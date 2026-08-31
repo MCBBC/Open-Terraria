@@ -62,6 +62,18 @@ export interface GameHooks {
    *  ——Projectile.cs:13693-96 NewProjectile(289) 等价出射口。Game 实现 =
    *  entities.add(e,'projectiles')，联机由弹幕互播通道自然覆盖） */
   spawnFriendlyProj?(e: import('./Entity').Entity, opts?: { netSync?: boolean }): void;
+
+  /** 叶绿水晶叶锚体（226）对账+缺位补生（Player.UpdateBuffs buff60 分支
+   *  :11749-11766 的桶扫描语义：只留最先扫到的一只、多余 Kill、无存活才生成——
+   *  Player.fixedUpdate buff 维护段消费，BuffType.LeafCrystal 在场才调 */
+  updateChloroCrystalAnchor?(): void;
+  /** 叶绿晶弹 227 发射出射口（Projectile.cs aiStyle42 :28253 与 Player.OnHit :7029
+   *  两生产位共用；dmg/kb = Player.crystalLeafDamage/KB 静态 100/10 直传不吃面板，
+   *  实体 ChloroLeafShot 内部再兜底缺省）。(x,y)=出生中心（原版 Center.X−4f, Center.Y） */
+  spawnChloroLeafShot?(x: number, y: number, vx: number, vy: number): void;
+  /** 叶绿水晶叶 on-hit 引援叶扫桶（Player.OnHit 尾段 :6986-7040 全语义含序依赖
+   *  break 怪癖；Enemy.hurt fromPlayer 钛金 proc 同位次调用,victim=受击敌怪） */
+  chloroOnHitLeafStrike?(victim: unknown): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */

@@ -37,14 +37,14 @@ export class HealProj extends Entity {
     this.extraUpdates = projType === 305 ? 10 : 3;   // :3696 / :3614
   }
 
-  draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.ctx;
-    if (!ctx) return;
-    // 305 尘 183 红雾 / 298 尘 175 青白雾配色近似（弹体本体 alpha 255）
-    ctx.fillStyle = this.projType === 305 ? '#D04060' : '#70F0D0';
-    ctx.beginPath();
-    ctx.arc(this.x + this.w / 2, this.y + this.h / 2, 4, 0, Math.PI * 2);
-    ctx.fill();
+  /** 原版本体不可见：SetDefaults alpha=255（:3613/:3695）且 GetAlpha 对 298/305 无
+   *  特判 ⇒ 缺省尾 Color(0,0,0,0) 全透明；盘上 Projectile_298/305.png 均为 1×1 占位
+   *  stub。可见观感完全由 AI_052 尘拖尾承载（AI_052 :28960-29003）——平涂扫描批
+   *  （2026-08-31）已把旧「尘 183/175 配色近似」fillStyle 圆点退役，改逐粒精确化。
+   *  本方法保留为文档化空实现，禁止回填平涂圆点。 */
+  draw(_r: Renderer, _cam: Camera): void {
+    void _r;
+    void _cam;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -68,6 +68,30 @@ export class HealProj extends Entity {
       const nx = dx / dist * 4, ny = dy / dist * 4;
       this.vx = (this.vx * 15 + nx) / 16;
       this.vy = (this.vy * 15 + ny) / 16;
+      // ---- AI_052 尾段尘拖尾（原式 :28960-29004；每【子步】一批）----
+      // 305：d183 ×3、scale1.1、后移距 v×0.334×i；298（else 支）：d175 ×5、
+      // scale1.3、v×0.2×i。公共态 noGravity=true(第 11 参=NewDust 后置等价位)、
+      // velocity*=0（清 NewDust 抖动）、α 参数 100、盒=弹盒 6×6。
+      // 同位序=AI 内出尘,先于本子步位移 ----
+      if (this.projType === 305) {
+        for (let i = 0; i < 3; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            183, 0, 0, 100, null, 1.1, true);
+          if (!d) continue;
+          d.vx = 0; d.vy = 0;                        // dust.velocity *= 0f（:28967）
+          d.x -= this.vx * 0.334 * i;                // :28968 position.X -= num397
+          d.y -= -(this.vy * 0.334) * i;             // :28969 position.Y -= num398
+        }
+      } else {
+        for (let i = 0; i < 5; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            175, 0, 0, 100, null, 1.3, true);
+          if (!d) continue;
+          d.vx = 0; d.vy = 0;                        // :28988
+          d.x -= this.vx * 0.2 * i;                  // :28989
+          d.y -= -(this.vy * 0.2) * i;               // :28990
+        }
+      }
       this.x += this.vx;   // tileCollide=false——穿墙不检碰撞（:3615/:3696）
       this.y += this.vy;
     }

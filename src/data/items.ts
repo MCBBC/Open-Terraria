@@ -538,10 +538,11 @@ item({ key: 'vi_4756_grox_the_great_s_chestplate', name: '', value: 1 });
 item({ key: 'vi_4757_grox_the_great_s_greaves', name: '', value: 1 });
 item({ key: 'vi_5000_terraspark_boots', name: '', value: 1 });
 item({ key: 'vi_5339_arcane_crystal', name: '', value: 1 });
-// 永久幸运消耗品（Player.cs:44786-44789：一次性 usedGalaxyPearl → luck +0.03 :28676-28678）
+// 永久幸运消耗品（Player.cs:45789-45793 使用支 usedGalaxyPearl=true@:45791；
+// luck +0.03 = RecalculateLuck :29372-29375——1456 旧锚 :44786/:28676 已漂移作废）
 item({ key: 'vi_5340_galaxy_pearl', name: '', value: 1 });
 // 漂亮镜子（Item 5577：投掷消耗品，shoot 1085；碎裂近身 150px → brokenMirrorBadLuckTime
-// 25200，Projectile.cs:67554-67574）——投掷走 thrownCombat 通用管线
+// 25200，Projectile.Kill type==1085 支 Projectile.cs:72034-72055,写位 :72054）——投掷走 thrownCombat 通用管线
 item({ key: 'vi_5577_pretty_mirror', name: '', value: 1 });
 item({ key: 'vi_5391_uncumbering_stone', name: '', value: 1 });
 item({ key: 'vi_2585_slime_hook', name: '', value: 1 });

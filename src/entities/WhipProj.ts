@@ -32,6 +32,9 @@ import { tintedTex } from '../render/StringLine';
 import { prettyStarSparkle } from '../render/Renderer';
 import { ITEM_DEFS } from '../data/items';
 import { combatWeapon } from '../data/vanillaItemCombat';
+// L5 长尾批：月主鞭命中编排（Spawn_MoonLordWhip :1653-1710 收编本体）
+import { moonLordWhipHitFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import {
   WHIP_TAG, WHIP_HIT_BUFF, WHIP_HIT_SIDEKICK,
   WHIP_SEGMENTS, WHIP_RANGE, WHIP_FALLOFF, WHIP_PROC_ITEMS, WHIP_PROC_ONCE_ITEMS,
@@ -520,6 +523,19 @@ export class WhipProj extends Entity {
         }
         const wpOwner = this.ownerRef();
         e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
+        // ★L5 长尾批：月主鞭 1035 命中编排（Projectile.Damage case1035 :13025-13029——
+        // settings.MovementVector=velocity.RotatedBy(±τ×0.1)、clientOnly:false → 本地直生
+        // + module8 上行。PositionInWorld=目标盒内随机点（本仓以敌盒随机点近似）。
+        // 补鞭子鞭同为 projId 1035 → 同款触发;1045 子鞭 proc 的 MoonLordWhipEye 由
+        // SpawnMoonLordWhipProc 面在本文件补鞭出生位承担）
+        if (this.projId === 1035) {
+          const hjx = (Math.random() * 2 - 1) * Math.PI * 2 * 0.1;
+          const baseA = Math.atan2(this.vy || 0.0001, this.vx || 0.0001);
+          const mX = Math.cos(baseA + hjx), mY = Math.sin(baseA + hjx);
+          const hxP = e.x + Math.random() * e.w, hyP = e.y + Math.random() * e.h;
+          moonLordWhipHitFx(game, hxP, hyP, mX, mY);
+          game.broadcastParticleOrchestra?.(ParticleOrchestraType.MoonLordWhipHit, hxP, hyP, mX, mY);
+        }
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）。
         //  1104：Slimed(137) 照表;OnFire(24) 表项抑制、按上方窗口直投（:11255-11272）
         // 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意

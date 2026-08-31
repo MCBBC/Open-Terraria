@@ -17,9 +17,9 @@
  *   `Hurt(…, ImmunityCooldownID.WrongBugNet)`（ItemCheck_CatchCritters :45097-45103
  *   ——1457 为 :45099）→ 实扣>0 && !dead 才 AddBuff(24,300)。
  *
- * 范围铁律：只落 WrongBugNet 与 General 两桶的实际消费面并【预留】全部枚举位
- * （BossNoCheese/Lava/PaladinsShield/TileContactDamage 的调用点不在此批拉入——
- * Lava 已由 Player.ts 岩浆链独立承载、BossNoCheese 桌面语义未建模，勿冒进接错域）。
+ * 范围铁律：消费面已扩至 WrongBugNet(3)/Lava(4)/TileContactDamage(0)/BossNoCheese(1)/
+ * LegacyUnused2(2)（岩浆/触格=环境站注入、Boss 族+食人魔近挥窗=接触链注入——见下方
+ * ★Notes⑤ 与 LegacyUnused2 段）；PaladinsShield(5) 仅语义位预留（调用点不在此批拉入）。
  */
 
 /** Terraria.ID.ImmunityCooldownID（Terarria1457/Terraria.ID/ImmunityCooldownID.cs:
@@ -128,12 +128,25 @@ export function getGlobalHurtBuckets(): HurtCooldownBuckets | null {
 export const BOSS_NO_CHEESE_CONTACT_IDS = new Set<number>([396, 397, 398, 400, 401, 636]);
 
 /**
- * NPC 接触伤应走哪个免疫桶：General(-1)=常规 / 1=BossNoCheese。
+ * NPC 接触伤应走哪个免疫桶：General(-1)=常规 / 1=BossNoCheese / 2=LegacyUnused2。
  * 返回 null = 原文 `continue`（连命中判定都不进）。
+ *
+ * ★LegacyUnused2 档（2026-08-31 GetMeleeCollisionData 玩家接触侧收口）：576/577
+ * DD2 食人魔在 FindFrame 近挥帧窗（NPC.cs:96185-96235，frame.Y∈{15,16,17,18}，
+ * 帧 id 由渲染端 dd2OgreNextFrame 维护）把 ref specialHitSetter 覆写为 2 ——
+ * 【先于相交判定】置位：近挥窗内擦到普通盒也走本桶，与 BossNoCheese 表互斥类型
+ * （vanilla 对同一怪两处覆盖不叠乘，GetMeleeCollisionData 后写赢）。门形=
+ * `flag3 = hurtCooldowns[specialHitSetter]==0`（:31630-31633），写入 :38680 同槽。
  */
-export function npcContactBucketId(vanillaId: number, ai0: number): number | null {
+export function npcContactBucketId(
+  vanillaId: number, ai0: number, frameY?: number | null,
+): number | null {
   if (vanillaId === 636) {
     return (ai0 === 0 || ai0 === 10) ? null : ImmunityCooldownID.BossNoCheese;
+  }
+  if ((vanillaId === 576 || vanillaId === 577) && frameY != null
+    && frameY >= 15 && frameY <= 18) {
+    return ImmunityCooldownID.LegacyUnused2;
   }
   if (BOSS_NO_CHEESE_CONTACT_IDS.has(vanillaId)) return ImmunityCooldownID.BossNoCheese;
   return -1;

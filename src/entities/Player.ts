@@ -130,6 +130,8 @@ import {
   SantankShellProj, mountRollerSkateStep, MOUNT_DATA,
 } from './Mounts';
 import { flameParticles } from '../fx/FlameParticles';
+// L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
+import { snappingStoneRechargeFx } from '../fx/orchestraFx';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -447,6 +449,10 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     overrideFishingBobber: number;
     runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
     enduranceEq: number; solarSet: boolean;
+    /** 叶绿水晶叶套装（台账 L3 清偿批 2026-08-31；ArmorSetBonuses.cs:128-146 四头
+     *  变体 AddBuff(60,5)+setChlorophyte——引擎 entities/ChloroLeafCrystalProj.ts,
+     *  buff 维护/锚体对账位在 fixedUpdate） */
+    crystalLeaf: boolean;
     shieldItem?: boolean;   // 日曜套(:16224-16295)
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
@@ -627,6 +633,13 @@ export class Player extends Entity {
   paladinShieldCd = 0;
   /** 钛金屏障 on-hit 冷却（Player.cs:6919 titaniumStormCooldown>0 门,10t） */
   titaniumStormCd = 0;
+  /** 金花花瓣/叶绿叶弹共享 on-hit 计时（Player.petalTimer :1165,OnHit :6965 花瓣=20/
+   *  :7009 叶绿=50；:25652-25655 每 tick 递减——Orichalcum onHitPetal 支未建模,
+   *  本仓生产位仅叶绿引援,字段保留共享语义） */
+  petalTimer = 0;
+  /** 叶绿水晶叶锚体出手冷却（Player.crystalLeafCooldown :1367,Projectile aiStyle42
+   *  :28254 写 40、:25664-25667 每 tick 递减——fixedUpdate 减位点在本类同段） */
+  crystalLeafCooldown = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
@@ -1251,7 +1264,8 @@ export class Player extends Entity {
     //（Player.cs:36441-36449：5540/5541→29 在前、item.stringColor>0 在后，槽序 3-9→13-19）
     let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
-    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）
+    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）
+    let crystalLeaf = false;     // 叶绿水晶叶套（台账 L3 清偿批 2026-08-31,:128-146 四头变体）
     let ashWood = false;         // ★Notes④ Ash Wood 全套（vanillaArmorSets 'AshWood'→:27885/:27904）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
@@ -1822,7 +1836,8 @@ export class Player extends Entity {
       if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
       if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
       if (sb.solar) solarSet = true;
-      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②
+      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②
+      if (sb.crystalLeaf) crystalLeaf = true;       // 叶绿三件套四头变体（L3 清偿批）
       if (sb.ashWood) ashWood = true;               // ★Notes④ Ash Wood 全套
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
@@ -1914,6 +1929,7 @@ export class Player extends Entity {
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSaveHuntress, ammoSaveChloro, ammoSaveCost80, ammoSaveCost75,
       kbGlove, autoReuseGlove, yoyoString, magmaStone, titaniumStorm,
+      crystalLeaf,   // 叶绿水晶叶套（L3 清偿批——fixedUpdate buff 维护 + 锚体对账消费）
       meleeScaleGlove,   // 手套族近战放大 ×1.1（GetAdjustedItemScale :41919-41930）
       stringColor,   // 线饰品线色（UpdateVisibleAccessory :36441-36449）
       accDraw,       // 身上贴图十族绘制槽（UpdateVisibleAccessory :36441-36520;渲染层消费）
@@ -2745,6 +2761,20 @@ export class Player extends Entity {
         }
       }
     } else { this.solarShields = 0; this.solarCounter = 0; }
+    // ---- 叶绿水晶叶套装（台账 L3 清偿批 2026-08-31）----
+    // 授予/清除对账（原版双支并跑语义）：Effect=AddBuff(60,5) 每 tick 重钉
+    // （ArmorSetBonuses.cs:128-146 :131/:138/:143）→ 本仓 300s=18000t 等价承载
+    // buffTime 钉值（UpdateBuffs buff60 分支 :11750）；卸套 ClearBuff(60) =
+    // Player.cs:16436-16440 UpdateArmorSets_Always_Chlorophyte → else remove() 同拍生效。
+    // equipStats.crystalLeaf 与原版 setChlorophyte 是同一 derive 的两种写法（查询表键一致）
+    if (this.equipStats.crystalLeaf) {
+      this.buffs.apply(BuffType.LeafCrystal, 300);
+      // 锚体对账+缺位补生（buff60 效果分支 :11752-11763：全桶扫 type==226 只留
+      // 最先扫到的一只多余 Kill、无存活才 NewProjectile(226)——Game 侧实现）
+      game.updateChloroCrystalAnchor?.();
+    } else {
+      this.buffs.remove(BuffType.LeafCrystal);
+    }
     // 盾球轨道（:16258-16283）+ buff 对账（:10044-10066：层数变即清多余档,
     // setSolar 在场持续续期 5t；卸套清零）
     {
@@ -4907,26 +4937,25 @@ export class Player extends Entity {
       this.repeatWhipSwings = -1;
     }
     // 拍击石系冷却递减（Update_SnappingStone :28595-28621）——归零帧按在身饰品
-    // 三选一回充反馈（★2026-08-24 r15 R15-16 补齐：三段纯 Dust + 三音效）：
-    //   accSnappingStone  → Item30(pitch −0.9,vol 0.08) + Spawn_SnappingStoneRecharge
-    //   (P57:454-470:10×dust 226,scale .9/fadeIn 1.1/α255→显形,y=半高,v×0.5 再
-    //    vy×3,customData=player,noLight/noGravity/noLightEmittance)
-    //   accPyroclast      → Item20 + Spawn_PyroclasticStoneRecharge(:437-452:
-    //    15×dust 6,scale 1.5/fadeIn 1.1,v=Circular(2,4))
-    //   accArmletOfRuin   → Item28(pitch −0.9,vol 0.08) + Spawn_ArmletOfRuinRecharge
-    //    (:418-435:10×dust 15,scale .9/fadeIn 1.1/α60,v×0.5 再 vy×3)
+    // 三选一回充反馈（★2026-08-24 r15 R15-16 补齐：三段纯 Dust + 三音效）。
+    // L5 长尾批（2026-08-31）：原版充能编排=Spawn_*Recharge :418-471 的 BroadcastOrRequest 面
+    // （netMode 联机广播）——本地直生改走 fx/orchestraFx.snappingStoneRechargeFx 同本体
+    // （视觉逐参一致）+ module8 上行补远端（消费端经 orchestraPlayerAnchor 以 invoker 槽
+    // 代放;尾音 Item30/Item20/Item28 档保留原置）：
     if (this.accSnappingStoneCooldown > 0 && --this.accSnappingStoneCooldown === 0) {
       const es = this.equipStats;
       const cx = this.mountedCenter.x, cy = this.mountedCenter.y;
-      if (es.accSnappingStone) {
-        game.playSfxWav?.('Item_30', 0.08, cx, cy, -0.9);
-        this.emitRechargeDust(game, 226, 10, 0.9, 255, true);
-      } else if (es.accPyroclast) {
-        game.playSfxWav?.('Item_20', 1, cx, cy);
-        this.emitRechargeDust(game, 6, 15, 1.5, 255, false);
-      } else if (es.accArmletOfRuin) {
-        game.playSfxWav?.('Item_28', 0.08, cx, cy, -0.9);
-        this.emitRechargeDust(game, 15, 10, 0.9, 60, true);
+      const rk: 0 | 1 | 2 | null = es.accSnappingStone ? 0 : es.accPyroclast ? 1 : es.accArmletOfRuin ? 2 : null;
+      if (rk !== null) {
+        snappingStoneRechargeFx(game, rk, this.x, this.y, this.w, this.h);
+        (game as unknown as { broadcastParticleOrchestra?: (t: number, x: number, y: number) => void })
+          .broadcastParticleOrchestra?.(
+            rk === 0 ? ParticleOrchestraType.SnappingStoneRecharge
+              : rk === 1 ? ParticleOrchestraType.PyroclasticStoneRecharge
+                : ParticleOrchestraType.ArmletOfRuinRecharge, cx, cy);
+        if (rk === 0) game.playSfxWav?.('Item_30', 0.08, cx, cy, -0.9);
+        else if (rk === 1) game.playSfxWav?.('Item_20', 1, cx, cy);
+        else game.playSfxWav?.('Item_28', 0.08, cx, cy, -0.9);
       }
     }
     // ---- 1457 配饰四件运行态（Update_AmmoCycler :28632 / Update_SentryBackpack
@@ -6637,32 +6666,34 @@ export class Player extends Entity {
    *  MinionProj.dd2SetFlags().ballistaPanic（GetBallistraShotDelay 60/30 档）。授予位
    *  在 damage()（=Hurt 闪避早退族之后、stealth 复位同段,与原文 :38526 位次同构） */
   ballistaPanicT = 0;
-  /** 幸运值（RecalculateLuck :28672-28697 1:1）：
+  /** 幸运值（RecalculateLuck Player.cs:29367-29394 1:1，2026-08-31 实锚重校——1456 旧注
+   *  :28672-28697 已漂移+695；更早的 28694/28700 族行号一并作废）：
    *  luck = 瓢虫×0.2 + 火炬×0.2 + 药水档×0.1 + 风筝档×0.1/3 + 银河珍珠 0.03
    *        + 灯笼夜 0.3 + 地精 0.2 − 臭屁 0.25 + 装备 + 钱币 − 碎镜 0.25。
-   *  不 clamp——luckMinimumCap=-0.7/luckMaximumCap=1（Player.cs:2952/2954）只喂 UI 计量
-   *  （:3950-3957），聚合本体可超界（原版如此）。
+   *  不 clamp——luckMinimumCap=-0.7/luckMaximumCap=1（Player.cs:3071/3073）只喂 UI 计量
+   *  （:4098-4103），聚合本体可超界（原版如此）。
    *  来源接线：药水 buff 257 三档 / 灯笼夜 / 地精+火炬（Game 15t 扫描）/ 装备（幸运币
    *  {855,3034,3035} +0.05、马掌族九件 +0.05、四叶草族 5574/5575/5576 +0.03/−0.1/−0.1
-   *  ——luckEquipmentBonus，Player.cs:12628-12646）已接；瓢虫 604/605（击杀=坏运
-   *  Enemy.hurt cs:82338、触碰=好运 ladybugAI cs:78730——旧注 359/360 为误记，实为蜗牛）、
+   *  ——luckEquipmentBonus，Player.cs:13148-13168；clover 判定置位 :12820/:12824）已接；
+   *  瓢虫 604/605（击杀=坏运 NPC.cs:78861-78862 LadyBugKilled(:82403)；触碰=好运
+   *  NPC.cs:78740 LadyBugLuck(:82437)——旧注 359/360 为误记，实为蜗牛）、
    *  buff 383 风筝三档、buff 120 臭屁、银河珍珠 5340、碎镜 1085、微光化币——均已接
    *  （来源状态权威见 src/stats/Luck.ts 头注） */
   get luck(): number {
     const l = this.luckState;
-    let v = l.ladyBugLuck * 0.2 + l.torchLuck * 0.2;        // :28673
-    v += this.luckPotionTier * 0.1;                          // :28674（buff 257 三档）
-    v += this.kiteLuckTier * (0.1 / 3);                      // :28675（buff 383 三档）
-    if (l.usedGalaxyPearl) v += 0.03;                        // :28676-28678
-    if (l.lanternsUp) v += 0.3;                              // :28679-28682
-    if (l.hasGardenGnomeNearby) v += 0.2;                    // :28683-28686
-    if (l.stinky || this.buffs.has(BuffType.Stinky)) v -= 0.25; // :28687-28690（buff 120 → stinky；l.stinky 为环境外注入位）
-    v += this.luckEquipmentBonus;                            // :28692
-    v += l.coinLuckValue;                                    // :28693
-    if (l.brokenMirrorBadLuck) v -= 0.25;                    // :28694-28696
+    let v = l.ladyBugLuck * 0.2 + l.torchLuck * 0.2;        // RecalculateLuck :29369
+    v += this.luckPotionTier * 0.1;                          // :29370（buff 257 三档）
+    v += this.kiteLuckTier * (0.1 / 3);                      // :29371（buff 383 三档）
+    if (l.usedGalaxyPearl) v += 0.03;                        // :29372-29375
+    if (l.lanternsUp) v += 0.3;                              // :29376-29379
+    if (l.hasGardenGnomeNearby) v += 0.2;                    // :29380-29383
+    if (l.stinky || this.buffs.has(BuffType.Stinky)) v -= 0.25; // :29384-29387（buff 120 → stinky；l.stinky 为环境外注入位）
+    v += this.luckEquipmentBonus;                            // :29388
+    v += l.coinLuckValue;                                    // :29389
+    if (l.brokenMirrorBadLuck) v -= 0.25;                    // :29390-29392
     return v;
   }
-  /** luckPotion（Player.cs:9971-9982 buff 257 分档）：0 无 / >600s=3 / >300s=2 / 其余 1 */
+  /** luckPotion（Player.cs:10372-10388 buff 257 分档）：0 无 / >600s=3 / >300s=2 / 其余 1 */
   get luckPotionTier(): number {
     const left = this.buffs.active.get(BuffType.Luck);
     if (left === undefined) return 0;
@@ -7388,27 +7419,31 @@ export class Player extends Entity {
     return false;
   }
 
-  /** GetItem_VoidVault（孤儿武器 B3 波 工单1；Player.cs:39703-39760）：
+  /** GetItem_VoidVault（孤儿武器 B3 波 工单1；Player.cs:39710-39731）：
    *  【满背包溢流入虚空保险库】——PickupItemFromWorld.CanGoIntoVoidVault=true 门下
-   *  （GetItemSettings.cs:13），背包 58 格接不住的余量进 bank4：占用堆叠先合并
-   *  (CanStack=同 type;bank4 槽无词缀位) → 空位整堆落格。CanVoidVaultAccept
-   *  (:39735-39747)：questItem ∪ 3822(DD2EnergyCrystal 埃特尼亚魔力) 拒——WorksInVoidBag
-   *  缺省全真(SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。
+   *  （GetItemSettings.cs:12；同旗通道还有 LootAllFromChest/RefundConsumedItem，
+   *  LootAllFromChest 消费位 Terraria.UI/ChestUI.cs:391-412，RefundConsumedItem 消费位
+   *  CraftingRequests.cs:339-341），背包 58 格接不住的余量进 bank4：占用堆叠先合并
+   *  (CanStack=同 type;bank4 槽无词缀位 :39747-39792) → 空位整堆落格(:39835-39857)。
+   *  CanVoidVaultAccept(:39733-39745)：questItem ∪ 3822(DD2EnergyCrystal 埃特尼亚魔力)
+   *  拒——WorksInVoidBag 缺省全真(SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。
    *  返回仍未入袋数量。
    *  ★F4 拒收门补挂（此前漏 CanVoidVaultAccept 半臂）：任务鱼 questFish 全表
    *  （QUEST_ITEM_VIDS = DefaultToQuestFish 调用面 [2450..2488]∪{4393,4394}，见常量注）
-   *  与 3822 灌袋时原样返回——拒绝面=留在原地不掉入袋（vanilla :39705 门不过即
-   *  `return item;` 余量退回世界）。调用方 ItemDrop.ts 不改：dep==stack 自然走残余路径。
-   *  ★原版语义澄清：虚袋不持续吸物,只在背包装不下时兜底（ItemSpaceForCofveve
-   *  :39510-39525 只做"空位判定"）；本方法即溢流通道唯一入口。 */
+   *  与 3822 灌袋时原样返回——拒绝面=留在原地不掉入袋（vanilla GetItem 汇流门
+   *  :39703 不过即 `return item;` 余量退回世界）。调用方 ItemDrop.ts 不改：
+   *  dep==stack 自然走残余路径。
+   *  ★原版语义澄清：虚袋不持续吸物,只在背包装不下时兜底（IsVoidVaultEnabled 空位判定
+   *  支 Player.cs:39509-39525）；本方法即溢流通道唯一入口。 */
   depositIntoVoidVault(itemId: number, stack: number): number {
     if (!this.useVoidBag() || stack <= 0) return stack;
-    // ★F4 门序对齐原文：CanVoidVaultAccept 在 GetItem_VoidVault 进位前判一次
-    //（:39705）,函数体内再判一次（:39714）——本仓单点等价
+    // ★F4 门序对齐原文：CanVoidVaultAccept 在 GetItem 收尾汇流门（Player.cs:39703）
+    // 判一次,GetItem_VoidVault 函数体内再判一次（:39711-39714）——本仓单点等价
     if (!canVoidVaultAccept(vanillaIdOfItem(itemId))) return stack;
     const vault = this.banks[3];
     let left = stack;
-    // 占用堆叠合并（GetItem_FillIntoOccupiedSlot_VoidBag :39747-39780）
+    // 占用堆叠合并（GetItem_FillIntoOccupiedSlot_VoidBag :39747-39792——该支原文无
+    // DoCoins,占用合并不触发换币）
     for (let i = 0; i < vault.length && left > 0; i++) {
       const s = vault[i];
       if (!s || s.stack <= 0 || vanillaIdOfItem(s.id) !== vanillaIdOfItem(itemId)) continue;
@@ -7418,12 +7453,18 @@ export class Player extends Entity {
       s.stack += put;
       left -= put;
     }
-    // 空位落格（GetItem_FillEmptyInventorySlot_VoidBag :39835-39855）
+    // 空位落格（GetItem_FillEmptyInventorySlot_VoidBag :39835-39857）
     for (let i = 0; i < vault.length && left > 0; i++) {
       if (vault[i]) continue;
       const put = Math.min(ITEM_DEFS[itemId]?.maxStack ?? left, left);
       vault[i] = { id: itemId, stack: put };
       left -= put;
+      // ★DoCoins 币种兑换尾随（:39844-39847 PopText 之后逐槽 `if(!NoCoinMerge)
+      //  DoCoins(i)`）——★反编译原文读的是 this.inventory（主背包）同下标位,【不是】
+      // 形参 inv 数组（bank4 本体不换币）;PickupItemFromWorld/LootAllFromChest/
+      // RefundConsumedItem 三通道 NoCoinMerge 均缺省 false=恒生效。槽位级原式
+      // 见 Inventory.doCoinsAt。
+      this.inv.doCoinsAt(i);
     }
     return left;
   }

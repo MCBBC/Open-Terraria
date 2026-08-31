@@ -301,7 +301,8 @@ export function setSlopeG2(v: boolean): void { SLOPE_G2 = v; }
  *    钳位已覆盖其主收益;受阻回退语义由嵌入守卫分支等价提供） */
 function slopeCollide(
   b: Body, world: World, feetEntry: number, vyEntry: number, wasGround: boolean,
-): void {
+  captureOnly = false,
+): boolean {
   const st = world.store;
   const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
@@ -413,9 +414,10 @@ function slopeCollide(
       //   （2026-08-19 用户报+行为录制定位；探针 _slopejump.mjs 复现 vy+2.31→-2.55）
       if (b.vy >= 0) b.onGround = true;
     } else {
-      // 抬升受阻回退（原版 :2004-2018 的速度清零语义）——墙角坡干净挡停而非楔进角落。
-      // 原版另有按 shortfall 的 X 滑动补偿,但其"重跑校验"保证每帧只作用一次;
-      // 我们的分轴结构下输入每帧重新加速,X 推会变棘轮,故只取清零、不推 X
+      // 抬升受阻：速度清零（原版 :2004-2018 语义——墙角坡干净挡停）。
+      // ★2026-08-31 尝试移除清零 → platform-hammer 回归（下落在受阻坡面穿坠）
+      //   → 恢复。用户行为日志的 ±40-90px 弹射是旧构建（无 G2/无振幅门/无双相）
+      //   的复合症状，不是本清零引起——新构建待用户复测。
       b.vx = 0;
       b.vy = 0;
     }
@@ -437,9 +439,21 @@ function slopeCollide(
       }
     }
     if (!blocked) {
-      b.y = ny;
-      if (b.vy > 0) b.vy = 0;
-      b.onGround = true;       // wasGround 门已挡飞行体/跳起首帧,无二段跳外溢
+      // ★下行速率帽（2026-09-01 锯齿收官,用户实录贴平15帧+单帧+10~16px猛坠）：
+      //   贴线的竖向位移超过对角线理论速度(|vx| 推进对应落差+1.2 容差)即说明
+      //   候选跨了共线远端/多级格顶——按速度帽渐进追线,缺口后续 tick 闭合；
+      //   离散台阶的整级位移由 StepDown 负责(不经此路),不受本帽影响。
+      const diagCap = Math.abs(b.vx) + 1.2;
+      const drop = ny - b.y;                 // >0 = 向下追线
+      if (drop > diagCap) {
+        b.y += diagCap;
+        if (b.vy > diagCap) b.vy = diagCap;
+        b.onGround = true;
+      } else {
+        b.y = ny;
+        if (b.vy > 0) b.vy = 0;
+        b.onGround = true;       // wasGround 门已挡飞行体/跳起首帧,无二段跳外溢
+      }
     }
   }
   if (bestDrop > 0) {
@@ -465,6 +479,7 @@ function slopeCollide(
       b.vy = 0;
     }
   }
+  return bestLift < 0 || bestDrop > 0;
 }
 
 /** 原版 Collision.noSlopeCollision（Collision.cs:2038-2113）+ NPC.Collision_MoveBlazingWheel
@@ -586,7 +601,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   //   在身体尚未抬升时判定，坡面放行门(feet-|vx|<=top+16 且边缘条件)在
   //   爬坡/下坡组合下失败 → 拦截+回推 → 棘轮式 -16px 阻尼卡进（实测 11+ tick
   //   误差 -16 恒定）。新序贴合先抬到当前坡面 → X 扫描看到干净脚下 → 平滑爬升。
-  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
+  const slopePreApplied = slopeCollide(b, world, feetEntry, vyEntry, wasGround);
   const maxStep = 8;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep));
   for (let i = 0; i < steps; i++) {
@@ -596,6 +611,8 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
+  // ★双相贴合·后补相（captureOnly=true：只做沉入抬升，不发面随下贴候选防级联）
+  if (!slopePreApplied) slopeCollide(b, world, feetEntry, vyEntry, wasGround, true);
   unembedPass(b, world);
 }
 

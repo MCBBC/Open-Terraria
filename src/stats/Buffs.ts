@@ -380,6 +380,13 @@ export enum BuffType {
   MonsterBanner = 316,         // 旗帜(147):对同型敌增伤/减伤（效果三链已在 BannerStrength 采样）
   WindPushed = 317,            // 强风(194):windPushed 风推（:11923-11926/:19922-19946）
   ShadowCandle = 318,          // 暗影蜡烛(350):刷怪旗覆写镜像（效果在 VanillaSpawner）
+  // ---- 叶绿水晶叶套装（台账 L3 清偿批,2026-08-31）——BuffID.LeafCrystal=60：
+  //      四头变体三件套（近战1001/召唤5524/头盔1002·头饰1003 × 胸1004×腿1005,
+  //      ArmorSetBonuses.cs:128-146）每拍 Effect=AddBuff(60,5)+setChlorophyte;
+  //      !setChlorophyte → ClearBuff(60)（Player.cs:16436/:16440）。buff 分支效果=
+  //      crystalLeaf=true+buffTime 钉 18000(:11749-11752),消费位=锚体 226 存续门
+  //      （Projectile.cs:28190 !crystalLeaf→Kill）。无免疫族/无难度缩放表项
+  LeafCrystal = 319,
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -664,6 +671,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.MonsterBanner]: { vanillaBuff: 147, descKey: 'BuffDescription.MonsterBanner', fallbackName: '旗帜' },
   [BuffType.WindPushed]: { vanillaBuff: 194, descKey: 'BuffDescription.WindPushed', fallbackName: '强风' },
   [BuffType.ShadowCandle]: { vanillaBuff: 350, descKey: 'BuffDescription.ShadowCandle', fallbackName: '暗影蜡烛' },
+  // 叶绿水晶叶（LeafCrystal 60,套装标志位 buff,无独立 DoT）——名称/描述走原版键
+  // （en-US.Game.json :701/:1055,BuffDescription.LeafCrystal 12 语言现成零自造键）；
+  // 图标 Buff_60.png 已在盘;vanilla id 60 在 BUFF_NO_TIME_DISPLAY（不显剩余时长）
+  [BuffType.LeafCrystal]: { vanillaBuff: 60, descKey: 'BuffDescription.LeafCrystal', fallbackName: '水晶叶' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：

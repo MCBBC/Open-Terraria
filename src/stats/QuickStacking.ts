@@ -67,6 +67,8 @@ interface DestHelper {
   transferBlocked: boolean;
   /** 本箱有实际收货（FillStack 或整送——VisualizeChestTransfer 的等价记录位） */
   mutated: boolean;
+  /** L5 长尾批：本箱收进的首个 vanilla 物品型（ItemTransfer 编排载荷 itemType 用） */
+  movedVid: number;
   freeSlots: number[];
   freeStart: number;
   categoryScores: Map<number, number>;
@@ -84,7 +86,9 @@ export function quickStackToChests(
   inv: Inventory,
   chests: readonly ChestData[],
   smartStack: boolean,
-): { touched: ChestData[]; blocked: ChestData[] } {
+): { touched: ChestData[]; blocked: ChestData[];
+     /** ItemTransfer 编排载荷（:315 BroadcastOrRequest 面）：箱 → 本次迁入的首件型序列 */
+     movedVids: Map<ChestData, number[]> } {
   const src = packQuickStackable(inv);
   const dests: DestHelper[] = [];
   const typesToList = new Map<number, DestHelper[]>();
@@ -92,6 +96,7 @@ export function quickStackToChests(
     if (chestIsEmpty(c)) continue;              // :404 !destination.chest.IsEmpty() 门
     const d: DestHelper = {
       chest: c, items: c.items, locked: !!c.locked, transferBlocked: false, mutated: false,
+      movedVid: 0,   // L5 长尾批:ItemTransfer 首件型载荷,首箱入件时置位
       freeSlots: [], freeStart: 0, categoryScores: new Map(), listedTypes: new Set(),
     };
     dests.push(d);
@@ -100,6 +105,9 @@ export function quickStackToChests(
   const insertIntoFreeSlot = (srcIdx: number, d: DestHelper) => {
     const slot = d.freeSlots[d.freeStart];
     d.freeStart++;
+    if (!d.movedVid && src.items[srcIdx]) {
+      d.movedVid = vanillaIdOfItem(src.items[srcIdx]!.id ?? 0);   // ItemTransfer 载荷首件型
+    }
     d.items[slot] = src.items[srcIdx];                // Utils.Swap（源格清空在写回）
     src.items[srcIdx] = null;
     d.mutated = true;                                 // VisualizeChestTransfer 等价记录
@@ -139,9 +147,14 @@ export function quickStackToChests(
   for (let i = 0; i < src.slots.length; i++) {
     inv.slots[src.slots[i]] = src.items[i] as Inventory['slots'][number];
   }
+  const movedVids = new Map<ChestData, number[]>();
+  for (const d of dests) {
+    if (d.mutated && d.movedVid) movedVids.set(d.chest, [d.movedVid]);
+  }
   return {
     touched: dests.filter((d) => d.mutated).map((d) => d.chest),
     blocked: dests.filter((d) => d.transferBlocked).map((d) => d.chest),
+    movedVids,
   };
 }
 
@@ -167,8 +180,10 @@ function buildDestinationMetrics(
         if (n > 0) {
           cs.stack += n;
           s.stack -= n;
+          if (!d.movedVid) d.movedVid = vanillaIdOfItem(cs.id);
           if (s.stack <= 0) src.items[j] = null;
-          d.mutated = true;      // FillStack（:517-529）——VisualizeChestTransfer 视觉未移植，登记
+          d.mutated = true;      // FillStack（:517-529）——VisualizeChestTransfer 视觉=L5 长尾批
+                                 //   itemTransferFx 接线（movedVids 载荷经返回值交 Game 直播）
         }
       }
       if (!d.listedTypes.has(vanillaIdOfItem(cs.id))) {
@@ -313,4 +328,48 @@ function countCoins(items: SrcItem[]): number {
     if (v >= 71 && v <= 74) n += it.stack * Math.pow(100, v - 71);
   }
   return n;
+}
+
+// ---------------------------------------------------------------------------
+// 储物面板 Loot All 通道（ChestUI.LootAll；2026-08-31 台账"多通道 vault 允许面"清偿）
+// ---------------------------------------------------------------------------
+
+/** ChestUI.LootAll 的 settings 二选一（ChestUI.cs:391-392）：
+ *  `player.chest > -1`（真箱 = 本仓 openChest.x ≥ 0 的世界宝箱）→ GetItemSettings.
+ *  LootAllFromChest，CanGoIntoVoidVault=true（GetItemSettings.cs:12-13）；bank 面板
+ *  （存钱罐 -2 / 保险箱 -3 / 守护者熔炉 -4 / 虚空袋 -5,ChestUI.cs:414-465 分支）→
+ *  LootAllFromBank = default,CanGoIntoVoidVault=false。即只有从真箱往背包拉取的
+ *  溢流面可进虚空保险库,bank 自身面板不进。 */
+export function chestSettingsAllowsVault(openChestX: number | undefined): boolean {
+  return !(openChestX !== undefined && openChestX < 0);
+}
+
+/** ChestUI.LootAll（ChestUI.cs:389-412）：容器全物逐槽 `player.GetItem(chest.item[i],
+ *  settings)`——主背包优先吸收（FillAmmo→Occupied→Empty 汇流顺序由 Inventory.add
+ *  承载）,装不下的余量留在原格。溢流段为 vault 允许通道：settings.CanGoIntoVoidVault
+ *  && IsVoidVaultEnabled && CanVoidVaultAccept 三重门后经 Player.GetItem_VoidVault
+ *  （Player.cs:39710）灌 bank4（GetItemSettings.cs:12 收尾汇流门 :39703）。vault 拒收
+ *  面（questItem/3822,Player.CanVoidVaultAccept :39733-39745）与 DoCoins 尾随
+ *  （:39844-39847 主背包同下标位结算）都在 Player.depositIntoVoidVault 内闭环,
+ *  本函数只把"是否允许进袋"的表达面按上面 settings 规则传入。
+ *  @param voidSpill 由调用方按 chestSettingsAllowsVault 决定是否携带（绑
+ *  player.depositIntoVoidVault）；返回值=仍未入袋余量。
+ *  @returns 有任何实际搬移（入包或溢流入袋）时 true */
+export function lootAllFromContainer(
+  inv: Inventory,
+  items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>,
+  voidSpill?: ((itemId: number, stack: number) => number) | undefined,
+): boolean {
+  let anyMoved = false;
+  for (let i = 0; i < items.length; i++) {
+    const cur = items[i];
+    if (!cur || cur.stack <= 0) continue;
+    const before = cur.stack;
+    let left = inv.add(cur.id, before, cur.prefix);   // 词缀随新放置槽写入,合并保留现有堆词缀
+    if (left > 0 && voidSpill) left = voidSpill(cur.id, left);
+    if (left === 0) items[i] = null;
+    else cur.stack = left;
+    if (left !== before) anyMoved = true;
+  }
+  return anyMoved;
 }

@@ -25,6 +25,9 @@ interface Leaf {
   x: number; y: number;
   vx: number; vy: number;     // vy<0 = 落地支（Gore_UpdateLeaf 分支条件）
   row: number; rowGroup: number; rowCounter: number;
+  /** SpriteFrame(32,8) 的 CurrentColumn = 树格油漆（TileDrawing :8027
+   *  CurrentColumn = tile.color()；★曾恒 0 = 上漆树掉原生色叶，2026-09-01 补） */
+  col: number;
   alpha: number; timeLeft: number;
   scale: number; gore: number;
   dead: boolean;
@@ -106,13 +109,14 @@ export class NatureParticles {
 
   // ================= 落叶（Gore_UpdateLeaf :1104） =================
 
-  spawnLeaf(x: number, y: number, gore: number): void {
+  spawnLeaf(x: number, y: number, gore: number, paint = 0): void {
     if (this.leaves.length >= this.maxLeaves || !LEAF_GORES.has(gore)) return;
     const row = Math.floor(Math.random() * 8);
     this.leaves.push({
       x, y,
       vx: (Math.random() - 0.5) * 4, vy: Math.random() * Math.PI * 2, // NewGore 初速 :1423
       row, rowGroup: Math.floor(row / 4), rowCounter: Math.floor(Math.random() * 8), // :1425-1428
+      col: paint,                                     // CurrentColumn = tile.color()（:8027）
       alpha: 0, timeLeft: 900,
       scale: 0.7 + Math.random() * 0.6, // :8012
       gore, dead: false,
@@ -462,7 +466,7 @@ export class NatureParticles {
       const fw = img.width / 32, fh = img.height / 8;
       const [lr, lg, lb] = lightAt?.(Math.floor((l.x + 4) / TILE), Math.floor((l.y + 4) / TILE)) ?? [255, 255, 255];
       ctx.globalAlpha = 1 - l.alpha / 255;
-      ctx.drawImage(this.tintedGore(img, `leaf${l.gore}`, lr, lg, lb), 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
+      ctx.drawImage(this.tintedGore(img, `leaf${l.gore}`, lr, lg, lb), l.col * fw, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
     }
     // 滴水：18×300 竖条 15 帧（帧高 20）——Gore 716 特例 GetAlpha 恒 (255,255,255,200)
     // 不受光照,不染色

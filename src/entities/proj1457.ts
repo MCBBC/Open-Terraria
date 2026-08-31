@@ -14,6 +14,10 @@ import { BuffType } from '../stats/Buffs';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
+// L5 长尾批：1091 浸液导通链 BlueLightningSmallLong（SpawnHitVisuals :14484-14492 收编;
+//   ArcSurge 折线与双音已由 emitBoltFx+声段原生承担——不重复接线,消费派发面在 Game）)
+import { blueLightningSmallLongFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
@@ -27,7 +31,7 @@ import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
   type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
 
 /** 同敌命中去重/冷却表（WeaponProj.HitCooldown 同构——该类模块私有，此处独立一份） */
-class HitCdImpl {
+export class HitCdImpl {
   private map = new Map<number, number>();
   tick(): void {
     for (const [k, v] of this.map) {
@@ -240,13 +244,17 @@ interface HitTarget {
  *  gate：ownerHitCheck 距离门（CanHitWithMeleeWeapon :12415-12417 距离段）+
  *  usesOwnerMeleeHitCD 共享命中表（Damage_PVE :12596 门 + StrikeNPC :14343 写——
  *  与玩家挥击弧共用 per-enemy 命中表，同一挥击内弧+弹不双结算）。 */
-function dealContacts(
+export function dealContacts(
   self: { x: number; y: number; w: number; h: number; cx: number; cy: number; damage: number; knockback: number; armorPen: number; critChance: number; projId: number },
   game: GameHooks,
   cd: HitCdImpl | IdStaticSharedTable,
   cooldown: number,
   onHit?: (t: HitTarget) => void,
   gate?: { ownerCx: number; ownerCy: number; maxDist: number; sharedHits?: Set<number> },
+  /** Enemy.hurt pierce 形参透传（缺省 0 维持全既有调用面）：1 = maxPenetrate 单发
+   *  flag3——无视免疫帧且命中不设帧（Projectile.cs:11903-11907）。叶弹 227 台账 L3
+   *  清偿批同段引用（ChloroLeafCrystalProj.ts） */
+  hitPierce = 0,
 ): void {
   cd.tick();
   for (const ent of game.enemies()) {
@@ -288,7 +296,7 @@ function dealContacts(
     if (snapBonus1457 > 0) dmg += Math.trunc(snapBonus1457 * (crit ? 2 : 1));
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
-    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, 0, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
+    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, hitPierce, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
     // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
     applyProjStatus(self.projId, ent as unknown as Record<string, number>,
       { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
@@ -1192,6 +1200,19 @@ export class StormLightning extends Entity {
         }
         if (hitPt || this.stormBoltCollides(game, pbox.x, pbox.y, pbox.w, pbox.h)) {
           this.evpStormBolt(game, hitPt ?? { x: this.cx, y: this.cy });
+          // ★L5 长尾批：浸液导通命中链电（Projectile.SpawnHitVisuals :14480-14492——
+          // StormLightningLiquidCollisionCheck 门内 BroadcastOrRequest(
+          // BlueLightningSmallLong,{Position=_lightningLastHitChainPos??Center,
+          // Movement=新链点−旧点,UniqueInfo=bolt 色});仓内无链记忆字段 →
+          // 位置=本次实触点、向量=以 bolt 心向 ±150 随机档近似（登记）。
+          if (this.boltLocalAI0 === 3 && this.projId === 1091) {
+            const pxL = hitPt ?? { x: this.cx, y: this.cy };
+            const mvLx = (Math.random() * 2 - 1) * 150 + (this.cx - pxL.x);
+            const mvLy = (Math.random() * 2 - 1) * 150 + (this.cy - pxL.y);
+            blueLightningSmallLongFx(game, pxL.x, pxL.y, mvLx, mvLy);
+            game.broadcastParticleOrchestra?.(ParticleOrchestraType.BlueLightningSmallLong,
+              pxL.x, pxL.y, mvLx, mvLy);
+          }
         }
       }
     }

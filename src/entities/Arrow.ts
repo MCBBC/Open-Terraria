@@ -4,6 +4,9 @@
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
 import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
+// L5 长尾批：弧线引矢家族/银箭/微光箭编排收编（fx/orchestraFx 池）
+import { harpyCharmFamilyFx, silverBulletSparkleFx, shimmerArrowFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
@@ -20,6 +23,12 @@ import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+
+/** 无 Hook 兜底：空实现碎面，使编排纯函数可被无上下文路径直驱（测试/模拟存档） */
+function noHookGame(x?: number, y?: number): GameHooks {
+  void x; void y;
+  return { spawnParticles: () => {}, spawnDust: () => null } as unknown as GameHooks;
+}
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
@@ -2444,6 +2453,16 @@ export class Arrow extends Entity {
         snake.armorPen = this.armorPen;
         entsS.add(snake, 'projectiles');
       }
+    } else if (this.projId === 981 && !this.hostile) {
+      // ★L5 长尾批：981 银弹贴块火花（Projectile.Kill :77659-77666——Collision.HitTiles+
+      // SoundID.Item10 后 RequestParticleSpawn(clientOnly:true, SilverBulletSparkle,
+      // Center,mv=Zero);音已由 onProjectileDeath Item_10 面承担,此处补 spark 本体）
+      silverBulletSparkleFx(game, this.cx, this.cy, 0, 0);
+    } else if (this.projId === 1006 && !this.hostile) {
+      // ★L5 长尾批：1006 微光箭贴块十字虹彩（Kill :77676-77686——Item10 后 per-call 一轮
+      // RequestParticleSpawn(clientOnly:true, ShimmerArrow, Center、mv=UnitX.RotatedBy(
+      // rand×τ)×0.4）;clientOnly:true=本地直驱不广播）
+      shimmerArrowFx(game, this.cx, this.cy);
     }
     // ---- ★R28 死亡 AoE 二次结算两件（Resize+Damage() 模式,NebulaBlazeBurst/
     //      LunarFlareStar 同构第三/四例）----
@@ -2830,6 +2849,17 @@ export class Arrow extends Entity {
     if (itemVid === 6181) this.phoenixQuivered = true;   // :58788-58791
     if (itemVid === 6180) this.seraphNecklaced = true;   // :58792-58795
     if (this.life > 300) this.life = 300;                // :58797-58800 timeLeft 钳 300
+    // 弧线引矢三型编排（ApplyHarpyCharm 尾 :58802 RequestParticleSpawn(clientOnly:false,
+    // SeraphNecklace|PhoenixQuiver|HarpyCharm, PositionInWorld=Center、MovementVector=velocity)
+    // ——L5 长尾批收编真值本体 harpyCharmFamilyFx（FadingParticle 外抛/内环两组+十字
+    // PrettySparkle+Item39/Item20 音）+ module8 上行。旧注「粒子视觉面省略」退役。
+    const gameA = (this as unknown as { __game?: GameHooks | null }).__game ?? null;
+    const gA: GameHooks | null = gameA
+      ?? (globalThis as unknown as { __swGameHook?: GameHooks }).__swGameHook ?? null;
+    gA?.broadcastParticleOrchestra?.(itemVid === 6180 ? ParticleOrchestraType.SeraphNecklace
+      : itemVid === 6181 ? ParticleOrchestraType.PhoenixQuiver : ParticleOrchestraType.HarpyCharm,
+      this.cx, this.cy, this.vx, this.vy);
+    harpyCharmFamilyFx(gA ?? noHookGame(this.cx, this.cy), itemVid, this.cx, this.cy, this.vx, this.vy);
   }
 
   /** Collision.SolidCollision 等价（aiStyle 33 贴壁判定 :27480/:27487）：弹体

@@ -22,12 +22,29 @@ import {
   IMMUNITY_COOLDOWN_COUNT, HurtCooldownBuckets, npcContactBucketId,
   type HurtCooldownBuckets as BucketTable,
 } from '../src/player/HurtCooldownBuckets';
+import {
+  getMeleeCollisionData, boxesIntersect,
+  type ContactBox, type MeleeCollisionInput,
+} from '../src/player/MeleeCollisionData';
 import { COLD_DAMAGE_NPCS, applyBannerDamageDealt } from '../src/entities/projTargets';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { COIN_KEYS } from '../src/items/Inventory';
-import { getAttackDamageScaledByDifficulty } from '../src/stats/ScaleStats';
-import type { Enemy } from '../src/entities/Enemy';
+import { damageVar, getAttackDamageScaledByDifficulty } from '../src/stats/ScaleStats';
+import { Enemy } from '../src/entities/Enemy';
+
+/** 求解壳（纯函数单测通用）：像素域无缩放裁剪 */
+function sol(input: Partial<MeleeCollisionInput> & Pick<MeleeCollisionInput, 'vanillaId' | 'x' | 'y' | 'w' | 'h'>,
+  victim?: ContactBox) {
+  const v: ContactBox = victim ?? { x: 0, y: 0, w: 20, h: 42 };
+  const merged = input as MeleeCollisionInput;
+  return getMeleeCollisionData(v, {
+    ...merged,
+    ai0: merged.ai0 ?? 0,
+    direction: (merged.direction ?? 1) as -1 | 1,
+    spriteDirection: (merged.spriteDirection ?? merged.direction ?? 1) as -1 | 1,
+  });
+}
 
 const iid = (vid: number): number => {
   const k = vanillaItemKey(vid);
@@ -750,5 +767,365 @@ describe('★Notes⑤ 前半 NPC 接触分桶（BossNoCheese 表 + npcContactBuc
     expect(npcContactBucketId(636, 0)).toBeNull();
     expect(npcContactBucketId(636, 10)).toBeNull();
     expect(npcContactBucketId(636, 5)).toBe(ImmunityCooldownID.BossNoCheese);
+  });
+});
+
+// ==============================================================================
+// ★GetMeleeCollisionData 玩家接触侧收口（2026-08-31 清账终局批）
+//   原文锚：Terarria1457/Terraria/NPC.cs:96111-96280（全支亲读移植 =>
+//   src/player/MeleeCollisionData.ts）；消费方 Update_NPCCollision :31557-31668。
+//   每族锚号在各案注释；实体几何取 vanilla-npcs.json SetDefaults 提取值。
+// ==============================================================================
+describe('★GMC 加宽族：430-436·591 ArmedZombie 族 ±34px 与 ×1.25（NPC.cs:96114-96127）', () => {
+  const ZOMBIE = { x: 100, y: 100, w: 18, h: 40 };        // 尸盒（vanilla-npcs.json 430）
+  const VICTIM = { x: 118, y: 104, w: 20, h: 42 };        // 右侧贴边外带内
+  it('ai[2]>5 挥击窗：朝向侧加宽 34px 使擦碰可达，乘区 ×1.25（direction>0 仅 Width 扩）', () => {
+    const narrow = sol({ vanillaId: 430, ...ZOMBIE, ai2: 3 }, VICTIM);
+    expect(narrow.damageMultiplier).toBe(1);
+    expect(boxesIntersect(VICTIM, narrow.rect!)).toBe(false);        // 窗外不可达基线
+    const wide = sol({ vanillaId: 430, ...ZOMBIE, ai2: 6, direction: 1 }, VICTIM);
+    expect(wide.rect!.x).toBe(ZOMBIE.x);                          // direction>0 左缘不动
+    expect(wide.rect!.w).toBe(ZOMBIE.w + 34);                     // :96123-24 Width+=34
+    expect(wide.damageMultiplier).toBe(1.25);                     // :96126
+    expect(boxesIntersect(VICTIM, wide.rect!)).toBe(true);        // 擦碰变可达
+  });
+  it('spriteDirection<0 对称支：X−=34 且 Width+=34（:96117-21）', () => {
+    const r = sol({ vanillaId: 431, ...ZOMBIE, ai2: 5.5, spriteDirection: -1 },
+      { x: ZOMBIE.x - 33, y: 104, w: 20, h: 42 });
+    expect(r.rect!.x).toBe(ZOMBIE.x - 34);
+    expect(r.rect!.w).toBe(ZOMBIE.w + 34);
+    expect(r.damageMultiplier).toBe(1.25);
+    expect(boxesIntersect({ x: ZOMBIE.x - 33, y: 104, w: 20, h: 42 }, r.rect!)).toBe(true);
+  });
+  it('七成员表门（430..436 ∪ 591）逐 id 接通；窗外/非成员恒等回落', () => {
+    for (const id of [430, 431, 432, 433, 434, 435, 436, 591]) {
+      const r = sol({ vanillaId: id, ...ZOMBIE, ai2: 7 });
+      expect(r.damageMultiplier).toBe(1.25);
+    }
+    // 表中条件带 ai[2]>5 门；591 火把僵尸同式（:58840 联合条件）
+    expect(sol({ vanillaId: 591, ...ZOMBIE, ai2: 5 }).damageMultiplier).toBe(1);
+    expect(sol({ vanillaId: 437, ...ZOMBIE, ai2: 9 }).damageMultiplier).toBe(1);   // 非成员
+    expect(sol({ vanillaId: 430, ...ZOMBIE, ai2: 6 }).rect).toEqual(
+      { x: ZOMBIE.x, y: ZOMBIE.y, w: ZOMBIE.w + 34, h: ZOMBIE.h });                // 无相交门替换原值
+  });
+});
+
+describe('★GMC 加宽族二：494-495 Crawdad ±18px ×1.25（:96128-96141）', () => {
+  const CRAB = { x: 100, y: 100, w: 28, h: 22 };
+  it('ai[2]>5：加宽 18px 且乘区（无相交门）；≤5 不变形', () => {
+    const v = { x: 127, y: 102, w: 20, h: 42 };
+    const off = sol({ vanillaId: 494, ...CRAB, ai2: 2 }, v);
+    expect(off.damageMultiplier).toBe(1);
+    const r = sol({ vanillaId: 495, ...CRAB, ai2: 19, direction: 1 }, v);
+    expect(r.rect!.w).toBe(CRAB.w + 18);
+    expect(r.rect!.x).toBe(CRAB.x);
+    expect(r.damageMultiplier).toBe(1.25);
+    expect(boxesIntersect(v, r.rect!)).toBe(true);
+  });
+});
+
+describe('★GMC 屠夫专盒：460 Butcher 30×14@脚部−20 ×1.35 几何四元组（:96146-96158）', () => {
+  const BUTCHER = { x: 200, y: 300, w: 18, h: 40 };
+  it('direction>0：盒=(cx, trunc(y)+h−20, 30, 14)；命中替换 + ×1.35', () => {
+    const cx = BUTCHER.x + BUTCHER.w / 2;                // =209，体右缘=218
+    const v = { x: 222, y: 324, w: 20, h: 30 };          // 体右侧只探到前探盒带 [209,239)
+    const r = sol({ vanillaId: 460, ...BUTCHER, direction: 1 }, v);
+    expect(r.rect).toEqual({
+      x: cx,                                             // X=(int)Center.X
+      y: BUTCHER.y + BUTCHER.h - 20,                     // Y=(int)pos.Y+height−20=320
+      w: 30,
+      h: 14,
+    });
+    expect(r.damageMultiplier).toBe(1.35);
+    expect(boxesIntersect(v, r.rect!)).toBe(true);
+    // 反证：裸盒判定不交（证明此命中确由专盒替换承载——v.x=222>218 体右缘）
+    expect(boxesIntersect(v, { x: BUTCHER.x, y: BUTCHER.y, w: 18, h: 40 })).toBe(false);
+  });
+  it('direction<0：X 回退身宽（面向左前探）；未中专盒 → 裸盒 ×1.0', () => {
+    const r = sol({ vanillaId: 460, ...BUTCHER, direction: -1 },
+      { x: 184, y: 322, w: 8, h: 20 });                  // 面向左带 [179,209) 内侧点
+    expect((r.rect as ContactBox).x).toBe(BUTCHER.x + BUTCHER.w / 2 - 30);
+    expect((r.rect as ContactBox).y).toBe(BUTCHER.y + BUTCHER.h - 20);
+    expect(r.damageMultiplier).toBe(1.35);
+    const miss = sol({ vanillaId: 460, ...BUTCHER, direction: 1 },
+      { x: 400, y: 400, w: 20, h: 42 });
+    expect(miss.damageMultiplier).toBe(1);               // ref 未被改写 ⇒ 回落裸盒
+    expect(miss.rect).toEqual(BUTCHER);
+  });
+});
+
+describe('★GMC 417 SolarSroller 滚动专盒 100²（:96161-96167）', () => {
+  const SROLLER = { x: 500, y: 500, w: 46, h: 52 };
+  it('ai[0]==6 ∧ ai[3]∈(0,4)：CenteredRectangle(Center,(100,100)) 替换 + ×1.35', () => {
+    const v = { x: 512, y: 512, w: 20, h: 42 };
+    const r = sol({ vanillaId: 417, ...SROLLER, ai0: 6, ai3: 2 }, v);
+    expect(r.rect).toEqual({
+      x: SROLLER.x + SROLLER.w / 2 - 50,                 // (int)(Center.X−50)
+      y: SROLLER.y + SROLLER.h / 2 - 50,                 // (int)(Center.Y−50)
+      w: 100,
+      h: 100,
+    });
+    expect(r.damageMultiplier).toBe(1.35);
+    expect(boxesIntersect(v, r.rect!)).toBe(true);
+  });
+  it('窗外态（ai[3]=0/4 或 ai[0]!=6）恒等：接的是驱动位真实档而非永开', () => {
+    for (const gate of [{ ai0: 6, ai3: 4 }, { ai0: 6, ai3: 0 }, { ai0: 3, ai3: 2 }]) {
+      const r = sol({ vanillaId: 417, ...SROLLER, ...gate }, { x: 508, y: 508, w: 20, h: 42 });
+      expect(r.damageMultiplier).toBe(1);
+      expect(r.rect).toEqual(SROLLER);
+    }
+  });
+});
+
+describe('★GMC 466 Psycho 专盒 30×8@脚部−32 ×1.75（:96170-96182）', () => {
+  const PSYCHO = { x: 700, y: 800, w: 18, h: 40 };
+  it('direction>0 四元组 + 命中/未中两相', () => {
+    // 专盒 Y 带 [808,816)：受害者 y=810 与带相叠；x∈[709,739) 内侧点
+    const r = sol({ vanillaId: 466, ...PSYCHO, direction: 1 },
+      { x: 720, y: 810, w: 8, h: 16 });
+    expect(r.rect).toEqual({
+      x: PSYCHO.x + PSYCHO.w / 2,
+      y: PSYCHO.y + PSYCHO.h - 32,                        // :96178 −32
+      w: 30,
+      h: 8,
+    });
+    expect(r.damageMultiplier).toBe(1.75);
+    const miss = sol({ vanillaId: 466, ...PSYCHO, direction: 1 },
+      { x: 750, y: 850, w: 20, h: 42 });
+    expect(miss.damageMultiplier).toBe(1);                // 未中 → 裸盒回落
+    expect(miss.rect).toEqual(PSYCHO);
+  });
+  it('mirror face=-1；未中回落裸盒 ×1.0', () => {
+    const m = sol({ vanillaId: 466, ...PSYCHO, direction: -1 }, { x: 690, y: 811, w: 8, h: 12 });
+    expect((m.rect as ContactBox).x).toBe(PSYCHO.x + PSYCHO.w / 2 - 30);   // [679,709)
+    expect(m.damageMultiplier).toBe(1.75);
+    const miss = sol({ vanillaId: 466, ...PSYCHO }, { x: 900, y: 900, w: 20, h: 42 });
+    expect(miss.rect).toEqual(PSYCHO);
+    expect(miss.damageMultiplier).toBe(1);
+  });
+});
+
+describe('★GMC 552-554 DD2Goblin 近战尾段 34×14@脚部−20 ×1.35（:96239-96251）', () => {
+  const GOBLIN = { x: 120, y: 130, w: 18, h: 40 };
+  it('ai[0]∈(0,24) 开窗（起手倒数 44 态的尾段）：命中替换 + ×1.35；25/负值关闭', () => {
+    const v = { x: 133, y: 152, w: 10, h: 12 };
+    for (const id of [552, 553, 554]) {
+      const r = sol({ vanillaId: id, ...GOBLIN, ai0: 23, direction: 1 }, v);
+      expect(r.rect).toEqual({ x: GOBLIN.x + GOBLIN.w / 2, y: GOBLIN.y + GOBLIN.h - 20, w: 34, h: 14 });
+      expect(r.damageMultiplier).toBe(1.35);
+    }
+    for (const gate of [24, 0, -7]) {
+      const off = sol({ vanillaId: 553, ...GOBLIN, ai0: gate }, v);
+      expect(off.damageMultiplier).toBe(1);
+      expect(off.rect).toEqual(GOBLIN);
+    }
+  });
+});
+
+describe('★GMC 668 Deerclops 下半身裁剪 + 斧臂帧盒（:96253-96278）', () => {
+  const DEER = { x: 1000, y: 1100, w: 60, h: 154 };
+  it('npcRect.Height−=80 无条件（帧门外）；frame.Y==15 ∧ ai[0]!=4 → 64×180 斧臂盒（无乘区）', () => {
+    // 窗外（普通帧）：只保留裁剪后的裸盒——下半身 80px 无接触
+    const idle = sol({ vanillaId: 668, ...DEER, ai0: 0, frameY: 0 }, { x: 1050, y: DEER.y + 100, w: 10, h: 10 });
+    expect(idle.rect).toEqual({ x: DEER.x, y: DEER.y, w: DEER.w, h: DEER.h - 80 });
+    expect(idle.damageMultiplier).toBe(1);
+    // 攻击帧 15：盒 X=(int)Center.X+(−num5)×dir（num5=−42 ⇒ +42·dir）、Y=(int)Center.Y−180+80
+    const swing = sol({ vanillaId: 668, ...DEER, ai0: 1, frameY: 15, direction: 1 },
+      { x: DEER.x + DEER.w / 2 + 45, y: DEER.y + DEER.h / 2 - 90, w: 10, h: 10 });
+    expect(swing.rect).toEqual({
+      x: DEER.x + DEER.w / 2 + 42,                       // :96271 字面
+      y: DEER.y + DEER.h / 2 - 180 + 80,
+      w: 64,
+      h: 180,
+    });
+    expect(swing.damageMultiplier).toBe(1);              // 本支不动乘区
+    // ai[0]==4（Attack1 共用拒支）不展开斧臂盒，仅裁剪盒生效
+    const denied = sol({ vanillaId: 668, ...DEER, ai0: 4, frameY: 15 }, { x: DEER.x + DEER.w / 2 + 45, y: 1080, w: 10, h: 10 });
+    expect(denied.rect).toEqual({ x: DEER.x, y: DEER.y, w: DEER.w, h: DEER.h - 80 });
+  });
+});
+
+describe('★GMC 400 真眼 npcRect=default 与兜底身份（:96143-96144 / :96255-96258）', () => {
+  it('type400 返回 rect=null（Update_NPCCollision Intersects(default) 恒假的全量语义）', () => {
+    const r = sol({ vanillaId: 400, x: 10, y: 10, w: 60, h: 60, ai0: 2 },
+      { x: 11, y: 11, w: 40, h: 40 });
+    expect(r.rect).toBeNull();
+    expect(r.damageMultiplier).toBe(1);
+    expect(r.specialHitSetterOverride).toBeNull();
+  });
+  it('非特殊家族走恒等回落（rect≈Hitbox 副本、mult=1、无覆写）', () => {
+    const r = sol({ vanillaId: 3, x: 10, y: 10, w: 18, h: 40 }, { x: 12, y: 12, w: 4, h: 4 });
+    expect(r.rect).toEqual({ x: 10, y: 10, w: 18, h: 40 });
+    expect(r.damageMultiplier).toBe(1);
+    expect(r.specialHitSetterOverride).toBeNull();
+  });
+});
+
+describe('★GMC 576/577 食人魔近挥帧窗：LegacyUnused2 冷却路由 + 专盒 ×1.75（:96185-96235）', () => {
+  const OGRE = { x: 2000, y: 2000, w: 96, h: 124 };
+  it('frame.Y∈15..18 → npcContactBucketId 路由 LegacyUnused2(2)；Boss 族/636 映射不变形', () => {
+    for (const fy of [15, 16, 17, 18]) {
+      expect(npcContactBucketId(576, 0, fy)).toBe(ImmunityCooldownID.LegacyUnused2);
+      expect(npcContactBucketId(577, 0, fy)).toBe(ImmunityCooldownID.LegacyUnused2);
+    }
+    // 窗外/帧未落盘 → General（含回归：Boss 族路由不受影响）
+    expect(npcContactBucketId(576, 0, 14)).toBe(-1);
+    expect(npcContactBucketId(577, 44, null)).toBe(-1);
+    expect(npcContactBucketId(396, 3)).toBe(ImmunityCooldownID.BossNoCheese);
+    expect(npcContactBucketId(636, 0, 17)).toBeNull();   // 636 continue 门优先级不被帧窗穿透
+  });
+  it('四档专盒几何（num3 offsetX ×direction / num4 offsetY，Y=Center.Y−H+num4）+ 命中 ×1.75', () => {
+    const cx = OGRE.x + OGRE.w / 2, cyc = OGRE.y + OGRE.h / 2;
+    const CASES: Array<[number, number, number, number]> = [
+      [15, 120, 30, 24], [16, 120, 60, 0], [17, 100, 90, 0], [18, 100, 50, 10],
+    ];
+    for (const [fy, w, h, oy] of CASES) {
+      const ox = [0, 10, 50, 90][fy - 15];
+      // direction>0 ⇒ 盒.x=Center.X−num3（num3 偏置按原文公式）：盒内点取样
+      const v = { x: Math.trunc(cx) - ox + 4, y: Math.trunc(cyc) - h + oy + 4, w: 12, h: 12 };
+      const r = sol({ vanillaId: 576, ...OGRE, frameY: fy, direction: 1 }, v);
+      expect(r.rect).toEqual({ x: Math.trunc(cx) - ox, y: Math.trunc(cyc) - h + oy, w, h });
+      expect(r.damageMultiplier).toBe(1.75);
+      expect(r.specialHitSetterOverride).toBe(2);
+      expect(boxesIntersect(v, r.rect!)).toBe(true);
+    }
+  });
+  it('近挥窗内未擦到专盒：裸盒照常受理（×1.0）但桶仍切 LegacyUnused2——ref 置位先于相交判定', () => {
+    // 受害者放身体底部条（y≈2100 > 四档专盒最大下沿 2086）→ rectangle4 不交而裸盒相交
+    const v = { x: OGRE.x + 40, y: OGRE.y + 100, w: 20, h: 20 };
+    const r = sol({ vanillaId: 577, ...OGRE, frameY: 16, direction: 1 }, v);
+    expect(boxesIntersect(v, { x: OGRE.x, y: OGRE.y, w: OGRE.w, h: OGRE.h })).toBe(true);
+    expect(r.damageMultiplier).toBe(1);                 // 擦不到专盒不乘
+    expect(r.specialHitSetterOverride).toBe(2);         // ★但冷却路由已换挡
+  });
+});
+
+// ---- 真环集成（Enemy.fixedUpdate 接触环 → Game.damagePlayer 漏斗） ----------------
+interface RingCapture { args: unknown[]; chanId: number | undefined }
+function ringHarness(w: World, p: Player) {
+  const captures: RingCapture[] = [];
+  const hooks = {
+    world: w,
+    player: p,
+    enemies: (): unknown[] => [],
+    critters: (): unknown[] => [],
+    projectiles: (): unknown[] => [],
+    spawnDrop: () => null,
+    damagePlayer: vi.fn((...args: unknown[]): number => {
+      const chan = (p as unknown as { __swNextHitBucket?: { id?: number } }).__swNextHitBucket;
+      captures.push({ args, chanId: (chan?.id ?? undefined) as number | undefined });
+      return 40;
+    }),
+    settlePlayerDeath: vi.fn(),
+    addDamageNumber: vi.fn(),
+    cutTile: vi.fn(),
+    breakTile: vi.fn(),
+    fellCactus: vi.fn(),
+    onEnemyKilled: vi.fn(),
+    spawnEnemy: vi.fn(),
+    spawnParticles: vi.fn(),
+    broadcastParticleOrchestra: vi.fn(),
+    notifyInventoryChanged: vi.fn(),
+    playSfx: vi.fn(),
+    playSfxFiles: vi.fn(),
+    showPickupLabel: vi.fn(),
+    punchCamera: vi.fn(),
+    achievements: undefined,
+    sfx: { play: vi.fn(), playWavFile: vi.fn() },
+    entities: { add: vi.fn() },
+  };
+  return { hooks, captures };
+}
+
+describe('★GMC 真环：接触环消费变形盒/乘区/桶通道（Enemy.fixedUpdate 集成）', () => {
+  it('460 屠夫：仅脚部前探专盒擦碰也受理——×1.35 流入 DamageVar（tier0 尸检 94≠裸 70）；远隔零受理对照', () => {
+    const w = tallWorld(51);
+    const p = new Player(30 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = ringHarness(w, p);
+    const e = Enemy.fromVanilla(460, 22 * 16 - 9, 41 * 16)!;
+    expect(e).not.toBeNull();
+    expect(e.vanillaId).toBe(460);
+    e.facing = 1;                                        // 朝右：前探盒 X=(int)Center.X..
+    e.vx = 0;                                            // 冻结移动（只验接触面）
+    // 身右缘=cx+9；玩家 x=cx+12 进前探带（[cx, cx+30]）且在脚部 Y 带 [bottom−20,bottom−6)
+    p.x = e.cx + 12;
+    p.y = e.y + e.h - 30;
+    p.vy = 0;
+    const d0 = e.def.damage;
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.4999);   // tier=0 ⇒ 掷骰 ×1.00
+    try {
+      e.fixedUpdate(1 / 60, hooks as never);
+      expect(captures.length).toBeGreaterThanOrEqual(1);
+      const dmg = captures[0].args[0];
+      expect(dmg).toBe(damageVar(d0 * 1.35, -p.luck));  // ★乘区真实进链
+      if (d0 === 70) expect(dmg).not.toBe(damageVar(d0, -p.luck));   // 反证（70→94）
+      expect(captures[0].args[3]).toBe(e);              // attacker 引用直通（banner/反射源）
+      // 远隔放置（AI 一拍位移 ≤~1.5px 不可能补上 >300px 差）→ 零受理对照
+      captures.length = 0;
+      p.x = 60 * 16;
+      p.y = 20 * 16;
+      e.fixedUpdate(1 / 60, hooks as never);
+      expect(captures.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  }, 20000);
+
+  it('576 食人魔近挥帧（vanillaGridFrameIdx 回填位）：裸盒擦碰照常结算且通道注入 LegacyUnused2', () => {
+    registerGlobalHurtBuckets(new HurtCooldownBuckets());
+    const w = tallWorld(52);
+    const p = new Player(30 * 16, 30 * 16, new Inventory());
+    const { hooks, captures } = ringHarness(w, p);
+    const e = Enemy.fromVanilla(576, 32 * 16 - 48, 34 * 16 - 62)!;
+    expect(e.vanillaId).toBe(576);
+    e.ai1 = 0;
+    e.ai0 = 44;                                          // 近挥（AI_107 num5）中段
+    e.vx = 0;
+    (e as { vanillaGridFrameIdx?: number | null }).vanillaGridFrameIdx = 17;
+    p.x = e.x + 38;                                      // 与身体叠置（不在任何帧窗前探带）
+    p.y = e.y + 50;
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.4999);
+    try {
+      e.fixedUpdate(1 / 60, hooks as never);
+      expect(captures.length).toBeGreaterThanOrEqual(1);
+      expect(captures[0].chanId).toBe(ImmunityCooldownID.LegacyUnused2);   // ★桶换挡
+      expect((p as unknown as { __swNextHitBucket?: unknown }).__swNextHitBucket)
+        .toBeUndefined();                                // 出站即清
+    } finally {
+      spy.mockRestore();
+    }
+  }, 20000);
+
+  it('577 食人魔帧未落盘（null）走 General 旧路——渲染前首拍/离屏态零回归', () => {
+    registerGlobalHurtBuckets(new HurtCooldownBuckets());
+    const w = tallWorld(53);
+    const p = new Player(30 * 16, 30 * 16, new Inventory());
+    const { hooks, captures } = ringHarness(w, p);
+    const e = Enemy.fromVanilla(577, 32 * 16 - 48, 34 * 16 - 62)!;
+    e.vx = 0;
+    (e as { vanillaGridFrameIdx?: number | null }).vanillaGridFrameIdx = null;
+    p.x = e.x + 40;
+    p.y = e.y + 50;
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.4999);
+    try {
+      e.fixedUpdate(1 / 60, hooks as never);
+      expect(captures.length).toBeGreaterThanOrEqual(1);
+      expect(captures[0].chanId).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  }, 20000);
+
+  it('BossNoCheese 分桶回归不破：桶 1 映射面逐字保持（专项集成不可行性登记）', () => {
+    // 月总肢体 396-398/401 SetDefaults damage=0 ⇒ 原版 `npc.damage<=0 continue` 门下
+    // 接触环本就不受理；400 由 rect=null 排除；636 的 ai[0] 由其 AI_120 每拍重写、
+    // 单测无法外置钉值——故桶 1 回归以纯映射面 + 既有 A3 通道测承接：
+    for (const [id, ai0, want] of [
+      [396, 3, ImmunityCooldownID.BossNoCheese], [400, 3, ImmunityCooldownID.BossNoCheese],
+      [401, 3, ImmunityCooldownID.BossNoCheese], [636, 5, ImmunityCooldownID.BossNoCheese],
+      [636, 0, null], [3, 0, -1],
+    ] as Array<[number, number, number | null]>) {
+      expect(npcContactBucketId(id, ai0)).toBe(want);
+    }
   });
 });

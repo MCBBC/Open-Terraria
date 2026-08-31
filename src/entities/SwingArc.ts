@@ -21,6 +21,9 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
+// L5 长尾批：真刃系挥弧命中编排（Projectile.Damage case972-985 收编池）
+import { nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -125,6 +128,7 @@ export class SwingArc extends Entity {
         + (snapBonusArc ? Math.trunc(snapBonusArc * (crit ? 2 : 1)) : 0),
         this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitSet.add(e.id);
+      swordTrailOrchestra(game, this.projId, e);   // ★L5 长尾批：挥弧命中编排（case972/982/983/984 面）
       // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
       // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
       // 假人 488；dmg=damage×1f、kb=弹体击退）→ Player.HorsemansBlade_SpawnPumpkin
@@ -371,6 +375,7 @@ export class TrueNightsEdgeSlash extends Entity {
           + (snapBonusTrueEdge ? Math.trunc(snapBonusTrueEdge * (crit ? 2 : 1)) : 0),
           this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
+        swordTrailOrchestra(game, 973, e);           // ★L5 长尾批：TrueNightsEdgeSlash=弹 973 → TrueNightsEdge(12)
       }
     }
   }
@@ -505,6 +510,7 @@ export class NightsEdgeFly extends Entity {
         + (snapBonusFly ? Math.trunc(snapBonusFly * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 9999);
+      swordTrailOrchestra(game, 972, e);             // ★L5 长尾批：永夜刃飞斩变体=弹 972 → NightsEdge(10)
     }
   }
 
@@ -1295,5 +1301,45 @@ export class HorsemansPumpkin extends Entity {
     const fh = img.height / 3;                         // Main.projFrames[321]=3（AI frame 0-2）
     ctx.drawImage(img, 0, this.frame * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
+  }
+}
+
+
+/** ★L5 长尾批：真刃系挥弧命中编排分派（Projectile.Damage :12984-13031 ownedBySomeone 支——
+ *  PositionInWorld=Main.rand.NextVector2FromRectangle(targetNPC.Hitbox)、MovementVector
+ *  缺省零（984/985 载 velocity）;clientOnly:false → 本地直生 + module8 上行。弹型映射：
+ *  972→NightsEdge(10)/973→TrueNightsEdge(12)/982→Excalibur(13)/983→TrueExcalibur(14)/
+ *  984|985→TerraBlade(15);997 无头骑士/976 草剑无编排面（vanilla 无对应 case） */
+function swordTrailOrchestra(
+  g: import('./types').GameHooks, projId: number,
+  e: { x: number; y: number; w: number; h: number },
+): void {
+  const hx = e.x + Math.random() * e.w;
+  const hy = e.y + Math.random() * e.h;
+  switch (projId) {
+    case 972:
+      nightsEdgeFx(g, hx, hy);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.NightsEdge, hx, hy);
+      break;
+    case 973:
+      trueNightsEdgeFx(g, hx, hy);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.TrueNightsEdge, hx, hy);
+      break;
+    case 982:
+      excaliburFx(g, hx, hy);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.Excalibur, hx, hy);
+      break;
+    case 983:
+      trueExcaliburFx(g, hx, hy);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.TrueExcalibur, hx, hy);
+      break;
+    case 984:
+    case 985:
+      terraBladeFx(g, hx, hy, Math.cos(hy), Math.sin(hy));
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.TerraBlade, hx, hy,
+        Math.cos(hy) * 4, Math.sin(hy) * 4);
+      break;
+    default:
+      break;
   }
 }

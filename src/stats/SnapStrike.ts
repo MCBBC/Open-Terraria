@@ -48,6 +48,9 @@ import { Arrow } from '../entities/Arrow';
 import { canBeChasedBy, pyroclastProjectileGate, snappingStoneProjectileGate } from '../entities/projTargets';
 import type { ProjClass } from '../entities/projTargets';
 import { canHit } from '../physics/LineOfSight';
+// L5 长尾批（2026-08-31）：拍击石系三味 Spawn_ 环带+音效收编与 module8 上行
+import { snappingStoneRingFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 
 export interface SnapStrikeTarget {
   id: number;
@@ -180,9 +183,21 @@ export function trySnapStrike(
     pulse.critChance = Math.min(1, strikeCritPct / 100);   // 负值原样穿过=不暴击（1132 档）
     add(pulse);
     if (kind === 1) t.onFire3T = Math.max(t.onFire3T ?? 0, 3);     // AddBuff(323,180)=3s（:14399）
-    // ★1457 编排器粒子尘链等价（Spawn_SnappingStone{,Melee,Summon}）——位置取目标
-    //  中心（原版 = lerp(盒内随机点, Center, 0.6)，备案）；FadingParticle/PrettySparkle
-    //  环带 + 音效（Item72/PyroclasticStone/ArmletOfRuin）登记未接
+    // ★1457 编排器环带段（Spawn_SnappingStone{,Melee,Summon} :593/:649/:734——L5 长尾批
+    //  收编:FadingParticle/PrettySparkle 环带+三味音 Item72/PyroclasticStone/ArmletOfRuin;
+    //  原版载荷 = PositionInWorld=lerp(盒内随机点,Center,.6)、MovementVector=(num11×num12,
+    //  出弹序号+1),本仓以目标中心+出弹序号近似锚）;clientOnly:false → module8 上行补远端。
+    //  Dust 段仍由下方 snapStrikeDust 承担（同批原文对齐）。
+    {
+      const halfDiag = Math.min(100, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
+      const msX = halfDiag * (0.3 + 1.4 * Math.random());
+      snappingStoneRingFx(game, kind, t.cx, t.cy, msX, strikes);
+      game.broadcastParticleOrchestra?.(
+        kind === 0 ? ParticleOrchestraType.SnappingStone
+          : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
+            : ParticleOrchestraType.SnappingStoneSummon,
+        t.cx, t.cy, msX, strikes);
+    }
     snapStrikeDust(game, kind, t.cx, t.cy, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
     skip.add(t.id);                             // skipTargets.Add(num9)（:14425-27）
   }
@@ -190,6 +205,15 @@ export function trySnapStrike(
   if (ctx?.victimBox) {
     snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy,
       Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2));
+    // R4-33 自脉冲面同款广播（Projectile.cs:14432-14437,victim.Center,ms=盒径/2 钳100）
+    {
+      const vh = Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2);
+      game.broadcastParticleOrchestra?.(
+        kind === 0 ? ParticleOrchestraType.SnappingStone
+          : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
+            : ParticleOrchestraType.SnappingStoneSummon,
+        ctx.victimBox.cx, ctx.victimBox.cy, vh * (0.3 + 1.4 * Math.random()), maxTargets);
+    }
   }
   // ★F1 加伤链（:14442-14457）——零目标也照样给满额漏配（num13 = 2 − num7）：
   //   `(int)((float)num14 ×乘区)` 为 C# float 乘后截断；f64/f32 双精度在常规乘区
@@ -241,7 +265,7 @@ export function projectileSnapStrikeBonus(
  *  kind2 毁灭臂镗（:734-812）15 颗 172 + 8 颗 211,Circular(10,10) 速,
  *  scale=max(0.75,20num),noGravity,1/6 重力 + scale×0.25
  */
-function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, sizeHalf: number): void {
+export function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, sizeHalf: number): void {
   const pool = game.vanillaDust;
   if (!pool) return;
   const rand = Math.random;

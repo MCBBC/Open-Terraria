@@ -845,7 +845,9 @@ function emitTreeLeaves(x: number, y: number, fx: number, fy: number, grassX: nu
   // 直取格，无中心偏移——曾 +6 近似，2026-08-19 收齐）
   const tx = Math.floor(vx / TILE), ty = Math.floor(vy / TILE);
   if (ST.inBounds(tx, ty) && ST.isSolid(tx, ty)) return;
-  natureParticles.spawnLeaf(vx, vy, gore);
+  // CurrentColumn = 树冠格油漆（TileDrawing :8027 tile.color()）
+  const paint = ST.inBounds(x, y) ? ST.paint[ST.idx(x, y)] : 0;
+  natureParticles.spawnLeaf(vx, vy, gore, paint);
 }
 
 /** DrawTrees（:8184-8460）：树冠/树枝摆动（墙后不摆 flag=tile.wall>0）+ 落叶喷出。

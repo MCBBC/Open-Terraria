@@ -543,6 +543,39 @@ export class Inventory {
     }
   }
 
+  /** 槽位级 DoCoins（Player.cs:39554-39570 原式，i 定点入口）：只审 slots[i]——
+   *  恰 stack==100 且面额 71-73 才把本槽 SetDefaults(type+1) 升一级置 1（:39578），
+   *  随后找 0-53 内别处同【升级后】面额的未满堆 +1、本槽 TurnToAir（:39581-39583）
+   *  并递归 DoCoins(j)（:39584）；i 本体清空后 type==0 使后续 j 全失配 ⇒ 每次调用至多
+   *  归并一处（原文同构）。铂(74)不升（:39575 只认 71/72/73）。
+   *  消费面 = 虚空袋溢流通道：GetItem_FillEmptyInventorySlot_VoidBag 尾部逐槽
+   *  `if (!settings.NoCoinMerge) DoCoins(i)`（Player.cs:39844-39847）——★反编译原文该
+   *  调用读的是 this.inventory（主背包），而非形参 inv 数组（inv 仅承载 bank4 槽位）：
+   *  【钱币升档结算在主背包同下标位发生,虚空袋自身永不换币】（2026-08-31 台账"币种
+   *  兑换 DoCoins"清偿接线的原式定谳;全扫版 doCoins() 为同一谓词的全域遍历口径,
+   *  与消费侧行为差 = 手改出恰 100 堆的外来状态才会被全扫多收——存档链路不可达）。 */
+  public doCoinsAt(i: number): void {
+    if (i < 0 || i >= COIN_START + COIN_SLOTS) return;      // 原文无上界守卫（inventory[59]）,
+    const s = this.slots[i];                                // 本仓以 0..53 有效位显式等价
+    if (!s) return;
+    const tier = coinIndexOf(s.id);
+    if (tier < 0 || tier > 2) return;                       // :39575 非 71-73 return
+    if (s.stack !== 100) return;                            // :39575 stack != 100 return
+    const nextId = ITEM_BY_KEY[COIN_KEYS[tier + 1]];
+    s.id = nextId;
+    s.stack = 1;                                            // :39578
+    for (let j = 0; j < COIN_START + COIN_SLOTS; j++) {     // :39579 j < 54
+      if (j === i) continue;
+      const t = this.slots[j];
+      if (t && t.id === nextId && t.stack < (ITEM_DEFS[nextId]?.maxStack ?? 100)) {
+        t.stack++;                                          // :39582
+        this.slots[i] = null;                               // :39583 TurnToAir
+        this.doCoinsAt(j);                                  // :39584 递归 DoCoins(j)
+        break;                                              // 清空后条件恒假,原文等价终了
+      }
+    }
+  }
+
   removeAt(i: number, count = 1): boolean {
     const s = this.slots[i];
     if (!s || s.stack < count) return false;

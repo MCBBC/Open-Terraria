@@ -366,14 +366,16 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    // ★枪族 v11(2026-08-31 终版):出生点 = 中心 + 瞄准单位·reach + (0, −fh/2)。
-    //  reach = fw + dp[0](每武器 barrel reach,含定制握把偏移);
-    //  垂直偏移 = −fh/2(手持贴图 pivot 高度,恒定不随角度旋转);
-    //  无横向恒定偏移 → 竖直瞄准弹在鼠标柱上(±0),水平瞄准枪口在前方。
-    //  (v10 的 handX=(fw/2+2)·sg 在近垂直时不衰减 = 左右偏移28px,已删)
+    // ★枪族 v12 金标审计修正(2026-09-01):pivot = (cx∓2, cy+dp[1]),
+    //  前伸 = fw+dp[0] 沿瞄准向。与修正后的 drawUseItem 绘制变换逐参数对齐
+    //  （offY=p.h/2+dp[1], drawOY=−fh/2, 原版 origin=(−num9,H/2)）。
+    //  弹出生点 = 绘制枪口 = 枪管轴向前伸在瞄准射线上的正确位置。
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
     const reach = fw + dp[0];
-    return { x: cx + Math.cos(aimWorld) * reach, y: cy - fh * 0.5 + Math.sin(aimWorld) * reach };
+    return {
+      x: cx - sg * 2 + Math.cos(aimWorld) * reach,
+      y: cy + dp[1] + Math.sin(aimWorld) * reach,
+    };
   }
   const wr = sg * alpha;
   const c = Math.cos(wr), s = Math.sin(wr);
@@ -7777,6 +7779,9 @@ export class Renderer {
     const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
     if (!img) return;
     const idx = dd2OgreNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy });
+    // 玩家接触侧回填（GetMeleeCollisionData 576/577 近挥帧窗 :96185-96235 消费，
+    // 相位锚证见 Enemy.vanillaGridFrameIdx 字段注）
+    e.vanillaGridFrameIdx = idx;
     const g = e.vanillaId != null ? NPC_GRIDS[e.vanillaId] : undefined;
     if (!g) return;
     this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
@@ -7835,6 +7840,8 @@ export class Renderer {
     if (!img) return;
     // 1457：攻击态帧计数读 ai[1]（AI 同步相位）
     const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy, lai0: e.lai0 });
+    // 玩家接触侧回填（GetMeleeCollisionData 668 斧臂帧判定 :96253-96278 消费）
+    e.vanillaGridFrameIdx = idx;
     // 几何查 NPC_GRIDS[668](5×5×218×240+pad2,重制管线同源)
     const g = NPC_GRIDS[668]!;
     const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);
@@ -12388,16 +12395,18 @@ export class Renderer {
           offY = p.h * 0.5 + Math.sin(aim) * staffReach;
           rot = aim + 0.785;
         } else {
-          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter-fh/2（:50387），
+          const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
+          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter+dy（:50387），
           // 绘制角 = itemRotation（PlayerDrawLayers.cs:3444）
+          // ★2026-09-01 金标审计修正：offY 不含 −fh/2（该量在旋转帧 origin.y=H/2），
+          //  per-item dy 加在未旋转 pivot 上（PlayerDrawSet vector11.Y→position.y）。
+          //  旧 offY=p.h/2−fh/2 把 H/2 放在旋转前 → 非水平瞄准时偏移按角度放大。
           offX = -2;
-          offY = p.h * 0.5 - fh * 0.5;
+          offY = p.h * 0.5 + dp[1];
           rot = aim;
           // ★握把 origin=(-num9,H/2)（PlayerDrawLayers.cs:3434-3443 + Main.cs:3305
-          // DrawPlayerItemPos）：num9 默认 10、逐 id 修正；dir=-1 时原版取 (W+num9,H/2)，
-          // 镜像空间等价 → 精灵左上角钉在握点 +（num9, dy）
-          const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
-          drawOX = dp[0]; drawOY = dp[1];
+          // DrawPlayerItemPos）：origin7.y=H/2 恒定不随物品变化，进旋转帧。
+          drawOX = dp[0]; drawOY = -fh * 0.5;
         }
         break;
       }

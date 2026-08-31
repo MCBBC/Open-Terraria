@@ -20,7 +20,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——kaleidoscope 鞭 tag 命中
 // 本地直生 + broadcast 上行同用此函数）
-import { rainbowRodHitFx } from '../fx/orchestraFx';
+import { rainbowRodHitFx, blackLightningHitFx, blueLightningSmallLongFx, trueExcaliburFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 
 /** NPCID.Sets.DebuffImmunitySets.ImmuneToWhips（1457 NPCID.cs 全表解析,
@@ -286,9 +286,12 @@ export class TagEffectState {
           break;
         case 'swordwhip':
           // WhipTagEffect_SwordWhip.MegaSlash :17-27：+30 固定伤 + TrueExcalibur 粒子
-          //（本仓以 916 弹近似粒子视觉）
+          //（:22 RequestParticleSpawn(clientOnly:false)——L5 长尾批收编真值本体
+          //  fx/orchestraFx.trueExcaliburFx（红粉前置带+Excalibur 金双带+d242/d169 门掷）
+          //  + module8 上行；旧 916 弹视觉占位退役）
           changes.addedFlatDamage += 30;
-          ctx.add(new Arrow(ctx.hx - 6, ctx.hy - 6, 0, -0.5, 0, 0, 916, null, { grav: 0, life: 14, pierce: 99 }));
+          trueExcaliburFx(game, ctx.hx, ctx.hy);
+          game.broadcastParticleOrchestra?.(ParticleOrchestraType.TrueExcalibur, ctx.hx, ctx.hy);
           break;
         case 'eel':
           // WhipTagEffect_ElectricEel.CreateLightningBlast :20-57：链电 5 目标 ×20 直伤
@@ -321,7 +324,14 @@ export class TagEffectState {
       if (!playerCanHitEnemy(ent, g, ctx.projId || 5478)) continue; // CanBeChasedBy 门
       hits++;
       en2.hurt(applyBannerDamageDealt(g, en2, 20), 0, 0, g, 0, false, 0, true);               // TryHittingNPC(nPC, 20, 0, null, 5478);fromPlayer=DPS 计
-      g.spawnParticles?.(px, py, '#60C8FF', 4, 2.2, { life: 16 }); // BlueLightningSmallLong 近似
+      // BlueLightningSmallLong 链电（WhipTagEffect_ElectricEel.cs:46 RequestParticleSpawn
+      // clientOnly:false——PositionInWorld=链电目标盒内随机点(vector2)、MovementVector=
+      // 命中盒内随机点−目标点(vector−vector2)。L5 长尾批收编真值本体（25px 步进复播
+      // LightningSmall）;旧 '#60C8FF' 粒子占位退役。命中盒内随机点以命中锚点近似。
+      const mvEx = ctx.hx + (Math.random() - 0.5) * (ctx.hurtEnemyWH.w ?? 0) - px;
+      const mvEy = ctx.hy + (Math.random() - 0.5) * (ctx.hurtEnemyWH.h ?? 0) - py;
+      blueLightningSmallLongFx(g, px, py, mvEx, mvEy);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.BlueLightningSmallLong, px, py, mvEx, mvEy);
     }
     g.playSfxFiles?.(['npc_hit34'], 0.6, ctx.hx, ctx.hy);     // SoundID.NPCHit34 :54（循环外无条件）
     return 50 + hits * 50;                                    // :55 AddedFlatDamage += 50+hits×50
@@ -336,9 +346,13 @@ export class TagEffectState {
     switch (d.kind) {
       case 'darkharvest':
         // WhipTagEffect_DarkHarvest :11-22（每次被 tag 敌被吃鞭 tag 的命中都触发）：
-        // 916 黑闪电,伤 = TagDamage × SummonTagDamageMultiplier[projType]
+        // 916 黑闪电,伤 = TagDamage × SummonTagDamageMultiplier[projType];命中粒子 =
+        // EmitBlackLightningParticles(:22 RequestParticleSpawn(clientOnly:false,
+        // BlackLightningHit))——L5 长尾批收编真值本体 blackLightningHitFx(7 环帧条)
+        // + module8 上行;旧 Arrow 916 视觉占位退役（916 伤害面=hurtFx 直结）。
         ctx.hurtFx?.(Math.max(1, Math.trunc(d.tagDamage * (SUMMON_TAG_MUL[ctx.projId] ?? 1))));
-        ctx.add(new Arrow(ctx.hx, ctx.hy, 0, -1, 0, 0, 916, null, { grav: 0, life: 24, pierce: 99 }));
+        blackLightningHitFx(game, ctx.hx, ctx.hy);
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.BlackLightningHit, ctx.hx, ctx.hy);
         break;
       case 'constellation':
         // WhipTagEffect_Constellation.OnTaggedHit :6-10：吃 tag 的随从/哨兵弹命中

@@ -27,8 +27,11 @@
 //   Y 反转 ×num27 仅 lastVy>0.7；|vy|<0.5 → vy=0；**首次触墙后 ai[1]=1**（切滚动态）。
 //   碰撞盒 10×10（Update colWidth/colHeight 表 :20073——与 SetDefaults 同值）。
 //   AI 型专段（Projectile.cs:23674-23730）：
-//     · owner==本地 → localAI[0]++ 钳 30；命中任一存活玩家（他人恒算/自己须
-//       localAI[0]≥30 宽限）→ Kill（被捡走并回归）
+//     · owner==本地 → localAI[0]++ 钳 30；命中任一存活玩家 → Kill（被捡走并回归）。
+//       ★宽限语义钉死（2026-08-31 台账核清,Projectile.cs:23677-23691 原文）：
+//       回收条件 = `(player2.whoAmI != player.whoAmI || !(localAI[0] < 30f))` ——
+//       【宽限期(≤30t)只豁免 owner 本人】,其他玩家一触即回收,
+//       不存在"任何玩家共享 30t 宽限窗"面;MP 下远端玩家提前触球被回收=原文真值。
 //     · vy==0 → vx×0.95 / 空 0.995；|vx|<0.5 → 0；vx==0&&vy==0 → Kill
 //     · vy += 0.1
 //     · ai[1]==1（滚动）：frame=frameCounter=0，rotation += (|vx|+|vy|)×0.03×direction
@@ -234,8 +237,11 @@ export class FootballProj extends BallBase {
     const world = game.world;
     if (this.outOfBounds(game)) { this.dead = true; return; }
 
-    // 接触回收（:23677-23691）：owner 本地门本仓恒真（单人/代理弹都归本端桶）
-    // Kill() 单口 → :79355-79357 回落段同样生效（被"捡走"= 回到玩家头顶掉落）
+    // 接触回收（:23677-23691）：owner 本地门本仓恒真（单人/代理弹都归本端桶）。
+    // Kill() 单口 → :79355-79357 回落段同样生效（被"捡走"= 回到玩家头顶掉落）。
+    // ★宽限=owner-only 钉死（Projectile.cs:23686 `(player2.whoAmI != player.whoAmI ||
+    //   !(localAI[0] < 30f))`）：30t 窗只豁免 owner;其余候选玩家(含 MP 远端代理)
+    //   存活且盒相交即立即回收——非债,原文如此。
     this.grace = Math.min(30, this.grace + 1);
     for (const p of game.candidatePlayers?.() ?? [game.player]) {
       const meta = p as unknown as { dead?: boolean; owner?: boolean; who?: number };

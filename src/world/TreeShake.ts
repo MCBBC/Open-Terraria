@@ -238,7 +238,7 @@ export interface TreeShakeSinks {
   /** 弹 655 蜂巢（:63381 丛林 1/40，命中格上方一格） */
   beehive(px: number, py: number): void;
   /** TreeGrowFX 叶爆单叶（:29763-29787，hitTree → 3 直排 + 5 散布） */
-  leaf(px: number, py: number, gore: number): void;
+  leaf(px: number, py: number, gore: number, paint?: number): void;
   /** TreeGrowFX_AshShake（:29796-29822，gore 1278 改尘爆） */
   ashDust(px: number, py: number): void;
 }
@@ -520,15 +520,17 @@ export function shakeTree(
       // TreeGrowFX :29761 gore 1278 → TreeGrowFX_AshShake（:29796 尘爆而非叶）
       sinks.ashDust(bottomX * 16 + 8, bottomY * 16 + 8);
     } else {
-      // :29763-29787 height=1：num=0 单行 3 叶（-16/0/+16 偏移 -5,-7）+ hitTree 尾爆 5 叶
+      // :29763-29787 height=1：num=0 单行 3 叶（-16/0/+16 偏移 -5,-7）+ hitTree 尾爆 5 叶；
+      // CurrentColumn = 树格油漆（:29889-29892 InWorld 门 + tile.color()）
+      const paint = st.inBounds(bottomX, bottomY) ? st.paint[st.idx(bottomX, bottomY)] : 0;
       const cx = bottomX * 16 + 8, cy = bottomY * 16 + 8;
-      sinks.leaf(cx - 16 - 5, cy - 7, passStyle);
-      sinks.leaf(cx - 5, cy - 7, passStyle);
-      sinks.leaf(cx + 16 - 5, cy - 7, passStyle);
+      sinks.leaf(cx - 16 - 5, cy - 7, passStyle, paint);
+      sinks.leaf(cx - 5, cy - 7, passStyle, paint);
+      sinks.leaf(cx + 16 - 5, cy - 7, passStyle, paint);
       for (let n = 0; n < 5; n++) {
         const dx = cx + (mainRand.next() * 80 - 40);
         const dy = cy - 40 + (mainRand.next() * 80 - 40) - 7;
-        sinks.leaf(dx, dy, passStyle);
+        sinks.leaf(dx, dy, passStyle, paint);
       }
     }
   }

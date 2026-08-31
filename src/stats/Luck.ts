@@ -1,17 +1,18 @@
-// 幸运度系统 1:1（1.4.5.6 反编译 = Terarria1456）：
-//   - 聚合公式 RecalculateLuck（Player.cs:28672-28697）：
-//       luck = GetLadyBugLuck()*0.2 + torchLuck*0.2          （:28673）
-//       luck += luckPotion*0.1                               （:28674，buff 257 三档）
-//       luck += kiteLuckLevel*0.1/3                          （:28675，buff 383 三档）
-//       luck += usedGalaxyPearl ? 0.03 : 0                   （:28676-28678，银河珍珠 5340）
-//       luck += LanternsUp ? 0.3 : 0                         （:28679-28682）
-//       luck += HasGardenGnomeNearby ? 0.2 : 0               （:28683-28686，tile 567）
-//       luck += stinky ? -0.25 : 0                           （:28687-28690，buff 120）
-//       luck += equipmentBasedLuckBonus                      （:28692，Player.cs:12629-12647）
-//       luck += CalculateCoinLuck()                          （:28693，微光化币）
-//       luck += brokenMirrorBadLuck ? -0.25 : 0              （:28694-28696，弹 810 击碎镜）
+// 幸运度系统 1:1（1.4.5.7/1.4.5.8 反编译锚 2026-08-31 实校——Terarria1456 旧注
+//   :286xx 族已漂移,+695 左右,勿再引用）：
+//   - 聚合公式 RecalculateLuck（Player.cs:29367-29394）：
+//       luck = GetLadyBugLuck()*0.2 + torchLuck*0.2          （:29369）
+//       luck += luckPotion*0.1                               （:29370，buff 257 三档）
+//       luck += kiteLuckLevel*0.1/3                          （:29371，buff 383 三档）
+//       luck += usedGalaxyPearl ? 0.03 : 0                   （:29372-29375，银河珍珠 5340）
+//       luck += LanternsUp ? 0.3 : 0                         （:29376-29379）
+//       luck += HasGardenGnomeNearby ? 0.2 : 0               （:29380-29383，tile 567）
+//       luck += stinky ? -0.25 : 0                           （:29384-29387，buff 120）
+//       luck += equipmentBasedLuckBonus                      （:29388，累加面 Player.cs:13148-13168）
+//       luck += CalculateCoinLuck()                          （:29389，微光化币）
+//       luck += brokenMirrorBadLuck ? -0.25 : 0              （:29390-29392，弹 1085 击碎镜）
 //     注意：RecalculateLuck 本体不 clamp——luckMinimumCap=-0.7 / luckMaximumCap=1
-//     （Player.cs:2952/2954）仅用于 UI 计量（:3950-3957），数值上可超界。
+//     （Player.cs:3071/3073）仅用于 UI 计量（:4098-4103），数值上可超界。
 //     （任务清单里的"月相"与"杀蝙蝠"均不进 luck 公式：月相只喂刷怪/旅行商品质
 //     类外围；负面 luck 源头是瓢虫 NPC 359/360 与碎镜，不是蝙蝠。）
 //   - 掷骰消费三态（Luck.cs 全文，Terraria.GameContent/Luck.cs:5-60）：
@@ -25,22 +26,27 @@
 //   来源接线状态（已接/登记见 get luck 注释与 Game.ts 扫描位）：
 //     已接：幸运药水 buff 257 / 灯笼夜 / 花园地精扫描 / 火炬幸运扫描 / 装备
 //           （幸运币 855 / 马掌族）/ 钱币幸运数值位 / 瓢虫 604/605（击杀=坏运
-//           Enemy.hurt cs:82338；触碰=好运 ladybugAI cs:78730。原登记 ID 359/360
-//           为旧版误记——1.4.5.6 瓢虫是 NPC 604 Ladybug / 605 Gold Ladybug，
-//           359/360 实为蜗牛；生成在 VanillaSpawner 起风日分支 cs:2413）
+//           NPC.cs:78861-78862 LadyBugKilled(:82403)；触碰=好运 NPC.cs:78740
+//           LadyBugLuck(:82437)。原登记 ID 359/360 为旧版误记——1.4.5.6+ 瓢虫是
+//           NPC 604 Ladybug / 605 Gold Ladybug，359/360 实为蜗牛；
+//           生成侧 ladyBugRainBoost 分支现居 Main.cs:65813/:65901，旧注
+//           VanillaSpawner cs:2413 文件已不存在）
 //     登记→已接（幸运来源批）：buff 383 风筝三档（BuffType.KiteBuff）、buff 120 恶臭
 //           （BuffType.Stinky，Player.luck 直读）、银河珍珠 5340（vi_5340_galaxy_pearl
 //           使用置 usedGalaxyPearl）、碎镜（vi_5577_pretty_mirror 投掷弹 1085 消亡近身
 //           150px → brokenMirrorBadLuckTime；原版此处弹体 id=1085，旧注释"810"系 1.4.0.5 编号）。
-//     登记→已接：微光化币（WorldItem.cs:1791-1810 钱币入微光消散 → coinLuckAmount
-//           面额放大 → LuckState.addCoinLuck 距离门+衰减；ItemDrop 钱币分支已接，
+//     登记→已接：微光化币（WorldItem.GetShimmered :1719 的钱币面额放大支
+//           :1725-1745 → Player.AddCoinLuck :1743 消费面额档、距离门+cap 在 :18204；
+//           ItemDrop 钱币分支已接，
 //           回归见 tests/shimmer.test.ts「金币 73 入池」探针）。
-//     登记→已接（2026-08-20）：四叶草族 5574/5575/5576（Player.luckEquipmentBonus
-//           口袋+装备位扫描，Player.cs:12494-12530/:12628-12646；获取链 = 割成熟
+//     登记→已接（2026-08-20）：四叶草族 5574/5575/5576（Player.luckEquipmentBonus——
+//           clover 判定置位 Player.cs:12820/:12824、装备聚合消费 :13148-13168；获取链 =
+//           割成熟
 //           药草 1/1000（DropBait.dropCloverRoll）/乌鸦 301 掉 5576 1/10/微光
 //           5574→5575）+ 马掌族运气位从 158 单件扩到九件全集。
 //     仍登记：风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭药水 1332/弹幕 1080）未移植;
-//           瓢虫 releaseOwner 门（:82370 玩家放生的瓢虫不给好运）——引擎无放生
+//           瓢虫 releaseOwner 门（NPC.cs:82439 releaseOwner!=255 玩家放生的瓢虫不给
+//           好运）——引擎无放生
 //           跟踪,当前全瓢虫视为野生,恒满足。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
@@ -87,12 +93,12 @@ export function rollOnlyBadLuckExtreme(luck: number, range: number, rand: () => 
 
 // ============ 聚合态（仿 BuffState：环境因子 Game 侧写入，value 幂等聚合） ============
 
-/** 瓢虫时序常量（NPC.cs:6549/6551，tick） */
+/** 瓢虫时序常量（NPC.cs:6643/:6645 ladyBugGoodLuckTime/BadLuckTime，tick） */
 export const LADYBUG_GOOD_LUCK_TIME = 43200;
 export const LADYBUG_BAD_LUCK_TIME = -10800;
-/** 碎镜负面时序（Projectile.cs:67574） */
+/** 碎镜负面时序（写位 Projectile.Kill type==1085 支 Projectile.cs:72054） */
 export const BROKEN_MIRROR_TIME = 25200;
-/** 钱币幸运累计上限（Player.cs AddCoinLuck:17952） */
+/** 钱币幸运累计上限（Player.cs AddCoinLuck :18208-18210 cap 1e6） */
 const COIN_LUCK_CAP = 1_000_000;
 
 export class LuckState {
@@ -102,21 +108,22 @@ export class LuckState {
   hasGardenGnomeNearby = false;
   /** 灯笼夜（LanternNight.LanternsUp，Game 侧每 tick 同步） */
   lanternsUp = false;
-  /** 银河珍珠已用（Player.cs:44786-44789 一次性）——物品 vi_5340_galaxy_pearl 已注册，
+  /** 银河珍珠已用（Player.cs:45789-45793 使用支 usedGalaxyPearl=true@:45791 一次性）
+   *  ——物品 vi_5340_galaxy_pearl 已注册，
    *  Game 使用分支（useTime 45）置位后消耗 */
   usedGalaxyPearl = false;
-  /** Stinky（buff 120，:9958-9961）——Player.luck 直接读 BuffType.Stinky（buff 在
+  /** Stinky（buff 120，Player.cs:10363-10366）——Player.luck 直接读 BuffType.Stinky（buff 在
    *  即 stinky）；此位仅作环境外注入备用。授予来源（恶臭药水 1332/弹幕 1080）未移植 */
   stinky = false;
-  /** 碎镜负面计时 tick（brokenMirrorBadLuckTime，UpdateBrokenMirrorLuck :28700-28711） */
+  /** 碎镜负面计时 tick（brokenMirrorBadLuckTime，UpdateBrokenMirrorLuck Player.cs:29396-29412） */
   brokenMirrorBadLuckTime = 0;
-  /** 瓢虫 luck 计时 tick（正=好运余量/负=坏运余量；UpdateLadyBugLuckTime :28654-28670 衰减） */
+  /** 瓢虫 luck 计时 tick（正=好运余量/负=坏运余量；UpdateLadyBugLuckTime Player.cs:18950-18969 衰减） */
   ladyBugLuckTimeLeft = 0;
-  /** 钱币幸运累计（铜币面额；来源 = 微光化币 WorldItem.cs:1787-1810——ItemDrop 钱币
+  /** 钱币幸运累计（铜币面额；来源 = 微光化币 WorldItem.GetShimmered 钱币支 :1725-1745——ItemDrop 钱币
    *  入微光消散分支已接 addCoinLuck（距离门+面额放大），回归见 tests/shimmer.test.ts） */
   coinLuck = 0;
 
-  /** GetLadyBugLuck（:18009-18019）：timeLeft/43200 或 -timeLeft/-10800（∈[-1,1]） */
+  /** GetLadyBugLuck（Player.cs:18270-18282）：timeLeft/43200 或 -timeLeft/-10800（∈[-1,1]） */
   get ladyBugLuck(): number {
     if (this.ladyBugLuckTimeLeft > 0) return this.ladyBugLuckTimeLeft / LADYBUG_GOOD_LUCK_TIME;
     if (this.ladyBugLuckTimeLeft < 0) return -this.ladyBugLuckTimeLeft / LADYBUG_BAD_LUCK_TIME;
@@ -127,7 +134,7 @@ export class LuckState {
     return this.brokenMirrorBadLuckTime > 0;
   }
 
-  /** CalculateCoinLuck（:17968-17997 分档） */
+  /** CalculateCoinLuck（Player.cs:18229-18268 分档） */
   get coinLuckValue(): number {
     if (this.coinLuck === 0) return 0;
     if (this.coinLuck > 249000) return 0.2;
@@ -140,7 +147,7 @@ export class LuckState {
     return 0.025;
   }
 
-  /** LadyBugKilled（NPC.cs:82403-82434）——瓢虫饵 4361/4362 消耗钩与瓢虫击杀共用：
+  /** LadyBugKilled（NPC.cs:82403-82433）——瓢虫饵 4361/4362 消耗钩与瓢虫击杀共用：
    *  距离 <400px 才生效（<100px 视为 0 距离），坏运量 = (int)(-10800 × (1−d/400)) ×
    *  (金瓢虫 ×2)，仅当比当前更坏（num3 < timeLeft）才覆写。
    *  Main.ladyBugRainBoost += 1800 钳 18000（:82405-82409）由 Weather 侧承接 */
@@ -152,16 +159,16 @@ export class LuckState {
     if (num3 < this.ladyBugLuckTimeLeft) this.ladyBugLuckTimeLeft = num3;  // :82430-82432
   }
 
-  /** AddCoinLuck（:17943-17955）：距离 <1000px 才累计，cap 1e6 */
+  /** AddCoinLuck（Player.cs:18204-18215）：距离 <1000px 才累计，cap 1e6 */
   addCoinLuck(distPx: number, coinAmount: number): void {
     if (distPx >= 1000) return;
     this.coinLuck = Math.min(COIN_LUCK_CAP, this.coinLuck + coinAmount);
   }
 
   /** 时序衰减（每 tick 调用；Main.dayRate 默认 1）：
-   *  - 瓢虫 :28654-28670（正负分别向 0 收敛）
-   *  - 钱币 UpdateCoinLuck :17956-17963（×0.9999^dayRate，<0.25 清零）
-   *  - 碎镜 UpdateBrokenMirrorLuck :28700-28711 */
+   *  - 瓢虫 :18950-18969（正负分别向 0 收敛）
+   *  - 钱币 UpdateCoinLuck :18217-18227（×0.9999^dayRate，<0.25 清零）
+   *  - 碎镜 UpdateBrokenMirrorLuck :29396-29412 */
   update(dayRate = 1): void {
     if (this.ladyBugLuckTimeLeft > 0) {
       this.ladyBugLuckTimeLeft = Math.max(0, this.ladyBugLuckTimeLeft - dayRate);
@@ -196,9 +203,12 @@ export class LuckState {
   }
 }
 
-// ============ 火炬幸运扫描（Player.cs:17580-17720 窗口 + :17771-17939 计算 1:1） ============
-// 窗口：玩家 Center tile ±40（81×81）。原版每 tick 只扫一行（luckyTorchCounter 逐行推进），
-// 扫满 81 行才 ConsumeCountersAndCalculate；本仓按 15 tick 一整窗直扫（节流等价，语义同净效果）。
+// ============ 火炬幸运扫描（TryRecalculatingTorchLuck :17845-17909 窗口 +
+// :18026-18202 计算 1:1；1456 旧注 17580/17771 族已漂移作废） ============
+// 窗口：玩家 Center tile ±40（81×81,Player.cs:17864 num2=40）。原版每 tick 只扫一行
+//（luckyTorchCounter 逐行推进,TryRecalculatingTorchLuck Player.cs:17845-17909）,
+// 扫满 81 行才 UpdateTorchLuck_ConsumeCountersAndCalculate(:18026-18202)；本仓按 15 tick
+// 一整窗直扫（节流等价，语义同净效果）。地表（:17858-17862 worldSurface 门）同理。
 // 地表（position.Y ≤ worldSurface*16）或死亡 → 直接 Consume（torchLuck=0）。
 
 /** TorchID（Terraria.ID/TorchID.cs:84-131）——窗口内见到的火炬样式集索引 */
@@ -227,7 +237,7 @@ export interface LuckScanInput {
   heldTorchStyle: number | null;
 }
 
-const TORCH_WINDOW = 40;          // num2（Player.cs:17595）
+const TORCH_WINDOW = 40;          // num2（Player.cs:17864）
 const GNOME_WINDOW_X = 84;        // SceneMetrics ZoneScanSize 半宽（(1920/16+49)/2 取整）
 const GNOME_WINDOW_Y = 61;
 
@@ -263,7 +273,7 @@ export function scanLuckScene(input: LuckScanInput): { torchLuck: number; hasGar
     return { torchLuck: 0, hasGardenGnome: scanGnome(st, tx, ty) };
   }
 
-  // 火炬窗口计数（:17604-17640；nearbyTorches 燃烧计数只喂 Torch God 触发，
+  // 火炬窗口计数（TryRecalc 扫描体 :17871-17907；nearbyTorches 燃烧计数只喂 Torch God 触发，
   // 由 TorchGod.ts 自扫，此处不重复累计）
   const nearby = new Array<boolean>(TORCH_STYLE_COUNT).fill(false);
   let dryCoral = false;
@@ -277,17 +287,17 @@ export function scanLuckScene(input: LuckScanInput): { torchLuck: number; hasGar
         const style = Math.floor(st.frameY[i] / 22);
         if (style < TORCH_STYLE_COUNT) {
           nearby[style] = true;
-          // :17629-17634：珊瑚炬非水中 → dryCoral（下文按"错群系"计负）
+          // :17896-17899：珊瑚炬非水中 → dryCoral（下文按"错群系"计负）
           if (style === TORCH_STYLE.Coral && (st.liquid[i] === 0 || st.liquidType[i] !== 1)) dryCoral = true;
         }
       }
     }
   }
   if (input.heldTorchStyle !== null && input.heldTorchStyle < TORCH_STYLE_COUNT) {
-    nearby[input.heldTorchStyle] = true;   // UpdateTorchLuck_ConsumeCountersAndCalculate :17775-17778
+    nearby[input.heldTorchStyle] = true;   // UpdateTorchLuck_ConsumeCountersAndCalculate :18031-18034
   }
 
-  // ---- UpdateTorchLuck_ConsumeCountersAndCalculate（:17771-17939）----
+  // ---- UpdateTorchLuck_ConsumeCountersAndCalculate（:18026-18202）----
   // num2=good（正确群系火炬加分项）num=bad（错群系火炬负分项）
   const z = input.zones;
   let good = 0;
@@ -296,21 +306,21 @@ export function scanLuckScene(input: LuckScanInput): { torchLuck: number; hasGar
     if (nearby[TORCH_STYLE.Ice]) { good += z.snow ? 1 : 0; bad += z.snow ? 0 : 1; }
     if (nearby[TORCH_STYLE.Desert]) { good += z.desert ? 1 : 0; bad += z.desert ? 0 : 1; }
     if (nearby[TORCH_STYLE.Coral]) {
-      if (z.ocean) good += 1;          // :17813-17815 海洋深度带内 = 正确群系
-      else if (dryCoral) bad += 1;     // :17816-17818 干珊瑚炬 = 错群系
+      if (z.ocean) good += 1;          // :18063-18065 海洋深度带内 = 正确群系
+      else if (dryCoral) bad += 1;     // :18067-18069 干珊瑚炬 = 错群系
     }
     if (nearby[TORCH_STYLE.Jungle]) { good += z.jungle ? 1 : 0; bad += z.jungle ? 0 : 1; }
     if (nearby[TORCH_STYLE.Mushroom]) { good += z.glowshroom ? 1 : 0; bad += z.glowshroom ? 0 : 1; }
     if (nearby[TORCH_STYLE.Corrupt]) { good += z.corrupt ? 1 : 0; bad += z.corrupt ? 0 : 1; }
-    if (nearby[TORCH_STYLE.Cursed] && z.corrupt) good += 1;   // :17828-17830
+    if (nearby[TORCH_STYLE.Cursed] && z.corrupt) good += 1;   // :18105-18108
     if (nearby[TORCH_STYLE.Crimson]) { good += z.crimson ? 1 : 0; bad += z.crimson ? 0 : 1; }
-    if (nearby[TORCH_STYLE.Ichor] && z.crimson) good += 1;    // :17831-17833
+    if (nearby[TORCH_STYLE.Ichor] && z.crimson) good += 1;    // :18120-18123
     if (nearby[TORCH_STYLE.Hallowed]) { good += z.hallow ? 1 : 0; bad += z.hallow ? 0 : 1; }
     if (nearby[TORCH_STYLE.Bone] && !z.snow && !z.desert && !z.corrupt && !z.crimson && !z.hallow && !z.jungle) {
-      good += 0.5;                                            // :17834-17836
+      good += 0.5;                                            // :18135-18137
     }
     if (nearby[TORCH_STYLE.Torch]) {
-      if (z.snow) bad += 2;                                    // :17837-17841
+      if (z.snow) bad += 2;                                    // :18141-18148
       else if (z.desert || z.corrupt || z.crimson || z.hallow) bad += 0.5;
     }
   }
@@ -320,6 +330,6 @@ export function scanLuckScene(input: LuckScanInput): { torchLuck: number; hasGar
   if (bad >= 2) torchLuck += -1.5;
   else if (bad >= 1) torchLuck += -1;
   else if (bad > 0) torchLuck += -0.5;
-  if (torchLuck < 0) torchLuck = 0;   // :17919-17921
+  if (torchLuck < 0) torchLuck = 0;   // :18176-18179
   return { torchLuck, hasGardenGnome: scanGnome(st, tx, ty) };
 }

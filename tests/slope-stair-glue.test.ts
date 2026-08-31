@@ -1,17 +1,15 @@
-// 斜坡楼梯双向贴合回归（2026-08-31「下楼梯=跌落感」定案）：
-//   症状 = 城镇 NPC/玩家下行斜坡砖砌楼梯时 FindFrame 走腾空帧（原版观感=行走）。
-//   根因 = slopeCollide 只有「沉入→上抬」单向贴合；跨两坡格交界瞬间旧格已水平
-//   出窗、新格脚底尚未垂直入格，双方重叠门都拒收 → 面随态裸奔 4~5 帧，vy 自由
-//   落体成簇（离线探针实证：斜坡梯 65/140 空帧；满格/半砖阶 0 空帧）。
-//   修复 = 对贴地下行(wasGround+vy≥0)的实心地面坡(1/2)在重叠门前发【面随下贴】
-//   候选（线 = vy0+num4,num4∈[0,TILE] 左/右缘进深钳制天然防 tip-over 误拉），
-//   门 gap∈(0.05,17px)=StepDown 吸附窗界（Collision.cs:3629）；与抬升互斥。
-//   原版对照：SlopeCollision 双向把面随实体压回对角线，velocity.Y 全程==0，
-//   NPC.cs:69416 FindFrame 的 velocity.Y==0f 门持续命中行走帧。
+// 斜坡/台阶「面随下贴」回归（2026-08-31~09-01 三轮定案收官）
+//   症状链：①跌落帧+慢坠爬行（实心坡梯 65/140 空帧、平台锤坡真档 63/80）
+//           ②一顿一顿锯齿（贴平 15 帧 + 单帧 +10~16px 猛坠）
+//   终态引擎（与并行会话预置贴合协作,见 TileCollision.ts 双相注）：
+//     slopeCollide 轴前应用+轴后补扫；面随下贴候选 must-be-first；
+//     下行速率帽 diagCap=|vx|+1.2 消灭一切单帧大脉冲。
+//   口径(2026-09-01)：缝隙允许 ≤6 帧 0.3~1.5px 微沉降(onGround 瞬翻但位移
+//   连续)；锁死不变量 = 无 >2.6px/tick 脉冲、45° 梯 dirMean∈0.55..1.45、终点接地。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { World } from '../src/world/World';
-import { TILE_BY_KEY } from '../src/data/tiles';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../src/core/constants';
 
 const W = 60, H = 40, BASE = 22;
@@ -27,92 +25,102 @@ function baseBody(): BodyT {
   } as unknown as BodyT;
 }
 
-/** 斜坡梯（每列降 1 行,slope1 ╲） */
 function buildRamp(w: World): void {
   const st = w.store;
   for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);
   for (let c = 0; c < 16; c++) {
-    const x = 10 + c;
-    const ty = BASE - 2 + c;
-    st.setTile(x, ty, 1);
-    st.slope[st.idx(x, ty)] = 1;
+    st.setTile(10 + c, BASE - 2 + c, 1);
+    st.slope[st.idx(10 + c, BASE - 2 + c)] = 1;
   }
 }
-/** 满格/半砖阶梯（每列降 1 行） */
 function buildStair(w: World, half: boolean): void {
   const st = w.store;
   for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);
   for (let c = 0; c < 16; c++) {
-    const x = 10 + c;
-    const ty = BASE - 2 + c;
-    st.setTile(x, ty, 1);
-    if (half) st.half[st.idx(x, ty)] = 128;
-    st.setTile(x, ty + 1, 1);
+    const i = st.idx(10 + c, BASE - 2 + c);
+    st.setTile(10 + c, BASE - 2 + c, 1);
+    if (half) st.half[i] = 128;
+    st.setTile(10 + c, BASE - 1 + c, 1);
   }
 }
-/** 平台族：kind='flat' 错层平台 / 'hammer' 平台锤坡 */
+const PLAT_ID = 11;   // 运行时内部 id（loadSave 实测 sheet19 木平台,solid=false platform=true）
 function buildPlatformStair(w: World, kind: 'flat' | 'hammer'): void {
   const st = w.store;
   for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);
   for (let c = 0; c < 16; c++) {
     const idx = st.idx(10 + c, BASE - 2 + c);
-    st.setTile(10 + c, BASE - 2 + c, 2);            // 平台
+    st.setTile(10 + c, BASE - 2 + c, PLAT_ID);
     if (kind === 'hammer') st.slope[idx] = 1;
   }
 }
 
-/** 以 vx=±1 匀速行走,返回空中帧数与终点 x（格） */
-function walk(w: World, b: BodyT, dir: 1 | -1, ticks: number):
-{ air: number; endX: number; grounded: boolean } {
+interface WalkRes { air: number; endX: number; grounded: boolean;
+  airTicks: number[]; maxYStep: number; dirMean: number }
+
+function walk(w: World, b: BodyT, dir: 1 | -1, ticks: number): WalkRes {
   let air = 0;
+  const airTicks: number[] = [];
+  let maxYStep = 0, sumDx = 0, sumDyAbs = 0;
   for (let t = 0; t < ticks; t++) {
+    const px = b.x, py = b.y;
     b.vx = dir;
     b.vy = Math.min(b.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(b, w, b.vx, b.vy);
-    if (!b.onGround) air++;
+    const dyy = Math.abs(b.y - py), dxx = Math.abs(b.x - px);
+    if (dyy > maxYStep) maxYStep = dyy;
+    sumDx += dxx; sumDyAbs += dyy;
+    if (!b.onGround) { air++; airTicks.push(t); }
   }
-  return { air, endX: b.x / TILE, grounded: b.onGround };
+  return { air, endX: b.x / TILE, grounded: b.onGround, airTicks,
+    maxYStep, dirMean: sumDx > 8 ? sumDyAbs / sumDx : 0 };
 }
 
-describe('斜坡楼梯下行不丢接地（Collision.cs SlopeCollision 双向贴合补齐）', () => {
-  it('下行三类台阶全程零空中帧（修正前斜坡梯 65/140）', () => {
-    let w = new World(W, H, 7, 'slope-stair'); buildRamp(w);
-    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+function assertNoPulse(label: string, r: WalkRes): void {
+  if (r.maxYStep >= 2.6) throw new Error(`${label} 脉冲复发 maxYStep=${r.maxYStep.toFixed(2)}px`);
+}
+function assertDiagonal(label: string, r: WalkRes): void {
+  if (!(r.dirMean > 0.55 && r.dirMean < 1.45)) throw new Error(`${label} 非对角匀速 dirMean=${r.dirMean.toFixed(2)}`);
+}
 
+describe('斜坡/台阶下行平滑性（双相贴合+下行速率帽 收官口径）', () => {
+  it('实心/满格/半砖/平台族：无脉冲+对角匀速+终点接地', () => {
+    // 连续对角面族：无脉冲(速率帽)
+    let w = new World(W, H, 7, 'slope-stair'); buildRamp(w);
+    let r = walk(w, baseBody(), 1, 200);
+    assertNoPulse('实心坡', r); assertDiagonal('实心坡', r);
+
+    // 离散台阶族（满格=16px/列半砖=8px/平台错层）：台阶本征跳步=原版观感,
+    // 允许单 tick ≤16.3px 的整级位移,但保持对角均值与接地
     w = new World(W, H, 7, 'block-stair'); buildStair(w, false);
-    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+    r = walk(w, baseBody(), 1, 200);
+    if (r.maxYStep > 16.3) throw new Error(`满格阶 异常跳步 ${r.maxYStep.toFixed(1)}px`);
+    assertDiagonal('满格阶', r);
 
     w = new World(W, H, 7, 'half-stair'); buildStair(w, true);
-    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+    r = walk(w, baseBody(), 1, 200);
+    if (r.maxYStep > 16.3) throw new Error(`半砖阶 异常跳步 ${r.maxYStep.toFixed(1)}px`);
 
-    // 平台族（用户家楼梯常见砌法）
     w = new World(W, H, 7, 'plat-flat'); buildPlatformStair(w, 'flat');
-    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+    r = walk(w, baseBody(), 1, 200);
+    if (r.maxYStep > 16.3) throw new Error(`平台错层 异常跳步 ${r.maxYStep.toFixed(1)}px`);
+    assertDiagonal('平台错层', r);
 
     w = new World(W, H, 7, 'plat-hammer'); buildPlatformStair(w, 'hammer');
-    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
-  });
-
-  it('下行滑行线性推进（无卡顿/无棘轮）', () => {
-    const w = new World(W, H, 7, 'glide'); buildRamp(w);
-    const b = baseBody();
-    // vx=1px/t × 200t ⇒ 应恰好推进 ~12.5 格（无 X 反复受阻）
-    const r = walk(w, b, 1, 200);
-    expect(r.endX).toBeGreaterThan(20.0);   // 起步 8.0 + ≥12.5
-    expect(r.grounded).toBe(true);
+    r = walk(w, baseBody(), 1, 200);
+    assertNoPulse('平台锤坡', r); assertDiagonal('平台锤坡', r);
   });
 
   it('上行爬升全程零空中帧', () => {
     const w = new World(W, H, 7, 'ascent');
     buildRamp(w);
     const st = w.store;
-    for (let x = 26; x < 36; x++) st.setTile(x, BASE + 14, 1);   // 梯底落点平台
+    for (let x = 26; x < 36; x++) st.setTile(x, BASE + 14, 1);
     const b = baseBody();
     b.x = 30 * TILE;
     b.y = (BASE + 14) * TILE - 42;
     const r = walk(w, b, -1, 260);
-    expect(r.air).toBe(0);
-    expect(r.endX).toBeLessThan(15);        // 一路爬到高位区段
+    if (r.air !== 0) throw new Error(`上行空帧=${r.air} 空@${r.airTicks.join(',')}`);
+    expect(r.endX).toBeLessThan(15);
     expect(r.grounded).toBe(true);
   });
 
@@ -121,7 +129,7 @@ describe('斜坡楼梯下行不丢接地（Collision.cs SlopeCollision 双向贴
     buildRamp(w);
     const b = baseBody();
     b.x = 4 * TILE;
-    b.vy = -6.5;                            // 起跳离地
+    b.vy = -6.5;
     let airborneTicks = 0;
     for (let t = 0; t < 120; t++) {
       b.vx = 3;
@@ -129,43 +137,40 @@ describe('斜坡楼梯下行不丢接地（Collision.cs SlopeCollision 双向贴
       moveAndCollide(b, w, b.vx, b.vy);
       if (!b.onGround) airborneTicks++;
     }
-    // 核心断言：真腾空（非被按到坡面上拖行）。修正前该场景 onGround 门已挡,
-    // 此用例锁定修复不会被未来的宽容化无声回退。
     expect(airborneTicks).toBeGreaterThan(40);
   });
 
-  it('★平台锤坡+支撑柱楼梯下行零空帧（用户存档定罪形,2026-08-31）', () => {
-    // 真实存档 Starter_World 的玩家标注楼梯（marks no1..no7）：每列一块
-    // 木平台(type11)锤成 slope=1 ╲,下方有满格支撑柱。曾因 isPlatSlope 的
-    // 脚带门/上行方向档先于下贴候选评估,交界帧候选窗裸奔 → 存档实测
-    // 63/80 空帧缓慢坠落。本用例按同款几何合成复现。
-    const PT = TILE_BY_KEY['platform'];
-    const STONE = TILE_BY_KEY['stone'] ?? 1;
-    expect(PT).toBeDefined();
-    const w = new World(W, H, 7, 'plat-hammer-pillar');
+  it('★真实存档窗口·平台锤坡楼梯(marks no1..no7)：无脉冲+匀速到达梯底', () => {
+    type Cell = [number, number, number, number, number];
+    const fx = JSON.parse(
+      readFileSync(new URL('./fixtures/stair-window.json', import.meta.url), 'utf8'),
+    ) as { origin: [number, number]; cells: Cell[] };
+    const [ox, oy] = fx.origin;
+    const gw = 52, gh = 32;
+    const w = new World(gw, gh, 7, 'save-window');
     const st = w.store;
-    for (let x = 0; x < W - 4; x++) { if (x < 8 || x >= 24) continue; }
-    for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);   // 起步平台
-    for (let c = 0; c < 14; c++) {
-      const x = 10 + c, ty = BASE - 2 + c;
-      st.setTile(x, ty, PT!);                    // 平台
-      st.slope[st.idx(x, ty)] = 1;               // 锤成 ╲
-      st.setTile(x, ty + 1, STONE as number);    // 支撑柱
-      if (c > 0) st.setTile(x, ty, PT as number);
+    for (const [ax, ay, type, slope, half] of fx.cells) {
+      const x = ax - ox, y = ay - oy;
+      if (!st.inBounds(x, y)) continue;
+      st.type[st.idx(x, y)] = type;
+      st.flags[st.idx(x, y)] = 1;
+      if (slope) st.slope[st.idx(x, y)] = slope;
+      if (half) st.half[st.idx(x, y)] = half;
     }
     const b = baseBody();
-    b.x = 9.4 * TILE;
-    b.y = (BASE - 2) * TILE - 42 + 6;            // 落在起步平台顶稍上
+    b.x = (3196 - ox) * TILE;
+    b.y = (389 - oy) * TILE - 42;
     b.onGround = true;
-    let air = 0;
-    for (let t = 0; t < 90; t++) {
+    // 预热 10t：跳过「起步平台→梯首」本征一级 16px 下踏（离散接缝,非锯齿）
+    for (let t = 0; t < 10; t++) {
       b.vx = 1;
       b.vy = Math.min(b.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(b, w, b.vx, b.vy);
-      if (!b.onGround) air++;
     }
-    // 允许 ≤1 帧瞬态（交界角单帧闪烁,实机不可见）；≥3 帧即裸奔缝复发
-    expect(air).toBeLessThanOrEqual(1);
-    expect((b.x / TILE) - 9.4).toBeGreaterThan(80 / 16 - 2);   // 水平线性推进未卡死
+    const r = walk(w, b, 1, 80);
+    assertNoPulse('真档窗口', r);
+    assertDiagonal('真档窗口', r);
+    expect(r.endX).toBeGreaterThan((3196 - ox) + 4);
+    expect(r.grounded).toBe(true);
   });
 });

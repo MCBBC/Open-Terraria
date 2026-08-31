@@ -630,6 +630,12 @@ export class DukeSharknadoBolt extends Entity {
   /** 小弹 vy 摆动相位(原版 ai[0]) */
   private phase = 0;
   private age = 0;
+  /** 绘制态（AI_065 :30023-30035/:30055-30067 两支同款）：localAI[0]>10 后
+   *  α−5/substep 钳 100、rotation += v.X×0.1、frame=(localAI[0]/3)%3。
+   *  projFrames[385]=3(Main.cs:8652)；贴图 68×204 帧高 68 */
+  private visAlpha = 255;     // SetDefaults :4684 alpha=255
+  private rotDraw = 0;
+  private aiFrame = 0;
   life = 300; // SetDefaults timeLeft
   /** 鲨鱼生成所需的 Duke 引用(spawnPart 位置供体,实际落点由龙卷覆写) */
   private src: Enemy;
@@ -652,6 +658,13 @@ export class DukeSharknadoBolt extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.kill(game); return; }
     this.age++;
+    // 绘制态推进（AI_065 :30023-30035 追踪支 / :30055-30067 摆动支同款）：
+    // localAI[0]>10 后 α−5 钳 100、rotation += v.X×0.1、frame=(localAI[0]/3)%3
+    if (this.age > 10) {
+      this.visAlpha = Math.max(100, this.visAlpha - 5);
+      this.rotDraw += this.vx0 * 0.1;
+      this.aiFrame = Math.floor(this.age / 3) % 3;
+    }
     // 追踪目标 = 出弹瞬冻结的公爵索敌目标(原版 Main.player[ai[1]-1],Projectile.cs
     // :28405-28447;ai[1]=target+1 由 NPC.cs:49875 NewProjectile 冻结)——M11 索敌链。
     // 傀儡重建(访客端)无 tgt 无 src → 回退本地玩家(目标不同步,数据链限制)
@@ -715,13 +728,37 @@ export class DukeSharknadoBolt extends Entity {
     return { kind: 5, tag: this.big ? '1' : '0', aux: 0, dmg: 0, exVx: this.vx0, exVy: this.vy0 };
   }
 
+  /** 绘制保真（2026-08-31 平涂扫描批）：弹 385 贴图在盘（Projectile_385.png 68×204×3
+   *  帧）——旧 #8FD8FF fillStyle 圆点退役，转 drawImage 帧切片。
+   *  原版 = type==385 专支(Main.cs:34878-34897)：帧窗 H/projFrames[385]、
+   *  origin=贴图中心、rotation、proj.scale=1；body 颜色 GetAlpha(light) 缺省尾
+   *  (P.cs:81509) rgb×(255−α)/255——α 半透明按 GetAlpha 系数近似为 globalAlpha
+   *  （CoinPortalProj :41 同仓口径）。oldPos[4] 插值运动尾迹段(:34884-34893)需
+   *  TrailCacheLength 轨迹缓存登记不接；追踪支 d172 尘环×6/substep(AI_065
+   *  :30018-30033,AI 域债非本批)同批登记。 */
   draw(r: Renderer, _cam: Camera): void {
+    void _cam;
     const ctx = r.ctx;
     if (!ctx) return;
-    ctx.fillStyle = '#8FD8FF';
-    ctx.beginPath();
-    ctx.arc(this.cx, this.cy, 6, 0, TAU);
-    ctx.fill();
+    const img = projSprite(385);
+    ctx.save();
+    if (img && img.width > 0) {
+      const fh = img.height / projFrameCount(385);       // H/3（Main.cs:34879）
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.rotDraw);
+      ctx.imageSmoothingEnabled = false;
+      // GetAlpha(rgb×(255−α)/255) 单系数口径；A 支(newColor.A−alpha)并入同系数
+      ctx.globalAlpha = Math.max(0, Math.min(1, (255 - this.visAlpha) / 255));
+      ctx.drawImage(img, 0, this.aiFrame * fh, img.width, fh,
+        -img.width / 2, -fh / 2, img.width, fh);         // origin=中心(:34895)
+    } else {
+      // 兜底(贴图懒加载未就绪;projSprite 失败带 10s TTL 自愈):近似色点
+      ctx.fillStyle = '#8FD8FF';
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, 6, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 }
 

@@ -21,7 +21,16 @@
 //     ⇒ 每拍 -4,寿命 900t 非旧注 3600t）。
 //   AI_059（:29368-29431）：≥60t 后每拍校验锁 ai[0]（CanBeChasedBy 门）;失效重选 =
 //     怪癖曼哈顿窗 <800 全候选【随机】取一（Main.rand）;全空 Kill。转向 (v×29+dir)/30
-//     （num447=30,speed num442=4）。尘 175 ×5 后向拖尾（:29417-29430,v×0.2×i 反向排布）。
+//     （num447=30,speed num442=4）。尘 175 ×5 后向拖尾（:29417-1457/:29385-1458,
+//     v×0.2×i 反向排布）。
+//   绘制保真（2026-08-31 平涂扫描批）：弹体本体在原版【不可见】——SetDefaults alpha=255
+//     且 GetAlpha（Projectile.cs:80596 起）对 type356 无任何特判 → 走缺省尾
+//     （:81509-81521）rgb×(255−255)/255=0、A=max(0,光色A−255)=0 ⇒ Color(0,0,0,0),
+//     DrawProjDirect 通用支（Main.cs:35485）即使画出也全透明。盘上
+//     public/sprites/vanilla/Projectile_356.png 为 1×1 占位 stub(素材缺家族,
+//     Projectile_357/358 同),无贴图可转正——可见外观全部来自 AI_059 的尘 175 拖尾
+//     （本文件已逐粒精确化,type175=原版 Spectre 尘,Dust.cs:869 scale−0.05/t）。
+//     故 draw() 为文档化空实现（禁再加平涂圆点——台账 approx-registry C 档点名件）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -317,6 +326,11 @@ export class SpectreSoulProj extends Entity {
         }
       }
 
+      // ---- 尘尾（AI_059 尾段 :29417-29430/:29385-1458）：每【子步】×5,与预热门
+      // 无关——for num448 在 ai[1]≥60 块外。链序同原版 AI 尾段：先出尘后位移。
+      // 原 Kill 支(cand 空)return 已在上方短路 ⇒ 该子步不出尘,与原版 AI() 提前
+      // return 跳过尘循环同态 ----
+      this.spawnTrailDust(game);
       // ---- 位移 + 接触（HandleMovement :17121 → Damage :17188）----
       this.x += this.vx;
       this.y += this.vy;
@@ -367,16 +381,31 @@ export class SpectreSoulProj extends Entity {
     }
   }
 
-  draw(r: Renderer, _cam: Camera): void {
+  /** AI_059 尘尾逐粒精确化（:29417-29430/1458 同段 :29385-29398）：
+   *  for num448=0..4：num449=v.X×0.2×i、num450=(−v.Y×0.2)×i；
+   *  Dust.NewDust(position,6,6,175,0,0,100,default(Color),1.3f)。noGravity=true
+   *  走 GameHooks.spawnDust 第 11 参(=原版 NewDust 后置 dust.noGravity=true 的
+   *  等价入参位)；velocity*=0（清 NewDust 内建 ±2 抖动）、position −= (num449,num450)
+   *  经返回句柄后置覆写（矿车轮火花 DelegateMethods 同款缝）。i=0 贴弹,i↑ 反向拖尾;
+   *  池满 null = 原版 dustIndex==maxDustToDraw 旧尘被顶的兜底语义 */
+  private spawnTrailDust(game: GameHooks): void {
+    for (let i = 0; i < 5; i++) {
+      const num449 = this.vx * 0.2 * i;
+      const num450 = -(this.vy * 0.2) * i;
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+        175, 0, 0, 100, null, 1.3, true);
+      if (!d) continue;                          // 池满兜底（:267 档）
+      d.vx = 0; d.vy = 0;                        // dust.velocity *= 0f（:29424）
+      d.x -= num449;                             // :29425 position.X -= num449
+      d.y -= num450;                             // :29426 position.Y -= num450
+    }
+  }
+
+  /** 原版本体不可见：alpha=255 + GetAlpha 无 356 特判 ⇒ 全透明（文首"绘制保真"段）。
+   *  盘上 Projectile_356.png 为 1×1 占位 stub——可见观感完全由 spawnTrailDust 的
+   *  尘 175 拖尾承载。本方法保留为文档化空实现,禁止回填平涂圆点。 */
+  draw(_r: Renderer, _cam: Camera): void {
+    void _r;
     void _cam;
-    const ctx = r.ctx;
-    if (!ctx) return;
-    ctx.save();
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = '#9DF5E8';                     // 尘 175 青白雾同族配色（近似）
-    ctx.beginPath();
-    ctx.arc(this.cx, this.cy, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
   }
 }

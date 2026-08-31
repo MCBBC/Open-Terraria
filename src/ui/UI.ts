@@ -133,6 +133,7 @@ import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, 
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
+import { chestSettingsAllowsVault, lootAllFromContainer } from '../stats/QuickStacking';
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
@@ -4055,18 +4056,21 @@ export class UI {
     this.root.appendChild(this.chestPanel);
   }
 
-  /** Loot All（ChestUI.LootAll :282/389）：箱内全部入包，装不下的留在箱里 */
+  /** Loot All（ChestUI.LootAll ChestUI.cs:389-412,DrawButtons 左键 :282）：箱内全部入包，
+   *  装不下的留在箱里。★vault 允许面（2026-08-31 台账"多通道"清偿）：settings 按
+   *  `player.chest > -1` 二选一（:391-392）——真箱=LootAllFromChest
+   *  (CanGoIntoVoidVault=true),bank 面板（本仓 openChest.x<0 的 -2..-5 约定,
+   *  :414-465 分支)=LootAllFromBank(default=false)。允许时余量经
+   *  Player.depositIntoVoidVault（GetItem_VoidVault Player.cs:39710——questItem/3822
+   *  拒收门 + DoCoins 主背包尾随都在内闭环）溢流灌虚空袋。 */
   private chestLootAll(): void {
     const chest = this.openChest;
     if (!chest) return;
     const inv = this.game.player.inv;
-    for (let i = 0; i < chest.items.length; i++) {
-      const cur = chest.items[i];
-      if (!cur) continue;
-      const left = inv.add(cur.id, cur.stack);
-      if (left === 0) chest.items[i] = null;
-      else cur.stack = left;
-    }
+    const spill = chestSettingsAllowsVault(chest.x)
+      ? (itemId: number, stack: number): number => this.game.player.depositIntoVoidVault(itemId, stack)
+      : undefined;
+    lootAllFromContainer(inv, chest.items as Array<{ id: number; stack: number; prefix?: number } | null>, spill);
     this.game.sfx.play('pickup');
     this.refreshAll();
   }

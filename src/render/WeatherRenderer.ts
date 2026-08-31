@@ -60,8 +60,13 @@ export interface WeatherFxHooks {
   snowTileCount: number;
   /** Boss 危险中（雨量 ×0.05 保底 1，Rain.cs:32-40） */
   bossDanger: boolean;
-  /** 沙尘发射（粒子上限由 Game.particles 自身的 600 帽控制）；size 供涟漪/沙尘区分 */
-  emitSand(x: number, y: number, vx: number, vy: number, color: string, size?: number): void;
+  /** Main.waterStyle（Rain.cs:165/210 rain.type = waterStyle×3+rand(3)；
+   *  Dust.dustWater() :405-421 溅花尘映射）——★曾硬编码纯水 0-2，雪原/丛林等
+   *  雨滴与溅花全部用错列（2026-09-01 与 dust 268 同批同族修正） */
+  waterStyle: number;
+  /** 雨滴落水花（Rain.Update :125-134）：真 dust（dustWater()）非色方块——
+   *  位置已按原版做完 −velocity、X−2/Y+2；rvx/rvy = 雨滴速度（dust.velocity 链用） */
+  splashDust(x: number, y: number, rvx: number, rvy: number, waterStyle: number): void;
   /** 沙尘可见门（ZoneSandstorm+沙漠背景；Game 侧由 scene + bgStyle 判定） */
   sandstormVisuals: boolean;
   /** 沙漠沙格数（EmitDust 的 DesertSandTileCount 门 ≥100） */
@@ -74,6 +79,23 @@ let rainTex: ImageBitmap | HTMLImageElement | null = null;
 function getRainTex(): ImageBitmap | HTMLImageElement | null {
   loadBitmapOnly('vanilla/Rain.png', () => rainTex !== null, (x) => { rainTex = x; });
   return rainTex;
+}
+
+/** Dust.dustWater()（Dust.cs:405-421）：雨溅花尘型按 waterStyle 映射（缺省 33 纯水） */
+export function dustWaterFor(waterStyle: number): number {
+  switch (waterStyle) {
+    case 2: return 98;
+    case 3: return 99;
+    case 4: return 100;
+    case 5: return 101;
+    case 6: return 102;
+    case 7: return 103;
+    case 8: return 104;
+    case 9: return 105;
+    case 10: return 123;
+    case 12: return 288;
+    default: return 33;
+  }
 }
 
 let dustTex: ImageBitmap | HTMLImageElement | null = null;
@@ -112,6 +134,7 @@ export class WeatherRenderer {
     const w = this.weather;
     const hooks = this.hooks;
     if (!w || !hooks || w.cloudAlpha <= 0 || hooks.atmo < 0.4) return;
+    if ((w.shimmerAlpha ?? 0) > 0) return;       // Main.shimmerAlpha 门（Rain.cs:32）
     let num = (viewW / 1920) * 25;               // MaxWorldViewSize.X≈1920 的比例
     num *= 0.25 + 1 * w.cloudAlpha;              // Rain.cs:28
     if (hooks.bossDanger) num = Math.max(1, num * 0.05);
@@ -159,7 +182,7 @@ export class WeatherRenderer {
     d.vx = w.windSpeedCurrent * 18 * d.scale;
     d.vy = 14 * d.scale;
     d.rotation = Math.atan2(d.vx, -d.vy);
-    d.type = Math.floor(Math.random() * 3);       // waterStyle=0 → type 0-2（Rain.png 三型）
+    d.type = hooks.waterStyle * 3 + Math.floor(Math.random() * 3);  // Rain.cs:210
   }
 
   /** Rain.NewRainForced（Rain.cs:134-171）1:1：无视 cloudAlpha 限量（池全量扫空位），
@@ -174,7 +197,7 @@ export class WeatherRenderer {
       d.vx = vx * d.scale;
       d.vy = vy * d.scale;
       d.rotation = Math.atan2(d.vx, -d.vy);
-      d.type = Math.floor(Math.random() * 3);
+      d.type = this.hooks!.waterStyle * 3 + Math.floor(Math.random() * 3);   // Rain.cs:165
       return;
     }
   }
@@ -199,11 +222,13 @@ export class WeatherRenderer {
       const wet = st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
       if (solid || wet || d.y > camBottom) {
         d.active = false;
-        // 落水花（Rain.cs:120-133）：dust 生在 position−velocity（退回表面一步），
-        // 再 X−2/Y+2；速度 = −v×0.025 且 Y−2。概率门 rand(100)<gfxQuality×100
-        // (2026-08-18 接自动画质;q=1 恒溅;★曾误 0.5 少一半水花)
+        // 落水花（Rain.Update :123-134）：真 dust = dustWater()（waterStyle 映射），
+        // 生在 position−velocity（退回表面一步）再 X−2/Y+2；alpha=38/scale=0.6/
+        // noGravity/velocity = v×0.1 + (−rain.v×0.025)、Y−2——Game 侧 hook 精置。
+        // 概率门 rand(100)<gfxQuality×100（2026-08-18 接自动画质;q=1 恒溅;
+        // ★曾误 0.5 少一半水花;★曾为 '#B8D0E8' 色方块近似,2026-09-01 改真尘）
         if (Math.random() * 100 < gfxQuality.value * 100) {
-          hooks.emitSand(d.x - d.vx - 2, d.y - d.vy + 2, -d.vx * 0.025, -d.vy * 0.025 - 2, '#B8D0E8', 3);
+          hooks.splashDust(d.x - d.vx - 2, d.y - d.vy + 2, d.vx, d.vy, hooks.waterStyle);
         }
       }
     }
@@ -409,7 +434,7 @@ export class WeatherRenderer {
         // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
         // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
         const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const v = Math.round((lvl / 7) * 0.85 * 255);
+        const v = Math.round((lvl / 7) * 0.85 * 255 * (1 - (w.shimmerAlpha ?? 0)));   // DrawRain :39488 ×(1−shimmerAlpha)
         const tinted = tintedRainStrip(tex!, d.type, v);
         if (tinted) {
           ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
@@ -510,7 +535,7 @@ function stIn(world: World, tx: number, ty: number): boolean {
 /** 雪花乘色缓存（8 级亮度 × 3 帧）：Dust.png 源矩形 (760,10×frame,8,8) = dust 76
  *  （NewDust frame 8×8、frame.Y=10×rand(3)，Dust.cs:176-190） */
 const flakeTintCache = new Map<string, HTMLCanvasElement>();
-function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, frame: number): HTMLCanvasElement | null {
+export function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, frame: number): HTMLCanvasElement | null {
   const key = `${frame}|${v}`;
   const hit = flakeTintCache.get(key);
   if (hit) return hit;
@@ -533,7 +558,7 @@ function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, frame: numb
  *  蓝底被 GetColor 沙色乘成暗绿 = 「树叶」假象根因，2026-08-31 定谳）。
  *  RGB 乘色入缓存；overlay 的 alpha 通道（GetColor 同式）由调用方 globalAlpha 施加 */
 const sandTintCache = new Map<string, HTMLCanvasElement>();
-function tintedDust268(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, frame: number): HTMLCanvasElement | null {
+export function tintedDust268(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, frame: number): HTMLCanvasElement | null {
   const key = `${frame}|${cr},${cg},${cb}`;
   const hit = sandTintCache.get(key);
   if (hit) return hit;

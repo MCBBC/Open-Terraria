@@ -23,6 +23,7 @@
 //   GetGolfTrailColor                :10533-10550（球色表）
 // ============================================================================
 import { Entity } from './Entity';
+import { projSprite } from './Arrow';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { TILE_DEFS } from '../data/tiles';
@@ -59,6 +60,9 @@ export class GolfBall extends Entity {
   ballState: BallState = BallState.Resting;
   /** 渲染旋转累加（Projectile.rotation，AI_149 :18956-18960） */
   rotation = 0;
+  /** oldPos 环（DrawProjDirect 高尔夫支读 oldPos[4]——Main.cs:31505；Main 每 tick
+   *  平移缓存 1 格,与 extraUpdates 无关。5 槽 = 未满不画插值尾迹(:31507 Zero 门) */
+  private posHist: Array<{ x: number; y: number }> = [];
   owner: () => unknown;
 
   constructor(cx: number, cy: number, projId: number, owner: () => unknown, onTee = false) {
@@ -133,29 +137,75 @@ export class GolfBall extends Entity {
     if (this.vy !== 0 && state === BallState.Moving) {
       this.rotation += this.vx * 0.1 + this.vy * 0.1;
     }
+    // oldPos 平移缓存（Main 每 tick 一格,DrawProjDirect :31505 读 oldPos[4]）
+    this.posHist.push({ x: this.x, y: this.y });
+    if (this.posHist.length > 5) this.posHist.shift();
   }
 
+  /** 绘制保真（2026-08-31 平涂扫描批）：高尔夫球贴图在盘（Projectile_721/739..752.png
+   *  均 8×8 实图）——旧 fillStyle 平涂圆点退役，转 drawImage 原版染色链。
+   *  原版主支（Main.cs :31578 无条件本体）= GetAlpha(light)(α 缺省 0 ⇒ 全亮)×center、
+   *  rotation、scale；动球追加点(:31464-31507 !IsGolfBallResting 支)=
+   *   · 速因子 num188=min(1,|v|/16)，trail 色 GetGolfTrailColor×num188；
+   *   · oldPos[4]→position 插值尾迹 f=0..1 步 .04：色×f、scale=Lerp(.7,1.5,f)；
+   *   · 本体染色复刻色 ×scale×1.5。
+   *  停杆瞄准 GolfBallOutline 叠层(:31569 只在持杆可打时)归 Game 瞄准 UI 域,登记不接。 */
   draw(r: import('../render/Renderer').Renderer): void {
     const ctx = r.ctx;
     if (!ctx) return;
-    // GetGolfTrailColor（Projectile.cs:10533-10550）—— 球色按投射物 id
-    const colors: Record<number, [number, number, number]> = {
-      739: [50, 50, 50], 740: [30, 50, 255], 741: [150, 90, 60], 742: [30, 255, 170],
-      743: [30, 255, 30], 744: [190, 255, 30], 745: [255, 130, 30], 746: [255, 50, 110],
-      747: [130, 10, 200], 748: [255, 30, 50], 749: [100, 180, 255], 750: [50, 240, 160],
-      751: [220, 80, 220], 752: [255, 180, 50],
+    // GetGolfTrailColor（Projectile.cs:11154-11174）—— 球色按投射物 id(A 支=染体 alpha)
+    const colors: Record<number, [number, number, number, number]> = {
+      739: [50, 50, 50, 80], 740: [30, 50, 255, 40], 741: [150, 90, 60, 90], 742: [30, 255, 170, 30],
+      743: [30, 255, 30, 40], 744: [190, 255, 30, 50], 745: [255, 130, 30, 50], 746: [255, 50, 110, 50],
+      747: [130, 10, 200, 40], 748: [255, 30, 50, 50], 749: [100, 180, 255, 30], 750: [50, 240, 160, 30],
+      751: [220, 80, 220, 70], 752: [255, 180, 50, 30],
     };
-    const c = colors[this.projId] ?? [160, 160, 255];   // 721 默认（:1049）
+    const c = colors[this.projId] ?? [160, 160, 255, 50];   // 721 默认(:11173)
+    const img = projSprite(this.projId);
+    if (!img || !(img.width > 0)) return;                   // 懒加载未就绪(下帧自愈)
+    const sz = img.width;                                   // 8×8(proj.scale 缺省 1)
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    // ---- 无条件本体（Main.cs:31578）：GetAlpha(light),α 缺省 0 ⇒ 全亮原色,
+    // rotation、origin=center ----
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rotation);
-    ctx.fillStyle = `rgb(${c[0]} ${c[1]} ${c[2]})`;
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.w / 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    ctx.drawImage(img, -sz / 2, -sz / 2);
+    ctx.restore();
+    if (!this.atRest) {
+      // ---- 动球追加链（!IsGolfBallResting :31475,GolfHelper.cs:400-410）----
+      const k = Math.min(1, Math.hypot(this.vx, this.vy) / 16);   // num188(:31477)
+      const q = k * (c[3] / 255);
+      const tintedCopy = (): void => {           // 本体染色复刻色（:31500,scale×1.5）
+        ctx.save();
+        ctx.translate(this.cx, this.cy);
+        ctx.rotate(this.rotation);
+        ctx.globalAlpha = Math.max(0, Math.min(1, q));
+        ctx.drawImage(img, -sz * 0.75, -sz * 0.75, sz * 1.5, sz * 1.5);
+        ctx.restore();
+      };
+      // 插值尾迹（:31505-31513 oldPos[4]≠Zero 门 ⇔ 轨迹窗满）——f 步 .04 共 26 发,
+      // 色×num188×A/255×f,scale=Lerp(.7,1.5,f)
+      if (this.posHist.length >= 5) {
+        const o = this.posHist[0];               // oldest ≈ oldPos[4](每 tick 平移一格)
+        for (let n = 0; n <= 25; n++) {
+          const f = n / 25;                      // 等价 f+=0.04 浮点序列
+          const ix = o.x + (this.x - o.x) * f + this.w / 2;   // Lerp+Size/2
+          const iy = o.y + (this.y - o.y) * f + this.h / 2;
+          const fs = 0.7 + 0.8 * f;              // Lerp(0.7,1.5,f)
+          ctx.save();
+          ctx.translate(ix, iy);
+          ctx.rotate(this.rotation);
+          ctx.globalAlpha = Math.max(0, Math.min(1, q * f));
+          ctx.drawImage(img, -(sz * fs) / 2, -(sz * fs) / 2, sz * fs, sz * fs);
+          ctx.restore();
+        }
+        tintedCopy();
+      } else {
+        tintedCopy();
+      }
+    }
     ctx.restore();
   }
 }

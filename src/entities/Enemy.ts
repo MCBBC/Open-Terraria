@@ -106,6 +106,7 @@ import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore, GorePiece } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
+import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -1644,6 +1645,16 @@ export class Enemy extends Entity {
   npcFrameT = 0;
   /** AI 侧算定的帧号直读位（694 态机帧；null=走渲染端 vanillaFrameIdx 通用档） */
   customFrameIdx: number | null = null;
+  /** 渲染端网格帧引擎回填位：drawDd2OgreGrid（576/577）与 drawDeerclopsGrid（668）
+   *  每次绘制把 dd2OgreNextFrame / deerclopsNextFrame 的输出（=原版 FindFrame 帧
+   *  索引 frame.Y）写回本字段。消费方=玩家接触侧 GetMeleeCollisionData 的食人魔
+   *  近挥帧窗（NPC.cs:96185-96235 y∈15..18 → specialHitSetter=2+专盒×1.75）与
+   *  鹿角怪斧臂帧判定（:96253-96278 y==15 ∧ ai[0]!=4）。相位锚证：原版
+   *  DoUpdateInWorld_Inner 内 UpdateWorld_Players 先于 UpdateWorld_NPCs
+   *  （Main.cs:17929/:17938/:17952）⇒ 接触环读到的就是【上一拍】FindFrame 终值；
+   *  本仓渲染落盘同理晚一拍——位序等价。null=尚未绘过（出生首拍/离屏）→ 按窗外
+   *  处理（General 桶 + 裸盒），与旧路径无差。 */
+  vanillaGridFrameIdx: number | null = null;
   /** 运行时 noGravity 位（原版 NPC.noGravity 逐 tick 置位，StrikeNPC :82217/:82228
    *  受击档读【运行时值】非静态表）：AI_017 秃鹫(:24079 飞行态 true/栖息 0 态 false)、
    *  AI_087 珍珑宝箱怪(:39525 起始 false、4/4.1/5 空中态 true)、AI_091 花岗岩元素
@@ -2422,26 +2433,47 @@ export class Enemy extends Entity {
     // M11：恒对【本地玩家】判定/结算（victim-settles：damagePlayer 只扣本地血；
     // 索敌目标可为访客代理，但访客的接触伤害由其端 netPuppetContact 对傀儡
     // 权威位本地结算——此处若用目标代理会误扣本地玩家的血）
-    // ★1457 真眼(400)接触盒清空(GetMeleeCollisionData :96142-96145 同族语义:
-    //   真眼不造成任何接触伤害——官方报告"月总与真眼均不再造成接触伤害"的
-    //   真半边;damage 字段两版同为 60 非新改,改的是接触判定)
-    if (localPlayer && !localPlayer.dead && this.aabbOverlaps(localPlayer) && this.def.damage > 0
-      && this.vanillaId !== 400) {
-      // 蜂蜜史莱姆（NPC 1 且 ai[1]=1125，Player.cs:30902-30908 接触分支最前）：
-      // AddBuff(48 Honey, 1800t=30s) 后 continue——**免接触伤害/击退/无敌帧**，
-      // 语义是"蹭一身蜜"而非攻击（此前仅 SLIME_ITEM_COLORS 染色，接触照常掉血）
-      if (this.vanillaId === 1 && this.ai1 === 1125) {
+    // ★GetMeleeCollisionData 玩家接触侧收口（2026-08-31，NPC.cs:96111-96280 全支，
+    // 求解器=player/MeleeCollisionData.ts）：Update_NPCCollision(:31557-31668) 循环内
+    // 三件事按原文序——①specialHitSetter 缺省分道（见下方 npcContactBucketId，含
+    // :31571-31587 Boss 族与 :96185-96235 食人魔帧窗覆写 2=LegacyUnused2）；②盒变形/
+    // 替换先于 Intersects（:31598-31601）；③乘区在 DamageVar 前乘入（:31624），漏斗
+    // 内 banner/荆棘/resistCold 以同一基准消费。先求解后判交：加宽族（430-436·591 /
+    // 494-495）无相交门恒生效；460/417/466/552-554/576-577/668 的专盒未命中时回落裸
+    // 盒 ×1.0（ref 未被改写）。rect=null ⇒ 原版 npcRect=default 永不相交：400 真眼零
+    // 接触（此前显式 vanillaId!==400 早退并入此路，语义同式 ：96143-96144）。
+    if (localPlayer && !localPlayer.dead && this.def.damage > 0
+      && this.vanillaId != null) {
+      const victim = { x: localPlayer.x, y: localPlayer.y, w: localPlayer.w, h: localPlayer.h };
+      const gmc = getMeleeCollisionData(victim, {
+        vanillaId: this.vanillaId,
+        ai0: this.ai0, ai1: this.ai1, ai2: this.ai2, ai3: this.ai3,
+        x: this.x, y: this.y, w: this.w, h: this.h,
+        direction: (this.facing === -1 ? -1 : 1),
+        spriteDirection: (this.facing === -1 ? -1 : 1),
+        frameY: this.vanillaGridFrameIdx,
+      });
+      if (!gmc.rect || !boxesIntersect(victim, gmc.rect)) {
+        // rect=null（真眼）或变形后不相交 ⇒ 整段跳过（无 buff 蹭/无伤/无无敌帧）
+      } else if (this.vanillaId === 1 && this.ai1 === 1125) {
+        // 蜂蜜史莱姆（NPC 1 且 ai[1]=1125，Player.cs:30902-30908 接触分支最前）：
+        // AddBuff(48 Honey, 1800t=30s) 后 continue——**免接触伤害/击退/无敌帧**，
+        // 语义是"蹭一身蜜"而非攻击（此前仅 SLIME_ITEM_COLORS 染色，接触照常掉血）
         localPlayer.buffs?.apply(BuffType.Honey, 30);
       } else {
-        // R5-F21：接触伤 DamageVar ±15% 掷骰（Player.cs:31625 `num4 = Main.DamageVar(
-        // npc.damage × damageMultiplier, -luck)`——banner 减伤在 Game.damagePlayer
-        // 内、resistCold 同,序 = DamageVar → banner → resistCold → Hurt 与原版一致）
+        // R5-F21：接触伤 DamageVar ±15% 掷骰（Player.cs:31624 `num4 = Main.DamageVar(
+        // npc.damage × damageMultiplier, -luck)`——multiplier 先于 DamageVar 乘入；
+        // banner 减伤/thorns 反射/resistCold 在 Game.damagePlayer 内吃同一基准,
+        // 序 = DamageVar → banner → resistCold → Hurt 与原版一致）
         // ★Notes⑤ 前半（四轮蓝队）：月总族接触分桶（Update_NPCCollision :31571-31587）
         //   ——type 396/397/398/400/401·636 specialHitSetter=BossNoCheese(1);636 于
         //   ai[0]==0||10 整段 continue;该族同时跳过 :31588 General immune 早退=通用
         //   无敌帧吞不掉本桶命中（免疫改由 hurtCooldowns[1] 独立计时,p.damage 分桶门
-        //   已建模）。桶经瞬态通道注入漏斗,出站即清（与环境站同形）。null=原文 continue。
-        const bucket = npcContactBucketId(this.vanillaId ?? -1, this.ai0 ?? 0);
+        //   已建模）。★LegacyUnused2 档：576/577 FindFrame y∈15..18 帧窗把 ref 覆写 2
+        //   （GetMeleeCollisionData 后写赢,先于相交判定置位）。桶经瞬态通道注入漏斗,
+        //   出站即清（与环境站同形）。null=原文 continue。
+        const frameY = this.vanillaGridFrameIdx;
+        const bucket = npcContactBucketId(this.vanillaId, this.ai0 ?? 0, frameY);
         const chan = localPlayer as unknown as {
           __swNextHitBucket?: { id: number; table: HurtCooldownBuckets };
         };
@@ -2451,7 +2483,9 @@ export class Enemy extends Entity {
           : undefined;
         if (inject) chan.__swNextHitBucket = inject;
         try {
-          game.damagePlayer(damageVar(this.def.damage, -localPlayer.luck), this.cx, this.cy, this, true);
+          game.damagePlayer(
+            damageVar(this.def.damage * gmc.damageMultiplier, -localPlayer.luck),
+            this.cx, this.cy, this, true);
         } finally {
           if (inject) chan.__swNextHitBucket = undefined;
         }
@@ -12514,6 +12548,25 @@ export class Enemy extends Entity {
           // ownedProjectileCounts[908]<7 支（:6931-6934）——计数与上限在 Game 端
           game.spawnTitaniumShard?.(plT.cx ?? 0, plT.cy ?? 0);
         }
+      }
+    }
+    // ---- 叶绿水晶叶 on-hit 引援叶（台账 L3 清偿批 2026-08-31）----
+    // Player.OnHit 尾段（Player.cs:6986-7040,1456 :6615-6640"三修门"本体）。原版
+    // OnHit 调用位同在 target.life>5 残血门内（:44754/:13642-44），故复用钛金
+    // proc 的 fromPlayer/dmg>0/hp>5 门族；差异面：本支仅查 victim CanBeChasedBy
+    // （:6988 flag2——原文不含 488/statue 特豁，假人被 canBeChasedBy 天然拒），
+    // 且 OnHit 来源排除表独立适用（TryDoingOnHitEffects :15210-15220 → srcProjId∈
+    // ON_HIT_EXCLUDED_PROJS 含 227/221 自续断链）；petalTimer 与花瓣（onHitPetal
+    // :6963 未建模）共享计时字段。扫桶+序依赖 break 怪癖全语义在 Game 端。
+    {
+      const plL = game.player as unknown as {
+        dead?: boolean; petalTimer?: number;
+        equipStats?: { crystalLeaf?: boolean };
+      } | null | undefined;
+      if (fromPlayer && dmg > 0 && this.hp > 5 && plL && !plL.dead
+        && plL.equipStats?.crystalLeaf === true && (plL.petalTimer ?? 0) <= 0
+        && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
+        game.chloroOnHitLeafStrike?.(this);
       }
     }
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）

@@ -19,6 +19,10 @@ export interface ArmorSetBonus {
   ashWood?: boolean;         // ★Notes④ 灰烬木全套（1456 Player.cs:15772-15775 赋位;
                              // 1457 消费位 :27885/:27904——remix 岩浆档 145+半减/OnFire−210/
                              // 与玫瑰并持完全免疫岩浆）
+                             // 与玫瑰并持完全免疫岩浆）
+  crystalLeaf?: boolean;     // 叶绿水晶叶套装（台账 L3 清偿批 2026-08-31,ArmorSetBonuses.cs
+                             // :128-146 四头变体 AddBuff(60,5)+setChlorophyte）——引擎=
+                             // entities/ChloroLeafCrystalProj.ts（锚体 226/叶弹 227+on-hit 引援）
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
   endurance?: number;
   dmgMinion?: number;   // minionDamage +=
@@ -110,6 +114,19 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '286|169|241': { anglerSet: true, name: 'Angler' },
   '286|253|104': { anglerSet: true, name: 'Angler' },
   '286|253|241': { anglerSet: true, name: 'Angler' },
+  // ---- 叶绿三件套族（台账 L3 清偿批 2026-08-31;1458 ArmorSetBonuses.Initialize
+  //      :430-432+Add :447-449——AddBuff(60,5)+setChlorophyte 四头变体，共享胸
+  //      ChlorophytePlateMail(bs51)×腿 Greaves(ls47)）：
+  //   · 近战头 Mask 1001(hs78) → ChlorophyteMelee：额外 endurance += 0.05（:131）
+  //   · 召唤头 Visor 5524(hs283) → ChlorophyteSummon：maxMinions += 2 —— 随从面已由
+  //     vanillaSummonStats.SUMMON_SET['283|51|47'] slot:2 承载（此处不再重复加成位）
+  //   · 头盔 Helmet 1002(hs79)/头饰 Headgear 1003(hs80) → Chlorophyte 基础档
+  //   引擎本体 = entities/ChloroLeafCrystalProj.ts + Player.fixedUpdate buff 段 +
+  //   Game.updateChloroCrystalAnchor/spawnChloroLeafShot/chloroOnHitLeafStrike ----
+  '78|51|47': { crystalLeaf: true, endurance: 0.05, name: 'ChlorophyteMelee' },
+  '79|51|47': { crystalLeaf: true, name: 'ChlorophyteHelmet' },
+  '80|51|47': { crystalLeaf: true, name: 'ChlorophyteHeadgear' },
+  '283|51|47': { crystalLeaf: true, name: 'ChlorophyteSummon' },
 };
 
 // ---- DD2 盔甲散件主属性（Player.cs:12709-12810 胸/腿件——头盔哨兵位已由 SUMMON_GEAR 承载,

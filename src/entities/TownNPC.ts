@@ -1705,15 +1705,21 @@ export class TownNPC extends Entity {
     //      相交」：任一相交即玩家可见 → 不传。两矩形均不相交 → 静默传回家 ----
     if (this.home) {
       const flag = sitFlag;
-      // IsInAGoodRestingSpot（NPC.cs:53165-53177）：夜间坐姿放宽 ±7 格
-      // （:53168-53176——防"坐在椅上被回家传送拽起"）；常态=与 rest 格精确同格
-      // （本仓 home.y 是站格即地面行 −1，±7 容差吸收该 1 行口径差）
-      const nearHome = this.sitting
-        ? Math.abs(Math.floor(this.cx / TILE) - this.home.x) <= 7
-          && Math.abs(Math.floor((this.y + this.h) / TILE) - this.home.y) <= 7
-        : Math.abs(this.cx - (this.home.x * TILE + 8)) < 4 * TILE
-          && Math.abs(this.cy - (this.home.y * TILE)) < 4 * TILE;
-      if (flag && !nearHome) {
+      // IsInAGoodRestingSpot（NPC.cs:53161-53177）1:1：夜间坐姿（!dayTime &&
+      // ai[0]==5）放宽 ±7 格——防"坐在椅上被回家传送拽起"；其余一律与好休息格
+      // 【精确同格】（tileX==floorX && tileY==floorY），原版无任何半径容差。
+      // ★2026-09-01 修正（用户实报"染料商晚上永远回不了房间"）：旧实现非坐姿用
+      //   home±4 格圆容差——NPC 在自家屋顶打转时 cx 大半时间落在 home.x±4 格内，
+      //   被误判"已到家" → 传送网永不合闸。判定锚 = FindGoodRestingSpot 输出
+      //   （restSpot 夜椅优先，否则 home 列向下找地面行），num7 = 脚部格
+      //   （(Y+Height+1)/16，:53853）。
+      const restTp = this.restSpot ?? this.restFloor(world);
+      const myX6 = Math.floor(this.cx / TILE);
+      const myY7 = Math.floor((this.y + this.h + 1) / TILE);
+      const nearHome = restTp != null && (this.sitting && !world.clock.isDay
+        ? Math.abs(myX6 - restTp.x) <= 7 && Math.abs(myY7 - restTp.y) <= 7
+        : myX6 === restTp.x && myY7 === restTp.y);
+      if (flag && restTp != null && !nearHome) {
         const pl = (game as unknown as { player: { x: number; y: number; w: number; h: number; dead: boolean } | null }).player;
         // 矩形视野门（:53831-53846）：k=0 以 NPC 位中心、k=1 以 home 位中心；
         // 尺寸 = (sWidth+2×safeRangeX) × (sHeight+2×safeRangeY) = 2044×1278

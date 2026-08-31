@@ -139,7 +139,7 @@ import {
 import { itemUseSoundWav, itemUseSoundPerceivedVol } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing } from '../entities/projStatus';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { trySnapStrike, snapStrikeDust } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
@@ -355,6 +355,7 @@ import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { windSway } from '../render/WindSway';
 import { natureParticles } from '../render/NatureParticles';
+import { dustWaterFor } from '../render/WeatherRenderer';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
@@ -402,6 +403,12 @@ import { TitaniumStormShard,
   PetalstormShot, StormLightning, GlacierFangShot,
   ThunderBoltShot, LaserMachinegunHolder, LaserMachinegunLaser, BookStormTwister, PrincessMagicCircle,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
+// 叶绿水晶叶套装弹族（台账 L3 清偿批 2026-08-31——锚体 226 + 隐藏叶弹 227；
+// canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
+import { ChloroLeafCrystalAnchor, ChloroLeafShot } from '../entities/ChloroLeafCrystalProj';
+import { getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
+// Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
+import { leafCrystalShotFx as leafCrystalShotFxLocal } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
 import { RainbowBolt } from '../entities/RainbowProj';
@@ -432,6 +439,18 @@ import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
 import {
   rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx,
   classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx,
+} from '../fx/orchestraFx';
+// module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
+import {
+  keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx,
+  cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx,
+  pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx,
+  natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx,
+  blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra,
+  blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx,
+  nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx,
+  moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx,
+  snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor,
 } from '../fx/orchestraFx';
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
 import { npcRarityOf } from '../data/vanillaNpcs';
@@ -4613,13 +4632,19 @@ export class Game implements GameHooks {
       snowRatio: 0,
       snowTileCount: 0,
       bossDanger: false,
+      waterStyle: 0,
       sandstormVisuals: false,
       desertSandTiles: 0,
-      emitSand: (x, y, vx, vy, color, size = 2) => {
-        this.particles.push({
-          x, y, vx, vy, life: 40 + Math.random() * 30, maxLife: 70,
-          color, size, damp: 0.995, grav: 0,
-        });
+      splashDust: (x, y, rvx, rvy, waterStyle) => {
+        // Rain.Update :125-134（−velocity/X−2/Y+2 已在 WeatherRenderer 调用点完成）：
+        // alpha=38、velocity = v×0.1 + (−rain.v×0.025)、Y−2、scale=0.6、noGravity
+        const d = this.vanillaDust.spawn(x, y, 2, 2, dustWaterFor(waterStyle));
+        if (!d) return;
+        d.alpha = 38;                              // :128
+        d.vx = d.vx * 0.1 - rvx * 0.025;           // :129-130
+        d.vy = d.vy * 0.1 - rvy * 0.025 - 2;       // :129-131
+        d.scale = 0.6;                             // :132
+        d.noGravity = true;                        // :133
       },
       sandColors: () => {
         // EmitDust :171-178 四色按【格数】加权（曾用区旗近似）——沙漠沙景
@@ -10709,7 +10734,8 @@ export class Game implements GameHooks {
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_5340_galaxy_pearl') {
-      // 银河珍珠（Player.cs:44786-44789：一次性 usedGalaxyPearl → luck +0.03 :28676-28678；
+      // 银河珍珠（Player.cs:45789-45793 使用支：一次性 usedGalaxyPearl=true@:45791 →
+      // luck +0.03 = RecalculateLuck :29372-29375；
       // 已用过 → 无动作不消耗，原版 !usedGalaxyPearl 门）
       if (!this.player.luckState.usedGalaxyPearl) {
         this.useSwing(heldDef);                   // ★V2a ⚠️b 补：useStyle4 举持+Item92（:42338-42347 与五兄弟同档）
@@ -15559,7 +15585,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         };
         this.entities.add(gp, 'projectiles');
       },
-      leaf: (px, py, gore) => natureParticles.spawnLeaf(px, py, gore),
+      leaf: (px, py, gore, paint) => natureParticles.spawnLeaf(px, py, gore, paint),
       ashDust: (px, py) => {
         // TreeGrowFX_AshShake :29796-29822 尘 31×~10 + 尘 6×~16 的粒子近似
         this.spawnParticles(px, py, '#8A6A52', 10, 1.6);
@@ -19863,6 +19889,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       hooks.sandstormVisuals = weather.sandstorm.happening && this.scene.zoneDesert && pty < gl + 30;
       // 沙尘发射门（Sandstorm.EmitDust :147：<100 直接不发射；密度 2000/count 也按真值）
       hooks.desertSandTiles = this.scene.desertSandTileCount;
+      // 雨滴列 = waterStyle×3+rand(3)（Rain.cs:165/210）+ 溅花尘 dustWater()（Dust.cs:405）
+      hooks.waterStyle = this.renderer.waterStyle;
     }
   }
 
@@ -23219,6 +23247,119 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (type === ParticleOrchestraType.PaladinsHammerShockwave) {
       // Spawn_PaladinsHammerShockwave :816-881（MovementVector=Size 载荷还原命中盒）
       paladinsHammerShockwaveFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    }
+    // ================= L5 长尾批派发段（2026-08-31;每型 Spawn_ 段 derive 见 fx 头注） =================
+    else if (type === ParticleOrchestraType.Keybrand) {
+      keybrandFx(this, s.posX, s.posY);                        // Spawn_Keybrand :3816-3883
+    } else if (type === ParticleOrchestraType.BlackLightningHit) {
+      blackLightningHitFx(this, s.posX, s.posY);               // :3554-3593 七环黑雷爆
+    } else if (type === ParticleOrchestraType.BlackLightningSmall) {
+      blackLightningSmallFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.BlueLightningSmall || type === ParticleOrchestraType.RedLightningSmall) {
+      lightningSmallOrchestra(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo >>> 0);   // 共体分色载荷
+    } else if (type === ParticleOrchestraType.BlueLightningSmallLong) {
+      blueLightningSmallLongFx(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo >>> 0);  // 25px 步进复播
+    } else if (type === ParticleOrchestraType.StormlightningWindup) {
+      stormLightningWindupFx(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo >>> 0);
+    } else if (type === ParticleOrchestraType.StormLightning) {
+      // Spawn_StormLightning 主放电——proj1457 bolt 折线渲染为本仓原生承担（M 级⑥清偿）;
+      // 占位注册面：远端语义型载荷静默消费（不重复生成折线）
+    } else if (type === ParticleOrchestraType.ArcSurge) {
+      // Spawn_ArcLightning :1245-1321——(moveX,moveY)=玩家锚,(posX,posY)=弹体终点
+      arcSurgeFx(this, s.moveX, s.moveY, s.posX, s.posY, s.invoker, s.uniqueInfo >>> 0);
+    } else if (type === ParticleOrchestraType.NightsEdge) {
+      nightsEdgeFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.TrueNightsEdge) {
+      trueNightsEdgeFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.Excalibur) {
+      excaliburFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.TrueExcalibur) {
+      trueExcaliburFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.TerraBlade) {
+      terraBladeFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.MoonLordWhipHit) {
+      moonLordWhipHitFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.MoonLordWhipEye) {
+      moonLordWhipEyeFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.StardustPunch) {
+      stardustPunchFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.PrincessWeapon) {
+      princessWeaponFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.FormatC) {
+      formatCFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.SilverBulletSparkle) {
+      silverBulletSparkleFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.UFOLaser) {
+      ufoLaserTrailFx(this, s.moveX, s.moveY, s.posX, s.posY, s.uniqueInfo | 0);
+    } else if (type === ParticleOrchestraType.MagnetSphereBolt) {
+      magnetSphereBoltTrailFx(this, s.moveX, s.moveY, s.posX, s.posY, s.uniqueInfo | 0);
+    } else if (type === ParticleOrchestraType.HeatRay) {
+      heatRayTrailFx(this, s.moveX, s.moveY, s.posX, s.posY, s.uniqueInfo | 0);
+    } else if (type === ParticleOrchestraType.GasTrap) {
+      gasTrapFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.ShimmerArrow) {
+      shimmerArrowFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.ShimmerBlock) {
+      shimmerBlockFx(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo);
+    } else if (type === ParticleOrchestraType.TownSlimeTransform) {
+      townSlimeTransformFx(this, ((s.uniqueInfo & 0xff) === 1 ? 1 : (s.uniqueInfo & 0xff) === 2 ? 2 : 0),
+        s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.CattivaHit) {
+      cattivaHitFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.RainbowBoulder1) {
+      rainbowBoulderFx(this, 1, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.RainbowBoulder2) {
+      rainbowBoulderFx(this, 2, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.RainbowBoulder3) {
+      rainbowBoulderFx(this, 3, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.RainbowBoulder4) {
+      rainbowBoulderFx(this, 4, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.RainbowBoulderPetBounce) {
+      rainbowBoulderFx(this, 'pet', s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.BestReforge) {
+      bestReforgeFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.ItemTransfer) {
+      itemTransferFx(this, s.posX, s.posY, s.posX + s.moveX, s.posY + s.moveY,
+        s.uniqueInfo & 0xffffff, (s.uniqueInfo >>> 24) & 0xff);
+    } else if (type === ParticleOrchestraType.PooFly) {
+      pooFlyFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.InScreenDungeonSpawn) {
+      inScreenDungeonSpawnFx(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo & 0xffff, null);
+    } else if (type === ParticleOrchestraType.HeroicisSetSpawnSound) {
+      heroicisSetSpawnSoundFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.PlayerVoiceOverrideSound) {
+      playerVoiceOverrideSoundFx(this, s.invoker, s.posX, s.posY, s.uniqueInfo & 0xff);
+    } else if (type === ParticleOrchestraType.NatureFly) {
+      natureFlyFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.LakeSparkle) {
+      lakeSparkleFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.HarpyCharm || type === ParticleOrchestraType.PhoenixQuiver
+      || type === ParticleOrchestraType.SeraphNecklace) {
+      const itemId = type === ParticleOrchestraType.PhoenixQuiver ? 6181
+        : type === ParticleOrchestraType.SeraphNecklace ? 6180 : 6166;
+      harpyCharmFamilyFx(this, itemId, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.SnappingStone
+      || type === ParticleOrchestraType.SnappingStoneMelee
+      || type === ParticleOrchestraType.SnappingStoneSummon) {
+      // Spawn_SnappingStone{,Melee,Summon}——环带+三味音（snappingStoneRingFx）+ Dust 段
+      //（snapStrikeDust,SnapStrike 同源导出）双面复放;motionScale=moveX/256 钳 .12
+      const kind = (type === ParticleOrchestraType.SnappingStone ? 0
+        : type === ParticleOrchestraType.SnappingStoneMelee ? 1 : 2) as 0 | 1 | 2;
+      snappingStoneRingFx(this, kind, s.posX, s.posY, s.moveX / 256, Math.max(0, s.moveY | 0));
+      snapStrikeDust(this, kind, s.posX, s.posY, Math.abs(s.moveX) / 2);
+    } else if (type === ParticleOrchestraType.SnappingStoneRecharge
+      || type === ParticleOrchestraType.PyroclasticStoneRecharge
+      || type === ParticleOrchestraType.ArmletOfRuinRecharge) {
+      // Spawn_*Recharge :418-471——尘位取 invoker 玩家本位（Main.player[invoker].position）
+      const kind = (type === ParticleOrchestraType.SnappingStoneRecharge ? 0
+        : type === ParticleOrchestraType.PyroclasticStoneRecharge ? 1 : 2) as 0 | 1 | 2;
+      const pa = orchestraPlayerAnchor(this, s.invoker);
+      if (pa) snappingStoneRechargeFx(this, kind, pa.x, pa.y, pa.w, pa.h);
+    } else if (type === ParticleOrchestraType.ChlorophyteLeafCrystalShot) {
+      // Spawn_LeafCrystalShot :3130-3157（台账 L3 清偿批 2026-08-31——叶绿叶弹轨迹;
+      //   uniqueInfo=hue byte、MovementVector=弹速;收编本体 fx/orchestraFx.leafCrystalShotFx）
+      leafCrystalShotFxLocal(this, s.posX, s.posY, s.moveX, s.moveY,
+        Math.max(0, Math.min(255, s.uniqueInfo & 0xff)) / 255);
     }
   }
 
@@ -27011,9 +27152,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       moveCoinsIntoBank(p.inv, bank);
       quickStackToChests(p.inv, [{ x: 0, y: 0, items: bank }], false);
     }
-    // ② 宝箱段（QuickStackToNearbyChests :243-259）
-    quickStackToChests(p.inv, chestsInRangeOf(this.world.chests, p.x, p.y),
-      this.quickStackMode() === 'smart');
+    // ② 宝箱段（QuickStackToNearbyChests :243-259）——入箱编排粒子（Chest.VisualizeChestTransfer
+    //   Chest.cs:315 BroadcastOrRequest 面的仓内等价位;L5 长尾批 ItemTransfer 接线）:
+    //   position=玩家心、chestPosition=箱左上、itemType=首件型、flags=RandomizeStart 位。
+    {
+      const qsRes = quickStackToChests(p.inv, chestsInRangeOf(this.world.chests, p.x, p.y),
+        this.quickStackMode() === 'smart');
+      for (const ch of qsRes.touched) {
+        const vids = qsRes.movedVids.get(ch) ?? [];
+        if (!vids.length) continue;
+        itemTransferFx(this, p.cx, p.cy, ch.x + 8, ch.y + 8, vids[0], 1);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.ItemTransfer,
+          p.cx, p.cy, (ch.x + 8) - p.cx, (ch.y + 8) - p.cy,
+          (vids[0] & 0xffffff) | (1 << 24));
+      }
+    }
     this.cb.onInventoryChanged?.();
   }
 
@@ -27973,12 +28126,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     });
   }
 
-  /** 弹幕消亡钩子（Projectile.Kill 按弹型分发）：
-   *  碎镜 1085（Projectile.cs:67554-67574 完整链）：Item106 音 @Center →
+  /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；2026-08-31 行号实校——1456 旧锚
+   *  :67554-67574/:28700-28711 已漂移作废,1458 现址如下）：
+   *  碎镜 1085（Projectile.cs:72034-72055 type==1085 支完整链）：Item106 音 @Center →
    *  oldVelocity×0.2 阻尼、position 回退阻尼步 → 10×尘330（velocity-=阻尼旧速）
    *  → Gore 1394-1397（Center 出、初速=-阻尼旧速，NewGore 自带 :1347-1348 扰动）
-   *  → 命中盒外扩 150px 与玩家矩形相交 → brokenMirrorBadLuckTime = 25200
-   *  （luck −0.25 档，UpdateBrokenMirrorLuck :28700-28711 衰减） */
+   *  → 命中盒外扩 150px 与玩家矩形相交 → brokenMirrorBadLuckTime = 25200（:72054）
+   *  （luck −0.25 档=RecalculateLuck Player.cs:29390-29392,
+   *  UpdateBrokenMirrorLuck :29396-29412 衰减） */
   /** 树球 868 落地重掷（TreeTopsInfo.RandomizeTreeStyleBasedOnWorldPosition
    *  :69-99 + RandomizeTreeStyle :101-149）：弹心下一格 tile 定 areaId →
    *  guarantee-new 掷变体写 world.treeTops[area]（VanillaTiler/WindSway 渲染端
@@ -33410,6 +33565,79 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     // 【无类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
     shard.armorPen = this.player.equipStats.armorPen;
     this.entities.add(shard, 'projectiles');
+  }
+
+  /** GameHooks.updateChloroCrystalAnchor（台账 L3 清偿批,2026-08-31）——叶绿锚体 226
+   *  对账+缺位补生。原版 buff60 效果分支（Player.cs:11749-11766,1456 :10483-10500）
+   *  每 tick：flag29 首个 active/owned/type==226 弹置 false 保留、其后每只 Kill()
+   *  （桶序=index 升序 ⇒ 最旧者存活）+ 全灭才 NewProjectile(226)（buff 起点中心）。
+   *  ★MP 面：锚体/叶弹为玩家本地自持实体（远端代理不跑 fixedUpdate）；原版经 msg27
+   *  全端同步锚体贴图——本仓远端可见面=叶弹 ChlorophyteLeafCrystalShot 编排粒子广播
+   *  （module8,type17),锚体本体不跨端，偏差登记 */
+  updateChloroCrystalAnchor(): void {
+    let kept: ChloroLeafCrystalAnchor | null = null;
+    for (const q of this.entities.projectiles as Array<{ dead?: boolean }>) {
+      if (!(q instanceof ChloroLeafCrystalAnchor) || q.dead) continue;
+      if (!kept) { kept = q; continue; }
+      (q as { dead: boolean }).dead = true;      // 多余者 Kill（:11757-58 同构）
+    }
+    if (kept || this.player.dead) return;
+    const anchor = new ChloroLeafCrystalAnchor();
+    anchor.pinTo(this.player);                   // :11763 出生位=玩家中心（AI 再钉 −60）
+    this.entities.add(anchor, 'projectiles');
+  }
+
+  /** GameHooks.spawnChloroLeafShot（L3 清偿批）：227 直传出射口——aiStyle42 常规出手
+   *  （Projectile.cs:28253 GetProjectileSource_FromThis）与 Player.OnHit 引援
+   *  （Player.cs:7029 GetProjectileSource_SetBonus(6)）两生产位共用。伤值走静态常量
+   *  crystalLeafDamage=100/crystalLeafKB=10（:821/:823——NewProjectile 直传字面,
+   *  不吃面板乘区;实体构造形参缺省同值兜底）;armorPen 由持有者 equipStats 注入 */
+  spawnChloroLeafShot(x: number, y: number, vx: number, vy: number): void {
+    const shot = new ChloroLeafShot(x, y, vx, vy);
+    shot.armorPen = this.player.equipStats.armorPen;
+    this.entities.add(shot, 'projectiles');
+  }
+
+  /** GameHooks.chloroOnHitLeafStrike（Player.OnHit 尾段 :6986-7040,1456 :6615-6640
+   *  的"三修门"本体；调用位 = Enemy.hurt fromPlayer 钛金 proc 之后同位次）。逐行：
+   *   ①!crystalLeaf || petalTimer!=0 早退（:6986）；
+   *   ②victim CanBeChasedBy 门（:6988-93 flag2——原文不含 488/statue 特豁,
+   *     训练假人被 canBeChasedBy 天然拒之门外）；
+   *   ③桶扫怪癖照抄：首个距离>1200px 的 226 直接 break 整循环（:7007 ——其后更近
+   *     锚体不再获机会）、petalTimer=50 先置（:7009）、方向基=命中点−(弹左上+
+   *     玩家 w/2,h/2)（:7013-14 width/height 无前缀=玩家盒,归一后无差）、
+   *     num9≥2160 分支不可达死代码保留结构、GetChaseResults 追及覆写、Center.X−4f
+   *     出手后 break 单发（:7033）。
+   *  hitPoint 近似：仓库 hurt 管线无命中点粒度,victim.Center 代 OnHit(x,y)
+   *  ——追及覆写为主路径时方向与命中点无关,偏差仅落在追不上时基向兜底支 */
+  chloroOnHitLeafStrike(victim: unknown): void {
+    const p = this.player;
+    if (!p.equipStats.crystalLeaf || p.petalTimer !== 0) return;               // :6986
+    if (!canBeChasedBy(victim)) return;                                        // :6988
+    const vcx = (victim as { cx?: number }).cx ?? ((victim as { x: number }).x + (victim as { w: number }).w / 2);
+    const vcy = (victim as { cy?: number }).cy ?? ((victim as { y: number }).y + (victim as { h: number }).h / 2);
+    for (let j = 0; j < this.entities.projectiles.length; j++) {
+      const q = this.entities.projectiles[j] as { dead?: boolean };
+      if (!(q instanceof ChloroLeafCrystalAnchor) || q.dead) continue;         // active/owner/type 门
+      if (Math.hypot(vcx - q.cx, vcy - q.cy) > 1200) break;                    // :7006-08 怪癖
+      p.petalTimer = 50;                                                       // :7009
+      const speed = 12;                                                        // num6
+      const frames = 180;                                                      // num10
+      let nx = vcx - (q.x + p.w / 2);
+      let ny = vcy - (q.y + p.h / 2);                                          // :7012-15
+      const len = Math.sqrt(nx * nx + ny * ny);
+      if (len >= speed * frames) continue;                                     // !(num9>=num11)
+      const k = speed / Math.max(len, 1e-8);   // len=0 时追及特例必覆写,epsilon 只防 NaN
+      nx *= k; ny *= k;
+      const chase = getChaseResultsJit(q.cx, q.cy, speed * frames,
+        vcx, vcy, (victim as { vx?: number }).vx ?? 0, (victim as { vy?: number }).vy ?? 0);
+      if (chase.happens && chase.time <= frames) {                             // :7025-28
+        nx = chase.vx / frames;
+        ny = chase.vy / frames;
+      }
+      this.spawnChloroLeafShot(q.cx - 4, q.cy, nx, ny);                        // :7029
+      break;                                                                   // :7033
+    }
   }
 
   /** GameHooks.spawnFriendlyProj（★α-H3④：玩家命中后效真弹出口——WeaponProj
