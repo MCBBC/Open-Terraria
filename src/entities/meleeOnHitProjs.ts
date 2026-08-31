@@ -5,7 +5,8 @@
 // 免疫写方桥统一走 game.noteNpcPlayerImmune（GC1 出口）。
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { damageVarRoll } from '../stats/DamageVar';
 import type { GameHooks } from './types';
 
 interface EnemyLike {
@@ -177,9 +178,11 @@ export class JavelinStickerProj extends Entity {
 //   AI_152_SuperStarSlash（Projectile.cs:22432-22552，type==977 面）：α −10/t 钳 ≥100；
 //   soundDelay==0 → SoundID.Item1 ×1；ai[0]!=0 → 每子步旋转 ai[0]/(10×MaxUpdates)；
 //   velocity×=0.96；1/8 子步掷 → 尘 172 于中心。
-//   extraUpdates 子步循环连 AI 同跑 3 次/帧（尘埃掷数、旋转与衰减均按子步计），
-//   timeLeft 仅外层帧递减一次。usesLocalNPCImmunity/-1 → 每目标至多一发；
-//   penetrate=1 → 全域单次受理后消亡。
+//   extraUpdates 子步循环连 AI 同跑 3 次/帧（尘埃掷数、旋转、衰减、timeLeft
+//   递减 :17307 与 Damage 结算 :17186 都在子步体内）。
+//   ★F3 勘误存档：旧注"timeLeft 仅外层帧递减一次"系误读——Update 的 while
+//   (numUpdates>=0) 体每子步全跑，寿命 = 30/3 = 10 实帧（已修）。
+//   usesLocalNPCImmunity/-1 → 每目标至多一发；penetrate=1 → 单次受理后消亡。
 // ============================================================================
 export class MuramasaSlashProj extends Entity {
   w = 20; h = 20;
@@ -231,8 +234,12 @@ export class MuramasaSlashProj extends Entity {
           this.vx * 0.5, this.vy * 0.5, 100, null, 0.9);
       }
       this.x += this.vx; this.y += this.vy;
+      // ★F3（2026-08-31 蓝队三批）：Projectile.Update 的 timeLeft-- 在 extraUpdates
+      //   子步循环【内】（Projectile.cs:17307 属 while(numUpdates>=0) 体——extraUpdates=2
+      //   ⇒ 每实帧递减 3 次）。SetDefaults `timeLeft = 10*MaxUpdates`（:9225）=30
+      //   ⇒ 寿命 10 实帧。旧实现每帧减一次 = 三倍寿。
+      if (--this.lifeLeft <= 0) { this.dead = true; return; }
     }
-    if (--this.lifeLeft <= 0) { this.dead = true; return; }
 
     const px = Math.trunc(this.x), py = Math.trunc(this.y);
     for (const raw of game.enemies()) {
@@ -242,11 +249,14 @@ export class MuramasaSlashProj extends Entity {
       const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
       if (gate.meleeNpcImmuneGateOf && !gate.meleeNpcImmuneGateOf(e.id)) continue;
       if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+      // ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
       const crit = (this.critChanceFn?.() ?? 0) > Math.random();
-      const dmgVar = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+      let dmgVar = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+      dmgVar = applyBannerDamageDealt(game, e, dmgVar);
       e.hurt(dmgVar * (crit ? 2 : 1),
         Math.sign((e.cx ?? this.cx) - this.cx) || 1,     // kb 原文 0f → 位移 0；方向位保留
-        0, game, this.armorPenInject + 5, crit, 0, true);
+        0, game, this.armorPenInject + 5, crit, 0, true, 0, 977);   // ★A-F1：srcProjId 进排除表
       clearGlobalImmune(game, e.id);
       this.hitSet.add(e.id);
       if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=1
@@ -279,6 +289,15 @@ export class MuramasaSlashProj extends Entity {
 // ============================================================================
 export class ConfettiBurstProj extends Entity {
   w = 10; h = 10;
+  /** ★Z-F4（2026-08-31 蓝队三批）联机元数据：原 NewProjectile 内联
+   *  NetMessage.SendData(27)（Projectile.cs 对应位）= 出生即时上线。此前实体无
+   *  projId/color/netProjMeta 任一识别位 → netProjBroadcast 分派链 kind<0 直接跳过,
+   *  联机侧整段不可见（广播只靠周期差分扫描+本弹寿命仅 2 拍，扫描窗根本轮不到）。
+   *  projId=289 使其落入 kind1 武器族通判（aux 带浸剂）；接收端按 kind1 用 Boomerang
+   *  代表类重建——纯视觉重建妥协：远端傀儡不复算本地 Kill 尘尾段（发送端照常出尘，
+   *  远端以消亡闪烁兜底），既定登记见 Game.netMakeProj case1 注与 spawnFriendlyProj。
+   */
+  readonly projId = 289;
   private lifeLeft = 2;
 
   constructor(x: number, y: number, vx: number, vy: number) {
@@ -297,10 +316,17 @@ export class ConfettiBurstProj extends Entity {
         const d = game.spawnDust?.(Math.trunc(this.x) - 5, Math.trunc(this.y) - 5, 10, 10, t,
           this.vx, this.vy, 0, null, 1.2);
         if (!d) break;
+        // ★F16（2026-08-31 蓝队三批）逐笔补齐原版六段扰动（:76094-76102）：
+        //   vX/vY 各 += Next(-50,51)×0.01 → 各 ×(1+Next(-50,51)×0.01)
+        //   → 各 += Next(-50,51)×0.05（旧实现缺此 4 笔中的"×0.05 加项"两笔）
+        //   + scale 微抖 ×(1+Next(-30,31)×0.01)（旧全缺）
         d.vx += (Math.floor(Math.random() * 101) - 50) * 0.01;
         d.vy += (Math.floor(Math.random() * 101) - 50) * 0.01;
         d.vx *= 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;
         d.vy *= 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;
+        d.vx += (Math.floor(Math.random() * 101) - 50) * 0.05;
+        d.vy += (Math.floor(Math.random() * 101) - 50) * 0.05;
+        d.scale *= 1 + (Math.floor(Math.random() * 61) - 30) * 0.01;
       }
       this.dead = true;
     }
@@ -319,6 +345,8 @@ export class ConfettiBurstProj extends Entity {
 //   双笔尘 170（每笔独立 1/3 拒绝门），尘位=(尘位+Center)/2 收拢、noGravity、
 //   velocity×0.1、scale×[(800−ai0)/800+0.1]，第二笔再加 velocity/2 偏移。
 //   α 无淡出面 → 全寿限不可见（视觉仅拖尾尘）；不画 sprite。
+//   ★F2 勘误存档：旧实现把 AI_096 单步跑（=extraUpdates 被吞）——Update 子步
+//   循环体内 AI+积分+Damage 全跑（Projectile.cs:16780-17330），已按 6 子步重构。
 //   usesIDStaticNPCImmunity 冷却 10t 为【全型共享】表（IDStatic 语义：模块级 Map）。
 // ============================================================================
 const GLOB_IDSTATIC_COOLDOWN_TICKS = 10;
@@ -346,44 +374,58 @@ export class BladetongueGlobProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     const now = (game as unknown as { tickCount?: number }).tickCount ?? 0;
-    // AI_096 主干
-    this.ai0 += 0.6;                                    // :33613
-    if (this.ai0 > 500) { this.dead = true; return; }   // :33614-33617
-    this.vy += 0.008;                                   // :33638 重力
-    for (let n = 0; n < 2; n++) {                       // :33619-33637 双笔尘 170
-      if (Math.floor(Math.random() * 3) !== 0) continue;
-      const d = game.spawnDust?.(Math.trunc(this.x) - 5, Math.trunc(this.y) - 5, 10, 10,
-        170, 0, 0, 100, null, 1);
-      if (!d) break;
-      d.x = Math.fround((d.x + this.cx) / 2);
-      d.y = Math.fround((d.y + this.cy) / 2);
-      d.noGravity = true;
-      d.vx *= 0.1; d.vy *= 0.1;
-      d.scale *= Math.fround((800 - this.ai0) / 800) + 0.1;
-      if (n === 1) {
-        d.x += Math.fround(this.vx / 2);
-        d.y += Math.fround(this.vy / 2);
+    // ★F2（2026-08-31 蓝队三批）extraUpdates=5 子步循环：Projectile.Update 的
+    //   while(numUpdates>=0) 体每实帧跑 extraUpdates+1=6 次——AI_096（ai0 累计/
+    //   双笔尘 170×6 组/重力）、位移积分与 Damage 结算全部随子步推进。
+    //   寿命随之归位：ai0 += 0.6/子步 → >500 Kill 在 ~139 实帧（旧单步 ≈833 帧）；
+    //   尘密度 ×6 与原版 DensityIndex 同拍。
+    for (let step = 0; step < 6; step++) {
+      if (this.dead) break;
+      // AI_096 主干
+      this.ai0 += 0.6;                                    // :33613
+      if (this.ai0 > 500) { this.dead = true; return; }   // :33614-33617
+      this.vy += 0.008;                                   // :33638 重力
+      for (let n = 0; n < 2; n++) {                       // :33619-33637 双笔尘 170
+        if (Math.floor(Math.random() * 3) !== 0) continue;
+        const d = game.spawnDust?.(Math.trunc(this.x) - 5, Math.trunc(this.y) - 5, 10, 10,
+          170, 0, 0, 100, null, 1);
+        if (!d) break;
+        d.x = Math.fround((d.x + this.cx) / 2);
+        d.y = Math.fround((d.y + this.cy) / 2);
+        d.noGravity = true;
+        d.vx *= 0.1; d.vy *= 0.1;
+        d.scale *= Math.fround((800 - this.ai0) / 800) + 0.1;
+        if (n === 1) {
+          d.x += Math.fround(this.vx / 2);
+          d.y += Math.fround(this.vy / 2);
+        }
       }
-    }
-    this.x += this.vx; this.y += this.vy;
+      this.x += this.vx; this.y += this.vy;
 
-    // ---- 命中面（Damage_PVE_Inner 闸门 + IDStatic 共享冷却 10t + penetrate=5）----
-    const px = Math.trunc(this.x), py = Math.trunc(this.y);
-    for (const raw of game.enemies()) {
-      const e = raw as EnemyLike;
-      if (!e || e.dead) continue;
-      if (!playerCanHitEnemy(raw as never, game)) continue;
-      const exp = GLOB_IDSTATIC_HITS.get(e.id);
-      if (exp !== undefined && now < exp) continue;
-      if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-      const crit = (this.critChanceFn?.() ?? 0) > Math.random();
-      const dmgVar = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
-      e.hurt(dmgVar * (crit ? 2 : 1),
-        Math.sign((e.cx ?? this.cx) - this.cx) || 1, 0,
-        game, this.armorPenInject, crit, 0, true);
-      GLOB_IDSTATIC_HITS.set(e.id, now + GLOB_IDSTATIC_COOLDOWN_TICKS);
-      clearGlobalImmune(game, e.id);
-      if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=5 计数耗尽
+      // ---- 命中面（Damage_PVE_Inner 闸门 + IDStatic 共享冷却 10t + penetrate=5，
+      //      原版 Damage() 本就在子步体内 Projectile.cs:17186 → 每子步结算）----
+      const px = Math.trunc(this.x), py = Math.trunc(this.y);
+      for (const raw of game.enemies()) {
+        const e = raw as EnemyLike;
+        if (!e || e.dead) continue;
+        if (!playerCanHitEnemy(raw as never, game)) continue;
+        const exp = GLOB_IDSTATIC_HITS.get(e.id);
+        if (exp !== undefined && now < exp) continue;
+        if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+        // ★F9/F1：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区；命中回写 ai[0]+=50
+        // （type==524 特例 :13261-63）
+        const crit = (this.critChanceFn?.() ?? 0) > Math.random();
+        let dmgVar = damageVarRoll(this.damage,
+          ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+        dmgVar = applyBannerDamageDealt(game, e, dmgVar);
+        e.hurt(dmgVar * (crit ? 2 : 1),
+          Math.sign((e.cx ?? this.cx) - this.cx) || 1, 0,
+          game, this.armorPenInject, crit, 0, true);
+        this.ai0 += 50;                                    // :13261 netUpdate=true; ai[0]+=50f
+        GLOB_IDSTATIC_HITS.set(e.id, now + GLOB_IDSTATIC_COOLDOWN_TICKS);
+        clearGlobalImmune(game, e.id);
+        if (--this.penLeft <= 0) { this.dead = true; return; }   // penetrate=5 计数耗尽
+      }
     }
   }
 

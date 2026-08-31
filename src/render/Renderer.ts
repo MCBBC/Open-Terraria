@@ -341,6 +341,38 @@ const ITEM_DRAW_POS: Record<number, readonly [number, number]> = {
   779: [0, 2], 5134: [0, 2], 905: [-5, 0], 930: [4, 2], 3788: [2, 2], 5668: [-13, 0],
 };
 
+/** ★HOUSE 出膛锚(2026-08-31):useStyle5 枪口/杖尖世界坐标——与 drawUseItem 完全
+ *  同源(pivot=中心+方向化 offX/offY,精灵钉 ITEM_DRAW_POS,镜像经 sg 因子统一式
+ *  world = T + R(sg·α)·(sg·lx, ly))。供 Game.resolveShotAnchor 射击瞬间直算
+ *  (无帧滞后;陈旧 readback 方案已退役)。枪:tip=(dp0+fw, dp1+fh/2);杖:斜持
+ *  α=aim+45°、tip=(fw·0.9, −fh·0.15)、3476 前伸 14 */
+export function heldItemTipWorld(
+  cx: number, cy: number, facing: number, aimWorld: number,
+  vid: number, fw: number, fh: number,
+): { x: number; y: number } {
+  const sg = facing;
+  const aimL = sg === 1 ? aimWorld : Math.PI - aimWorld;
+  const isStaff = STAFF_ITEMS.has(vid);
+  let alpha: number, lx: number, ly: number, px: number, py: number;
+  if (isStaff) {
+    alpha = aimL + 0.785;
+    const reach = vid === 3476 ? 14 : 6;                    // :50376-50383
+    px = cx + sg * Math.cos(aimL) * reach;
+    py = cy + Math.sin(aimL) * reach;                       // offY=p.h/2+sin·reach
+    lx = fw * 0.9; ly = -fh * 0.15;
+  } else {
+    alpha = aimL;
+    const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
+    px = cx + sg * -2;                                      // offX=-2*dir(:50387)
+    py = cy - fh * 0.5;                                     // offY=p.h/2−fh/2
+    lx = dp[0] + fw; ly = dp[1] + fh * 0.5;                 // 管口=精灵右缘中点
+  }
+  const wr = sg * alpha;
+  const c = Math.cos(wr), s = Math.sin(wr);
+  const lxm = sg * lx;
+  return { x: px + lxm * c - ly * s, y: py + lxm * s + ly * c };
+}
+
 /** OffsetsPlayerHeadgear（Main.cs:504-525，按 bodyFrame.Y/56 行索引）：
  *  行 0-6→y2 / 7-9→y0 / 10-13→y2 / 14-16→y0 / 17-19→y2（X 恒 0）。
  *  useStyle 14/15（头侧持）与 holdStyle 5/6/8 的 itemLocation 都要加此偏移 */
@@ -2066,6 +2098,8 @@ const PILLAR_FF = new WeakMap<object, { lastShield: number; breakTick: number; r
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
+  /** GL 拖尾 pass 帧快照（render() 每帧写入；TrailShader GL 路径与合成消费） */
+  glCamX = 0; glCamY = 0; glZoom = 1; glViewW = 1; glViewH = 1;
   /** CPU 软渲染态(渲染模式 cpu 或 auto 降级后为 true):主画布/chunk 烘焙/
    *  光照画布全部走 willReadFrequently(软件光栅化,零 GPU 预算) */
   cpuRender = false;
@@ -2148,7 +2182,7 @@ export class Renderer {
   /** 统一 GL 实例获取:活实例直取;死亡 5s 退避;初始化失败 30s 闩。
    *  ★旧 bg 路径 diedAt=0 时退避判恒真 = 每帧 new GLSpriteLayer(构造器
    *  createElement)= 60 张/秒,暂停中也持续(渲染循环不停) */
-  private acquireGL(): GLSpriteLayer | null {
+  acquireGL(): GLSpriteLayer | null {
     if (this.glfx) {
       if (!this.glfx.unavailable) return this.glfx;
       if (performance.now() - this.glfx.diedAt < 5000) { this.glfx = null; return null; }
@@ -2913,6 +2947,9 @@ export class Renderer {
     // 2026-08-10 实证);吸附后相机以 z 像素步进,像素风反而更稳
     ctx.imageSmoothingEnabled = false;
     const camRX = Math.round(cam.x * z) / z;
+    // GL 拖尾 pass 相机快照（TrailShader GL 路径消费；每帧覆盖）
+    this.glCamX = cam.x; this.glCamY = cam.y;
+    this.glZoom = z; this.glViewW = viewW; this.glViewH = viewH;
     const camRY = Math.round(cam.y * z) / z;
     // 低清档:基准变换整体 ×K(视野的世界矩形不变——culling 仍按 viewW/H 算,
     // 只是落点像素少 K²);屏内坐标一律乘 K 后落画布
@@ -3228,6 +3265,21 @@ export class Renderer {
         } else {
           (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
         }
+      }
+    }
+    // GL 拖尾合成（天顶剑/女皇剑条带层：ZenithSword.draw 期间已绘入 glfx 画布，
+    // 此处单次 drawImage 回主链——层级=实体之后、表情气泡之前；设备像素直绘）
+    {
+      const gx = this.glfx;
+      if (gx && gx.trailDirty && !gx.unavailable) {
+        const c2 = this.ctx;
+        if (c2) {
+          c2.save();
+          c2.setTransform(1, 0, 0, 1, 0, 0);
+          c2.drawImage(gx.canvas, 0, 0);
+          c2.restore();
+        }
+        gx.trailDirty = false;
       }
     }
     // 表情气泡（原版 EmoteBubble：实体层之上；本段在世界变换内，世界坐标绘制）
@@ -9847,11 +9899,6 @@ export class Renderer {
    *  PrismProj.draw 登记 → drawPlayer 后冲刷(世界变换仍活,世界坐标闭包直画) */
   prismCrystalQueue: Array<() => void> = [];
 
-  /** ★HOUSE 出膛锚供体（drawUseItem useStyle5 刷新,2026-08-31）：本地玩家手持
-   *  枪口/杖尖的世界坐标,与绘制同变换(translate+镜像+旋转)——发射链回读使
-   *  弹出生点=绘制尖端本体,左右朝向构造性对称。t=采样时刻(freshness 门) */
-  lastHeldTipWorld: { x: number; y: number; t: number } | null = null;
-
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
    *  28/45 White 无 s、9/29 主纹理×s²（:964-969 平方分支）；叠画 23/27/30×s、
@@ -12357,23 +12404,6 @@ export class Renderer {
         drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOY, w: ar.sw, h: ar.sh }, flicker);
       }
     }
-    // ★HOUSE 出膛锚供体（2026-08-31）：useStyle5 手持帧把枪口/杖尖世界坐标暴露给
-    //  发射链（Game 射击点回读 lastHeldTipWorld,替代几何近似模型）——与绘制完全
-    //  同变换(translate+镜像+旋转),左右朝向构造性对称,常量退役。
-    //  枪族 tip=精灵右缘中点(管口,drawOX+fw, drawOY+fh/2);
-    //  法杖 tip=花头尖端(斜持 aim+45°,取 (sw·0.9, −sh·0.15))。
-    if (us === 5 && ar && !hide) {
-      const isStaff = heldVid >= 0 && STAFF_ITEMS.has(heldVid);
-      const tipLx = isStaff ? ar.sw * 0.9 : drawOX + ar.sw;
-      const tipLy = isStaff ? -ar.sh * 0.15 : drawOY + ar.sh * 0.5;
-      const ca = Math.cos(rot), sa = Math.sin(rot);
-      const rx = tipLx * ca - tipLy * sa, ry = tipLx * sa + tipLy * ca;
-      this.lastHeldTipWorld = {
-        x: p.cx + p.facing * offX + (p.facing === -1 ? -rx : rx),
-        y: p.y + offY + ry,
-        t: performance.now(),
-      };
-    }
     ctx.restore();
   }
 
@@ -13759,8 +13789,10 @@ export class Renderer {
       ctx.font = '12px sans-serif';
       ctx.fillText(`\u7b2c ${clock.dayCount} \u5929`, px + pw / 2, py + 23);
       box(px + pw - 84, py + 8, 76, 22, '+ 1 \u5c0f\u65f6', () => setT(clock.timeOfDay + 1 / 24));
-      // \u5feb\u6377\u9884\u8bbe\uff08clock \u8bed\u4e49\uff1a0=\u5348\u591c 0.25=06:00 0.5=\u6b63\u5348 0.75=18:00\uff09
-      const presets: Array<[string, number]> = [['\u6e05\u6668', 0.27], ['\u6b63\u5348', 0.5], ['\u9ec4\u660f', 0.73], ['\u5348\u591c', 0.0]];
+      // \u5feb\u6377\u9884\u8bbe\uff08clock \u8bed\u4e49\uff1a0=\u5348\u591c 0.25=06:00 0.5=\u6b63\u5348 0.75=18:00\uff09\u3002
+      // \u9ec4\u660f\u987b\u7528\u663c\u591c\u8fb9\u754c DUSK=0.8125\uff0819:30,\u539f\u7248 StartNightImmediately \u540c\u951a\uff09\u2014\u2014
+      // \u66fe\u5199 0.73(17:31) \u70b9\u5b8c\u5929\u8fd8\u4eae\u7740\uff08type-only import,\u5e38\u91cf\u843d\u5b57\u9762\u91cf\uff09
+      const presets: Array<[string, number]> = [['\u6e05\u6668', 0.27], ['\u6b63\u5348', 0.5], ['\u9ec4\u660f', 0.8125], ['\u5348\u591c', 0.0]];
       presets.forEach(([label, t], i) => {
         box(px + 10 + i * 56, py + 38, 52, 20, label, () => setT(t));
       });

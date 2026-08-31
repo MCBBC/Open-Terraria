@@ -105,12 +105,12 @@ export class BeetleMeter {
       // （原版无显式清零点——UpdateArmorSets 不调两臂即静态保留到重入）
       if (this.readOrbs(p) > 0 && --this.orbLife <= 0) this.writeOrbs(p, 0);
     }
-    this.pinBuffs(p, offenseSet);
+    this.pinBuffs(p);
   }
 
   /** buff 图标维持（:10432/:16663-16675 钉值 + :10434-10452/:16686-16696 换档清旧）。
    *  宿主无 buff 栏（裸测试宿主）时静默跳过。 */
-  private pinBuffs(p: BeetleHost, _offenseSet: boolean): void {
+  private pinBuffs(p: BeetleHost): void {
     const buffs = (p as { buffs?: { apply(type: number, durationSec: number): void; remove(type: number): void } }).buffs;
     if (!buffs) return;
     const n = this.readOrbs(p);

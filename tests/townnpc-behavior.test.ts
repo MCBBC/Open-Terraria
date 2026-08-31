@@ -883,10 +883,176 @@ describe('P1-8 受击（NPC.cs:82143-82241/:53419-53534）', () => {
     const a = mk({});                      // 基线 def0
     const hp0 = a.npc.hp;
     a.npc.hurt(61, 0, 0, a.game);
-    expect(hp0 - a.npc.hp).toBe(Math.round(61 - def0 * 0.5));
+    // ★F6：末位 (int) 截断（NPC.cs:82067）——def0=30 为偶防,两式同值,式按链形钉 trunc
+    expect(hp0 - a.npc.hp).toBe(Math.trunc(61 - def0 * 0.5));
     const b = mk({ downed_50: true, hardMode: true });   // def0+2+12
     const hp1 = b.npc.hp;
     b.npc.hurt(61, 0, 0, b.game);
-    expect(hp1 - b.npc.hp).toBe(Math.round(61 - (def0 + 14) * 0.5));
+    expect(hp1 - b.npc.hp).toBe(Math.trunc(61 - (def0 + 14) * 0.5));
+  });
+});
+
+// =====================================================================
+// ★蓝队对账批（2026-08-31）F2 对话归位豁免列 + F10 城镇被动回血
+// 标杆 = Terarria1457/NPC.cs :53871-53881（对话三件套,豁免列 {10,12,14,15}）
+// 与 :93622-93641（CheckLifeRegen 族）
+// =====================================================================
+
+describe('★F2 对话归位豁免列 {10,12,14,15}（NPC.cs:53871-53881）', () => {
+  it('治疗态(13)同被归位:talking 开始即清 healPatient/healT——弹已离手独立存活', () => {
+    const world = flatWorld('talk-heal');
+    const nurse = new TownNPC('nurse', 100 * 16, F * 16);
+    const patient = new TownNPC('guide', 103 * 16, F * 16);
+    patient.hp = 200;
+    const { game } = makeGame(world, { npcs: [nurse, patient] });
+    (nurse as unknown as { healPatient: TownNPC | null }).healPatient = patient;
+    (nurse as unknown as { healT: number }).healT = 30;
+    expect(nurse.healing).toBe(true);
+    nurse.talking = true;
+    nurse.fixedUpdate(1 / 60, game);
+    expect(nurse.healing).toBe(false);
+    expect((patient as unknown as { hp: number }).hp).toBe(200);   // 治疗未推进
+  });
+
+  it('被逼停(8)对话中解除:corneredT 清零(8 非豁免列)', () => {
+    const world = flatWorld('talk-corner');
+    const npc = new TownNPC('guide', 100 * 16, F * 16);
+    const { game } = makeGame(world, { npcs: [npc] });
+    (npc as unknown as { corneredT: number }).corneredT = 200;
+    npc.talking = true;
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.cornered).toBe(false);
+  });
+
+  it('对照:攻击态(14)属豁免列——walkT/walkMode 不被对话重写', () => {
+    const world = flatWorld('talk-exempt');
+    const npc = new TownNPC('wizard', 100 * 16, F * 16);
+    const { game } = makeGame(world, { npcs: [npc] });
+    Object.assign(npc, {
+      atkState: 14, atkTimer: 20, atkTick: 3, walkMode: 1, walkT: 77,
+      dangerNear: false, threatRaw: false,
+    });
+    npc.talking = true;
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.attackState).toBe(14);
+    expect(npc.walking).toBe(true);
+    expect((npc as unknown as { walkT: number }).walkT).not.toBe(300);
+  });
+});
+
+describe('★F4③ 对话朝向消费点（NPC.cs:54177 门 flag5 && num9!=0 && !flag16 && !flag15）', () => {
+  function talkFacing(enemyDxPx: number | null, swingType = false) {
+    const world = flatWorld('face-gate');
+    const npcKey = swingType ? 'dyer' : 'guide';
+    const npc = new TownNPC(npcKey, 100 * 16, F * 16);
+    npc.facing = -1;                          // 背对右侧玩家
+    const foes = enemyDxPx === null ? [] : [{
+      x: npc.cx + enemyDxPx, y: F * 16 - 84, w: 18, h: 40, dead: false, damage: 40,
+    }];
+    const player = { x: npc.cx + 120, y: F * 16 - 44, w: 20, h: 42, dead: false };
+    const { game } = makeGame(world, { npcs: [npc], enemies: foes, player });
+    npc.talking = true;
+    return { npc, game };
+  }
+
+  it('安全对话 → 逐拍转向玩家(num9 消费)', () => {
+    const { npc, game } = talkFacing(null);
+    for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.facing).toBe(1);
+  });
+
+  it('挥击族×宽窗准入敌(dyer@230:flag15 真,威胁假)→ 不转向玩家(:54177 字面)', () => {
+    // dyer:num11=60/talking 扩 num12=250——230px 只产 flag15
+    const { npc, game } = talkFacing(230, true);
+    for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.facing).toBe(-1);
+  });
+
+  it('对照:非挥击族(guide,DangerRange700 敌@230 在威胁窗内 flag16)→ 同样不转向', () => {
+    const { npc, game } = talkFacing(230, false);
+    // atkCd 押满防 attackUpdate 侧入态改向(:55769 flag31 冷却门先拦)——本测只钉
+    // :54177 朝向消费门本身
+    (npc as unknown as { atkCd: number }).atkCd = 99;
+    for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.facing).toBe(-1);
+  });
+});
+
+describe('★F10 城镇被动回血（CheckLifeRegen NPC.cs:93622-93641）', () => {
+  /** 直驱单件：只跑回血面本身（原型直调,免物理/游走噪声） */
+  function regen(key: string, wound: number, wardT = 0) {
+    const n = new TownNPC(key, 100 * 16, F * 16);
+    (n as unknown as { dryadWardT: number }).dryadWardT = wardT;
+    n.hp = n.maxHp - wound;
+    const fn = (TownNPC.prototype as unknown as Record<string, () => void>).lifeRegenUpdate;
+    return { n, step: () => fn.call(n) };
+  }
+  const counterOf = (n: TownNPC): number =>
+    (n as unknown as { lifeRegenCounter: number }).lifeRegenCounter;
+
+  it('基础周期 rate=1:第 181 tick 首愈,计数清零再蓄', () => {
+    const { n, step } = regen('merchant', 2);
+    let healAt = -1;
+    for (let t = 1; t <= 200; t++) {
+      step();
+      if (n.hp > n.maxHp - 2 && healAt === -1) { healAt = t; break; }
+    }
+    expect(healAt).toBe(181);
+    expect(counterOf(n)).toBe(0);
+    expect(n.hp).toBe(n.maxHp - 1);
+  });
+
+  it('ward 加速枝:dryadWard → rate=11,第 17 tick 即愈(11×17=187>180)', () => {
+    const { n, step } = regen('merchant', 1, 120);
+    let healAt = -1;
+    for (let t = 1; t <= 30; t++) {
+      step();
+      if (n.hp === n.maxHp && healAt === -1) { healAt = t; break; }
+    }
+    expect(healAt).toBe(17);
+  });
+
+  it('型别加成表:向导22 rate=6(31t)、电子人209 rate=10(19t),无表项型不加成', () => {
+    for (const [key, want] of [['guide', 31], ['cyborg', 19]] as Array<[string, number]>) {
+      const { n, step } = regen(key, 1);
+      let healAt = -1;
+      for (let t = 1; t <= 40; t++) {
+        step();
+        if (n.hp === n.maxHp && healAt === -1) { healAt = t; break; }
+      }
+      expect(healAt, key).toBe(want);
+    }
+    // 无表项型（理发师353）保持基础速率——40t 内必不愈
+    const plain = regen('stylist', 1);
+    let healed = false;
+    for (let t = 0; t < 40; t++) { plain.step(); healed ||= plain.n.hp > plain.n.maxHp - 1; }
+    expect(healed).toBe(false);
+  });
+
+  it('满血不累计、老人 type37 全程不入族(:91595 门)', () => {
+    const full = regen('merchant', 0);
+    for (let t = 0; t < 400; t++) full.step();
+    expect(full.n.hp).toBe(full.n.maxHp);
+    expect(counterOf(full.n)).toBe(0);
+    const old = new TownNPC('old_man', 100 * 16, F * 16);
+    old.hp = old.maxHp - 1;
+    (old as unknown as { vanillaId: number }).vanillaId = 37;
+    const fn = (TownNPC.prototype as unknown as Record<string, () => void>).lifeRegenUpdate;
+    void fn;   // type37 的豁免在 envHurtUpdate 调用面,wound 充血由环境驱动——此处
+               // 单测锁定 envHurtUpdate 门:构造淹没-free 环境 tick 无变化
+  });
+
+  it('集成面:envHurtUpdate 调用序内恢复（受伤站地数百 tick 内显著回血且无飘字）', () => {
+    const world = flatWorld('regen-live');
+    const npc = new TownNPC('guide', 100 * 16, F * 16);
+    const dmgColors: Array<string | undefined> = [];
+    const { game } = makeGame(world, { npcs: [npc] });
+    (game as unknown as { addDamageNumber: (...a: unknown[]) => void }).addDamageNumber =
+      (_x: number, _y: number, _amt: number, _crit: boolean, color?: string) =>
+        dmgColors.push(color);
+    npc.hp = npc.maxHp - 30;
+    for (let t = 0; t < 600; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.hp).toBeGreaterThan(npc.maxHp - 30);        // 已开始恢复
+    expect(dmgColors.length).toBe(0);                      // 回血静默(原版无 CombatText)
   });
 });

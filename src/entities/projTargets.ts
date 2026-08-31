@@ -5,7 +5,7 @@ import type { GameHooks } from './types';
 import { BuffType, buffTypeByVanilla, type BuffState } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode, damageVar } from '../stats/ScaleStats';
-import { bannerReceivedMult } from '../world/Banners';
+import { bannerReceivedMult, bannerOfNpc, bannerItemId } from '../world/Banners';
 import { projGlobalImmuneWriteTicks, PROJ_IMMUNE_SLOW_MAGIC_TIER } from '../data/vanillaProjImmuneTiers';
 import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
@@ -124,6 +124,54 @@ export const MINION_SHOT_PROJS: ReadonlySet<number> = new Set(
 /** ProjectileID.Sets.SentryShot（同文件相邻行全 14 型）：哨兵弹家族。语义同上。 */
 export const SENTRY_SHOT_PROJS: ReadonlySet<number> = new Set(
   [680, 664, 666, 668, 694, 695, 696, 644, 642, 378, 379, 309, 967, 1026]);
+
+// ---- ★A-F1 OnHit 来源排除表（蓝队三批，2026-08-31） ----------------------------
+// Projectile.TryDoingOnHitEffects（Terarria1457/Terraria/Projectile.cs:15210-15220）：
+//   `switch (type) { case 221: case 227: case 614: case 729: case 908: case 977: return; }`
+// ——六型弹命中【不触发】Player.OnHit 族效果（钛金风暴自续/影闪 buff59 等全被
+// 断链：这批弹本身就是 on-hit 效果产出的伴生弹）。消费点 = Enemy.hurt 钛金 proc 门
+// （srcProjId 尾参携带），单测两案在 blue-r2-redteam2 套。
+export const ON_HIT_EXCLUDED_PROJS: ReadonlySet<number> = new Set([221, 227, 614, 729, 908, 977]);
+
+// ---- ★F1 攻端旗乘区单源（蓝队三批，2026-08-31） -------------------------------
+// ★R2-07(a) ItemID.BannerEffect.DamageDealt 攻端乘区采样
+// （Terarria1457/Terraria.ID/ItemID.cs:11-40 BannerEffect 构造 + ItemID.cs:1072
+// BannerStrength 表 + GameDifficultyData.LinearCurve.Sample）：
+// · 普通旗 strength=1f → keys{Classic(1):1.5, Expert(2):2.0}；
+// · DD2 族 itemId 3837-3846 → BannerStrength=BannerEffect(0.2f) → keys{1.1,1.2}；
+// · Sample(Main.Difficulty) 为【分段线性 + 越尾键同斜率外推】——大师档(3) 经外推
+//   得 2.5/1.3，Main.Difficulty 走浮点难度轴（GameDifficultyLevel.cs:8-16，
+//   旅程 0.5 ≤ 首键 → 取首键值）。闭合式：k1+(difficulty−1)·(k2−k1)，x≤1 时取 k1。
+// （原 Game.ts 局部实现整体迁入本模块——applyBannerDamageDealt 单源消费，F1 收口）
+export function bannerDamageDealtSample(itemId: number, difficulty: number): number {
+  const dd2 = itemId >= 3837 && itemId <= 3846;
+  const k1 = dd2 ? 1.1 : 1.5;
+  const k2 = dd2 ? 1.2 : 2;
+  if (difficulty <= 1) return k1;
+  return Math.fround(k1 + Math.fround(k2 - k1) * (difficulty - 1));
+}
+
+/** 玩家攻端旗加伤统一出口（GetBannerBuffEffect DamageDealt 面）——原版三个消费位：
+ *  · ApplyDamageToNPC 内置段 Player.cs:20599（狱火光环/矿车冲撞/荆棘反伤/
+ *    TryHittingNPC 家族——凡走该函数的直伤通道都吃一次）；
+ *  · ProcessHitAgainstNPC :44658-61（近战挥击链，Game.ts 挥击段直接调 sampler）；
+ *  · Projectile.Damage_PVE :13388-90（全部玩家弹幕结算面）。
+ *  StrikeNPC 本体无旗逻辑 ⇒ 攻端各站【恰好一次】，语义 = `(int)((float)dmg×sample)`
+ *  截断；banner 未激活 / 弹 id 无旗档 → 原值返回。靶点判据 = 受击实体 vanillaId。 */
+export function applyBannerDamageDealt(
+  game: GameHooks,
+  target: { vanillaId?: number | null } | null | undefined,
+  dmg: number,
+): number {
+  const vid = target?.vanillaId;
+  if (!vid || vid <= 0) return dmg;
+  const g = game as unknown as { bannerNpcActive?: (id: number) => boolean; world?: never };
+  if (!g.bannerNpcActive?.(vid)) return dmg;
+  const bItem = bannerItemId(bannerOfNpc(vid));
+  if (!(bItem > 0)) return dmg;
+  const world = (game as unknown as { world?: Parameters<typeof mainDifficulty>[0] }).world;
+  return Math.trunc(dmg * bannerDamageDealtSample(bItem, mainDifficulty(world)));
+}
 
 // ---- ★α-H4 OnHit 域出口谓词（HittableForOnHitRewards 统一收口） ----------------
 // 原版 NPC.cs:91152 `!(CountsAsACritter(target) || target.immortal)`——OnHit 奖励域

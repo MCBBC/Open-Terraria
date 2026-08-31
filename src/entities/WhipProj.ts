@@ -409,9 +409,9 @@ export class WhipProj extends Entity {
     // 补接：真鞭伤害走本自有命中环,nano 乘区/party 彩带此前只在弹幕环
     // WeaponProj.hitEnemies 接过（grep 实证本文件原零引用）
     const whipImbuNano = ((game.player as unknown as {
-      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has(BuffType.ImbueNano)) === true;
+      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has?.(BuffType.ImbueNano)) === true;
     const whipImbuParty = ((game.player as unknown as {
-      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has(BuffType.ImbueParty)) === true;
+      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has?.(BuffType.ImbueParty)) === true;
     for (const p of pts) {
       // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
       // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)

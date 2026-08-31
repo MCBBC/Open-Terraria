@@ -1466,7 +1466,12 @@ const CHECK2XX_TYPES = new Set([104, 105, 207, 320, 337, 349, 356, 378, 410, 456
  *   WaterCheck→KillTile←SquareTileFrame←TileFrameImportant←case94 Check2x2）。
  *   96=Check2x2Style 独立支仍未派发（cs:87357 备案：未观测族）。95/126 上锚支
  *   （cs:49055-59=上格 solid 非平台门）按原文落地于 check2x2Sweep 内 k 列循环。 */
-const C2X2_MAIN_GROUP = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
+/* ★IIIII99b 收口裁剪：真值全集=上注 14 成员，但 100/125/126/173/…等在本仓写侧
+ *   （DungeonPass.place2x2D 裸 dgWr 全 f0,0）帧不一致 ⇒ 派发即误杀（g 链 #105
+ *   T100>0×8 @(441,729) 复归实证；toad 两地牢组同源）。keg(94) 的本仓放置侧
+ *   （CaveHousePass.placeFurniture case94 → frameY=style*36+row*18）自洽，故先单开
+ *   94 收口 toad #98/#99；其余成员随「地牢家具帧正确化」专项连带派发。 */
+const C2X2_MAIN_GROUP = new Set([94]);
 function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);

@@ -351,7 +351,7 @@ export class GLSpriteLayer {
    *  noMip=跳过 mip 链(超大纹理/恒放大或 NEAREST 采样的贴图:小地图/迷雾——
    *  8400×2400 的 mip 重生成是巨量 GPU churn,且它只在 zoom≥1 放大或 NEAREST
    *  下采样时被采样,MIN/mip 永不生效) */
-  texFromImage(key: string, img: TexImageSource, repeatX = false, noMip = false): TexEntry | null {
+  texFromImage(key: string, img: TexImageSource, repeatX = false, noMip = false, wrapY = false): TexEntry | null {
     if (this.unavailable || !this.gl) return null;
     const hit = this.texs.get(key);
     if (hit) { hit.stamp = ++this.stamp; return hit; }
@@ -371,7 +371,7 @@ export class GLSpriteLayer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeatX ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapY ? gl.REPEAT : gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
@@ -570,6 +570,158 @@ export class GLSpriteLayer {
     }
   }
 
+  // ---- 拖尾三角带 pass（2026-08-30 天顶剑 GL 化：obj58 像素语义 1:1）----
+  // 极光/水面同教训：条带类特效走 CPU canvas 逐像素 = 又慢又重（预乘/混合语义
+  // 对不齐）；本 pass 在共享 glfx 画布上以真 GPU 混合(ONE,INV_SRC_ALPHA)渲染
+  // VertexStrip 三角带，主 ctx 每帧一次 drawImage 合成。
+  private trailProg: WebGLProgram | null = null;
+  private trailUni: Record<string, WebGLUniformLocation | null> = {};
+  private trailVAO: WebGLVertexArrayObject | null = null;
+  private trailVbo: WebGLBuffer | null = null;
+  private trailIbo: WebGLBuffer | null = null;
+  /** 帧内已有条带（首个条带负责清屏） */
+  trailDirty = false;
+
+  private static readonly TRAIL_VS = `#version 300 es
+layout(location=0) in vec2 aPos;      // 世界 px
+layout(location=1) in vec4 aColor;    // 顶点色(含沿程淡出与 Opacity 折叠)
+layout(location=2) in vec3 aTC;       // (progress, distAcross, dist)
+uniform vec2 uCam;                    // 相机中心(世界 px)
+uniform vec2 uHalf;                   // 视半宽(设备 px; y 已含 DPR)
+out vec4 vColor;
+out vec3 vTC;
+void main(){
+  vec2 clip = vec2((aPos.x - uCam.x) / uHalf.x, -(aPos.y - uCam.y) / uHalf.y);
+  gl_Position = vec4(clip, 0.0, 1.0);
+  vColor = aColor; vTC = aTC;
+}`;
+
+  private static readonly TRAIL_FS = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in vec3 vTC;
+uniform sampler2D uS0;   // UseImage0（Extra_201 等）
+uniform sampler2D uS1;   // UseImage1（Extra_193 等）
+uniform vec4 uSSD;       // uShaderSpecificData=(4,0,0,4)
+out vec4 oC;
+void main(){
+  float p = vTC.x;                       // progressOnStrip（chronological, oldest=0）
+  float across = vTC.z != 0.0 ? vTC.y / vTC.z : 0.0;   // B 侧 0、A 侧 1
+  float wEnv = p * 1.5 - 0.5;            // mad r0.w（alpha 线性包络）
+  float ph = p * uSSD.x + uSSD.y;        // 锯齿相位（obj58 r0.x 前段）
+  vec2 uv = vec2(fract(abs(ph)), across);// frc+abs（cmp 分支在 Repeat 下不可见）
+  float gate = texture(uS1, uv).x;       // texld s1（obj58 只读 .x 进 edge）
+  vec4 blade = texture(uS0, uv);         // texld s0
+  vec4 col = blade * vColor;             // mul v0
+  float edge = clamp((gate - wEnv) * 2.0, 0.0, 1.0);   // add+add_sat
+  float dswInv = uSSD.w != 0.0 ? 1.0 / uSSD.w : 0.0;   // 预着色器 c2.x=1/SSD.w
+  float dim = 1.0 - ph * dswInv;                       // mad r0.x（锯齿 dim——线性于 p）
+  vec4 r0 = vec4(dim, edge, 1.0, max(wEnv, 0.0));      // 尾乘四 lane（反汇编逐通道）
+  vec4 oc = col * edge;                  // mul r1, r0.y（标量广播）
+  oc *= r0;                              // mul r0, r0, r1（lane 独立）
+  oC = vec4(oc.rgb * oc.a, oc.a);        // 预乘适配 (ONE, INV_SRC_ALPHA)
+}`;
+
+  /** 惰性编译拖尾程序（失败→trailOK=false 永久走 2D 兜底） */
+  private ensureTrail(): boolean {
+    if (this.unavailable || !this.gl) return false;
+    if (this.trailProg) return true;
+    const gl = this.gl;
+    const mk = (type: number, src: string): WebGLShader | null => {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.warn('[GLSpriteLayer] trail shader 编译失败:', gl.getShaderInfoLog(sh));
+        gl.deleteShader(sh);
+        return null;
+      }
+      return sh;
+    };
+    const vs = mk(gl.VERTEX_SHADER, GLSpriteLayer.TRAIL_VS);
+    const fs = mk(gl.FRAGMENT_SHADER, GLSpriteLayer.TRAIL_FS);
+    if (!vs || !fs) return false;
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn('[GLSpriteLayer] trail 程序链接失败:', gl.getProgramInfoLog(prog));
+      return false;
+    }
+    this.trailProg = prog;
+    for (const n of ['uCam', 'uHalf', 'uS0', 'uS1', 'uSSD']) this.trailUni[n] = gl.getUniformLocation(prog, n);
+    this.trailVAO = gl.createVertexArray()!;
+    this.trailVbo = gl.createBuffer()!;
+    this.trailIbo = gl.createBuffer()!;
+    return true;
+  }
+
+  /**
+   * 帧首：调用方在首个条带前调用（清屏 + 相机 uniform）。
+   * viewW/viewH = 设备像素（glfx.canvas 同尺寸，调用方先 resize）。
+   */
+  trailFrameBegin(viewW: number, viewH: number, camX: number, camY: number): void {
+    if (!this.ensureTrail() || !this.gl) return;
+    const gl = this.gl;
+    this.resize(viewW, viewH);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.trailDirty) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.trailDirty = true;
+    }
+    gl.useProgram(this.trailProg);
+    gl.uniform2f(this.trailUni.uCam, camX, camY);
+    gl.uniform2f(this.trailUni.uHalf, viewW / 2, viewH / 2);
+    gl.uniform1i(this.trailUni.uS0, 0);
+    gl.uniform1i(this.trailUni.uS1, 1);
+    gl.bindVertexArray(this.trailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailVbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.trailIbo);
+    // stride = 9 floats: pos2 + color4 + tc3
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 36, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 36, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+  }
+
+  /**
+   * 单条条带（一条三角带 = 一次 drawElements）。
+   * verts = n×2 顶点交错 [x,y, r,g,b,a, progress, distAcross, dist]（9 floats/顶点）；
+   * idx = XNA PrepareIndices(includeBackside) 语义的索引（调用方生成）。
+   */
+  trailStrip(texS0: TexEntry, texS1: TexEntry, verts: Float32Array, idx: Uint16Array,
+    ssd: readonly [number, number, number, number]): void {
+    if (!this.ensureTrail() || !this.gl || !this.trailDirty) return;
+    const gl = this.gl;
+    gl.useProgram(this.trailProg);
+    gl.bindVertexArray(this.trailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.trailIbo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texS0.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texS1.tex);
+    // XNA MiscShaderData 默认 LinearWrap：无 mip 线性 + 双轴 REPEAT
+    if (!this.trailWrapSampler) {
+      const s = gl.createSampler()!;
+      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      this.trailWrapSampler = s;
+    }
+    gl.bindSampler(0, this.trailWrapSampler);
+    gl.bindSampler(1, this.trailWrapSampler);
+    gl.uniform4f(this.trailUni.uSSD, ssd[0], ssd[1], ssd[2], ssd[3]);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+    glStatDraw(this.statName, idx.length / 3);
+    gl.bindSampler(0, null); gl.bindSampler(1, null);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+  private trailWrapSampler: WebGLSampler | null = null;
+
   /** 全量释放(切世界/读档——★曾漏挂此链:连续读档逐次叠满 LRU=GB 级显存
    *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
@@ -580,6 +732,16 @@ export class GLSpriteLayer {
       for (const [, e] of this.texs) { this.gl.deleteTexture(e.tex); freed += e.bytes; }
       glStatDelete(this.statName, freed);   // #perf-gpulog:整包释放记净额
     }
+    if (!this.gl.isContextLost() && !this.objectsStale) {
+      if (this.trailProg) this.gl.deleteProgram(this.trailProg);
+      if (this.trailVAO) this.gl.deleteVertexArray(this.trailVAO);
+      if (this.trailVbo) this.gl.deleteBuffer(this.trailVbo);
+      if (this.trailIbo) this.gl.deleteBuffer(this.trailIbo);
+      if (this.trailWrapSampler) this.gl.deleteSampler(this.trailWrapSampler);
+    }
+    this.trailProg = null; this.trailVAO = null; this.trailVbo = null;
+    this.trailIbo = null; this.trailWrapSampler = null;
+    this.trailDirty = false;
     this.texs.clear();
     this.bytes = 0;
     this.canvas.width = 0;

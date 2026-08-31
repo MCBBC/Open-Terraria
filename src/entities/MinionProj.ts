@@ -17,7 +17,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
-import { Arrow, projFrameImg, projFrameCount } from './Arrow';
+import { Arrow, projFrameImg, projFrameCount, projSprite } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
@@ -145,7 +145,7 @@ export function lightningAuraCanHitFrom(
  *      学徒 T2 套装置 0.1（:69332 垂直覆盖大幅放宽）
  *  - deadBottomAngle（AI_134，:69481/:69503）：`(|vX| < |vY|·dba) 且 vY>0` 的
  *      陡下锥内候选拒（0.75,:69580）;上方目标恒通过
- *  - directionLock：AI_130 第二调用点 canChangeDirection=false（:69404 实参）——
+ *  - directionLock：AI_130 第二调用点 canChangeDirection=false（:69391 实参;首轮 :69375 缺省——★F8 校准）——
  *      `(float)direction * v.X < 0f` 即正后方候选跳过（开火帧不再回头转向;
  *      门不过 → 调用侧回落 (direction,0) 直射）。第一调用点 :69376 可换向=无此门 */
 export interface TowerAimGate {
@@ -174,7 +174,7 @@ export function towerAimGate(dxNorm: number, dyNorm: number,
     if (Math.abs(dxNorm) < Math.abs(dyNorm) * gate.deadBottomAngle && dyNorm > 0) return false;
   }
   if (gate.directionLock !== undefined) {
-    //（:69456 经 :69404 实参展开）direction*vX < 0 → 拒
+    //（:69456 经 :69391 实参展开）direction*vX < 0 → 拒
     if ((gate.directionLock as number) * dxNorm < 0) return false;
   }
   return true;
@@ -266,13 +266,45 @@ const MINION_SHOOT: Record<number, { shot: number; speed: number; cd?: number; r
   194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
   387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15, life: 300 },  // timeLeft=300(:28981)
   // Foxparks 族（AI_026 flag10 段 :62566-62753）：cd num135 42/30（1113 :62573）；
-  // 射程门 num139<800+num134（1113 num134+=360 :62674-62675 → 1160）； muzzleY = h/2-8 再 -2
-  // （:62740 vector14.Y-=2）；burn：1097 命中 ai[1]>0 → OnFire3(323)/否则 OnFire(24)
-  // （:11315-11318）——1094 ai[1]=0 恒火、1113 ai[1]=3/1 恒地狱火（:62744-62752）
-  1094: { shot: 1097, speed: 11, cd: 42, range: 800, life: 300, muzzleY: -10, burn: 'fire' }, // Foxparks 分支 :58784 再 -2
+  // 射程门 num139<800+num134（1113 num134+=360 :62674-62675 → 1160）； muzzleY=-10
+  // ★三轮蓝队 F5④ 核证：原版 vector14 = (pos.X+w/2, pos.Y+h/2−8)＝【Center−8】
+  //   （:62706,h/2 在原式里即盒心项）→flag8 支 :62740 再 −2 ⇒ Center−10。本表
+  //   muzzleY 消费端 = this.cy+muzzleY ⇒ 常数 -10 对任意 h 精确成立（非 h-派生缺位，
+  //   是"Center 相对"语义本身——真盒扩容前后零视觉差,登记核证结论）。burn：
+  //   1097 命中 ai[1]>0 → OnFire3(323)/否则 OnFire(24)（:11315-11318）——
+  //   1094 ai[1]=0 恒火、1113 ai[1]=3/1 恒地狱火（:62744-62752）
+  1094: { shot: 1097, speed: 11, cd: 42, range: 800, life: 300, muzzleY: -10, burn: 'fire' }, // Center−10 = :62706−8 & :62740−2
   // 1113 索敌检索 1160（:62674-62675 num134+=360 → num139<800+360 :62691；approach num151=450+180 :62672/:62674）
   1113: { shot: 1097, speed: 11, cd: 30, range: 1160, search: 1160, life: 300, muzzleY: -10, burn: 'hellfire' }, // 6149 可靠的火绒狐（1457 新）
 };
+
+/** ★三轮蓝队 F5②：MinionProj SetDefaults 真盒单源读口（尺寸初始化链同步本函数）。
+ *  Game.spawnDigtoiseOnCursor（Game.ts:12818 调用点在并行 α 的 Game 属主作业区外沿,
+ *  本批不改其行）消费形：NewProjectile(x*16+8, y*16−32, …)=「中心」语义（Player.cs:
+ *  50043 :50044 与 Projectile.cs NewProjectile X/Y=中心链一致）——落位派生式为
+ *  `new MinionProj(x*TILE + 8 - bx.w / 2, y*TILE - 32 - bx.h / 2, …)`；旧实现把中心点
+ *  直接当盒左上 ⇒ 钻地龟(34×34)整体右下偏半盒 17px。放大前后视觉差：出场摆正后
+ *  无差（vy=15 下坠+挖掘 AI 自纠),首帧入场动画与三列净空门(x±1×y-2..y-1)判定面
+ *  对齐上移；16×16 旧假设弹（如随从通用路 spawnMinion 的 MouseWorld 点）不在本批域。
+ *  本导出未接线前返回值仅供测试/调用方自取（先例：pickSentryLandingSpot 导出缝）。 */
+export function minionTrueBox(projId: number): { w: number; h: number } {
+  switch (projId) {
+    case 1098: case 1123: return { w: 34, h: 34 };       // 钻地龟（:10245-10246/:10507-10508）
+    case 1093: case 1112: case 1118: case 1119: return { w: 14, h: 22 };
+    case 1113: return { w: 18, h: 18 };
+    case 1022: return { w: 20, h: 30 };                  // 蘑菇小伙伴（:9670-9671）
+    case 663: return { w: 30, h: 54 };                   // :7133-7134
+    case 665: return { w: 28, h: 58 };                   // :7141-7144
+    case 667: return { w: 28, h: 60 };                   // :7145-7148
+    case 677: case 678: case 679: return { w: 26, h: 54 };   // :7244-7245
+    case 308: return { w: 80, h: 74 };                   // 冰九头蛇（:4001-4002）
+    case 377: return { w: 66, h: 50 };                   // 蜘蛛皇后（:4619-4620）
+    case 641: case 643: return { w: 32, h: 32 };         // 月门/彩虹水晶（:6919/:6932）
+    case 966: return { w: 18, h: 60 };                   // 猎犬底座（:9146-9147）
+    case 1025: return { w: 42, h: 38 };                  // 悬空毒眼球（:9710-9711）
+    default: return { w: 16, h: 16 };                    // MinionProj 缺省兜底（构造期字段）
+  }
+}
 
 /** aiStyle 53 定点哨兵表（AI :27172-27382 1:1）：初冷 ai[0]=120（:27180），
  *  射速 ai[0] 归零重置 60（966 猎犬 90，:27282-27288），弹速 9/9/12.5。
@@ -3122,6 +3154,25 @@ export class MinionProj extends Entity {
     else if (projId === 665) { this.w = 28; this.h = 58; }      // :7141-7144 覆写
     else if (projId === 667) { this.w = 28; this.h = 60; }      // :7145-7148 覆写
     else if (projId === 677 || projId === 678 || projId === 679) { this.w = 26; this.h = 54; }  // :7244-7245
+    // ★三轮蓝队 F5③：法杖系哨兵 SetDefaults 真盒补注册（物品 1572/2366/3571/3569/
+    //   5119/5463 → shoot 308/377/643/641/966/1025,vanilla-itemfunc.json）——此前落
+    //   16×16 兜底 ⇒ 判定盒/索敌锚（AI_053 炮口 :27289-27305 为盒相对式）与贴图错位。
+    //   真盒扩容前后视觉差说明：
+    //   · 308 冰九头蛇 16→80×74（:4001-4002）：命中判定从芯点扩到塔身全影,
+    //     索敌锥区随盒心右移；旧绘制因整图兜底锚无视觉漂移（贴图本按帧切片居中）
+    //   · 377 蜘蛛皇后 16→66×50（:4619-4620）：贴图设计恰 66×50 ⇒ 绘制零变化、
+    //     纯判定面扩容（打它更实了）
+    //   · 641 月门 / 643 彩虹水晶 16→32×32（:6919-6920/:6932-6933）：传送门弹拾取/
+    //     水面等盒判加宽;悬浮位不受影响（FLOATING_SENTRIES 免落地扫描）
+    //   · 966 猎犬底座 16→18×60（:9146-9147）：盒高 60 贴合石桩立柱,炮口扇区
+    //     （Bottom 锚带）对位上移 22px;弹落点可见更准
+    //   · 1025 悬空毒眼球 16→42×38（:9710-9711）：悬浮盒≈贴图 46×62 帧体,
+    //     命中判定追平眼柄轮廓
+    else if (projId === 308) { this.w = 80; this.h = 74; }
+    else if (projId === 377) { this.w = 66; this.h = 50; }
+    else if (projId === 641 || projId === 643) { this.w = 32; this.h = 32; }
+    else if (projId === 966) { this.w = 18; this.h = 60; }
+    else if (projId === 1025) { this.w = 42; this.h = 38; }
   }
 
   /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
@@ -3332,7 +3383,7 @@ export class MinionProj extends Entity {
           if (this.sCool > 0) this.sCool--;
         } else {
           if (this.sFireT === 12) {
-            // 开火帧重索敌（:69404，canChangeDirection=false → directionLock=现朝向；
+            // 开火帧重索敌（:69391，canChangeDirection=false → directionLock=现朝向；
             // 正后方候选被 :69456 `direction*vX<0` 拒）——门不过 → 沿入态朝向直射
             // （原版 num11==-1 支 vector2=(direction,0)）
             const s = spot();
@@ -3473,12 +3524,18 @@ export class MinionProj extends Entity {
             }
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
             zapped = true;
-            // 命中 armorPenetrationPercent=1（100% 护穿，:12443——penPercent 通道
-            // 2026-08-13 接通）;tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
+            // 命中 armorPenetrationPercent 门（Projectile.cs:13266-13269）：
+            //   `if ((type == 688||689||690) && targetNPC.type != 68 && targetNPC.defense < 999)`
+            //   ⇒ 仅当受害者非 68（地牢守卫族）且防御 <999 才置 100% 护穿——高防/守卫豁免。
+            //   ★三轮 η 红队：旧实现无条件传 penPercent=1（且锚写死 :12443 属死锚）
+            //   ⇒ 防≥999 受害者的退款池计算随 penAdd 整体变形。tag 伤 ×0.5
+            //   （ProjectileID.cs:31 SummonTagDamageMultiplier）
+            const vAura = en as unknown as { vanillaId?: number | null; def?: { defense?: number } };
+            const penPctAura = vAura.vanillaId !== 68 && (vAura.def?.defense ?? 0) < 999 ? 1 : 0;
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
-            en.hurt(res.dmg, 0, 0, game, 0, false, 1, true, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443);fromPlayer=DPS 计
+            en.hurt(res.dmg, 0, 0, game, 0, false, 1, true, penPctAura); // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
           // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，
@@ -4180,6 +4237,33 @@ export class MinionProj extends Entity {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }
     const img = projFrameImg(this.projId, frame);
+    // ---- ★三轮蓝队 F5①：爆炸烈焰塔 663/665/667 半帧专绘（Main.cs:34075-34086）----
+    // 原版帧内是【左右两半镜像塔身】（rectangle23.Width/=2 后按 ai[2] 选半——ai[2]==1
+    // 仅哨兵背包携行态,本仓不建模 ⇒ 恒取左半,与原版默认摆位一致）；锚 = Bottom 系：
+    // draw pos=BoxBottom、origin=(半宽/2, 半高−4) ⇒ 贴图底 4px 探出盒底。旧通用路径
+    // 以整宽帧(74/96/92px)从盒顶左落锚=双影横排+整体偏下（放大前后视觉差最重一档）。
+    if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
+      const sheet = projSprite(this.projId);
+      if (sheet) {
+        const framesN = Math.max(1, frames);
+        const fh = sheet.height / framesN;
+        const halfW = Math.floor(sheet.width / 2);
+        const sx = 0;                                    // ai[2]==0 → 左半
+        const sy = Math.round(frame * fh);   // 与 projFrameImg round 语义同源
+        ctx.save();
+        if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+        // 炮向翻转：AI_130 首帧 direction=spriteDirection=player.direction（:69340）——
+        // 原版由 SpriteEffects 镜像；本仓 scale(-1,1) 绕锚镜像,源半恒取左半
+        ctx.translate(this.cx, this.cy + this.h / 2);
+        if (this.facing < 0) ctx.scale(-1, 1);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sheet as CanvasImageSource,
+          sx, sy, halfW, fh,
+          -halfW / 2, -(fh - 4), halfW, fh);              // origin=(半宽/2, 半高−4)
+        ctx.restore();
+        return;
+      }
+    }
     ctx.save();
     // 帕鲁出场淡入（Projectile alpha 通道：绘制色 = 原色 × (255-α)/255——
     // DoPalAppearEffect 每 tick α-15，17t 全显 :39509-39515）
@@ -4363,7 +4447,11 @@ export class TigerPounce extends Entity {
       en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
         add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
-      en.hurt(res.dmg, 0, -1, game, 0, false, 0, true); // knockBack=0（:46470 生成传 0）;fromPlayer=DPS 计
+      // ★F10（2026-08-31 蓝队三批）：扑击弹 818 生成侧 knockBack=0（:46470
+      //  NewProjectile 尾参 0f）→ 原版 StrikeNPC 的 `knockBack>0f && knockBackResist>0f`
+      //  双门（NPC.cs:82144）整段不进——击退/冲量归零。旧 (0,-1) 冲量是自造位移，
+      //  与 Enemy.hurt 武器支 :12366 的同式双门不一致，归零对齐。
+      en.hurt(res.dmg, 0, 0, game, 0, false, 0, true); // kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
     }
     void this.ownerRef;
   }

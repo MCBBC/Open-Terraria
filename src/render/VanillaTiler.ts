@@ -16,7 +16,7 @@ import {
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
-import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, TILE_ANIM_RATE } from './TileAnim';
+import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, TILE_ANIM_RATE } from './TileAnim';
 import { tileFrameCapture as cap } from '../debug/TileFrameCapture';
 
 /** 捕获用素材宽读取（vmeta.sheet → ensureVImage 缓存直取，无请求副作用路径已有） */
@@ -1233,8 +1233,10 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       // 405 壁炉：frameX≥54 列静止（TileDrawing.cs:5524 门）；406 烟囱：带折算
       // （cs:5448-5462）——offset 后须钳制在素材界内，防止“播到透明区”整块消失
       // （2026-08-28 用户双帧实拍：烟囱周期性整体隐形）
+
       let extra = sheet === 405 ? fireplaceAddFrY(fx)
         : sheet === 406 ? chimneyAddFrY(fy)
+        : sheet === 272 ? cogAddFrY(x, y)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
       const reqExtra = extra;
@@ -1252,8 +1254,10 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // = sy + 帧序×90。与 style 分支的 animYOffset 叠加语义一致（ChunkCache 已按
     // TILE_ANIM_RATE 登记重烘焙）
     if (r && TILE_ANIM_RATE[sheet]) {
+
       let extra = sheet === 405 ? fireplaceAddFrY(fx)
         : sheet === 406 ? chimneyAddFrY(fy)
+        : sheet === 272 ? cogAddFrY(x, y)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
       const reqExtra = extra;
@@ -1335,6 +1339,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       //   会叠加 animYOffset 默认 pitch 的错误偏移再与 drawAdjust 尾部二次相加
       reconExtra = sheet === 405 ? fireplaceAddFrY(fx)
         : sheet === 406 ? chimneyAddFrY(fy)
+        : sheet === 272 ? cogAddFrY(x, y)   // ★272 经相位 helper，勿进通用偏移
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       ofy += reconExtra;
     }

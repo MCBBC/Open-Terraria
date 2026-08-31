@@ -90,6 +90,7 @@ describe('BeetleMeter buff 钉值管道', () => {
   it('裸宿主（无 buffs）不炸——blue-r2 既有用例形态兼容', () => {
     const host = { beetleOrbs: 0 };
     const m = new BeetleMeter();
+    m.registerHit(500, true);
     expect(() => m.tick(host, true, false)).not.toThrow();
     expect(host.beetleOrbs).toBe(1);
   });

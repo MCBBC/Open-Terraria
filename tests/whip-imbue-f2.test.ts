@@ -48,7 +48,10 @@ function makeHooks(enemies: MockEnemy[] = []) {
     onEnemyKilled: () => {},
     spawnEnemy: () => {},
     spawnParticles: () => {},
+    notifyInventoryChanged: () => {},
+    playSfx: () => {},
     playSfxFiles: () => {},
+    showPickupLabel: () => {},
     // ★F2 出射口录制（types.ts:61 可选钩子——真实现 Game.spawnFriendlyProj :32877）
     spawnFriendlyProj: (e) => { spawned.push(e); },
   };
@@ -91,14 +94,15 @@ describe('F2：鞭命中环 nano ×1.05 / party 彩带 289', () => {
     withBuff.player.buffs.apply(BuffType.ImbueParty, 30);    // 泡泡糖浸剂 → meleeEnchant==7 档
     landOneHit(mkWhip(withBuff.player, 40), withBuff.hooks, e1);
     expect(e1.hits.length).toBe(1);
-    const confetti = withBuff.spawned.filter((x) => x instanceof ConfettiBurstProj)
-      as ConfettiBurstProj[];
+    const confetti =
+      withBuff.spawned.filter((x) => x instanceof ConfettiBurstProj) as ConfettiBurstProj[];
     expect(confetti.length).toBe(1);                          // 单发（原版 NewProjectile 一次）
     const c = confetti[0] as unknown as { x: number; y: number; w: number; h: number; vx: number; vy: number };
     expect(c.vx).toBe(3);
     expect(c.vy).toBe(-2);
-    expect(c.x + c.w / 2).toBeCloseTo(400, 5);               // Center.X 语义（ctor 收中心）
-    expect(c.y + c.h / 2).toBeCloseTo(600, 5);               // Center.Y
+    // 出射位 = 被命中敌当前 Center（landOneHit 已把敌挪到曲线控制点 → 用实时盒心对照）
+    expect(c.x + c.w / 2).toBeCloseTo(e1.x + e1.w / 2, 5);   // targetNPC.Center.X
+    expect(c.y + c.h / 2).toBeCloseTo(e1.y + e1.h / 2, 5);   // targetNPC.Center.Y
   });
 
   it('两浸剂同挂 → 乘区与出弹并行生效（门同支不互斥）', () => {

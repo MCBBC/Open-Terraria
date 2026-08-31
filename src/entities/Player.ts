@@ -190,8 +190,8 @@ const INV_EFFECTIVE_VIDS = new Set<number>([
   3123, 3124, 5358, 5359, 5360, 5361,  // PDA/REK3000/手机/贝壳手机三态
   5574, 5575, 5576,                    // 幸运饰族（hasLuck_*）
   // 机械族（RefreshMechanicalAccsFromItemType 本仓建模面——★F3 补 4767/5323/
-  // 4346/5095：漏键=袋外背包放取相应饰品不失效缓存）
-  3619, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095,
+  // 4346/5095：漏键=袋外背包放取相应饰品不失效缓存；★F5③ 补 6190）
+  3619, 3624, 2216, 3061, 5126, 4767, 5323, 4346, 5095, 6190,
 ]);
 
 /** RefreshMechanicalAccsFromItemType 的仓内旗集（机械族，Player.cs:12916-12930
@@ -204,7 +204,18 @@ interface MechanicalAccFlags {
   dontHurtCritters: boolean;
   preventAllItemPickups: boolean;   // 4346（Prevent All Item Pickups 位——本次补建模成面）
   hasLucyTheAxe: boolean;           // 5095 Lucy the Axe 持斧位
+  oldStyleParkour: boolean;         // ★F5③ 6190 旧世界跑酷指南（Player.cs:12933-12936）
 }
+
+/** ItemID.Sets.IgnoresEncumberingStone（ItemID.cs:250 字面）：preventAllItemPickups
+ *  （4346 Prevent All Item Pickups / Encumbering Stone 拖累石）生效期唯一放行拾取的
+ *  白名单 = 心/星族（CanAcceptItemIntoInventory Player.cs:35172-35179 的取反面）。
+ *  ★F5① 消费端挂门后自 1457 反编译原表逐 id 抄录：58 心 / 184 魔力星 /
+ *  1734 大红心 / 1735 大魔力星 / 1867 圣诞之心 / 1868 圣诞之星 /
+ *  3453·3454·3455 心红花红(命匣档) / 4143 法力斗篷之星 */
+export const IGNORES_ENCUMBERING_STONE_VIDS = new Set<number>([
+  58, 184, 1734, 1735, 1867, 1868, 3453, 3454, 3455, 4143,
+]);
 function refreshMechanicalAccsFromItemType(m: MechanicalAccFlags, vid: number): void {
   if (vid === 3619) m.mechShowWires = true;                 // Mechanical Lens（:12920 档族）
   else if (vid === 3624) m.autoActuator = true;             // Actuation Rod
@@ -212,7 +223,9 @@ function refreshMechanicalAccsFromItemType(m: MechanicalAccFlags, vid: number): 
   else if (vid === 4767 || vid === 5323) m.dontHurtCritters = true;            // Guide To Critter Companionship/双件套
   else if (vid === 4346) m.preventAllItemPickups = true;    // Prevent All Item Pickups
   else if (vid === 5095) m.hasLucyTheAxe = true;            // hasLucyTheAxe
+  else if (vid === 6190) m.oldStyleParkour = true;          // ★F5③ 旧世界跑酷指南（:12933-12936）
 }
+export { refreshMechanicalAccsFromItemType };
 
 /** ItemID.Sets.WorksInVoidBag（ItemID.cs:82 `Factory.CreateBoolSet(true, 4346, 5095)`）：
  *  默认全真，例外仅此二件——虚空袋内【不】重放信息/机械刷新。 */
@@ -220,6 +233,23 @@ const WORKS_IN_VOID_BAG_FALSE = new Set<number>([4346, 5095]);
 /** 机械族 vid 全集（equipStatsKey 虚空袋段用；与上方
  *  refreshMechanicalAccsFromItemType 的分支表一一对应，改其一必同步另一） */
 const MECH_ACC_VIDS = new Set<number>([3619, 3624, 2216, 3061, 5126, 4767, 5323]);
+
+/** Item.questItem 全集（1457 反编译枚举：Item.cs 全文仅 DefaultToQuestFish()
+ *  :27653-27654 一处置 true——调用面 = 任务鱼区间 `type >= 2450 && type <= 2488`
+ *  （:24153 段 if 块内）∪ `case 4393: case 4394:`（:37327 两 case 共支）。
+ *  ★F4 CanVoidVaultAccept（Player.cs:39735-39747）的 questItem 半臂拒收源表；
+ *  另一半 = type==3822（DD2EnergyCrystal 埃特尼亚魔力）。 */
+export const QUEST_ITEM_VIDS = new Set<number>((() => {
+  const s = new Set<number>();
+  for (let v = 2450; v <= 2488; v++) s.add(v);
+  s.add(4393); s.add(4394);
+  return s;
+})());
+
+/** CanVoidVaultAccept（Player.cs:39735-39747）仓内形：questItem ∪ 3822 拒。 */
+export function canVoidVaultAccept(vanillaVid: number): boolean {
+  return vanillaVid !== 3822 && !QUEST_ITEM_VIDS.has(vanillaVid);
+}
 
 const IMMUNE_ACC: Record<number, number[]> = {
   885: [30], 886: [36], 887: [20], 888: [22],
@@ -286,6 +316,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     dontHurtCritters: boolean;   // ★E：4767/5323（RefreshMechanicalAccs :12922-12924）
     preventAllItemPickups: boolean;   // ★F3：4346（WorksInVoidBag=false 例外面）
     hasLucyTheAxe: boolean;           // ★F3：5095
+    oldStyleParkour: boolean;         // ★F5③：6190 旧世界跑酷指南（:12933-12936）
     infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; kbGlove: boolean; yoyoString: boolean;
@@ -1190,7 +1221,7 @@ export class Player extends Entity {
   // ★F3 机械旗聚合器（GrantArmorBenefits 装备位 ∪ 背包 58 格 ∪ 虚空袋三路共用）
   const mech: MechanicalAccFlags = {
     mechShowWires: false, autoActuator: false, autoPaint: false, dontHurtCritters: false,
-    preventAllItemPickups: false, hasLucyTheAxe: false,
+    preventAllItemPickups: false, hasLucyTheAxe: false, oldStyleParkour: false,
   };
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSaveHuntress = false, ammoSaveChloro = false, ammoSaveCost80 = false, ammoSaveCost75 = false;
@@ -1842,6 +1873,7 @@ export class Player extends Entity {
       dontHurtCritters: dontHurtCrittersAcc,   // ★E（4767/5323——小动物免伤面）
       preventAllItemPickups: mech.preventAllItemPickups,   // ★F3（4346——WorksInVoidBag=false 面）
       hasLucyTheAxe: mech.hasLucyTheAxe,                    // ★F3（5095）
+      oldStyleParkour: mech.oldStyleParkour,                // ★F5③（6190 旧世界跑酷指南）
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSaveHuntress, ammoSaveChloro, ammoSaveCost80, ammoSaveCost75,
       kbGlove, autoReuseGlove, yoyoString, magmaStone, titaniumStorm,
@@ -1945,14 +1977,6 @@ export class Player extends Entity {
    *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。原"猛爪手套 ×2"档已废——
    *  原版猛爪手套 211 只给 meleeSpeed += 0.12 + autoReuseGlove（:14559-14562），
    *  0.12 已经 vanilla-accfx.json 走 equipStats.meleeSpeed，不应再翻倍。 */
-  /** 甲虫力量档球数（buff 98/99/100 在场派生——原版攻伤/攻速由 UpdateBuffs 的
-   *  98-100 分支直加（:10518-10520），穿防御壳攒出的球【不】给猛攻数值） */
-  private get beetleMightOrbs(): number {
-    return this.buffs.has(BuffType.BeetleMight3) ? 3
-      : this.buffs.has(BuffType.BeetleMight2) ? 2
-        : this.buffs.has(BuffType.BeetleMight1) ? 1 : 0;
-  }
-
   get attackSpeedMult(): number {
     const raw = (1 + this.equipStats.meleeSpeed)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
@@ -1962,6 +1986,14 @@ export class Player extends Entity {
       * (1 + this.buffs.wellFedMeleeSpeed)                   // 食物近战速 +5/7.5/10%（:11528+）
       * (1 + this.buffs.hungerMeleeSpeed);                   // 饥饿/极饿近战速 -5/-10%（:11566+/:11589+）
     return raw > 3 ? 1 / 3 : 1 / raw;                        // :28566-28573
+  }
+
+  /** 甲虫力量档球数（buff 98/99/100 在场派生——原版攻伤/攻速由 UpdateBuffs 的
+   *  98-100 分支直加（:10518-10520），穿防御壳攒出的球【不】给猛攻数值） */
+  private get beetleMightOrbs(): number {
+    return this.buffs.has(BuffType.BeetleMight3) ? 3
+      : this.buffs.has(BuffType.BeetleMight2) ? 2
+        : this.buffs.has(BuffType.BeetleMight1) ? 1 : 0;
   }
   /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；四系分道——summon 是独立
    *  minionDamage 链：装备走 SUMMON_GEAR/SET，不含 magic-only 来源） */
@@ -3387,10 +3419,14 @@ export class Player extends Entity {
       // （30mph vs 原版 15mph，2026-08-16 默认移速审计修）
       let accRun = this.equipStats.accRunSpeed || 3;
       // 1457: accRunSpeed 也吃减速 debuff（Update :26207-26210 accRunSpeed *=
-      // strongestMoveSpeedDebuff，oldStyleParkour 豁免——本仓无 6190 老派跑酷书恒吃）；
-      // 1456 的 `chilled → accRunSpeed = maxRunSpeed` 门改为仅 oldStyleParkour
-      // （HorizontalMovement :19901-19903）——本仓无该配饰，Chilled 不再压跑步上限
-      accRun *= strongestSlow;
+      // strongestMoveSpeedDebuff）——★F5③ 豁免臂接通：6190 旧世界跑酷指南
+      // （RefreshMechanicalAccsFromItemType :12933-12936 → equipStats.oldStyleParkour）
+      // 在场时不乘；HorizontalMovement 头 `chilled && oldStyleParkour` 支
+      // （:19901-19903）同步落地——accRun ← maxRun（此时 maxRun 已含 debuff，
+      // 与原文 Update :26204-26210 先行减完再进 HorizontalMovement 的值序一致）
+      const parkourBook = this.equipStats.oldStyleParkour === true;
+      if (!parkourBook) accRun *= strongestSlow;
+      else if (this.buffs.has(BuffType.Chilled)) accRun = maxRun;
       if (mnt) {
         // :26329-26331：mounted 时 maxRun=RunSpeed / accRun=DashSpeed / runAcc=Acceleration
         //（CanUseWings 族走 Math.max 分支省略——本仓坐骑恒禁翼）。
@@ -3635,14 +3671,29 @@ export class Player extends Entity {
       // 是蛙蹼族配饰/系统设置授予的免松键档（:14507 等）。R5-F11/F12：旧 held 门
       // （inputJump+vy>-2+8t cd）= 全员恒 autoJump 语义，已废）
       const jumpEdge = this.inputJump && !this.jumpEdgePrev;
+    // ---- ★F2/Note① 移动相三段时序归位：HorizontalMovement 尾五分块
+    //      （1457 Player.cs:20238-20320 CollideWithNPCs，随 HorizontalMovement :26889 跑）
+    //      先于 JumpMovement 三踩踏循环（:20693-20801，JumpMovement :26945 头部），
+    //      再进 controlJump 清湿——本仓自 F6 批的"移动相尾（摔伤段后）双通道"位次
+    //      上提到跳跃门前。同帧脚底带+面向带双候选仍按原文常数集由横撞先手
+    //      （高尔夫车 17：kb10/npc 免疫30/玩家钟12 vs 竖踩 kb5/npc 免疫12），第二通道
+    //      因 npc immune≠0 门自然落空；DashMovement 全结算面（含 dash==6 冲撞命中）
+    //      天然排在本位之后=原文 :26958 序。D1 横撞族阈值/伤害/击退/免疫档见
+    //      MountCombat.chargeConfigs；踩踏三支参数见 SLIME_STOMP/GOLF_CART_STOMP。
+    //      速度语境红利：横撞阈值从此读 DashMovement 阻尼【前】的 vx（原文位置等价
+    //      ——阻尼在 DashMovement :21424+ 才跑）。
+    mountHorizontalCharges(this, game);
+    mountJumpStomps(this, game);
     // 控跳清湿（JumpMovement controlJump 头部，1457 :20805-20818 / 1456 :20366-20379）：
     // 骑史莱姆族坐骑时按住跳键即清 wetSlime——★原版 gate 无液体位置要求：controlJump
     // 块内直接判 mount.Active/IsSlimeMount/wetSlime>0，陆上残余同样按跳即刻清除（旧版曾
     // 把消费点嵌进下方水中分支 → 出水湿残余 ~30t 抑制踩踏且陆地按跳无法提前解压，
     // 2026-08-30 R3 复核外提）。原版 flag 对水下起跳门的完整放行链（flag2&&flag3 组合
-    // :20845）本仓未整体建模，出水跳仍走 vy==0/脚蹼门（近似）；时序登记：原版同一函数内
-    // 先跑三踩踏循环再进 controlJump 清湿，本仓跳跃管线与踩踏段（mountJumpStomps）分置两处
-    // ——清湿在本文件前段、踩踏在后段，同 tick 内仍保持"先清后踩"。
+    // :20845）本仓未整体建模，出水跳仍走 vy==0/脚蹼门（近似）。
+    // ★Note① 节拍复原：consumeWetSlimeOnJumpControl 自 stompSweep 【之后】调用——
+    // 恢复 vanilla"三踩踏循环先于 controlJump 清湿"的函数内先后（湿帧落地按住跳：
+    // 先判踩（wetSlime>0→竖踩 A 支拒绝）、后清湿、下一拍才可踩），拆分点=上一行
+    // mountJumpStomps 与本行之间的分界。
     // ★D2 出水起跳链（JumpMovement :20813-20818 + 外门 ：20845）：清湿发生的这一帧
     //  = 原文 flag=true——干门 `(sliding||vy==0)|flag` 放行任意 vy 的起跳（史莱姆坐骑
     //  水中起跳的完整链；旧近似只认 vy==0/脚蹼，出水跳全靠踩底）。该旗与 flipperJump
@@ -3983,6 +4034,8 @@ export class Player extends Entity {
       // （kbGlove ×2 / 泰坦 kbBuff ×1.5，:20800-20808）；命中 → eocDash=10、30t 冷却、
       // 反弹 vx=-dir×9 vy=-4（:20825-20840）
       if (eq.dash === 2 && this.eocDash > 0 && this.eocHitId < 0) {
+        let eocHitFlag = false;         // :21270/:21281 eocHit>=0 本轮快照
+        const parkourArm = eq.oldStyleParkour === true;   // ★F5③ 6190 两臂开关
         const bhx = this.x + this.vx * 0.5 - 4, bhy = this.y + this.vy * 0.5 - 4;
         const bhw = this.w + 8, bhh = this.h + 8;
         for (const e of game.enemies()) {
@@ -4014,11 +4067,23 @@ export class Player extends Entity {
           //  DashMovement 冲撞段 :21277 GiveImmuneTimeForCollisionAttack(4) 同位）
           grantCollisionAttackImmunity(this, 4);
           this.eocDash = 10;            // :20833
+          eocHitFlag = true;
           this.eocHitId = en.id ?? -2;  // :20840（后续帧不再对同一敌结算）
           this.dashDelay = 30;          // :20834 反弹并结束滑行
-          this.vx = -dir * 9;
-          this.vy = -4;
+          // ★F5③ inline 臂（:21272-21276）：跑酷书 6190 在场 → 命中迭代内即翻速
+          if (parkourArm) {
+            this.vx = -dir * 9;
+            this.vy = -4;
+          }
           break;
+        }
+        // ★F5③ post-loop 臂（:21281-21286）：非跑酷书走循环尾统一反弹，num4 取
+        // 【整轮终态】vx 符号或朝向——单命中 break 模型下终态 vx=±14.5（本帧无人写）
+        // ⇒ num4=dir 与 inline 同值；接通多命中续扫时两臂差异在此兑现。
+        if (eocHitFlag && !parkourArm) {
+          const num4 = this.vx !== 0 ? Math.sign(this.vx) : this.facing;   // :21283 num4
+          this.vx = -num4 * 9;
+          this.vy = -4;
         }
       }
       if (this.dashDelay > 0) {
@@ -4053,21 +4118,34 @@ export class Player extends Entity {
         //   R5-F14：旧恒 12/0.985/0.94/20——dash1 克盾衰减过快（20t 残速 74% vs
         //   原版 85%）、dash2 冷却短 1/3、dash3 阈值档错,均已修
         // ★F5① dash==6 滑行特例（:21521-21527）：`Sign(vx) != direction || dashType != 6`
-        // → num17=(dashDelay)=30、vx×0.3、dashTime=0；dashType!=6 半支在本仓由
-        // mountDash6Active 位承载恒假（位只在 mount∈{62..65} 触发帧置真）。
+        // → num17=(dashDelay)=30、vx×0.3、dashTime=0。
+        // ★F1 dashType!=6 半支修正：原文 dashType 由 DashMovement 头逐帧覆写
+        //（:21211-21214 mount∈{62..65} → dashType=6；ResetEffects :18775 每帧清 0）
+        //⇒ 运行期恒等式 dashType==6 ⟺ 本 tick 仍在 Chillet 鞍上。旧近似把半支承载在
+        //"mountDashing6()" 上——滑行中途下鞍瞬间既失收敛判定又落配饰档污染
+        //（eq.dash∈{2,3,4} 会冒充覆写）；现拆 m6Glide(本轮滑行发起源=dash6,即原文
+        // dash 字段保持 6 的窗口)与 onChillet6(dashType==6 位)两个真值面：
+        //   反向 ⟺ Sign(vx)!=direction；脱离鞍位 ⟺ !onChillet6 ⇒ 任一成立即收敛。
         let m6Ended = false;
-        if (this.mountDash6Active && this.mountDashing6()) {
-          if (Math.sign(this.vx) !== this.facing) {
+        const m6Glide = this.mountDash6Active;       // 本轮滑行=dash6 发起（= 原文 dash==6）
+        const onChillet6 = this.mountDashing6();     // dashType==6 位（本 tick 在鞍上）
+        if (m6Glide) {
+          if (Math.sign(this.vx) !== this.facing || !onChillet6) {
             m6Ended = true;
             this.vx *= 0.3;                  // velocity.X *= 0.3f（:21525）
           } else {
             // 同向滑行：尘/光照段未建模视觉面；dashDelay 保持 -1 继续阻尼
           }
         }
-        const dashNum13 = eq.dash === 3 ? 14 : 12;
-        const dashNum14 = (eq.dash === 2 || eq.dash === 3 || eq.dash === 4) ? 0.985 : 0.992;
-        const dashNum16 = (eq.dash === 2 || eq.dash === 3 || eq.dash === 4) ? 0.94 : 0.96;
-        const dashNum17 = m6Ended ? 30 : (eq.dash === 2 ? 30 : 20);   // :21523 num17=(dashDelay)=30（反向收敛特例）;其余按各档
+        // ★F1 滑行参数基础档化：覆写表按【滑行发起源的 dash 档】查（原文 num13-17 只认
+        // dash 字段值 :21434-21499）——dash6 发起的滑行 dash==6 无任何条目=恒基础档
+        // 12/0.992/0.96/20；骑乘期 eq.dash 不得污染。配饰档（eq.dash∈{1,2,3}）只在
+        // 配饰发起的滑行生效（含骑 CanDash 非 6 型坐骑 56-61 场景,dash 保持装备值）。
+        const accOverridden = !m6Glide && (eq.dash === 2 || eq.dash === 3 || eq.dash === 4);
+        const dashNum13 = (!m6Glide && eq.dash === 3) ? 14 : 12;
+        const dashNum14 = accOverridden ? 0.985 : 0.992;
+        const dashNum16 = accOverridden ? 0.94 : 0.96;
+        const dashNum17 = m6Ended ? 30 : (!m6Glide && eq.dash === 2 ? 30 : 20);   // :21523 num17=(dashDelay)=30（反向收敛特例）;其余按各档
         if (m6Ended) { this.dashDelay = 30; this.mountDash6Active = false; }   // dashTime=0 无独立窗建模
         // num15（:21429 出口钳速）= max(accRunSpeed, maxRunSpeed)，maxRunSpeed 已吃
         // Update :26204-26210 moveSpeed 乘区（buffs.moveSpeedMult × strongestSlow——
@@ -4128,6 +4206,12 @@ export class Player extends Entity {
             if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
             if (eq.dash === 3) { this.solarDashing = true; this.solarDashConsumed = false; } // :21258-21260 SolarDashStart
             }
+          } else if (this.ridingMount && !MOUNT_CAN_DASH_TYPES.has(this.mount.type)) {
+            // ★Note② 非 CanDash 坐骑：:21579 早退在 DoCommonDashHandle 前整体 return
+            // ——【窗口同样不登记】（dashTime ±15 不落）。旧版只挡消费端：鞍上首击
+            // 登记的残窗 + 快速下鞍后二击可消费 = 原文不可达路径。
+            // 门集 = MountID.Sets.CanDash {56..65}（MountID.cs:11 字面）。
+            this.dashT = 0;
           } else {
             this.dashT = dir * 15;        // :21316-21321 首击登记双击窗（dashTime ±15）
           }
@@ -4371,16 +4455,10 @@ export class Player extends Entity {
       if (this.wetSlime === 0 && this.jumpHold > cap5) this.jumpHold = cap5;
     }
 
-    // ---- ★F6 坐骑碰撞攻击双通道（顺序对齐原文）：HorizontalMovement 尾五分块
-    //      （1457 Player.cs:20238-20320 CollideWithNPCs）先于 JumpMotion 三踩踏循环
-    //      （:20693-20801），两者均在 Update 移动相尾、TileCollision 积分【前】调用
-    //      （:26889/:26945；此前本仓挂在摔伤段之后的碰撞后位且竖先横后——顺序与速度
-    //      语境双偏离已改）。同帧脚底带+面向带双候选时按原文常数集由横撞先手
-    //      （高尔夫车 17：kb10/npc 免疫30/玩家钟12 vs 竖踩 kb5/npc 免疫12），第二通道
-    //      因 npc immune≠0 门自然落空。D1 横撞族阈值/伤害/击退/免疫档见
-    //      MountCombat.chargeConfigs；踩踏三支参数见 SLIME_STOMP/GOLF_CART_STOMP。
-    mountHorizontalCharges(this, game);
-    mountJumpStomps(this, game);
+    // ---- 坐骑碰撞攻击双通道已按原文三段时序上提（★F2/Note①，HorizontalMovement 尾
+    //      → JumpMovement 头，今在跳跃门 `justClearedWetSlime` 行上方）——此处原挂位
+    //      与 dash 段（DashMovement 面 :26958）的先后关系随之上对齐。移动相尾仍保持
+    //      位移积分【前】语境不变（TileCollision 在更晚的 moveAndCollide）。
 
     this.dropThrough = !!this.inputDown || this.ratClimbVy !== null;   // 爬墙期间平台穿透（:27777）
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
@@ -6955,6 +7033,17 @@ export class Player extends Entity {
   /** 眼球伞云盖标记（Player.cs:1884 eyebrellaCloud——渲染层 DrawPlayer_38 消费） */
   eyebrellaCloud = false;
 
+  /** CanAcceptItemIntoInventory（Player.cs:35172-35179）★F5① 消费端面：
+   *  preventAllItemPickups（4346 拖累石——RefreshMechanicalAccsFromItemType
+   *  :12917-12919 主背包/装备/虚空袋三路聚合）生效期，世界物品拾取/拉取两通道
+   *  （GrabItems :35187 门 + CanPullItem :39453 门）只放行 IgnoresEncumberingStone
+   *  白名单成员（心/星族,ItemID.cs:250 字面）。
+   *  vanillaVid = 物品的原版 id（非原版物按不在白名单论=拒）。 */
+  canAcceptItemIntoInventory(vanillaVid: number): boolean {
+    if (!this.equipStats.preventAllItemPickups) return true;
+    return IGNORES_ENCUMBERING_STONE_VIDS.has(vanillaVid);
+  }
+
   // ---- 虫洞药水（item 2997 WormholePotion：HasUnityPotion/TakeUnityPotion
   //     Player.cs:41652-41697；消费链 = 观战键 B 传送 HandleSpectatingControls
   //     :16942-16947，CanWormholeToSpectating :17002-17009）----
@@ -6971,12 +7060,20 @@ export class Player extends Entity {
    *  【满背包溢流入虚空保险库】——PickupItemFromWorld.CanGoIntoVoidVault=true 门下
    *  （GetItemSettings.cs:13），背包 58 格接不住的余量进 bank4：占用堆叠先合并
    *  (CanStack=同 type;bank4 槽无词缀位) → 空位整堆落格。CanVoidVaultAccept
-   *  (:39715-39724)：questItem/3822(COFVEVE 恶心物) 拒——WorksInVoidBag 缺省全真
-   *  (SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。返回仍未入袋数量。
+   *  (:39735-39747)：questItem ∪ 3822(DD2EnergyCrystal 埃特尼亚魔力) 拒——WorksInVoidBag
+   *  缺省全真(SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。
+   *  返回仍未入袋数量。
+   *  ★F4 拒收门补挂（此前漏 CanVoidVaultAccept 半臂）：任务鱼 questFish 全表
+   *  （QUEST_ITEM_VIDS = DefaultToQuestFish 调用面 [2450..2488]∪{4393,4394}，见常量注）
+   *  与 3822 灌袋时原样返回——拒绝面=留在原地不掉入袋（vanilla :39705 门不过即
+   *  `return item;` 余量退回世界）。调用方 ItemDrop.ts 不改：dep==stack 自然走残余路径。
    *  ★原版语义澄清：虚袋不持续吸物,只在背包装不下时兜底（ItemSpaceForCofveve
    *  :39510-39525 只做"空位判定"）；本方法即溢流通道唯一入口。 */
   depositIntoVoidVault(itemId: number, stack: number): number {
     if (!this.useVoidBag() || stack <= 0) return stack;
+    // ★F4 门序对齐原文：CanVoidVaultAccept 在 GetItem_VoidVault 进位前判一次
+    //（:39705）,函数体内再判一次（:39714）——本仓单点等价
+    if (!canVoidVaultAccept(vanillaIdOfItem(itemId))) return stack;
     const vault = this.banks[3];
     let left = stack;
     // 占用堆叠合并（GetItem_FillIntoOccupiedSlot_VoidBag :39747-39780）

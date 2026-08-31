@@ -176,7 +176,17 @@ export class ItemDrop extends Entity {
       const inGrabRange =
         this.x < player.x + player.w + GRAB_RANGE && this.x + this.w > player.x - GRAB_RANGE &&
         this.y < player.y + player.h + GRAB_RANGE && this.y + this.h > player.y - GRAB_RANGE;
-      if (touching) {
+      // ★F5① preventAllItemPickups 消费端（CanAcceptItemIntoInventory Player.cs
+      //  :35172-35179）：4346 拖累石在场（机械族三路聚合 → equipStats 位）时,世界
+      //  物品的【拾取与拉取】两通道只放行 IgnoresEncumberingStone 白名单成员
+      //  （心/星族,ItemID.cs:250）——vanilla GrabItems :35187 把该门挂在循环 continue
+      //  上（两通道一并跳过）、CanPullItem :39453 复判同一门。心/星吸附本就属白名单,
+      //  阻挡面=其余一切物品。MP 候补：packet 自报 take 只在本地拾取成立后发生,
+      //  无独立 intake 位可漏。
+      const canAccept = (player as unknown as {
+        canAcceptItemIntoInventory?: (vid: number) => boolean;
+      }).canAcceptItemIntoInventory?.(vanillaIdOfItem(this.itemId)) ?? true;
+      if (touching && canAccept) {
         if (this.pickup) {
           if (this.pickup === 'heart') {
             player.hp = Math.min(player.maxHp, player.hp + 20);
@@ -252,7 +262,7 @@ export class ItemDrop extends Entity {
         // （人人可再捡 = 物品复制）。★仅在本次拾取真实改变余量时发（背包已满
         // 的持续重叠不得每拍一帧刷屏——2026-08-28 全面 review 收口） */
         if (left > 0 && left !== before && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
-      } else if (inGrabRange) {
+      } else if (inGrabRange && canAccept) {   // ★F5① 拉取面同门（CanPullItem :39453）
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
         // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597
         // else 分支仅 position+=velocity),物品穿墙飞向玩家。

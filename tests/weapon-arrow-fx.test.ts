@@ -2,7 +2,7 @@
 //  ① 91 圣箭星雨（P.cs:72250-72287）——Arrow.killNow → Game.onProjectileDeath 分发链
 //    端到端（Game 侧星雨分支本体在 held-draw-fixes.test.ts ⑤ 已锚，此处锚 Arrow 半边）
 //  ② 41 狱炎箭（物品 265）64×64 爆炸盒（P.cs:73256-73293）——真 Arrow 撞块 → 真爆炸结算
-//  ③ 469 蜂箭 Kill 放蜂（P.cs:73369-73390）+ 入水即 Kill（AI_001 :51125）
+//  ③ 469 蜂箭 Kill 放蜂（P.cs:73369-73390）+ 入水即 Kill（AI_001 :54969,★F8 校准）
 //  ④ 225 叶绿箭撞块弹反 + 归巢（HandleMovement :17128-17150）
 //  ⑤ 710 空中祸害空旷 ×1.5（Damage :12236-12239）+ 命中撒 5 裂片（BetsySharpnel :51075-51091）
 //  ⑥ 撞块 Kill 音/尘分档（1/81 :70989-70996 / 2/82 :72542-72549 / 474 :72550-72557）
@@ -128,7 +128,7 @@ describe('② 41 狱炎箭爆炸（Kill :73256-73293）', () => {
   });
 });
 
-// ============ ③ 469 蜂箭（Kill :73369-73390 + 入水 :51125） ============
+// ============ ③ 469 蜂箭（Kill :73369-73390 + 入水 :54969） ============
 describe('③ 469 蜂箭放蜂/入水消亡', () => {
   it('Kill 放蜂：奇数拍 Next(3)==0 全中 → 6 只（伤/3、penetrate 2、ranged、蜂型 181）', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
@@ -168,7 +168,7 @@ describe('③ 469 蜂箭放蜂/入水消亡', () => {
     }
   });
 
-  it('入水即 Kill（:51125 wet&&!honeyWet&&!shimmerWet）；蜂蜜豁免', () => {
+  it('入水即 Kill（:54969 wet&&!honeyWet&&!shimmerWet）；蜂蜜豁免', () => {
     const w = emptyWorld();
     w.store.setLiquid(100, 189, 255, LIQUID_TYPE.WATER);
     const game = makeGame(w);
@@ -180,7 +180,7 @@ describe('③ 469 蜂箭放蜂/入水消亡', () => {
     const game2 = makeGame(w2);
     const b = new Arrow(100 * TILE, 186 * TILE, 0, 4, 30, 3, 469, null, {});
     for (let t = 0; t < 6; t++) b.fixedUpdate(1, game2);
-    expect(b.dead).toBe(false);                                // honeyWet 豁免（:51125）
+    expect(b.dead).toBe(false);                                // honeyWet 豁免（:54969）
   });
 });
 

@@ -237,7 +237,10 @@ describe('FR1 bit6 狱火支实扣权威广播（Player.cs:10348 SendPlayerHurt 
     expect(sent[0].dmg).toBe(20);                          // hpBefore−hp 净减量
     expect(sent[0].flags & PlayerHurtFlags.Pvp).not.toBe(0);
     expect(sent[0].flags & PlayerHurtFlags.Crit).toBe(0);
-    expect(sent[0].dir).toBe(-1);                          // 攻击者在右侧 → dir=-1
+    // ★FR3-F（三轮蓝队）：原版 :10344-48 `player.Hurt(ByOther(16),20,0,pvp:true)`
+    // hitDirection=0 零击退形制 → dir 恒 0（旧钉「攻击者右侧→-1」系位置符号近似，
+    // 已随三站统一废除）
+    expect(sent[0].dir).toBe(0);
   });
 
   it('per-owner 冷却窗内重复意向不再结算/再报（原版 infernoCounter%60 节拍等价）', () => {
@@ -455,5 +458,116 @@ describe('联机③ netPvpProjFeedback 族面补全', () => {
     const u = shellWithProj(unknown);
     (u.g as unknown as { netPvpProjFeedback: () => void }).netPvpProjFeedback();
     expect(u.steals.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★三轮蓝队批回归钉子（2026-08-31）
+//   FR2-F：damagePlayer 尾通用通道——非 PvP 全路径 msg117 自动生产 + PvP 支去重
+//   FR6-F：ghost isMagic 按弹型真值（ghostHeal 内部 !magic 拒，Projectile.cs:12090-12093）
+//   FR5-F：kind9 aux 相位通道（收端重锚 + 傀儡等速自推进）
+// ---------------------------------------------------------------------------
+describe('FR2-F 非 PvP 通用 msg117 通道（Player.Hurt :38656-38664 三要素对位）', () => {
+  function envShell() {
+    const g = protGame();
+    const sent: Array<{ dmg: number; x: number; y: number; dir: number; flags: number }> = [];
+    const notified = vi.fn();
+    const p = new Player(1000, 1000, new Inventory());
+    p.hostile = false;
+    g.player = p;
+    g.sfx = { playWavFile: () => true, playFiles: () => true, play: () => {} };  // voice 链桩
+    g.addDamageNumber = () => {};
+    g.spawnParticles = () => {};
+    g.net = {
+      active: true,
+      mySlot: 3,
+      notifyPlayerHurtSettled: notified,
+      sendPlayerHurt: (dmg: number, x: number, y: number, dir: number, flags: number) =>
+        sent.push({ dmg, x, y, dir, flags }),
+    };
+    return { g, p, sent, notified };
+  }
+
+  it('NPC 接触族（pvp=false）落地即广播一次：flags=0、dmg=实扣、src 左侧 → dir=+1', () => {
+    const { g, p, sent } = envShell();
+    p.iframes = 0;
+    const hp0 = p.hp;
+    (g as unknown as { damagePlayer: (...a: unknown[]) => number }).damagePlayer(30, 900, 1000);
+    expect(sent.length).toBe(1);
+    expect(sent[0].flags).toBe(0);                      // 非 PvP 非 crit 位
+    expect(sent[0].dmg).toBeGreaterThan(0);
+    expect(sent[0].dmg).toBe(Math.max(0, hp0 - p.hp));  // 实扣口径（与五 PvP 支同语义）
+    expect(sent[0].dir).toBe(1);                        // 攻击源在左侧
+  });
+
+  it('pvp=true 面不自动发（五个结算支显式 reportPlayerHurt 所有权保留）', () => {
+    const { g, p, sent } = envShell();
+    p.iframes = 0;
+    (g as unknown as { damagePlayer: (...a: unknown[]) => number })
+      .damagePlayer(20, 960, 1000, undefined, false, true);
+    expect(sent.length).toBe(0);
+  });
+});
+
+describe('FR6-F ghost isMagic 弹型真值投影（A3 类别通道单源）', () => {
+  function fbShell(proj: Record<string, unknown>) {
+    const world = new World(160, 160, 42, 'fr6');
+    const g = protGame();
+    const player = new Player(800, 1440, new Inventory());
+    player.hostile = true;
+    g.world = world;
+    g.player = player;
+    g.tickCount = 7;
+    g.pvpProjHitSet = new Set<string>();
+    const rp = new Player(802, 1440, new Inventory());
+    rp.hostile = true;
+    (rp as unknown as { __netSlot?: number }).__netSlot = 1;
+    g.remotePlayerProxies = [rp];
+    const steals: Array<{ kind: string; isMagic: boolean }> = [];
+    g.applyLifeSteal = (kind: string, _dmg: number, _hits: number, _x: number, _y: number,
+      isMagic: boolean) => { steals.push({ kind, isMagic }); return 0; };
+    g.net = { active: true, policy: { pvpAllowed: true }, players: new Map(),
+      getProxyPvpImmuneRemaining: () => 0 };
+    g.entities = { projectiles: [proj] };
+    return { g, steals };
+  }
+
+  it('856 magic 类 → isMagic=true（预算扣后照治疗）', () => {
+    const proj = { id: 3, projId: 856, damage: 40, dead: false, hostile: false,
+      x: 800, y: 1440, w: 32, h: 32 };
+    const { g, steals } = fbShell(proj);
+    (g as unknown as { netPvpProjFeedback: () => void }).netPvpProjFeedback();
+    expect(steals.length).toBe(1);
+    expect(steals[0]).toEqual({ kind: 'ghost', isMagic: true });
+  });
+
+  it('木箭 ranged 类 → isMagic=false（旧恒 true 虚入账面已废）', () => {
+    const proj = { id: 4, projId: 1, damage: 40, dead: false, hostile: false,
+      x: 800, y: 1440, w: 16, h: 16 };
+    const { g, steals } = fbShell(proj);
+    (g as unknown as { netPvpProjFeedback: () => void }).netPvpProjFeedback();
+    expect(steals.length).toBe(1);
+    expect(steals[0]).toEqual({ kind: 'ghost', isMagic: false });
+  });
+});
+
+describe('FR5-F kind9 旋转相位通道（aux 千分位 t01）', () => {
+  it('收端到包重锚：phase01 收敛于携值（t=round(t01×90)）；快照间隔内傀儡自推进 +3/tick', () => {
+    const spark = new SparkleGuitarProj(1000, 1000, -12, 40, 80, 1000, 1000);
+    spark.netPhaseApply(1 / 3);
+    expect(spark.phase01).toBeCloseTo(30 / 90, 6);      // round(90/3)=30 整除无舍入
+    (spark as unknown as { netPuppet: boolean }).netPuppet = true;   // 傀儡支自推进
+    (spark as SparkleGuitarProj).fixedUpdate(1 / 60, {} as never);
+    expect(spark.phase01).toBeCloseTo(33 / 90, 6);
+  });
+
+  it('越界/脏值钳制：NaN/负值不污染相位；超 1 钳到 t=90 → mod-90 wrap 为 0（rotation 周期等价）', () => {
+    const spark = new SparkleGuitarProj(1000, 1000, 12, 40, 80, 1000, 1000);
+    spark.netPhaseApply(Number.NaN);
+    expect(spark.phase01).toBeCloseTo(0, 5);
+    spark.netPhaseApply(-2);
+    expect(spark.phase01).toBeCloseTo(0, 5);
+    spark.netPhaseApply(7);                              // clamp→1 → t=90 → wrap 0
+    expect(spark.phase01).toBe(0);                       // 2π×90/90 ≡ 2π×0 视觉恒等
   });
 });

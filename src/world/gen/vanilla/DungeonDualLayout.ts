@@ -3354,7 +3354,7 @@ class DualProvider {
     const data = this.data;
     const ctx = this.ctx;
     const iN = ++_drlInstNext;
-    drlMark(`DR|S|i${iN}|INL rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|INL rc=${drlRc()}`);
     data.defaultStyle = defaultStyle;
     this.snakeLines = snakeLines;
     this.snakeInst = snakeInst;
@@ -3362,11 +3362,11 @@ class DualProvider {
     void dataLocal0;
     ctx.snap('dualEntranceRoom');
     const entranceRoom = this.calculateEntranceRoom();
-    drlMark(`DR|S|i${iN}|EN rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|EN rc=${drlRc()}`);
     const startingRoom = this.calculateStartingRoom(snakeLines[0]!);
-    drlMark(`DR|S|i${iN}|ST rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|ST rc=${drlRc()}`);
     this.calculateEntranceHall(entranceRoom, startingRoom);
-    drlMark(`DR|S|i${iN}|EH rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|EH rc=${drlRc()}`);
     ctx.snap('dualStartRooms');
     const biomeRooms = this.calculateBiomeRooms(snakeLines, snakeInst);
     drlMark(`DR|S|i${iN}|BIO n=${biomeRooms.length}|bt=${biomeRooms.map((r) => r.settings.roomType).join(',')}|mr=${drlMr()}|rc=${drlRc()}`);
@@ -3387,13 +3387,13 @@ class DualProvider {
     drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|mr=${drlMr()}|rc=${drlRc()}`);
     ctx.snap('dualHalls');
     this.calculateDungeonBounds(data.halls);
-    drlMark(`DR|S|i${iN}|BND rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|BND rc=${drlRc()}`);
     // —— 房间 GenerateRoom 循环 + PreHallways 特征 ——
     for (const rm of data.rooms) rm.generateRoom(data, ctx);
-    drlMark(`DR|S|i${iN}|RGN rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|RGN rc=${drlRc()}`);
     ctx.snap('dualRoomsGen');
     for (const rm of data.rooms) rm.generatePreHallwaysFeatures?.(data, ctx);
-    drlMark(`DR|S|i${iN}|PRH rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|PRH rc=${drlRc()}`);
     ctx.snap('dualPreHall');
     // —— 大厅次序生成：cracked-brick → spider(style12) → 其余 ——
     const crackedList = data.halls.filter((hh) => hh.crackedBrick);

@@ -47,7 +47,8 @@
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { applyProjStatus } from './projStatus';
-import { hitCritters, playerCanHitEnemy } from './projTargets';
+import { hitCritters, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { damageVarRoll } from '../stats/DamageVar';
 import { GorePiece } from './GorePiece';
 import type { GameHooks } from './types';
 import { playerCanHitEntity } from '../physics/LineOfSight';
@@ -260,8 +261,11 @@ export class VolcanoBlastProj extends Entity {
       // ★R2-05 击退参照系（:13669-72 aiStyle∈188..191）：以【玩家中心】对照目标
       const kdir = ((pEnt?.cx ?? this.cx) < (e.cx ?? this.cx)) ? 1 : -1;
       // ★R2-04 ③Main.DamageVar ±15% + 暴击 ×2（crit 在 Strike 时点实时取玩家近战 crit）
+      //   ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
       const crit = (this.critChanceFn?.() ?? 0.04) > Math.random();
-      const dmgVar = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+      let dmgVar = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+      dmgVar = applyBannerDamageDealt(game, e, dmgVar);
       e.hurt(dmgVar * (crit ? 2 : 1),
         kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, 0, true);
       // StatusNPC（Projectile.cs:11365）：AddBuff(24,180)=On Fire! 3s（提取表驱动）
@@ -283,7 +287,13 @@ export class VolcanoBlastProj extends Entity {
     const img = projSprite(978);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || !ctx) return;
-    const opacity = Math.max(0, Math.min(1, 1 - this.alphaTick));
+    // ★F17（2026-08-31 蓝队三批）可见度方向修正：原版 AI_189 :43038 全式
+    //   `alpha = (int)(255f * (1f − Remap(ai0,0,2,0,1) × Remap(ai0,6,10,1,0)))`
+    //   （XNA α 域：255=全透）。本仓 alphaTick 只存乘积 R=Remap1×Remap2，
+    //   可见因子 = 1 − alpha/255 = 1 − (1−R) = R。旧式 `opacity = 1 − R` 恰好
+    //   翻转（起手可见、2..6t 窗口恒隐身、尾段回显）。修正为直接取 R：
+    //   出生隐→2t 渐显满亮→6..10t 渐隐（与头注曲线一致）。
+    const opacity = Math.max(0, Math.min(1, this.alphaTick));
     if (opacity <= 0.02) return;
     const frames = 5;                     // Main.projFrames[978]=5（vanilla-projframes.json）
     const fh = img.height / frames;

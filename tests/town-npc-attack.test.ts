@@ -536,35 +536,224 @@ describe('★F4 医师治疗弹 584 反弹链（Projectile.cs:17696+:18233-18254
     expect(heals[0].amt).toBe(20);                            // min(lifeMax−life,20)
   });
 
-  // ★治理批 B4（2026-08-31）：消亡判序重立账——
-  //   :18233-18254 反弹支无显式 Kill,`penetrate==0 → Kill` 的通用门（Projectile.cs:
-  //   17312-17315）在【下一 tick】的 AI/timeLeft 之后、tile 碰撞之前求值。旧映射
-  //   「第 3 弹当拍即亡」提前一拍并跳过末拍 AI/life 面,废除。
-  it('★B4 第 3 次反弹不死当拍:penetrate 归零者存活到下拍头部才死（AI 先行）', () => {
-    const world = new World(200, 200, 100, 'syr-b4');
-    for (let ty = 44; ty <= 56; ty++) world.store.setTileSilent(30, ty, STONE4);
+  // ★蓝队 F1（2026-08-31）判序定谳：Projectile.Update 体序 = AI(:16880) →
+  //   HandleMovement(:17120,内含 tile 碰撞步进与 :18233-18254 type==584 反弹支) →
+  //   尾部 timeLeft--(:17307-17311) 与 penetrate==0 Kill(:17312-17315)。故第 3 次
+  //   反弹当拍【已产生碰撞受限位移】、该拍末尾即死——旧「下拍头部才死(AI 先行)」
+  //   治理批 B4 判序读反（多活一拍零位移幽灵帧），金标随之反转。
+  it('★F1 第 3 次反弹当拍即死且该拍已产生碰撞受限位移(Y 轴部分推进后结算)', () => {
+    const world = new World(200, 200, 100, 'syr-f1');
+    for (let x = 10; x <= 60; x++) world.store.setTileSilent(x, 40, STONE4);
     const patient = { x: 5000, y: 5000, w: 20, h: 40, hp: 90, maxHp: 110, dead: false };
-    // 弹盒左缘预置在墙右沿+1px、向左请求 8px → 本拍必出接触证据(X 轴反弹)
-    const shot = new NurseSyringeShot(497, 49 * 16 - 5, -8, 0, patient as never);
+    // 地面行 40 = 实心带 [640,656)。初速 vy=25 > 步距 cap 10 → 快路径子步步进;
+    // y=620 起,本拍累计被地面截停在 y=630（盒 [630,640) 未触地,再进一步 [640,650)
+    // 被堵）→ 接触证据(vy 改速且 preVy>2) → 反弹 + penetrate-- + 尾门同拍结算
+    const shot = new NurseSyringeShot(50 * 16, 620, 0, 25, patient as never);
     const game = buildGame(world);
     (shot as unknown as { bouncesLeft: number }).bouncesLeft = 1;   // 末档直达
     shot.fixedUpdate(1 / 60, game);
-    expect(shot.dead).toBe(false);                       // 反弹当拍不死(:18254 无 Kill)
+    expect(shot.dead).toBe(true);                        // :18254 penetrate-- → 同拍尾门 :17312-15
     expect((shot as unknown as { bouncesLeft: number }).bouncesLeft).toBe(0);
-    const lifeAfterBounce = shot.life;
-    shot.fixedUpdate(1 / 60, game);
-    expect(shot.dead).toBe(true);                        // 下拍通用门 :17312-17315 结算
-    expect(shot.life).toBe(lifeAfterBounce - 1);         // 死亡拍 AI/timeLeft 面已先行消费
+    expect(shot.y).toBeCloseTo(630, 2);                  // 该拍已产生碰撞受限位移(快路径子步浮点和)
+    expect(Math.abs(shot.vy)).toBeLessThan(25);          // 反弹还原已生效(|lastVel| 复幅)
   });
 
-  it('★B4 对照:健康 penetrate(3)正常反弹不误杀,X 轴证据面不变', () => {
-    const world = new World(200, 200, 100, 'syr-b4c');
+  it('★F1 对照:非末档穿透计数反弹照常存活当拍(同几何,X 轴零推进仍出证据)', () => {
+    const world = new World(200, 200, 100, 'syr-f1c');
     for (let ty = 44; ty <= 56; ty++) world.store.setTileSilent(30, ty, STONE4);
     const patient = { x: 120, y: 48 * 16, w: 20, h: 40, hp: 90, maxHp: 110, dead: false };
     const shot = new NurseSyringeShot(497, 49 * 16 - 5, -8, 0, patient as never);
     const game = buildGame(world);
     shot.fixedUpdate(1 / 60, game);
-    expect(shot.dead).toBe(false);
+    expect(shot.dead).toBe(false);                       // penetrate 尚未归零,存活
     expect((shot as unknown as { bouncesLeft: number }).bouncesLeft).toBe(2);
+  });
+
+  it('★F1 对照:第 3 反弹零位移窄缝同拍死(X 轴钳制截停形态,嵌墙右沿+1px)', () => {
+    const world = new World(200, 200, 100, 'syr-f1z');
+    for (let ty = 44; ty <= 56; ty++) world.store.setTileSilent(30, ty, STONE4);
+    const patient = { x: 5000, y: 5000, w: 20, h: 40, hp: 90, maxHp: 110, dead: false };
+    const shot = new NurseSyringeShot(497, 49 * 16 - 5, -8, 0, patient as never);
+    const game = buildGame(world);
+    (shot as unknown as { bouncesLeft: number }).bouncesLeft = 1;
+    shot.fixedUpdate(1 / 60, game);
+    expect(shot.dead).toBe(true);                        // 末档同拍结算
+    expect(shot.x).toBeCloseTo(497, 3);                  // 钳制截停:本拍净推进为 0 仍死
+  });
+});
+
+// =====================================================================
+// ★蓝队对账批（2026-08-31）F3/F4/F5/F7/F8 收口回归
+// =====================================================================
+
+/** 危险扫描原型直调（与 callEntry 同款通道） */
+function callDanger(npc: AnyNpc, world: World, game: never): void {
+  const fn = (TownNPC.prototype as unknown as Record<string, (w: World, g: never) => void>)
+    .dangerUpdate;
+  fn.call(npc, world, game);
+}
+
+describe('★F4 危险管线双窗拆分 + PrettySafe 收口伞（NPC.cs:54033/:54040-41/:54102-29）', () => {
+  /** 敌盒（相对本体中心右移 dxPx、同一走廊行 row97——LOS 畅通面) */
+  function foe(dxPx: number) {
+    return { x: 100 * 16 + 10 + dxPx - 9, y: 96 * 16 + 20 - 20, w: 18, h: 40,
+      id: 0, dead: false, damage: 40 };
+  }
+
+  function dangerHarness(npcKey: string, dxPx: number, talking: boolean) {
+    const { world, game, npc } = entryHarness(npcKey, []);
+    (game as unknown as { enemies: () => unknown[] }).enemies = () => [foe(dxPx)];
+    (npc as unknown as { talking: boolean }).talking = talking;
+    (npc as unknown as { onGround: boolean }).onGround = true;
+    return { world, game, npc };
+  }
+
+  it('对话×挥击族(dyer):宽窗 250 只产 flag15 准入——威胁/侧选/候选全空', () => {
+    // dyer(207):num11=60,num12=talking 扩 250。敌 230px ∈ 宽窗 ∉ 威胁窗
+    const { world, game, npc } = dangerHarness('dyer', 230, true);
+    callDanger(npc as AnyNpc, world, game);
+    expect((npc as unknown as { admitWide: boolean }).admitWide).toBe(true);     // flag15
+    expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(false);    // flag16 无
+    expect((npc as unknown as { dangerNear: boolean }).dangerNear).toBe(false);
+    expect((npc as unknown as { threatLeft: unknown }).threatLeft).toBeNull();   // 簿记不进宽窗
+    expect((npc as unknown as { threatRight: unknown }).threatRight).toBeNull();
+  });
+
+  it('对照:非对话同几何连准入都没有(扩窗条件须 flag5,:54036-38)', () => {
+    const { world, game, npc } = dangerHarness('dyer', 230, false);
+    callDanger(npc as AnyNpc, world, game);
+    expect((npc as unknown as { admitWide: boolean }).admitWide).toBe(false);
+    expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(false);
+  });
+
+  it('PrettySafe 收口伞四态同几何(wizard,PrettySafe=100,敌@150):idle 关/其余开', () => {
+    for (const [state, want] of [
+      ['idle', false], ['talking', true], ['cornered', true], ['attacking', true],
+    ] as Array<[string, boolean]>) {
+      const { world, game, npc } = dangerHarness('wizard', 150, state === 'talking');
+      if (state === 'cornered') (npc as unknown as { corneredT: number }).corneredT = 7;
+      if (state === 'attacking') (npc as unknown as { atkState: number }).atkState = 14;
+      callDanger(npc as AnyNpc, world, game);
+      expect((npc as unknown as { threatRaw: boolean }).threatRaw, state).toBe(true);
+      expect((npc as unknown as { dangerNear: boolean }).dangerNear, state).toBe(want);
+    }
+  });
+
+  it('对照:窗内近距(<PrettySafe=100)不收口——idle 也算险', () => {
+    const { world, game, npc } = dangerHarness('wizard', 80, false);
+    callDanger(npc as AnyNpc, world, game);
+    expect((npc as unknown as { dangerNear: boolean }).dangerNear).toBe(true);
+  });
+});
+
+describe('★F3 攻击冷却挂总伞 !flag5|flag16(NPC.cs:55761/:55770-72)', () => {
+  it('对话且无险:冷却冻结保留剩余', () => {
+    const { world, game, npc } = entryHarness('guide', []);
+    Object.assign(npc, { atkCd: 37 });
+    (npc as unknown as { talking: boolean }).talking = true;
+    npc.fixedUpdate(1 / 60, game);
+    expect((npc as unknown as { atkCd: number }).atkCd).toBe(37);
+  });
+
+  it('无对话(即使无险):逐拍递减', () => {
+    const { world, game, npc } = entryHarness('guide', []);
+    Object.assign(npc, { atkCd: 37 });
+    npc.fixedUpdate(1 / 60, game);
+    expect((npc as unknown as { atkCd: number }).atkCd).toBe(36);
+  });
+
+  it('对话但有险:总伞开放照常递减', () => {
+    const eY = 96 * 16;
+    const { world, game, npc } = entryHarness('guide',
+      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    Object.assign(npc, { atkCd: 37 });
+    (npc as unknown as { talking: boolean }).talking = true;
+    npc.fixedUpdate(1 / 60, game);
+    expect((npc as unknown as { atkCd: number }).atkCd).toBeLessThan(37);
+  });
+
+  it('聊完剩余冷却如实拦一道:atkCd>0 时掷骰通过也不入态(flag31 早退)', () => {
+    const eY = 96 * 16;
+    const { world, game, npc } = entryHarness('guide',
+      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true, atkCd: 9 });
+    let rolls = 0;
+    npc.rng = () => { rolls++; return 0.0000001; };
+    expect(callEntry(npc, world, game)).toBe(false);
+    expect(npc.attackState).toBe(0);
+    expect(rolls).toBe(0);            // flag31 冷却门在掷骰之前(:55773-55775)
+  });
+});
+
+describe('★F5① 魔法族入态重验 = CanHitLine 点对(NPC.cs:56066-68)', () => {
+  /** 走廊行 97 立一块【坡面】石(斜面 tile 不挡 CanHit、挡 CanHitLine——两条链的
+   *  阻挡谓词差恰是本批锚定的语义分叉面)。敌距 80 < PrettySafe[108]=100——
+   *  收口伞不闭(超距会被 :54120 合法关门,无法测到重验支) */
+  function wizardWorld(withSlope: boolean) {
+    const { world, game, npc } = entryHarness('wizard',
+      [{ x: 100 * 16 + 80, y: 96 * 16, w: 18, h: 40 }]);
+    if (withSlope) {
+      const col = Math.floor(((npc as unknown as { cx: number }).cx + 40) / 16);
+      world.store.setTileSilent(col, 97, TILE_BY_KEY['stone']!);
+      world.store.slope[world.store.idx(col, 97)] = 2;          // 半坡
+    }
+    Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    npc.rng = () => 0.0000001;
+    return { world, game, npc };
+  }
+
+  it('CanHit 可透坡面 → 扫描准入 OK;重验 CanHitLine 拒发(不入态)', () => {
+    const { world, game, npc } = wizardWorld(true);
+    callDanger(npc as AnyNpc, world, game);
+    expect(callEntry(npc, world, game)).toBe(false);
+    expect(npc.attackState).toBe(0);
+  });
+
+  it('对照:无坡面同几何直入魔法态 14', () => {
+    const { world, game, npc } = wizardWorld(false);
+    callDanger(npc as AnyNpc, world, game);
+    expect(callEntry(npc, world, game)).toBe(true);
+    expect(npc.attackState).toBe(14);
+  });
+});
+
+describe('★F7 机械师探机归属键=实例单调 tag(取舍备案见 MECH_PROBE_TAG_SEQ 注)', () => {
+  it('异实例 tag 的在途弹不抑制本机师;同 tag 582 抑制;他型弹抑制无效', () => {
+    const { game, shots, npc } = entryHarness('mechanic', []);
+    const probeAlive = (): boolean =>
+      ((TownNPC.prototype as unknown as Record<string, (g: never) => boolean>).mechProbeAlive)
+        .call(npc, game);
+    shots.push({ dead: false, projId: 582, ai1: 999 } as unknown as TownShot);
+    expect(probeAlive()).toBe(false);            // 他机师(异 tag)的在途弹
+    (npc as unknown as { probeTag: number }).probeTag = 42;
+    shots.push({ dead: false, projId: 582, ai1: 42 } as unknown as TownShot);
+    expect(probeAlive()).toBe(true);             // 本体 tag 在途 → 抑制再发(:55778-80)
+    shots.pop();
+    shots.push({ dead: false, projId: 583, ai1: 42 } as unknown as TownShot);
+    expect(probeAlive()).toBe(false);            // 非 582 型不参与归属检(:53719 字面)
+  });
+});
+
+describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出豁免)', () => {
+  it('巫师入态+连发射程全程零 Math.random 直呼', () => {
+    // 世界先建（WeatherState 构造种子面属既有豁免域）——之后再接管 Math.random
+    const eY = 96 * 16;
+    const { world, game, shots, npc } = entryHarness('wizard',
+      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    npc.rng = () => 0.0000001;                 // 攻击门 1/gate 恒中、散布序列确定
+    const realRandom = Math.random;
+    let strayCalls = 0;
+    Math.random = () => { strayCalls++; return 0.5; };
+    try {
+      expect(callEntry(npc, world, game)).toBe(true);
+      for (let t = 0; t < 30 && shots.length === 0; t++) {
+        npc.fixedUpdate(1 / 60, game);           // 态内推进至 shootTick 发射
+      }
+      expect(shots.length).toBeGreaterThanOrEqual(1);   // 连发表已消费(rng 面)
+      expect(strayCalls).toBe(0);              // 整段战斗路径无 Math.random 直呼
+    } finally {
+      Math.random = realRandom;
+    }
   });
 });

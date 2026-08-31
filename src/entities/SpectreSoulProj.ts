@@ -15,8 +15,10 @@
 //     （wiki 的"Death Rattle"印象不成立——触发点在 Damage() 内于目标存活路径上,
 //      与 NPC 死亡无关）。命中侧位置 = 受害者 Center。
 //   弹 356（SetDefaults :4466-4475）：6×6、aiStyle 59、alpha 255、magic、tileCollide=false、
-//     extraUpdates=3、【无 friendly】——AI_059 里 ai[1]≥60 才置 friendly=true（:29371,
-//     1s 无害预热）;默认 timeLeft 3600（Projectile.cs:789 无覆写）。
+//     extraUpdates=3、【无 friendly】——AI_059 里 ai[1]≥60 才置 friendly=true（:29371;
+//     ★三轮蓝队 F2：EU 子步语义修正后 ai[1] 每拍 +4 ⇒ 预热 60 计数≈15t,非旧注 60t）;
+//     默认 timeLeft 3600（Projectile.cs:789 无覆写;timeLeft-- 在子步循环内 :17309
+//     ⇒ 每拍 -4,寿命 900t 非旧注 3600t）。
 //   AI_059（:29368-29431）：≥60t 后每拍校验锁 ai[0]（CanBeChasedBy 门）;失效重选 =
 //     怪癖曼哈顿窗 <800 全候选【随机】取一（Main.rand）;全空 Kill。转向 (v×29+dir)/30
 //     （num447=30,speed num442=4）。尘 175 ×5 后向拖尾（:29417-29430,v×0.2×i 反向排布）。

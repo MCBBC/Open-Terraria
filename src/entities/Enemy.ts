@@ -5,7 +5,7 @@ import { entityNet } from '../net/entitySyncHooks';
 // M3 Boss 伤害统计漏斗（/boss伤害;NPC.StrikeNPC→NPCDamageTracker.AddDamage :82129-82130。
 // entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
 import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { liquidCollision, drownCollision } from '../stats/TouchDamage';
@@ -12145,8 +12145,13 @@ export class Enemy extends Entity {
     this.onGround = false;
   }
 
-  /** 受击。返回是否死亡 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false, penPercent = 0): boolean {
+  /** 受击。返回是否死亡。
+   *  ★srcProjId（2026-08-31 蓝队三批 A-F1）：弹幕来源弹 id 的可选尾参——仅服务
+   *  Player.OnHit 系 proc 的来源排除面（Projectile.TryDoingOnHitEffects :15210-15220
+   *  对 case {221,227,614,729,908,977} 硬排除——钛金碎片 908/村正刀气 977 等
+   *  "由 on-hit 效果产出的弹"再命中时不再触发任何玩家 OnHit 效果，自续风暴/
+   *  刷新 buff 在原版不存在）。非弹幕/未知源保持缺省 0 = 不排除。 */
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false, penPercent = 0, srcProjId = 0): boolean {
     // pierce 语义（Projectile.cs:11903-11907/13152-13155 Damage_PVE）：
     //   0   = 近战/荆棘等非弹幕 → 命中设免疫 10t（原版 immune[owner] 默认档）；
     //   1   = 单发弹（maxPenetrate==1，flag3）→ **无视免疫且命中后不设帧**
@@ -12172,32 +12177,35 @@ export class Enemy extends Entity {
     // 对"已死未出列"的敌怪二次触发死亡管线(碎块/掉落/音效翻倍)。原版由
     // Damage_PVE 的 npc.active 前置门(Projectile.cs:11869)天然防重;此处等价。
     if (this.dead) return false;
-    // ★修齐批②：钛金屏障 on-hit（Player.cs:6927-6936——任意 NPC 伤害源命中,
-    //   cooldown 10t 门+statue/488 豁免;buff306 600t+碎片 908 ≤7）。
-    // ★α-H4（终局扫尾批）：补 OnHit 域 `target.life>5` 豁免门——Player.OnHit 的
-    //   全部调用位都在残血门内（ProcessHitAgainstNPC :44678 / Projectile.Damage
-    //   TryDoingOnHitEffects :13642-44 `ownedBySomeone && targetNPC.life > 5`）；
-    //   此处读受击前 life（=本函数入口 this.hp,防结算尚未发生）。OnHit 域成员 =
-    //   【armorSet proc 类】钛金风暴（本块）；【weapon proc 类】ApplyNPCOnHitEffects
-    //   镜像区（血舌/蓄能/彩纸/潜行/标枪/吸血/蜂群/村正刀气 :44809-44906）在原版
-    //   **不带**该门——两类分界勿混。附带把 flag 豁免（Player.cs:6917-6921
-    //   `type==488 || SpawnedFromStatue` → 不 proc）显式收进同一条件。
-    //  ◆α-H4 结算版（完整 proc 体原子重建——勿再拆成"裸开门等体"两步写）：
-    //    Player.OnHit 钛金支（Player.cs:6916-6935 全量 1:1）：
-    //      flag = victim is NPC && (type==488 || SpawnedFromStatue);
-    //      onHitTitaniumStorm && !flag ⇒ { titaniumStormCooldown=10; AddBuff(306,600);
-    //        ownedProjectileCounts[908]<7 ⇒ NewProjectile(908, dmg50, kb15,
-    //        velocity=Zero 于 owner.Center); }
-    //    方向参数语义 = 不消费击退方向/hitDirection（原版 velocity 显式 Zero,
-    //    :6930-6934 无 num40 参与）；碎片≤7 的 ownedProjectileCounts 门与存活计数
-    //    归 GameHooks.spawnTitaniumShard 实现侧承担（Game.ts 计存活同型数,≤7 上限）。
+    if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
+    if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
+    // ★F1 翻案收口（2026-08-31 蓝队三批）：本函数【不再】内挂旗乘区。原版旗加伤
+    // （Player.GetBannerBuffEffect→effect.DamageDealt.Sample）是**攻端调用面**乘区：
+    //   · ApplyDamageToNPC 内置段 Player.cs:20599（狱火/矿车冲撞/荆棘反伤/TryHittingNPC 等）；
+    //   · ProcessHitAgainstNPC :44658-61（近战挥击链，Game.ts 挥击段已接）；
+    //   · Projectile.Damage_PVE :13388-90（全部玩家弹幕结算面）。
+    // StrikeNPC 本体（NPC.cs:81958 起）无任何旗逻辑——旧注释"统一入口=StrikeNPC"
+    // 为虚构锚：这里内乘一次，与上述攻端面叠成 ×1.5² / 与 ApplyDamageToNPC 面
+    // 二连乘；攻端各站的采样现统一走 projTargets.applyBannerDamageDealt 单源。
+    // ★F6 钛金屏障 on-hit 迁位（Player.cs:6916-6935）：proc 必须落在免疫窗
+    //   （ProcessHitAgainstNPC :44598 immune[whoAmI]==0 早退 / Damage_PVE_Inner
+    //   :12641-46 immune[owner] 门）与 dontTakeDamage 判别**之后**——拒收的命中
+    //   不 proc、不消费 10t 冷却。此前块排在两个早退门前=被拒命中也吃 cd。
+    // ★α-H4（终局扫尾批）：`target.life>5` 残血豁免门保留（Player.OnHit 调用位
+    //   原文全在残血门内 :44754/:13642-44），读受击前 life（=入口 this.hp）。
+    //   flag 豁免（Player.cs:6917-6921 type==488 || SpawnedFromStatue）照旧并入。
+    // ★A-F1 来源排除表（Projectile.TryDoingOnHitEffects :15210-20）：弹 id ∈
+    //   {221,227,614,729,908,977} 的命中不触发 OnHit 族（钛金碎片再命中不 proc/
+    //   不刷 cd）。srcProjId 由弹侧结算点携带（proj1457.dealContacts /
+    //   MuramasaSlashProj 等 on-hit 效果产出弹）。
     {
       const plT = game.player as unknown as {
         dead?: boolean; cx?: number; cy?: number; titaniumStormCd?: number;
         buffs: { apply(t: number, s: number): void };
         equipStats?: { titaniumStorm?: boolean };
       } | null | undefined;
-      const titanExempt = this.vanillaId === 488 || this.spawnedFromStatue;
+      const titanExempt = this.vanillaId === 488 || this.spawnedFromStatue
+        || (srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId));
       if (fromPlayer && dmg > 0 && !titanExempt && this.hp > 5
         && plT && !plT.dead && plT.equipStats?.titaniumStorm === true) {
         if ((plT.titaniumStormCd ?? 0) <= 0) {
@@ -12208,14 +12216,6 @@ export class Enemy extends Entity {
         }
       }
     }
-    if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
-    // 旗 buff 加伤（Main.GetBannerBuffEffect → StrikeNPC 乘区,ItemID.cs:11-44 普通族:
-    // 经典 ×1.5/专家 ×2;DD2 0.2 族不区分,登记）——统一入口=StrikeNPC 全通道语义
-    if (this.vanillaId != null && (game as { bannerNpcActive?: (n: number) => boolean }).bannerNpcActive?.(this.vanillaId)) {
-      const g = game as { world?: { flags?: Record<string, boolean> } };
-      dmg = Math.max(1, Math.round(dmg * (g.world?.flags?.hardMode ? 2 : 1.5)));
-    }
-    if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
     // 猪鲨爆裂泡泡（NPC 371，StrikeNPC cs:82102-82107）：伤害清零(num=0)不扣血，
     // 直接转入爆炸态 ai[0]=1/ai[1]=4 + dontTakeDamage——"被击即爆"而非"被打死"；
@@ -12239,10 +12239,17 @@ export class Enemy extends Entity {
     const penAdd = npcCheckArmorPenetration(def, armorPen, penPercent, {
       ichor: this.ichorT > 0, brokenArmor: this.brokenArmorT > 0, betsysCurse: this.betsysCurseT > 0,
     });
-    dmg = Math.max(1, Math.round(dmg + penAdd - def * 0.5));
+    // ★F9/η（2026-08-31 蓝队三批）取整链锚修正：原版 StrikeNPC_Inner
+    //   `int num = (int)Math.Max(1.0, Main.CalculateDamageNPCsTake(Damage, defense)
+    //   × (crit?2:1))`——CalculateDamageNPCsTake 为 double 全程不取整
+    //   （Main.cs:67126-33），终值只在 StrikeNPC_Inner 处 `(int)` 向零截断
+    //   （NPC.cs:82067）。旧 round() 在奇防非暴击面每击系统性 +1（例 10/7→6.5：
+    //   原版 6、旧实现 7），统一换 trunc。
+    dmg = Math.trunc(Math.max(1, dmg + penAdd - def * 0.5));
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
-    if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
+    // （takenDamageMultiplier 段 NPC.cs:82070-82072 亦为 (int) 截断非 round）
+    if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.trunc(dmg * this.takenDamageMultiplier));
     // ---- 伤害飘值 + 受击音：原版 StrikeNPC 内【单点】发射（:82006-82015 CombatText、
     // :82118 起 HitSound）——调用方零重复。曾调用方多点各发 + 假人分支再发 =
     // 一次打击双份飘值+音效双播（2026-08-23 用户报）。
@@ -12359,6 +12366,11 @@ export class Enemy extends Entity {
     // :82217/:82228 读【运行时】noGravity（AI_017 秃鹫飞行态/AI_087 空中态/AI_091
     // 浮游态按态置位）——def.flying 仅静态兜底（数据 noGravity + aiStyle 2/5/14/23/44）
     const kbFlying = this.noGravity || this.def.flying;
+    // ★F10（2026-08-31 蓝队三批）：原版击退整段单门 `knockBack>0f && knockBackResist>0f`
+    // （NPC.cs:82144）——标量 knockBack 与两分支共享。仓内双参冲量约定（kby≠0=爆炸/
+    // 环形冲量）在此以「向量非零」等价承载 knockBack>0：两分支现都要求 [冲量非零 ∧
+    // resist>0]，与武器支 :12366 同式；送参侧零冲量调用点同步归零（扑击弹 818 案，
+    // 见 MinionProj TigerPounce F10 注）。
     if (kby !== 0) {
       if (resist > 0) { this.vx += kbx * resist; this.vy += kby * resist; }
     } else if (Math.abs(kbx) > 0 && resist > 0) {   // :82144 knockBack>0 && resist>0 双门

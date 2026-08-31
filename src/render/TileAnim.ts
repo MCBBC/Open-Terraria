@@ -137,7 +137,11 @@ export const TILE_ANIM_PITCH: Record<number, number> = {
   463: 72, 464: 72,
   565: 36, 593: 18, 594: 36,
   642: 54,          // case 219/220/642 三联组实文同 54
-  17: 38,   77: 38,   96: 36,   129: 38,   133: 38,   215: 36,   270: 38,   272: 38,   377: 38,   405: 38,   406: 56,   410: 38,   421: 90,   456: 38,   480: 38,   509: 38,   572: 38,   657: 38,   658: 38,   660: 38,   665: 36,   696: 36,   708: 90,   720: 38,   721: 38,   725: 38,
+  17: 38,   77: 38,   96: 36,   129: 38,   133: 38,   215: 36,   270: 38,   377: 38,   405: 38,   406: 56,   410: 38,   421: 90,   456: 38,   480: 38,   509: 38,   572: 38,   657: 38,   658: 38,   660: 38,   665: 36,   696: 36,   708: 90,   720: 38,   721: 38,   725: 38,
+  // ★272 齿轮块（2026-08-31 权威化，TileDrawing.cs:1137-1147 verbatim）：步距 90
+  // （素材 234×180=两带各90 实证）——此前 PIN 锁的 38 为本波补键时序错值，
+  // 表现为用户报「海盗船齿轮块动态漂移」；相位因子见 cogAddFrY。
+  272: 90,
 };
 
 /** 捕获系统读表用（生效帧数对照，回卷上限=AnimateTiles reset 值） */
@@ -273,6 +277,17 @@ export function fireplaceAddFrY(frameX: number): number {
   if (frameX >= 54) { tileFrameCapture.yoff('fp405', `x${frameX}:s`, 0); return 0; }
   const off = animFrameIdx(405, 306) * 38;
   tileFrameCapture.yoff('fp405', String(frameX), off);
+  return off;
+}
+
+/** 齿轮块 272（TileDrawing.cs:1137-1147 case 272 verbatim）：addFrY =
+ *  ((tileFrame[272] + x%2 + y%2 + x%3 + y%3) % 2) × 90 —— 每格按坐标哈希取相位，
+ *  相邻格交错选带（素材 234×180=两带各90）。★必须经 cogAddFrY 路由，不能走
+ *  通用 animYOffset（会丢坐标相位 ⇒ 全场齿轮同步翻转=用户报"动态漂移"根因）。 */
+export function cogAddFrY(x: number, y: number): number {
+  const idx = (animFrameIdx(272, 180) + (x % 2) + (y % 2) + (x % 3) + (y % 3)) % 2;
+  const off = idx * 90;
+  tileFrameCapture.yoff('cog272', `${x},${y}`, off);
   return off;
 }
 

@@ -549,7 +549,27 @@ function unembedPass(b: Body, world: World): void {
   //  slopeCollide 逐 tick 管理),无排除=被判真嵌入→15t 后上抬 16px→重力落回
   //  →循环("掉落物在斜坡上下移-瞬移-再下移",2026-08-25 用户实报+存档标记定位)
   const centerSolid = st.isSolid(cx, cy) && st.slope[ci] === 0 && !st.half[ci] && !st.isPlatform(cx, cy);
-  if (!centerSolid && !topEmbedded) {
+  // ★坡面 solid 三角嵌入检测(2026-08-31 天花板斜面穿透 bug 修复):
+  //  坡面格不全部排除——中心点在【开放三角】(斜面低侧)= 正常贴合(slopeCollide 管理不触发);
+  //  中心点在【solid 三角】(斜面高侧实体区)= 真嵌入(slopeCollide 只管脚底贴面不管
+  //  头部穿入 solid 区),连续 15t 后照常推出。
+  //  各坡向 solid 三角判定(中心相对 tile 原点的 cpx/cpy):
+  //  slope 1: solid=左下三角 ⇒ cpy > cpx
+  //  slope 2: solid=右下三角 ⇒ cpy > (TILE - cpx)
+  //  slope 3: 天花板左 ⇒ solid=上方三角 ⇒ cpy < cpx
+  //  slope 4: 天花板右 ⇒ solid=上方三角 ⇒ cpy < (TILE - cpx)
+  let slopeSolidEmbed = false;
+  if (!centerSolid && st.slope[ci] > 0 && !st.half[ci] && !st.isPlatform(cx, cy)) {
+    const slopeV = st.slope[ci];
+    const cpx = (b.x + b.w / 2) - cx * TILE;
+    const cpy = (b.y + b.h / 2) - cy * TILE;
+    if (slopeV === 1) slopeSolidEmbed = cpy > cpx;
+    else if (slopeV === 2) slopeSolidEmbed = cpy > TILE - cpx;
+    else if (slopeV === 3) slopeSolidEmbed = cpy < cpx;
+    else if (slopeV === 4) slopeSolidEmbed = cpy < TILE - cpx;
+  }
+  const embedded = centerSolid || topEmbedded || slopeSolidEmbed;
+  if (!embedded) {
     b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
     return;
   }

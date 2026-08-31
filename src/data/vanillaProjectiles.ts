@@ -1,5 +1,13 @@
 // 原版投射物数据（tools/extract-projectiles.mjs 从 Projectile.cs SetDefaults 提取；
 // ★2026-08-23 基准切换 1457——提取器缺省源版本 SW_ITEM_VER 缺省 1457）。
+// ★2026-08-31 校验修正（三轮蓝队 F4）：DD2 哨兵塔 SetDefaults「switch(type) 三档
+//   覆写」曾被提取器整块照收（case 体不分 id,lastMatch 恒吃末 case）⇒ json 663/665
+//   两行被写成 667 的 28×60。已按两树 SetDefaults 终值逐值勘正：663=30×54
+//   （Terarria1457/Terraria/Projectile.cs:7133-7134）/665=28×58（:7141-7144,1456 同值
+//   :6852-6858 段同构）;667=28×60 本就正确。同步修复提取器根因（expandTypeSwitchLines
+//   纯 type switch 逐 id 求值,case 连排空标脚共享体、default 不并入），recon-item 双闸门
+//   HANDPATCH 台账随之清零（此前 665.height=58 被误登记为「手补偏离源码」的假账消除）。
+//   ⚠裸重跑提取器仍会抹下方手补清单各列——本文件头注为唯一权威恢复指引。
 // 注意 1456 的 SetDefaults 是 if/else-if 链（非 switch），且长矛/悠悠球/连枷等族走
 // DefaultTo*() 辅助方法（aiStyle 19/99/15）、悠悠球批量定义在 `type >= A && type <= B` 区间块。
 // ★手补清单（2026-08-22 弹幕基建批；提取器 NUM_FIELDS 未含 localNPCHitCooldown/

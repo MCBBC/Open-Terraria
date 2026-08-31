@@ -394,7 +394,8 @@ export function grantCollisionAttackImmunity(p: { iframes?: number }, time: numb
 }
 
 /** JumpMovement 头部踩踏段总入口（A+C 支；B 支无引擎触发源走显式入口）——
- *  Player.fixedUpdate 每 tick 调一次（vanilla :26945 移动尾无条件调 JumpMovement）。
+ *  Player.fixedUpdate 每 tick 调一次（vanilla :26945 移动尾无条件调 JumpMovement；
+ *  ★F2/Note① 批起与 mountHorizontalCharges 同位上提到跳跃门前,清湿在踩踏【后】）。
  *  返回命中数。同时推进免疫连击时钟（见上）。 */
 export function mountJumpStomps(p: {
   x: number; y: number; w: number; h: number; vx: number; vy: number;
@@ -509,8 +510,10 @@ function chargeConfigs(mountType: number): Array<{
   return null;
 }
 
-/** 横向侧撞族总入口（Player.fixedUpdate 移动尾与 mountJumpStomps 并列——vanilla
- *  同为 Update 主体内速度终值语境）。返回命中数（≤cfg 数,每 cfg 至多一个目标） */
+/** 横向侧撞族总入口（★F2/Note① 批：Player.fixedUpdate 跳跃门位次,先于清湿/
+ *  跳跃/DashMovement 面——vanilla CollideWithNPCs 五分块随 HorizontalMovement :26889
+ *  跑,JumpMovement 三踩踏循环在其后。此前挂移动相尾(摔伤段后)已上提归位）。
+ *  返回命中数（≤cfg 数,每 cfg 至多一个目标） */
 export function mountHorizontalCharges(p: {
   x: number; y: number; w: number; h: number; vx: number; vy: number;
   facing: number; iframes?: number; wetSlime?: number;

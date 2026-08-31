@@ -12,6 +12,7 @@ import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
+import { wetCollision } from './npcLiquid';
 import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
@@ -641,6 +642,12 @@ export class Arrow extends Entity {
   hostile: boolean;
   /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
   whipTagShot = false;
+  /** ★Z-F1（2026-08-31 蓝队三批）运行时类别旗覆写槽（原版 spawn 位
+   *  `Main.projectile[i].melee = true` 显式赋值的仓内形态——蜂 181/566 家族：
+   *  Player.cs:43977/:44479/:44873 + Projectile.cs:13759）。SetDefaults 数据面
+   * （projClassOfProjId 查表）保持零旗真值不变；显式字段经 resolveProjClass()
+   * 优先于数据面。null/缺省 = 无类弹。 */
+  projClass?: import('./projTargets').ProjClass;
   /** 命中施加 OnFire 300t（1106 火舌 :11002-11004） */
   ignite = false;
   /** 命中施加地狱火 OnFire3(323) 300-600t（1097 生成侧 ai[1]>0 档 :11315-11318——
@@ -2941,7 +2948,7 @@ export class Arrow extends Entity {
       this.thornStep(game);
       if (this.dead) return;
     }
-    // 469 蜂箭入水即消亡（AI_001 头 Projectile.cs:51125 `type == 469 && wet &&
+    // 469 蜂箭入水即消亡（AI_001 头 Projectile.cs:54969 `type == 469 && wet &&
     // !honeyWet && !shimmerWet` → Kill()——水/岩浆档，蜂蜜/微光豁免）。
     // 本仓 wet = 弹心格液量 >0 + liquidType ∈ {WATER, LAVA}（LIQUID_TYPE +1 编码）
     if (this.projId === 469) {
@@ -3688,12 +3695,19 @@ export class Arrow extends Entity {
       //    或 10/0.25(自由)、566 6.8/0.14（:27793-27822）。
       const st36 = world.store;
       {
-        const bx36 = Math.floor(this.cx / TILE), by36 = Math.floor(this.cy / TILE);
-        if (st36.inBounds(bx36, by36) && st36.liquid[st36.idx(bx36, by36)] > 0) {
-          const lt36 = st36.liquidType[st36.idx(bx36, by36)];
-          if ((lt36 === LIQUID_TYPE.WATER || lt36 === LIQUID_TYPE.LAVA) && this.projId !== 307) {
-            this.killNow(game); return;                    //（:27685-27688）
-          }
+        // ★三轮蓝队 F7：判死几何升级（Collision.cs:1575-1656 全式,复用 npcLiquid
+        //   1:1 移植）——单「弹心格 liquid>0」近似曾有两类真差异：
+        //   a) 贴水面掠飞：弹心格 liquid>0 但液面下探((256-liquid)/32×2px)后探针盒
+        //      （min(10,W)×min(H/2,H) 居中）与液体体积不相交 ⇒ 原版不死、我们误杀;
+        //   b) 邻格液体 + 弹心格干燥：中心格判漏 ⇒ 原版 W≤10 蜂全宽探针可触邻格
+        //      液体而致死被漏;坡面格+上方液体(slope≠0 支 :1630-1647)同前一类。
+        //   升级后与原版逐值一致；熔岩致死保留（WetCollision 对岩浆格同样真）；
+        //   307 豁免/wet 标志时序差已证等价（AI 内即时读 vs 原版上子步 wet 缓存,
+        //   首子步 spawn-in-water 差 1 子步,<4px 不可感知）。honey/shimmer 由返回旗
+        //   精确豁免（liquidType 3/4——旧 WATER/LAVA 白名单等价消解进 ！honey&&!shimmer）。
+        const wc36 = wetCollision(st36, this.x, this.y, this.w, this.h);
+        if (wc36.wet && !wc36.honey && !wc36.shimmer && this.projId !== 307) {
+          this.killNow(game); return;                    //（:27685-27688）
         }
       }
       if (this.alpha > 0) {
@@ -5224,7 +5238,7 @@ export class Arrow extends Entity {
         if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0,
           e.x + e.w / 2, e.y + e.h / 2, 0, 0)) hitBox = false;
       }
-      // ★批③（2026-08-31）弹 661 黑爆 Colliding 重载（Projectile.cs:15887-15893）：
+      // ★批③（2026-08-31）弹 661 黑爆 Colliding 重载（Projectile.cs:15877-15883,★F8 校准）：
       // dist(myRect.Center→targetRect.Center) > 500f 或 !CanHitLine(双盒心点对 0×0)
       // ⇒ 本拍不命中（原版 Colliding 直接 return false——掷出去的玛瑙爆破弹
       // 越过 500px 或被墙隔断后连擦身都不结算）。顺序=先距离后视线,1:1。

@@ -59,6 +59,83 @@ function readBlock(text, from) {
   }
   return null;
 }
+/** 块内收集:id 视角的有效行 = 语句层行 + 嵌套纯 type if(对该 id 为真)的递归行
+ *  ★三轮蓝队 F4（2026-08-31）修正：语句层还含 `switch (type)` 分派（663 族
+ *  SetDefaults :7132-7157 三档盒覆写等）——旧实现整块照收全部 case 体,
+ *  lastMatch 恒取末 case 行 ⇒ 三个 id 全被写成 667 的 28×60。现对【纯 type】
+ *  switch 逐 id 求值:命中 case 体并入、其余丢弃（含 default）。非纯表达式
+ *  switch 维持旧行为照收并登记。 */
+function expandTypeSwitchLines(block, id) {
+  // 找第一个语句层 switch；无 → 原文返回（递归基,先于任何递归调用防同串自旋）
+  const swRe = /switch\s*\(/g;
+  let m;
+  while ((m = swRe.exec(block))) {
+    // switch 头须位于块语句层（其前括号深度为 0）
+    let d0 = 0;
+    for (let i = 0; i < m.index; i++) {
+      if (block[i] === '(' || block[i] === '{') d0++;
+      else if (block[i] === ')' || block[i] === '}') d0--;
+    }
+    if (d0 !== 0) continue;
+    const cond = readCond(block, m.index + m[0].length - 1);
+    if (!cond) return block.slice(0, m.index).split('\n').map((l) => l.trim());
+    const body = readBlock(block, cond.condEnd);
+    if (!body) return block.slice(0, m.index).split('\n').map((l) => l.trim());
+
+    const out = [...expandTypeSwitchLines(block.slice(0, m.index), id)];
+    if (!tryCompile(cond.cond)) {
+      // 非纯 type switch：不可静态求值,保守沿用旧行为=整个 body 照收
+      out.push(...body.text.split('\n').map((l) => l.trim()));
+    } else {
+      // 拆 case 标签（case N 连排且之间无实体语句时共享一体=C# 穿透仅空标脚）；
+      // 有体的组遇新标签即开新组。命中体并入、其余丢弃（default 同法并入尾组）。
+      const caseRe = /\b(?:case\s+(-?\d+)\s*:|default\s*:)/g;
+      const defaultSentinel = Symbol('default');   // default 只在无任何 case 命中时生效(C# 跳转),此保守实现仅记录不并入
+      const groups = [];          // { ids:Set, text }——default 以 -Infinity 假值入组首标签位?不,default 仅在无穿透依赖时并入尾组文本前
+      let curIds = null;
+      let curStart = null;
+      let cs;
+      const isEmptySeg = (t) => t.replace(/[\s;}|]|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '') === '';
+      const pushGroup = (endAt) => {
+        if (curIds !== null && curStart !== null) {
+          groups.push({ ids: curIds, text: body.text.slice(curStart, endAt) });
+        }
+      };
+      while ((cs = caseRe.exec(body.text))) {
+        if (cs[1] !== undefined) {
+          const v = Number(cs[1]);
+          const prevEmpty = curStart === null || isEmptySeg(body.text.slice(curStart, cs.index));
+          if (!prevEmpty) {
+            pushGroup(cs.index);
+            curIds = new Set();
+          } else if (curIds === null) {
+            curIds = new Set();
+          } else {
+            curIds = new Set(curIds);   // 复制防跨组串写
+          }
+          curIds.add(v);
+          curStart = caseRe.lastIndex;
+        } else {
+          // default：并入当前组文本域（default 与 case 同体)或自成一组
+          if (curIds === null || !isEmptySeg(body.text.slice(curStart ?? caseRe.lastIndex, cs.index))) {
+            pushGroup(cs.index);
+            curIds = new Set();
+          }
+          curIds.add(defaultSentinel);
+          curStart = caseRe.lastIndex;
+        }
+      }
+      pushGroup(body.text.length);
+      for (const g of groups) {
+        if (g.ids.has(id)) out.push(...g.text.split('\n').map((l) => l.trim()));   // default 哨兵≠数字 id,天然不命中
+      }
+    }
+    out.push(...expandTypeSwitchLines(block.slice(body.end), id));
+    return out;
+  }
+  return block.split('\n').map((l) => l.trim());
+}
+
 /** 块内收集:id 视角的有效行 = 语句层行 + 嵌套纯 type if(对该 id 为真)的递归行 */
 function collectLinesForId(block, id, depth = 0) {
   const out = [];
@@ -66,8 +143,8 @@ function collectLinesForId(block, id, depth = 0) {
   let cursor = 0;
   let m;
   while ((m = re.exec(block))) {
-    // 条件前的语句层文本行并入
-    out.push(...block.slice(cursor, m.index).split('\n').map((l) => l.trim()));
+    // 条件前的语句层文本行并入（★F4:语句层的 switch(type) 在此展开逐 id 求值）
+    out.push(...expandTypeSwitchLines(block.slice(cursor, m.index), id));
     const c = readCond(block, m.index + m[0].length - 1);
     if (!c) break;
     const b = readBlock(block, c.condEnd);
@@ -83,7 +160,7 @@ function collectLinesForId(block, id, depth = 0) {
     re.lastIndex = cursor;
     if (depth > 4) break;
   }
-  out.push(...block.slice(cursor).split('\n').map((l) => l.trim()));
+  out.push(...expandTypeSwitchLines(block.slice(cursor), id));
   return out;
 }
 const blocks = [];

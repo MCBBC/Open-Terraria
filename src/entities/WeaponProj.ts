@@ -66,6 +66,18 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
  *  ★当前消费端（本仓 aiStyle 族的 drawProj 调用方）尚未覆盖这些型号——表先行就位,
  *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项本仓 Bobber 为自绘近似不适用 */
 const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly [number, number, number]> = {
+  // ★三轮蓝队 F5① 弩车三档（2026-08-31）：Main.cs:34097-34134 支派生——泛型锚 =
+  //   proj.Center（Main.cs:33695）→ 分支内 vector99.Y++、+=2（677 基准=Bottom+3）
+  //   /678 再 −4 /679 再 −2；origin32=frame.Size/2。折算进本表「贴图左上=盒左+num144,
+  //   盒上−num143」公式（帧尺寸 677:124×56 / 678:140×56 / 679:142×56）：
+  //   num143 = fh/2 − bh − dyOffset 之负逆（dyOffset: 677:+3 / 678:−1 / 679:+1 相对
+  //   Bottom 的贴图心锚距）；num144 = bw/2 − fw/2。放大前后视觉差：旧兜底=[0,0,0]
+  //   盒顶左锚 ⇒ 贴图整体偏下/右 fh/2−bh 量级且随真盒扩容雪崩;现按原版 Bottom 系
+  //   锚复现。残余已知差：分支头 `dir ^= FlipH|FlipV` 双轴镜像背面朝向语义（XNA
+  //   顶点绕 origin 镜像对本仓 scale(-1,1) 单轴式）未复刻——非翻转主位与原版一致。
+  677: () => [-29, -49, 0],
+  678: () => [-25, -57, 0],
+  679: () => [-27, -58, 0],
   959: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
   1095: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
   1096: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
@@ -317,11 +329,12 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       // .Center.X/.Y, targetNPC.velocity.X/.Y, 289)）——弹幕侧独占位，无双发风险。
       // 289 实体 = meleeOnHitProjs.ConfettiBurstProj（挥砍侧同款）
       if (imbuParty) {
+        // ★Z-F4：netSync——NewProjectile 内联 SendData(27) 语义（短命弹即时上线）
         game.spawnFriendlyProj?.(new ConfettiBurstProj(
           (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
           (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
           (e as unknown as { vx?: number }).vx ?? 0,
-          (e as unknown as { vy?: number }).vy ?? 0));
+          (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
       }
     }
     e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
@@ -375,8 +388,9 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
 };
 
 /** Phaseblade 族（ProjectileID.cs:27 IsAPhaseblade,19 型）：
- *  出程 30t 后垂落;返回 40/3 高速穿墙归位 + extraUpdates 随距离增长（:37211-37221） */
-const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
+ *  出程 30t 后垂落;返回 40/3 高速穿墙归位 + extraUpdates 随距离增长（:37211-37221）。
+ *  exported：Game 发射侧接线再掷召回门（recallGate）/回归测试共面 */
+export const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
 
 /** 撞墙反弹族（:18142-18151）：33 荆棘轮/106 光碟/866 飞刀——撞墙不回收,
@@ -387,12 +401,75 @@ const WALL_BOUNCE_PROJ = new Set([33, 106, 866]);
  *  :12292-12297,301/383 命中时 direction 朝敌改写 :12249-12263） */
 const NO_HIT_RETURN_PROJ = new Set([301, 866, 902]);
 
-/** 出程尘近似表（AI_003 头段 :36652-36738 per-type Dust——颜色/概率近似,
- *  粒型/noGravity/光源不建模;未列型号原版本就无尘） */
-const BOOMERANG_DUST: Record<number, [string, number]> = {
-  19: ['#FFA040', 1], 33: ['#B0E080', 0.6], 6: ['#FFE0A0', 0.25],
-  113: ['#B0C0FF', 1], 320: ['#C0E8FF', 0.4], 383: ['#D0A0FF', 0.3],
-  867: ['#FF6060', 0.4], 1000: ['#FFD080', 0.3], 182: ['#FFD080', 0.5],
+/** 出程头段逐型真值尘（1458 AI_003_Boomerang 头段 :39619-39686;1456 同段 :36652-36738。
+ *  台账 C 批清偿：原 BOOMERANG_DUST 手调色值近似退役——真值 = 粒型/alpha/scale/
+ *  noGravity/vel 系数逐参；未列型号（含旧表误收的 182/383）原版头段本就无尘）。
+ *  ctx.v = 弹速向量。spawnDust 宿主缺省 = null 静默跳过（测试 mock 兼容）。 */
+type BoomerangDustCtx = { projId: number; x: number; y: number; w: number; h: number; vx: number; vy: number };
+const BOOMERANG_DUST_TRUTH: Record<number, (s: BoomerangDustCtx, game: GameHooks) => void> = {
+  // 19 荆棘轮回旋镖（:39623-39632）：恒发 2× d6,vel×0.2 后 XY 再 ×0.3,noGravity,scale2
+  19: (s, game) => {
+    for (let i = 0; i < 2; i++) {
+      const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 6, s.vx * 0.2, s.vy * 0.2, 100, null, 2);
+      if (d) { d.noGravity = true; d.vx *= 0.3; d.vy *= 0.3; }
+    }
+  },
+  // 1000 无头回旋镖（:39633-39657）：rand3==0 → 三分档——default 档再 rand3 选
+  // {15/57/58} vel×0.25 alpha150 scale0.7 后 ×0.5 / d267(色50,50,200,alpha50,scale1.1,
+  // fadeIn0.1,v×0.5,noGravity) / d76(v×0.15,noGravity,scale1.1)+d15(v×0.05,alpha150,scale0.6)
+  1000: (s, game) => {
+    if (Math.floor(Math.random() * 3) !== 0) return;
+    const r = Math.floor(Math.random() * 3);
+    if (r === 0) {
+      const rr = Math.floor(Math.random() * 3);
+      const type = rr === 1 ? 57 : rr === 2 ? 58 : 15;
+      const d = game.spawnDust?.(s.x, s.y, s.w, s.h, type, s.vx * 0.25, s.vy * 0.25, 150, null, 0.7);
+      if (d) { d.vx *= 0.5; d.vy *= 0.5; }
+    } else if (r === 1) {
+      const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 267, s.vx, s.vy, 50,
+        { r: 50, g: 50, b: 200, a: 255 }, 1.1);
+      if (d) { d.fadeIn = 0.1; d.vx = s.vx * 0.5; d.vy = s.vy * 0.5; d.noGravity = true; }
+    } else {
+      const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 76, s.vx * 0.15, s.vy * 0.15, 0, null, 1.1);
+      if (d) d.noGravity = true;
+      game.spawnDust?.(s.x, s.y, s.w, s.h, 15, s.vx * 0.05, s.vy * 0.05, 150, null, 0.6);
+    }
+  },
+  // 867 鲜血之杯（:39658-39665）：rand3==0 → d165（velocity 原样,alpha50,scale 缺省1）
+  // 后 ×0.5,noGravity
+  867: (s, game) => {
+    if (Math.floor(Math.random() * 3) !== 0) return;
+    const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 165, s.vx, s.vy, 50);
+    if (d) { d.vx *= 0.5; d.vy *= 0.5; d.noGravity = true; }
+  },
+  // 33 荆棘轮（:39666-39671）：rand.Next(1)==0 恒发 → d40,vel×0.25,scale1.4,noGravity
+  33: (s, game) => {
+    const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 40, s.vx * 0.25, s.vy * 0.25, 0, null, 1.4);
+    if (d) d.noGravity = true;
+  },
+  // 320 冰霜回旋镖（:39672-39687）：rand3==0 → d5 vel×0.25 scale1.1;
+  // 再 rand2==0 → scale=0.9+vel×0.2，否则 noGravity
+  320: (s, game) => {
+    if (Math.floor(Math.random() * 3) !== 0) return;
+    const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 5, s.vx * 0.25, s.vy * 0.25, 0, null, 1.1);
+    if (!d) return;
+    if (Math.floor(Math.random() * 2) === 0) { d.scale = 0.9; d.vx *= 0.2; d.vy *= 0.2; }
+    else d.noGravity = true;
+  },
+  // 6 木回旋镖（:39688-39695）：rand5==0 → rand3 选 {15/57/_:58},vel×0.25,alpha150,scale0.7
+  6: (s, game) => {
+    if (Math.floor(Math.random() * 5) !== 0) return;
+    const r = Math.floor(Math.random() * 3);
+    game.spawnDust?.(s.x, s.y, s.w, s.h, r === 0 ? 15 : r === 1 ? 57 : 58,
+      s.vx * 0.25, s.vy * 0.25, 150, null, 0.7);
+  },
+  // 113 血腥回旋镖（:39696-39701）：Next(1)==0 恒发 → d76(v×0.15,noGravity,scale1.1)
+  // + d15(v×0.05,alpha150,scale0.6)
+  113: (s, game) => {
+    const d = game.spawnDust?.(s.x, s.y, s.w, s.h, 76, s.vx * 0.15, s.vy * 0.15, 0, null, 1.1);
+    if (d) d.noGravity = true;
+    game.spawnDust?.(s.x, s.y, s.w, s.h, 15, s.vx * 0.05, s.vy * 0.05, 150, null, 0.6);
+  },
 };
 
 /** melee 投掷初速（ItemCheck_Shoot :46430-46434）：shootSpeed / meleeSpeed——
@@ -442,6 +519,9 @@ export class Boomerang extends Entity {
   meleeProj = true;
   /** channel 电平（301 Bouncing Shield 双门用；Game 仅 301 注入,其余族空挂无害） */
   channel: (() => boolean) | null = null;
+  /** 光刃再掷召回电平（P.cs:39717-39722 IsAPhaseblade[HeldItem.shoot]&&controlUseItem；
+   *  Game 发射侧仅对 PHASEBLADE_PROJ 注入——mouseHeld+手持同物品,flail channel 同管线） */
+  recallGate?: () => boolean;
   /** ★ai[0]（:36783 起）：0 飞出 / 1 返回 / 2 光刃撞墙悬停（:17975-17990 置 2） */
   ai0 = 0;
   /** 探针 _weapons-family-probe 读 returning——ai[0]==1 即返回段（保留旧名兼容） */
@@ -534,8 +614,16 @@ export class Boomerang extends Entity {
         this.life = 5;
         if (this.ai0 !== 1) this.ai0 = 1;
       }
-      // :36758-36764 再掷召回门（持光刃按 use 即回收）——需 Player controlUseItem/
-      //   releaseUseItem 输入语义,本引擎未建模（GAP,登记 docs/weapon-proj-audit）
+      // :39717-39722 再掷召回门（1458 行号;1456 同段 :36758-36764）：
+      //   IsAPhaseblade[HeldItem.shoot] && owner==myPlayer && ai[0]!=1 && 玩家存活
+      //   && controlUseItem → ai0=1 提前召回。recallGate 由 Game 发射侧接线
+      //   （mouseHeld=controlUseItem 电平 + 手持同物品核对——flail channel 同管线;
+      //    ★登记偏差:原版按 IsAPhaseblade[HeldItem.shoot] 判,换持另一柄光刃也触发,
+      //    本仓按同 itemId 绑定（存档的 itemId 字段缺省 undefined 时退化为纯电平门））
+      if (this.ai0 !== 1 && !(p as { dead?: boolean }).dead
+        && (this.recallGate ? this.recallGate() : false)) {
+        this.ai0 = 1;
+      }
     }
     if (this.ai0 === 0) this.aiOut(game, isPhase);
     else if (isPhase && this.ai0 === 2) this.aiHover(game); // 光刃撞墙悬停
@@ -769,10 +857,12 @@ export class Boomerang extends Entity {
     } else if (!isPhase) {
       this.rot += 0.4 * this.dir; // :37351-37352 缺省族两段自旋 0.4（非定角!）
     }
-    // per-type 尘近似（:36652-36738,色/率近似）
-    const dust = BOOMERANG_DUST[this.projId];
-    if (dust && Math.random() < dust[1]) {
-      game.spawnParticles(this.cx, this.cy, dust[0], 1, 0.4, { life: 18, grav: 0, size: 2 });
+    // per-type 真值尘（1458 AI_003 头段 :39619-39686——粒型/alpha/scale/noGravity 逐参,
+    // 原 BOOMERANG_DUST 手调色值近似退役）
+    const dustFn = BOOMERANG_DUST_TRUTH[this.projId];
+    if (dustFn) {
+      dustFn({ projId: this.projId, x: this.x, y: this.y, w: this.w, h: this.h,
+        vx: this.vx, vy: this.vy }, game);
     }
   }
 
@@ -905,9 +995,13 @@ export class SpearProj extends Entity {
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
   /** AI_019 伴生弹回调（Game 注入 entities.add——GameHooks 不暴露实体桶）：
-   *  130 蘑菇矛→131 孢子云七连 / 730 风暴矛→732 首拍气旋（Projectile.cs:46726-46746）。
-   *  参数 = 弹心坐标 + 初速 + 弹型/伤/kb（NewProjectile 中心坐标语义） */
-  spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
+   *  130 蘑菇矛→131 孢子云七连 / 730 风暴矛→732 首拍气旋 / 342 北极→343 雪花镖 /
+   *  222 叶绿→228 孢子云 / 367 黑曜鱼叉→1-3×1107-1109 碎刃
+   *  （1458 Projectile.cs:46749-46802）。参数 = 弹心坐标 + 初速 + 弹型/伤/kb
+   *  （NewProjectile 中心坐标语义）;extra = NewProjectile 后置覆写档（timeLeft——
+   *  367 支逐枚掷 :46800） */
+  spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number,
+    kb: number, extra?: { timeLeft?: number }) => void) | null = null;
   /** localAI[0]（AI_019 per-type 计数：130 七连拍 / 730 首拍一次性门） */
   private localAI0 = 0;
   /** 刺出方向（单位向量，原版出手时定死）——public 供 SpearDustCtx 结构化消费
@@ -1022,24 +1116,60 @@ export class SpearProj extends Entity {
     const offset = n6 + n7 * num9 - n8 * num10;
     this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
     this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
-    // ---- AI_019 per-type 伴生弹（Projectile.cs:46726-46746,R30 §3.2 落点清单 #8）----
+    // ---- AI_019 per-type 伴生弹（1458 Projectile.cs:46749-46802,R30 §3.2 落点清单 #8;
+    //   本块曾只接 130/730——342/222/367 三类未申报缺口,2026-08-31 台账清偿）----
     //   原版 switch(type) 紧随 position += velocity×offset 之后、旋转/命中之前；
     //   弹心坐标 + 本弹当前速度（velocity=朝向×shootSpeed[÷meleeSpeed]，本仓 dx/dy×spd）
-    if (this.spawnProj && (this.projId === 130 || this.projId === 730)) {
+    //   flag = itemAnimation < itemAnimationMax/3（int 除法,:46720——缩回相才掷,单发闩
+    //   localAI[0]=1 先于条件执行:CanHit 不成立也吞掉唯一掷次,1:1）
+    const retractPhase = itemAnim < Math.floor(max / 3);
+    if (this.spawnProj && (this.projId === 130 || this.projId === 730
+      || this.projId === 342 || this.projId === 222 || this.projId === 367)) {
       if (this.projId === 130) {
         // 130 蘑菇矛：localAI[0]∈{0,4,…,24} 七连掷 131 孢子云（damage/3 整除,kb=0），
-        // localAI[0] 每 tick 自增（:46727-46736）
+        // localAI[0] 每 tick 自增（:46750-46759）
         if (this.localAI0 % 4 === 0 && this.localAI0 <= 24) {
           this.spawnProj(this.cx, this.cy, this.dx * this.spd, this.dy * this.spd,
             131, Math.trunc(this.damage / 3), 0);
         }
         this.localAI0++;
-      } else if (this.localAI0 === 0) {
+      } else if (this.projId === 730 && this.localAI0 === 0) {
         // 730 风暴矛：首拍一次性掷 732 气旋——v×4、(int)(damage×1.6)、kb×0.5
-        // （:46737-46745 localAI[0]==0 → 置 1 单发门）
+        // （:46760-46768 localAI[0]==0 → 置 1 单发门）
         this.localAI0 = 1;
         this.spawnProj(this.cx, this.cy, this.dx * this.spd * 4, this.dy * this.spd * 4,
           732, Math.trunc(this.damage * 1.6), this.knockback * 0.5);
+      } else if (this.projId === 342 && retractPhase && this.localAI0 === 0) {
+        // 342 北极（:46769-46780）：缩回相一次性掷 343 雪花镖——v×2.4、伤满额、kb×0.85、
+        // CanHit(玩家盒→弹体盒) 视线门;laned(localAI[0]=1) 在门判定前,失线即弃
+        this.localAI0 = 1;
+        const pl = p as unknown as { x: number; y: number; w: number; h: number };
+        if (canHit(game.world.store, pl.x, pl.y, pl.w, pl.h, this.x, this.y, this.w, this.h)) {
+          this.spawnProj(this.cx, this.cy, this.dx * this.spd * 2.4, this.dy * this.spd * 2.4,
+            343, this.damage, this.knockback * 0.85);
+        }
+      } else if (this.projId === 222 && retractPhase && this.localAI0 === 0) {
+        // 222 叶绿partisan（:46781-46789）：缩回相一次性掷 228 孢子云——速度原样（v 不乘）、
+        // 伤/kb 满额（弹本体 tileCollide=false 缓浮毒云,vanilla-projectiles.json :228 档）
+        this.localAI0 = 1;
+        this.spawnProj(this.cx, this.cy, this.dx * this.spd, this.dy * this.spd,
+          228, this.damage, this.knockback);
+      } else if (this.projId === 367 && this.localAI0 === 0) {
+        // 367 黑曜鱼叉（:46790-46801，无缩回相门）：Next(1,4)=1..3 枚 1107+rand(3)
+        // 黑曜碎刃——vector=v;X×(0.7+r×0.6)/Y×(0.7+r×0.6)独立掷、整体×(0.8+r×0.4)、
+        // 再 ×2 出手;(int)(damage×0.5)、kb=0、timeLeft=Next(30,150)（逐枚独立）
+        this.localAI0 = 1;
+        const nDarts = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < nDarts; i++) {
+          const fX = 0.7 + Math.random() * 0.6;
+          const fY = 0.7 + Math.random() * 0.6;
+          const fG = 0.8 + Math.random() * 0.4;
+          this.spawnProj(this.cx, this.cy,
+            this.dx * this.spd * fX * fG * 2, this.dy * this.spd * fY * fG * 2,
+            1107 + Math.floor(Math.random() * 3),
+            Math.trunc(this.damage * 0.5), 0,
+            { timeLeft: 30 + Math.floor(Math.random() * 120) });
+        }
       }
     }
     // 前向延伸盒（AI_019_Spears_GetExtensionHitbox :43530-43571，仅 105/46/153 伸出相）
@@ -1081,14 +1211,17 @@ export class SpearProj extends Entity {
       undefined, undefined, true); // 全局免疫档同 AI_019（见 fixedUpdate 注）——细剑刺 8 帧内重叠窗同样可复中
   }
 
-  /** Chain Guillotines 481 单个 AI 子步（AI_013 type==481 支,Projectile.cs:24957-25120）：
-   *  出程（ai[0]==0）：距玩家 >525 → 转返回（:25001-25003）;ai[1]++、>5 显形、>8 钳 8
-   *  （:25014-25026——钳 8 使共享 `ai[1]>=10 → vy+0.3` 坠速支结构性不可达,登记）。
-   *  返回（ai[0]==1）：tileCollide=false 穿墙（:25081）;距玩家 <50 Kill（:25087-25089）;
-   *  velocity = 朝玩家 ×20（:25092-25096）。命中敌 → Damage aiStyle13 支 ai[0]=1
-   *  （:14223-14228）。位移 = 每子步 position += velocity（Update 积分序）。
-   *  登记近似：原版出程 tileCollide=true 撞块有碰撞响应,本支无 tile 碰撞通道
-   *  （SpearProj 包络模型不接 moveAndCollide）——链刀穿墙,与回收段同形态。 */
+  /** Chain Guillotines 481 单个 AI 子步（AI_013 type==481 支,1458 Projectile.cs:24957-25121;
+   *  1456 同段 :24957-25120 行号锚）：
+   *  出程（ai[0]==0）：距玩家 >525 → 转返回（:25004-25006）;ai[1]++、>5 显形、>8 钳 8
+   *  （:25017-25029——钳 8 使共享 `ai[1]>=10 → vy+0.3` 坠速支结构性不可达,登记）。
+   *  ★出程 tileCollide=true（SetDefaults :5563-5572 未关,真值仅返程置 false :25084）
+   *  ——撞块走 AI_003/013 共享 HandleMovement 响应链 :19632-19665：
+   *  Collision.HitTiles 尘 + SoundID 0 + ai[0]=1 转【回收】,且无速度反转（反转仅
+   *  aiStyle 3/109）——2026-08-31 台账清偿:出程撞块截停进回收,不再全程穿墙。
+   *  返回（ai[0]==1）：tileCollide=false 穿墙（:25084）;距玩家 <50 Kill（:25090-25092）;
+   *  velocity = 朝玩家 ×20（:25095-25099）。命中敌 → Damage aiStyle13 支 ai[0]=1
+   *  （:14226-14231）。位移 = 每子步 position += velocity（Update 积分序）。 */
   private guillotineStep(game: GameHooks): void {
     const p = game.player;
     this.owner481 = p;   // 绘制期玩家中心快照（链条锚）
@@ -1103,20 +1236,37 @@ export class SpearProj extends Entity {
     const pdx = p.cx - this.cx, pdy = p.cy - this.cy;
     const dist = Math.hypot(pdx, pdy);
     if (this.gA0 === 0) {
-      if (dist > 525) this.gA0 = 1;              // :25001-25003 出程门
+      if (dist > 525) this.gA0 = 1;              // :25004-25006 出程门
       this.gA1++;
-      if (this.gA1 > 5) this.gShown = true;      // :25016-25018 alpha=255→0 显形
-      if (this.gA1 > 8) this.gA1 = 8;            // :25023-25025 钳 8
+      if (this.gA1 > 5) this.gShown = true;      // :25019-25021 alpha=255→0 显形
+      if (this.gA1 > 8) this.gA1 = 8;            // :25026-25028 钳 8
     } else {
-      if (dist < 50) { this.dead = true; return; }   // :25087-25089 近手 Kill
-      this.vx = pdx / (dist || 1) * 20;              // :25092-25096 回收速度制
+      if (dist < 50) { this.dead = true; return; }   // :25090-25092 近手 Kill
+      this.vx = pdx / (dist || 1) * 20;              // :25095-25099 回收速度制
       this.vy = pdy / (dist || 1) * 20;
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    if (this.gA0 === 0) {
+      // 出程实体碰撞通道（SetDefaults 未关 tileCollide→ 撞块即截停收刀;返程才关 :25084）
+      // moveAndCollide 全 AABB 四缘+步进;stepUp 不参与（原版弹幕不调 StepUp）
+      const body = {
+        x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
+        onGround: false, hitWall: false, hitHead: false, collideY: false,
+      };
+      moveAndCollide(body, game.world, this.vx, this.vy);
+      this.x = body.x; this.y = body.y;
+      if (body.hitWall || body.hitHead || body.onGround || body.collideY) {
+        // :19652-19654 默认档 HitTiles 尘 + :19664 SoundID 0 挖掘音（音尘一次）
+        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+        game.playSfx('dig', 1, this.cx, this.cy);
+        this.gA0 = 1;                            // :19658-19660 ai[0]=1——速度不反转
+      }
+    } else {
+      this.x += this.vx;
+      this.y += this.vy;
+    }
     // 命中结算（全局免疫 10t 同族;命中即转返回态）
     hitEnemies(this, game, this.hitCd, 10, this.dx > 0 ? 1 : -1, this.armorPen,
-      () => { this.gA0 = 1; }, undefined, true);   // Damage aiStyle13 支 :14223-14228
+      () => { this.gA0 = 1; }, undefined, true);   // Damage aiStyle13 支 :14226-14231
   }
 
   /** 绘制角（AI_013 :24999/:25082）：出程 rotation=atan2(v)+1.57;返回=atan2(向玩家)−1.57 */

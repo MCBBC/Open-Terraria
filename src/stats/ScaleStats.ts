@@ -20,6 +20,7 @@
 // 注入（Game.afterWorldLoad；对应原版 Main 静态单例）。
 // ============================================================================
 import type { World } from '../world/World';
+import { damageVarRoll } from './DamageVar';
 
 // ---------------------------------------------------------------------------
 // GameDifficultyLevel（GameDifficultyLevel.cs:8-16）：档位是【浮点值】不是枚举序号
@@ -262,19 +263,10 @@ export function getAttackDamageForTownNPC(normalDamage: number, difficulty: numb
 /* 版本锚勘误存档：旧头注 "Main.cs:65597-65620" 是 1456 行号；2026-08-30 蓝队复核按
  * 1457 基准改双版标注（DamageVar 在 1457 Main.cs 自 :67097 起）。 */
 export function damageVar(base: number, luck: number, rnd: () => number = Math.random): number {
-  let num = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
-  if (luck > 0) {
-    if (rnd() < luck) {
-      const second = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
-      if (second > num) num = second;
-    }
-  } else if (luck < 0) {
-    if (rnd() < -luck) {
-      const second = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
-      if (second < num) num = second;
-    }
-  }
-  return Math.round(num);   // (int)Math.Round（1457 :67123 / 1456 :65620——曾误 trunc 系统性偏低 0.5）
+  // ★F9（2026-08-31 蓝队三批）：体迁入 stats/DamageVar.ts 单源——离散档/luck 重掷
+  // 逻辑不变，终值舍入改 C# ToEven 银行家形（旧 Math.round half-up 在 x.5 档
+  // 偏一，见 DamageVar.ts 头注②）。
+  return damageVarRoll(base, luck, rnd);
 }
 
 /** GetAttackDamage_CappedAtMaster（:7020）：大师以上钳在 Master 档 */

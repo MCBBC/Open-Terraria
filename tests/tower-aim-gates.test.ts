@@ -1,7 +1,7 @@
 // AI_130/AI_134 FindTarget 三门族回归（2026-08-31 对齐批①②；标杆
-// Terarria1457/Terraria/Projectile.cs:69418-69507 + 调用点 :69376/:69404/:69647/:69685）：
+// Terarria1457/Terraria/Projectile.cs:69418-69507 + 调用点 :69375/:69391/:69647/:69685）：
 //  ① angleRatioMax 锥形门（AI_130 :69434/:69456,默认 1/学徒 T2 套装 0.1 :69332）
-//     + canChangeDirection=false 的 directionLock 门（开火帧重索敌 :69404→后方候选拒）
+//     + canChangeDirection=false 的 directionLock 门（开火帧重索敌 :69391→后方候选拒）
 //  ② deadBottomAngle 死锥门（AI_134 :69481/:69503=0.75）+ 集火路同吃门
 //  「未接」账（angleRatioMax/deadBottomAngle/套装 shot_range/AI_134 center Y−4）本批清偿。
 // ★F4 终端形状定案（2026-08-31 二轮蓝队）：锚定模式视线 = CanHitLine(shootingSpot,0,0
@@ -104,7 +104,7 @@ describe('nearestEnemy(gate) 集成（炮塔 shootingSpot 口径,F4 终端=Cente
     expect(call(900, spot, { angleRatioMax: 0.1 })).toBeNull();
   });
 
-  it('directionLock 承载 canChangeDirection=false(:69404)：后方近敌跳过,前方远敌获选', () => {
+  it('directionLock 承载 canChangeDirection=false(:69391)：后方近敌跳过,前方远敌获选', () => {
     const rearNear = mkEnemy(1, 900, 1098);   // spot 右侧 100px,vX>0
     const frontFar = mkEnemy(2, 650, 1098);   // spot 左侧 150px,vX<0
     const { call } = setup([rearNear, frontFar]);
@@ -112,7 +112,7 @@ describe('nearestEnemy(gate) 集成（炮塔 shootingSpot 口径,F4 终端=Cente
     // 可换向（待机调用点 :69376）→ 取更近的右侧
     const unlocked = call(900, spot) as MockEnemy;
     expect(unlocked?.id).toBe(1);
-    // 开火帧重索敌(:69404) facing=-1 → 正后方(右)候选被 :69456 拒 → 回落左侧
+    // 开火帧重索敌(:69391) facing=-1 → 正后方(右)候选被 :69456 拒 → 回落左侧
     const locked = call(900, spot, { angleRatioMax: 1, directionLock: -1 }) as MockEnemy;
     expect(locked?.id).toBe(2);
   });

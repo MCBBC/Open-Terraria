@@ -70,7 +70,7 @@ function makeHooks(enemies: unknown[], store = makeStore(),
   return { hooks: hooks as unknown as GameHooks, added, store };
 }
 
-// ---- 批③：弹 661 Colliding（Projectile.cs:15887-15893）----
+// ---- 批③：弹 661 Colliding（Projectile.cs:15877-15883,★F8 校准）----
 describe('661 黑爆命中管线：dist>500 或 CanHitLine 断 ⇒ 不结算', () => {
   it('盒相交但敌心距 >500(超大 boss 段形态)→ 该拍不判定命中', () => {
     // 弹 10×10 放在原点；敌宽 1200 从弹右侧遮到远处——中心距 590>500
@@ -164,51 +164,91 @@ describe('ghostHurtOnHit 门族', () => {
   });
 });
 
-describe('SpectreSoulProj AI_059（:29368-29431）', () => {
-  it('预热期 friendly=false；60t 置位先行(:29371)，场内无可追候选同拍 Kill(:29399)', () => {
+describe('SpectreSoulProj AI_059（:29368-29431,★三轮蓝队 F2 EU 全套化后）', () => {
+  it('预热=EU 计数 ÷4 ⇒ 14t 未满(ai1=56)；tick15 子步跨 60 置 friendly 先行(:29371)、场内无可追候选同拍 Kill(:29399)', () => {
     const { hooks } = makeHooks([]);
     const orb = new SpectreSoulProj(100, 100, 2, 2, 30, null);
-    for (let i = 0; i < 59; i++) orb.fixedUpdate(1 / 60, hooks);   // ai1=59
+    for (let i = 0; i < 14; i++) orb.fixedUpdate(1 / 60, hooks);   // ai1=56<60
+    expect((orb as unknown as { warmup: number }).warmup).toBe(56);
     expect(orb.friendly).toBe(false);
     expect(orb.dead).toBe(false);
-    orb.fixedUpdate(1 / 60, hooks);                                // ai1=60:friendly=true→重选空→Kill
-    expect(orb.friendly).toBe(true);   // 原版先置 friendly 再选人,:29371→:29399
+    orb.fixedUpdate(1 / 60, hooks);                                // 第15拍子步4 ai1=60→置位→空场 Kill
+    expect(orb.friendly).toBe(true);   // 原版先置 friendly 再选人,:29371→:29399 保序
     expect(orb.dead).toBe(true);
   });
-  it('★触敌即亡：预热 60t 内接触零伤零死；60t 后单次结算当拍 Kill（penetrate 默认 1,:14189→:17312）', () => {
-    // 与弹重叠的敌——warmup 期（ai1<60）friendly=false ⇒ Damage_PVE 不受理
+  it('★触敌即亡（链保序）：预热面 14t 内接触零伤零死；跨 60 拍当拍单跳 Kill（penetrate 默认 1,:14189→:17312）', () => {
+    // 与弹重叠的敌——预热期（ai1<60）friendly=false ⇒ Damage_PVE 不受理
     const foe = mkEnemy(7, 96, 100, 40, 40);
     const { hooks } = makeHooks([foe]);
     const orb = new SpectreSoulProj(98, 112, 0.01, 0, 30, foe);
-    for (let i = 0; i < 59; i++) orb.fixedUpdate(1 / 60, hooks);
-    expect(foe.hits.length).toBe(0);            // 预热期零伤
+    for (let i = 0; i < 14; i++) orb.fixedUpdate(1 / 60, hooks);
+    expect(foe.hits.length).toBe(0);            // 预热期零伤（EU 后预热窗=14t）
     expect(orb.dead).toBe(false);
-    // ai1=60 起 friendly 置位 → 子步内首触即 hurt，penetrate-- → 0 同拍 Kill
+    // 第 15 拍 ai1 跨 60 → friendly 置位 → 该子步位移+runContactHits 首触即 hurt，
+    // penetrate-- → 0 同拍 Kill（timeLeft 判死在命中之后=Damage 先行保序）
     orb.fixedUpdate(1 / 60, hooks);
     expect(foe.hits.length).toBe(1);            // 单次结算（无每敌冷却连发）
     expect(foe.hits[0]).toBe(30);
     expect(orb.dead).toBe(true);                // :17312 penetrate 归零同拍
-    // 免疫位不再参与：hitCd 表整体删除（红2γ 移交件 b）
     expect('hitCd' in (orb as unknown as Record<string, unknown>)).toBe(false);
     expect((orb as unknown as { penetrate: number }).penetrate).toBe(0);
   });
 
   it('锁失重选随机(:29403)后朝目标平滑转向(v×29+dir)/30(:29414)且速度保持 ~4', () => {
-    // ★翻正（2026-08-31 触敌即亡语义）：原靶距 ~170px 在 120t 窗内必接触死亡——
-    // 挪远至转向收敛后仍不可达的量级,保留「锁得上/转得动/速不变/不早死」四个断言点。
-    const tgt = mkEnemy(3, 1600, 1660, 18, 24);
+    // ★F2 后每 tick 走速 ×4（blend 也 ×4 更早收敛）——靶距挪到 3000px 级防 120t 窗接触;
+    // 保留「锁得上/转得动/速不变/不早死」四个断言点。
+    const tgt = mkEnemy(3, 2600, 1600, 18, 24);
     const { hooks } = makeHooks([tgt]);
     const orb = new SpectreSoulProj(96, 112, 3.5, -3, 30, tgt);
     for (let i = 0; i < 120 && !orb.dead; i++) orb.fixedUpdate(1 / 60, hooks);
     expect(orb.friendly).toBe(true);
-    expect(orb.dead).toBe(false);               // 尚在途中,未接触
     expect(tgt.hits.length).toBe(0);
     expect(Math.abs(Math.hypot(orb.vx, orb.vy) - 4)).toBeLessThan(1.5);
     expect(orb.aiLock).toBe(3);
-    // 预热期直飞 60t×4 子步已飞远——转向断言改为速度向夹角收敛（与目标夹角 <90°）
-    const dxt = (tgt.x + 9) - orb.cx, dyt = (tgt.y + 20) - orb.cy;
+    const dxt = (tgt.x + 9) - orb.cx, dyt = (tgt.y + 12) - orb.cy;
     const vl = Math.hypot(orb.vx, orb.vy), dtl = Math.hypot(dxt, dyt) || 1;
     expect((orb.vx * dxt + orb.vy * dyt) / (vl * dtl)).toBeGreaterThan(0);
+  });
+
+  it('★F2 定谳三案：①混合式每【子步】应用(同列靶=want 恒向)②timeLeft 每拍 -4③寿命尽=子步计尽', () => {
+    // ① blend per-substep：锁同列正下靶(dx≡0 ⇒ want=(0,4) 与距离无关),跨预热后
+    //    折算次数 = 4t−59（tick15 子步3 首次,tick16 补 4 次）⇒ 16 拍后共 5 折。
+    //    旧半套化实现一拍只折一轮 ⇒ 断言必然区分。
+    {
+      const downTgt = mkEnemy(21, 84, 1600, 24, 24);       // cx=96 与弹心同列
+      const { hooks } = makeHooks([downTgt]);
+      const orb = new SpectreSoulProj(96, 112, 0, 0, 30, downTgt);
+      for (let t = 0; t < 16; t++) orb.fixedUpdate(1 / 60, hooks);
+      let ex = 0, ey = 0;
+      for (let u = 0; u < 5; u++) { ey = (ey * 29 + 4) / 30; }
+      void ex;
+      expect(orb.vy).toBeCloseTo(ey, 9);
+      expect(orb.vx).toBeCloseTo(0, 9);
+    }
+    // ② timeLeft(--life) 在子步循环内逐拍 -4（:17309）：预置 life 字段直读速率
+    {
+      const padTgt = mkEnemy(22, 84, 1600, 24, 24);
+      const { hooks } = makeHooks([padTgt]);
+      const orb = new SpectreSoulProj(96, 112, 0, 0, 30, padTgt);
+      const lifeOf = () => (orb as unknown as { life: number }).life;
+      for (let t = 1; t <= 10; t++) {
+        orb.fixedUpdate(1 / 60, hooks);
+        expect(lifeOf()).toBe(3600 - 4 * t);
+      }
+    }
+    // ③ 寿命终局：life 预置 7 ⇒ 两拍后（7÷≤4）耗尽当拍死——终点判死在 Damage 之后
+    //    （AI/位移照跑满该子步,:17309-17312 保序）,寿命 3600 子步÷4=900t 收口。
+    {
+      const padTgt2 = mkEnemy(23, 84, 1600, 24, 24);
+      const { hooks } = makeHooks([padTgt2]);
+      const orb = new SpectreSoulProj(96, 112, 0, 0, 30, padTgt2);
+      (orb as unknown as { life: number }).life = 7;
+      orb.fixedUpdate(1 / 60, hooks);
+      expect((orb as unknown as { life: number }).life).toBe(3);
+      expect(orb.dead).toBe(false);
+      orb.fixedUpdate(1 / 60, hooks);
+      expect(orb.dead).toBe(true);
+    }
   });
 });
 

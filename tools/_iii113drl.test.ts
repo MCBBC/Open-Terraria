@@ -90,46 +90,55 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   writeFileSync(JOUT, lines.join('\n') + '\n');
 
-  // —— x86 侧解析 + 两两对比（归一化：去 SW_MARKRC 追加的重复 |rc=、mr 与 JS 无可比面）——
-  const normX86 = (l: string): string =>
-    l.replace(/(?:\|rc=\d+){2}$/, (m) => m.slice(0, m.indexOf('|', 1)))
-      .replace(/\|mr=-?\d+\|/, '|');
-  const xtRaw = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => normX86(l.slice(5)))
-    .filter((l) => !l.startsWith('DR|S|MD'));   // MakeDungeon 头探针：JS 侧无同位钩，剔除
-  // JS 侧同样剥掉 |mr= 使可比键一致（JS 双计数恒等）
-  const xt = xtRaw.map((l) => l.replace(/\|mr=\d+\|/, '|'));
-  const jsNorm = lines.map((l) => l.replace(/\|mr=\d+\|/, '|'));
-  console.log(`[i113] x86 lines=${xt.length} js lines=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
-  let first = -1;
-  const n = Math.min(xt.length, lines.length);
-  for (let i = 0; i < n; i++) {
-    if (xt[i] !== jsNorm[i]) { first = i; break; }
-  }
-  const ctx2 = Math.max(0, first - 3);
-  if (first >= 0) {
-    console.log(`[i113] FIRST-DIVERGENCE @#${first}:`);
-    for (let k = ctx2; k < Math.min(first + 4, n, xt.length, lines.length); k++) {
-      console.log(`  [${k}] X86 ${xt[k]}\n  [${k}] JS  ${lines[k]}${xt[k] === lines[k] ? '' : '   <<<'}`);
+  // —— 分座对拍：把每行尾 |rc=N 换成段间增量 Δ（首行置 *），mr 剥离 ——
+  const normalizeSeatRows = (raw: string[]) => {
+    const rows = raw.map((l) => l.replace(/^(MARK.)?/, ""));
+    const seatOf = (l: string) => l.split("|")[2]?.replace(/^i/, "") ?? "";
+    const out = new Map<string, { txt: string; n: number }[]>();
+    for (const l0 of rows) {
+      let l = l0;
+      // 剥离 Snaplog 追加的重复尾巴：形如 “...|rc=A|rc=A” 且两个数值相同
+      const m = l.match(/^(.*\\|rc=(\\d+))\\|rc=\\2$/);
+      if (m) l = m[1]!;
+      // 剥 mr
+      l = l.replace(/\\|mr=-?\\d+/, "");
+      const seat = seatOf(l);
+      const nm = l.match(/(^|[ |])rc=(\\d+)$/);
+      const n = nm ? Number(nm[2]) : NaN;
+      const keyTxt = l.replace(/(^|[ |])rc=-?\\d+$/, "$1rc=@");
+      if (!out.has(seat)) out.set(seat, []);
+      out.get(seat)!.push({ txt: keyTxt, n });
     }
-  } else {
-    console.log(`[i113] ALL-EQUAL (${n}/${xt.length}|${lines.length})`);
-  }
-  // 座别分段小计
-  const summarize = (rows: string[]) => {
-    const perSeat = new Map<string, { segs: string[]; nHC: number }>();
-    for (const l of rows) {
-      const m = l.match(/^DR\|[SH]C\|i(\d+)\|([A-Z]+)/);
-      if (!m) continue;
-      const key = m[1]!;
-      const e = perSeat.get(key) ?? { segs: [], nHC: 0 };
-      if (m[2] !== 'CTOR') e.segs.push(m[2]);
-      if (l.includes('src=')) e.nHC++;
-      perSeat.set(key, e);
-    }
-    for (const [k, v] of [...perSeat.entries()].sort()) {
-      console.log(`[i113] seat i${k}: HCcalls=${v.nHC} segs=${v.segs.filter((x) => !['INL'].includes(x)).join(',')}`);
-    }
+    return out;
   };
-  summarize(xt);
-  summarize(lines);
+  const fmt = (list: { txt: string; n: number }[]) => {
+    let prev = NaN;
+    return list.map((e) => {
+      const d = Number.isNaN(e.n) || Number.isNaN(prev) ? "*" : e.n - prev;
+      prev = e.n;
+      return e.txt.replace("rc=@", `rc=${d === "*" ? "*" : d}`);
+    });
+  };
+  const xtAll = readFileSync(X86, "utf8").split("\n").filter((l) => l.startsWith("MARK|DR|")).map((l) => l.slice(5))
+    .filter((l) => !l.startsWith("DR|S|MD"));
+  const jsm = normalizeSeatRows(lines);
+  const xsm = normalizeSeatRows(xtAll);
+  console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
+  const XJ = fmt(xsm.get("1") ?? []);
+  const JJ = fmt(jsm.get("1") ?? []);
+  void XJ; void JJ;
+  for (const [k, xr0] of [...xsm.entries()].sort()) {
+    const xr = fmt(xr0);
+    const jr = fmt(jsm.get(k) ?? []);
+    let first = -1;
+    const nn = Math.min(xr.length, jr.length);
+    for (let i = 0; i < nn; i++) if (xr[i] !== jr[i]) { first = i; break; }
+    const eqAll = first < 0 && xr.length === jr.length;
+    console.log(eqAll
+      ? `[i113] seat i${k}: ALL-EQUAL (${xr.length} rows)`
+      : `[i113] seat i${k}: FIRST-DIFF @#${first}/${nn} lenX=${xr.length} lenJ=${jr.length}`);
+    for (let q = Math.max(0, first - 2); !eqAll && q < Math.min(first + 5, nn, xr.length, jr.length); q++) {
+      console.log(`   [${q}] X ${xr[q]}\n   [${q}] J ${jr[q]}${xr[q] === jr[q] ? "" : "   <<<"}`);
+    }
+  }
 });

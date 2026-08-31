@@ -186,6 +186,37 @@ export function sparkleGuitarTargetRect(pcx: number, pcy: number): {
   return { left: pcx - 500, right: pcx + 500, top: pcy - 400, bottom: pcy + 400 };
 }
 
+/** ★三轮蓝队 F1①：Utils.NextVector2Circular 唯一实现（Utils.cs:1301-1304）——
+ *  NextVector2Unit()×(w,h)×NextFloat() = 单角均匀 × 半径【线性】乘子。
+ *  Game case4715 注入端经此单源（曾内联 √rand 面积盘=自加近似,且双角双乘子
+ *  连盘形都不是——x/y 各掷各的角,已废）。半径分布 R=r×max：P(R<t)=t/max 线性,
+ *  E[R]=max/2——面积均匀样本(√rand)均值 max/3、半盘命中 1/4,统计判别式见 tests。 */
+export function nextVector2Circular(rng: () => number, hw: number, hh: number):
+  { x: number; y: number } {
+  const a = rng() * Math.PI * 2;
+  const r = rng();
+  return { x: Math.cos(a) * r * hw, y: Math.sin(a) * r * hh };
+}
+
+/** GetSparkleGuitarTarget 候选收集（Game.case4715 调用侧抽取为可测纯函数）。
+ *  rect = sparkleGuitarTargetRect；chase = canBeChasedBy（projTargets）。 */
+export interface StellarCandidate { cx: number; cy: number; vx?: number; vy?: number }
+export function collectStellarTargets(
+  ents: Array<{ x: number; y: number; w: number; h: number; vx?: number; vy?: number }>,
+  rect: { left: number; right: number; top: number; bottom: number },
+  chase: (e: unknown) => boolean,
+): StellarCandidate[] {
+  const out: StellarCandidate[] = [];
+  for (const e of ents) {
+    if (!chase(e)) continue;
+    if (e.x + e.w <= rect.left || e.x >= rect.right
+      || e.y + e.h <= rect.top || e.y >= rect.bottom) continue;   // Hitbox.Intersects(value)
+    // ★F1③：velocity×20 提前量随行（Player.cs:48453 nPC.Center+nPC.velocity*20f）
+    out.push({ cx: e.x + e.w / 2, cy: e.y + e.h / 2, vx: e.vx ?? 0, vy: e.vy ?? 0 });
+  }
+  return out;
+}
+
 /**
  * 弹 856 实体：SetDefaults(:8208)/AI_167(:47427)/命中管线(Damage_PVE ×localNPCImmunity
  * -1 + ModifyStellarTuneDamage :13333)全按原文。spawn/aim 由 computeStellarTuneShot

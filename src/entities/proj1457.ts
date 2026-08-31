@@ -16,7 +16,8 @@ import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitPlayer } from './projTargets';
+import { playerCanHitEnemy, hitPlayer, applyBannerDamageDealt } from './projTargets';
+import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
@@ -113,9 +114,18 @@ function dealContacts(
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!cd.ready(e.id, cooldown)) continue;
     const crit = Math.random() < self.critChance;
-    const dmg = crit ? self.damage * 2 : self.damage;
+    // ★F1（2026-08-31 蓝队三批）：Damage_PVE :13388 攻端旗乘区 + ★F9 DamageVar 单源
+    //   （原版序：DamageVar(:12959) → …→ banner(:13388) → armorPen 弹侧 :13679 在
+    //   banner 后 ⇒ 不吃旗乘——armorPen 独立参传，此处序一致）。
+    //   crit 翻倍沿用仓内调用侧预倍惯例（与 Enemy.hurt 内 (int)Math.Max(1,×2)
+    //   截断式同值）。
+    let dmg = damageVarRoll(self.damage,
+      ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+    dmg = applyBannerDamageDealt(game, e, dmg);
+    dmg *= crit ? 2 : 1;
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
-    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
+    // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
+    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, 0, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
     // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
     applyProjStatus(self.projId, ent as unknown as Record<string, number>,
       { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
