@@ -20,7 +20,7 @@ const OUT = process.env.SW_I101_OUT ?? '/tmp/iii101-out/cap-lt';
 const CAP_LABEL = process.env.SW_I101_LABEL ?? 'LivingTrees';
 const CMP_IDX = Number(process.env.SW_I101_CMP ?? 42);
 const G2 = process.env.SW_I101_G2 ?? '/tmp/iii80-out/x86-sparkle';
-const W = 4200, H = 1200, N = W * H;
+const W = 4200, H_ = 1200, N = W * H_;
 const SEED = process.env.SW_M8_SEED ?? '771004';
 const EVIL = Number(process.env.SW_I101_EVIL ?? 0);
 const FLAGS: Record<string, boolean> = {};
@@ -235,6 +235,27 @@ const le16 = (p: string): Uint16Array => {
     (globalThis as unknown as { __ltSnapBox?: (tag: string) => void }).__ltSnapBox = (tag) => {
       dumpBox(`${String(boxSeq).padStart(3, '0')}_${tag}`);
       boxSeq++;
+    };
+  }
+  // IIII97c: 簇盒快照通道（SW_I109_BOX=<dir>，c≥35 每簇头写 typ/act/wal 原始窗）
+  if (process.env.SW_I109_BOX) {
+    mkdirSync(process.env.SW_I109_BOX, { recursive: true });
+    const OUTDIR = process.env.SW_I109_BOX;
+    (globalThis as unknown as Record<string, unknown>).__i109box = (c: number, x0: number, x1: number, y0: number, y1: number, store: TileStore) => {
+      if (x0 < 5) x0 = 5; if (y0 < 5) y0 = 5;
+      if (x1 > W - 5) x1 = W - 5; if (y1 > H_ - 5) y1 = H_ - 5;
+      const nx = x1 - x0 + 1, ny = y1 - y0 + 1;
+      const buf = Buffer.alloc(nx * ny * 6);
+      let pp = 0;
+      for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+        const ii = store.idx(xx, yy);
+        buf[pp++] = store.flags[ii]! & 1;
+        const sh2 = SHEET[store.type[ii]!] >= 0 ? SHEET[store.type[ii]!]! : 9999;
+        buf[pp++] = sh2 & 0xff; buf[pp++] = (sh2 >>> 8) & 0xff;
+        buf[pp++] = store.wall[ii]! & 0xff; buf[pp++] = (store.wall[ii] >>> 8) & 0xff;
+        buf[pp++] = store.half[ii]! | ((store.slope[ii]!) << 4);
+      }
+      writeFileSync(`${OUTDIR}/c${c}.bin`, buf);
     };
   }
   const t0 = Date.now();

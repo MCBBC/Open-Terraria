@@ -124,7 +124,7 @@ import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/
 import { assembleTooltipLines, materialIids } from './itemTooltip';
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
-import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
@@ -3845,15 +3845,39 @@ export class UI {
         };
         (ui.icon as HTMLImageElement).src = want;
       }
-      // 时长门（1457 Main.cs:43985-44054）：默认路径仅 buffTime>2【tick】出字；
-      // vampireSeed 下火系三连(24/23/32) <10 tick 不出字——日光炽灼三连每帧 3t 续期
-      // 恒 <10t,图标上永不显示时长
+      // 时长门（1457 Main.cs:43985-44054）= TryGetBuffTime(:44029-44040) 拒答面 +
+      // DrawBuffIcon(:44058) 的 buffTime>2【tick】出字门。拒答四支：
+      // ① buffNoTimeDisplay 表（BUFF_NO_TIME_DISPLAY——工位五件套/狼人/宠物族等 124 项，
+      //    磨刀石 159 即属此：右键 30 分钟全程无倒计时字样）；
+      // ② 蜜中 honeyWet 不显示 Honey(48)（`(!honeyWet || num != 48)`，:44031）；
+      // ③ 湿身+专家不显示 Chilled(46)（`(!wet || !expertMode || num != 46)`，wet≙三液并集）；
+      // ④ vampireSeed 下火系三连(24/23/32) <10 tick 不出字——日光炽灼三连每帧 3t 续期
+      //    恒 <10t,图标上永不显示时长
       const ticksLeft = left * 60;
+      const vb = BUFF_DEFS[t].vanillaBuff;
       const vampHideTime = !!this.game.world.seedFlags?.vampireSeed
-        && [24, 23, 32].includes(BUFF_DEFS[t].vanillaBuff) && ticksLeft < 10;
-      // buffTime/60 先整除到秒再格式化（Main.cs:44053 new TimeSpan(0,0,buffTime/60)）
-      ui.time.textContent = vampHideTime || ticksLeft <= 2
-        ? '' : localizedDuration(left);
+        && [24, 23, 32].includes(vb) && ticksLeft < 10;
+      const p = this.game.player;
+      const tryGetTime = !BUFF_NO_TIME_DISPLAY.has(vb)
+        && !(vb === 48 && p.inHoney)
+        && !(vb === 46 && (p.inWater || p.inLava || p.inHoney) && this.game.world.isExpert);
+      // 图标文字（Main.cs:44051-44059 DrawBuffIcon）：BuffTextHandlers 在册族（随从 28 项，
+      // BuffID.cs:36-145）先于时长——ownedProjectileCounts 按弹型求和 >0 → "x"+n，
+      // =0 → null 回落时长路径（noTimeDisplay 拒答 → 无字）；其余走时长门
+      const counterProjs = BUFF_TEXT_PROJECTILE_COUNTER[vb];
+      let timeText: string;
+      if (counterProjs) {
+        let n = 0;
+        for (const q of this.game.entities.projectiles) {
+          const pid = (q as { projId?: number }).projId;
+          if (!q.dead && pid !== undefined && counterProjs.includes(pid)) n++;
+        }
+        timeText = n > 0 ? `x${n}` : '';
+      } else {
+        // buffTime/60 先整除到秒再格式化（Main.cs:44053 new TimeSpan(0,0,buffTime/60)）
+        timeText = !tryGetTime || vampHideTime || ticksLeft <= 2 ? '' : localizedDuration(left);
+      }
+      ui.time.textContent = timeText;
     }
     for (const [t, ui] of this.buffBlocks) {
       if (!seen.has(t)) ui.block.style.display = 'none';

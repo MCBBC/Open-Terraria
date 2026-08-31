@@ -363,9 +363,16 @@ function convertCell(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, conversionType: number, tiles: boolean, walls: boolean,
 ): void {
-  const cascades = conversionType === 0;   // ★IIIII87：净化面(0) 才启用尾级联（fish mox 实证）；
-                                           // 其余 conversionType 的级联面待逐支还原后开放（toadstool
-                                           // 蘑菇臂回归实证：case3 级联含尚未镜像的掷骰/重帧副作用）。
+  // ★IIIII87：净化面(0) 才启用尾级联（fish mox 实证）——
+  // ★IIIII99b（2026-08-31）翻案扩展至 case3 蘑菇面：C# Convert_ActuallyConvertTile/Wall
+  //   的 SquareTileFrame/SquareWallFrame 尾级联对【一切 conversionType】无条件执行
+  //   （cs:56801/56813），非「case3 含尚未镜像副作用」而是级联缺位本身——toadstool
+  //   终清理 FinalizeSecretSeeds 双调用（cs:607-614）后植物 61→71/藤 62→528 重挂种、
+  //   树族换种与逐列 Next(3) 流差全由缺失级联致（此前 early-call 域未暴露系
+  //   l<ws+Next(3) 带内当时尚无植被可重挂）。实证：① tools/_iii108tm 槽头基座反演
+  //   重放 vs -004_PostFinSeed/#105 由 7351→21 再经 shimmer/merge 域归零；
+  //   ② _iii105tm 复跑 era-1 窗口 vs #018_Mud_Caves_To_Grass 八通道全零。
+  const cascades = conversionType === 0 || conversionType === 3;
   if (i < 1 || j < 1 || i >= st.w - 1 || j >= st.h - 1) return;       // InWorld(i,j,1)
   if (!tiles && !walls) return;
   const ii = st.idx(i, j);

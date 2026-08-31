@@ -896,7 +896,6 @@ export class Player extends Entity {
   vortexStealthActive = false;
   private prevDown = false;
   private downTapT = 0;
-  private sharpenedCd = 0;
   /** BOC 受击脉冲（fixedUpdate 内消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
   /** Player.insanityShadowCooldown（Player.cs:1060；SpawnHallucination :13633 递减）：
@@ -2538,9 +2537,10 @@ export class Player extends Entity {
     // ---- 眼球伞 5101（armor[0] 头盔或 armor[10] 时装头任一，UpdateEquips :12661 门）
     //      + 水晶鞋 5077（armor[13-19] 时装配饰槽，ApplyEquipVanity :13821 门） ----
     this.updateDontStarveCosmetics(game, world);
-    // 魂镰吸魂自持（Player.cs:9555-9558：soulDrain>0 → AddBuff(151, 2)——
-    // Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄）
-    if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2);
+    // 魂镰吸魂自持（1457 Player.cs:9944-9947 UpdateBuffs 头：soulDrain>0 →
+    // AddBuff(151, 2)=2【t】每帧钉值——Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄。
+    // ★曾误写 2【秒】(120t) 顶破 >2t 无字门显「2秒」（2026-08-31 tick/秒单位族审计）
+    if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2 / 60);
     const buffHeal = this.buffs.tick(dt);
     // 叶绿孢子 397 玩家侧孢子云发射器（★2026-08-24 r15 R15-19：PL57:26178-26193
     //  chlorophyteSpore && Next(60)==0 → 盒内 Inflated(−2,−2) 掷点,v=velocity×0.5
@@ -2633,7 +2633,10 @@ export class Player extends Entity {
       }
       const tiers = [BuffType.SolarShield1, BuffType.SolarShield2, BuffType.SolarShield3] as const;
       tiers.forEach((bt, i) => {
-        if (this.solarShields > 0 && i + 1 === this.solarShields) this.buffs.apply(bt, 0.5);   // :10046 buffTime=5 持续续期
+        // 原版钉值=UpdateBuffs 效果循环直写 buffTime[j]=5【t】(:10451-10452)+
+        // 增/减档 AddBuff(170+shields,5)（:16501/:57426）→ 稳态恒 5t。
+        // ★曾误 0.5s(30t)，掉档后图标多挂 25t（2026-08-31 tick/秒单位族审计）
+        if (this.solarShields > 0 && i + 1 === this.solarShields) this.buffs.apply(bt, 5 / 60);
         else this.buffs.remove(bt);
       });
     }
@@ -4445,7 +4448,9 @@ export class Player extends Entity {
     // else 分支 DelBuff：人鱼化（accMerman 浸水态 merman）期间狼人 buff 直接移除，
     // 回复/近战加成随 buff 一起失效）
     if (this.equipStats.wolfAcc && !this.merman && !(game.world.clock?.isDay ?? true)) {
-      this.buffs.apply(BuffType.Werewolf, 2);
+      // :25798 每帧 AddBuff(28,60)=60t 钉值（60t=1s；原 apply(...,2) 误为 2 秒，
+      // 曾顶破 >2t 无字门露出「2秒」字样——buffNoTimeDisplay[28]=true Main.cs:9215 本恒无字）
+      this.buffs.apply(BuffType.Werewolf, 1);
     } else if (this.buffs.has(BuffType.Werewolf)) {
       this.buffs.remove(BuffType.Werewolf);
     }
@@ -4458,19 +4463,9 @@ export class Player extends Entity {
     } else if (this.buffs.has(BuffType.IceBarrier)) {
       this.buffs.remove(BuffType.IceBarrier);
     }
-    // 磨刀站 3198 就近常驻（每 60t 扫 41×25 区）
-    if (--this.sharpenedCd <= 0) {
-      this.sharpenedCd = 60;
-      const stt = game.world.store;
-      const tid = TILE_BY_KEY['v_377_sharpening_station'] ?? -1;
-      if (tid > 0) {
-        const tx0 = Math.floor(this.cx / TILE) - 20, tx1 = tx0 + 40;
-        const ty0 = Math.floor(this.cy / TILE) - 12, ty1 = ty0 + 25;
-        outer: for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-          if (stt.inBounds(tx, ty) && stt.type[stt.idx(tx, ty)] === tid) { this.buffs.apply(BuffType.Sharpened, 2); break outer; }
-        }
-      }
-    }
+    // 磨刀站(377)无邻近光环——1457 仅右键授予 AddBuff(159,108000)（Player.cs:32863-32866，
+    // Game.ts 工位右键分支已 1:1）；且 buffNoTimeDisplay[159]=true（Main.cs:9322）恒无倒计时
+
     // BOC 闪避脉冲消费（BrainOfConfusionDodge :38331-38340 后半：AddBuff(321,240)=4s。
     // R5-F25：困惑近敌是 Hurt :38690-38721 命中侧 Retaliate 分支（Game.damagePlayer）,
     // 闪避侧只挂 321——旧消费端在此困惑近敌系错位,已移） */

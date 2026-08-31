@@ -4035,8 +4035,8 @@ const snap: SnapFn = (name) => {
       // ★IIIII98c：书架 attempt 级标记（与 rig bsDr/bsDi/bsS/bsA/bsPF/bsOK/bsGO 同位同 tag）
       const I110bs = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I110_MARK;
       const emitBS = (ln: string): void => { if ((globalThis as { __wvLines?: string[] }).__wvLines) (globalThis as { __wvLines?: string[] }).__wvLines!.push(`MARK|${ln}`); };
-      let rawA: number;
-      let rawB: number;
+      let x = 0;
+      let y = 0;
       {
         const GSIR = globalThis as unknown as { __swLastRollIdx?: number };
         const iA = (GSIR.__swLastRollIdx ?? 0) + 1;
@@ -4044,8 +4044,6 @@ const snap: SnapFn = (name) => {
         const iB = iA + 1;
         const dyv = ri(bounds.T, bounds.B - 1);
         if (I110bs) emitBS(`bsDr|${num3},${ncount}|${dxv},${dyv} i=${iA},${iB} m=${dgMainRolls - 2},${dgMainRolls}`);
-        rawA = iA;
-        rawB = iB;
         x = dxv;
         y = dyv;
       }
@@ -4896,7 +4894,7 @@ const snap: SnapFn = (name) => {
       } else if (num18 === 10) {
         if (iLamp > -1 && place1xXD(num3, j, DG_ITEM_TILE[iLamp], 3, DG_ITEM_STYLE[iLamp] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 11) {
-        if (iCand > -1 && place2x2D(num3, j, DG_ITEM_TILE[iCand])) { dgFurnResult = 'ok'; return; }
+        if (iCand > -1 && place2x2D(num3, j, DG_ITEM_TILE[iCand], DG_ITEM_STYLE[iCand] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 12) {
         if (iClock > -1 && place2xXD(num3, j, DG_ITEM_TILE[iClock], 5, DG_ITEM_STYLE[iClock] ?? 0)) { dgFurnResult = 'ok'; return; }
       }
@@ -5059,13 +5057,19 @@ const snap: SnapFn = (name) => {
     return true;
   }
   // Place2x2（cs:51352 烛台100）
-  function place2x2D(x: number, y: number, t: number): boolean {
+  function place2x2D(x: number, y: number, t: number, style = 0): boolean {
     for (let i = x - 1; i < x + 1; i++) {
       for (let j = y - 1; j < y + 1; j++) if (!dgClr(i, j)) return false;
       const bi = st.idx(i, y + 1);
       if (st.flags[bi] === 0 || (!solidTile2D(i, y + 1) && !TILE_TABLE_D.has(st.type[bi]))) return false;
     }
-    for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) dgWr(i, j, t);
+    const num22 = TILE_DEFS[t]?.vanilla?.sheet === 172 ? 38 : 36;
+    for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = (i - x + 1) * 18;
+      st.frameY[fi] = style * num22 + (j - y + 1) * 18;
+    }
     return true;
   }
   // Place3x3（cs:53549 354/355 分支A；★53650 起 = PlaceSunflower，勿混——

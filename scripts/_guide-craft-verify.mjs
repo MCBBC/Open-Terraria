@@ -100,7 +100,9 @@ const res = await page.evaluate(async () => {
       placed: JSON.stringify(window.__swUI['guidePlaced']),
       held: JSON.stringify(window.__swUI['heldStack']),
       bagWood: woodInBag(),
-      benchInBag: g.player.inv.slots.some((s) => s && s.stack > 0 && /vi_36_Work/.test((window.__swITEMS||[])[s.id]?.key||'')),
+      benchAnywhere: (() => { const hits=[]; g.player.inv.slots.forEach((s,i)=>{ if(s && s.id===558) hits.push(i+':'+s.stack); }); return hits.join(',') || 'none'; })(),
+      defKey558: (window.__swITEMS||[])[558]?.key,
+      invId558Count: g.player.inv.slots.filter((s)=>s&&s.id===558).length,
     };
     ok('C1 扣 10 木+入包工作台', postClick.bagWood === postClick.bagWood && false || false);
     out.steps.push(`[diag] pre=${JSON.stringify(preClick)} post=${JSON.stringify(postClick)}`);

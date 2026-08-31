@@ -358,6 +358,7 @@ import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks, LootPlayerCtx } from '../entities/types';
 import { BehaviorRecorder } from '../debug/BehaviorRecorder';
+import { walkPrediction } from '../entities/TownNPC';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
@@ -1650,23 +1651,19 @@ export const FIXED_SELF_DAMAGE_FOR_PLAYERS: Record<number, number> = (() => {
   return t;
 })();
 
-/** ★HOUSE 弹药出生抬升（2026-08-31 用户特定要求,刻意偏离原版的观感修正）:
- *  反编译字面里 ItemCheck_Shoot 的弹药出生点 = RotatedRelativePoint(MountedCenter)
- *  ≡ 玩家碰撞盒中心（腰腹线,1458 Player.cs:47603;无逐物品"枪口"通用式）。原版
- *  实机里大口径慢速弹(火箭/手雷发射器族)头几帧尾焰因此叠在角色下半身——本仓
- *  2026-08-30 用户报"几乎所有弹药弹道偏下",拍板全弹药族出生点整体上移 8px 抬到
- *  胸线（肩部与下巴之间）。
- *  ★性质 = 与魔法域杖头锚(Game.useCombatWeapon :12957 批注,2026-08-26 拍板)同款
- *  备案偏离:**禁止对齐回去**。只做 Y 向平移不带前伸——贴脸(<距离)射击弹仍在玩家
- *  盒内不进敌方背后,不复发 2021-08-21 "靠太近没伤害"案;
- *  逐物品原版显式支({281,986}/{3007},Player.cs:47632-47637)在本常量之上叠加,
- *  相互关系保持原样 */
-export const HOUSE_SHOT_ORIGIN_LIFT_Y = -8;
-
-/** ★HOUSE 枪口前伸档位(2026-08-31 用户特定要求②"弹药从枪口出膛"):前伸 =
- *  clamp(手持贴图半宽−6, MIN, MAX)px 沿瞄准向(带逐4px实心回退钳制,见弹药链 :11385 批注) */
+/** ★HOUSE 出手锚模型(2026-08-31 用户特定要求,刻意偏离原版字面,禁止对齐回去):
+ *  原版字面 ItemCheck_Shoot 出生点 = RotatedRelativePoint(MountedCenter) ≡ 碰撞盒
+ *  中心(Player.cs:47603,±6 旋瞄向/CanHit×4 前探均 proj85 火焰喷射器专支 :47768),
+ *  大口径慢速弹尾焰因此叠在角色下半身("弹道偏下")。
+ *  现行 = 握把枢轴旋转模型:出生点 = 中心 + Rot(ang)·(前伸, HOUSE_HAND_LIFT_Y),
+ *  ——偏移向量随持物一起绕"手"旋转:水平射击落在胸线(fix 偏下),竖直/斜射自然
+ *  跟着炮管走且不会像早期"叠加式"(固定 Y−8 ∥ 沿瞄准全量前伸)那样在斜射时
+ *  垂直分量翻倍炸到头顶(08-31 用户复报"火箭又偏上")。
+ *  前伸量 = clamp(手持贴图半宽−6, MUZZLE_MIN, MAX);贴墙时逐 4px 回退钳制。
+ *  三通道共用:弹药链/Game.houseShotMuzzleDeltas;魔法杖头·蜂枪 08-31 并入 */
+export const HOUSE_HAND_LIFT_Y = -4;
 export const HOUSE_SHOT_MUZZLE_MIN = 6;
-export const HOUSE_SHOT_MUZZLE_MAX = 26;
+export const HOUSE_SHOT_MUZZLE_MAX = 34;
 
 export class Game implements GameHooks {
   /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
@@ -6526,11 +6523,25 @@ export class Game implements GameHooks {
           hitWall: boolean; onGround: boolean; stuckT: number; walkMode: number;
           walking?: boolean; doorCarry?: boolean; doorContactT?: number };
         this.recorder.log('npcMove', {
-          id: (n as unknown as { entityId?: number }).entityId ?? -1,
-          key: n.npcKey, x: Math.round(nx.cx), y: Math.round(n.cy / 1),
+          key: n.npcKey, x: Math.round(nx.cx), y: Math.round(n.cy),
           vx: +n.vx.toFixed(2), dir: n.facing,
           hw: !!nx.hitWall, g: !!n.onGround, stuck: nx.stuckT, wm: nx.walkMode,
           carry: nx.doorCarry === true, ct: nx.doorContactT ?? 0,
+          af: (() => {
+            try {
+              const stl = this.world.store;
+              const cT2 = Math.floor(nx.cx / 16);
+              const probeX = cT2 + n.facing;
+              // 简化版 walkPrediction 核心逻辑:前视列扫 j=-1..4 找 solid/platform
+              for (let dj = -1; dj <= 4; dj++) {
+                const py = Math.floor(n.cy / 16) + dj;
+                if (!stl.inBounds(probeX, py)) continue;
+                const pi = stl.idx(probeX, py);
+                if (stl.type[pi] !== 0 && (stl.isSolid(probeX, py) || stl.isPlatform(probeX, py))) return 'ok';
+              }
+              return 'af';
+            } catch (e) { return 'ERR:' + String(e).slice(0, 60); }
+          })(),
         });
       }
     }
@@ -11384,21 +11395,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★曾 +朝向×14 前移 = 贴脸(<14px)射击时弹出生在敌盒后方 → 整条路径无判定
         //   (2026-08-21 报)；★又曾 −4px 抬高 = 无口径的枪口系统性偏上（2026-08-22 修,
         //   原版确无此二偏移）。
-        // ★★现行两层 HOUSE 观感修正（2026-08-31 用户特定要求,刻意偏离反编译字面,
-        //   与 magic 杖头锚同性质,禁止对齐回去;逐物品显式支在最后叠加,关系不变）:
-        //   ① +HOUSE_SHOT_ORIGIN_LIFT_Y(-8px):原版字面锚=腰腹线,慢速大口径弹尾焰叠
-        //     下半身显"弹道偏下"→ 全弹药族抬到胸线(只 Y 移不带前伸,不复发穿背案);
-        //   ② HOUSE_SHOT_MUZZLE_BIRTH 枪口前伸:沿瞄准向把出生点推到手持贴图半长处
-        //     (halfW−6 钳 [6,26]px——发射筒/长枪 sprW≈40 → 前伸≈14,手枪≈6-8),
-        //     实现真正的"从枪口出膛"。逐 4px 步进做实心回退钳制,贴墙射击点退到
-        //     最后一个非实心位(与原版贴墙开火弹即刻撞墙消亡不冲突:出生仍在玩家前方)。
-        //   ★注意区别于 2026-08-21 被拆除的旧 ±14px:旧版是【无判别】盲推且向心+Y-4
-        //     组合;本式带实心回退+沿瞄准向+限制在持物半长内,不存在越过目标的路径。
+        // ★★现行 HOUSE 握把枢轴模型（2026-08-31 用户特定要求,刻意偏离反编译字面,
+        //   与 magic 杖头锚同源,禁止对齐回去;逐物品显式支在最后叠加,关系不变）:
+        //   出生点 = 中心 + 沿瞄准·前伸 + (0, −4 纯屏幕竖直手抬)。迭代史:
+        //   v1 固定 Y−8 抬升 → 用户复报"火箭又偏上"(斜射时固定抬升与沿瞄准前伸的
+        //   垂直分量双重计入);v2 两层叠加同病;v3 绕手枢轴旋转([swMuzzle] deg=-178
+        //   dy=+3.4 定罪:θ 过±90° 抬升翻下压,朝左全体低4px);v3.1 乘 facing 补偿
+        //   → 近垂直时横向分量由 cos 符号退化决定(deg=-91 左朝向竟 d=(+3.5,·),
+        //   两图"举枪偏移最明显"即此横跳);**v4 = 前伸沿瞄准 + 手抬纯屏幕竖直**
+        //   (现行,houseShotMuzzleDeltas)——二者正交零耦合,任何象限无横跳。
+        //   逐 4px 实心回退钳制贴墙不出墙。注意区别于 2026-08-21 拆除的旧 ±14px
+        //   盲推:本式限制在持物半长内且出生仍在玩家→目标之间。
         let ax = this.player.cx;
-        const liftBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
-        const { dx: muzzleDx, dy: muzzleDy } = this.houseShotMuzzleDeltas(heldDef.key, this.player.cx, liftBaseY, ang);
+        const { dx: muzzleDx, dy: muzzleDy } = this.houseShotMuzzleDeltas(heldDef.key, this.player.cx, this.player.cy, ang);
         ax += muzzleDx;
-        let ay = liftBaseY + muzzleDy;
+        let ay = this.player.cy + muzzleDy;
         // 逐枪枪口偏移（Player.cs:47632-47640）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
         // 飞镖手枪 3007 (−4×dir,−2×gravDir)；gravDir 本仓恒 1（无重力翻转建模）
         if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6; }
@@ -12777,21 +12788,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** ★HOUSE 枪口前伸 deltas（2026-08-31 用户特定要求②，机制详见弹药链 :11388 批注与
-   *  常量区 HOUSE_SHOT_MUZZLE_MIN/MAX）：沿瞄准向把出生点推到手持贴图半长处
-   *  （halfW−6 钳 [6,26]px），逐 4px 步进 store.isSolid 回退钳制——贴墙射击时退到
-   *  最后一个非实心位。弹药/魔法杖头/蜂枪三通道共用；Y 抬升(HOUSE_SHOT_ORIGIN_LIFT_Y)
-   *  由调用方先并入 originY 再传入。只返回位移分量,不写实体 */
+  /** ★HOUSE 出手锚 deltas(2026-08-31 用户特定要求,模型见常量区批注):
+   *  出生点 = origin + Rot(ang)·(前伸, HOUSE_HAND_LIFT_Y)。前伸=clamp(贴图半宽−6,
+   *  [MUZZLE_MIN,MAX]);绕手枢轴旋转 ⇒ 水平射胸线、斜射随炮管自然爬升、竖直射出
+   *  头顶上方,垂直分量不随角度平方放大。逐 4px store.isSolid 回退钳制。弹药/
+   *  魔法杖头/蜂枪三通道共用;originY 一律传玩家 cy(抬升已烘焙进偏移向量)。 */
   private houseShotMuzzleDeltas(spriteKey: string, originX: number, originY: number, ang: number): { dx: number; dy: number } {
     const swAr = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, spriteKey) : null;
-    const fwdMax = Math.min(Math.max(((swAr?.sw ?? 16) / 2) - 6, HOUSE_SHOT_MUZZLE_MIN), HOUSE_SHOT_MUZZLE_MAX);
+    // 前伸 = 贴图全长−握把 16px(枪口尖端世界距≈sprW·pivot比例−内缩;曾用半宽−6
+    // 钳 18 → 发射筒(sprW52,尖端距≈34)弹在管身中段出生,"偏移"残差的最后一块)
+    const fwdMax = Math.min(Math.max((swAr?.sw ?? 16) - 16, HOUSE_SHOT_MUZZLE_MIN), HOUSE_SHOT_MUZZLE_MAX);
+    // ★v4(2026-08-31 终版):前伸沿瞄准 + 手抬为【纯屏幕竖直常量】(不旋转)。
+    //  迭代定罪链:v3 把手抬并入本地旋转 → θ 过±90° 翻成下压(deg=-178 dy=+3.4);
+    //  v3.1 乘 facing 补偿 → 近垂直时横向分量由 cos 符号退化决定(deg=-91 左朝向
+    //  竟 d=(+3.5,·) 弹从右肩外冒,两图"举枪偏移最明显"即此)。任何"随角旋转的
+    //  抬升"都会在某个象限横跳——只有屏幕系恒量稳。d 沿瞄准提供斜射跟随,
+    //  HAND 只管垂直,二者正交无耦合。
+    let out: { dx: number; dy: number } = { dx: 0, dy: 0 };
     const st2 = this.world.store;
     for (let d = fwdMax; d > 0; d -= 4) {
       const qx = Math.floor((originX + Math.cos(ang) * d) / TILE);
-      const qy = Math.floor((originY + Math.sin(ang) * d) / TILE);
-      if (!st2.inBounds(qx, qy) || !st2.isSolid(qx, qy)) return { dx: Math.cos(ang) * d, dy: Math.sin(ang) * d };
+      const qy = Math.floor((originY + Math.sin(ang) * d + HOUSE_HAND_LIFT_Y) / TILE);
+      if (!st2.inBounds(qx, qy) || !st2.isSolid(qx, qy)) {
+        out = {
+          dx: Math.cos(ang) * d,
+          dy: Math.sin(ang) * d + HOUSE_HAND_LIFT_Y,
+        };
+        break;
+      }
     }
-    return { dx: 0, dy: 0 };
+    // ★仪表(localStorage.swDebugMuzzle='1'):打印通道/贴图宽/前伸上限/角度/最终位移
+    //  ——定数后可摘(_swMuzzleDbg)
+    //  ★用 console.log 非 debug:DevTools 默认级别会滤掉 debug 行(踩坑记录)
+    try {
+      if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
+        || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
+        console.log('[swMuzzle]', spriteKey.slice(0, 12),
+          `sw=${swAr?.sw ?? 'DF16'} fwdMax=${fwdMax}`,
+          `deg=${Math.round(ang * 180 / Math.PI)}`,
+          `d=(${out.dx.toFixed(1)},${out.dy.toFixed(1)})`);
+      }
+    } catch { /* 无 localStorage 环境静默 */ }
+    return out;
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -13392,14 +13430,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   {3094/3378/3543/5117}Y=height/3——均【非】magic kind（ranged/melee,
         //   Item.cs case 复核）,走 'shot' 族登记偏差,不在本批
         const [mzMouseX, mzMouseY] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-        // ★2026-08-31 二次拍板:杖头锚接两层 HOUSE(Y−8 抬胸线 + 贴图半宽前伸 +
-        //  实心回退钳制,houseShotMuzzleDeltas 与弹药链同源,见 :11388 批注与常量区)。
-        //  固定 ×18 即 sprW≈48 长杖的特例值,语义被公式吞并;重瞄角(出生点→光标)
-        //  与逐型显式散布块(517/206/1114)全部保持原序不变。
-        const mzBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
-        const { dx: mzdX, dy: mzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, mzBaseY, ang);
+        // ★2026-08-31 二次拍板:杖头锚接 HOUSE 握把枢轴模型(houseShotMuzzleDeltas,
+        //  与弹药链同源:Rot(ang)·(贴图半宽前伸,−4 手抬),见常量区批注)。固定 ×18
+        //  即 sprW≈48 长杖的特例值,语义被公式吞并;重瞄角(出生点→光标)与逐型散布
+        //  块(517/206/1114)全部原序不变。
+        const { dx: mzdX, dy: mzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, this.player.cy, ang);
         const mzX = this.player.cx + mzdX;
-        const mzY = mzBaseY + mzdY;
+        const mzY = this.player.cy + mzdY;
         const mzAng = Math.atan2(mzMouseY - mzY, mzMouseX - mzX);   // 出生点→光标 重瞄角
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         // ★R27：陨石套 spaceGun 无限蓝（ItemCheck_PayMana_ShouldSkipManaUse
@@ -13438,11 +13475,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (Math.floor(Math.random() * 6) === 0) nBee++;
           if (this.player.equipStats.strongBees && Math.floor(Math.random() * 3) === 0) nBee++;   // strongBees 档（:48788-48791）
           const [bmwx, bmwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          // ★2026-08-31 同批:蜂枪锚点也换两层 HOUSE(houseShotMuzzleDeltas),固定×18 弃用
+          // ★2026-08-31 同批:蜂枪锚点同换握把枢轴模型(houseShotMuzzleDeltas),固定×18 弃用
           const angB0 = Math.atan2(bmwy - this.player.cy, bmwx - this.player.cx);
-          const beeBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
-          const { dx: bzdX, dy: bzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, beeBaseY, angB0);
-          const bzX = this.player.cx + bzdX, bzY = beeBaseY + bzdY;
+          const { dx: bzdX, dy: bzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, this.player.cy, angB0);
+          const bzX = this.player.cx + bzdX, bzY = this.player.cy + bzdY;
           const angB = Math.atan2(bmwy - bzY, bmwx - bzX);
           this.player.facing = Math.cos(angB0) > 0 ? 1 : -1;
           const bvx0 = Math.cos(angB) * cw.shootSpeed, bvy0 = Math.sin(angB) * cw.shootSpeed;
@@ -27178,8 +27214,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (ok) {
       this.recLog('hurt', { hp: p.hp, dmg: ok });   // 行为录制：玩家受击（实扣值 + 剩余 hp；Player.damage 无 game 参故挂此）
-      // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
-      if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
+      // 狼人(155)无接触 debuff——1457 StatusFromNPC 接触表(:22708-22760 全表)无 155 项，
+      // 全树 AddBuff(33, 六处无一系狼人（1456 同查无）。原注释"-5.1%伤/速"系狼人
+      // buff 28 正面数值(0.051×2)误抄成 debuff。2026-08-31 自 08-12 探针会话混入即无源，清除
       // 爆裂泡泡 371 接触施加潮湿 103（StatusFromNPC Player.cs:22239-22242：
       // AddBuff(103, 60×Next(3,8)) = 180-420t 即 3-7s——猪鲨仔 MountFishronSpecial
       // 的 dripping 增益 + 火系免疫 24/323/67 两处消费）。★371 走通用接触伤害链
@@ -30172,9 +30209,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const [smin, smax] = rule.size ?? [1.5, 3];
           const life = Math.round((rule.life ?? 40) * (0.7 + Math.random() * 0.6));
           const rise = rule.rise ?? 0.4;
+          // dxBox/dyBox（NewDust 矩形盒 1:1，TileParticles.ts 头注）：命中时取代
+          // dx/dy±2 的近似抖动
+          const bx = rule.dxBox, by = rule.dyBox;
           this.particles.push({
-            x: x * TILE + (rule.dx ?? 8) + (Math.random() - 0.5) * 4,
-            y: y * TILE + (rule.dy ?? 0) + (Math.random() - 0.5) * 4,
+            x: bx !== undefined
+              ? x * TILE + bx[0] + Math.random() * (bx[1] - bx[0])
+              : x * TILE + (rule.dx ?? 8) + (Math.random() - 0.5) * 4,
+            y: by !== undefined
+              ? y * TILE + by[0] + Math.random() * (by[1] - by[0])
+              : y * TILE + (rule.dy ?? 0) + (Math.random() - 0.5) * 4,
             vx: (rule.sideways ?? 0) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.5) * 0.2,
             vy: -rise * (0.7 + Math.random() * 0.6),
             life, maxLife: life,

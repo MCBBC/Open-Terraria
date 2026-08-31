@@ -2642,23 +2642,76 @@ function checkCactusSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): b
 }
 
 /** CheckLilyPad（cs:59227）：非水杀；换 frameY；上方有水再生一格 518 */
+/** CheckLilyPad（rigsrc cs:58967-59085 全量重写，IIIII99b）——原 JS 只镜像了
+ *  「非水击杀 + 地基帧修正 + 上移臂的前半（且漏了自身失活/.paint 拷贝/级联/下移/双杀支）」
+ *  ⇒ toad 浮空岛塘 21 格睡莲最终态漂移（T0>518×13 + A 兄弟位 ×8）。本版逐句：
+ *  ① liquidType()≠水 → KillTile；②下潜找地基（active∧solid∧非 solidTop 才停，
+ *     上界 maxY-50）；③ 帧号按地基 {2,477}→0 / {109,116}→18 / 60→36，否则 KillTile；
+ *  ④ 已知帧：上格有水且空 → 睡莲整株上浮（目标 active+type+fx/fy+half/slope 清+
+ *     paint 拷贝，自身 active=false+type=0，SquareTileFrame(x,y-1,false)）；
+ *     否则自格 liquid==0 时：下方 inactive → 下沉一格（同拷贝序）；下方 active 且
+ *     非平台且(非实心∨solidTop) → KillTile。 */
 function checkLilyPadSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
-  if (st.liquid[i]! > 0 && st.liquidType[i] !== LIQUID_TYPE.WATER) { killTileGen(st, ctx, x, y); return; }
-  let ny = y;
-  while (ny < st.h - 50 && (!st.flags[st.idx(x, ny)] || !genSolidType(st.type[st.idx(x, ny)])
-    || TILE_DEFS[st.type[st.idx(x, ny)]]?.platform)) ny++;
-  const g = sheetAt2(st, x, ny);
-  let fy = -1;
-  if (g === 2 || g === 477) fy = 0;
-  else if (g === 109 || g === 116) fy = 18;
-  else if (g === 60) fy = 36;
-  if (fy >= 0) {
-    st.frameY[i] = fy;
-    const up = st.idx(x, y - 1);
-    if (st.liquid[up]! > 0 && !st.flags[up]) {
-      st.setTileSilent(x, y - 1, sid(518), st.frameX[i]!, st.frameY[i]!);
-    }
+  // cs:58972 `liquidType() != 0`——JS +1 编码的水=1；无液体残型字节亦照读（0=NONE≡水道）
+  if (st.liquidType[i] !== LIQUID_TYPE.NONE && st.liquidType[i] !== LIQUID_TYPE.WATER) {
+    killTileGen(st, ctx, x, y);
+    return;
+  }
+  let num = y;
+  for (;;) {
+    if (!(num < st.h - 50)) break;                       // 与 C# while 同口径（短路序对齐）
+    const q = st.idx(x, num);
+    if (!(!st.flags[q] || !genSolidType(st.type[q]) || !!TILE_DEFS[st.type[q]]?.platform)) break;
+    num++;
+  }
+  const type = st.type[st.idx(x, num)];
+  const sh = SWEEP_SHEET[type];
+  let num2 = -1;
+  if (sh === 2 || sh === 477) num2 = 0;
+  else if (sh === 109 || sh === 116) num2 = 18;
+  else if (sh === 60) num2 = 36;
+  if (num2 < 0) { killTileGen(st, ctx, x, y); return; }  // cs:59079 地基失配整杀
+  if (st.frameY[i] !== num2) st.frameY[i] = num2;
+  const upIdx = st.idx(x, y - 1);
+  // cs:59016-30：上格带水空位 → 上浮（自身失活）
+  if (st.liquid[upIdx]! > 0 && !st.flags[upIdx]) {
+    st.setTileSilent(x, y - 1, sid(518), st.frameX[i]!, st.frameY[i]!);
+    st.half[upIdx] = 0;
+    st.slope[upIdx] = 0;
+    st.paint[upIdx] = st.paint[i];
+    st.flags[i] = 0;                                     // C#：active(false)+type=0
+    st.type[i] = sid(0);
+    squareTileFrameAt(st, ctx, x, y - 1);                // resetFrame:false 九宫
+    return;
+  }
+  if (st.liquid[i] !== 0) return;                        // cs:59033 自格含水 → 维持
+  const dn = st.idx(x, y + 1);
+  const dAct = !!st.flags[dn];
+  const dSh = SWEEP_SHEET[st.type[dn]];
+  const isPlatform = !!TILE_DEFS[st.type[dn]]?.platform;
+  if (!dAct) {                                           // 下沉臂（cs:59036-52）
+    st.setTileSilent(x, y + 1, sid(518), st.frameX[i], st.frameY[i]);
+    st.half[dn] = 0;
+    st.slope[dn] = 0;
+    st.paint[dn] = st.paint[i];
+    st.flags[i] = 0;
+    st.type[i] = sid(0);
+    squareTileFrameAt(st, ctx, x, y + 1);
+    return;
+  }
+  // cs:59053-66：下方 active 非平台且(非实心∨solidTop→本仓以 platform 近似，同前档
+  //   solidTop 等价式) → 击杀
+  if (dAct && !isPlatform && (!genSolidType(st.type[dn]) || !!TILE_DEFS[st.type[dn]]?.platform)) {
+    killTileGen(st, ctx, x, y);
+  }
+}
+
+/** SquareTileFrame(i,j,resetFrame:false) 全 false 变体（CheckLilyPad 移动臂专用，
+ *  cs:59029/59051 显式传 resetFrame:false ——私有 helper 固定中心 true 故另立） */
+function squareTileFrameAt(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) tileFrameGen(st, ctx, x + dx, y + dy, false);
   }
 }
 

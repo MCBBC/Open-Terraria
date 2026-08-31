@@ -84,6 +84,7 @@ it(`IIII98c rainbow dungeon replay + candidate state marks`, () => {
   (globalThis as unknown as { __swOnRoll?: (v: number) => void }).__swOnRoll = (v) => {
     const box = (globalThis as unknown as { __swRollN?: number });
     box.__swRollN = (box.__swRollN ?? 0) + 1;
+    (globalThis as unknown as { __swLastRollIdx?: number }).__swLastRollIdx = box.__swRollN;
     rollH = ((rollH ^ (v >>> 0)) * 16777619) >>> 0;
     if (ROLLLOG) rollLogBuf.push(`${box.__swRollN}|${v}`);
   };

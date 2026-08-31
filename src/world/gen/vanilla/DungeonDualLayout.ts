@@ -101,11 +101,12 @@ function closestPointOnLine(px: number, py: number, ax: number, ay: number, bx: 
 type F2 = { x: number; y: number };
 const fF = (x: number, y: number): F2 => ({ x: fr(x), y: fr(y) });
 const fadd = (a: F2, b: F2): F2 => fF(a.x + b.x, a.y + b.y);
-/** Vector2.RotatedBy(double angle)（Utils.cs:1752）：cos/sin 先各自 (float) 化，
- *  随后**逐乘积项在 f32 域内完成**再相加减——旧直译在 double 里乘完再一次性 fround，
- *  边界格 1px 漂（Wormlike 内形状宽差簇根因之一）。 */
+/** Vector2.RotatedBy(double angle)（Utils.cs:1752）：**角度保持 double**，
+ *  (float) 化只发生在 cos/sin 结果；随后**逐乘积项在 f32 域内完成**再相加减——
+ *  ★IIIII99b2 勘误：旧版先 fr(angle) 再 cos 会把 double 角度域偷换成 f32 角度域
+ *  （cos(f32(x)) ≠ (float)cos(x)），Wormlike 螺旋方向链/Sine 幅度投影都被污染。 */
 function frot(v: F2, angle: number): F2 {
-  const c = fr(Math.cos(fr(angle))), s = fr(Math.sin(fr(angle)));
+  const c = fr(Math.cos(angle)), s = fr(Math.sin(angle));
   return fF(fr(c * v.x) - fr(s * v.y), fr(s * v.x) + fr(c * v.y));
 }
 /** Utils.Lerp 的 float 重载（v1+(v2-v1)*a 全 f32；clamped 缺省 false）。 */
@@ -133,6 +134,22 @@ export const CPQuality = { Good: 0, Okay: 1, Bad: 2, VeryBad: 3 } as const;
 const GenShapeT = { Circle: 0, Mound: 1, Hourglass: 2, Doughnut: 3, QuadCircle: 4 } as const;
 /** SceneMetrics.ShimmerTileThreshold（SceneMetrics.cs:24）。 */
 const SHIMMER_TILE_THRESHOLD = 300;
+
+// ── ★IIIII99b2 DR|S|/DR|HC| 段界记账镜像（x86 rig DualDungeonLayoutProvider DRL 钩同构）──
+// 挂载 globalThis.__swI113=(line)=>… 后逐行输出；rc=__swRollN（与 JJHook.RollCount 同口径
+// =本 pass 窗口内全部 internalSample 计数）。零 RNG 消耗,缺省零开销。
+let _drlInstNext = 0;
+function drlMark(s: string): void {
+  const h = (globalThis as { __swI113?: (line: string) => void }).__swI113;
+  if (h) h(s);
+}
+function drlRn(): number { return (globalThis as { __swRollN?: number }).__swRollN ?? -1; }
+/** C# BitConverter.DoubleToInt64Bits(d).ToString("x16")（无符号 16 位十六进制）。 */
+function bits64x(d: number): string {
+  const dv = new DataView(new ArrayBuffer(8));
+  dv.setFloat64(0, d);
+  return (dv.getBigInt64(0, false) & 0xFFFFFFFFFFFFFFFFn).toString(16).padStart(16, '0');
+}
 
 // ── ShapeData / DungeonBounds / tile 写入工具 ──────────────────────
 
@@ -273,15 +290,21 @@ function nextV2Circular(r: UnifiedRandom, hw: number, hh: number): V2 {
   const m = r.nextDouble();
   return v2(u.x * hw * m, u.y * hh * m);
 }
-/** Vector2(float) 版 CircularEdge——Wormlike 主向量（float 网格）。 */
+/** Vector2(float) 版 CircularEdge（Utils.cs:1306）：startRotation(0f)+range(2π_f32)*
+ *  NextFloat((float)NextDouble) 全 **f32 域角度**，随后 ToRotationVector2(float)=
+ *  (float)Math.Cos/Sin（Utils.cs:1743）→ ×Vector2(hw,hh) f32。
+ *  ★IIIII99b2 勘误：旧版复用 nextV2Unit 的 double 角度域（NextDouble 不经 f32 量化 +
+ *  cos/sin 结果不 (float) 化），单位向量末位差被螺线 (int) 截断放大成 box 宽差。 */
 function nextF2CircularEdge(r: UnifiedRandom, hw: number, hh: number): F2 {
-  const u = nextV2Unit(r);
-  return fF(u.x * hw, u.y * hh);
+  const ang = fr(fr(6.2831854820251465) * fr(r.nextDouble()));
+  const c = fr(Math.cos(ang)), s = fr(Math.sin(ang));
+  return fF(fr(c * hw), fr(s * hh));
 }
-/** Vector2.RotatedByRandom(maxRadians)=RotatedBy(NextDouble()*max−NextDouble()*max)，2 掷。 */
+/** Vector2.RotatedByRandom(maxRadians)（Utils.cs:1785）＝RotatedBy(r1*max−r2*max)，
+ *  两掷独立；合成走 RotatedBy(Vector2,double) 同款 f32 逐乘积项路径。 */
 function rotByRandom(r: UnifiedRandom, sp: F2, maxRadians: number): F2 {
   const ang = r.nextDouble() * maxRadians - r.nextDouble() * maxRadians;
-  return frotD(sp, ang);
+  return frot(sp, ang);
 }
 
 // ── 提供器上下文 ────────────────────────────────────────────────────
@@ -883,8 +906,10 @@ class DWormlikeRoom extends DRoomBase {
       }
       for (let k = 0; k < iterations; k++) {
         const tF = fr(fr(k) / fr(iterations));
-        // (int)Utils.Lerp(num,num2,tF)（:138/:171）＝**float** 重载后截断，非 double lerp
-        num3 = Math.trunc(fLerp(num, num2, tF));
+        // ★IIIII99b2 勘误：Utils 只有 **double Lerp**（Utils.cs:107，float 版不存在）——
+        //   (int)Utils.Lerp(num,num2,tF) 是 double 域插值后截断，旧 fLerp(f32) 在
+        //   跨整数边界步进时产 −1 宽差（#21/#26 box×24 族根因之二）
+        num3 = Math.trunc(lerpN(num, num2, tF));
         num5 = num3 + num4;
         const gx = Math.trunc(vec.x), gy = Math.trunc(vec.y);
         this.outerShape.addBounds(gx - num5 - originI, gy - num5 - originJ, gx + num5 - originI, gy + num5 - originJ);
@@ -2704,6 +2729,7 @@ class HallwayCalculator {
     for (const l of ls) sum += l.LineLength;
     this.avgLineLength = ls.length ? sum / ls.length : 1;
     this.maxProgressDelta = 300.0 / this.avgLineLength;
+    drlMark(`DR|HC|i${_drlInstNext}|CTOR e=${this.entries.length}|av=${bits64x(this.avgLineLength)}|mp=${bits64x(this.maxProgressDelta)}|rc=${drlRn()}`);
   }
   generate(): DHallBase[] {
     // 楼梯井通道（rooms.Skip(2)，Next(2)==0）
@@ -2714,6 +2740,7 @@ class HallwayCalculator {
         if (pick && pick.score > 0.0) this.makeHall(pick.line, DPHallType.Stairwell);
       }
     }
+    drlMark(`DR|HC|i${_drlInstNext}|GA sw=${this.stairwells.length}|rc=${drlRn()}`);
     // 常规走廊（rooms.Skip(1)，无反链者必连+Next(2) 可选厅）
     for (let i = 1; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
@@ -2735,6 +2762,7 @@ class HallwayCalculator {
         if (pick && pick.score > -2.0) this.makeHall(pick.line, hallType);
       }
     }
+    drlMark(`DR|HC|i${_drlInstNext}|GB h=${this.hallsOut.length}|rc=${drlRn()}`);
     return this.hallsOut;
   }
 
@@ -2844,7 +2872,10 @@ class HallwayCalculator {
     }
     const liquidFlag = source.room.settings.style.LiquidType >= 0;
     let best: HallLineRef | null = null;
-    let bestScore = -Infinity;
+    // ★IIIII99b2：C# bestScore 初始=double.MinValue（非 -Infinity）——镜像取值以便
+    //   DR|HC| bs 位型逐位对拍；比较语义对有限 num 等价。
+    let bestScore = -Number.MAX_VALUE;
+    let drlCands = 0;
     for (const cand of candidates) {
       if (!this.canConnect(source, cand)) { ST.connFails++; continue; }
       const liquidFlag2 = cand.room.settings.style.LiquidType >= 0;
@@ -2860,6 +2891,7 @@ class HallwayCalculator {
       }
       if ((liquidFlag && (connS.y >= source.centerY || connS.y <= connT.y))
         || (liquidFlag2 && (connT.y >= cand.centerY || connS.y > connT.y))) { ST.liquidFails++; continue; }
+      drlCands++;
       let num = r.next();
       const hallLine: HallLineRef = { source, target: cand, sourcePoint: connS, targetPoint: connT };
       num -= (qGood === CPQuality.Okay ? 2 : qGood === CPQuality.Bad ? 10 : (qGood as number) === CPQuality.VeryBad ? 1000 : 0);
@@ -2887,6 +2919,7 @@ class HallwayCalculator {
     }
     if (!best) ST.borderFails++;
     else ST.picks++;
+    drlMark(`DR|HC|i${_drlInstNext}|src=${this.entries.indexOf(source)}|cands=${drlCands}|pick=${best ? this.entries.indexOf(best.target) : -1}|bs=${bits64x(bestScore)}|rc=${drlRn()}`);
     return best ? { line: best, score: bestScore } : null;
   }
 
@@ -3317,6 +3350,8 @@ class DualProvider {
   provideLayout(snakeLines: DungeonControlLineRef[], snakeInst: import('./DitherSnakePass').DitherSnake, defaultStyle: DungeonStyleData): void {
     const data = this.data;
     const ctx = this.ctx;
+    const iN = ++_drlInstNext;
+    drlMark(`DR|S|i${iN}|INL rc=${drlRn()}`);
     data.defaultStyle = defaultStyle;
     this.snakeLines = snakeLines;
     this.snakeInst = snakeInst;
@@ -3324,15 +3359,21 @@ class DualProvider {
     void dataLocal0;
     ctx.snap('dualEntranceRoom');
     const entranceRoom = this.calculateEntranceRoom();
+    drlMark(`DR|S|i${iN}|EN rc=${drlRn()}`);
     const startingRoom = this.calculateStartingRoom(snakeLines[0]!);
+    drlMark(`DR|S|i${iN}|ST rc=${drlRn()}`);
     this.calculateEntranceHall(entranceRoom, startingRoom);
+    drlMark(`DR|S|i${iN}|EH rc=${drlRn()}`);
     ctx.snap('dualStartRooms');
     const biomeRooms = this.calculateBiomeRooms(snakeLines, snakeInst);
+    drlMark(`DR|S|i${iN}|BIO n=${biomeRooms.length}|bt=${biomeRooms.map((r) => r.settings.roomType).join(',')}|rc=${drlRn()}`);
     const regularRooms = this.calculateRooms(snakeLines);
+    drlMark(`DR|S|i${iN}|RM n=${regularRooms.length}|rc=${drlRn()}`);
     void biomeRooms;
     void regularRooms;
     ctx.snap('dualLayout');
     this.convertSpecializedRooms(regularRooms);
+    drlMark(`DR|S|i${iN}|CSR dr=${data.rooms.length}|rc=${drlRn()}`);
     // specialized 替换已就地写回 regularRooms 元素——hallway 域=biome+regular+starting
     const hallInput: DRoomBase[] = [...biomeRooms, ...regularRooms, startingRoom];
     (data as unknown as { hallSnake?: import('./DitherSnakePass').DitherSnake }).hallSnake = snakeInst;
@@ -3340,31 +3381,37 @@ class DualProvider {
     (data as unknown as { __i103Calc?: HallwayCalculator }).__i103Calc = calculator;
     const halls = calculator.generate();
     this.convertSpecializedHalls(halls);
+    drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|rc=${drlRn()}`);
     ctx.snap('dualHalls');
     this.calculateDungeonBounds(data.halls);
+    drlMark(`DR|S|i${iN}|BND rc=${drlRn()}`);
     // —— 房间 GenerateRoom 循环 + PreHallways 特征 ——
     for (const rm of data.rooms) rm.generateRoom(data, ctx);
+    drlMark(`DR|S|i${iN}|RGN rc=${drlRn()}`);
     ctx.snap('dualRoomsGen');
     for (const rm of data.rooms) rm.generatePreHallwaysFeatures?.(data, ctx);
+    drlMark(`DR|S|i${iN}|PRH rc=${drlRn()}`);
     ctx.snap('dualPreHall');
     // —— 大厅次序生成：cracked-brick → spider(style12) → 其余 ——
     const crackedList = data.halls.filter((hh) => hh.crackedBrick);
     const spiderList = data.halls.filter((hh) => hh.settings.style.Style === 12);
-    let countGen = 0;
+    let countGen = 0;           // C# num2 同口径：仅 calculated 时++
+    let anyTouched = 0;
     for (const hh of crackedList) {
-      void ++countGen;
-      if (hh.calculated && !hh.generated) hh.generateHallData(data, ctx);
+      void ++anyTouched;
+      if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
     }
     for (const hh of spiderList) {
-      void ++countGen;
-      if (hh.calculated && !hh.generated) hh.generateHallData(data, ctx);
+      void ++anyTouched;
+      if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
     }
     for (const hh of data.halls) {
       if (!hh.crackedBrick && hh.settings.style.Style !== 12) {
-        void ++countGen;
-        if (hh.calculated && !hh.generated) hh.generateHallData(data, ctx);
+        void ++anyTouched;
+        if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
       }
     }
+    drlMark(`DR|S|i${iN}|HG g=${countGen}|rc=${drlRn()}`);
     ctx.snap('dualHallsGen');
     // MakeDungeon :391-413（Dual 支跳过最高房扫描）
     const first = data.rooms[0]!;
@@ -3508,6 +3555,7 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   data.entranceY = opts.entY;
   data.precalcFlag = opts.precalcOK;
   (globalThis as { __swI103K?: number }).__swI103K = ddualK;
+  if (ddualK === 0) _drlInstNext = 0;
   const provider = new DualProvider(data, ctx);
   provider.provideLayout(lines, snakeInst, defaultStyle);
   // ★IIIII97 终表取证：本座房间/大厅指纹（与 rig SW_DRLOG DR|R|/DR|H| 行同构对拍）

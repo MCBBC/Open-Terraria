@@ -281,7 +281,7 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
   let rollN = 0, rollH = 2166136261 >>> 0;
   const g = globalThis as unknown as { __swOnRoll?: (v: number) => void };
   const oOnRoll = g.__swOnRoll;
-  const rollBuf: string[] = [], evBuf: string[] = [], tntBuf: string[] = [];
+  const rollBuf: string[] = [], evBuf: string[] = [], tntBuf: string[] = [], sandBuf: string[] = [];
   let probeActive = WRITE_PROBE;
   g.__swOnRoll = (v: number) => {
     if (probeActive) return;
@@ -289,10 +289,56 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
     rollH = ((rollH ^ (v >>> 0)) * 16777619) >>> 0;
     if (rollBuf.length < 4_000_000) rollBuf.push(`${rollN}|${v}`);
   };
-  const ge = globalThis as unknown as { __swTrapEv?: (k: string, a: number, b: number, v: number) => void; __swTntEv?: (m: string) => void };
+  const ge = globalThis as unknown as { __swTrapEv?: (k: string, a: number, b: number, v: number) => void; __swTntEv?: (m: string) => void; __swSandEv?: (kind: string, a: number, b: number, v: number) => void };
   const oEv = ge.__swTrapEv, oTnt = ge.__swTntEv;
   ge.__swTrapEv = (k, a, b, v) => { if (!probeActive && evBuf.length < 200_000) evBuf.push(`${k}|${a}|${b}|${v}`); };
   ge.__swTntEv = (m) => { if (!probeActive && tntBuf.length < 100_000) tntBuf.push(m); };
+  const oSand = ge.__swSandEv;
+  ge.__swSandEv = (kind, a, b, v) => {
+    if (!probeActive && sandBuf.length < 400_000) sandBuf.push(`SAND ${kind} ${a} ${b} ${v}`);
+    oSand?.(kind, a, b, v);
+  };
+  // 窗内 KillTile 时序账（与 rig TRLOG 同构可对拍）
+  const WKILL = (process.env.SW_TR_KWIN ?? '2373,738,14;2417,487,14').split(';').map((s) => s.split(',').map(Number));
+  const gk = globalThis as unknown as { __swKillW?: (m: string) => void; __swCascW?: (m: string) => void };
+  const oKw = gk.__swKillW;
+  gk.__swKillW = (m) => {
+    if (!probeActive) {
+      const [xs, ys] = m.split(',').map(Number);
+      for (const [cx, cy, r] of WKILL) {
+        if (Math.abs(xs - cx) <= r && Math.abs(ys - cy) <= r) { sandBuf.push(`KW ${m}`); break; }
+      }
+    }
+    oKw?.(m);
+  };
+  const oCw = gk.__swCascW;
+  gk.__swCascW = (m) => {
+    if (!probeActive) {
+      const parts = m.split(' ')[0].split(',').map(Number);
+      const [xs, ys] = parts;
+      if (WKILL.some(([cx, cy, r]) => Math.abs(xs - cx) <= r && Math.abs(ys - cy) <= r)) sandBuf.push(`CW ${m}`);
+    }
+    oCw?.(m);
+  };
+  // 新钩：环分派 SQF 轨迹 + Check2x2 判负杀
+  const g2 = globalThis as unknown as { __swSqfF?: (x: number, y: number, t: number) => void; __swC2Kill?: (x: number, y: number, t: number) => void; __swC2M?: (x: number, y: number, t: number, m: Array<[number, number, number, number]>) => void; __swC2It?: (x: number, y: number, hit: boolean) => void };
+  const inWin = (x: number, y: number): boolean => WKILL.some(([cx, cy, r]) => Math.abs(x - cx) <= r && Math.abs(y - cy) <= r);
+  const oSqf = g2.__swSqfF;
+  g2.__swSqfF = (x, y, t) => { if (!probeActive && inWin(x, y)) sandBuf.push(`SQF ${x},${y} a1t${t}`); oSqf?.(x, y, t); };
+  const oC2k = g2.__swC2Kill;
+  g2.__swC2Kill = (x, y, t) => { if (!probeActive && inWin(x, y)) sandBuf.push(`C2K ${x},${y} t${t}`); oC2k?.(x, y, t); };
+  const oC2m = g2.__swC2M;
+  g2.__swC2M = (x, y, t, m) => { if (!probeActive && inWin(x, y)) sandBuf.push(`C2M ${x},${y} t${t} mem=${JSON.stringify(m)}`); oC2m?.(x, y, t, m); };
+  const oC2it = g2.__swC2It;
+  g2.__swC2It = (x, y, hit) => { if (!probeActive && inWin(x, y)) sandBuf.push(`C2I ${x},${y} ${hit ? 1 : 0}`); oC2it?.(x, y, hit); };
+  const d59g = globalThis as unknown as { __swD59v?: (o: Record<string, unknown>) => void };
+  const oD59 = d59g.__swD59v;
+  d59g.__swD59v = (o) => {
+    if (!probeActive && typeof o.x === 'number' && typeof o.j === 'number' && inWin(o.x as number, o.j as number)) {
+      sandBuf.push(`D59 ${JSON.stringify(o)}`);
+    }
+    oD59?.(o);
+  };
   const chestsRaw = JSON.parse(readFileSync(`${OUT}/base_chests.json`, 'utf8')) as Array<{ x: number; y: number; it: number[][] }>;
   const chests = chestsRaw.map((c) => ({ x: c.x, y: c.y, items: c.it.map(([id, stack]) => ({ id, stack })) }));
   try {
@@ -349,6 +395,7 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
   writeFileSync(ROLLLOG, rollBuf.join('\n') + (rollBuf.length ? '\n' : ''));
   writeFileSync(EVLOG, evBuf.join('\n') + (evBuf.length ? '\n' : ''));
   writeFileSync(TNTLOG, tntBuf.join('\n') + (tntBuf.length ? '\n' : ''));
+  writeFileSync(`${OUT}/tr-sand-js.log`, sandBuf.join('\n') + (sandBuf.length ? '\n' : ''));
   cmpAgainst('after-Traps', CMP_IDX, st);
 
   // 邻差动作图（x86 视角 075→076 与 JS 改写集聚类，仅在启用时）

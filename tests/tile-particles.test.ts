@@ -49,6 +49,36 @@ describe('方块环境粒子规则表（TileParticles）', () => {
     expect(ruleMatches(shadow, 0, 0)).toBe(false);
   });
 
+  it('篝火 215 / 悬挂火盆 592：按列拆三条，出生盒落在火堆 [2,38)px（★2026-08-31 偏移定谳）', () => {
+    for (const sheet of [215, 592] as const) {
+      const rules = TILE_PARTICLE_RULES.get(sheet)!;
+      expect(rules).toHaveLength(3);
+      // 原版每列 1/12/帧（外层 Next(4) × Next(3)），×3 扫描 = 0.25
+      for (const r of rules) {
+        expect(r.prob).toBeCloseTo(0.25, 5);
+        expect(r.dxBox).toBeDefined();
+        expect(r.dyBox).toBeDefined();
+      }
+      // 列帧门 + 出生盒（L6893-6924：NewDust(i*16+2, ∓4, 4×8) + 列修正 ±rand(8)）。
+      // ★dxBox = 命中格自身左上相对值（发射器 x = cellX*16 + 盒采样）：
+      //   col0 [2,13) / col1 [2,6) / col2 [-6,6) → 绝对羽流 = X0+[2,13)∪[18,22)∪[26,38)
+      const byCol = new Map(rules.map((r) => [r.fx0!, r] as const));
+      expect(byCol.get(0)!.dxBox).toEqual([2, 13]);   // 2+rand(4)+rand(8)
+      expect(byCol.get(18)!.dxBox).toEqual([2, 6]);   // 2+rand(4)（绝对 = 本列+18..22）
+      expect(byCol.get(36)!.dxBox).toEqual([-6, 6]);  // 2+rand(4)−rand(8)（绝对 = 本列+26..38）
+      // 绝对羽流右界 ≤38px（火堆 48px 宽）——右列盒尾 32+6=38
+      expect(byCol.get(36)!.dxBox![1] + 32).toBeLessThanOrEqual(38);
+      // 帧门：仅点火行（215 fy0=0 / 592 fy0=18）各自列命中
+      const fy = sheet === 215 ? 0 : 18;
+      expect(ruleMatches(byCol.get(0)!, 0, fy)).toBe(true);
+      expect(ruleMatches(byCol.get(0)!, 18, fy)).toBe(false);
+      expect(ruleMatches(byCol.get(36)!, 36, fy)).toBe(true);
+      expect(ruleMatches(byCol.get(36)!, 36, fy === 0 ? 18 : 0)).toBe(false);
+    }
+    expect(TILE_PARTICLE_RULES.get(215)![0].dyBox).toEqual([-4, 4]);
+    expect(TILE_PARTICLE_RULES.get(592)![0].dyBox).toEqual([4, 12]);
+  });
+
   it('dust 色表覆盖规则引用的所有基础色键', () => {
     expect(DUST_COLOR[6]).toBeDefined();
     expect(DUST_COLOR[14]).toBeDefined();

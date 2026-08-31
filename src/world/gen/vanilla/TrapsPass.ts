@@ -342,6 +342,8 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     const ut = st.type[ui];
     // TileFrame 失活格清 half/slope/块漆（cs:82077-82082，零掷零杀）
     if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; st.paint[ui] = 0; continue; }
+    // ★IIII111 环分派取证钩（缺省零开销；与 x86 TRLOG SQF 行同构对拍用）
+    (globalThis as { __swSqfF?: (x: number, y: number, t: number) => void }).__swSqfF?.(ux, uy, ut);
     const sh = sheetOf(ut);
     if (sh === 165 && rng) { checkStalactite(st, rng, ux, uy); continue; }
     if (ut === GEM178) { check178Gen(st, ux, uy, rng); continue; }
@@ -1008,15 +1010,30 @@ function check2x2Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
       && !solidTileAllowBottomSlope(st, num2, num6 + 2) && !solidTileAllowBottomSlope(st, num2 + 1, num6 + 2)) flag = true;
   }
   if (!flag) return;
+  // ★IIII111 取证钩（缺省零开销）：Check2x2 判负杀块
+  (globalThis as { __swC2Kill?: (x: number, y: number, t: number) => void }).__swC2Kill?.(num2, num6, t);
   destroyObjectT = true;
   for (let k = num2; k <= num2 + 1; k++) {
     for (let l = num6; l <= num6 + 1; l++) {
       if (!st.inBounds(k, l)) continue;
       const ki = st.idx(k, l);
+      // ★IIII111 取证钩（缺省零开销）：成员迭代分派记录
+      (globalThis as { __swC2It?: (x: number, y: number, hit: boolean) => void }).__swC2It?.(k, l, !!(st.type[ki] === t && st.flags[ki]));
       if (st.type[ki] === t && st.flags[ki]) killTileWholeCore(st, k, l, rng);
     }
   }
   destroyObjectT = false;
+  {
+    // ★IIII111 取证钩（缺省零开销）：杀块后四格终态（列优先 origin 行序）
+    const mem: Array<[number, number, number, number]> = [];
+    for (let l = num6; l <= num6 + 1; l++) {
+      for (let k = num2; k <= num2 + 1; k++) {
+        const ki = st.inBounds(k, l) ? st.idx(k, l) : -1;
+        mem.push(ki >= 0 ? [st.type[ki]!, st.flags[ki]!, st.frameX[ki]!, st.frameY[ki]!] : [-1, -1, -1, -1]);
+      }
+    }
+    (globalThis as { __swC2M?: (x: number, y: number, t: number, m: Array<[number, number, number, number]>) => void }).__swC2M?.(num2, num6, t, mem);
+  }
 }
 
 /** Snow/Ice 与 Sand 支撑族（CheckPile cs:46940-46947——与 Spread.ts 同表副本） */

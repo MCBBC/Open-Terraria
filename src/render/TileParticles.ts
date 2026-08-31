@@ -18,6 +18,11 @@ export interface TileParticleRule {
   /** 出生偏移（tile 左上原点，px） */
   dx?: number;
   dy?: number;
+  /** 出生 X 盒 [min,max)（tile 左上原点，px）——1:1 复刻 Dust.NewDust(position,w,h)
+   *  的矩形盒采样；给了 dxBox/dyBox 时忽略 dx/dy 与发射器的 ±2 抖动 */
+  dxBox?: readonly [number, number];
+  /** 出生 Y 盒 [min,max)（同上；缺省用 dy±2） */
+  dyBox?: readonly [number, number];
   /** 上浮速度（正数，内部转 vy=-rise）；负数=下沉 */
   rise?: number;
   /** 横漂速度（暗影球横向飘） */
@@ -209,9 +214,24 @@ function buildRules(): TileParticleRule[] {
   add({ sheet: 72, color: dust(41), prob: 1 / 500 * 3, rise: 0.4, life: 50, size: [1.5, 2.5] });
   // 丛林植物成熟 61 L7521-7528：fx==144
   add({ sheet: 61, color: dust(44), prob: 1 / 60 * 3, fx0: 144, rise: 0.3, life: 50, size: [1.5, 3] });
-  // 篝火 215 L6893-6908（fy==0 时 1/3 smoke；fy<36 都算点燃侧）+ 悬挂火盆 592 L6909-6924
-  add({ sheet: 215, color: dust(31), prob: 0.9, fy0: 0, dx: 16, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
-  add({ sheet: 592, color: dust(31), prob: 0.9, fy0: 18, dx: 8, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+  // 篝火 215 L6893-6908 + 悬挂火盆 592 L6909-6924（同构块）：外层 Next(4) 门 ×
+  // 内层 Next(3) → 每列 1/12/帧，×3 扫描折算 prob=0.25（曾用 0.9 ≈ 密度 3.6 倍）。
+  // 出生盒 NewDust(i*16+2, j*16∓4, 4×8) + 列修正：左列(fx==0)+rand(8) 右推、
+  // 右列(fx==36)−rand(8) 左拉。★dxBox 是【命中格自身左上】相对值（发射器
+  // x = cellX*16 + 盒采样）——首版误按火堆左缘绝对坐标写 [20,24)/[26,38)，
+  // 列偏移被双倍计入 → 烟柱右漂 +16/+32px（用户截图"偏移更严重"，5202 探针
+  // 直方图 [36,40)/[56,72) 定谳）。换算：绝对 [20,24)−16=[2,6)、[26,38)−32=[-6,6)。
+  const STOVE_COL_BOX: ReadonlyArray<readonly [number, number]> = [
+    [2, 13],    // 左列(fx==0)：2+rand(4)+rand(8)，格相对
+    [2, 6],     // 中列(fx==18)：2+rand(4)
+    [-6, 6],    // 右列(fx==36)：2+rand(4)−rand(8)
+  ];
+  for (const [fx, box] of [[0, STOVE_COL_BOX[0]], [18, STOVE_COL_BOX[1]], [36, STOVE_COL_BOX[2]]] as const) {
+    add({ sheet: 215, color: dust(31), prob: 1 / 12 * 3, fx0: fx, fy0: 0, dxBox: box, dyBox: [-4, 4], rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+  }
+  for (const [fx, box] of [[0, STOVE_COL_BOX[0]], [18, STOVE_COL_BOX[1]], [36, STOVE_COL_BOX[2]]] as const) {
+    add({ sheet: 592, color: dust(31), prob: 1 / 12 * 3, fx0: fx, fy0: 18, dxBox: box, dyBox: [4, 12], rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+  }
   // 壁炉 405 L7493-7503（点燃帧 1/20）
   add({ sheet: 405, color: dust(6), prob: 1 / 20 * 3, fx0: 18, fy0: 18, dx: 16, dy: -4, rise: 1.0, life: 40, size: [1.5, 2.5] });
   // 烟囱 406 L6925-6946（fy==54&&fx==0 时 1/3 蒸汽）

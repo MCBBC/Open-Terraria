@@ -72,6 +72,7 @@ let SHEET_N = 0;
   let winSnapDone = false;
   let winRolls = 0;
   let openedAt = '';
+  const winVals: string[] = [];
 
   const wr = (file: string, s: string): void => { try { appendFileSync(file, s + '\n'); } catch { /* */ } };
 
@@ -108,6 +109,8 @@ let SHEET_N = 0;
       // 关窗（Surf 段结束后的下一条独立 reseed——比 1333 本行更稳）
       if (winOn) {
         console.log(`[WIN] closed at ${srcFile.split('/').pop()}:${siteLine} winRolls=${winRolls}`);
+        writeFileSync(`${OUT}/win-values.txt`, winVals.join('\n') + '\n');
+        if (TRACE_ALL) writeFileSync(`${OUT}/die-sites.txt`, allSites.join('\n') + '\n');
         selfFaceCheck();
         winOn = false;
       }
@@ -134,11 +137,35 @@ let SHEET_N = 0;
     console.log(`[SELF] active+chestcells diff vs dump059 = ${diff}`);
   }
 
+  const TRACE_HEAD = Number(process.env.SW_I112_TRACEHEAD ?? '0');
+  const TRACE_ALL = process.env.SW_I112_TRACEALL === '1';
+  let headCount = 0;
+  const allSites: string[] = [];
   g.__swOnRoll = (v: number) => {
     rollN++; evSince++;
-    if (winOn) winRolls++;
+    if (winOn) {
+      winRolls++; winVals.push(`${rollN}|${v}`);
+      if (TRACE_ALL || (TRACE_HEAD > 0 && headCount < TRACE_HEAD)) {
+        headCount++;
+        let site = '?'; let site2 = '?';
+        const st = (new Error().stack ?? '').split('\n');
+        for (const line of st) {
+          const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+          if (m && !m[1].includes('/core/rng') && !m[1].includes('_iii112')) { site = `${m[1].replace(/^.*?(src\/)/, '$1')}:${m[2]}`; break; }
+        }
+        let seen1 = false;
+        for (const line of st) {
+          const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+          if (m && !m[1].includes('/core/rng') && !m[1].includes('_iii112')) {
+            if (seen1) { site2 = `${m[1].replace(/^.*?(src\/)/, '$1')}:${m[2]}`; break; }
+            seen1 = true;
+          }
+        }
+        if (TRACE_ALL) allSites.push(`${rollN - 107452525}|${v}|${site} | ${site2}`);
+        else wr(`${OUT}/head-trace.txt`, `${rollN}|${v}|${site}`);
+      }
+    }
     oRoll?.(v);
-    void v;
   };
   g.__swChestEv = (p: string, i: number, j: number, x?: number) => {
     if (!winOn) return;

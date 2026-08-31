@@ -321,23 +321,20 @@ export function flameStyleIndex(flameIdx: number, frameX: number, frameY: number
 /** num9 + style → 绘制参数（纯函数）。default 族恒 FLAME_STD（颜色乘子差异在
  *  火把 disco/恶魔档，见 flameTint——不进本表）。
  *
- *  ★2026-08-31 死区语义修正（内联表委托门）：蜡烛/烛台/壁灯三族的内联 switch
- *  只枚举了低段显式键，其余 style 走 `default:` 且被布尔门拦住——
- *    蜡烛   flag3 = frameY/22 ≥ 44（TileDrawing.cs:2911-2912）
- *    烛台   flag4 = frameY/36 ≥ 45（:3017-3018）
- *    壁灯   flag2 = frameY/54 ≥ 45（:3244-3245）
- *  门关着就【什么都不画】（连 delegate 都不进）→ 凡 <阈值且不在表的 style =
- *  FLAME_ZERO；≥阈值未在数据表命中 = 数据表 default 7 份 FLAME_STD
- *  （:2086-2097 / :2228-2239 / :2533-2536）。吊灯族无此门：数据表 default 直达
- *  7 份，所有未列 style 都有火（含 44 档）。灯笼族双层 default 都是 0 份。
- *  注：Flame_N 平行表在这些死区 style 的格位多半也有内容——旧版回退 STD 会把
- *  原版没有的火焰画出来（例：普通蜡烛 style0、Tiki 台灯 style0、地牢烛台）。 */
+ *  ★2026-08-31 全量复核后的权威结构：各主族内联 switch 的 default 是双分支
+ *  `{ if(阈值门) delegate→GetTileFlameData; else → 7 份 (0.15,0.35)×(100) }`
+ *  （蜡烛 :3011-3026 / 烛台 :3108-3117 / 壁灯 :3348-3358 / 吊灯 :3225-3234）——
+ *  即【阈值门只决定参数出处（内联硬编码 vs 数据表），任何未列 style 都画
+ *  default 7 份】，不存在"死区不画"。本表未命中 ⇒ 无条件回退 FLAME_STD。
+ *  ★例外 = 灯笼族(13)：数据表与内联双层 default 都是 0 份（不画），仅显式键
+ *  有火；且吊灯 34 / 灯笼 42 属摆动路径，恒走数据表（GetTileFlameData），
+ *  内联层对其不可达。 */
 export function flameStyleSpec(flameIdx: number, style: number): FlameStyleSpec {
   switch (flameIdx) {
-    case 1: return CANDLE_FLAME_STYLES[style] ?? (style >= 44 ? FLAME_STD : FLAME_ZERO);
-    case 2: return CANDELABRA_FLAME_STYLES[style] ?? (style >= 45 ? FLAME_STD : FLAME_ZERO);
+    case 1: return CANDLE_FLAME_STYLES[style] ?? FLAME_STD;
+    case 2: return CANDELABRA_FLAME_STYLES[style] ?? FLAME_STD;
     case 3: return CHANDELIER_FLAME_STYLES[style] ?? FLAME_STD;
-    case 4: return LAMP_FLAME_STYLES[style] ?? (style >= 45 ? FLAME_STD : FLAME_ZERO);
+    case 4: return LAMP_FLAME_STYLES[style] ?? FLAME_STD;
     case 7: return { count: 4, xRange: [0, 0], yRange: [0, 0], multX: 0, multY: 0, tint: [50, 50, 50] }; // :2897-2907（掷后清零=4 份原位）
     case 13: return LANTERN_FLAME_STYLES[style] ?? FLAME_ZERO;
     default: return FLAME_STD;
@@ -598,7 +595,20 @@ export function drawTileFlames(
       }
       const img = imgFor(flameIdx);
       if (!img) continue;
-      const r0 = atlas.vframeAt(sheet, frameX, frameY);
+      // ★壁灯(93)折列【取格专用】（GetTileDrawData case93 :6518-6522 的 addFr：
+      // addFrY-=1998n / addFrX+=36n；火焰矩形与本体同式含 addFr——default-else
+      // 分支 :3339-3348 与 ≥45 delegate 分支的源矩形均 `+drawData.addFr`）。
+      // style 判定仍读原始帧（原版内联 switch 直接 Main.tile[x,y].frameY）。
+      // 曾缺此折：fy≥1998 的新家具台灯（Sandstone Lamp 等）源矩形越界 → vframeAt
+      // null → 整族漏焰（2026-08-31 Starter World 三连标注案定谳反转后补）。
+      let rFx = frameX, rFy = frameY, extraTop = 0;
+      if (!isCampfire && !isBrazier && sheet === 93) {
+        const n = Math.floor(frameY / 1998);
+        rFy -= 1998 * n;
+        rFx += 36 * n;
+        extraTop = 2;   // case93 tileTop+=2（:6523）
+      }
+      const r0 = atlas.vframeAt(sheet, rFx, rFy);
       if (!r0) continue;
       // 原版绘制尺寸覆盖（FLAME_DRAW_SIZE 表注）：源矩形同格左上取 w×h，
       // dx = x*16-(w-16)/2(:2718)——蜡烛族 16px 零外溢(治邻焰盖格)
@@ -606,7 +616,7 @@ export function drawTileFlames(
       const r = size
         ? { ...r0, sw: size[0], sh: size[1] }
         : r0;
-      const top = flameTileTop(sheet, st, x, y, frameX, st.frameY[i]);
+      const top = flameTileTop(sheet, st, x, y, frameX, st.frameY[i]) + extraTop;
       const dx = x * TILE - (r.sw - TILE) / 2;          // :2718 X = x*16-(w-16)/2
       const dy = y * TILE + top;
       if (isCampfire || isBrazier) {

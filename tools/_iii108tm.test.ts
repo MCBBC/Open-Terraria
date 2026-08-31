@@ -60,7 +60,7 @@ function loadDump(nm: string) {
 
 function cmp(X: ReturnType<typeof loadDump>, st: TileStore, tag: string, csvName: string | null) {
   const pair = new Map<string, number>();
-  let fI = -1; let n = 0; const samples: string[] = [];
+  let fI = -1; let n = 0; const samples: string[] = []; const allCells: string[] = [];
   for (let i = 0; i < N; i++) {
     const xa = X.a[i] ? X.t[i] : 0;
     const ja = (st.flags[i] & 1) ? (SHEET[st.type[i]] >= 0 ? SHEET[st.type[i]] : 9999) : 0;
@@ -71,10 +71,13 @@ function cmp(X: ReturnType<typeof loadDump>, st: TileStore, tag: string, csvName
     else if (X.l[i] !== st.liquid[i]) kind = `L${X.l[i]}>${st.liquid[i]}`;
     if (!kind) continue;
     n++; if (fI < 0) fI = i;
-    pair.set(kind.replace(/>.*/, '>...'), (pair.get(kind.replace(/>.*/, '>...')) ?? 0) + 1);
+    const kk = kind.replace(/\/>.*/, '>...');
+    pair.set(kk, (pair.get(kk) ?? 0) + 1);
+    allCells.push(`${i % W},${Math.floor(i / W)} ${kk}`);
     if (samples.length < 8) samples.push(`(${i % W},${Math.floor(i / W)}) ${kind}`);
     if (csvName) void csvName;
   }
+  if (process.env.SW_I08_ALL === '1') writeFileSync(`/tmp/iii108-out/${tag.replace(/[^\w]/g,'_')}.cells.txt`, allCells.join('\n'));
   console.log(`[${tag}] n=${n} first=${fI < 0 ? '-' : `${fI % W},${Math.floor(fI / W)}`} pairs=${[...pair.entries()].sort((a, b) => b[1]! - a[1]!).slice(0, 8).map(([k, c]) => `${k}×${c}`).join(' ')}`);
   for (const s of samples) console.log(`   ${s}`);
   writeFileSync(`/tmp/iii108-out/${csvName ?? 'x'}.txt`, JSON.stringify({ tag, n }));
@@ -110,6 +113,15 @@ function cmp(X: ReturnType<typeof loadDump>, st: TileStore, tag: string, csvName
   const SKIP = process.env.SW_I08_SKIP ?? '';
   try {
     if (!SKIP.includes('cleanup')) {
+      const serStage = (tag: string): void => {
+        try {
+          for (const c of CHANS) {
+            const arr = rec[c] as unknown as { buffer: ArrayBuffer; byteOffset: number; byteLength: number };
+            writeFileSync(`/tmp/iii108-out/tm-${tag}_${c}.bin`, Buffer.from(arr.buffer as ArrayBuffer, 0, arr.byteLength));
+          }
+          console.log(`stage→ tm-${tag}_*`);
+        } catch (e) { console.log(`stage skip: ${(e as Error).message}`); }
+      };
       runFinalCleanupPass(st, gs, rng, {
         chests: [],
         beforeShimmer: () => {
@@ -120,10 +132,20 @@ function cmp(X: ReturnType<typeof loadDump>, st: TileStore, tag: string, csvName
               finalSeedCleanup(st, gs.seedFlags ?? {}, []);
             }
           }
+          serStage('postfin');                       // 对应 x86 -004_PostFinSeed 时点
         },
       });
     }
     if (!SKIP.includes('merge')) finalGenMergeScan(st, rng);
+    {
+      try {
+        for (const c of CHANS) {
+          const arr = rec[c] as unknown as { buffer: ArrayBuffer; byteOffset: number; byteLength: number };
+          writeFileSync(`/tmp/iii108-out/tm-end_${c}.bin`, Buffer.from(arr.buffer as ArrayBuffer, 0, arr.byteLength));
+        }
+        console.log('stage→ tm-end_*');
+      } catch { /* noop */ }
+    }
   } finally { /* noop */ }
   cmp(loadDump('-004_PostFinSeed'), st, 'replay vs x86 PostFinSeed', 'fcp-postfin');
   cmp(loadDump('105_Final_Cleanup'), st, 'replay vs x86 Final_Cleanup', 'fcp-final');

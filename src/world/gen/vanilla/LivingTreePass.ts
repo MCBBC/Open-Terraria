@@ -242,7 +242,10 @@ function setLeaf(st: TileStore, x: number, y: number): void {
   st.type[i] = LEAF;
   st.flags[i] = 1;
   st.half[i] = 0;
-  st.frameX[i] = 0; st.frameY[i] = 0; // 清帧：防旧 framed tile（187 地被等）帧残留
+  // ★IIIII97c 定罪②（cs:28646-28648）：原版叶写入只动 type/active/halfBrick 三件，
+  //  不触碰 frameX/frameY。旧实现在此清帧 ⇒ 后续 SquareTileFrame→Check3x2 对相邻
+  //  187 石堆的六格校验读到与原版不同的帧面 → KillTile 清除分叉（c37 案实证：
+  //  同列同骰位，x86 扫到下方 187、JS 已是 192）。清帧行已删。
 }
 function deactivate(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
@@ -1195,14 +1198,22 @@ export function growLivingTree(
     mk109(`LC|c=${n43}|round=${ax7[n43] ? 1 : 0}|x=${ax5[n43]}|y=${ax6[n43]}|n44=${n44}|box=${n45},${n46},${n47},${n48}`);
     const n49 = 2.0 - rng.int(0, 4) * 0.1;                // cs:28618
     mk109(`LC49|c=${n43}`);
+    if (MK109 && n43 >= 35) {
+      const bd = (globalThis as unknown as { __i109box?: (c: number, x0: number, x1: number, y0: number, y1: number, st: TileStore) => void }).__i109box;
+      if (bd) bd(n43, n45 - 4, n46 + 4, n47 - 4, n48 + 104, st);
+    }
     for (let n50 = n45; n50 <= n46; n50++) {
       mk109(`COL|c=${n43}|x=${n50}`);
       for (let n51 = n47; n51 <= n48; n51++) {
         if (!canPlaceLeaves(st, n50, n51)) continue;
         if (ax7[n43]) {
-          // 枝头圆冠（cs:28633-28645）
+          // 枝头圆冠（cs:28633-28645）★IIIII97c 定罪④：C# 用 Vector2D(float32)，
+          // Length() 内部 X*X/Y*Y/加法均为 r4 舍入后再开方——JS 必须 fround 模拟。
+          // 曾用 f64 直算 ⇒ 同 d² 边界格两侧“一半有一半无”（c37 案:同列同骰位
+          // x86 见 187 / JS 见 192），并使本簇后续列的 canPlaceLeaves 扫描面翻转。
           const dx = ax5[n43] - n50, dy = ax6[n43] - n51;
-          if (Math.sqrt(dx * dx + dy * dy) < n44 * 0.9) setLeaf(st, n50, n51);
+          const lenSq = Math.fround(Math.fround(Math.fround(dx * dx) + Math.fround(dy * dy)));
+          if (Math.sqrt(lenSq) < n44 * 0.9) setLeaf(st, n50, n51);
         } else if (Math.abs(ax5[n43] - n50) + Math.abs(ax6[n43] - n51) * n49 < n44) {
           setLeaf(st, n50, n51);                            // cs:28648
         }
@@ -1282,6 +1293,13 @@ export function runLivingTreesPass(
   // 一次性探针钩（同 WebsPass 模式）：LivingTrees 入口快照（债时间线用）
   const g0 = globalThis as { __swLtCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swLtCap?.(gs, st); } catch { /* probe */ }
+  // ★IIIII97c 定罪③（cs:15789 前史/TileID.cs tileSolid[192]=true 基线）：原版【本
+  //   pass 全程】活树叶=实心——根系 SolidTile 下探计数、竖井预检 flag4、PlaceSmallPile/
+  //   Place3x2 的 SolidTile2 支撑门全部消费该语义；本仓数据把 192 预置 non-solid 且
+  //   曾只在 pass 尾 flip(false)（no-op）⇒ 叶顶石堆/地被在叶面上放置的成败与原版翻转。
+  //   头部翻 true、尾部已存 flip false，pass 外语义零变化（下游各 pass 认证域不动）。
+  flipGenSolid([LEAF], true);
+  if (MK109) mk109(`SOLIDCHK|leafVanSolid=${vanGenSolidType(LEAF)} genSolid=${genSolidType(LEAF)}`);
   const { w } = st;
   const num = 200;                        // cs:15560 与世界中心 ±200 排除带
   const num2 = 0;                         // cs:15561（extraFloatingIslands 才 >0）
