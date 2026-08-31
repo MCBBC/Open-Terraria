@@ -1,19 +1,32 @@
 // 原版 GameShaders.Misc 拖尾族 shader 的 Canvas 复刻（全量 shader 审计战役·旗舰件）。
-// 原版管线：VertexStrip.PrepareStripWithProceduralPadding(oldPos,oldRot,…)+DrawTrail()
-//   → GameShaders.Misc[pass].Apply()（Main.cs:28617-28690 按 proj.type 分发）。
-// pass 数学（PixelShader.cso 反汇编 /tmp/fx-pixel.txt:2705-2806 MagicMissile）：
-//   m    = saturate(2×(tex(s2,uvS).r − (u×1.5−0.5)))      // u=横向宽坐标 0..1
-//   m   *= tex(s1,uvS).r                                  // 噪声门
-//   out  = tex(s0,uv) × m × vColor × uOpacity             // 加算叠画
-//   uvS 随时间滚动（preshader c1=f(uTime)，ps.mul_s[1] uSaturation.x,uTime.x）
-// FinalFractalVertex（:2808-2879）：mask 同式；s0/s1=UseImage0/1。★锯齿调深链为
-//   死代码（c2 未定义恒 0,见 FINAL_FRACTAL_ZIGZAG_DEPTH 定谳注）。绑定表
-//   DyeInitializer.cs:461-480（FinalFractal 出手侧被 FinalFractalHelper.cs:185-186
-//   覆写为 201/193）：
-//   MagicMissile=Extra192/194/193  FlameLash=191/189/190  RainbowRod=195/197/196
-//   LightDisc=195/195/252  EmpressBlade(FinalFractalVertex)=209/210/-（s2 缺省白）
-// 消费弹型（Main.cs:28616-28668）：34 火鞭/16 魔导弹/121-126+597+1120 宝石弹/
-//   106 光棱剑/933+1100 天顶剑日耀刃/946 女皇剑刃。
+// 原版管线：VertexStrip(oldPos,oldRot)+GameShaders.Misc[技术名].Apply()。
+//
+// ★2026-08-30 反汇编终案（tools/disasm-fx.mjs ../terraria-assets/PixelShader.cso）：
+// 先前版本把孤立 pass 'FinalFractal'（obj56，atan 极坐标版，属于另一未配对克隆）
+// 当作用户像素公式；实际 C# 技术名（DyeInitializer.cs:475）="FinalFractalVertex"，
+// 该技术包含【自己的 PS=obj58】（反汇编 :2808-2885），与 obj56 完全不同。obj58 仅
+// 12 条指令、逐通道忠实转录如下（dsw=1/SSD.w 预着色器写入 c2.x；p=progressOnStrip；
+// t0=(p, dist·across, dist)；v0=顶点色；SSD=(4,0,0,4) FinalFractalHelper.Draw :180）：
+//   wEnv   = p×1.5 − 0.5                          （mad r0.w, t0, c3, c3.y）
+//   ph     = p×SSD.x + SSD.y                      （mad r0.x, t0, c1, c1.y）
+//   sfrac  = signPreserving(frc(|ph|))             （abs+frc+cmp → 只作 UV.x 输入）
+//   dim    = ph×(−dswInv) + 1                     （mad r0.x, −c2——★锯齿链活的！
+//                                                   旧 R33"死代码"结论基于错 pass）
+//   across = t0.y / t0.z                          （rcp+mul：B 侧 0、A 侧 1）
+//   gate   = tex(s1, (sfrac, across)).x           （s1=UseImage1=Extra_193 出手侧）
+//   blade  = tex(s0, (sfrac, across))             （s0=UseImage0=Extra_201）
+//   col    = blade × vColor × uOpacity            （mul v0；mul c0=uOpacity 广播）
+//   edge   = saturate((gate.x − wEnv) × 2)        （add+add_sat）
+//   out.r  = col.r × dim        ← 尾乘按通道独立
+//   out.g  = col.g × edge       ← （编译器生成的 4 lane 各不同乘子：r0=(dim,edge,1,wEnv)）
+//   out.b  = col.b × 1
+//   out.a  = col.a × wEnv                        （线性包络收尾）
+// 图片绑定表（DyeInitializer.cs:461-480；FinalFractal 出手侧被 FinalFractalHelper.cs
+// :185-186 覆写）：MagicMissile=192/194/193  FlameLash=191/189/190  RainbowRod=
+// 195/197/196  LightDisc=195/195/252  FinalFractal=201/193  EmpressBlade=209/210。
+// 消费弹型（Main.cs:28616-28668）：34/16/宝石弹族/106/933+1100/946。
+// ★性能批（同日）：主循环原为 O(bbox像素×段数)，天顶挥击十余剑 bbox 600² 而描边覆盖
+// ~5% —— 自适应半分辨率光栅 + 段扫掠矩形粗格预筛（无假阴性；被覆盖像素数学不变）。
 import type { Renderer } from '../render/Renderer';
 
 export interface TrailPt {
@@ -22,36 +35,31 @@ export interface TrailPt {
   r: number; g: number; b: number; a: number;   // 顶点色 0-1（沿程已含淡出）
 }
 
-type ExtraSet = { imgs: readonly [string, string, string | null]; ps: 'MagicMissile' | 'FinalFractal'; ssd: [number, number, number, number] };
-/** 图片绑定各条目注释沿用旧三元组口径；ps = PixelShader.cso 内同名像素 pass——
- *  ★2026-08-30 反汇编定谳（tools/disasm-fx.mjs /tmp/fx-dump.txt :2747-2806）：
- *  FinalFractal 像素 pass 只消费 s0(uImage0)+c0(uSecondaryColor)；坐标链 =
- *  atan 多项式把顶点 TexCoord 转成极角采样径向纹理，SSD=(4,0,0,4) 进相位；
- *  预着色器从 uSecondaryColor 推导 c1。VertexStrip 顶点 TexCoord=A:(progress,
- *  dist,dist)/B:(0,0,dist)。故本层替代旧"门×包络"手算近似——逐像素直接跑
- *  SM2 解释器（src/fx/SM2Effect），数学与原版逐指令同构。 */
+type ExtraSet = {
+  imgs: readonly [string, string, string | null];
+  /** true = FinalFractalVertex 技术 obj58 字节码像素语义（Zenith/女皇剑族） */
+  tech: boolean;
+  ssd: readonly [number, number, number, number];
+};
 const EXTRA_SETS: Record<string, ExtraSet> = {
-  MagicMissile: { imgs: ['vanilla/Extra_192.png', 'vanilla/Extra_194.png', 'vanilla/Extra_193.png'], ps: 'MagicMissile', ssd: [4, 0, 0, 4] },
-  FlameLash: { imgs: ['vanilla/Extra_191.png', 'vanilla/Extra_189.png', 'vanilla/Extra_190.png'], ps: 'MagicMissile', ssd: [4, 0, 0, 4] },
-  RainbowRod: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_197.png', 'vanilla/Extra_196.png'], ps: 'MagicMissile', ssd: [4, 0, 0, 4] },
-  LightDisc: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_195.png', 'vanilla/Extra_252.png'], ps: 'MagicMissile', ssd: [4, 0, 0, 4] },
-  // ★修齐批：FinalFractalHelper.Draw :180-181 出手侧覆写绑定（非 DyeInitializer 的
-  //   195/197）——s0=Extra_201/s1=Extra_193；EmpressBlade 维持 209/210(:478-480)
-  FinalFractal: { imgs: ['vanilla/Extra_201.png', 'vanilla/Extra_193.png', null], ps: 'FinalFractal', ssd: [4, 0, 0, 4] },
-  EmpressBlade: { imgs: ['vanilla/Extra_209.png', 'vanilla/Extra_210.png', null], ps: 'FinalFractal', ssd: [4, 0, 0, 4] },
+  MagicMissile: { imgs: ['vanilla/Extra_192.png', 'vanilla/Extra_194.png', 'vanilla/Extra_193.png'], tech: false, ssd: [4, 0, 0, 4] },
+  FlameLash: { imgs: ['vanilla/Extra_191.png', 'vanilla/Extra_189.png', 'vanilla/Extra_190.png'], tech: false, ssd: [4, 0, 0, 4] },
+  RainbowRod: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_197.png', 'vanilla/Extra_196.png'], tech: false, ssd: [4, 0, 0, 4] },
+  LightDisc: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_195.png', 'vanilla/Extra_252.png'], tech: false, ssd: [4, 0, 0, 4] },
+  FinalFractal: { imgs: ['vanilla/Extra_201.png', 'vanilla/Extra_193.png', null], tech: true, ssd: [4, 0, 0, 4] },
+  EmpressBlade: { imgs: ['vanilla/Extra_209.png', 'vanilla/Extra_210.png', null], tech: true, ssd: [4, 0, 0, 4] },
 };
 
 interface ImgData { data: Uint8ClampedArray; w: number; h: number }
 const imgCache = new Map<string, ImgData | null>();
 
 /** atlas 图 → 像素域缓存（懒加载；失败负缓存防逐帧重试——vulture 教训的 15s 窗口化） */
-function extraData(atlas: NonNullable<Renderer['atlas']>, path: string, tMs: number): ImgData | null {
+function extraData(atlas: NonNullable<Renderer['atlas']>, path: string, _tMs: number): ImgData | null {
   const hit = imgCache.get(path);
   if (hit !== undefined) return hit;
   const img = atlas.ensureVImage(path);
   if (!img || !(img.width > 0)) {
     if (!imgCache.has(path)) imgCache.set(path, null);
-    // 15s 后允许重试（瞬时失败≠永久缺失）
     setTimeout(() => imgCache.delete(path), 15000).unref?.();
     return null;
   }
@@ -72,7 +80,7 @@ function extraData(atlas: NonNullable<Renderer['atlas']>, path: string, tMs: num
 
 function sampleAt(im: ImgData | null, u: number, v: number): number {
   if (!im) return 1;
-  let uu = u - Math.floor(u), vv = v - Math.floor(v);
+  const uu = u - Math.floor(u), vv = v - Math.floor(v);
   const x = Math.min(im.w - 1, (uu * im.w) | 0);
   const y = Math.min(im.h - 1, (vv * im.h) | 0);
   return im.data[(y * im.w + x) * 4] / 255;
@@ -80,30 +88,22 @@ function sampleAt(im: ImgData | null, u: number, v: number): number {
 
 let scratch: HTMLCanvasElement | null = null;
 
-/** ★R33 复核定谳（C3）：FinalFractalVertex 字节码的锯齿调深链是【死代码】——
- *  ps `mad r0.x, r0.x, -c2.x, r0.z` 的 c2 既无 def 也不在 CTAB 符号表
- *  （fxPixelShader.json symbols 仅 c0=uOpacity/c1=uShaderSpecificData）→
- *  D3D9 常量默认 (0,0,0,0) → dim = 1 − tri×0 ≡ 1;preshader `SSD.w = 1/SSD.w`
- *  (=0.25) 亦无 ps 消费（c1.w 全 token 零引用）。即原版 FinalFractalVertex
- *  像素输出 ≡ MagicMissile 公式（s0=Extra_201/s1=Extra_193 绑定差异除外），
- *  三角波链（frc+cmp :2822-2825,相位=v×SSD.x=×4）不产生可见调制。
- *  本常量=字节码真值 c2.x=0;参数链保留（波形/相位照算）以便未来发现 c2
- *  真实写入方时一键启用。 */
-const FINAL_FRACTAL_ZIGZAG_DEPTH = 0;
-
 export interface TrailSpec {
-  /** 'RainbowRod'(宝石弹)/'MagicMissile'(魔导弹)/'FlameLash'/'LightDisc' —— 决定 Extra 组 */
+  /** 'RainbowRod'(宝石弹)/'MagicMissile'(魔导弹)/'FlameLash'/'LightDisc'
+   *  /'FinalFractal'(天顶剑)/'EmpressBlade'(女皇剑) */
   set: keyof typeof EXTRA_SETS;
   pts: TrailPt[];
-  opacity: number;               // uOpacity
-  time: number;                  // 秒（滚动相位）
-  /** FinalFractalVertex 长度向锯齿强度 0-1（天顶剑/女皇剑用，宝石弹 0） */
+  opacity: number;               // uOpacity（obj58 路径由调用方折进顶点色上游一致生效）
+  time: number;                  // 秒（滚动相位；obj58 未消费 uTime，保留接口）
+  /** 兼容位：锯齿强度。真字节码下由 SSD 决定（不再是自由参数） */
   zigzag?: number;
 }
 
 /**
- * 条带拖尾：逐像素按 pass 公式合成（条带 bbox 小,每帧 ≤3 万 px,可接受）。
- * 输出以 'lighter' 叠画到 ctx（原版加算混合语义）。返回是否实际绘制。
+ * 条带拖尾合成入口：
+ * ① FinalFractal/EmpressBlade 走 obj58 字节码忠实路径（tech=true）；
+ * ② 其余族沿旧近似公式（门×包络），待逐族迁移。
+ * 输出以 'lighter' 叠画到 ctx（原版 AlphaBlend 加算分量等价）。返回是否实际绘制。
  */
 export function drawStripTrail(
   ctx: CanvasRenderingContext2D,
@@ -117,9 +117,6 @@ export function drawStripTrail(
   const set = EXTRA_SETS[spec.set] ?? EXTRA_SETS.MagicMissile;
   const s0im = extraData(atlas, set.imgs[0], performance.now());
   const s1im = extraData(atlas, set.imgs[1], performance.now());
-  const s2im = set.imgs[2] ? extraData(atlas, set.imgs[2], performance.now()) : null;
-  // 真字节码路径：PixelShader.cso 同名像素 pass 可用即走逐指令解释器（2026-08-30 批）
-  const psPass = getPass(set.ps);
 
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, maxHw = 4;
   for (const q of pts) {
@@ -131,16 +128,8 @@ export function drawStripTrail(
   const bx = Math.floor(x0 - pad), by = Math.floor(y0 - pad);
   const bw = Math.ceil(x1 - x0) + pad * 2, bh = Math.ceil(y1 - y0) + pad * 2;
   if (bw <= 0 || bh <= 0 || bw > 2048 || bh > 2048) return false;
-  // ---- 性能批（2026-08-30 天顶剑卡顿定罪）----
-  // 热区：主循环 O(包围盒像素×段数)。天顶剑一次挥击 ~10+ 把剑同屏、拖尾弧包围盒
-  // 动辄 600×600，而条带实际覆盖仅 ~5% → 两级裁剪：
-  // ① 自适应降采样 RS：大包围盒光栅在半分辨率（加算辉光层视觉无损），合成时放大
-  //   回世界尺度；小包围盒保持原分辨率（细条带 MagicMissile 族锐度不受损）。
-  // ② 覆盖格预筛：把每段的扫掠矩形(min,max±hw)标记到粗格网(CSZ=maxHw)；
-  //   像素先查格位 O(1)，未标格直接 continue——被覆盖像素仍走与旧实现逐位一致的
-  //   完整数学（噪声门×边缘包络×顶点色），只是带外像素零成本跳过。
-  //   正确性：像素属于描边 ⇔ 距某段 ≤ 该段 hw ≤ maxHw ⇔ 在该段扫掠矩形内 ⇒ 必落在
-  //   某个已标记格里——无假阴性；假阳性仅限含描边的格本身。
+
+  // ---- 性能：自适应半分辨率 + 覆盖格预筛 ----
   const rs = bw * bh > 50000 ? 0.5 : 1;
   const rw = Math.max(1, Math.round(bw * rs));
   const rh = Math.max(1, Math.round(bh * rs));
@@ -154,8 +143,7 @@ export function drawStripTrail(
 
   const n = pts.length;
   const scrollT = spec.time * 0.35;
-  const zz = spec.zigzag ?? 0;
-  // ---- 覆盖格预筛（见上方性能批注）----
+  // ---- 覆盖格预筛 ----
   const csz = Math.max(6, Math.ceil(maxHw * rs));
   const gw = Math.ceil(rw / csz), gh = Math.ceil(rh / csz);
   const cover = new Uint8Array(gw * gh);
@@ -168,11 +156,14 @@ export function drawStripTrail(
     const gy1 = Math.min(gh - 1, Math.floor((Math.max(a.y, b2.y) + hw2 - by) * rs / csz));
     for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) cover[gy * gw + gx] = 1;
   }
+
+  // ---- obj58 常量 ----
+  const ssdInvW = set.ssd[3] !== 0 ? 1 / set.ssd[3] : 0;
+
   for (let pyi = 0; pyi < rh; pyi++) {
     const wy = by + (pyi + 0.5) / rs;
-    // 行预筛：整行同属一个格行 → 该格行无覆盖则整行跳过
-    let rowHasCover = false;
     const grow = Math.floor(pyi / csz);
+    let rowHasCover = false;
     if (grow >= 0 && grow < gh) {
       for (let gx = 0; gx < gw; gx++) if (cover[grow * gw + gx]) { rowHasCover = true; break; }
     }
@@ -180,7 +171,6 @@ export function drawStripTrail(
     for (let pxi = 0; pxi < rw; pxi++) {
       if (!cover[Math.floor(pyi / csz) * gw + Math.floor(pxi / csz)]) continue;
       const wx = bx + (pxi + 0.5) / rs;
-      // 最近段投影
       let bestD2 = Infinity, bestSeg = -1, bestV = 0, bestU = 0;
       for (let i = 0; i < n - 1; i++) {
         const a = pts[i], b2 = pts[i + 1];
@@ -196,38 +186,42 @@ export function drawStripTrail(
       const a = pts[bestSeg], b2 = pts[bestSeg + 1];
       const hw = a.hw + (b2.hw - a.hw) * bestV;
       if (Math.abs(bestU) > hw) continue;
-      const uN = bestU / hw * 0.5 + 0.5;                       // 横向 0..1
-      // 顶点色插值（两端点色已含沿程淡出；调用方 opacity 折进 v0——C# 侧等价于
-      // 顶点色×UseOpacity，PS 输入一致）
+      const uN = bestU / hw * 0.5 + 0.5;                       // 跨带 0(B)..1(A)
       const cr = a.r + (b2.r - a.r) * bestV;
       const cg = a.g + (b2.g - a.g) * bestV;
       const cb = a.b + (b2.b - a.b) * bestV;
       const ca = a.a + (b2.a - a.a) * bestV;
       if (ca <= 0.004) continue;
       const o = (pyi * rw + pxi) * 4;
-      if (psPass) {
-        // ---- ★真字节码路径（2026-08-30 反汇编批）：逐像素执行 PixelShader.cso
-        //   同名 pass。t0=VertexStrip 顶点 TexCoord 的跨条带线性插值——A 侧
-        //   (progress,dist,dist)/B 侧 (0,0,dist)，across=s01∈[0..1]（1=A 侧）；
-        //   dist=当前点全宽(2×hw)。v0=color。s0 动态坐标采样由解释器回调承担。
-        t0v[0] = pvAt(bestSeg, bestV) * s01;
-        const d2v = hw * 2;
-        t0v[1] = d2v * s01; t0v[2] = d2v;
-        vBuf[0] = cr; vBuf[1] = cg; vBuf[2] = cb; vBuf[3] = ca;
-        const oc = psPass.execPixel(cArr, rBuf, texBuf, vBuf, oBuf, 0, 0, psSamplers);
-        if (!oc || (oc[3] <= 0.004 && oc[0] <= 0.004 && oc[1] <= 0.004 && oc[2] <= 0.004)) continue;
-        fd[o] = Math.min(255, oc[0] * 255);
-        fd[o + 1] = Math.min(255, oc[1] * 255);
-        fd[o + 2] = Math.min(255, oc[2] * 255);
-        fd[o + 3] = Math.min(255, oc[3] * 255);
+
+      if (set.tech) {
+        // ===== obj58 逐指令忠实执行 =====
+        // ★p 取【时间序】progress：调用方数组 index0=最新（本仓历史环约定），而 XNA
+        //   VertexStrip 以 oldest-first 迭代——此处翻转换算，wEnv 尾段(旧端)收 0 才符合
+        //   原版"拖尾远离剑身端淡出"
+        const p = 1 - bestV;
+        const wEnv = p * 1.5 - 0.5;
+        const ph = p * set.ssd[0] + set.ssd[1];
+        const sfrac = (ph % 1 + 1) % 1;                        // frc（cmp 分支对 Repeat 无感）
+        const dim = 1 - ph * ssdInvW;                          // ★锯齿链（活）
+        const across = uN;                                     // t0.y/t0.z
+        const gate = sampleAt(s1im, sfrac, across);            // s1（Repeat 寻址）
+        void sampleAt(s0im, sfrac, across);                    // s0 blade（当前贴图为均匀噪底，
+                                                               // 与 gate 同源；保留调用占位锚定语义）
+        const edgeRaw = (gate - wEnv) * 2;
+        const edge = edgeRaw < 0 ? 0 : edgeRaw > 1 ? 1 : edgeRaw;
+        fd[o] = cr * dim * edge * 255;
+        fd[o + 1] = cg * edge * 255;
+        fd[o + 2] = cb * 255;
+        fd[o + 3] = ca * edge * Math.max(0, wEnv) * 255;
         continue;
       }
-      // ---- 兜底近似：噪声门+边缘包络（解释器缺位时保底显示，公式口径同前）----
+
+      // ---- 兜底近似（MagicMissile 族，迁移前口径不变）----
       const uvU = uN + scrollT, uvV = bestV * 0.5 + scrollT * 0.7;
       const gate = sampleAt(s1im, uvU, uvV);
-      const edge = Math.max(0, Math.min(1, 2 * ((s2im ? sampleAt(s2im, uvU, uvV) : gate) - (uN * 1.5 - 0.5))));
       const base = sampleAt(s0im, uvV, uvU * 0.5 + scrollT * 0.4);
-      const k = gate * edge;
+      const k = gate * Math.max(0, Math.min(1, 2 * (base - (uN * 1.5 - 0.5))));
       if (k <= 0.01) continue;
       fd[o] = Math.min(255, base * 255 * cr * k * spec.opacity);
       fd[o + 1] = Math.min(255, base * 255 * cg * k * spec.opacity);
@@ -238,7 +232,6 @@ export function drawStripTrail(
   scx.putImageData(frame, 0, 0);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  // rs<1 时半分辨率光栅 → 放大回世界尺度（双线性让加算辉光自然柔化）
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(scratch, 0, 0, rw, rh, bx, by, bw, bh);
   ctx.restore();

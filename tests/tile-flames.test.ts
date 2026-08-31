@@ -73,9 +73,24 @@ describe('① 蜡烛族逐 style 火苗参数（num9=1，TileDrawing.cs:2911-301
     expect(CANDLE_FLAME_STYLES[63].dynTint).toBe('boulder');
   });
 
-  it('未命中回 default 7 份 (0.15, 0.35) ×(100)（:3006-3010）', () => {
-    expect(flameStyleSpec(1, 0)).toBe(FLAME_STD);
-    expect(flameStyleSpec(1, 46)).toBe(FLAME_STD);   // 数据表未列 → default
+  it('未命中分档：≥委托阈值 → 数据表 default 7 份；<阈值死区 → 不画（★2026-08-31 定谳）', () => {
+    // 蜡烛 flag3 = frameY/22≥44（:2911-2912）；内联只枚举 5,6,7,10/8/12/14/16/27/28(+43 委托)，
+    // 其余低段【原版什么都不画】。46 数据表未列 → default 7 份（:2086-2097）
+    expect(flameStyleSpec(1, 46)).toBe(FLAME_STD);
+    expect(flameStyleSpec(1, 0).count).toBe(0);      // style0 普通蜡烛死区
+    expect(flameStyleSpec(1, 13).count).toBe(0);     // 内联枚举间空档
+    // 烛台 flag4≥45（:3017-3018）/ 壁灯 flag2≥45（:3244-3245）同语义
+    expect(flameStyleSpec(2, 5).count).toBe(0);
+    expect(flameStyleSpec(2, 47)).toBe(FLAME_STD);   // 烛台数据表未列的 ≥45 段 → default
+    expect(flameStyleSpec(4, 0).count).toBe(0);      // Tiki 台灯 style0 死区
+    expect(flameStyleSpec(4, 38)).toBe(FLAME_STD);   // 折列带 style38（frameY=2052 类）→ 数据表 default
+    // 吊灯族无委托门：数据表 default 直达 7 份——用户标注三格吊灯（style44）靠此有火
+    expect(flameStyleSpec(3, 44)).toBe(FLAME_STD);
+    // 灯笼数据表显式键 11 / 44（:2589-2599 / :2611-2620）——旧表漏键致整层不画
+    expect(LANTERN_FLAME_STYLES[11]).toEqual({
+      count: 7, xRange: [-10, 11], yRange: [-10, 11], multX: 0.075, multY: 0.075, tint: [50, 50, 50],
+    });
+    expect(flameStyleSpec(13, 44)).toBe(FLAME_STD);  // 标注灯笼（fy=1602）样式
   });
 });
 

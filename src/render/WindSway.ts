@@ -16,6 +16,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
   type TreeStyleData } from './VanillaTiler';
 import { animYOffset } from './TileAnim';
+import { drawVineTileFlame, vineAdvanceSeed } from './TileFlames';
+import type { FlickerClock } from '../lighting/SkyColor';
 import { getTilePaintSettings } from '../world/Paint';
 import { tintRegion } from './TileTint';
 import { frameMergesWith } from './TileMergeFamily';
@@ -341,6 +343,9 @@ function drawCell(
   px: number, py: number, pivotX: number, pivotY: number, rot: number, offX: number, offY: number,
   trees?: TreeStyleData,
   glow?: (dpx: number, dpy: number) => void,
+  /** 火苗叠画（MultiVine 族专用，TileDrawing.cs:9782-9794）：与本体同一
+   *  变换/次序执行（原版 Draw 顺序 = 本体 → glow → 火焰），dest 口径同 glow。 */
+  flame?: (dpx: number, dpy: number) => void,
 ): void {
   const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
   const draw = (dpx: number, dpy: number) => {
@@ -378,6 +383,7 @@ function drawCell(
   if (rot === 0 && offX === 0 && offY === 0) {
     draw(px, py);
     if (glow) glow(px, py);
+    if (flame) flame(px, py);
     return;
   }
   ctx.save();
@@ -386,6 +392,7 @@ function drawCell(
   ctx.translate(-pivotX, -pivotY);
   draw(px + offX, py + offY);
   if (glow) glow(px + offX, py + offY);
+  if (flame) flame(px + offX, py + offY);
   ctx.restore();
 }
 
@@ -739,11 +746,15 @@ function multiVineVariant(sheet: number, fx: number, fy: number): MultiVineVaria
   return v;
 }
 
-/** DrawMultiTileVinesInWind（:9407-9700）：吊挂植物绕顶部中心摆，下部摆幅大 */
+/** DrawMultiTileVinesInWind（:9407-9700）：吊挂植物绕顶部中心摆，下部摆幅大。
+ *  ★2026-08-31：尾部每格火焰循环（:9782-9794）随本体变换补画——吊灯 34/灯笼 42
+ *  全 style 在原版都有火（GetTileFlameData 数据表直达），此前整层漏火
+ *  （Starter World 用户标注排查定谳）。组种子 num6 惰性结转（首格=锚格）。 */
 function drawMultiVine(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
   rec: SwayRec, ax: number, ay: number, type: number,
   trees?: TreeStyleData,
+  flicker?: FlickerClock | null,
 ): void {
   const i0 = st.idx(ax, ay);
   if (!multiVineAnchor(rec.sheet, st.frameX[i0], st.frameY[i0])) return;
@@ -767,6 +778,7 @@ function drawMultiVine(
     if (above?.platform && !st.half[ai] && st.slope[ai] === 0) pivotY -= 8;
   }
   const ROT = -0.15 * num2Mul; // num2（0.15 后 *= -1，变体可再缩放）
+  const seedBox = { s: 0n };   // 组共享火苗种子 num6（惰性首格结转，TileFlames 块注释）
   for (let j = 0; j < sy; j++) {
     let hFrac = (j + 1) / sy; // 与 MultiGrass 相反：越靠下摆幅越大
     if (hFrac === 0) hFrac = 0.1;
@@ -778,8 +790,13 @@ function drawMultiVine(
       if (!st.inBounds(cx, cy)) continue;
       const idx = st.idx(cx, cy);
       if (st.type[idx] !== type || !st.flags[idx]) continue;
+      const fxRaw = st.frameX[idx], fyRaw = st.frameY[idx];
+      vineAdvanceSeed(seedBox, cx, cy);
       drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE + offX, cy * TILE,
-        pivotX, pivotY + offY, wc * ROT * hFrac, 0, offY, trees);
+        pivotX, pivotY + offY, wc * ROT * hFrac, 0, offY, trees,
+        undefined,
+        (dpx, dpy) => drawVineTileFlame(ctx, atlas, dpx, dpy,
+          rec.sheet, fxRaw, fyRaw, seedBox, flicker ?? null));
     }
   }
 }
@@ -903,6 +920,10 @@ export function drawWindSwayTiles(
   cam: SwayCam, z: number,
   clock?: Clock, waterStyle = 0,
   zones: { corrupt: boolean; crimson: boolean; hallow: boolean } = { corrupt: false, crimson: false, hallow: false },
+  /** FlickerClock（GlobalTimeWrappedHourly 等）：MultiVine 家具动态焰色呼吸用；
+   *  缺省 null → 呼吸值取 t=0 半幅（与主火焰层同口径，仅影响 fallenStar/hallowed
+   *  /cloud 等动态色族）。 */
+  flicker?: FlickerClock | null,
 ): void {
   const st = world.store;
   ST = st;
@@ -953,7 +974,7 @@ export function drawWindSwayTiles(
           };
           switch (rec.kind) {
             case SwayKind.MultiVine:
-              if (group === 1) drawMultiVine(ctx, atlas, st, rec, x, y, type, trees);
+              if (group === 1) drawMultiVine(ctx, atlas, st, rec, x, y, type, trees, flicker ?? null);
               break;
             case SwayKind.MultiGrass:
               if (group === 1) drawMultiGrass(ctx, atlas, st, rec, x, y, type, trees);

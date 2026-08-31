@@ -33,10 +33,9 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
-import { flameTileTop, renderEnv } from './VanillaTiler';
+import { flameTileTop } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { campfireYOffset, animYOffset, tileAnim } from './TileAnim';
-import { GorePiece, SMOKE_SPAWN_LIFE } from '../entities/GorePiece';
 import type { FlickerClock } from '../lighting/SkyColor';
 
 /** 火苗族 tile → Flame_{n} 贴图索引（TileDrawing.cs:2857-2893 的 num9 switch 1:1；
@@ -70,15 +69,8 @@ export const BRAZIER_FLAME_TILE: Record<number, number> = {
 };
 const BRAZIER_TINT: readonly [number, number, number] = [200, 200, 200];
 
-/** 烟囱烟发射节律：锚格 key → 上次发射的 animTick（tick 每锚一次，防高刷重复掷） */
-const _smokeLastTickByKey = new Map<number, number>();
 
-/** 烟囱烟总开关（★2026-08-31 用户要求先看无烟效果，默认 OFF）：
- *  localStorage.sw_chimney_smoke === '1' 时开启；控制台/探针可热切换（重进世界生效） */
-export const CHIMNEY_SMOKE_EMIT = (() => {
-  try { return typeof localStorage !== 'undefined' && localStorage.getItem('sw_chimney_smoke') === '1'; }
-  catch { return false; }
-})();
+
 
 /** 火焰族的【绘制尺寸】(GetTileDrawData 各 case 的 tileWidth/tileHeight,非图集格):
  *  火把 20×20(:4724-4730) | 蜡烛族 33/49/174/372/646 = 16×20(:4887-4893) |
@@ -294,7 +286,9 @@ export const LANTERN_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTable([
   // :3371-3390（外层第一组，default 7 份 (100,100,100)）+ 数据表补 :2566-2571 的
   // 53/57/60/62/66/69（≥51 段经数据表 default 前的显式组到达，同为 7 份）
   [[1, 3, 6, 8, 19, 27, 29, 30, 31, 32, 36, 39], FLAME_STD],
-  [[2, 16, 25], S(7, [-10, 11], [-10, 1], 0.15, 0.1, [50, 50, 50])],         // :3392-3402
+  [[2, 16, 25], S(7, [-10, 11], [-10, 1], 0.15, 0.1, [50, 50, 50])],         // :3392-3402（数据表 :2578-2588 同）
+  [11, S(7, [-10, 11], [-10, 11], 0.075, 0.075, [50, 50, 50])],              // 数据表显式键 :2589-2599——仅数据表有（内联表无 11），摆动路径恒经数据表；旧表漏键致该档不画
+  [44, FLAME_STD],                                                           // 数据表显式键 :2611-2620（7 份 (0.15,0.35)×(100)）——1.4.4+ 家具套装灯笼段（frameY/36=44, fy=1584..1601）；旧表漏键致该档不画
   [[34, 35], still([75, 75, 75])],                                           // :3417-3420
   [50, stillDyn('fallenStar')],                                              // :3421-3436
   [51, TRIPLE_200],                                                          // 数据表 :2630-2639
@@ -325,13 +319,25 @@ export function flameStyleIndex(flameIdx: number, frameX: number, frameY: number
 }
 
 /** num9 + style → 绘制参数（纯函数）。default 族恒 FLAME_STD（颜色乘子差异在
- *  火把 disco/恶魔档，见 flameTint——不进本表）。 */
+ *  火把 disco/恶魔档，见 flameTint——不进本表）。
+ *
+ *  ★2026-08-31 死区语义修正（内联表委托门）：蜡烛/烛台/壁灯三族的内联 switch
+ *  只枚举了低段显式键，其余 style 走 `default:` 且被布尔门拦住——
+ *    蜡烛   flag3 = frameY/22 ≥ 44（TileDrawing.cs:2911-2912）
+ *    烛台   flag4 = frameY/36 ≥ 45（:3017-3018）
+ *    壁灯   flag2 = frameY/54 ≥ 45（:3244-3245）
+ *  门关着就【什么都不画】（连 delegate 都不进）→ 凡 <阈值且不在表的 style =
+ *  FLAME_ZERO；≥阈值未在数据表命中 = 数据表 default 7 份 FLAME_STD
+ *  （:2086-2097 / :2228-2239 / :2533-2536）。吊灯族无此门：数据表 default 直达
+ *  7 份，所有未列 style 都有火（含 44 档）。灯笼族双层 default 都是 0 份。
+ *  注：Flame_N 平行表在这些死区 style 的格位多半也有内容——旧版回退 STD 会把
+ *  原版没有的火焰画出来（例：普通蜡烛 style0、Tiki 台灯 style0、地牢烛台）。 */
 export function flameStyleSpec(flameIdx: number, style: number): FlameStyleSpec {
   switch (flameIdx) {
-    case 1: return CANDLE_FLAME_STYLES[style] ?? FLAME_STD;
-    case 2: return CANDELABRA_FLAME_STYLES[style] ?? FLAME_STD;
+    case 1: return CANDLE_FLAME_STYLES[style] ?? (style >= 44 ? FLAME_STD : FLAME_ZERO);
+    case 2: return CANDELABRA_FLAME_STYLES[style] ?? (style >= 45 ? FLAME_STD : FLAME_ZERO);
     case 3: return CHANDELIER_FLAME_STYLES[style] ?? FLAME_STD;
-    case 4: return LAMP_FLAME_STYLES[style] ?? FLAME_STD;
+    case 4: return LAMP_FLAME_STYLES[style] ?? (style >= 45 ? FLAME_STD : FLAME_ZERO);
     case 7: return { count: 4, xRange: [0, 0], yRange: [0, 0], multX: 0, multY: 0, tint: [50, 50, 50] }; // :2897-2907（掷后清零=4 份原位）
     case 13: return LANTERN_FLAME_STYLES[style] ?? FLAME_ZERO;
     default: return FLAME_STD;
@@ -381,6 +387,75 @@ let _drawCycle = 0;
  *  的抖动种子同源——`TileFrameSeed ^ (x<<32|y)`，两族共用同一推进节拍） */
 export function currentTileFrameSeed(): bigint {
   return _frameSeed;
+}
+
+// ============================================================================
+// 摆动路径火焰（DrawMultiTileVinesInWind 尾部循环，TileDrawing.cs:9782-9794）。
+// 吊灯 34 / 吊挂灯笼 42 在主循环被 AddSpecialPoint(MultiTileVine) 摘出普通路径
+// （:543-561），但特殊绘制路径的每格循环【末尾仍画火焰】——参数唯一来源 =
+// GetTileFlameData 数据表（内联 switch 对这两族不可达）。由 WindSway.drawMultiVine
+// 在与本体完全相同的 ctx 变换（pivot 平移+旋转+行偏移）内逐格调用来复现原版
+// vector6/vector5/num8 同源几何；本函数只负责查表 + 抖动 + 加色合成。
+// 首批接入 = 标注排查定谳（2026-08-31 Starter World：灯笼×6 / 吊灯×3 全漏火案）。
+//
+// ★ VineSeedBox 结转语义（:9783-9791 num6）：C# TileFlameData 是 struct，每格
+//   虽然重算 flameSeed 但随即被 num6 覆盖——首格种子结转给同组全部格，且每组
+//   每格都从该种子重启同一序列（复制品不回写）。等价实现：每格从 box.s 重启。
+// ============================================================================
+
+/** 摆动组共享火苗种子结转盒（drawMultiVine 每组建一个，box.s=0n 表示未初始化）。 */
+export interface VineSeedBox { s: bigint }
+
+/** 每格调用：若组种子尚未初始化则用本格 tile 种子初始化（:9784-9792 的 num6 惰性初值 1:1）。 */
+export function vineAdvanceSeed(box: VineSeedBox, cx: number, cy: number): void {
+  const cell = currentTileFrameSeed() ^ ((BigInt(cx) << 32n) | BigInt(cy >>> 0));
+  if (box.s === 0n) box.s = cell;
+}
+
+/** 摆动路径单格火焰叠画。调用点 = WindSway.drawCell 内、与本体同一变换/裁剪态；
+ *  (dpx,dpy) = 本格世界像素原点（含 offX/offY 行偏移与平台 -8 等，同本体 dest 口径）。
+ *  与 drawTileFlames 的差异：① 种子 = 组结转盒（num6）；② 无 FLAME_DRAW_SIZE 覆盖
+ *  （vine 家族 tileWidth/tileHeight 未被 GetTileDrawData override，画满图集格）；
+ *  ③ 不推进 _frameSeed 节拍（主火焰层每帧推进一次，两路共用同一节拍即可对齐
+ *  Main.cs:61156 每 5 绘制周期全域推进）。 */
+export function drawVineTileFlame(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  dpx: number, dpy: number,
+  sheet: number, fx: number, fy: number,
+  seedBox: VineSeedBox, flicker: FlickerClock | null,
+): void {
+  const flameIdx = TORCH_FLAME_TILE[sheet];
+  if (flameIdx === undefined) return;
+  // MultiVine 成员里带火的只有 34(num9=3)/42(num9=13)；270/271/581 的
+  // FireflyJar/LightningbugJar/GlowMask[291] 特例（GetTileFlameData :1874-1894）暂未
+  // 接入（TORCH_FLAME_TILE 无其键 → 此处零开销跳过）——非本次标注排查面，
+  // 备忘账本：萤火虫罐/闪电虫罐/发光蜗牛罐的罐体自亮脉冲层。
+  const img = atlas.ensureVImage(`vanilla/Flame_${flameIdx}.png`);
+  if (!img || typeof img.width !== 'number' || img.width === 0) return;
+  const spec = flameStyleSpec(flameIdx, flameStyleIndex(flameIdx, fx, fy));
+  if (spec.count <= 0) return;
+  const r = atlas.vframeAt(sheet, fx, fy);
+  if (!r) return;
+  let tint: readonly [number, number, number] | null;
+  if (spec.dynTint && spec.dynTint !== 'randGray') {
+    tint = furnitureFlameTint(spec.dynTint, flicker ? flicker.globalTimeWrappedHourly : 0);
+  } else {
+    tint = spec.tint;   // randGray 仅壁灯 style12（普通路径特有），不会到达这里
+  }
+  const cell = tint ? tintedFlameCell(img, r.sx, r.sy, r.sw, r.sh, tint[0], tint[1], tint[2]) : null;
+  const src = cell ?? img;
+  const sxC = cell ? 0 : r.sx, syC = cell ? 0 : r.sy;
+  // 抖动序列每格从组种子重启（struct 复制语义，见块注释）
+  const box = { s: seedBox.s };
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalCompositeOperation = 'lighter';   // A=0 预乘加色语义（文件头注同款）
+  for (let k = 0; k < spec.count; k++) {
+    const ox = randomInt(box, spec.xRange[0], spec.xRange[1]) * spec.multX;
+    const oy = randomInt(box, spec.yRange[0], spec.yRange[1]) * spec.multY;
+    ctx.drawImage(src, sxC, syC, r.sw, r.sh, dpx + ox, dpy + oy, r.sw, r.sh);
+  }
+  ctx.restore();
 }
 
 // ---- 颜色乘子预染缓存（multiply×fill 逐像素染 Flame 单元；静态色缓存命中、
@@ -497,49 +572,14 @@ export function drawTileFlames(
       if (!st.flags[i]) continue;
       const def = TILE_DEFS[st.type[i]];
       const sheet = def?.vanilla?.sheet ?? -1;
-      // ★烟囱烟发射器（TileDrawing.cs:6933-6953 1:1）：仅 fx==0 && fy==54 的烟囱
-      // 锚格，1/3 概率/帧放出 GoreID.ChimneySmoke1..3(825-827)；出点=(x*16+16, y*16+8)，
-      // 初速 0 + 负风给正向 X；scale 分档 0.2-0.4/0.3-0.6/0.4-0.8 按原版嵌套掷序。
-      // 烟体 AI 在 GorePiece.updateChimneySmoke（SpecialAI==2）。暂停期不发射
-      // （原版 NewGore 内 gamePaused 守卫等价）。渲染期调用天然视口限域，烘焙路径不进。
-      if (CHIMNEY_SMOKE_EMIT && sheet === 406 && st.frameX[i] === 0
-        && (st.frameY[i] === 54 || st.frameY[i] === 0)) {   // 原版门=换带首格(Style3x3 永假,预留死支)；★自研放宽:帽行 fy=0 等价锚点(帽带含烟纹)+修复行即从这里冒烟
-        // 节律钉到游戏 tick（原版 DrawTiles_EmitParticles 每 Draw 帧执行但帧=tick；
-        // 本仓渲染可与更新解耦(高刷/UNCAPPED)，以 animTick 每锚一次防密度爆炸）
-        const anchorKey = x * 65536 + y;
-        const lastT = _smokeLastTickByKey.get(anchorKey);
-        const curT = tileAnim.tick;
-        if (lastT !== curT) {
-          _smokeLastTickByKey.set(anchorKey, curT);
-          if (_smokeLastTickByKey.size > 512) _smokeLastTickByKey.clear();
-          if (Math.random() < 0.18   // ★调参备案：原版外层=1/4（TileDrawing.cs:968 FastRandom…Next(4)），
-                              // 2026-08-31 用户裁定烟量减半 → 0.18；同时寿命缩短(GorePiece.SMOKE_*)
-            && (window as unknown as { __swGame?: { paused?: boolean } }).__swGame?.paused !== true) {
-            const wind = renderEnv.wind;
-            const svx = wind < 0 ? -wind : 0;                 // :6940-6943
-            const goreType = 825 + Math.floor(Math.random() * 3);   // :6946 Next(825,828)
-            let gscale: number;
-            if (Math.random() * 4 < 1) {                        // :6949 Next(4)==0
-              gscale = Math.random() * 0.2 + 0.2;
-            } else if (Math.random() * 2 < 1) {                 // :6952 Next(2)==0
-              gscale = Math.random() * 0.3 + 0.3;
-            } else {
-              gscale = Math.random() * 0.4 + 0.4;               // :6955 else 支
-            }
-            const _gp = GorePiece.newGore(goreType, x * 16 + 16, y * 16 + 8, svx, 0, gscale, true);
-            if (_gp) {
-              _gp.behindTiles = true;      // 后层通道（被烟囱实体遮挡）
-              _gp.timeLeft = SMOKE_SPAWN_LIFE;   // ★调参备案：更早消散（见 GorePiece 常量注）
-            }
-          }
-        }
-      }
       // 摆动族（草/藤/吊挂灯笼 42/吊灯 34 等 MultiTileVine/Basic/Vine 全家）：原版主循环
       // AddSpecialPoint 后 continue——普通绘制路径（含 DrawSingleTile_Flames :1746）整体
-      // 跳过，摆动 tile【没有火焰叠画层】。曾照画 = 火焰用自身贴图 tint 副本钉在静态格位
-      // + 摆动层本体在摆动位 = 双影（2026-08-23 用户报地牢吊挂灯笼推晃重影，与假人
-      // 烘焙静止行透出同病）。swayBakeSkip 与烘焙摘除同源（例外帧 530/705/227 走普通
-      // 路径 = 原版也画火焰，门完全对称）
+      // 跳过。【★2026-08-31 定谳修正】"摆动 tile 没有火焰叠画层"系误判：原版特殊路径
+      // DrawMultiTileVinesInWind 的每格循环末尾【同样跑 GetTileFlameData + 抖动循环】
+      // （TileDrawing.cs:9782-9794），吊灯 34/吊挂灯笼 42 全 style 都有火。本层的
+      // swayBakeSkip continue 只负责防双影（曾照画进本静态层 = 火焰钉死位 + 摆动层
+      // 本体摆动 = 双影，2026-08-23 地牢灯笼案）；正确的火焰由 WindSway.drawMultiVine
+      // 在与本体完全相同的 ctx 变换内逐格调 drawVineTileFlame 补画——迁移而非删除。
       if (def?.vanilla && swayBakeSkip(st.type[i], st.frameX[i])) continue;
       const isCampfire = sheet === CAMPFIRE_FLAME.sheet;
       const isBrazier = !isCampfire && BRAZIER_FLAME_TILE[sheet] !== undefined;

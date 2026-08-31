@@ -3063,13 +3063,6 @@ export class Renderer {
     //       DrawLiquidBehindTiles :449-466 背景层调用,两 pass 并存）
     this.drawLiquidBehindSolidTiles(world, cam, viewW, viewH, z);
 
-    // 2c-'. behindTiles Gore 通道（★2026-08-31 自研放宽：烟囱烟后置）——原版
-    //     DrawGore 恒在实体层(Main.cs:63230)全体前绘；但标准烟囱的发射门对
-    //     Style3x3 是死支(fy==54 永 false)，无实机基线。本仓激活该粒子后按用户
-    //     观感裁定烟体【被烟囱/地形遮挡、只在口上方显形】→ 标记 behindTiles 的
-    //     gore 在墙层后、tile 层前单列绘制（对应 tile 语义=可被实体盖住）。
-    this.drawGorePieces(ctx, cam, viewW, viewH, { onlyBehind: true });
-
     // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
     drawChunkGrid('tile');
 
@@ -3124,7 +3117,7 @@ export class Renderer {
         corrupt: !!this.scene?.zoneCorrupt,
         crimson: !!this.scene?.zoneCrimson,
         hallow: !!this.scene?.zoneHallow,
-      });
+      }, flicker);
 
       // 自然层粒子（原版 Gore：落叶/滴水/墓地雾——DrawGores 在 tile 层后实体前；
       // Gore.GetAlpha 乘位置光照色 → 注入 lightAt 采样）
@@ -4356,18 +4349,10 @@ export class Renderer {
    *  光照合成在后自动受光（同 wind-sway/natureParticles 层）。贴图多帧行取
    *  GorePiece.frameRows（1217/1218 等竖条）；落地不归零 rotation（Gore.cs 无此步，
    *  翻滚随 vx 摩擦冻结）。 */
-  private drawGorePieces(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number,
-    opts?: { onlyBehind?: boolean }) {
+  private drawGorePieces(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number) {
     if (!this.atlas) return;
     const pieces = liveGorePieces();
     if (!pieces.length) return;
-    // behindTiles 分流：烟囱烟等后层粒子只进 2c-' 通道，主实体层跳过
-    const wantBehind = !!opts?.onlyBehind;
-    let any = false;
-    for (const p of pieces) {
-      if (!p.dead && (!!p.behindTiles === wantBehind)) { any = true; break; }
-    }
-    if (!any) return;
     const z = cam.zoom;
     // 视区外剔除（扩半贴图防边缘闪断）
     const x0 = cam.x - viewW / 2 - 64, x1 = cam.x + viewW / 2 + 64;
@@ -4375,7 +4360,7 @@ export class Renderer {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const p of pieces) {
-      if (p.dead || (!!p.behindTiles !== wantBehind)) continue;
+      if (p.dead) continue;
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
       this.drawGorePiece(ctx, p, z);
     }

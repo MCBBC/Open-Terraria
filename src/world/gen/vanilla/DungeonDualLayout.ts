@@ -67,7 +67,18 @@ const lerpN = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 /** Utils.Remap(double)。 */
 function remapN(v: number, lo: number, hi: number, olo: number, ohi: number): number {
-  return olo + ((v - lo) / (hi - lo)) * (ohi - olo);
+  // ★IIIII98 第四轮勘误：C# Remap=GetLerpValue(…,clamped:true)→Lerp（Utils.cs:345/:350），
+  //   lerp 因子钳 [0,1]；旧直译无钳会外推越界（|val.Y|>1、链接数>3 等常态发生）。
+  let t = (v - lo) / (hi - lo);
+  if (!(t > 0)) t = 0; else if (t > 1) t = 1;
+  return olo + t * (ohi - olo);
+}
+/** Remap 的 **float 重载**全 f32 路径（ScoreHallway :181-183 三处为 Count/float 字面量 → float 版）。 */
+function remapF(v: number, lo: number, hi: number, olo: number, ohi: number): number {
+  const fv = fr(v), flo = fr(lo), fhi = fr(hi);
+  let t = fr(fr(fv - flo) / fr(fhi - flo));
+  if (!(t > 0)) t = 0; else if (t > 1) t = 1;              // MathHelper.Clamp(f32)
+  return fr(fr(olo) + fr(fr(fr(ohi) - fr(olo)) * t));      // MathHelper.Lerp float
 }
 
 /** Utils.LineSegmentsIntersect(Vector2D)。 */
@@ -90,10 +101,16 @@ function closestPointOnLine(px: number, py: number, ax: number, ay: number, bx: 
 type F2 = { x: number; y: number };
 const fF = (x: number, y: number): F2 => ({ x: fr(x), y: fr(y) });
 const fadd = (a: F2, b: F2): F2 => fF(a.x + b.x, a.y + b.y);
-/** Vector2.RotatedBy(float angle)。 */
+/** Vector2.RotatedBy(double angle)（Utils.cs:1752）：cos/sin 先各自 (float) 化，
+ *  随后**逐乘积项在 f32 域内完成**再相加减——旧直译在 double 里乘完再一次性 fround，
+ *  边界格 1px 漂（Wormlike 内形状宽差簇根因之一）。 */
 function frot(v: F2, angle: number): F2 {
   const c = fr(Math.cos(fr(angle))), s = fr(Math.sin(fr(angle)));
-  return fF(c * v.x - s * v.y, s * v.x + c * v.y);
+  return fF(fr(c * v.x) - fr(s * v.y), fr(s * v.x) + fr(c * v.y));
+}
+/** Utils.Lerp 的 float 重载（v1+(v2-v1)*a 全 f32；clamped 缺省 false）。 */
+function fLerp(a: number, b: number, t: number): number {
+  return fr(fr(a) + fr(fr(b - a) * t));
 }
 /** Wormlike 转角：double 角度域 + float 输入。 */
 function frotD(v: F2, angle: number): F2 {
@@ -720,6 +737,7 @@ class DLegacyRoom extends DRoomBase {
     const lgHook = (globalThis as { __swI103Phase?: ((tag: string, gen: boolean, seed: number) => void) | undefined }).__swI103Phase;
     const isEnt = !!this.settings.isEntranceRoom && !generating;
     if (lgHook && isEnt) lgHook(`LG0|seed=${this.settings.randomSeed | 0}|n2=${num2}|steps=${num4}|ratio=${num6}|py=${py}`, false, 0);
+    const startX = px, startY = py;                                 // =C# val3（覆写分支后、循环前）
     this.inner.set(sx0, sy0, sx0, sy0);
     this.outer.set(sx0, sy0, sx0, sy0);
     while (num4 > 0) {
@@ -772,7 +790,11 @@ class DLegacyRoom extends DRoomBase {
       vx = Math.max(-1.0, Math.min(1.0, vx + Math.fround(ur.nextIntRange(-10, 11) * Math.fround(0.05)) * data.scalars.roomSlant));
       vy = Math.max(-1.0, Math.min(1.0, vy + Math.fround(ur.nextIntRange(-10, 11) * Math.fround(0.05)) * data.scalars.roomSlant));
     }
-    this.startPos = v2(sx0, sy0);
+    // ★IIIII98 第四轮定罪：C# StartPosition=val3（Vector2D **double**，含 .5 分量，
+    //   LegacyDungeonRoom.cs:198/302；:194 calculated 分支恢复的正是这个双精度起点）。
+    //   旧直译存 Math.trunc 整数 ⇒ generate 第二遍丢小数、内界 T/B 各漂 −1（入馆房盒案）。
+    //   恢复调用链/形状偏移仍以 (int)val3 截断值（sx0/sy0）为准，与 C# (int) 强转同构。
+    this.startPos = v2(startX, startY);
     this.endPosV = v2(px, py);
     this.strengthVal = Math.trunc(num5);
     if (lgHook && isEnt) lgHook(`LGend|ib=${this.inner.L},${this.inner.T},${this.inner.R},${this.inner.B}|start=${sx0},${sy0}`, false, 0);
@@ -861,7 +883,8 @@ class DWormlikeRoom extends DRoomBase {
       }
       for (let k = 0; k < iterations; k++) {
         const tF = fr(fr(k) / fr(iterations));
-        num3 = Math.trunc(lerpN(num, num2, tF));
+        // (int)Utils.Lerp(num,num2,tF)（:138/:171）＝**float** 重载后截断，非 double lerp
+        num3 = Math.trunc(fLerp(num, num2, tF));
         num5 = num3 + num4;
         const gx = Math.trunc(vec.x), gy = Math.trunc(vec.y);
         this.outerShape.addBounds(gx - num5 - originI, gy - num5 - originJ, gx + num5 - originI, gy + num5 - originJ);
@@ -2759,9 +2782,10 @@ class HallwayCalculator {
     num -= remapN(Math.abs(n.y), fromMin, 0.0, 0.0, 1.0);
     num -= remapN(Math.abs(n.y), fromMin, 1.0, 0.0, 5.0);
     num -= remapN(lenD(vx, vy), this.avgLineLength * 1.5, this.avgLineLength * 3.0, 0.0, 3.0);
-    num -= remapN(line.target.forwardLinks.length, 1, 3, 0, 2);
-    num -= remapN(line.source.backLinks.length, 1, 3, 0, 2);
-    num += remapN(this.distanceFromCommonAncestor(line.source, line.target), 3, 6, 0, 1);
+    // :181/:182/:183 = Remap 的 float 重载（int Count + 1f/3f/0f/2f 全 float 字面量），f32 全程
+    num -= remapF(line.target.forwardLinks.length, 1, 3, 0, 2);
+    num -= remapF(line.source.backLinks.length, 1, 3, 0, 2);
+    num += remapF(this.distanceFromCommonAncestor(line.source, line.target), 3, 6, 0, 1);
     if ((isBiomeEntry(line.target) && line.target.forwardLinks.length > 0)
       || (isBiomeEntry(line.source) && line.source.backLinks.length > 0)) num -= 5.0;
     if (isBiomeEntry(line.target) || isBiomeEntry(line.source)) {

@@ -1871,6 +1871,11 @@ const snap: SnapFn = (name) => {
         }
       }
       dungeonX = Math.trunc(cx); dungeonY = b1;
+      // ★IIIII98b2：SetOldManSpawn(generating:true)→NPC.NewNPC(37) 头 FTW 支
+      //   （NPC.cs:81576 `Main.getGoodWorld && Main.rand.Next(3)!=0`）每次世界生成期
+      //   NPC 落地必耗 1 颗主流掷；老头 id37 不在 46/62 换型表,值弃置。曾缺失 →
+      //   入口段 −1 主掷、此后 pass32 骰流整体错位一位（x86 H97|oldman0→1 420→421 实证）。
+      if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
       // ★IIIII21（cs:582-585）：drunk 死生命树座——x=generatingDungeonPositionX、
       //   y=(int)Main.worldSurface、attachmentY=generatingDungeonPositionY；
       //   generateRoots=true。掷骰走主流 rng。HasATree=drunk&&!NoDungeonGuardian
@@ -2644,6 +2649,8 @@ const snap: SnapFn = (name) => {
     dgTowerDoor(i, n7, n4, n3, !leftSide);
     // 老头锚（SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——dungeonX/Y=(i,num7)）
     dungeonX = i; dungeonY = n7;
+    // ★IIIII98b2：FTW NewNPC 头 Next(3) 主流掷镜像（同 legacy 锚注释；Tower :492）
+    if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
     // ★IIIII21（cs:493-495）：drunk 死生命树——x=i、y=(int)worldSurface、
     //   attachmentY=num7-num16+8、generateRoots=false。
     // ★IIIII84 刀①取证钩（WVLOG 门控零开销）：树前/树后主流样本序数（x86 侧对照=
@@ -2935,6 +2942,8 @@ const snap: SnapFn = (name) => {
     // 老头锚（cs:430 SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——
     //   CurrentDungeon==0 时 Main.dungeonX/Y=(i,num7)。AAAA 批 :3864 的锚语义在此本体化）
     dungeonX = i; dungeonY = n7;
+    // ★IIIII98b2：FTW NewNPC 头 Next(3) 主流掷镜像（同 legacy 锚注释；Dome :472）
+    if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
     // ★IIIII21（cs:473-475）：drunk 死生命树——x=i、y=(int)worldSurface、
     //   attachmentY=num7-num3+5、generateRoots=false（穹顶座无根）。
     if (gs.seedFlags.drunkWorld) {
@@ -4023,13 +4032,29 @@ const snap: SnapFn = (name) => {
       ncount++;
       let k0 = 0;
       if (bsEvG) k0 = dgMainRolls;
-      let x = ri(bounds.L, bounds.R - 1);
-      let y = ri(bounds.T, bounds.B - 1);
-      let flag = true;
-      // ★IIIII98c：书架 attempt 级标记（与 rig bsS/bsA/bsPF/bsOK/bsGO 同位同 tag）
+      // ★IIIII98c：书架 attempt 级标记（与 rig bsDr/bsDi/bsS/bsA/bsPF/bsOK/bsGO 同位同 tag）
+      const I110bs = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I110_MARK;
       const emitBS = (ln: string): void => { if ((globalThis as { __wvLines?: string[] }).__wvLines) (globalThis as { __wvLines?: string[] }).__wvLines!.push(`MARK|${ln}`); };
+      let rawA: number;
+      let rawB: number;
+      {
+        const GSIR = globalThis as unknown as { __swLastRollIdx?: number };
+        const iA = (GSIR.__swLastRollIdx ?? 0) + 1;
+        const dxv = ri(bounds.L, bounds.R - 1);
+        const iB = iA + 1;
+        const dyv = ri(bounds.T, bounds.B - 1);
+        if (I110bs) emitBS(`bsDr|${num3},${ncount}|${dxv},${dyv} i=${iA},${iB} m=${dgMainRolls - 2},${dgMainRolls}`);
+        rawA = iA;
+        rawB = iB;
+        x = dxv;
+        y = dyv;
+      }
+      let flag = true;
       if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
-        const n7 = rn(2) === 0 ? -1 : 1;
+        const iC = ((globalThis as unknown as { __swLastRollIdx?: number }).__swLastRollIdx ?? 0) + 1;
+        const d98c = rn(2);
+        if (I110bs) emitBS(`bsDi|${num3},${ncount}|${d98c} m=${dgMainRolls} i=${iC}`);
+        const n7 = d98c === 0 ? -1 : 1;
         while (flag && inW(x, y, 0) && actAt(x, y) === 0) {
           x -= n7;
           if (x < 5 || x > w - 5) flag = false;
@@ -5744,6 +5769,8 @@ const snap: SnapFn = (name) => {
       }
     }
     if (TT) TT.climb1 = dgMainRolls;
+    dgpMark("climb1");
+    dgpMark("preent");
   }
   // MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1 转录）；
   // Dome=DomeDungeonEntrance（FFFF 批 2026-08-18 1:1 转录——XX 批备案的"Legacy 近似
@@ -5753,6 +5780,7 @@ const snap: SnapFn = (name) => {
   if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
   else if (entKind === 1) { raw(); dgDomeEntrance(posX, posY, entSeed); }
   else dgEntrance(raw(), entSeed);
+  dgpMark("entdone");
   // ★IIIII80（2026-08-30，DungeonCrawler.cs:467-470）：surfaceIsInSpace →
   //   入口生成后 dungeonBounds.Top=25（Clamp[10,h-10] 同 DBnd.topSet）——房间
   //   Processing/平台门刷与装饰的上下文界面向天空扩展。仅 sgis 世界改值。

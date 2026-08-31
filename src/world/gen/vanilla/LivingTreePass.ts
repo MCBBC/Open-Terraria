@@ -1194,7 +1194,9 @@ export function growLivingTree(
     const n48 = ax6[n43] + n44 * 2;
     mk109(`LC|c=${n43}|round=${ax7[n43] ? 1 : 0}|x=${ax5[n43]}|y=${ax6[n43]}|n44=${n44}|box=${n45},${n46},${n47},${n48}`);
     const n49 = 2.0 - rng.int(0, 4) * 0.1;                // cs:28618
+    mk109(`LC49|c=${n43}`);
     for (let n50 = n45; n50 <= n46; n50++) {
+      mk109(`COL|c=${n43}|x=${n50}`);
       for (let n51 = n47; n51 <= n48; n51++) {
         if (!canPlaceLeaves(st, n50, n51)) continue;
         if (ax7[n43]) {

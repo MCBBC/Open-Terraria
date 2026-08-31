@@ -1465,6 +1465,26 @@ export class UI {
     this.cursorGlowUntil = performance.now() + UI.CURSOR_GLOW_MS;
     this.moveGhost();
   }
+
+  /** 合成成品上光标（CraftItem_GrantItem Main.cs:43329 `mouseItem = result`）：
+   *  光标空=整叠挂上；同 id 且同词缀=并入（上限钳制）；异 id/异词缀/装不下 =
+   *  余量返回给调用方走背包。返回【未能上光标的余量】 */
+  grantCraftToCursor(id: number, stack: number, prefix?: number): number {
+    const def = ITEM_DEFS[id];
+    const max = def?.maxStack ?? 999;
+    let remaining = stack;
+    if (!this.heldStack) {
+      const put = Math.min(remaining, max);
+      this.heldStack = { id, stack: put, ...(prefix !== undefined ? { prefix } : {}) };
+      remaining -= put;
+    } else if (this.heldStack.id === id && (this.heldStack.prefix ?? undefined) === prefix) {
+      const space = max - this.heldStack.stack;
+      const put = Math.min(space, remaining);
+      if (put > 0) this.heldStack.stack += put;
+      remaining -= put;
+    }
+    return remaining;
+  }
   /** SM2 MouseItem 光晕帧烘焙（getPass('MouseItem') 直连,uColor=OurFavoriteColor/
    *  uSaturation=glow²——ItemSlot :2518-2521 uniform 对齐;量化 5 档省解释器开销） */
   private mouseHaloFrame(img: HTMLImageElement, glow: number): HTMLCanvasElement | null {
@@ -2873,7 +2893,8 @@ export class UI {
       row.appendChild(info);
       row.onclick = () => {
         // 全行可点：不可合成时 consumeMaterials 静默无效=原版 guide 模式同款表现
-        game.vanillaCraft(r, 1);
+        // 成品跟随光标（CraftItem_GrantItem 同款）
+        game.vanillaCraft(r, 1, true);
         this.refreshAll();
       };
       listEl.appendChild(row);
@@ -4694,7 +4715,7 @@ export class UI {
           this.hoverFocus = -1;       // 点击行即焦点，预览态退场
           // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）
           this.returnCraftGrid();
-          game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1);
+          game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);   // 成品跟随光标
           this.refreshAll();
         });
         cl.appendChild(row);

@@ -22,30 +22,34 @@ const res = await page.evaluate(async () => {
   // 场景：复现用户世界数据——直接写 mark 快照 (fx 0/18, fy 18/36/54 组)
   const T = await import('/src/data/tiles.ts');
   const st = g.world.store;
+  // 高空场景：干净空气 + 石头天花板
+  const sx = g.world.spawnX + 12;
+  let sy0 = 60;
+  while (sy0 < g.world.h - 80 && st.get(sx, sy0) !== 0) sy0++;
+  sy0 -= 10;
   // 玩家挪过去（相机跟随）
-  g.player.x = sx*16 - 60; g.player.y = sy*16 + 40; g.player.vx=0; g.player.vy=0;
+  g.player.x = sx*16 - 60; g.player.y = sy0*16 + 60; g.player.vx=0; g.player.vy=0;
   g.player.hp = g.player.maxHp; g.player.dead=false;
   for (let i=0;i<30;i++) g.fixedUpdate(1/60);
-  // 背后木墙（wall id 21 木栅? 用 1 通用墙）铺满 2×3
-  for (let dy=0; dy<3; dy++) for (let dx=0; dx<2; dx++) {
-    st.wall[st.idx(sx+dx, sy+dy)] = 5;
-    st.setTile(sx+dx, sy+dy, 0);
+  // 用户 mark 快照直写 (fx∈{0,18}, fy∈{18,36}; 顶行另含 fy=? 的第三格在上方——
+  //   由 marks 推断完整 2×3 组: rows y-?..y+?, 这里按截图相对位置复刻三行)
+  const T592 = T.TILE_BY_KEY['v_592_hanging_brazier'];
+  for (const dx of [0,1]) st.setTile(sx+dx, sy0, T.TILE_BY_KEY['stone']);   // 天花板
+  const bx = sx, by = sy0 + 1;                // 组顶行=天花板下一行
+
+  const layout = [[0,0],[0,18],[0,36],[18,0],[18,18],[18,36]];
+  for (const [fx, fy] of layout) {
+    const dx2 = fx/18, dy2 = fy/18;
+    const i2 = st.idx(bx+dx2, by+dy2);
+    st.setTile(bx+dx2, by+dy2, T592);
+    st.frameX[i2] = fx; st.frameY[i2] = fy;
   }
-  // 真实放置：tryPlace(tx=sx, ty=sy, itemDef)
-  const r1 = g['tryPlace'](sx, sy, itemDef);
-  out.tryPlaceRet = r1;
-  out.tileWritten = st.get(sx, sy+1);
-  out.fx = st.frameX[st.idx(sx, sy+1)], out.fy = st.frameY[st.idx(sx, sy+1)];
-  for (let i=0;i<40;i++) g.fixedUpdate(1/60);    // 烘焙
-  out.store592Count = (() => {
-    let c=0; for (let y=0;y<st.h;y+=7) for (let x=0;x<st.w;x+=7) if (st.type[st.idx(x,y)]===out.tileWritten) c++;
-    return 'sampled='+c;
-  })();
+  for (let i=0;i<45;i++) g.fixedUpdate(1/60);    // 烘焙
   return out;
 });
 console.log(JSON.stringify(res));
-// 截屏看效果
-const cam = await page.evaluate(() => { const c = window.__swGame.renderer.camera; return {x:c.x,y:c.y,zoom:c.zoom,vw:innerWidth,vh:innerHeight}; });
-console.log('camera', JSON.stringify(cam));
-await page.screenshot({ path: '/tmp/braz-after.png' });
-await browser.close();
+// 相机以玩家为中心 → 玩家世界位在屏幕中心；吊盆在玩家右上约 (80, -70)px(粗)
+await page.waitForFunction(() => window.__swGame?.player && !window.__swGame.paused, { timeout: 60000 });
+await new Promise(r=>setTimeout(r,1200));
+const sc = await page.evaluate(() => ({ px: innerWidth/2 + 120, py: innerHeight/2 - 100 }));
+await page.screenshot({ path: '/tmp/braz-after.png', clip: { x: Math.max(0,sc.px-90), y: Math.max(0,sc.py-110), width: 200, height: 200 } });

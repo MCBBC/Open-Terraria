@@ -18,7 +18,7 @@
 //   F24 1 点伤半无敌帧               Hurt :38674
 //   F25 混乱之脑完整闪避             Hurt :38511-38515 + BrainOfConfusionDodge :38331
 //   F26 恐慌项链 480t                Hurt :38522-38525
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -645,5 +645,67 @@ describe('R5-F16 日曜冲撞', () => {
     hits.length = 0;
     p.fixedUpdate(1 / 60, hooks as never);
     expect(hits.length).toBe(1);
+  });
+});
+
+// ============================================================
+// ★终局扫尾 B（战斗面小件）：dash 命中循环 AI_112 仙灵免疫支补门
+// （原式 :21275 克盾/:21299 日耀 `(aiStyle==112 && !(ai[2]<=1))` → continue；
+// SetDefaults NPC.cs:16608 下 aiStyle112 全集=583/584/585 三型 ⇒ vanillaId 判定
+// 与 chilletDashCharge 同款落法）
+// ============================================================
+describe('★B 冲撞面 AI_112 仙灵免疫门', () => {
+  const mkFairyEnemy = (id: number, px: number, py: number,
+    charged: boolean): Record<string, unknown> => ({
+    id, vanillaId: 585, ai2: charged ? 2 : 1,
+    x: px + 14, y: py, w: 16, h: 16, cx: px + 22, cy: py + 8, dead: false,
+    iframes: 0,
+    hurt(d: number) { hits.push(d); return false; },
+  });
+  let hits: number[] = [];
+
+  beforeEach(() => { hits = []; });
+
+  it('克盾冲撞：充能态(585,ai2=2)免伤；前态(ai2≤1)照常吃', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    p.inv.armor[3] = { id: _iid(3097), stack: 1 };
+    settle(p, w);
+    const dash2tap = (pp: Player): void => {
+      pp.inputX = 1; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+      pp.inputX = 0; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+      pp.inputX = 1; pp.fixedUpdate(1 / 60, fakeHooks(w, pp) as never);
+    };
+    dash2tap(p);                                       // 进入 dash==2 滑行（双击左）
+    expect(p.vx).toBeCloseTo(14.5, 6);
+    const charged = mkFairyEnemy(11, p.x, p.y, true);
+    const loose = mkFairyEnemy(12, p.x, p.y, true);
+    (loose.ai2 as number) = 1;
+    const hooks = { ...fakeHooks(w, p), enemies: () => [charged, loose] } as never;
+    p.eocDash = 1;
+    p.eocHitId = -1;
+    p.fixedUpdate(1 / 60, hooks);                      // 冲撞扫敌一拍
+    // 充能仙灵零结算；松散仙灵被命中入账
+    expect(hits.length).toBe(1);                       // 仅 loose
+    void charged;
+  });
+
+  it('日耀冲撞：同门位 :21299 —— 充能态拒、前态受理', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    p.inv.armor[0] = { id: _iid(2763), stack: 1 };
+    p.inv.armor[1] = { id: _iid(2764), stack: 1 };
+    p.inv.armor[2] = { id: _iid(2765), stack: 1 };
+    settle(p, w);
+    const charged = mkFairyEnemy(21, p.x, p.y, true);
+    const loose = mkFairyEnemy(22, p.x, p.y, false);
+    (loose.ai2 as number) = 0;                          // ≤1 前态
+    const hooks = { ...fakeHooks(w, p), enemies: () => [charged, loose] } as never;
+    p.solarDashing = true;
+    (p as unknown as { solarDashConsumed: boolean }).solarDashConsumed = false;
+    p.dashDelay = -1;
+    p.vx = 21.9;
+    p.fixedUpdate(1 / 60, hooks);
+    expect(hits.length).toBe(1);                        // 仅前态仙灵
   });
 });

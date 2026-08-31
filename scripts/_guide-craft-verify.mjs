@@ -87,12 +87,23 @@ const res = await page.evaluate(async () => {
     const woodBeforeCraft = woodInBag();
     const benchRow = [...rowsB].find((r2) => (r2.textContent || '').trim().startsWith('工作台')
       && !(r2.textContent || '').includes('+'));
+    const preClick = {
+      placed: JSON.stringify(window.__swUI['guidePlaced']),
+      held: JSON.stringify(window.__swUI['heldStack']),
+      bagWood: woodInBag(),
+      rowClass: benchRow.className,
+      isSameNode: [...rowsB].indexOf(benchRow) >= 0,
+    };
     benchRow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 100));
-    ok('C1 扣 10 木+入包工作台',
-      woodInBag() === woodBeforeCraft - 10
-        && g.player.inv.slots.some((s) => s && s.stack > 0 && vidOf(s.id) === 36),
-      `wood=${woodInBag()} was=${woodBeforeCraft}`);
+    const postClick = {
+      placed: JSON.stringify(window.__swUI['guidePlaced']),
+      held: JSON.stringify(window.__swUI['heldStack']),
+      bagWood: woodInBag(),
+      benchInBag: g.player.inv.slots.some((s) => s && s.stack > 0 && /vi_36_Work/.test((window.__swITEMS||[])[s.id]?.key||'')),
+    };
+    ok('C1 扣 10 木+入包工作台', postClick.bagWood === postClick.bagWood && false || false);
+    out.steps.push(`[diag] pre=${JSON.stringify(preClick)} post=${JSON.stringify(postClick)}`);
 
     // ---- PHASE-D 取回到手 → 收拢入包 ----
     slotEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));

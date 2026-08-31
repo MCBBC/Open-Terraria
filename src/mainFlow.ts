@@ -280,6 +280,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); g.prefetchInvPlaceableSheets(); ui.refreshAll(); },
       onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
+      // 合成成品上光标（CraftItem_GrantItem Main.cs:43329）——余量由 Game 落包/掉落
+      grantToCursor: (itemId, stack, prefix) => ui.grantCraftToCursor(itemId, stack, prefix),
       onBuffsChanged: () => ui.refreshBuffs(),
       // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
       // silent=原版自动保存全程静默（:19594 无任何 UI/音效）；手动/退出保存仍提示

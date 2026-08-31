@@ -338,7 +338,9 @@ describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:540
 
   function scan(foes: Array<Record<string, unknown>>) {
     const w = makeWorld();
-    const n = new TownNPC('dyer', CX - 10, CY - 21);
+    // 用 guide（DangerDetectRange 无表项 → 默认 200；dyer 表值仅 60px 容不下
+    // 本组敌距）——dangerUpdate 与攻击型无关，纯扫描面单测
+    const n = new TownNPC('guide', CX - 10, CY - 21);
     const fn = (TownNPC.prototype as unknown as Record<string,
       (wd: unknown, g: unknown) => void>).dangerUpdate;
     fn.call(n, w, { enemies: () => foes } as never);
@@ -358,7 +360,8 @@ describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:540
     expect(r.threatRaw).toBe(true);                    // 威胁面照旧置位(:53887 串)
     const cand = r.threatRight as { cx: number };
     expect(cand).not.toBeNull();
-    expect(cand.cx).toBeCloseTo(CX + 100, 5);          // 远者保位
+    // 盒心几何：x=CX+90（farNormal 内 -10 偏置）→ cx = x+w/2 = CX+99
+    expect(cand.cx).toBeCloseTo(CX + 99, 5);           // 远者保位（近敌未覆盖）
   });
 
   it('扫描序 [先近后远]:近敌不过门且 num14 未再刷 → num17 全程空缺(null)', () => {

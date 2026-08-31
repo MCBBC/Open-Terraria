@@ -158,6 +158,8 @@ function labelOf(file: string, line: number): string {
     if (dgpT) writeFileSync(`${OUT}/dgp-trace.json`, JSON.stringify(dgpT));
     if (pitT) writeFileSync(`${OUT}/pit-trace.json`, JSON.stringify(pitT));
     if (pitR) writeFileSync(`${OUT}/pit-reason.json`, JSON.stringify(pitR));
+    const TT98 = (globalThis as unknown as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace;
+    if (TT98) writeFileSync(`${OUT}/tower-trace.json`, JSON.stringify(TT98));
     writeFileSync(`${OUT}/layout-trace.json`, JSON.stringify(layoutTrace));
     writeFileSync(`${OUT}/hall-trace.json`, JSON.stringify(hallTrace));
     writeFileSync(`${OUT}/wvlines.log`, wvLines.join('\n'));

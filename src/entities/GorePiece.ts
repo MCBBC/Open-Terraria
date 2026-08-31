@@ -59,17 +59,6 @@ const vanishAlpha = (t: number) => DISAPPEAR_ALPHA[t] ?? 1;
 /** 气泡族判定（Gore.cs:856/:1427 的 411-430 专属块——泡泡棒 1450 喷出的
  *  411-415 经 NewGore 尾段 type += rand(4)*5 可落入全部四族） */
 const isBubble = (t: number) => t >= 411 && t <= 430;
-/** SpecialAI==2 烟囱烟三型（GoreID.cs:464-471 ChimneySmoke1..3 = 825..827，
- *  SpecialAI 注册见 :9 `Factory.CreateIntSet(0, …, 825, 2, 826, 2, 827, 2, …)`） */
-const CHIMNEY_SMOKE_AI: ReadonlySet<number> = new Set([825, 826, 827]);
-/** ★自研调参备案（2026-08-31 用户裁定：原版发射门对 Style3x3 死支，无实机基线；
- *  观感要求烟更稀、消散更早）——
- *  SMOKE_SPAWN_LIFE：出生 timeLeft（原版 GORE_TIME 600 ≈14s 稳态 ~80 只；
- *  现 360 + 随机衰减(≈0.7/t) → 实际存活 ~210t≈3.5s，稳态 ~10 只）
- *  SMOKE_FADE_TICKS：渐隐提前窗（原版尾段 60t；现 140t = 后 2.3 秒缓缓变淡，
- *  避免由近实直接消失的突兀感）。AI 其余数学仍按 Gore.cs:775-860。 */
-export const SMOKE_SPAWN_LIFE = 360;
-const SMOKE_FADE_TICKS = 140;
 /** 气泡族贴图尺寸（terraria-assets/Images/Gore_411-430.png 实测 10/20/32/48/64；
  *  TEX 表（_meta.tex）只含 HitEffect 提取面，该族不在其中——NewGore 尾段定位 /
  *  Update 爆裂尘计数 / 玩家与实心碰撞矩形都以贴图原尺寸为准，故独立登记） */
@@ -325,9 +314,6 @@ export class GorePiece extends Entity {
   sticky = true;
   /** Gore.light（NewGore :1487-1490 仅 16/17 置 1；Update 尾段据此 AddLight） */
   light = 0;
-  /** 后层通道标记（★自研放宽备案：原版 DrawGore 恒全体前绘，但烟囱烟激活是
-   *  自研行为、按用户观感裁定被地形遮挡 → 走 Renderer 2c-' 墙后/tile 前单列） */
-  behindTiles = false;
   /** 贴图原始尺寸（碰撞盒与绘制基准；缺失回退 32） */
   texW: number;
   texH: number;
@@ -486,7 +472,6 @@ export class GorePiece extends Entity {
     // （源码中该尾段是本块的 else 分支，气泡不进 TileCollision/时档渐隐），
     // 末段 position += velocity（:1070-1077）与本块内爆裂尘归 updateBubble
     if (isBubble(t)) { this.updateBubble(game); return; }
-    if (CHIMNEY_SMOKE_AI.has(t)) { this.updateChimneySmoke(game); return; }
 
     // ---- 位移前物理（:352-769 链）----
     if (isDampRibbon(t)) {
@@ -620,59 +605,6 @@ export class GorePiece extends Entity {
     this.x += this.vx;                                       // :1070-1077 尾段位移
     this.y += this.vy;
     if (this.alpha >= 255) this.kill();                      // :1079-1081
-  }
-
-  /**
-   * 烟囱烟 825-827 专属 AI（SpecialAI==2，Gore.Update :775-860 整块）：
-   * 尾段 60 tick 内 alpha 每帧 +rand(1..6)（渐隐），其余若 alpha>100 则 −rand(1..3)
-   * （烟体维持近实）；速度双轴 1/51 低通逼近 → X：视觉风×2 + ±0.1 噪声，
-   * Y：−0.35 净上升 + (vx<0 时 vx×0.2 顶风抬升) + ±0.2 噪声；rotation=vx×0.6；
-   * 触碰玩家即爆（timeLeft=0 + 尘爆 type31 noGravity/alpha100/scale 同 gore、
-   * 粒速×(1+玩家速)/3 —— 本仓尘 API 无后乘钩，按零基速直发，备案近似）；
-   * 存活期随机衰减（1/2 减 1、1/50 减 5、1/100 减 10）；不进重力/碰撞/时档尾段。
-   */
-  private updateChimneySmoke(game: GameHooks): void {
-    const wind = game.world.weather?.windSpeedCurrent ?? 0;   // Main.WindForVisuals
-    if (this.timeLeft < SMOKE_FADE_TICKS) {
-      this.alpha += 1 + irand(6);                             // :777-779 rand.Next(1,7)
-    } else if (this.alpha > 100) {
-      this.alpha -= 1 + irand(3);                             // :781-782 rand.Next(1,4)
-    }
-    if (this.alpha < 0) this.alpha = 0;
-    if (this.alpha > 255) this.timeLeft = 0;
-    this.vx = (this.vx * 50 + wind * 2 + irand2(-10, 11) * 0.1) / 51;      // :785
-    const lift = this.vx < 0 ? this.vx * 0.2 : 0;             // :788-791 num18
-    this.vy = (this.vy * 50 - 0.35 + lift + irand2(-10, 11) * 0.2) / 51;   // :792
-    this.rotation = this.vx * 0.6;                            // :793
-    // :795-819 玩家矩形相交 → 爆（联机远端不在 GameHooks 面，仅主角，同气泡备案）
-    const bw = this.texW * this.scale, bh = this.texH * this.scale;
-    let playerSpeed = -1;
-    const pl = game.player;
-    if (!pl.dead
-      && this.x < pl.x + pl.w && this.x + bw > pl.x
-      && this.y < pl.y + pl.h && this.y + bh > pl.y) {
-      this.timeLeft = 0;
-      const dxp = Math.hypot(pl.vx, pl.vy);                   // num19
-      playerSpeed = isFinite(dxp) ? dxp : -1;
-    }
-    if (this.timeLeft > 0) {
-      if (irand(2) === 0) this.timeLeft--;                    // :846-848
-      if (irand(50) === 0) this.timeLeft -= 5;                // :849-851
-      if (irand(100) === 0) this.timeLeft -= 10;              // :852-854
-    } else {
-      this.alpha = 255;                                       // :858
-      // :859-904 尘爆（仅在玩家触碰引爆路径；数量=宽×scale×0.8）
-      if (playerSpeed >= 0 && game.spawnDust) {
-        const n = Math.floor(this.texW * this.scale * 0.8);
-        for (let i = 0; i < n; i++) {
-          game.spawnDust?.(this.x, this.y, Math.floor(bw), Math.floor(bh),
-            31, 0, 0, 100, null, this.scale, true);
-        }
-      }
-    }
-    this.x += this.vx;
-    this.y += this.vy;
-    if (this.alpha >= 255) this.kill();
   }
 
   private kill(): void {

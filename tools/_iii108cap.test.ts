@@ -6,8 +6,9 @@
 //     SW_I08_OUT=/tmp/iii108-out/js npx vitest run tools/_iii108cap.test.ts
 import { it } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { generateWorld } from '../src/world/gen/WorldGen';
+import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { TileStore } from '../src/world/TileStore';
+import { snapshotGenSolid } from '../src/world/gen/vanilla/GenSolid';
 
 const RUN = process.env.SW_I08CAP === '1';
 const OUT = process.env.SW_I08_OUT ?? '/tmp/iii108-out/js';
@@ -37,6 +38,37 @@ const doneSlots = new Set<string>();
         const a = rec[c]!;
         writeFileSync(`${OUT}/s${tag}_${c}.bin`, Buffer.from(a.buffer, a.byteOffset, a.byteLength));
       }
+      // IIII99b：槽末同时落 gs + world 侧字段（反演重放基座；仅尾段够用）
+      try {
+        const gs = lastGenState();
+        if (gs) {
+          const serVal = (v: unknown): unknown => {
+            if (v instanceof Uint8Array || v instanceof Int8Array || v instanceof Uint16Array
+              || v instanceof Int16Array || v instanceof Uint32Array || v instanceof Int32Array
+              || v instanceof Float32Array || v instanceof Float64Array) {
+              return { __t: v.constructor.name, d: Array.from(v as ArrayLike<number>) };
+            }
+            if (Array.isArray(v)) return { __arr: v.map(serVal) };
+            if (v && typeof v === 'object') {
+              const o: Record<string, unknown> = {};
+              for (const k of Object.keys(v as object)) o[k] = serVal((v as Record<string, unknown>)[k]);
+              return o;
+            }
+            return v;
+          };
+          const world = w as unknown as Record<string, unknown>;
+          writeFileSync(`${OUT}/s${tag}_ctx.json`, JSON.stringify({
+            gs: serVal(gs),
+            genSolid: Object.fromEntries(Object.entries(snapshotGenSolid()).map(([k, v]) => [k, Array.from(v as Uint8Array)])),
+            world: {
+              genWaterLine: world.genWaterLine, genDungeonExempt: world.genDungeonExempt,
+              genRemixWater: world.genRemixWater, shimmerX: world.shimmerX, shimmerY: world.shimmerY,
+              groundLevel: world.groundLevel, rockLevel: world.rockLevel,
+              seedFlags: world.seedFlags,
+            },
+          }));
+        }
+      } catch (e) { console.log(`ctx dump skip slot#${i}: ${(e as Error).message}`); }
       console.log(`snapshot slot#${i} ${pn} → ${OUT}/s${tag}_*`);
       saved++;
     },

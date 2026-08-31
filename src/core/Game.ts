@@ -1359,6 +1359,10 @@ export interface GameCallbacks {
   /** ★批III② 合成完成光标辉光（CraftingEffects.GlowPulse :18-23——成品上光标时
    *  _mouseItemGlow=1;本仓成品入包,UI 侧拾取同型即亮。可选=测试/无 UI 兼容 */
   onCraftCursorGlow?: (itemId: number) => void;
+  /** 合成成品上光标（CraftItem_GrantItem Main.cs:43329 `mouseItem = result`）：
+   *  UI 把成品挂到光标 heldStack,返回【未能上光标的余量】(背包已由 UI 处理);
+   *  未接线 = 全额走背包路径（缺省兼容）。2026-08-27 用户要求合成品跟随光标 */
+  grantToCursor?: (itemId: number, stack: number, prefix?: number) => number;
   onToast: (msg: string) => void;
   /** 死亡收背包（Main.cs:46435-46440 dead ⇒ playerInventory=false;UI 实现,缺省=无 UI 兼容） */
   closeInventory?: () => void;
@@ -1658,6 +1662,11 @@ export const FIXED_SELF_DAMAGE_FOR_PLAYERS: Record<number, number> = (() => {
  *  逐物品原版显式支({281,986}/{3007},Player.cs:47632-47637)在本常量之上叠加,
  *  相互关系保持原样 */
 export const HOUSE_SHOT_ORIGIN_LIFT_Y = -8;
+
+/** ★HOUSE 枪口前伸档位(2026-08-31 用户特定要求②"弹药从枪口出膛"):前伸 =
+ *  clamp(手持贴图半宽−6, MIN, MAX)px 沿瞄准向(带逐4px实心回退钳制,见弹药链 :11385 批注) */
+export const HOUSE_SHOT_MUZZLE_MIN = 6;
+export const HOUSE_SHOT_MUZZLE_MAX = 26;
 
 export class Game implements GameHooks {
   /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
@@ -11375,13 +11384,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★曾 +朝向×14 前移 = 贴脸(<14px)射击时弹出生在敌盒后方 → 整条路径无判定
         //   (2026-08-21 报)；★又曾 −4px 抬高 = 无口径的枪口系统性偏上（2026-08-22 修,
         //   原版确无此二偏移）。
-        // ★★现行 +HOUSE_SHOT_ORIGIN_LIFT_Y(-8px) = 2026-08-31 用户特定要求的观感修正:
-        //   原版字面锚点=腰腹线,慢速大口径弹尾焰叠下半身显"弹道偏下"——全弹药族抬到
-        //   胸线。刻意备案偏离(与 magic 杖头锚同性质)禁止对齐回去;只 Y 移不带前伸,
-        //   不复发贴脸穿背案;逐物品显式支(下方 281/986/3007)在其上叠加,关系不变。
+        // ★★现行两层 HOUSE 观感修正（2026-08-31 用户特定要求,刻意偏离反编译字面,
+        //   与 magic 杖头锚同性质,禁止对齐回去;逐物品显式支在最后叠加,关系不变）:
+        //   ① +HOUSE_SHOT_ORIGIN_LIFT_Y(-8px):原版字面锚=腰腹线,慢速大口径弹尾焰叠
+        //     下半身显"弹道偏下"→ 全弹药族抬到胸线(只 Y 移不带前伸,不复发穿背案);
+        //   ② HOUSE_SHOT_MUZZLE_BIRTH 枪口前伸:沿瞄准向把出生点推到手持贴图半长处
+        //     (halfW−6 钳 [6,26]px——发射筒/长枪 sprW≈40 → 前伸≈14,手枪≈6-8),
+        //     实现真正的"从枪口出膛"。逐 4px 步进做实心回退钳制,贴墙射击点退到
+        //     最后一个非实心位(与原版贴墙开火弹即刻撞墙消亡不冲突:出生仍在玩家前方)。
+        //   ★注意区别于 2026-08-21 被拆除的旧 ±14px:旧版是【无判别】盲推且向心+Y-4
+        //     组合;本式带实心回退+沿瞄准向+限制在持物半长内,不存在越过目标的路径。
         let ax = this.player.cx;
-        let ay = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
-        // 逐枪枪口偏移（Player.cs:46632-46641）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
+        const liftBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
+        const { dx: muzzleDx, dy: muzzleDy } = this.houseShotMuzzleDeltas(heldDef.key, this.player.cx, liftBaseY, ang);
+        ax += muzzleDx;
+        let ay = liftBaseY + muzzleDy;
+        // 逐枪枪口偏移（Player.cs:47632-47640）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
         // 飞镖手枪 3007 (−4×dir,−2×gravDir)；gravDir 本仓恒 1（无重力翻转建模）
         if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6; }
         else if (bowVid2 === 3007) { ax -= 4 * this.player.facing; ay -= 2; }
@@ -12759,6 +12777,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** ★HOUSE 枪口前伸 deltas（2026-08-31 用户特定要求②，机制详见弹药链 :11388 批注与
+   *  常量区 HOUSE_SHOT_MUZZLE_MIN/MAX）：沿瞄准向把出生点推到手持贴图半长处
+   *  （halfW−6 钳 [6,26]px），逐 4px 步进 store.isSolid 回退钳制——贴墙射击时退到
+   *  最后一个非实心位。弹药/魔法杖头/蜂枪三通道共用；Y 抬升(HOUSE_SHOT_ORIGIN_LIFT_Y)
+   *  由调用方先并入 originY 再传入。只返回位移分量,不写实体 */
+  private houseShotMuzzleDeltas(spriteKey: string, originX: number, originY: number, ang: number): { dx: number; dy: number } {
+    const swAr = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, spriteKey) : null;
+    const fwdMax = Math.min(Math.max(((swAr?.sw ?? 16) / 2) - 6, HOUSE_SHOT_MUZZLE_MIN), HOUSE_SHOT_MUZZLE_MAX);
+    const st2 = this.world.store;
+    for (let d = fwdMax; d > 0; d -= 4) {
+      const qx = Math.floor((originX + Math.cos(ang) * d) / TILE);
+      const qy = Math.floor((originY + Math.sin(ang) * d) / TILE);
+      if (!st2.inBounds(qx, qy) || !st2.isSolid(qx, qy)) return { dx: Math.cos(ang) * d, dy: Math.sin(ang) * d };
+    }
+    return { dx: 0, dy: 0 };
+  }
+
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
     const inp = this.input;
     // 瞄准角 = 玩家中心→鼠标世界坐标（ItemCheck_Shoot :47610 vector = MouseWorld −
@@ -13357,8 +13392,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   {3094/3378/3543/5117}Y=height/3——均【非】magic kind（ranged/melee,
         //   Item.cs case 复核）,走 'shot' 族登记偏差,不在本批
         const [mzMouseX, mzMouseY] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-        const mzX = this.player.cx + Math.cos(ang) * 18;
-        const mzY = this.player.cy + Math.sin(ang) * 18;
+        // ★2026-08-31 二次拍板:杖头锚接两层 HOUSE(Y−8 抬胸线 + 贴图半宽前伸 +
+        //  实心回退钳制,houseShotMuzzleDeltas 与弹药链同源,见 :11388 批注与常量区)。
+        //  固定 ×18 即 sprW≈48 长杖的特例值,语义被公式吞并;重瞄角(出生点→光标)
+        //  与逐型显式散布块(517/206/1114)全部保持原序不变。
+        const mzBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
+        const { dx: mzdX, dy: mzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, mzBaseY, ang);
+        const mzX = this.player.cx + mzdX;
+        const mzY = mzBaseY + mzdY;
         const mzAng = Math.atan2(mzMouseY - mzY, mzMouseX - mzX);   // 出生点→光标 重瞄角
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         // ★R27：陨石套 spaceGun 无限蓝（ItemCheck_PayMana_ShouldSkipManaUse
@@ -13397,9 +13438,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (Math.floor(Math.random() * 6) === 0) nBee++;
           if (this.player.equipStats.strongBees && Math.floor(Math.random() * 3) === 0) nBee++;   // strongBees 档（:48788-48791）
           const [bmwx, bmwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          // ★2026-08-26 锚点批：蜂枪弹同 'magic' 域从杖头出生+出生点→光标重瞄
+          // ★2026-08-31 同批:蜂枪锚点也换两层 HOUSE(houseShotMuzzleDeltas),固定×18 弃用
           const angB0 = Math.atan2(bmwy - this.player.cy, bmwx - this.player.cx);
-          const bzX = this.player.cx + Math.cos(angB0) * 18, bzY = this.player.cy + Math.sin(angB0) * 18;
+          const beeBaseY = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
+          const { dx: bzdX, dy: bzdY } = this.houseShotMuzzleDeltas(def.key, this.player.cx, beeBaseY, angB0);
+          const bzX = this.player.cx + bzdX, bzY = beeBaseY + bzdY;
           const angB = Math.atan2(bmwy - bzY, bmwx - bzX);
           this.player.facing = Math.cos(angB0) > 0 ? 1 : -1;
           const bvx0 = Math.cos(angB) * cw.shootSpeed, bvy0 = Math.sin(angB) * cw.shootSpeed;
@@ -31545,7 +31588,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 执行原版配方合成（CraftingRequests.CraftLocally 主干）：扣材料→成品入背包 */
-  vanillaCraft(r: VanillaRecipeLike, times = 1) {
+  vanillaCraft(r: VanillaRecipeLike, times = 1, toCursor = false) {
     if (!consumeMaterials(this.player.inv, r, times, this._alchemyTable, this._craftSourcesCache())) return;
     const outKey = recipeItemKey(r.create);
     if (!outKey) return;
@@ -31562,11 +31605,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // R14-B4：钱币互转配方（REC57:15121-15147,71↔72↔73↔74）产物走 NoCoinMerge
     // （CraftItem_GrantItem → GetItem(ReturnItemShowAsNewNoCoinMerge),GetItemSettings.cs:25
-    // 禁 DoCoins）——曾直接 inv.add 跑 doCoins 把 100 铜瞬时合回 1 银=净变化零的死合成
+    // 禁 DoCoins）——曾直接 inv.add 跑 doCoins 把 100 铜瞬时合回 1 银=净变化零的死合成。
+    // ★成品去向（2026-08-27 用户要求）：跟随光标（CraftItem_GrantItem Main.cs:43329
+    // `mouseItem = result`）——cb.grantToCursor 上光标(返回余量),未接线/余量走背包。
+    // 钱币 NoCoinMerge 特例仅在直入背包路径保持（上光标无 doCoins 概念）
     const outVid0 = vanillaIdOfItem(outId);
-    const left = (outVid0 >= 71 && outVid0 <= 74 && r.createStack === 1 && times === 1)
-      ? this.player.inv.addNoCoinMerge(outId, r.createStack * times)
-      : this.player.inv.add(outId, r.createStack * times, prefix);
+    let left: number;
+    if (toCursor && this.cb.grantToCursor && outId !== undefined) {
+      left = this.cb.grantToCursor(outId, r.createStack * times, prefix) ?? 0;
+      if (left > 0 && outVid0 >= 71 && outVid0 <= 74 && r.createStack === 1 && times === 1) {
+        left = this.player.inv.addNoCoinMerge(outId, left);
+      }
+    } else if (outVid0 >= 71 && outVid0 <= 74 && r.createStack === 1 && times === 1) {
+      left = this.player.inv.addNoCoinMerge(outId, r.createStack * times);
+    } else {
+      left = this.player.inv.add(outId, r.createStack * times, prefix);
+    }
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
     // R4-18（HandleWeirdCrafts,M57:43354-43364）：合成 6148/6149（Trusty 件）即杀
     // 场上旧代帕鲁弹 1093/1094（KillProjectilesOfTypeForLocalPlayer）——召唤侧互清

@@ -3959,6 +3959,14 @@ export class Player extends Entity {
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
           // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
           if (!playerCanHitEnemy(e, game)) continue;
+          // ★AI_112 仙灵免疫门（B 扫尾补账：原式 :21275 冲撞扫敌门禁串
+          //  `(nPC.aiStyle == 112 && !(nPC.ai[2] <= 1f))` → continue——充能态
+          //  （虫网释放后态 2+）仙灵免伤克盾冲撞）。SetDefaults（NPC.cs:16608
+          //  type==583||584||585）下 aiStyle=112 全集恰为仙灵三型 ⇒ 三型 vanillaId
+          //  判定与原式等价（chilletDashCharge 同款落法）；ai[2]≤1 前态照常可打。
+          const dashFairy = en as unknown as { vanillaId?: number; ai2?: number };
+          if ((dashFairy.vanillaId === 583 || dashFairy.vanillaId === 584
+            || dashFairy.vanillaId === 585) && (dashFairy.ai2 ?? 0) > 1) continue;
           const ex = en.x ?? en.cx - 8, ey = en.y ?? en.cy - 8, ew = en.w ?? 16, eh = en.h ?? 16;
           if (!(bhx < ex + ew && bhx + bhw > ex && bhy < ey + eh && bhy + bhh > ey)) continue;
           const dir = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing; // :20809-20815
@@ -4107,6 +4115,12 @@ export class Player extends Entity {
           // immune[whoAmI] > 0 门（:21299——6t 免疫帧内不再吃冲撞）
           if ((en.iframes ?? 0) > 0) continue;
           if (!playerCanHitEnemy(e, game)) continue;
+          // ★AI_112 仙灵免疫门（B 扫尾补账：原式 :21299 `nPC2.aiStyle == 112 &&
+          //   !(nPC2.ai[2] <= 1f)` → continue——充能态仙灵免伤日耀冲撞。三型
+          //   vanillaId 判定落法与 chilletDashCharge/克盾支同源，ai2≤1 前态可打）
+          const solFairy = en as unknown as { vanillaId?: number; ai2?: number };
+          if ((solFairy.vanillaId === 583 || solFairy.vanillaId === 584
+            || solFairy.vanillaId === 585) && (solFairy.ai2 ?? 0) > 1) continue;
           const ex3 = en.x ?? en.cx - 8, ey3 = en.y ?? en.cy - 8, ew3 = en.w ?? 16, eh3 = en.h ?? 16;
           if (!(bhx3 < ex3 + ew3 && bhx3 + bhw3 > ex3 && bhy3 < ey3 + eh3 && bhy3 + bhh3 > ey3)) continue;
           if (this.solarShields > 0 && !this.solarDashConsumed) {

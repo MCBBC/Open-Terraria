@@ -305,6 +305,15 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
     ge.__swTrapEv = oEv; ge.__swTntEv = oTnt;
   }
   console.log(`runTrapsPass ${Date.now() - t0}ms rolls=${rollN} fnvHash=${rollH.toString(16)}(${rollH})`);
+  // 终态全通道落盘（离线帧/线级对账用）
+  if (process.env.SW_TR_SAVEFINAL === '1') {
+    const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;
+    const hdrS: Record<string, number> = { w: st.w, h: st.h };
+    for (const c of CHANS) {
+      writeFileSync(`${OUT}/final_${c}.bin`, Buffer.from(rec[c]!.buffer, rec[c]!.byteOffset, rec[c]!.byteLength));
+    }
+    writeFileSync(`${OUT}/final_hdr.json`, JSON.stringify(hdrS));
+  }
 
   // ---- 行为级写集对账（SW_TR_WRITE=1）：before→after(JS) vs dump(after=x86) ----
   if (WRITE_PROBE && beforeStore) {
@@ -328,10 +337,9 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
           const bT = bA ? sheet(B.type[i]!) : 0, jT = jA ? sheet(A.type[i]!) : 0, vT = vA ? d76.xt[i]! : 0;
           const mark = bT !== jT || bA !== jA ? '*' : (jT !== vT || jA !== vA ? '!' : ' ');
           row += `${mark}${bT}/${bA}·${jT}/${jA}·${vT}/${vA}`;
-          const wB = B.wire[i]!, wJ = A.wire[i]!, wV = d76.xia[i]! & 255;
-          const s1 = `w${wB & 31}-${wJ & 31}-${wV}`;
-          if ((wB & 31) !== (wJ & 31)) row += `<${s1}`;
-          else if ((wJ & 31) !== wV) row += `[${s1}]`;
+          const wB = B.wire[i]!, wJ = A.wire[i]!;
+          if ((wB & 19) !== (wJ & 19)) row += `<w${wB & 19}-${wJ & 19}`;
+          if (!!d76.xia[i]) row += '+ia';
           row += ' ';
         }
         console.log(`y=${String(y).padStart(4)} ${row}`);

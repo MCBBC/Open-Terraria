@@ -255,18 +255,22 @@ describe('★A3 projClass 数据面与消费面', () => {
   });
 
   it('④ nano×1.05（melee||IsAWhip 门）+ confetti 289 真弹出射口', () => {
-    const a = hitStub(1111, { imbuNano: true, imbuParty: true });
-    hitEnemies(a.me, a.game, a.cd, 9999, 1);
-    expect(a.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
-    expect(a.spawned.length).toBe(1);
+    // random 高位钉死 ⇒ 恒无暴击（自动掷面被排除,variance 不在本管线）
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      const a = hitStub(1111, { imbuNano: true, imbuParty: true });
+      hitEnemies(a.me, a.game, a.cd, 9999, 1);
+      expect(a.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
+      expect(a.spawned.length).toBe(1);
 
-    const whip = hitStub(1034, { imbuNano: true }); // IsAWhip 臂：无类也吃门
-    hitEnemies(whip.me, whip.game, whip.cd, 9999, 1);
-    expect(whip.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
+      const whip = hitStub(1034, { imbuNano: true }); // IsAWhip 臂：无类也吃门
+      hitEnemies(whip.me, whip.game, whip.cd, 9999, 1);
+      expect(whip.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
 
-    const none = hitStub(1111);
-    hitEnemies(none.me, none.game, none.cd, 9999, 1);
-    expect(none.spawned.length).toBe(0);
+      const none = hitStub(1111);
+      hitEnemies(none.me, none.game, none.cd, 9999, 1);
+      expect(none.spawned.length).toBe(0);
+    } finally { rand.mockRestore(); }
   });
 
   it('②浸剂位次搬前（A5 弹幕侧）：ichor 在 StrikeNPC 调用时已施加（StatusNPC :13640→strike 序）', () => {
@@ -336,6 +340,49 @@ describe('★A4 Enemy.hurt 钛金屏障 on-hit 门（life>5 ∪ statue/488 flag�
     (e3 as unknown as { spawnedFromStatue: boolean }).spawnedFromStatue = true;
     e3.hurt(20, 0, 0, t.g, 0, false, 1, true);
     expect(t.shards()).toBe(0);
+  });
+
+  it('488 训练假人不触发（flag 另一成员 :6917）；速度参数语义=Zero（:6930-6934 无方向项）', () => {
+    const t = titanGame(0);
+    const d488 = Enemy.fromVanilla(488, 60 * TILE, 60 * TILE)!;
+    d488.hurt(20, 3, 0, t.g, 0, false, 1, true);   // kbx≠0 亦不 proc
+    expect(t.shards()).toBe(0);
+  });
+});
+
+// 碎片 ≤7 cap 与出射口参数（ownedProjectileCounts[908]<7 支,Player.cs:6931-6934）
+describe('★A4 出射口：spawnTitaniumShard ≤7 cap + Zero 速度/dmg50×meleeMult/kb15', () => {
+  function shardHarness() {
+    const s = swingStub(3013);
+    const mkShard = () => ({ projId: 908, dead: false,
+      x: 0, y: 0, w: 14, h: 14, damage: 50, knockback: 15 });
+    const projs = (s.g.entities as unknown as { projectiles: Array<Record<string, unknown>> }).projectiles;
+    return { s, projs, mkShard };
+  }
+  /** 经 Game.prototype 直调 spawnTitaniumShard（swingStub 的 Object.create 实例） */
+  const spawnT = (gInstance: unknown, x: number, y: number): void => {
+    ((Game.prototype as unknown as
+      { spawnTitaniumShard?: (this: Game, x: number, y: number) => void })
+      .spawnTitaniumShard?.call(gInstance as Game, x, y));
+  };
+
+  it('已有 7 枚存活 → 不再生成；死亡一枚后恢复可生成', () => {
+    const { s, projs, mkShard } = shardHarness();
+    for (let i = 0; i < 7; i++) projs.push(mkShard());
+    spawnT(s.g, 10, 10);
+    expect(projs.length).toBe(7);                   // cap 面（alive 计存活同型）
+    (projs[3] as Record<string, unknown>).dead = true;
+    spawnT(s.g, 10, 10);
+    expect(projs.length).toBe(8);                   // 死档不计数(:6932 active 源)
+  });
+
+  it('出射参数：位置居玩家中心、dmg=max(1,round(50×meleeMult))、kb=15', () => {
+    const { s, projs } = shardHarness();
+    spawnT(s.g, s.player.cx, s.player.cy);
+    const sh = projs[0] as unknown as { x: number; y: number; w: number; damage: number; knockback: number };
+    expect(sh.damage).toBe(Math.max(1, Math.round(50 * s.player.damageMult('melee'))));
+    expect(sh.knockback).toBe(15);
+    expect(sh.x + sh.w / 2).toBeCloseTo(s.player.cx, 5);     // NewProjectile X/Y=Center
   });
 });
 

@@ -779,7 +779,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
     || (sheet >= 82 && sheet <= 84) || sheet === 233 || sheet === 236 || sheet === 238
-    || sheet === 702 || CHECK2XX_TYPES.has(sheet)
+    || sheet === 702 || CHECK2XX_TYPES.has(sheet) || C2X2_MAIN_GROUP.has(sheet)
     // VVVVV：Check1x2 椅族/CheckOrb 珠族/484 巨石仙人掌同列（自读帧族）
     || sheet === 15 || sheet === 20 || sheet === 216 || sheet === 338 || sheet === 390
     || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
@@ -791,6 +791,12 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   //   生成期 GetTileMergeCulling 恒全 false（invisibleBlock 位），按零 culling 镜像。
   if (PLATFORMS.has(sheet)) {
     framePlatformSweep(st, ctx, x, y);
+    return true;
+  }
+  // ★IIIII99b：Check2x2 主组（cs(1458 rigsrc):87340-56 直调列）——置于 switch 前，
+  //   与 654/TNT 桶同式（vanilla 该组经 goto case 132 并入 Check2x2）
+  if (C2X2_MAIN_GROUP.has(sheet)) {
+    check2x2Sweep(st, ctx, x, y, sheet);
     return true;
   }
   switch (sheet) {
@@ -1056,9 +1062,19 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
         || st.frameX[q] !== (k - num2) * 18 + num
         || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
     }
-    // cs:48460-71（非巨石支：95/126 未派发、132 除外）——411/751/752/654 地面门
+    // cs:49055-59（95/126 上锚支：num6-1 行须 active+solid 非 solidTop——
+    //   ★IIIII99b 随主组补全落地；此前该组未派发故此支从未走通）
+    if (sheet === 95 || sheet === 126) {
+      if (!inW(k, num6 - 1)) flag = true;
+      else {
+        const ai = st.idx(k, num6 - 1);
+        const ad = TILE_DEFS[st.type[ai]!];
+        if (!st.flags[ai] || !genSolidType(st.type[ai]!) || !!ad?.platform) flag = true;
+      }
+    }
+    // cs:48460-71（非巨石支：132 除外）——411/751/752/654 地面门
     //   （★IIIII33：654 TNT 桶=break-goto 组成员，vanilla 同走本支 cs:86947→87208）
-    if (!isBoulder && sheet !== 132) {
+    else if (!isBoulder && sheet !== 132) {
       if (!inW(k, num6 + 2)) flag = true;
       else {
         const gi = st.idx(k, num6 + 2);
@@ -1440,6 +1456,17 @@ function checkJunglePlantSweep(st: TileStore, ctx: SweepCtx, x: number, y: numbe
  *  → destroyObject 闸内整组杀。Item 掉落零掷（生成期 noItem 无堆叠实参）省略。 */
 const CHECK2XX_TYPES = new Set([104, 105, 207, 320, 337, 349, 356, 378, 410, 456, 465,
   480, 489, 506, 509, 531, 545, 560, 591, 592, 657, 658, 663, 720, 721, 725]);
+
+/* ★IIIII99b（2026-08-31）：Check2x2 主组补全——rigsrc(1458) WorldGen.cs:87340-56
+ *   TileFrameImportant case 94/95/97/98/99/100/125/126/173/282/287/319/621/622 →
+ *   Check2x2(i,j,type)。引擎此前仅派发 {138,411,484,751,752,654}∪CHECK2XX_TYPES，
+ *   Keg 组整缺 ⇒ toadstool #98 Settle_Liquids_Again：埋屋 Keg(94) 底排被沉降期岩浆
+ *   WaterCheck 死亡支杀掉后，KillTile 尾 SquareTileFrame 九邻重帧到孤儿上半时无臂
+ *   落空 → T0>94×2 @(2712..2713,905) 残差（x86 ktlog 栈实证全链：
+ *   WaterCheck→KillTile←SquareTileFrame←TileFrameImportant←case94 Check2x2）。
+ *   96=Check2x2Style 独立支仍未派发（cs:87357 备案：未观测族）。95/126 上锚支
+ *   （cs:49055-59=上格 solid 非平台门）按原文落地于 check2x2Sweep 内 k 列循环。 */
+const C2X2_MAIN_GROUP = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
 function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);

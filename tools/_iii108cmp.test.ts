@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const RUN = process.env.SW_I08CMP === '1';
-const JS = '/tmp/iii108-out/js';
+const JS = process.env.SW_I08_JS ?? '/tmp/iii108-out/js';
 const G2 = process.env.SW_I08_G2 ?? `${process.env.HOME}/GoldenChains/golden-toadstool`;
 const W = 4200, H = 1200;
 
