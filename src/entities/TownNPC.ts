@@ -14,6 +14,8 @@ import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNp
 import { isNpcTownShimmerable, findShimmerFreeSpot } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import { getAttackDamageForTownNPC, mainDifficulty } from '../stats/ScaleStats';
+// ★蓝队 F2：互殴首击 Main.DamageVar 单源（Main.cs:67097 ±15% 31 档 + 银行家舍入）
+import { damageVarRoll } from '../stats/DamageVar';
 import { hslToRgb } from '../player/Appearance';
 import { newNpcName } from '../i18n/RandomText';
 import { canHit } from '../physics/LineOfSight';
@@ -22,7 +24,7 @@ import { canHitLine } from '../physics/LineOfSight';
 // :56019-56026 / 挥击退出链 :55649-55658 的字面 CanHit(Vector2,0,0,…))
 import { canHitPoint } from '../physics/LineOfSight';
 import { getSwingStatsAnchor, tweakSwingStats } from './townNpcSwing';
-import { npcCheckArmorPenetration } from './projStatus';
+import { npcCheckArmorPenetration, applyBuffTicks } from './projStatus';
 // ★2026-08-31 治理批 B1：危险扫描候选记录门（NPC.cs:54042 flag19 = CanBeChasedBy）
 import { canBeChasedBy } from './projTargets';
 import { projSprite } from './Arrow';
@@ -210,17 +212,23 @@ export function shootingFrameOffset(vanillaId: number, aimY: number): number {
 }
 
 // ===================== shimmerTransparency（NPC.cs:6112，0..1）=====================
-export const SHIMMER_ST_RAMP = 0.01;      // 浸微光 +0.01/t（:92469）
-export const SHIMMER_ST_TRANSFORM = 0.9;  // >0.9 触发 GetShimmered（:92471）
-export const SHIMMER_ST_RISE = 0.89;      // 城镇转化置 0.89（:92568）
-export const SHIMMER_ST_DECAY_RISE = 1 / 60;  // ai[0]=25 上升态 −1/60/t（:53625）
-export const SHIMMER_ST_DECAY_HIT = 0.1;      // justHit −0.1/t（:92484）
-export const SHIMMER_ST_DECAY_IDLE = 0.001;   // 常规 −0.001/t（:92492）
+// ★锚行校准（1457）：UpdateNPC_BuffApplyVFX 内赋值区 = :92631-62（非 :92469 系——
+// 那是 UpdateNPC 尾段沾液尘/松露人 case 的行带）；上升态 −1/60 = AI_007 :53770。
+export const SHIMMER_ST_RAMP = 0.01;      // 浸微光 +0.01/t（:92636）
+export const SHIMMER_ST_TRANSFORM = 0.9;  // >0.9 触发 GetShimmered（:92637-39）
+export const SHIMMER_ST_RISE = 0.89;      // 城镇转化置 0.89（:92705，GetShimmered 支）
+export const SHIMMER_ST_DECAY_RISE = 1 / 60;  // ai[0]=25 上升态 −1/60/t（:53770）
+export const SHIMMER_ST_DECAY_HIT = 0.1;      // justHit −0.1/t（:92650）
+export const SHIMMER_ST_DECAY_IDLE = 0.001;   // buffImmune[353] else 支 −0.001/t（:92658）
 
-/** shimmerTransparency 每 tick 推进（赋值时序 NPC.cs:92468-92497 + :53625）：
- *  浸微光 +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92570-92573），
+/** shimmerTransparency 每 tick 推进（赋值时序 NPC.cs:92631-46 浸位 + :92646-62
+ *  衰减位 + AI 上升块 ：53765-76）：
+ *  浸微光 +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92706-10），
  *  上升态内 shimmering 恒 false，st 走 −1/60 衰减）；非浸按 justHit/rise/常规
- *  三档衰减，下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate 微光块） */
+ *  三档衰减，下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate 微光块）。
+ *  ★登记未接：原版非浸段另有 buffImmune[353] → −0.015 快档（:92652-54，与
+ *  justHit 档可同 tick 叠加，顺序先 −0.1 再 −0.015）——本仓无 buffImmune 载体，
+ *  缺席即恒走 else −0.001；接入需 buffImmune 位面另批 */
 export function shimmerTransparencyNext(
   st: number, shimmering: boolean, justHit: boolean, rise: boolean,
 ): number {
@@ -241,11 +249,13 @@ export function shimmerGlowAlpha(baseAlpha: number, shimmerTransparency: number)
   return shimmerTransparency > 0 ? baseAlpha * (1 - shimmerTransparency) : baseAlpha;
 }
 
-// ===================== ai[0]=25 微光上升态（NPC.cs:53594-53682）=====================
-export const SHIMMER_RISE_VELOCITY_TICK = 30;   // ai[1]≥30 起 st 衰减 + 上浮速度（:53621）
-export const SHIMMER_RISE_END_TICK = 75;        // ai[1]≥75 且 st≤0 → 转化收尾（:53653）
-export const SHIMMER_RISE_PAUSE = 30;           // 远距落点后 ai[2]=30 暂停（:53604）
-export const SHIMMER_RISE_TELEPORT_DIST = 560;  // 落点位移 ≥560px 才暂停+发送粒子（:56001）
+// ===================== ai[0]=25 微光上升态（NPC.cs:53737-53820；入态 =
+// GetShimmered ShimmerTownTransform 支 :92695-92711——★1457 锚行校准，非 :53594
+// 系/:92562 系旧 1456 行带）=====================
+export const SHIMMER_RISE_VELOCITY_TICK = 30;   // ai[1]≥30 起 st 衰减 + 上浮速度（:53765-76）
+export const SHIMMER_RISE_END_TICK = 75;        // ai[1]≥75 且 st≤0 → 转化收尾（:53801）
+export const SHIMMER_RISE_PAUSE = 30;           // 远距落点后 ai[2]=30 暂停（:56141）
+export const SHIMMER_RISE_TELEPORT_DIST = 560;  // 落点位移 ≥560px 才暂停+发送粒子（:56138）
 
 /** Utils.Remap（Utils.cs:313，clamped 默认 true）：fromMin..fromMax 归一后
  *  线性映到 toMin..toMax（区间外钳端值） */
@@ -377,6 +387,77 @@ export function drownCollision(
     }
   }
   return false;
+}
+
+// ===================== 敌怪互殴准入/几何表（GetHurtByOtherNPCs 通道）=====================
+
+/** 互殴攻击者最小形状（Enemy 运行时面 + ai2/facing 档位） */
+export interface MeleeAttackerLike {
+  x: number; y: number; w: number; h: number;
+  vanillaId?: number;
+  facing?: number;       // ≈ spriteDirection/direction（±1）
+  ai2?: number;          // 原版 ai[2]（咬合态计时）
+  damage?: number;
+  def?: { damage?: number };
+  dead: boolean;
+}
+
+/** NPCID.Sets.CritterThatCanTurnOnPlayers（NPCID.cs:4781，十型）：互殴受击准入
+ *  排除面——攻击者命中支直判 :93573（致变体 aiStyle==3 的【自身】门 ：93560 对
+ *  城镇 NPC 恒假,无载体）。 turtle(639-645)/蜥蛙(299)/企鹅(538/539) 族接触
+ *  【不再】误伤城镇 NPC */
+export const CRITTERS_TURN_ON_PLAYERS = new Set([645, 639, 644, 642, 643, 641, 640, 299, 539, 538]);
+
+/** NPCID.Sets.HurtingBees（NPCID.cs HurtingBees 集）：第二遍 GetHurtByOtherNPCs
+ *  （:91601-03）受理集——蜂类攻击者 */
+export const HURTING_BEES = new Set([210, 211]);
+
+/** NPCID.Sets.Skeletons（NPCID.cs:4865）：受害 self==453 骷髅商人特判引用
+ *  （:93579 `(type != 453 || !Skeletons[nPC.type])` 字面） */
+export const SKELETON_IDS = new Set([77, 449, 450, 451, 452, 481, 201, 202, 203, 21,
+  324, 110, 323, 293, 291, 322, 292, 197, 167, 44, 635]);
+
+/** GetMeleeCollisionData（NPC.cs:96111-96290）互殴通道变形盒——只接本域有载体的族：
+ *  - 430-436 持械僵尸六兄弟 / 591 持械火把僵尸：咬合态 ai[2]>5 时武器侧加宽
+ *    （spriteDirection<0 → X−34 且 W+34，否则仅 W+34）(:96117-96133)；
+ *  - 494/495 龙虾（Crawdad）：同式 ±18px (:96134-96146)；
+ *  - 460 屠夫：冲刺刀击专盒 30×14（X=Center.X、<0 时 X−=W；Y=feet−20），与受害盒
+ *    相交时整体替换 (:96152-96169)，不相交保持原盒；
+ *  - type 400：npcRect=default → 恒不交（返回 null）(:96147-96151)。
+ *  ★乘区注意：damageMultiplier/specialHitSetter 在 GetHurtByOtherNPCs 消费点是
+ *  【死参】——ref 写回后弃置，BeHurtByOtherNPC 直用 Main.DamageVar(thatNPC.damage)
+ *  （:93595）；此处严禁给伤害补 ×1.25/×1.35。
+ *  未列族（417 独眼旗手/466 精神病屠夫/552-554 DD2 巨龙箱头目/576-577 蜂王魔像/
+ *  668 月总 发射端 frameY 支）为玩家挥击通道专属窗面或本域无载体，缺席即原盒。 */
+export function meleeAttackRect(
+  e: MeleeAttackerLike, vx: number, vy: number, vw: number, vh: number,
+): { x: number; y: number; w: number; h: number } | null {
+  const t = e.vanillaId ?? -1;
+  const facing = e.facing ?? 1;
+  if ((t >= 430 && t <= 436) || t === 591) {
+    const bite = (e.ai2 ?? 0) > 5;                       // :96116 `ai[2] > 5f`
+    return bite ? { x: e.x - (facing < 0 ? 34 : 0), y: e.y, w: e.w + 34, h: e.h }
+      : { x: e.x, y: e.y, w: e.w, h: e.h };
+  }
+  if (t === 494 || t === 495) {
+    const bite = (e.ai2 ?? 0) > 5;
+    return bite ? { x: e.x - (facing < 0 ? 18 : 0), y: e.y, w: e.w + 18, h: e.h }
+      : { x: e.x, y: e.y, w: e.w, h: e.h };
+  }
+  if (t === 400) return null;                            // npcRect = default(Rectangle)
+  if (t === 460) {
+    // 屠夫冲刺刀击盒（:96153-96168）：30×14，锚 Center.X / feet−20
+    const bx = Math.round(e.x + e.w / 2) - (facing < 0 ? 30 : 0);
+    const by = Math.round(e.y + e.h - 20);
+    const box = { x: bx, y: by, w: 30, h: 14 };
+    // 仅当专盒与受害盒相交才替换(:96166 victimHitbox.Intersects(rectangle))，
+    // 否则维持原盒判定
+    if (vx < box.x + box.w && vx + vw > box.x && vy < box.y + box.h && vy + vh > box.y) {
+      return box;
+    }
+    return { x: e.x, y: e.y, w: e.w, h: e.h };
+  }
+  return { x: e.x, y: e.y, w: e.w, h: e.h };
 }
 
 /** AI_007_TownEntities_GetWalkPrediction（NPC.cs:56093-56165）1:1：
@@ -880,7 +961,7 @@ export class TownNPC extends Entity {
   talking = false;
   talkCooldown = 0;
   /** 微光化变体 = townNpcVariationIndex==1（NPCID.Sets.ShimmerTownTransform 入
-   *  微光 → GetShimmered :92561-92573 → ai[0]=25 上升态；上升收尾 :53664 翻转——
+   *  微光 → GetShimmered :92668/:92695-92711 → ai[0]=25 上升态；上升收尾 :53814 翻转——
    *  **双向**：已微光化再浸微光翻转回原形态）。变体贴图经 townSheet getter 切
    *  TownNPCs/Shimmered 档（Profiles.StackedNPCProfile 档位 1），对话差分登记 GAP */
   shimmered = false;
@@ -899,11 +980,11 @@ export class TownNPC extends Entity {
   /** 本 tick 刚走"回家传送"（TeleportToHome :56063-56090 落位后即
    *  TryForcingSitting :56081——免"站定+同格"门，:54074 门只管走到场的情形） */
   private teleportedHome = false;
-  /** 微光转化透明度（NPC.cs:6112，0..1；赋值时序 :92468-92497/:92568/:53625）。
+  /** 微光转化透明度（NPC.cs:6112，0..1；赋值时序 :92631-62/:53770——★1457 校准）。
    *  消费：Renderer 本体 alpha=1−st（GetAlpha :94874）+ 160 Glow ×(1−st)
    *  （Main.cs:25771-25776）——微光转化渐显/渐隐的唯一驱动字段 */
   shimmerTransparency = 0;
-  /** 微光上升态旗标（原版 ai[0]==25，NPC.cs:53594-53682：落点传送 → ai[1]≥30
+  /** 微光上升态旗标（原版 ai[0]==25，NPC.cs:53737-53820：落点传送 → ai[1]≥30
    *  起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 → st 归零后翻转变体 + 到场粒子 +
    *  成就 43；态内 dontTakeDamage——推进见 shimmerRiseUpdate） */
   private shimmerRise = false;
@@ -913,6 +994,10 @@ export class TownNPC extends Entity {
   private shimmerRisePause = 0;
   /** Main.IsItStorming 缓存（isItStormingNext 逐步推进；坐姿/回家 flag 消费） */
   private storming = false;
+  /** AI_007 局部 flag（:53532-53547 定义）快照 = 雨/夜/日食/史莱姆雨/(风暴且地表)。
+   *  坐姿回家与开门掷门（:54578 `(Next(10)==0 | flag)` 第二操作数）共用；每 tick
+   *  在 sitFlag 计算处同步写入。★2026-08-31 台账批新增 */
+  private homeFlag = false;
   /** ai[0]==25 上升态只读（渲染/测试消费） */
   get shimmerRising(): boolean { return this.shimmerRise; }
 
@@ -935,10 +1020,12 @@ export class TownNPC extends Entity {
   // ---- 社交/表演态（AI_007 ai[0]∈{2,3,4,6,7,9,16,17,19}，NPC.cs:55630-55835 掷骰
   //      + :54660-54748 推进 + FindFrame :69577-70152 表演帧）----
   /** 当前社交态（null=无）。kind 对应原版 ai[0]：2 发呆 / 3,4 结对聊天（发起/
-   *  应答）/ 6 派对舞 / 7 面向玩家 / 9 驻足看家具 / 16,17 石头剪刀布（发起/应答）/
-   *  19 回应玩家表情（EmoteBubble.CheckForNPCsToReactToEmoteBubble 置入 :161-166） */
+   *  应答）/ 6 派对舞 / 7 面向玩家 / 9 驻足看家具 / 11 海盗闲坐拨弄（229 掷入）
+   *  / 16,17 石头剪刀布（发起/应答）/ 18 酒馆老板扔麦酒演出（550 掷入）/
+   *  19 回应玩家表情（EmoteBubble.CheckForNPCsToReactToEmoteBubble 置入 :161-166）/
+   *  24 树妖 Stardew 彩蛋施法演出（HaveDryadDoStardewAnimation :19220 置入） */
   social: {
-    kind: 2 | 3 | 4 | 6 | 7 | 9 | 16 | 17 | 19;
+    kind: 2 | 3 | 4 | 6 | 7 | 9 | 11 | 16 | 17 | 18 | 19 | 24;
     t: number;            // ai[1] 态倒计时
     other: TownNPC | null;  // ai[2] 对偶 NPC（3/4/16/17）
     frameT: number;       // frameCounter（表演帧时间线，逐 tick +1）
@@ -1182,7 +1269,9 @@ export class TownNPC extends Entity {
     // force=true = 内部直击通道(StrikeNPCNoInteraction owner=255 同形):不查
     // 无敌帧也不查 dontTakeDamage(原版 StrikeNPC 全链两者皆不读)
     if ((this.iframes > 0 || this.shimmerRise) && !force) return false;
-    // ↑ ai[0]==25 dontTakeDamage 承接位(NPC.cs:53596);force 仅溺水致死一击使用
+    // ↑ ai[0]==25 dontTakeDamage 承接位(= :53736 块：复位 dontTakeDamage=false
+    //   :53736 + if(ai[0]==25f) 置真 :53738-39——★1457 锚行校准,非 :53596);force
+    //   仅溺水致死一击使用
     const prog = townNpcProgressionFromWorld(game.world);
     prog.tipsy = this.tipsy;
     const defBase = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;
@@ -1381,9 +1470,10 @@ export class TownNPC extends Entity {
    *  - 681 彩虹城镇史莱姆（AI_007 尾段 :55963-55974）= TorchColor(23)×0.35
    *  - 683 黄城镇史莱姆（:55974-55979）= (0.25,0.25,0.1)×WrappedLerp(0.75,1,t%120/120)
    *  条件态：魔法光环 ai[0]==14（:55394，num69=1 恒满档，atkState===14 承接）
-   *  ×GetMagicAuraColor；微光上升光 :53637（ai[1] 30→90，shimmerRise 态内已接）；
-   *  跳过一处——:55546 ai[0]==24（树妖 Stardew 演出 HaveDryadDoStardewAnimation
-   *  :19123，公主礼物彩蛋无载体） */
+   *  ×GetMagicAuraColor；ai[0]==24 树妖 Stardew 施法光（:55693-55694，
+   *  HaveDryadDoStardewAnimation :19220 置入的彩蛋演出——2026-08-31 台账批补，
+   *  social kind 24 承接；GetMagicAuraColor 全档直加， Center 处）；微光上升光
+   *  :53637（ai[1] 30→90，shimmerRise 态内已接） */
   get lightRGB(): [number, number, number] | null {
     let rgb: [number, number, number] | null = null;
     // 逐通道 max 合并（原版同帧多 AddLight，单槽近似视觉并集；不挪光源位）
@@ -1417,6 +1507,11 @@ export class TownNPC extends Entity {
         || this.vanillaId === 20 || this.vanillaId === 663)) {
       merge(this.magicAuraColor());
     }
+    // 树妖 Stardew 施法光（ai[0]==24 块 :55693-55694）：GetMagicAuraColor() 全档直加
+    // 于 Center——仅 type 20 可达该态（HaveDryadDoStardewAnimation :19224 循环体）
+    if (this.social?.kind === 24) {
+      merge(this.magicAuraColor());
+    }
     // 微光上升光（:53637-53639）：Center 处 hslToRgb(t/360%1, 0.6, 0.65) ×
     // Remap(ai[1],30,90,0,0.7)——Remap 钳位使 ai[1]<30 时恒 0（无光）
     if (this.shimmerRise) {
@@ -1438,7 +1533,7 @@ export class TownNPC extends Entity {
       }
     }
     // justHit 近似（原版逐 tick 旗标）：hurt() 置 iframes=10 且只在无无敌帧时生效
-    // → 递减前 ==10 恰好标记"自上 tick 起受过击"（微光衰减 −0.1 档 NPC.cs:92484）
+    // → 递减前 ==10 恰好标记"自上 tick 起受过击"（微光衰减 −0.1 档 NPC.cs:92650）
     const justHit = this.iframes === 10;
     if (this.iframes > 0) this.iframes--;
     // buff 25 Tipsy 递减（NPC.cs:93174 lowerBuffTime,UpdateNPC 每 tick 头部）+
@@ -1464,14 +1559,15 @@ export class TownNPC extends Entity {
       for (let k = 0; k < books0; k++) this.applyCombatBook();
     }
 
-    // ---- 城镇微光转化链 1:1（GetShimmered NPC.cs:92561-92573 + AI_007 ai[0]==25
-    //      :53594-53682）。触发：浸微光 st +0.01/t（:92469），>0.9 → GetShimmered
-    //      （:92471，约 91t 渐隐非即刻）；城镇分支置 st=0.89 并进 ai[0]=25 上升态
-    //      （:92562-92568，摘 buff 353 :92570-92573——城镇 buff 系统未建，无载体）。
+    // ---- 城镇微光转化链 1:1（★1457 锚行校准：GetShimmered :92668/:92695-92711
+    //      + AI_007 ai[0]==25 块 :53737-53820）。触发：浸微光 st +0.01/t（:92636），
+    //      >0.9 → GetShimmered（:92637-39，约 91t 渐隐非即刻）；城镇分支置 st=0.89
+    //      并进 ai[0]=25 上升态（ai[0..3] 清零 ：92700-03、st=0.89 :92705、摘 buff 353
+    //      :92706-10——城镇 buff 系统未建，无载体）。
     //      上升态 = 落点传送 → ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 →
     //      st 归零后翻转微光变体 + 到场粒子 + 成就 43（推进见 shimmerRiseUpdate）。
     //      变体贴图走 townSheet getter（已接），对话差分未接（GAP）。
-    //      注：原版 UpdateNPC_BuffApplyVFX（:92492）上升态外仍每 tick −0.001 共衰减，
+    //      注：原版 UpdateNPC_BuffApplyVFX（衰减位 :92646-62）上升态外仍每 tick −0.001 共衰减，
     //      本仓并入 −1/60 单档（既有 shimmerTransparencyNext 模型，纯函数测试锁定）----
     const st0 = world.store;
     const si = st0.idx(
@@ -1486,14 +1582,14 @@ export class TownNPC extends Entity {
       );
       if (isNpcTownShimmerable(this.vanillaId) && inShimmer
         && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {
-        this.shimmerRise = true;                    // ai[0]=25（:92562）
-        this.shimmerRiseT = 0;                      // ai[1]=0（:92563）
-        this.shimmerRisePause = 0;                  // ai[2]=0（:92564）
-        this.shimmerTransparency = SHIMMER_ST_RISE; // :92568
+        this.shimmerRise = true;                    // ai[0]=25（GetShimmered :92700）
+        this.shimmerRiseT = 0;                      // ai[1]=0（:92701）
+        this.shimmerRisePause = 0;                  // ai[2]=0（:92702）
+        this.shimmerTransparency = SHIMMER_ST_RISE; // :92705
       }
     }
     if (this.shimmerRise && this.shimmerRiseUpdate(world, game, st0.liquid[si] > 0)) {
-      // ai[0]==25 块整段 return（:53682）：AI_007 游走/坐姿/攻击/开门全跳过；
+      // ai[0]==25 块整段 return（:53820）：AI_007 游走/坐姿/攻击/开门全跳过；
       // 补齐 UpdateNPC 层在 AI() 之后照常运行的各块（:91521-91600）：
       // ① 环境生命周期三连（★C1 重排定案：CheckLifeRegen :93622 无任何 ai 门、
       //    CheckDrowning 仅 townNPC 门——两者随 Update 层每帧运行,与 ai[0]==25 正交;
@@ -1548,6 +1644,9 @@ export class TownNPC extends Entity {
     const sitFlag = world.weather.raining || !world.clock.isDay
       || !!world.clock.eclipse || !!world.weather.slimeRain
       || (this.storming && this.y / TILE < world.groundLevel);
+    this.homeFlag = sitFlag;   // ★2026-08-31 台账批：同一旗的 NPC.cs:54578 开门掷门消费
+                               // （aiStyle7 全体共用该局部 flag，非坐姿专属——这里快照供
+                               // npcDoorUpdate/tryOpenDoorAhead 同拍读取）
     this.restSpot = (sitFlag && !world.clock.isDay && this.home
       && !NO_SIT_NPC_IDS.has(this.vanillaId))
       ? findChairSpot(world.store, this.home.x, this.home.y) : null;
@@ -2054,13 +2153,16 @@ export class TownNPC extends Entity {
    *  ② RPS 1/1800（partner 同门+!IsTownPet；发起 localAI[2]=Next(4)、
    *    localAI[3]=Next(3−l2)）
    *  ③ 派对舞 1/1200（!IsTownPet 且 id==208 或派对中 AttackType==0 族；
-   *    玩家 150px+LOS；300t）
+   *    玩家 150px+Top 锚 LOS；300t）
+   *  ④' 酒馆老板 550 扔麦酒 1/600（新批）：玩家 150px+Top 锚 LOS；300t→ai0=18
    *  ④ 发呆 1/1800（!IsTownPet；45t；帧 0⇄num58−1 循环）
-   *  ⑤ 面向玩家 1/1200（220t；帧 16t 处冒 112 头像、160t 冒 60）
+   *  ④" 海盗 229 拨弄 1/600（新批）：30×Next(1,4)t→ai0=11（与发呆共段推进）
+   *  ⑤ 面向玩家 1/1200（220t；Player.CanBeTalkedTo+UI 门收窄后触发；
+   *    帧 16t 处冒 112 头像、160t 冒 60）
    *  ⑥ 驻足看家具 1/600（行走态；身上无 AvoidedByNPCs 贴块且前方 10px 格
    *    InteractableByNPCs → 40+Next(90)t）
-   *  550 扔麦酒(1/600)/229 海盗(1/600) 表演未接（登记）。禁触 = flag30：
-   *  ai[0]<2 && !flag16 && !wet（危险中/湿身/带门行走/对话/攻击/坐姿全挡） */
+   *  禁触 = flag30：ai[0]<2 && !flag16 && !wet（危险中/湿身/带门行走/对话/
+   *  攻击/坐姿全挡） */
   private socialUpdate(world: import('../world/World').World, game: GameHooks): boolean {
     const rnd = this.rng;
     // ---- A. 态推进（:54660-54748）----
@@ -2068,31 +2170,51 @@ export class TownNPC extends Entity {
       const s = this.social;
       this.vx *= 0.8;                                        // :54683/:54720
       s.t--;                                                 // ai[1]--
-      if (s.kind === 2) {
-        // 发呆小转身（:54663-54669）：rand(60)==0 且锁尽 → 翻向锁 60
+      if (s.kind === 2 || s.kind === 11) {
+        // 发呆/海盗闲坐小转身（:54663-54669，ai0==2||11 共段）：rand(60)==0 且锁尽
+        // → 翻向锁 60（掷骰每拍照耗——与原版非短路序一致）
         if (this.turnLock > 0) this.turnLock--;
         if (rnd() * 60 < 1 && this.turnLock <= 0) {
           this.turnLock = 60;
           this.facing *= -1;
         }
       }
-      if ((s.kind === 6 || s.kind === 7 || s.kind === 19) && s.t > 0) {
-        // 对玩家态（:54713 ai0∈{6,7,18,19} 共段 + :54722-54744）：玩家失效
-        // （>200px/无 LOS）→ t=0；否则面向玩家
+      if ((s.kind === 6 || s.kind === 7 || s.kind === 18 || s.kind === 19) && s.t > 0) {
+        // 对玩家态（:54861 ai0∈{6,7,18,19} 共段 + :54870-54742）：玩家失效
+        // （CanBeTalkedTo 不满足 / >200px / Top 锚无 LOS）→ t=0；否则面向玩家。
+        // ★2026-08-31 台账批：补 Player.CanBeTalkedTo(:3872 stealth==1f 面)；
+        //   LOS 端点由盒左上角改 Entity.Top（中心-X,顶-Y）
         const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
-        if (!pl || pl.dead
-          || Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) > 200
-          || !canHitLine(world.store, this.x, this.y, 0, 0, pl.x, pl.y, 0, 0)) {
-          s.t = 0;                                           // :54729-54733
+        const pStealth = pl ? ((pl as unknown as { stealth?: number }).stealth ?? 1) : 1;
+        const talkable = !!pl && !pl.dead && pStealth >= 1;
+        if (!talkable
+          || Math.hypot(pl!.x + pl!.w / 2 - this.cx, pl!.y + pl!.h / 2 - this.cy) > 200
+          || !canHitLine(world.store, this.cx, this.y, 0, 0, pl!.cx, pl!.y, 0, 0)) {
+          s.t = 0;                                           // :54870-54874
         } else {
-          this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;  // :54736-54742
+          this.facing = pl!.x + pl!.w / 2 < this.cx ? -1 : 1;  // :54876-54882
         }
       }
+      if (s.kind === 24) {
+        // 施法态锁向（ai[0]==24 块 :55691-55692 每拍直写）
+        this.facing = 1;
+      }
       if (s.t <= 0) {
+        if (s.kind === 24) {
+          // 施法结束（:55695-55703）：ai[0]=0 / ai[1]=480 / localAI[1]=480 /
+          // ai[2]=0——非社交普通退出口，不走两掷
+          this.social = null;
+          this.walkMode = 0;
+          this.walkT = 480;
+          this.atkCd = 480;
+          return false;
+        }
         this.social = null;
         this.walkMode = 0;
-        this.walkT = 60 + Math.floor(rnd() * 60);            // :54692/:54746
-        this.turnLock = 30 + Math.floor(rnd() * 60);         // localAI[3]=30+rand(60)
+        this.walkT = 60 + Math.floor(rnd() * 60);            // :54827/:54855 两族同值
+        this.turnLock = (s.kind === 2 || s.kind === 11)
+          ? 40                                               // {2,11} 族 localAI[3]=40（:54828）
+          : 30 + Math.floor(rnd() * 60);                     // 其余 30+Next(60)（:54859）+同拍掷骰
         return false;
       }
       return true;
@@ -2137,26 +2259,50 @@ export class TownNPC extends Entity {
     } else if (!isPet && this.walkMode === 0 && rnd() * 1200 < 1
       && (this.vanillaId === 208
         || (!!world.scene?.partyUp && (TOWN_ATTACK_TYPE[this.vanillaId] ?? -1) === 0))) {
-      // ③ 派对舞（:55704-55730）：208 派对女孩恒掷；其余=派对中近战族
-      // （AttackType[208]=0 同族）；玩家 150px + LOS
-      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
+      // ③ 派对舞（:55860-55884 前段）：208 派对女孩恒掷；其余=派对中近战族
+      // （AttackType[208]=0 同族）；玩家 150px + LOS（Top 锚）
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
       if (pl && !pl.dead
-        && Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) < 150
-        && canHitLine(world.store, this.x, this.y, 0, 0, pl.x, pl.y, 0, 0)) {
+        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
         this.social = { kind: 6, t: 300, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
       }
+    } else if (!isPet && this.walkMode === 0 && rnd() * 600 < 1 && this.vanillaId === 550) {
+      // ④' 酒馆老板扔麦酒演出（:55886-55905 新批）：站定 1/600，玩家 150px +
+      // CanHitLine(Top→Top) 才演——ai0=18 / ai1=300 / ai2=玩家槽 / 面向玩家。
+      // FindFrame 档见 socialFrame case 18（终值帧常驻 npcFrameCount−2 反编译原文）
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
+      if (pl && !pl.dead
+        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
+        this.social = { kind: 18, t: 300, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
+        this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
+        return true;
+      }
     } else if (!isPet && this.walkMode === 0 && rnd() * 1800 < 1) {
-      // ④ 发呆（:55757-55762）：45t（原版 45×Next(1,2)=45×1 恒定）
+      // ④ 发呆（:55757-55762→1458 :55950 族）：45t（原版 45×Next(1,2)=45×1 恒定）
       this.social = { kind: 2, t: 45, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
       return true;
-    } else if (this.walkMode === 0 && rnd() * 1200 < 1) {
-      // ⑤ 面向玩家（:55765-55788）：玩家 CanBeTalkedTo 近似 = 在场；150px+LOS
-      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
+    } else if (!isPet && this.walkMode === 0 && rnd() * 600 < 1 && this.vanillaId === 229) {
+      // ④" 海盗闲坐拨弄（:55908-55915 新批）：站定 1/600 → ai0=11 /
+      // ai1=30×Next(1,4)（30/60/90t 三档）。尾部 `&& !flag18` 的 flag18 在 AI_007
+      // 内全文无置位（死旗），按字面省略。态内推进与发呆共段（转身边+退出口），
+      // 表演帧带独立（case 11：困盹气泡+dust216）
+      this.social = { kind: 11, t: 30 * (1 + Math.floor(rnd() * 3)), other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
+      return true;
+    } else if (this.walkMode === 0 && rnd() * 1200 < 1
+      && this.playerCanBeTalkedTo(game)) {
+      // ⑤ 面向玩家问好（:55910-55926）：★2026-08-31 台账批收窄——
+      //   玩家门由「在场」修为 Player.CanBeTalkedTo(:3872，active&&!dead&&!ShouldNotDraw
+      //   &&stealth==1f——隐身衣/潜行未满格不点头)+UI 占用工程门(input.uiBlocking≈
+      //   原版 mouseInterface/smartInteract 家族,背包/挂牌/商店开着不点头,登记择优叠加);
+      //   LOS 端点改 Entity.Top 中心锚。220t；帧 16t 冒 112、160t 冒 60
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
       if (pl && !pl.dead
-        && Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) < 150
-        && canHitLine(world.store, this.x, this.y, 0, 0, pl.x, pl.y, 0, 0)) {
+        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
         this.social = { kind: 7, t: 220, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
@@ -2179,6 +2325,36 @@ export class TownNPC extends Entity {
       }
     }
     return false;
+  }
+
+  /** Player.CanBeTalkedTo（Player.cs:3872-3881）：active && !dead && !ShouldNotDraw
+   *  && stealth == 1f。本仓 dead 门已覆盖硬核幽灵相（ShouldNotDraw 的 invis 载体），
+   *  stealth 为公开累积位（隐身药水/星璇/蘑菇矿潜行 <1 时 NPC 不问好不冒泡）。
+   *  ★工程收窄叠加（2026-08-31 台账批，非原版 AI 内条件——原版对应面在 Main 的
+   *  mouseInterface/smartInteract 家族 :43793-43802）：UI 占用（背包/挂牌编辑/
+   *  商店等 input.uiBlocking）时同样不问好不点头。 */
+  private playerCanBeTalkedTo(game: GameHooks): boolean {
+    const p = (game as unknown as { player?: { dead?: boolean; stealth?: number } }).player;
+    if (!p || p.dead) return false;
+    if ((p.stealth ?? 1) < 1) return false;
+    const ui = (game as unknown as { input?: { uiBlocking?: boolean } }).input;
+    return !ui?.uiBlocking;
+  }
+
+  /** 树妖 Stardew 彩蛋施法态置入（HaveDryadDoStardewAnimation NPC.cs:19220-19248
+   *  对 type==20 循环体的实体侧）：localAI[2]=480（prevAi0 承接）、ai[0]=24 /
+   *  ai[1]=480 / ai[2]=0 / localAI[3]=0、direction=spriteDirection=1；弹 995 的
+   *  全屏 StardewValleyAnimation 与落点扫描由 fx/StardewAnimation 编排器承担。
+   *  返回 false = 已在演出中（CanDryadPlayStardewAnimation 的 ai[0]!=24 门）。 */
+  enterStardewCast(): boolean {
+    if (this.social?.kind === 24) return false;
+    this.prevAi0 = 480;                    // 原文 localAI[2]=480 直录（该位仅被
+                                           // exitAttackCommon 的 ==8 判定消费）
+    this.social = { kind: 24, t: 480, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
+    this.sitting = false;                  // ai[0] 换号即离坐姿（TryForcingSitting 同理）
+    this.facing = 1;                       // direction = spriteDirection = 1
+    this.vx = 0;
+    return true;
   }
 
   /** 聊天/RPS 对偶搜索（:55636-55649 / :55681-55694）：CanBeTalkedTo（站地城镇
@@ -2229,9 +2405,8 @@ export class TownNPC extends Entity {
    *  行走 frameCounter += |vx|*2+1，>6 推进，帧区间 2..frames-extra-1（越界回卷
    *  帧2）。微光上升态同样调（原版 FindFrame 在 AI 早退之后仍执行 :91565）。
    *  被逼停 ai[0]==8 不在原版 ai 态链（落 velocity.X==0 空闲帧 0）；玩家对话
-   *  （talkNPC==本体 :53721 置 ai[0]=0）原版同落帧 0——NPC↔NPC 聊天表演帧
-   *  （num58−1..−5 族 :69678-69930，ai[0]∈{3,4,7,16,17}）本仓无对应状态机，
-   *  登记未接 */
+   *  （talkNPC==本体 :53721 置 ai[0]=0）原版同落帧 0。社交表演帧带经 socialFrame
+   *  承接（ai[0]∈{2,11,18,24,6,7,19,9,3,4,16,17} 全列）。 */
   private updateWalkFrame(game?: GameHooks): void {
     if (!this.onGround) {
       this.frame = 1;
@@ -2354,10 +2529,11 @@ export class TownNPC extends Entity {
       }
       case 3:
       case 4: {
-        // 结对聊天（:69865-69940）：发起者 num90/应答者 num91 双时间线；
-        // 表情由发起方掷（frameCounter==70 对方冒 90"…"、==216 自己冒 70
-        // 对话、==320 自己冒 100"?!"——NewBubbleNPC 带对方锚，本仓 spawnEmote
-        // 单锚近似）
+        // 结对聊天（:69865-69942）：发起者 num92/应答者 num93 双时间线；
+        // 表情由发起方掷。★2026-08-31 台账批：三处 NewBubbleNPC 按原式落——
+        // 第二参=时长 tick，表情=PickNPCEmote 随机（旧码把 90/70/100 当表情 id
+        // 直绘且寿命恒默认 180）；==70 泡锚在【对方头顶】（NewBubbleNPC(
+        // anchor=nPC,time=90,other=self)，nPC.CanTalk 门），==216/==320 锚在自己。
         let mine = 0, theirs = 0;
         if (t < 10) mine = 0;
         else if (t < 16) mine = base - 5;
@@ -2376,18 +2552,65 @@ export class TownNPC extends Entity {
         else if (t < 326) theirs = base - 1;
         this.frame = s.kind === 3 ? mine : theirs;
         if (s.kind === 3) {
-          // 结对聊天表情（:69899-69942）：num92/num93 默认 −1，仅三处置值——
-          //  ==216 → num92=70（自己）、==320 → num92=100（自己）、==70 → num93=90
-          //  （对方 nPC.CanTalk 门）。NewBubbleNPC(anchor, 时长, 对方锚)——★每次事件
-          //  【单泡】（锚在说话者/回应者间切换，非两位各一；RPS ai16 才是双泡
-          //  :70149-70150）；第二参是时长 tick 非表情 id，表情 = PickNPCEmote(other)
-          //  随机（90/70/100 此前误当表情 id）。第三锚=对方（气泡指向），本仓
-          //  facing 已朝对方=尾巴方向等效
-          if (t === 216) spawnEmote(this, 70);      // num92=70（:69901 表情 id）
-          if (t === 320) spawnEmote(this, 100);     // num92=100（:69917）
-          if (t === 70 && s.other) spawnEmote(s.other, 90);  // num93=90（:69929，锚在对方）
+          // NewBubbleNPC(anchor, time, other)（EmoteBubble.cs:134）：
+          //   ==216 → (self, 70, partner)  ==320 → (self, 100, partner)
+          //   ==70  → (partner, 90, self)，须 partner.CanTalk（:6673 站地+非宠物）
+          const partnerCanTalk = s.other ? s.other.onGround && !IS_TOWN_PET.has(s.other.vanillaId) : false;
+          if (t === 216) spawnEmote(this, this.npcEmotePick(this.rng), 70);
+          if (t === 320) spawnEmote(this, this.npcEmotePick(this.rng), 100);
+          if (t === 70 && s.other && partnerCanTalk) {
+            spawnEmote(s.other, this.npcEmotePick(this.rng), 90);
+          }
         }
         if (t >= 420) s.frameT = 0;
+        break;
+      }
+      case 11: {
+        // 海盗闲坐拨弄（FindFrame ai[0]==11 :69709-69750）：帧 0 →(≥20t)→
+        // num60−1 困盹帧 + NewBubble(89, self, 90)；困盹满 50t 的那一拍从背后撒
+        // dust 216 ×(3+Next(4))（vel=(−dir,1)、原式再各 ÷2）+ 1/30 gore 580-582
+        // （gore 无 API 不接，登记）；≥100t 且 Next(20)==0 回帧 0。
+        // 转身/退出口与发呆共段（socialUpdate A 区 {2,11} 族）
+        if (this.frame === base - 1) {
+          if (t === 50 && game?.vanillaDust) {
+            const n67 = 3 + Math.floor(this.rng() * 4);            // Next(4)
+            for (let i = 0; i < n67; i++) {
+              const d = game.vanillaDust.spawn(
+                this.cx - this.facing * 8 - 5, this.cy + 3, 3, 6, 216,
+                -this.facing / 2, 0.5, 0, null, 0.8);
+              if (d) d.scale = 0.8;
+            }
+          }
+          if (t >= 100 && this.rng() < 1 / 20) {                   // Next(20)==0
+            this.frame = 0; s.frameT = 0;
+          }
+        } else if (t >= 20) {
+          this.frame = base - 1; s.frameT = 0;
+          spawnEmote(this, 89, 90);                                // NewBubble(89,self,90)
+        }
+        break;
+      }
+      case 18: {
+        // 酒馆老板扔麦酒演出帧（FindFrame ai[0]==18 :69856-69889）：反编译原文
+        // 时间带（<10 帧0/<16 num60−1/else num60−2 再被 ai[1]<16→num60−1 /
+        // <10→0 两道改写）全部被末行 `num78 = Main.npcFrameCount[type] − 2`
+        // 无条件覆写 ⇒ 有效终值恒为【倒数第二行】，按字面直录（不"修复"编译器
+        // 保留的死赋值链）
+        const total18 = VANILLA_NPCS[String(this.vanillaId)]?.frames ?? 0;
+        this.frame = Math.max(0, total18 - 2);
+        break;
+      }
+      case 24: {
+        // 树妖 Stardew 施法演出帧（FindFrame ai[0]==14||24 共带 :69943-69970）：
+        // 每 6t 在 num60 / num60+1 间交替；ai[0]==24 特有：60t 冒 NewBubble(87,
+        // self,60)、150t 冒 NewBubble(3, self, 90)。frameCounter 不清零——
+        // ≥240 后末行 `frame.Y=0` 把行号钉死回空闲帧（演出后半段静立），气泡
+        // 各恰一次（480t 态长由 s.t 承载）
+        let f24 = t % 12 < 6 ? base : base + 1;
+        if (t >= 240) f24 = 0;
+        this.frame = f24;
+        if (t === 60) spawnEmote(this, 87, 60);
+        if (t === 150) spawnEmote(this, 3, 90);
         break;
       }
       case 16:
@@ -2524,35 +2747,35 @@ export class TownNPC extends Entity {
     this.frameT = 0;
   }
 
-  /** AI_007 ai[0]==25 微光上升态（NPC.cs:53594-53682）1:1，返回 true = 态中。
-   *  时间线：ai[1]==0 落点传送（:53609，位移 ≥560px 则 ai[2]=30 暂停 + 发送
-   *  粒子）→ ai[2] 倒计时毕置 ai[1]=1（:53612-53618）→ 此后每 tick ai[1]+1
-   *  （:53620）→ ≥30 起非浸液 st−1/60、浸液钳 30 等待（:53621-53629）+
-   *  velocity=(0,−4×st)（:53631）→ ai[1]≥75 且 st≤0 收尾（:53653-53669）：
-   *  变体翻转（双向）+ 原地 Teleport(12)（TeleportEffect 无 style 12 分支 =
-   *  纯重锚无视觉，Main.cs:13169-13414）+ ShimmerTownNPC 到场粒子 + 成就 43 */
+  /** AI_007 ai[0]==25 微光上升态（★1457 锚行校准：块 :53737-53820）1:1，返回 true = 态中。
+   *  时间线：ai[1]==0 落点传送（:53752-55 → Shimmer_TeleportToLandingSpot :56130-49，
+   *  位移 ≥560px(:56138) 则 ai[2]=30(:56141) 暂停 + 发送粒子）→ ai[2] 倒计时毕置
+   *  ai[1]=1（:53747-50）→ 此后每 tick ai[1]+1（:53764）→ ≥30 起非浸液 st−1/60、
+   *  浸液钳 30 等待（:53765-75）+ velocity=(0,−4×st)（:53776）→ ai[1]≥75 且 st≤0
+   *  收尾（:53801-3820）：变体翻转（双向）+ 原地 Teleport(12)（TeleportEffect 无
+   *  style 12 分支 = 纯重锚无视觉，Main.cs:13169-13414）+ ShimmerTownNPC 到场粒子 + 成就 43 */
   private shimmerRiseUpdate(
     world: import('../world/World').World, game: GameHooks, wet: boolean,
   ): boolean {
     if (this.shimmerRiseT === 0) this.vx = 0;                     // :53597-53599
     if (this.shimmerRiseT === 0 && this.shimmerRisePause < 1) {
-      this.shimmerLandAt(world.store, game);                      // :53609
+      this.shimmerLandAt(world.store, game);                      // :53752-55/:56130
     }
     if (this.shimmerRisePause > 0) {                              // :53612-53618
       this.shimmerRisePause--;
       if (this.shimmerRisePause <= 0) this.shimmerRiseT = 1;
       return true;
     }
-    this.shimmerRiseT++;                                          // :53620
-    if (this.shimmerRiseT >= SHIMMER_RISE_VELOCITY_TICK) {        // :53621
+    this.shimmerRiseT++;                                          // :53764
+    if (this.shimmerRiseT >= SHIMMER_RISE_VELOCITY_TICK) {        // :53765
       if (!wet) {
         // WetCollision 近似 = 中心格任意液体（:53622-53626）
         this.shimmerTransparency = shimmerTransparencyNext(this.shimmerTransparency, false, false, true);
       } else {
-        this.shimmerRiseT = SHIMMER_RISE_VELOCITY_TICK;           // :53627 浸液等待
+        this.shimmerRiseT = SHIMMER_RISE_VELOCITY_TICK;           // :53772-75 浸液等待
       }
       this.vx = 0;
-      this.vy = -4 * this.shimmerTransparency;                    // :53631
+      this.vy = -4 * this.shimmerTransparency;                    // :53776
     }
     // 上升演出（:53634-53649）——dust 309 / ShimmerBlock 的 Remap 门在 ai[1]<30
     // 时钳到恒假，与原版同 tick 生效（光走 lightRGB 的 shimmerRise 分支）
@@ -2579,16 +2802,17 @@ export class TownNPC extends Entity {
         );
       }
     }
-    // TargetClosest（:53651）：面向最近玩家
+    // TargetClosest（:53799）：面向最近玩家
     const tp = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
     if (tp && !tp.dead) this.facing = tp.x + tp.w / 2 < this.cx ? -1 : 1;
     if (this.shimmerRiseT >= SHIMMER_RISE_END_TICK && this.shimmerTransparency <= 0) {
-      this.shimmerRise = false;                                   // ai[0]=0（:53654）
+      this.shimmerRise = false;                                   // ai[0]=0（:53803-06）
       this.shimmerRiseT = 0;
       this.shimmerRisePause = 0;
-      this.vx = 0; this.vy = -4;                                  // :53660
-      this.shimmered = !this.shimmered;                           // :53664 变体翻转（双向）
-      // ShimmerTownNPC 到场粒子（:53666 → Spawn_ShimmerTownNPC :1696-1752）：
+      this.vx = 0; this.vy = -4;                                  // :53808
+      this.shimmered = !this.shimmered;                           // :53814 变体翻转（双向）
+      // ShimmerTownNPC 到场粒子（:53817 BroadcastParticleSpawn(ShimmerTownNPC) →
+      // Spawn_ShimmerTownNPC :1696-1752）：
       // 40 PrettySparkle（hsl(rand,1,0.5)+白，30×60 盒上升）+ 20 dust 308 四色
       // （#FFFFD2/#BEF5FF/#FF96FF/#BEAFFF = 1:1:1:3，vy−8）+ SoundID.Item29
       //（= Item bank cue 29，Sfx 键 manaCrystal → sounds/Item_29.wav；曾因登记
@@ -2597,20 +2821,21 @@ export class TownNPC extends Entity {
       game.spawnParticles(this.cx, this.cy, '#BEF5FF', 4, 3.2, { life: 34, grav: -0.12 });
       game.spawnParticles(this.cx, this.cy, '#FF96FF', 4, 3.2, { life: 34, grav: -0.12 });
       game.playSfx('manaCrystal', 1, this.cx, this.cy);
-      // module8 广播（NPC.cs:53674 BroadcastParticleSpawn(ShimmerTownNPC, Center)）：
+      // module8 广播（NPC.cs:53816-19 Teleport(12)+Broadcast：本地视觉上方已生）：
       // 本地视觉上方三行已生,此处只发服务器中继——他端经 Spawn_ShimmerTownNPC 同款爆发
       game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.cy);
-      if (this.shimmered) game.achievements?.notifyProgressionEvent(43);   // :53667-53669
+      if (this.shimmered) game.achievements?.notifyProgressionEvent(43);   // :53822-24
     }
     return true;
   }
 
-  /** AI_007_TownEntities_Shimmer_TeleportToLandingSpot（:53609 → :55982-56010 +
-   *  ScanForBestSpotToLandOn :55996-56059）：以自身顶格扫无微光落点（home 锚
-   *  兜底），传送过去；位移 ≥560px → ai[2]=30 暂停 + ShimmerTownNPCSend 粒子
-   *  （Spawn_ :1657-1694）。复用 stats/Shimmer.findShimmerFreeSpot（玩家脱困
-   *  版同谓词）：环扫为原版 8 点环超集、r 并到 59、平台落点恒允许（原版仅
-   *  homeless 无 home 时 allowSolidTop）——行为相容近似 */
+  /** AI_007_TownEntities_Shimmer_TeleportToLandingSpot（★1457 锚行校准：调用位
+   *  :53752-55 → 本体 :56130-49 + ScanForBestSpotToLandOn :56151 起）：以自身顶格
+   *  扫无微光落点（home 锚兜底），传送过去；位移 ≥560px(:56138) → ai[2]=30(:56141)
+   *  暂停 + ShimmerTownNPCSend 粒子（PositionInWorld=vector2+Size/2 :56144）。
+   *  复用 stats/Shimmer.findShimmerFreeSpot（玩家脱困版同谓词）：环扫为原版 8 点环
+   *  超集、r 并到 59、平台落点恒允许（原版仅 homeless 无 home 时 allowSolidTop）
+   *  ——行为相容近似 */
   private shimmerLandAt(st: TileStore, game: GameHooks): void {
     const spot = findShimmerFreeSpot(
       st, Math.floor(this.x / TILE), Math.floor(this.y / TILE),   // Top.ToTileCoordinates
@@ -2620,37 +2845,45 @@ export class TownNPC extends Entity {
     const nx = spot.x * TILE - this.w / 2, ny = spot.y * TILE - this.h;   // ShimmerHelper.cs:9
     const dist = Math.hypot(nx - this.x, ny - this.y);
     const oldX = this.x, oldY = this.y;
-    const oldCx = oldX + this.w / 2, oldCy = oldY + this.h / 2;   // 传送前中心（:55995 vector2+Size/2）
+    const oldCx = oldX + this.w / 2, oldCy = oldY + this.h / 2;   // 传送前中心（:56144 vector2+Size/2）
     this.x = nx;
     this.y = ny;
     if (dist >= SHIMMER_RISE_TELEPORT_DIST) {
-      this.shimmerRisePause = SHIMMER_RISE_PAUSE;                 // :56004
+      this.shimmerRisePause = SHIMMER_RISE_PAUSE;                 // :56141
       game.spawnParticles(this.cx, this.cy, '#BEAFFF', 14, 1.2, { life: 30, grav: -0.05 });
       game.spawnParticles(this.cx, this.cy, '#BEF5FF', 10, 1.2, { life: 30, grav: -0.05 });
-      // module8 广播（NPC.cs:55994 ShimmerTownNPCSend：旧中心位 + 位移向量
+      // module8 广播（NPC.cs:56143 ShimmerTownNPCSend：旧中心位 + 位移向量
       //（= 新旧左上差,与新旧中心差同值））
       game.broadcastParticleOrchestra?.(
         ParticleOrchestraType.ShimmerTownNPCSend, oldCx, oldCy, nx - oldX, ny - oldY);
     }
   }
 
-  /** 环境与互殴受击(NPC.cs:91590-91600 的 townNPC 分支;★C1 定案：本块在 Update 层
-   *  与 AI() 正交——ai[0]==25 微光上升帧同样运行,早退分支现于 fixedUpdate 内显式
-   *  调用本方法承接。整块挂 :91593 门 `netMode!=1 && type!=37 && friendly`——老人
-   *  (37) 不入三连）：
+  /** 环境与互殴受击(UpdateEnemy :91592-91603;★C1 定案：本块在 Update 层与 AI()
+   *  正交——ai[0]==25 微光上升帧同样运行,早退分支现于 fixedUpdate 内显式调用本
+   *  方法承接。原版双调用位：三连 :91592-91600 挂 `type!=37 && (friendly||
+   *  TakesDamageFromHostilesWithoutBeingFriendly)`；蜂二次调用 ：91601-03 无该门,
+   *  见下 ④）：
    *  ① 岩浆已移交 npcLiquid.updateNpcLiquid（30t 冷却+50 直伤同语义）
-   *  ② 溺水(CheckDrowning :96056-96088):几何判头浸(Collision.DrownCollision
-   *    Collision.cs:1385,非 wet 旗)——水内每 7t breath--;breath≤0 后每 7t
+   *  ② 溺水(CheckDrowning :96056-96088):几何判头浸 = Collision.DrownCollision
+   *    （Collision.cs:1385-1430,gravDir=1）★F4 定案换真探针几何（drownCollision
+   *    本文件）、【无 wet 锁存】——水内每 7t breath--;breath≤0 后每 7t
    *    life-=2 直写(:96073,dontTakeDamage 管不着)+friendlyRegen 清零(:96069);
    *    归零一击 StrikeNPCNoInteraction(2)(:96077-81,owner=255 链不查
    *    dontTakeDamage/immune → 微光中同样可致死,hurt 的 force 通道承接);
    *    离水 breath+3/t cap 200
-   *  ③ 敌怪互殴(GetHurtByOtherNPCs :93555-93690):头部 dontTakeDamage 早退(:93559-
-   *    63) → 微光上升态停算;接触命中 → StrikeNPC(DamageVar(attacker.damage), 6,
-   *    方向),immune[255]=30;后置两枝（2026-08-20 补）：dryadWard 荆棘反伤
-   *    (⌊实伤/3⌋,:93666-93681) + HurtingBees 蜂攻击者受【本体 damage】反蜇
-   *    (:93682-93696)
-   *  Enemy.def.damage 已含难度缩放(ScaleStats),DamageVar≈1(Classic)直用。 */
+   *  ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:93599）：头部 dontTakeDamage
+   *    早退(:93559-63) → 微光上升态停算;攻击者准入门 = acceptable 集 + !friendly +
+   *    damage>0 + !CritterThatCanTurnOnPlayers（★F3① 十型表）;命中盒 =
+   *    GetMeleeCollisionData 变形面（★F3② 加宽族表 meleeAttackRect;
+   *    damageMultiplier 为死参不接）;接触命中 → StrikeNPC(DamageVar(attacker.damage),
+   *    6,方向),immune[255]=30;后置两枝：dryadWard 荆棘反伤(⌊实伤/3⌋,:93666-81)
+   *    + HurtingBees 蜂反蜇(:93682-96)
+   *  ④ ★F1③ HurtingBees 第二遍（:91601-03）：门 = CanBeHurtByBees[type]（默认全
+   *    类型真,翻转集 210/211/222）+ 场上存在蜂——【老人 37 也受理】伤害面放开;
+   *    同 tick 若首遍已建 immune[255]=30 则早退(:93564)
+   *  Enemy.def.damage 已含难度缩放(ScaleStats);首击掷骰走 stats/DamageVar 单源
+   *  （★F2,this.rng 注入,luck=0 单掷）。 */
   /** 城镇 NPC 被动回血（CheckLifeRegen NPC.cs:93622-93641，★F10 移植）——
    *  受伤期每 tick 累加 friendlyRegen += 回血率[1 + dryadWard?10 + {22:+5|209:+9}]，
    *  >180 → 清零并 life+1；不设难度倍率、无 CombatText、无音效。困难态唯一不变式 =
@@ -2678,15 +2911,11 @@ export class TownNPC extends Entity {
     // 整块豁免门（:91593 字面 `type != 37 && friendly…`——老人(37)不在三连受理面,
     // ★C1 上提覆盖面：豁免从「仅回血」扩为整段三连,与原版同门）
     if (this.vanillaId !== 37) {
-      // ② 溺水(CheckDrowning :96056-96088):几何判头浸(Collision.DrownCollision,
-      // Collision.cs:1385)——非 wet 标志位驱动!近似 = 头部格有液 且 非 lava(2)
-      // 且 非 shimmer(4)（DrownCollision 显式 `!tile.lava() && !tile.shimmer()`）
-      const hi = st.idx(
-        Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))),
-        Math.max(0, Math.min(st.h - 1, Math.floor((this.y + 6) / TILE))),
-      );
-      const submerged = this.wet && st.liquid[hi] > 0
-        && st.liquidType[hi] !== 2 && st.liquidType[hi] !== 4;
+      // ② 溺水(CheckDrowning :96056-96088)：DrownCollision 几何判定（:96058 字面
+      // `DrownCollision(position,width,height,1f)`，gravDir=1 非 includeSlopes）
+      // ★F4 定案 = 真 10×12 头部探针族 + 降面水位 + 首行实心排除，且【去 wet
+      // 锁存】——传送落水首拍即计（原文本不查 wet;带 wet 外伞的是 idle 起身支）
+      const submerged = drownCollision(st, this.x, this.y, this.w, this.h);
       if (submerged) {
         if (++this.breathCounter >= 7) {
           this.breathCounter = 0;
@@ -2708,43 +2937,82 @@ export class TownNPC extends Entity {
       // ②' 城镇被动回血 CheckLifeRegen（:93598 与 CheckDrowning 同块依序,
       //    位于互殴段之前）★F10/★C1(ai25 帧照常累计)
       this.lifeRegenUpdate();
-      // ③ 敌怪互殴(GetHurtByOtherNPCs :93555-93690)——BeHurtByOtherNPC 全段（含
-      //    dryadWard 荆棘 + HurtingBees 蜂反蜇两后置枝，:93666-93696）。
-      //    ★C1：头部早退门 (:93559-63 `dontTakeDamage||immortal||…`) —— 微光上升态
+      // ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:93599）——beHurtByOtherNpc
+      //    全段（含 dryadWard 荆棘 + HurtingBees 蜂反蜇两后置枝,:93666-93696）。
+      //    ★C1：头部早退门 (:93559-63 `dontTakeDamage||immortal||…`)——微光上升态
       //    (ai[0]==25 → this.hurt 的 dontTakeDamage 承接位)互殴停算。
-      if (!this.shimmerRise && this.npcVsCd <= 0) {
-      for (const ent of game.enemies()) {
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-          damage?: number; def?: { damage?: number }; vanillaId?: number };
-        if (e.dead) continue;
-        const dmg = e.damage ?? e.def?.damage ?? 0;
-        if (dmg <= 0) continue;
-        if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-        const dir = e.x + e.w / 2 > this.cx ? -1 : 1; // :93662 攻击者在右侧 → 向左击退
-        this.npcVsCd = 30;                              // immune[255]=30
-        const hpBefore = this.hp;
-        this.hurt(dmg, dir * 6, 0, game);               // kb=6(:93661)
-        // 实伤 num5 = StrikeNPCNoInteraction 返回值（hp 差值等价，致死钳到扣血额）
-        const dealt = Math.max(0, hpBefore - Math.max(0, this.hp));
-        // 干掉攻击者引用（荆棘/反蜇两枝共享；反蜇伤害源 = 本体 npc.damage）
-        const strikeBack = (amount: number): void => {
-          const foe = e as unknown as import('./Enemy').Enemy;
-          if (typeof foe.hurt !== 'function') return;
-          foe.hurt(amount, -dir * 6, 0, game, 0, false, 1);   // StrikeNPCNoInteraction
-        };
-        // :93666-93681 dryadWard 荆棘：反伤 ⌊dealt/3⌋（kb6 反向，攻击者同 30t 冷却）
-        if (this.dryadWardT > 0 && dealt > 0) {
-          strikeBack(Math.trunc(dealt / 3));
-        }
-        // :93682-93696 HurtingBees：蜂攻击者额外受【本体 damage】反蜇
-        // （npc.damage = 攻击型城镇 NPC 战斗伤害，atkParams 取档）
-        if (e.vanillaId === 210 || e.vanillaId === 211) {
-          const myDmg = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId] as 0 | 1 | 2 | 3)?.dmg ?? 0;
-          strikeBack(myDmg);
-        }
-        break;
+      if (!this.shimmerRise && this.npcVsCd <= 0) this.enemyMeleeScan(game, null);
+    }
+    // ★F1③ HurtingBees 第二遍（:91601-03 字面）：无 type37/friendly 门——门 =
+    //   CanBeHurtByBees[type]（NPCID.cs Factory.CreateBoolSet(true,210,211,222)
+    //   翻转集 → 默认全类型为真、仅蜂/蜂后假——【老人 37 也真】）+ 场上存在蜂
+    //   (210/211)(npcsFoundForCheckActive 探测,性能面)。→ 老人(37)不入三连但
+    //   被蜂接触伤害面【照常放开】。
+    //   两遍 immune 序：首遍命中即置 immune[255]=30(npcVsCd) → 此处同 tick 早退
+    //   (:93564)，蜂近场判定与原版 npcsFoundForCheckActive 同为性能短路。
+    const beesNear = (game.enemies() as Array<{ dead?: boolean; vanillaId?: number }>)
+      .some((e) => !e.dead && (e.vanillaId === 210 || e.vanillaId === 211));
+    if (beesNear && !this.shimmerRise && this.npcVsCd <= 0) {
+      this.enemyMeleeScan(game, HURTING_BEES);
+    }
+  }
+
+  /** GetHurtByOtherNPCs 循环体（:93555-93585）。acceptable=null = AllNPCs 全集；
+   *  否则仅 HurtingBees 集。命中一个攻击者即 return——与原版 break 同构 */
+  private enemyMeleeScan(
+    game: GameHooks, acceptable: ReadonlySet<number> | null,
+  ): void {
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as MeleeAttackerLike & import('./Enemy').Enemy;
+      if (e.dead) continue;
+      const id = e.vanillaId ?? -1;
+      if (acceptable !== null && !acceptable.has(id)) continue;   // acceptableNPCIDs[type]
+      if (CRITTERS_TURN_ON_PLAYERS.has(id)) continue;             // :93573 准入门②(十型)
+      const dmg = e.damage ?? e.def?.damage ?? 0;
+      if (dmg <= 0) continue;                                     // nPC.damage > 0(:93575)
+      // 命中几何 = GetMeleeCollisionData 变形后的攻击者盒(:96111)；后置特判链 :93579-80
+      const rect = meleeAttackRect(e, this.x, this.y, this.w, this.h);
+      if (!rect) continue;                                        // type400 npcRect=default 恒不交
+      if (!(this.x < rect.x + rect.w && this.x + this.w > rect.x
+        && this.y < rect.y + rect.h && this.y + this.h > rect.y)) continue;
+      // (:93579 `(type != 453 || !Skeletons[nPC.type])`——self∈Skeletons 型才受限,
+      // 骷髅商人 453 有城镇载体故字面保留 Skeletons 表；624/690 直判)
+      if ((this.vanillaId !== 453 || !SKELETON_IDS.has(id)) && id !== 624 && id !== 690) {
+        this.beHurtByOtherNpc(e, game, dmg);
       }
-      }
+      return;
+    }
+  }
+
+  /** BeHurtByOtherNPC（:93588-93620）：immune[255]=num(30/695·696 面 20)、首击 =
+   *  Main.DamageVar(thatNPC.damage)（★F2：stats/DamageVar 单源、注入 this.rng——
+   *  luck=0 单掷不涉重掷位）;dryadWard 反伤 ⌊实伤/3⌋ 与 HurtingBees 反蜇
+   *  （蜂受击=受方 damage 直接取值【不再掷骰】——原文本面 num2=damage）两后置枝 */
+  private beHurtByOtherNpc(
+    e: MeleeAttackerLike & import('./Enemy').Enemy, game: GameHooks, rawDmg: number,
+  ): void {
+    const dir = e.x + e.w / 2 > this.cx ? -1 : 1;   // :93613 攻击者在右 → 向左击退
+    this.npcVsCd = 30;                              // :93616 immune[255]=30
+    const hpBefore = this.hp;
+    // :93595 num2 = Main.DamageVar(thatNPC.damage)
+    const rolled = damageVarRoll(rawDmg, 0, this.rng);
+    this.hurt(rolled, dir * 6, 0, game);            // StrikeNPCNoInteraction(num2,6,num4)
+    // 实伤 num5 = StrikeNPCNoInteraction 返回值（hp 差值等价，致死钳到扣血额）
+    const dealt = Math.max(0, hpBefore - Math.max(0, this.hp));
+    // 干掉攻击者引用（荆棘/反蜇两枝共享）
+    const strikeBack = (amount: number): void => {
+      const foe = e as unknown as import('./Enemy').Enemy;
+      if (typeof foe.hurt !== 'function') return;
+      foe.hurt(amount, -dir * 6, 0, game, 0, false, 1);     // StrikeNPCNoInteraction
+    };
+    // :93618-23 dryadWard 荆棘：反伤 ⌊dealt/3⌋（kb6 反向，攻击者同 30t 冷却）
+    if (this.dryadWardT > 0 && dealt > 0) {
+      strikeBack(Math.trunc(dealt / 3));
+    }
+    // :93624-31 HurtingBees：蜂攻击者额外受【本体 damage】反蜇（atkParams 取档）
+    if (e.vanillaId === 210 || e.vanillaId === 211) {
+      const myDmg = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId] as 0 | 1 | 2 | 3)?.dmg ?? 0;
+      strikeBack(myDmg);
     }
   }
 
@@ -2810,6 +3078,13 @@ export class TownNPC extends Entity {
                                                       // flag15 与威胁簿记在此分立
       scanHit = true;                                 // flag16 = true（:54043 候选点）
       if (estinky) this.dangerStinky = true;          // flag17 置位（:54045-47）
+      // ★F5 留档：dx==0（敌怪 Center.X 与本体中心精确同列）两侧都不簿记——原版
+      // 判定链是 `num18 < 0f → num13` / `num18 > 0f → num14`（:54052-54068），
+      // 零值两边皆不写。本仓以 else 兜底把 dx==0 归入右侧候选（保持入池受理面）。
+      // 选侧差异只在「存在严格左侧威胁 × 其余右侧皆空」时显形：原版 num14 恒
+      // −1 → `(num14!=-1f)?…:(-1)` 取 −1 向西；本仓 bestR==0 参与近距比较取向东。
+      // 唯一中心敌场景两侧结果同为向右（num13==-1 → 1），无差。登记性偏离,
+      // 改 else-if 前须同步复核 threatPool 受理面。
       if (dx < 0) {
         if (bestL === -1 || dx > bestL) {
           bestL = dx;
@@ -3118,7 +3393,7 @@ export class TownNPC extends Entity {
     //  自出生起计；Kill 门 = 本 NPC 离开 ai[0]=14 态（:38724）→ 态尽随退态熄灭
     if (this.atkState === 14 && this.vanillaId === 20 && this.atkTick >= 24) {
       this.wardT++;
-      this.updateDryadWardAura(game);
+      this.updateDryadWardAura(world, game);
     }
     if (this.atkState === 15) {
       // 挥击态：退出链（含换敌再接/被逼停复位）在 swingUpdate 内闭环,
@@ -3399,9 +3674,12 @@ export class TownNPC extends Entity {
    *    AddBuff(165,120)；本仓 buffs.apply 的 max 合并等价续期（120t=2s）
    *  - 尘（:38754-38777）：1/4 掷光环环尘（163，2/3 尘加环向速度）
    *  - 熄灭（:38732 Kill 门 + :38814 >=570 Kill）：本 NPC 离开施法态或弹龄 570
-   *  敌怪 186 DryadBane/城镇 NPC 165 同链（:38806-38812 每 10t）——本仓敌怪 buff
-   *  系统无 186，城镇 NPC buff 无栏，登记不接 */
-  private updateDryadWardAura(game: GameHooks): void {
+   *  敌怪 186 DryadBane 同链 else-if 臂（Projectile.cs:41967-41970，2026-08-31 台账
+   *  批补：!friendly && lifeMax>5 && !dontTakeDamage && (无186|≤20t 重授) &&
+   *  (已带煞 || CanHit 弹心点对敌盒) && type!=488 蜂后豁免；DoT =
+   *  GetDryadsBaneDamagePerSecond(:92898 进度链 ×4 基) → DOTTally.Add(dps×2,
+   *  dps/3) = dps HP/s，Enemy.dryadBaneT/dryadBaneDps 承载） */
+  private updateDryadWardAura(world: import('../world/World').World, game: GameHooks): void {
     if (this.wardT > 570) return;
     const a = this.wardT;
     let radius = 300;
@@ -3419,13 +3697,29 @@ export class TownNPC extends Entity {
       // hurt() 防御 +20/15/10 与荆棘反伤 ⌊实伤/3⌋ 两枝即刻覆盖本体；连带 ：55782
       // 入态门（扫描含 self、`FindBuffIndex(165)==-1` 才放行）出现「独处施法节律
       // 化」——本体带 ward 时不再自证 needy，须等 120t 衰减归零才可再入 ai[0]=14。
-      // 敌怪 DryadBane(186) 支登记未接（敌怪 buff 系统无 186 栏）
       if (a % 10 === 0) {
         for (const ent of (game.npcs?.() ?? [])) {
           const tn = ent as TownNPC;
           if (!(tn instanceof TownNPC) || tn.dead) continue;
           if (Math.hypot(tn.cx - this.cx, tn.cy - this.cy) > radius) continue;
           if (tn.dryadWardT <= 20) tn.dryadWardT = 120;
+        }
+        // else-if 臂：非友好实体的 186 树妖煞（:41967 字面门序——重授窗 FindBuff==-1
+        // || buffTime<=20 由 ≤20/120t 比例承载；LOS = CanHit(弹心,1,1, 敌盒))
+        const progAura = townNpcProgressionFromWorld(world);
+        const baneDps = getAttackDamageForTownNPC(4 * townNpcProgressionBoost(progAura).damageMul,
+          mainDifficulty(world));
+        for (const ent of (game.enemies?.() ?? [])) {
+          const e = ent as unknown as import('./Enemy').Enemy & { dryadBaneT?: number };
+          if (!e || e.dead || e.vanillaId === 488) continue;         // type!=488（蜂后）
+          if (e.maxHp <= 5 || e.dontTakeDamage) continue;
+          if (Math.hypot(e.cx - this.cx, e.cy - this.cy) > radius) continue;
+          const cur = e.dryadBaneT ?? 0;
+          if (cur > 20 / 60) continue;                              // 重授窗=尚余 >20t
+          if (!(cur > 0) && !canHitLine(world.store, this.cx, this.cy, 1, 1,
+            e.x, e.y, e.w, e.h)) continue;                          // 未带煞须见 LOS
+          applyBuffTicks(e as unknown as Record<string, number | undefined>, 186, 120);   // max 合并+免疫表
+          if ((e.dryadBaneT ?? 0) > cur) e.dryadBaneDps = baneDps;  // 实际写入才算吃上
         }
       }
     }
@@ -3457,9 +3751,11 @@ export class TownNPC extends Entity {
     opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean; shotFaceMatch?: boolean },
   ): ThreatRef | null {
     const pool = this.threatPool;
-    // 态内发射瞄准面（num58 两连 if）：
+    // 态内发射瞄准面（★F5 锚行校准：原版 num15/spriteDirection/num16·17 池靶
+    //   取向规则首现 :55052-58（ai[0]==10 支直接内联构造 vec），挑选位同形
+    //   :55105-13（num58=-1 + 两连 if）——后续发射支沿同形取池靶,本仓统一为：
     //   num15==1 && spriteDirection==1 → num17；num15==-1 && spriteDirection==-1 → num16；
-    //   否则 -1。hazard 侧与面向不同向 → 直取默认直线向量（shootAt 兜底承担）。
+    //   否则 -1。面向与危险侧不同向 → 直取默认直线向量（shootAt 兜底承担）。
     if (opts?.shotFaceMatch) {
       if ((this.facing === 1) !== (this.dangerSide === 1)) return null;
       return this.facing === 1 ? pool.right : pool.left;
@@ -3640,67 +3936,31 @@ export class TownNPC extends Entity {
       return;
     }
     // 撞门开门：前方碰撞点是关着的普通门（10）或高门（388）
-    // （原版 54478-54500：Next(10)==0；普通门两方向回退，高门 ShiftTallGate(closing:false)）
-    // ★2026-08-30 二改:不依赖 hitWall —— obstacleJump/避坠停走会让 NPC 永远差半格
-    // 贴不上墙(hitWall 难产),踱步死循环(用户实测「被迫来回踱步从未靠近门」)。改为
-    // 行进态每 tick 先前视扫门(原版即 tile 扫描驱动),hitWall 仅作补充通道。
-    // ★非行进/交互中不扫门(坐姿·对话·攻击·守卫老人——原版开门在行走块内,
-    //  站椅近门时乱开是本修曾引入的回归面);hitWall 兜底同受此门保护
+    // （原版 54576-54608：行进贴地态每 tick 前视探格，掷门 (Next(10)==0 | 回家旗)）
+    // ★2026-08-30 二改：不依赖 hitWall —— 行进态每 tick 前视扫门（原版即 tile 扫描
+    //   驱动）。★2026-08-31 台账①收敛批：hitWall 兜底通道【退役】——旧兜底
+    //   「任何天气赌 10%+撞墙必开、开成不加走程、堵死不转身」四点全为偏离；现唯一
+    //   通道 tryOpenDoorAhead 内已按原版补齐回家旗/成功 ai[1]+=80/全败 direction
+    //   翻转三语义（见下法）。站椅近门乱开的回归面由 idleInteractive 门继续承担
+    //   （原版开门在行走块内，坐/对话/攻击等态整段不可达）。
     const idleInteractive = this.sitting || this.talking || this.atkState !== 0
       || this.healing || this.stationary || this.fleeing;
-    // ★诊断插桩:门分支入口状态(永久旗控 __DOORDBG)
-    const dbgOn2 = (globalThis as unknown as { __DOORDBG?: boolean }).__DOORDBG === true;
-    if (dbgOn2 && Math.random() < 0.03) {
-      game.behavioLog?.('npcDoorGate', {
-        hitWall: !!this.hitWall, idle: this.sitting || this.talking || this.atkState !== 0
-          || this.stationary || this.fleeing,
-        walkMode: this.walkMode, cxT: Math.floor(this.cx / 16), facing: this.facing,
-        carried: this.closeDoor,
-      });
-    }
-    if (!this.closeDoor && !idleInteractive && !this.hitWall) {
-      // ★无 walkMode 前提:站坑口停走/避坠瞬间(walkMode 被清零的 tick)正是最需要
-      // 开门的时刻——去掉前提后自然相位 1.5s 内开门,不再依赖特定模式窗口
+    if (!this.closeDoor && !idleInteractive) {
+      // ★无 walkMode 前提：站坑口停走/避坠瞬间(walkMode 被清零的 tick)正是最需要
+      // 开门的时刻——原版该块挂 velocity.Y==0 的贴地窗而非游走子态
       if (this.tryOpenDoorAhead(st, game)) return;
-    }
-    if (!this.hitWall) return;
-    const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
-    const fy = Math.floor((this.y + this.h - 8) / TILE);
-    for (const dy of [0, -1]) {
-      const x = fx, y = fy + dy;
-      if (x < 1 || y < 1 || x >= st.w - 1 || y >= st.h - 1) continue;
-      const t = st.type[st.idx(x, y)];
-      if (this.rng() >= 0.1) return;   // 原版 Next(10)==0（★F8 注入面）
-      if (t === TILE_BY_KEY_DOOR_TILES['door_closed']) {
-        const before = st.type[st.idx(x, y)];
-        const opened = openDoor(st, x, y, this.facing) || openDoor(st, x, y, -this.facing);
-        if (opened && before !== st.type[st.idx(x, y)]) {
-          this.closeDoor = true;
-          this.doorX = x; this.doorY = y;
-          game.playSfx('door_open', 1, this.cx, this.cy);
-          game.npcDoorNet?.('door', x, y, false, this.facing);  // msg19:开门
-        }
-        return;
-      }
-      if (t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed']) {
-        const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
-        if (anchor) {
-          this.closeDoor = true;
-          this.doorX = anchor[0]; this.doorY = anchor[1];
-          game.npcDoorNet?.('gate', anchor[0], anchor[1], false, this.facing);  // msg19:闸开
-        }
-        return;
-      }
     }
   }
 
-  /** 开门前视判定(NPC.cs:54600-54606 忠实版):
-   *  t5 = 头顶行(num25, num26-2) —— 判定门只看这一格,探列公式与 obstacleJump
+  /** 开门前视判定(NPC.cs:54576-54608):
+   *  t5 = 头顶行(num25, num26-2) —— 原版判定门只看这一格,探列公式与 obstacleJump
    *  同源(:54515 position.X + width/2 + 15*direction)。触发 =
-   *  townNPC && t5.nactive && type∈{10,388} && (rand(10)==0 | flag)
-   *  其中原版 flag = 非宠物非坐姿(:53420 同款) ⇒ 站着的镇民每 tick 都掷,
-   *  不存在“特定模式窗口”——此前三层错位全因我方加了原版没有的模式门。
-   *  hitWall 兜底通道仍保留(工程保险,不影响忠实性——成功路径等价)。 */
+   *  townNPC && t5.nactive && type∈{10,388} && ((rand(10)==0) | flag)，其中 flag =
+   *  该回家旗(:53532-53547,this.homeFlag 快照)——雨/夜/日食/史莱姆雨/风暴地表时免掷必开。
+   *  成功（OpenDoor 两向任一 / ShiftTallGate）→ closeDoor+doorX/Y+ai[1]+=80f；
+   *  全败 → direction *= -1（:54629）。
+   *  ★列级三行探测为本仓忠实扩展(门槛/半砖高差工程裕度,登记):原版单行前提下本仓
+   *  地形同高场景行为一致;掷门与成败语义与原版逐字对齐(2026-08-31 台账批)。 */
   private tryOpenDoorAhead(st: TileStore, game: GameHooks): boolean {
     void this.doorContactT; // 计数字段保留(reset 链路复用),扫描不再累计
     const dir = this.facing;
@@ -3727,12 +3987,15 @@ export class TownNPC extends Entity {
       cxT: Math.floor(this.cx / TILE),
     });
 
-    // (rand(10)==0) | flag —— flag=非宠物非坐姿(:53420);宠物保持 10% 掷（★F8 注入面）
-    const petOrSitting = IS_TOWN_PET.has(this.vanillaId) || this.sitting;
+    // (rand(10)==0) | flag —— 第二操作数 = 「该回家」天气/时辰旗（:53532-53547 定义、
+    //   :54578 消费：雨/夜/日食/史莱姆雨/风暴地表 任一为真 → 免掷必开）。
+    // ★2026-08-31 台账②：旧第二操作数 (!petOrSitting && hitWall)= 本仓造面
+    //   （hitWall 撞墙"必开兜底"+任何天气都赌 10%），退役；IS_TOWN_PET 豁免子句
+    //   同无原版锚——原版 townNPC 一体掷门，宠物一并删除（走近门的宠物照原版语义）。
+    // 注：C# `(A | B)` 非短路 ⇒ Next(10) 每拍恒耗骰，本行序与原版一致。
     const rollHit = this.rng() < 0.1;
+    if (!(rollHit || this.homeFlag)) return false;            // 本 tick 未中
     const doorOpenable = hitKind === 'door';
-    if (!(rollHit || (!petOrSitting && this.hitWall))) return false;  // 本 tick 未中
-
     if (doorOpenable) {
       const opened = openDoor(st, n25, hitY, dir) || openDoor(st, n25, hitY, -dir);
       if (opened) {
@@ -3741,8 +4004,12 @@ export class TownNPC extends Entity {
         game.playSfx('door_open', 1, this.cx, this.cy);
         game.behavioLog?.('npcDoor', { phase: 'opened', x: n25, y: hitY });
         game.npcDoorNet?.('door', n25, hitY, false, dir);  // msg19:开门
+        this.walkT += 80;                                  // ai[1] += 80f(:54610/:54619)
       } else {
-        game.behavioLog?.('npcDoor', { phase: 'openBlocked', x: n25, y: hitY });
+        // 两方向皆开不动（目标侧列被非砍切格堵死）→ direction *= -1 重试
+        // （:54629 全败 else 支）。仅翻向不写 vx——原版亦只动 direction
+        this.facing = -dir;
+        game.behavioLog?.('npcDoor', { phase: 'openBlockedTurn', x: n25, y: hitY });
       }
       return opened;
     }
@@ -3750,7 +4017,11 @@ export class TownNPC extends Entity {
     if (anchor) {
       this.closeDoor = true;
       this.doorX = anchor[0]; this.doorY = anchor[1];
+      this.walkT += 80;                                    // :54627 同奖励
       game.npcDoorNet?.('gate', anchor[0], anchor[1], false, dir);  // msg19:闸开
+    } else {
+      this.facing = -dir;                                  // :54629 高门同败支
+      game.behavioLog?.('npcDoor', { phase: 'gateBlockedTurn', x: n25, y: hitY });
     }
     return !!anchor;
   }

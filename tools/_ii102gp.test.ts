@@ -17,6 +17,7 @@ import { RNG } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { pumpkinSeasonArm } from '../src/world/gen/vanilla/SecretSeedDoEndsPass';
 import { runGrassPlantsPass, runFlowersPass } from '../src/world/gen/vanilla/SurfaceDecorPasses';
+import { runSmoothWorldPass } from '../src/world/gen/vanilla/HalfBrickPass';
 
 const RUN_CAP = process.env.SW_I102CAP === '1';
 const RUN_RE = process.env.SW_I102RE === '1';
@@ -174,16 +175,28 @@ const le16 = (p: string): Uint16Array => {
     xl = readFileSync(`${pre(CMP)}.liq`), xhf = readFileSync(`${pre(CMP)}.half`), xsl = readFileSync(`${pre(CMP)}.slope`),
     xlt = readFileSync(`${pre(CMP)}.lty`), xia = readFileSync(`${pre(CMP)}.inact`);
   const { st, gs } = hydrate();
-  // 基座自检（对上层 dump=BASE）
+  // 基座自检（对上层 dump=BASE）——全通道（act/typ/wal/liq/half/slope/lty/inact）
   {
     const bt = le16(`${pre(BASE)}.typ`), ba = readFileSync(`${pre(BASE)}.act`);
-    let dA = 0, dT = 0;
+    const bw = le16(`${pre(BASE)}.wal`), bl = readFileSync(`${pre(BASE)}.liq`);
+    const bhf = readFileSync(`${pre(BASE)}.half`), bsl = readFileSync(`${pre(BASE)}.slope`);
+    const blt = readFileSync(`${pre(BASE)}.lty`), bia = readFileSync(`${pre(BASE)}.inact`);
+    let dA = 0, dT = 0, dW = 0, dL = 0, dHf = 0, dSl = 0, dLt = 0, dIa = 0;
     for (let i = 0; i < N; i++) {
-      if (ba[i] !== (st.flags[i]! & 1)) dA++;
-      else if (ba[i] && bt[i] !== (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!] : 9999)) dT++;
+      const ja = st.flags[i]! & 1;
+      if (ba[i] !== ja) { dA++; continue; }
+      if (ja && bt[i] !== (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!] : 9999)) { dT++; continue; }
+      if (bw[i] !== st.wall[i]) dW++;
+      if (bl[i] !== st.liquid[i]) dL++;
+      if (bhf[i] !== st.half[i]) dHf++;
+      if (bsl[i] !== st.slope[i]) dSl++;
+      const vl = bl[i]! > 0 ? blt[i]! + 1 : 0;
+      const jl = st.liquid[i]! > 0 ? st.liquidType[i]! : 0;
+      if (vl !== jl) dLt++;
+      if ((bia[i] ? 1 : 0) !== ((st.wire[i]! >>> 5) & 1)) dIa++;
     }
-    console.log(`[base selfcheck vs ${BASE_NAME}] dAct=${dA} dTyp=${dT}`);
-    if (dA !== 0 || dT !== 0) throw new Error('base drift — snapshot stale, re-capture');
+    console.log(`[base selfcheck vs ${BASE_NAME}] A=${dA} T=${dT} W=${dW} L=${dL} Hf=${dHf} Sl=${dSl} Lt=${dLt} Ia=${dIa}`);
+    if (dA || dT || dW || dL || dHf || dSl || dLt || dIa) throw new Error('base drift — snapshot stale, re-capture');
   }
   const rng = new RNG(gs.seed);
   // 花圃决策探针：打印进入 kill/fit 分支的锚点与格（m,n）+ 门读数
@@ -206,6 +219,7 @@ const le16 = (p: string): Uint16Array => {
   try {
     const FN = process.env.SW_I102_FN ?? 'grass';
     if (FN === 'flowers') { runFlowersPass(st, rng, gs); }
+    else if (FN === 'smooth') { runSmoothWorldPass(st, rng, gs); }
     else { pumpkinSeasonArm(st, rng, gs); runGrassPlantsPass(st, rng); }
   } finally {
     (globalThis as unknown as { __swOnRoll?: (v: number) => void }).__swOnRoll = oOnRoll;
@@ -218,7 +232,9 @@ const le16 = (p: string): Uint16Array => {
     const actA = new Uint8Array(N), slp = new Uint8Array(N), hlf = new Uint8Array(N);
     for (let i = 0; i < N; i++) {
       const va = st.flags[i]! & 1;
-      sheetTyp[i] = va ? (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999) : 0;
+      // ghost 保真：非活性格照映射（x86 dump 对位口径），勿清零
+      sheetTyp[i] = st.type[i] === 0 || SHEET[st.type[i]!] < 0 ? (va ? 9999 : 0)
+        : (SHEET[st.type[i]!] ?? 9999);
       actA[i] = va; slp[i] = st.slope[i]!; hlf[i] = st.half[i]!;
     }
     writeFileSync(`${OUT}/jsafter.typ`, Buffer.from(sheetTyp.buffer, sheetTyp.byteOffset, N * 2));

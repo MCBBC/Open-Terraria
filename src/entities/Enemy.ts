@@ -105,6 +105,7 @@ import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore, GorePiece } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
+import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -1425,6 +1426,18 @@ export class Enemy extends Entity {
    *  附：液体即除(TryRemovingWaterPerishableEffects :94433,见 npcLiquid.ts)。
    *  B1 批新增授予源：恶臭药水弹 371 消亡 80px 圈（P.cs:78947-78956 → ThrowKillFx） */
   stinkyT = 0;
+  /** 树妖煞(186 DryadBane)：树妖祝福光环弹 586 的 else-if 臂（Projectile.cs:41967-
+   *  41970，2026-08-31 台账批接）——施加端 TownNPC.updateDryadWardAura：
+   *  !friendly && lifeMax>5 && !dontTakeDamage && (FindBuff==-1||≤20t) &&
+   *  (已带煞 || CanHit 弹心点对敌盒) && type!=488。DoT = DOTTally.Add(dps×2,
+   *  dps/3) = dps HP/s，dps = GetDryadsBaneDamagePerSecond(NPC.cs:92898 基数4×
+   *  downed 进度链，GetAttackDamage_ForTownNPC 截断)——由施加端换算写入
+   *  dryadBaneDps；视觉 dust 163 1/4（UpdateNPC_BuffApplyVFX :92448-92453）。*/
+  dryadBaneT = 0;
+  dryadBaneDps = 0;
+  /** DoT 累计器（DOTTally 家族同款：tick 累入 dps×dt、结算面按 ⌊acc⌋ 扣血保小数）
+   *  ——漏声明曾致 L2279/2299 引用编译红（2026-08-31 补） */
+  dryadBaneDoT = 0;
   /** lovestruck(119)：爱情药水弹 370 消亡 80px 圈授予（P.cs:78940/:78955）——
    *  NPC.buffType 挂账但 UpdateNPC 无任何 case（纯展示位），纯计时承载（B1 批） */
   lovestruckT = 0;
@@ -2264,6 +2277,9 @@ export class Enemy extends Entity {
     if (this.potentAcidT > 0) { this.potentAcidT -= dt; this.potentAcidDoT += 90 * accelMul * dt; }
     if (this.chlorophyteSporeT > 0) { this.chlorophyteSporeT -= dt; this.chlorophyteSporeDoT += 90 * accelMul * dt; }
     if (this.eelWhipT > 0) { this.eelWhipT -= dt; this.eelWhipDoT += 50 * dt; }
+    // 树妖煞(186)：DOTTally.Add(dps×2, dps/3)=dps HP/s（:92797-92800）——裸 Add,
+    // 不入 398 加速池；dps 由施加端按世界进度链换算写入
+    if (this.dryadBaneT > 0) { this.dryadBaneT -= dt; this.dryadBaneDoT += this.dryadBaneDps * dt; }
     if (this.acceleratePoisonsT > 0) this.acceleratePoisonsT -= dt;
     if (this.blueLightningT > 0) this.blueLightningT -= dt;
     if (this.redLightningT > 0) this.redLightningT -= dt;
@@ -2283,7 +2299,7 @@ export class Enemy extends Entity {
       ['javelinT', 'javelinDoT'], ['spikeT', 'spikeDoT'], ['butcherT', 'butcherDoT'],
       ['soulDrainT', 'soulDrainDoT'], ['stardustT', 'stardustDoT'],
       ['potentAcidT', 'potentAcidDoT'], ['chlorophyteSporeT', 'chlorophyteSporeDoT'],
-      ['eelWhipT', 'eelWhipDoT']] as const) {
+      ['eelWhipT', 'eelWhipDoT'], ['dryadBaneT', 'dryadBaneDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);
@@ -2353,6 +2369,18 @@ export class Enemy extends Entity {
         d.vy -= 0.5;
       }
     }
+    if (this.dryadBaneT > 0 && Math.floor(Math.random() * 4) === 0) {
+      // 树妖煞尘 dust163 1/4（UpdateNPC_BuffApplyVFX :92448-92453）：盒 (pos−2,w+4,h)
+      // vel=(vX*0.4,vY*0.4)，尾段 velocity ×(NextFloat*4−2, 0)、noGravity+noLight
+      const d = game.spawnDust?.(this.x - 2, this.y, this.w + 4, this.h, 163,
+        this.vx * 0.4, this.vy * 0.4, 100, null, 1.5);
+      if (d) {
+        d.noGravity = true;
+        d.noLight = true;
+        d.vx *= Math.random() * 4 - 2;
+        d.vy = 0;
+      }
+    }
     if ((this.blueLightningT > 0 || this.redLightningT > 0) && Math.floor(Math.random() * 10) === 0) {
       // Blue/RedLightningSmall 1/10（NPC57:92272-92294 → Spawn_LightningSmall
       //   P57:3617-3672;★2026-08-24 r15 R15-18 接 1457 升级:红雷档
@@ -2408,7 +2436,25 @@ export class Enemy extends Entity {
         // R5-F21：接触伤 DamageVar ±15% 掷骰（Player.cs:31625 `num4 = Main.DamageVar(
         // npc.damage × damageMultiplier, -luck)`——banner 减伤在 Game.damagePlayer
         // 内、resistCold 同,序 = DamageVar → banner → resistCold → Hurt 与原版一致）
-        game.damagePlayer(damageVar(this.def.damage, -localPlayer.luck), this.cx, this.cy, this, true);
+        // ★Notes⑤ 前半（四轮蓝队）：月总族接触分桶（Update_NPCCollision :31571-31587）
+        //   ——type 396/397/398/400/401·636 specialHitSetter=BossNoCheese(1);636 于
+        //   ai[0]==0||10 整段 continue;该族同时跳过 :31588 General immune 早退=通用
+        //   无敌帧吞不掉本桶命中（免疫改由 hurtCooldowns[1] 独立计时,p.damage 分桶门
+        //   已建模）。桶经瞬态通道注入漏斗,出站即清（与环境站同形）。null=原文 continue。
+        const bucket = npcContactBucketId(this.vanillaId ?? -1, this.ai0 ?? 0);
+        const chan = localPlayer as unknown as {
+          __swNextHitBucket?: { id: number; table: HurtCooldownBuckets };
+        };
+        const table = getGlobalHurtBuckets();
+        const inject = bucket !== null && bucket !== -1 && table
+          ? { id: bucket, table }
+          : undefined;
+        if (inject) chan.__swNextHitBucket = inject;
+        try {
+          game.damagePlayer(damageVar(this.def.damage, -localPlayer.luck), this.cx, this.cy, this, true);
+        } finally {
+          if (inject) chan.__swNextHitBucket = undefined;
+        }
       }
     }
 

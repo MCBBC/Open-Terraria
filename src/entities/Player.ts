@@ -41,6 +41,7 @@ import { harpyCharmEffect } from './Arrow';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
+import { damageVarRoll } from '../stats/DamageVar';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
@@ -123,7 +124,7 @@ import { PARTY_HAIR_DYE_SHADER_ID } from '../data/vanillaHairDyes';
 import { GorePiece } from './GorePiece';
 import { TownShot } from './TownShot';
 import { hslToRgb } from '../player/Appearance';
-import { playDeathVoice, playHurtVoice, voiceSlotOfItem, type VoiceState } from '../player/PlayerVoice';
+import { playDeathVoice, voiceSlotOfItem, type VoiceState } from '../player/PlayerVoice';
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot,
   SantankShellProj, mountRollerSkateStep, MOUNT_DATA,
@@ -438,6 +439,10 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     cordage: boolean;
     /** 玫瑰族 lavaRose（1323/908/4003/4004/5000）：岩浆伤 80-45/OnFire 420-210（:27384-27387） */
     lavaRose: boolean;
+    /** ★Notes④ Ash Wood 全套（头 278/胸 246/腿 234——1456 UpdateArmorSetsOld
+     *  :15772-15775 赋位；1457 消费位 :27885/:27904）：remix 岩浆档 145+半减、
+     *  OnFire−210，与玫瑰并持 = 完全免疫岩浆 */
+    ashWood?: boolean;
     /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
     overrideFishingBobber: number;
     runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
@@ -1247,6 +1252,7 @@ export class Player extends Entity {
     let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）
+    let ashWood = false;         // ★Notes④ Ash Wood 全套（vanillaArmorSets 'AshWood'→:27885/:27904）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
     let counterWeight = 0, vanityCounterWeight = 0;   // int 物品 id（0=无）
@@ -1817,6 +1823,7 @@ export class Player extends Entity {
       if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
       if (sb.solar) solarSet = true;
       if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②
+      if (sb.ashWood) ashWood = true;               // ★Notes④ Ash Wood 全套
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
       // Molten 套 buffImmune[24] 门（Player.cs:15883 UpdateArmorSetsOld：裸 Molten
@@ -1929,7 +1936,7 @@ export class Player extends Entity {
       royalGel,                     // 皇家凝胶 23 类史莱姆不索敌（Enemy 索敌门消费）
       manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc,   // 耗魔加算折扣（:14040+:14561）
       toolboxRange, mechShowWires, autoActuator, magiluminescence,
-      iceBarrierAcc, lavaRose,
+      iceBarrierAcc, lavaRose, ashWood,   // ★Notes④ Ash Wood 全套（lava 双档+完全豁免源）
       cordage,
       overrideFishingBobber: bobberOverride,   // 浮漂饰品弹型覆写（:1920/-1=无）
       runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
@@ -3163,21 +3170,48 @@ export class Player extends Entity {
     // 飘字值以 damagePreview 预演回填（floatDealt）、颜色 #FF6020（floatColor）保持
     // 本地像素零漂移且漏斗单点显示防双发；受击音同样由漏斗 PlayHurtSound 单点承载。
     // OnFire 门 = Hurt 返回>0（:27921 `num85 > 0.0` 字面）。
-    if (this.inLava && !this.buffs.obsidianSkin) {
-      // 黑曜石皮 buff:lavaImmune 完全豁免（Player.cs:9573）,不伤不火
+    // 黑曜石皮 buff:lavaImmune 完全豁免（Player.cs:9573）;★Notes④ 加第二完全豁免源
+    // `lavaImmune |= ashWoodBonus && lavaRose`（:27885 字面）
+    const lavaTotalImmune = this.buffs.obsidianSkin
+      || (this.equipStats.ashWood === true && !!this.equipStats.lavaRose);
+    if (this.inLava && !lavaTotalImmune) {
       const lavaMax = this.equipStats.lavaMax;
       if (lavaMax > 0 && this.lavaImmuneTicks > 0) {
         this.lavaImmuneTicks--;
       } else if (this.lavaBucketOpen()) {
         this.lastDamageCause = { kind: 'lava' };            // PlayerDeathReason.ByOther(2)
-        // 玫瑰族 lavaRose（:27904-27906 主档）：岩浆伤 num83 80−45=35、OnFire num84 420−210
-        const lavaDmg = this.equipStats.lavaRose ? 35 : 80;
+        // ★Notes④（四轮蓝队）：num83/num84 双档全表（1457 :27897-27917 字面）——
+        //   主档 80/420；remix(don't dig up) 200/630；ashWoodBonus 在 remix 档改写
+        //   145 后【再除二】（(int) 除法）+ OnFire −210；玫瑰层最后 −45/−210。
+        //   （ashWoodBonus 生产位 = Ash Wood 全套套装加成，见 vanillaArmorSets
+        //    'AshWood' 与 equipStats.ashWood——1456 赋值位 UpdateArmorSetsOld
+        //    :15772-15775；1457 反编译树缺该函数但消费位 :27885/:27904 原样在。
+        //    `lavaImmune |= ashWoodBonus && lavaRose` 同步落。）
+        let num83 = 80;
+        let num84 = 420;
+        if (world.seedFlags.remix === true) {
+          num83 = 200;
+          num84 = 630;
+        }
+        if (this.equipStats.ashWood === true) {
+          if (world.seedFlags.remix === true) {
+            num83 = 145;
+          }
+          num83 = Math.trunc(num83 / 2);
+          num84 -= 210;
+        }
+        if (this.equipStats.lavaRose) {
+          num83 -= 45;
+          num84 -= 210;
+        }
         // cooldownCounter=ImmunityCooldownID.Lava(4) 经瞬态桶通道注入——日曜盾消耗门
         // Counter 集 {General,BossNoCheese} 不含（R5-F23 保持,太阳门 effId 派生见 p.damage）
-        const lavaShown = this.damagePreview(lavaDmg);
-        if (this.envHurtThroughFunnel(game, lavaDmg, this.cx, this.y - 10,
+        const lavaShown = this.damagePreview(num83);
+        if (this.envHurtThroughFunnel(game, num83, this.cx, this.y - 10,
           ImmunityCooldownID.Lava, lavaShown, '#FF6020') > 0) {
-          this.buffs.apply(BuffType.OnFire, this.equipStats.lavaRose ? 3.5 : 7);
+          // AddBuff(24,num84)：原文门 `num84 > 0 && num85 > 0.0`（:27919——ashWood+
+          // 玫瑰双叠时 num84 恰归 0,不加火）
+          if (num84 > 0) this.buffs.apply(BuffType.OnFire, num84 / 60);
           game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
       }
@@ -3298,6 +3332,12 @@ export class Player extends Entity {
         playDeathVoice(game, this.voiceState);   // PlayDeathSound(:39013-39041,override 9 retro/5 铃/15 气球)
         this.dead = true;
         game.recLog?.('death', { hp: 0 });   // 行为录制：玩家死亡（任何死法统一在此结算）
+        // ★F2（四轮蓝队）：直扣型致死站在此补齐完整死亡管线——原版它们都走
+        // KillMe 家族（溺水 hp-=2→KillMe(ByOther(1),10) :23449-23455 / tongued DoT
+        // 分块 KillMe(ByOther(7)/(8)/(12),10) :19142-19148 / 墙舌 >3000px、世界墙边
+        // KillMe(ByOther(11)/(12),1000) :22507/:22511）。damagePlayer 族已在漏斗致死
+        // 分支同步结算，settlePlayerDeath 幂等门防双计（非致死 tick 恒不到此=照旧零结算）。
+        game.settlePlayerDeath?.(this.lastPvpDeath === true);
       }
       // 初速掷骰用独立标记：Game.damagePlayer 接触死路径会先直置 dead（Game.ts:15360）
       // ——不能拿 !dead 当 init 门；首 tick 只掷不推进（原版 KillMe 在 Hurt 中段置 dead，
@@ -3397,17 +3437,23 @@ export class Player extends Entity {
       this.inputUp = newRight;                          // Up←R(新)（原版怪癖同款）
       this.inputDown = wasUp;                           // Down←Up
     }
-    // 石化变身瞬间（:24924-24931 stoned != lastStoned 过渡）： Hurt(20×敌伤倍率, ByOther(5))
-    // + SoundID 0 + 20 尘——死因 = DeathText.Petrified_1..4（"X碎成渣了"）
+    // 石化变身瞬间（1457 :25414-25431 stoned != lastStoned 过渡）：Hurt(ByOther(5),
+    // 20×敌伤倍率) + SoundID 0（Dig 碎裂档）+ 20 尘。死因 = DeathText.Petrified_1..4。
+    // ★F3（四轮蓝队）：原版此处即 !quiet Hurt 形（无静默参的默认调用）→ 走通用漏斗，
+    // 防御/难度系数/endurance/神秘腰布·黑带·克脑闪避族/msg117 全随漏斗生效；受击语音
+    // 与本地飘字由漏斗单点承载——删旧手补 playHurtVoice（闪避早退时旧路径照样喊=
+    // 双发/错发）、飘字以 damagePreview 预演回填。hitDirection=0 ⇒ kb=false 原式。
+    // 尘在原文是【过渡无条件】段（双向都发）——搬出 stoned 支对齐；Dig 档碎裂声的
+    // wav 别名本仓未建模，登记待音频表接入。
     {
       const stonedNow = this.buffs.has(BuffType.Stoned);
       if (stonedNow !== this.lastStoned) {
         if (stonedNow) {
+          const dmg = getAttackDamageScaledByDifficulty(20, mainDifficulty(game.world));
           this.lastDamageCause = { kind: 'petrified' };
-          this.damage(getAttackDamageScaledByDifficulty(20, mainDifficulty(game.world)), this.cx, this.cy - 10, false);
-          playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
-          game.spawnParticles(this.cx, this.cy, '#9A8FA0', 20, 2.2);
+          this.envHurtThroughFunnel(game, dmg, this.cx, this.cy - 10, -1, this.damagePreview(dmg));
         }
+        game.spawnParticles(this.cx, this.cy, '#9A8FA0', 20, 2.2);   // :25422-25429 尘×20
         this.lastStoned = stonedNow;
       }
     }
@@ -5337,13 +5383,22 @@ export class Player extends Entity {
     // :22000-22002 墙嘴前沿 X（墙朝东再退 96px）
     let mouth = wall.x + 40;
     if (wall.facing > 0) mouth -= 96;
-    // :22003-22007 墙前 140px 带且 gross → 每帧 50 伤（难度缩放，走墙的难度档）
+    // :22460-22465 墙嘴前沿 140px 带且 gross → 每帧 Hurt(50×难度缩放)。★F3（四轮
+    // 蓝队）：原版此处即 !quiet Hurt 面（:22464 `Hurt(LegacyDefault(),
+    // GetAttackDamage_ScaledByDifficulty(50f), npc.direction)`，:22462 先置
+    // noKnockback=false 无视钴盾族免击退）→ 改走通用漏斗：防御/难度系数/endurance/
+    // 黑带·腰布·克脑闪避族/msg117 全随漏斗生效；受击语音与本地飘字由漏斗单点承载
+    // （删旧手补 playHurtVoice/addDamageNumber 双发源；飘字值=damagePreview 预演回填、
+    // 颜色照旧）。归因照旧 'npc' 名（漏斗不传 attacker ⇒ banner/反射面不适用——
+    // 本站不在 Update_NPCCollision 反射循环内，构造性边界同弹幕族）。
+    // 固定推离（:37908-37912 击退段=velocity.X=4.5×direction/velocity.Y=-3.5）漏斗
+    // 无从表达，保持受理后直写（noKnockback=false 语义天然成立）；fallStart 重置同段。
     if (this.x + this.w > mouth && this.x < mouth + 140 && gross) {
       const dmg = getAttackDamageScaledByDifficulty(50, wall.difficulty);
       this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
-      if (this.damage(dmg, wall.cx, wall.cy)) {
-        playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
-        game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, playerHurtFloatColor(false));
+      const dealt = this.envHurtThroughFunnel(game, dmg, wall.cx, wall.cy, -1,
+        this.damagePreview(dmg), playerHurtFloatColor(false));
+      if (dealt > 0) {
         // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开。
         // 原版走 Hurt(hitDirection=墙 direction)（:22007）→ 击退段 = 固定
         // velocity.X = 4.5×direction / velocity.Y = -3.5（Player.cs:37910-37912）
@@ -6969,7 +7024,11 @@ export class Player extends Entity {
   private suffocateDelay = 0;
   private applyTouchDamage(game: GameHooks, ht: HurtTile): void {
     let blocked = false;
-    const dmg = TOUCH_IMMEDIATE.get(ht.type);
+    const touchBase = TOUCH_IMMEDIATE.get(ht.type);
+    // ★F4（四轮蓝队）：表值过 Main.DamageVar 单源——原文 `num = Main.DamageVar(num,
+    // 0f - luck)`（Player.cs:29211 字面；luck 参数位 = −luck，负 luck 重掷取低带）。
+    // ±15% 离散档 + 银行家舍入随 stats/DamageVar 单源（Enemy.ts:2411 接触面同式）。
+    const dmg = touchBase !== undefined ? damageVarRoll(touchBase, -this.luck) : undefined;
     if (dmg !== undefined) {
       this.lastDamageCause = { kind: 'defaultWrap' }; // PlayerDeathReason.ByOther(3)
       const shown = this.damagePreview(dmg);
@@ -7612,8 +7671,11 @@ export class Player extends Entity {
   /** ★F13（2026-08-31 蓝队三批）SetImmuneTimeForAllTypes 仓内形（Player.cs:38298-38306）：
    *  General 位 = iframes；全部特殊桶（WrongBugNet/Lava 等）经全局登记表【无条件】
    *  满填——原版循环直写无空位门。未登记（纯单元测桩）只落 iframes 面。 */
+  /** SetImmuneTimeForAllTypes 全桶满填（★Notes② 四轮蓝队：Player.cs:38298-38306
+   *  `immune=true; immuneTime=time; for(i..) hurtCooldowns[i]=time;`——**无条件覆写**
+   *  非 max 合并;既有免疫窗可被直接缩短,与原文逐字。桶表 setAll 同为无条件形）。 */
   private dodgeFullFill(ticks: number): void {
-    this.iframes = Math.max(this.iframes, ticks);
+    this.iframes = ticks;
     getGlobalHurtBuckets()?.setAll(ticks);
   }
 

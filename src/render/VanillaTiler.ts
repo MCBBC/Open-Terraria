@@ -26,7 +26,7 @@ function vImgW(atlas: SpriteAtlas, sheet: number): number {
   const img = atlas.ensureVImage(m.sheet);
   return img ? img.width : 0;
 }
-import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily } from './VanillaFraming';
+import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily, isVanillaSeamPair } from './VanillaFraming';
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
 // ★回退开关(发现严重问题时无需改代码):
 //   ①URL ?vf=0 —— 单次强制关,压过一切(含 localStorage);
@@ -71,7 +71,8 @@ function ensureSolidTables(): void {
 // 链帧本就是普通合并帧(rig 实证:斜坡格存 (54,54) 等),斜坡/半砖的形状完全由
 // 绘制层切出;此前链命中直画整块 ⇒ vf=1 斜坡/半砖全变完整方块(用户实报根因)。
 //
-// ★跨族边界统一视图(2026-08-30 用户实报「异族结合透背景墙」两批收敛):
+// ★跨族边界统一视图(2026-08-30 用户实报「异族结合透背景墙」两批收敛;2026-08-31
+// 第四批扩冰雪互斥对——用户实报「冰块×雪块跨类漏缝」,同政策归入统一视图):
 // compiled-1458 rig 逐位仲裁证实——链输出的MERGE_DIRT跨族交界帧与原版服务器完全一致,
 // 且这些官方过渡帧自带真透明缺口(绿底合成实验),即"细缝咬合"是原版本相;但用户实测
 // 权威认定接缝应封闭。第一批尝试「该格回落旧近似路径」,第二批标注证明旧规则在这些
@@ -102,6 +103,27 @@ function crossesForeignMergeDirt(st: TileStore, x: number, y: number): boolean {
   }
   return false;
 }
+// 冰雪互斥对门(2026-08-31 用户实报「冰块×雪块跨类漏缝」):官方 tileBrick 超级
+// 家族内经 DontMergeWithSnow/Snow/IcesSnow 排除表互斥的对(雪↔冰族/雪泥/松树块/
+// 猫毛块、薄冰↔冰族+雪)——官方过渡帧自带真透明缺口,同 MERGE_DIRT 批政策
+// (用户权威定案=封闭;sw_vanilla_framing_strict=1 切回逐位原版)。
+function crossesSeamPair(st: TileStore, x: number, y: number): boolean {
+  const ci = st.idx(x, y);
+  if (!st.flags[ci]) return false;
+  const van0 = vanillaIdOf(st.type[ci]);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx, ny = y + dy;
+      if (!st.inBounds(nx, ny)) continue;
+      const ni = st.idx(nx, ny);
+      if (!st.flags[ni]) continue;
+      const nv = vanillaIdOf(st.type[ni]);
+      if (nv !== van0 && isVanillaSeamPair(van0, nv)) return true;
+    }
+  }
+  return false;
+}
 function vanillaChainFrame(
   atlas: SpriteAtlas, sheet: number,
   st: TileStore, x: number, y: number, type: number,
@@ -112,8 +134,8 @@ function vanillaChainFrame(
   const meta = atlas.vmeta(sheet);
   const variant = ((x * 7) + (y * 11)) % 3;
   let v: { fx: number; fy: number };
-  if (!_VANILLA_STRICT && crossesForeignMergeDirt(st, x, y)) {
-    // ★跨族统一视图:异族合并族邻居视同本族求帧 ⇒ 全连内帧族闭合接缝(独立缓存)
+  if (!_VANILLA_STRICT && (crossesForeignMergeDirt(st, x, y) || crossesSeamPair(st, x, y))) {
+    // ★跨族统一视图:异族合并族/冰雪互斥对邻居视同本族求帧 ⇒ 全连内帧族闭合接缝(独立缓存)
     v = vanillaFrameUnified(st, x, y, variant, world?.rockLevel ?? 0);
   } else {
     v = vanillaFrameFor(st, x, y, st, variant, world?.rockLevel ?? 0);

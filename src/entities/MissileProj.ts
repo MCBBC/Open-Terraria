@@ -34,8 +34,8 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
-import { noteVanillaProjImmune, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
 // broadcast 上行同用此函数）
@@ -60,21 +60,21 @@ import { projectileData } from '../data/vanillaProjectiles';
 export function limitPointToPlayerReachableArea(
   px: number, py: number, pcx: number, pcy: number, worldWPx: number, worldHPx: number,
 ): [number, number] {
-  // worldRect = CenteredRectangle(Center, MaxWorldViewSize)（Utils.CenteredRectangle：左上=心−Size/2）
-  let rx = pcx - 960;
-  let ry = pcy - 600;
-  // ∩ GetWorldPlayArea()：世界边框(px 域 0..worldW/H)内缩 640
+  // worldRect = CenteredRectangle(Center, MaxWorldViewSize)（左上=心−Size/2）
+  // ∩ GetWorldPlayArea()（世界边框 px 域 0..W/H 内缩 640）——Utils.Clamp 矩形
+  // 相交语义：贴边玩家处盒被裁小、Center 随之位移,num4/num6 用【裁后】半宽/高。
   const pl = 640, pt = 640, pr = Math.max(pl, worldWPx - 640), pb = Math.max(pt, worldHPx - 640);
-  rx = Math.max(rx, pl);
-  ry = Math.max(ry, pt);
-  rx = Math.min(rx + 1920, pr) - 1920;     // Utils.Clamp(Rectangle)：宽恒 1920（超窄世界才收缩）
-  ry = Math.min(ry + 1200, pb) - 1200;
-  const cx = rx + 960, cy = ry + 600;
+  const l = Math.max(pcx - 960, pl);
+  const r = Math.min(pcx + 960, pr);
+  const t = Math.max(pcy - 600, pt);
+  const b = Math.min(pcy + 600, pb);
+  const cx = (l + r) / 2, cy = (t + b) / 2;
+  const hw = Math.max((r - l) / 2, 0), hh = Math.max((b - t) / 2, 0);
   const vx = px - cx, vy = py - cy;
   const ax = Math.abs(vx), ay = Math.abs(vy);
   let k = 1;
-  if (ax > 960) k = Math.min(k, 960 / ax);
-  if (ay > 600) k = Math.min(k, 600 / ay);
+  if (ax > hw) k = Math.min(k, hw / ax);
+  if (ay > hh) k = Math.min(k, hh / ay);
   return [cx + vx * k, cy + vy * k];
 }
 
@@ -516,16 +516,17 @@ export class MagicMissileProj extends Entity {
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       if (this.nebulaCb) this.nebulaCb();
-      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）：可控导弹族三型
-      //   （16/34/79）均 magic 数据面 → 原版同样不触发；类门 pyroclastProjectileGate
-      //   单源（melee|ranged 过滤），站位补齐
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1,
-          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
-      }
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
+      // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）：
+      // 可控导弹族三型（16/34/79）均 magic 数据面 → 原版同样不触发；双支类门
+      // projectileSnapStrikeBonus 单源（melee|ranged/ranged 过滤），站位补齐；
+      // 返回 num14 加伤随暴击并入实伤参。
+      const snapBonusMissile = projectileSnapStrikeBonus(game, this,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusMissile ? Math.trunc(snapBonusMissile * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 16 显型档=immune[owner]=8（:14096-14098）→ 非 local 面按表写；
       // 34/79 usesLocalNPCImmunity（1457 SetDefaults :1173/:1605,cd=12）→ 写 0
@@ -885,15 +886,16 @@ export class FlyingKnifeProj extends Entity {
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
-      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——飞刀 491 数据面
-      //   melee（SetDefaults 类旗投影）→ 过类门即脉冲；共用 360t 冷却
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1,
-          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
-      }
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
+      // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
+      // 飞刀 491 数据面 melee（SetDefaults 类旗投影）→ 过 kind1 门即脉冲、kind0 门
+      // 天然拒；返回 num14 加伤随暴击并入实伤参
+      const snapBonusKnife = projectileSnapStrikeBonus(game, this,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusKnife ? Math.trunc(snapBonusKnife * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
     }
   }
 
@@ -998,15 +1000,15 @@ export class StarfuryStar extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——老星怒落星 9 数据面
-      //   melee → 过类门即脉冲；共用 360t 冷却（vanilla 在 DamageVar 前、StrikeNPC 前）
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1,
-          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
-      }
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点
+      // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
+      // 老星怒落星 9 数据面 melee → 过 kind1 门即脉冲；返回 num14 加伤随暴击并入实伤参
+      const snapBonusStar = projectileSnapStrikeBonus(game, this,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusStar ? Math.trunc(snapBonusStar * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)

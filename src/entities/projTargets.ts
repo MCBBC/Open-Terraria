@@ -111,35 +111,55 @@ export function resolveProjClass(
   return p.meleeProj === true ? 'melee' : null;
 }
 
-// ================= ★焰爆石 6178 弹幕侧 kind1 触发门（清零收敛批，2026-08-31） =================
-// 唯一标杆：Projectile.Damage（Terarria1457/Terraria/Projectile.cs:13439-13442）
-//   `((melee || ranged) & ownedBySomeone) && Main.player[owner].accPyroclast
-//    → TryMakingSnappingStoneStrike(GetProjectileSource_FromThis(), this, owner,
-//      targetNPC, ref dmg, 1)`——弹幕命中侧的共用节拍门。三消费位分工：
-//   · kind1 焰爆石 6178 = 本谓词（各玩家弹结算站逐一接入：Arrow.dealContacts/
-//     piranha、WeaponProj.hitEnemies/YoyoShotProj/DaybreakFlare、MagicProj、
-//     MissileProj 三 hitStep、Dart.TrapShot 双环、SparkleGuitarProj.stellarStrike）；
-//   · kind0 拍击石 6167（:13443-45 `(ranged & ownedBySomeone)`）已接 Arrow.dealContacts；
+// ================= ★焰爆石 6178 / 拍击石 6167 弹幕侧触发门（单源，2026-08-31） =================
+// 唯一标杆：Projectile.Damage_PVE_Inner（Terarria1457/Terraria/Projectile.cs:13439-13446）
+// 两连支共用的节拍门骨架。消费位分工（F3 接线台账见 stats/SnapStrike.ts 头注）：
+//   · kind1 焰爆石 6178 = pyroclastProjectileGate
+//     （:13439-42 `((melee||ranged) & ownedBySomeone) && accPyroclast`）；
+//   · kind0 拍击石 6167 = snappingStoneProjectileGate
+//     （:13443-45 `(ranged & ownedBySomeone) && accSnappingStone`——★蓝队四轮 F2/F3：
+//      原 Arrow.dealContacts 内联手搓口径撤销收编本单源,与 kind1 同骨架同门序）；
 //   · kind2 毁灭臂镗 6179（:13447-50 tag 面 changes.AddProjectileTagDamage）
 //     已接 WhipTag.resolveWhipTagHit。
 // 门序本仓单源三段：
 //   ①ownedBySomeone ≈ !hostile（hostile 弹 owner≠本地玩家/Damage_PVE 整段拦截 :11902-05）
-//   ②类 ∈ {melee,ranged} —— 走 resolveProjClass 单源（显式 projClass 字段 → 弹 id
-//     SetDefaults 类旗投影 → meleeProj 兜底），禁止散抄 projectileData 表；
-//   ③accPyroclast 在身（equipStats 聚合 Player.ts:1442）。
+//   ②类位——走 resolveProjClass 单源（显式 projClass 字段 → 弹 id SetDefaults 类旗
+//     投影 → meleeProj 兜底），禁止散抄 projectileData 表；
+//   ③饰品在身（equipStats 聚合 Player.ts:1442 段）。
 // 冷却/去重 = Player.accSnappingStoneCooldown 360t（:14382-83）三 kind 共用、由
 // stats/SnapStrike.trySnapStrike 在扫描前先置——同帧多弹连击被冷却门天然去重，
 // 与原版 Damage() 每次有效命中的节拍一致。
+/** 门共用骨架：hostile ∪ 类位（melee|ranged 或纯 ranged）∪ 饰品读面 */
+function snapStoneFamilyGate(
+  game: GameHooks,
+  proj: { hostile?: boolean; projClass?: ProjClass; projId?: number;
+    meleeProj?: boolean } | null | undefined,
+  classes: readonly ProjClass[],
+  accessoryKey: 'accPyroclast' | 'accSnappingStone',
+): boolean {
+  if (!proj || proj.hostile === true) return false;           // ownedBySomeone 档
+  const cls = resolveProjClass(proj);
+  if (!classes.includes(cls as ProjClass)) return false;      // 类位门
+  return ((game.player as unknown as { equipStats?: Record<string, boolean> } | null)
+    ?.equipStats?.[accessoryKey]) === true;
+}
+
 export function pyroclastProjectileGate(
   game: GameHooks,
   proj: { hostile?: boolean; projClass?: ProjClass; projId?: number;
     meleeProj?: boolean } | null | undefined,
 ): boolean {
-  if (!proj || proj.hostile === true) return false;           // ownedBySomeone 档
-  const cls = resolveProjClass(proj);
-  if (cls !== 'melee' && cls !== 'ranged') return false;      // melee|ranged 位门
-  return ((game.player as unknown as { equipStats?: { accPyroclast?: boolean } } | null)
-    ?.equipStats?.accPyroclast) === true;
+  return snapStoneFamilyGate(game, proj, ['melee', 'ranged'], 'accPyroclast');
+}
+
+/** ★kind0 拍击石 6167 门（Projectile.Damage_PVE_Inner :13443-13445）——纯 ranged 位
+ *  （melee 弹过不了此门,kind0 的 30×远程伤只吃远程弹触发）；随从/哨兵/魔法弹自然排除。 */
+export function snappingStoneProjectileGate(
+  game: GameHooks,
+  proj: { hostile?: boolean; projClass?: ProjClass; projId?: number;
+    meleeProj?: boolean } | null | undefined,
+): boolean {
+  return snapStoneFamilyGate(game, proj, ['ranged'], 'accSnappingStone');
 }
 
 /** ProjectileID.Sets.IsAWhip（Terarria1457/Terraria.ID/ProjectileID.cs:35 全 18 型，

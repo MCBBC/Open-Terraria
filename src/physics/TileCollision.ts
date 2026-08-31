@@ -292,14 +292,22 @@ export const SLOPE_G2_ENABLED = SLOPE_G2;
  *  - num4 钳 ≥0（原版 num4<0 跳过）：坡顶过渡瞬间防脱钩下沉
  *  - 未移植 :2003 的"重跑 TileCollision 校验"本体（分轴结构代价高,
  *    钳位已覆盖其主收益;受阻回退语义由嵌入守卫分支等价提供） */
-function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number): void {
+function slopeCollide(
+  b: Body, world: World, feetEntry: number, vyEntry: number, wasGround: boolean,
+): void {
   const st = world.store;
   const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
   let bestLift = 0;      // 最大抬升量（负 y 位移;0 = 无贴合）
   let bestDrop = 0;      // 天花板最大下推量
+  let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
+  let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
+  // ★贴地前瞻行（+1）：跨坡格交界时脚底尚未探入下一行、旧格又已水平出窗——
+  // 两候选皆不可见的裸奔缝（v5 探针 t47 定案,每列一次 5 帧空簇的根源）。
+  // 仅贴地下行时多扫一行,让下一列对角线提前一帧进入候选窗。
+  const yProbe = (wasGround && b.vy >= 0) ? y1 + 1 : y1;
   for (let tx = x0; tx <= x1; tx++) {
-    for (let ty = y0; ty <= y1; ty++) {
+    for (let ty = y0; ty <= yProbe; ty++) {
       if (!st.inBounds(tx, ty)) continue;
       const i = st.idx(tx, ty);
       const slope = st.slope[i];
@@ -319,6 +327,23 @@ function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number)
           && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
       }
       const vx0 = tx * TILE, vy0 = ty * TILE;
+      // ★面随下贴候选——必须在重叠门前评估（下坡丢接地对症,2026-08-31 楼梯
+      //   下行=跌落感定案）：跨两坡格交界的瞬间旧格已水平出窗、新格脚底尚未
+      //   垂直入格，第 326 行的重叠门两侧都拒收 → 候选窗裸奔 4~5 帧（v5 探针
+      //   t47 定案）→ vy 自由落体成簇 → FindFrame 腾空帧。此处对【贴地下行】
+      //   的实心地面坡（1/2）提前发候选：线 = vy0 + num4（num4 仍按本格左/右缘
+      //   进深钳 [0,TILE]——天然防误拉：tip-over 场景 num4=0 → 线=格顶=平地
+      //   齐平,gap≈0 不触发）。门 = wasGround + vy≥0 + gap∈(0.05,17px)
+      //   （=StepDown 吸附窗界,Collision.cs:3629）；候选取最贴近脚下者。
+      if (wasGround && b.vy >= 0 && !isPlatSlope && slope <= 2) {
+        const n4s = Math.max(0, Math.min(TILE,
+          slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
+        const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
+        if (gapS > 0.05 && gapS < bestSnapGap) {
+          bestSnapGap = gapS;
+          bestSnapY = vy0 + n4s;
+        }
+      }
       if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
       // slope2/4 取右缘。钳到 ≥0（与原版 num4<0 即跳过的差异,见函数头注释）：
@@ -344,9 +369,11 @@ function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number)
           if (num5 > bestDrop) { bestDrop = num5; if (SLOPE_G2) b.collideY = true; }
         }
       } else {
-        // 地面坡（:1935-1966）：脚沉到斜面之下才抬回（num7<0 即抬升）
-        if (b.y + b.h < vy0 + num4) continue;
-        const num7 = vy0 - (b.y + b.h) + num4;
+        // 地面坡（:1935-1966）：沉到斜面下才抬回（gap<0 即抬升；面随下贴候选
+        // 已上提到重叠门前,此处只保留抬升路径）
+        const gap = vy0 + num4 - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入面下
+        if (gap >= 0) continue;                        // 未沉入 → 无抬升（原 :3621 面）
+        const num7 = gap;
         // ★G2 速度门（:1947）：贴合结果必须高于「入口英尺+本帧速度Y」与当前
         //   落地位的较小者——上升/掠过者拒贴（阻尼根因）
         if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
@@ -386,11 +413,32 @@ function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number)
       b.vx = 0;
       b.vy = 0;
     }
+  } else if (bestSnapY > 0) {
+    // ★面随下贴执行（与抬升互斥——本 tick 有沉入贴合时无需下贴）：
+    //   脚底压回对角线 + 置接地 + 清落速（原版面随态 velocity.Y==0 同效）。
+    //   守卫对称抬升守卫：目标位不得嵌进整砖/半砖（坡线端点紧贴支撑砖顶的畸形地形）
+    const ny = bestSnapY - b.h;
+    let blocked = false;
+    const bx0 = Math.floor(b.x / TILE), bx1 = Math.floor((b.x + b.w - 0.01) / TILE);
+    const by0 = Math.floor(ny / TILE), by1 = Math.floor((ny + b.h - 0.01) / TILE);
+    for (let tx = bx0; tx <= bx1 && !blocked; tx++) {
+      for (let ty = by0; ty <= by1; ty++) {
+        if (!st.inBounds(tx, ty)) continue;
+        const j = st.idx(tx, ty);
+        if (!st.isSolid(tx, ty) || st.slope[j] > 0 || st.half[j]) continue;
+        const top = ty * TILE + (st.half[j] ? 8 : 0);
+        if (b.x + b.w > tx * TILE && b.x < tx * TILE + TILE && ny + b.h > top + 0.05 && ny < (ty + 1) * TILE) { blocked = true; break; }
+      }
+    }
+    if (!blocked) {
+      b.y = ny;
+      if (b.vy > 0) b.vy = 0;
+      b.onGround = true;       // wasGround 门已挡飞行体/跳起首帧,无二段跳外溢
+    }
   }
   if (bestDrop > 0) {
     // 下推守卫:推离后不能嵌进下方实心(对称于抬升守卫)
-    const ny = b.y + bestDrop;
-    let blocked = false;
+    const ny = b.y + bestDrop;    let blocked = false;
     const bx0 = Math.floor(b.x / TILE), bx1 = Math.floor((b.x + b.w - 0.01) / TILE);
     const by0 = Math.floor(ny / TILE), by1 = Math.floor((ny + b.h - 0.01) / TILE);
     for (let tx = bx0; tx <= bx1 && !blocked; tx++) {
@@ -411,6 +459,10 @@ function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number)
       b.vy = 0;
     }
   }
+  // ★临时诊断钩（sw_slope_dbg=true 启用;验证后删）:slopeCollide 决策快照
+  const dbg = (globalThis as { __SW_SLOPEDBG?: unknown[] }).__SW_SLOPEDBG;
+  if (dbg && bestLift < 0) dbg.push({ phase: 'lift', lift: -bestLift, x: b.x, feet: b.y + b.h });
+  if (dbg && bestSnapY > 0) dbg.push({ phase: 'snap', gap: bestSnapGap, snapY: bestSnapY, x: b.x, feet: b.y + b.h });
 }
 
 /** 原版 Collision.noSlopeCollision（Collision.cs:2038-2113）+ NPC.Collision_MoveBlazingWheel
@@ -536,7 +588,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
-  slopeCollide(b, world, feetEntry, vyEntry);
+  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
   unembedPass(b, world);
 }
 

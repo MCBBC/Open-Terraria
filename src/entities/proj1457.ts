@@ -17,6 +17,7 @@ import { TILE } from '../core/constants';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, type CurveKey } from '../stats/ScaleStats';
@@ -272,6 +273,19 @@ function dealContacts(
       ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
     dmg = applyBannerDamageDealt(game, e, dmg);
     dmg *= crit ? 2 : 1;
+    // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——
+    // 本共享结算面承载 1126/1127/1128/1129 等 1457 近战系新弹（数据面 melee），
+    // 类门+触发统一走 projectileSnapStrikeBonus 单源；返回 num14 加伤在 banner 采样
+    // 之后并入（原版加伤 :14457 晚于 banner :13387）→ 不再吃旗乘区,随暴击已并 ×2。
+    const snapBonus1457 = projectileSnapStrikeBonus(game, self,
+      (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+      (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+      e.id, {
+        victimBox: { w: e.w, h: e.h, cx: (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2 },
+        targeterBox: { x: self.x, y: self.y, w: self.w, h: self.h },
+      });
+    if (snapBonus1457 > 0) dmg += Math.trunc(snapBonus1457 * (crit ? 2 : 1));
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
     e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, 0, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
@@ -1290,7 +1304,11 @@ export class StormLightning extends Entity {
   }
 
   /** 命中域逐敌结算（Damage_PVE_Inner 链——crit/击退/StatusNPC 同 dealContacts 管线;
-   *  免疫窗：1117 local −1 / 1122 IDStatic 10 型级共享表 / 1091 local −1） */
+   *  免疫窗：1117 local −1 / 1122 IDStatic 10 型级共享表 / 1091 local −1）
+   *  ★F3 接线判定留档（蓝队四轮）：本面现役弹型 = 1091(无类旗)/1117/1122(magic)——
+   *  焰爆石 kind1（melee|ranged）/拍击石 kind0（ranged）两类门对三型恒拒,
+   *  原版同真值 ⇒ 无可加行为,不接 projectileSnapStrikeBonus（类门数据单源自证,
+   *  未来分流进 melee/ranged 族时按 dealContacts 同款补接即可）。 */
   private damageAlongBolt(game: GameHooks, bolt: Bolt): void {
     const cd = this.sharedCd ?? this.hitCd;
     cd.tick();

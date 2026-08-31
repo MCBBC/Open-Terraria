@@ -211,12 +211,59 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
   let rollLines: string[] | null = null;
   if (ROLLS_PATH) { try { require('node:fs'); } catch { /* noop */ } }
   rollLines = ROLLS_PATH ? [] : null;
+  // ★IIII101 注释掷流（SW_G101_TAGS）：逐样本记录 src 内消费点栈签名——与 x86
+  //   rig SW_TAGLOG 的「内层→外层帧序」同构对齐用（值流已证全等 ⇒ 差异必在消费者）。
+  const TAGS_PATH = process.env.SW_G101_TAGS ?? '';
+  const tagLines: string[] | null = TAGS_PATH ? [] : null;
+  // ★IIII101 检查点仪（SW_G101_CKPT）：每逢 256 掷对拍一次「当前态 vs G2 #CMP 终态」
+  //   差异计数——首个 >0 的检查点窗口即写面分叉起点（与 js-tags 对读定罪消费点）。
+  const CKPT_PATH = process.env.SW_G101_CKPT ?? '';
+  const sheetOfI2V = (tid: number): number => tid < SHEET.length && SHEET[tid]! >= 0 ? SHEET[tid]! : 9999;
+  let ckpts: string[] | null = null;
+  let ckTarget: { t: Uint16Array; a: Uint8Array; w: Uint16Array } | null = null;
+  if (CKPT_PATH && existsSync(`${G2}/059_${DUMPNAME.get(59)}.typ`)) {
+    ckpts = [`0 0`];
+    const pre = `${G2}/059_${DUMPNAME.get(59)}`;
+    ckTarget = { t: le16(`${pre}.typ`), a: readFileSync(`${pre}.act`), w: le16(`${pre}.wal`) };
+  }
+  const stackSrc = (stack: string): string => {
+    const out: string[] = [];
+    for (const line of stack.split('\n')) {
+      const m = line.match(/(?:\/src\/)([^\s()]+\.ts):(\d+):\d+/);
+      if (!m) continue;
+      if (m[1]!.includes('core/rng')) continue;
+      out.push(`${m[1]!.replace(/^.*?(gen|world)\//, '')}:${m[2]}`);
+      if (out.length >= 4) break;
+    }
+    return out.join('<');
+  };
   const ledger: Array<{ tag: string; n: number }> = [];
   const markR = (tag: string): void => {
     ledger.push({ tag, n: rollN });
     rollLines?.push(`---PASS ${tag}`);
   };
-  g.__swOnRoll = (v) => { rollN++; rollLines?.push(String(v)); };
+  g.__swOnRoll = (v) => {
+    rollN++;
+    rollLines?.push(String(v));
+    if (tagLines) {
+      const st2 = (new Error().stack ?? '').split('\n').slice(1).join('\n');
+      tagLines.push(`${rollN}|${v}|${stackSrc(st2)}`);
+    }
+    if (ckpts && ckTarget && (rollN % 256 === 0)) {
+      let cnt = 0;
+      const tg = ckTarget;
+      for (let i = 0; i < N; i++) {
+        if (tg.a[i] !== st.flags[i]) { cnt++; continue; }
+        if (tg.w[i] !== st.wall[i]) { cnt++; continue; }
+        const vt = tg.a[i] ? tg.t[i] : 0;
+        const jt = st.flags[i] & 1 ? sheetOfI2V(st.type[i]) : 0;
+        if (vt !== jt) cnt++;
+      }
+      if (ckpts.length === 0 || cnt > Number(ckpts[ckpts.length - 1]!.split(' ')[1])) {
+        ckpts.push(`${rollN} ${cnt}`);
+      }
+    }
+  };
 
   try {
     const chests: ChestSink = [];
@@ -261,5 +308,7 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
     console.log(`ledger(samples)=${ledger.map(({ tag, n }) => `${tag}=${n}`).join(' ')}`);
     console.log(`rolls_total=${rollN}`);
     if (rollLines && ROLLS_PATH) writeFileSync(ROLLS_PATH, `${rollLines.join('\n')}\n`);
+    if (tagLines && TAGS_PATH) writeFileSync(TAGS_PATH, `${tagLines.join('\n')}\n`);
+    if (ckpts && CKPT_PATH) writeFileSync(CKPT_PATH, `${ckpts.join('\n')}\n`);
   }
 }, 600_000);

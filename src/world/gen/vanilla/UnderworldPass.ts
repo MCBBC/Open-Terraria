@@ -75,6 +75,13 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState,
     const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
     sim.isGeneratingOrLoadingWorld = true;
     sim.generatingWorld = true;
+    // ★IIIII100d（GFB-C #28 三格液杀）：pass 链 RNG 必须接入 passRng/passRand——
+    //   KillTile 尾 SquareTileFrame 级联帧引擎的 TileFrameImportant case165
+    //   （CheckStalactite 钟乳石失锚整支）带 `if (ctx.rng)` 门；缺线 ⇒ 支整体跳过
+    //   ⇒ 蜘蛛网(51) cut-kill 后悬空/失承的 cave-deco(165) 族漏杀
+    //   （mile8 GFB-C #28 @1682,730 三格 T0>165，rig KSTK 栈定罪）。
+    sim.passRand = (max) => rng.nextInt(max);
+    sim.passRng = rng;
     // Liquid.cs:177-190 落水越 waterLine → 岩浆（深洞岩浆池来源）。地牢豁免分支
     // （:186-188）本时点可证无操作：地牢墙族 {7,8,9,94-99} 在 dump027 为 0
     // （Dungeon pass 32 在其后）——不接线。
@@ -201,6 +208,9 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
     const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
     sim.isGeneratingOrLoadingWorld = true;
     sim.generatingWorld = true;
+    // ★IIIII100d：同 UW-body——passRng 缺线会静默跳过级联帧引擎 case165
+    sim.passRand = (max) => rng.nextInt(max);
+    sim.passRng = rng;
     sim.genWaterLine = gs.waterLine;
     // ★IIIII58：REMIX 落水分型带（Liquid.cs:182-185 首臂）——同 settle/WorldGen 接线
     if (!!gs.seedFlags.remix) {
@@ -254,6 +264,9 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
     const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
     sim.isGeneratingOrLoadingWorld = true;
     sim.generatingWorld = true;
+    // ★IIIII100d：同 UW-body——passRng 缺线会静默跳过级联帧引擎 case165
+    sim.passRand = (max) => rng.nextInt(max);
+    sim.passRng = rng;
     sim.genWaterLine = gs.waterLine;
     // ★IIIII58：REMIX 落水分型带（Liquid.cs:182-185 首臂）——同 settle/WorldGen 接线
     if (!!gs.seedFlags.remix) {

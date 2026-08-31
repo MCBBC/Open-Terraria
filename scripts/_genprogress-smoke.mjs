@@ -11,8 +11,9 @@ const browser = await puppeteer.launch({
   headless: 'new', defaultViewport: { width: 1200, height: 800 }, protocolTimeout: 600000,
 });
 const page = await browser.newPage();
-await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
+const errs = [];
+page.on('console', (m) => { const t = m.text(); if (/error|ERROR|缺失/.test(t)) errs.push(t.slice(0, 160)); });
+page.on('pageerror', (e) => errs.push('PAGE:' + String(e).slice(0, 200)));
 // 织入 Worker 进度事件记录（worker 内 GenProgress → protocol progress(local)）
 await page.evaluateOnNewDocument(() => {
   const recs = [];
@@ -28,15 +29,25 @@ await page.evaluateOnNewDocument(() => {
     }
   };
 });
+await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+// （织入块已上移至 goto 前）
 // 绕过资产预载门直接走创建流（window.__swFlow.newWorld 与正式 UI 同链路）
 await page.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld, { timeout: 180000 });
 const t0 = Date.now();
-await page.evaluate(() => window.__swFlow.newWorld(String(424242), 4200, 1200));
+try {
+  await page.evaluate(() => window.__swFlow.newWorld(String(424242), 4200, 1200));
+} catch (e) {
+  console.log('NEWWORLD_THROW:', JSON.stringify({ msg: String(e).slice(0, 200), errs: errs.slice(0, 8) }));
+  process.exit(3);
+}
 await page.waitForFunction(() => !!globalThis.__swGame?.world?.store?.w, { timeout: 240000 });
 const secs = (Date.now() - t0) / 1000;
 
-const out = await page.evaluate(() => {
-  const r = globalThis.__swProgRecs;
+let out;
+try {
+  out = await page.evaluate(() => {
+  const r = globalThis.__swProgRecs ?? [];   // 兜底：织入未命中时按空集判等
   let mono = true; let prev = -1;
   for (const e of r) {
     if (e.p < prev - 1e-9 && e.p !== 1) { mono = false; break; }
@@ -53,5 +64,8 @@ const out = await page.evaluate(() => {
     last: r[r.length - 1],
   };
 });
-console.log(JSON.stringify({ genSecs: +secs.toFixed(1), ...out }));
+} catch (e) {
+  out = { evaluateError: String(e).slice(0, 300) };
+}
+console.log(JSON.stringify({ genSecs: +secs.toFixed(1), ...out, errs: errs.slice(0, 6) }));
 process.exit(0);

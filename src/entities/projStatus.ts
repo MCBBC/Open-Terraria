@@ -74,6 +74,9 @@ const SUPPORTED: Record<number, string> = {
   //   效果 = 其余敌怪以 stinky 者为目标(NPC.cs:53888/53899 TargetClosest 门)——
   //   本仓敌怪索敌 AI 未建模该转向,登记 GAP;字段仅承载 buff 存量/倒计时。
   //   B1 批新增授予源:恶臭药水弹 371 消亡 80px 圈(P.cs:78947-78956 → ThrowKillFx)
+  186: 'dryadBaneT',   // DryadBane(树妖煞,树妖光环弹 586 else-if 臂 P.cs:41967-41970;
+                       //   2026-08-31 台账批接——施加端 TownNPC.updateDryadWardAura,
+                       //   重授窗/LOS 豁免在施加端判,DOTTally 消费见 Enemy.fixedUpdate)
   // ---- B1 孤儿武器投掷物光环 buff（2026-08-30;Projectile.Kill 圈支 P.cs:78940-78962,
   //      弹型→buff 映射 370→119/371→120/936→320;ThrowKillFx.applyAura 施加）----
   //   ★工单"4986 NPC 不吃"与反编译相左——1456(:75203)/1458(:78955) 均为三件共享 NPC

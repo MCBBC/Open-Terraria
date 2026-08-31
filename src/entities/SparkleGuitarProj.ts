@@ -44,8 +44,8 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
 
 /** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
@@ -103,16 +103,18 @@ function stellarStrike(
   damage: number, kx: number, game: GameHooks, armorPen: number, critChance: number,
   proj?: { hostile?: boolean; projId?: number },
 ): void {
-  // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42 `(melee||ranged)&ownedBySomeone
-  //   && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：直击与 Kill 爆裂共用的
-  //   唯一结算口——弹 856 数据面 magic（resolveProjClass 单源）→ 原版同样不触发，
-  //   接线为站位补齐（类门 melee|ranged 过滤,未来分流时自动生效）。
-  if (proj && pyroclastProjectileGate(game, proj)) {
-    trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
-      { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
-  }
-  e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage)), kx, 0, game, armorPen,
-    Math.random() < critChance, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
+  // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级 2026-08-31
+  //   蓝队四轮）：直击与 Kill 爆裂共用的唯一结算口——弹 856 数据面 magic
+  //   （resolveProjClass 单源）→ 原版同样不触发，接线为站位补齐（kind1 门 melee|ranged
+  //   过滤/kind0 门 ranged 过滤,未来分流时自动生效）。返回 num14 加伤随暴击并入实伤参。
+  const critGuitar = Math.random() < critChance;
+  const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
+    e.x + e.w / 2, e.y + e.h / 2, e.id,
+    { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+  e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
+    + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
+    kx, 0, game, armorPen,
+    critGuitar, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
 }
 
 /** 出手暴击率单源（★二轮蓝队 FR2-F：词缀位曾漏——Game case4715 只吃 stTune.crit）。

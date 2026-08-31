@@ -82,8 +82,12 @@ export class HurtCooldownBuckets {
   /** ★F13（2026-08-31 蓝队三批）SetImmuneTimeForAllTypes 桶表满填（Player.cs:
    *  38298-38306）：`immune=true; immuneTime=time; for(i..) hurtCooldowns[i]=time;`
    *  ——无 "仅空位" 门，无条件覆写（区别于 applyAfterHit 的 :38680 形）。
-   *  调用面 = 四个闪避/药水站（mysticSash/blackbelt/BOC/大麦酒），WrongBugNet
-   *  与 Lava 等窗一并覆盖（SetImmuneTimeForAllTypes 语义即含全部特殊桶）。 */
+   *  ★Notes③（四轮蓝队）调用面五站勘误——原文 SetImmuneTimeForAllTypes 全部
+   *  调用位：①DoMysticSashDodge :38344（神秘艺术腰布）/ ②NinjaDodge :38406
+   *  （黑带·忍者大师装备）/ ③BrainOfConfusionDodge :38333（混乱之脑）/
+   *  ④ShadowDodge :38310（**buff 59 幻影闪避**——此前误记成第四站缺名）/
+   *  ⑤ApplyLifeAndOrMana 诡药 3001 支 :52551（**随机 i-帧档**, 第四站≠药水族,
+   *  第五站才是诡药）。WrongBugNet 与 Lava 等窗一并覆盖（满填语义即含全部特殊桶）。 */
   setAll(ticks: number): void {
     for (let i = 0; i < IMMUNITY_COOLDOWN_COUNT; i++) this.table.set(i, ticks);
   }
@@ -111,4 +115,26 @@ export function registerGlobalHurtBuckets(t: HurtCooldownBuckets | null): void {
 /** 未绑定（纯单元测/极早期）返回 null——闪避站此时只落 iframes 面。 */
 export function getGlobalHurtBuckets(): HurtCooldownBuckets | null {
   return GLOBAL_HURT_BUCKETS;
+}
+
+// ---- ★Notes⑤ 前半（2026-08-31 四轮蓝队）：NPC 接触分桶族 BossNoCheese ----------------
+// Update_NPCCollision（Player.cs:31570-31587）：specialHitSetter 缺省 General，
+// 接触敌怪 type ∈ {396,397,398,400,401} → ImmunityCooldownID.BossNoCheese(1)；
+// 636 → BossNoCheese 且 ai[0]==0||10 时【整段 continue】（不判定不受伤）。
+// 该族同时跳过 :31588 的 `(General && immune)` 早退 → 通用无敌帧吞不掉本桶命中，
+// 免疫改由 Hurt 入口的 hurtCooldowns[1] 独立计时承担（分域不互吞）。
+/** BossNoCheese 接触桶成员表（月总肢体族 + 真眼 400；400 本身接触盒清空,
+ *  :96142-96145，入表只为 specialHitSetter 分道完整性）。 */
+export const BOSS_NO_CHEESE_CONTACT_IDS = new Set<number>([396, 397, 398, 400, 401, 636]);
+
+/**
+ * NPC 接触伤应走哪个免疫桶：General(-1)=常规 / 1=BossNoCheese。
+ * 返回 null = 原文 `continue`（连命中判定都不进）。
+ */
+export function npcContactBucketId(vanillaId: number, ai0: number): number | null {
+  if (vanillaId === 636) {
+    return (ai0 === 0 || ai0 === 10) ? null : ImmunityCooldownID.BossNoCheese;
+  }
+  if (BOSS_NO_CHEESE_CONTACT_IDS.has(vanillaId)) return ImmunityCooldownID.BossNoCheese;
+  return -1;
 }

@@ -280,6 +280,7 @@ export class GenProgress {
       this.applyMsg(n);
       this.openWindow = true;
       this.start(this.weightOf(n));
+      this.emit(true);
     } else {                                  // 多成员：预置队列，窗由 beginVan 开
       this.pendingSubs = subpasses.slice();
       this.currentWeight = 0; this.value = 0; this.openWindow = false;
@@ -305,7 +306,11 @@ export class GenProgress {
     this.applyMsg(vanName);
     this.openWindow = true;
     this.start(this.weightOf(vanName));
+    this.emit(true);                       // 边界必达：换窗即上屏（含文案粘滞的再次确认）
   }
+
+  /** 只读账目观测（测试/诊断用） */
+  get done(): number { return this.doneWeight; }
 
   /** 单发式：粗粒度子 pass 直接 begin+置满+收账（边界停留时间≈0 的薄 pass） */
   subOnce(vanName: string): void { this.beginVan(vanName); this.set(1); this.endVan(); }

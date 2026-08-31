@@ -25,7 +25,7 @@ describe('GenProgress 加权账目', () => {
     prog.finish();
     expect(prog.overall).toBeLessThanOrEqual(1);
     expect(prog.overall).toBeGreaterThanOrEqual(afterSlot1);
-    expect(prog.doneProbe()).toBe(1);
+    expect(prog.done).toBe(prog.totalWeight);
   });
 
   it('声明成员未消费时 leaveSlot 补收（自愈）', () => {
@@ -34,7 +34,7 @@ describe('GenProgress 加权账目', () => {
     prog.enterSlot('生物群系', ['Generate Ice Biome', 'Jungle']);   // 两个都未 begin
     prog.beginTail();                          // closeWindow 关闭空窗
     prog.finish();
-    expect(prog.doneProbe()).toBe(1);          // TotalWeight 全部被补收
+    expect(prog.done).toBe(prog.totalWeight);          // TotalWeight 全部被补收
   });
 });
 
@@ -46,8 +46,9 @@ describe('GenProgress 文案粘滞', () => {
     prog.enterSlot('洞穴', ['Ocean Sand', 'Grass', 'Sand Patches']);
     prog.beginVan('Sand Patches');             // 有词条
     expect(seen[seen.length - 1]).toBe('WorldGeneration.SandPatches');
-    prog.beginVan('Grass');                    // 无词条 → 粘滞不换字
-    expect(seen[seen.length - 1]).toBe(undefined);
+    prog.beginVan('Grass');                    // 无词条 → 粘滞不换字（重复上屏同键；
+                                               //   省字节优化由 makeThrottledSink.lastLabel 完成）
+    expect(seen[seen.length - 1]).toBe('WorldGeneration.SandPatches');
     expect((prog as unknown as { displayKey: string | null }).displayKey)
       .toBe('WorldGeneration.SandPatches');
   });

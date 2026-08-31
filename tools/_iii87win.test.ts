@@ -373,24 +373,19 @@ function deepCopyGs(g: GenState): GenState {
             console.log(`[map ${phase}] → ${outDir}/js-box-${phase}.txt (${parts.length})`);
           };
           map118('ph0-base');
-          // ★IIIII118 击杀归因仪（SW_III118_KILL=1）：盒内 killTileAt/killTileGen
-          //   调用点栈回显（调用方=src/world|src/gen 帧前 5 层）。
-          if (process.env.SW_III118_KILL === '1' && !(LiquidSim.prototype as unknown as Record<string, unknown>).__sw118Wrap) {
-            const LQP = LiquidSim.prototype as unknown as Record<string, (x: number, y: number) => void>;
-            for (const fn of ['killTileAt', 'killTileGen'] as const) {
-              const orig = LQP[fn];
-              LQP[fn] = function (this: unknown, x: number, y: number) {
+          // ★IIIII118 击杀归因仪（SW_III118_KILL=1）：注册 LiquidSim 内联钩
+          //   __sw118Kt，盒内每次 gen/runtime KillTile 打印调用点栈前 6 层。
+          if (process.env.SW_III118_KILL === '1') {
+            (globalThis as unknown as { __sw118Kt?: ((tag: string, x: number, y: number) => void) | undefined }).__sw118Kt =
+              (tag, x, y) => {
                 if (x >= 1650 && x <= 1710 && y >= 690 && y <= 770) {
                   const frames = (new Error().stack ?? '').split('\n')
                     .map((l) => l.trim())
                     .filter((l) => /src[\\/](world|gen)/.test(l))
-                    .slice(0, 5);
-                  console.log(`[kt ${fn}] ${x},${y} :: ${frames.join(' <- ')}`);
+                    .slice(0, 6);
+                  console.log(`[kt ${tag}] ${x},${y} :: ${frames.join(' <- ')}`);
                 }
-                return orig.call(this, x, y);
               };
-            }
-            (LQP as unknown as { __sw118Wrap: boolean }).__sw118Wrap = true;
           }
           const hits: string[] = [];
           for (let i = 0; i < N && hits.length < 16; i++) {

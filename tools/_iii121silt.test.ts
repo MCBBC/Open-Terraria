@@ -12,7 +12,11 @@ import { RNG } from '../src/core/rng';
 import { TILE_DEFS } from '../src/data/tiles';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
+import { TILE_BY_KEY } from '../src/data/tiles';
+import { tileRunner, FRAME_IMPORTANT_SKIP_SHEETS } from '../src/world/gen/vanilla/TileRunner';
 
+
+const FRAME_IMP = new Set<number>(FRAME_IMPORTANT_SKIP_SHEETS);
 const RUN = process.env.SW_I121 === '1';
 const G2 = '/tmp/iii84-out/x86-i78-ddual';
 const W = 4200, H = 1200;
@@ -224,119 +228,137 @@ function hydrate(idx: number, nm: string): TileStore {
   void ownerCount; void hitRuns; void callIdx; void rng; void gs; void stB; void diffSet; void calls;
 });
 
-import { FRAME_IMPORTANT_SKIP_SHEETS } from '../src/world/gen/vanilla/TileRunner';
-const FRAMED_SKIP_LOCAL = new Uint8Array(TILE_DEFS.length);
-for (let _i = 0; _i < TILE_DEFS.length; _i++) {
-  const _s = TILE_DEFS[_i]?.vanilla?.sheet;
-  if (typeof _s === 'number' && FRAME_IMPORTANT_SKIP_SHEETS.has(_s)) FRAMED_SKIP_LOCAL[_i] = 1;
-}
-// ── IV 波：真值步态仪对拍（__swTrStep 实测 vs 解析重放）──
-(RUN ? it : it.skip)('IIII121d step-truth autopsy', () => {
+
+// ── V 波：真值步态驱动重放（最终定谳仪）──
+// 真值事件（__swTrStep 每迭代 px/py/n1/rolled/skips，移动前快照——与引擎语义一致）
+// + 原始骰流逐格配对 ⇒ 完整重建接受集合。与引擎写集（before/after 差）互证。
+(RUN ? it : it.skip)('IIII121f truth-driven margin autopsy', () => {
   const gsj = JSON.parse(readFileSync('/tmp/iii99-out/cap-ddual/base_gs.json', 'utf8')) as Record<string, unknown>;
   const seedNum = Number(gsj.seed);
   const mkGs = (): GenState => ({ seedFlags: { dualDungeons: true }, worldSurface: Number(gsj.worldSurface), rockLevelLow: Number(gsj.rockLevelLow), rockLevelHigh: Number(gsj.rockLevelHigh), rockLevel: Number(gsj.rockLevel), waterLine: Number(gsj.waterLine), lavaLine: Number(gsj.lavaLine), beachDistance: 380, seed: seedNum } as unknown as GenState);
-
-  // 实例级骰流记录
-  type Tr = { op: string; a: number[]; r: number };
-  const trace: Tr[] = [];
-  const runStarts: number[] = [];
-  const calls: Array<{ i: number; j: number; st: number; sp: number }> = [];
-  const realSteps: Array<Array<{ iter: number; px: number; py: number; vx: number; vy: number; num1: number; rolled: number }>> = [];
-  let curRun = -1;
-  (globalThis as { __swTrCall?: (o: Record<string, unknown>) => void }).__swTrCall = (o) => {
-    runStarts.push(trace.length);
-    calls.push({ i: Math.round(Number(o.i)), j: Math.round(Number(o.j)), st: Number(o.strength), sp: Math.round(Number(o.steps)) });
-    curRun++;
-    realSteps.push([]);
-  };
-  (globalThis as { __swTrStep?: unknown }).__swTrStep = () => undefined;
-  const mkLoggedRng = (): RNG => {
-    const r = new RNG(seedNum);
-    const self = r as unknown as { int: (a: number, b: number) => number };
-    const oInt = self.int.bind(r);
-    self.int = (a: number, b: number) => {
-      const v = oInt(a, b);
-      trace.push({ op: 'int', a: [a, b], r: v });
-      if (curRun >= 0 && a[0] === -10 && a[1] === 10) void v;
-      return v;
+  // 差集
+  const diffSet = new Set<number>();
+  for (const l of readFileSync('/tmp/iii121-out/silt-diff-cells.txt', 'utf8').trim().split('\n')) {
+    const q = l.split(',').map(Number);
+    diffSet.add(q[1]! * W + q[0]!);
+  }
+  // 真值事件采集
+  type Ev = { k: number; iter: number; px: number; py: number; num1: number; rolled: number; skips: number };
+  const evAll: Array<Array<Ev>> = [];
+  {
+    const gs = mkGs();
+    const stThrowaway = hydrate(24, 'Dirt_To_Mud');
+    let kr = -1;
+    const gg = globalThis as { __swTrCall?: unknown; __swTrStep?: unknown };
+    gg.__swTrCall = () => { kr++; evAll.push([]); };
+    gg.__swTrStep = (o0) => {
+      const o = o0 as Record<string, number>;
+      evAll[kr]!.push({ k: kr, iter: o.iter!, px: o.px!, py: o.py!, num1: o.num1!, rolled: o.rolled!, skips: o.skips! });
     };
-    return r;
-  };
-  const stTruth = hydrate(24, 'Dirt_To_Mud');
-  const stB2 = stTruth;
-  void stB2;
-  // 挂步态接收器（TileRunner 每迭代末上报）
-  const g = globalThis as { __swI121Step?: (o: Record<string, unknown>) => void };
-  g.__swI121Step = (o) => {
-    realSteps[curRun]!.push({ iter: Number(o.iter), px: Number(o.px), py: Number(o.py), vx: Number(o.vx), vy: Number(o.vy), num1: Number(o.num1), rolled: Number(o.rolled) });
-  };
-  // 生产 TileRunner 的步态钩是 __swTrStep，此探针借 __swTrStep 转投：
-  (globalThis as { __swTrStep?: unknown }).__swTrStep = (o) => { g.__swI121Step!(o as Record<string, unknown>); };
+    runSiltPass(stThrowaway, new RNG(seedNum), gs);
+    delete gg.__swTrStep;
+    delete gg.__swTrCall;
+  }
+  console.log(`[i121f2] runs=${evAll.length}`);
+  const callsL = readFileSync('/tmp/iii121-out/silt-call-ledger.txt', 'utf8').trim().split('\n').map((l) => l.split('|').map(Number));
+  const startsTxt = readFileSync('/tmp/iii121-out/silt-run-starts.txt', 'utf8').trim().split('\n');
+  const traceR = readFileSync('/tmp/iii121-out/silt-roll-trace.txt', 'utf8').trim().split('\n').map((l) => Number(l.split('|')[3]));
+  const starts = startsTxt.map((l) => Number(l.split('|')[1]));
 
-  runSiltPass(stTruth, mkLoggedRng(), mkGs());
-  delete (globalThis as { __swTrStep?: unknown }).__swTrStep;
-  delete g.__swI121Step;
-  delete (globalThis as { __swTrCall?: unknown }).__swTrCall;
-  runStarts.push(trace.length);
-  console.log(`[i121d2] calls=${calls.length} trace=${trace.length} runsWithSteps=${realSteps.filter((r) => r.length > 0).length}`);
+  const SILT = TILE_BY_KEY['silt']!;
+  const gs2 = mkGs();
+  void gs2;
+  const st = hydrate(24, 'Dirt_To_Mud');
+  const beforeType = st.type.slice();
+  const tf = st.flags, ty = st.type;
 
-  // ── 解析重放对比：逐 runner、逐迭代 rolled 计数与轨迹 ──
-  const N_RUNS = Math.min(calls.length, realSteps.length);
-  let badRuns = 0;
-  const firstBadSamples: string[] = [];
-  for (let k = 0; k < N_RUNS; k++) {
-    const c = calls[k]!;
-    const s0 = runStarts[k]!;
-    const s1 = runStarts[k + 1] ?? trace.length;
-    let cursor = s0;
-    const stSelf = stTruth!;
-    let px = c.i, py = c.j;
-    let vx = trace[s0 - 3]!.r * 0.1;
-    let vy = trace[s0 - 2]!.r * 0.1;
-    let num1 = c.st, num2 = c.sp;
-    const rs = realSteps[k]!;
-    let brokeAt = -1;
-    let iterNo = 0;
-    while (cursor < s1 && num2 > 0 && cursor < trace.length) {
-      num1 = c.st * (num2 / c.sp);
-      num2--;
+  type Rec = { k: number; iter: number; px: number; py: number; dist: number; thr: number; draw: number };
+  const recMap = new Map<number, Rec[]>();      // 仅差集格的接受记录
+  const acceptAll = new Set<number>();
+  const acceptOwner = new Int32Array(W * H).fill(-1);   // 最后接受者 run
+  let cursor = 0;
+  let mismatchRuns = 0;
+  for (let k = 0; k < callsL.length; k++) {
+    const c = callsL[k]!;
+    const ev = evAll[k]!;
+    cursor = starts[k]!;
+    let vx = traceR[starts[k]! - 3]! * 0.1;
+    let vy = traceR[starts[k]! - 2]! * 0.1;
+    const take = (): number => traceR[cursor++]!;
+    for (const e of ev) {
+      const num1 = e.num1;
+      const px = e.px, py = e.py;
       const x0 = Math.max(1, Math.floor(px - num1 * 0.5));
       const x1 = Math.min(W - 1, Math.floor(px + num1 * 0.5));
       const y0 = Math.max(1, Math.floor(py - num1 * 0.5));
       const y1 = Math.min(H - 1, Math.floor(py + num1 * 0.5));
-      // ★III 波修正：pre-dice 跳格（FRAMED_SKIP 家族）不耗骰——必须按真实内容建模
       let expectRolled = 0;
-      for (let xq = x0; xq < x1; xq++) {
-        for (let yq = y0; yq < y1; yq++) {
-          const qi = yq * W + xq;
-          if ((stSelf.flags[qi] & 1) && FRAMED_SKIP_LOCAL[stSelf.type[qi]]) continue;
-          if ((stSelf.flags[qi] & 1) && SHEET[stSelf.type[qi]] === 165) void qi;
+      for (let x = x0; x < x1; x++) {
+        for (let y = y0; y < y1; y++) {
+          const qi = y * W + x;
+          if ((tf[qi] & 1)) {
+            const sh = SHEET[ty[qi]];
+            if (sh >= 0 && FRAME_IMP.has(sh)) continue;
+          }
           expectRolled++;
+          const dist = Math.abs(x - px) + Math.abs(y - py);
+          const draw = take();
+          const thr = num1 * 0.5 * (1 + draw * 0.015);
+          if (dist >= thr) continue;
+          acceptAll.add(qi);
+          acceptOwner[qi] = k;
+          if (diffSet.has(qi)) {
+            const arr = recMap.get(qi) ?? [];
+            arr.push({ k, iter: e.iter, px, py, dist, thr, draw });
+            recMap.set(qi, arr);
+          }
+          ty[qi] = SILT;
         }
       }
-      iterNo++;
-      const want = rs[iterNo - 1];
-      if (!want || want.rolled !== expectRolled) {
-        brokeAt = iterNo;
-        if (firstBadSamples.length < 8) {
-          firstBadSamples.push(`run${k}@(${c.i},${c.j})st${c.st}/sp${c.sp} iter${brokeAt}: simRolled=${expectRolled}(bbox ${x0},${x1},${y0},${y1}) real=${want ? `${want.rolled} px${want.px.toFixed(3)},py${want.py.toFixed(3)},n1${want.num1.toFixed(3)}` : '(none)'}`);
-        }
-        break;
+      if (expectRolled !== e.rolled || ((x1 - x0) > 0 && (y1 - y0) > 0 && (x1 - x0) * (y1 - y0) - expectRolled !== e.skips)) {
+        mismatchRuns++;
+        if (mismatchRuns <= 6) console.log(`  [BAD] run#${k} iter${e.iter}: modeled=${expectRolled} real=${e.rolled} bbox=(${x0},${x1},${y0},${y1})`);
+        cursor += e.rolled - expectRolled;
       }
-      for (let i2 = 0; i2 < expectRolled; i2++) cursor++;
-      px += vx; py += vy;
-      if (num1 > 50) {
-        for (const thrL of [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900]) {
-          if (num1 > thrL) { px += vx; py += vy; num2--; vy += trace[cursor++]!.r * 0.05; vx += trace[cursor++]!.r * 0.05; } else break;
-        }
-      }
-      vx += trace[cursor++]!.r * 0.05;
+      vx += take() * 0.05;
       if (vx > 1) vx = 1; else if (vx < -1) vx = -1;
-      vy += trace[cursor++]!.r * 0.05;
+      vy += take() * 0.05;
       if (vy > 1) vy = 1; else if (vy < -1) vy = -1;
     }
-    if (brokeAt >= 0 || cursor !== s1) badRuns++;
   }
-  console.log(`[i121d2] sim-vs-real: badRuns=${badRuns}/${N_RUNS}`);
-  for (const l of firstBadSamples) console.log(`   ${l}`);
+  console.log(`[i121f2] done cursor=${cursor}/${traceR.length} mismatchRuns=${mismatchRuns} acceptAll=${acceptAll.size}`);
+
+  // 引擎写集
+  const gsW = mkGs();
+  const stEng = hydrate(24, 'Dirt_To_Mud');
+  const tEng = stEng.type;
+  runSiltPass(stEng, new RNG(seedNum), gsW);
+  const engAcc = new Set<number>();
+  for (let i = 0; i < W * H; i++) if (tEng[i] !== beforeType[i]) engAcc.add(i);
+
+  const engOnly: number[] = [];
+  for (const qi of engAcc) if (!acceptAll.has(qi)) engOnly.push(qi);
+  const simOnly: number[] = [];
+  for (const qi of acceptAll) if (!engAcc.has(qi)) simOnly.push(qi);
+  console.log(`[i121f2] engWritten=${engAcc.size} simAccepted=${acceptAll.size} engOnly=${engOnly.length} simOnly=${simOnly.length}`);
+  writeFileSync('/tmp/iii121-out/eng-only.txt', engOnly.map((i) => `${i % W},${(i / W) | 0}`).join('\n') + '\n');
+  // engOnly 底物类型 + 归属（查事件扩展盒覆盖）
+  const preT = le16(`${pre(24, 'Dirt_To_Mud')}.typ`);
+  const pt = new Map<number, number>();
+  for (const qi of engOnly.slice(0, 5000)) pt.set(preT[qi]!, (pt.get(preT[qi]!) ?? 0) + 1);
+  console.log(`[i121f2] engOnly substrate top: ${JSON.stringify([...pt.entries()].sort((a, b) => b[1]! - b[1]! || (a[1]! > b[1]! ? -1 : 1)).slice(0, 6))}`);
+  // 裕度直方图（差集 ∩ 接受集）
+  const unowned = [...diffSet].filter((i) => !recMap.has(i));
+  console.log(`[i121f2] accepted diff-cells=${recMap.size}/992 unowned=${unowned.length}`);
+  const hist = new Map<string, number>();
+  const samp = new Map<string, { xy: string; r: Rec }>();
+  for (const [idx, arr] of recMap) {
+    const r = arr[arr.length - 1]!;
+    const m = r.thr - r.dist;
+    const lg = m <= 0 ? '<=0' : m < 1e-9 ? '<1e-9' : m < 1e-6 ? '<1e-6' : m < 1e-3 ? '<1e-3' : m < 0.02 ? '<0.02' : m < 0.1 ? '<0.1' : '>=0.1';
+    hist.set(lg, (hist.get(lg) ?? 0) + 1);
+    if (!samp.has(lg)) samp.set(lg, { xy: `${idx % W},${(idx / W) | 0}`, r });
+  }
+  console.log(`[i121f2] final-writer margin hist=${JSON.stringify([...hist.entries()].sort())}`);
+  for (const [kk, v] of samp) console.log(`   ${kk}: @${v.xy} run#${v.r.k} dist=${v.r.dist.toFixed(6)} thr=${v.r.thr.toFixed(12)} m=${(v.r.thr - v.r.dist).toExponential(3)} px=${v.r.px.toFixed(3)} py=${v.r.py.toFixed(3)}`);
 }, 600_000);

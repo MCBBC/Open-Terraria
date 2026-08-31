@@ -1,25 +1,53 @@
-// 拍击石系三脉冲（Projectile.TryMakingSnappingStoneStrike 1457 :14347-14420 1:1）：
-//  6167 拍击石   kind 0（ranged 命中触发 :13443-13446）——30×rangedDamage/120px/2 目标
-//                【消费端已接 entities/Arrow.ts 通用命中环：!hostile（≈ownedBySomeone）
-//                + projectileData.ranged 位门】
+// 拍击石系三脉冲（Projectile.TryMakingSnappingStoneStrike 1457 :14347-14465 1:1）：
+//  6167 拍击石   kind 0（ranged 命中触发 :13443-13446）——30×rangedDamage/120px/2 目标；
+//                加伤基座 num3=40（:14363 头部缺省值,kind0 不覆写）
 //  6178 焰爆石   kind 1（melee|ranged 命中触发 :13439-13442）——45×meleeDamage/300px/
 //                弹 1131 + 目标 323 Hellfire 180t（:14396-14401）；1131 出射逐弹按
-//                持有者 meleeCrit>rangedCrit 现场定类 :14414-14418（★F3,见 trySnapStrike）
-//  6179 毁灭臂镗 kind 2（tag 命中触发 :13447-13450）——150×minionDamage/400px/弹 1132
-//  共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383,Player.ts:571 字段/
-//  :3837 逐 t 递减——Update_SnappingStone :28592-28604 同款）;命中盒外目标取
-//  FindTargetWithLineOfSight（:14405-14412,至多 num2=2 个,跳过本次受击者）。
+//                持有者 meleeCrit>rangedCrit 现场定类 :14414-14418（★F3,见 trySnapStrike）；
+//                加伤基座 num3=70（:14373）/乘区 = max(meleeDamage,rangedDamage)
+//                （:14448-14451,与初始伤的 meleeDamage【不同式】）+ 受击者本体
+//                AddBuff(323,180)（:14444）
+//  6179 毁灭臂镗 kind 2（tag 命中触发 :13447-13450）——150×minionDamage/400px/弹 1132；
+//                加伤基座 num3=150（:14378）
+// ★F1（蓝队四轮，2026-08-31）：脉冲扫描尾【无条件】把加伤并入本次触发命中的 dmg：
+//   `num13 = num2 − num7`（:14442,漏配额=2−实出弹数,零目标也非负）→
+//   `num14 = num3 + num4*num13`（num4=10,:14362）→ 按 kind 乘区截断 → `dmg += num14`
+//   （:14457）→ kind1 另行给受击者本体 Hellfire。trySnapStrike 因此把旧 boolean
+//   返回值改为【返回 num14 终值】(number,未触发/冷却拦下 = 0)——所有调用站须把它
+//   并入本次 e.hurt 实伤参（防御前）。迁移时序说明：
+//    · 原版弹幕侧（Projectile.Damage_PVE_Inner）加伤点在 DamageVar(:12959) 与
+//      banner(:13387-91) 之后、parry ×5(:13634)/StrikeNPC(:13702) 之前 ⇒ num14 不吃
+//      攻端旗乘区；暴击翻倍在 StrikeNPC_Inner 防后 (:81990 num*(crit?2:1)) 故 num14
+//      【随本次命中一起】吃暴击——仓内调用侧预倍惯例下按 `+ bonus*(crit?2:1)` 并入；
+//    · 原版挥砍侧（Player.ProcessHitAgainstNPC :44684-86）恰好相反：加伤在
+//      DamageVar(:44700 前) 之前 ⇒ num14 跟全链一起掷 ±15%（Game.ts 已按此序并入）。
+// 共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383,Player.ts:571 字段/
+//  :3837 逐 t 递减——Update_SnappingStone :28592-28604 同款）;目标选取 =
+//  FindTargetWithLineOfSight（Projectile.cs:46474-46501,至多 num2=2 个,跳过本次受击者
+//  + 此前已选者）。★F2（蓝队四轮）：扫描面已按原文重建——①最近距离收缩语义
+//  （`num2 < num` STRICT 严格小于：距离恰等于 maxRange 的目标不取;原版 Distance()
+//  为 f32 长度,仓内 f64 双精度在常规量程与 f32 同值,f32 次常差异域备案），
+//  每个 num8 循环迭代以本次结果为 skipTargets 新成员重扫（缩短半径）；②视线门
+//  Collision.CanHit(targeter 整盒 → npc 整盒)（:46491,physics.canHit 家族复用；
+//  targeterBox 缺省 = 点盒(hx,hy,0,0),仅测试桩形态）;③localNPCImmunity!=0 排除
+//  （:46488,targeter 为 Projectile 时——经 ctx.exclude 读各宿主弹体的局部免疫窗，
+//  对齐 GC1 noteNpcPlayerImmune 体系承载的同语义窗位）。
 //  弹 1121/1131/1132 timeLeft=2 速 UnitY×0.1（:14413-14416）——本仓 Arrow 直生近似。
 //  ★1457 编排器对齐（2026-08-23）：命中尘 = Spawn_SnappingStone{,Melee,Summon}
 //  （ParticleOrchestrator.cs:593-812）Dust 段 1:1 入 vanillaDust 池（见
 //  snapStrikeDust）；FadingParticle/PrettySparkle 环带 + 三音效登记未接（编排器
-//  粒子类型本仓无池）。受击者自身脉冲（Projectile.cs:14432-14437 victim.Center,
-//  num11=盒径/2 钳 100）已补（R4-33,蓝队）——victim 盒径经可选参传入。
+//  粒子类型本仓无池；命中尾 Item30/Item20/Item43 三连 PlaySound 同批登记,音频通道
+//  补齐时统一走该登记,勿在此散写合成兜底）。受击者自身脉冲（Projectile.cs:14432-
+//  14437 victim.Center,num11=盒径/2 钳 100）已补（R4-33,蓝队）——victimBox 经 ctx 传。
+//  ★F3 接线台账（蓝队四轮）：projectileSnapStrikeBonus 为弹幕侧统一双支入口；
+//  971/975 飞行段原版本体即零伤害结算面（vanilla Damage() 无 971/975 特案,两弹型
+//  也不在本仓任何结算站出现）⇒ "无可接面"判定维持留档,不接线。
 import type { GameHooks } from '../entities/types';
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
-import { canBeChasedBy } from '../entities/projTargets';
+import { canBeChasedBy, pyroclastProjectileGate, snappingStoneProjectileGate } from '../entities/projTargets';
 import type { ProjClass } from '../entities/projTargets';
+import { canHit } from '../physics/LineOfSight';
 
 export interface SnapStrikeTarget {
   id: number;
@@ -30,8 +58,53 @@ export interface SnapStrikeTarget {
   hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
 }
 
-/** TryMakingSnappingStoneStrike（:14347-14420）。victim = 本次受击者（跳过）;
- *  返回是否触发（冷却命中/无目标 = false） */
+/** ★F1/F2 上下文包（原位 C# ref-dmg / skipTargets / localNPCImmunity 的仓内投影） */
+export interface SnapStrikeCtx {
+  /** R4-33 受击者自脉冲（Projectile.cs:14432-37 victim.Center 盒径尘） */
+  victimBox?: { w: number; h: number; cx: number; cy: number };
+  /** F2 视线门 targeter 整盒（Collision.CanHit 首参原文实体盒形态；缺省 = 点盒
+   *  (hx,hy,0,0) —— 仅测试桩与"触发锚即受击点"的面使用） */
+  targeterBox?: { x: number; y: number; w: number; h: number };
+  /** F2 localNPCImmunity[id]!=0 排除读面（真值 = 该敌仍在本弹免疫窗内,不可被选） */
+  exclude?: (npcId: number) => boolean;
+}
+
+/** FindTargetWithLineOfSight（Projectile.cs:46474-46501）单次扫描：全程候选里取
+ *  「skip/exclude 外 ∪ CanBeChasedBy ∪ 距离 < 当前收缩阈(STRICT) ∪ CanHit」的最小者。
+ *  距离 = 中心距欧氏（:46490 targeter.Distance(nPC.Center)）。 */
+function findTargetWithLineOfSight(
+  game: GameHooks,
+  hx: number,
+  hy: number,
+  maxRange: number,
+  skip: ReadonlySet<number>,
+  ctx: SnapStrikeCtx | undefined,
+): SnapStrikeTarget | null {
+  let bestDist = maxRange;                        // num 初值 = maxRange（:46477）
+  let best: SnapStrikeTarget | null = null;       // result = -1 档（:46479）
+  const tb = ctx?.targeterBox ?? { x: hx, y: hy, w: 0, h: 0 };
+  for (const ent of game.enemies()) {
+    if (!ent || typeof ent !== 'object') continue;
+    const t = ent as unknown as SnapStrikeTarget;
+    if (!t || t.dead || skip.has(t.id)) continue;            // ignoreTargets.Contains(:46481)
+    if (!canBeChasedBy(ent)) continue;                       // CanBeChasedBy(targeter)（:46485）
+    if (ctx?.exclude?.(t.id)) continue;                      // localNPCImmunity[i]!=0（:46487-89）
+    const tcx = t.cx ?? t.x + t.w / 2;
+    const tcy = t.cy ?? t.y + t.h / 2;
+    const d = Math.hypot(tcx - hx, tcy - hy);
+    if (!(d < bestDist)) continue;                           // num2 < num STRICT（:46492）
+    // Collision.CanHit(targeter.position,w,h, nPC.position,w,h)（:46493 实体整盒形）
+    if (!canHit(game.world.store, tb.x, tb.y, tb.w, tb.h, t.x, t.y, t.w, t.h)) continue;
+    bestDist = d;                                            // 收缩阈值（:46494）
+    best = t;
+  }
+  return best;
+}
+
+/** TryMakingSnappingStoneStrike（:14347-14465）。victim = 本次受击者（跳过）;
+ *  返回并入本次命中实伤（防御前）的加伤 num14 终值（冷却拦下/门关 = 0）。
+ *  F1 迁移注意：返回值不再是触发布尔——调用站必须消费（game.player 挥砍站把它并进
+ *  DamageVar 滚前链,弹幕站并进 e.hurt 实伤参并按暴击态乘 2/1）。 */
 export function trySnapStrike(
   game: GameHooks,
   owner: Player | null,
@@ -39,26 +112,32 @@ export function trySnapStrike(
   hx: number,
   hy: number,
   victimId: number,
-  victimBox?: { w: number; h: number; cx: number; cy: number },
-): boolean {
-  if (!owner || owner.accSnappingStoneCooldown > 0) return false;   // :14352-14354
+  ctx?: SnapStrikeCtx,
+): number {
+  if (!owner || owner.accSnappingStoneCooldown > 0) return 0;   // :14352-14354
   const eq = owner.equipStats;
   // 门：kind 对应饰品在身（调用侧已门,此处兜底）
-  if (kind === 0 && !eq.accSnappingStone) return false;
-  if (kind === 1 && !eq.accPyroclast) return false;
-  if (kind === 2 && !eq.accArmletOfRuin) return false;
+  if (kind === 0 && !eq.accSnappingStone) return 0;
+  if (kind === 1 && !eq.accPyroclast) return 0;
+  if (kind === 2 && !eq.accArmletOfRuin) return 0;
   let dmg = 30;            // num（:14356）
   let maxRange = 120;      // maxRange
   const maxTargets = 2;    // num2
   let projId = 1121;
+  let flatBase = 40;       // num3（加伤基座,:14363 缺省——kind0 不覆写）
+  let flatMult = 1 + eq.dmgRanged;               // kind0 加伤乘区（:14446-14448 rangedDamage）
   if (kind === 0) {
     dmg = Math.trunc(30 * (1 + eq.dmgRanged));                    // ×rangedDamage（:14358）
   } else if (kind === 1) {
     dmg = Math.trunc(45 * (1 + eq.dmgMelee));                     // num=45 ×meleeDamage（:14360-14362）
+    flatBase = 70;                                                // :14373
+    flatMult = Math.max(1 + eq.dmgMelee, 1 + eq.dmgRanged);       // :14447-14451 max(melee,ranged)
     maxRange = 300;
     projId = 1131;
   } else {
     dmg = Math.trunc(150 * owner.summonDamageMult);               // num=150 ×minionDamage（:14364-14366）
+    flatBase = 150;                                               // :14378
+    flatMult = owner.summonDamageMult;                            // :14459-14461 minionDamage
     maxRange = 400;
     projId = 1132;
   }
@@ -86,13 +165,13 @@ export function trySnapStrike(
   }
   const add = (e: unknown) =>
     (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
-  let strikes = 0;
-  for (const ent of game.enemies()) {
-    if (strikes >= maxTargets) break;
-    const t = ent as unknown as SnapStrikeTarget;
-    if (t.dead || t.id === victimId) continue;                     // skipTargets（:14372-14376）
-    if (!canBeChasedBy(ent)) continue;           // FindTargetWithLineOfSight → CanBeChasedBy 索敌门(:14372)
-    if (Math.hypot(t.cx - hx, t.cy - hy) > maxRange) continue;
+  // ★F2 重构：skipTargets 表（victim 起表 :14381-83 → 每出一弹追加 :14426-27）+
+  //  FindTargetWithLineOfSight 收缩语义（num8 循环每次全量重扫取最近,:14384-14428）。
+  const skip = new Set<number>([victimId]);
+  let strikes = 0;                              // num7
+  for (let n = maxTargets; n > 0; n--) {        // for(num8=num2; num8>0; num8--)（:14385）
+    const t = findTargetWithLineOfSight(game, hx, hy, maxRange, skip, ctx);
+    if (!t) break;                              // num9 == -1 → break（:14388-90）
     strikes++;
     // NewProjectile(nPC.Center, UnitY*0.1, projId, dmg, kb 5) + timeLeft=2（:14413-14416）
     const pulse = new Arrow(t.cx, t.cy - 4, 0, 0.1, dmg, 5, projId, null,
@@ -105,13 +184,50 @@ export function trySnapStrike(
     //  中心（原版 = lerp(盒内随机点, Center, 0.6)，备案）；FadingParticle/PrettySparkle
     //  环带 + 音效（Item72/PyroclasticStone/ArmletOfRuin）登记未接
     snapStrikeDust(game, kind, t.cx, t.cy, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
+    skip.add(t.id);                             // skipTargets.Add(num9)（:14425-27）
   }
   // R4-33（Projectile.cs:14432-14437）：受击者自身也发一次脉冲——num11=盒径/2 钳 100
-  if (victimBox) {
-    snapStrikeDust(game, kind, victimBox.cx, victimBox.cy,
-      Math.min(100, Math.hypot(victimBox.w, victimBox.h) / 2));
+  if (ctx?.victimBox) {
+    snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy,
+      Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2));
   }
-  return strikes > 0;
+  // ★F1 加伤链（:14442-14457）——零目标也照样给满额漏配（num13 = 2 − num7）：
+  //   `(int)((float)num14 ×乘区)` 为 C# float 乘后截断；f64/f32 双精度在常规乘区
+  //   量程同值（乘区非 2 幂边界的次常差异域备案），沿用仓内截断惯例。
+  const misses = maxTargets - strikes;          // num13（:14442,≤上限恒非负）
+  const bonus = Math.trunc((flatBase + 10 * misses) * flatMult);   // num14 = num3 + num4*num13（:14443）
+  if (kind === 1) {                             // victim.AddBuff(323,180)=3s（:14444 受击者本体）
+    const vic = (game.enemies() as unknown as SnapStrikeTarget[])
+      .find((t) => t?.id === victimId && !t.dead);
+    if (vic) vic.onFire3T = Math.max(vic.onFire3T ?? 0, 3);
+  }
+  return bonus;                                 // dmg += num14（:14457 由调用站并入实伤参）
+}
+
+/** ★F3 弹幕侧统一双支入口（Projectile.Damage_PVE_Inner :13439-13446 书写序的仓内单源，
+ *  2026-08-31 蓝队四轮收编——此前 Arrow.dealContacts 的 kind0 内联手搓口径撤销、
+ *  各新站一律经本函数接入，禁止散写 projectileData 类位查表）：
+ *   支1 kind1 焰爆石门 pyroclastProjectileGate（melee|ranged ∧ accPyroclast）；
+ *   支2 kind0 拍击石门 snappingStoneProjectileGate（ranged ∧ accSnappingStone）。
+ *  两支共用 360t 冷却 ⇒ 同帧至多一支实触发；返回两次触发的加伤和（冷却/门关 = 0），
+ *  调用站并入本次 e.hurt 实伤参（防御前,不吃攻端旗乘区,见 trySnapStrike 迁移注）。 */
+export function projectileSnapStrikeBonus(
+  game: GameHooks,
+  host: { hostile?: boolean; projClass?: ProjClass; projId?: number; meleeProj?: boolean } | null | undefined,
+  hx: number,
+  hy: number,
+  victimId: number,
+  ctx?: SnapStrikeCtx,
+): number {
+  if (!host || host.hostile === true) return 0;            // ownedBySomeone 档
+  let bonus = 0;
+  if (pyroclastProjectileGate(game, host)) {
+    bonus += trySnapStrike(game, game.player, 1, hx, hy, victimId, ctx);       // :13439-42
+  }
+  if (snappingStoneProjectileGate(game, host)) {
+    bonus += trySnapStrike(game, game.player, 0, hx, hy, victimId, ctx);       // :13443-46
+  }
+  return bonus;
 }
 
 /**

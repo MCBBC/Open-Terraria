@@ -1,8 +1,8 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
@@ -519,13 +519,19 @@ export class TrapShot extends Entity {
         // 巨石族（若 id 带类旗则自动生效）。此处故意不复写实例 hostile 投影（本仓
         // hostile 承载"伤玩家"档，与原版 Projectile.hostile/friendly 数据面不同域）；
         // 反射弹已由外层 !this.reflected 拦截。
-        if (trapProjId !== undefined && pyroclastProjectileGate(game, { projId: trapProjId })) {
-          trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2,
-            (e as unknown as { id?: number }).id ?? -1,
+        if (trapProjId !== undefined) {
+          // ★F3/F1 收编升级（2026-08-31 蓝队四轮）：双支单源（kind1 门+kind0 门同序,
+          // 数据面无类旗弹恒双拒）+ 返回 num14 加伤并入实伤参
+          const snapBonusTrap = projectileSnapStrikeBonus(game, { projId: trapProjId },
+            e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
             { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+          // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
+          e.hurt(applyBannerDamageDealt(game, e, this.damage)
+            + (snapBonusTrap ? Math.trunc(snapBonusTrap * 1) : 0),
+            Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        } else {
+          e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         }
-        // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
-        e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
         // 陷阱弹 id 的全局档按纯表取（现役表内无显型定档/三旗——penetrate 走数据面：
         // 98/184/185/186/980 均 penetrate=-1 ⇒ 末档每次命中写 immune[owner]=10
@@ -614,15 +620,19 @@ export class TrapShot extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
-      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——TRAP_PROJ_ID 兜底
-      //  查 id（162/281 无类旗原版恒不触发），站位补齐同命中环注
+      // ★焰爆石/拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
+      // TRAP_PROJ_ID 兜底查 id（162/281 无类旗原版恒不触发），站位补齐同命中环注；
+      // 返回 num14 加伤并入实伤参（无 crit 面,×1）
       const blProjId = TRAP_PROJ_ID[this.kind];
-      if (blProjId !== undefined && pyroclastProjectileGate(game, { projId: blProjId })) {
-        trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2,
-          (e as unknown as { id?: number }).id ?? -1,
+      let snapBonusBlast = 0;
+      if (blProjId !== undefined) {
+        snapBonusBlast = projectileSnapStrikeBonus(game, { projId: blProjId },
+          e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
           { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
       }
-      e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
+      e.hurt(applyBannerDamageDealt(game, e, this.damage)
+        + (snapBonusBlast ? Math.trunc(snapBonusBlast * 1) : 0),
+        Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
     }
   }
 
@@ -950,6 +960,10 @@ export class Dart extends Entity {
   private dartStep(game: GameHooks, st: DartStyle): void {
     this.age++;
     this.tick++;
+    // AI_016_Bombs 摩擦门读数：原版在同一 AI 拍里「先判 velocity.Y==0(:48387) 再
+    // vy+=0.2(:48412)」——门读的是上拍碰撞后的静止态，本仓重力在上游通用段先加,
+    // 故在此快照（spiky 支摩擦在其加重力之前,天然同序无需快照）
+    const prevVyZero = this.vy === 0;
     // ---- 重力/加速（AI_001 分型重力门 & AI_018/AI_027 加速段）----
     if (st.accel && this.age >= st.accel.from && this.age < st.accel.to) {
       this.vx *= st.accel.mul; this.vy *= st.accel.mul;
@@ -1040,11 +1054,11 @@ export class Dart extends Entity {
     if (st.bomb) {
       // ---- aiStyle16 炸弹族位移（75 HappyBomb）：轴分离 + 撞块反弹
       //      （Projectile.cs:19866-19872：X 碰 → −lastVX×0.4；Y 碰且 lastVY>0.7
-      //      → −lastVY×0.4,否则停）。贴地摩擦走 AI_016_Bombs 尾原式
-      //      (:48379-48413)：门=上一拍碰撞后的 velocity.Y==0 且 vx≠0 +
-      //      |vx|≤0.01 静止截停——★B 档清偿:曾用"脚下实心"探针近似且缺截停,
+      //      → −lastVY×0.4,否则停）。贴地摩擦走 AI_016_Bombs 尾原式(:48379-48413)：
+      //      全段在 ai[0]>5 门内、门=上拍碰撞后的 velocity.Y==0(读加重力前快照) 且
+      //      vx≠0 + |vx|≤0.01 静止截停——★B 档清偿:曾用"脚下实心"探针近似且缺截停,
       //      慢速爬行永不休止 ----
-      if (this.vy === 0 && this.vx !== 0) {
+      if (this.age > 5 && prevVyZero && this.vx !== 0) {
         this.vx *= 0.97;
         if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
       }

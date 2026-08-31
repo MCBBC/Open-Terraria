@@ -289,7 +289,16 @@ export class Celeb2Rocket extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）：庆祝弹射器 MK2 族（714/615/715-718）数据面 ranged
+      // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在
+      // banner 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
+      const snapBonusCeleb2 = projectileSnapStrikeBonus(game,
+        { projId: this.projId ?? 714 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusCeleb2 ? Math.trunc(snapBonusCeleb2 * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
       this.explode(game);                              // penetrate 1 → 命中即 Kill
       return;
     }

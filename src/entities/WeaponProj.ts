@@ -23,8 +23,8 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // 直生 + broadcast 上行同用此函数）
 import { paladinsHammerShockwaveFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
-import { noteVanillaProjImmune, pyroclastProjectileGate } from './projTargets';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { noteVanillaProjImmune } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
@@ -346,18 +346,19 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
           (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
       }
     }
-    // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42 `(melee||ranged)&ownedBySomeone
-    //  && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：回旋镖/长矛/悠悠球/
-    // 飞刀等投射在 Damage() 的结算位——vanilla 在 DamageVar 前、StrikeNPC 前，本仓
-    // 对齐 hurt 前同一节拍。类门 pyroclastProjectileGate 单源；45×meleeDamage/300px/
-    // 2 目标弹 1131+323（:14396-14401），共用 360t 冷却去重。
-    if (pyroclastProjectileGate(game, self)) {
-      trySnapStrike(game, game.player, 1,
-        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
-    }
-    e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序；F3/F1
+    //  收编升级,2026-08-31 蓝队四轮）：回旋镖/长矛/悠悠球/飞刀等投射在 Damage() 的
+    // 结算位。门+触发走 projectileSnapStrikeBonus 单源（pyroclastProjectileGate /
+    // snappingStoneProjectileGate 类位单源;360t 共用冷却去重）; F2 = FindTargetWith
+    // LineOfSight 原文扫描面；返回 num14 加伤【不吃攻端旗乘区】、随暴击并入实伤参
+    // （banner 采样在 :13387 先于加伤 :14457 ⇒ 加伤不进 applyBannerDamageDealt 面）。
+    const snapBonusHitEnemies = projectileSnapStrikeBonus(game, self,
+      (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+      e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+        cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+    e.hurt(applyBannerDamageDealt(game, e, dmg)
+      + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0),
+      kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
@@ -2843,14 +2844,15 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——悠悠球伴生弹
-      //   （1125 Cascade 爆裂/1130 EoC 冲撞/1134 晶簇/1135 Kraken 波，SetDefaults
-      //   friendly/melee）结算位；类门 pyroclastProjectileGate 单源
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
-          { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
-      }
-      e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序,
+      // F3/F1 收编升级）——悠悠球伴生弹（1125 Cascade 爆裂/1130 EoC 冲撞/1134 晶簇/
+      // 1135 Kraken 波，SetDefaults friendly/melee 数据面）结算位；门+触发 =
+      // projectileSnapStrikeBonus 单源，加伤随暴击并入实伤参（不吃旗乘区）
+      const snapBonusYoyoSib = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusYoyoSib ? Math.trunc(snapBonusYoyoSib * (crit ? 2 : 1)) : 0),
+        kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 蓝队二轮 F1/F5 裁决：四型 face 不再依赖调用点硬编码——
       //   1125/1130 usesLocalNPCImmunity(cd=-1) → 写 0 清全局窗（:10541/:10610）；
@@ -3896,7 +3898,14 @@ export class GrenadeProj extends Entity {
           // 再飞 3t（30-45px）穿过目标才爆,接触目标零伤（假人/蝙蝠双症状根因）
           const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
           const crit = Math.random() < (this.critChance || 0.04);
-          e.hurt?.(this.damage, dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
+          // ★F3 接线（蓝队四轮）：接触伤害走标准 Damage_PVE 全管线 → 焰爆石/拍击石
+          // 双支（Projectile.cs:13439-13446）随接触生效；手雷族数据面 ranged。
+          // 加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）。
+          const snapBonusGrenade = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2,
+            e.id, { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+          e.hurt?.(this.damage
+            + (snapBonusGrenade ? Math.trunc(snapBonusGrenade * (crit ? 2 : 1)) : 0),
+            dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
           this.fuse = 3;
           break;
         }
@@ -4056,6 +4065,15 @@ export class GrenadeProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
+    // ★HOUSE(2026-08-31):角色盒内不渲染弹体(age<30 门)——与 Arrow.draw 同款,
+    //  GrenadeProj 此前漏加 = 火箭从身体中心可见("弹没从炮筒出"的火箭侧根因)
+    const mp = r.mainPlayer;
+    if (mp && this.fired) {
+      if (this.cx > mp.x && this.cx < mp.x + mp.w &&
+          this.cy > mp.y && this.cy < mp.y + mp.h) {
+        return;
+      }
+    }
     // 原版投射物绘制 = 贴图原生尺寸 × scale 1（与碰撞盒解耦）——雷管 29 贴图 10×32
     // 此前按碰撞盒宽 14 拉方成 14×44.8（"雷管贴图这么大个"根因）
     // 发射族：贴墙待爆 alpha=255 隐形 / 感应雷布防 alpha=200 半隐（:18368/:44754）
@@ -4108,7 +4126,14 @@ export class GrenadeProj extends Entity {
           // = 投掷炸弹穿体后爆,接触目标零伤,同火箭双症状）
           const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
           const crit = Math.random() < (this.critChance || 0.04);
-          e.hurt?.(this.damage, dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
+          // ★F3 接线（蓝队四轮）：投掷支接触环 = 第二处引爆面（发射支 3906 同款）——
+          // 焰爆石/拍击石双支随标准 Damage_PVE 生效,加伤随暴击并入实伤参
+          const snapBonusGrenadeThrow = projectileSnapStrikeBonus(game, this,
+            e.x + e.w / 2, e.y + e.h / 2, e.id,
+            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+          e.hurt?.(this.damage
+            + (snapBonusGrenadeThrow ? Math.trunc(snapBonusGrenadeThrow * (crit ? 2 : 1)) : 0),
+            dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
           this.fuse = Math.min(this.fuse, 3);
           break;
         }
@@ -4905,16 +4930,17 @@ export class DaybreakFlare extends Entity {
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——镖/标枪附着族首击
-      //   结算位；类门 pyroclastProjectileGate 单源
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1,
-          (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
-          { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
-      }
-      e.hurt(applyBannerDamageDealt(game, e, dmg), (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序，
+      // F3/F1 收编升级）——镖/标枪附着族首击结算位；门+触发 = projectileSnapStrikeBonus
+      // 单源，加伤随暴击并入实伤参（不吃旗乘区）
+      const snapBonusFlare = projectileSnapStrikeBonus(game, this,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2,
+        (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
+        { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusFlare ? Math.trunc(snapBonusFlare * (crit ? 2 : 1)) : 0),
+        (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // ★GC1 写方桥：镖/标枪附着族（598/636/614）走 Projectile.cs:14039-14051 顶层
       //  分派旁路——纯表返回无写档（附着节流全靠 per-javelin 表与上限管理），其余
       //  id（未来扩种）自动落缺省档。

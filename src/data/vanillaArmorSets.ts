@@ -16,6 +16,9 @@ export interface ArmorSetBonus {
   critMagic?: number;
   noKnockback?: boolean;
   titaniumStorm?: boolean;   // 钛金全套 on-hit（ArmorSetBonuses.cs:222-225 Titanium→onHitTitaniumStorm）
+  ashWood?: boolean;         // ★Notes④ 灰烬木全套（1456 Player.cs:15772-15775 赋位;
+                             // 1457 消费位 :27885/:27904——remix 岩浆档 145+半减/OnFire−210/
+                             // 与玫瑰并持完全免疫岩浆）
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
   endurance?: number;
   dmgMinion?: number;   // minionDamage +=
@@ -38,6 +41,11 @@ export interface ArmorSetBonus {
 export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 钛金 (1215|1216|1217 头 ×1218 胸 ×1219 腿,ArmorSetBonuses.cs:461-463)：
   // on-hit 钛金屏障（Player.cs:6927-6936 cooldown10+buff306 600t+碎片908≤7）
+  // 灰烬木 5279|5280|5281 = 槽序 278|246|234（itemstats hs/bs/ls；1456 Player.cs
+  // :15772-15775 `ArmorSetBonus.AshWood` → ashWoodBonus=true。1457 反编译树缺
+  // UpdateArmorSetsOld 函数体,消费位 Player.cs:27885/:27904 原样保留——本表按
+  // 1456 赋值语义+1457 消费字面重建,REMIX 世界可获取,见 vanillaItemVariants.ts:107）
+  '278|246|234': { ashWood: true, name: 'AshWood' },
   '89|56|51': { titaniumStorm: true, name: 'Titanium' },    // Mask(headSlot 89)
   '90|56|51': { titaniumStorm: true, name: 'Titanium' },    // Helmet(90)
   '91|56|51': { titaniumStorm: true, name: 'Titanium' },    // Headgear(91)

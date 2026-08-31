@@ -591,7 +591,7 @@ import { runFinishDrunkGenPass } from './vanilla/FinishDrunkGenPass';   // ★II
 import {
   doDigExtraHoles, doSurfaceIsMushroomsEarly, pumpkinSeasonArm,
   finalizeSecretSeedDoEnds, applyGraveyardInitialClockState,
-  doRoundLandMasses,
+  doRoundLandMasses, doExtraLiquidAddLiquid,
   // ★IIIII41-T3①：vampire/randomSpawn 共宿核心（avoid 表四支补全在彼处）
   randomizeWorldSpawnCore, doAdditionalChangesAroundSpawnCore,
 } from './vanilla/SecretSeedDoEndsPass';
@@ -682,6 +682,11 @@ export async function liquidSettlePass({ world, rng, store, prog }: GenCtx, ocea
           if (st0.liquid[i] > 0 && st0.liquidType[i] !== 1) st0.liquidType[i] = 1;
         }
       }
+    }
+    // ★IIIII101（waterpark）：cs:16242-16245——DoExtraLiquidAddLiquid 在 oceanDepths
+    //   归水之后、NotTheBees() 之前（仅首沉降 pass 调用；二次沉降只有旗标文案位）
+    if (oceanStrip && gs.seedFlags.extraLiquid) {
+      doExtraLiquidAddLiquid(store, rng, gs);
     }
     // ★UUUUUU：NotTheBees() 槽头（SettleLiquids cs:16237 / SettleLiquidsPart2
     //   cs:21064——两沉降 pass 头、QuickWater 之前的首掷消费者位；本函数被
@@ -1666,7 +1671,7 @@ function cactusCoralPass({ store, rng }: GenCtx) {
   runCactusPalmTreesAndCoralPass(store, rng, gs);
 }
 
-function tileCleanupPass({ store, rng, world }: GenCtx) {
+function tileCleanupPass({ store, rng, world, prog }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenySome(gs.seedFlags)) return;                // ★IIIII44 cs:21702

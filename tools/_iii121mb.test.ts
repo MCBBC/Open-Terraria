@@ -174,6 +174,13 @@ const le16 = (p: string): Uint16Array => {
     Object.defineProperty(rp, 'vanilla', { value: { ...van, next: () => { rcBox.n++; return on(); } }, configurable: true });
   }
   (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc = rcBox;
+  // 118MB/118LT 镜像流（SW_I121_SEG=1）：对拍 rig drlog 用；rc 同源 mbDraws
+  const segLog: string[] = [];
+  (globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws = () => rcBox.n;
+  if (process.env.SW_I121_SEG === '1') {
+    (globalThis as unknown as { __swSeg?: (name: string, d?: unknown) => void }).__swSeg =
+      (name: string, d?: unknown) => { segLog.push(`${name}|${d === undefined ? '' : JSON.stringify(d)}|${rcBox.n}`); };
+  }
   // MBWRITE 全域写监视：记录本 pass 内每个写入格（act/type/wall/liq 任一变化）+ 掷位序
   const beforeAct = xa.slice().subarray(0, 0); void beforeAct;
   const snapAct = new Uint8Array(N), snapTyp = new Uint16Array(N), snapWal = new Uint16Array(N),
@@ -182,6 +189,12 @@ const le16 = (p: string): Uint16Array => {
   for (let i2 = 0; i2 < N; i2++) { snapTyp[i2] = st.flags[i2] ? (SHEET[st.type[i2]!] >= 0 ? SHEET[st.type[i2]!]! : 9999) : 0; snapWal[i2] = st.wall[i2]!; snapLiq[i2] = st.liquid[i2]!; snapSl[i2] = st.slope[i2]!; }
   const t0 = Date.now();
   runMicroBiomesPass(st, rng, gs, chests as never);
+  if (process.env.SW_I121_SEG === '1') {
+    writeFileSync(`${OUT}/js-seg.txt`, segLog.join('\n') + '\n');
+    console.log(`js-seg -> ${OUT}/js-seg.txt (${segLog.length} lines)`);
+    segLog.length = 0;
+    (globalThis as unknown as { __swSeg?: unknown }).__swSeg = undefined;
+  }
   console.log(`runMicroBiomesPass ${Date.now() - t0}ms rolls=${rcBox.n} chestsIn=${chests.length}`);
   // 八通道对拍（mile8 同构）
   let dA = 0, dT = 0, dW = 0, dL = 0, dHf = 0, dSl = 0, dLt = 0, dIa = 0, dGh = 0;

@@ -22434,7 +22434,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //      TryMakingSnappingStoneStrike kind 1：45×近战伤/300px/2 目标弹 1131+323；
       //      共用 360t 冷却，见 stats/SnapStrike）—— vanilla 在【DamageVar 之前】，
       //      此前被排在 e.hurt 之后，A5 批一并搬回此位 ----
-      trySnapStrike(this, this.player, 1, e.cx, e.cy, e.id);
+      // ★F1（蓝队四轮）：返回值 = num14 加伤（Projectile.cs:14457 dmg+=num14），
+      //   挥砍侧原版序为加伤先于 DamageVar ⇒ 与全链一起吃 ±15% 方差与暴击翻倍；
+      //   注：本站无 kind0 支（挥砍面 vanilla 仅挂 accPyroclast 单支 :44684-97）。
+      //   victimBox 补传（R4-33 受击者自脉冲尘,Notes 清偿项）。
+      const snapBonusSwing = trySnapStrike(this, this.player, 1, e.cx, e.cy, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });
+      if (snapBonusSwing > 0) chainDmg += snapBonusSwing;
       // 原版 Main.DamageVar（:44654 `int num3 = Main.DamageVar(damage, luck)`）：
       // ★F9 单源化——离散 31 档 ×ToEven 银行家舍入 ×luck 重掷取极值
       // （stats/DamageVar.ts damageVarRoll；旧连续 uniform×30−15 + half-up round
@@ -25322,6 +25328,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onInventoryChanged?.();
       }
       startStardewAnimation();
+      // ★2026-08-31 台账批：HaveDryadDoStardewAnimation 的 ai[0]==24 实体侧
+      // （NPC.cs:19223-19230）——施法光/锁向/表演帧由 TownNPC.social kind24 承接
+      npc.enterStardewCast();
       this.net?.sendDryadStardewAnim();               // 原版 netMode==1 → SendData(144)
       this.sfx.play('menuTick');                      // Interact 首行 PlaySound(12)
       this.refreshNpcDialog(npc, Lang.text('StardewTalk.PlayerGivesCola'));
@@ -27557,7 +27566,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //     applyBannerDamageDealt 包装；方向 -num3（:31642）、hitDir 入参 0。
     //   弹幕命中不进此面（contactOnly 门）＝原版无弹侧反射的构造性边界。
     {
-      // flag3（General ⇔ !immune；非 General 桶查表——接触链现恒 General,BossNoCheese 未建模）
+      // flag3（General ⇔ !immune；非 General 桶查表——★Notes⑤ 前半起接触链亦可为
+      // BossNoCheese：月总族 396/397/398/400/401·636 由 Enemy 接触链注入 :31571-31587）
       const flag3 = effCd === -1 ? p.iframes <= 0
         : !(getGlobalHurtBuckets()?.blocksHit(effCd));
       if (attacker && contactOnly && !pvp && !attacker.dead && flag3 && !attacker.dontTakeDamage) {
@@ -27568,8 +27578,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const kbVel = canParry ? 5 : 10;
         // num3（:31619-31623）：怪在玩家左 ⇒ +1（攻向右推玩家）→ 反射取 -num3 推离玩家
         const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1;
+        // ★F5①（四轮蓝队）：删独占 ×0.65——原文 `ApplyDamageToNPC(npc, num5,
+        //   knockback, …)`（:31642/:31655）的 knockback 共享局部量就是裸值
+        //   （parry 态 5 / 常态 10，:31608/:31616），原值直进 StrikeNPC;击退 resist 与
+        //   五段软封顶全部在 NPC 内部结算（Enemy.hurt kb 管线 = StrikeNPC :82144-82239
+        //   同构）。全树无 0.65 推导位,该系数系无源乘区 → 原式回正。
+        // ★F5②（四轮蓝队）：攻端面补 ApplyDamageToNPC 内置两步（Player.cs:20597-20621）：
+        //   · damage += npc.checkArmorPenetration(GetArmorPenetration(melee:false), 0f)
+        //     ——本仓经 Enemy.hurt 第 armorPen 形参走 npcCheckArmorPenetration 单池;
+        //     GetArmorPenetration(false)=armorPenetration 通用池（不含近战追加位）。
+        //   · OnHit(x,y,npc) 攻端 on-hit 面：仓内承载 = Enemy.hurt fromPlayer 位内嵌
+        //     钛金屏障 proc（equipStats.titaniumStorm ⇒ cd10+buff306+碎片弹）;反射命中
+        //     原 versionic 上也触发该族 ⇒ reflect 调用带 fromPlayer=true 接通。
+        //     （OnHit 其余支 onHitDodge/onHitRegen/petal/stardust/crystalLeaf 对应套装
+        //      本仓未建模=无生产位,勿在此虚发——见受击域批注。）
         const hurtReflector = (amount: number): void => {
-          attacker.hurt(applyBannerDamageDealt(this, attacker, amount), -num3 * kbVel * 0.65, canParry ? -2 : 0, this);
+          attacker.hurt(applyBannerDamageDealt(this, attacker, amount),
+            -num3 * kbVel, canParry ? -2 : 0, this,
+            p.equipStats.armorPen ?? 0, false, 0, true);
         };
         const num2 = canParry ? 2 : (p.turtleSet ? 2 : p.thornsAmount);
         if (num2 > 0) {                                   // :31634 `num2 > 0f` 门
@@ -33495,8 +33521,15 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
         onStrike: (netId, dmg, kbx, kby, fromSlot) => this.netApplyStrike(netId, dmg, kbx, kby, fromSlot),
         // M4 msg120：其他端玩家表情——锚到对应远端代理头顶出泡 360t
         // （原版锚实体是 Player → OnBubbleChange Player 门适用）
-        // msg144：其他端树妖星露谷演出（编排器全局态由 stardewActive 防重入）
-        onDryadStardewAnim: () => { if (!stardewActive()) startStardewAnimation(); },
+        // msg144：其他端树妖星露谷演出（编排器全局态由 stardewActive 防重入）+
+        // 本端 dryad 实体进 ai[0]==24 施法态（HaveDryadDoStardewAnimation 对
+        // type==20 全量循环,19222-19231）
+        onDryadStardewAnim: () => {
+          if (!stardewActive()) startStardewAnimation();
+          for (const n of this.entities.npcs as unknown as TownNPC[]) {
+            if (!n.dead && n.npcKey === 'dryad') n.enterStardewCast();
+          }
+        },
         onEmoteBubble: (slot, emoteId) => {
           const proxy = this.remotePlayerProxies.find(
             (pr) => (pr as unknown as { __netSlot?: number }).__netSlot === slot);

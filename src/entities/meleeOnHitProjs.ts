@@ -7,6 +7,7 @@ import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { damageVarRoll } from '../stats/DamageVar';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 
 interface EnemyLike {
@@ -264,7 +265,15 @@ export class MuramasaSlashProj extends Entity {
       let dmgVar = damageVarRoll(this.damage,
         ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       dmgVar = applyBannerDamageDealt(game, e, dmgVar);
-      e.hurt(dmgVar * (crit ? 2 : 1),
+      // ★F3 接线（蓝队四轮）：村正斩波 977 数据面 melee（SetDefaults :9196-9225 类旗
+      // 投影）→ 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；
+      // 加伤在 banner 后并入、随暴击并入实伤参（原版序注同上）。
+      const snapBonusMuramasa = projectileSnapStrikeBonus(game,
+        { projId: 977 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: px, y: py, w: this.w, h: this.h } });
+      e.hurt(dmgVar * (crit ? 2 : 1)
+        + (snapBonusMuramasa ? Math.trunc(snapBonusMuramasa * (crit ? 2 : 1)) : 0),
         Math.sign((e.cx ?? this.cx) - this.cx) || 1,     // kb 原文 0f → 位移 0；方向位保留
         0, game, this.armorPenInject + 5, crit, 0, true, 0, 977);   // ★A-F1：srcProjId 进排除表
       clearGlobalImmune(game, e.id);
@@ -430,7 +439,15 @@ export class BladetongueGlobProj extends Entity {
         let dmgVar = damageVarRoll(this.damage,
           ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
         dmgVar = applyBannerDamageDealt(game, e, dmgVar);
-        e.hurt(dmgVar * (crit ? 2 : 1),
+        // ★F3 接线（蓝队四轮）：血舌球 524 数据面 melee（SetDefaults :5941-54 类旗投影）
+        // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 子步结算生效；
+        // 加伤在 banner 后并入（原版序 :14457 晚于 :13387），随暴击并入实伤参。
+        const snapBonusGlob = projectileSnapStrikeBonus(game,
+          { projId: 524 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+          { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+            targeterBox: { x: px, y: py, w: this.w, h: this.h } });
+        e.hurt(dmgVar * (crit ? 2 : 1)
+          + (snapBonusGlob ? Math.trunc(snapBonusGlob * (crit ? 2 : 1)) : 0),
           Math.sign((e.cx ?? this.cx) - this.cx) || 1, 0,
           game, this.armorPenInject, crit, 0, true);
         this.ai0 += 50;                                    // :13261 netUpdate=true; ai[0]+=50f

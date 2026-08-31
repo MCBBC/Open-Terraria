@@ -739,13 +739,17 @@ export function resolveWhipTagHit(
   }
   stack.onHit(ctx, baseDmg, game);                                 // :13711（calcDamage = num7）
   // 毁灭臂镗 6179（Damage :13447-13450）：tag 伤害成立的命中 → kind2 脉冲
-  //（150×minionDamage/400px/2 目标,共用 360t 冷却）
+  //（150×minionDamage/400px/2 目标,共用 360t 冷却）。★F1（蓝队四轮）：原版 num14
+  // 加伤在 tag 栈(:12932)/DamageVar(:12959)/banner(:13387)【之后】并入 → 不吃
+  // tag/banner 乘区、随暴击翻倍（StrikeNPC 防后 ×2 :81990）——返回值移到 crit 倍率处并入
+  let snapBonusKind2 = 0;
   if (changes.addProjectileTagDamage && owner?.equipStats.accArmletOfRuin) {
     const vw = en.w ?? 16, vh = en.h ?? 16, vx0 = en.x ?? hx, vy0 = en.y ?? hy;
-    trySnapStrike(game, owner, 2, hx, hy, en.id,
+    snapBonusKind2 = trySnapStrike(game, owner, 2, hx, hy, en.id,
       { w: vw, h: vh, cx: vx0 + vw / 2, cy: vy0 + vh / 2 });   // R4-33 victim 自脉冲
   }
   if (crit) dmg *= 2;
+  if (snapBonusKind2 > 0) dmg += Math.trunc(snapBonusKind2 * (crit ? 2 : 1));
   return { dmg: Math.max(1, Math.round(dmg)), crit };
 }
 

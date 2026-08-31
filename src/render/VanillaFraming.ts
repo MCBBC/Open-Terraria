@@ -638,6 +638,24 @@ function vanToInternalTable(): Int16Array {
 export function isVanillaMergeDirtFamily(van: number): boolean {
   return van === 0 || !!MERGE_DIRT[van];
 }
+// ★冰雪互斥接缝对(2026-08-31 第四批,用户实报「冰块×雪块跨类漏缝」):
+// 官方 TileFrameCosmetic 里雪/冰同属 tileBrick 超级家族却经排除表互斥——
+//   雪 147 排除 DontMergeWithSnow(TID:193){161 冰,200 血冰,163 腐冰,164 神圣冰,
+//     224 雪泥,170 松树块,738 蓬松猫毛块}(:82796-82799);
+//   冰族排除雪 147 Sets.Snow(TID:291)(:82801-82805);
+//   162 薄冰排除 IcesSnow(TID:297){161,200,163,164,147}(:82806-82809)。
+// 与 MERGE_DIRT 跨族批同政策(用户权威定案=接缝封闭;官方互斥过渡帧自带真透明
+// 缺口,sw_vanilla_framing_strict=1 可切回逐位原版验缝)。判定按官方排除表
+// 双向对称(单向缝的另一侧官方本就相连,统一视图对其是视觉无操作)。
+export function isVanillaSeamPair(a: number, b: number): boolean {
+  if ((a === 147) !== (b === 147)) {
+    if (DONT_MERGE_WITH_SNOW[a === 147 ? b : a]) return true;
+  }
+  if ((a === 162) !== (b === 162)) {
+    if (SETS_ICES_SNOW[a === 162 ? b : a]) return true;
+  }
+  return false;
+}
 const ghostFrameCache = new Map<number, { fx: number; fy: number }>();
 function clearGhostCache(): void {
   ghostFrameCache.clear();
@@ -658,7 +676,13 @@ function buildUnifiedView(st: TileStore, centerVan: number): TileStore {
         if (!Number.isInteger(i)) return (realType as unknown as Record<string | symbol, unknown>)[prop];
         if (!flags[i]) return realType[i];
         const van = vanillaIdOf(realType[i]);
-        if (van !== centerVan && isVanillaMergeDirtFamily(van) && targetInternal >= 0) return targetInternal;
+        if (van !== centerVan && targetInternal >= 0) {
+          // 泥土族跨族批:视图原语义 = 邻居∈MERGE_DIRT 族 → 视同本族(调用门保证
+          // 中心亦在族内;此处显式判中心,防冰雪批复用视图时把石/土误并进雪)
+          if (isVanillaMergeDirtFamily(centerVan) && isVanillaMergeDirtFamily(van)) return targetInternal;
+          // 冰雪互斥批(2026-08-31):官方排除表互斥对 → 视同本族,内帧闭合接缝
+          if (isVanillaSeamPair(centerVan, van)) return targetInternal;
+        }
         return realType[i];
       },
     }) as TileStore['type'],

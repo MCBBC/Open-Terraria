@@ -19,7 +19,13 @@ for (let id = 1; id < TILE_DEFS.length; id++) {
 const tid = (sheet: number): number => BY_SHEET.get(sheet) ?? -1;
 const setOf = (sheets: number[]) => new Set(sheets.map(tid).filter((v) => v >= 0));
 
-/** 触碰直接伤害值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等） */
+/**
+ * 触碰直接伤害【基准】值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等）。
+ * ★F4：此表为原版 TileID.Sets.TouchDamageImmediate 的静态原始值——消费端
+ * ApplyTouchDamage（Player.cs:29205-29211）先过 `Main.DamageVar(num, −luck)` 单源
+ * 掷骰再入 Hurt（Player.ts applyTouchDamage 经 stats/DamageVar.damageVarRoll 实施）,
+ * 表内数值【不】是最终落地伤。
+ */
 export const TOUCH_IMMEDIATE = new Map<number, number>(
   ([[32, 10], [69, 17], [80, 6], [352, 10], [655, 100], [48, 60], [232, 80], [484, 25], [750, 70]] as Array<[number, number]>)
     .map(([s, d]) => [tid(s), d] as [number, number])

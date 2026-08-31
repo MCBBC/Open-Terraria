@@ -602,6 +602,43 @@ export function doRoundLandMasses(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 // ============================================================
+// ①c DoExtraLiquidAddLiquid（waterpark，cs:1604-1630；SettleLiquids 槽头 :16242）
+// ============================================================
+/** 全图注水（原版语义逐臂转录；掷序=if/else-if 链短路）。调用位：SettleLiquids
+ *  pass 头 oceanDepths 归水之后、NotTheBees() 之前（cs:16241-16244）；二次沉降
+ *  (SettleLiquidsPart2AndNotTheBees :21431-21438) 无 AddLiquid 调用，只有旗标
+ *  文案位——勿重复接线。 */
+export function doExtraLiquidAddLiquid(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;                       // cs:1605 skyblockWorldGen 早退
+  const num = 40;
+  const underworld = st.h - 200;                  // Main.UnderworldLayer（Main.cs:2863）
+  const dualOn = !!F.dualDungeons;                // 地牢墙豁免只在 dual 族出现
+  for (let i = num; i < st.w - num; i++) {        // cs:1608 [40, maxTilesX-40)
+    for (let j = num; j < st.h - num; j++) {      // [40, maxTilesY-40)
+      const idx = j * st.w + i;
+      if (st.flags[idx] & 1) continue;            // active 早退（不掷骰）
+      if (dualOn && isDungeonWallId(st.wall[idx])) continue;
+      // 臂1 墙=0 且地表上：Next(3)==0 → 满 255 水
+      if (st.wall[idx] === 0 && j < gs.worldSurface) {
+        if (rng.nextInt(3) === 0) st.liquid[idx] = 255;
+      // 臂2 地狱层下（!remix）：Next(4)==0 → 满（岩浆型由 Finalize 面 lava 门转）
+      } else if (j > underworld) {
+        if (!!F.remix) continue;                  // !remixWorldGen 条件内掷——remix 短路零掷
+        if (rng.nextInt(4) === 0) st.liquid[idx] = 255;
+      // 臂3 地牢外粉墙/猩红墙等特殊墙（216=绿藻砖墙?187=神圣化石墙）→ Next(3)
+      } else if (st.wall[idx] === 216 || st.wall[idx] === 187) {
+        if (rng.nextInt(3) === 0) st.liquid[idx] = 255;
+      // 臂4 其余带墙格：Next(3)!=0 才满； HoneyBrickWall86 上先标蜂蜜型
+      } else if (rng.nextInt(3) !== 0) {
+        if (st.liquid[idx] === 0 && st.wall[idx] === 86) st.liquidType[idx] = LIQUID_TYPE.HONEY;
+        st.liquid[idx] = 255;
+      }
+    }
+  }
+}
+
+// ============================================================
 // ② DoNoInfection（fish mox，cs:1911-1954；全图净化）
 // ============================================================
 export function doNoInfection(st: TileStore, rng: RNG, gs: GenState): void {

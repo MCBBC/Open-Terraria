@@ -6,6 +6,9 @@
 //   Terraria/Item.cs DefaultToCapturedCritter(:47613)/DefaultToKite(:47457) 调用点
 // 覆盖：原型表全量对账 / 锚定半径运动（walker+flyer+jumper）/ 越界 Recall /
 //   破坏消散+掉物 / 读档重生 / 风筝链 / LCG32 位级。
+// ★1457 L4 五项引擎迁移批（2026-08-31）：四探针真值表 / Jumper 水浮力三态 /
+//   Flyer IsBlockedByMedium truth-table+Update 长跑停摆 / Recall 尘双旗 /
+//   DrawBubble 档缩放——真值 Terarria1458（与 1457 三文件 diff 全等）。
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { T } from '../src/data/tiles';
@@ -1183,13 +1186,15 @@ describe('★1457 拆分探针族（WorldGen.cs:70686-70919；原版真值表映
     cell(st, 2, 2, T.DIRT, { actuated: true });
     expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(false);       // !inActive 支
     expect(solidTileAllowBottomSlope(st, -1, 5)).toBe(true);       // InWorld 界外返 true（:70710）
-    // 平台：合法顶帧 [0,7]∪[12,16]∪[25,26] 以外不承放；顶坡+合法帧可站（:70722）
-    cell(st, 3, 2, T.PLATFORM, { frameX: 54 });                    // 54/18=3 → 合法
+    // 平台：平放不查帧档直通（!topSlope 先行短路）；顶坡只有合法顶帧豁免（:70722）
+    cell(st, 3, 2, T.PLATFORM, { frameX: 54 });
     expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);
-    cell(st, 3, 2, T.PLATFORM, { frameX: 144 });                   // 144/18=8 → 切缺档
-    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(false);
+    cell(st, 3, 2, T.PLATFORM, { frameX: 144 });                   // 144/18=8 切缺档
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);        // 平放不走 ProperFrame 门
+    cell(st, 3, 2, T.PLATFORM, { frameX: 144, slope: 1 });
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(false);       // 顶坡+非法帧 → 拒
     cell(st, 3, 2, T.PLATFORM, { frameX: 54, slope: 1 });
-    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);        // 平台顶坡合法帧豁免
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);        // 顶坡+合法帧 → 豁免
     // PlanterBox（sheet380）：不在 Sets.Platforms，tileSolid 经 EXTRA 并集直通
     cell(st, 4, 2, TILE_BY_KEY['v_380_planter_boxes']);
     expect(solidTileAllowBottomSlope(st, 4, 2)).toBe(true);
@@ -1392,22 +1397,21 @@ describe('★1457 Flyer IsBlockedByMedium 液体遮挡门（FlyerLeashedCritter.
     mW.update({ store: stW }, mkEnv(), bw.cx, bw.cy);
     bw.waitTime = 600;                                          // 冻结目标重掷
     bw.tx = 90; bw.ty = 20;                                     // 远目标 → near=false
-    bw.vx = 1; bw.vy = 0;
-    const startX = bw.cx, startY = bw.cy;
-    mW.update({ store: stW }, mkEnv(), bw.cx, bw.cy);
-    expect(bw.cx).toBe(startX);                                 // 未动
-    expect(bw.cy).toBe(startY);
-    expect(bw.vx).toBe(0);                                      // 速度归零
-    expect(bw.vy).toBe(0.0001);                                 // 悬空微速度恢复（:114 非 snap 支）
-    // 干路对照：同一出发位无水 → 正常位移
+    const startX = bw.cx;
+    // 长跑：停摆后探针格恒湿（每拍先加速后阻断）→ 净位移仅首触一步级
+    for (let t = 0; t < 240; t++) mW.update({ store: stW }, mkEnv(), bw.cx, bw.cy);
+    expect(bw.cx).toBeLessThan(61 * 16 + 2);                    // 止步于液柱左缘外（跨步余量内）
+    expect(bw.cx - startX).toBeLessThan(3 * 16);                // 明显卡死
+    expect(bw.vx).toBe(0);                                      // 末拍速度归零
+    // 干路对照：无水时全速位移，跨过相同里程仍在途中
     const stD = build();
     const mD = mkManager(stD);
     const bd = mD.spawnCritter(60, 20, 1994, { seed: 1 })!;
     mD.update({ store: stD }, mkEnv(), bd.cx, bd.cy);           // 暖帧同上
-    bd.waitTime = 600; bd.tx = 90; bd.ty = 20; bd.vx = 1; bd.vy = 0;
+    bd.waitTime = 600; bd.tx = 90; bd.ty = 20;
     const startDx = bd.cx;
-    mD.update({ store: stD }, mkEnv(), bd.cx, bd.cy);
-    expect(bd.cx).toBeGreaterThan(startDx);
+    for (let t = 0; t < 240; t++) mD.update({ store: stD }, mkEnv(), bd.cx, bd.cy);
+    expect(bd.cx - startDx).toBeGreaterThan(60);
   });
 });
 

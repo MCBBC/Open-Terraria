@@ -7,10 +7,10 @@ import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
-import { trySnapStrike } from '../stats/SnapStrike';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision } from './npcLiquid';
 import { LIQUID_TYPE } from '../world/TileStore';
@@ -2609,6 +2609,20 @@ export class Arrow extends Entity {
       bee.pierce = 2;                       // :78079 覆盖 181/566 表值 penetrate 3/4
       bee.pierceInit = 2;
       bee.frostEligible = true;             // ranged = true（:78078-78079）
+      // ★F5（蓝队四轮）：消亡蜂群原版 `magic=false / ranged=true`（1458 P.cs:78075-79 /
+      // 1456 :73387-90）——SetDefaults 零旗但本发蜂位显式覆写运行时旗 → 远程 crit 掷臂
+      // (:12920)/焰爆石·拍击石类门全按 ranged 生效。仓内形态 = projClass 显式字段
+      // （数据面 vanilla-projectiles.json 保持 SetDefaults 直写真值,combat-stitch-final
+      // 金标断言 projClassOfProjId(181)=null 不动）。
+      // ★同族发蜂位双式对账（grep 防第三处,2026-08-31）：①`.melee=true` 式——
+      //   蜂巢剑挥动蜂 Player.cs:43976-77、蜂王双路 :44478-79/:44872-73、黄蜂枪弹
+      //   命中伴生 Projectile.cs:13758-59、HiveFive yoyo 同支——仓内 Game.ts 挥动站已置
+      //   bee.projClass='melee';②`.ranged=true` 式——蜂蜜徽章箭 Player.cs:13959-61 与
+      //   本站;③唯一【无】旗位 = 蜂蜜斗篷受击反击 Player.cs:38810-13（仓内 Game.ts
+      //   反击链不置 projClass,与原文一致）。★未来黄蜂枪 999 坑位：弹命中侧三成概率
+      //   放蜂必须照 Projectile.cs:13758-59 补 `.melee=true`（projClass='melee'）,
+      //   勿按"蜂=远程"直觉错挂。
+      bee.projClass = 'ranged';             // 运行时旗覆写（:78077-79 本站）
       bee.critChance = this.critChance;
       bee.critBonus = this.critBonus;
       bee.armorPen = this.armorPen;
@@ -2886,14 +2900,16 @@ export class Arrow extends Entity {
         const cone0 = coneGeom337(0);
         this.x = cone0.x; this.y = cone0.y;
         this.vx = cone0.vx; this.vy = cone0.vy;
-        //（pinFrame 本弹已由 ctor 掷定=原版 spawn 侧 rand.Next(5);次锥走构造器自掷）
+        //（本弹 pinFrame 由 ctor 掷定=原版 spawn 侧 rand.Next(5);次锥 birthLock 下
+        // ctor 未掷,下方显式补）
         const g1 = coneGeom337(1);                          // i=1 次锥 Y−700
         const cone1 = new Arrow(g1.x, g1.y, g1.vx, g1.vy,
           this.damage, this.knockback, 337, null, {});
+        cone1.pinFrame = Math.floor(Math.random() * 5);     // ai[1]=rand.Next(5) :48118
         cone1.critChance = this.critChance;
         cone1.critBonus = this.critBonus;
         cone1.armorPen = this.armorPen;
-        ents?.add(cone1, 'projectiles');
+        ents?.add?.(cone1, 'projectiles');                  // 桶缺 add 口=静默跳过
       } finally { Arrow.birthLock = false; }
     }
     // ---- §3 316 蝙蝠杖 2-3 只散布（Player.cs:48820-48830）----
@@ -4678,10 +4694,25 @@ export class Arrow extends Entity {
           if (++this.nailDotT >= 2) {
             this.nailDotT = 0;
             const rec = tgt as unknown as { hurt?: (...a: unknown[]) => boolean; iframes?: number };
+            // 敌形窄化只声明了 cx/cy;x/y 兜底位可选读（运行期敌实体恒有 x/y）
+            const tXY = tgt as unknown as { x?: number; y?: number };
             if (rec.hurt && !(tgt as unknown as { dead?: boolean }).dead) {
               const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
               const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
-              rec.hurt(applyBannerDamageDealt(game, rec, dN), 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+              // ★F3 接线（蓝队四轮）：刺入 DoT 每隔拍一击 = Damage() 整段重入
+              // （aiStyle93 :13368-13376 + immune 写 1 档 :14060-14062 → 隔拍再刺面，
+              // ★aiStyle93 双触面陷阱：这里每拍都是独立 Damage() pass ⇒ 焰爆石/
+              // 拍击石双支（:13439-13446）随拍生效而非仅首击；360t 冷却天然节流）
+              const snapBonusDot = projectileSnapStrikeBonus(game, this,
+                tgt.cx ?? ((tXY.x ?? 0) + tgt.w / 2),
+                tgt.cy ?? ((tXY.y ?? 0) + tgt.h / 2), tgt.id, {
+                  victimBox: { w: tgt.w, h: tgt.h,
+                    cx: tgt.cx ?? ((tXY.x ?? 0) + tgt.w / 2), cy: tgt.cy ?? ((tXY.y ?? 0) + tgt.h / 2) },
+                  targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
+                });
+              rec.hurt(applyBannerDamageDealt(game, rec, dN)
+                + (snapBonusDot ? Math.trunc(snapBonusDot * (critN ? 2 : 1)) : 0),
+                0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
             }
           }
         }
@@ -5438,7 +5469,17 @@ export class Arrow extends Entity {
         if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // immune[owner] 门
         const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
-        e.hurt(applyBannerDamageDealt(game, e, dN), 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+        // ★F3 接线（蓝队四轮）：钉首击走 Damage() 全管线（aiStyle93 :13368-13376 段同
+        //  在 Damage_PVE_Inner 内）→ 焰爆石/拍击石双支（:13439-13446）一并生效；
+        //  弹 514 数据面 ranged；加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）
+        const snapBonusNail = projectileSnapStrikeBonus(game, this, e.cx ?? e.x + e.w / 2,
+          e.cy ?? e.y + e.h / 2, e.id, {
+            victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2 },
+            targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
+          });
+        e.hurt(applyBannerDamageDealt(game, e, dN)
+          + (snapBonusNail ? Math.trunc(snapBonusNail * (critN ? 2 : 1)) : 0),
+          0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
         this.nailAi0 = -(e.id + 1);            // :13372-13373 ai[0] = -victimIndex-1
         this.nailAi1 = 0;                      // :13370 ai[1] = 0
         this.vx = e.cx - this.cx;              // :13374 velocity = targetNPC.Center - Center
@@ -5651,34 +5692,28 @@ export class Arrow extends Entity {
             e as unknown as Record<string, number>);
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
-        // ★焰爆石 6178 kind1 弹幕侧（Damage_PVE_Inner :13439-13442
-        //  `((melee||ranged) & ownedBySomeone) && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：
-        // 位次在拍击石 kind0(:13443-46)【之前】，两 kind 共用 360t 冷却先到先得；
-        // 类门 pyroclastProjectileGate 单源（resolveProjClass——显式 projClass 字段→
-        // 数据面类旗），随从/哨兵/魔法弹自然排除。45×meleeDamage/300px/2 目标弹
-        // 1131 + 目标 Hellfire(323) 3s，脉冲本体见 stats/SnapStrike.trySnapStrike。
-        if (pyroclastProjectileGate(game, this)) {
-          trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
-            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });   // R4-33 victim 自脉冲
-        }
-        // 拍击石 6167 kind0 远程脉冲（Damage_PVE_Inner :13443-13446 `(ranged &
-        // ownedBySomeone) && accSnappingStone → TryMakingSnappingStoneStrike(…,0)`）：
-        // 门 = 玩家弹（!hostile ≈ ownedBySomeone,本仓同 :1019 owner==myPlayer 近似）
-        // + 型号 ranged 位（projectileData 表,1121 脉冲弹自身也 ranged——360t 共用冷却
-        // 在 trySnapStrike 内先置,不递归；随从/哨兵弹 668/680/1120 等无 ranged 位自然
-        // 排除,与原版同门）+ 6167 在身。30×远程伤/120px/2 目标弹 1121
-        if (!this.hostile
-          && (projectileData(this.projId)?.ranged ?? false)
-          && (game.player as unknown as { equipStats?: { accSnappingStone?: boolean } })
-            ?.equipStats?.accSnappingStone) {
-          trySnapStrike(game, game.player, 0, e.x + e.w / 2, e.y + e.h / 2, e.id,
-            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });   // R4-33 victim 自脉冲
-        }
+        // ★焰爆石 kind1 + 拍击石 kind0 弹幕侧双支（Damage_PVE_Inner :13439-13446，
+        // 书写序 = k1 先 k0 后）。★F3/F1 收编（2026-08-31 蓝队四轮）：类门+触发走
+        // projectileSnapStrikeBonus 单源（pyroclastProjectileGate /
+        // snappingStoneProjectileGate——原 kind0 内联 projectileData.ranged 手搓口径撤销）；
+        // F2 扫描面 = FindTargetWithLineOfSight 原文语义；返回值 = num14 加伤并
+        // 【不吃攻端旗乘区】（原版 banner :13387 在加伤 :14457 前），随暴击并入本次实伤。
+        // 排除面 = 本弹局部免疫窗投影（vanilla localNPCImmunity[i]!=0 :46487-89 的仓内读面）。
+        const snapBonusArrow = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2, e.id, {
+          victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },       // R4-33 victim 自脉冲
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
+          exclude: (id: number): boolean => (this.pierceInit >= 0 && this.hitSet.has(id))
+            || (this.localImmuneCd.get(id) ?? 0) > 0 || (this.meowHitCd.get(id) ?? 0) > 0
+            || (this.spawnImmuneCd.get(id) ?? 0) > 0,
+        });
         // ★1457 GetDamageMultiplier 乘区已上移到发射侧（Player.cs:49813-49814
         //   `(int)((float)Damage * damageMultiplier)` C# 截断，Game.fireGemStaffBolts
         //   消费）——弹幕 damage 字段即终值，命中侧不再乘（蓝队 R2-06：命中侧
         //   Math.round 曾致 SwirlTwins 0.6/ArPenSpread 0.5 档在 x.5 处系统性 +1）
-        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
+        // ★F1：snapBonus 并在 banner 采样之外、crit 随本次翻倍、防御前（Enemy.hurt 内）。
+        e.hurt(applyBannerDamageDealt(game, e, dmg)
+          + (snapBonusArrow ? Math.trunc(snapBonusArrow * (crit ? 2 : 1)) : 0),
+          Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         // ★GC1 写方桥（清零批二波，2026-08-31；蓝队二轮 F4 校准行号 F5 补表面）：
         //  命中尾 npc.immune[owner] 统一写（Projectile.Damage :14031-14183 梯子,
         //  StrikeNPC 后原位）。face 由上方去重支记录：idStatic/local 面 = 原版写 0
@@ -6185,15 +6220,23 @@ export class Arrow extends Entity {
         applyFrostBurn((game.player as unknown as { equipStats?: { frostBurn?: boolean } })
           .equipStats?.frostBurn ?? false, e as unknown as Record<string, number>);
       }
-      // ★焰爆石 6178 kind1 弹幕侧（:13439-42）——食人鱼弹 190 数据面 ranged，
-      // 过 pyroclastProjectileGate 类门即脉冲（共用 360t 冷却）
-      if (pyroclastProjectileGate(game, this)) {
-        trySnapStrike(game, game.player, 1, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2,
-          e.id, { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2 });
-      }
+      // ★焰爆石 kind1 + 拍击石 kind0 弹幕侧（Damage_PVE_Inner :13439-13446 同序双支
+      //  + F4 补支,2026-08-31 蓝队四轮）——食人鱼弹 190 数据面 ranged：原主环
+      //  Arrow.dealContacts 两 kind 双接、本环此前只接 kind1 = 漏网；统一走
+      //  projectileSnapStrikeBonus 单源（k1→k0 门序;360t 共用冷却），加伤并入本次实伤。
+      const snapBonusPiranha = projectileSnapStrikeBonus(game, this,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+        e.id, {
+          victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
+          exclude: (id: number): boolean => this.pHitCd.has(id),   // localNPCImmunity 门同源表(:11869)
+        });
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
-      // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
+      // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点；★F1 加伤随暴击并入
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusPiranha ? Math.trunc(snapBonusPiranha * (crit ? 2 : 1)) : 0),
+        Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
     }

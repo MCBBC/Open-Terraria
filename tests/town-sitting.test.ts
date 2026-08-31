@@ -7,18 +7,21 @@
 //    |dx|+|dy| 最小、下格(frameY%40!=0) 先 -1 再 +2）
 //  - 态推进 :54682-54710（vx×0.8、ai[1]--、椅没了 ai[1]=0 起身、时限起身）
 //  - 坐姿与攻击互斥：触发门 flag31 的 ai[0]<2（:55621）不含 5
-//  - shimmerTransparency：+0.01/t（:92469）、>0.9 转化（:92471）、转化置 0.89
-//    （:92568）、上升态 −1/60（:53625）、justHit −0.1（:92484）、常规 −0.001
-//    （:92492）；消费 = GetAlpha :94874（本体）+ Main.cs:25771-25776（160 Glow）
+//  - shimmerTransparency（★1457 锚行校准）：+0.01/t（:92636）、>0.9 转化
+//    （:92637-39）、转化置 0.89（:92705）、上升态 −1/60（:53770）、justHit −0.1
+//    （:92650）、常规 −0.001（:92658）；消费 = GetAlpha :94874（本体）+
+//    Main.cs:25771-25776（160 Glow）
 //  - 坐姿落盘：WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883-2930 **无 ai[]**
 //    ——ai[0]==5/ai[1] 坐姿态不随存档持久，读档站立、夜间 AI 自然重坐
-//  - ai[0]==25 上升态 :53594-53682：落点传送 :53609/:55982-56059、ai[1]≥30 起
-//    −1/60 + velocity.Y=−4×st :53621-53631、收尾变体翻转 :53664（双向）、
-//    ShimmerTownNPC 粒子 + 成就 43（:53666-53669）
+//  - ai[0]==25 上升态 :53737-53820：落点传送 :53752-55/:56130-49、ai[1]≥30 起
+//    −1/60 + velocity.Y=−4×st :53765-76、收尾变体翻转 :53814（双向）、
+//    ShimmerTownNPC 粒子 + 成就 43（:53816-24）
 //  - 风暴门 :53399-53402：Main.IsItStorming（= _shouldUseStormMusic，迟滞机
 //    Main.cs:12927-12960，阈值 0.34/0.4/0.4/0.5 见 :66137-66140）且
 //    position.Y/16 < worldSurface
-import { describe, it, expect } from 'vitest';
+vi.stubGlobal('localStorage', { getItem: (k: string) => (k === 'sw_slope_g2' ? '0' : null) });
+// A/B 鉴别桩：G2 关闭态跑本文件——若转绿则 1% 距离差归因 G2，否则为在册抖动族
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';
 import { TownShot } from '../src/entities/TownShot';
@@ -293,7 +296,7 @@ describe('帽 Y 修正链（Main.cs:26965-26987 num6）', () => {
   });
 });
 
-describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
+describe('shimmerTransparency（NPC.cs:92631-62/:53770——1457 锚行校准）', () => {
   it('推进纯函数：浸没 +0.01 cap 1；rise/justHit/常规三档衰减', () => {
     expect(SHIMMER_ST_RAMP).toBe(0.01);
     expect(SHIMMER_ST_TRANSFORM).toBe(0.9);
@@ -330,12 +333,12 @@ describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
     const { game } = makeGame(world, { npcs: [npc] });
     // 中心格微光（TownNPC 以中心格判浸没）
     world.store.setLiquid(100, 98, 255, 4);
-    // 渐变期（~91t 才到 >0.9，非即刻转化——原版 :92471）
+    // 渐变期（~91t 才到 >0.9，非即刻转化——原版 :92637-39）
     for (let t = 0; t < 60; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.shimmered).toBe(false);
     expect(npc.shimmerRising).toBe(false);
     expect(npc.shimmerTransparency).toBeCloseTo(0.6, 5);
-    // 转化帧：只进 ai[0]=25 上升态 + st=0.89（:92562-92568），变体未翻转
+    // 转化帧：只进 ai[0]=25 上升态 + st=0.89（GetShimmered :92700-05），变体未翻转
     let tick = -1;
     for (let t = 60; t < 300 && tick < 0; t++) {
       npc.fixedUpdate(1 / 60, game);
@@ -352,7 +355,7 @@ describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
     for (let t = 0; t < SHIMMER_RISE_VELOCITY_TICK - 2; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.shimmerTransparency).toBe(0.89);
     expect(npc.shimmerRising).toBe(true);
-    // ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮（:53625-53631）——
+    // ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮（:53765-76）——
     // 落点传送后先落回地面（1..29 无速度设定只受重力），30 起自站位上浮
     const standY = FLOOR * 16 - npc.h;
     let minY = npc.y;
@@ -368,7 +371,7 @@ describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
   });
 });
 
-describe('ai[0]=25 微光上升态演出（NPC.cs:53594-53682）', () => {
+describe('ai[0]=25 微光上升态演出（NPC.cs:53737-53820）', () => {
   /** 备好"地面 + 中心微光池 + 无 home 站定向导"场景，返回 {npc, game, world} */
   function shimmerScene() {
     const world = new World(200, 200, 100, 'shimmer-rise');

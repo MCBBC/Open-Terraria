@@ -7,10 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
 import { World } from '../src/world/World';
-import { NetReader } from '../src/net/protocol';
+import { NetModule, NetReader } from '../src/net/protocol';
 import {
   ParticleOrchestraType, writeParticleModule, readParticleModule,
 } from '../src/net/syncModules';
+import { FakeFish, setFakeFishRandom, clearFakeFish } from '../src/entities/FakeFish';
 
 type PartRec = { x: number; y: number; color: string; count: number; opts: Record<string, unknown> };
 type DustRec = {
@@ -34,20 +35,20 @@ function mkGame(store?: unknown) {
   const dusts: DustRec[] = [];
   const wavs: Array<{ file: string; vol: number }> = [];
   const files: Array<{ names: string[]; vol: number }> = [];
-  const g = Object.create(Game.prototype) as unknown as Game;
+  const g = Object.create(Game.prototype) as unknown as Game & Record<string, (...a: unknown[]) => unknown>;
   g.spawnParticles = (x: number, y: number, color: string, count: number,
     _speed?: number, opts: Record<string, unknown> = {}) => {
     particles.push({ x, y, color, count, opts });
-  } as never;
-  g.spawnDust = ((x: number, y: number, w: number, h: number, type: number,
+  };
+  g.spawnDust = (x: number, y: number, w: number, h: number, type: number,
     vx = 0, vy = 0, alpha = 0,
     _color?: unknown, scale = 1, noGravity = false) => {
     const ret = { x, y, vx: 1.1, vy: -1.1, noGravity };
     dusts.push({ x, y, w, h, type, vx, vy, alpha, scale, ret });
     return ret;
-  }) as never;
-  g.playSfxWav = ((file: string, vol?: number) => { wavs.push({ file, vol: vol ?? 1 }); }) as never;
-  g.playSfxFiles = ((names: string[], vol?: number) => { files.push({ names, vol: vol ?? 1 }); }) as never;
+  };
+  g.playSfxWav = (file: string, vol?: number) => { wavs.push({ file, vol: vol ?? 1 }); };
+  g.playSfxFiles = (names: string[], vol?: number) => { files.push({ names, vol: vol ?? 1 }); };
   g.world = { store: store ?? new World(160, 200, 30, 'orch-stub').store } as never;
   return { g, particles, dusts, wavs, files };
 }
@@ -116,15 +117,16 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
     it('ClassyCane(55)：7×d10(α80,scale1.1,vy−1) 恒定;纸屑按 Next(0,2) 掷、Next(3)!=0 noGravity', async () => {
       const { classyCaneFx } = await import('../src/fx/orchestraFx');
       const noPaper = mkGame();
-      classyCaneFx(noPaper.g, 5, 5, () => 0.4);            // Next(0,2)=0 → 无 gore1218 档
+      classyCaneFx(noPaper.g, 5, 5, () => 0.2);            // Next(0,2)=0 → 无 gore1218 档
       expect(noPaper.particles.length).toBe(0);
       expect(noPaper.dusts.length).toBe(7);
       expect(noPaper.dusts.every((d) =>
         d.type === 10 && d.alpha === 80 && d.scale === 1.1 && d.vx === 0 && d.vy === -1)).toBe(true);
-      expect(noPaper.dusts.some((d) => d.ret.noGravity)).toBe(false);   // 0.4<1/3 → 有重力档
+      // Next(3)：floor(rng×3)==0（rng<1/3）→ 保留重力（:2907 if 不置 noGravity）
+      expect(noPaper.dusts.every((d) => !d.ret.noGravity)).toBe(true);
 
       const paper = mkGame();
-      classyCaneFx(paper.g, 5, 5, () => 0.9);              // 有纸屑 + Next(3)!=0 全 noGravity
+      classyCaneFx(paper.g, 5, 5, () => 0.9);              // 有纸屑 + Next(3)=2≠0 全 noGravity
       expect(paper.particles.length).toBe(1);
       expect(paper.dusts.every((d) => d.ret.noGravity)).toBe(true);
 
@@ -186,8 +188,7 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
       expect(wavs.some((v) => v.file === 'Item_180')).toBe(true);     // Spawn_ 头部 :822
       const d57 = dusts.filter((d) => d.type === 57 && d.alpha === 200 && d.scale === 1.8);
       const d43 = dusts.filter((d) => d.type === 43 && d.alpha === 254 && d.scale === 1.3);
-      expect(d57.length + d43.length).toBeGreaterThan(0);  // 50 掷两互斥支（Next(2)/Next(3))
-      expect(Math.abs(d57.vx + 0) >= 0).toBe(true);
+      expect(d57.length + d43.length).toBeGreaterThan(0);  // 50 掷两互斥支（Next(2)/Next(3)）
       const blocks = dusts.filter((d) => d.type === 14 && d.vy === -3);
       expect(blocks.length).toBeGreaterThan(0);
       expect(blocks.length).toBeLessThanOrEqual(32);       // 同圈帽（C 批登记口径保留）
@@ -231,12 +232,80 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
     });
   });
 
+  // ==================== ⑦ RepelAt 排斥面（Player.cs:28781→ :1411 → FakeFish:521-561）====================
+  describe('RepelAt/FakeFish.beRepelled', () => {
+    // ★wetCollision 扫描带钳 min(st.h−40,…)：本仓测试世界高 200 → j1≤160,
+    //   行 ≥160 的液体对湿判不可见——水箱行取 100..150 干地带内
+    function waterStore(): unknown {
+      const w = new World(160, 200, 30, 'orch-wet');
+      for (let x = 60; x <= 120; x++) {
+        for (let y = 100; y <= 150; y++) w.store.setLiquid(x, y, 255, 1);
+      }
+      return w.store;
+    }
+    const DRY = new World(160, 200, 30, 'orch-dry').store;
+
+    it('环内推离（水体）：速度指离源且幅=Remap(ring,100,0,2,5);_gotRepelled 置位后二次免疫', () => {
+      clearFakeFish();
+      setFakeFishRandom(() => 0.99);
+      const f = new FakeFish();
+      f.prepare(2337, 400, -100000, -100000);              // 浮标远置（Interested 支不干扰）
+      const ws = waterStore();
+      const sx = 90 * 16, sy = 118 * 16;                    // 源 = 玩家 Bottom（水中）
+      f.x = sx + 50;                                        // ring = 50−21 = 29
+      f.y = sy;
+      f.lifeCounted = 200; f.lifeTotal = 400;               // <0.7×总寿 → 压缩支可达
+      f.beRepelled(ws, sx, sy, 21);
+      const k = 2 + 3 * ((29 - 100) / (0 - 100));           // Remap clamped t=0.71 → 4.13
+      expect(Math.hypot(f.vx, f.vy)).toBeCloseTo(k, 4);     // 前向 32px 探湿命中 → 不重掷(:538)
+      expect(f.vx).toBeGreaterThan(0);                      // away=(+1,0) RotBy(jit<π/2) 仍指离源
+      expect(Math.hypot(f.x - (sx + 50), f.y - sy)).toBeCloseTo(k, 3);   // Position -= Velocity 同幅
+      const firstVx = f.vx;
+      f.beRepelled(ws, sx, sy, 21);                         // _gotRepelled 门 → 二次调用免疫
+      expect(f.vx).toBe(firstVx);
+      setFakeFishRandom(() => Math.random);
+    });
+
+    it('干地前向探干 → 重掷游向收幅(target×0.1 :542-543)/态归 FreeRoaming', () => {
+      clearFakeFish();
+      setFakeFishRandom(() => 0.99);
+      const g = new FakeFish();
+      g.prepare(2337, 400, -100000, -100000);
+      g.x = 90 * 16; g.y = 60 * 16;                         // 全干区（无任何液体面）
+      g.beRepelled(DRY, g.x - 50, g.y, 21);
+      expect(Math.hypot(g.vx, g.vy)).toBeLessThan(2);       // 重掷后 |v| = 0.1×target(≤5)
+      expect(g.stateId).toBe(0);                            // State.FreeRoaming(:547)
+      setFakeFishRandom(() => Math.random);
+    });
+
+    it('环外 ≥100 静默;寿命压缩按进度 lerp(1,0.85)·prog==1 档 0.7(:551-560)', () => {
+      clearFakeFish();
+      setFakeFishRandom(() => 0.25);
+      const far = new FakeFish();
+      far.prepare(2337, 400, -100000, -100000);
+      far.x = 500; far.y = 0; far.vx = 7; far.vy = -7;
+      far.lifeCounted = 200; far.lifeTotal = 400;
+      far.beRepelled(DRY, 0, 0, 21);                        // ring=479 ≥100 直接返回
+      expect(far.vx).toBe(7);
+      expect(far.lifeCounted).toBe(200);
+
+      const late = new FakeFish();
+      late.prepare(2337, 400, -100000, -100000);
+      late.x = 50; late.y = 0;
+      late.lifeCounted = 200; late.lifeTotal = 400;         // prog=remap(.5,0,.25)=1 → ×0.7
+      late.beRepelled(DRY, 0, 0, 21);
+      expect(late.lifeCounted).toBe(Math.trunc(400 * 0.7));
+      setFakeFishRandom(() => Math.random);
+    });
+  });
+
   // ==================== wire 往返 ====================
   it('module8 编解码往返保留新 type 与 settings 字段（21B 载荷不动）', () => {
-    const payload = writeParticleModule(ParticleOrchestraType.DeadCellsFlint, {
-      posX: 12.5, posY: 3400.25, moveX: 32, moveY: 1, uniqueInfo: 7, invoker: 3,
-    });
-    const back = readParticleModule(new NetReader(payload, 5));
+    const s = { posX: 12.5, posY: 3400.25, moveX: 32, moveY: 1, uniqueInfo: 7, invoker: 3 };
+    const frame = writeParticleModule(ParticleOrchestraType.DeadCellsFlint, s);
+    const r = new NetReader(frame.subarray(3));
+    expect(r.u16()).toBe(NetModule.Particles);            // 消费 moduleId 后再读载荷
+    const back = readParticleModule(r);
     expect(back.type).toBe(41);
     expect(back.settings.posX).toBeCloseTo(12.5, 2);
     expect(back.settings.posY).toBeCloseTo(3400.25, 1);

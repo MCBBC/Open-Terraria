@@ -21,6 +21,12 @@ const bubbles: EmoteBubbleInstance[] = [];
 /** 调试/探针：当前活跃气泡数 */
 export function emoteCount(): number { return bubbles.length; }
 
+/** 测试/探针：活跃气泡快照（emote + 剩余寿命）——NewBubbleNPC 时长/随机表情
+ *  断言用（TownNPC 台账批 2026-08-31） */
+export function emoteSnapshot(): Array<{ emote: number; lifeTime: number }> {
+  return bubbles.map((b) => ({ emote: b.emote, lifeTime: b.lifeTime }));
+}
+
 // 探针句柄：挂在 window 上保证与 Game/Renderer 同一模块实例（HMR ?t= 分叉时
 // 动态 import 会拿到另一份模块实例，气泡数恒 0 的假象来源）
 if (typeof window !== 'undefined') {

@@ -305,6 +305,8 @@ export class LiquidSim {
   private killTileGen(x: number, y: number): void {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return;
+    // ★IIIII118 取证钩：gen 击杀探针（内联避免 wrapper 失效歧义）
+    (globalThis as unknown as { __sw118Kt?: ((tag: string, x: number, y: number) => void) | undefined }).__sw118Kt?.('killTileGen', x, y);
     const i = this.idx(x, y);
     if (!st.flags[i]) return; // cs:63574 !active() 早退
     // YYYYY 批：杀事件探针钩（x86 KT 织入对拍用；未注册零开销）
@@ -330,6 +332,8 @@ export class LiquidSim {
    *  LiquidCheck(:1288-1295 非水本格+下方裁切植物)/CreateLiquidMergeTile(:1370)
    *  三条触发链在沉降期同样生效（#97 vanilla 实测 KillTile 844 格） */
   private killTileAt(x: number, y: number): void {
+    // ★IIIII118 取证钩（缺省零开销）：KillTile 分发探针——调用点栈首帧回显
+    (globalThis as unknown as { __sw118Kt?: ((tag: string, x: number, y: number) => void) | undefined }).__sw118Kt?.('killTileAt', x, y);
     if (this.killTile) { this.killTile(x, y); return; }
     if (this.isGeneratingOrLoadingWorld) this.killTileGen(x, y);
   }
