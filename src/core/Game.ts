@@ -31,7 +31,11 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
+  // ★★对抗修复批②2026-09-01（C-F1 近链/C-F4 受理核/C-F6 松露条件）
+  queryRoom, acceptTownNPCAtHouse, checkHousesNearAPlayer,
+  expandedMushroomCount, MUSHROOM_TILE_THRESHOLD } from '../world/Housing';
+import type { NearChainNpcView } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
@@ -2389,8 +2393,9 @@ export class Game implements GameHooks {
    *  同类)且 npcKey 不同的镇民落进同一房间 tiles 集(floodRoom 同一闭包)时,保留距
    *  房间中心更近者,dropped 一律置 homeless(leashHome 同步清零,下一入驻轮自然重
    *  分配)。source 仅作日志定位;warnOnce=true(save 高频路径)时 console 汇总本会话
-   *  只首发一次。返回被清人数。读档 pass / 入驻轮收尾 / 写盘前三路共用这一份逻辑。 */
-  private clearDuplicateHomes(source: 'load' | 'arrival' | 'assign' | 'save', warnOnce = false): number {
+   *  只首发一次。返回被清人数。读档 pass / 入驻轮收尾 / 写盘前 / 近链迁入（★批②
+   *  2026-09-01 新增 'near'——CheckForHousesNearAPlayer 迁入支收尾）四路共用这一份逻辑。 */
+  private clearDuplicateHomes(source: 'load' | 'arrival' | 'assign' | 'save' | 'near', warnOnce = false): number {
     const claims = (this.entities.npcs
       .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead && !!n.home) as TownNPC[])
       .map((n) => ({ npc: n, key: n.npcKey, x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
@@ -4558,6 +4563,10 @@ export class Game implements GameHooks {
     resetMechQueen();
     // ★1457：homelessSpawnTimeout 复位 54000（clearWorld cs:6976——读档/换世界即节流重置）
     this.homelessSpawnTimeout = 54000;
+    // ★★对抗修复批②2026-09-01（C-F1）：LastFoundHouse 同步归零（clearWorld cs:6975
+    //   LastFoundHouse=default(Point)——与 timeout 复位同一处）
+    this.lastFoundHouse = null;
+    this.worldHousingScan = 0;
     // M3 Boss 伤害统计复位 + 宿主注入（NPCDamageTracker.Reset :196-204;换世界清账）
     resetBossDamage();
     bindBossDamageHost({
@@ -7247,6 +7256,9 @@ export class Game implements GameHooks {
     if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
     // ★1457：homelessSpawnTimeout 每 tick 递减（UpdateWorld cs:72083-72086）
     if (this.homelessSpawnTimeout > 0) this.homelessSpawnTimeout--;
+    // ---- 近玩家实时回收链（CheckForHousesNearAPlayer cs:72089——UpdateWorld 内每
+    //      tick 于 timeout 减档后紧跟；C-F1 ★★对抗修复批②2026-09-01）----
+    this.checkForHousesNearPlayer();
     // ---- 昼夜事件（UpdateTime_StartNight :64817 / StartDay :64876 语义） ----
     {
       const ct = w.clock.timeOfDay, pt = this._lastClockT;
@@ -7417,6 +7429,11 @@ export class Game implements GameHooks {
         mysticLogs.startNight(this.fairyCtx());
         // · :64711-64712 prioritizedTownNPCType=0/checkForSpawns=0——本仓入驻走
         //   tickCount %7200 模型（上方注），无计数器可清 → 不适用
+        //   ★★对抗修复批②2026-09-01（B-6 字面核实）：StartNight 对 homelessSpawnTimeout
+        //   与 LastFoundHouse 均不触碰（:64699-64712 全段穷举无此二位）——前者由
+        //   UpdateWorld 每 tick 自减自然流逝，后者是缓存非节流，夜切保留。本仓同字面
+        //   （crossed(DUSK) 段不清二位；仅 clearWorld cs:6975-6976 归零）。差异登记：
+        //   prioritizedTownNPCType 原版入夜清零本仓无跨帧锁型字段,无从清。
         // 夜幕：日食清除（Main.cs:64721-64725——日食全天持续，入夜即结束；
         // 实现在 world/Eclipse.ts endEclipseAtDusk，位于血月 roll 之前）；
         // 成就：挺过日食（event 3，旗在清除前求值 :64722-64724）
@@ -19639,6 +19656,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （=1 天）；UpdateWorld 每 tick 递减；clearWorld 复位 54000。不入存档（原版
    *  WorldGen 静态字段）。 */
   private homelessSpawnTimeout = 0;
+  /** ★★对抗修复批②2026-09-01（C-F1）：近玩家实时回收链——轮转计数与
+   *  LastFoundHouse 缓存（WorldGen.LastFoundHouse :4237 静态位对应物，不入存档；
+   *  任务蓝本写 world.lastFoundHouse,为守批2文件边界落 Game 私有字段——同
+   *  homelessSpawnTimeout 先例;原版 clearWorld :6975 归零语义在下方 clearWorld 段
+   *  同步,StartNight/StartDay 均不清它(缓存非节流,字面核实 cs:64699-64712)。 */
+  private lastFoundHouse: { x: number; y: number } | null = null;
+  /** 近链主轮转计数（Main.GameUpdateCount 对应；每 tick 自增,%active 取模选人） */
+  private worldHousingScan = 0;
   /** 本夜天幕流星已掷(_canShowMeteorFall 位;入夜重置) */
   private _skyMeteorShown = false;
   /** FTW 巨石雨记账旗（WorldGen._isRainingBoulders :72235——风暴臂窗口状态，
@@ -23941,12 +23966,58 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** 近玩家实时回收链（WorldGen.CheckForHousesNearAPlayer cs:72184-72215 移植，
+   *  ★★对抗修复批②2026-09-01 C-F1）：每游戏帧轮转一名 active 玩家，视野矩形
+   *  （MaxWorldViewSize/32 外扩）内 300 点随机采样，命中 wallHouse 背墙即走
+   *  SpawnTownNPC(x,y,canSpawnNewTownNPC:false) 受理：有合格流浪者 → 静默迁入
+   *  （RelocatedHomeless：不发公告/不写解锁旗/不动节流;vanilla 该支仅成就 8,
+   *  本仓入住链各支均未接成就 8——对称省略）;受理通过但无可迁者 → 缓存
+   *  lastFoundHouse（LastFoundHouse :5535）供入驻轮快路径（SpawnHomelessNPC
+   *  cs:4979-4994）。本通路独立于入驻环锚池——vanilla 近链同样不查锚池,
+   *  2026-08-15「锚池空→整轮 return」契约不受影响。采样用 Math.random=非掷流锚
+   *  （原版 Main.rand 域,非确定性判定,与掷流对拍无关,登记）。 */
+  private checkForHousesNearPlayer(): void {
+    const w = this.world;
+    if (!w?.store) return;
+    const p = this.player;
+    // active 玩家中心 tile 坐标（active=含死亡幽灵的 vanilla 口径;单人本仓=本地
+    // 玩家——MP 房间制远端玩家未入世界实体桶,登记）
+    const players = [{ x: Math.floor((p.x + p.w / 2) / TILE), y: Math.floor((p.y + p.h / 2) / TILE) }];
+    type View = NearChainNpcView<TownNPC>;
+    const views: View[] = [];
+    const occupied: Array<{ x: number; y: number; npcId?: number }> = [];
+    for (const n of this.entities.npcs) {
+      if (!(n instanceof TownNPC) || n.dead) continue;
+      views.push({ key: n.npcKey, npcId: n.vanillaId, bound: n.bound, home: n.home, ref: n });
+      if (n.home) occupied.push({ x: n.home.x, y: n.home.y, npcId: n.vanillaId });
+    }
+    const r = checkHousesNearAPlayer(w.store, players, this.worldHousingScan++, views, occupied);
+    if (!r.seedHit) return;
+    if (r.relocated && r.home) {
+      // 迁入（vanilla 写 homeTileX/bestX、homeTileY/bestY、homeless=false;
+      // 本仓 home=站立格三行赋值同 updateTownNpcArrival ① 形态）
+      const mover = r.relocated.ref;
+      mover.home = { x: r.home.x, y: r.home.y };
+      mover.leashHome = true;
+      mover.x = r.home.x * TILE + 8 - mover.w / 2;
+      mover.y = (r.home.y + 1) * TILE - mover.h;
+      this.clearDuplicateHomes('near');
+    } else if (r.foundHouseNoSpawn) {
+      this.lastFoundHouse = { x: r.foundHouseNoSpawn[0], y: r.foundHouseNoSpawn[1] };
+    }
+  }
+
   /** 入驻轮（每 7200 tick）：①无家 NPC 见空房入住（QuickFindHome）
    *  ②按优先级链选一名待入驻者 ③有房则入住房内、无房但有入住者则流浪生成 */
   private updateTownNpcArrival() {
     // 入侵/月事件进行中暂停城镇 NPC 入驻（SpawnHomelessNPC :4987 门；月事件原版经
     // !dayTime 间接压制——本入驻轮无昼夜门，显式补 moonEventActive）
     if (invasionActive(this.world) || moonEventActive(this.world)) return;
+    // ★★对抗修复批②2026-09-01（B-5 isDay 总门）：原版 UpdateTime_SpawnTownNPCs 只在
+    // 昼 tick 段被调（Main.cs:66132 位于 if(!dayTime){…}else{…白天支}内）——①''房况
+    // 复核/①QuickFindHome 自动分配仅白天跑；夜间只剩 CheckForHousesNearAPlayer 静默
+    // 迁入通路（其天然不分昼夜,cs:72089 无昼夜门）。夜里整轮 return。
+    if (!this.world.clock.isDay) return;
     const npcs = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead) as TownNPC[];
     const has = (key: string) => npcs.some((n) => n.npcKey === key);
     // npcId 随 home 携带（ScoreRoom 占用豁免 CanNPCsLiveWithEachOther 用）
@@ -23975,6 +24046,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const n of npcs) {
       if (!n.home || n.bound || n.vanillaId === 368 || n.vanillaId === 37 || n.vanillaId === 453) continue;
       const hx = n.home.x, hy = n.home.y;
+      // ★★对抗修复批②2026-09-01（E-12）：松露人 SpecialConditions 随住复核
+      // （CheckSpecialTownNPCSpawningConditions(160) cs:4890-4918——vanilla 该条件在
+      // QuickFindHome :5681 对每名 NPC 复跑）：unlockedTruffleSpawn 未置时，现居房须
+      // 内室底在地表带内且外扩盒蘑菇族 ≥100。不过 → 转 homeless 并回收占位
+      // （下轮 ①/A 近链重找;与下方 rehouse 失败分支同处置形态）。
+      if (n.vanillaId === 160 && !this.world.flags.unlockedTruffleSpawn) {
+        const rq = queryRoom(st, hx, hy, { ignoreNeeds: true });
+        let ok = false;
+        if (rq.room) {
+          let ry2b = 0;
+          for (const ti of rq.room.tiles) { const ty = (ti / st.w) | 0; if (ty > ry2b) ry2b = ty; }
+          ok = ry2b <= Math.floor(this.world.groundLevel)
+            && expandedMushroomCount(st, rq.room) >= MUSHROOM_TILE_THRESHOLD;
+        }
+        if (!ok) {
+          n.home = null;
+          n.leashHome = false;
+          const hi = homes.findIndex((hh) => hh.x === hx && hh.y === hy);
+          if (hi >= 0) homes.splice(hi, 1);
+          continue;
+        }
+      }
       const others = homes.filter((h) => !(h.x === hx && h.y === hy));
       const rehouse = findFreeHouse(st, others, hx, hy, n.vanillaId);
       if (rehouse) {
@@ -24011,7 +24104,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //    染料商 ≥4 人、油漆工 ≥8 人、派对女孩 ≥20 人且 1/40 重掷）
     // ★锚池空 → 原版 SpawnHomelessNPC 在 num10>=1 门内(Main.cs:64530-64537),
     //   整轮（含新 NPC 生成）不跑——冷启世界的第一个入住只能走住房 UI 手动分配
+    //   （2026-08-15 用户定案「百分百对齐」——★★对抗修复批②2026-09-01 保持不动,
+    //   近玩家回收链是独立通路,vanilla 里它同样不依赖锚池）
     if (anchorPool.length === 0) return;
+    // ★★对抗修复批②2026-09-01（B-5 昼上午门）：自然生成段（③新住户/流浪兜底/宠物）
+    // 的唯一原版调用位 SpawnHomelessNPC 带昼上午门（Main.cs:66028-66036 dayTime &&
+    // time<27000,travel 同窗 :66003-66009）——新住户到达只能发生在上午;复核/自动
+    // 分配（既有住民面）白天全程照跑（上方 isDay 总门）。Main.time 27000=正午
+    // （4:30AM 起 54000 制中点）→ 本仓绝对钟面口径 timeOfDay<0.5。
+    if (!(this.world.clock.isDay && this.world.clock.timeOfDay < 0.5)) return;
     const merchantHere = has('merchant');
     const allow = (key: string) => this.townNpcSpawnAllowed(key);
     const n = npcs.length; // num40：在场城镇 NPC 总数（含守卫老人，原版同）
@@ -24073,8 +24174,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // SpawnTownNPC(LastFoundHouse) 失败后走 :5014-5033 randomNext homes，
     // 新 NPC 落锚点后经 QuickFindHome(:5135) 在锚点 ±10 窗内找房
     const id = TOWN_NPC_IDS[pick].id;
-    const anchor = pickAnchor();
-    const house = findFreeHouse(st, homes, anchor.x, anchor.y, id);
+    let house: ReturnType<typeof findFreeHouse> = null;
+    let viaLastFoundHouse = false;
+    // ★★对抗修复批②2026-09-01（A-3 LastFoundHouse 快路径，SpawnHomelessNPC
+    // cs:4979-4994）：上轮近链/本轮更早缓存 lastFoundHouse 时【优先】以它作
+    // SpawnTownNPC(LastFoundHouse) 落点——受理核 acceptTownNPCAtHouse（StartRoomCheck+
+    // RoomNeeds+ScoreRoom 合并面,extraSolid{379} 内建）成功即把快路径房当本轮安置位；
+    // 失败走既有 findFreeHouse 锚扫。成功后置 homelessSpawnTimeout=54000 并清缓存
+    // （★纠错：原版置 54000 的位置只在快路径成功支 :4986-4989；此前本仓在流浪兜底
+    // 生成分支置值属错位,该处原版只置 homelessDespawn 等价物——已删）
+    if (this.lastFoundHouse) {
+      const lf = this.lastFoundHouse;
+      const acc = acceptTownNPCAtHouse(st, homes, lf.x, lf.y, id);
+      if (acc.ok && acc.room && acc.home) {
+        house = { standX: acc.home.x, standY: acc.home.y, tiles: acc.room.tiles };
+        viaLastFoundHouse = true;
+      }
+    }
+    if (!house) {
+      const anchor = pickAnchor();
+      house = findFreeHouse(st, homes, anchor.x, anchor.y, id);
+    }
     const name = Lang.npcName(id) ?? pick;
     // NPCID.Sets.IsTownPet（NPCID.cs:4444）= 宠物三只+全部城镇史莱姆：WorldGen.
     // IsThereASpawnablePrioritizedTownNPC(:4855) 对本集免房放行——无房时在出生点
@@ -24098,22 +24218,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 松露人特判（WorldGen.CheckSpecialTownNPCSpawningConditions :4919-4946）：
     // unlockedTruffleSpawn 未置时房间须整体在地表（roomY2 ≤ worldSurface），
-    // 且房内蘑菇族 tile（70 草/71 植/72 树/528 藤）≥ SceneMetrics.
-    // MushroomTileThreshold(=100)——此前按全域找房（备案），现 1:1；不满足则本轮跳过
+    // 且蘑菇族 tile（70 草/71 植/72 树/528 藤）≥ SceneMetrics.MushroomTileThreshold
+    // (=100)——★★对抗修复批②2026-09-01（E-11）：计数域从「房内 tiles」扩成
+    // GetTestedRoomBounds 外扩盒（±46 同构,expandedMushroomCount 单源）；不满足则本轮跳过
     if (house && pick === 'truffle') {
-      const MUSH = [TILE_BY_KEY['v_70_mushroom_grass_block'], TILE_BY_KEY['v_71_mushroom_plant'],
-        TILE_BY_KEY['v_72_mushroom_tree'], TILE_BY_KEY['v_528_mushroom_vines']].filter(
-        (v): v is number => v !== undefined);
-      let mush = 0;
       let roomBottom = 0;
       for (const ti of house.tiles) {
         const ty = Math.floor(ti / st.w);
         if (ty > roomBottom) roomBottom = ty;
-        if (MUSH.includes(st.type[ti])) mush++;
       }
       const surfOk = !!this.world.flags.unlockedTruffleSpawn
         || roomBottom <= Math.floor(this.world.groundLevel);
-      if (!surfOk || mush < 100) return;   // 房不合格：本轮放弃（下轮重试）
+      if (!surfOk || expandedMushroomCount(st, house) < MUSHROOM_TILE_THRESHOLD) {
+        return;   // 房不合格：本轮放弃（下轮重试）
+      }
     }
     if (house) {
       // SpawnTownNPC：房间合格且无人 → 生成在房内、安家（Announcement.HasArrived）。
@@ -24127,6 +24245,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         town_slime_cool: 'unlockedSlimeGreenSpawn',
       };
       if (ARRIVE_UNLOCK_FLAG[pick]) this.world.flags[ARRIVE_UNLOCK_FLAG[pick]] = true;
+      if (viaLastFoundHouse) {
+        // ★★对抗修复批②2026-09-01（A-3）：快路径成功支——54000 节流（cs:4988）
+        // + 清缓存（下一次新流浪走锚扫/重新缓存）。此置位先前错挂在流浪兜底支,
+        // 已按原版字面移回此处。
+        this.homelessSpawnTimeout = 54000;
+        this.lastFoundHouse = null;
+      }
       const npc = new TownNPC(pick, house.standX * TILE + 8, (house.standY + 1) * TILE);
       npc.home = { x: house.standX, y: house.standY };
       npc.leashHome = true;
@@ -24136,8 +24261,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // SpawnHomelessNPC（:4992）：白天且当前无流浪 NPC 时，在已入住者的家附近生成；
       // 无人入住（无锚点）则不生成——新世界只有向导（WorldGen.cs:20036 出生）
       // ★1457（cs:4956-4988）：+homelessSpawnTimeout 节流门（>0 直接 return）+
-      //  需已有入住 NPC（num>0,排除 37 老人/453 骷髅商/368 旅商——同锚池口径）；
-      //  成功生成后置 54000（一天一户）
+      //  需已有入住 NPC（num>0,排除 37 老人/453 骷髅商/368 旅商——同锚池口径）
+      // ★★对抗修复批②2026-09-01：本支不再置 54000——原版兜底扫描成功后只置
+      //  homelessDespawn=true + QuickFindHome（cs:5124-5128），置 timeout 的位置在
+      //  快路径成功支 :4986-4989（上方 house 支已按字面归位）。差异登记：本仓
+      //  TownNPC 无 homelessDespawn 对应物,夜扫清场链未建,生成位照旧不标。
       if (!this.world.clock.isDay || this.homelessSpawnTimeout > 0) return;
       if (anchorPool.length === 0) return;
       // ★R3-1（1457 W57:5551-5564 FindAnyHomelessTownNPC）："已有流浪者"门带四元
@@ -25045,11 +25173,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (q.reason === 'occupied') { this.newText(Lang.inter(41), 255, 240, 20); return; }
     if (q.reason === 'evil') { this.newText(Lang.inter(42), 255, 240, 20); return; }
+    if (q.reason === 'standing') {
+      // ★★对抗修复批②2026-09-01（C-F8 数据位已接、文案挂账）：四件套齐全但
+      // ScoreRoom 无正分站位（hasStandingSpace=false）。原版无专项文案,此档在
+      // MoveTownNPC displayText 里同落「不是有效房屋」——维持 inter[40] 兜底,
+      // 专用键挂账待补（若补需走 tools/l10n-custom 双语 + build-l10n 流程）
+      this.newText(Lang.inter(40), 255, 240, 20);
+      console.info('[housing] 无站位空间(score<=0 且 hasStandingSpace=false) @', x, y);
+      return;
+    }
     if (q.reason === 'needs') {
-      // RoomNeeds 缺件文案（WorldGen.cs:4680-4700）：门/光源/桌/椅序拼 HouseMissing_n
+      // RoomNeeds 缺件文案（WorldGen.cs:4680-4700）：★★对抗修复批②2026-09-01
+      // （F-13）列举序改 torch(light)→door→table→chair（原版 Game.cs HouseMissing
+      // 拼装以光源起头）
       const missing: string[] = [];
-      if (!q.flags.door) missing.push(Lang.text('Game.HouseDoor'));
       if (!q.flags.light) missing.push(Lang.text('Game.HouseLightSource'));
+      if (!q.flags.door) missing.push(Lang.text('Game.HouseDoor'));
       if (!q.flags.table) missing.push(Lang.text('Game.HouseTable'));
       if (!q.flags.chair) missing.push(Lang.text('Game.HouseChair'));
       if (missing.length) {
@@ -25071,6 +25210,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 失败文案同查询路径（MoveTownNPC displayText 分支）
       this.housingQuery(x, y);
       return false;
+    }
+    // ★★对抗修复批②2026-09-01（E-12 手动分配过检）：松露人 SpecialConditions
+    // （CheckSpecialTownNPCSpawningConditions(160)——手动分配=SpawnTownNPC 面同样
+    // 受条件约束）不过 → 拒绝并提示 inter[55]「此房屋不符合以下人物要求:」等价键。
+    if (npc.vanillaId === 160 && !this.world.flags.unlockedTruffleSpawn) {
+      let ry2b = 0;
+      for (const ti of q.room.tiles) { const ty = (ti / this.world.store.w) | 0; if (ty > ry2b) ry2b = ty; }
+      const surfOk = ry2b <= Math.floor(this.world.groundLevel);
+      const mushOk = expandedMushroomCount(st, q.room) >= MUSHROOM_TILE_THRESHOLD;
+      if (!surfOk || !mushOk) {
+        console.info(`[housing] truffle assign 拒绝 @(${x},${y}) surf=${surfOk} mush=${mushOk}`);
+        this.newText(Lang.inter(55), 255, 240, 20);
+        return false;
+      }
     }
     // moveRoom（:4797-4803）：置 homeless→SpawnTownNPC(x,y) 在点击房内重新安家
     npc.home = { x: q.room.standX, y: q.room.standY };

@@ -635,7 +635,8 @@ export class Boomerang extends Entity {
   armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
-  /** channel 电平（301 Bouncing Shield 双门用；Game 仅 301 注入,其余族空挂无害） */
+  /** channel 电平（★301 的"按住/松手双门"出程语义已按 1457 真值退役——原版 AI_003
+   *  无 controlUseItem 门;字段保留承接 Game 发射侧既有注入接线,当前无消费面） */
   channel: (() => boolean) | null = null;
   /** 光刃再掷召回电平（P.cs:39717-39722 IsAPhaseblade[HeldItem.shoot]&&controlUseItem；
    *  Game 发射侧仅对 PHASEBLADE_PROJ 注入——mouseHeld+手持同物品,flail channel 同管线） */
@@ -1007,11 +1008,50 @@ export class Boomerang extends Entity {
     // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
     // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
     const chX = body.vx !== lvx, chY = body.vy !== lvy;
+    // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改也计接触
+    const stB = game.world.store;
+    const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
+      || this.y <= 0 || this.y + this.h >= stB.h * TILE;
     this.x = body.x; this.y = body.y;
     this.vx = lvx; this.vy = lvy;
     const hitX = chX, hitY = chY;
     if (!hitX && !hitY && !offWorldEdge) return;
-                   // SoundID 0(:19670 共享尾)
+    // 原版此点 velocity 已被 Collision 按碰撞轴清零（TileCollision 后写语义）——下游
+    // 反射读数/LightDisc_Bounce 的 reflect 源都基于这份"轴零化视图"。管线以差分折叠
+    // 出等价投影（未碰轴保留 lastV、碰轴置 0）。
+    const pvx = hitX ? 0 : lvx, pvy = hitY ? 0 : lvy;
+    // ---- aiStyle3/13 撞墙响应链（1458 Projectile.cs:19627-19671,顺序与源码一致）----
+    if (isPhase) {
+      this.ai0 = 2; this.outT = 0;
+      return;
+    }
+    if (this.projId === 106) {
+      this.lightDiscBounceFx(game, pvx, pvy, lvx, lvy);
+    }
+    if (this.projId === 383) {
+      if (this.outT >= 10) {
+        hitTilesInACircleFx(game, this.x - 150, this.y - 150, lvx, lvy, 300);
+        game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
+        this.boomBox = 300;                                     // localAI[0]=num71(:15065 GetHitbox)
+      }
+    } else if (this.projId === 301) {
+      paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
+        this.x, this.y, this.w, this.h);
+      this.boomBox = 200;                                       // localAI[0]=num72(:15063)
+    } else {
+      game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+    }
+    // :19667-19675 {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从
+    // lastVelocity 全反（383 豁免,aiStyle13 型号在 AnchoredProj 侧另案）
+    if (WALL_BOUNCE_PROJ.has(this.projId)) {
+      if (hitX) this.vx = -lvx;
+      if (hitY) this.vy = -lvy;
+    } else {
+      this.ai0 = 1; this.outT = 0;
+      if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
+    }
+    game.playSfx('dig', 1, this.cx, this.cy);                   // SoundID 0(:19670 共享尾)
   }
 
   /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
@@ -3952,7 +3992,10 @@ export class FlaironSpike extends Entity {
         const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
         if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
       }
-      this.ai0 = found ? 1 : -15; // repo 无 NPC 索引,命中即锚定首敌(ai0=1)
+      // 锚定语义：原版 ai[0]=idx+1 恒指【首个锁定目标】（NPC 索引引用,Projectile.cs
+      // :29202-29215）;本仓实体模型无 NPC 索引域——以"逐拍取当前最近敌"承载追踪,
+      // 实体身份/索敌表示层结构差沿用登记（引擎表示层批处理面）
+      this.ai0 = found ? 1 : -15;
       if (found) {
         const num605 = (35 + Math.random() * 40) / 30; // Next(35,75)/30
         const jx = bx - cx0 + (Math.random() * 200 - 100);
@@ -3962,7 +4005,8 @@ export class FlaironSpike extends Entity {
         this.vy = (this.vy * 20 + (jy / jd) * num605) / 21;
       }
     } else if (this.ai0 > 0) {
-      // 追踪:(v×40+dir×12)/41——repo 无索引锚,朝当前最近敌(650 内)
+      // 追踪:(v×40+dir×12)/41——原版恒指 ai[0] 锚定索引（表示层差,见首寻段注）,
+      // 本仓以逐拍最近敌(650 内)承载
       let best = 650, bx = 0, by = 0, found = false;
       for (const ent of game.enemies()) {
         const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };

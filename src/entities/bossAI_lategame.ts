@@ -1670,7 +1670,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         // 沿锁定角 40 速发射(2026-08-31 台账批实体化;旧「Projectile.AI 收敛:12 速
         // 直飞/弹 ai1 延时参」说法系误读——ai[1] 仅作色相源,AI 不消费)
         addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
-          dayEnrage, num6));   // num6 :46332
+          num6, dayEnrage));   // num6 :46332
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1762,7 +1762,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           // 原版 NewProjectile(Vector2.Zero,919,ai[0]=v3.ToRotation() 锁定角,
           // ai[1]=num80 线上分位)(:47122)——AI_179 60t 预告→40 速发射(实体化 FairyQueenLance)
           addProj(game, new FairyQueenLance(ox, oy, Math.atan2(vy, vx), t,
-            dayEnrage, num7));   // num7 :46336
+            num7, dayEnrage));   // num7 :46336
         }
       }
       e.ai1 += 1;
@@ -1842,7 +1842,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
         addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
-          dayEnrage, num6));   // num6 :46332（case11 预测光枪墙）
+          num6, dayEnrage));   // num6 :46332（case11 预测光枪墙）
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }

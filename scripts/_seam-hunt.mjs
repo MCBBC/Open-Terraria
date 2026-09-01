@@ -22,7 +22,7 @@ const VP = { width: 900, height: 560, deviceScaleFactor: 1 };  // dsf2/headless 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 600000, defaultViewport: VP });
 const p = await b.newPage();
 p.on('pageerror', (e) => console.log('PAGEERR:', e.message.slice(0, 160)));
-await p.goto(`${ORIGIN}/?nosw`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+await p.goto(`${ORIGIN}/?nosw${process.env.SW_FLAGS ? '&' + process.env.SW_FLAGS : ''}`, { waitUntil: 'domcontentloaded', timeout: 120000 });
 await p.waitForFunction(() => !!window.__swFlow, { timeout: 240000 });
 await p.evaluate(async () => { await window.__swFlow.loadJson(await (await fetch('/debug-seam-save.json?v=' + Date.now())).text()); });
 await p.waitForFunction(() => !!window.__swGame && !!window.__swGame.world, { timeout: 240000 });
@@ -66,6 +66,15 @@ await p.evaluate(async () => {
   window.__swTILE_DEFS_OK = true;
 });
 await sleep(600);
+// 诊断：暂停态/可见性/世界尺寸/chunk缓存
+const diag = await p.evaluate(() => {
+  const g = window.__swGame;
+  return { paused: g.paused, vis: document.visibilityState,
+    worldW: g.world?.w, lowW: g.renderer?._worldLowW, lowK: g.renderer?._worldLowK,
+    camX: g.camera.x, camY: g.camera.y, zoom: g.camera.zoom,
+    px: g.player?.x, py: g.player?.y };
+});
+console.log('DIAG:', JSON.stringify(diag));
 // 动画时钟对齐（在截图前一刻置位,帧内容即与记录时刻同相）
 if (renderMeta && (REPLAY === 'full' || REPLAY === 'cam')) {
   await p.evaluate(async (t) => { const m = await import('/src/render/TileAnim.ts'); m.tileAnim.tick = t; }, renderMeta.animTick);
@@ -82,7 +91,21 @@ for (const z of zooms) {
     return g.camera.zoom === zz;
   }, z);
   await sleep(800);
+  const ensureNoModal = async () => {
+    await p.bringToFront();
+    for (let i = 0; i < 10; i++) {
+      const gone = await p.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.includes('我已知晓'));
+        if (b) { b.click(); return false; }
+        return !document.querySelector('.sw-modal, .modal, [class*=overlay]');
+      });
+      if (gone) return;
+      await sleep(300);
+    }
+  };
+  await ensureNoModal();
   for (const tag of ['a', 'b']) {
+    await ensureNoModal();
     await sleep(tag === 'a' ? 50 : 640);
     const clip = null; // 全幅截图（缝场景以相机为中心,不锚定出生点机器）
     await p.screenshot({ path: `${OUT}/z${z}-${tag}.png` });
@@ -104,19 +127,43 @@ for (const z of zooms) {
         for (let x = x0; x <= x1; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
         out.push([y, +(s2 / n).toFixed(1)]);
       }
+      // furnace 列带精确定位缝行
+      const furnCol = [];
+      for (let y = 90; y <= 135; y++) {
+        let s2 = 0, n = 0;
+        for (let x = 138; x <= 178; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
+        furnCol.push([y, +(s2 / n).toFixed(1)]);
+      }
+      // 找 furnace 带内的异常行(局部极值):与邻行均值差>18
+      let seamY = -1, bestD = 0;
+      for (let i = 2; i < furnCol.length - 2; i++) {
+        const nb = (furnCol[i - 2][1] + furnCol[i - 1][1] + furnCol[i + 1][1] + furnCol[i + 2][1]) / 4;
+        const dd = furnCol[i][1] - nb;
+        if (dd > bestD) { bestD = dd; seamY = furnCol[i][0]; }
+      }
+      // 沿缝行采样色带(x=134..300 每8px) + 缝行世界坐标
+      const seamRow = [];
+      if (seamY > 0) {
+        for (let x = 134; x <= 300; x += 8) {
+          const i = (seamY * W + x) * 4;
+          seamRow.push(`${x}:${d[i]},${d[i + 1]},${d[i + 2]}`);
+        }
+        const wpt = g.camera.screenToWorld(x0 + 4, seamY);
+        seamRow.push(`worldY=${(wpt.y / 16).toFixed(2)}tiles`);
+      }
       // 机器区 4x 放大
       const mc = document.createElement('canvas');
       mc.width = (x1 - x0) * 4; mc.height = 70 * 4;
       const mcx = mc.getContext('2d');
       mcx.imageSmoothingEnabled = false;
       mcx.drawImage(cv, x0, 80, x1 - x0, 70, 0, 0, mc.width, mc.height);
-      return { rows: out, png: mc.toDataURL('image/png') };
+      return { rows: out, png: mc.toDataURL('image/png'), furnCol, seamRow };
     }, tag);
     await p.evaluate((durl, z, tg) => {
       window.__seamCrops = window.__seamCrops ?? {};
       window.__seamCrops[`${z}-${tg}`] = durl;
     }, scan.png, z, tag);
-    console.log(`z${z}-${tag} rows80-150=${JSON.stringify(scan.rows)}`);
+        console.log(`z${z}-${tag} furnCol=${JSON.stringify(scan.furnCol)} seamRowColors=${JSON.stringify(scan.seamRow)}`);
   }
 }
 // 落盘全部放大裁剪

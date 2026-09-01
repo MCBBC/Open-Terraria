@@ -317,13 +317,14 @@ export interface Occupant { x: number; y: number; /** 入住者原版 NPC id（C
 
 /**
  * ScoreRoom 1:1（WorldGen.cs:5804-5940）：对已判合格的房间打分并选家位点。
- * occupied = 已入住 NPC 的 home tile（home 与 home-1 同在房内视为占用者）；
+ * occupied = 已入住 NPC 的 home tile（home 与 home-1 同在房内视为占用者；
+ * ★批②2026-09-01 放宽为 ReadonlyArray——acceptTownNPCAtHouse 只读传参）；
  * askingNpcId = 申请入住的 NPC id（占用豁免用：同 housingCategory 才判占用，
  * WorldGen.cs:5754 CanNPCsLiveWithEachOther——城镇 NPC 与城镇宠物可同房）。
  */
 export function scoreRoom(
   st: TileStore, room: Room,
-  occupied: Array<{ x: number; y: number; npcId?: number }>,
+  occupied: ReadonlyArray<Occupant>,
   askingNpcId = -1,
 ): RoomScore {
   const fail: RoomScore = { score: 0, x: room.standX, y: room.standY, roomEvil: false, hasStandingSpace: false };

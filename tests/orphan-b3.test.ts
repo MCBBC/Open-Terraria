@@ -534,6 +534,7 @@ describe('工单4 三地球仪重掷策略（styleRerolls 纯层）', () => {
     g.renderer = { biomeBg: {
       biomeVariant: () => -1,                            // oldVal=-1 保证首掷必异且不同族,确定化
       biomeVariantRows: () => [0, 1, 2, 3, 4, 5, 6],     // B3-5 起可行域口(桩固定池,非真表长)
+      sameVisual: () => false,                           // 终清波起森林族门经实例口(本测只验分段落槽)
       setBiomeVariant: (k: string, v: number) => { written[k] = v; return v; },
     } } as never;
     const p = g.player as Player;

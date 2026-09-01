@@ -25,7 +25,10 @@ function recorder() {
 const FAKE_W = 1152, FAKE_H = 216;
 function surfBg(cam: { x: number; y: number; zoom: number }) {
   const bg = new BiomeBackground();
-  // Node 无 Image——img() 懒加载炸,stub 成已知尺寸假图
+  // Node 无 Image/DOM——img() 懒加载与 flip 烘焙(51/54 层,tsc/document 均不可用)桩化:
+  // flippedOf 直通等价件（贴图号不变,坐标断言不受影响）
+  (bg as unknown as Record<string, unknown>).flippedOf =
+    (im: HTMLImageElement | ImageBitmap): HTMLImageElement | ImageBitmap => im;
   (bg as unknown as { img: (n: number) => HTMLImageElement | null }).img = (n: number) => {
     if (n < 0) return null;
     const recs2 = (bg as unknown as { __recs?: Rec[] }).__recs;

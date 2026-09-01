@@ -32,6 +32,9 @@ import { TILE } from '../core/constants';
 import petAiJson from '../data/vanilla-petai.json';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+// ★终清波批：1090 彩虹巨石宠微光粒子（AI_067 ai[0]==1 段 Projectile.cs:50640-50648,
+// ParticleOrchestration ShimmerBlock clientOnly:true 本地直驱——fx 本体 L6 收编池复用）
+import { shimmerBlockFx } from '../fx/orchestraFx';
 
 // ===================== 数据表类型（vanilla-petai.json） =====================
 type PetFamily = 'ground' | 'fly' | 'hover';
@@ -135,6 +138,13 @@ function jumpPick(st: { inBounds(c: number, r: number): boolean; isSolid(c: numb
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
+/** TreeID.Sets.IsShakeable 子集可摇树的木材/树种掉落 vid 映射（KillTile_GetTreeDrops
+ *  :66718-66790 树种面精简——GetTreeTypeAndTreeBottom 溯基座草族由【同列下探首块非
+ *  干草格】承载。宝石树 583-589 的宝石果面与冠帧橡实面不入此精简表（登记）） */
+const PET_AXE_WOOD_BY_GRASS: Record<number, number> = {
+  23: 619, 199: 911, 60: 620, 147: 2503, 109: 621, 492: 621, 633: 5215,
+};   // Forest/其余基座 → 9
+
 /** 原版加速趋近模式（Projectile.cs 各宠物分支通用写法）：
  *  cur < want → +=acc（反向时再 +=acc）；cur > want → -=acc（对称） */
 export function accelToward(cur: number, want: number, acc: number): number {
@@ -222,6 +232,24 @@ export class PetFollower extends Entity {
    *  每 tick 复核存活+射程后回写，驱动 type==960 开盖帧段（Projectile.cs:63747） */
   beingTracked = false;
 
+  // ---- ★终清波批彩蛋状态 ----
+  /** 764 UpbeatStar alpha 脉冲三角波（localAI[0]：0..120 折返,:66806-66808/
+   *  :66831-66834 Opacity=Lerp(0.4,0.75,tri)）；starRot=localAI[1] 自旋累加
+   *  （+=vX*0.01+1/120 wrap ±2π,:66809-66816—— FallenStar 覆绘旋转消费面因
+   *  sprites 盘缺 Item_75.png 登记,累加面随批就位） */
+  private starT = 0;
+  private starOpacity = 1;
+  private starRot = 0;
+  /** 1050 斧仙（AI_144 case 1050 :71258-71338）：axeCd=localAI[1]（<0 冷却,
+   *  ≥0 工作态）、chopAccum=localAI[2] 砍击蓄量、lai0 相位 = animTick 共用、
+   *  chopMode 锚覆写与动画窗标记 */
+  private axeCd = 0;
+  private chopAccum = 0;
+  /** 1090 彩虹巨石宠微光粒子相位（原版读 Main.LocalPlayer.miscCounter %2==0） */
+  private shimmerParity = 0;
+  /** 764 Y 波消费位（upbeatStarTick 前置计算→hoverAI 目标点叠加,:66835 case 尾式） */
+  private hoverWaveY = 0;
+
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
     super();
@@ -255,10 +283,17 @@ export class PetFollower extends Entity {
     }
     const R = this.params;
     if (!R) { this.legacyAI(p); return; }   // 表外 id：回退登记见文件尾
+    // ★终清波批：764 UpbeatStar 专属前段（alpha 脉冲/Y 波相位/d292 微光尘）——
+    //   AI_144 case 764 :66801-66832；movement 仍走 hover 公共段（flag2=true 悬停族）
+    if (this.projId === 764) this.upbeatStarTick(p, game);
     switch (R.family) {
       case 'ground': this.groundAI(p, game, R); break;
       case 'fly': this.flyAI(p, R); break;
-      case 'hover': this.hoverAI(p, R); break;
+      case 'hover':
+        // ★终清波批：1050 斧仙走全量专支（扫描/砍击/动画窗覆写——通用 hover 帧
+        //   机表达不了 chop 态 num5=8 带）,其余悬停族照旧
+        if (this.projId === 1050) { this.axeFairyAI(p, game); break; }
+        this.hoverAI(p, R); break;
     }
     this.stepAnim(R, game, this.x !== prevX);
   }
@@ -297,6 +332,18 @@ export class PetFollower extends Entity {
         this.vy = accelToward(this.vy, ty, flyAccel);
       }
       this.x += this.vx; this.y += this.vy;
+      // ★终清波批：1090 彩虹巨石宠微光粒子（AI_067 ai[0]==1 归位飞行段 :50640-50648,
+      // Main.LocalPlayer.miscCounter %2==0 → ShimmerBlock 编排 @Center+NextCircularEdge
+      // (w/2,h/2)、MovementVector=v*0.05、UniqueInfoPiece=500;clientOnly:true 本地直驱）
+      if (this.projId === 1090) {
+        const gmc = (p as unknown as { miscCounter?: number }).miscCounter
+          ?? (game as unknown as { miscCounter?: number }).miscCounter ?? ++this.shimmerParity;
+        if ((gmc % 2 + 2) % 2 === 0 && shimmerBlockFx) {
+          const ang = Math.random() * Math.PI * 2;
+          const ex = this.cx + Math.cos(ang) * this.w / 2, ey = this.cy + Math.sin(ang) * this.h / 2;
+          shimmerBlockFx(game, ex, ey, this.vx * 0.05, this.vy * 0.05, 500);
+        }
+      }
       // 落回地面门（:57556-57562）：距玩家 < landRange、玩家落地、宠物不高于玩家脚、
       // 宠物未嵌块 → 退出飞行（vy 钳 ≥ -6）
       const pvy = (p as { vy?: number }).vy ?? 0;
@@ -360,7 +407,6 @@ export class PetFollower extends Entity {
         this.vy = jumpPick(st, tx, ty, e.jumpLadder ?? D.jumpLadder ?? [-5.1, -7.1, -11.1, -10.1, -9.1]);
       }
     }
-
     // 重力 + 碰撞位移（:59421 通用档 velocity.Y += 0.4f / cap 10）
     const grav = e.gravity ?? D.gravity ?? 0.4;
     const fallCap = e.fallCap ?? D.fallCap ?? 10;
@@ -482,6 +528,9 @@ export class PetFollower extends Entity {
       const period = e.bobPeriod || 120;
       ty0 += Math.cos((this.animTick % period) / period * Math.PI * 2) * e.bob;  // AI_144 702 余弦 bob
     }
+    // ★终清波批：764 Y 波（AI_144 case 764 段尾 vector.Y += cos(lai0/120·τ)×2）——
+    //   upbeatStarTick 每 tick 前置算好供本处消费（case 特有波不并 bob 表）
+    if (this.projId === 764 && this.hoverWaveY !== 0) ty0 += this.hoverWaveY;
     const dx = tx0 - this.cx, dy = ty0 - this.cy;
     const d = Math.hypot(dx, dy);
     if (d > teleport) {   // 超距瞬移（124 :34149 / 144 :66804-66806 / 90 :31373）
@@ -682,6 +731,172 @@ export class PetFollower extends Entity {
     }
     return true;
   }
+
+  // ===================== ★终清波批彩蛋（AI_144 DD2Pet 特化段） =====================
+  /** 764 UpbeatStar 前段（Projectile.cs:66801-66832 AI_144 case 764 全式）：
+   *  · localAI[0] 相位 ++ wrap120 → alpha 脉冲三角波 Opacity=Lerp(0.4,0.75,fold)
+   *    （:66831-66834,num11 折返）；draw() 以 starOpacity 消费
+   *  · localAI[1] 自旋：+=vX×0.01 + 1/120，wrap ±2π；慢速档再 ×0.9（:66809-66820）
+   *    ——消费面（DrawProjWithStarryTrail FallenStar 覆绘 rotation）因 sprites 盘
+   *    缺 Item_75.png 登记,累加面随批就位
+   *  · d292 微光尘：慢速档 |v|∈(0.1,4) Next(30)==0 一粒（vel×0.5 出速→×0.3 阻尼+
+   *    noLightEmittance,:66821-66823）;快速档 ≥4 时无屏盒结果消费直 Next(15)==0 且
+   *    scale0.9 档（:66826-66830——原版 Hitbox.Intersects 结果弃置,不建模）
+   *  · Y 波 cos(localAI[0]/120·τ)×2 → hoverWaveY 供 hoverAI 目标叠加（:66835） */
+  private upbeatStarTick(p: OwnerRef, game: GameHooks): void {
+    void p;
+    this.starT = this.starT + 1 > 120 ? 0 : this.starT + 1;        // :66806-66808
+    let num11 = this.starT / 120 * 2;                              // :66831
+    if (num11 > 1) num11 = 2 - num11;
+    this.starOpacity = num11 * (0.75 - 0.4) + 0.4;                 // Lerp(0.4,0.75)
+    this.starRot += (this.vx ?? 0) * 0.01 + 1 / 120;               // :66809-66811
+    while (this.starRot < -Math.PI * 2) this.starRot += Math.PI * 2;
+    while (this.starRot > Math.PI * 2) this.starRot -= Math.PI * 2;
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd < 4) {
+      this.starRot *= 0.9;                                         // :66819
+      if (spd > 0.1 && Math.floor(Math.random() * 30) === 0) {     // :66821-66823
+        const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy,
+          this.w, this.h, 292, this.vx * 0.5, this.vy * 0.5, 150);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; d.noLightEmittance = true; }
+      }
+    } else if (Math.floor(Math.random() * 15) === 0) {             // :66826-66830
+      const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy,
+        this.w, this.h, 292, this.vx * 0.5, this.vy * 0.5, 150, null, 0.9);
+      if (d) d.noLightEmittance = true;
+    }
+    this.hoverWaveY = Math.cos(this.starT / 120 * Math.PI * 2) * 2; // :66835 case 尾
+  }
+
+  /** 1050 斧仙全量专支（Item 5517/buff 372；AI_144 case 1050 :71258-71338 + 公共尾段
+   *  :71339-71414 逐段）：原地沿玩家朝向侧扫 12 格寻 IsShakeable 树干——找到即锚定
+   *  树格近侧 30px 悬停（vector 覆写）+ 动画窗 8..15 每 3t + 砍击拍（frame==8||12 且
+   *  frameCounter==0：木屑粒/dig 音/蓄量++ 与 200+rand(100)（rand(20)==0 ÷8 加急档）
+   *  达标且 rand(5)==0 → KillTile_DropItems 掉木材【不毁树】）;主 >320px 或扫空 →
+   *  localAI[1] 置 -300 缓启。移动/旋转/帧行为照公共尾段（num4=16 常规带 vs chop 带）。*/
+  private axeFairyAI(p: OwnerRef, game: GameHooks): void {
+    const st = game.world.store;
+    const num = 3;                       // 巡航速度档 num=3f（case 1050 覆写 :71263）
+    const accFactor = 0.1;               // num7 缺省
+    const playerSpd = { x: p.cx - 30 * p.facing, y: p.cy - 20 };  // vector 初值基座
+    // ---- case 1050 头段 ----
+    if (this.axeCd < 0) this.axeCd++;                                  // 冷却回充 :71265-71267
+    if (this.axeCd >= 0) {
+      if (Math.hypot(p.cx - this.cx, p.cy - this.cy) >= 320) {
+        this.axeCd = -300;                                             // :71334-71337 远离冷却
+      } else {
+        this.chopAccum++;
+        // 侧向扫描（:71270-71290）：中心格起 ×direction 至多 12 格，IsShakeable 命中
+        const tx0 = Math.floor(this.cx / TILE), ty0 = Math.floor(this.cy / TILE);
+        let px = tx0, k = 12, hit = false;
+        while (!hit && k > 0 && st.inBounds(px, ty0)) {
+          if (TREE_SHAKEABLE_SHEETS.has(st.type[st.idx(px, ty0)])) { hit = true; break; }
+          if (st.isSolid(px, ty0)) break;                              // 实心非树截停
+          k--;
+          px += p.facing;
+        }
+        if (k === 0) px -= p.facing;                                   // :71292 步退溢出格
+        if (hit) {
+          // 锚定（:71294-71296）：vector = 树心 +(−dir×30,0) − MountedCenter；
+          // 动画窗覆写 num4=16(常)/num5=8/num2=3 —— 由 frameBand 承载
+          this._axeTargetX = px * TILE + 8 - p.facing * 30;
+          this._axeTargetY = ty0 * TILE + 8;
+          this._axeChop = true;
+          // 砍击拍（:71304-71324）：frame==8||12 且 frameCounter==0 → 尘+音+蓄量掉落
+          if (this.frameAcc === 0 && (this.frame === 8 || this.frame === 12)) {
+            for (let i = 0; i < 3; i++) {
+              game.spawnParticles?.(px * TILE + 8, ty0 * TILE + 8, '#7A5230',
+                1, 1.6, { life: 22, grav: 0.25 });
+            }
+            game.playSfxFiles?.(['dig'], 1, this.cx, this.cy);         // KillTile fail 音≈dig
+            const need = 200 + Math.floor(Math.random() * 100)
+              * (Math.random() >= 0.05 ? 1 : 0);                       // rand(20)==0 → ÷8 加急
+            const needV = Math.random() < 0.05 ? (200 + Math.floor(Math.random() * 100)) / 8 : need;
+            if (this.chopAccum >= (needV | 0) && Math.floor(Math.random() * 5) === 0) {
+              this.chopAccum = 0;
+              this.dropFairyWood(game, px, ty0);
+            }
+          }
+        } else this._axeChop = false;
+      }
+    }
+    if (!this._axeChop && this.axeCd >= 0) { this._axeTargetX = undefined; this._axeChop = false; }
+    // ---- 公共尾段（:71339-71414）：目标向量 + 两档推进 + 双速率帧机 ----
+    const waveY = Math.cos(this.animTick * (Math.PI / 30)) * 2;        // :71338 Y 波
+    let vx0: number, vy0: number;
+    if (this._axeChop && this._axeTargetX !== undefined) {
+      vx0 = this._axeTargetX - p.cx;                                   // vector 已覆写
+      vy0 = this._axeTargetY - p.cy;
+    } else {
+      vx0 = playerSpd.x - p.cx === 0 ? -30 * p.facing : -30 * p.facing; // vector.X*=−1 ⇒ −dir×30
+      vy0 = -20;
+    }
+    vx0 = this._axeChop && this._axeTargetX !== undefined
+      ? vx0 : -p.facing * 30;                                          // hoverX=-30 表语义
+    const target = { x: p.cx + vx0, y: p.cy + vy0 + waveY };           // MountCenter+vector
+    const dist = Math.hypot(target.x - this.cx, target.y - this.cy);
+    if (dist > 1000) {                                                 // :71346-71348 瞬移
+      this.x = p.cx + vx0 - this.w / 2; this.y = p.cy + vy0 + waveY - this.h / 2;
+      this.vx = 0; this.vy = 0;
+    }
+    const towardX = target.x - this.cx, towardY = target.y - this.cy;
+    if (dist < num) { this.vx *= 0.25; this.vy *= 0.25; }              // :71353-71355
+    const tl = Math.hypot(towardX, towardY);
+    if (tl !== 0) {
+      if (tl < num * 0.5) { this.vx = towardX; this.vy = towardY; }    // :71358-71360
+      else { this.vx = towardX * accFactor; this.vy = towardY * accFactor; }
+    }
+    this.dir = p.facing;                                               // spriteDirection 主向
+    const rateN = dist > 6 ? 3 : 5;                                    // 移动 num3=3/待机 num2=5
+    const fast = Math.hypot(this.vx, this.vy) > 6;
+    if (fast) {                                                        // :71362-71383 快档
+      const num13 = this.vx * 0.08 + this.vy * p.facing * 0.02;        // num6=0.04×2 子步近似
+      let d = num13 - this.rollRot;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.rollRot += d / 12;                                          // avg(12)
+      if (++this.frameAcc >= rateN) {
+        this.frameAcc = 0;
+        if (++this.frame >= this._axeChop ? 16 : 16) this.frame = this._axeChop ? 8 : 0;
+      }
+    } else {                                                           // 慢档旋转衰减
+      if (this.rollRot > Math.PI) this.rollRot -= Math.PI * 2;
+      if (this.rollRot > -0.005 && this.rollRot < 0.005) this.rollRot = 0;
+      else this.rollRot *= 0.96;
+      if (++this.frameAcc >= rateN) {
+        this.frameAcc = 0;
+        const top = this._axeChop ? 16 : 16;
+        if (++this.frame >= top) this.frame = this._axeChop ? 8 : 0;
+      }
+    }
+    if (this.projId === 1050 && framesOf1050Valid) { /* lai0 相位与 animTick 共用 */ }
+  }
+
+  /** 斧仙木料掉落（KillTile_DropItems :64469 → GetTreeDrops 树种面精简版）：
+   *  同列下探首块非干草格定树种 vid（PET_AXE_WOOD_BY_GRASS,缺省 9）；
+   *  bonusWood 掷骰 1/3 面（手持斧力读取跨私有域登记简化）+ 蘑菇草 50% 无果。
+   *  ★宝石树果面/冠帧橡实面不入此精简表（登记） */
+  private dropFairyWood(game: GameHooks, treeX: number, treeY: number): void {
+    const st = game.world.store;
+    let sheet = st.type[st.idx(treeX, treeY)];
+    let gy = treeY;
+    while (gy < st.h) {
+      const t = st.type[st.idx(treeX, gy)];
+      if (t !== 0 && t !== sheet) break;
+      gy++;
+    }
+    const ground = gy < st.h ? st.type[st.idx(treeX, gy)] : 0;
+    const isMushroom = ground === 70 || sheet === 72;
+    if (isMushroom && Math.random() >= 0.5) return;
+    const vid = isMushroom ? 183
+      : (PET_AXE_WOOD_BY_GRASS[ground] ?? 9);
+    const key = VANILLA_ITEM_KEY_BY_ID[vid];
+    if (!key) return;
+    const bonus = Math.floor(Math.random() * 35) <= 0 || Math.floor(Math.random() * 3) === 0;
+    game.spawnDrop?.(treeX * TILE + 8, gy * TILE, key, bonus ? 2 : 1,
+      (Math.random() - 0.5) * 2, -2 - Math.random());
+  }
+
 
   // ===================== 绘制 =====================
   draw(r: Renderer, _cam: Camera): void {

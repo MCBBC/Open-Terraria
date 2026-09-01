@@ -11,6 +11,7 @@ import { Inventory } from '../src/items/Inventory';
 import {
   DaybreakFlare, DaybreakExplosionProj, daybreakExplosionSide,
   SpearProj, Boomerang, GlowstickProj, PHASEBLADE_PROJ,
+  AnchoredProj, FlaironSpike, YoyoShotProj, FlailProj,
 } from '../src/entities/WeaponProj';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -35,7 +36,7 @@ function mkHooks(opts: { wallColumn?: number; wallRows?: [number, number] } = {}
   const dusts: DustRec[] = [];
   const sfxFiles: string[] = [];
   const sfxNames: string[] = [];
-  const sfxWav: string[] = [];
+  const sfxWav: Array<[string, number | undefined]> = [];
   const hooks = {   // mock 简化面统一 unknown→GameHooks 收口（tests/weapons-entities 惯例）
     world: { store },
     player,
@@ -51,7 +52,9 @@ function mkHooks(opts: { wallColumn?: number; wallRows?: [number, number] } = {}
     notifyInventoryChanged: () => {},
     playSfx: (n: string) => sfxNames.push(n),
     playSfxFiles: (f: string[]) => sfxFiles.push(...f),
-    playSfxFile: (f: string) => sfxWav.push(f),
+    playSfxWav: (f: string, _v?: number, _x?: number, _y?: number, pitch?: number) =>
+      sfxWav.push([f, pitch]),
+    playSfxFile: (f: string) => sfxNames.push(`wav:${f}`),
     showPickupLabel: () => {},
     spawnFriendlyProj: (e: unknown) => projectiles.push(e),
     spawnDust: (x: number, y: number, _w: number, _h: number, type: number,
@@ -279,5 +282,152 @@ describe('B⑤ 彩虹棒反弹钳档（1458 P.cs:19798-19821）', () => {
     const stick = new GlowstickProj(90 * TILE, 100 * TILE - 6 - 0.01, 0, 0.6, 1089);
     stick.fixedUpdate(1 / 60, t.hooks);
     expect(stick.vy).toBe(-1);
+  });
+});
+
+// ===================== 终清波·WeaponProj 全域近似清偿回归（2026-09-01） =====================
+// 锚定：1458 AI_003/HandleMovement/Collision 真值（详见 approx-registry 终清波节）。
+describe('终清波 A·301 弹跳盾出程式重写（1457/1458 真值,1456 双门退役）', () => {
+  it('掷出呼啸：出程(ai[0]==0)全程静默;入回收后每声 Item_7 带 -0.33 变调(:39578-39595)', () => {
+    const t = mkHooks({ wallColumn: 62, wallRows: [80, 99] });
+    const b = new Boomerang(t.player.cx - 20, t.player.cy, 14, 0, 30, 4, 301);
+    for (let i = 0; i < 6 && !b.returning; i++) b.fixedUpdate(1 / 60, t.hooks);
+    expect(b.returning).toBe(false);
+    // 出程期间零呼啸（门内不置 soundDelay 不播声）
+    expect(t.sfxWav.filter(([f]) => f === 'Item_7')).toHaveLength(0);
+    // 撞墙转回收后：呼啸带 pitch
+    for (let i = 0; i < 40 && !b.returning; i++) b.fixedUpdate(1 / 60, t.hooks);
+    expect(b.returning).toBe(true);
+    const whistles = t.sfxWav.filter(([f, p]) => f === 'Item_7' && p !== undefined);
+    expect(whistles.length).toBeGreaterThanOrEqual(1);
+    expect(whistles[0][1]).toBeCloseTo(-0.33, 5);
+  });
+
+  it('出程悬停钉位(Center=MountedCenter−velocity,ai[1]<30)与 Item_1 @ai[1]==20(:40017)', () => {
+    const t = mkHooks();
+    const b = new Boomerang(t.player.cx - 8, t.player.cy, 14, 0, 30, 4, 301);
+    let item1AtPin = false;
+    for (let i = 0; i < 26 && !item1AtPin; i++) {
+      b.fixedUpdate(1 / 60, t.hooks);
+      // ai[1]<30 阶段：弹心被钉在手侧一个弹速半径内（允许管线位移回写余量）
+      const d = Math.hypot(b.cx - t.player.cx, b.cy - t.player.cy);
+      if (i >= 2) expect(d).toBeLessThanOrEqual(Math.hypot(14, 0) + b.w + 6);
+      if (t.sfxFiles.includes('Item_1')) item1AtPin = true;
+    }
+    expect(item1AtPin).toBe(true);        // ai[1]==20 帧触发
+  });
+
+  it('ai[1]>=60 转回收且速度归零（无墙无敌路径）', () => {
+    const t = mkHooks();                   // 无墙列——自由空中飞行,不会被撞停
+    const b = new Boomerang(t.player.cx + 240, t.player.cy, -16, 0, 30, 4, 301);
+    for (let i = 0; i < 62 && !b.returning; i++) b.fixedUpdate(1 / 60, t.hooks);
+    expect(b.returning).toBe(true);
+  });
+});
+
+describe('终清波 B·光刃变调三档 + 182 锤头尘 + 866 尾尘（1458 头/尾段真值）', () => {
+  it('1074 自旋段 Item_7 带 -0.3 变调(:39807);非 1074 光刃 Item_15 无变调档', () => {
+    const t1 = mkHooks();
+    const blade = new Boomerang(t1.player.cx, t1.player.cy, 12, -6, 30, 4, 1074);
+    for (let i = 0; i < 16 && !blade.returning; i++) blade.fixedUpdate(1 / 60, t1.hooks);
+    const pitched = t1.sfxWav.filter(([f, p]) => f === 'Item_7' && p !== undefined);
+    expect(pitched.length).toBeGreaterThanOrEqual(1);
+    expect(pitched[0][1]).toBeCloseTo(-0.3, 5);
+
+    const t2 = mkHooks();
+    const blade2 = new Boomerang(t2.player.cx, t2.player.cy, 12, -6, 30, 4, 1060);
+    for (let i = 0; i < 16 && !blade2.returning; i++) blade2.fixedUpdate(1 / 60, t2.hooks);
+    expect(t2.sfxFiles).toContain('Item_15');                 // 缺省光刃族自旋音
+    expect(t2.sfxWav.filter(([, p]) => p !== undefined)).toHaveLength(0);
+  });
+
+  it('182 圣骑锤出程段 d57 锤光尘(α255/s0.75/vel×0.1 后 noGravity,:39906-39912)', () => {
+    const t = mkHooks();
+    const h = new Boomerang(t.player.cx - 400, t.player.cy, -14, 0, 30, 4, 182);
+    for (let i = 0; i < 22 && !h.returning; i++) h.fixedUpdate(1 / 60, t.hooks);
+    const d57 = t.dusts.filter((d) => d.type === 57);
+    expect(d57.length).toBeGreaterThanOrEqual(1);
+    expect(d57.every((d) => d.alpha === 255)).toBe(true);
+    expect(d57[0].noGravity).toBe(true);
+  });
+
+  it('866 飞刀尾段(全状态)d212 尘、vel×0.1、noGravity(:40281-40289)', () => {
+    const t = mkHooks();
+    const k = new Boomerang(t.player.cx + 500, t.player.cy, -10, 0, 30, 4, 866);
+    k.fixedUpdate(1 / 60, t.hooks);
+    k.fixedUpdate(1 / 60, t.hooks);
+    const d212 = t.dusts.filter((d) => d.type === 212);
+    expect(d212.length).toBeGreaterThanOrEqual(1);
+    expect(Math.abs(d212[0].vx)).toBeLessThan(3);
+    expect(d212[0].noGravity).toBe(true);
+  });
+
+  it('106 光碟撞墙溅射 LightDisc_Bounce 实装(:28787-28801,perfect306×4 主粒+白克隆)', () => {
+    const t = mkHooks({ wallColumn: 58, wallRows: [40, 99] });
+    const disc = new Boomerang(58 * TILE - 80, 60 * TILE, 5, 0, 30, 4, 106);
+    let hits = 0;
+    for (let i = 0; i < 30 && hits === 0; i++) {
+      disc.fixedUpdate(1 / 60, t.hooks);
+      hits = t.dusts.filter((d) => d.type === 306).length;
+    }
+    expect(hits).toBeGreaterThanOrEqual(8);                    // 4 主粒×(主+克隆)
+    const mains = t.dusts.filter((d) => d.type === 306 && d.alpha === 200);
+    expect(mains.length).toBeGreaterThanOrEqual(4);            // α200 主粒面
+    expect(t.sfxNames).toContain('dig');                       // SoundID 0 共享尾保留
+  });
+});
+
+describe('终清波 C·FlaironSpike 反射轴差分/Kill 尘坐标修正', () => {
+  it('首次接触仅镜像速度被改的轴(vx 保持 0,vy 上抛反射；:18431-18442)', () => {
+    const t = mkHooks();
+    const sp = new FlaironSpike(90 * TILE, 100 * TILE - 12, 0, 6, 30, 2);
+    sp.fixedUpdate(1 / 60, t.hooks);
+    expect(sp.vx).toBe(0);
+    expect(sp.vy).toBeLessThan(0);                             // 第 1/2 次接触反弹续飞
+  });
+
+  it('Kill 爆尘 y 坐标使用弹心 cy（cx0 误用 typo 回归钉死；P.cs:74184-74208）', () => {
+    const t = mkHooks();
+    const sp = new FlaironSpike(800, 95 * TILE, 0, 10, 30, 2);
+    (sp as unknown as { bounces: number }).bounces = 2;        // 直接预置第 3 次接触前态
+    sp.fixedUpdate(1 / 60, t.hooks);                           // 触撞 → bounces>=3 → Kill
+    expect(sp.dead).toBe(true);
+    const burst = t.dusts.filter((d) => d.type === 212);
+    expect(burst.length).toBe(20);                             // NewDust 20 粒
+    const cyBefore = 95 * TILE;
+    // 修复后全部尘都挂在弹心竖直平面上——typo 版会飞到 x 心平面(y≈cy 差数百 px)
+    expect(burst.every((d) => Math.abs(d.y - cyBefore) < 40)).toBe(true);
+  });
+});
+
+describe('终清波 D·Wet 坡面支 + 冲击波/块尘几何(窗口/Item14/dd2 音资产)', () => {
+  it('948 入水:斜砖上方液体经坡面支判湿 → 转型 947(:1646-1666 清偿鉴别样本)', () => {
+    const t = mkHooks();
+    const st = t.store;
+    st.setTile(60, 99, 1);
+    st.setSlope(60, 99, 1);          // 斜砖格本身无液体——旧"液体-only 扫描"必漏
+    st.setLiquid(60, 98, 255, 1);    // 液体在斜砖上一格（原版判湿域）
+    st.setTile(60, 98, 0);
+    const cxp = 60 * TILE + 8, cyp = 99 * TILE + 8;            // 探针整体落在斜砖行内
+    const flail = new FlailProj(cxp, cyp, 30, 948,
+      () => false, () => ({ x: cxp + 100, y: cyp }));
+    flail.fixedUpdate(1 / 60, t.hooks);
+    expect(flail.projId).toBe(947);
+  });
+
+  it('262 回收起手冲击:HitTilesInACircle(Position−num117/2)+SoundID.Item14(:25054-25071)', () => {
+    const t = mkHooks();
+    const an = new AnchoredProj(1, 0.35, 14, 20, 2, 262);      // 下压向落地面触发
+    for (let i = 0; i < 90 && !an.dead; i++) an.fixedUpdate(1 / 60, t.hooks);
+    expect(t.sfxNames).toContain('wav:Item_14');               // 原 'explosion' 合成兜底退役
+    expect(t.dusts.filter((d) => d.type === 14).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('1125 CascadeExplosion 首帧播 DD2 三变体随机一(WAV_MAP dd2Explosive 在盘资产)', () => {
+    const t = mkHooks();
+    const shot = new YoyoShotProj({ x: 800, y: 1400, vx: 1, vy: 0, projId: 1125,
+      dmg: 40, kb: 2, scale: 1 });
+    shot.fixedUpdate(1 / 60, t.hooks);
+    expect(t.sfxFiles.filter((f) => /^dd2_explosive_trap_explode_\d$/.test(f)).length).toBe(1);
   });
 });

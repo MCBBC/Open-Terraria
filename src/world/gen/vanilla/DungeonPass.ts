@@ -6208,8 +6208,16 @@ const snap: SnapFn = (name) => {
     for (const fr of res.featRooms ?? []) gfFeatRooms.push(fr);
     for (const fh of res.featHalls ?? []) gfFeatHalls.push(fh);
     gfFeatScalar = res.scalar ?? 1.0;                    // DC.cs:381（provider 出口时点）
-    dgLayout(num);
   }
+  // ★IIIII108b 紧急解堵（2026-09-01）：dgLayout(num) 曾被并行车道落进 isDualWorld
+  //   分支内——非 dual 世界（含全部常规链+remix）不再执行 legacy 布局 ⇒ rooms 空，
+  //   下行 `rooms[0].inner`（本文件 :6224）读 undefined 'inner'，pass4 全链炸面
+  //   （g/remix #59 双实锤=base0.log；与 XXXII 章「DungeonPass.ts:6227 reading
+  //   'inner'」同族）。按上文注释「蛇槽缓存缺失（或非 dual 链）一律落回 legacy
+  //   布局——普通世界零扰动口径」恢复双分流原语义：dual=provider 布局（rooms 经
+  //   roomSink 注入,legacy 不重跑）;非 dual=legacy dgLayout。备份
+  //   /tmp/iii134-out/DungeonPass.broken.bak。
+  if (!isDualWorld) dgLayout(num);
   {
     const WV61c = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
     if (WV61c) ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|d61layoutEnd|rc=${dgMainRolls}`);

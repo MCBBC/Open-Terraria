@@ -3243,6 +3243,17 @@ export class SkyRenderer {
     this.dramaCore = core;
     this.dramaLightRequestedThisFrame = false;
 
+    // DD2 永恒水晶胜利尾段白光请求(NPC.cs(1458):41201-41205):ai[1]==2 演出期
+    // lerpValue = GetLerpValue(480,570,ai[0]) ≠ 0 → MoonlordDeathDrama.RequestLight
+    // ——与月总死亡共享 whitening 面(:194 MoveTowards 0.02)。渲染帧扫描实体即取
+    // 同一活体状态(本文件 drama 系既有模式),无 AI→renderer 直连通道
+    if (fc) {
+      for (const en of fc.entities) {
+        if ((en.vanillaId ?? 0) !== 548 || en.dead || en.ai1 !== 2 || en.ai0 <= 480) continue;
+        this.requestDramaLight(lerpValueClamped(480, 570, en.ai0), en.cx, en.cy);
+      }
+    }
+
     if (core) {
       // 死亡演出段（ai0==2）：每 3t 一簇爆炎（:36981-36998，落点须界内非实心）
       if (core.ai0 === 2 && core.ai1 % 3 === 0 && core.ai1 > 60 && core.ai1 < 580) {

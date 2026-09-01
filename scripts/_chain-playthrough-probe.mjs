@@ -307,19 +307,15 @@ await p.evaluate(() => {
 
 // ================= S8 世纪之花(262) =================
 {
-  const r = await p.evaluate(() => {
-    const g = window.__swGame, st = g.world.store;
-    // 三王首杀链已 burst 灯泡 → 丛林找 v_238 灯泡,真链:挖掉(监听器召王)
-    const bulb = (window.__bulbId ??= null);
-    return 'need-import';
-  });
   const r2 = await p.evaluate(async () => {
     const g = window.__swGame, st = g.world.store;
     const T = await import('/src/data/tiles.ts');
     const BULB = T.TILE_BY_KEY['v_238_plantera_s_bulb'];
+    // 灯泡生成带 = [worldSurface, h-200](planteraBulbBurst 同带全扫)
+    const yTop = Math.floor(g.world.groundLevel ?? 330);
     let bulb = null;
-    outer: for (let y = st.h - 40; y > st.h - 260; y -= 2) {
-      for (let x = 100; x < st.w - 100; x += 2) {
+    outer: for (let y = yTop; y < st.h - 200; y += 1) {
+      for (let x = 2; x < st.w - 2; x += 1) {
         if (st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === BULB) { bulb = [x, y]; break outer; }
       }
     }
@@ -328,21 +324,18 @@ await p.evaluate(() => {
       st.setTile(bulb[0], bulb[1], 0);
       window.__T.ticks(30);
     } else {
-      g.spawnBossOnPlayer(262);   // 灯泡未及生成(演化批处理)直召,备案
+      g.spawnBossOnPlayer(262);   // 灯泡未及生成直召,备案
     }
     const up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 262);
+    const keyBefore = g.entities.drops.filter((d) => d.itemId === 1141).length;
     const dead = window.__T.killBoss(262);
     window.__T.ticks(30);
-    // 世花首杀必掉神庙钥匙(1293)
-    const templeKeyDrop = g.entities.drops.some((d) => {
-      const vid = d.itemVid ?? d.vid ?? -1;
-      return vid === 1293 || String(d.key ?? '').startsWith('vi_1293_');
-    });
-    return { viaBulb: !!bulb, bulbPos: bulb, up, dead, downed: !!g.world.flags['downed_262'], templeKeyDrop };
+    const keyAfter = g.entities.drops.filter((d) => d.itemId === 1141).length;
+    return { viaBulb: !!bulb, bulbPos: bulb, up, dead, downed: !!g.world.flags['downed_262'], templeKeyDrop: keyAfter > keyBefore, keyAfter };
   });
   ok('S8 世纪之花召唤(灯泡链=' + (r2.viaBulb ? '真链' : '直召备案') + ')', r2.up, r2.bulbPos ? `bulb@${r2.bulbPos}` : 'no bulb');
   ok('S8 世纪之花击杀+downed_262', r2.dead && r2.downed);
-  ok('S8 神庙钥匙掉落', r2.templeKeyDrop);
+  ok('S8 神庙钥匙(1141)掉落', r2.templeKeyDrop, `drops=${r2.keyAfter}`);
 }
 
 // ================= S9 石巨人(245) =================
@@ -374,27 +367,39 @@ await p.evaluate(() => {
   ok('S9R 存档回环:石巨人/世花/骷髅王旗齐', s.d245 && s.d262 && s.ske, JSON.stringify(s));
 }
 
-// ================= S10 邪教徒(439) =================
+// ================= S10 邪教徒(439)·自然石碑链 =================
 {
   const r = await p.evaluate(() => {
     const g = window.__swGame;
-    // 传送到地牢门口,夜(教徒召唤窗口),快进等自然重生
     const dX = g.world.dungeonX, dY = g.world.dungeonY;
-    g.player.x = dX * 16; g.player.y = (dY - 6) * 16; g.player.vx = 0; g.player.vy = 0;
+    // ① 玩家远离地牢(LOS 门=玩家视口×1.2 盒,站门口会拒召石碑) → 夜 → 等石碑自然重生
+    g.player.x = 1640 * 16; g.player.y = 300 * 16; g.player.vx = 0; g.player.vy = 0;
     g.player.hp = g.player.maxHp; g.player.dead = false;
     window.__T.night();
-    let up = false;
-    for (let i = 0; i < 60; i++) {
-      window.__T.ticks(60);
-      if (g.entities.enemies.some((e) => !e.dead && e.vanillaId === 439)) { up = true; break; }
+    let tablet = null;
+    for (let i = 0; i < 40 && !tablet; i++) {
+      window.__T.ticks(120);
+      tablet = g.entities.enemies.find((e) => !e.dead && e.vanillaId === 437) ?? null;
     }
-    if (!up) g.spawnBossOnPlayer(439);   // 自然重生窗口未中,直召备案
+    if (!tablet) return { tablet: false, note: 'no tablet' };
+    // ② 传送到地牢口,杀光四教徒(379 弓手×2 / 438 信徒×2) → 石碑召邪教徒 439
+    g.player.x = dX * 16; g.player.y = (dY - 8) * 16; g.player.vx = 0; g.player.vy = 0;
+    for (let i = 0; i < 30; i++) {
+      for (const id of [379, 438]) {
+        const c = g.entities.enemies.find((e) => !e.dead && e.vanillaId === id);
+        if (c) c.hurt(9999999, 10, 0, g);
+      }
+      window.__T.ticks(20);
+      if (g.entities.enemies.some((e) => !e.dead && e.vanillaId === 439)) break;
+    }
+    const up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 439);
     const dead = window.__T.killBoss(439);
     window.__T.ticks(60);
     const towers = [517, 422, 507, 493].map((id) => g.entities.enemies.some((e) => !e.dead && e.vanillaId === id));
-    return { up, dead, towers, lunarActive: !!g.world.lunarEvent?.active };
+    return { tablet: true, up, dead, towers, lunarActive: !!g.world.lunarEvent?.active };
   });
-  ok('S10 邪教徒召唤+击杀', r.up && r.dead, r.up ? '' : '(直召备案)');
+  ok('S10 石碑自然重生+四教徒仪式链', r.tablet && r.up, r.note ?? `tablet=${r.tablet}`);
+  ok('S10 邪教徒击杀', r.dead);
   ok('S10 四塔降临(月事件激活)', r.towers.every(Boolean), JSON.stringify(r.towers));
 }
 
@@ -410,6 +415,8 @@ await p.evaluate(() => {
       if (!t) { dead.push({ vid, dead: false }); continue; }
       const key = vid === 517 ? 'solar' : vid === 422 ? 'vortex' : vid === 507 ? 'nebula' : 'stardust';
       if (w.lunarEvent) w.lunarEvent.shield[key] = 0;   // 盾清零(原版=击杀 100 只小怪)
+      window.__T.ticks(2);                              // ★塔 AI 每帧重算 dontTakeDamage=盾>0
+                                                        //   (Enemy.ts:12323)——须过一帧再打
       t.hurt(9999999, 10, 0, g);
       window.__T.ticks(30);
       dead.push({ vid, dead: !g.entities.enemies.some((e) => !e.dead && e.vanillaId === vid) });
@@ -431,7 +438,7 @@ await p.evaluate(() => {
   const r = await p.evaluate(() => {
     const g = window.__swGame;
     let up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 398);
-    for (let i = 0; i < 80 && !up; i++) {
+    for (let i = 0; i < 40 && !up; i++) {
       window.__T.ticks(120);
       up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 398);
     }

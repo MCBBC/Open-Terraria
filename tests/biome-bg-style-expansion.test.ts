@@ -115,7 +115,7 @@ function renderSlot(slot: number, privates: Record<string, unknown>, zoneScene: 
   b.flippedOf = (im: { __n?: number }) => im;
   b.img = (n: number) => {
     if (n < 0) return null;
-    return { width: 1024, height: 600, complete: true, __n: n } as HTMLImageElement;
+    return { width: 1024, height: 600, complete: true, __n: n } as unknown as HTMLImageElement;
   };
   b.seededFor = 42;                                         // 固定种子面
   b.bgStyle = slot;
