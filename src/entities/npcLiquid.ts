@@ -91,6 +91,32 @@ export function wetCollision(
   return { wet: false, honey, shimmer };
 }
 
+/** Collision.LavaCollision（Collision.cs:1657-1692）1:1：【全盒】与岩浆格表面带相交。
+ *  与 WetCollision 形状两分（:1656 起）：无中心探针盒（整包围盒直测）、无坡面支;
+ *  扫描窗同式钳制 0..maxTilesX−1 / 0..maxTilesY−40（:1663-1666）。
+ *  消费：Projectile.lavaWet 粘滞位维护（Projectile.cs:16906-16911 只置 true 不清,
+ *  清位在主循环 `if (!wet)` 段 :17103-17108——弹体湿缓存生命周期见 Arrow.ts）。 */
+export function lavaCollision(st: TileStore, px: number, py: number, pw: number, ph: number): boolean {
+  const TS = TILE;
+  const i0 = Math.max(0, Math.floor(px / TS) - 1);
+  const i1 = Math.min(st.w - 1, Math.floor((px + pw) / TS) + 2);
+  const j0 = Math.max(0, Math.floor(py / TS) - 1);
+  const j1 = Math.min(st.h - 40, Math.floor((py + ph) / TS) + 2);
+  for (let i = i0; i < i1; i++) {
+    for (let j = j0; j < j1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const idx = st.idx(i, j);
+      if (st.liquid[idx] <= 0 || st.liquidType[idx] !== 2) continue;   // tile.lava()
+      // 表面带（:1673-1680 num3=(256−liquid)/32、Y+=num3×2、高 16−(int)(num3×2)）
+      const drop = (256 - st.liquid[idx]) / 32;
+      const surfY = j * TS + drop * 2;
+      const effH = TS - Math.trunc(drop * 2);
+      if (px + pw > i * TS && px < i * TS + TS && py + ph > surfY && py < surfY + effH) return true;
+    }
+  }
+  return false;
+}
+
 /** Collision.GetWaterLine（Collision.cs:1501-1547）1:1：给定锚格 (X,Y)，向上找最近液面。
  *  规则（liquid/16 是 C# byte÷int 整除——液面取被截断值）：
  *   - 越界（InWorld margin 10）或 (X,Y-2) 有液体（已在深处）→ false；

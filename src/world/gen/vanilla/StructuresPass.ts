@@ -301,6 +301,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (Math.sqrt(ddx * ddx + ddy * ddy) < r19 + rng.int(0, 1)) {   // num19 + Next(2)
           const ti = st.idx(x, y);
           st.flags[ti] = 1; st.type[ti] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:79368=1457 SquareTileFrame(n,num21)
         }
       }
     }
@@ -386,16 +387,19 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (!st.inBounds(xx, y)) continue;
         if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
           const k = st.idx(xx, y);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y);       // ★IIIII113 cs:79508 锚=外层列 num41（非写入列 num44）——原版字面量 SquareTileFrame(num41,num42)
         }
         if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
           const k = st.idx(xx, y + 1);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y + 1);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 1);   // cs:79515 SquareTileFrame(num41,num42+1)
         }
         if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
           && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
           const k = st.idx(xx, y + 2);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y + 2);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 2);   // cs:79522 SquareTileFrame(num41,num42+2)
         }
       }
     }
@@ -419,6 +423,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {   // num49 + Next(-1,2)
           const k = st.idx(x, y);
           st.flags[k] = 1; st.type[k] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:79568=1457 SquareTileFrame(num51,num52)
         }
       }
     }
@@ -428,6 +433,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
       if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
         const k = st.idx(x, y);
         st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        sqTF(st, rng, x, y);                               // ★IIIII113 cs:79582 SquareTileFrame(num55,num56)
       }
     }
   }
@@ -480,6 +486,7 @@ function cloudIslandVariant(
         if (y > b7) b7 = y;
         const ti = st.idx(x, y);
         st.flags[ti] = 1; st.type[ti] = tile;
+        sqTF(st, rng, x, y);                               // ★IIIII113 ①盘写后 STF（cs:79766 CloudLake / cs:78439 Snow·Desert=1457 行号）
       }
     }
     px += vx; py += vy;
@@ -505,6 +512,7 @@ function cloudIslandVariant(
         if (Math.sqrt(ddx * ddx + ddy * ddy) < r19 + rng.int(0, 1)) {
           const ti = st.idx(x, y);
           st.flags[ti] = 1; st.type[ti] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:78490=1457 Snow/Desert ② SquareTileFrame(n,num20)
         }
       }
     }
@@ -532,7 +540,7 @@ function cloudIslandVariant(
         const ti = st.idx(x, y);
         const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
         // 雪岛守卫 type==189（与云岛 num8 路径同字面量）、目标=芯块
-        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) st.type[ti] = coreTile;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) { st.type[ti] = coreTile; sqTF(st, rng, x, y); }   // ★IIIII113 cs:78556=1457 ③ SquareTileFrame(num24,num25)
       }
     }
     px += vx; py += vy;
@@ -557,7 +565,7 @@ function cloudIslandVariant(
         for (let y = cy - cr; y <= cy + cr; y++) {
           if (y <= b6 || !st.inBounds(x, y)) continue;
           const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
-          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) st.type[st.idx(x, y)] = tile;
+          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) { st.type[st.idx(x, y)] = tile; sqTF(st, rng, x, y); }   // ★IIIII113 cs:78612=1457 ④ SquareTileFrame(num32,num33)
         }
       }
       cx += rng.int(cr, Math.floor(cr * 1.5) - 1);
@@ -592,21 +600,25 @@ function cloudIslandVariant(
         if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
           const k = st.idx(xx, y);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y);       // ★IIIII113 锚=外层列 num4x（cs ⑥ 池写字面量 SquareTileFrame(num4x,num4y)）
         }
         if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
           const k = st.idx(xx, y + 1);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 1);
         }
         if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
           && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
           const k = st.idx(xx, y + 2);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 2);
         }
       }
     }
     if (st.inBounds(x, y)) {
       if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;
       st.liquidType[st.idx(x, y)] = 1;
+      sqTF(st, rng, x, y);                                 // ★IIIII113 每列收尾 STF（cs:78684 Snow·Desert ⑥ / cs:79988 CloudLake ⑤=1457）
     }
   }
   const puffs = rng.int(0, 3);                       // ⑦ 岛上方副云 puff：altTile
@@ -623,6 +635,7 @@ function cloudIslandVariant(
         if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {
           const k = st.idx(x, y);
           st.flags[k] = 1; st.type[k] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:78707=1457 Snow/Desert ⑦ SquareTileFrame(num50,num51)
         }
       }
     }
@@ -632,6 +645,7 @@ function cloudIslandVariant(
       if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
         const k = st.idx(x, y);
         st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        sqTF(st, rng, x, y);                                 // ★IIIII113 cs:78722 SquareTileFrame(num54,num55)
       }
     }
   }
@@ -684,6 +698,7 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
         if (y > b7) b7 = y;
         const ti = st.idx(x, y);
         st.flags[ti] = 1; st.type[ti] = tile;
+        sqTF(st, rng, x, y);                               // ★IIIII113 ①盘写后 STF（cs:79766 CloudLake / cs:78439 Snow·Desert=1457 行号）
       }
     }
     px += vx; py += vy;
@@ -711,6 +726,7 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
           if (!st.inBounds(x, y)) continue;
           const ti = st.idx(x, y);
           st.flags[ti] = 1; st.type[ti] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:79835=1457 SquareTileFrame(n,num21)
         }
       }
     }
@@ -784,21 +800,25 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
         if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
           const k = st.idx(xx, y);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y);       // ★IIIII113 锚=外层列 num4x（cs ⑥ 池写字面量 SquareTileFrame(num4x,num4y)）
         }
         if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
           const k = st.idx(xx, y + 1);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 1);
         }
         if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
           && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
           const k = st.idx(xx, y + 2);
           st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          sqTF(st, rng, x, y + 2);
         }
       }
     }
     if (st.inBounds(x, y)) {
       if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;
       st.liquidType[st.idx(x, y)] = 1;
+      sqTF(st, rng, x, y);                                 // ★IIIII113 每列收尾 STF（cs:78684 Snow·Desert ⑥ / cs:79988 CloudLake ⑤=1457）
     }
   }
   // ⑥ 湖上方云 puff（cs:79442-79481）——★与 CloudIsland ⑦ 的差异：数量 Next(1,4)
@@ -818,6 +838,7 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
         if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {
           const k = st.idx(x, y);
           st.flags[k] = 1; st.type[k] = mat;
+          sqTF(st, rng, x, y);                               // ★IIIII113 cs:80010=1457 SquareTileFrame(num43,num44)
         }
       }
     }
@@ -827,6 +848,7 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
       if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
         const k = st.idx(x, y);
         st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        sqTF(st, rng, x, y);                               // ★IIIII113 cs:80024 SquareTileFrame(num47,num48)
       }
     }
   }

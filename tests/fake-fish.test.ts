@@ -9,6 +9,7 @@ import {
 } from '../src/data/vanillaFishing';
 import {
   FakeFish, FAKE_FISH_POOL_CAP, clearFakeFish, fakeFishCount, eachFakeFish,
+  eachLakeSparkles,
   requestFakeFishSpawn, spawnFakeFishInWater,
   magnetFakeFish, pingFakeFish, pushAwayFakeFish, releaseCaughtFakeFish,
   updateFakeFishSchool, FISH_SPLASH_PITCH_OFFSET, fishSplashPitch, dustWaterFor,
@@ -428,5 +429,53 @@ describe('Bobber.fishingCheck 生成门集成', () => {
     }
     expect(sawFish).toBe(true);                    // 渔情周期必出装饰鱼（:20709）
     expect(bit || b.biteT > 0).toBe(true);
+  });
+});
+
+// ==================== 湖面星闪积分步（Spawn_LakeSparkle :1336-1353,★F2 2026-09-01）====================
+// 真形 = 静止起步匀加速：Velocity=Zero（SetBasicInfo :1343 第三参）+ AccelerationPerFrame
+// = (move/60)/TTL（:1339 vector=/60 → :1346 /num 两段除法）。旧码漏第二段 /life：
+// 初速即 move 原值 = "火箭出水面"形（首拍速度/TTL 末速均大 life 倍）。
+describe('湖面星闪积分步（★F2 两段除法）', () => {
+  it('静止起步：出生拍 vx=vy=0（非旧火箭初速 move 原值）', () => {
+    const st = new TileStore(96, 96);
+    pool(st, 20, 40, 12, 8);
+    const host = makeHost(st);
+    let saw = false;
+    for (let seed = 1; seed <= 60 && !saw; seed++) {
+      clearFakeFish();
+      spawnFakeFishInWater(host, 25, 40, baseCtx(), seeded(seed * 104729));
+      saw = eachLakeSparkles().length > 0;
+    }
+    expect(saw).toBe(true);
+    for (const s of eachLakeSparkles()) {
+      expect(s.vx).toBe(0);
+      expect(s.vy).toBe(0);
+    }
+  });
+
+  it('匀加速运动学：v(k)=k·a、位移=a·k(k+1)/2（欧拉恒等,星闪通道无 damp/grav）', () => {
+    const st = new TileStore(96, 96);
+    pool(st, 20, 40, 12, 8);
+    const host = makeHost(st);
+    for (let seed = 1; seed <= 60; seed++) {
+      clearFakeFish();
+      spawnFakeFishInWater(host, 25, 40, baseCtx(), seeded(seed * 104729));
+      const sp = eachLakeSparkles()[0];
+      if (!sp) continue;
+      const y0 = sp.y, a = sp.ayPerT, life = sp.life;
+      expect(life).toBeGreaterThanOrEqual(50);
+      expect(life).toBeLessThanOrEqual(140);
+      updateFakeFishSchool(host);                    // 1 tick
+      expect(sp.vy).toBeCloseTo(a, 12);
+      updateFakeFishSchool(host);                    // 2 ticks
+      expect(sp.vy).toBeCloseTo(2 * a, 12);
+      expect(sp.y - y0).toBeCloseTo(a * 3, 12);      // a(1+2)
+      // ★F2 判别式：终速 = a·life = rise/60（缓慢上浮档,≤ 池深 128px/60 ≈ 2.14）；
+      //  旧码 a=rise/60（少 /life）→ a·life=rise ≤ 128,判别窗 60 倍
+      expect(Math.abs(a) * life).toBeLessThanOrEqual(2.2);
+      return;
+    }
+    throw new Error('60 种子均未出星闪（1/5 列门失效?）');
   });
 });

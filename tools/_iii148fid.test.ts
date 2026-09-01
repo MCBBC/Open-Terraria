@@ -78,7 +78,28 @@ function desVal(v: unknown): unknown {
   const ev: string[] = [];
   let rc = 0;
   const g = globalThis as Record<string, unknown>;
-  g.__swOnRoll = () => { rc++; };
+  // 掷级标签窗（SW_I148F_LW=from,to）：窗内逐掷记录直接调用点（RNG 帧上的第一 src 帧）
+  const LW = (process.env.SW_I148F_LW ?? '').split(',').map(Number);
+  const labCache = new Map<string, string[]>();
+  const rollLab: string[] = [];
+  g.__swOnRoll = (v: number) => {
+    rc++;
+    if (LW.length === 2 && rc >= LW[0] && rc <= LW[1]) {
+      const stack = new Error().stack ?? '';
+      let lab = '?';
+      for (const line of stack.split('\n')) {
+        const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+        if (m && !m[1].includes('/core/rng') && !m[1].includes('_iii148fid')) {
+          const f = m[1], ln = Number(m[2]);
+          let src = labCache.get(f);
+          if (!src) { try { src = (require('node:fs') as typeof import('node:fs')).readFileSync(f, 'utf8').split('\n'); } catch { src = []; } labCache.set(f, src); }
+          lab = `${f.replace(/^.*?(src\/)/, '$1')}:${ln}`;
+          break;
+        }
+      }
+      rollLab.push(`${rc}|${lab}`);
+    }
+  };
   g.__swChestWrite = (i: number, topY: number, tile: number, style: number) => {
     const shh = TILE_DEFS[tile]?.vanilla?.sheet ?? -1;
     ev.push(`${rc}|W|i=${i},gy=${topY},sheet=${shh},style=${style}`);
@@ -112,8 +133,13 @@ function desVal(v: unknown): unknown {
     return { typ, act, wal, liq };
   };
   let rst0: TileStore = st;   // 别名(阶段钩内用)
+  g.__swRollN = 0;            // __rn() 读这里 → stage rc = 段内掷数
+  (Object.keys(g) as string[]).forEach(() => {});
+  const __setRollN = (): void => { (g as { __swRollN?: number }).__swRollN = rc; };
+  const oOnRoll = g.__swOnRoll as (v: number) => void;
+  g.__swOnRoll = (v: number): void => { oOnRoll(v); __setRollN(); };
   g.__swHouseStage = (tag: string, ox: number, oy: number, a: number, rollN: number) => {
-    if (ox === HB[0] && oy === HB[1]) stageSnaps.push({ tag, rc: rollN, ...regionSnap() });
+    if (ox === HB[0] && oy === HB[1]) stageSnaps.push({ tag, rc: (g as { __swRollN?: number }).__swRollN ?? 0, ...regionSnap() });
   };
   flipGenSolid([226, 162, 225, 190], true);
   // ★流位纪律：计数预掷必须由【主 rng】消费（管线=reseed 后同一实例连掷 4 颗）。
@@ -142,6 +168,7 @@ function desVal(v: unknown): unknown {
   if (process.env.SW_I148F_SAVE === '1') {
     const { writeFileSync: wf } = require('node:fs') as typeof import('node:fs');
     wf(`${OUT}/replay-events.log`, ev.join('\n') + '\n');
+    wf(`${OUT}/replay-rolllab.txt`, rollLab.join('\n') + '\n');
   }
   // 对拍 end-win
   const est = end.st as unknown as Record<string, Uint8Array | Uint16Array>;

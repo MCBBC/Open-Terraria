@@ -3495,10 +3495,12 @@ export class FlailProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
-    // 火焰重锤 948 入水(非岩浆)→ 变型 948→947(:41064-41067 type==948 && wet && !lavaWet)
-    // wet 语义 = 任一液体(Collision.WetCollision :1608 liquid>0,含蜂蜜/微光)中心
-    // 探盒交叠;lavaWet 单独判(:15456-15459)——"湿且非岩浆"即水/蜂蜜/微光都触发。
-    // 变型在 switch(type) 参数提取之前 → 同 tick 起按 947 参数走(两型参数一致,无感)
+    // 火焰重锤 948 入水(非岩浆)→ 变型 948→947（1457 :44542-44546,1456 :41064-41067
+    // `type == 948 && wet && !lavaWet` → type = 947）
+    // wet 语义 = 任一液体(Collision.WetCollision :1604 liquid>0,1456 :1608,含蜂蜜/微光)
+    // 中心探盒交叠;lavaWet 单独判(Update wet 段 :16906-16911 全盒 LavaCollision 命中
+    // 置 true,1456 :15450-15459;清位在 !wet 段 :17103-17108)——"湿且非岩浆"即水/蜂蜜/
+    // 微光都触发。变型在 switch(type) 参数提取之前 → 同 tick 起按 947 参数走(两型参数一致,无感)
     if (this.projId === 948 && this.inLiquid(game) && !this.inLiquid(game, 2)) this.projId = 947;
     const p = game.player;
     this.handX = p.cx;
@@ -3858,18 +3860,25 @@ export class FlailProj extends Entity {
    *  其余型（3 蜂蜜/4 微光）按 liquidType 细分沿用 Wet 探针形——vanilla 以 honey()/shimmer()
    *  旗标在 Wet 扫描内附带判定(:1627-1646),本仓参数化等价承载。
    *  坡面支已建模（终清波）：active+slope!=0+上方格液体 → 整深 16px 相交判湿
-   *  （:1646-1666,store.slope 数据面承载;lava 全盒档无此支,原版即两分）。 */
+   *  （:1631-1654,store.slope 数据面承载;lava 全盒档无此支,原版即两分）。 */
   private inLiquid(game: GameHooks, type?: number): boolean {
     const st = game.world.store;
     const fullBox = type === 2;                       // LavaCollision 全盒档
     const pw = fullBox ? this.w : Math.min(10, this.w);          // num:int 除
     const ph = fullBox ? this.h : Math.trunc(this.h / 2);        // num2:min(H/2,H)=H/2
-    const px = fullBox ? this.x : this.x + this.w / 2 - Math.trunc(pw / 2);
-    const py = fullBox ? this.y : this.y + this.h / 2 - Math.trunc(ph / 2);
-    const t0x = Math.floor(this.x / TILE) - 1;
-    const t1x = Math.floor((this.x + this.w) / TILE) + 2;        // 循环 < 上界(原版同构)
-    const t0y = Math.floor(this.y / TILE) - 1;
-    const t1y = Math.floor((this.y + this.h) / TILE) + 2;
+    // ★F2①（2026-09-01）：中心两项 = C# `(float)(Width/2)` 式【整数除】
+    // （Collision.cs:1580/:1583/:1593/:1596 五连整除族,WetCollision;LavaCollision
+    // 全盒档不经此路）——奇数尺寸弹浮点除即偏 0.5px（同族坑清单见 npcLiquid.ts:44-52）
+    const px = fullBox ? this.x : this.x + Math.trunc(this.w / 2) - Math.trunc(pw / 2);
+    const py = fullBox ? this.y : this.y + Math.trunc(this.h / 2) - Math.trunc(ph / 2);
+    // ★F2②：扫描窗钳制对齐 Wet/Lava 两原文（Collision.cs:1595-1598/:1663-1666
+    // Utils.Clamp 0..maxTilesX−1 / 0..maxTilesY−40）与两兄弟副本
+    // （TouchDamage.liquidCollision/drownCollision、npcLiquid.wetCollision 同式）
+    // ——世界右缘末列/狱底 40 行带原版不扫（钳后上界 exclusive 循环）。
+    const t0x = Math.max(0, Math.floor(this.x / TILE) - 1);
+    const t1x = Math.min(st.w - 1, Math.floor((this.x + this.w) / TILE) + 2);   // 循环 < 上界(原版同构)
+    const t0y = Math.max(0, Math.floor(this.y / TILE) - 1);
+    const t1y = Math.min(st.h - 40, Math.floor((this.y + this.h) / TILE) + 2);
     for (let tx = t0x; tx < t1x; tx++) {
       for (let ty = t0y; ty < t1y; ty++) {
         if (!st.inBounds(tx, ty)) continue;
@@ -3884,7 +3893,7 @@ export class FlailProj extends Entity {
           if (px + pw > tx * TILE && px < tx * TILE + TILE
             && py + ph > surfY && py < surfY + depth) return true;
         } else if (!fullBox) {
-          // 坡面支（1458 Collision.cs:1646-1666，仅 Wet 探针形档——LavaCollision 无此支）：
+          // 坡面支（Collision.cs:1631-1654，仅 Wet 探针形档——LavaCollision 无此支）：
           // active+slope!=0+j>0 且上方格液体>0 → 【整深 16px】矩形相交即湿。
           // type 参数过滤同样作用于上方格液体型。★store.slope 数据面已就位
           // （TileStore.ts:29）——"坡面支未建模(store 无斜度旗)"登记缺口清偿（终清波）

@@ -12,7 +12,7 @@ import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { ITEM_BY_KEY } from '../src/data/items';
-import { trySnapStrike } from '../src/stats/SnapStrike';
+import { trySnapStrike, snapStrikeDust } from '../src/stats/SnapStrike';
 import { BuffType } from '../src/stats/Buffs';
 import type { ProjClass } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
@@ -144,5 +144,66 @@ describe('F3：脉冲弹出射类旗现场定类 + crit 通道注入', () => {
     expect(pu).toBeDefined();
     expect(pu.projClass).toBeUndefined();                       // 无类旗不伪造
     expect(pu.critChance ?? 0).toBeLessThan(0);                 // rand<threshold 恒假（无掷臂语义）
+  });
+});
+
+// ==================== ★F3（2026-09-01）拍击石尘段载荷直用 ====================
+// 原文 Spawn_SnappingStone 消费式 num=钳(MovementVector.X/256,≤.12)（:600-605），
+// X 在出弹端已含单掷 num11×num12（Projectile.cs:14429-31；受击者拍 :14434-36 为
+// num11 裸值）。旧码 sizeHalf×(0.3+1.4r) 在尘段【复掷 num12】且收端 |X|/2 再除——
+// 本地/远端/环带三面速度分裂。判别：同 X 重跑恒等 + 速度 = 64×num 精确式。
+describe('★F3 尘段载荷直用（禁二次掷）', () => {
+  const mkDustPool = () => {
+    const made: Array<{ type: number; vx: number; vy: number; noGravity: boolean;
+      scale: number; noLight: boolean; noLightEmittance: boolean }> = [];
+    const pool = {
+      spawn: (_x: number, _y: number, _w: number, _h: number, type: number) => {
+        const d = { type, vx: 1, vy: 1, scale: 0, fadeIn: 9,
+          noGravity: false, noLight: false, noLightEmittance: false };
+        made.push(d);
+        return d;
+      },
+    };
+    return { pool, made };
+  };
+  const runKind0 = (mvX: number) => {
+    const { pool, made } = mkDustPool();
+    const hooks = { vanillaDust: pool } as unknown as GameHooks;
+    snapStrikeDust(hooks, 0, 100, 100, mvX);
+    expect(made.length).toBe(20);
+    return made;
+  };
+  /** 逐尘期望速：base×64×num×（226 → 1/2,再 1/6 恢复重力支 ×1/2） */
+  const expectVel = (made: ReturnType<typeof runKind0>, mvX: number): void => {
+    const num = Math.min(0.12, mvX / 256);
+    for (const d of made) {
+      const f = d.type === 226 ? (d.noGravity ? 0.5 : 0.25) : 1;
+      expect(d.vx).toBeCloseTo(64 * num * f, 12);
+      expect(d.vy).toBeCloseTo(64 * num * f, 12);
+      expect([226, 15]).toContain(d.type);
+      expect(d.noLight).toBe(true);
+    }
+  };
+
+  it('X=16（出弹端载荷形）：num=0.0625 → 速 4×chloro 因子,type15 速跨跑恒等（无二次掷）', () => {
+    const a = runKind0(16);
+    const b = runKind0(16);
+    expectVel(a, 16);
+    expectVel(b, 16);
+    // 无二次掷判别：type15（非氯尘,无额外因子）速恒 = 64×num——旧码尘段复掷
+    // num12 时该值逐跑漂移；chloro Next(3)/1/6 支为原版自有掷,型序不恒等属正常
+    const v15a = [...new Set(a.filter((d) => d.type === 15).map((d) => d.vx))];
+    const v15b = [...new Set(b.filter((d) => d.type === 15).map((d) => d.vx))];
+    expect(v15a.length).toBe(1);
+    expect(v15b.length).toBe(1);
+    expect(v15a[0]).toBeCloseTo(4, 12);
+    expect(v15a[0]).toBe(v15b[0]);
+  });
+  it('X=64 饱和档：num 钳 0.12 → 速 7.68×chloro 因子', () => {
+    expectVel(runKind0(64), 64);
+  });
+  it('受击者拍裸值形（X=num11 无 num12）：同式直入,不再自行乘 (0.3+1.4r)', () => {
+    const a = runKind0(11.313708498984761);   // 16×16 盒 num11=√(16²+16²)/2
+    expectVel(a, 11.313708498984761);
   });
 });

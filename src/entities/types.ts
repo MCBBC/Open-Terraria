@@ -161,7 +161,13 @@ export interface GameHooks {
   /** 粒子 */
   spawnParticles(
     x: number, y: number, color: string, count: number, speed?: number,
-    opts?: { life?: number; damp?: number; grav?: number; size?: number; vx?: number; vy?: number },
+    opts?: { life?: number; damp?: number; grav?: number; size?: number; vx?: number; vy?: number;
+      /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道——湖面星闪
+       *  (move/60)/TTL、枭首者残影 vel/60 等双轴加速型 1:1 用；缺省 0） */
+      ax?: number; ay?: number;
+      /** 寿命不抖动档（编排粒子 TTL 耦合参数——加速度按 TTL 折算时必须同值,
+       *  否则终速/位移积分漂移；缺省走 base×(0.6+0.4r) 抖动） */
+      lifeExact?: number },
   ): void;
   /** 定向粒子爆发（烟花爆花/喷泉/马桶水花等原版 dust 带初速方向的场景；
    *  spawnParticles 为全向均匀发射，无法表达定向）。dir 为中心角、spread 为半散布，

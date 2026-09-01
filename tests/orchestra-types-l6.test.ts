@@ -17,6 +17,7 @@ import {
 import { NetModule, NetReader } from '../src/net/protocol';
 import {
   terraBladeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx,
+  deadCellsBarnacleShotFiringFx,
 } from '../src/fx/orchestraFx';
 
 type PartRec = { x: number; y: number; color: string; count: number; opts: Record<string, unknown> };
@@ -374,7 +375,40 @@ describe('杂项（Keybrand/GasTrap/Shimmer/TownSlime/Cattiva/RB 族/BestReforge
     const ls = mkGame();
     apply(ls.g, ParticleOrchestraType.LakeSparkle, 100, 100, 16, 0);
     expect(ls.particles.length).toBe(1);
-    expect(ls.particles[0].opts.vx).toBe(16);
+    // ★F2 积分步翻新：初速零 + 加速度 (move/60)/TTL——旧判词 vx=moveX(16) 原值
+    // （火箭形）退役；lifeExact 与 life 同值（TTL 耦合参数不抖动）
+    expect(ls.particles[0].opts.vx).toBe(0);
+    expect(ls.particles[0].opts.vy).toBe(0);
+    expect(ls.particles[0].opts.ay).toBe(0);
+    expect(ls.particles[0].opts.ax)
+      .toBeCloseTo(16 / 60 / (ls.particles[0].opts.lifeExact as number), 12);
+    expect(ls.particles[0].opts.lifeExact).toBeGreaterThanOrEqual(50);
+    expect(ls.particles[0].opts.lifeExact).toBeLessThanOrEqual(140);
+  });
+  it('★F5 BarnacleShotFiring d2 scale 边界：Next(-5,5) 上值 4 → 1.24（旧 ×11 上探 1.25）', () => {
+    const { g, dusts } = mkGame();
+    // 队列喂 rng：i=0 的 d2 五掷 = [spd, rotJitter, xOff, yOff, scale]——scale 槽喂
+    // 0.999999（Math.random 值域 [0,1) 上界邻域）→ floor(9.99999−5)=4 → 1.24
+    const q = [0.5, 0, 0, 0, 0.999999];
+    deadCellsBarnacleShotFiringFx(g as never, 100, 100, 1, 0,
+      (): number => (q.length ? (q.shift() as number) : 0.5));
+    expect(dusts.length).toBeGreaterThanOrEqual(1);
+    expect(dusts[0].type).toBe(2);
+    expect(dusts[0].scale).toBeCloseTo(1.24, 12);
+    // 统计补刀：种子扫过全域,任一 d2 scale 不得越过 1.24（上界开区间）
+    let seed = 1;
+    const rng = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return (seed >>> 8) / 0x800000;
+    };
+    for (let k = 0; k < 40; k++) {
+      const g2 = mkGame();
+      deadCellsBarnacleShotFiringFx(g2.g as never, 100, 100, 1, 0, rng);
+      for (const d of g2.dusts) {
+        if (d.type === 2) expect(d.scale).toBeLessThanOrEqual(1.24);
+      }
+      seed = (seed + 7919) & 0x7fffffff;
+    }
   });
   it('HeroicisSetSpawnSound(64)=rainbow_boulder 音；PlayerVoiceOverrideSound(46)=变声字分派', () => {
     const he = mkGame();
@@ -420,6 +454,41 @@ describe('生产者接线结构断言（module8 上行/clientOnly 直驱按原 n
     expect(has('src/stats/SnapStrike.ts', 'snappingStoneRingFx(game, kind, t.cx, t.cy, msX, strikes)'));
     expect(has('src/stats/SnapStrike.ts', 'ParticleOrchestraType.SnappingStoneSummon'));
     expect(has('src/stats/SnapStrike.ts', 'export function snapStrikeDust'));
+    // ★F3（2026-09-01）：尘段载荷直用（收端禁再掷/再除）——收端 |X|/2、尘段
+    //   (0.3+1.4r) 复掷两式均退役；本地 msX 与广播/环带三面共吃同一载荷
+    expect(has('src/core/Game.ts', 'snapStrikeDust(this, kind, s.posX, s.posY, s.moveX);')).toBe(true);
+    expect(has('src/core/Game.ts', 'Math.abs(s.moveX) / 2')).toBe(false);
+    expect(has('src/stats/SnapStrike.ts', 'snapStrikeDust(game, kind, t.cx, t.cy, msX);')).toBe(true);
+    expect(has('src/stats/SnapStrike.ts', 'const num = Math.min(0.12, mvX / 256);')).toBe(true);
+    expect(has('src/stats/SnapStrike.ts', '0.3 + 1.4 * rand()')).toBe(false);
+  });
+  it('★F5 Next(a,b) 上界开区间 off-by-one 三站（Next(-20,40)=60 值/Next(-5,5)=10 值）', () => {
+    expect(has('src/entities/Arrow.ts', 'Math.floor(Math.random() * 60) - 20')).toBe(true);
+    // 窄针：Arrow.ts:3811 另有合法 Math.random()*61（Next(60,121) 气泡档），勿宽匹配
+    expect(has('src/entities/Arrow.ts', 'Math.floor(Math.random() * 61) - 20')).toBe(false);
+    expect(has('src/entities/Arrow.ts', 'Math.floor(Math.random() * 10) - 5')).toBe(true);
+    expect(has('src/fx/orchestraFx.ts', 'Math.floor(rng() * 10 - 5)')).toBe(true);
+    expect(has('src/fx/orchestraFx.ts', 'rng() * 11 - 5')).toBe(false);
+  });
+  it('★F3 收端分派：SnappingStone 载荷 X 直入尘段 num=钳(X/256,.12)（禁 |X|/2 再掷）', () => {
+    const { g } = mkGame();
+    const made: Array<{ type: number; vx: number; noGravity: boolean }> = [];
+    (g as unknown as Record<string, unknown>).vanillaDust = {
+      spawn: (_x: number, _y: number, _w: number, _h: number, type: number) => {
+        const d = { type, vx: 1, vy: 1, scale: 0, fadeIn: 9,
+          noGravity: false, noLight: false, noLightEmittance: false };
+        made.push(d);
+        return d;
+      },
+    };
+    apply(g, ParticleOrchestraType.SnappingStone, 500, 400, 16, 1);
+    expect(made.length).toBe(20);
+    const num = Math.min(0.12, 16 / 256);
+    for (const d of made) {
+      const f = d.type === 226 ? (d.noGravity ? 0.5 : 0.25) : 1;
+      expect(d.vx).toBeCloseTo(64 * num * f, 12);
+      expect([226, 15]).toContain(d.type);
+    }
   });
   it('Player：充能三连改走收编本体+上行', () => {
     expect(has('src/entities/Player.ts', 'snappingStoneRechargeFx(game, rk, this.x, this.y, this.w, this.h)'));

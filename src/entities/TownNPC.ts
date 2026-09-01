@@ -28,6 +28,7 @@ import { canHitLine } from '../physics/LineOfSight';
 import { canHitPoint } from '../physics/LineOfSight';
 import { getSwingStatsAnchor, tweakSwingStats } from './townNpcSwing';
 import { npcCheckArmorPenetration, applyBuffTicks } from './projStatus';
+import { drownCollision } from '../stats/TouchDamage';
 // ★2026-08-31 治理批 B1：危险扫描候选记录门（NPC.cs:54042 flag19 = CanBeChasedBy）
 import { canBeChasedBy } from './projTargets';
 import { projSprite } from './Arrow';
@@ -380,57 +381,23 @@ export const INTERACTABLE_BY_NPC_SHEETS = new Set([
 const AVOIDED_BY_NPC_TILES = sheetTileIds(AVOIDED_BY_NPC_SHEETS);
 const INTERACTABLE_BY_NPC_TILES = sheetTileIds(INTERACTABLE_BY_NPC_SHEETS);
 
-/** Collision.DrownCollision 1:1（Collision.cs:1385-1430；★蓝队 F4 定案：替换旧
- *  「中心格 liquid>30」单点近似）。城镇 NPC 四个调用面全走 gravDir=1 档——
- *  CheckDrowning :96058、跌水跳跃/逃速 flag21 :54361 与 idle 起身 :54285
- *  （后两者 includeSlopes:true）、walkPrediction 落点检验 ：56311。
- *  几何要素：
- *  - 探针盒 = 中心 X 对齐、宽 min(10,W) × 高 min(12,H)，顶 = Top−2px
- *    （gravDir=1 无 `vector.Y += Height/2-6` 上移项——玩家档才有）；
- *  - 扫描窗 = 盒外扩 tile：[floor(X/16)−1 .. floor((X+W)/16)+2] × [同式 Y]
- *    （上缘钳 maxTilesY−40）；gravDir=1 的实心排除行 num4 = value3 = 扫描【首行】：
- *    该行 active 实心非 solidTop 的格不计水（includeSlopes=true 时 blockType!=0
- *    即半砖/坡面反而计水——本仓 half/slope 双数组承接）；
- *  - 液格顶面降面 = Y += ((256−liquid)/32)×2，有效高 = 16 − (int)(((256−liquid)/32)×2)
- *    （npcLiquid drop 同式；C# 侧 Y 偏移用 float 原值、高取 (int) 截断）；
- *  - lava/shimmer 显式不计（原文本面）;命中 = 探针盒与液面子盒四严格不等式
- *    (:1422-26)。
- *  ★无 wet 锁存依赖——传送落水首拍即计；带 wet 外伞的是 idle 起身支
- *  （:54177 `wet && !flag11` 包裹 currentlyDrowning3），由调用方区分。 */
-export function drownCollision(
-  st: TileStore, x: number, y: number, w: number, h: number, includeSlopes = false,
-): boolean {
-  const pw = Math.min(10, w);                      // num
-  const ph = Math.min(12, h);                      // num2
-  const x0 = x + w / 2 - Math.floor(pw / 2);       // vector.X（num/2 整数除法同 C#）
-  const y0 = y - 2;                                // vector.Y（gravDir=1）
-  const clampI = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-  const i0 = clampI(Math.floor(x / 16) - 1, 0, st.w - 1);
-  const i1 = clampI(Math.floor((x + w) / 16) + 2, 0, st.w - 1);
-  const j0 = clampI(Math.floor(y / 16) - 1, 0, st.h - 40);
-  const j1 = clampI(Math.floor((y + h) / 16) + 2, 0, st.h - 40);
-  for (let i = i0; i < i1; i++) {
-    for (let j = j0; j < j1; j++) {
-      if (!st.inBounds(i, j)) continue;
-      const idx = st.idx(i, j);
-      if (!(st.liquid[idx] > 0)) continue;
-      const lt = st.liquidType[idx];
-      if (lt === 2 || lt === 4) continue;          // !tile.lava() && !tile.shimmer()
-      if (j === j0 && st.type[idx] !== 0 && st.isSolid(i, j)
-        && !(includeSlopes && (st.slope[idx] !== 0 || st.half[idx] !== 0))) {
-        continue;                                  // 首行实心排除（num4 = value3）
-      }
-      const dropPx = ((256 - st.liquid[idx]) / 32) * 2;
-      const wy = j * 16 + dropPx;
-      const wh = 16 - Math.trunc(dropPx);
-      // :1422-26 字面四不等式（X 轴用满格 16,Y 用降面子高）
-      if (x0 + pw > i * 16 && x0 < i * 16 + 16 && y0 + ph > wy && y0 < wy + wh) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
+/** Collision.DrownCollision 共用移植归一在 stats/TouchDamage.ts（★蓝队 F4①，
+ *  2026-09-01）：本文件旧副本退役。选【抽公共函数】而非复制+双注——消费面已有
+ *  三处（Player :23379 / Enemy AI_007 / 本文件五调用面），旧双副本已各自漂移过
+ *  一次（本副本 st.isSolid 带 nactive() 致动闸,缺 L1「纯在场」核正;缺 solidTop
+ *  族豁免;includeSlopes 只有单侧有）,单源杜绝再漂。
+ *  签名 = 原文序 (st, x, y, w, h, gravDir, includeSlopes=false)
+ *  （Collision.cs:1385 `DrownCollision(…, float gravDir = -1f, bool includeSlopes = false)`;
+ *  本域五调用面全 gravDir=1,includeSlopes 逐一对号 NPC.cs 原文——
+ *   - walkPrediction 落点没顶检验 :56311 → 缺省 false;
+ *   - fixedUpdate 逃速 flag21 :54361 → true;
+ *   - idle 起身 currentlyDrowning3 :54285 → true（外伞 `wet && !flag11` 在调用方）;
+ *   - 行走态 flag21 同源面 :54361 → true（无 wet 门）;
+ *   - CheckDrowning :96058 → 缺省 false。
+ *  几何要点（10×12 头部探针/中心项整数除/降面水位/首行实心排除/lava+shimmer
+ *  不计/includeSlopes blockType 臂）见 TouchDamage.drownCollision 注。
+ *  ★无 wet 锁存依赖——传送落水首拍即计；带 wet 外伞的是 idle 起身支。 */
+export { drownCollision };
 
 // ===================== 敌怪互殴准入/几何表（GetHurtByOtherNPCs 通道）=====================
 
@@ -565,7 +532,7 @@ export function walkPrediction(
     // DrownCollision(width,height,gravDir=1)——★F4 换真探针几何，宽度取
     // widthPx（缺省 20 = 本仓城镇盒宽；仅影响 min(10,W) 探针 ±1px 级）
     avoidFalling = drownCollision(
-      st, px * TILE + 8 - widthPx / 2, py * TILE - heightPx, widthPx, heightPx,
+      st, px * TILE + 8 - widthPx / 2, py * TILE - heightPx, widthPx, heightPx, 1,
     );
   }
   return { keepwalking, avoidFalling };
@@ -2034,7 +2001,7 @@ export class TownNPC extends Entity {
     // flag21（:54361）= !flag11 && DrownCollision(includeSlopes:true)——★F4 换
     // DrownCollision 真几何且【无 wet 锁存】（城镇 NPC flag11 恒 false，非 616/617/
     // 625/361/445/687 族）；逃速提档 :54467 与 walkPrediction keepwalking③ 同源消费
-    const drowningNow = drownCollision(world.store, this.x, this.y, this.w, this.h, true);
+    const drowningNow = drownCollision(world.store, this.x, this.y, this.w, this.h, 1, true);
     const speedup = this.fleeing || drowningNow;
     const spdCap = speedup
       ? FLEE_SPEED_BASE + (1 - this.hp / this.maxHp) * FLEE_HURT_FACTOR
@@ -2298,7 +2265,7 @@ export class TownNPC extends Entity {
         if (this.walkT > 0) this.walkT--;
         // 溺水起身（:54177-54186 外伞 `wet && !flag11` → currentlyDrowning3 =
         // DrownCollision(includeSlopes:true)，:54285）——wet 门保留、几何换真探针
-        const drowning = this.wet && drownCollision(st, this.x, this.y, this.w, this.h, true);
+        const drowning = this.wet && drownCollision(st, this.x, this.y, this.w, this.h, 1, true);
         if (drowning) {
           this.walkMode = 1;
           this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
@@ -2340,7 +2307,7 @@ export class TownNPC extends Entity {
       } else {
         // flag21（:54361，同 fixedUpdate drowningNow 面）：行走态倒计时只在非溺水
         // 几何下挂上归家 −5/t 附加扣减——无 wet 门（★F4 换真探针）
-        const drownGeom = drownCollision(st, this.x, this.y, this.w, this.h, true);
+        const drownGeom = drownCollision(st, this.x, this.y, this.w, this.h, 1, true);
         if (!drownGeom) {
           // ★红蓝批 R4（2026-09-01）：背离 drain 臂对齐 :54364-54374 字面——
           //   ①门加 `!tileDungeon[脚格]`（守卫老人驻砖上时整臂豁免,否则老人地牢
@@ -3361,7 +3328,7 @@ export class TownNPC extends Entity {
       // `DrownCollision(position,width,height,1f)`，gravDir=1 非 includeSlopes）
       // ★F4 定案 = 真 10×12 头部探针族 + 降面水位 + 首行实心排除，且【去 wet
       // 锁存】——传送落水首拍即计（原文本不查 wet;带 wet 外伞的是 idle 起身支）
-      const submerged = drownCollision(st, this.x, this.y, this.w, this.h);
+      const submerged = drownCollision(st, this.x, this.y, this.w, this.h, 1);
       if (submerged) {
         if (++this.breathCounter >= 7) {
           this.breathCounter = 0;

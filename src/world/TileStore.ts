@@ -155,11 +155,19 @@ export class TileStore {
   /** 站顶单向面（原版 Collision.TileCollision :2330-2333 的 flag 门：
    *  `flag = tileSolid[type]; if (tileSolidTop[type] && frameY == 0) flag = true`
    *  分两族语义——
-   *  ① 平台行为族 = tileSolid∩tileSolidTop 四件套（Main.cs:7841/:9568/:9570/:9888）：
-   *    19 平台/239 矿锭/380 花盆箱/427 团队平台。flag=tileSolid **恒真**——其 frameY 是
-   *    材质行（PlaceTile case 19/380 `frameY = 18*style`，TileFrameImportant 只重写
-   *    frameX 连接形态），**可站与 frameY 无关**。曾把家具的 frameY==0 门套到平台族
+   *  ① 平台行为族 = tileSolid∩tileSolidTop 九件套（1457 Main.cs：19 :8031-8032 /
+   *    239 :9797-9798 / 380 :9799-9800 / 427 :10118-10119 / 435-439 团队平台五色
+   *    :10126-10136 整批 tileSolidTop+tileSolid,TileID.cs:1307-1315;旧注 7841/9568/
+   *    9570/9888 系 1.4.4 代行号已废）：19 平台/239 矿锭/380 花盆箱/427-439 团队
+   *    平台六色。flag=tileSolid **恒真**——其 frameY 是材质行（PlaceTile case 19/380
+   *    `frameY = 18*style`，TileFrameImportant 只重写 frameX 连接形态），**可站与
+   *    frameY 无关**。曾把家具的 frameY==0 门套到平台族
    *    → 世界生成放的 13+ 材质平台（CaveHouse/HouseBuilder PlatformStyle）全体穿透。
+   *    ★本仓快查分支暂列前四件：五色团队平台各 tile id 单 item 单 placeStyle,
+   *    实放 frameY=0 档,经②家具族分支同判可站=行为等价（vanilla TileObjectData.cs
+   *    :2150-2162 五色 StyleMultiplier=27 多 style 位——将来引入多 style 摆放须同步
+   *    扩快查）;DrownCollision 豁免行消费的静态族表九件套在 stats/TouchDamage.ts
+   *    TILE_SOLID_TOP_FAMILY（蓝队 F1 已扩齐）。
    *  ② 家具族（tileSolid=false：桌/铁砧/工作台/钢琴/书架/笼子等）：frameY==0=底行
    *    才可站，上半格（frameY>0）不站。
    *  nactive 门（:2327）：已致动(inActive)的平台/家具顶不可站。

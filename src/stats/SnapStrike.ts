@@ -199,36 +199,35 @@ export function trySnapStrike(
     //  收编:FadingParticle/PrettySparkle 环带+三味音 Item72/PyroclasticStone/ArmletOfRuin;
     //  原版载荷 = PositionInWorld=lerp(盒内随机点,Center,.6)、MovementVector=(num11×num12,
     //  出弹序号+1),本仓以目标中心+出弹序号近似锚）;clientOnly:false → module8 上行补远端。
-    //  Dust 段仍由下方 snapStrikeDust 承担（同批原文对齐）。
+    //  ★F3（2026-09-01）：num12 单掷落在载荷 X 上（:14429 halfDiag×(0.3+1.4r)）——
+    //  环带/尘/广播三面共吃同一 msX（原版 Spawn_ 的 num=钳(X/256,≤.12) 环带与尘同源），
+    //  尘段禁再掷 num12（曾本地尘另掷一次+远端 |X|/2 再掷 = 三面速度分裂）。
     {
-      const halfDiag = Math.min(100, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
-      const msX = halfDiag * (0.3 + 1.4 * Math.random());
+      const halfDiag = Math.min(100, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);  // num11 钳 100（:14430-31）
+      const msX = halfDiag * (0.3 + 1.4 * Math.random());   // ×num12（:14429）= 载荷 X 原值
       snappingStoneRingFx(game, kind, t.cx, t.cy, msX, strikes);
       game.broadcastParticleOrchestra?.(
         kind === 0 ? ParticleOrchestraType.SnappingStone
           : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
             : ParticleOrchestraType.SnappingStoneSummon,
         t.cx, t.cy, msX, strikes);
+      snapStrikeDust(game, kind, t.cx, t.cy, msX);          // 载荷直用（尘段内钳(X/256,.12)）
     }
-    snapStrikeDust(game, kind, t.cx, t.cy, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
     skip.add(t.id);                             // skipTargets.Add(num9)（:14425-27）
   }
-  // R4-33（Projectile.cs:14432-14437）：受击者自身也发一次脉冲——num11=盒径/2 钳 100
+  // R4-33（Projectile.cs:14432-14437）：受击者自身也发一次脉冲——载荷 X = 盒对角
+  // Length()/2 裸值【无钳无 num12 掷】（:14434-36），尘段同值直用（★F3,与广播共 vh）
   if (ctx?.victimBox) {
-    snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy,
-      Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2));
+    const vh = Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2;
+    snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy, vh);
     // R4-33 自脉冲面同款广播（★2026-09-01 载荷对齐原文 :14431-14437：X=盒对角
     //   Length()/2 原值【无钳无掷】、Y=0=零延迟拍——曾错传 ×(0.3+1.4r) 掷幅 +
-    //   Y=maxTargets 延迟档；延迟仅属出弹链 num7+1 :14429。snapStrikeDust 的
-    //   钳 100 是尘段自有口径,与此广播载荷分属两面,各自对齐）
-    {
-      const vh = Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2;
-      game.broadcastParticleOrchestra?.(
-        kind === 0 ? ParticleOrchestraType.SnappingStone
-          : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
-            : ParticleOrchestraType.SnappingStoneSummon,
-        ctx.victimBox.cx, ctx.victimBox.cy, vh, 0);
-    }
+    //   Y=maxTargets 延迟档；延迟仅属出弹链 num7+1 :14429）
+    game.broadcastParticleOrchestra?.(
+      kind === 0 ? ParticleOrchestraType.SnappingStone
+        : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
+          : ParticleOrchestraType.SnappingStoneSummon,
+      ctx.victimBox.cx, ctx.victimBox.cy, vh, 0);
   }
   // ★F1 加伤链（:14442-14457）——零目标也照样给满额漏配（num13 = 2 − num7）：
   //   `(int)((float)num14 ×乘区)` 为 C# float 乘后截断；f64/f32 双精度在常规乘区
@@ -291,6 +290,9 @@ export function projectileSnapStrikeBonus(
 /**
  * ★1457 拍击石系命中尘（ParticleOrchestrator.cs 三 Spawn 的 Dust 段 1:1；
  *  编排器粒子类型 FadingParticle/PrettySparkle 本仓无池,环带视觉登记未接）：
+ *  mvX 形参 = 编排载荷 MovementVector.X 原值【已含出弹端 num12 单掷】,禁在尘段
+ *  复掷/再除（★F3 2026-09-01,Projectile.cs:14429-31 num11×num12/受击者拍 :14434-36
+ *  num11 裸值——本地/远端/环带三面共吃同一 X,消费式唯一 = num=钳(X/256,≤0.12)）：
  *  kind0 拍击石（:593-646）num=钳(MovementVector.X/256,≤0.12)——20 颗 2/3→226
  *  否则 15,velocity×64num,noGravity,scale1,fadeIn 1.5→0,noLight;226 再 ×0.5 速、
  *  1/6 恢复重力再 ×0.5 速、noLightEmittance;
@@ -299,14 +301,12 @@ export function projectileSnapStrikeBonus(
  *  kind2 毁灭臂镗（:734-812）15 颗 172 + 8 颗 211,Circular(10,10) 速,
  *  scale=max(0.75,20num),noGravity,1/6 重力 + scale×0.25
  */
-export function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, sizeHalf: number): void {
+export function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, mvX: number): void {
   const pool = game.vanillaDust;
   if (!pool) return;
   const rand = Math.random;
   if (kind === 0) {
-    // R4-33：num11 = 盒径/2 钳 100（Projectile.cs:14414-14421）——超大盒径角案钳制
-    sizeHalf = Math.min(100, sizeHalf);
-    const num = Math.min(0.12, (sizeHalf * (0.3 + 1.4 * rand())) / 256);   // :600-605
+    const num = Math.min(0.12, mvX / 256);   // :600-605（X 原值直入——num11 钳 100 已在出弹端 :14430-31）
     for (let j = 0; j < 20; j++) {
       const chloro = Math.floor(rand() * 3) !== 0;                 // Next(3)!=0 → 226
       const d = pool.spawn(x, y, 0, 0, chloro ? 226 : 15);

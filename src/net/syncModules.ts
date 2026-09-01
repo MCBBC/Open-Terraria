@@ -423,16 +423,19 @@ export const enum ParticleOrchestraType {
   RainbowBoulder1 = 47,     // 虹石族四种（RB1 天基寻宝 :20298/RB2·RB3 虹砖 ambience TileDrawing
   RainbowBoulder2 = 48,     //   :6996/:6989/RB4 跃迁 :20349。★2026-09-01 tile-ambient 面
   RainbowBoulder3 = 49,     //   落地：RB2·RB3 = Game.emitTileOrchestraAmbient 虹砖 711
-                            //   frameX==0&&frameY==0 门直驱（RB3 1/45、RB2 2/3+circ(16,16)）；
-                            //   RB1/RB4 面仍域缺登记）
+                            //   frameX==0&&frameY==0 门直驱（RB3 1/45、RB2 2/3/visit×3
+                            //   窗折算=恒发,★F1 2026-09-01+circ(16,16)）；RB1/RB4 面仍域缺登记）
   RainbowBoulder4 = 50,     // ★δB10（2026-09-01）彩带 Velocity=(0,-1).RotatedBy(num5)=(sin,-cos)
                             //   /白镜像=(0,1).RotatedBy=(-sin,+cos)=共线反向流（P.cs:1478/:1493,
                             //   曾错用 (cos,sin) 成 90° 垂直轴）+白镜像位改盒内随机（:1490）
-  LakeSparkle = 52,         // 湖面闪光星（P.cs:20638 clientOnly:true;FakeFish.ts :703 段
-                            //   逐参直译=逐参数等价在案,维持局部池不迁移）
+  LakeSparkle = 52,         // 湖面闪光星（P.cs:20638 clientOnly:true;FakeFish.ts :600 段
+                            //   局部池直译：初速零+加速=(move/60)/寿命两段除法（★F2
+                            //   2026-09-01 补第二段 /life,旧"逐参数等价在案"判词撤）,
+                            //   旋转/scale/α 包络按 FadingParticle 近似登记,维持局部池不迁移）
   NatureFly = 53,           // 森林花虻环境粒（TileDrawing.cs:7017 clientOnly:true。★2026-09-01
                             //   tile-ambient 落地=Game.emitTileOrchestraAmbient：SpawnsNatureFlies
-                            //   草族 13 型（TileID.cs:251）+风门 lerp(|wind|,.08,.18)+0.3→1/600,
+                            //   草族 13 型（TileID.cs:251）+双独立门 [风门 lerp(|wind|,.08,.18)+0.3]
+                            //   ×[1/600]——×3 折算只落前因子（★F1 2026-09-01）,
                             //   _windGrid 风格档未建模登记）
   FakeFishJump = 54,        // 假鱼跃出（P.cs:20967 jumping=true;保持 FakeFish.ts 局部池——密度门同池语义）
   MagnetSphereBolt = 56,    // 磁球闪电行进尘（P.cs:71850 区弹255 AI_001 BroadcastOrRequest）

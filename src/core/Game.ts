@@ -847,6 +847,12 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   //   （此前走家具 hasSupport 近似=侧邻/墙都算撑,与原版逐列判据不符）
   254: 'pumpkin', 444: 'super', 485: 'super', 231: 'larva3x3',
 };
+/** DECOR 3×3 邻域扫候选（SquareTileFrame→TileFrame→tileFrameImportant 派发面的
+ *  DECOR 子集,内部 id 集）——'furniture' 族由家具近似链(checkFurnitureSupport)承担,
+ *  不入本集（审计 D-1 增量,2026-09-01 四批） */
+const DECOR_SWEEP_SHEETS = Object.keys(DECOR_SUPPORT_KIND)
+  .map(Number)
+  .filter((sh) => DECOR_SUPPORT_KIND[sh] !== 'furniture');
 /** CheckAlch 药草地基列（cs:45981,Main.tileAlch={82,83,84};键=frameX/18 列）——
  *  与生成期 FinalCleanupPass.ALCH_GROUND 同表 */
 const ALCH_GROUND_RUNTIME: Record<number, Set<number>> = {
@@ -980,6 +986,8 @@ function internalIdsOfVanSheets(sheets: readonly number[]): Set<number> {
     return acc;
   }, []));
 }
+/** DECOR 3×3 邻域扫候选 → 内部 id 集（checkDecorSquareFrame 逐格 O(1) 早退用） */
+const DECOR_SWEEP_TILE_IDS = internalIdsOfVanSheets(DECOR_SWEEP_SHEETS);
 // TileID.cs:89 Regrowth 表逐项
 const CUT_IGNORE_REGROWTH = internalIdsOfVanSheets([
   3, 24, 52, 382, 61, 703, 62, 71, 73, 74, 82, 83, 84, 110, 113, 115,
@@ -5081,6 +5089,13 @@ export class Game implements GameHooks {
     // 家具失撑（原版 TileFrame → Check2x1/Check3x2/Check4x2 族 :47500+：支撑格
     // 被挖 → 家具掉落。曾无此链=挖掉工作台脚下它悬空挂着，2026-08-21 review）
     w.store.onTileChanged((x, y) => this.checkFurnitureSupport(x, y - 1));
+    // DECOR 3×3 邻域扫（SquareTileFrame WorldGen.cs:81462 运行期等价,债 B 2026-09-01
+    // 四批）：被改格九宫（含中心）内 DECOR 件复验 = KillTile 尾 SquareTileFrame(i,j)
+    // （:64432）的派发面——顶锚件（蜂巢 444 天花板/吊灯 34·皮格纳塔 454 挂钩块）
+    // 挖塌靠此链（D-1 上方格链只覆盖"变化格上方"一个方向）。'furniture' 族不入扫
+    // （维持上方家具近似链原样）；多格件放置写循环期间由 _decorPlaceBuilding 抑制
+    // （TileObject.Place :94-110 裸写无级联,写完由 tryPlace 对放置目标点补一次）
+    w.store.onTileChanged((x, y) => this.checkDecorSquareFrame(x, y));
     // 进图一次性植物孤儿清整（演化监听只护"支撑变化后"的状态——读档/导入期写入的
     // 非法锚植株[斜面/半砖上的蘑菇、腐化地上森林草]是粘滞件，2026-08-26 用户实报；
     // 新增侧已由演化 IsFit 门拦截，历史遗留在此收口）
@@ -8502,6 +8517,8 @@ export class Game implements GameHooks {
     // 2-3 格,视觉与"落地"无差)
     for (const p of this.particles) {
       p.life--;
+      p.vx += p.ax ?? 0;        // 加速度通道（原版编排粒子 AccelerationPerFrame,先加速后位移）
+      p.vy += p.ay ?? 0;
       p.vy += p.grav ?? 0.05;   // 原版重力尘 +0.05(Dust.cs:894 族),无参默认对齐
       if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 原版阻尼 0.93/0.97 族,发射端按型给
       p.x += p.vx;
@@ -18573,48 +18590,71 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 等早 return 分支各自在写点录；from=放置目标恒空格（空间检查已保证）
     this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'place' });
     const isVanillaStyle = !!def.vanilla && def.vanilla.frame === 'style';
-    for (let dx2 = 0; dx2 < ow; dx2++) {
-      for (let dy2 = 0; dy2 < oh; dy2++) {
-        const px = tx + dx2, py = ty + dy2;
-        // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）。
-        // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
-        // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确。
-        // 单格帧合成统一走 framedCellFrame（旗帜 91 逆写 / 竖排族布局表 / 通用
-        // style*fw*18）——tests/cage-placement 用同一入口做放置帧锚端到端断言
-        if (isVanillaStyle) {
-          let [fx2, fy2] = framedCellFrame(
-            def.vanilla?.sheet ?? -1, def.vanilla?.fw ?? 1, itemDef.placeStyle ?? 0, dx2, dy2);
-          // 书（50）放置帧随机 0-4（PlaceOnTable1x1 WorldGen.cs:45379
-          // `frameX = 18*genRand.Next(5)`——style 参数被无条件覆盖，五书色随机）
-          if (def.vanilla?.sheet === 50) fx2 = 18 * Math.floor(Math.random() * 5);
-          st.setTile(px, py, tileId, fx2, fy2);
-        } else {
-          st.setTile(px, py, tileId, dx2, dy2);
-        }
-        // 水被方块挤出：水量转移到相邻可容纳的格子（上/左/右），
-        // 而不是被方块吞掉消失。封闭无处可去时才消失
-        const pi = st.idx(px, py);
-        const liq = st.liquid[pi];
-        if (liq > 0) {
-          const ltype = st.liquidType[pi];
-          st.setLiquid(px, py, 0, 0);
-          let remaining = liq;
-          for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0]] as const) {
-            if (remaining <= 0) break;
-            const nx = px + ox, ny = py + oy;
-            if (!st.inBounds(nx, ny)) continue;
-            const nd = TILE_DEFS[st.type[st.idx(nx, ny)]];
-            if (nd && nd.solid) continue;
-            const ni = st.idx(nx, ny);
-            const cap = 255 - st.liquid[ni];
-            if (cap <= 0) continue;
-            const t = Math.min(remaining, cap);
-            st.setLiquid(nx, ny, st.liquid[ni] + t, ltype || st.liquidType[ni] || 1);
-            remaining -= t;
+    // ★债 A（2026-09-01 四批）：写循环期间抑制 DECOR 分派。原版多格放置 =
+    //  TileObject.Place（TileObject.cs:94-110）对 w×h 全格【裸写】（active/frameX/
+    //  frameY/type 直赋,无逐格 TileFrame——清格相 :79-93 的 KillTile 自带 SquareTileFrame
+    //  且发生在【写入前】,此时本件尚不存在）,级联在放置完成后由调用方对放置目标点
+    //  一次 SquareTileFrame（WorldGen.PlaceObject :51886-51888 /
+    //  Player.PlaceThing_Tiles_PlaceIt :40438-40439）。本仓逐格 setTile 每格触发
+    //  onTileChanged → 已写一半的多格件被 Check* 完整性裁决判坏 → killDecorTile 吃掉
+    //  已写格（向日葵 27 实测 6/8 格存活）。只抑制 DECOR 支（checkDecorSupport 入口
+    //  早退+checkDecorSquareFrame 早退）;家具链"半件态不处理"自保护维持原样,
+    //  其他监听（沙/藤/巨石/火把）一律不动。try/finally 保证旗必清。
+    //  ★单格路径走同一循环（ow=oh=1）,旗窗一格 = 原版同款（放置中无级联）,行为不变
+    this._decorPlaceBuilding = true;
+    try {
+      for (let dx2 = 0; dx2 < ow; dx2++) {
+        for (let dy2 = 0; dy2 < oh; dy2++) {
+          const px = tx + dx2, py = ty + dy2;
+          // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）。
+          // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
+          // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确。
+          // 单格帧合成统一走 framedCellFrame（旗帜 91 逆写 / 竖排族布局表 / 通用
+          // style*fw*18）——tests/cage-placement 用同一入口做放置帧锚端到端断言
+          if (isVanillaStyle) {
+            let [fx2, fy2] = framedCellFrame(
+              def.vanilla?.sheet ?? -1, def.vanilla?.fw ?? 1, itemDef.placeStyle ?? 0, dx2, dy2);
+            // 书（50）放置帧随机 0-4（PlaceOnTable1x1 WorldGen.cs:45379
+            // `frameX = 18*genRand.Next(5)`——style 参数被无条件覆盖，五书色随机）
+            if (def.vanilla?.sheet === 50) fx2 = 18 * Math.floor(Math.random() * 5);
+            st.setTile(px, py, tileId, fx2, fy2);
+          } else {
+            st.setTile(px, py, tileId, dx2, dy2);
+          }
+          // 水被方块挤出：水量转移到相邻可容纳的格子（上/左/右），
+          // 而不是被方块吞掉消失。封闭无处可去时才消失
+          const pi = st.idx(px, py);
+          const liq = st.liquid[pi];
+          if (liq > 0) {
+            const ltype = st.liquidType[pi];
+            st.setLiquid(px, py, 0, 0);
+            let remaining = liq;
+            for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0]] as const) {
+              if (remaining <= 0) break;
+              const nx = px + ox, ny = py + oy;
+              if (!st.inBounds(nx, ny)) continue;
+              const nd = TILE_DEFS[st.type[st.idx(nx, ny)]];
+              if (nd && nd.solid) continue;
+              const ni = st.idx(nx, ny);
+              const cap = 255 - st.liquid[ni];
+              if (cap <= 0) continue;
+              const t = Math.min(remaining, cap);
+              st.setLiquid(nx, ny, st.liquid[ni] + t, ltype || st.liquidType[ni] || 1);
+              remaining -= t;
+            }
           }
         }
       }
+    } finally {
+      this._decorPlaceBuilding = false;
     }
+    // 原版时点补级联（债 A 后半）：放置目标点一次 SquareTileFrame 等价（WorldGen.cs:
+    // 51888 / Player.cs:40439 都只在 Place 成功后调一次）——对本仓即 DECOR 支的
+    // checkDecorSquareFrame(tx, ty)：构造完成的整件 + 九宫邻格 DECOR 件复验
+    // （放置清格相 :18507-18535 的 breakTile 在旗窗之外,其级联照常先行）。
+    // 家具链维持现状（原版该 SquareTileFrame 同样触发家具 Check*,本仓家具半件态
+    // 自保护 + 写循环内上方格派发已等效覆盖,不另补）
+    this.checkDecorSquareFrame(tx, ty);
     // 容器族放置登记（PlaceChest → Chest.CreateChest :57840-57842;梳妆台
     //  PlaceDresserDirect → CreateChest(x-1,y-1) :57899——锚同为物件左上格）:
     //  21/467/88 三族（此前只登 21 → 放置的梳妆台/二类箱成"孤儿",悬停文本支误进）
@@ -21994,6 +22034,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private smashPot(x: number, y: number) {
     const st = this.world.store;
     if (!st.inBounds(x, y) || st.get(x, y) !== POT_TILE) return;
+    // 重入护栏（债 B 伴生,2026-09-01 四批）：DECOR 3×3 扫会在本方法清环中途对
+    // 残余罐格再派发 CheckPot → killDecorTile(锚) → breakTile → 本方法重入 →
+    // 掉落表跑两遍。原版同构风险由 CheckPot 头 destroyObject 门（WorldGen.cs:57276,
+    // 销毁环前置旗 :57337）压制——罐破清环期间不再受理嵌套整罐裁决。此处同旨：
+    // 外层 flood 表已含整罐（连通洪泛）,重入调用直接退出,清格+掉落由外层一次完成。
+    // ★只罐破此一处需要：其余多格 DECOR 破坏支（breakPumpkin/breakBeeHive/
+    // breakAntlionLarva/breakLarva/breakXmasTree/object 锚点支）均锚格先清,
+    // 嵌套 kill 的目标格已是空格 → breakTile 早退,无重复效应
+    if (this._potSmashing) return;
+    this._potSmashing = true;
+    try {
+      this.smashPotInner(x, y);
+    } finally {
+      this._potSmashing = false;
+    }
+  }
+
+  private _potSmashing = false;
+
+  private smashPotInner(x: number, y: number) {
+    const st = this.world.store;
     const cells: Array<[number, number]> = [];
     const stack: Array<[number, number]> = [[x, y]];
     const seen = new Set<number>([x * 100000 + y]);
@@ -24206,11 +24267,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       || type === ParticleOrchestraType.SnappingStoneMelee
       || type === ParticleOrchestraType.SnappingStoneSummon) {
       // Spawn_SnappingStone{,Melee,Summon}——环带+三味音（snappingStoneRingFx）+ Dust 段
-      //（snapStrikeDust,SnapStrike 同源导出）双面复放;motionScale=moveX/256 钳 .12
+      //（snapStrikeDust,SnapStrike 同源导出）双面复放;motionScale=moveX/256 钳 .12。
+      // ★F3（2026-09-01）：尘段也按载荷直用——X 已含出弹端单掷（Projectile.cs:14429-31
+      // num11×num12 / 受击者拍 :14434-36 num11 裸值）,收端禁再掷/再除（曾 |X|/2 后
+      // 尘段复掷 num12 = 二次掷+幅减半,本地/远端尘速分裂）
       const kind = (type === ParticleOrchestraType.SnappingStone ? 0
         : type === ParticleOrchestraType.SnappingStoneMelee ? 1 : 2) as 0 | 1 | 2;
       snappingStoneRingFx(this, kind, s.posX, s.posY, s.moveX / 256, Math.max(0, s.moveY | 0));
-      snapStrikeDust(this, kind, s.posX, s.posY, Math.abs(s.moveX) / 2);
+      snapStrikeDust(this, kind, s.posX, s.posY, s.moveX);
     } else if (type === ParticleOrchestraType.SnappingStoneRecharge
       || type === ParticleOrchestraType.PyroclasticStoneRecharge
       || type === ParticleOrchestraType.ArmletOfRuinRecharge) {
@@ -32087,12 +32151,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *     Next(100)==0 → pooFlyFx@(x×16+8, y×16−8)；
    *   · RainbowBoulder3（:6992-6999）虹砖 711 frameX==0&&frameY==0、Next(45)==0 →
    *     rainbowBoulderFx(3)@(x×16+16, y×16+16)；
-   *   · RainbowBoulder2（:7000-7007）同门 Next(3)!=0（=2/3）→ rainbowBoulderFx(2)
-   *     位+circular(16,16)、move=circular(1,0.5)×0.5；
+   *   · RainbowBoulder2（:7000-7007）同门 Next(3)!=0（=2/3/visit×3 窗折算=恒发,F1①）
+   *     → rainbowBoulderFx(2) 位+circular(16,16)、move=circular(1,0.5)×0.5；
    *   · NatureFly（:7009-7027）SpawnsNatureFlies 草族 {3,20,24,27,73,201,80,110,
-   *     529,530,595,615,637}：liquid≤0、帧率门 lerp(|wind|,0.08,0.18,0..1)+0.3、
-   *     再 1/600（风格 _windGrid.GetWindTime 档未建模,登记）→ natureFlyFx@
-   *     (x×16+8, y×16)。LakeSparkle 已由 FakeFish.ts 局部池逐参直译（:20635-20646）。 */
+   *     529,530,595,615,637}：liquid≤0、双独立门 P(NextFloat<lerp+0.3)×P(Next(600)==0)
+   *     ——×3 窗折算只落第一因子（min(1,p×3)）,第二因子保持 1/600（F1②）；风时档
+   *     _windGrid.GetWindTime(+Next(48)) 未建模,登记 → natureFlyFx@(x×16+8, y×16)。
+   *     LakeSparkle 已由 FakeFish.ts 局部池直译（:20635-20646,积分步 F2 补 /life）。 */
   private emitTileOrchestraAmbient(tx0: number, ty0: number, tx1: number, ty1: number): void {
     const st = this.world.store;
     const NATURE_FLIES = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 595, 615, 637]);
@@ -32120,18 +32185,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (Math.random() < 3 / 45) {
               rainbowBoulderFx(this, 3, x * TILE + 16, y * TILE + 16);
             }
-            if (Math.random() < 2 / 3) {
-              rainbowBoulderFx(this, 2, x * TILE + 16 + (Math.random() * 2 - 1) * 16,
-                y * TILE + 16 + (Math.random() * 2 - 1) * 16,
-                (Math.random() * 2 - 1) * 0.5, (Math.random() * 2 - 1) * 0.25);
-            }
+            // Next(3)!=0 = 2/3/visit（TileDrawing.cs:7002）×3 窗折算 ≥1 → 恒发（F1①）
+            rainbowBoulderFx(this, 2, x * TILE + 16 + (Math.random() * 2 - 1) * 16,
+              y * TILE + 16 + (Math.random() * 2 - 1) * 16,
+              (Math.random() * 2 - 1) * 0.5, (Math.random() * 2 - 1) * 0.25);
           }
         }
         if (NATURE_FLIES.has(sheet) && !liquidHere) {
           const wind = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);   // ≈WindForVisuals
           const lv = wind < 0.08 ? 0 : wind > 0.18 ? 1 : (wind - 0.08) / 0.1; // GetLerpValue clamped
           const p = lv + 0.3;                                //（:7012-7015）
-          if (Math.random() < Math.min(1, p * 3) && Math.random() < 3 / 600) {
+          // 双独立门 ×3 窗折算只落第一因子,第二因子 Next(600)==0 保持 1/600（F1②）
+          if (Math.random() < Math.min(1, p * 3) && Math.random() < 1 / 600) {
             natureFlyFx(this, x * TILE + 8, y * TILE);
           }
         }
@@ -32355,6 +32420,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  队列 tntBarrelBlast 式）。 */
   private _decorKillQueue: Array<[number, number]> = [];
   private _decorKillDraining = false;
+  /** 多格件放置写循环构造旗（债 A）：原版多格放置 = TileObject.Place :94-110 对
+   *  w×h 全格【裸写】（active/frameX/frameY/type 直赋,无任何 TileFrame/级联），
+   *  级联在放置完成后由调用方对放置目标点一次 SquareTileFrame（WorldGen.PlaceObject
+   *  :51888 / Player.PlaceThing_Tiles_PlaceIt :40439）。本仓放置尾逐格 setTile 每格
+   *  触发 onTileChanged → 会把【已写一半】的多格件交给 Check* 完整性裁决 →
+   *  killDecorTile 吃掉已写格（向日葵 27 实测 6/8 格）。置位期间 checkDecorSupport
+   *  入口早退（只抑制 DECOR 支;家具链"半件态不处理"自保护维持原样,沙/藤/
+   *  巨石/火把监听一律不动），try/finally 保证必清 */
+  private _decorPlaceBuilding = false;
   private killDecorTile(x: number, y: number): void {
     const q = (this._decorKillQueue ??= []);   // ??=：Object.create 壳测试实例无构造器字段（同 _tntPending）
     q.push([x, y]);
@@ -32444,6 +32518,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return sl !== 1 && sl !== 3;
   }
 
+  /** DECOR 3×3 邻域扫（债 B）：原版 SquareTileFrame（WorldGen.cs:81462-81473）运行期
+   *  等价——列优先（x 外层/y 内层）九格【含中心格】逐格 TileFrame（:82605-82637：
+   *  界内门 :82607 / 非 active 早退 :82625-82628 / tileFrameImportant → TileFrameImportant
+   *  :82630-82634 派发 Check* 族）。KillTile 尾 SquareTileFrame(i,j)（:64432,tile.type=0
+   *  :64430 之后）因此覆盖被改格【下方/左右/斜角】的 DECOR 件——顶锚件（蜂巢 444 的
+   *  天花板/吊灯 34 与皮格纳塔 454 的挂钩块）挖塌靠此链。本仓原只有 D-1 上方一格
+   *  （checkFurnitureSupport(x,y-1) 监听）= 原版偏差（顶锚件整件不塌）。
+   *  只接 DECOR 支（DECOR_SWEEP_TILE_IDS 命中且 kind≠'furniture' → checkDecorSupport），
+   *  家具近似链与其余监听维持现状。重复分派幂等：各 case 有效时只读；'plant' 换型/
+   *  'sapling'·'stinkbug' 重帧带随机（Check1x2 :43484 num7=54*num6+Next(3)*18 /
+   *  CheckStinkbugBlocker :54395 锚向重定向）——重跑无害（重帧后判据即满足,不再变）；
+   *  件被清后本格 type=0 出候选集自然终止,级联深度由 killDecorTile 队列预算 4096 兜底。
+   *  ★界外：原版 TileFrame :82607 有 5 格世界边界门（近边 5 格不派发）,本仓沿用
+   *  inBounds 世界界（近边 decor 会多扫,原版语义下边角件无支撑本就少见,备案） */
+  private checkDecorSquareFrame(cx: number, cy: number): void {
+    if (this._decorPlaceBuilding) return;   // 债 A：放置写循环期抑制（TileObject.Place :94-110 裸写无级联）
+    const st = this.world.store;
+    for (let dx = -1; dx <= 1; dx++) {                 // :81464-81472 列优先:x 外层
+      for (let dy = -1; dy <= 1; dy++) {               //           y 内层,含 (0,0) 中心格
+        const nx = cx + dx, ny = cy + dy;
+        if (!st.inBounds(nx, ny)) continue;            // :82607
+        const tid = st.type[st.idx(nx, ny)];
+        if (!DECOR_SWEEP_TILE_IDS.has(tid)) continue;  // tileFrameImportant 派发面 DECOR 子集
+        if (!st.isActive(nx, ny)) continue;            // :82625-82628
+        const def = TILE_DEFS[tid]!;
+        const sheet = def.vanilla?.sheet ?? -1;
+        const kind = DECOR_SUPPORT_KIND[sheet] as DecorSupportKind | undefined;
+        if (!kind || kind === 'furniture') continue;
+        this.checkDecorSupport(nx, ny, def, sheet, kind);
+      }
+    }
+  }
+
   /** decor 支撑检查（D-1,原版 TileFrameImportant :85703 Check* 族运行期移植）：
    *  按 DECOR_SUPPORT_KIND 分派——PlantCheck（地基失配→换型或杀,含腐化/蔓延过境
    *  变型）/CheckAlch（列地基+岩浆枯杀）/CheckSunflower（2×4+草族实心底）/
@@ -32452,6 +32559,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  链清除+掉落）。挂 onTileChanged(x,y)→checkFurnitureSupport(x,y-1) 同家具链。 */
   private checkDecorSupport(x: number, y: number, def: (typeof TILE_DEFS)[number],
     sheet: number, kind: DecorSupportKind): void {
+    if (this._decorPlaceBuilding) return;   // 债 A：多格件放置写循环期抑制 DECOR 裁决（TileObject.Place :94-110 裸写,级联在写完后的放置目标点一次 :51888/:40439）
     const st = this.world.store;
     const i = st.idx(x, y);
     switch (kind) {
@@ -33497,18 +33605,22 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
 
   spawnParticles(
     x: number, y: number, color: string, count: number, speed = 2,
-    opts: { life?: number; damp?: number; grav?: number; size?: number; /** 逐粒显式初速（提供时替换随机方向速度——原版 NewDust+逐尘 velocity 修型 1:1 用） */ vx?: number; vy?: number } = {},
+    opts: { life?: number; damp?: number; grav?: number; size?: number; /** 逐粒显式初速（提供时替换随机方向速度——原版 NewDust+逐尘 velocity 修型 1:1 用） */ vx?: number; vy?: number;
+      /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道,★F2/F4 2026-09-01） */
+      ax?: number; ay?: number;
+      /** 寿命不抖动档（TTL 耦合参数——加速度按 TTL 折算时必须同值） */
+      lifeExact?: number } = {},
   ) {
     const base = opts.life ?? 40;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
-      const life = Math.round(base * (0.6 + Math.random() * 0.4));
+      const life = opts.lifeExact ?? Math.round(base * (0.6 + Math.random() * 0.4));
       this.particles.push({
         x, y,
         vx: opts.vx ?? Math.cos(a) * speed * Math.random(),
         vy: opts.vy ?? Math.sin(a) * speed * Math.random() - 1,
         life, maxLife: life, color, size: opts.size ?? 2 + Math.random() * 2,
-        damp: opts.damp, grav: opts.grav,
+        damp: opts.damp, grav: opts.grav, ax: opts.ax, ay: opts.ay,
       });
     }
     if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);

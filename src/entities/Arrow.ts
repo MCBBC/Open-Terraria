@@ -16,7 +16,7 @@ import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
-import { wetCollision } from './npcLiquid';
+import { wetCollision, lavaCollision } from './npcLiquid';
 import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
@@ -1264,23 +1264,28 @@ export class Arrow extends Entity {
   /** 蜂族 alpha 归零后 extraUpdates→0 挂起（:27693-27695——原版 numUpdates 每 tick
    *  头读取,当拍已入循环的子步数不变,下一 tick 起 1 子步/tick） */
   private bee36EU0 = false;
-  // ---- ★L2 湿缓存（Projectile.wet/honeyWet/shimmerWet 同名字段,2026-09-01 NX3 遗留2）----
-  //  原版三字段 = 出生预置（NewProjectile :10887-10893 WetCollision 首测）+ 每子步
-  //  液段刷新（:16900-16908 置位 / :17104-17108 !wet 三清）;AI 头读的是【缓存】,
-  //  即上一子步液段值（出生拍 = 预置值）。本仓消费族（wetCacheConsumer）按此时序
-  //  维护,蜂族/469 判湿位改读缓存——详见 fixedUpdate 出生预置块注。
+  // ---- ★L2 湿缓存（Projectile.wet/lavaWet/honeyWet/shimmerWet 同名字段,2026-09-01
+  //  NX3 遗留2）----原版四字段 = 出生预置（NewProjectile :10886-10892 WetCollision
+  //  首测;lavaWet 原版预置不设,恒 false 起步）+ 每子步液段刷新（:16906-16918 置位 /
+  //  :17103-17108 !wet 三清）;AI 头读的是【缓存】,即上一子步液段值（出生拍 = 预置
+  //  值）。本仓消费族（wetCacheConsumer）按此时序维护,蜂族/469/入水消亡块判湿位改
+  //  读缓存——详见 fixedUpdate 出生预置块注。
   wet = false;
+  lavaWet = false;
   honeyWet = false;
   shimmerWet = false;
-  /** 出生预置已做（一次;NewProjectile :10887-93 等价） */
+  /** 出生预置已做（一次;NewProjectile :10886-92 等价） */
   private wetPresetDone = false;
   /** 湿缓存消费族：aiStyle 36 蜂族（181/189/307/316/566,AI_036 :27685 读 wet 三旗）
-   *  + 469 蜂箭（AI_001 头 :54969 同三旗）。原版全体弹都维护此缓存;本仓其余弹族
-   *  的湿消费位（AI_001 IsDestroyedByWater 块等）仍走各自内联探测,不为无消费者
+   *  + 469 蜂箭（AI_001 头 :54969 同三旗）+ AI_001 共享 wet 段消亡/变型族
+   *  （★F3 2026-09-01 入表：IsDestroyedByWater 六型 ProjectileID.cs:287 + 2 燃烧箭
+   *  变型 :16921-16931——旧写「弹心格内联探测」退役后这些 id 的消亡块改读缓存,
+   *  必须入消费面才有人维护）。原版全体弹都维护此缓存;本仓其余弹族不为无消费者
    *  付每子步重测成本——消费面扩族时同步入表 */
   private get wetCacheConsumer(): boolean {
     const p = this.projId;
-    return p === 181 || p === 189 || p === 307 || p === 316 || p === 566 || p === 469;
+    return p === 181 || p === 189 || p === 307 || p === 316 || p === 566 || p === 469
+      || p === 2 || ARROW_DESTROYED_BY_WATER.has(p);
   }
   // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支 :58383-58465）----
   /** ai[0] 索敌延迟（>20 后激活，:58403-58405 自减钳 20） */
@@ -2690,12 +2695,13 @@ export class Arrow extends Entity {
     // deadCellsBarrelExplosionFx+gore/尘（hostile 门同 661——被反射后不回打敌侧）
     else if (this.projId === 1023 && !this.dead && !this.hostile) this.barrel1023Burst(game);
     // ★2026-09-01 藤壶哨站弹 1026 Kill（:76827-76836）：Item_167 音 + 20×d2
-    // （vel=circular(5,5)、α50/fadeIn .5/noGravity、scale 1.2+Next(-20,40)×0.01）
+    // （vel=circular(5,5)、α50/fadeIn .5/noGravity、scale 1.2+Next(-20,40)×0.01——
+    //  ★F5 2026-09-01 ×60=Next(a,b) 上界开区间 {-20..39},旧 ×61 多掷 +40 档）
     if (this.projId === 1026 && !this.dead) {
       game.playSfxFile?.('Item_167', 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 2, this.vx, this.vy, 0, null,
-          1.2 + (Math.floor(Math.random() * 61) - 20) * 0.01);
+          1.2 + (Math.floor(Math.random() * 60) - 20) * 0.01);
         if (d) {
           d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true;
           d.vx = (Math.random() * 2 - 1) * 5; d.vy = (Math.random() * 2 - 1) * 5;
@@ -3259,6 +3265,14 @@ export class Arrow extends Entity {
       this.wetPresetDone = true;
       const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
       this.wet = rWet.wet;
+      // ★F3（2026-09-01 NX3 遗留3）：预置补 lavaWet——原版 NewProjectile 确实不设
+      //   lavaWet,但原版 tick1 的 wet 段（:16906-16911）在【消亡判定 :16921 之前】
+      //   就把 LavaCollision(出生位) 并进 lavaWet;本仓消亡块读「上一子步末缓存」,
+      //   subStep1 读的正是预置值 ⇒ 预置必须携带 tick1 档 lavaWet,否则出生即在浆里
+      //   的 IsDestroyedByWater 弹（188 火焰陷阱等）首子步就被误杀（原版同位被
+      //   lavaWet 粘滞面保护）。ignoreWater 时原版整段 wet 块跳过（:16903）→ 同门。
+      if (!projectileData(this.projId)?.ignoreWater
+        && lavaCollision(game.world.store, this.x, this.y, this.w, this.h)) this.lavaWet = true;
       if (rWet.honey) this.honeyWet = true;
       if (rWet.shimmer) this.shimmerWet = true;
       if (projectileData(this.projId)?.ignoreWater) this.wet = false;   // :10888-10890
@@ -3313,16 +3327,26 @@ export class Arrow extends Entity {
     if (this.life <= 0) { this.killNow(game); return; }   // 防御（正常由尾部递减杀）
     this.subStepAI(game);
     if (this.dead) return;                                // AI 侧已杀（killNow 已走）
-    // ★L2 湿缓存逐子步刷新（Projectile.cs:16900-16908 wet 段时序=AI 后、timeLeft
+    // ★L2 湿缓存逐子步刷新（Projectile.cs:16903-17113 wet 段时序=AI 后、timeLeft
     //   递减前）：位置 = 本子步末（AI 尾位移后）= 下一子步 AI 头读位——消费位读
-    //   到的即"上子步液段值",与原版字段语义逐值同;旗位生命周期同 :17104-17108
-    //   （置位只增不清,!wet 三清;本仓消费族不读 lavaWet,不做 LavaCollision 全盒测）
-    if (this.wetCacheConsumer) {
+    //   到的即"上子步液段值",与原版字段语义逐值同。★F3（2026-09-01）生命周期
+    //   对称补齐：①ignoreWater 门——原文 `if (!ignoreWater)` 全段跳过（:16903）,
+    //   wet/lavaWet/honeyWet/shimmerWet 四旗一律不更新（出生预置 :10888-10890 同门
+    //   只清 wet）;②lavaWet 维护——LavaCollision 全盒命中置 true【只置不清】
+    //   （:16906-16911 粘滞）,清位在主循环 `if (!wet)` 段与 honey/shimmer 同批
+    //   三清（:17103-17108）——照抄位次,非"出浆即清"。
+    if (this.wetCacheConsumer && !projectileData(this.projId)?.ignoreWater) {
+      const rLava = lavaCollision(game.world.store, this.x, this.y, this.w, this.h);
       const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
-      this.wet = rWet.wet;
+      if (rLava) this.lavaWet = true;                 // :16909-16911 只置不清（粘滞）
+      this.wet = rWet.wet;                            // :16976 wet=flag2 逐子步现值
       if (rWet.honey) this.honeyWet = true;
       if (rWet.shimmer) this.shimmerWet = true;
-      if (!this.wet) { this.honeyWet = false; this.shimmerWet = false; }
+      if (!this.wet) {                                // :17103-17108 !wet 三清
+        this.lavaWet = false;
+        this.honeyWet = false;
+        this.shimmerWet = false;
+      }
     }
     if (--this.life <= 0) this.killNow(game);
   }
@@ -3447,17 +3471,20 @@ export class Arrow extends Entity {
     // 入水块（AI_001 共享 wet 段 Projectile.cs:16921-16931）：wet && !lavaWet →
     // ① IsDestroyedByWater{85,15,188,34,1097,1106}（ProjectileID.cs:287）Kill;
     // ② type 2 燃烧箭 → TransformType(1) 变木箭 + light = 0（projId 改 1 后
-    //   数据表 1 无 light,光自动归零=原版语义）。此前整缺(备案项已处理)
-    {
-      const stW2 = world.store;
-      const cx2 = Math.floor((this.x + this.w / 2) / TILE), cy2 = Math.floor((this.y + this.h / 2) / TILE);
-      if (stW2.inBounds(cx2, cy2) && stW2.liquid[stW2.idx(cx2, cy2)] > 0) {
-        const lt2 = stW2.liquidType[stW2.idx(cx2, cy2)];
-        if (lt2 !== LIQUID_TYPE.LAVA) {
-          if (ARROW_DESTROYED_BY_WATER.has(this.projId)) { this.killNow(game); return; }
-          if (this.projId === 2) this.projId = 1;   // TransformType(1)（:16929）
-        }
-      }
+    //   数据表 1 无 light,光自动归零=原版语义）。
+    // ★F3（2026-09-01 NX3 遗留3 清偿）：读【湿缓存】+ lavaWet 粘滞面——旧写
+    // 「弹心格 liquid>0 且液型≠岩浆」为中心格几何近似（浅缘半浸/邻格液面两向偏差,
+    // 且缺 lavaWet 渡浆语义）,登记近似退役。原文判定位次（同一段内）：
+    //   Lava/WetCollision 同位双测（:16906-16908）→ lavaWet|=flag（:16909-16911,
+    //   只置不清）→ honey/shimmer|=（:16912-16918）→ 本消亡判定（:16921-16931）
+    //   → wet=flag2（:16976）/!wet 三清（:17103-17108）。原版语义：wet 为逐拍现值、
+    //   lavaWet 粘滞——沾浆弹在湿状态下永不消亡/不变型（浆→水直渡豁免）,离液拍
+    //   （!wet） lavaWet 归零,再入清水才判;岩浆中 wet 同真（WetCollision 只查
+    //   liquid>0）而 lavaWet 同真 → 双跳过。本仓读取=上一子步末同位测值（与
+    //   469/蜂族消费位同时序;出生拍=预置值,预置含 tick1 档 lavaWet——见预置注）。
+    if (this.wet && !this.lavaWet) {
+      if (ARROW_DESTROYED_BY_WATER.has(this.projId)) { this.killNow(game); return; }
+      if (this.projId === 2) this.projId = 1;   // TransformType(1)（:16929）
     }
     // ---- ★B1-X3 微光气球 936 巨星解锁段（2026-08-30 触发域修正：killNow → Shimmer()）----
     // 原版唯一出处 = Shimmer()（P.cs:22564 方法头）aiStyle==2 分支 :22676-22697，
@@ -5637,7 +5664,8 @@ export class Arrow extends Entity {
         const sl = Math.hypot(this.vx, this.vy) || 1;
         const d26 = game.spawnDust?.(this.x - (this.vx / sl) * 5, this.y - (this.vy / sl) * 5,
           this.w, this.h, 2, this.vx, this.vy, 0, null,
-          0.7 + (Math.floor(Math.random() * 11) - 5) * 0.01);
+          // 0.7+Next(-5,5)×.01（:26926）——★F5 2026-09-01 ×10 上界开区间,旧 ×11 多掷 +5 档
+          0.7 + (Math.floor(Math.random() * 10) - 5) * 0.01);
         if (d26) {
           d26.alpha = 50; d26.fadeIn = 0.5; d26.noGravity = true;
           d26.vx = this.vx * 0.25; d26.vy = this.vy * 0.25;

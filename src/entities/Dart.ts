@@ -864,11 +864,18 @@ export class Dart extends Entity {
     }
     // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)——不画本体
     if (st.noTex) return;
+    // DrawProjDirect 轨迹支绘前白化（Main.cs:30068 projectileColor=Lighting.GetColor
+    //  格光色 → :30841-30856 Lerp(projectileColor,White,k)）：811 k≡1.0（Remap(ai[0])
+    //  恒下端,见 DART_STYLE 811 注）/ 814 k=0.35 常数。per-type filter 在此处一次算好;
+    //  filter 是 ctx 级状态——置位须在本行 save/restore 界内,出界显式复位
+    //  （与下方 globalAlpha=1 同款双保险）,不影响同帧其它弹与贴图未就绪短线兜底
+    const whiteFilter = st.whiteLerp != null ? lerpWhiteFilter(st.whiteLerp) : null;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = this.netPuppet ? 1 : Math.max(0, 1 - this.alpha / 255); // 傀儡不跑 dartStep,alpha 恒初始 → 恒可见
+    if (whiteFilter) ctx.filter = whiteFilter;
     let drawn = false;
     if (st.hFrames) {
       // 836 蒲公英籽:横向 4 列胶片(Frame(4,1,frame),Main.cs:33247)——projFrameImg 竖切不适用
@@ -890,6 +897,7 @@ export class Dart extends Entity {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+    if (whiteFilter) ctx.filter = 'none';   // 出界显式复位（save/restore 本身已还原,双保险）
     if (drawn) return;
     // 贴图未就绪:短线兜底(方向与弹速一致)
     ctx.strokeStyle = st.fallback ?? '#C8B89A';
@@ -1719,6 +1727,21 @@ interface DartStyle {
   noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
   pulse?: boolean;                       // alpha/scale 呼吸(115)
   fallback?: string;                     // 贴图未就绪短线色
+  /** DrawProjDirect 轨迹支绘前白化（Main.cs:30068 projectileColor=Lighting.GetColor
+   *  格光色 → :30841-30856 Lerp(projectileColor,White,k)）——k = 本仓终值。
+   *  canvas 侧以 ctx.filter brightness/saturate 近似（lerpWhiteFilter,公式同
+   *  Arrow.ts drawTableAlpha lerpFilter :1941）；filter 为 ctx 级状态,消费点在
+   *  Dart.draw save/restore 界内且出界显式复位,不外溢同帧其它弹 */
+  whiteLerp?: number;
+}
+
+/** Lerp(色,White,k) 的 Canvas filter 近似——逐字照搬 Arrow.ts drawTableAlpha 内
+ *  lerpFilter（:1941-1943）：k≥0.999 → brightness(2.2) saturate(0) 纯白剪影;
+ *  否则 brightness 提亮（中灰 128 → 128(1−k)+255k）+ saturate 随 k 去色。
+ *  独立副本原因:Arrow 侧为类私有闭包未导出,本批改动限定 Dart.ts 单文件 */
+function lerpWhiteFilter(k: number): string {
+  return k >= 0.999 ? 'brightness(2.2) saturate(0)'
+    : `brightness(${(1 - k + (k * 255) / 128).toFixed(2)}) saturate(${Math.max(0, 1 - k * 0.8).toFixed(2)})`;
 }
 
 const DART_STYLE: Record<number, DartStyle> = {
@@ -1736,9 +1759,14 @@ const DART_STYLE: Record<number, DartStyle> = {
   // 速15/伤35）：10×10 aiStyle1 hostile α=255 penetrate=-1 tileCollide=true；
   // fade:20=AI 每拍 α−20（:57347-57351）→13 拍渐显；timeLeft 无行→600；
   // 尘面见 dartStep 811 AI 段+双 Kill 口（:57340-57367/:74019-74027）；
-  // DrawProjDirect 轨迹支白化 Lerp(:30847 ai[0] 恒 0=恒白 1.0) 未建模登记。
+  // 绘前白化（DrawProjDirect :30841-30848）：projectileColor =
+  //   Lerp(projectileColor, White, Remap(ai[0], 0, 15, 1, 0.3)) —— ai[0] 全域无写入方
+  //   （AI_001 811 支 :57340-57367 只动 localAI[0]/alpha/dust;发射点 NPC.cs:51435
+  //   不传 ai 参）→ ai[0]≡0 → Remap 恒取下端 = 因子恒 1.0 纯白剪影。
+  //   ★留 Remap 动态结构记载勿钉死常数（未来 ai[0] 若被赋值,按
+  //   Remap(ai0,0,15,1.0,0.3) 逐帧算 k 接 whiteLerp）;1.0 为现终值。
   // fallback 近似血红目测（PNG 主色未取,811 撞墙即消极少见兜底态,登记）
-  811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 600,
+  811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 600, whiteLerp: 1.0,
     sfx: ['Item_17'], fallback: '#8A3038' },
   // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
   55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
@@ -1863,8 +1891,9 @@ const DART_STYLE: Record<number, DartStyle> = {
   836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, hFrames: 4, windSeed: true, fallback: '#E8E8D0' },
   // 814 血弹(恐惧鹦鹉螺 AI_117 :47751):10×10 aiStyle1,alpha255 渐入 -20/t(:53573),
   //    tileCollide=false 穿墙,penetrate=-1;★原版 814 无光(:53561 起块内无 AddLight——
-  //    曾误挂 819 的红光 :53558);尘 5 尾;出生音 Item171(:53562)
-  814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180,
+  //    曾误挂 819 的红光 :53558);尘 5 尾;出生音 Item171(:53562);
+  //    绘前白化 Lerp(projectileColor,White,0.35) 常数(DrawProjDirect :30849-30856)
+  814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180, whiteLerp: 0.35,
     trail: { color: '#C83848', count: 1 },
     sfx: ['Item_171'], fallback: '#B03040' },
   // 577 星旋激光 VortexLaser(风暴潜水员 425 满蓄四连发,NPC.cs:59202 速 20/kb1 →

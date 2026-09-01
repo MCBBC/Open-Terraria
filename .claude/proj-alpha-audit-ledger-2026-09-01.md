@@ -86,7 +86,7 @@
 | :81476 | 9/15/34/50/53/76/77/78/91/92 | ⚰ 死支 | 无需动 |
 | :81503 | yoyo stringColor29 | 彩绳白 | 登记暂缓 |
 
-结构性遗留（E 系列）：E1 死存储族误活读（440/449/606 白剪影滤镜 brightness(2.2)saturate(0) vs 纯缺省★）[拍板；review 补注：440/449/606 的 GA case 数值已等价纯缺省，仅剩 XENO glow 叠画差异]；E2 Opacity 因子普遍丢失（多数 fixedfade 条目无 mul）；E3 折色固有损失（彩色 tint 退化为亮度近似，代码自注）；E4 Main.cs DrawProjDirect 额外面（PhoenixQuivered Extra[91] 羽饰层缺失、type==14 强制 White、229 不画→D3）。**E4 勘误（2026-09-01 whip 代理翻案+复核坐实）**：原记"whip 811/814 绘前 Lerp"归属错误——811=BloodShot/814=BloodNautilusShot 血月敌对弹（ProjectileID.cs:2074/:2080），属 DrawProjDirect **轨迹尾焰支 ：30609 成员表**（同表 70+ 弹），与 DrawWhip(:36656) 不相交；正式立项为敌对弹渲染债：①814 Lerp(White,0.35) 常数白化（Dart.ts 表已有条目可挂色通道）②811 Remap(ai[0],0..15→1..0.3) 动态因子（今日 ai[0] 无写入方恒 1.0 全白，禁止钉死常数抹形态）③811 本仓无 DART/ARROW 表条目=双缺 ④:31177/:31182 段间层（num164=0 除零诡）须随整条轨迹渲染同期实施。WhipProj.ts:1352 注释位对应彩虹鞭 :37391（已移植），勿混。
+结构性遗留（E 系列）：E1 死存储族误活读（440/449/606 白剪影滤镜 brightness(2.2)saturate(0) vs 纯缺省★）[拍板；review 补注：440/449/606 的 GA case 数值已等价纯缺省，仅剩 XENO glow 叠画差异]；E2 Opacity 因子普遍丢失（多数 fixedfade 条目无 mul）；E3 折色固有损失（彩色 tint 退化为亮度近似，代码自注）；E4 Main.cs DrawProjDirect 额外面（PhoenixQuivered Extra[91] 羽饰层缺失、type==14 强制 White、229 不画→D3）。**E4 勘误（2026-09-01 whip 代理翻案+复核坐实）**：原记"whip 811/814 绘前 Lerp"归属错误——811=BloodShot/814=BloodNautilusShot 血月敌对弹（ProjectileID.cs:2074/:2080），属 DrawProjDirect **轨迹尾焰支 ：30609 成员表**（同表 70+ 弹），与 DrawWhip(:36656) 不相交。**→ 811/814 白化已由批六落地**（Dart.ts：DartStyle.whiteLerp 字段+lerpWhiteFilter 函数=Arrow lerpFilter 逐字副本+draw save/restore 界内施加；811 k=1.0 恒白剪影[ai[0]≡0 恒 Remap 下端,Remap 动态结构入注未钉死]、814 k=0.35；光照交互残差登记=原版作用于光色后整弹全亮,本仓实体层在光照合成前=暗处白剪影被压暗,补齐需 post-light 通道）；:31177/:31182 段间层仍挂账（num164=0 除零诡，须随整条轨迹渲染同期）。WhipProj.ts:1352 注释位对应彩虹鞭 :37391（已移植），勿混。
 
 ## §3 反向错误/口徑冲突（待拍板）
 
@@ -106,8 +106,8 @@
 | # | typeId | 缺的操作 | 原版行号 | 备注 |
 |---|---|---|---|---|
 | H1 | ~~596~~ **✅ 批四完成**（载体勘误：596=**Dart 载体**非 Arrow，DART_STYLE[596] 沙漠精灵 533 fireCasterVolley 直构）——Dart.ts 落码：①AI 尘环 3 连掷 1/27 门逐字+尾爆盒 60×60/damage=mainExpertMode?22:30 ②curse596Kill（:73762-73794 逐字：Kill 才是稳定伤害面,飞行伤原版=0）③life 尽+接触死亡双挂点（二次 hitPlayer 被免疫帧拦）。**登记未修**：飞行伤=baseDamage≠原版 0（Dart 无 damage=0 表能力）、AI α 渐显段（Dart 不读 afade 档=双层缺） | :34171-:34272/:73762-73794/:6452-6461 |
-| H2 | 633 | 每 tick 从面板重算 damage | :67585-67598 | FrostHydra |
-| H3 | 632(+461/455/537/642 家族) | 子件同步父伤 damage*=3 | :31977-32089 | 冰霜九头蛇 |
+| H2 | ~~633~~ **误报销账**（2026-09-01 主线复核）：633=**LastPrism**（最后的棱镜持手晶体，ProjectileID.cs:1718）非 FrostHydra——行为层张冠李戴；本仓 PrismProj 独占链已承载（伤害每拍刷新 :67596 由 dmgCb 注入，Game.ts:14686-14691+PrismProj.ts:5-6/:331-332） | :67584-67640 |
+| H3 | ~~632(+461/455/537/642)~~ **误报销账**：632=**LastPrismLaser**（:1716），「damage=projectile3.damage 逐拍同步 :30375」已由 PrismProj 承载；461/455/537/642 的 sin-scale 属月总哨兵激光等其它家族，非"冰霜九头蛇镜像" | :31977-32089/:30375 |
 | H4 | 1130 GlacierFang | damage/kb Remap 成长+penetrate 重置 | :37518-37743 | 与色彩 :80597 一并 |
 | H5 | 304 余烬 | 30t 后 α+=10;damage*0.9;kb*0.9;α 满 255 消亡 | :23880-23892 | 出生帧 α=0 一次性(:23455) |
 | H6 | ~~556-561 counterweight~~ | **误报销账**（2026-09-01 复核）——Next(3,7) 复原属 AI_099_2_Yoyos 主悠悠球（:68785 方法体,":69093 penetrate<0→Next(3,7)"），本仓 YoyoProj:2857 pierceLeft 已逐字实现;配重球 AI_099_1(:68701)是常量 penetrate=1=一次命中即亡,本仓 onHit :2453 无条件 dead 等价承载。行为层子代理归属错挂 | :68785/:69093/:68701 | 附带登记:YoyoProj :2601/:2855 注释锚为 1456 代际行号（1457 真值 −2 块 :69093-69151/onHit :13290-13335+14189-14205),数字正确仅代际旧 |

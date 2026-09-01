@@ -618,7 +618,7 @@ import {
   type BarContext, type BarNpc, type CollectInfo,
 } from './BossBars';
 
-export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
+export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
 // ---- 拴绳风筝绘制（Main.DrawKite :36614-37069）工具 ----
 

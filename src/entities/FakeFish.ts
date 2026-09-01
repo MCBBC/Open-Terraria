@@ -585,7 +585,7 @@ interface FakeFishGameProbe extends FakeFishHost {
 
 // ==================== 湖面星闪（Spawn_LakeSparkle :1336-1353 近似）====================
 
-interface LakeSparkle {
+export interface LakeSparkle {
   x: number; y: number; vx: number; vy: number;
   axPerT: number; ayPerT: number;
   life: number; age: number;
@@ -598,11 +598,16 @@ const sparkles: LakeSparkle[] = [];
 /** FadingParticle.SetBasicInfo/SetTypeInfo 包络近似：寿命 50..140t、加速 =
  *  MovementVector/60/寿命、白星随机透明度、FadeIn/Out 各 45%、自旋 ±2π/32×|move|钳 */
 function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number): void {
+  const life = 50 + 90 * randFloat();         // SetTypeInfo(num=50+90×rand)
   sparkles.push({
     x: px, y: py, vx: 0, vy: 0,
-    axPerT: moveX / 60, ayPerT: moveY / 60,   // vector=/60 再 /num——两步合并于 age 循环
+    // Velocity=Zero（SetBasicInfo :1343 第三参）+AccelerationPerFrame=(move/60)/num
+    //（:1339 vector=MovementVector/60 → :1346 vector/num）——两段除法缺一不可
+    //（★F2 2026-09-01 补第二段 /life：旧码少除=终速×life 的"火箭出水面"形；
+    //  真形 = 静止起步匀加速,寿命末终速恰为 move/60,位移 = move×life/120）
+    axPerT: moveX / 60 / life, ayPerT: moveY / 60 / life,
     age: 0,
-    life: 50 + 90 * randFloat(),              // SetTypeInfo(num=50+90×rand)
+    life,
     rot: randFloat() * Math.PI * 2,
     rotVel: (randFloat() < 0.5 ? -1 : 1) * (Math.PI * 2 / 32)
       * Math.max(0, Math.min(1, Math.hypot(moveX, moveY) / 32)),
@@ -618,6 +623,8 @@ const school: FakeFish[] = [];
 
 export function fakeFishCount(): number { return school.length; }
 export function eachFakeFish(): readonly FakeFish[] { return school; }
+/** 湖面星闪读侧（测试/度量,同 eachFakeFish 口径） */
+export function eachLakeSparkles(): readonly LakeSparkle[] { return sparkles; }
 /** 世界卸载/测试复位（原版粒子系统随世界重建） */
 export function clearFakeFish(): void {
   school.length = 0;

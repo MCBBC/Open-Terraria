@@ -9271,7 +9271,10 @@ export class Enemy extends Entity {
     const notCalm = !game.world.clock.isDay || wthr.raining || wthr.slimeRain || stormSurface;
     const wet = this.wet;         // 原版一律碰撞盒 wet（:54049/:54293/:53585 等，曾中心格 liquid>80）
     const drowning = !canBreathe
-      && drownCollision(st, this.x, this.y, this.w, this.h, 1);   // flag21（:54216）
+      // flag21（NPC.cs:54361——旧注 :54216 系漂移行号）：AI_007 原文
+      // `!flag11 && Collision.DrownCollision(position, width, height, 1f, includeSlopes: true)`
+      // ★F4②（2026-09-01）：includeSlopes 补 true——坡面/半砖带液计水触发溺逃
+      && drownCollision(st, this.x, this.y, this.w, this.h, 1, true);
     // ---- 危险扫描（cs:53884-54028，每 tick；乌龟整段跳过）----
     let danger = false;           // flag16
     let dangerDir = -1;           // num15：朝最近险情侧

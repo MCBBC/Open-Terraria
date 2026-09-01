@@ -10,6 +10,28 @@
 //   · 生产端（clientOnly:false 型）= 本地调本函数 + broadcast 上行 module8;
 //     netApplyParticleOrchestra 收包侧分支再调本函数 → 全端同款复放（原版语义 =
 //     请求端 SpawnParticlesDirect 本地直生 + Broadcast 排除发送者,两面对同一本体）。
+//   · ★F6（2026-09-01）随机分布形近似【统一登记】（视觉面已登记惯例,不改实现,
+//     精确版先例 = SparkleGuitarProj.ts:210 nextVector2Circular——该处为唯一 1:1）：
+//     − Utils.RotatedByRandom(maxRadians)（Utils.cs:1785-1787）= NextDouble()×r −
+//       NextDouble()×r = 对称【三角分布】（峰在 0,肩 ±r）；本仓统一写法
+//       (rng()×2−1)×half = ±half【均匀】,尾巴概率密度偏低。
+//     − Utils.NextVector2Circular(w,h)（Utils.cs:1301-1304）= NextVector2Unit()×(w,h)
+//       ×NextFloat() = 角均匀×【线性半径】盘；本仓 circ() 助手（:572,逐轴
+//       (2u−1)×r）=【盒均匀】——角非均匀、盒角溢出椭圆、半径密度偏高。
+//     涉事站点清单（收编批统一采用上两式,后续新增型沿用同一登记不再逐站备注）：
+//     circ() 盒均匀消费 = rainbowBoulderFx(10)/townSlimeTransformFx(7)/
+//     rainbowRodHitFx(7)/keybrandFx(7)/formatCFx(5)/stardustPunchFx(4)/
+//     snappingStoneRingFx(3)/snappingStoneRechargeFx(3)/lightningSmallOrchestra(3)/
+//     inScreenDungeonSpawnFx(3)/deadCellsFlintFx(3)/deadCellsDownDashExplosionFx(3)/
+//     stormLightningWindupFx·stellarTuneFx·shimmerArrowFx·princessWeaponFx·
+//     mushroomBoiTargetFoundFx·itemTransferFx·harpyCharmFamilyFx·gasTrapFx·
+//     deadCellsBeheadedHeadFx·classyCaneFx·cattivaHitFx·blackLightningSmallFx·
+//     blackLightningHitFx·bestReforgeFx(各 2)/swordConeArmDust·silverBulletSparkleFx·
+//     pooFlyFx·natureFlyFx·moonLordWhipHitFx·deadCellsBarnacleShotFiringFx·
+//     arcSurgeFx(各 1)；RotatedByRandom 三角→均匀消费 = deadCellsBarnacleShotFiringFx
+//     rot() 助手（0.19635/0.09817 双档）/snappingStoneRingFx kind1 bolt 相位(±0.05τ)/
+//     stellarTuneFx(±0.25)/shimmerArrowFx 等 rng()×2−1 角抖站。判别式与盘形统计
+//     锚见 tests/spectre-stellar-procs.test.ts（nextVector2Circular 线性盘）。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -267,7 +289,8 @@ export function mushroomBoiTargetFoundFx(game: GameHooks, x: number, y: number):
  * producer = AI_028 1026 支 ai[1]==0 首子步门（Projectile.cs:27028-27038,
  * clientOnly:true,PositionInWorld=Center、MovementVector=velocity）：
  *   Item95 音 + 15×d2（NewDustPerfect 位±4、vel=moveDir.RotatedByRandom(0.19635)×
- *   (i≥8?3+r×2:7+r×2)、α50/scale 1.2±0.05/fadeIn .5/noGravity）+ 5×d267
+ *   (i≥8?3+r×2:7+r×2)、α50/scale 1.2+Next(-5,5)×.01（★F5 2026-09-01:×10,旧 ×11 多掷
+ *   +5 档=Next(a,b) 上界开区间 off-by-one）/fadeIn .5/noGravity）+ 5×d267
  *   （±4、RotatedByRandom(0.09817)×r×8、α127、Lerp(DarkOliveGreen,White,r×0.25)、
  *   fadeIn .6+r×.6、scale .5、noGravity）。
  * ★2026-09-01 producer 锚补齐批：本仓 AI_197 出弹站（MinionProj 1025 支）首拍接线,
@@ -288,7 +311,7 @@ export function deadCellsBarnacleShotFiringFx(
     const spd = i >= 8 ? 3 + rng() * 2 : 7 + rng() * 2;
     const [vx, vy] = rot(bx, by, 0.19634954631328583);
     const d = game.spawnDust?.(x + Math.floor(rng() * 8 - 4), y + Math.floor(rng() * 8 - 4),
-      0, 0, 2, vx * spd, vy * spd, 0, null, 1.2 + Math.floor(rng() * 11 - 5) * 0.01, true);
+      0, 0, 2, vx * spd, vy * spd, 0, null, 1.2 + Math.floor(rng() * 10 - 5) * 0.01, true);
     if (d) { d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true; }
   }
   for (let j = 0; j < 5; j++) {                            // 5×d267（:2551-2559）
@@ -370,7 +393,9 @@ export function deadCellsBeheadedHeadFx(
     const py = y + Math.sin(f) * num2 * 15 * 0.5 + (rng() * 2 - 1) * 4 * num2
       + moveY * num - vy * 0.5;
     game.spawnParticles?.(px, py, 'rgba(255,200,120,0.55)', 1, Math.hypot(vx, vy),
-      { life: 15, vx, vy, damp: 1, grav: 0, size: 1.2 * num2 * 2 });
+      // AccelerationPerFrame = Velocity×(1/num4)×0.25 = vel/60（:1940 `×(0−−1/15)×0.25`
+      // 双负号=正加速,寿命内 1v→1.25v 渐加速；★F4 2026-09-01 补——旧 damp:1 无加速
+      { life: 15, vx, vy, ax: vx / 60, ay: vy / 60, grav: 0, size: 1.2 * num2 * 2 });
   }
 }
 
@@ -1619,12 +1644,17 @@ export function natureFlyFx(game: GameHooks, x: number, y: number, rng: Rng = Ma
  * Spawn_LakeSparkle（:1336-1353）：湖面闪光星（star0 BehindPlayers、寿命 50-140、旋转速度被
  * movementVector 长度钳制缩放、scale .5-1）。FakeFish 族统一收编迁移面（评估结论=迁入统一池;
  * FakeFishJump 保持局部——跃态需池内密度门,详见 syncModules 注）。
+ * ★F2（2026-09-01）：积分步 = 初速零（SetBasicInfo :1343 Velocity=Zero）+ 加速度
+ * (move/60)/TTL（:1339 vector=/60 → :1346 /num 两段除法）——旧码把 MovementVector
+ * 原值当初速（火箭形,终速/TTL 均错 60×life 倍）；TTL 耦合走 lifeExact 同值。
  */
 export function lakeSparkleFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
 ): void {
+  const life = 50 + ((rng() * 91) | 0);                    // SetTypeInfo(num=50+90×rand)
   game.spawnParticles?.(x, y, `rgba(255,255,255,${rng().toFixed(2)})`, 1, 0,
-    { life: 50 + ((rng() * 91) | 0), vx: moveX, vy: moveY, damp: 1, grav: 0, size: 1 + rng() });
+    { lifeExact: life, vx: 0, vy: 0, ax: moveX / 60 / life, ay: moveY / 60 / life,
+      damp: 1, grav: 0, size: 1 + rng() });
 }
 
 /**

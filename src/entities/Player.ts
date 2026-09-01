@@ -2709,8 +2709,11 @@ export class Player extends Entity {
     this.updateHairDyeDust(game);
     // ---- ★2026-09-01 枭首者头部 282 逐帧残影（DoDeadCellsBeheadedParticles
     //      Player.cs:24491-24510——与 UpdateHairDyeDust 同段相邻,原版在 PlayerFrame()
-    //      之后逐帧跑,Main.netMode!=2 门 = 各端对全部 Main.player 生成;本仓远端代理
-    //      不走 fixedUpdate,与染发剂彩纸同门在 Game.simulateRemotePlayers 补掷 ----
+    //      之后逐帧跑,Main.netMode!=2 门 = 各端对全部 Main.player 生成。★F4②
+    //      2026-09-01 注记订正：本仓远端代理不走 fixedUpdate,【无】模拟侧补掷（旧注
+    //      "与染发剂彩纸同门在 Game.simulateRemotePlayers 补掷"失实——查无此掷）；
+    //      远端画面由 owner 端本步的 broadcastParticleOrchestra(DeadCellsBeheadedEffect)
+    //      → 各端 netApplyParticleOrchestra 复放 deadCellsBeheadedHeadFx 覆盖 ----
     this.deadCellsBeheadedStep(game);
     // ---- FTW 克脑重力倒置消费端（NPC.brainOfGravity → Player.forcedGravity）：
     //      克脑 266 二阶段每 tick 写 world.brainOfGravity=实体 id（NPC.cs:32650-32653），
@@ -5257,7 +5260,10 @@ export class Player extends Entity {
    *  对全部玩家本地生成）→ 本仓只模拟本地玩家 → 本地直生 + 广播补远端（34 型偏差
    *  口径）。消费本体 = fx/orchestraFx.deadCellsBeheadedHeadFx。 */
   deadCellsBeheadedStep(game: GameHooks): void {
-    if (this.dead || this.isGhostPhase(game.world) || this.shimmering) return;   // dead/ghost/frozen(shimmering) 门
+    // ★F4③（2026-09-01）补 !stoned 门——仓内有真实石化态（BuffType.Stoned=156,
+    // :3619 lastStoned 过渡同源）非"不可达态",原版门串 :24494 含 !stoned && !frozen
+    if (this.dead || this.isGhostPhase(game.world) || this.shimmering
+      || this.buffs.has(BuffType.Stoned)) return;   // dead/ghost/frozen(shimmering)/stoned 门
     if (this.headArmorSlot !== 282) return;                    // head == 282（枭首者头部 5457）
     if (this.sitting || this.sleeping) return;                 // !sitting.isSitting && !sleeping.isSleeping
     if (this.mount.active && !!MOUNT_SETS.PlayerIsHidden?.[this.mount.type]) return;   // PlayerIsHidden 门

@@ -20,13 +20,22 @@ const tid = (sheet: number): number => BY_SHEET.get(sheet) ?? -1;
 const setOf = (sheets: number[]) => new Set(sheets.map(tid).filter((v) => v >= 0));
 
 /**
- * TileSolidTop ∩ TileSolid 可达族（平台行为族四件套,TileStore.isPlatform 注①）。
+ * TileSolidTop ∩ TileSolid 可达族（平台行为族九件套,TileStore.isPlatform 注①）。
  * Main.tileSolidTop 是【类型静态表】（致动不变）——对 tileSolid 族的可达成员
- * 只有这四件套（其余 solidTop 型均 tileSolid=false,被 tileSolid 项先行否决）。
+ * 只有这九件（其余 solidTop 型均 tileSolid=false,被 tileSolid 项先行否决）。
+ * 1457 字面（Main.cs,赋值即 tileSolidTop+tileSolid 同批成对）：
+ *   19 平台 :8031-8032 / 239 矿锭 :9797-9798 / 380 花盆箱 :9799-9800 /
+ *   427 红团队平台 :10118-10119 / 435-439 绿蓝黄粉白团队平台五色 :10126-10136
+ *   （`for (num2 = 435; num2 <= 439; …)` 整批七旗,TileID.cs:1307-1315 五 const）。
+ * ★潜伏雷说明（蓝队 F1,2026-09-01）：本仓 TILE_DEFS 口径下这九件当前【全
+ *   solid:false】（platform 语义档,数据面未随 1457 置 tileSolid）→ 消费位
+ *   `TILE_DEFS[t]?.solid &&` 先行否决,本表今日整体是死表;将来有人按原版把
+ *   任一件（最可能是团队平台五色）tileSolid 改真时,豁免行判定位立即复活——
+ *   本表已就位,九件一并豁免/solidTop 反豁免,不会漏件误放行。
  * DrownCollision 豁免行（Collision.cs:1418）tileSolidTop 项消费——不可用
  * TileStore.isPlatform 代替：其带 nactive() 致动闸,致动平台原版恒吃 tileSolidTop。
  */
-const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427]);
+const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427, 435, 436, 437, 438, 439]);
 
 /**
  * 触碰直接伤害【基准】值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等）。
@@ -88,20 +97,29 @@ export function liquidCollision(st: TileStore, px: number, py: number, pw: numbe
 
 /**
  * Collision.DrownCollision（Collision.cs:1385-1444）1:1——头部浸液判定。
- * 头部采样盒:X=px+pw/2 居中宽 min(10,pw),Y=py-2(gravDir==-1 时 +ph/2-6),
- * 高 min(12,ph)。命中条件:液体>0 且非岩浆(2)非微光(4)——**蜂蜜(3)也可淹**
- * ——且该格不在豁免行(gravDir==1 取扫描首行,否则末行-1;豁免行若
- * active+solid+非 solidTop 则不计,即头顶贴实心块时该行液体不算)。
+ * 头部采样盒:X=px+trunc(pw/2)−trunc(num/2) 居中宽 num=min(10,pw),Y=py−2
+ * （gravDir==−1 时 +trunc(ph/2)−6）,高 num2=min(12,ph)。
+ * ★中心三项全是 C# `(float)(Width/2)` 式【整数除】（Collision.cs:1387/:1394/:1397）
+ * ——奇数尺寸体浮点除即偏 0.5px（蓝队 F4③ 2026-09-01 定罪;WetCollision 同族坑
+ * 与五处整除清单见 npcLiquid.ts:44-52）。
+ * 命中条件:液体>0 且非岩浆(2)非微光(4)——**蜂蜜(3)也可淹**——且该格不在豁免行
+ * (gravDir==1 取扫描首行,否则末行-1;豁免行若 active+solid+非 solidTop 则不计,
+ * 即头顶贴实心块时该行液体不算;includeSlopes=true 时 blockType()!=0——半砖/坡面,
+ * Tile.cs:204-216——反例计水)。
  * 液面高度:drop=(256-liquid)/32,表面 Y=j*16+drop*2,有效高 16-trunc(drop*2)。
- * 偏差:tileSolidTop≈isPlatform(平台近似);includeSlopes 玩家调用不传,省略。
+ * 扫描窗钳制 0..maxTilesX−1 / 0..maxTilesY−40（Collision.cs:1404-1407）。
+ * includeSlopes 实参对号（蓝队 F4②,2026-09-01）:NPC.cs:54361 AI_007 flag21 与
+ * :54285 idle 起身传【true】（坡面/半砖带液计水触发溺逃）;玩家 Player.cs:23379
+ * 与 NPC :96058 CheckDrowning/:56311 walkPrediction 缺省 false。
  */
 export function drownCollision(
-  st: TileStore, px: number, py: number, pw: number, ph: number, gravDir: 1 | -1,
+  st: TileStore, px: number, py: number, pw: number, ph: number,
+  gravDir: 1 | -1, includeSlopes = false,
 ): boolean {
   const TS = 16;
   const num = Math.min(10, pw), num2 = Math.min(12, ph);
-  const vx = px + pw / 2 - num / 2;
-  const vy = py - 2 + (gravDir === -1 ? ph / 2 - 6 : 0);
+  const vx = px + Math.floor(pw / 2) - Math.floor(num / 2);   // (float)(Width/2)−(float)(num/2)
+  const vy = py - 2 + (gravDir === -1 ? Math.floor(ph / 2) - 6 : 0);   // +Height/2−6 同整数除
   const i0 = Math.max(0, Math.floor(px / TS) - 1);
   const i1 = Math.min(st.w - 1, Math.floor((px + pw) / TS) + 2);
   const j0 = Math.max(0, Math.floor(py / TS) - 1);
@@ -116,9 +134,14 @@ export function drownCollision(
       //   ★L1 NX3 同位核正（2026-09-01）：原版无 inActive 检查,致动实心块头顶那行
       //   液体同样不计水;旧 isActive=nactive() 口径把致动实心放行成"淹水"】且
       //   tileSolid（Main.tileSolid 静态表——st.isSolid 带致动闸不可用）且
-      //   非 tileSolidTop（静态族表,见 TILE_SOLID_TOP_FAMILY 注）→ 该行液体不计
+      //   非 tileSolidTop（静态族表,见 TILE_SOLID_TOP_FAMILY 注）且
+      //   非（includeSlopes && blockType()!=0）→ 该行液体不计。
+      //   ★F4②（2026-09-01）：includeSlopes 臂落地——NPC.cs:54361/:54285 传 true,
+      //   坡面/半砖带液反例计水;blockType()=halfBrick?1:(slope?slope+1:0),
+      //   !=0 ⇔ half||slope>0（Tile.cs:204-216）。
       const t = st.type[idx];
-      if (j === topRow && t !== 0 && !!TILE_DEFS[t]?.solid && !TILE_SOLID_TOP_FAMILY.has(t)) continue;
+      if (j === topRow && t !== 0 && !!TILE_DEFS[t]?.solid && !TILE_SOLID_TOP_FAMILY.has(t)
+        && !(includeSlopes && (st.half[idx] !== 0 || st.slope[idx] > 0))) continue;
       const drop = (256 - liq) / 32;
       const surfY = j * TS + drop * 2;
       const surfH = TS - Math.trunc(drop * 2);
