@@ -42,6 +42,7 @@ function mkGame(store?: TileStore) {
     const ret: VDust = {
       active: true, x, y, vx, vy, type, scale, alpha, fadeIn: 0,
       noGravity, noLight: false, noLightEmittance: false, color: color ?? null,
+      followEnt: null, attractTo: null,
       rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
     };
     dusts.push({ type, scale, ret, perfect });
@@ -386,29 +387,27 @@ describe('杂项（Keybrand/GasTrap/Shimmer/TownSlime/Cattiva/RB 族/BestReforge
     expect(ls.particles[0].opts.lifeExact).toBeLessThanOrEqual(140);
   });
   it('★F5 BarnacleShotFiring d2 scale 边界：Next(-5,5) 上值 4 → 1.24（旧 ×11 上探 1.25）', () => {
-    const { g, dusts } = mkGame();
-    // 队列喂 rng：i=0 的 d2 五掷 = [spd, rotJitter, xOff, yOff, scale]——scale 槽喂
-    // 0.999999（Math.random 值域 [0,1) 上界邻域）→ floor(9.99999−5)=4 → 1.24
-    const q = [0.5, 0, 0, 0, 0.999999];
-    deadCellsBarnacleShotFiringFx(g as never, 100, 100, 1, 0,
-      (): number => (q.length ? (q.shift() as number) : 0.5));
-    expect(dusts.length).toBeGreaterThanOrEqual(1);
-    expect(dusts[0].type).toBe(2);
-    expect(dusts[0].scale).toBeCloseTo(1.24, 12);
-    // 统计补刀：种子扫过全域,任一 d2 scale 不得越过 1.24（上界开区间）
-    let seed = 1;
+    // 统计判别（对 rng 消费序稳健——rot() 助手 ★F6 清偿后每调用 2 掷）：
+    // ×10 判别式 scale ∈ [1.15,1.24]；旧 ×11 在 40 轮×15 粒≈600 掷里
+    // P(全躲开 1.25 档 rng∈[10/11,1)) ≈ 3e-28,漏检不可能
+    let seed = 7;
     const rng = (): number => {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
       return (seed >>> 8) / 0x800000;
     };
+    let d2Count = 0;
     for (let k = 0; k < 40; k++) {
       const g2 = mkGame();
       deadCellsBarnacleShotFiringFx(g2.g as never, 100, 100, 1, 0, rng);
       for (const d of g2.dusts) {
-        if (d.type === 2) expect(d.scale).toBeLessThanOrEqual(1.24);
+        if (d.type !== 2) continue;
+        d2Count++;
+        expect(d.scale).toBeGreaterThanOrEqual(1.15);
+        expect(d.scale).toBeLessThanOrEqual(1.24);
       }
       seed = (seed + 7919) & 0x7fffffff;
     }
+    expect(d2Count).toBe(600);
   });
   it('HeroicisSetSpawnSound(64)=rainbow_boulder 音；PlayerVoiceOverrideSound(46)=变声字分派', () => {
     const he = mkGame();

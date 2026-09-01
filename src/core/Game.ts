@@ -1602,7 +1602,7 @@ export function maintainMinionBuffs(
         const bird = new MinionProj(
           owner.cx - 8, owner.y, 759,     // base.Top（Center.X, position.Y）
           Math.max(1, c4281?.damage ?? 7), c4281?.knockBack ?? 4,
-          false, 0, false, () => (owner.dead ? null : owner),
+          false, 0, false, () => owner,   // ★F5：AI_158 :49643 全程读 Main.player[owner] 不查 dead
         );
         spawn(bird);
         owned.set(759, (owned.get(759) ?? 0) + 1);
@@ -6756,7 +6756,9 @@ export class Game implements GameHooks {
       if (guardianOn && !g623) {
         const owner = this.player;
         const g = new MinionProj(owner.cx, owner.cy, 623, 30, 10, false, 0, false,
-          () => (owner.dead ? null : owner));
+          // ★F5：AI_120 :45455-45477 全程读 player，player.dead 只清 stardustGuardian
+          //   旗（timeLeft 不再续写 → 弹体自灭）——属主引用不置空（死亡窗内照常索敌）
+          () => owner);
         g.noSlot = true;
         this.entities.add(g, 'projectiles');
       } else if (!guardianOn && g623) g623.dead = true;
@@ -7819,7 +7821,13 @@ export class Game implements GameHooks {
         const host: MeteorHost = {
           w: st.w, h: st.h, spawnX: w.spawnX,
           groundLevel: w.groundLevel, rockLevel: w.rockLevel, store: st,
-          players: player.dead ? [] : [{ x: player.x, y: player.y, w: player.w, h: player.h }],
+          // ★F4（2026-09-01）去 dead-blanking：原版玩家门只查 active——
+          //   dropMeteor 全槽扫描 `if (Main.player[i].active)`（:6198-6205,死亡玩家
+          //   active 仍真 → 照常进入落点搜索）+ meteor 保护区盒 `if (Main.player[k].active
+          //   && !ignorePlayers)`（:6324-6334,尸位照常锚定禁落）。旧 `dead ? []` 双向
+          //   偏离：死亡窗口 dropMeteor 因 players.length===0 直接 return null
+          //   （MeteorFall.ts :6209-6216 门）= 陨石被吞 + 尸位保护区消失。
+          players: [{ x: player.x, y: player.y, w: player.w, h: player.h }],
           npcs: [
             ...this.entities.enemies.filter((e) => !e.dead).map((e) => ({ x: e.x, y: e.y, w: e.w, h: e.h })),
             ...this.entities.npcs.filter((n) => !n.dead).map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h })),
@@ -9880,6 +9888,24 @@ export class Game implements GameHooks {
       } else {
         this.interactAt(tx, ty);
       }
+      // 旧世界跑酷指南 6190↔6195 右键互换（★T2 批 2026-09-01；Player.cs:31764-31877
+      // ItemCheck_ManageRightClickFeatures 快换表 case 6190→6195/6195→6190——SetDefaults
+      // :47656-47660 无 useStyle 族物品的唯一消费面）。原版门 = flag（:31765）
+      // `controlUseTile && !tileInteractionHappened && releaseUseItem && !controlUseItem`
+      // + itemTime==0 && itemAnimation==0 + 右键边沿（mouseRightRelease——6190 不在
+      // ItemsThatAllowRepeatedRightClick）。★F1（2026-09-01 蓝队六轮）定位修正：本分派
+      // 原挂在 updateUse 左键分派链（曾 :11080 else-if 臂），在左键早退门
+      // （:9994 !mouseDown&&!holdOk）之后，纯右键帧永不可达 = 死支——上移进右键交互块
+      //（tile 交互分派之后 = !tileInteractionHappened 语义，3384/3858 同位先例；原版
+      // switch 快换表也先于 altFunctionUse 族）；门配 !inp.mouseHeld = !controlUseItem
+      // （:43160 releaseUseItem=!controlUseItem 同源——按住左键期间点右键不换型）
+      // + 右键边沿 + useTime===0（itemTime/itemAnimation 归零）。成功吞边沿
+      // （:31844 Main.mouseRightRelease=false）防 tile 互动二次消费
+      if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
+        && heldDef && (viIdFromKey(heldDef.key) === 6190 || viIdFromKey(heldDef.key) === 6195)
+        && this.swapParkourBookVisual(viIdFromKey(heldDef.key))) {
+        this.input.rightDown = false;
+      }
       // 传送门枪右键（form 1 蓝门；Player.cs:48053-48057 altFunctionUse==2 → ai1=1）。
       // 挂在 tile 交互分派之后 = 原版 :31070 !tileInteractionHappened 语义——
       // 右键悬门/箱/祭坛时优先交互不射门（前面分支消费过 rightDown 则跳过）
@@ -11077,16 +11103,6 @@ export class Game implements GameHooks {
       } else if (b3Vid === 4131 || b3Vid === 5325) this.throwVoidLens(heldDef, b3Vid);
       else if (b3Vid === 859) this.throwBeachBall(heldDef);
       else if (b3Vid === 4743) this.throwFootball(heldDef);
-    } else if (heldDef && inp.rightDown && !this._prevRightDown && this.player.useTime === 0) {
-      // 旧世界跑酷指南 6190↔6195 右键互换（★T2 批 2026-09-01；Player.cs:31764-31877
-      // ItemCheck_ManageRightClickFeatures 快换表——SetDefaults 无 useStyle 族物品
-      // 的唯一消费面）。原版门 = controlUseTile + 边沿 + 无使用在途（仓内
-      // rightDown 边沿 + useTime===0 同式,swapVoidBagVisual 同位先例）；
-      // 成功吞边沿防 tile 互动二次消费
-      const pbVid = viIdFromKey(heldDef.key) ?? -1;
-      if ((pbVid === 6190 || pbVid === 6195) && this.swapParkourBookVisual(pbVid)) {
-        this.input.rightDown = false;
-      }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 75) {
       // 坠落星 75 点击消耗（Item.cs:2283-2297 useStyle4/useAnimation=useTime=17/
       // consumable/UseSound Item4；Player.cs:42602 消耗门无豁免——手持点击即
@@ -11483,7 +11499,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!has) {
             const owner = p;
             const cube = new MinionProj(owner.cx, owner.cy, 653, 0, 0, false, 0, true,
-              () => (owner.dead ? null : owner));
+              () => owner);   // ★F5：AI_067 :50014-50208 全程读 player 不查 dead（653 无旗清支）
             cube.noSlot = true;
             this.entities.add(cube, 'projectiles');
           }
@@ -12835,7 +12851,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.add(new FlyingPiggyBank(this.player.cx + Math.cos(ang) * 14,
         this.player.cy - 4 + Math.sin(ang) * 14,
         Math.cos(ang) * speed, Math.sin(ang) * speed,
-        () => (this.player.dead ? null : this.player)), 'projectiles');
+        () => this.player), 'projectiles');   // ★F5：aiStyle97 :33640-33744 只读 Center 不查 dead
       this.sfx.playWavFile(MONEY_TROUGH_USE.sound, 1, this.player.cx, this.player.cy);   // UseSound Item59（:28985）
       this.useSwing(heldDef);                               // useStyle 1 举持
       this.player.useTime = itemCombat(3213)?.useTime ?? 28;
@@ -13153,7 +13169,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               this.player.cx + Math.cos(ang) * 12, this.player.cy - 6,
               Math.cos(ang) * 9, Math.sin(ang) * 9 - 3,
               ff.fishingPole, baitSlot, baitPower,
-              () => (owner.dead ? null : owner),
+              () => owner,   // ★F5：AI_061 :54604-54623 的 dead→Kill 门在 Bobber.fixedUpdate 本体内建模
             );
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
             bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:19230）
@@ -13285,7 +13301,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  减 minionTrueBox(projId)/2。
       const bwT = minionTrueBox(projId);
       const m = new MinionProj(x * TILE + 8 - bwT.w / 2, y * TILE - 32 - bwT.h / 2, projId, 0, 0,
-        false, 0, false, () => (this.player.dead ? null : this.player));
+        false, 0, false, () => this.player);   // ★F5：AI_067 族全程读 Main.player[owner] 不查 dead
       m.noSlot = true;
       m.vy = 15;
       this.entities.add(m, 'projectiles');
@@ -14004,7 +14020,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const angB = Math.atan2(bmwy - bzY, bmwx - bzX);
           this.player.facing = Math.cos(angB0) > 0 ? 1 : -1;
           const bvx0 = Math.cos(angB) * cw.shootSpeed, bvy0 = Math.sin(angB) * cw.shootSpeed;
-          const dmgBee0 = Math.max(1, Math.round((cw.damage ?? 9) * (ps?.dmg ?? 1) * this.player.damageMult('magic')));
+          // ★F2（2026-09-01 蓝队六轮·单次应用形）：伤乘区去重——wrapper(:13385) 已把
+          //   词缀 ps.dmg × damageMult('magic') 折进 cw.damage（原版 ItemCheck_Shoot 的
+          //   Damage 参数同折），1121 专支原版 beeDamage(Damage) 直取（:48797）——此处
+          //   再乘一遍 = 双重乘区，带伤词缀 +30% 量级偏差（9 伤 Mythical 10→旧 12）。
+          //   改直取式（1155 黄蜂枪支 cw.damage 直取同式 :14065）
+          const dmgBee0 = cw.damage;
           const kbBase = cw.knockback ?? 0.25;
           for (let ib = 0; ib < nBee; ib++) {
             // beeType()（Player.cs:12505-12513）：equipStats.strongBees（蜂巢背包 3333
@@ -14028,8 +14049,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.entities.add(bee, 'projectiles');
           }
           this.playUseSound(critVid, 'tink');   // UseSound Item_11
-          this.player.useTime = this.cycleCooldown(critVid,
-            Math.max(1, Math.round(cw.useTime * (ps?.spd ?? 1))));
+          // ★F2（同上单次应用形）：wrapper(:13389) 已把词缀 ps.spd 折进 cw.useTime——
+          //   此处 round(cw.useTime×spd) 再乘一遍 = 双重乘区；且 cycleCooldown 结果不吃
+          //   slowMagic×2.5（原版 ItemCheck_Shoot 尾段对 mana>0 && slowMagicUse 一律
+          //   ApplyItemTime(sItem, 2.5)（:47594-47601），1121 魔法武器同吃）。收口 =
+          //   getSlowMagicUseTime(cycleCooldown(cw.useTime))（:14634 组合先例）
+          // ★F3：补 onManaItemUsed()（Player.cs:42131-42137 itemAnimation>0 && item.mana>0
+          //   → ItemCheck_ApplyManaRegenDelay 回蓝延迟钟窗；邻支 :14778 先例）
+          this.player.useTime = this.player.getSlowMagicUseTime(this.cycleCooldown(critVid, cw.useTime));
+          this.player.onManaItemUsed();
           this.useSwing(def, angB, ps?.spd ?? 1);
           this.input.mouseDown = false;
           break;
@@ -14072,6 +14100,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           this.playUseSound(critVid, 'tink');   // UseSound Item_11（vanilla-itemusesound 表值）
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          // ★F3：补 onManaItemUsed()（Player.cs:42131-42137 itemAnimation>0 && item.mana>0
+          //   → ItemCheck_ApplyManaRegenDelay 回蓝延迟钟窗；邻支 :14778 先例）——
+          //   1155 magic=true 弹同吃该窗（此前漏接 = 蜂枪连发期白嫖回蓝）
+          this.player.onManaItemUsed();
           this.useSwing(def, angW, ps?.spd ?? 1);
           this.input.mouseDown = false;
           break;

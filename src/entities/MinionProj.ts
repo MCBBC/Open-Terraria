@@ -42,14 +42,33 @@ const FLAMEBURST_TOWER = new Set([663, 665, 667]);
  *  `num2 = num6` 覆写——旧"第12t"是初值误读,2026-08-31 批②修）、25t 结束、
  *  冷却 GetBallistraShotDelay */
 const BALLISTA_TOWER = new Set([677, 678, 679]);
-/** Utils.AngleLerp（Utils.cs:2154-2172）：圆周最短路插值（两分支均化简为
- *  cur + wrap(target−cur)×amount——MathHelper.Lerp(cur, target±2π, amt) 展开同式）。
- *  ★T9：AI_134 弩车 rotation 状态机消费（:69651 待机瞄准 0.08 / :69675 归位 0.05）。 */
+/** Utils.AngleLerp（Utils.cs:2154-2172）字面移植——分支结构保留，不做「最短路」化简。
+ *  ★F2② 纠偏（2026-09-01）：旧式 `diff 归一化后 cur+diff×amt` 在平局向（两角恰差 π）
+ *  与原文分叉——原文 target<cur 支的平局（num−cur == cur−target，严格 `>` 不成立）
+ *  落 else 支 `Lerp(cur, target+2π, amt)` = 沿【正方向】经 target+2π 回摆
+ *  （d=−π 时走正半周），而 diff 归一化式会取负半周（cur−π·amt）。target>cur 支的
+ *  平局同理落 `Lerp(cur, target, amt)` = 正向。⇒ 平局恒正向，非对称语义只能靠
+ *  原文分支结构保真。MathHelper.Lerp 展开 = value1+(value2−value1)×amount；
+ *  WrapAngle 单次回卷（XNA/MonoGame/FNA 同式）。消费位：AI_134 弩车 rotation
+ *  状态机（:69651 待机瞄准 0.08 / :69675 归位 0.05）。 */
 function angleLerp134(cur: number, target: number, amt: number): number {
-  let diff = target - cur;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  return cur + diff * amt;
+  let angle: number;
+  if (target < cur) {
+    const num = target + Math.PI * 2;                        // :2158
+    angle = (num - cur > cur - target)                       // :2159
+      ? cur + (target - cur) * amt
+      : cur + (num - cur) * amt;
+  } else if (target > cur) {                                 // :2164-2167 相等原样返回
+    const num = target - Math.PI * 2;                        // :2168
+    angle = (target - cur > cur - num)                       // :2169
+      ? cur + (num - cur) * amt
+      : cur + (target - cur) * amt;
+  } else {
+    return cur;
+  }
+  // MathHelper.WrapAngle：≤π 且 ≥−π 原样；否则单次 ±2π（XNA/MonoGame/FNA 共式）
+  if (angle <= Math.PI && angle >= -Math.PI) return angle;
+  return angle > Math.PI ? angle - Math.PI * 2 : angle + Math.PI * 2;
 }
 /** DD2 套装旗标消费位（2026-08-31 批②接线）。原版写入链 =
  *  ballistaPanic（buff 205,Player.cs:11933 读面——SquireT2 受击 AddBuff(205,300) :38526）：
@@ -4273,6 +4292,14 @@ export class MinionProj extends Entity {
         const setf134 = dd2SetFlags(game.player);
         const spotY134 = () => this.cy - (this.projId === 677 ? 4 : 0);
         const shotSpeed134 = setf134.squireT2 ? 21 : 16;    // num3（:69587/:69592）
+        // ★F2③ 携行态朝向回写（:69615-69623 num8 支,先于 ai[0]==1 待机臂执行）：
+        //   ai[2]==1（哨兵背包携行）&& ai[0]==1 && ai[1]==0 ⇒ direction=spriteDirection
+        //   =player.direction 每拍回写——随玩家转向同步塔身朝向（回写优先级高于待机臂
+        //   的旋转半平面派生与转火覆写；ai[1]==0 = 冷却恰好走完的拍）
+        if (this.carriedByBackpack && this.sFire === 0 && this.sCool === 0) {
+          const carrier = owner ?? game.player;
+          if (carrier) this.facing = carrier.facing < 0 ? -1 : 1;
+        }
         // 恐慌冷却钳（:69631-69640 空闲态每次递减前先钳 60/T3 双真 30）
         const panicClamp = (): void => {
           if (setf134.ballistaPanic && this.sCool > 60) this.sCool = 60;
@@ -4286,7 +4313,12 @@ export class MinionProj extends Entity {
           // ★T9 ai[0]==0 落位拍（:69599-69608）：direction=spriteDirection=
           //   owner.direction；朝左时 rotation=π（本体贴图朝右-authored,背面朝向
           //   的旋转基线由此起）——rotation 为 draw 侧 dir 组合的输入,见 draw 弩车支
-          this.rot = (game.player?.facing ?? 1) < 0 ? Math.PI : 0;
+          //   ★F2①：direction=spriteDirection=owner.direction 的【朝向写回】此前缺席
+          //   （只设了 rotation）——朝左放置后 facing 停留缺省 1,待机期 draw 的
+          //   FlipV 半边不触发（R(π)·FlipV 应为水平镜像,缺 FlipV 时 rot=π 单独
+          //   生效=上下颠倒）
+          this.facing = ((owner ?? game.player)?.facing ?? 1) < 0 ? -1 : 1;
+          this.rot = this.facing < 0 ? Math.PI : 0;
         }
         if (this.sFire === 0) {
           // 索敌门 = AI_134_Ballista_FindTarget（Projectile.cs:69465-69507）：

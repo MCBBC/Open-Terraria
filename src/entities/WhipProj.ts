@@ -323,6 +323,11 @@ export class WhipProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     const owner = this.ownerRef();
     const prevAi0 = this.ai0;
+    // ★F5（AI_165 :49309-49331）：owner.dead → flag → Kill()（原文 flag 五支 =
+    //   CCed/noItems/held.shoot!=type/pulley/dead；本仓只建模 dead 支——CCed 档
+    //   Frozen 属有损建模、held/pulley 面属发射侧语义，缺失=登记）。
+    //   此前靠 Game.ts 调用点 dead→null + 空转（null owner 不杀,鞭悬空飞完）= 双偏离
+    if (owner?.dead) { this.dead = true; return; }
     this.ai0 += this.maxUpdates; // 每 update ai[0]+1（:45014）
     if (this.ai0 >= this.timeToFlyOut) { this.dead = true; return; } // :45019-45022
     // 锚点载体钉在玩家身上（锚点=手部位置，见 armPos；proj 本体随 velocity 前漂

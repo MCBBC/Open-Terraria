@@ -929,6 +929,18 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   654 仅 notraps 在场 ⇒ g/s22222/m/const/ntb 天然空转；族尘掷全零档
     //   （killDustAmount cs:66654）⇒ RNG 流位无移。
     case 138: case 411: case 484: case 752: case 751: case 654:
+    // ★IIIII110b(涂装链)：+巨石家族余员 664/665/711/712/713/714/715/716——
+    //   1457 cs:87209-26 直调列（case 132/138/142/143/288-295/**484/664/665/711/712**
+    //   → Check2x2）与 cs:86965-69+87208 break-goto 列（654/713-716/751/752 空支出栈
+    //   `goto case 132` 并入）双臂全员=Check2x2。WHO 取证（i144p-rig JJHook.Who,
+    //   SW_KTWHO 盒式调用者栈）实证 invisibleplane #097 微群系窗：轨巷 KT(2088,575)
+    //   尾 SquareTileFrame→TileFrameImportant(714)→Check2x2 整组杀蛛石 714 四格
+    //   （WHO 2087,573/574+2088,573/574 t=714 | Check2x2←TileFrameImportant←
+    //   TileFrame←SquareTileFrame←KillTile←TrackGenerator.PlacePath）。族尘掷全零档
+    //   （killTileDustAmount 664/665/711-716→0）⇒ 派发 RNG 流零移；isBoulder 支与
+    //   138/484 同码路（上方箱族豁免+底两格 SolidTileAllowBottomSlope 联合门）。
+    //   生成期在场成员=invisibleplane 蛛石 714（Traps pass placeTrap 侧所产）。
+    case 664: case 665: case 711: case 712: case 713: case 714: case 715: case 716:
       check2x2Sweep(st, ctx, x, y, sheet);
       return true;
     // ★IIIII99d 批补（cs(1458):87030-33 → Check3x4 cs:50526；case 87035-38 →

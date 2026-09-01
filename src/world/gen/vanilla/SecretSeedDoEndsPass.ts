@@ -213,15 +213,24 @@ function convertActuallyWall(st: TileStore, rng: RNG, x: number, y: number, newW
   if (!cascades) return;
   genSquareWallFrame(st, rng, x, y);
 }
-/** Convert_ActuallyConvertTorch（cs:56762-56785）：火把样式帧改写；num==22 时净化目标恒 21。 */
-function convertActuallyTorch(st: TileStore, x: number, y: number, newStyle: number): void {
+/** Convert_ActuallyConvertTorch（cs:56762-56785）：火把样式帧改写；num==22 时净化目标恒 21。
+ *  ★F3（cs:56782）尾级联补列：SquareTileFrame(x,y) 在 num!=newStyle 支内【无条件】执行
+ *  ——原文 num2(=conversionType∈{1,4,2}) 门只包 RainbowSandAndBlackSandWalls 清漆段
+ *  （cs:56777-56781,本仓清漆面未建模=登记），与 Convert_ActuallyConvertTile 尾
+ *  SquareTileFrame（cs:56801,convertActuallyTile cascades 臂同构）同一语义面。
+ *  cascades 形参 = 本仓移植期调度旋钮（见 convertCell ★III-F5 注），非原版语义面。 */
+function convertActuallyTorch(st: TileStore, rng: RNG, x: number, y: number, newStyle: number,
+  cascades = false): void {
   const i = st.idx(x, y);
   if (!st.inBounds(x, y)) return;
   if (!st.flags[i] || SHEET_OF_TYPE[st.type[i]] !== 4) return;
   const num = Math.trunc(st.frameY[i] / 22);
   let style = newStyle;
   if (num === 22) style = 21;                                         // cs:56769-56772
-  if (num !== style) st.frameY[i] = style * 22;
+  if (num !== style) {
+    st.frameY[i] = style * 22;
+    if (cascades) genSquareTileFrame(st, rng, x, y);                  // cs:56782 无条件（门只包清漆）
+  }
 }
 
 /** TileID.Conversion.Torch(tile, conversionType)（TileID.cs:44-70） */
@@ -420,7 +429,7 @@ function convertCell(
     }
     if (!tiles) return;
     let t = SHEET_OF_TYPE[st.type[ii]];
-    if (t === 4 && torchConvertible(t, st.frameY[ii], 2)) convertActuallyTorch(st, i, j, 20);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 2)) convertActuallyTorch(st, rng, i, j, 20, cascades);
     else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 117) convertActuallyTile(st, rng, i, j, 117, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_GOLF_GRASS.has(t) && t !== 492) convertActuallyTile(st, rng, i, j, 492, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 109 && t !== 492) convertActuallyTile(st, rng, i, j, 109, cascades, gs);
@@ -441,7 +450,7 @@ function convertCell(
     if (walls && WALL_GLOW_MUSHROOM.has(wall)) convertActuallyWall(st, rng, i, j, 80, cascades);
     if (!tiles) return;
     let t = shOf(st, ii);
-    if (t === 4 && torchConvertible(t, st.frameY[ii], 3)) convertActuallyTorch(st, i, j, 22);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 3)) convertActuallyTorch(st, rng, i, j, 22, cascades);
     else if (t === 60) convertActuallyTile(st, rng, i, j, 70, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_THORN.has(t)) genKillTile(st, rng, i, j);
     return;
@@ -482,7 +491,7 @@ function convertCell(
     }
     if (!tiles) return;
     let t = shOf(st, ii);
-    if (t === 4 && torchConvertible(t, st.frameY[ii], 0)) convertActuallyTorch(st, i, j, 0);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 0)) convertActuallyTorch(st, rng, i, j, 0, cascades);
     else if (t === 492) convertActuallyTile(st, rng, i, j, 477, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 60) convertActuallyTile(st, rng, i, j, 60, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 2 && t !== 477) convertActuallyTile(st, rng, i, j, 2, cascades, gs);
@@ -508,7 +517,7 @@ function convertCell(
     }
     if (!tiles) return;
     let t = SHEET_OF_TYPE[st.type[ii]];
-    if (t === 4 && torchConvertible(t, st.frameY[ii], 4)) convertActuallyTorch(st, i, j, 19);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 4)) convertActuallyTorch(st, rng, i, j, 19, cascades);
     else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 203) convertActuallyTile(st, rng, i, j, 203, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 662) convertActuallyTile(st, rng, i, j, 662, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 199) convertActuallyTile(st, rng, i, j, 199, cascades, gs);
@@ -533,7 +542,7 @@ function convertCell(
     }
     if (!tiles) return;
     let t = SHEET_OF_TYPE[st.type[ii]];
-    if (t === 4 && torchConvertible(t, st.frameY[ii], 1)) convertActuallyTorch(st, i, j, 18);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 1)) convertActuallyTorch(st, rng, i, j, 18, cascades);
     else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 25) convertActuallyTile(st, rng, i, j, 25, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 661) convertActuallyTile(st, rng, i, j, 661, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 23) convertActuallyTile(st, rng, i, j, 23, cascades, gs);

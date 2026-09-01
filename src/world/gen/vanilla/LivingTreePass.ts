@@ -1065,15 +1065,28 @@ export function growLivingTree(
   if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
   if (j < 150) { if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
 
-  // ★YYYYYY（2026-08-23）NTB #42：cs:28186-28192 干宽三连——skyblock/extraLivingTrees
-  //   之后的 **`else if (notTheBees && !drunkWorldGen)`** 支：num3-=Next(0,2)/
-  //   num4+=Next(0,2)（2 掷+加宽）。JS 曾整支缺 → NTB 干窄 1 格+流移 2 掷。
+  // ★YYYYYY（2026-08-23）NTB #42：1458 cs:28312-28327 干宽四连——Next(2,3)×2 后
+  //   **if/else-if 三支链**：skyblock(num3--/num4++ 零掷) / extraLivingTrees(
+  //   num3-=Next(0,3)/num4+=Next(0,3) 2 掷+加宽) / NTB(num3-=Next(0,2)/num4+=
+  //   Next(0,2) 2 掷+加宽)。
+  //   ★IIIII114 定罪：JS 曾只有 NTB 支 ⇒ rainforest 链 x86 侧每次 GrowLivingTree
+  //   头部多耗 2 掷且干宽 +0..4——eLT 宽干特化（flag3 门 num4-num3≥7,cs:29072）在
+  //   JS 恒死（基础宽 4..5<7）,即 XXXVIII 落地的四段特化在 rf 链上从未生效。
+  //   x86 插桩 rig 窗流首分叉=pass42 第 6 样本（首次过头部门禁的调用,k6..10=5 掷
+  //   vs JS 3 掷）。（注意：patch 支 cs:28346-28355 只有 NTB 加宽,无 eLT——照抄。）
   const ntbWiden = gs.seedFlags.notTheBees && !gs.seedFlags.drunkWorld;
-  let num3 = i - rng.int(2, 2);   // cs:28182 Next(2,3) 恒 2（保留掷骰消耗）
-  let num4 = i + rng.int(2, 2);   // cs:28183
-  if (ntbWiden) {
-    num3 -= rng.int(0, 1);        // cs:28189-28190 Next(0,2)
-    num4 += rng.int(0, 1);        // cs:28191-28192
+  const sfELTw = !!gs.seedFlags.extraLivingTrees;
+  let num3 = i - rng.int(2, 2);   // cs:28312 Next(2,3) 恒 2（保留掷骰消耗）
+  let num4 = i + rng.int(2, 2);   // cs:28313
+  if (gs.seedFlags.skyblock) {
+    num3--;                        // cs:28314-28317（零掷）
+    num4++;
+  } else if (sfELTw) {
+    num3 -= rng.int(0, 2);         // cs:28318-28322 Next(0,3)
+    num4 += rng.int(0, 2);
+  } else if (ntbWiden) {
+    num3 -= rng.int(0, 1);         // cs:28323-28327 Next(0,2)
+    num4 += rng.int(0, 1);
   }
   if (rng.int(0, 4) === 0) {      // cs:28200 Next(5)
     if (rng.int(0, 1) === 0) num3--;

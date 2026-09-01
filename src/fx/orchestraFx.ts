@@ -10,28 +10,26 @@
 //   · 生产端（clientOnly:false 型）= 本地调本函数 + broadcast 上行 module8;
 //     netApplyParticleOrchestra 收包侧分支再调本函数 → 全端同款复放（原版语义 =
 //     请求端 SpawnParticlesDirect 本地直生 + Broadcast 排除发送者,两面对同一本体）。
-//   · ★F6（2026-09-01）随机分布形近似【统一登记】（视觉面已登记惯例,不改实现,
-//     精确版先例 = SparkleGuitarProj.ts:210 nextVector2Circular——该处为唯一 1:1）：
+//   · ★F6（2026-09-01）随机分布形近似【统一登记】（判别式与盘形统计锚见
+//     tests/spectre-stellar-procs.test.ts 的 nextVector2Circular 线性盘批）：
 //     − Utils.RotatedByRandom(maxRadians)（Utils.cs:1785-1787）= NextDouble()×r −
-//       NextDouble()×r = 对称【三角分布】（峰在 0,肩 ±r）；本仓统一写法
-//       (rng()×2−1)×half = ±half【均匀】,尾巴概率密度偏低。
+//       NextDouble()×r = 对称【三角分布】（峰 0、肩 ±r）；
 //     − Utils.NextVector2Circular(w,h)（Utils.cs:1301-1304）= NextVector2Unit()×(w,h)
-//       ×NextFloat() = 角均匀×【线性半径】盘；本仓 circ() 助手（:572,逐轴
-//       (2u−1)×r）=【盒均匀】——角非均匀、盒角溢出椭圆、半径密度偏高。
-//     涉事站点清单（收编批统一采用上两式,后续新增型沿用同一登记不再逐站备注）：
-//     circ() 盒均匀消费 = rainbowBoulderFx(10)/townSlimeTransformFx(7)/
-//     rainbowRodHitFx(7)/keybrandFx(7)/formatCFx(5)/stardustPunchFx(4)/
-//     snappingStoneRingFx(3)/snappingStoneRechargeFx(3)/lightningSmallOrchestra(3)/
-//     inScreenDungeonSpawnFx(3)/deadCellsFlintFx(3)/deadCellsDownDashExplosionFx(3)/
-//     stormLightningWindupFx·stellarTuneFx·shimmerArrowFx·princessWeaponFx·
-//     mushroomBoiTargetFoundFx·itemTransferFx·harpyCharmFamilyFx·gasTrapFx·
-//     deadCellsBeheadedHeadFx·classyCaneFx·cattivaHitFx·blackLightningSmallFx·
-//     blackLightningHitFx·bestReforgeFx(各 2)/swordConeArmDust·silverBulletSparkleFx·
-//     pooFlyFx·natureFlyFx·moonLordWhipHitFx·deadCellsBarnacleShotFiringFx·
-//     arcSurgeFx(各 1)；RotatedByRandom 三角→均匀消费 = deadCellsBarnacleShotFiringFx
-//     rot() 助手（0.19635/0.09817 双档）/snappingStoneRingFx kind1 bolt 相位(±0.05τ)/
-//     stellarTuneFx(±0.25)/shimmerArrowFx 等 rng()×2−1 角抖站。判别式与盘形统计
-//     锚见 tests/spectre-stellar-procs.test.ts（nextVector2Circular 线性盘）。
+//       ×NextFloat() = 角均匀×【线性半径】盘；
+//     收编批旧写法 (rng()×2−1)×half【均匀】/逐轴 (2u−1)×r【盒均匀】曾全族登记为
+//     近似；★F6 清偿（2026-09-01 用户点名,并行批落地）：circ() 助手与
+//     deadCellsBarnacleShotFiringFx rot() 助手已改精确式——注意两助手现各消费
+//     2 掷/次（旧 1 掷）,rng 消费序敏感的测试/仪器须重排；仍在册的均匀消费 =
+//     内联 (rng()×2−1) 站（位置盒抖/角抖）：rainbowBoulderFx(10)/
+//     townSlimeTransformFx(7)/rainbowRodHitFx(7)/keybrandFx(7)/formatCFx(5)/
+//     stardustPunchFx(4)/snappingStoneRingFx(3)/snappingStoneRechargeFx(3)/
+//     lightningSmallOrchestra(3)/inScreenDungeonSpawnFx(3)/deadCellsFlintFx(3)/
+//     deadCellsDownDashExplosionFx(3)/stormLightningWindupFx·stellarTuneFx·
+//     shimmerArrowFx·princessWeaponFx·mushroomBoiTargetFoundFx·itemTransferFx·
+//     harpyCharmFamilyFx·gasTrapFx·deadCellsBeheadedHeadFx·classyCaneFx·
+//     cattivaHitFx·blackLightningSmallFx·blackLightningHitFx·bestReforgeFx(各 2)/
+//     swordConeArmDust·silverBulletSparkleFx·pooFlyFx·natureFlyFx·
+//     moonLordWhipHitFx·arcSurgeFx(各 1)——后续新增型沿用同一登记不再逐站备注。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -303,7 +301,9 @@ export function deadCellsBarnacleShotFiringFx(
   const ml = Math.hypot(moveX, moveY) || 1;
   const bx = moveX / ml, by = moveY / ml;                  // SafeNormalize
   const rot = (baseX: number, baseY: number, half: number): [number, number] => {
-    const ja = (rng() * 2 - 1) * half;                     // RotatedByRandom(half)
+    // ★F6 清偿：RotatedByRandom（Utils.cs:1785-1787）= NextDouble×r − NextDouble×r
+    //  对称【三角分布】（峰 0、肩 ±r）——曾 (rng×2−1)×half 均匀,尾巴密度偏低
+    const ja = (rng() - rng()) * half;
     const c = Math.cos(ja), s = Math.sin(ja);
     return [baseX * c - baseY * s, baseX * s + baseY * c];
   };
@@ -590,9 +590,15 @@ function fc(r: number, g: number, b: number, a = 1): string {
   return `rgba(${c(r)},${c(g)},${c(b)},${a})`;
 }
 
-/** Main.rand.NextVector2Circular(rx,ry) */
+/** Main.rand.NextVector2Circular(rx,ry)（Utils.cs:1301-1304）：
+ *  NextVector2Unit()×(w,h)×NextFloat() = 角均匀 ×【线性半径】盘。
+ *  ★F6 清偿（2026-09-01 用户点名）：曾 (rng()×2−1)×r 逐轴盒均匀=角非均匀+
+ *  盒角溢出椭圆+半径密度偏高；本式与 SparkleGuitarProj.nextVector2Circular
+ *  （唯一 1:1 先例）同构。P(R<t)=t/max 线性、E[R]=max/2（旧盒均匀 E=2/3·max）。 */
 function circ(rnd: Rnd, rx: number, ry = rx): { x: number; y: number } {
-  return { x: (rnd() * 2 - 1) * rx, y: (rnd() * 2 - 1) * ry };
+  const a = rnd() * Math.PI * 2;
+  const r = rnd();
+  return { x: Math.cos(a) * r * rx, y: Math.sin(a) * r * ry };
 }
 
 /** SpawnHelper_SpawnInLine 的仓内等价步进器——按 [movementVector..position]

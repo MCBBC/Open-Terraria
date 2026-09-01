@@ -177,21 +177,21 @@ describe('★F4 DrownCollision 探针几何（Collision.cs:1385-1430，gravDir=1
   it('全液格命中：探针盒与降面液面四严格不等式成立', () => {
     const st = mk();
     st.liquid[st.idx(10, 40)] = 255; st.liquidType[st.idx(10, 40)] = 1;
-    expect(drownCollision(st, 160, Y, 20, 42)).toBe(true);
+    expect(drownCollision(st, 160, Y, 20, 42, 1)).toBe(true);
   });
   it('降面水位边界（liquid=64 → 液面下探 12px）：未触面 false / 触面 true', () => {
     const st = mk();
     st.liquid[st.idx(10, 40)] = 64;
     // y=640：探针 [638..650]，液面顶 652 → 底 650 不大于之 → false
-    expect(drownCollision(st, 160, 40 * 16, 20, 42)).toBe(false);
+    expect(drownCollision(st, 160, 40 * 16, 20, 42, 1)).toBe(false);
     // y=643：探针底 653 > 652 → true（:1422 字面 `vector.Y + num2 > vector2.Y` 严格式）
-    expect(drownCollision(st, 160, 40 * 16 + 3, 20, 42)).toBe(true);
+    expect(drownCollision(st, 160, 40 * 16 + 3, 20, 42, 1)).toBe(true);
   });
   it('lava(2)/shimmer(4) 显式不计水（原文本面 !tile.lava() && !tile.shimmer()）', () => {
     for (const lt of [2, 4]) {
       const st = mk();
       st.liquid[st.idx(10, 40)] = 255; st.liquidType[st.idx(10, 40)] = lt;
-      expect(drownCollision(st, 160, Y, 20, 42)).toBe(false);
+      expect(drownCollision(st, 160, Y, 20, 42, 1)).toBe(false);
     }
   });
   it('扫描首行实心排除：includeSlopes=false 跳过 / true 且 blockType!=0 计水', () => {
@@ -199,10 +199,10 @@ describe('★F4 DrownCollision 探针几何（Collision.cs:1385-1430，gravDir=1
     const st = mk();
     st.setTileSilent(10, 19, TILE_BY_KEY['dirt']!);   // active 实心 + 带液（半格内液形态）
     st.liquid[st.idx(10, 19)] = 255; st.liquidType[st.idx(10, 19)] = 1;
-    expect(drownCollision(st, 160, 320, 20, 42)).toBe(false);          // 默认排除
-    expect(drownCollision(st, 160, 320, 20, 42, false)).toBe(false);
+    expect(drownCollision(st, 160, 320, 20, 42, 1)).toBe(false);        // 默认排除
+    expect(drownCollision(st, 160, 320, 20, 42, 1, false)).toBe(false);
     st.slope[st.idx(10, 19)] = 2;                                       // blockType!=0
-    expect(drownCollision(st, 160, 320, 20, 42, true)).toBe(true);      // includeSlopes 计入
+    expect(drownCollision(st, 160, 320, 20, 42, 1, true)).toBe(true);   // includeSlopes 计入
   });
 });
 

@@ -14,7 +14,7 @@
 //   权限门（PowerPermissionLevel）非授权点击拒绝提示；房主面板附权限调节区。
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
-import { ITEM_DEFS } from '../data/items';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import {
   JourneyPowersState, targetTimeRate, timeRateSliderOf, strengthOfDifficultySlider,
   spawnRateMultiplier, shouldDisableSpawns, windOfSlider, sliderOfWind,
@@ -603,9 +603,12 @@ function buildJourneyBrowser(game: Game, body: HTMLElement): void {
   let rows = 0;
   const filterButtons = new Map<JourneyFilterKey, HTMLButtonElement>();
 
-  /** 源集 = ForEachItemWithResearchProgress（ItemsSacrificedUnlocksTracker :48-57：
-   *  计数>0 的解析后 id——含未研究满的半程物品，原版暗槽展示不可取用） */
-  const sourceVids = (): number[] => research.resolvedIdsWithProgress();
+  /** 源集 = 全量原版 vid 空间（2026-09-02 用户拍板：道具搜索=开发者模式例外——
+   *  原版 ForEachItemWithResearchProgress（ItemsSacrificedUnlocksTracker :48-57）
+   *  只列已捐物品,圣种这类未到手道具永远搜不到;本仓面板语义=全部道具可搜可取,
+   *  研究进度仍作徽标展示（partial 暗槽态保留）,点击授予不再受研究门约束。
+   *  原版纪律本身不动：世界内获取/掉落/商店照旧 1:1）。 */
+  const sourceVids = (): number[] => Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number);
 
   const rebuild = () => {
     list = runBrowserQuery(sourceVids(), {
@@ -720,17 +723,17 @@ function makeCell(game: Game, vid: number, x: number, y: number): HTMLButtonElem
     b.appendChild(el('div', 'fb', name.slice(0, 4)));
   }
   b.addEventListener('mouseenter', () => research.clearNewlyResearchedStatus(vid));
-  if (fully) {
-    b.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      const internalId = internalIdOfVid(vid);
-      if (internalId < 0) return;   // ★-1 哨兵(0=合法 def 位,v 109 魔力水晶)
-      
-      const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
-      giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
-      game.sfx.play('menuTick', 1);
-    });
-  }
+  // ★2026-09-02 开发者模式例外（用户拍板）：授予不再受研究门约束（原版 fully 门
+  //  与"只列已捐"配套；本仓全量池后 partial 槽也要能取,徽标只作进度展示）
+  b.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    const internalId = internalIdOfVid(vid);
+    if (internalId < 0) return;   // ★-1 哨兵(0=合法 def 位,v 109 魔力水晶)
+
+    const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
+    giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
+    game.sfx.play('menuTick', 1);
+  });
   return b;
 }
 

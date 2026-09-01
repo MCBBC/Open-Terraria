@@ -630,6 +630,69 @@ const PROJ_ALPHA0: Record<number, number> = {
   //  1103 史莱姆长枪(:10290=90,DefaultToSpear aiStyle19;AI_019_Spears 的 −40 渐显
   //   仅 877-879:P.cs:46717 (uint)(num2−877)<=2 门;载体 WeaponProj 矛族)
   18: 150, 50: 75, 53: 75, 515: 75, 396: 100, 1103: 90,
+
+  // ★2026-09-01 批五（AI_001 顶层 per-type fade 段收官批）——fade 支配套键，与
+  //  AI001_FADE_RATE/AI001_FADE_SPEEDK/AI001_FADE_AGE2 三表成对（缺一即禁补：
+  //  有键无 fade = 兜底活读 (255−255)/255 恒隐）。R6 判定全部亲核 1457 GetAlpha
+  //  （Projectile.cs:80595-81521）：下列 id 均走缺省路径(:81507 num14=(255−α)/255)
+  //  或读 α 的动态支，fade 有意义——
+  //  323 :55101 α−50 / 468 :55351 α−40 / 408 :55962 α−40 / 937 :56057 α−50
+  //  （GetAlpha :80657 A×0.75 后落缺省 → PROJ_ALPHA_MOD afade 档消费）/
+  //  710 :56350 α−25（:80838 (255−α,255−α,255−α,255−α)）/ 671 :57324 α−20
+  //  （:81034 White×Opacity）/ 675 :57448 α−20（:81099 (255,255,255,128)×(1−α/255)）/
+  //  676 :57461 α−20（:81103 newColor×Opacity）/ 357 :57751 α−25 / 344 :58053 α−50
+  //  （localAI[1]>5 门；:81181 num7=1−α/255）/ 275/276 :58182 α−30（速度链段内）/
+  //  593 :56884 α−10 / 242/438/462/592 :56631 α−=(byte)(|v|×0.9)（积分式）/
+  //  638 :56849 α−=(byte)(|v|×0.3) / 684 :55937 α−40（原 dragonAlpha 死镜像迁入）/
+  //  711 :57591 α−25（ai[0]≥2 门；原共享 dragonFade −40 恒减率错，双修正）
+  323: 255, 468: 255, 408: 255, 937: 255, 710: 255, 671: 255,
+  675: 255, 676: 255, 357: 255, 344: 255, 275: 255, 276: 255,
+  593: 255, 242: 255, 438: 255, 462: 255, 592: 255, 638: 255,
+  684: 255, 711: 255,
+  // [专用类承载 dormant 备案键（规则③只补键不接 fade——载体不读本表，Arrow 路径
+  //  现无出生面；若未来接 Arrow 出生须连 AI001_FADE_* 配对，否则兜底恒隐）]
+  //  174/176（Dart DART_STYLE alpha0:255 fade:50，:56007/:56085）/
+  //  302（Dart fade:'speed'=|v|×0.9，:56626 同式，EU=7）/
+  //  635（NebulaBlazeBolt alphaI −40/子步 :55518；GetAlpha :81030 White×Opacity 读 α）/
+  //  686（DD2BetsyFireball 无 alpha 面；联机傀儡重建 Arrow 档由 AI001_FADE_AGE2 接）
+  174: 255, 176: 255, 302: 255, 635: 255, 686: 255,
+};
+
+/** AI_001 顶层 per-type fade 恒率表（★2026-09-01 批五收官批；表驱动单支替代按率
+ *  分档 Set——率值本身即分档信息，Record 一张 + 键注释即可表达，实现最小）。
+ *  语义 = 每 AI 子步 `alpha = max(0, alpha − rate)`（vanilla AI_001 per update 一减；
+ *  EU 型由子步循环自然 ×(EU+1)，与原版 numUpdates 循环同拍）。vanilla 各块写法
+ *  （无条件减 / `if (alpha > 0)` 门）在钳 0 语义下等价，统一收口。键 = 减量，值出处：
+ *  323:50(:55101) 468:40(:55351) 684:40(:55937) 408:40(:55962) 937:50(:56057)
+ *  710:25(:56350) 671:20(:57324) 675:20(:57448) 676:20(:57461) 357:25(:57751)
+ *  275/276:30(:58182) 593:10(:56884)——★163 族 AI_001 段(:56562 −25)对其为死代码
+ *  （SetDefaults aiStyle=33 → 实走 AI_033 −50，本仓 flare 支已接），不入表防双减。 */
+const AI001_FADE_RATE: Record<number, number> = {
+  323: 50, 468: 40, 684: 40, 408: 40, 937: 50,
+  710: 25, 671: 20, 675: 20, 676: 20, 357: 25,
+  275: 30, 276: 30, 593: 10,
+};
+
+/** AI_001 fade 带龄门档：[每子步减量, 门=localAI/ai 计数 > 门值]。344 :58053
+ *  `localAI[1]++ > 5` 门（localAI[1] 每 update 自增 = 子步计数 ≡ this.age，1 基）。 */
+const AI001_FADE_DELAYED: Record<number, readonly [number, number]> = {
+  344: [50, 5],
+};
+
+/** AI_001 速度积分式 fade 系数表：`alpha −= (byte)(|velocity| × k)`（:56631 242 族
+ *  ×0.9 / :56849 638 ×0.3）——(byte) 截断 → Math.trunc 直译；|v|×k>255 的环绕分支
+ *  在原版速度域（≤~70）不可达，不建模。302 不入（Dart 载体 fade:'speed' 已承载）。 */
+const AI001_FADE_SPEEDK: Record<number, number> = {
+  242: 0.9, 438: 0.9, 462: 0.9, 592: 0.9, 638: 0.3,
+};
+
+/** AI_001 fade 的 ai[0]≥2 延迟门族（686 :57489 / 711 :57589 / 1097 :57533 同门）——
+ *  686/711/1097 不在 AI_001 flag3 排除表（:56929-:57012）→ 通用 ai[0]++（:57020）
+ *  每子步 +1 ≡ this.age（1 基，subStepAI 头自增）。1097 SetDefaults 无 alpha 行
+ *  （:10234，α≡0）→ 减段恒空转不入；686 权威端=DD2BetsyFireball 专用类（无 alpha
+ *  面），本支仅联机傀儡重建 Arrow 档（Game.ts kind1 tag='686'）消费。 */
+const AI001_FADE_AGE2: Record<number, number> = {
+  711: 25, 686: 25,
 };
 
 /** AI_036 追踪内核逐型参数表（[speed, acc]，终零波单核收编导出面；tests/finalzero-game-domain
@@ -854,12 +917,20 @@ export class Arrow extends Entity {
   // ---- 大地法杖巨石 261（AI_014 type 段 :18235/:12745）专属态 ----
   /** 慢速死亡门：|v|<1.5 消亡 */
   boulder = false;
-  // ---- 飞龙剑气 684（AI_001 type 段 :52086-52098）专属态 ----
-  /** SetDefaults alpha=255（:7021）→ AI 每帧 −40 渐显 */
+  // ---- 飞龙剑气 684（AI_001 type 段 :55935-55960）专属态 ----
+  /** SetDefaults alpha=255（:7303）→ AI 每子步 −40 渐显（AI001_FADE_RATE[684] 承载;
+   *  本字段=旧实现的死镜像（draw 从不消费），仅 ctor 台账值 + ranged-catalog 断言面） */
   dragonFade = false;
   dragonAlpha = 255;
   /** 711 双足翼龙弹：命中 Betsy's Curse(203) 600t（:10719-10721） */
   betsyCurse = false;
+  // ---- 冰霜月寒潮波 348 / 万圣夜魔魂 349 双向脉冲对（AI_001 :57226/:57201）----
+  /** 相位槽：0/2=显相（scale+0.01 & α−50 至 0）/ 1=隐相（scale−0.01 & α+50 至 255）。
+   *  348 槽=ai[0]、349 槽=localAI[0]（348/349 均在 AI_001 flag3 排除表 :56929-57012，
+   *  ai[0] 无通用自增，专属使用无竞争）。SetDefaults 无 alpha 行（:4380/:4392）→
+   *  α≡0 起步：首子步显相即翻相 = 原版「从全隐开始一次隐相脉冲」同相。 */
+  private f348Phase = 0;
+  private f349Phase = 0;
   // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
   terra = false;
   // ---- 星怒剑 503 专属态 ----
@@ -5146,13 +5217,67 @@ export class Arrow extends Entity {
         game.spawnParticles(this.cx, this.cy, '#F0C8F8', 2, 0.2, { life: 14, grav: 0 });
       }
     } else if (this.projId === 639) {
-      // 639 月总箭（AI_001，Projectile.cs:52999-53003）：alpha −55/t 淡入
+      // 639 月总箭（AI_001，Projectile.cs:56381-56396；1456 :52537-52550 同值）：
+      // alpha −25/substep 淡入（SetDefaults α=255 :6881、MaxUpdates=2 → EU=2 → ×3
+      // 子步/帧）。★批五勘误：旧注 ":52999-53003 −55" 引到 Shimmer() 方法体（该处
+      // 无 alpha 写），−55 系行号错锚伪值——1456/1457 两代均为 −25，按 1457 修。
       // （归零 16 芒星环特效属"特殊箭特效"后续批，登记未接）
-      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 55);
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
     } else if (this.projId === 477 || this.projId === 478) {
       // 477/478 镖（AI_001，Projectile.cs:54412-54415）：localAI[0]>3 → alpha=0
       // （前 3 拍隐形——GetAlpha :76303-76308 alpha≠0 返回 (0,0,0,0)）
       if (this.age > 3) this.alpha = 0;
+    } else if (AI001_FADE_SPEEDK[this.projId] !== undefined) {
+      // ---- ★2026-09-01 批五：AI_001 顶层 per-type fade（速度积分式族）----
+      //  alpha −= (byte)(|velocity| × k)（:56631 242/438/462/592 ×0.9、:56849 638
+      //  ×0.3）——(byte) 截断 → Math.trunc 直译。EU 型每帧 ×(EU+1) 子步（242/438/
+      //  462/592 EU=7 → ×8；638 EU=5 → ×6）。R6：242 GetAlpha :81361 α<140 门
+      //  （PROJ_ALPHA_MOD alphaLt 档消费）/ 438/462/592 :81107-:81123 (255,255,255,
+      //  128)×(1−α/255)（fixedfade 档）/ 638 :81369 (255,255,255,100)×Opacity
+      //  （fixedfade 档）——全读 α。302 同式 ×0.9 不入本支（Dart 载体已承载）。
+      const k = AI001_FADE_SPEEDK[this.projId];
+      if (this.alpha > 0) {
+        this.alpha = Math.max(0, this.alpha - Math.trunc(Math.hypot(this.vx, this.vy) * k));
+      }
+    } else if (AI001_FADE_DELAYED[this.projId] !== undefined) {
+      // 344 寒潮炮弹（:58043-58094）：localAI[1]>5 门后 α−50（本仓 age=子步计数
+      // 1 基 ≡ localAI[1]）。GetAlpha :81181 num7=1−α/255（fixedfade 档消费）。
+      const [rd, gate] = AI001_FADE_DELAYED[this.projId];
+      if (this.age > gate) this.alpha = Math.max(0, this.alpha - rd);
+    } else if (AI001_FADE_AGE2[this.projId] !== undefined) {
+      // 686/711（:57493/:57591）：ai[0]≥2 门后 α−25（出生 2 update 起渐显）。
+      // 686 权威端=DD2BetsyFireball 专用类无 alpha 面，本支仅联机傀儡重建 Arrow 档。
+      const r2 = AI001_FADE_AGE2[this.projId];
+      if (this.age >= 2) this.alpha = Math.max(0, this.alpha - r2);
+    } else if (AI001_FADE_RATE[this.projId] !== undefined) {
+      // ---- ★2026-09-01 批五：AI_001 顶层 per-type fade（恒率族，AI001_FADE_RATE
+      //  键注释逐 id 标 P.cs 行号；R6 判定见 PROJ_ALPHA0 批五段）----
+      this.alpha = Math.max(0, this.alpha - AI001_FADE_RATE[this.projId]);
+    } else if (this.projId === 348 || this.projId === 349) {
+      // ---- ★2026-09-01 批五：双向脉冲对（AI_001 :57226-57245 348 / :57201-57220
+      //  349）——scale ±0.01 与 α ∓50 相位耦合：显相(0/2) scale+0.01 & α−50（≤0 翻
+      //  隐相 1，α 钉 0）；隐相(1) scale−0.01 & α+50（≥255 翻显相 2，α 钉 255）。
+      //  SetDefaults 无 alpha 行（:4380/:4392）→ α≡0 起步 = 出生即翻隐相，与原版
+      //  同相（周期 10 子步：隐 5 拍 + 显 5 拍；348 EU=1 → ×2/帧）。GetAlpha
+      //  :81152 (200,200,200,α)——A 即 α（PROJ_ALPHA_MOD afade slope:−1 档消费）。
+      //  348 的 ai[1]==0 首拍 Item8 音与 349 的 frame=(int)ai[0]（发射侧注入帧）
+      //  不在本支（音面/帧面另行登记）。----
+      const ph = this.projId === 348 ? this.f348Phase : this.f349Phase;
+      if (ph === 0 || ph === 2) {
+        this.drawScale += 0.01;
+        this.alpha -= 50;
+        if (this.alpha <= 0) {
+          this.alpha = 0;
+          if (this.projId === 348) this.f348Phase = 1; else this.f349Phase = 1;
+        }
+      } else {
+        this.drawScale -= 0.01;
+        this.alpha += 50;
+        if (this.alpha >= 255) {
+          this.alpha = 255;
+          if (this.projId === 348) this.f348Phase = 2; else this.f349Phase = 2;
+        }
+      }
     }
     // 477 水晶镖旋转平滑（AI_001 type 段，Projectile.cs:54802-54812）：localAI[1]<5
     // 前 rotation = atan2(vy,vx)+π/2（对齐速度角），之后 (rot×2+aim)/3 渐近平滑
@@ -5334,9 +5459,11 @@ export class Arrow extends Entity {
         game.spawnParticles(this.cx, this.cy, '#8C6A4A', 10, 3, { life: 30 });
       }
     }
-    // 飞龙剑气 684（AI_001 type 段 :52086-52098）：alpha 255−40/t 渐显 + 尘 60 拖尾
+    // 飞龙剑气 684（AI_001 type 段 :55935-55960）：尘 60 拖尾（1/2 概率 20×80 椭域
+    // 随机偏移 RotatedBy(速度角) 的近似）。alpha 通道迁入 AI001_FADE_RATE[684]（−40/
+    // 子步，684）与 AI001_FADE_AGE2[711]（−25，ai[0]≥2 门）——旧实现写 dragonAlpha
+    // 从无 draw 消费者（死存储），且 711 曾被同槽 −40 错率携带（vanilla −25）
     if (this.dragonFade) {
-      this.dragonAlpha = Math.max(0, this.dragonAlpha - 40);
       if (Math.random() < 0.5) {
         game.spawnParticles(this.cx + (Math.random() - 0.5) * 20, this.cy + (Math.random() - 0.5) * 80,
           '#C0E8FF', 1, 0.8, { life: 16 });

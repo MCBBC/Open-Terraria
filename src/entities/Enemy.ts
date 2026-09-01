@@ -217,6 +217,21 @@ const NO_DESPAWN_IDS = new Set([
  *  39,87,127-131,392-394,491,492} 恒视屏内）。13=EoW 头（即便 boss 位被换锚到
  *  体节后,原头残段也不消散） */
 const ALWAYS_ACTIVE_IDS = new Set([7, 10, 13, 35, 36, 39, 87, 127, 128, 129, 130, 131, 392, 393, 394, 491, 492]);
+/** CheckActive 两窗半幅（NPC.cs:6176-6178 + sWidth/sHeight=1920/1200 :67892-67895，
+ *  F1 纵向纠偏 2026-09-01）：
+ *  · rectangle（ActiveRange 保命盒,:78705-78706）半幅 = activeRangeX/Y = (int)(s×2.1)
+ *    = 4032 / 2520 px——旧 Y 半幅 TILE*142=2272px 系误植（2268/2272 混写）， vanilla
+ *    2520 ⇒ 2272~2520px 竖向带内"原版保命、我方提前消散"（F1 判别例）。
+ *  · rectangle2（屏幕盒,:78691-78693）半幅 = sWidth/2+width / sHeight/2+height
+ *    = 960+w / 600+h px——旧 TILE*62/TILE*35（992/560px）系按 32×32 定宽 NPC 的
+ *    中心距近似；现按本弹体盒宽高逐例求值（X 项与 32 宽 NPC 数值恰同,宽NPC/高NPC
+ *    不再偏窄）。
+ *  ★交测口径备案（F5c）：本仓为中心距式 |Δcenter|<半幅，原版为 rectangle2 与玩家
+ *  hitbox 相交——等价于半幅再外扩玩家半宽/半高（≤21px），即本仓屏盒判定对"玩家
+ *  贴边半身入屏"的场景偏窄一档。中心距式保留为登记近似（两侧同为屏内续命窗,
+ *  差异仅在 21px 边缘带），ActiveRange 盒同口径（4032/2520 已远大于玩家半幅）。 */
+const CHECK_ACTIVE_HALF_X = 4032;
+const CHECK_ACTIVE_HALF_Y = 2520;
 /** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
 const STATUE_DROP_RARITY: Record<number, number> = {
   480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
@@ -2590,7 +2605,7 @@ export class Enemy extends Entity {
       //  前结构「encouraged 屏内也倒数」系杜撰——原版机制分四步:
       //  ①rectangle(ActiveRange)=2.1×屏(:6176-6178)相交任一玩家 → flag2=true 存活门
       //  ②boss(:78743)/强真名单(:78747-78767)只需存在活跃玩家即 flag2=true
-      //  ③rectangle2 屏幕矩形(62×35 半轴,992×556px)每 tick 重置 750+清鼓励旗
+      //  ③rectangle2 屏幕矩形(半幅 960+w/600+h,:78691-78693——F1 纠偏,旧 62×35 格近似退役)每 tick 重置 750+清鼓励旗
       //    ——这是 EncourageDespawn 钉低值的唯一抵消点:怪天亮向上飞,**在屏内绝不
       //    消散**;飞出屏幕瞬间 reset 停止 → 剩余 timer≈封顶值(10t)→ 秒消散
       //  ④timer 每帧无条件−1,归零 → flag2 强制翻假(:78791-78794,无视①②保命门)
@@ -2601,10 +2616,13 @@ export class Enemy extends Entity {
       if (cands.length > 0) {
         let flag2 = false;
         for (const q of cands) {
-          // activeRangeX/Y=4032/2268px → |Δ|<半幅(half=252/142 格),中心距近似
-          // (±玩家半宽 ≤1tile 登记差);此窗曾漏接=远处怪少一道提前清账门
-          if (Math.abs(q.cx - this.cx) < TILE * 252
-            && Math.abs(q.cy - this.cy) < TILE * 142) {
+          // ★F1 纠偏：activeRangeX/Y = (int)(sWidth*2.1)/(int)(sHeight*2.1) =
+          //   4032/2520px（NPC.cs:6176-6178,sWidth/sHeight=1920/1200 :67892-67895,
+          //   rectangle 相交 :78705-78706）——旧 Y 半幅 TILE*142=2272px 系误植,
+          //   2272~2520px 竖向带内原版保命、我方提前消散。中心距式=hitbox 相交的
+          //   登记近似（±玩家半幅,见 CHECK_ACTIVE_HALF_X 注 F5c 备案）
+          if (Math.abs(q.cx - this.cx) < CHECK_ACTIVE_HALF_X
+            && Math.abs(q.cy - this.cy) < CHECK_ACTIVE_HALF_Y) {
             flag2 = true;
             break;
           }
@@ -2615,8 +2633,13 @@ export class Enemy extends Entity {
           || this.def.boss)) {
           flag2 = true;
         }
+        // ★F1 纠偏：rectangle2 半幅 = sWidth/2+width / sHeight/2+height = 960+w /
+        //   600+h（NPC.cs:78691-78693 逐项展开）——旧 TILE*62/TILE*35（992/560px）
+        //   系 32×32 定宽近似；高≥48 的怪（560<600+32≤600+h）屏内续命窗被低估
+        //   40~72px。逐例求值后 X 项对 32 宽 NPC 数值不变（960+32=992）
+        const screenHalfX = 960 + this.w, screenHalfY = 600 + this.h;
         const onScreen = cands.some((q) =>
-          Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
+          Math.abs(q.cx - this.cx) < screenHalfX && Math.abs(q.cy - this.cy) < screenHalfY);
         if (onScreen) {
           this.despawnTimer = 750;
           this.despawnEncouraged = false;
