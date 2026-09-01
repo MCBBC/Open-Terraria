@@ -74,4 +74,33 @@ describe('巨石(aiStyle 25,Projectile 99)', () => {
     for (let t = 0; t < 400 && !b3.dead; t++) b3.fixedUpdate(1, g2);
     expect(b3.dead).toBe(true);                                          // 撞墙碎裂(:17574)
   });
+
+  it('旋转单次累加 vx*0.06/tick(AI_025 :26682 终清波勘误——通用 spin 块已剔 boulder,双倍累加退役)', () => {
+    const g = makeGame(worldWithFloor());
+    const b = new TrapShot(50 * TILE, 80 * TILE - 31, 2, 0, 70, 'boulder'); // 贴地出生
+    let expectRot = 0;
+    for (let t = 0; t < 3; t++) {
+      expect(b['rot']).toBeCloseTo(expectRot, 5);        // 拍内时序:rot 先于滚地加速
+      expectRot += b.vx * 0.06;                          // vx 增量发生在本拍 rot 之后
+      b.fixedUpdate(1, g);
+    }
+    expect(b.boulderLanded).toBe(true);                  // ai[0]=1(:26684)踢门已生效
+    if (!b.dead) expect(Math.abs(b.vx)).toBeGreaterThan(2); // 滚地加速未停(vy≤6 带)
+  });
+
+  it('滞滞启动踢三级递宽窗(:26596-26679 终清波转正):中距左墙 → 向右踢;'
+    + '旧"只测最宽窗"实现在该场景会按奇偶误向左踢', () => {
+    const w = worldWithFloor();
+    const gB = makeGame(w);
+    // 左探窗:L 首级 col50 空窗、中距 col49 放墙、最宽 col48 留空 → 三级第 2 级命中
+    // (x=816 → L 列 floor((816−{8,24,40})/16)={50,49,48});探针行=盒 y 行与 +16 行
+    w.store.setTileSilent(49, 78, 1, 0, 0);
+    w.store.setTileSilent(49, 79, 1, 0, 0);
+    const b = new TrapShot(51 * TILE, 80 * TILE - 31, 0, 0, 70, 'boulder');
+    b.fixedUpdate(1, gB);                                // 落地置位拍(ai[0]=1,次拍起门生效)
+    expect(b.boulderLanded).toBe(true);
+    expect(b.vx).toBe(0);                                // 首拍 landed 未置 → 不踢
+    b.fixedUpdate(1, gB);
+    expect(b.vx).toBeCloseTo(0.5, 5);                    // 左实 → 向右踢 num213=0.5
+  });
 });

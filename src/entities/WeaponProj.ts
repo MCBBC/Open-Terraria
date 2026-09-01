@@ -1,6 +1,7 @@
 // 数据驱动近战/爆炸武器投射物（1456 aiStyle 家族行为，Game.useCombatWeapon 派发）：
 //   Boomerang  aiStyle 3   —— 飞出减速后返回主角（AI_003）
-//   SpearProj  aiStyle 19/161 —— 随主角前刺伸缩（AI_019 的 owner 相对位移简化）
+//   SpearProj  aiStyle 19/161 —— AI_019 伸缩包络（GetSpearOffsetRelativeToPlayer
+//     per-type 伴生弹/延伸命中盒 :43417-43571 逐参移植）/ AI_161 短剑刺直刺模型
 //   YoyoProj   aiStyle 99  —— 按住鼠标滞留追光标，松手收回（AI_099 channel 语义）
 //   FlailProj  aiStyle 15  —— AI_015_Flails 全状态机（旋转/掷出/回拉/坠落/悬荡/回收）
 //   GrenadeProj aiStyle 16 —— 弹跳 + 引信爆炸（手雷 180/炸弹 150/炸药 135 tick）
@@ -392,11 +393,19 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
 //                  =1456 影子死代码,实测回收点就是 30;撞墙反弹不回收（:18142-18151）
 //   320 冰回旋镖 → ai[1]≥10 起下垂 vy+0.5/vx×0.95（:36868-36886）
 //   383 附魔飞刀 → 同 320（上升再+0.35）;距玩家>800 回收（:36868-36888）
-//   182 圣骑士锤 → 追踪窗 ai[1]∈(10,360) 取 800px 最近敌（CanHit 视线门）,
-//                  无目标且 ≥30 回收（:36889-36973;目标速度 12/轴步进 0.25 :36937-36973）
-//   866 飞刀     → localAI[0] 同窗（FindTargetWithLineOfSight 缺省 800 :42972）;
-//                  无目标 ≥30 回收（:36980-37057）
-//   301 弹跳盾   → 按住 ≥20/松手 ≥100 双门,回收时速度归零（:37062-37080）
+//   182 圣骑士锤 → 出程态头段 rand(2)==0 d57 锤光尘(α255/s0.75/vel×0.1 后 noGravity
+//                  :39906-39912)+ spriteDirection=sign(vx);追踪窗 ai[1]∈(10,360) 取
+//                  800px 最近敌(CanHit 视线门),无目标且 ≥30 回收(:36889-36973 对位
+//                  1456 行号;目标速度 12/轴步进 0.25)
+//   866 飞刀     → localAI[0] 同窗(FindTargetWithLineOfSight 缺省 800);无目标 ≥30 回收;
+//                  尾段(全状态) rand(2)==0 d212 尘 vel×0.1 noGravity(:40277-40284)
+//   301 弹跳盾   → 掷出呼啸在出程(ai[0]==0)全程静默——回程才每 soundDelay=10×(extra+1)
+//                  一声 Item_7 且 -0.33f 变调(:39578-39595,-1000=展示偶人语态);
+//                  出程 = scale=1.75/tick + ai[1]==1 帧定角 -π/4-π/2、==20 帧 Item_1、
+//                  <30 绕手悬停(rotation+=dir×π/30 且 Center 钉 MountedCenter−velocity)、
+//                  否则 atan2(v)+π/4,≥60 转回收速度归零(:451-477 提取件行锚;★1456 为
+//                  "按住≥20/松手≥100 双门"旧式,1457 起改此式,本仓随 1457/1458 真值);
+//                  尾段出程态另有 d57/d43 旋喷尘团(:40710-40764 区段)
 //   光刃族 19 型 → ai[1]≥30 起垂落 vy+1/vx×0.96（:36800-36832）;撞墙转悬停 ai[0]=2
 //                  （vy<0 减半/rotation=2.335/vx=0/vy+1,:37089-37109）
 
@@ -450,9 +459,11 @@ const WALL_BOUNCE_PROJ = new Set([33, 106, 866]);
  *  :12292-12297,301/383 命中时 direction 朝敌改写 :12249-12263） */
 const NO_HIT_RETURN_PROJ = new Set([301, 866, 902]);
 
-/** 出程头段逐型真值尘（1458 AI_003_Boomerang 头段 :39619-39686;1456 同段 :36652-36738。
+/** 出程头段逐型真值尘（1458 AI_003_Boomerang 头段 :39599-39702;1456 同段 :36652-36738。
  *  台账 C 批清偿：原 BOOMERANG_DUST 手调色值近似退役——真值 = 粒型/alpha/scale/
- *  noGravity/vel 系数逐参；未列型号（含旧表误收的 182/383）原版头段本就无尘）。
+ *  noGravity/vel 系数逐参。★未列型号勘误：182 的 d57 光尘居【出程分支内】(:39906-39912,
+ *  aiOut 处直挂)、383 无尘、866 的 d212 居【尾段全状态】(aiVisual 处直挂)——头段确实
+ *  只有下表七型（终清波复核）。
  *  ctx.v = 弹速向量。spawnDust 宿主缺省 = null 静默跳过（测试 mock 兼容）。 */
 type BoomerangDustCtx = { projId: number; x: number; y: number; w: number; h: number; vx: number; vy: number };
 const BOOMERANG_DUST_TRUTH: Record<number, (s: BoomerangDustCtx, game: GameHooks) => void> = {
@@ -630,6 +641,9 @@ export class Boomerang extends Entity {
   private boomBox = 0;
   /** rotation（尾段 per-type :37294-37352 + 光刃出程/悬停/返回专属段） */
   private rot = 0;
+  /** 绘制 scale（301 出程态 scale=1.75/tick,Projectile.cs :40011——getRect 不乘,
+   *  仅视觉;无复位点=回程保持直至消亡,原版同态。其余型号恒 1 */
+  private visScale = 1;
   /** soundDelay（掷出呼啸 8t/301 10t,:36626-36651;每 tick 自减 :15427-15429） */
   private soundDelay = 0;
   /** SetDefaults penetrate（命中自减 :13175-13182;==0 Kill :15866-15868;866 特例 :13124-13137） */
@@ -658,7 +672,7 @@ export class Boomerang extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    drawProj(r, cam, this, this.projId, this.rot, '#C0A060');
+    drawProj(r, cam, this, this.projId, this.rot, '#C0A060', 1, 0, false, false, this.visScale);
   }
 
   /** 轴向目标速度逼近（AI_003 追踪/返回共用式 :36937-36973/:37249-37282）：
@@ -692,11 +706,23 @@ export class Boomerang extends Entity {
     const p = game.player;
     const isPhase = PHASEBLADE_PROJ.has(this.projId);
     // ---- AI 段 ----
-    // 掷出呼啸（:36626-36651;383/光刃族豁免;301 延时 10 其余 8,均 ×(extra+1)）。
-    // 301 的 -0.33 变调未建模（playSfxFiles 无 pitch 参数）
+    // 掷出呼啸（1458 AI_003_Boomerang 头段 :39574-39597,1457 同段同值——终清波实装）：
+    //   383/光刃族豁免。缺省族 = soundDelay 8×(extra+1)、Item_7 直播（三参无 pitch 档,
+    //   SoundEngine.PlaySound(SoundID.Item7, position)）。301 = 门 ai[0]!=-1000f &&
+    //   !=0f 才响(:39578,-1000 展示偶人语态常规局不可达、出程 ai[0]==0 全程静默,
+    //   只有回程每 soundDelay=10×(extra+1) 一声)且带 -0.33f 变调(:39586)。
+    //   ★-0.33 经 playSfxWav 第 5 参落地(Sfx 链 XNA Pitch 直传 2^pitch 变调)——
+    //   此前"恒播且无变调"= 登记缺口清偿。
     if (this.projId !== 383 && !isPhase && this.soundDelay === 0) {
-      this.soundDelay = (this.projId === 301 ? 10 : 8) * (this.extra + 1);
-      game.playSfxFiles(['Item_7'], 1, this.cx, this.cy);
+      if (this.projId === 301) {
+        if (this.ai0 !== -1000 && this.ai0 !== 0) {
+          this.soundDelay = 10 * (this.extra + 1);
+          game.playSfxWav?.('Item_7', 1, this.cx, this.cy, -0.33);
+        }
+      } else {
+        this.soundDelay = 8 * (this.extra + 1);
+        game.playSfxFiles(['Item_7'], 1, this.cx, this.cy);
+      }
     }
     if (isPhase) {
       // :36745-36748 中心出界（InWorld 外扩 10 格）→ 直接进返回
@@ -774,10 +800,17 @@ export class Boomerang extends Entity {
           }
         }
       } else {
-        this.rot += 0.4 * this.dir; // :36836-36847（1074 11t/其余 14t;-0.3 变调略）
+        // 前 30 AI 次自旋段：1074 的 Item_7 带 -0.3f 变调(:39800-39808),其余 Item_15
+        // 无变调(:39810-39814)——"-0.3 变调略"登记缺口随 playSfxWav pitch 参清偿
+        this.rot += 0.4 * this.dir; // :36836-36847 对位行号(1456)
         if (this.soundDelay === 0) {
-          game.playSfxFiles([this.projId === 1074 ? 'Item_7' : 'Item_15'], 1, this.cx, this.cy);
-          this.soundDelay = this.projId === 1074 ? 11 : 14;
+          if (this.projId === 1074) {
+            game.playSfxWav?.('Item_7', 1, this.cx, this.cy, -0.3);
+            this.soundDelay = 11;
+          } else {
+            game.playSfxFiles(['Item_15'], 1, this.cx, this.cy);
+            this.soundDelay = 14;
+          }
         }
       }
       return;
@@ -797,6 +830,13 @@ export class Boomerang extends Entity {
       return;
     }
     if (this.projId === 182 || this.projId === 866) {
+      // 182 圣骑锤锤头光尘（1458 :39906-39912,出程段内 1456 对位 :36889 起）：出程态
+      // rand(2)==0 → d57 α255 s0.75、vel×0.1 后 noGravity。★C1 批曾按"原版头段本就
+      // 无尘"把 182 从尘表删除——该块实居出程分支内而非方法头段,登记勘误+补接
+      if (this.projId === 182 && Math.floor(Math.random() * 2) === 0) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 57, 0, 0, 255, null, 0.75);
+        if (d) { d.vx *= 0.1; d.vy *= 0.1; d.noGravity = true; }
+      }
       // 182 圣骑士锤（:36889-36973）/ 866 飞刀（:36980-37057）:800px 内最近敌追踪
       // （CanHit 视线门）,目标速度=(目标-球心)norm×12,轴步进 0.25;无目标 ≥30 回收。
       // ★计数源不同:182=ai[1]（:36790-36793,顶部已自增）/ 866=localAI[0]（:36999,
@@ -821,10 +861,31 @@ export class Boomerang extends Entity {
       return;
     }
     if (this.projId === 301) {
-      // 301 Bouncing Shield（:37062-37080）：按住 ≥20/松手 ≥100 双门,回收时速度归零
-      const held = this.channel ? this.channel() : false;
-      if ((held && this.outT >= 20) || (!held && this.outT >= 100)) {
-        this.ai0 = 1; this.outT = 0; this.vx = 0; this.vy = 0;
+      // 301 弹跳盾出程态（1457 AI_003 `else if (type == 301)` 提取件行锚 :459-477;
+      // ★1456 曾为"按住≥20/松手≥100 双门"旧式(:37058-37082),1457 起重构为此式——
+      // 本仓沿 1456 写法属版本域漂移,终清波按 1457/1458 真值重写）：
+      //   · scale=1.75/tick（仅绘制层——getRect 不乘 scale,Projectile.cs:16760-16763;
+      //     无任何复位点 → 回程保持放大直至消亡,原版同态）
+      //   · ai[1]==1 帧 rotation=atan2(v)−π/4−π/2;ai[1]==20 帧 Item_1 音(:40017-40022)
+      //   · ai[0]!=-1000f 守护(展示偶人语态,常规局恒真):ai[1]<30 期绕手悬停自旋
+      //     （rotation += direction×π/30、Center 钉在 MountedCenter−velocity）,
+      //     否则 rotation=atan2(v)+π/4
+      //   · player active&&!dead 才运行整段;ai[1]>=60 → 转回收且速度归零
+      const pl = p as unknown as { dead?: boolean };
+      this.visScale = 1.75;
+      if (!pl.dead) {
+        if (this.outT === 1) {
+          this.rot = Math.atan2(this.vy, this.vx) - Math.PI / 4 - Math.PI / 2;
+        }
+        if (this.outT === 20) game.playSfxFiles(['Item_1'], 1, this.cx, this.cy);
+        if (this.outT < 30) {
+          this.rot += this.dir * (Math.PI / 30);
+          this.x = p.cx - this.vx - this.w / 2;   // Center=MountedCenter−velocity
+          this.y = p.cy - this.vy - this.h / 2;
+        } else {
+          this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
+        }
+        if (this.outT >= 60) { this.ai0 = 1; this.outT = 0; this.vx = 0; this.vy = 0; }
       }
       return;
     }
@@ -852,9 +913,15 @@ export class Boomerang extends Entity {
       // :37114-37124 direction 朝玩家侧;rotation = 飞行向 - 2.335
       this.dir = this.cx < p.cx ? -1 : 1;
       this.rot = Math.atan2(this.vy, this.vx) - 2.335;
-      if (this.localT <= 0) { // :37125-37144 localAI[0] 门（悬停过=Item_182,否则 Item_7）
-        game.playSfxFiles([this.projId === 1074 ? (this.localT < 0 ? 'Item_182' : 'Item_7') : 'Item_15'],
-          1, this.cx, this.cy);
+      if (this.localT <= 0) { // :40315-40334 localAI[0]<=0 门（悬停过<0 / 常规回程==0）
+        // 悬停过=Item_182 -0.2f(:40321) / 否则 Item_7 -0.5f(:40324)/其余 Item_15 无变调
+        // ——三档 pitch 随 playSfxWav 第 5 参落地（"返回音无变调"登记缺口清偿）
+        if (this.projId === 1074) {
+          if (this.localT < 0) game.playSfxWav?.('Item_182', 1, this.cx, this.cy, -0.2);
+          else game.playSfxWav?.('Item_7', 1, this.cx, this.cy, -0.5);
+        } else {
+          game.playSfxFiles(['Item_15'], 1, this.cx, this.cy);
+        }
         this.localT = 1;
       }
     }
@@ -933,50 +1000,83 @@ export class Boomerang extends Entity {
     this.vx = lvx; this.vy = lvy;
     const hitX = chX, hitY = chY;
     if (!hitX && !hitY && !offWorldEdge) return;
-    if (WALL_BOUNCE_PROJ.has(this.projId)) {
-      // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
+    // 原版此点 velocity 已被 Collision 按碰撞轴清零（TileCollision 后写语义）——下游
+    // 反射读数/LightDisc_Bounce 的 reflect 源都基于这份"轴零化视图"。管线以差分折叠
+    // 出等价投影（未碰轴保留 lastV、碰轴置 0）。
+    const pvx = hitX ? 0 : lvx, pvy = hitY ? 0 : lvy;
+    // ---- aiStyle3/13 撞墙响应链（1458 Projectile.cs:19627-19671,顺序与源码一致）----
+    if (isPhase) {
+      // 光刃撞墙 → 悬停态（独立链:无 HitTiles 尘/挖掘音,入态音尘由 aiHover 承担）
+      this.ai0 = 2; this.outT = 0;
+      return;
+    }
+    if (this.projId === 106) {
+      // LightDisc_Bounce 溅射（:28787-28801）——"溅射视觉略"登记清偿,见私有方法注
+      this.lightDiscBounceFx(game, pvx, pvy, lvx, lvy);
+    }
+    if (this.projId === 383) {
+      // 383 附魔飞刀 ai[1]>=10 → Collision.HitTilesInACircle(Position−num71/2,velocity,
+      // num71,num71)+Item14(:19639-19649);num71=300。此前传"圆心"口径改 Position 左上
+      if (this.outT >= 10) {
+        hitTilesInACircleFx(game, this.x - 150, this.y - 150, lvx, lvy, 300);
+        game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
+        this.boomBox = 300;                                     // localAI[0]=num71(:15065 GetHitbox)
+      }
+    } else if (this.projId === 301) {
+      // Spawn_PaladinsHammerShockwave（ParticleOrchestrator.cs:816-881 收编本体,含
+      // Item180 音）+ broadcast（Projectile.cs:19649-19661 clientOnly:false,
+      // PositionInWorld=position 左上、MovementVector=Size 载荷;owner==myPlayer 门同式）
+      paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
+        this.x, this.y, this.w, this.h);
+      this.boomBox = 200;                                       // localAI[0]=num72(:15063)
+    } else {
+      // 缺省族（33/866/6/19/52/113/… 含 1000 等）→ Collision.HitTiles(position,
+      // velocity,w,h)(:19662-19664)。块色尘依赖 WorldGen.KillTile_MakeTileDust
+      // per-tile 尘型表系统待移植——合成灰尘占位登记（点名家,VisualDeficit 面）
       game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-      game.playSfx('dig', 1, this.cx, this.cy);
-      // :18142-18151 33/106/866 命中轴反弹,不回收（106 LightDisc_Bounce 溅射视觉略）
+    }
+    // :19667-19675 {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从
+    // lastVelocity 全反（383 豁免,aiStyle13 型号在 AnchoredProj 侧另案）
+    if (WALL_BOUNCE_PROJ.has(this.projId)) {
       if (hitX) this.vx = -lvx;
       if (hitY) this.vy = -lvy;
-    } else if (isPhase) {
-      // :17975-17990 光刃撞墙 → 悬停态（独立 else 链:无 HitTiles 尘/挖掘音,
-      // 入态音尘由 aiHover 的 localAI[1] 门承担）
-      this.ai0 = 2; this.outT = 0;
     } else {
-      // HandleMovement 特例档（1458 :19646-19655;1456 同段 :19627-19663——三支互斥,
-      // 替代通用 HitTiles 尘）:
-      //   383 附魔飞刀 ai[1]>=10 → Collision.HitTilesInACircle(300)块尘圈 + Item14;
-      //   301 圣骑士锤 → localAI[0]=200 + ParticleOrchestrator.Spawn_PaladinsHammerShockwave
-      //     （ParticleOrchestrator.cs:816-880:Item180 音已接 + d57/d43 放射环 +
-      //     命中点 7×7 格 KillTile 块尘）——音为本仓 netPuppet 早退等价"本地才响";
-      //   其余（含缺省):Collision.HitTiles 通用尘。2026-08-31 台账 C 批清偿:
-      //   此前 383 圈/301 冲击波粒本体整缺只接了音。
-      let genericDust = true;
-      if (this.projId === 383 && this.outT >= 10) {
-        hitTilesInACircleFx(game, this.cx, this.cy, 150);       // num71=300→半径 (W+H)/4=150
-        game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
-        this.boomBox = 300;                                     // localAI[0]=num71(:15065-15068 GetHitbox)
-        genericDust = false;
-      } else if (this.projId === 301) {
-        // Spawn_PaladinsHammerShockwave（:816-881 收编本体,含 Item180 音——原 :822 直播
-        // 在 C 批注释里误注"调用侧已播"实缺,本体收编后随本地/远端两面各响一次）+
-        // broadcast（Projectile.cs:19649-19661 clientOnly:false——PositionInWorld=
-        // position 左上、MovementVector=Size 载荷;owner 门原版同式 owner==Main.myPlayer）
-        paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
-        game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
-          this.x, this.y, this.w, this.h);
-        this.boomBox = 200;                                     // localAI[0]=num72(:15059-15063)
-        genericDust = false;
-      }
-      if (genericDust) {
-        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-      }
-      game.playSfx('dig', 1, this.cx, this.cy);                 // SoundID 0(:19666 共享尾)
-      // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）
       this.ai0 = 1; this.outT = 0;
       if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
+    }
+    game.playSfx('dig', 1, this.cx, this.cy);                   // SoundID 0(:19670 共享尾)
+  }
+
+  /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
+   *  登记的终清波实装）：NewDustPerfect 306 ×4 主粒（α200/scale1.6/color=
+   *  Color.Lerp(new Color(219,253,0), Cyan, rand)）+ CloneDust 白档副本（白,s1,α50）。
+   *  spinningpoint = Vector2.Reflect(velocity, normal)（XNA 原式 v−2(v·n)n,n 可为
+   *  非单位轴向：碰撞轴取 −sign(lastVelocity)、未碰轴 0）；散布 =
+   *  RotatedBy(π/4 × NextFloatDirection([-1,1))) × 0.6 × NextFloat()。
+   *  hitPoint = Center + velocity.SafeNormalize(UnitX)×8×scale（velocity 此点为轴零化
+   *  投影,零向量 SafeNormalize(UnitX) 兜底）。spawnDust perfect 变体承载定点落位 */
+  private lightDiscBounceFx(game: GameHooks, pvx: number, pvy: number, lvx: number, lvy: number): void {
+    const nx = pvx !== lvx ? -Math.sign(lvx) : 0;
+    const ny = pvy !== lvy ? -Math.sign(lvy) : 0;
+    const dot = pvx * nx + pvy * ny;
+    const rx = pvx - 2 * dot * nx, ry = pvy - 2 * dot * ny;     // Vector2.Reflect
+    const vmag = Math.hypot(pvx, pvy);
+    const hxOff = vmag > 0 ? pvx / vmag : 1, hyOff = vmag > 0 ? pvy / vmag : 0; // SafeNormalize(UnitX)
+    for (let i = 0; i < 4; i++) {
+      const spread = (Math.random() * 2 - 1) * (Math.PI / 4);   // NextFloatDirection×π/4
+      const ca = Math.cos(spread), sa = Math.sin(spread);
+      const mag = 0.6 * Math.random();
+      const bvx = (rx * ca - ry * sa) * mag, bvy = (rx * sa + ry * ca) * mag;
+      const t = Math.random();                                  // Lerp 主色
+      const col = { r: Math.round(219 + (0 - 219) * t), g: Math.round(253 + (255 - 253) * t), b: Math.round(0 + 255 * t), a: 255 };
+      for (let clone = 0; clone < 2; clone++) {
+        const d = game.spawnDust?.(hxOff !== undefined ? this.cx + hxOff * 8 : this.cx,
+          hyOff !== undefined ? this.cy + hyOff * 8 : this.cy,
+          this.w, this.h, 306, bvx, bvy, clone === 0 ? 200 : 50, clone === 0 ? col : null,
+          clone === 0 ? 1.6 : 1, false, true);
+        if (d && clone === 1) d.noGravity = false;
+      }
     }
   }
 

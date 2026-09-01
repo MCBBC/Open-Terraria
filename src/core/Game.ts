@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
+import { tileAnim } from '../render/TileAnim';
 import { prewarmTrailTextures } from '../fx/TrailShader';
 import { GrappleProj, GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
@@ -3927,6 +3928,24 @@ export class Game implements GameHooks {
       hardMode: !!this.world?.flags?.hardMode,
       dayTime: this.world?.clock?.isDay ?? true,
     });
+    // ★渲染快照（2026-09-01 发丝缝回放链）：F5 报告 meta.render 带导出瞬间的
+    //   相机/画布/低清档/动画时钟——探针按这四元组逐位重建该帧做像素级扫描。
+    //   读 renderer 私有档字段走结构化断言（避免公开面扩张）。
+    this.recorder.renderInfo = () => {
+      const r = this.renderer as unknown as {
+        canvas?: HTMLCanvasElement; _worldLowK?: number;
+        _worldLowW?: number; _worldLowH?: number;
+      };
+      const cv = r?.canvas;
+      return {
+        camX: this.camera.x, camY: this.camera.y, zoom: this.camera.zoom,
+        canvasW: cv?.width ?? 0, canvasH: cv?.height ?? 0,
+        cssW: cv?.clientWidth ?? 0, cssH: cv?.clientHeight ?? 0,
+        dpr: typeof devicePixelRatio !== 'undefined' ? devicePixelRatio : 1,
+        animTick: tileAnim.tick,
+        lowK: r?._worldLowK ?? 1, lowW: r?._worldLowW ?? 0, lowH: r?._worldLowH ?? 0,
+      };
+    };
     // 键沿：只录操作键（移动/跳/交互/快捷栏），其余（聊天/F 键等）忽略降噪
     const REC_KEYS = new Set(['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
       'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyE',

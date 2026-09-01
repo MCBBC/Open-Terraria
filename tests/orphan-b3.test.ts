@@ -533,7 +533,7 @@ describe('工单4 三地球仪重掷策略（styleRerolls 纯层）', () => {
     g.scene = {};                                        // 全 zone false → 走 forest 四分段
     g.renderer = { biomeBg: {
       biomeVariant: () => -1,                            // oldVal=-1 保证首掷必异且不同族,确定化
-      biomeVariantRows: () => [0, 1, 2, 3, 4, 5, 6],     // B3-5 起可行域口(真实 FOREST_STYLES 表长)
+      biomeVariantRows: () => [0, 1, 2, 3, 4, 5, 6],     // B3-5 起可行域口(桩固定池,非真表长)
       setBiomeVariant: (k: string, v: number) => { written[k] = v; return v; },
     } } as never;
     const p = g.player as Player;
@@ -545,7 +545,7 @@ describe('工单4 三地球仪重掷策略（styleRerolls 纯层）', () => {
     expect(Object.keys(written).filter((k) => k.startsWith('forest'))).toEqual(['forest1']);
   });
 
-  it('B3-5 可行域重掷纯层：掷即渲染可达+域内必异;森林行族门剔同画;单值域剔空停掷', () => {
+  it('B3-5 可行域重掷纯层：掷即渲染可达+域内必异;森林族门=sameVisual 终清波扩表翻译;单值域剔空停掷', () => {
     // 决定论两界：seq[0] 取首个候选 / seq[0.99] 取末位候选（rng.next(cand.length) 契约）
     expect(rollVariantInDomain([0, 1, 2, 3], 1, undefined, seqRng([0]))).toBe(0);
     expect(rollVariantInDomain([0, 1, 2, 3], 1, undefined, seqRng([0.99]))).toBe(3);
@@ -554,24 +554,34 @@ describe('工单4 三地球仪重掷策略（styleRerolls 纯层）', () => {
       expect(v).not.toBe(2);                              // 必异在可行域内成立(修前全域掷+取模可折回原档)
       expect(v >= 0 && v <= 5 && Number.isInteger(v)).toBe(true);
     }
-    // 森林行族门：FOREST_STYLES[0]/[1] 是 style1 同画复制行 → 族内互斥必重掷
-    expect(isSameForestRow(0, 1)).toBe(true);
-    expect(isSameForestRow(1, 0)).toBe(true);
-    expect(isSameForestRow(0, 2)).toBe(false);
-    expect(isSameForestRow(5, 6)).toBe(false);
-    for (let t = 0; t < 30; t++) {
-      const fromDupRow = rollVariantInDomain([0, 1, 2, 3, 4, 5, 6], 0, isSameForestRow, randRng)!;
-      expect(isSameForestRow(0, fromDupRow)).toBe(false);   // 掷 0 不出 1(复制行)
-      const fromPlainRow = rollVariantInDomain([0, 1, 2, 3, 4, 5, 6], 2, isSameForestRow, randRng)!;
-      expect(fromPlainRow).not.toBe(2);
-      expect(fromPlainRow >= 0 && fromPlainRow <= 6).toBe(true);
+    // 森林族门（IsBackgroundConsideredTheSame :8010 → sameVisual 行空间翻译）：
+    // 3↔31 / 5↔51 / 7↔71↔72↔73 互视同款;终清波扩表后全表无复制行(旧行 0/1 族已废)
+    const gate = (a: number, b: number) => new BiomeBackground().sameVisual('forest', a, b);
+    expect(gate(frRow(3), frRow(31))).toBe(true);
+    expect(gate(frRow(31), frRow(3))).toBe(true);
+    expect(gate(frRow(5), frRow(51))).toBe(true);
+    expect(gate(frRow(7), frRow(72))).toBe(true);
+    expect(gate(frRow(72), frRow(73))).toBe(true);
+    expect(gate(frRow(1), frRow(2))).toBe(false);
+    expect(gate(frRow(31), frRow(5))).toBe(false);
+    // 行号表自洽：行数 = 样式映射长、映射无重复（复制行曾专治的同画问题已被扩表消灭）
+    const fRows19 = new BiomeBackground().biomeVariantRows('forest');
+    expect(fRows19.length).toBe(VANILLA_FOREST_STYLE_ORDER.length);
+    expect(new Set(VANILLA_FOREST_STYLE_ORDER).size).toBe(VANILLA_FOREST_STYLE_ORDER.length);
+    // from 样式 3 的行永不出同族的样式 31 行;from 普通行不出自身
+    for (let t = 0; t < 40; t++) {
+      const fromFam = rollVariantInDomain(fRows19, frRow(3), gate, randRng)!;
+      expect(gate(frRow(3), fromFam)).toBe(false);
+      const fromPlain = rollVariantInDomain(fRows19, frRow(9), gate, randRng)!;
+      expect(fromPlain).not.toBe(frRow(9));
+      expect(fRows19.includes(fromPlain)).toBe(true);
     }
     // 可行域剔空（单值域）→ null：原版 while(同值) 无从满足时上层早退的等价语义
     expect(rollVariantInDomain([3], 3)).toBeNull();
     expect(rollVariantInDomain([], 0)).toBeNull();
   });
 
-  it('B3-5 各槽全对拍：真 BiomeBackground 表长下任意当前档重掷恒落 STYLES 行内且≠当前档——修复前的全域%表长折叠会出同档/越界写', () => {
+  it('B3-5 各槽全对拍：真 BiomeBackground 表长下任意当前档重掷恒落 STYLES 行内且≠当前档——修复前的全域%表长折叠会出同档/越界写（终清波:雪15/沙漠8/腐化7/蘑菇5 扩域后语义不变）', () => {
     const bg = new BiomeBackground();
     const nonForest = ['corrupt', 'crimson', 'jungle', 'snow', 'hallow',
       'mushroom', 'desert', 'ocean', 'underworld'] as const;
@@ -586,19 +596,32 @@ describe('工单4 三地球仪重掷策略（styleRerolls 纯层）', () => {
         }
       }
     }
-    // 森林四段走行族门（池=[0..6]）：from 0 永不出同画复制行 1；from i(i>1) 不出 i
+    // 扩表后各槽值域（锚 setBG 全集:forest 19 视觉/雪 Next(9)+六折=15/沙漠 {0..4}∪{51..53}=8/
+    // 腐化 {0..4}∪{51,52}=7/蘑菇 Next(5)=5/神圣 Next(6)=6/猩红 Next(7)=7/丛林 Next(7)=7）
+    expect(bg.biomeVariantRows('forest').length).toBe(19);
+    expect(bg.biomeVariantRows('snow').length).toBe(15);
+    expect(bg.biomeVariantRows('desert').length).toBe(8);
+    expect(bg.biomeVariantRows('corrupt').length).toBe(7);
+    expect(bg.biomeVariantRows('mushroom').length).toBe(5);
+    expect(bg.biomeVariantRows('crimson').length).toBe(7);
+    expect(bg.biomeVariantRows('jungle').length).toBe(7);
+    expect(bg.biomeVariantRows('hallow').length).toBe(6);
+    // 森林四段走族门：from 家族成员行永不出族内其余行;from 孤行不出自身
     const fRows = bg.biomeVariantRows('forest');
-    expect(fRows).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    const gate = (a: number, b: number) => bg.sameVisual('forest', a, b);
     for (const cur of [-1, ...fRows]) {
       for (let t = 0; t < 24; t++) {
-        const v = rollVariantInDomain(fRows, cur, isSameForestRow)!;
+        const v = rollVariantInDomain(fRows, cur, gate)!;
         expect(fRows.includes(v)).toBe(true);
-        if (fRows.includes(cur)) expect(isSameForestRow(cur, v)).toBe(false);
+        if (fRows.includes(cur)) {
+          expect(v).not.toBe(cur);
+          expect(gate(cur, v)).toBe(false);
+        }
       }
     }
   });
 
-  it('B3-5 集成:869 世界球经真 BiomeBackground 连掷雪槽 50 次——每次写值都在 SNOW_STYLES 6 行内且逐次变化(修前 vanilla 全域%6 会折回原档视觉不变)', () => {
+  it('B3-5 集成:869 世界球经真 BiomeBackground 连掷雪槽 50 次——每次写值都在 SNOW_STYLES 行域内(终清波扩至15行,含折变体子族)且逐次变化(修前 vanilla 全域%6 会折回原档视觉不变)', () => {
     const g = stubGame([0, 0]);
     g.spawnDust = (() => null) as never;
     g.playSfxFiles = ((files: string[]) => {

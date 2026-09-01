@@ -268,6 +268,8 @@ export class TrackGenerator {
     // 生成期箱皆有货 → 恒"不可毁"——保守按有货判,箱族/音乐盒 235 帧锚位入表)
     if (chests) {
       for (const c of chests) {
+        // ★IIII102c：跳洞（稀疏 sink）
+        if (!c) continue;
         if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) this.blockedChestAnchors.add(c.x * 16384 + c.y);
       }
     }

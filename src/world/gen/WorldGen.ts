@@ -551,6 +551,13 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
   runMultitileFragmentSweepPass(ctx.store);
+  // ★IIII102c：出口稠密化——生成全程 sink 稀疏（洞=null 镜像 Main.chest）,此处剥离
+  // 洞保留槽序的活箱坐标序列（与 .wld chests 段同构;运行期/存档面零感知）。
+  {
+    const d = densifyChests(world.chests as never) as never;
+    (world.chests as unknown[]).length = 0;
+    for (const c of d as unknown[]) (world.chests as unknown[]).push(c);
+  }
   ctx.prog?.finish();
   onProgress?.('完成', 1);
   return world;
@@ -558,6 +565,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
 
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
+import { densify as densifyChests } from './ChestRegistry';   // ★IIII102c 出口稠密化
 import { flipGenSolid, resetGenSolid, vanSolidOrSloped } from './vanilla/GenSolid';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
 import { parseSeedChain, type SeedFlags } from './SeedEasterEggs';

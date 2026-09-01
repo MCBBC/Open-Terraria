@@ -132,7 +132,7 @@ const le16 = (p: string): Uint16Array => {
   const b = readFileSync(p);
   return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1);
 };
-interface Ch { t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array }
+interface Ch { t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array; wir?: Uint8Array }
 /** 8 通道完备集（.typ 名表之外必须齐备的 7 通道）——HHHHHHH 第 4 坑免疫基准 */
 const CHAN_FILES = ['act', 'wal', 'liq', 'half', 'slope', 'lty', 'inact'] as const;
 const cache = new Map<number, Ch>();
@@ -171,9 +171,18 @@ function cmp(tag: string, idx: number, st: {
   const c = chans(idx);
   const r: Row = { idx, tag, dA: 0, dT: 0, dW: 0, dL: 0, dHf: 0, dSl: 0, dLt: 0, dIa: 0, dGh: 0, first: '', pairs: [], samples: [] };
   if (!c) { r.first = '(no dump)'; return r; }
+  // ★IIII102c（2026-09-01）wire 对账通道（SW_DUMP_WIR 的 .wir）——照 i106 .pnt/.cbt
+  // 先例**扩展式**接入：G2 目录该槽存在 .wir 才比对，缺省（14 条既有链）零影响。
+  // 字节语义两侧同布局：bit0 红/bit1 蓝/bit2 绿/bit3 黄/bit4 致动器位(bit5=inActive
+  // 已由 Ia 列裁决,此处屏蔽)。何时引入偏差一眼定位到槽。
+  const judgeWire = !!c.wir && process.env.SW_M8_NOWIRE !== '1';
+  let dWir = 0;
+  let firstWir = -1;
+  const pairWir = new Map<string, number>();
   const pair = new Map<string, number>();
   let firstI = -1;
   const mark = (i: number) => { if (firstI < 0) firstI = i; };
+  void pairWir; void firstWir; void dWir;   // 装配于循环尾（wire 行报表见 WIRE_ROWS）
   for (let i = 0; i < N; i++) {
     const va = c.a[i]!, ja = st.flags[i]! & 1;
     if (va !== ja) { r.dA++; mark(i); if (r.samples.length < 8) r.samples.push(`A(${i % W},${(i / W) | 0}) v${va} j${ja}`); }
@@ -205,6 +214,15 @@ function cmp(tag: string, idx: number, st: {
     const vg = va ? 0 : c.t[i]!;
     const jg = ja ? 0 : (st.type[i]! === 0 ? 0 : (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999));
     if (vg !== jg) r.dGh++;
+    if (judgeWire) {
+      const vw = (c.wir![i] ?? 0) & ~32;
+      const jw = (st.wire[i] ?? 0) & ~32;
+      if (vw !== jw) {
+        dWir++; if (firstWir < 0) firstWir = i;
+        const k = `${vw}>${jw}`;
+        pairWir.set(k, (pairWir.get(k) ?? 0) + 1);
+      }
+    }
   }
   if (firstI >= 0) r.first = `(${firstI % W},${Math.floor(firstI / W)})`;
   r.pairs = [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => [k, n] as [string, number]);

@@ -1,10 +1,11 @@
 // 可控导弹族（MagicMissileProj，aiStyle 9 = AI_009_MagicMissiles
 // Projectile.cs:40518-40751）+ 老星怒落星（StarfuryStar，proj 9 aiStyle 5
 // :22130-22247）行为回归——操控转向 / 松手语义 / 旋转角 / 穿透 / 持按连发。
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj,
   limitPointToPlayerReachableArea } from '../src/entities/MissileProj';
+import { VanillaDust } from '../src/fx/VanillaDust';
 
 /** 本文件构造的导弹登记表——afterEach 统一出链（清模块级 ALIVE） */
 const made: MagicMissileProj[] = [];

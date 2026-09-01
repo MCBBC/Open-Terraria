@@ -36,6 +36,15 @@ export interface RecMeta {
   eventCount: number;
   /** 录制窗开启 tick（无窗导出=全环快照时为 null） */
   startTick: number | null;
+  /** ★渲染快照（2026-09-01 发丝缝回放用）：导出瞬间的相机/画布/动画时钟——
+   *  渲染管线确定性,四元组(相机x,y+zoom+画布尺寸)+animTick 即可逐位重建该帧。
+   *  回放：探针里置 camera + tileAnim.tick = 记录值后截图 → 逐行像素扫描。 */
+  render?: {
+    camX: number; camY: number; zoom: number;
+    canvasW: number; canvasH: number; cssW: number; cssH: number; dpr: number;
+    animTick: number;
+    lowK: number; lowW: number; lowH: number;
+  };
 }
 
 export interface RecExport {
@@ -70,6 +79,8 @@ export class BehaviorRecorder {
   tickSource: () => number = () => 0;
   /** 世界元信息源（Game 构造注入；export 头用。缺省占位） */
   worldInfo: () => RecWorldInfo = () => ({ worldName: '', seed: 0, w: 0, h: 0, hardMode: false, dayTime: true });
+  /** 渲染快照源（Game 构造期注入；未注入 = meta.render 缺省不写字段） */
+  renderInfo?: () => RecMeta['render'];
 
   /** 恒安全写入（无窗也进环——追溯能力的根基）。风暴下自动淘汰最旧 */
   log(k: string, d: unknown): void {
@@ -120,6 +131,7 @@ export class BehaviorRecorder {
         truncated,
         eventCount: events.length,
         startTick: events[0] ? events[0].t : null,
+        ...(this.renderInfo ? { render: this.renderInfo() } : {}),
       },
       events,
     };

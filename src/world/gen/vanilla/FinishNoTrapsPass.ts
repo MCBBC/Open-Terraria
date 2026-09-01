@@ -341,9 +341,12 @@ export function runFinishNoTraps(st: TileStore, rng: RNG, gs: GenState, chests: 
     }
   }
   // ---- (E) 每箱 1/15 塞 5346 Gas Trap（cs:26477-26492） ----
+  // ★IIII102c：原文 `num18<8000 { chest=Main.chest[num18]; if null break; … }`——
+  //   首洞截断（整链后续不再耗 Next(15)）;稀疏 sink 下必须镜像,否则掷流漂移。
   const gasId = vid(5346);
-  for (let num18 = 0; num18 < chests.length; num18++) {
-    const c = chests[num18]!;
+  for (let num18 = 0; num18 < chests.length && num18 < 8000; num18++) {
+    const c = chests[num18];
+    if (!c) break;
     const e15 = rng.int(0, 14);                                         // Next(15)（掷照耗）
     const skip = e15 !== 0 || !c.items[1] || c.items[1].stack === 0;
     if (pr) em?.(`ECH|${num18}|${e15}|${skip ? 1 : 0}|${rc()}`);

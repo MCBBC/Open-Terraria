@@ -22,6 +22,12 @@
 //   不经本解释器)/Aurora(自研光栅化逐像素 v0,不受此限)）。逐帧带 v0 烘焙需
 //   逐像素重跑 SM2=架构级改动,登记为已知偏差;亮处 v0≡白时等价故地表难察觉。
 import fxJson from '../data/fxPixelShader.json';
+import { sat, type Sm2PxGenFn } from './sm2Runtime';
+import { GEN_MAP } from './gen/genIndex.gen';
+
+/** PR#3 引擎开关：codegen 直线代码优先，VM 保留为差分门 oracle 与回退路径。
+ *  任何 pass 无生成产物（genIndex 缺项/生成器 refuse）自动落回 VM。 */
+const SM2_CODEGEN = true;
 
 export interface SM2Uniforms {
   uColor: [number, number, number];
@@ -422,9 +428,7 @@ export class SM2Pass {
   }
 }
 
-function sat(x: number): number {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
-}
+// sat 已迁至 sm2Runtime(PR#3)——供生成代码与 VM 共享同一实现(逐字同式)。
 
 
 // ---------- pass 检索 ----------

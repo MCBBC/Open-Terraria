@@ -366,16 +366,16 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    // ★枪族 v12 金标(2026-09-01):原版 itemLocation(Player.cs:51006) =
-    //   握点 = 中心 + (fw/2+2)·dir + (0, 24−21), 前伸 = fw+dp[0]。
-    //   发射筒 759: 握点=(cx+28·dir, cy+3+2), reach=52−8=44
-    //   → 水平右 d=(28+44, 5)=(72,5)。含手前偏移(武器越宽手越远)。
+    // ★枪族 v13 纯极坐标(2026-08-31 终版):出生点 = 中心 + 瞄准单位·reach + (0,−fh/2)。
+    //  reach = fw + dp[0](每武器 barrel reach 含定制握把偏移);
+    //  垂直偏移 = −fh/2(pivot 高度,恒定不随角度旋转);
+    //  零横向恒定偏移 → 全象限弹都在鼠标柱上,朝向翻转零跳变。
+    //  (v12 的 handFwd·sg 横向偏移在近垂直时不衰减 = 左右跳,已删)
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
-    const handFwd = fw * 0.5 + 2;
     const reach = fw + dp[0];
     return {
-      x: cx + sg * handFwd + Math.cos(aimWorld) * reach,
-      y: cy + 3 + dp[1] + Math.sin(aimWorld) * reach,
+      x: cx + Math.cos(aimWorld) * reach,
+      y: cy - fh * 0.5 + Math.sin(aimWorld) * reach,
     };
   }
   const wr = sg * alpha;

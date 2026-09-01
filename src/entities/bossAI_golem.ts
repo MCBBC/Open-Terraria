@@ -6,7 +6,10 @@
 //   SetDefaults:NPC.cs:12095-12149(245-249 属性);:17942-17962 = getGoodAdjustments
 //   (FTW 专属:245-249 scale×0.5、245-248 canDisplayBuffs=false——普通世界无此调整)。
 // 经典模式主链 1:1;getGoodWorld 分支已实装(balance +2/+3/蓄力 +100/本体+拳落体砸
-// 火把/FTW 断臂尘由砸火把取代);expert 分支保留注释;netcode/纯视觉尘(Gore/netOffset)跳过。
+// 火把/FTW 断臂尘由砸火把取代);expert 分支保留注释;netcode 跳过。
+// 尘真值面已全量实装(2026-09-01 终清波):断臂 Dust31×双臂流+1/10 火星(:19626-19663)/
+// 拳聚能向心收敛 228 圆盘(:19374-19390)/冲拳焰尾 306 OurFavoriteColor scale2(:19455-19460)/
+// 自由头排焰双流 228(:31796-31812);仅 Gore 族(netcode 关联)维持不接。
 //
 // 死亡链(任务约定,原版 checkDead 语义的对齐版):
 //   · 挂载头在场时本体无敌(NPC.cs:19513 dontTakeDamage = flag)——一阶段打头/拳;
@@ -21,7 +24,22 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { vanillaNpc } from '../data/vanillaNpcs';
-import { spawnPart, shoot, accelTo, losClear } from './bossAI';
+import { spawnPart, spawnVanillaEnemy, shoot, accelTo, losClear } from './bossAI';
+
+// ---- Main.rand 掷面工具（本文件石巨人尘块专用）----
+/** NextFloat() ∈ [0,1) */
+const rf = (): number => Math.random();
+/** NextFloatDirection() ∈ [-1,1)（Utils 语义：2×NextFloat−1） */
+const rfDir = (): number => Math.random() * 2 - 1;
+/** NextVector2Circular(hw,hh)=NextVector2Unit()×(hw,hh)×NextFloat()
+ *  （Utils.cs:1296-1304：单位圆角 θ=2π·rand → 半径 rand 各向异性缩放=圆盘抽样,
+ *  ★非逐轴矩形均匀——本仓 fx/orchestraFx 的同名词件是矩形近似,勿混用） */
+const circular = (hw: number, hh = hw): { x: number; y: number } => {
+  const a = Math.random() * Math.PI * 2, f = Math.random();
+  return { x: Math.cos(a) * hw * f, y: Math.sin(a) * hh * f };
+};
+/** OurFavoriteColor(255,231,69,255)（Main.cs:886——尘 306 焰尾色源） */
+const FAVORITE_RGB = { r: 255, g: 231, b: 69, a: 255 };
 // 台账批 2026-08-31:私有三列采样 collideGround 退役 → 本仓 physics 基建 moveAndCollide
 // 1:1(Collision.cs:2299 TileCollision + SlopeCollision + StepUp/StepDown 全语义——
 // 140px 体宽的旧采样点 [x+2,cx,x+w−2] 间各有 ~68px 盲带,四列实心可悬空/坡面不贴合)
@@ -210,19 +228,29 @@ function golemEyeLasersFree(
 // AI_045 石巨人本体 245(NPC.cs:19447-19722)
 // ---------------------------------------------------------------------------
 
-/** 挂载头 → 自由态(原版 HitEffect :85842-85847:246 血尽原地 NewNPC 249;
- *  本工程头原体变身,满血+属性对齐 249 SetDefaults :12139-12149) */
+/** 挂载头 → 自由态(原版 HitEffect NPC.cs(1458):85904-85919:246 血尽且无任何尘/gore,
+ *  仅 `NewNPC(GetSpawnSource_NPCHurt(), (int)Center.X, position.Y+height, 249, whoAmI)`
+ *  ——NewNPC 内 `nPC.Bottom = (X,Y)`(:81594)⇒ 底边锚=原头底边;246/249 同为 70×70
+ *  (:12207-12251)⇒ 盒逐位重合,fresh 249 走完整 ScaleStats(lifeMax 16000 档)。
+ *  2026-09-01 终清波实装:fresh 直生对齐真值;ctor 缺失环境(纯单测 mock 的 spawnVanillaEnemy
+ *  空转/failed)退化为在位转换兜底。曾附 '#C04030'×16 演出爆 = 原版全段无此物,删除)
+ *  转换音:原版全程无声(HitEffect 仅 NewNPC 249;曾加 roar 系对账行号 :32587 误引——
+ *  该行属幻影龙 266 段,石巨人无此吼,2026-08-19 终审删) */
 function golemHeadGoFree(e: Enemy, game: GameHooks): void {
   const x = headXOf(e);
   if (x.free) return;
+  const fresh = spawnVanillaEnemy(game, 249, Math.round(e.cx), Math.round(e.y + e.h));
+  if (fresh) {
+    fresh.vx = fresh.vy = 0;
+    e.dead = true;          // 原位实体让位(246 死亡零演出,直接 active 移除语义)
+    return;
+  }
+  // ---- 兜底在位转换(仅 mock 无 ctor 环境;语义面同上,fresh 原生缩放面缺失备案) ----
   x.free = true;
   e.ai3 = 1;          // 自由态标记(探针/部件锚定可观测)
   e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
-  e.hp = e.maxHp;     // 原版 249 满血登场
+  e.hp = e.maxHp;     // 原版 249 满血登场(lifeMax 与 fresh 16000 档差 = 本兜底唯一漂移)
   e.spin = 0;         // 新 249 rotation=0——远锚态变身残留 vx*0.1 旋转=永久歪头(终审修)
-  game.spawnParticles(e.cx, e.cy, '#C04030', 16, 2.6, { life: 30 });
-  // 转换音:原版全程无声(HitEffect :85842-85847 仅 NewNPC 249;曾加 roar 系
-  // 对账行号 :32587 误引——该行属幻影龙 266 段,石巨人无此吼,2026-08-19 终审删)
 }
 
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -308,11 +336,32 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     smashTorches(game.world.store, e.x, e.x + e.w, e.y, e.y + e.w);
   }
 
-  // ---- 断臂尘(NPC.cs:19529-19595):原版整块被 !getGoodWorld 包住(FTW 下由砸火把
-  //      取代,无断臂尘);此处每 10t 一簇粒子近似 ----
+  // ---- 断臂尘(NPC.cs(1458):19626-19663,!getGoodWorld 包住——FTW 下由砸火把取代):
+  //      每 tick 双臂流:缺侧各一粒 Dust.NewDust(臂点 8×8 盒,31 号灰,alpha100 后
+  //      +=Next(100)、v×0.2、vy−=0.5+Next(10)/10、fadeIn=0.5+Next(10)/10);再掷
+  //      Next(10)==0 → 臂点一粒 Dust6 火星(Next(20)!=0 门:noGravity/scale×(1+Next(10)/10)/
+  //      vy−−)。旧"每 10t 一簇 spawnParticles 近似"退役 —— 终清波实装 ----
   if (!game.world.seedFlags?.getGoodWorld) {
-    if (!hasL && e.aiT % 10 === 0) game.spawnParticles(e.cx - 80 * sc(e), e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
-    if (!hasR && e.aiT % 10 === 0) game.spawnParticles(e.cx + 62 * sc(e), e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+    const armDust = (ox: number): void => {
+      const px = e.cx + ox * sc(e) - 4, py = e.cy - 9 - 4;   // NewDust 8×8 盒的左上
+      const d = game.spawnDust?.(px, py, 8, 8, 31, 0, 0, 100);
+      if (!d) return;
+      d.alpha = Math.min(255, d.alpha + Math.floor(rf() * 100));  // alpha += Next(100)
+      d.vx *= 0.2;
+      d.vy *= 0.2;
+      d.vy -= 0.5 + rf() * 10 * 0.1;                              // velocity.Y -= .5+Next(10)*.1
+      d.fadeIn = 0.5 + rf() * 10 * 0.1;
+      if (rf() < 1 / 10) {                                        // Next(10)==0
+        const s = game.spawnDust?.(px, py, 8, 8, 6);
+        if (s && rf() >= 1 / 20) {                                // Next(20)!=0
+          s.noGravity = true;
+          s.scale *= 1 + rf() * 10 * 0.1;
+          s.vy -= 1;                                              // velocity.Y--
+        }
+      }
+    };
+    if (!hasL) armDust(-80);
+    if (!hasR) armDust(62);
   }
 
   // ---- 跳跃穿墙解除(NPC.cs:19569-19578):下落低于玩家顶 / 有视线且自身不在块内 ----
@@ -564,7 +613,36 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         golemEyeLasersFree(game, e, player, noLosBody, r);
       }
     }
-    // :31721-31740 排焰尘(纯视觉,略)
+    // ---- 排焰双流真实尘(NPC.cs(1458):31796-31812,!getGoodWorld 门):每 tick 两粒
+    //      Dust228/NewDustPerfect,均 +=velocity、noGravity——
+    //      流① Bottom+(±22·scale,−22·scale)(侧别 num779=Next(2)×2−1),速=
+    //      Rot(π/2−π/2·侧+NextFloatDirection·π/4)×(2+NextFloat);
+    //      流② Bottom+(NextFloatDirection·6·scale,(NextFloat·−4−8)·scale),速=UnitY×
+    //      (2+NextFloat),fadeIn=0/scale=0.7+NextFloat·0.5。(原注 ":31721-31740 纯视觉略"
+    //      整段缺失 —— 终清波实装;Perfect 通道经 VanillaDust spawn 内烟雾族特例后
+    //      position/velocity 双覆写,与原版 NewDustPerfect 仅覆写两字段语义一致) ----
+    if (!game.world.seedFlags?.getGoodWorld) {
+      const scc = sc(e);
+      const side = (Math.random() < 0.5 ? -1 : 1);          // Next(2)*2-1
+      const angA = Math.PI / 2 + (-Math.PI / 2) * side + rfDir() * (Math.PI / 4);
+      const spdA = 2 + rf();
+      const dA = game.spawnDust?.(
+        e.cx + side * 22 * scc, e.y + e.h - 22 * scc, 0, 0,
+        228, Math.cos(angA) * spdA, Math.sin(angA) * spdA, 0, null, 1, false, true);
+      if (dA) {
+        dA.vx += e.vx; dA.vy += e.vy;
+        dA.noGravity = true;
+      }
+      const dB = game.spawnDust?.(
+        e.cx + rfDir() * 6 * scc, e.y + e.h + (rf() * -4 - 8) * scc, 0, 0,
+        228, 0, 2 + rf(), 0, null, 1, false, true);
+      if (dB) {
+        dB.fadeIn = 0;
+        dB.scale = 0.7 + rf() * 0.5;
+        dB.vx += e.vx; dB.vy += e.vy;
+        dB.noGravity = true;
+      }
+    }
   }
 
   // 穿墙开关(:31581-31597 两版本同段):看不到玩家 → noTileCollide=true 直飞;
@@ -660,10 +738,21 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.x = tx - e.w / 2;                     // 原版 base.Center = vector(整帧钉在肩锚)
     e.y = ty - e.h / 2;
     e.spin = 0; e.vx = 0; e.vy = 0;
-    if (e.ai1 <= 15) {                      // :19278-19292 聚能尘(粒子近似)
-      game.spawnParticles(
-        e.cx + (Math.random() - 0.5) * 30, e.cy + (Math.random() - 0.5) * 30,
-        '#C8A040', 1, 0.8, { life: 26 });
+    if (e.ai1 <= 15) {                      // NPC.cs(1458):19374-19390 聚能向心收敛尘
+      // vector3=Circular(80,80)/vector4=vector3×−0.05(vector5=Circular(20,20) 抖动):
+      // 出生位 = Center+vector3·0.95+vector5、速度 = vector4（指向本体的向心汇流）;
+      // Dust228 fadeIn=1.5 / scale=0.5 / noGravity,getGoodWorld 再 noLight。
+      // 原"每拍 '#C8A040' spawnParticles 近似"退役 —— 终清波实装
+      const v3 = circular(80), j = circular(20);
+      const d = game.spawnDust?.(
+        e.cx + v3.x * 0.95 + j.x, e.cy + v3.y * 0.95 + j.y, 0, 0,
+        228, v3.x * -0.05, v3.y * -0.05, 0, null, 1, false, true);
+      if (d) {
+        d.fadeIn = 1.5;
+        d.scale = 0.5;
+        if (game.world.seedFlags?.getGoodWorld) d.noLight = true;
+        d.noGravity = true;
+      }
     }
     if (e.ai1 >= 30) {
       x.noTC = true;
@@ -690,8 +779,16 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     e.ai1 += 1;
     if (e.ai1 === 1) game.playSfxWav?.('Item_14', 1, e.cx, e.cy);   // SoundID.Item14(:19344-19346;曾借 roar 0.4)
-    if (e.aiT % 2 === 0) {                        // :19348-19356 焰尾尘(粒子近似)
-      game.spawnParticles(e.cx + e.vx * 0.5, e.cy + e.vy * 0.5, '#E08040', 1, 0.6, { life: 20 });
+    if (rf() < 1 / 2) {                           // NPC.cs(1458):19455-19460 焰尾尘
+      // 1/2 拍:vector7=velocity×0.5 + Circular(20,20) 抖动 → Dust306(NewDustPerfect,
+      // 同速 vector7, OurFavoriteColor(255,231,69)).scale=2f——
+      // 原"每 2t '#E08040' spawnParticles 近似"退役;306 纹理/2 倍缩放/黄橙真值色齐备
+      const v7x = e.vx * 0.5, v7y = e.vy * 0.5;
+      const j = circular(20);
+      const d = game.spawnDust?.(
+        e.cx + v7x + j.x, e.cy + v7y + j.y, 0, 0,
+        306, v7x, v7y, 0, FAVORITE_RGB, 1, false, true);
+      if (d) d.scale = 2;
     }
     // 过轴判定(:19363-19388):主轴冲过玩家 → 关穿墙(开始撞墙)
     if (Math.abs(e.vx) > Math.abs(e.vy)) {

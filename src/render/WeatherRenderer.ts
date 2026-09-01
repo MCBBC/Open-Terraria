@@ -465,7 +465,8 @@ export class WeatherRenderer {
     const amount = (value - 0.77) / 0.23000002;
     const maxValue2 = Math.max(1, Math.floor(1 + 9 * amount));   // Lerp(1,10,amount)
     const num7 = Math.floor(1000 * (viewW / 1920));         // maxScreenW≈1920
-    let num9 = num7 * 1.1 - this.countSand();               // gfxQuality=1（Main.cs:1012）
+    const gq = gfxQuality.value;                            // :171 SandStormCount 预算按画质
+    let num9 = num7 * (gq * 0.5 + 0.5) + num7 * 0.1 - this.countSand();
     if (num9 <= 0) return;
     const colors = hooks.sandColors().filter((c) => c.weight > 0);
     const totalW = colors.reduce((s, c) => s + c.weight, 0);

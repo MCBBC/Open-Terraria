@@ -38,7 +38,7 @@ const STYLE_TO_AREA: Record<number, number> = {
 //
 // 森林（SetForestBGSet :7589-7716 全表 19 视觉 = {0..13}∪{31,51,71,72,73}，
 // RollRandomForestBGStyle cs:7983 的全域；default 分支 = 样式 0 → [9,10,11]）。
-const FOREST_STYLES: Array<{ m: [number, number]; t: [number, number, number] }> = [
+export const FOREST_STYLES: Array<{ m: [number, number]; t: [number, number, number] }> = [
   { m: [7, 8], t: [9, 10, 11] },         // 样式 0（switch default 树组）
   { m: [7, 8], t: [50, 51, 52] },        // 样式 1
   { m: [7, 8], t: [53, 54, 55] },        // 样式 2
@@ -63,23 +63,23 @@ const FOREST_STYLES: Array<{ m: [number, number]; t: [number, number, number] }>
  *  导出仅供对账/测试——渲染与重掷消费方仍应走行空间口）。 */
 export const VANILLA_FOREST_STYLE_ORDER = [0, 1, 2, 3, 31, 4, 5, 51, 6, 7, 71, 72, 73, 8, 9, 10, 11, 12, 13];
 
-const CORRUPT_STYLES: Array<[number, number, number]> = [
+export const CORRUPT_STYLES: Array<[number, number, number]> = [
   [12, 13, 14], [56, 57, 58], [211, 212, 213], [225, 226, 227], [240, 241, 242],
   [324, 323, 322],   // 样式 51（Graveyard 族——RandomizeBackgrounds_Corruption :7962 折变体）
   [324, 226, 322],   // 样式 52（case 52 :7253-[1]槽借 226,SURF_FLIP 整层翻转自动生效）
 ];
-const CRIMSON_STYLES: Array<[number, number, number]> = [
+export const CRIMSON_STYLES: Array<[number, number, number]> = [
   [43, 44, 45], [105, 106, 107], [174, -1, 175], [214, 215, 216], [-1, 229, 230], [255, 256, 257], [339, 338, 337],
 ];
-const JUNGLE_STYLES: Array<[number, number, number]> = [
+export const JUNGLE_STYLES: Array<[number, number, number]> = [
   [15, 16, 17], [59, 60, 61], [222, 223, 224], [237, 238, 239], [284, 285, 286], [271, 272, 273], [302, 301, 300],
 ];
 /** 雪（setBG case 3 :7305-7440 全域 = Next(9)+折变体 21/22/31/32/41/42 共 15 视觉）。
  *  ★原版 case 3 连 Main.snowMntBG 一起换（:7306 预置 35/36 后按样式覆写 98/99/
  *  98/100/98/101 或清空 -1/-1）——结构化行携带山体对（m 槽,-1=该步不画）,
  *  drawSurface 雪支按行取 m 槽替换旧硬编码 35/36。 */
-interface SnowRow { m: [number, number]; t: [number, number, number] }
-const SNOW_STYLES: SnowRow[] = [
+export interface SnowRow { m: [number, number]; t: [number, number, number] }
+export const SNOW_STYLES: SnowRow[] = [
   { m: [35, 36], t: [37, 38, 39] },      // 样式 0
   { m: [35, 36], t: [97, 96, 95] },      // 样式 1
   { m: [98, 99], t: [-1, -1, -1] },      // 样式 2（纯山体组）
@@ -96,28 +96,34 @@ const SNOW_STYLES: SnowRow[] = [
   { m: [269, 270], t: [267, 266, 268] }, // 样式 7
   { m: [35, 36], t: [299, 298, -1] },    // 样式 8（case 8 不覆写山体,:7306 预置态）
 ];
-const HALLOW_STYLES: Array<[number, number, number]> = [
+export const HALLOW_STYLES: Array<[number, number, number]> = [
   [29, 30, 31], [102, 103, 104], [219, 220, 221], [243, 244, 245], [-1, 261, 262], [327, 326, 325],
 ];
+/** 行号↔样式号映射（雪/沙漠/腐化——行序即此表序;供重掷链与渲染行的对账测试）。
+ *  雪序含折变体（RandomizeBackgrounds :7922-7949 折叠语义）;沙漠/腐化序把
+ *  侵染族 51..53 / 51..52 排在纯档之后。 */
+export const VANILLA_SNOW_STYLE_ORDER = [0, 1, 2, 21, 22, 3, 31, 32, 4, 41, 42, 5, 6, 7, 8];
+export const VANILLA_CORRUPT_STYLE_ORDER = [0, 1, 2, 3, 4, 51, 52];
+export const VANILLA_DESERT_STYLE_ORDER = [0, 1, 2, 3, 4, 51, 52, 53];
 /** 蘑菇（setBG case 8 :7528-7559 五档全表）。★终清波修正:旧行 [26,27,28]/
  *  [111,110,109] 是早期转录错误——26/27 实为原版 GoodEvilDesert 兜底沙丘画
  *  （Main.cs:61857/:61874 LoadBackground(26)/(27)）、109..111 与蘑菇无关,与
  *  1456/1457/1458 三版 mushroomBG 全不对应。存档兼容:mushroom 持久值本就是
  *  原版样式号 0..4,行序即样式序,旧存档 0/1 值直接落正确新行。 */
-const MUSHROOM_STYLES: Array<[number, number, number]> = [
+export const MUSHROOM_STYLES: Array<[number, number, number]> = [
   [46, 47, 48], [231, 232, 233], [234, 235, 236], [287, 288, 289], [321, 320, 319],
 ];
 /** 沙漠（setBG case 6 :7441-7508 全域 = {0..4}∪{51,52,53}）。结构化行:p=Pure 组
  *  （bgStyle=2 直用）;c/h/r=腐化/神圣/猩红沙漠槽列（bgStyle=5/13/14 时若当前
  *  desertStyle 为沙侵染族 51/52/53 则取对应列,否则走 GoodEvilDesert 兜底 26/27）。
  *  样式 4 无侵染列——纯样式只在 Pure 列驻留(:7462 后 Clear 只填 Pure)。 */
-interface DesertRow {
+export interface DesertRow {
   p: [number, number, number];
   c?: [number, number, number];
   h?: [number, number, number];
   r?: [number, number, number];
 }
-const DESERT_STYLES: DesertRow[] = [
+export const DESERT_STYLES: DesertRow[] = [
   { p: [21, 20, -1] },                  // 样式 0
   { p: [108, 109, -1] },                // 样式 1
   { p: [207, 208, -1] },                // 样式 2
@@ -135,7 +141,7 @@ const DESERT_STYLE4_ROW = 4;
 const GOODEVIL_DESERT_FALLBACK: [number, number] = [26, 27];
 /** 海洋单层贴图变体（WorldGen.setBG case 7 :7513-7541：style 0-7 → Main.oceanBG，
  *  worldgen 期 setBG(7, random.Next(8)) :7973 掷骰；海洋层 = 单张贴图无树层组） */
-const OCEAN_STYLES = [28, 110, 111, 209, 210, 283, 332, 340];
+export const OCEAN_STYLES = [28, 110, 111, 209, 210, 283, 332, 340];
 /** 地下带状背景横向视差（Main.cs:1172 caveParallax 默认 0.88;设置项 "Parallax" 可调） */
 const CAVE_PARALLAX = 0.88;
 
@@ -1119,9 +1125,15 @@ export class BiomeBackground {
       // DrawSurfaceBG_Forest（:62217）三树层
       drawLayer(fs.t[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });
       drawLayer(fs.t[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true, flip: true });
-      drawLayer(fs.t[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
-      // [0]==91 风格：[2] 层贴图 92 走 1.3/0.42 特例（:62404-62407）+ nudge +150
-      if (fs.t[0] === 91) drawLayer(92, 1.3, 0.42, 2100, 2000, aFront, { anim: true, nudge: 150 });
+      // 槽[2] 几何：t[0]==91 时整槽走 1.3/0.42 特例（:62398-62407,该覆写挂在
+      // [0]==91 上与槽内容无关——样式 31 的 t[2]=11 也吃此档）;SURF_NUDGE[92]=150
+      // 由表按贴图号自动施加。曾误写成「再画一遍 92」= s3 行 92 双绘 +
+      // 扩表后的样式 31 行凭空多出 92 层（终清波修正）。
+      if (fs.t[0] === 91) {
+        drawLayer(fs.t[2], 1.3, 0.42, 2100, 2000, aFront, { anim: true });
+      } else {
+        drawLayer(fs.t[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
+      }
     } else if (style === Corruption) {
       drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[2]
       drawLayer(25, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[2]

@@ -197,10 +197,12 @@ function finalSeedCleanupPaint(st: TileStore, x: number, y: number, f: SeedFlags
  *  否则下格静态化（下坠一格成型,原格保留 Falling 态——原版如此,勿"修"）。
  *  chests=世界箱注册表（CanDestroyChest 有货箱锚集镜像,cs:590）。 */
 export function finalSeedCleanup(st: TileStore, f: SeedFlags,
-  chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
+  chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> } | null>): void {
   const blockedChests = new Set<number>();
   if (chests) {
     for (const c of chests) {
+      // ★IIII102c：跳洞（稀疏 sink）
+      if (!c) continue;
       if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) blockedChests.add(c.x * 16384 + c.y);
     }
   }
