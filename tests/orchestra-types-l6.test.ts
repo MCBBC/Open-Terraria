@@ -15,9 +15,12 @@ import {
   ParticleOrchestraType, writeParticleModule, readParticleModule,
 } from '../src/net/syncModules';
 import { NetModule, NetReader } from '../src/net/protocol';
+import {
+  terraBladeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx,
+} from '../src/fx/orchestraFx';
 
 type PartRec = { x: number; y: number; color: string; count: number; opts: Record<string, unknown> };
-type DustRec = { type: number; scale: number; ret: VDust };
+type DustRec = { type: number; scale: number; ret: VDust; perfect: boolean };
 
 function mkGame(store?: TileStore) {
   const particles: PartRec[] = [];
@@ -32,14 +35,15 @@ function mkGame(store?: TileStore) {
     particles.push({ x, y, color, count, opts });
   }) as never;
   g.spawnDust = ((x: number, y: number, w: number, h: number, type: number,
-    vx = 0, vy = 0, alpha = 0, color?: DustColor | null, scale = 1, noGravity = false) => {
+    vx = 0, vy = 0, alpha = 0, color?: DustColor | null, scale = 1, noGravity = false,
+    perfect = false) => {
     void w; void h; void vx; void vy;
     const ret: VDust = {
       active: true, x, y, vx, vy, type, scale, alpha, fadeIn: 0,
       noGravity, noLight: false, noLightEmittance: false, color: color ?? null,
       rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
     };
-    dusts.push({ type, scale, ret });
+    dusts.push({ type, scale, ret, perfect });
     return ret;
   }) as never;
   g.playSfxWav = ((file: string, vol?: number) => { wavs.push({ file, vol: vol ?? 1 }); }) as never;
@@ -111,11 +115,11 @@ describe('剑刃轨迹族（SwingArc/Slash/Fly 生产锚 → dispatch 消费）'
     apply(g, ParticleOrchestraType.NightsEdge);
     expect(particles.length).toBe(6);
   });
-  it('TrueNightsEdge(12) 四臂绿族+d75 尘对', () => {
+  it('TrueNightsEdge(12) 双臂绿族 + d75 尘锥（每臂 i<2 双掷 × ± 对 = 8,:3205-3217）', () => {
     const { g, particles, dusts } = mkGame();
     apply(g, ParticleOrchestraType.TrueNightsEdge);
     expect(particles.length).toBe(4);
-    expect(dusts.filter((d) => d.type === 75).length).toBe(4);
+    expect(dusts.filter((d) => d.type === 75).length).toBe(8);
   });
   it('Excalibur(13) 八臂金十字；TrueExcalibur(14) 红粉前置带加成', () => {
     const { g, particles } = mkGame();
@@ -125,11 +129,13 @@ describe('剑刃轨迹族（SwingArc/Slash/Fly 生产锚 → dispatch 消费）'
     apply(r2.g, ParticleOrchestraType.TrueExcalibur);
     expect(r2.particles.length).toBe(8 + 4);             // 红粉前置双带 ×2
   });
-  it('TerraBlade(15) 三带十粒+d107×8', () => {
+  it('TerraBlade(15) 三带十粒+d107×8（±臂 scale 对 .8/1.4）', () => {
     const { g, particles, dusts } = mkGame();
     apply(g, ParticleOrchestraType.TerraBlade, 500, 400, 8, 0);
     expect(particles.length).toBe(10);
-    expect(dusts.filter((d) => d.type === 107).length).toBe(8);
+    const ds = dusts.filter((d) => d.type === 107);
+    expect(ds.length).toBe(8);
+    expect(ds.every((d) => d.perfect)).toBe(true);        // B3：剑族尘必走 perfect 通道
   });
   it('MoonLordWhipHit(44)/Eye(45)：双色笔触/单残影', () => {
     const a = mkGame();
@@ -267,7 +273,7 @@ describe('杂项（Keybrand/GasTrap/Shimmer/TownSlime/Cattiva/RB 族/BestReforge
   it('Keybrand(0)：三带金橙+蓝白扩点', () => {
     const { g, particles } = mkGame();
     apply(g, ParticleOrchestraType.Keybrand);
-    expect(particles.length).toBe(3 + 2 + 1);
+    expect(particles.length).toBe(3 + 3 + 1);           // ★δB9 第二带=3 片（num2=3 循环）
   });
   it('GasTrap(23)：Item16 音+外环12/内环10 绿雾', () => {
     const { g, particles, wavs } = mkGame();
@@ -414,9 +420,10 @@ describe('生产者接线结构断言（module8 上行/clientOnly 直驱按原 n
     expect(has('src/entities/Player.ts', 'ParticleOrchestraType.PyroclasticStoneRecharge'));
   });
   it('SwingArc/WhipProj/proj1457：剑刃轨迹族+月主鞭+导通链电', () => {
-    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, this.projId, e)'));
-    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, 973, e)'));
-    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, 972, e)'));
+    // ★δB1：MovementVector=弹体速度载荷（Projectile.cs:13015 settings.MovementVector=velocity）
+    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, this.projId, e, Math.sign(this.ai0) || 1, 0)'));
+    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, 973, e, this.vx, this.vy)'));
+    expect(has('src/entities/SwingArc.ts', 'swordTrailOrchestra(game, 972, e, this.vx, this.vy)'));
     expect(has('src/entities/WhipProj.ts', 'moonLordWhipHitFx(game, hxP, hyP, mX, mY)'));
     expect(has('src/entities/WhipProj.ts', 'ParticleOrchestraType.MoonLordWhipHit'));
     expect(has('src/entities/proj1457.ts', 'blueLightningSmallLongFx(game, pxL.x, pxL.y, mvLx, mvLy)'));
@@ -432,5 +439,121 @@ describe('生产者接线结构断言（module8 上行/clientOnly 直驱按原 n
     expect(src).toContain('Keybrand = 0');
     expect(src).toContain('ArmletOfRuinRecharge = 81');
     expect(src).toContain('PaladinsHammer = 9');
+  });
+});
+
+// ==================== 剑族尘锥 B3 回归（RotatedBy 臂向量真式 + perfect 通道） ====================
+//
+// 原文统一式 = Dust.NewDustPerfect(PositionInWorld, TYPE, 臂向量.RotatedBy(
+// NextFloatDirection()×τ×0.025) × NextFloat())——TerraBlade :2788/:2791、Excalibur
+// :2850/:2853、TrueExcalibur :3012/:3015、TrueNightsEdge :3211/:3214（1457↔1458 同文）。
+// 速率域 [0,|臂|=4]px/t、方向贴臂 ±0.157rad；旧直译 side*(rng*2−1)*k*rng 各向同性
+// 标量抖动慢 ~50 倍且不贴臂（红队 B3 finding 定罪面）。池语义见 wing-visuals 的
+// NewDustPerfect describe（position/velocity 完整覆写绕开烟雾族特例）。
+
+const TAU = Math.PI * 2;
+const JMAX = TAU * 0.025;
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 贴臂判定：速度向量到 ±臂向量的最小夹角 */
+function angularDeviation(vx: number, vy: number, ax: number, ay: number): number {
+  return Math.min(
+    Math.abs(Math.atan2(vx * ay - vy * ax, vx * ax + vy * ay)),
+    Math.abs(Math.atan2(vy * ax - vx * ay, -(vx * ax) - vy * ay)),
+  );
+}
+
+describe('剑族尘锥 B3 回归（速率 ≤4px/t 贴臂向 + perfect 旗声明）', () => {
+  it('TerraBlade d107×8：速率域[0,4]、方向贴臂、scale 对(.8|1.4)、全走 perfect', () => {
+    let maxSpeedSeen = 0;
+    for (let seed = 1; seed <= 32; seed++) {
+      const { g, dusts } = mkGame();
+      terraBladeFx(g, 500, 400, -0.6, 0.8, mulberry32(seed));
+      const ds = dusts.filter((d) => d.type === 107);
+      expect(ds.length).toBe(8);
+      const base = Math.atan2(0.8, -0.6) + Math.PI / 2;
+      ds.forEach((d, i) => {
+        const arm = base + Math.PI / 2 * Math.floor(i / 2);   // 发射序=臂×(±对)
+        maxSpeedSeen = Math.max(maxSpeedSeen, Math.hypot(d.ret.vx, d.ret.vy));
+        expect(Math.hypot(d.ret.vx, d.ret.vy)).toBeLessThanOrEqual(4 + 1e-9);
+        if (Math.hypot(d.ret.vx, d.ret.vy) > 1e-9) {
+          expect(angularDeviation(d.ret.vx, d.ret.vy, Math.cos(arm), Math.sin(arm)))
+            .toBeLessThanOrEqual(JMAX + 1e-9);
+        }
+        expect(d.perfect).toBe(true);
+      });
+      expect(ds.filter((d) => d.ret.scale === 0.8).length).toBe(4);   // +臂 :2788
+      expect(ds.filter((d) => d.ret.scale === 1.4).length).toBe(4);   // −臂 :2791
+    }
+    expect(maxSpeedSeen).toBeGreaterThan(3.5);          // 满速可达（旧式帽 ~0.16 永不到）
+  });
+
+  it('TrueNightsEdge d75×8：每臂两掷双对、速率域[0,4]、方向贴臂、全走 perfect', () => {
+    for (let seed = 1; seed <= 32; seed++) {
+      const { g, dusts } = mkGame();
+      trueNightsEdgeFx(g, 300, 300, mulberry32(seed));
+      const ds = dusts.filter((d) => d.type === 75);
+      expect(ds.length).toBe(8);
+      ds.forEach((d, i) => {
+        const arm = Math.PI / 4 + Math.PI / 2 * Math.floor(i / 4);   // 双臂 {π/4, 3π/4}
+        expect(Math.hypot(d.ret.vx, d.ret.vy)).toBeLessThanOrEqual(4 + 1e-9);
+        if (Math.hypot(d.ret.vx, d.ret.vy) > 1e-9) {
+          expect(angularDeviation(d.ret.vx, d.ret.vy, Math.cos(arm), Math.sin(arm)))
+            .toBeLessThanOrEqual(JMAX + 1e-9);
+        }
+        expect(d.ret.scale).toBe(1.4);
+        expect(d.perfect).toBe(true);
+      });
+    }
+  });
+
+  it('Excalibur d169 仅第二黄带无门 ×8（数量核对修正：旧直译两带全挂 ×16）', () => {
+    for (let seed = 1; seed <= 32; seed++) {
+      const { g, dusts } = mkGame();
+      excaliburFx(g, 120, 120, mulberry32(seed));
+      const ds = dusts.filter((d) => d.type === 169);
+      expect(ds.length).toBe(8);                        // 4 臂 × ±对，无门
+      expect(ds.every((d) => d.perfect)).toBe(true);
+      // 臂向 = τ/4 网格（基角 0,步 π/2）——方向最小角偏离 ≤ JMAX
+      ds.forEach((d) => {
+        if (Math.hypot(d.ret.vx, d.ret.vy) > 1e-9) {
+          const dev = [0, 1, 2, 3].map((k) => angularDeviation(
+            d.ret.vx, d.ret.vy, Math.cos(Math.PI / 2 * k), Math.sin(Math.PI / 2 * k),
+          ));
+          expect(Math.min(...dev)).toBeLessThanOrEqual(JMAX + 1e-9);
+        }
+      });
+    }
+  });
+
+  it('TrueExcalibur：前置带 d242 per-arm 门(≤4)+黄带 d169 门(≤16)，sparkle 计数不变', () => {
+    let seenD242 = new Set<number>();
+    let seenD169Max = 0;
+    for (let seed = 1; seed <= 64; seed++) {
+      const { g, particles, dusts } = mkGame();
+      trueExcaliburFx(g, 60, 70, mulberry32(seed));
+      expect(particles.length).toBe(12);                // 红粉前置 4 + 金黄四臂 8
+      const c242 = dusts.filter((d) => d.type === 242).length;
+      const c169 = dusts.filter((d) => d.type === 169).length;
+      expect(c242 % 2).toBe(0);
+      expect(c242).toBeLessThanOrEqual(4);              // 2 臂 × ±对
+      expect(c169 % 2).toBe(0);
+      expect(c169).toBeLessThanOrEqual(16);             // 4 臂 × ±对
+      expect(dusts.every((d) => d.perfect)).toBe(true);
+      seenD242.add(c242);
+      seenD169Max = Math.max(seenD169Max, c169);
+    }
+    expect([...seenD242].some((n) => n > 0)).toBe(true);      // 50% 门可放行
+    expect(seenD242.has(4) || seenD242.has(0)).toBe(true);    // 两态可达
+    expect(seenD169Max).toBeGreaterThan(0);
   });
 });

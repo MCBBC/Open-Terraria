@@ -164,12 +164,14 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
   //   的全部 internalSample（JJHook.OnRoll 无 identity 过滤）——SW_I104_ALL=1 时镜像同口径
   //   （含 dgUR 私有房/廊种子实例），缺省维持旧主实例口径以便复现旧档数字。
   const CAPTURE_ALL = process.env.SW_I104_ALL === '1';
+  let tagsArr: number[] | null = CAPTURE_ALL ? [] : null;
   const kStart = Number(process.env.SW_I104_KS ?? -1);
   const kWid = Number(process.env.SW_I104_KW ?? 0);
   const stacks: string[] = [];
   (globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll =
     (v: number, inst: object) => {
       if (!CAPTURE_ALL && inst !== mainU) return;
+      if (CAPTURE_ALL && tagsArr) tagsArr.push(inst === mainU ? 0 : 1);
       vals.push(v);
       rollHash = ((rollHash ^ (v >>> 0)) * 16777619) >>> 0;
       const n2 = vals.length;
@@ -207,6 +209,14 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
       writeFileSync(`${pre}.liq`, liq); writeFileSync(`${pre}.half`, hf); writeFileSync(`${pre}.slope`, sl);
       writeFileSync(`${pre}.lty`, lt); writeFileSync(`${pre}.inact`, ia);
       stageInfo[name] = { n: vals.length, rh: (rollHash >>> 0).toString(16).padStart(8, '0') };
+      if (CAPTURE_ALL) {
+        (globalThis as unknown as { __gfbxStageAll?: Record<string, number> }).__gfbxStageAll =
+          { ...((globalThis as unknown as { __gfbxStageAll?: Record<string, number> }).__gfbxStageAll ?? {}), [name]: vals.length };
+        let mm = 0;
+        for (let ti = 0; ti < vals.length; ti++) mm += 1 - (tagsArr?.[ti] ?? 1);
+        (globalThis as unknown as { __gfbxStageMainK?: Record<string, number> }).__gfbxStageMainK =
+          { ...((globalThis as unknown as { __gfbxStageMainK?: Record<string, number> }).__gfbxStageMainK ?? {}), [name]: mm };
+      }
       console.log(`[stage ${name}] rc=${vals.length} rh=${stageInfo[name].rh}`);
     };
   try {
@@ -220,6 +230,18 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
     const buf = new Uint8Array(vals.length * 4);
     for (let i = 0; i < vals.length; i++) buf.set(le(vals[i]), i * 4);
     writeFileSync(`${OUTDIR}/js-main-vals.bin`, buf);
+    if (tagsArr) {
+      const tb = new Uint8Array(tagsArr.length);
+      for (let i = 0; i < tagsArr.length; i++) tb[i] = tagsArr[i];
+      writeFileSync(`${OUTDIR}/js-tags.bin`, tb);
+      writeFileSync(`${OUTDIR}/stage-all.json`, JSON.stringify({
+        all: (globalThis as unknown as { __gfbxStageAll?: Record<string, number> }).__gfbxStageAll ?? {},
+        mainK: (globalThis as unknown as { __gfbxStageMainK?: Record<string, number> }).__gfbxStageMainK ?? {},
+      }));
+      let m2 = 0;
+      for (let i = 0; i < tagsArr.length; i++) m2 += 1 - tagsArr[i];
+      console.log(`[split] total-all=${tagsArr.length} main=${m2} private=${tagsArr.length - m2}`);
+    }
     if (stacks.length) writeFileSync(`${OUTDIR}/js-stacks.txt`, stacks.join('\n---\n') + '\n');
     writeFileSync(`${OUTDIR}/stage-info.json`, JSON.stringify(stageInfo, null, 1));
     writeFileSync(`${OUTDIR}/layout-trace.json`, JSON.stringify(layoutTrace));

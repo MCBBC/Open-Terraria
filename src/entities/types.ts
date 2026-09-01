@@ -267,12 +267,16 @@ export interface GameHooks {
   /** 原版 Dust 池直入（fx/VanillaDust.spawn——Dust.NewDust 签名对齐）。
    *  Gore 411-430 气泡族爆裂尘（Gore.cs:905-928，type 176-179）用；缺省静默丢弃。
    *  返回入池尘（调用侧可做原版 DelegateMethods 式的 NewDust 后置字段覆写——
-   *  矿车轮火花 DelegateMethods.Minecart.Sparks 族即此模式）；池满/缺省 = null */
+   *  矿车轮火花 DelegateMethods.Minecart.Sparks 族即此模式）；池满/缺省 = null。
+   *  perfect=true → Dust.NewDustPerfect 变体（Dust.cs:52-63）：完整 NewDust 链后
+   *  position/velocity 完整覆写——0 宽盒抖动窗与烟雾族特例（242/75/169 的 vy 重掷
+   *  + vx×0.3）被消解，定向速度原样入池；scale 走 NewDust 结果供调用侧后置赋值
+   *  （ParticleOrchestrator 剑族尘锥/定向快尘一律走此通道） */
   spawnDust?(
     x: number, y: number, w: number, h: number, type: number,
     speedX?: number, speedY?: number, alpha?: number,
     color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
-    noGravity?: boolean,
+    noGravity?: boolean, perfect?: boolean,
   ): import('../fx/VanillaDust').VDust | null;
   /** 鼠马车挖掘链的镐力门（MinecartDiggerHelper.HasPickPower :163-170 ←
    *  Player.HasEnoughPickPowerToHurtTile Player.cs:52964-52979）：背包最佳镐

@@ -173,7 +173,6 @@ describe('⑤ UI.chestLootAll 生产方法驱动（按钮行为位;40 槽世界�
     rc.items[0] = { id: WOOD, stack: 2000 };          // 700 入半堆,1300 溢流(<M_WOOD 单格)
     rc.items[5] = { id: DIRT, stack: 123 };
     const { plays, player, refreshed } = driveOpen(rc);
-    const { plays, player, refreshed } = drive(rc);
     expect(rc.items[0]).toBeNull();
     expect(rc.items[5]).toBeNull();
     expect(player.inv.slots[49]).toEqual({ id: WOOD, stack: M_WOOD });
@@ -185,7 +184,7 @@ describe('⑤ UI.chestLootAll 生产方法驱动（按钮行为位;40 槽世界�
 
   it('真箱空箱：零搬移不响 Grab（moved=false 门）,面板仍刷新', () => {
     const empty = { x: 7, y: 0, items: Array.from({ length: 40 }, (): Slot => null) };
-    const { plays, refreshed } = drive(empty);
+    const { plays, refreshed } = driveOpen(empty);
     expect(plays).not.toContain('pickup');
     expect(refreshed()).toBe(1);
   });
@@ -194,7 +193,7 @@ describe('⑤ UI.chestLootAll 生产方法驱动（按钮行为位;40 槽世界�
     const vv = { x: -5, y: 0, items: Array.from({ length: 40 }, (): Slot => null) };
     vv.items[3] = { id: WOOD, stack: 12, favorited: true };
     vv.items[4] = { id: DIRT, stack: 456 };
-    const { plays, player } = drive(vv);
+    const { plays, player } = driveOpen(vv);
     expect(vv.items[3]).toEqual({ id: WOOD, stack: 12, favorited: true });   // 收藏锁:原格不动
     expect(vv.items[4]).toEqual({ id: DIRT, stack: 456 });                   // 全满无口:留格
     expect(player.banks[3].every((s) => s === null)).toBe(true);             // bank 支永不溢流

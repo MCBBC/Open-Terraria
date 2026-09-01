@@ -192,7 +192,7 @@ const res = await page.evaluate(() => {
     cleanUpToIdle();
   }
   // ---- F(平台穿透):浏览器鼠标→世界 Y 映射对探针环境过敏不可靠,已改为
-  //        tests/halfbrick-boomerang-collision.test.ts 对 boomerangCellBlocks 直测
+  //        tests/halfbrick-boomerang-collision.test.ts 已改为四形态行为断言(真跑 fixedUpdate)
   //        (平台 tile 在本仓 TILE_DEFS.solid=false ⇒ isSolid=false 恒不拦=原版
   //         flag6 fallThrough 缺省 true 同义),不再做端到端断言。
   // ---- G 斜砖站立发射（2026-09-01 用户实录 behavior-log…16-41-58）----

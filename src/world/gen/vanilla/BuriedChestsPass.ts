@@ -960,12 +960,18 @@ function placeBuriedChestInner(
   if (iceDbg) iceDbg(i, gy, tBelow, mainId, style ?? -1, 0);
   // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||
   // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)。
-  //  ★IsUndergroundDesert（cs:35798-35824）= y≥worldSurface && x∈[0.15W,0.85W] &&
+  //  ★IsUndergroundDesert（★IIIII107 校勘：1456 行号 cs:35798-35824 已退役，1458 终值
+  //   cs:36144-36162）= y≥worldSurface && x∈[0.15W,0.85W] &&
   //   **±15 邻域扫描 wall∈{187,216}**——曾用 gs.undergroundDesert 矩形近似：
   //   沙漠边缘（墙带内外 ±15）矩形判定与扫描判定不同 → 漏掷沙漠主件骰
   //   （vanilla (2783,605) 实证：邻墙 187 → 掷 1 骰后 PlaceChest 拒 =1 耗掷，
   //   旧 JS 矩形外 0 耗掷——流分叉，2026-08-17 箱族批）。
+  //   ★IIIII107 第一分叉定罪（remix #59 ABRES）：vanilla 第三道门
+  //   `if (remixWorldGen && y > Main.rockLayer) return false;`（cs:36153-36156）
+  //   整段缺失 → REMIX 岩层下暗流池多掷/漏掷 ⇒ 候选列整体错位（本种首差
+  //   @winIdx1176 (1996,~778>769)：JS 池掷+1 而 x86 无骰直过）。
   const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
+    && !(gs.seedFlags.remix && gy > gs.rockLayer)
     && (() => {
       if (gy > st.h - 205) return false;
       const num = 15;
@@ -985,6 +991,10 @@ function placeBuriedChestInner(
     // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
     // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
     const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
+    // ★IIIII107 临时诊断（SW_I107DES=1 才打印，零开销缺省）：沙漠池触发输入观测
+    if (process.env.SW_I107DES === '1') {
+      console.log(`[DES-FIRE] rollN=${(globalThis as { __swRollN?: number }).__swRollN ?? -1} i=${i} gy=${gy} j=${j} mainId0=${mainId} argStyle=${argStyle} tile=${tile} remix=${(gs.seedFlags as { remix?: boolean }).remix} rock=${gs.rockLevel} overRockLvl=${gy > gs.rockLevel} inUdVal=${inUd}`);
+    }
     if (!mainId) {
       mainId = deep
         ? [4061, 4062, 4276][rng.int(0, 2)]

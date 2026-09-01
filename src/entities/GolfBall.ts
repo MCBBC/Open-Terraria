@@ -20,7 +20,8 @@
 //     · IsGolfBallResting            :400-407
 //     · ValidateShot                 :423-449（角度钳 [-87.12°,0°] + 站位盒）
 //     · HitGolfBall                  :451-474（材质阻尼 + ai[1] + RecordSwing）
-//   GetGolfTrailColor                :10533-10550（球色表）
+//   GetGolfTrailColor                :10533-10550（球色表；1458 = Projectile.cs:11154-11174,
+//   DrawProjDirect 动球支 = Main.cs:31459-31515 / 通用本体 = :31578）
 // ============================================================================
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
@@ -65,9 +66,9 @@ export class GolfBall extends Entity {
   ballState: BallState = BallState.Resting;
   /** 渲染旋转累加（Projectile.rotation，AI_149 :18956-18960） */
   rotation = 0;
-  /** oldPos 渲染窗（DrawProjDirect 高尔夫支读 oldPos[4]——Main.cs:31507；Update
+  /** oldPos 渲染窗（DrawProjDirect 高尔夫支读 oldPos[4]——Main.cs:31503；Update
    *  尾随平移 Projectile.cs:17200-17203 每 tick 1 格，SetDefaults :7636 无
-   *  extraUpdates ⇒ 不多步。5 槽 = 未满不画插值尾迹(:31507 Zero 门) */
+   *  extraUpdates ⇒ 不多步。5 槽 = 未满不画插值尾迹(:31503 Zero 门) */
   private posHist: Array<{ x: number; y: number }> = [];
   /** IsGolfBallResting 弱判定窗（GolfHelper.cs:400-407）：oldPos 实长 =
    *  TrailCacheLength[721/739-752] = 20（ProjectileID.cs:387），尾槽 = 20 tick 前
@@ -158,7 +159,7 @@ export class GolfBall extends Entity {
     }
     // oldPos 平移缓存（Projectile.cs:17200-17203 每 Update 尾随平移 1 格，
     // SetDefaults :7636 无 extraUpdates ⇒ 每 tick 恰 1 次）：渲染窗(posHist,
-    // DrawProjDirect :31507 读 oldPos[4])+Resting 弱判定窗(restHist,尾槽
+    // DrawProjDirect :31503 读 oldPos[4])+Resting 弱判定窗(restHist,尾槽
     // =TrailCacheLength 20,GolfHelper.cs:404) 同源双环
     const pos = { x: this.x, y: this.y };
     this.posHist.push(pos);
@@ -169,9 +170,10 @@ export class GolfBall extends Entity {
 
   /** 绘制保真（2026-08-31 平涂扫描批 → 2026-09-01 层序+乘色修正批[G1/G2]）：
    *  高尔夫球贴图在盘（Projectile_721/739..752.png 均 8×8 实图）。原版动球支
-   *  （Main.cs:31475 !IsGolfBallResting 门）先画——插值尾迹(:31507-31513
-   *  oldPos[4]≠Zero 门)f=0..1 步 .04 共 26 发 + 本体染色复刻 scale×1.5(:31500)，
-   *  通用主本体（color48,:31578）在支后无条件补画盖顶 ⇒ 叠层恒为
+   *  （Main.cs:31494 !IsGolfBallResting 门，色 :31496）先画——插值尾迹(:31503
+   *  oldPos[4]≠Zero 门，:31508 发射)f=0..1 步 .04 共 26 发 + 本体染色复刻
+   *  scale×1.5(:31511)，通用主本体（color48=GetAlpha :31532，发射 :31578）在支后
+   *  无条件补画盖顶 ⇒ 叠层恒为
    *  「尾迹垫底 / ×1.5 彩晕居中 / 本体最顶」（[G1] 旧实现反序先本体后彩晕 =
    *  层级倒置，滚动球面发"脆"、彩色晕染被本体压没，已修为原版流序）。
    *  乘色面（[G2]）：原版实体 pass = BlendState.AlphaBlend 预乘混合，画色 C 的
@@ -211,7 +213,7 @@ export class GolfBall extends Entity {
       // ---- 动球追加链（!IsGolfBallResting 门,GolfHelper.cs:400-407）----
       const k = Math.min(1, Math.hypot(this.vx, this.vy) / 16);   // num188(:31477)
       const q = k * (c[3] / 255);                              // A 面=衰减系数
-      /** 一处落点双通道：f=null=本体染色复刻档（色不带 f 因子,:31500-31501）。
+      /** 一处落点双通道：f=null=本体染色复刻档（色不带 f 因子,:31511）。
        *  cut@q·f 与旧实现 globalAlpha 数值全同 = alpha 面一致；'lighter' 补上
        *  加色贡献=P.rgb×C.rgb×P.a×k·f,与预乘混合最终式逐项相等。 */
       const put = (ix: number, iy: number, sp: number, f: number | null): void => {
@@ -239,17 +241,17 @@ export class GolfBall extends Entity {
           ctx.restore();
         }
       };
-      // 插值尾迹（:31507-31513 oldPos[4]≠Zero 门 ⇔ 轨迹窗满）——先画垫底
+      // 插值尾迹（:31503 oldPos[4]≠Zero 门 ⇔ 轨迹窗满,:31508 发射）——先画垫底
       if (this.posHist.length >= 5) {
         const o = this.posHist[0];               // oldest ≈ oldPos[4](每 tick 平移一格)
         for (let n = 0; n <= 25; n++) {
           const f = n / 25;                      // 等价 f+=0.04 浮点序列
           const ix = o.x + (this.x - o.x) * f + this.w / 2;   // Lerp+Size/2
           const iy = o.y + (this.y - o.y) * f + this.h / 2;
-          put(ix, iy, sz * (0.7 + 0.8 * f), f);  // scale=Lerp(.7,1.5,f)(:31511)
+          put(ix, iy, sz * (0.7 + 0.8 * f), f);  // scale=Lerp(.7,1.5,f)(:31508)
         }
       }
-      put(this.cx, this.cy, sz * 1.5, null);     // 本体染色复刻 ×1.5(:31500)
+      put(this.cx, this.cy, sz * 1.5, null);     // 本体染色复刻 ×1.5(:31511)
     }
     // ---- 无条件本体最后画盖顶（Main.cs:31578 通用支,[G1] 层序终点）----
     ctx.save();

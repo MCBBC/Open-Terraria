@@ -1,6 +1,6 @@
-// 原版 Dust 引擎（Dust.cs NewDust :75-285 / CloneDust :260-288 / UpdateDust
-// :423-2450 / Main.DrawDust :38266-38436 / GetAlpha :2469-2772 / GetColor
-// :2773-2817）——翅膀视觉批引入，拴绳小动物批扩表。
+// 原版 Dust 引擎（Dust.cs NewDustPerfect :52-63 / NewDust :75-285 / CloneDust
+// :260-288 / UpdateDust :423-2450 / Main.DrawDust :38266-38436 / GetAlpha
+// :2469-2772 / GetColor :2773-2817）——翅膀视觉批引入，拴绳小动物批扩表。
 //
 // 范围说明：本引擎按"消费方已用到的 type"精植（翅膀尘埃 13 型：6/31/43/55/58/76/
 // 86/182/217/229/240/261/264；拴绳批 5 型：43/15/267/278/6；钻头坐骑 230——
@@ -99,9 +99,19 @@ export class VanillaDust {
   }
 
   /** NewDust（:75-285）：位置/速度抖动、scale 抖动、type-6 烟雾初速特例、
-   *  屏外裁剪（±400·(1−dCount) 外圈不生成——满池启发式不建模，取 400 常量门） */
+   *  屏外裁剪（±400·(1−dCount) 外圈不生成——满池启发式不建模，取 400 常量门）。
+   *
+   *  opts.perfect = NewDustPerfect 变体通道（Dust.cs:52-63）：内部仍走完整 NewDust
+   *  初始化链（含 0 宽盒抖动窗/rand ±2 初速/烟雾族特例），随后仅两个字段被完整
+   *  覆写——`dust.position = Position`（盒抖动消解）、Velocity.HasValue 时
+   *  `dust.velocity = Velocity.Value`（本仓调用侧恒传具体向量）。由此：
+   *  · 烟雾族特例（216-222 型表 242/75/169 等）的 vy 重掷与 vx×0.3 被覆写消解，
+   *    定向速度向量原样入池（调用侧全责定义速率域）；
+   *  · 其余字段（scale 含 ×0.7 烟雾衰减、alpha/color/frame/fadeIn 等）保持
+   *    NewDust 结果——原版 Perfect 不覆写它们，调用侧可像原文那样后置赋值。 */
   spawn(x: number, y: number, w: number, h: number, type: number,
-    speedX = 0, speedY = 0, alpha = 0, color: DustColor | null = null, scale = 1): VDust | null {
+    speedX = 0, speedY = 0, alpha = 0, color: DustColor | null = null, scale = 1,
+    opts?: { perfect?: boolean }): VDust | null {
     // 屏外裁剪需要视口信息——由 Game 侧 update 先暂存；spawn 时跳过（池小、
     // 视口裁剪在 update/draw 双重兜底），此处仅密度池满兜底
     let d: VDust | null = null;
@@ -137,6 +147,14 @@ export class VanillaDust {
       d.vy = ((Math.random() * 16 | 0) - 10) * 0.1;
       d.vx *= 0.3;
       d.scale *= 0.7;
+    }
+    // :52-63 NewDustPerfect：dust.position = Position；Velocity.HasValue →
+    // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）
+    if (opts?.perfect) {
+      d.x = x;
+      d.y = y;
+      d.vx = speedX;
+      d.vy = speedY;
     }
     return d;
   }

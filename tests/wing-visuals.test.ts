@@ -902,3 +902,57 @@ describe('VanillaDust：逐型扩展批（230/229/31/55/76/217/240）', () => {
     expect(d217.noGravity).toBe(false);           // noGravity 由消费方置位（spawn 后）
   });
 });
+
+// ===================== VanillaDust：NewDustPerfect 变体通道（B3 根修） =====================
+// Dust.cs:52-63——NewDustPerfect(Position, Type, Velocity) 内部走完整 NewDust 链后仅
+// 覆写 position/velocity 两字段：0 宽盒抖动窗与烟雾族特例（216-222 表内 242/75/169 的
+// vy 重掷+vx×0.3）被消解，定向速度原样入池；scale×0.7 等其余字段保持 NewDust 结果。
+describe('VanillaDust：NewDustPerfect 通道（Dust.cs:52-63,B3 剑族尘锥根修）', () => {
+  it('perfect=true：position/velocity 完整覆写,烟雾族 242 不被 vy 重掷/vx×0.3 吞噬', () => {
+    const vd = new VanillaDust();
+    // 对照组：普通 NewDust 通道下 242 在烟雾名单(:216),定向速度必被改写
+    const plain = vd.spawn(100, 200, 40, 40, 242, 3, -2)!;
+    expect(plain.vx).not.toBe(3);                  // ×0.3 吞噬
+    expect(Math.abs(plain.vy + 2)).toBeGreaterThan(0.001);   // vy 已重掷为 [-1,0.5)
+    expect(plain.x).not.toBe(100);                 // 盒抖动窗
+    const p = vd.spawn(100, 200, 40, 40, 242, 3, -2, 0, null, 1, { perfect: true })!;
+    expect(p.vx).toBe(3);
+    expect(p.vy).toBe(-2);
+    expect(p.x).toBe(100);                          // dust.position = Position
+    expect(p.y).toBe(200);
+    expect(p.scale).toBeLessThanOrEqual(0.7 * 1.21 + 1e-9);   // 内部链未被跳过:×0.7 照走
+    // 烟雾名单其余三剑尘型同样直通
+    for (const t of [75, 169]) {
+      const d = vd.spawn(-50, -30, 12, 12, t, -4.2, 0.8, 0, null, 1, { perfect: true })!;
+      expect(d.vx).toBe(-4.2);
+      expect(d.vy).toBe(0.8);
+      expect(d.x).toBe(-50);
+      expect(d.y).toBe(-30);
+    }
+    const d107 = vd.spawn(10, 20, 30, 30, 107, 2.5, 1.5, 0, null, 1, { perfect: true })!;
+    expect(d107.vx).toBe(2.5);
+    expect(d107.vy).toBe(1.5);
+  });
+
+  it('perfect=true 后照常老化积分（update 按 velocity 推进,noGravity 由调用侧置位）', () => {
+    const vd = new VanillaDust();
+    const p = vd.spawn(500, 600, 0, 0, 169, 3, -2, 0, null, 1, { perfect: true })!;
+    p.noGravity = true;
+    vd.update(0, 0, 4000, 4000);
+    expect(p.active).toBe(true);
+    expect(p.x).toBeCloseTo(503);
+    expect(p.y).toBeCloseTo(598);
+    expect(p.scale).toBeLessThan(1);               // fadeIn=0 → 逐 tick −0.01 衰落链未变
+  });
+
+  it('普通通道（缺省 opts）行为零变化：初速随机叠加 SpeedX/SpeedY', () => {
+    const vd = new VanillaDust();
+    let jittered = false;
+    for (let i = 0; i < 64 && !jittered; i++) {
+      const d = vd.spawn(100, 100, 40, 40, 107, 3, 1)!;
+      if (d.vx !== 3 || d.vy !== 1) jittered = true;     // ±2 rand 抖动一直在
+      expect(d.type).toBe(107);
+    }
+    expect(jittered).toBe(true);
+  });
+});

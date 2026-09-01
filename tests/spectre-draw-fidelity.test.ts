@@ -65,13 +65,13 @@ function dustHookSink(): { recs: DustRec[]; spawnDust: NonNullable<GameHooks['sp
   return { recs, spawnDust };
 }
 
-function hooksWith(dust: GameHooks['spawnDust']): GameHooks {
+function hooksWith(dust: GameHooks['spawnDust'] | null): GameHooks {
   const h = {
     world: { store: { inBounds: () => false } },
     enemies: () => [],
     critters: () => [],
     cutTile: () => {},
-    spawnDust: dust,
+    spawnDust: dust ?? undefined,   // null = 无尘钩（DukeSharknado 静默步）→ undefined 档
     playSfxWav: () => {},
     spawnParticles: () => {},
     player: { dead: true },
@@ -247,7 +247,7 @@ describe('DukeSharknadoBolt 385 贴图转正(Main.cs:34878-34897 专支)', () =>
 });
 
 // ==================================================== ④ GolfBall 贴图染色链
-describe('GolfBall 贴图转正(Main.cs:31464-31507/31578 高尔夫支)', () => {
+describe('GolfBall 贴图转正(Main.cs:31475 动球支/:31578 通用支 · [G1]层序/[G2]乘色批)', () => {
   function ball(id: number): GolfBall {
     const sz = pngSize(`Projectile_${id}.png`);
     expect(sz).toEqual({ w: 8, h: 8 });                 // 球贴图 8×8 实图
@@ -270,39 +270,114 @@ describe('GolfBall 贴图转正(Main.cs:31464-31507/31578 高尔夫支)', () => 
     expect(calls.some((c) => c.m === 'arc')).toBe(false);
   });
 
-  it('动球:GetGolfTrailColor 染链——oldPos[4] 插值尾迹 26 发(α=q×f,scale Lerp(.7,1.5))+复刻 ×1.5', () => {
+  it('[G1 层序·兜底几何(node 无 DOM)]动球:尾迹 f=0..1 垫底 → ×1.5 复刻 → 本体最后盖顶', () => {
     const b = ball(750);
     b.clubHit(8, 0, 0, null);                                // Moving 化 + vx=8
-    const face = (b as unknown as { __face: unknown }).__face;
     const hist = (b as unknown as { posHist: Array<{ x: number; y: number }> }).posHist;
     for (let i = 0; i < 5; i++) hist.push({ x: 300 - i, y: 300 });
     const { calls, r } = makeR();
     b.draw(r as never);
     const imgCalls = calls.filter((c) => c.m === 'drawImage');
-    expect(imgCalls).toHaveLength(28);                       // 本体 1 + 26 尾迹 + 染色复刻
+    expect(imgCalls).toHaveLength(28);                       // 26 尾迹 + 染色复刻 + 本体
     const alphas = calls.filter((c) => c.m === 'set:globalAlpha').map((c) => c.a[0] as number);
     expect(alphas).toHaveLength(27);                         // 尾迹 26 发逐粒 α + 复刻 1
     const q = 0.5 * (30 / 255);                              // num188=min(1,8/16)=0.5;A(750)=30
     expect(alphas[0]).toBeCloseTo(0, 9);                     // f=0 端
     expect(alphas[25]).toBeCloseTo(q, 9);                    // f=1 端
     expect(alphas[26]).toBeCloseTo(q, 9);                    // 复刻档无 f 因子
-    // imgCalls 序 = [0]无条件本体,[1..26]尾迹(f=0..1),[27]染色复刻
-    expect(imgCalls[0].a[1]).toBe(-4);                       // 本体半宽 −sz/2
-    expect(imgCalls[1].a[1]).toBeCloseTo(-8 * 0.7 / 2, 9);   // fscale(f=0)=0.7
-    expect(imgCalls[26].a[1]).toBeCloseTo(-8 * 1.5 / 2, 9);  // fscale(f=1)=1.5
-    expect(imgCalls[27].a[3]).toBe(8 * 1.5);                 // 复刻档宽=×1.5(:31500)
-    expect(imgCalls[27].a[1]).toBe(-8 * 1.5 / 2);
+    // [G1] imgCalls 序 = [0..25]尾迹(f=0..1)垫底,[26]染色复刻,[27]本体最后盖顶
+    //（原版 DrawProjDirect:动球支 :31475-31513 先画,通用支 :31578 补画在末）
+    expect(imgCalls[0].a[1]).toBeCloseTo(-8 * 0.7 / 2, 9);   // fscale(f=0)=0.7
+    expect(imgCalls[25].a[1]).toBeCloseTo(-8 * 1.5 / 2, 9);  // fscale(f=1)=1.5
+    expect(imgCalls[26].a[3]).toBe(8 * 1.5);                 // 复刻档宽=×1.5(:31500)
+    expect(imgCalls[26].a[1]).toBe(-8 * 1.5 / 2);
+    expect(imgCalls[27].a[1]).toBe(-4);                      // 本体半宽 −sz/2 收官
   });
 
-  it('轨迹窗未满(oldPos[4]==Zero 门):跳过插值尾迹,仅染色复刻本体(scale×1.5)', () => {
+  it('[G2 乘色]tintedTex 预烘 add/cut 双面:multiply 填充带色表 rgb + lighter 加色贡献面', () => {
+    // 临时桩 document.createElement → 记录型烘焙画布(tintedTex 需 DOM 存在)
+    type CallRec = { m: string; a: unknown[] };
+    const bakes: Array<CallRec[]> = [];
+    const g = globalThis as unknown as Record<string, unknown>;
+    const prevDoc = g.document;
+    g.document = {
+      createElement: (): Record<string, unknown> => {
+        const ops: CallRec[] = [];
+        bakes.push(ops);
+        return {
+          width: 0, height: 0,
+          getContext: (): CanvasRenderingContext2D =>
+            new Proxy({} as CanvasRenderingContext2D, {
+              get: (_t, k) => ((...a: unknown[]) => { ops.push({ m: String(k), a }); }) as never,
+              set: (_t, k, v) => { ops.push({ m: `set:${String(k)}`, a: [v] }); return true; },
+            }),
+        };
+      },
+    };
+    try {
+      const b = ball(740);                                   // 蓝 740：色表 [30,50,255,40]
+      b.clubHit(12, 4, 0, null);                             // |v|=12.64 → k<1 非饱和档
+      const kExp = Math.min(1, Math.hypot(12, 4) / 16);
+      const q = kExp * (40 / 255);
+      const hist = (b as unknown as { posHist: Array<{ x: number; y: number }> }).posHist;
+      for (let i = 0; i < 5; i++) hist.push({ x: 300 - i, y: 300 });
+      const { calls, r } = makeR();
+      b.draw(r as never);
+
+      // ---- 烘焙面 multiply+destination-in 三段合成,且 multiply 填充【带色值】----
+      expect(bakes).toHaveLength(2);                         // add(色表 rgb)+cut(黑) 各一张
+      const styles = bakes.flatMap((ops) => ops
+        .filter((c) => c.m === 'set:fillStyle').map((c) => String(c.a[0])));
+      expect(styles).toContain('rgb(30,50,255)');            // 色值进乘色面([G2]核心断言)
+      expect(styles).toContain('rgb(0,0,0)');                // 黑背板=A 衰减载体
+      for (const ops of bakes) {
+        expect(ops.some((c) => c.m === 'set:globalCompositeOperation' && c.a[0] === 'multiply')).toBe(true);
+        expect(ops.some((c) => c.m === 'set:globalCompositeOperation' && c.a[0] === 'destination-in')).toBe(true);
+        expect(ops.filter((c) => c.m === 'drawImage')).toHaveLength(2);  // 源首绘+α 回贴
+      }
+      // ---- 场景面:put 双通道 —— cut@q·f(source-over)+add@k·f(lighter)×27 落点 ----
+      const scene = calls as Call[];
+      let gaCur = 1; let gcCur = 'source-over';
+      const stack: Array<[number, string]> = [];
+      const cutGa: number[] = []; const addGa: number[] = [];
+      let bodyIdx = -1;
+      for (let i = 0; i < scene.length; i++) {
+        const c = scene[i];
+        if (c.m === 'save') stack.push([gaCur, gcCur]);
+        else if (c.m === 'restore') { const p = stack.pop(); if (p) { gaCur = p[0]; gcCur = p[1]; } }
+        else if (c.m === 'set:globalAlpha') gaCur = c.a[0] as number;
+        else if (c.m === 'set:globalCompositeOperation') gcCur = c.a[0] as string;
+        else if (c.m === 'drawImage') {
+          if ((c.a.length ?? 0) >= 5) {                      // 尾迹/复刻笔(A 面+加色面)
+            if (gcCur === 'lighter') addGa.push(gaCur); else cutGa.push(gaCur);
+          } else bodyIdx = i;                                // 3 参 = 无条件本体
+        }
+      }
+      expect(addGa).toHaveLength(27);                        // 26 尾迹+1 复刻走 lighter 加色
+      expect(cutGa).toHaveLength(27);                        // 同落点数,A 面=背景衰减
+      expect(cutGa[0]).toBeCloseTo(0, 9);                    // f=0 端衰减归零
+      expect(cutGa[26]).toBeCloseTo(q, 9);                   // 复刻档 A=k·a/255(与旧实现同式)
+      expect(addGa[0]).toBeCloseTo(0, 9);
+      expect(addGa[26]).toBeCloseTo(kExp, 9);                // rgb 面只吃速度因子,不吃表 A
+      // [G1 终检]最后一个 drawImage 是无条件本体——尾迹/彩晕恒垫其下
+      expect(bodyIdx).toBeGreaterThanOrEqual(0);
+      const lastDraw = scene.reduce((acc, c, i) => (c.m === 'drawImage' ? i : acc), -1);
+      expect(bodyIdx).toBe(lastDraw);
+    } finally {
+      g.document = prevDoc;                                  // 还原全局,防泄漏他测
+    }
+  });
+
+  it('轨迹窗未满(oldPos[4]==Zero 门):跳过插值尾迹,仅染色复刻 + 本体最后', () => {
     const b = ball(752);
     b.clubHit(4, 0, 0, null);                                // Moving 但 hist 空
     const { calls, r } = makeR();
     b.draw(r as never);
     const imgCalls = calls.filter((c) => c.m === 'drawImage');
-    expect(imgCalls).toHaveLength(2);                        // 无条件本体 + 复刻
-    expect(imgCalls[1].a[3]).toBe(8 * 1.5);
-    expect(imgCalls[1].a[1]).toBe(-8 * 1.5 / 2);
+    expect(imgCalls).toHaveLength(2);                        // 复刻 + 本体
+    expect(imgCalls[0].a[3]).toBe(8 * 1.5);                  // [G1] 复刻先画(垫层)
+    expect(imgCalls[0].a[1]).toBe(-8 * 1.5 / 2);
+    expect(imgCalls[1].a[1]).toBe(-4);                       // 本体收尾盖顶(:31578)
   });
 });
 

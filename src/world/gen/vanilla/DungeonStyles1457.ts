@@ -95,6 +95,12 @@ export interface DungeonStyleData {
    *  canBeClearedDuringGenerationDual 合并 isDungeonTile 时须随主风格一并入表
    *  （DungeonCrawler.cs:146-154 合并语义）。 */
   SubStyles?: DungeonStyleData[];
+  /** ★IIIII105b：风格家具 item 表（DungeonGenerationStyles.cs 各档终态）——由
+   *  DungeonStyleItems.ts 装配（数据不在本文件重复转录）。消费端=dual 家具分派。 */
+  Furn?: import('./DungeonStyleItems').FurnTables;
+  /** ★IIIII105b：LivingWoodStyleData.GetBookshelfMinMaxSizes 覆写 (3,7)
+   *  （DungeonGenerationStyles.cs:38-44）；其余档缺省 (1,4)。 */
+  BookshelfMinMaxOverride?: [number, number];
 }
 
 const T = DualDungeonUnbreakableWallTiers;

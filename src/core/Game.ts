@@ -392,7 +392,8 @@ import { TitaniumStormShard,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
 // 叶绿水晶叶套装弹族（台账 L3 清偿批 2026-08-31——锚体 226 + 隐藏叶弹 227；
 // canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
-import { ChloroLeafCrystalAnchor, ChloroLeafShot, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
+import { ChloroLeafCrystalAnchor, ChloroLeafShot,
+  CHLORO_LEAF_SHOT_SIZE, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
 import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
@@ -4139,6 +4140,27 @@ export class Game implements GameHooks {
    *  而非全量 ~250MB)——远行遇到的类型走懒加载,onVImageLoaded 回调全量标脏
    *  chunk 自动重烘焙;物品图标全量(18MB);角色 = Player_ 全量 + 当前装备的
    *  3 张 Armor 表(换装走懒加载);出生点森林背景 */
+  /** 角色贴图预载（2026-08-28 用户要求“确保角色贴图加载完整再进入世界”）：
+   *  按实际外观（读档/导入路径 makeGame 时 selectedAppearance 可能为空,曾按
+   *  默认 v0 预载 → 首帧 sheetRect 回退 Player_0 初始贴图一闪而过）——预载
+   *  Player_{variant}_{通道} + Player_0 回退 + 发型正/帽发,await 就绪后才返回。
+   *  与 preloadSceneAssets 的角色段同一文件集； armor 走 PaperDoll 懒加载
+   *  (未就绪=该层不绘,非回退初始贴图) */
+  async ensureAppearanceFiles(app: { skinVariant?: number; hair?: number } | null | undefined): Promise<void> {
+    const a = this.atlas;
+    if (!a) return;
+    const variant = app?.skinVariant ?? 0;
+    const hair = app?.hair ?? 0;
+    const files = new Set<string>();
+    for (const s of [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]) {
+      files.add(`vanilla-ui/Player_${variant}_${s}.png`);
+      if (variant !== 0) files.add(`vanilla-ui/Player_0_${s}.png`); // 女体缺通道男体回退
+    }
+    files.add(`vanilla-ui/Player_Hair_${hair + 1}.png`);
+    files.add(`vanilla-ui/Player_HairAlt_${hair + 1}.png`);
+    await a.preloadUiFiles(files);
+  }
+
   private async preloadSceneAssets(onProgress?: (label: string, p: number) => void, playerAt?: { x: number; y: number }): Promise<void> {
     const a = this.atlas;
     if (!a) return;
@@ -6878,7 +6900,7 @@ export class Game implements GameHooks {
       if (!(w.isJourney && shouldDisableSpawns(w.journeyPowers.spawnRateSlider))) {
       // 史莱姆雨天空落怪（NPC.cs:192-195：每帧先 SlimeRainSpawns 再常规链，独立概率门）
       if (this.world.weather.slimeRain) {
-        const sp = this.vanillaSpawner ?? (this.vanillaSpawner = new VanillaSpawner(w));
+        const sp = this.vanillaSpawner ?? (this.vanillaSpawner = this.makeVanillaSpawner(w));
         const vw = this.camera.viewW / (this.camera.zoom || 1);
         const vh = this.camera.viewH / (this.camera.zoom || 1);
         const slime = sp.slimeRainSpawns(player.cx, player.cy,
@@ -6899,7 +6921,7 @@ export class Game implements GameHooks {
     //      Main.SpawnNPC 链，F8 旅程滑杆均不门） ----
     if (!this._wasInShimmerZone && !!this.scene?.zoneShimmer
       && (!this.net || this.net.policy.isHost)) {
-      const sp = this.vanillaSpawner ?? (this.vanillaSpawner = new VanillaSpawner(w));
+      const sp = this.vanillaSpawner ?? (this.vanillaSpawner = this.makeVanillaSpawner(w));
       // 半屏格数（同 trySpawnEnemy :15166 惯例：viewW/zoom/2/TILE）
       const viewHalfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
       const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
@@ -23227,6 +23249,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (type === ParticleOrchestraType.PaladinsHammerShockwave) {
       // Spawn_PaladinsHammerShockwave :816-881（MovementVector=Size 载荷还原命中盒）
       paladinsHammerShockwaveFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.ChlorophyteLeafCrystalShot) {
+      // Spawn_LeafCrystalShot :3130-3157——叶弹 227 轨迹 streak 全端复放。δA bug③ 后
+      // uniqueInfo=producer 三段式【变换后】H 的截断字节（leafTrailInfoByte 直出,
+      // P.cs:28282-84）;本地渲染与远端复放两面对同一 leafCrystalShotFx 消费本体
+      leafCrystalShotFxLocal(this, s.posX, s.posY, s.moveX, s.moveY, s.uniqueInfo & 0xff);
     }
     // ================= L5 长尾批派发段（2026-08-31;每型 Spawn_ 段 derive 见 fx 头注） =================
     else if (type === ParticleOrchestraType.Keybrand) {
@@ -23248,8 +23275,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Spawn_PaladinsShieldHit :903-973——PositionInWorld=(受击槽,持盾槽) int 对
       paladinsShieldHitFx(this, Math.trunc(s.posX), Math.trunc(s.posY));
     } else if (type === ParticleOrchestraType.ArcSurge) {
-      // Spawn_ArcLightning :1245-1321——(moveX,moveY)=玩家锚,(posX,posY)=弹体终点
-      arcSurgeFx(this, s.moveX, s.moveY, s.posX, s.posY, s.invoker, s.uniqueInfo >>> 0);
+      // Spawn_ArcLightning :1245-1321——(posX,posY)=弹体终点(PositionInWorld/EndPosition);
+      // ★δB6：MovementVector 载荷回归原版语义 moveX=种子整型(:1263)/moveY==1→雷暴档寿命×3
+      // (:1257-1259),玩家锚=Main.player[invoker] GetPlayerAnchorPos(Invoker 门)
+      arcSurgeFx(this, s.posX, s.posY, s.invoker, s.uniqueInfo >>> 0, s.moveY === 1);
     } else if (type === ParticleOrchestraType.NightsEdge) {
       nightsEdgeFx(this, s.posX, s.posY);
     } else if (type === ParticleOrchestraType.TrueNightsEdge) {
@@ -23428,6 +23457,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
 
+  /** VanillaSpawner 组装 + module8 出站钩注入（δB B12 接线,2026-08-31）：
+   *  spawner 域自然刷生的编排粒子经本钩两半边出站——本地 netApplyParticleOrchestra
+   *  同款复放（BroadcastOrRequest 本地直生半边）+ broadcastParticleOrchestra 上行
+   *  （module8 排除发送者广播半边），载荷同参。当前唯一生产点 = spawnNPC 尾部
+   *  InScreenDungeonSpawn 门（VanillaSpawner.spawnNPC 注）。 */
+  private makeVanillaSpawner(w: World): VanillaSpawner {
+    const sp = new VanillaSpawner(w);
+    const slot = this.net?.mySlot ?? 0;
+    sp.spawnOrchestra = (type, x, y, mx, my, info) => {
+      this.netApplyParticleOrchestra(type, {
+        posX: x, posY: y, moveX: mx, moveY: my,
+        uniqueInfo: info,
+        invoker: slot & 0xff,
+      });
+      this.broadcastParticleOrchestra(type, x, y, mx, my, info);
+    };
+    return sp;
+  }
+
   private trySpawnEnemy() {
     // 联机模式：刷怪归房主权威（房主跑完整模拟，快照广播给访客；访客不本地刷怪）
     if (this.net && !this.net.policy.isHost) return;
@@ -23437,7 +23485,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (this.boss) return;
 
     // 原版 Spawner 1:1（VanillaSpawner.ts）：选点+选怪全部按 SpawnAnNPC 链
-    if (!this.vanillaSpawner) this.vanillaSpawner = new VanillaSpawner(w);
+    if (!this.vanillaSpawner) this.vanillaSpawner = this.makeVanillaSpawner(w);
     // 原版 Spawner.SetSpawnFlags：地牢旗标取玩家 SceneMetrics（15 tick 刷新的 scene），
     // downedBoss3（杀过骷髅王）决定地牢出 守卫/常规池；
     // invaders = ShouldSpawnInvasionEnemies（NPC.cs:352：入侵前线 3000px 内的地表玩家）；
@@ -30715,15 +30763,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** GameHooks.spawnDust：原版 Dust 池直入（Dust.NewDust 签名对齐 + 调用侧
    *  后置字段覆写——Gore.cs:922-927 气泡爆裂尘的 noGravity/alpha/scale 三件套
    *  在 NewDust 之后逐尘赋值，NewDust 本身不带这些参）。DrawDust 双 pass 消费。
-   *  返回入池尘供调用侧做 DelegateMethods 式后置（矿车轮火花）；池满 null */
+   *  返回入池尘供调用侧做 DelegateMethods 式后置（矿车轮火花）；池满 null。
+   *  perfect=true → Dust.NewDustPerfect 变体（Dust.cs:52-63，position/velocity
+   *  完整覆写通道——剑族尘锥等定向快尘必走） */
   spawnDust(
     x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0,
     color: { r: number; g: number; b: number; a: number } | null = null,
-    scale = 1, noGravity = false,
+    scale = 1, noGravity = false, perfect = false,
   ): import('../fx/VanillaDust').VDust | null {
     const d = this.vanillaDust.spawn(x, y, w, h, type, speedX, speedY, alpha,
-      color as import('../fx/VanillaDust').DustColor | null, scale);
+      color as import('../fx/VanillaDust').DustColor | null, scale,
+      perfect ? { perfect: true } : undefined);
     if (d && noGravity) d.noGravity = true;
     return d ?? null;
   }
@@ -32478,6 +32529,25 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       // 最优档（Main.cs:42620-42631 SoundID.BestReforge=best_reforge.wav,
       //   SoundID.cs:1122 WithPitchVariance(0.1f)→PITCH_CASE 库层抖动）
       this.sfx.playWavFile('best_reforge');
+      // δB B13 接线（2026-08-31）：顶级词缀发光编排 Main.ReforgeItemInReforgeSlot
+      //   :42638-42652 逐式直译——reforgeCooldown=60 冷却面未建模维持登记；粒子全为
+      //   clientOnly:true 本地直驱【不广播】。位置 = LocalPlayer.MountedCenter +
+      //   (0,−16×gravDir)/+NextVector2Circular(16,16)，rng = Math.random 代 Main.rand：
+      //   ① :42640-42643 RainbowRodHit 两掷：mv=(48,0)+Circular(16,16)、(0,16)+Circular(5,5)
+      //   ② :42644-42649 BestReforge 三连掷（每次 Spawn_BestReforge 内生 Research_Spark 八粒）
+      {
+        const mc = this.player.mountedCenter;
+        const gy = mc.y - 16 * this.player.gravDir;
+        const mv1x = 48 + (Math.random() * 2 - 1) * 16;
+        const mv1y = (Math.random() * 2 - 1) * 16;
+        rainbowRodHitFx(this, mc.x, gy, mv1x, mv1y);
+        rainbowRodHitFx(this, mc.x, gy,
+          (Math.random() * 2 - 1) * 5, 16 + (Math.random() * 2 - 1) * 5);
+        for (let i = 0; i < 3; i++) {
+          bestReforgeFx(this,
+            mc.x + (Math.random() * 2 - 1) * 16, mc.y + (Math.random() * 2 - 1) * 16);
+        }
+      }
     } else {
       // 非最优档（Main.cs:42653 SoundID.Item37；FILE_CASE_VOL 已有 ×0.5 档）
       this.sfx.playWavFile('Item_37');
@@ -33571,9 +33641,14 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
    *  （Projectile.cs:28253 GetProjectileSource_FromThis）与 Player.OnHit 引援
    *  （Player.cs:7029 GetProjectileSource_SetBonus(6)）两生产位共用。伤值走静态常量
    *  crystalLeafDamage=100/crystalLeafKB=10（:821/:823——NewProjectile 直传字面,
-   *  不吃面板乘区;实体构造形参缺省同值兜底）;armorPen 由持有者 equipStats 注入 */
-  spawnChloroLeafShot(x: number, y: number, vx: number, vy: number): void {
-    const shot = new ChloroLeafShot(x, y, vx, vy);
+   *  不吃面板乘区;实体构造形参缺省同值兜底）;armorPen 由持有者 equipStats 注入。
+   *  ★δA 疑①（2026-08-31）：形参=NewProjectile 的 position【top-left】（原文直收
+   *  Center.X−4f/Center.Y）——实际中心=top-left+(w/2,h/2)=锚中心+(+3,+7)。旧实现把
+   *  形参当中心再左上化 ⇒ 有效 top-left=(cx−11,cy−7),出生点整体偏 (−14,−14);换算
+   *  收敛在此单点（调用侧字面 Center.X−4f/Centery 两处不动）。 */
+  spawnChloroLeafShot(px: number, py: number, vx: number, vy: number): void {
+    const shot = new ChloroLeafShot(px + CHLORO_LEAF_SHOT_SIZE / 2,
+      py + CHLORO_LEAF_SHOT_SIZE / 2, vx, vy);
     shot.armorPen = this.player.equipStats.armorPen;
     this.entities.add(shot, 'projectiles');
   }

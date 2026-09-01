@@ -22,6 +22,7 @@ import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollOnlyBadLuck, rollBadLuc
 import { canHit } from '../../physics/LineOfSight';
 import { chumSpots } from '../../entities/chumBucket';
 import { scanChosenTileZones } from '../DungeonDualZones';
+import { ParticleOrchestraType } from '../../net/syncModules';   // δB B12：双地牢刷生纸屑爆编排型
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -341,6 +342,13 @@ export class VanillaSpawner {
    *  399/87/86 水蜡烛加重支消费 */
   private zoneWaterCandle = false;
 
+  /** module8 编排出站钩（δB B12 接线,2026-08-31；Game.makeVanillaSpawner 注入）：
+   *  两半边 = 本地直生（netApplyParticleOrchestra 同款复放）+ module8 上行（排除发送者
+   *  广播），合起来即原版 BroadcastOrRequestParticleSpawn 客户端语义。缺省 = 钩未注入
+   *  （测试/单机域）零调用面。当前唯一生产点 = spawnNPC 尾部 InScreenDungeonSpawn 门。 */
+  spawnOrchestra?: (type: number, x: number, y: number,
+    moveX: number, moveY: number, uniqueInfo: number) => void;
+
   constructor(private world: World) {}
 
   /** 玩家级 Zone 旗标（原版 Spawner.SetSpawnFlags L300：ZoneDungeon = player.ZoneDungeon——
@@ -592,6 +600,17 @@ export class VanillaSpawner {
     if (ov?.alpha != null) e.spawnAlpha = ov.alpha;
     // 植物族锚点（aiStyle 13：锚点格存 ai0/ai1）
     if (ai0 !== undefined && ai1 !== undefined) { e.ai0 = ai0; e.ai1 = ai1; }
+    // InScreenDungeonSpawn（NPC.SpawnNPC :5265-5273——原版所有自然刷生链共用本包装位,
+    //   史莱姆雨 SlimeRainSpawns 同走此口；δB B12 接线,2026-08-31。微光之灵 SpawnFaelings
+    //   走裸 NewNPC :5924 不经此包装,故不出纸屑——本仓 faelings 回调路径同构）：
+    //   门 = dualDungeonsSeed && Y > worldSurface×16 && Y < UnderworldLayer×16
+    //   （Y 为像素坐标、严格不等;UnderworldLayer=本仓 world.lavaLine=maxTilesY−200）；
+    //   PositionInWorld=(X,Y)、MovementVector=(width,height)、UniqueInfoPiece=Type(netId 原值)。
+    const w_ = this.world;
+    if (w_.seedFlags?.dualDungeons && y > w_.groundLevel * TILE && y < w_.lavaLine * TILE) {
+      this.spawnOrchestra?.(ParticleOrchestraType.InScreenDungeonSpawn,
+        x, y, e.w, e.h, netId);
+    }
     e.id = this.world.store.w; // 占位，Game 侧会重编
     return e;
   }

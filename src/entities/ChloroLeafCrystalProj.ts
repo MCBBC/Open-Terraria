@@ -33,19 +33,41 @@
 // 伤害结算走 proj1457.dealContacts（DamageVar/banner/crit/SnapStrike 单源）;pierce 语义
 // = maxPenetrate 1 flag3（Enemy.hurt pierce=1 免疫豁免+不设帧）；227 已在
 // projTargets.ON_HIT_EXCLUDED_PROJS（TryDoingOnHitEffects :15210-15220）= 自续断链。
+//
+// ★δA 红队复查批清偿（2026-08-31 蓝队单条群,对照 Terarria1458）：
+//   · bug① 幻影暴击面：原版暴击掷只走 melee/ranged/magic 三旗（P.cs:12932-12945,
+//     ownedBySomeone 支内）——227 SetDefaults（:3126-3137）无任何类别旗 ⇒ 永不暴击。
+//     critChance 归零（同仓先例=TitaniumStormShard 908,Game.ts「α-H1」注);
+//     蓄能暴击 TryConsumingTimerCrit（:12945）为全弹通用独立面,保持不撤。
+//   · bug② 一弹一敌：keepIterating 门（Damage_PVE_Inner :14186-14201 penetrate 减至
+//     0 时置 false,:12592 循环条件即止）⇒ 整条生命周期只伤桶序首个 NPC——dealContacts
+//     尾参 stopAfterFirstHit 启用,不再重叠多怪同拍各吃 100。
+//   · bug③ type17 载荷色相链：producer 三段式全文前移到广播载荷（详见 orchestraFx.
+//     leafTrailInfoByte 注）——UniqueInfoPiece 存【变换后】H 的截断字节,两端同一字节面。
+//   · 疑① 出手坐标：NewProjectile 形参=position(top-left)（aiStyle42 :28253）——实际中心=
+//     top-left+(w/2,h/2)=锚中心+(+3,+7);换算归 Game.spawnChloroLeafShot（调用侧形参已是
+//     Center.X−4f/Center.Y 字面,不另改）。
+//   · 疑③ 边界裕量：P.cs:16787 position≤leftWorld(0)/+width≥rightWorld(=tiles×16,
+//     Main.cs:1080-1086) 原值判定——±16px 内缩自造裕量退役。
+//   · 疑② （未修,登记）game.enemies() 平铺桶含蠕虫段体 vs 原版整虫一个 npc index——
+//     引擎表示层结构差,索敌"最近目标"语义在蠕虫族逐段化,待引擎批处理（台账同步备案）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { canHit } from '../physics/LineOfSight';
 import { canBeChasedBy } from './projTargets';
 import { HitCdImpl, dealContacts } from './proj1457';
-import { leafTrailHue01, leafCrystalShotFx } from '../fx/orchestraFx';
+import { leafTrailInfoByte, leafCrystalShotFx } from '../fx/orchestraFx';
 import { projSprite } from './Arrow';
 
 /** Player.crystalLeafDamage static 初值（Player.cs:821） */
 export const CHLORO_LEAF_DAMAGE = 100;
 /** Player.crystalLeafKB static 初值（Player.cs:823） */
 export const CHLORO_LEAF_KB = 10;
+
+/** 叶弹 227 SetDefaults 盒宽/高（:3131-32 width=14/height=14——NewProjectile top-left
+ *  → 中心换算用,Game.spawnChloroLeafShot 消费） */
+export const CHLORO_LEAF_SHOT_SIZE = 14;
 
 /** 锚体每拍出手后的冷却窗（aiStyle42 :28254 crystalLeafCooldown=40——递减位在
  *  Player.fixedUpdate ：25665-67 与 petalTimer/shadowDodgeTimer 同段） */
@@ -231,7 +253,11 @@ export class ChloroLeafShot extends Entity {
   readonly projId = 227;
   damage: number;
   knockback: number;
-  critChance = 0.04;             // friendly 无类别旗默认 crit 面（TitaniumStormShard 同式）
+  // ★δA bug①（2026-08-31）：弹 227 SetDefaults（:3126-3137）【无 melee/ranged/magic
+  // 类别旗】→ 原版 Damage 暴击掷只走三旗（P.cs:12932-12945 ownedBySomeone 支内三掷）
+  // ⇒ 永不暴击,撤 0.04 默认面。同仓先例=TitaniumStormShard 弹 908（Game.ts「α-H1」注);
+  // 蓄能暴击 TryConsumingTimerCrit(:12945) 为全弹通用独立面,仍经 dealContacts 走。
+  critChance = 0;
   armorPen = 0;
   meleeProj = false;
   dead = false;
@@ -241,6 +267,8 @@ export class ChloroLeafShot extends Entity {
   /** usesLocalNPCImmunity 表（penetrate=1 单发窗——dealContacts cooldown=−1 每敌一次） */
   private readonly hitCd = new HitCdImpl();
 
+  /** 入参=弹体中心（Game.spawnChloroLeafShot 已按 NewProjectile position(top-left) 形参
+   *  换算 top-left+(w/2,h/2)=锚中心+(+3,+7)——δA 疑①；构造器保持中心语义） */
   constructor(cx: number, cy: number, vx: number, vy: number, damage = CHLORO_LEAF_DAMAGE,
     knockback = CHLORO_LEAF_KB) {
     super();
@@ -278,19 +306,25 @@ export class ChloroLeafShot extends Entity {
     // 轨迹粒子随子步推进采样,见 trailStep）
     for (let u = 0; u < LEAF_SUBSTEPS && !this.dead; u++) {
       const st = game.world.store;
+      // ★δA 疑③（2026-08-31）：原值边界——P.cs:16787 `position.X <= leftWorld ||
+      //  position.X+width >= rightWorld || …`，leftWorld/topWorld=0、rightWorld/bottomWorld
+      //  =世界像素全域（Main.cs:1080-1086,rightWorld≡maxTilesX*16 同义档）。旧 ±16px
+      //  内缩自造；our-id 与 vanilla tile 域不同但世界像素边界语义相同,st.w*16 即等值。
+      //  （NaN 支不建模:JS 数值无该输入源。）
       const tw = st.w * 16;
       const th = st.h * 16;
-      if (this.x <= 16 || this.y <= 16 || this.x + this.w >= tw - 16 || this.y + this.h >= th - 16) {
-        this.dead = true;                        // :16788 active=false 静默出界
+      if (this.x <= 0 || this.y <= 0 || this.x + this.w >= tw || this.y + this.h >= th) {
+        this.dead = true;                        // active=false 静默出界（同段）
         return;
       }
       this.x += this.vx;
       this.y += this.vy;
       this.trailStep(game, u);
       // Damage()（每子步结算面——DamageVar/banner/SnapStrike/crit 单源经共享
-      // dealContacts;pierce=1 = flag3 免疫豁免+不设帧,命中即亡 penetrate）
+      // dealContacts;pierce=1 = flag3 免疫豁免+不设帧,命中即亡 penetrate;尾参 true=
+      // maxPenetrate 1 keepIterating 截断——重叠多怪同拍只伤桶序首个,δA bug②）
       let hit = false;
-      dealContacts(this, game, this.hitCd, -1, () => { hit = true; }, undefined, 1);
+      dealContacts(this, game, this.hitCd, -1, () => { hit = true; }, undefined, 1, true);
       if (hit) {
         this.killWithFx(game);
         return;
@@ -304,16 +338,17 @@ export class ChloroLeafShot extends Entity {
   }
 
   /** 轨迹编排粒子（aiStyle43 :28279-28303 每子步请求 ChlorophyteLeafCrystalShot——
-   *  原版 181 次/拍;本仓每 45 子步采样一次 ≈4 次/拍,色相链与广播 uniqueInfo 一致,
-   *  密度差登记） */
+   *  原版 181 次/拍;本仓每 45 子步采样一次 ≈4 次/拍,密度差登记）。
+   *  ★δA bug③（2026-08-31）：广播载荷=producer 三段式全链终值（leafTrailInfoByte——
+   *  hslToRgb→Lerp Red→Lerp LimeGreen/Gold 后 rgbToHsl .X 的 (byte) 截断字节,P.cs
+   *  :28282-84）;本地渲染走同一字节面经消费端 Spawn_LeafCrystalShot 还原,两端一致。 */
   private trailStep(game: GameHooks, u: number): void {
     if (u % 45 !== 0) return;
-    const hue = leafTrailHue01(this.timeLeft);
-    const infoByte = Math.max(0, Math.min(255, Math.round(hue * 255)));
+    const infoByte = leafTrailInfoByte(this.timeLeft);
     game.broadcastParticleOrchestra?.(
       17 /* ParticleOrchestraType.ChlorophyteLeafCrystalShot */,
       this.cx, this.cy, this.vx, this.vy, infoByte);
-    leafCrystalShotFx(game, this.cx, this.cy, this.vx, this.vy, hue);
+    leafCrystalShotFx(game, this.cx, this.cy, this.vx, this.vy, infoByte);
   }
 
   /** hide=true（SetDefaults :3136）——本体不绘制,视觉=ChlorophyteLeafCrystalShot

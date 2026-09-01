@@ -3555,6 +3555,16 @@ function isAnyRoomInBounds(data: DualDungeonData, bounds: DBoundsFull, settings:
 export interface DualLayoutResult {
   posX: number;
   posY: number;
+  /** ★IIIII105b：特征域载荷（GroundFurniture_DualDungeons 等内容特征的 per-seat 数据桥）。
+   *  rooms=provider 全体房间（gen=generated、st=settings.style.Style、InnerBounds）；
+   *  halls=provider 大厅（Bounds 为 hall 外框，C# DungeonHall.Bounds :126/:134 同名面）；
+   *  scalar=data.globalFeatureScalar（DC.cs:375-382 max(1,rooms.Count/20) 双精度原值——
+   *  截断发生在消费端 (int)((1f+(int)(w/4200))*scalar)）；styles=本座 dungeonGenerationStyles
+   *  表（GetStyleForWall / IsConsideredDungeonWall 的 per-seat 扩张消费源）。 */
+  featRooms?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
+  featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
+  scalar?: number;
+  styles?: import('./DungeonStyles1457').DungeonStyleData[];
 }
 
 export interface DualLayoutOpts {
@@ -3672,7 +3682,17 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
       innerL: rm.inner.L, innerR: rm.inner.R, innerT: rm.inner.T, innerB: rm.inner.B,
     });
   }
-  return { posX: data.genPosX, posY: data.genPosY };
+  // ★IIIII105b：特征域载荷桥（GroundFurniture_DualDungeons 消费；普通世界恒 undefined）
+  const featRooms = data.rooms.map((rm) => ({
+    gen: rm.generated, st: rm.settings.style.Style,
+    L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B,
+  }));
+  const featHalls = data.halls.map((hh) => ({
+    gen: hh.generated, st: hh.settings.style.Style,
+    L: hh.bounds.L, T: hh.bounds.T, R: hh.bounds.R, B: hh.bounds.B,
+  }));
+  const scalar = Math.max(1.0, data.rooms.length / 20.0);   // DC.cs:381 双精度
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, scalar, styles };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {

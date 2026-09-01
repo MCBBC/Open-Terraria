@@ -295,7 +295,7 @@ describe('drawMoonLordHand 锚点(Main.cs:24391-24447)', () => {
 // final_vanilla = sprite×(0.7L+0.3) = 已绘(sprite×L) + sprite×0.3×(1−L):
 // 差值色 rgb(0.3×(255−light)) 以 'lighter' 加性叠回。验证:色值数学/三步乘色序/
 // 剔除门(全亮零差跳过/出屏跳过/fullbright 跳过/behindTiles 跳过)。
-import { TILE } from '../src/core/constants';
+
 
 describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
   function makeFixture(opts: {

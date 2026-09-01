@@ -128,7 +128,9 @@ export class SwingArc extends Entity {
         + (snapBonusArc ? Math.trunc(snapBonusArc * (crit ? 2 : 1)) : 0),
         this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitSet.add(e.id);
-      swordTrailOrchestra(game, this.projId, e);   // ★L5 长尾批：挥弧命中编排（case972/982/983/984 面）
+      // ★L5 长尾批：挥弧命中编排（case972/982/983/984 面）;★δB1 MovementVector=弹速
+      // =锚弧出生速度 (direction,0)（Player.cs:49441;AI_190 恒定不写 velocity）
+      swordTrailOrchestra(game, this.projId, e, Math.sign(this.ai0) || 1, 0);
       // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
       // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
       // 假人 488；dmg=damage×1f、kb=弹体击退）→ Player.HorsemansBlade_SpawnPumpkin
@@ -375,7 +377,8 @@ export class TrueNightsEdgeSlash extends Entity {
           + (snapBonusTrueEdge ? Math.trunc(snapBonusTrueEdge * (crit ? 2 : 1)) : 0),
           this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
-        swordTrailOrchestra(game, 973, e);           // ★L5 长尾批：TrueNightsEdgeSlash=弹 973 → TrueNightsEdge(12)
+        // ★L5 长尾批：TrueNightsEdgeSlash=弹 973 → TrueNightsEdge(12);★δB1 载弹速
+        swordTrailOrchestra(game, 973, e, this.vx, this.vy);
       }
     }
   }
@@ -510,7 +513,8 @@ export class NightsEdgeFly extends Entity {
         + (snapBonusFly ? Math.trunc(snapBonusFly * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 9999);
-      swordTrailOrchestra(game, 972, e);             // ★L5 长尾批：永夜刃飞斩变体=弹 972 → NightsEdge(10)
+      // ★L5 长尾批：永夜刃飞斩变体=弹 972 → NightsEdge(10);★δB1 载弹速
+      swordTrailOrchestra(game, 972, e, this.vx, this.vy);
     }
   }
 
@@ -1307,12 +1311,17 @@ export class HorsemansPumpkin extends Entity {
 
 /** ★L5 长尾批：真刃系挥弧命中编排分派（Projectile.Damage :12984-13031 ownedBySomeone 支——
  *  PositionInWorld=Main.rand.NextVector2FromRectangle(targetNPC.Hitbox)、MovementVector
- *  缺省零（984/985 载 velocity）;clientOnly:false → 本地直生 + module8 上行。弹型映射：
+ *  缺省零（case984|985 :13015 载 velocity）;clientOnly:false → 本地直生 + module8 上行。弹型映射：
  *  972→NightsEdge(10)/973→TrueNightsEdge(12)/982→Excalibur(13)/983→TrueExcalibur(14)/
- *  984|985→TerraBlade(15);997 无头骑士/976 草剑无编排面（vanilla 无对应 case） */
+ *  984|985→TerraBlade(15);997 无头骑士/976 草剑无编排面（vanilla 无对应 case）。
+ *  ★δB1（2026-09-01）：MovementVector=弹体速度（1457/1458 Projectile.cs 同 :13015）——曾误传
+ *  命中点 Y 的 (cos(hy),sin(hy))。锚弧支 vel=(direction,0) 恒定（Player.cs:49441 NewProjectile(
+ *  MountedCenter,new Vector2(direction,0f),984…);AI_190 只读不改写 velocity:42749 num3=
+ *  velocity.ToRotation()）→ 按朝向传 ±1;飞斩 972/973 支传实时 vx/vy（原版 Damage 时点读弹速）。 */
 function swordTrailOrchestra(
   g: import('./types').GameHooks, projId: number,
   e: { x: number; y: number; w: number; h: number },
+  mvX = 0, mvY = 0,
 ): void {
   const hx = e.x + Math.random() * e.w;
   const hy = e.y + Math.random() * e.h;
@@ -1335,9 +1344,9 @@ function swordTrailOrchestra(
       break;
     case 984:
     case 985:
-      terraBladeFx(g, hx, hy, Math.cos(hy), Math.sin(hy));
-      g.broadcastParticleOrchestra?.(ParticleOrchestraType.TerraBlade, hx, hy,
-        Math.cos(hy) * 4, Math.sin(hy) * 4);
+      // MovementVector=弹体速度（Projectile.cs:13015 settings.MovementVector=velocity）
+      terraBladeFx(g, hx, hy, mvX, mvY);
+      g.broadcastParticleOrchestra?.(ParticleOrchestraType.TerraBlade, hx, hy, mvX, mvY);
       break;
     default:
       break;

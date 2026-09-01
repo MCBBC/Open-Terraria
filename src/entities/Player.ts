@@ -132,6 +132,7 @@ import {
 import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
+import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28574）
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -2263,13 +2264,37 @@ export class Player extends Entity {
   /** TryConsumingTimerCrit（Player.cs:28564-28595；调用点 :44657 ItemCheck 近战命中
    *  等 5 处全在近战接触结算）：满蓄（timerCritChargeFull :3387 ≥1000）或负冷却窗
    *  （charge<0，:28566）→ 强制暴击；charge>0 时消费置 −15（:28568-28571,负窗内
-   *  不重置=15t 连暴窗）；粒子（:28576-28593 NightsEdge 编排+尘 228×20）近似取
-   *  相交盒中心。返回 true = 本次命中强制暴击。 */
+   *  不重置=15t 连暴窗）。粒子面按原文两段直译（δB B4 接线,2026-08-31——旧 6 颗
+   *  '#E8E8FF' 通用白粒近似退役）：
+   *   ① :28574-28577 NightsEdge 编排 RequestParticleSpawn(clientOnly:false)——
+   *      PositionInWorld=hitbox.Center;本地直生(fx/orchestraFx.nightsEdgeFx 同本体)
+   *      + module8 上行补远端；
+   *   ② :28578-28593 尘 228×20：noLight/noGravity、scale .9/fadeIn 1.1、Y 钳盒垂直
+   *     中点（position.Y=vector.Y+num2/2）、customData=null(不跟随)、noLightEmittance;
+   *      velocity 终值 = (π/4+π/2·i) 方向 × NextFloat()×4 径向环——原文先 ×0.5 再
+   *      vy×3 的中间式被尾式赋值整体覆写=死支，直译终值不叠算。
+   *  返回 true = 本次命中强制暴击。 */
   tryConsumingTimerCrit(game: GameHooks, rx: number, ry: number, rw: number, rh: number): boolean {
     if (!this.equipStats.accTimerCrit) return false;
     if (!(this.accTimerCritCharge >= 1000 || this.accTimerCritCharge < 0)) return false;
     if (this.accTimerCritCharge > 0) this.accTimerCritCharge = -15;   // :28568-28571
-    game.spawnParticles?.((rx + rw / 2), (ry + rh / 2), '#E8E8FF', 6, 2.2, { life: 20, grav: 0 });
+    const cx0 = rx + rw / 2, cy0 = ry + rh / 2;                       // hitbox.Center
+    nightsEdgeFx(game, cx0, cy0);                                     // Spawn_NightsEdge 收编本体
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.NightsEdge, cx0, cy0);
+    for (let i = 0; i < 20; i++) {                                    // 尘 228×20（:28578）
+      const d = game.spawnDust?.(rx, ry, rw, rh, 228, 0, 0, 255, null, 0.9);
+      if (!d) continue;
+      d.noLight = true;                                               // :28581
+      d.noGravity = true;                                             // :28582
+      d.scale = 0.9;                                                  // :28583
+      d.fadeIn = 1.1;                                                 // :28584
+      d.y = cy0;                                                      // :28585 position.Y=盒中点
+      const ang = Math.PI / 4 + (Math.PI / 2) * i;                    // :28588 基角族
+      const sp = Math.random() * 4;                                   // NextFloat()×4 幅
+      d.vx = Math.cos(ang) * sp;
+      d.vy = Math.sin(ang) * sp;
+      d.noLightEmittance = true;                                      // :28591
+    }
     return true;
   }
 

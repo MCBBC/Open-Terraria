@@ -296,7 +296,14 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
  *  DeadCells 余三型（BarnacleShotFiring :27036 挂点无 producer;BarrelExplosion≈
  *  Arrow1023 killNow 内联近似;MushroomBoiTargetFound 已接 34 型旁路）;FakeFishJump(54)
  *  保持 FakeFish.ts 局部池（跃态密度门）;NatureFly/PooFly tile-ambient 面;PlayerVoice
- *  变声样本库;HeroicisSet 出土转化链;PaladinsShield pvp 盾链;Keybrand :35153 滑行拖星。
+ *  变声样本库;HeroicisSet 出土转化链;PaladinsShield pvp 盾链;Keybrand :35153 滑行拖星;
+ *  CattivaHit 镐力面(:52193 ai[0]=3 帮工意图未折算)。
+ *  ★δB 蓝队四组补齐（✅2026-08-31 已清偿,2026-09-01 复核）：L5 段曾以"消费派发在位/
+ *  接线在位"登记 CattivaHit(67)/InScreenDungeonSpawn(66)/BestReforge(18) 的生产面——
+ *  经对账全为声称失实（生产端零调用,详见各型行内注更正），本批补生产接线：
+ *  67=MinionProj.contact 命中拍、66=VanillaSpawner.spawnNPC 尾门+spawnOrchestra 出站钩、
+ *  18=Game.doReforge top-tier 三连掷;另 TimerCrit(6170) 命中面 NightsEdge(10) 编排+
+ *  d228×20 尘环（Player.TryConsumingTimerCrit :28574,Player.ts）。
  *  2026-08-21 前批六型与 L5 九型见前注；每个 clientOnly:false 型生产端均 module8 上行。
  *  DeadCells 余三型（BarnacleShotFiring :27036 clientOnly:true 无锚→register;
  *  BarrelExplosion≈Arrow1023 killNow 内联近似不另走编排通道;MushroomBoiTargetFound
@@ -328,9 +335,12 @@ export const enum ParticleOrchestraType {
   // ---- 台账 L3 清偿批（2026-08-31）----
   ChlorophyteLeafCrystalPassive = 16, // 叶绿晶叶驻留绿弧（视觉纯函数 fx/orchestraFx.chlorophyteLeafCrystalPassiveFx 备档;弹体本体归叶绿 SetBonus 代理域——错峰约定）
   ChlorophyteLeafCrystalShot = 17,  // 叶绿叶弹轨迹 streak（Projectile.cs:28285 aiStyle43
-                                    //   每子步请求,clientOnly:false;UniqueInfoPiece=hue byte,
-                                    //   MovementVector=弹速;视觉本体 fx/orchestraFx.leafCrystalShot,
-                                    //   producer=ChloroLeafShot.trailStep——L5 备案项收编）。
+                                    //   每子步请求,clientOnly:false;UniqueInfoPiece=producer
+                                    //   三段式【变换后】H 的 (byte) 截断字节——fx/orchestraFx.
+                                    //   leafTrailInfoByte 直出（δA bug③ 清偿,P.cs:28282-84）,
+                                    //   MovementVector=弹速;视觉本体 fx/orchestraFx.
+                                    //   leafCrystalShotFx（消费端 ParticleOrchestrator.cs
+                                    //   :3139-46),producer=ChloroLeafShot.trailStep。
                                     //   ChlorophyteLeafCrystalPassive(16) 全树无生产位
                                     //   （孤儿型,L5 同清单）不接
 
@@ -339,21 +349,33 @@ export const enum ParticleOrchestraType {
   //             叶绿 SetBonus 代理域本批不复派发,fx/orchestraFx 备纯函数对拍面） =================
   Keybrand = 0,             // 锁匙刃充能斩（NPC.KeyBrandStrike NPC.cs:82005 clientOnly:false;
                             //   Game 近战循环 671 支接线;:35153 滑行拖星支登记未接）
+                            //   ★δB9（2026-09-01）第二带 Extra[98] 白化橙渐变改 3 片
+                            //   （num2=3 循环步长至 :3860 才重置）+删臆加白色伴生粒
   BlackLightningHit = 4,    // 黑雷爆（WhipTagEffect_DarkHarvest.cs:24 clientOnly:false;WhipTag 接线）
   BlackLightningSmall = 6,  // 黑雷拖带（NPC.cs:92297/P.cs:48715 clientOnly:true 本地直驱）
   StardustPunch = 7,        // 星尘拳紫罗兰光点（P.cs:14315 type1039/:14331 type623 clientOnly:false;
                             //   消费+FX 在位,随从弹侧 anchor 登记缺）
   PrincessWeapon = 8,       // 公主法杖挥尾品红焰（Player.cs:51790/P.cs:43546-67 全 clientOnly:true 本地直驱）
   PaladinsHammer = 9,       // ★vanilla 孤儿：1458 全仓无调用点（仅 Spawn_ 分派臂）;占位注册
-  NightsEdge = 10,          // 永夜刃挥弧紫尘（Projectile.Damage case972 :13007;SwingArc/NightsEdgeFly 锚）
+  NightsEdge = 10,          // 永夜刃挥弧紫尘（Projectile.Damage case972 :13007;SwingArc/NightsEdgeFly 锚
+                            //   + TimerCrit 蓄能暴击命中面 Player.TryConsumingTimerCrit :28574
+                            //   ——Player.ts 接线,✅2026-08-31 已清偿[δB B4],d228×20 尘环不走编排面）
   SilverBulletSparkle = 11, // 银箭白炽拖星（P.cs:77659 弹981 Kill 贴块支;clientOnly:true 直驱）
   TrueNightsEdge = 12,      // 真永夜刃挥弧绿尘（case973 :13010;TrueNightsEdgeSlash 锚）
   Excalibur = 13,           // 圣剑四臂金尘十字（case982 :13018;SwingArc 锚）
+                            //   ★δB2（2026-09-01）尺度按臂奇偶 (i%2==0?2:4)+奇臂×1.5
+                            //   （:2809-2823/:3040-3067;曾按层定值+丢 ×1.5）
   TrueExcalibur = 14,       // 真断钢剑红金双带（case983 :13021 + 剑鞭 WhipTagEffect_SwordWhip.cs:22;
-                            //   SwingArc/WhipTag 双锚）
+                            //   SwingArc/WhipTag 双锚）★δB2b 红粉前置带删幻加速度
+                            //   （原版两层不赋 Velocity 静止驻留 :2974-3006）
   TerraBlade = 15,          // 泰拉刃绿三带击斩（case984|985 :13015;985 光束 Arrow aiStyle191 域）
-  BestReforge = 18,         // 顶级词缀重铸 Research_Spark 八粒上旋（Main.cs:42645 top-tier 支,
-                            //   clientOnly:true;reforge UI 完成拍接线）
+                            //   ★δB1（2026-09-01）MovementVector=弹体速度载荷（Projectile.cs:13015
+                            //   settings.MovementVector=velocity;锚弧支=(direction,0) Player.cs:49441,
+                            //   AI_190 只读 velocity;飞斩支=实时 vx/vy）——曾误传命中点 (cos(hy),sin(hy))
+  BestReforge = 18,         // 顶级词缀重铸 Research_Spark 八粒上旋（Main.ReforgeItemInReforgeSlot
+                            //   :42645 top-tier 支,clientOnly:true 本地直驱不广播;Game.doReforge
+                            //   接线=三连掷 bestReforgeFx+两掷 RainbowRodHit 编排。旧注
+                            //   "reforge UI 完成拍接线"系声称失实[只响声]已订正,✅2026-08-31 已清偿)
   GasTrap = 23,             // 毒气陷阱起爆（P.cs:33160 弹1007首帧 Broadcast 面;弹在场性登记）
   ItemTransfer = 24,        // 快堆入箱飞行件（Chest.VisualizeChestTransfer :315 BroadcastOrRequest;
                             //   QuickStackToNearbyChests 包装位接线）
@@ -371,13 +393,17 @@ export const enum ParticleOrchestraType {
   RainbowBoulder1 = 47,     // 虹石族四种（RB1 天基寻宝 :20298/RB2·RB3 虹砖 ambience TileDrawing
   RainbowBoulder2 = 48,     //   :6996/:6989/RB4 跃迁 :20349——tile/fairy 面无编排通道登记;
   RainbowBoulder3 = 49,     //   FX+派发在位,消费可达）
-  RainbowBoulder4 = 50,
+  RainbowBoulder4 = 50,     // ★δB10（2026-09-01）彩带 Velocity=(0,-1).RotatedBy(num5)=(sin,-cos)
+                            //   /白镜像=(0,1).RotatedBy=(-sin,+cos)=共线反向流（P.cs:1478/:1493,
+                            //   曾错用 (cos,sin) 成 90° 垂直轴）+白镜像位改盒内随机（:1490）
   LakeSparkle = 52,         // 湖面闪光星（P.cs:20638 clientOnly:true;FakeFish 族统一收编迁移）
   NatureFly = 53,           // 森林花虻环境粒（TileDrawing.cs:7017 clientOnly:true;tile-ambient 未建,直驱保留）
   FakeFishJump = 54,        // 假鱼跃出（P.cs:20967 jumping=true;保持 FakeFish.ts 局部池——密度门同池语义）
   MagnetSphereBolt = 56,    // 磁球闪电行进尘（P.cs:71850 区弹255 AI_001 BroadcastOrRequest）
   HeatRay = 57,             // 热射线行进尘（同区弹260）
   RainbowBoulderPetBounce = 60,  // 虹石宠落地尘（P.cs:50709 pet=true clientOnly:true）
+                                 //   ★δB10（2026-09-01）同 RainbowBoulder4——彩带共线反向流+
+                                 //   白镜像盒内随机
   StormLightning = 61,      // 世界落雷主放电——proj1457 bolt 折线原生承担（M级⑥清偿,占位注册不重复生成）
   StormlightningWindup = 62,// 落雷蓄势白闪环（P.cs:40510/:40520/:80294 三武器预备段 clientOnly:true）
   PaladinsShieldHit = 63,   // 圣骑士盾分伤护壁闪（Player.Hurt :38649 clientOnly:true;
@@ -386,10 +412,16 @@ export const enum ParticleOrchestraType {
                             //   转化链未移植,消费面在位）
   BlueLightningSmallLong = 65,  // 电鳗鞭链电长距版（WhipTagEffect_ElectricEel.cs:46 clientOnly:false +
                             //   P.cs:14484 浸液导通链;25px 步进复播 LightningSmall;WhipTag/proj1457 锚）
-  InScreenDungeonSpawn = 66,  // 双地牢种子层内怪出生纸屑爆（NPC.NewNPC :5267 dualDungeonsSeed 门;
-                            //   uniqueInfo=npcType;spawner 域 caller 接线+消费派发在位）
-  CattivaHit = 67,          // 捣蛋猫命中六芒簇（SpawnHitVisuals type1093/1112 + P.cs:52194;
-                            //   clientOnly 直驱+消费派发在位,pet-hit 侧 anchor 登记）
+  InScreenDungeonSpawn = 66,  // 双地牢种子层内怪出生纸屑爆（NPC.SpawnNPC :5265-5273 SpawnNPC 包装位
+                            //   [非 NewNPC 本体] dualDungeonsSeed&&地下带门,BroadcastOrRequest;
+                            //   uniqueInfo=npcType。生产=VanillaSpawner.spawnNPC 尾门+B12 出站钩,
+                            //   微光之灵裸 NewNPC 路径同构免笺;旧注"NewNPC·spawner 域 caller 接线
+                            //   在位"系声称失实[自然刷生零调用],✅2026-08-31 已清偿）
+  CattivaHit = 67,          // 捣蛋猫命中六芒簇（Projectile.SpawnHitVisuals :14493 type1093/1112 受击拍
+                            //   +:52193 HitIntention 镐力面,BroadcastOrRequest。命中面生产=
+                            //   MinionProj.contact 命中拍[B11,每靶一发];镐力面锚 ai[0]=3 帮工意图
+                            //   未折算维持登记。旧注"clientOnly 直驱+接线在位"系声称失实[从未发出],
+                            //   ✅2026-08-31 已清偿；PalJoy 心形气泡窗(palJoyTick)非此型勿混）
   SnappingStone = 69,       // 拍击石系三味脉冲环带+音（TryMakingSnappingStoneStrike :14400-14464
                             //   clientOnly:false;SnapStrike.ts 锚接线,rings+dust+音双面同源）
   HarpyCharm = 70,          // 弧线引矢三型同体（ApplyHarpyCharm P.cs:58803 clientOnly:false;
@@ -397,6 +429,9 @@ export const enum ParticleOrchestraType {
   SeraphNecklace = 78,
   ArcSurge = 71,            // ArcSurge 武器余像+双音（P.cs:71905 弹1122 出手拍 clientOnly:true;
                             //   折线本体 proj1457 自绘——此处补端点闪光与双音）
+                            //   ★δB6（2026-09-01）载荷回归原版语义 moveX=种子(:1263)/moveY==1→
+                            //   雷暴档寿命×3（num2=16|48 :1255-1259,端点=num2+Next(4,9) :1291）,
+                            //   玩家锚走 invoker 槽 GetPlayerAnchorPos 门——曾把 (moveX,moveY) 当锚坐标
   FormatC = 72,             // Format:C 法锤暴击金芒（case562 :13003 crit 门 clientOnly:false）
   SnappingStoneMelee = 74,  // 焰爆石脉冲（PyroclasticStone 音）/毁灭臂镗（ArmletOfRuin 音,d172/d211 圆阵）
   SnappingStoneSummon = 75, //   ——两型与 69 同锚 SnapStrike.ts 按 kind 分派

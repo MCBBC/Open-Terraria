@@ -48,11 +48,20 @@ export interface Body {
   liqFactor?: number;
   /** 连续中心格嵌入 tick 计数（unembedPass 延迟门用；脱出/未嵌入即复位） */
   embedTicks?: number;
+  /** 本嵌入会话（embedTicks 未清零期）topEmbedded 横推已消耗预算 px
+   *  （2026-09-01 tent 弹飞收敛帽；脱出即清零） */
+  embedPushed?: number;
+  /** 原版 Collision.TileCollision 第 9 参 hoik（默认 false）：钻洞弹幕类 AI 显式传
+   *  true 才启用天花板坡链水平穿越放行。普通实体恒 false——曾误开为无条件规则，
+   *  导致天花板坡邻接实心格被永久豁免（tent 悬臂案例：幽灵入场+hitWall 恒 false）。 */
+  hoik?: boolean;
   /** ★斜坡 G2 门入口快照（2026-08-31 统一阻尼修复）：moveAndCollide 每 tick 在
    *  速度辅助/分轴解析【前】记录——slopeCollide 的贴合门用（原版
    *  `y = Position.Y + Velocity.Y`，Collision.cs G2 `Position.Y + num7 < y`） */
   vyEntry?: number;
   feetEntry?: number;
+  /** 坡面受阻推离已发射（一次性；脱坡复位） */
+  slopeBlockFired?: boolean;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -209,10 +218,17 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         // 身体已横向跨在格上（上坡爬升中段,脚沉在斜面下）不拦——交给 slopeCollide
         // 抬升,否则上坡会被每帧推回卡死
         if (dir > 0 ? oldX + b.w > tx * TILE + 0.01 : oldX < (tx + 1) * TILE - 0.01) continue;
-        // hoik 坡链放行（:2412/:2432）：身后格是配套坡面（同向坡链中段）→ 不拦
-        const bj = st.idx(tx - Math.sign(dir), ty);
-        if (dir > 0 && (st.slope[bj] === 2 || st.slope[bj] === 4)) continue;
-        if (dir < 0 && (st.slope[bj] === 1 || st.slope[bj] === 3)) continue;
+        // hoik 坡链放行（:2412/:2432）：身后格是配套坡面（同向坡链中段）→ 不拦。
+        // ★原版为 TileCollision 形参（默认 false），仅钻洞弹幕 AI 显式传 true，
+        //   普通实体碰撞恒不可达此支。曾无条件启用 → 天花板坡邻接实心格被永久
+        //   豁免：玩家/NPC 幽灵穿入净空不足的悬臂禁区（2026-09-01 tent 案例定罪：
+        //   x591 墙被右邻 (592,328) slope3 放走 1px 入场 → 头顶嵌实心 → 弹飞；
+        //   且 hitWall 恒 false，NPC 检测不到墙无限重试）。对齐 vanilla 默认关。
+        if (b.hoik) {
+          const bj = st.idx(tx - Math.sign(dir), ty);
+          if (dir > 0 && (st.slope[bj] === 2 || st.slope[bj] === 4)) continue;
+          if (dir < 0 && (st.slope[bj] === 1 || st.slope[bj] === 3)) continue;
+        }
         if (dir > 0) b.x = tx * TILE - b.w;
         else b.x = (tx + 1) * TILE;
         b.vx = 0;
@@ -397,6 +413,7 @@ function slopeCollide(
       }
     }
   }
+  if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记
   if (bestLift < 0) {
     const ny = b.y + bestLift;
     // 抬升后不能嵌进实心
@@ -428,9 +445,13 @@ function slopeCollide(
       //   坡结构时碰墙就滑过去而非卡死。
       //   本仓实现：限制滑行量 ≤ TILE（一格），方向 = 贴合方向的反向
       //   （被堵住意味着上方有障碍 → 沿墙面水平退让）。
-      const shortfall = -(bestLift);              // 被堵的提升量（正数）
-      const slide = Math.min(shortfall, TILE) * (b.vx >= 0 ? -1 : 1) * 0.5;
-      b.x += slide;
+      // ★2026-09-01 用户反馈"弹飞太远"定罪：此 slide 每 tick 触发，持续
+      //   滑行 ~8px/tick × 多 tick = 累计数远超 1 格。修=一次性 4px 半格推离
+      //   （slopeBlockFired 门），接触期不重复，离开坡面后复位。
+      if (!b.slopeBlockFired) {
+        b.slopeBlockFired = true;
+        b.x += (b.vx >= 0 ? -1 : 1) * 4;          // 半格推离（固定量，非比例）
+      }
       b.vy = 0;
     }
   } else if (bestSnapY > 0) {
@@ -663,10 +684,9 @@ function unembedPass(b: Body, world: World): void {
   const embedded = centerSolid || topEmbedded;
   if (!embedded) {
     b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
+    b.embedPushed = 0;  // 横推预算同会话复位(2026-09-01 tent 收敛帽)
     return;
   }
-  const emb = (b.embedTicks ?? 0) + 1;
-  b.embedTicks = emb;
   // ★topEmbedded 快速响应(2026-08-31):头顶 solid 区嵌入的 15t 延迟期 = 无限上下
   //  弹跳期(站台+上方家具 1 格空隙),观感不可接受。top-embed 检出可靠性高(逐列扫
   //  solid 含坡面三角判定),2t 即可确认非瞬态。
@@ -721,8 +741,15 @@ function unembedPass(b: Body, world: World): void {
   const l = sideClear(-1), r = sideClear(1);
   if (l === 0 && r === 0) return;
   const dir = r >= l ? 1 : -1;
-  // ★topEmbedded 一口气推到最远净空(上限 4 格)——原 1 格/tick 期=连续弹跳窗口
-  const push = Math.min(Math.max(l, r), 4) * TILE;
+  // ★2026-09-01 tent 弹飞定罪:topEmbedded 一口气 min(max(l,r),4) 格爆推 =
+  //  "阻尼走到悬臂尽头被弹出数格以外"的元凶(vanilla 无 unembed 等价机制,本支
+  //  纯 worldgen 坏形自愈兜底)。收敛:每 tick 至多 1 格,本嵌入会话累计 ≤2 格,
+  //  超帽即放弃本支(降级驻留,① 垂直支每 tick 重试)——禁止远程传送弹射。
+  const wide = Math.min(Math.max(l, r), topEmbedded ? 1 : 4);
+  const used = b.embedPushed ?? 0;
+  const budget = topEmbedded ? Math.max(0, 2 * TILE - used) : wide * TILE;
+  const push = Math.min(wide * TILE, budget);
+  if (push <= 0) return;
   const nx = b.x + dir * push;
   // 增量条带验证（同上移支）：只验新扫入的前缘列
   const leadCol = dir > 0 ? Math.floor((nx + b.w - 0.01) / TILE) : Math.floor(nx / TILE);
@@ -738,5 +765,6 @@ function unembedPass(b: Body, world: World): void {
   if (fits) {
     b.x = nx;
     b.vx = 0;
+    if (topEmbedded) b.embedPushed = used + push;   // 预算记账(会话帽)
   }
 }

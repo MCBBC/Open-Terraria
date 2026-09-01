@@ -28,6 +28,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
 import { ParticleOrchestraType } from '../net/syncModules';
+import { cattivaHitFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
@@ -3537,6 +3538,26 @@ export class MinionProj extends Entity {
     return typeof iv === 'number' && iv > 0;
   }
 
+  /** SpawnHitVisuals 编排面（Projectile.cs:14466-14501，Damage 对每个实际受伤目标各调
+   *  一次——:13633 NPC 支在免疫门之后)。type1093/1112 → CattivaHit 六芒簇
+   *  （BroadcastOrRequest clientOnly:false = 本地直生 + module8 上行；δB B11 接线,
+   *  2026-08-31——旧档"消费派发在位/接线在位"系声称失实,生产端从未接）：
+   *   PositionInWorld = Center + (direction·8, 0) + Circular(4,4)；
+   *   MovementVector = CircularEdge(4,4)（Utils.cs:1306 单位圆 × 半径,落在椭圆边上）。
+   *  载荷只采样一次——本地 fx 与广播共用同参（原版 settings 对象同构）。
+   *  ★镐力面 :52193（AI_067_FreakingPirates_HitIntention,ai[0]=3 帮工意图）本仓未折算
+   * （IntentionGuesser 智能光标系统未建模,"勿造系统"登记）；抚摸 Joy 音槽（palJoyTick/
+   *  心形气泡窗）与 CattivaHit 无关,勿在此误植。 */
+  private emitSpawnHitVisuals(game: GameHooks): void {
+    if (this.projId !== 1093 && this.projId !== 1112) return;
+    const px = this.cx + this.facing * 8 + (Math.random() * 2 - 1) * 4;   // +Circular(4,4)
+    const py = this.cy + (Math.random() * 2 - 1) * 4;
+    const ea = Math.random() * Math.PI * 2;                              // NextVector2Unit
+    const mvX = Math.cos(ea) * 4, mvY = Math.sin(ea) * 4;                // CircularEdge(4,4)
+    cattivaHitFx(game, px, py, mvX, mvY);
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.CattivaHit, px, py, mvX, mvY);
+  }
+
   /** 接触伤害通用（pad=判定盒外扩）；鞭 tag + TagCrit + proc 统一走 resolveWhipTagHit
    *  （TagEffectState.ModifyHit :216-228 / OnHit :230-243，含黑收成 OnTaggedHit 与
    *  火鞭/星陨/花瓣/月主弹 proc 首跳）。返回是否命中过（乌鸦命中重置扑击计时）。
@@ -3557,7 +3578,13 @@ export class MinionProj extends Entity {
       const hitbox = pad
         ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2 }
         : { x: this.x, y: this.y, w: this.w, h: this.h };
-      if (hitCritters(hitbox, game, { minion: true, sentry: this.sentry })) anyHit = true;
+      // 小动物亦属原版 Main.npc 全表 → Damage 每中兽同样走 SpawnHitVisuals（此处整桶
+      // 合一近似——多兽同帧合并为一发;Enemy 桶为逐靶直译）
+      const critterHit = hitCritters(hitbox, game, { minion: true, sentry: this.sentry });
+      if (critterHit) {
+        this.emitSpawnHitVisuals(game);
+        anyHit = true;
+      }
     }
     for (const e of game.enemies()) {
       if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
@@ -3606,6 +3633,7 @@ export class MinionProj extends Entity {
       en.hurt(applyBannerDamageDealt(game, en, golemCrit ? res.dmg * 2 : res.dmg),
         kbDir * (this.knockback + mkb), 0, game, pen0, false, 0, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
+      this.emitSpawnHitVisuals(game);           // SpawnHitVisuals :13633（免疫门后每靶一发,B11）
       this.attackFlash = 24;
       anyHit = true;
     }

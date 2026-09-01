@@ -290,53 +290,113 @@ export function shadowbeamLineFx(
 /** Remap 再导出（FakeFish.beRepelled 同表对拍用） */
 export { remap as orchestraRemap };
 
-// ==================== ChlorophyteLeafCrystalShot（:3130-3157）====================
+// ==================== ChlorophyteLeafCrystalShot（P.cs:28282-28303 + :3130-3157）====
 //
 // 叶绿水晶叶套装（台账 L3 清偿批 2026-08-31）叶弹 227 的轨迹 streak——原版 aiStyle43
-// 每子步请求（Projectile.cs:28279-28303 clientOnly:false），本仓 producer =
+// 每子步请求（Projectile.cs:28282-28303 clientOnly:false），本仓 producer =
 // entities/ChloroLeafCrystalProj ChloroLeafShot.trailStep（181 子步/拍采样 ≈4 次/拍,
 // 密度差登记）;同型 ChlorophyteLeafCrystalPassive(16) 全树无生产位,不接。
 // PrettySparkle streak 收编为 spawnParticles 长寿命直线粒 + 白核 additive 近似
 // （Lighting.AddLight(0.05,0.2,0.1)×1.5 由粒子亮度承载）。
+//
+// ★δA bug③（2026-08-31 蓝队单条群）：UniqueInfoPiece 载荷链修齐——原版 producer 是
+// 【三段式变换后】再 rgbToHsl 取 .X 存 (byte) 截断（P.cs:28282-84），旧实现广播的是
+// 未变换 raw H 且 byte 化用 round。现 leafTrailInfoByte 为完整三段式全链直出；消费端
+// Spawn_LeafCrystalShot（ParticleOrchestrator.cs:3139-46）从字节 hslToRgb(H,1,.5)
+// →Lerp(·,Gold,R/255×0.5) 还原——生产/本地渲染/远端复放三面同一字节面。
 
-/** 轨迹色相链 producer 侧（Projectile.cs:28279-84）：hue=wrap((1−timeLeft/180)×−6×0.85
- *  +0.33)——num329=1−timeLeft/180,num330 环绕归一 */
-export function leafTrailHue01(timeLeft: number): number {
-  const n = ((1 - timeLeft / 180) * -6 * 0.85 + 0.33) % 1;
-  return ((n % 1) + 1) % 1;
+/** Main.hslToRgb(H,S,L) 精确移植（Main.cs:48695-48737：双精度 hue2rgb+byte=Math.Round;
+ *  与 render/AuroraSky.hslToRgb255 同式——fx 域独立副本避免 fx←render 依赖） */
+function leafHslToRgb255(h: number, s: number, l: number): [number, number, number] {
+  const hue2rgb = (c: number, t1: number, t2: number): number => {
+    let x = c;
+    if (x < 0) x += 1;                          // C# double 直写 c++/c--
+    if (x > 1) x -= 1;
+    if (6 * x < 1) return t1 + (t2 - t1) * 6 * x;
+    if (2 * x < 1) return t2;
+    if (3 * x < 2) return t1 + (t2 - t1) * (2 / 3 - x) * 6;
+    return t1;
+  };
+  if (s === 0) {                                // Saturation==0 支（Main.cs:48700）
+    const v = Math.round(l * 255);
+    return [v, v, v];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const t = 2 * l - q;
+  return [
+    Math.round(hue2rgb(h + 1 / 3, t, q) * 255),
+    Math.round(hue2rgb(h, t, q) * 255),
+    Math.round(hue2rgb(h - 1 / 3, t, q) * 255),
+  ];
 }
 
-/** Spawn_LeafCrystalShot 终色（:3139-46）：hsl(hue,1,.5) → Color.Lerp(·, Gold,
- *  R/255×0.5)——rgba css 直返；uniqueInfoPiece 载荷=hue byte（rgbToHsl 往返等价槽位） */
-export function leafSparkleCss(hue: number): string {
-  const h = ((hue % 1) + 1) % 1;
-  const s = 1, l = 0.5;
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const chan = (t: number): number => {
-    let x = t; if (x < 0) x += 1; if (x > 1) x -= 1;
-    if (x < 1 / 6) return p + (q - p) * 6 * x;
-    if (x < 1 / 2) return q;
-    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
-    return p;
-  };
-  const r = Math.round(chan(h + 1 / 3) * 255);
-  const g = Math.round(chan(h) * 255);
-  const b = Math.round(chan(h - 1 / 3) * 255);
+/** Main.rgbToHsl(color).X 色相分量（Main.cs:48749-48790 float 式,Appearance.rgbToHsl 同式） */
+function leafRgbToHue(r: number, g: number, b: number): number {
+  const R = r / 255, G = g / 255, B = b / 255;
+  const mx = Math.max(R, G, B);
+  const mn = Math.min(R, G, B);
+  if (mx === mn) return 0;                      // val==val2 → num4=0
+  const d = mx - mn;
+  let h: number;
+  if (mx === R) h = (G - B) / d + (G < B ? 6 : 0);
+  else if (mx === G) h = (B - R) / d + 2;
+  else h = (R - G) / d + 4;
+  return h / 6;
+}
+
+/** XNA Color.Lerp 逐通道 Round（仓内既定口径：CharCreation.lerpC/orchestraLerpRgb
+ *  同式；两处 amount 经 Remap clamped/R/255 均 ∈[0,1],XNA Clamp 分支不触发） */
+function leafLerpChannel(a: number, b: number, t: number): number {
+  return Math.round(a + (b - a) * t);
+}
+
+/** 叶弹轨迹色相链 producer 三段式全文（Projectile.cs aiStyle43 段 P.cs:28282-28303,
+ *  载荷截断含在内）。原文逐行：
+ *   num330=((num329×-6×0.85+0.33)%1+1)%1   wrap 归一（num329=1-timeLeft/180）
+ *   value2=hslToRgb(num330,1,0.5)          ① Main.hslToRgb byte 化
+ *   value2=Lerp(value2,Red,Remap(num330,.33,.7,0,1))     ② Remap clamped 红端压带
+ *   value2=Lerp(value2,Lerp(LimeGreen,Gold,.3),(int)value2.R/255f)  ③ 用②R 字节定量
+ *   UniqueInfoPiece=(byte)(rgbToHsl(value2).X*255f)      载荷=【变换后】H 截断字节
+ *  C# `(byte)` cast=向零截断（非 round）；RGB 域 [50..255] 无灰点,H∈(0,1) 必然。
+ *  返回该字节即 type17 广播/本地渲染共用载荷 */
+export function leafTrailInfoByte(timeLeft: number): number {
+  const num329 = 1 - timeLeft / 180;
+  const num330 = ((num329 * -6 * 0.85 + 0.33) % 1 + 1) % 1;
+  let [r, g, b] = leafHslToRgb255(num330, 1, 0.5);            // ①
+  const tRed = remap(num330, 0.33, 0.7, 0, 1);                // ② Utils.Remap clamped
+  r = leafLerpChannel(r, 255, tRed);                          //    Red=(255,0,0,255)
+  g = leafLerpChannel(g, 0, tRed);
+  b = leafLerpChannel(b, 0, tRed);
+  const tgtR = leafLerpChannel(50, 255, 0.3);                 // ③ Lerp(LimeGreen=(50,205,50),
+  const tgtG = leafLerpChannel(205, 215, 0.3);                //    Gold=(255,215,0),0.3)
+  const tgtB = leafLerpChannel(50, 0, 0.3);
+  const tR = r / 255;                                         // (int)value2.R / 255f ×1f
+  r = leafLerpChannel(r, tgtR, tR);
+  g = leafLerpChannel(g, tgtG, tR);
+  b = leafLerpChannel(b, tgtB, tR);
+  return Math.trunc(leafRgbToHue(r, g, b) * 255);             // (byte)(H*255f) 截断
+}
+
+/** Spawn_LeafCrystalShot 终色（ParticleOrchestrator.cs:3139-46）：value=hslToRgb(
+ *  uniqueInfoByte/255,1,0.5)→Color.Lerp(value,Gold,(int)value.R/255f×0.5f)。入参=
+ *  编排载荷字节（δA 后两端语义：byte→hsl 全程与原版同构）;css rgb() 直返 */
+export function leafSparkleCss(infoByte: number): string {
+  const [r, g, b] = leafHslToRgb255((infoByte & 0xff) / 255, 1, 0.5);
   const tGold = (r / 255) * 0.5;                 // Color.Lerp(value, Gold, R/255*0.5f)
-  const lr = Math.round(r + ((255 - r) * tGold));
-  const lg = Math.round(g + ((215 - g) * tGold));
-  const lb = Math.round(b + ((0 - b) * tGold));
+  const lr = leafLerpChannel(r, 255, tGold);     // Gold=(255,215,0)
+  const lg = leafLerpChannel(g, 215, tGold);
+  const lb = leafLerpChannel(b, 0, tGold);
   return `rgb(${lr},${lg},${lb})`;
 }
 
 /** Spawn_LeafCrystalShot 本体：LocalPosition -= Velocity×4f（:3152 逆航向拖尾）、
- *  Velocity=MovementVector、TimeToLive=30/半窗 FadeIn/Out=15（:3138/:3152-55）；生产
+ *  Velocity=MovementVector、TimeToLive=30/半窗 FadeIn/Out=15（:3138/:3152-55）；入参
+ *  infoByte=producer 载荷字节（leafTrailInfoByte/broadcast uniqueInfo 同槽位）。生产
  *  与 module8 消费两面对同一函数（L5 收编规则头注） */
 export function leafCrystalShotFx(
-  game: GameHooks, x: number, y: number, vx: number, vy: number, hue: number,
+  game: GameHooks, x: number, y: number, vx: number, vy: number, infoByte: number,
 ): void {
-  const col = leafSparkleCss(hue);
+  const col = leafSparkleCss(infoByte);
   game.spawnParticles?.(x - vx * 4, y - vy * 4, col, 1, Math.hypot(vx, vy),
     { life: 30, vx, vy, size: 1.6 });
   game.spawnParticles?.(x - vx * 4, y - vy * 4, 'rgba(255,255,255,0.5)', 1, Math.hypot(vx, vy),
@@ -386,9 +446,37 @@ export function orchestraLineWalk(
 }
 
 /**
+ * 剑族尘锥共体（B3 池层根修,2026-09-01）：ParticleOrchestrator 四型 Spawn_* 统一式
+ * ——Dust.NewDustPerfect(PositionInWorld, TYPE, 臂向量.RotatedBy(
+ * NextFloatDirection()×τ×0.025) × NextFloat()) 后置 noGravity=true + scale=常量赋值。
+ * 锚行（1457 与 1458 该段逐行同文,TerraBlade 前置 diff 实证）：TerraBlade :2788/:2791、
+ * Excalibur :2850/:2853、TrueExcalibur :3012/:3015、TrueNightsEdge :3211/:3214。
+ * 速率域 [0,|臂|]（|臂|=4 → ≤4px/t）、方向贴臂 ±0.157rad——旧直译
+ * `side*(rng*2−1)*k*rng` 各向同性标量抖动慢 ~50 倍且不贴臂（红队 B3 finding）。
+ * 走 NewDustPerfect 通道（spawn 尾参 perfect=true）：velocity 完整覆写免遭
+ * 烟雾族特例（242/75/169 的 vy 重掷+vx×0.3,scale×0.7 照留供后置赋值覆盖）侵蚀。
+ */
+function swordConeArmDust(
+  game: GameHooks, x: number, y: number, type: number,
+  armX: number, armY: number, negated: boolean, scale: number, rng: Rng,
+): void {
+  const jit = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection × τ × 0.025f
+  const spd = rng();                                   // Main.rand.NextFloat()
+  const c = Math.cos(jit), s = Math.sin(jit);
+  const rx = armX * c - armY * s;
+  const ry = armX * s + armY * c;                      // 臂向量.RotatedBy(jit)
+  // NewDustPerfect(Position, Type, Velocity)：w/h=0/α0/color 缺省——perfect 覆写位速
+  const d = game.spawnDust?.(x, y, 0, 0, type,
+    negated ? -rx * spd : rx * spd,
+    negated ? -ry * spd : ry * spd, 0, null, 1, false, true);
+  if (d) { d.noGravity = true; d.scale = scale; }      // 原文紧跟的两句字段赋值
+}
+
+/**
  * Spawn_NightsEdge（:3221-3277）：永夜刃命中小三叉紫尘幕。双层各 3 臂（基角 π/4+π/4·i），
  * 第一层暗紫 rgba(64,25,128,.5)、第二层亮紫白底;TrueNightsEdge(:3155)=双臂绿族两档
- * + d75 尘对;i==1 强化臂原文死支（步长语义忠实保留不触发,登记）。
+ * + d75 尘锥（每臂 i<2 双掷 × ± 对,:3205-3217,共 ≤8）;i==1 强化臂原文死支（步长语义
+ * 忠实保留不触发,登记）。
  */
 export function nightsEdgeFx(
   game: GameHooks, x: number, y: number, rng: Rng = Math.random,
@@ -415,10 +503,9 @@ export function nightsEdgeFx(
         fc(0.3, 0.6, 0.3, 0.5), 1, 4, { life, vx, vy, size: 4 * 1.1 });
       game.spawnParticles?.(x - vx * life * 0.25, y - vy * life * 0.25,
         fc(0.6, 1, 0.2, 1), 1, 4, { life, vx, vy, size: 4 * 0.7 });
-      for (const side of [-1, 1]) {                    // d75 尘对（:3206-3219）
-        game.spawnDust?.(x, y, 1, 1, 75,
-          side * (rng() * 2 - 1) * 0.079 * rng(),
-          side * (rng() * 2 - 1) * 0.079 * rng(), 0, null, 1.4);
+      for (let n2 = 0; n2 < 2; n2++) {                 // for i<2 双掷（:3205）
+        swordConeArmDust(game, x, y, 75, vx, vy, false, 1.4, rng);   // :3206-3209
+        swordConeArmDust(game, x, y, 75, vx, vy, true, 1.4, rng);    // :3210-3216
       }
     }
   }
@@ -431,8 +518,14 @@ export function trueNightsEdgeFx(game: GameHooks, x: number, y: number, rng: Rng
 
 /**
  * Spawn_Excalibur（:2798-2860）/ Spawn_TrueExcalibur（:2970-3084）：
- * 圣剑四臂金尘十字（正向反抽速度带 ×odd 1.5 增强）+ d169 尘对；真断钢多 π/4 基角
- * 红粉前置双带（d242 门 Next(2)!=0）。剑鞭 SwordWhip tag proc 同用 TrueExcalibur
+ * 圣剑四臂金尘十字——尺度按臂奇偶 Scale.X=(i%2==0?2:4)*(1.1|0.7) 且奇数臂 Scale/Velocity
+ * 再 ×1.5（:2809/:2833 定值式 + :2819-2823/:3040-3044/:3063-3067 奇臂增强段;1457/1458 同锚）
+ * + d169 尘锥——原文只挂第二黄带（:2846-2857 Excalibur 无门/TrueExcalibur :3065-3078
+ * per-arm 门 Next(2)!=0），第一金带与两变体共享的第一反抽带均无尘（B3 数量核对修正:
+ * 旧直译两带全挂/16 粒）；真断钢多 π/4 基角红粉前置双带（d242 门 Next(2)!=0,:3009-3017,
+ * 每臂一对 ≤4）。★δB2/B2b（2026-09-01）：曾按层定值(band===0?2:4)+丢奇臂 ×1.5→按臂
+ * 奇偶重排补强;真断钢红粉前置两层原版均不赋 Velocity＝静止驻留（:2974-2989/:2991-3006
+ * 无 Velocity 段）→ 删 ±v*0.2 幻加速度。剑鞭 SwordWhip tag proc 同用 TrueExcalibur
  * （WhipTagEffect_SwordWhip.cs:22 clientOnly:false）。
  */
 export function excaliburFx(
@@ -444,34 +537,31 @@ export function excaliburFx(
     for (let i = 0; i < 2; i++) {
       const a0 = base + Math.PI / 2 * i;
       const vx = Math.cos(a0) * 4, vy = Math.sin(a0) * 4;
-      game.spawnParticles?.(x, y, fc(1, 0, 0.3, 1), 1, 4, { life: lifeT, vx: -vx * 0.2, vy: -vy * 0.2, size: 5 * 1.1 });
-      game.spawnParticles?.(x, y, fc(1, 0.5, 0.8, 1), 1, 4, { life: lifeT, vx: vx * 0.2, vy: vy * 0.2, size: 3 * 0.7 });
-      if (rng() >= 0.5) {
-        for (const side of [-1, 1]) {
-          game.spawnDust?.(x, y, 1, 1, 242,
-            side * (rng() * 2 - 1) * 0.079 * rng(), side * (rng() * 2 - 1) * 0.079 * rng(), 0, null, 1.4);
-        }
+      // δB2b：原版两层 PrettySparkle 均无 Velocity 赋值（:2974-2989/:2991-3006）＝静止驻留
+      game.spawnParticles?.(x, y, fc(1, 0, 0.3, 1), 1, 4, { life: lifeT, vx: 0, vy: 0, size: 5 * 1.1 });
+      game.spawnParticles?.(x, y, fc(1, 0.5, 0.8, 1), 1, 4, { life: lifeT, vx: 0, vy: 0, size: 3 * 0.7 });
+      if (rng() >= 0.5) {                              // Next(2)!=0（:3009-3011）
+        swordConeArmDust(game, x, y, 242, vx, vy, false, 1.4, rng);   // :3012-3014
+        swordConeArmDust(game, x, y, 242, vx, vy, true, 1.4, rng);    // :3015-3017
       }
     }
   }
   const life = 30;
-  const gateDust = variant === 'trueexcalibur';
   for (let band = 0; band < 2; band++) {
     const innerScale = band === 0 ? 1.1 : 0.7;
     const tint = band === 0 ? fc(0.9, 0.85, 0.4, 0.5) : fc(1, 1, 0.2, 1);
     for (let i = 0; i < 4; i++) {
       const a0 = Math.PI / 2 * i;
       const vx = Math.cos(a0) * 4, vy = Math.sin(a0) * 4;
-      const boost = i % 2 === 1 ? 1.5 : 1;
+      const boost = i % 2 === 1 ? 1.5 : 1;             // δB2 奇臂增强（:2819-2823 等）
       const dirSign = band === 0 ? -1 : 1;
       game.spawnParticles?.(x, y, tint, 1, Math.hypot(vx, vy),
         { life, vx: dirSign * vx * 0.2 * boost, vy: dirSign * vy * 0.2 * boost,
-          size: (band === 0 ? 2 : 4) * innerScale });
-      if (!gateDust || rng() >= 0.5) {
-        for (const side of [-1, 1]) {
-          game.spawnDust?.(x, y, 1, 1, 169,
-            side * (rng() * 2 - 1) * 0.063 * rng(), side * (rng() * 2 - 1) * 0.063 * rng(), 0, null, 1.4);
-        }
+          size: (i % 2 === 0 ? 2 : 4) * innerScale * boost });   // δB2 按臂奇偶定值
+      // d169 尘带只属第二黄带（for j<1 循环在 num6 带 Add 之后,:2846/:3065）
+      if (band === 1 && (variant === 'excalibur' || rng() >= 0.5)) {
+        swordConeArmDust(game, x, y, 169, vx, vy, false, 1.4, rng);
+        swordConeArmDust(game, x, y, 169, vx, vy, true, 1.4, rng);
       }
     }
   }
@@ -483,8 +573,12 @@ export function trueExcaliburFx(game: GameHooks, x: number, y: number, rng: Rng 
 }
 
 /**
- * Spawn_TerraBlade（:2715-2797）：泰拉刃绿色三带击斩（基准角=MovementVector 角+π/2）。
- * 984 弧/985 光束命中两侧同款（Projectile.Damage case984|985 :13015 clientOnly:false）。
+ * Spawn_TerraBlade（:2715-2797）：泰拉刃绿色三带击斩（基准角=MovementVector 角+π/2;
+ * num2=settings.MovementVector.ToRotation()+π/2 :2720——1457/1458 同锚）。
+ * ★δB1（2026-09-01）：(moveX,moveY)=弹体速度载荷（Projectile.Damage case984|985
+ * settings.MovementVector=velocity Projectile.cs:13015;1457/1458 同行号）——调用侧曾把
+ * 命中点 Y 的 (cos(hy),sin(hy)) 当角度传（SwingArc swordTrailOrchestra）。
+ * 第三带每臂挂 d107 剑尖尘对（+臂 .8/:2788、−臂 1.4/:2791,共 8,B3 改剑族尘锥共体）。
  */
 export function terraBladeFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
@@ -510,11 +604,10 @@ export function terraBladeFx(
     const odd = i % 2 === 1;
     game.spawnParticles?.(x, y, fc(0.2, 1, 0.2, 1), 1, 4,
       { life, vx: vx * (odd ? 0.4 : 0.2), vy: vy * (odd ? 0.4 : 0.2), size: 3 * 0.7 });
-    for (const side of [-1, 1]) {
-      game.spawnDust?.(x, y, 1, 1, 107,
-        side * (rng() * 2 - 1) * 0.063 * rng(), side * (rng() * 2 - 1) * 0.063 * rng(),
-        0, null, side > 0 ? 1.4 : 0.8);
-    }
+    // d107 剑尖尘对（B3：RotatedBy(±τ×0.025)×NextFloat 贴臂向 + perfect 通道;
+    // +臂 scale .8 :2788-2790 / −臂 scale 1.4 :2791-2793——旧直译两 scale 曾对调）
+    swordConeArmDust(game, x, y, 107, vx, vy, false, 0.8, rng);
+    swordConeArmDust(game, x, y, 107, vx, vy, true, 1.4, rng);
   }
 }
 
@@ -797,27 +890,46 @@ export function stormLightningWindupFx(
 }
 
 /**
- * Spawn_ArcLightning（:1245-1321）收编段：1122 出手拍余像——玩家锚驻留帧条一束+
- * 终点 RandomizedFrame 对+AddLight+双音（Item15/ArcSurge vol .6 pitch ±0.05..−0.25）。
- * 折线本体由 proj1457 自绘 LightningGenerator 路径承担（M 级⑥清偿,不重复生成）。
+ * Spawn_ArcLightning（:1245-1321;1457/1458 同锚行）收编段：1122 出手拍余像——玩家锚
+ * 驻留帧条一束+终点 RandomizedFrame 对+AddLight+双音（Item15/ArcSurge vol .6 pitch
+ * ±0.05..−0.25）。折线本体由 proj1457 自绘 LightningGenerator 路径承担（M 级⑥清偿,
+ * 不重复生成）。★δB6（2026-09-01）按原文修正寿命/载荷面：
+ *   · num2=16 基准、settings.MovementVector.Y==1f（雷暴档 :1253/:1257-1259）→ ×3=48;
+ *     曾恒 16。锚条 TimeToLive=num2（:1280 SetTypeInfo）、端点对 num7=num2+Next(4,9)
+ *     （:1291 → 16..24 / 雷暴档 48..56;曾 rand(4..8) 不含 num2 基准）;
+ *   · 载荷语义回归原版：MovementVector=(seed(X),(Y==1)雷暴旗)、PositionInWorld=弹体终点
+ *     （:1263 seed=MovementVector.X 整型入生成器）；玩家锚取
+ *     Main.player[IndexOfPlayerWhoInvokedThis]→GetPlayerAnchorPos(RotatedRelativePoint(
+ *     HandPosition ?? MountedCenter) StormLightningParticle.cs)≈盒心近似 ——invokerSlot
+ *     槽无法解析时回退终点坐标（followPlayerIndex 跟随档无通道登记,原注释同口径）;
+ *   · 端点白镜像粒与主粒共享同一 vector=circular(6,6)×0.7 偏移位（:1293 LocalPosition=
+ *     settings.PositionInWorld(已覆写 EndPosition)+vector / :1311 mirror 同位）;scale 镜
+ *     像 ×0.5=0.6375（:1317 Scale ×0.5f）。
+ *   · rng 流差异登记：原文循环内吞 Main.rand.Next(4,9)(:1273 弃值)+Next(6) 帧——视觉零差。
+ * @param stormTier settings.MovementVector.Y==1f 雷暴三倍寿命档
  */
 export function arcSurgeFx(
-  game: GameHooks, ax: number, ay: number, bx: number, by: number, invokerSlot: number,
-  packedColor = 0, rng: Rng = Math.random,
+  game: GameHooks, ex: number, ey: number,
+  invokerSlot = -1, packedColor = 0, stormTier = false, rng: Rng = Math.random,
 ): void {
   const white = packedColor !== 0 ? orchestraPackedCss(packedColor, 255) : 'rgba(255,255,255,255)';
-  const rot = Math.atan2(by - ay, bx - ax) + Math.PI / 2;
-  game.addLightAt?.(bx, by, 0.4, 0.8, 1);
-  game.playSfxWav?.('Item_15', 1, ax, ay);
-  game.playSfxFiles?.(['arcsurge'], 0.6, ax, ay);        // SoundID.ArcSurge 组播兜底文件名
-  game.spawnParticles?.(ax, ay, white, 1, 0,
-    { life: 16, vx: 0, vy: 0, damp: 1, size: 1.5, grav: 0 });
-  const frames = ((rng() * 5) | 0) + 4;                  // Next(4,9)
-  game.spawnParticles?.(bx + circ(rng, 6).x * 0.7, by + circ(rng, 6).y * 0.7, white, 1, 0,
-    { life: frames, vx: 0, vy: 0, damp: 1, size: 1.275, grav: 0 });
-  game.spawnParticles?.(bx, by, 'rgba(255,255,255,0)', 1, 0,
-    { life: frames, vx: 0, vy: 0, damp: 1, size: 0.64, grav: 0 });
-  void rot; void invokerSlot;                            // followPlayerIndex 档无玩家跟随通道登记
+  const anchorBox = invokerSlot >= 0 ? orchestraPlayerAnchor(game, invokerSlot) : null;
+  const anchorX = anchorBox ? anchorBox.x + anchorBox.w / 2 : ex;    // 手位≈盒心近似
+  const anchorY = anchorBox ? anchorBox.y + anchorBox.h / 2 : ey;
+  const lifeNum2 = stormTier ? 48 : 16;                  // num2×(num?3:1)（:1255-1259）
+  const rot = Math.atan2(ey - anchorY, ex - anchorX) + Math.PI / 2;   // 锚向终点（:1288）
+  void rot;
+  game.addLightAt?.(ex, ey, 0.4, 0.8, 1);                // AddLight(PositionInWorld=EndPosition)（:1264）
+  game.playSfxWav?.('Item_15', 1, anchorX, anchorY);     // PlaySound(Item15, playerAnchorPos)（:1266）
+  game.playSfxFiles?.(['arcsurge'], 0.6, anchorX, anchorY);   // SoundID.ArcSurge 组播兜底文件名
+  game.spawnParticles?.(anchorX, anchorY, white, 1, 0,
+    { life: lifeNum2, vx: 0, vy: 0, damp: 1, size: 1.5, grav: 0 });   // 锚驻留帧条（:1274-1289）
+  const frames = lifeNum2 + ((rng() * 5) | 0) + 4;       // num7=num2+Next(4,9)（:1291）
+  const off = circ(rng, 6);                              // vector=circular(6,6) 两粒共享（:1292）
+  game.spawnParticles?.(ex + off.x * 0.7, ey + off.y * 0.7, white, 1, 0,
+    { life: frames, vx: 0, vy: 0, damp: 1, size: 1.275, grav: 0 });   // Scale=(1.5,0.75)×0.85（:1300）
+  game.spawnParticles?.(ex + off.x * 0.7, ey + off.y * 0.7, 'rgba(255,255,255,0)', 1, 0,
+    { life: frames, vx: 0, vy: 0, damp: 1, size: 0.6375, grav: 0 });  // 白镜像 ×0.5（:1310-1320）
 }
 
 /**
@@ -857,9 +969,12 @@ export function orchestraPlayerAnchor(
 // ==================== 杂项族（Keybrand/GasTrap/Shimmer/TownSlime/Leaf/Cattiva/RB 族） ====================
 
 /**
- * Spawn_Keybrand（:3816-3883）：锁匙刃命中三带——①3×金橙 sparkles ②Extra[98] 橙白渐变
- * FadingParticle 对 ③蓝白扩张闪点。生产者 NPC.KeyBrandStrike :82005 clientOnly:false /
- * Player.cs:35153 滑行面 clientOnly:true（后者登记未接）。
+ * Spawn_Keybrand（:3816-3883;1457/1458 同锚）：锁匙刃命中三带——①3×金橙 sparkles
+ * （PrettySparkle num2=3 :3822）②Extra[98] 白化橙渐变 FadingParticle ×3（num2=3 循环步长
+ * 至带后 :3860 才重置 num2=1,:3848-3881——★δB9 曾只发 1 片+臆加白色伴生粒,按原文改 3 片;
+ * 位向偏移=dir(num7)*vector4*vector*num8*0.2=0.7*0.7*30*0.2=2.94px+circular(4,4)×0.7 抖动）
+ * ③Extra[174] 蓝白扩张闪点（num2=1 单粒 :3885-3911）。生产者 NPC.KeyBrandStrike :82005
+ * clientOnly:false / Player.cs:35153 滑行面 clientOnly:true（后者登记未接）。
  */
 export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Math.random): void {
   for (let i = 0; i < 3; i++) {                          // 第一带（:3822-3845）
@@ -869,11 +984,16 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
       orchestraHslCss(0.08 + rng() * 0.03, 1, 0.45), 1, spd,
       { life: 60, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, size: 1.6 });
   }
-  const a2 = rng() * Math.PI * 2;                        // 第二带（:3855-3881）
-  game.spawnParticles?.(x + Math.cos(a2) * 0.7 * 30 * 0.2, y + Math.sin(a2) * 0.7 * 30 * 0.2,
-    fc(1, 0.72, 0.28, 0), 1, 0.7, { life: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 2 });
-  game.spawnParticles?.(x, y, 'rgba(255,244,224,0)', 1, 0.7,
-    { life: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 1.2 });
+  const aBase = rng() * Math.PI * 2;                     // num 重掷（:3852 死步长句后 :3853 重置）
+  for (let k = 0; k < 3; k++) {                          // 第二带 ×3（num2=3 循环 :3855-3881）
+    const a2 = Math.PI * 2 * (k / 3) + aBase + (rng() * 2 - 1) * 0.1;
+    const jitter = circ(rng, 4);                         // vector5=circular(4,4)×vector
+    game.spawnParticles?.(
+      x + Math.cos(a2) * 0.7 * 0.7 * 30 * 0.2 + jitter.x * 0.7,
+      y + Math.sin(a2) * 0.7 * 0.7 * 30 * 0.2 + jitter.y * 0.7,
+      fc(1, 0.72, 0.28, 0), 1, 0.7,
+      { life: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 2 });
+  }
   game.spawnParticles?.(x + circ(rng, 4).x * 0.7, y + circ(rng, 4).y * 0.7,   // 第三带（:3894-3913）
     `rgba(100,143,255,0.5)`, 1, 0,
     { life: 30, grav: -0.02, damp: 0.97, size: 0.35 });
@@ -1048,13 +1168,11 @@ export function chlorophyteLeafCrystalPassiveFx(
 }
 
 /**
- * Spawn_LeafCrystalShot 尾尘近似色桥（hsl(uniqueInfo/255) 与 Gold 按 R/255×0.5 Lerp）
- * ——叶绿代理弹体已自带轨迹 streak 视觉,本函数供派发面/测试对拍（真值 color 公式）。
+ * Spawn_LeafCrystalShot 消费端色桥（=leafSparkleCss 同式委托——δA 后两实现合一,
+ * 防色链分叉;入参=UniqueInfoPiece 载荷字节）。
  */
 export function leafCrystalShotTint(uniqueHueByte: number): string {
-  const base = hexToRgbArr(orchestraHslCss(((uniqueHueByte & 0xff) / 255), 1, 0.5));
-  const col = orchestraLerpRgb(base, { r: 255, g: 215, b: 0 }, (base.r / 255) * 0.5);
-  return `rgb(${col.r},${col.g},${col.b})`;
+  return leafSparkleCss(uniqueHueByte & 0xff);
 }
 
 /**
@@ -1078,7 +1196,8 @@ export function cattivaHitFx(game: GameHooks, x: number, y: number, _moveX = 0, 
 /**
  * Spawn_RainbowBoulder{1..4,PetBounce} 收编（:1506/:1562/:1589/:1435+pet 分支）：
  *  1 环形虹彩对+d66 环流尘×21 / 2 双星平移 / 3 小环列+d267 双层 / 4|pet 尘环+
- *  movementVector 法向 sparkle 对（14/8×d66、20/10 对;pet 味省音）。
+ *  movementVector 轴向 sparkle 反向对（彩带 (sin,-cos)/白 (-sin,+cos),共线反向——
+ *  δB10 修正后;14/8×d66、20/10 对;pet 味省音）。
  * 生产者：P.cs:20298(RB1 天基寻宝 clientOnly:true)/TileDrawing :6989(:6996)(RB3/RB2
  * 虹砖 ambience)/:20349 RB4 跃迁(clientOnly:false)放置面/50709 PetBounce——仓内锚
  * 在场性差异见登记。
@@ -1102,13 +1221,19 @@ export function rainbowBoulderFx(
     }
     const ribbons = pet ? 10 : 20;
     const rotN = Math.atan2(moveY, moveX) + Math.PI / 2;
+    // ★δB10：彩带 Velocity=(0,-1).RotatedBy(num5)=(sin num5,-cos num5)、白镜像=
+    // (0,1).RotatedBy(num5)=(-sin num5,cos num5)=同一轴上反向共流（P.cs:1478/:1493,
+    // 1457/1458 同锚）——曾用 (cos,sin)/(−sin,cos) 对子成错 90° 垂直轴
+    const sxn = Math.sin(rotN), csn = Math.cos(rotN);
     for (let r = 0; r < ribbons; r++) {
       void r;
-      const lifeT = ((rng() * 20) | 0) + 20;
-      game.spawnParticles?.(x + circ(rng, pet ? 6 : 10).x, y + circ(rng, pet ? 6 : 10).y,
-        hslRand(), 1, 1, { life: lifeT, vx: Math.cos(rotN), vy: Math.sin(rotN), damp: 1, grav: 0, size: 1.7 });
-      game.spawnParticles?.(x, y, 'rgba(255,255,255,0.4)', 1, 1,
-        { life: lifeT, vx: -Math.sin(rotN), vy: Math.cos(rotN), damp: 1, grav: 0, size: 0.85 });
+      const lifeT = ((rng() * 20) | 0) + 20;             // num7=Next(20,40)（:1477 两粒共享）
+      const pc = circ(rng, pet ? 6 : 10);                // 彩带位=rect(num4) 盒内随机（:1475）
+      game.spawnParticles?.(x + pc.x, y + pc.y,
+        hslRand(), 1, 1, { life: lifeT, vx: sxn, vy: -csn, damp: 1, grav: 0, size: 1.7 });
+      const pw = circ(rng, pet ? 6 : 10);                // 白镜像位独立盒内随机（:1490）——曾钉死 x,y
+      game.spawnParticles?.(x + pw.x, y + pw.y, 'rgba(255,255,255,0.4)', 1, 1,
+        { life: lifeT, vx: -sxn, vy: csn, damp: 1, grav: 0, size: 0.85 });
     }
     return;
   }

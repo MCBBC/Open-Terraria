@@ -74,9 +74,6 @@ describe('Player 坐椅消费（isLockedToATile :3858-3868 / 回血 :19053-19056
 
 // 睡床锚点（GetSleepingTargetInfo SH:193-224 + StartSleeping :156-191，2026-08-17
 // 渲染错位修复批）：Bottom=anchor，anchor=(床段左列+方向列偏移, 行+1)·ToWorld(8,16)
-import { World } from '../src/world/World';
-import { TILE_BY_KEY } from '../src/data/tiles';
-
 describe('睡床锚点（GetSleepingTargetInfo :193-224）', () => {
   it('朝右床（frameX=72 列）：anchor = (左列+2, 行+1)·16+(8,16)，Bottom 落锚', () => {
     // 铺一张 4×2 床：frameX 72..126（列位 1=朝右），frameY 0/18
@@ -115,8 +112,6 @@ describe('睡床锚点（GetSleepingTargetInfo :193-224）', () => {
 });
 
 // 睡眠物理锁 + 输入起床（SH:103-105 + isLockedToATile :3858-3868，2026-08-17 复查批）
-import { Inventory } from '../src/items/Inventory';
-import { Player } from '../src/entities/Player';
 
 function sleepPlayer(): { p: Player; hooks: import('../src/entities/types').GameHooks } {
   const store = new TileStore(40, 30);

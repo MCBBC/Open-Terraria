@@ -168,6 +168,19 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
 
+  /** 角色贴图预载（2026-08-28 用户要求“确保角色贴图加载完整再进入世界”）：
+   *  按角色档案实际外观预载 Player_ 通道/发型——读档/导入路径 makeGame 时
+   *  selectedAppearance 可能为空,preloadSceneAssets 曾按默认 v0 预载 → 首帧
+   *  sheetRect 回退 Player_0 初始贴图一闪而过。await 就绪后才 loadWorld */
+  async function ensureCharAppearanceFiles(): Promise<void> {
+    const g = game;
+    if (!g) return;
+    const cid = charContextId();
+    const cs = cid != null ? await charStore.getState(cid) : null;
+    const app = cs ?? selectedAppearance ?? null;
+    await g.ensureAppearanceFiles(app);
+  }
+
   // 隐藏文件输入（DOM 能力，VUI 按钮触发）
   // E2E/控制台调试:直接加载存档 JSON 文本(菜单阶段可用,绕过设置面板 file input)
   (window as unknown as { __swLoadJson?: (t: string) => Promise<void> }).__swLoadJson = (t: string) => loadFromJson(t);
@@ -563,6 +576,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
           });
           const g = makeGame();
+          await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
@@ -605,6 +619,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           });
           __m('load.roundtrip.end');
           const g = makeGame();
+          await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
           __m('load.makeGame.done');
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
@@ -628,6 +643,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const { world, player, data } = loadSave(text);
       applyDifficultyFallback(world, data);
       const g = makeGame();
+      await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
       const loadState = new UIWorldLoadState();
       VUI.setState(loadState);
       loadState.setProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);

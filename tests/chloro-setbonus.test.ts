@@ -18,9 +18,10 @@ import { BuffType } from '../src/stats/Buffs';
 import { ARMOR_SET_BONUSES } from '../src/data/vanillaArmorSets';
 import {
   ChloroLeafCrystalAnchor, ChloroLeafShot,
-  CHLORO_LEAF_DAMAGE, CHLORO_LEAF_KB, getChaseResults,
+  CHLORO_LEAF_DAMAGE, CHLORO_LEAF_KB, CHLORO_LEAF_SHOT_SIZE, getChaseResults,
 } from '../src/entities/ChloroLeafCrystalProj';
 import { damageVarRoll } from '../src/stats/DamageVar';
+import { leafTrailInfoByte, leafSparkleCss } from '../src/fx/orchestraFx';
 
 const iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
 
@@ -407,5 +408,128 @@ describe('getChaseResults 数值锚（Utils.cs:651-692）', () => {
   it('重合特例（InterceptionHappens=true + ChaserVelocity Zero,:656-664）', () => {
     const r = getChaseResults(10, 10, 2160, 10, 10, 3, 4);
     expect(r).toEqual({ happens: true, time: 0, vx: 0, vy: 0 });
+  });
+});
+
+// ============================================================
+// ⑧ δA 复查批清偿断言（2026-08-31 蓝队单条群）
+//    ① 幻影暴击面 ② 首命中即截断 ③ type17 三段式载荷锚
+//    ④ 出生中心=锚+(3,7) ⑤ 边界原值判定（疑② 蠕虫段体粒度=引擎层备案,无运行时锚）
+// ============================================================
+describe('δA 清偿批：叶弹 227 暴击/穿透/坐标/边界/色链（Terarria1458 对账）', () => {
+  /** 无敌怪/可注入敌怪桶最小 hooks（broadcast/spawnParticles 面可观测） */
+  function shotHooks(w?: World, enemies: unknown[] = []): Record<string, unknown> & {
+    broadcastParticleOrchestra: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      enemies: () => enemies,
+      world: w ?? mkWorld(),
+      player: new Player(200, 500, new Inventory()),
+      spawnDust: vi.fn(),
+      playSfxWav: vi.fn(),
+      bannerNpcActive: () => false,
+      broadcastParticleOrchestra: vi.fn(),
+      spawnParticles: vi.fn(),
+    };
+  }
+
+  it('δA① critChance===0 永不暴击——随机掷恒 0（原 0.04 必暴面）不得出现 crit=true（P.cs:12932-12945 三旗掷+SetDefaults :3126-3137 无类别旗）', () => {
+    const shot = new ChloroLeafShot(400, 400, 12, 0);
+    expect(shot.critChance).toBe(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0);          // 任何未撤的 crit 面都会命中掷
+    const victim = { x: 388, y: 388, w: 24, h: 42, id: 777, dead: false,
+      vanillaId: 21, hurt: vi.fn(() => true) };
+    const g = shotHooks(undefined, [victim]);
+    shot.fixedUpdate(1 / 60, g as never);
+    const args = victim.hurt.mock.calls[0] as unknown[];
+    expect(args[5]).toBe(false);                            // crit 形参恒 false
+    const expDmg = Math.max(1, Math.round(damageVarRoll(CHLORO_LEAF_DAMAGE, 0)));
+    expect(args[0]).toBe(expDmg);                           // ×2 暴击乘区绝不并入
+  });
+
+  it('δA② 重叠双怪一拍只伤桶序首个（keepIterating=false 截断映射,Damage_PVE_Inner :14186-14201/:12592）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const v1 = { x: 400, y: 414, w: 24, h: 42, id: 771, dead: false, vanillaId: 21, hurt: vi.fn(() => true) };
+    const v2 = { x: 408, y: 414, w: 24, h: 42, id: 772, dead: false, vanillaId: 21, hurt: vi.fn(() => true) };
+    const g = shotHooks(undefined, [v1, v2]);
+    const shot = new ChloroLeafShot(412, 421, 0, 0);        // 盒 [405..419]×[414..428]
+    // 自检:两怪确实都与弹盒相交（旧行为会同拍连吃两份伤害）
+    const overlap = (v: typeof v1): boolean =>
+      shot.x < v.x + v.w && shot.x + shot.w > v.x && shot.y < v.y + v.h && shot.y + shot.h > v.y;
+    expect(overlap(v1)).toBe(true);
+    expect(overlap(v2)).toBe(true);
+    shot.fixedUpdate(1 / 60, g as never);
+    expect(v1.hurt).toHaveBeenCalledTimes(1);               // 桶序首个受击
+    expect(v2.hurt).not.toHaveBeenCalled();                 // 截断后不遍历后继敌怪
+    expect(shot.dead).toBe(true);
+  });
+
+  it('δA③ type17 载荷三段式数值锚（P.cs:28282-84 全链→(byte) 截断;消费端 :3139-46 还原）', () => {
+    // 数值锚（wrap 多圈:(−6×0.85)/180 ≈ 每 35.3t 循环一周）
+    expect(leafTrailInfoByte(180)).toBe(83);   // 出生 num330=0.33 纯绿带（round 会得 84）
+    expect(leafTrailInfoByte(150)).toBe(77);   // round 会得 78
+    expect(leafTrailInfoByte(120)).toBe(55);   // remap 带尾蓝段（round 会得 56）
+    expect(leafTrailInfoByte(90)).toBe(66);    // num330=0.78 → Red 压满 → LimeGreen/Gold 混色
+    expect(leafTrailInfoByte(45)).toBe(69);
+    expect(leafTrailInfoByte(15)).toBe(58);
+    // 广播载荷与本地渲染同一字节面（两端一致=bug③ 口径）;消费端终色直值：
+    expect(leafSparkleCss(leafTrailInfoByte(180))).toBe('rgb(18,254,0)');
+    expect(leafSparkleCss(66)).toBe('rgb(146,246,0)');
+    expect(leafSparkleCss(55)).toBe('rgb(206,241,0)');
+  });
+
+  it('δA③b trailStep 广播即该字节——type17 四站采样全对拍（u∈{0,45,90,135}）', () => {
+    const g = shotHooks();
+    const shot = new ChloroLeafShot(1200, 1280, 0, 0);      // 世界中腹零速 → 全寿命走完
+    shot.fixedUpdate(1 / 60, g as never);
+    const calls = g.broadcastParticleOrchestra.mock.calls.filter((c: unknown[]) => c[0] === 17);
+    expect(calls.length).toBe(4);
+    for (let k = 0; k < 4; k++) {
+      expect(calls[k][5]).toBe(leafTrailInfoByte(180 - 45 * k));   // trailStep 先于子步递减
+    }
+    expect(calls[0][5]).toBe(83);                           // 出生字节直面锚
+  });
+
+  it('δA④ spawnChloroLeafShot 形参=NewProjectile position(top-left)（:28253 Center.X−4f）→ 实际中心=top-left+(7,7)', () => {
+    const g = Object.create(Game.prototype) as unknown as {
+      player: Player;
+      entities: { add: (e: unknown) => void };
+      spawnChloroLeafShot: (this: unknown, x: number, y: number, vx: number, vy: number) => void;
+    };
+    g.player = new Player(200, 300, new Inventory());
+    const added: unknown[] = [];
+    g.entities = { add: (e: unknown): void => { added.push(e); } };
+    (g.spawnChloroLeafShot as (x: number, y: number, vx: number, vy: number) => void)
+      .call(g, 400, 300, 12, 3);
+    const s = added[0] as ChloroLeafShot;
+    expect(s.cx).toBe(400 + CHLORO_LEAF_SHOT_SIZE / 2);     // 锚 center+(+3,+7)
+    expect(s.cy).toBe(300 + CHLORO_LEAF_SHOT_SIZE / 2);
+    expect(s.damage).toBe(CHLORO_LEAF_DAMAGE);
+    expect(s.knockback).toBe(CHLORO_LEAF_KB);
+    expect(s.projId).toBe(227);
+  });
+
+  it('δA⑤ 世界边界原值判定（leftWorld=0/rightWorld=tiles×16,P.cs:16787+Main.cs:1080-1086）——旧 ±16px 内缩带内全程存活', () => {
+    // 左缘贴边 8px（<16 内缩带;旧门 x<=16 即刻截杀 → lifeT 冻 180 且零广播）
+    const gL = shotHooks();
+    const left = new ChloroLeafShot(CHLORO_LEAF_SHOT_SIZE / 2 + 8, 1280, 0, 0);
+    left.fixedUpdate(1 / 60, gL as never);
+    expect(left.dead).toBe(true);
+    expect(left.lifeT).toBeLessThanOrEqual(0);              // 寿命耗尽路径=边界从未触发
+    expect(gL.broadcastParticleOrchestra.mock.calls.filter((c: unknown[]) => c[0] === 17).length).toBe(4);
+    // 右缘对称:x+w 距 rightWorld 8px 同样全程存活
+    const w = mkWorld();
+    const twPx = w.store.w * 16;
+    const gR = shotHooks(w);
+    const right = new ChloroLeafShot(twPx - CHLORO_LEAF_SHOT_SIZE / 2 - 8, 1280, 0, 0);
+    right.fixedUpdate(1 / 60, gR as never);
+    expect(right.dead).toBe(true);
+    expect(right.lifeT).toBeLessThanOrEqual(0);
+    // 出界仍必须死（新门原值判定生效）：left edge 逐子步越界于第 3 子步截杀
+    const gOut = shotHooks();
+    const out = new ChloroLeafShot(30, 1280, -12, 0);
+    out.fixedUpdate(1 / 60, gOut as never);
+    expect(out.dead).toBe(true);
+    expect(out.lifeT).toBeLessThanOrEqual(178);             // 旧门会在第 2 子步截杀(lifeT=179)
   });
 });

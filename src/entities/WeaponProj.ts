@@ -919,9 +919,14 @@ export class Boomerang extends Entity {
       dropThrough: true,
     };
     moveAndCollide(body, game.world, lvx, lvy);
+    // ★1:1 决策落地(2026-09-01):接触判定与原版 HandleMovement 外门同构 =
+    // 【lastVelocity != velocity】(P.cs:18007)——slopeCollide 贴附等速度编辑同样计入。
+    // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
+    // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
+    const chX = body.vx !== lvx, chY = body.vy !== lvy;
     this.x = body.x; this.y = body.y;
     this.vx = lvx; this.vy = lvy;
-    const hitX = body.hitWall, hitY = body.collideY;
+    const hitX = chX, hitY = chY;
     if (!hitX && !hitY) return;
     if (WALL_BOUNCE_PROJ.has(this.projId)) {
       // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
@@ -2115,27 +2120,39 @@ export class CounterweightProj extends Entity {
         (e) => this.onHit(e), undefined, true);   // 玩家级共享免疫（aiStyle 99 同族）
       return;
     }
-    // 移动/碰撞（环绕与脱离态;回收态上方已直积分返回）
+    // 移动/碰撞（环绕与脱离态;回收态上方已直积分返回）。
+    // ★1:1 决策落地(2026-09-01):aiStyle99 反射链(P.cs:18509-18552)以【速度被改】
+    // 差分判轴——此前旗标口径撤销。body 视图取差分;dropThrough 按 :17661 原文 =
+    // 仅脱离态(ai[0]==-2)FALSE(下坠撞平台),环绕/其余恒 TRUE(弹体 fallThrough 缺省)。
     const lvx = this.vx, lvy = this.vy;
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    const cwBody = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: !(this.ai0 === -2),
+    };
+    moveAndCollide(cwBody, game.world, lvx, lvy);
+    const chX = cwBody.vx !== lvx, chY = cwBody.vy !== lvy;
+    this.x = cwBody.x; this.y = cwBody.y; this.vx = cwBody.vx; this.vy = cwBody.vy;
     if (this.ai0 === -2) {
-      // 脱离态撞块（:16988-17006；1457 :69152-69160 定向自转门并入 554 Kraken）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
-      // SoundID 0 + Kill（配重 AI_099_1——1457 的 554 定向自转门仅 AI_099_2 本体）
-      if ((this.onGround || this.hitHead) && lvy > 4) this.vy = -lvy * 0.6;
-      if (this.hitWall) {
+      // 脱离态（:18513-18525）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞差分 → HitTiles 尘 +
+      // SoundID 0 + Kill
+      if (chY && lvy > 4) this.vy = -lvy * 0.6;
+      if (chX) {
         game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });   // HitTiles 尘
         game.playSfx('dig', 1, this.cx, this.cy);   // SoundID 0
         this.dead = true;
         return;
       }
-    } else if (this.hitWall || this.onGround || this.hitHead) {
-      // 环绕态撞块（:17005-17028）：逐轴反转 + 朝玩家合成 0.25 + 速度钳 6
-      if (this.hitWall) this.vx = -lvx;
-      if (this.onGround || this.hitHead) this.vy = -lvy;
+    } else if (chX || chY) {
+      // 环绕态（:18527-18547）：逐轴全反射(-lastV) + 任一轴反射后向玩家合成
+      // v2=norm(p-c)*|v|×0.25、velocity×0.75+v2、|v|>6 再 ×0.5
+      if (chX) this.vx = -lvx;
+      if (chY) this.vy = -lvy;
       let hx = p.cx - this.cx, hy = p.cy - this.cy;
       const hd = Math.hypot(hx, hy) || 1;
       const spd = Math.hypot(this.vx, this.vy);
-      hx = hx / hd * spd * 0.25;   // v *= velocity.Length() × 0.25
+      hx = hx / hd * spd * 0.25;   // v2 *= velocity.Length() × 0.25(SafeNormalize(UnitY) 兜底)
       hy = hy / hd * spd * 0.25;
       this.vx = this.vx * 0.75 + hx;
       this.vy = this.vy * 0.75 + hy;
@@ -3316,8 +3333,8 @@ export class FlailProj extends Entity {
     // （Update 序:AI 先行/TileCollision 随后,AI_015_HandleMovementCollision 于 :19437
     // 后置调用）。此前 bespoke 全格扫描在斜砖/半砖上重演「几何空区被判实心」的帧0互锁
     // （Boomerang 三批同病）;2026-09-01 改走 moveAndCollide 正典管线:
-    //   · 命中轴判定 = 管线 hitWall/collideY 旗标(纯 tile 拦截才计撞)。原版差分会把
-    //     slopeCollide 贴附等速度编辑一并计数——此处保守口径排除,登记差异
+    //   · 命中轴判定 =【速度被改】差分(1:1 决策落地,与 :44471/:44477 同构,
+    //     slopeCollide 贴附速度编辑同样计入——曾旗标保守口径,决策后撤销)
     //   · 命中轴覆写为 -lastV×rest(:44478/:44484 反射式),bounces++ 每次 tick 全计
     //   · dropThrough=true(弹体 fallThrough 缺省 true)/旋转态由 AI 钉位不进本支/
     //     回收态 st==4 由外层 continue 跳过 → tileCollide 恒 true 进管线
@@ -3333,7 +3350,10 @@ export class FlailProj extends Entity {
         tileCollide: true, dropThrough: true,
       };
       moveAndCollide(body, world, lvx, lvy);
-      const chX = body.hitWall, chY = body.collideY;
+      // ★1:1 决策落地(2026-09-01):命中轴判定与原版完全同构 = 【速度被改】差分
+      //   (:44471 velocity.X != lastVelocity.X)——slopeCollide 贴附等速度编辑同样
+      //   计入(原版即如此),此前旗标保守口径撤销。管线不动未拦截轴 ⇒ 精确相等无幻影。
+      const chX = body.vx !== lvx, chY = body.vy !== lvy;
       this.x = body.x; this.y = body.y;
       this.vx = lvx; this.vy = lvy;
       if (chX) {
@@ -4518,6 +4538,7 @@ export class GlowstickProj extends Entity {
         if (hitY) this.vy = lastVy > 1 ? lastVy * -0.5 : 0;
       }
     }
+    if (this.vy > 16) this.vy = 16;   // 原版落端钳制（P.cs:25623-25626 终速 16f）
     this.x = nx; this.y = ny;
   }
 }

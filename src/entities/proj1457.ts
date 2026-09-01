@@ -255,6 +255,12 @@ export function dealContacts(
    *  flag3——无视免疫帧且命中不设帧（Projectile.cs:11903-11907）。叶弹 227 台账 L3
    *  清偿批同段引用（ChloroLeafCrystalProj.ts） */
   hitPierce = 0,
+  /** ★δA bug②（2026-08-31 蓝队单条群）：maxPenetrate==1 首命中即截断——keepIterating
+   *  语义映射（Damage_PVE_Inner :14186-14201：penetrate>0 逐击递减，减至 0 时
+   *  keepIterating=false；Damage_PVE for 循环条件 `(i < maxNPCs) & keepIterating`
+   *  :12592 ⇒ 同拍重叠多怪只结算【桶序首个】，随后弹亡再无第二目标）。叶弹 227
+   *  调用侧启用（其一拍 181 子步全路径扫掠,每子步只允许一次命中结算面） */
+  stopAfterFirstHit = false,
 ): void {
   cd.tick();
   for (const ent of game.enemies()) {
@@ -303,6 +309,7 @@ export function dealContacts(
     // 命中回写共享表（StrikeNPC :14343 SetMeleeHitCooldown——玩家挥击弧同帧不再结算）
     gate?.sharedHits?.add(e.id);
     onHit?.(ent as unknown as HitTarget);
+    if (stopAfterFirstHit) return;       // keepIterating=false（:14200——首命中即止,同拍不再遍历后继敌怪）
   }
 }
 

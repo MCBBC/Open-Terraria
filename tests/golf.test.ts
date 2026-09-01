@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { stepGolfBall, golfPhysicsForTile, BallState, type GolfTileMap } from '../src/world/golf/golfPhysics';
 import { GolfState, GolfBallTrackRecord, type GolfBallHandle } from '../src/world/golf/GolfState';
 import { golferShopScoreGates } from '../src/world/golf/golferShop';
-import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../src/entities/GolfBall';
+import { GolfBall, GOLF_CLUBS, GOLF_TRAIL_CACHE_LEN, golfShot, golfBallInStance } from '../src/entities/GolfBall';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { saveGame, loadSave } from '../src/save/SaveFile';
@@ -397,6 +397,34 @@ describe('球体 AI_149 与球座（tile 494）', () => {
     b.clubHit(10, -5, 0, null);
     expect(b.swings).toBe(3);
     expect(b.vx).toBe(10); expect(b.vy).toBe(-5);
+  });
+
+  it('[G3]IsGolfBallResting 弱判定（GolfHelper.cs:404）：Moving 态与窗尾位移 <1px 判静', () => {
+    const restHist = (b: GolfBall): Array<{ x: number; y: number }> =>
+      (b as unknown as { restHist: Array<{ x: number; y: number }> }).restHist;
+    // 强支短路：localAI[1]==0（Resting 枚举）恒真（GolfHelper.cs:406）
+    expect(new GolfBall(0, 0, 721, () => owner).atRest).toBe(true);
+    // clubHit 转 Moving（localAI[1]=1）后走弱支
+    const b1 = new GolfBall(100, 100, 740, () => owner);
+    b1.clubHit(3, 0, 0, null);
+    // 窗未满(<20)：原版尾槽尚为 Vector2.Zero → Distance(position, Zero) ≫ 1px ⇒ 未静
+    for (let i = 0; i < GOLF_TRAIL_CACHE_LEN - 1; i++) restHist(b1).push({ x: b1.x + 0.05 * i, y: b1.y });
+    expect(b1.atRest).toBe(false);
+    // 窗满 + 窗尾距当前位置 <1px ⇒ 判静（滚动末段：尾迹消失 + 瞄准白圈提前亮）
+    restHist(b1).length = 0;
+    for (let i = 0; i < GOLF_TRAIL_CACHE_LEN; i++) {
+      restHist(b1).push({ x: b1.x - 0.5 * (GOLF_TRAIL_CACHE_LEN - i) / GOLF_TRAIL_CACHE_LEN, y: b1.y });
+    }
+    expect(Math.hypot(b1.x - restHist(b1)[0].x, 0)).toBeCloseTo(0.5, 9);
+    expect(b1.atRest).toBe(true);
+    // 窗满但窗尾 ≥1px ⇒ 未静（真滚动中）
+    const b2 = new GolfBall(200, 200, 748, () => owner);
+    b2.clubHit(5, 0, 0, null);
+    for (let i = 0; i < GOLF_TRAIL_CACHE_LEN; i++) {
+      restHist(b2).push({ x: b2.x - 3 * (1 - i / GOLF_TRAIL_CACHE_LEN), y: b2.y });
+    }
+    expect(Math.hypot(b2.x - restHist(b2)[0].x, 0)).toBeGreaterThanOrEqual(1);
+    expect(b2.atRest).toBe(false);
   });
 });
 

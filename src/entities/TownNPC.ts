@@ -3257,6 +3257,16 @@ export class TownNPC extends Entity {
       if (!solidRange(ax - dir * 2, ax, fy - 3, fy - 1)) this.vy = -4.4;
       else if (this.dangerNear) { freeze = true; turn = true; }
       else turn = true;
+    } else if (t5 && shortBody && !t4 && !t3 && this.h >= 34) {
+      // ★楣阻档（2026-09-01 染料商楔死定谳补装）：仅头顶行实心而胸/脚行全空且
+      // 本体高≥34px(物理上无法通过仅两空行的开口)——原版此形态三档全不受理
+      // （tier1 门含 flag25 矮个需 t4 同实心），按字面移植会让顶楣行走被横碰撞
+      // 逐拍吞速→0.07px/tick 微爬+腿程耗尽前永不折返；本仓高频几何=头顶一行
+      // 的门楣/檐口。以兄弟支「不可进则转身」(flag26)语义收尾——登记性偏离
+      // （原版无对应 branch，参照 ：54604-54608 折返面），不加跳、不动 cornered；
+      // 危险中同兄弟支叠冻结。小型宠物(h<34)可钻低拱，不受理。
+      if (this.dangerNear) { freeze = true; }
+      turn = true;
     } else if (avoidFalling) {
       // 前视避坠命中（:54575-54579）：无障碍但前方是坑/岩浆/深水 → 转身
       // （flag24 溺水跳出时例外——跳出当帧不转身）；危险中叠冻结
