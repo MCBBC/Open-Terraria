@@ -402,6 +402,8 @@ import { TitaniumStormShard,
 // canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
 import { ChloroLeafCrystalAnchor, ChloroLeafShot,
   CHLORO_LEAF_SHOT_SIZE, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
+// 山铜套装 on-hit 花瓣弹 221（终零波批,2026-09-01——Player.OnHit :6963-6985）
+import { OrichalcumPetal } from '../entities/OrichalcumPetalProj';
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
 import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, blockedChestFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
@@ -1120,6 +1122,19 @@ export const REUSE_DELAY_TICKS: Record<number, number> = {
 export function reuseDelayOf(vid: number): number {
   return REUSE_DELAY_TICKS[vid] ?? 0;
 }
+/** 玩家出生点 failover 核（纯函数，tests/finalzero-game-domain 直测）——
+ *  Player.Spawn :37851-37858 的「床点 vs 世界初始」两源复验式：
+ *  · 未设床（当前==初始）→ 直接初始（床位面未启用）
+ *  · 设了床且 CheckSpawn 通过 → 床点
+ *  · CheckSpawn 不通过 → 初始出生点（SpawnX=SpawnY=-1 复位支 :37855，存档旗保留）
+ *  revalidate = Game.checkBedSpawn 注入面（null=通过 / ''·文案键=失败）。 */
+export function resolveSpawnPoint(
+  curX: number, curY: number, origX: number, origY: number,
+  revalidate: (x: number, y: number) => null | '' | string,
+): [number, number] {
+  if (curX === origX && curY === origY) return [origX, origY];   // 无床设
+  return revalidate(curX, curY) === null ? [curX, curY] : [origX, origY];
+}
 /** R26 GAP-03 spray 周期计划（纯函数，tests/redblue-r26 直测）：
  *  useTime < useAnimation 的连射族一动画窗内发数 = 1+⌊(A−1)/U⌋（首发 t=0、续发
  *  t=kU 且 kU≤A−1——itemAnimation>0 门，红队 §1.1 精确式；⌈A/U⌉ 同值），
@@ -1409,6 +1424,10 @@ export interface GameCallbacks {
   onAutoSave?: () => void;
   /** 配装热键切换（Loadout1/2/3）——UI 侧播切套白闪（GetColorByLoadout :2554） */
   onLoadoutSwitched?: (k: 0 | 1 | 2) => void;
+  /** ★Q-F9 槽级 blocked 回执（QuickStacking.cs:360-363 RestoreToPlayer flag 支 →
+   *  ItemSlot.IndicateBlockedSlot :527 红脉冲 40t）——参数=源件槽号
+   *  （quickStackToChests().blockedSlots），流程层接 UI.indicateBlockedSlots */
+  onQuickStackBlockedSlots?: (slots: number[]) => void;
 }
 
 /** Main.time 口径换算已上移为 Clock.vanillaMainTime（World.ts；原版分段计时,
@@ -3997,12 +4016,17 @@ export class Game implements GameHooks {
         const digit = /^Digit([0-9])$/.exec(code);
         if (digit) {
           this.player.inv.selected = digit[1] === '0' ? 9 : Number(digit[1]) - 1;
+          // SelectedItemState.Select（Player.cs:498-499）：换栏清 AFK 两计数
+          //（afkCounterForKiting 未建模,见 Player.afkCounter 注）
+          this.player.afkCounter = 0;
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarMinus', code)) {
           this.player.inv.selected = (this.player.inv.selected + 9) % 10;
+          this.player.afkCounter = 0;              // Select(:498) 同款清零
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarPlus', code)) {
           this.player.inv.selected = (this.player.inv.selected + 1) % 10;
+          this.player.afkCounter = 0;              // Select(:498) 同款清零
           this.cb.onInventoryChanged();
         }
       }
@@ -5704,6 +5728,8 @@ export class Game implements GameHooks {
         }
       }
     }
+    // 快速堆叠演示锁窗（HasLockedInventory 读面,终零波）——演示窗内重按不重入
+    if (this.quickStackLockTicks > 0) this.quickStackLockTicks--;
     // HitTile 衰减不再走墙钟——原版 Prune 挂在每次非零伤害挥击后
     //（Player.cs:45083/:45150/:45351/:52902，见 pruneHitTiles/HitTile.cs 文件头），
     // 离手进度冻结、被后续挥击逐击衰减
@@ -6095,6 +6121,10 @@ export class Game implements GameHooks {
       player.inputDown = inp.downAction('Down');
       player.inputUp = inp.downAction('Up');
     }
+    // controlTorch（TriggersSet.cs:794）：火把键电平——与智能选取同源绑定
+    // （updateSmartSelect 同式）；消费=AFK 计数门六键之一（Player.cs:25692）
+    player.inputTorch = this.spectatingSlot >= 0 ? false
+      : (inp.downAction('SmartSelect') && !(this.renderer?.fullMap?.open ?? false));
     // 坐骑能力输入（钻头坐骑 8 专用：ItemCheck_HandleMount :52066-52081）：
     // 鼠标世界坐标（AimAbility 的 crosshair）+ 左/右键电平 + 按压边沿
     //（releaseUseItem&&releaseUseTile = 上 tick 双松 + 本 tick 任一按下）
@@ -7180,7 +7210,7 @@ export class Game implements GameHooks {
             // OnGameEventClearedForTheFirstTime 首杀翻转门内 →
             // WorldGen.GeneratePlanteraBulbOnAllMechsDefeated：netMode!=1 &&
             // hardMode && 三旗齐——★补 !wasDowned：原版只在旗标首次翻转那杀
-            // 生成（重复杀不超发灯泡，此前每杀都 burst，2026-08-18 修）
+            // 生成（重复杀不超发花苞，此前每杀都 burst，2026-08-18 修）
             if ((ev === 16 || ev === 17 || ev === 18) && !wasDowned && w.flags.hardMode
               && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
               this.evolution.planteraBulbBurst();
@@ -8617,6 +8647,18 @@ export class Game implements GameHooks {
     return Math.max(base, this.swing?.dur ?? 0);
   }
 
+  /** UsingOrReusingItem（1458 Player.cs:4052-4061）：动画/后摇/channel 任一在途即真；
+   *  全空时退读 pendingItemReuse——autoReuse 武器「归零拍→下一拍重施」间隙的
+   *  短窗仍算「正在用」。本仓映照：swing=itemAnimation 在途 ∪ useTime=itemTime
+   *  在途 → 真；swing 已空时读 player.pendingItemReuse。
+   *  ★偏差登记：①reuseDelay>0 恒真支——本仓 reuseDelay 并入 swing.dur（useSwing 尾），
+   *  同由 !!this.swing 覆盖；②channel 无独立全局旗——channel 组件按持械续发维持
+   *  swing 重启（useStyle5 channel 族），归入第一条；两者均与原版同可观测结果。 */
+  usingOrReusingItem(): boolean {
+    if (this.player.useTime > 0 || this.swing) return true;
+    return this.player.pendingItemReuse === true;   // :4058 return pendingItemReuse
+  }
+
   /** 药水病分档（Player.cs:51085-51120 ApplyPotionDelay + Item.cs:70-76 常量）：
    *  月光药水 3001 → 随机 2400-4200t（Next(2400,4201)）且当次吃贤者石乘区；
    *  恢复药水 227/126 → restorationDelay 2700t(45s)；蛋奶酒 1912 → eggnogDelay
@@ -9377,10 +9419,11 @@ export class Game implements GameHooks {
     const host: SmartSelectHost = {
       selected: p.inv.selected,
       hotbar: this.smartSelectHotbar,
-      canChangeImmediately: !this.swing && p.useTime === 0,
-      // CanChangeSelectedItemImmediately（Player.cs:386-393）：itemAnimation/itemTime 空——
-      // 本作 swing = itemAnimation、player.useTime = itemTime；reuseDelay/channel/
-      // pendingItemReuse 未实装
+      canChangeImmediately: this.usingOrReusingItem() ? false : p.useTime === 0,
+      // CanChangeSelectedItemImmediately（1458 Player.cs:415-421）：!UsingOrReusingItem
+      // && ItemTimeIsZero——本作 swing = itemAnimation、player.useTime = itemTime；
+      // pendingItemReuse（autoReuse 动画归零拍旗）与 channel/reuseDelay 语义见
+      // usingOrReusingItem 注（终零波 补档,旧"pendingItemReuse 未实装"登记销核）
       isSlotEmpty: (i) => !p.inv.slots[i],
       onSelectionChanged: () => this.cb.onInventoryChanged(),
     };
@@ -9460,6 +9503,9 @@ export class Game implements GameHooks {
 
   private updateUse(_dt: number) {
     const inp = this.input;
+    // pendingItemReuse 复位（ItemCheck :42921 函数头 `pendingItemReuse = false`）：
+    // 该旗只在「归零拍 → 本函数下一拍」窗口为真（updateSwingHits 归零拍写真）
+    this.player.pendingItemReuse = false;
     this.tryFaceHeldAim();
     // 住房光标激活（mouseNPC 持续态,Main.cs:44664-44688）：左键点世界 = 查询/
     // 分配并吞点击；右键/开背包取消由 UI 侧处理（清 housingMode + Sound 12）
@@ -11211,15 +11257,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           consume(); p.useTime = 30; this.sfx.play('drink');
           break;
         }
-        case 4870: // 回归药水(:42462):传送出生点(床/回归点 stash 未实装→出生点近似,偏差记录)
+        case 4870: {
+          // 回归药水（1458 P.cs:43470 区 itemTime==20 →
+          // DoPotionOfReturnTeleportationAndSetTheComebackPoint :37780-37792）：
+          // Spawn(PlayerSpawnContext.RecallFromItem) 等价面——出生点源走共享解析
+          // resolvePlayerSpawnPoint()（床点→CheckSpawn 复验→初始出生点 failover，
+          // 与 respawnPlayer 同一读口，终零波「床/回归点 stash 未实装」登记销核；
+          // CheckSpawn 门接入后床被拆/房间破坏时不再嵌回失效床点）。原版前后还
+          // RemoveAllGrapplingHooks + immune/immuneTime 存取回存（净效果=免疫窗不变）
+          // + PotionOfReturn{Original,Home}Position 双锚——双锚的消费端（返回腿
+          // DoPotionOfReturnReturnToOriginalUsePosition）在 1458 全树无调用方、仅渲染/
+          // 地图图标读取 → 本仓不建死状态（引擎无对应消费位,登记）。
           this.sfx.play('drink');
-          p.x = this.world.spawnX * TILE + 8;
-          p.y = (this.world.spawnY - 3) * TILE;
-          p.vx = 0; p.vy = 0;
+          p.removeAllGrapplingHooks();                      // :37782（召回前收钩爪）
+          const [rx, ry] = this.resolvePlayerSpawnPoint();
+          p.x = rx * TILE + 8;                              // Spawn_SetPosition 放置口径
+          p.y = (ry - 3) * TILE;
+          p.vx = 0; p.vy = 0;                               // Spawn :37919 ResetFallDamage+vel 清零
+          p.sleeping = false;
           this.camera.x = p.cx; this.camera.y = p.cy;
-          this.recallDust(p, 70, true);
+          this.recallDust(p, 70, true);                     // TeleportEffect 尘（:43483-43484 七十粒）
           consume(); p.useTime = 30;
           break;
+        }
         case 678: { // 红药水（Player.cs:42205-42284）：惩罚彩蛋件——无治疗无自伤
           //（Item.cs:9330-9340 仅 useStyle9/useTime17/consumable，无 heal 字段）。
           // 普通世界 = 固定 11 减益各 216000t=3600s（:42271-42283：20/22/23/24/30/
@@ -11680,7 +11740,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 飞镖手枪 3007 (−4×dir,−2×gravDir)；gravDir 本仓恒 1（无重力翻转建模）
         if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6; }
         else if (bowVid2 === 3007) { ax -= 4 * this.player.facing; ay -= 2; }
-        // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
+        // 回收掉落：仅木箭。★终零波真值对账（2026-09-01）：原版 Projectile.Kill
+        // !noDropItem 段（P.cs:79099-79360）**无任何箭族 NewItem**,Player.cs 全文件
+        // RequestNewItem 清单亦无落地拾取链——1/3 落地回收 = 本仓自加 gameplay 偏离
+        // （登记在案维持,见 Arrow.ts 撞块段注 + Game.THROWN_NO_RECOVERY_VIDS 注;
+        // 旧注 ":47161/:46817 原版锚" 系误引[两处为液体放置/桶支]已摘）。
         const dropKey = projId === 1 ? ammoDef.key : null;
         // grav 按 AI_001 重力链规格（projGravSpec，2026-08-14 对账）：箭族默认
         // 15update 平飞后 +0.1/update 缓坠（终端 16）；子弹/光束 flag3 表直线 0；
@@ -11880,7 +11944,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0) + (ps?.crt ?? 0);
         const arpenTotal = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
         const gravOpts = { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At };
-        /** 特例扇生成共用：noDropItem 等价 = dropKey null（仅木箭回收，:47161/:46817） */
+        /** 特例扇生成共用：noDropItem 等价 = dropKey null（仅木箭回收——本仓登记偏离,
+         *  无原版锚,见下方 dropKey 行注） */
         const spawnFanArrow = (fx3: number, fy3: number, vx3: number, vy3: number,
           pid3: number, dmg3: number): void => {
           const a3 = new Arrow(fx3, fy3, vx3, vy3, dmg3, knockback, pid3, null, gravOpts);
@@ -16495,10 +16560,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 破坏仙人掌脚下的沙 → 整株倒下（CheckCactus :54132-54143 支撑仅沙族
     // 53/112/116/234 整砖——沙被挖后 TileFrame 级联逐格上行）
     if (st.get(x, y - 1) === TILE_BY_KEY['v_80_cactus']) this.fellCactus(x, y - 1);
-    // 世花灯泡 238 支撑破坏（CheckJunglePlant WorldGen.cs:47952-48060 + SquareTileFrame
+    // 世花花苞 238 支撑破坏（CheckJunglePlant WorldGen.cs:47952-48060 + SquareTileFrame
     //  :86219-86223 派发）：破坏丛林草 60 → 支撑行不满足（!SolidTile || type!=60）→
     // 2×2 整件 KillTile 清除；238 的 KillTile 段（:48017-48030）50 格曼哈顿门 →
-    // SpawnOnPlayer(262)。灯泡底行贴草上：两对齐候选 (x-1,y-1)/(x,y-1) 任中即回推
+    // SpawnOnPlayer(262)。花苞底行贴草上：两对齐候选 (x-1,y-1)/(x,y-1) 任中即回推
     // 锚点整清+召唤（清格+门+召唤语义同上方直接破坏分支）——此前只支持直接砸泡
     if (type === TILE_BY_KEY['v_60_jungle_grass_block']) {
       const bulb = TILE_BY_KEY['v_238_plantera_s_bulb'];
@@ -18047,11 +18112,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
     if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
-    // PlaceIt_AutoPaintAndActuate（Player.cs:39935-39975）：喷漆器族配饰（2216/3061/
-    // 5126，:14720-14734）→ 对本次放置覆盖的每格 TryPainting（tile 通道，
-    // applyItemAnimation:false 无挥动动画）。builderAccStatus[3] 开关默认 0=启用
-    // （开关 UI 未实装，登记 GAP）；无线/同色不耗；上漆在冷却前、成败不影响放置
-    if (this.player.equipStats.autoPaint) {
+    // PlaceIt_AutoPaintAndActuate（1458 P.cs:40018-40136 区 `autoPaint &&
+    // builderAccStatus[3]==0`）：喷漆器族配饰（2216/3061/5126，:14720-14734）→
+    // 对本次放置覆盖的每格 TryPainting（tile 通道，applyItemAnimation:false 无挥动
+    // 动画）。builderAccStatus[3] 开关面已接：设置页 toggle
+    // （options.builderAutoPaintDisabled ↔ status==1 关断；原版=装备区旁 BuilderAcc
+    // 图标钮 Main.cs:48252 case3 + GameUI.PaintSprayerOn/Off tooltip——终零波 最小
+    // 可行版,旧「开关 UI 未实装」登记销核）；无线/同色不耗；上漆在冷却前、成败不影响放置
+    if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
       const dust = this.paintDustHook();
       for (let dy2 = 0; dy2 < oh; dy2++) {
         for (let dx2 = 0; dx2 < ow; dx2++) {
@@ -18060,13 +18128,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // PlaceIt_AutoActuate（Player.cs:39977-40010）：加压器 3624（:14746-14748
-    // autoActuator）→ 放置覆盖的每格实心瓦自动上致动器（WorldGen.PlaceActuator
-    // :58027 已致动格跳过），耗背包 849 致动器（FindItem(849)→stack--），
-    // 播 SoundID.Dig(0)。builderAccStatus[2] 开关默认 0=启用（开关 UI 未实装，登记）。
+    // PlaceIt_AutoActuate（1458 P.cs:40952 `!autoActuator || builderAccStatus[2]!=0`）：
+    // 加压器 3624（:14746-14748 autoActuator）→ 放置覆盖的每格实心瓦自动上致动器
+    // （WorldGen.PlaceActuator :58027 已致动格跳过），耗背包 849 致动器（FindItem(849)
+    // →stack--），播 SoundID.Dig(0)。builderAccStatus[2] 开关面已接：设置页 toggle
+    // （options.builderAutoActuatorDisabled ↔ status==1 关断;原版 Main.cs:48275 case2 +
+    // GameUI.ActuationDeviceOn/Off——终零波 最小可行版）。同开关其余四个消费位
+    // （:40948 上漆 / :40136 / :40140 / :46193 等 ruler 系）随两系统建模批对齐。
     // 排除表 :39986-39999 = 导轨 314/泡泡 379/活板门+高门 386-389/高尔夫球洞 476；
     // TileID.Sets.NotReallySolid 细分未建模（登记）
-    if (this.player.equipStats.autoActuator && this.wiring) {
+    if (this.player.equipStats.autoActuator && !options.data.builderAutoActuatorDisabled
+      && this.wiring) {
       const actId = VI_ID(849);
       for (let dy2 = 0; dy2 < oh; dy2++) {
         for (let dx2 = 0; dx2 < ow; dx2++) {
@@ -21979,7 +22051,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★vid/key 在 def 上不在实例上(InvItem={id,stack,prefix…})——曾读 held.vid/held.key
       //  → viIdFromKey(undefined)='reading match' 每次挥击到期帧崩停机(实报帧循环异常)
       const heldDef = held ? ITEM_DEFS[held.id] : null;
-      const au = heldDef ? itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse : false;
+      const vidHeld = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const au = heldDef ? itemCombat(vidHeld)?.autoReuse : false;
+      // pendingItemReuse 写真（ItemCheck :43148 `itemAnimation==0 && reuseDelay==0 &&
+      //  controlUseItem && releaseUseItem`，releaseUseItem 由 AutoReuseLogic :53523
+      //  对 autoReuse 强制）——终零波：动画归零拍 + autoReuse + 持续按压 +
+      //  无后摇表项（reuseDelay 族原版不同入旗）→ 置真,下一 updateUse 头复位。
+      //  TryAllowingItemReuse(:53542-53559 手套/全局连用)旗面并入 au 判（手套族
+      //  本仓 equipStats.autoReuseGlove 已聚合, stressBall 未建模）
+      const gloveReuse = this.player.equipStats.autoReuseGlove === true;   // 近战/成长召唤手套链
+      if ((au || gloveReuse) && this.input.mouseHeld && !this.annotateMode
+        && vidHeld >= 0 && reuseDelayOf(vidHeld) === 0) {
+        this.player.pendingItemReuse = true;
+      }
       if (au && this.input.mouseHeld && !this.annotateMode) { this.swing.t = 1; return; }
       this.swing = null;
       return;
@@ -23702,6 +23786,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       palA >= 0 && this.player.inv.countOf(palA) > 0,
       palB >= 0 && this.player.inv.countOf(palB) > 0);
     this.vanillaSpawner.starfallBoost = this.starfallBoost;   // 流星夜附魔夜爬虫支（NPC.cs:2316）
+    // AFK 计数注入（终零波 接线）：SetSpawnFlags :412 `noGroundWorms =
+    // player.afkCounter >= Player.AFKTimeNeededForNoWormSpawns(300)` ——计数在
+    // Player.fixedUpdate 尾累计（IsConsideredStandingStill 门），此处每周期快照。
+    // 消费=setFlagsForChosenTile 头 `!skyMob && noGroundWorms → noWorms=true`
+    // （NPC.cs:1052-1053）；影子蜡烛轮 getSpawnRate 会清本旗（NPC.cs:420-425 序）
+    this.vanillaSpawner.noGroundWorms = p.afkCounter >= 300;   // NPC.cs:412 / AFKTimeNeededForNoWormSpawns :971
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）。第三参 = NPC.cs:302 读
     // player.ZoneSandstorm（SceneMetrics zoneSandstorm 派生位——已含地表大气门，
     // 旧 zoneDesert&&<groundLevel+30 近似退役）
@@ -27279,7 +27369,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  AdjustSlotRarities（Chest.cs:919-947）逐槽阈值降档：第 4201-4701 次尝试起各槽
    *  rarity 降 1——原版 rarity 与 array 同引用（:1283-1285/:1310），降档全店持久。
    *  peddlersSatchelWasUsed（:1271 货郎背包 +1，2026-08-22 补 C ❌5343 批接通——
-   *  旗存 world.flags.peddlersSatchelUsed）/十周年世界（:1274-1280）未实装 */
+   *  旗存 world.flags.peddlersSatchelUsed）；十周年世界门已接（1458 Chest.cs:1301-
+   *  1308 `tenthAnniversaryWorld → (!getGood)+1 再 +1`，R14-C26 ⑦ 消费
+   *  seedFlags.tenthAnniversary——旧「:1274-1280 未实装」登记为陈旧注,销核） */
   private travelStock: Array<[number, number]> = [];
   private buildTravelStock(): Array<[number, number]> {
     const array = [100, 200, 300, 400, 500, 600];
@@ -27412,6 +27504,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return options.data.quickStackMode;
   }
 
+  /** 快速堆叠演示窗（tick）＝本仓 HasLockedInventory 的 IsStackingItems 等价窗：
+   *  原版 QuickStacking 把逐件搬移铺在若干帧 ItemTransfer 演示上（inventoryChestStack[]
+   *  位存在期 = Player.IsStackingItems :23359-23370 真），动画完成前 HasLockedInventory()
+   *  恒真 → QuickStackAllChests(:22905) 静默拒绝重入。本仓搬运一帧结算、
+   *  emitItemTransferFx 同帧连发——以同量级短锁承载该窗口（终零波：与原版「演示窗内
+   *  再按无效」的可观测面等价；PendingInventoryActions 源=光标手持槽待决,本仓无
+   *  Main.mouseItem 面≡恒空,见 damagePlayer [58] 注）。 */
+  static readonly QUICK_STACK_LOCK_TICKS = 12;
+  private quickStackLockTicks = 0;
+  /** Player.HasLockedInventory（:23271）读取面：IsStackingItems ⇒ 演示锁窗未清；
+   *  pendingInventoryActions 源在本仓无生产位（无光标手持槽）→ 不参与 */
+  hasLockedInventory(): boolean {
+    return this.quickStackLockTicks > 0;
+  }
+
   /** CycleQuickStackMode（Player.cs:367-371）：Quick ↔ Smart 二档循环（非三档——
    *  原版枚举仅两成员）。UI 侧右键 ChestStack 钮触发（Main.cs:41297-41301 +
    *  音效 10 + SaveSettings） */
@@ -27424,21 +27531,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  + VisualizeChestTransfer_CoinsBatch 可视化 + 通用 Transfer（含逐帧 ItemTransfer,
    *  Q-F5）；② 附近宝箱（600px 欧氏）quick/smart 堆叠——持虚空透镜（useVoidBag=
    *  背包 58 格任一 4131）时走 PackQuickStackableItems includeVoidBag 臂把 banks[3]
-   *  追加为源件段（Q-F2）。HasLockedInventory（占位物 4762 锁栏）本仓未实装，登记。
+   *  追加为源件段（Q-F2）。HasLockedInventory 读取面已接（终零波）：原版
+   *  Player.HasLockedInventory(:23271)= IsStackingItems() ∪
+   *  LocalPlayerHasPendingInventoryActions——两源都属「逐帧搬移动画窗」态旗；
+   *  本仓 Transfer 单帧同步完成、无跨帧栈,以 quickStackLockTicks 短锁等价承载
+   *  （=原版动画窗内再按不重入的可观测面：堆叠演示/连点不双发,窗口期
+   *  QUICK_STACK_LOCK_TICKS 与原版 ItemTransfer 演示长度同量级）。
    *  触发面（F9 复核注：全链有调用方）：背包 UI 右上钮簇 ChestStack 钮已接线于
    *  src/ui/UI.ts :3391-3406（左键本入口+音12 / 右键 cycleQuickStackMode+音10；
    *  悬停文案走原版键 GameUI.QuickStackToNearby|SmartStackToNearby :4550-4556,
    *  Main.cs:42563-42574 等价）；原版无独立键盘热键（仅指针钮）。 */
   quickStackAllChests(): void {
+    if (this.hasLockedInventory()) return;         // :22905 门（动画窗内静默拒绝）
+    this.quickStackLockTicks = Game.QUICK_STACK_LOCK_TICKS;
     const p = this.player;
     // ① bank 段（QuickStackToNearbyBanks :238-250 / 1456 :230-242）——tile 段盒扫
     //   与合成侧同源（GetBanksInRangeOf :33-91）;bank 径源件不含袋臂（includeVoidBag:false）
     const cx = Math.floor(p.cx / TILE), cy = Math.floor(p.cy / TILE);
     const vaultHeld = p.inv.slots.some((s) => s && s.stack > 0 && vanillaIdOfItem(s.id) === 5325);
-    for (const b of nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld)) {
+    const bankHits = nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld);
+    for (const b of bankHits) {
       const bx = (b.tx + 1) * 16, by = (b.ty + 1) * 16;   // item.position=(j·16+16,k·16+16)
       // MoveCoins + VisualizeChestTransfer_CoinsBatch(:243-244 / 1456 :235-236)：净转铜值
-      //   四档拆分（Utils.CoinsSplit Chest.cs:325），每档 ≥1 发一枚 ItemTransfer(71+i)
+      //   四档拆分（Utils.CoinsSplit Chest.cs:325），每档 ≥1 发一枚 ItemTransfer(71+i)。
+      //   ★①-F1：MoveCoins 仍为 per-bank 前置循环（原文 foreach 段在 Transfer 之前）,
+      //   合币语义保留在各 bank 自身段先跑。
       const cue = { playSound7: false };
       const coinsMoved = moveCoinsIntoBank(p.inv, b.items, cue);
       if (coinsMoved > 0) {
@@ -27451,9 +27568,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       if (cue.playSound7) this.sfx.play('pickup', 1);   // Q-F6:ChestUI.MoveCoins 尾 flag 支 PlaySound(7)
-      // bank 径通用 Transfer（Invariant.Assert(!blockedChests.Any()) :248——bank 无 locked 面）
-      this.emitQuickStackResultFx(
-        quickStackToChests(p.inv, [{ x: b.tx, y: b.ty, items: b.items }], false));
+    }
+    // ★①-F1 bank 径归一（QuickStackToNearbyBanks :240/:248）：收集范围全部 banks →
+    //   【一次性】Transfer(banksInRangeOf 表,SourceInventory 单包单还原)——旧「逐 bank
+    //   单调 quickStackToChests」= 每 bank 重打包+中间写回,与原文单 SourceInventory 形
+    //   不符（B 阶段 Lookup 受理集应为跨 bank 聚合表,bank 序即盒扫序）。bank 无 locked
+    //   面 ⇒ Invariant.Assert(!blockedChests.Any()) :248 空回执（blockedSlots 恒 []）。
+    //   袋臂 voidVaultSource 与此无关（:252-268 仅宝箱路径含袋臂,核 Player.cs:23368
+    //   QuickStackAllChests→:22904 链,本函数下方②段即原文形）。
+    if (bankHits.length > 0) {
+      this.emitQuickStackResultFx(quickStackToChests(p.inv,
+        bankHits.map((b) => ({ x: b.tx, y: b.ty, items: b.items })),
+        false));
     }
     // ② 宝箱段（QuickStackToNearbyChests :252-268 / 1456 :243-259）——持虚空透镜走
     //   includeVoidBag 臂（PackQuickStackableItems :384-386 的 useVoidBag() & true 门）：
@@ -27481,6 +27607,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // IndicateBlockedChests 单人半边（QuickStacking.cs:270-287）→ Chest.IndicateBlockedChest
     //   （:3578 红图标挂箱锚 60t）等价最低成本位=blockedChestFx 粒子通道（Q-F7）
     for (const ch of res.blocked) blockedChestFx(this, (ch.x + 1) * 16, (ch.y + 1) * 16);
+    // ★Q-F9 槽级回执半边（RestoreToPlayer :360-363 → IndicateBlockedSlot）：出站即播,
+    //   不与箱级回执互斥（原版两半各自独立）。bank 径恒空数组零外溢。
+    if (res.blockedSlots.length > 0) this.cb.onQuickStackBlockedSlots?.(res.blockedSlots);
   }
 
   /** 单帧 ItemTransfer 出站半边（本地直生 + module8 上行,Chest.VisualizeChestTransfer
@@ -28125,8 +28254,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && COLD_DAMAGE_NPCS.has(attacker.vanillaId) && p.buffs.has(BuffType.Warmth)) {
       dmg = Math.trunc(dmg * 0.7);
     }
-    // 日曜护盾反击（:37706-37716 ConsumeSolarFlare 后 NewProjectile 608：
-    // 150×meleeDamage + kb15 朝攻击者——608 追踪弹未实装,直伤近似,登记）
+    // 日曜护盾反击门（1458 P.cs:38589-38605 Counter 集 + ConsumeSolarFlare →
+    // NewProjectile 608）。下层 shieldsBefore 支 = 爆闪 608 全参等价实现
+    // （settleSolarFlareRetaliation）——旧「608 追踪弹未实装,直伤近似」登记销核。
+    // ★定谳注：608 SetDefaults aiStyle=117（P.cs:6556-6282 区 160×160/timeLeft=3/
+    // tileCollide=false/hide=true），出生即 Kill()、AI 从不运行——反击伤害全部由
+    // Projectile.Kill 的 penetrate=-1 重置+Damage()（160×160 命中盒一次性 AoE）+
+    // 音尘尾承担，与「AI_036 追踪」无关（审计勘误,勿再按追踪弹对账）
     const shieldsBefore = p.solarShields;
     const ok = p.damage(dmg, srcX, srcY, knockback, pvp);
     // ★FR2-F（三轮蓝队 F2）：msg117 主生产通道补缺。原版 Player.Hurt :38656-38664
@@ -33046,7 +33180,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (!bobber.retracting) bobber.dead = true;
   }
 
-  /** SpawnOnPlayer 等价（NPC.cs:81273-81506）：灯泡破坏召唤走此链——在玩家
+  /** SpawnOnPlayer 等价（NPC.cs:81273-81506）：花苞破坏召唤走此链——在玩家
    *  【屏幕外】找点（500 次尝试，最后一次强制落点），非地表顶部扫描；
    *  SpawnBoss 段 timeLeft×20=15000、AnyNPCs 独占、HasAwoken 公告。
    *  物品召唤路径（summonBoss onPlayer 档）2026-08-18 已统一迁移共用寻点器。 */
@@ -33068,7 +33202,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
 
   /** SpawnOnPlayer 屏幕外寻点（NPC.cs:81370-81430 主干近似，自 spawnBossOnPlayer
    *  抽出的共用体）：500 次尝试、末次强制落点、落点区块 6×6 无实心。消费方 =
-   *  spawnBossOnPlayer（灯泡/世花/猪鲨/月总）+ summonBoss({onPlayer})（物品召唤
+   *  spawnBossOnPlayer（花苞/世花/猪鲨/月总）+ summonBoss({onPlayer})（物品召唤
    *  全族，ItemCheck_UseBossSpawners Player.cs:43080-43237 皆走 SpawnOnPlayer）。
    *  原版寻点在 spawnArea 随机取点 + 向下扫首个实心 + KS 专属墙体/视线两道附加门
    *  （:81398-81418，本近似未建模，登记）；返回 (tx, ty) 世界 tile 坐标 */
@@ -33192,7 +33326,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   }
 
   /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王)。
-   *  roar = 是否播召唤咆哮（物品召唤 true；自然/灯泡/诅咒等生成路径 false）。
+   *  roar = 是否播召唤咆哮（物品召唤 true；自然/花苞/诅咒等生成路径 false）。
    *  onPlayerTy = SpawnOnPlayer 寻点结果的 ty（summonBoss onPlayer 档传入）：
    *  传入时跳过 ±55 列地表顶扫与毁灭者地下 Y 覆写，落点直用（与 spawnBossOnPlayer
    *  同约定 sy*TILE+8）；缺省维持既有列顶扫行为（自然/调试/诅咒路径，2026-08-18）。
@@ -33353,7 +33487,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
    *  静默集（50/82/126/316/551/662）无公告。颜色 ChatColors.BossOrEvent=(175,75,255)。
    *  ★音效与公告解耦（2026-08-14 对账）：原版 Roar 只在【物品使用】瞬间播
    *  （ItemCheck_UseBossSpawners Player.cs:43080-43232 + 石巨人祭坛 :32322 +
-   *  事件物 :43246-43364）——生成路径（自然/灯泡/幼虫/老人诅咒/娃娃/浮标/月总
+   *  事件物 :43246-43364）——生成路径（自然/花苞/幼虫/老人诅咒/娃娃/浮标/月总
    *  倒计时/光女踩虫）全部无声，唯一例外 Item173=蜂后蜜蜂分泌物(:43184)。
    *  故 roar=true 仅由物品召唤点传入。 */
   private announceBossSummon(vanillaId: number, roar = false): void {
@@ -33603,6 +33737,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   /** 旗 buff：该 npc 是否被屏内旗覆盖（ItemID.Sets.BannerStrength 普通族） */
   bannerNpcActive(npcId: number): boolean { return this._bannerNpcs.has(npcId); }
 
+  /** 屏内旗覆盖的 npcId 列表（升序）。旗帜 buff tooltip 名单消费
+   *  （Main.cs:21558-21612 bannerMouseOver 附加循环的 BannerSystem 枚举序等价物——
+   *  BannerToNPC 注册序在原版亦近乎 id 升序；HasNPCBannerBuff(i) 门=同源覆盖集） */
+  bannerNpcIds(): number[] { return [...this._bannerNpcs].sort((a, b) => a - b); }
+
   /** ★IIIII22b：royale-with-cheese 队伍出生点落位（TeamBasedSpawns 批主接面）。
    *  Player.Spawn :37911-37916 三分支 = 床点(SpawnX≥0) > teamBasedSpawnsSeed 队点 >
    *  世界出生点。本仓床点为世界级（world.spawnX≠spawnX0 且复验通过），因此"无床"口径 =
@@ -33617,6 +33756,20 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (!fl) return;
     p.x = fl.tx * TILE + 8;                                        // 同世界出生点放置口径(+8 锚)
     p.y = (fl.ty - 3) * TILE;
+  }
+
+  /** 玩家出生点解析（Player.Spawn :37851-37858 FindSpawn→CheckSpawn failover 共享核）：
+   *  源选择 = 床点（world.spawnX≠spawnX0 的世界级床设面，Housing 设床链写入）
+   *  → CheckSpawn 复验失败/未设床 → 世界初始出生点。原版「床位 vs 初始」两源都经
+   *  同一 Consumer（重生 Spawn(ReviveFromDeath) / 回归药水 DoPotionOfReturn…AndSet…
+   *  内 Spawn(RecallFromItem)，:42462 区）——本方法即该消费侧的单一读口（终零波：
+   *  旧 4870 直吃 w.spawnX 不复验的登记销核）。返回 [tx, ty] 落脚格行。
+   *  纯函数形（revalidate 注入）供 tests/finalzero-game-domain 直测 */
+  resolvePlayerSpawnPoint(): [number, number] {
+    return resolveSpawnPoint(
+      this.world.spawnX, this.world.spawnY, this.world.spawnX0, this.world.spawnY0,
+      (x, y) => this.checkBedSpawn(x, y),
+    );
   }
 
   respawnPlayer() {
@@ -33645,14 +33798,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     //  SpawnX=SpawnY=-1` → :37913 落世界出生点）——床被拆/房间破坏后原样复活在失效床点
     //  可嵌墙(R21-5)。存档位不清（原版 spN 表同样保留,下次重生再验）;checkBedSpawn
     //  返回 null 才算通过（''/文案键都是失败,原版 CheckSpawn 只回 bool 静默）
-    let spawnX = this.world.spawnX, spawnY = this.world.spawnY;
-    if ((spawnX !== this.world.spawnX0 || spawnY !== this.world.spawnY0)
-      && this.checkBedSpawn(spawnX, spawnY) !== null) {
-      spawnX = this.world.spawnX0;
-      spawnY = this.world.spawnY0;
-    }
-    p.x = spawnX * TILE + 8;
-    p.y = (spawnY - 3) * TILE;
+    // ★终零波：复验逻辑抽 resolvePlayerSpawnPoint() 共享——回归药水 4870 同源消费
+    //  （原版两条路都走 Spawn(PlayerSpawnContext) → FindSpawn/CheckSpawn 同一段）
+    const [sx2, sy2] = this.resolvePlayerSpawnPoint();
+    p.x = sx2 * TILE + 8;
+    p.y = (sy2 - 3) * TILE;
     // ★IIIII22b：三分支第二臂——床点未定（复验后落回原始出生点）且 teamBased 世界且
     // 队伍 ≥1 → 按队伍点表重定位（Player.Spawn :37913-37915 Spawn_SetPositionAtTeamSpawn）
     this.applyTeamSpawnPlacement(p);
@@ -33985,6 +34135,44 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       this.spawnChloroLeafShot(q.cx - 4, q.cy, nx, ny);                        // :7029
       break;                                                                   // :7033
     }
+  }
+
+  /** GameHooks.spawnOnHitPetals（终零波批,2026-09-01）：山铜（奥利哈刚）套装 on-hit
+   *  花瓣弹——Player.OnHit（Player.cs:6963-6985）：
+   *    · 门 onHitPetal && petalTimer==0（petalTimer 与叶绿引援共享,:7009 叶绿支=50；
+   *      每 tick 递减位 Player.fixedUpdate petalTimer 段 :25652-25655 已在轨）
+   *    · 出生点=屏幕边：x 屏【朝向背面】边缘（direction>0 → 左缘 Main.screenPosition.X,
+   *      否则 +=screenWidth）、y=屏幕顶+rand(screenHeight)；
+   *    · 速度=(受击点−出生点)+rand(-50,51)×0.1 抖动,归一化到 24px/子步
+   *      （num5=24f/len,len==0 时 C# float 除零=±Inf——本仓 epsilon 钳零登记偏差,
+   *      GetChaseResults 兜底同法 chloro 先例）;
+   *    · NewProjectile(pos=(出生点 top-left),221,dmg36,kb0) 字面量直传不吃面板。
+   *  子步折叠（extraUpdates=2 ⇒ 每拍 3 子步）与绘制见 entities/OrichalcumPetalProj。
+   *  MP 面：与 ChloroLeafShot 同口径玩家本地自持（远端代理不跑 hurt 结算的 owner 端
+   *  也各有本地模拟面,弹幕快照不承载 type221——偏差登记台账）。 */
+  spawnOnHitPetals(x: number, y: number): void {
+    const p = this.player;
+    if (!p.equipStats.onHitPetal || p.petalTimer !== 0) return;               // :6963
+    p.petalTimer = 20;                                                        // :6964
+    const dir = p.facing;                                                     // int num = direction
+    const cam = this.camera;
+    const zoom = cam.zoom || 1;
+    const sx = cam.x - cam.viewW / (2 * zoom);                                // Main.screenPosition.X
+    const sy = cam.y - cam.viewH / (2 * zoom);
+    const sw = cam.viewW / zoom;                                              // Main.screenWidth（世界 px）
+    const sh = cam.viewH / zoom;                                              // Main.screenHeight
+    let ox = sx;
+    if (dir < 0) ox += sw;                                                    // :6968-6970
+    const oy = sy + Math.floor(Math.random() * sh);                           // :6971-72 y2+=Next(screenHeight)
+    // :6977-83：vec = 命中点−出生点 + Next(-50,51)×0.1 抖动（上界不含 → ±50),
+    // 【无条件】按 24f/len 缩放——len<24 时速度反而缩小,原式无下限门;
+    // len==0 时 C# float 除零=±Inf(JS 会 NaN 化),epsilon 钳制登记偏差(chloro 先例同法)
+    let vx = x - ox + (Math.floor(Math.random() * 101) - 50) * 0.1;
+    let vy = y - oy + (Math.floor(Math.random() * 101) - 50) * 0.1;
+    const len = Math.sqrt(vx * vx + vy * vy);
+    const k = 24 / Math.max(len, 1e-8);
+    vx *= k; vy *= k;
+    this.entities.add(new OrichalcumPetal(ox, oy, vx, vy), 'projectiles');     // :6984 dmg36/kb0 实体内部定值
   }
 
   /** GameHooks.spawnFriendlyProj（★α-H3④：玩家命中后效真弹出口——WeaponProj

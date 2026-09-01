@@ -741,15 +741,36 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     const feetRow = Math.floor((b.y + b.h) / TILE);
     const midCol = Math.floor((b.x + b.w / 2) / TILE);
     if (dx !== 0 && st.inBounds(midCol, feetRow)) {
-      const fi = st.idx(midCol, feetRow);
-      const fs = st.slope[fi];
-      if ((fs === 1 || fs === 2) && !st.half[fi] && st.isSolid(midCol, feetRow)) {
-        const vx0 = midCol * TILE;
-        const num4 = fs === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w);
-        if (num4 >= 0 && b.y + b.h >= feetRow * TILE + num4
-          && ((fs === 1 && b.vx > 0) || (fs === 2 && b.vx < 0))) {
-          dy += Math.abs(dx);
+      // ★坡格下探(2026-09-01 交替处踏入下坠终修):浮在坡面上方的玩家 feetRow
+      //   在坡格上方 1-3 行——只查 feetRow 会失明(漂移累积成 4-5px 下坠)。
+      //   向下探测 3 行找同向坡格,按【中心面】算落差,落差 ≤半身时一步补齐。
+      for (let dr = 0; dr <= 3; dr++) {
+        const fy = feetRow + dr;
+        if (!st.inBounds(midCol, fy)) break;
+        const fi = st.idx(midCol, fy);
+        const fs = st.slope[fi];
+        if ((fs !== 1 && fs !== 2) || st.half[fi]
+          || !(st.isSolid(midCol, fy) || st.isPlatform(midCol, fy))) {
+          if (st.isActive(midCol, fy) && st.isSolid(midCol, fy)) break;  // 实心挡路=下方无坡
+          continue;
         }
+        const vx0 = midCol * TILE;
+        const centerX = b.x + b.w / 2;
+        const surfCenter = fs === 1
+          ? fy * TILE + (centerX - vx0)
+          : fy * TILE + (vx0 + TILE - centerX);
+        const num4 = fs === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w);
+        const deficit = surfCenter - (b.y + b.h);
+        // ★门辨(2026-09-01 冲刺坠落案):deficit≤半身门在冲刺时一步越限后永久关闭
+        //   → 自由落体 7.8 格(实测)。门的本意=防跳跃跨越被拽下——以 wasGround
+        //   区分:行走中(wasGround)落差不限量,单 tick 补差帽 1 tile 防瞬移;
+        //   空中(跳跃/坠落跨越)维持 ≤半身 旧门。
+        if (num4 >= 0 && deficit >= -TILE
+          && (deficit <= b.w / 2 || wasGround)
+          && ((fs === 1 && b.vx > 0) || (fs === 2 && b.vx < 0))) {
+          dy += Math.max(Math.abs(dx), Math.min(deficit, TILE));
+        }
+        break;   // 找到首个坡格即止(无论是否命中辅助)
       }
     }
   }

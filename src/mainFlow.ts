@@ -303,6 +303,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onAutoSave: () => doSave(true),
       // 配装热键切换白闪（GetColorByLoadout :2554-2559；背包按钮同款）
       onLoadoutSwitched: () => ui.flashLoadoutSwitch(),
+      // ★Q-F9 快堆槽级 blocked 回执（QuickStacking.cs:360-363 → IndicateBlockedSlot 红脉冲）
+      onQuickStackBlockedSlots: (slots) => ui.indicateBlockedSlots(slots),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
       onHousingCursor: (m) => {

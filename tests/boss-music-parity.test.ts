@@ -33,7 +33,7 @@ const VANILLA_TABLE: Record<number, {
   134: { name: 'Destroyer',      announce: 'awoken',   itemRoar: true,  music: 92 },   // 机械蠕虫 556 :43146（Mechdusa→25）
   222: { name: 'Queen Bee',      announce: 'awoken',   itemRoar: true,  music: 96 },   // 蜂王分泌物 1133 = Item173 :43184
   245: { name: 'Golem',          announce: 'awoken',   itemRoar: true,  music: 17 },   // 能量电池祭坛 :32322 咆哮
-  262: { name: 'Plantera',       announce: 'awoken',   itemRoar: false, music: 24 },   // 灯泡 WorldGen.cs:48030 无咆哮
+  262: { name: 'Plantera',       announce: 'awoken',   itemRoar: false, music: 24 },   // 花苞 WorldGen.cs:48030 无咆哮
   266: { name: 'Brain of Cth.',  announce: 'awoken',   itemRoar: true,  music: 13 },   // 血腥脊椎 1331 :43199
   370: { name: 'Duke Fishron',   announce: 'awoken',   itemRoar: false, music: 58 },   // 松露虫 :51569 无咆哮
   395: { name: 'Martian Saucer', announce: null,       itemRoar: false, music: null }, // 事件怪；曲走火星 37（INVASION_MUSIC）

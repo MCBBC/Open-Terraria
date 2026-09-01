@@ -314,7 +314,7 @@ await p.evaluate(() => {
     const g = window.__swGame, st = g.world.store;
     const T = await import('/src/data/tiles.ts');
     const BULB = T.TILE_BY_KEY['v_238_plantera_s_bulb'];
-    // 灯泡生成带 = [worldSurface, h-200](planteraBulbBurst 同带全扫)
+    // 花苞生成带 = [worldSurface, h-200](planteraBulbBurst 同带全扫)
     const yTop = Math.floor(g.world.groundLevel ?? 330);
     let bulb = null;
     outer: for (let y = yTop; y < st.h - 200; y += 1) {
@@ -325,13 +325,13 @@ await p.evaluate(() => {
     if (bulb) {
       // 真链:breakTile(玩家挖掘路径,breakTile 内 bulb 分支召王 :16096-16115)。
       // ★原版门:曼哈顿距离 <50 格内须有玩家(WorldGen.cs:48030)——玩家站远处
-      //   挖灯泡不召王。真实玩法=玩家走到丛林挖灯泡,探针同款贴位
+      //   挖花苞不召王。真实玩法=玩家走到丛林挖花苞,探针同款贴位
       g.player.x = bulb[0] * 16; g.player.y = (bulb[1] - 4) * 16;
       g.player.vx = 0; g.player.vy = 0; g.player.dead = false; g.player.hp = g.player.maxHp;
       g.breakTile(bulb[0], bulb[1], true);
       window.__T.ticks(30);
     } else {
-      g.spawnBossOnPlayer(262);   // 灯泡未及生成直召,备案
+      g.spawnBossOnPlayer(262);   // 花苞未及生成直召,备案
     }
     const up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 262);
     // 钥匙/宝袋检测:物品域=内部 id(与 vanilla vid 不同域),经 itemByVid 反查。
@@ -347,7 +347,7 @@ await p.evaluate(() => {
     const keyAfter = countLoot();
     return { viaBulb: !!bulb, bulbPos: bulb, up, dead, downed: !!g.world.flags['downed_262'], templeKeyDrop: keyAfter > keyBefore, master, keyIid, bagIid, keyAfter };
   });
-  ok('S8 世纪之花召唤(灯泡链=' + (r2.viaBulb ? '真链' : '直召备案') + ')', r2.up, r2.bulbPos ? `bulb@${r2.bulbPos}` : 'no bulb');
+  ok('S8 世纪之花召唤(花苞链=' + (r2.viaBulb ? '真链' : '直召备案') + ')', r2.up, r2.bulbPos ? `bulb@${r2.bulbPos}` : 'no bulb');
   ok('S8 世纪之花击杀+downed_262', r2.dead && r2.downed);
   ok('S8 神庙钥匙(1141)掉落', r2.templeKeyDrop, `drops=${r2.keyAfter}`);
 }

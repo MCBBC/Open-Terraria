@@ -1097,39 +1097,150 @@ export class StarfuryStar extends Entity {
     game.onProjectileDeath?.(9, this.x, this.y, this.w, this.h);
   }
 
-  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+  /** 星体绘制（Main.cs:31820-32003 星族块 type==9 支 1:1；★终零波 C 项升格——
+   *  Extra[91] 星芒真值组合退役"渐隐金粉曳光近似"：
+   *  · 静态首芒（:31971）：纹理=Extra[91] 整帧(34×90)、origin=(w/2,10)、
+   *    rotation=velocity.ToRotation()+π/2、锚点 vector53：type9 分支先 +velocity 再
+   *    −velocity(:31899/:31930) = 恒 Center、再 +vector52(normalize(v)×8,:31928)；
+   *    尺度 num216/217/218=0.9/0/0（type9 覆写 :31924-31926）——二三芒 scale 0
+   *    不可见,只绘首条（零乘空 Draw 语义等价）
+   *  · 双拍交叉渐隐芒（:32016-32029）：锚点 vector54=Center−v×0.5 再 +vector52，
+   *    相位 f=(tfe/60 %0.5)/0.5 与 num232∈{0,0.5} 错半相,alpha=color58×三角波、
+   *    scale=(0.5+f×0.5)×num219（type9 num219=1×0.75 :31931）
+   *  · 星体本体（:32032 最后一张）：色=Lerp(Gold(A=180),(194,22,134,127),num227)
+   *    （GetAlpha 初值被覆写→不消费弹体 alpha）、scale=num220=proj.scale+0.1+
+   *    num227×0.2、rot=this.rot。num227=1−Remap(phase,.15,.5,0,1)×
+   *    Remap(phase,.5,.85,1,0)，phase=(rot×0.5 wrap 后归一)/2π
+   *  XNA Color 字面值逐通道截断转录（Multiply-then-round 即 XNA op*）：value40=
+   *  (194,22,134)×.75(A/=2)=(145,16,100,95)、value43=(180,20,255)×.225=(40,4,57,57)、
+   *  value41=Lerp(Gold,W,.5)(A/=4)×.85×.75=(162,149,81,39)、value44=(W,0)×.15=(38,38,38,0)。
+   *  flag31=false(:31920) → A 取上述值不再覆写。SpriteBatch AlphaBlend 直-alpha 语义 =
+   *  canvas globalAlpha 直绘。染色经 starRaySprite 像素级 multiply（tint 缓存池,
+   *  半加载贴图拒烘）；贴图未就绪时回退旧曳光线（懒加载首帧兜底,加载后自愈） */
+  draw(r: { canvas?: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
+    atlas?: { ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(9);
     if (!img || !(img.width > 0) || img.width === 0) return;
     const sp = Math.hypot(this.vx, this.vy) || 1;
-    // Main.cs:31101-31127 type 9 覆写：绘制位 = Center + normalize(vel)×8（vector46）、
-    // scale ×0.75（num207）；色 = Gold(A=180) ↔ (194,22,134,127) 按 rotation 脉动
-    // （num212=0.5 档）。Extra[91] 三条星芒尾（:31170-31172）以渐隐金粉曳光近似
+    const nx = this.vx / sp, ny = this.vy / sp;
     const phase = wrapAngle(this.rot * 0.5) / (Math.PI * 2) + 0.5;
-    const pulse = 1 - lerpValue(0.15, 0.5, phase) * lerpValue(0.5, 0.85, phase);
-    const px = this.cx + this.vx / sp * 8;
-    const py = this.cy + this.vy / sp * 8;
-    const a = Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+    const p227 = 1 - lerpValue(0.15, 0.5, phase) * lerpValue(0.5, 0.85, phase);
+    const mixC = (a: RGBA, b: RGBA): RGBA => ({
+      r: a.r + (b.r - a.r) * p227, g: a.g + (b.g - a.g) * p227,
+      b: a.b + (b.b - a.b) * p227, a: a.a + (b.a - a.a) * p227,
+    });
+    const rayRot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+    const cRay = mixC({ r: 145, g: 16, b: 100, a: 95 }, { r: 40, g: 4, b: 57, a: 57 });
+    const cPulseBase = mixC({ r: 162, g: 149, b: 81, a: 39 }, { r: 38, g: 38, b: 38, a: 0 });
+    const cBody = mixC({ r: 255, g: 215, b: 0, a: 180 }, { r: 194, g: 22, b: 134, a: 127 });
+    // ---- 双拍交叉渐隐芒（画序在静态芒之后、本体之前 :32016 起）----
+    const tfe = (performance.now() / 1000) * 60;        // Main.timeForVisualEffects 拍钟
+    const imgRayRaw = r.atlas?.ensureVImage ? r.atlas.ensureVImage('vanilla/Extra_91.png') : null;
+    const rayReady = !!(imgRayRaw && imgRayRaw.width > 0 && imgRayRaw.height > 0
+      && !(imgRayRaw instanceof HTMLImageElement && !imgRayRaw.complete));
+    const angAnchorX = this.cx + nx * 8, angAnchorY = this.cy + ny * 8;
+    const pulseAX = this.cx - this.vx * 0.5 + nx * 8, pulseAY = this.cy - this.vy * 0.5 + ny * 8;
+    let raysDrawn = false;
+    if (rayReady && imgRayRaw) {
+      const spriteStatic = starRaySprite(imgRayRaw, cRay);
+      // 静态首芒 scale 0.9（二三芒 type9 scale=0 直接跳过）
+      if (spriteStatic) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.translate(angAnchorX, angAnchorY);
+        ctx.rotate(rayRot);
+        ctx.drawImage(spriteStatic, -(imgRayRaw.width / 2) * 0.9, -10 * 0.9,
+          imgRayRaw.width * 0.9, imgRayRaw.height * 0.9);
+        ctx.restore();
+        for (const off of [0, 0.5]) {
+          let f = ((tfe / 60) % 0.5) / 0.5 + off;
+          f %= 1;
+          let tri = f * 2;
+          if (tri > 1) tri = 2 - tri;
+          const sc = (0.5 + f * 0.5) * 0.75;
+          const spritePulse = starRaySprite(imgRayRaw,
+            { ...cPulseBase, a: cPulseBase.a * tri });
+          if (!spritePulse || sc <= 0) continue;
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.translate(pulseAX, pulseAY);
+          ctx.rotate(rayRot);
+          ctx.drawImage(spritePulse, -(imgRayRaw.width / 2) * sc, -10 * sc,
+            imgRayRaw.width * sc, imgRayRaw.height * sc);
+          ctx.restore();
+        }
+        raysDrawn = true;
+      }
+    }
+    if (!raysDrawn) {
+      // 回退：贴图未就绪（懒加载窗口）——旧金粉曳光线，加载完成后自动走上方真值面
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,215,0,${(0.25 * cBody.a / 255).toFixed(3)})`;
+      ctx.lineWidth = 2 + 5 * 0.8 * p227;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(angAnchorX - nx * 26, angAnchorY - ny * 26);
+      ctx.lineTo(angAnchorX, angAnchorY);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // ---- 星体本体（:32032 origin=整帧中心,scale=[0.9,1.1] 按 pulse）----
+    const num220 = 0.8 + 0.1 + p227 * 0.2;               // proj.scale(SetDefaults 0.8)+0.1+0.2×pulse
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = `rgba(255,215,0,${(0.25 * a).toFixed(3)})`;
-    ctx.lineWidth = 2 + 5 * 0.8 * pulse;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(px - this.vx / sp * 26, py - this.vy / sp * 26);
-    ctx.lineTo(px, py);
-    ctx.stroke();
-    ctx.restore();
-    ctx.save();
-    ctx.globalAlpha = a;
+    ctx.globalAlpha = Math.max(0, Math.min(1, cBody.a / 255));
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(px, py);
-    ctx.rotate(this.rot);
-    const s = 0.75 * 0.8;   // num207×0.75 × SetDefaults scale 0.8
-    ctx.drawImage(img, -img.width * s / 2, -img.height * s / 2,
-      img.width * s, img.height * s);
+    ctx.drawImage(img, -img.width * num220 / 2, -img.height * num220 / 2,
+      img.width * num220, img.height * num220);
     ctx.restore();
     ctx.globalAlpha = 1;
+  }
+}
+
+// =============================================================================
+// 终零波·Extra_91 星芒染色副本周转池（StarfuryStar.draw 消费；Main.cs:31971 起
+// EntitySpriteDraw color 参的 canvas 等价物——XNA 在采样期做 srcColor×tint，
+// canvas 无单 sprite tint,这里像素级 multiply 一次产出后按色值复用）。
+// ★烘焙入口两闸（celestial 天体系平色矩形毒化判例,MEMORY celestial-flare 判例同源）：
+//   · texReady 门：HTMLImageElement.complete!==true 直接返回 null（拒烘半加载帧）；
+//   · 色键全通道非黑门不设——本调用位颜色恒来自固定 lerp 带,无单色退化输入面。
+// =============================================================================
+
+interface RGBA { r: number; g: number; b: number; a: number }
+
+const STAR_RAY_TINT_CACHE = new Map<string, HTMLCanvasElement>();
+
+function starRaySprite(src: ImageBitmap | HTMLImageElement, col: RGBA): CanvasImageSource | null {
+  const iw = 'width' in src ? src.width : 0;
+  const ih = 'height' in src ? src.height : 0;
+  if (!iw || !ih) return null;
+  const key = `${Math.round(col.r)}|${Math.round(col.g)}|${Math.round(col.b)}|${Math.round(col.a)}`;
+  const hit = STAR_RAY_TINT_CACHE.get(key);
+  if (hit) return hit;
+  if (src instanceof HTMLImageElement && !src.complete) return null;   // 拒烘半加载
+  if (STAR_RAY_TINT_CACHE.size >= 96) {
+    const oldest = STAR_RAY_TINT_CACHE.keys().next().value;
+    if (oldest !== undefined) STAR_RAY_TINT_CACHE.delete(oldest);       // FIFO 淘汰
+  }
+  try {
+    const c = document.createElement('canvas');
+    c.width = iw; c.height = ih;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.drawImage(src as CanvasImageSource, 0, 0);
+    const d = g.getImageData(0, 0, iw, ih);
+    const p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+      p[i] = (p[i]! * col.r / 255) | 0;
+      p[i + 1] = (p[i + 1]! * col.g / 255) | 0;
+      p[i + 2] = (p[i + 2]! * col.b / 255) | 0;
+      p[i + 3] = (p[i + 3]! * col.a / 255) | 0;
+    }
+    g.putImageData(d, 0, 0);
+    STAR_RAY_TINT_CACHE.set(key, c);
+    return c;
+  } catch {
+    return null;                                        // getImageData 异常 → 静默走本体直绘
   }
 }

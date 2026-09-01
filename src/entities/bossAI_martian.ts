@@ -53,7 +53,9 @@ const sign = (v: number): number => (v > 0 ? 1 : v < 0 ? -1 : 0);
 // 先例自 terraria-assets/Images 补入 public/sprites/vanilla/(Arrow 按 projId 懒加载),
 // 此前的 RENDER_PROXY 代渲登记已退役。
 // ProjectileID.cs 对照:264 RainCloud 雨滴 / 435 MartianTurretBlast(特斯拉电球) /
-// 438 MuonBlast(骑手弹) / 447 MartianDeathray(死光电报,自带 proj AI 未实装→直飞代) /
+// 438 MuonBlast(骑手弹) / 447 MartianDeathray(死光电报——★终零波销核:AI_079 已
+//   :929 起 MartianDeathray 实体类 1:1 实装(:36201/:36670 两生产位均走该类),
+//   旧"自带 proj AI 未实装→直飞代"登记就此退役) /
 // 448 MartianSaucerCannon(火炮弹) / 449 MartianSaucerLaser(激光) / 450 MartianMissile。
 // ---------------------------------------------------------------------------
 function shootM(

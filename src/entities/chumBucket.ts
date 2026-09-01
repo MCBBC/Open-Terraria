@@ -8,11 +8,13 @@
 //   ② SharkSpawnChance（NPC.cs:5558-5576）：水面点 Collision.CanHit(活体 820 矩形)
 //      命中即 1/2 否则 1/10——VanillaSpawner 海洋支接线（vanilla 直扫 Main.projectile，
 //      本仓以同帧矩形表等价，数据流同源）。
-// ★R25-E10 登记：本仓弹体 820 实体（AI_163 物理/泡沫/消散链）与 Item4608
-//   use→shoot=820 链未实装——本注册面先行接线；实体批落地时在该 AI 内每帧调
-//   chumReport，并在全体弹幕更新前每帧调 chumOnPreUpdateAll。空表态 = 无渔力
-//   加成/鲨鱼 1/10，与 vanilla 无 chum 投掷时完全同态（替换旧"扫地面掉落物
-//   4608"的反向错误路径：桶扔地上也白吃加成）。
+// ★R25-E10 登记销核（2026-09-01 终零波核对）：弹体 820 实体（ChumBucketProj,
+//   AI_163 干抛→湿身钉液面物理链）与 Item4608 use→shoot 专支（Game.throwChumBucket,
+//   ORPHAN_THROW_VIDS A 波工单3）均已实装——生产端每 tick 在 AI 内调 chumReport、
+//   Game 主循环实体更新前调 chumOnPreUpdateAll(:6712)。消费端两条接线在位：
+//   Bobber.getFishingPondState→chumsInTile 与 VanillaSpawner SharkSpawnChance→chumSpots。
+//   空表态 = 无渔力加成/鲨鱼 1/10，与 vanilla 无 chum 投掷时完全同态（已替换旧
+//   "扫地面掉落物 4608"的反向错误路径）。
 
 export interface ChumSpot {
   /** 弹体矩形左上角（世界 px；SharkSpawnChance 的 CanHit 面） */

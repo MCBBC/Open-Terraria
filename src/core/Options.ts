@@ -103,6 +103,17 @@ export interface OptionsData {
   /** 拾取提示（Main.showItemText，:705；默认 true）——消费：PopupText 族；
    *  本仓 Game.showPickupLabel 门 */
   showItemText: boolean;
+  /** 建造饰品自动上致动器关断（Main.builderAccStatus[2]==1 档；默认 false = status[2]=0
+   *  启用）——加压器 3624 置放覆盖格自动上致动器的开关面。原版开关 UI =
+   *  装备区旁 BuilderAcc 图标钮（Main.cs:48162 区，tooltip GameUI.ActuationDeviceOn/Off，
+   *  装备 autoActuator 时才出现）；本仓以设置页 toggle 承载（终零波 最小可行版）。
+   *  消费：Game.tryPlace 自动致动段（Player.cs:40952 `!autoActuator || builderAccStatus[2]!=0`） */
+  builderAutoActuatorDisabled: boolean;
+  /** 建造饰品自动喷漆关断（Main.builderAccStatus[3]==1 档；默认 false = status[3]=0 启用）
+   *  ——喷漆器族 2216/3061/5126 放置同步上漆的开关面。原版 tooltip
+   *  GameUI.PaintSprayerOn/Off（Main.cs:48252 case3）；本仓以设置页 toggle 承载。
+   *  消费：Game.tryPlace 自动上漆段（Player.cs:39938 `autoPaint && builderAccStatus[3]==0` 等） */
+  builderAutoPaintDisabled: boolean;
   /** 事件进度条（Main.invasionProgressMode，:714；Main() 静默初始化=2，非字段 0！）：
    *  0=关 / 1=定时(160t 窗) / 2=开(近场常显)。消费：CheckInvasionProgressDisplay
    *  :46965+DrawInvasionProgress :47077；本仓 Game 入侵条数据源 */
@@ -220,6 +231,8 @@ export class OptionsStore {
     doorOpeningPreference: 'enabled',       // DoorOpeningHelper.cs:216
     autoReuseAllItems: false,               // Main.cs:241
     showItemText: true,                     // Main.cs:1194
+    builderAutoActuatorDisabled: false,     // builderAccStatus[2]=0（启用）
+    builderAutoPaintDisabled: false,        // builderAccStatus[3]=0（启用）
     invasionProgressMode: 2,                // Main() 静默初始化 Main.cs:65992
     placementPreview: true,                 // Main.cs:1298
     highlightNewItems: true,                // ItemSlot.cs:31
@@ -340,6 +353,9 @@ export class OptionsStore {
       if (this.data.quickStackMode !== 'quick' && this.data.quickStackMode !== 'smart') {
         this.data.quickStackMode = 'quick';
       }
+      // 建造饰品开关（终零波）：坏值回默认「启用」
+      if (typeof this.data.builderAutoActuatorDisabled !== 'boolean') this.data.builderAutoActuatorDisabled = false;
+      if (typeof this.data.builderAutoPaintDisabled !== 'boolean') this.data.builderAutoPaintDisabled = false;
       // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----
       if (typeof this.data.touchButtonAlpha !== 'number'
         || !Number.isFinite(this.data.touchButtonAlpha)) this.data.touchButtonAlpha = 0.82;

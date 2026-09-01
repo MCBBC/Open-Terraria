@@ -142,6 +142,10 @@ function jumpPick(st: { inBounds(c: number, r: number): boolean; isSolid(c: numb
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
+/** ★终零波批：帧 branch 自带 rotation 的逐款集（208/825/958/1027——
+ *  Projectile.cs:65827/:61861/:61969/:63624，draw() 消费 animRot） */
+const PET_ANIM_ROT_IDS = new Set([208, 825, 958, 1027]);
+
 /** TreeID.Sets.IsShakeable 子集可摇树的木材/树种掉落 vid 映射（KillTile_GetTreeDrops
  *  :66718-66790 树种面精简——GetTreeTypeAndTreeBottom 溯基座草族由【同列下探首块非
  *  干草格】承载。宝石树 583-589 的宝石果面与冠帧橡实面不入此精简表（登记）） */
@@ -260,6 +264,12 @@ export class PetFollower extends Entity {
   private axeLai0 = 0;
   /** npc.rotation（AI_144 双档旋转面：快档 avg12 / 慢档 ×0.96 衰减；draw 消费） */
   private rot = 0;
+  // ---- ★终零波批：地面族逐款帧机 latch ----
+  /** 958/825 待机轮 localAI[0]（眨眼/表情轮盘计时——Projectile.cs:63403/:64522） */
+  private laiG = 0;
+  /** 208/825/958/1027 帧 branch 内 rotation（rotation=vx·k 等，draw 消费；
+   *  undefined = 本拍无旋转覆写 → 走通用翻转面） */
+  private animRot?: number;
 
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
@@ -357,9 +367,12 @@ export class PetFollower extends Entity {
       }
       // 落回地面门（:57556-57562）：距玩家 < landRange、玩家落地、宠物不高于玩家脚、
       // 宠物未嵌块 → 退出飞行（vy 钳 ≥ -6）
+      // ★终零波：208 鹦鹉降落禁用档（P.cs:61487——玩家 |vx|+|vy|>4 时 num102=-1,
+      // 本 tick 不降；"0.95 水平阻尼"旧登记系该段误读,顺此销核）
+      const landGate = !(this.projId === 208 && pSpeed >= 4);
       const pvy = (p as { vy?: number }).vy ?? 0;
       const landRange = e.landRange ?? D.landRange ?? 200;
-      if (dist < landRange && pvy === 0 && this.y + this.h <= p.y + p.h
+      if (landGate && dist < landRange && pvy === 0 && this.y + this.h <= p.y + p.h
         && !solidAtBox(st, this.x, this.y, this.w, this.h)) {
         this.flying = false;
         if (this.vy < -6) this.vy = -6;
@@ -419,8 +432,10 @@ export class PetFollower extends Entity {
       }
     }
     // 重力 + 碰撞位移（:59421 通用档 velocity.Y += 0.4f / cap 10）
-    const grav = e.gravity ?? D.gravity ?? 0.4;
-    const fallCap = e.fallCap ?? D.fallCap ?? 10;
+    // ★终零波：208 鹦鹉本支字面档 = +0.1 / cap4（P.cs:65846-65847，flag27 链
+    // type==208 分支内自带——非家族通用行）
+    const grav = this.projId === 208 ? 0.1 : (e.gravity ?? D.gravity ?? 0.4);
+    const fallCap = this.projId === 208 ? 4 : (e.fallCap ?? D.fallCap ?? 10);
     this.vy = Math.min(this.vy + grav, fallCap);
     moveAndCollide(this, game.world, this.vx, this.vy);
     // aiStyle 67 滚动角（AI_067 :46795-46800：rotation += vx/20；1056/1090 /16）
@@ -579,10 +594,12 @@ export class PetFollower extends Entity {
   }
 
   // ===================== 动画帧推进 =====================
-  // 帧表 = 竖排条（Main.projFrames；帧高 = 图高/帧数）。逐款帧窗口（如 958 行走
-  // 5-12/待机 0/空中 4）未逐款移植，按家族通用规则近似：
-  //   ground：待机 0／空中 1／行走 0..min(frames,3) 按 |vx| 累进（:61700 通用式
-  //           frameCounter += |vx|，>6 进帧）；
+  // 帧表 = 竖排条（Main.projFrames；帧高 = 图高/帧数）。逐款帧窗口转正面：
+  //   ground：待机 0／空中 1／行走 0..min(frames,3) 按 |vx| 累进（家族通用式近似,
+  //           兜底面）；★终零波批已转正专支:960 Chester(:63714-63828)/208 鹦鹉
+  //           (:65826)/825 小红熊猫(:64465+:61852)/958 独眼巨鹿宠(:63386+:61955)/
+  //           1027 掘地蜂群(:63576) —— 见 parrotStep/pandaStep/deerclopsStep/
+  //           cavelingStep 各方法体内行号注;
   //   fly：匀速循环全表（移动 4t/帧、待机 8t/帧）；
   //   hover：AI_144/124 原版双速率（待机 idleRate/移动 moveRate，vel>6 判移动）。
   //   ★957 GlommerPet 走专支（见 case 'hover' 头部注释）。
@@ -603,6 +620,11 @@ export class PetFollower extends Entity {
           this.chesterStepAnim(movedX);
           break;
         }
+        // ---- ★终零波批：四款逐帧窗转正（此前按家族通用式近似）----
+        if (this.projId === 208) { this.parrotStep(movedX); break; }
+        if (this.projId === 825) { this.pandaStep(movedX); break; }
+        if (this.projId === 958) { this.deerclopsStep(movedX); break; }
+        if (this.projId === 1027) { this.cavelingStep(movedX); break; }
         if (!this.onGround) { this.frame = Math.min(1, frames - 1); this.frameAcc = 0; break; }
         if (Math.abs(this.vx) <= 0.1) { this.frame = 0; this.frameAcc = 0; break; }
         this.frameAcc += Math.abs(this.vx);
@@ -743,6 +765,165 @@ export class PetFollower extends Entity {
       if ((st.isSolid(tx, ty + i)) !== (i === 4)) return false;
     }
     return true;
+  }
+
+  // ===========================================================================
+  // ★终零波批：地面族四款逐帧窗（此前按家族通用规则近似——本批逐款转正）。
+  // 源 = AI_026 flag27 状态链（Projectile.cs:63335 起）+ 追赶飞行窗（:61852/:61955/
+  // :62290 各 type 分支）。判据面：air=velocity.Y≠0（引擎等价=moveAndCollide 落地
+  // 即 vy==0,Chester 批同约定）；idle=flag27(position.X−oldPosition.X==0 ↔ movedX
+  // 取反)；flight=this.flying（ai[0]≠0）。旋转经 animRot 字段在 draw() 消费。
+  // ===========================================================================
+
+  /** 208 鹦鹉（flag27 链 :65826-65848 + 飞行窗 :62290-62299 同式合并——两段字面一致）：
+   *  落定→面向玩家(双 if 序) rot 归零 frame0；其余 rot=vx×0.075、7t 步进、窗 [1..4]
+   *  （>4 回 1 / <1 钳 1）。★重力档差异（本支字面 velocity.Y+=0.1 cap4 :65846-65847
+   *  vs 家族通用 0.4/10）由 groundAI projId===208 覆写承载 */
+  private parrotStep(movedX: boolean): void {
+    if (this.vy === 0 && !movedX && !this.flying) {
+      const p = this.ownerRef();
+      if (p) {
+        if (p.cx < this.cx) this.dir = -1;
+        else if (p.cx > this.cx) this.dir = 1;       // :65831-65836 双独立 if
+      }
+      this.animRot = 0;
+      this.frame = 0;
+      this.frameAcc = 0;
+      return;
+    }
+    this.animRot = this.vx * 0.075;
+    if (++this.frameAcc > 6) { this.frameAcc = 0; this.frame++; }
+    if (this.frame > 4) this.frame = 1;
+    if (this.frame < 1) this.frame = 1;
+  }
+
+  /** 825 小红熊猫（flag27 链 :64465-64554 + 飞行窗 :61852-61861）：
+   *  空 → laiG 清 frame12；追赶飞 → 4t 步进窗 [21..25] + rot=vx×0.025；
+   *  待机 → 三段表情轮盘（1..2 段 6t 循环 / 3..11 段 6t 循环回 0 / 其余归 13,13 段
+   *  9t 后 14→0,laig>300 且 rand(50)==0 → rand(2)?3:1 入轮）;行走 → rate 按 |v|
+   *  分档（>4:每3t/>2:每2t/≤2:每4t）、窗 [13..19]（<13 回 13、>19 回 14）。
+   *  待机朝向反序（player 左 → spriteDirection=+1,:64474-64477） */
+  private pandaStep(movedX: boolean): void {
+    if (this.flying) {                                    // ai[0]≠0 追赶飞行（:61852）
+      if (++this.frameAcc > 4) { this.frameAcc = 0; this.frame++; }
+      if (this.frame < 21 || this.frame > 25) this.frame = 21;
+      this.animRot = this.vx * 0.025;
+      return;
+    }
+    this.animRot = undefined;                             // 落地链无旋转覆写（飞行值清零防残留）
+    if (this.vy !== 0) {                                  // 空中定格（:64469-64472）
+      this.laiG = 0;
+      this.frameAcc = 0;
+      this.frame = 12;
+      return;
+    }
+    if (!movedX) {                                        // 待机轮盘（:64473-64535）
+      const p = this.ownerRef();
+      this.dir = -(Math.sign(p ? p.cx - this.cx : 0)) || this.dir;
+      if (this.frame >= 1 && this.frame <= 2) {
+        this.laiG = 0;
+        if (++this.frameAcc > 5) { this.frameAcc = 0; this.frame++; }
+        if (this.frame > 2) this.frame = 0;
+      } else if (this.frame >= 3 && this.frame <= 11) {
+        this.laiG = 0;
+        if (++this.frameAcc > 5) { this.frameAcc = 0; this.frame++; }
+        if (this.frame > 11) this.frame = 0;
+      } else {
+        if (this.frame === 13) {
+          if (++this.frameAcc > 8) { this.frameAcc = 0; this.frame++; }
+          if (this.frame === 14) this.frame = 0;
+        }
+        if (this.frame !== 0) this.frame = 13;
+        else this.frame = 0;
+        if (this.frame === 0) {
+          this.laiG++;
+          if (this.laiG > 300 && Math.floor(Math.random() * 50) === 0) {
+            this.frame = Math.floor(Math.random() * 2) === 0 ? 1 : 3;   // switch(rand(2))
+          }
+        }
+      }
+      return;
+    }
+    // 行走（:64537-64550）：rate=num214∈{3(|v|≤2),1(>2),2(>4)} 步进周期=num214+1
+    this.laiG = 0;
+    const len = Math.hypot(this.vx, this.vy);
+    const num214 = len > 4 ? 2 : len > 2 ? 1 : 3;
+    if (++this.frameAcc > num214) { this.frameAcc = 0; this.frame++; }
+    if (this.frame < 13) this.frame = 13;
+    if (this.frame > 19) this.frame = 14;
+  }
+
+  /** 958 独眼巨鹿宠 DeerclopsPet（flag27 链 :63386-63427 + 飞行窗 :61955-61970）：
+   *  空 → laiG/frameCounter 清 frame4；待机 → 面向玩家（player 左 → −1）+ 停留
+   *  laiG++ 过 200 起眨眼帧 1+(laiG−200)/6（≥218 收 0 并重掷 laiG=rand(100)）；行走 →
+   *  frameCounter+=|v| 每 7t 步进、窗 [5..12]；追赶飞 → sign(vx) 定向、<13 先钉 13、
+   *  4t 步进窗 [13..16]、rot=clamp(vx×0.025,±0.4)。行走态 rotation 无覆写 */
+  private deerclopsStep(movedX: boolean): void {
+    if (this.flying) {                                    // ai[0]≠0（:61955）
+      if (this.vx !== 0) this.dir = Math.sign(this.vx);
+      if (this.frame < 13) { this.frame = 13; this.frameAcc = 0; }
+      if (++this.frameAcc > 4) { this.frameAcc = 0; this.frame++; }
+      if (this.frame > 16) this.frame = 13;
+      this.animRot = clamp(this.vx * 0.025, -0.4, 0.4);
+      return;
+    }
+    this.animRot = undefined;                             // 落地链无旋转覆写（飞行值清零防残留）
+    if (this.vy !== 0) {                                  // 空中定格（:63387-63390）
+      this.laiG = 0;
+      this.frameAcc = 0;
+      this.frame = 4;
+      return;
+    }
+    if (!movedX) {                                        // 待机+眨眼轮（:63392-63409）
+      const p = this.ownerRef();
+      this.dir = -(Math.sign(p ? this.cx - p.cx : 0)) || this.dir;   // player 左→−1（:63394-63397 同序）
+      this.laiG++;
+      if (this.laiG > 200) {
+        this.frame = 1 + Math.floor((this.laiG - 200) / 6);
+        if (this.laiG >= 218) {
+          this.frame = 0;
+          this.laiG = Math.floor(Math.random() * 100);
+        }
+      } else {
+        this.frame = 0;
+      }
+      return;
+    }
+    this.laiG = 0;                                        // 行走（:63410-63420）
+    this.frameAcc += Math.trunc(Math.hypot(this.vx, this.vy));
+    if (this.frameAcc > 6) { this.frameAcc = 0; this.frame++; }
+    if (this.frame < 5 || this.frame > 12) this.frame = 5;
+  }
+
+  /** 1027 掘地蜂群 Caveling（flag27 链 :63576-63631；α 视觉+渐隐降落链 :61346/:59945 登记偏差）：
+   *  升(vy<0)→frame2 / 降(vy>0)→frame4 / 待机→面向玩家反向序（player 左→+1)frame0 /
+   *  行走→frameCounter+=max(1,(int)(|v|/2)) 每 6t 步进窗 [0..3];rot=0,腾空时 =
+   *  vy/10·π/4·(−spriteDirection)（:63622-63626）。★碰撞腾空分帧(rot/2/4 帧)与
+   *  本仓"onGround 稳态"近似一致性由引擎落地清 vy 保证 */
+  private cavelingStep(movedX: boolean): void {
+    if (this.flying || !this.onGround) {
+      // 追赶飞行（vanilla=(209/956/1027) 特化「渐隐平移至玩家脚下」:61346-61368，
+      // 非 ai[0]!=0 通用追击）——未建模登记，维持批前通用表现（定格帧 1）
+      this.animRot = undefined;
+      this.frameAcc = 0;
+      this.frame = 1;
+      return;
+    }
+    if (this.vy < 0) this.frame = 2;
+    else if (this.vy > 0) this.frame = 4;
+    else if (!movedX) {
+      const p = this.ownerRef();
+      this.dir = -(Math.sign(p ? p.cx - this.cx : 0)) || this.dir;   // player 左→+1(:63590-63593 反序族同 825)
+      this.frame = 0;
+      this.frameAcc = 0;
+    } else {
+      this.frameAcc += Math.max(1, Math.trunc(Math.hypot(this.vx, this.vy) / 2));
+      if (this.frameAcc > 5) { this.frameAcc = 0; this.frame++; }
+      if (this.frame < 0 || this.frame > 3) this.frame = 0;
+    }
+    this.animRot = this.vy !== 0
+      ? this.vy / 10 * (Math.PI / 4) * (-this.dir)
+      : 0;
   }
 
   // ===================== ★终清波批彩蛋（AI_144 DD2Pet 特化段） =====================
@@ -953,6 +1134,11 @@ export class PetFollower extends Entity {
     if (this.projId === 1050) {
       if (flip) { ctx.rotate(-this.rot); ctx.scale(-1, 1); }
       else ctx.rotate(this.rot);
+    } else if (this.animRot !== undefined && PET_ANIM_ROT_IDS.has(this.projId)) {
+      // ★终零波：地面族四款帧 branch rotation（208=vx×0.075 / 825·958 飞行=vx×0.025
+      // [958 钳 ±0.4] / 1027 腾空=vy/10·π/4×(−dir)；翻转位按 1050 同式先旋后镜）
+      if (flip) { ctx.rotate(-this.animRot); ctx.scale(-1, 1); }
+      else ctx.rotate(this.animRot);
     } else if (this.params.e.roll) ctx.rotate(this.rollRot);
     else if (flip) ctx.scale(-1, 1);
     if (this.projId === 764) ctx.globalAlpha *= this.starOpacity;
@@ -962,24 +1148,29 @@ export class PetFollower extends Entity {
   }
 
   // =============== 回退：旧统一肩后悬停近似（表外 proj id 用） ===============
-  // 登记缺口（本次升级后残留的近似项）：
+  // 登记缺口（残留的近似项；★终零波批已大面积销核）：
   //  ① Wisp(211)/ShadowOrb(18) 的控制键偏移（controlUp/Down ±40、controlLeft/Right
   //    ±120）——ownerRef 无输入态，未建模；
   //  ② ★终清波批销核面：764 alpha 脉冲/Y 波/d292 微光尘（upbeatStarTick）、1050 斧仙
   //    砍树专支（axeFairyAI+dropFairyWood）、1090 归位飞行 ShimmerBlock 编排粒子
   //    （groundAI flying 段）已 1:1 入位。653 同伴方块彩蛋本体在 MinionProj.
   //    companionCubeStep（本仓该宠走弹体召唤路 = 原版 BuffHandle_SpawnPetIfNeeded
-  //    NewProjectile 同构,非 PetFollower 承载）→ 此处无重复实现。★资产缺口：
-  //    DrawProjWithStarryTrail 的 FallenStar 覆绘需 vanilla/Item_75.png（盘上缺,
-  //    atlas-append 后即通）；Extra_91 三星尾迹需拖尾域帧缓存（渲染域债登记）。
-  //  ③ 地面族逐款帧窗口（958 行走 5-12、825 待机表情轮盘等）与 208 鹦鹉 0.95
-  //    水平阻尼、1027 波浪帧段——按家族通用规则近似；
-  //    ★960 Chester 已转正专支（chesterStepAnim，Projectile.cs:63714-63828，
-  //    2026-08-26 接通——开盖/合盖/行走/待机四段 1:1），从本登记销核；
+  //    NewProjectile 同构,非 PetFollower 承载）→ 此处无重复实现。
+  //    ★资产缺口销核（2026-09-01 终零波批）：Extra_91 星芒尾已随 StarfuryStar.draw
+  //    真值组合落地（vanilla/Extra_91.png 盘上在案,MissileProj.ts 染色副本周转池），
+  //    渲染域债登记退役;FallenStar 覆绘(764)仍待 Item_75.png 入库维持登记。
+  //  ③ 地面族逐款帧窗口——★终零波批销核面：960 Chester（chesterStepAnim 1:1,
+  //    2026-08-26）、208 鹦鹉（parrotStep+[0.1/cap4] 重力档 + 追赶降落禁用档
+  //    P.cs:61487——旧"0.95 水平阻尼"系误读销核）、825 小红熊猫（pandaStep 表情
+  //    轮盘三段式+speed 分档行走窗 [13..19]+飞行窗 [21..25]）、958 独眼巨鹿宠
+  //    （deerclopsStep 待机眨眼轮 laiG>200+行走窗 [5..12]+飞行窗 [13..16] 与
+  //    rot clamp±0.4）、1027 掘地蜂群（cavelingStep 升降分帧 2/4+|v|/2 分档窗
+  //    [0..3]+腾空 rot）均转正（见各 step 方法体内行号）。登记残留=①1027 追赶
+  //    飞行的特化「渐隐平移至玩家脚下」链（P.cs:61346-61368,非通用追击族,现走
+  //    cavelingStep 通用定格近似）;②Pal 族(1093/1094/1098)专属 Joy 音效
+  //    （1.4.5 Palworld 联动素材缺,维持下条登记）;
   //  ④ AI_026 抚摸(petting)：已接通（beingPetted 2026-08-20——flag9 闲逛/浮游停摆 +
   //     面向玩家，全链在 Player.petAnimal/updatePettingAnimal + Game 右键链）。
-  //     残留：Pal 族(1093/1094/1098)专属 Joy 音效（1.4.5 Palworld 联动，素材
-  //     dd2 系无对应 wav，登记）。
   private legacyAI(p: OwnerRef): void {
     // 目标位：玩家肩后（朝向反向 ×22px，头侧 -26px）+ 正弦浮动（±4px，0.06/t）
     const bob = Math.sin(this.animTick * 0.06) * 4;

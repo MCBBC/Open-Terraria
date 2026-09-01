@@ -24,7 +24,7 @@ import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
-import { mainDifficulty, sampleCurve, remap, GDL, f32, type CurveKey } from '../stats/ScaleStats';
+import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
@@ -123,10 +123,14 @@ const ID_STATIC_1128_TABLE = new IdStaticSharedTable(30 * TICK_MS);
  *  (_gameModeDifficultyOverride)+FTW 种子 +1 抬档）。1091 SetDefaults :10186
  *  `hostileDamageScaling = LightningPlayerDamageScaling` 接线本表 */
 export const LIGHTNING_PLAYER_DAMAGE_SCALING: readonly CurveKey[] = [
-  { input: GDL.JOURNEY, output: 0.04 },
-  { input: GDL.CLASSIC, output: 0.08 },
-  { input: GDL.MASTER, output: 0.24 },
-  { input: GDL.LEGENDARY, output: 0.4 },
+  // ★②-F4 预折：Journey(0.5) 首键相等段 Sample 走 num===0 早退直出 key.output——
+  //   折后 = fround(0.04)=0.03999999910593033，与 C# Key(float,float) 构造语义一致；
+  //   消费链 lightningEvpFinalDamage 的中间 fround 吸收两形态样本差（dmg 1..100000
+  //   全轴零截断翻档）。见 tests/scalestats-prefold.test.ts。
+  curveKey(GDL.JOURNEY, 0.04),
+  curveKey(GDL.CLASSIC, 0.08),
+  curveKey(GDL.MASTER, 0.24),
+  curveKey(GDL.LEGENDARY, 0.4),
 ];
 
 /** 玩家侧终值 = DamageVar(base,-luck) × curve(Difficulty) ×2 ×死囚毛衣(trap ×0.5 帽300)

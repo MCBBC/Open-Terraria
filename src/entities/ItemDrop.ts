@@ -7,7 +7,7 @@ import { ITEM_DEFS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
 import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
-import { getDropScanCtx } from './dropScanCtx';
+import { getDropScanCtx, grabRangeBonusFor } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
   decraftOutcome, isItemDecraftableAndUnlocked,
@@ -166,27 +166,32 @@ export class ItemDrop extends Entity {
       if (grabbable) {
       // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
       // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取；
-      // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
+      // 拉取半径加成段 = Player.GetItemGrabRange 全表（终零波 GRAB_RANGE 一行改造：
+      // 帧扫描路径经 grabRangeBonusFor(ctx,vid) 逐 vid 展开——金戒指币族+350/
+      // 星族/心族/4143/3822/NebulaPickup 六项全部按原版 vid 门生效；
+      // 旧 grabRangeBonus(-1)+pickup 分类拼装 retired）
       // ★帧扫描快照（dropScanCtx.ts 头注；trace 实测 equip 热点 54.4% 主线程自耗
       //   时——grabRangeBonus/canAccept 曾每帧每物触发 equipStats 内容键全量重建）。
-      //   三项加成与 preventAll 在一帧内恒定（拾取写面不触及任何输入域），同值严格
-      //   等价；快照缺席（单测/探针直调本 fixedUpdate 不经 Entities.update）回退旧逐
-      //   次计算路径。
+      //   四旗输入与 preventAll 在一帧内恒定（拾取写面不触及任何输入域），同值严格
+      //   等价；快照缺席（单测/探针直调本 fixedUpdate 不经 Entities.update）回退
+      //   player.getItemGrabRangeBonus(vid) 直读。
       const scan = getDropScanCtx(player);
       const vidThis = vanillaIdOfItem(this.itemId);
       let GRAB_RANGE: number;
       let canAccept: boolean;
       if (scan) {
-        GRAB_RANGE = 42 + scan.grab
-          // 拾心药水（lifeMagnet）：红心单独扩大拾取范围
-          + (this.pickup === 'heart' ? scan.heart : 0)
-          // 魔力磁石（manaMagnet：星 184/1735/1868 专用吸附，Player.cs:34495 专属拉取通道）
-          + (this.pickup === 'star' ? scan.star : 0);
+        GRAB_RANGE = 42 + grabRangeBonusFor(scan, vidThis);
         canAccept = !scan.preventAll || IGNORES_ENCUMBERING_STONE_VIDS.has(vidThis);
       } else {
-        GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0)
-          + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0)
-          + (this.pickup === 'star' ? ((player as { manaMagnetBonus?: number }).manaMagnetBonus ?? 0) : 0);
+        const gb = (player as unknown as { getItemGrabRangeBonus?: (v: number) => number })
+          .getItemGrabRangeBonus;
+        GRAB_RANGE = 42
+          + (gb ? gb.call(player, vidThis)
+            : grabRangeBonusFor({   // 裸 stub 宿主回退：只有 grab 遗留值可用
+                treasureMagnet: false, goldRing: false, manaMagnetEquip: false,
+                heartreachBuff: false, grab: (player as { grabRangeBonus?: number }).grabRangeBonus ?? 0,
+                heart: 0, star: 0, preventAll: false,
+              }, vidThis));
         canAccept = (player as unknown as {
           canAcceptItemIntoInventory?: (vid: number) => boolean;
         }).canAcceptItemIntoInventory?.(vidThis) ?? true;

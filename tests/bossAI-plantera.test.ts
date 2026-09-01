@@ -1,7 +1,7 @@
 // 世纪之花 262 全链专项（2026-08-13 1:1 对齐批验收）：
 //   AI_051 相位常数/激怒界（UnderworldLayer=h-200,勿用 lavaLine）/despawn 4800px
 //   语义/弹幕物理（275/276 延迟重力+专家追踪、277 荆棘弹跳）/276 命中上毒
-//   （BuffType.Poisoned）/保底灯泡爆发（GeneratePlanteraBulbOnAllMechsDefeated）
+//   （BuffType.Poisoned）/保底花苞爆发（GeneratePlanteraBulbOnAllMechsDefeated）
 //   /钩蔓 263 dontTakeDamage。
 // 参照：NPC.cs:31873-32237 / Projectile.cs:54318-54345,18306-18314,11527-11535
 //      WorldGen.cs:74180-74329 / NPC.cs:12328-12340。
@@ -220,8 +220,8 @@ describe('世纪之花弹幕与状态', () => {
   });
 });
 
-describe('保底灯泡爆发（WorldGen.cs:74180-74329）', () => {
-  it('丛林侧草床 → 恰好生成一个 2×2 灯泡', () => {
+describe('保底花苞爆发（WorldGen.cs:74180-74329）', () => {
+  it('丛林侧草床 → 恰好生成一个 2×2 花苞', () => {
     const w = makeWorld(true);
     const evo = new WorldEvolution({
       store: w.store, worldSurface: 50, rockLevel: 120,

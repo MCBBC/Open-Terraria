@@ -81,7 +81,37 @@ export function remap(fromValue: number, fromMin: number, fromMax: number, toMin
 // ---------------------------------------------------------------------------
 export interface CurveKey { input: number; output: number }
 
+/** ★②-F4 构造期 f32 预折（仿 DryadsBane ADD_* 先例：每键值 f32 物化存储）。
+ *  C# LinearCurve.Key 的形参本身就是 float（GameDifficultyData.cs:8-10
+ *  `Key(float input, float output)`），即字面量在**构造**处完成 (float) 舍入，
+ *  Sample 里的一切算术都作用于已物化的 float 键值。旧形态把 raw double 写进表、
+ *  仅在采样期对差值 fround，等价于倒置了两次舍入的次序——含非精确字面量的曲线
+ *  出现系统性偏差：
+ *    · KnockbackToEnemiesMultiplier 的 0.8f：num2 = 0.8f−1 = −0.199999988…（f32 域
+ *      直差），旧路 = double 直差 −0.20000000298… 再 fround —— **二选不同邻居**；
+ *      实证轴 value=2.75：0.82499999(旧) / 0.82500005(新)，恰为任务单点名的
+ *      「−0.20000000…2 之别」。
+ *    · LightningPlayerDamageScaling 首键输出 0.04f：Sample 在首键相等段走 `num===0`
+ *      早退直出 key.output——存 double 就直出未折值。
+ *  影响面逐曲线核算（difficulty 网格 1..4 步长 0.00025，C# float 逐 op 模拟对拍）：
+ *    五表（MAX_LIFE/DAMAGE/HOSTILE/MONEY/TOWN_NPC）折前折后逐点全等——所有字面量
+ *    或精确、或舍入落同一邻位（含 5.3333335f 的插值段）；
+ *    KNOCKBACK 差点数占比≈32%（网格口径）、|Δ| 上限=5.9604644775390625e-8；
+ *    LIGHTNING 同级 |Δ|=2.98e-8。
+ *  ★消费面吸收定谳：采样差经消费链的中间 fround（f32(f32(x)·Sample) / f32(kbResist·S)）
+ *    在 dmg 1..100000 × 四轴全格与 kbResist 稠密扫描内零截断翻档/零位差组——本刀的
+ *    价值是构造语义忠实（消除「下次有人在边界加个字面量就滑进邻位」的潜在翻转类），
+ *    而非可见行为变化；Journey 早退支 0.04raw 的样本差同样被吸收。
+ *  ★残余形差登记（非本刀引入，双重差）：C# Sample 的 value 形参是 float，
+ *    本仓以 double 直传且入口不折——arg 精度引入的第三类微差与预折无关
+ *    （2.38e-7~9.54e-7 量级 witness 见 tests/scalestats-prefold.test.ts 注）。
+ *  表钉测试 = tests/scalestats-prefold.test.ts。 */
+export const curveKey = (input: number, output: number): CurveKey =>
+  ({ input: f32(input), output: f32(output) });
+
 export function sampleCurve(keys: readonly CurveKey[], value: number): number {
+  // 注：keys 已在构造期 f32 预折；此处各 op 的 fround 对应 C# float 逐 op 舍入语义,
+  // 与预折不是同一层（保留勿删）。
   let key = keys[0];
   let key2 = key;
   for (let i = 0; i < keys.length; i++) {
@@ -95,30 +125,31 @@ export function sampleCurve(keys: readonly CurveKey[], value: number): number {
   return f32(f32(f32(value - key.input) * num2) / num + key.output);
 }
 
-// 七条难度曲线（GameDifficultyData.cs:62-70，键值逐项照抄；
-// DebuffTimeMultiplier(:70)/LightningPlayerDamageScaling(:71) 未消费暂不列）
+// 七条难度曲线（GameDifficultyData.cs:62-71，键值逐项照抄并经 curveKey 构造期 f32
+// 预折——★②-F4；第六表 LightningPlayerDamageScaling 消费面在 entities/proj1457.ts
+// 落雷家 EVP，DebuffTimeMultiplier 未消费暂不列）
 export const ENEMY_MAX_LIFE_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.JOURNEY, output: 0.5 }, { input: GDL.LEGENDARY, output: 4 },
+  curveKey(GDL.JOURNEY, 0.5), curveKey(GDL.LEGENDARY, 4),
 ];
 export const ENEMY_DAMAGE_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.JOURNEY, output: 0.5 }, { input: GDL.MASTER, output: 3 }, { input: GDL.LEGENDARY, output: 5.3333335 },
+  curveKey(GDL.JOURNEY, 0.5), curveKey(GDL.MASTER, 3), curveKey(GDL.LEGENDARY, 5.3333335),
 ];
 export const HOSTILE_PROJECTILE_DAMAGE_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.JOURNEY, output: 0.5 }, { input: GDL.MASTER, output: 3 },
+  curveKey(GDL.JOURNEY, 0.5), curveKey(GDL.MASTER, 3),
 ];
 export const KNOCKBACK_TO_ENEMIES_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.CLASSIC, output: 1 }, { input: GDL.MASTER, output: 0.8 },
+  curveKey(GDL.CLASSIC, 1), curveKey(GDL.MASTER, 0.8),
 ];
 export const ENEMY_MONEY_DROP_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.CLASSIC, output: 1 }, { input: GDL.EXPERT, output: 2.5 },
-  { input: GDL.MASTER, output: 2.5 }, { input: GDL.LEGENDARY, output: 3.5 },
+  curveKey(GDL.CLASSIC, 1), curveKey(GDL.EXPERT, 2.5),
+  curveKey(GDL.MASTER, 2.5), curveKey(GDL.LEGENDARY, 3.5),
 ];
 /** TownNPCDamageMultiplier（GameDifficultyData.cs:69）：城镇 NPC 自卫攻击伤害乘区。
  *  键 Journey 0.5→2 / Classic 1→1 / Expert 2→1.5 / Legendary 4→2——**无 Master 键**，
  *  Master(3) 由 Sample 在 Expert(1.5)-Legendary(2) 区间线性插值得 1.75 */
 export const TOWN_NPC_DAMAGE_MULTIPLIER: readonly CurveKey[] = [
-  { input: GDL.JOURNEY, output: 2 }, { input: GDL.CLASSIC, output: 1 },
-  { input: GDL.EXPERT, output: 1.5 }, { input: GDL.LEGENDARY, output: 2 },
+  curveKey(GDL.JOURNEY, 2), curveKey(GDL.CLASSIC, 1),
+  curveKey(GDL.EXPERT, 1.5), curveKey(GDL.LEGENDARY, 2),
 ];
 
 // ---------------------------------------------------------------------------

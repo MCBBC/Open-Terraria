@@ -207,3 +207,58 @@ describe('T④ 端到端 updateDryadWardAura 敌怪支（Projectile.cs:41967-419
     expect(e.dryadBaneDps).toBe(first);              // 未覆写 dps
   });
 });
+
+// ============================================================================
+// ★dryad census（2026-09-01 五轮轻验证收口批）——头注口径勘误的复算工具位：
+//   「double 直算偏档率」的正确口径 = 2^14 进度乘区组合 × infectedSeed 两半
+//   【双半空间合计】= 32,768 组合；double 链与 float32 链在 (int) 截断面上分歧
+//   共 2,830 组 = 8.6365%（≈8.64%，旧注「约 17%」系单半空间粗估退役）。
+//   复算路径 = 本 describe（vitest 纯函数域，零世界依赖）。
+// ============================================================================
+describe('★census：双半空间合计口径的偏档率复算（8.64%）', () => {
+  const fround = Math.fround;
+  const ADD_010 = fround(0.1), ADD_040 = fround(0.4), ADD_015 = fround(0.15);
+
+  function multF32(bits: boolean[]): number {
+    let n = 1;
+    if (bits[0]) n = fround(n + ADD_010); if (bits[1]) n = fround(n + ADD_010);
+    if (bits[2]) n = fround(n + ADD_010); if (bits[3]) n = fround(n + ADD_010);
+    if (bits[4]) n = fround(n + ADD_040);
+    for (let i = 5; i < 14; i++) if (bits[i]) n = fround(n + ADD_015);
+    return n;
+  }
+  function multDbl(bits: boolean[]): number {
+    let n = 1;
+    if (bits[0]) n += 0.1; if (bits[1]) n += 0.1; if (bits[2]) n += 0.1; if (bits[3]) n += 0.1;
+    if (bits[4]) n += 0.4;
+    for (let i = 5; i < 14; i++) if (bits[i]) n += 0.15;
+    return n;
+  }
+  // bit 序 ↔ DryadsBaneProgress 字段序：boss1/2/3/蜂后/hardMode/皇后/机1..3/世花/
+  // 石巨人/拜月/光女/猪鲨
+
+  it('32768 组合中 double 偏档恰 2830 组（8.64%）且见证组合 mask=1009 在案', () => {
+    let diverge = 0, total = 0, mask1009f = -1, mask1009d = -1;
+    for (const inf of [false, true]) {
+      const base = inf ? 8 : 4;
+      for (let m = 0; m < 16384; m++) {
+        total++;
+        const bits: boolean[] = [];
+        for (let b = 0; b < 14; b++) bits.push(Boolean(m & (1 << b)));
+        const dpsF = Math.trunc(fround(base * multF32(bits)));
+        const dpsD = Math.trunc(base * multDbl(bits));
+        if (m === 1009 && !inf) {   // boss1+hardMode+queenSlime+mech1..mech3+plant
+          expect([base, dpsF]).toEqual([4, 9]);   // float32 链 = 原版大档 9
+          expect(dpsD).toBe(8);                    // double 直算偏到 8（T② 同源见证）
+          mask1009f = dpsF; mask1009d = dpsD;
+        }
+        if (dpsF !== dpsD) diverge++;
+      }
+    }
+    expect(total).toBe(32768);
+    expect(mask1009f).toBe(9);
+    expect(mask1009d).toBe(8);
+    expect(diverge).toBe(2830);                                // census 终值钉死
+    expect((100 * diverge / total).toFixed(2)).toBe('8.64');   // 口径勘误后的标注值
+  });
+});

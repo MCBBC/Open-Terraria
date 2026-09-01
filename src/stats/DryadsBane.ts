@@ -37,9 +37,14 @@
  *   各旗标错档——本模块即翻正载体。消费端只显式挑取下列字段，防再串链。
  *
  * ★float32 保真（禁近似）：C# num2 为 float，每个 += 都在 float32 上舍入；JS 双精度
- *   直算会在约 17% 的旗标组合上把截断 dps 偏掉一档（实证组合 boss1+hardMode+
- *   queenSlime+mech1+mech2+mech3+plant：float32 链恰为 2.25f → ×4=9.000000→(int)=9；
- *   double 直算 2.2499999999999996 → ×4=8.999999…→(int)=8）。故逐项 Math.fround。
+ *   直算会在部分旗标组合上把截断 dps 偏掉一档。★2026-09-01 红队口径勘误：旧注
+ *   「约 17%」系单半空间粗估——正确口径 = 2^14 进度乘区组合 × infectedSeed 两半的
+ *   【双半空间合计】：32,768 组合中 double 直算偏档共 2,830 组 = **8.64%**（全零进度、
+ *   全成就链尾等大量组合两侧一致，偏档集中在乘区恰落 .25/.75 等截断边界的组合）。
+ *   实证见证组合 boss1+hardMode+queenSlime+mech1+mech2+mech3+plant（mask=1009）：
+ *   float32 链恰为 2.25f → ×4=9.000000→(int)=9；double 直算 2.2499999999999996 →
+ *   ×4=8.999999…→(int)=8。故逐项 Math.fround。census 工具 =
+ *   tests/town-npc-dryads-bane.test.ts 的 census 段（vitest 可复算 2830/32768）。
  */
 
 import { f32, getAttackDamageForTownNPC } from './ScaleStats';

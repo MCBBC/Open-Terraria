@@ -1214,9 +1214,10 @@ export class MinionProj extends Entity {
    *    InRangeDual 1:1,双距择近已归真）;盒相交∧下落 → vy=-4/vx=dir×10 兔跳
    *    蹭伤（:51181-51188）
    *  · 接触冷却 SetDefaults localNPCHitCooldown=10（:8095-8096）✔既有显式一致
-   *  · 未折算登记：目标脚下 15 格无地扫描→ai[0]=5 与 boss>600→ai[0]=5 追离态
-   *    （state5 全态机另批,现触发源仅上述两路径;M 项遗留细化）、flag3 静置尘 269/
-   *    AddLight 0.5（渲染层,C 类）——索敌"单距简化"登记于终清波批销账 */
+   *  · ai[0]=5 追离态（终零波清偿）：唯一触发源 = 目标脚下 15 格虚空扫描
+   *    （:51142-51156）；共享核 ai067StateFive（orbit 接近→入扑/180t 超时回 0）
+   *  · 未折算登记：flag3 静置尘 269/AddLight 0.5（渲染层,C 类）、追离中兔跳与
+   *    蓄力跳重叠窗未建模——索敌"单距简化"登记于终清波批销账 */
   private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
     const gems = Math.max(1, this.peerCount(game, 831));
     const scale = 1 + 0.4 * (gems - 1);
@@ -1226,21 +1227,44 @@ export class MinionProj extends Entity {
       if (--this.tigerA1 <= 0) { this.tigerA0 = 0; this.tigerA1 = 0; }
       return;
     }
-    // 特殊攻击门（成功按档冷却/失败 10t 重试）
+    // 索敌先行（state5 与触发源都需要 attackTarget 双距域内的真值——
+    // flag16 含 5 :50502-50504 flag15=ai[0]==5 → 虎在追离态每帧重检索）
+    const tgtPre = this.findTargetInRangeDual(game, 800);
+    // 特殊攻击门（成功按档冷却/失败 10t 重试；原版无 ai[0] 门,localAI[0] 计数在
+    // 追离态照走 :50184-50202——故置于 state5 门之前）
     if (this.pounceCd > 0) this.pounceCd--;
     else {
       const cd = this.projId === 834 ? 300 : this.projId === 835 ? 240 : 360;
       if (this.tigerSpecialAttack(game, p, dmg0)) { this.pounceCd = cd; return; }
       this.pounceCd = 10;
     }
+    // ai[0]==5 追离态（:50955-51001 共享核,终零波清偿）——唯一触发源 =
+    // 目标脚下 15 格虚空扫描（:51146-51156）；num10 缺省 15 档
+    if (this.tigerA0 === 5) {
+      this.ai067StateFive(game, tgtPre, 'tigerA0', 'tigerA1', 'tigerLai0', 15);
+      return;
+    }
     const st = game.world.store;
-    // 索敌（num2=800 :50136 flag3 覆写；Minion_FindTargetInRange 800 + 双距择近
-    // + skipIfCannotHitWithOwnBody —— 终清波批单距近似退役）
-    const tgt = this.findTargetInRangeDual(game, 800);
+    const tgt = tgtPre;
     const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
     let ax: number, ay: number;
     if (tgt) {
       ax = tgt.cx; ay = tgt.cy;
+      // 目标脚下 15 格虚空扫描（:51142-51156,flag3 支,IsInRangeOfMeOrMyOwner 域内
+      // 每帧跑）：nPC3.Top（Entity.Top=CenterX :86-90）向下数 num5=15 行，遇
+      // active() 或越界(null) 即截停；整窗无一格实心 → ai[0]=5 追离态+ai[1]=0
+      // 整段退（state5 核见上）。★旧登记"未折算"于终零波清偿——扫描列取【中心列】,
+      // 曾误用左缘列（ Entity.cs:86 Top=(X+w/2,Y) 终零波勘误））
+      {
+        const ttx = Math.floor((tgt.x + tgt.w / 2) / TILE);
+        const tty = Math.floor(tgt.y / TILE);
+        let rows = 0;
+        for (; rows < 15; rows++) {
+          if (!st.inBounds(ttx, tty + rows)) break;          // 越界=tile null → break
+          if (st.flags[st.idx(ttx, tty + rows)] & 1) break;   // tile.active()
+        }
+        if (rows >= 15) { this.tigerA0 = 5; this.tigerA1 = 0; return; }
+      }
       // 接敌兔跳（:51181-51188：Hitbox 相交 ∧ velocity.Y>=0 → vy=-4/vx=direction*10）
       if (this.x < tgt.x + tgt.w && this.x + this.w > tgt.x
         && this.y < tgt.y + tgt.h && this.y + this.h > tgt.y && this.vy >= 0) {
@@ -1329,22 +1353,85 @@ export class MinionProj extends Entity {
    *  原版专属段（1458 Projectile.cs：flag 定义 :50020/:50291 跟随锚/:50513 num2=800
    *  索敌/:51003-51007 扑击门/:51041-51097 高空俯扑+落地尘 gore/:51296-52057 两结算
    *  段/:50862-50869 扑击态 friendly 窗）：
-   *   · 态机 pirA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击）、pirA1=ai[1]（扑击倒数 num10=15）
+   *   · 态机 pirA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击 / 5 追离 orbit）、pirA1=ai[1]
+   *     （扑击倒数 num10=15；state5 兼作 180t 计数——原版同槽复用）
    *   · 归位飞行（:50636-50712 同族）：tileCollide=false、加速 0.2、限速 max(10,|p.v|)；
    *     >2000 瞬移；<200 ∧ 主落地 ∧ 头顶净空 → 落地回 0
    *   · 无目标：跟随锚 (15+p.w/2)+20slot×dir（:50291-50294）＋接地扫描；归位门
    *     500/300（num3/num4 缺省 :50031-50033）
    *   · 有目标：anchor=nPC.Center（flag 无侧翼点）;≤20px → ai[0]=2/ai[1]=15
-   *     （num30=20/flag14 支 :51155-51177）；高空俯扑 vy>2∧!wet∧敌顶低于脚底 250px+
-   *     → sqrt(2×0.4×h) 反向起跳封顶 26（:51041-51058,X 抖 ±Next×5）
+   *     （num30=20/flag14 支 :51155-51177）；高空俯扑 vy>2∧!wet∧敌【中心】高于盒底
+   *     250px+ → ★position.Y%1<0.5 整分叉 quirk(:51027) 入 ai[0]=5 追离态跳过本帧,
+   *     否则 sqrt(2×0.4×h) 反向起跳封顶 26（h=我中心−敌中心 num31,X 抖 ±Next×5）
+   *     → 与 boss>600 触发源（:51077,同一 `flag&&ai[1]==0` 块内【先俯扑后距离】的
+   *     先后关系）共为终零波清偿;state5 共享核 = ai067StateFive（orbit 点 =
+   *     敌心+rot(minionPos×2π/0.5862069)×min(w,h)/4,速 16,<32px 距离入扑,180t 超时）
    *   · 接触伤仅在扑击窗（走行 friendly=false :50476 缺省不复位——海盗不在置真名单,
    *     扑击支 :50862 置 true）：SetDefaults localNPCHitCooldown=18（:4765-4770）
    *   · 移动档 flag 档 = 目标在位 1/8/8（:51317-51321）、catch-up 同共轨两结算段
-   *   · 未折算登记：落地尘 216/gore 580-583·11-14 两象限（渲染 C 类）、boss>600→
-   *     ai[0]=5 态与俯扑前置 position.Y 整分叉 quirk（ai[0]=5 全态机另批）、
-   *     海盗攻击帧机 frame=4+(num10-ai1)/(num10/3)(+3 空)（draw 兜底循环差异,C 类） */
+   *   · 帧（:51802-51835 走行 + :50866-50872 扑击）：立 0/走 0-3（fc+=⌊|vx|⌋+1>10
+   *     翻页）/空中 14/扑击 4+(15-ai1)/5（空中 +3 → 7-9）；pirFrame 直写通道接 draw,
+   *     旧 age/8 匀速兜底退役（终零波 M2 清偿）
+   *   · 未折算登记：落地尘 216/gore 580-583·11-14 两象限与站立唠叨环（:52057
+   *     localAI 900-1200 加尘,渲染 C 类）；state5 中蓄力跳重叠窗未建模 */
   private pirA0 = 0;
   private pirA1 = 0;
+  /** 海盗帧机状态（AI_067 flag 帧段直写：走行 :51802-51835/扑击 :50866-50872；
+   *  state1 归位飞行与 state5 追离【不写 frame】= 冻结上一帧,原版同语义） */
+  private pirFrame = 0;
+  private pirFrameCd = 0;
+  /** localAI[0] 归位镜像（AI_067 state5 距离/16 写点 :50970；不与加尘计数共用以
+   *  免交叉清零——原版同槽混用,该加尘环：52057 加尘近似本就 C 类未建模） */
+  private pirLai0 = 0;
+  /** 虎侧 state5 距离镜像（同上,虎的 localAI[0] 无其它消费者） */
+  private tigerLai0 = 0;
+  /** AI_067 ai[0]==5 追离态共享核（Projectile.cs :50955-51001，终零波清偿）：
+   *  orbit 点 = 敌 Center + rot(minionPos×2π/0.5862069)×min(w,h)/2×0.5（:50961-50966）；
+   *  velocity = Vector2.Zero.MoveTowards(orbit−Center, num29=16)（:50969）；
+   *  localAI[0]=距离/16 → <2 即入扑击（vel×0.3 + 圆周缘4 抖、vy=-3——原版先 Abs 后
+   *  覆写=恒 -3;Center 钉 orbit 点）;否则 ai[1]++ ≥180 超时回 0（num9=0 海盗/虎）。
+   *  flag16 含 5（海盗 :50512/虎 :50502-50504）→ 调用前必须先重跑双距索敌刷新
+   *  attackTarget；丢目标 → 清态回 0 并整段退（:50956-50963）。tileCollide=true
+   *  正常 Move 撞墙滑移。调用方此后直接 return。 */
+  private ai067StateFive(game: GameHooks, tgtF: EnemyLike | null,
+    ai0Key: 'pirA0' | 'tigerA0', ai1Key: 'pirA1' | 'tigerA1',
+    laiKey: 'pirLai0' | 'tigerLai0', pounceDur: number): void {
+    if (!tgtF) {
+      this[ai0Key] = 0;
+      this[ai1Key] = 0;
+      this[laiKey] = 0;
+      return;                                       // :50956-50963 丢目标清态退段
+    }
+    const num28 = Math.min(tgtF.w, tgtF.h) / 2 * 0.5;
+    const ang = this.slot * ((Math.PI * 2) / 0.5862069);
+    const px = tgtF.cx + Math.cos(ang) * num28;
+    const py = tgtF.cy + Math.sin(ang) * num28;
+    const dx = px - this.cx, dy = py - this.cy;
+    const dl = Math.hypot(dx, dy);
+    const sp = Math.min(16, dl);
+    this.vx = dl ? (dx / dl) * sp : 0;
+    this.vy = dl ? (dy / dl) * sp : 0;
+    this[laiKey] = dl / 16;                         // localAI[0]=距离/16（:50970）
+    this.facing = this.vx >= 0 ? 1 : -1;            // direction=spriteDirection（:50971）
+    moveAndCollide(this, game.world, this.vx, this.vy);   // tileCollide=true（:50454 缺省）
+    if (this[laiKey] < 2) {                         // 抵达入扑（:50972-50980）
+      this[ai1Key] = pounceDur;
+      this[ai0Key] = 2;
+      this.vx *= 0.3;
+      const ra = Math.random() * Math.PI * 2;
+      this.vx += Math.cos(ra) * 4;                  // NextVector2CircularEdge(4,4)
+      this.vy += Math.sin(ra) * 4;
+      this.vy = -3;                                 // 先 Abs 后覆写 = 净 -3（:50978）
+      this.x = px - this.w / 2;                     // base.Center = orbit 点（:50979）
+      this.y = py - this.h / 2;
+      return;
+    }
+    if (++this[ai1Key] >= 180) {                    // 超时回 0（:50981-50990,num9=0）
+      this[ai0Key] = 0;
+      this[ai1Key] = 0;
+      this[laiKey] = 0;
+    }
+  }
   private pirateStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
     const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
@@ -1371,6 +1458,14 @@ export class MinionProj extends Entity {
       this.facing = this.vx !== 0 ? (this.vx > 0 ? 1 : -1) : p.facing;
       return;
     }
+    // ---- ai[0]==5 追离态（:50955-51001，终零波清偿）——触发源见下方目标支：
+    //      :51032 俯扑前置 position.Y%1<0.5 整分叉 与 :51077 boss>600 距离门，
+    //      先后关系 = 同一 `flag && ai[1]==0` 块内先俯扑后距离。orbit 接近核共享,
+    //      索敌已在本函数头部刷新（海盗 flag16 = ai0∈{0,5}）。num10=15 缺省档 ----
+    if (this.pirA0 === 5) {
+      this.ai067StateFive(game, tgtF, 'pirA0', 'pirA1', 'pirLai0', 15);
+      return;
+    }
     // ---- 地面态 ----
     if (!tgtF) {
       const dP = Math.hypot(p.cx - this.cx, p.cy - this.cy);
@@ -1378,6 +1473,10 @@ export class MinionProj extends Entity {
       else if (dP > 500 || Math.abs(p.cy - this.cy) > 300) { this.pirA0 = 1; return; }
     }
     if (this.pirA0 === 2) {                              // 扑击态（:50861-50927：friendly 置真+帧+重力+倒数,无速度改写）
+      // 攻击帧机（:50866-50872 flag 支）：frame=4+(15−ai1)/5（0..2→4..6），
+      // 空中(vy≠0) +3 → 7..9。ai1 尚未递减时求值 = 原版序
+      this.pirFrame = Math.min(6, 4 + Math.floor((15 - this.pirA1) / 5))
+        + (this.vy !== 0 ? 3 : 0);
       this.vy = Math.min(this.vy + 0.4, 10);
       moveAndCollide(this, game.world, this.vx, this.vy);
       this.contact(game, dmg0, 18);                      // 扑击窗内才有接触伤（friendly=true 支）
@@ -1388,11 +1487,29 @@ export class MinionProj extends Entity {
     let ax: number, ay: number;
     if (tgtF) {
       ax = tgtF.cx; ay = tgtF.cy;
-      // 高空俯扑（:51041-51058）：下落中 ∧ !wet ∧ 敌顶高出脚底 250px → sqrt 蓄力反跳
-      if (this.vy > 2 && !wet && tgtF.y + tgtF.h - (this.y + this.h) < -250) {
-        const h = (this.y + this.h) - (tgtF.y + tgtF.h);
-        this.vy = -Math.min(26, Math.sqrt(Math.max(0, h) * 2 * 0.4));
-        this.vx += (Math.random() * 2 - 1) * Math.random() * 5;
+      // ---- flag && ai[1]==0 块（:51022-51082，终零波补全两触发源+先后关系）----
+      // ① 高空俯扑（:51023-51076）：vy>2 ∧ !wet ∧ 敌 CenterY−我盒底 < −250 →
+      //    ★position.Y%1<0.5 整分叉 quirk（:51027-51031）：满足即入 ai[0]=5（ai[1]=0）
+      //    并整段退【跳过本帧蓄力跳】——否则 sqrt 蓄力反跳（h=敌中心距 :51033-51036,
+      //    封顶 26）+ X 圆周缘抖 ±NextFloat×NextFloat×5。原版半数拍走追离态 =
+      //    原文真态非笔误（Physics 整格落位后 y 为整值 → 恒进分支；空中滑移帧为
+      //    小数才回落跳）;旧实现无该分叉=海盗空中恒自跳,本批对齐。
+      if (this.pirA1 === 0
+        && this.vy > 2 && !wet && tgtF.cy - (this.y + this.h) < -250) {
+        if ((this.y % 1) < 0.5) {                     // :51025-51031 quirk 分叉
+          this.pirA0 = 5; this.pirA1 = 0; return;
+        }
+        const h = this.cy - tgtF.cy;                  // num31=(vector7.Y−Center.Y)×−1=我中心−敌中心
+        this.vy = -Math.min(26, Math.sqrt(Math.max(0, h) * 2 * 0.4));   // num32=0.4
+        this.vx += (Math.random() * 2 - 1) * Math.random() * 5;   // NextFloatDirection×NextFloat×5
+      }
+      // ② boss>600 追离触发（:51077-51082,在俯扑块之后独立判——同块先后关系）:
+      //    与敌心距离 >600 且目标是 boss → ai[0]=5 追离态（orbit 接近核另段）
+      if (this.pirA1 === 0
+        && Math.hypot(tgtF.cx - this.cx, tgtF.cy - this.cy) > 600
+        && (((tgtF as unknown as { boss?: boolean }).boss === true)
+          || ((tgtF as unknown as { def?: { boss?: boolean } }).def?.boss === true))) {
+        this.pirA0 = 5; this.pirA1 = 0; return;
       }
       // 扑击门（:51155-51160）：距锚 <20 → 入扑
       if (Math.hypot(ax - this.cx, ay - this.cy) < 20) {
@@ -1407,6 +1524,23 @@ export class MinionProj extends Entity {
       ax = g.x; ay = g.y;
     }
     this.ai067WalkChase(game, p, ax, ay, tgtF ? [1, 8, 8] : null, { wet });   // flag 档 :51317
+    // 走行帧机（:51802-51835 flag 支,移动段内逐帧）：立 0 / 空中(vy≠0) 14 /
+    // 行走 fc+=⌊|vx|⌋+1>10 → frame++ 且 ≥4 回 0。仅 state0 走行段执行到此处
+    if (this.vy === 0) {
+      if (this.vx === 0 || Math.abs(this.vx) < 0.5) {
+        this.pirFrame = 0; this.pirFrameCd = 0;          // |vx|<0.5 静立档
+      } else {
+        this.pirFrameCd += Math.floor(Math.abs(this.vx)) + 1;
+        if (this.pirFrameCd > 10) {
+          this.pirFrame++;
+          this.pirFrameCd = 0;
+          if (this.pirFrame >= 4) this.pirFrame = 0;
+        }
+      }
+    } else {
+      this.pirFrameCd = 0;
+      this.pirFrame = 14;
+    }
   }
 
   /** 帕鲁地面随从 1093 捣蛋猫 / 1112 可靠的捣蛋猫 / 1118 黏土蓓蕾（AI_067
@@ -2522,7 +2656,11 @@ export class MinionProj extends Entity {
    *    centerY/16 相对 −1/−2/−4/−5——旧实现误用脚下行作基准（h/2 系统差一格）
    *    且 Math.round(vx) 应为 (int) 截断。
    *  ★与 AI_067 三柱形【刻意不同构】：AI_026 原文即单柱（任务书"统一三柱"仅对
-   *  AI_067 族成立,蜘蛛 390-392 归 AI_026 flag7 不入虎先例）。 */
+   *  AI_067 族成立,蜘蛛 390-392 归 AI_026 flag7 不入虎先例）。
+   *  终零波 M6 复核（1458 :63178-63184/:63223-63244）：AI_026 的梯档在
+   *  flag5 门下对【同一列】只做高度选择（−1/−2/−4/−5 行相对中腰）；三柱支承闸
+   *  （num64 0..2 左缘/中心/右缘三点探测,:51526-51544）与家族墙意图档是 AI_067
+   *  独有——蛙(758)/帕鲁(1093·1112·1118)/蘑菇(1022) 归 AI_067 故用三柱,维持现状。 */
   private walkerJumpIntent(st: import('../world/TileStore').TileStore,
     dirX: number): boolean {
     const col = Math.floor((this.x + this.w / 2) / 16) + dirX + Math.trunc(this.vx);
@@ -4231,8 +4369,11 @@ export class MinionProj extends Entity {
           // ★台账批 C-3472（2026-08-31）：电弧声密度对齐原版 ai[0] 循环（AI_137
           //  :69955-69979：ai[0]++ %num3==0 时扫场，场内有敌才 PlayTrackedSound——
           //  num3=30/僧侣T2 -5→25、T3 不改字面）。旧"每直伤 tick 一声"密度 ×30。
-          //  真值节拍：zapCycle==period-1 且本轮扫描见敌 → 一声。PlayTrackedSound 的
-          //  跨 tick 续播缓冲不入模（单发 wav 密度对齐,C 类已注）。
+          //  真值节拍：zapCycle==period-1 且本轮扫描见敌 → 一声。原版 PlayTrackedSound
+          //  每次新开 ActiveSound 实例（旧实例未停=尾音自然重叠），本仓一次性 wav 同构
+          //  ——「跨 tick 续播缓冲」仅指实例存活期内 Volume/Position 跟踪（Sfx.ts 音轨
+          //  注记）；塔体静止时与 playSfxFiles 无可测差，startTrackedLoop 是 loop=true
+          //  通道语义不同【不接】（终零波 M5 复核,C 类维持）。
           this.zapCycle++;
           const zapPeriod = dd2SetFlags(game.player).monkT2 ? 25 : 30;
           if (this.zapCycle >= zapPeriod) {
@@ -4684,13 +4825,17 @@ export class MinionProj extends Entity {
           ? Math.abs(tgt.cx - this.cx) + Math.abs(tgt.cy - this.cy)
           : Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
         const range = (shooter.range ?? 700) + (shooter.rangeSlot ?? 0) * this.slot;
+        // 门界比较（终零波 M4 对账）：AI_026 flag10 族原文是【严格 <】
+        // （:62691 num139<800f+num134）——旧实现 ≤ 会把恰等于门距的敌多放一枪。
+        // 恰值只发生在曼哈顿距离整数落点,以 metric 键区分,欧氏族维持既有面
+        const inRange = shooter.metric === 'manhattan' ? d < range : d <= range;
         // AI_026 flag10 族出手前 Collision.CanHit 本体盒→敌盒（num141 面,
         // :62631-62656 双轨检索只在 CanHit 候选置 num141;无视线不出手）
         if (shooter.throwLos
           && !canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) return;
         // 387 双子激光眼需视线（:28982 CanHitLine 门；AI_062 五族无此门）
         if (this.projId === 387 && !canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) return;
-        if (d <= range) {
+        if (inRange) {
           this.shootCd = shooter.cd ?? 60;
           const j = shooter.jitter ?? 0;
           const ax = tgt.cx + (Math.random() * 2 - 1) * j - this.cx;
@@ -4933,6 +5078,11 @@ export class MinionProj extends Entity {
     } else if (this.projId === 963) {
       // 阿比盖尔一阶（AI_062 963 档 :66843-66868）：abigailBody 帧机直写
       frame = Math.min(this.a963Frame, Math.max(0, frames - 1));
+    } else if (this.projId >= 393 && this.projId <= 395) {
+      // 海盗随从（AI_067 flag 帧段直写 :50866/:51802）：走 0-3 / 立 0 / 空中 14 /
+      // 扑击 4..6(+3 空中=7..9)；state1 归位飞行与 state5 追离不更新 = 冻结
+      // （原版同语义——旧 age/8 匀速兜底扫遍 15 帧 = 扑击窗仍换跑图,M2 清偿）
+      frame = Math.min(this.pirFrame, Math.max(0, frames - 1));
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,

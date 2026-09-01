@@ -56,6 +56,32 @@ describe('B. CanPlace 语义（TileObject.cs 满分制移植）', () => {
     }
   });
 
+  it('Smart 吸附：左右夹墙仅 3 格地台时，点击首/中/尾格皆可放置', () => {
+    const st = mkStore();
+    layFloor(st, 10, 12, 12);                       // 仅 3 格地面 (10..12)
+    // 左右立实心柱(11 行即占位行高)模拟阻挡
+    st.setTile(9, 11, DIRT); st.setTile(9, 9, DIRT);
+    st.setTile(13, 11, DIRT); st.setTile(13, 9, DIRT);
+    const rec = anchorSpecOf(220)!;
+    // 唯一合法锚 = (10,9)；三处点击均应命中该锚
+    expect(chooseAnchorFromClick(st as never, 11, 11, rec)).toEqual({ x: 10, y: 9 });   // 中
+    expect(chooseAnchorFromClick(st as never, 10, 11, rec)).toEqual({ x: 10, y: 9 });   // 首格
+    expect(chooseAnchorFromClick(st as never, 12, 11, rec)).toEqual({ x: 10, y: 9 });   // 尾格
+  });
+
+  it('Smart 吸附②：直接点击地面固体块本体 → 幽灵上移吸附坐落其上', () => {
+    const st = mkStore();
+    layFloor(st, 10, 12, 12);
+    st.setTile(9, 11, DIRT); st.setTile(9, 9, DIRT);
+    st.setTile(13, 11, DIRT); st.setTile(13, 9, DIRT);
+    const rec = anchorSpecOf(220)!;
+    // 点击表面固体格 (cx,12) ⇒ 物件应悬坐于 rows 9..11，锚=(10,9)
+    for (const cx of [10, 11, 12]) {
+      expect(chooseAnchorFromClick(st as never, cx, 12, rec), `surface ${cx}`)
+        .toEqual({ x: 10, y: 9 });
+    }
+  });
+
   it('固化机：背景墙【不算】支撑——只有墙没有地面时拒绝（挂墙修复）', () => {
     const st = mkStore();
     for (let y = 6; y <= 12; y++) for (let x = 8; x <= 16; x++) st.wall[st.idx(x, y)] = 21;   // 木墙

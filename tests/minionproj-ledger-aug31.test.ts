@@ -96,8 +96,12 @@ const bite = (m: MinionProj, g: GameHooks, d = 10): boolean =>
   (m as unknown as { contact(g: GameHooks, dmg: number): boolean }).contact(g, d);
 
 describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () => {
+  // ★终零波 M1 清偿注记：ai[0]=5 追离态触发源之「目标脚下 15 格虚空扫描」
+  //   （:51146-51156）已按原文接通——脚踩 15 行内无任何 active() 瓦片的悬空目标
+  //   会让虎转追离态而不再走步行链。以下 fixture 的敌人从原悬空位改为贴地面/
+  //   加支承砖，以贴合「站地可跳」的真实构图（悬空无支承本来就该进 state5）。
   it('flag3 有目标档 1/8/8：首拍 accel=1、终值钳 [6..8]（速度窗）', () => {
-    const e = mkEnemy(1, 60 * 16 + 300, 96 * 16);
+    const e = mkEnemy(1, 60 * 16 + 300, 105 * 16);        // 贴地面高（地面行 110 在脚下窗内）
     const { hooks, player } = makeHooks([e]);
     const t = mk(833, player, player.cx, 106 * 16);
     priv(t).pounceCd = 1000;                              // 关闭 818 链门,聚焦步行链
@@ -109,7 +113,7 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
     expect(t.facing).toBe(1);
   });
   it('0.7 catch-up：|主速|=10>num52=8 → num52=10、accel=0.7（:51342-51345）', () => {
-    const e = mkEnemy(2, 60 * 16 + 300, 96 * 16);
+    const e = mkEnemy(2, 60 * 16 + 300, 105 * 16);
     const { hooks, player } = makeHooks([e]);
     player.vx = 10;
     const t = mk(833, player, player.cx, 106 * 16);
@@ -177,6 +181,10 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
     const mkCase = (diff: number): { m: MinionProj; g: GameHooks } => {
       const en = mkEnemy(4, 60 * 16 + 400, selfCy - diff);
       const env = makeHooks([en]);
+      // ★终零波 M1：目标【中心列】（Entity.Top=CenterX,:86-90 → 扫描列取中心）
+      //   脚下垫一格实心——Top 向下扫描在窗内即命中 active,不再误入 ai[0]=5 追离；
+      //   支承砖置于 Top+12 行远离盒底,与本体的 CanHit 试验线不相交
+      env.store.setTile(Math.floor(en.cx / 16), Math.floor(en.y / 16) + 12, 1);
       const t = mk(833, env.player, 60 * 16, 110 * 16 - 16);
       priv(t).pounceCd = 1000;
       return { m: t, g: env.hooks };

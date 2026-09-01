@@ -74,6 +74,11 @@ export interface GameHooks {
   /** 叶绿水晶叶 on-hit 引援叶扫桶（Player.OnHit 尾段 :6986-7040 全语义含序依赖
    *  break 怪癖；Enemy.hurt fromPlayer 钛金 proc 同位次调用,victim=受击敌怪） */
   chloroOnHitLeafStrike?(victim: unknown): void;
+  /** 山铜（奥利哈刚）套装 on-hit 花瓣弹（终零波批,2026-09-01）：Player.OnHit
+   *  :6963-6985 `onHitPetal && petalTimer==0` 支——petalTimer=20 共享窗置位 +
+   *  NewProjectile(221,36,kb0) 屏幕边出生。调用位 = Enemy.hurt fromPlayer 段
+   *  （钛金→[神圣 buff59]→帕拉钯→花瓣→叶绿 同位次链）,(x,y)=受击敌怪中心 */
+  spawnOnHitPetals?(x: number, y: number): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */

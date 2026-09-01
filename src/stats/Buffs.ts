@@ -387,6 +387,24 @@ export enum BuffType {
   //      crystalLeaf=true+buffTime 钉 18000(:11749-11752),消费位=锚体 226 存续门
   //      （Projectile.cs:28190 !crystalLeaf→Kill）。无免疫族/无难度缩放表项
   LeafCrystal = 319,
+  // ---- 神圣套幻影闪避链（终零波 Player.ts 域批,2026-09-01）——BuffID.ShadowDodge=59：
+  //      来源唯一 = 神圣/神圣召唤套装 onHitDodge → OnHit AddBuff(59,1800)
+  //      （Player.cs:6937-6940,ArmorSetBonuses.cs:228-236）。效果循环直判
+  //      shadowDodge=true（:10159-10163）→ Hurt 第四闪避支（:38516 ShadowDodge()
+  //      :38306-38324 全桶满填+DelBuff+timer=1800 重整）
+  ShadowDodge = 320,           // 幻影闪避(59)：神圣套 on-hit 授予的闪避旗标窗
+  // BuffID.RapidHealing=58：帕拉钯全套 on-hit（OnHit :6942-6945 AddBuff(58,300)）；
+  // 效果循环 palladiumRegen=true（:10169-10172）→ UpdateLifeRegen lifeRegenCount+=4/t
+  // （:19385-19387——+2HP/s 额外再生,乘区外 flat）
+  RapidHealing = 321,          // 快速再生(58)：帕拉钯套 on-hit 再生加速窗
+  // ---- 玩家侧未建档 debuff 两条（终零波 护士经济簇批,2026-09-01）----
+  // BuffID.Dazed=160（眩晕；Main.debuff[160]=true Main.cs:9005）。原版施加面 =
+  // 另一玩家的美杜莎之首 537/弹幕 StatusPlayer 通用支（proj.buffType=160 →
+  // player.AddBuff,Projectile.cs:12412）=PvP-only 生产位;NPC.cs 全文无对玩家
+  // AddBuff(160)。效果=移动 ×1/3(:26138-26140)+跳高 ÷5/跳速 ÷2(:19762-19766,
+  // UpdateJumpHeight)。Ogre AI 批落地敌侧后经通用 StatusPlayer 链自动上人。
+  Dazed = 322,                 // 眩晕(160)：美杜莎之首 PvP 命中族
+  OgreSpit = 323,              // 分泌物(197)：DD2 巨魔喷吐团 Death 近身施加(:74093)
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -675,7 +693,35 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // （en-US.Game.json :701/:1055,BuffDescription.LeafCrystal 12 语言现成零自造键）；
   // 图标 Buff_60.png 已在盘;vanilla id 60 在 BUFF_NO_TIME_DISPLAY（不显剩余时长）
   [BuffType.LeafCrystal]: { vanillaBuff: 60, descKey: 'BuffDescription.LeafCrystal', fallbackName: '水晶叶' },
+  // 终零波批（2026-09-01）：descKey 走原版 BuffDescription.* 命名空间（vanilla l10n
+  // dump 未含 → UI 回落 fallbackName,TitaniumStorm/LeafCrystal 同款先例,零自造键）
+  [BuffType.ShadowDodge]: { vanillaBuff: 59, descKey: 'BuffDescription.ShadowDodge', fallbackName: '幻影闪避' },
+  [BuffType.RapidHealing]: { vanillaBuff: 58, descKey: 'BuffDescription.RapidHealing', fallbackName: '快速再生' },
+  // 终零波·护士经济簇（2026-09-01）：descKey 走原版键（en-US.Game.json:807/:815
+  // ——名称 Dazed/`OgreSpit`=Oozed）
+  [BuffType.Dazed]: { vanillaBuff: 160, descKey: 'BuffDescription.Dazed', fallbackName: '眩晕' },
+  [BuffType.OgreSpit]: { vanillaBuff: 197, descKey: 'BuffDescription.OgreSpit', fallbackName: '分泌物' },
 };
+
+/** BuffType → vanilla buff id 反查（BUFF_DEFS 驱动；新入档 buff 自动可见） */
+export function vanillaIdOfBuff(bt: BuffType): number {
+  return (BUFF_DEFS as Record<BuffType, { vanillaBuff: number }>)[bt]?.vanillaBuff ?? -1;
+}
+
+/** BuffID.Sets.NurseCannotRemoveDebuff（Terraria.ID/BuffID.cs:32 全表）——护士治疗
+ *  计价与清除双面的排除集（Main.cs:40758 计数门 / :40832 清除门同式读取）。
+ *  表内成员实为「护士动不得」全家桶：正面伪 debuff（狼人 28/人鱼 34/圣骑盾 43）、
+ *  每帧重钉的短光环（篝火 87/水蜡烛 86/心灯 89/和平 157/暗影 350/树妖 165 等）、
+ *  常驻效用 buff（药水病 21/蜂蜜 48/旗帜 147/猫堡垒 215/混乱脑 321）、饥饿链
+ *  （332-334，非 dontStarve 世界即时清零故无意义）与 DD2 场地 NoBuilding 199。 */
+export const NURSE_CANNOT_REMOVE_VANILLA = new Set<number>([
+  28, 34, 87, 89, 21, 86, 199, 332, 333, 334, 165, 146, 48, 158, 157, 350, 215, 147, 321, 43,
+]);
+
+/** 排除表命中判定（护士计价/清除两侧共用门） */
+export function isNurseLockedBuff(vanillaId: number): boolean {
+  return vanillaId > 0 && NURSE_CANNOT_REMOVE_VANILLA.has(vanillaId);
+}
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：
  *  AddBuff 授予任一 fed-state 前先删栏内全部其它 fed-state，Player.cs:5080-5089。
@@ -728,6 +774,15 @@ export function buffName(t: BuffType): string {
 /** Buff 描述:自有键(机制数值是本仓库实现,不用原版通用描述) */
 export function buffDesc(t: BuffType): string {
   return Lang.text(BUFF_DEFS[t].descKey);
+}
+
+/** 旗帜 buff 描述附加名单（Main.cs:21558-21612 MouseText_DrawBuffTooltip 的
+ *  bannerMouseOver 第二循环：BannerSystem.BannerToNPC(i)≠0 且
+ *  Player.HasNPCBannerBuff(i) 的每个样式追加一行 NPC 名——本仓=屏内覆盖集升序
+ *  npcId 逐个翻名，'\n' 分行由 DOM 气泡渲染端天然换行）。
+ *  缺名 id 剔除（原版 GetNPCNameValue 恒有名；NPC_NAME_BY_ID 缺口防御）。 */
+export function bannerBuffNames(ids: number[], nameOf: (id: number) => string | null): string {
+  return ids.slice().sort((a, b) => a - b).map(nameOf).filter((s): s is string => !!s).join('\n');
 }
 
 /** HP/s 汇总表（UpdateBuffs lifeRegen 项换算：lifeRegen N = N/2 HP/s） */
@@ -785,8 +840,11 @@ export class BuffState {
   /** 本仓已实装的 debuff 集（Main.debuff 表 ∩ BuffType：环境伤害/控速/DoT 族——
    *  魔力眩晕 94 亦在原版 debuff 表，护士可清）。
    *  ★ NurseCannotRemoveDebuff 排除表（BuffID.cs:32 = {28,34,87,89,21,86,199,332,
-   *  333,334,165,146,48,158,157,350,215,147,321,43}）与本集【零交集】——本集成员
-   *  全部可被护士计价清除；实装排除表内 buff 时须在此过滤（登记） */
+   *  333,334,165,146,48,158,157,350,215,147,321,43}）消费面已接：
+   *  debuffCount/clearDebuffs 经 NURSE_CANNOT_REMOVE_VANILLA 反查 vanilla id 过滤
+   *  （护士不计价也不清除该表成员——狼人 28/人鱼 34 等正面伪 debuff、篝火/水蜡烛等
+   *  短钉光环、药水病 21、DD2 巨魔唾液期内 NoBuilding 199 等）。本集成员与此表仍
+   *  零交集（回归锁 tests/finalzero-game-domain），未来入集的排除表成员自动被滤。 */
   static readonly DEBUFFS = new Set<BuffType>([
     BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
     BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,
@@ -804,20 +862,25 @@ export class BuffState {
                          //（BuffID.cs:32）——红药水 678 减益族（2026-08-22 补 B 批）
     BuffType.Wet,      // Main.debuff[103]=true（Main.cs:8833）——潮湿可被护士计价清除；
                        // 103 不在 NurseCannotRemoveDebuff 排除表（BuffID.cs:30）
+    // 终零波补档两条（2026-09-01；均不在护士排除表 → 可计价/可清除）
+    BuffType.Dazed,      // 眩晕(160)——美杜莎之首 PvP 命中族（Main.cs:9005）
+    BuffType.OgreSpit,   // 分泌物(197)——DD2 巨魔喷吐团消亡近身 900t(:74097)
   ]);
-  /** 活跃 debuff 计数（Main.GetNurseHealCost :39466-39472 的 +100/个 段：
-   *  buffTime>60 且 Main.debuff；NurseCannotRemoveDebuff 排除表未实装，登记） */
+  /** 活跃 debuff 计数（Main.GetNurseHealCost Main.cs:40752-40762 的 +100/个 段：
+   *  `debuff[t] && buffTime>60 && !BuffID.Sets.NurseCannotRemoveDebuff[t]`） */
   debuffCount(minSeconds = 0): number {
     let n = 0;
     for (const [bt, sec] of this.active) {
-      if (BuffState.DEBUFFS.has(bt) && sec > minSeconds) n++;
+      if (BuffState.DEBUFFS.has(bt) && sec > minSeconds
+        && !isNurseLockedBuff(vanillaIdOfBuff(bt))) n++;
     }
     return n;
   }
-  /** 清全部 debuff（护士治疗 NPCChatText_DoNurseHeal 语义） */
+  /** 清全部 debuff（NPCChatText_DoNurseHeal Main.cs:40822-40838 语义：
+   *  排除表成员同门保留——DelBuff 只走 `!NurseCannotRemoveDebuff` 支） */
   clearDebuffs(): void {
     for (const bt of [...this.active.keys()]) {
-      if (BuffState.DEBUFFS.has(bt)) this.active.delete(bt);
+      if (BuffState.DEBUFFS.has(bt) && !isNurseLockedBuff(vanillaIdOfBuff(bt))) this.active.delete(bt);
     }
   }
   /** 狼人回复独立累加器（:11496 lifeRegen++ 恒 0.5 HP/s，与篝火强度/节拍无关） */
@@ -1189,14 +1252,18 @@ export class BuffState {
   /** 1457 新机制 strongestMoveSpeedDebuff（Player.cs:26132-26165）：移动减速 debuff
    *  全部折算 min 只取最强单项不叠加——OgreSpit(197) 1/3、Dazed(160) 1/3、
    *  Burning 0.5、Slow 0.5、Chilled 0.75、盾举(shieldRaised,Player 侧) 1/3。
-   *  本仓未实装 buff 197/160（DD2 巨魔唾液/美杜莎眩晕玩家侧），接入时并入本链。
-   *  消费：Update 尾 moveSpeed *= 本值；accRunSpeed *= 本值（oldStyleParkour 豁免，
-   *  本仓无 6190 老派跑酷书 → 恒吃） */
+   *  197/160 玩家侧已入档（终零波 护士经济簇批,2026-09-01）——生产位登记见
+   *  BuffType.Dazed/OgreSpit 注。消费：Update 尾 moveSpeed *= 本值；accRunSpeed
+   *  *= 本值（oldStyleParkour 豁免，本仓无 6190 老派跑酷书 → 恒吃） */
   get strongestMoveSpeedDebuff(): number {
     let s = 1;
     if (this.active.has(BuffType.Burning)) s = Math.min(s, 0.5);   // :26144-26146
     if (this.active.has(BuffType.Slow)) s = Math.min(s, 0.5);      // :26147-26149
     if (this.active.has(BuffType.Chilled)) s = Math.min(s, 0.75);  // :26150-26152
+    // 终零波补档两条（Player.Update 尾折算段同位点）：巨魔唾液 197（:26129-26132）/
+    // 眩晕 160 dazed（:26138-26140）均 ×1/3 最强单取 min 不叠加
+    if (this.active.has(BuffType.Dazed)) s = Math.min(s, 1 / 3);
+    if (this.active.has(BuffType.OgreSpit)) s = Math.min(s, 1 / 3);
     return s;
   }
   get defenseBonus(): number {

@@ -36,10 +36,34 @@ export interface ArmorSetBonus {
   huntressAmmoCost90?: boolean;  // 省弹 1/10（:12754 case 3804 女猎手护甲——件门在
                                   // Player.ts ARMOR_AMMO_SAVE_VID 表承载，此键为表回填预留）
   manaCostMul?: number;      // manaCost -=（折扣）
+  onHitRegen?: boolean;      // 帕拉钯全套（ArmorSetBonuses.cs:217-220 Palladium→onHitRegen;
+                             // Player.cs:6942-6945 AddBuff(58,300)——快速再生 58 RapidHealing）
+  onHitPetal?: boolean;      // 山铜（奥利哈刚）全套（:215-221 Orichalcum→onHitPetal;
+                             // Player.cs:6963-6985 OnHit 花瓣弹 221,petalTimer=20 共享窗）
+  onHitDodge?: boolean;      // 神圣套/神圣召唤套（:228-236 Hallowed·HallowedSummoner→
+                             // onHitDodge;Player.cs:6937-6940 shadowDodgeTimer==0 门 →
+                             // AddBuff(59,1800) 幻影闪避——Hurt 第四闪避支来源链）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
   ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，engine 未接）
   anglerSet?: boolean;       // 渔夫套装：生成环 spawnRate×1.3/maxSpawns×0.7（NPC.cs:627-630）
   name?: string;             // ArmorSetBonus.*（调试/后续 UI 展示）
+}
+
+/** 头变体全组合展开（1458 Terraria.DataStructures/ArmorSetBonus.cs Builder.Set
+ *  (int[] headOptions, int[] bodyOptions, int[] legsOptions) :81-107——选项数组笛卡尔
+ *  积逐 Set(head,body,legs).Add() 落进 All 表；PartType 枚举仅 tooltip 文案语义
+ *  （"由头部决定"），匹配面 = QueryCount(:164-186) 三件俱全 Complete ⇒ 本表键照样
+ *  是 `${hs}|${bs}|${ls}` 精确三元组。GetCompleteSet(ArmorSetBonuses.cs:512-531)
+ *  只回首个命中 ⇒ 单套装键模型等价。 */
+function expandHeadVariants(name: string, heads: number[], body: number[], legs: number[],
+  bonus: ArmorSetBonus): Record<string, ArmorSetBonus> {
+  const out: Record<string, ArmorSetBonus> = {};
+  for (const h of heads) {
+    for (const b of body) {
+      for (const l of legs) out[`${h}|${b}|${l}`] = { ...bonus, name };
+    }
+  }
+  return out;
 }
 
 export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
@@ -127,6 +151,29 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '79|51|47': { crystalLeaf: true, name: 'ChlorophyteHelmet' },
   '80|51|47': { crystalLeaf: true, name: 'ChlorophyteHeadgear' },
   '283|51|47': { crystalLeaf: true, name: 'ChlorophyteSummon' },
+  // ---- 硬模式矿族三件套（1458 ArmorSetBonuses.Initialize :455-464——Builder 全
+  //      组合展开见 expandHeadVariants 注；槽序 = Item.cs SetDefaults 提取：
+  //      帕拉钯头 1205/1206/1207=hs83/84/85×胸 1208=bs54×腿 1209=ls49；
+  //      山铜头 1210/1211/1212=hs86/87/88×胸 1213=bs55×腿 1214=ls50）----
+  // 帕拉钯 (:216-221)：onHitRegen → OnHit AddBuff(58,300) 快速再生（:6942-6945）
+  ...expandHeadVariants('Palladium', [83, 84, 85], [54], [49], { onHitRegen: true }),
+  // 山铜/奥利哈刚 (:222-227)：onHitPetal → OnHit 花瓣弹 221（dmg36/kb0,petalTimer=20）
+  ...expandHeadVariants('Orichalcum', [86, 87, 88], [55], [50], { onHitPetal: true }),
+  // ---- 神圣套两变体（1458 :462-464 头选项数组族——PartType.Head 仅文案语义；
+  //      槽序：神圣近战/远程/魔法头 558(面具)/553(头盔)/559(头饰)=hs42/41/43、
+  //      远古版 4896/4897/4898=hs255/256/257；召唤头 4873(神圣兜帽)/4899(远古
+  //      兜帽)=hs254/258。共享胸 551(bs24)/4900(bs229)×腿 552(ls23)/4901(ls212)。
+  //      HallowedSummoner 额外 maxMinions+=2（ArmorSetBonuses.cs:228-231）——
+  //      ★不在此表承载：该效果已由 vanillaSummonStats.SUMMON_SET
+  //      '254|*|*'/'258|*|*' 键群（2026-08-13 批,slot:2）+ 兜帽散件 SUMMON_GEAR
+  //      4873/4899 {slot:1,dmg:.10}（vanilla ApplyEquipFunctional :16023 头件固有
+  //      maxMinions++）分道承载——本表只补行为面 onHitDodge(Effect 正交面)----
+  // 召唤变体在先：表序无关，GetCompleteSet 按头部项所在集合优先扫描
+  // （SetsContaining[head] 先于 body），兜帽只属本集合 ⇒ 无歧义。
+  ...expandHeadVariants('HallowedSummoner', [254, 258], [24, 229], [23, 212],
+    { onHitDodge: true }),
+  ...expandHeadVariants('Hallowed', [41, 42, 43, 255, 256, 257], [24, 229], [23, 212],
+    { onHitDodge: true }),
 };
 
 // ---- DD2 盔甲散件主属性（Player.cs:12709-12810 胸/腿件——头盔哨兵位已由 SUMMON_GEAR 承载,

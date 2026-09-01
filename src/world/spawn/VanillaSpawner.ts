@@ -268,8 +268,14 @@ export class VanillaSpawner {
   private expert = false;
   private waterTile = false;
   private noWorms = false;
+  /** noGroundWorms（NPC.cs:172/:412 `player.afkCounter >= 300`）——Game 每周期注入
+   *  player.afkCounter（Player.fixedUpdate 计数链），setFlagsForChosenTile 头
+   *  `!skyMob && noGroundWorms → noWorms=true`（NPC.cs:1052-1055，挂机不出蠕虫族）。
+   *  ★影子蜡烛覆写(:420-425)清的就是本旗+noWorms+townNPCs 三连。终零波接入，
+   *  旧「AFK 计数链未建模」登记销核 */
+  noGroundWorms = false;
   /** ZoneShadowCandle（NPC.cs:328-333 tile 646 扫描 → noWorms/noGroundWorms=false + townNPCs=0；
-   *  ★本仓未建模 noGroundWorms/AFK 计数链（:412 afkCounter 门），影子蜡烛支只清已建模面） */
+   *  影子蜡烛覆写同步清 noGroundWorms） */
   private shadowCandle = false;         // 原版 wallHouse（房屋内不出蠕虫）
   /** GetSpawnRate 城镇段置位（NPC.cs:717/:734/:750/:767/:792/:814）：城镇 NPC ≥1 时
    *  蠕虫抑制。原版与 wallHouse 同字段（GetSpawnRate 在 SetSpawnFlags 之后调用,
@@ -630,6 +636,10 @@ export class VanillaSpawner {
   private setFlagsForChosenTile(spawnTileX: number, spawnTileY: number, spawnTileType: number, rng: RNG): void {
     const st = this.world.store;
     this.spawnTileX = spawnTileX; this.spawnTileY = spawnTileY; this.spawnTileType = spawnTileType;
+    // noGroundWorms → noWorms 顶针（NPC.cs:1052-1053 SetSpawnFlagsForChosenTile 头部
+    // `if (!skyMob && noGroundWorms) { noWorms = true; }`）——AFK ≥300 的玩家周围
+    // 选点一律按房屋门关闭（影子蜡烛覆写在 getSpawnRate 侧同拍清三旗，原版序一致）
+    if (!this.skyMob && this.noGroundWorms) this.noWorms = true;
     // waterTile（L957）：落脚格上方两格都是液体且为水
     const above1 = st.idx(spawnTileX, spawnTileY - 1), above2 = st.idx(spawnTileX, spawnTileY - 2);
     this.waterTile = st.liquid[above1] > 0 && st.liquid[above2] > 0 && st.liquidType[above1] === 1;
@@ -958,8 +968,8 @@ export class VanillaSpawner {
       maxSpawns = Math.floor(maxSpawns * 3);
     } else if (zoneJungle) {
       // 影子蜡烛覆写（NPC.cs:420-425 三连写 noWorms/noGroundWorms=false + townNPCs=0；
-      // noGroundWorms 链未建模，见 :260 注）
-      if (shadowCandle) { townNPCs = 0; this.noWorms = false; }
+      // noGroundWorms 已建模——AFK 链 Game 注入,终零波接入）
+      if (shadowCandle) { townNPCs = 0; this.noWorms = false; this.noGroundWorms = false; }
       else if (townNPCs === 0) {
         spawnRate = Math.floor(spawnRate * 0.4);
         maxSpawns = Math.floor(maxSpawns * 1.5);

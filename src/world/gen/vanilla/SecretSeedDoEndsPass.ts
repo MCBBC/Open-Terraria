@@ -40,9 +40,11 @@
 // 普通种子（九旗全关）：模块零钩入零消费。
 //
 // 已知近似（零掷骰差，批章登记）：
-//   ① Convert_ActuallyConvert{Tile,Wall} 后的 SquareTileFrame/SquareWallFrame 邻格重帧未
-//      模拟——转化目标均为 auto-frame 虚拟化类（草/石/泥/冰/沙墙），绘制期虚拟帧兜底
-//      （clay-blend-virtualized-frames 同判据）；
+//   ①（已失效留档，勿据此回归）早期版本曾把 Convert_ActuallyConvert{Tile,Wall} 尾部的
+//      SquareTileFrame/SquareWallFrame 邻格重帧整体判为未模拟；IIIII87 起 convertCell
+//      各面均已按 cs:56801/:56813 原文接线生成期级联（★III-F5 起含 case2 神圣面）——
+//      「转化目标均为 auto-frame 虚拟化类，绘制期虚拟帧兜底」只对【重帧后的邻格视觉
+//      帧】成立，骰耗面以真实调用为准；
 //   ② TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid 按 profile GroundTest ∪
 //      Conversion 组合判定后杀干基单格（genKillTile 承载 CheckTree 整树坍塌级联）；
 //      ConvertTreeAndGround 整树换种臂（596/616/634↔5/323 双向）未移植——finalize 时点
@@ -379,19 +381,26 @@ function convertCell(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, conversionType: number, tiles: boolean, walls: boolean,
 ): void {
-  // ★IIIII87：净化面(0) 才启用尾级联（fish mox 实证）——
-  // ★IIIII99b（2026-08-31）翻案扩展至 case3 蘑菇面：C# Convert_ActuallyConvertTile/Wall
-  //   的 SquareTileFrame/SquareWallFrame 尾级联对【一切 conversionType】无条件执行
-  //   （cs:56801/56813），非「case3 含尚未镜像副作用」而是级联缺位本身——toadstool
-  //   终清理 FinalizeSecretSeeds 双调用（cs:607-614）后植物 61→71/藤 62→528 重挂种、
-  //   树族换种与逐列 Next(3) 流差全由缺失级联致（此前 early-call 域未暴露系
-  //   l<ws+Next(3) 带内当时尚无植被可重挂）。实证：① tools/_iii108tm 槽头基座反演
-  //   重放 vs -004_PostFinSeed/#105 由 7351→21 再经 shimmer/merge 域归零；
-  //   ② _iii105tm 复跑 era-1 窗口 vs #018_Mud_Caves_To_Grass 八通道全零。
-  // ★IIIII106：IIIII99b 已定谳 C# 级联对一切 conversionType 无条件执行——case 1/4
-  // （worldIsInfected=purify this 净化/腐化面）入列后本仓全部消费面（0..4）都带级联。
-  const cascades = conversionType === 0 || conversionType === 3
-    || conversionType === 1 || conversionType === 4;
+  // ★III-F5（2026-09-01）级联开关消费边界书面化（消除 IIIII87/99b/106 注自相矛盾）：
+  //   C# Convert_ActuallyConvertTile / Convert_ActuallyConvertWall 的尾部
+  //   SquareTileFrame(x,y)/SquareWallFrame(x,y) 对【一切 conversionType】**无条件**执行
+  //   （cs:56801/:56813——原文里 num（=type∈{1,4,2}）门只包 RainbowSandAndBlackSandWalls
+  //   清漆段，不包级联）；cascades 形参是本仓移植期的调度旋钮，非原版语义面。
+  //   消费边界 = 本仓 convertCell 全部可达面 conversionType ∈ {0,1,2,3,4}：
+  //     0 净化 = doNoInfection/ShimmerCleanUp 菱形/cs:56762 torch 面（★IIIII87 fish mox 实证）
+  //     3 蘑菇 = doSurfaceIsMushrooms（★IIIII99b toadstool 终清理 61→71/62→528 重挂种实证：
+  //       tools/_iii108tm 反演 #105 由 7351→21 再经 shimmer/merge 域归零；_iii105tm 复跑
+  //       era-1 窗口 vs #018_Mud_Caves_To_Grass 八通道全零）
+  //     1/4 腐化·猩红 = doWorldIsInfected（★IIIII106 purify this 面）
+  //     2 神圣 = doHallowOnSurface finalize 臂 + HardmodePass remix 边缘带臂（★III-F5 本刀
+  //       补列——此前漏挂为 IIIII99b 注的自相矛盾残留：注已断言「一切 type 无条件」而代码
+  //       恰漏 case2。影响 = hallowOnTheSurface / does that sparkle、周年组合 finalize 臂与
+  //       remix/too easy 组合的 initializeHardMode 神圣带从该修开始转化骰耗才与 x86 对齐
+  //       —— 见 tests/secret-seed-hallow-cascade.test.ts 与本批报告掷流声明）
+  //   case 5/6/7… 在 C# 同样无条件级联，但本仓无消费点（登记另案）；若未来接线,
+  //   按 cs:56801/56813 应直接拆掉本旋钮而非继续扩表。
+  const cascades = conversionType === 0 || conversionType === 1 || conversionType === 2
+    || conversionType === 3 || conversionType === 4;
   if (i < 1 || j < 1 || i >= st.w - 1 || j >= st.h - 1) return;       // InWorld(i,j,1)
   if (!tiles && !walls) return;
   const ii = st.idx(i, j);

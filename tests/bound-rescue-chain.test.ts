@@ -35,7 +35,7 @@ function evoAt(jAbove: boolean) {
     store: w.store, worldSurface: 12, rockLevel: 18,
     flags: w.flags, crimson: false, isDay: true, raining: false,
     maxRaining: 0, windSpeedCurrent: 0, playerTile: () => null,
-    dungeonX: 0, difficulty: 0,   // Main.dungeonX（保底灯泡搜索框；本测试无地牢）
+    dungeonX: 0, difficulty: 0,   // Main.dungeonX（保底花苞搜索框；本测试无地牢）
   };
   return { w, st: w.store, evo: new WorldEvolution(host), j: jAbove ? 6 : 20 };
 }

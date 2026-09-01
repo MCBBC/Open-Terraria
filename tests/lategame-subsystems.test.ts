@@ -265,7 +265,7 @@ describe('WorldEvolution 空水格睡莲/香蒲', () => {
       store: st, worldSurface: 50, rockLevel: 60,
       flags: w.flags, crimson: false, isDay: true, raining: false,
       maxRaining: 0, windSpeedCurrent: 0, playerTile: () => null,
-      dungeonX: 0, difficulty: 0,   // Main.dungeonX（保底灯泡搜索框；本测试无地牢）
+      dungeonX: 0, difficulty: 0,   // Main.dungeonX（保底花苞搜索框；本测试无地牢）
     };
     return { w, st, y, evo: new WorldEvolution(host) };
   }

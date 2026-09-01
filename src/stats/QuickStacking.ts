@@ -38,7 +38,8 @@
 // 24 位 item id|高字节 settings 位）;PlayerToChest settings 四旗全真
 // （Chest.cs:30-36 bits RandomizeStart|RandomizeEnd|TransitionIn|Fullbright）。
 // blocked 双回执：源槽级 = RestoreToPlayer 里 ItemSlot.IndicateBlockedSlot
-// （:360-363 / 1456 :349-352）;目的箱级 = IndicateBlockedChests →
+// （:360-363 / 1456 :349-352）——★Q-F9 起随返回值 blockedSlots: number[] 出站,
+//   Game→UI 经 .sw-blocked-pulse 通道呈现;目的箱级 = IndicateBlockedChests →
 // Chest.IndicateBlockedChest（Chest.cs:3578-3598,箱锚红图标 60t 上浮）。
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { Inventory } from '../items/Inventory';
@@ -191,7 +192,14 @@ export function quickStackToChests(
 ): { touched: ChestData[]; blocked: ChestData[];
      /** ItemTransfer 编排载荷（VisualizeChestTransfer Chest.cs:312-321 每搬一枚）：
       *  箱 → 本次迁入的物品型序列（FillStack→InsertIntoFreeSlot 时间序） */
-     movedVids: Map<ChestData, number[]> } {
+     movedVids: Map<ChestData, number[]>;
+     /** ★Q-F9 槽级 blocked 回执半边（RestoreToPlayer :360-363 flag 支 →
+      *  ItemSlot.IndicateBlockedSlot :527 = AddPulseEffect(250,40,40)。原版回执门：
+      *  transferBlocked[j] 且源件仍非空（AddPulseEffect !item.IsAir :535-538——
+      *  被并尽的源件不闪）。元素 = 打包段槽号（主段 10-49 背包槽号；includeVoidBag
+      *  臂下为 bank4 槽号——袋面槽 DOM 通道本仓未挂,Game/UI 侧查不到即静默,
+      *  形差登记于 emitQuickStackResultFx 注）。bank 径恒空（Invariant.Assert !blocked）。 */
+     blockedSlots: number[] } {
   const src = packQuickStackable(inv,
     opts?.voidVaultSource ? [opts.voidVaultSource] : []);   // :379-389 两段收集
   const dests: DestHelper[] = [];
@@ -247,10 +255,14 @@ export function quickStackToChests(
     }
   }
   // ---- RestoreToPlayer（:345-365 / 1456 :334-355）：源槽写回（null = 清格）；
-  //      覆盖面 = 两段收集位（背包 + includeVoidBag 臂下的 bank4 袋格）----
+  //      覆盖面 = 两段收集位（背包 + includeVoidBag 臂下的 bank4 袋格）。
+  //      ★Q-F9：flag 支回执面 = transferBlocked[j] 且源件仍在槽（:358 flag 判定 +
+  //      AddPulseEffect !IsAir 门）——被并尽格不闪。槽号取打包段 index 原值。 ----
+  const blockedSlots: number[] = [];
   for (let i = 0; i < src.slots.length; i++) {
     const ref = src.slots[i];
     ref.arr[ref.index] = src.items[i] as SlotArray[number];
+    if (src.blocked[i] && src.items[i]) blockedSlots.push(ref.index);
   }
   const movedVids = new Map<ChestData, number[]>();
   for (const d of dests) {
@@ -260,6 +272,7 @@ export function quickStackToChests(
     touched: dests.filter((d) => d.mutated).map((d) => d.chest),
     blocked: dests.filter((d) => d.transferBlocked).map((d) => d.chest),
     movedVids,
+    blockedSlots,
   };
 }
 

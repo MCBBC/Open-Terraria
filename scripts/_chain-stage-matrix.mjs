@@ -68,7 +68,7 @@ for (const c of CASES) {
       outer: for (let y = yTop; y < st.h - 200; y++) for (let x = 2; x < st.w - 2; x++) {
         if (st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === BULB) { bulb = [x, y]; break outer; }
       }
-      out.nextOk = !!bulb;   // 灯泡在=世花链可达(直召备案不需要)
+      out.nextOk = !!bulb;   // 花苞在=世花链可达(直召备案不需要)
     } else if (window.__next === 'tablet-spawn') {
       // 玩家远离地牢 → 夜 → 等石碑
       g.player.x = 1640 * 16; g.player.y = 300 * 16; g.player.hp = g.player.maxHp; g.player.dead = false;

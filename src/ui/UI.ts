@@ -124,7 +124,7 @@ import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/
 import { assembleTooltipLines, materialIids } from './itemTooltip';
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
-import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
@@ -313,6 +313,12 @@ const CSS = `
 @keyframes sw-loadout-flash { 0% { background:rgb(255 255 255 / 0.5); }
   100% { background:rgb(255 255 255 / 0); } }
 .sw-loadout-flash .sw-slot::before { animation:sw-loadout-flash 0.5s ease-out; }
+/* ★Q-F9 槽级阻塞回执（ItemSlot.IndicateBlockedSlot :527 → AddPulseEffect(250,40,40)；
+ *  Draw :2343-2352 InventoryBack21 叠层 alpha 包络 40t 收束）。::before 默认 multiply
+ *  会把红压暗——动画期内切 normal 以直绘红衰层呈现（IndicateBlockedSlot 语义=红脉冲
+ *  非乘色）。形差=单脉冲 ease-out 替代双 cos 波（见 indicateBlockedSlots 注） */
+@keyframes sw-blocked-pulse { 0% { background:rgb(250 40 40 / 0.7); } 100% { background:rgb(250 40 40 / 0); } }
+.sw-slot.sw-blocked-pulse::before { animation:sw-blocked-pulse 0.67s ease-out; mix-blend-mode:normal; }
 /* 物品转移 hue 脉冲（ItemSlot.cs :2144-2152：贴图换 Back13 +
  *  Lerp(基色(63,65,151)×invAlpha, hslToRgb(hue,1,0.5), (time/300)²/2)——
  *  CSS 近似：色层 alpha 沿二次曲线 0.5→0 衰减，5s（300 tick） */
@@ -3863,7 +3869,14 @@ export class UI {
       }
       ui.block.style.display = 'flex';
       ui.block.dataset.swTipName = buffName(t);
-      ui.block.dataset.swTipDesc = buffDesc(t);
+      // 旗帜(147)：描述后追加名单行（Main.cs:21558-21612 bannerMouseOver 第二循环——
+      // BannerToNPC≠0 且 HasNPCBannerBuff(i) 的每样式一行 NPC 名；本仓=屏内覆盖集）
+      let tipDesc = buffDesc(t);
+      if (BUFF_DEFS[t].vanillaBuff === 147 && this.game) {
+        const bn = bannerBuffNames(this.game.bannerNpcIds(), (id) => Lang.npcName(id));
+        if (bn) tipDesc += '\n' + bn;
+      }
+      ui.block.dataset.swTipDesc = tipDesc;
       // 原版 DrawBuffIcon（Main.cs:42736）：TextureAssets.Buff[type] 原大绘制——
       // 用原版 Buff_{vanillaBuff} 贴图（2026-08-13 前：误用对应药水物品图标）
       const want = remasterBuffIcon?.(BUFF_DEFS[t].vanillaBuff)
@@ -5271,6 +5284,25 @@ export class UI {
     void this.invPanel.offsetWidth;
     this.invPanel.classList.add('sw-loadout-flash');
     setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
+  }
+
+  /** ★Q-F9 槽级 blocked 回执（QuickStacking.cs:360-363 RestoreToPlayer flag 支 →
+   *  ItemSlot.IndicateBlockedSlot :527 = AddPulseEffect(250,40,40)；Draw
+   *  ItemSlot.cs:2343-2352 用 InventoryBack21 叠层 × 包络 0.5+0.2·(−cos(πt+π)) ×(1−t⁴)，
+   *  PulseEffect.EffectDuration=40t ≈667ms）。仓内最贴近通道 = .sw-slot 色层动画族
+   *  （sw-loadout-flash 同型，::before 叠层）；cos 双脉冲包络以 ease-out 单脉冲近似
+   *  （★形差登记：指数尾 vs (1−t⁴)+cos 波形差,视觉语义=同格红闪一次）。slots =
+   *  quickStackToChests().blockedSlots（主段背包槽号 10-49；includeVoidBag 臂的 bank4
+   *  槽号无 data-idx 槽元素 → 查不到静默跳过,与原版 Bank4 面板独立回执面的形差在案） */
+  indicateBlockedSlots(slots: number[]): void {
+    for (const s of slots) {
+      const slotEl = this.slotEl(s, 'inv');
+      if (!slotEl || !slotEl.isConnected) continue;
+      slotEl.classList.remove('sw-blocked-pulse');
+      void slotEl.offsetWidth;
+      slotEl.classList.add('sw-blocked-pulse');
+      setTimeout(() => slotEl.classList.remove('sw-blocked-pulse'), 700);
+    }
   }
 
   showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string; coins?: number }>, portrait?: DialoguePortraitPayload | null, vanillaId?: number, cornerItem?: number): void {

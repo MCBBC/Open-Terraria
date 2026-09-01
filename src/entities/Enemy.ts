@@ -1443,8 +1443,9 @@ export class Enemy extends Entity {
    *  NPC.buffType 挂账但 UpdateNPC 无任何 case（纯展示位），纯计时承载（B1 批） */
   lovestruckT = 0;
   /** gelBalloonBuff(320)：微光气球弹 936 消亡 80px 圈授予（P.cs:78943/:78955）——
-   *  玩家侧 = drippingSparkleSlime 滴落展示（Player.cs:11843-11846），NPC 侧零消费，
-   *  纯计时承载（B1 批） */
+   *  玩家侧 = drippingSparkleSlime 滴落展示（Player.cs:11843-11846）；NPC 侧三消费
+   *  （终零波补齐 2026-09-01）：染色 G×0.75 B×0.85（debuffTintRGB :92220-92225）+
+   *  微光滴尘 dust243 尾迹（updateBuffVfx :92563-92583）。 */
   gelBalloonT = 0;
   /** 实例级 buff 免疫覆写（1457 AI_001 熔岩史莱姆段 :61312-61316 运行时
    *  `buffImmune[70/397/395/20] = false`）：vanilla buff id → false = 静态免疫表
@@ -1461,12 +1462,26 @@ export class Enemy extends Entity {
   /** GetNPCColorTintedByBuffs（1457 NPC.cs:92142-92255）等价：debuff 染色的 RGB
    *  乘区（1=不变）。原版在 draw color 上逐 debuff 累乘（buffColor 闭式 = 累乘后
    *  一次乘 npcColor,与逐次乘等价）;本仓返回 [R,G,B] 乘区由 Renderer.drawEnemy 以
-   *  tintedSprite(multiply) 消费。ichor 为整色替换 (255,255,0)（:92246-92248）。
+   *  tintedSprite(multiply) 消费。ichor 为整色替换 (255,255,0)（:92226-92229）。
    *  求值序 = 原版 if 链顺序（brokenArmor→poisoned→venom→chlorophyteSpore→
    *  potentAcid→bleeding/hemorrhage→midas→betsysCurse→oiled→stinky→drippingSlime→
-   *  ichor;stinky 段 :92208-92214 已补(2026-08-31),SparkleSlime/hunter 段本仓无对应态不进）。门 = canDisplayBuffs
-   *  （:92144,FTW getGood 245-248 石巨人族 false）。1457 新增 chlorophyteSpore
-   *  （中毒式 R×0.65 B×0.75）与 potentAcid（剧毒式 G×0.45 R×0.75）两段 */
+   *  drippingSparkle→ichor;Sparkle 段 :92220-92224 已补(2026-09-01 终零波,buff 320=
+   *  微光气球滴落 gelBalloonT)。hunter 段(:92230-92259)为后置缺口登记,见下。
+   *  门 = canDisplayBuffs（:92144,FTW getGood 245-248 石巨人族 false）。1457 新增
+   *  chlorophyteSpore（中毒式 R×0.65 B×0.75）与 potentAcid（剧毒式 G×0.45 R×0.75）
+   *  两段。
+   *  ★hunter 缺口（C 类登记）：原版尾段 `CanApplyHunterPotionEffects(:92137) &&
+   *  lifeMax>1`（:92230-92259）把最终色逐通道钳底——AppearsFriendlyToHunterPotion
+   *  (:92126)=friendly||catchItem>0||(damage==0&&lifeMax==5)，友好族钳 (50,255,50)、
+   *  其余钳 (255,50,50)；门 = Main.SceneMetrics.PerspectivePlayer.detectCreature
+   *  （本地玩家 Hunter 药水 buff 54 狩猎）。
+   *  ★该段作用于【乘光后的 npcColor】（Main.cs:23115 npcColor=Lighting.GetColor →
+   *  :23170 着色链 → Draw 才乘贴图）＝全黑暗中仍保底可见；本仓敌方精灵在世界层
+   *  绘制后整体被 lightCanvas 乘暗（Renderer.ts 收口注释），钳底必须在乘光之后合成
+   *  才能等效，精灵调制期无法表达——现有狩猎高亮走 drawBuffHighlights 红框近似
+   *  （同在乘光之前，亦不透暗）。升级路径 = 光照收口后的实体剪影 pass（新基建，
+   *  另批），勿把钳底塞进本乘区（会被后续乘暗抹掉）。 */
+
   get debuffTintRGB(): [number, number, number] | null {
     if (!this.canDisplayBuffs) return null;
     let r = 1, g = 1, b = 1;
@@ -1482,8 +1497,9 @@ export class Enemy extends Entity {
     if (this.betsysCurseT > 0) mul(0.8, 0.6, 1);                 // :92197-92202
     if (this.oiledT > 0) mul(0.4, 0.4, 0.4);                     // :92204-92209
     if (this.stinkyT > 0) mul(0.7, 1, 0.55);                     // :92208-92214 stinky(R×0.7 B×0.55)
-    if (this.slimedT > 0) mul(0.8, 0.8, 1);                      // :92222-92227 drippingSlime
-    if (this.ichorT > 0) return [255, 255, 0];                   // :92246-92248 整色替换
+    if (this.slimedT > 0) mul(0.8, 0.8, 1);                      // :92214-92219 drippingSlime
+    if (this.gelBalloonT > 0) mul(1, 0.75, 0.85);                // :92220-92225 drippingSparkle(320) G×0.75 B×0.85
+    if (this.ichorT > 0) return [255, 255, 0];                   // :92226-92229 整色替换（drip 两段后、hunter 钳底前）
     return hit ? [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)] : null;
   }
   /** oldTarget 等效（NPC.cs:6374 `public int target = -1;` + :8472/:91442 每帧
@@ -1632,8 +1648,12 @@ export class Enemy extends Entity {
   lai2 = 0;              // localAI[2] 语义位（AI_054 克脑：二阶段入场演出门）
   lai3 = 0;              // localAI[3] 语义位（AI_054 克脑：玩家死/离场下坠计数；AI_008 法师 32：RedHat 变体带 +3）
   /** 红帽骷髅王标记（NPC.cs:81262-81266 redHatMode 召唤置 ai[3]=1；RedHatSkeletron
-   *  AdjustmentsEnabled :67282 消费）。本仓 Chippy 沙发召唤链未实装 → 恒 false，
-   *  32 的 lai3 变体带/双倍计时因此不触发（常态=单一头饰形态，2026-08-17 帧修复的门） */
+   *  AdjustmentsEnabled :67282 消费——35 看 ai[3]、36/32 看 localAI[3]、33 看 ai[3]）。
+   *  ★召唤链已接通（Game.updateSitting，2026-08-18）：夜间坐长凳 89 款式 43 +
+   *  装备裁缝巫毒娃娃(equipStats.killClothier) + 裁缝师 54 在场 CanHit →
+   *  SpawnSkeletron(redHatMode:true)，此处写 true 且 ai3 同步写 1（NpcDrops 五条
+   *  RedHat 条件/Renderer 红臂骨/GorePiece gore 表全依赖此旗）。
+   *  32 的 lai3 变体带/双倍计时由此激活（casterAI aiInit 段每帧扫描消费）。 */
   redHat = false;
   /** 原版 NPC.dontTakeDamage（SetDefaults 静态置位，如 266 克脑 :12372 一阶段
    *  不可击；AI 段自行清除）。与 iframes 不同：持续态而非帧计数 */
@@ -2392,8 +2412,27 @@ export class Enemy extends Entity {
         d.vy = 0;
       }
     }
+    if (this.gelBalloonT > 0 && Math.floor(Math.random() * 4) !== 0) {
+      // 微光滴落 dust 243（UpdateNPC_BuffApplyVFX :92563-92583,终零波补齐
+      // drippingSparkleSlime NPC 侧尾迹）：外掷 Next(4)!=0=3/4、内 Next(2)==0 生效；
+      // 盒 (pos−2,+2,w+4,h+2)、α150 + 内两次 Next(2)==0 各 +25、noLight、
+      // velocity×0.2 → Y+=0.2 → +=实体速度（Dust.velocity += this.velocity）
+      if (Math.floor(Math.random() * 2) === 0) {
+        const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 2,
+          243, 0, 0, 150);
+        if (d) {
+          if (Math.random() < .5) d.alpha += 25;
+          if (Math.random() < .5) d.alpha += 25;
+          d.noLight = true;
+          d.vx *= 0.2;
+          d.vy *= 0.2;
+          d.vy += 0.2;
+          d.vx += this.vx;
+          d.vy += this.vy;
+        }
+      }
+    }
     if ((this.blueLightningT > 0 || this.redLightningT > 0) && Math.floor(Math.random() * 10) === 0) {
-      // Blue/RedLightningSmall 1/10（NPC57:92272-92294 → Spawn_LightningSmall
       //   P57:3617-3672;★2026-08-24 r15 R15-18 接 1457 升级:红雷档
       //   UniqueInfoPiece=GetLightningColor(1122)=(255,60,60) → ①色对覆写
       //   color=PackedValue/value=color×0.75 ②伴生光尘 226→**331 自色**+
@@ -2518,54 +2557,67 @@ export class Enemy extends Entity {
       // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）。
       // M11：原版 :78703-78720 扫全部 255 槽——任一活跃玩家在屏内即重置；
       // 联机下访客在屏内同样压制 despawn（单机 = 仅本地，零回归）
+      // 消散副作用（bossFled/风气球挂载/蠕虫整链）——两条路径共用
+      const runDespawnFx = () => {
+        if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/玩家死后撤离
+        // 风气球 594 自然消散：挂载史莱姆一并消失（防 -999 冻结悬空）
+        if (this.vanillaId === 594) {
+          const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
+          if (sl) sl.dead = true;
+        }
+        this.dead = true;
+        // 蠕虫离屏消散 → 整链同灭（原版段自查 :51832-51841：前段 ai[0] 失效 →
+        // life=0 自灭级联；水蛭头 117 不在闲置豁免名单，离屏消散时其体节
+        // 118/119 在名单内不会自行消散，需此处级联，否则留无驱动的冻结残段）
+        if (this.wormNext || this.wormFollow) {
+          let wh: Enemy = this;
+          while (wh.wormFollow) wh = wh.wormFollow;
+          for (let s: Enemy | null = wh; s; s = s.wormNext) s.dead = true;
+        }
+      };
+      // ★忠实重放 CheckActive(:78698-78810,2026-09-01 定罪重写):
+      //  前结构「encouraged 屏内也倒数」系杜撰——原版机制分四步:
+      //  ①rectangle(ActiveRange)=2.1×屏(:6176-6178)相交任一玩家 → flag2=true 存活门
+      //  ②boss(:78743)/强真名单(:78747-78767)只需存在活跃玩家即 flag2=true
+      //  ③rectangle2 屏幕矩形(62×35 半轴,992×556px)每 tick 重置 750+清鼓励旗
+      //    ——这是 EncourageDespawn 钉低值的唯一抵消点:怪天亮向上飞,**在屏内绝不
+      //    消散**;飞出屏幕瞬间 reset 停止 → 剩余 timer≈封顶值(10t)→ 秒消散
+      //  ④timer 每帧无条件−1,归零 → flag2 强制翻假(:78791-78794,无视①②保命门)
       const cands = (game.candidatePlayers?.() ?? [localPlayer as Player])
         .filter((q) => !!q && !q.dead);
-      const onScreen = cands.some((q) =>
-        Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
-      // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
-      if (this.despawnEncouraged) {
-        // ★EncourageDespawn 已激活：屏内不重置，timer 继续倒数直至消散
-        //  (原版 EncourageDespawn 设 timeLeft 后 onScreen 重置不覆盖——
-        //   2026-08-31 用户报恶魔眼被地形卡住 2 分钟不消散定罪)
-        //  消散副作用（bossFled/蠕虫级联/风气球）与下方 else 分支对齐
-        this.despawnTimer--;
-        if (this.despawnTimer <= 0) {
-          if (this.def.boss) this.bossFled = true;
-          if (this.vanillaId === 594) {
-            const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
-            if (sl) sl.dead = true;
-          }
-          this.dead = true;
-          if (this.wormNext || this.wormFollow) {
-            let wh: Enemy = this;
-            while (wh.wormFollow) wh = wh.wormFollow;
-            for (let s: Enemy | null = wh; s; s = s.wormNext) s.dead = true;
+      if (cands.length > 0) {
+        let flag2 = false;
+        for (const q of cands) {
+          // activeRangeX/Y=4032/2268px → |Δ|<半幅(half=252/142 格),中心距近似
+          // (±玩家半宽 ≤1tile 登记差);此窗曾漏接=远处怪少一道提前清账门
+          if (Math.abs(q.cx - this.cx) < TILE * 252
+            && Math.abs(q.cy - this.cy) < TILE * 142) {
+            flag2 = true;
+            break;
           }
         }
-      } else if (onScreen
-        // flag2 强真名单（:78735-78758）:EoW 头 13/毁灭者头 134 族等恒视屏内
-        || (this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))) {
-        this.despawnTimer = 750;
-        this.despawnEncouraged = false;
+        // boss(:78743)/ALWAYS_ACTIVE 名单(:78749-78767):存在活跃玩家即保命,
+        // 无几何要求(强真名单只置 flag2 不续 timeLeft)
+        if (!flag2 && ((this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))
+          || this.def.boss)) {
+          flag2 = true;
+        }
+        const onScreen = cands.some((q) =>
+          Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
+        if (onScreen) {
+          this.despawnTimer = 750;
+          this.despawnEncouraged = false;
+        }
+        this.despawnTimer--;
+        if (this.despawnTimer <= 0) {
+          flag2 = false; // :78791-78794 归零 → 无条件允许消散(含 boss/名单)
+        }
+        if (!flag2) runDespawnFx();
       } else {
+        // 无活跃候选者(本地死亡/联机空场):维持 C 批既有语义=纯离屏倒计时
+        // (死亡玩家不算几何,§M11 dev 注释;不作 flag2 即死以免死亡瞬间团灭)
         this.despawnTimer--;
-        if (this.despawnTimer <= 0) {
-          if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/玩家死后撤离
-          // 风气球 594 自然消散：挂载史莱姆一并消失（防 -999 冻结悬空）
-          if (this.vanillaId === 594) {
-            const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
-            if (sl) sl.dead = true;
-          }
-          this.dead = true;
-          // 蠕虫离屏消散 → 整链同灭（原版段自查 :51832-51841：前段 ai[0] 失效 →
-          // life=0 自灭级联；水蛭头 117 不在闲置豁免名单，离屏消散时其体节
-          // 118/119 在名单内不会自行消散，需此处级联，否则留无驱动的冻结残段）
-          if (this.wormNext || this.wormFollow) {
-            let wh: Enemy = this;
-            while (wh.wormFollow) wh = wh.wormFollow;
-            for (let s: Enemy | null = wh; s; s = s.wormNext) s.dead = true;
-          }
-        }
+        if (this.despawnTimer <= 0) runDespawnFx();
       }
     }
     this.ambientSoundTick(game);   // 环境声三表（IdleSounds/闲话/Critter,2026-08-18 批）
@@ -2752,8 +2804,13 @@ export class Enemy extends Entity {
       && Math.abs(q.cy - wy) < hh + q.h / 2);
   }
 
-  /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7228-7235）：timeLeft 封顶 + 置鼓励旗 */
+  /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7276-7283）：timeLeft 封顶 + 置鼓励旗 */
   encourageDespawn(despawnTime: number): void {
+    // ★封顶语义(2026-09-01 定罪):原版 EncourageDespawn(d) = min(timeLeft,d) 封顶赋值
+    //  + despawnEncouraged=true,它本身不杀怪——真正的快速消散由 CheckActive 屏外窗口
+    //  完成:屏内每 tick 被重置到 750 抵挡(AI 每 tick 重新钉 10),一旦离屏 reset 停止,
+    //  剩余 timer≈最后封顶值(常为 10t)→ 约 10 帧内消失。屏内永远有重置保护。
+    //  (曾两次误译:①despawnTimer=d 屏内也倒数=日出原地蒸发;②−=d 减法同为杜撰)
     if (this.despawnTimer > despawnTime) this.despawnTimer = despawnTime;
     this.despawnEncouraged = true;
   }
@@ -2807,7 +2864,8 @@ export class Enemy extends Entity {
    *  isBallooned（风气球 ai[0]==-999，:62154）→ 13 桶风筝/纸飞机。
    *  WorldGen.Skyblock.lowTiles 三处修正（:62156-62164 / :62199-62207 / :62230-62237）
    *  依赖天空盒世界——本仓无天空盒世界（NpcDrops evalCond 'SkyblockIsUp' 同判恒
-   *  false）→ 跳过。case 0 default 的 netMode!=0 分支（多人 2997 虫洞药水）单人不可达 */
+   *  false）→ 跳过。case 0 default 的 netMode!=0 分支（多人 2997 虫洞药水）单人
+   *  不可达——1458 行号勘误：:62408-62413（终零波 M 域复核,语义维持 MP-only 不动） */
   private slimeGenItemInsideBody(isBallooned: boolean): number {
     const roll = (n: number) => Math.floor(Math.random() * n);              // Next(n)
     const rollR = (a: number, b: number) => a + Math.floor(Math.random() * (b - a)); // Next(a,b) 含a不含b
@@ -2828,7 +2886,7 @@ export class Enemy extends Entity {
           case 1: return 292;            // 铁皮
           case 2: return 296;            // 光标
           case 3: return 2322;           // 挖矿
-          default: return 2350;          // 回忆（2997 虫洞仅多人，:62200-62203）
+          default: return 2350;          // 回忆（2997 虫洞仅多人,:62408-62413 netMode!=0）
         }
       case 1:                                                                // 火把/炸弹桶 :62196
         num = roll(4);
@@ -11470,15 +11528,17 @@ export class Enemy extends Entity {
       this.casterTeleportBurst(game);
     }
     this.ai0 += 1;                                 // :20971 每帧计时
-    // :20777-20784 RedHat 变体（红帽骷髅王 35 ai[3]==1 在场 → localAI[3]=1 置位永不清；
-    // 帧侧整带 +3、计时双倍）。本仓红帽召唤链未实装（Enemy.redHat 恒 false）→ 恒 0
-    // （enemies 可选访问：测试桩 hooks 可能未实现）
+    // :20877-20884 RedHat 变体（红帽骷髅王 35 在场且 FindFirstNPC(35) 的 ai[3]==1 →
+    // localAI[3]=1 置位永不清；帧侧整带 +3、计时双倍 :21135 分支+弹球支 :21321）。
+    // 召唤链已接通（Game.updateSitting 长凳+巫毒娃娃 easter egg 写 head.redHat=true
+    // 且 ai3=1）——此处与原版一致改查 ai[3]==1 双门（2026-09-01 终零波更新：旧注
+    // "红帽召唤链未实装"已过期）。enemies 可选访问：测试桩 hooks 可能未实现）
     if (vid === 32 && this.lai3 === 0) {
       const enemiesOf = (game as { enemies?: () => unknown[] }).enemies;
       const sk = enemiesOf
         ? (enemiesOf.call(game) as Enemy[]).find((n) => n.vanillaId === 35 && !n.dead)
         : undefined;
-      if (sk?.redHat) this.lai3 = 1;
+      if (sk?.redHat || sk?.ai3 === 1) this.lai3 = 1;
     }
     // :20787-20791 X 摩擦 0.93 + |vx|<0.1 归零（Y 不阻尼——重力由引擎共享段承担）
     this.vx *= 0.93;
@@ -11875,6 +11935,17 @@ export class Enemy extends Entity {
     // （:20258-20261）反弹玩家弹幕；出变身段后由本行自然清回
     this.reflectsProjectiles = false;
 
+    // ---- 共享血雾（:20112-20117，aiStyle4 旋转段后/状态机前,全阶段每拍执行）：
+    //      1/5 概率 dust 5（EoC 红雾),盒 (w, h×0.5) @ (0, h×0.25),
+    //      speedX = velocity.X（★冲刺 15px/t 时红雾随眼同速喷出再凝滞 = 速度感
+    //      拖影轨迹）+ speedY = 2,生后 v×(0.5, 0.1) 凝滞。
+    //      ★曾整段漏移植——P2 冲刺只有本体残影、无血雾轨迹（2026-09-01 用户对照）----
+    if (Math.random() < 0.2) {
+      const mist = game.spawnDust?.(this.x, this.y + this.h * 0.25, this.w, Math.floor(this.h * 0.5), 5,
+        this.vx, 2);
+      if (mist) { mist.vx *= 0.5; mist.vy *= 0.1; }
+    }
+
     // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（:20020-20025） ----
     // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续
     if (game.world.clock.isDay || player.dead) {
@@ -12017,16 +12088,29 @@ export class Enemy extends Entity {
             // 段二满 100t → P2（:20312-20315）：ai[2] 清零收住残余自旋
             this.spinSpeed = 0;
           } else {
-            // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 20 + Roar(15)
+            // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 5 ×20 + Roar(15)
             game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
             game.playSfx('roar', 1, this.cx, this.cy);   // :20329 style0(带坐标衰减,曾缺坐标)
-            game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 8/7/6 ×2 份
-            game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
+            // gore 8/7/6 ×2（:20321-20327）：眼肉红条飞散(Gore_6/7/8),速度 ±6px/t,
+            // GorePiece.newGore 内叠 NewGore 随机扰动——★曾是 '#8A1A1A' 色块近似,
+            // 二阶段变身后的红色触须飞散观感全靠它们(2026-09-01 用户对照原版视频)
+            for (let gi = 0; gi < 2; gi++) {
+              for (const gid of [8, 7, 6]) {
+                GorePiece.newGore(gid, this.x, this.y,
+                  (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
+              }
+            }
+            // 尘 5 ×20（:20328-20330 EoC 血雾;★曾误注"尘 20"且用色块近似）
+            for (let di = 0; di < 20; di++) {
+              game.spawnDust?.(this.x, this.y, this.w, this.h, 5,
+                (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
+            }
           }
         }
       }
-      // :20434 变身期每 tick 掉 1 颗 5 号尘（±3 初速;曾缺=外观级缺失,R23a 补）
-      game.spawnParticles(this.cx, this.cy, '#FF3030', 1, 2);
+      // :20434 变身期每 tick 掉 1 颗 5 号尘（±6px/t 初速;曾用 '#FF3030' 色块近似）
+      game.spawnDust?.(this.x, this.y, this.w, this.h, 5,
+        (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
       // 速度 0.98/t 阻尼 + 小值清零（:20333-20343）
       this.vx *= 0.98; this.vy *= 0.98;
       if (this.vx > -0.1 && this.vx < 0.1) this.vx = 0;
@@ -12569,14 +12653,62 @@ export class Enemy extends Entity {
         }
       }
     }
+    // ---- 神圣套幻影闪避授予（终零波批,2026-09-01）----
+    // Player.OnHit 第二支（:6937-6940）：`if (onHitDodge && shadowDodgeTimer==0)
+    // AddBuff(59,1800)`——buff59 = ShadowDodge（Hurt 第四闪避支来源,:38516 消费）。
+    // 复用 OnHit 调用位残血门族（fromPlayer/dmg>0/hp>5）+ 来源排除表独立适用；
+    // 原文此支【不】含 488/statue 特豁（flag 仅钛金分支消费）。
+    {
+      const plH = game.player as unknown as {
+        dead?: boolean; shadowDodgeTimer?: number;
+        buffs: { apply(t: number, s: number): void };
+        equipStats?: { onHitDodge?: boolean };
+      } | null | undefined;
+      if (fromPlayer && dmg > 0 && this.hp > 5 && plH && !plH.dead
+        && plH.equipStats?.onHitDodge === true
+        && (plH.shadowDodgeTimer ?? 0) <= 0                                  // :6938 timer==0 门
+        && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
+        plH.buffs.apply(BuffType.ShadowDodge, 30);                           // AddBuff(59,1800t)=30s
+      }
+    }
+    // ---- 帕拉钯套快速再生授予（终零波批,2026-09-01）----
+    // Player.OnHit 第三支（:6942-6945）：`if (onHitRegen) AddBuff(58,300)`——
+    // buff58 = RapidHealing（UpdateLifeRegen lifeRegenCount+=4/t,:19385-19387 消费）。
+    {
+      const plP = game.player as unknown as {
+        dead?: boolean;
+        buffs: { apply(t: number, s: number): void };
+        equipStats?: { onHitRegen?: boolean };
+      } | null | undefined;
+      if (fromPlayer && dmg > 0 && this.hp > 5 && plP && !plP.dead
+        && plP.equipStats?.onHitRegen === true
+        && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
+        plP.buffs.apply(BuffType.RapidHealing, 5);                           // AddBuff(58,300t)=5s
+      }
+    }
+    // ---- 山铜套花瓣弹（终零波批,2026-09-01）----
+    // Player.OnHit 第四支（:6963-6985）：`if (onHitPetal && petalTimer==0) { petalTimer=20;
+    // NewProjectile(...221,36,kb0); }`——全语义在 Game.spawnOnHitPetals（屏幕边出生/
+    // 归一速度），此处仅 OnHit 门族复用。原文此支同样不含 488/statue 特豁。
+    // petalTimer 与叶绿引援共享计时字段（petal=20 / 叶绿=50 同一 player.petalTimer）。
+    {
+      const plO = game.player as unknown as {
+        dead?: boolean; petalTimer?: number;
+        equipStats?: { onHitPetal?: boolean };
+      } | null | undefined;
+      if (fromPlayer && dmg > 0 && this.hp > 5 && plO && !plO.dead
+        && plO.equipStats?.onHitPetal === true && (plO.petalTimer ?? 0) <= 0    // :6963 双门
+        && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
+        game.spawnOnHitPetals?.(this.cx ?? (this.x + this.w / 2), this.cy ?? (this.y + this.h / 2));
+      }
+    }
     // ---- 叶绿水晶叶 on-hit 引援叶（台账 L3 清偿批 2026-08-31）----
     // Player.OnHit 尾段（Player.cs:6986-7040,1456 :6615-6640"三修门"本体）。原版
     // OnHit 调用位同在 target.life>5 残血门内（:44754/:13642-44），故复用钛金
     // proc 的 fromPlayer/dmg>0/hp>5 门族；差异面：本支仅查 victim CanBeChasedBy
     // （:6988 flag2——原文不含 488/statue 特豁，假人被 canBeChasedBy 天然拒），
     // 且 OnHit 来源排除表独立适用（TryDoingOnHitEffects :15210-15220 → srcProjId∈
-    // ON_HIT_EXCLUDED_PROJS 含 227/221 自续断链）；petalTimer 与花瓣（onHitPetal
-    // :6963 未建模）共享计时字段。扫桶+序依赖 break 怪癖全语义在 Game 端。
+    // ON_HIT_EXCLUDED_PROJS 含 227/221 自续断链）。扫桶+序依赖 break 怪癖全语义在 Game 端。
     {
       const plL = game.player as unknown as {
         dead?: boolean; petalTimer?: number;

@@ -137,8 +137,12 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
   return true;
 }
 
-/** 点击格 → 锚定位置换算 + 水平镜像备选扫描。返回最终锚点（占位左上角）。
- *  对齐 vanilla CanPlace：主 Origin 试放 → 不满足且有方向备选时按对称轴翻折重试。 */
+/** 点击格 → 锚定位置换算 + Smart 吸附。返回最终锚点（占位左上角）。
+ *  候选序（vanilla 手感：Smart Cursor 对持拿物的幽灵吸附重定向，行为子集）：
+ *  ①主 Origin 对位；②方向备选水平镜像；③★全窗吸附——
+ *    水平覆盖点击列落在物件横向跨度内的所有锚（贴墙缝点首/尾格即成），垂直
+ *    覆盖「点击格作为底锚行正上方悬坐」（点到地表固体上时幽灵整体上移），
+ *    按「Origin 所在格到点击的曼哈顿距」升序取首个满分者。 */
 export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number, rec: AnchorRec):
   { x: number; y: number } | null {
   const prim = { x: cx - rec.ox, y: cy - rec.oy };
@@ -146,6 +150,23 @@ export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number
   if ((rec.dirs?.length ?? 0) > 0 && rec.w > 1) {
     const mx = { x: cx - ((rec.w - 1) - rec.ox), y: cy - rec.oy };
     if (mx.x !== prim.x && validateAnchors(st, mx.x, mx.y, rec)) return mx;
+  }
+  // ③ 全窗吸附：横向让点击列 ∈ [ax, ax+w-1]（ax ∈ [cx-w+1, cx]，与 Origin 解耦），
+  //    纵向 ay ∈ [cy-h, cy]：「物件直接坐在点击行上方」(ay=cy-h, 点地表块本体)
+  //    至「点击行即物件顶行」。排序键 = 物件 Origin 格到点击的曼哈顿距，同距低者优。
+  type Cand = { ax: number; ay: number; d: number };
+  const out: Cand[] = [];
+  for (let dxx = -(rec.w - 1); dxx <= 0; dxx++) {
+    const ax = cx + dxx;
+    for (let ay = cy - rec.h; ay <= cy; ay++) {
+      if (ax === prim.x && ay === prim.y) continue;
+      const oxCell = ax + rec.ox, oyCell = ay + rec.oy;
+      out.push({ ax, ay, d: Math.abs(oxCell - cx) + Math.abs(oyCell - cy) });
+    }
+  }
+  out.sort((a, b) => a.d - b.d || a.ay - b.ay || a.ax - b.ax);
+  for (const c of out) {
+    if (validateAnchors(st, c.ax, c.ay, rec)) return { x: c.ax, y: c.ay };
   }
   return null;
 }

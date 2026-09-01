@@ -456,6 +456,21 @@ export class SettingsPanel {
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartAxeAfterPickaxe'), () => d.smartAxeAfterPickaxe, (v) => void options.set('smartAxeAfterPickaxe', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartBlocks'), () => d.smartBlocksEnabled, (v) => void options.set('smartBlocksEnabled', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartHoldRelease'), () => d.smartHoldCanReleaseMidUse, (v) => void options.set('smartHoldCanReleaseMidUse', v)),
+        // 建造饰品自动致动（builderAccStatus[2]；原版开关=装备区旁 BuilderAcc 图标钮
+        // Main.cs:48162 区，装备加压器 3624 时才出现，tooltip GameUI.ActuationDeviceOn/Off，
+        // 点击翻 builderAccStatus[2] 0↔1 + 音 22）。本仓无该图标簇 → 开关落设置页
+        // （终零波 最小可行版；status==0 = 启用语义与原版一致）
+        this.toggle(
+          `${Lang.text('GameUI.ActuationDeviceOn').replace(/[:：].*$/, '')} / ${Lang.text('GameUI.ActuationDeviceOff').replace(/[:：].*$/, '')}`,
+          () => !d.builderAutoActuatorDisabled,
+          (v) => void options.set('builderAutoActuatorDisabled', !v),
+        ),
+        // 建造饰品自动喷漆（builderAccStatus[3]，tooltip GameUI.PaintSprayerOn/Off）
+        this.toggle(
+          `${Lang.text('GameUI.PaintSprayerOn').replace(/[:：].*$/, '')} / ${Lang.text('GameUI.PaintSprayerOff').replace(/[:：].*$/, '')}`,
+          () => !d.builderAutoPaintDisabled,
+          (v) => void options.set('builderAutoPaintDisabled', !v),
+        ),
         // 玩家对决（Player.hostile;原版仅联机显示该 UI——Main.cs:2982 ShouldPVPDraw,
         // 单机常驻为调试便利,联机语义由协议同步压制）。显示态读【实时 player.hostile】
         // （原版会话语义:进服恒 false,与 options 上次设置无关——勿用 options 回显）

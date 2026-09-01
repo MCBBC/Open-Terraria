@@ -549,6 +549,18 @@ const PROJ_ALPHA0: Record<number, number> = {
   467: 255,                                                          // 教徒火球制导支（AI 支 α−40/update 渐显 :55194-55200）
 };
 
+/** AI_036 追踪内核逐型参数表（[speed, acc]，终零波单核收编导出面；tests/finalzero-game-domain
+ *  金标直测）。全家族 {181 蜜蜂 / 189 巨蜜蜂 / 307 小吞噬者(friendly) / 316 蝙蝠杖 /
+ *  566 巨蜂} 共用同一条索敌+逐轴步进管线（fixedUpdate 内唯一分支——三处生产端：
+ *  蜂蜜斗篷受击反击 Game.ts、蜂箭 469 Kill 放蜂 spawnBeeSwarm、beenadeBurst 大爆
+ *  弹幕拨发全部落表）。真值推导 Projectile.cs AI() 派发 case36 段：speed=各弹
+ *  `num`（181:6.0/:27700 区、189:9.0、307:13.0、566:6.8），acc=num×0.025 族系数
+ *  （181:0.1→×?/189:0.2/307:0.35）——以既有对账值为准；316 双档（锁定 [13,0.325]/
+ *  无目标 [10,0.25]）在消费位按 bee36AimLocked 动态并表。 */
+export const AI_STYLE36_TRACK_PARAMS: Readonly<Record<number, readonly [number, number]>> = {
+  181: [6, 0.1], 189: [9, 0.2], 307: [13, 0.35], 566: [6.8, 0.14],
+};
+
 /** MathHelper.WrapAngle(XNA)：IEEE remainder 2π 后钳回 (−π,π]。AngleLerp 消费 */
 function wrapAngle(angle: number): number {
   const twoPi = Math.PI * 2;
@@ -2616,7 +2628,8 @@ export class Arrow extends Entity {
   /** 469 蜂箭 Kill 放蜂（1458 Projectile.cs:78058-78081 / 1456 :73369-73390）：6 拍
    *  循环、奇数拍（1/3/5）再掷 Next(3)==0 才放（期望 4 只、3-6 只区间）；出生点 =
    *  position − oldVelocity 归一×8×i；速度 = Next(-35,36)×0.01 + oldVelocity/6
-   *  （aiStyle 36 追踪 AI 未建模——直线漂移近似，同 Game 蜂蜜斗篷反击蜂先例，登记）；
+   *  （出生弹即 aiStyle 36 家族本体——projId∈{181,566} 走下方 bee36 追踪内核,
+   *  索敌/转向与蜂蜜斗篷反击蜂同核;旧「直线漂移近似」登记随追踪批销核）；
    *  蜂型 = beeType()（1458 Player.cs:12505-12513：Hive Pack strongBees 半数掷 566 巨蜂
    *  ——★2026-08-31 台账清偿：原经 equipStats 恒 181,现接 beenadeBurst 同源通道;
    *  每只独立重掷 makeStrongBee 态）/ 伤 = beeDamage(damage/3)（:12517-12524 强蜂
@@ -4053,10 +4066,13 @@ export class Arrow extends Entity {
       if (!this.bee36Aim) {
         this.bee36Aim = { cx: this.cx + this.vx * 100, cy: this.cy + this.vy * 100 };  //（:27784-27788）
       }
-      // 逐轴步进转向（:27823-27862）
+      // 逐轴步进转向（:27823-27862）——★终零波·AI_036 内核单核收编：本分支是
+      // aiStyle36 全家族唯一追踪核，三处生产端（蜂蜜斗篷受击反击 Game.ts / 蜂箭
+      // 469 Kill 放蜂 spawnBeeSwarm / beenade 大爆拨发）的弹体 projId 命中表后
+      // 走同一索敌+转向管线；参数真值抽 AI_STYLE36_TRACK_PARAMS 导出（金标直测）
       const P36: Record<number, [number, number]> = {
-        181: [6, 0.1], 189: [9, 0.2], 307: [13, 0.35],
-        316: this.bee36AimLocked ? [13, 0.325] : [10, 0.25], 566: [6.8, 0.14],
+        ...AI_STYLE36_TRACK_PARAMS,
+        316: this.bee36AimLocked ? [13, 0.325] : [10, 0.25],   // 双档在消费位按锁存并表
       };
       const [spd36, acc36] = P36[this.projId];
       {
@@ -5446,8 +5462,13 @@ export class Arrow extends Entity {
           this.killNow(game);
           return;
         }
-        // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落；本仓旧约定偏离——原版恒消耗
-        // 投掷件不入档,清单位置 Game.THROWN_NO_RECOVERY_VIDS）,然后消失
+        // 实心块：1/3 概率回收掉落。★终零波真值对账（2026-09-01）：原版 Projectile.Kill
+        // 的 !noDropItem 段（P.cs:79099-79360）只含 aiStyle10 放块族（num18 兜底件）、
+        // 736-738、绳圈 171/475/505/506、type12(dmg>500)/155/861——**箭族 1/2 等无任何
+        // NewItem**,Player.cs 亦无落地拾取链（全文件 RequestNewItem 清单核过）。
+        // 本掷系本仓自加机制=登记在案的旧约定 gameplay 偏离（域内不扩散,新入链件一律
+        // null——见 Game.THROWN_NO_RECOVERY_VIDS 注 + tests/orphan-b1.test.ts 对照
+        // "机制在位"契约钉）,维持不删;注释不再伪称"原版箭 Kill 的掉落"。
         // ★R29：子弹撞块 HitTiles 近似（Kill :77624-77625 族——Collision.HitTiles 在
         // 弹盒覆盖格撒 3-5 粒砖色尘;本仓以 4×d7 通用碎屑近似,音在 Game.onProjectileDeath
         // BULLET_KILL_SFX 分支）

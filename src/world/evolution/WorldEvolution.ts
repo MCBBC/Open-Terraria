@@ -109,7 +109,7 @@ export interface EvolutionHost {
   store: TileStore;
   worldSurface: number;
   rockLevel: number;
-  /** Main.dungeonX（保底灯泡搜索框用，GeneratePlanteraBulbOnAllMechsDefeated cs:74182） */
+  /** Main.dungeonX（保底花苞搜索框用，GeneratePlanteraBulbOnAllMechsDefeated cs:74182） */
   dungeonX: number;
   /** 世界难度 0/1/2（生命果密度门 cs:74514-74528） */
   difficulty: number;
@@ -308,7 +308,7 @@ export class WorldEvolution {
    *  GeneratePlanteraBulbAt（cs:74250-74329）：三王全灭时在丛林侧搜索框
    *  [worldSurface, UnderworldLayer) 内掷 2500 点，逐点向上走找丛林草 60
    *  （<500 次后 forceBulb 允许泥 59，<200 次后允许非活动格）；找到即试
-   *  (X,Y-1)/(X-1,Y-1)/(X+1,Y-1) 三锚，**恰好生成一个**灯泡即返回。 */
+   *  (X,Y-1)/(X-1,Y-1)/(X+1,Y-1) 三锚，**恰好生成一个**花苞即返回。 */
   planteraBulbBurst(): boolean {
     const st = this.host.store;
     const { w } = st;
@@ -346,7 +346,7 @@ export class WorldEvolution {
   }
 
   /** AttemptToGeneratePlanteraBulbAt（cs:74250-74329）+ PlaceJunglePlant 238 支
-   *  （cs:48191-48256）。锚 (i,j)=灯泡 2×2 右下角；底承两列须实心泥 60。
+   *  （cs:48191-48256）。锚 (i,j)=花苞 2×2 右下角；底承两列须实心泥 60。
    *  2×2 允许族（cs:48204-48212）：空 / 强势草61 / 藤62 / 丛林植物233 /
    *  短草69 / 香蒲74 / 幌菊703 / 655 / 旗185(fy=0)——其余活动格即拒。
    *  非 force 先 KillTile(noItem) 覆写允许族再直写；force 档 4×4 计分
