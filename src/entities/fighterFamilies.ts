@@ -540,14 +540,16 @@ export function attemptToFindTeleportSpot(
         }
       }
       if (!clear) continue;
-      // :18926-18945 telefrag 预防：落点外扩 N 格与玩家 AABB（含 20t 速度外推并集）
-      // 不相交——原版 :18933-18940 扫【全部 255 玩家槽】（M11 起含联机访客代理）
+      // :19144-19164 telefrag 预防：落点外扩 N 格与玩家 AABB（含 20t 速度外推并集）
+      // 不相交——原版 :19146-19160 扫【全部 255 玩家槽】（M11 起含联机访客代理）
+      // ★F5c（2026-09-01）行号漂移校准：旧 :18926-18945/:18933-18940/:18932/:18884
+      //   系 1456 基线行号,1457 该段整体后移（NPC.cs AI_AttemptToFindTeleportSpotNearBooks_SearchWall）
       const ext = telefragPreventionDistanceInTiles * TILE;
       const box = { x: num5 * TILE - ext, y: i * TILE - ext, w: TILE + ext * 2, h: TILE + ext * 2 };
       let telefragged = false;
       for (const p of game.candidatePlayers?.() ?? [game.player as Player]) {
-        if (!p || p.dead) continue;                                    // :18932 active && !dead
-        const ux = p.x + p.vx * 20, uy = p.y + p.vy * 20;               // num4=20（:18884）
+        if (!p || p.dead) continue;                                    // :19149 active && !dead
+        const ux = p.x + p.vx * 20, uy = p.y + p.vy * 20;               // num4=20（:19152 velocity*20f）
         const px0 = Math.min(p.x, ux), px1 = Math.max(p.x + p.w, ux + p.w);
         const py0 = Math.min(p.y, uy), py1 = Math.max(p.y + p.h, uy + p.h);
         if (px0 < box.x + box.w && px1 > box.x && py0 < box.y + box.h && py1 > box.y) {

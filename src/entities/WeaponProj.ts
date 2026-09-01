@@ -70,10 +70,13 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
 
 /** 方向/高度依赖偏移项（Main.cs:29375-29826 表内 spriteDirection/direction/height
  *  条目,2026-08-19 补齐机制）。dirX = 弹体朝向（spriteDirection 语义:+1 右/-1 左,
- *  调用方传实体 facing）。397 的 num145-=1 以第三元素表达（0/−1）。
+ *  调用方传实体 facing）；dir = 原版 proj.direction（AI 移动朝向,缺省=dirX——
+ *  ★F5b：191-194/390-392 三族原文读 direction 非 spriteDirection
+ *  （Main.cs:30490-30498），MinionProj 消费端经第三参传真值）。397 的 num145-=1
+ *  以第三元素表达（0/−1）。
  *  ★当前消费端（本仓 aiStyle 族的 drawProj 调用方）尚未覆盖这些型号——表先行就位,
  *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项由 Bobber 实体自持绘制,不入本表 */
-const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly [number, number, number]> = {
+const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number, dir: number) => readonly [number, number, number]> = {
   // ★T9（2026-09-01）：弩车三档 677/678/679 表项退役——F5① 折算（2026-08-31）把
   //   Main.cs:34097-34137 支的锚误读为 Bottom 系（该支【不】重置 vector99,继承
   //   :33695 的 Center 缺省;663/691 支 :34082/:34091 才显式 Bottom）,折算结果整体
@@ -86,29 +89,32 @@ const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly
   1003: (d) => [22, -18 + (d === 1 ? 8 : 0), 0],
   1004: (d) => [26, -18 + (d === 1 ? 6 : 0), 0],
   112: (d) => [14, -8 + 4 * d, 0],
-  191: (d) => [26, d !== 1 ? -22 : -10, 0],
-  192: (d) => [26, d !== 1 ? -22 : -10, 0],
-  193: (d) => [26, d !== 1 ? -22 : -10, 0],
-  194: (d) => [26, d !== 1 ? -22 : -10, 0],
-  390: (d) => [0, 4 * d, 0],
-  391: (d) => [0, 4 * d, 0],
-  392: (d) => [-2, 4 * d, 0],
+  191: (_d, _h, dir) => [26, dir !== 1 ? -22 : -10, 0],   // Main.cs:30490-30493 direction
+  192: (_d, _h, dir) => [26, dir !== 1 ? -22 : -10, 0],
+  193: (_d, _h, dir) => [26, dir !== 1 ? -22 : -10, 0],
+  194: (_d, _h, dir) => [26, dir !== 1 ? -22 : -10, 0],
+  390: (_d, _h, dir) => [0, 4 * dir, 0],                  // Main.cs:30495-30498 num152=4*direction
+  391: (_d, _h, dir) => [0, 4 * dir, 0],
+  392: (_d, _h, dir) => [-2, 4 * dir, 0],
   313: (_d, h) => (h !== 54 ? [20, -12, 0] : [0, 0, 0]),
   397: () => [-2, -2, -1],   // num145−1（cs:29821-29823）
   // 火绒狐 1094/1113（2026-08-23 网格贴图批；非 num143/144 表系,1457 Main.cs:33742
   // vector99.Y -= 11 专支折算：帧 62×44 心 = (cx, cy−11)、盒 18×18 →
   // 贴图左上 = (盒左−22, 盒上−24)。翻转侧 −8 原点修正不走本表（MinionProj
-  // 消费端恒传 dirX=−1）,由 MinionProj.draw foxFlipAdj 直补）
+  // 消费端传真 facing,F5b 前恒传 −1）,由 MinionProj.draw foxFlipAdj 直补）
   1094: () => [24, -22, 0],
   1113: () => [24, -22, 0],
 };
 
 /** num143/num144(含 397 的 num145−1)偏移求值——静态+动态两表共用,
  *  供 MinionProj 等非 drawProj 消费端接入。返回 null = 两表均未登记。
- *  dirX = spriteDirection 语义(+1 右/−1 左);boxH = 碰撞盒高(313 高度门用)。 */
-export function projDrawOffsetFor(projId: number, dirX: number, boxH: number): readonly [number, number, number] | null {
+ *  dirX = spriteDirection 语义(+1 右/−1 左);boxH = 碰撞盒高(313 高度门用);
+ *  dir = 原版 proj.direction(AI 移动朝向;缺省回退 dirX——仅 191-194/390-392
+ *  三族原文读 direction,Main.cs:30490-30498,F5b)。 */
+export function projDrawOffsetFor(projId: number, dirX: number, boxH: number,
+  dir = dirX): readonly [number, number, number] | null {
   const dyn = PROJ_DRAW_OFFSET_DYN[projId];
-  if (dyn) return dyn(dirX, boxH);
+  if (dyn) return dyn(dirX, boxH, dir);
   const st = PROJ_DRAW_OFFSET[projId];
   return st ? [st[0], st[1], 0] : null;
 }

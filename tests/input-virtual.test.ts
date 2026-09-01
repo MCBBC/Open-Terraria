@@ -157,6 +157,40 @@ describe('Input 虚拟通道', () => {
     expect(calls).toBe(2);
   });
 
+  it('按住自愈:伪 keyup 丢电平后,OS 自动重复沿补回(只补电平,仅一条 repeatHeal 沿)', () => {
+    const rec: Array<[string, boolean, string?]> = [];
+    inp.onKeyEvent = (c, d, k) => rec.push([c, d, k]);
+    dispatchWin('keydown', { code: 'KeyA', repeat: false, target: null });
+    expect(inp.keys.has('KeyA')).toBe(true);
+    dispatchWin('keyup', { code: 'KeyA' });              // 伪 keyup(系统焦点抖动/输入法态切换)
+    expect(inp.keys.has('KeyA')).toBe(false);
+    dispatchWin('keydown', { code: 'KeyA', repeat: true, target: null });  // OS 自动重复沿
+    expect(inp.keys.has('KeyA')).toBe(true);             // 电平补回,断档缩到一个重复周期
+    expect(rec).toEqual([
+      ['KeyA', true, undefined],
+      ['KeyA', false, undefined],
+      ['KeyA', true, 'repeatHeal'],                      // 只在真实补回时一条(不随重复沿刷环)
+    ]);
+    dispatchWin('keydown', { code: 'KeyA', repeat: true, target: null });  // 后续重复沿幂等
+    expect(rec).toHaveLength(3);
+    expect(inp.keys.has('KeyA')).toBe(true);
+  });
+
+  it('按住自愈不越权:输入框内的重复沿不补电平(打字语义优先)', () => {
+    dispatchWin('keydown', { code: 'KeyA', repeat: false, target: null });
+    dispatchWin('keyup', { code: 'KeyA' });
+    const inputEl = { tagName: 'INPUT' };
+    dispatchWin('keydown', { code: 'KeyA', repeat: true, target: inputEl });
+    expect(inp.keys.has('KeyA')).toBe(false);            // 打字目标:游戏键不复活
+  });
+
+  it('onWindowBlur:clearForBlur 必经观察口(取证 blur 清空 vs 伪 keyup)', () => {
+    let blurs = 0;
+    inp.onWindowBlur = () => blurs++;
+    inp.clearForBlur();
+    expect(blurs).toBe(1);
+  });
+
   it('clearForBlur:清全部四层状态并置 delayUseItem(R4-22 语义保留)', () => {
     inp.pressVirtual('Space');
     inp.keys.add('KeyA');

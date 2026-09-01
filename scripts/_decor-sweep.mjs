@@ -167,6 +167,35 @@ const out = await page.evaluate(async () => {
     };
   }
 
+  // ⑨ 备案①清零（2026-09-01 五批）：TileFrame 五格世界边界门（:82606-82609
+  //   i<=5||j<=5||i>=max-5||j>=max-5 整格 return）——x<=5 区内顶锚件挖天花板
+  //   【不派发】Check* → 整件幸存;x>5 同构造（对照,主场景①已证）则整件清除
+  {
+    const ey = F;                       // 边界列竖直位（y 远大于 5,门只由 x 触发）
+    const edgeSetup = (bx) => {
+      // 边界区手工清场（clearBox 锚定 x0,不适用）
+      for (let x = bx - 2; x <= bx + 5; x++) for (let y = ey - 6; y <= ey + 3; y++) {
+        if (!st.inBounds(x, y)) continue;
+        if (st.isActive(x, y)) st.setTile(x, y, 0, 0, 0);
+        const i2 = st.idx(x, y);
+        if (st.liquid[i2] > 0) st.liquid[i2] = 0;
+      }
+      row(bx, ey, 4, STONE);            // 地面
+      row(bx, ey - 3, 2, STONE);        // 天花板锚行（444 顶行=ey-2）
+      buildObj(HIVES, bx, ey - 1, 2, 2);
+    };
+    edgeSetup(4);                        // 蜂巢列 x=4,5 —— 全在 <=5 门内
+    const preBees = enemyCount(210) + enemyCount(211);
+    g['breakTile'].call(g, 4, ey - 3);   // 挖左列天花板锚格
+    res.edgeGatedSurvives = {
+      residue: countIn(HIVES, 2, 7, ey - 4, ey + 1),
+      bees: enemyCount(210) + enemyCount(211) - preBees,
+    };
+    edgeSetup(7);                        // 对照:蜂巢列 x=7,8 —— 门外,扫生效
+    g['breakTile'].call(g, 7, ey - 3);
+    res.edgeOutsideWiped = { residue: countIn(HIVES, 5, 10, ey - 4, ey + 1) };
+  }
+
   res.verdict = res.hiveCeiling.residue === 0 && res.hiveCeiling.bees > 0 && res.hiveCeiling.ceilRightSurvives
     && res.hiveDiagControl.residue === 4
     && res.chandelierHook.residue === 0 && res.chandelierHook.drop106 > 0
@@ -175,7 +204,9 @@ const out = await page.evaluate(async () => {
     && res.pigronataOtherColControl.residue === 12
     && res.plantBelowRegression.weedGone
     && res.potReentryGuard.residue === 0 && res.potReentryGuard.innerCalls === 1
-    && res.potReentryGuard.lootCalls === 1 ? 'PASS' : 'FAIL';
+    && res.potReentryGuard.lootCalls === 1
+    && res.edgeGatedSurvives.residue === 4 && res.edgeGatedSurvives.bees === 0
+    && res.edgeOutsideWiped.residue === 0 ? 'PASS' : 'FAIL';
   return res;
 });
 fs.writeFileSync('/tmp/decor-sweep.json', JSON.stringify(out));

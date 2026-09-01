@@ -5337,9 +5337,17 @@ export class MinionProj extends Entity {
     // ---- 原版偏移表消费（Main.cs:29375-29826 num143/144 + 通用绘制 :34040）----
     // 全型号统一走公式（2026-08-19 清零近似）：有表项用 num143/144,未登记 = 0/0
     // → 贴图左上角 = (盒左+num144, 盒上−num143) = 盒左上对齐（曾一律盒心居中近似,
-    // 已废）。AI_026 族 spriteDirection 恒 −1（零赋值）→ 动态项 dirX=−1;
-    // 旋转族(rotation)绕 anchor 旋转 = 原版 spriteBatch(anchor,origin,rotation) 同构
-    const off3 = img ? (projDrawOffsetFor(this.projId, -1, this.h) ?? [0, 0, 0]) : null;
+    // 已废）。★F5b：动态项 dirX 此前恒传 −1（"AI_026 零赋值 ⇒ spriteDirection=−1"
+    // 系误读——原版零赋值 = 缺省 +1,Entity/Projectile 双缺省 1,Projectile.cs:356）,
+    // 现传真值：dirX = facing（spriteDirection 语义镜）;dir = 原版 direction
+    // （蜘蛛 390-392 = spDir,:63302-63317;其余族用 facing 侧写——仅 191-194/
+    // 390-392 三族读 direction,Main.cs:30490-30498。右行蜘蛛 num152 旧 −4 应 +4
+    // =8px 差）。旋转族(rotation)绕 anchor 旋转 = 原版 spriteBatch(anchor,origin,
+    // rotation) 同构
+    const off3 = img
+      ? (projDrawOffsetFor(this.projId, this.facing, this.h,
+        this.projId >= 390 && this.projId <= 392 ? this.spDir : this.facing) ?? [0, 0, 0])
+      : null;
     // num145 = (贴图宽−盒宽)/2 + 盒宽/2 = 贴图宽/2（Main.cs:29601 原式化简,1457
     // Main.cs 同式）——旋转枢=贴图水平中点;曾误写 (贴图宽+盒宽)/2 → 随从绕偏心点
     // 公转（2026-08-23 备案项⑦,同 WeaponProj.drawProj 修法）

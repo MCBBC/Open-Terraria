@@ -1052,7 +1052,13 @@ function checkBannerSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): v
       const topSlope = st.slope[a] === 1 || st.slope[a] === 2;
       const halfBrick = st.half[a] !== 0;
       const bottomSlope = st.slope[a] === 3 || st.slope[a] === 4;
-      const tileSolid = !!d && (d.solid || d.platform);
+      // ★IIIII110b(涂装链)：tileSolid 改读生成期 Main.tileSolid 镜像（vanGenSolidType）
+      //   ——Piles 槽头覆写列（cs:18906-18916：379/229/190/196/189/717-719/202/460/484
+      //   置非实心,runPilesPass 经 flipGenSolid 接线）期间,202 类锚格在原版读「非实心」
+      //   ⇒ num3=false ⇒ flag3=false ⇒ CheckBanner 整旗杀。JS 曾读 TILE_DEFS 静态
+      //   solid ⇒ 锚恒"实心" ⇒ neg #077 (2933,114) T0>91×3 横幅三连不杀（x86
+      //   WHO 取证：CheckBanner←TileFrameImportant←SquareTileFrame←PlaceTile(186)）。
+      const tileSolid = vanGenSolidType(at);
       const tileSolidTop = !!d?.platform;
       const isPlatformFamily = !!d?.platform;
       const anchorSolid = topSlope || halfBrick || tileSolid;        // cs:46541 num3

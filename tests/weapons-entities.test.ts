@@ -8,7 +8,9 @@ import { Enemy } from '../src/entities/Enemy';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike, spearDrawAngle, YOYO_RANGE, YOYO_LIFE, DaybreakFlare, daybreakStacks } from '../src/entities/WeaponProj';
 import type { GameHooks } from '../src/entities/types';
 
-const W = 200, H = 120;
+const W = 200, H = 160;   // ★F2②（2026-09-01）：120→160——H=120 时玩家/链球(row≈90)
+// 落在原版 Wet/LavaCollision 扫描钳 maxTilesY−40（row≤80）之下的不可扫带,inLiquid
+// 按原版恒判干,③ 入水变型标靶失靶;抬高世界使标靶回到可扫带（岩浆/水语义不变）
 
 function makeHooks(opts: { channel?: boolean; target?: { x: number; y: number } } = {}) {
   const store = new TileStore(W, H);
@@ -641,7 +643,7 @@ describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => 
     expect(Math.hypot(s.vx, s.vy)).toBeLessThanOrEqual(6.5);
   });
 
-  it('③ 948 火焰重锤入水变 947(:41069-41071);岩浆豁免(lavaWet,:15456-15459)', () => {
+  it('③ 948 火焰重锤入水变 947(:44542-44546,1456 :41064-41067);岩浆豁免(lavaWet 置位 :16906-16911,1456 :15450-15459)', () => {
     const { hooks, player } = makeHooks();
     const store = (hooks.world as { store: TileStore }).store;
     const mk = () => new FlailProj(player.cx, player.cy - 4, 30, 4, 948, () => true,

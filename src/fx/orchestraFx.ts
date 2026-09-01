@@ -30,6 +30,28 @@
 //     cattivaHitFx·blackLightningSmallFx·blackLightningHitFx·bestReforgeFx(各 2)/
 //     swordConeArmDust·silverBulletSparkleFx·pooFlyFx·natureFlyFx·
 //     moonLordWhipHitFx·arcSurgeFx(各 1)——后续新增型沿用同一登记不再逐站备注。
+//     ★F6 终局甄别（2026-09-01,全部内联 (rng×2−1) 站逐站对 1458 原版掷点判别收口;
+//     上清单系登记期嫌疑面,非全为三角/circ 债——NextFloatDirection 均匀站维持）：
+//     ①三角化（真 RotatedByRandom）=gasTrapFx 外/内环(:2939 π/20/:2953 π/15)+
+//       harpyCharmFamilyFx 外抛(:529 RotatedByRandom(6.28318548)→half π)/内抛(:551
+//       RotatedByRandom(0.31415927)),改 (rng()−rng())×half;
+//     ②circ 化（真 NextVector2Circular,单掷双分量共享）=rainbowRodHitFx sparkle
+//       (8,8)×scale(:3475)/d267(1,1)(:3498)+方向标量标量共享(:3499)/白影 CloneDust
+//       速度复制(:3511,Dust.cs:260 无掷)/deadCellsFlint(5,3)Y反(:1887)+位(7,0)(:1892)/
+//       deadCellsDownDash(5,3)Y反(:2144)+位(10,0)(:2153)/deadCellsBeheadedHead(4,4)
+//       ×num2(:1938)/stellarTune(12,12)×0.7(:3685)/snappingStoneRechargeFx pyroclastic
+//       (2,4)(:448,曾裸 Math.random 盒均匀);
+//     ③NextVector2CircularEdge 直译修=rainbowBoulderFx v1 d66(:1551,角均匀无半径掷
+//       →X 清零(:1554)+Y>0 反号(:1556))——旧 dvyRaw 乘法为自造形变;
+//     ④维持均匀（原版即 NextFloatDirection/NextFloat×2−1/Next(-n,n) 整数档）=
+//       rainbowRodHit 抖动(:3468/:3499)/classyCane(:2900 Next20/:2901 Next(-10,11))/
+//       deadCellsFlint·DownDash 块尘近似层/flint 火花(:1836 前后无三角/circular 掷)/
+//       stellarTune·blackLightningSmall·blackLightningHit·lightningSmall·
+//       stormLightningWindup 角抖(:3682/:3525/:3566/:3638/:1002 均 NextFloatDirection×0.25)/
+//       swordConeArmDust(:2788 族)/moonLordWhip(:1698)/stardustPunch(:3421 角均匀)/
+//       formatC(:3705/:3710/:3711)/keybrand(:3823/:3840)/shimmerArrow(:2610/:2666)/
+//       cattiva(:3772)/rainbowBoulder v3(:1597/:1635)/snappingStone kind1(:662/:724)/
+//       gasTrap 径向 5+rand(:2937)。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -87,8 +109,8 @@ export function rainbowRodHitFx(
     const spd = 1.5 * scale;                              // vector3（:3474）
     const vx = Math.cos(ang) * spd + jitterX;
     const vy = Math.sin(ang) * spd + jitterY;
-    const offX = (rng() * 2 - 1) * 8 * scale;             // vector4 circular(8,8)×scale（:3475）
-    const offY = (rng() * 2 - 1) * 8 * scale;
+    const off = circ(rng, 8);                             // ★F6 清偿：NextVector2Circular(8,8)（:3475）
+    const offX = off.x * scale, offY = off.y * scale;     //  线性盘,单掷双分量共享（双层 sparkle 同位）
     const life = 60;                                      // num5（:3475 衰减窗=寿命）
     const px = x + offX, py = y + offY;
     // 彩色层（:3476-3489）+ 白色核（:3490-3500，scale×0.6）
@@ -100,13 +122,17 @@ export function rainbowRodHitFx(
   }
   // ---- 12 × d267 + CloneDust 白影（:3501-3511）----
   for (let i = 0; i < 12; i++) {
+    // ★F6 清偿：velocity=NextVector2Circular(1,1)（:3498）线性盘 + MovementVector×
+    //  NextFloatDirection×0.5（:3499,标量 xy 共享单掷）；CloneDust（Dust.cs:260,:
+    //  3511）=velocity 全量复制白影,不再重掷
+    const cv = circ(rng, 1);
+    const jd = (rng() * 2 - 1) * 0.5;
     const d = game.spawnDust?.(x, y, 1, 1, 267,
-      (rng() * 2 - 1) + moveX * (rng() * 2 - 1) * 0.5,
-      (rng() * 2 - 1) + moveY * (rng() * 2 - 1) * 0.5,
+      cv.x + moveX * jd, cv.y + moveY * jd,
       0, null, 0.6 + rng() * 0.9, true);
     if (d) d.fadeIn = 0.7 + rng() * 0.8;
     game.spawnDust?.(x, y, 1, 1, 267,
-      (rng() * 2 - 1), (rng() * 2 - 1), 0,
+      cv.x + moveX * jd, cv.y + moveY * jd, 0,
       { r: 255, g: 255, b: 255, a: 255 }, (0.6 + rng() * 0.9) / 2, true);   // CloneDust 白影
   }
 }
@@ -226,10 +252,12 @@ export function deadCellsFlintFx(
   game.playSfxFiles?.(['dd2_monk_staff_ground_impact_0', 'dd2_monk_staff_ground_impact_1',
     'dd2_monk_staff_ground_impact_2'], 1, x, y);
   for (let m = 0; m < 30; m++) {                          // 尘 228 ×30（:1885-1890 从简 8+22 稀释视效帽）
-    const dvx = (rng() * 2 - 1) * 5, dvyRaw = (rng() * 2 - 1) * 3;
-    const dvy = dvyRaw > 0 ? -dvyRaw : dvyRaw;            // value.Y>0 反号（:1887-1889）
-    game.spawnParticles?.(x + (rng() * 2 - 1) * 7, y - rng() * 3,
-      '#FFB400', 1, 0.7 + rng() * 0.8, { life: 26, vx: dvx, vy: dvy });
+    // ★F6 清偿：value=NextVector2Circular(5,3)（:1887）线性盘 + Y>0 反号（:1888-1890）；
+    //  位抖=NextVector2Circular(7,0)（:1892,X 向扁盘）——y 提升段为仓内近似维持
+    const cv = circ(rng, 5, 3);
+    const dvy = cv.y > 0 ? -cv.y : cv.y;
+    game.spawnParticles?.(x + circ(rng, 7, 0).x, y - rng() * 3,
+      '#FFB400', 1, 0.7 + rng() * 0.8, { life: 26, vx: cv.x, vy: dvy });
   }
   void gravitySign;
   return true;
@@ -250,10 +278,11 @@ export function deadCellsDownDashExplosionFx(
   const speedMul = strong ? 1.5 : 1;                      // value *= 1.5f（:2147-2149）
   const hue = strong ? 0.01 : 0.55;                       // num3（:2150-2152）
   for (let i = 0; i < 40; i++) {                          // dust306 ×40（:2140-2155）
-    let dvx = (rng() * 2 - 1) * 5, dvy = (rng() * 2 - 1) * 3;
-    if (dvy > 0) dvy = -dvy;
-    dvx *= speedMul; dvy *= speedMul;
-    game.spawnParticles?.(x + (rng() * 2 - 1) * 10, y,
+    // ★F6 清偿：value=NextVector2Circular(5,3)（:2144）线性盘 + Y>0 反号（:2145-2147）
+    //  + strong ×1.5；位抖=NextVector2Circular(10,0)（:2153,X 向扁盘）
+    const cv = circ(rng, 5, 3);
+    const dvx = cv.x * speedMul, dvy = (cv.y > 0 ? -cv.y : cv.y) * speedMul;
+    game.spawnParticles?.(x + circ(rng, 10, 0).x, y,
       orchestraHslCss(hue + rng() * 0.1, 1, 0.55), 1, 1.9,
       { life: 30, vx: dvx, vy: dvy, size: 1.3 + rng() * 0.8 });
   }
@@ -388,9 +417,10 @@ export function deadCellsBeheadedHeadFx(
   for (let num = 0; num < 1; num += 0.5) {
     const f = rng() * Math.PI * 2;
     const vx = moveX * 0.5, vy = moveY * 0.5;              // Velocity（:1936）
-    const px = x + Math.cos(f) * num2 * 15 * 0.5 + (rng() * 2 - 1) * 4 * num2
+    const jc = circ(rng, 4);                               // ★F6 清偿：NextVector2Circular(4,4)（:1938）
+    const px = x + Math.cos(f) * num2 * 15 * 0.5 + jc.x * num2
       + moveX * num - vx * 0.5;
-    const py = y + Math.sin(f) * num2 * 15 * 0.5 + (rng() * 2 - 1) * 4 * num2
+    const py = y + Math.sin(f) * num2 * 15 * 0.5 + jc.y * num2
       + moveY * num - vy * 0.5;
     game.spawnParticles?.(px, py, 'rgba(255,200,120,0.55)', 1, Math.hypot(vx, vy),
       // AccelerationPerFrame = Velocity×(1/num4)×0.25 = vel/60（:1940 `×(0−−1/15)×0.25`
@@ -414,14 +444,15 @@ export function stellarTuneFx(
   const lerpCss = (a: [number, number, number], b: [number, number, number], t: number): string =>
     `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
   for (let i = 0; i < 5; i++) {                            // num2=5（:3678-3701）
-    const ang = Math.PI * 2 * (i / 5) + phase + (rng() * 2 - 1) * 0.25;
+    const ang = Math.PI * 2 * (i / 5) + phase + (rng() * 2 - 1) * 0.25;   // NextFloatDirection×.25 均匀
     const spd = 1.5 * 0.7;                                 // vector2 = 1.5×(0.7,0.7)
+    const jc = circ(rng, 12);                              // ★F6 清偿：NextVector2Circular(12,12)（:3685）
     const scale = 0.2 + rng() * 0.8;
     const t = rng();
     const col = rng() < 0.5
       ? lerpCss([255, 215, 0], [255, 105, 180], t)         // Lerp(Gold,HotPink,r)
       : lerpCss([238, 130, 238], [255, 105, 180], t);      // Lerp(Violet,HotPink,r)
-    game.spawnParticles?.(x + (rng() * 2 - 1) * 12 * 0.7, y + (rng() * 2 - 1) * 12 * 0.7,
+    game.spawnParticles?.(x + jc.x * 0.7, y + jc.y * 0.7,
       col, 1, spd, { life: 60, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
         damp: 1 - 1 / 60, grav: 0, size: 1.4 * scale });
   }
@@ -1185,7 +1216,7 @@ export function gasTrapFx(
     const a0 = (i / 12) * Math.PI * 2;
     let sx = moveX + (5 + rng()) * Math.cos(a0);
     let sy = (5 + rng()) * Math.sin(a0);
-    const ja = (rng() * 2 - 1) * Math.PI / 20;
+    const ja = (rng() - rng()) * Math.PI / 20;           // ★F6 清偿：RotatedByRandom(π/20)（:2939）三角
     const rx = sx * Math.cos(ja) - sy * Math.sin(ja);
     const ry = sx * Math.sin(ja) + sy * Math.cos(ja);
     sx = rx; sy = ry;
@@ -1196,7 +1227,7 @@ export function gasTrapFx(
     const a0 = (j / 10) * Math.PI * 2;
     const sBase = 2.5 + rng() * 1.45;
     let sx = sBase * Math.cos(a0), sy = sBase * Math.sin(a0);
-    const ja = (rng() * 2 - 1) * Math.PI / 15;
+    const ja = (rng() - rng()) * Math.PI / 15;           // ★F6 清偿：RotatedByRandom(π/15)（:2953）三角
     const rx = sx * Math.cos(ja) - sy * Math.sin(ja);
     const ry = sx * Math.sin(ja) + sy * Math.cos(ja);
     sx = rx; sy = ry;
@@ -1429,11 +1460,12 @@ export function rainbowBoulderFx(
         { life: 200, vx: 0, vy: -1.5, damp: 0.995, grav: 0, size: 0.6 });
     }
     for (let i = 0; i < 21; i++) {                       // d66 环流尘（:1547-1559）
-      let dvyRaw = (rng() * 2 - 1);
-      dvyRaw = dvyRaw > 0 ? -dvyRaw : dvyRaw;
-      const sp = 8 + 2 * rng();
+      // ★F6 清偿：velocity=NextVector2CircularEdge(1,1)（:1551,单位圆边=角均匀、无半径掷）
+      //  ×(8+2×NextFloat) → X 清零（:1554）+ Y>0 反号（:1556-1558）——旧 dvyRaw 乘法为
+      //  自造形变（速度密度被压向 0,非原版 |sin| 谱）
       const ang = rng() * Math.PI * 2;
-      const d = game.spawnDust?.(x, y, 16, 16, 66, Math.cos(ang) * sp, Math.sin(ang) * sp * dvyRaw, 100, hexToRgbArr(hslRand()), 1.7);
+      const sp = 8 + 2 * rng();
+      const d = game.spawnDust?.(x, y, 16, 16, 66, Math.cos(ang) * sp, Math.sin(ang) * sp, 100, hexToRgbArr(hslRand()), 1.7);
       if (d) {
         d.noGravity = true;
         d.fadeIn = 1 + rng();
@@ -1729,7 +1761,6 @@ export function snappingStoneRingFx(
 export function snappingStoneRechargeFx(
   game: GameHooks, kind: 0 | 1 | 2, px: number, py: number, pw: number, ph: number, rng: Rng = Math.random,
 ): void {
-  void rng;
   const cfg = kind === 0 ? { dust: 226, count: 10, alpha: 255, scale: 0.9, pull: true }
     : kind === 1 ? { dust: 6, count: 15, alpha: 255, scale: 1.5, pull: false }
       : { dust: 15, count: 10, alpha: 60, scale: 0.9, pull: true };
@@ -1745,8 +1776,10 @@ export function snappingStoneRechargeFx(
       d.vx *= 0.5;
       d.vy *= 3;
     } else {
-      d.vx = (Math.random() * 2 - 1) * 2;
-      d.vy = (Math.random() * 2 - 1) * 4;
+      // ★F6 清偿：Spawn_PyroclasticStoneRecharge=NextVector2Circular(2,4)（:448）线性盘
+      //  ——曾裸 Math.random 逐轴盒均匀
+      const pc = circ(rng, 2, 4);
+      d.vx = pc.x; d.vy = pc.y;
     }
     d.alpha = cfg.alpha;
     d.followPlayer = true;
@@ -1772,7 +1805,8 @@ export function harpyCharmFamilyFx(
   else game.playSfxWav?.('Item_39', 1, x, y);
   const life = 30;
   for (let i = 0; i < 4 * up; i++) {
-    const ja = (rng() * 2 - 1) * Math.PI;
+    // ★F6 清偿：RotatedByRandom(6.28318548)（:529）三角=NextDouble×r−NextDouble×r
+    const ja = (rng() - rng()) * Math.PI;
     const bx = moveX * Math.cos(ja) - moveY * Math.sin(ja);
     const by = moveX * Math.sin(ja) + moveY * Math.cos(ja);
     const spd = rng() * 0.25 * up;
@@ -1780,7 +1814,7 @@ export function harpyCharmFamilyFx(
       { life, vx: bx * spd, vy: by * spd, damp: 1, grav: 0, size: 1.5 });
   }
   for (let i = 0; i < 3 * up; i++) {
-    const ja = (rng() * 2 - 1) * 0.314;
+    const ja = (rng() - rng()) * 0.3141592741012573;     // ★F6 清偿：RotatedByRandom(0.31415927)（:551）三角
     const bx = moveX * Math.cos(ja) - moveY * Math.sin(ja);
     const by = moveX * Math.sin(ja) + moveY * Math.cos(ja);
     const spd = rng() * up;

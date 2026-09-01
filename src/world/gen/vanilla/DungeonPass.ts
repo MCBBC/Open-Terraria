@@ -7328,6 +7328,11 @@ const snap: SnapFn = (name) => {
   //   主流掷面=每窗 GetWindowPlatformStyle 1 掷（cs:161-168,表空不掷）。
   if (gfStyles.length > 0 && gfEarlyRooms.length > 0
     && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    // ★IIIII110c 诊断钩（零开销常态：__wvLines 未装配时全程空转）：S9 每房分派面
+    //   写时账——room 序/kind/style/seed/box/门 + 每窗写位/档，供 x86 窗簇逐房对拍。
+    const _w9L = (globalThis as { __wvLines?: string[] }).__wvLines ?? null;
+    const w9 = (l: string): void => { if (_w9L) _w9L.push(`MARK|W9|${l}`); };
+    let _w9i = 0;
     /** 每房窗写体（DungeonWindowBasic.Window :26-105 1:1,风格参数化）——
      *  玻璃=Closed?winGC:winG、边=winE、wallColor(0)（OverrideGlassPaint 本域恒 −1）、
      *  下缘越界支窗台（type19+frameY=style*18+color(0)+TileFrame 不建模）。
@@ -7377,8 +7382,10 @@ const snap: SnapFn = (name) => {
       }
       box.calc();
       winBoxes.push(box);
+      w9(`win|rm=${_w9i - 1}|x=${px}|y=${py}|w=${ww}|h=${wh}|cl=${closed ? 1 : 0}|plat=${plat}|st=${er.st}`);
     };
     for (const er of gfEarlyRooms) {
+      w9(`room|${_w9i++}|kind=${er.kind}|st=${er.st}|seed=${er.seed}|box=${er.L},${er.T},${er.R},${er.B}|c=${er.cx},${er.cy}|ok=${er.winOK ? 1 : 0}|liq=${er.liquid}`);
       if (er.kind === 5) {                                       // BiomeRugged
         if (dualLayoutCtxS) dualRuggedEarlyFeatures(dualLayoutCtxS, er);
       } else if (er.kind === 6) {                                // BiomeStructured
@@ -7392,11 +7399,13 @@ const snap: SnapFn = (name) => {
         if (num2v === 0) {
           const closed = ur.nextInt(3) !== 0;
           const h5 = Math.trunc(height / 5);
+          w9(`struct|rm=${_w9i - 1}|n2=0|cl=${closed ? 1 : 0}|h5=${h5}|num=${num}|c=${x},${y}`);
           dgWindowSty(x, y, 9, h5, closed, er);
           dgWindowSty(x - num, y + 3, 7, h5 - 4, closed, er);
           dgWindowSty(x + num, y + 3, 7, h5 - 4, closed, er);
         } else {
           const num3 = 4;
+          w9(`struct|rm=${_w9i - 1}|n2=1|pillars|num=${num}|c=${x},${y}|bot=${bottom}`);
           // BlockActuatedSolidTop：inact+SolidTop ±2 豁免；AlwaysPlaceEntirePillar=false；
           // 柱漆 b=OverridePaintTile>−1?Override:TilePaintColor（DungeonPillar.cs:107-113）
           const sp = er.opt > -1 ? er.opt : er.bPaint;
@@ -7406,7 +7415,9 @@ const snap: SnapFn = (name) => {
         }
       } else {                                                   // 基类支（DungeonRoom.cs:61-125）
         const ur = new UnifiedRandom(er.seed);
-        if (ur.nextInt(3) === 0) {
+        const _n3 = ur.nextInt(3);
+        w9(`base|rm=${_w9i - 1}|n3=${_n3}|st=${er.st}`);
+        if (_n3 === 0) {
           let num = 1;
           const width = er.R - er.L, height = er.B - er.T;
           const closed = !(er.B <= ws);                          // Closed=!(Bottom<=worldSurface)
@@ -7414,6 +7425,7 @@ const snap: SnapFn = (name) => {
           if (num2v >= 1 && num2v <= 2 && (width <= 36 || height <= 15)) num2v = 0;
           let flag = true;
           if (num2v === 0 && (width <= 14 || height <= 10)) flag = false;
+          w9(`basewin|rm=${_w9i - 1}|n2=${num2v}|flag=${flag ? 1 : 0}|cl=${closed ? 1 : 0}|wh=${width}x${height}|ok=${er.winOK ? 1 : 0}`);
           if (flag) {
             let cxF = er.cx, cyF = er.cy;
             // GetRoomCenterForDungeonFeature：GenShape Mound → cy += Height/5（:76-85）

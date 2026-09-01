@@ -11,7 +11,43 @@
 //      accessory 数据面真值 + 全物品栏在场授予 equipStats.oldStyleParkour
 //      （RefreshMechanicalAccsFromItemType :12933-12936）+ 右键 6190↔6195 快换
 //      （Player.cs:31804-31808,仓内 Game.swapParkourBookVisual）依赖面。
-import { describe, it, expect } from 'vitest';
+//   ★蓝队六轮 F 批（2026-09-01,F1-F4）：
+//     F1 6190↔6195 快换可达性——原版手势 = !controlUseItem（ItemCheck_ManageRightClick
+//        Features flag :31765;releaseUseItem 与 controlUseItem 互反 :43160）：左键未按
+//        时右键边沿才换型。仓内分派曾挂在 updateUse 左键分派链（左键早退门
+//        !mouseDown&&!holdOk 之后）= 纯右键帧死支——已上移右键交互块（tile 交互分派
+//        之后 = !tileInteractionHappened 语义,3384/3858 同位先例）,门配 !mouseHeld。
+//     F2 1121 蜂枪双重乘区 + slowMagic 缺失——useCombatWeapon wrapper（Game.ts :13385/
+//        :13389）已把词缀 ps.dmg×damageMult('magic')/ps.spd 折进 cw.damage/cw.useTime,
+//        1121 支原再乘一遍（带伤词缀 +30% 量级偏差）；且 cycleCooldown 不吃
+//        slowMagic×2.5（原版 ItemCheck_Shoot 尾段对 mana>0 && slowMagicUse 一律
+//        ApplyItemTime(sItem, 2.5) :47594-47601,1121 魔法武器同吃）。改单次应用形
+//        （1155 黄蜂枪支 cw.damage/cw.useTime 直取先例 :14065/:14074）。
+//     F3 1155/1121 补 onManaItemUsed()（Player.cs:42131-42137 itemAnimation>0 &&
+//        item.mana>0 → ItemCheck_ApplyManaRegenDelay 回蓝延迟钟窗;邻支 :14778 先例）
+//        ——漏接 = 蜂枪连发期白嫖回蓝。
+//     F4 ★设计登记（189 IDStatic 三跳,Arrow.ts 并行在飞 B6B 禁改,本文件先登记意图）：
+//        189 SetDefaults（:2771-2781）usesIDStaticNPCImmunity + idStaticNPCHitCooldown=10
+//        + penetrate=3——原版命中节奏 = 同一敌每 10t 可再结算一跳（贴身吃满 3 跳）。
+//        原版命中写位（Projectile.cs:14031-14037 usesIDStaticNPCImmunity 支）：
+//        `targetNPC.immune[owner] = 0` + `perIDStaticNPCImmunity[identity,i] =
+//        GameUpdateCount + 10`——【自己打的 iframes 不拦自己】,再命中节拍只由组表管;
+//        读门（:12635-12637）immune[owner]==0 对该族同样生效（外源伤害照旧拦）。
+//        组键 = immunityIdentity（189 缺省 = type → 189;181/566 显式
+//        UseGroupStaticImmunity(181) :2686/:6185 → 两型共用 181 一张表,齐扑同敌
+//        不叠伤）。仓级偏差 = Arrow 通用穿透去重（Arrow.ts「修复1」注: pierceInit>=0
+//        && hitSet.has(e.id) 永久去同敌重）对该族【越权】——idStaticCheck 组表
+//        （10t 过期）已就位,再被 hitSet 永久去重 ⇒ 189/181/566 永远只结算 1 跳。
+//        最小改法（待 B6B 落地后微批执行,报告移交段同步留档）：
+//        ① 读侧：Arrow.ts 命中环 else 支 hitSet 去重对 idStaticGroup!==null 弹豁免
+//          （`pierceInit>=0 && idStaticGroup===null && hitSet.has(e.id)`）——组表
+//          idStaticCheck（按组键+敌id,10t 过期）即该族同敌再命中门,键形与 181/566
+//          现有两键同形兼容,零新键空间;
+//        ② 写侧：e.hurt() 成功后对 idStaticGroup!==null 弹清 e.iframes（= 原版
+//          targetNPC.immune[owner]=0——只清自己这一跳造成的 iframes,外源 iframes
+//          照旧拦,读门不豁免）。穿透经济学不变：每受理一跳照常 pierce--
+//          （:14194-14196）,penetrate=3 → 单敌至多 3 跳、节拍 ≥10t。
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player, refreshMechanicalAccsFromItemType } from '../src/entities/Player';
@@ -20,11 +56,12 @@ import { TileStore } from '../src/world/TileStore';
 import { Arrow, AI_STYLE36_TRACK_PARAMS } from '../src/entities/Arrow';
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { projClassOfProjId } from '../src/entities/projTargets';
-import { itemCombat } from '../src/data/vanillaItemCombat';
+import { itemCombat, combatWeapon } from '../src/data/vanillaItemCombat';
 import { vanillaStatOfVid, isAnyAccessory } from '../src/data/vanillaItemStats';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../src/data/items';
 import { invIndexOfVanilla } from '../src/data/vanillaRecipes';
-import { waspGunVolleyRoll, waspGunHiveBonus } from '../src/core/Game';
+import { Game, waspGunVolleyRoll, waspGunHiveBonus } from '../src/core/Game';
+import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 200;
@@ -145,6 +182,12 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
     expect((projectileData(189) ?? {}) as Record<string, unknown>).not.toHaveProperty('buffType');
   });
   it('IDStatic 静态免疫组：identity=type=189、cd 10t≈167ms（:2777-2778+P.cs:784）', () => {
+    // ★F4 设计登记（2026-09-01,详见文件头 F4 段）：本断言钉的是【组表就位】面。
+    //   原版三跳节奏 = usesIDStaticNPCImmunity+cd10+penetrate=3 → 同敌 10t 一跳、
+    //   吃满 3 跳（命中写位 :14031-14037 immune[owner]=0+组表=count+10）。仓级
+    //   Arrow hitSet（pierceInit>=0 永久去同敌重）目前越权把 189 压成 1 跳——
+    //   Arrow.ts 并行在飞（B6B）禁改,行为级三跳断言待其落地后随微批补入
+    //   （读侧 hitSet 豁免 + 写侧 iframes 清零两刀,键形=immunityIdentity 组键）。
     const { hooks } = makeHooks();
     const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0 });
     expect(wasp.idStaticGroup).toBe(189);
@@ -275,5 +318,187 @@ describe('T2 旧世界跑酷指南 6190：SetDefaults 真值 + 生效链', () =>
       // 键名走原版 Pascal 键（ItemTooltip.OldStyleParkourBook）
       expect((l.ItemName ?? {}).OldStyleParkourBook).toBeTruthy();
     }
+  });
+});
+
+// ==== 蓝队六轮 F 批（2026-09-01）====
+//   F2/F3 走 useCombatWeapon 真链（Object.create(Game.prototype) 最小桩——词缀折叠
+//   wrapper 与 1121/1155 专支全是真代码,只旁路挥击/音效/锚点渲染面）；
+//   F1 走 updateUse 真链（右键交互块手势面）。
+
+/** 掷骰确定性：固定 Math.random（0.25 下 1121 nBee=1/普蜂 +0、1155 nWasp=2） */
+function withRng<T>(value: number, fn: () => T): T {
+  const spy = vi.spyOn(Math, 'random').mockReturnValue(value);
+  try { return fn(); } finally { spy.mockRestore(); }
+}
+
+/** useCombatWeapon 最小桩（1121/1155 魔法支）：heldPrefixStat 走【真实现】
+ *  （读槽位 prefix → prefixStat 表）——词缀折叠 wrapper 不桩,单次应用形才可验 */
+function magicGame(vid: number, o?: { prefix?: number; mana?: number }) {
+  const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  const player = new Player(50 * TILE, 90 * TILE, new Inventory());
+  const iid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]];
+  player.inv.add(iid, 1);
+  // 词缀直写槽位（inv.add 的 fillRange 空槽支不带 prefix——与被测链无关,heldPrefixStat
+  // 真实现读槽位 prefix → prefixStat 表,词缀折叠 wrapper 照真跑）
+  if (o?.prefix) player.inv.heldItem()!.prefix = o.prefix;
+  player.mana = o?.mana ?? 100;
+  const added: unknown[] = [];
+  g.player = player;
+  g.entities = { add: (e: unknown) => { added.push(e); }, projectiles: [] };
+  g.input = { mouseDown: true, mouseHeld: true, rightDown: false, mouseX: 700, mouseY: 300, uiBlocking: false };
+  g.camera = { screenToWorld: () => [800, 0] };
+  g.sfx = { play: () => {}, playWavFile: () => true, playFiles: () => true };
+  g.achievements = { handleSpecialEvent: () => {} };
+  g.cb = { onInventoryChanged: () => {}, onToast: () => {} };
+  g.swing = null;                       // 动画不在途（TAIL_SILENCE 门旁路）
+  g.mining = null;
+  g.world = { store: { get: () => 0 } };
+  g.useSwing = () => {};                // 挥击旁路（本批只验出手/冷却/钟窗）
+  g.playUseSound = () => {};            // 音效旁路
+  g.resolveShotAnchor = (_k: string, ang: number) =>
+    ({ x: player.cx + Math.cos(ang) * 18, y: player.cy + Math.sin(ang) * 18 });
+  return { g, player, added };
+}
+
+function fireCombatWeapon(g: Record<string, unknown>, vid: number): void {
+  const def = ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]]];
+  (g as unknown as { useCombatWeapon: (cw: unknown, def: unknown) => void })
+    .useCombatWeapon(combatWeapon(def), def);
+}
+
+describe('F2 蜂枪 1121 单次应用形（wrapper 折叠后直取 = Player.cs:48797 beeDamage(Damage)）', () => {
+  it('无词缀：单蜂 9 伤 / useTime 12 / 耗魔 5（基线不变式）', () => {
+    const { g, player, added } = magicGame(1121);
+    withRng(0.25, () => fireCombatWeapon(g, 1121));
+    expect(added).toHaveLength(1);                    // nBee=1（Next(1,4)=1、两 Next(6)≠0）
+    const bee = added[0] as Arrow;
+    expect(bee.projId).toBe(181);
+    expect(bee.damage).toBe(9);                       // cw.damage=round(9×1×1) 直取
+    expect(player.mana).toBe(95);                     // cwCost=5
+    expect(player.useTime).toBe(12);                  // getSlowMagicUseTime 透传（不空蓝）
+    expect(player.slowMagicUse).toBe(false);
+  });
+
+  it('Mythical(83)：蜂伤 10 单次应用——旧双乘 12 作反证钉', () => {
+    const { g, player, added } = magicGame(1121, { prefix: 83 });
+    withRng(0.25, () => fireCombatWeapon(g, 1121));
+    const bee = added[0] as Arrow;
+    // wrapper round(9×1.15)=10 → 专支直取 10；旧码再乘 = round(10×1.15)=12
+    expect(bee.damage).toBe(10);
+    expect(bee.damage).not.toBe(12);
+    // useTime：wrapper round(12×0.9)=11 → 直取 11；旧码再乘 = round(11×0.9)=10
+    expect(player.useTime).toBe(11);
+    expect(player.useTime).not.toBe(10);
+  });
+
+  it('空蓝 slowMagic：useTime ×2.5（ApplyItemTime(sItem,2.5) :47594-47601）——旧值 12 反证钉', () => {
+    const { g, player } = magicGame(1121, { mana: 2 });
+    withRng(0.25, () => fireCombatWeapon(g, 1121));
+    expect(player.mana).toBe(0);                      // statMana=0（:53243）
+    expect(player.slowMagicUse).toBe(true);           // DoRunOutOfManaEffect（:53258-53261）
+    expect(player.useTime).toBe(30);                  // floor(2.5×12)
+    expect(player.useTime).not.toBe(12);              // 旧码 cycleCooldown 不吃 slowMagic
+  });
+});
+
+describe('F3 onManaItemUsed 回蓝延迟钟窗（Player.cs:42131-42137,邻支 Game.ts :14778 先例）', () => {
+  it('1121：manaAnimTicks = useTime（漏接时恒 0 = 连发期白嫖回蓝）', () => {
+    const { g, player } = magicGame(1121);
+    withRng(0.25, () => fireCombatWeapon(g, 1121));
+    expect(player.useTime).toBe(12);
+    expect(player.manaAnimTicks).toBe(12);
+  });
+  it('1155：manaAnimTicks = useTime（空蓝 ×2.5 同式折入）', () => {
+    const { g, player } = magicGame(1155, { mana: 2 });
+    withRng(0.25, () => fireCombatWeapon(g, 1155));
+    expect(player.slowMagicUse).toBe(true);
+    expect(player.useTime).toBe(45);                  // floor(2.5×18)
+    expect(player.manaAnimTicks).toBe(45);
+  });
+});
+
+describe('F2/F3 黄蜂枪 1155 出手链单次应用形（Player.cs:48809-48820）', () => {
+  it('无词缀：2 蜂 31 伤 / useTime 18 / 耗魔 10 / 弹 189', () => {
+    const { g, player, added } = magicGame(1155);
+    withRng(0.25, () => fireCombatWeapon(g, 1155));
+    expect(added).toHaveLength(2);                    // Next(2,5) 首掷 0.25 → 2
+    for (const w of added) {
+      expect((w as Arrow).projId).toBe(189);
+      expect((w as Arrow).damage).toBe(31);           // cw.damage 直取（无 Hive Pack）
+    }
+    expect(player.mana).toBe(90);
+    expect(player.useTime).toBe(18);
+  });
+  it('Mythical(83)：蜂伤 36 单次应用（旧双乘 41 作反证钉）/ useTime 16', () => {
+    const { g, added } = magicGame(1155, { prefix: 83 });
+    withRng(0.25, () => fireCombatWeapon(g, 1155));
+    expect((added[0] as Arrow).damage).toBe(36);      // round(31×1.15)=35.65→36
+    expect((added[0] as Arrow).damage).not.toBe(41);  // round(36×1.15)=41.4→41（旧双乘面）
+    expect((g.player as Player).useTime).toBe(16);    // wrapper round(18×0.9)=16.2→16
+  });
+});
+
+/** updateUse 最小桩（6190/6195 右键快换手势面）：右键交互块全链可达 */
+function parkourGame(vid: 6190 | 6195, input: Record<string, unknown>, prevRightDown = false) {
+  const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  const player = new Player(50 * TILE, 90 * TILE, new Inventory());
+  player.inv.add(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]], 1);
+  g.player = player;
+  g.entities = { add: () => {}, projectiles: [], npcs: [], critters: [], enemies: [] };
+  g.input = { mouseDown: false, mouseHeld: false, rightDown: true, mouseX: 700, mouseY: 300,
+    uiBlocking: false, downAction: () => false, ...input };
+  g.camera = { tileUnder: () => [60, 60], screenToWorld: () => [800, 0] };
+  g.renderer = { canvas: { width: 800, height: 600 }, fullMap: { open: false },
+    timeUiHover: false, weatherUiHover: false };
+  g.smartCursor = { showing: false };
+  g.annotateMode = false;
+  g.mining = null;
+  g.housingMode = null;
+  g.recallChannel = null;
+  g.golfWhistleAt = null;
+  g.minecart = null;
+  g.cartKeyLatch = false;
+  g.swing = null;
+  g._prevMouseDown = false;
+  g._prevRightDown = prevRightDown;
+  g.world = { store: { get: () => 0 }, flags: {} };
+  g.tryFaceHeldAim = () => {};
+  g.itemFuncTool = () => undefined;
+  g.inTileRange = () => false;
+  g.findChestNear = () => null;
+  g.talkToNearbyNpc = () => false;
+  g.interactAt = () => {};
+  g.sfx = { play: () => {}, playWavFile: () => true, playFiles: () => true };
+  g.achievements = { handleSpecialEvent: () => {} };
+  g.cb = { onInventoryChanged: () => {}, onToast: () => {} };
+  return { g, player };
+}
+
+const runUse = (g: Record<string, unknown>): void =>
+  (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
+
+describe('F1 6190↔6195 快换可达性（原版手势 !controlUseItem,Player.cs:31765/:31804-31808）', () => {
+  it('纯右键帧：手持 6190 右键边沿 → 换 6195 + 吞边沿（:31844 mouseRightRelease=false）', () => {
+    const { g, player } = parkourGame(6190, {});
+    runUse(g);
+    expect(player.inv.heldItem()!.id).toBe(invIndexOfVanilla(6195));
+    expect((g.input as { rightDown: boolean }).rightDown).toBe(false);
+  });
+  it('手持 6195 → 换回 6190（快换表双向）', () => {
+    const { g, player } = parkourGame(6195, {});
+    runUse(g);
+    expect(player.inv.heldItem()!.id).toBe(invIndexOfVanilla(6190));
+  });
+  it('按住左键期间点右键：不换型（原版排除态 !controlUseItem,:43160 releaseUseItem 同源）', () => {
+    const { g, player } = parkourGame(6190, { mouseHeld: true });
+    runUse(g);
+    expect(player.inv.heldItem()!.id).toBe(invIndexOfVanilla(6190));
+    expect((g.input as { rightDown: boolean }).rightDown).toBe(true);   // 未吞边沿
+  });
+  it('右键非边沿帧（mouseRightRelease 已假,6190 不在 ItemsThatAllowRepeatedRightClick）：不换型', () => {
+    const { g, player } = parkourGame(6190, {}, true);
+    runUse(g);
+    expect(player.inv.heldItem()!.id).toBe(invIndexOfVanilla(6190));
   });
 });

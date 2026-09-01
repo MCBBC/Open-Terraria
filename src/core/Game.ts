@@ -4009,12 +4009,26 @@ export class Game implements GameHooks {
         // 鼠标/移动(window 级+轮询)活着而数字键死 = 恰好用户症状
         const handlers = this.input.keydownHandlers.slice();
         const onKey = this.input.onKeyEvent;
+        const onBlur = this.input.onWindowBlur;
+        // ★物理按住态随实例迁移(2026-09-01 用户报"按住的键偶尔断一下"):contextlost
+        // 熔断/看门狗重建主画布时用户往往正按着键——旧实例 keys 是此刻物理真实,
+        // new Input 清零后 OS 不会补发首按 keydown(修饰键连 repeat 都没有)=按住
+        // 的键静默死掉须重按。keys/mouseHeld/rightDown/delayUseItem 均纯电平,
+        // 直迁即可;虚拟电平仍随 destroy 归零(下方原注释,安全侧)
+        const heldKeys = this.input.keys;
+        const heldMouse = { held: this.input.mouseHeld, right: this.input.rightDown, delayUse: this.input.delayUseItem };
         // 虚拟电平随实例销毁(destroy 内 releaseAllVirtual):熔断窗口恰逢摇杆按住
         // 时,新实例电平自然归零=安全侧(MobileControls 下次 touchstart 重注)
         this.input.destroy();
         this.input = new Input(canvas);
+        this.input.keys = heldKeys;
+        this.input.mouseHeld = heldMouse.held;
+        this.input.rightDown = heldMouse.right;
+        this.input.delayUseItem = heldMouse.delayUse;
         this.input.keydownHandlers.push(...handlers);
         this.input.onKeyEvent = onKey;
+        this.input.onWindowBlur = onBlur;
+        this.recLog('perf', { ev: 'canvasRecreated' });   // 行为录制:熔断重建可解释"键断"
         // 拍照模式 cm.input 快照刷新(main.ts initCameraModeWiring 曾持久快照旧
         // 实例 → 熔断后 mouseHeld/rightDown 电平面整体失灵):captureMode 属
         // renderer 不重建,只回写其 input 引用(CaptureInput 结构子集,直接赋值)
@@ -4115,9 +4129,12 @@ export class Game implements GameHooks {
       'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyE',
       'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4',
       'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
-    this.input.onKeyEvent = (code, down) => {
-      if (REC_KEYS.has(code)) this.recorder.log('key', { c: code, down });
+    this.input.onKeyEvent = (code, down, kind) => {
+      if (REC_KEYS.has(code)) this.recorder.log('key', kind ? { c: code, down, kind } : { c: code, down });
     };
+    // 失焦取证：blur 清空是"按住的键断掉且须重按"的三大来源之一（另两个=伪
+    // keyup[key 沿可见] 与熔断重建[perf canvasRecreated]），无此条则三者不可分辨
+    this.input.onWindowBlur = () => this.recorder.log('focus', { ev: 'blur' });
     // 实体出生（player 不经 EntityManager，天然除外）
     this.entities.onAdd = (e, bucket) => {
       const en = e as Entity & { vanillaId?: number | null };
@@ -5707,6 +5724,13 @@ export class Game implements GameHooks {
   private frame(now: number) {
     const dtMs = now - this.lastTime;
     this.frameDts.push(dtMs);
+    // 帧冻结取证(2026-09-01 用户报"按住的键断一下"):>100ms 的渲染帧停顿在
+    // 游戏内观感恰是"移动/智能选取断一下"(rAF 停摆=逻辑不步进,角色原地定住),
+    // 与真键沿(key 事件)可分辨——节流 1s/条防风暴刷环淹没证据
+    if (dtMs > 100 && now - this._lastStallLogAt > 1000) {
+      this._lastStallLogAt = now;
+      this.recLog('perf', { stallMs: Math.round(dtMs) });
+    }
     if (this.frameDts.length > 60) this.frameDts.shift();
     const elapsed = Math.min(dtMs / 1000, 0.25);
     this.lastTime = now;
@@ -5781,6 +5805,8 @@ export class Game implements GameHooks {
   }
   /** 自动保存墙钟锚（DoUpdate_AutoSave 的 saveTime Stopwatch 等价；0=未起表） */
   private _autoSaveAt = 0;
+  /** 帧冻结取证节流锚（frame() 内 >100ms 停顿落行为环，1s 一条防刷环） */
+  private _lastStallLogAt = 0;
   /** 自动暂停（Main.autoPause）Web 语义：切 tab(hidden) 暂停——标记"本次暂停是
    *  失焦所致"，回来(visible) 仅当我们暂停的才自动恢复（手动暂停不被误唤醒） */
   private _autoPausedByFocus = false;
@@ -13653,7 +13679,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
           Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
           whip.knockback, whip.useTime, whip.shootSpeed,
-          () => (owner.dead ? null : owner),
+          () => owner,   // ★F5：AI_165 :49309-49331 的 dead→Kill 门建模于 WhipProj.fixedUpdate
           // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
           () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
             inp.mouseX - this.renderer.canvas.width / 2),
@@ -13731,7 +13757,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             cw.knockback, !!cw.sentry,
             slotIdx,
             false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
-            () => (owner.dead ? null : owner),
+            () => owner,   // ★F5：AI_026/062/067 全程读 Main.player[owner] 不查 dead（dmgOf 同）
           );
           this.entities.add(m, 'projectiles');
           return m;
@@ -15191,7 +15217,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 配重球运行上下文（CounterweightProj ctx——Game 闭包;魔法线克隆复用同物品 channel） */
   private mkCounterweightCtx(itemId?: number): CounterweightCtx {
     const ctx: CounterweightCtx = {
-      owner: () => (this.player.dead ? null : this.player),
+      // ★F5：AI_099_1 :68464-68468 的 owner.dead→Kill 门在 CounterweightProj.aiStep 本体内建模
+      owner: () => this.player,
       channel: () => this.input.mouseHeld && !this.input.uiBlocking
         && (itemId === undefined || this.player.inv.heldItem()?.id === itemId),
       yoyoInPlay: () => this.entities.projectiles.some((q) =>
@@ -18552,7 +18579,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onInventoryChanged();
       return;
     }
-    // 放置空间检查
+    // 支撑检查：非漂浮。原版权威 = TileObjectData.CanPlace（TileObjectData.cs 每_tile
+    // 锚点表：AnchorTop/Bottom/Wall/AlternateTiles + 方向备选），全量锚点表未提取——
+    // 此处以"下/上/侧邻任一格有内容或墙"近似（依赖登记：TileObjectData 锚点类型表）。
+    // 矿车轨道（314）例外：无锚点可悬空铺设（TileObjectData 314 无 Anchor 项）
+    // ★2026-09-01 五批（备案③清零）：支撑校验【先于】清格相——原版 CanPlace（含锚点
+    //  判定,TileObject.cs:357）在 Place 清格（:79-93）【之前】,失败路径零格变更；本仓
+    //  曾清格在校验前=放置失败也吞掉 tileCut 障碍物。判定对清格不变式：hasSupport 的
+    //  支撑行/侧邻在占位矩形外,validateAnchors 对豁免格 continue、液体/墙不受 KillTile
+    //  影响 → 先验后清同判。useTime 节流门（原版 PlaceThing 头部节流）一并前移,
+    //  防清格后被节流中止的同类吞格。
+    const isTrack = def.vanilla?.sheet === TRACK_SHEET;
+    const needSupport = !isTrack && (def.solid || def.platform || def.framed);
+    // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
+    if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
+      ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
+    if (needSupport && anchorCovered
+      && !validateAnchors(st, tx, ty, anchorRec!)) return;   // 双保险(状态未变时恒真)
+    // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
+    //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
+    if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
+      const below = st.inBounds(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
+      const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
+      if (!TILE_TABLE_SHEETS.has(belowSheet)) return;
+    }
+    if (this.player.useTime > 0) return;
+
+    // 放置空间检查（★在支撑校验之后——见上方五批注释）
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
         const px = tx + dx2, py = ty + dy2;
@@ -18582,25 +18635,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (def.solid && this.overlapsEntity(px, py)) return;
       }
     }
-    // 支撑检查：非漂浮。原版权威 = TileObjectData.CanPlace（TileObjectData.cs 每_tile
-    // 锚点表：AnchorTop/Bottom/Wall/AlternateTiles + 方向备选），全量锚点表未提取——
-    // 此处以"下/上/侧邻任一格有内容或墙"近似（依赖登记：TileObjectData 锚点类型表）。
-    // 矿车轨道（314）例外：无锚点可悬空铺设（TileObjectData 314 无 Anchor 项）
-    const isTrack = def.vanilla?.sheet === TRACK_SHEET;
-    const needSupport = !isTrack && (def.solid || def.platform || def.framed);
-    // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
-    if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
-      ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
-    if (needSupport && anchorCovered
-      && !validateAnchors(st, tx, ty, anchorRec!)) return;   // 双保险(状态未变时恒真)
-    // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
-    //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
-    if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
-      const below = st.inBounds(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
-      const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
-      if (!TILE_TABLE_SHEETS.has(belowSheet)) return;
-    }
-    if (this.player.useTime > 0) return;
 
     // 矿车轨道（WorldGen.PlaceTile case 314 → Minecart.PlaceTrack + SquareTileFrame：
     // frameX/frameY 是连接 ID 非 18px 像素偏移，随后 FrameTrack 按邻接定型；
@@ -30936,7 +30970,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (cur && !cur.dead && cur.projId === info.proj) return cur;
     if (cur && !cur.dead) cur.dead = true;
     const f = new PetFollower(this.player.cx, this.player.y - 30, info.proj,
-      () => (this.player.dead ? null : this.player));
+      // ★F5：属主引用不置空——AI_067 旗清族（player.dead → 旗 false → timeLeft 不续）
+      // 的"死亡消散"语义由本函数上方 `!this.player.dead` 槽门承载（旗面等价）；
+      // 死亡窗内（槽门下一拍执行前）随从照常读 owner（原版同拍同面）
+      () => this.player);
     this.entities.add(f, 'npcs');
     return f;
   }
@@ -31034,7 +31071,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const projH = sz?.height ?? 18;
     const proj = new GrappleProj(
       p.cx - projW / 2, p.cy - projH / 2, dirX * hi.shootSpeed, dirY * hi.shootSpeed,
-      shootType, () => (p.dead ? null : p));           // :6110-6115 NewProjectile（玩家中心）
+      // ★F5：AI_007 :53485-53488 的 owner.dead→Kill 门在 GrappleProj.aiStep 本体内建模
+      shootType, () => p);           // :6110-6115 NewProjectile（玩家中心）
     this.entities.add(proj, 'projectiles');
     p.registerGrappleProj(proj);
     p.useTime = hi.useTime;                            // ItemCheck_TryStartUse 冷却
@@ -32570,7 +32608,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (let dx = -1; dx <= 1; dx++) {                 // :81464-81472 列优先:x 外层
       for (let dy = -1; dy <= 1; dy++) {               //           y 内层,含 (0,0) 中心格
         const nx = cx + dx, ny = cy + dy;
-        if (!st.inBounds(nx, ny)) continue;            // :82607
+        if (!st.inBounds(nx, ny)) continue;
+        // ★五批（备案①清零）：TileFrame 五格世界边界门（:82606-82609,i<=5||j<=5||
+        // i>=max-5||j>=max-5 整格 return）——近边 5 格内原版不派发 Check*；曾沿用
+        // inBounds=近边件多扫（边角件无支撑本就少见,但语义须 1:1）
+        if (nx <= 5 || ny <= 5 || nx >= st.w - 5 || ny >= st.h - 5) continue;   // :82606-82609
         const tid = st.type[st.idx(nx, ny)];
         if (!DECOR_SWEEP_TILE_IDS.has(tid)) continue;  // tileFrameImportant 派发面 DECOR 子集
         if (!st.isActive(nx, ny)) continue;            // :82625-82628

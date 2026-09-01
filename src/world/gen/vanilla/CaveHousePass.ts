@@ -1898,28 +1898,39 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   → 不耗。曾整段漏掷：每成功一屋流漂 1 颗，后续所有小屋/宝箱位置级联
     //   （#58 窗 typ≈15k 自因主根因，2026-08-17 隔离重放实锤）
     if (theme === 'wood' || theme === 'ice' || theme === 'jungle' || theme === 'desert') {
-      rng.next(); // PotentiallyConvertToSeedHouse：NextFloat >0.4f 早退，普通种子仅保流
-      // ★IIIII110 PotentiallyConvertToSeedHouse else 支全臂（HouseBuilder.cs:228-261）：
-      //   ≤0.4f 命中后按序组 special list——①NTB+tenth 丛林屋 {562,563,229}；
-      //   ②(drunk+tenth)×(wood|ice) 屋 {197 糖果木|193};③(frozen×ice)屋 Next(3)==0 →
-      //   {145 糖果块/wall29, 146 绿糖果块/wall30}；④(remix+getGood)沙漠屋 {188}。
-      //   list>0 再掷 Next(list.Count) 定型。普通/冬链走不到的组合支零添加零掷
-      //   （①②④旗关时纯条件短路）。
-      const spList: Array<[number, number]> = [];      // [tileSheet, wallSheet]
-      if (theme === 'jungle' && !!gs.seedFlags?.notTheBees && !!gs.seedFlags?.tenthAnniversary)
-        spList.push([562, 312], [563, 313], [229, 86]);            // cs:233-238
-      if ((theme === 'wood' || theme === 'ice') && !!gs.seedFlags?.drunkWorld && !!gs.seedFlags?.tenthAnniversary)
-        spList.push(theme === 'ice' ? [197, 76] : [193, 76]);      // cs:239-249
-      if (theme === 'ice' && !!gs.seedFlags?.worldIsFrozen && rng.nextInt(3) === 0)
-        spList.push([145, 29], [146, 30]);                         // cs:250-254 ★winter 主支
-      if (theme === 'desert' && !!gs.seedFlags?.remix && !!gs.seedFlags?.getGoodWorld)
-        spList.push([188, 72]);                                    // cs:255-258
-      if (spList.length > 0) {
-        const pick = spList[rng.nextInt(spList.length)];           // cs:259-261
-        const spT = sheetTile(pick[0]);
-        if (spT >= 0) { def.tile = spT; def.wall = pick[1]; }      // BeamType=574 为 ice 缺省态同值（IceHouseBuilder.cs:15）
+      // PotentiallyConvertToSeedHouse（HouseBuilder.cs:227-261）：头掷 NextFloat()
+      //   **> 0.4f 即早退**——①-④特殊转换支只在 float≤0.4f（约四成）时可达。
+      //   ★IIIII112b（2026-09-01）定罪：旧实现漏掉早退门，冬链 (frozen×ice) 屋
+      //   的 Next(3) 糖果支【每冰屋恒掷】→ 每屋多耗 1 颗、流位级联漂移 → win 链
+      //   #59 埋箱窗 12.6k tile 差（x86 HS 分段仪实锤：fill 29 vs JS 30、
+      //   created→builder 3 vs 4，age1 级联 +37）。其余链旗关零影响。
+      //   NextFloat=(float)NextDouble（Utils.cs:1233 扩展）→ 比较须 fround 对齐
+      //   float32 域（0.4f = fround(0.4)）。
+      const __seedFloat = rng.next();
+      if (!(Math.fround(__seedFloat) > Math.fround(0.4))) {
+        // ★IIIII110 PotentiallyConvertToSeedHouse else 支全臂（HouseBuilder.cs:228-261）：
+        //   ≤0.4f 命中后按序组 special list——①NTB+tenth 丛林屋 {562,563,229}；
+        //   ②(drunk+tenth)×(wood|ice) 屋 {197 糖果木|193};③(frozen×ice)屋 Next(3)==0 →
+        //   {145 糖果块/wall29, 146 绿糖果块/wall30}；④(remix+getGood)沙漠屋 {188}。
+        //   list>0 再掷 Next(list.Count) 定型。普通/冬链走不到的组合支零添加零掷
+        //   （①②④旗关时纯条件短路）。
+        const spList: Array<[number, number]> = [];      // [tileSheet, wallSheet]
+        if (theme === 'jungle' && !!gs.seedFlags?.notTheBees && !!gs.seedFlags?.tenthAnniversary)
+          spList.push([562, 312], [563, 313], [229, 86]);            // cs:233-238
+        if ((theme === 'wood' || theme === 'ice') && !!gs.seedFlags?.drunkWorld && !!gs.seedFlags?.tenthAnniversary)
+          spList.push(theme === 'ice' ? [197, 76] : [193, 76]);      // cs:239-249
+        if (theme === 'ice' && !!gs.seedFlags?.worldIsFrozen && rng.nextInt(3) === 0)
+          spList.push([145, 29], [146, 30]);                         // cs:250-254 ★winter 主支
+        if (theme === 'desert' && !!gs.seedFlags?.remix && !!gs.seedFlags?.getGoodWorld)
+          spList.push([188, 72]);                                    // cs:255-258
+        if (spList.length > 0) {
+          const pick = spList[rng.nextInt(spList.length)];           // cs:259-261
+          const spT = sheetTile(pick[0]);
+          if (spT >= 0) { def.tile = spT; def.wall = pick[1]; }      // BeamType=574 为 ice 缺省态同值（IceHouseBuilder.cs:15）
+        }
       }
-      // PotentiallyConvertToRainbowBrick（ctor 第 2 掷；WoodHouseBuilder 专属）
+      // PotentiallyConvertToRainbowBrick（ctor 第 2 掷；WoodHouseBuilder 专属）——
+      //   独立方法，不受 SeedHouse 早退影响（vanilla 原位可达）
       if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
         if (rng.nextIntRange(0, 2) === 0) {
           const rb = sheetTile(160);

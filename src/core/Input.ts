@@ -62,8 +62,12 @@ export class Input {
   keydownHandlers: Array<(code: string, e: KeyEventLite) => void> = [];
   /** 键沿观察口（行为录制用：Game 构造接 recLog('key')——down=false 为 keyup）。
    *  只在 keydown/keyup 边沿各调一次（keydown 有 e.repeat 门；虚拟沿经 press/
-   *  releaseVirtual 同步收录），轮询零影响 */
-  onKeyEvent?: (code: string, down: boolean) => void;
+   *  releaseVirtual 同步收录），轮询零影响。kind 缺省=普通沿；'repeatHeal'=
+   *  按住自愈补回电平（见 keydown 监听内注释,仅真实补回时一条,不随重复沿刷屏） */
+  onKeyEvent?: (code: string, down: boolean, kind?: 'press' | 'repeatHeal') => void;
+  /** 窗口失焦观察口（clearForBlur 必经）。行为录制用：held 键"断一下"的取证
+   *  关键分野——blur 清空(须重按) vs 伪 keyup(重复沿可自愈) vs 帧冻结(无键沿) */
+  onWindowBlur?: () => void;
 
   /** 虚拟 action 电平(MobileControls setVirtualAction):用户重绑后即时跟随——
    *  downAction(a)=绑定码命中(keys/touchKeys) || virtualActions.has(a)。
@@ -95,10 +99,22 @@ export class Input {
     };
 
     onWin('keydown', ((e: KeyboardEvent) => {
-      if (e.repeat) return;
       // 输入框内打字不算操作键位（合成搜索框等）：游戏键全不放行、也不吞事件
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
+      if (e.repeat) {
+        // ★按住自愈（2026-09-01 用户报"按住 Shift/方向键偶尔断一下信号"）：OS 自动
+        // 重复沿到达 = 物理上仍按着。电平桶若因一次伪 keyup（系统焦点抖动/输入法
+        // 态切换）丢了该键，OS 不会补发首按 keydown（浏览器对已按住的键只在松开前
+        // 持续发 repeat）——靠重复沿把电平补回，断档缩到一个重复周期（≤65ms）。
+        // ★只补电平不派发按下沿（keydownHandlers 是按下边沿语义）；修饰键
+        // （Shift 等）无自动重复，断档仍需重按 = 已知边界，取证走 onWindowBlur
+        if (!this.keys.has(e.code)) {
+          this.keys.add(e.code);
+          this.onKeyEvent?.(e.code, true, 'repeatHeal');
+        }
+        return;
+      }
       this.keys.add(e.code);
       const lite: KeyEventLite = {
         code: e.code, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey,
@@ -223,6 +239,7 @@ export class Input {
 
   /** 窗口失焦清理(R4-22 原语义;blur 与测试复用入口) */
   clearForBlur(): void {
+    this.onWindowBlur?.();
     this.keys.clear();
     this.releaseAllVirtual();
     this.mouseHeld = false;

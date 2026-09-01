@@ -7,7 +7,9 @@
 //   ②place_v_* 自制 vid 空间(PRIV_ITEM_STABLE)与原版 vid 无碰撞;
 //   ③种子族九员的 createTile 与授予后路由判定一致。
 //标杆:src/net/leashedSync.internalIdOfVid(JourneyPowersUI 版同源)。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { languageManager } from '../src/i18n/LanguageManager';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile } from '../src/data/items';
 import { GRASS_CONVERT_SHEETS, assortedPlaceOk } from '../src/world/evolution/PlantRules';
 import { internalIdOfVid } from '../src/net/leashedSync';
@@ -16,6 +18,13 @@ const viVidOf = (key: string): number | null => {
   const m = /^vi_(\d+)_/.exec(key);
   return m ? Number(m[1]) : null;
 };
+
+beforeAll(() => {
+  // zh 包注入+culture 激活(搜索匹配走 Lang.itemName 的 zh 官方译名)
+  languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
+  (languageManager as unknown as { activeCulture: unknown }).activeCulture =
+    { name: 'zh-Hans', legacyId: 1, displayNameKey: 'Language.Chinese' };
+});
 
 describe('JourneyBrowser 授予映射（vid→def 全量）', () => {
   it('①vid→def 解析保真：每个原版条目落到的 def 持同一 vi_vid（别名键不串号）', () => {
@@ -110,5 +119,19 @@ describe('★授予热栏落位（2026-09-02 UX 批：热栏满时旧策略落�
     giveItem(fakeGame(inv), seedId, 1);
     expect(inv.slots[7]!.id).toBe(seedId);           // 唯一空热栏槽 7
     for (let i = 10; i < 50; i++) expect(inv.slots[i] ?? null).toBeNull(); // 背包尾无坠物(slots 以 null 占位)
+  });
+});
+
+describe('★复制面板=开发者模式全量池（2026-09-02 用户拍板）', () => {
+  it('全量 vid 空间下搜「神圣种子」必命中 vid 369（未研究也可见可取）', async () => {
+    const { runBrowserQuery, searchMatches } = await import('../src/ui/JourneyBrowser');
+    void searchMatches;
+    const vids = Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number);
+    expect(vids.length).toBeGreaterThan(5000);
+    const stub = { isNewlyResearched: () => false, isResearched: () => false };
+    const out = runBrowserQuery(vids, { search: '神圣种子', activeFilters: [] }, stub);
+    expect(out).toContain(369);
+    // 面板块不在原版 vid 空间,同名撞车根除后「神圣种子」查询只回落真种子
+    for (const v of out) expect(v).toBe(369);
   });
 });

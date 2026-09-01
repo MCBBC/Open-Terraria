@@ -33,8 +33,8 @@ const search = async (q) => await page.evaluate(async (q) => {
 }, q);
 await openDup();
 const r1 = await search('神圣种子');
-const r2 = await search('神圣草');
-console.log(JSON.stringify({ r1, r2 }, null, 2));
+
+console.log(JSON.stringify({ r1 }, null, 2));
 
 // 点击第一个神圣种子格 → 背包热栏应出现真种子
 const grant = await page.evaluate(async () => {
