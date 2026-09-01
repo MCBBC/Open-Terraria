@@ -19,7 +19,7 @@ import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
 // （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
-import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle } from './DungeonStyles1457';
+import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle, tileIsInStyle } from './DungeonStyles1457';
 import type { PotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII93b 双座 pb 面
 // ★IIIII105b：风格家具 item 表（ItemID.Sets.DerivedPlacementDetails 提取域）
 import { ITEM_PLACE, STYLE_LIGHTCHEST_TABLES } from './DungeonStyleItems';   // ★105c 灯/箱/生物箱表
@@ -4098,9 +4098,13 @@ const snap: SnapFn = (name) => {
           const GC2 = ((globalThis as unknown as { __dgcF?: Record<string, number> }).__dgcF ??= {});
           GC2[`st${rmSt}`] = (GC2[`st${rmSt}`] ?? 0) + 1;
         }
-        const half = Math.trunc(rm.strength * 0.4);
-        const exI = Math.trunc(rm.ex), eyI = Math.trunc(rm.ey);
-        const L = exI - half, R = exI + half, C = eyI - half, Bt = eyI + half;   // InnerBounds: Left/Right/Center.Y/Bottom
+        // ★IIIII106b：受理窗勘误——provider 房（DRegularRoom/DBiomeRoomBase）走
+        //   DungeonRoom.TryGenerateChestInRoom 基类=InnerBounds 直传 Lerp 端点
+        //   （Rooms/DungeonRoom.cs:259-263）；EndPosition±(int)(Strength*0.4) 只属
+        //   LegacyDungeonRoom 覆写（:78-92,legacy 腿专属）。dual 座的全部非 Default 房
+        //   都是 provider 房 ⇒ 改用 rm.inner——上批 ex±half 曾把受理窗画错（④号件）。
+        const rmI6 = rm.inner;
+        const L = rmI6.L, R = rmI6.R, C = rmI6.T, Bt = rmI6.B;   // InnerBounds Left/Right/Top/Bottom
         for (let j = 0; j < 1000; j++) {
           // num=(int)Lerp(L,R,rd)、num2=(int)Lerp(C,B,rd)
           const num = Math.trunc(L + (R - L) * rd());
@@ -5518,6 +5522,9 @@ const snap: SnapFn = (name) => {
    *  CurrentDungeonGenVars.isDungeonWall（本座 styles+SubStyles 克隆合并扩张,DC.cs:147-185）。
    *  普通/未装配 gfStyles 时退化为静态集（与旧 isDW 同口径）。 */
   let _gfSeatDWSet: Set<number> | null = null;
+  // ★IIIII106b：本座 outerProgressionBounds（res.progBounds 直通,styles 同序；
+  //  EarlyDual TileClump 抽样窗消费源。普通世界恒 null=零扰动）
+  let _gfSeatProgBounds: Array<{ L: number; T: number; R: number; B: number }> | null = null;
   const gfIsDW = (v2: number): boolean =>
     v2 > 0 && (_gfSeatDWSet !== null ? _gfSeatDWSet.has(v2) : DG_DUNGEON_WALLS.has(v2));
   /** ★IIIII105b 逐族分步 #1：Bookshelves 座面谓词（wall/tile 双集，同样克隆合并语义——
@@ -6386,6 +6393,8 @@ const snap: SnapFn = (name) => {
       for (const s0 of res.styles) addT(s0);
       _gfSeatDTSet = tset;   // IIII105b：座面 tile 集基建保留（Books 窗口接刀用,当前无消费者）
     }
+    // ★IIIII106b：本座 outerProgressionBounds（EarlyDual TileClump 抽样窗；styles 同序）
+    _gfSeatProgBounds = (res.progBounds !== undefined && res.progBounds.length > 0) ? res.progBounds : null;
     gfChestPlan = res.chestPlan;                            // ★105c：生物箱桶
     if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I137_CHESTS) {
       const hist137: Record<string, number> = {};
@@ -6535,6 +6544,121 @@ const snap: SnapFn = (name) => {
       void deTileClump;
     }
   }
+  // ★IIIII106b（2026-09-01）：DungeonGlobalEarlyDualDungeonFeatures.EarlyDungeonFeatures
+  //   的【TileClump 臂】双座实装（cs:394-589 终态）——②号移交件「ExtraWallTypes 写笔
+  //   定位」定谳=写笔在本段：style3(Desert) 三臂 Tile{53,397,404}/Wall{216,216,223}、
+  //   style2(Snow) 两臂 Tile{147,224}/Wall{40}，OnlyReplace=本风格 Brick 对——x86 在
+  //   biome 房体把风格主砖洗成天然生物系块+墙（G2@033 D 族 HardenedSand216/SnowWall40/
+  //   DesertFossil223 全部源此；Crystal186 系 style15 房体 BrickWallType 正常涂墙）。
+  //   此前 JS 恒 stub ⇒ 整面漏写。掷面=每候选 Next(W)+Next(H)（wall gate 失败即
+  //   continue）+命中后 seed/strength/steps 三掷；clump 本体走内部 UnifiedRandom(
+  //   RandomSeed) 零主流掷（deTileClump=IIIII59 认证体 1:1）。num7/num8 按 GetWorldSize()
+  //   case 取值（cs:36-75；4200²=case0→40/40）。GetStyleForTile 门按 cs:722-743 直译。
+  //   ★启用门=SW_I138_EARLY=1：本臂依赖 S1..S7（标枪探针/字典 DropTrap 臂）先行恢复
+  //   掷位与上游 ±Δ 归零,当前默认 OFF 维持既有账面（mile8 s4 实测 W+97k/T+42k 回退）。
+  if (gfStyles.length > 0 && _gfSeatProgBounds !== null
+    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    const dgECss = (tileSheet: number): number | null => {
+      if (tileSheet < 0) return null;
+      for (const s0 of gfStyles) {
+        if (tileIsInStyle(s0, tileSheet, false, true)) return s0.Style;
+        for (const ss of s0.SubStyles ?? []) {
+          if (tileIsInStyle(ss, tileSheet, false, true)) return ss.Style;
+        }
+      }
+      return null;
+    };
+    const sheetE = (x2: number, y2: number): number => TILE_DEFS[typAt(x2, y2)]?.vanilla?.sheet ?? -1;
+    const dgECtx = {
+      st, w, h, ws,
+      uw: h - 200,
+      rng,
+      canGenerateFeatureAt: (qx: number, qy: number): boolean => featOK(qx, qy, 0),
+    };
+    const wszEI6 = worldSizeIdx();
+    const num7E = wszEI6 === 0 ? 40 : wszEI6 === 1 ? 60 : 80;    // cs:47-49/:55-57/:64-66
+    const num8E = num7E;                                        // cs:50/:58/:67 num8=num7 同值
+    for (let lE = 0; lE < gfStyles.length; lE++) {
+      const stlE = gfStyles[lE]!;
+      const bbE = _gfSeatProgBounds[lE]!;
+      if (!bbE) continue;
+      if (stlE.Style === 3) {
+        // arm1 ×num7：TileType=53(Sand) WallType=216(HardenedSand)（cs:443-477）
+        for (let nA = num7E, capA = 1000; nA > 0 && capA > 0;) {
+          capA--;
+          const ax = bbE.L + ri(0, bbE.R - bbE.L - 1);
+          const ay = bbE.T + ri(0, bbE.B - bbE.T - 1);
+          if (!inW(ax, ay, 0) || st.wall[st.idx(ax, ay)] !== stlE.BrickWallType) continue;
+          if (dgECss(sheetE(ax, ay)) !== 3) continue;
+          deTileClump(dgECtx, ax, ay, {
+            randomSeed: raw(), strength: 25 + ri(0, 9), steps: 25 + ri(0, 9),
+            tileType: 53, wallType: 216,
+            onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
+          });
+          nA--;
+        }
+        // arm2 ×num7：TileType=397(HardenedSand 块) WallType=216（cs:480-514）
+        for (let nB = num7E, capB = 1000; nB > 0 && capB > 0;) {
+          capB--;
+          const bx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
+          const by2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
+          if (!inW(bx2, by2, 0) || st.wall[st.idx(bx2, by2)] !== stlE.BrickWallType) continue;
+          if (dgECss(sheetE(bx2, by2)) !== 3) continue;
+          deTileClump(dgECtx, bx2, by2, {
+            randomSeed: raw(), strength: 25 + ri(0, 9), steps: 25 + ri(0, 9),
+            tileType: 397, wallType: 216,
+            onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
+          });
+          nB--;
+        }
+        // arm3 ×num8*2：TileType=404(DesertFossil) WallType=223；strength/steps=15+N(5)（cs:517-551）
+        for (let nC = num8E * 2, capC = 1000; nC > 0 && capC > 0;) {
+          capC--;
+          const cx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
+          const cy2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
+          if (!inW(cx2, cy2, 0) || st.wall[st.idx(cx2, cy2)] !== stlE.BrickWallType) continue;
+          if (dgECss(sheetE(cx2, cy2)) !== 3) continue;
+          deTileClump(dgECtx, cx2, cy2, {
+            randomSeed: raw(), strength: 15 + ri(0, 4), steps: 15 + ri(0, 4),
+            tileType: 404, wallType: 223,
+            onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
+          });
+          nC--;
+        }
+      }
+      if (stlE.Style !== 2) {
+        continue;                                               // cs:554 continue（styles 迭代）
+      }
+      // arm4 ×num8：TileType=147(SnowBlock) WallType=40（cs:561-597）
+      for (let nD = num8E, capD = 1000; nD > 0 && capD > 0;) {
+        capD--;
+        const dx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
+        const dy2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
+        if (!inW(dx2, dy2, 0) || st.wall[st.idx(dx2, dy2)] !== stlE.BrickWallType) continue;
+        if (dgECss(sheetE(dx2, dy2)) !== 2) continue;
+        deTileClump(dgECtx, dx2, dy2, {
+          randomSeed: raw(), strength: 25 + ri(0, 9), steps: 25 + ri(0, 9),
+          tileType: 147, wallType: 40,
+          onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
+        });
+        nD--;
+      }
+      // arm5 ×num8：TileType=224(Slush) WallType=40（cs:599-635）
+      for (let nE2 = num8E, capE = 1000; nE2 > 0 && capE > 0;) {
+        capE--;
+        const ex2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
+        const ey2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
+        if (!inW(ex2, ey2, 0) || st.wall[st.idx(ex2, ey2)] !== stlE.BrickWallType) continue;
+        if (dgECss(sheetE(ex2, ey2)) !== 2) continue;
+        deTileClump(dgECtx, ex2, ey2, {
+          randomSeed: raw(), strength: 25 + ri(0, 9), steps: 25 + ri(0, 9),
+          tileType: 224, wallType: 40,
+          onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
+        });
+        nE2--;
+      }
+    }
+  }
   // ★IIIII98c：阶段级靶窗状态仪（SW_I110_STAGE="x0,x1,y0,y1" 只读；诊断后可移除）
   const I110STG = typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_I110_STAGE : undefined;
   const stageDump = (tag: string): void => {
@@ -6549,7 +6673,14 @@ const snap: SnapFn = (name) => {
     ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|STAGE ${tag} ${rows.join('')}`);
   };
   dgpMark('early_features_done');
-  dgEarly();
+  // ★IIIII106b：DungeonPitTrap 大循环门取证结论（cs:620-621）——vanilla 对
+  //   DualDungeon 座**整跳**本循环（坑洞由 cs:172-303 per-room S4 臂承担）。但 S1..S7
+  //   字典臂尚未移植、上游 ±Δ 未归零，现阶段跳过=−25,200 掷账缺口而保留=实测全拒
+  //   （旧「PD→Pi 25,200 全常数 R3 风暴」）零写仅 +25,200 幻掷——两态下游同不可对齐。
+  //   故默认维持旧行为；S4/S1..S7 批次启用 SW_I138_EARLY=1 一并切走新径。
+  if (!(gfStyles.length > 0 && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1')) {
+    dgEarly();
+  }
   snap('dungeonPi');
   dgpMark('pit_loop_end');
   dgSpikes(); snap('dungeonS'); stageDump('S');

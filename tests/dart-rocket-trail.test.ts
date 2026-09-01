@@ -63,3 +63,26 @@ describe('303 火箭尾烟（AI_016_Bombs :48181-48233）', () => {
     expect(d.vy).toBe(0);                       // 无重力直飞
   });
 });
+
+// EoC/肉山尘族家族补全（2026-09-01）：Dust.cs 链 A 独占链接 :1564-1635。311 用
+// torch 重载 AddLight(i,j,TorchID,amount)=TorchColor(16)×amount——Torch 16 Desert
+// 恒色 (1.4,0.85,0.55)（TorchID.cs Initialize）；本支无 noLight/noLightEmittance 门。
+describe('EoC/肉山尘族补全（110-114/311-313）', () => {
+  it('311 光照 = torch16 Desert × min(scale×0.1,1)；链 A 链接不吃重力（:1609-1617/:1889）', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(160, 200, 10, 10, 311)!;
+    d.scale = 1;                                // 消 NewDust 抖动 → amount=0.1 钉值
+    d.noGravity = false;
+    d.vx = 0; d.vy = 0;
+    vd.update(-99999, -99999, 199998, 199998);  // 巨视口防 :2387 屏底清除
+    expect(vd.lights.length).toBe(1);
+    const l = vd.lights[0];
+    expect(l.r).toBeCloseTo(1.4 * 0.1, 5);
+    expect(l.g).toBeCloseTo(0.85 * 0.1, 5);
+    expect(l.b).toBeCloseTo(0.55 * 0.1, 5);
+    expect(l.x).toBeGreaterThan(100);           // push 的是像素坐标（Game 侧 /16 转格）
+    // chainLink=true：两拍后 vy 不累积通用重力 +0.1/t（否则入 :1889 重力支）
+    vd.update(-99999, -99999, 199998, 199998);
+    expect(vd.lights.length).toBe(1);
+  });
+});

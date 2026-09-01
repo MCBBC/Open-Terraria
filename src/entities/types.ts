@@ -104,6 +104,13 @@ export interface GameHooks {
   /** ★F2 死亡结算单点（deaths 计数/掉落/硬核消亡——damagePlayer 致死分支与
    *  直扣 hp 致死站共用的幂等管线；Game 实现 settlePlayerDeath） */
   settlePlayerDeath?(pvp: boolean): void;
+  /** X1 溺水观战回体（2026-09-01）：CheckDrowning 溺水直伤拍 SetOrRequestSpectating(-1)
+   *  （Player.cs:23450——statLife-=2 (:23449) 与致死判 :23452-23455 之间，本地玩家门内
+   *  全难度逐拍调）。原版语义：单机 netMode==0 两分支皆不进 = 纯 no-op（:17346-17375
+   *  净空 return）；多人客户端半边 = spectating=-1 + msg150(whoAmI,target) 通报服务器
+   *  重发焦点帧。target==spectating 早退（:17349-17351）保证逐拍重入零重发。
+   *  Game 实现 askSpectateExit → setSpectating(-1)；缺省（测试 mock）= 静默跳过 */
+  askSpectateExit?(): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器

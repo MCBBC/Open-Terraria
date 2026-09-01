@@ -3,6 +3,7 @@ import type { GameHooks } from './types';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { beginDropScanCtx } from './dropScanCtx';
+import { cutTilesBox } from './ProjCutTiles';
 
 export abstract class Entity {
   id = 0;
@@ -77,6 +78,10 @@ function compact(list: Entity[]): void {
   list.length = w;
 }
 
+/** CanCutTiles 排除型（Projectile.cs:15407 尾支排除表）+ aiStyle 45/137/92/105/106
+ *  族以 vanillaId 近似过滤——中央收口误砍的最小化护栏 */
+const CUT_EXCLUDE_VIDS = new Set([463, 69, 70, 621, 10, 11, 379, 407, 476, 623, 625, 626, 627, 628, 833, 834, 835, 818, 831, 820, 864, 970, 995, 908, 1020, 1105, 1040]);
+
 export class EntityManager {
   nextId = 1;
   enemies: Entity[] = [];
@@ -104,7 +109,22 @@ export class EntityManager {
         //   enter drops 桶前一次快照 ⇒ 帧内逐物访问与逐次计算严格同值
         beginDropScanCtx((game as { player?: unknown }).player);
       }
-      for (const e of list) e.fixedUpdate(dt, game);
+      for (const e of list) {
+        e.fixedUpdate(dt, game);
+        // ★中央 CutTiles 收口（2026-09-01 清零审计）：原版 Projectile.cs:11824 对
+        //   全部 friendly 弹每 tick 弹盒(+1 外沿)砍 Main.tileCut 物（瓦罐/杂草/盆栽）。
+        //   此前按弹型分散接入（Arrow 撞格路径/cutTilesBox 手动）漏网一批——天顶剑、
+        //   真刃弧族等（2026-08-31 审计）。收口到此单点：projectiles 桶统一弹盒上报。
+        //   · 幂等：已自砍弹型（Arrow 等）重复上报在 Game.cutTile 内零操作
+        //   · CanCutTiles 排除表按 vanillaId/projId 近似过滤；minion 不砍（原版门）
+        if (list === this.projectiles) {
+          const m = e as { vanillaId?: number; projId?: number; minion?: boolean };
+          const vid = m.vanillaId ?? m.projId ?? 0;
+          if (!m.minion && !CUT_EXCLUDE_VIDS.has(vid)) {
+            cutTilesBox(game, e.x, e.y, e.w, e.h);
+          }
+        }
+      }
       compact(list);
     }
   }

@@ -506,7 +506,18 @@ const FLARE_DUST: Record<number, number> = { 163: 127, 310: 187, 1008: 169, 1009
  *  消亡表（Projectile.cs:16923-16925）：水（非岩浆/非蜂蜜豁免语义=仅排 lava）触即 Kill */
 const ARROW_DESTROYED_BY_WATER = new Set([85, 15, 188, 34, 1097, 1106]);
 const ADDITIVE_GLOW_PROJS = new Set([15, 34, 93, 94, 95, 96, 1114, 253, 258, 102,
-  876]);   // R27：zapinator（GetAlpha :81458-81464 (255−alpha) 白 A=0 = 加算白光渐显）
+  876,
+  // ★2026-09-01 激光步枪批：GetAlpha :81457 支全名单（(255−α,255−α,255−α,0) 纯加算白）
+  //  88 PurpleLaser（激光步枪 514）/83/89/90/100/104/279/283-287 zapinator 系/1134。
+  //  XNA 预乘语义 A=0 → dst+=tex.rgb 全强度叠加；source-over 直译=暗紫细线不可见
+  //  （用户报「激光好细看不清」定罪：贴图本体 Projectile_88.png 仅 2×60，
+  //  scale 0.65 起步 ≈1.3px 细线 + 缺加算发光层双重不可见）
+  83, 88, 89, 90, 100, 104, 279, 283, 284, 285, 286, 287, 1134]);
+/** GetAlpha :81457 支里走共享 −15/update 渐显的成员（Projectile.cs:56570-56592
+ *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集）。
+ *  本仓只接本批 GetAlpha 支成员（14/20/36 等 1456 期已有渲染面不动）；90/1134 不减
+ * （AI 无衰减档）α 恒 50=恒 205/255；88 α 初值即 0 且专属 −10/t 段(:56910)恒空转 */
+const LASER_FADE15_PROJS = new Set([83, 89, 100, 104, 279, 283, 284, 285, 286, 287]);
 const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
   207: 255, 837: 255,
@@ -547,6 +558,13 @@ const PROJ_ALPHA0: Record<number, number> = {
   297: 255,                                                          // 幽灵法杖弹（SetDefaults :5685-5695 alpha=255，AI 不消费恒全显）
   659: 255,                                                          // 灵魂之焰（SetDefaults :8571-8580 alpha=255，−12/t 渐显 :36901-36903）
   467: 255,                                                          // 教徒火球制导支（AI 支 α−40/update 渐显 :55194-55200）
+  // ★2026-09-01 GetAlpha :81457 加算白支的 α 初值记账（SetDefaults 直读；缺省=0 的
+  //  88 不入表——:1704-1716 无 alpha 行）。83=255(:1642)/89=255(:1725)/90=50(:1739)/
+  //  100=255(:1881)/104=255(:1924)/279=255(:3660)/283-287=255(:3707-3767)/1134=50(:10648)。
+  //  255 组由共享 −15/子步渐显(cs:56570-56592,LASER_FADE15_PROJS)拉亮;EU=4 弹
+  //  每游戏帧实减 ×5 ≈ 一闪即亮（原版太空枪系激光观感）
+  83: 255, 89: 255, 90: 50, 100: 255, 104: 255, 279: 255,
+  283: 255, 284: 255, 285: 255, 286: 255, 287: 255, 1134: 50,
 };
 
 /** AI_036 追踪内核逐型参数表（[speed, acc]，终零波单核收编导出面；tests/finalzero-game-domain
@@ -1743,6 +1761,14 @@ export class Arrow extends Entity {
       // 876 zapinator（GetAlpha :81458-81464 与 88/89/100 等同支）：alpha<200 →
       // (255−alpha)白加算、≥200 Transparent——出生 25.5 update 渐显白光
       case 876: return this.alpha >= 200 ? 0 : (255 - this.alpha) / 255;
+      // ★2026-09-01 GetAlpha :81457 支其余成员（与 876 同式 (255−α) 白 A=0 加算）：
+      //  88 α≡0（SetDefaults 无 alpha 行，AI −10/t 段恒空转）→ 恒满强白加算=激光亮体；
+      //  90/1134 α 恒 50 → 恒 205/255；83/89/100/104/279/283-287 随共享 −15/子步
+      //  渐显（LASER_FADE15_PROJS）从隐到亮爬升——本式与 876 同门 <200
+      case 83: case 89: case 90: case 100: case 104: case 279:
+      case 283: case 284: case 285: case 286: case 287: case 1134:
+        return this.alpha >= 200 ? 0 : (255 - this.alpha) / 255;
+      case 88: return 1;
       // ---- Xenopopper 子弹族（GetAlpha :81040-81100 区段）——白化档走 drawXenoFilter ----
       case 445: return (128 / 255) * (1 - this.alpha / 255);   // (255,255,255,128)×(1-α/255)
       case 446: return 1 - this.alpha / 255;                   // Lerp(白,0.8)×(1-α/255)
@@ -3736,6 +3762,31 @@ export class Arrow extends Entity {
       } else {
         this.aiCnt++;
       }
+    } else if (this.projId === 88) {
+      // ---- ★2026-09-01 激光步枪 88 PurpleLaser 成长段（Projectile.cs:54978-55002，
+      //  AI_001 type 专属段）----
+      //  scale += 0.053/子步至帽 4（EU=4 → 每游戏帧实增 ≈0.265，出生 0.65 约
+      //  13 帧满径 = 2px 细线 → 8px×~240px 粗光柱的「越飞越粗」签名）；击退随行
+      //  ×1.0045；localAI[0](aiCnt) 满 8 重置并 damage+Next(1,4)、penetrate
+      //  +Next(0,2)（pierce/pierceInit 同步抬=maxPenetrate 上移）。整块受
+      //  scale<4 门包束——到帽即停止一切成长(:54981 字面)。extraUpdates=ai[0]
+      //  直写分支仅敌方生成侧生效,玩家侧 ai[0]=0 不移植。
+      if (this.drawScale < 4) {
+        this.drawScale = Math.min(4, this.drawScale + 0.053);
+        this.knockback *= 1.0045;
+        if (++this.aiCnt >= 8) {
+          this.aiCnt = 0;
+          this.damage += Math.floor(Math.random() * 3) + 1;   // Next(1,4)=1..3
+          const penUp = Math.floor(Math.random() * 2);        // Next(0,2)=0..1
+          this.pierce += penUp;
+          this.pierceInit += penUp;
+        }
+      }
+    } else if (LASER_FADE15_PROJS.has(this.projId)) {
+      // ---- GetAlpha :81457 白加算支的共享渐显（Projectile.cs:56570-56592 case 组
+      //  本族子集直抄：alpha −15/子步至 0;EU 弹每游戏帧 ×5 ≈ 出生一闪即亮） ----
+      if (this.alpha > 0) this.alpha -= 15;
+      if (this.alpha < 0) this.alpha = 0;
     } else if (this.projId === 876) {
       // ---- R27：876 zapinator AI 尾段（Projectile.cs:56892-56908，aiStyle1 type 段）----
       //  tileCollide 按 ai[1] 态逐拍恢复（命中侧随机化把撞块关掉后,下一次 Damage 结算

@@ -17,6 +17,6 @@ export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h:
   const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
   const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
   for (let ix = x0; ix <= x1; ix++) {
-    for (let iy = y0; iy <= y1; iy++) game.cutTile(ix, iy);
+    for (let iy = y0; iy <= y1; iy++) game.cutTile?.(ix, iy);
   }
 }

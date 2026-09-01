@@ -128,7 +128,7 @@ import {
   kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   type FurnitureKind,
 } from '../world/FurnitureItems';
-import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef } from '../data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf } from '../data/vanillaNpcs';
@@ -901,7 +901,7 @@ function isTileReplaceable(st: Game['world']['store'], x: number, y: number): bo
   return true;
 }
 // PlantCheck 判定/换型规则已迁 src/world/evolution/PlantRules.ts 单点（Game 与演化放置门共用）
-import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY } from "../world/evolution/PlantRules";
+import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY, assortedPlaceOk } from "../world/evolution/PlantRules";
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
@@ -940,6 +940,14 @@ export const TILE_CUT = new Set<number>(
     return acc;
   }, []),
 );
+// 原版 TileID.Sets.BreakableWhenPlacing（TileID.cs:383）→ 内部 id——放置占用
+// 例外面第二支（CanPlace TileObject.cs:357 / Place 清格 TileObject.cs:84-86）：
+// 小石块 185、大石堆 186/187、海滩石堆 324、珊瑚 81、钟乳石 165、绿洲植物 530、
+// 枯枝败叶 233、染料植物 227、蚁狮幼虫 485、Abigail 花 624。这些与 tileCut 植物
+// 同权：放家具/方块压到即自动清除，不需要镐先挖。
+const TILE_BREAK_WHEN_PLACING = internalIdsOfVanSheets([
+  324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624,
+]);
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
 /** ★R2-06②（蓝队二轮）TileID.Sets 挥击砍切忽略/加砍清单（Terarria1457/
  *  Terraria.ID/TileID.cs:82-92 + :307 bonusCutTiles；Player.ItemCheck_CutTiles
@@ -3094,6 +3102,18 @@ export class Game implements GameHooks {
     this.lastStripReq = '';    // 触发下一 %30 轮立即按新相机位请求条带
   }
 
+  /** GameHooks.askSpectateExit（X1 溺水观战回体，2026-09-01）：Player.CheckDrowning
+   *  溺水直伤拍 SetOrRequestSpectating(-1) 的出射口（:23450——statLife-=2 与致死判
+   *  :23452-54 之间）。单机 netMode==0 早退 no-op（原版 SetOrRequestSpectating
+   *  :17346-17375 单机两分支皆不进 = 净空 return：不动 spectating/不重发 msg150/
+   *  不碰 strip 轮）；联机转 setSpectating(-1)＝退出观战相机 + msg150 焦点帧重发
+   *  （sendSpectateFocus）+ lastStripReq 复位触发下轮 AOI 条带请求；
+   *  target==spectating 早退（:17349-17351）保证溺水逐拍重入零重发 */
+  askSpectateExit(): void {
+    if (!this.net?.active) return;         // netMode==0 no-op（Player.cs:17371-75）
+    this.setSpectating(-1);
+  }
+
   /** 观战相机位（SpectatingCameraPosition :3920-3930）：
    *  目标代理 Bottom + (0, gfxOffY−21) + netOffset（gfxOffY 未建模，取 0） */
   private spectateCamPos(): { x: number; y: number } | null {
@@ -3626,6 +3646,15 @@ export class Game implements GameHooks {
       }
     }
     if (p.ridingCart) return true;                    // 车上换坐骑需先下车（QuickMount 语义）
+    // X2① QuickMinecartSnap 消费位（Player.cs:6075——物品选型+CanMount+TryStartUse
+    // 通过后、SetMount 前）：玩家盒 ±24px 内有轨道格即接管本次召唤改上矿车（吸附规则
+    // 见 quickMinecartSnap）。骑乘态能到达此处仅因本仓换骑链路（原版 QuickMount 骑乘
+    // 先走下坐支，:6040-6059），显式门防外溢；Rat/Bat/Pixie（55/56/61，
+    // Mount.cs:2376/:2434/:2498 dismountsOnItemUse=true；DismountsOnItemUse 全表查无第五）
+    // 在 :6077-6079 被 flag=false 压住整支——TryingToUseItem 本仓快挂路径不建模
+    // itemAnimation（近似恒真窗），这几型未入本仓坐骑目录,守卫为前向护栏。
+    if (!p.ridingMount && mountId !== 55 && mountId !== 56 && mountId !== 61
+      && this.quickMinecartSnap()) return true;
     if (!p.mount.setMount(mountId, p, this)) return false;
     // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆
     // Item_81 / 帕鲁坐骑 62-65 = PalSummon——1457 Item.cs:44510-44535（5665/5666）与
@@ -3694,7 +3723,52 @@ export class Game implements GameHooks {
     }
   }
 
-  /** QuickMinecart（Player.cs:5796-5827）：射程内取视线可达的最近轨道格上车 */
+  /** X2① QuickMinecartSnap（Player.cs:6140-6176；唯一消费位 = QuickMount 物品支
+   *  :6075）：玩家盒外扩 ±24px 内扫轨道格（active && type==314，:6152），命中 → 本次
+   *  坐骑召唤改走近轨上车接管（result=true ⇒ :6080-6090 跳过 SetMount/UseSound）。
+   *  候选规则 1:1：
+   *  · GetTilesIn 列序 = x 外层升序、y 内层升序（Collision.cs:4390-4399）——
+   *    oldStyleParkour「首枚免视线」的次序锚；
+   *  · oldStyleParkour（6190 旧世界跑酷指南，RefreshMechanicalAccsFromItemType
+   *    :12933-12935 生产）= 首枚轨道格【免 CanHitLine】直接入候选（:6155-6157），
+   *    其后更近者仍须视线可达才可替换（同格复测因严格更近恒败,循环跳过等价）；
+   *  · 无跑酷指南 = 全候选须 CanHitLine(center→轨心) 且严格更近（:6160-6162，
+   *    Distance = 玩家中心距）。
+   *  本仓等价收敛：原版命中后 LaunchMinecartHook（:33817-33824）发 403 轨道钩、由
+   *  GrappleMovement 贴轨支随拍完成 SetMount——本仓无 403 异步钩体建模,塌缩为立即
+   *  mountMinecartAt（getOnTrack 吸附 + 落点实心门与 403 上车段 :22406-22426 同语义,
+   *  与右键轨道路径同款既有模式）；落点被实心卡住时回退 false 放行普通召唤
+   *  （原版此处留悬钩由玩家松手清理,不建模）。矿车型取 bestCartMount()
+   *  （miscEquips[2] > 手持 > 背包后备近似;原版 :22401 num4=13 缺省同源） */
+  private quickMinecartSnap(): boolean {
+    if (this.minecart) return false;
+    const st = this.world.store;
+    const p = this.player;
+    const parkour = p.equipStats.oldStyleParkour === true;
+    const dist = (tx: number, ty: number): number =>
+      Math.hypot(tx * TILE + 8 - p.cx, ty * TILE + 8 - p.cy);
+    let point: { x: number; y: number } | null = null;
+    // 盒边界 GetTilesIn ToTileCoordinates 截断（C# 向零截断 vs floor：负半轴仅多扫
+    // 越界列,inBounds 过滤后候选集等价）
+    for (let tx = Math.floor((p.x - 24) / TILE); tx <= Math.floor((p.x + p.w - 1 + 24) / TILE); tx++) {
+      for (let ty = Math.floor((p.y - 24) / TILE); ty <= Math.floor((p.y + p.h - 1 + 24) / TILE); ty++) {
+        if (!st.inBounds(tx, ty) || !st.isActive(tx, ty)
+          || st.type[st.idx(tx, ty)] !== this.trackTile) continue;
+        if (parkour && !point) {                          // ★oldStyleParkour 臂（X2①）：首枚直入
+          point = { x: tx, y: ty };
+          continue;
+        }
+        if ((!point || dist(tx, ty) < dist(point.x, point.y))
+          && canHitLine(st, p.cx, p.cy, 0, 0, tx * TILE + 8, ty * TILE + 8, 0, 0)) {
+          point = { x: tx, y: ty };
+        }
+      }
+    }
+    if (!point) return false;
+    return this.mountMinecartAt(point.x, point.y, this.bestCartMount());
+  }
+
+  /** QuickMinecart（Player.cs:6107-6138）：射程内取视线可达的最近轨道格上车 */
   private tryQuickMinecart(): void {
     if (this.minecart) return;
     const st = this.world.store;
@@ -3975,6 +4049,24 @@ export class Game implements GameHooks {
         animTick: tileAnim.tick,
         lowK: r?._worldLowK ?? 1, lowW: r?._worldLowW ?? 0, lowH: r?._worldLowH ?? 0,
       };
+    };
+    // ★地形快照（2026-09-01 交替处坠落排查）：F5 导出时玩家 ±32 格稀疏 tile 数据
+    this.recorder.terrainInfo = () => {
+      const st = this.world?.store;
+      if (!st) return { playerTileX: 0, playerTileY: 0, cells: {} };
+      const ptx = Math.floor(this.player.x / 16);
+      const pty = Math.floor(this.player.y / 16);
+      const cells: Record<string, [number, number, number, number, number]> = {};
+      const R = 32;
+      for (let y = Math.max(0, pty - R); y <= Math.min(st.h - 1, pty + R); y++) {
+        for (let x = Math.max(0, ptx - R); x <= Math.min(st.w - 1, ptx + R); x++) {
+          const i = st.idx(x, y);
+          const t = st.type[i], w = st.wall[i];
+          if (t === 0 && w === 0) continue;
+          cells[`${x},${y}`] = [t, st.slope[i], st.half[i], st.isPlatform(x, y) ? 1 : 0, w];
+        }
+      }
+      return { playerTileX: ptx, playerTileY: pty, cells };
     };
     // 键沿：只录操作键（移动/跳/交互/快捷栏），其余（聊天/F 键等）忽略降噪
     const REC_KEYS = new Set(['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
@@ -10006,9 +10098,16 @@ export class Game implements GameHooks {
     //  （axe+createTile 2）。近战/工具分支的 return 曾把放置链整个截胡
     //  ＝"再生法杖没效果"主根因。先试转化（noCooldown——冷却由随后的分支
     //  统一设置，同一按键挥击+放置并行），非可转目标静默落空不影响战斗
-    if (heldDef?.tile && (cwMelee || tool)
+    // 挥击链同样按 meta 推导族别（vi_213_staff_of_regrowth 等量产 def 无 tile 字段，
+    // 曾被 heldDef?.tile 前置挡死=法杖挥击转化从不触发）
+    const heldFam = heldDef
+      ? (heldDef.tile
+        ? (TILE_DEFS[TILE_BY_KEY[heldDef.tile]]?.vanilla?.sheet ?? -1)
+        : vanillaItemCreateTile(viIdFromKey(heldDef.key)))
+      : -1;
+    if (heldDef && GRASS_CONVERT_SHEETS.has(heldFam) && (cwMelee || tool)
       && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
-      this.tryGrassConvert(tx, ty, heldDef, { noCooldown: true });
+      this.tryGrassConvert(tx, ty, heldDef, heldFam, { noCooldown: true });
     }
     if (tool?.type === 'sword' || (cwMelee && !tool)) {
       // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
@@ -13388,21 +13487,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           Math.cos(ang) * throwSpd, Math.sin(ang) * throwSpd,
           cw.damage, cw.knockback, cw.shoot, this.player.facing);
         placeAtShootSpawn(bom, this.player.cx, this.player.cy);
-        // ★嵌出宽限(2026-09-01 站斜坡里侧实录定罪):斜坡站位上弹盒左/下缘可能嵌入
-        //  阶梯立体几何(半宽差 9px)。置宽限帧=10,期间管线照常解析但 Boomerang
-        //  跳过接触响应(不反弹/不回收/不响声)——弹体以投掷动量自然滑出嵌入区。
-        //  平地零重叠 → embedGrace=0 → 行为完全不变。
-        {
-          const stW = this.world.store;
-          const _bx0 = Math.floor(bom.x / TILE), _bx1 = Math.floor((bom.x + bom.w - 0.01) / TILE);
-          const _by0 = Math.floor(bom.y / TILE), _by1 = Math.floor((bom.y + bom.h - 0.01) / TILE);
-          for (let ty = _by0; ty <= _by1; ty++) {
-            for (let tx = _bx0; tx <= _bx1; tx++) {
-              if (stW.inBounds(tx, ty) && stW.isSolid(tx, ty)) { bom.embedGrace = 12; ty = _by1 + 1; break; }
-            }
-            if (bom.embedGrace > 0) break;
-          }
-        }
+
         bom.critChance = critTotal;
         bom.armorPen = this.player.equipStats.armorPen; // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
@@ -15350,19 +15435,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   此前实现「每挥整形、永不拆墙」= 缺 poundRelease 状态机的偏离，即用户痛点根因。
     if (toolType === 'hammer') {
       const st = this.world.store;
-      const poundRelease = this.hammerPoundRelease;   // 松开闩（fixedUpdate !mouseHeld 置位）
       const throttled = this.tickCount - this.lastMineHitTick < Math.max(8, speed);
-      // ---- TryPoundingTile（poundRelease 态整形一步，:46359+；IsAHammerTarget :45920）----
-      if (poundRelease && !throttled && type !== 0) {
-        // IsAHammerTarget = tileHammer({26,31,695,696}) || IsTilePoundable(:45929)——
-        // IsTilePoundable：实心恒真；非实心须 ∈ {314 轨道, 424 时钟, 442 灯串, 351, 470 假人}
-        const dH = TILE_DEFS[type];
-        const shH = dH?.vanilla?.sheet ?? -1;
-        const isHammerTarget = type === TILE_BY_KEY['v_26_altars'] || !!dH?.solid
-          || shH === 314 || shH === 424 || shH === 442 || shH === 351 || shH === 470;
-        if (!isHammerTarget) {
-          this.hammerPoundRelease = false;            // :46015-46020 非锤目标复位闩
-        } else {
+      // ---- poundRelease 闩复位（:46000-46007，先于整形）：瞄准【空格】或非锤目标
+      //      都复位——缺空格复位会让「锤墙途中松手过一次」的残留闩在光标扫到方块时
+      //      被误消费成一次整形（2026-09-01 用户实报第二次反馈）----
+      const dH = type !== 0 ? TILE_DEFS[type] : null;
+      const shH = dH?.vanilla?.sheet ?? -1;
+      const isHammerTarget = type !== 0 && (type === TILE_BY_KEY['v_26_altars'] || !!dH?.solid
+        || shH === 314 || shH === 424 || shH === 442 || shH === 351 || shH === 470);
+      if (type === 0 || !isHammerTarget) this.hammerPoundRelease = false;
+      // ---- TryPoundingTile（poundRelease 态整形一步，:46359+；IsAHammerTarget :45920）
+      //      闩=释放后置位（fixedUpdate !mouseHeld），再按的第一挥消费——按住期间
+      //      :46000 每挥不复位但闩本为 false，光标扫过方块只会拆墙不会整形 ----
+      if (this.hammerPoundRelease && !throttled && isHammerTarget) {
+        {
           this.hammerPoundRelease = false;            // 消费闩（:46699 尾段同款）
           this.lastMineHitTick = this.tickCount;      // ApplyItemTime(:46368)
           // 矿车轨道换向（:45442-45447 FrameTrack(pound)；帧变 → Item52）
@@ -15506,7 +15592,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const w = wallAt(wX, wY);
       const activeC = cellActive(wX, wY);
       const canHitWall = w > 0
-        && (!activeC || wX !== tx || wY !== ty || (!tileHammerAt(wX, wY) && !poundRelease))
+        && (!activeC || wX !== tx || wY !== ty || (!tileHammerAt(wX, wY) && !this.hammerPoundRelease))
         && !throttled
         && power > 0
         && canPlayerSmashWall(wX, wY);
@@ -17605,25 +17691,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  半砖/坡面/油漆（PlaceTile :59499 语义）。noCooldown=武器/工具并行路径
    *  （冷却由工具/近战分支统一设置，Player.cs 挥击与 PlaceThing 并行）。
    *  返回 true=已转化（调用方据此终止通用放置链） */
-  private tryGrassConvert(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number], opts?: { noCooldown?: boolean }): boolean {
+  private tryGrassConvert(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number],
+    gsheetIn?: number, opts?: { noCooldown?: boolean }): boolean {
     const st = this.world.store;
-    const gt = TILE_BY_KEY[itemDef.tile!];
-    const gsheet = TILE_DEFS[gt]?.vanilla?.sheet ?? -1;
+    // gsheet：itemDef.tile 优先，量产 def（无 tile 字段）从 vanilla meta 推导
+    const gsheet = gsheetIn ?? (itemDef.tile
+      ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
+      : vanillaItemCreateTile(viIdFromKey(itemDef.key)));
     if (!GRASS_CONVERT_SHEETS.has(gsheet)) return false;
+    const gt = TILE_INTERNAL_BY_SHEET.get(gsheet);
+    if (gt === undefined) return false;
     if (!opts?.noCooldown && this.player.useTime > 0) return false;
     const heldVid = viIdFromKey(itemDef.key);
     const staff = heldVid === 213 || heldVid === 5295;
     const target = st.get(tx, ty);
-    const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : -1;
-    const okTarget =
-      (gsheet === 2 && (staff ? (tsheet === 0 || tsheet === 1 || tsheet === 38) : tsheet === 0))
-      || ((gsheet === 23 || gsheet === 199) && (tsheet === 0 || tsheet === 59))
-      || ((gsheet === 60 || gsheet === 70 || gsheet === 661 || gsheet === 662) && tsheet === 59)
-      || (gsheet === 109 && tsheet === 0)
-      || (gsheet === 633 && tsheet === 57);
-    if (target === 0 || !okTarget || !exposed8ForPlant(st, tx, ty)) return false;
+    // 空格 type 读作 0（vanilla AssortedThings 直接读 Main.tile.type，inactive/空格同为 0）
+    const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : 0;
+    // ★原版 AssortedThings 门 → PlantRules.assortedPlaceOk 纯函数。empty 入参承载
+    //   nactive() 门：种子族空格恒 false（不放置不消耗）；staff 无此门可凭空种
+    if (!assortedPlaceOk(staff, gsheet, tsheet, target === 0) || !exposed8ForPlant(st, tx, ty)) return false;
     st.setTile(tx, ty, gt);
     this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+    // 行为录制（终审补：wand/rope/torch/wall 各族放置均有 recLog，种子/法杖转化
+    // 曾缺席 ⇒ 行为日志与回放工具对草族写面失明——用户 2026-09-01 报 bug 时正是
+    // 靠该日志定位的，转化路径自身必须留痕）
+    this.recLog('tile', {
+      x: tx, y: ty,
+      from: target === 0 ? 0 : (TILE_DEFS[target]?.key ?? target),
+      to: TILE_DEFS[gt]?.key ?? gt,
+      cause: staff ? 'staff' : 'seed',
+    });
     // 种子 consumable 扣 1；法杖/斧非消耗（Item.cs 213 无 consumable）
     if (itemFuncOfVid(heldVid)?.consumable) {
       this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -17678,8 +17775,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
 
-    // 草族"转化"放置（见 tryGrassConvert；非草族物品落空继续通用链）
-    if (itemDef.tile && this.tryGrassConvert(tx, ty, itemDef)) return;
+    // 草族"转化"放置（见 tryGrassConvert）。★族内物品【无论成败】都终止通用链：
+    // 原版外门把种子族无条件送进 TryPlacing 后，AssortedThings 的 false 就是终点
+    // （Player.cs:40097 外门 + :41356-41440 门体；TileObjectData.CustomPlace 对
+    // 草块族 legacy tile 恒 false ⇒ 永无"铺进空格"回落）。此前失败回落通用链 =
+    // 神圣种子在草地上朝空格叠出新草块的根因（2026-09-01 用户实报，手铺 109）。
+    // 非族物品（普通方块）照旧走通用链。
+    // ★草族路由（2026-09-01 三修）：判据=「createTile 落在草族 tile」×「非 place_v_*
+    //   草块放置物」。量产注册 def（vi_369_HallowedSeeds 等）没有 tile 字段 ⇒ g0 从
+    //   vanilla meta createTile 推导（首版按 tile 字段前置=真种子根本进不了转化门）；
+    //   法杖特权在 tryGrassConvert 内按 vid 细分。place_v_* 是本仓草"块"面板物品 →
+    //   通用链（空格+支撑铺设/Block Swap 排除表），不吃 AssortedThings 门。
+    const hv0 = viIdFromKey(itemDef.key);
+    const g0 = itemDef.tile
+      ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
+      : vanillaItemCreateTile(hv0);
+    if (GRASS_CONVERT_SHEETS.has(g0) && !itemDef.key.startsWith('place_v_')) {
+      this.tryGrassConvert(tx, ty, itemDef, g0); return;
+    }
     // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
     //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
     //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
@@ -17977,8 +18090,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  framed 家具被当草割（2026-08-25 用户实报墓碑变掉落物）；改用
           //  !framed 又误杀 style 帧植物（3/74 族本身 framed=true）——两族都
           //  在 decor∩framed 交集里,唯 tileCut 表是原版权威判据
-          if (!TILE_CUT.has(st.get(px, py))) return;
+          // ★占位例外面第二支 = TileID.Sets.BreakableWhenPlacing（TILE_BREAK_WHEN_
+          //  PLACING）：小石块 185 等石堆/珊瑚/钟乳石压到即碎,免镐直放（CanPlace
+          //  TileObject.cs:357 放行 + Place TileObject.cs:84-86 写前 KillTile;
+          //  2026-09-01 用户实报小石子挡工作台）。特例:484 滚石仙人掌/654 TNT桶
+          //  虽在 tileCut 表,CanPlace :357 显式排除,仍阻挡放置。
           const wt = st.get(px, py);
+          const shWt = TILE_DEFS[wt]?.vanilla?.sheet ?? -1;
+          if (!(TILE_CUT.has(wt) && shWt !== 484 && shWt !== 654) && !TILE_BREAK_WHEN_PLACING.has(wt)) return;
           this.breakTile(px, py, true);
           for (let yy = py - 1; st.get(px, yy) === wt; yy--) this.breakTile(px, yy, true);
           for (let yy = py + 1; st.get(px, yy) === wt; yy++) this.breakTile(px, yy, true);
@@ -28517,7 +28636,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   beeType（:12006-12015）strongBees 且 Next(2)==0 → 566（巨蜂），否则 181；
       //   beeDamage（:12017-12025）入参 (int)num20（:37899 截断后）→ 181 +Next(2)、566 +Next(1,4)；
       //   beeKB（:12026-12032）566 → 0.5、181 → 0；出点 = 玩家左上角（position.X/Y）；
-      //   初速 = Next(-35,36)*0.02（aiStyle 36 追踪 AI 未建模，以下方瞄敌近似，登记）；
+      //   初速 = Next(-35,36)*0.02（出生蜂即走 Arrow bee36 追踪内核——终零波销核
+      //     旧「追踪 AI 未建模/瞄敌近似」登记,全参见下方出速注）；
       //   反击后 AddBuff(48 Honey, 300t=5s)（:37906）；原版此处无声效（旧 beeSummon 已删）
       if (p.equipStats.bees && retaliateOk) {
         const strong = accVids.includes(3333);

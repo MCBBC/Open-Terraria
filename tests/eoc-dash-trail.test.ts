@@ -51,7 +51,6 @@ describe('EoC P2 冲刺残影链路(Main.cs:26359 门 = ai0==3 && ai1>=4)', () =
   it('专家:经典 3 连冲后 hp<50% → 预测连冲链进入 state 4(残影门触发),历史轨迹≥6', () => {
     const game = makeGame(1);   // expert
     const e = Enemy.fromVanilla(4, 32 * TILE, 20 * TILE)!;
-    e.hostile = true;
     e.ai0 = 3; e.state = 2; e.ai2 = 0; e.chargesLeft = 0;   // 经典首冲进行中
     e.hp = e.maxHp * 0.4;                                    // <50% → 预测链入口
     let saw4 = false;
@@ -68,7 +67,6 @@ describe('EoC P2 冲刺残影链路(Main.cs:26359 门 = ai0==3 && ai1>=4)', () =
   it('经典:同 tick 数下 state 永不 ≥4(原版经典无残影——防误加)', () => {
     const game = makeGame(0);   // classic
     const e = Enemy.fromVanilla(4, 32 * TILE, 20 * TILE)!;
-    e.hostile = true;
     e.ai0 = 3; e.state = 0; e.ai2 = 0; e.chargesLeft = 0;
     let saw4 = false;
     for (let i = 0; i < 1200; i++) {

@@ -69,8 +69,8 @@ const out = await page.evaluate(async () => {
   const urls = [0, 1, 2].map((f) => wr.tintedDust268(tex, 200, 160, 20, f)?.toDataURL());
   const distinct = new Set(urls).size === 3;
 
-  // 雪花三帧(760,10×f)同验
-  const furls = [0, 1, 2].map((f) => wr.tintedFlake(tex, 255, f)?.toDataURL());
+  // 雪花三帧(760,10×f)同验——2026-09-01 去量化后签名 (tex,r,g,b,frame)
+  const furls = [0, 1, 2].map((f) => wr.tintedFlake(tex, 255, 255, 255, f)?.toDataURL());
   const fDistinct = new Set(furls).size === 3;
 
   // dustWaterFor 映射(Dust.cs:405-421)

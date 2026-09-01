@@ -1867,6 +1867,13 @@ for (const [vid, sheet] of CAGE_ITEM_SHEET) {
 //  128/269 仍判「有物返还」，与原版 CheckMan :46589 掉 498 / CheckWoman 掉 1989 一致
 //  （返还判据按 tile 族,不按终态由哪件物品放置）。惰性 = 首次调用才建表
 import itemFuncRaw from './vanilla-itemfunc.json';
+/** 原版 vid → createTile（vanilla.json meta 推导；量产注册 def 无 tile 字段，
+ *  草族路由/放置判定的兜底源。未注册 vid（本仓自加 place_v_* 族）→ -1） */
+export function vanillaItemCreateTile(vid: number): number {
+  if (vid <= 0) return -1;
+  const m = _vim[String(vid)] as { createTile?: number } | undefined;
+  return m?.createTile ?? -1;
+}
 let _vanillaPlaceableTiles: ReadonlySet<string> | null = null;
 export function vanillaPlaceableTileKeys(): ReadonlySet<string> {
   if (_vanillaPlaceableTiles === null) {

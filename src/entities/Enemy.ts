@@ -12828,6 +12828,18 @@ export class Enemy extends Entity {
       const n = Math.ceil((dmg / this.maxHp) * 100);
       for (let k = 0; k < n; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hd, -1);
     }
+    // WoF 家族受击尘（HitEffect life>0 段，与鸟族块同构）：血肉墙
+    // WallOfFlesh 113 / WallOfFleshEye 114 = 20 簇 5 号血尘 SpeedX=hitDirection /
+    // SpeedY=-1（1457 NPC.cs:88353-88355；1456 :88281-88283）；TheHungry 115 /
+    // TheHungryII 116 = 5 簇同参数（1457 :88405-88408；1456 :88333-88335）。
+    // hit/kill 共用本段：击杀拍时本块在 hp-=dmg 之后、hp>0 门已挡（=原版
+    // life<=0 不进此支），死亡侧走下方 death 管线的对应段。
+    const wofVid = this.vanillaId;
+    if ((wofVid === 113 || wofVid === 114 || wofVid === 115 || wofVid === 116) && this.hp > 0) {
+      const hdWof = Math.sign(kbx) || 1;
+      const nWof = wofVid === 113 || wofVid === 114 ? 20 : 5;
+      for (let k = 0; k < nWof; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWof, -1);
+    }
     // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
     // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
     if (fromPlayer) {
@@ -13305,20 +13317,57 @@ export class Enemy extends Entity {
         const hd = Math.sign(kbx) || 1;
         for (let k = 0; k < 50; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hd, -2);
       }
+      // WoF 家族死亡尘（HitEffect life<=0 段）：血肉墙 113 / 大眼 114 = 50 簇
+      // 5 号血尘 SpeedX=2×hitDirection / SpeedY=-1（1457 NPC.cs:88359-88361；
+      // 1456 :88287-88289）。饥饿者 115 权威侧（SP/房主——与本管线前段
+      // NewNPC(116) 同用 !netPuppet 门）= 10 簇 hitDirection/-1，且原版该支出尘后
+      // 直接 return——单机 Hungry 死亡无任何 gore（1457 :88411-88417；1456
+      // :88337-88346）；客户端傀儡 115 与 TheHungryII 116 落通用支 = 20 簇
+      // hitDirection/-1（1457 :88420-88423；1456 :88348-88350），随后 gore
+      // 132/133 由下方查表承担。
+      // ★113 全屏肉浆尘幕的逐格尘不在此补：
+      //   · 逐格 gore（140-142）已由 vanilla-gore.json 的 screenGrid 条目承担
+      //     （GorePiece.spawnScreenGridGore，玩家深度门 playerDeepHell 1:1）；
+      //   · 逐格 5 尘（1457 :88392-88395；1456 :88322-88324，32×32 盒、速度
+      //     rand(-60..60)*0.1）已由 Renderer.spawnWoFDeathFx 代位——Game 尘池
+      //     512 放不下原版满屏 ~570 粒（Renderer 侧自持粒子列表 2 尘/格折半，
+      //     见其方法头注），此处再发会双倍叠加。
+      const wofDeadVid = this.vanillaId;
+      const wofHungryAuthority = wofDeadVid === 115 && !this.netPuppet;
+      if (wofDeadVid === 113 || wofDeadVid === 114) {
+        const hdWofD = Math.sign(kbx) || 1;
+        for (let k = 0; k < 50; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hdWofD, -1);
+      } else if (wofHungryAuthority) {
+        const hdWofD = Math.sign(kbx) || 1;
+        for (let k = 0; k < 10; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWofD, -1);
+      } else if (wofDeadVid === 116 || wofDeadVid === 115) {
+        const hdWofD = Math.sign(kbx) || 1;
+        for (let k = 0; k < 20; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWofD, -1);
+      }
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
       // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在
       // GorePiece.newGore 内）。spriteDirection = 本仓 facing（同符号约定，表内
       // `spriteDirection != -1` 类镜像分支门用）。无表项 = 原版只出尘不出块
       // （史莱姆族等）→ 只走下方彩色粒子近似
-      spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
+      // 115 权威支跳查表：HitEffect :88411-88417 的 return 在 NewNPC(116)+10 尘
+      // 之后立即发生，132/133 不落——vanilla-gore.json 表未建模该早退（132/133
+      // 行被提取器记到 115 头上，是 116 共用段）；此处按原版控制流门掉，联机
+      // 傀儡端不加门=通用支语义（客户端也出 132/133）
+      if (!wofHungryAuthority) {
+        spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
+      }
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
       // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）——鸟族 61/252/301
-      // 已换原版精确血尘（上方 50 簇），不再叠通用近似（原版本族无彩色粒子段）
+      // 已换原版精确血尘（上方 50 簇），不再叠通用近似（原版本族无彩色粒子段）；
+      // WoF 家族 113-116 同理已换精确尘（113/114=50、权威侧 115=10、傀儡
+      // 115/116=20），死亡尘不再走本近似
       const [c1, c2, c3] = this.def.gore;
       const big = this.killBossFlag || this.w > 40;
       const birdExactDust = this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301;
-      if (!birdExactDust) {
+      const wofExactDust = wofDeadVid === 113 || wofDeadVid === 114
+        || wofDeadVid === 115 || wofDeadVid === 116;
+      if (!birdExactDust && !wofExactDust) {
         game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
@@ -13326,8 +13375,9 @@ export class Enemy extends Entity {
       return true;
     }
     // 受击：少量碎屑零散溅落（不大面积）——鸟族 61/252/301 已有原版精确血尘
-    // （ hurt 首段 HitEffect 块），不再叠通用近似
-    if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301) {
+    // （hurt 首段 HitEffect 块），不再叠通用近似；WoF 家族 113-116 同理
+    if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301
+      && wofVid !== 113 && wofVid !== 114 && wofVid !== 115 && wofVid !== 116) {
       game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
     }
     return false;

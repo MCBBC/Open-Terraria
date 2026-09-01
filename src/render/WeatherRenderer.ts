@@ -181,6 +181,19 @@ function getDustTex(): ImageBitmap | HTMLImageElement | null {
   return dustTex;  // 1000×120 = 10px 格、帧 8×8；雪花 = dust 76 (760,0/10/20)、沙尘 = dust 268 (680,60/70/80)
 }
 
+/**
+ * Main.maxRain（Main.cs:1126）：`public static int maxRain = 750;` 固定初始化,全反编译源
+ * 无再赋值点。它是雨池活跃帽/扫描域唯一权威：
+ * - NewRain     num2 = (int)(maxRain×cloudAlpha) ≤ 750（Rain.cs:172-175）
+ * - NewRainForced num2 = maxRain = 750,再按画质 (1+gq)/2<0.9 折减（Rain.cs:141-146）
+ * - ClearRain / DrawRain 均只扫 [0,maxRain)（Rain.cs:24 / Main.cs:39480）
+ * - 槽位总数 maxRain+1=751（Main.cs:1704 数组,new 于 Main.cs:6853）——末槽永不参扫
+ * ★ MakeRain 的屏宽比例项 screenWidth/MaxWorldViewSize.X(常量 1920,Main.cs:754-758)
+ *   只缩放"每帧生成尝试数"（Rain.cs:36-38 num *= 25×(0.25+cloudAlpha)）,不作用容量帽;
+ *   本仓旧实现 min(2400,max(600,viewW×1.2)) 即误把屏宽比例当池帽,构成真实雨密度偏差。
+ */
+const MAIN_MAX_RAIN = 750;
+
 export class WeatherRenderer {
   private pool: RainDrop[] = [];
   private poolCap = 0;
@@ -198,7 +211,7 @@ export class WeatherRenderer {
   }
   detach() { this.weather = null; this.hooks = null; this.pool.length = 0; this.snow.length = 0; this.sand.length = 0; }
 
-  /** 池容量 = 屏宽比例（原版 Main.maxRain 语义近似：屏宽/视口宽×25） */
+  /** 池只增不减（原版 Main.rain 启动时一次分配 Main.cs:6853 永不重建），cap 由调用方给 MAIN_MAX_RAIN */
   private ensurePool(cap: number) {
     this.poolCap = cap;
     while (this.pool.length < cap) {
@@ -292,7 +305,7 @@ export class WeatherRenderer {
   /** 每帧：雨滴+雪粒更新 + 沙尘发射（在绘制前的逻辑阶段调用，或 draw 内合并——原版即 draw 时 update） */
   update(world: World, viewW: number, viewH: number, camX: number, camY: number, playerVx: number, playerVy: number) {
     if (!this.weather) return;
-    this.ensurePool(Math.min(2400, Math.max(600, Math.floor(viewW * 1.2))));
+    this.ensurePool(MAIN_MAX_RAIN);   // Main.maxRain=750 固定帽（Main.cs:1126/Rain.cs:172）,不随屏宽
     const hooks = this.hooks;
     if (!hooks) return;
     this.makeRain(viewW, camX, camY, playerVx, playerVy, world);
@@ -548,11 +561,15 @@ export class WeatherRenderer {
       ctx.translate(d.x, d.y);
       ctx.rotate(d.rotation);
       if (texOk) {
-        // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
-        // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
-        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const v = Math.round((lvl / 7) * 0.85 * 255 * (1 - hooks.shimmerAlpha));   // DrawRain :39488 ×(1−shimmerAlpha)
-        const tinted = tintedRainStrip(tex!, d.type, v);
+        // 光照着色（Main.cs:38248-38252）1:1：color = GetColor(light)×0.85f，shimmerAlpha>0
+        // 再 ×(1−shimmerAlpha)——都是【逐通道连续值】乘法（XNA Color*float 只乘 RGB 不动 A）。
+        // 每滴在模块级 2×40 scratch 上按全精度 RGB 烘焙（multiply+destination-in 两步式，
+        // 同 Renderer.tintedSprite 单帧路径），取用即弃、无缓存无量化。
+        // ★旧实现把光照折成均值灰量化 8 档再乘（±9% 误差且彩色光照丢通道），2026-09-01 弃用。
+        //   shimmer 系数合并进 k：shimmerAlpha=0 时 (1−0)=1，乘法恒等，与原版分支逐位同值
+        const k = 0.85 * (1 - hooks.shimmerAlpha);
+        const tinted = bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40,
+          Math.round(lr * k), Math.round(lg * k), Math.round(lb * k));
         if (tinted) {
           ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
         }
@@ -565,10 +582,12 @@ export class WeatherRenderer {
 
   /** 雪/沙尘 precip（★r15 R15-1 拆分：原版雪=dust 76、沙尘=dust 268 走 DrawDust
    *  Main.cs:39501——碎块后、前景水前；Renderer 在 gore 后调用本方法）。
-   *  通用支（:39714-39732）：基画 GetAlpha(light) 全幅 + dust.color 非零时叠画
-   *  GetColor(light)；GetColor = color−(255−light) 逐通道钳 [0,255]（Dust.cs:2801-2847），
+   *  通用支（:39722-39733）：基画 GetAlpha(Lighting.GetColor(pos)) 全幅 + dust.color 非零时
+   *  叠画 GetColor(基画)；GetColor = color−(255−基画) 逐通道钳 [0,255]（Dust.cs:2802-2854），
    *  overlay alpha = color.A 同式（雪 76 无 color=单画）。帧 8×8、origin (4,4)、rot 0。
-   *  光照纯黑 → dust.active=false（:39730）——两池同遵。 */
+   *  光照纯黑 → dust.active=false（:39730，GetAlpha(Black)==Black 同判）——两池同遵。
+   *  ★2026-09-01 去量化：光照乘数全部改逐粒【全精度 RGB】（基画乘 (lr,lg,lb)、叠画减
+   *  各自配对通道），旧 8 级均值灰 v 全面退役。 */
   drawPrecipDust(r: Renderer, world: World) {
     const hooks = this.hooks;
     if (!hooks) return;
@@ -583,8 +602,8 @@ export class WeatherRenderer {
         const ty = Math.floor((f.y + 5) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
         if (lr === 0 && lg === 0 && lb === 0) { f.active = false; continue; } // :39730
-        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const tinted = tintedFlake(dTex, Math.round((lvl / 7) * 255), f.frame);
+        // 单画（GetAlpha 路径，dust 76 无 color 不叠）——雪花本体白格阵，RGB 直接乘全精度光
+        const tinted = tintedFlake(dTex, lr, lg, lb, f.frame);
         if (tinted) ctx.drawImage(tinted, f.x - 4 * f.scale, f.y - 4 * f.scale, 8 * f.scale, 8 * f.scale);
       }
       // ---- 沙尘 grain（dust 268；DrawDust 通用支双画：环境光底 + GetColor 叠画）----
@@ -594,15 +613,21 @@ export class WeatherRenderer {
         const ty = Math.floor((g.y + 4) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
         if (lr === 0 && lg === 0 && lb === 0) { g.active = false; continue; } // :39730
-        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const v = Math.round((lvl / 7) * 255);
-        const base = tintedDust268(dTex, v, v, v, g.frame); // 基画 = GetAlpha(light)（全幅）
-        // 叠画 = GetColor(light) = color+light−255 逐通道；alpha = color.A+light−255
-        // （雪 76 无 color 不叠，沙尘四色 A=180）——★曾按 dust.color×light 乘色且
-        //   丢 alpha 通道：乘出来的暗绿十字即"沙尘暴飞树叶"假象（2026-08-31）
-        const gc = (c: number) => Math.max(0, Math.min(255, c + v - 255));
-        const over = tintedDust268(dTex, gc(g.cr), gc(g.cg), gc(g.cb), g.frame);
-        const ga = gc(SAND_COLOR_ALPHA) / 255;
+        const base = bakeTintFrame('dust268-base', dTex, 680, 60 + 10 * g.frame, 8, 8,
+          lr, lg, lb);                                        // 基画 = GetAlpha(light)（全幅）
+        // 叠画 = GetColor(基画) = color − (255 − 基画) 逐通道钳 [0,255]（Dust.cs:2802-2854）；
+        // 基画各通道取全精度光。★本模型不含 GetAlpha 的 ka=(255−alpha)/255 与 light.A 项
+        // （dust.alpha 场未建模，与定谳批一致）；A 槽见下方 ga 注。
+        // ★曾按 dust.color×light 乘色且丢 alpha 通道：乘出来的暗绿十字即"沙尘暴飞树叶"
+        //   假象（2026-08-31 定谳）
+        const gcr = Math.max(0, Math.min(255, g.cr + lr - 255));
+        const gcg = Math.max(0, Math.min(255, g.cg + lg - 255));
+        const gcb = Math.max(0, Math.min(255, g.cb + lb - 255));
+        const over = bakeTintFrame('dust268-tint', dTex, 680, 60 + 10 * g.frame, 8, 8, gcr, gcg, gcb);
+        // A 槽：old 曾把灰度 v 代入 GetColor 的 alpha 式 clamp(A+v−255)（量化遗留耦合，
+        // 暗 光下叠画整层消失）。斩断后按 light.A≡255 + 本仓不建模 dust.alpha → A = color.A
+        // 常量；若日后建模两场再补完整 A 链
+        const ga = SAND_COLOR_ALPHA / 255;
         const dx = g.x - 4 * g.scale, dy = g.y - 4 * g.scale;
         const sz = 8 * g.scale;
         if (base) ctx.drawImage(base, dx, dy, sz, sz);
@@ -625,70 +650,79 @@ export class WeatherRenderer {
   }
 }
 
-/** 乘色雨滴条缓存（type×8 级亮度）：multiply 灰阶 ×0.85 上限 + destination-in 保形 */
-const rainTintCache = new Map<string, HTMLCanvasElement>();
-function tintedRainStrip(tex: ImageBitmap | HTMLImageElement, type: number, v: number): HTMLCanvasElement | null {
-  const key = `${type}|${v}`;
-  const hit = rainTintCache.get(key);
-  if (hit) return hit;
+/* ── 逐粒精确乘色（2026-09-01 弃 8 级灰阶量化缓存）────────────────────────────
+ *  原版三处着色的乘数都是【连续逐通道】值：
+ *    雨条   Main.DrawRain :38248-38252 —— GetColor(pos)×0.85f，shimmer 再 ×(1−α)
+ *    尘基画 Main.DrawDust :39722       —— dust.GetAlpha(GetColor(pos))
+ *    尘叠画 Main.DrawDust :39725-39733 —— dust.GetColor(基画) = color−(255−基画)
+ *             逐通道钳 [0,255]（Dust.cs:2802-2854）
+ *  旧实现把光照折成均值灰、量化 8 档后按档预烘焙乘色画布（rainTintCache/
+ *  flakeTintCache/sandTintCache 三张 Map）——亮度误差约 ±9%、彩色光照丢通道。
+ *  现改为每粒在【模块级共享 scratch】上按全精度 RGB 现烘（multiply 铺色 +
+ *  destination-in 保形两步式，等价 Renderer.tintedSprite 的单帧路径）。不建缓存：
+ *  连续光照下键空间无界必漏；scratch 复用取代（同 Renderer.dustScratch 模式）。
+ *  ★scratch 内容会被下一次烘焙覆写——拿到引用的调用方必须【当场】消费。 */
+
+interface TintScratch { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }
+const tintScratches = new Map<string, TintScratch>();
+
+function tintScratch(key: string, w: number, h: number): TintScratch | null {
   if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = 2; c.height = 40;
-  const cx = c.getContext('2d')!;
-  cx.drawImage(tex, type * 4, 0, 2, 40, 0, 0, 2, 40);
+  let s = tintScratches.get(key);
+  if (!s) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    s = { canvas, ctx: canvas.getContext('2d')! };
+    tintScratches.set(key, s);
+  }
+  return s;
+}
+
+/** multiply 复合的 fillStyle 要求合法 rgb()：分量 NaN/越界时声明无效 → 会沿用上次
+ *  fillStyle（=错色），这里统一钳制兜底 */
+function tintByte(v: number): number {
+  return Number.isFinite(v) ? Math.max(0, Math.min(255, Math.round(v))) : 0;
+}
+
+/** 把 tex 的 (sx,sy,w,h) 帧乘精确 RGB 烘进 key 对应的 scratch 后返回该 canvas；
+ *  调用方必须当场绘制/取证（toDataURL），下次烘焙即覆写 */
+function bakeTintFrame(key: string, tex: ImageBitmap | HTMLImageElement,
+  sx: number, sy: number, w: number, h: number,
+  cr: number, cg: number, cb: number): HTMLCanvasElement | null {
+  const s = tintScratch(key, w, h);
+  if (!s) return null;
+  const cx = s.ctx;
+  cx.globalCompositeOperation = 'source-over';
+  cx.clearRect(0, 0, w, h);
+  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
+  // ① RGB 乘乘数（multiply 会把精灵透明区铺满成方形伪影，由②裁掉）
   cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${v},${v},${v})`;
-  cx.fillRect(0, 0, 2, 40);
+  cx.fillStyle = `rgb(${tintByte(cr)},${tintByte(cg)},${tintByte(cb)})`;
+  cx.fillRect(0, 0, w, h);
+  // ② 本体作 destination-in 源：alpha 回到精灵轮廓
   cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, type * 4, 0, 2, 40, 0, 0, 2, 40);
-  rainTintCache.set(key, c);
-  return c;
+  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
+  cx.globalCompositeOperation = 'source-over';
+  return s.canvas;
 }
 
 function stIn(world: World, tx: number, ty: number): boolean {
   return world.store.inBounds(tx, ty);
 }
 
-/** 雪花乘色缓存（8 级亮度 × 3 帧）：Dust.png 源矩形 (760,10×frame,8,8) = dust 76
- *  （NewDust frame 8×8、frame.Y=10×rand(3)，Dust.cs:176-190） */
-const flakeTintCache = new Map<string, HTMLCanvasElement>();
-export function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, frame: number): HTMLCanvasElement | null {
-  const key = `${frame}|${v}`;
-  const hit = flakeTintCache.get(key);
-  if (hit) return hit;
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = 8; c.height = 8;
-  const cx = c.getContext('2d')!;
-  cx.drawImage(tex, 760, 10 * frame, 8, 8, 0, 0, 8, 8);
-  cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${v},${v},${v})`;
-  cx.fillRect(0, 0, 8, 8);
-  cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, 760, 10 * frame, 8, 8, 0, 0, 8, 8);
-  flakeTintCache.set(key, c);
-  return c;
+/** 雪片（dust 76）真帧：Dust.png (760,10×frame,8,8)（NewDust frame 8×8、
+ *  frame.Y=10×rand(3)，Dust.cs:176-190）乘精确 RGB——生产单画路径与探针共用。
+ *  ★签名变化（2026-09-01 去量化）：旧版第二参是 8 级量化的灰度 v，现为全精度 r/g/b */
+export function tintedFlake(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, frame: number): HTMLCanvasElement | null {
+  return bakeTintFrame('flake', tex, 760, 10 * frame, 8, 8, r, g, b);
 }
 
-/** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,60+10×frame,8,8) = dust 268 三帧
- *  （NewDust while 双轮：frame.Y = 10×rand(3)+60——★(680,20) 是 dust 68 的蓝十字格，
- *  蓝底被 GetColor 沙色乘成暗绿 = 「树叶」假象根因，2026-08-31 定谳）。
- *  RGB 乘色入缓存；overlay 的 alpha 通道（GetColor 同式）由调用方 globalAlpha 施加 */
-const sandTintCache = new Map<string, HTMLCanvasElement>();
+/** 沙尘 grain（dust 268）真帧：Dust.png (680,60+10×frame,8,8) 三帧（NewDust while
+ *  双轮：frame.Y = 10×rand(3)+60——★(680,20) 是 dust 68 的蓝十字格，蓝底被 GetColor
+ *  沙色乘成暗绿 = 「树叶」假象根因，2026-08-31 定谳）。RGB 语义不变；overlay 的
+ *  alpha 由调用方 globalAlpha 施加。★探针回归入口（scripts/_sandstorm-grain-color.mjs
+ *  帧区分性）——slot 与生产基画槽分开，双画底稿不被覆盖 */
 export function tintedDust268(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, frame: number): HTMLCanvasElement | null {
-  const key = `${frame}|${cr},${cg},${cb}`;
-  const hit = sandTintCache.get(key);
-  if (hit) return hit;
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = 8; c.height = 8;
-  const cx = c.getContext('2d')!;
-  cx.drawImage(tex, 680, 60 + 10 * frame, 8, 8, 0, 0, 8, 8);
-  cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${cr},${cg},${cb})`;
-  cx.fillRect(0, 0, 8, 8);
-  cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, 680, 60 + 10 * frame, 8, 8, 0, 0, 8, 8);
-  sandTintCache.set(key, c);
-  return c;
+  return bakeTintFrame('dust268-tint', tex, 680, 60 + 10 * frame, 8, 8, cr, cg, cb);
 }

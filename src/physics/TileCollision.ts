@@ -448,12 +448,21 @@ function slopeCollide(
       //   与本坡下落向相反时（slope1 向左爬 / slope2 向右爬），身后仍重叠的
       //   低位格会持续发候选，把爬势按帽速逐帧拽回低线→爬升停滞致脱梯坠落。
       //   日志实录：L行 dx-26~79 同帧 dy+16~30 的反向拖拽段。
-      if (wasGround && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)
+      //   ★wasGround 软门（2026-09-01 交替处阶梯下行漏帧终修，用户 F5 地形快照
+      //   回放实锤）：坡格交界帧 slopeCollide 双候选皆缺席 → onGround 掉一帧 →
+      //   walkDownSlopePre/速度辅助的 vy===GRAVITY 精确门就此失活（空中 vy
+      //   只会越来越大永不复位）→ 整段纯重力坠落直到落地（实测 SPD3.0 每级台阶
+      //   边界漏 2-3 帧、vy 序列 0.4/0.8/1.2）。修 = 非贴地帧只要缺口仍在「近线
+      //   窗口」（≤ 半身 + 本帧行程：正常衔接最大浮空就是踏上下一坡格前的一步）
+      //   也发候选——恢复通道不再依赖 wasGround 自愈；大缺口（真高空/坠崖）与
+      //   上行排除门维持原语义不变。
+      const nearLine = Math.abs(b.vx) > 0.01;   // 行走中才有近线豁免（静止浮空照旧走 wasGround 门）
+      if ((wasGround || nearLine) && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)
         && !((slope === 1 && b.vx < -0.01) || (slope === 2 && b.vx > 0.01))) {
         const n4s = Math.max(0, Math.min(TILE,
           slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
         const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
-        if (gapS > 0.05 && gapS < bestSnapGap) {
+        if (gapS > 0.05 && gapS <= b.w / 2 + Math.abs(b.vx) && gapS < bestSnapGap) {
           bestSnapGap = gapS;
           bestSnapY = vy0 + n4s;
         }
@@ -521,6 +530,11 @@ function slopeCollide(
         }
       }
     }
+  }
+  // [临时取证口] 探针观测用，用后即删
+  {
+    const dbg = (globalThis as Record<string, unknown>)?.__SW_SCDBG as unknown[] | undefined;
+    if (dbg) dbg.push({ wl: bestLift, ws: bestSnapY, wg: bestSnapGap });
   }
   if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记
   if (bestLift < 0) {

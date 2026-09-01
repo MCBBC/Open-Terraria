@@ -4,7 +4,7 @@
 // 验收语义（TileObject.cs CanPlace 尾判）：锚点格子与占位格【全部】通过才可放
 //   （num35/num36 双满分制），备选方向按序取首个满分者。
 import anchorsJson from '../data/tile-anchors.json';
-import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
 import type { World } from './World';
 
 export interface AnchorDataRec { t: string[]; cnt: number | string; start: number | string }
@@ -103,7 +103,15 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       if (!st.inBounds(x, y)) return false;
       const i2 = st.idx(x, y);
       if (occupiedIgnore?.(x, y)) continue;
-      if (st.isActive(x, y) && !TILE_CUT_SHEETS.has(defAt(st, x, y)?.vanilla?.sheet ?? -1)) return false;
+      // 占位格阻挡判定（CanPlace TileObject.cs:357）：tileCut ∪ BreakableWhenPlacing
+      // 均不阻挡（写入前 TileObject.Place :84-86 KillTile 清除）；特例 484/654 虽属
+      // tileCut 仍阻挡。★石堆族 185 曾漏入例外面——小石子挡家具须镐挖(用户实报)。
+      {
+        const shOc = defAt(st, x, y)?.vanilla?.sheet ?? -1;
+        const clearable = (shOc !== -1 && shOc !== 484 && shOc !== 654
+          && TILE_CUT_SHEETS.has(shOc)) || BREAKABLE_WHEN_PLACING_SHEETS.has(shOc);
+        if (st.isActive(x, y) && !clearable) return false;
+      }
       if (st.liquid[i2] > 0 && !rec.liqAllow) return false;
       if (rec.wall && st.wall[i2] === 0) return false;
     }

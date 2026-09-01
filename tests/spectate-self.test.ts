@@ -254,3 +254,45 @@ describe('滚轮退出（:16933 尾项 ScrollWheelDelta != 0 → SetOrRequestSpe
     expect(g.input.mouseDown).toBe(true);        // 未吞（return 先于环选段）
   });
 });
+
+// ---- X1 溺水观战回体（2026-09-01）：CheckDrowning 直伤拍 SetOrRequestSpectating(-1)
+//      （Player.cs:23450）经 GameHooks.askSpectateExit 的 Game 桥语义 ------------------
+describe('askSpectateExit Game 桥（X1：溺水拍 SetOrRequestSpectating(-1)，Player.cs:23450/:17346-17375）', () => {
+  it('单机 netMode==0：早退纯 no-op——spectating/msg150/strip 轮全不动', () => {
+    const g = shell({ slot: 5, net: false, players: { 5: { active: true, dead: false } } });
+    // 单机正常到不了 spectating>=0；置脏值以钉死「分支未进=零写」原义（:17371-75）
+    g.spectatingSlot = 5;
+    g.lastStripReq = 'pending';
+    g.askSpectateExit();
+    expect(g.spectatingSlot).toBe(5);                    // 状态未清（SetOrRequest 两分支皆不进）
+    expect(g.net.sendSpectateFocus).not.toHaveBeenCalled();   // 无 msg150（SendData(150) 未触）
+    expect(g.lastStripReq).toBe('pending');              // strip 轮未被扰动
+  });
+
+  it('多人观战中：退出观战相机 + msg150(-1) + strip 轮复位（客户端半边 :17388-17396）', () => {
+    const g = shell({ slot: 5, players: { 5: { active: true, dead: false } } });
+    g.lastStripReq = 'pending';
+    g.askSpectateExit();
+    expect(g.spectatingSlot).toBe(-1);
+    expect(g.net.sendSpectateFocus).toHaveBeenLastCalledWith(-1);
+    expect(g.lastStripReq).toBe('');                     // 下轮 %30 立即按新相机位请求条带
+  });
+
+  it('多人已自尸镜头（slot=-1）：target==spectating 早退零重发（:17349-17351）——溺水逐拍重入幂等', () => {
+    const g = shell({});
+    g.askSpectateExit();
+    g.askSpectateExit();
+    g.askSpectateExit();
+    expect(g.spectatingSlot).toBe(-1);
+    expect(g.net.sendSpectateFocus).not.toHaveBeenCalled();   // 早退挡住逐拍 msg150 风暴
+    expect(g.lastStripReq).toBe('');
+  });
+
+  it('mySlot 归一保持（setSpectating 同款）：显式非自机目标照常切换不受本桥影响', () => {
+    const g = shell({ slot: -1, players: { 5: { active: true, dead: false } } });
+    (g as unknown as { setSpectating(t: number): void }).setSpectating(5);
+    expect(g.spectatingSlot).toBe(5);
+    g.askSpectateExit();
+    expect(g.spectatingSlot).toBe(-1);                   // 回体=退出观战而非跳目标
+  });
+});

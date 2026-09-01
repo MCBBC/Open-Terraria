@@ -83,3 +83,32 @@ export const PLANT_CONVERT_KEY: Record<number, string> = {
   71: 'v_71_mushroom_plant', 73: 'v_73_forest_tall_plants', 74: 'v_74_jungle_tall_plants',
   110: 'v_110_hallow_short_plants', 113: 'v_113_hallow_tall_plants', 201: 'v_201_crimson_short_plants',
 };
+
+/** 草族种子/法杖放置门（Player.cs:41362-41440 BlockPlacementForAssortedThings 纯函数化）。
+ *  staff=手持 213/5295（含 Item.cs:4003-4016 的"凭空种草"特权：目标 type 0【含空格】/1/38）；
+ *  种子族只转对应基座——草种/圣种(2/109)→泥土(0)、腐化/猩红(23/199)→泥土或泥(59)、
+ *  丛林(60)/蘑菇(70)/红蓝蘑菇苔(661/662)→泥、灰烬草种(633)→灰烬块(57)。
+ *  命中=canPlace true（原位转化；staff 空格=新置）；未命中=false=原版整链终点
+ *  （TileObjectData.CustomPlace 对草块族 legacy tile 恒 false ⇒ 绝无"铺进空格"回落）。
+ *  调用方必须把族内物品的 false 当作"终止"而非"回落"（2026-09-01 神圣种子叠块 bug）。
+ *  @param empty 目标格为空气（独立入参承载 nactive() 门语义；staff 无此门可凭空种） */
+export function assortedPlaceOk(staff: boolean, gsheet: number, tsheet: number, empty: boolean): boolean {
+  // staff 分支只读 .type（Player.cs:41364-41370，无 nactive() 门）——空格=type 0 放行；
+  if (staff) return tsheet === 0 || tsheet === 1 || tsheet === 38;
+  // 非法杖族全部分支带 nactive()（:41372/:41378/:41390/:41403/:41416）——空格恒 false
+  if (empty) return false;
+  switch (gsheet) {
+    case 2: case 109: return tsheet === 0;
+    case 23: case 199: return tsheet === 0 || tsheet === 59;
+    case 60: case 70: case 661: case 662: return tsheet === 59;
+    case 633: return tsheet === 57;
+    default: return false;
+  }
+}
+
+/** ItemID.Sets.GrassSeeds（1457 ItemID.cs:84：62 草种/59 腐化种/2171 猩红种/369 神圣种/
+ *  195 丛林种/194 蘑菇种/5214 灰烬草种）＋ 再生法杖 213/再生之斧 5295 特权族。
+ *  ★定位=原版集合备忘与测试锚。运行时路由（Game.tryPlace 三修后）按「createTile
+ *  ∈GRASS_CONVERT_SHEETS（meta 推导）× 非 place_v_* 前缀」判族，staff 特权由
+ *  vid∈{213,5295} 细分——本集合不再参与路由判别（曾按它误拦 place_v_109 草块）。 */
+export const GRASS_SEED_STAFF_VIDS: ReadonlySet<number> = new Set([62, 59, 2171, 369, 195, 194, 5214, 213, 5295]);

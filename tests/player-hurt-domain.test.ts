@@ -127,6 +127,7 @@ function envHarness(w: World, p: Player) {
       if (pvp) p.deathsPvp++;                        // 真身面最小镜像（计数由 Game 承担）
       else p.deathsPve++;
     }),
+    askSpectateExit: vi.fn(),   // X1：溺水直伤拍观战回体出射口（GameHooks 可选位;缺省 mock 零发）
     addDamageNumber: vi.fn(),
     cutTile: vi.fn(),
     breakTile: vi.fn(),
@@ -489,6 +490,30 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     expect(p.deathsPve).toBe(deathsBefore + 1);
     for (let i = 0; i < 10; i++) p.fixedUpdate(1 / 60, hooks as never);
     expect(settlements.length).toBe(1);
+  }, 20000);
+
+  it('X1 溺水直伤拍调 askSpectateExit（SetOrRequestSpectating(-1) :23450）——每直伤拍一次，先于死亡结算管线', () => {
+    // 致死档（对齐上行既有致死例）：直伤拍出射口必须在 KillMe 管线之前
+    // （原版序 :23449 statLife-=2 → :23450 SetOrRequestSpectating → :23452-54 判死）
+    const w = tallWorld(31);
+    const st = w.store;
+    for (let x = 20; x <= 40; x++) st.setTileSilent(x, 48, TILE_BY_KEY['dirt']);
+    for (let x = 20; x <= 40; x++) for (let y = 26; y <= 46; y++) st.setLiquid(x, y, 220, 1);
+    const p = new Player(28 * 16, 32 * 16, new Inventory());
+    const { hooks } = envHarness(w, p);
+    const spx = (hooks as unknown as { askSpectateExit: ReturnType<typeof vi.fn> }).askSpectateExit;
+    const settle = (hooks as unknown as { settlePlayerDeath: ReturnType<typeof vi.fn> }).settlePlayerDeath;
+    p.breath = 3;                                    // 快进：两拍即见首拍
+    p.hp = 4;                                        // 低血量促死
+    for (let i = 0; i < 120 && !p.dead; i++) {
+      p.fixedUpdate(1 / 60, hooks as never);
+      if (!p.dead) { p.x = 28 * 16; p.y = 32 * 16; p.vy = 0; }
+    }
+    expect(p.dead).toBe(true);
+    expect(spx.mock.calls.length).toBeGreaterThanOrEqual(1);   // 直伤拍逐拍出射（含非致命重拍）
+    expect(settle.mock.calls.length).toBe(1);                  // 死亡单次受理
+    expect(spx.mock.invocationCallOrder[0]).toBeLessThan(
+      settle.mock.invocationCallOrder[0]);                     // ★:23450 先于 :23452-54 管线
   }, 20000);
 
   it('msg117 dir 字面透传：显式 0 按钉语义直发,缺省维持 sign 推算（既有五支不变）', () => {

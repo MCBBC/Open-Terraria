@@ -45,6 +45,11 @@ export interface RecMeta {
     animTick: number;
     lowK: number; lowW: number; lowH: number;
   };
+  /** ★地形快照（±32 格稀疏数据） */
+  terrain?: {
+    playerTileX: number; playerTileY: number;
+    cells: Record<string, [number, number, number, number, number]>;
+  };
 }
 
 export interface RecExport {
@@ -81,6 +86,11 @@ export class BehaviorRecorder {
   worldInfo: () => RecWorldInfo = () => ({ worldName: '', seed: 0, w: 0, h: 0, hardMode: false, dayTime: true });
   /** 渲染快照源（Game 构造期注入；未注入 = meta.render 缺省不写字段） */
   renderInfo?: () => RecMeta['render'];
+  /** ★地形快照（2026-09-01 用户交替处坠落排查）：导出瞬间玩家周围 ±32 格的
+   *  tile 压缩数据（type/slope/half/platform/wall），供逐格碰撞诊断。
+   *  格式 = 稀疏字典 { key: [type, slope, half, isPlat, wall] }，key = "x,y"。
+   *  仅记录非空格（type≠0 或 wall≠0）+ 玩家 tile 坐标。 */
+  terrainInfo?: () => RecMeta['terrain'];
 
   /** 恒安全写入（无窗也进环——追溯能力的根基）。风暴下自动淘汰最旧 */
   log(k: string, d: unknown): void {
@@ -132,6 +142,7 @@ export class BehaviorRecorder {
         eventCount: events.length,
         startTick: events[0] ? events[0].t : null,
         ...(this.renderInfo ? { render: this.renderInfo() } : {}),
+        ...(this.terrainInfo ? { terrain: this.terrainInfo() } : {}),
       },
       events,
     };

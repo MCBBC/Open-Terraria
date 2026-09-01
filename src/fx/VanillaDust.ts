@@ -2,9 +2,13 @@
 // :260-288 / UpdateDust :423-2450 / Main.DrawDust :38266-38436 / GetAlpha
 // :2469-2772 / GetColor :2773-2817）——翅膀视觉批引入，拴绳小动物批扩表。
 //
-// 范围说明：本引擎按"消费方已用到的 type"精植（翅膀尘埃 13 型：6/31/43/55/58/76/
-// 86/182/217/229/240/261/264；拴绳批 5 型：43/15/267/278/6；钻头坐骑 230——
-// 见各 case 行号），逐型带源码行号；NewDust 初始化链与通用老化链
+// 范围说明：本引擎双通道扩表——① **精植**：按"消费方已用到的 type"逐型移植
+// （翅膀尘埃 13 型：6/31/43/55/58/76/86/182/217/229/240/261/264；拴绳批 5 型：
+// 43/15/267/278/6；钻头坐骑 230——见各 case 行号），逐型带源码行号；
+// ② **家族补全**（2026-09-01 起）：整段家族一次到位，含当前 0 发射方的型，
+// 防将来启用时静默缺光/缺 alpha——首批 EoC/肉山尘族 110-114/311-313（Dust.cs
+// 链 A 独占链接 :1564-1635 + GetAlpha :2583-2586，均无 noLight/noLightEmittance 门）；
+// NewDust 初始化链与通用老化链
 // （fadeIn=生长目标语义 :2148-2171：0<fadeIn<100 时 scale += 0.03/t 至超 fadeIn
 // 转衰落；否则 scale -= 0.01/t）全量 1:1。后续其它系统接入新 type 时按同法扩表。
 //
@@ -28,8 +32,8 @@
 //  本引擎 switch(链A)+老化后 switch(链B) 两段对应；261/264/182 维持翅膀批
 //  既有链 A 单段近似（其后通用重力照旧——扩表时勿动）。
 //
-// 光照：261/264/182/43/15 族/267/278/6 逐尘 AddLight（update 期收集 → Game 推
-// LightingEngine）；43 型需读光（Lighting.GetColor :1475 照度门）——update 由
+// 光照：261/264/182/43/15 族/267/278/6 与 EoC·肉山族（110-114/311-313，家族补全
+// 2026-09-01）逐尘 AddLight（update 期收集 → Game 推 LightingEngine）；43 型需读光（Lighting.GetColor :1475 照度门）——update 由
 // Game 注入 lightAt 采样器；278 型入实心格收缩（:2264 Collision.SolidCollision
 // 10×10 盒）需 solidBoxAt 探针（Game 注入 solidCollisionBox 1:1,半砖下 8/斜坡整格）；
 // 两者缺省 = 全亮/不实心（无注入时门不误杀）。
@@ -397,6 +401,31 @@ export class VanillaDust {
           chainLink = true;
           break;
         }
+        // EoC/肉山尘族（链 A 独占链接 :1564-1635，家族补全 2026-09-01）：每支仅
+        // AddLight、无速度/缩放改动；命中即 chainLink=true——链尾重力链接 :1889
+        // else-if 对它们不评估。★原版这些分支【无】noLight/noLightEmittance 门
+        // （不同于同链 43 :1509 / 15 族 :1523），零门移植；★链 ② 兜底 vx×0.99
+        // (:2141-2144) 原版对全体尘评估，但本引擎沿用既有近似"链 A 命中者不乘"
+        // （文件头结构澄清 ②）。本仓现 0 发射方——预防性补全防将来启用静默缺光。
+        //   111 ×0.125 / 313 ×0.25 / 其余 ×0.1，钳 1；
+        //   311/312 走 torch 重载 AddLight(i,j,TorchID,amount)=TorchColor(id)×amount
+        //   （TorchID.cs Initialize：16=Desert (1.4,0.85,0.55)、9=Ice (0.75,0.85,1.4)，恒色）
+        case 110: case 111: case 112: case 113: case 114:
+        case 311: case 312: case 313: {
+          const k = Math.min(d.scale * (d.type === 111 ? 0.125 : d.type === 313 ? 0.25 : 0.1), 1);
+          let lr = k, lg = k, lb = k;
+          if (d.type === 110) { lr = k * 0.2; lg = k; lb = k * 0.5; }               // :1571
+          else if (d.type === 111) { lr = k * 0.2; lg = k * 0.7; lb = k; }         // :1580
+          else if (d.type === 112) { lr = k * 0.8; lg = k * 0.2; lb = k * 0.8; }   // :1589
+          else if (d.type === 113) { lr = k * 0.2; lg = k * 0.3; lb = k * 1.3; }   // :1598
+          else if (d.type === 114) { lr = k * 1.2; lg = k * 0.5; lb = k * 0.4; }   // :1607
+          else if (d.type === 311) { lr = k * 1.4; lg = k * 0.85; lb = k * 0.55; } // :1616 torch16 Desert
+          else if (d.type === 312) { lr = k * 0.75; lg = k * 0.85; lb = k * 1.4; } // :1625 torch9 Ice
+          else { lr = k; lg = k * 0.8; lb = k * 0.6; }                             // 313 :1634
+          this.lights.push({ x: d.x, y: d.y, r: lr, g: lg, b: lb });
+          chainLink = true;
+          break;
+        }
         case 267: {  // :1660-1686 帝皇蝶尘：方向旋转 + 阻尼 + 生长 + 自色光
           d.rotation += d.vx < 0 ? -1 : 1;                // :1662-1669
           d.vy *= 0.98; d.vx *= 0.98;                     // :1670-1671
@@ -554,6 +583,12 @@ export class VanillaDust {
       case 86: case 87: case 88: case 89: case 90: case 91:
         if (!d.noLight) return { rgb: 1, a: 0 };                                // :2511
         return { rgb: num, a: num };
+      // EoC/肉山尘族（GetAlpha :2583-2586，同族无 noLight 门）：本体色恒
+      // (200,200,200,0)——A=0 本体不可见，纯光照尘（不在强制 White 全亮桶）。
+      // 家族补全 2026-09-01，本仓现 0 发射方
+      case 110: case 111: case 112: case 113: case 114:
+      case 311: case 312: case 313:
+        return { rgb: 200 / 255, a: 0 };
       default:
         return { rgb: num, a: num };
     }

@@ -88,9 +88,11 @@ describe('终零波 B1：AFK 计数步进核（Player.cs:25692-25701 1:1）', ()
 });
 
 describe('终零波 B2：spawner 消费面（NPC.cs:1052-1053 !skyMob && noGroundWorms → noWorms）', () => {
-  type SpPriv = VanillaSpawner & {
-    pX: number; pY: number; skyMob: boolean; noWorms: boolean; noGroundWorms: boolean;
-    setFlagsForChosenTile: (x: number, y: number, t: number, r: RNG) => void;
+  // 不与类本体相交：pX/pY/skyMob/noWorms/setFlagsForChosenTile 是私有成员,
+  // 交叉类型会把访问解析成 never（TS 私有域合并规则）
+  type SpPriv = {
+    pX: number; pY: number; skyMob?: boolean; noWorms?: boolean; noGroundWorms?: boolean;
+    setFlagsForChosenTile(x: number, y: number, t: number, r: RNG): void;
   };
   function mkSpawner(): SpPriv {
     const w = new World(400, 600, 42, 'rate-test');
@@ -226,13 +228,14 @@ describe('终零波 D：GRAB_RANGE 逐 vid 化（GetItemGrabRange 加成段全�
     expect(grabRangeBonusFor(ctx, 71)).toBe(350);
     expect(grabRangeBonusFor(ctx, 4143)).toBe(300);       // 恒真门不吃装备位
   });
-  it('宝藏磁石全类 +150 立柱与币族叠加（磁石 5010 在手 → 币 75 拉距 500px 复合）', () => {
+  it('宝藏磁石全类 +150 与金戒指币族 +350 双源叠加（IsACoin=71..74 门内复合）', () => {
     const p = new Player(0, 0, new Inventory());
-    p.inv.armor[3] = { id: _iid(3033), stack: 1 };
-    p.inv.armor[6] = { id: _iid(5010), stack: 1 };
+    p.inv.armor[3] = { id: _iid(3033), stack: 1 };   // 金戒指币族旗
+    p.inv.armor[4] = { id: _iid(5010), stack: 1 };   // 宝藏磁石全类旗（双源叠加）
     beginDropScanCtx(p);
     const ctx = getDropScanCtx(p)!;
-    expect(grabRangeBonusFor(ctx, 75)).toBe(150 + 350);
+    expect(grabRangeBonusFor(ctx, 74)).toBe(150 + 350);   // 铂金币在 IsACoin 集
+    expect(grabRangeBonusFor(ctx, 76)).toBe(150);         // 币族门外仅磁石立柱
     expect(grabRangeBonusFor(ctx, 3822)).toBe(150 + 50);
   });
 });

@@ -17,6 +17,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { Arrow } from '../src/entities/Arrow';
+import { wetCollision } from '../src/entities/npcLiquid';
 import { canHit, canHitLine } from '../src/physics/LineOfSight';
 import type { GameHooks } from '../src/entities/types';
 
@@ -55,7 +56,7 @@ function makeHooks(enemies: MockEnemy[] = [], opts?: { solidAt?: (tx: number, ty
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (() => {}) as never,        // 签名宽 mock（同 spawnDust 口径）
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},
@@ -358,5 +359,96 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     expect(aimB().bee36AimLocked).toBe(true);
     expect(aimB().bee36Aim?.cx).toBe(60 * 16 + 400);
     expect(aimB().bee36Aim?.cy).toBe(90 * 16 - 200);
+  });
+});
+
+// ★F7 终裁固防（2026-09-01，MB-D 旧红「蜂族入水即消亡」收口追认）：F7 判死几何
+// 升级（Arrow.ts 蜂族站改走 npcLiquid.wetCollision = Collision.WetCollision :1575-1656
+// 全式移植）后全绿——旧红定谳为旧实现「弹心格单格近似」的预先存在债，现以 truth
+// 三态判别场景钉进固防，防回退。truth 分家表（1457）：
+//   · WetCollision :1575-1656 ——【wet 家族】liquid>0 即真,液种不筛（水/岩浆/蜂蜜/
+//     微光同权）,蜂蜜/微光经静态旗 Collision.honey/.shimmer 外带;中心小盒
+//     (min(10,W)×min(H/2,H))+液面下探 (256-liquid)/32×2px + 坡面整格支;
+//   · DrownCollision :1385 ——【溺水面】排除 lava 与 shimmer、honey 计入
+//     （NPC 呼吸域专用 + 底行实心豁免支——与弹族无关）;
+//   · LavaCollision :1657 ——【仅岩浆】。
+// 蜂族门 Projectile.cs:27685 `type != 307 && wet && !honeyWet && !shimmerWet`：
+// wet 家族 ⇒ 岩浆无豁免（致死）、蜂蜜/微光经旗豁免；对照 IsDestroyedByWater 族
+// :16917 有 `!lavaWet` 门——两勿混。蜂盒探针（181=8×8）：宽 min(10,8)=8、高 H/2=4，
+// 即 [px..px+8]×[py+2..py+6]；L=200 液带 = [ty*16+3.5, ty*16+16.5]。
+// MB-D 两界复验（直测旗位见本组末测）：①honey 计入 = 蜜格返回 wet:true+honey:true
+// （NPC 侧照常湿身、蜂侧靠旗豁免）；②lava 致死面 = 浆格 wet:true 且无旗 ⇒ 蜂死。
+const putLiquid = (st: TileStore, tx: number, ty: number, amt: number, t: number): void => {
+  st.liquid[st.idx(tx, ty)] = amt;
+  st.liquidType[st.idx(tx, ty)] = t;
+};
+describe('★F7 蜂族入水判死几何三态固防（深水/浅缘/邻格/蜜·光豁免/浆致死）', () => {
+  const bee181 = (px: number, py: number): Arrow =>
+    new Arrow(px, py, 0, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+  const diesWithin = (p: Arrow, n: number, h: GameHooks): boolean => {
+    let died = false;
+    for (let i = 0; i < n && !died; i++) { p.fixedUpdate(1, h); died = p.dead; }
+    return died;
+  };
+
+  it('深水：弹心格 L255 整浸 1 拍即死', () => {
+    const { hooks, store } = makeHooks([]);           // 无敌怪 → 静止几何零位移可复核
+    putLiquid(store, 60, 90, 255, 1);                 // WATER
+    const bee = bee181(60 * 16 + 4, 90 * 16);         // 探针 [1442..1446] ⊂ 液带
+    expect(diesWithin(bee, 1, hooks)).toBe(true);
+  });
+
+  it('浅缘上掠（a 类误杀面反例）：盒底恰在液面之上⇒不死，尽管中心格仍在液体行', () => {
+    const { hooks, store } = makeHooks([]);
+    putLiquid(store, 60, 90, 200, 1);                 // 液带 [1443.5, 1456.5]
+    // 盒 [1438..1442]，1442 > 1443.5 不成立 → 原版不杀；旧「弹心格 liquid>0」近似
+    // 读到中心格（cy=1440→row90 有液）必误杀——此景即 F7 升级的判别器
+    const bee = bee181(60 * 16 + 4, 90 * 16 - 4);
+    expect(diesWithin(bee, 45, hooks)).toBe(false);
+  });
+
+  it('浅缘生死 1px 级阈对拍：py−3 生 / py−2 死（液面下探半像素差两分）', () => {
+    const { hooks, store } = makeHooks([]);
+    putLiquid(store, 60, 90, 200, 1);
+    const live = bee181(60 * 16 + 4, 90 * 16 - 3);    // 盒 [1439..1443]，压线未进
+    expect(diesWithin(live, 45, hooks)).toBe(false);
+    const dead = bee181(60 * 16 + 4, 90 * 16 - 2);    // 盒 [1440..1444]，探底越过 1443.5
+    expect(diesWithin(dead, 1, hooks)).toBe(true);
+  });
+
+  it('邻格液体（b 类漏杀面反例）：弹心格干燥、右邻 1px 探沿触液⇒死', () => {
+    const { hooks, store } = makeHooks([]);
+    putLiquid(store, 61, 90, 255, 1);                 // 仅右邻列有水
+    // 弹心 cx=973→col60 干燥（旧单格判活）；探针 [969..977] 越界 1px 触 col61
+    const bee = bee181(60 * 16 + 9, 90 * 16);
+    expect(diesWithin(bee, 1, hooks)).toBe(true);
+  });
+
+  it('蜂蜜/微光豁免对拍（同几何死场：water 死 / honey·shimmer 活）', () => {
+    for (const [t, mustDie] of [[1, true], [3, false], [4, false]] as const) {
+      const { hooks, store } = makeHooks([]);
+      putLiquid(store, 60, 90, 200, t);               // 致死几何 = py−2 压线进入
+      const bee = bee181(60 * 16 + 4, 90 * 16 - 2);
+      expect(diesWithin(bee, 8, hooks)).toBe(mustDie);
+    }
+  });
+
+  it('岩浆无豁免致死面（wet 家族不分家；对照 IsDestroyedByWater 族有 !lavaWet 门）', () => {
+    const { hooks, store } = makeHooks([]);
+    putLiquid(store, 60, 90, 200, 2);                 // LAVA
+    const bee = bee181(60 * 16 + 4, 90 * 16 - 2);     // 同致死几何
+    expect(diesWithin(bee, 1, hooks)).toBe(true);
+  });
+
+  it('wetCollision 旗位直测：honey/shimmer 计入 wet 并外带旗；lava/water 不带旗', () => {
+    const probe = (t: number) => {
+      const st = new TileStore(80, 200);        // 高 200：j 钳 maxTilesY−40=160（复测顶注）
+      putLiquid(st, 40, 40, 255, t);
+      return wetCollision(st, 40 * 16 + 4, 40 * 16, 8, 8);   // 蜂盒几何探 [.. +6]
+    };
+    expect(probe(1)).toMatchObject({ wet: true, honey: false, shimmer: false });   // 水
+    expect(probe(2)).toMatchObject({ wet: true, honey: false, shimmer: false });   // 岩浆
+    expect(probe(3)).toMatchObject({ wet: true, honey: true, shimmer: false });    // 蜂蜜计入
+    expect(probe(4)).toMatchObject({ wet: true, honey: false, shimmer: true });    // 微光计入
   });
 });

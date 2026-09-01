@@ -669,9 +669,6 @@ export class Boomerang extends Entity {
   /** SetDefaults extraUpdates（AI 每 tick 跑 1+extra 次,Update :15336-15339 while 循环） */
   private extra: number;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   /** timeLeft 缺省 3600（SetDefaults :526,aiStyle 3 族无型号覆写——旧值 900 是自造） */
   life = 3600;
   dead = false;
@@ -985,6 +982,18 @@ export class Boomerang extends Entity {
   /** 移动/撞墙段（HandleMovement 撞墙分支 :18103-18161;分轴探测 = lastVelocity 语义） */
   private moveStep(game: GameHooks, isPhase: boolean): void {
     if (this.ai0 === 1) { this.x += this.vx; this.y += this.vy; return; } // 穿墙（:37145）
+    // ★嵌入态裸位移(2026-09-01 用户实录定罪):中心格在实体内 = 弹体出生嵌在斜坡/
+    //  阶梯立体几何中。处置 = 无管线/无碰撞响应/无声的裸位移——以投掷动量自然滑出,
+    //  进入自由空间后正常差分门接管。修复两个症状:
+    //   ①反复弹射音效(嵌入状态下每帧触撞→playSfx('dig') 连发)
+    //   ②穿墙(embedGrace 相位穿越已移除,此方案限定穿透范围=出生时覆盖的格数)
+    {
+      const stE = game.world.store;
+      const _cx = Math.floor(this.cx / TILE), _cy = Math.floor(this.cy / TILE);
+      if (stE.inBounds(_cx, _cy) && stE.isSolid(_cx, _cy)) {
+        this.x += this.vx; this.y += this.vy; return;
+      }
+    }
     // ★正典碰撞管线（2026-09-01 定罪「站斜砖旋刃原地打转」,终结本族第三次近似迭代：
     //  ①出生盒心偏移→②半砖全格布尔→③坡面全格布尔）：bespoke solidBox 的
     //  坡面全格近似与玩家站坡的脚线沉降(格内中段)天然互斥,帧0 即判撞双轴互锁。
@@ -1003,60 +1012,25 @@ export class Boomerang extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
-      tileCollide: this.ai0 !== 1 && this.embedGrace <= 0,
+      tileCollide: this.ai0 !== 1,
       dropThrough: true,
     };
     moveAndCollide(body, game.world, lvx, lvy);
-    // ★1:1 决策落地(2026-09-01):接触判定与原版 HandleMovement 外门同构 =
-    // 【lastVelocity != velocity】(P.cs:18007)——slopeCollide 贴附等速度编辑同样计入。
-    // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
-    // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
-    // 始终采纳管线解析位置(含宽限期的相位穿越位移)
+    // ★接触路径恢复 lastV——反射公式(-lvx/-lvy)与 383 豁免、301 盾钳定均以
+    // 【入撞前速度】为基准。slope 粘滞编辑的持久化问题(右下弹射)归管线层修。
     this.x = body.x; this.y = body.y;
-    if (this.embedGrace > 0) {
-        // 宽限期:保持投掷动量(tileCollide=false 在 body 构造中已设),纯位移无碰撞响应
-        this.embedGrace--; this.vx = lvx; this.vy = lvy; return;
-    }
     const chX = body.vx !== lvx, chY = body.vy !== lvy;
-    // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改也计接触
     const stB = game.world.store;
+    // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改也计接触
     const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
       || this.y <= 0 || this.y + this.h >= stB.h * TILE;
-    this.x = body.x; this.y = body.y;
-    // ★接触路径恢复 lastV——反射公式(-lvx/-lvy)与 383 豁免(保留原速)、301 盾钳定
-    // 均以【入撞前速度】为基准;管线内贴坡编辑的持久化问题(右下弹射)归管线层修,
-    // 此处不越权(2026-09-01 终审撤回此前全局采纳尝试,其改变 383/301 等
-    // 豁免型在拦截轴上的瞬态读数)。slopeCollide 对纯坡面编辑的持久化由管线
-    // 下次调用的 body 视图自动携带。
-    this.vx = lvx; this.vy = lvy;
-    let hitX = chX, hitY = chY;
-    // ★贴坡滑行特例(同批,用户实录):WALL_BOUNCE 族 Y 接触落斜砖(slope1/2)顶带且仅
-    // Y 变化——管线「整行最高面」拍平截停是分轴近似伪影(原版快速路径逐子步
-    // SlopeCollision 对角净滑),此情形不反弹不回收,以贴坡下行续飞。
-    const isWallBounce = !isPhase && WALL_BOUNCE_PROJ.has(this.projId);
-    let slopeSlide = false;
-    if (isWallBounce) {
-      const bx0 = Math.floor(this.x / TILE), bx1 = Math.floor((this.x + this.w - 0.01) / TILE);
-      const by0 = Math.floor((this.y + this.h - 0.01) / TILE);
-      for (let tx = bx0; tx <= bx1 && !slopeSlide; tx++) {
-        for (let ty = Math.max(0, by0 - 1); ty <= by0 && !slopeSlide; ty++) {
-          if (!stB.inBounds(tx, ty)) continue;
-          const idx = stB.idx(tx, ty);
-          if ((stB.slope[idx] === 1 || stB.slope[idx] === 2) && stB.isSolid(tx, ty)
-            && lvy > 0 && !chX
-            && ((stB.slope[idx] === 1 && lvx >= 0) || (stB.slope[idx] === 2 && lvx <= 0))) {
-            slopeSlide = true;
-          }
-        }
-      }
-      if (slopeSlide) { hitX = false; hitY = false; }
-    }
+    const hitX = chX, hitY = chY;
     if (!hitX && !hitY && !offWorldEdge) return;
     // 原版此点 velocity 已被 Collision 按碰撞轴清零（TileCollision 后写语义）——下游
     // 反射读数/LightDisc_Bounce 的 reflect 源都基于这份"轴零化视图"。管线以差分折叠
     // 出等价投影（未碰轴保留 lastV、碰轴置 0）。
     const pvx = hitX ? 0 : lvx, pvy = hitY ? 0 : lvy;
-    // ---- aiStyle3/13 撞墙响应链（1458 Projectile.cs:19627-19671,顺序与源码一致）----
+    // ---- aiStyle3/13 撞墙响应链 ----
     if (isPhase) {
       this.ai0 = 2; this.outT = 0;
       return;
@@ -1068,32 +1042,25 @@ export class Boomerang extends Entity {
       if (this.outT >= 10) {
         hitTilesInACircleFx(game, this.x - 150, this.y - 150, lvx, lvy, 300);
         game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
-        this.boomBox = 300;                                     // localAI[0]=num71(:15065 GetHitbox)
+        this.boomBox = 300;
       }
     } else if (this.projId === 301) {
       paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
       game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
         this.x, this.y, this.w, this.h);
-      this.boomBox = 200;                                       // localAI[0]=num72(:15063)
+      this.boomBox = 200;
     } else {
       game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
     }
-    // :19667-19675 {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从
-    // lastVelocity 全反（383 豁免,aiStyle13 型号在 AnchoredProj 侧另案）
-    if (isWallBounce) {
-      if (slopeSlide) {
-        // 贴坡下行续飞:跟随水平速度的对角下行分量(有界),不翻转、不回收。
-        // 原版净滑由逐子步 SlopeCollision 提供,此处为分轴架构下的行为级补偿。
-        this.vy = Math.max(this.vy, Math.abs(this.vx) * 0.9);
-      } else {
-        if (hitX) this.vx = -lvx;
-        if (hitY) this.vy = -lvy;
-      }
+    // {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从 lastVelocity 全反
+    if (WALL_BOUNCE_PROJ.has(this.projId)) {
+      if (hitX) this.vx = -lvx;
+      if (hitY) this.vy = -lvy;
     } else {
       this.ai0 = 1; this.outT = 0;
       if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
     }
-    if (!slopeSlide) game.playSfx('dig', 1, this.cx, this.cy);  // SoundID 0(:19670;滑行tick不响挖音)
+    game.playSfx('dig', 1, this.cx, this.cy);
   }
 
   /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
@@ -1360,9 +1327,6 @@ export class SpearProj extends Entity {
   /** 型号伸缩参数 */
   private prm: [number, number, number];
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   dead = false;
   // ---- Chain Guillotines 481（AI_013 锚定族专支,R30 §1/§8.4——3012 断头台链刀）----
   /** ai[0]：-1 未初始化 / 0 出程 / 1 返回（Projectile.cs:24957-25120） */
@@ -1760,9 +1724,6 @@ export class AnchoredProj extends Entity {
   /** 23 出膛重力弧计数(ai[1]>=17 起 vy+=0.6/vx*=0.995) */
   private gravT = 0;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   /** 绘制期玩家中心快照（链条锚,fixedUpdate 续约） */
   private owner: { cx: number; cy: number } | null = null;
   /** 23 鱼叉链摆荡记忆（proj.localAI[1]/[2]——Main.cs 绘制层每帧更新,
@@ -2260,9 +2221,6 @@ export class CounterweightProj extends Entity {
   private rot = 0;
   private ctx: CounterweightCtx;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   /** 方向（-2 漂移/rotation 定号） */
   private dir = 1;
   dead = false;
@@ -2626,9 +2584,6 @@ export class YoyoProj extends Entity {
    *  ÷(1+meleeSpeed×3)/4（:64974）——旧"220+spd×10"自造公式已废,勿再启用 */
   private stringLen: number;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   private rot = 0;
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
   handX = 0;
@@ -3381,9 +3336,6 @@ export class FlailProj extends Entity {
   private texScale: number;
   private rotation = 0;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   /** 手部坐标（链条起点，每 tick 刷新） */
   handX = 0;
   handY = 0;
@@ -4075,9 +4027,6 @@ export class FlaironSpike extends Entity {
   private alpha = 255;
   private bounces = 0;
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   life = 120;
   dead = false;
 
@@ -5645,9 +5594,6 @@ export class DaybreakExplosionProj extends Entity {
   private frameCounter = 0;
   hidden = false;                        // frame≥5 → hide=true(:35113-35115)
   private hitCd = new HitCooldown();
-  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
-   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
-  embedGrace = 0;
   /** SetDefaults 无 melee/ranged/magic 类旗（:8990-9001）→ Damage() 不掷暴击、
    *  不吃近战浸剂/parry——resolveProjClass 走 null 档,hitEnemies 内天然成立,
    *  勿给本类补 critChance 字段 */

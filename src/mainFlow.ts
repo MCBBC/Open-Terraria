@@ -97,6 +97,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // menubg 账本(三开压测:菜单页 GL 崩溃此前无任何观测面)。Game 处重复调用幂等
   maybeInstallGpuLoggerFromUrl();
   let playStart = 0;
+  /** 累计游玩时长（vanilla .plr timePlayed 语义 = 全生涯累计）：槽位已累计值
+   *  （WorldStore.load 由 header.playTimeMs 回填）+ 本会话至今。此前三处保存点
+   *  直传 Date.now()-playStart（会话净时长）→ 世界列表“游戏时长”每局清零重计，
+   *  与原版持久化语义漂移（2026-09-01 存档时机审计修）。 */
+  function cumulativePlayMs(): number {
+    return (currentWorld?.playTimeMs ?? 0) + Math.max(0, Date.now() - playStart);
+  }
   /** 程序化素材总包预热（#perf2026-08-28 三批修订）：buildAssets 是确定性全局单例
    *  （~6700 图标画布+全表，同步 ~400-700ms）。★只允许在【进世界路径起点】触发——
    *  与 worker 读档解析/沉降、素材下载并行吃掉；曾挂菜单启动 idle 钩子，实测在这台
@@ -811,9 +818,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           hardMode: !!game.world.flags.hardMode,
         });
       }
-      const json = saveGame(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave());
+      const json = saveGame(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave());
       if (currentWorld) currentWorld.hardMode = !!game.world.flags.hardMode;   // 图标 Hallow 前缀随肉山刷新
-      await worldStore.save(currentWorld, json, Date.now() - playStart);
+      await worldStore.save(currentWorld, json, cumulativePlayMs());
       const lobbyPort = addr.includes(':') ? parseInt(addr.split(':')[1], 10) : 7778;
       const host = addr.includes(':') ? addr.split(':')[0] : addr;
       const r = await fetch(`http://${host}:${lobbyPort}/rooms`, {
@@ -1218,7 +1225,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // (2026-08-30 用户报)。序列化输入(world/player 等)经实参同步取值不受影响
     const slotMeta = currentWorld;
     const hardModeNow = !!game.world.flags.hardMode;
-    const playTimeMs = Date.now() - playStart;
+    const playTimeMs = cumulativePlayMs();
     saveClient.ensure();
     void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
       void kvSetCompat(json).then((where) => {
@@ -1260,7 +1267,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function doExportSave() {
     if (!game) return;
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
+    // 导出档同链：playTime 一并写累计口径（与槽位/quick 档一致,2026-09-01 审计）
+    void saveClient.save(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave()).then((json) => {
       const name = (game!.world.name ?? 'world').replace(/\s+/g, '_');
       const d = new Date();
       const p = (n: number) => String(n).padStart(2, '0');

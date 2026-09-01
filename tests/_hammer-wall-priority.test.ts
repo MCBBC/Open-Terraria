@@ -102,4 +102,23 @@ describe('锤击优先级（按住拆墙 / 松开整形 / 开口门 / ×1.5）',
     // 100 锤力 ×1.5 = 150 ≥100 → 贴角墙一击即毁
     expect(st.wall[st.idx(21, 20)]).toBe(0);
   });
+
+  it('⑤ 空格挥击复位闩：锤墙途中残留闩不误整形扫过的方块(:46000-46007)', () => {
+    const w = new World(40, 40, 20, 'open');
+    const st = w.store;
+    st.setTileSilent(20, 20, TILE_BY_KEY['stone'], 0, 0);   // 方块(将扫到的目标)
+    const { g } = makeGame(w);
+    g.hammerPoundRelease = true;                 // 模拟:锤墙途中曾松手 → 闩残留
+    // 第一挥落在【空格】(锤墙位) → :46000 空格复位闩
+    tryMine(g, 12, 12, 40);
+    expect(g.hammerPoundRelease).toBe(false);
+    // 第二挥光标扫到方块(仍按住) → 闩已复位 → 只拆方块背后的墙,不整形
+    st.setTileSilent(20, 20, TILE_BY_KEY['stone'], 0, 0);
+    st.setWall(20, 20, 1);
+    (g as { tickCount: number }).tickCount = 10;
+    tryMine(g, 20, 20, 100);                                     // 1.5×100=150 一击毁墙
+    const i = st.idx(20, 20);
+    expect(st.half[i] !== 0 || st.slope[i] !== 0).toBe(false);  // 不整形
+    expect(st.wall[st.idx(20, 20)]).toBe(0);                     // 墙被拆(按住语义)
+  });
 });

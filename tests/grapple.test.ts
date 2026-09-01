@@ -17,16 +17,20 @@ import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TILE_BY_KEY } from '../src/data/tiles';
-import { TILE } from '../src/core/constants';
+import { TILE, PLAYER_JUMP_TICKS, PLAYER_JUMP_SPEED } from '../src/core/constants';
 import {
   GrappleProj, GRAPPLE_FLY, GRAPPLE_RETRACT, GRAPPLE_LATCH, canTileBeLatchedOnTo,
 } from '../src/entities/GrappleProj';
 import {
   HOOK_PROJ_STATS, HOOK_ITEMS, HOOK_TIME_LEFT, hookItemOf, isHookProjectile,
 } from '../src/data/grappleHooks';
+import { ITEM_BY_KEY } from '../src/data/items';
+import { vanillaItemKey } from '../src/data/vanillaRecipes';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const PLATFORM = TILE_BY_KEY['platform']!;
+/** vid → 本仓物品内部 id（X2② 旧世界跑酷指南 6190 注入用） */
+const iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
 
 /** 空 40×40 世界 + 假 GameHooks（Player/GrappleProj 只用 world/player/音效/粒子/掉落） */
 function makeWorld(name = 'open') {
@@ -139,7 +143,37 @@ describe('钩爪 AI_007（Projectile.cs:49647-49980）', () => {
     }
   });
 
-  it('跳键沿释放（Player.cs:22447-22480）：慢速(<2)时附带跳跃、钩全灭', () => {
+  it('X2② oldStyleParkour 半跳（1457 :22906）：释放跳 jumpHold=(int)jumpHeight/2=7、初速不减', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    const g = fire(p, 13, 0, -1, 11.5);
+    for (let t = 0; t < 90 && g.ai0 !== GRAPPLE_LATCH; t++) g.fixedUpdate(1 / 60, hooks);
+    expect(g.ai0).toBe(GRAPPLE_LATCH);            // 挂墙 tick 已登记锚点表（未消费）
+    p.inv.slots[5] = { id: iid(6190), stack: 1 }; // 旧世界跑酷指南——equipStats 实时 getter 生效
+    expect(p.equipStats.oldStyleParkour).toBe(true);
+    p.vx = 0; p.vy = 0;                           // velocity.Length()<2 → flag（覆写前快照）
+    p.grappleReleaseJump = true;
+    p.inputJump = true;
+    p.grappleMovement(hooks as never);            // 直调纯释放语义（积分噪声零掺入）
+    expect(p.grappling[0] == null).toBe(true);    // RemoveAllGrapplingHooks（:22915）
+    expect(p.vy).toBe(-PLAYER_JUMP_SPEED);        // :22905 velocity.Y=-jumpSpeed 两档同值
+    expect(p.jumpHold).toBe(Math.floor(PLAYER_JUMP_TICKS / 2));   // int 除法 (int)(15/2)=7
+  });
+
+  it('X2② 对照：无跑酷指南释放跳全段 jumpHold=jumpHeight=15（:22906 else 支）', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    const g = fire(p, 13, 0, -1, 11.5);
+    for (let t = 0; t < 90 && g.ai0 !== GRAPPLE_LATCH; t++) g.fixedUpdate(1 / 60, hooks);
+    p.vx = 0; p.vy = 0;
+    p.grappleReleaseJump = true;
+    p.inputJump = true;
+    p.grappleMovement(hooks as never);
+    expect(!!p.equipStats.oldStyleParkour).toBe(false);
+    expect(p.jumpHold).toBe(PLAYER_JUMP_TICKS);
+  });
+
+  it('跳键沿释放（Player.cs:22899-22926）：慢速(<2)时附带跳跃、钩全灭', () => {
     const { st, p, hooks } = makeWorld();
     for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);   // 玩家 cy≈661 → 距 269px（<300 射程）
     const g = fire(p, 13, 0, -1, 11.5);

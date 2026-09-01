@@ -5,7 +5,7 @@
 //   3 MountInstance 状态机：上下坐/能量/疲劳/帧态/特例 RunSpeed 与跳跃加成
 //   4 三模物理接管（Player.fixedUpdate）：陆行参数覆写 / 飞行 hover 能量 / 游泳 ignoreWater
 //   5 摔伤系数（fallDamage）与 extraFall 豁免、海龟免淹（:22953）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -22,7 +22,11 @@ import {
   MountShot,
   type DrillStore, type DrillBeam, type SlopeStore,
 } from '../src/entities/Mounts';
-import { TILE_DEFS } from '../src/data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+import { Game } from '../src/core/Game';
+import { placeTrack, frameTrackArea } from '../src/world/MinecartTrack';
+import { ITEM_BY_KEY } from '../src/data/items';
+import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { TILE } from '../src/core/constants';
 import { BuffType } from '../src/stats/Buffs';
 import { playerMountRotation } from '../src/render/Renderer';
@@ -1539,5 +1543,88 @@ describe('Santank 46：专属炮击节拍（UpdateEffects :4919-4921 cooldown%10
     scut.setMount(9, view());
     scut.aimScutlix(view({ x: 0, y: 0, w: 20, h: 42 }), 300, 21);
     expect(scut.frameExtra).toBe(8);              // Scutlix 仍按角度分档
+  });
+});
+
+// ---- X2① QuickMinecartSnap（Player.cs:6140-6176；唯一消费位 QuickMount 物品支 :6075）----
+// 候选规则判别：GetTilesIn 列序（x 外层升序）± oldStyleParkour 首枚免视线臂 + 最近
+// 且 CanHitLine 替换门。世界高 140（clampYTile 上界 maxTilesY-40=100 在候选行之上，
+// 排除钳制掺入）。玩家盒 [480..500]×[926..968] → 扫描窗 ±24px = 列 28..32 行 56..62。
+const TRACK = TILE_BY_KEY['v_314_minecart_track']!;
+expect(TRACK).toBeGreaterThanOrEqual(0);
+const iidOf = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
+
+function snapShell(rails: Array<[number, number]>, blockers: Array<[number, number]> = [],
+  parkourBook = false) {
+  const w = new World(64, 140, 42, 'snap');
+  const st = w.store;
+  for (const [x, y] of rails) { placeTrack(st, x, y, 0); frameTrackArea(st, x, y); }
+  for (const [x, y] of blockers) st.setTileSilent(x, y, 1);     // 内部 id 1=泥土
+  const p = new Player(480, 926, new Inventory());
+  const g = Object.create(Game.prototype) as Record<string, unknown> & {
+    quickMinecartSnap(): boolean; mountMinecartAt(x: number, y: number, m: number): boolean;
+  };
+  g.world = w;
+  g.player = p;
+  g.trackTile = TRACK;
+  g.minecart = null;
+  g.entities = { add: vi.fn() };
+  g.playSfxFile = vi.fn();
+  if (parkourBook) p.inv.slots[5] = { id: iidOf(6190), stack: 1 };   // equipStats 实时 getter
+  const spy = vi.spyOn(g, 'mountMinecartAt');                        // 默认透传真身
+  return { w, p, g, spy };
+}
+
+describe('X2① QuickMinecartSnap（Player.cs:6140-6176 oldStyleParkour 臂 + :6075 消费位）', () => {
+  it('无跑酷指南：视线可达双轨取最近吸附，result=true 并上车', () => {
+    const { g, spy } = snapShell([[31, 60], [32, 60]]);            // 距心 25.2 < 36.6 → (31,60)
+    expect(g.quickMinecartSnap()).toBe(true);
+    expect(spy.mock.calls.length).toBe(1);
+    expect(spy.mock.calls[0][0]).toBe(31);
+    expect(spy.mock.calls[0][1]).toBe(60);
+    expect(g.minecart).not.toBeNull();                             // LaunchMinecartHook 等价收敛=即时上车
+    expect((g.player as unknown as { ridingCart: boolean }).ridingCart).toBe(true);
+  });
+
+  it('无跑酷指南：全候选被实心隔断视线 → result=false 零接管（:6160 CanHitLine 门）', () => {
+    // 环形实心封死扫描窗内全部射线（除两枚轨道格自身）
+    const blockers: Array<[number, number]> = [];
+    for (let x = 27; x <= 33; x++) for (let y = 55; y <= 63; y++) blockers.push([x, y]);
+    const { g, spy } = snapShell([[31, 60], [32, 60]],
+      blockers.filter(([x, y]) => !(y === 60 && (x === 31 || x === 32))));
+    expect(g.quickMinecartSnap()).toBe(false);
+    expect(spy.mock.calls.length).toBe(0);
+    expect(g.minecart).toBeNull();
+  });
+
+  it('★oldStyleParkour 臂：首枚轨道格【免视线】直入候选——同一堵死布局翻转为命中', () => {
+    const blockers: Array<[number, number]> = [];
+    for (let x = 27; x <= 33; x++) for (let y = 55; y <= 63; y++) blockers.push([x, y]);
+    const rails: Array<[number, number]> = [[31, 60], [32, 60]];
+    const keep = new Set(rails.map(([x, y]) => `${x},${y}`));
+    const { g, spy } = snapShell(rails,
+      blockers.filter(([x, y]) => !keep.has(`${x},${y}`)), true);
+    // 判据对齐候选选择面：result 依赖 mountMinecartAt 车位实心受体门（环堵布局
+    // 下车体座位被围实心占据 → 拒载收尾，quickMinecartSnap 返回 false 放行普通
+    // 召唤——实现注所记「403 异步钩塌缩为立即上车」的偏差面，非候选规则失真）。
+    // 与前一无书例成对差分：B=零候选零接管 / 此处=候选必中（:6155-6157 无条件臂）。
+    g.quickMinecartSnap();
+    expect(spy.mock.calls.length).toBe(1);
+    expect(spy.mock.calls[0][0]).toBe(31);                         // GetTilesIn 列序首个（x 外层升序）
+    expect(spy.mock.calls[0][1]).toBe(60);
+    expect(g.minecart).toBeNull();                                 // 塌缩收敛在拒载分支收尾
+  });
+
+  it('oldStyleParkour 次序锚：更近但后扫者无视线【不得】替换先扫免视候选', () => {
+    const blockers: Array<[number, number]> = [];
+    for (let x = 27; x <= 33; x++) for (let y = 55; y <= 63; y++) blockers.push([x, y]);
+    const rails: Array<[number, number]> = [[28, 56], [31, 60]];   // 先扫 (28,56) 远 / 后扫 (31,60) 近
+    const keep = new Set(rails.map(([x, y]) => `${x},${y}`));
+    const { g, spy } = snapShell(rails,
+      blockers.filter(([x, y]) => !keep.has(`${x},${y}`)), true);
+    g.quickMinecartSnap();
+    expect(spy.mock.calls.length).toBe(1);
+    expect(spy.mock.calls[0][0]).toBe(28);                          // 首枚锁死（CanHitLine 全断无法替换）
+    expect(spy.mock.calls[0][1]).toBe(56);
   });
 });

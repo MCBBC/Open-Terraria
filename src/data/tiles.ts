@@ -983,6 +983,15 @@ export const TILE_CUT_SHEETS = new Set<number>([
   654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
   71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
 ]);
+// ===================== 放置清格例外面第二支 =====================
+// TileID.Sets.BreakableWhenPlacing（TileID.cs:383）——与 Main.tileCut 并列的另一支
+// 占位例外面：CanPlace（TileObject.cs:357）不阻挡、Place（TileObject.cs:84-86）
+// 写入前 KillTile 静默清除。石堆族 185 小石块/186,187 大石堆/324 海滩石堆、
+// 珊瑚 81、钟乳石 165、绿洲植物 530、枯枝败叶 233、染料植物 227、蚁狮幼虫 485、
+// Abigail 花 624——放家具/方块压到它们时自动碎掉，不需要镐先挖。
+export const BREAKABLE_WHEN_PLACING_SHEETS = new Set<number>([
+  324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624,
+]);
 const DOOR_SMASH_SHEETS = new Set<number>([165, 373, 374, 375, 461, 709]);
 /** 内部 tile id → 开门时是否可砍切放行（原版 OpenDoor 侧列判定） */
 export function doorSmashable(internalId: number): boolean {

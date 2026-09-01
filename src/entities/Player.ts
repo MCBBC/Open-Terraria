@@ -3444,9 +3444,14 @@ export class Player extends Entity {
         if (this.breath <= 0) {
           this.breath = 0;
           this.lastDamageCause = { kind: 'drowned' }; // PlayerDeathReason.ByOther(1)
-          // statLife -= 2 直伤（:22981-22991）：不过防御/不吃无敌帧，不走 damage()
+          // statLife -= 2 直伤（1457 :23449）：不过防御/不吃无敌帧，不走 damage()
           this.hp -= 2;
-          if (this.hp <= 0) this.hp = 0; // KillMe(ByOther(1),10) 交由下方统一死亡结算
+          // X1 观战回体：SetOrRequestSpectating(-1)（1457 :23450——statLife 结算与
+          // 致死判 :23452-54 之间逐拍调）。单机 netMode==0 两分支皆不进=纯 no-op
+          // （SetOrRequestSpectating :17346-17375）；联机=退出观战相机+msg150 焦点帧，
+          // spectating==-1 早退保证重拍零重发。
+          game.askSpectateExit?.();
+          if (this.hp <= 0) this.hp = 0; // KillMe(ByOther(1),10) :23452-54 交由下方统一死亡结算
         }
       }
     } else {
@@ -5415,25 +5420,31 @@ export class Player extends Entity {
       if (this.vx > 0) this.facing = 1;                    // :22442-22445
       if (this.vx < 0) this.facing = -1;
     }
-    // :22447-22482 跳键沿 → 释放全部钩爪；速度低（<2）/水面静止/非下拉时附带跳跃
+    // :22899-22926 跳键沿 → 释放全部钩爪；速度低（<2）/水面静止/非下拉时附带跳跃
     if (this.inputJump) {
       if (this.grappleReleaseJump) {
-        let canJump = wetStill || slow;                    // :22465 flag4 = flag2 || flag
-        if (this.inputDown) canJump = false;               // :22467-22469 controlDown 否决
-        if (pullingDown && !this.inputUp) canJump = false; // :22470-22472 下拉贴地且未按上
+        let canJump = wetStill || slow;                    // :22903 flag4 = flag2 || flag
+        if (this.inputDown) canJump = false;               // :22905-22907 controlDown 否决
+        if (pullingDown && !this.inputUp) canJump = false; // :22908-22910 下拉贴地且未按上
         if (canJump) {
-          this.vy = -PLAYER_JUMP_SPEED * this.gravDir;     // :22474 velocity.Y = -jumpSpeed
-          this.jumpHold = PLAYER_JUMP_TICKS;               // :22475 jump = jumpHeight
+          this.vy = -PLAYER_JUMP_SPEED * this.gravDir;     // :22905 velocity.Y = -jumpSpeed
+          // X2② oldStyleParkour 半跳（1457 :22906）：jump = (oldStyleParkour ?
+          // jumpHeight/2 : jumpHeight)。jumpHeight 是 static int（:2495）⇒ C# 整除
+          // 15/2=7（非浮点 7.5）——跑酷指南下抓钩释放跳只保一半悬停 tick，
+          // 初速 -jumpSpeed 两档同值不减。
+          this.jumpHold = this.equipStats.oldStyleParkour === true
+            ? Math.floor(PLAYER_JUMP_TICKS / 2)            // int 除法：(int)(15/2)=7
+            : PLAYER_JUMP_TICKS;
           this.grappleReleaseJump = false;
         } else {
-          this.vy += 0.01;                                 // :22478 velocity.Y += 0.01
+          this.vy += 0.01;                                 // :22911 velocity.Y += 0.01
           this.grappleReleaseJump = false;
         }
         if (this.onGround) this.extraJumps = [...this.equipStats.jumpOpts]; // RefreshDoubleJumps
-        this.removeAllGrapplingHooks();                    // :22480
+        this.removeAllGrapplingHooks();                    // :22915
       }
     } else {
-      this.grappleReleaseJump = true;                      // :22481-22482
+      this.grappleReleaseJump = true;                      // :22924-22925
     }
     void game;
   }
@@ -5638,6 +5649,25 @@ export class Player extends Entity {
       this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
       this.iframes = 0;
       this.hp = 0;
+    }
+    //  ④ 拖拽（Player.cs:27623-27662，tongued 时速度全覆写,原版在 Update 移动段）：
+    //     目标 = 墙 Center.X + direction×200（行进方向前缘 200px）、Y = 墙 Center.Y;
+    //     速度 = (目标−玩家) 钳长 ≤ 11(经典)/lerp(11→22, 墙速/5)(专家);
+    //     距离 ≤ 拖速 → 速度直取 + 解除舌头(gross 未消则下帧重新上舌,原版拔河语义)。
+    //     ★曾整个缺失——绕到肉山背后只会持续吃伤害,不会被舌头拽回前面(2026-09-01)
+    const front = wall.cx + (wall.facing >= 0 ? 1 : -1) * 200;
+    const ddx = front - this.cx, ddy = wall.cy - this.cy;
+    const dist = Math.hypot(ddx, ddy);
+    let drag = 11;
+    if (mainExpertMode(world)) {
+      drag = 11 + (22 - 11) * Math.min(1, Math.hypot(wall.vx, wall.vy) / 5);
+    }
+    if (dist > drag) {
+      this.vx = ddx * (drag / dist);
+      this.vy = ddy * (drag / dist);
+    } else {
+      this.vx = ddx; this.vy = ddy;
+      this.buffs.remove(BuffType.TheTongue);
     }
   }
 
