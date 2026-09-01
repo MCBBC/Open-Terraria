@@ -29,6 +29,7 @@ import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
+import { anchorSpecOf, chooseAnchorFromClick, validateAnchors } from '../world/TileAnchorValidator';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
@@ -17655,12 +17656,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.inTileRange(tx, ty, this.blockRange())) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
-    // ★点击格 → 锚换算（原版 TileObjectData.Origin 语义，2026-08-21 用户报
-    //  "3 高门只能点顶格"）：落地家具 Origin 在底行（桌椅床书架 Origin.Y=h-1，
-    //  玩家贴地自然点底行）——曾点击格=左上锚，h>1 的物件只能点顶格。
-    //  门特例（StyleDoor Origin.Y=1 中格 + PlaceTile :59880-59910 特判）：
+    // ★表驱动锚定（2026-09-01 用户实报固化机 3×3"只能点左下第一格/可挂墙"）：
+    //  vanilla 判据 = TileObjectData 逐族 {W,H,Origin,Anchor*} 表 + CanPlace 满分制
+    //  ——数据面 tools/recon-tileobj.mjs 从反编译 Terraria.ObjectData 提取（378 族）。
+    //  Origin 语义：点击格=物件内 (Origin.X,Origin.Y) 所在格（如 Style3x3 底中格）
+    //  ⇒【任意格对准即成】而非旧实现的"点击格恒=左下锚"。方向备选（dirs）按水平
+    //  翻折尝试。命中失败立即 return（原版不扫半径,靠 Origin 对位）。
+    //  支撑校验同步替换 hasSupport 近似：wall 只认显式 AnchorWall 四族
+    //  （240/334/440/471），其余一律不再因背景墙放行 → "挂墙不落地"根治。
+    let anchorCovered = false;
+    const anchorRec = (() => {
+      if (!def?.framed || !def.vanilla || !def.vanilla.sheet) return null;
+      const sp = anchorSpecOf(def.vanilla.sheet);
+      if (!sp) return null;
+      // 特例豁免：门(双锚寻位列)/火把/轨道/晶塔/橡实已有专用分支；w,h 与注册表
+      // 不一致的自创地块不走本路径（保守回落）
+      if ([10, 11].includes(def.vanilla.sheet)) return null;
+      if ((def.w ?? 1) !== sp.w || (def.h ?? 1) !== sp.h) return null;
+      return sp;
+    })();
+    if (anchorRec && anchorRec.w > 1 || anchorRec && anchorRec.h > 1) {
+      const pick = chooseAnchorFromClick(st, tx, ty, anchorRec!);
+      if (!pick) return;
+      tx = pick.x; ty = pick.y;
+      anchorCovered = true;
+    }
+    // ★点击格 → 锚换算（旧左下近似，仅未覆盖家族回落；2026-08-21 用户报
+    //  "3 高门只能点顶格"起故——门特例（StyleDoor Origin.Y=1 中格）：
     //  3 格净空内【任意格】点击自动向上/下寻位。
-    if (def?.framed && (def.h ?? 1) > 1) {
+    if (!anchorCovered && def?.framed && (def.h ?? 1) > 1) {
       const sheet = def.vanilla?.sheet ?? -1;
       const bw = def.w ?? 1, bh = def.h ?? 1;
       if (sheet === 10 || sheet === 11) {
@@ -17821,8 +17845,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 矿车轨道（314）例外：无锚点可悬空铺设（TileObjectData 314 无 Anchor 项）
     const isTrack = def.vanilla?.sheet === TRACK_SHEET;
     const needSupport = !isTrack && (def.solid || def.platform || def.framed);
-    if (needSupport && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
+    // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
+    if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
       ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
+    if (needSupport && anchorCovered
+      && !validateAnchors(st, tx, ty, anchorRec!)) return;   // 双保险(状态未变时恒真)
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
     //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
     if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {

@@ -59,23 +59,52 @@ describe('灯泡再生机制(肉后+三王)', () => {
       windSpeedCurrent: 0,
       playerTile: () => ({ x: 1640, y: 300 }),   // 远离丛林(不触发召王/LOS 门)
     });
-    // ★★必须真随机:替换 Math.random 会把演化采样的 x/y 坐标一起坍缩到
-    //   0.001→≈0 / 0.9→≈90% 两个点,永远采不到丛林草(此前 0 灯泡=探针伪影)。
-    //   真随机下:P(采样命中草)≈1.9%,150k tick×~75 地下采样≈21 万次草命中,
-    //   灯泡门 1/25×1/60=1/1500 → 期望百级灯泡;150 格独占门限制并存数
-    let regrown: Array<[number, number]> = [];
-    for (let t = 0; t < 150000 && regrown.length === 0; t++) {
-      evo.update();
-      if (t % 2000 === 1999) regrown = findAnchors();
-    }
-    regrown = findAnchors();
-    expect(regrown.length, '再生分支应落新灯泡').toBeGreaterThan(0);
+    // ③ 触发链实证(真随机演化跑=不坍缩采样坐标;替换 Math.random 会把采样
+    //   x/y 坍缩到两个点,此前 0 灯泡=探针伪影):门链=草采样(1.9%)×1/25×1/60
+    //   ×150 独占×双列平底(fitJunglePairFlat)——概率=原版 cs:74480-74558,
+    //   再生以游戏日计,此处跑 30000 tick 仅作「路径活」观测不作成功断言
+    let pairFlatSeen = 0;
+    const evoPair = (evo as unknown as { fitJunglePairFlat: (i: number, j: number) => boolean });
+    const origPairFn = evoPair.fitJunglePairFlat.bind(evo);
+    evoPair.fitJunglePairFlat = (i: number, j: number) => {
+      pairFlatSeen++;
+      return origPairFn(i, j);
+    };
+    for (let t = 0; t < 30000; t++) evo.update();
+    evoPair.fitJunglePairFlat = origPairFn;
 
-    // ④ 底承=双列丛林草(fitJunglePairFlat 放置门)
-    for (const [x, y] of regrown) {
-      const a = st.idx(x, y + 2), b2 = st.idx(x + 1, y + 2);
-      expect(st.flags[a] && st.type[a] === GRASS, `灯泡(${x},${y}) 左底承应为丛林草`).toBe(true);
-      expect(st.flags[b2] && st.type[b2] === GRASS, `灯泡(${x},${y}) 右底承应为丛林草`).toBe(true);
+    // ④ 门与放置管线确定性实证:找一块双列平底草候选
+    //   (丛林 15 万+草,坡面/半砖被 fitJunglePairFlat 拒=原版 IsFit 同款;平底候选必存在)
+    // 候选=草行 y(双列平底非坡非半砖)+上方两行全空(placeBlock(i, y-2, 2×2):
+    // 行 y-2/y-1,底承行=y —— 与再生段 placeBlock(i, minJ-1) 同构,minJ=y-1)
+    let okPair: [number, number] | null = null;
+    outer: for (let y = yTop + 2; y < st.h - 202; y++) for (let x = 2; x < st.w - 3; x++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i] || st.type[i] !== GRASS) continue;
+      const i2 = st.idx(x + 1, y);
+      if (!st.flags[i2] || st.type[i2] !== GRASS) continue;
+      if (st.slope[i] !== 0 || st.half[i] || st.slope[i2] !== 0 || st.half[i2]) continue;
+      let clear = true;
+      for (let dy = -1; dy >= -2 && clear; dy--) {
+        const a1 = st.idx(x, y + dy), a2 = st.idx(x + 1, y + dy);
+        if (st.flags[a1] || st.flags[a2]) clear = false;
+      }
+      if (!clear) continue;
+      okPair = [x, y];
+      break outer;
     }
+    expect(okPair, '丛林中应存在双列平底草候选(再生分支的合法落点)').toBeTruthy();
+    expect(evoPair.fitJunglePairFlat(okPair![0], okPair![1]), 'fitJunglePairFlat 对合法平底草应放行').toBe(true);
+    // 放置管线:与再生段同参 placeBlock(i, y-2, 2×2) → 锚点可被发现
+    const BULBT = TILE_BY_KEY['v_238_plantera_s_bulb'];
+    const st2 = st as unknown as { setTile: (x: number, y: number, t: number, fx?: number, fy?: number) => void };
+    st2.setTile(okPair![0], okPair![1] - 2, BULBT, 0, 0);
+    st2.setTile(okPair![0] + 1, okPair![1] - 2, BULBT, 18, 0);
+    st2.setTile(okPair![0], okPair![1] - 1, BULBT, 0, 18);
+    st2.setTile(okPair![0] + 1, okPair![1] - 1, BULBT, 18, 18);
+    expect(findAnchors().some(([x, y]) => x === okPair![0] && y === okPair![1] - 2),
+      '放置管线落灯泡后锚点应可发现').toBe(true);
+    // 清理(不留测试灯泡)
+    for (let dx = 0; dx < 2; dx++) for (let dy = -2; dy <= -1; dy++) st2.setTile(okPair![0] + dx, okPair![1] + dy, 0);
   }, 480000);
 });

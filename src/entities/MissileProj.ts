@@ -38,7 +38,12 @@ import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
-// broadcast 上行同用此函数）
+// broadcast 上行同用此函数）。★终零波裁决注：module8 已有 netApply 消费面
+// （Game.netApplyParticleOrchestra case RainbowRodHit → 同一 rainbowRodHitFx），
+// 但 broadcast 通道为"服务器排除发送者"语义（Game.broadcastParticleOrchestra
+// 只 sendParticleOrchestra、无本地回环）——"module8 已接则本地组合可简化"
+// 不成立：拆掉本地直调 = 单机/发送端自身失明。维持"生产端双发（本地直生+
+// broadcast 上行）、两面对同一收编本体"的原版等价形态。
 import { rainbowRodHitFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
@@ -682,10 +687,14 @@ export class MagicMissileProj extends Entity {
           }
         }
       }
-      // RainbowRodHit 编排粒子 ×2（:72488-72495）——L5 批收编真值本体（六掷虹彩
-      // 簇+12×d267 双层）;原版 clientOnly:true 不上网,本地直驱同口径
-      rainbowRodHitFx(game, this.cx, this.cy);
-      rainbowRodHitFx(game, this.cx, this.cy);
+      // RainbowRodHit 编排粒子 ×2（:72486-72496）——L5 批收编真值本体（六掷虹彩
+      // 簇+12×d267 双层）;原版 clientOnly:true 不上网,本地直驱同口径。
+      // ★终零波补载荷（:72492 MovementVector=UnitX.RotatedBy(num70·2π)·16,num70
+      //  步 0/0.25 → (16,0)/(0,16)):movement 向量进 Spawn_ 的抖动向量与 d267 出速
+      // （fx/orchestraFx.rainbowRodHitFx moveX/moveY 消费位）——曾传缺省 0 = 两组
+      // 编排完全同参,远端复放与本地皆失一轴偏置。
+      rainbowRodHitFx(game, this.cx, this.cy, 16, 0);
+      rainbowRodHitFx(game, this.cx, this.cy, 0, 16);
       // 14×d66 随机色 vel×3（:72496-72502）
       for (let i = 0; i < 14; i++) {
         const [rr, gg, bb] = hueToRgb(Math.random());

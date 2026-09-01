@@ -1,0 +1,152 @@
+// TileObjectData 锚点验证器（vanilla Terraria.TileObject.CanPlace 全量移植，分格判定）
+// 数据源：src/data/tile-anchors.json（tools/recon-tileobj.mjs 从反编译
+//   Terraria.ObjectData/TileObjectData.cs 提取，1457）。
+// 验收语义（TileObject.cs CanPlace 尾判）：锚点格子与占位格【全部】通过才可放
+//   （num35/num36 双满分制），备选方向按序取首个满分者。
+import anchorsJson from '../data/tile-anchors.json';
+import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS } from '../data/tiles';
+import type { World } from './World';
+
+export interface AnchorDataRec { t: string[]; cnt: number | string; start: number | string }
+export interface AnchorRec {
+  w: number; h: number; ox: number; oy: number;
+  anchorTop: AnchorDataRec | null; anchorBottom: AnchorDataRec | null;
+  anchorLeft: AnchorDataRec | null; anchorRight: AnchorDataRec | null;
+  wall: boolean; liqAllow: boolean; flatten: boolean; dir: string; yOff: number;
+  dirs?: Array<{ dir: string }>;
+}
+const RAW = (anchorsJson as unknown as { v: string; tiles: Record<string, AnchorRec | null> }).tiles;
+
+const _resolved = new Map<number, AnchorRec | null>();
+/** 取 tile 的锚点规格；无数据 / 复杂构造回落(null)/含未建模豁免位者归 null 走旧路径 */
+export function anchorSpecOf(sheet: number): AnchorRec | null {
+  if (_resolved.has(sheet)) return _resolved.get(sheet)!;
+  const raw = RAW[String(sheet)];
+  let out: AnchorRec | null = null;
+  if (raw) {
+    // AlternateTile/Tree 位依赖逐族白名单（未提取）→ 整体回落旧近似（保守）
+    const hasExoticBits = [raw.anchorTop, raw.anchorBottom, raw.anchorLeft, raw.anchorRight]
+      .some((a) => a?.t.some((s) => s === 'AlternateTile' || s === 'Tree'));
+    out = hasExoticBits ? null : raw;
+  }
+  _resolved.set(sheet, out);
+  return out;
+}
+
+/** 原版 blockType()：0 平整 / 1 半砖 / 2..5 = slope1..4 */
+function btOf(st: World['store'], x: number, y: number): number {
+  const i = st.idx(x, y);
+  if (st.half[i]) return 1;
+  const s = st.slope[i];
+  return s > 0 ? s + 1 : 0;
+}
+function defAt(st: World['store'], x: number, y: number) {
+  return TILE_DEFS[st.get(x, y)];
+}
+function solidPureFlat(st: World['store'], x: number, y: number, flatten: boolean): boolean {
+  // SolidTile 位：tileSolid 且非 tileSolidTop；默认还要求 blockType==0
+  // （FlattenAnchors 时坡/半砖亦可）；noAttach 表近似忽略（常见家具锚面皆可附）
+  const d = defAt(st, x, y);
+  if (!d) return false;
+  if (!(d.solid && !d.platform)) return false;
+  return flatten || btOf(st, x, y) === 0;
+}
+function solidTopLike(st: World['store'], x: number, y: number): boolean {
+  // SolidWithTop/Platform 位宽口径：平台族 + 桌台类（tableTop 集，平台兼桌面）
+  return st.isPlatform(x, y) || TILE_TABLE_SHEETS.has(defAt(st, x, y)?.vanilla?.sheet ?? -1);
+}
+/** 原版 blockType 侧缘对位表（SolidSide）：bottom{4,5} top{2,3} left{3,5} right{2,4} */
+const SIDE_BT_PAIRS: Record<string, number[]> = {
+  bottom: [4, 5], top: [2, 3], left: [3, 5], right: [2, 4],
+};
+
+interface SideSpec { t: string[]; cnt: number; start: number }
+
+function evalCell(side: string, spec: SideSpec, at: [number, number],
+  st: World['store'], rec: AnchorRec): boolean {
+  const [cx, cy] = at;
+  if (!st.inBounds(cx, cy)) return false;
+  const active = st.isActive(cx, cy);
+  const bit = (name: string) => spec.t.includes(name);
+  let ok = false;
+  if (active) {
+    const d = defAt(st, cx, cy)!;
+    const sheet = d?.vanilla?.sheet ?? -1;
+    if (bit('SolidTile') && d?.solid && !d.platform && st.wall[st.idx(cx, cy)] >= 0
+      && (rec.flatten || btOf(st, cx, cy) === 0)) ok = true;
+    if (!ok && (bit('SolidWithTop') || bit('Table')) && solidTopLike(st, cx, cy)
+      && (rec.flatten || !(st.isPlatform(cx, cy) && (st.half[st.idx(cx, cy)] || btOf(st, cx, cy) > 0))))
+      ok = true;
+    if (!ok && bit('SolidSide') && d?.solid && !d.platform
+      && SIDE_BT_PAIRS[side]?.includes(btOf(st, cx, cy))) ok = true;
+    if (!ok && bit('PlanterBox') && sheet === 380) ok = true;
+    if (!ok && bit('SolidBottom')) {
+      // Composite（TileObject :541-556）：整实心 / 半砖 / 顶坡 / 平台的半砖·顶坡形态；
+      // NotReallySolid/bottomSlope 近似忽略（花箱族已由 PlanterBox 覆盖）
+      const b = btOf(st, cx, cy);
+      if (d?.solid || b === 1 || b >= 2) ok = true;
+    }
+  } else if (bit('EmptyTile')) ok = true;
+  return ok;
+}
+
+/** 检验“某物放在 ax,ay 是否满足全部锚点”。CanPlace 的 all-or-nothing 判定。
+ *  liquid 非允许集时占用格有水即拒；wall 族沿用 isValidWallAnchor 默认分支
+ *  （任意非零墙均有效）。occupiedIgnore：调用方为“原地重放”场景给的豁免面。 */
+export function validateAnchors(st: World['store'], ax: number, ay: number, rec: AnchorRec,
+  occupiedIgnore?: (x: number, y: number) => boolean): boolean {
+  if (!Number.isFinite(ax) || !Number.isFinite(ay)) return false;
+  if (ax < 1 || ay < 1 || ax + rec.w > st.w - 1 || ay + rec.h > st.h - 1) return false;
+  for (let j = 0; j < rec.h; j++) {
+    for (let i = 0; i < rec.w; i++) {
+      const x = ax + i, y = ay + j;
+      if (!st.inBounds(x, y)) return false;
+      const i2 = st.idx(x, y);
+      if (occupiedIgnore?.(x, y)) continue;
+      if (st.isActive(x, y) && !TILE_CUT_SHEETS.has(defAt(st, x, y)?.vanilla?.sheet ?? -1)) return false;
+      if (st.liquid[i2] > 0 && !rec.liqAllow) return false;
+      if (rec.wall && st.wall[i2] === 0) return false;
+    }
+  }
+  const sideSpec = (side: 'top' | 'bottom' | 'left' | 'right'): SideSpec | null => {
+    const a = side === 'top' ? rec.anchorTop : side === 'bottom' ? rec.anchorBottom
+      : side === 'left' ? rec.anchorLeft : rec.anchorRight;
+    if (!a) return null;
+    return {
+      t: a.t,
+      cnt: typeof a.cnt === 'number' ? a.cnt : rec.w,
+      start: typeof a.start === 'number' ? a.start : Math.max(0, rec.h - 1),
+    };
+  };
+  const bottom = sideSpec('bottom');
+  if (bottom) for (let k = 0; k < bottom.cnt; k++) {
+    if (!evalCell('bottom', bottom, [ax + bottom.start + k, ay + rec.h], st, rec)) return false;
+  }
+  const top = sideSpec('top');
+  if (top) for (let k = 0; k < top.cnt; k++) {
+    if (!evalCell('top', top, [ax + top.start + k, ay - 1], st, rec)) return false;
+  }
+  const left = sideSpec('left');
+  if (left) for (let k = 0; k < left.cnt; k++) {
+    if (!evalCell('left', left, [ax - 1, ay + left.start + k], st, rec)) return false;
+  }
+  const right = sideSpec('right');
+  if (right) for (let k = 0; k < right.cnt; k++) {
+    if (!evalCell('right', right, [ax + rec.w, ay + right.start + k], st, rec)) return false;
+  }
+  return true;
+}
+
+/** 点击格 → 锚定位置换算 + 水平镜像备选扫描。返回最终锚点（占位左上角）。
+ *  对齐 vanilla CanPlace：主 Origin 试放 → 不满足且有方向备选时按对称轴翻折重试。 */
+export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number, rec: AnchorRec):
+  { x: number; y: number } | null {
+  const prim = { x: cx - rec.ox, y: cy - rec.oy };
+  if (validateAnchors(st, prim.x, prim.y, rec)) return prim;
+  if ((rec.dirs?.length ?? 0) > 0 && rec.w > 1) {
+    const mx = { x: cx - ((rec.w - 1) - rec.ox), y: cy - rec.oy };
+    if (mx.x !== prim.x && validateAnchors(st, mx.x, mx.y, rec)) return mx;
+  }
+  return null;
+}
+export const ANCHOR_JSON_V = (anchorsJson as unknown as { v: string }).v;

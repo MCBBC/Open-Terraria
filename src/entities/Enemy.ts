@@ -2523,7 +2523,26 @@ export class Enemy extends Entity {
       const onScreen = cands.some((q) =>
         Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
-      if (onScreen
+      if (this.despawnEncouraged) {
+        // ★EncourageDespawn 已激活：屏内不重置，timer 继续倒数直至消散
+        //  (原版 EncourageDespawn 设 timeLeft 后 onScreen 重置不覆盖——
+        //   2026-08-31 用户报恶魔眼被地形卡住 2 分钟不消散定罪)
+        //  消散副作用（bossFled/蠕虫级联/风气球）与下方 else 分支对齐
+        this.despawnTimer--;
+        if (this.despawnTimer <= 0) {
+          if (this.def.boss) this.bossFled = true;
+          if (this.vanillaId === 594) {
+            const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
+            if (sl) sl.dead = true;
+          }
+          this.dead = true;
+          if (this.wormNext || this.wormFollow) {
+            let wh: Enemy = this;
+            while (wh.wormFollow) wh = wh.wormFollow;
+            for (let s: Enemy | null = wh; s; s = s.wormNext) s.dead = true;
+          }
+        }
+      } else if (onScreen
         // flag2 强真名单（:78735-78758）:EoW 头 13/毁灭者头 134 族等恒视屏内
         || (this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))) {
         this.despawnTimer = 750;
