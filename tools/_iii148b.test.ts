@@ -2,7 +2,7 @@
 // sandy #76 Traps 巨石变体定罪仪——①注册 __swTrapEv 钩捕 VID 候选序；②Traps pass
 // 写前(▶Traps)/写后(▶Piles reseed)双快照提取 JS 实际巨石放置集，与 x86 075→076 对拍。
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG } from '../src/core/rng';
 import { TILE_DEFS } from '../src/data/tiles';
@@ -59,6 +59,7 @@ function labelOf(file: string, line: number): string {
     delete (globalThis as unknown as Record<string, unknown>).__swTrapEv;
   }
   console.log(`[i148b] VID candidates=${ev.length} pre=${pre?.length ?? '∅'} post=${post?.length ?? '∅'}`);
+  writeFileSync('/tmp/iii148-out/vid-104.txt', ev.join('\n'));
   // 指定格 pre/post 值抽查
   const val = (arr: string[] | null, x: number, y: number): string => {
     if (!arr) return '∅';

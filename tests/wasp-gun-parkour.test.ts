@@ -47,6 +47,12 @@
 //          targetNPC.immune[owner]=0——只清自己这一跳造成的 iframes,外源 iframes
 //          照旧拦,读门不豁免）。穿透经济学不变：每受理一跳照常 pierce--
 //          （:14194-14196）,penetrate=3 → 单敌至多 3 跳、节拍 ≥10t。
+//        ★落地（2026-09-01 微批,B6D 设计①②原文执行）：读侧 Arrow.ts 命中环 else 支
+//          已改 `pierceInit>=0 && idStaticGroup===null && hitSet.has(e.id)`;写侧已在
+//          e.hurt() 主结算点后补 `hurtOk && idStaticGroup!==null → e.iframes=0`（与
+//          GC1 桥双域同相：桥管近战域 registry,此处清弹幕域读面）。行为级三跳断言
+//          见下方「F4 落地」describe（节拍用 tick 墙钟驱动 idStaticCheck 的
+//          Date.now 节流,16.67ms/tick 恒速推进,与原版 GameUpdateCount 计数同构）。
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -73,6 +79,7 @@ function makeStore(): TileStore {
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number; dead: boolean;
   cx: number; cy: number; hp: number; wet?: boolean; dontTakeDamage?: boolean;
+  iframes?: number;
   hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
   hits: number[];
 }
@@ -185,9 +192,9 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
     // ★F4 设计登记（2026-09-01,详见文件头 F4 段）：本断言钉的是【组表就位】面。
     //   原版三跳节奏 = usesIDStaticNPCImmunity+cd10+penetrate=3 → 同敌 10t 一跳、
     //   吃满 3 跳（命中写位 :14031-14037 immune[owner]=0+组表=count+10）。仓级
-    //   Arrow hitSet（pierceInit>=0 永久去同敌重）目前越权把 189 压成 1 跳——
-    //   Arrow.ts 并行在飞（B6B）禁改,行为级三跳断言待其落地后随微批补入
-    //   （读侧 hitSet 豁免 + 写侧 iframes 清零两刀,键形=immunityIdentity 组键）。
+    //   Arrow hitSet（pierceInit>=0 永久去同敌重）曾越权把 189 压成 1 跳——
+    //   ★两刀已随微批落地（读侧 hitSet 豁免 + 写侧 iframes 清零,键形=
+    //   immunityIdentity 组键）,行为级三跳断言见下方「F4 落地」describe。
     const { hooks } = makeHooks();
     const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0 });
     expect(wasp.idStaticGroup).toBe(189);
@@ -196,6 +203,104 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
     const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, null, { grav: 0 });
     expect(bee.idStaticGroup).toBe(181);
     void hooks;
+  });
+});
+
+// ==== F4 落地（2026-09-01 微批）：189 IDStatic 同敌三跳节拍（B6D 两刀行为面）====
+//   读侧刀①：命中环 else 支 hitSet 永久去重对 idStaticGroup!==null 弹豁免——同敌
+//   再命中门只归组表 idStaticCheck（组键+敌id,10t 过期,键空间=immunityIdentity 零新增）。
+//   写侧刀②：e.hurt() 结算成功后清 e.iframes（=原版 targetNPC.immune[owner]=0
+//   :14033-14036）——自己这跳设的 10t 帧不拦自己;外源 iframes 照旧被读门（:12635-37
+//   同式,不豁免）拦。三跳判别器链：无刀① → 恒 1 跳（hitSet 越权）;无刀② → 敌侧
+//   iframes=10 不衰减（桩不走 Enemy.fixedUpdate）→ 恒 1 跳（读门拦）。
+describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清帧）', () => {
+  /** tick 墙钟：idStaticCheck 以 Date.now 节流——每 step 前恒速推 1000/60ms,
+   *  令组表 167ms(=10t) 窗在 tick 刻度上过期（与原版 GameUpdateCount 计数同构;
+   *  不推钟则窗恒新,三跳节拍不可观测） */
+  function withTickClock(fn: (clock: { t: number }) => void): void {
+    const clock = { t: 1_000_000 };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.t);
+    try { fn(clock); } finally { spy.mockRestore(); }
+  }
+  /** 真结算敌：hurt 置 10t iframes（=Enemy.hurt 通用档 :13152,pierce>1 支）——
+   *  写侧刀②清帧的可观测载体（mkEnemy 桩不置帧,清帧面无从断言） */
+  function mkRealEnemy(id: number, cx: number, cy: number, w: number, h: number): MockEnemy {
+    const e = mkEnemy(id, cx, cy, w, h);
+    e.hurt = (d: number) => { e.hp -= d; e.hits.push(d); e.iframes = 10; return true; };
+    return e;
+  }
+  /** 巨敌盒：弹 40t 内不离盒（AI36 极速 9px/t）,命中节拍纯由组表管,几何噪声归零 */
+  const BIG_W = 900, BIG_H = 400;
+  const iframesOf = (e: MockEnemy): number => e.iframes ?? 0;
+
+  it('同敌 10t 间隔三跳结算、穿透恰耗尽（penetrate=3 → 3 跳后消亡）', () => {
+    const e = mkRealEnemy(21, 60 * 16, 90 * 16, BIG_W, BIG_H);
+    const { hooks } = makeHooks([e]);
+    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    expect(wasp.pierceInit).toBe(3);
+    const hitTicks: number[] = [];
+    withRng(0.99, () => withTickClock((clock) => {            // 钉 0.99=无暴击,实伤恒 31
+      for (let t = 1; t <= 60 && !wasp.dead; t++) {
+        clock.t += 1000 / 60;
+        wasp.fixedUpdate(1, hooks);
+        if (e.hits.length > hitTicks.length) hitTicks.push(t);
+      }
+    }));
+    expect(hitTicks).toHaveLength(3);                         // 贴身吃满 3 跳（任一刀缺席恒 1）
+    expect(hitTicks[1] - hitTicks[0]).toBeGreaterThanOrEqual(10);   // 组表 10t 节拍
+    expect(hitTicks[1] - hitTicks[0]).toBeLessThanOrEqual(12);      // 且窗过期即放行（非永久去重）
+    expect(hitTicks[2] - hitTicks[1]).toBeGreaterThanOrEqual(10);
+    expect(e.hits).toEqual([31, 31, 31]);
+    expect(wasp.pierce).toBe(0);                              // 穿透恰耗尽（每受理一跳 pierce--）
+    expect(wasp.dead).toBe(true);                             // 第三跳受理后通用消亡口
+  });
+
+  it('<10t 第二跳被组表拦（写侧清帧实证：拦门=组表,非 iframes;被拒跳不耗穿透）', () => {
+    const e = mkRealEnemy(22, 60 * 16, 90 * 16, BIG_W, BIG_H);
+    const { hooks } = makeHooks([e]);
+    const w1 = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const w2 = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    withRng(0.99, () => withTickClock((clock) => {
+      for (let t = 1; t <= 8; t++) {                          // 窗内 8t：两弹同拍压敌
+        clock.t += 1000 / 60;
+        w1.fixedUpdate(1, hooks);
+        w2.fixedUpdate(1, hooks);
+      }
+    }));
+    expect(e.hits).toHaveLength(1);                           // 同组键窗内第二弹不叠伤
+    expect(iframesOf(e)).toBe(0);                             // 刀②已清（若非 0,拦门归因不成立）
+    expect(w1.pierce).toBe(2);                                // 受理跳照常 pierce--
+    expect(w2.pierce).toBe(3);                                // 被拒跳穿透不动（continue 早退）
+    withRng(0.99, () => withTickClock((clock) => {
+      clock.t += (1000 / 60) * 12;                            // 推过 10t 窗
+      w2.fixedUpdate(1, hooks);
+    }));
+    expect(e.hits).toHaveLength(2);                           // 窗过期后第二跳受理（原语义）
+  });
+
+  it('181/566 组回归：两型共用组键 181,窗内跨实例只结算一颗;成功跳不漏清帧', () => {
+    const e = mkRealEnemy(23, 60 * 16, 90 * 16, BIG_W, BIG_H);
+    const { hooks } = makeHooks([e]);
+    const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    const hornet = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 9, 1, 566, null, { grav: 0, life: 660, pierce: 4 });
+    expect(bee.idStaticGroup).toBe(181);
+    expect(hornet.idStaticGroup).toBe(181);                   // 两键共用一张表
+    withRng(0.99, () => withTickClock((clock) => {
+      for (let t = 1; t <= 8; t++) {
+        clock.t += 1000 / 60;
+        bee.fixedUpdate(1, hooks);
+        hornet.fixedUpdate(1, hooks);
+      }
+    }));
+    expect(e.hits).toHaveLength(1);                           // 表级共享窗内第二蜂不结算
+    expect(iframesOf(e)).toBe(0);                             // 成功跳写侧清帧（181 组同享刀②）
+    expect(hornet.pierce).toBe(4);                            // 被拒跳不耗穿透
+    withRng(0.99, () => withTickClock((clock) => {
+      clock.t += (1000 / 60) * 12;
+      hornet.fixedUpdate(1, hooks);
+    }));
+    expect(e.hits).toHaveLength(2);                           // 窗过期后照常受理
+    expect(hornet.pierce).toBe(3);                            // 受理跳 pierce--
   });
 });
 

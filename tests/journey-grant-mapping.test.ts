@@ -135,3 +135,18 @@ describe('★复制面板=开发者模式全量池（2026-09-02 用户拍板）'
     for (const v of out) expect(v).toBe(369);
   });
 });
+
+describe('★背包道具搜索器覆盖去重豁免（2026-09-02 第三案真凶）', () => {
+  it('圣种/草种/法杖/苔藓族不被 place_v 覆盖去重滤掉（isFunctionalTileItem）', async () => {
+    const { isFunctionalTileItem } = await import('../src/world/evolution/PlantRules');
+    // 种子族 createTile:2/23/59?/60/70/109/199/633/661/662 + 法杖 2 + 苔藓 11 面
+    for (const vid of [62, 59, 2171, 369, 195, 194, 5214, 213, 5295]) {
+      expect(isFunctionalTileItem(vanillaItemCreateTile(vid)), `vid${vid}`).toBe(true);
+    }
+    for (const vid of [4349, 4350, 4351, 4352, 4353, 4354, 4377, 4378, 4389, 5127, 5128]) {
+      expect(isFunctionalTileItem(vanillaItemCreateTile(vid)), `moss vid${vid}`).toBe(true);
+    }
+    // 对照:纯铺块死条目（createTile 被 place_v 覆盖且不在功能面）仍应滤除
+    expect(isFunctionalTileItem(1)).toBe(false);   // 石块(place_v_1 覆盖,无转化职能)
+  });
+});

@@ -217,3 +217,15 @@ export function dyePlaceOk(sp: DyePlantSpot): boolean {
       return true;
   }
 }
+
+// ============================================================
+// 道具搜索器「功能件豁免」判据（2026-09-02 神圣种子第三案）
+// ============================================================
+/** createTile 落在功能转化面的 vi_ 物品不得被 place_v 覆盖去重滤掉。
+ *  覆盖去重本意=滤「唯一职能是铺那格 tile」的死条目；草种/法杖（AssortedThings
+ *  转化）与苔藓族（点石/灰砖转化）在 place_v 面板块存在时仍是独立功能件——
+ *  圣种全家+法杖+苔藓曾被整族滤出背包道具搜索（UI.ts openItemSearchPanel）。
+ *  UI 侧消费见 UI.ts 条目过滤；本函数即唯一判据源。 */
+export function isFunctionalTileItem(ct: number | undefined): boolean {
+  return ct !== undefined && (GRASS_CONVERT_SHEETS.has(ct) || MOSS_CONVERT_SHEETS.has(ct));
+}

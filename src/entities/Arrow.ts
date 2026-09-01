@@ -6225,7 +6225,12 @@ export class Arrow extends Entity {
           if (this.pierceInit !== 1 && ((e as { iframes?: number }).iframes ?? 0) > 0) continue;
           // 穿透弹同敌不重复命中；无限穿透（penetrate −1：小丑箭 5/地狱火箭 41，
           // 无 usesLocalNPCImmunity）不入 hitSet——iframes 过期即可再命中（修复1）
-          if (this.pierceInit >= 0 && this.hitSet.has(e.id)) continue;
+          // ★B6D 刀①读侧（2026-09-01）：IDStatic 族（idStaticGroup!==null：189 缺省组键
+          //   =type/181·566 显式共用 181/511-513 共用 511,键空间=immunityIdentity 零新增）
+          //   豁免 hitSet 永久去同敌重——同敌再命中门=上方组表 idStaticCheck（组键+敌id、
+          //   10t 过期）,节拍=原版同敌 10t 一跳（usesIDStaticNPCImmunity 支 :14031-14037,
+          //   penetrate=3 → 单敌至多 3 跳）；非 IDStatic 弹行为零变。
+          if (this.pierceInit >= 0 && this.idStaticGroup === null && this.hitSet.has(e.id)) continue;
         }
         // ★鞭 tag（WhipTagEffect.CanRunHitEffects :73-84：MinionShot/SentryShot 弹幕吃
         //   tag——随从/哨兵射出的箭 whipTagShot 置标时走 resolveWhipTagHit 统一结算：
@@ -6344,9 +6349,17 @@ export class Arrow extends Entity {
         //   消费）——弹幕 damage 字段即终值，命中侧不再乘（蓝队 R2-06：命中侧
         //   Math.round 曾致 SwirlTwins 0.6/ArPenSpread 0.5 档在 x.5 处系统性 +1）
         // ★F1：snapBonus 并在 banner 采样之外、crit 随本次翻倍、防御前（Enemy.hurt 内）。
-        e.hurt(applyBannerDamageDealt(game, e, dmg)
+        const hurtOk = e.hurt(applyBannerDamageDealt(game, e, dmg)
           + (snapBonusArrow ? Math.trunc(snapBonusArrow * (crit ? 2 : 1)) : 0),
           Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
+        // ★B6D 刀②写侧（2026-09-01）：IDStatic 族结算成功即清本跳 iframes（=原版
+        //   usesIDStaticNPCImmunity 支 `targetNPC.immune[owner] = 0` :14033-14036）——
+        //   自己这跳设的 10t 帧不拦自己 10t 节拍再命中（节拍只由组表管）；外源 iframes
+        //   照旧被上方读门（:12635-12637 同式,本族不豁免）拦。hurt 返回 false（已死/
+        //   dontTakeDamage/免疫拒收）不写。穿透经济学不变：被拒跳不落此支、受理跳
+        //   下方照常 pierce--。与 GC1 桥（noteVanillaProjImmune→registry）双域同相：
+        //   桥管近战域表,此处清弹幕域读面 e.iframes。
+        if (hurtOk && this.idStaticGroup !== null) (e as unknown as { iframes?: number }).iframes = 0;
         // ★GC1 写方桥（清零批二波，2026-08-31；蓝队二轮 F4 校准行号 F5 补表面）：
         //  命中尾 npc.immune[owner] 统一写（Projectile.Damage :14031-14183 梯子,
         //  StrikeNPC 后原位）。face 由上方去重支记录：idStatic/local 面 = 原版写 0

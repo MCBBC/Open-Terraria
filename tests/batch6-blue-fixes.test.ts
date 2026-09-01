@@ -84,6 +84,19 @@ function pinSlime(w: World, e: Enemy, cx: number, cy: number): void {
   }
 }
 
+/** projFrameImg 走 document.createElement（node 无 DOM）——enemy-proj-draw-parity 同款桩 */
+function stubDocument(): void {
+  vi.stubGlobal('document', {
+    createElement: () => ({
+      width: 0, height: 0,
+      getContext: () => ({
+        set imageSmoothingEnabled(_: boolean) {},
+        drawImage() {},
+      }),
+    }),
+  });
+}
+
 describe('★F1 CheckActive 两窗常量（NPC.cs:6176-6178/:78691-78693）', () => {
   it('①248px 带判别例：竖距 2400px ∈ (旧2272, 原版2520] → 原版保命 flag2（旧实现提前消散）', () => {
     const w = world();
@@ -106,14 +119,15 @@ describe('★F1 CheckActive 两窗常量（NPC.cs:6176-6178/:78691-78693）', ()
     expect(e.dead).toBe(true);                  // 原版同样消散：flag2 恒假
   });
 
-  it('③屏幕盒纵向 600+h：竖距 620px（>旧 560、≤600+28）→ 照常续命 750', () => {
+  it('③屏幕盒纵向 600+h：竖距 600px（>旧 560、≤600+18）→ 照常续命 750', () => {
     const w = world();
     const p = new Player(60 * TILE, 60 * TILE, new Inventory());
     const e = Enemy.fromVanilla(1, 60 * TILE, 60 * TILE)!;
-    pinSlime(w, e, p.cx, p.cy + 620);
+    pinSlime(w, e, p.cx, p.cy + 600);
     e.despawnTimer = 42;
     e.fixedUpdate(1, hooks(w, p));
     // 屏幕盒命中 → timeLeft=activeTime 再 −1 = 749（旧 560 半幅 → 不命中 → 41）
+    // 蓝史莱姆盒 24×18 → 新半幅 = 600+18 = 618 > 600 ≥ 旧 560
     expect(e.despawnTimer).toBe(749);
   });
 });
@@ -173,6 +187,15 @@ function mkBallista(player: unknown, mx = 50 * TILE, my = 108 * TILE): MinionPro
 }
 
 describe('★F2 弩车 AI_134 朝向三案', () => {
+  beforeAll(() => {
+    stubDocument();
+    // 弩车本体帧图（Main.cs:34097-34137 支走 projSprite(678)，无 override 时专绘支跳过）
+    setProjSpriteOverride(678, { width: 124, height: 336 } as unknown as HTMLImageElement);
+  });
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('①落位 facing 同步（:69599-608）：朝左放置 → facing=-1 且 rot=π；draw = rotate(π)+scale(1,-1) 水平镜像组（非上下颠倒）', () => {
     const player = stubPlayer(-1);
     const { hooks } = bHooks(bStore(), player);
@@ -198,7 +221,8 @@ describe('★F2 弩车 AI_134 朝向三案', () => {
   });
 
   it('②平局向（Utils.cs:2159-2162 严格 >）：aim=0 与 rot=π 恰差 π → 走 target+2π 正半周（π→−0.92π，旧式 +0.92π）', () => {
-    const player = stubPlayer(-1);
+    const player = new Player(90 * TILE, 100 * TILE, new Inventory());   // 真实 Player:tagEffectStack
+    player.facing = -1;
     const enemy = mkEnemy(1, 0, 0);
     const { hooks } = bHooks(bStore(), player, [enemy]);
     const m = mkBallista(player);
@@ -314,7 +338,7 @@ describe('★F4 陨石落点玩家门=active 语义（:6198-6205/:6324-6334）',
 // ===========================================================================
 describe('★F5 死亡期间随从不停火（ownerRef 不随 dead 置空）', () => {
   it('373 黄蜂：owner.dead 仍存活、仍开火（旧 dead→null ⇒ 通用臂 `!p → dead` 首拍自灭）', () => {
-    const player = stubPlayer(1);
+    const player = new Player(90 * TILE, 100 * TILE, new Inventory());   // 真实 Player:tagEffectStack
     player.dead = true;                                   // 死亡窗内（原版 active 仍真）
     const enemy = mkEnemy(1, player.cx + 300, player.cy);
     const { hooks, projectiles } = bHooks(bStore(), player, [enemy]);
@@ -340,15 +364,7 @@ describe('★F5 死亡期间随从不停火（ownerRef 不随 dead 置空）', (
 // ===========================================================================
 describe('★F5b 绘制偏移动态项 dir=proj.direction（蜘蛛 390-392）', () => {
   beforeAll(() => {
-    // projFrameImg 走 document.createElement（node 无 DOM）——enemy-proj-draw-parity 同款桩
-    vi.stubGlobal('document', {
-      createElement: () => {
-        const c: { width: number; height: number; getContext: () => unknown } = {
-          width: 0, height: 0, getContext: () => null,
-        };
-        return c;
-      },
-    });
+    stubDocument();
     setProjSpriteOverride(390, { width: 40, height: 40 } as unknown as HTMLImageElement);
   });
   afterAll(() => {
@@ -367,10 +383,8 @@ describe('★F5b 绘制偏移动态项 dir=proj.direction（蜘蛛 390-392）', 
   });
 
   it('消费端接线：蜘蛛右行 draw translate X 含 +4（修复前恒 −4 = 8px 差）', () => {
-    const player = stubPlayer(1);
-    const { hooks } = bHooks(bStore(), player);
+    const player = new Player(90 * TILE, 100 * TILE, new Inventory());
     const m = new MinionProj(500, 500, 390, 10, 2, false, 0, true, () => player as never);
-    m.fixedUpdate(1, hooks);                        // 建帧通道
     (m as unknown as { spDir: number }).spDir = 1;  // direction=+1（右行）
     m.facing = -1;                                  // spriteDirection=−direction（翻转）
     const { rec, ctx } = recCtx();

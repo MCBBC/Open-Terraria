@@ -72,13 +72,15 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
     return parts.join('|');
   };
 
-  const g = globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void };
+  const g = globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void; __ltRc?: { n: number } };
+  g.__ltRc = { n: 0 };
   const oRoll = g.__swOnRoll;
   g.__swOnRoll = (v: number, inst: object) => {
     if (winOpen) {
       if (mainTok === null) mainTok = inst;
       if (inst === mainTok) {
         ln++;
+        g.__ltRc!.n = ln;
         rollBuf.push(String(v));
         tagBuf.push(`${ln}|${v}||${framesOf()}`);
         if (rollBuf.length >= 16384) { rollWs.write(rollBuf.join('\n') + '\n'); rollBuf = []; }
