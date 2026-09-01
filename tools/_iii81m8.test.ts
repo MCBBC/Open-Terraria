@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import { RNG } from '../src/core/rng';
+import { TileStore } from '../src/world/TileStore';   // ★IIIII106 COAT_* 位常量
 
 const RUN = process.env.SW_I81 === '1';
 const VG = process.env.SW_I81_VG ?? '';  // 名表源
@@ -20,6 +21,13 @@ const EVIL = process.env.SW_I81_EVIL !== undefined ? Number(process.env.SW_I81_E
 // YYYY 批旁路参：中世界链（6400×1800）+大 N 禁缓存（每槽 ~115MB×106 槽会爆 RSS）
 const W = Number(process.env.SW_M8_W ?? 4200), H = Number(process.env.SW_M8_H ?? 1200), N = W * H;
 const NOCACHE = process.env.SW_I81_NOCACHE === '1';
+// ★IIIII106：涂装/涂层扩展通道（SW_I81_PAINT=1）——.pnt(块漆)/.pwal(墙漆)/.cbt(涂层四位)
+// 仅当链 dump 目录带此三通道文件时参与比较（旧 G2 目录零变化，缺省全跳过）。
+// x86 侧由 /tmp/i106rig.app 的 JJHook 扩展 dump（SW_DUMP_PAINT=1）：pnt=color(sTileHeader
+// 低5位)、pwal=wallColor(bTileHeader 低5位)、cbt 位包=invisibleBlock|invisibleWall<<1|
+// fullbrightBlock<<2|fullbrightWall<<3。JS 侧 TileStore：paint/paintWall 漆值同域；
+// coat 常量 INV_B=2/INV_W=4/FB_B=8/FB_W=16 → 位包按位映射。
+const PAINT = process.env.SW_I81_PAINT === '1';
 // PPPPP 批旁路参：彩蛋种子旗标直注（S0-1 seedFlags 通道）——逗号分隔旗标名
 // （如 SW_M8_FLAGS=theConstant），与 SW_M8_SEED 数字种子配套（对拍秘密种子链用）
 // ★BBBBBBB（2026-08-24）键勘误：值必须是 SeedFlags **字段名**（驼峰），直注无解析——
@@ -227,7 +235,7 @@ const le16 = (p: string): Uint16Array => {
   const b = readFileSync(p);
   return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1);
 };
-interface Ch { t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array }
+interface Ch { t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array; pnt?: Uint8Array; pwal?: Uint8Array; cbt?: Uint8Array }
 /** 8 通道完备集（.typ 名表之外必须齐备的 7 通道）——HHHHHHH 第 4 坑免疫基准 */
 const CHAN_FILES = ['act', 'wal', 'liq', 'half', 'slope', 'lty', 'inact'] as const;
 const cache = new Map<number, Ch>();
@@ -250,6 +258,16 @@ function chans(idx: number): Ch | null {
     t: le16(`${pre}.typ`), a: readFileSync(`${pre}.act`), w: le16(`${pre}.wal`), l: readFileSync(`${pre}.liq`),
     hf: readFileSync(`${pre}.half`), sl: readFileSync(`${pre}.slope`), lt: readFileSync(`${pre}.lty`), ia: readFileSync(`${pre}.inact`),
   };
+  // ★IIIII106：paint/coat 扩展三通道（存在才载入；不存在保持 undefined=不裁决）
+  if (PAINT) {
+    if (existsSync(`${pre}.pnt`) && existsSync(`${pre}.pwal`) && existsSync(`${pre}.cbt`)) {
+      c.pnt = readFileSync(`${pre}.pnt`);
+      c.pwal = readFileSync(`${pre}.pwal`);
+      c.cbt = readFileSync(`${pre}.cbt`);
+    } else {
+      console.log(`  [i106-paint] #${idx}_${nm} 缺 paint 通道 → 该槽 paint 三通道不参与裁决`);
+    }
+  }
   if (!NOCACHE) cache.set(idx, c);
   return c;
 }
@@ -257,14 +275,16 @@ function chans(idx: number): Ch | null {
 interface Row {
   idx: number; tag: string; dA: number; dT: number; dW: number; dL: number;
   dHf: number; dSl: number; dLt: number; dIa: number; dGh: number;
+  dP?: number; dPw?: number; dCb?: number;
   first: string; pairs: Array<[string, number]>; samples: string[];
 }
 function cmp(tag: string, idx: number, st: {
   type: Uint16Array; flags: Uint8Array; wall: Uint16Array; liquid: Uint8Array;
   liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array; wire: Uint8Array;
-}): Row {
+} & Partial<Record<'paint' | 'paintWall' | 'coat', Uint8Array>>): Row {
   const c = chans(idx);
-  const r: Row = { idx, tag, dA: 0, dT: 0, dW: 0, dL: 0, dHf: 0, dSl: 0, dLt: 0, dIa: 0, dGh: 0, first: '', pairs: [], samples: [] };
+  const r: Row = { idx, tag, dA: 0, dT: 0, dW: 0, dL: 0, dHf: 0, dSl: 0, dLt: 0, dIa: 0, dGh: 0,
+    ...(PAINT ? { dP: -1, dPw: -1, dCb: -1 } : {}), first: '', pairs: [], samples: [] };
   if (!c) { r.first = '(no dump)'; return r; }
   const pair = new Map<string, number>();
   let firstI = -1;
@@ -291,6 +311,29 @@ function cmp(tag: string, idx: number, st: {
     const via = c.ia[i]! ? 1 : 0;
     const jia = (st.wire[i]! >>> 5) & 1;
     if (via !== jia) { r.dIa++; mark(i); if (r.samples.length < 8) r.samples.push(`I(${i % W},${(i / W) | 0}) v${via} j${jia}`); }
+    // ★IIIII106：paint/coat 三通道（dump 带文件才裁决；-1=该槽未带通道不裁决）
+    if (c.pnt && c.pwal && c.cbt && PAINT) {
+      const jp = st.paint as Uint8Array | undefined, jpw = st.paintWall as Uint8Array | undefined,
+        jc = st.coat as Uint8Array | undefined;
+      if (jp && jpw && jc) {
+        let p = 0, pw = 0, cb = 0;
+        if (c.pnt[i] !== jp[i]) { p++; }
+        if (c.pwal[i] !== jpw[i]) { pw++; }
+        // x86 位包→JS coat 常量反映射逐位比
+        const vcb = c.cbt[i]!;
+        const wantCoat = ((vcb & 1) ? TileStore.COAT_INVISIBLE_BLOCK : 0)
+          | ((vcb >> 1 & 1) ? TileStore.COAT_INVISIBLE_WALL : 0)
+          | ((vcb >> 2 & 1) ? TileStore.COAT_FULLBRIGHT_BLOCK : 0)
+          | ((vcb >> 3 & 1) ? TileStore.COAT_FULLBRIGHT_WALL : 0);
+        // JS 杂散位也报差：coat 中不属于四位包的位=状态污染
+        if (jc[i] !== wantCoat) { cb++; if (r.samples.length < 8) r.samples.push(`Cb(${i % W},${(i / W) | 0}) v${vcb} j${jc[i]}`); }
+        if (p) { mark(i); if (r.samples.length < 8) r.samples.push(`P(${i % W},${(i / W) | 0}) v${c.pnt[i]} j${jp[i]}`); }
+        if (pw) { mark(i); if (r.samples.length < 8) r.samples.push(`Pw(${i % W},${(i / W) | 0}) v${c.pwal[i]} j${jpw[i]}`); }
+        r.dP = (r.dP === -1 ? 0 : r.dP) + p;
+        r.dPw = (r.dPw === -1 ? 0 : r.dPw) + pw;
+        r.dCb = (r.dCb === -1 ? 0 : r.dCb) + cb;
+      }
+    }
     // ghost（信息位）：非活性残留 type。
     // ★IIIII54 伪影修正：旧式把 JS st.type==0(空气,TILE_DEFS[0] 无 vanilla sheet)
     //   经 SHEET 映射 -1→9999 哨兵——而 x86 Tile.type 缺省 0，结果「gh 差」恒等于
@@ -419,17 +462,20 @@ function labelOf(file: string, line: number): string {
   } finally { RNGp.reseed = oReseed; }
   rows.sort((a, b) => a.idx - b.idx);
   for (const r of rows) {
-    const bad = r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa;
+    const bad = r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa
+      || ((r.dP ?? -1) > 0) || ((r.dPw ?? -1) > 0) || ((r.dCb ?? -1) > 0);
     console.log(`${String(r.idx).padStart(3)} ${DUMPNAME.get(r.idx) ?? '?'} ← ${r.tag.padEnd(22)} ` +
       `A=${String(r.dA).padStart(7)} T=${String(r.dT).padStart(7)} W=${String(r.dW).padStart(6)} L=${String(r.dL).padStart(6)} ` +
-      `Hf=${String(r.dHf).padStart(6)} Sl=${String(r.dSl).padStart(6)} Lt=${String(r.dLt).padStart(6)} Ia=${String(r.dIa).padStart(4)} (Gh=${r.dGh}) ` +
-      `${bad ? '✗ ' + r.first : '✓'}`);
+      `Hf=${String(r.dHf).padStart(6)} Sl=${String(r.dSl).padStart(6)} Lt=${String(r.dLt).padStart(6)} Ia=${String(r.dIa).padStart(4)} (Gh=${r.dGh})` +
+      (PAINT ? ` P=${String(r.dP ?? '?').padStart(6)} Pw=${String(r.dPw ?? '?').padStart(5)} Cb=${String(r.dCb ?? '?').padStart(5)}` : '') +
+      ` ${bad ? '✗ ' + r.first : '✓'}`);
     if (bad) {
       console.log(`     pairs: ${r.pairs.map(([k, n]) => `${k}×${n}`).join(' ')}`);
       console.log(`     samples: ${r.samples.join(' | ')}`);
     }
   }
-  const firstBad = rows.find((r) => r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa);
+  const firstBad = rows.find((r) => r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa
+    || ((r.dP ?? -1) > 0) || ((r.dPw ?? -1) > 0) || ((r.dCb ?? -1) > 0));
   const firstGh = rows.find((r) => r.dGh);
   console.log(`\n★ 8通道首差边界: ${firstBad ? `#${String(firstBad.idx).padStart(3)} ${DUMPNAME.get(firstBad.idx)} @${firstBad.tag} ${firstBad.first} ${firstBad.pairs.slice(0, 4).map(([k, n]) => `${k}×${n}`).join(' ')}` : '无（0..31 全绿）'}`);
   console.log(`★ ghost 首差边界(信息位): ${firstGh ? `#${firstGh.idx} ${DUMPNAME.get(firstGh.idx)} gh=${firstGh.dGh}` : '无'}`);

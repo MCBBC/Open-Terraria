@@ -2,6 +2,7 @@
 // + SpreadGrass cs:75210 逐 tile 版）1:1。岩层深处放 min(w/700,50) 个蘑菇生态：
 // ShroomPatch 泥 blob（墙 80）×6 → 全图 SpreadGrass(59→70, repeat:false) →
 // 蘑菇草饰面循环（KillTile/PlaceTile(59)/Next(4) 散点）。
+import { doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -123,6 +124,11 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
   const __ev = (globalThis as { __swMushEv?: (s: string) => void }).__swMushEv;
 
   const { w, h } = st;
+  // ★IIIII106 cs:12600-12602：sandy britches 表层沙漠化第一臂（GlowingMushroomPatches
+  //   pass 头、remix 假地表带臂之前；noSurface 组合走 DoSurfaceIsDesert 前半=另案登记）
+  if (!!gs.seedFlags.surfaceIsDesert && !gs.seedFlags.noSurface) {
+    doSurfaceIsDesertCore(st, rng, gs);
+  }
   // ★IIIII48 REMIX 头段（1458 cs:12604-12613）：remix 世界把「假地表」带
   //   [remixMushroomLayerLow(850), maxTilesY-10] 内全部 **幽灵/活性 type=0（土/空气）**
   //   改写成泥 ghost——逐列 Next(3) 起始行（每列恒耗 1 骰）。vanilla 判 tile.type==0

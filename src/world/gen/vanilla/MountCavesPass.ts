@@ -61,6 +61,8 @@ function mountinater(st: TileStore, rng: RNG, i: number, j: number, remix: boole
  *  在 !remixWorldGen 内**——remix 不避让出生点带。 */
 export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState,
   gp?: import('../GenProgress').GenProgress): void {
+  // ★IIIII106 cs:11821-11823：sandy britches 整跳山丘体（同 Tunnels 整门语义）
+  if (!!gs.seedFlags.surfaceIsDesert) return;
   const remix = !!gs.seedFlags.remix;
   let count = Math.floor(st.w * 0.001);
   if (remix) count = Math.trunc(count * 1.5);

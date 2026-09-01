@@ -55,6 +55,8 @@ import { hfIs1457 } from './HellFortPass';
 import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 // ★SSS-CELEB（2026-08-27）：FinishTenthAnniversaryWorld 全家（1458 cs:24502-24554）
 import { growTree } from './TreePass';
+// ★IIIII106：sandy britches 表层沙漠化核心（cs:2363 第二半；调用位 :22343）
+import { doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';
 
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
 
@@ -822,7 +824,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   竖组完整性 + 上锚门整组杀——g #105 (564,328) 孤儿旗帜实证（此前仅 LiquidSim
     //   前置扫镜像覆盖沉降级联，引擎主臂缺席）。稀疏模式同列豁免见上方 frameSparse 清单。
     case 91: checkBannerSweep(st, ctx, x, y); return true;
-    case 518: if (!((__swProcessEnv ?? {}).SW_I126_LPY_OFF === '1')) checkLilyPadSweep(st, ctx, x, y); return true;
+    case 518: checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
     case 571: checkBambooSweep(st, ctx, x, y); return true;
@@ -3184,6 +3186,11 @@ export function runFinalCleanupPass(
   // ② FillWallHolesInArea（cs:22307，PPPP 实装——原备案跳过；区域=[0,w)×[0,worldSurface)
   //   仅地表带）。W247 残差（(2776-2786,98) 墙 82 补洞）清偿。
   fillWallHolesInArea(st, gs);
+  // ★IIIII106 cs:22341-22343：sandy britches 表层沙漠化第二臂（NormalFunction 门=单旗标
+  //   恒真；noSurface 组合臂不在消费面）。原版位在 FillWallHoles 之后、主清扫循环之前。
+  if (rng && !!gs.seedFlags.surfaceIsDesert && !gs.seedFlags.noSurface) {
+    doSurfaceIsDesertCore(st, rng, gs);
+  }
   const stats = ctx.stats!;
   for (const k of Object.keys(stats) as Array<keyof ZzzStats>) stats[k] = 0;
   const { w, h } = st;

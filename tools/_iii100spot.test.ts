@@ -40,6 +40,9 @@ const CHAINS: Record<string, ChainCfg> = {
   fishmox:   { name: 'fishmox',   seed: '771003',     evil: 0,  flags: { noInfection: true }, g2: C('golden-fishmox') },
   // ★IIIII99e：FTW 链五点接入（G2=IIIII90b 迁址权威 ~/GoldenChains/golden-ftw）
   ftw:       { name: 'ftw',       seed: '1671560105', evil: 0,  flags: { getGoodWorld: true }, g2: C('golden-ftw') },
+  // ★IIIII104：pumpkin/jagged 五点接入（G2 同 IIII89/i80 桶；配方=m8all.sh/jagged 章）
+  pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: { halloweenGen: true }, g2: '/tmp/iii84-out/x86-i78-pumpkin' },
+  jagged:    { name: 'jagged',    seed: '771005',     evil: 0,  flags: { digExtraHoles: true }, g2: '/tmp/iii80-out/x86-jagged' },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';

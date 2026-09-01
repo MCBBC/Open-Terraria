@@ -63,10 +63,14 @@ import type { SeedFlags } from '../SeedEasterEggs';
 import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★IIIII41-T3② 变体门
 import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { initializeHardMode } from './HardmodePass';
-import { genKillTile, genSquareTileFrame } from './FinalCleanupPass';
+import { genKillTile, genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { genSquareWallFrame } from './DesertPass';                       // ★IIIII87 Convert 墙写尾级联掷骰镜像
 import { sheetId } from './TileCleanupPass';
 import { tileRunner } from './TileRunner';
+// ★IIIII106：四涂装/涂层族全图端点（FinalSeedCleanupPass 结构先行件，本次接线）
+import {
+  doCoatEverythingEcho, doCoatEverythingIlluminant, doPaintEverythingGray, doPaintEverythingNegative,
+} from './FinalSeedCleanupPass';
 import { hurtTiles } from '../../../stats/TouchDamage';
 import { TILE_REMOVE_WHEN_UNDER_SPAWN } from '../../../data/vanillaSets1457';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
@@ -384,7 +388,10 @@ function convertCell(
   //   l<ws+Next(3) 带内当时尚无植被可重挂）。实证：① tools/_iii108tm 槽头基座反演
   //   重放 vs -004_PostFinSeed/#105 由 7351→21 再经 shimmer/merge 域归零；
   //   ② _iii105tm 复跑 era-1 窗口 vs #018_Mud_Caves_To_Grass 八通道全零。
-  const cascades = conversionType === 0 || conversionType === 3;
+  // ★IIIII106：IIIII99b 已定谳 C# 级联对一切 conversionType 无条件执行——case 1/4
+  // （worldIsInfected=purify this 净化/腐化面）入列后本仓全部消费面（0..4）都带级联。
+  const cascades = conversionType === 0 || conversionType === 3
+    || conversionType === 1 || conversionType === 4;
   if (i < 1 || j < 1 || i >= st.w - 1 || j >= st.h - 1) return;       // InWorld(i,j,1)
   if (!tiles && !walls) return;
   const ii = st.idx(i, j);
@@ -479,8 +486,427 @@ function convertCell(
     else if ((t = shOf(st, ii)), t === 32 || t === 352) genKillTile(st, rng, i, j);
     return;
   }
-  // 其余 conversionType（1/4 corrupt/crimson、5/6/7…）不在本批旗标消费面内——
-  // worldIsInfected 的 conversionType 1/4 为其他车道债（见批章）。
+  if (conversionType === 4) {                                         // ── case 4 猩红（cs:55583-55636）──
+    if (walls) {
+      if (WALL_CONV_GRASS.has(wall) && wall !== 81) convertActuallyWall(st, rng, i, j, 81, cascades);
+      else if (WALL_CONV_STONE.has(wall) && wall !== 83) convertActuallyWall(st, rng, i, j, 83, cascades);
+      else if (WALL_CONV_HARDENED_SAND.has(wall) && wall !== 218) convertActuallyWall(st, rng, i, j, 218, cascades);
+      else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 221) convertActuallyWall(st, rng, i, j, 221, cascades);
+      else if (WALL_CONV_NEW1.has(wall) && wall !== 192) convertActuallyWall(st, rng, i, j, 192, cascades);
+      else if (WALL_CONV_NEW2.has(wall) && wall !== 193) convertActuallyWall(st, rng, i, j, 193, cascades);
+      else if (WALL_CONV_NEW3.has(wall) && wall !== 194) convertActuallyWall(st, rng, i, j, 194, cascades);
+      else if (WALL_CONV_NEW4.has(wall) && wall !== 195) convertActuallyWall(st, rng, i, j, 195, cascades);
+    }
+    if (!tiles) return;
+    let t = SHEET_OF_TYPE[st.type[ii]];
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 4)) convertActuallyTorch(st, i, j, 19);
+    else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 203) convertActuallyTile(st, rng, i, j, 203, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 662) convertActuallyTile(st, rng, i, j, 662, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 199) convertActuallyTile(st, rng, i, j, 199, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 200) convertActuallyTile(st, rng, i, j, 200, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 234) convertActuallyTile(st, rng, i, j, 234, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 399) convertActuallyTile(st, rng, i, j, 399, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 401) convertActuallyTile(st, rng, i, j, 401, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_THORN.has(t) && t !== 352) convertActuallyTile(st, rng, i, j, 352, cascades, gs);
+    return;
+  }
+
+  if (conversionType === 1) {                                         // ── case 1 腐化（cs:55744-55796）──
+    if (walls) {
+      if (WALL_CONV_GRASS.has(wall) && wall !== 69) convertActuallyWall(st, rng, i, j, 69, cascades);
+      else if (WALL_CONV_STONE.has(wall) && wall !== 3) convertActuallyWall(st, rng, i, j, 3, cascades);
+      else if (WALL_CONV_HARDENED_SAND.has(wall) && wall !== 217) convertActuallyWall(st, rng, i, j, 217, cascades);
+      else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 220) convertActuallyWall(st, rng, i, j, 220, cascades);
+      else if (WALL_CONV_NEW1.has(wall) && wall !== 188) convertActuallyWall(st, rng, i, j, 188, cascades);
+      else if (WALL_CONV_NEW2.has(wall) && wall !== 189) convertActuallyWall(st, rng, i, j, 189, cascades);
+      else if (WALL_CONV_NEW3.has(wall) && wall !== 190) convertActuallyWall(st, rng, i, j, 190, cascades);
+      else if (WALL_CONV_NEW4.has(wall) && wall !== 191) convertActuallyWall(st, rng, i, j, 191, cascades);
+    }
+    if (!tiles) return;
+    let t = SHEET_OF_TYPE[st.type[ii]];
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 1)) convertActuallyTorch(st, i, j, 18);
+    else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 25) convertActuallyTile(st, rng, i, j, 25, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 661) convertActuallyTile(st, rng, i, j, 661, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 23) convertActuallyTile(st, rng, i, j, 23, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 163) convertActuallyTile(st, rng, i, j, 163, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 112) convertActuallyTile(st, rng, i, j, 112, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 398) convertActuallyTile(st, rng, i, j, 398, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 400) convertActuallyTile(st, rng, i, j, 400, cascades, gs);
+    // ★IIIII106 cs:55797-55800：case1 荆棘=换种 32（非 KillTile——case0/2/3 才是杀）
+    else if ((t = shOf(st, ii)), CONV_THORN.has(t) && t !== 32) convertActuallyTile(st, rng, i, j, 32, cascades, gs);
+    return;
+  }
+  // 其余 conversionType（5/6/7…）不在本批旗标消费面内——登记另案。
+}
+
+// ============================================================
+// ★IIIII106 DoWorldIsInfected（purify this，cs:2023-2060；FinalizeSecretSeeds :629-632
+// hallowOnTheSurface 之后、startInHardmode 之前调用）全图感染面
+// ============================================================
+/** DoWorldIsInfected：skyblock 早退；num=起始行（单旗标恒 0；noInfection/hallow
+ *  组合带见 cs:2027-2043）；逐列先掷 Next(3)（j 起点 num+Next(3)，列内升序），
+ *  conversionType：drunk 按左右半场 crimsonLeft 分流 4 / 非 drunk crimson 全 4 /
+ *  其余（含纯 purify this 腐化世界）恒 1。tiles/walls 豁免表 = cs:2049-2051 字面。
+ *  Convert 带 size=0 ⇒ 单格版 convertCell 直调。 */
+export function doWorldIsInfected(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;                                           // cs:2024 skyblockWorldGen 早退
+  let num = 0;                                                        // cs:2025-2044
+  if (!!F.noInfection) {
+    if (!!F.noSurface) {
+      num = Math.floor((gs.rockLevel + (st.h - 200)) / 2);            // (int)(rockLayer+UnderworldLayer)/2
+    } else {
+      num = Math.floor(gs.worldSurface) + 10;
+      if (!!F.hallowOnTheSurface) {
+        num = Math.floor((gs.rockLevel + (st.h - 200)) / 2);
+      }
+    }
+  } else if (!!F.hallowOnTheSurface) {
+    num = Math.floor(gs.worldSurface) - 3;                            // cs:2044-2047
+  }
+  for (let i = 0; i < st.w; i++) {
+    // cs:2048-2058 conversionType 选择（drunk 半场分流优先于 crimson 全量）
+    let convType = 1;
+    if (!!F.drunkWorld) {
+      if (gs.crimsonLeft && i < st.w / 2) convType = 4;
+      if (!gs.crimsonLeft && i > st.w / 2) convType = 4;
+    } else if (gs.crimson) {
+      convType = 4;
+    }
+    for (let j = num + rng.nextInt(3); j < st.h; j++) {               // per-column 必掷 Next(3)
+      const ii = st.idx(i, j);
+      const t = shOf(st, ii);
+      const wv = st.wall[ii];
+      const tiles = t !== 60 && t !== 109 && t !== 117 && t !== 164 && t !== 116 && t !== 403 && t !== 402;
+      const walls = wv !== 64 && wv !== 204 && wv !== 205 && wv !== 206 && wv !== 207
+        && wv !== 70 && wv !== 265 && wv !== 28 && wv !== 219 && wv !== 222;
+      convertCell(st, rng, gs, i, j, convType, tiles, walls);
+    }
+  }
+}
+
+// ============================================================
+// ★IIIII106 sandy britches（surfaceIsDesert）族
+// ============================================================
+/** TileID.Sets.Ore（TileID.cs:1110-1130 终值；gronk 表同源） */
+const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+/** WallID.Sets.Fences（WallID.cs:56） */
+const WALL_FENCES = new Set([150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
+/** Clouds 集（TileID.cs:197）——DoSurfaceIsDesertFinish 锚用 */
+const DESERT_CLOUD_IDS = new Set([189, 196, 460, 717, 718, 719]);
+function findLowestCloudSheet(st: TileStore, wsDouble: number): number {
+  let num = 0;
+  for (let y = 20; y < wsDouble; y++) {
+    let hit = false;
+    for (let x = 20; x < st.w - 20; x++) {
+      const i = st.idx(x, y);
+      if (st.flags[i] && DESERT_CLOUD_IDS.has(shOf(st, i))) { hit = true; break; }
+    }
+    if (hit) num = y;
+  }
+  return num;
+}
+
+/** DoSurfaceIsDesert 核心第二半（cs:2454-2581；noSurface 前半分支不入本仓单旗标消费面）。
+ *  消费位=① GlowingMushroomPatches pass 头（cs:12600，!noSurface 才到此后半）
+ *         ② FinalCleanup pass 体 FillWallHolesInArea 之后（cs:22343，
+ *            Variations.surfaceIsDesertNormalFunction=true 门）。
+ *  逐列先掷 Next(3)（n<worldSurface+Next(3) 双重比较）；七连 if 按 C# 序即时生效
+ *  （前一臂改写类型后臂读新值）；23/199/109 三臂 3×3 邻域把「残留型==53」格联动转沙。 */
+export function doSurfaceIsDesertCore(st: TileStore, rng: RNG, gs: GenState): void {
+  if (!!gs.seedFlags.skyblock) return;
+  const setT = (x: number, y: number, sheet: number): void => { st.type[st.idx(x, y)] = idOf(sheet); };
+  for (let m = 0; m < st.w; m++) {
+    const lim = Math.floor(gs.worldSurface + rng.nextInt(3));          // per-column 必掷
+    for (let n = 0; n < lim; n++) {
+      const ii = st.idx(m, n);
+      if (st.flags[ii]) {
+        let t = shOf(st, ii);
+        if (t === 1) setT(m, n, 396);
+        if ((t = shOf(st, ii)) === 25) setT(m, n, 398);
+        if ((t = shOf(st, ii)) === 203) setT(m, n, 399);
+        if ((t = shOf(st, ii)) === 117) setT(m, n, 402);
+        if ((t = shOf(st, ii)) === 0) setT(m, n, 53);                  // cs:2492 字面
+        if ((t = shOf(st, ii)) === 2) setT(m, n, 53);
+        if ((t = shOf(st, ii)) === 23) {
+          setT(m, n, 112);
+          for (let a = m - 3; a <= m + 3; a++) {
+            for (let b = n - 3; b <= n + 3; b++) {
+              if (!st.inBounds(a, b)) continue;
+              if (shOf(st, st.idx(a, b)) === 53) setT(a, b, 112);      // 不查活性（cs 字面 .type 直比）
+            }
+          }
+        }
+        if ((t = shOf(st, ii)) === 199) {
+          setT(m, n, 234);
+          for (let a = m - 3; a <= m + 3; a++) {
+            for (let b = n - 3; b <= n + 3; b++) {
+              if (!st.inBounds(a, b)) continue;
+              if (shOf(st, st.idx(a, b)) === 53) setT(a, b, 234);
+            }
+          }
+        }
+        if ((t = shOf(st, ii)) === 109) {
+          setT(m, n, 116);
+          for (let a = m - 3; a <= m + 3; a++) {
+            for (let b = n - 3; b <= n + 3; b++) {
+              if (!st.inBounds(a, b)) continue;
+              if (shOf(st, st.idx(a, b)) === 53) setT(a, b, 116);
+            }
+          }
+        }
+      }
+      const jj = st.idx(m, n);
+      if ((st.wall[jj] === 2 || st.wall[jj] === 59) && st.flags[jj] && shOf(st, jj) === 53) {
+        st.wall[jj] = 0;
+      }
+    }
+  }
+}
+
+/** DoSurfaceIsDesertFinish（cs:2295-2362，FinalizeSecretSeeds 首位 :591-594）：
+ *  表层墙 63→2 / 植被 TileFrame{3,73,27} / 云锚下首个 7 格地表带矿→沙 / 沙带自支撑
+ *  形态学（num2 三态机：wall 侧补 2、无支撑区 wall==2 清零、52 型草露头清墙）。 */
+export function doSurfaceIsDesertFinish(st: TileStore, rng: RNG, gs: GenState): void {
+  // cs:2296 num = FindLowestCloud() + 1（云缓存；本 pass 单调用等价直算）
+  const cloudBottomPlus1 = findLowestCloudSheet(st, gs.worldSurface) + 1;
+  for (let i = 5; i < st.w - 5; i++) {
+    let num2 = 0;
+    let flag = false;
+    let num3 = 7;
+    const jsLim = Math.floor(gs.worldSurface);                          // j <= Main.worldSurface（含等号）
+    for (let j = 5; j <= jsLim; j++) {
+      const ii = st.idx(i, j);
+      if (st.wall[ii] === 63) st.wall[ii] = 2;                          // cs:2304 腐化石墙表层翻土墙
+      const tSelf = st.flags[ii] ? shOf(st, ii) : -1;
+      if (tSelf === 3 || tSelf === 73 || tSelf === 27) genTileFrame(st, rng, i, j);   // cs:2306-2308 植被重帧
+      if (j <= cloudBottomPlus1) continue;
+      if (solidNonTopAt(st, i, j)) flag = true;                         // SolidTile3(i,j)
+      if (flag && num3 > 0) {
+        num3--;
+        const tNow = st.flags[st.idx(i, j)] ? shOf(st, ii) : -1;
+        if ((tNow === 397 || tNow === 396 || ORE_SHEETS.has(tNow) || tNow === 40)
+          && solidNonTopAt(st, i, j + 1)) {
+          st.type[ii] = idOf(53);
+        }
+      }
+      const lSolid = solidNonTopAt(st, i - 1, j), rSolid = solidNonTopAt(st, i + 1, j);
+      if (solidNonTopAt(st, i, j)
+        && (lSolid || st.wall[st.idx(i - 1, j)] > 0)
+        && (rSolid || st.wall[st.idx(i + 1, j)] > 0)) {
+        const tC = st.flags[ii] ? shOf(st, ii) : -1;
+        const sandFam = tC === 53 || tC === 112 || tC === 234 || tC === 116;
+        if (num2 === 0 && sandFam) num2 = 1;
+        else if (num2 === 1 && !sandFam) num2 = 2;
+      }
+      if (num2 === 2 && (!!gs.seedFlags.skyblock || !!gs.seedFlags.roundLandmasses)) num2 = 0;   // cs:2351
+      if (num2 === 2) {
+        if (st.wall[ii] === 0) st.wall[ii] = 2;                         // 沙柱背衬墙
+      } else if (!flag && st.wall[ii] === 2) {
+        st.wall[ii] = 0;                                                // 无沙裸土带撤墙
+      } else if (st.flags[ii] && shOf(st, ii) === 53 && !WALL_FENCES.has(st.wall[ii])) {
+        st.wall[ii] = 0;                                                // cs:2359 草面露头清墙
+      }
+    }
+  }
+}
+
+// ============================================================
+// ★IIIII106 DoErrorWorldFinish（i am error，cs:1301-1543；FinalizeSecretSeeds :671-674
+// 在 worldIsFrozen Finish 位后、teamBasedSpawns/FinalSeedCleanup 前调用）
+// ============================================================
+/** ItemID.Sets.ErrorWorldChestSwapImmunity（ItemID.cs:1120）＝ 空槽(type0)+特典 5 物 */
+const ERROR_CHEST_SWAP_IMMUNITY = new Set([0, 1156, 1571, 1569, 1260, 1572, 4607]);
+/** CrackedBricks / Conversion.Moss（TileID.cs） */
+const EW_CRACKED = new Set([481, 482, 483]);
+const EW_CONV_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+/** tileFrameImportant 表（def.framed × vanilla.sheet 缺省推导；与 VanillaFraming 同构） */
+const EW_FRAME_IMPORTANT_SHEET = (() => {
+  const b = new Array(800).fill(false) as boolean[];
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const v = TILE_DEFS[i]?.vanilla;
+    if (v && v.sheet < 800 && TILE_DEFS[i].framed) b[v.sheet] = true;
+  }
+  return b;
+})();
+/** 内部物品 id → 原版 vid（免疫表是 vid 空间；世界箱 items 是内部 id 空间） */
+const EW_INTERNAL_TO_VID: ReadonlyMap<number, number> = (() => {
+  const m = new Map<number, number>();
+  for (const [vidStr, k] of Object.entries(VANILLA_ITEM_KEY_BY_ID)) {
+    const iid = ITEM_BY_KEY[k];
+    if (iid !== undefined && !m.has(iid)) m.set(iid, Number(vidStr));
+  }
+  return m;
+})();
+
+interface EWChestLike { x?: number; y?: number; items: Array<{ id: number; stack: number } | null> }
+
+/** errorWorldAdjustment(value)（cs:330-337）：count=单旗标 ⇒ 因子 (count+3)/4 整除=1。
+ *  （组合世界 count≥2 才缩水——多秘计数另案，本仓按单旗标域恒等） */
+function ewAdjust(_value: number): number { return _value; }
+
+/** 40 槽窗视图（SW compact items → vanilla item[40]）：读/写都在 0..39 槽内。 */
+function ewSlotRead(items: Array<{ id: number; stack: number } | null>, idx: number): number {
+  if (idx >= items.length || idx >= 40) return 0;
+  const it = items[idx];
+  return it ? it.id : 0;
+}
+function ewSlotWrite(items: Array<{ id: number; stack: number } | null>, idx: number, val: { id: number; stack: number } | null): void {
+  if (idx >= 40) return;
+  while (items.length < idx) items.push(null);          // 补洞保持槽位对位
+  if (idx === items.length) items.push(val);
+  else items[idx] = val;
+}
+
+/** DoErrorWorldFinish 本体。chests=世界箱注册表（≤8000）；starterTowns=world.starterTownNpcs
+ *  引用（NPC 臂：!infected&&!vampire 时全部非老头镇民重掷为 homeless 老头）。 */
+export function doErrorWorldFinish(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests: ReadonlyArray<EWChestLike>,
+  starterTowns: Array<{ key: string; givenName?: string; x: number; y: number; anchor: [number, number]; dir?: number }> | undefined,
+): void {
+  const F = gs.seedFlags;
+  // ── ① 宝箱换物主循环（cs:1303-1349）：迭代 maxTilesX*2 次，两箱四掷 + 免疫/空箱拒采。
+  //    Main.chest[8000] 稀疏数组语义 = 索引≥count 即 null ⇒ Next(8000) 接受率按 count 比例，
+  //    拒采掷全量照录（这是本端点的巨型骰消费面）。num3 守卫耗尽=return 整段。
+  const aliveChest = (slot: EWChestLike | undefined): slot is EWChestLike =>
+    !!slot && !!slot.items[0];                          // item[0].type==0 判空主件槽
+  const pickChestIdx = (guardReturn: boolean): number => {
+    let guard = 100000;
+    let idx = rng.nextInt(8000);
+    while (!aliveChest(chests[idx])) {
+      idx = rng.nextInt(8000);
+      if (guardReturn && --guard <= 0) return -1;
+    }
+    return idx;
+  };
+  const pickItemSlot = (ch: EWChestLike, guarded: boolean): number => {
+    let guard = 100000;
+    let s = rng.nextInt(40);                            // item.Length=40 定长
+    while (ERROR_CHEST_SWAP_IMMUNITY.has(EW_INTERNAL_TO_VID.get(ewSlotRead(ch.items, s)) ?? 0)) {
+      s = rng.nextInt(40);
+      if (guarded && --guard <= 0) return -1;
+    }
+    return s;
+  };
+  const iterations = st.w * 2;                          // num = maxTilesX*2
+  for (let i = 0; i < iterations; i++) {
+    const aIdx = pickChestIdx(true);
+    if (aIdx < 0) return;                               // cs:1310 守卫耗尽 → 整函数退出
+    const ca = chests[aIdx]!;
+    const sA = pickItemSlot(ca, true);
+    if (sA < 0) return;
+    const bIdx = pickChestIdx(false);                   // cs:1326 无守卫支
+    const cb = chests[bIdx];
+    if (!cb) continue;
+    const sB = pickItemSlot(cb, false);                 // cs:1331-1335 无守卫支
+    // cs:1338：balancedChests(count>=6 组合臂)=false 单旗标恒直换——不改 rare 相等门
+    const tmp = ca.items[sA] ?? null;
+    ewSlotWrite(ca.items, sA, cb.items[sB] ?? null);
+    ewSlotWrite(cb.items, sB, tmp);
+  }
+
+  // ── ② [20,w-20)×[20,h-20) 全图调形扫（cs:1350-1423）
+  const canKillEW = (x: number, y: number): boolean => {   // CanKillTile 本语境可达子集
+    if (!st.inBounds(x, y)) return false;
+    const ii0 = st.idx(x, y);
+    if (!st.flags[ii0]) return false;
+    if (st.wall[ii0] === 350) return false;
+    const uUp = st.idx(x, y - 1);
+    if (y >= 1 && st.flags[uUp]) {
+      const shU = shOf(st, uUp);
+      const shS = shOf(st, ii0);
+      if ([21, 26, 72, 77, 88, 467, 488].includes(shU) && shU !== shS) return false;
+      if ([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634].includes(shU) || shU === 323) {
+        const fx = st.frameX[uUp], fy = st.frameY[uUp];
+        const sideBranch = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 44 && fy >= 198 && fy <= 242)
+          || (fx === 88 && fy >= 66 && fy <= 110) || (fx === 66 && fy >= 198 && fy <= 242);
+        if (!sideBranch && fy < 198) return false;
+        if (shU === 323 && (fx === 66 || fx === 220)) return false;
+      }
+    }
+    return true;
+  };
+  const setT = (x: number, y: number, sheet: number): void => { st.type[st.idx(x, y)] = idOf(sheet); };
+  for (let j = 20; j < st.w - 20; j++) {
+    for (let k = 20; k < st.h - 20; k++) {
+      const ii = st.idx(j, k);
+      // ★ghost 域字面：C# 各判据直读 .type/.wall（不查 active），且逐条 if **即时重读**——
+      //   前臂改型后后臂看到新值。统一走 tNow()。
+      const tNow = (): number => shOf(st, ii);
+      if (EW_CRACKED.has(tNow())) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;     // invisibleBlock(true)
+      if (EW_CONV_MOSS.has(tNow()) && tNow() !== 381 && rng.nextInt(ewAdjust(5)) === 0) {
+        const roll = rng.nextInt(5);                    // NextFromList 5 元素=Next(5)
+        setT(j, k, [539, 536, 534, 625, 627][roll]!);
+      }
+      if (k > gs.worldSurface && st.wall[ii] === 73) st.wall[ii] = 0;
+      if (tNow() === 501) {
+        if (!canKillEW(j, k)) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+        else st.flags[ii] = 0;                          // active(false)
+      }
+      if (st.wall[ii] === 238) st.wall[ii] = 0;
+      if (tNow() === 137 && (st.wire[ii] & 1) === 0) st.frameX[ii] = rng.nextInt(6) * 18;
+      if (tNow() === 28 && rng.nextInt(5) === 0) st.flags[ii] = 0;
+      if (rng.nextInt(ewAdjust(7)) === 0
+        && [48, 232, 21, 467, 28, 639, 12, 484].includes(tNow())) {
+        st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+      }
+      if (rng.nextInt(ewAdjust(15)) === 0 && solidNonTopAt(st, j, k)
+        && !EW_FRAME_IMPORTANT_SHEET[tNow()]
+        && st.flags[st.idx(j, k - 1)]
+        && !solidNonTopAt(st, j, k - 1)
+        && [237, 231, 355, 354, 26, 77, 642, 506, 377].indexOf(shOf(st, st.idx(j, k - 1))) < 0) {
+        if (canKillEW(j, k)) st.flags[ii] = 0;
+        else st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+      }
+      if (rng.nextInt(ewAdjust(10000)) === 0) st.paint[ii] = 30;
+      if (rng.nextInt(ewAdjust(10000)) === 0) st.paintWall[ii] = 30;
+      if (rng.nextInt(ewAdjust(50000)) === 0) st.coat[ii] |= TileStore.COAT_FULLBRIGHT_BLOCK;
+      if (rng.nextInt(ewAdjust(50000)) === 0) st.coat[ii] |= TileStore.COAT_FULLBRIGHT_WALL;
+      if (rng.nextInt(ewAdjust(250000)) === 0) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+    }
+  }
+
+  // ── ③ 泡块种散（cs:1508-1540）：maxTilesX/3 次；2×2 空/无液格置 379+满液体。
+  {
+    const count = Math.trunc(st.w / 3 / ewAdjust(1));
+    for (let n = 0; n < count; n++) {
+      const x = rng.nextIntRange(50, st.w - 50);
+      const y = rng.nextIntRange(Math.floor(gs.worldSurface), st.h - 50);
+      let busy = false;
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+        const q = st.idx(x + dx, y + dy);
+        if (st.flags[q] || st.liquid[q] !== 0) busy = true;
+      }
+      if (busy) continue;
+      const lty = rng.nextInt(4);
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+        const q = st.idx(x + dx, y + dy);
+        st.flags[q] = 1;
+        st.type[q] = idOf(379);
+        st.liquid[q] = 255;
+        st.liquidType[q] = lty + 1;                     // C# liquidType(num15)：JS 通道 +1 基
+        st.paint[q] = [9, 1, 2, 10][lty]!;
+      }
+    }
+  }
+
+  // ── ④ 镇民重掷（cs:1543-1543！!:1541-1561 —— !infected&&!vampire 门）：
+  //    全部非 37 型镇民在出生点位复活为 homeless 老头、原体停用（零命名掷——
+  //    Language 表 37 无 RandomFromCategory 分支，NPC.cs:7312-7323）。
+  if (!!F.infectedSeed || !!F.vampireSeed) return;
+  if (starterTowns) {
+    for (let i = 0; i < starterTowns.length; i++) {
+      const t0 = starterTowns[i]!;
+      if (t0.key === 'oldMan') continue;
+      starterTowns[i] = {
+        key: 'oldMan',
+        x: t0.x, y: t0.y,                               // position=原镇民 pos 字面透传
+        anchor: [Math.round(t0.x / 16), Math.round(t0.y / 16)],
+        dir: 1,
+      };
+    }
+  }
 }
 function shOf(st: TileStore, ii: number): number { return SHEET_OF_TYPE[st.type[ii]]; }
 function shNb(st: TileStore, x: number, y: number): number {
@@ -1080,6 +1506,10 @@ export function finalizeSecretSeedDoEnds(
   store: TileStore, rng: RNG, gs: GenState, world: World,
 ): void {
   const F = gs.seedFlags;
+  // ★IIIII106 cs:591-594：surfaceIsDesert Finish 端点（本函数首端点）
+  if (F.surfaceIsDesert) doSurfaceIsDesertFinish(store, rng, gs);
+  // extraLiquid Finish（cs:595-598，waterpark 批域登记）；actuallyNoTraps(:603)
+  // /worldIsFrozen Do(:617)/noSurface(:639) 同属未承接位——保持原版序占位
   if (F.surfaceIsInSpace) doSurfaceIsInSpace(store, gs);
   if (F.surfaceIsMushrooms) {
     if (!F.noSurface) doSurfaceIsMushroomsCore(store, rng, gs);         // cs:607-614 ×2 怪癖照录
@@ -1087,7 +1517,17 @@ export function finalizeSecretSeedDoEnds(
   }
   if (F.noInfection) doNoInfection(store, rng, gs);
   if (F.hallowOnTheSurface) doHallowOnSurface(store, rng, gs);
+  // ★IIIII106 cs:629-632：purify this 全图感染面（Convert case1/4 入列后可达）
+  if (F.infectedSeed) doWorldIsInfected(store, rng, gs);
   if (F.startInHardmode) doStartInHardmode(world, rng);
+  // ── ★IIIII106 四涂装/涂层族全图端点（cs:639-654；noSurface(:639) 位之后）──
+  if (F.coatEverythingEcho) {
+    doCoatEverythingEcho(store, F, world.chests as Array<{ items: Array<{ id: number; stack: number } | null> }>,
+      () => rng.nextInt(25) === 0);                                     // 塞 SpectreGoggles 掷
+  }
+  if (F.coatEverythingIlluminant) doCoatEverythingIlluminant(store, F, () => rng.nextInt(2) === 0);
+  if (F.paintEverythingGray) doPaintEverythingGray(store, F, gs.worldSurface, () => rng.nextInt(3));
+  if (F.paintEverythingNegative) doPaintEverythingNegative(store, F, gs.worldSurface, () => rng.nextInt(3));
   // ★IIIII41-T3①：randomSpawn「how did I get here」臂【不在此挂】——见 WorldGen.ts 尾段
   //   doRandomSpawnFinishPass 挂位注（原版 FinalizeSecretSeeds 在 SpawnPoint 写回之后，
   //   本仓 SpawnPoint 写回被上提到 finalize()＝管线末，臂须挂尾段才不被覆盖）。

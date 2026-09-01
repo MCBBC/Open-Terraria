@@ -45,6 +45,9 @@ export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState,
  *  （tenth 分支与 while 环整体在 `!remixWorldGen` 内）。 */
 export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState,
   gp?: import('../GenProgress').GenProgress): void {
+  // ★IIIII106 cs:11755：sandy britches 整跳地表隧道（!noSurface && !surfaceIsDesert 才跑；
+  //   每 pass 独立重播 ⇒ 零掷=vanilla 跳过等价，槽 dump 冻结同前态）
+  if (!!gs.seedFlags.surfaceIsDesert) return;
   const { w } = st;
   const remix = !!gs.seedFlags.remix;
   const maxTunnels = 50; // GenVars.maxTunnels（cs:232）

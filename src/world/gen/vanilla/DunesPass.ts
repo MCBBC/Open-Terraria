@@ -133,7 +133,8 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   const count = rng.int(lo, hi);
   // Configuration.json Dunes.ChanceOfPyramid；★IIIII14（cs:11564-11567）：drunk 世界
   // ChanceOfPyramid → 1.0（每个沙丘 spot 必产金字塔候选）。
-  const pyramidChance = gs.seedFlags.drunkWorld ? 1.0 : 0.8;
+  // ★IIIII106 cs:11566：sandy britches 同臂（drunkWorldGen || surfaceIsDesert.Enabled）
+  const pyramidChance = (gs.seedFlags.drunkWorld || gs.seedFlags.surfaceIsDesert) ? 1.0 : 0.8;
   const scale = w / 4200;    // cs:11562 num2
   for (let i = 0; i < count; i++) {
     // RandomWorldPoint(0, 500, 0, 500)(cs:11570)+ 拒绝带(cs:11572-11588):

@@ -1370,17 +1370,39 @@ export function runLivingTreesPass(
   //   下游域，此翻转暂不入线；后续批若定罪 KillTile 链再随拍补。
   //   （试验时 SOLIDCHK 打印确认 flip 本身生效：leafVanSolid=true。）
   const { w } = st;
-  const num = 200;                        // cs:15560 与世界中心 ±200 排除带
-  const num2 = 0;                         // cs:15561（extraFloatingIslands 才 >0）
+  // ★IIIII106：save the rainforest / the care bears movie 双臂入列——num 排除带收
+  // 150（cs:15589）、num2=FindLowestCloud()+1（cs:15571/:15591，低锚=云层底）。
+  let ltCloudRow = 0;
+  const ltFindLowestCloud = (): number => {
+    if (ltCloudRow) return ltCloudRow;                     // FindLowestCloud GenVars 缓存语义
+    let lo = 0;
+    for (let y = 20; y < gs.worldSurface; y++) {
+      for (let x = 20; x < w - 20; x++) {
+        const ii0 = st.idx(x, y);
+        if (st.flags[ii0] && CLOUD_SHEETS.has(TILE_DEFS[st.type[ii0]]?.vanilla?.sheet ?? -1)) { lo = y; break; }
+      }
+    }
+    return (ltCloudRow = lo + 1);
+  };
+  const sfLT106 = !!gs.seedFlags.extraLivingTrees;
+  const sfCFB106 = !!gs.seedFlags.extraFloatingIslands;
+  if (sfCFB106) ltCloudRow = ltFindLowestCloud();          // cs:15570-15572 num2 预锚（缓存共享）
+  const num2b = sfLT106 ? ltFindLowestCloud() : 0;         // cs:15590-15592：树臂时云锚+1 覆写
+  let num = 200;                          // cs:15560 与世界中心 ±200 排除带（eLT 收 150）
+  let num2 = num2b;                       // cs:15561
   const num3 = w / 4200;                  // cs:15563
   let num4 = rng.int(0, Math.floor(2 * num3));   // cs:15564 Next(0, (int)(2*num3)+1)
   if (num4 === 0 && rng.int(0, 1) === 0) num4++; // cs:15565 genRand.Next(2)==0（int(0,1) ≡ Next(2) 位级一致）
-  // ★SSS-CELEB（1458 cs:15576-15602 else-if 阶梯）：活树数量种子加成。
-  //   梯序：SecretSeed.extraLivingTrees → ntb&&tenth&&!drunk(+10·num3) →
-  //   drunk(+2) → **tenth(+3)** → remix(+2)。前两支是组合域（按惯例不移植），
-  //   drunk/remix/tenth 三支照 1458 补齐——各自独立线的既有缺口同框清偿。
+  // ★SSS-CELEB + ★IIIII106（1458 cs:15576-15602 else-if 阶梯全序）：
+  //   extraLivingTrees(reduced?+3:+30·num3 且 num=150/num2=cloud+1) → ntb&&tenth&&!drunk
+  //   (+10·num3) → drunk(+2) → tenth(+3) → remix(+2)。eLT 的 reduced=
+  //   noSurface||count>=6 ⇒ 单旗标恒 +30·num3。
   const sfT = !!gs.seedFlags?.tenthAnniversary;
-  if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
+  if (sfLT106) {
+    num4 += Math.trunc(30 * num3);            // cs:15584-15587（reduced 支组合域另案）
+    num = 150;
+    num2 = ltFindLowestCloud();
+  } else if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
     num4 += Math.trunc(10 * num3);            // cs:15579-15581
   } else if (gs.seedFlags.drunkWorld) {
     num4 += Math.trunc(2 * num3);             // cs:15582-15584
@@ -1423,24 +1445,28 @@ export function runLivingTreesPass(
             if (isTileNearby(st, num6, j, LIVING_WOOD, 10) || isTileNearby(st, num6, j, LEAF, 10)) {
               flag2 = false;                // cs:15639-15642
             }
-            if (flag2) {
-              // cs:15645-15671：候选点周围 100×100 排除区
+            // ★IIIII106 cs:15645-15682 整段重排：原 `if(flag2)` 包裹的扫描现按
+            //   cs 拆两门——`flag2 && !errorWorld` 才扫砖/云排除（errorWorld 整跳）。
+            if (flag2 && !gs.seedFlags.errorWorld) {
               outer:
               for (let k = num6 - 50; k < num6 + 50; k++) {
                 for (let l = j - 50; l < j + 50; l++) {
                   if (!activeAt(st, k, l)) continue;
                   const sh = sheetAt(st, k, l);
                   if (EXCLUDE_BRICK.has(sh)) { flag2 = false; break outer; }
-                  if (CLOUD_SHEETS.has(sh)) { flag2 = false; break outer; }
+                  // cs:15663-15668：rainforest 世界云格豁免（其余种子云带禁树）
+                  if (CLOUD_SHEETS.has(sh)) { if (!sfLT106) { flag2 = false; break outer; } }
                 }
               }
             }
-            // cs:15674-15682：与 Mount Caves 锚点 ±50 拒绝
+            // cs:15674-15682：与 Mount Caves 锚点 ±50 拒绝（★IIIII106 rainforest 整跳）
+            if (!sfLT106) {
             for (let m = 0; m < gs.numMCaves; m++) {
               if (num6 > gs.mCaveX[m] - 50 && num6 < gs.mCaveX[m] + 50) {
                 flag2 = false;
                 break;
               }
+            }
             }
             if (flag2) {
               if (LT_TRACE) console.log(`LT try x=${num6} j=${j} st=${ltStream()}`);
@@ -1456,14 +1482,19 @@ export function runLivingTreesPass(
                   if (n === 0) continue;
                   let num7 = num6;
                   let num8 = rng.int(0, 3);          // cs:15728 基掷（恒消耗）
-                  // ★SSS-CELEB（1458 cs:15730-15744 else-if 阶梯）：patch 小树清带宽加成
-                  //   ntb&&tenth&&!drunk +Next(3,7)/drunk||tenth +Next(2,5)/remix +Next(1,6)
-                  if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
+                  // ★SSS-CELEB + ★IIIII106（1458 cs:15730-15744 else-if 阶梯全序）：
+                  //   eLT +Next(5,11) → ntb&&tenth&&!drunk +Next(3,7) → drunk||tenth
+                  //   +Next(2,5) → remix +Next(1,6) → errorWorld +Next(1,4)
+                  if (sfLT106) {
+                    num8 += rng.int(5, 10);
+                  } else if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
                     num8 += rng.int(3, 6);
                   } else if (gs.seedFlags.drunkWorld || sfT) {
                     num8 += rng.int(2, 4);
                   } else if (gs.seedFlags.remix) {
                     num8 += rng.int(1, 5);
+                  } else if (gs.seedFlags.errorWorld) {
+                    num8 += rng.int(1, 3);
                   }
                   for (let n9 = 0; n9 < num8; n9++) {
                     num7 += rng.int(13, 30) * n;

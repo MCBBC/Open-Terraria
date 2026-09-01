@@ -650,6 +650,8 @@ import type { ChestSink } from './vanilla/BuriedChestsPass';
 // ★1457 对齐档 2（2026-08-23）复线：finalSeedCleanup import 恢复（1457 FinalizeSecretSeeds
 //   尾无条件终扫;KKKKKK 批曾撤,基准回 1457 后按 1457 WorldGen.cs:22666/:692 接回）。
 import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
+// ★IIIII106：i am error 终结端点（WorldGen.cs:1301，FinalizeSecretSeeds :671-674）
+import { doErrorWorldFinish } from './vanilla/SecretSeedDoEndsPass';
 // ★IIIII17：DoPortalGunInChests（WorldGen.cs:3004，FinalizeSecretSeeds #18 位）
 import { doPortalGunInChests } from './vanilla/FinalSeedCleanupPass';
 
@@ -1720,6 +1722,10 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
           if (hfIs1457()) {
             if (ctxGs[0]!.seedFlags?.portalGunInChests) {
               doPortalGunInChests(world.chests as never, () => rng.nextInt(7) === 0);
+            }
+            // ★IIIII106 cs:671-674：errorWorld Finish（worldIsFrozen Finish 位后）
+            if (ctxGs[0]!.seedFlags?.errorWorld) {
+              doErrorWorldFinish(store, rng, ctxGs[0]!, world.chests as never, world.starterTownNpcs as never);
             }
             finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never);
           }

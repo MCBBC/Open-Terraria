@@ -68,12 +68,29 @@ const HEART = TILE_BY_KEY['crystal_heart']!;
 // 距离用 sqrt(dx²+dy²)（原版 Math.Sqrt——Math.hypot 有 ulp 级差异，禁用）
 export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
-  const isCount = Math.trunc(w * 0.0008);          // 3（4200 宽）
+  const sfI106 = gs.seedFlags;
+  // ★IIIII106 cs:12981：eFI NormalAmount=skyblock 组合域；ReducedAmount=noSurface||count>=6
+  // → 单旗标两派生位恒假。errorWorldAdjustment(1.0)=单旗标因子 1 < 3 恒真 ⇒ ×3（cs:12997）。
+  const ewIslandX3 = !!sfI106.errorWorld;                       // Variations.errorWorldAdjustment(1.0)<3
+  const efiNormal = !!(sfI106.extraFloatingIslands && sfI106.skyblock);
+  const efiReduced = !!(sfI106.extraFloatingIslands && (sfI106.noSurface || efiNormal));
+  let isCount = Math.trunc(w * 0.0008);            // 3（4200 宽）
+  if (ewIslandX3) isCount *= 3;                                  // cs:12997-13002 ×3
   // GenVars.skyLakes = Reset 段定值（WorldGen.cs:11197-11205）：1 + (w>8000) + (w>6000)
   // → 小 4200=1 / 中 6400=2 / 大 8400=3。曾硬编码 1 → 大尺寸少 2 座天湖（中尺寸少 1），
   // P|23 流哈希即失配（大 l2222 JS n=74908 ≠ 原版），天湖几何缺失级联下游全图。
-  const skyLakes = 1 + (w > 8000 ? 1 : 0) + (w > 6000 ? 1 : 0);
+  let skyLakes = 1 + (w > 8000 ? 1 : 0) + (w > 6000 ? 1 : 0);
+  // ★IIIII106 cs:13009-13020：the care bears movie —— 岛数与天湖数同倍增（reduced ×2 /
+  // 普通 ×10），NormalAmount 组合域不放大。
+  if (!!sfI106.extraFloatingIslands && !efiNormal) {
+    if (efiReduced) { isCount *= 2; skyLakes *= 2; }
+    else { isCount *= 10; skyLakes *= 10; }
+  }
   const total = isCount + skyLakes;
+  // 中央排除带（cs:13045-13048）：150 缺省 / eFI 收窄 100；岛距（cs:13056）：180 缺省 /
+  // eFI&&Normal 收 100（单旗标恒 180——注意 reduced 分支不改岛距！）
+  const centerBand = !!sfI106.extraFloatingIslands ? 100 : 150;
+  const houseSpacing = (!!sfI106.extraFloatingIslands && !efiNormal) ? 100 : 180;
   const housesX: number[] = [];
   const housesY: number[] = [];
   let lakes = 0;
@@ -82,9 +99,9 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
     while (--budget > 0) {
       let ok = true;
       let x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);   // Next(0.1w, 0.9w)
-      while (x > w / 2 - 150 && x < w / 2 + 150) x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
+      while (x > w / 2 - centerBand && x < w / 2 + centerBand) x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
       for (let j = 0; j < housesX.length; j++) {
-        if (x > housesX[j]! - 180 && x < housesX[j]! + 180) { ok = false; break; }
+        if (x > housesX[j]! - houseSpacing && x < housesX[j]! + houseSpacing) { ok = false; break; }
       }
       if (!ok) continue;
       ok = false;
@@ -95,9 +112,21 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       if (!ok) continue;
       budget = -1;
       // GenVars.worldSurfaceLow（raw 截断）＝ gs.worldSurfaceLow（正数 floor≡trunc）
-      const y = Math.min(rng.int(90, surf - 101), gs.worldSurfaceLow - 50);
+      let y = Math.min(rng.int(90, surf - 101), gs.worldSurfaceLow - 50);
+      // ★IIIII106 cs:13105-13109：i am error 深岛重掷（!noSurface 内；Next(4)!=0 ⇒
+      //   Y 改入 [worldSurface+50, UnderworldLayer-50)——75% 的「天上岛」沉入地底）
+      if (!!sfI106.errorWorld && !sfI106.noSurface && rng.nextInt(4) !== 0) {
+        y = rng.nextIntRange(Math.floor(gs.worldSurface) + 50, st.h - 200 - 50);
+      }
       // GenVars.worldSurfaceLow（raw double 截断）——注意非 gs.worldSurfaceLow
-      const isLake = lakes >= isCount;
+      // ★IIIII106 cs:13027-13046 天湖判定：基态=成功序≥isCount 后皆湖；
+      // eFI 追加臂：i>4（=已成功落位 >4）后，尚无湖则本位强制为湖、已有湖则
+      // Next(4)==0（25%）为湖——彩熊世界的湖岛交错带。
+      let isLake = lakes >= isCount;
+      if (!!sfI106.extraFloatingIslands && housesX.length > 4) {
+        if (lakes === 0) isLake = true;
+        else if (rng.int(0, 3) === 0) isLake = true;
+      }
       // ★IIIII21（cs:13124-13155）：drunk 世界（非 remix 组合域）50/50 换用
       // SnowCloudIsland(style3)/DesertCloudIsland(style1)；正常世界 CloudIsland
       // style0。骰只在 drunk 分支内出现（普通世界零扰动）。
