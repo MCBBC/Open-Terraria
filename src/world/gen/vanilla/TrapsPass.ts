@@ -13,6 +13,7 @@ import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 // ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
 import { hfIs1457 } from './HellFortPass';
+import type { SparseChestSink } from '../ChestRegistry';   // ★IIII102c 稀疏 sink 槽模型
 // ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
 import { placeTrapDualDungeonReject } from './DungeonStyles1457';
 
@@ -540,7 +541,7 @@ let destroyObjectT = false;
 /** Chest.CanDestroyChest 语境（cs:590）：有物箱不可毁（锚键 y*w+x）。
  *  runTrapsPass 由 world.chests 灌入；杀箱时同步注销（Chest.DestroyChest） */
 let chestItemAnchors: Set<number> | null = null;
-let chestList: Array<{ x: number; y: number; items: unknown[] }> | null = null;
+let chestList: SparseChestSink | null = null;   // ★IIII102c：稀疏槽模型(洞=null,禁 splice)
 export function __setTrapsChestAnchors(s: Set<number> | null): void { chestItemAnchors = s; }
 
 
@@ -961,11 +962,14 @@ function checkChestGen(st: TileStore, x: number, y: number, rng?: RNG): void {
     }
   }
   // Chest.DestroyChest（cs:575+）：注销箱注册表（锚在本块内）
+  // ★IIII102c：splice → RemoveChest 置 null 留洞（Chest.cs:126——vanilla 不压缩数组,
+  //  槽号即后续 GetPossibleChestsToTrapify 的枚举下标）。
   if (chestList) {
-    for (let q = chestList.length - 1; q >= 0; q--) {
-      const c = chestList[q]!;
+    for (let q = 0; q < chestList.length; q++) {
+      const c = chestList[q];
+      if (!c) continue;
       if (c.x >= num && c.x <= num + 1 && c.y >= num2 && c.y <= num2 + 2) {
-        chestList.splice(q, 1);
+        chestList[q] = null;
         chestItemAnchors?.delete(c.y * st.w + c.x);
       }
     }

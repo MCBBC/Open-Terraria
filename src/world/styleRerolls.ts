@@ -224,17 +224,18 @@ export function rollUntilDifferent(
 // ---------------------------------------------------------------------------
 // 世界球 B3-5 —— 可行域重掷（游戏路径实际消费式）
 // ---------------------------------------------------------------------------
-// 上面 BG 掷链输出的是 vanilla 样式号全域，而本仓 BiomeBackground 各 STYLES 表
-// 是子集且【行号 ≠ vanilla 样式号】（SNOW_STYLES[2..5] 显示的是原版样式 5..8 的
-// 画；FOREST_STYLES[0]/[1] 是 SetForestBGSet style1 的同画复制行）。Game 曾把全
-// 域结果 %表长落行：雪 42%6→0、沙漠 52%4=0、森林 9%7→2 等——「while 必异」掷出的
-// 新值经取模后可折回原档视觉不变、或贴到完全不相干的行。修正 = 重掷池先压成
-// 【可行域】（与存储态同一行号空间,由 BiomeBackground.biomeVariantRows 提供再掷）：
-//   · 掷即渲染可达——每个候选都落在真实表行上,不再靠取模折叠；
-//   · 「必异」在可行域内成立——剔当前档 + 同画家族（isSameForestRow）；
+// 本仓重掷池 = 【渲染可达行空间】（BiomeBackground.biomeVariantRows 提供表长展开),
+// 不再按 vanilla 样式号全域掷完 %表长落行（B3-5 审计:全域%表长会把「while 必异」
+// 折回原档视觉——雪 42%6→0、森林 9%7→2 等）。终清波扩表后各群系表已与 setBG 可行
+// 值域一一对应，该机制语义不变仍生效：
+//   · 掷即渲染可达——每个候选都落在真实表行上,不靠取模折叠；
+//   · 「必异」在可行域内成立——剔当前档 + 同视觉族（森林族门走 BiomeBackground.
+//     sameVisual()，= IsBackgroundConsideredTheSame :8010 的行空间翻译）；
 //   · 可行域剔空返回 null = 原版 while(同值) 无从满足时上层早退的等价语义。
-// 全覆盖槽（jungle/crimson/hallow/ocean/underworld）该式的边际分布 ≡ 原版 while
-// 同值门循环的 uniform-over-others,行为零变化。值域缺口全清单锚 Game.applyWorldGlobeReroll。
+// 全覆盖槽的边际分布 ≡ 原版 while 同值门循环的 uniform-over-others。
+//
+// （历史注：isSameForestRow 曾专治 FOREST_STYLES[0]/[1] 同画复制行的旧子集表，
+//  扩表后全表无复制行，族判定收编进 sameVisual()，本函数已删。）
 
 /** 可行域重掷：pool = 渲染可达档位全集（BiomeBackground 行号空间），剔 current 与
  *  sameVisual 家族成员后均匀掷一值；候选空（单值域/全族同画）返回 null=早退。 */
@@ -246,12 +247,6 @@ export function rollVariantInDomain(
   const cand = pool.filter((v) => v !== current && !(sameVisual && sameVisual(current, v)));
   if (!cand.length) return null;
   return cand[rng.next(cand.length)];
-}
-
-/** 森林行家族门（行空间的 IsBackgroundConsideredTheSame 等价物）：FOREST_STYLES
- *  第 0/1 两行都是 SetForestBGSet style1 的复制画 → 族内互视同款必重掷；其余行各自成族。 */
-export function isSameForestRow(a: number, b: number): boolean {
-  return (a <= 1 ? 0 : a) === (b <= 1 ? 0 : b);
 }
 
 // ---------------------------------------------------------------------------

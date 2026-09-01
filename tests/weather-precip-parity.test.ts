@@ -49,6 +49,7 @@ describe('rain 列选型（Rain.cs:165/210）', () => {
   const hooksFor = (waterStyle: number) => ({
     lightAt: () => [255, 255, 255] as [number, number, number],
     atmo: 1, snowRatio: 0, snowTileCount: 0, bossDanger: false,
+    deerclopsNear: false,
     waterStyle, shimmerAlpha: 0,
     splashDust() {}, sandstormVisuals: false, desertSandTiles: 0,
     sandColors: () => [],
@@ -125,30 +126,32 @@ describe('spawnLeaf CurrentColumn（TileDrawing:8027）', () => {
 });
 
 // ---------- ⑤ SolidCollision 盒测（Collision.cs:2713-2746；斜坡穿沙定谳回归） ----------
-import { solidCollisionBox } from '../src/render/WeatherRenderer';
+import { solidCollisionBox, solidTileExact, wetCollisionBox } from '../src/render/WeatherRenderer';
 import { TILE } from '../src/core/constants';
 import { TileStore } from '../src/world/TileStore';
 
 /** 迷你 TileStore 桩（solidCollisionBox 只摸 w/h/idx/flags/wire/type/half） */
-function fakeStore(cells: Record<string, { type: number; half?: boolean; actuated?: boolean }>) {
+function fakeStore(cells: Record<string, { type?: number; half?: boolean; actuated?: boolean; slope?: number; liquid?: number }>) {
   const w = 32, h = 128;
   const type = new Uint16Array(w * h);
   const flags = new Uint8Array(w * h);
   const wire = new Uint8Array(w * h);
   const half = new Uint8Array(w * h);
+  const slope = new Uint8Array(w * h);
+  const liquid = new Uint8Array(w * h);
   flags.fill(1); // active 全 1（空气=type 0 不实心即可）
   for (const [k, c] of Object.entries(cells)) {
     const [x, y] = k.split(',').map(Number);
     const i = y * w + x;
-    type[i] = c.type;
+    type[i] = c.type ?? 0;
     half[i] = c.half ? 1 : 0;
     wire[i] = c.actuated ? 32 : 0;
+    slope[i] = c.slope ?? 0;
+    liquid[i] = c.liquid ?? 0;
   }
   return {
-    w, h, type, flags, wire, half,
+    w, h, type, flags, wire, half, slope, liquid,
     wall: new Uint16Array(w * h),
-    liquid: new Uint8Array(w * h),
-    liquidType: new Uint8Array(w * h),
     idx: (x: number, y: number) => y * w + x,
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
   } as never;
@@ -226,5 +229,47 @@ describe('沙尘 grain 268 链（空中波动支/实心收缩支）', () => {
     // 时序：+0.01（:1863）在收缩前 → (0.9+0.01)×0.9 −0.01（老化）
     expect(g.scale).toBeCloseTo((0.9 + 0.01) * 0.9 - 0.01, 5);
     expect(Math.abs(g.vx)).toBeCloseTo(Math.abs(10 * 1.0050251 * 0.25), 5);
+  });
+});
+
+// ---------- ⑦ WorldGen.SolidTile 生成门语义（WorldGen.cs:70487,与 SolidCollision 相反） ----------
+describe('solidTileExact（半砖/斜坡生成门审计）', () => {
+  const realLut = Number(TileStore.SOLID_LUT[SAND]);
+  beforeAll(() => { TileStore.SOLID_LUT[SAND] = 1; });
+  afterAll(() => { TileStore.SOLID_LUT[SAND] = realLut; });
+
+  it('整格沙=true;半砖=false;slope≠0=false(生成门排除,雨生成于其上再撞死)', () => {
+    const st = fakeStore({ '5,5': { type: SAND }, '6,5': { type: SAND, half: true }, '7,5': { type: SAND, slope: 2 } });
+    expect(solidTileExact(st, 5, 5)).toBe(true);
+    expect(solidTileExact(st, 6, 5)).toBe(false);   // halfBrick
+    expect(solidTileExact(st, 7, 5)).toBe(false);   // slope
+  });
+
+  it('已致动=false(nactive 门);平台型(type0)=false;越界=true(null→拒生)', () => {
+    const st = fakeStore({ '5,5': { type: SAND, actuated: true } });
+    expect(solidTileExact(st, 5, 5)).toBe(false);
+    expect(solidTileExact(st, 8, 8)).toBe(false);   // type 0 空气
+    expect(solidTileExact(st, -3, 4)).toBe(true);
+  });
+});
+
+// ---------- ⑧ WetCollision 液面感知（Collision.cs:2763） ----------
+describe('wetCollisionBox（浅水上缘干/液面下降）', () => {
+  it('满液格(255):面降 0.06px,2×2 雨盒搭上沿即湿', () => {
+    const st = fakeStore({ '9,9': { liquid: 255 } });
+    expect(wetCollisionBox(st, 9 * TILE + 4, 9 * TILE + 4, 2, 2)).toBe(true);
+  });
+
+  it('浅液格(liquid=32):水面在 +14px(液区 [158,160)),内盒 y=py+1 高 1px——上缘干、触面湿', () => {
+    const st = fakeStore({ '9,9': { liquid: 32 } });   // f = 224/16 = 14 → 液区 [158,160)
+    // py=132 → 内盒 y=[133,134) 全在水面之上 → 干
+    expect(wetCollisionBox(st, 9 * TILE + 4, 9 * TILE - 12, 2, 2)).toBe(false);
+    // py=157 → 内盒 y=[158,159) 压到液面 → 湿
+    expect(wetCollisionBox(st, 9 * TILE + 4, 9 * TILE + 13, 2, 2)).toBe(true);
+  });
+
+  it('斜坡覆液支:本格 slope≠0 且上邻有液 → 湿(Collision.cs:2811-2827)', () => {
+    const st = fakeStore({ '7,9': { slope: 1, type: 1 }, '7,8': { liquid: 255 } });
+    expect(wetCollisionBox(st, 7 * TILE + 4, 9 * TILE + 4, 2, 2)).toBe(true);
   });
 });

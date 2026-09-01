@@ -8,7 +8,8 @@
 //  P1-3 白天随机坐椅（:55774-55814：行走态 rand(300)==0 → 脚下格（Bottom−2px）
 //       椅 15/马桶 497 + 占位门；原版无昼夜门——夜间走回家的同样触发）
 //  P1-7 越障三档跳 + 卡墙折返（:54514-54611 两格上 −6/一格上 −5/半格 −4.4 +
-//       净空失败转身 flag26 / 逃命中冻结 flag27；StepUp 无位移 10t 折返 :54409-54422）
+//       净空失败转身 flag26 / 逃命中冻结 flag27；无位移 ≥30t 折返 cs:54789-54804
+//       ★对抗修复批①2026-09-01 拨正）
 import { describe, it, expect, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';
@@ -273,7 +274,7 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
     }
   });
 
-  it('魔法态 14 每 12t 交替 num58/num58+1（:69832-69847）：巫师 21/22', () => {
+  it('魔法态 14 每 6t 翻档（★1437 拨正 NPC.cs:69943-69955 `(fc%12)*2<12`）：巫师 21/22', () => {
     stubRand(0);
     const world = flatWorld();
     const npc = new TownNPC('wizard', 100 * 16, F * 16);
@@ -286,8 +287,9 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
     }
     expect(frames.length).toBeGreaterThan(13);
     expect(frames[0]).toBe(21);         // 态内计数 0
-    expect(frames[11]).toBe(21);        // 计数 11 仍在下档
-    expect(frames[12]).toBe(22);        // 计数 %24 ≥12 翻档
+    expect(frames[5]).toBe(21);         // 计数 5 仍在下档（档宽 6）
+    expect(frames[6]).toBe(22);         // 计数 %12 ≥6 翻档
+    expect(frames[12]).toBe(21);        // 计数 12 回卷下档
   });
 
   it('挥击态 15 按 ai[1]/AttackTime 比例四档（:69787-69802）：染料商 15t 内 21→22→23→24', () => {
@@ -386,7 +388,7 @@ describe('P1-3 行走随机坐椅（NPC.cs:55774-55814，无昼夜门）', () =>
 // =====================================================================
 // P1-7 越障三档跳 + 卡墙折返
 // =====================================================================
-describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611/:54409-54422）', () => {
+describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611/卡墙折退 cs:54789-54804）', () => {
   /** 白天无 home 向右走（stub 0.7：facing 恒 1、坐椅/攻击掷不中） */
   function walker(col: number, wall: (world: World) => void, label = 'jump-test') {
     const world = flatWorld(label);
@@ -439,7 +441,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
     expect(turned).toBe(true);        // 撞墙转身
   });
 
-  it('StepUp 无位移卡墙 10t → 强制折返（:54409-54422）', () => {
+  it('无位移卡墙 ≥30t → 强制折返一次（★对抗修复批①2026-09-01 对齐 cs:54789-54804）', () => {
     stubRand(0.7);
     // 1 格台阶（F-1）+ 其上 2 格留空 + F-3 悬浮盖板：三档跳全不命中、StepUp 头顶净空被堵
     const { npc, game } = walker(120, (w) => {
@@ -584,7 +586,9 @@ describe('P1-2 悬崖避让（NPC.cs:56093-56165/:54444-54467）', () => {
     expect(walkPrediction(st, 100, 100, false, 1, 110, F - 1, 42).avoidFalling).toBe(false);
     // ⑤ 豁免（:56120-56123）：不在 home±35 且正朝 home 走 → 悬空列也不避（远处赶路跳坑）
     expect(walkPrediction(st, 80, 200, false, 1, 120, F - 1, 42).avoidFalling).toBe(false);
-    // ⑥ 城镇宠物恒不避（TownCritter）
+    // ⑥ 避坠豁免参（★1437 拨正：回家臂/避坠消费的是 TownCritter 非 IsTownPet，
+    // NPCID.cs:4827——蓝队A-F1；实体侧谓词已由 IS_TOWN_PET 拨正
+    // VANILLA_TOWN_CRITTER_SHEETS，家化宠物放弃豁免）
     expect(walkPrediction(st, 100, 100, true, 1, 120, F - 1, 42).avoidFalling).toBe(false);
   });
 

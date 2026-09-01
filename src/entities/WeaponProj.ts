@@ -3356,11 +3356,12 @@ export class FlailProj extends Entity {
       };
       moveAndCollide(body, world, lvx, lvy);
       // ★1:1 决策落地(2026-09-01):命中轴判定与原版完全同构 = 【速度被改】差分
-      //   (:44471 velocity.X != lastVelocity.X)——slopeCollide 贴附等速度编辑同样
-      //   计入(原版即如此),此前旗标保守口径撤销。管线不动未拦截轴 ⇒ 精确相等无幻影。
+      //   (:44471 velocity.X != lastVelocity.X)——slopeCollide 贴附等速度编辑同样计入。
+      //   ★二修:采纳管线后速度而非恢复 lvx/lvy——贴坡粘滞/落面钳制等编辑持久化,
+      //   否则阶梯场景每帧同初速重触撞永动锁死(用户实录右下弹射)。
       const chX = body.vx !== lvx, chY = body.vy !== lvy;
       this.x = body.x; this.y = body.y;
-      this.vx = lvx; this.vy = lvy;
+      this.vx = body.vx; this.vy = body.vy;
       if (chX) {
         this.vx = -lvx * rest;
         this.bounces++; // localAI[0]:每次接触都计(:44476/:44482)——只计 >4 会让缓磨墙永不触发逃生
@@ -4042,7 +4043,8 @@ export class GrenadeProj extends Entity {
     };
     moveAndCollide(body, game.world, this.vx, this.vy);
     this.x = body.x; this.y = body.y;
-    this.vx = lastVx; this.vy = lastVy;
+    // ★1:1 同批:采纳管线后速度(lastVx/lastVy 已存档供反弹式引用)——贴坡等编辑持久化
+    this.vx = body.vx; this.vy = body.vy;
     const hitX = body.hitWall, hitY = body.collideY || body.onGround || body.hitHead;
     // 1088 橡实种弹：撞块先查种树点（CanAcornPlant → Kill——Kill 内种植/掉落，
     // oldVelocity = 入撞前速度）。管线版接触面含坡面落面(onGround)

@@ -1,0 +1,3916 @@
+{
+ "meta": {
+  "comment": "SM2 解释器位级金标(PRD:#0)。寄存值=生成时刻解释器逐位输出;重生成需人工审阅。",
+  "hostFingerprint": "0.g0df5258e2339,-0.f885fd4c4f041,0.72929c66agf695,-0.f73723956f6c6,0.1c5cae43b9g643,1.f9545e4g0ae18,3.0137g2bc9424d,2.c8f6gf04f2d54,0.000024c250a1g62acf,0.00000000000046d2f8110786a,7.1392b23a770g,0.00000000000013a94c2555f32a,0.51bf51c387c7c",
+  "engine": "v22.21.1",
+  "sceneCount": 12
+ },
+ "passes": {
+  "Default": {
+   "S01-white": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9e0024e4c54fc98f",
+    "stack": "931a3a50ca7a12f5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   }
+  },
+  "ColorOnly": {
+   "S01-white": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "30c3918267bb943f",
+    "stack": "2590af3457808025",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "b4617d4b70b8093f",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   }
+  },
+  "ArmorMartian": {
+   "S01-white": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "12b8abada6b34c2e",
+    "stack": "ec8a2a5153c82687",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "4f35496bb5650eb0",
+    "stack": "60ca6c0dc89e22f5",
+    "kill": "-"
+   }
+  },
+  "ArmorColored": {
+   "S01-white": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "3ba91d72674e8b8f",
+    "stack": "dc122d4c26333acd",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "d4a7675e993dfb0b",
+    "stack": "b4e489dddea9e639",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "d12d652139f40bb5",
+    "stack": "91793578f38a0835",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredAndBlack": {
+   "S01-white": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "85ace3ea1b504340",
+    "stack": "3a3b9974bea5b8cd",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "dfe2bc6672605b90",
+    "stack": "ff3afd347dd0bf15",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "2476c1fc5c9dccda",
+    "stack": "7782672688e9eaa2",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredAndSilverTrim": {
+   "S01-white": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "af58c52627c45535",
+    "stack": "7efacf95f3b516ba",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "14489bf286c52aed",
+    "stack": "80fde9893a3c1ea9",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "87b854c717b8d356",
+    "stack": "43db9af461a09ff5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   }
+  },
+  "ArmorSilverTrim": {
+   "S01-white": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "b43db3dc1a2511ad",
+    "stack": "ead4b4126cac6023",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "f53f17cde5317868",
+    "stack": "2182b37357e77e27",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "67f3e6be4505ce25",
+    "stack": "23ce912fdc20957a",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "e9c37aafb2d5260e",
+    "stack": "a6333e5bc86a0d54",
+    "kill": "-"
+   }
+  },
+  "ArmorBrightnessColored": {
+   "S01-white": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4920de8f3b48f4b4",
+    "stack": "667b04fea587d18e",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "3210f867cb31e434",
+    "stack": "d932f725db4d56fe",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "b3d63797a6b82d3b",
+    "stack": "3b83ee76ff160a12",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredGradient": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "8b1fe961638df5f9",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "f4e8a051a4b063b1",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "91793578f38a0835",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "a6e552f3032995ea",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "c0f55bb88f647666",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredAndBlackGradient": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "3242826f9d18e073",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "6e52db0f5759a0b4",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "7782672688e9eaa2",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "37a289cef587cd85",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "f9a1ed80d49a554b",
+    "kill": "-"
+   }
+  },
+  "ArmorBrightnessGradient": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "b82f386941f5c58a",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "aa9d1345a25abb02",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "7b6e4cd1f0930428",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "6565f482a3d636c8",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "4f9863adb5dc8cfb",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredRainbow": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "86e85300a727029e",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "88aeaeeade210a74",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "5e3043f0d9a7ee96",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "04a19f897e27bd80",
+    "stack": "39c61fb6c14bc8a7",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "1d94ae9e8839538b",
+    "kill": "-"
+   }
+  },
+  "ArmorBrightnessRainbow": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "d5785cf00ba358ea",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "fc896b5818bbce59",
+    "stack": "dea8e2ac2c8a13af",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "177a81fdd8ca66b7",
+    "kill": "-"
+   }
+  },
+  "ArmorLivingRainbow": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "de42a3b936666cba",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "cfba4e2d3089bf16",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "3fab6713e3173c11",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "f7cef872dfbdfda2",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "c7088c0953fb1f3b",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "e68d3e99f49678c9",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "3fab6713e3173c11",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "3fab6713e3173c11",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "df0630209b5db137",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "3fab6713e3173c11",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "72b35b24a690c364",
+    "stack": "ece33a0905370d8c",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "3fab6713e3173c11",
+    "kill": "-"
+   }
+  },
+  "ArmorInvert": {
+   "S01-white": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "bfc1d2aad0a91899",
+    "stack": "88c43c3b98658c55",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "4f24231cbf619c54",
+    "stack": "e21afdc2ccb69dfd",
+    "kill": "-"
+   }
+  },
+  "ArmorLivingOcean": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "4ba16691505da0fc",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "219b4f22590d39a8",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "82834e0ec5b03e30",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "174a4cb20a7c7578",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "813848167f53b08f",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "febed59646440c4f",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "82834e0ec5b03e30",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "82834e0ec5b03e30",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "f8336372b177ee77",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "82834e0ec5b03e30",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "22a2e596185da8c9",
+    "stack": "3a985d34754a5e68",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "82834e0ec5b03e30",
+    "kill": "-"
+   }
+  },
+  "ArmorLivingFlame": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "07531a87829384d7",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "e83d0d4c69cc192f",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "3b83ee76ff160a12",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "31c8582b8224c82f",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   }
+  },
+  "ArmorWisp": {
+   "S01-white": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "12f88b38b814c697",
+    "stack": "85a4326c52f0a45c",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "f4be00d87401a00d",
+    "stack": "30128ff5a660af50",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "c67ba1aac162065b",
+    "stack": "2590af3457808025",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "4a198d73ca5e7b5b",
+    "stack": "fbc42845d9ed7ec5",
+    "kill": "-"
+   }
+  },
+  "ArmorHighContrastGlow": {
+   "S01-white": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "74dafb1a7735440f",
+    "stack": "280ab6585b55db60",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "2092e522b9f3e711",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "8a1483cd44aa2c8f",
+    "stack": "ae1b77a5ad9f23b4",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "8958e4fd26b54c82",
+    "stack": "24db7644fcb20210",
+    "kill": "-"
+   }
+  },
+  "ArmorPlaid": {
+   "S01-white": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "592b48dfed94d1f5",
+    "stack": "c3a298305d35e158",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "8bfbfcfb4624ae55",
+    "stack": "b39821e7f6e076d6",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "22709bbfd5dea5f4",
+    "stack": "8fd34b03ad7d94d4",
+    "kill": "-"
+   }
+  },
+  "ArmorDev": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "82f5d0ff112919d9",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "64705ec0dd63a20d",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a9c1bb5f2771c674",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d1bf861238fa2df7",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "e301e82c79c77c7f",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "43a83ce4db40f632",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a9c1bb5f2771c674",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a9c1bb5f2771c674",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "7d758c83fd24b382",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "166658cba74a1451",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "30bc133a33f8026c",
+    "stack": "1eb1ba0e3bcb75cc",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a9c1bb5f2771c674",
+    "kill": "-"
+   }
+  },
+  "ArmorReflectiveColor": {
+   "S01-white": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "6a89e0306fcb0e88",
+    "stack": "2ca939b6abc0ad14",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "b16580f5627954f8",
+    "stack": "2d9099e70ebee9df",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "1dcb1376d2d543cb",
+    "stack": "6924fda315f1b7e9",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "dd126097a2db6a98",
+    "stack": "364ce3104b67ca5f",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "dd126097a2db6a98",
+    "stack": "144d04ca3a8d944f",
+    "kill": "-"
+   }
+  },
+  "ArmorBasicColor": {
+   "S01-white": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "754407335a592544",
+    "stack": "d1323ab55f10dee9",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "ccece4a5ab3e42b5",
+    "stack": "4439ec923691abb7",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "b3863d9b9e0ea258",
+    "stack": "14c863f1dd18a101",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9e0024e4c54fc98f",
+    "stack": "931a3a50ca7a12f5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   }
+  },
+  "ArmorHades": {
+   "S01-white": {
+    "direct": "59f611472b7a4110",
+    "stack": "def89d9bd01dd3b2",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "b53047327927649f",
+    "stack": "ddd34306c200959c",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "59f611472b7a4110",
+    "stack": "6a12d54ef146775e",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "59f611472b7a4110",
+    "stack": "33905d732c5934e4",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "59f611472b7a4110",
+    "stack": "f4c5082893c62c41",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "59f611472b7a4110",
+    "stack": "6a12d54ef146775e",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "59f611472b7a4110",
+    "stack": "6a12d54ef146775e",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "59f611472b7a4110",
+    "stack": "3a8d046249f39057",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "528632e9d327ad67",
+    "stack": "9fa2f4170249a528",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "59f611472b7a4110",
+    "stack": "8384fb789e1da0ab",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "59f611472b7a4110",
+    "stack": "4c9b81493494d019",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "59f611472b7a4110",
+    "stack": "6a12d54ef146775e",
+    "kill": "-"
+   }
+  },
+  "ArmorTwilight": {
+   "S01-white": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "46865deff1bb1c32",
+    "stack": "f3a738564c0a2cd3",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "23861ab063a26c9b",
+    "stack": "73a8adad6e8032e0",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "c8454724dca6cfa3",
+    "stack": "71e13bb89de1968c",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "3682c8911228793d",
+    "stack": "83cfdf7dcdfd983e",
+    "kill": "-"
+   }
+  },
+  "ArmorAcid": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "10dcb04ba70e47cb",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "92bc5b547a777e3c",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "b419c35f7897e0a4",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "c4adcc9a0134fc36",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "d7a29f9b7e9dbbb3",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "fdd80d062c9e8af7",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "b419c35f7897e0a4",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "39ccbcb52e7043c8",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "5a11b1182a8abe86",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "b419c35f7897e0a4",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "01bb005ede924e35",
+    "stack": "4fbef2b68b3b4d56",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "b419c35f7897e0a4",
+    "kill": "-"
+   }
+  },
+  "ArmorMushroom": {
+   "S01-white": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "b7f8eaa12de7a347",
+    "stack": "ffcfc29379a3b309",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "b04c6807d059ce5f",
+    "stack": "d6cebce257cca1af",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "3f9aeb9ce936e4ed",
+    "stack": "02bfd67a9683b1be",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "39a1769bd74099c3",
+    "stack": "3e60355fdb87e3b0",
+    "kill": "-"
+   }
+  },
+  "ArmorPhase": {
+   "S01-white": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "57ce2d72b78a4e6b",
+    "stack": "fa10785bc4e9d312",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "fd2f1ee0a9de5137",
+    "stack": "c58e121a25395d6e",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "e161efcf9594f00d",
+    "stack": "bbf02312a43fdab6",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "ffb8ebd194ddd517",
+    "stack": "ff006f4b44b8ca05",
+    "kill": "-"
+   }
+  },
+  "ArmorReflective": {
+   "S01-white": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9183465c318a259f",
+    "stack": "4d1c5175d96762f5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "7f3e2fcfc4900035",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "7d1f8d2112d9f57e",
+    "stack": "2166e0957c3a4a68",
+    "kill": "-"
+   }
+  },
+  "ArmorSolar": {
+   "S01-white": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "1f07058496ad57a7",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4e05c328d0efca65",
+    "stack": "ebbdb63f70a6356d",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "1ea1068dd2d55335",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "9471407fc92d8027",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "d8fdb2443364739b",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "bbe9a2079a096d50",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "1ea1068dd2d55335",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "22d51a50f87e548b",
+    "stack": "7724d39c64d558b4",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "27d7b8e77edb9e52",
+    "stack": "a81fb25f36b0b292",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "1ea1068dd2d55335",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "8bab2d99dea732a2",
+    "stack": "e512e38eccc7ceba",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "89137c6130ae2ef2",
+    "stack": "1ea1068dd2d55335",
+    "kill": "-"
+   }
+  },
+  "ArmorNebula": {
+   "S01-white": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "80c05d4fbfa2e376",
+    "stack": "9fbfc86de45d6fec",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "645ff1d177a7d3f2",
+    "stack": "f1daa28f2a54478d",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "b3d63797a6b82d3b",
+    "stack": "3b83ee76ff160a12",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "7b9be979c28d8d2c",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   }
+  },
+  "ArmorVortex": {
+   "S01-white": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4920de8f3b48f4b4",
+    "stack": "667b04fea587d18e",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "3210f867cb31e434",
+    "stack": "d932f725db4d56fe",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "b3d63797a6b82d3b",
+    "stack": "3b83ee76ff160a12",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "5075a26e2e8bf72d",
+    "kill": "-"
+   }
+  },
+  "ArmorStardust": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "2c9b58d50d32d41a",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "f7ddae8b7e4cff96",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "7f971c2e75528093",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "968167fb58eb915e",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "8a3ba99e63d53fc5",
+    "kill": "-"
+   }
+  },
+  "ArmorVoid": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a132b3d2002ffa28",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "0f910d8e1c4633d3",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "08464a268de12fb8",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "5ea6aac270fcbc83",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "9076a4854707c819",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "3a743fd2167e2511",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "08464a268de12fb8",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "08464a268de12fb8",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "649dd3f5d2195795",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "08464a268de12fb8",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "82dd707047044ae1",
+    "stack": "b8a63adb07f51229",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "08464a268de12fb8",
+    "kill": "-"
+   }
+  },
+  "ArmorShiftingSands": {
+   "S01-white": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "f524acffd64efcef",
+    "stack": "3e5599745b5d0d56",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "164d38be9340dd5f",
+    "stack": "83871e6c0f1274ca",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "a2ecc195cbdd24ba",
+    "stack": "ba9a37a3aa4b52d4",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   }
+  },
+  "ArmorShiftingPearlsands": {
+   "S01-white": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "f524acffd64efcef",
+    "stack": "3e5599745b5d0d56",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "164d38be9340dd5f",
+    "stack": "83871e6c0f1274ca",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "a2ecc195cbdd24ba",
+    "stack": "ba9a37a3aa4b52d4",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "85103b80c929e97b",
+    "stack": "68480ef174282c91",
+    "kill": "-"
+   }
+  },
+  "ArmorFog": {
+   "S01-white": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "6e5cee61224d96df",
+    "stack": "2ca7113463592c28",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "f7f411bdb970455b",
+    "stack": "da29a8c24ab62e94",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "1fe5072fd9dbc51e",
+    "stack": "f9a1a7ed8ea26523",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "801512f2ad9905d4",
+    "stack": "58044a57b6892deb",
+    "kill": "-"
+   }
+  },
+  "ArmorHallowBoss": {
+   "S01-white": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "924dd39b693b2973",
+    "stack": "0773f85696ab3a68",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "bbb2294b98fe7dce",
+    "stack": "30b844c1057f4016",
+    "kill": "-"
+   }
+  },
+  "ArmorMirage": {
+   "S01-white": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "c524cec377b5a44b",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "ee6db4b89c152094",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "93bf04b679996a1a",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "a07ca5c768a2510d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "12869da4bc36befe",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "ae5a0fbb8c30ea2f",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "93bf04b679996a1a",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "93bf04b679996a1a",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "dee04968afff188e",
+    "stack": "c722ca225db8cdd3",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "93bf04b679996a1a",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "c92bc46b189bddb4",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "0ea60d7d28654d47",
+    "stack": "93bf04b679996a1a",
+    "kill": "-"
+   }
+  },
+  "ArmorMidnightRainbow": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "289fe0dd574c2604",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "7a15adfc172815ff",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "4a02887a1fc3824e",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "c65f5d9a68c667dc",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "ebddf448e1b48334",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "38e81469ee578a37",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "4a02887a1fc3824e",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "4a02887a1fc3824e",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "f23fdc6af297e82f",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "4a02887a1fc3824e",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "bda273e50ba2f2a0",
+    "stack": "44b08f1fdcc2f374",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "4a02887a1fc3824e",
+    "kill": "-"
+   }
+  },
+  "ArmorColoredAndSilverTrimGradient": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "296905e7166a909f",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "d92e9e49d387be7a",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "43db9af461a09ff5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "8e510b65c0382669",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "51b7c6813e7a7c1d",
+    "kill": "-"
+   }
+  },
+  "ArmorPolarized": {
+   "S01-white": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "95eb463d29d4da2a",
+    "stack": "b64cd64f08abdf28",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "185ce49739d89242",
+    "stack": "5dd54266c89c8dd2",
+    "kill": "-"
+   }
+  },
+  "ArmorGel": {
+   "S01-white": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "01bb005ede924e35",
+    "stack": "15b7c9a0e66973eb",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "01bb005ede924e35",
+    "stack": "0daab874def3799e",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "eacb986ae6866035",
+    "stack": "a0cb8ff5be2ee75e",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "59776cd2398368f6",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "01bb005ede924e35",
+    "stack": "e855b6d8cd036893",
+    "kill": "-"
+   }
+  },
+  "ArmorFlow": {
+   "S01-white": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "2266c178f344b051",
+    "stack": "5ec6eeb53e3f9f52",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "309192e8d8805c73",
+    "stack": "c98c2a3692e97354",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "b3d63797a6b82d3b",
+    "stack": "3b83ee76ff160a12",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "4b0b89f9006a88d8",
+    "stack": "3051c8d5c3bd0260",
+    "kill": "-"
+   }
+  },
+  "ArmorForceField": {
+   "S01-white": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "cc208ffe95b9c8c0",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4920de8f3b48f4b4",
+    "stack": "2ff8fad8e759424f",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "3e3a41cf92de25d5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "648036eb810a6cb8",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "895d04da38bd1b08",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "affbb0e5225d0ab4",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "3e3a41cf92de25d5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "3210f867cb31e434",
+    "stack": "66333805b8a77a67",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "b3d63797a6b82d3b",
+    "stack": "a75bdc73359da2df",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "3e3a41cf92de25d5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "3276876c331dc86d",
+    "stack": "2aafea512486043a",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "f9ae4cdb8a6f7fea",
+    "stack": "3e3a41cf92de25d5",
+    "kill": "-"
+   }
+  },
+  "ArmorLoki": {
+   "S01-white": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "ebbbbd90abd58b37",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "691e9513d734fb14",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "b8070f2562d981f3",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "65924b1b7dc96113",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "74114c8718ce01d1",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "b8070f2562d981f3",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "b8070f2562d981f3",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "1a2d650a65077951",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "6fb7156cb39c8d1a",
+    "stack": "38098e77ddfa7dd9",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "f2ffe24b19df1e14",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "b020da25d3292bdc",
+    "stack": "c00d46b85a1e9082",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "4aa7d7a99dbcb2e6",
+    "stack": "b8070f2562d981f3",
+    "kill": "-"
+   }
+  },
+  "ForceField": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "6003d7e1d17c6e3d",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "76f07e0f85155188",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "90f3478ee2164719",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "a7645c25da32a7a5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "33f8dcbe7eeabe41",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "62492baadc4cc581",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "90f3478ee2164719",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "c171b55d0c00fac1",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "ec5b27aec435d945",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "90f3478ee2164719",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "90f3478ee2164719",
+    "kill": "-"
+   }
+  },
+  "WaterProcessor": {
+   "S01-white": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "d950644ac92ad935",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "c96ae975eddca3ae",
+    "stack": "d54cd1d5b3decd14",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "9f7a14015f39b49d",
+    "stack": "37d99e5d88af2bac",
+    "kill": "-"
+   }
+  },
+  "WaterDistortionObject": {
+   "S01-white": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "046dcbd19f0e71b1",
+    "stack": "fd8a07cc26061579",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "d8221b88c70c09d5",
+    "stack": "229964f3585346e1",
+    "kill": "-"
+   }
+  },
+  "HallowBoss": {
+   "S01-white": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "14c70e2671881291",
+    "stack": "d219fe4d821f6d25",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   }
+  },
+  "TitaniumStorm": {
+   "S01-white": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "825f476ff3eadd99",
+    "stack": "fc4335a353c412e5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "87832779c98e5d1a",
+    "stack": "bbe6dcd898befb88",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "14c70e2671881291",
+    "stack": "d219fe4d821f6d25",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "f340bc76061df391",
+    "stack": "7fc8a27d16ccdd25",
+    "kill": "-"
+   }
+  },
+  "QueenSlime": {
+   "S01-white": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "704e08ed18b9da45",
+    "stack": "5ed18dcbc20e01dc",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "e4ce85175d1b58b0",
+    "stack": "6ff1765526994d06",
+    "kill": "-"
+   }
+  },
+  "MagicMissile": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "FinalFractal": {
+   "S01-white": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "7ce4e0cd3a5de6cd",
+    "stack": "6430b1db3c00bc27",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "73bedd9ea6a9a825",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "cdfb5393eab170b9",
+    "stack": "9ec2773f98760149",
+    "kill": "-"
+   }
+  },
+  "FinalFractalVertex": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "MaskedFade": {
+   "S01-white": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "30a9a79744584851",
+    "stack": "a4f93577a9e44c25",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9e0024e4c54fc98f",
+    "stack": "931a3a50ca7a12f5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   }
+  },
+  "RainbowTownSlime": {
+   "S01-white": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "9ff606e3cb89443f",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "f210201e063af406",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "962c0d2414258671",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "f84e9565475b5c99",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "3028476201ac620d",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "306b5f39c4d2ea7c",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "962c0d2414258671",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "962c0d2414258671",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "6ef5fbea1c140dbb",
+    "stack": "193ae2adf1522e88",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "962c0d2414258671",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "9f53bb523839a08b",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "26a8c88b3693bbda",
+    "stack": "962c0d2414258671",
+    "kill": "-"
+   }
+  },
+  "HorizonClouds": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "9b2694c65524ce3e",
+    "stack": "a4797fcadbd641b6",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "LitNature": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "fc0d65ad8d9f693e",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "Aurora": {
+   "S01-white": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "46958f2cfdbf91d9",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "StormLightning": {
+   "S01-white": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "45db94d2aadfecd5",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   }
+  },
+  "LensFlare": {
+   "S01-white": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "9e0024e4c54fc98f",
+    "stack": "931a3a50ca7a12f5",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "9f707abc077de6ee",
+    "stack": "cded3f6d4ed1f7b5",
+    "kill": "-"
+   }
+  },
+  "MouseItem": {
+   "S01-white": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S02-gradient": {
+    "direct": "edd8f3d4bc95d2b5",
+    "stack": "578a4b359d608395",
+    "kill": "-"
+   },
+   "S03-t0": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S04-t0927": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S05-negfold": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S06-bigtime": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S07-spatial": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S08-sat-eps": {
+    "direct": "3ae174bc5329f87d",
+    "stack": "d80ac658736bb725",
+    "kill": "-"
+   },
+   "S09-rect": {
+    "direct": "8b0d3c6306a667a5",
+    "stack": "ac3deee29689bd25",
+    "kill": "-"
+   },
+   "S10-direction": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S11-size0-explicit": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   },
+   "S12-lightsource": {
+    "direct": "6a122558798127a5",
+    "stack": "4b852eec5e393585",
+    "kill": "-"
+   }
+  }
+ }
+}

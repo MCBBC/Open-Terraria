@@ -42,6 +42,7 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { rainbowRodHitFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import type { VDust } from '../fx/VanillaDust';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
 
@@ -128,16 +129,30 @@ function moveTowardsV2(cx: number, cy: number, tx: number, ty: number, max: numb
   return [cx + dx / d * max, cy + dy / d * max];
 }
 
-/** hslToRgb(S=1, L=0.5) 纯色环（彩虹拖尾色相档） */
-function hueToRgb(h: number): [number, number, number] {
+/** Main.hslToRgb(H, S=1, L)（Main.cs:48695-48737 双精度 hue2rgb + byte=Math.Round，
+ *  与 fx/orchestraFx.leafHslToRgb255 同式）。S 钉 1 的纯色环：飞行拖尾/14×火花用
+ *  缺省 L=.5（原文 hslToRgb(rand,1,.5)），Kill 迸散尾迹用 L=.65（:72441）。
+ *  ★终清波升级：旧六边形分段表只支持 L=.5，79 Kill 的 newColor3 是 L=.65 档——
+ *  直接引入闭式替代保证亮度档正确。 */
+function hueToRgb(h: number, l = 0.5): [number, number, number] {
+  const hue2rgb = (c: number, t1: number, t2: number): number => {
+    let x = c;
+    if (x < 0) x += 1;                          // C# double 直写 c++/c--
+    if (x > 1) x -= 1;
+    if (6 * x < 1) return t1 + (t2 - t1) * 6 * x;
+    if (2 * x < 1) return t2;
+    if (3 * x < 2) return t1 + (t2 - t1) * (2 / 3 - x) * 6;
+    return t1;
+  };
   h = ((h % 1) + 1) % 1;
-  const x = 1 - Math.abs((h * 6) % 2 - 1);
-  let r = 0, g = 0, b = 0;
-  const seg = Math.floor(h * 6);
-  if (seg === 0) { r = 1; g = x; } else if (seg === 1) { r = x; g = 1; }
-  else if (seg === 2) { g = 1; b = x; } else if (seg === 3) { g = x; b = 1; }
-  else if (seg === 4) { r = x; b = 1; } else { r = 1; b = x; }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  const s = 1;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const t = 2 * l - q;
+  return [
+    Math.round(hue2rgb(h + 1 / 3, t, q) * 255),
+    Math.round(hue2rgb(h, t, q) * 255),
+    Math.round(hue2rgb(h - 1 / 3, t, q) * 255),
+  ];
 }
 
 // ===================== 可控导弹（aiStyle 9） =====================
@@ -579,9 +594,9 @@ export class MagicMissileProj extends Entity {
 
   /** 统一消亡出口。★R27：79 彩虹魔杖补 Kill 爆（Projectile.cs:72426-72503，1458 同）：
    *  Resize(128,128) → maxPenetrate=−1 → Damage()（128px 死亡 AoE 二次结算）→
-   *  Item10 音 + 沿 oldPos 全程彩虹 d267 尾迹迸散（逐点 hue 相位/数量按距离衰减/
-   *  白影 CloneDust）+ RainbowRodHit 编排粒子×2（L5 批收编 fx/orchestraFx 真值本体）
-   *  + 14×d66 随机色 vel×3 */
+   *  Item10 音 + 沿 oldPos 全程彩虹 d267 尾迹迸散（逐点 hue 相位/数量按「距头部」
+   *  衰减/白影 = Dust.CloneDust 真克隆体——2026-09-01 终清波真值化，见体内注）
+   *  + RainbowRodHit 编排粒子×2（L5 批收编 fx/orchestraFx 真值本体）+ 14×d66 随机色 */
   private killNow(game: GameHooks): void {
     if (this.projId === 79 && !this.dead) {
       // Resize(128,128) 死亡 AoE（:72428-72434）：以弹心为心 128px 盒重结算一次伤害
@@ -603,24 +618,63 @@ export class MagicMissileProj extends Entity {
           Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       }
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
-      // 沿 oldPos 尾迹迸散（:72436-72487）：逐点 hue 相位、数量按点序衰减（≥0.3 −1、
-      // ≥0.65 再 −2、≥0.85 再 −3）、白影 CloneDust 以半尺白尘近似
-      const N = this.trail.length / 2;
+      // 沿 oldPos 尾迹迸散（:72436-72487，1458 与 1047 彩虹巨石族同构）。
+      // ★终清波真值化（2026-09-01）：旧实现两处失真退役——①数量衰减方向写反
+      // （vanilla 对「距头部」≥N×{.3/.65/.85} 的老点减，旧码却对靠近爆心的新点减）
+      // ②白影系独立半尺白粒——vanilla 是 Dust.CloneDust 真克隆体：字段级复制回池
+      // （position/velocity/fadeIn/scale 原样继承,Dust.cs:260-288）后 scale/=2、
+      // fadeIn×=0.85、color=纯白。本段全链：
+      //   · 迭代序 = 最新点（oldPos[0]=前拍位,:17204 oldPos[0]=position 写入面）
+      //     → 最老；target4 从 Center 起步逐点回走（:72439），DirectionTo().Safe
+      //     Normalize(Vector2.Zero)（零长→零向）。
+      //   · 主尘：NewDust(vector13,w,h,267,0,0,0,newColor3) → velocity×=r×0.8 →
+      //     noGravity=true → scale=(.9+r×1.2)【覆写消抖动】 → fadeIn=r×1.2×num67 →
+      //     velocity += 向更近点单位向×6 → scale×=num67（与上行合并为整式）→
+      //     position=Lerp(盒心,dustPos,lvp2)。
+      //   · newColor3 = hslToRgb((hue0+lvp2)%1, 1, .65)——L=.65 亮度档（:72441）。
+      //   · num67 = Lerp(.3,1,lvp2)、lvp2 = GetLerpValue(N,0,num65) = 1−num65/N；
+      //     count = Next(1,4) − {≥.3N:1, ≥.65N:再2, ≥.85N:再3}（可负 = 不出粒）。
+      //   · 克隆仅在主尘成功时进行（:72491 `if (num69 != 6000)` 门 ↔ 引擎池满 null）；
+      //     克隆走引擎 VanillaDust.clone 1:1 件（Game.vanillaDust 直读，缺省面静默
+      //     跳过——测试桩/池满同兜底语义）。
+      interface DustCloneHost { clone(rf: VDust): VDust | null }
+      const pts79 = this.trail;                            // 老→新存数（oldPos 为新→老，反向等价）
+      const N = pts79.length / 2;
       const hue0 = Math.random();
-      for (let i = 0; i < N; i++) {
-        const px = this.trail[i * 2], py = this.trail[i * 2 + 1];
-        const t = N <= 1 ? 0 : i / (N - 1);                 // GetLerpValue(oldPos.Length,0,i)
-        let count = 1 + Math.floor(Math.random() * 3);
-        if (t >= 0.3) count--;
-        if (t >= 0.65) count -= 2;
-        if (t >= 0.85) count -= 3;
-        const [rr, gg, bb] = hueToRgb((hue0 + t) % 1);
+      const dustCloneHost = (game as unknown as { vanillaDust?: DustCloneHost }).vanillaDust;
+      let tgx = this.cx, tgy = this.cy;                    // target4（:72438 初值 Center）
+      for (let i = N - 1; i >= 0; i--) {                   // num65=0（head）→ N-1（tail）
+        const px = pts79[i * 2], py = pts79[i * 2 + 1];
+        const num65 = (N - 1) - i;                         // 距头部（oldPos 下标语义）
+        const dl = Math.hypot(tgx - px, tgy - py);
+        const uxv = dl > 0 ? (tgx - px) / dl : 0;
+        const uyv = dl > 0 ? (tgy - py) / dl : 0;
+        tgx = px; tgy = py;                                // target4 = vector13（:72474）
+        const lvp2 = 1 - num65 / N;                        // GetLerpValue(N,0,num65)（:72444）
+        const k67 = lerp(0.3, 1, lvp2);                    // num67（:72445）
+        let count = 1 + Math.floor(Math.random() * 3);     // Next(1,4)（:72442）
+        if (num65 >= N * 0.3) count--;                     // :72446-72454
+        if (num65 >= N * 0.65) count -= 2;
+        if (num65 >= N * 0.85) count -= 3;
+        const [rr, gg, bb] = hueToRgb((hue0 + lvp2) % 1, 0.65);
         for (let k = 0; k < Math.max(count, 0); k++) {
-          const sc = lerp(0.3, 1, t) * (0.9 + Math.random() * 1.2);   // Lerp(0.3,1,lerpValue2) :72448
-          game.spawnDust?.(px, py, 4, 4, 267, 0, 0, 0,
-            { r: rr, g: gg, b: bb, a: 255 }, sc, true);
-          game.spawnDust?.(px, py, 4, 4, 267, 0, 0, 0,
-            { r: 255, g: 255, b: 255, a: 255 }, sc / 2, true);   // CloneDust 白影
+          const dd = game.spawnDust?.(px - this.w / 2, py - this.h / 2, this.w, this.h,
+            267, 0, 0, 0, { r: rr, g: gg, b: bb, a: 255 }, undefined, true);
+          if (!dd) continue;                               // num69 != 6000 门（主尘失败无克隆）
+          dd.vx *= Math.random() * 0.8;                    // :72446
+          dd.vy *= Math.random() * 0.8;
+          dd.scale = (0.9 + Math.random() * 1.2) * k67;    // :72448/:72453 两步覆写并一步
+          dd.fadeIn = Math.random() * 1.2 * k67;           // :72449
+          dd.vx += uxv * 6;                                // :72452 velocity += vector14*6f
+          dd.vy += uyv * 6;
+          dd.x = px + (dd.x - px) * lvp2;                  // :72455 position Lerp 盒心钉头
+          dd.y = py + (dd.y - py) * lvp2;
+          const cd = dustCloneHost?.clone(dd as VDust);    // CloneDust(num69)（:72492）
+          if (cd) {
+            cd.scale /= 2;                                 // :72493
+            cd.fadeIn *= 0.85;                             // :72495
+            cd.color = { r: 255, g: 255, b: 255, a: 255 }; // :72496
+          }
         }
       }
       // RainbowRodHit 编排粒子 ×2（:72488-72495）——L5 批收编真值本体（六掷虹彩

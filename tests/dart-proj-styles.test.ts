@@ -149,4 +149,19 @@ describe('敌怪弹幕 DART_STYLE（对照 Projectile.cs）', () => {
     expect(d.dead).toBe(false);
     expect(d.y).toBeGreaterThan(70 * 16);                // 已穿入地板下方
   });
+
+  it('498 铁钉：ai[0]<50 恒对齐速度向、≥50 与重力/摩擦同支改自旋 direction×0.5'
+    + '（:58485-58492 终清波接线——旧"±0.5 未接"登记退役）', () => {
+    const { hooks } = dartHooks();
+    const d = new Dart(20 * 16, 30 * 16, 7, 2, 12, 498);
+    expect(d.life).toBe(180);                            // SetDefaults timeLeft :5723
+    flyTicks(d, hooks, 49);
+    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2, 5); // else 支 atan2+1.57
+    expect(d.vy).toBeCloseTo(0, 5);                      // 重力与翻转同拍起(前 49t 无)
+    flyTicks(d, hooks, 1);
+    expect(d.vy).toBeCloseTo(0.15, 5);                   // 第 50 更新起 vy+=0.15(:58487)
+    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5, 5); // 自旋一拍
+    flyTicks(d, hooks, 3);
+    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5 * 4, 5);
+  });
 });

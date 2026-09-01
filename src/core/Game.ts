@@ -160,10 +160,11 @@ import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
 import { VoidLensProj } from '../entities/VoidLensProj';
 import { BeachBallProj, FootballProj } from '../entities/BallProjs';
 // 三地球仪 Kill 重掷消费面（树球 868/世界球 869/月亮球 996 —— Projectile.cs:75111-75131）
-// B3-5：世界球重掷改走可行域（rollVariantInDomain+isSameForestRow）;原版全域链
+// B3-5：世界球重掷改走可行域（rollVariantInDomain;森林族门 = BiomeBackground.sameVisual
+// ——终清波扩表后全表无复制行,isSameForestRow 退役）;原版全域链
 // rollUntilDifferent/rollForestBg/isSameBackground 留在 styleRerolls 作参考实现存照
 import {
-  rollMoonType, rollTreeTopVariation, rollVariantInDomain, isSameForestRow,
+  rollMoonType, rollTreeTopVariation, rollVariantInDomain,
   pickZoneArea, ensureTreeTops13, oceanDepths,
   TREE_AREA_BY_GROUND_TILE, mathRng, type BgAreaKind,
 } from '../world/styleRerolls';
@@ -347,7 +348,7 @@ import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { windSway } from '../render/WindSway';
 import { natureParticles } from '../render/NatureParticles';
-import { dustWaterFor } from '../render/WeatherRenderer';
+import { dustWaterFor, solidCollisionBox } from '../render/WeatherRenderer';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
@@ -4624,6 +4625,7 @@ export class Game implements GameHooks {
       snowRatio: 0,
       snowTileCount: 0,
       bossDanger: false,
+      deerclopsNear: false,
       waterStyle: 0,
       shimmerAlpha: 0,
       sandstormVisuals: false,
@@ -4967,6 +4969,7 @@ export class Game implements GameHooks {
     const savedNpcs = this.world.pendingTownNpcs ?? [];
     this.world.pendingTownNpcs = [];
     this.guideSpawned = true;
+    let droppedOldMan = false;   // 老人条目在直加循环被丢弃(幽灵 home/门口特例) → 重建门必须知情
     if (savedNpcs.length > 0) {
       for (const n of savedNpcs) {
         const t = new TownNPC(n.key, n.x, n.y);
@@ -4996,11 +4999,15 @@ export class Game implements GameHooks {
         }
         // 守卫老人特例（2026-08-31）：原版老人锚=地牢口【开敞】走廊，不套围合——
         // 导入 wld 的老人条目 home 落地牢口无房墙区域属正常态,snap 必失败。此时
-        // 丢弃存档条目走下方 !some(old_man) 分支 maybeRespawnOldMan 重扫门口重建
-        // （Game.ts:5361 同款 door 锚+leashHome），与自有存档老人生成语义合流。
+        // 丢弃存档条目走下方 maybeRespawnOldMan 重扫门口重建（Game.ts:5361 同款
+        // door 锚+leashHome），与自有存档老人生成语义合流。
         // 骷髅王已败/无地牢世界维持直加（t 无 home,同旧导入行为）。
+        // ★2026-09-01 修复（用户实报"导入后地牢老人没了"）：重建门原查
+        //   !savedNpcs.some(old_man)——但 savedNpcs 是【原始存档表】,直加循环
+        //   丢弃条目后此门恒 false → 丢弃+不重建=老人凭空消失。改丢弃知情旗。
         if (n.key === 'old_man' && !t.home
           && this.world.dungeonX > 0 && !this.skeletronDowned()) {
+          droppedOldMan = true;
           continue;
         }
         this.entities.add(t, 'npcs');
@@ -5038,9 +5045,10 @@ export class Game implements GameHooks {
         }
         this.entities.add(st, 'npcs');
       }
-      // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目则重扫地牢口）
+      // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目或条目被
+      // 直加循环丢弃[幽灵 home/门口特例]都重扫地牢口重建）
       if (this.world.dungeonX > 0 && !this.skeletronDowned()
-        && !savedNpcs.some((n) => n.key === 'old_man')) {
+        && (!savedNpcs.some((n) => n.key === 'old_man') || droppedOldMan)) {
         this.maybeRespawnOldMan();
       }
       // bound 救援 NPC 已由存档条目覆盖（含 bound 态与已获救态），不再重新放置
@@ -6225,8 +6233,9 @@ export class Game implements GameHooks {
         player.x - player.oldX, player.y - player.oldY,
         // 43 型照度门 Lighting.GetColor（Dust.cs:1475-1484）读光采样器
         (tx, ty) => this.lighting.lightAt(tx, ty),
-        // 278 型入实心格收缩（Dust.cs:2264-2268）WorldGen.SolidTile 探针
-        (tx, ty) => { const s = this.world.store; return s.inBounds(tx, ty) && s.isSolid(tx, ty); },
+        // 76/278/329 实心收缩（Dust.cs :1823/:2264/:598）Collision.SolidCollision 盒探针
+        // （半砖下 8px、斜坡整格、平台不算——1:1,曾为单点 isSolid 备案近似）
+        (px, py, w, h) => solidCollisionBox(this.world.store, px, py, w, h),
         // 主角探针：230 型钻头尘吸向玩家中心（:655-663 customData=mountedPlayer）/
         // 76 型雪尘随玩家下坠（:1814 Main.player[myPlayer].velocity.Y）
         { cx: player.cx, cy: player.cy, vy: player.vy });
@@ -7192,6 +7201,19 @@ export class Game implements GameHooks {
           }
         }
         this.boss = null;
+      }
+    }
+
+    // ---- 守卫老人每帧自灭（AI_007 type 37 1:1，NPC.cs:53886-53760）----
+    // 原版老人 AI 每帧查 downedBoss3 → ai[3]=1 消散（Roar_0）。覆盖非战斗途径的
+    // 旗标在位面：如导入「老人条目+已败骷髅王」双条目的奇特 wld（直加支照加，
+    // 原版同款活一帧即散）、控制台/未来旗标注入路径
+    if (this.world.dungeonX > 0 && !!(w.flags.downedSkeletron || w.flags['downed_35'])) {
+      for (const n of this.entities.npcs) {
+        if (n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead) {
+          n.dead = true;
+          this.playSfxWav('Roar_0', 1, n.cx, n.cy);   // 消散咆哮(:53742-53750)
+        }
       }
     }
 
@@ -19884,6 +19906,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       hooks.waterStyle = this.renderer.waterStyle;
       // 微光雨门/淡出（Rain.cs:32 + Main.cs:39488；monoFilters 逐帧同源值）
       hooks.shimmerAlpha = this.renderer.monoFilters.shimmerAlpha;
+      // 鹿角怪稀释放雪（NPC.IsADeerclopsNearScreen :——UpdateFoundActiveNPCs 全图
+      // 活跃 NPC 打标,无屏幕过滤;本仓 enemies 桶 vanillaId===668 同义）
+      hooks.deerclopsNear = (this.enemies() as import('../entities/Enemy').Enemy[]).some((e) => !e.dead && e.vanillaId === 668);
     }
   }
 
@@ -28206,23 +28231,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  ★B3-5：重掷池先压成【本仓可行域】再掷（styleRerolls.rollVariantInDomain,池 =
    *  BiomeBackground.biomeVariantRows 行空间）——曾按 vanilla 全域掷完 %表长落行,
    *  雪 42%6=0/森林 9%7=2 等会把「必异」结果折回原档视觉不变或贴到错组画。
-   *  ★值域缺口全清单（vs 1457 各槽持久值域:setBG cs:7165 起/SetForestBGSet/RollRandom
-   *  ForestBGStyle cs:8008/IsBackgroundConsideredTheSame cs:8040）：
-   *    forest  {0..13}∪{31,51,71,72,73}:本仓 FOREST_STYLES 7 行仅覆盖样式 1(第 0/1 两
-   *            行都是其复制画)+2..6 —— 缺样 0(默认树组 t[9,10,11])、样 7..13、五折子族;
-   *    snow    {0..8}∪{21,22,31,32,41,42} 共 15 值:本仓 SNOW_STYLES 6 行={样式 0,1,
-   *            5,6,7,8}(行 2..5 显示的是原版样式 5..8 的画;山体恒画样式0 的35/36),
-   *            缺纯山体样 2/3/4 与六个折变体,另有行号↔样式号错位面;
-   *    desert  {0..4}∪{51,52,53}:本仓 DESERT_STYLES 4 行=样 0..3,缺样 4([248,249,250])
-   *            与沙侵染族 51/52/53;
-   *    corrupt {0..4}∪{51,52}(原生样 5 必被折成 51/52 不驻留):本仓 CORRUPT_STYLES
-   *            6 行含样 51(行5=[324,323,322]),缺样 52([324,226,322]);
-   *    mushroom{0..4}:本仓 MUSHROOM_STYLES 2 行[26,27,28]/[111,110,109] 与 1456/1457
-   *            样式三元组(46..48/231../234../287../319..321)全不对应(疑似更早版本转录),
-   *            缺样 2..4 —— 行画对齐待扩表批处理,此处不动既有观测行为。
-   *    jungle/crimson/hallow/ocean/underworld 全覆盖零缺口（此式重掷的边际分布 ≡ 原版
-   *    while 同值门循环 uniform-over-others）。underworld 双写 world.underworldBG
-   *  （存档持久位）。 */
+   *  ★值域缺口清单 → 终清波扩表收编（2026-09,BiomeBackground 各表头注记锚行号）：
+   *  B3-5 时各表为 vanilla 子集（forest 缺样 0/7..13/五折子族、snow 缺纯山体样
+   *  2/3/4 与六折变体、desert 缺样 4+侵染族、corrupt 缺样 52、mushroom 两行
+   *  [26,27,28]/[111,110,109] 系早期错转录——26/27 实为 GoodEvilDesert 兜底画）。
+   *  现各 STYLES 表与 setBG 可行值域一一对应（森林 19 视觉/雪 15/沙漠 8 四列结构/
+   *  腐化 7 含样 52/蘑菇 5 档全表;丛林/猩红/神圣/海洋/地狱原本就全覆盖），
+   *  行→贴图映射随行序即原版样式序成立；行号空间仍经 biomeVariantRows/
+   *  rollVariantInDomain 重掷,必异语义 = 同值 + sameVisual() 同族剔除。
+   *  underworld 双写 world.underworldBG（存档持久位）。 */
   private applyWorldGlobeReroll(): void {
     const s = this.scene as unknown as Record<string, boolean>;
     const bg = this.renderer.biomeBg;
@@ -28242,9 +28259,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const area = pickZoneArea(z, Math.floor(this.player.cx / TILE), this.world.treeX);
     if (area.kind === 'forest') {
       const slot = `forest${area.seg}` as 'forest0' | 'forest1' | 'forest2' | 'forest3';
-      // 可行域重掷 + 行族门（FOREST_STYLES[0]/[1] 同画复制行,IsBackgroundConsideredTheSame
-      // cs:8040 的行空间等价物）;null=可行域剔空 ⇒ 早退=vanilla while 门无从满足即放行的语义
-      const nv = rollVariantInDomain(bg.biomeVariantRows('forest'), bg.biomeVariant(slot), isSameForestRow);
+      // 可行域重掷 + 行族门（sameVisual = IsBackgroundConsideredTheSame cs:8040 的
+      // 行空间翻译:森林族 3↔31/5↔51/7↔71↔72↔73;终清波扩表后全表无复制行）
+      // null=可行域剔空 ⇒ 早退=vanilla while 门无从满足即放行的语义
+      const nv = rollVariantInDomain(bg.biomeVariantRows('forest'), bg.biomeVariant(slot),
+        (a, b) => bg.sameVisual('forest', a, b));
       if (nv === null) return;
       bg.setBiomeVariant(slot, nv);
       return;

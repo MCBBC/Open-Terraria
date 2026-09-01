@@ -26,7 +26,6 @@ interface SnowFlake {
   x: number; y: number;
   vx: number; vy: number;
   scale: number;
-  life: number;
   /** NewDust 帧掷（Dust.cs:177 frame.Y=10×rand(3)）→ 源矩形 (760,10×frame,8,8) */
   frame: number;
   active: boolean;
@@ -61,6 +60,10 @@ export interface WeatherFxHooks {
   snowTileCount: number;
   /** Boss 危险中（雨量 ×0.05 保底 1，Rain.cs:32-40） */
   bossDanger: boolean;
+  /** NPC.IsADeerclopsNearScreen（NPC.cs:12407 id=668）——反编译实为【全图任一活跃
+   *  668】（UpdateFoundActiveNPCs 无屏幕过滤,名字骗人）：雪稀释 num/20、目标 /3、
+   *  雪片 scale −0.5（Main.cs:13228-13231/:13268-13270） */
+  deerclopsNear: boolean;
   /** Main.waterStyle（Rain.cs:165/210 rain.type = waterStyle×3+rand(3)；
    *  Dust.dustWater() :405-421 溅花尘映射）——★曾硬编码纯水 0-2，雪原/丛林等
    *  雨滴与溅花全部用错列（2026-09-01 与 dust 268 同批同族修正） */
@@ -100,6 +103,51 @@ export function dustWaterFor(waterStyle: number): number {
     case 12: return 288;
     default: return 33;
   }
+}
+
+/** WorldGen.SolidTile（WorldGen.cs:70487-70499）1:1：nactive + tileSolid + !tileSolidTop
+ *  + **!halfBrick + slope==0**——与 SolidCollision 的半砖/斜坡语义【相反】（生成门：
+ *  半砖/斜坡格不算实心，雨滴要生成在其上再立即撞死溅花）。★曾用 isSolid（仅类型位,
+ *  含半砖/斜坡）代替 → 斜坡/半砖屋顶正上方一列不生成雨（2026-09-01 半砖审计）。
+ *  越界格按 vanilla tile==null → true（拒生） */
+export function solidTileExact(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const nactive = st.flags[i] !== 0 && (st.wire[i] & TileStore.WIRE_ACTUATED) === 0;
+  return nactive && TileStore.SOLID_LUT[st.type[i]] === 1 && !st.half[i] && st.slope[i] === 0;
+}
+
+/** Collision.WetCollision（Collision.cs:2763-2830）布尔 1:1（honey/shimmer 旗不建模，
+ *  雨死判只用返回值）：内盒 = 中心收缩 (min(10,W)/2, min(H/2,H)/2)（C# int 除法）；
+ *  液格 = **液面高度感知** AABB——水面随液量下降 (256−liquid)/16 px（浅水上缘是干的，
+ *  雨滴穿过水面才判湿）；斜坡支 = 本格 slope≠0 且上邻格有液 → 湿（液覆斜坡）。
+ *  ★曾用单点 liquid>0 代替——半格液上缘误判湿 */
+export function wetCollisionBox(st: TileStore, px: number, py: number, w: number, h: number): boolean {
+  const num = Math.min(10, w);
+  const num2 = Math.min(Math.floor(h / 2), h);
+  const vx = px + Math.floor(w / 2) - Math.floor(num / 2);
+  const vy = py + Math.floor(h / 2) - Math.floor(num2 / 2);
+  const x0 = Math.max(0, Math.min(Math.floor(px / TILE) - 1, st.w - 1));
+  const x1 = Math.max(0, Math.min(Math.floor((px + w) / TILE) + 2, st.w - 1));
+  const y0 = Math.max(0, Math.min(Math.floor(py / TILE) - 1, st.h - 40));
+  const y1 = Math.max(0, Math.min(Math.floor((py + h) / TILE) + 2, st.h - 40));
+  for (let i = x0; i < x1; i++) {
+    for (let j = y0; j < y1; j++) {
+      const idx = st.idx(i, j);
+      if (st.liquid[idx] <= 0) {
+        // else 支（:2811-2827）：斜坡格 + 上邻格有液 → 湿
+        if (st.flags[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
+        if (st.liquid[st.idx(i, j - 1)] <= 0) continue;
+        if (vx + num > i * TILE && vx < i * TILE + TILE && vy + num2 > j * TILE && vy < j * TILE + TILE) return true;
+        continue;
+      }
+      const f = ((256 - st.liquid[idx]) / 32) * 2;          // num5*2f（浮点液面下降量）
+      const cy = j * TILE + f;
+      const ch = TILE - Math.trunc(f);                      // num4 -= (int)(num5*2f)
+      if (vx + num > i * TILE && vx < i * TILE + TILE && vy + num2 > cy && vy < cy + ch) return true;
+    }
+  }
+  return false;
 }
 
 /** Collision.SolidCollision（Collision.cs:2713-2746,2 参版）1:1：盒对实心格 AABB 扫描。
@@ -166,7 +214,11 @@ export class WeatherRenderer {
     if (hooks.shimmerAlpha > 0) return;          // Main.shimmerAlpha 门（Rain.cs:32）
     let num = (viewW / 1920) * 25;               // MaxWorldViewSize.X≈1920 的比例
     num *= 0.25 + 1 * w.cloudAlpha;              // Rain.cs:28
-    if (hooks.bossDanger) num = Math.max(1, num * 0.05);
+    if (hooks.bossDanger) {                          // :39-47：num2>1 且折后<1 才抬到 1
+      const num2 = num;
+      num *= 0.05;
+      if (num2 > 1 && num < 1) num = 1;
+    }
     for (let i = 0; i < num; i++) {
       // 自动画质密度门(Rain.cs:123 rand(100)<gfxQuality×100):q 降则雨滴
       // 按比例稀疏(每滴独立掷门,原版同款)
@@ -181,9 +233,10 @@ export class WeatherRenderer {
       x = Math.max(0, Math.min((world.w - 1) * TILE, x));
       const tx = Math.max(0, Math.min(world.w - 1, Math.floor(x / TILE)));
       const ty = Math.max(0, Math.min(world.h - 1, Math.floor(y / TILE)));
-      // 起点须非实心且无墙（Rain.cs:72-74）
+      // 起点须非 SolidTile 实心且无墙（Rain.cs:86：WorldGen.SolidTile 排除半砖/斜坡——
+      // ★曾用 isSolid 类型位 → 斜坡/半砖屋顶正上方一列不生成雨）
       const st = world.store;
-      const solid = st.isSolid(tx, ty);
+      const solid = solidTileExact(st, tx, ty);
       const wall = st.wall[st.idx(tx, ty)];
       if (solid || wall > 0) continue;
       this.spawnRain(x, y);
@@ -195,6 +248,8 @@ export class WeatherRenderer {
     const w = this.weather!;
     const hooks = this.hooks!;
     let cap = Math.floor(this.poolCap * w.cloudAlpha);
+    const num4 = (1 + gfxQuality.value) / 2;             // :179-183 画质池帽
+    if (num4 < 0.9) cap = Math.floor(cap * num4);
     const snow = hooks.snowRatio * hooks.snowRatio;
     cap = Math.floor(cap * (1 - snow));
     cap = Math.floor(cap * Math.pow(hooks.atmo, 9));
@@ -218,7 +273,10 @@ export class WeatherRenderer {
    *  scale = 1+Next(-20,21)×0.01、velocity = 传入速度×scale、
    *  rotation = atan2(vx, -vy)。消费方 = 眼球伞滴水（Player.DoEyebrellaRainEffect） */
   newRainForced(x: number, y: number, vx: number, vy: number): void {
-    for (const d of this.pool) {
+    const num3 = (1 + gfxQuality.value) / 2;              // Rain.cs:142-146 画质池帽
+    const num2 = num3 < 0.9 ? Math.floor(this.poolCap * num3) : this.poolCap;
+    for (let pi = 0; pi < num2; pi++) {
+      const d = this.pool[pi];
       if (d.active) continue;
       d.active = true;
       d.x = x; d.y = y;
@@ -239,17 +297,17 @@ export class WeatherRenderer {
     if (!hooks) return;
     this.makeRain(viewW, camX, camY, playerVx, playerVy, world);
     this.makeSnow(viewW, viewH, camX, camY, playerVy, world);
-    const camBottom = camY + 2000;
+    const camBottom = camY + viewH;                      // :2387 dust 屏底清（screenHeight,无 +100——雨专有）
     const st = world.store;
     for (const d of this.pool) {
       if (!d.active) continue;
       d.x += d.vx;
       d.y += d.vy;
-      const tx = Math.floor((d.x + 1) / TILE);
-      const ty = Math.floor((d.y + 1) / TILE);
-      const solid = st.inBounds(tx, ty) && st.isSolid(tx, ty);
-      const wet = st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
-      if (solid || wet || d.y > camBottom) {
+      // 消亡门（Rain.Update :120）：SolidCollision(pos,2,2)（半砖下 8px 才算）‖
+      // 液面感知 WetCollision(pos,2,2)（浅水上缘干）‖ 屏底 +100
+      const solid = solidCollisionBox(st, d.x, d.y, 2, 2);
+      const wet = wetCollisionBox(st, d.x, d.y, 2, 2);
+      if (solid || wet || d.y > camY + viewH + 100) {
         d.active = false;
         // 落水花（Rain.Update :123-134）：真 dust = dustWater()（waterStyle 映射），
         // 生在 position−velocity（退回表面一步）再 X−2/Y+2；alpha=38/scale=0.6/
@@ -274,7 +332,9 @@ export class WeatherRenderer {
       if (solidCollisionBox(st, f.x - 5, f.y - 5, 10, 10)) {   // :1823-1827 SolidCollision 10×10 盒
         f.scale *= 0.9; f.vx *= 0.25; f.vy *= 0.25;
       }
-      if (--f.life <= 0 || f.scale < 0.3 || f.y > camBottom) f.active = false;
+      f.scale -= 0.01;                              // :2163 老化（76 无 fadeIn,与链内 +0.009 净 −0.001/t
+      //  = 原版寿命机制;★曾用 life 200-300 计时器替代 → 雪片 +0.009/t 无限变大、寿命偏短）
+      if (f.scale < 0.1 || f.y > camBottom) f.active = false;   // :2432/:2387
       if (f.active) snowLive.push(f);
     }
     // ---- 沙尘 grain 更新（Dust.cs 268 独占链 :1859-1887 + :469 移动 + :2148 老化
@@ -321,10 +381,15 @@ export class WeatherRenderer {
     const w = this.weather!;
     const hooks = this.hooks!;
     if (hooks.atmo < 0.4 || hooks.snowTileCount <= 0) return;   // SurfaceAtmospherics 近似（同雨）
+    if ((world as unknown as { remixWorld?: boolean }).remixWorld) return;  // snowing() :13205 remix 早退
     let num = hooks.snowTileCount / 6000;                       // SnowTileMax（SceneMetrics.cs:46）
     num = Math.pow(num, 4 - w.cloudAlpha * 3);
-    const target = Math.floor(500 * (viewW / 1920) * (1 + 2 * w.cloudAlpha));
+    let target = Math.floor(500 * (viewW / 1920) * (1 + 2 * w.cloudAlpha));
     const attempts = 1 + 50 * w.cloudAlpha;
+    if (hooks.deerclopsNear) {                                  // :13228-13231 鹿角怪稀释放雪
+      num /= 20;
+      target /= 3;
+    }
     let live = 0;
     for (const f of this.snow) if (f.active) live++;
     const st = world.store;
@@ -344,9 +409,14 @@ export class WeatherRenderer {
       const tx = Math.max(0, Math.min(world.w - 1, Math.floor(sx / TILE)));
       const ty = Math.max(0, Math.min(world.h - 1, Math.floor(sy / TILE)));
       const ii = st.idx(tx, ty);
-      if (st.flags[ii] !== 0 || st.wall[ii] !== 0) continue;    // 非实心且无墙（:13015）
-      // 速度/缩放（:13016-13038）：scale = 1+0.4α（两次 +=0.2α）
-      const scale = 1 + 0.4 * w.cloudAlpha;
+      // 生成门（Main.cs:13200 snowing）：!nactive && wall==0 才生成——nactive = active
+      // && !致动（致动格对碰撞免疫,原版允许雪生成其间）;★曾用 active 位漏致动豁免
+      const nactive = st.flags[ii] !== 0 && (st.wire[ii] & TileStore.WIRE_ACTUATED) === 0;
+      if (nactive || st.wall[ii] !== 0) continue;
+      // 尺度/速度时序（:13249-13271）：NewDust 抖动 → +0.2α(#1) → vy *= scale →
+      // 风分支 → vy *= 1+0.3α → +0.2α(#2) → Deerclops −0.5 → 尾乘 1+0.5α
+      let scale = 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
+      scale += 0.2 * w.cloudAlpha;
       let vy = 3 + Math.floor(Math.random() * 30) * 0.1;
       vy *= scale;
       let vx: number;
@@ -359,8 +429,10 @@ export class WeatherRenderer {
         vy *= 0.5;
       }
       vy *= 1 + 0.3 * w.cloudAlpha;
+      scale += 0.2 * w.cloudAlpha;                              // :13265 #2
+      if (hooks.deerclopsNear) scale -= 0.5;                    // :13267-13269
       const k = 1 + w.cloudAlpha * 0.5;                         // 末端 velocity ×= 1+0.5α
-      const f: SnowFlake = { x: sx, y: sy, vx: vx * k, vy: vy * k, scale, life: 200 + Math.floor(Math.random() * 100), frame: Math.floor(Math.random() * 3), active: true };
+      const f: SnowFlake = { x: sx, y: sy, vx: vx * k, vy: vy * k, scale, frame: Math.floor(Math.random() * 3), active: true };
       this.snow.push(f);
       live++;
     }

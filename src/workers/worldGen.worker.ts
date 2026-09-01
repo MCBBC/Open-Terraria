@@ -120,7 +120,9 @@ ctx.onmessage = async (e) => {
           if (lastProgLabel === undefined && label === undefined) return; // 首条粘滞前不判定
           lastProgLabel = label !== undefined ? label : lastProgLabel;
           const now = Date.now();
-          if (now < nextShotAt) return;
+          // p≥1 终帧越权：冷却钟只削过程帧，成图帧必达（此前"保底"会被
+          // 恰好落窗内的 '完成' 事件削掉——评审 2026-09-01 修正）
+          if (now < nextShotAt && p < 1) return;
           if (boundary || p >= 1 || Math.abs(p - lastShotP) >= PREVIEW_MIN_DP) {
             if (shootIfDue()) lastShotP = p;
           }

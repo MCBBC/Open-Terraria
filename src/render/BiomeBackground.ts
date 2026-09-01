@@ -30,19 +30,43 @@ const STYLE_TO_AREA: Record<number, number> = {
 };
 
 
-// ---- 贴图集表（WorldGen.setBG :7181-7700；style 由世界种子确定性挑选） ----
-// 森林（SetForestBGSet :7605：树层 + 远山组；style 见 case）
+// ---- 贴图集表（WorldGen.setBG :7165-7716；style 由世界种子确定性挑选） ----
+// ★终清波扩表（2026-09：对照 Terarria1458 反编译全集补齐渲染行）：此前本仓各
+// 群系表是 vanilla 值域子集（B3-5 审计备案），世界球重掷只落在旧档位上。现全部
+// 扩到与原版 setBG 可行值域一一对应（每行注释标原版样式号，行序 = 样式号升序,
+// 子族紧随基样）。旧行语义仍保留在行号 0 起（见各表首注记）。
+//
+// 森林（SetForestBGSet :7589-7716 全表 19 视觉 = {0..13}∪{31,51,71,72,73}，
+// RollRandomForestBGStyle cs:7983 的全域；default 分支 = 样式 0 → [9,10,11]）。
 const FOREST_STYLES: Array<{ m: [number, number]; t: [number, number, number] }> = [
-  { m: [7, 8], t: [50, 51, 52] },    // 默认
-  { m: [7, 8], t: [50, 51, 52] },    // 1
-  { m: [7, 8], t: [53, 54, 55] },    // 2
-  { m: [7, 90], t: [91, -1, 92] },   // 3
-  { m: [93, 94], t: [-1, -1, -1] },  // 4
-  { m: [93, 94], t: [-1, -1, 55] },  // 5
-  { m: [171, 172], t: [173, -1, -1] }, // 6
+  { m: [7, 8], t: [9, 10, 11] },         // 样式 0（switch default 树组）
+  { m: [7, 8], t: [50, 51, 52] },        // 样式 1
+  { m: [7, 8], t: [53, 54, 55] },        // 样式 2
+  { m: [7, 90], t: [91, -1, 92] },       // 样式 3
+  { m: [7, 90], t: [91, -1, 11] },       // 样式 31
+  { m: [93, 94], t: [-1, -1, -1] },      // 样式 4
+  { m: [93, 94], t: [-1, -1, 55] },      // 样式 5
+  { m: [93, 94], t: [-1, -1, 11] },      // 样式 51
+  { m: [171, 172], t: [173, -1, -1] },   // 样式 6
+  { m: [176, 177], t: [178, -1, -1] },   // 样式 7
+  { m: [176, 177], t: [178, -1, 11] },   // 样式 71
+  { m: [176, 177], t: [178, -1, 52] },   // 样式 72
+  { m: [176, 177], t: [178, -1, 55] },   // 样式 73
+  { m: [179, 180], t: [184, -1, -1] },   // 样式 8
+  { m: [277, 278], t: [279, -1, -1] },   // 样式 9
+  { m: [280, 281], t: [282, -1, -1] },   // 样式 10
+  { m: [7, 331], t: [330, 329, 328] },   // 样式 11
+  { m: [7, 336], t: [335, 334, 333] },   // 样式 12
+  { m: [7, -1], t: [343, 342, 341] },    // 样式 13（无 Step2 山层）
 ];
+/** 行号 ↔ 原版森林样式号映射（上表唯一事实源,sameVisual forest 族门的翻译底稿;
+ *  导出仅供对账/测试——渲染与重掷消费方仍应走行空间口）。 */
+export const VANILLA_FOREST_STYLE_ORDER = [0, 1, 2, 3, 31, 4, 5, 51, 6, 7, 71, 72, 73, 8, 9, 10, 11, 12, 13];
+
 const CORRUPT_STYLES: Array<[number, number, number]> = [
-  [12, 13, 14], [56, 57, 58], [211, 212, 213], [225, 226, 227], [240, 241, 242], [324, 323, 322],
+  [12, 13, 14], [56, 57, 58], [211, 212, 213], [225, 226, 227], [240, 241, 242],
+  [324, 323, 322],   // 样式 51（Graveyard 族——RandomizeBackgrounds_Corruption :7962 折变体）
+  [324, 226, 322],   // 样式 52（case 52 :7253-[1]槽借 226,SURF_FLIP 整层翻转自动生效）
 ];
 const CRIMSON_STYLES: Array<[number, number, number]> = [
   [43, 44, 45], [105, 106, 107], [174, -1, 175], [214, 215, 216], [-1, 229, 230], [255, 256, 257], [339, 338, 337],
@@ -50,18 +74,65 @@ const CRIMSON_STYLES: Array<[number, number, number]> = [
 const JUNGLE_STYLES: Array<[number, number, number]> = [
   [15, 16, 17], [59, 60, 61], [222, 223, 224], [237, 238, 239], [284, 285, 286], [271, 272, 273], [302, 301, 300],
 ];
-const SNOW_STYLES: Array<[number, number, number]> = [
-  [37, 38, 39], [97, 96, 95], [258, 259, 260], [263, 264, 265], [267, 266, 268], [299, 298, -1],
+/** 雪（setBG case 3 :7305-7440 全域 = Next(9)+折变体 21/22/31/32/41/42 共 15 视觉）。
+ *  ★原版 case 3 连 Main.snowMntBG 一起换（:7306 预置 35/36 后按样式覆写 98/99/
+ *  98/100/98/101 或清空 -1/-1）——结构化行携带山体对（m 槽,-1=该步不画）,
+ *  drawSurface 雪支按行取 m 槽替换旧硬编码 35/36。 */
+interface SnowRow { m: [number, number]; t: [number, number, number] }
+const SNOW_STYLES: SnowRow[] = [
+  { m: [35, 36], t: [37, 38, 39] },      // 样式 0
+  { m: [35, 36], t: [97, 96, 95] },      // 样式 1
+  { m: [98, 99], t: [-1, -1, -1] },      // 样式 2（纯山体组）
+  { m: [98, 99], t: [95, 96, 97] },      // 样式 21
+  { m: [98, 99], t: [37, 38, 39] },      // 样式 22
+  { m: [98, 100], t: [-1, -1, -1] },     // 样式 3
+  { m: [98, 100], t: [95, 96, 97] },     // 样式 31
+  { m: [98, 100], t: [37, 38, 39] },     // 样式 32
+  { m: [98, 101], t: [-1, -1, -1] },     // 样式 4
+  { m: [98, 101], t: [95, 96, 97] },     // 样式 41
+  { m: [98, 101], t: [37, 38, 39] },     // 样式 42
+  { m: [-1, -1], t: [258, 259, 260] },   // 样式 5（巨型山脉树组,无独立山层）
+  { m: [-1, -1], t: [263, 264, 265] },   // 样式 6
+  { m: [269, 270], t: [267, 266, 268] }, // 样式 7
+  { m: [35, 36], t: [299, 298, -1] },    // 样式 8（case 8 不覆写山体,:7306 预置态）
 ];
 const HALLOW_STYLES: Array<[number, number, number]> = [
   [29, 30, 31], [102, 103, 104], [219, 220, 221], [243, 244, 245], [-1, 261, 262], [327, 326, 325],
 ];
+/** 蘑菇（setBG case 8 :7528-7559 五档全表）。★终清波修正:旧行 [26,27,28]/
+ *  [111,110,109] 是早期转录错误——26/27 实为原版 GoodEvilDesert 兜底沙丘画
+ *  （Main.cs:61857/:61874 LoadBackground(26)/(27)）、109..111 与蘑菇无关,与
+ *  1456/1457/1458 三版 mushroomBG 全不对应。存档兼容:mushroom 持久值本就是
+ *  原版样式号 0..4,行序即样式序,旧存档 0/1 值直接落正确新行。 */
 const MUSHROOM_STYLES: Array<[number, number, number]> = [
-  [26, 27, 28], [111, 110, 109],
+  [46, 47, 48], [231, 232, 233], [234, 235, 236], [287, 288, 289], [321, 320, 319],
 ];
-const DESERT_STYLES: Array<[number, number, number]> = [
-  [21, 20, -1], [108, 109, -1], [207, 208, -1], [217, 218, -1],
+/** 沙漠（setBG case 6 :7441-7508 全域 = {0..4}∪{51,52,53}）。结构化行:p=Pure 组
+ *  （bgStyle=2 直用）;c/h/r=腐化/神圣/猩红沙漠槽列（bgStyle=5/13/14 时若当前
+ *  desertStyle 为沙侵染族 51/52/53 则取对应列,否则走 GoodEvilDesert 兜底 26/27）。
+ *  样式 4 无侵染列——纯样式只在 Pure 列驻留(:7462 后 Clear 只填 Pure)。 */
+interface DesertRow {
+  p: [number, number, number];
+  c?: [number, number, number];
+  h?: [number, number, number];
+  r?: [number, number, number];
+}
+const DESERT_STYLES: DesertRow[] = [
+  { p: [21, 20, -1] },                  // 样式 0
+  { p: [108, 109, -1] },                // 样式 1
+  { p: [207, 208, -1] },                // 样式 2
+  { p: [217, 218, -1] },                // 样式 3
+  { p: [248, 249, 250] },               // 样式 4（三槽齐用;山体门 desertBG!=4 关闭,:60809/:60847）
+  { p: [306, 303, -1], c: [310, 307, -1], h: [314, 311, -1], r: [318, 315, -1] },  // 样式 51
+  { p: [306, 304, -1], c: [310, 308, -1], h: [314, 312, -1], r: [318, 316, -1] },  // 样式 52
+  { p: [306, 305, -1], c: [310, 309, -1], h: [314, 313, -1], r: [318, 317, -1] },  // 样式 53
 ];
+/** 沙漠样式 4 所在行（BackMountainsStep1/Step2 的 desertBG!=4 门锚点,
+ *  :60806-60808/:60844-60846——沙暴巨型丘自带三层,不再叠通用 23/22 山）。 */
+const DESERT_STYLE4_ROW = 4;
+/** 好恶沙漠兜底画（DrawSurfaceBG_GoodEvilDesert :61852-61892:set 的对应侵染列
+ *  为空时 Corrupt/Hallow/CrimsonDesert 槽落通用沙丘双条 26/27） */
+const GOODEVIL_DESERT_FALLBACK: [number, number] = [26, 27];
 /** 海洋单层贴图变体（WorldGen.setBG case 7 :7513-7541：style 0-7 → Main.oceanBG，
  *  worldgen 期 setBG(7, random.Next(8)) :7973 掷骰；海洋层 = 单张贴图无树层组） */
 const OCEAN_STYLES = [28, 110, 111, 209, 210, 283, 332, 340];
@@ -105,6 +176,15 @@ const SET_BG: Record<number, [number | undefined, number | undefined, number | u
   333: [2.01, 0.37, undefined, undefined], 334: [undefined, 0.26, undefined, undefined], 335: [undefined, 0.22, 1650, 1470],
   337: [1.01, 0.35, 2500, 2200], 338: [0.98, 0.24, 1900, 1650], 339: [0.94, 0.2, 1600, 1350],
   341: [undefined, 0.3, undefined, undefined], 342: [undefined, 0.25, undefined, undefined], 343: [undefined, 0.2, 1650, 1550],
+  // ★森林树层[0]槽内联覆写（DrawSurfaceBG_Forest :62231-62259——这四枚不在
+  //   SetBackgroundOffsets switch 内,是函数体内的 if 分支专属值;终清波扩表批补齐,
+  //   曾漏 = 样式 6(row t0=173)/7(178)/8(184) 的缩放与视差恒走函数头默认档）。
+  //   282 同类内联分支只有 bgScale=1.4(:62253),但其 SetBackgroundOffsets 项
+  //   ([2.6,0.25,1800,1340] :61519)随后必覆写,净行为已由上表 282 行承担。
+  91: [1.2, 0.27, undefined, undefined],
+  173: [1.3, 0.25, undefined, undefined],
+  178: [1.2, 0.30000001192092896, undefined, undefined],
+  184: [1.2, 0.25, undefined, undefined],
 };
 
 /** GetLayerYOffset（Main.cs :60687-60730）：山体/雪原/丛林层贴图专属 Y 微调 */
@@ -126,7 +206,7 @@ for (const t of [219, 220, 221, 271, 272, 273, 302, 303, 305, 307, 309, 311, 313
  *  Crimson :61150-61156/:61231 + Jungle :61888/:61920/:61948） */
 const SURF_NUDGE: Record<number, number> = {
   50: -50, 53: -100, 91: 200, 173: 200, 178: 75, 330: -150, 335: -150, 343: -300,   // Forest[0]
-  51: -50, 54: -100, 329: -150, 334: -150, 342: -300,                              // Forest[1]
+  51: -50, 54: -100, 329: -150, 334: -150, 342: -300, 342: -300,                              // Forest[1]
   52: -50, 55: -100, 92: 150, 328: -150, 333: -150, 341: -50,                      // Forest[2]
   105: 50, 174: -350, 175: -400,                                                   // Crimson[0]/[2]
   59: -200, 60: -175, 61: -150,                                                    // Jungle
@@ -294,6 +374,20 @@ class CanvasBgBlit implements BGBlit {
   }
 }
 
+/** 行变体类型 = 元组行（corrupt/crimson/jungle/hallow/mushroom 三元组）或结构化行
+ *  （forest/SnowRow{m,t}、DesertRow{p,c,h,r}） */
+type SurfStyleRow = number[] | { readonly [k: string]: readonly number[] };
+
+/** 结构化/元组行 → 贴图 id 平面集（warm/warmStyle/loadBg 预热与渐隐带判定共口；
+ *  键名覆盖两类结构化行的全部槽）。负数槽位（-1=该步不画）由消费方自行过滤。 */
+function rowTexIds(row: SurfStyleRow): number[] {
+  if (Array.isArray(row)) return [...row];
+  return ['m', 't', 'p', 'c', 'h', 'r'].flatMap((k) => {
+    const v = (row as { readonly [k: string]: readonly number[] })[k];
+    return Array.isArray(v) ? [...v] : [];
+  });
+}
+
 export class BiomeBackground {
   /** Main.cloudBGAlpha（:58782-58792 漂移累积器，cloudBG 大云图双层 α 源；
    *  与 SkyRenderer 同名位同式——HorizonClouds 强度消费那份，此处消费云图层 α） */
@@ -379,6 +473,35 @@ export class BiomeBackground {
     return OCEAN_STYLES[this.oceanStyle] ?? OCEAN_STYLES[0];
   }
 
+  /** 沙漠当前生效三层组（bgStyle 槽感知）：Desert(2)→Pure 列 p；Corrupt/Hallow/
+   *  CrimsonDesert(5/13/14)→该侵染列 c/h/r——纯样式（0..4）不驻留侵染列
+   *  （setBG case 6 每 case 先 Clear 只填 Pure,:7448 起）→ 落 GoodEvilDesert
+   *  兜底沙丘双条 26/27（Main.cs DrawSurfaceBG_GoodEvilDesert :61852-61892,
+   *  第三槽 -1=原版双条画）。drawSurface/预温共口。 */
+  private activeDesertTriple(): [number, number, number] {
+    const d = this.styleRow('desert', DESERT_STYLES, this.desertStyle);
+    if (this.bgStyle === Desert) return [...d.p] as [number, number, number];
+    const col = this.bgStyle === CorruptDesert ? d.c
+      : this.bgStyle === HallowDesert ? d.h
+      : this.bgStyle === CrimsonDesert ? d.r : undefined;
+    if (col) return [...col] as [number, number, number];
+    return [GOODEVIL_DESERT_FALLBACK[0], GOODEVIL_DESERT_FALLBACK[1], -1];
+  }
+
+  /** IsBackgroundConsideredTheSame（WorldGen.cs:8010）的行空间翻译——重掷「必异」
+   *  的同族门（rollVariantInDomain 的 sameVisual 参量来源，Game.applyWorldGlobeReroll
+   *  经此取用；行号空间经 VANILLA_FOREST_STYLE_ORDER 映射回样式号判族）：
+   *  原版只有森林有三/四元视觉族 3↔31、5↔51、7↔71↔72↔73，其余群系 default 分支
+   *  一律严格同值（a===b 由 rollVariantInDomain 的剔除逻辑先行处理）。 */
+  sameVisual(kind: 'corrupt' | 'crimson' | 'jungle' | 'snow' | 'hallow'
+    | 'mushroom' | 'desert' | 'ocean' | 'underworld' | 'forest', a: number, b: number): boolean {
+    if (kind !== 'forest') return a === b;
+    const st = (row: number) => VANILLA_FOREST_STYLE_ORDER[row];
+    return [[3, 31], [5, 51], [7, 71, 72, 73]].some(
+      (g) => g.includes(st(a)) && g.includes(st(b)),
+    );
+  }
+
   /** 风格表兜底读（pickStyle 的无 world 版）：索引缺失/越界回退 [0] 并留现场。
    *  warm/warmStyle/tint 全族统一走此口——裸读表曾在风格域字段越界时
    *  "undefined.filter" 帧循环 halt（2026-08-27 用户实报 Td.warm） */
@@ -446,19 +569,20 @@ export class BiomeBackground {
    *  后台取齐,跨群系旅行不闪空。fire-and-forget */
   warm(scene: SceneFlags): void {
     if (this.seededFor === -1) return; // 尚未播种(preloadInitial/draw 先行),跳过防取错风格
-    // ★风格档读取统一走 styleRow 兜底（seedPick 负模数曾致同类崩溃，见类内注记）
-    const styles: number[][] = [];
+    // ★风格档读取统一走 styleRow 兜底（seedPick 负模数曾致同类崩溃，见类内注记）；
+    //   行可能是元组或结构化行——统一经 rowTexIds 拉平成贴图 id 集
+    const styles: SurfStyleRow[] = [];
     if (scene.zoneCorrupt) styles.push(this.styleRow('corrupt', CORRUPT_STYLES, this.corruptStyle));
     else if (scene.zoneCrimson) styles.push(this.styleRow('crimson', CRIMSON_STYLES, this.crimsonStyle));
     else if (scene.zoneJungle) styles.push(this.styleRow('jungle', JUNGLE_STYLES, this.jungleStyle));
     else if (scene.zoneSnow) styles.push(this.styleRow('snow', SNOW_STYLES, this.snowStyle));
     else if (scene.zoneHallow) styles.push(this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle));
     else if (scene.zoneGlowshroom) styles.push(this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle));
-    else if (scene.zoneDesert) styles.push(this.styleRow('desert', DESERT_STYLES, this.desertStyle));
+    else if (scene.zoneDesert) styles.push(this.activeDesertTriple());
     // 海洋 = 单张 oceanBG 贴图（Step2 far 槽 3，Main.cs:59348-59351）
     else if (scene.zoneBeach) styles.push([this.oceanTexId()]);
     if (!styles.length) return; // 森林已在 preloadInitial 就位
-    void this.loadBg(styles[0].filter((n) => n >= 0));
+    void this.loadBg(rowTexIds(styles[0]).filter((n) => n >= 0));
   }
 
   /** 后台加载背景贴图集(去重 + decode 预热) */
@@ -561,21 +685,23 @@ export class BiomeBackground {
   }
 
   /** 拍照群系档贴图预热：style(0-14) → 该风格贴图 id 集 → loadBg（变体取当前
-   *  世界掷定的 corruptStyle/jungleStyle 等，与 draw 解析同表同变体）。 */
+   *  世界掷定的 corruptStyle/jungleStyle 等，与 draw 解析同表同变体）。
+   *  ★终清波：行可能是结构化行（雪 m/t 山+树、沙漠 p/c/h/r 四列）——统一经
+   *  槽位解析口 surfRowTexIds（含当前 bgStyle 对应的沙漠侵染列选择）。 */
   warmStyle(style: number): void {
-    let ids: number[] = [];
+    let row: SurfStyleRow | null = null;
     if (style === Forest1 || style === Forest2 || style === Forest3 || style === Forest4) {
       const st = this.styleRow('warm-forest', FOREST_STYLES, this.forestStyles[0] % FOREST_STYLES.length);
-      ids = [...st.m, ...st.t];
-    } else if (style === Corruption) ids = this.styleRow('corrupt', CORRUPT_STYLES, this.corruptStyle);
-    else if (style === Crimson) ids = this.styleRow('crimson', CRIMSON_STYLES, this.crimsonStyle);
-    else if (style === Jungle) ids = this.styleRow('jungle', JUNGLE_STYLES, this.jungleStyle);
-    else if (style === Snow) ids = this.styleRow('snow', SNOW_STYLES, this.snowStyle);
-    else if (style === Hallow) ids = this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle);
-    else if (style === Mushroom) ids = this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle);
-    else if (style === Desert) ids = this.styleRow('desert', DESERT_STYLES, this.desertStyle);
-    else if (style === Ocean) ids = [this.oceanTexId()];
-    const clean = ids.filter((n) => n >= 0);
+      row = { m: st.m, t: st.t };
+    } else if (style === Corruption) row = this.styleRow('corrupt', CORRUPT_STYLES, this.corruptStyle);
+    else if (style === Crimson) row = this.styleRow('crimson', CRIMSON_STYLES, this.crimsonStyle);
+    else if (style === Jungle) row = this.styleRow('jungle', JUNGLE_STYLES, this.jungleStyle);
+    else if (style === Snow) row = this.styleRow('snow', SNOW_STYLES, this.snowStyle);
+    else if (style === Hallow) row = this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle);
+    else if (style === Mushroom) row = this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle);
+    else if (style === Desert) row = this.activeDesertRow();
+    else if (style === Ocean) row = [this.oceanTexId()];
+    const clean = (row ? rowTexIds(row) : []).filter((n) => n >= 0);
     if (clean.length) void this.loadBg(clean);
   }
 
@@ -584,13 +710,13 @@ export class BiomeBackground {
   // 写 WorldGen.corruptBG/jungleBG/…（WorldGen.setBG → Main.bgStyle 数据位），本仓
   // 变体散在私有字段且由 seedFor(seed) 只挑一次——公共 setter 承担【运行时重掷】
   // 的唯一入口。
-  // ★B3-5 重掷值域：本仓各 STYLES 表是 vanilla 样式号的子集且【行号≠样式号】
-  // （SNOW_STYLES[2..5]=原版样式 5..8 的画；FOREST_STYLES[0]/[1]=style1 复制行；
-  // 全缺口清单锚 Game.applyWorldGlobeReroll）——曾按 vanilla 全域掷完 %表长落行,
-  // 雪 42%6=0/森林 9%7=2 等会把「必异」结果折回原档或错组画。现重掷池改走
-  // biomeVariantRows 可行域 + styleRerolls.rollVariantInDomain（先过滤再掷,保证
-  // 掷即渲染可达+域内必异）；setBiomeVariant 的取模钳降级为防御兜底（正常入参
-  // 恒在界内）。
+  // ★B3-5 重掷值域 → 终清波收编（2026-09）：B3-5 时本仓各 STYLES 表是 vanilla
+  // 值域子集且行号≠样式号（雪 42%6=0、森林 9%7=2 会把「必异」折回原档）,故当时
+  // 把重掷池压成可行域（biomeVariantRows 行空间 + rollVariantInDomain 先过滤再掷）。
+  // 本批已把全部群系表扩到与 setBG 可行值域一一对应（见各表头注记），可行域机制
+  // 与【域内必异】语义原样保留，同族门换成 sameVisual() 行空间翻译
+  // （IsBackgroundConsideredTheSame :8010：森林族 3↔31/5↔51/7↔71↔72↔73；
+  // 其余群系原版本就严格同值门）；setBiomeVariant 的取模钳仍是防御兜底（存档脏值）。
 
   /** 变体表长单点（setBiomeVariant 取模钳/biomeVariantRows 同源——扩缩 STYLES 表
    *  两处自动随动,零另行登记）。kind 兼收 'forest'（四段共用 FOREST_STYLES 行域）。
@@ -1006,8 +1132,12 @@ export class BiomeBackground {
       drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { flip: true, nudge: n56 });
       drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aFront, { nudge: n56 });
     } else if (style === Crimson) {
-      drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[5]
-      drawLayer(42, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[5]
+      // Step1/Step2 槽[5] 山体门 crimsonBG!=5（Main.cs :60809/:60848）——样式 5
+      // 的 [255,256,257] 组自带完整远景,不再叠通用山（曾恒画 = 该档多一层穿帮）
+      if (this.crimsonStyle !== 5) {
+        drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[5]
+        drawLayer(42, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[5]
+      }
       const cs = this.pickStyle('crimson', CRIMSON_STYLES, this.crimsonStyle, world);
       drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });   // 105:+50/174:-350 走 NUDGE
       drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true });
@@ -1018,9 +1148,12 @@ export class BiomeBackground {
       drawLayer(js[1], 1.31, 0.43, 1950, 1840, aFront, { anim: true, yoff: true });
       drawLayer(js[2], 1.34, 0.49, 2100, 2060, aFront, { anim: true, yoff: true });
     } else if (style === Snow) {
-      drawLayer(35, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // snowMntBG[0] Step1
-      drawLayer(36, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // snowMntBG[1] Step2
+      // ★终清波：雪原山体随样式行切换——setBG case 3（WorldGen.cs:7305-7440）每档
+      // 先预置 Main.snowMntBG=[35,36] 再按样式覆写 98/99、98/100、98/101 或清 -1；
+      // 曾硬编码恒画 35/36 = 样式 2/3/4 子族山体缺失。Step1 门=:60801 bgTexIndexes>=0
       const ss = this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world);
+      drawLayer(ss.m[0], 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // snowMntBG[0] Step1
+      drawLayer(ss.m[1], 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // snowMntBG[1] Step2（:60853）
       drawLayer(ss[0], 1.25, 0.4, 1800, 1500, aFront, { yoff: true });
       drawLayer(ss[1], 1.31, 0.43, 1950, 1750, aFront, { yoff: true });
       drawLayer(ss[2], 1.34, 0.49, 2100, 2000, aFront, { yoff: true });
@@ -1040,11 +1173,20 @@ export class BiomeBackground {
       drawLayer(ms[1], 1.32, 0.43, 1950, 1675, aFront, { anim: true });
       drawLayer(ms[2], 1.36, 0.49, 2100, 1950, aFront, { anim: true });
     } else if (style === Desert || style === CorruptDesert || style === CrimsonDesert || style === HallowDesert) {
-      drawLayer(23, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[1]
-      drawLayer(22, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[1]
-      const d = this.pickStyle('desert', DESERT_STYLES, this.desertStyle, world);
+      // Step1/Step2 槽[1] 山体门 desertBG!=4（Main.cs :60806/:60844）——样式 4 的
+      // [248,249,250] 自带三层沙暴丘,不再叠通用 23/22 山;好恶沙漠槽(5/13/14)
+      // 原版山步无 case = 恒无山体（GoodEvilDesert 只画前景双条,:61852 起）
+      if (style === Desert && this.desertStyle !== DESERT_STYLE4_ROW) {
+        drawLayer(23, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[1]
+        drawLayer(22, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[1]
+      }
+      // 三层组（DrawSurfaceBG_Desert :61969：槽[0]=1.25/0.37/1800/1750、槽[1]/[2]=
+      // 1.34/0.49/2100/2150 各经 SetBackgroundOffsets 特例覆写;好恶沙漠侵染列
+      // 为空时落 GoodEvilDesert 兜底 26/27 双条）
+      const d = this.activeDesertTriple();
       drawLayer(d[0], 1.25, 0.37, 1800, 1750, aFront);
       drawLayer(d[1], 1.34, 0.49, 2100, 2150, aFront);
+      drawLayer(d[2], 1.34, 0.49, 2100, 2150, aFront);   // 仅样式 4 的 250 非空
     } else if (style === Ocean) {
       // 海洋 = Step2 槽[3]（:60836 bgAlphaFarBackLayer[3] → oceanBG）+ YOff（283→-800 等）
       drawLayer(this.oceanTexId(), 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });
@@ -1618,14 +1760,15 @@ export class BiomeBackground {
         if (has(ids, [179])) out.push({ rgb: [157, 192, 255], alpha: a });
       }
     }
-    // 沙漠 @248
+    // 沙漠 @248（样式 4 的 Pure 组;槽感知——侵染列/兜底画不含 248）
     if (this.alphaFront[Desert] > 0
-      && has(this.styleRow('tint-desert', DESERT_STYLES, this.desertStyle).filter((n) => n >= 0), [248])) {
+      && has(this.activeDesertTriple().filter((n) => n >= 0), [248])) {
       out.push({ rgb: [184, 211, 245], alpha: this.alphaFront[Desert] });
     }
-    // 雪原 @263/268/269
-    if (this.alphaFront[Snow] > 0 && has(this.styleRow('tint-snow', SNOW_STYLES, this.snowStyle), [263, 268, 269])) {
-      out.push({ rgb: [169, 241, 255], alpha: this.alphaFront[Snow] });
+    // 雪原 @263/268/269（结构化行拉平含山体对）
+    if (this.alphaFront[Snow] > 0) {
+      const srow = rowTexIds(this.styleRow('tint-snow', SNOW_STYLES, this.snowStyle));
+      if (has(srow, [263, 268, 269])) out.push({ rgb: [169, 241, 255], alpha: this.alphaFront[Snow] });
     }
     // 丛林双带 @59/@284
     if (this.alphaFront[Jungle] > 0) {

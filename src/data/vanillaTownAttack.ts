@@ -78,12 +78,19 @@ export const TOWN_MELEE: Record<number, TownShotParams> = {
   107: { proj: 24,  dmg: 15, speed: 5,  shootTick: 10, cdBase: 60,  cdRand: 60,  spread: 0,  kb: 1,   aimLiftScaled: 16 },
   124: { proj: 582, dmg: 11, speed: 10, shootTick: 1,  cdBase: 30,  cdRand: 30,  spread: 0,  kb: 3.5, note: '弹附加 ai1=本体索引/ai2=外观变体' },
   18:  { proj: 583, dmg: 8,  speed: 8,  shootTick: 1,  cdBase: 15,  cdRand: 10,  spread: 0,  kb: 2,   aimLiftScaled: 10 },
-  142: { proj: 589, dmg: 22, speed: 7,  shootTick: 1,  cdBase: 10,  cdRand: 1,   spread: 0,  kb: 2,   note: '弹附加 ai1=rand5' },
+  // ★对抗修复批①2026-09-01：补 aimLiftScaled:10（cs:55045 num47=10f——瞄准上抬走
+  // dist/range 归一公式；107 的 16f 在 cs:55015 实存勿动，红队曾误报）
+  142: { proj: 589, dmg: 22, speed: 7,  shootTick: 1,  cdBase: 10,  cdRand: 1,   spread: 0,  kb: 2,
+         aimLiftScaled: 10, note: '弹附加 ai1=rand5(:55067 NewProjectile 末参)' },
 };
 
 /** ai[0]==12 弓态(转录自 :54936-55240;连发档 = burst 数组) */
 export const TOWN_BOW: Record<number, TownShotParams> = {
-  19:  { proj: 14, dmg: 24, speed: 13, shootTick: 1, burst: [10, 20, 30], cdBase: 14, cdRand: 4,  spread: 0.5, kb: 3, hardMode: { dmg: 15 } },
+  // ★对抗修复批①2026-09-01：19 连发链整段包 if(Main.hardMode)（cs:55126-55148）——
+  // 肉前 num54 恒 1（单发）；肉后才 dmg15 + 档 10/20/30。故 burst 只入 hardMode 面，
+  // 非困难模式 burst 为 undefined（消费端 atkParams 合并后差异即体现）
+  19:  { proj: 14, dmg: 24, speed: 13, shootTick: 1, cdBase: 14, cdRand: 4, spread: 0.5, kb: 3,
+         hardMode: { dmg: 15, burst: [10, 20, 30] } },
   227: { proj: 587, dmg: 8, speed: 10, shootTick: 1, burst: [12, 24], cdBase: 10, cdRand: 1, spread: 0.5, kb: 1.75, hardMode: { dmg: 10 }, note: '弹附加 ai1=rand(12)/6' },
   368: { proj: 14, dmg: 24, speed: 13, shootTick: 1, cdBase: 12, cdRand: 5, spread: 0.2, kb: 2, hardMode: { dmg: 30, proj: 357 } },
   22:  { proj: 1, dmg: 12, speed: 10, shootTick: 1, cdBase: 30, cdRand: 20, spread: 0.7, kb: 2.75, aimLift: 4,
@@ -101,10 +108,16 @@ export const TOWN_MAGIC: Record<number, TownShotParams> = {
   54:  { proj: 585, dmg: 16, speed: 10, shootTick: 30, cdBase: 20, cdRand: 15, spread: 1, kb: 2 },
   108: { proj: 15, dmg: 18, speed: 6, shootTick: 15, cdBase: 15, cdRand: 5, spread: 0, kb: 3, aimLiftScaled: 20,
          note: '连发 1-3 发(SelectRandom 权重 4:2:1,:55337),每发附加 ±3.4 逐轴随机速度' },
-  160: { proj: 590, dmg: 40, speed: 0, shootTick: 15, burst: [30, 45], cdBase: 10, cdRand: 1, spread: 0, kb: 3,
+  // ★对抗修复批①2026-09-01：连发梯补全。原版是 `for(; localAI[3]>num64; num64+=步长)`
+  // 无界循环（cs:55447 步长15 / :55459 步长10），实际可达档受 AttackTime 截断：
+  //   160：AttackTime 60 → 档 30/45/60（末发 atkTick 60 与退出共帧，先发后退 :55473/:55551）
+  //   663：AttackTime 60 → 档 25/35/45/55（65 越界不可达）
+  160: { proj: 590, dmg: 40, speed: 0, shootTick: 15, burst: [30, 45, 60], cdBase: 10, cdRand: 1, spread: 0, kb: 3,
          note: '落点弹:position−Size×2+Size×rand(0..1)×5(:55349),实心重掷≤10(:55351),velocity=0' },
-  663: { proj: 950, dmg: 15, speed: 0, shootTick: 15, burst: [25, 35, 45], cdBase: 0, cdRand: 1, spread: 0, kb: 3,
+  663: { proj: 950, dmg: 15, speed: 0, shootTick: 15, burst: [25, 35, 45, 55], cdBase: 0, cdRand: 1, spread: 0, kb: 3,
          hardMode: { dmg: 20 }, note: '落点弹:position+Size×rand(0..1)(:55367),实心重掷≤5(:55369),velocity=0' },
+         // ★cdRand 注：原版 maxValue3=0（cs:55457），本仓 1 经 exitAttackCommon 的
+         // max(1,) 等价保留（0+Next(1)≡0）；勿再改回 0——直接除数会炸 Math.floor(rng*0)
   20:  { proj: 586, dmg: 0, speed: 0, shootTick: 24, cdBase: 10, cdRand: 1, spread: 0, kb: 3,
          note: 'dryad 净化脉冲(0 伤/0 速,弹 ai1=本体);CanHitLine 全失仍进入态' },
 };

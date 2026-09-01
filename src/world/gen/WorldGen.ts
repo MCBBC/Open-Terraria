@@ -28,7 +28,7 @@ export const SLOT_VANILLA_PASSES: Readonly<Record<string, readonly string[]>> = 
     'Dirt Layer Caves', 'Rock Layer Caves', 'Surface Caves', 'Wavy Caves'],
   '生物群系': ['Generate Ice Biome', 'Grass', 'Jungle', 'Mud Caves To Grass', 'Full Desert',
     'Mushroom Patches', 'Marble', 'Granite', 'Floating Islands', 'Dirt To Mud', 'Silt',
-    'Shinies', 'Webs', 'Underworld', 'Corruption', 'Lakes', 'Slush',
+    'Shinies', 'Webs', 'Underworld', 'Corruption', 'Lakes', 'Slush', 'Dungeon',
     'Mountain Caves', 'Beaches', 'Gems'],
   '液体': [],                       // 空壳：Lakes/Slush 并入「生物群系」（vanillaLakes 注释）
   '引力沙': ['Gravitating Sand', 'Ocean Caves'],
@@ -515,8 +515,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
       const wrapped = new Error(`[pass ${i + 1}/${passes.length} ${passes[i].name}] ${(err as Error)?.message ?? err}`);
       (wrapped as Error & { cause?: unknown }).cause = err;
       throw wrapped;
+    } finally {
+      // abort 路径也收账：开着的原版窗与声明余量都入账，防 overall 账面悬挂
+      if (subsNow === undefined || subsNow.length > 0) prog.leaveSlot();
     }
-    if (subsNow === undefined || subsNow.length > 0) prog.leaveSlot();
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
   }

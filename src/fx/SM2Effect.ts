@@ -57,6 +57,9 @@ export function defaultUniforms(): SM2Uniforms {
 
 /** 采样器：输入 uv（0..1）→ 线性 RGBA（寻址策略由实现承担） */
 export type SM2Sampler = (u: number, v: number) => [number, number, number, number];
+/** 出参版采样器（2026-09-01 PR#1）：写满 out[0..3] 即返回——零分配路径。
+ * ★不变量：采样器不得保留对 out 的引用（消费即止，返回后缓冲立即可复用）。 */
+export type SM2SamplerOut = (u: number, v: number, out: Float64Array) => void;
 
 interface FxSymbol { name: string; kind: string; reg: string; count: number }
 interface FxPassJson {
@@ -189,6 +192,8 @@ export class SM2Pass {
   private prog: Inst[];
   private symbols: FxSymbol[];
   private pres: FxPassJson['preshader'];
+  /** 出参采样器的实例域复用缓冲（PR#1——单线程顺序执行下实例互不重叠） */
+  private sampOut = new Float64Array(4);
 
   constructor(json: FxPassJson) {
     this.name = json.pass;
@@ -225,6 +230,12 @@ export class SM2Pass {
       const outregs = new Float64Array(64 * 4);
       const written = new Set<number>();
       this.runPreshader(this.pres, inpool, outregs, written);
+      // ★P3 已撤销（2026-09-01 金标门裁决）：理论推导"静态族依赖链 ≤40×2⁻²⁴ ≪ 半
+      //   量化步，fround 必不翻字节"被实测否证——非 fp32 可表的 uniform 输入经
+      //   preshader 放大后落在 8bit 量化边界上，ArmorColored 梯度场景即现 stack 层
+      //   字节漂移（25/756 场景失配）。在 1458 rig 抓取原生 oC0 作为"朝原版收敛"
+      //   的独立证据前，维持 f64 全程=与已发布视觉逐位一致（用户硬约束优先）。
+      //   重启条件见 memory corruption-equip-key-hotspot 同批登记。
       for (const item of written) {
         const reg = this.outRegOf(item);
         c[reg * 4 + (item & 3)] = outregs[item];
@@ -321,7 +332,7 @@ export class SM2Pass {
   /** 执行单像素；返回 oC0 RGBA（0..1）或 null=texkill。regs/tex/v0/o 由调用方复用 */
   execPixel(c: Float64Array, regs: Float64Array, tex: Float64Array,
     v0: Float64Array, o: Float64Array, t0x: number, t0y: number,
-    samplers: Array<SM2Sampler | undefined>): [number, number, number, number] | null {
+    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>): [number, number, number, number] | null {
     tex[0] = t0x; tex[1] = t0y;
     regs.fill(0);
     o.fill(0);
@@ -387,12 +398,18 @@ export class SM2Pass {
           break;
         }
         case 0x42: { // texld dst, coord(srcs[0]), sampler(srcs[1])
-          const samp = samplers[ins.srcs[1].reg ?? 0];
+          // ★PR#1：双形态采样器（出参版零分配 / 传统返回元组）。判据 = 形参个数
+          //   （out 版恒 3）；out 缓冲为实例域 sampOut，消费即止(见 SM2SamplerOut 注)。
+          const smp = samplers[ins.srcs[1].reg ?? 0];
           const px = S(0, 0), py = S(0, 1);
-          if (samp) {
-            const r4 = samp(px, py);
+          if (!smp) { write(0, 0, 0, 1); break; }
+          if (smp.length === 3) {
+            (smp as SM2SamplerOut)(px, py, this.sampOut);
+            write(this.sampOut[0], this.sampOut[1], this.sampOut[2], this.sampOut[3]);
+          } else {
+            const r4 = (smp as SM2Sampler)(px, py);
             write(r4[0], r4[1], r4[2], r4[3]);
-          } else write(0, 0, 0, 1);
+          }
           break;
         }
         case 0x58: write(S(0, 0) >= 0 ? S(1, 0) : S(2, 0), S(0, 1) >= 0 ? S(1, 1) : S(2, 1),
@@ -427,7 +444,7 @@ export const passNames = (): string[] => [...PASS_MAP.keys()];
  */
 export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   w: number, h: number, uniforms: SM2Uniforms,
-  extraSamplers: Array<SM2Sampler | undefined> = [],
+  extraSamplers: Array<SM2Sampler | SM2SamplerOut | undefined> = [],
   t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
   const u = { ...uniforms };
   if (t0Rect) {
@@ -447,10 +464,10 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   const srcData = new Uint8ClampedArray(data);           // s0 采样源（防读写交叠）
   // s0 = 被染贴图。vanilla 中它是【整表纹理】、t0 是全表 UV；本仓烘焙图只有切片
   // → 采样前做表空间→切片空间反变换（派生坐标的偏移采样同样落在正确语义上）
-  const s0: SM2Sampler = t0Rect
-    ? (uu, vv) => sampleImageData(srcData, w, h,
-      (uu * t0Rect.sheetW - t0Rect.sx) / w, (vv * t0Rect.sheetH - t0Rect.sy) / h, false)
-    : (uu, vv) => sampleImageData(srcData, w, h, uu, vv, false);
+  const s0: SM2SamplerOut = t0Rect
+    ? (uu, vv, o4) => { sampleImageInto(srcData, w, h,
+        (uu * t0Rect.sheetW - t0Rect.sx) / w, (vv * t0Rect.sheetH - t0Rect.sy) / h, false, o4); }
+    : (uu, vv, o4) => { sampleImageInto(srcData, w, h, uu, vv, false, o4); };
   const samplers = [s0, ...extraSamplers];
   // t0 = 全表 UV（SpriteBatch 子矩形语义：(rect.X + u·rect.W)/texW）——
   // 渐变族按 t0×uImageSize0−uSourceRect.xy 取像素位，切片局部 UV 会错锚
@@ -469,26 +486,45 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   }
 }
 
-/** ImageData 双线性采样（clamp 或 wrap） */
-export function sampleImageData(data: Uint8ClampedArray, w: number, h: number,
-  u: number, v: number, wrap: boolean): [number, number, number, number] {
+/** ImageData 双线性采样·出参版（PR#1 主路径）。
+ * ★parity 纪律：运算树与历史实现【逐字同形】——半像素约定、clamp 三元链、wrap
+ *   双模取整式、`|0` 截断、/255 除法、lp= p+(q-p)*t 的嵌套求值序一概不动；
+ *   唯一改形 = 寻址模式分支自四角重复调用外提为一次选择(等价纯函数)。 */
+const BIL_A = new Float64Array(4), BIL_B = new Float64Array(4);
+const BIL_C = new Float64Array(4), BIL_D = new Float64Array(4);
+export function sampleImageInto(data: Uint8ClampedArray, w: number, h: number,
+  u: number, v: number, wrap: boolean, out: Float64Array): void {
   const x = u * w - 0.5, y = v * h - 0.5;
   const x0 = Math.floor(x), y0 = Math.floor(y);
   const fx = x - x0, fy = y - y0;
-  const px = (xx: number, yy: number): [number, number, number, number] => {
-    let sx = xx, sy = yy;
-    if (wrap) { sx = ((xx % w) + w) % w; sy = ((yy % h) + h) % h; }
-    else { sx = xx < 0 ? 0 : xx >= w ? w - 1 : xx; sy = yy < 0 ? 0 : yy >= h ? h - 1 : yy; }
-    const i = ((sy | 0) * w + (sx | 0)) * 4;
-    return [data[i] / 255, data[i + 1] / 255, data[i + 2] / 255, data[i + 3] / 255];
-  };
-  const a = px(x0, y0), b = px(x0 + 1, y0), cc = px(x0, y0 + 1), d = px(x0 + 1, y0 + 1);
-  const lp = (p: number, q: number, t: number) => p + (q - p) * t;
-  return [
-    lp(lp(a[0], b[0], fx), lp(cc[0], d[0], fx), fy),
-    lp(lp(a[1], b[1], fx), lp(cc[1], d[1], fx), fy),
-    lp(lp(a[2], b[2], fx), lp(cc[2], d[2], fx), fy),
-    lp(lp(a[3], b[3], fx), lp(cc[3], d[3], fx), fy),
-  ];
+  // 角点直写四缓冲（原 px() 内联：地址公式逐字；返回数组→标量存储）
+  const cornerInto = wrap
+    ? (xx: number, yy: number, o4: Float64Array): void => {
+        const sx = ((xx % w) + w) % w, sy = ((yy % h) + h) % h;
+        const i = ((sy | 0) * w + (sx | 0)) * 4;
+        o4[0] = data[i] / 255; o4[1] = data[i + 1] / 255; o4[2] = data[i + 2] / 255; o4[3] = data[i + 3] / 255;
+      }
+    : (xx: number, yy: number, o4: Float64Array): void => {
+        const sx = xx < 0 ? 0 : xx >= w ? w - 1 : xx;
+        const sy = yy < 0 ? 0 : yy >= h ? h - 1 : yy;
+        const i = ((sy | 0) * w + (sx | 0)) * 4;
+        o4[0] = data[i] / 255; o4[1] = data[i + 1] / 255; o4[2] = data[i + 2] / 255; o4[3] = data[i + 3] / 255;
+      };
+  cornerInto(x0, y0, BIL_A);
+  cornerInto(x0 + 1, y0, BIL_B);
+  cornerInto(x0, y0 + 1, BIL_C);
+  cornerInto(x0 + 1, y0 + 1, BIL_D);
+  for (let k = 0; k < 4; k++) {
+    const p01 = BIL_A[k] + (BIL_B[k] - BIL_A[k]) * fx;   // 原 lp(a,b,fx)
+    const p23 = BIL_C[k] + (BIL_D[k] - BIL_C[k]) * fx;   // 原 lp(cc,d,fx)
+    out[k] = p01 + (p23 - p01) * fy;                     // 原 lp(p01,p23,fy)
+  }
 }
+/** ImageData 双线性采样（传统元组版——签名冻结，出参委托） */
+export function sampleImageData(data: Uint8ClampedArray, w: number, h: number,
+  u: number, v: number, wrap: boolean): [number, number, number, number] {
+  sampleImageInto(data, w, h, u, v, wrap, BIL_OUT);
+  return [BIL_OUT[0], BIL_OUT[1], BIL_OUT[2], BIL_OUT[3]];
+}
+const BIL_OUT = new Float64Array(4);
 

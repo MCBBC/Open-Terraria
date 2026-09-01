@@ -38,7 +38,9 @@ export const TRAP_SHOT_STYLE: Record<string, {
   /** 隐形弹（733 alpha=255 SetDefaults）：纯尘/gore 发射器，不画本体 */
   invisible?: boolean;
   spin?: boolean | 'roll' | 'bunny'; rotOff?: number;
-  /** spin=true 时的滚转系数(尖刺球 aiStyle14 = vx*0.14,1405 :21630;其余默认 0.03) */
+  /** spin=true 时的滚转系数。现役唯一消费 = 巨石 99(AI_025 :26681 rotation +=
+   *  velocity.X*0.06,累加在 kind==='boulder' 支内于踢门【之后】——表值供绘制门
+   *  + 回退速率;尖刺球 185 已直写 kind 支 0.1 不走此字段,旧注 0.14 系陈位) */
   spinK?: number;
   trail?: { colors: string[]; count: number; life: number; grav: number };
   /** 炮弹族：前 N tick 直线无重力（Projectile.cs:21546/26844 ai[0]>=18 才加重力） */
@@ -331,8 +333,9 @@ export class TrapShot extends Entity {
     }
     // 首帧发射音（Projectile.AI：162=Projectile.cs:21542-21546 / 281=26830-26833 SoundID.Item14）
     if (this.age === 1 && st.launchSfx) game.playSfx(st.launchSfx, 1, this.x + this.w / 2, this.y + this.h / 2);
-    // 滚转：尖刺球 aiStyle14 = vx*0.14(1405 :21630)/巨石近似 0.03 | 炮弹族按原版
-    if (st.spin === true) this.rot += this.vx * (st.spinK ?? 0.03);
+    // 滚转：巨石 99 走 kind==='boulder' 支内单次累加(见下——本块若再计即双倍,
+    // 终清波勘误),其余表项 spinK 回退 0.03 | 炮弹族 'roll'/'bunny' 按原版
+    if (st.spin === true && this.kind !== 'boulder') this.rot += this.vx * (st.spinK ?? 0.03);
     else if (st.spin === 'roll') {
       // aiStyle2（Projectile.cs:21528）：rotation += (|vx|+|vy|)*0.03*direction
       this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx < 0 ? -1 : 1);
@@ -341,26 +344,36 @@ export class TrapShot extends Entity {
       this.rot += this.vx * 0.05 + (this.vx < 0 ? -1 : 1) * 0.05;
     }
     if (this.kind === 'boulder') {
-      // ---- 巨石 aiStyle 25(AI_025 :24578-24723 + 撞块族 :17530-17551)----
-      // 滞滞启动踢(:24578-24661):落地态(ai[0]≠0,本仓 landed)且 vy≤0 且 vx==0 →
+      // ---- 巨石 aiStyle 25(AI_025 1458 :26359 起;踢块 :26596-26677 + 撞块族
+      //      :17530-17551)----
+      // 滞滞启动踢(:26596-26677):落地态(ai[0]≠0,本仓 landed)且 vy≤0 且 vx==0 →
       // 探 ±40px(8+32)侧壁:左实 → 向右踢 0.5 / 右实 → 向左 / 两侧空 → 按
       // Center.X 奇偶定向。没有这一踢,vx=0 命不中滚地加速两分支 → 落地即死停。
       if (this.boulderLanded && this.vy <= 0 && this.vx === 0) {
         const st8 = game.world.store;
         const solid2 = (px: number, py: number) => st8.isSolid(Math.floor(px / TILE), Math.floor(py / TILE));
-        const rowA = this.y, rowB = this.y + TILE;
-        const leftBlocked = solid2(this.x - 8 - 32, rowA) || solid2(this.x - 8 - 32, rowB);
-        const rightBlocked = solid2(this.x + this.w + 8 + 32, rowA) || solid2(this.x + this.w + 8 + 32, rowB);
-        // 原版(:24578-24661):flag11(左实)→vx=+0.5 / flag12(右实)→vx=−0.5 /
-        // 两侧空 → Center.X 格奇偶定向(偶=flag11=向右)
-        this.vx = leftBlocked && !rightBlocked ? 0.5 : rightBlocked && !leftBlocked ? -0.5
-          : (Math.floor(this.cx / TILE) % 2 === 0 ? 0.5 : -0.5);
+        // 单级探针 = 同一深度两侧各一列×两行(posY 行与 +1 行,:26600-26603)。原版为
+        // 三级【递宽】窗:±8px 首查,全空再 ±24、再 ±40(:26603-26669 三层嵌套);
+        // 首中即定踢向(左实→+0.5 右实→−0.5,左实优先=:26614-26619 的 if/else 序)。
+        // ★终清波补缺:旧实现只测最宽窗(40px)丢单/中距墙命中面,且双侧皆实时误落
+        // 奇偶兜底(vanilla 左实恒胜);三级级联就此转正。
+        const sideSolid = (off: number): 'L' | 'R' | null =>
+          solid2(this.x - off, this.y) || solid2(this.x - off, this.y + TILE) ? 'L'
+            : solid2(this.x + this.w + off, this.y) || solid2(this.x + this.w + off, this.y + TILE) ? 'R'
+              : null;
+        // 最宽窗仍两侧全空才落 Center.X 格奇偶兜底(:26663-26679,偶格=向右)
+        const kickTo = sideSolid(8) ?? sideSolid(24) ?? sideSolid(40)
+          ?? (Math.floor(this.cx / TILE) % 2 === 0 ? 'L' as const : 'R' as const);
+        this.vx = kickTo === 'L' ? 0.5 : -0.5;
       }
-      // 重力 0.3/终端 16(:24723/:24667);滚地加速:vy≤6 且 |vx|<7 → ±0.05(:24699-24708)
-      // ——落地后不会停,持续加速滚动直到撞墙;旋转 = vx×0.06(:24664)。
+      // 重力 0.3/终端 16(1458 :26741/:26685-26687);滚地加速:vy≤6 且 |vx|<7 →
+      // ±0.05(:26717-26723)——落地后不会停,持续加速滚动直到撞墙;旋转 = vx×0.06
+      // 单次(:26682 `type!=1055` 支)。★终清波勘误:此处与通用 spin 块原本各计一次
+      // = 双倍;已把 boulder 从通用块剔除——本行位于踢门【之后】,与 vanilla 拍内
+      // 时序一致(踢(:26596-26677)→rot(:26682)→ai[0]=1(:26684)→滚地加速→重力)。
       // 撞块(AABB 分轴 + lastVelocity):Y 阻挡且 lastVy>5 → 反弹 −lastVy×0.2(:17551,
       // 软落直接落定不微弹);X 阻挡 → HitTiles(敲石音+尘)+ 碎裂消亡(:17561-17574)。
-      this.boulderLanded = true;               // ai[0]=1(:24666,次 tick 起转角门生效)
+      this.boulderLanded = true;               // ai[0]=1(:26684,次 tick 起转角门生效)
       this.rot += this.vx * 0.06;
       this.vy += 0.3;
       if (this.vy > 16) this.vy = 16;
@@ -985,6 +998,14 @@ export class Dart extends Entity {
       case 'spin': this.rot += st.spinRate! * this.dir; break;
       case 'tilt': this.rot = this.vx * 0.125; break;          // 836 蒲公英籽 :43312
       case 'vxSpin': this.rot += this.vx * 0.1; break;         // aiStyle16 炸弹族 :48444
+      case 'nail':
+        // 498 铁钉（P.cs:58485-58492）：ai[0]<50 恒对齐速度方向（else 支 atan2+1.57）；
+        // ≥50 与摩擦/重力【同一分支】改自旋 rotation += direction*0.5——翻转点复用
+        // gravDelay 表值(49)即与重力门同拍；direction=出生速度符号（原版 NewProjectile
+        // 语义，本仓 ctor 处 Math.sign(vx) 同式，飞行中不复评）
+        if (this.age > (st.gravDelay ?? 0)) this.rot += this.dir * (st.spinRate ?? 0.5);
+        else this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+        break;
       case 'none': this.rot = 0; break;
     }
     // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
@@ -1453,6 +1474,8 @@ function laserScanTiles(game: GameHooks, cx: number, cy: number, dxu: number, dy
  *   spin    = += rate*direction（44 魔镰 AI_018 :23814 rate 0.8 / 96 诅咒焰 AI_008 :22669 rate 0.3 /
  *             31 沙球 AI_010 :55158 rate 0.1）
  *   tilt    = rotation = vx*0.125（836 蒲公英籽 :43312）
+ *   nail    = ai[0]<50 恒对齐速度向、≥50 改自旋 += direction*rate（498 铁钉
+ *             :58485-58492,翻转点与重力/摩擦同支 → 经 gravDelay 复用同拍）
  *   none    = 恒 0（128 霜爆/177 冰水吐涎/288 金雨,AI_028/AI_012 无旋转更新）
  *  alpha=255 族视觉 = 渐入（302 族按 |v|*0.9 :52782,257 恒 -10 :53036,其余家族恒减） */
 // ---- 31 沙球用原版 TileID → 本仓 id 换算（★本仓 tile id ≠ 原版 TileID,直比/直写
@@ -1472,7 +1495,7 @@ const SHATTER_SET = new Set(SHATTER_VANILLA);
 interface DartStyle {
   w: number; h: number;                  // 碰撞盒(SetDefaults width/height)
   scale?: number;                        // 绘制缩放(SetDefaults scale)
-  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none' | 'vxSpin';
+  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none' | 'vxSpin' | 'nail';
   spinRate?: number;
   alpha0?: number;                       // 出生 alpha(255=渐入)
   fade?: 'speed' | number;               // 渐入速率
@@ -1610,11 +1633,14 @@ const DART_STYLE: Record<number, DartStyle> = {
   //    光=ProjLight 0.75×(0.7,0,1)(:15178——Game 侧 PROJ_LIGHT_MUL 83 已注册,勿在此自报)
   83: { w: 4, h: 4, rot: 'align90', scale: 1.7, alpha0: 255, fade: 15, updates: 2, life: 600,
     fallback: '#70E0FF' },
-  // 498 铁钉 Nail(Nailhead 463 散射 :57611):6×6,aiStyle1 直飞,penetrate -1,life180;
-  //    出生音 Item17(:54610);ai0≥50 起摩擦 vx×0.98 + 重力 0.15(:54615-54618),
-  //    同段 rotation 改自旋 ±0.5/更新（纯视觉,本表 rot 单模未接——登记）
-  498: { w: 6, h: 6, rot: 'align90', grav: 0.15, gravDelay: 49, xDamp: 0.98, life: 180,
-    sfx: ['Item_17'], fallback: '#D8D8E0' },
+  // 498 铁钉 Nail(Nailhead 463 散射 NPC.cs:57793):6×6 aiStyle1 hostile penetrate -1
+  //    timeLeft180(SetDefaults :5716-5723);出生音 Item17(:58476 localAI[0] 门);
+  //    ai0≥50 起摩擦 vx×0.98 + 重力 0.15 + rotation 自旋(direction×0.5/更新)
+  //    (:58485-58489 同支——与重力/摩擦同一 ai[0]>=50 分支,'nail' 模式经 gravDelay
+  //    49 复用同拍翻转点);<50 恒 align90(:58490-58492 else 支)。终清波接上
+  //    （原"±0.5 未接"登记就此退役;direction=出生速度符号,飞行中不复评=原版语义）
+  498: { w: 6, h: 6, rot: 'nail', spinRate: 0.5, grav: 0.15, gravDelay: 49, xDamp: 0.98,
+    life: 180, sfx: ['Item_17'], fallback: '#D8D8E0' },
   // 501 蝇瓶 DrManFlyFlask(Dr. Man Fly 468 :59863):14×14,aiStyle2 抛物,scale1.1;
   //    ai0≥18 起摩擦 vx×0.995 + 重力 0.2(:21804-21811),之前直飞
   501: { w: 14, h: 14, rot: 'align90', scale: 1.1, grav: 0.2, gravDelay: 18, xDamp: 0.995,

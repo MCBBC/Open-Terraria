@@ -95,3 +95,55 @@ describe('Boomerang 弹体×地形形态(moveStep 正典管线接入)', () => {
     expect(maxDist, `${kind} 最大位移 ${maxDist.toFixed(1)}px 应>48(非原地互锁)`).toBeGreaterThan(48);
   });
 });
+
+
+// ---- 用户存档阶梯重放(map-Starter_World(25):玻璃斜坡阶梯右下沉,col k: slope1@362+2k /
+//      solid@363+2k / slope4@364+2k;站位 c3352,feetY=5856)——修「右下扔只向上」判例 ----
+it('用户阶梯地形:右下投掷可进入下行走廊(非永动向上弹射)', () => {
+  // 坐标系:世界列 local = 存档列 - 3300(BASE 列 50 起步),行不变
+  const w = new World(120, 220, 7, 'user-stair');
+  const st = w.store;
+  const COL0 = 46;               // 对应存档 c3346(k=-4)
+  for (let k = -4; k <= 10; k++) {
+    const tx = COL0 + 4 + k, r0 = 360 + 2 * k;   // 存档 r0=362+2k → 本地以行 360 为 k=+1 对齐
+    void tx; void r0;
+  }
+  // 直接按存档逐柱写:r0(L)=360+2*(kL-? ) 以 c52(feetRow366 tread)为锚:
+  //   kL 与存档一一对应:kS=k-(-4)+col=COL0+k ... 简化循环写法
+  for (let k = -4; k <= 10; k++) {
+    const tx = 46 + (k + 4);      // local col of archive tx=3350+k
+    const r0 = 362 + 2 * k - 12;  // 行整体上移 12 行留头顶空间(362→350 基准)
+    if (r0 < 8 || r0 + 8 >= 220) continue;
+    st.setTile(tx, r0, 2); st.setSlope(tx, r0, 1);
+    st.setTile(tx, r0 + 1, 2);
+    st.setTile(tx, r0 + 2, 2); st.setSlope(tx, r0 + 2, 4);
+  }
+  // 站位=c352(local 54,k=2,r0 tread=362+4-12=354? →feet=(354+1+1? ) 用与存档同构落点:
+  //   存档 feetRow=366(=slope1@366 的格顶线);本地等价行=r0(c52)=354 → 格顶 354*16
+  const bxLocal = (54) * TILE + 2;
+  const surfTop = (356) * TILE;   // 356=c52 slope1@354 的下一?—直接以收敛为准,不精算
+  const b = { x: bxLocal, y: (340) * TILE, w: 20, h: 42, vx: 0, vy: 0,
+    onGround: false, hitWall: false, hitHead: false, collideY: false,
+    tileCollide: true, dropThrough: true };
+  for (let i = 0; i < 90 && !b.onGround; i++) { b.vy = Math.min(b.vy + 0.4, 10); moveAndCollide(b, w, b.vx, b.vy); }
+  expect(b.onGround).toBe(true);
+  const footRow = Math.floor((b.y + b.h) / TILE);
+  expect(footRow, '应落在阶梯斜面带').toBeGreaterThanOrEqual(352);
+  const cy = b.y + 21;
+  for (const [label, vx, vy] of [['steep', 11.4, 8], ['shallow', 13, 5], ['down', 5, 12]] as [string, number, number][]) {
+    const bom = new Boomerang(b.x + 10, cy, vx, vy, 25, 8, 33, 1);
+    bom.x -= bom.w / 2; bom.y -= bom.h / 2;
+    let minYAboveStart = 0;
+    let maxX = 0;
+    for (let t = 0; t < 60 && !bom.dead; t++) {
+      bom.fixedUpdate(1 / 60, hooks);
+      maxY_OFFSET_CHECK: void 0;
+      maxX = Math.max(maxX, bom.cx - (b.x + 10));
+      // 「向上弹射锁死」特征:长时间位于出生点上方 >24px
+      if (bom.cy < cy - 24) minYAboveStart++;
+    }
+    expect(maxX, `${label} 应向右推进 ≥48px`).toBeGreaterThan(48);
+    // 允许单次反弹过冲,但不得长期悬挂在出生点上方 24px 以上
+    expect(minYAboveStart, `${label} 高位滞留 tick ${minYAboveStart}/60 应 ≤18`).toBeLessThanOrEqual(18);
+  }
+});

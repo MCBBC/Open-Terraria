@@ -8,7 +8,7 @@
 // 梯度对齐 ReflectiveArmorShaderData.Apply。
 import dyeJson from './vanilla-dyes.json';
 import fxShaderJson from './fxPixelShader.json';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Sampler, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 
 export interface DyeEntry {
   tech: string;
@@ -66,12 +66,12 @@ const S1_PASSES: Set<string> = (() => {
  *  ★R33 回归轮：加载单例化已复核（noiseStarted 旗，Image 只建一次=无加载风暴）；
  *  就绪前回退改中性灰（0.5）而非放行消费端 hallowRamp——Extra_156 彩虹渐变对
  *  noise 族是错纹理（曾致相位染料彩虹污染+不可预期 alpha）。 */
-let noiseSam: SM2Sampler | null = null;
+let noiseSam: SM2SamplerOut | null = null;
 let noiseStarted = false;
 const NOISE_SIZE = 256;                       // Misc_noise.png 256²（资产实测）
-const noiseNeutral: SM2Sampler = () => [0.5, 0.5, 0.5, 1];   // 中性灰回退
+const noiseNeutral: SM2SamplerOut = (u, v, o4) => { o4[0] = 0.5; o4[1] = 0.5; o4[2] = 0.5; o4[3] = 1; };   // 中性灰回退
 let noiseRetried = false;
-function noiseSampler(): SM2Sampler {
+function noiseSampler(): SM2SamplerOut {
   if (noiseSam) return noiseSam;
   if (noiseStarted || typeof document === 'undefined') return noiseNeutral;
   noiseStarted = true;
@@ -86,7 +86,7 @@ function noiseSampler(): SM2Sampler {
         cx.drawImage(img, 0, 0);
         const d = cx.getImageData(0, 0, cv.width, cv.height).data;
         const w = cv.width, h = cv.height;
-        noiseSam = (u, v) => sampleImageData(d, w, h, u - Math.floor(u), v - Math.floor(v), false);
+        noiseSam = (u, v, o4) => { sampleImageInto(d, w, h, u - Math.floor(u), v - Math.floor(v), false, o4); };
       } catch { /* 解码失败：维持中性灰 */ }
     };
     img.onerror = () => {
@@ -146,9 +146,9 @@ export function dyeCount(): number {
  * 返回是否实际染色。
  */
 export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
-  apply: DyeApply, extraSamplers: Array<SM2Sampler | undefined> = [],
+  apply: DyeApply, extraSamplers: Array<SM2SamplerOut | undefined> = [],
   t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number },
-  noiseOverride?: SM2Sampler): boolean {
+  noiseOverride?: SM2SamplerOut): boolean {
   const pass = getPass(apply.tech);
   if (!pass) return false;
   let extra = extraSamplers;

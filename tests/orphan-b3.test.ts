@@ -31,9 +31,17 @@ import { BeachBallProj, FootballProj } from '../src/entities/BallProjs';
 import {
   rollMoonType, rollTreeTopVariation, treeTopVariationPool, ensureTreeTops13,
   rollUntilDifferent, rollSnowBg, rollCorruptBg, rollDesertBg, isSameBackground,
-  pickZoneArea, oceanDepths, rollVariantInDomain, isSameForestRow, type Rng,
+  pickZoneArea, oceanDepths, rollVariantInDomain, type Rng,
 } from '../src/world/styleRerolls';
-import { BiomeBackground } from '../src/render/BiomeBackground';
+import { BiomeBackground, VANILLA_FOREST_STYLE_ORDER } from '../src/render/BiomeBackground';
+
+/** 原版森林样式号 → 本仓行号（VANILLA_FOREST_STYLE_ORDER 映射;终清波扩表后行序
+ *  即样式升序+子族紧随基样） */
+function frRow(styleNo: number): number {
+  const i = VANILLA_FOREST_STYLE_ORDER.indexOf(styleNo);
+  expect(i).toBeGreaterThanOrEqual(0);
+  return i;
+}
 import type { GameHooks } from '../src/entities/types';
 
 const STONE = () => {

@@ -21,6 +21,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
+import { cutTilesBox } from './ProjCutTiles';
 // L5 长尾批：真刃系挥弧命中编排（Projectile.Damage case972-985 收编池）
 import { nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -98,6 +99,10 @@ export class SwingArc extends Entity {
     this.scaleCur = (this.style.num6 + num * this.style.num5) * this.ai2;
     this.op = Math.min(1, Math.max(0, num / 0.6)) * (num <= 0.6 ? 1 : Math.max(0, (1 - num) / 0.4));
     this.lightRGB = [this.style.c2[0] / 255 * 0.4, this.style.c2[1] / 255 * 0.4, this.style.c2[2] / 255 * 0.4];
+    // CutTiles（Projectile.cs:11824 全弹幕旁路——972/982/983/997/984 均不在
+    // CanCutTiles 排除表）→ 旋斩扫过的瓦罐/杂草同步砍断（cutTilesBox 弹盒+1 外沿）
+    cutTilesBox(game, this.cx - 85 * this.scaleCur, this.cy - 60 * this.scaleCur,
+      170 * this.scaleCur, 120 * this.scaleCur);
     // 尘近似（AI_190 各型号 278/107/267 火花——按 num3 包络概率降采样）
     if (Math.random() < this.op * 0.5) {
       const a2 = this.rot + (Math.random() - 0.5) * Math.PI / 2;
@@ -721,6 +726,17 @@ export class ZenithSword extends Entity {
       this.spriteDir = this.vx > 0 ? -1 : 1;
     }
     this.opacity = ZenithSword.lerpV(0, 5, this.counter) * ZenithSword.lerpV(120, 115, this.counter);
+    // 剑刃线 CutTiles（Projectile.CutTiles :11824/:14115——瓦罐/杂草等 tileCut 物
+    // 随剑刃扫过砍断）：沿刃轴向（rot−π/2）中心±40 逐格 game.cutTile，与 bladeHits
+    // 判定线同源。曾漏接 = 天顶剑穿过瓦罐不碎（用户实报 2026-09-01）。
+    {
+      const dxc = Math.cos(this.rot - Math.PI / 2), dyc = Math.sin(this.rot - Math.PI / 2);
+      for (const off of [-40, -13, 13, 40]) {
+        const tx = Math.floor((this.cx + dxc * off) / 16);
+        const ty = Math.floor((this.cy + dyc * off) / 16);
+        if (Number.isFinite(tx) && Number.isFinite(ty)) game.cutTile?.(tx, ty);
+      }
+    }
     const prof = fractalProfile(this.ai1);
     // 光照（:40493-40496，num2<1 门 :40478）：Center 点 trailColor×0.5×Opacity +
     // MountedCenter 点 Lerp(Vector3.One, trailColor, 0.7)×Opacity×0.15（后者每剑

@@ -48,6 +48,8 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 // ★1457 对齐档 2：门落点/塌墙 helper 从 1457 语义存档即插接线（存档自包含副本,
 //   与本文件 placeDoorHF/placeTileDoorHF/solidTileHF 同构,勿双向耦合）
 import { hellFortAttemptDoorAt, hellFortPlaceDoorLoop, hellFortCanCrumbleWall, hellFortAttemptCrumbleWall } from './rollback1457/HellFort.1457';
+import { registerChest, findLiveChest } from '../ChestRegistry';   // ★IIII102c 洞数组 sink
+import type { SparseChestSink } from '../ChestRegistry';
 
 // ★IIIII14（cs:32981-32984 / 1456 cs:32874 同款）：drunk 房间跨距 num=8→4、num2=20→40
 //  与翼/双轴门恒开——hellFort/hellFort1456 双实现无 gs 入参，经模块档位传递，
@@ -208,8 +210,9 @@ function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: nu
   }
   if (tile === T_DRESSER && chests) {
     // CreateChest(x-1,y-1)：同位重条目 → flag2=false（放置失败,条目不建）
-    if (chests.some(c => c.x === x - 1 && c.y === y - 1)) return false;
-    chests.push({ x: x - 1, y: y - 1, items: [], locked: false });
+    // ★IIII102c：some → findLiveChest 跳洞+registerChest 首空槽复用（洞数组 sink）
+    if (findLiveChest(chests as SparseChestSink, x - 1, y - 1)) return false;
+    registerChest(chests as SparseChestSink, { x: x - 1, y: y - 1, items: [], locked: false });
   }
   if (!ok) return false;
   const fx = 54 * style;

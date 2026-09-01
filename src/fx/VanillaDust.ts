@@ -30,8 +30,9 @@
 //
 // 光照：261/264/182/43/15 族/267/278/6 逐尘 AddLight（update 期收集 → Game 推
 // LightingEngine）；43 型需读光（Lighting.GetColor :1475 照度门）——update 由
-// Game 注入 lightAt 采样器；278 型入实心格收缩（:2264 WorldGen.SolidTile）需
-// solidTileAt 探针；两者缺省 = 全亮/不实心（无注入时门不误杀）。
+// Game 注入 lightAt 采样器；278 型入实心格收缩（:2264 Collision.SolidCollision
+// 10×10 盒）需 solidBoxAt 探针（Game 注入 solidCollisionBox 1:1,半砖下 8/斜坡整格）；
+// 两者缺省 = 全亮/不实心（无注入时门不误杀）。
 // 绘制：亮色族 {6,15,59-64}（DrawDust 强制 White :38406）画在光照合成之后
 // （= 原版 GetColor(White) 等价），其余画在合成前（逐像素乘光 ≈ 原版逐尘取光）。
 // 双 pass：本体（GetAlpha）+ 自定义色 pass（GetColor 加性钳位 :2773）。
@@ -187,13 +188,13 @@ export class VanillaDust {
   /** UpdateDust（:423-2450，消费型精植）。playerDelta = 主角本 tick 位移
    *  （oldPosition 差——customData=Player 跟随用）。
    *  lightAt = Lighting.GetColor(tx,ty) 采样器（43 型照度门 :1475-1484；缺省全亮）；
-   *  solidTileAt = WorldGen.SolidTile 探针（278 型入实心格收缩 :2264-2268；缺省恒假）；
+   *  solidBoxAt = Collision.SolidCollision 盒探针（76/278=10×10、329=4×4；缺省恒假）；
    *  player = 主角探针（230 型钻头尘吸向玩家中心 :655-663 / 76 型雪尘随玩家下坠
    *  :1814-1822 读 Main.player[myPlayer] 速度；缺省 = 两效应关闭） */
   update(screenX: number, screenY: number, screenW: number, screenH: number,
     playerDx = 0, playerDy = 0,
     lightAt: ((tx: number, ty: number) => [number, number, number]) | null = null,
-    solidTileAt: ((tx: number, ty: number) => boolean) | null = null,
+    solidBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null,
     player: { cx: number; cy: number; vy: number } | null = null): void {
     this.lights.length = 0;
     for (const d of this.pool) {
@@ -204,13 +205,9 @@ export class VanillaDust {
       d.x += d.vx; d.y += d.vy;
       // :598-602 鸟粪尘（329,独立 if 段,在 883 链之前）：Collision.SolidCollision
       // (position,4,4) 命中实心 → scale ×0.8（4×4 盒跨至多 2×2 格,四角判定）
-      if (d.type === 329 && solidTileAt) {
-        const bx0 = Math.floor(d.x / 16), by0 = Math.floor(d.y / 16);
-        const bx1 = Math.floor((d.x + 3) / 16), by1 = Math.floor((d.y + 3) / 16);
-        if (solidTileAt(bx0, by0) || solidTileAt(bx1, by0)
-          || solidTileAt(bx0, by1) || solidTileAt(bx1, by1)) {
-          d.scale *= 0.8;
-        }
+      if (d.type === 329 && solidBoxAt
+        && solidBoxAt(d.x, d.y, 4, 4)) {              // :598-602 SolidCollision(position,4,4)
+        d.scale *= 0.8;
       }
       // ---- 链 A 独占段（:883-1894 独占链：命中者跳过其余链接与 :1884 重力）----
       //  230/217/240 是独立段/无档型（非 883 链链接）：chainLink 不置位，重力门
@@ -314,8 +311,8 @@ export class VanillaDust {
             d.vy += (pvy - d.vy) * 0.04;                  // Lerp(vy, y, 0.04)
           }
           if (!d.noLight && pvy > 0) d.y += pvy * 0.2;    // :1819-1822
-          if (d.fadeIn === 0 && solidTileAt               // :1823-1827（Collision.SolidCollision
-            && solidTileAt(Math.floor(d.x / 16), Math.floor(d.y / 16))) {  //  10×10 盒≈本格，备案）
+          if (d.fadeIn === 0 && solidBoxAt                // :1823-1827 Collision.SolidCollision
+            && solidBoxAt(d.x - 5, d.y - 5, 10, 10)) {    //  (position−(5,5),10,10) 1:1
             d.scale *= 0.9;
             d.vx *= 0.25; d.vy *= 0.25;
           }
@@ -470,8 +467,8 @@ export class VanillaDust {
             d.vx *= 0.95; d.vy *= 0.95;
             d.scale -= 0.0025;
           }
-          if (solidTileAt && d.fadeIn === 0 && !d.noGravity   // :2264-2268
-            && solidTileAt(Math.floor(d.x / 16), Math.floor(d.y / 16))) {
+          if (solidBoxAt && d.fadeIn === 0 && !d.noGravity    // :2264-2268 SolidCollision
+            && solidBoxAt(d.x - 5, d.y - 5, 10, 10)) {        //  (position−(5,5),10,10) 1:1
             d.scale *= 0.9;
             d.vx *= 0.25; d.vy *= 0.25;
           }

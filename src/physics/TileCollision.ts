@@ -305,6 +305,81 @@ export const SLOPE_G2_ENABLED = SLOPE_G2;
 /** 运行时切换（探针 A/B 鉴别用；生产回退仍走 localStorage 重进世界） */
 export function setSlopeG2(v: boolean): void { SLOPE_G2 = v; }
 
+/** ★WalkDownSlope 预备阶段开关（2026-09-01 用户"角色阻尼滑入斜坡"终局修复）：
+ *  vanilla 移动前阶段 Collision.WalkDownSlope（Collision.cs:1691-1795）全量移植。
+ *  旧"速度辅助"其实是它的残缺尾巴（:1776-1794 vy+=|vx|），缺了 ：1696 活性门
+ *  与全宽落面扫描 → 上/下坡起步帧 X 先走 Y 未跟上 = 脚悬空再被贴合拉回的
+ *  阻尼沉浮。★回退开关：localStorage sw_slope_wd='0'（重进世界生效）。 */
+let WALKDOWN_PRE = (() => {
+  try { return typeof localStorage === 'undefined' || localStorage.getItem('sw_slope_wd') !== '0'; }
+  catch { return true; }
+})();
+export const WALKDOWN_PRE_ENABLED = WALKDOWN_PRE;
+export function setWalkDownPre(v: boolean): void { WALKDOWN_PRE = v; }
+
+/** 原版 Collision.WalkDownSlope（1457 Collision.cs:1691-1795）逐字适配：
+ *  贴地行走者即将步入下行地面坡（slope1 右行 / slope2 左行）时，于分轴移动【前】
+ *  给 vy 追加 |vx| —— 让 Y 与 X 同帧同步走对角线，消灭"先平移再被轴后贴合拽回"
+ *  的每帧沉浮循环。玩家 SlopingCollision 前置调用、NPC UpdateCollision 首步
+ *  Collision_WalkDownSlopes 同源。与旧速度辅助的差异：
+ *  ① 门：仅 vy==gravity 的纯贴地态激活（vanilla :1695 字面早退）；
+ *  ② 落面扫描：【全身体宽度】[x..x+w] × (feet+4)/16 行起两行的矩形上探窗
+ *     （17px 窗,:1717-1719 + Intersects 判定），取最贴脚候选——不再是只看中心列,
+ *     接近坡第一列即同步补偿（阻尼残差根因）;
+ *  ③ 表面等高续链门（:1735-1743）：同层表面并列时只跟随与行走方向配套的同侧
+ *     坡链（slope==dirCode），防跨结构误触发。 */
+function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
+  if (!WALKDOWN_PRE) return;
+  // 活性门（:1695 字面 `Velocity.Y != gravity` 早退）：玩家侧 vy===GRAVITY 字面
+  // 等价；NPC 族本仓重力先累加、碰撞头已清 onGround——贴地判据用入口快照
+  // wasGround（'grounded' 档）;跳起首帧 vy<0 / 飞行体照旧早退。
+  // TownCritter 'never' 档不参与（AI_007 flag22 语义）。
+  if (!b.stepUp) return;
+  const gate = b.stepDownGate ?? 'grounded';
+  if (gate === 'never') return;
+  if (gate === 'gravity' ? b.vy !== GRAVITY : !(wasGround && b.vy >= 0)) return;
+  const st = world.store;
+  // 扫描窗（:1698-1720）：j0=(feet+4)/16；候选面须在 (j*16-17, j*16) 的 17px 上探带内
+  // 与身体盒相交，且 num5 <= num(初始 (j0+3)*16 大帽)。solid||solidTop(平台族)均可作面。
+  const xC0 = Math.floor(b.x / TILE), xC1 = Math.floor((b.x + b.w) / TILE);
+  const jA = Math.floor((b.y + b.h + 4) / TILE);
+  let bestTop = (jA + 3) * TILE;    // num 初始
+  let txB = -1, tyB = -1;           // num2/num3
+  for (let i = xC0; i <= xC1; i++) {
+    for (let j = jA; j <= jA + 1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      if (!st.isActive(i, j)) continue;
+      if (!st.isSolid(i, j) && !st.isPlatform(i, j)) continue;
+      let top = j * TILE;
+      if (st.half[st.idx(i, j)]) top += 8;   // halfBrick 面 +8（:1721-1723）
+      // 17px 上探带矩形相交（:1717 Rectangle(j*16-17,…,16,16) vs 身体盒）+ 高度帽
+      const bandOk = b.x + b.w > i * TILE && b.x < i * TILE + TILE
+        && j * TILE - 17 < b.y + b.h && j * TILE - 17 + TILE > b.y;
+      if (!bandOk || top > bestTop) continue;
+      if (top === bestTop && txB !== -1 && tyB !== -1) {
+        // 等高并列续链（:1735-1743）：前候选是坡时，只接受坡型==行走方向档位的新格;
+        // 前候选非坡(平坦/半砖)则照单全收（else 分支直落）
+        const prevIsSlope = st.slope[st.idx(txB, tyB)] !== 0;
+        if (prevIsSlope && st.slope[st.idx(i, j)] !== (b.vx < 0 ? 2 : 1)) continue;
+      }
+      bestTop = top;
+      txB = i; tyB = j;
+    }
+  }
+  // 终段（:1766-1794）：选中面为下行坡且方向/进深满足 → vy += |vx|（纯加法,+不取反）
+  if (txB === -1 || tyB === -1) return;
+  const sl = st.slope[st.idx(txB, tyB)];
+  if (sl !== 1 && sl !== 2) return;
+  const vx0 = txB * TILE;
+  if (sl === 1) {
+    const depth = b.x - vx0;
+    if (b.y + b.h >= tyB * TILE + depth && b.vx > 0) b.vy += Math.abs(b.vx);
+  } else {
+    const depth = vx0 + TILE - (b.x + b.w);
+    if (b.y + b.h >= tyB * TILE + depth && b.vx < 0) b.vy += Math.abs(b.vx);
+  }
+}
+
 /** 原版 Collision.SlopeCollision（1456 Collision.cs:1796-2036）适配：
  *  常规碰撞后对重叠坡面格做对角线贴合——身体沉到斜面下时抬回斜面上
  *  （走路沿坡爬升;多格取最高贴合位,与原版 y 最小值机制一致）。
@@ -605,10 +680,15 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     else if (gate === 'gravity' ? b.vy === GRAVITY : (wasGround && b.vy >= 0)) applyStepDown(b, world);
     applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
   }
-  // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
-  // 是 slope1/2、水平速度朝低侧、脚已沉到对角线 → dy += |dx|
-  // （等价 Velocity.Y += |Velocity.X|）把身体粘到斜面,消除坡顶角/高速下坡 1 帧的格顶滑行
-  {
+  // ★WalkDownSlope 预备阶段（2026-09-01 全量移植,见 walkDownSlopePre 注释）：
+  //   vanilla 玩家 SlopingCollision 前置/NPC UpdateCollision 首步同源。开启后
+  //   接管 vy+=|vx| 的全部职责；旧中心列"速度辅助"保留为回退开关路径（二选一,
+  //   防双重补偿把下坡吸成急坠）。
+  walkDownSlopePre(b, world, wasGround);
+  // 速度辅助（Collision.cs:1773-1790 = WalkDownSlope 尾巴的残缺移植）：脚底中心
+  // 所在格是 slope1/2、水平速度朝低侧、脚已沉到对角线 → dy += |dx|。
+  // ★仅在 WALKDOWN_PRE 关闭时执行（旧语义回退路径;sw_slope_wd='0' 复原）
+  if (!WALKDOWN_PRE) {
     const st = world.store;
     const feetRow = Math.floor((b.y + b.h) / TILE);
     const midCol = Math.floor((b.x + b.w / 2) / TILE);

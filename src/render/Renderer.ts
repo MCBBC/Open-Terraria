@@ -366,15 +366,16 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    // ★枪族 v12 金标审计修正(2026-09-01):pivot = (cx∓2, cy+dp[1]),
-    //  前伸 = fw+dp[0] 沿瞄准向。与修正后的 drawUseItem 绘制变换逐参数对齐
-    //  （offY=p.h/2+dp[1], drawOY=−fh/2, 原版 origin=(−num9,H/2)）。
-    //  弹出生点 = 绘制枪口 = 枪管轴向前伸在瞄准射线上的正确位置。
+    // ★枪族 v12 金标(2026-09-01):原版 itemLocation(Player.cs:51006) =
+    //   握点 = 中心 + (fw/2+2)·dir + (0, 24−21), 前伸 = fw+dp[0]。
+    //   发射筒 759: 握点=(cx+28·dir, cy+3+2), reach=52−8=44
+    //   → 水平右 d=(28+44, 5)=(72,5)。含手前偏移(武器越宽手越远)。
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
+    const handFwd = fw * 0.5 + 2;
     const reach = fw + dp[0];
     return {
-      x: cx - sg * 2 + Math.cos(aimWorld) * reach,
-      y: cy + dp[1] + Math.sin(aimWorld) * reach,
+      x: cx + sg * handFwd + Math.cos(aimWorld) * reach,
+      y: cy + 3 + dp[1] + Math.sin(aimWorld) * reach,
     };
   }
   const wr = sg * alpha;
@@ -602,7 +603,7 @@ import {
   shieldHaloFactor, shieldParryTransform,
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
 } from '../data/vanillaAccDrawslots';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Sampler, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
@@ -7656,7 +7657,7 @@ export class Renderer {
       c0.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, sw, sh);
       const im = c0.getImageData(0, 0, sw, sh);
       // Extra_180/179 渐变噪声采样器（wrap;像素缓存）
-      const mkSampler = (file: string): SM2Sampler | undefined => {
+      const mkSampler = (file: string): SM2SamplerOut | undefined => {
         let px = this.qsNoisePix[file];
         if (!px) {
           const nimg = this.atlas!.ensureVImage(`vanilla/${file}.png`);
@@ -7668,11 +7669,11 @@ export class Renderer {
           px = { w: nc.width, h: nc.height, data: ncx.getImageData(0, 0, nc.width, nc.height).data };
           this.qsNoisePix[file] = px;
         }
-        return (uu, vv) => {
+        return (uu, vv, o4) => {
           const u2 = uu - Math.floor(uu), v2 = vv - Math.floor(vv);
           const x = Math.min(px.w - 1, (u2 * px.w) | 0), y = Math.min(px.h - 1, (v2 * px.h) | 0);
           const o = (y * px.w + x) * 4;
-          return [px.data[o] / 255, px.data[o + 1] / 255, px.data[o + 2] / 255, px.data[o + 3] / 255];
+          o4[0] = px.data[o] / 255; o4[1] = px.data[o + 1] / 255; o4[2] = px.data[o + 2] / 255; o4[3] = px.data[o + 3] / 255;
         };
       };
       const s1 = mkSampler('Extra_180'), s2 = mkSampler('Extra_179');
@@ -10215,7 +10216,7 @@ export class Renderer {
 
   /** Extra_156 wrap 采样器缓存（HallowBoss 链共用：44 翼烘焙 + 4778 染料） */
   private hallowRampData: { data: Uint8ClampedArray; w: number; h: number } | null = null;
-  private hallowRampSampler(): ((u: number, v: number) => [number, number, number, number]) | null {
+  private hallowRampSampler(): SM2SamplerOut | null {
     if (!this.hallowRampData) {
       const atlas = this.atlas;
       if (!atlas) return null;
@@ -10230,7 +10231,8 @@ export class Renderer {
       };
     }
     const r = this.hallowRampData;
-    return (u, v) => sampleImageData(r!.data, r!.w, r!.h, u, v, true);   // LinearWrap（MiscShaderData.Apply 默认）
+    // PR#1：出参版 wrap 采样（Extra_156 ramp；LinearWrap=MiscShaderData.Apply 默认）
+    return (u, v, o4) => { sampleImageInto(r!.data, r!.w, r!.h, u, v, true, o4); };
   }
 
   /** 44 彩虹翼烘焙缓存（PlayerRainbowWingsTextureContent.cs 1:1）：Extra_171 全图

@@ -30,6 +30,8 @@ import { setBoulderSolidity } from './TrapsPass';
 // 结构位接线见 dgEarlyDualFamilies；现行一切链形参表下纯惰性零掷。
 import { dropTrap as deDropTrap, tileClump as deTileClump } from './DungeonEarlyFeatures';
 import { runDualDungeonLayout } from './DungeonDualLayout';   // ★IIIII92 双地牢布局域
+import { registerChest } from '../ChestRegistry';             // ★IIII102c 洞数组 sink
+import type { SparseChestSink } from '../ChestRegistry';
 import { dualSnakes } from './DitherSnakePass';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
@@ -3819,7 +3821,8 @@ const snap: SnapFn = (name) => {
         }
       }
       dgChestLoot(num7, num10, flag9, flag10, num9, chestTile, flag0);
-      chests.push({ x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
+      // ★IIII102c：push → registerChest（Main.chest 首空槽复用,Chest.cs:584）
+      registerChest(chests as SparseChestSink, { x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
       return true;
     }
     return false;
@@ -4055,7 +4058,7 @@ const snap: SnapFn = (name) => {
     // tools/_gggreplay.test.ts 对拍注记）——B 尾 -3 掷定位用，常态零开销。
     const bsEvG = (globalThis as { __bsEv?: unknown[][] }).__bsEv;
     let ncount = 0, num3 = 0;
-    // ★IIIII105b：Bookshelves 自己的 minimumWaterCandles（Bookshelves.cs:33-42，非共享 ref）
+    // ★IIIII105b：Bookshelves 自持 minimumWaterCandles（Bookshelves.cs:33-42；GetWorldSize 同 :54-63）
     const bkMinWC = { v: gfStyles.length > 0 ? (worldSizeIdx() === 0 ? 5 : worldSizeIdx() === 1 ? 10 : 15) : -1 };
     while (num3 < Math.trunc(w / 20)) {
       ncount++;
@@ -4080,7 +4083,7 @@ const snap: SnapFn = (name) => {
       // ★IIIII105b：Books 座面化（逐族分步 #1）——IsConsideredDungeonWall/Tile 的
       // per-seat 全集（DungeonUtils.cs:1929-1950/:1844-1869 genVars 克隆合并族）；
       // 普通世界 gfStyles 空 ⇒ 与旧 isDW/isDT 逐位同径零扰动。
-      if (gfIsBkDW(wallAt(x, y)) && actAt(x, y) === 0) {
+      if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
         const iC = ((globalThis as unknown as { __swLastRollIdx?: number }).__swLastRollIdx ?? 0) + 1;
         const d98c = rn(2);
         if (I110bs) emitBS(`bsDi|${num3},${ncount}|${d98c} m=${dgMainRolls} i=${iC}`);
@@ -4088,13 +4091,12 @@ const snap: SnapFn = (name) => {
         while (flag && inW(x, y, 0) && actAt(x, y) === 0) {
           x -= n7;
           if (x < 5 || x > w - 5) flag = false;
-          else if (actAt(x, y) !== 0 && !gfIsBkDT(typAt(x, y))) flag = false;   // IIII105b
+          else if (actAt(x, y) !== 0 && !isDT(typAt(x, y))) flag = false;
         }
         emitBS(`bsS|${num3},${ncount}|${x},${y} fl=${flag ? 1 : 0}`);
-        // ★IIIII105b：三锚格 tile 谓词座面化（gfIsBkDT；普通世界恒同 isDT）
-        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && gfIsBkDT(typAt(x, y))
-          && actAt(x, y - 1) !== 0 && gfIsBkDT(typAt(x, y - 1))
-          && actAt(x, y + 1) !== 0 && gfIsBkDT(typAt(x, y + 1))) {
+        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && isDT(typAt(x, y))
+          && actAt(x, y - 1) !== 0 && isDT(typAt(x, y - 1))
+          && actAt(x, y + 1) !== 0 && isDT(typAt(x, y + 1))) {
           x += n7;
           emitBS(`bsA|${num3},${ncount}|${x},${y}`);
           outer4:
@@ -4113,31 +4115,26 @@ const snap: SnapFn = (name) => {
             const num8 = x;
             while (k > bounds.L && k < bounds.R && actAt(k, y) === 0 && actAt(k, y - 1) === 0 && actAt(k, y + 1) === 0) k += n7;
             k = Math.abs(x - k);
-            let flag3 = rn(2) === 0;
+            let flag3 = rn(2) === 0;   // ★IIIII105b：座面 !flag2 ⇒ false 重赋（cs:101）
             if (k > 5) {
-              // ★III 批 2026-08-18：styleForWall 四件套（DungeonGlobalBookshelves.cs:96-110）。
-              //   普通世界样式表=[Default]（SetupDungeonGenVarVariables 仅 dualDungeons
-              //   追加特殊样式；GetCurrentDungeonStyle 的 PlatformItemTypes=new int[0]
-              //   ——x86 IL 实证）⇒ GetStyleForWall(wall)=wall==brickWallType→Default：
-              //   flag2=true、GetPlatformStyle 恒 -1 **不掷**、minmax=(1,4)；其余墙→null：
-              //   四件套整体跳过。本种子锚墙 {96/0:null, 9:Default} 均零掷差——B 段 -3 掷
-              //   真根因=pre-pit 布局债（见 caves-oracle.cs 头注 III 批取证）。
+              // ★III 批 2026-08-18 注记 + ★IIIII105b 座面化终案：
+              //   普通世界（gfStyles 空）沿用旧判 wall==brickWallType→Default(0)；
+              //   dual 座面按 DungeonGlobalBookshelves.cs:96-110 原文序接 GetStyleForWall：
+              //     flag2=(Style==0)；!flag2 ⇒ flag3=false；GetPlatformStyle=
+              //     Next(len)→DerivedPlacementDetails.tileStyle（:150-158 空表恒 -1 不掷）；
+              //     GetBookshelfMinMaxSizes 缺省 (1,4)/LivingWood 覆写 (3,7)
+              //     （DungeonGenerationStyles.cs:38-44）。
               let flag2 = true;
               let num9 = -1, min = 1, max = 4;
-              // ★IIIII105b（逐族分步 #1 续）：GetStyleForWall 四件套座面化。
-              //   普通世界（gfStyles 空）保持原状：wall==brickWallType→Default(0)。
-              //   dual 座面（DungeonGlobalBookshelves.cs:96-110 原文序）：
-              //     flag2=Style==0；!flag2 ⇒ flag3=false；GetPlatformStyle 掷
-              //     Next(len)→DerivedPlacementDetails.tileStyle；minmax=覆写/缺省。
               const _bksFW = gfStyles.length > 0 ? gfStyleForWall(wallAt(x, y))
                 : (wallAt(x, y) === wall ? { Style: 0 } as import('./DungeonStyles1457').DungeonStyleData : null);
               if (_bksFW !== null) {
                 flag2 = _bksFW.Style === 0;
-                if (!flag2) flag3 = false;
+                if (!flag2) flag3 = false;          // cs:101 !flag2 ⇒ flag3=false（首排平台不再带书/瓶尾挂件）
                 const bPlat = _bksFW.PlatformItemTypes ?? [];
                 if (_bksFW.Style === 0 || bPlat.length === 0) num9 = -1;
                 else {
-                  const pv = ITEM_PLACE[bPlat[rn(bPlat.length)]!];
+                  const pv = ITEM_PLACE[bPlat[rn(bPlat.length)]!];   // GetPlatformStyle
                   num9 = pv ? pv.s ?? -1 : -1;
                 }
                 const mmBk = _bksFW.BookshelfMinMaxOverride;
@@ -4159,7 +4156,7 @@ const snap: SnapFn = (name) => {
                 //   GetPlatformStyle 对 Default 样式恒 -1 不覆写）——曾误用
                 //   platformStyle(6/8/7，那是 dgPlatforms 平台件的样式)。
                 const swl = wallAt(x, y);
-                // ★IIIII105b：num9>-1 ⇒ GetPlatformStyle 覆写 shelfStyles（cs:131 num11=num9）
+                // ★IIIII105b：num9>-1 ⇒ 平台样式覆写（Bookshelves.cs:131 num11=num9）
                 let shelfStyle = swl === wallVariants[1] ? shelf[1] : swl === wallVariants[2] ? shelf[2] : shelf[0];
                 if (num9 > -1) shelfStyle = num9;
                 st.frameY[st.idx(x, y)] = 18 * shelfStyle;
@@ -4182,8 +4179,8 @@ const snap: SnapFn = (name) => {
               if (!flag3 && rn(2) === 0) {
                 x = num8; y--;
                 // flag2 门（cs:148-196）：true → Next(4) 选 13/49；false → 直放 13（少 1 掷）。
-                //   ★IIIII105b：dual 座 minimumWaterCandles>0 ⇒ num12 强制 =1（=49，cs:169-171）；
-                //   本座计数器 bookMinWC 特性内自持（Bookshelves.cs:33-42 新开 ref 非 Furniture 共享）。
+                //   ★IIIII105b：dual 座 minimumWaterCandles>0 ⇒ num12 强制 49（cs:169-171）；
+                //   bookMinWC 特性内自持（Bookshelves.cs:33-42 非 Furniture 共享 ref）。
                 let n12v: number;
                 if (flag2) {
                   if (gfStyles.length > 0 && bkMinWC.v > 0) n12v = 49;
@@ -6206,21 +6203,21 @@ const snap: SnapFn = (name) => {
         for (const sb of s0.SubStyles ?? []) addT(sb);
       };
       for (const s0 of res.styles) addT(s0);
-      _gfSeatDTSet = tset;
+      _gfSeatDTSet = tset;   // IIII105b：座面 tile 集基建保留（Books 窗口接刀用,当前无消费者）
     }
     for (const fr of res.featRooms ?? []) gfFeatRooms.push(fr);
     for (const fh of res.featHalls ?? []) gfFeatHalls.push(fh);
     gfFeatScalar = res.scalar ?? 1.0;                    // DC.cs:381（provider 出口时点）
-  } else {
     dgLayout(num);
   }
   {
     const WV61c = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
     if (WV61c) ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|d61layoutEnd|rc=${dgMainRolls}`);
   }
-  // ★IIIII105b：provider 大厅基线（此后 halls 数组内新增=爬升走廊/插入厅,均 Default
-  // style0 语义——dgHall/dgEntHall* 的 StyleData=genVars.dungeonStyle,DC.cs:455-473 同位）
-  const gfClimbHallBase = isDualWorld ? halls.length : -1;
+  // ★IIIII105b：provider 大厅/房间基线（此后 halls/rooms 数组内新增=爬升走廊、
+  // roomDelay 插入厅房,均 Default style0 语义——dgHall/dgEntHall*/dgRoom 的
+  // StyleData=genVars.dungeonStyle,DC.cs:446-458/:455-473 同位）
+  const gfClimbBase = isDualWorld ? { rooms: rooms.length, halls: halls.length } : null;
   if (!isDualWorld) {
   // cs:374-396：最高已生成房 InnerBounds 顶部中心回写（dual 支跳过——Provider 已按
   // dungeonRooms[0].InnerBounds 直接定位，DC.cs:391-413 分型语义）
@@ -6303,11 +6300,17 @@ const snap: SnapFn = (name) => {
   if (gs.seedFlags.surfaceIsInSpace) bounds.topSet(25);
   // ★IIIII105b：爬升/插入大厅并入特征域载荷（dungeonHalls 全集=C# data.dungeonHalls
   // 含 LegacyEntrance 支；style=genVars.dungeonStyle=Default(style0)）
-  if (isDualWorld && gfClimbHallBase >= 0) {
-    for (let hi = gfClimbHallBase; hi < halls.length; hi++) {
+  if (isDualWorld && gfClimbBase !== null) {
+    for (let hi = gfClimbBase.halls; hi < halls.length; hi++) {
       const hl = halls[hi]!;
       gfFeatHalls.push({ gen: !!hl.generated, st: 0,
         L: hl.bounds.L, T: hl.bounds.T, R: hl.bounds.R, B: hl.bounds.B });
+    }
+    // roomDelay 插入房（LegacyDungeonRoom → data.dungeonRooms 全集成员，DC.cs:446-458）
+    for (let ri2 = gfClimbBase.rooms; ri2 < rooms.length; ri2++) {
+      const rr = rooms[ri2]!;
+      gfFeatRooms.push({ gen: !!rr.generated, st: 0,
+        L: rr.inner.L, T: rr.inner.T, R: rr.inner.R, B: rr.inner.B });
     }
     emit132(`MARK|I132 feats rooms=${gfFeatRooms.length} halls=${gfFeatHalls.length}`);
   }

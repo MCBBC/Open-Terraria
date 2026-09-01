@@ -84,6 +84,8 @@ function __swFnt39(tag: string, x: number, y: number): void {
   if (em) em(tag + '|' + x + ',' + y + '|' + (pr?.rc ? pr.rc() : -1));
 }
 import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
+import { findLiveChest } from '../ChestRegistry';           // ★IIII102c 洞数组 sink
+import type { SparseChestSink } from '../ChestRegistry';
 import { GENERAL_PLACEMENT_FORBID } from './GenState';
 
 const SAND = TILE_BY_KEY['sand']!;
@@ -1554,20 +1556,25 @@ export class DeadMansChestBiome {
   private readonly gs: GenState;
   /** chest sink 条目（带 items）——TurnGoldChestIntoDeadMansChest 的 FindChest/右移
    *  消费（★R11-M1：曾只收 {x,y} 丢 items → 5007 全游戏不可得） */
-  private readonly chestList: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
+  /** chest sink 条目（带 items;★IIII102c 稀疏槽号=数组下标,洞=null 跳过）——
+   *  TurnGoldChestIntoDeadMansChest 的 FindChest/右移消费（★R11-M1：曾只收 {x,y} 丢
+   *  items → 5007 全游戏不可得） */
+  private readonly chestList: SparseChestSink;
   private readonly darts: DartSpot[] = [];
   private readonly wires: WireSpot[] = [];
   private readonly boulders: BoulderSpot[] = [];
   private readonly explosives: Array<{ x: number; y: number }> = [];
 
   constructor(st: TileStore, rng: RNG, gs: GenState,
-    chestList: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>) {
+    chestList: SparseChestSink) {
     this.st = st; this.rng = rng; this.gs = gs; this.chestList = chestList;
   }
 
-  /** GetPossibleChestsToTrapify(cs:405-442):按 Main.chest 槽位序(=创建序)扫金箱
-   *  (style 1)。本仓 chest sink(world.chests)即创建序——2026-08-17 前用栅格行扫描
-   *  近似,候选集相同但**顺序不同**→Next(count) 选中的箱不同→陷阱屋整体错位。
+  /** GetPossibleChestsToTrapify(cs:405-442):按 Main.chest **槽位序**扫金箱(style 1)。
+   *  ★IIII102c：sink 洞数组化后=直接按下标枚举跳洞——GetPossibleChestsToTrapify
+   *  原文即 `for j in 0..7999 { chest=Main.chest[j]; if null continue; …; list.Add(j) }`
+   *  （cs:427-443）,候选存的是 Main.chest 槽下标 j 本身。旧实现"candSlot++ 连号计数"
+   *  只在无洞时与槽位序等价。
    *  structures.CanPlace(1×1, 扩展白名单+21/467/138/664/712-715, pad 10)(cs:433):
    *  GeneralPlacementTiles 黑名单集剔除七类(本方法专有白名单扩展)。 */
   getPossibleChests(): Array<{ x: number; y: number }> {
@@ -1575,9 +1582,9 @@ export class DeadMansChestBiome {
     const forbid = new Set(GENERAL_PLACEMENT_FORBID);
     for (const t of idsByVanillaSheet(21, 467, 138, 664, 712, 713, 714, 715)) forbid.delete(t);
     const out: Array<{ x: number; y: number }> = [];
-    let candSlot = -1;
-    for (const ch of this.chestList) {
-      candSlot++;
+    for (let candSlot = 0; candSlot < this.chestList.length; candSlot++) {
+      const ch = this.chestList[candSlot];
+      if (!ch) continue;                       // 洞：Main.chest[j]==null → cs:429 continue
       const { x, y } = ch;
       // IIII67：x86 DmLog 'CHEST slot=' 同格式（全箱枚举,非金箱也打行）
       if (this.__swLogChest !== false) segProbe(`CHEST slot=${candSlot} ${x},${y} t=${mbSheetOf(st.type[st.idx(x, y)])} fx=${st.frameX[st.idx(x, y)]} fy=${st.frameY[st.idx(x, y)]} act=${(st.flags[st.idx(x, y)] & 1)}`);
@@ -1861,7 +1868,7 @@ export class DeadMansChestBiome {
     //  超 40 尾丢。旧实现"无 chest sink 写入跳过"判断有误——runMicroBiomesPass
     //  传入的正是带 items 的 sink → 5007 曾全游戏不可得（每世界 3-7 箱缺件）。
     if (this.rng.int(0, 2) !== 0) return;
-    const ch = this.chestList.find((c) => c.x === x && c.y === y);   // Chest.FindChest
+    const ch = findLiveChest(this.chestList, x, y);   // Chest.FindChest（_chestsByCoords,跳洞）
     if (!ch) return;
     const items = ch.items;
     if (items.length >= 40) items.length = 39;     // item[Length-1] 被右移覆盖丢弃

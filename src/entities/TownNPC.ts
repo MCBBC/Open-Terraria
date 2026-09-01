@@ -92,8 +92,20 @@ const TOILET_TILE_IDS = sheetTileIds(new Set([497]));
 const NO_SIT_NPC_IDS = new Set([638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
 /** NPCID.Sets.IsTownPet（NPCID.cs:4444）：637 猫/638 狗/656 兔 + 城镇史莱姆族
  *  （IsTownSlime 670/678-684 ⊂ IsTownPet）——无 CanTalk（不发起聊天/RPS/舞/
- *  发呆）、sitFlag 回家门带 !TownCritter 门 */
+ *  发呆）。（★对抗修复批①2026-09-01：sitFlag 回家门/避坠豁免已拨正为消费
+ *  TownCritter 集,见下方 VANILLA_TOWN_CRITTER_SHEETS;本集保留社交类真实消费位） */
 const IS_TOWN_PET = new Set([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
+/** NPCID.Sets.TownCritter（★蓝队A-F1：NPCID.cs:4827 行原文全量抄录，2026-09-01）。
+ *  ★与 IsTownPet 是两个不同的集：宠物(637/638/656 等)不在本集、野生小动物不在
+ *  IsTownPet。AI_007 的回家双臂(:54198/:54320 `!TownCritter[type]` 门)与
+ *  GetWalkPrediction 避坠豁免(:56120-56123)消费的是【本集】——此前误用 IS_TOWN_PET
+ *  使家化宠物不回家且恒放弃避坠判定；拨正后宠物恢复回家/避坠，两消费面不动
+ *  NO_SIT_NPC_IDS / 聊天等真实 IsTownPet 位 */
+export const VANILLA_TOWN_CRITTER_SHEETS = new Set([
+  46, 148, 149, 230, 299, 300, 303, 337, 361, 362, 364, 366, 367, 443, 445, 447,
+  538, 539, 540, 583, 584, 585, 592, 593, 602, 607, 608, 610, 616, 617, 625, 626,
+  627, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 687, 688,
+]);
 /** NPCID.Sets.IsTownSlime（NPCID.cs:4446）——站定态湿身强制走动门（:54047） */
 const SLIME_TOWN_IDS = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
 
@@ -305,9 +317,12 @@ export const HOME_DRIFT_TICK = 5;
 /** 到家站定入停态 ai[1] = 200+Next(200)（:54100/:54195） */
 export const REST_LEG_BASE = 200;
 export const REST_LEG_RAND = 200;
-/** 站定态起身走程（湿畜 :54050 = 200+Next(500,700)；常态 :54146 = 200+Next(300)） */
-export const RISE_LEG_WET_BASE = 200;
-export const RISE_LEG_WET_RAND = 200;   // Next(500,700) 跨度 200
+/** 站定态起身走程（湿畜 :54196-54198 = 200+Next(500,700) = **700..899**；
+ *  常态 :54146/:54253/:54305 = 200+Next(300)）
+ *  ★对抗修复批①2026-09-01：BASE 由 200 拨正 700——旧注释把跨度 Next(500,700)
+ *  读成了总值 200，致湿史莱姆起身只走 1/4 程就转停态 */
+export const RISE_LEG_WET_BASE = 700;
+export const RISE_LEG_WET_RAND = 200;   // Next(500,700) 跨度 200 → BASE+[0..199]
 
 /** 回家传送视野门（:53830-53836）：NPC.sWidth=1920 / sHeight=1200（:6695/:6697）
  *  + safeRange = (dim/16)×0.52 截断（:6090-6092 → 62/39）。玩家盒与 NPC 位/home 位
@@ -1213,7 +1228,8 @@ export class TownNPC extends Entity {
   private corneredT = 0;
   /** ai[0]==8 只读（渲染/测试消费） */
   get cornered(): boolean { return this.corneredT > 0; }
-  /** StepUp 无位移卡墙计数（:54409-54422：每 10t 强制折返） */
+  /** 无位移卡墙计数（★对抗修复批①2026-09-01 对齐 cs:54789-54804：连续 ≥30 拍
+   *  触发一次后清零再积；原版载体重用 localAI[2]） */
   private stuckT = 0;
   /** 拽起防重坐锁：危险扫描踢出坐姿的原刻阻止 sittingUpdate 走 TryForcingSitting
    *  再坐回（原版扫描先改 ai[0]=1 → 当刻坐姿块整段跳过，:53990 vs :54682） */
@@ -1935,7 +1951,10 @@ export class TownNPC extends Entity {
       const myX = Math.floor(this.cx / TILE);
       const ax = Math.floor((this.cx + 15 * wantDir) / TILE);   // num26 前方列（:54405）
       const fy = Math.floor((this.y + this.h - 16) / TILE);     // num27 脚部行（:54406）
-      const isCritter = IS_TOWN_PET.has(this.vanillaId);
+      // ★蓝队A-F1 拨正（2026-09-01）：避坠豁免参 = TownCritter 谓词（NPCID.cs:4827，
+      // :56120-56123 消费）——非 IsTownPet；家化宠物（637/638/656/史莱姆族不在
+      // TownCritter 集）由此【放弃豁免】照常避坠
+      const isCritter = VANILLA_TOWN_CRITTER_SHEETS.has(this.vanillaId);
       // keepwalking 三参（:56098-56117）：起步期 = 走态且走程剩余 <30t；挤人 =
       // 前方盒（X−20/宽+40）内有站定（vx==0）城镇 NPC（:56105-56115）
       const startLeg = this.walkMode === 1 && this.walkT < 30;
@@ -2011,13 +2030,21 @@ export class TownNPC extends Entity {
       : ENEMY_GRAVITY;
     this.vy = Math.min(this.vy + grav, MAX_FALL_SPEED);
     moveAndCollide(this, world, this.vx, this.vy);
-    if (this.hitWall) this.vx *= 0.5;
-    // ---- StepUp 卡墙折返（NPC.cs:54403-54422）：站地行走中 StepUp 无位移
-    //      （x 一格未动）且走态末段（ai[1]<100）每 10t → 强制折返（ai[0]=1、
-    //      ai[1]=200+rand(300)、direction/vx 双翻）----
-    if (wantDir !== 0 && this.onGround && Math.abs(this.x - preX) < 0.01) {
+    // ★对抗修复批①2026-09-01：删除 `if(this.hitWall) this.vx*=0.5` 死阻尼——
+    // X 轴拦截在 TileCollision.moveAxis 内已 b.vx=0，乘法恒零且原版无城镇撞墙半速
+    //（cs 全文无此面）
+    // ---- 卡墙折返（★对抗修复批①2026-09-01 对齐 cs:54789-54804，旧注释错引
+    //      ":54403-54422"）：无位移连续 ≥30 拍触发【一次】后计数清零再积
+    //      （原版 oldPosition==position && oldVelocity==velocity+gravity &&
+    //      localAI[2]++>=30 → localAI[2]=0 + ai[0]=1/ai[1]=200+Next(300)/双翻）。
+    //      PARTIAL 余留（蓝队允许降级）：速度同符号近似判定未建，仅 x 轴位移；
+    //      触发前提加 !flag16（危险中不折返,dangerNear 承接）与 !talking，
+    //      旧 walkT<100 门/模10 摊销删除——原版无此二条件 ----
+    if (wantDir !== 0 && this.onGround && !this.dangerNear && !this.talking
+      && Math.abs(this.x - preX) < 0.01) {
       this.stuckT++;
-      if (this.stuckT % 10 === 0 && this.walkMode === 1 && this.walkT < 100) {
+      if (this.stuckT >= 30 && this.walkMode === 1) {
+        this.stuckT = 0;                                   // :54791 localAI[2]=0 重积
         this.facing = -this.facing;
         this.vx = -this.vx;
         this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
@@ -2060,7 +2087,10 @@ export class TownNPC extends Entity {
     const rest = this.restSpot ?? this.restFloor(world);       // FindGoodRestingSpot 输出
     const myX = Math.floor(this.cx / TILE);                    // num6
     const myY = Math.floor((this.y + this.h + 1) / TILE);      // num7
-    const isCritter = IS_TOWN_PET.has(this.vanillaId);
+    // ★蓝队A-F1 拨正（2026-09-01）：回家双臂（站定 :54198 / 行走 :54320 的
+    // `!TownCritter[type]` 门）与起身避坠豁免消费 TownCritter（NPCID.cs:4827）
+    // 非 IsTownPet——家化宠物要能回家（旧集把 637/638/656 全挡在回家门外）
+    const isCritter = VANILLA_TOWN_CRITTER_SHEETS.has(this.vanillaId);
     const atRest = rest != null && myX === rest.x && myY === rest.y;
     if (this.turnLock > 0) this.turnLock--;                    // :54040-54042 站定态递减
     let wantDir = 0;
@@ -2144,9 +2174,10 @@ export class TownNPC extends Entity {
             this.walkT -= HOME_DRIFT_TICK;
           }
           this.walkT--;
-        } else {
-          this.walkT--;
         }
+        // ★对抗修复批①2026-09-01：溺水（flag21）臂的递减删除——原版减法整体在
+        // `if(!flag21)` 内（cs:54361-54375），没顶期间腿程【冻结】不减（drain −5/t
+        // 同伞豁免，本仓结构照旧）；旧 else 臂照扣是造面
         if (this.walkT <= 0) {
           // 走→停换态（:54232-54242）：停程 300+Next(300)+Next(900)
           this.walkMode = 0;
@@ -2789,7 +2820,7 @@ export class TownNPC extends Entity {
    *    档距 num79=6（633 狼人 0/2），windup num78=10（633:0）（:69765-69786）
    *  - 挥击 15：按 ai[1]/AttackTime 比例四档 >0.65/0.5/0.35/0（:69787-69802）
    *  - 弓 12：num58+GetShootingFrame(ai[2])（:69827，表 :67061）
-   *  - 魔法 14：每 12t 交替 num58/num58+1（:69832-69847） */
+   *  - 魔法 14：12t 周期 6t 档交替 num58/num58+1（:69943-69955 `%12*2<12`） */
   private attackFrame(base: number): void {
     if (this.atkState === 10) {
       const windup = this.vanillaId === 633 ? 0 : 10;   // num78
@@ -2806,8 +2837,11 @@ export class TownNPC extends Entity {
       this.frame = r > 0.65 ? base : r > 0.5 ? base + 1 : r > 0.35 ? base + 2 : r > 0 ? base + 3 : 0;
     } else if (this.atkState === 12) {
       this.frame = base + shootingFrameOffset(this.vanillaId, this.holdAim);
-    } else {                                            // 14 魔法
-      this.frame = this.atkTick % 24 < 12 ? base : base + 1;
+    } else {
+      // ★对抗修复批①2026-09-01：施法翻帧行走样拨正——原版 FindFrame ai[0]==14||24
+      // 分支 `(frameCounter % 12 * 2 < 12)`（NPC.cs:69953-69954）= 12t 周期/档宽 6t
+      //（%24<12 是 24t 周期,曾被写成同义）
+      this.frame = this.atkTick % 12 < 6 ? base : base + 1;
     }
     this.frameT = 0;
   }
@@ -3232,6 +3266,10 @@ export class TownNPC extends Entity {
     const ax = Math.floor((this.cx + 15 * dir) / TILE);          // num26（:54515）
     const fy = Math.floor((this.y + this.h - 16) / TILE);        // num27（:54516）
     const solidRange = (x1: number, x2: number, y1: number, y2: number): boolean => {
+      // ★对抗修复批①2026-09-01：入口先归一区间（vanilla Collision.SolidTilesVersatile
+      // 先 Utils.Swap 再扫,Collision.cs:3454-3460）——dir=-1 时实参 (ax+2, ax+1) 倒序,
+      // 不交换则空扫恒返回「净空」→ 向左越障全失效
+      if (x1 > x2) { const t = x1; x1 = x2; x2 = t; }
       if (x1 < 0 || x2 >= st.w || y1 < 0 || y2 >= st.h - 40) return true;
       for (let x = x1; x <= x2; x++) for (let y = y1; y <= y2; y++) if (st.isSolid(x, y)) return true;
       return false;
@@ -3724,7 +3762,9 @@ export class TownNPC extends Entity {
    *  掷序 = 腿程 ai[1] = cdBase+Next(cdRand) → localAI[1]&(localAI[3]) =
    *  cdBase/2+Next(cdRand)（同值共享——atkCd 与转身锁 turnLock 同源）；
    *  cornered 复位 = (localAI[2]==8)&flag16 → 回被逼停态且 ai[1] 取腿程值；
-   *  非复位臂（无险或入态时非逼停）→ corneredT 显式清零——原版 single ai[0]
+   *  非复位臂（无险或入态时非逼停）→ ai[0]=0 归站定（本仓 walkMode=0 承接,
+   *  ★对抗修复批①2026-09-01 补——旧实现漏走态归零）+ corneredT 显式清零
+   *  ——原版 single ai[0]
    *  载体换号即离态，本仓影子计数须同步归零，防"急袭完成仍钉 ~225t"残窗 */
   private exitAttackCommon(cdBase: number, cdRand: number): void {
     this.holdAim = 0;                     // ai[2] 态尽归零（:55080 族）
@@ -3738,6 +3778,10 @@ export class TownNPC extends Entity {
       this.fleeing = false;
       this.vx = 0;
     } else {
+      // ★对抗修复批①2026-09-01：非 cornered 臂补 walkMode=0——四退出锚的
+      // `(localAI[2]==8f)&flag16 ? 8 : 0` 强制归站定态（cs:55081/:55353/:55551/
+      // :55679 逐字），cornered 臂保持现状。入态 prevAi0 快照语义不变
+      this.walkMode = 0;
       this.corneredT = 0;                 // ai[0]=0 离逼停态（影值清偿）
     }
   }
@@ -3970,7 +4014,9 @@ export class TownNPC extends Entity {
     game.spawnTownShot?.(new TownShot(sx, sy, vx, vy, dmgFinal, kb, proj,
       this.vanillaId === 124
         ? { ai1: this.probeTag }
-        : { life: this.vanillaId === 588 ? 480 : undefined },
+        // ★对抗修复批①2026-09-01：timeLeft=480 特判并上 107（cs:55070-55077 两连支
+        // `if(type==588)/if(type==107)`；TownShot 默认 life=600 仅兜底）
+        : { life: (this.vanillaId === 588 || this.vanillaId === 107) ? 480 : undefined },
     ));
   }
 
@@ -3982,7 +4028,11 @@ export class TownNPC extends Entity {
     // 过门关门（原版 54243-54274）：触发门只看 x——中心超门列 ±2 格；先试关门
     // （门已被拆/堵则 closeDoor 保持），再判放弃（x 或 y 超门 ±4 格——y 位移>4
     // 属"放弃"而非"过门"，本仓旧版误把 y 差并进触发门）
-    if (this.closeDoor) {
+    // ★对抗修复批①2026-09-01：走态门——原版关门块整体在 `else if(ai[0]==1f)`
+    // 行走支内（cs:54387-54414），攻击/对话/坐姿/被逼停/治疗期间不执行；本仓
+    // walkMode 与这些态并行残留，故以 ai0 等价值(==1) 门控+healing 显式排除。
+    // 不释放 closeDoor 记忆（doorX/Y 记录保留），回到行走态即补关
+    if (this.closeDoor && this.ai0 === 1 && !this.healing) {
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
       if (tx > this.doorX + 2 || tx < this.doorX - 2) {
         const doorType = st.type[st.idx(this.doorX, this.doorY)];

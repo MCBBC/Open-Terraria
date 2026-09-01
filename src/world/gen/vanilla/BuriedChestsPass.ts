@@ -22,6 +22,8 @@ import { genSquareTileFrame } from './FinalCleanupPass';
 //   ★IIIII23（2026-08-28）缺省翻转：现缺省 1457 形,SW_MB_1456=1 / SW_MB_1457=0
 //   显式降档（见 HellFortPass.hfIs1457 头注的七链双态实证）。
 import { hfIs1457 } from './HellFortPass';
+import { registerChest } from '../ChestRegistry';
+import type { SparseChestSink } from '../ChestRegistry';
 // 1456 主物门回退值（cs:36130-36133 Next(50)==0）——经具名常量承载（VVVVVV 双态
 // 与 worldgen-1457-rewire 结构锁兼容:该锁禁 1456 赋值形直书,具名常量绕行）。
 const MAIN_FALLBACK_669 = 669;
@@ -82,7 +84,10 @@ function chestLegOK(st: TileStore, lx: number, ly: number): boolean {
   return false;
 }
 
-export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
+// ★IIII102c：chest sink 洞数组化（Main.chest 槽模型归一,Chest.cs:516/126）——
+// 元素可 null（洞）。枚举/查找必须跳洞;注册走 ChestRegistry.registerChest 首空槽复用;
+// 注销置 null 留洞禁 splice。生成出口由 WorldGen.densify 收缩。
+export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean } | null>;
 
 /** 宝箱主题旗标(AddBuriedChest flag2/3/4/5/6/8) */
 export interface ChestFlags {
@@ -771,6 +776,8 @@ export function __setJCItemChestAnchors(s: Set<number> | null): void { killSurvi
 export function jcItemChestAnchorSet(st: TileStore, chests: ChestSink): Set<number> {
   const s = new Set<number>();
   for (const c of chests) {
+    // ★IIII102c：跳洞（稀疏 sink 洞=null;CanDestroyChest 只对活箱判）
+    if (!c) continue;
     if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) s.add(c.y * st.w + c.x);
   }
   return s;
@@ -996,13 +1003,6 @@ function placeBuriedChestInner(
     // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
     // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
     const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
-    // ★IIIII107 临时诊断（SW_I107DES=1 才打印，零开销缺省）：沙漠池触发输入观测
-    // ★热修(2026-09-01 共享阻断):worldgen 在 [worker] 上下文运行,vite 不注入
-    //   process ⇒ 原裸写 ReferenceError 杀掉 pass19 全 boot(所有人起不了世界)。
-    //   typeof 守卫保持 Node 侧(x86 rig/probe)原诊断语义不变。
-    if (typeof process !== 'undefined' && process.env?.SW_I107DES === '1') {
-      console.log(`[DES-FIRE] rollN=${(globalThis as { __swRollN?: number }).__swRollN ?? -1} i=${i} gy=${gy} j=${j} mainId0=${mainId} argStyle=${argStyle} tile=${tile} remix=${(gs.seedFlags as { remix?: boolean }).remix} rock=${gs.rockLevel} overRockLvl=${gy > gs.rockLevel} noRock=${i107NoRockDesert} inUdVal=${inUd} mk=${I107_MARK}`);
-    }
     if (!mainId) {
       mainId = deep
         ? [4061, 4062, 4276][rng.int(0, 2)]
@@ -1212,7 +1212,9 @@ function placeBuriedChestInner(
   const __lend = (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv;
   const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h, chestStyle: style }, mainId);
   __lend?.('lend', i, gy, (globalThis as { __swRollN?: number }).__swRollN ?? -1); // ★IIIII98：loot 段耗骰尾戳
-  chests.push({ x: i - 1, y: topY, items });   // Chest.CreateChest(xCoord,yCoord)=(i-1,gy-2)
+  // ★IIII102c：push → registerChest（Chest.CreateChest(cs:584)=FindEmptyChest 首空槽
+  // 复用+同位重占拒建;-1=已占用,现网 NNOC 门下不可达,保险按追加同义处理）
+  registerChest(chests as SparseChestSink, { x: i - 1, y: topY, items });   // Chest.CreateChest(xCoord,yCoord)=(i-1,gy-2)
   if (flags.hell) gs.hellChestIdx++; // cs:36257-36264 放置成功才前进（失败重试取同一件）
   return true;
 }
