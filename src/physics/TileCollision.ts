@@ -442,6 +442,7 @@ function slopeCollide(
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
   let positionChanged = false;  // 贴合是否实际移动了 body（消费方 Y 冻结判定）
+  let levelSupport: boolean | null = null;  // 行走优先级守卫（等高平顶支撑;惰性求值一次）
 
   // ★贴地前瞻行（+1）：跨坡格交界时脚底尚未探入下一行、旧格又已水平出窗——
   // 两候选皆不可见的裸奔缝（v5 探针 t47 定案,每列一次 5 帧空簇的根源）。
@@ -476,15 +477,40 @@ function slopeCollide(
       //   也发候选——恢复通道不再依赖 wasGround 自愈；大缺口（真高空/坠崖）与
       //   上行排除门维持原语义不变。
       const nearLine = Math.abs(b.vx) > 0.01;   // 行走中才有近线豁免（静止浮空照旧走 wasGround 门）
+      // ★行走优先级守卫（2026-09-01 用户「返回被提前引下实心梯」定罪，marks(41) 实锤）：
+      //   身体横跨内存在与脚底等高（±2px）的平台/整砖平顶时禁用下贴——凹槽口
+      //   (3166,275) 平台坡的下贴抢在顶面单向承接（Y 轴 crossing catch）之前把
+      //   身体拽上对角线,顺势滑进 (3167,276) 实心梯（原版无主动下贴,顶面承接
+      //   优先）。坡格自身顶=对角高角,非平顶,不构成等高支撑（纯对角链不受影响,
+      //   第五波交界自愈保持）;hold S(dropThrough) 时顶面承接本就关闭,守卫随
+      //   gap 窗自然失效,下穿语义不变。
+      if (levelSupport === null) {
+        levelSupport = false;
+        const feetNow = b.y + b.h;
+        const lx0 = Math.floor(b.x / TILE), lx1 = Math.floor((b.x + b.w - 0.01) / TILE);
+        const lr0 = Math.floor((feetNow - 2) / TILE), lr1 = Math.floor((feetNow + 2) / TILE);
+        for (let lx = lx0; lx <= lx1 && !levelSupport; lx++) {
+          for (let ly = lr0; ly <= lr1; ly++) {
+            if (!st.inBounds(lx, ly)) continue;
+            const li = st.idx(lx, ly);
+            if (st.slope[li] !== 0) continue;
+            if (!st.isSolid(lx, ly) && !st.isPlatform(lx, ly)) continue;
+            const top = ly * TILE + (st.half[li] ? 8 : 0);
+            // 只认【托住身体】的顶面:顶在脚底上方 0~2px(含微陷)才算等高支撑;
+            // 顶在脚底下方(下坡末段前方 1-2px 的落面)不构成支撑,不否决下贴
+            if (top >= feetNow - 2 && top <= feetNow + 0.5) { levelSupport = true; break; }
+          }
+        }
+      }
       if ((wasGround || nearLine) && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)
         && !((slope === 1 && b.vx < -0.01) || (slope === 2 && b.vx > 0.01))) {
         const n4s = Math.max(0, Math.min(TILE,
           slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
         const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
-        if (gapS > 0.05 && gapS <= b.w / 2 + Math.abs(b.vx) && gapS < bestSnapGap) {
+        if (!levelSupport && gapS > 0.05 && gapS <= b.w / 2 + Math.abs(b.vx) && gapS < bestSnapGap) {
           bestSnapGap = gapS;
           bestSnapY = vy0 + n4s;
-          if (srec) srec.push(`  snap@${tx},${ty} y=${bestSnapY} gap=${bestSnapGap.toFixed(2)}`);
+          if (srec) srec.push(`  snap@${tx},${ty} y=${bestSnapY} gap=${bestSnapGap.toFixed(2)}${levelSupport ? ' VETO' : ''}`);
         }
       }
       // 坡面平台（平台锤楼梯，slope 恒 1/2——3/4 不存在于平台锤循环）：单向门

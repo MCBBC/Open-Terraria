@@ -119,8 +119,9 @@ export function bubbleWandGoreRoll(rnd: () => number): BubbleWandRoll | null {
 // ---------------------------------------------------------------------------
 // 蜂巢 1124 发蜂掷骰（Player.cs:42946-42958，挥动期每 tick）：
 //   外层门 1/30（:42948 Next(30)==0）→ 弹 = beeType()（:12006——Hive Pack 3333
-//   半数 566 巨蜂；本仓 equipStats 无 strongBees 通道恒 181，与 Arrow.ts 蜂箭
-//   swarm 同款登记）→ 伤 = beeDamage(5)（:12017——181 档 5+Next(2)）、
+//   半数 566 巨蜂；★strongBees 通道已接（equipStats.strongBees,2026-08-31 台账
+//   清偿）——弹型选择在 Game.ts 挥动站调用位，本函数只承担 181 档伤害掷）→
+//   伤 = beeDamage(5)（:12017——181 档 5+Next(2)）、
 //   kb = beeKB(0) = 0（:12026）。出生点 = 近战判定盒中心、速度 = 朝鼠标 ×6。
 // ---------------------------------------------------------------------------
 export interface HiveBeeRoll { damage: number }

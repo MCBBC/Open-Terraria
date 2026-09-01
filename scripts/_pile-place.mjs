@@ -147,22 +147,25 @@ const out = await page.evaluate(async () => {
   const enemyCount = (vid) => (g.entities.enemies ?? []).filter((e) => !e.dead && e.vanillaId === vid).length;
   const dropCount = (vid) => (g.entities.drops ?? []).filter((d) => !d.dead
     && String(items.ITEM_DEFS[d.itemId]?.key ?? '').startsWith(`vi_${vid}_`)).length;
-  // 合成多格件（帧 col*18 / row*18;bl=底左原点,底行=bl.y=占位矩形行）
-  const buildObj = (tid, blx, bly, ow2, oh2) => {
+  // 合成多格件（帧 fxBase+col*18 / row*18;bl=底左原点,底行=bl.y=占位矩形行。
+  //  南瓜 fxBase=144（GrowPumpkin 第四阶段,frameX<72 原版不掉 1725,探针须成熟株）
+  const buildObj = (tid, blx, bly, ow2, oh2, fxBase = 0) => {
     for (let dx = 0; dx < ow2; dx++) {
       for (let dy = 0; dy < oh2; dy++) {
-        st.setTile(blx + dx, bly - (oh2 - 1) + dy, tid, dx * 18, dy * 18);
+        // setTileSilent：四件均非放置物品,真实构建面 = worldgen/导入静默写;
+        // 逐格 setTile 会在合成中途触发 D-1 Check* 整件裁决(原版写完才级联)
+        st.setTileSilent(blx + dx, bly - (oh2 - 1) + dy, tid, fxBase + dx * 18, dy * 18);
       }
     }
   };
-  const envFloorGrass = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly + 1, GRASS2, 0, 0); };
-  const envFloorStone = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly + 1, STONE, 0, 0); };
-  const envCeil = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly - 2, STONE, 0, 0); };
-  const objTest = async (tid, ow2, oh2, env) => {
+  const envFloorGrass = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTileSilent(blx + dx, bly + 1, GRASS2, 0, 0); };
+  const envFloorStone = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTileSilent(blx + dx, bly + 1, STONE, 0, 0); };
+  const envCeil = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTileSilent(blx + dx, bly - 2, STONE, 0, 0); };
+  const objTest = async (tid, ow2, oh2, env, fxBase = 0) => {
     wipe();
     const blx = qx + 1, bly = qy;
     env(blx, bly, ow2);
-    buildObj(tid, blx, bly, ow2, oh2);
+    buildObj(tid, blx, bly, ow2, oh2, fxBase);
     const pre = { p1725: dropCount(1725), bees: enemyCount(210) + enemyCount(211), a582: enemyCount(582) };
     holdItem(wbIdx);
     stand(base.click[0], base.click[1]);
@@ -189,7 +192,7 @@ const out = await page.evaluate(async () => {
     wipe();
     const blx = qx + 1, bly = qy;
     envFloorGrass(blx, bly, 2);
-    buildObj(PUMPKIN, blx, bly, 2, 2);
+    buildObj(PUMPKIN, blx, bly, 2, 2, 144);
     const pre = dropCount(1725);
     g['breakTile'].call(g, blx, bly + 1);   // 挖支撑草（等价 TileFrame 级联触发源）
     let residue = 0;
@@ -213,7 +216,7 @@ const out = await page.evaluate(async () => {
     torchStone: torchDef ? await torchTest('stone') : 'no-torch-def',
     webSurvivor: await webSurvivor(),
     weedOrphan: await weedOrphan(),
-    pumpkinHalf: PUMPKIN >= 0 ? await objTest(PUMPKIN, 2, 2, envFloorGrass) : 'no-def',
+    pumpkinHalf: PUMPKIN >= 0 ? await objTest(PUMPKIN, 2, 2, envFloorGrass, 144) : 'no-def',
     hiveHalf: HIVES >= 0 ? await objTest(HIVES, 2, 2, envCeil) : 'no-def',
     antlionHalf: ANTL >= 0 ? await objTest(ANTL, 2, 2, envFloorStone) : 'no-def',
     larvaHalf: LARVA3 >= 0 ? await objTest(LARVA3, 3, 3, envFloorStone) : 'no-def',

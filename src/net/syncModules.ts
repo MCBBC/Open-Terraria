@@ -291,13 +291,26 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
  *  PlayerVoiceOverrideSound(46,音效型照 PlaySound 锚)/NatureFly(53)/LakeSparkle(52)。
  *  叶绿 LeafCrystal 两型的消费派发由叶绿 SetBonus 代理的实体面自带（16 驻留绿弧/
  *  17 弹轨迹 streak 在其分支处理），本批 fx/orchestraFx 备 chlorophyteLeafCrystal*
- *  纯函数供对拍不复派发。登记维持（确不可达/无锚）：PaladinsHammer(9)——1458 全仓
+ *  纯函数供对拍不复派发。登记维持（确不可达/无锚/域缺）：PaladinsHammer(9)——1458 全仓
  *  grep 无任何 RequestParticleSpawn 调用点（只存在 Spawn_ 分派臂）=vanilla 自身孤儿;
- *  DeadCells 余三型（BarnacleShotFiring :27036 挂点无 producer;BarrelExplosion≈
- *  Arrow1023 killNow 内联近似;MushroomBoiTargetFound 已接 34 型旁路）;FakeFishJump(54)
- *  保持 FakeFish.ts 局部池（跃态密度门）;NatureFly/PooFly tile-ambient 面;PlayerVoice
- *  变声样本库;HeroicisSet 出土转化链;PaladinsShield pvp 盾链;Keybrand :35153 滑行拖星;
- *  CattivaHit 镐力面(:52193 ai[0]=3 帮工意图未折算)。
+ *  ShadowOrbExplosion(38) 同判（★2026-09-01 亲证：1457+1458 全树仅 枚举/分派/Spawn_
+ *  三处,零调用位——旧注"producer=暗影球破坏事件"失实,WorldGen.CheckOrb :54634-54822
+ *  破坏面纯 KillTile+PlaySound(4|13),零尘零编排;本仓 smashOrbHeart 的紫爆=域内自加
+ *  视觉非该型近似,见 :451 注）;DeadCellsMushroomBoiTargetFound(43) 已接 34 型旁路;
+ *  FakeFishJump(54)/FakeFish(51) 保持 FakeFish.ts 局部池（跃态密度门）;HeroicisSet
+ *  出土转化链;PaladinsShield pvp 盾链;CattivaHit 镐力面(:52193 ai[0]=3 帮工意图未折算)。
+ *  ★2026-09-01 producer 锚缺/域内近似清零批（本批翻正八项,细节见各型行内注）：
+ *  36 BarnacleShotFiring=MinionProj 1025 AI_197 出弹站+Arrow 1026 全链（原"挂点无
+ *  producer"系漏查 AI_197 :41054 short num5=1026 出弹位）;42 BarrelExplosion 由
+ *  Arrow.barrel1023Burst 内联近似升格忠实本体+module8 上行;40 BeheadedEffect=
+ *  Player.deadCellsBeheadedStep（head==282 逐帧,物品 5457 头槽即锚）;7 StardustPunch=
+ *  MinionProj 623 拳击命中面;2 StellarTune=SparkleGuitarProj.killStellarTune;
+ *  46 PlayerVoice 变声字=uniqueInfo 直通 hurtVoicePlan OVERRIDE_HURT 表（"仓内无
+ *  变声样本"旧判失实,player/PlayerVoice.ts 全表在档）+Game 语音饰品使用位出站;
+ *  tile-ambient 四型（53 NatureFly/31 PooFly/48-49 RainbowBoulder2·3）=Game.
+ *  emitTileOrchestraAmbient 直驱（原"未建"登记消账;52 LakeSparkle 已在 FakeFish.ts
+ *  :20635 段逐参直译）;0 Keybrand :35153 滑行拖星=原版死支翻案（Player.cs:35102
+ *  TryBouncingBlocks 内 flag2 声明 false 后全程无置位——该编排支不可达,不接）。
  *  ★δB 蓝队四组补齐（✅2026-08-31 已清偿,2026-09-01 复核）：L5 段曾以"消费派发在位/
  *  接线在位"登记 CattivaHit(67)/InScreenDungeonSpawn(66)/BestReforge(18) 的生产面——
  *  经对账全为声称失实（生产端零调用,详见各型行内注更正），本批补生产接线：
@@ -305,10 +318,8 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
  *  18=Game.doReforge top-tier 三连掷;另 TimerCrit(6170) 命中面 NightsEdge(10) 编排+
  *  d228×20 尘环（Player.TryConsumingTimerCrit :28574,Player.ts）。
  *  2026-08-21 前批六型与 L5 九型见前注；每个 clientOnly:false 型生产端均 module8 上行。
- *  DeadCells 余三型（BarnacleShotFiring :27036 clientOnly:true 无锚→register;
- *  BarrelExplosion≈Arrow1023 killNow 内联近似不另走编排通道;MushroomBoiTargetFound
- *  挂点父弹键缺省）、ItemTransfer/PooFly/LakeSparkle/NatureFly/FakeFish±Jump
- *  （clientOnly:true 本地直驱族,FakeFish.ts 同口径）、UFOLaser/MagnetSphereBolt/
+ *  ItemTransfer/LakeSparkle/NatureFly/FakeFish±Jump（clientOnly:true 本地直驱族,
+ *  FakeFish.ts/emitTileOrchestraAmbient 同口径）、UFOLaser/MagnetSphereBolt/
  *  HeatRay/SnappingStone×6/HarpyCharm/PhoenixQuiver/SeraphNecklace 等——原版
  *  调用位见上表头注行号 */
 export const enum ParticleOrchestraType {
@@ -323,8 +334,13 @@ export const enum ParticleOrchestraType {
   WaffleIron = 30,          // 华夫饼烙印命中音（Player.cs:44715-44721;Spawn_=纯 Item178 音）
   ShimmerTownNPC = 32,      // 城镇 NPC 微光转化到位（NPC.cs:53674 / Player.cs:28402）
   ShimmerTownNPCSend = 33,  // 微光上升态远距落点传送（NPC.cs:56004）
-  DeadCellsMushroomBoiExplosion = 34,  // 蘑菇小伙伴爆炸（P.cs:35277 clientOnly:true→本仓
-                                       //   owner 权威模拟改 broadcast 补远端,偏差登记）
+  DeadCellsMushroomBoiExplosion = 34,  // 蘑菇小伙伴爆炸（P.cs:35277 clientOnly:true,
+                                       //   第三实参=owner=IndexOfPlayerWhoInvokedThis——
+                                       //   RequestParticleSpawn :52-60 语义=本地 Spawn_ 直生,
+                                       //   仅 !clientOnly 才上行;Spawn_ :2426-2516 本体不读
+                                       //   invoker 字段=纯载荷冗余。本仓随从仅 owner 权威
+                                       //   模拟→owner 广播补远端;广播器钉 mySlot,owner
+                                       //   权威模拟面 mySlot≡owner=同值,偏差口径维持）
   DeadCellsDownDashExplosion = 35,     // 下坠砸地爆（Player.cs:29005-29022 clientOnly:false；
                                        //   下坠跳系统未移植→当前仅消费面，producer 缺口登记）
   DeadCellsFlint = 41,      // 火石枪满蓄刺出土面释放（P.cs:53240-53245 clientOnly:false）
@@ -348,13 +364,20 @@ export const enum ParticleOrchestraType {
   //             生成式对齐验证见 tests/orchestra-types-l6.test.ts；叶绿两型的消费派发归
   //             叶绿 SetBonus 代理域本批不复派发,fx/orchestraFx 备纯函数对拍面） =================
   Keybrand = 0,             // 锁匙刃充能斩（NPC.KeyBrandStrike NPC.cs:82005 clientOnly:false;
-                            //   Game 近战循环 671 支接线;:35153 滑行拖星支登记未接）
+                            //   Game 近战循环 671 支接线;:35153 滑行拖星支=原版死支——
+                            //   ★2026-09-01 亲读 Player.TryBouncingBlocks :35102-35164：
+                            //   `bool flag2 = false` 声明后全程无置位句,Keybrand 编排支
+                            //   (if(flag2) :35138-35158) 不可达=构造性不可能,不接）
                             //   ★δB9（2026-09-01）第二带 Extra[98] 白化橙渐变改 3 片
                             //   （num2=3 循环步长至 :3860 才重置）+删臆加白色伴生粒
   BlackLightningHit = 4,    // 黑雷爆（WhipTagEffect_DarkHarvest.cs:24 clientOnly:false;WhipTag 接线）
   BlackLightningSmall = 6,  // 黑雷拖带（NPC.cs:92297/P.cs:48715 clientOnly:true 本地直驱）
-  StardustPunch = 7,        // 星尘拳紫罗兰光点（P.cs:14315 type1039/:14331 type623 clientOnly:false;
-                            //   消费+FX 在位,随从弹侧 anchor 登记缺）
+  StardustPunch = 7,        // 星尘拳紫罗兰光点（P.cs:14315 type1039/:14331 type623 clientOnly:false。
+                            //   ★2026-09-01 星尘护手锚补齐：623 命中支=MinionProj.guardianBody
+                            //   拳盒命中拍（载荷=Lerp(Center,盒最近点,.5)+(0,±10rand)/
+                            //   move=(facing,±.5rand)×(3+3r),乘区共用一掷）;1039 Constellation-
+                            //   Star（ConstellationWhip_SpawnConstellationStarsTowards :15009-15036
+                            //   出手星弹）本仓未建弹体→该支域缺,行内备案）
   PrincessWeapon = 8,       // 公主法杖挥尾品红焰（Player.cs:51790/P.cs:43546-67 全 clientOnly:true 本地直驱）
   PaladinsHammer = 9,       // ★vanilla 孤儿：1458 全仓无调用点（仅 Spawn_ 分派臂）;占位注册
   NightsEdge = 10,          // 永夜刃挥弧紫尘（Projectile.Damage case972 :13007;SwingArc/NightsEdgeFly 锚
@@ -383,21 +406,34 @@ export const enum ParticleOrchestraType {
   TownSlimeTransform = 26,  // 镇史莱姆命名变身三味（NPC.cs:19186/:19210/:80339 Broadcast;
                             //   uniqueInfo 0书呆/1铜/2长）
   ShimmerBlock = 28,        // 微光转化格上飘星（Player.cs:24002 等×4 全 clientOnly:true 本地直驱）
-  PooFly = 31,              // 便便史莱姆飞虫环境粒（NPC.cs:61457 ai1==5395 clientOnly:true 直驱）
+  PooFly = 31,              // 便便史莱姆飞虫环境粒（NPC.cs:61457 ai1==5395 clientOnly:true 直驱
+                            //   +TileDrawing :6983-6990 便砖 666/712 tile 面——★2026-09-01
+                            //   后者=Game.emitTileOrchestraAmbient 直驱）
   BlueLightningSmall = 37,  // 蓝/红小雷共体（NPC.cs:92272-97/PlayerDrawSet:1224 clientOnly:true）
   UFOLaser = 39,            // UFO 激光行进尘（P.cs:71850 区弹433 AI_001 BroadcastOrRequest 面）
   MoonLordWhipHit = 44,     // 月主鞭命中小蓝带+亮绿细带（case1035/:1045 :13025/:13030;WhipProj 锚）
   MoonLordWhipEye = 45,     // 月主鞭 proc 眼球残影（SpawnMoonLordWhipProc P.cs:15005;补鞭面接线）
-  PlayerVoiceOverrideSound = 46,  // 受击变声播报（Player.cs:45813 clientOnly:false;
-                            //   音效型照 PlaySound 锚直译='hurt';变声字未建模登记）
+  PlayerVoiceOverrideSound = 46,  // 受击变声播报（ItemCheck_UsePlayerSoundOverrideAccessory
+                            //   Player.cs:45810-45818 clientOnly:false,uniqueInfo=Item.
+                            //   voiceSlot。★2026-09-01 变声字落账：消费端 Spawn_ :2870-885
+                            //   临时置 voiceOverride 后 PlayHurtSound——本仓直通 player/
+                            //   PlayerVoice.hurtVoicePlan OVERRIDE_HURT 表（1-20 全档在案,
+                            //   "无变声样本"旧判失实）;生产=Game 语音饰品使用位（useTime17,
+                            //   窗相位差=原版窗口末拍 vs 本仓起手拍,行内注登记））
   RainbowBoulder1 = 47,     // 虹石族四种（RB1 天基寻宝 :20298/RB2·RB3 虹砖 ambience TileDrawing
-  RainbowBoulder2 = 48,     //   :6996/:6989/RB4 跃迁 :20349——tile/fairy 面无编排通道登记;
-  RainbowBoulder3 = 49,     //   FX+派发在位,消费可达）
+  RainbowBoulder2 = 48,     //   :6996/:6989/RB4 跃迁 :20349。★2026-09-01 tile-ambient 面
+  RainbowBoulder3 = 49,     //   落地：RB2·RB3 = Game.emitTileOrchestraAmbient 虹砖 711
+                            //   frameX==0&&frameY==0 门直驱（RB3 1/45、RB2 2/3+circ(16,16)）；
+                            //   RB1/RB4 面仍域缺登记）
   RainbowBoulder4 = 50,     // ★δB10（2026-09-01）彩带 Velocity=(0,-1).RotatedBy(num5)=(sin,-cos)
                             //   /白镜像=(0,1).RotatedBy=(-sin,+cos)=共线反向流（P.cs:1478/:1493,
                             //   曾错用 (cos,sin) 成 90° 垂直轴）+白镜像位改盒内随机（:1490）
-  LakeSparkle = 52,         // 湖面闪光星（P.cs:20638 clientOnly:true;FakeFish 族统一收编迁移）
-  NatureFly = 53,           // 森林花虻环境粒（TileDrawing.cs:7017 clientOnly:true;tile-ambient 未建,直驱保留）
+  LakeSparkle = 52,         // 湖面闪光星（P.cs:20638 clientOnly:true;FakeFish.ts :703 段
+                            //   逐参直译=逐参数等价在案,维持局部池不迁移）
+  NatureFly = 53,           // 森林花虻环境粒（TileDrawing.cs:7017 clientOnly:true。★2026-09-01
+                            //   tile-ambient 落地=Game.emitTileOrchestraAmbient：SpawnsNatureFlies
+                            //   草族 13 型（TileID.cs:251）+风门 lerp(|wind|,.08,.18)+0.3→1/600,
+                            //   _windGrid 风格档未建模登记）
   FakeFishJump = 54,        // 假鱼跃出（P.cs:20967 jumping=true;保持 FakeFish.ts 局部池——密度门同池语义）
   MagnetSphereBolt = 56,    // 磁球闪电行进尘（P.cs:71850 区弹255 AI_001 BroadcastOrRequest）
   HeatRay = 57,             // 热射线行进尘（同区弹260）
@@ -442,16 +478,40 @@ export const enum ParticleOrchestraType {
   // ---- 值域补全（终态清单收口——无派发臂的型仅作值域/枚举注册面）----
   FlameWaders = 1,          // 火行者靴行走焰（P.EmitFlameWaderParticles 同链本体已由
                             //   FlameParticles 域承担,编排面不重复接线）
-  StellarTune = 2,          // 星律吉他命中星屑（Projectile.cs:72826 clientOnly:true;
-                            //   SparkleGuitarProj 域既有近似视觉,不重复接线）
+  StellarTune = 2,          // 星律吉他命中星屑（Projectile.cs:72825-72831 Kill 856 段
+                            //   clientOnly:true。★2026-09-01 producer+消费同步忠实化：
+                            //   Spawn_StellarTune :3675-3705 收编为 stellarTuneFx 纯函数,
+                            //   producer=SparkleGuitarProj.killStellarTune（5×Gold/HotPink/
+                            //   Violet PrettySparkle,vel=dir×1.05/TTL60/acc−vel/60）+广播
+                            //   补远端;旧注"域既有近似视觉不重复接线"订正=当时零编排面）
   WallOfFleshGoatMountFlames = 3,  // WoF 山羊坐骑火焰（Mount.cs:3940 clientOnly:true;
                             //   本仓 FlameParticles=唯一移植的编排视觉,L5 前批同口径）
-  DeadCellsBarnacleShotFiring = 36,   // 藤壶射击（P.cs:27036 clientOnly:true——挂点父弹
-                            //   缺省,producer 无锚登记;FX 纯函数在 fx/orchestraFx 备档）
-  ShadowOrbExplosion = 38,  // 暗影球爆炸（Producer=暗影球破坏事件,域内既有近似）
-  DeadCellsBeheadedEffect = 40,       // 斩首效应（Player.cs:24503 clientOnly:true,
-                            //   死亡细胞种子联动域缺 producer 锚登记）
-  DeadCellsBarrelExplosion = 42,      // 木桶爆（≈Arrow 1023 killNow 内联近似,前批口径维持）
+  DeadCellsBarnacleShotFiring = 36,   // 藤壶射击（P.cs:27033-27038 AI_028 1026 支 ai[1]==0
+                            //   首子步门,clientOnly:true——★2026-09-01 锚翻正：producer=
+                            //   哨站 1025 AI_197 出弹（P.cs:41054 short num5=1026）每发
+                            //   1026 首拍,旧注"挂点父弹缺省无锚"系漏查 AI_197。落地=
+                            //   MinionProj 1025 出弹站（cd50/速12/muzzle+(0,10)）+Arrow 1026
+                            //   全链（AI_28 ×0.8 衰减/alpha 消亡/d2 拖尾/Item_167 Kill 音/
+                            //   StatusNPC 表 d20 中毒已在表）+deadCellsBarnacleShotFiringFx
+                            //   （Item_95+15×d2+5×d267）本地+广播补远端）
+  ShadowOrbExplosion = 38,  // ★vanilla 孤儿（★2026-09-01 构造性证明：1457+1458 全树
+                            //   grep 仅 枚举/分派 :294-295/Spawn_ :2036 三处,零调用位;
+                            //   WorldGen.CheckOrb :54634-54822 破坏面纯 KillTile+
+                            //   PlaySound(4|13) :54818-54822,零尘零编排——旧注"producer=
+                            //   暗影球破坏事件"失实。本仓 smashOrbHeart 紫爆粒=域内自加
+                            //   视觉,维持现状不接不删,占位注册面）
+  DeadCellsBeheadedEffect = 40,       // 斩首效应（DoDeadCellsBeheadedParticles Player.cs:
+                            //   24491-24510 clientOnly:true,head==282 逐帧——★2026-09-01
+                            //   锚补齐：本仓物品 5457 头槽 hs=282 在档 → Player.
+                            //   deadCellsBeheadedStep 逐帧发射（ MountedTop+8×gravDir+
+                            //   Remap(|vx|,0,3,0,-4)×gravDir 载荷）+deadCellsBeheadedHeadFx
+                            //   (FadingPlayerShader 贴图池无登记=暖色光点近似,结构逐值)+
+                            //   广播补远端;fullRotation 旋位/骑乘速度旋转两支登记未建模）
+  DeadCellsBarrelExplosion = 42,      // 木桶爆（P.cs:78567-78572 Kill 1023 支 clientOnly:true。
+                            //   ★2026-09-01 由 Arrow.barrel1023Burst 内联青色近似升格：
+                            //   deadCellsBarrelExplosionFx 忠实本体（4 层 Extra[269] 环
+                            //   TTL25/20/25/25+25 道 Extra[89] 辐条+7×d267)+module8 上行
+                            //   补远端;gore61-63×8/d31×40/192 盒 Damage 面原位不动）
   DeadCellsMushroomBoiTargetFound = 43,  // 蘑菇小伙伴锁定图标（mushroomBoiTargetFoundFx 已接 34 型旁路）
   FakeFish = 51,            // 假鱼巡游（保持 FakeFish.ts 局部池——密度门同池语义,评估留局部）
   SporeCloud = 73,        // 叶绿孢子云（Player.cs:26186/NPC.cs:92890 clientOnly:true;本仓孢子云弹 1128 自带视觉——占位注册不重复生成）

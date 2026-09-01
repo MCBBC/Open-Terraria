@@ -1115,7 +1115,8 @@ export function orchestraPlayerAnchor(
  * 至带后 :3860 才重置 num2=1,:3848-3881——★δB9 曾只发 1 片+臆加白色伴生粒,按原文改 3 片;
  * 位向偏移=dir(num7)*vector4*vector*num8*0.2=0.7*0.7*30*0.2=2.94px+circular(4,4)×0.7 抖动）
  * ③Extra[174] 蓝白扩张闪点（num2=1 单粒 :3885-3911）。生产者 NPC.KeyBrandStrike :82005
- * clientOnly:false / Player.cs:35153 滑行面 clientOnly:true（后者登记未接）。
+ * clientOnly:false / Player.cs:35153 滑行面 clientOnly:true——★2026-09-01 定谳=原版
+ * 死支（TryBouncingBlocks :35102 flag2 声明 false 后全程无置位,该支不可达）不接。
  */
 export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Math.random): void {
   for (let i = 0; i < 3; i++) {                          // 第一带（:3822-3845）
@@ -1643,7 +1644,9 @@ export function snappingStoneRingFx(
       game.spawnParticles?.(x, y, 'rgba(30,180,255,0)', 1, 0,
         { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 6 * ms });
     }
-    void delayTicks;                                     // FadingParticle.Delay 档无延迟通道登记
+    void delayTicks;        // ★L5 节拍核对（:625 Delay=(int)MovementVector.Y×3t,Y=出弹序号
+                            //   +1 :14429/受击者拍 Y=0 :14433——载荷双面已按原文钉齐
+                            //   SnapStrike.ts;本池 spawnParticles 无延迟通道,视觉零延迟登记）
     return;
   }
   if (kind === 1) {

@@ -419,7 +419,8 @@ export class Inventory {
     return this.add(id, count, undefined, undefined, true);
   }
 
-  add(id: number, count: number, prefix?: number, placeStyle?: number, noCoinMerge = false): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）
+  add(id: number, count: number, prefix?: number, placeStyle?: number, noCoinMerge = false,
+    preferHotbar = false): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）；preferHotbar=授予类入包先热栏（见 ②'）
     // 未知 id 守卫(2026-08-18):裸 .maxStack 曾让一个不在定义表的掉落物在拾取瞬间
     // TypeError 炸掉整个帧循环(用户实报:砍树掉落自动收集时崩溃)——拒绝入包并
     // 留栈取证,定位是谁产出了这个 id
@@ -467,6 +468,28 @@ export class Inventory {
           }
         }
       }
+    }
+    // ②' preferHotbar（2026-09-02 神圣种子 UX 批）：授予类入包（旅行浏览器复制）
+    //    先热栏落位——旧策略④从背包尾降序填，热栏满时新授物落背包深处，玩家手里
+    //    仍是旧物继续点地（行为日志两轮：授予后 21 条 use 全是旧草块）。顺序=
+    //    当前选中空槽 → 热栏空槽 0..9；溢出/非空槽族照旧走 ③④。
+    if (preferHotbar) {
+      const sel = Math.min(Math.max(this.selected, 0), 9);
+      for (const i of [sel, ...Array.from({ length: 10 }, (_, k) => k)]) {
+        if (count <= 0) break;
+        if (i >= 10) continue;
+        const s = this.slots[i];
+        if (s && s.id === id && s.stack < max && (prefix ?? 0) === (s.prefix ?? 0)) {
+          const put = Math.min(max - s.stack, count);
+          s.stack += put;
+          count -= put;
+        } else if (!s) {
+          const put = Math.min(max, count);
+          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+          count -= put;
+        }
+      }
+      if (count <= 0) return 0;
     }
     // ③ 合并 0-49 已有堆
     count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);

@@ -977,11 +977,15 @@ export const TILE_TABLE_SHEETS = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276
 
 // ===================== 开门砍切白名单（原版 OpenDoor cs:37698-37724 1:1） =====================
 // 侧列仅许 tileCut / 165 洞穴装饰 / IsADripTile，其余实心才拒绝开门；可砍格随后碎掉。
-// Main.tileCut 全表 38 项（Main.cs:7312-7754）；IsADripTile（TileID.cs:157）。
+// Main.tileCut 全表 41 项（Main.cs:7312-10385 逐条赋值反查——2026-09-01 对拍补齐
+// 236 生命果/254 南瓜/454 皮格纳塔三条漏项；此前 254 漏 = 南瓜挡工作台放置全程被拒
+// （validateAnchors 占位门不豁免→chooseAnchorFromClick 全窗落空），探针实锤）。
+// IsADripTile（TileID.cs:157）。
 // Game.ts 另有 TILE_CUT_VANILLA 同表副本（挥击消费）——改此表须两处同步，待其战区安静后合并。
 export const TILE_CUT_SHEETS = new Set<number>([
   654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
   71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
+  236, 254, 454,
 ]);
 // ===================== 放置清格例外面第二支 =====================
 // TileID.Sets.BreakableWhenPlacing（TileID.cs:383）——与 Main.tileCut 并列的另一支

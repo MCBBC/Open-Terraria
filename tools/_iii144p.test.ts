@@ -78,10 +78,9 @@ it('III144P paint chain track ledger', async () => {
         const r0 = drawIdx;
         if (inBox(x, y) && st.inBounds(x, y)) {
           const i = st.idx(x, y);
-          if (st.flags[i] !== 0) {
-            rows.push(`E|KTI|${x},${y}|t=${SHEET_OF[st.type[i]!] ?? -1}|w=${st.wall[i]}|fy=${st.frameY[i]}|rc=${r0}`);
-            emitted = true;
-          }
+          // 全量调用行(x86 B2 钩同口径:调用即记,act 标注活性)
+          rows.push(`E|KTI|${x},${y}|t=${SHEET_OF[st.type[i]!] ?? -1}|w=${st.wall[i]}|fy=${st.frameY[i]}|rc=${r0}|act=${st.flags[i] !== 0 ? 1 : 0}`);
+          emitted = true;
         }
         try {
           return origKT.apply(this, a2);

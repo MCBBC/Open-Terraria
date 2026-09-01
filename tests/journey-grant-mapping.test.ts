@@ -79,3 +79,36 @@ describe('★哨兵 0 撞合法 def 位回归（2026-09-02 review 实锤）', ()
     expect(ITEM_DEFS[id]?.key).toBe('vi_109_mana_crystal');  // 授予保真
   });
 });
+
+describe('★授予热栏落位（2026-09-02 UX 批：热栏满时旧策略落背包尾,玩家手里仍是旧物）', () => {
+  const fakeGame = (inv: import('../src/items/Inventory').Inventory) =>
+    ({ player: { inv }, cb: { onInventoryChanged() {} } }) as never;
+
+  it('热栏全满+选中槽占用 → 授予落选中槽弹回? 不——落首个空热栏槽;全满才走背包尾', async () => {
+    const { Inventory } = await import('../src/items/Inventory');
+    const { giveItem } = await import('../src/ui/JourneyPowersUI');
+    const inv = new Inventory();
+    const seedId = internalIdOfVid(369);
+    for (let i = 0; i < 10; i++) inv.slots[i] = { id: seedId === 0 ? 1 : (i === 3 ? seedId : 10000 + i), stack: 99 };
+    // 槽 3 预放同 id 半堆 → 合并;其余为别物。选中 5
+    inv.slots[3] = { id: seedId, stack: 1 };
+    inv.selected = 5;
+    giveItem(fakeGame(inv), seedId, 1);
+    const s3 = inv.slots[3]!, s5 = inv.slots[5]!;
+    // 选中槽 5 为别物(不可吞) → 不覆盖;合并进 3 的半堆
+    expect(s5?.id).not.toBe(seedId);
+    expect(s3.stack).toBe(2);
+  });
+
+  it('热栏有空槽且选中槽占用别物 → 首个空热栏槽落位(不再坠背包尾 10-49)', async () => {
+    const { Inventory } = await import('../src/items/Inventory');
+    const { giveItem } = await import('../src/ui/JourneyPowersUI');
+    const inv = new Inventory();
+    const seedId = internalIdOfVid(369);
+    for (let i = 0; i < 10; i++) if (i !== 7) inv.slots[i] = { id: 20000 + i, stack: 1 };
+    inv.selected = 2;
+    giveItem(fakeGame(inv), seedId, 1);
+    expect(inv.slots[7]!.id).toBe(seedId);           // 唯一空热栏槽 7
+    for (let i = 10; i < 50; i++) expect(inv.slots[i] ?? null).toBeNull(); // 背包尾无坠物(slots 以 null 占位)
+  });
+});

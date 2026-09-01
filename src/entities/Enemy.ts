@@ -2594,11 +2594,13 @@ export class Enemy extends Entity {
       //    ——这是 EncourageDespawn 钉低值的唯一抵消点:怪天亮向上飞,**在屏内绝不
       //    消散**;飞出屏幕瞬间 reset 停止 → 剩余 timer≈封顶值(10t)→ 秒消散
       //  ④timer 每帧无条件−1,归零 → flag2 强制翻假(:78791-78794,无视①②保命门)
-      const cands = game.candidatePlayers?.() ?? [localPlayer as Player];
+      // ★T6（2026-09-01）：候选剔 dead 系过度删除——死玩家 active 仍真（见上注）,
+      //   照常参与①④两窗几何。此处仅剔空槽（!Main.player[i].active,:78706 唯一门）。
+      const cands = (game.candidatePlayers?.() ?? [localPlayer as Player])
+        .filter((q) => !!q);
       if (cands.length > 0) {
         let flag2 = false;
         for (const q of cands) {
-          if (!q) continue;   // !active 槽（候选表空位）——唯一合法剔除位(:78706)
           // activeRangeX/Y=4032/2268px → |Δ|<半幅(half=252/142 格),中心距近似
           // (±玩家半宽 ≤1tile 登记差);此窗曾漏接=远处怪少一道提前清账门
           if (Math.abs(q.cx - this.cx) < TILE * 252
@@ -2613,7 +2615,7 @@ export class Enemy extends Entity {
           || this.def.boss)) {
           flag2 = true;
         }
-        const onScreen = cands.some((q) => !!q &&
+        const onScreen = cands.some((q) =>
           Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
         if (onScreen) {
           this.despawnTimer = 750;
@@ -2625,8 +2627,9 @@ export class Enemy extends Entity {
         }
         if (!flag2) runDespawnFx();
       } else {
-        // 零活跃玩家（联机空场；单机本地恒入候选、死亡玩家也照常算几何=T6）：
-        // 原版语义 = flag2 恒假 + 屏盒永不重置 → 纯倒数归零即消（:78791-78794）
+        // 零活跃玩家（仅测试桩/无世界态可现；真实游玩本地槽恒 active、死亡也照常
+        // 算几何=T6）：原版该态经 `!flag2` 立即消散(:78796-78797)——本仓保守取
+        // 纯倒数归零（C 批既有语义,登记的退化态偏离,防桩场景团灭误伤）
         this.despawnTimer--;
         if (this.despawnTimer <= 0) runDespawnFx();
       }

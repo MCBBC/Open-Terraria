@@ -151,7 +151,7 @@ import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
 import { checkBoulderFamily, BOULDER_FAMILY_SHEETS, BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
 import { RollingBoulder } from '../entities/RollingBoulder';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
-import { playDeathVoice, playHurtVoice } from '../player/PlayerVoice';
+import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/PlayerVoice';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
@@ -406,7 +406,7 @@ import { ChloroLeafCrystalAnchor, ChloroLeafShot,
 // 山铜套装 on-hit 花瓣弹 221（终零波批,2026-09-01——Player.OnHit :6963-6985）
 import { OrichalcumPetal } from '../entities/OrichalcumPetalProj';
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
-import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, blockedChestFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
+import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx, deadCellsBeheadedHeadFx, stellarTuneFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, blockedChestFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
 import { RainbowBolt } from '../entities/RainbowProj';
@@ -698,7 +698,10 @@ type DecorSupportKind =
   // docs/audit/tile-audit-2026-08-23.md「TileFrame 全量派发对照」）——
   | 'jungleplant' | 'oasisplant' | 'wallhang' | 'stalactite' | 'moss'
   | 'pile' | 'deco3x2' | 'deco3x1' | 'dyeplant' | 'waterplant' | 'sandplant'
-  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip';
+  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip'
+  // —— 2026-09-01 三批：放置清格豁免面多格件 Check* 族（tileCut 免除件原版
+  // KillTile 尾 SquareTileFrame→TileFrame 级联的整件裁决,探针 _pile-place.mjs 四场景）——
+  | 'pumpkin' | 'super' | 'larva3x3';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -835,6 +838,14 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // IsADripTile（TileID.cs:157 {373,374,375,461,709};TileFrameImportant :86390-86396
   // 内联——上方 active+solid+非 solidTop+非底坡,失顶即杀）滴落族
   373: 'drip', 374: 'drip', 375: 'drip', 461: 'drip', 709: 'drip',
+  // —— 2026-09-01 三批：放置清格豁免面多格件 Check* 族（WorldGen.cs:52753/:48523/:53520）。
+  //   这四个 sheet ∈ Main.tileCut（放置清格会破坏它们）且是多格件——占位格被清后
+  //   原版 KillTile 尾 SquareTileFrame → TileFrame 派发 Check2x2Style/CheckSuper/
+  //   Check3x3 整件裁决（残段悬空在原版不存在）。成员格被直接破坏的方向由 breakTile
+  //   特支承担（breakPumpkin/breakBeeHive/breakAntlionLarva/breakLarva）,本表接的是
+  //   D-1 链方向（下方格变化 → 上方成员格复验）与支撑/底质精确判定
+  //   （此前走家具 hasSupport 近似=侧邻/墙都算撑,与原版逐列判据不符）
+  254: 'pumpkin', 444: 'super', 485: 'super', 231: 'larva3x3',
 };
 /** CheckAlch 药草地基列（cs:45981,Main.tileAlch={82,83,84};键=frameX/18 列）——
  *  与生成期 FinalCleanupPass.ALCH_GROUND 同表 */
@@ -1209,6 +1220,14 @@ export function starCloakStarInfo(accVids: number[], starCloakFlag: boolean): { 
  *  直测（beeRetaliateRoll 同法）；速度散布 ±Next(-35,36)×0.02 在调用侧逐只重掷 */
 export function waspGunVolleyRoll(rnd: () => number): number {
   return 2 + Math.floor(rnd() * 3);
+}
+
+/** 黄蜂枪 Hive Pack（蜂巢背包 3333 strongBees）加成面（Projectile.cs:12855-12858
+ *  `case 189: num6 += 5` 穿甲 +5 / :12905-12907 `num7 += 5` 终伤 +5——都在
+ *  Damage() 侧、终伤位在暴击翻倍【前】⇒ 出生位一次注入 this.damage 与
+ *  armorPen 同拍放大等价）。纯函数导出供金标直测 */
+export function waspGunHiveBonus(strongBees: boolean): { dmg: number; pen: number } {
+  return strongBees ? { dmg: 5, pen: 5 } : { dmg: 0, pen: 0 };
 }
 
 /** 蜂巢族受击反击掷骰（Player.cs:37871-37907）：数量 num19 =
@@ -12431,8 +12450,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           };
         }
         // 气喇叭 968 随机起始帧 ai[1]=Next(Main.projFrames[968]=24)（Player.cs:46596-46599
-        // NewProjectile 第 9 参）——Arrow 帧号 = ⌊age/5⌋%frames，置 age 相位即等价起始帧
-        if (bowVid2 === 5117) bowArrow.age = Math.floor(Math.random() * 24) * 5;
+        // NewProjectile 第 9 参）——★批五：掷签已移至 Arrow ctor pinFrame（Arrow.ts
+        // 静态随机帧语义正解=ai[1] 生成侧写,age 相位 hack 退役；曾置 age 相位=渲染
+        // 帧近似,与 968 全生命周期静态帧语义不符）
+        // if (bowVid2 === 5117) bowArrow.age = Math.floor(Math.random() * 24) * 5;
         this.entities.add(bowArrow, 'projectiles');
         // ⑤ 霰弹族多弹丸（Player.cs:47326-47356/47539-47551）：爆管 534 rand(4,6) 发、
         // 霰弹枪 964 rand(3,5)——原版每发都吃整数散布 ±Next(-40,41)×0.05（964 为
@@ -13045,6 +13066,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
         this.input.mouseDown = false;
+      }
+      // ---- ★2026-09-01 语音饰品使用（Player.cs:45810-45818 ItemCheck_UsePlayer-
+      //      SoundOverrideAccessory,ItemCheck :43942 调用）：voiceSlot!=0 的语音饰品
+      //      （DefaultToVoiceOverrideAccessory 家族,useStyle4/useTime17/UseSound=null
+      //      Item.cs:47786-47797）使用拍 → PlayerVoiceOverrideSound(46) 编排
+      //      （clientOnly:false = 本地直生+module8 上行,uniqueInfo=voiceSlot）——收端
+      //      临时置 voiceOverride 后 PlayHurtSound(orchestraFx :2870-2885 消费本体)。
+      //      原版门 = ItemTimeIsZero && itemAnimation!=0（窗口末拍触发,逐窗一发）；
+      //      本仓单计时模型在起手拍等价触发（useTime 17 冷却后可再发,按住连发同
+      //      原版 reusable 语义）——窗相位差登记。
+      else if (heldDef && this.player.useTime === 0 && inp.mouseDown) {
+        const vsVid = viIdFromKey(heldDef.key);
+        const vs = voiceSlotOfItem(vsVid);
+        if (vs > 0) {
+          this.player.useTime = 17;                          // ApplyItemTime(useTime 17)
+          this.player.itemAnimTicks = 17;                    // useStyle 4 举持姿势
+          playHurtVoice(this, { voiceOverride: vs });
+          this.broadcastParticleOrchestra(ParticleOrchestraType.PlayerVoiceOverrideSound,
+            this.player.cx, this.player.cy, 0, 0, vs);
+          this.input.mouseDown = false;
+        }
       }
       // ---- 血泪 4271（Player.cs:43329-43345 + CanUseItem :51435）：夜且非血月可用 →
       //      StartBloodMoon：sound 15、moonPhase==4(新月)时拨到 5、misc[8] 公告。
@@ -13999,16 +14041,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const nWasp = waspGunVolleyRoll(Math.random);
           // Hive Pack（蜂巢背包 3333）:12855/:12905 双 +5——终伤 +5 在暴击翻倍前，
           // 故直接并入 this.damage（crit 时 ×2 同拍放大=原版 (num7+5)×2 序）
-          const hiveWasp = this.player.equipStats.strongBees === true;
+          const hiveWasp = waspGunHiveBonus(this.player.equipStats.strongBees === true);
           for (let iw = 0; iw < nWasp; iw++) {
             const wasp = new Arrow(wzA.x, wzA.y,
               wvx0 + nrand(35) * 0.02, wvy0 + nrand(35) * 0.02,
-              cw.damage + (hiveWasp ? 5 : 0), cw.knockback, 189, null, { grav: 0 });
+              cw.damage + hiveWasp.dmg, cw.knockback, 189, null, { grav: 0 });
             wasp.frostEligible = false;   // magic=true 弹（SetDefaults 189 :2779）不吃冰霜引擎
             // 类别通道走数据面（vanilla-projectiles.json 189 magic=true = SetDefaults
             // 直写 → projClassOfProjId(189)='magic'，无需 1121 那样的 spawn 位覆写）
             wasp.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            wasp.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0) + (hiveWasp ? 5 : 0);
+            wasp.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0) + hiveWasp.pen;
             this.entities.add(wasp, 'projectiles');
           }
           this.playUseSound(critVid, 'tink');   // UseSound Item_11（vanilla-itemusesound 表值）
@@ -16385,6 +16427,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.breakLarva(x, y);
       return;
     }
+    // 南瓜（Check2x2Style case 254 掉落段,WorldGen.cs:52831-52855）：整件 2×2 清 +
+    // 触发格 frameX 帧段掉南瓜 1725（<72 无/<108 半数 Next(1,3)/<144 Next(2,6)/
+    // ≥144 Next(5,11)+万圣 1/200 魔法南瓜种子 1799）。原版掉落出自 TileFrame 级联的
+    // Check2x2Style（KillTile 本体在 frameImportant no-drop 表 :66340 组）——本仓
+    // 通用 object 锚点路径拦掉级联,须特支承担（254 非放置物品,静默蒸发=债）
+    if (type === TILE_BY_KEY['v_254_pumpkin_plant']) {
+      this.breakPumpkin(x, y);
+      return;
+    }
+    // 蜂巢结构（CheckSuper flag3,WorldGen.cs:48639-48697 + 655 弹 :48753-48755）：
+    // 整件清 + 占位无液体（!flag6）→ 生成 655 蜂巢弹（落地爆 2-5 只蜂 210/211±0.4,
+    // :76611-76660）;flag6（任一格液体>0）→ 原版不生成 655=仅整件清除。655 弹实体
+    // 未建（弹跳相位 cosmetic,落点取巢心,备案）——干巢按弹亡蜂群等效直放
+    if (type === TILE_BY_KEY['v_444_bee_hive']) {
+      this.breakBeeHive(x, y);
+      return;
+    }
+    // 蚁狮幼虫（CheckSuper :48731-48750）：整件清 + 释放幼虫小怪 582（LarvaeAntlion,
+    // 巢左下 num2*16,num3*16+32;TargetClosest 朝向 vx=dir*1.5/vy=-5,可被替换;
+    // GetAvailableAmountOfNPCsToSpawnUpToSlot(1) 槽位门单实体恒 1）
+    if (type === TILE_BY_KEY['v_485_antlion_larva']) {
+      this.breakAntlionLarva(x, y);
+      return;
+    }
     // 圣诞树（tile 171）：CheckXmasTree :39647-39703——任一格破坏即整树清除 +
     // 掉圣诞树(1873)；锚点格 KillTile case 171（:65319-65326）逐槽 dropXmasTree
     // 回收装饰物。须在 object 锚点分支前拦：装饰位段写在锚点 frameY（如 1024），
@@ -16972,6 +17038,111 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 蜜蜂分泌物物品 :43184）——公告 HasAwoken 走表，roar=false
     if (larvaSummonInRange(this.player.x, this.player.y, x, y)) {
       this.summonBoss('queen_bee', { roar: false });
+    }
+  }
+
+  /** 南瓜破坏（Check2x2Style case 254 掉落段,WorldGen.cs:52831-52855 1:1）：
+   *  2×2 整件清（锚=frameX/18%2、frameY/18%2）+ 触发格 frameX 帧段掉南瓜——
+   *  带宽 36（GrowPumpkin 每阶 +36,列差 18 不跨段,读被破坏格帧≡原版读级联
+   *  触发格帧）。万圣（Main.halloween ∨ forceHalloweenForToday）满段 1/200
+   *  掉魔法南瓜种子 1799。运行期随机口径同 killTileDropItems（Math.random） */
+  private breakPumpkin(x: number, y: number) {
+    const st = this.world.store;
+    const pumpkin = TILE_BY_KEY['v_254_pumpkin_plant']!;
+    const i0 = st.idx(x, y);
+    const preFx = st.frameX[i0];
+    const ax = x - (Math.floor(preFx / 18) % 2);
+    const ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === pumpkin) {
+          st.setTile(ax + dx, ay + dy, 0);
+        }
+      }
+    }
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[pumpkin]?.mapColor ?? '#F89E5C', 6, 1.5);
+    const r = Math.random();
+    if (preFx >= 72 && preFx < 108) {
+      if (r < 0.5) this.spawnDrop(x * TILE + 8, y * TILE + 8, VANILLA_ITEM_KEY_BY_ID[1725] ?? '', 1 + Math.floor(Math.random() * 2));
+    } else if (preFx >= 108 && preFx < 144) {
+      this.spawnDrop(x * TILE + 8, y * TILE + 8, VANILLA_ITEM_KEY_BY_ID[1725] ?? '', 2 + Math.floor(Math.random() * 4));
+    } else if (preFx >= 144) {
+      this.spawnDrop(x * TILE + 8, y * TILE + 8, VANILLA_ITEM_KEY_BY_ID[1725] ?? '', 5 + Math.floor(Math.random() * 6));
+      if ((this.world.clock.halloween || this.forceHalloweenForToday) && Math.floor(Math.random() * 200) === 0) {
+        this.spawnDrop(x * TILE + 8, y * TILE + 8, VANILLA_ITEM_KEY_BY_ID[1799] ?? '', 1);
+      }
+    }
+  }
+
+  /** 蜂巢结构破坏（CheckSuper flag3 :48639-48697 wipe + 655 弹 :48753-48755 +
+   *  弹亡奏 :76611-76660）：2×2 整件清;干巢（!flag6）→ 巢心蜂群等效（655 弹实体
+   *  未建——31px 弹跳相位 cosmetic,初速 0 落巢心,弹亡 2-5 只蜂 210/211 ±0.4 初速
+   *  + SoundID 4 挖掘音 + 147 蜂蜜尘）;湿巢（占位任一格液体>0）→ 原版不生成 655,
+   *  仅整件清除。随机口径同 breakHive */
+  private breakBeeHive(x: number, y: number) {
+    const st = this.world.store;
+    const hive = TILE_BY_KEY['v_444_bee_hive']!;
+    const i0 = st.idx(x, y);
+    const ax = x - (Math.floor(st.frameX[i0] / 18) % 2);
+    const ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
+    let wet = false;
+    for (let dx = 0; dx < 2 && !wet; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        // flag6 = 占位任一格液体>0（:48661-48668 对 w×h 全格,不限本物格）
+        if (st.inBounds(ax + dx, ay + dy)
+          && (st.liquid[st.idx(ax + dx, ay + dy)] ?? 0) > 0) wet = true;
+      }
+    }
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === hive) {
+          st.setTile(ax + dx, ay + dy, 0);
+        }
+      }
+    }
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[hive]?.mapColor ?? '#bfb07c', 8, 1.6);
+    if (!wet) {
+      // num653 = 2 + 三次 Next(3)==0 增量（:76650-76658）;槽位门单点恒真
+      let bees = 2;
+      for (let k = 0; k < 3; k++) if (Math.random() < 1 / 3) bees++;
+      this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+      const cx = ax * TILE + 16, cy = ay * TILE + 16;
+      for (let k = 0; k < bees; k++) {
+        const bee = Enemy.fromVanilla(Math.random() < 0.5 ? 210 : 211, cx, cy);
+        if (!bee) continue;
+        bee.vx = (Math.random() - 0.5) * 0.8;
+        bee.vy = (Math.random() - 0.5) * 0.8;
+        bee.id = this.entities.nextId++;
+        this.entities.add(bee, 'enemies');
+      }
+    }
+  }
+
+  /** 蚁狮幼虫破坏（CheckSuper :48731-48750 1:1）：2×2 整件清 + 释放幼虫小怪 582
+   *  （LarvaeAntlion,巢左下 (num2*16, num3*16+32)=占位底边;TargetClosest 朝向
+   *  vx=direction*1.5/vy=-5;CanBeReplacedByOtherNPCs=true——本仓无替换位语义备案;
+   *  GetImmuneTime(-1,20)=联机免疫回执,单机不涉）。仅运行期（!isGeneratingOrLoading
+   *  && netMode!=1 门由调用面保证——gen 期走 setTileSilent 不进 breakTile） */
+  private breakAntlionLarva(x: number, y: number) {
+    const st = this.world.store;
+    const ant = TILE_BY_KEY['v_485_antlion_larva']!;
+    const i0 = st.idx(x, y);
+    const ax = x - (Math.floor(st.frameX[i0] / 18) % 2);
+    const ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === ant) {
+          st.setTile(ax + dx, ay + dy, 0);
+        }
+      }
+    }
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[ant]?.mapColor ?? '#C68658', 6, 1.5);
+    const larva = Enemy.fromVanilla(582, ax * TILE, ay * TILE + 32);
+    if (larva) {
+      larva.vx = (this.player.x >= ax * TILE ? 1 : -1) * 1.5;
+      larva.vy = -5;
+      larva.id = this.entities.nextId++;
+      this.entities.add(larva, 'enemies');
     }
   }
 
@@ -18345,11 +18516,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  割草判据曾用 decor 启发式踩坑（墓碑 85 与杂草 3 同构），唯显式表是权威。
           // ★只杀占位格、不做额外同型纵扫——原版 KillTile 尾 SquareTileFrame(i,j)
           //  （cs:64432）触发 3×3 邻域 TileFrame，孤儿段由各类型 Check* 族裁决：
-          //  植物 PlantCheck 地基失配杀(:81857)/陶罐 CheckPot 整罐/藤·蛛网·蜂巢无支撑
-          //  语义悬空保留。本仓等价链 = setTile→onTileChanged→checkFurnitureSupport→
-          //  checkDecorSupport（D-1,:5054/:32611）。2026-08-21 曾加同型纵向整株扫修
-          //  "留上半悬空"，该债由上述级联承担后此扫越出原版杀伤半径（藤链/蛛网被多杀），
-          //  2026-09-01 撤除（仪具 scripts/_pile-place.mjs 含 webSurvivor/weedOrphan 回归）。
+          //  植物 PlantCheck 地基失配杀(:81857)/陶罐 CheckPot 整罐/多格豁免件
+          //  {231,254,444,485} Check3x3·Check2x2Style·CheckSuper 整件裁决（DECOR
+          //  'larva3x3'/'pumpkin'/'super' 三支 + breakTile 特支效应,2026-09-01 三批）/
+          //  藤·蛛网无 TileFrame 支悬空保留。本仓等价链 = setTile→onTileChanged→
+          //  checkFurnitureSupport→checkDecorSupport（D-1,:5054/:32611）。
+          //  2026-08-21 曾加同型纵向整株扫修"留上半悬空"，该债由上述级联承担后
+          //  此扫越出原版杀伤半径（藤链/蛛网被多杀），2026-09-01 撤除
+          //  （仪具 scripts/_pile-place.mjs 含 webSurvivor/weedOrphan 回归）。
           const wt = st.get(px, py);
           const shWt = TILE_DEFS[wt]?.vanilla?.sheet ?? -1;
           if (!(TILE_CUT.has(wt) && shWt !== 484 && shWt !== 654) && !TILE_BREAK_WHEN_PLACING.has(wt)) return;
@@ -23902,6 +24076,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (type === ParticleOrchestraType.DeadCellsFlint) {
       // Spawn_DeadCellsFlint :1786-1901（火石枪刺出地表释放特效;movementY=gravDir 档位保留）
       deadCellsFlintFx(this, s.posX, s.posY, s.moveY || 1);
+    } else if (type === ParticleOrchestraType.DeadCellsBarnacleShotFiring) {
+      // ★2026-09-01 Spawn_DeadCellsBarnacleShotFiring :2534-2560（藤壶哨站弹 1026 出膛;
+      //   Item_95 音+15×d2+5×d267;producer=Arrow 1026 首子步,MinionProj 1025 出弹站）
+      deadCellsBarnacleShotFiringFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.DeadCellsBarrelExplosion) {
+      // ★2026-09-01 Spawn_DeadCellsBarrelExplosion :1710-1785（木桶爆 4 层环+25 辐条
+      //   +7×d267;producer=Arrow.barrel1023Burst,由青色近似升格真广播）
+      deadCellsBarrelExplosionFx(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.DeadCellsBeheadedEffect) {
+      // ★2026-09-01 Spawn_DeadCellsHeadEffect :1920-1953（枭首者头部 282 残影;
+      //   producer=Player.deadCellsBeheadedStep 逐帧）
+      deadCellsBeheadedHeadFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.StellarTune) {
+      // ★2026-09-01 Spawn_StellarTune :3675-3705（星律吉他弹 856 Kill 星屑;
+      //   producer=SparkleGuitarProj.killStellarTune）
+      stellarTuneFx(this, s.posX, s.posY);
     } else if (type === ParticleOrchestraType.ShadowbeamHostile
       || type === ParticleOrchestraType.ShadowbeamFriendly) {
       // Spawn_Shadowbeam :1987-2005（锚点→当前位置 d173 直线铺撒;Arrow.SHADOWBEAM_
@@ -31887,6 +32077,66 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+    this.emitTileOrchestraAmbient(tx0, ty0, tx1, ty1);
+  }
+
+  /** ★2026-09-01 编排器 tile-ambient 族发射位（TileDrawing.DrawTiles_EmitParticles
+   *  Tier3 四支,clientOnly:true 各端本地直生,零广播）：与 Tier1/2 尘表（上方规则
+   *  循环）同扫节拍（每 3 tick ×3 概率折算）。此前"tile-ambient 未建"登记消账：
+   *   · PooFly（:6983-6990）便砖 666/712：liquid≤0、上格非 ActiveAndWalkable、
+   *     Next(100)==0 → pooFlyFx@(x×16+8, y×16−8)；
+   *   · RainbowBoulder3（:6992-6999）虹砖 711 frameX==0&&frameY==0、Next(45)==0 →
+   *     rainbowBoulderFx(3)@(x×16+16, y×16+16)；
+   *   · RainbowBoulder2（:7000-7007）同门 Next(3)!=0（=2/3）→ rainbowBoulderFx(2)
+   *     位+circular(16,16)、move=circular(1,0.5)×0.5；
+   *   · NatureFly（:7009-7027）SpawnsNatureFlies 草族 {3,20,24,27,73,201,80,110,
+   *     529,530,595,615,637}：liquid≤0、帧率门 lerp(|wind|,0.08,0.18,0..1)+0.3、
+   *     再 1/600（风格 _windGrid.GetWindTime 档未建模,登记）→ natureFlyFx@
+   *     (x×16+8, y×16)。LakeSparkle 已由 FakeFish.ts 局部池逐参直译（:20635-20646）。 */
+  private emitTileOrchestraAmbient(tx0: number, ty0: number, tx1: number, ty1: number): void {
+    const st = this.world.store;
+    const NATURE_FLIES = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 595, 615, 637]);
+    const walkableAbove = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y - 1)) return false;
+      const t2 = st.type[st.idx(x, y - 1)];
+      if (t2 === 0) return false;                          // 上格非 active
+      if (st.liquid[st.idx(x, y - 1)] > 0) return true;    // AnyLiquidAt 上格有液
+      const d2 = TILE_DEFS[t2];
+      return !!d2?.solid || !!d2?.platform;                // ActiveAndWalkableTile 近似
+    };
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = st.idx(x, y);
+        if (st.type[i] === 0) continue;
+        const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+        const liquidHere = st.liquid[i] > 0;
+        if ((sheet === 666 || sheet === 712) && !liquidHere && Math.random() < 3 / 100
+          && !walkableAbove(x, y)) {
+          pooFlyFx(this, x * TILE + 8, y * TILE - 8);
+        }
+        if (sheet === 711) {
+          const fx = st.frameX[i], fy = st.frameY[i];
+          if (fx === 0 && fy === 0) {
+            if (Math.random() < 3 / 45) {
+              rainbowBoulderFx(this, 3, x * TILE + 16, y * TILE + 16);
+            }
+            if (Math.random() < 2 / 3) {
+              rainbowBoulderFx(this, 2, x * TILE + 16 + (Math.random() * 2 - 1) * 16,
+                y * TILE + 16 + (Math.random() * 2 - 1) * 16,
+                (Math.random() * 2 - 1) * 0.5, (Math.random() * 2 - 1) * 0.25);
+            }
+          }
+        }
+        if (NATURE_FLIES.has(sheet) && !liquidHere) {
+          const wind = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);   // ≈WindForVisuals
+          const lv = wind < 0.08 ? 0 : wind > 0.18 ? 1 : (wind - 0.08) / 0.1; // GetLerpValue clamped
+          const p = lv + 0.3;                                //（:7012-7015）
+          if (Math.random() < Math.min(1, p * 3) && Math.random() < 3 / 600) {
+            natureFlyFx(this, x * TILE + 8, y * TILE);
+          }
+        }
+      }
+    }
   }
 
   // ================= 高门自动通行（DoorOpeningHelper.cs 1:1 简化） =================
@@ -32829,9 +33079,103 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!ud || !ud.solid || ud.platform || usl === 3 || usl === 4) this.killDecorTile(x, y);
         return;
       }
+      case 'pumpkin': {
+        // Check2x2Style（:52753）type 254 南瓜支：2×2 完整性（锚=列 frameX/18%2、
+        // 行 frameY/18%2;style 带 num5=⌊frameX/18/2⌋×36——★原文本就【只】比 frameX
+        // 不比 frameY,:52773-52778 bug-for-bug）+逐列 SolidTileAllowBottomSlope
+        // （:52781）+254 特支下方格 ∈ 草族 {2,109,477,492}（:52786-52794,仅 active
+        // 才查——非活性由前一支杀）。失配整件杀 → killDecorTile（掉落走 breakTile
+        // breakPumpkin 特支帧段表 :52831-52855）
+        const col0 = Math.floor(st.frameX[i] / 18);
+        const ax = x - (col0 % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const num5 = Math.floor(col0 / 2) * 36;
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== dx * 18 + num5) { bad = true; break; }
+          }
+          if (!bad && !this.solidAllowBottomSlopeAt(ax + dx, ay + 2)) bad = true;
+          if (!bad && st.isActive(ax + dx, ay + 2)) {
+            const bs = TILE_DEFS[st.get(ax + dx, ay + 2)]?.vanilla?.sheet ?? -1;
+            if (bs !== 2 && bs !== 109 && bs !== 477 && bs !== 492) bad = true;
+          }
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'super': {
+        // CheckSuper（:48523）444/485 支（锚=frameX/18%w、frameY/18%h;style 带
+        // num4=⌊frameX/36⌋——与生成期 HalfBrickPass.checkSuper 同公式,golden 已验）。
+        // 444 顶锚（flag3 :48639-48657）：每列上方 AnchorValid(SolidTile)+占位任一
+        // 格液体>0（flag6,同时抑制 655 弹 :48753 门）。485 底锚（flag4 :48659-48669）：
+        // 每列下方 AnchorValid(SolidTile)。失配整件杀 → killDecorTile（效应走
+        // breakTile breakBeeHive/breakAntlionLarva 特支）
+        const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const num4 = Math.floor(st.frameX[i] / 36);
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== num4 * 36 + dx * 18
+              || st.frameY[qi] !== dy * 18) { bad = true; break; }
+          }
+          if (!bad && sheet === 444) {
+            if (!this.anchorSolidTileAt(ax + dx, ay - 1)) bad = true;
+            for (let dy2 = 0; dy2 < 2 && !bad; dy2++) {
+              if ((st.liquid[st.idx(ax + dx, ay + dy2)] ?? 0) > 0) bad = true;
+            }
+          } else if (!bad && !this.anchorSolidTileAt(ax + dx, ay + 2)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'larva3x3': {
+        // Check3x3（:53520）type 231 幼虫支：3×3 完整性（列 frameX/18%3 商×54=style
+        // 带、行 frameY/18%3、带基 ⌊frameY/54⌋×54）+逐柱下方 SolidTileAllowBottomSlope
+        // （:53562-53572 的 231 大表支;first-fail 即 flag）。generatingWorld 豁免支
+        // （:53579）运行期不达。失配整件杀 → killDecorTile → breakLarva（清 3×3+
+        // 300 格内召蜂后,KillTile case 231 链）
+        const col0 = Math.floor(st.frameX[i] / 18);
+        const ax = x - (col0 % 3);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 3);
+        const styleBand = Math.floor(col0 / 3) * 54;
+        const fyBase = Math.floor(st.frameY[i] / 54) * 54;
+        let bad = false;
+        for (let dx = 0; dx < 3 && !bad; dx++) {
+          for (let dy = 0; dy < 3; dy++) {
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== dx * 18 + styleBand
+              || st.frameY[qi] !== dy * 18 + fyBase) { bad = true; break; }
+          }
+          if (!bad && !this.solidAllowBottomSlopeAt(ax + dx, ay + 3)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
       default:
         return;   // 'furniture'：不拦,落入下方家具失撑机制
     }
+  }
+
+  /** AnchorValid(SolidTile)（WorldGen.cs:52294+SolidTile 位）：nactive+tileSolid+
+   *  非 solidTop+blockType==0。界外 = GetTileSafely 产空 tile → nactive false。
+   *  与 solidTileStrictAt 的差别：界外语义(false vs true)+致动位+tileNoAttach
+   *  （常用锚面皆可附,同生成期 HalfBrickPass.anchorSolidTile 口径近似忽略）。
+   *  仅供 CheckSuper 444/485 锚判（WorldGen.AnchorValid 家族),勿作通用实心谓词 */
+  private anchorSolidTileAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.isActive(x, y) || (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0) return false;   // nactive()
+    const d = TILE_DEFS[st.type[i]];
+    if (!d || !d.solid || d.platform) return false;
+    return !st.half[i] && st.slope[i] === 0;                             // blockType()==0
   }
 
   private checkTorchDetach(x: number, y: number) {

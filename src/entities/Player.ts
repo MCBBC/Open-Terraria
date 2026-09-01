@@ -133,6 +133,7 @@ import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
 import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28574）
+import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -2706,6 +2707,11 @@ export class Player extends Entity {
     //      Game.simulateRemotePlayers 同门补掷（原版各端对全部 Main.player 跑此尘）。
     //      fixedUpdate 本身只在非暂停时跑 ----
     this.updateHairDyeDust(game);
+    // ---- ★2026-09-01 枭首者头部 282 逐帧残影（DoDeadCellsBeheadedParticles
+    //      Player.cs:24491-24510——与 UpdateHairDyeDust 同段相邻,原版在 PlayerFrame()
+    //      之后逐帧跑,Main.netMode!=2 门 = 各端对全部 Main.player 生成;本仓远端代理
+    //      不走 fixedUpdate,与染发剂彩纸同门在 Game.simulateRemotePlayers 补掷 ----
+    this.deadCellsBeheadedStep(game);
     // ---- FTW 克脑重力倒置消费端（NPC.brainOfGravity → Player.forcedGravity）：
     //      克脑 266 二阶段每 tick 写 world.brainOfGravity=实体 id（NPC.cs:32650-32653），
     //      距脑 <4000px → forcedGravity=10 → gravDir=-1（Player.cs:26489-26496）；
@@ -5240,6 +5246,26 @@ export class Player extends Entity {
         g.scale *= 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
       }
     }
+  }
+
+  /** ★2026-09-01 枭首者头部 282 联动残影发射位（DoDeadCellsBeheadedParticles
+   *  Player.cs:24491-24510 1:1）：门 = !dead && !ghost && !stoned && !frozen &&
+   *  head==282 && !sitting && !sleeping && (坐骑不隐藏玩家)。载荷：
+   *  PositionInWorld = MountedTop + (0, 8×gravDir + gfxOffY + Remap(|vx|,0,3,0,−4)×
+   *  gravDir)（fullRotation 旋位/骑乘速度旋转两支本仓 fullRotation 未建模,登记）；
+   *  MovementVector = velocity。原版 RequestParticleSpawn(clientOnly:true)（各端
+   *  对全部玩家本地生成）→ 本仓只模拟本地玩家 → 本地直生 + 广播补远端（34 型偏差
+   *  口径）。消费本体 = fx/orchestraFx.deadCellsBeheadedHeadFx。 */
+  deadCellsBeheadedStep(game: GameHooks): void {
+    if (this.dead || this.isGhostPhase(game.world) || this.shimmering) return;   // dead/ghost/frozen(shimmering) 门
+    if (this.headArmorSlot !== 282) return;                    // head == 282（枭首者头部 5457）
+    if (this.sitting || this.sleeping) return;                 // !sitting.isSitting && !sleeping.isSleeping
+    if (this.mount.active && !!MOUNT_SETS.PlayerIsHidden?.[this.mount.type]) return;   // PlayerIsHidden 门
+    const topY = this.y + 8 * this.gravDir
+      + Math.max(0, Math.min(1, (Math.abs(this.vx) - 0) / 3)) * -4 * this.gravDir;   // Remap(|vx|,0,3,0,-4)
+    deadCellsBeheadedHeadFx(game, this.cx, topY, this.vx, this.vy);
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBeheadedEffect,
+      this.cx, topY, this.vx, this.vy);
   }
 
   /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢

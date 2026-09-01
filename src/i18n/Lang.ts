@@ -167,25 +167,30 @@ export const Lang = {
 
   /**
    * 图块名。解析链(1.4.4+ 原版语义:方块无独立显示名——Tiles 分节为空)：
-   * ① 放置它的物品名(TILE_NAME_ITEM_BY_SHEET:Item.createTile 反查,取基础款最小 id；
-   *    如 tile14 表 → 木桌 WoodenTable)——12 语言官方译名权威来源
-   * ② MapObject 族名(Lang.cs:77 GetMapObjectName 系,仅 79 键,族级泛称如"桌子")
-   * ③ id-maps 方块名(TILE_NAME_ZH/EN_BY_ID：世界生成专属块——树/藤蔓/药草等
-   *    无放置物品且 MapObject 缺失；原版对它们无 UI 显示名,此为唯一译名来源。
-   *    zh 系语言取 zh,其余语言取 en)
+   * ★2026-09-02 优先级反转(神圣种子撞名事故)——原版 tile 的 UI/地图语义名 =
+   *   MapObject/方块族名,【不是】放置物品名；物品反查只能当末位兜底。
+   *   旧序让 sheet109(圣草)被其唯一放置者 vid369 的物品名「神圣种子」劫持,
+   *   面板方块 place_v_109 由此与真种子同名 ⇒ 道具搜索里两个「神圣种子」,
+   *   用户拿块当种(行为日志两轮全为 place_v_109 use,零 vi_369)。
+   * ① MapObject 族名(Lang.cs:77 GetMapObjectName 系,族级泛称如"桌子")
+   * ② id-maps 方块名(TILE_NAME_ZH/EN_BY_ID：世界生成专属块——树/藤蔓/药草等
+   *    无放置物品且 MapObject 缺失；zh 系取 zh,其余取 en)
+   * ③ 放置它的物品名(TILE_NAME_ITEM_BY_SHEET:Item.createTile 反查,取基础款
+   *    最小 id,如 tile14 → 木桌)——仅当前两级全缺时的兜底
    * ④ null(调用方回退 TILE_DEFS[].name)
    */
   tileName(id: number): string | null {
+    const internal = TILE_NAME_BY_ID[id];
+    if (internal && Lang.has(`MapObject.${internal}`)) return Lang.text(`MapObject.${internal}`);
+    const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
+    const fallback = isZh ? TILE_NAME_ZH_BY_ID[id] : TILE_NAME_EN_BY_ID[id];
+    if (fallback) return fallback;
     const placer = TILE_NAME_ITEM_BY_SHEET[id];
     if (placer !== undefined) {
       const n = Lang.itemName(Number(placer));
       if (n) return n;
     }
-    const internal = TILE_NAME_BY_ID[id];
-    if (internal && Lang.has(`MapObject.${internal}`)) return Lang.text(`MapObject.${internal}`);
-    const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
-    const fallback = isZh ? TILE_NAME_ZH_BY_ID[id] : TILE_NAME_EN_BY_ID[id];
-    return fallback ?? null;
+    return null;
   },
 
   /**

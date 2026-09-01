@@ -217,14 +217,17 @@ export function trySnapStrike(
   if (ctx?.victimBox) {
     snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy,
       Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2));
-    // R4-33 自脉冲面同款广播（Projectile.cs:14432-14437,victim.Center,ms=盒径/2 钳100）
+    // R4-33 自脉冲面同款广播（★2026-09-01 载荷对齐原文 :14431-14437：X=盒对角
+    //   Length()/2 原值【无钳无掷】、Y=0=零延迟拍——曾错传 ×(0.3+1.4r) 掷幅 +
+    //   Y=maxTargets 延迟档；延迟仅属出弹链 num7+1 :14429。snapStrikeDust 的
+    //   钳 100 是尘段自有口径,与此广播载荷分属两面,各自对齐）
     {
-      const vh = Math.min(100, Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2);
+      const vh = Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2;
       game.broadcastParticleOrchestra?.(
         kind === 0 ? ParticleOrchestraType.SnappingStone
           : kind === 1 ? ParticleOrchestraType.SnappingStoneMelee
             : ParticleOrchestraType.SnappingStoneSummon,
-        ctx.victimBox.cx, ctx.victimBox.cy, vh * (0.3 + 1.4 * Math.random()), maxTargets);
+        ctx.victimBox.cx, ctx.victimBox.cy, vh, 0);
     }
   }
   // ★F1 加伤链（:14442-14457）——零目标也照样给满额漏配（num13 = 2 − num7）：

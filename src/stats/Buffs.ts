@@ -1254,7 +1254,8 @@ export class BuffState {
    *  Burning 0.5、Slow 0.5、Chilled 0.75、盾举(shieldRaised,Player 侧) 1/3。
    *  197/160 玩家侧已入档（终零波 护士经济簇批,2026-09-01）——生产位登记见
    *  BuffType.Dazed/OgreSpit 注。消费：Update 尾 moveSpeed *= 本值；accRunSpeed
-   *  *= 本值（oldStyleParkour 豁免，本仓无 6190 老派跑酷书 → 恒吃） */
+   *  *= 本值（oldStyleParkour 豁免臂已接——Player.ts Run 段 parkourBook 门,
+   *  equipStats.oldStyleParkour 由 6190 旧世界跑酷指南全物品栏在场授予） */
   get strongestMoveSpeedDebuff(): number {
     let s = 1;
     if (this.active.has(BuffType.Burning)) s = Math.min(s, 0.5);   // :26144-26146

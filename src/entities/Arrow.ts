@@ -897,6 +897,8 @@ export class Arrow extends Entity {
   // ---- 特殊箭特效批（2026-08-22，weapon-audit-2026-08-22 类别六）----
   /** 225 叶绿箭撞块弹反计数（ai[1]，:17130：首跳伤 ×0.66 / 第 4 撞 Kill） */
   private arrow225Ai1 = 0;
+  /** 285 纳米弹撞块弹反计数（ai[1]，:18677：首跳伤 ×0.66 / 第 2 撞 Kill） */
+  private proj285Ai1 = 0;
   /** 710 空中祸害裂片标（原版出生参 ai[1]=-1——裂片命中不再撒裂片，BetsySharpnel
    *  :51077 `ai[1] != -1f` 门） */
   abShard = false;
@@ -2684,9 +2686,22 @@ export class Arrow extends Entity {
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
     // ★R29 玛瑙爆破枪黑爆二段（Kill :73493-73540）：Resize(160)→Damage() AoE
     else if (this.projId === 661 && !this.dead && !this.hostile) this.blackBolt661Burst(game);
-    // ★B1 死亡细胞桶发射器 1023（Kill :78560-78585）：音+192 盒 Damage()+编排粒子
-    // 近似+gore/尘（hostile 门同 661——被反射后不回打敌侧）
+    // ★B1 死亡细胞桶发射器 1023（Kill :78560-78585）：音+192 盒 Damage()+编排本体
+    // deadCellsBarrelExplosionFx+gore/尘（hostile 门同 661——被反射后不回打敌侧）
     else if (this.projId === 1023 && !this.dead && !this.hostile) this.barrel1023Burst(game);
+    // ★2026-09-01 藤壶哨站弹 1026 Kill（:76827-76836）：Item_167 音 + 20×d2
+    // （vel=circular(5,5)、α50/fadeIn .5/noGravity、scale 1.2+Next(-20,40)×0.01）
+    if (this.projId === 1026 && !this.dead) {
+      game.playSfxFile?.('Item_167', 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 2, this.vx, this.vy, 0, null,
+          1.2 + (Math.floor(Math.random() * 61) - 20) * 0.01);
+        if (d) {
+          d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true;
+          d.vx = (Math.random() * 2 - 1) * 5; d.vy = (Math.random() * 2 - 1) * 5;
+        }
+      }
+    }
     // §1 暗影束消亡：补铺末段（Kill :71840-71870 从最后锚点到死亡位广播）
     if (this.projId === 294 && !this.hostile && this.sbL0 > 9
       && (this.sbAx > 0 || this.sbAy > 0)) {
@@ -4001,8 +4016,34 @@ export class Arrow extends Entity {
       //  （Projectile.cs:23413-23431）：alpha = Math.Max(0, alpha − 50) 每拍
       //  （:23429；SetDefaults α=255 :9169-9176 → 6 拍淡入；aiStyle2 无 EU=1 拍/帧）。
       //  同块 frame=(int)ai[1] 静态随机帧由 ctor pinFrame 掷签承载（见 ctor 注），
-      //  不在本支。出生尘爆（localAI[0]==0 → 8×尘31 持械初速派生 :23414-23428）
-      //  登记暂缓——视觉域，Remap(玩家初速)×RotatedByRandom 耦合，后续批接。 ----
+      //  不在本支。 ----
+      //  ★批五：出生尘爆接装（localAI[0]==0 一次性门 → age===1 首子步等价，
+      //  P.cs:23414-23428）：8×d31 @ 弹心前 SafeNormalize(v)×25 + (−8,−8) 处，
+      //  尘速 = v×(0.2+Remap(玩家速,0..3→0..0.5)).RotatedByRandom(±0.7)
+      //  + 玩家速×0.25 再 ×rand(0..1]，fadeIn 0.1、无重力、scale 0.75+rand×0.3。
+      //  position −= velocity 的反向偏置不建模（一拍内消解，登记）。
+      if (this.age === 1) {
+        const pl968 = game.player as { vx: number; vy: number } | null;
+        const pvx = pl968?.vx ?? 0, pvy = pl968?.vy ?? 0;
+        const pvL = Math.hypot(pvx, pvy);
+        const gain = (pvL / 3) * 0.5;                        // Remap(|pv|,0..3 → 0..0.5)
+        const sp = Math.hypot(this.vx, this.vy) || 1;
+        const ox = this.cx + (this.vx / sp) * 25 - 8;        // Center + norm(v)×25 + (−8,−8)
+        const oy = this.cy + (this.vy / sp) * 25 - 8;
+        for (let i = 0; i < 8; i++) {
+          const d968 = game.spawnDust?.(ox, oy, 16, 16, 31, this.vx, this.vy, 50, null,
+            0.75 + Math.random() * 0.3, true);
+          if (!d968) break;
+          const ra = (Math.random() * 2 - 1) * 0.7;          // RotatedByRandom(0.7) ∈ ±0.7
+          const ca = Math.cos(ra), sa = Math.sin(ra);
+          const base = sp * (0.2 + gain);
+          const vxr = this.vx / sp, vyr = this.vy / sp;
+          const dr = Math.random();                          // velocity ×= rand(0..1]
+          d968.vx = ((vxr * ca - vyr * sa) * base) * dr + pvx * 0.25;
+          d968.vy = ((vyr * ca + vxr * sa) * base) * dr + pvy * 0.25;
+          d968.fadeIn = 0.1;
+        }
+      }
       if (this.alpha > 0) this.alpha -= 50;
       if (this.alpha < 0) this.alpha = 0;
     } else if (this.projId === 876) {
@@ -5575,6 +5616,38 @@ export class Arrow extends Entity {
         this.harpyCharmConsumed = true;                    // :58772-58776 无目标 → 位停引
       }
     }
+    // ---- 藤壶哨站弹 1026（aiStyle 28 default 支 :27095-27104 + 1026 视觉支
+    //      :26920-26944；★2026-09-01 producer 锚补齐批——原 AI_28 全链未建模,
+    //      哨站 1025 悬浮但零开火）:extraUpdates=2（SetDefaults :9719-9725）→ 本仓
+    //      spawn 侧传 extraUpdates:2,本支逐【子步】执行：
+    //      ①首子步 ai[1]==0 门 → DeadCellsBarnacleShotFiring 编排（:27033-27038,
+    //        clientOnly:true → 本仓 owner 权威广播补远端,同 34 型口径）;
+    //      ②拖尾：localAI[0]≥8（钳值）且 timeLeft%2==0 → d2 尾尘（位=position−
+    //        vel 归一×5、vel×0.25、α50/fadeIn .5/noGravity、scale .7±.05）;
+    //      ③default 支：velocity ×0.8/子步 + alpha += 4 → ≥255 Kill（≈64 子步
+    //        ≈21t 寿命,GetAlpha=随 alpha 淡出同 drawGlobalAlpha 语义）。
+    //      （顺序=原版 AI 先于 UpdatePosition：衰减/杀在位移前）
+    if (this.projId === 1026) {
+      if (this.age === 1) {
+        deadCellsBarnacleShotFiringFx(game, this.cx, this.cy, this.vx, this.vy);
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBarnacleShotFiring,
+          this.cx, this.cy, this.vx, this.vy);
+      }
+      if (this.age >= 8 && this.life % 2 === 0) {
+        const sl = Math.hypot(this.vx, this.vy) || 1;
+        const d26 = game.spawnDust?.(this.x - (this.vx / sl) * 5, this.y - (this.vy / sl) * 5,
+          this.w, this.h, 2, this.vx, this.vy, 0, null,
+          0.7 + (Math.floor(Math.random() * 11) - 5) * 0.01);
+        if (d26) {
+          d26.alpha = 50; d26.fadeIn = 0.5; d26.noGravity = true;
+          d26.vx = this.vx * 0.25; d26.vy = this.vy * 0.25;
+        }
+      }
+      this.vx *= 0.8;
+      this.vy *= 0.8;
+      this.alpha += 4;
+      if (this.alpha >= 255) { this.killNow(game); return; }
+    }
     // aiStyle4 荆棘链：UpdatePosition 早退（Projectile.cs:20552）——链段全程静止，
     // 不消费速度位移（"接力推进"= 子段出生在父段前方一格速度处）
     if (!this.thornChain) {
@@ -5710,6 +5783,40 @@ export class Arrow extends Entity {
         if ((this.projId === 181 || this.projId === 189 || this.projId === 357 || this.projId === 566)
           && this.pierce > 0) {
           if (this.projId === 357) this.damage = Math.max(1, Math.trunc(this.damage * 0.9));
+          this.pierce--;
+          if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx;
+          else this.vy = -this.vy;
+          return;
+        }
+        // ---- ★批五：285 纳米弹/477 水晶飞镖撞块弹反（HandleMovement type 段
+        //      Projectile.cs:18675-18701 / :18756-18774，2026-09-01 全弹域审计批）----
+        //  285 NanoBullet：ai[1] 计数、首撞伤 ×0.66（(int) 截断）、第 2 撞 Kill；
+        //      全速反 lastVelocity + FindTargetWithLineOfSight 归巢（默认 800px
+        //      LOS 门 :46466，直瞄中心 :18697-18701——与 225 的高度偏移归巢不同式；
+        //      本仓 nearestEnemyWithLos 直线可视近似同 chloroBounceOff 口径）。
+        //  477 CrystalDart：撞块 → penetrate--（≤0 Kill，与命中敌共用计数）+
+        //      damage ×0.85（(int) 截断，每撞折价）；rotation 速度角重锚由
+        //      PROJ_ROT_RIGHT 通用绘制式覆盖。
+        //      两型原版按 velocity!=lastVelocity 分轴反射；本仓单点碰撞按速度
+        //      主轴反射（294/蜂族档同法，登记）----
+        if (this.projId === 285) {
+          this.proj285Ai1++;
+          if (this.proj285Ai1 === 1) this.damage = Math.max(1, Math.trunc(this.damage * 0.66));
+          if (this.proj285Ai1 >= 2) { this.killNow(game); return; }
+          if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx;
+          else this.vy = -this.vy;
+          const tgt285 = this.nearestEnemyWithLos(game, 800);
+          if (tgt285) {
+            const dx285 = tgt285.cx - this.cx, dy285 = tgt285.cy - this.cy;
+            const dl285 = Math.hypot(dx285, dy285);
+            const sp285 = Math.hypot(this.vx, this.vy);
+            if (dl285 > 0) { this.vx = (dx285 / dl285) * sp285; this.vy = (dy285 / dl285) * sp285; }
+            else { this.vx = 0; this.vy = -sp285; }
+          }
+          return;
+        }
+        if (this.projId === 477 && this.pierce > 0) {
+          this.damage = Math.max(1, Math.trunc(this.damage * 0.85));
           this.pierce--;
           if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx;
           else this.vy = -this.vy;

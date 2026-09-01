@@ -13,7 +13,7 @@
 // ④ 963 阿比盖尔特判 ×-1（:62992）贴图朝右——常规 facing=sign(目标方向) 不变
 import { describe, expect, it } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
-import { Arrow } from '../src/entities/Arrow';
+import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -285,5 +285,105 @@ describe('随从世界点光（AI 侧 AddLight/CastLightOpen，2026-08-17 血蝙
       (new MinionProj(0, 0, id, 10, 2, false, 0, false, () => player) as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
     expect(mk(387)).toBeNull();
     expect(mk(388)).toBeNull();
+  });
+});
+
+// ★T9（2026-09-01）弩车族 677/678/679 draw 专绘（Main.cs:34097-34137 + dir 缺省
+//  :30529-30532 + 锚/origin 缺省 :33695/:33787 + 公共尾绘 :34212）：
+//  ① dir 组合：spriteDirection==-1 ⇒ dir=FlipH（:30531）再 ^= FlipH|FlipV（:34099）
+//     ⇒ 净 FlipVertically。XNA 顶点序 world=T·R(θ)·F·(p−o)（镜像先于旋转）⇒
+//     canvas 等价 = rotate(rot) 后 scale(1,−1)——「双轴镜像背面朝向」，非旧
+//     scale(-1,1) 单轴式（旧式在 rot==0 恰同净效果、rot≠0 镜像轴错）。
+//  ② 塔座 Extra_83/84/85（:34105-34116）：Bottom 底心锚 origin=(w/2,h−2)、
+//     rotation=0、effects=dir&FlipH 恒 None ⇒ 永不镜像；ai[2]==1 携行不画。
+//  ③ 本体帧（:34117-34126）：anchor=Center+(0,+3)（678 再−4/679 再−2）、
+//     origin=(fw/2−1[,679 再−4], fh/2[679 非翻转侧+4/翻转侧−4 :34130-34134])。
+//  手法 = weapon-whip-render 同款记录型 ctx + setProjSpriteOverride 假贴图。
+const fakeTex9 = (w: number, h: number): HTMLImageElement =>
+  ({ width: w, height: h }) as unknown as HTMLImageElement;
+class FakeCanvas9 {
+  width = 0; height = 0;
+  getContext() {
+    return { drawImage() {}, imageSmoothingEnabled: false };
+  }
+}
+(globalThis as { document?: unknown }).document = {
+  createElement: (): FakeCanvas9 => new FakeCanvas9(),
+};
+interface Rec9 { tex: unknown; args: number[] }
+function recordingCtx9() {
+  const draws: Rec9[] = [];
+  const translates: number[][] = [];
+  const rots: number[] = [];
+  const scales: number[][] = [];
+  const ctx = {
+    save() {}, restore() {},
+    translate(x: number, y: number) { translates.push([x, y]); },
+    rotate(a: number) { rots.push(a); },
+    scale(x: number, y: number) { scales.push([x, y]); },
+    set imageSmoothingEnabled(_: boolean) {},
+    set globalAlpha(_: number) {},
+    drawImage(tex: unknown, ...rest: number[]) { draws.push({ tex, args: rest }); },
+  } as unknown as CanvasRenderingContext2D;
+  return { ctx, draws, translates, rots, scales };
+}
+describe('T9 弩车 draw 双轴镜像背面 + 塔座（Main.cs:34097-34137）', () => {
+  const setup = (projId: number, sheetW: number) => {
+    setProjSpriteOverride(projId, fakeTex9(sheetW, 336));   // 6 帧 × 56px 竖条
+    const { player } = makeHooks();
+    // 构造器 (x,y)=盒左上：cx=x+w/2、cy=y+h/2（26×54）
+    const m = new MinionProj(player.cx, player.cy, projId, 20, 6, true, 0, false, () => player);
+    const rec = recordingCtx9();
+    const atlas = {
+      ensureVImage: (name: string) =>
+        fakeTex9(name.endsWith('83.png') ? 30 : name.endsWith('84.png') ? 38 : 32, 30),
+    };
+    return { m, rec, atlas, r: { ctx: rec.ctx, atlas } as never };
+  };
+
+  it('677 朝右：塔座先画（Bottom 底心锚,不镜像）+ 本体 anchor=Center+(0,+3)/origin=(61,28)', () => {
+    const { m, rec, r } = setup(677, 124);
+    m.draw(r);
+    expect(rec.draws.length).toBe(2);                       // 塔座 + 本体
+    expect(rec.draws[0].args).toEqual([-15, -28]);          // origin=(30/2, 30−2)
+    expect(rec.draws[1].args).toEqual([-61, -28]);          // origin=(124/2−1, 56/2)
+    // 调用序：translate(Bottom)→塔座→translate 回退→translate(Center+3)→rotate→本体
+    expect(rec.translates[0]).toEqual([m.cx, m.y + m.h]);   // proj.Bottom
+    expect(rec.translates[1]).toEqual([-m.cx, -(m.y + m.h)]); // 回退
+    expect(rec.translates[2]).toEqual([m.cx, m.cy + 3]);    // vector99.Y++/+=2(:34119-34121)
+    expect(rec.rots).toEqual([0]);
+    expect(rec.scales).toEqual([]);                         // dir=None ⇒ 不翻转
+  });
+
+  it('677 朝左(rot=π)：双轴翻转 = rotate(π)+scale(1,−1)（dir 净 FlipVertically）,origin 不变', () => {
+    const { m, rec, r } = setup(677, 124);
+    m.facing = -1;
+    m.rot = Math.PI;                                        // AI_134 朝左落位角(:69605-69607)/待机归位角(:69673-69675)
+    m.draw(r);
+    expect(rec.rots).toEqual([Math.PI]);
+    expect(rec.scales).toEqual([[1, -1]]);                  // ★FlipV 而非旧单轴 (−1,1)
+    expect(rec.draws[1].args).toEqual([-61, -28]);          // 677 无翻转侧 origin 反补
+  });
+
+  it('679 锚/origin 分档：朝右 (cx,cy+1)/(66,32)；朝左 FlipV 侧 (66,24)（:34130-34136）', () => {
+    const { m, rec, r, atlas } = setup(679, 142);
+    m.draw(r);
+    expect(rec.translates[2]).toEqual([m.cx, m.cy + 1]);    // +3−2(:34125)
+    expect(rec.draws[1].args).toEqual([-66, -32]);          // 142/2−1−4(:34127/:34136), 28+4(:34130-34134)
+    const rec2 = recordingCtx9();
+    m.facing = -1;
+    m.rot = Math.PI;
+    m.draw({ ctx: rec2.ctx, atlas } as never);
+    expect(rec2.draws[1].args).toEqual([-66, -24]);         // 28−4（翻转侧反补）
+    expect(rec2.scales).toEqual([[1, -1]]);
+  });
+
+  it('携行态（ai[2]==1 → carriedByBackpack）不画塔座,本体照画（:34112 ai[2]!=1f 门）', () => {
+    const { m, rec, r } = setup(678, 140);
+    (m as unknown as { carriedByBackpack: boolean }).carriedByBackpack = true;
+    m.draw(r);
+    expect(rec.draws.length).toBe(1);                       // 仅本体
+    expect(rec.translates[0]).toEqual([m.cx, m.cy - 1]);    // 678:+3−4(:34122-34123)
+    expect(rec.draws[0].args).toEqual([-69, -28]);          // 140/2−1, 56/2
   });
 });

@@ -28,7 +28,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
 import { ParticleOrchestraType } from '../net/syncModules';
-import { cattivaHitFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）
+import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
@@ -44,7 +44,7 @@ const FLAMEBURST_TOWER = new Set([663, 665, 667]);
 const BALLISTA_TOWER = new Set([677, 678, 679]);
 /** Utils.AngleLerp（Utils.cs:2154-2172）：圆周最短路插值（两分支均化简为
  *  cur + wrap(target−cur)×amount——MathHelper.Lerp(cur, target±2π, amt) 展开同式）。
- *  ★T9：AI_134 弩车 rotation 状态机消费（:69628 待机瞄准 0.08 / :69645 归位 0.05）。 */
+ *  ★T9：AI_134 弩车 rotation 状态机消费（:69651 待机瞄准 0.08 / :69675 归位 0.05）。 */
 function angleLerp134(cur: number, target: number, amt: number): number {
   let diff = target - cur;
   while (diff > Math.PI) diff -= Math.PI * 2;
@@ -3653,6 +3653,24 @@ export class MinionProj extends Entity {
           en.hurt(applyBannerDamageDealt(game, en, res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
+          // ★2026-09-01 StardustPunch(7) 出手面（Projectile.cs:14331-14337,type==623
+          //  Damage 命中支,clientOnly:false → 本地直生 + module8 上行,原版即全网）：
+          //  PositionInWorld = Lerp(Center, targetNPC.Hitbox.ClosestPointInRect(Center), .5)
+          //  + (0, NextFloatDirection×10)；MovementVector = (direction, NextFloatDirection×.5)
+          //  ×(3+3r)。星尘护手 623 星屑紫罗兰光点消费本体 stardustPunchFx（δB B11 同
+          //  "命中拍逐靶一发"口径）。
+          {
+            const clx = Math.max(en.x, Math.min(this.cx, en.x + en.w));
+            const cly = Math.max(en.y, Math.min(this.cy, en.y + en.h));
+            const px623 = (this.cx + clx) * 0.5, py623 = (this.cy + cly) * 0.5
+              + (Math.random() * 2 - 1) * 10;
+            const mv623m = 3 + 3 * Math.random();              // 乘区共用一掷（:14334）
+            const mv623x = this.facing * mv623m;
+            const mv623y = (Math.random() * 2 - 1) * 0.5 * mv623m;
+            stardustPunchFx(game, px623, py623, mv623x, mv623y);
+            game.broadcastParticleOrchestra?.(ParticleOrchestraType.StardustPunch,
+              px623, py623, mv623x, mv623y);
+          }
         }
         // ★F4 召唤/哨兵弹伤害时刻的小动物恒拒门（CanNPCBeHitByPlayerOrPlayerProjectile
         // (npc, projectile)：flag = …∪(projectile.minion ∪ MinionShot ∪ sentry ∪
@@ -4265,7 +4283,7 @@ export class MinionProj extends Entity {
         if (this.sInit === 0) {
           this.sInit = 1;
           this.sCool = ballistraShotDelayOf(game.player);
-          // ★T9 ai[0]==0 落位拍（:69610-69616）：direction=spriteDirection=
+          // ★T9 ai[0]==0 落位拍（:69599-69608）：direction=spriteDirection=
           //   owner.direction；朝左时 rotation=π（本体贴图朝右-authored,背面朝向
           //   的旋转基线由此起）——rotation 为 draw 侧 dir 组合的输入,见 draw 弩车支
           this.rot = (game.player?.facing ?? 1) < 0 ? Math.PI : 0;
@@ -4278,9 +4296,10 @@ export class MinionProj extends Entity {
           const s134y = spotY134();
           const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900,
             { x: this.cx, y: s134y }, { deadBottomAngle: 0.75 });
-          // ★T9 ai[0]==1 待机臂（:69627-69649）：有标 → rotation=AngleLerp(rot,
-          //   aim,0.08) 后 direction 取旋转半平面（|rot|>π/2 ⇒ −1,等价 cosθ<0 ⟺
-          //   v.X<0）；无标 → 向归位角（direction==−1?π:0）0.05 速率回摆。
+          // ★T9 ai[0]==1 待机臂（:69647-69676）：有标 → rotation=AngleLerp(rot,
+          //   aim,0.08)(:69651) 后 direction 取旋转半平面(:69652-69659;|rot|>π/2 ⇒ −1,
+          //   等价 cosθ<0 ⟺ v.X<0)；无标 → 向归位角（direction==−1?π:0,:69669-69675）
+          //   0.05 速率回摆。
           //   rotation 只作 draw 输入,facing 派生序照原文（lerp→半平面→转火覆写）
           if (tgt) {
             this.rot = angleLerp134(this.rot,
@@ -4290,7 +4309,7 @@ export class MinionProj extends Entity {
             this.rot = angleLerp134(this.rot, this.facing < 0 ? Math.PI : 0, 0.05);
           }
           if (tgt && this.sCool <= 0) {
-            // ★T9 :69650-69655 转火拍 direction=Sign(v.X) 覆写（仅此瞬拍；非转火
+            // ★T9 :69660-69666 转火拍 direction=Sign(v.X) 覆写（仅此瞬拍；非转火
             // 拍方向恒=旋转半平面派生,lerp 滞后照原文）
             this.facing = tgt.cx >= this.cx ? 1 : -1;
             this.sFire = 1; this.sFireT = 0;
@@ -4312,9 +4331,9 @@ export class MinionProj extends Entity {
               vx = ((tgt.cx - this.cx) / d) * shotSpeed134;
               vy = ((tgt.cy - sy134) / d) * shotSpeed134;
             }
-            // ★T9 ai[0]==2 出弹拍（:69680-69690）：rotation=vector.ToRotation()
-            //   精确钉角（fallback vector=(direction,0) ⇒ 0/π），direction 再取
-            //   旋转半平面——先于出弹（NewProjectile 速度=同 vector×num3）
+            // ★T9 ai[0]==2 出弹拍（:69687-69698）：rotation=vector.ToRotation()(:69690)
+            //   精确钉角（fallback vector=(direction,0) ⇒ 0/π），direction 再取旋转
+            //   半平面(:69691-69698)——先于出弹（速度=同 vector×num3 :69699）
             this.rot = Math.atan2(vy, vx);
             this.facing = this.rot > Math.PI / 2 || this.rot < -Math.PI / 2 ? -1 : 1;
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
@@ -4530,6 +4549,43 @@ export class MinionProj extends Entity {
             'projectiles');
         }
         if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
+        return;
+      }
+      // ★2026-09-01 AI_197_CeilingAndHoverTurret 出弹站（Projectile.cs:41041-41179）：
+      // 藤壶哨站 1025（物品 5463）——此前仅 FLOATING_SENTRIES 悬浮档,零开火（producer
+      // 锚缺登记消账面）。①localAI[1]==0 首拍：frame=3 + 40×d2 出生尘爆
+      // （Center±(10,10)、α100、v×2、noGravity,:41045-41056）;②num3=15 顶格深扫
+      // flag2 只改本体浮态（悬停恒定,免笺）;③localAI[0]++ 至 num4=50——无目标钳 50
+      // （目标出现当拍即发）,有目标归零并 NewProjectile 1026（muzzle=Center+(0,10),
+      // 哨兵背包携带态 (0,0) :41060-41064、vel=(敌心−muzzle).SafeNormalize×num7=12、
+      // 伤=damage、kb=本体;索敌 AI_053_HandleSentryNPCTargeting maxDistance=num8=
+      // 1000+num3×16=1240（flag=1025 档 :41150-41154,无视线门）。弹 1026 全链
+      // （AI_28 衰减/拖尾/出膛编排/命中毒/Kill 音尘）在 Arrow.ts 1026 支。
+      if (this.projId === 1025) {
+        if (this.sInit === 0) {
+          this.sInit = 1;
+          for (let i = 0; i < 40; i++) {
+            const d = game.spawnDust?.(this.cx - 10, this.cy - 10, 20, 20, 2, 0, 0, 100);
+            if (d) { d.vx *= 2; d.vy *= 2; d.noGravity = true; }
+          }
+        }
+        this.sCool = Math.min(this.sCool + 1, 50);            // localAI[0]++（:41156-41158）
+        if (this.sCool >= 50) {
+          const tgt = this.nearestEnemy(game, 1240);          // num8=1000+num3×16（:41153）
+          if (!tgt) return;
+          this.sCool = 0;                                     // localAI[0]=0（:41164）
+          const oy = this.carriedByBackpack ? 0 : 10;         // vector3.Y（:41060-41064）
+          const mx = this.cx, my = this.cy + oy;
+          const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+          const sp26 = projectileData(1026);
+          const hw26 = (sp26?.width ?? 14) / 2, hh26 = (sp26?.height ?? 14) / 2;
+          const life26 = sp26?.timeLeft ?? 3600;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+            Object.assign(new Arrow(mx - hw26, my - hh26, ((tgt.cx - mx) / d) * 12, ((tgt.cy - my) / d) * 12,
+              dmgOf(), this.knockback, 1026, null, { grav: 0, life: life26, extraUpdates: 2 }),
+              { whipTagShot: true }),                         // SENTRY_SHOT_SET 吃鞭 tag
+            'projectiles');
+        }
         return;
       }
       // 其他哨兵（aiStyle 123：月门/彩虹水晶）

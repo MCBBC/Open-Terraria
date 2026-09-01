@@ -36,7 +36,10 @@ export function giveItem(game: Game, internalId: number, stack: number): void {
   const inv = game.player.inv;
   const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
   const want = Math.min(stack, Math.max(1, def?.maxStack ?? 999));
-  const left = inv.add(internalId, want);
+  // ★preferHotbar（2026-09-02 神圣种子 UX 批）：授予先热栏——否则热栏满时新物
+  //  落背包尾,玩家手里仍是旧物（两轮行为日志实证）。原版语义=复制到手/光标,
+  //  本仓无光标槽,热栏直落是最近可用近似。
+  const left = inv.add(internalId, want, undefined, undefined, false, true);
   const key = (def as { key?: string } | undefined)?.key;
   if (left > 0 && key) {
     game.spawnDrop(game.player.cx, game.player.cy,

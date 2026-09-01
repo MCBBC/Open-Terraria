@@ -41,6 +41,10 @@ import {
 
 const fr = Math.fround;
 
+/** SW_I138_EARLY 门（EarlyDual 家族批门,DungeonPass 同名门镜像——OFF=维持前批账面）。 */
+const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
+const i138EarlyGate = (): boolean => __swProcessEnv.SW_I138_EARLY === '1';
+
 type V2 = { x: number; y: number };
 
 /** RNG/UnifiedRandom 双形态掷骰适配（inner=UnifiedRandom 精确流；main=RNG 包装）。 */
@@ -643,7 +647,21 @@ abstract class DRoomBase {
       }
     }
   }
-  generatePreHallwaysFeatures(_data: DualDungeonData, _ctx: DualLayoutCtx): void {}
+  /** ★IIIII109b（PRH 窗 −3,160 定罪主项）：基类 GeneratePreHallwaysDungeonFeaturesInRoom
+   *  （DungeonRoom.cs:53-59）——Style4/5（Crimson/Corruption）非 Biome 房在【PreHallways
+   *  窗】下扫钟乳石（主流掷!，Max(3,Width/3) 根）。旧 JS 本体空 ⇒ x86 PRH 净 +3,500 vs
+   *  JS +344（rugged 错置面）的基类缺臂。paint=(OverridePaintTile>=0∨!Style.TilePaintColor)
+   *  ?Override:Style.Value（cs:57-58 三元；−1=cs null 不写漆,chTileSheet paint>0 门同构）。 */
+  generatePreHallwaysFeatures(_data: DualDungeonData, ctx: DualLayoutCtx): void {
+    if (!i138EarlyGate()) return;                          // OFF=前批账面（本体空）
+    const sty = this.settings.style;
+    if (sty.Style !== 4 && sty.Style !== 5) return;
+    if (!(this.inner.width > 10 && this.inner.height > 10)) return;
+    const opt = this.settings.overridePaintTile;
+    const paint = opt >= 0 ? opt : (sty.TilePaintColor !== undefined ? sty.TilePaintColor : -1);
+    generateSpeleothemsInArea(ctx, this.inner.L, this.inner.T, this.inner.width, this.inner.height,
+      Math.max(3, Math.trunc(this.inner.width / 3)), sty.BrickTileType, paint);
+  }
   abstract calculateRoom(data: DualDungeonData, ctx: DualLayoutCtx): void;
   abstract generateRoom(data: DualDungeonData, ctx: DualLayoutCtx): void;
 }
@@ -1064,6 +1082,9 @@ abstract class DBiomeRoomBase extends DRoomBase {
   roomInnerSize = 0;
   roomOuterSize = 0;
   wallDepth = 8;
+  /** ★IIIII109b：BiomeDungeonRoom.cs:36-38 GeneratePreHallwaysDungeonFeaturesInRoom
+   *  **空体覆写**——biome 房不吃基类 style4/5 钟乳石面（该面只属非 Biome 房）。 */
+  generatePreHallwaysFeatures(_data: DualDungeonData, _ctx: DualLayoutCtx): void {}
   /** BiomeDungeonRoom.cs:27-34：traps/spikes/chests/drop/pit 拒——下游 feature 批接。 */
   protectionAt(st: TileStore, x: number, y: number): number {
     if (this.settings.style.Style === 0 || this.settings.style.Style === 10) return Protection.None;
@@ -1293,8 +1314,15 @@ class DBiomeRuggedRoom extends DBiomeRoomBase {
     this.shapeDataInner = new ShapeData();
     this.shapeDataOuter = new ShapeData();
   }
-  /** GenerateEarlyDungeonFeaturesInRoom（:54-71）：speleothems+floating rocks。 */
+  /** ★IIIII109b 移窗（BiomeRuggedDungeonRoom.cs:54-71 GenerateEarlyDungeonFeaturesInRoom）：
+   *  rugged 钟乳石/浮石族属【早特征窗】（cs:588-591 每房循环内、主流掷!）而非
+   *  PreHallways 窗——cs BiomeDungeonRoom.GeneratePreHallwaysDungeonFeaturesInRoom
+   *  是**空体**（:36-38），旧 JS 把本面挂在 PRH 循环=窗位错置（x86 PRH 净 +3,500
+   *  vs JS +344 的定罪主体之一，IIIII108c §②移交项）。
+   *  门 ON=早特征窗经 dualRuggedEarlyFeatures（载荷驱动,DungeonPass 调用），本面整跳；
+   *  门 OFF=维持 108c 前账面（错置窗原样保留）。 */
   generatePreHallwaysFeatures(data: DualDungeonData, ctx: DualLayoutCtx): void {
+    if (i138EarlyGate()) return;
     void data;
     const style = this.settings.style;
     const tilePaint = this.settings.overridePaintTile > -1 ? this.settings.overridePaintTile : (style.TilePaintColor ?? 0);
@@ -1739,6 +1767,21 @@ function generateSpeleothem(ctx: DualLayoutCtx, ur: RngLike, x: number, yIn: num
       chTileSheet(st, nx, y + k + num5, tileType, false, paint);
     }
   }
+}
+
+/** ★IIIII109b：rugged 早特征面（载荷驱动版,DungeonPass 早特征窗调用=cs:588-591 循环内）。
+ *  自 PRH 错置窗迁回；PRH 的 rugged 支仅在 SW_I138_EARLY=0（前批账面）时保留。
+ *  paint=cs byte? b 三元（Override>−1 ? Override : Style.TilePaintColor|null）——
+ *  chTileSheet 的 paint>0 写门使 0/−1 与 cs null 同效。 */
+export function dualRuggedEarlyFeatures(ctx: DualLayoutCtx, er: DualEarlyRoom): void {
+  const width = er.R - er.L, height = er.B - er.T;
+  const tilePaint = er.opt > -1 ? er.opt : (er.bPaint > -1 ? er.bPaint : 0);
+  generateSpeleothemsInArea(ctx, er.L, er.T, width, height,
+    Math.max(1, Math.trunc(width / 6)), er.brick, tilePaint);
+  // GetPlatformStyle（DungeonGenerationStyleData.cs）同构：空表不掷、Next(len)→item。
+  const platStyle = er.plat.length === 0 ? -1 : er.plat[ctx.rng.nextInt(er.plat.length)]!;
+  generateFloatingRocksInArea(ctx, er.L, er.T, width, height,
+    er.brick, true, platStyle, tilePaint, 7);
 }
 
 /** GenerateSpeleothemsInArea（DU:1442-1564）。 */
@@ -3601,6 +3644,36 @@ export interface DualLayoutResult {
    *  一席=全座房/厅外框并集经 outerPotential Top/Bottom 钳制；EarlyDual TileClump/DropTrap
    *  抽样窗消费源）。styles 数组同序。普通世界（provider 未跑）恒 undefined=零扰动。 */
   progBounds?: Array<{ L: number; T: number; R: number; B: number }>;
+  /** ★IIIII109b：GenerateEarlyDungeonFeaturesInRoom 每房分派面载荷（cs:588-591 循环，
+   *  BiomeRugged 主流掷钟乳石/浮石 + Structured 窗柱 + 基类窗/FloodRoom——全 self-seed
+   *  除 rugged 外）。kind=DungeonRoomType（5=Rugged/6=Structured/3=LivingTree/其他=基类支）；
+   *  winOK=房间级 CanGenerateFeatureAt(data,this,window,x,y) 的**静态档**（StyleData 子类
+   *  覆写 Shimmer11/Beehive9 拒 Window + GenShape Hourglass2/Doughnut3 拒 Window；
+   *  基类/其余档恒 true）。winPlat=WindowPlatformItemTypes（item id 域,窗台平台样式掷）；
+   *  liquid=StyleData.LiquidType（>=0 时基类尾 FloodRoom）。 */
+  earlyRooms?: DualEarlyRoom[];
+}
+
+export interface DualEarlyRoom {
+  kind: number;
+  st: number;
+  seed: number;
+  L: number; T: number; R: number; B: number;
+  cx: number; cy: number;
+  opt: number; opw: number;
+  shape: number;
+  hr: number; vr: number;
+  liquid: number;
+  brick: number; bwall: number;
+  bPaint: number; bwPaint: number;
+  winG: number; winGC: number; winE: number;
+  /** WindowPlatformItemTypes 经 DerivedPlacementDetails 映射后的 **tileStyle 表**
+   *  （GetWindowPlatformStyle 主流掷=Next(len)→表项;空表不掷恒 -1）。 */
+  winPlatS: number[];
+  /** PlatformItemTypes（GetPlatformStyle 掷=rugged 浮石 platformStyle；消费端按 cs
+   *  DungeonGenerationStyleData.GetPlatformStyle 复刻：空表不掷、Next(len)→Derived.style）。 */
+  plat: number[];
+  winOK: boolean;
 }
 
 export interface DualLayoutOpts {
@@ -3633,6 +3706,15 @@ void roomGetBounding;
  * 由 DungeonPass.runDungeonPass 在 seedFlags.dualDungeons 下调用，替代 legacy 布局段；
  * 爬升入口走廊与全后置特征仍在 DungeonPass 共享壳内继续。
  */
+/** ★IIIII109b：窗台平台 item→DerivedPlacementDetails.tileStyle（Item.cs SetDefaults 逐项
+ *  提取：94=(19,0)/631=(19,1)/632=(19,2)/633=(19,3)/913=(19,5)/1384..1386=(19,6..8)/
+ *  2549=(19,18)/2629..2630=21+type−2627=(19,23..24)/3906=30+type−3903=(19,33)/
+ *  3908=(19,35)/4311=(19,42)/4416=(19,43)）。 */
+export const WINDOW_PLAT_ITEM_STYLE: Record<number, number> = {
+  94: 0, 631: 1, 632: 2, 633: 3, 913: 5, 1384: 6, 1385: 7, 1386: 8,
+  2549: 18, 2629: 23, 2630: 24, 3906: 33, 3908: 35, 4311: 42, 4416: 43,
+};
+
 export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): DualLayoutResult {
   const ddualK = opts.k ?? 0;                         // ★IIIII93b 参数化（前值恒 0=仅 dungeon#0）
   const st = ctx.st;
@@ -3744,10 +3826,74 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     cell.rooms.push({ L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B });
   }
   const scalar = Math.max(1.0, data.rooms.length / 20.0);   // DC.cs:381 双精度
+  // ★IIIII109b：窗台平台 item→DerivedPlacementDetails.tileStyle（Item.cs SetDefaults 逐项
+  //  提取：94=(19,0)/631=(19,1)/632=(19,2)/633=(19,3)/913=(19,5)/1384..1386=(19,6..8)/
+  //  2549=(19,18)/2629..2630=21+type−2627=(19,23..24)/3906=30+type−3903=(19,33)/
+  //  3908=(19,35)/4311=(19,42)/4416=(19,43)）。
+  // ★IIIII109b：WindowPlatformItemTypes 逐档静态表（DungeonGenerationStyles.cs :75/:116/:156/
+  //  :196/:239/:281/:322/:363/:403/:444/:486/:526/:568/:610/:650；Style0=GenVars.windowPlatformItemTypes
+  //  [1386/1385/1384 by theme]——GenVars.cs 装配,defaultStyleProject 已携带）。
+  const windowPlatformItemsFor = (styId: number, defPrj: DungeonStyleData): number[] => {
+    if (styId === 0) return defPrj.PlatformItemTypes;
+    switch (styId) {
+      case 1: return [94, 4416];
+      case 2: return [3908];
+      case 3: return [4311];
+      case 4: return [631];
+      case 5: return [913];
+      case 6: return [633];
+      case 7: return [2549];
+      case 8: return [632];
+      case 9: return [2630];
+      case 10: return [3906];
+      case 11: return [94];
+      case 12: return [94];
+      case 13: return [2629];
+      case 14: return [2629];
+      case 15: return [633];
+      default: return [94];
+    }
+  };
+  // ★IIIII109b：GenerateEarlyDungeonFeaturesInRoom 每房分派面载荷（cs:588-591 次序=data.rooms 序）。
+  //  window 玻璃/闭合/边墙与 WindowPlatformItemTypes 逐 cs DungeonGenerationStyles.cs 静态档转录；
+  //  winOK=StyleData 子类 CanGenerateFeatureAt(data,room,window,·) 静态判（Shimmer11/Beehive9 拒
+  //  Window;GenShape Hourglass2/Doughnut3 房级再拒）。doughnut 半径=InnerShape(CircleRoom) 原值
+  //  （消费端取 Max(1,r/2) 自除）。
+  const earlyRooms: DualEarlyRoom[] = data.rooms.map((rm) => {
+    const sty = rm.settings.style;
+    const gsCls = rm.settings as unknown as { shapeType?: number; innerShape?: RoomShape | null };
+    const shape = rm instanceof DGenShapeRoom ? (gsCls.shapeType ?? -1) : -1;
+    const innerCircle = (shape === GenShapeT.Doughnut && gsCls.innerShape instanceof CircleRoomShape)
+      ? gsCls.innerShape as CircleRoomShape : null;
+    let winOK = true;
+    if (rm instanceof DGenShapeRoom) {
+      if (shape === GenShapeT.Hourglass || shape === GenShapeT.Doughnut) winOK = false;   // GenShapeDungeonRoom.cs:43-51
+    } else if (rm instanceof DBiomeRoomBase) {
+      winOK = false;                                     // BiomeDungeonRoom 基类早特征空体（:40-42）
+    }
+    if (sty.Style === 9 || sty.Style === 11) winOK = false;   // Beehive/Shimmer StyleData 拒 DungeonWindow
+    return {
+      kind: rm.settings.roomType,
+      st: sty.Style,
+      seed: rm.settings.randomSeed,
+      L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B,
+      cx: rm.inner.centerX(), cy: rm.inner.centerY(),
+      opt: rm.settings.overridePaintTile, opw: rm.settings.overridePaintWall,
+      shape,
+      hr: innerCircle ? innerCircle.hRad : 0, vr: innerCircle ? innerCircle.vRad : 0,
+      liquid: sty.LiquidType,
+      brick: sty.BrickTileType, bwall: sty.BrickWallType,
+      bPaint: sty.TilePaintColor ?? -1, bwPaint: sty.WallPaintColor ?? -1,
+      winG: sty.WindowGlassWallType, winGC: sty.WindowClosedGlassWallType, winE: sty.WindowEdgeWallType,
+      winPlatS: windowPlatformItemsFor(sty.Style, defaultStyle).map((it) => WINDOW_PLAT_ITEM_STYLE[it] ?? -1),
+      plat: sty.PlatformItemTypes,
+      winOK,
+    } satisfies DualEarlyRoom;
+  });
   // ★IIIII106b：outerProgressionBounds 投影（provider 收口时 outerProgBounds 已由
   // calculateDungeonBounds 装配=styles 同序；空数组防御=legacy 回退面）
   const progBounds = (data.outerProgressionBounds ?? []).map((b2) => ({ L: b2.L, T: b2.T, R: b2.R, B: b2.B }));
-  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles, progBounds };
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles, progBounds, earlyRooms };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {

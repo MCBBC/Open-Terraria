@@ -958,6 +958,16 @@ export class Dart extends Entity {
     if (--this.life <= 0) {
       if (st?.rocket) this.rocketKill(game);
       else if (this.projId === 596) this.curse596Kill(game);   // ★批四 T1：Kill 爆（P.cs:73762-73794）
+      else if (this.projId === 811) {
+        // ★批五：811 Kill 尘（:74019-74027 共组 30×d5,同撞块口）
+        for (let n = 0; n < 30; n++) {
+          const d811k = game.spawnDust?.(this.x, this.y, this.w, this.h, 5, 0, 0, 100);
+          if (!d811k) break;
+          d811k.scale = 1.25 + Math.random();
+          d811k.vx *= 2; d811k.vy *= 2;
+        }
+        this.dead = true;
+      }
       else this.dead = true;
       return;
     }
@@ -1200,11 +1210,51 @@ export class Dart extends Entity {
         }
       }
     }
+    // ---- ★批五：811 BloodShot AI 段（AI_001 type==811 支 P.cs:57340-57367）----
+    //  首拍（localAI[0]==0 → age===0）：Item17 音已由表 sfx 承载 + 8×d5 四向爆发
+    //  （vel=NextFloatDirection()*π 全向单位×2 + norm(v)×3、scale1.5、fadeIn1.7、
+    //  pos=Center :57344-57356）；每拍轨迹尘 2×d5（vel=v/4+proj.v/2=proj.v×3/4、
+    //  scale1.2、pos=Center+rand×v×2 :57358-57364）；α−20/拍由表 fade:20 承载。
+    if (this.projId === 811) {
+      if (this.age === 0) {
+        for (let i = 0; i < 8; i++) {
+          const d811 = game.spawnDust?.(this.cx, this.cy, 0, 0, 5, this.vx, this.vy, 100);
+          if (!d811) break;
+          const a811 = Math.random() * Math.PI * 2;      // NextFloatDirection()*π 全向
+          const nl811 = Math.hypot(this.vx, this.vy) || 1;
+          d811.vx = Math.cos(a811) * 2 + (this.vx / nl811) * 3;
+          d811.vy = Math.sin(a811) * 2 + (this.vy / nl811) * 3;
+          d811.scale = 1.5;
+          d811.fadeIn = 1.7;
+          d811.x = this.cx; d811.y = this.cy;
+        }
+      }
+      for (let i = 0; i < 2; i++) {
+        const d811b = game.spawnDust?.(this.cx, this.cy, 0, 0, 5, this.vx, this.vy, 100);
+        if (!d811b) break;
+        d811b.vx = this.vx / 4 + this.vx / 2;            // obj10.velocity = v/4 + velocity/2
+        d811b.vy = this.vy / 4 + this.vy / 2;
+        d811b.scale = 1.2;
+        const j811 = Math.random() * 2;                  // NextFloat()×2
+        d811b.x = this.cx + this.vx * j811;              // pos = Center + rand×velocity×2
+        d811b.y = this.cy + this.vy * j811;
+      }
+    }
     // ---- 撞实心块 ----
     const tx = Math.floor(this.cx / TILE);
     const ty = Math.floor(this.cy / TILE);
     if (game.world.store.isSolid(tx, ty)) {
       if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
+      // ★批五：811 Kill 尘（Projectile.Kill 共组 :74019-74027——30×d5 scale1.25+rand、
+      //  vel×2；811/814 共组。814 本仓 tileCollide=false 不撞墙,唯 811 走本口）
+      if (this.projId === 811) {
+        for (let n = 0; n < 30; n++) {
+          const d811k = game.spawnDust?.(this.x, this.y, this.w, this.h, 5, 0, 0, 100);
+          if (!d811k) break;
+          d811k.scale = 1.25 + Math.random();
+          d811k.vx *= 2; d811k.vy *= 2;
+        }
+      }
       if (st.noTile) { /* 300 圣锤/299 暗影焰 tileCollide=false:穿墙 */ }
       else {
         // ---- 31 沙球落档（Projectile.Kill aiStyle==10 :79117-79310 等价）：落地放沙 ----
@@ -1238,10 +1288,11 @@ export class Dart extends Entity {
     // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义) ----
     if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
       if (st.rocket) { this.rocketKill(game); return; }
+      // ★批五：noPlayerHit 族碰玩家无伤穿透不消亡（596 原版 NewProjectile damage=0
+      //  + penetrate=-1,P.cs:21229/:6452-6461——曾折中为接触即死+爆,伤害面错位:
+      //  飞行 baseDamage 冒充了本应为 0 的接触伤;稳定伤害面只保留寿终 curse596Kill）
+      if (st.noPlayerHit) return;
       hitPlayer(this, game, this.damage);
-      // ★批四 T1：596 接触死亡同样收口 Kill 爆（原版 Kill 面随死亡必走；此处二次
-      //  hitPlayer 被免疫帧拦截不双扣）
-      if (this.projId === 596) { this.curse596Kill(game); return; }
       this.dead = true;
     }
     // ---- 75 HappyBomb 近身引信（AI_016 :47809-47820）：距存活玩家中心 <40px
@@ -1644,6 +1695,9 @@ interface DartStyle {
   accel?: { from: number; to: number; mul: number };   // 加速段(ai0 区间内每更新 ×mul)
   updates?: number;                      // extraUpdates(每 tick 完整更新次数)
   noTile?: boolean;                      // tileCollide=false 穿墙
+  /** ★批五：碰玩家无伤穿透不消亡（NewProjectile damage=0 的原版形态——
+   *  596 沙漠幽焰飞行伤=0+penetrate=-1,唯一伤害面=寿终 Kill 爆 :73762） */
+  noPlayerHit?: boolean;
   life?: number;
   trail?: { color: string; count: number; life?: number; grav?: number };
   sfx?: string[];                        // 发射音(原版 wav)
@@ -1675,8 +1729,17 @@ const DART_STYLE: Record<number, DartStyle> = {
   129: { w: 14, h: 14, rot: 'align90', life: 300, trail: { color: '#E8C85A', count: 1 }, fallback: '#F0D060' },
   // 596 沙漠幽焰（533 沙漠精灵 :21104-21135）：8×8 aiStyle 107 慢速追踪、timeLeft 180、
   //  ignoreWater；出生零速由 homing 拉向玩家（AI_107 收敛近似）
-  596: { w: 8, h: 8, rot: 'align90', life: 180, home: { range: 2400, spd: 5, lerp: 40 },
+  596: { w: 8, h: 8, rot: 'align90', life: 180, noTile: true, noPlayerHit: true,
+    home: { range: 2400, spd: 5, lerp: 40 },
     trail: { color: '#8A5AE8', count: 2 }, fallback: '#9A6AF0' },
+  // 811 BloodShot（Projectile.cs:7927-7939，NPC.cs:51435 血月骑手 619/620 射弹，
+  // 速15/伤35）：10×10 aiStyle1 hostile α=255 penetrate=-1 tileCollide=true；
+  // fade:20=AI 每拍 α−20（:57347-57351）→13 拍渐显；timeLeft 无行→600；
+  // 尘面见 dartStep 811 AI 段+双 Kill 口（:57340-57367/:74019-74027）；
+  // DrawProjDirect 轨迹支白化 Lerp(:30847 ai[0] 恒 0=恒白 1.0) 未建模登记。
+  // fallback 近似血红目测（PNG 主色未取,811 撞墙即消极少见兜底态,登记）
+  811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 600,
+    sfx: ['Item_17'], fallback: '#8A3038' },
   // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
   55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
   // 81/82 木箭/燃烧箭(战士族 num172 :59797/:59821):10×10,重力 0.07@20(:54009);发射音 Item5

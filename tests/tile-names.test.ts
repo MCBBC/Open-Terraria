@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs';
 import { languageManager } from '../src/i18n/LanguageManager';
 import { Lang } from '../src/i18n/Lang';
 
-// 真实 zh-Hans 包注入
+// 真实 zh-Hans 包注入 + culture 激活(tileName ②级 zh/en 分流按 activeCulture.name 判,
+// 未激活时 en 表劫持 zh 断言——2026-09-02 神圣种子撞名批)
 beforeAll(() => {
   const pack = JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8'));
   languageManager.loadPackJson(pack);
+  (languageManager as unknown as { activeCulture: unknown }).activeCulture =
+    { name: 'zh-Hans', legacyId: 1, displayNameKey: 'Language.Chinese' };
 });
 
 // 方块名解析链（1.4.4+ 原版语义：Tiles 分节为空，方块名 = 放置它的物品）
@@ -39,8 +42,21 @@ describe('方块名多语言解析（Lang.tileName）', () => {
   });
 
   it('世界生成专属块（树 5/宝石树 583）：id-maps 回退非空', () => {
-    // 测试环境未激活 culture（activeCulture=null）→ 第③级取 id-maps en
+    // culture=zh-Hans 已激活（见 beforeAll）→ 第②级取 zh id-map
     expect(Lang.tileName(5)).toBeTruthy();
     expect(Lang.tileName(583)).toBeTruthy();
+  });
+
+  // ★2026-09-02 优先级反转回归：sheet109 圣草的 UI 名不得被放置物品(vid369)的
+  //  「神圣种子」劫持——面板方块 place_v_109 曾与真种子同名，道具搜索里两个
+  //  「神圣种子」，用户拿块当种（行为日志两轮 use 全为 place_v_109）。
+  //  原版地图语义 = 方块名(神圣草)，放置物品名只做末位兜底。
+  it('★圣草 tile(109) 名=神圣草；place_v_109 面板块与真种子(vi_369)不同名', () => {
+    expect(Lang.tileName(109)).toBe('神圣草');
+    const block = Lang.itemNameByKey('place_v_109_hallowed_grass_block');
+    const seed = Lang.itemNameByKey('vi_369_HallowedSeeds');
+    expect(seed).toBe('神圣种子');
+    expect(block).not.toBe(seed);
+    expect(block).toBe('神圣草');
   });
 });

@@ -2120,6 +2120,15 @@ const ITEMS_1457_VALUE: Record<number, number> = {
   6188: 75000,  // 恢复之盾 sellPrice(0,1,50)（:47645）
   6189: 100000, // 秘术腰带 sellPrice(0,2)（:47652）
   6190: 350000, // 旧世界跑酷指南 sellPrice(0,7)（:47657）
+                // ★SetDefaults 6190 全貌（:47656-47660）：SetShopValues(rare10,
+                //   sellPrice(0,7)) + width/height 30×30 ——【无】useStyle/useTime/
+                //   useAnimation/accessory（非配饰!不在 ACC_STATS_1457 是对的）。
+                //   消费面 = ①右键 6190↔6195 快换（Game.swapParkourBookVisual,
+                //   Player.cs:31804-31808）②全物品栏在场授予 equipStats.
+                //   oldStyleParkour（RefreshMechanicalAccsFromItemType :12933-12936,
+                //   Player.ts F5③）③IsConsideredSameItemAsType(:47878-47884) →
+                //   ITEM_ONLY_NEED_ONE_OVERRIDE 已含两型。rare 走 vanilla-itemrare
+                //   （6190:10），width/height 仓内非放置物品无消费面不建字段。
   6191: 0,      // 小亲情桃 sellPrice()=0（:47662）
   6192: 0,      // 亲情桃 sellPrice()=0（:47667）
   6193: 400000, // 混沌弹筒（随机） sellPrice(0,8)（:47541 共享 case）

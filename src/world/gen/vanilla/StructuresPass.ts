@@ -10,6 +10,7 @@ import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
+import { genTileFrame } from './FinalCleanupPass';   // ★IIIII112 SquareTileFrame 3×3 TileFrame 等价
 import { idsByVanillaSheet } from './TileRunner';
 
 /** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
@@ -37,6 +38,7 @@ import { solidTile as _solidTileHB } from './HalfBrickPass';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
+const STAR_CLOUD = TILE_BY_KEY['v_718_star_cloud']!;   // ★IIIII113 eFI 岛主材质备选（cs:79215）
 /** ★SquareWallFrame 掷骰还原（2026-08-16 #23 云层债根因，同 DesertPass 机制）：
  *  CloudIsland/CloudLake 的墙 73 填充循环（cs:78968）每格 `wall=73; SquareWallFrame(i,j)`
  *  ——Framing.WallFrame(resetFrame=true) 对「有墙且非大幅墙」格掷 1 次 genRand.Next(0,3)
@@ -222,12 +224,30 @@ function sgisClearSkyAbove(st: TileStore, gs: GenState, x: number, topRow: numbe
 
 /** CloudIsland（cs:78618-79066）1:1：①云盘(189) → ②底缘雨云凸包 → ③土芯(云→土) →
  *  ④土面云斑 → ⑤墙 73 → ⑥岛面水池 → ⑦岛上方云 puff + 中心注水 */
+/** SquareTileFrame（cs:81470-81482）生成期等价：3×3 TileFrame（中心 resetFrame=true）。
+ *  ★IIIII112：x86 CloudIsland 族逐格写后都跟 SquareTileFrame——空域岛邻域无可杀/可重帧
+ *  内容（零掷零写）此前省略恒绿；errorWorld 深岛写进洞穴地形时，TileFrame 的
+ *  支撑校验会杀掉失去锚的洞饰（484 滚刺/165 钟乳石/187 堆）——JS 缺它 ⇒ 残 8 格。 */
+function sqTF(st: TileStore, rng: RNG, x: number, y: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      genTileFrame(st, rng, x + dx, y + dy);
+    }
+  }
+}
+
 function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
-  const tile = CLOUD;                                // num8 = 189（雨云只在凸包/puff 出现）
   let num = rng.int(100, 149);                       // Next(100,150)
   let num2 = num;
   let num3 = rng.int(20, 29);                        // Next(20,30)
   let b4 = ci, b5 = ci, b6 = cj, b7 = cj;            // bbox
+  // ★IIIII113（cs:79215=1457 :79186）：num8 头——eFI 世界先掷 Next(3)，==0 → 主材质
+  //   改 718 星云（①③④⑥ 全部随 num8 联动）。曾整缺 ⇒ ①cb 世界每体少耗 1 掷
+  //  （流自 body0 内部起整体前移 → 后续岛 x/y 全错位，#23 T0>189×2.5 万级主根）
+  //  ②1/3 岛体材质 189 vs x86 718（T718>0×6890 铁证）。普通世界门恒假零扰动。
+  //   Snow/Desert 变体（1458 :78292/:78728）无此头，勿外溢。
+  let tile = CLOUD;                                  // num8 = 189（雨云只在凸包/puff 出现）
+  if (gs.seedFlags.extraFloatingIslands && rng.int(0, 2) === 0) tile = STAR_CLOUD;
   let px = ci + 0.0, py = cj + 0.0;
   let vx = rng.int(-20, 20) * 0.2;
   while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
@@ -254,6 +274,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (y > b7) b7 = y;
         const ti = st.idx(x, y);
         st.flags[ti] = 1; st.type[ti] = tile;
+        sqTF(st, rng, x, y);                               // cs:152-153 SquareTileFrame
       }
     }
     px += vx; py += vy;
@@ -306,7 +327,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (y <= top) continue;
         const ti = st.idx(x, y);
         const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
-        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) st.type[ti] = T.DIRT;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) { st.type[ti] = T.DIRT; sqTF(st, rng, x, y); }   // cs:270-271
       }
     }
     px += vx; py += vy;
@@ -331,7 +352,7 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         for (let y = cy - cr; y <= cy + cr; y++) {
           if (y <= b6 || !st.inBounds(x, y)) continue;
           const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
-          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) st.type[st.idx(x, y)] = tile;   // 原版只写 type
+          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) { st.type[st.idx(x, y)] = tile; sqTF(st, rng, x, y); }   // 原版只写 type + STF（cs:321-323）
         }
       }
       cx += rng.int(cr, Math.floor(cr * 1.5) - 1);
@@ -365,22 +386,23 @@ function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: numb
         if (!st.inBounds(xx, y)) continue;
         if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
           const k = st.idx(xx, y);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y);
         }
         if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
           const k = st.idx(xx, y + 1);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y + 1);
         }
         if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
           && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
           const k = st.idx(xx, y + 2);
-          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1; sqTF(st, rng, xx, y + 2);
         }
       }
     }
     if (st.inBounds(x, y)) {
       if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;   // Next(5)
       st.liquidType[st.idx(x, y)] = 1;
+      sqTF(st, rng, x, y);                                 // cs:397-398 每列收尾 STF
     }
   }
   const puffs = rng.int(0, 3);                       // ⑦ 岛上方云 puff：Next(4)
@@ -628,7 +650,6 @@ function desertCloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj
 /** CloudLake（cs:79068-79419）1:1：①云盘 → ②底缘雨云凸包（无 InWorld 门）→
  *  ③湖盆挖除+灌水（阈值 top-2、Y 下限 0）→ ④墙 73 → ⑤湖面水 */
 function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
-  const tile = CLOUD;
   let num = rng.int(100, 149);
   let num2 = num;
   let num3 = rng.int(20, 29);
@@ -637,6 +658,10 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
   let vx = rng.int(-20, 20) * 0.2;
   while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
   let vy = rng.int(-20, -11) * 0.02;
+  // ★IIIII113（cs:79675=1457 :79646）：CloudLake 同款 num8 头——注意原文在 val2.Y
+  //  之后（与 CloudIsland 的 val 之前不同序），掷序照抄。eFI 门恒假世界零扰动。
+  let tile = CLOUD;
+  if (gs.seedFlags.extraFloatingIslands && rng.int(0, 2) === 0) tile = STAR_CLOUD;
   while (num > 0 && num3 > 0) {                      // ① 云盘（同 CloudIsland）
     num -= rng.int(0, 3);
     num3 -= 1;

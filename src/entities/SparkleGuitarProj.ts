@@ -47,6 +47,8 @@ import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
+import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
+import { ParticleOrchestraType } from '../net/syncModules';
 
 /** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
  *  （maxPenetrate==1 ∧ 无两旗）豁免此窗——但 856 usesLocalNPCImmunity=true ⇒ flag3
@@ -367,7 +369,12 @@ export class SparkleGuitarProj extends Entity {
     for (let i = 0; i < 6; i++) {                  // dust58 ×6 于本体盒（:72807-72809）
       game.spawnDust?.(this.x, this.y, this.w, this.h, 58, 0, 0, 150, null, 0.8);
     }
-    // gore16/StellarTune 编排不建模（渲染层接点=Game.onProjectileDeath 镜段,头注）
+    // ★2026-09-01 StellarTune(2) 编排接线（Projectile.Kill 856 段 :72825-72831,
+    //  clientOnly:true,invoker=owner）：5 粒 Gold/HotPink/Violet 星屑——producer 锚
+    //  缺登记消账（旧注"编排不建模"订正）。原版 clientOnly:true → 本仓 owner 权威
+    //  模拟广播补远端（34 型偏差口径,module8 枚举注同）。gore16 仍不在建模面。
+    stellarTuneFx(game, this.cx, this.cy);
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.StellarTune, this.cx, this.cy);
     const bw = 128, bh = 128;
     this.x = this.cx - bw / 2;                     // position = Center → 盒左上随 128 展开
     this.y = this.cy - bh / 2;

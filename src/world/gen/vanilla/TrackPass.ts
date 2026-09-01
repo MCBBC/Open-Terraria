@@ -600,6 +600,24 @@ export class TrackGenerator {
         }
       }
     }
+    // ★IIIII110b(涂装链)：ShouldTileSurvive 箱存活门(cs:64365→CheckTileBreakability2
+    //   cs:62986-63031)——BasicChest{21,467}/梳妆台 88 有货箱锚位=DestroyChest false→
+    //   ShouldTileSurvive true→击杀早退(尘掷/化石已照序执行,与原版同序;早退点在
+    //   SquareTileFrame 之前,箱帧不动)。xrayvision #097 (2500,769) T21>0×4 定罪：
+    //   轨巷清扫 KT 到有货金箱,x86 靠本门存活而 JS 曾整杀。空箱/不在表→可杀
+    //   (原版 DestroyChest true 侧随带 RemoveChest——ChestSink 登记面本巷不可达,备案)。
+    //   470/475(人偶/帽架 IsBreakable=TileEntity 面)生成期无实体不移植。
+    if (sheet === 21 || sheet === 467 || sheet === 88) {
+      const fyv = st.frameY[i]!;
+      if (sheet === 88) {
+        const dx = Math.trunc(fx / 18) % 3;
+        if (this.blockedChestAnchors.has((x - dx) * 16384 + (y - Math.trunc(fyv / 18)))) return;
+      } else {
+        let dx = Math.trunc(fx / 18);
+        while (dx > 1) dx -= 2;
+        if (this.blockedChestAnchors.has((x - dx) * 16384 + (y - Math.trunc(fyv / 18)))) return;
+      }
+    }
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
   }

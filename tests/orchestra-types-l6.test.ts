@@ -376,13 +376,19 @@ describe('杂项（Keybrand/GasTrap/Shimmer/TownSlime/Cattiva/RB 族/BestReforge
     expect(ls.particles.length).toBe(1);
     expect(ls.particles[0].opts.vx).toBe(16);
   });
-  it('HeroicisSetSpawnSound(64)=rainbow_boulder 音；PlayerVoiceOverrideSound(46)=hurt PlaySound 锚', () => {
+  it('HeroicisSetSpawnSound(64)=rainbow_boulder 音；PlayerVoiceOverrideSound(46)=变声字分派', () => {
     const he = mkGame();
     apply(he.g, ParticleOrchestraType.HeroicisSetSpawnSound, 100, 100);
     expect(he.wavs.some((w) => w.file === 'rainbow_boulder')).toBe(true);
+    // ★2026-09-01 变声字落账：uniqueInfo=voiceSlot 直通 player/PlayerVoice.hurtVoicePlan
+    // （Spawn_ :2870-2885 临时置 voiceOverride 后 PlayHurtSound 的仓内等价口）——
+    // 19 谁皮垫 → Item_16；3（DST 档未移植）→ 落 variant 缺省男声库
     const pv = mkGame();
-    apply(pv.g, ParticleOrchestraType.PlayerVoiceOverrideSound, 100, 100, 0, 0, 3);
-    expect(pv.ats.some((a) => a.name === 'hurt')).toBe(true);
+    apply(pv.g, ParticleOrchestraType.PlayerVoiceOverrideSound, 100, 100, 0, 0, 19);
+    expect(pv.wavs.some((w) => w.file === 'Item_16')).toBe(true);
+    const pv2 = mkGame();
+    apply(pv2.g, ParticleOrchestraType.PlayerVoiceOverrideSound, 100, 100, 0, 0, 3);
+    expect(pv2.wavs.some((w) => /^Player_Hit_/.test(w.file))).toBe(true);
   });
   it('FormatC(72)：金芒双层+d213 金尘十二', () => {
     const { g, particles, dusts } = mkGame();

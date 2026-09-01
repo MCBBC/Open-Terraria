@@ -1684,7 +1684,10 @@ const CHECK2XX_TYPES = new Set([104, 105, 207, 320, 337, 349, 356, 378, 410, 456
 //   tools/_iii116ab 对拍隔离本批消费者面的四通道贡献，缺省零开销）。
 const C2X2_MAIN_GROUP = (__swProcessEnv ?? {}).SW_I99D_NODISP === '1'
   ? new Set<number>([94])
-  : new Set<number>([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
+  : new Set<number>([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622,
+    484]);   // ★IIIII112：+484 RollingCactus（cs:83677-83684 case 132 组→Check2x2）——
+             // errorWorld 深岛写把 2×2 滚刺组右列覆成云后，TileFrame 触发整组杀；
+             // JS 缺派发曾残 (1775,550-551) 2 格。
 function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);
