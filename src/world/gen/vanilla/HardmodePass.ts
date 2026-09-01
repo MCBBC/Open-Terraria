@@ -9,10 +9,11 @@
 //   · 微型世界回填窗口（cs:31961）：RandomWorldPoint(top,…,left) 下界双态
 //     ws>100 ? ws−100 : 20（RandomWorldPoint cs:27374-27382：top,y ∈ Next(top,maxY-190)）
 // - GERunner（57: cs:76923-77214 / 56: 76385-76683）：带宽 Next(200,250)×(w/4200)
-//   (:76961)、菱形 |dx|+|dy|<带宽/2×(1±1.5% 逐格抖动 Next(-10,11)*0.015)(:77003)、
-//   初速 Next(-10,11)*0.1(:76969-76970)、速度扰动 Next(-10,11)*0.05 钳 speedX±1(:77199)、
-//   出界终止；★Skyblock.lowTiles 早退门（cs:76941-76943，空岛低格档整段跳过、零掷骰）；
-//   三套完整转化表（神圣 good / 猩红 crimson / 腐化 else——墙 id 直存、tile 走 sheet 反查）
+//   (:76961)、初速 Next(-10,11)*0.1(:76969-76970)、菱形 |dx|+|dy|<带宽/2×(1±1.5% 逐格
+//   抖动 Next(-10,11)*0.015)(:77003)、速度扰动 Next(-10,11)*0.05 钳 speedX±1(:77199)、
+//   出界终止(:77208)；★Skyblock.lowTiles 早退门（cs:76941-76943，空岛低格档整段跳过、
+//   零掷骰）；三套转化表（神圣 :77007+ / 猩红 :77076+ / 腐化 :77136+——墙 id 直存、
+//   tile 走 sheet 反查）
 // - createBrickBoxForWallOfFlesh（NPC.cs 57:79852-79866 / 56:79837-79866）：击杀点半径
 //   w/2/16+1 的魔金砖 140（猩红世界 347 猩红砖）空心盒 + 盒内岩浆清零
 // - StartHardmode（57: cs:31990-32008 / 56: 31866-31880）：早退门 netMode==1 ||
@@ -28,7 +29,7 @@
 // 是会话随机态、逐位不可复现。本实现统一用 new RNG(world.seed) 新流（同种子世界 V 带
 // 位置自洽，与原版逐位不同，结构性等价——RNG 面近似登记在先，勿误记为对拍债）。
 import { RNG } from '../../../core/rng';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS } from '../../../data/tiles';
 import type { World } from '../../World';
 import type { TileStore } from '../../TileStore';
 import { vanSolidOrSloped } from './GenSolid';
@@ -94,7 +95,7 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
         const wl = st.wall[ii];
         const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? -1;
         if (good) {
-          // 神圣（cs:76496-76539）：墙 63/65/66/68/69/81→70、216→219、187→222、3/83→28
+          // 神圣（57 :77007-77024 / 56 76496-…）：墙 63/65/66/68/69/81→70、216→219、187→222、3/83→28
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68 || wl === 69 || wl === 81) st.setWall(m, n, 70);
           else if (wl === 216) st.setWall(m, n, 219);
           else if (wl === 187) st.setWall(m, n, 222);
@@ -113,7 +114,7 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
           else if (sh === 396) st.setTile(m, n, id(403));
           else if (sh === 397) st.setTile(m, n, id(402));
         } else if (crimson) {
-          // 猩红（cs:76541-76603）：墙 63/65/66/68→81、216→218、187→221
+          // 猩红（57 :77076-77135 / 56 76541-…）：墙 63/65/66/68→81、216→218、187→221
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 81);
           else if (wl === 216) st.setWall(m, n, 218);
           else if (wl === 187) st.setWall(m, n, 221);
@@ -129,7 +130,7 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
           else if (sh === 396) st.setTile(m, n, id(401));
           else if (sh === 397) st.setTile(m, n, id(399));
         } else {
-          // 腐化（cs:76605-76667）：墙 63/65/66/68→69、216→217、187→220
+          // 腐化（57 :77136-77195 / 56 76605-…）：墙 63/65/66/68→69、216→217、187→220
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 69);
           else if (wl === 216) st.setWall(m, n, 217);
           else if (wl === 187) st.setWall(m, n, 220);
@@ -147,8 +148,8 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
         }
       }
     }
-    // 速度积分 + 扰动（cs:77190-77206）：val2.X += Next(-10,11)*0.05，钳 speedX±1
-    // （★F1：同样补 +10 端点）
+    // 速度积分 + 扰动（57 :77197-77212 / 56 76669-76682）：val2.X += Next(-10,11)*0.05，
+    // 钳 speedX±1（★F1：同样补 +10 端点）
     vx += dx; vy += dy;
     dx += rng.nextIntRange(-10, 11) * 0.05;
     if (dx > speedX + 1) dx = speedX + 1;

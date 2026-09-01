@@ -165,6 +165,8 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
   //   （含 dgUR 私有房/廊种子实例），缺省维持旧主实例口径以便复现旧档数字。
   const CAPTURE_ALL = process.env.SW_I104_ALL === '1';
   let tagsArr: number[] | null = CAPTURE_ALL ? [] : null;
+  let stkArr: string[] | null = CAPTURE_ALL ? [] : null;
+  const stkLimit = Number(process.env.SW_I104_STKLIMIT ?? Infinity);
   const kStart = Number(process.env.SW_I104_KS ?? -1);
   const kWid = Number(process.env.SW_I104_KW ?? 0);
   const stacks: string[] = [];
@@ -175,6 +177,13 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
       vals.push(v);
       rollHash = ((rollHash ^ (v >>> 0)) * 16777619) >>> 0;
       const n2 = vals.length;
+      if (CAPTURE_ALL && stkArr && n2 - 1 < (stkLimit ?? Infinity)) {
+        const fr = (new Error().stack ?? '').split('\n')
+          .map((l) => l.trim().replace(/^at\s+/, ''))
+          .filter((l) => /src[\\/]/.test(l))
+          .slice(0, 6);
+        stkArr.push(fr.join('|'));
+      }
       if (kStart >= 0 && kWid > 0 && n2 - 1 >= kStart && n2 - 1 < kStart + kWid) {
         const fr = (new Error().stack ?? '').split('\n')
           .map((l) => l.trim().replace(/^at\s+/, ''))
@@ -243,6 +252,10 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
       console.log(`[split] total-all=${tagsArr.length} main=${m2} private=${tagsArr.length - m2}`);
     }
     if (stacks.length) writeFileSync(`${OUTDIR}/js-stacks.txt`, stacks.join('\n---\n') + '\n');
+    if (stkArr) {
+      writeFileSync(`${OUTDIR}/js-stkall.txt`, stkArr.map((s2, i2) => `${i2 + 1}|${vals[i2]}|${tagsArr?.[i2] ?? '-'}|${s2}`).join('\n') + '\n');
+      console.log(`[stkall] ${stkArr.length} rows`);
+    }
     writeFileSync(`${OUTDIR}/stage-info.json`, JSON.stringify(stageInfo, null, 1));
     writeFileSync(`${OUTDIR}/layout-trace.json`, JSON.stringify(layoutTrace));
     console.log(`[mc] pass-total main samples=${vals.length} final-rh=${(rollHash >>> 0).toString(16)}`);

@@ -330,7 +330,9 @@ export interface DualLayoutCtx {
   jsBoundUpd(x0: number, y0: number, x1: number, y1: number): void;
   /** 房间视图接收器（下游 roomPlatformsDoors/dgBasicChests 桥接）。legacy=true 才带终值。 */
   roomSink(rm: { x: number; y: number; ex: number; ey: number; strength: number; generated: boolean;
-    innerL: number; innerR: number; innerT: number; innerB: number }): void;
+    innerL: number; innerR: number; innerT: number; innerB: number;
+    /** ★IIIII105c：settings.style.Style（BasicChests/BiomeChests_DualDungeons 座分派） */
+    st?: number }): void;
   snap(name: string): void;
   /** tier 判定上下文（runDualDungeonLayout 装配） */
   tierCtx?: TierCtx | null;
@@ -3565,6 +3567,10 @@ export interface DualLayoutResult {
   featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
   scalar?: number;
   styles?: import('./DungeonStyles1457').DungeonStyleData[];
+  /** ★IIIII105c：BiomeChests_DualDungeons 桶（cs DungeonGlobalBiomeChests.cs:34-76）——
+   *  键=settings.StyleData.Style；biome=BiomeDungeonRoom 实例（每样式至多一席,后写覆盖）；
+   *  rooms=其余房 InnerBounds 列表（Next(list.Count) 采样+Remove）。 */
+  chestPlan?: Record<number, { biome?: { L: number; T: number; R: number; B: number } | null; rooms: Array<{ L: number; T: number; R: number; B: number }> }>;
 }
 
 export interface DualLayoutOpts {
@@ -3679,6 +3685,7 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
       ey: legacy ? rm.endPosV.y : rm.centerY(),
       strength: legacy ? Math.max(1, Math.trunc(rm.strengthVal)) : Math.max(1, Math.min(rm.inner.width, rm.inner.height)),
       generated: true,
+      st: rm.settings.style.Style,
       innerL: rm.inner.L, innerR: rm.inner.R, innerT: rm.inner.T, innerB: rm.inner.B,
     });
   }
@@ -3691,8 +3698,20 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     gen: hh.generated, st: hh.settings.style.Style,
     L: hh.bounds.L, T: hh.bounds.T, R: hh.bounds.R, B: hh.bounds.B,
   }));
+  // ★IIIII105c：BiomeChests_DualDungeons 桶（array2/array 同构）
+  const chestPlan: Record<number, { biome?: { L: number; T: number; R: number; B: number } | null; rooms: Array<{ L: number; T: number; R: number; B: number }> }> =
+    Object.create(null);
+  for (const rm of data.rooms) {
+    const key = rm.settings.style.Style;
+    const cell = chestPlan[key] ??= { biome: null as null | { L: number; T: number; R: number; B: number }, rooms: [] };
+    if (rm instanceof DBiomeRoomBase) {
+      cell.biome = { L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B };
+      continue;
+    }
+    cell.rooms.push({ L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B });
+  }
   const scalar = Math.max(1.0, data.rooms.length / 20.0);   // DC.cs:381 双精度
-  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, scalar, styles };
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {

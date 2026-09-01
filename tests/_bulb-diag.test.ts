@@ -30,12 +30,22 @@ describe('bulb regrow funnel', () => {
       }
     }
     const proto = WorldEvolution.prototype as unknown as Record<string, (...a: never[]) => unknown>;
-    const funnel = { gg: 0, g60: 0, emptyMinJ: 0, bulbGate1: 0, hardMech: 0, roll60: 0, scan150: 0, pairFlat: 0, placed: 0 };
+    const funnel = { up: 0, ov: 0, und: 0, s60: 0, gg: 0, pairFlat: 0, placed: 0 };
+    const origUnd = proto.undergroundTile;
+    proto.undergroundTile = function (this: unknown, ...a: unknown[]) {
+      funnel.und++;
+      const i = a[0] as number, j = a[1] as number;
+      const self = this as { typeAt: (x: number, y: number) => number; active: (x: number, y: number) => boolean };
+      // 正域:sheetOf(内部 id)→vanilla sheet;另记 active 前后
+      const sheet = (self as unknown as { sheetOf: (t: number) => number }).sheetOf
+        ? (self as unknown as { sheetOf: (t: number) => number }).sheetOf(self.typeAt(i, j))
+        : self.typeAt(i, j);
+      if (sheet === 60) funnel.s60++;
+      return (origUnd as (...a: unknown[]) => unknown).apply(this, a as never);
+    };
     const origGG = proto.grassGrowth;
     proto.grassGrowth = function (this: unknown, ...a: unknown[]) {
       funnel.gg++;
-      const sheet = a[7] as number ?? -1;
-      void sheet;
       return (origGG as (...a: unknown[]) => unknown).apply(this, a as never);
     };
     // 更细:直接包 grassGrowth 不够,包 fitJunglePairFlat
@@ -63,13 +73,23 @@ describe('bulb regrow funnel', () => {
     let call = 0;
     Math.random = () => (call++ % 7) < 2 ? 0.001 : 0.9;
     try {
-      for (let t = 0; t < 20000; t++) {
+      for (let t = 0; t < 6000; t++) {
         evo.update();
         if (hasBulb()) { funnel.placed++; break; }
       }
     } finally {
       Math.random = orig;
     }
-    console.log('funnel:', JSON.stringify(funnel), 'bulb:', hasBulb());
+    // 直接全图扫:地下带内 sheet60 丛林草总量(与采样命中对照)
+    let grassTotal = 0, grassInBand = 0;
+    for (let y = 10; y < st.h - 10; y++) for (let x = 10; x < st.w - 10; x++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const d = TILE_DEFS[st.type[i]];
+      if (d?.vanilla?.sheet !== 60) continue;
+      grassTotal++;
+      if (y >= yTop && y < st.h - 200) grassInBand++;
+    }
+    console.log('funnel:', JSON.stringify(funnel), 'bulb:', hasBulb(), 'grassTotal:', grassTotal, 'grassInBand:', grassInBand, 'yTop:', yTop);
   }, 300000);
 });

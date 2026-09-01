@@ -22,7 +22,7 @@ import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle } from './DungeonStyles1457';
 import type { PotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII93b 双座 pb 面
 // ★IIIII105b：风格家具 item 表（ItemID.Sets.DerivedPlacementDetails 提取域）
-import { ITEM_PLACE } from './DungeonStyleItems';
+import { ITEM_PLACE, STYLE_LIGHTCHEST_TABLES } from './DungeonStyleItems';   // ★105c 灯/箱/生物箱表
 // ★LLL 批（2026-08-25）：placeTrap0 补 noTraps 巨石非实心窗（WorldGen.SetBoulderSolidity
 //   经 GenSolid 全局表翻转,dgSolid/genSolidType 即见）——与 TrapsPass 同源单实现。
 import { setBoulderSolidity } from './TrapsPass';
@@ -274,6 +274,9 @@ class DBnd {
 interface DRoom {
   seed: number; x: number; y: number; start: boolean; generated: boolean;
   inner: DBnd; outer: DBnd; ex: number; ey: number; strength: number;
+  /** ★IIIII105c：房 StyleData.Style（GenerateDungeonRegularChest/BiomeChests_DualDungeons 消费）。
+   *  普通世界未标注=0 → legacy Default 支逐位同。 */
+  st?: number;
 }
 interface DHall {
   seed: number; generated: boolean; forceX: boolean; isEntrance: boolean;
@@ -320,6 +323,7 @@ export function runDungeonPass(
 ): void {
   // ★KKKKKKK 段级网格观察钩（诊断用，常态零开销）：globalThis.__dgSegWatch=(name,st)=>…
   const segWatch = (globalThis as { __dgSegWatch?: (name: string, s2: TileStore) => void }).__dgSegWatch;
+  DG_JUNGLE_CHEST_COUNT = 0;                              // ★105c：GenVars.JungleItemCount 每世界复位
   // ★IIIII93 DGP 镜像标记（x86 rig UpdateDungeonProgress 同位；__i97dgp 存在时生效）
   const dgpMark = (name: string): void => {
     const g = (globalThis as unknown as { __i97dgp?: Array<{ name: string; cum: number }>, __i97cum?: { n: number } }).__i97dgp;
@@ -3979,6 +3983,56 @@ const snap: SnapFn = (name) => {
     return out;
   };
   function dgBiomeChests(): void {
+    // ★IIIII105c：DualDungeon 臂=BiomeChests_DualDungeons（cs:30-77）整缺补移植——
+    //   组表 [Jungle8, 邪恶(4/5), Hallow6, Snow2, Desert3]（drunk 追加对侧邪恶）,
+    //   按【房样式】分桶受理：每样式优先 BiomeDungeonRoom×50 试,否则随机房
+    //   num3=30×count 次（Next(list.Count)+Remove）。GenerateDungeonBiomeChest
+    //   （DU.cs:291-323）：InnerBounds Lerp(rd×2)→CanGenerateFeatureInArea→
+    //   BiomeChestItemType 表(LootItemType<0 早退)→Locked 覆写 style。双座分别
+    //   各跑一遍；普通世界 gfChestPlan undefined → legacy 全图 bounds 掷法逐位同。
+    if (gfStyles.length > 0 && gfChestPlan !== undefined) {
+      const groups: number[] = [8, gs.crimson ? 5 : 4, 6, 2, 3];
+      if (gs.seedFlags.drunkWorld) groups.push(gs.crimson ? 4 : 5);
+      const tryRoom = (bnd: { L: number; T: number; R: number; B: number }, stId: number): boolean => {
+        const spec = STYLE_LIGHTCHEST_TABLES[stId];
+        if (spec === undefined) return false;
+        const cY = Math.trunc((bnd.T + bnd.B) / 2);          // Rectangle.Center.Y（正域=floor）
+        const num = Math.trunc(bnd.L + (bnd.R - bnd.L) * rd());
+        const num2 = Math.trunc(cY + (bnd.B - cY) * rd());
+        if (!featAreaOK(num, num2, 1)) return false;         // CanGenerateFeatureInArea(:296)
+        if (spec.BiomeChestLootItemType < 0) return false;   // num3==0 早退(:317-320)
+        let chestTileVid = 21, chestStyleV = 2;              // 缺省 21/2(:301-302)
+        if (spec.BiomeChestItemType >= 0) {
+          const pd = ipOf(spec.BiomeChestItemType);
+          if (pd.t >= 0) { chestTileVid = pd.t; chestStyleV = pd.s ?? 0; }
+        }
+        if (spec.LockedBiomeChestStyle >= 0) chestStyleV = spec.LockedBiomeChestStyle;   // locked=true
+        const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
+        return dgAddBuriedChest(num, num2, spec.BiomeChestLootItemType, chestStyleV, ctInternal);
+      };
+      for (const gsty of groups) {
+        const ent = gfChestPlan[gsty];
+        let flagG = false;
+        if (ent?.biome != null) {                            // array2[style]=BiomeDungeonRoom
+          let n50 = 50;
+          while (n50 > 0) {
+            n50--;
+            if (tryRoom(ent.biome!, gsty)) { flagG = true; break; }
+          }
+        }
+        if (!flagG && ent !== undefined && ent.rooms.length > 0) {
+          let n30c = 30 * ent.rooms.length;
+          while (n30c > 0 && ent.rooms.length > 0) {
+            n30c--;
+            const pick = ent.rooms[rn(ent.rooms.length)]!;
+            if (tryRoom(pick, gsty)) flagG = true;
+            ent.rooms.splice(ent.rooms.indexOf(pick), 1);    // Remove(pick)（试后除）
+            if (flagG) break;
+          }
+        }
+      }
+      return;
+    }
     // ★IIIII21（DungeonGlobalBiomeChests.cs:76-79/:88）：drunk → 箱组数 5→6，
     //   case5=对侧邪恶箱（crimson?24/1571:25/1569）。switch(i % num) 纯 drunk
     //   （num=6）与原版枚举一致；普通世界（num=5）i%5≡i 零扰动。
@@ -4013,11 +4067,71 @@ const snap: SnapFn = (name) => {
       }
     }
   }
+  /** ★IIIII105c：GetNextJungleChestItem（WG.cs:10146-10168）——计数器模 4 选基础品,
+   *  Next(15)==0→2292 else-if Next(20)==0→3017（Next(20) 仅在 Next(15)!=0 时耗）,
+   *  计数恒 ++。 */
+  function dgNextJungleChestItem(): number {
+    let result = 211;
+    switch (DG_JUNGLE_CHEST_COUNT % 4) {
+      case 1: result = 212; break;
+      case 2: result = 213; break;
+      case 3: result = 964; break;
+      default: result = 211; break;
+    }
+    if (rn(15) === 0) result = 2292;
+    else if (rn(20) === 0) result = 3017;
+    DG_JUNGLE_CHEST_COUNT++;
+    return result;
+  }
   function dgBasicChests(): void {
     // 对账插桩(dormant)：SW_DG_GC=1 时逐房/逐尝试记 lo/hi/num/num2（G 段流对拍用）
     const gcT = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
     let gcRm = 0;
     for (const rm of rooms) {
+      // ★IIIII105c：GenerateDungeonRegularChest 座分派（DU.cs:334-385）——room.style
+      //   非 Default（seat1 的 Snow2/Desert3/Hallow6/Temple10）走【case 表 + ChestItemTypes
+      //   表支】,不进 GetDungeonLootAndChestStyle（无 lootStyle 面）。gfStyles 空
+      //   （普通世界）或 st==0 → legacy 支逐位同。
+      if (gfStyles.length > 0 && (rm.st ?? 0) !== 0) {
+        const rmSt = rm.st ?? 0;
+        if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I137_CHESTS) {
+          const GC2 = ((globalThis as unknown as { __dgcF?: Record<string, number> }).__dgcF ??= {});
+          GC2[`st${rmSt}`] = (GC2[`st${rmSt}`] ?? 0) + 1;
+        }
+        const half = Math.trunc(rm.strength * 0.4);
+        const exI = Math.trunc(rm.ex), eyI = Math.trunc(rm.ey);
+        const L = exI - half, R = exI + half, C = eyI - half, Bt = eyI + half;   // InnerBounds: Left/Right/Center.Y/Bottom
+        for (let j = 0; j < 1000; j++) {
+          // num=(int)Lerp(L,R,rd)、num2=(int)Lerp(C,B,rd)
+          const num = Math.trunc(L + (R - L) * rd());
+          const num2 = Math.trunc(C + (Bt - C) * rd());
+          if (!featAreaOK(num, num2, 1)) continue;            // data.CanGenerateFeatureInArea(:339)
+          let itemType = -1, chestStyle = 2;
+          let chestTileVid = 21;                              // ushort chestTileType=21
+          switch (rmSt) {
+            case 8: case 9: case 14: itemType = dgNextJungleChestItem(); break;   // :353-357
+            case 10: itemType = 1293; break;                  // :358-360 Temple
+            case 13:                                          // :361-367（itemType=832/Next(3)→4281）
+              itemType = 832;
+              if (rn(3) === 0) itemType = 4281;
+              break;
+            default: break;                                   // flag=false 支（2/3/6/…）
+          }
+          // :369-374 `!flag && ChestItemTypes.Length != 0`——Style!=0 恒 !flag ⇒ 全部非
+          // Default 房都掷表支（含 case10/13/8 已设 itemType 者,C# 同构！）
+          const spec137 = STYLE_LIGHTCHEST_TABLES[rmSt];
+          if (spec137 !== undefined && spec137.ChestItemTypes !== null && spec137.ChestItemTypes.length !== 0) {
+            const it = spec137.ChestItemTypes[rn(spec137.ChestItemTypes.length)]!;
+            const pd = ipOf(it);
+            chestTileVid = pd.t >= 0 ? pd.t : 21;
+            chestStyle = pd.s ?? 0;
+          }
+          if (itemType === 0 && rn(2) === 0) break;           // :375-378 空手受领（本域不可达,照抄）
+          const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
+          if (dgAddBuriedChest(num, num2, itemType, chestStyle, ctInternal)) break;   // :379；style≠0 无 lootStyle++
+        }
+        continue;
+      }
       if (gcT) console.log(`GC-RM ${gcRm++} exI=${Math.trunc(rm.ex)} eyI=${Math.trunc(rm.ey)} half=${Math.trunc(rm.strength * 0.4)} str=${rm.strength} exf=${rm.ex.toFixed(6)} eyf=${rm.ey.toFixed(6)}`);
       // ★#32 终清（2026-08-18）：LegacyDungeonRoom.cs:86-87 原文
       //   `(int)endPosition.X - num`——**先 (int) 截断再 ± half**。曾以 double 的
@@ -4254,10 +4368,15 @@ const snap: SnapFn = (name) => {
     }
     const num5 = Math.trunc(28 * (w / 4200) * 1.0);
     let ncount = 0, num4 = 0;
+    // ★105c 取证仪（dormant）：SW_I137_LIGHTS=1 时漏斗计数——批后可整段移除。
+    const lgSt137 = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I137_LIGHTS;
+    const LF = lgSt137 ? ((globalThis as unknown as { __dglF?: Record<string, number> }).__dglF ??= {}) : null;
     while (num4 < num5) {
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(bounds.T, bounds.B - 1);
+      if (LF) { LF.attempt = (LF.attempt ?? 0) + 1;
+        if (!globalThis.__dglPrint) globalThis.__dglPrint = [bounds.L, bounds.T, bounds.R, bounds.B]; }
       // ★IIIII105c：Lights 全域谓词座面化（IsConsideredDungeonWall/Tile 消费
       //   CurrentDungeonGenVars 合并表，DU.cs:1929-1950/:1844-1869）——seat1 的
       //   Snow71/Desert187/Hallow28/Temple87 族墙此前被静态集整门拒斥=G→I 窗
@@ -4275,6 +4394,7 @@ const snap: SnapFn = (name) => {
           if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && gfIsBkDT(typAt(x, cy - 1))
             && featOK(x, cy, 0)
             && ((entExists && entBounds.contains(x, cy)) || gfIsDW(wallAt(x, cy))))) continue;
+          if (LF) LF.cand = (LF.cand ?? 0) + 1;
           let near = false;
           outer5:
           for (let a = x - 15; a < x + 15; a++) {
@@ -4345,50 +4465,70 @@ const snap: SnapFn = (name) => {
             }
           }
           if (placed) break;
-          // ★R11-D2（2026-08-24）：灯笼支补 Next(3) 主流掷（DungeonGlobalLights.cs:128
-          //  ——`genRand.Next(3) == 0 && wall >= 94 && wall <= 105`，**Next(3) 在 && 左侧
-          //  恒掷**：Default style（普通世界唯一档）每次进入灯笼段必耗 1 掷,与锚定成败
-          //  无关——故掷点在锚定预检**之前**。命中且墙∈[94,105]（变体墙）→ GOTHIC
-          //  灯笼 53 覆写三档查表值。曾缺 → 每盏灯笼少 1 颗主流掷,dungeon 段尾起全链流位移。
-          const gothicRoll = rn(3);
-          // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 42 两格）
-          const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
-          // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
-          // 勿读静态 TILE_DEFS.solid（dungeonI 转写债根因之一）
-          const aboveSolid = genSolidType(typAt(x, cy - 1));
-          // nactive()（active&&!inActive）——MMMM 批：致动柱格不可挂灯笼（Place1x2Top :46705）
-          const abvInact = inW(x, cy - 1, 0) && ((st.wire[st.idx(x, cy - 1)] >>> 5) & 1) !== 0;
-          if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !abvInact && !DG_SOLID_TOP.has(aboveSheet)
-            && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
-            if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
-            // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]；
-            // ★R11-D2：gothic 命中（1/3 × 变体墙）→ 53 覆写（cs:128-132 在三档之后）
-            const wl = wallAt(x, cy);
-            const lStyle = (gothicRoll === 0 && wl >= 94 && wl <= 105) ? 53
-              : wl === wallVariants[1] ? lantern[1] : wl === wallVariants[2] ? lantern[2] : lantern[0];
-            if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(`MARK|LLNT|${x},${cy}|s=${lStyle}`);
-            chTile(st.idx(x, cy), LANTERN, false);
-            chTile(st.idx(x, cy + 1), LANTERN, false);
-            // Place1x2Top 帧式（:46711-46717）：frameY=style*36（下格 +18）、frameX=0（亮档；
-            // 灭档 frameX=18 由 dgSwitch 2/3 掷写）。★此前不写帧=残留砖帧,样式全丢
-            st.frameY[st.idx(x, cy)] = lStyle * 36;
-            st.frameY[st.idx(x, cy + 1)] = lStyle * 36 + 18;
-            st.frameX[st.idx(x, cy)] = 0;
-            st.frameX[st.idx(x, cy + 1)] = 0;
-            {
-              const ev = (globalThis as { __swDgDecor?: Array<unknown> }).__swDgDecor;
-              if (ev) ev.push({ k: 'L', n4: num4, x, y: cy, s: lStyle });
+          // 灯笼支（DungeonGlobalLights.cs:104-135）★IIIII105c 座面化：
+          //   GetStyleForWall=null∨LanternItemTypes==null ⇒ 整支不进且**不 break**
+          //   （上扫继续——本表全部风格档 Lantern 非 null,该分支目前不可达,照抄）。
+          //   Default 支（null∨Style==0∨len==0）：变体三档 ladder→Next(3)&&墙94-105
+          //   GOTHIC 53 覆写（★R11-D2：Next(3) 在锚定预检前恒耗）；表支：
+          //   items[Next(len)]→Derived（tileType+tileStyle）直进 Place1x2Top，
+          //   无 Next(3)、无变体 ladder。成功判定 type==num10 ⇔ 预检通过即落型。
+          const lwl = wallAt(x, cy);
+          const lSty = gfStyles.length > 0 ? gfStyleForWall(lwl) : (gfIsDW(lwl) ? DG_DEFAULT_STUB : null);
+          const lantT = lSty !== null && lSty.Lch !== undefined ? lSty.Lch.LanternItemTypes : undefined;
+          // 外层门（cs:112）：null ∨ LanternItemTypes != null 才进两臂（否则不置不破）
+          if (lSty === null || (lSty.Lch !== undefined && lantT !== null)) {
+            const isDefArm = lSty === null || lSty.Style === 0
+              || (lantT as number[]).length === 0;
+            if (LF) LF.lanArm = (LF.lanArm ?? 0) + 1;
+            const gothicRoll = isDefArm ? rn(3) : -1;         // Next(3) 仅 Default 臂（cs:128）
+            // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 两格）
+            const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
+            // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
+            // 勿读静态 TILE_DEFS.solid（dungeonI 转写债根因之一）
+            const aboveSolid = genSolidType(typAt(x, cy - 1));
+            // nactive()（active&&!inActive）——MMMM 批：致动柱格不可挂灯笼（Place1x2Top :46705）
+            const abvInact = inW(x, cy - 1, 0) && ((st.wire[st.idx(x, cy - 1)] >>> 5) & 1) !== 0;
+            if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !abvInact && !DG_SOLID_TOP.has(aboveSheet)
+              && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
+              if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
+              let lNum10 = 42, lStyle: number;
+              if (!isDefArm) {
+                const lItem = (lantT as number[])[rn((lantT as number[]).length)]!;
+                const pd = ipOf(lItem);
+                lNum10 = pd.t >= 0 ? pd.t : -1;               // 表支无 Next(3)/无 ladder
+                lStyle = pd.s ?? 0;
+              } else {
+                // Default：变体三档（Lights :109-118）+ GOTHIC 覆写（cs:128-132）
+                lStyle = (gothicRoll === 0 && lwl >= 94 && lwl <= 105) ? 53
+                  : lwl === wallVariants[1] ? lantern[1] : lwl === wallVariants[2] ? lantern[2] : lantern[0];
+              }
+              if (lNum10 >= 0) {
+                const ltInternal = TILE_INTERNAL_BY_SHEET.get(lNum10) ?? LANTERN;
+                if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(`MARK|LLNT|${x},${cy}|s=${lStyle}`);
+                chTile(st.idx(x, cy), ltInternal, false);
+                chTile(st.idx(x, cy + 1), ltInternal, false);
+                // Place1x2Top 帧式（:46711-46717）：frameY=style*36（下格 +18）、frameX=0
+                st.frameY[st.idx(x, cy)] = lStyle * 36;
+                st.frameY[st.idx(x, cy + 1)] = lStyle * 36 + 18;
+                st.frameX[st.idx(x, cy)] = 0;
+                st.frameX[st.idx(x, cy + 1)] = 0;
+                {
+                  const ev = (globalThis as { __swDgDecor?: Array<unknown> }).__swDgDecor;
+                  if (ev) ev.push({ k: 'L', n4: num4, x, y: cy, s: lStyle });
+                }
+                placed = true; ncount = 0; num4++;
+                dgSwitch(x, cy);
+              }
             }
-            placed = true; ncount = 0; num4++;
-            dgSwitch(x, cy);
+            break;                                            // 两臂同以 break 终结上扫（:131/:134）
           }
-          break;                                              // 灯笼尝试后必 break（:131）
         }
       }
       if (ncount > 1000) { num4++; ncount = 0; }
     }
+    if (lgSt137) console.log(`LGST attempt=${LF!.attempt} outerDW=${LF!.outerDW ?? 0} cand=${LF!.cand ?? 0} lanArm=${LF!.lanArm ?? 0} num4=${num4} n5=${num5} bounds=${bounds.L},${bounds.T},${bounds.R},${bounds.B}`);
   }
-  function placeChand(x: number, y: number): boolean {
+  function placeChand(x: number, y: number, styleOverride?: number): boolean {
     for (let a = x - 1; a < x + 2; a++) {
       for (let b = y; b < y + 3; b++) {
         if (!inW(a, b, 0) || actAt(a, b) !== 0) return false;
@@ -4406,8 +4546,10 @@ const snap: SnapFn = (name) => {
     // 页列 num2=108*(style/36)（27-29 无分页=0）、行基 num3=style*54（分页修正同式）；
     // 三列 fx=num2+{0,18,36}、三行 fy=num3+{0,18,36}。★此前不写帧=残留砖帧
     //（53 档：num2=108、num3=53*54-54*1*37=864——分页修正式对 53 同构,公式通用）
+    // ★IIIII105c：styleOverride——表支（ChandelierItemTypes→Derived.placeStyle）直传；
+    // 缺省=旧 Default 支内部推导（GOTHIC?53 : 27+theme），普通世界逐位同。
     const wl = wallAt(x, y);
-    const style = (wl >= 94 && wl <= 105) ? 53 : 27 + theme;
+    const style = styleOverride ?? ((wl >= 94 && wl <= 105) ? 53 : 27 + theme);
     const n2 = Math.floor(style / 36) * 108;
     let n3 = style * 54;
     if (n2 >= 108) n3 -= 54 * Math.floor(n2 / 108) * 37;
@@ -4428,8 +4570,8 @@ const snap: SnapFn = (name) => {
       const b = y + ri(3, 20);
       const sgInW = inW(a, b, 0) && inW(a, b + 1, 0);
       const sgAct = sgInW && actAt(a, b) === 0 && actAt(a, b + 1) === 0;
-      const sgL = sgAct && inW(a - 1, b, 0) && isDT(typAt(a - 1, b));
-      const sgR = sgL && inW(a + 1, b, 0) && isDT(typAt(a + 1, b));
+      const sgL = sgAct && inW(a - 1, b, 0) && gfIsBkDT(typAt(a - 1, b));   // ★105c 座面化
+      const sgR = sgL && inW(a + 1, b, 0) && gfIsBkDT(typAt(a + 1, b));
       const sgH = sgR && canHitLocal(a, b, x, y);
       if (swTr) console.log(`DG SW i=${i} x=${x} y=${y} a=${a} b=${b} inW=${sgInW ? 1 : 0} act=${sgAct ? 1 : 0} dtL=${sgL ? 1 : 0} dtR=${sgR ? 1 : 0} hit=${sgH ? 1 : 0} tL=${inW(a - 1, b, 0) ? TILE_DEFS[typAt(a - 1, b)]?.vanilla?.sheet ?? -1 : -1} tR=${inW(a + 1, b, 0) ? TILE_DEFS[typAt(a + 1, b)]?.vanilla?.sheet ?? -1 : -1} aL=${inW(a - 1, b, 0) ? actAt(a - 1, b) : -1} aR=${inW(a + 1, b, 0) ? actAt(a + 1, b) : -1}`);
       if (!sgInW) continue;
@@ -4439,7 +4581,7 @@ const snap: SnapFn = (name) => {
       if (!sgH) continue;
       const anchor = (dgSolid(a - 1, b) && typAt(a - 1, b) !== DOOR)
         || (dgSolid(a + 1, b) && typAt(a + 1, b) !== DOOR) || dgSolid(a, b + 1);
-      if (anchor && isDW(wallAt(a, b)) && (isDT(typAt(a - 1, b)) || isDT(typAt(a + 1, b)))) {
+      if (anchor && gfIsDW(wallAt(a, b)) && (gfIsBkDT(typAt(a - 1, b)) || gfIsBkDT(typAt(a + 1, b)))) {   // ★105c
         if (actAt(a, b) === 0) {
           const si = st.idx(a, b);
           st.flags[si] = 1; st.type[si] = DSWITCH;
@@ -5020,6 +5162,8 @@ const snap: SnapFn = (name) => {
   const gfFeatHalls: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
   let gfFeatScalar = 1.0;
   let gfStyles: import('./DungeonStyles1457').DungeonStyleData[] = [];
+  /** ★IIIII105c：BiomeChests_DualDungeons 桶（provider chestPlan 桥,普通世界恒 undefined） */
+  let gfChestPlan: NonNullable<import('./DungeonDualLayout').DualLayoutResult['chestPlan']> | undefined;
   const _I132M = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I132_MARK;
   const emit132 = (ln: string): void => {
     if (!_I132M) return;
@@ -5424,7 +5568,7 @@ const snap: SnapFn = (name) => {
     //   槽=孤儿条目,vanilla 同构,HellFortPass.place3x2HF TTTT 同款先例)。本仓曾漏挂此
     //   支 → 全部地牢梳妆台不进 chest sink（首个实证=x86 CHEST slot24 3237,759 t88
     //   fx2538 于 JS 掉辖,IIIII101e §②首裂点）。
-    if (t === DRESSER) {
+    if (t === DRESSER && process.env.SW_102C_DRESSER !== '0') {   // ★A/B 开关：0=回退为无挂号旧行为(drunk 归因实验)
       const sink = chests as SparseChestSink;
       if (findLiveChest(sink, x - 1, y - 1) !== null) flag2 = false;   // 同位重占→拒置
       else registerChest(sink, { x: x - 1, y: y - 1, items: [], locked: false });
@@ -6211,6 +6355,7 @@ const snap: SnapFn = (name) => {
           seed: 0, x: rmv.x, y: rmv.y, start: false, generated: true,
           inner: new DBnd(w, h), outer: new DBnd(w, h),
           ex: rmv.ex, ey: rmv.ey, strength: rmv.strength,
+          st: rmv.st ?? 0,                                    // ★105c：房样式透传
         };
         view.inner.set(rmv.innerL, rmv.innerT, rmv.innerR, rmv.innerB);
         view.outer.set(Math.max(10, rmv.innerL - 8), Math.max(10, rmv.innerT - 8), Math.min(w - 10, rmv.innerR + 8), Math.min(h - 10, rmv.innerB + 8));
@@ -6240,6 +6385,12 @@ const snap: SnapFn = (name) => {
       };
       for (const s0 of res.styles) addT(s0);
       _gfSeatDTSet = tset;   // IIII105b：座面 tile 集基建保留（Books 窗口接刀用,当前无消费者）
+    }
+    gfChestPlan = res.chestPlan;                            // ★105c：生物箱桶
+    if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I137_CHESTS) {
+      const hist137: Record<string, number> = {};
+      for (const [kk2, vv2] of Object.entries(res.chestPlan ?? {})) hist137[kk2] = vv2.rooms.length;
+      console.log(`BCPLAN k=${instIdx} rooms=${JSON.stringify(hist137)} keys=${Object.keys(res.chestPlan ?? {}).join(',')}`);
     }
     for (const fr of res.featRooms ?? []) gfFeatRooms.push(fr);
     for (const fh of res.featHalls ?? []) gfFeatHalls.push(fh);
@@ -6507,6 +6658,26 @@ export function flipFurn(st: TileStore, cx: number, floorY: number, tile: number
     }
   }
 }
+
+/** ★IIIII105c：GenVars.JungleItemCount 镜像（WG.cs:10146 GetNextJungleChestItem）——
+ *  计数跨双座共享不分座（C# GenVars 静态面）；runDungeonPass 头重置=每世界一次。 */
+let DG_JUNGLE_CHEST_COUNT = 0;
+
+/** ★IIIII105c：Default 样式存根=GetCurrentDungeonStyle()（DC.cs :683-733）：Style0、
+ *  item 表全【空数组非 null】。gfStyles 未装配时 Lights 候选判定的展开面 ——与旧
+ *  isDW 门下 chGate/lantern 默认臂逐位同径（空数组→len==0 分支）。 */
+const DG_DEFAULT_STUB = {
+  Style: 0,
+  Lch: {
+    ChestItemTypes: [] as number[],
+    ChandelierItemTypes: [] as number[],
+    LanternItemTypes: [] as number[],
+    LockedBiomeChestType: -1,
+    LockedBiomeChestStyle: -1,
+    BiomeChestItemType: -1,
+    BiomeChestLootItemType: -1,
+  },
+};
 
 /** 墙饰(画/骨/挂毯):顶行=topY,锚点左上;须净空 */
 function placeWallArt(st: TileStore, x: number, y: number, tile: number, style: number): void {

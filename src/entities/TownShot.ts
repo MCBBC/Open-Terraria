@@ -151,8 +151,10 @@ export class TownShot extends Entity {
     this.drawScale = def?.scale ?? 1;
     if (this.lifeOverride !== undefined) this.life = this.lifeOverride;
     this.age0 = this.life;
-    // 589 五列变体:原版出生 ai[1]=rand5(NPC.cs:54953 末参),发射端未传时本地补
-    if (projId === 589 && (opts?.ai1 === undefined)) this.ai1 = Math.floor(Math.random() * 5);
+    // ★对抗修复批③ B-F10b：589 五列变体由发射端显式传 ai1（NPC.cs:55067 三元末支
+    // 第 11 参 Next(5)；原 .ai1 未传时本地 Math.random() 补掷已删——构造器级直呼
+    // 脱离实例注入面/确定性口径，且战斗路径全批禁 Math.random 直呼约定）。
+    // 缺省 0（首列），显式传入语义收敛到唯一随机源 shootAt。
   }
 
   private noGrav = false;

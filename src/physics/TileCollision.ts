@@ -29,17 +29,20 @@ export interface Body {
   stepUp?: boolean;
   /** StepUp holdsMatching（Collision.StepUp 第 8 参）：true 时允许把站台面
    *  （tileSolidTop 顶行：平台/桌子/铁砧/笼子…）当落脚格抬升——玩家传 controlUp
-   *  （Player.cs:23258/:27753），NPC 恒 true（NPC.cs:54382 flag22，飞行态除外）。
-   *  specialChecksMode==1 的 IgnoredByNpcStepUp 排除集（14/469/18/16/134）由
-   *  stepUpNpc=true 启用 */
+   *  （Player.cs:23258/:27753）。★对抗修复批③2026-09-01（NPC.cs:54513-54527）：
+   *  城镇 NPC 该参【不是】恒 true——原版传的是每拍计算的 flag22（家平线门：
+   *  homeTileY*16−32 > position.Y ⇔ 本体高于家线 32px+ 时 false→holds=false,
+   *  不再踏站台面）；TownNPC.fixedUpdate 每 tick 按 flag22 写本字段，其余族仍恒 true。 */
   stepUpHolds?: boolean;
   stepUpNpc?: boolean;
   /** StepDown 触发门。原版两处均为 == 精确等值（NPC.cs:54374 velocity.Y==0、
    *  Player.cs:23252 velocity.Y==gravity）——语义 = 仅"贴地行走"吸附,空中实体不吸附。
    *  本仓 NPC 族重力在碰撞【前】累加（贴地时 vy=GRAVITY≠0）,故 NPC 门取语义等价的
    *  onGround；玩家取原版字面 vy===GRAVITY（'gravity'）。
-   *  'never' = 恒不吸附：AI_007 TownCritter（NPC.cs:54373 flag22 恒 true——homeTileY=-1
-   *  使 StepDown 分支永不可达）专用档,2026-08-19。
+   *  'never' = 恒不吸附：AI_007 的 !flag22 门取反形（NPC.cs:54518 `!flag22 && vy==0`
+   *  才调 Collision.StepDown——flag22 为真〔本体不低于「家平线−32px」〕时不吸附；
+   *  TownCritter 族 homeTileY=-1 ⇒ flag22 恒真 ⇒ 即本档,2026-08-19；★对抗修复批③
+   *  起城镇 NPC 全体由 TownNPC.fixedUpdate 按 flag22 三态写本字段）。
    *  ★曾用 vy>=0 宽门：低空飞行小动物（萤火虫/蝴蝶平飞 vy≥0）脚下 7~17px 有落面
    *  即被瞬移按压 → "怪力按地+闪现"周期循环（飞行 AI 抬升后再次触发） */
   stepDownGate?: 'grounded' | 'gravity' | 'never';
@@ -216,8 +219,29 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
       if (span && b.y + b.h > span[0]) {
         // 原版拦截前提（:2406/:2426）：上一位置【完全】在该格一侧（贴面接近）才拦；
         // 身体已横向跨在格上（上坡爬升中段,脚沉在斜面下）不拦——交给 slopeCollide
-        // 抬升,否则上坡会被每帧推回卡死
-        if (dir > 0 ? oldX + b.w > tx * TILE + 0.01 : oldX < (tx + 1) * TILE - 0.01) continue;
+        // 抬升,否则上坡会被每帧推回卡死。
+        // ★2026-09-01 穿门定罪收窄：跨格豁免此前对【全部】图格生效 → 普通整块
+        //   （slope0 非半砖,如闭合门 door_closed/箱柜架体）只要身体在进入该列前
+        //   就已横向跨在其上,此后逐子步全部放行 = 整体穿墙。实锤两案：
+        //   ① 荆棘旋刃 38×38 盒心落玩家中心(Projectile.cs:1154-1163 width/height=38),
+        //     贴脸对关闭门掷出时出生盒右缘越门柱内 9px → 全程 hw=false 直穿;
+        //   ② 斜下轨迹以行未重叠姿态先入柱、再下行压入门带 → 同理跨格态永拦失效。
+        //   修法：跨格态仅对坡(slope≠0)/半砖(half)维持放行(其几何由 slopeCollide
+        //   对角贴合接管);普通整块改为【止步不回拉】——抵消本子步横移冻结在移前位,
+        //   不做整身回钳（嵌深任意大时回钳=瞬移,走滑下坡接平地的脚线沉降帧会被拽）。
+        //   与原版可观测结果一致(vanilla TileCollision :2355 目标盒相交 + Vector3 跨格
+        //   双支全假时同样无推离,但 vanilla 弹幕 Update 逐帧原速复位,玩家盒 20 宽中心
+        //   出膛不会跨进邻柱;本仓旋刃族盒尺寸放大后必须引擎层兜底)。closeDoor 有
+        //   EmptyTile 占格拒关门(Door.ts blocked 回调),关门压人不由此触发。
+        const jw = st.idx(tx, ty);
+        const wasAcross = dir > 0 ? oldX + b.w > tx * TILE + 0.01 : oldX < (tx + 1) * TILE - 0.01;
+        if (wasAcross) {
+          if (st.slope[jw] !== 0 || st.half[jw]) continue; // 坡/半砖跨格态:原放行语义不变
+          b.x -= dx;                                       // 整块跨格态:止步(移前位),零回拉
+          b.vx = 0;
+          hitX = true;
+          break;
+        }
         // hoik 坡链放行（:2412/:2432）：身后格是配套坡面（同向坡链中段）→ 不拦。
         // ★原版为 TileCollision 形参（默认 false），仅钻洞弹幕 AI 显式传 true，
         //   普通实体碰撞恒不可达此支。曾无条件启用 → 天花板坡邻接实心格被永久
@@ -686,7 +710,13 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     //   （那需要无 wasGround 门；飞虫 wasGround 恒 false 本就不吸附）
     if (gate === 'never') { /* no StepDown */ }
     else if (gate === 'gravity' ? b.vy === GRAVITY : (wasGround && b.vy >= 0)) applyStepDown(b, world);
-    applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
+    // ★对抗修复批③2026-09-01 D-F3（cs:54525-54527）：原版 AI_007 的 StepUp 整个
+    // 包在 `if (velocity.Y >= 0f)` 里——上升帧（跳跃首 tick / 击退上抛）不探台面,
+    // 杜绝半空中贴身探测到 16.1px 内落脚格被瞬移抬升的"怪力上吸"。玩家侧原版同形
+    // （Player.cs:23726/:28273 的 `(carpetFrame != -1 || velocity.Y >= gravity)` 门）;
+    // 其余走 moveAndCollide 的族——AI_107 ImprovedWalkers（NPC.cs:64911 无门）与
+    // 弹系步进体——本闸对它们只在 vy<0（离地上行）帧收紧探柱,贴地/下落行为零变化。
+    if (b.vy >= 0) applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
   }
   // ★WalkDownSlope 预备阶段（2026-09-01 全量移植,见 walkDownSlopePre 注释）：
   //   vanilla 玩家 SlopingCollision 前置/NPC UpdateCollision 首步同源。开启后

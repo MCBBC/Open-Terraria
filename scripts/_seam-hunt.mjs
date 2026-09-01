@@ -146,8 +146,8 @@ for (const z of zooms) {
     await sleep(tag === 'a' ? 50 : tag === 'c' ? 30 : 640);
     const clip = null; // 全幅截图（缝场景以相机为中心,不锚定出生点机器）
     await p.screenshot({ path: `${OUT}/z${z}-${tag}.png` });
-    // 数值行剖扫(机器跨度窗)+ 4x 放大裁剪导出
-    const scan = await p.evaluate((tag2) => {
+    // ★全宽行缝归因扫描:能量>18 的行 → 世界tile行 + 分类
+    const scan = await p.evaluate(() => {
       const g = window.__swGame;
       const cv = g.renderer?.canvas ?? document.querySelector('canvas');
       const c2 = document.createElement('canvas');
@@ -156,98 +156,24 @@ for (const z of zooms) {
       cx2.drawImage(cv, 0, 0);
       const d = cx2.getImageData(0, 0, cv.width, cv.height).data;
       const W = cv.width;
-      const x0 = 236, x1 = 312;
       const lum = (x, y) => { const i = (y * W + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
       const out = [];
-      for (let y = 80; y <= 150; y++) {
-        let s2 = 0, n = 0;
-        for (let x = x0; x <= x1; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
-        out.push([y, +(s2 / n).toFixed(1)]);
-      }
-      // furnace 列带精确定位缝行
-      const furnCol = [];
-      for (let y = 275; y <= 300; y++) {
-        let s2 = 0, n = 0;
-        for (let x = 244; x <= 306; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
-        furnCol.push([y, +(s2 / n).toFixed(1)]);
-      }
-      // 找 furnace 带内的异常行(局部极值):与邻行均值差>18
-      let seamY = -1, bestD = 0;
-      void seamY; void bestD;
-      // ★审视 283..289 行横向色带
-      const seamRow = [];
-      for (let yy = 283; yy <= 289; yy++) {
-        const band = [];
-        for (let x = 244; x <= 312; x += 8) {
-          const i = (yy * W + x) * 4;
-          band.push(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+      const camY = g.camera.y, z = g.camera.zoom, oy = Math.round(cv.height / 2);
+      for (let y = 3; y < cv.height - 3; y++) {
+        let e = 0, n = 0;
+        for (let x = 100; x < W - 100; x += 2) { e += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
+        e /= n;
+        if (e > 18) {
+          const worldY = (y - oy) / z + camY;
+          const tile = worldY / 16;
+          const kind = Math.abs(tile - Math.round(tile)) < 0.02 && Math.round(tile) % 16 === 0 ? 'CHUNKROW'
+            : Math.abs(tile - Math.round(tile)) < 0.05 ? 'TILEROW' : 'mid';
+          out.push(y + '(' + tile.toFixed(2) + 't,' + kind + ',' + e.toFixed(0) + ')');
         }
-        seamRow.push(`y${yy}[${band.join(' ')}]`);
-      }
-      // 机器区 4x 放大
-      const mc = document.createElement('canvas');
-      mc.width = 90 * 4; mc.height = 75 * 4;
-      const mcx = mc.getContext('2d');
-      mcx.imageSmoothingEnabled = false;
-      mcx.drawImage(cv, 262, 90, 90, 75, 0, 0, mc.width, mc.height);
-      return { rows: out, png: mc.toDataURL('image/png'), furnCol, seamRow };
-    }, tag);
-    await p.evaluate((durl, z, tg) => {
-      window.__seamCrops = window.__seamCrops ?? {};
-      window.__seamCrops[`${z}-${tg}`] = durl;
-    }, scan.png, z, tag);
-        const trace = await p.evaluate((holeRows) => {
-      const trAll = (globalThis.__SEAMTRACE ?? []);
-      const tr = trAll.slice(-2000);   // 最近帧(全量累积数万条,取尾)
-      const stats = { total: trAll.length, sheets: [...new Set(trAll.map((c) => c.sheet))].join(','),
-        ty383: JSON.stringify(trAll.filter((c) => c.ty === 383).slice(-12)),
-        ty382: JSON.stringify(trAll.filter((c) => c.ty === 382).slice(-6)) };
-      const out = [];
-      for (const hr of holeRows) {
-        const cover = tr.filter((c) => c.yda <= hr && c.ydb >= hr + 1 && c.dxa <= 312 && c.dxb >= 236);
-        out.push('row' + hr + ': ' + (cover.map((c) => '(' + c.tx + ',' + c.ty + ')s' + c.sheet + '[' + c.dxa + ',' + c.yda + ',' + c.dxb + ',' + c.ydb + ']').join(' ') || 'NO-COVER'));
-        const spans = cover.map((c) => [Math.max(236, c.dxa), Math.min(312, c.dxb)]).sort((a, b) => a[0] - b[0]);
-        let cur = spans.length ? spans[0][0] : undefined;
-        const gaps = [];
-        for (const [s0, s1] of spans) {
-          if (cur === undefined) { cur = s0; continue; }
-          if (s0 > cur + 0.5) gaps.push('[' + cur + ',' + s0 + ')');
-          cur = Math.max(cur, s1);
-        }
-        if (gaps.length) out.push('  xGAPS=' + gaps.join(','));
-      }
-      globalThis.__SEAMTRACE = [];
-      out.unshift('stats=' + JSON.stringify(stats));
-      return out;
-    }, [285, 286, 287]);
-    // ★三列带逐行扫:左臂/晶石/右臂 内部是否出现墙色行
-    const colScan = await p.evaluate(() => {
-      const g = window.__swGame;
-      const cv = g.renderer?.canvas ?? document.querySelector('canvas');
-      const c2 = document.createElement('canvas');
-      c2.width = cv.width; c2.height = cv.height;
-      const cx2 = c2.getContext('2d');
-      cx2.drawImage(cv, 0, 0);
-      const d = cx2.getImageData(0, 0, cv.width, cv.height).data;
-      const W = cv.width;
-      const cols = { armL: 288, crys: 300, armR: 322 };
-      const out = {};
-      for (const [k, cx3] of Object.entries(cols)) {
-        const rows = [];
-        for (let y = 92; y <= 158; y++) {
-          const i = (y * W + cx3) * 4;
-          rows.push(`${y}:${d[i]},${d[i + 1]},${d[i + 2]}`);
-        }
-        out[k] = rows;
       }
       return out;
     });
-    if (tag === 'b' || tag === 'c') {
-      const armR = colScan.armR.filter((r) => { const y = parseInt(r); return y >= 118 && y <= 132; });
-      console.log(`z${z}-${tag} armR=${JSON.stringify(armR)}`);
-    }
-    console.log(`z${z}-${tag} COLS=${JSON.stringify(colScan)}`);
-    console.log(`z${z}-${tag} TRACE=${JSON.stringify(trace)}`);
+    console.log(`z${z}-${tag} SEAMROWS=${JSON.stringify(scan)}`);
     console.log(`z${z}-${tag} furnCol=${JSON.stringify(scan.furnCol)} seamRowColors=${JSON.stringify(scan.seamRow)}`);
   }
 }
@@ -258,6 +184,50 @@ for (const [k, v] of Object.entries(crops)) {
   writeFileSync(`${OUT}/crop-${k}.png`, Buffer.from(v.split(',')[1], 'base64'));
 }
 console.log('CROPS:', Object.keys(crops).join(','));
+// ★墙页联合行验尸:chunk(199,23)底缘 vs chunk(199,24)顶缘 在墙页上的连续性
+const walljoint = await p.evaluate(() => {
+  const g = window.__swGame;
+  const key = (cx, cy) => (cx & 0xffff) | ((cy & 0xffff) << 16);
+  const p23 = g.chunks.chunks.get(key(199, 23));
+  const p24 = g.chunks.chunks.get(key(199, 24));
+  if (!p23 || !p24) return 'cells missing: ' + JSON.stringify([!!p23, !!p24]);
+  const grab = (cv, sx, sy) => {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const x = c.getContext('2d'); x.drawImage(cv, sx, sy, 256, 256, 0, 0, 256, 256);
+    return { d: x.getImageData(0, 0, 256, 256).data, c };
+  };
+  const a = grab(p23.wall, p23.sx, p23.sy);   // chunk23 墙 cell(底行 = 页 y+255)
+  const b = grab(p24.wall, p24.sx, p24.sy);   // chunk24 墙 cell(顶行 = 页 y+0)
+  const lum = (d, x, y) => { const i = (y * 256 + x) * 4; return 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]; };
+  const out = [];
+  // 跨联合的平均亮度剖面:chunk23 的 252..255 行 + chunk24 的 0..3 行
+  for (let r = 0; r < 8; r++) {
+    let s = 0, n = 0;
+    for (let x = 8; x < 248; x++) {
+      const v = r < 4 ? lum(a.d, x, 252 + r) : lum(b.d, x, r - 4);
+      s += v; n++;
+    }
+    const tag = r < 4 ? `c23行${252 + r}` : `c24行${r - 4}`;
+    out.push(tag + '=' + (s / n).toFixed(1));
+  }
+  // 逐 x 找联合处跳变>30 的列(连续墙面不应有)
+  const jumps = [];
+  for (let x = 8; x < 248; x++) {
+    const up = lum(a.d, x, 255), dn = lum(b.d, x, 0);
+    if (Math.abs(up - dn) > 30) jumps.push(x + ':' + up.toFixed(0) + '/' + dn.toFixed(0));
+  }
+  out.push('jumpCols=' + (jumps.length ? jumps.slice(0, 10).join(' ') : '无'));
+  // 同时导出联合处 1:1 拼接图(上格末4行+下格首4行 ×256宽,放大4x)
+  const mc = document.createElement('canvas');
+  mc.width = 256 * 2; mc.height = 8 * 4;
+  const mx = mc.getContext('2d');
+  mx.imageSmoothingEnabled = false;
+  mx.drawImage(a.c, 0, 252, 256, 4, 0, 0, 512, 16);
+  mx.drawImage(b.c, 0, 0, 256, 4, 0, 16, 512, 16);
+  window.__wallJoint = mc.toDataURL('image/png');
+  return { rows: out, pngLen: window.__wallJoint.length };
+});
+console.log('WALLJOINT:', JSON.stringify(walljoint).slice(0, 600));
 // ★光照层归因:同一设备行在 worldCanvas(乘光前) vs 主画布(乘光后) 的亮度差
 const lightDiff = await p.evaluate(() => {
   const g = window.__swGame;

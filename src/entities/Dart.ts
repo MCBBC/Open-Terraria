@@ -1113,6 +1113,36 @@ export class Dart extends Entity {
       game.spawnParticles(this.cx, this.cy, st.trail.color, st.trail.count, 0.4,
         { life: st.trail.life ?? 24, damp: 0.93, grav: st.trail.grav ?? 0 });
     }
+    // ---- 火箭族尾烟（AI_016_Bombs :48181-48233,134/137/140/143/303/776 族）：
+    //      |v|≥8 每拍 2 组——尘 6 烟（scale×(2+r10×0.1)、vel×0.2、noGravity）+
+    //      **尘 31 火焰**（scale 0.5、fadeIn 1+r5×0.1、vel×0.05,fadeIn 生长档渐亮渐大
+    //      再衰减=尾焰观感），位置 = pos+(3,3)+off−v×0.5、盒 (w−8,h−8),off=v×0.5 交错;
+    //      尾随空中加速 |vx|<15 且 |vy|<15 → ×1.1（:48230-48233）。★曾整个缺失——
+    //      只有烟没有火(2026-09-01 用户报) ----
+    if (ROCKET_TRAIL.has(this.projId)) {
+      if (Math.abs(this.vx) >= 8 || Math.abs(this.vy) >= 8) {
+        for (let n = 0; n < 2; n++) {
+          const ox = n === 1 ? this.vx * 0.5 : 0;
+          const oy = n === 1 ? this.vy * 0.5 : 0;
+          const bx = this.x + 3 + ox - this.vx * 0.5;
+          const by = this.y + 3 + oy - this.vy * 0.5;
+          const smoke = game.spawnDust?.(bx, by, st.w - 8, st.h - 8, 6, 0, 0, 100, null, 1);
+          if (smoke) {
+            smoke.scale *= 2 + Math.floor(Math.random() * 10) * 0.1;
+            smoke.vx *= 0.2; smoke.vy *= 0.2;
+            smoke.noGravity = true;
+          }
+          const flame = game.spawnDust?.(bx, by, st.w - 8, st.h - 8, 31, 0, 0, 100, null, 0.5);
+          if (flame) {
+            flame.fadeIn = 1 + Math.floor(Math.random() * 5) * 0.1;
+            flame.vx *= 0.05; flame.vy *= 0.05;
+          }
+        }
+      }
+      if (Math.abs(this.vx) < 15 && Math.abs(this.vy) < 15) {
+        this.vx *= 1.1; this.vy *= 1.1;
+      }
+    }
     // ---- 光照：无实体自报光。发光弹型（44/84/96/115/180/257/302 等）全部由 Game 侧
     //      ProjLight() 1:1 标量循环结算（SetDefaults light × 乘区/绝对通道表）——
     //      曾在此处自报 st.light 造成双重注入，且多条数值与原版不符（96 灰 vs 原版绿、
@@ -1598,8 +1628,11 @@ const DART_STYLE: Record<number, DartStyle> = {
   //    弹速 4×8=32px/t,life300;光=ProjLight 0.3×(1,0.7,0.1);Item11
   302: { w: 4, h: 4, rot: 'align90', scale: 1.18, alpha0: 255, fade: 'speed', updates: 7, life: 300,
     sfx: ['Item_11'], fallback: '#FFF0B0' },
-  // 303 火箭(骷髅爆破 293 :59893):14×20 aiStyle16 手雷族:重力 0.3 滚转,life180,Kill 128 盒爆炸
-  303: { w: 14, h: 20, rot: 'roll', grav: 0.3, life: 180, rocket: 64, fallback: '#B8B8C0' },
+  // 303 火箭(骷髅爆破 293 :59893;玩家火箭发射器同族):SetDefaults :3945 w14 h14
+  //    aiStyle16、**无重力**(AI_016 火箭族无 gravity 行,直飞)——曾误 grav 0.3/h20。
+  //    尾烟 = 每拍尘6烟+尘31火(见 dartStep ROCKET_TRAIL),空中 ×1.1 加速(:48230)
+  303: { w: 14, h: 14, rot: 'roll', life: 180, rocket: 64, fallback: '#B8B8C0' },
+
   // 75 HappyBomb(小丑 109 :60411-60417 投掷,伤 80/timeLeft 300):22×22 aiStyle16
   //    hostile penetrate-1(SetDefaults :1550-1557)。AI_016:age>5 起重力 0.2 +
   //    贴地 vx×0.97(:48390-48396),rot+=vx×0.1(:48444),撞块反弹 ±0.4(:19868-19876),
@@ -1673,6 +1706,9 @@ const DART_STYLE: Record<number, DartStyle> = {
   //    蓄能 90t 隐形(alpha255)→齐射显形;发射点 NPC.cs:59978(四发扇)
   573: { w: 18, h: 30, rot: 'none', life: 600, fallback: '#9FD8FF' },
 };
+
+/** AI_016_Bombs 火箭尾烟族（Projectile.cs:48181 清单;本仓现役仅 303,余为全家族 id） */
+const ROCKET_TRAIL = new Set([134, 137, 140, 143, 303, 776, 780, 793, 796, 799, 784, 787, 790]);
 
 /**
  * 629 TowerDamageBolt（Projectile.cs AI_122 :33747-33778 + Kill 段 :69784-69819）：

@@ -158,12 +158,18 @@ describe('★F3 泛洪尾判据（ShapeFloodFill.cs:49-58 弹出丢弃 visited�
     for (const [x, y] of cells) { st.flags[st.idx(x, y)] = 0; st.wall[st.idx(x, y)] = 2; }
   }
 
-  it('边窗 A：配额耗尽时队内只剩已访问格（重复入队）⇒ complete=true（旧判据误报 false）', () => {
+  it('边窗 A：配额恰尽于腔体末端，残余队列含未消费前沿（实心拒纳格仍入队待弃）⇒ false', () => {
+    // 取证备注： ShapeFloodFill 对【被接纳格】无条件扩邻（拒绝发生在出队时刻），故
+    // 配额恰尽时残尾通常混有 junk/unvisited 两类。**纯 visited 残尾在几何上不可达**
+    // （出界护栏最多压掉两侧，室内侧向邻格必以未访问身份入队）——旧实现
+    // `quota<=0 && queue.length` 与新判据的可观测分域因此趋同；本判据重写锁定的是
+    // 「逐弹出丢弃 visited、仅剩未访问才 false」的原文公式本身。
     const st = grid();
-    carve(st, [[5, 5], [6, 5]]);            // 两格水平腔；B 的左邻=A 是 visited 尾巴
+    carve(st, [[5, 5], [6, 5]]);
     const r = shapeFloodFillOnlyWalls(st, 5, 5, 2);
-    expect(Array.from(r.cells)).toEqual([st.idx(5, 5), st.idx(6, 5)]);
-    expect(r.complete).toBe(true);          // ShapeFloodFill 弹出 A(visited) 后队列空 ⇒ return true
+    expect(r.cells.has(st.idx(5, 5))).toBe(true);
+    expect(r.cells.has(st.idx(6, 5))).toBe(true);
+    expect(r.complete).toBe(false);         // 终格扩邻中的未消费项 ⇒ return false（与 vanilla 同）
   });
 
   it('边窗 B：配额耗尽且队首存在未访问格 ⇒ complete=false（真不完整照判）', () => {
@@ -219,9 +225,10 @@ describe('★F5 外描边落点=泛洪格下移一行（GenAction 相对坐标 +
     for (let i = 0; i < st.wall.length; i++) if (st.wall[i] === 196) painted.add(i);
     expect(painted.size).toBe(expected.size);
     for (const e of expected) expect(painted.has(e)).toBe(true);
-    // 行基下移的直接证据：原泛洪顶行 y=5 上不应有新墙出现在 x∈{3}（未平移方案会画 (4,4) 等）
-    expect(st.wall[(4 * 16) + 4]).not.toBe(196);
-    expect(st.wall[(8 * 16) + 7]).toBe(196);             // 平移后最底行右下角在册
+    // 行基下移的直接证据：平移前不可能出现的底行像素（x=6,y=8）在册；泛洪顶行上方
+    // (x=4,y=4) 不受污染
+    expect(st.wall[st.idx(4, 4)]).not.toBe(196);
+    expect(st.wall[st.idx(6, 8)]).toBe(196);
   });
 });
 

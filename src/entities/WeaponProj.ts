@@ -669,6 +669,9 @@ export class Boomerang extends Entity {
   /** SetDefaults extraUpdates（AI 每 tick 跑 1+extra 次,Update :15336-15339 while 循环） */
   private extra: number;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   /** timeLeft 缺省 3600（SetDefaults :526,aiStyle 3 族无型号覆写——旧值 900 是自造） */
   life = 3600;
   dead = false;
@@ -1000,7 +1003,7 @@ export class Boomerang extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
-      tileCollide: this.ai0 !== 1,
+      tileCollide: this.ai0 !== 1 && this.embedGrace <= 0,
       dropThrough: true,
     };
     moveAndCollide(body, game.world, lvx, lvy);
@@ -1008,16 +1011,24 @@ export class Boomerang extends Entity {
     // 【lastVelocity != velocity】(P.cs:18007)——slopeCollide 贴附等速度编辑同样计入。
     // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
     // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
+    // 始终采纳管线解析位置(含宽限期的相位穿越位移)
+    this.x = body.x; this.y = body.y;
+    if (this.embedGrace > 0) {
+        // 宽限期:保持投掷动量(tileCollide=false 在 body 构造中已设),纯位移无碰撞响应
+        this.embedGrace--; this.vx = lvx; this.vy = lvy; return;
+    }
     const chX = body.vx !== lvx, chY = body.vy !== lvy;
     // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改也计接触
     const stB = game.world.store;
     const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
       || this.y <= 0 || this.y + this.h >= stB.h * TILE;
     this.x = body.x; this.y = body.y;
-    // ★采纳管线后速度(1:1 终版):slope 粘滞辅助/落面钳制等编辑持久化到下一帧——
-    // 恢复 lastV 的写法会让贴坡场景每帧从同一初速重触撞=阶梯右下永动向上弹射(实录)。
-    // 反射分支显式引用 lvx/lvy,lastVelocity 语义不变。
-    this.vx = body.vx; this.vy = body.vy;
+    // ★接触路径恢复 lastV——反射公式(-lvx/-lvy)与 383 豁免(保留原速)、301 盾钳定
+    // 均以【入撞前速度】为基准;管线内贴坡编辑的持久化问题(右下弹射)归管线层修,
+    // 此处不越权(2026-09-01 终审撤回此前全局采纳尝试,其改变 383/301 等
+    // 豁免型在拦截轴上的瞬态读数)。slopeCollide 对纯坡面编辑的持久化由管线
+    // 下次调用的 body 视图自动携带。
+    this.vx = lvx; this.vy = lvy;
     let hitX = chX, hitY = chY;
     // ★贴坡滑行特例(同批,用户实录):WALL_BOUNCE 族 Y 接触落斜砖(slope1/2)顶带且仅
     // Y 变化——管线「整行最高面」拍平截停是分轴近似伪影(原版快速路径逐子步
@@ -1349,6 +1360,9 @@ export class SpearProj extends Entity {
   /** 型号伸缩参数 */
   private prm: [number, number, number];
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   dead = false;
   // ---- Chain Guillotines 481（AI_013 锚定族专支,R30 §1/§8.4——3012 断头台链刀）----
   /** ai[0]：-1 未初始化 / 0 出程 / 1 返回（Projectile.cs:24957-25120） */
@@ -1746,6 +1760,9 @@ export class AnchoredProj extends Entity {
   /** 23 出膛重力弧计数(ai[1]>=17 起 vy+=0.6/vx*=0.995) */
   private gravT = 0;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   /** 绘制期玩家中心快照（链条锚,fixedUpdate 续约） */
   private owner: { cx: number; cy: number } | null = null;
   /** 23 鱼叉链摆荡记忆（proj.localAI[1]/[2]——Main.cs 绘制层每帧更新,
@@ -2243,6 +2260,9 @@ export class CounterweightProj extends Entity {
   private rot = 0;
   private ctx: CounterweightCtx;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   /** 方向（-2 漂移/rotation 定号） */
   private dir = 1;
   dead = false;
@@ -2606,6 +2626,9 @@ export class YoyoProj extends Entity {
    *  ÷(1+meleeSpeed×3)/4（:64974）——旧"220+spd×10"自造公式已废,勿再启用 */
   private stringLen: number;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   private rot = 0;
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
   handX = 0;
@@ -3358,6 +3381,9 @@ export class FlailProj extends Entity {
   private texScale: number;
   private rotation = 0;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   /** 手部坐标（链条起点，每 tick 刷新） */
   handX = 0;
   handY = 0;
@@ -4049,6 +4075,9 @@ export class FlaironSpike extends Entity {
   private alpha = 255;
   private bounces = 0;
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   life = 120;
   dead = false;
 
@@ -5613,6 +5642,9 @@ export class DaybreakExplosionProj extends Entity {
   private frameCounter = 0;
   hidden = false;                        // frame≥5 → hide=true(:35113-35115)
   private hitCd = new HitCooldown();
+  /** 嵌出宽限帧：placeAtShootSpawn 后如与实体地形重叠，投掷侧置 N——期间管线解析
+   *  照常(防深入)、速度采纳照常，但跳过差分门→不反弹/不回收/不响声。 */
+  embedGrace = 0;
   /** SetDefaults 无 melee/ranged/magic 类旗（:8990-9001）→ Damage() 不掷暴击、
    *  不吃近战浸剂/parry——resolveProjClass 走 null 档,hitEnemies 内天然成立,
    *  勿给本类补 critChance 字段 */

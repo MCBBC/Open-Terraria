@@ -3048,6 +3048,9 @@ export class Renderer {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
+      // ★chunk 格线调试(?gutterdbg=1):每 chunk 边界画 1px 品红——旗标活性可视化
+      const gutterDbg = typeof location !== 'undefined'
+        && new URLSearchParams(location.search).has('gutterdbg');
       // ★低清档(#perf-gpulog):矩形直接在【低清整数空间】取整——zz=z·wK、中心
       // lw/lh。防缝前提 = 相邻块共享边同 round 值(整数设备边);若改套 ctx.scale(K),
       // 整数边被打回半像素,相邻矩形各自取整 → 逐 chunk 边界发丝缝(K=0.5 用户实报
@@ -3066,6 +3069,10 @@ export class Renderer {
           // chunk atlas 化(2026-08-18):pair.wall/tile 是 1024² atlas 页,
           // cell 用 sx/sy/256 源矩形取(9 参形式;曾 4 参整页误绘)
           const p = chunks.get(cx, cy);
+          if (gutterDbg) {
+            ctx.strokeStyle = 'magenta';
+            ctx.strokeRect(xd0 + 0.5, yd0 + 0.5, xd1 - xd0 - 1, yd1 - yd0 - 1);
+          }
           // ★无 +1（2026-08-19 归位缝终根因）：旧 `尺寸+1` 在整数矩形下不是重叠
           //   而是【拉伸】（256 源→321 目标，有效缩放 1.2539≠1.25）——块内内容逐行
           //   漂移，树干首行漂 0.6px 落设备行中间 → 最近邻采到上一行（marker 空行）
@@ -9922,7 +9929,8 @@ export class Renderer {
   /** AttackType2 施法光环（DrawNPCExtras :27697-27705）：Extra_51 竖 4 帧
    *  （帧 = frameCounter%48/12,本仓以态内 tick atkTick 代——同为逐 tick 推进），
    *  锚 = Bottom+(0,4)、origin=帧底中心，乘色 = MagicAuraColor 表（A=127 经
-   *  globalAlpha）；微光变体：160 BGR 互换 / 20→(90,20,210)（GetMagicAuraColor） */
+   *  globalAlpha）；微光变体：160 BGR 互换 / 20→(90,20,210) / 663→(255,0,77)
+   *  （GetMagicAuraColor 三连覆盖 NPC.cs:53468-53482，663 支 B-F9 补齐） */
   private drawTownMagicAura(ctx: CanvasRenderingContext2D, n: TownNPC): void {
     if (!this.atlas) return;
     const img = this.atlas.ensureVImage('vanilla/Extra_51.png');
@@ -9932,6 +9940,11 @@ export class Renderer {
     let [r, g, b] = TOWN_MAGIC_AURA_COLOR[n.vanillaId] ?? [255, 255, 255];
     if (n.vanillaId === 160 && n.shimmered) { const t = r; r = b; b = t; }
     if (n.vanillaId === 20 && n.shimmered) { r = 90; g = 20; b = 210; }
+    // ★对抗修复批③ B-F9：663 公主变体档缺支补齐——GetMagicAuraColor 三连覆盖
+    // （NPC.cs:53468-53482）原样照录：`type==663 && variation==1 → (255,0,77,A)`
+    // （A 走 globalAlpha 127 档）。AddLight 同色源无需动：TownNPC.lightRGB 的
+    // magicAuraColor() 已含 663 微光分支（NPC.cs:53329 字面同值）。
+    if (n.vanillaId === 663 && n.shimmered) { r = 255; g = 0; b = 77; }
     ctx.save();
     ctx.globalAlpha = 127 / 255;
     tintIconRect(ctx, { img, sx: 0, sy: fi * fh, sw: img.width, sh: fh },
@@ -12512,18 +12525,6 @@ export class Renderer {
           rot = aim + 0.785;
         } else {
           const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
-          // ★全量仪表:每次 useStyle5 绘制打一行完整变换数据(_swDrawDbg)
-          try {
-            if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
-              || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
-              console.log('[swDraw]', `vid=${vid} fw=${fw} fh=${fh}`,
-                `dp=[${dp[0]},${dp[1]}]`,
-                `pivot=(${(p.cx + p.facing * (-2)).toFixed(1)},${(p.y + p.h * 0.5 + dp[1]).toFixed(1)})`,
-                `rot=${rot.toFixed(3)} rad (${Math.round(rot * 180 / Math.PI)}°)`,
-                `drawO=(${drawOX},${drawOY})`,
-                `muzzle_local=(${(dp[0] + fw).toFixed(0)},${(dp[1] + fh * 0.5).toFixed(1)})`);
-            }
-          } catch { /* noop */ }
           // 非法杖（枪/弓/悠悠球等）：
           // ★金标审计修正(2026-09-01)：offY = h/2 + dp[1]（per-item dy 进未旋转 pivot，
           //   原版 vector11.Y→position.y）；drawOY = −fh/2（原版 origin7.y = H/2，

@@ -779,6 +779,45 @@ describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出
       Math.random = realRandom;
     }
   });
+
+  // ★对抗修复批③ B-F10b 覆盖面扩至 589/227：构造器级 Math.random 兜底删除后，
+  // 发射端逐型 ai1（圣诞 589 列变体 Next(5) / 画师 587 油漆色 Next(12)/6）必须
+  // 全程走 this.rng 注入面——本例双型各走一遍完整入态→发射链并验证零外泄。
+  it.each([
+    ['painter', 'TOWN_BOW 587 弹：ai1 ∈ {k/6} 且零 Math.random'],
+    ['santa_claus', 'TOWN_MELEE 589 弹：ai1=Next(5) 整数列且零 Math.random'],
+  ] as const)('%s：%s', (key, _label) => {
+    const eY = 96 * 16;
+    const wBox = { x: 104 * 16, y: eY, w: 18, h: 40 };
+    const { world, game, shots, npc } = entryHarness(key, [wBox]);
+    Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', wBox);
+    npc.rng = () => 0.0000001;
+    const realRandom = Math.random;
+    let strayCalls = 0;
+    Math.random = () => { strayCalls++; return 0.5; };
+    try {
+      expect(callEntry(npc, world, game)).toBe(true);
+      for (let t = 0; t < 40 && shots.length === 0; t++) {
+        npc.fixedUpdate(1 / 60, game);
+      }
+      expect(shots.length).toBeGreaterThanOrEqual(1);
+      const shot = shots[0];
+      if (key === 'painter') {
+        expect(shot.projId).toBe(587);
+        expect(Number.isInteger((shot.ai1 ?? 0) * 6)).toBe(true);
+        expect(shot.ai1).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(shot.projId).toBe(589);
+        expect(Number.isInteger(shot.ai1 ?? -1)).toBe(true);
+        expect(shot.ai1).toBeGreaterThanOrEqual(0);
+        expect(shot.ai1).toBeLessThanOrEqual(4);
+      }
+      expect(strayCalls).toBe(0);              // ai1 补掷不再借道 Math.random
+    } finally {
+      Math.random = realRandom;
+    }
+  });
 });
 
 // =====================================================================

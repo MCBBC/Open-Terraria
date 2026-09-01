@@ -340,7 +340,7 @@ import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
-  ITEM_TRANSFER_PLAYER_TO_CHEST_BITS, type SlotArray } from '../stats/QuickStacking';
+  ITEM_TRANSFER_PLAYER_TO_CHEST_BITS } from '../stats/QuickStacking';
 import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
@@ -11672,7 +11672,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   tip-reach 公式(仍近似)→**v5 同源直算**(终,readback 因冷却期扫瞄
         //   一拍滞后亦退役)。逐 4px 实心回退钳制贴墙不出墙。注意区别于
         //   2026-08-21 拆除的旧 ±14px 盲推:本式出生仍在玩家→目标之间。
-        const anchor = this.resolveShotAnchor(heldDef.key, ang);
+        const anchor = this.resolveShotAnchor(heldDef.key, ang, projectileData(projId)?.height ?? 0);
         let ax = anchor.x;
         let ay = anchor.y;
         // 逐枪枪口偏移（Player.cs:47632-47640）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
@@ -13070,10 +13070,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  无回退时贴墙=穿墙射击、朝下=扎进地板(2026-08-31 用户双报定罪)。回退的
    *  "缩短"是正确行为(不能隔墙开火);原版出生=盒中心同样永远够不到墙外语义。
    **/
-  private resolveShotAnchor(spriteKey: string, ang: number): { x: number; y: number } {
+  private resolveShotAnchor(spriteKey: string, ang: number, projH = 0): { x: number; y: number } {
     // ★v8 终案(2026-08-31):出生=盒中心(原版字面 Player.cs:47603),永不穿墙/入地。
     //  枪口出膛观感由渲染层实现:Arrow.draw / GrenadeProj.draw 角色盒内不渲染弹体。
-    return { x: this.player.cx, y: this.player.cy };
+    // ★弹体半高上抬(2026-08-31 用户实测):出生 y − projH/2 对准炮管高度;
+    //  projH = projectileData(shoot).height,调用侧从弹表传入(如火箭 14 → −7)
+    return { x: this.player.cx, y: this.player.cy - projH / 2 };
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -13313,6 +13315,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           Math.cos(ang) * throwSpd, Math.sin(ang) * throwSpd,
           cw.damage, cw.knockback, cw.shoot, this.player.facing);
         placeAtShootSpawn(bom, this.player.cx, this.player.cy);
+        // ★嵌出宽限(2026-09-01 站斜坡里侧实录定罪):斜坡站位上弹盒左/下缘可能嵌入
+        //  阶梯立体几何(半宽差 9px)。置宽限帧=10,期间管线照常解析但 Boomerang
+        //  跳过接触响应(不反弹/不回收/不响声)——弹体以投掷动量自然滑出嵌入区。
+        //  平地零重叠 → embedGrace=0 → 行为完全不变。
+        {
+          const stW = this.world.store;
+          const _bx0 = Math.floor(bom.x / TILE), _bx1 = Math.floor((bom.x + bom.w - 0.01) / TILE);
+          const _by0 = Math.floor(bom.y / TILE), _by1 = Math.floor((bom.y + bom.h - 0.01) / TILE);
+          for (let ty = _by0; ty <= _by1; ty++) {
+            for (let tx = _bx0; tx <= _bx1; tx++) {
+              if (stW.inBounds(tx, ty) && stW.isSolid(tx, ty)) { bom.embedGrace = 12; ty = _by1 + 1; break; }
+            }
+            if (bom.embedGrace > 0) break;
+          }
+        }
         bom.critChance = critTotal;
         bom.armorPen = this.player.equipStats.armorPen; // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
@@ -14764,10 +14781,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 默认魔法路径曾硬编码 pierce 1）、extraUpdates 2/4 与 timeLeft 600 由弹表驱动、
         // 点光 0.75（:1026/:1710）
         if (cw.shoot === 20 || cw.shoot === 88) {
-          console.log('[swZap]', 'deg=' + Math.round(ang * 180 / Math.PI),
-            'spawn=('+this.player.cx.toFixed(0)+','+this.player.cy.toFixed(0)+')',
-            'vx=' + (Math.cos(ang) * cw.shootSpeed).toFixed(1),
-            'vy=' + (Math.sin(ang) * cw.shootSpeed).toFixed(1)); //$TEST
           const zapA = this.resolveShotAnchor(def.key, ang);
           const zap = new Arrow(zapA.x, zapA.y,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
