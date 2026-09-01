@@ -209,11 +209,13 @@ export interface GameHooks {
    *  缺省 = 单人/旧客户端零发送 */
   npcDoorNet?(kind: 'door' | 'gate', x: number, y: number, closing: boolean, dir: number): void;
   playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean): void;   // 单 wav 直播（环境声三表;pitch=变调/EoC 连冲 0.6;replace=case36 ForceRoar 覆盖语义;可选=测试 mock 兼容）
-  /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声等；
-   *  返回句柄 stop/setPos；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */
+  /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声/
+   *  DD2 传送门 idle 环(:41409/:41458)/小妖精引信双轨(:63969+)；
+   *  返回句柄 stop/setPos/setVolume(ActiveSound.Volume 逐帧覆写档,NPC.cs:41464
+   *  收门段 Volume=scale 消费)；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */
   startTrackedLoop?(
     name: string, vol: number, x: number, y: number,
-  ): { stop(): void; setPos(px: number, py: number): void } | null;
+  ): { stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void } | null;
   /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
    *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用） */
   refreshChannelItem?(aim?: number): void;

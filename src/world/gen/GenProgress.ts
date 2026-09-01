@@ -237,6 +237,8 @@ export class GenProgress {
   displayKey: string | null = null;
   private pendingSubs: string[] = [];           // 本槽尚未显式 beginVan 的队列（可变——逐个摘除）
   private openWindow = false;                    // 是否存在待收账窗
+  private slotName: string | null = null;        // 当前槽名（仅告警语境用）
+  private multiSlot = false;                     // 多成员槽 ⇒ beginVan 必须命中声明表
 
   constructor(
     /** 发射信道（限流后的）；null=静默构建（探针/replay 直调场景） */
@@ -270,6 +272,8 @@ export class GenProgress {
    *  单成员槽立即开整窗（包装函数零改动）；多成员槽由包装函数逐个 beginVan 消费。 */
   enterSlot(slotName: string, subpasses: readonly string[]): void {
     this.closeWindow();                       // 上槽残留防御性收账
+    this.slotName = slotName;
+    this.multiSlot = subpasses.length > 1;
     if (subpasses.length === 0) {             // 未声明构成（自加兜底槽）
       this.pendingSubs = [];
       if (this.displayKey === null) this.displayKey = slotName;
@@ -293,15 +297,25 @@ export class GenProgress {
     this.closeWindow();
     for (const n of this.pendingSubs) this.doneWeight += this.weightOf(n);
     this.pendingSubs = [];
+    this.slotName = null;
+    this.multiSlot = false;
     this.emit(true);
   }
 
   // ---- pass 体接口 ----
 
-  /** 开始一个原版子 pass（自动收上一窗账；仅当有词条才换显示键） */
+  /** 开始一个原版子 pass（自动收上一窗账；仅当有词条才换显示键）。
+   *  ★账目不变式（终清零批护栏）：vanName 必须是当前槽声明成员——未声明名会让
+   *   该窗权重进账却不进 TotalWeight ⇒ overall 提前顶满被 clamp（Dungeon 漏声明
+   *   实证）。多成员槽内在此硬告警；单成员槽自动开窗等价于已消费，不走本分支。 */
   beginVan(vanName: string): void {
     this.closeWindow();
     const i = this.pendingSubs.indexOf(vanName);
+    // ★护栏：多成员槽内 begin 未声明名 ⇒ 该窗权重溢出总账（Dungeon 漏声明实证）
+    if (this.multiSlot && i < 0) {
+      console.warn(`[GenProgress] beginVan 未声明成员 "${vanName}"（槽 ${this.slotName ?? '?'}）` +
+        ' —— 权重会溢出总账，请补进 SLOT_VANILLA_PASSES');
+    }
     if (i >= 0) this.pendingSubs.splice(i, 1);
     this.applyMsg(vanName);
     this.openWindow = true;

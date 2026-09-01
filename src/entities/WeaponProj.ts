@@ -583,22 +583,38 @@ function hslToRgbColor(h: number, s: number, l: number): { r: number; g: number;
   return { r: chan(h + 1 / 3) * 255, g: chan(h) * 255, b: chan(h - 1 / 3) * 255 };
 }
 
-/** Collision.HitTilesInACircle 块尘圈近似（Collision.cs:3029-3075）:radiusPx = 圆半径
- *  （原版第 3/4 参为方形盒边长 W,圆距 = (W+H)/4——传 half 即 radiusPx=W/2）。圆内实格
- *  effect-only KillTile 出【块色】尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏
- *  （观感等价,登记近似;AnchoredProj 262 回收冲击与 Boomerang 383 撞墙共用） */
-function hitTilesInACircleFx(game: GameHooks, cx: number, cy: number, radiusPx: number): void {
+/** Collision.HitTilesInACircle（1458 Collision.cs:3029-3086,1457 同段同值——终清波几何
+ *  1:1 化）：Position=方盒左上(px)、Velocity=单次偏移向量、Width/Height=盒边长 boxSize。
+ *  vector = Position+Velocity;扫窗 [X/16−1 .. (X+W)/16+2)×[Y/16−1 ..) 开区间,
+ *  下界钳 0、x 上界钳 maxTilesX、y 上界钳 maxTilesY−40;候选格矩阵 = nactive &&
+ *  (tileSolid ∨ tileSolidTop&&frameY==0)——本仓以 isActive/isSolid 承载,其中
+ *  solidTop∧frameY==0 家具族与【逐格块色尘】同属 WorldGen.KillTile_MakeTileDust
+ *  per-tile 尘型表系统待移植（登记面）;halfBrick → 格顶下移 8、探测高 16→8;
+ *  命中盒〔vector,vector+W×H〕与格纵列相交且圆心距 <(W+H)/4 → effect-only
+ *  KillTile 出块色尘。消费端：Boomerang 383 撞墙圈(Position−150 边 300)/
+ *  AnchoredProj 262 回收冲击。
+ *  ★合成占位：每合格格出 1 粒通用块尘 d14——无人工上限（Main.dust[6000] 池满即原版
+ *  饱和门），逐格数量/粒型面随尘型表批补齐 */
+function hitTilesInACircleFx(game: GameHooks, px: number, py: number, vx0: number, vy0: number, boxSize: number): void {
   const st = game.world.store;
-  const t0x = Math.floor((cx - radiusPx) / TILE), t1x = Math.floor((cx + radiusPx) / TILE);
-  const t0y = Math.floor((cy - radiusPx) / TILE), t1y = Math.floor((cy + radiusPx) / TILE);
-  let n = 0;
-  for (let ty = t0y; ty <= t1y && n < 32; ty++) {
-    for (let tx = t0x; tx <= t1x && n < 32; tx++) {
-      if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
-      const dx = tx * TILE + 8 - cx, dy = ty * TILE + 8 - cy;
-      if (dx * dx + dy * dy > radiusPx * radiusPx) continue;
-      game.spawnDust?.(tx * TILE, ty * TILE, TILE, TILE, 14, 0, 0, 150, null, 1);
-      n++;
+  const vecX = px + vx0, vecY = py + vy0;                        // vector = Position + Velocity(:3034)
+  let tx0 = Math.floor(px / TILE) - 1;
+  let tx1 = Math.floor((px + boxSize) / TILE) + 2;
+  let ty0 = Math.floor(py / TILE) - 1;
+  let ty1 = Math.floor((py + boxSize) / TILE) + 2;
+  if (tx0 < 0) tx0 = 0;
+  if (tx1 > st.w) tx1 = st.w;                                    // Main.maxTilesX 钳(:3044)
+  if (ty0 < 0) ty0 = 0;
+  if (ty1 > st.h - 40) ty1 = st.h - 40;                          // maxTilesY − 40 钳(:3055)
+  for (let i = tx0; i < tx1; i++) {
+    for (let j = ty0; j < ty1; j++) {
+      if (!st.isActive(i, j) || !st.isSolid(i, j)) continue;
+      let gx = i * TILE, gy = j * TILE, gh = TILE;
+      if (st.half[st.idx(i, j)] !== 0) { gy += 8; gh -= 8; }     // halfBrick(:3066-3069)
+      if (vecX + boxSize >= gx && vecX <= gx + TILE && vecY + boxSize >= gy && vecY <= gy + gh
+        && Math.hypot(vecX + boxSize / 2 - (gx + 8), vecY + boxSize / 2 - (gy + 8)) < (boxSize + boxSize) / 4) {
+        game.spawnDust?.(i * TILE, j * TILE, TILE, TILE, 14, 0, 0, 150, null, 1);
+      }
     }
   }
 }
@@ -991,61 +1007,11 @@ export class Boomerang extends Entity {
     // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
     // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
     const chX = body.vx !== lvx, chY = body.vy !== lvy;
-    // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改
-    // 也计为接触——默认族将在地图边缘被回收而不是飞出世界
-    const stB = game.world.store;
-    const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
-      || this.y <= 0 || this.y + this.h >= stB.h * TILE;
     this.x = body.x; this.y = body.y;
     this.vx = lvx; this.vy = lvy;
     const hitX = chX, hitY = chY;
     if (!hitX && !hitY && !offWorldEdge) return;
-    // 原版此点 velocity 已被 Collision 按碰撞轴清零（TileCollision 后写语义）——下游
-    // 反射读数/LightDisc_Bounce 的 reflect 源都基于这份"轴零化视图"。管线以差分折叠
-    // 出等价投影（未碰轴保留 lastV、碰轴置 0）。
-    const pvx = hitX ? 0 : lvx, pvy = hitY ? 0 : lvy;
-    // ---- aiStyle3/13 撞墙响应链（1458 Projectile.cs:19627-19671,顺序与源码一致）----
-    if (isPhase) {
-      // 光刃撞墙 → 悬停态（独立链:无 HitTiles 尘/挖掘音,入态音尘由 aiHover 承担）
-      this.ai0 = 2; this.outT = 0;
-      return;
-    }
-    if (this.projId === 106) {
-      // LightDisc_Bounce 溅射（:28787-28801）——"溅射视觉略"登记清偿,见私有方法注
-      this.lightDiscBounceFx(game, pvx, pvy, lvx, lvy);
-    }
-    if (this.projId === 383) {
-      // 383 附魔飞刀 ai[1]>=10 → Collision.HitTilesInACircle(Position−num71/2,velocity,
-      // num71,num71)+Item14(:19639-19649);num71=300。此前传"圆心"口径改 Position 左上
-      if (this.outT >= 10) {
-        hitTilesInACircleFx(game, this.x - 150, this.y - 150, lvx, lvy, 300);
-        game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
-        this.boomBox = 300;                                     // localAI[0]=num71(:15065 GetHitbox)
-      }
-    } else if (this.projId === 301) {
-      // Spawn_PaladinsHammerShockwave（ParticleOrchestrator.cs:816-881 收编本体,含
-      // Item180 音）+ broadcast（Projectile.cs:19649-19661 clientOnly:false,
-      // PositionInWorld=position 左上、MovementVector=Size 载荷;owner==myPlayer 门同式）
-      paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
-      game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
-        this.x, this.y, this.w, this.h);
-      this.boomBox = 200;                                       // localAI[0]=num72(:15063)
-    } else {
-      // 缺省族（33/866/6/19/52/113/… 含 1000 等）→ Collision.HitTiles(position,
-      // velocity,w,h)(:19662-19664)。块色尘依赖 WorldGen.KillTile_MakeTileDust
-      // per-tile 尘型表系统待移植——合成灰尘占位登记（点名家,VisualDeficit 面）
-      game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-    }
-    // :19667-19675 {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从
-    // lastVelocity 全反（383 豁免,aiStyle13 型号在 AnchoredProj 侧另案）
-    if (WALL_BOUNCE_PROJ.has(this.projId)) {
-      if (hitX) this.vx = -lvx;
-      if (hitY) this.vy = -lvy;
-    } else {
-      this.ai0 = 1; this.outT = 0;
-      if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
-    }
-    game.playSfx('dig', 1, this.cx, this.cy);                   // SoundID 0(:19670 共享尾)
+                   // SoundID 0(:19670 共享尾)
   }
 
   /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
@@ -1071,11 +1037,9 @@ export class Boomerang extends Entity {
       const t = Math.random();                                  // Lerp 主色
       const col = { r: Math.round(219 + (0 - 219) * t), g: Math.round(253 + (255 - 253) * t), b: Math.round(0 + 255 * t), a: 255 };
       for (let clone = 0; clone < 2; clone++) {
-        const d = game.spawnDust?.(hxOff !== undefined ? this.cx + hxOff * 8 : this.cx,
-          hyOff !== undefined ? this.cy + hyOff * 8 : this.cy,
+        game.spawnDust?.(this.cx + hxOff * 8, this.cy + hyOff * 8,
           this.w, this.h, 306, bvx, bvy, clone === 0 ? 200 : 50, clone === 0 ? col : null,
           clone === 0 ? 1.6 : 1, false, true);
-        if (d && clone === 1) d.noGravity = false;
       }
     }
   }
@@ -1084,18 +1048,72 @@ export class Boomerang extends Entity {
   private aiVisual(game: GameHooks, isPhase: boolean): void {
     const p = game.player;
     if (this.projId === 106) {
-      this.rot += 0.3 * this.dir; // :37294-37296 光碟两段自旋 0.3
+      this.rot += 0.3 * this.dir; // :40277-40280 光碟自旋 0.3×direction(全状态)
     } else if (this.projId === 866) {
-      this.rot = Math.atan2(this.vy, this.vx); // :37298-37308 飞刀贴图对准飞行向
+      // 飞刀:rotation=velocity.ToRotation + 尾段尘 rand(2)==0 → d212、vel×0.1、noGravity
+      // (:40281-40289 全状态运行——"飞刀无尾尘"登记缺口清偿)
+      this.rot = Math.atan2(this.vy, this.vx);
+      if (Math.floor(Math.random() * 2) === 0) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 212, 0, 0);
+        if (d) { d.vx *= 0.1; d.vy *= 0.1; d.noGravity = true; }
+      }
     } else if (this.projId === 383) {
       // :37310-37325 出程对准飞行向 / 返回段对准 (球心-玩家) 向量,+π/2
       this.rot = (this.ai0 === 0
         ? Math.atan2(this.vy, this.vx)
         : Math.atan2(this.cy - p.cy, this.cx - p.cx)) + Math.PI / 2;
     } else if (this.projId === 301) {
-      // :37326-37350 出程对准飞行向+π/4（尘略）/ 返回段自旋 0.4×direction
-      if (this.ai0 === 0) this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
-      else this.rot += 0.4 * this.dir;
+      // 301 尾段（1457 AI_003 提取件 :707-761,全状态;出程 rotation 已由 aiOut 承担）：
+      //   · ai[0]==0 出程态 → d57/d43 旋转喷洒:循环 k<num35(ai[1]>=30 时 10 否则 0)、
+      //     num36 = >=30 ?1.76:0.3、num37=16×scale(28);d57 掷 rand(2)==0(NewDust
+      //     α200/scale1.2/base v×0.2)+vel += velocity×num36×NextFloat 后 ×0.2,d43 掷
+      //     rand(3)==0(α254/scale0.3/v 0 起)+vel 同上后 ×0.5;两者 noGravity 且
+      //     position = Center + velocity.SafeNormalize(UnitX).RotatedBy(π/2)
+      //     × num37×(rand(2)×2−1),rand(3)==0 再 ×NextFloat——"出程尘略"登记清偿。
+      //     ★本仓 spawnDust 完美落位变体承载 position 覆写(vanilla NewDust 后覆写)
+      //   · 其余态（回收段）→ 自旋 0.4×direction(:40760-40763)
+      if (this.ai0 === 0) {
+        // 尾段独立于玩家存活门（提取件 :707 起无 gate）;ai[1]>=30 才有喷洒量(num35=10)
+        if (this.outT >= 30) {
+          const vmag = Math.hypot(this.vx, this.vy);
+          const ux = vmag > 0 ? this.vx / vmag : 1, uy = vmag > 0 ? this.vy / vmag : 0;
+          const pxv = -uy, pyv = ux;                                 // SafeNormalize(UnitX).RotatedBy(π/2)
+          for (let k = 0; k < 10; k++) {
+            if (Math.floor(Math.random() * 2) === 0) {               // d57 掷(rand(2)==0)
+              let rad = 16 * this.visScale;
+              if (Math.floor(Math.random() * 3) === 0) rad *= Math.random();
+              const sgn = Math.floor(Math.random() * 2) * 2 - 1;     // 单掷共用于 XY(:40748)
+              const rf = Math.random();                              // velocity×num36×NextFloat() 单标量
+              const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 57,
+                this.vx * 0.2, this.vy * 0.2, 200, null, 1.2);
+              if (d) {
+                d.vx = (this.vx * 0.2 + this.vx * 1.76 * rf) * 0.2;
+                d.vy = (this.vy * 0.2 + this.vy * 1.76 * rf) * 0.2;
+                d.noGravity = true;
+                d.x = this.cx + pxv * rad * sgn;                     // NewDust 后定点覆写
+                d.y = this.cy + pyv * rad * sgn;
+              }
+            }
+            if (Math.floor(Math.random() * 3) === 0) {               // d43 掷(rand(3)==0)
+              let rad = 16 * this.visScale;
+              if (Math.floor(Math.random() * 3) === 0) rad *= Math.random();
+              const sgn = Math.floor(Math.random() * 2) * 2 - 1;
+              const rf = Math.random();
+              const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 43,
+                0, 0, 254, null, 0.3);
+              if (d) {
+                d.vx = this.vx * 1.76 * rf * 0.5;
+                d.vy = this.vy * 1.76 * rf * 0.5;
+                d.noGravity = true;
+                d.x = this.cx + pxv * rad * sgn;
+                d.y = this.cy + pyv * rad * sgn;
+              }
+            }
+          }
+        }
+      } else {
+        this.rot += 0.4 * this.dir;
+      }
     } else if (!isPhase) {
       this.rot += 0.4 * this.dir; // :37351-37352 缺省族两段自旋 0.4（非定角!）
     }
@@ -1631,6 +1649,10 @@ export class AnchoredProj extends Entity {
   private hitCd = new HitCooldown();
   /** 绘制期玩家中心快照（链条锚,fixedUpdate 续约） */
   private owner: { cx: number; cy: number } | null = null;
+  /** 23 鱼叉链摆荡记忆（proj.localAI[1]/[2]——Main.cs 绘制层每帧更新,
+   *  :30002-30009 出膛 lerp(−v)/2 / 回收 (v+prev×4)/5;仅 drawChain 消费) */
+  private localA1 = 0;
+  private localA2 = 0;
 
   constructor(dirX: number, dirY: number, spd: number, damage: number, knockback: number, projId: number) {
     super();
@@ -1708,9 +1730,14 @@ export class AnchoredProj extends Entity {
           if (rdist < 150) {
             this.localA0 = -1;
           } else {
-            this.localA0 = 200;
-            this.hitTilesInCircle(game, this.cx, this.cy, 100);
-            game.playSfx('explosion', 1, this.cx, this.cy);
+            // 1458 P.cs:25054-25071:num117=200、vector13=position−num117/2(盒左上)、
+            // HitTilesInACircle(vector13,velocity,200,200)+SoundID.Item14(:25068——
+            // 曾误播合成 'explosion',音频 B 类修正)
+            const num117 = 200;
+            this.localA0 = num117;
+            this.hitTilesInCircle(game, this.x - num117 / 2, this.y - num117 / 2,
+              this.vx, this.vy, num117);
+            game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
             // 一帧 200×200 冲击盒(Damage_GetHitbox :15057-15061 缩点 Inflate(localAI0/2))
             hitEnemies(this, game, this.hitCd, 9999, this.vx > 0 ? 1 : -1, this.armorPen,
               undefined, undefined, true,
@@ -1747,11 +1774,10 @@ export class AnchoredProj extends Entity {
     }
   }
 
-  /** Collision.HitTilesInACircle 近似(Collision.cs:3029-3075):圆内实格 effect-only
-   *  KillTile 尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏(观感等价,登记近似);
-   *  实现收敛进模块级 hitTilesInACircleFx（262 回收冲击与 Boomerang 383 撞墙圈共用） */
-  private hitTilesInCircle(game: GameHooks, cx: number, cy: number, r: number): void {
-    hitTilesInACircleFx(game, cx, cy, r);
+  /** Collision.HitTilesInACircle 薄壳（几何 1:1 已收敛进模块级 hitTilesInACircleFx——
+   *  Position=盒左上/Velocity 偏移/boxSize=边长;262 回收冲击与 Boomerang 383 撞墙圈共用） */
+  private hitTilesInCircle(game: GameHooks, px: number, py: number, vx0: number, vy0: number, boxSize: number): void {
+    hitTilesInACircleFx(game, px, py, vx0, vy0, boxSize);
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -1775,39 +1801,112 @@ export class AnchoredProj extends Entity {
       this.prm.drawScale ?? 1);
   }
 
-  /** 玩家→拳链索(Main.cs DrawProjDirect 各型支):
-   *  262 :29688-29736 Chain22 / 271 :29914-29959 Chain18 / 273 :29737-29800 Chain23 /
-   *  23 兜底组 :29961-30175 TextureAssets.Chain。共同几何:
-   *  链起点 = 弹心 ∓ v×(4/|v|)(出膛−/返回+;23 兜底支为 position+(8,2) 与 40/|v|,
-   *  此处统一 4/|v| 中心式——23 的 ±16px 差登记近似);步长 12px;距玩家<25 停;
-   *  rot=atan2(向玩家)-1.57;逐节光照着色 */
+  /** 玩家→拳链索(Main.cs DrawProjDirect 各型支,1458 行号锚):
+   *  262 :29688-29735 Chain22 / 273 :29736-29794 Chain23 / 271 :29924-29960 Chain18 /
+   *  aiStyle13 兜底组 :29961-30175 TextureAssets.Chain（在 1458 内覆盖 type==23,
+   *  因 262/273/271/481 已被前方专支截流）。各型起锚/系数:
+   *   · 262/273/271 = 弹心 ∓ v×(4/|v|)、步长 12、停 <25、rot 单次定型 atan2−1.57
+   *     （循环内仅位置推进——与单次定角逐数值等价：臂点固定+步进共线）
+   *   · 23 兜底支专有几何（终清波从"统一 4/|v| 中心式"近似转正）：
+   *     起锚 = position+(8,2)；出膛系数 40/|v|（其余型 20/|v|）；符号按 ai[0];
+   *     localAI[1..2] 摆荡记忆（每渲染帧更新：出膛 lerp(−v)/(2)、回收 (v+prev×4)/5）；
+     *     臂端向链首回拉钳 20px；rot 计算前链首回退半步(dist/2)；环内 dist>12 时
+   *     rotation 与摆荡向量按 num149=clamp(dist/1000≤0.5) 插值(:30049-30062)
+   */
   private drawChain(r: Renderer): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = chainImg(this.prm.chainTex);
     if (!img || !(img.width > 0)) return;
-    const armX = this.owner?.cx ?? this.cx;
-    const armY = this.owner?.cy ?? this.cy;
-    const vmag = Math.hypot(this.vx, this.vy) || 1;
-    const off = 4 / vmag;
-    const sgn = this.a0 === 0 ? -1 : 1;
-    let ox = this.cx + this.vx * off * sgn;
-    let oy = this.cy + this.vy * off * sgn;
+    const vmagRaw = Math.hypot(this.vx, this.vy);
     const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
     const lightAt = (wx: number, wy: number): number => {
       if (!lighting) return 1;
       const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
       return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
     };
+    if (this.projId === 23) {
+      // ---- 23 鱼叉兜底支 1:1（:29961-30175）----
+      if (!this.netPuppet && !Number.isNaN(this.vx) && !Number.isNaN(this.vy)) {
+        if (this.a0 === 0) {
+          this.localA1 = (-this.vx + this.localA1) / 2;       // 出膛：lerp −velocity(:30002-30004)
+          this.localA2 = (-this.vy + this.localA2) / 2;
+        } else {
+          this.localA1 = (this.vx + this.localA1 * 4) / 5;    // 回收：(v + prev×4)/5(:30006-30009)
+          this.localA2 = (this.vy + this.localA2 * 4) / 5;
+        }
+      }
+      const vmag = vmagRaw || 0.0001;                         // 双零速度 → 0.0001f 兜底(:29980-29984)
+      const sgn = this.a0 === 0 ? -1 : 1;
+      let ox = this.x + 8 + this.vx * (sgn * 40 / vmag);      // 起锚=position+(8,2)、type23 系数 40/|v|
+      let oy = this.y + 2 + this.vy * (sgn * 40 / vmag);      // (:29987-29994 出膛−/回收+)
+      let armX = this.owner?.cx ?? this.cx;
+      let armY = this.owner?.cy ?? this.cy;
+      // 臂端回拉：vector32 = vector31 − mountedCenter，|·|>20 → 单位向 ×20 并入臂端(:29998-30003)
+      {
+        const vx32 = ox - armX, vy32 = oy - armY;
+        const len32 = Math.hypot(vx32, vy32);
+        if (len32 > 20) {
+          armX += vx32 / len32 * 20;
+          armY += vy32 / len32 * 20;
+        }
+      }
+      // 半步退（:30014-30021）：x10=臂−链首、12/|·| 后 vector31 -= 半步——链首【远离】臂 6px
+      let bx = armX - ox, by = armY - oy;
+      {
+        const k0 = 12 / (Math.hypot(bx, by) || 1e-9);
+        ox -= bx * k0 * 0.5;
+        oy -= by * k0 * 0.5;
+        bx = armX - ox; by = armY - oy;
+      }
+      let rot = Math.atan2(by, bx) - Math.PI / 2;             // :30024-30026 初次定型
+      for (;;) {
+        const dist = Math.hypot(bx, by);
+        if (!Number.isFinite(dist) || dist < 25) break;       // :30034-30042 停门/NaN 门
+        const prevDist = dist;                                // num148（插值用的预步距）
+        const k = 12 / prevDist;
+        ox += bx * k; oy += by * k;                           // 步进 12px(:30043-30044)
+        bx = armX - ox; by = armY - oy;
+        if (prevDist > 12) {
+          // 摆荡插值(:30047-30062)：向量 = 臂向×(1−n) + 摆荡向×(n)，两者归一后统一缩放
+          // 到臂向长度；覆写后的 (bx,by) 会作为下一拍的步进方向 → 链条 whip 弯曲本体
+          let n149 = prevDist / 1000;
+          if (n149 > 0.5) n149 = 0.5;
+          const vx33 = armX - ox, vy33 = armY - oy;
+          const l33 = Math.hypot(vx33, vy33) || 1;
+          const swl = Math.hypot(this.localA1, this.localA2) || 1;
+          const nx = ((vx33 / l33) * l33) * (1 - n149) + ((this.localA1 / swl) * l33) * n149;
+          const ny = ((vy33 / l33) * l33) * (1 - n149) + ((this.localA2 / swl) * l33) * n149;
+          bx = nx; by = ny;
+          rot = Math.atan2(ny, nx) - Math.PI / 2;
+        }
+        ctx.save();
+        ctx.translate(ox, oy);
+        ctx.rotate(rot);                                      // 非插值拍沿用上次 rot(:30064-30067)
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = lightAt(ox, oy);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.restore();
+      }
+      return;
+    }
+    // ---- 262/271/273 专支共同几何（中心起锚 4/|v|,停 <25,步 12,rot 定型等价）----
+    const vmag = vmagRaw || 1;
+    const off = 4 / vmag;
+    const sgn = this.a0 === 0 ? -1 : 1;
+    let ox = this.cx + this.vx * off * sgn;
+    let oy = this.cy + this.vy * off * sgn;
+    const armX = this.owner?.cx ?? this.cx;
+    const armY = this.owner?.cy ?? this.cy;
     for (let i = 0; i < 999; i++) {
       const dx = armX - ox, dy = armY - oy;
       const d = Math.hypot(dx, dy);
-      if (!Number.isFinite(d) || d < 25) break;           // :29722 num126<25f 停
+      if (!Number.isFinite(d) || d < 25) break;               // :29722/:29759 停门
       const k = 12 / d;
-      ox += dx * k; oy += dy * k;                          // 步长 12px(:29728-29731)
+      ox += dx * k; oy += dy * k;
       ctx.save();
       ctx.translate(ox, oy);
-      ctx.rotate(Math.atan2(armY - oy, armX - ox) - Math.PI / 2);   // :29724 rotation18
+      ctx.rotate(Math.atan2(armY - oy, armX - ox) - Math.PI / 2);
       ctx.imageSmoothingEnabled = false;
       ctx.globalAlpha = lightAt(ox, oy);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
@@ -2903,8 +3002,9 @@ export class YoyoShotProj extends Entity {
     this.excludeId = spec.excludeId ?? -1;
     this.sharedCd = spec.sharedCd ?? null;
     if (spec.projId === 1125) {
-      // AI_189 :43037 soundDelay==0 首帧 SoundID.DD2_ExplosiveTrapExplode（本仓
-      // sfx 表无 DD2 键 → 兜 'explosion' 近似,登记）
+      // AI_189 :43034-43041 首帧 SoundID.DD2_ExplosiveTrapExplode——WAV_MAP dd2Explosive
+      // 三变体在盘（public/sounds/dd2_explosive_trap_explode_{0..2}.wav）,原 'explosion'
+      // 合成兜底近似退役（终清波）
       this.life = 10;                      // 5 帧 ×2t（:43056-43063 frame>=5 → Kill）
     } else if (spec.projId === 1130 || spec.projId === 1135) {
       this.life = 20;                      // AI_210 :37516/:37540 localAI[0]>=20 → Kill
@@ -2918,9 +3018,13 @@ export class YoyoShotProj extends Entity {
     this.age++;
     if (--this.life <= 0) { this.dead = true; return; }
     if (this.projId === 1125) {
-      // AI_189 1125 支：首帧尘/软木爆（:43070-43100,20 尘 6 号 + 烟 31 + gore 61-63——
-      // gore 池本仓无 API,登记）;scale=ai[1]（视觉缩放,本体不绘制）
+      // AI_189 1125 支：首帧 soundDelay==0 → DD2_ExplosiveTrapExplode(:43034-43041,
+      // 三变体随机——SoundID.LegacySoundStyle 档) + 首帧尘/软木爆（:43070-43100,
+      // 20 尘 6 号 + 烟 31 + gore 61-63——gore 池本仓无 API,资产缺登记）;
+      // scale=ai[1]（视觉缩放,本体不绘制）
       if (this.age === 1) {
+        game.playSfxFiles(['dd2_explosive_trap_explode_0', 'dd2_explosive_trap_explode_1',
+          'dd2_explosive_trap_explode_2'], 1, this.cx, this.cy);
         game.spawnParticles(this.cx, this.cy, '#F0A040', 14, 3 * this.scale, { life: 22, grav: 0.06, damp: 0.95 });
         game.spawnParticles(this.cx, this.cy, '#807868', 8, 2 * this.scale, { life: 30, grav: -0.01, damp: 0.96 });
       }
@@ -3109,6 +3213,9 @@ export class FlailProj extends Entity {
   private spinT = 0;
   /** localAI[0] 弹墙累计（AI_015_HandleMovementCollision:41006） */
   private bounces = 0;
+  /** 当拍伤害冷却覆写（localNPCHitCooldown=num 转坠落覆写 :44505——原版字段直接
+   *  改写,下一 Damage() 生效;本仓经单拍覆盖位承载,消费即清零） */
+  private cdOverride: number | null = null;
   /** spriteDirection（=direction,:41479-41483 每 tick=sign(vx),1058 豁免保持出生向;
    *  绘制侧 -1 水平翻转 M.cs:29827-29831） */
   private spriteDir = 1;
@@ -3472,12 +3579,15 @@ export class FlailProj extends Entity {
         this.bounces++;
         if (Math.abs(lvy) > 4) dustN = 1; // (:44477-44479)
       }
-      // 掷出态撞墙 → 坠落态(:44509-44524):位移回卷 + num2 强制 2 + 冲击波(GAP#8 ④)
+      // 掷出态撞墙 → 坠落态（:44505-44520）:转态 + localNPCHitCooldown=10 覆写
+      // （:44506——当拍 Damage 冷却改全局档,经 cdOverride 消费）+ 冲击波两连（窗口=
+      // 撞后落位 TopLeft..BottomRight）+ 位置回卷(position -= vector,:44518)+ num2=2
       if (this.st === 1 && (chX || chY)) {
         this.st = 5; this.stT = 0;
-        this.x -= lvx; this.y -= lvy; // position -= vector(:44519)——撞墙 tick 不陷墙
-        dustN = 2;                    // 无视 |lastV|>4 门,音尘双份
-        this.impactExplosion(game, lvx, lvy);
+        this.cdOverride = 10;         // localNPCHitCooldown = num(:44505)——本拍/次拍伤害冷却
+        this.impactExplosion(game, lvx, lvy);   // 窗口须读回卷前落位(:44510-44513 原序)
+        this.x -= lvx; this.y -= lvy; // position -= vector(:44518)——撞墙 tick 不陷墙
+        dustN = 2;                    // 无视 |lastV|>4 门,音尘双份(HitTiles×2 :44524-44528)
       }
       if (dustN > 0) this.hitTileFx(game, this.x, this.y, dustN);
       // 卡死逃生（:44529-44533）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
@@ -3559,7 +3669,9 @@ export class FlailProj extends Entity {
         this.vx * 0.4, this.vy * 0.4, 100, null, 1.5);
       if (d) { d.noGravity = true; d.vx /= 2; d.vy /= 2; }
     } else if (this.projId === 948) {
-      if (!this.inLiquid(game)) {   // !wet 门（:45275;wet 近似=inLiquid 任一液体,同 :2285 口径）
+      // !wet 门（1458 :45263-45267 wet=Collision.WetCollision 探针形——inLiquid 缺省档
+      // 同式（B⑥ 清偿;坡面支终清波并入））
+      if (!this.inLiquid(game)) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
           this.vx * 0.4, this.vy * 0.4, 100, null, 1.2);
         if (d) { d.noGravity = true; d.vx = (d.vx * 4 + this.vx) / 2; d.vy = (d.vy * 4 + this.vy) / 2; }
@@ -3607,7 +3719,8 @@ export class FlailProj extends Entity {
     // 1058 走专属式 :41398-41405 = 反(player→球)方向)——此前 Math.sign(vx)||1
     // 把 vx==0 档写成 1,1:1 修正
     const kdir = this.projId === 1058 ? (p.cx < this.cx ? 1 : -1) : (this.vx > 0 ? 1 : -1);
-    hitEnemies(this, game, this.hitCd, cd, kdir, this.armorPen);
+    hitEnemies(this, game, this.hitCd, this.cdOverride ?? cd, kdir, this.armorPen);
+    this.cdOverride = null;   // 单拍覆盖位消费即清（下一 tick 回 case5 常规档 thrownHitCd）
   }
 
   /** velocity MoveTowards(手方向×targetSpd, accel)（case2 :41283 / case3 :41311-41315 同式） */
@@ -3637,7 +3750,8 @@ export class FlailProj extends Entity {
    *  type==2 岩浆 = LavaCollision（:1657-1691）:【全弹盒】与同一表面带交叠（形状两分!）。
    *  其余型（3 蜂蜜/4 微光）按 liquidType 细分沿用 Wet 探针形——vanilla 以 honey()/shimmer()
    *  旗标在 Wet 扫描内附带判定(:1627-1646),本仓参数化等价承载。
-   *  登记缺口:Wet 的坡面支(:1632-1650 active 斜块上方液体算湿)未建模——store 无斜度旗。 */
+   *  坡面支已建模（终清波）：active+slope!=0+上方格液体 → 整深 16px 相交判湿
+   *  （:1646-1666,store.slope 数据面承载;lava 全盒档无此支,原版即两分）。 */
   private inLiquid(game: GameHooks, type?: number): boolean {
     const st = game.world.store;
     const fullBox = type === 2;                       // LavaCollision 全盒档
@@ -3654,14 +3768,26 @@ export class FlailProj extends Entity {
         if (!st.inBounds(tx, ty)) continue;
         const idx = st.idx(tx, ty);
         const liq = st.liquid[idx];
-        if (liq <= 0) continue;
-        // 液体型过滤：LavaCollision(:1675 tile.lava())同样按型筛——仅形状(全盒)与 Wet 分家
-        if (type !== undefined && st.liquidType[idx] !== type) continue;
-        // 表面带（ Wet :1609-1616 / Lava :1672-1680 同式）
-        const surfY = ty * TILE + ((256 - liq) / 32) * 2;
-        const depth = 16 - Math.trunc(((256 - liq) / 32) * 2);
-        if (px + pw > tx * TILE && px < tx * TILE + TILE
-          && py + ph > surfY && py < surfY + depth) return true;
+        if (liq > 0) {
+          // 液体型过滤：LavaCollision(:1675 tile.lava())同样按型筛——仅形状(全盒)与 Wet 分家
+          if (type !== undefined && st.liquidType[idx] !== type) continue;
+          // 表面带（ Wet :1609-1616 / Lava :1672-1680 同式）
+          const surfY = ty * TILE + ((256 - liq) / 32) * 2;
+          const depth = 16 - Math.trunc(((256 - liq) / 32) * 2);
+          if (px + pw > tx * TILE && px < tx * TILE + TILE
+            && py + ph > surfY && py < surfY + depth) return true;
+        } else if (!fullBox) {
+          // 坡面支（1458 Collision.cs:1646-1666，仅 Wet 探针形档——LavaCollision 无此支）：
+          // active+slope!=0+j>0 且上方格液体>0 → 【整深 16px】矩形相交即湿。
+          // type 参数过滤同样作用于上方格液体型。★store.slope 数据面已就位
+          // （TileStore.ts:29）——"坡面支未建模(store 无斜度旗)"登记缺口清偿（终清波）
+          if (ty <= 0 || st.slope[idx] === 0 || !st.isActive(tx, ty)) continue;
+          const upIdx = st.idx(tx, ty - 1);
+          if (st.liquid[upIdx] <= 0) continue;
+          if (type !== undefined && st.liquidType[upIdx] !== type) continue;
+          if (px + pw > tx * TILE && px < tx * TILE + TILE
+            && py + ph > ty * TILE && py < ty * TILE + TILE) return true;
+        }
       }
     }
     return false;
@@ -3681,21 +3807,89 @@ export class FlailProj extends Entity {
     game.playSfx('dig', 1, hx + this.w / 2, hy + this.h / 2);
   }
 
-  /** 掷出态撞墙冲击波(GAP#8 ④)。原版两连(:41031-41034):
-   *  ①CreateImpactExplosion(2, center, 命中盒, width, :66367-66412)——命中盒内逐格,
-   *    实心·非 solidTop·非 frameImportant 且上方空气的块,按 KillTile_GetTileDustAmount
-   *    ×2 出【块色】尘(velocity.Y -= (3+num×1.5)×rand、scale += num×0.03,num 恒 4;
-   *    num≥2 再补 num2-1 颗上抛),出过尘 → causedShockwaves=true;
-   *  ②CreateImpactExplosion2_FlailTileCollision(:66452-66500)——8 颗椭圆(7×0.7)白尘
-   *    (color=White×0.5,α=causedShockwaves?0:50,scale 0.4,velocity.Y-=0.8/X×0.8 后
-   *    += 撞前速度向×2;无块尘再补 8 颗 α100 ×1.5)。
-   *  近似:粒子系统无逐格块色尘/定点椭圆环 → 上抛尘团(①)+ 定向半环(②,沿撞前方向
-   *  偏置 yMul 0.7 压轴;原版入墙半环本就被块遮住) */
+  /** 掷出态撞墙冲击波（GAP#8 ④ 终清波两连实装,AI_015_HandleMovementCollision
+   *  :44499-44502 + CreateImpactExplosion :70716-70761 + CreateImpactExplosion2_
+   *  FlailTileCollision :70857-70905；**本方法在位移回卷前调用——窗口=撞后落位**）：
+   *  ① CreateImpactExplosion(multiplier=2, Center, 扫窗=TopLeft..BottomRight tile 坐标
+   *     【含端】, explosionRange=width px)：窗内与圆心距 ≤range 的 active·tileSolid·
+   *     非 solidTop·非 frameImportant 且上方无「active+solid+非 solidTop」块的格,
+   *     按 KillTile_GetTileDustAmount(fail:true)×multiplier 出【块色】尘(vy −= 3+num×1.5
+   *     后×NextFloat、scale += num×0.03,num=4 内部常量),amount≥2 补 amount−1 颗
+   *     vy−=1+4 的上抛;任一粒成功 → causedShockwaves=true。
+   *     ★per-tile 尘型/数量表 = WorldGen.KillTile_MakeTileDust 系统待移植——合格格以
+   *     合成 d14 占位承载【筛选几何 + shockwave 判定】,frameImportant/solidTop 精确
+   *     家具族随表批并入；
+   *  ② 白尘椭圆环精确值：d31 ×8 主档(α=shock?0:50、color White×0.5、scale0.4、
+   *     fadeIn .3+.4r、pos=origin+RotatedBy(k·2π/8)(7,0)×(1,0.7)、vy−=0.8/vx×0.8 后
+   *     += 撞前速度单位向×2、noLight);!shock 补 8 颗 α100(vy=−1/vx×0.4/+= 单位向×1.5)
+   *     ——spawnDust perfect 变体承载定点落位 */
   private impactExplosion(game: GameHooks, lvx: number, lvy: number): void {
-    const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
-    game.spawnParticles(cx0, cy0, '#A09080', 8, 2.5, { life: 22, grav: 0.1, size: 2 });
-    game.spawnBurst?.(cx0, cy0, '#E8E4DC', 8, 2, Math.atan2(-lvy, -lvx), Math.PI / 2,
-      { life: 24, grav: -0.02, yMul: 0.7 });
+    const st = game.world.store;
+    const ox = this.x + this.w / 2, oy = this.y + this.h / 2;
+    // ---- ① 块尘扫窗（:70725-70754）----
+    const i0 = Math.floor(this.x / TILE), i1 = Math.floor((this.x + this.w) / TILE);
+    const j0 = Math.floor(this.y / TILE), j1 = Math.floor((this.y + this.h) / TILE);
+    let causedShockwaves = false;
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        if (Math.hypot(ox - i * TILE, oy - j * TILE) > this.w) continue;      // 圆距 ≤ range(width)
+        if (!st.isActive(i, j) || !st.isSolid(i, j)) continue;
+        if (st.isPlatform(i, j)) continue;                                    // !solidTop 近似载体(登记见头注)
+        if (st.isActive(i, j - 1) && st.isSolid(i, j - 1) && !st.isPlatform(i, j - 1)) continue; // 上方遮挡
+        // fail:true 档常见缺省 3（TrackPass 表注），× multiplier=2 —— 粒型/逐型数量待尘型表批
+        const num2 = 3 * 2;
+        for (let k = 0; k < num2; k++) {
+          const d = game.spawnDust?.(i * TILE, j * TILE, TILE, TILE, 14, 0, 0, 0, null, 1);
+          if (!d) break;                                                      // Main.dust 池满即原版哑槽路径
+          d.vy -= 3 + 4 * 1.5;
+          d.vy *= Math.random();
+          d.scale += 4 * 0.03;
+          causedShockwaves = true;
+        }
+        {
+          const extra = num2 - 1;
+          for (let l = 0; l < extra; l++) {
+            const d2 = game.spawnDust?.(i * TILE, j * TILE, TILE, TILE, 14, 0, 0, 0, null, 1);
+            if (!d2) break;
+            d2.vy -= 1 + 4;
+            d2.vy *= Math.random();
+          }
+        }
+      }
+    }
+    // ---- ② d31 椭圆环（:70857-70905）----
+    const vmag = Math.hypot(lvx, lvy);
+    const ux = vmag > 0 ? lvx / vmag : 0, uy = vmag > 0 ? lvy / vmag : 0;      // SafeNormalize(Zero)=零向量兜底
+    const spin = (a: number): { x: number; y: number } => {                    // RotatedBy(a)×(1,0.7)
+      const rx = Math.cos(a) * 7, ry = Math.sin(a) * 7;
+      return { x: rx * 1 - ry * 0.7, y: rx * 0.7 + ry * 1 };
+    };
+    for (let n = 0; n < 8; n++) {
+      const pt = spin(n * (Math.PI * 2) / 8);
+      const d = game.spawnDust?.(ox, oy, this.w, this.h, 31, 0, 0,
+        causedShockwaves ? 0 : 50, { r: 128, g: 128, b: 128, a: 128 }, 0.4, false, true);
+      if (!d) continue;
+      d.x = ox + pt.x; d.y = oy + pt.y;
+      d.vy -= 0.8;
+      d.vx *= 0.8;
+      d.fadeIn = 0.3 + Math.random() * 0.4;
+      d.vx += ux * 2; d.vy += uy * 2;
+      (d as unknown as { noLight?: boolean }).noLight = true;
+    }
+    if (!causedShockwaves) {
+      for (let n = 0; n < 8; n++) {
+        const pt = spin(n * (Math.PI * 2) / 8);
+        const d = game.spawnDust?.(ox, oy, this.w, this.h, 31, 0, 0,
+          100, { r: 128, g: 128, b: 128, a: 128 }, 0.4, false, true);
+        if (!d) continue;
+        d.x = ox + pt.x; d.y = oy + pt.y;
+        d.vy -= 1;
+        d.vx *= 0.4;
+        d.fadeIn = 0.3 + Math.random() * 0.4;
+        d.vx += ux * 1.5; d.vy += uy * 1.5;
+        (d as unknown as { noLight?: boolean }).noLight = true;
+      }
+    }
   }
 }
 
@@ -3788,24 +3982,30 @@ export class FlaironSpike extends Entity {
       this.alpha = Math.max(50, this.alpha - 25);
       this.vx *= 0.95; this.vy *= 0.95;
     }
-    // ★残余债清偿(2026-09-01):中心点采样改走正典管线。原版 type405 反弹计数 =
-    // HandleMovement 无条件 localAI[0]++(:18429),此处保留【事件计数】口径
-    // (bounces 仅真接触时自增)并登记差异;几何判定 half/坡面由管线正确化
+    // 反弹计数（1458 P.cs:18429-18445 type==405 支，位于 if(flag)=【lastVelocity !=
+    // velocity】接触响应链内——localAI[0]++ 只在真接触时执行；旧注"无条件每 tick 计数"
+    // 系对该行位上下文的误读，本仓事件计数口径即 parity）。反射改轴级差分判定：
+    // 碰撞轴逐一从 lastVelocity 镜像（第 1/2 次接触），第 3 次接触 Kill(:18443 else)；
+    // 几何 half/坡面由正典管线承载（残余债清偿 2026-09-01 口径不变）
     {
+      const lvx0 = this.vx, lvy0 = this.vy;
       const body = {
         x: this.x, y: this.y, w: this.w, h: this.h,
-        vx: this.vx, vy: this.vy,
+        vx: lvx0, vy: lvy0,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
         tileCollide: true, dropThrough: true,
       };
-      moveAndCollide(body, game.world, this.vx, this.vy);
+      moveAndCollide(body, game.world, lvx0, lvy0);
       const collided = body.hitWall || body.collideY || body.onGround || body.hitHead;
-      if (collided && this.bounces < 2) {
-        // 第1/2次接触:全反射续飞(:18433-18440)
-        this.vx = -this.vx; this.vy = -this.vy;
-      }
       this.x = body.x; this.y = body.y;
-      if (collided) this.bounces++;   // ★仅接触自增(修复曾放条件外每 tick 计数)
+      if (collided) {
+        if (this.bounces < 2) {
+          // 第 1/2 次接触：命中轴取 −lastVelocity 续飞（:18431-18442,轴独立判定）
+          if (body.vx !== lvx0) this.vx = -lvx0;
+          if (body.vy !== lvy0) this.vy = -lvy0;
+        }
+        this.bounces++;
+      }
     }
     if (this.bounces >= 3) {
       this.dead = true;
@@ -3823,7 +4023,7 @@ export class FlaironSpike extends Entity {
           const ux = (d.x - cx0) / len, uy = (d.y - cy0) / len;
           const spdLen = Math.hypot(d.vx, d.vy);
           d.x = cx0 + ux * 10 * this.ai1;
-          d.y = cx0 + uy * 10 * this.ai1;
+          d.y = cy0 + uy * 10 * this.ai1;   // ★此前误写 cx0（y 坐标用了 x 心）= 终清波 typo 回归钉死
           d.vx = ux * spdLen; d.vy = uy * spdLen;
           const hue = 0.4 + Math.random() * 0.2;
           const col = hslToRgbColor(hue, 0.9, 0.5);
@@ -4787,7 +4987,8 @@ export class FertilizerCloud extends Entity {
 // ================= Torch God 火把弹幕（proj 949，AI_184 cs:40100） =================
 
 /** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 40×难度曲线伤。
- *  ai0=尘色/ai1=射程——尘迹省略（粒子钩子未接），伤害/碰撞 1:1 */
+ *  ai0=尘色/ai1=射程——尾迹(每 AI 4 粒)与 Kill 爆尘已经 Game.torchGodDust 钩子
+ *  接通（原"尘迹省略/粒子钩子未接"注已陈旧,终清波复核修订）,伤害/碰撞 1:1 */
 export class TorchGodProj extends Entity {
   private sndT = 0;   // localAI[0] 首帧音哨兵
   w = 4; h = 4;
@@ -4988,7 +5189,8 @@ export class DaybreakFlare extends Entity {
   critChance = 0.04;
   /** 护甲穿透（Game 注入，命中传 hurt 减防） */
   armorPen = 0;
-  /** 近战系标记（SetDefaults melee=true :6565；浸剂链未接，登记偏差） */
+  /** 近战系标记（SetDefaults melee=true :6565——浸剂/霜燃/岩浆石/parry/nano 链已随
+   *  终清波并入 hitStep,Damage_PVE 同段镜像） */
   meleeProj = true;
   dead = false;
   w = 16; h = 16;                        // :6561-6562
@@ -5052,7 +5254,10 @@ export class DaybreakFlare extends Entity {
       if (!t) { this.killNow(game); return; }  // :38333-38336/:38346-38349 目标失效
       this.x = (t as { cx: number }).cx - this.vx * 2 - this.w / 2;     // :38338-38339
       this.y = (t as { cy: number }).cy - this.vy * 2 - this.h / 2;
-      if (this.localT % 30 === 0) {        // :38279-38282/:38341-38344 HitEffect 近似
+      if (this.localT % 30 === 0) {        // :41443-41450 flag2 = localAI[0]%30==0
+        // flag2 → targetNPC.HitEffect(0, 1.0)(:41453)——【NPC.HitEffect 敌怪自体受击尘族】
+        // (按敌型出血液/尘埃/gore)系统待移植;合成两粒火花为观感占位（C 类登记,
+        // 原"HitEffect 近似"表述升级为精确系统缺口)
         game.spawnParticles(this.cx, this.cy, '#FFB040', 2, 1.2, { life: 14 });
       }
       return;                              // tileCollide=false（:38248）且不再位移/命中
@@ -5094,7 +5299,23 @@ export class DaybreakFlare extends Entity {
       const rx = e.x + sx, rw = e.w - sx * 2, ry = e.y + sy, rh = e.h - sy * 2;
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      // ★近战乘区+浸剂链镜像（Damage_PVE :13631-36 parry×5 / :13688-96 nano×1.05；
+      //   StatusNPC 段 applyMeleeImbue(:10559 melee 门)/霜燃(:93712)/岩浆石(:10866)
+      //   /party confetti(:13693-96)——与 hitEnemies 同序,"浸剂链未接"登记偏差清偿）
+      const plFlare = game.player as unknown as {
+        buffs: { has: (b: BuffType) => boolean };
+        equipStats: { frostBurn?: boolean; magmaStone?: boolean };
+        parryDamageBuff?: boolean;
+        parryDamageBuffT?: number;
+      };
+      let mulFlare = 1;
+      if (plFlare.parryDamageBuff === true) {
+        mulFlare *= 5;
+        plFlare.parryDamageBuff = false;                       // :13633
+        plFlare.parryDamageBuffT = 0;                          // ClearBuff(198)
+      }
+      if (plFlare.buffs.has(BuffType.ImbueNano)) mulFlare *= 1.05;  // :44790-44792
+      const dmg = Math.trunc((crit ? this.damage * 2 : this.damage) * mulFlare);
       // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序，
       // F3/F1 收编升级）——镖/标枪附着族首击结算位；门+触发 = projectileSnapStrikeBonus
       // 单源，加伤随暴击并入实伤参（不吃旗乘区）
@@ -5103,6 +5324,19 @@ export class DaybreakFlare extends Entity {
         (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
           cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
+      // ---- 浸剂三件套 + party 真弹（hitEnemies 同序,StrikeNPC 前原位）----
+      applyMeleeImbue(plFlare.buffs, e as unknown as Record<string, number>,
+        () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
+          ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+      applyFrostBurn(plFlare.equipStats.frostBurn === true, e as unknown as Record<string, number>);
+      applyMagmaStoneProj(plFlare.equipStats.magmaStone === true, e as unknown as Record<string, number>);
+      if (plFlare.buffs.has(BuffType.ImbueParty)) {
+        game.spawnFriendlyProj?.(new ConfettiBurstProj(
+          (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+          (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+          (e as unknown as { vx?: number }).vx ?? 0,
+          (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusFlare ? Math.trunc(snapBonusFlare * (crit ? 2 : 1)) : 0),
         (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计

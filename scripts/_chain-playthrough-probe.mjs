@@ -21,8 +21,13 @@ const ok = (name, cond, info = '') => {
   console.log(R[R.length - 1]);
 };
 
-// 世界生成(固定种子,小世界)
-await p.evaluate(() => window.__swFlow.newWorld('chain2026', 4200, 1200));
+// 世界起点:载入用户导出的 Starter World 存档(前困难早期态,骷髅王/肉山未败)。
+// ★当前共享树 worldgen 在 pass4 生物群系崩(.inner)——并行会话在途编辑,链探针
+//   先用已知好存档驱动,worldgen 修复后可切回 newWorld('chain2026')
+import fs from 'node:fs';
+const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (20).json';
+const mapText = fs.readFileSync(MAP, 'utf8');
+await p.evaluate((t) => window.__swFlow.loadJson(t), mapText);
 await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
 await sleep(2000);
 await p.evaluate(() => {
@@ -71,7 +76,6 @@ await p.evaluate(() => {
   ok('S0 世界生成+向导在场', s.guide);
   ok('S0 守卫老人在地牢门口(重建门)', s.oldMan && s.omDist <= 2, `dist=${s.omDist} dungeonX=${s.dungeonX}`);
   console.log('world evil:', s.crimson ? 'crimson' : 'corrupt');
-  window.__evil = s.crimson;
 }
 
 // ================= S1 克苏鲁之眼(4) =================

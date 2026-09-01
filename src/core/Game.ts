@@ -14739,8 +14739,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 默认魔法路径曾硬编码 pierce 1）、extraUpdates 2/4 与 timeLeft 600 由弹表驱动、
         // 点光 0.75（:1026/:1710）
         if (cw.shoot === 20 || cw.shoot === 88) {
+          console.log('[swZap]', 'deg=' + Math.round(ang * 180 / Math.PI),
+            'spawn=('+this.player.cx.toFixed(0)+','+this.player.cy.toFixed(0)+')',
+            'vx=' + (Math.cos(ang) * cw.shootSpeed).toFixed(1),
+            'vy=' + (Math.sin(ang) * cw.shootSpeed).toFixed(1)); //$TEST
           const zapA = this.resolveShotAnchor(def.key, ang);
           const zap = new Arrow(zapA.x, zapA.y,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            cw.damage, cw.knockback, cw.shoot, null,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, cw.shoot, null,
             { grav: 0, life: pd?.timeLeft ?? 600, pierce: pd?.penetrate ?? 3 });

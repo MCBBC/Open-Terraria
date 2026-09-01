@@ -24,7 +24,48 @@ import { canHit } from '../physics/LineOfSight';
 import { LightningBoltProj } from './LightningBoltProj';
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段×AABB(CheckAABBvLineCollision 胶囊近似,共用)
 import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
+import { hslToRgb255 } from '../render/AuroraSky';
 import { TtlSprite } from '../assets/ttlSprite';
+
+// ---------------------------------------------------------------------------
+// 彩虹乘色烘焙(919/923 专供):本地 multiply+destination-in 两步染形,键按
+// RGB 步进 8 量化(同 Renderer.tintedSprite/FakeFish.silhouetteOf 桶——色相连续
+// 漂移防逐帧新键刷爆缓存)。半载窗(width==0)拒烘不缓存(天体渲染双修教训:
+// 平色矩形永久毒化缓存);命中桶直接复用。
+// ---------------------------------------------------------------------------
+const rainbowTintCache = new Map<string, HTMLCanvasElement>();
+
+function tintBake(
+  prefix: string,
+  img: CanvasImageSource | null | undefined,
+  sx: number, sy: number, sw: number, sh: number,
+  rgb: readonly [number, number, number],
+): HTMLCanvasElement | null {
+  if (!img || typeof document === 'undefined') return null;
+  const iw = (img as { width?: number }).width ?? 0;
+  const ih = (img as { height?: number }).height ?? 0;
+  if (!(iw > 0) || !(ih > 0)) return null;              // 半载拒烘
+  const w = Math.max(1, Math.ceil(sw)), h = Math.max(1, Math.ceil(sh));
+  const q = (v: number) => Math.round(v) & ~7;
+  const key = `${prefix}|${sx},${sy},${sw},${sh}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
+  const hit = rainbowTintCache.get(key);
+  if (hit) return hit;
+  if (rainbowTintCache.size > 512) rainbowTintCache.clear();   // 上限护栏(单场 BOSS 面不至)
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  cx.globalCompositeOperation = 'multiply';             // RGB 乘目标色
+  cx.fillStyle = `rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])})`;
+  cx.fillRect(0, 0, w, h);
+  cx.globalCompositeOperation = 'destination-in';       // 轮廓还原
+  cx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  cx.globalCompositeOperation = 'source-over';
+  rainbowTintCache.set(key, c);
+  return c;
+}
 
 // ===================== 共用工具(与 bossAI.ts 同语义,私有副本) =====================
 
@@ -847,7 +888,12 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   //      ★非每 tick 重试)→ 锁定后 ai[1]∈(20,200) 保速转向 AngleLerp(target,0.008),
   //      <20px 自爆 Kill;alpha −40/update 渐显 + AddLight + 尾尘环。命中侧
   //      OnFire(24)=vanillaProjStatusPlayer 表、消亡爆=Game.onProjectileDeath
-  //      467 分支(P.cs:74390)双通道不变 ----
+  //      467 分支(P.cs:74390)双通道不变。
+  //      ★ttl 裁定(终清波复核):vanilla SetDefaults(P.cs:5364-5372)无 timeLeft 覆写
+  //      ⇒缺省 3600;本仓仍传 shoot 缺省 life=300 —— 判定【成立】:全仓弹幕实体无离屏
+  //      剔除(VanillaDust 的 ±400 屏外裁剪只作用于尘池),放宽到 3600 会让脱靶制导火球
+  //      在玩家远行期间持续存活/汇聚(参考返场即遇满屏追猎),维持 300 直至引擎补齐
+  //      弹幕离屏剔除后一并放宽(已在此注留档,勿无声"顺手改真")----
   if (e.ai0 === 3) {
     if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numFire === 0) {
       // 原版硬编码第 3 拍(:65442 /num2==2)——FTW 5 拍下仍在第 3 拍补射,1:1 保留
@@ -1098,9 +1144,17 @@ function addProj(game: GameHooks, p: Entity): void {
 // 命中判定(P.cs Colliding :15711-15727):300×300 粗筛盒(_lanceHitboxBounds,弹心
 // 居中)∩目标后,沿 rotation 方向 center±40px 线段 × 宽 8(CheckAABBvLineCollision
 // 线形判定盒——本仓 segHitsRect 胶囊近似,与 Dart/Betsy 同源)。
-// 绘制(Main.cs DrawProj_FairyQueenLance :36492):Extra_178 光带 + Projectile_919
-// 按 rotation 旋,色=hslToRgb((ai[1]+0.5)%1)·Opacity(暴怒→White→OurFavoriteColor 渐变)
-// ——本仓 sprite 白画+hue-rotate 滤镜近似(色彩非命中面,C 档登记)。
+// 绘制(Main.cs DrawProj_FairyQueenLance :36492-36536)——2026-09-01 终清波逐 pass 直译:
+//   color=AI_171_GetColor(P.cs:46399)=hslToRgb((ai[1]+0.5)%1,1,.5)·Opacity,
+//   暴怒 → Color.Lerp(White,OurFavoriteColor(255,231,69),lerpValue(0,60,(int)Main.time))
+//   ·Opacity(:46399-46406);color.A=0 的 pass 在预乘管线+AlphaBlend(One,InvSrcAlpha)
+//   下=加性光叠(out.rgb+=tex·C.rgb),canvas 以 'lighter' 承载;A>0 的 pass 走 source-over。
+//   结构:Extra_178 光带双画(num2=180×40/2=3600 全长/半长 × 高 2 帧·scaleY2,fade=
+//   lerpValue(60,55)×lerpValue(0,10)) → 尾迹 num4=1..1/6 六步(-120·num4·|v|∈[0,1]
+//   反向,color·lerpValue(10,60)·(1−num4)+白 0.15 第二画 scale×0.85) → 轨道环 4 点
+//   ((n·2π+rot)×2·num3,color2=A/2) → 本体双画(num3=Lerp(.7,1,lerpValue(55,60)),先
+//   ×1.1 大档再本体白画 White×lerpValue(0,20)(A/2))。色=hsl 真值乘色烘焙
+//   (multiply+destination-in,键量化 8——hue-rotate 滤镜近似退役)。
 // ---------------------------------------------------------------------------
 export class FairyQueenLance extends Entity {
   readonly projId = 919;
@@ -1109,11 +1163,14 @@ export class FairyQueenLance extends Entity {
   private la0 = 0;                   // localAI[0]
   private readonly ang: number;      // ai[0] 出射角
   private readonly ai1v: number;     // ai[1](绘制色相)
+  private readonly enraged: boolean; // ShouldEmpressBeEnraged 出生档快照(逐帧读 Main.dayTime 差登记)
   private alpha = 255;
   dead = false;
 
-  constructor(x: number, y: number, ang: number, ai1: number, damage: number) {
+  constructor(x: number, y: number, ang: number, ai1: number, damage: number,
+    enraged = false) {
     super();
+    this.enraged = enraged;
     this.x = x - this.w / 2;         // NewProjectile X/Y 为中心锚
     this.y = y - this.h / 2;
     this.ang = ang;
@@ -1133,8 +1190,21 @@ export class FairyQueenLance extends Entity {
     if (this.la0 >= 60) {                                    // :45855-45866 发射相
       this.vx = Math.cos(this.ang) * 40;
       this.vy = Math.sin(this.ang) * 40;
-      if (Math.random() < 1 / 3) {                           // :45857 Next(3)==0 尘 267
-        game.spawnDust?.(this.cx, this.cy, 0, 0, 267, 0, 0, 100, null, 1.5, true);
+      if (Math.random() < 1 / 3) {                           // :45857-45866 尘 267
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 267, 0, 0, 100, null, 1, false, true);
+        if (d) {
+          d.fadeIn = 1;                                      // fadeIn=1
+          const [dr, dg, db] = this.colorRGB();
+          const w = Math.random() * 0.4;                     // Color.Lerp(c,White,NextFloat×0.4)
+          d.color = {
+            r: Math.round(dr + (255 - dr) * w),
+            g: Math.round(dg + (255 - dg) * w),
+            b: Math.round(db + (255 - db) * w), a: 255,
+          };
+          d.noGravity = true;
+          d.noLightEmittance = true;                         // (:45864)
+          d.scale *= 1.5;                                    // scale ×1.5(:45865)
+        }
       }
     }
     if (this.la0 >= 360) { this.dead = true; return; }       // :45863-45866
@@ -1153,38 +1223,102 @@ export class FairyQueenLance extends Entity {
     }
   }
 
+  /** AI_171_GetColor(P.cs:46399-46406):非暴怒 = hslToRgb((ai[1]+0.5)%1,1,.5);
+   *  暴怒 = White→OurFavoriteColor(255,231,69) Lerp(GetLerpValue(0,60,(int)Main.time))
+   *  ——本仓取出生档快照(Main.time 渐变窗 ≤60t,稳态恒 OurFavoriteColor,快照语义
+   *  落终值;昼→夜切换的活面差登记)。Opacity 与 A 分量由调用侧 globalAlpha 承载 */
+  private colorRGB(): [number, number, number] {
+    if (this.enraged) return [255, 231, 69];
+    return hslToRgb255((this.ai1v + 0.5) % 1, 1, 0.5);
+  }
+
+  /** DrawProj_FairyQueenLance 直译(Main.cs :36492-36536)。XNA 预乘管线+AlphaBlend
+   *  (One,InvSrcAlpha) 下:A=0 的 pass(C.a=0 ⇒ dst 权重恒 1)= 纯加性光叠,'lighter'
+   *  承载;A>0 的 pass(color2=A/2·Opacity / color4=白·A/2)走 source-over。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
-    const bright = 1 - this.alpha / 255;
-    if (bright <= 0) return;
+    const la0 = this.la0;
+    const opacity = 1 - this.alpha / 255;                   // P.Opacity(:45868 链)
+    if (opacity <= 0) return;
+    const [cr, cg, cb] = this.colorRGB();
     const img = projSprite(919);
+    if (!img || !(img.width > 0)) {
+      // 贴图缺失兜底：细长光条（色彩仍走真值）
+      ctx.save();
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.ang);
+      ctx.globalAlpha = Math.min(1, opacity);
+      ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      ctx.fillRect(-24, -4, 48, 8);
+      ctx.restore();
+      return;
+    }
+    const iw = img.width, ih = img.height;                  // 120×24 单帧
+    // GetColor 乘色烘焙缓存(saturate 通道并给 color2 的 A/2 档复用同桶)
+    const tinted = tintBake('p919', img, 0, 0, iw, ih, [cr, cg, cb]);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.ang);
-    if (img && img.width > 0) {
-      ctx.globalAlpha = bright;
-      // GetColor = hslToRgb((ai[1]+0.5)%1,1,.5)（P.cs:46399）——hue-rotate 近似
-      const hueDeg = ((this.ai1v + 0.5) % 1) * 360;
-      ctx.filter = `hue-rotate(${hueDeg.toFixed(0)}deg) saturate(1.3)`;
-      const s = 1;
-      ctx.drawImage(img, -img.width * s / 2, -img.height * s / 2, img.width * s, img.height * s);
-      // 出膛拖影（:36531-36536 num4 循环三帧近似；speed==0 时跳过）
-      if (Math.hypot(this.vx, this.vy) > 1) {
+    // ---- Extra_178 光带双画(:36505-36512):num=40,num2=180×40/2=3600 折半带宽;
+    //      origin=(0,半高),scaleY 恒 2;color3=color×fade×GTLV(0,10)——A=0 加性 ----
+    const band = r.atlas?.ensureVImage?.('vanilla/Extra_178.png') ?? null;
+    if (band && band.width > 0) {
+      const fade = lerpValue(60, 55, la0) * lerpValue(0, 10, la0);   // 出膛早段+临发尾削
+      if (fade > 0) {
+        const sxFull = 3600 / band.width;                    // XNA num2/Width
+        const bw = band.width, bh = band.height;             // 512×2
         ctx.globalCompositeOperation = 'lighter';
-        for (let k = 2; k >= 1; k--) {
-          ctx.globalAlpha = bright * 0.22 * k;
-          ctx.drawImage(img, -img.width * s / 2 - 120 / 6 * k,
-            -img.height * s / 2, img.width * s, img.height * s);
+        // 半长(scale2=(sxFull*0.5,2))
+        const inner = tintBake('e178', band, 0, 0, bw, bh, [cr, cg, cb]);
+        if (inner) {
+          ctx.globalAlpha = Math.min(1, fade * opacity);
+          ctx.drawImage(inner, 0, -bh, bw * sxFull * 0.5, bh * 2);
+          ctx.globalAlpha = Math.min(1, fade * 0.3 * opacity);
+          ctx.drawImage(inner, 0, -bh, bw * sxFull, bh * 2);
         }
+        ctx.globalCompositeOperation = 'source-over';
       }
-      ctx.filter = 'none';
-    } else {
-      // 贴图缺失兜底：细长光条
-      ctx.globalAlpha = bright;
-      ctx.fillStyle = '#FFD9F0';
-      ctx.fillRect(-24, -4, 48, 8);
+    }
+    // ---- 弹体链:num3=Lerp(.7,1,GTLV(55,60));lerpValue=GTLV(10,60)(非 clamp 域,
+    //      <10 为负整块跳过) → 尾迹六步 + 轨道环四点 + 本体双画 ----
+    const num3 = vLerp(0.7, 1, lerpValue(55, 60, la0));
+    const lv = lerpValue(10, 60, la0);
+    const speedF = lerpValue(0, 1, Math.hypot(this.vx, this.vy));
+    if (lv > 0 && tinted) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (let k = 0; k < 6; k++) {                          // num4 = 1 - k/6（原文 -= 1/6）
+        const n4 = 1 - k / 6;
+        const ox = -(120 * n4 * speedF);
+        ctx.globalAlpha = Math.min(1, lv * (1 - n4) * opacity);
+        ctx.drawImage(tinted, ox - iw * num3 / 2, -ih * num3 / 2, iw * num3, ih * num3);
+        // 白 0.15 第二画(白色温原画直接可绘)
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, 0.15 * lv * (1 - n4) * opacity);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(img, ox - iw * (num3 * 0.85) / 2, -ih * (num3 * 0.85) / 2,
+          iw * num3 * 0.85, ih * num3 * 0.85);
+        ctx.restore();
+      }
+      // 轨道环 4 点(offset 2·num3,color2=A/2·lv——alpha 档直承载;color2 半透明下
+      // 在 straight 画布用 globalAlpha 等价承载预乘通道积)
+      ctx.globalCompositeOperation = 'source-over';
+      for (let i = 0; i < 4; i++) {
+        const a = (i * 0.25) * Math.PI * 2;
+        const rx = Math.cos(a) * 2 * num3, ry = Math.sin(a) * 2 * num3;
+        ctx.globalAlpha = Math.min(1, 0.5 * lv * opacity);
+        ctx.drawImage(tinted, rx - iw * num3 / 2, ry - ih * num3 / 2, iw * num3, ih * num3);
+      }
+      ctx.globalAlpha = Math.min(1, 0.5 * lv * opacity);
+      ctx.drawImage(tinted, -iw * num3 * 1.1 / 2, -ih * num3 * 1.1 / 2,
+        iw * num3 * 1.1, ih * num3 * 1.1);
+    }
+    // 本体白画(color4=White×GTLV(0,20),A/2)
+    const bodyA = lerpValue(0, 20, la0) * 0.5 * opacity;
+    if (bodyA > 0) {
+      ctx.globalAlpha = Math.min(1, bodyA);
+      ctx.drawImage(img, -iw * num3 / 2, -ih * num3 / 2, iw * num3, ih * num3);
     }
     ctx.restore();
   }
@@ -1201,10 +1335,15 @@ export class FairyQueenLance extends Entity {
 //   · CanDamage 同上表臂(type==923 && localAI[0]<=60);命中(Colliding :15729-15753)
 //     = 由心沿 rotation 三段锥形线束:scale·{510,660,800} 长 × scale·0.7·{100,60,10} 宽,
 //     任一段相交即受理(近似=三次 segHitsRect);
-//   · 束身 CastLightOpen 12 采样(纯视觉光通道)≈ addLightAt 六步采样;
+//   · 束身光路(AI_180 :45818-45826 精确式):v3_ = hslToRgb((ai[0]/2π+la0/180)%1,
+//     1,.85)·scale,num4=800·scale 上 13 点(num5=0..1 步 1/12)CastLightOpen——
+//     DelegateMethods.cs:729-744 实心格豁免(本仓 store.isSolid 已含致动排除面)。
+//     旧"六步采样+定值色因子"近似退役(2026-09-01 终清波);
 //   · 首帧 Item_159 @base.Center(:45794)——移出调用点逐辐重复播,位置化 C 项收口。
-// 绘制(Main.cs :28702-28742):802×208 双帧行彩虹束,hsl 相位循环 + 暴怒 OurFavoriteColor
-// ——本仓取上帧行白画 hue-rotate 近似(C 档登记)。
+// 绘制(Main.cs :28706-28741 四画直译):802×208 双帧行,num24 相位循环——
+//   pass1/2 行2(value4/value5,hue+0.3/+0.15、lum lerp(0.3,.66/.5)、×白0.1、A/2,
+//   外层 ×1.2/内层 ×1.1,暴怒→OurFavoriteColor 替换)、pass3 行1(color5·0.5)、
+//   pass4 行2(color5·lerpValue(40,60));hslToRgb 真值乘色烘焙(hue-rotate 近似退役)。
 // ---------------------------------------------------------------------------
 export class SunDanceBeam extends Entity {
   readonly projId = 923;
@@ -1262,12 +1401,27 @@ export class SunDanceBeam extends Entity {
       .find((n) => !n.dead && n.id === this.bossId && n.vanillaId === 636);
     if (boss) { this.x = boss.cx - this.w / 2; this.y = boss.cy - this.h / 2; }
     this.vx = 0; this.vy = 0;
-    // CastLightOpen 12 采样 → addLightAt 六步(hslToRgb 因子近似,v3_·scale :45818-45826)
-    const dirX = Math.cos(this.rotation), dirY = Math.sin(this.rotation);
-    for (let i = 1; i <= 6; i++) {
-      game.addLightAt?.(this.cx + dirX * 800 * this.scaleV * (i / 12),
-        this.cy + dirY * 800 * this.scaleV * (i / 12),
-        this.scaleV, 0.25 * this.scaleV, this.scaleV * 0.85);
+    if (boss) {
+      // ---- 束身光路(:45818-45826 精确式,仅本体锚存活时跑——原版该段包在
+      //      Main.npc.IndexInRange(active&&type==636) 分支内):v3_ = hslToRgb
+      //      ((ai[0]/2π+la0/180)%1,1,.85)·scale(每帧色相旋转的虹彩光);13 点全采样
+      //      (num5=0..1 步 1/12),CastLightOpen 实心格豁免(DelegateMethods.cs:729-744:
+      //      非 active∨inActive∨tileSolidTop∨非 tileSolid 才 AddLight——store.isSolid
+      //      含致动排除面同构)。曾"六步+定值因子"近似退役 —— 终清波实装 ----
+      const dirX = Math.cos(this.rotation), dirY = Math.sin(this.rotation);
+      const hue = (this.baseAng / (Math.PI * 2) + this.la0 / 180) % 1;
+      const [lr, lg, lb] = hslToRgb255(hue, 1, 0.85);
+      const st = game.world?.store;
+      for (let s = 0; s <= 12; s++) {
+        const px = this.cx + dirX * 800 * this.scaleV * (s / 12);
+        const py = this.cy + dirY * 800 * this.scaleV * (s / 12);
+        const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+        // 界外格:原版 CastLightOpen 越界 return false 即无光;isSolid 对越界恒 false——
+        // 显式 inBounds 门保持同语义(不外溢照亮边缘外)
+        if (!st || !st.inBounds(tx, ty) || st.isSolid(tx, ty)) continue;
+        game.addLightAt?.(px, py,
+          (lr / 255) * this.scaleV, (lg / 255) * this.scaleV, (lb / 255) * this.scaleV);
+      }
     }
     if (this.la0 > 60) {                                       // CanDamage la0<=60 免伤门(:12463)
       hitPlayer(this, game, this.damage, false, false, (p) => this.hits(p));
@@ -1277,31 +1431,72 @@ export class SunDanceBeam extends Entity {
     }
   }
 
+  /** DrawProj_FairyQueenSunDance 直译(Main.cs :28706-28741 四画):
+   *  num24=ai[0]/2π+la0/180;num25=GTLV(0,30)×GTLV(180,150);lerpV=GTLV(40,60);
+   *  原版 origin=(帧尺寸×(0.03,.5)),dest 纵向 = lerp(.25,.7)·proj.scale——
+   *  曾 hue-rotate 滤镜+三层近似退役 —— 终清波实装(hslToRgb255 真值乘色)。 */
+  private color5RGB(): [number, number, number] {
+    return hslToRgb255(((this.baseAng / (Math.PI * 2) + this.la0 / 180) % 1), 1, 1);
+  }
+
+  /** value4/value5 的白混档:XNA Color.Lerp(color,White,0.1) 后 A/=2 */
+  private enrageLerpPass(
+    off: number, lumLo: number, lumHi: number, lerpV: number,
+  ): [number, number, number] {
+    if (this.enraged) return [255, 231, 69];          // OurFavoriteColor ×num25(A 面走 α)
+    const base = hslToRgb255(
+      ((this.baseAng / (Math.PI * 2) + this.la0 / 180 + off) % 1), 1,
+      vLerp(lumLo, lumHi, lerpV),
+    );
+    return [
+      base[0] + (255 - base[0]) * 0.1,                // Lerp(c, White, .1)
+      base[1] + (255 - base[1]) * 0.1,
+      base[2] + (255 - base[2]) * 0.1,
+    ];
+  }
+
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
     if (this.scaleV <= 0.01) return;
     const img = projSprite(923);
     if (!img || !(img.width > 0)) return;
-    const bandH = img.height / 2;                              // Frame(1,2) 双帧行(:28708-28709)
-    const rotDeg = ((this.baseAng + this.la0 / 180) % 1) * 360;// hsl 相位(num24 :28711)近似驱动滤镜
-    const wob = 1 + 0.15 * lerpValue(40, 60, this.la0);        // vector=(1,lerp(.25,.7)) 径向收敛近似
+    const iw = img.width;
+    const bandH = Math.floor(img.height / 2);         // Frame(1,2) 双帧行(:28708-28709)
+    const la0 = this.la0;
+    const num25 = lerpValue(0, 30, la0) * lerpValue(180, 150, la0);
+    if (num25 <= 0) return;
+    const lerpV = lerpValue(40, 60, la0);
+    const sqY = vLerp(0.25, 0.7, lerpV);              // 纵向收敛(vector.Y·scale)
+    const c5 = this.color5RGB();
+    const v4 = this.enrageLerpPass(0.3, 0.3, 0.66, lerpV);
+    const v5 = this.enrageLerpPass(0.15, 0.3, 0.5, lerpV);
+    const t5 = tintBake('p923c5', img, 0, 0, iw, img.height, c5);
+    const t4 = tintBake('p923v4', img, 0, 0, iw, img.height, v4);
+    const tv5 = tintBake('p923v5', img, 0, 0, iw, img.height, v5);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rotation);
-    ctx.filter = this.enraged ? 'none' : `hue-rotate(${rotDeg.toFixed(0)}deg) saturate(1.35)`;
-    ctx.globalAlpha = Math.min(1, this.scaleV * 0.85);
-    // 帧 1 双层(外 ×1.2/内 ×1.05)+ 帧 0 芯层(:28727/:28738 顺序简化为三层)
-    const drawBand = (band: 0 | 1, sw: number, alpha: number) => {
-      ctx.globalAlpha = Math.min(1, this.scaleV * alpha);
-      ctx.drawImage(img, 0, band * bandH, img.width, bandH,
-        -0.03 * img.width * sw, -bandH * sw / 2, img.width * sw, bandH * sw);
+    // dest=origin 抵消式:origin=(.03·iw, 半帧行高) → 左偏 .03·destW、上偏 .5·destH
+    type Pass = {
+      tint: HTMLCanvasElement | null; band: 0 | 1; mul: number; alpha: number;
     };
-    drawBand(1, this.scaleV * 1.2 * wob, 0.5);
-    drawBand(1, this.scaleV * 1.05 * wob, 0.65);
-    drawBand(0, this.scaleV * wob, 0.5);
-    ctx.filter = 'none';
+    const passes: Pass[] = [                           // :28727/:28733/:28737/:28739
+      { tint: t4, band: 1, mul: 1.2, alpha: num25 * 0.5 },          // value4 ×vector*1.2
+      { tint: tv5, band: 1, mul: 1.1, alpha: num25 * 0.5 },         // value5 ×vector*1.1
+      { tint: t5, band: 0, mul: 1, alpha: num25 * 0.5 },            // color5·0.5 行1
+      { tint: t5, band: 1, mul: 1, alpha: num25 * lerpV },          // color5·lerpV 行2
+    ];
+    for (const p of passes) {
+      if (!p.tint || p.alpha <= 0) continue;
+      const dw = iw * this.scaleV * p.mul;
+      const dh = bandH * sqY * this.scaleV * p.mul;
+      ctx.globalAlpha = Math.min(1, p.alpha);
+      ctx.drawImage(p.tint,
+        0, p.band * bandH, iw, bandH,
+        -0.03 * dw, -dh / 2, dw, dh);
+    }
     ctx.restore();
   }
 }
@@ -1363,6 +1558,31 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   //  曾得 9999×1.5=14999（乘区序错，2026-08-18 审查勘误）
   e.def.damage = dayEnrage ? 9999 : Math.round(b.dmg * (dashBoost ? 1.5 : 1));
 
+  // ---- 弹伤五元组 Remap(AI_120_HallowBoss NPC.cs(1458):46495-46499):
+  //      num = GetAttackDamage_ForProjectiles(phase 内 normal 锚, expert 锚)
+  //         = (int)Remap(difficulty, Classic(1), Expert(2), normal, expert)（NPC.cs:7079,
+  //      Utils.Remap clamped 默认——大师/传奇压回 expert 档）。锚随二阶段翻转:
+  //        num6 光枪墙 919 (:46909/:46940/:47260/:47291)  p1(50,30)→p2(60,35)
+  //        num7 光枪回环 919 (:47122)                      p1(70,65)→p2(65,30)
+  //        num8 彩虹射线/螺旋 873(:46798/:46807/:47331)     p1(45,30)→p2(50,35)
+  //        num9 永恒彩虹 872 (:46982)                      p1(45,30)→p2(50,35)
+  //        num10 太阳舞 923 (:47022)                       p1(50,35)→p2(60,40)
+  //      flag4=白天暴怒 → 五元组整体覆写 9999（:46500-46507,后于 Remap,不参与乘区）。
+  //      ★曾按经典值二元硬编码(dayEnrage?9999:phase2?a:b),专家档失配+大师被错钉
+  //      经典值,C 档登记退役 —— 终清波实装。874 出生极光弹原版 damage=0(:46528),
+  //      case3 的 874(num5=40) 属无表项不可达态,维持不接 ----
+  const diff = e.difficulty;
+  const empProjDmg = (
+    nP1: number, nP2: number, eP1: number, eP2: number,
+  ): number => getAttackDamageForProjectiles(
+    phase2 ? nP2 : nP1, phase2 ? eP2 : eP1, diff,
+  );
+  const num6 = dayEnrage ? 9999 : empProjDmg(50, 60, 30, 35);   // :46332
+  const num7 = dayEnrage ? 9999 : empProjDmg(70, 65, 65, 30);   // :46336
+  const num8 = dayEnrage ? 9999 : empProjDmg(45, 50, 30, 35);   // :46333
+  const num9 = dayEnrage ? 9999 : empProjDmg(45, 50, 30, 35);   // :46334
+  const num10 = dayEnrage ? 9999 : empProjDmg(50, 60, 35, 40);  // :46335
+
   switch (e.ai0) {
     // ---- 0 出生(:46370-46422):velocity=(0,5) 后 0.95 阻尼,180t 渐显;全程无敌(flag6=false) ----
     case 0: {
@@ -1413,7 +1633,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       const num91 = flag2 ? 2 : 3;          // :46631-46635 flag2 射速加密
       if (Math.floor(e.ai1) % num91 === 0 && e.ai1 < 60) {
         const [dvx, dvy] = rot(0, -6, (Math.PI / 2) * (Math.random() * 2 - 1));
-        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, dayEnrage ? 9999 : phase2 ? 50 : 45, 873);  // num8 :46333
+        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, num8, 873);  // num8 :46333（Remap 见上）
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1450,7 +1670,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         // 沿锁定角 40 速发射(2026-08-31 台账批实体化;旧「Projectile.AI 收敛:12 速
         // 直飞/弹 ai1 延时参」说法系误读——ai[1] 仅作色相源,AI 不消费)
         addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
-          dayEnrage ? 9999 : phase2 ? 60 : 50));   // num6 :46332
+          dayEnrage, num6));   // num6 :46332
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1468,7 +1688,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const [ux, uy] = rot(0, 1, Math.PI / 2 + Math.PI * 2 * t + base);
           const [ox, oy] = rot(ux, uy, -Math.PI / 2);
           shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8,
-            dayEnrage ? 9999 : phase2 ? 50 : 45, 872);   // num9 :46334
+            num9, 872);   // num9 :46334（Remap 见上）
         }
       }
       e.ai1 += 1;
@@ -1491,7 +1711,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           // timeLeft=180(SetDefaults :8766——曾误传 ttl 240);首帧音 Item159 移入
           // SunDanceBeam 弹位播(C 光音位置化,2026-08-31)
           addProj(game, new SunDanceBeam(e.cx, e.cy - 100, a, e.id,
-            dayEnrage ? 9999 : phase2 ? 60 : 50, dayEnrage));   // num10 :46335
+            num10, dayEnrage));   // num10 :46335（Remap 见上）
         }
       }
       e.ai1 += 1;
@@ -1542,7 +1762,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           // 原版 NewProjectile(Vector2.Zero,919,ai[0]=v3.ToRotation() 锁定角,
           // ai[1]=num80 线上分位)(:47122)——AI_179 60t 预告→40 速发射(实体化 FairyQueenLance)
           addProj(game, new FairyQueenLance(ox, oy, Math.atan2(vy, vx), t,
-            dayEnrage ? 9999 : phase2 ? 65 : 70));   // num7 :46336
+            dayEnrage, num7));   // num7 :46336
         }
       }
       e.ai1 += 1;
@@ -1622,7 +1842,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
         addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
-          dayEnrage ? 9999 : phase2 ? 60 : 50));   // num6 :46332
+          dayEnrage, num6));   // num6 :46332（case11 预测光枪墙）
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1644,7 +1864,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       if (Math.floor(e.ai1) % num22 === 0 && flag11) {
         const [svx, svy] = rot(0, -20, Math.PI * 2 * num23);   // :47176
         shoot(game, e.cx - 55, e.cy - 30, svx, svy,
-          dayEnrage ? 9999 : phase2 ? 50 : 45, 873);     // num8（:47179）
+          num8, 873);     // num8（:47179，Remap 见上）
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }

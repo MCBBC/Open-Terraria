@@ -3,7 +3,7 @@
 // ② 文案粘滞——无 VAN_PASS_MESSAGE 词条的 beginVan 不改显示键（原版 Message 持久）；
 // ③ 自愈——leaveSlot 把未显式 beginVan 的声明成员权重一次性补收；
 // ④ 限流——makeThrottledSink 首帧/force/label 变化必达，微小抖动被抑制。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { GenProgress, makeThrottledSink } from '../src/world/gen/GenProgress';
 
 describe('GenProgress 加权账目', () => {
@@ -64,5 +64,36 @@ describe('makeThrottledSink 限流', () => {
     sink('b', 0.200, 0.3, false);               // 标签变化必达
     expect(out.map((x) => x[0])).toEqual(['a', 'a', 'b']);
     expect(out[1]![1]).toBe(0.105);
+  });
+});
+
+describe('beginVan 声明护栏（终清零批）', () => {
+  it('多成员槽内 begin 未声明成员：console.warn 告警（Dungeon 漏声明回归锁）', () => {
+    const warns: string[] = [];
+    const spy = vi.spyOn(console, 'warn').mockImplementation((m?: unknown) => warns.push(String(m)));
+    const prog = new GenProgress(null);
+    prog.totalWeight = 10;
+    prog.enterSlot('生物群系', ['Slush', 'Mountain Caves', 'Beaches']);
+    prog.beginVan('Slush');
+    expect(warns.filter((w) => w.includes('未声明'))).toHaveLength(0);
+    prog.beginVan('Dungeon');                        // ★曾漏声明的实况
+    expect(warns.some((w) => w.includes('"Dungeon"') && w.includes('生物群系'))).toBe(true);
+    spy.mockRestore();
+  });
+  it('单成员槽自动开窗不告警；已声明成员不告警', () => {
+    const warns: string[] = [];
+    const spy = vi.spyOn(console, 'warn').mockImplementation((m?: unknown) => warns.push(String(m)));
+    const prog = new GenProgress(null);
+    prog.totalWeight = 5;
+    prog.enterSlot('沙丘', ['Dunes']);               // 单成员
+    expect(warns).toHaveLength(0);
+    prog.endVan();
+    const prog2 = new GenProgress(null);
+    prog2.totalWeight = 10;
+    prog2.enterSlot('洞穴', ['Rock Layer Caves', 'Surface Caves']);
+    prog2.beginVan('Rock Layer Caves');
+    prog2.beginVan('Surface Caves');
+    expect(warns).toHaveLength(0);
+    spy.mockRestore();
   });
 });

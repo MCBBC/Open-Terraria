@@ -26,8 +26,10 @@ import { sat, type Sm2PxGenFn } from './sm2Runtime';
 import { GEN_MAP } from './gen/genIndex.gen';
 
 /** PR#3 引擎开关：codegen 直线代码优先，VM 保留为差分门 oracle 与回退路径。
- *  任何 pass 无生成产物（genIndex 缺项/生成器 refuse）自动落回 VM。 */
-const SM2_CODEGEN = true;
+ *  任何 pass 无生成产物（genIndex 缺项/生成器 refuse）自动落回 VM。
+ *  可运行期切换(操作端兜底/测试双跑)，setSm2CodegenEnabled(false)=整体回 VM。 */
+let SM2_CODEGEN = true;
+export function setSm2CodegenEnabled(v: boolean): void { SM2_CODEGEN = v; }
 
 export interface SM2Uniforms {
   uColor: [number, number, number];
@@ -335,11 +337,58 @@ export class SM2Pass {
     }
   }
 
-  /** 执行单像素；返回 oC0 RGBA（0..1）或 null=texkill。regs/tex/v0/o 由调用方复用 */
+  /** PR#3：codegen 引擎通路（懒初始化 + 采样器身份缓存的一次性 out 化适配）。 */
+  private genFn?: Sm2PxGenFn | null;
+  private static normCache = new WeakMap<object, Array<((u: number, v: number, out: Float64Array) => void) | undefined>>();
+
+  /** execPixel：codegen 直线体优先(SM2_CODEGEN 且有产物)，否则回退 VM。
+   * VM 路径与生成路径共享金标网(codegen-parity 差分门=切换前提)。 */
   execPixel(c: Float64Array, regs: Float64Array, tex: Float64Array,
     v0: Float64Array, o: Float64Array, t0x: number, t0y: number,
     samplers: Array<SM2Sampler | SM2SamplerOut | undefined>): [number, number, number, number] | null {
+    if (SM2_CODEGEN && this.genFn === undefined) {
+      const e = (GEN_MAP as Record<string, { px: unknown; killable: boolean } | undefined>)[this.name];
+      this.genFn = e ? (e.px as Sm2PxGenFn) : null;   // 缺产物=null ⇒ 本 pass 走 VM
+    }
+    if (SM2_CODEGEN && this.genFn) {
+      let norm = SM2Pass.normCache.get(samplers);
+      if (!norm) {
+        const noopFill = SM2Pass.sampFallback;
+        norm = samplers.map((s) => {
+          if (!s) return noopFill;
+          if (s.length === 3) return s as SM2SamplerOut;
+          const legacy = s as SM2Sampler;
+          // 传统元组采样器的一次性适配(每 samplers 数组身份只建一次)
+          return (uu: number, vv: number, o4: Float64Array): void => {
+            const r4 = legacy(uu, vv);
+            o4[0] = r4[0]; o4[1] = r4[1]; o4[2] = r4[2]; o4[3] = r4[3];
+          };
+        });
+        // 槽位补齐到 4：生成体对缺失槽直接调用，VM 语义=write(0,0,0,1) 兜底
+        while (norm.length < 4) norm.push(noopFill);
+        SM2Pass.normCache.set(samplers, norm);
+      }
+      tex[0] = t0x; tex[1] = t0y;
+      const killed = this.genFn(c, regs, tex, v0, o, norm, this.sampOutGen, SM2Pass.scrGen);
+      if (killed === null) return null;
+      return [o[0], o[1], o[2], o[3]];
+    }
     tex[0] = t0x; tex[1] = t0y;
+    return this.execPixelVM(c, regs, tex, v0, o, samplers);
+  }
+
+  private sampOutGen = new Float64Array(4);           // OUT 写回缓冲(gen 契约)
+  private static scrGen = new Float64Array(4);        // gen 体内部 sm2Scr 共享槽
+  /** 缺失采样槽的 VM 兜底等价体（case42 缺省 write(0,0,0,1)） */
+  private static sampFallback = (u: number, v: number, o4: Float64Array): void => {
+    void u; void v;
+    o4[0] = 0; o4[1] = 0; o4[2] = 0; o4[3] = 1;
+  };
+  /** （PR#3 前）逐指令 switch VM——保留为 oracle 与回退；生成体不发 texkill 时
+   *  语义面完全一致（差分门锁定）。orginal inline implementation moved verbatim. */
+  private execPixelVM(c: Float64Array, regs: Float64Array, tex: Float64Array,
+    v0: Float64Array, o: Float64Array,
+    samplers: Array<SM2Sampler | SM2SamplerOut | undefined>): [number, number, number, number] | null {
     regs.fill(0);
     o.fill(0);
     for (const ins of this.prog) {

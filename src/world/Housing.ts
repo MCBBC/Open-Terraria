@@ -59,6 +59,34 @@ const COUNTS_AS_CHAIR = new Set<number>([15, 79, 89, 102, 487, 497]);
 
 const isDoorType = (t: number) => t === T.DOOR_CLOSED || t === T.DOOR_OPEN;
 
+// ★★对抗修复批②2026-09-01（C-F3 泛洪封边帧规则）——原版 CheckRoom 的门件分支
+// （WorldGen.cs:6113-6127）是逐 sheet 语义，此前 isDoorType 十门件【无帧】全当硬
+// 边界有两处偏差：开门(11)中段把应连通的两侧室切开；高门开启态 389/翻板 386 等
+// 非实心 COUNTS_AS_DOOR 件被误当边界。精确规则：
+//   · 实心（tileSolidLike 代理 tileSolid）一律封房（主规则 :6111-6113，平台/金属条同）；
+//   · 开门 11 仅锚帧 frameX∈{0,54,72,126} 封——原始相等比较不用模制（对照 CloseDoor
+//     编码 cs:32094-32145：两叶四列 frameX%72∈{0,18,36,54}、+72 进第二叶,首末列贴
+//     墙为界,中列 18/36/90/108 是门洞穿透继续泛洪 → 开着的门两室合并为一间 =
+//     原版语义;另 IsOpenDoorAnchorFrame cs:69697-69709 的 %72 制仅消费于 ScoreRoom
+//     头顶扫描豁免面,两者不等价勿混用）；
+//   · 高门开启态 389 无条件封（:6118-6121）；关闭态 388 走实心主规则；
+//   · 翻板门 386 条件封 (frameX<36&&frameY==18)||(frameX>=36&&frameY==0)（:6123-6127）。
+// isDoorType 十门件语义只在 COUNTS_AS_DOOR 登记面（markHouseTile/floodRoom 家具旗）
+// 与 findFreeHouse 入口探针枚举面保留。
+/** 开门硬边界锚帧（cs:6115：frameX==0||==54||==72||==126 原始相等） */
+function isOpenDoorHardFrame(fx: number): boolean {
+  return fx === 0 || fx === 54 || fx === 72 || fx === 126;
+}
+/** 泛洪边界的非实心门件判定（邻格 nactive 时调；sheet=vanilla sheet、fx/fy=邻格帧） */
+function doorFrameBoundary(sheet: number, fx: number, fy: number): boolean {
+  switch (sheet) {
+    case 11: return isOpenDoorHardFrame(fx);
+    case 389: return true;
+    case 386: return (fx < 36 && fy === 18) || (fx >= 36 && fy === 0);
+    default: return false;
+  }
+}
+
 /** Main.tileSolid 代理（CheckRoom 填充门 :6121 = 纯 tileSolid，无 !tileSolidTop 豁免）：
  *  平台/金属条/种植箱在原版 tileSolid=true → 封房（平台地板可做房间边界）；
  *  桌/砧/笼等家具 tileSolid=false（仅 solidTop）→ 不封（房内家具合法）。
@@ -220,6 +248,14 @@ const IGNORED_IN_HOUSE_SCORE = new Set([4, 3, 73, 82, 83, 84, 386]);
 const BASIC_CHEST = new Set([21, 467]);
 /** ScoreRoom_CanBeHomeSpot（WorldGen.cs:5967-5978）：boulder 379 不可作家 */
 const BOULDER_SHEET = 379;
+/** 主链共享 extraSolid（★★对抗修复批②2026-09-01 C-F4）：boulder/泡沫块 379。
+ *  原版 SpawnTownNPC 家族各入口均临时翻转 Main.tileSolid[379]=true 后还原
+ *  （CheckForHousesNearAPlayer cs:72199-72201 / SpawnHomelessNPC cs:4979-4994 /
+ *  床 CheckSpawn 先例 Game.checkBedSpawn 的 checkRoomEnclosure extraSolid 同构）；
+ *  本仓不改全局静态表，以「视作实心的 vanilla sheet 集」注入泛洪与种子预检
+ *  （scoreRoom_CanBeHomeSpot 对 379 落位格的排除 cs:5953-5962 单列早存,互补不冲突）。
+ *  泛洪默认取该集=域内统一视角,等价于原版逐调用点翻转的合成效果。 */
+const MAIN_EXTRA_SOLID: ReadonlySet<number> = new Set([BOULDER_SHEET]);
 
 // ================= 同房判定（TownRoomManager.CanNPCsLiveWithEachOther） =================
 
@@ -314,10 +350,11 @@ export function scoreRoom(
     if (y < ry1) ry1 = y;
     if (y > ry2) ry2 = y;
   }
-  // ② 邪恶度：包围盒外扩 46（Housing_GetTestedRoomBounds ±(40+5+1)）扫 tile 计数
-  //    （CountTileTypesInArea startX+1..endX-1 / startY+2..endY+1）
-  let bx1 = Math.max(5, rx1 - 46), bx2 = Math.min(st.w - 6, rx2 + 46);
-  let by1 = Math.max(5, ry1 - 44), by2 = Math.min(st.h - 6, ry2 + 44);
+  // ② 邪恶度：包围盒外扩（Housing_GetTestedRoomBounds cs:5929-5951，testedRoomBounds
+  //    同构源；邪恶度扫 CountTileTypesInArea startX+1..endX-1 / startY+2..endY+1
+  //    cs:5812-5820——与松露外扩计数共用同一盒形,勿再开平行副本）
+  const rb = testedRoomBounds(st, rx1, rx2, ry1, ry2);
+  const bx1 = rb.x0, bx2 = rb.x1, by1 = rb.y0, by2 = rb.y1;
   let corrupt = 0, crimson = 0, hallow = 0, sunflower = 0;
   for (let y = by1 + 2; y <= by2 + 1; y++) {
     for (let x = bx1 + 1; x <= bx2 - 1; x++) {
@@ -459,7 +496,9 @@ interface FloodOpts {
 function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags, opts: FloodOpts = {}): Room | null {
   const requireFurniture = opts.requireFurniture !== false;
   const requireStand = opts.requireStand !== false;
-  const extraSolid = opts.extraSolid;
+  // extraSolid 缺省=主链共享集 {379}（C-F4：原版 SpawnTownNPC 家族对 tileSolid[379]
+  // 的临时翻转合成视角;显式传参仅 checkRoomEnclosure 床路径——同值）
+  const extraSolid: ReadonlySet<number> | undefined = opts.extraSolid ?? MAIN_EXTRA_SOLID;
   const ignoreNeeds = opts.ignoreNeeds === true;
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
@@ -510,13 +549,16 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       if (tiles.has(ni)) continue;
       const nt = st.type[ni];
       const ndef = nt ? TILE_DEFS[nt] : undefined;
-      // 边界：纯 tileSolid（tileSolidLike = 实心 + 平台/金属条/种植箱）+ 门。
-      // 原版 CheckRoom 填充门 :6121 = nactive && tileSolid（无 !tileSolidTop 豁免）
-      // → 平台地板封房、桌/砧/笼等家具（tileSolid=false）为房内格可穿透。
+      // 边界（CheckRoom cs:6111-6127 精确规则，见 doorFrameBoundary 注记）：
+      // 实心主规则 + 开门锚帧/389/386 逐帧门件分支。原版填充门 :6121 =
+      // nactive && tileSolid → 平台地板封房、桌/砧/笼等家具（tileSolid=false）
+      // 为房内格可穿透。
       // 原版先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
       // ScoreRoom 的 Housing_CheckIfInRoom(地板格) 依赖这一点
-      if (tileSolidLike(nt) || isDoorType(nt) || (extraSolid !== undefined && nt !== 0
-        && extraSolid.has(sheetOf(nt)))) {
+      const nsheet = ndef ? (ndef.vanilla?.sheet ?? -1) : -1;
+      if (tileSolidLike(nt)
+        || (nt !== 0 && doorFrameBoundary(nsheet, st.frameX[ni], st.frameY[ni]))
+        || (nt !== 0 && extraSolid.has(nsheet))) {
         // 边界格同样登记 houseTile（原版在 tileSolid 短路前 :6090）——平台 19
         // 地板即"门"（R21:平台入口房不再一律 notValid）
         if (ndef) markHouseTile(ndef.vanilla?.sheet ?? -1);
@@ -631,9 +673,13 @@ export function findFreeHouse(
 /** 房屋需求旗标（RoomNeeds :5616-5660 四布尔；填充由 floodRoom 完成，失败时也保留已见项） */
 export interface RoomNeedsFlags { table: boolean; chair: boolean; light: boolean; door: boolean }
 
-/** 查询失败原因（TownNPCRoomCheckFailureReason 对齐 + 我们两个合成档） */
+/** 查询失败原因（TownNPCRoomCheckFailureReason 对齐 + 我们的合成档；
+ *  'standing'=★C-F8/F-13 新增数据位：房况四件套齐全但 ScoreRoom 无正分站位
+ *  （hasStandingSpace=false）——UI 文案映射挂账（见 Game.housingQuery），原版此档
+ *  落「不是有效房屋」inter[40] 兜底） */
 export type HousingFailReason =
-  | 'ok' | 'edge' | 'solid' | 'tooBig' | 'tooSmall' | 'hole' | 'occupied' | 'evil' | 'needs';
+  | 'ok' | 'edge' | 'solid' | 'tooBig' | 'tooSmall' | 'hole' | 'occupied' | 'evil'
+  | 'needs' | 'standing';
 
 export interface HousingQueryResult {
   room: Room | null;
@@ -656,14 +702,17 @@ export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'uns
 export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
 export function queryRoom(st: TileStore, x: number, y: number,
-  opts: Pick<FloodOpts, 'ignoreNeeds'> = {}): HousingQueryResult {
+  opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid'> = {}): HousingQueryResult {
   const flags: RoomNeedsFlags = { table: false, chair: false, light: false, door: false };
   if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) {
     return { room: null, flags, reason: 'edge' };
   }
   // 起点实心（StartedInASolidTile :6025-6032）——原版仅置 canSpawn=false 后继续
-  // 泛洪（同轮后续检查会失败）；此处直接判失败等价（实心种子的泛洪无意义）
-  if (st.flags[st.idx(x, y)] && tileSolidLike(st.type[st.idx(x, y)])) {
+  // 泛洪（同轮后续检查会失败）；此处直接判失败等价（实心种子的泛洪无意义）。
+  // ★C-F4：Main.tileSolid[379] 翻转窗内种子格同判实心（同构 checkRoomEnclosure 预检）
+  if (st.flags[st.idx(x, y)]
+    && (tileSolidLike(st.type[st.idx(x, y)])
+      || MAIN_EXTRA_SOLID.has(sheetOf(st.type[st.idx(x, y)])))) {
     return { room: null, flags, reason: 'solid' };
   }
   const room = floodRoom(st, x, y, flags, opts);
@@ -686,11 +735,205 @@ export function housingCheckAt(
   st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
   x: number, y: number, askingNpcId = -1,
 ): HousingQueryResult & { score: number } {
+  // 主链 extraSolid 缺省（C-F4）：queryRoom/floodRoom 默认带 MAIN_EXTRA_SOLID{379}
   const q = queryRoom(st, x, y);
   if (!q.room) return { ...q, score: 0 };
   const s = scoreRoom(st, q.room, occupied, askingNpcId);
   if (s.score < 0) return { ...q, room: q.room, reason: 'occupied', score: -1 };
   if (s.roomEvil) return { ...q, room: q.room, reason: 'evil', score: s.score };
-  if (s.score <= 0) return { ...q, room: q.room, reason: 'needs', score: 0 };
+  // ★C-F8：走到这里四件套必齐（floodRoom requireFurniture 已过）——score≤0 且
+  // hasStandingSpace=false = 无可用站位（杂务挤占/头顶压分全负），单列数据位
+  if (s.score <= 0) {
+    return { ...q, room: q.room, reason: s.hasStandingSpace ? 'needs' : 'standing', score: 0 };
+  }
   return { ...q, reason: 'ok', score: s.score };
+}
+
+// ================= 外扩测试盒 + 松露人居所条件（Housing_GetTestedRoomBounds cs:5929-5951 /
+//  CheckSpecialTownNPCSpawningConditions(160) cs:4890-4918，★★对抗修复批②2026-09-01 C-F6/E） =================
+
+export interface TileRect { x0: number; x1: number; y0: number; y1: number }
+
+/** 房间包围盒外扩盒（GetTestedRoomBounds：膨胀 40 + 缘距 X±6/Y±4 →
+ *  startX=rx1-46 / endX=rx2+46 / startY=ry1-44 / endY=ry2+44，[5,max-6] 钳制；
+ *  hoisted function——scoreRoom 邪恶度块与松露计数共用同一盒形勿再开副本） */
+export function testedRoomBounds(
+  st: TileStore, rx1: number, rx2: number, ry1: number, ry2: number,
+): TileRect {
+  return {
+    x0: Math.max(5, rx1 - 46),
+    x1: Math.min(st.w - 6, rx2 + 46),
+    y0: Math.max(5, ry1 - 44),
+    y1: Math.min(st.h - 6, ry2 + 44),
+  };
+}
+
+/** 外扩盒蘑菇族计数（cs:4898-4911：i∈startX+1..endX-1 × j∈startY+2..endY+1 扫
+ *  tile∈{70 草/71 植/72 树/528 藤}）。SceneMetrics.MushroomTileThreshold=100。 */
+const MUSHROOM_SHEET = new Set([70, 71, 72, 528]);
+export const MUSHROOM_TILE_THRESHOLD = 100;
+
+/** room.tiles → 包围盒 → 外扩盒蘑菇计数（Game 入驻轮③/①''' 复核/UI 手动分配三路共用） */
+export function expandedMushroomCount(st: TileStore, room: Room): number {
+  let rx1 = st.w, rx2 = 0, ry1 = st.h, ry2 = 0;
+  for (const i of room.tiles) {
+    const x = i % st.w, y = (i / st.w) | 0;
+    if (x < rx1) rx1 = x;
+    if (x > rx2) rx2 = x;
+    if (y < ry1) ry1 = y;
+    if (y > ry2) ry2 = y;
+  }
+  const b = testedRoomBounds(st, rx1, rx2, ry1, ry2);
+  let count = 0;
+  for (let y = b.y0 + 2; y <= b.y1 + 1; y++) {
+    for (let x = b.x0 + 1; x <= b.x1 - 1; x++) {
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      if (st.flags[i] && MUSHROOM_SHEET.has(sheetOf(st.type[i]))) count++;
+    }
+  }
+  return count;
+}
+
+/** 松露现任房条件复核（①'' 复核环用）：自 home 站位点泛出所在房间后按外扩盒
+ *  计数 ≥100 判定；泛不出房间=已失效=false。unlockedTruffleSpawn 置位免检由调用方
+ *  附带（vanilla 条件首查 :4893-4895）；地表门 roomY2≤worldSurface 同样调用方判
+ *  （groundLevel 口径,Game 入驻轮③同式）。 */
+export function truffleHomeConditionOk(st: TileStore, hx: number, hy: number): boolean {
+  const q = queryRoom(st, hx, hy, { ignoreNeeds: true });
+  if (!q.room) return false;
+  return expandedMushroomCount(st, q.room) >= MUSHROOM_TILE_THRESHOLD;
+}
+
+// ================= 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-72215，
+// ★★对抗修复批②2026-09-01 C-F1） =================
+
+/**
+ * 视野采样矩形（cs:72188-72190）：玩家中心 tile 坐标零尺寸矩形 Inflate(
+ * MaxWorldViewSize.X/32, Y/32) 后 ClampToWorld(margin 10)。换算标定：
+ * Main.MaxWorldViewSize=(1920,1200)（Main.cs:754-758 静态常量）÷32 =
+ * X±60 / Y±37（int 除截断）。
+ * ★任务蓝本曾按 2048×1200 推导 64×37.5——按反编译基准更正为 1920×1200
+ * （CLAUDE.md「反编译源码是唯一标杆」）。
+ */
+export function nearHouseViewRect(st: TileStore, ptx: number, pty: number): TileRect {
+  return {
+    x0: Math.max(10, ptx - 60),
+    x1: Math.min(st.w - 11, ptx + 60),
+    y0: Math.max(10, pty - 37),
+    y1: Math.min(st.h - 11, pty + 37),
+  };
+}
+
+/**
+ * 单玩家 300 点随机采样（cs:72193-72203 NextFromRectangle 均匀取点）：
+ * 首个 wallHouse 背墙命中即返回该格坐标。rand 注入面=受控 rng 或 Math.random——
+ * 近链采样天然非确定性判定（原版 Main.rand），非掷流锚（登记，与确定性掷流对拍无关）。
+ */
+export function sampleHouseSeed(
+  st: TileStore, rect: TileRect, rand: () => number,
+): [number, number] | null {
+  for (let j = 0; j < 300; j++) {
+    const x = rect.x0 + Math.floor(rand() * (rect.x1 - rect.x0 + 1));
+    const y = rect.y0 + Math.floor(rand() * (rect.y1 - rect.y0 + 1));
+    if (!st.inBounds(x, y)) continue;
+    if (WALL_HOUSE.has(st.wall[st.idx(x, y)])) return [x, y];
+  }
+  return null;
+}
+
+/**
+ * SpawnTownNPC 受理核（cs:5332-5536 的房屋面合并实现）：StartRoomCheck（种子预检 +
+ * 单点直锚泛洪,queryRoom 承担;ignoreNeeds——家具检查是 RoomNeeds 独立步骤,由
+ * floodRoom 四旗随扫完成）→ ScoreRoom(-1,n) hiScore>0。bestX/bestY = score 位地板格,
+ * vanilla homeTile 写 bestX/bestY,本仓 home 约定=站立格（地板上一行 s.y-1,同
+ * updateTownNpcArrival ① 口径）;迁入（RelocatedHomeless :5367-5376）与新住户
+ * （Successful）共用同一 home 位。ok=false 时 Blocked/FoundHouseNoSpawn 分支由调用方
+ * 依 mover 有无落账（受理通过但无可迁者才缓存 LastFoundHouse :5535,早退支不缓存）。
+ */
+export interface HousingAcceptanceResult {
+  ok: boolean;
+  /** 新家站位（ok=true 才有值） */
+  home: { x: number; y: number } | null;
+  /** 受理现场房间（失败也带——松露外扩复评/占用校验复评用） */
+  room: Room | null;
+}
+export function acceptTownNPCAtHouse(
+  st: TileStore,
+  occupied: ReadonlyArray<{ x: number; y: number; npcId?: number }>,
+  x: number, y: number, askingNpcId = -1,
+): HousingAcceptanceResult {
+  const q = queryRoom(st, x, y, { ignoreNeeds: true });
+  if (!q.room) return { ok: false, home: null, room: null };
+  const s = scoreRoom(st, q.room, occupied, askingNpcId);
+  if (s.score <= 0) return { ok: false, home: null, room: q.room };
+  return { ok: true, home: { x: s.x, y: s.y - 1 }, room: q.room };
+}
+
+/** 迁入候选视图（Housing 层不解实体依赖：ref 由调用方携带实体指针回投） */
+export interface NearChainNpcView<K = unknown> {
+  key: string;                 // townnpc key（'old_man' 排除）
+  npcId: number;               // 原版 NPC id
+  bound?: boolean;             // 被绑态不迁（AI_007 bound 原地语义）
+  home?: { x: number; y: number } | null;
+  ref: K;
+}
+
+/**
+ * 近链流浪者迁入资格（FindNPCLookingForHomeThatCanMoveIn :5539-5545 homeless 门 +
+ * FindAnyHomelessTownNPC :5551-5556 四元排除的最小等价集）。本仓近链迁入不按
+ * prioritizedTownNPCType 配型（入驻环无跨帧优先型锁定——UpdatePrioritizedTownNPC 的
+ * 世界态锁未移植,登记），故四元排除全量保留：37 老人地牢驻点恒 homeless、453 骷髅商
+ * /368 旅商本就无家、160 松露人受蘑菇居所特殊条件约束（泛化迁入会把松露塞进无蘑菇
+ * 房,违反 CheckSpecialTownNPCSpawningConditions(160)）。lookForHomeTimeout 本仓无对应物
+ * （NewNPC spawn 链侧字段,任务指明省略）。
+ */
+export function pickHomelessMover<K>(npcs: readonly NearChainNpcView<K>[]): NearChainNpcView<K> | null {
+  for (const v of npcs) {
+    if (!v.home && !v.bound && v.key !== 'old_man'
+      && v.npcId !== 37 && v.npcId !== 453 && v.npcId !== 368 && v.npcId !== 160) return v;
+  }
+  return null;
+}
+
+export interface NearChainOutcome<K> {
+  /** wallHouse 命中采样点（null=本步未命中） */
+  seedHit: [number, number] | null;
+  /** 被迁入者（RelocatedHomeless 支：静默,不发公告） */
+  relocated: NearChainNpcView<K> | null;
+  /** 新家站位（迁入成功才有值；home={s.x,s.y-1}） */
+  home: { x: number; y: number } | null;
+  /** 合格但无可迁者 → LastFoundHouse 缓存位（FoundHouseNoSpawn 支 :5535） */
+  foundHouseNoSpawn: [number, number] | null;
+}
+
+/**
+ * CheckForHousesNearAPlayer 单玩家步（cs:72184-72215 纯算法面）：turnIndex = 主轮转序号
+ * （Main.GameUpdateCount%ActivePlayersCount 对应,调用方每 tick 自增计数传入）；
+ * players = active 玩家中心 tile 坐标表（active 全量,死亡幽灵仍计入——vanilla active 口径）。
+ * 命中 wallHouse 即走受理：存在合格流浪者 → RelocatedHomeless【静默】;受理通过但无可迁
+ * 者（canSpawnNewTownNPC=false 直落缓存支）→ LastFoundHouse 缓存;Blocked 各早退支与
+ * vanilla 一致不缓存。此通路独立于入驻环锚池（vanilla 近链也不查锚池）。
+ */
+export function checkHousesNearAPlayer<K>(
+  st: TileStore,
+  players: ReadonlyArray<{ x: number; y: number }>,
+  turnIndex: number,
+  npcs: readonly NearChainNpcView<K>[],
+  occupied: ReadonlyArray<{ x: number; y: number; npcId?: number }>,
+  rand: () => number = Math.random,
+): NearChainOutcome<K> {
+  const none: NearChainOutcome<K> = { seedHit: null, relocated: null, home: null, foundHouseNoSpawn: null };
+  if (players.length === 0) return none;
+  const pt = players[((turnIndex % players.length) + players.length) % players.length];
+  const hit = sampleHouseSeed(st, nearHouseViewRect(st, pt.x, pt.y), rand);
+  if (!hit) return none;
+  const mover = pickHomelessMover(npcs);
+  // vanilla 顺序：FindNPCLookingForHomeThatCanMoveIn 先于 RoomNeeds/ScoreRoom 打分
+  const acc = acceptTownNPCAtHouse(st, occupied, hit[0], hit[1], mover?.npcId ?? -1);
+  if (!acc.ok) return { ...none, seedHit: hit };                       // Blocked：不缓存
+  if (mover && acc.home) {
+    return { seedHit: hit, relocated: mover, home: acc.home, foundHouseNoSpawn: null };   // 静默迁入
+  }
+  return { seedHit: hit, relocated: null, home: null, foundHouseNoSpawn: [hit[0], hit[1]] }; // FoundHouseNoSpawn
 }

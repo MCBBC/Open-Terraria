@@ -24,7 +24,7 @@
 //     （type!=304 && noGravity → velocity×0.92、fadeIn==0 时 scale−0.04）。
 //     ★R4-30：226/272/331 三档已实装（226 固定蓝光/272 固定紫光/331=1457 新自色光
 //     受 noLightEmittance 门）——头注曾虚标覆盖、实际 switch 缺 case（226 被闪电弹
-//     真实消费落 default）。331 绘制端拖影/四向贴片（M57:39639-39695）未建模（登记）。
+//     真实消费落 default）。331 绘制端拖影/四向贴片（M57:39639-39695）已实装（Renderer 拖影 331 专属色 +本体五贴片+全亮桶,2026-09-01 清偿）。
 //  本引擎 switch(链A)+老化后 switch(链B) 两段对应；261/264/182 维持翅膀批
 //  既有链 A 单段近似（其后通用重力照旧——扩表时勿动）。
 //
@@ -58,6 +58,10 @@ export interface VDust {
   /** customData = 主角（旧位跟随；263/264/182 一次性后清除，261 持续） */
   followPlayer: boolean;
   followOnce: boolean;
+  /** customData = NPC（:896-917 229/228/279 档 dust.position += npc.position -
+   *  npc.oldPos[1]）。闭包返回被跟实体【上一拍位移】；终清烟批（月总水蛭
+   *  aiStyle82 d229 环 :37102-37116）为首个消费方。池复用安全：spawn() 归零。 */
+  followEnt: (() => { dx: number; dy: number }) | null;
   /** 染料 vid（-1 无；GetSecondaryShader(cShoe/cWings) 等价——渲染端跑
    *  SM2 染料字节码（63 pass 全技术，含彩虹/反射/凝胶等动态族）） */
   dyeVid: number;
@@ -95,6 +99,7 @@ export class VanillaDust {
         active: false, x: 0, y: 0, vx: 0, vy: 0, type: 0, scale: 1, alpha: 0,
         fadeIn: 0, noGravity: false, noLight: false, noLightEmittance: false,
         color: null, rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
+        followEnt: null,
       });
     }
   }
@@ -140,6 +145,7 @@ export class VanillaDust {
     d.noLightEmittance = false;
     d.followPlayer = false;
     d.followOnce = false;
+    d.followEnt = null;
     d.dyeVid = -1;
     // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
     if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
@@ -182,6 +188,7 @@ export class VanillaDust {
     c.fx = rf.fx; c.fy = rf.fy;                // :284 frame（原样复制，非重掷）
     c.followPlayer = rf.followPlayer;          // :286 customData=Player
     c.followOnce = rf.followOnce;
+    c.followEnt = rf.followEnt;
     return c;
   }
 
@@ -267,10 +274,17 @@ export class VanillaDust {
           d.scale -= 0.0025;
           if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
           break;
-        case 6: case 229: {  // :890-1092 烟雾族链接：轻重力 + 光（229 = 星璇潜行尘）
+        case 6: case 229: case 228: case 279: { // :883-1092 烟雾族链接：轻重力 + 光
           if (!d.noGravity) d.vy += 0.05;                 // :892-895（非通用 0.1）
-          if (d.type === 229 && d.followPlayer) {         // :896-917（_NPC/_Vector2 两档
-            d.x += playerDx; d.y += playerDy;             //  本仓无消费方——备案不建）
+          // :896-917（229/228/279 三型 customData 档）——_Player 已由 followPlayer
+          // 承载；_NPC 档由 followEnt 闭包承载（终清波批接入月总水蛭 d229 环）。
+          // _Vector2 吸向档仍无消费方，维持登记不建。
+          if ((d.type === 229 || d.type === 228 || d.type === 279)) {
+            if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
+            else if (d.followEnt) {
+              const q = d.followEnt();
+              d.x += q.dx; d.y += q.dy;
+            }
           }
           if (!d.noLight && !d.noLightEmittance) {        // :918
             if (d.type === 229) {                          // :976-983 蓝 青 光
@@ -543,6 +557,8 @@ export class VanillaDust {
 }
 
 function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
-  const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64);
+  // 331 自发光族（DrawDust :39670 色不取光:白心 Color.White+GetAlpha(color) 贴片）→
+  // 与 6/15/59-64 同入全亮桶（光照合成后绘制）
+  const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331;
   return wantFb === fb;
 }

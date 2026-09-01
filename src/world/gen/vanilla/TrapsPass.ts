@@ -1862,6 +1862,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
   chestList = chests ?? null;
   chestItemAnchors = new Set();
   if (chests) for (const c of chests) {
+    if (!c) continue;   // ★IIII102c：跳洞
     if (c.items.some((it) => it && (it as { id: number; stack: number }).id > 0 && (it as { id: number; stack: number }).stack > 0)) {
       chestItemAnchors.add(c.y * st.w + c.x);
     }

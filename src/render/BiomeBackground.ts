@@ -212,7 +212,7 @@ for (const t of [219, 220, 221, 271, 272, 273, 302, 303, 305, 307, 309, 311, 313
  *  Crimson :61150-61156/:61231 + Jungle :61888/:61920/:61948） */
 const SURF_NUDGE: Record<number, number> = {
   50: -50, 53: -100, 91: 200, 173: 200, 178: 75, 330: -150, 335: -150, 343: -300,   // Forest[0]
-  51: -50, 54: -100, 329: -150, 334: -150, 342: -300, 342: -300,                              // Forest[1]
+  51: -50, 54: -100, 329: -150, 334: -150, 342: -300,                              // Forest[1]
   52: -50, 55: -100, 92: 150, 328: -150, 333: -150, 341: -50,                      // Forest[2]
   105: 50, 174: -350, 175: -400,                                                   // Crimson[0]/[2]
   59: -200, 60: -175, 61: -150,                                                    // Jungle
@@ -381,15 +381,20 @@ class CanvasBgBlit implements BGBlit {
 }
 
 /** 行变体类型 = 元组行（corrupt/crimson/jungle/hallow/mushroom 三元组）或结构化行
- *  （forest/SnowRow{m,t}、DesertRow{p,c,h,r}） */
-type SurfStyleRow = number[] | { readonly [k: string]: readonly number[] };
+ *  （forest/SnowRow{m,t}、DesertRow{p,c,h,r}）。槽键显式枚举——接口型无隐式索引签名,
+ *  不能写 {[k:string]:...} 这类索引形态。 */
+type SurfStyleRow = readonly number[] | {
+  readonly m?: readonly number[]; readonly t?: readonly number[];
+  readonly p?: readonly number[]; readonly c?: readonly number[];
+  readonly h?: readonly number[]; readonly r?: readonly number[];
+};
 
 /** 结构化/元组行 → 贴图 id 平面集（warm/warmStyle/loadBg 预热与渐隐带判定共口；
  *  键名覆盖两类结构化行的全部槽）。负数槽位（-1=该步不画）由消费方自行过滤。 */
 function rowTexIds(row: SurfStyleRow): number[] {
   if (Array.isArray(row)) return [...row];
   return ['m', 't', 'p', 'c', 'h', 'r'].flatMap((k) => {
-    const v = (row as { readonly [k: string]: readonly number[] })[k];
+    const v = (row as { readonly m?: readonly number[] })[k as 'm'];
     return Array.isArray(v) ? [...v] : [];
   });
 }
@@ -705,7 +710,7 @@ export class BiomeBackground {
     else if (style === Snow) row = this.styleRow('snow', SNOW_STYLES, this.snowStyle);
     else if (style === Hallow) row = this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle);
     else if (style === Mushroom) row = this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle);
-    else if (style === Desert) row = this.activeDesertRow();
+    else if (style === Desert) row = this.activeDesertTriple();
     else if (style === Ocean) row = [this.oceanTexId()];
     const clean = (row ? rowTexIds(row) : []).filter((n) => n >= 0);
     if (clean.length) void this.loadBg(clean);
@@ -1166,9 +1171,9 @@ export class BiomeBackground {
       const ss = this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world);
       drawLayer(ss.m[0], 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // snowMntBG[0] Step1
       drawLayer(ss.m[1], 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // snowMntBG[1] Step2（:60853）
-      drawLayer(ss[0], 1.25, 0.4, 1800, 1500, aFront, { yoff: true });
-      drawLayer(ss[1], 1.31, 0.43, 1950, 1750, aFront, { yoff: true });
-      drawLayer(ss[2], 1.34, 0.49, 2100, 2000, aFront, { yoff: true });
+      drawLayer(ss.t[0], 1.25, 0.4, 1800, 1500, aFront, { yoff: true });                // DrawSurfaceBG_Snow 三层（:61252 起）
+      drawLayer(ss.t[1], 1.31, 0.43, 1950, 1750, aFront, { yoff: true });
+      drawLayer(ss.t[2], 1.34, 0.49, 2100, 2000, aFront, { yoff: true });
     } else if (style === Hallow) {
       // 246/247 山体仅 hallowBG==3 档（:60816/:60845 门；HALLOW_STYLES[3]=[243,244,245]）
       if (this.hallowStyle === 3) {

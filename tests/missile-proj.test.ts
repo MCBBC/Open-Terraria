@@ -534,3 +534,124 @@ describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :
     expect(k3.dead).toBe(true);
   });
 });
+
+// ===================== 79 彩虹魔杖 Kill 迸散(:72436-72487 终清波真值化) =====================
+describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数量按距头部衰减 + L=.65)', () => {
+  /** rand 恒 0.5 钉死的确定性回归:NewDust 抖动归零(±0.1×((.5*41|0)-20)=0)、
+   *  Next(1,4)→2、scale=(0.9+0.6)*k67=1.5*k67、fadeIn=0.6*k67 —— 全闭式可算 */
+  function makeRecording79Kill() {
+    const vd = new VanillaDust();
+    type Rec = {
+      x: number; y: number; vx: number; vy: number; type: number;
+      scale: number; fadeIn: number; alpha: number; noGravity: boolean;
+      color: { r: number; g: number; b: number; a: number } | null;
+    };
+    const spawns267: Rec[] = [];
+    const clones: Rec[] = [];
+    const realClone = vd.clone.bind(vd);
+    (vd as unknown as { clone(rf: never): unknown }).clone = (rf: never) => {
+      const c = realClone(rf);
+      if (c) clones.push(c as never as Rec);
+      return c;
+    };
+    const { hooks } = makeHooks();
+    Object.assign(hooks as object, {
+      vanillaDust: vd,
+      broadcastParticleOrchestra: () => {},
+      spawnDust(x: number, y: number, w: number, h: number, type: number,
+        sx = 0, sy = 0, alpha = 0,
+        color: Rec['color'] = null, scale = 1, noGravity = false, perfect = false) {
+        const d = vd.spawn(x, y, w, h, type, sx, sy, alpha, color, scale,
+          perfect ? { perfect: true } : undefined);
+        if (d && noGravity) d.noGravity = true;
+        if (type === 267) spawns267.push(d as never as Rec);
+        return d;
+      },
+    });
+    return { hooks, spawns267, clones };
+  }
+
+  it('head-first 三级减数分组 [2,2,2,2,1,1,1,1](正向!镜像实现给出 [..]=8 组)+速度=朝更近点单位向×6', () => {
+    const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const { hooks, spawns267 } = makeRecording79Kill();
+      const m = mkMissile(hooks, {
+        projId: 79, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
+        channel: () => false,
+      });
+      fly(m, hooks, 15);                                  // trail 环拉满 → N=12 点
+      expect(m.trail.length).toBe(24);
+      (m as unknown as { killNow(g: never): void }).killNow(hooks);
+
+      // 迸散段是 spawn 流前缀(randbowRodHitFx ×2 与 14×d66 尾随,同 d267 但在段后)
+      // —— 按"连续同钉点"分组(N=12:阈 {3.6,7.8,10.2} → 减数型 d∈[0,3]×2/[4,7]×1/
+      //     [8,11]×0)。若方向写反(旧 bug 对新点减),首组数会 ≤ 后组且合计缩为 8。
+      expect(spawns267.length).toBeGreaterThanOrEqual(12);
+      const groups: typeof spawns267 = [];
+      for (const d of spawns267.slice(0, 12)) {
+        const cur = groups[groups.length - 1];
+        if (cur && Math.abs(cur[0].x - d.x) < 1e-9 && Math.abs(cur[0].y - d.y) < 1e-9) {
+          cur.push(d);
+        } else groups.push([d]);
+      }
+      expect(groups.map((g) => g.length)).toEqual([2, 2, 2, 2, 1, 1, 1, 1]);
+      // k67 严格单调下降(head=1 → 老点→0.3 带):scale 组间严格递减(旧码反向会给尾部大值)
+      for (let gi = 1; gi < groups.length; gi++) {
+        expect(groups[gi][0].scale).toBeLessThan(groups[gi - 1][0].scale);
+      }
+      // scale/fadeIn 闭式核对:head 组 k67=1 → scale=1.5 / fadeIn=0.6
+      expect(groups[0][0].scale).toBeCloseTo(1.5, 10);
+      expect(groups[0][0].fadeIn).toBeCloseTo(0.6, 10);
+      // 速度链:jitter(0)×r0.8 → += 朝更近点单位向×6 ⇒ |v|≡6 且 head 组指向爆心
+      //（尾迹采样已校准为原版 oldPos 先于位移快照——头点距弹心 = 上一拍速模恒非零）
+      for (const g of groups) {
+        for (const d of g) {
+          expect(Math.hypot(d.vx, d.vy)).toBeCloseTo(6, 6);
+        }
+      }
+      const head = groups[0][0];
+      expect(head.vx * ((m.cx ?? 0) - head.x) + head.vy * ((m.cy ?? 0) - head.y))
+        .toBeGreaterThan(0);
+      // 主尘面:α=0/noGravity/type267,L=.65 彩色(非纯白)
+      for (const d of spawns267.slice(0, 12)) {
+        expect(d.alpha).toBe(0);
+        expect(d.noGravity).toBe(true);
+        expect(d.type).toBe(267);
+        expect(d.color!.r === 255 && d.color!.g === 255 && d.color!.b === 255).toBe(false);
+      }
+    } finally {
+      randSpy.mockRestore();
+    }
+  });
+
+  it('白影 = Dust.CloneDust 真克隆体(Dust.cs:260-288):逐主尘配对,scale÷2 + fadeIn×0.85'
+    + ' + 纯白覆写,其余字段(position/velocity/alpha/noGravity)原样继承——终清波退役"半尺白尘"', () => {
+    const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const { hooks, spawns267, clones } = makeRecording79Kill();
+      const m = mkMissile(hooks, {
+        projId: 79, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
+        channel: () => false,
+      });
+      fly(m, hooks, 15);
+      (m as unknown as { killNow(g: never): void }).killNow(hooks);
+      expect(clones.length).toBe(12);                     // 引擎 clone 仅迸散段使用
+      for (let i = 0; i < clones.length; i++) {
+        const p = spawns267[i];                           // clone push 序 == 主尘序(逐对紧跟)
+        const c = clones[i];
+        expect(c.scale).toBeCloseTo(p.scale / 2, 10);     // :72493 dust.scale /= 2f
+        expect(c.fadeIn).toBeCloseTo(p.fadeIn * 0.85, 10);// :72495 dust.fadeIn *= 0.85f
+        expect(c.x).toBe(p.x);                            // :273 position 原样复制
+        expect(c.y).toBe(p.y);
+        expect(c.vx).toBe(p.vx);                          // :274 velocity 继承(dir*6 向量)
+        expect(c.vy).toBe(p.vy);
+        expect(c.type).toBe(267);                         // :281 type 复制
+        expect(c.alpha).toBe(0);                          // :283 alpha=0 档继承
+        expect(c.noGravity).toBe(true);                   // :276 noGravity=true 继承
+        expect(c.color).toEqual({ r: 255, g: 255, b: 255, a: 255 });  // :72496 纯白
+      }
+    } finally {
+      randSpy.mockRestore();
+    }
+  });
+});

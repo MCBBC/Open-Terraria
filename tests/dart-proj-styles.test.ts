@@ -157,11 +157,12 @@ describe('敌怪弹幕 DART_STYLE（对照 Projectile.cs）', () => {
     expect(d.life).toBe(180);                            // SetDefaults timeLeft :5723
     flyTicks(d, hooks, 49);
     expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2, 5); // else 支 atan2+1.57
-    expect(d.vy).toBeCloseTo(0, 5);                      // 重力与翻转同拍起(前 49t 无)
+    expect(d.vy).toBeCloseTo(2, 5);                      // 前 49t 无重力(vy 保持初值 2)
     flyTicks(d, hooks, 1);
-    expect(d.vy).toBeCloseTo(0.15, 5);                   // 第 50 更新起 vy+=0.15(:58487)
+    expect(d.vy).toBeCloseTo(2.15, 5);                   // 第 50 更新起 vy+=0.15(:58487)
     expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5, 5); // 自旋一拍
     flyTicks(d, hooks, 3);
     expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5 * 4, 5);
+    expect(d.vx).toBeCloseTo(7 * Math.pow(0.98, 4), 4);  // 同支摩擦 ×0.98/更新(:58486)
   });
 });

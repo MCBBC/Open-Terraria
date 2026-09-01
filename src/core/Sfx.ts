@@ -50,6 +50,12 @@ export type SfxName =
   | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
   | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
   | 'conch'       // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
+  | 'dd2PortalLoop'   // DD2_EtherianPortalIdleLoop（SoundID.cs:984 无 WithVolume→基量 1;
+                      //   NPC.cs:41409/:41458 GetActiveSound 空 → PlayTrackedSound 重建的
+                      //   常驻循环轨——startTrackedLoop 距离衰减通道,终清波接入）
+  | 'dd2KoboldIgniteLoop' // DD2_KoboldIgniteLoop（AI_107 :63969/:63991 引信循环轨;
+                          //   曾不在 WAV_MAP→startTrackedLookup 恒 null=静默,终清波补键）
+  | 'dd2KoboldChargeLoop' // DD2_KoboldScreamChargeLoop（AI_107 冲锋嘶叫循环轨,同上）
   | 'manaCrystal' // SoundID.Item29（LegacySoundStyle(2,29)：Item.cs:2657 物品 109 魔力水晶 UseSound
                   //   + ParticleOrchestrator.Spawn_ShimmerTownNPC :1756 城镇 NPC 微光到位音）
   // ---- 天气环境音循环轨（SceneState.cs:235-297 暴风雪双轨；SoundType.Ambient）----
@@ -148,6 +154,10 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   mirror: ['Item_6'],
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
+  // ---- DD2 跟踪循环轨（Sounds/Custom 提取拍平；startTrackedLoop 距离衰减+声像通道）----
+  dd2PortalLoop: ['dd2_etherian_portal_idle_loop'],
+  dd2KoboldIgniteLoop: ['dd2_kobold_ignite_loop'],
+  dd2KoboldChargeLoop: ['dd2_kobold_scream_charge_loop'],
   // Item bank cue 29（case 2 无专属音量修正——LegacySoundPlayer.cs:519-643，
   // 默认 ±0.06 音高抖动由 PITCH_CASE.Item_ 表达,R22 前的全局 0.92+rand×0.16≈±0.115 过抖已废）
   manaCrystal: ['Item_29'],
@@ -866,7 +876,9 @@ export class Sfx {
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound 语义，AI_016 :44276 引信嘶声）:
    *  返回句柄 {stop, setPos}——setPos 按距离衰减刷新音量（ProjectileAudioTracker
    *  跟随弹体）。缓冲未就绪返回 null（调用方下 tick 重试即可）。 */
-  startTrackedLoop(name: SfxName, vol: number, x: number, y: number): { stop(): void; setPos(px: number, py: number): void } | null {
+  startTrackedLoop(name: SfxName, vol: number, x: number, y: number): {
+    stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void;
+  } | null {
     if (this.suppress) return null;          // 载入期静音门（见字段注释）
     const list = WAV_MAP[name];
     if (!list || !list.length) return null;
@@ -879,7 +891,16 @@ export class Sfx {
     src.loop = true;
     src.playbackRate.value = pitchRateFor(list[0]);
     const g = ctx.createGain();
-    g.gain.value = this.atten(vol, x, y) * this.master;
+    // setVolume 面积(终清波)：ActiveSound.Volume 逐帧覆写语义(NPC.cs:41464 女皇水晶
+    // 收门段 Volume=scale / 天气轨同构)——乘在基量上,与位置衰减 atten 相互独立
+    let vmul = 1;
+    let lx = x, ly = y;
+    const applyAt = (px: number, py: number) => {
+      g.gain.value = this.atten(vol * vmul, px, py) * this.master;
+      if (panner) panner.pan.value = this.panOf(px, py);
+    };
+    // `panner` 在下方声明——applyAt 仅在句柄返回后被调用(TDZ 安全)
+    g.gain.value = this.atten(vol * vmul, x, y) * this.master;
     src.connect(g);
     // 声像跟随（原版跟踪轨每次 PlaySound 重设 Pan=num3 同语义）
     let panner: StereoPannerNode | null = null;
@@ -895,8 +916,12 @@ export class Sfx {
     return {
       stop: () => { try { src.stop(); } catch { /* 已停 */ } g.disconnect(); panner?.disconnect(); },
       setPos: (px: number, py: number) => {
-        g.gain.value = this.atten(vol, px, py) * this.master;
-        if (panner) panner.pan.value = this.panOf(px, py);
+        lx = px; ly = py;
+        applyAt(px, py);
+      },
+      setVolume: (v: number) => {
+        vmul = Math.max(0, Math.min(1, v));
+        applyAt(lx, ly);
       },
     };
   }

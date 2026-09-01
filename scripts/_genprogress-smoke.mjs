@@ -74,11 +74,20 @@ try {
     firstLabels.push(`${String(e.label)}@${e.p.toFixed(3)}${e.local != null ? `l${e.local.toFixed(2)}` : ''}`);
   }
   const prevShotsWithIdx = pvs.map((e) => `${e.idx}:${(e.name || '').slice(0, 8)}`);
+  // ★终帧保底断言：'完成' 进度事件之后（到达序）必须仍有 preview 帧（p≥1 越权冷却钟）
+  const doneGlobalIdx = r.findIndex((e) => !e.pv && e.label === '完成');
+  let terminalFrameGuaranteed = false;
+  if (doneGlobalIdx >= 0) {
+    for (let i = doneGlobalIdx + 1; i < r.length; i++) {
+      if (r[i].pv) { terminalFrameGuaranteed = true; break; }
+    }
+  }
   return {
     total: prog.length, withLocal: withLocal.length, stickyUndefinedLabel, mono, bigJumps,
     firstLabels: firstLabels.slice(0, 6),
     previews: pvs.length, previewMinGapMs: minGap, previewOver1sGaps: over1sGaps,
     previewFirstShots: prevShotsWithIdx.slice(0, 8), previewMaxWidths: maxWidths.slice(0, 2),
+    terminalFrameGuaranteed,
     last: prog[prog.length - 1] ?? null,
   };
 });

@@ -64,10 +64,12 @@ describe('地表远景背景锚点（Main.cs DrawSurfaceBG :58749/:58860）', ()
     const scAdj = scAdjOf(camTopY, 862, 1.25, 100, 600);
     // 山体双步（2026-08-25 原版对齐重写）：m[0]=Step1 几何 num3×1300+1090、
     // m[1]=treeMntBGSet1[1] 块 num3×1400+1260（:60430），各 + GetLayerYOffset(贴图)
-    // + scAdj + push。风格按种子挑选——候选取全部森林风格 m 槽贴图的 YOffset 集
-    // {7:0,93:-50,171:-100,176:-760} / {8:0,90:0,94:0,172:130,177:-200}
-    const y0Cands = [0, -50, -100, -760].map((o) => num3 * 1300 + 1090 + o + scAdj + PUSH);
-    const y1Cands = [0, 130, -200].map((o) => num3 * 1400 + 1260 + o + scAdj + PUSH);
+    // + scAdj + push。风格按种子挑选——候选取全部森林风格 m 槽贴图的 YOffset 并集
+    // （终清波扩表后 m 槽全集 {7,93,171,176,179,277,280}/{8,90,94,172,177,180,278,
+    // 281,331,336}：GetLayerYOffset :60687 起 179:-100、277:-260、280:-170、
+    // 180:-350、278:-120、281:-300）
+    const y0Cands = [0, -50, -100, -170, -260, -760].map((o) => num3 * 1300 + 1090 + o + scAdj + PUSH);
+    const y1Cands = [0, 130, -120, -200, -300, -350].map((o) => num3 * 1400 + 1260 + o + scAdj + PUSH);
     expect(recs.some((c) => y0Cands.some((y) => Math.abs(c.dy - y) < 1.01)),
       `dys=${recs.map((c) => Math.round(c.dy)).join(",")} want=[${y0Cands.map(Math.round)}]`).toBe(true);
     expect(recs.some((c) => y1Cands.some((y) => Math.abs(c.dy - y) < 1.01))).toBe(true);

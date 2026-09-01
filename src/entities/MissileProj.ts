@@ -284,12 +284,17 @@ export class MagicMissileProj extends Entity {
     this.pvx = this.vx; this.pvy = this.vy;
     this.prevCx = this.cx; this.prevCy = this.cy;
     this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
+    // 尾迹采样点序对齐原版 oldPos 写入面(:17200-17204 每拍先快照当前位再跑
+    // AI/位移——oldPos[0] 恒落后当前位一个位移步)：push 先于积分，非后随。
+    // ★终清波校准：曾采"移动后中心"，头点与弹心重合 → Kill 迸散的
+    // DirectionTo 链首段零长退化（SafeNormalize(Vector2.Zero)=零向），拖尾
+    // 绘制亦整体前移一段。vanilla 时序下头距=上一拍速度模长恒非零。
+    this.trail.push(this.cx, this.cy);
+    if (this.trail.length > 24) this.trail.splice(0, this.trail.length - 24);
     this.steer(game);
     if (this.dead) return;
     this.x += this.vx;
     this.y += this.vy;
-    this.trail.push(this.cx, this.cy);
-    if (this.trail.length > 24) this.trail.splice(0, this.trail.length - 24);
     this.hitStep(game);
   }
 

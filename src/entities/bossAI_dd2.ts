@@ -125,38 +125,45 @@ export const dd2LocalAI = (e: Enemy): number[] => {
 // 句柄（非数值槽），Enemy 类无本地字段落点 → 模块级 Map 承载；manage 语义对齐
 // Game.updateWaterfallAmbience 的 wfAmbLoops（句柄终态 dead 即拆建）。
 // ---------------------------------------------------------------------------
-/** 循环轨句柄结构面（GameHooks.startLoopSfx 返回值，Sfx.startLoopFile 产物） */
+/** 循环轨句柄结构面（GameHooks.startTrackedLoop 返回值；setVolume=ActiveSound.Volume
+ *  逐帧覆写档,NPC.cs:41464 收门段 Volume=scale 消费） */
 interface DD2LoopHandle {
-  stop(): void; setVolume(v: number): void;
-  readonly playing: boolean; readonly dead: boolean;
+  stop(): void; setVolume?(v: number): void; setPos(px: number, py: number): void;
 }
 const portalLoops = new Map<Enemy, DD2LoopHandle>();
-/** 循环轨加载失败门：句柄终态但从未起振 = 缓冲缺失——该实例不再重建防逐帧泄
- *  GainNode（Player._sizzleFailed 同语义，Player.ts:6366-6368） */
-const portalLoopDead = new WeakSet<Enemy>();
+/** 缺省 vol 门内联（≤0 拆轨/不起轨）——旧 startLoopSfx 异步句柄时代的
+ *  portalLoopDead 失败门随接口退役：startTrackedLoop 同步句柄/null(重试) 面 */
 /** 循环轨 manage（vol≤0 视作拆轨）：先代扫已亡实例——AI 在实体死亡后即停摆，
  *  自拆只能靠存活门代劳（门恒成对出生 + 消散由胜负演出统一置 ai1=1 走受控停轨，
  *  清扫链不断）；实例级兜底见 lanePortalAI bInit 注入的 destroy()（Entity.compact
  *  剔除 dead 实体时回调，Entity.ts:69-76）。残余窗口仅 EntityManager.clear() 退世界
- *  不走 destroy（WeaponProj.ts:4145 同登记），单机影响=离世界后余音至重载。 */
+ *  不走 destroy（WeaponProj.ts:4145 同登记），单机影响=离世界后余音至重载。
+ *
+ *  ★屏距衰减(终清波)：原版 PlayTrackedSound(SoundID.DD2_EtherianPortalIdleLoop,
+ *  Center)(NPC.cs:41409/:41458)=位置化跟踪轨——GetActiveSound 空才重建、其余仅
+ *  收门段 Volume=scale。旧 startLoopSfx 全量不衰减接口退役 → startTrackedLoop
+ *  (atten/pan 随 setPos 刷新,传送门本体不动=setPos 与出生位一致,volume 档接
+ *  收门缩放)。 */
 function portalLoopManage(e: Enemy, game: GameHooks, vol: number): void {
   for (const [k, h] of portalLoops) {
-    if (k.dead || h.dead) {
-      if (h.dead && !h.playing) portalLoopDead.add(k);
+    if (k.dead) {
       h.stop();
       portalLoops.delete(k);
     }
   }
-  if (portalLoopDead.has(e)) return;
   let h = portalLoops.get(e);
   if (!h) {
     if (vol <= 0) return;
-    h = game.startLoopSfx?.('dd2_etherian_portal_idle_loop', Math.min(1, vol)) ?? undefined;
-    if (h) portalLoops.set(e, h);
+    // 缓冲未就绪(同步起振失败=null)本轮静默、下拍重试——GetActiveSound 空→
+    // PlayTrackedSound 重建的原版语义;句柄命中后 setPos 对齐出生位
+    const nh = game.startTrackedLoop?.('dd2_etherian_portal_idle_loop', Math.min(1, vol), e.cx, e.cy)
+      ?? undefined;
+    if (nh) { portalLoops.set(e, nh); nh.setPos?.(e.cx, e.cy); }
     return;
   }
   if (vol <= 0) { h.stop(); portalLoops.delete(e); return; }
-  h.setVolume(Math.min(1, vol));
+  h.setPos?.(e.cx, e.cy);
+  h.setVolume?.(Math.min(1, vol));
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +179,8 @@ function portalLoopManage(e: Enemy, game: GameHooks, vol: number): void {
 // setPos 逐帧刷新）。停轨 = 状态退出/自爆/消亡——原版靠 PlayTrackedSound 的实体
 // 追踪绑定在 NPC 失效后自然熄灭，本仓显式 stop 对齐听感。曾以"60t 一拍补播"
 // 近似（档内注释备案）退役；俯冲滑翔怪的引信环此前整段缺失。
+// ★终清波勘误:台账⑩接线时 wav 键未入 WAV_MAP→startTrackedLookup 恒 null=两轨
+// 实际从未出声;dd2KoboldIgniteLoop/dd2KoboldChargeLoop 键已补(Sfx.ts),现真通。
 // ---------------------------------------------------------------------------
 interface TrackedLoopHandle { stop(): void; setPos(px: number, py: number): void }
 const fuseLoops = new Map<Enemy, Map<string, TrackedLoopHandle>>();
@@ -211,6 +220,9 @@ const oldVel = new WeakMap<Enemy, { x: number; y: number }>();
 const mageCastAim = new WeakMap<Enemy, { x: number; y: number }>();
 
 const TAU = Math.PI * 2;
+/** 12 拍星爆触发表(NPC.cs(1458):41255 —— 胜利演出整环白尘收束拍) */
+const RING_BURST_TICKS: readonly number[] =
+  [100, 160, 220, 280, 340, 370, 400, 430, 460, 500, 520, 540];
 const rnd = (n: number): number => Math.floor(Math.random() * n);
 const rndRange = (a: number, b: number): number => a + Math.floor(Math.random() * (b - a));
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -1102,13 +1114,55 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     } else {
       e.vy = 0;
     }
-    // 尘涡（:42894-42958 的 264 号白尘双环,粒子近似）
-    if (e.ai0 < 540 && Math.random() < 0.6) {
-      const a = Math.random() * TAU;
-      game.spawnParticles(
-        e.cx + Math.cos(a) * (110 + Math.random() * 600),
-        e.cy - 20 + Math.sin(a) * (110 + Math.random() * 600),
-        '#FFFFFF', 1, 0.5, { life: 40 });
+    // ---- 胜利尘涡(NPC.cs(1458):41214-41253 精确式,终清波实装):num1499 密度相位
+    //      0.99→(≥60).79→(≥120).58→(≥180).43→(≥240).33;≥540 →1(全滚不出尘);
+    //      每 tick 9 掷,num1499=【不出的概率】——roll≥num1499 才出一粒 264 号
+    //      NewDustPerfect(位置=center+(0,-20)+向×(110+600·r)、速=反向×(14+8·r)、
+    //      scale .9/fadeIn 1.15+.3r/color A=num1499·(1−num1499)/noGravity/noLight)
+    //      ——密度随演出爬升的"沙暴漏斗"。旧"<540 且 roll<0.6 单粒 spawnParticles"
+    //      近似(恒密度+无径向速度)退役 ----
+    if (e.ai0 >= 0 && e.ai0 < 540) {
+      const n1499 = e.ai0 >= 240 ? 0.33
+        : e.ai0 >= 180 ? 0.43
+        : e.ai0 >= 120 ? 0.58
+        : e.ai0 >= 60 ? 0.79 : 0.99;
+      for (let k = 0; k < 9; k++) {
+        if (Math.random() < n1499) continue;                 // !(NextFloat<num1499)
+        const ang = Math.random() * TAU;                     // num1501
+        const r = Math.random();                             // num1502
+        const px = e.cx + Math.cos(ang) * (110 + 600 * r);
+        const py = e.cy - 20 + Math.sin(ang) * (110 + 600 * r);
+        const d = game.spawnDust?.(px, py, 0, 0, 264,
+          -Math.cos(ang) * (14 + 8 * r), -Math.sin(ang) * (14 + 8 * r), 0,
+          null, 1, true, true);
+        if (!d) break;
+        d.scale = 0.9;
+        d.fadeIn = 1.15 + r * 0.3;
+        d.color = { r: 255, g: 255, b: 255, a: Math.round(255 * n1499 * (1 - n1499)) };
+        d.noGravity = true;
+        d.noLight = true;
+      }
+    }
+    // ---- 12 拍星爆(:41255-41271):ai0∈{100,160,...,540} 时整环 120 粒 264 号
+    //      perfect(半径=810−ai0 收束、速=反向×(14+5·ai0/600+8·rand)、color A=0=
+    //      预乘纯加性白)——原版整缺面补齐 ----
+    if ((e.ai0 | 0) === e.ai0 && RING_BURST_TICKS.includes(e.ai0)) {
+      const radius = 810 - e.ai0;
+      for (let i = 0; i < 120; i++) {
+        const ang = (i / 120) * TAU;
+        const r = Math.random();
+        const spd = 14 + 5 * (e.ai0 / 600) + 8 * r;
+        const px = e.cx + Math.cos(ang) * radius;
+        const py = e.cy - 20 + Math.sin(ang) * radius;
+        const d = game.spawnDust?.(px, py, 0, 0, 264,
+          -Math.cos(ang) * spd, -Math.sin(ang) * spd, 0, null, 1, true, true);
+        if (!d) break;
+        d.scale = 0.9;
+        d.fadeIn = 1.15 + r * 0.3;
+        d.color = { r: 255, g: 255, b: 255, a: 0 };
+        d.noGravity = true;
+        d.noLight = true;
+      }
     }
     if (e.ai0 >= 600) {
       DD2_EVENT_HOOKS.stopInvasion?.(game, true);  // DD2Event.StopInvasion(win:true)
@@ -1202,7 +1256,7 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 调用点亦无 override → 满响×PlayTrackedSound 距离衰减（曾私改 0.7）
       game.playSfxFiles(['dd2_etherian_portal_open'], 1.0, e.cx, e.cy);  // DD2_EtherianPortalOpen（:43075→41400）
     }
-    if (x[0] > 150) portalLoopManage(e, game, 1);   // ★B1：循环轨起轨（NPC.cs:41406-41413 localAI[0]>150 判 GetActiveSound 空 → PlayTrackedSound；SoundID.cs:984 无 WithVolume → 基音量 1。原版带位置衰减,本仓 startLoopSfx 无空间参数,屏距衰减未建模登记）
+    if (x[0] > 150) portalLoopManage(e, game, 1);   // ★B1：循环轨起轨（NPC.cs:41403-41413 localAI[0]>150 判 GetActiveSound 空 → PlayTrackedSound;SoundID.cs:984 无 WithVolume → 基音量 1。★终清波:startTrackedLoop 位置化跟踪——atten/pan 随 setPos 距离衰减,屏距衰减登记闭合）
     if (!DD2_EVENT_HOOKS.enemySpawningOnHold()) e.ai0 += 1;
     const rate = DD2_EVENT_HOOKS.laneSpawnRate();
     // 出怪拍（:43094-43108 1:1）：ai[0] 数到 LaneSpawnRate 才进门——首拍在第
@@ -1409,7 +1463,7 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   // ★台账⑩：俯冲小妖精滑翔怪引信循环音（AI_108,1458 NPC.cs:66388-66406）——
   // 俯冲态 ai[1]>=20 起 KoboldIgniteLoop 单轨跟随重建,其余态拆轨;曾整段缺失
   if (p.explode) {
-    fuseLoopManage(e, game, [['ignite', 'dd2_kobold_ignite_loop']],
+    fuseLoopManage(e, game, [['ignite', 'dd2KoboldIgniteLoop']],
       e.ai0 === 2 && e.ai1 >= 20, e.cx, e.cy);
   }
   if (e.ai0 === 3) {
@@ -1715,6 +1769,41 @@ function projTargetsOverlap(
  *    追上），线宽 40——命中走 Damage_EVP，OnFire 420-600t 由 statusPlayer 687 表授予。
  *  - 绘制 = Main.cs:31287-31319 十五层火舌（98×686 七帧行 + seed=1 定数 LCG 抖动角，
  *    alpha 渐层白→红(180,30,30,200)→暗(0,0,0,30)，色乘近似为 alpha 档）。 */
+// ---- 火舌乘色烘焙(帧子矩形 multiply+destination-in;色键量化 8,上限护栏,
+//      半载窗拒烘不缓存——天体渲染双修/平色毒缓存教训同源) ----
+const betsyTintCache = new Map<string, HTMLCanvasElement>();
+
+function betsyTint(
+  img: CanvasImageSource | null | undefined,
+  sx: number, sy: number, sw: number, sh: number,
+  rgb: readonly [number, number, number],
+): HTMLCanvasElement | null {
+  if (!img || typeof document === 'undefined') return null;
+  const iw = (img as { width?: number }).width ?? 0;
+  const ih = (img as { height?: number }).height ?? 0;
+  if (!(iw > 0) || !(ih > 0)) return null;
+  const w = Math.max(1, Math.ceil(sw)), h = Math.max(1, Math.ceil(sh));
+  const q = (v: number) => Math.round(v) & ~7;
+  const key = `b687|${sx},${sy},${sw},${sh}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
+  const hit = betsyTintCache.get(key);
+  if (hit) return hit;
+  if (betsyTintCache.size > 512) betsyTintCache.clear();
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])})`;
+  cx.fillRect(0, 0, w, h);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  cx.globalCompositeOperation = 'source-over';
+  betsyTintCache.set(key, c);
+  return c;
+}
+
 export class BetsyBreath extends Entity {
   w = 30;
   h = 30;
@@ -1795,47 +1884,68 @@ export class BetsyBreath extends Entity {
     }
   }
 
-  /** Main.cs:31287-31319 十五层火舌（近似）：98×686 七帧行逐层取帧，
-   *  位置 = SmoothStep(焰心, 焰心+抖动向·400, v)、缩放 = (0.9+0.8v)²·0.8、
-   *  旋转 = ang + 2π(v+GlobalTime·1.2)·0.2 + seg·2π/5；可见窗/色层照抄
-   *  （色乘以 alpha 档近似——白层 A=0 原版即不可见）。 */
+  /** 十五层火舌逐式直译(Main.cs 1458 :32080-32116 终清波):
+   *  · 可见窗修正——原版 DRAW 条件=¬(v>frac∧fc<40)∧¬(v<frac∧fc≥40)(前置段
+   *    [0..frac] 先现、尾段随 fc≥40 只画前缘);旧实现恰反相(hue 白画近似退役时未及),
+   *    本批按原文取反。
+   *  · 色层四通道全真值(:32104-32105 三锚点 Transparent/(255,255,255,0)/(180,30,30,
+   *    200)/(0,0,0,30) 四段线性);XNA 预乘管线 AlphaBlend(One,InvSrcAlpha) 双半边
+   *    = canvas 两步:destination-out(mask=texα×Cα 背景遮蔽)+lighter(tinted 加色,
+   *    rgb=C.rgb 乘)——白层 A=0 自动退化纯加性,"色乘以 alpha 档近似"退役。
+   *  · 其余公式(±0.125 rad 定数 LCG 抖动、SmoothStep 位置、(0.9+0.8v)²·0.8 缩放、
+   *    GlobalTimeWrappedHourly 旋转、Frame(1,7,(int)(v·7)))已对齐维持。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const sheet = projSprite(687);
     if (!sheet || !(sheet as HTMLImageElement).complete || sheet.width === 0) return;
     const fw = sheet.width, fh = sheet.height / 7;
-    // seed=1 定数 LCG（Utils.RandomNext :2383-2396：s=(s·25214903917+11) mod 2^48，
+    // seed=1 定数 LCG（Utils.RandomFloat(ref seed)：s=(s·25214903917+11) mod 2^48，
     // 取高 24 位）——每帧层布局稳定（原版火舌不闪烁换位）
     let seed: number = 1;
-    const num229 = this.frameT / 40;                          // 焰面前沿（0..~1.95）
+    const num240 = 40, num241 = 80;
+    const num229 = this.frameT / num240;                      // num242：焰面前沿（0..~1.95）
     const frac = num229 % 1;
-    const gt = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
+    const gt = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000
+      % 3600;                                                 // GlobalTimeWrappedHourly(:17014)
     for (let layer = 0; layer < 15; layer++) {
       seed = (seed * 25214903917 + 11) % 281474976710656;
-      const rf = Math.floor(seed / 16777216) / 16777216;
-      const jitter = rf * 0.25 - 0.125;                       // ±0.125 rad
+      const rfSeed = Math.floor(seed / 16777216) / 16777216;
+      const jitter = rfSeed * 0.25 - 0.125;                   // ±0.125 rad
       const la = this.ang + jitter;
       const tipX = this.cx + Math.cos(la) * 400;
       const tipY = this.cy + Math.sin(la) * 400;
       let v = num229 + layer * (1 / 15);
       const seg = Math.floor(v / (1 / 15));
       v %= 1;
-      // 可见窗（:31308）
-      if (!((v > frac || this.frameT >= 40) && (v < frac || this.frameT < 40))) continue;
-      // 色层 alpha（:31310）：<0.35 白层 A=0（不可见）、0.35-0.7 → A200、
-      // 0.7-0.9 → A30、0.9-1 → 渐隐
-      let a = 0;
-      if (v < 0.1) a = 0;
-      else if (v < 0.35) a = 0;
-      else if (v < 0.7) a = Math.round(200 * clamp((v - 0.35) / 0.35, 0, 1));
-      else if (v < 0.9) a = Math.round(30 + (200 - 30) * (1 - clamp((v - 0.7) / 0.2, 0, 1)));
-      else a = Math.round(30 * (1 - clamp((v - 0.9) / 0.1, 0, 1)));
-      if (a <= 0) continue;
-      // 缩放（:31311-31313）：(0.9+0.8v)²·0.8
-      let sc = 0.9 + v * 0.8;
-      sc = sc * sc * 0.8;
-      // 位置 = SmoothStep(焰心, 焰尖, v)
+      // 可见窗(:32101 —— ¬(v>frac∧fc<40) ∧ ¬(v<frac∧fc≥40))
+      if ((v > frac && this.frameT < num240)
+        || (v < frac && this.frameT >= num241 - num240)) continue;
+      // 色层四通道(:32104-32106 五段链)
+      let rgb: [number, number, number];
+      let ca: number;
+      if (v < 0.1) {                                          // Transparent → White(A 恒 0)
+        const t = clamp(v / 0.1, 0, 1);
+        rgb = [255 * t, 255 * t, 255 * t]; ca = 0;
+      } else if (v < 0.35) {                                  // color66=(255,255,255,0)
+        rgb = [255, 255, 255]; ca = 0;
+      } else if (v < 0.7) {                                   // → color67=(180,30,30,200)
+        const t = clamp((v - 0.35) / 0.35, 0, 1);
+        rgb = [255 + (180 - 255) * t, 255 + (30 - 255) * t, 255 + (30 - 255) * t];
+        ca = 200 * t;
+      } else if (v < 0.9) {                                   // → color68=(0,0,0,30)
+        const t = clamp((v - 0.7) / 0.2, 0, 1);
+        rgb = [180 * (1 - t), 30 * (1 - t), 30 * (1 - t)];
+        ca = 200 + (30 - 200) * t;
+      } else {                                                // → Transparent(渐隐)
+        const t = clamp((v - 0.9) / 0.1, 0, 1);
+        rgb = [0, 0, 0];
+        ca = 30 * (1 - t);
+      }
+      // 缩放（:32107-32109）: (0.9+v·0.8)²×0.8
+      let sc2 = 0.9 + v * 0.8;
+      sc2 = sc2 * sc2 * 0.8;
+      // 位置 = SmoothStep(center, tip, v)
       const sm = v * v * (3 - 2 * v);
       const px = this.cx + (tipX - this.cx) * sm;
       const py = this.cy + (tipY - this.cy) * sm;
@@ -1844,13 +1954,28 @@ export class BetsyBreath extends Entity {
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(rot);
-      ctx.globalAlpha = a / 255;
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(sheet, 0, Math.round(frame * fh), fw, Math.round(fh),
-        -fw * sc / 2, -fh * sc / 2, fw * sc, fh * sc);
+      const sxr = 0, syr = Math.round(frame * fh), sfw = fw, sfh = Math.round(fh);
+      const dw = fw * sc2, dh = sfh * sc2;
+      // ① 遮蔽半边:OutWeight = texα·Cα(Ca=0 → 无遮蔽,纯加性直落 ②)
+      if (ca > 0) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = ca / 255;
+        ctx.drawImage(sheet, sxr, syr, sfw, sfh, -dw / 2, -dh / 2, dw, dh);
+      }
+      // ② 加色半边:tex.rgb×C.rgb(lighter;烘焙 multiply+destination-in 保形)
+      if (rgb[0] > 0 || rgb[1] > 0 || rgb[2] > 0) {
+        const tinted = betsyTint(sheet, sxr, syr, sfw, sfh, rgb);
+        if (tinted) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1;
+          ctx.drawImage(tinted, -dw / 2, -dh / 2, dw, dh);
+        }
+      }
       ctx.restore();
     }
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
 }
 
@@ -2119,13 +2244,29 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
   const ZAP_SPD = 10;         // num11
   const HEIGHT_GATE = 50;     // num12
   const SEP = 0.1;            // num13
-  // ---- 出生渐显（:66846-66876 flag3） ----
+  // ---- 出生渐显（:66846-66876 flag3,:67018-67054 消费）----
   if (x[1] === 0) e.spawnAlpha = 255;
   if (x[1] === 30) game.playSfxFiles(soundTrackFiles('dd2_etherian_portal_spawn_enemy'), 0.3, e.cx, e.cy);
   if (x[1] < 60) {
     x[1] += 1;
     e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
     e.alphaFade = false;
+    // 出场烟(NPC.cs:67036-67053 精确式):num15=localAI[1]/10,i<num15 且 Next(5)==0
+    // 才出一粒 NewDustDirect(整盒 27 号,vel.x=自身 vx、scale .55、fadeIn .7、v×0.1·num16
+    // 后 += 自身速度;num16=Size.Length()/40;maxValue 门 5/578 不进 {576,577} 特例)
+    const num15 = Math.floor(x[1] / 10);
+    const num16 = Math.hypot(e.w, e.h) / 2 / 20;
+    for (let i = 0; i < num15; i++) {
+      if (Math.random() >= 1 / 5) continue;               // Next(5)==0
+      const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 27, e.vx * 1, 0, 100);
+      if (!d) break;
+      d.scale = 0.55;
+      d.fadeIn = 0.7;
+      d.vx *= 0.1 * num16;
+      d.vy *= 0.1 * num16;
+      d.vx += e.vx;
+      d.vy += e.vy;
+    }
   }
   // ---- 索敌（:66816 TargetClosestOldOnesInvasion） ----
   const tgt = dd2Target(game, e, player);
@@ -2138,11 +2279,29 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
     }
   }
   e.visAngle = Math.abs(e.vx) * e.facing * 0.1;    // rotation（:66902）
-  // ---- 电光尘（:66846-66862 的 272 号尘,粒子近似） ----
+  // ---- 电光尘双支(NPC.cs(1458):66985-67014 精确式,type==578 每 tick 恒掷)----
+  // 支① Next(15)==0:NewDustDirect(半宽×整高盒,272,scale .65,vy−=.8;direction 同向
+  //     的 vx 翻负 = 向身后甩、vy>0 → v×−0.5);direction==-1 时盒右移 halfW(贴咬口侧)
+  if (Math.random() < 1 / 15) {
+    const bx = e.facing === -1 ? e.x + e.w / 2 : e.x;
+    const d = game.spawnDust?.(bx, e.y, e.w / 2, e.h, 272);
+    if (d) {
+      d.scale = 0.65;
+      d.vy -= 0.8;
+      if (d.vx * e.facing > 0) d.vx *= -1;
+      if (d.vy > 0) { d.vx *= -0.5; d.vy *= -0.5; }
+    }
+  }
+  // 支② Next(80)==0:Center 双粒 272/NewDustPerfect,速=随机单位向×{1.1,1.5}、
+  //     noGravity(customData=自身 的 Player 跟随消费不适用 NPC 型,登记)——
+  //     原"1/80 spawnParticles 两粒白点"近似退役 —— 终清波实装
   if (Math.random() < 1 / 80) {
-    const a = Math.random() * TAU;
-    game.spawnParticles(e.cx, e.cy, '#B0E0FF', 2, 0.8, { life: 30 });
-    void a;
+    const ang = Math.random() * TAU;
+    const ux2 = Math.cos(ang), uy2 = Math.sin(ang);
+    const dA = game.spawnDust?.(e.cx, e.cy, 0, 0, 272, ux2 * 1.1, uy2 * 1.1, 0, null, 1, true, true);
+    if (dA) dA.noGravity = true;
+    const dB = game.spawnDust?.(e.cx, e.cy, 0, 0, 272, ux2 * 1.5, uy2 * 1.5, 0, null, 1, true, true);
+    if (dB) dB.noGravity = true;
   }
   if (!tgt) { fly(e); return; }
   const txc = tgt.x, tyc = tgt.y;
@@ -2615,7 +2774,7 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     // 其余态拆轨（原版 :63957-64005 的 GetActiveSound-null→重播 + Position 跟随）
     fuseLoopManage(
       e, game,
-      [['ignite', 'dd2_kobold_ignite_loop'], ['scream', 'dd2_kobold_scream_charge_loop']],
+      [['ignite', 'dd2KoboldIgniteLoop'], ['scream', 'dd2KoboldChargeLoop']],
       (e.ai1 === 1 && e.ai0 === 0) || (e.ai1 === 0 && e.ai0 > 0 && x[2] >= 30),
       e.cx, e.cy);
   }

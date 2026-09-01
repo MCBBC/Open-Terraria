@@ -101,6 +101,8 @@ describe('巨石(aiStyle 25,Projectile 99)', () => {
     expect(b.boulderLanded).toBe(true);
     expect(b.vx).toBe(0);                                // 首拍 landed 未置 → 不踢
     b.fixedUpdate(1, gB);
-    expect(b.vx).toBeCloseTo(0.5, 5);                    // 左实 → 向右踢 num213=0.5
+    // 踢门给 num213=0.5(左实→向右);同拍尾部滚地加速带(vy≤6,|vx|<7)再 +0.05
+    // (:26717-26723 与踢同支后置) ⇒ 终值 0.55 —— 拍内时序 踢(:26682 前)→rot→加速
+    expect(b.vx).toBeCloseTo(0.55, 5);
   });
 });

@@ -4694,6 +4694,26 @@ export class Renderer {
               c2.putImageData(idt, 0, 0);
               ctx.drawImage(s2, -5, -5);         // GetColor 叠画
             }
+          } else if (d.type === 331 && d.color) {
+            // :39650-39652 331 拖影色 = GetColor(GetAlpha(White)):GetAlpha(White)=
+            // (255−alpha)…,GetColor 再减 (255−该值) → 净 = clamp(color.ch − dust.alpha)。
+            // 不取光照（自发光族）;曾落通用 s1=GetAlpha(light) 桶
+            const c = d.color;
+            const tr = Math.max(0, c.r - d.alpha) / 255;
+            const tg = Math.max(0, c.g - d.alpha) / 255;
+            const tb = Math.max(0, c.b - d.alpha) / 255;
+            const ta = Math.max(0, Math.min(255, c.a - d.alpha)) / 255;
+            c2.clearRect(0, 0, 8, 8);
+            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+            const idt3 = c2.getImageData(0, 0, 8, 8);
+            for (let i = 0; i < idt3.data.length; i += 4) {
+              idt3.data[i] = idt3.data[i] * tr;
+              idt3.data[i + 1] = idt3.data[i + 1] * tg;
+              idt3.data[i + 2] = idt3.data[i + 2] * tb;
+              idt3.data[i + 3] = idt3.data[i + 3] * ta;
+            }
+            c2.putImageData(idt3, 0, 0);
+            ctx.drawImage(s2, -4, -4);
           } else if (trailCp) {
             c2.clearRect(0, 0, 8, 8);
             c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
@@ -4758,6 +4778,43 @@ export class Renderer {
             continue;   // 染料 pass 取代本体+colorPass（shader 输出即最终色）
           }
         }
+      }
+      if (d.type === 331) {
+        // :39670-39692 五贴片专属绘制（自发光族,全亮桶不受光）：
+        //   四向 ±2px（世界像素,×zoom）贴 GetAlpha(dust.color)=sprite×color×num、
+        //   A=clamp(color.a−alpha);白心 = Color.White 原帧——曾走通用 lit 管线+colorPass
+        //   （头注登记「331 绘制端拖影/四向贴片未建模」清偿 2026-09-01）
+        const c = d.color;
+        const zoom = cam.zoom;
+        if (c) {
+          const num = (255 - d.alpha) / 255;
+          const pa = Math.max(0, Math.min(255, c.a - d.alpha)) / 255;
+          c2.clearRect(0, 0, 8, 8);
+          c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+          const idp = c2.getImageData(0, 0, 8, 8);
+          for (let i = 0; i < idp.data.length; i += 4) {
+            idp.data[i] = idp.data[i] * (c.r / 255) * num;
+            idp.data[i + 1] = idp.data[i + 1] * (c.g / 255) * num;
+            idp.data[i + 2] = idp.data[i + 2] * (c.b / 255) * num;
+            idp.data[i + 3] = idp.data[i + 3] * pa;
+          }
+          c2.putImageData(idp, 0, 0);
+          for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+            ctx.save();
+            ctx.translate(px + ox * zoom, py + oy * zoom);
+            if (d.rotation) ctx.rotate(d.rotation);
+            if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+            ctx.drawImage(s2, -4, -4);
+            ctx.restore();
+          }
+        }
+        ctx.save();                              // 白心:Color.White 原帧,不受光
+        ctx.translate(px, py);
+        if (d.rotation) ctx.rotate(d.rotation);
+        if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+        ctx.drawImage(img, d.fx, d.fy, 8, 8, -4, -4, 8, 8);
+        ctx.restore();
+        continue;                                // vanilla 331 无 GetColor 叠画
       }
       // 自定义色 pass（GetColor :2773：clamp(color.ch − (255 − base.ch)) 后再乘贴图）
       const cp = VanillaDust.colorPass(d, rgb, a);
