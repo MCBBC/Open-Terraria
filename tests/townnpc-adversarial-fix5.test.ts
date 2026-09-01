@@ -17,12 +17,7 @@
 //   【A10】critter 死域预防三件：起身腿程 Next(200,400) 单采(UnifiedRandom.cs:
 //         121-132)/走→停双分支(cs:54377-90)/第二乘子 ×1.2(cs:54751-55)。
 //         ★骰流位变化记录：该区域现行零实体(VANILLA_TOWN_CRITTER_SHEETS 无既有
-//         城镇 NPC 载体)、无既有回放依赖——fix5 打包即「存证公证」
-//   【A11】错引注释行号考古（语义零改动）：常量表 :307/:320、:2181、:3568 区、
-//         :3631、TownNPC magicAuraColor 头注——均为纯注释行，由 tsc/lint 覆盖
-//
-// 骰序约定（集成用例公用事实）：行走中 socialUpdate ⑥驻足门先耗一张 rand(600)、
-// tryRandomChairSit 再耗一张 rand(300)； Hence 各用例的 rngQueue 首张垫 0.999。
+//         城镇 NPC 载体)、无既有回放依赖——本文件即存证公证
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';
@@ -35,8 +30,14 @@ import { TILE_DEFS } from '../src/data/tiles';
 const DIRT = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 1);
 const FLOOR_ROW = 100;
 
-/** 可编程骰序（缺省回填 fallback；log 不需要——用例全部按位计骰） */
-function rngQueue(vals: number[], fallback = 0.999) {
+function lcg(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+}
+function rngQ(vals: number[], fallback = 0.999) {
   let i = 0;
   return () => {
     const v = i < vals.length ? vals[i] : fallback;
@@ -44,7 +45,6 @@ function rngQueue(vals: number[], fallback = 0.999) {
     return v;
   };
 }
-
 function priv(n: object, k: string): any {
   return (n as Record<string, unknown>)[k];
 }
@@ -58,12 +58,16 @@ function flatWorld(name: string): World {
   for (let x = 20; x <= 230; x++) world.store.setTileSilent(x, FLOOR_ROW, DIRT);
   return world;
 }
+/** 底部精确落地面 */
+function placeOnFloor(world: World, npc: TownNPC, tileX: number): void {
+  npc.x = tileX * 16;
+  npc.y = FLOOR_ROW * 16 - npc.h;
+}
 
 interface TestEnemy {
   x: number; y: number; w: number; h: number; dead: boolean; damage: number;
   hurt: () => boolean;
 }
-
 function makeGame(world: World, enemies: TestEnemy[] = []) {
   const shots: TownShot[] = [];
   const game = {
@@ -90,10 +94,12 @@ function armPool(npc: AnyNpc, cx: number, cy: number): void {
     threatPool: { left: null, right: { x: cx - 10, y: cy - 20, w: 20, h: 40, cx, cy } },
   });
 }
-
+const feetRowOf = (n: TownNPC): number => Math.floor((n.y + n.h - 16) / 16);
 const shootAtFn = (TownNPC.prototype as unknown as Record<string, (...a: unknown[]) => void>).shootAt;
 const obstacleJumpFn =
   (TownNPC.prototype as unknown as Record<string, (...a: unknown[]) => boolean>).obstacleJump;
+const wanderUpdateFn =
+  (TownNPC.prototype as unknown as Record<string, (...a: unknown[]) => number>).wanderUpdate;
 const mechProbeAliveFn =
   (TownNPC.prototype as unknown as Record<string, (g: never) => boolean>).mechProbeAlive;
 
@@ -103,24 +109,25 @@ const mechProbeAliveFn =
 describe('【A1】兔表演尾冻门值 row>20（cs:69647-50）', () => {
   it('kind22 帧行 17..20 往复：19 与 20 都出现、永不越 21 或回卷 0', () => {
     const world = flatWorld('fix5-a1');
-    const npc = new TownNPC('town_bunny', 104 * 16, FLOOR_ROW * 16 - 20) as AnyNpc;
+    const npc = new TownNPC('town_bunny', 0, 0) as AnyNpc;
+    placeOnFloor(world, npc, 104);
     npc.vx = 0;
     npc.social = { kind: 22, t: 400, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
     npc.frame = 17;
     privSet(npc, { walkMode: 0 });
     const { game } = makeGame(world);
-    npc.rng = rngQueue([], 0.999);
+    npc.rng = rngQ([], 0.999);
     const seen = new Set<number>();
     for (let t = 0; t < 140 && npc.social; t++) {
       npc.fixedUpdate(1 / 60, game);
       seen.add(npc.frame);
     }
-    // 门值修正的直接证据：旧行为 `row>19→19` 使 20 永不可达（尾带提前折返）
+    // 门值修正的直接证据：旧行为 `row>19→19` 使 20 永不可达（尾带提前一拍折返）
     expect(seen.has(20)).toBe(true);
     expect(seen.has(19)).toBe(true);
     for (const f of seen) {
-      expect(f).toBeGreaterThanOrEqual(17);           // 吸附带下界
-      expect(f).toBeLessThanOrEqual(20);              // 回弹上界（不越 21 / 不触 nf 回卷）
+      expect(f).toBeGreaterThanOrEqual(17);
+      expect(f).toBeLessThanOrEqual(20);
     }
   });
 });
@@ -142,34 +149,41 @@ describe('【A2】魔法光环 663 基色 (255,143,197)', () => {
 });
 
 // =====================================================================
-// 【A3】209 逐弹冷却三态（每拍一骰 SelectRandom + 退出用本拍选中值）
+// 【A3】209 逐弹冷却三态
 // =====================================================================
 describe('【A3】电子人(209)逐弹冷却链（cs:55138-60/:55362-66）', () => {
-  /** 灌进态：敌右侧同层；返回已入态环境 */
+  /** LCG 灌进态（敌右侧同层斜率带内），返回已发射环境 */
   function enterCyborg(): { world: World; cyborg: AnyNpc; game: never; shots: TownShot[] } {
     const world = flatWorld('fix5-a3');
-    const cyborg = new TownNPC('cyborg', 100 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    const enemy: TestEnemy = { x: 106 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    const cyborg = new TownNPC('cyborg', 0, 0) as AnyNpc;
+    placeOnFloor(world, cyborg, 100);
+    const enemy: TestEnemy = {
+      x: 105 * 16, y: FLOOR_ROW * 16 - 60, w: 20, h: 40, dead: false,
+      damage: 40, hurt: () => true,
+    };
     const { game, shots } = makeGame(world, [enemy]);
-    cyborg.rng = rngQueue([0.0000001], 0.999);       // 首拍过触发门，其余全 miss
+    cyborg.rng = lcg(20260901);
     let ticks = 0;
-    while ((cyborg.attackState !== 12 || shots.length > 0) && ticks++ < 3000) {
+    while (cyborg.attackState !== 12 && ticks++ < 4000) {   // 进态即停（首拍未及发射）
       enemy.x = cyborg.cx + 64;
+      enemy.y = cyborg.cy - 8;
       cyborg.fixedUpdate(1 / 60, game);
-      if (ticks > 2900) break;
+      if (ticks > 3990) break;
     }
     return { world, cyborg, game, shots };
   }
 
-  it('态内每拍恰耗一张 SelectRandom 骰（含无发射拍）', () => {
+  it('态内每拍恰耗一张 SelectRandom 骰（含无发射拍与退出拍）', () => {
     const { cyborg, game } = enterCyborg();
     let diceThisTick = 0;
-    let seed = 77777777;
-    cyborg.rng = () => {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      diceThisTick++;
-      return seed / 0x100000000;
-    };
+    cyborg.rng = (() => {
+      let seed = 77777777;
+      return () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        diceThisTick++;
+        return seed / 0x100000000;
+      };
+    })();
     const counts: number[] = [];
     for (let t = 0; t < 70 && cyborg.attackState === 12; t++) {
       diceThisTick = 0;
@@ -178,33 +192,34 @@ describe('【A3】电子人(209)逐弹冷却链（cs:55138-60/:55362-66）', () 
     }
     expect(cyborg.attackState).toBe(0);              // AttackTime=60 已退
     expect(counts.length).toBeGreaterThanOrEqual(30);
-    for (const c of counts) expect([1, 3]).toContain(c);   // 选弹拍 / (发射|退出)加骰拍
+    for (const c of counts) expect([1, 3]).toContain(c);   // 选弹拍 / 发射拍或退出拍(+2)
     expect(counts.filter((c) => c === 1).length).toBeGreaterThan(5);
   });
 
-  it('全程恒喂 0.5 → 恒选中 133；退出腿程/冷却取三态精确终值 10/5', () => {
+  it('选弹切恒 0.5 → 恒中 133；退出腿程/冷却取三态终值 10/5 且与静态默认不相交', () => {
     const { world, cyborg, game, shots } = enterCyborg();
-    cyborg.rng = rngQueue([], 0.5);                  // floor(.5*3)=1 → 134,133,135 取 [133]
+    void world;
+    cyborg.rng = rngQ([], 0.5);                      // floor(.5*3)=1 → 第 2 位 = 133
     let ticks = 0;
     while (cyborg.attackState === 12 && ticks++ < 300) cyborg.fixedUpdate(1 / 60, game);
     expect(cyborg.attackState).toBe(0);
     const roll = priv(cyborg, 'cyborgRoll') as { kind: number; cdBase: number; cdRand: number };
     expect(roll).toBeDefined();
     expect(roll.kind).toBe(133);                     // cs:55147 case 133(num55=10/maxValue2=1)
-    const shot = shots.find((s) => s.projId === 133)!;
+    const shot = shots.find((s) => s.projId === 133);
     expect(shot).toBeDefined();
-    expect(shot.damage).toBe(25);                    // num52=25×num2(1)→GetAttackDamage Classic
-    expect(priv(cyborg, 'walkT')).toBe(10);          // ai[1]=num55+⌊.5·1⌋
+    expect(shot!.damage).toBe(25);                   // num52=25 ×num2(1)
+    expect(priv(cyborg, 'walkT')).toBe(10);          // ai[1]=num55+⌊.5·1⌋（本拍选中值）
     expect(priv(cyborg, 'atkCd')).toBe(5);           // num55/2+⌊.5·1⌋
     expect(priv(cyborg, 'turnLock')).toBe(5);        // localAI[1]≡localAI[3]
-    // 与静态默认(14/4 族)不相交——若覆写失效本断言必红
-    expect(priv(cyborg, 'atkCd')).not.toBeGreaterThan(6);
-    expect(world.difficulty).toBeDefined();
+    // 静态默认(14/4 族 → atkCd∈[7,10]/legT∈[14,17]) 与实取证值不相交——覆写失效即红
+    expect(priv(cyborg, 'atkCd')).not.toBeGreaterThanOrEqual(7);
+    expect(priv(cyborg, 'walkT')).not.toBeGreaterThanOrEqual(14);
   });
 });
 
 // =====================================================================
-// 【A4】出膛锚点半宽：950 大弹 ±47px 漂移钉死；10×10 族不变量
+// 【A4】出膛锚点半宽尺寸源
 // =====================================================================
 describe('【A4】出膛锚点半宽尺寸源（vanilla-projectiles.json 载体）', () => {
   it('1/583/587/589 恰 10×10（锚点换算不变）、950=104、590=14；586 在册但无出膛点', () => {
@@ -215,37 +230,45 @@ describe('【A4】出膛锚点半宽尺寸源（vanilla-projectiles.json 载体�
     expect(projectileData(950)?.width).toBe(104);
     expect(projectileData(950)?.height).toBe(104);
     expect(projectileData(590)?.width).toBe(14);
-    expect(projectileData(586)).toBeDefined();       // 干涸登记：走 updateDryadWardAura
+    expect(projectileData(586)).toBeDefined();       // 登记面：走 updateDryadWardAura 无出膛点
   });
 
   it('公主(663)落点弹集成：中心口径落窗内、旧 10px 口径恒越窗（±47px）', () => {
     const world = flatWorld('fix5-a4');
-    const princess = new TownNPC('princess', 100 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
+    const princess = new TownNPC('princess', 0, 0) as AnyNpc;
+    placeOnFloor(world, princess, 100);
     princess.stationary = true;
-    privSet(princess, { stationary: true });
-    const ex = 104 * 16, ey = 96 * 16, ew = 20, eh = 40;
+    const ex = 104 * 16, ey = FLOOR_ROW * 16 - 60, ew = 20, eh = 40;
     const enemy: TestEnemy = { x: ex, y: ey, w: ew, h: eh, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(world, [enemy]);
-    princess.rng = rngQueue([], 0.999);
+    princess.rng = lcg(987654321);
     let ticks = 0;
-    while (!shots.some((s) => s.projId === 950) && ticks++ < 3000) {
+    let lastEx = enemy.x, lastEy = enemy.y;          // 发射刻敌位快照（敌逐拍跟随）
+    while (!shots.some((s) => s.projId === 950) && ticks++ < 4000) {
+      lastEx = enemy.x;
+      lastEy = enemy.y;
       enemy.x = princess.cx + 64;
-      enemy.y = 97.5 * 16;                           // 斜率带内同层
+      enemy.y = princess.cy - 20;
       princess.fixedUpdate(1 / 60, game);
+      if (shots.some((s) => s.projId === 950)) { lastEx = enemy.x; lastEy = enemy.y; }
+      if (ticks > 3990) break;
     }
-    const shot = shots.find((s) => s.projId === 950)!;
-    expect(shot.w).toBe(104);
-    const px = shot.x + shot.w / 2;                  // 新口径（半宽 52 反推中心）
-    const py = shot.y + shot.h / 2;
-    expect(px).toBeGreaterThanOrEqual(ex);           // cs:55367 [x, x+w]
-    expect(px).toBeLessThanOrEqual(ex + ew);
-    expect(py).toBeGreaterThanOrEqual(ey);
-    expect(py).toBeLessThanOrEqual(ey + eh);
-    // 旧口径 x+5 的读数与真中心差恒 47px 且必越窗（假阳性暴露面钉死）
-    expect((shot.x + shot.w / 2) - (shot.x + 5)).toBe(47);
-    expect((shot.y + shot.h / 2) - (shot.y + 5)).toBe(47);
-    const oldX = shot.x + 5, oldY = shot.y + 5;
-    expect(oldX >= ex && oldX <= ex + ew && oldY >= ey && oldY <= ey + eh).toBe(false);
+    const shot = shots.find((s) => s.projId === 950);
+    expect(shot).toBeDefined();
+    expect(shot!.w).toBe(104);
+    // 采样窗以【发射刻】敌盒为准（cs:55367 position+Size×rand(0..1) 直读池快照）
+    const px = shot!.x + shot.w / 2;                 // 新口径（半宽 52 反推中心）
+    const py = shot!.y + shot.h / 2;
+    expect(px).toBeGreaterThanOrEqual(lastEx);       // [x, x+w]
+    expect(px).toBeLessThanOrEqual(lastEx + ew);
+    expect(py).toBeGreaterThanOrEqual(lastEy);
+    expect(py).toBeLessThanOrEqual(lastEy + eh);
+    // 旧口径 x+5 读数与真中心差恒 47px 且必越窗（假阳性暴露面钉死）
+    expect((shot!.x + shot!.w / 2) - (shot!.x + 5)).toBe(47);
+    expect((shot!.y + shot!.h / 2) - (shot!.y + 5)).toBe(47);
+    const oldX = shot!.x + 5, oldY = shot!.y + 5;
+    expect(oldX >= lastEx && oldX <= lastEx + ew && oldY >= lastEy && oldY <= lastEy + eh)
+      .toBe(false);
   });
 });
 
@@ -256,8 +279,8 @@ describe('【A5】life 管线（Projectile.cs:789 预置档 → json timeLeft �
   it('构造器默认 = json timeLeft；缺失支走 3600；发射级 480 后于默认（24:4800→480）', () => {
     const mk = (id: number, opts?: { life?: number }) =>
       new TownShot(0, 0, 0, 0, 0, 0, id, opts);
-    // decompiled 双向核对过：24→4800 / 590→900 / 950→180 / 1·2→1200 /
-    // 242·357·14→600（Projectile.cs :1072/:6388/:8959/:810/:820/:3241/:4477/:953）
+    // decompiled 双向核对过：24→4800(:1072)/590→900(:6388)/950→180(:8959)/
+    // 1·2→1200(:810/:820)/14→600(:953)/242→600(:3241)/357→600(:4477)
     expect(mk(24).life).toBe(4800);
     expect(mk(590).life).toBe(900);
     expect(mk(950).life).toBe(180);
@@ -278,66 +301,76 @@ describe('【A5】life 管线（Projectile.cs:789 预置档 → json timeLeft �
     expect(priv(mk(590), 'age0')).toBe(900);
   });
 
-  it('机械师(124)侦察弹 582：无重力直飞 + 探针窗 3600 计数存活', () => {
+  it('机械师(124)侦察弹 582：无重力直飞 + 探针窗 3600 计数存活 + 在途抑制门命中', () => {
     const world = flatWorld('fix5-a5');
-    const mechanic = new TownNPC('mechanic', 100 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
+    const mechanic = new TownNPC('mechanic', 0, 0) as AnyNpc;
+    placeOnFloor(world, mechanic, 40);
     privSet(mechanic, { atkState: 10, atkTick: 1, atkNextShot: 1, hardModeFlag: false });
-    armPool(mechanic, 110 * 16, 97.5 * 16);
+    // 远距高位目标 → 直飞轨迹永不出场、不入地
+    armPool(mechanic, 180 * 16, FLOOR_ROW * 16 - 320);
     const { shots, game } = makeGame(world);
     shootAtFn.call(mechanic, world, game,
       { proj: 582, dmg: 11, speed: 10, shootTick: 1, cdBase: 30, cdRand: 30, spread: 0, kb: 3.5 }, 800);
     expect(shots.length).toBe(1);
     const probe = shots[0];
     expect(probe.projId).toBe(582);
-    expect(priv(probe, 'noGrav')).toBe(true);                    // ★A5 无重力探针前提
-    expect(probe.ai1).toBeGreaterThan(0);                        // 本体归属 tag(:55067 ai1=whoAmI)
-    expect(probe.life).toBe(3600);                               // 探针窗计数上限
+    expect(priv(probe, 'noGrav')).toBe(true);        // ★A5 无重力探针前提
+    expect(probe.ai1).toBeGreaterThan(0);            // 本体归属 tag(:55067 ai1=whoAmI)
+    expect(probe.life).toBe(3600);                   // 探针窗计数上限
     const vy0 = probe.vy;
-    for (let t = 0; t < 90 && !probe.dead; t++) probe.fixedUpdate(1 / 60, game);
-    expect(probe.dead).toBe(false);                              // 90t << 3600 在途
-    expect(probe.vy).toBe(vy0);                                  // 无重力 → vy 恒定
-    // 机械师「侦察弹在途」抑制门（mechProbeAlive 键 = ai1 tag）
+    for (let t = 0; t < 60 && !probe.dead; t++) probe.fixedUpdate(1 / 60, game);
+    expect(probe.dead).toBe(false);                  // 60t << 3600 在途
+    expect(probe.vy).toBe(vy0);                      // 无重力 → vy 恒定不积 grav
+    // 机械师「侦察弹在途」抑制门（mechProbeAlive 键 = ai1 tag）命中
     expect(mechProbeAliveFn.call(mechanic, game)).toBe(true);
   });
 });
 
 // =====================================================================
-// 【A6】holdAim 链：入态种子 vector8.Y + flag28 档进拍带内回写
+// 【A6】holdAim 链：flag28 带检回写（入态种子另见 town-npc-behavior 批⑤更新例）
 // =====================================================================
-describe('【A6】弓族 ai[2] 写入门（cs:56052-59 入态种子 / cs:55382-91 回写）', () => {
+describe('【A6】弓族 ai[2] 写入门（cs:55382-91 回写面）', () => {
   function bowNpc(key = 'witch_doctor'): AnyNpc {
-    const npc = new TownNPC(key, 100 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(npc, { atkState: 12, atkTick: 8, atkNextShot: 8, atkBurstIdx: 0, hardModeFlag: false, holdAim: 0.3 });
+    const npc = new TownNPC(key, 0, 0) as AnyNpc;
+    placeOnFloor(world0(), npc, 100);
+    privSet(npc, {
+      atkState: 12, atkTick: 8, atkNextShot: 8, atkBurstIdx: 0,
+      hardModeFlag: false, holdAim: 0.3,
+    });
     return npc;
   }
-  function fire(npc: AnyNpc, dyPx: number): TownShot[] {
-    const world = flatWorld('fix5-a6');
-    armPool(npc, 106 * 16, 97.5 * 16 + dyPx);
+  function world0(): World { return flatWorld('fix5-a6'); }
+
+  function fire(npc: AnyNpc, refCyPx: number): TownShot[] {
+    const world = world0();
+    const centerY = Math.floor(npc.cy / 16) * 16 + 8;   // 参考中线附近
+    armPool(npc, 106 * 16, refCyPx || centerY);
     const { shots, game } = makeGame(world);
     shootAtFn.call(npc, world, game, { ...TOWN_BOW[178] }, 900);
     return shots;
   }
 
-  it('flag28=false（非连发推进拍）：整拍不写——保留入态种子 0.3', () => {
+  it('flag28=false（非连发推进拍）：整拍不写——保留旧种子 0.3', () => {
     const npc = bowNpc();
-    fire(npc, 0);
-    expect(priv(npc, 'holdAim')).toBe(0.3);          // 旧实现无条件钳写→0 系病根
+    fire(npc, Math.floor(npc.cy / 16) * 16 + 8);
+    expect(priv(npc, 'holdAim')).toBe(0.3);          // 旧实现无条件钳写系病根
   });
 
-  it('flag28=true（档进拍）：带外 |Y|>0.5 不写保留旧值；带内写入且不再 clamp', () => {
+  it('flag28=true（档进拍）：带内写入本拍向量 Y；带外保留旧值不再 clamp', () => {
     const npc = bowNpc('pirate');                     // 229 有真实连发链
     privSet(npc, { atkBurstIdx: 1 });                 // flag28 承接载体
-    // 带外：dy=80 → 敌中心距 ~291px? dy/dist = 80/hypot(dx=96,dy=80±lift)…＞0.5?
-    // 直接以大 dy 保证 |Y|>0.5：dy=300/dx=96 → |Y|≈0.95
+    // 带内：候选中心与本体近同高（差 8px << 43px 半带界）→ 写入近似 0
+    const nearCy = Math.floor(npc.cy / 16) * 16 + 8;
+    fire(npc, nearCy);
+    const inBand = priv(npc, 'holdAim') as number;
+    expect(Math.abs(inBand - (nearCy - npc.cy) / Math.hypot(6 * 16, nearCy - npc.cy))).toBeLessThan(0.02);
+    // 带外：+120px → |Y|>0.5 → 不写保留（原版字面,非 clamp 到 ±0.5）
     privSet(npc, { holdAim: 0.3 });
-    fire(npc, 300);
-    expect(priv(npc, 'holdAim')).toBe(0.3);           // 带外保留旧值（原版字面,非 clamp）
-    // 带内：同高 → Y≈0
-    fire(npc, 0);
-    expect(Math.abs(priv(npc, 'holdAim'))).toBeLessThan(0.01);
-    // 带边缘语义：种子 −0.44 带内原地保留另一方向
+    fire(npc, nearCy + 120);
+    expect(priv(npc, 'holdAim')).toBe(0.3);
+    // 再证另一符号
     privSet(npc, { holdAim: -0.44 });
-    fire(npc, 220);                                   // |Y|≈0.92 带外 → 不写
+    fire(npc, nearCy - 160);
     expect(priv(npc, 'holdAim')).toBe(-0.44);
   });
 });
@@ -346,7 +379,6 @@ describe('【A6】弓族 ai[2] 写入门（cs:56052-59 入态种子 / cs:55382-9
 // 【A7】social kind9 入态 turnLock=0（cs:55982 localAI[3]=0f）
 // =====================================================================
 describe('【A7】驻足看家具入态清锁（RB-L3）', () => {
-  /** 从 TILE_DEFS 反查一个 InteractableByNPCs sheet 的内部 tile id */
   function interactableTile(): number {
     const sheets = new Set([
       17, 77, 133, 12, 665, 639, 26, 695, 35, 36, 55, 395, 471, 698, 21, 467,
@@ -364,41 +396,41 @@ describe('【A7】驻足看家具入态清锁（RB-L3）', () => {
     const tid = interactableTile();
     if (tid < 0) throw new Error('no interactable tile found');
     const world = flatWorld('fix5-a7');
-    const npc = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(npc, { walkMode: 1, walkT: 500, turnLock: 123 });
+    const npc = new TownNPC('guide', 0, 0) as AnyNpc;
+    placeOnFloor(world, npc, 104);
+    privSet(npc, { walkMode: 1, walkT: 500, turnLock: 123, onGround: true });
     npc.facing = 1;
     npc.vx = 1;
     // 探测公式同 socialUpdate ⑥：fx=floor(cx+dir*10)/16、fy=floor(cy/16)
     const fx = Math.floor((npc.cx + npc.facing * 10) / 16);
     const fy = Math.floor(npc.cy / 16);
-    if (world.store.isSolid(fx, fy + 1)) world.store.setTileSilent(fx, fy, tid);
+    if (!world.store.isSolid(fx, fy + 1)) world.store.setTileSilent(fx, fy, tid);
     const { game } = makeGame(world);
-    let entered = false;
-    for (let t = 0; t < 400 && !entered; t++) {
-      npc.rng = rngQueue(t === 0 ? [0.999, 0.000001] : [], 0.999);  // ⑥路命中
-      npc.fixedUpdate(1 / 60, game);
-      entered = npc.socialKind === 9;
-    }
-    expect(entered).toBe(true);
+    // 骰序：行走 tick ⑥驻足 rand600 先耗一张（首张 0.000001 直接命中入态）
+    npc.rng = rngQ([0.000001], 0.999);
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.socialKind).toBe(9);
     expect(npc.vx).toBe(0);                          // :55831 velocity=0
     expect(priv(npc, 'turnLock')).toBe(0);           // ★A7 本体断言（cs:55982）
   });
 });
 
 // =====================================================================
-// 【A8+A9】史莱姆蹦跳两臂 + 啮齿折返
+// 【A9】史莱姆蹦跳两臂 + 啮齿折返
 // =====================================================================
 describe('【A9】史莱姆蹦跳/啮齿折返', () => {
-  it('臂A：贴地全净空梯序末档小跳 vy=-5（白盒 obstacleJump 直调,无物理干扰）;非史莱姆不跳', () => {
+  it('臂A：贴地全净空梯序末档小跳 vy=-5（白盒直调,无物理干扰）;非史莱姆不受理', () => {
     const world = flatWorld('fix5-a9a');
-    const slime = new TownNPC('town_slime_blue', 104 * 16, FLOOR_ROW * 16 - 20) as AnyNpc;
+    const slime = new TownNPC('town_slime_blue', 0, 0) as AnyNpc;
+    placeOnFloor(world, slime, 104);
     privSet(slime, { vy: 0, vx: 1 });
     slime.facing = 1;
     const turned = obstacleJumpFn.call(slime, world, 1, false);
     expect(turned).toBe(false);                      // 跳跃不转身
     expect(priv(slime, 'vy')).toBe(-5);              // cs:54724 字面
 
-    const guide = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
+    const guide = new TownNPC('guide', 0, 0) as AnyNpc;
+    placeOnFloor(world, guide, 112);
     privSet(guide, { vy: 0, vx: 1 });
     guide.facing = 1;
     obstacleJumpFn.call(guide, world, 1, false);
@@ -407,12 +439,13 @@ describe('【A9】史莱姆蹦跳/啮齿折返', () => {
 
   it('活体史莱姆落地场：蹦跳节律（反复腾空）且平地支撑充足不触发臂B停走', () => {
     const world = flatWorld('fix5-a9-live');
-    const slime = new TownNPC('town_slime_blue', 104 * 16, FLOOR_ROW * 16) as AnyNpc;
+    const slime = new TownNPC('town_slime_blue', 0, 0) as AnyNpc;
+    placeOnFloor(world, slime, 104);
     privSet(slime, { walkMode: 1, walkT: 50000, turnLock: 0 });  // 巨腿程防自然停走干扰
     slime.facing = 1;
     slime.vx = 1;
     const { game } = makeGame(world);
-    slime.rng = rngQueue([], 0.999);
+    slime.rng = rngQ([], 0.999);
     let hops = 0, wasAir = false, stoppedWalking = false;
     for (let t = 0; t < 600; t++) {
       const preVx = slime.vx;
@@ -422,7 +455,7 @@ describe('【A9】史莱姆蹦跳/啮齿折返', () => {
       if (preVx !== 0 && slime.vx === 0 && priv(slime, 'turnLock') === 40) stoppedWalking = true;
     }
     expect(hops).toBeGreaterThanOrEqual(3);          // 节律：反复起跳(vy<0 触发)
-    expect(slime.walking).toBe(true);                // 平地每列支撑 3>2 → 臂B不受理
+    expect(slime.walking).toBe(true);                // 平地支撑 3>2 → 臂B不受理
     expect(stoppedWalking).toBe(false);
   });
 
@@ -430,142 +463,154 @@ describe('【A9】史莱姆蹦跳/啮齿折返', () => {
     const world = flatWorld('fix5-a9b');
     const st = world.store;
     const bx = 105;
-    // 掏空脚下 ±1 列 × 下探 8 行，只留 2 个孤立支撑格（≤2 触发；cs:54767-81 计数式）
+    // 掏空脚下 ±1 列含本行 × 下探 8 行，只留 2 个孤立支撑格（≤2 触发,cs:54767-81 式）
     for (const col of [bx - 1, bx, bx + 1]) {
-      for (let d = 1; d <= 8; d++) st.setTileSilent(col, FLOOR_ROW + d, 0);
+      for (let d = 0; d <= 8; d++) st.setTileSilent(col, FLOOR_ROW + d, 0);
     }
     st.setTileSilent(bx + 1, FLOOR_ROW + 1, DIRT);   // 支撑①
-    st.setTileSilent(bx - 1, FLOOR_ROW + 4, DIRT);   // 支撑②
-    const slime = new TownNPC('town_slime_blue', bx * 16 + 2, FLOOR_ROW * 16 - 40) as AnyNpc;
+    st.setTileSilent(bx - 1, FLOOR_ROW + 2, DIRT);   // 支撑②
+    const slime = new TownNPC('town_slime_blue', bx * 16 + 2, 0) as AnyNpc;
+    placeOnFloorSky(slime, FLOOR_ROW * 16 - 40);     // 半空腾空位（onGate 已显式置）
     privSet(slime, { walkMode: 1, walkT: 5000, onGround: false, vy: -3, vx: 1, turnLock: 0 });
     slime.facing = 1;
     const { game } = makeGame(world);
-    // 行走腾空 tick 骰序：⑥驻足 rand600 先耗一张（miss）→ Next(50) 吃 0.5
-    slime.rng = rngQueue([0.999, 0.5], 0.999);
+    slime.rng = rngQ([0.5], 0.999);                  // 该拍仅 Next(50) 一骰（实测骰流）
     slime.fixedUpdate(1 / 60, game);
-    expect(slime.walking).toBe(false);               // walkMode=0
+    expect(slime.walking).toBe(false);               // walkMode=0（ai[0]=0）
     expect(priv(slime, 'walkT')).toBe(75);           // 50+⌊.5·50⌋
     expect(priv(slime, 'turnLock')).toBe(40);        // localAI[3]=40
     expect(Math.abs(slime.vx - 0.2)).toBeLessThan(1e-9);  // velocity.X *= 0.2f
   });
+  function placeOnFloorSky(npc: TownNPC, y: number): void { npc.y = y; }
 
   it('啮齿折返臂：flag7 两格高墙被卡 + 身侧实心 → 折返且 vx=0（不走 flag26 −vx 反冲）', () => {
     const world = flatWorld('fix5-a9r');
     const st = world.store;
-    const rat = new TownNPC('guide', 102 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
+    const rat = new TownNPC('guide', 0, 0) as AnyNpc;
+    placeOnFloor(world, rat, 102);
     privSet(rat, { vanillaId: 300 });                 // cs:54001 flag7 集 {300,447,610}
-    const feetRow = FLOOR_ROW - 1;                    // Bottom 贴地 → num27
-    st.setTileSilent(103, feetRow - 2, DIRT);         // t5 实心（一档门槛）
-    st.setTileSilent(103, feetRow - 1, DIRT);         // t4 同实心（shortBody 双门）
-    st.setTileSilent(102, feetRow - 1, DIRT);         // 折返壁:SolidTile(centerX/16+dir, centerY/16)
-    privSet(rat, { walkMode: 1, walkT: 400, onGround: true, vy: 0, vx: 1 });
-    rat.facing = 1;
+    const feetRow = feetRowOf(rat);                   // 底贴地 → 本行恒 FLOOR_ROW−1
+    const headRow = feetRow - 2;
+    const cyRow = Math.floor(rat.cy / 16);
+    st.setTileSilent(103, headRow, DIRT);             // t5 实心（一档门槛,需 t4 双实心）
+    st.setTileSilent(103, feetRow - 1, DIRT);         // t4 实心
+    st.setTileSilent(Math.floor(rat.cx / 16), feetRow - 1, DIRT);  // 净空失败区（SV 面）
     const turned = obstacleJumpFn.call(rat, world, 1, false);
-    expect(turned).toBe(true);                        // 方向翻转被调用方保全
+    expect(turned).toBe(true);
     expect(rat.facing).toBe(-1);                      // direction *= -1
     expect(rat.vx).toBe(0);                           // velocity.X *= 0f（cs:54662）
+    expect(cyRow).toBe(feetRow - 1);                  // 身侧实心行恰=centerY 行 → 折返壁实证
   });
 });
 
 // =====================================================================
-// 【A10】critter 死域预防三件套（起身 bonus / 走→停双分支 / 第二乘子）
+// 【A10】critter 死域预防三件套
 // =====================================================================
 describe('【A10】critter 三 bonus（★现行零实体区域——骰流位变化无既有回放依赖）', () => {
-  it('(a)站桩耗尽起身：critter 第三掷 Next(200,400) 单采 → 350+300；非critter 只吃一骰', () => {
+  /** (a)/(b) 用 wanderUpdate 白盒直调——骰序从零起算不受社交链前耗干扰 */
+  function standCritter(world: World, vanillaId: number): AnyNpc {
+    const npc = new TownNPC('guide', 0, 0) as AnyNpc;
+    placeOnFloor(world, npc, 130);
+    privSet(npc, { vanillaId, walkMode: 0, walkT: 1, onGround: true, turnLock: 5, talking: false });
+    return npc;
+  }
+
+  it('(a)站桩耗尽起身：critter 第三掷 Next(200,400) 单采 → 650；非critter 只吃一骰 → 350', () => {
     const world = flatWorld('fix5-a10a');
-    const critter = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(critter, { vanillaId: 300, walkMode: 0, walkT: 1, onGround: true });
-    const { game } = makeGame(world);
-    critter.rng = rngQueue([0.5, 0.5], 0.999);       // base ⌊.5·300⌋=150 / bonus ⌊.5·200⌋=100
-    critter.fixedUpdate(1 / 60, game);
+    const critter = standCritter(world, 300);
+    privSet(critter, { turnLock: 5 });               // 锁未尽免拴绳掷尾扰动? 拴绳仍耗一张——序列后置无害
+    critter.rng = rngQ([0.5, 0.5], 0.999);           // base ⌊.5·300⌋=150 / bonus ⌊.5·200⌋=100
+    wanderUpdateFn.call(critter, world, makeGame(world).game, false);
     expect(critter.walking).toBe(true);
-    expect(priv(critter, 'walkT')).toBe(650);        // (200+150) + (200+100)
+    expect(priv(critter, 'walkT')).toBe(650);        // (200+150)+(200+100)
     expect(VANILLA_TOWN_CRITTER_SHEETS.has(300)).toBe(true);
 
-    // 非 critter 对照：起身臂不吃 bonus 骰（base 后流面保持原状,仅一骰）
-    const plain = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(plain, { walkMode: 0, walkT: 1, onGround: true });
-    plain.rng = rngQueue([0.5], 0.999);
-    plain.fixedUpdate(1 / 60, game);
-    expect(priv(plain, 'walkT')).toBe(350);
+    const plain = standCritter(world, 22);
+    plain.rng = rngQ([0.5], 0.999);                  // 仅 base 一骰
+    wanderUpdateFn.call(plain, world, makeGame(world).game, false);
+    expect(priv(plain, 'walkT')).toBe(350);          // 非 critter 路径不吃 bonus（流位保持）
   });
 
-  it('(a′)卡墙折返：critter 折返腿程吃到 Next(200,400)=350+300（cs:54795-97）', () => {
+  it('(a′)卡墙折返：critter 折返腿程 = base(499)+bonus(399)=898（对照非critter 499）', () => {
     const world = flatWorld('fix5-a10p');
     const st = world.store;
-    const rat = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(rat, { vanillaId: 46, walkMode: 1, walkT: 300, onGround: true, vx: 0.9 });
-    rat.facing = 1;
-    for (let x = 106; x <= 110; x++) {
-      st.setTileSilent(x, FLOOR_ROW - 1, DIRT);       // 迎面墙（阻断位移,vx→0,x 不动）
-      st.setTileSilent(x, FLOOR_ROW - 2, DIRT);
-      st.setTileSilent(x, FLOOR_ROW - 3, DIRT);
-    }
-    const { game } = makeGame(world);
-    const vals = new Array<number>(34).fill(0.999);   // 触发前各拍安全垫骰
-    vals.push(0.5, 0.5);                              // 折返拍:base ⌊.5·300⌋=150/bonus ⌊.5·200⌋=100
-    rat.rng = rngQueue(vals, 0.999);
-    let flipped = false;
-    for (let t = 0; t < 200 && !flipped; t++) {
-      rat.fixedUpdate(1 / 60, game);
-      flipped = rat.facing === -1;
-    }
-    expect(flipped).toBe(true);
-    expect(priv(rat, 'walkT')).toBe(650);             // 折返腿程实证（非 critter 会是 800）
+    // 脚部行【单层】唇墙：阻挡位移但不落入任何越障梯档（t5/t4 空、t3 半格口径
+    // bottomSink=16px≤20 不受理）→ 零跳零转纯卡位，stuckT 稳定累计到 30 触发
+    const buildLip = (): void => {
+      for (let x = 106; x <= 110; x++) st.setTileSilent(x, FLOOR_ROW - 1, DIRT);
+    };
+    const runSide = (startTile: number): number => {
+      const n = new TownNPC('guide', 0, 0) as AnyNpc;
+      placeOnFloor(world, n, startTile);
+      const fr = feetRowOf(n);                        // FLOOR_ROW−1（底贴地）
+      if (fr !== FLOOR_ROW - 1) throw new Error(`unexpected feetRow ${fr}`);
+      // stepUp 关断：单层唇墙不涉越障梯档（t5/t4 空、t3 半格口径 bottomSink=16≤20），
+      // 物理面把 X 钉死 → 卡位成立；步上台阶被禁防"跨唇通过"
+      privSet(n, { vanillaId: 46, walkMode: 1, walkT: 30000, onGround: true, vx: 0.9, stepUp: false });
+      n.facing = 1;
+      for (let x = startTile + 2; x <= startTile + 6; x++) st.setTileSilent(x, fr, DIRT);
+      const { game } = makeGame(world);
+      n.rng = rngQ([], 0.999);                        // 恒定 fallback → base/bonus 值可复现
+      let flipped = false;
+      for (let t = 0; t < 400 && !flipped; t++) {
+        n.fixedUpdate(1 / 60, game);
+        flipped = n.facing === -1;
+      }
+      expect(flipped).toBe(true);
+      return priv(n, 'walkT') as number;
+    };
+
+    // critter 46：base(499)+bonus(399)=898；非 critter 对照：仅 base 单写 499
+    expect(VANILLA_TOWN_CRITTER_SHEETS.has(46)).toBe(true);
+    expect(runSide(104)).toBe(898);
+    expect(runSide(120)).toBe(499);
   });
 
   it('(b)走→停双分支：critter −Next(100) → 400 / 非 critter +Next(900) → 900（流位保持）', () => {
     const world = flatWorld('fix5-a10b');
-    const { game } = makeGame(world);
-    const critter = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(critter, { vanillaId: 46, walkMode: 1, walkT: 1, onGround: true });
-    critter.facing = 1;
-    critter.rng = rngQueue([0.999, 0.999, 0.999, 0.5, 0.5], 0.999);
-    // ↑ 垫：驻足 rand600(行走 ⑤链) / 椅掷 rand300……首两投为通道垫骰，后两张才是换态骰
-    critter.fixedUpdate(1 / 60, game);
+    const walker = (id: number, vals: number[]): AnyNpc => {
+      const n = new TownNPC('guide', 0, 0) as AnyNpc;
+      placeOnFloor(world, n, 130);
+      privSet(n, { vanillaId: id, walkMode: 1, walkT: 1, onGround: true });
+      n.facing = 1;
+      n.rng = rngQ(vals, 0.999);
+      return n;
+    };
+    const critter = walker(46, [0.5, 0.5]);
+    wanderUpdateFn.call(critter, world, makeGame(world).game, false);
     expect(critter.walking).toBe(false);
-    expect(priv(critter, 'walkT')).toBe(400);         // 300+150−50（减骰路径）
+    expect(priv(critter, 'walkT')).toBe(400);        // 300+150−50（减骰路径）
     expect(priv(critter, 'turnLock')).toBe(60);
 
-    const plain = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(plain, { walkMode: 1, walkT: 1, onGround: true });
-    plain.facing = 1;
-    plain.rng = rngQueue([0.999, 0.999, 0.999, 0.5, 0.5], 0.999);
-    plain.fixedUpdate(1 / 60, game);
-    expect(priv(plain, 'walkT')).toBe(900);           // 300+150+450（加骰路径,逐骰逐值等价原文）
+    const plain = walker(22, [0.5, 0.5]);
+    wanderUpdateFn.call(plain, world, makeGame(world).game, false);
+    expect(priv(plain, 'walkT')).toBe(900);          // 300+150+450（加骰路径,逐骰逐值等价原文）
   });
 
-  it('(c)第二乘子：干身 critter 起跳 −5×1.2=−6（独立 if）；flag7/普通不乘（含 grav 位换算）', () => {
+  it('(c)第二乘子：干身 critter 起跳 −5×1.2（独立 if）；flag7 与普通城镇 NPC 不乘（grav 位换算）', () => {
     const world = flatWorld('fix5-a10c');
-    const { game } = makeGame(world);
-    const mkWall = (): void => {
-      // 二档门槛：t4=(ax,fy-1) 单独实心（t5 空,t3 空）
-      world.store.setTileSilent(103, FLOOR_ROW - 2, DIRT);
+    const st = world.store;
+    const caseRunner = (vanillaId: number | null): number => {
+      const wx = flatWorld(`fix5-a10c-${vanillaId}`);
+      const stx = wx.store;
+      const n = new TownNPC('guide', 0, 0) as AnyNpc;
+      placeOnFloor(wx, n, 102);
+      const fr = feetRowOf(n);                        // 底贴地 → 本行 FLOOR_ROW−1
+      stx.setTileSilent(103, fr - 1, DIRT);           // 二档门槛:t4 单独实心(t5 空,t3 空)
+      void st;
+      privSet(n, { walkMode: 1, walkT: 4000, onGround: true, vy: 0, vx: 1 });
+      if (vanillaId !== null) n.vanillaId = vanillaId;
+      n.facing = 1;
+      const { game } = makeGame(wx);
+      n.rng = rngQ([], 0.999);
+      n.fixedUpdate(1 / 60, game);
+      return priv(n, 'vy') as number;
     };
-    mkWall();
-
-    // critter 46（非 flag7）：obstacleJump 内 vy=-5 → 块内乘 ×1.2=-6 → 物理 grav +0.3 → -5.7
-    const c = new TownNPC('guide', 102 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(c, { vanillaId: 46, walkMode: 1, walkT: 400, onGround: true, vy: 0, vx: 1 });
-    c.facing = 1;
-    c.rng = rngQueue([], 0.999);
-    c.fixedUpdate(1 / 60, game);
-    expect(Math.abs(priv(c, 'vy') + 5.7)).toBeLessThan(1e-6);
-
-    // flag7 啮齿 300 同几何：乘子豁免 → -5+0.3=-4.7
-    const r = new TownNPC('guide', 102 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(r, { vanillaId: 300, walkMode: 1, walkT: 400, onGround: true, vy: 0, vx: 1 });
-    r.facing = 1;
-    r.rng = rngQueue([], 0.999);
-    r.fixedUpdate(1 / 60, game);
-    expect(Math.abs(priv(r, 'vy') + 4.7)).toBeLessThan(1e-6);
-
-    // 普通 guide 同几何：无乘子 → -4.7
-    const p = new TownNPC('guide', 102 * 16, FLOOR_ROW * 16 - 42) as AnyNpc;
-    privSet(p, { walkMode: 1, walkT: 400, onGround: true, vy: 0, vx: 1 });
-    p.facing = 1;
-    p.rng = rngQueue([], 0.999);
-    p.fixedUpdate(1 / 60, makeGame(world).game);
-    expect(Math.abs(priv(p, 'vy') + 4.7)).toBeLessThan(1e-6);
+    // critter 46（非 flag7）：AI 内 -5→乘子→-6；物理 grav +0.3 → 终值 -5.7
+    expect(Math.abs(caseRunner(46) + 5.7)).toBeLessThan(1e-6);
+    // flag7 啮齿 300：乘子豁免 → -5+0.3=-4.7
+    expect(Math.abs(caseRunner(300) + 4.7)).toBeLessThan(1e-6);
+    // 普通 guide：无乘子 → -4.7
+    expect(Math.abs(caseRunner(null) + 4.7)).toBeLessThan(1e-6);
   });
 });

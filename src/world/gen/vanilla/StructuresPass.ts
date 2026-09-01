@@ -15,6 +15,9 @@ import { idsByVanillaSheet } from './TileRunner';
 /** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
  *  typeof 守卫同 DungeonPass SW_DGPA_TRACE——浏览器无 process,裸引用炸模块加载 */
 const PYR_TRACE = typeof process !== 'undefined' && !!process.env.PYR_TRACE;
+/** 浮空湖追踪开关——2026-09-02 曾以裸 `process.env.SW_FLTRACE` 直引用炸浏览器
+ *  worker worldgen pass4(生物群系)（HellFortPass:106 同型事故二犯）；typeof 守卫 */
+const FLTRACE = typeof process !== 'undefined' && !!process.env.SW_FLTRACE;
 /** RNG 流位置指纹（对拍探针用；同 oracle StreamHash 算法） */
 function pyrStream(rng?: { ur: { seedArray: Int32Array; inext: number } }): string {
   if (!PYR_TRACE) return '';
@@ -80,6 +83,7 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
   // → 小 4200=1 / 中 6400=2 / 大 8400=3。曾硬编码 1 → 大尺寸少 2 座天湖（中尺寸少 1），
   // P|23 流哈希即失配（大 l2222 JS n=74908 ≠ 原版），天湖几何缺失级联下游全图。
   let skyLakes = 1 + (w > 8000 ? 1 : 0) + (w > 6000 ? 1 : 0);
+  const islandsCapBase = isCount;   // ★IIIII111 cs:13002 num3 快照（errorWorld×3 后、eFI 放大前）
   // ★IIIII106 cs:13009-13020：the care bears movie —— 岛数与天湖数同倍增（reduced ×2 /
   // 普通 ×10），NormalAmount 组合域不放大。
   if (!!sfI106.extraFloatingIslands && !efiNormal) {
@@ -94,6 +98,8 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
   const housesX: number[] = [];
   const housesY: number[] = [];
   let lakes = 0;
+  let placed = 0;               // ★IIIII111（cs num2）总成功落位数（含湖）
+  let hasLake = false;          // ★IIIII111（cs flag）已放天湖位
   for (let n = 0; n < total; n++) {
     let budget = w;
     while (--budget > 0) {
@@ -120,11 +126,19 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       }
       // GenVars.worldSurfaceLow（raw double 截断）——注意非 gs.worldSurfaceLow
       // ★IIIII106 cs:13027-13046 天湖判定：基态=成功序≥isCount 后皆湖；
-      // eFI 追加臂：i>4（=已成功落位 >4）后，尚无湖则本位强制为湖、已有湖则
-      // Next(4)==0（25%）为湖——彩熊世界的湖岛交错带。
-      let isLake = lakes >= isCount;
-      if (!!sfI106.extraFloatingIslands && housesX.length > 4) {
-        if (lakes === 0) isLake = true;
+      // eFI 追加臂：i>4——★IIIII111 勘误：原版此处是【外层循环尝试序 i】（含
+      // spacing 失败的空转轮），不是「成功落位数」！旧码用 housesX.length>4 判，
+      // 在 ×10 世界里成功序与尝试序大幅偏离 ⇒ 湖判定错 + Next(4) 骰耗错位级联
+      // （task 线索「云盘选址骰序错位」的真源）。尚无湖则本位强制为湖、已有湖
+      // 则 Next(4)==0（25%）为湖；flag3 已真时该 Next(4) 也必掷（原文 else-if 链）。
+      // ★IIIII111 勘误二：`flag`（C# :13036 初值 false）=【是否已放天湖】——首个
+      //   CloudLake 落地后即永久 true，与「非湖岛成功数」无关。旧码拿非湖成功数当
+      //   湖存在位 ⇒ eFI 世界从第 5 次尝试起永远走 25% 支、永不触发 force-lake。
+      //   另：基态判据用 num2（全部成功落位数，含湖），eFI 臂 Next(4) 在 hasLake
+      //   时**必掷**（即便基态已真）——骰耗照抄原文 else-if 链。
+      let isLake = placed >= isCount;
+      if (!!sfI106.extraFloatingIslands && n > 4) {
+        if (!hasLake) isLake = true;
         else if (rng.int(0, 3) === 0) isLake = true;
       }
       // ★IIIII21（cs:13124-13155）：drunk 世界（非 remix 组合域）50/50 换用
@@ -156,7 +170,17 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
           housesX.push(x); housesY.push(y);
       gs.floatingIslands.push({ x, y, style, isLake });
       if (!isLake) lakes++;
+      placed++;                       // ★IIIII111（cs:13171 num2）：含湖的全部成功落位数
+      if (isLake) hasLake = true;     // ★IIIII111（cs:13137 flag=true）=已现天湖
+      if (FLTRACE) console.log(`FL|n=${n}|x=${x}|y=${y}|lake=${isLake ? 1 : 0}|lakes=${lakes}|succ=${housesX.length}`);
     }
+  }
+  if (FLTRACE) console.log(`FL-END|placed=${gs.floatingIslands.length}|cap=${islandsCapBase * 2}`);
+  // ★IIIII111（cs:13178-13181）：eFI 记账截断——numIslandHouses = min(placed, num3*2)。
+  //   FloatingIslandHouses pass（cs:17993）只遍历截断后的数组 ⇒ 彩熊世界 ×10 岛
+  //   只为【前 num3*2 个记录】建房；漏此句曾让全部岛都建屋。
+  if (!!sfI106.extraFloatingIslands && gs.floatingIslands.length > islandsCapBase * 2) {
+    gs.floatingIslands.length = islandsCapBase * 2;
   }
 }
 

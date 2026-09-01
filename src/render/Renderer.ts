@@ -903,6 +903,27 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const phase = (e.walkCycleT + Math.abs(e.vx) * 8) % 32; // 每 tick +|vx|，32 一循环
     return phase < 8 ? 0 : phase < 16 ? 1 : phase < 24 ? 2 : 1;
   }
+  // 武装僵尸族扑咬（FindFrame case 430-436/591，NPC.cs:71651-71716；case 494/495
+  // :70437-70518）：ai[2]>0（lungeFamilyStep 扑咬窗，fighterFamilies.ts）按窗龄切挥砍帧行
+  // ——武装型 <5→3/<10→4/<15→5/else→6；494/495 <7→5/<14→6/else→7。非攻咬态同 zombie
+  // 三态：腾空/后滑(direction×velocity 相逆)=行 2（494/495 跳升 2/下落 3 分行）；站立=0；
+  // 行走 [0,1,2,1]（494/495 为 [0..4]，周期 39px）——walkCycleT 即 frameCounter+=|vx| 直读。
+  // 曾落 default 全帧循环 → 边走边播挥砍臂（用户实报）
+  if ((id >= 430 && id <= 436) || id === 591 || id === 494 || id === 495) {
+    const backslide = (e.facing === -1 && e.vx > 0) || (e.facing === 1 && e.vx < 0);
+    if (id === 494 || id === 495) {
+      if (e.ai2 > 0) return e.ai2 < 7 ? 5 : e.ai2 < 14 ? 6 : Math.min(7, frames - 1);
+      if (!e.onGround || backslide) return e.vy < 0 ? 2 : 3;
+      if (!walking) return 0;
+      const c = e.walkCycleT % 39;
+      return c < 8 ? 0 : c < 16 ? 1 : c < 24 ? 2 : c < 32 ? 3 : 4;
+    }
+    if (e.ai2 > 0) return e.ai2 < 5 ? 3 : e.ai2 < 10 ? 4 : e.ai2 < 15 ? 5 : Math.min(6, frames - 1);
+    if (!e.onGround || backslide) return 2;
+    if (!walking) return 0;
+    const c = e.walkCycleT % 32;
+    return c < 8 ? 0 : c < 16 ? 1 : c < 24 ? 2 : 1;
+  }
   // 栖息态 NPC（秃鹫 61 cs:24082 ai[0]=0 栖息 / 宝箱怪 85 族 cs:25645 ai[0]=0 伪装）：
   // 静止帧 0；激活后从帧 1 起循环
   if (ai === 17 || ai === 25) {

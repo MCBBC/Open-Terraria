@@ -1151,6 +1151,12 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
     [5747, 53], [5765, 54], [5786, 55], [5807, 56], [5828, 57], [5867, 58], [5907, 59],
     [5941, 60], [5964, 61], [5984, 62], [6007, 63], [6030, 64], [6053, 65], [6076, 66],
     [6098, 67], [6120, 68]] as const).map(([vid, st]) => [vid, 'door_closed', st] as const),
+  // 异奇株 Strange Plant 四件（Item.cs:30968-30971 `placeStyle = type - 3385 + 8`——
+  // 共享算式段提取器解不开 ⇒ itemfunc 缺条目(vanilla.json meta 也无 placeStyle 键)
+  // → 曾全落 style0（放/掉全成蓝蘑菇档）。tile 由 createTile 双源回填补齐(227→
+  // v_227_dye_plants),此处只补 style。GAP-B 清偿批 2026-09-01。
+  [3385, 'v_227_dye_plants', 8], [3386, 'v_227_dye_plants', 9],
+  [3387, 'v_227_dye_plants', 10], [3388, 'v_227_dye_plants', 11],
 ];
 for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];

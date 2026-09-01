@@ -442,13 +442,20 @@ export function doCoatEverythingIlluminant(st: TileStore, f: SeedFlags, next2: (
 /** DoPaintEverythingGray（cs:777-805）：边距 5;JustTheSurface 上界逐列
  *  Min(w-5, worldSurface+Next(3))（同掷）。 */
 export function doPaintEverythingGray(st: TileStore, f: SeedFlags, worldSurface: number, next3: () => number): void {
+  // ★IIIII110（cs:73-83 paintEverythingGrayUseWhite getter 消费位 :794）：白漆支
+  //   ⇔ paintEverythingGray && worldIsFrozen（纯 getter 直判，不读派生缓存位）。
+  //   普通/单涂装世界恒 false 零影响；组合 lane（monochrome+winter）自此白漆正确。
+  const useWhite = !!f.paintEverythingGray && !!f.worldIsFrozen;
   const num = 5;
   let bound = st.h;
   for (let i = num; i < st.w - num; i++) {
     if (f.grayJustTheSurface) {
       bound = Math.min(st.w - 5, worldSurface + next3());
     }
-    for (let j = num; j < bound; j++) doPaintEverythingGraySingleTile(st, i, j, f);
+    for (let j = num; j < bound; j++) {
+      // 白漆位经局部派生传参（★IIIII110）：single-tile 帮手按参数走 26/27
+      doPaintEverythingGraySingleTile(st, i, j, useWhite ? { ...f, grayUseWhite: true } : f);
+    }
   }
 }
 

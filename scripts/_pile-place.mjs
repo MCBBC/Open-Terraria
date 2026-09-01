@@ -93,17 +93,68 @@ const out = await page.evaluate(async () => {
     const cleanCleared = st.get(ox, oy) !== { pile: PILE, stone: STONE, weed: WEED }[mode];
     return { mode, placedHere, cleanCleared, obsLeft: st.get(ox, oy) };
   };
+  // ---- ③二轮 review 增补场景 ----
+  const TORCH = idOfSheet(4), WEB = idOfSheet(51);
+  let torchDef = null, torchIdx = -1;
+  for (let i = 0; i < items.ITEM_DEFS.length; i++) {
+    if (items.ITEM_DEFS[i]?.tile === tiles.TILE_DEFS[TORCH]?.key) { torchDef = items.ITEM_DEFS[i]; torchIdx = i; break; }
+  }
+  if (!torchDef && items.ITEM_BY_KEY['torch'] !== undefined) { torchIdx = items.ITEM_BY_KEY['torch']; torchDef = items.ITEM_DEFS[torchIdx]; }
+  const standClick = async () => {
+    stand(base.click[0], base.click[1]);
+    await new Promise((r) => setTimeout(r, 40));
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, base.click[0], base.click[1], torchDef ?? wbDef);
+  };
+  // 火把顶杂草（TileObject.Place 同款清格）；石块对照拒绝
+  const torchTest = async (mode) => {
+    wipe();
+    if (mode !== 'bare') st.setTile(qx, qy, mode === 'weed' ? WEED : STONE, 0, 0);
+    if (torchDef) { holdItem(torchIdx); await standClick(); }
+    return { nowTorch: st.get(qx, qy) === TORCH, obstacleKept: mode === 'stone' ? st.get(qx, qy) === STONE : true };
+  };
+  // 蛛网纵向对(footprint 内 2 格 + 占位矩形外上方孤格)：原版无 TileFrame 支 → 孤格必须幸存
+  // （撤除同型纵扫的回归哨兵——旧扫会多杀外格）
+  const webSurvivor = async () => {
+    wipe();
+    st.setTile(qx, qy, WEB, 0, 0); st.setTile(qx + 1, qy, WEB, 0, 0); st.setTile(qx, qy - 1, WEB, 0, 0);
+    holdItem(wbIdx);
+    stand(base.click[0], base.click[1]);
+    await new Promise((r) => setTimeout(r, 40));
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, base.click[0], base.click[1], wbDef);
+    return { benchAt: st.get(qx, qy) === W || st.get(qx + 1, qy) === W, outerWebSurvives: st.get(qx, qy - 1) === WEB };
+  };
+  // 违规堆叠双杂草：占位格 + 其正上一格外格。原版 KillTile 尾 SquareTileFrame →
+  // PlantCheck(down=家具=-1型失配) 杀孤儿；本仓等价链 onTileChanged→checkDecorSupport。
+  const weedOrphan = async () => {
+    wipe();
+    st.setTile(qx, qy, WEED, 0, 0); st.setTile(qx, qy - 1, WEED, 0, 0);
+    holdItem(wbIdx);
+    stand(base.click[0], base.click[1]);
+    await new Promise((r) => setTimeout(r, 40));
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, base.click[0], base.click[1], wbDef);
+    return { benchAt: st.get(qx, qy) === W, orphanCleaned: st.get(qx, qy - 1) !== WEED };
+  };
   const res = {
-    ids: { pile: PILE, stone: STONE, weed: WEED, workbench: W },
+    ids: { pile: PILE, stone: STONE, weed: WEED, workbench: W, torch: TORCH, web: WEB },
     itemKey: wbDef.key, anchorProbe: vav.validateAnchors(st, qx, qy, rec18),
     base,
     bare: await singleShot('bare'),
     pile: await singleShot('pile'),
     weed: await singleShot('weed'),
     stone: await singleShot('stone'),
+    torchWeed: torchDef ? await torchTest('weed') : 'no-torch-def',
+    torchStone: torchDef ? await torchTest('stone') : 'no-torch-def',
+    webSurvivor: await webSurvivor(),
+    weedOrphan: await weedOrphan(),
   };
   res.verdict = res.base.placed && res.bare.placedHere && res.pile.placedHere && res.pile.cleanCleared
-    && res.weed.placedHere && res.weed.cleanCleared && !res.stone.placedHere ? 'PASS' : 'FAIL';
+    && res.weed.placedHere && res.weed.cleanCleared && !res.stone.placedHere
+    && (torchDef ? res.torchWeed.nowTorch && res.torchStone.obstacleKept : true)
+    && res.webSurvivor.benchAt && res.webSurvivor.outerWebSurvives
+    && res.weedOrphan.benchAt && res.weedOrphan.orphanCleaned ? 'PASS' : 'FAIL';
   inv.slots[selIdx] = savedSlot;
   return res;
 });

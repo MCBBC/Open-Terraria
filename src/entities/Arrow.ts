@@ -513,15 +513,29 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 34, 93, 94, 95, 96, 1114, 253, 258, 102
   //  （用户报「激光好细看不清」定罪：贴图本体 Projectile_88.png 仅 2×60，
   //  scale 0.65 起步 ≈1.3px 细线 + 缺加算发光层双重不可见）
   83, 88, 89, 90, 100, 104, 279, 283, 284, 285, 286, 287, 1134,
-  // ★2026-09-01 全弹域审计补：GetAlpha A=0 加算支再补三例——604 孢子云/631 幻象矢
-  // (:80818) 与 131 蘑菇孢子(:81325) 原式同为 (255−α,…,**A=0**) 纯加算白闪,
-  // 此前 drawGlobalAlpha 走 source-over fade（同公式三种处置并存的口径漂移点）
-  604, 631, 131]);
+  // ★2026-09-01 审计补：131 蘑菇孢子(:81325) A=0 加算白——真值起步 α≡0
+  //  （SetDefaults 无显式行）→ 满(255−α)/255 加算=与原版一致 ✓
+  // ★604 孢子云/:80818+631 幻象矢暂缓入组（review 判决）——二者 SetDefaults
+  //  均 α=255 起（:6525/:6790）系全隐尘载体（604 aiStyle115 :35063 ai1>30 即
+  //  自灭;631 :35xxx 渐显挂钩 AI 未移植）,JS 侧缺键 α≡0 入 lighter 会反向
+  //  变成恒满强白闪=新回归;待初值+AI 段完备化批一并接入(见审计台账 §2)
+  131]);
 /** GetAlpha :81457 支里走共享 −15/update 渐显的成员（Projectile.cs:56570-56592
- *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集）。
- *  本仓只接本批 GetAlpha 支成员（14/20/36 等 1456 期已有渲染面不动）；90/1134 不减
- * （AI 无衰减档）α 恒 50=恒 205/255；88 α 初值即 0 且专属 −10/t 段(:56910)恒空转 */
-const LASER_FADE15_PROJS = new Set([83, 89, 100, 104, 279, 283, 284, 285, 286, 287]);
+ *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集，
+ *  组体在 AI_001() 内(:54950 起)，全部 aiStyle=1 型每 AI update 恰一消费）。
+ *  本仓接 GetAlpha 支与批二扩员者；14/20 不入（SetDefaults 无 alpha 行≡0 起步,
+ *  fade 恒不触发——批二审计维持）；90/1134 不减（AI 无衰减档）α 恒 50=恒 205/255；
+ *  88 α 初值即 0 且专属 −10/t 段(:56910)恒空转。
+ *  ★2026-09-01 批二扩员九枚：36 陨石弹/84 粉激光/110 雪人子弹/158-161 钱币枪四币/
+ *  180 神射手子弹/389 小视网膜激光——共享 case 组全成员核验(P.cs:56573-56591),
+ *  SetDefaults α=255(:1192/:1656/:1988/:2467/:2479/:2491/:2503/:2670/:4739),
+ *  无 Arrow.ts 专属 alpha 竞争支、无 drawGlobalAlpha case；唯 180 有 GetAlpha 专属
+ *  Lerp 白支(P.cs:80734→PROJ_ALPHA_MOD lerp 档承接,fade 动态乘子不压渐显) */
+const LASER_FADE15_PROJS = new Set([
+  // zapinator 系激光组（批一）
+  83, 89, 100, 104, 279, 283, 284, 285, 286, 287,
+  // 批二扩员（P.cs 共享 −15 case 组成员）
+  36, 84, 110, 158, 159, 160, 161, 180, 389]);
 const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
   207: 255, 837: 255,
@@ -565,10 +579,19 @@ const PROJ_ALPHA0: Record<number, number> = {
   // ★2026-09-01 GetAlpha :81457 加算白支的 α 初值记账（SetDefaults 直读；缺省=0 的
   //  88 不入表——:1704-1716 无 alpha 行）。83=255(:1642)/89=255(:1725)/90=50(:1739)/
   //  100=255(:1881)/104=255(:1924)/279=255(:3660)/283-287=255(:3707-3767)/1134=50(:10648)。
-  //  255 组由共享 −15/子步渐显(cs:56570-56592,LASER_FADE15_PROJS)拉亮;EU=4 弹
-  //  每游戏帧实减 ×5 ≈ 一闪即亮（原版太空枪系激光观感）
+  //  255 组由共享 −15/子步渐显(cs:56570-56592,LASER_FADE15_PROJS)拉亮;EU 弹每游戏帧
+  //  实减 ×(EU+1)（本组 89 EU=1 其余 EU=2 → ×2~×3）≈ 一闪即亮（原版太空枪系激光观感；
+  //  ★批二勘误：旧注「EU=4×5」与 SetDefaults 不符——279 即 EU=2(:3661)，全组无 EU=4）
   83: 255, 89: 255, 90: 50, 100: 255, 104: 255, 279: 255,
   283: 255, 284: 255, 285: 255, 286: 255, 287: 255, 1134: 50,
+  // ★2026-09-01 批二：共享渐显组扩员九枚初值（SetDefaults 直读，行号已逐一 sed
+  //  校验;AI_001 共享 case 组 −15/子步拉亮 P.cs:56569-56599）——36 陨石弹(:1192)/
+  //  84 粉激光(:1656)/110 雪人子弹(:1988)/158 铜币(:2467)/159 银币(:2479)/
+  //  160 金币(:2491)/161 白金币(:2503)钱币枪四币/180 神射手子弹(:2670)/
+  //  389 小视网膜激光(:4739)。GetAlpha 全走缺省路径 :81507-81520(num14=(255−α)/255)
+  //  → 兜底式承接;唯 180 走 Lerp 白支(:80734)由 PROJ_ALPHA_MOD lerp 档消费 fade
+  36: 255, 84: 255, 110: 255, 158: 255, 159: 255, 160: 255, 161: 255,
+  180: 255, 389: 255,
 };
 
 /** AI_036 追踪内核逐型参数表（[speed, acc]，终零波单核收编导出面；tests/finalzero-game-domain
@@ -2257,12 +2280,15 @@ export class Arrow extends Entity {
         ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
       }
       if (isXeno) {
-        // 加算发光叠画（同矩形 lighter α0.45）——原版 GlowMask 214 族观感
+        // 加算发光叠画（同矩形 lighter α0.45）——原版 GlowMask 214 族观感；
+        // ★基线 alpha 捕获-恢复（2026-09-01 review）：曾回写 `ga ?? 1`，
+        //   在 GA null+mod null 时会把缺省兜底 (255−α)/255 抹成满显
+        const baseGa = ctx.globalAlpha;
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha *= 0.45;
         ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
         ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = Math.max(0, Math.min(1, ga ?? 1));
+        ctx.globalAlpha = baseGa;
       }
     } else {
       // 贴图未就绪：短线兜底
@@ -3805,11 +3831,13 @@ export class Arrow extends Entity {
         }
       }
     } else if (this.projId === 20) {
-      // ---- ★2026-09-01 全弹域审计：二代木弹/星怒投掷 20 成长段（Projectile.cs
-      //  :55004-55021，AI_001 type 段，与 88 同款结构）----
+      // ---- ★2026-09-01 全弹域审计：Space Gun 绿激光 20 成长段（Projectile.cs
+      //  :55004-55021，AI_001 type 段，与 88 同款结构；发射者=Item.cs:2918 case 127
+      //  SpaceGun shoot=20——与 514 LaserRifle→88 姐妹武器；曾误注"二代木弹"）----
       //  scale<3 帽包整块（到帽即停止一切成长）；scale+=0.0189 至 cap3、owner 门内
       //  knockback×1.0025、localAI[0](aiCnt) 满 25 重置并 damage+Next(1,3)=1..2、
-      //  penetrate++（pierce/pierceInit 同步抬=maxPenetrate 上移）。
+      //  penetrate++（pierce/pierceInit 同步抬=maxPenetrate 上移）；EU=2 → AI 每
+      //  游戏帧 ×3 子步（ProjectileID.GreenLaser，4×4 盒）。
       //  α 面：SetDefaults 20 无 alpha 行≡0 → 共享 fade 组(:56569)恒不触发=全程
       //  可见 ✓ 与现渲染一致,不入 LASER_FADE15。
       if (this.drawScale < 3) {
@@ -3824,7 +3852,9 @@ export class Arrow extends Entity {
       }
     } else if (LASER_FADE15_PROJS.has(this.projId)) {
       // ---- GetAlpha :81457 白加算支的共享渐显（Projectile.cs:56570-56592 case 组
-      //  本族子集直抄：alpha −15/子步至 0;EU 弹每游戏帧 ×5 ≈ 出生一闪即亮） ----
+      //  本族子集直抄：alpha −15/子步至 0;EU 弹每游戏帧 ×(EU+1) ≈ 出生一闪即亮）
+      //  ★批二扩员后含非加算支成员：36/84/110/158-161/180/389 GetAlpha 各走缺省
+      //  路径(:81507-81520)/180 走 Lerp 白支(:80734),色彩解释在 draw 侧各自完成 ----
       if (this.alpha > 0) this.alpha -= 15;
       if (this.alpha < 0) this.alpha = 0;
     } else if (this.projId === 876) {

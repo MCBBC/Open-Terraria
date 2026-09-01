@@ -109,8 +109,8 @@ export function assortedPlaceOk(staff: boolean, gsheet: number, tsheet: number, 
 /** 草族"转化"放置路由域（Game.tryPlace 路由判据用）。= assortedPlaceOk 非法杖分支
  *  覆盖的 createTile 全集（Player.cs:41372/:41378/:41390/:41403/:41416 各支受理面）。
  *  ★单源化：Game.ts 不再持字面量副本；AssortedThings 其余分支不在此集——
- *  staff(213/5295 特权随 vid 判)、tileMoss 族（石/灰砖转化，双模放置）、227 染料植物
- *  （无条件门）、滴水族/火把族各有专路 —— 见 assortedPlaceOk 注释档 */
+ *  staff(213/5295 特权随 vid 判)、tileMoss 族（MOSS_CONVERT_SHEETS 单模专路）、
+ *  227 染料植物（专用路由,见 dyePlaceOk）、滴水族/火把族各有专路 —— 见 assortedPlaceOk 注释档 */
 export const GRASS_CONVERT_SHEETS: ReadonlySet<number> = new Set([2, 23, 60, 70, 109, 199, 633, 661, 662]);
 
 /** ItemID.Sets.GrassSeeds（1457 ItemID.cs:84：62 草种/59 腐化种/2171 猩红种/369 神圣种/
@@ -119,3 +119,101 @@ export const GRASS_CONVERT_SHEETS: ReadonlySet<number> = new Set([2, 23, 60, 70,
  *  ∈GRASS_CONVERT_SHEETS（meta 推导）× 非 place_v_* 前缀」判族，staff 特权由
  *  vid∈{213,5295} 细分——本集合不再参与路由判别（曾按它误拦 place_v_109 草块）。 */
 export const GRASS_SEED_STAFF_VIDS: ReadonlySet<number> = new Set([62, 59, 2171, 369, 195, 194, 5214, 213, 5295]);
+
+// ============================================================
+// GAP-A：tileMoss 苔藓族（2026-09-01 清偿）
+// ============================================================
+/** tileMoss 族 createTile 全集（Main.cs:7146 起 tileSolid/tileBrick/tileBlockLight/
+ *  tileMoss 四联置位的 moss 面；物品面 11 件=vanilla.json meta createTile——
+ *  4349-4353→179..183、4354→381、4377→534、4378→536、4389→539、5127→625、5128→627，
+ *  Item.cs:37164/37270/41088 DefaultToPlaceableTile 直查）。
+ *
+ *  ★AssortedThings moss 分支（Player.cs:41377-41383）受理面 = 目标格 nactive() 且
+ *  type∈{1 石块,38 灰砖}。
+ *
+ *  ★【单模】定谳（2026-09-01,登记 GAP-A 原"双模"描述系误读）：else-if 链互斥,
+ *  moss 物品命中本支后对空格/其他目标【不置 canPlace】→ PlaceIt 不运行 ⇒
+ *  外门 Player.cs:40058 的 `|| Main.tileMoss[tileToCreate]` 只是把活跃目标放行进
+ *  TryPlacing 门口,不是空格铺设的通行证（TryPlacing :40086 canPlace 初值 false,
+ *  moss 支是唯一可翻真的分支；TileObjectData 无 227 无 moss=CustomPlace 恒 false）。
+ *  官方 wiki 同口径："Collected moss can be placed on Stone Blocks and Gray Bricks"
+ *  （terraria.wiki.gg/wiki/Moss）。调用方须把族内物品当【无论成败终止】处理
+ *  （同草种族）；苔砖变体(512-517/535/537/540/626/628)是普通 legacy 块走通用链，
+ *  其放置物品 vid(4710+ 族)不在本判域。 */
+export const MOSS_CONVERT_SHEETS: ReadonlySet<number> = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+
+/** moss→灰砖上的苔砖变体映射（WorldGen.PlaceTile 内 num 重写 cs:59902-59912：
+ *  `if (tile.type == 38) num = num switch { 381=>517, 534=>535, 536=>537, 539=>540,
+ *  625=>626, 627=>628, _ => 512 + num - 179 }`；WorldGen.MossConversion cs:72000 的
+ *  正反双向表同构。石块(1)目标不改型——moss 原样落） */
+export const MOSS_TO_BRICK_SHEET: Readonly<Record<number, number>> = {
+  179: 512, 180: 513, 181: 514, 182: 515, 183: 516,
+  381: 517, 534: 535, 536: 537, 539: 540, 625: 626, 627: 628,
+};
+
+/** AssortedThings moss 分支纯函数化（Player.cs:41377-41383）。
+ *  @param gsheet 手持放置物 createTile（vanilla sheet）
+ *  @param tsheet 目标格 sheet（调用方保证非空格才进来；空格在原版即 false） */
+export function mossPlaceOk(gsheet: number, tsheet: number): boolean {
+  return MOSS_CONVERT_SHEETS.has(gsheet) && (tsheet === 1 || tsheet === 38);
+}
+
+// ============================================================
+// GAP-B：tile 227 染料植物族（2026-09-01 定谳实装）
+// ============================================================
+/** PlaceDye 上/下邻豁免植物族（WorldGen.cs:54459/:54467 两处字面同表：type∈
+ *  {3 短草,51 长草芽,697 蛛网,61 丛林短草,703 丛林垂藤,73 高草,74 丛林高草,
+ *  184 苔藓植物}） */
+export const DYE_PLANT_PLANT_FAMILY: ReadonlySet<number> = new Set([3, 51, 697, 61, 703, 73, 74, 184]);
+
+/** 帧步长（PlaceDye cs:54489 `frameX = 34 * style`；CheckDye cs:54260
+ *  `frameX / 34` 同步⇒破坏/失撑掉落按此带反推，GetItemDrop case227 cs:65563 同式） */
+export const DYE_PLANT_FRAME_STEP = 34;
+
+/** PlaceDye 门纯函数（WorldGen.cs:54451-54502 1:1）。全部入参由调用方预读：
+ *  - style：Item.placeStyle（1107-1112→0..5 / 1114 血橙根→7 / 3385-3388 异奇株→8..11；
+ *    style 6 仙人掌寄生株无玩家物品,仅世界生成 plantDye 使用）
+ *  - above/below 邻格读数（aboveSheet=-1 表上格非 active）
+ *  - belowSolid：WorldGen.SolidTile(x,y+1)（严格实心,仓内 solidTileStrictAt 口径）
+ *  - selfLiquid/selfLiquidType/selfWall：目标格自身液体量/类型(TileStore +1 编码)/墙
+ *  失败=canPlace 进了 PlaceIt 但 PlaceTile case227 写不出帧 → result=false：
+ *  原版静默无动作不消耗（ApplyItemTime 只在 flag 后） */
+export interface DyePlantSpot {
+  style: number;
+  aboveActive: boolean; aboveSheet: number;
+  aboveSolid: boolean;            // SolidTile(x,y-1)——style 7 吊顶档的锚（上邻严格实心）
+  belowActive: boolean; belowSheet: number;
+  sideLeftActive: boolean; sideRightActive: boolean;   // 仅 style 6 用（x±1,y+1）
+  belowSolid: boolean;            // SolidTile(x,y+1)
+  selfLiquidFullWater: boolean;   // liquid==255 && !lava() && !honey() && !shimmer()
+  selfHasLiquid: boolean;         // Main.tile[x,y].liquid != 0
+  selfWall: number;               // Main.tile[x,y].wall
+}
+export function dyePlaceOk(sp: DyePlantSpot): boolean {
+  if (sp.style === 7) {
+    // 吊顶档（cs:54458-54466）：下邻(裸读 active+type,未过 nactive 门)要么 inactive
+    // 要么植物族；立足条件=上邻 SolidTile(x,y-1)+下邻非 active
+    if (sp.belowActive && !DYE_PLANT_PLANT_FAMILY.has(sp.belowSheet)) return false;
+    return sp.aboveSolid && !sp.belowActive;
+  }
+  if (sp.aboveActive && !DYE_PLANT_PLANT_FAMILY.has(sp.aboveSheet)) return false;
+  if (sp.style === 6) {
+    // 仙人掌寄生档（cs:54472-54478）：下邻 nactive+80,且左右两侧(y+1 行)非 active
+    return sp.belowActive && sp.belowSheet === 80
+      && !sp.sideLeftActive && !sp.sideRightActive;
+  }
+  if (!sp.belowSolid || sp.aboveActive) return false;
+  switch (sp.style) {
+    case 5:
+      // 水中档（Lime Kelp,cs:54488-54492）：满水且非岩浆/蜂蜜/微光
+      return sp.selfLiquidFullWater;
+    case 8: case 9: case 10: case 11:
+      // 异奇株（Strange Plant,cs:54493-54497）：立地即可,液/墙无视
+      return true;
+    default:
+      // 0/1/2 常规立地档 + 3/4 地表档（Marigold/BlueBerries 要求【无】背景墙,cs:54498-54507）
+      if (sp.selfHasLiquid) return false;
+      if (sp.style === 3 || sp.style === 4) return sp.selfWall === 0;
+      return true;
+  }
+}

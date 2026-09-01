@@ -70,6 +70,8 @@ it('III136 trace collector', () => {
     BIASES.push({ tag: String(pair.split('@')[0]), k: b });
   }
   const anchorHit = new Map<string, number>();
+  let trkSeqN = 0; let lastTag2 = 0; let lastM2: Map<string, string> | null = null;
+  const trkDiffs: Array<{ seq: number; diffs: string[] }> = [];
   const attCoord: Array<[number, number, number, number]> = [];
   const attDiffs: Array<{ att: number; xy: [number, number] | null; ok: number; diffs: string[] }> = [];
   let lastM: Map<string, string> | null = null;
@@ -99,6 +101,27 @@ it('III136 trace collector', () => {
         lastM = cur;
         lastTag = attN;
         attCoord.push([attN, ...(Array.isArray(d) ? d.slice(0, 3) : [0, 0, 0]) as number[]]);
+      }
+    }
+    if (name.startsWith('LTRK') || name.startsWith('STRK')) {
+      // 每次 track 尝试完成处的增量快照(STRK 正则同时命中二者)
+      if ((process.env.SW_I136_PERTRK ?? '') === '1') {
+        const n2 = ++trkSeqN;
+        const mxy = /(\d+),(\d+) rc=(\d+) ok=(\d)/.exec(name);
+        console.log(`PTRACE seq#${n2} ${name}${mxy ? '' : ' [no coord]'}`);
+        const cur: Map<string, string> = new Map();
+        for (let y = BANDY0; y <= BANDY1; y++) {
+          for (let x = BANDX0; x <= BANDX1; x++) {
+            const i2 = y * W + x;
+            cur.set(`${x},${y}`, `${st.flags[i2]}${st.type[i2]}w${st.wire[i2]}s${st.slope[i2]}h${st.half[i2]}`);
+          }
+        }
+        if (lastM2) {
+          const diffs2: string[] = [];
+          for (const [cell, v] of cur) if (lastM2.get(cell) !== v) diffs2.push(`${cell}:${lastM2.get(cell)}->${v}`);
+          if (diffs2.length) trkDiffs.push({ seq: lastTag2, diffs: diffs2 });
+        }
+        lastM2 = cur; lastTag2 = n2;
       }
     }
     if (ANCHOR_WORDS.includes(name)) {
@@ -167,6 +190,13 @@ it('III136 trace collector', () => {
   for (const [seg, list] of attributions) {
     console.log(`ATTR seg=${seg} changedCells=${list.length} first: ${list.slice(0, 8).join(' ; ')}`);
   }
+  // ---- per-track-attempt 归属（SW_I136_PERTRK=1 时）----
+  if ((process.env.SW_I136_PERTRK ?? '') === '1') {
+    for (const drow of trkDiffs) {
+      console.log(`PERTRK seq#${drow.seq} cells=${drow.diffs.length} :: ${drow.diffs.slice(0, 6).join(' ; ')}`);
+    }
+  }
+
   // ---- per-attempt 增量归属（SW_I136_PERTATT=1 时）----
   if (PERTATT) {
     for (const drow of attDiffs) {

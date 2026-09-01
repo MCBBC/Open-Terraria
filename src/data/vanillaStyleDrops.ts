@@ -224,6 +224,13 @@ const FakeChests2: T = [
  *  frameX/72!=1→498 / ==1→1989;Womannequin Item.cs:21292 placeStyle=2→fx=72） */
 const Mannequins: T = [498, 1989];
 
+/** 染料植物 227——GetItemDrop case 227（WorldGen.cs:65563-65568）：num=frameX/34,
+ *  `dropItem = 1107 + num`、8-11 段覆写为 3385+num-8。style→株：0 蓝蘑菇(TealMushroom)/
+ *  1 绿蘑菇/2 天蓝花/3 万寿菊/4 蓝浆果/5 石灰海带/6 仙人掌寄生株(生成期专用,掉
+ *  占位物 1113)/7 血橙根(吊顶,1114)/8-11 异奇株(Strange Plant)。6/7 两档照抄
+ *  原版算式产物 1113/1114（非异常）——GAP-B 清偿批 2026-09-01 */
+const DyePlants: T = [1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 3385, 3386, 3387, 3388];
+
 /** 盆栽树 547——Check2x5 case 547（WorldGen.cs:53739,:53806-53809 4430+num3,
  *  num3=fx/36 :53747-53752 段）5 档 */
 const PottedTrees: T = [4430, 4431, 4432, 4433, 4434];
@@ -456,6 +463,7 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   209: (fx) => Math.floor(fx / 72),                                   // 炮（CheckCannon :51239 num2）
   215: (fx) => Math.floor(fx / 54),                                   // 营火（KillTile :64499/Check3x2 :49995）
   216: (_fx, fy) => Math.floor(fy / 40),                              // 烟花火箭（Check1x2 :43744 num3）
+  227: (fx) => Math.floor(fx / 34),                                   // 染料植物（KillTile case 227 :65563 num=frameX/34；PlaceDye :54489 frameX=34*style 同步）
   240: (fx, fy) => Math.floor(fx / 54) + Math.floor(fy / 54) * 36,    // 画 3×3（Check3x3Wall :44751）
   241: () => 0,                                                       // 画 4×3（Check4x3Wall :45335 恒掉 1417,无 style 档）
   242: (fx, fy) => Math.floor(fx / 108) * 27 + Math.floor(fy / 72),   // 画 6×4（Check6x4Wall :45399）
@@ -554,6 +562,7 @@ export function styleDropVid(sheet: number, style: number): number {
     case 469: return pick(Tables_2, style);
     case 487: return pick(PicnicTables, style);
     case 497: return pick(Toilet, style);
+    case 227: return pick(DyePlants, style);
     default: return 0;
   }
 }

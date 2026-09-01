@@ -1407,9 +1407,9 @@ function vanillaStructures({ store, rng, world, prog }: GenCtx) {
   // 丛林灌水前（方案 A 原版位置）；全图祭坛独立 pass 卡在活木墙与灌水之间。
   // LivingTrees：GrowLivingTree 树干壳+枝叶+根系+贯通竖井+密室宝箱；LivingTreeWalls：
   // 全图 type==191 连通核补墙 244（零掷骰）。
-  rng.reseed(gs.seed); prog?.beginVan('Living Trees');                 // ▶cs:15551
+  rng.reseed(gs.seed); prog?.beginVan('Living Trees');                 // ▶LivingTrees cs:15551
   runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)
-  rng.reseed(gs.seed); prog?.beginVan('Wood Tree Walls');              // ▶cs:15792（零掷骰）
+  rng.reseed(gs.seed); prog?.beginVan('Wood Tree Walls');              // ▶LivingTreeWalls cs:15792（零掷骰）
   runLivingTreeWallsPass(store, gs);                 // Living Tree Walls(活木墙)
   // Demon And Crimson Altars(15825,全图随机撒 16 坛)——注册序 LivingTreeWalls(15792) <
   // 本 pass < SurfaceWaterInJungle(15887)。★与 Corruption pass 内猩红逐组祭坛(cs:14241)

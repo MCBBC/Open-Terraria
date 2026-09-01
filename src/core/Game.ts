@@ -901,7 +901,9 @@ function isTileReplaceable(st: Game['world']['store'], x: number, y: number): bo
   return true;
 }
 // PlantCheck 判定/换型规则已迁 src/world/evolution/PlantRules.ts 单点（Game 与演化放置门共用）
-import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY, assortedPlaceOk, GRASS_CONVERT_SHEETS } from "../world/evolution/PlantRules";
+import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY, assortedPlaceOk, GRASS_CONVERT_SHEETS,
+  MOSS_CONVERT_SHEETS, MOSS_TO_BRICK_SHEET, mossPlaceOk,
+  DyePlantSpot, dyePlaceOk, DYE_PLANT_FRAME_STEP } from "../world/evolution/PlantRules";
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
@@ -17737,6 +17739,164 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
 
+  /** GAP-A·tileMoss 苔藓族转化（AssortedThings moss 分支 Player.cs:41377-41383 +
+   *  PlaceIt → PlaceTile legacy moss 支 WorldGen.cs:59864/59902-59912 全链）：
+   *  手持 createTile∈tileMoss（Main.cs:7146 起）对【活跃】石块(1)/灰砖(38) 原位免费
+   *  转化。★单模（2026-09-01 反编译定谳,原 GAP-A 登记"空格回落普通铺设"系误读）：
+   *  AssortedThings else-if 链互斥,moss 支对空格不置 canPlace ⇒ PlaceIt 不运行——
+   *  族内物品无论成败都终止通用链（同草种族,见 mossPlaceOk 注释档）。
+   *  石块目标→moss 原样；灰砖目标→苔砖变体（PlaceTile num 重写表 :59902-59912,
+   *  PlantRules.MOSS_TO_BRICK_SHEET）。返回 true=已转化（调用方据此终止通用链） */
+  private tryMossConvert(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number],
+    gsheetIn?: number): boolean {
+    const st = this.world.store;
+    const gsheet = gsheetIn ?? (itemDef.tile
+      ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
+      : vanillaItemCreateTile(viIdFromKey(itemDef.key)));
+    if (!MOSS_CONVERT_SHEETS.has(gsheet)) return false;
+    // 外门 ItemTimeIsZero（Player.cs:40060）——冷却中连转化尝试都不发生
+    if (this.player.useTime > 0) return false;
+    const target = st.get(tx, ty);
+    if (target === 0) return false;                    // 空格：nactive() 门恒假（:41379）
+    const tsheet = TILE_DEFS[target]?.vanilla?.sheet ?? -1;
+    if (!mossPlaceOk(gsheet, tsheet)) return false;    // 非 nactive 石/灰砖 = 原版整链终点
+    const outSheet = tsheet === 38 ? (MOSS_TO_BRICK_SHEET[gsheet] ?? gsheet) : gsheet;
+    const gt = TILE_INTERNAL_BY_SHEET.get(outSheet);
+    if (gt === undefined) return false;
+    st.setTile(tx, ty, gt);
+    // ResetsHalfBrickPlacementAttempt（TileID.cs:181 含苔藓/苔砖全族）→ 半砖清位
+    // （PlaceTile cs:59499-59507 else-if 支 `tile.halfBrick(false)+帧归零`;坡面/油漆
+    // 按 active→active 存活——setTile 对 wasActive 保 paint/coat/half/slope,半砖
+    // 是唯一例外,显式补清）
+    if (st.half[st.idx(tx, ty)]) st.setHalfBrick(tx, ty, false);
+    this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+    // 行为录制（cause:'moss'——苔藓转化写面留痕,回放工具可复现）
+    this.recLog('tile', {
+      x: tx, y: ty,
+      from: TILE_DEFS[target]?.key ?? target,
+      to: TILE_DEFS[gt]?.key ?? gt,
+      cause: 'moss',
+    });
+    // 消耗门（Player.cs:42602 itemTime==itemTimeMax && consumable——DefaultToPlaceableTile
+    //  Item.cs:48494-48504 置 consumable=true;itemfunc 提取面缺 moss 条目故按
+    //  "非 false 即消耗"口径,与通用放置链 :18372 一致）
+    const heldVid = viIdFromKey(itemDef.key);
+    if (itemCombat(heldVid)?.consumable !== false) {
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.cb.onInventoryChanged();
+    }
+    // ApplyItemTime（PlaceIt cs:40455 → :4221 tileSpeed 折算;moss 物品 combat 数据
+    // 缺 useTime → 回退 14 与通用链缺失档一致）
+    {
+      const ut = itemCombat(heldVid)?.useTime;
+      this.player.useTime = ut && ut > 0
+        ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
+        : 14;
+    }
+    this.placeItAutoAcc(tx, ty);
+    this.sfx.play('place');
+    return true;
+  }
+
+  /** GAP-B·tile 227 染料植物（2026-09-01 定谳不等价,实装专用路由）：通用链的
+   *  framed hasSupport 近似+framedCellFrame(style*18 步长)与原版两头都对不上——
+   *  ①TryPlacing 显式把 227 从 TileObjectData 满分制排除（Player.cs:40086
+   *  `CustomPlace(...) && !=82 && !=227 && !=4`）走 AssortedThings 无条件支
+   *  （:41403-41405 canPlace=true）;②PlaceTile case 227（WorldGen.cs:60533-60536）
+   *  → PlaceDye（:54451-54502）逐 style 环境门 + `frameX=34*style` 帧。
+   *  失败=静默无动作不消耗（PlaceDye 不写帧 → result=false → ApplyItemTime 不跑,
+   *  cs:40453/40455）。物品面 12 件：1107-1112（style0-5）/1114 血橙根（style7）/3385-
+   *  3388 异奇株（style8-11）。支撑存活侧已有 'dyeplant' 失撑链（CheckDye :54257） */
+  private tryDyePlantPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]): boolean {
+    const st = this.world.store;
+    if ((TILE_DEFS[TILE_BY_KEY[itemDef.tile!]]?.vanilla?.sheet ?? -1) !== 227) return false;
+    if (this.player.useTime > 0) return false;         // 外门 ItemTimeIsZero（:40060）
+    const style = itemDef.placeStyle ?? 0;
+    const i0 = st.idx(tx, ty);
+    const targetActive = st.isActive(tx, ty);
+    // 外门（Player.cs:40058）：227 不在特放名册 → 目标须非 active,或命
+    // IsReplaceableBlock（Player.cs:40066-40072：(!tileCut||484||711)&&非裂砖族{373-375,
+    // 461,709} 时读 BreakableWhenPlacing,否则恒真——tileCut∪BreakableWhenPlacing 双豁免）
+    if (targetActive) {
+      const t = st.type[i0];
+      const sh = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+      const inner = (!TILE_CUT.has(t) || sh === 484 || sh === 711)
+        && !(sh >= 373 && sh <= 375) && sh !== 461 && sh !== 709;
+      if (!(inner ? (sh >= 0 && TILE_BREAK_WHEN_PLACING.has(t)) : true)) return false;
+      // IsBlockedByLava（:41809-41824）：227 非实心 + tileLavaDeath[227]=true
+      // （Main.cs:8302）→ CheckLiquidPlacement 恒否 ⇒ 目标格岩浆拒置
+      if (st.liquid[i0] > 0 && st.liquidType[i0] === LIQUID_TYPE.LAVA) return false;
+    }
+    // PlaceDye 环境门预读（界外邻格=vanilla null 早退 ⇒ 恒失败,与 PlantRules 约定一致）
+    if (!st.inBounds(tx, ty + 1) || !st.inBounds(tx, ty - 1)) return false;
+    const aboveActive = st.isActive(tx, ty - 1);
+    const belowActive = st.isActive(tx, ty + 1);
+    const spot: DyePlantSpot = {
+      style,
+      aboveActive, aboveSheet: aboveActive ? sheetAt(st, tx, ty - 1) : -1,
+      aboveSolid: this.solidTileStrictAt(tx, ty - 1),
+      belowActive, belowSheet: belowActive ? sheetAt(st, tx, ty + 1) : -1,
+      sideLeftActive: st.isActive(tx - 1, ty + 1), sideRightActive: st.isActive(tx + 1, ty + 1),
+      belowSolid: this.solidTileStrictAt(tx, ty + 1),   // SolidTile(x,y+1)（cs:54469）——
+                                                        // 与 !aboveActive 组门在 dyePlaceOk 内
+                                                        // （cs:54471 else-if 条件第二项）
+      selfLiquidFullWater: st.liquid[i0] === 255
+        && (st.liquidType[i0] === LIQUID_TYPE.WATER || st.liquidType[i0] === LIQUID_TYPE.NONE),
+      selfHasLiquid: st.liquid[i0] !== 0,
+      selfWall: st.wall[i0],
+    };
+    if (!dyePlaceOk(spot)) return false;
+    // recLog from 值先取（写面后 type 已被覆盖）
+    const fromKey = targetActive ? (TILE_DEFS[st.type[i0]]?.key ?? String(st.type[i0])) : 0;
+    // 成功写面（cs:54483-54490）：type/active + halfBrick(false)+slope(0)+
+    // frameY=0+frameX=34*style。原 SquareTileFrame(:60535) 对 frameImportant 227 no-op
+    st.setTile(tx, ty, TILE_BY_KEY[itemDef.tile!], DYE_PLANT_FRAME_STEP * style, 0);
+    if (st.half[i0]) st.setHalfBrick(tx, ty, false);   // halfBrick(false)（cs:54484）
+    else if (st.slope[i0] !== 0) st.setSlope(tx, ty, 0); // slope(0)（cs:54485;独立上报面）
+    this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+    this.recLog('tile', {
+      x: tx, y: ty, from: fromKey,
+      to: TILE_DEFS[TILE_BY_KEY[itemDef.tile!]]?.key ?? itemDef.tile!,
+      cause: 'dye', s: style,
+    });
+    // consumable=true（itemfunc 提取面齐全,1107-1112/1114 逐件带键）
+    if (itemCombat(viIdFromKey(itemDef.key))?.consumable !== false) {
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.cb.onInventoryChanged();
+    }
+    {
+      const ut = itemCombat(viIdFromKey(itemDef.key))?.useTime;
+      this.player.useTime = ut && ut > 0
+        ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
+        : 14;
+    }
+    this.placeItAutoAcc(tx, ty);
+    this.sfx.play('place');
+    return true;
+  }
+
+  /** PlaceThing_Tiles_PlaceIt 尾奏自动附件（1458 P.cs:40912/:40952 区 autoPaint/
+   *  autoActuator）——仅 moss/dye 两【早期 return】专用路径调用（通用路径尾部已
+   *  内联展开,勿重复触发）。OW×OH 恒 1×1 单格。builderAccStatus 开关面接设置页 */
+  private placeItAutoAcc(x: number, y: number): void {
+    if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+      this.tryPainting(x, y, false, this.paintDustHook());
+    }
+    if (this.player.equipStats.autoActuator && !options.data.builderAutoActuatorDisabled
+      && this.wiring && this.player.inv.countOf(VI_ID(849)) > 0) {
+      const ti = this.world.store.idx(x, y);
+      const td2 = TILE_DEFS[this.world.store.type[ti]];
+      const vt2 = td2?.vanilla?.sheet ?? -1;
+      // flag4（:39985-39999）actuate 排除段与通用链同表;染料植物非实心天然被排
+      if (td2?.solid && vt2 >= 0 && vt2 !== 314 && vt2 !== 379
+        && !(vt2 >= 386 && vt2 <= 389) && vt2 !== 476
+        && this.wiring.placeActuator(x, y)) {
+        this.player.inv.remove(VI_ID(849), 1);
+        this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+      }
+    }
+  }
+
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     if (!this.inTileRange(tx, ty, this.blockRange())) return;   // 射程门（原版 PlaceThing IsTargetTileInRange；曾无门=指哪放哪）
@@ -17796,6 +17956,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const g0 = itemDef.tile
       ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
       : vanillaItemCreateTile(hv0);
+    // ---- GAP-A·tileMoss 苔藓族（Player.cs:40058 外门 `|| Main.tileMoss[tileToCreate]`
+    //  + AssortedThings :41377 moss 支）：石/灰砖原位免费转化；★单模——族内物品无论
+    //  成败终止通用链（AssortedThings 互斥链对空格不置 canPlace=PlaceIt 不运行,
+    //  "空格回落铺设"系误读,见 tryMossConvert/mossPlaceOk 注释档）。place_v_* 是本仓
+    //  面板伪物品照旧走通用链 ----
+    if (MOSS_CONVERT_SHEETS.has(g0) && !itemDef.key.startsWith('place_v_')) {
+      this.tryMossConvert(tx, ty, itemDef, g0); return;
+    }
+    // ---- GAP-B·tile 227 染料植物族（TryPlacing 显式排除 TileObjectData 路径 +
+    //  AssortedThings 无条件支 + PlaceTile case227→PlaceDye 环境门）:专用路由,
+    //  无论成败终止通用链（原版 PlaceDye 失败=result false 不消耗）----
+    if (g0 === 227 && !itemDef.key.startsWith('place_v_')) {
+      this.tryDyePlantPlace(tx, ty, itemDef); return;
+    }
     if (GRASS_CONVERT_SHEETS.has(g0) && !itemDef.key.startsWith('place_v_')) {
       this.tryGrassConvert(tx, ty, itemDef, g0); return;
     }
@@ -18065,7 +18239,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 底锚(0)→左锚(22)→右锚(44)→墙锚(0)；普通火把液体中拒绝、水炬 8/11/17 允许
     if (tileId === T.TORCH) {
       if (this.player.useTime > 0) return;
-      if (st.isActive(tx, ty)) return;
+      // ★占用面与通用放置同口径（CanPlace TileObject.cs:357）：目标格为 tileCut ∪
+      //  BreakableWhenPlacing 活动格 → 放置成功前 KillTile 清格（TileObject.Place :79-93），
+      //  孤儿段交 onTileChanged 级联（同下方放置循环注释）。曾严格空格=火把顶不掉
+      //  杂草/小石块，与原版不一致（2026-09-01 二轮 review 定谳）。特例 484/654 同前。
+      //  ★清格置于全部拒绝门之后（frame/液体门先验）——失败不吞掉障碍物（原版
+      //  CanPlace 失败同样不动格）。
+      let hasObstacle = false;
+      if (st.isActive(tx, ty)) {
+        const wtT = st.get(tx, ty);
+        const shT = TILE_DEFS[wtT]?.vanilla?.sheet ?? -1;
+        if (!(TILE_CUT.has(wtT) && shT !== 484 && shT !== 654) && !TILE_BREAK_WHEN_PLACING.has(wtT)) return;
+        hasObstacle = true;
+      }
       const frame = torchAnchorFrame(st, tx, ty);
       // placeStyle（Item.cs placeStyle→TileObjectData subtile）：彩色 427-433 /
       // 群系火把显式表 / 水炬 8/11/17——此前恒 0 = 群系火把放成普通火把（色光全失）
@@ -18073,6 +18259,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (frame < 0) return;
       // 液体门（WaterPlacement）：普通火把 NotAllowed、水炬三色 Allowed
       if (st.liquid[st.idx(tx, ty)] > 0 && !isWaterTorchStyle(style * 22)) return;
+      if (hasObstacle) this.breakTile(tx, ty, true);
       st.setTile(tx, ty, tileId, frame, style * 22);
       this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'torch' });   // 行为录制：火把放置
       this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -18087,26 +18274,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const px = tx + dx2, py = ty + dy2;
         if (!st.inBounds(px, py)) return;
         if (st.isActive(px, py)) {
-          // tileCut 割草（原版 Player.PlaceThing 放置前对 tileCut 目标 KillTile）：
-          // breakTile 走掉落(种子掷)/音效链；多格植物（丛林高草 74 等 1×2）上下
-          // 同型整株清——曾 setTile 直切单格留上半悬在工作台上方（用户观感
-          // "没放成,还得用台子再打一次草"2026-08-21）
-          // ★割草判据 = Main.tileCut 显式表（TILE_CUT,构建期从 TILE_CUT_VANILLA
-          //  派生,只含植物/草/藤族）。曾用 decor 启发式：墓碑 85 等 decor 标记的
-          //  framed 家具被当草割（2026-08-25 用户实报墓碑变掉落物）；改用
-          //  !framed 又误杀 style 帧植物（3/74 族本身 framed=true）——两族都
-          //  在 decor∩framed 交集里,唯 tileCut 表是原版权威判据
-          // ★占位例外面第二支 = TileID.Sets.BreakableWhenPlacing（TILE_BREAK_WHEN_
-          //  PLACING）：小石块 185 等石堆/珊瑚/钟乳石压到即碎,免镐直放（CanPlace
-          //  TileObject.cs:357 放行 + Place TileObject.cs:84-86 写前 KillTile;
-          //  2026-09-01 用户实报小石子挡工作台）。特例:484 滚石仙人掌/654 TNT桶
-          //  虽在 tileCut 表,CanPlace :357 显式排除,仍阻挡放置。
+          // ★放置清格 = TileObject.Place cs:79-93 全量移植：占位格 = Main.tileCut ∪
+          //  TileID.Sets.BreakableWhenPlacing 的活动格，写入前逐格 WorldGen.KillTile
+          //  （默认参=带掉落/音效；CanPlace :357 同口径放行）。特例：484 滚石仙人掌 /
+          //  654 TNT桶虽属 tileCut，CanPlace :357 显式排除仍阻挡。
+          //  割草判据曾用 decor 启发式踩坑（墓碑 85 与杂草 3 同构），唯显式表是权威。
+          // ★只杀占位格、不做额外同型纵扫——原版 KillTile 尾 SquareTileFrame(i,j)
+          //  （cs:64432）触发 3×3 邻域 TileFrame，孤儿段由各类型 Check* 族裁决：
+          //  植物 PlantCheck 地基失配杀(:81857)/陶罐 CheckPot 整罐/藤·蛛网·蜂巢无支撑
+          //  语义悬空保留。本仓等价链 = setTile→onTileChanged→checkFurnitureSupport→
+          //  checkDecorSupport（D-1,:5054/:32611）。2026-08-21 曾加同型纵向整株扫修
+          //  "留上半悬空"，该债由上述级联承担后此扫越出原版杀伤半径（藤链/蛛网被多杀），
+          //  2026-09-01 撤除（仪具 scripts/_pile-place.mjs 含 webSurvivor/weedOrphan 回归）。
           const wt = st.get(px, py);
           const shWt = TILE_DEFS[wt]?.vanilla?.sheet ?? -1;
           if (!(TILE_CUT.has(wt) && shWt !== 484 && shWt !== 654) && !TILE_BREAK_WHEN_PLACING.has(wt)) return;
           this.breakTile(px, py, true);
-          for (let yy = py - 1; st.get(px, yy) === wt; yy--) this.breakTile(px, yy, true);
-          for (let yy = py + 1; st.get(px, yy) === wt; yy++) this.breakTile(px, yy, true);
         }
         // 实心物不能与玩家重叠
         if (def.solid && this.overlapsEntity(px, py)) return;

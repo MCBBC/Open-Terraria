@@ -170,13 +170,43 @@ describe('② AI_127 Palworld 双宠 695/696', () => {
       expect(z.y + z.h).toBeCloseTo(GROUND * TILE - 48, 0); // Bottom=y*16-48（:43257）
     }
     expect(pal.ai0).toBe(0);                                // 守望
-    expect(pal.despawnTimer).toBe(750);                     // timeLeft=activeTime 续命
+    // 续命终态 = activeTime−1：拍内序 AI()(:91533) 先行——AI_127 守望分支自带
+    // timeLeft=activeTime（NPC.cs:43418，与几何无关）→ CheckActive 屏窗再重置
+    //（:78736-78737）→ 尾部无条件 timeLeft--（:78790；CheckActive 是 UpdateNPC
+    // 末点 :91629）。两条续命路都发生在本拍倒数之前 ⇒ 拍末观测恒 750−1，750 只
+    // 存在于拍中。旧断言 750 是旧形「屏内重置不倒数」杜撰形的产物，非原版语义。
+    expect(pal.despawnTimer).toBe(749);
     // 威慑僵尸：面向 pal 贴地站立（不追玩家；:57387 num57 朝向宠）
     const z0 = zombies[0];
     const z0x = z0.x;
     for (let t = 0; t < 30; t++) z0.fixedUpdate(1 / 60, h.hooks);
     expect(Math.abs(z0.x - z0x)).toBeLessThan(2);           // 站定（vx ×0.93 阻尼）
     expect(Math.sign(pal.cx - z0.cx)).toBe(z0.facing);      // 面向宠（:57387）
+  });
+
+  it('续命路径分解：玩家屏外(Δ80 格)守望仍每拍自续恒 749（:43418）；双僵尸灭解除 → 仅剩屏窗续命（:78736）不可达 → 离屏纯倒数消散（:78790/:78795）', () => {
+    const h = makeHooks(makeWorld(), { x: 180, y: GROUND - 4 }); // Δ80 格 <252 格 ActiveRange 但 >62 格屏窗
+    const pal = Enemy.fromVanilla(695, 100 * TILE, (GROUND - 1) * TILE + 8)!;
+    pal.y = (GROUND - 1) * TILE - pal.h;
+    h.enemies.push(pal);
+    pal.fixedUpdate(1 / 60, h.hooks);
+    const zombies = h.enemies.filter((n) => n !== pal && n.vanillaId === 111);
+    expect(zombies).toHaveLength(2);
+    // 守望中：ai[0]==0 分支每拍 timeLeft=activeTime（NPC.cs:43418）与屏窗无关
+    // ——屏外 200 拍既不死也不掉数（无此分支则会跌到 ~549）
+    for (let t = 0; t < 200; t++) pal.fixedUpdate(1 / 60, h.hooks);
+    expect(pal.dead).toBe(false);
+    expect(pal.ai0).toBe(0);
+    expect(pal.despawnTimer).toBe(749);                     // 自续(:43418)−倒数(:78790)=恒 749
+    // 解除守望：双僵尸灭 → ai0=1 → :43418 停走；屏窗半轴 62 格接不到 Δ80 格的
+    // 玩家 ⇒ :78736 重置缺席，只剩 :78790 无条件倒数，≤0 消散（:78795-78809）
+    for (const z of zombies) { z.hp = 0; z.dead = true; }
+    pal.fixedUpdate(1 / 60, h.hooks);
+    expect(pal.ai0).toBe(1);
+    let ticks = 0;
+    while (!pal.dead && ticks < 900) { pal.fixedUpdate(1 / 60, h.hooks); ticks++; }
+    expect(pal.dead).toBe(true);
+    expect(ticks).toBeGreaterThan(600);                     // 从 ~749 起倒数而非秒灭
   });
 
   it('玩家 <200px 解除威慑（:57373）；双僵尸灭 → ai0=1；玩家 <100px → ai0=2；120t 奖赏+静默消亡', () => {

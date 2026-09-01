@@ -187,12 +187,14 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   };
   if (!fitSide(-1) && !fitSide(1)) return false;
   let height = rng.int(5, 16) + heightAddon;           // Next(5,17)+treeHeightAddon（1458 :30078）
-  // ★IIIII111（cs:30080-30086）：errorWorld ⇒ Next(errorWorldAdjustment(3.0))==0 时
-  //   高度改 Next(2,101)；else-if extraLivingTrees ⇒ 高度 += Next(0,11)。
-  if (!!gs.seedFlags.errorWorld && rng.nextInt((gs as unknown as { __ewAdj3?: number }).__ewAdj3 ?? 4) === 0) {
-    height = rng.int(2, 100);
+  // ★IIIII111（cs:30081-30086）：errorWorld ⇒ Next(errorWorldAdjustment(3.0))==0 时
+  //   高度改 Next(2,101)；else-if extraLivingTrees ⇒ 高度 += Next(0,11)。组合秘种子
+  //   activeSecretSeedCount>1 的因子缩水另案（SecretSeedDoEndsPass ewAdjust 同域惯例）
+  //   ——单旗标因子 (1+3)/4=1 ⇒ adjustment=3，零掷骰差。
+  if (!!gs.seedFlags.errorWorld && rng.nextInt(3) === 0) {
+    height = rng.int(2, 100);                          // cs:30084
   } else if (!!gs.seedFlags.extraLivingTrees) {
-    height += rng.int(0, 10);                          // eLT 树高加成
+    height += rng.int(0, 10);                          // eLT 树高加成（cs:30085-30086）
   }
   let clear = height + 4;                              // num3
   if (JUNGLE_GRASS.has(st.type[gi])) clear += 5;
