@@ -3145,7 +3145,9 @@ export class Renderer {
     drawChunkGrid('tile');
 
     // 2c''. 动画格统一动态层（根治：动画格永不进烘焙，见 drawAnimatedTileLayer 注）
-    this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z);
+    //   dev 参数 = 设备空间取整（与 drawChunkGrid 同 zz/ox/oy/camRX 同源,发丝缝）
+    this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z,
+      { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY });
 
     // 3.7 血肉墙墙身/肌腱链/舌头（★2026-08-24 r15 R15-8 搬移：原版 DrawWoF 在
     //     DoDraw_WallsTilesNPCs 内紧随 DrawWalls(:64233→:64235)、在非实心 tile/
@@ -3206,8 +3208,9 @@ export class Renderer {
         (tx, ty) => this.lighting?.lightAt(tx, ty) ?? [255, 255, 255]);
 
       // 训练假人 tile 动态绘制层（tile 378 已摘出烘焙，本层画当前动画行——单层
-      // 绘制语义，防烘焙静止行透出同朝向重影）
-      this.drawDummyTileAnim(ctx, world, entities, cam, viewW, viewH, z);
+      // 绘制语义，防烘焙静止行透出同朝向重影）。dev=设备取整（发丝缝 doctrine）
+      this.drawDummyTileAnim(ctx, world, entities, cam, viewW, viewH, z,
+        { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY });
     }
 
     // 2c'. 导线覆盖层（★2026-08-24 r15 R15-2 搬移：原版实机路径 DrawWires 唯二调用
@@ -4202,7 +4205,8 @@ export class Renderer {
    *  （405/406/272/瀑布族 animYOffset…）。整屏世界坐标系绘制 = 无 chunk 边界
    *  裁剪，动画家具跨 chunk 的 2px 溢出行不再有陈旧副本。 */
   private drawAnimatedTileLayer(ctx: CanvasRenderingContext2D, world: World,
-    cam: Camera, viewW: number, viewH: number, z: number) {
+    cam: Camera, viewW: number, viewH: number, z: number,
+    dev?: { zz: number; ox: number; oy: number; camRX: number; camRY: number }) {
     if (!this.atlas) return;
     const st = world.store;
     const atlas = this.atlas;
@@ -4211,6 +4215,18 @@ export class Renderer {
     const tx1 = Math.min(world.w - 1, Math.ceil((cam.x + viewW / 2 / z) / ts) + 1);
     const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
     const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
+    // ★设备空间取整（2026-09-01 动态物件发丝缝定案）：静态瓦片走 chunk 缓存，
+    //   共享边 = round(同一连续表达式) 恒等无缝（drawChunkGrid 注）；本层是唯一
+    //   仍以世界坐标直绘的活绘路径——非整数缩放（z=1.27 / 低清 K=0.5）下格边
+    //   落小数设备像素，各 drawImage 边独立最近邻取整 → 多格家具内部发丝缝
+    //   （提取机/染料机横缝，用户截图 42）。接入同一 doctrine：退出缩放变换，
+    //   逐格算共享边设备矩形（dxa/dxb 同 round 函数），格内内容以 s=宽/16 缩放
+    //   回放——任意 zoom/相机下动态格边恒整数，且与 chunk 邻边同函数同值。
+    if (dev) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+    }
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = st.idx(tx, ty);
@@ -4223,19 +4239,41 @@ export class Renderer {
         let fy = st.frameY[i];
         if (sheet === 215) fy = campfireYOffset(st.frameY[i]);
         else if (sheet === 207) fy = fountainYOffset(st.frameY[i], tx, st.frameX[i]);
-        drawVanillaCell(ctx, atlas, sheet, van.frame,
-          van.fw ?? 1, van.fh ?? 1,
-          st, tx, ty, type,
-          (t) => t === type || frameMergesWith(type, t),
-          tx * ts, ty * ts, st.frameX[i], fy,
-          { treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
-            worldSurface: world.groundLevel, worldW: world.w, rockLevel: world.rockLevel });
+        if (dev) {
+          const { zz, ox, oy, camRX, camRY } = dev;
+          const dxa = ox + Math.round((tx * ts - camRX) * zz);
+          const yda = oy + Math.round((ty * ts - camRY) * zz);
+          const dxb = ox + Math.round(((tx + 1) * ts - camRX) * zz);
+          const ydb = oy + Math.round(((ty + 1) * ts - camRY) * zz);
+          ctx.save();
+          ctx.translate(dxa, yda);
+          ctx.scale((dxb - dxa) / ts, (ydb - yda) / ts);
+          ctx.translate(-tx * ts, -ty * ts);
+          drawVanillaCell(ctx, atlas, sheet, van.frame,
+            van.fw ?? 1, van.fh ?? 1,
+            st, tx, ty, type,
+            (t) => t === type || frameMergesWith(type, t),
+            tx * ts, ty * ts, st.frameX[i], fy,
+            { treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+              worldSurface: world.groundLevel, worldW: world.w, rockLevel: world.rockLevel });
+          ctx.restore();
+        } else {
+          drawVanillaCell(ctx, atlas, sheet, van.frame,
+            van.fw ?? 1, van.fh ?? 1,
+            st, tx, ty, type,
+            (t) => t === type || frameMergesWith(type, t),
+            tx * ts, ty * ts, st.frameX[i], fy,
+            { treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+              worldSurface: world.groundLevel, worldW: world.w, rockLevel: world.rockLevel });
+        }
       }
     }
+    if (dev) ctx.restore();
   }
 
   private drawDummyTileAnim(ctx: CanvasRenderingContext2D, world: World, entities: Entity[],
-    cam: Camera, viewW: number, viewH: number, z: number) {
+    cam: Camera, viewW: number, viewH: number, z: number,
+    dev?: { zz: number; ox: number; oy: number; camRX: number; camRY: number }) {
     const img = this.atlas?.ensureVImage('vanilla/Tiles_378.png');
     if (!img) return;
     const st = world.store;
@@ -4273,8 +4311,19 @@ export class Renderer {
           for (let cx = 0; cx < 2; cx++) {
             const r = this.atlas!.vframeAt(378, vx + cx * 18, row * 54 + cy * 18);
             if (!r) continue;
-            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
-              (tx + cx) * ts, (ty + cy) * ts + dy, ts, ts);
+            if (dev) {
+              // 设备空间取整（同 drawAnimatedTileLayer doctrine,发丝缝）
+              const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
+              const dxa = dev.ox + Math.round((wx - dev.camRX) * dev.zz);
+              const yda = dev.oy + Math.round((wy - dev.camRY) * dev.zz);
+              const dxb = dev.ox + Math.round((wx + ts - dev.camRX) * dev.zz);
+              const ydb = dev.oy + Math.round((wy + ts - dev.camRY) * dev.zz);
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+                dxa, yda, dxb - dxa, ydb - yda);
+            } else {
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+                (tx + cx) * ts, (ty + cy) * ts + dy, ts, ts);
+            }
           }
         }
       }
@@ -12398,17 +12447,15 @@ export class Renderer {
           rot = aim + 0.785;
         } else {
           const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
-          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter+dy（:50387），
+          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter-fh/2（:50387），
           // 绘制角 = itemRotation（PlayerDrawLayers.cs:3444）
-          // ★2026-09-01 金标审计修正：offY 不含 −fh/2（该量在旋转帧 origin.y=H/2），
-          //  per-item dy 加在未旋转 pivot 上（PlayerDrawSet vector11.Y→position.y）。
-          //  旧 offY=p.h/2−fh/2 把 H/2 放在旋转前 → 非水平瞄准时偏移按角度放大。
           offX = -2;
-          offY = p.h * 0.5 + dp[1];
+          offY = p.h * 0.5 - fh * 0.5;
           rot = aim;
           // ★握把 origin=(-num9,H/2)（PlayerDrawLayers.cs:3434-3443 + Main.cs:3305
-          // DrawPlayerItemPos）：origin7.y=H/2 恒定不随物品变化，进旋转帧。
-          drawOX = dp[0]; drawOY = -fh * 0.5;
+          // DrawPlayerItemPos）：num9 默认 10、逐 id 修正；dir=-1 时原版取 (W+num9,H/2)，
+          // 镜像空间等价 → 精灵左上角钉在握点 +（num9, dy）
+          drawOX = dp[0]; drawOY = dp[1];
         }
         break;
       }
@@ -12856,15 +12903,22 @@ export class Renderer {
       ctx.font = '14px monospace';
       const lh = 20;
       const lines: string[] = [];
-      let remaining = this.signHoverText;
-      while (remaining.length > 0 && lines.length < 10) {
-        if (ctx.measureText(remaining).width <= 460) { lines.push(remaining); break; }
-        let cut = remaining.length;
-        while (cut > 1 && ctx.measureText(remaining.slice(0, cut)).width > 460) cut--;
-        const sp = remaining.lastIndexOf(' ', cut);   // 优先空格断词（WordwrapString 语义）
-        if (sp > 0) cut = sp;
-        lines.push(remaining.slice(0, cut));
-        remaining = remaining.slice(cut).trimStart();
+      // 原版 WordwrapString(Utils.cs:874) = CreateWrappedText 后按 '\n' Split——
+      // 硬换行（墓碑 epitaph = 死因\n日期）成独立行。曾不切 \n → 日期黏上死因行、
+      // \n 渲染成幻影空档（2026-09-01 用户实报）
+      for (const para of this.signHoverText.split('\n')) {
+        if (lines.length >= 10) break;
+        let seg = para;
+        if (ctx.measureText(seg).width <= 460) { lines.push(seg); continue; }
+        while (seg.length > 0 && lines.length < 10) {
+          if (ctx.measureText(seg).width <= 460) { lines.push(seg); seg = ''; break; }
+          let cut = seg.length;
+          while (cut > 1 && ctx.measureText(seg.slice(0, cut)).width > 460) cut--;
+          const sp = seg.lastIndexOf(' ', cut);   // 优先空格断词（WordwrapString 语义）
+          if (sp > 0) cut = sp;
+          lines.push(seg.slice(0, cut));
+          seg = seg.slice(cut).replace(/^[ ]+/, '');
+        }
       }
       let maxW = 0;
       for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
@@ -12873,6 +12927,11 @@ export class Renderer {
       if (by > this.canvas.height - lh * lines.length) by = this.canvas.height - lh * lines.length;
       if (bx > this.canvas.width - maxW) bx = this.canvas.width - maxW;
       ctx.save();
+      // ★锚自洁(2026-09-01 用户实报"墓碑文字与底板错位"):本块曾只钉 textBaseline
+      //   ——textAlign 依赖上游状态,render 尾段任一 'center' 泄漏跨帧存活(canvas
+      //   状态跨帧持久;死亡屏 2026-08-25 同案) → 文字以 bx 为中心横排:整体左移
+      //   半宽、底板右脱节。MouseText 家族锚语义 = 左上,两锚一并显式钉死
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       if (options.data.opaqueBoxBehindTooltips) {
         ctx.fillStyle = 'rgba(18,20,64,0.79)';   // Color(23,25,81,255)×0.925×0.85
@@ -13414,7 +13473,22 @@ export class Renderer {
       const gl = this.worldLightLayer();
       // 低清档(#perf-gpulog):world 纹理已 K 缩,lightRect 同比缩(world-layer 像素系)
       const k = this._worldLowK;
-      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx * k, sy * k, lw * k, lh * k])) {
+      // ★光矩形设备取整（2026-09-01 全宽发丝缝定案）：旧 [sx*k, sy*k, lw*k, lh*k]
+      //   是浮点屏幕坐标——相机高度/缩放变化时矩形小数部分漂移，GL 线性采样在
+      //   边缘行插值到纹理夹持边 → 整屏宽 1px 错位行（必须特定高度/缩放复现，
+      //   用户截图43 横贯机器+墙+背景）。改用与 chunk/动态层完全同源的取整
+      //   表达式（oxW+round((世界坐标-camRX)*zz)）——光照矩形与世界内容像素
+      //   级配准且恒整数，边缘行不再跨界采样；光照渐变本身不受影响。
+      const zzL = z * k;
+      const camRXl = Math.round(cam.x * z) / z;
+      const camRYl = Math.round(cam.y * z) / z;
+      const oxW = Math.round(this._worldLowW / 2), oyW = Math.round(this._worldLowH / 2);
+      const lx0 = oxW + Math.round((tx0 * ts - camRXl) * zzL);
+      const ly0 = oyW + Math.round((ty0 * ts - camRYl) * zzL);
+      const lx1 = oxW + Math.round(((tx0 + tilesX) * ts - camRXl) * zzL);
+      const ly1 = oyW + Math.round(((ty0 + tilesY) * ts - camRYl) * zzL);
+      void lw; void lh; void sx; void sy;
+      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0])) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/

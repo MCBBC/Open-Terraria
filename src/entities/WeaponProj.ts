@@ -924,10 +924,15 @@ export class Boomerang extends Entity {
     // 原版 aiStyle3 支(:19627-19655):{33,106,866} 按轴全反射;其余 ai[0]=1 回收 +
     // 双轴从 lastVelocity 全反(383 豁免)。此前旗标口径撤销。
     const chX = body.vx !== lvx, chY = body.vy !== lvy;
+    // ★世界边缘特判(P.cs:18009-18011,仅 aiStyle3 有):出界格线即使速度未被改
+    // 也计为接触——默认族将在地图边缘被回收而不是飞出世界
+    const stB = game.world.store;
+    const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
+      || this.y <= 0 || this.y + this.h >= stB.h * TILE;
     this.x = body.x; this.y = body.y;
     this.vx = lvx; this.vy = lvy;
     const hitX = chX, hitY = chY;
-    if (!hitX && !hitY) return;
+    if (!hitX && !hitY && !offWorldEdge) return;
     if (WALL_BOUNCE_PROJ.has(this.projId)) {
       // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
       game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
@@ -4432,10 +4437,8 @@ export class GlowstickProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.timeLeft <= 0) { this.dead = true; return; }
     const st = game.world.store;
-    const solidAt = (px: number, py: number) => {
-      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
-    };
+    // (旧 solidAt 点采样助手已随管线化退役——53 粘性/主移动/妖精斥力各自改走
+    //  正典管线或显式 nactive 扫描)
     if (this.fairy) {
       // AI_170_FairyGlowstick（cs:42997-43053）：排斥场 + 衰减
       this.fairyT++;

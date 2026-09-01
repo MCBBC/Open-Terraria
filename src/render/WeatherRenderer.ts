@@ -6,6 +6,7 @@
 // tile 层后）。光照着色由调用方注入 lightAt 回调（LightingEngine.lightAt 同源）。
 import { loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
+import { TileStore } from '../world/TileStore';
 import type { World } from '../world/World';
 import { gfxQuality } from '../core/GfxQuality';
 import type { Camera } from './Camera';
@@ -99,6 +100,31 @@ export function dustWaterFor(waterStyle: number): number {
     case 12: return 288;
     default: return 33;
   }
+}
+
+/** Collision.SolidCollision（Collision.cs:2713-2746,2 参版）1:1：盒对实心格 AABB 扫描。
+ *  ★斜坡按【整格】算（SolidCollision 无斜面削减——沙坡照样挡尘）、半砖下缩 8px、
+ *  平台（tileSolidTop 族 solid:false）不算、已致动（inActive）不算。
+ *  根因（2026-09-01 用户报"沙尘有几率穿透斜方块进屋"）：曾只测中心点所在单格——
+ *  斜坡对角几何中心点常擦空,且 268 空中 vx ~28px/tick 且每拍 ×1.005 累乘,单点门
+ *  被整列穿越。原版语义 = 粒 10×10 盒（position−(5,5) 起）与实心格重叠即命中 */
+export function solidCollisionBox(st: TileStore, px: number, py: number, w: number, h: number): boolean {
+  const x0 = Math.max(0, Math.min(Math.floor(px / TILE) - 1, st.w - 1));
+  const x1 = Math.max(0, Math.min(Math.floor((px + w) / TILE) + 2, st.w - 1));
+  const y0 = Math.max(0, Math.min(Math.floor(py / TILE) - 1, st.h - 40));
+  const y1 = Math.max(0, Math.min(Math.floor((py + h) / TILE) + 2, st.h - 40));
+  for (let i = x0; i < x1; i++) {
+    for (let j = y0; j < y1; j++) {
+      const idx = st.idx(i, j);
+      if (st.flags[idx] === 0) continue;                        // !active
+      if (st.wire[idx] & TileStore.WIRE_ACTUATED) continue;     // inActive（已致动不碰撞）
+      if (TileStore.SOLID_LUT[st.type[idx]] !== 1) continue;    // tileSolid && !tileSolidTop
+      let cy = j * TILE, ch = TILE;
+      if (st.half[idx]) { cy += 8; ch = 8; }                    // halfBrick :2735-2738
+      if (px + w > i * TILE && px < i * TILE + TILE && py + h > cy && py < cy + ch) return true;
+    }
+  }
+  return false;
 }
 
 let dustTex: ImageBitmap | HTMLImageElement | null = null;
@@ -245,29 +271,44 @@ export class WeatherRenderer {
       // 玩家下落跟随（:1815-1819）：vy 向玩家 vy 靠 + 位相补偿
       if (playerVy > 0 && f.vy < playerVy) f.vy += (playerVy - f.vy) * 0.04;
       if (playerVy > 0) f.y += playerVy * 0.2;
-      const fx = Math.floor((f.x + 5) / TILE), fy = Math.floor((f.y + 5) / TILE);
-      const solidHere = st.inBounds(fx, fy) && st.isSolid(fx, fy);
-      if (solidHere) { f.scale *= 0.9; f.vx *= 0.25; f.vy *= 0.25; }  // 落地（:1821-1824）
+      if (solidCollisionBox(st, f.x - 5, f.y - 5, 10, 10)) {   // :1823-1827 SolidCollision 10×10 盒
+        f.scale *= 0.9; f.vx *= 0.25; f.vy *= 0.25;
+      }
       if (--f.life <= 0 || f.scale < 0.3 || f.y > camBottom) f.active = false;
       if (f.active) snowLive.push(f);
     }
-    // ---- 沙尘 grain 更新（Dust.cs 主线 + 268 分支 :1854-1875 + 通用死亡 :446/:2387/:2434）----
+    // ---- 沙尘 grain 更新（Dust.cs 268 独占链 :1859-1887 + :469 移动 + :2148 老化
+    //      + :445/:2387/:2432 死亡）。268 为链 A 链接：不吃 :1884 通用重力，空中 vy 由
+    //      else 支整拍重置 = sin(x×0.0044)×2+3 波动下坠；老化 −0.01 与链内 +0.01 对冲
+    //      → scale 恒定，寿命由屏底/实心收缩/黑光（绘制端 :39730）决定。
+    //      ★曾漏 else 支误加 +0.05 通用重力、实心判定用中心点单格（穿斜坡进屋）、
+    //      先测后移时序差一拍、屏外横漂粒不回收泄漏发射预算——2026-09-01 全修）----
     const sandBottom = camY + viewH;
     for (const g of this.sand) {
       if (!g.active) continue;
-      g.vy += 0.05;                                        // 默认尘重力（:721-724）
-      g.vx *= 1.0050251; g.vy *= 1.0050251;                // :1857
-      g.scale += 0.01;                                     // :1858
-      if (!hooks.sandstormVisuals) g.scale -= 0.05;        // !flag 档（:1859-1861）
-      if (g.fadeIn > 0 && g.scale > g.fadeIn) g.fadeIn = 0;   // :2148-2168（268 恒瞬时清）
-      if (playerVy > 0 && g.fadeIn === 0 && g.vy < playerVy) g.vy += (playerVy - g.vy) * 0.04;  // :1811-1816
-      if (playerVy > 0 && g.fadeIn === 0) g.y += playerVy * 0.2;                               // :1817-1819
-      const gx = Math.floor((g.x + 5) / TILE), gy = Math.floor((g.y + 5) / TILE);
-      if (g.fadeIn === 0 && st.inBounds(gx, gy) && st.isSolid(gx, gy)) {   // :1821-1825 落地
-        g.scale *= 0.9; g.vx *= 0.25; g.vy *= 0.25;
+      if (g.scale > 10) { g.active = false; continue; }        // :445
+      g.x += g.vx; g.y += g.vy;                                // :469 position += velocity（先移后测）
+      g.vx *= 1.0050251; g.vy *= 1.0050251;                    // :1862
+      g.scale += 0.01;                                         // :1863
+      if (!hooks.sandstormVisuals) g.scale -= 0.05;            // :1864-1867
+      const pvy = playerVy;                                    // :1869 Main.player.velocity.Y
+      if (pvy > 0 && g.fadeIn === 0 && g.vy < pvy) g.vy += (pvy - g.vy) * 0.04;  // :1870-1873
+      if (pvy > 0) g.y += pvy * 0.2;                           // :1874-1877
+      if (g.fadeIn === 0 && solidCollisionBox(st, g.x - 5, g.y - 5, 10, 10)) {
+        g.scale *= 0.9; g.vx *= 0.25; g.vy *= 0.25;            // :1878-1882 实心收缩
+      } else {
+        g.vy = Math.sin(g.x * 0.0043982295) * 2 + 3;           // :1883-1887 空中波动下坠
       }
-      g.x += g.vx; g.y += g.vy;
-      if (g.scale > 10 || g.y > sandBottom || g.scale < 0.1) g.active = false;
+      if (g.fadeIn > 0 && g.fadeIn < 100) {                    // :2148-2162 生长目标档
+        g.scale += 0.03;
+        if (g.scale > g.fadeIn) g.fadeIn = 0;
+      } else {
+        g.scale -= 0.01;                                       // :2163-2168（与链内 +0.01 对冲净零）
+      }
+      // :2387 屏底 + :2432 缩没 + DrawDust 剔除矩形（:38268-38284 ±1000/±1050,原版逐帧
+      // 执行——屏外横漂粒不回收会吃光 num9 发射预算）
+      if (g.y > sandBottom || g.scale < 0.1
+        || g.x < camX - 1000 || g.x > camX + viewW + 1000 || g.y < camY - 1050) g.active = false;
     }
     this.emitSandstorm(world, viewW, viewH, camX, camY);
   }

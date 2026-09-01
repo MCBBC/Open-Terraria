@@ -6,7 +6,7 @@
 //   ③ 雨溅花尘映射 dustWater()（Dust.cs:405-421）；
 //   ④ 落叶 SpriteFrame(32,8) CurrentColumn = 树格油漆（TileDrawing:8027）。
 // 全部纯函数/池驱动，无 DOM 依赖。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { dustFrameOf } from '../src/fx/VanillaDust';
 import { dustWaterFor, WeatherRenderer } from '../src/render/WeatherRenderer';
 import { natureParticles, LEAF_GORES } from '../src/render/NatureParticles';
@@ -121,5 +121,110 @@ describe('spawnLeaf CurrentColumn（TileDrawing:8027）', () => {
     expect(natureParticles.leaves.length).toBe(n0);
     expect(LEAF_GORES.has(910)).toBe(true);
     expect(LEAF_GORES.has(706)).toBe(false);
+  });
+});
+
+// ---------- ⑤ SolidCollision 盒测（Collision.cs:2713-2746；斜坡穿沙定谳回归） ----------
+import { solidCollisionBox } from '../src/render/WeatherRenderer';
+import { TILE } from '../src/core/constants';
+import { TileStore } from '../src/world/TileStore';
+
+/** 迷你 TileStore 桩（solidCollisionBox 只摸 w/h/idx/flags/wire/type/half） */
+function fakeStore(cells: Record<string, { type: number; half?: boolean; actuated?: boolean }>) {
+  const w = 32, h = 128;
+  const type = new Uint16Array(w * h);
+  const flags = new Uint8Array(w * h);
+  const wire = new Uint8Array(w * h);
+  const half = new Uint8Array(w * h);
+  flags.fill(1); // active 全 1（空气=type 0 不实心即可）
+  for (const [k, c] of Object.entries(cells)) {
+    const [x, y] = k.split(',').map(Number);
+    const i = y * w + x;
+    type[i] = c.type;
+    half[i] = c.half ? 1 : 0;
+    wire[i] = c.actuated ? 32 : 0;
+  }
+  return {
+    w, h, type, flags, wire, half,
+    wall: new Uint16Array(w * h),
+    liquid: new Uint8Array(w * h),
+    liquidType: new Uint8Array(w * h),
+    idx: (x: number, y: number) => y * w + x,
+    inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
+  } as never;
+}
+const SAND = 53;   // 内部 id 占位——LUT 位在 describe 内临时注入（SOLID_LUT 是运行时可变 Uint8Array）
+
+describe('solidCollisionBox（Collision.cs:2713 斜坡穿沙回归）', () => {
+  const realLut = Number(TileStore.SOLID_LUT[SAND]);
+  beforeAll(() => { TileStore.SOLID_LUT[SAND] = 1; });
+  afterAll(() => { TileStore.SOLID_LUT[SAND] = realLut; });
+
+  it('中心点在空气中、10×10 盒搭到斜坡沙格 → 命中（旧单点门=穿墙根因）', () => {
+    const st = fakeStore({ [`${10},${10}`]: { type: SAND } });
+    // 盒 (px,py)=(10*16-9, 10*16-4)：盒右缘 x=10*16+1 搭进沙格,中心点 (px+5)=(151)∈格9 空气
+    const px = 10 * TILE - 9, py = 10 * TILE - 4;
+    expect(Math.floor((px + 5) / TILE)).toBe(9);          // 中心点格=空气（旧门漏判）
+    expect(solidCollisionBox(st, px, py, 10, 10)).toBe(true);
+  });
+
+  it('纯空气 → 不命中', () => {
+    const st = fakeStore({});
+    expect(solidCollisionBox(st, 5 * TILE, 5 * TILE, 10, 10)).toBe(false);
+  });
+
+  it('半砖：上半 8px 不命中、下半命中（Collision.cs:2735-2738）', () => {
+    const st = fakeStore({ '8,8': { type: SAND, half: true } });
+    // 半砖实心区 = [128+8, 128+16) = [136,144)。盒 y=118..128（py+h=128 < 136）不命中
+    expect(solidCollisionBox(st, 8 * TILE + 4, 8 * TILE - 10, 10, 10)).toBe(false);
+    // 盒 y=132..142（py+h=142 > 136）命中
+    expect(solidCollisionBox(st, 8 * TILE + 4, 8 * TILE + 4, 10, 10)).toBe(true);
+  });
+
+  it('已致动实心格不算（inActive :2725）', () => {
+    const st = fakeStore({ '6,6': { type: SAND, actuated: true } });
+    expect(solidCollisionBox(st, 6 * TILE + 4, 6 * TILE + 4, 10, 10)).toBe(false);
+  });
+});
+
+// ---------- ⑥ dust 268 独占链物理（Dust.cs:1859-1887） ----------
+describe('沙尘 grain 268 链（空中波动支/实心收缩支）', () => {
+  interface G268 { x: number; y: number; vx: number; vy: number; scale: number; fadeIn: number; active: boolean }
+  const poolOf = (wr: WeatherRenderer) => (wr as unknown as { sand: G268[] }).sand;
+  const fakeWeather = { sandstorm: { happening: true, severity: 0.8, timeLeft: 100, intendedSeverity: 0.8 }, cloudAlpha: 0, windSpeedCurrent: 1, raining: false } as never;
+  const hooks = {
+    lightAt: () => [255, 255, 255] as [number, number, number],
+    atmo: 1, snowRatio: 0, snowTileCount: 0, bossDanger: false,
+    waterStyle: 0, shimmerAlpha: 0,
+    splashDust() {}, sandstormVisuals: true, desertSandTiles: 500,
+    sandColors: () => [{ color: '#C8A014', weight: 10 }],
+  };
+  const grain = (over: Partial<Record<string, number | boolean>> = {}) => ({
+    x: 1000, y: 1000, vx: 10, vy: 1, scale: 0.9, fadeIn: 0,
+    cr: 200, cg: 160, cb: 20, frame: 0, active: true, ...over,
+  } as never);
+  const fakeWorld = (st: unknown) => ({ store: st, w: 32, h: 128 }) as never;
+
+  it('空中拍：vy 被整拍重置为 sin(x×0.0044)×2+3（else 支 :1883-1887,非累加重力）', () => {
+    const wr = new WeatherRenderer();
+    wr.attach(fakeWeather, hooks as never);
+    poolOf(wr).push(grain());
+    wr.update(fakeWorld(fakeStore({})), 800, 600, 0, 0, 0, 0);
+    const g = poolOf(wr)[0];
+    expect(g.vy).toBeCloseTo(Math.sin(g.x * 0.0043982295) * 2 + 3, 5);
+    expect(g.vx).toBeCloseTo(10 * 1.0050251, 6);          // :1862 累乘一次
+    expect(g.scale).toBeCloseTo(0.9 + 0.01 - 0.01, 6);    // :1863 +0.01 与老化 :2163 −0.01 对冲
+  });
+
+  it('实心拍：scale×0.9、速度×0.25,不进 else 支（:1878-1882）', () => {
+    const wr = new WeatherRenderer();
+    wr.attach(fakeWeather, hooks as never);
+    // 粒落点 10*16=160 附近,沙格 (10,10) 整格实心
+    poolOf(wr).push(grain({ x: 10 * TILE + 4, y: 10 * TILE + 4 }));
+    wr.update(fakeWorld(fakeStore({ '10,10': { type: SAND } })), 800, 600, 0, 0, 0, 0);
+    const g = poolOf(wr)[0];
+    // 时序：+0.01（:1863）在收缩前 → (0.9+0.01)×0.9 −0.01（老化）
+    expect(g.scale).toBeCloseTo((0.9 + 0.01) * 0.9 - 0.01, 5);
+    expect(Math.abs(g.vx)).toBeCloseTo(Math.abs(10 * 1.0050251 * 0.25), 5);
   });
 });

@@ -250,15 +250,17 @@ describe('δB B13 BestReforge 顶级词缀发光（Main.ReforgeItemInReforgeSlot
     const prefixMod = await vi.importActual<typeof import('../src/data/vanillaPrefixes')>(
       '../src/data/vanillaPrefixes');
     const { ITEM_BY_KEY, ITEM_DEFS } = await import('../src/data/items');
-    // vid 推导与 Game.doReforge 同式（多数原版物品走 vi_<id> 键名反解）
-    const derVid = (k: string): number => {
-      const v = (ITEM_DEFS as Record<string, never>)[k];
-      return ((v as unknown as { vid?: number })?.vid)
-        ?? (k.startsWith('vi_') ? parseInt(k.slice(3), 10) : -1);
+    // vid 推导与 Game.doReforge 同式（vid 缺省时走 vi_<id> 键名反解）
+    const derVid = (k: string, idx: number): number => {
+      const d = (ITEM_DEFS as unknown as Record<number, { vid?: number; key?: string } | undefined>)[idx];
+      return d?.vid
+        ?? (d?.key && d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     };
     let picked = { id: 0, vid: -1, pool: [] as number[], top: 0, bestMul: 0 };
-    for (const [key, id] of Object.entries(ITEM_BY_KEY)) {
-      const vid = derVid(key);
+    for (const [key, idRaw] of Object.entries(ITEM_BY_KEY)) {
+      const id = Number(idRaw);
+      if (!Number.isFinite(id)) continue;
+      const vid = derVid(key, id);
       if (!Number.isFinite(vid) || vid <= 0) continue;
       const pool = prefixMod.rollablePrefixes(vid, false);
       if (!pool || pool.length < 3) continue;

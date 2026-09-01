@@ -30772,6 +30772,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     color: { r: number; g: number; b: number; a: number } | null = null,
     scale = 1, noGravity = false, perfect = false,
   ): import('../fx/VanillaDust').VDust | null {
+    // vanillaDust 缺省（测试 Object.create 桩/池未实例化）→ 契约"缺省=静默丢弃"
+    if (!this.vanillaDust) return null;
     const d = this.vanillaDust.spawn(x, y, w, h, type, speedX, speedY, alpha,
       color as import('../fx/VanillaDust').DustColor | null, scale,
       perfect ? { perfect: true } : undefined);

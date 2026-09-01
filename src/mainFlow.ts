@@ -176,8 +176,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const g = game;
     if (!g) return;
     const cid = charContextId();
-    const cs = cid != null ? await charStore.getState(cid) : null;
-    const app = cs ?? selectedAppearance ?? null;
+    // ★外观(皮肤变体/发型)持久在 Appearance JSON(charStore.get)——getState 返回的
+    //  随身物品态没有这两个字段（2026-08-28 编译错）
+    const app = (cid != null ? await charStore.get(cid) : null) ?? selectedAppearance ?? null;
     await g.ensureAppearanceFiles(app);
   }
 
@@ -390,6 +391,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
     await startAssetPrewarm();
     const g = makeGame();
+    await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label ?? ''), p));   // label=undefined（粘滞文案）仅此合成探针路径，直收窄空串
   }
 

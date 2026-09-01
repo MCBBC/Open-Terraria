@@ -19,8 +19,10 @@ import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
 // （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
-import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds } from './DungeonStyles1457';
+import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle } from './DungeonStyles1457';
 import type { PotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII93b 双座 pb 面
+// ★IIIII105b：风格家具 item 表（ItemID.Sets.DerivedPlacementDetails 提取域）
+import { ITEM_PLACE } from './DungeonStyleItems';
 // ★LLL 批（2026-08-25）：placeTrap0 补 noTraps 巨石非实心窗（WorldGen.SetBoulderSolidity
 //   经 GenSolid 全局表翻转,dgSolid/genSolidType 即见）——与 TrapsPass 同源单实现。
 import { setBoulderSolidity } from './TrapsPass';
@@ -4053,6 +4055,8 @@ const snap: SnapFn = (name) => {
     // tools/_gggreplay.test.ts 对拍注记）——B 尾 -3 掷定位用，常态零开销。
     const bsEvG = (globalThis as { __bsEv?: unknown[][] }).__bsEv;
     let ncount = 0, num3 = 0;
+    // ★IIIII105b：Bookshelves 自己的 minimumWaterCandles（Bookshelves.cs:33-42，非共享 ref）
+    const bkMinWC = { v: gfStyles.length > 0 ? (worldSizeIdx() === 0 ? 5 : worldSizeIdx() === 1 ? 10 : 15) : -1 };
     while (num3 < Math.trunc(w / 20)) {
       ncount++;
       let k0 = 0;
@@ -4073,7 +4077,10 @@ const snap: SnapFn = (name) => {
         y = dyv;
       }
       let flag = true;
-      if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
+      // ★IIIII105b：Books 座面化（逐族分步 #1）——IsConsideredDungeonWall/Tile 的
+      // per-seat 全集（DungeonUtils.cs:1929-1950/:1844-1869 genVars 克隆合并族）；
+      // 普通世界 gfStyles 空 ⇒ 与旧 isDW/isDT 逐位同径零扰动。
+      if (gfIsBkDW(wallAt(x, y)) && actAt(x, y) === 0) {
         const iC = ((globalThis as unknown as { __swLastRollIdx?: number }).__swLastRollIdx ?? 0) + 1;
         const d98c = rn(2);
         if (I110bs) emitBS(`bsDi|${num3},${ncount}|${d98c} m=${dgMainRolls} i=${iC}`);
@@ -4081,12 +4088,13 @@ const snap: SnapFn = (name) => {
         while (flag && inW(x, y, 0) && actAt(x, y) === 0) {
           x -= n7;
           if (x < 5 || x > w - 5) flag = false;
-          else if (actAt(x, y) !== 0 && !isDT(typAt(x, y))) flag = false;
+          else if (actAt(x, y) !== 0 && !gfIsBkDT(typAt(x, y))) flag = false;   // IIII105b
         }
         emitBS(`bsS|${num3},${ncount}|${x},${y} fl=${flag ? 1 : 0}`);
-        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && isDT(typAt(x, y))
-          && actAt(x, y - 1) !== 0 && isDT(typAt(x, y - 1))
-          && actAt(x, y + 1) !== 0 && isDT(typAt(x, y + 1))) {
+        // ★IIIII105b：三锚格 tile 谓词座面化（gfIsBkDT；普通世界恒同 isDT）
+        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && gfIsBkDT(typAt(x, y))
+          && actAt(x, y - 1) !== 0 && gfIsBkDT(typAt(x, y - 1))
+          && actAt(x, y + 1) !== 0 && gfIsBkDT(typAt(x, y + 1))) {
           x += n7;
           emitBS(`bsA|${num3},${ncount}|${x},${y}`);
           outer4:
@@ -4105,7 +4113,7 @@ const snap: SnapFn = (name) => {
             const num8 = x;
             while (k > bounds.L && k < bounds.R && actAt(k, y) === 0 && actAt(k, y - 1) === 0 && actAt(k, y + 1) === 0) k += n7;
             k = Math.abs(x - k);
-            const flag3 = rn(2) === 0;
+            let flag3 = rn(2) === 0;
             if (k > 5) {
               // ★III 批 2026-08-18：styleForWall 四件套（DungeonGlobalBookshelves.cs:96-110）。
               //   普通世界样式表=[Default]（SetupDungeonGenVarVariables 仅 dualDungeons
@@ -4116,10 +4124,25 @@ const snap: SnapFn = (name) => {
               //   真根因=pre-pit 布局债（见 caves-oracle.cs 头注 III 批取证）。
               let flag2 = true;
               let num9 = -1, min = 1, max = 4;
-              if (wallAt(x, y) === wall) {
-                flag2 = true;                       // Default.Style == 0（!flag2 时 flag3 已在上文置 false——特殊房间才可能）
-                num9 = -1;                           // PlatformItemTypes 空 → -1，不掷
-                // GetBookshelfMinMaxSizes 基类实现 → (1, 4)（LivingWood 覆写 (3,7) 仅 dual/remix）
+              // ★IIIII105b（逐族分步 #1 续）：GetStyleForWall 四件套座面化。
+              //   普通世界（gfStyles 空）保持原状：wall==brickWallType→Default(0)。
+              //   dual 座面（DungeonGlobalBookshelves.cs:96-110 原文序）：
+              //     flag2=Style==0；!flag2 ⇒ flag3=false；GetPlatformStyle 掷
+              //     Next(len)→DerivedPlacementDetails.tileStyle；minmax=覆写/缺省。
+              const _bksFW = gfStyles.length > 0 ? gfStyleForWall(wallAt(x, y))
+                : (wallAt(x, y) === wall ? { Style: 0 } as import('./DungeonStyles1457').DungeonStyleData : null);
+              if (_bksFW !== null) {
+                flag2 = _bksFW.Style === 0;
+                if (!flag2) flag3 = false;
+                const bPlat = _bksFW.PlatformItemTypes ?? [];
+                if (_bksFW.Style === 0 || bPlat.length === 0) num9 = -1;
+                else {
+                  const pv = ITEM_PLACE[bPlat[rn(bPlat.length)]!];
+                  num9 = pv ? pv.s ?? -1 : -1;
+                }
+                const mmBk = _bksFW.BookshelfMinMaxOverride;
+                min = mmBk ? mmBk[0]! : 1;
+                max = mmBk ? mmBk[1]! : 4;
               }
               void num9;
               const cnt98 = ri(min, max - 1);        // ri 闭区间 ↔ Next(min, max)（IIIII98c 捕获名）
@@ -4136,7 +4159,9 @@ const snap: SnapFn = (name) => {
                 //   GetPlatformStyle 对 Default 样式恒 -1 不覆写）——曾误用
                 //   platformStyle(6/8/7，那是 dgPlatforms 平台件的样式)。
                 const swl = wallAt(x, y);
-                const shelfStyle = swl === wallVariants[1] ? shelf[1] : swl === wallVariants[2] ? shelf[2] : shelf[0];
+                // ★IIIII105b：num9>-1 ⇒ GetPlatformStyle 覆写 shelfStyles（cs:131 num11=num9）
+                let shelfStyle = swl === wallVariants[1] ? shelf[1] : swl === wallVariants[2] ? shelf[2] : shelf[0];
+                if (num9 > -1) shelfStyle = num9;
                 st.frameY[st.idx(x, y)] = 18 * shelfStyle;
                 if (flag3) {
                   placeOnTableD(x, y - 1, BOOKS);   // ★平台19 ∈ tileTable
@@ -4157,11 +4182,18 @@ const snap: SnapFn = (name) => {
               if (!flag3 && rn(2) === 0) {
                 x = num8; y--;
                 // flag2 门（cs:148-196）：true → Next(4) 选 13/49；false → 直放 13（少 1 掷）。
-                //   普通世界 flag2 恒 true；dual/remix 特殊房间（LivingWood 等）才有 false 支。
-                const n12v = flag2 ? (rn(4) === 0 ? 49 : 13) : 13;
+                //   ★IIIII105b：dual 座 minimumWaterCandles>0 ⇒ num12 强制 =1（=49，cs:169-171）；
+                //   本座计数器 bookMinWC 特性内自持（Bookshelves.cs:33-42 新开 ref 非 Furniture 共享）。
+                let n12v: number;
+                if (flag2) {
+                  if (gfStyles.length > 0 && bkMinWC.v > 0) n12v = 49;
+                  else n12v = rn(4) === 0 ? 49 : 13;
+                } else n12v = 13;
                 // v_13_placed_bottles（sheet 13）——曾误写 'v_13_bottles'（不存在的键）：
                 // undefined 被 Uint16Array 吞成 type 0，且下行 frameX 掷骰恒不触发（流欠耗）。
-                placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_placed_bottles']!);
+                const bkPlaced = placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_placed_bottles']!);
+                if (gfStyles.length > 0 && bkMinWC.v > 0 && bkPlaced
+                  && inW(x, y, 0) && typAt(x, y) === WATER_CANDLE) bkMinWC.v--;   // cs:184-186
                 if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);
               }
             }
@@ -4938,6 +4970,401 @@ const snap: SnapFn = (name) => {
     }
   }
   const dgTileOfSheet = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;  // （DG_ITEM_TILE 已源头换算后无内部消费者,留作家具重构期过渡）
+  // ============ ★IIIII105b DungeonGlobalGroundFurniture —— DualDungeons 分派 ============
+  // 裁决源 Terarria1458/Terraria.GameContent.Generation.Dungeon.Features/
+  //   DungeonGlobalGroundFurniture.cs：分派 GenerateFeature:22-31（Type==DualDungeon →
+  //   GroundFurniture_DualDungeons :34-185；else legacy GroundFurniture :187-253=上方
+  //   dgFurniture 已认证体）。本段=d1/d0 双座分派全函数 + ActuallyGenerateFurniture
+  //   (:255-861) 的 dual 全参体（legacy 体上方 dgFurnAt 保留七链金标零扰动）。
+  // 关键语义（与本仓静态表差异）：
+  //   · IsConsideredDungeonWall（DU.cs:1929-1950）＝Main.wallDungeon{7,8,9,94-99} ∪
+  //     **CurrentDungeonGenVars.isDungeonWall**（per-seat styles 扩张：Snow71/Desert187/
+  //     Hallow28/Temple87+ExtraWallTypes40/216/223 等，DC.cs:147-185 克隆合并族）——
+  //     d1 房间内恒可命中候选（x86 box-snapshot 序列 046_dg_dungeonF 实证 w71 空格上
+  //     workbench/piano/sofa 入场），旧 JS isDW 静态集为 F 相样本爆炸根源。
+  //   · alch/bew 清零臂(:41-53)：genVars.dungeonGenerationStyles 无 Style==0 ⇒ 清零——
+  //     seat1=[Snow2,Desert3,Hallow6,Temple10] 恒无 ⇒ d1 双计数恒 0/0；
+  //     seat0 含 Default0(主题砖座) ⇒ (int)((1f+(int)(w/4200))*scalar)=int(2*6.55)=13/13。
+  //   · minimumWaterCandles(:54-63)：GetWorldSize()==maxTilesX<=4200→**0**→5
+  //     （switch{1=>10,2=>15,_=>5}；本世界 W=4200 ⇒ 5。批注勘误"10"不成立）。
+  //   · halls 臂(:126-183)：Bounds 框、count=GetFurnitureCount(6)、第二尝试 strict:true+
+  //     noRegularFurnitureAreaChecks:true（noReg 尺寸全表 :440-507 + num22=num19 :549-555 +
+  //     area-check active 中止门关闭 :529-535 + bew 支 :566-573 原文同构）。
+
+  type GFSeatFeat = NonNullable<import('./DungeonDualLayout').DualLayoutResult['featRooms']>;
+  interface GFItemRef { v: number }
+  let dgFurnDualResult: '' | 'alch' | 'bew' | 'ok' = '';
+  /** per-seat 特征载荷与 climb 大厅基线（runDualDungeonLayout 返回后装配） */
+  const gfFeatRooms: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
+  const gfFeatHalls: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
+  let gfFeatScalar = 1.0;
+  let gfStyles: import('./DungeonStyles1457').DungeonStyleData[] = [];
+  const _I132M = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I132_MARK;
+  const emit132 = (ln: string): void => {
+    if (!_I132M) return;
+    ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`${ln}|rc=${dgMainRolls}`);
+  };
+  /** WorldGen.SolidTileAllowBottomSlope（WorldGen.cs:70706-70730）——FirstSolid 下扫谓词。
+   *  平台集合=TileID.Sets.Platforms={19}（生成域内其余平台型皆不入该 Set）。 */
+  const _GF_PLATS = new Set<number>([19]);
+  const solidAllowBottomDg = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const ti = st.idx(x, y);
+    if (!(st.flags[ti] & 1)) return false;
+    if ((st.wire[ti] >>> 5) & 1) return false;
+    const sheet = TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
+    const def = TILE_DEFS[st.type[ti]];
+    if (!def || !(genSolidType(st.type[ti]) || def.vanilla?.solidTop === true)) return false;
+    const slope = st.slope[ti];
+    if ((slope === 1 || slope === 2)) {                 // topSlope → 平台 properTopFrame 例外
+      if (!_GF_PLATS.has(sheet) || st.half[ti] === 0) return false;
+      return true;
+    }
+    return st.half[ti] === 0;
+  };
+  /** GetStyleForWall（DungeonGenerationStyles.cs:745-764）：style0 ∧ Main.wallDungeon；
+   *  其余档 WallIsInStyle(includeWindows:false, includeExtras:true)；递归 SubStyles 一层。 */
+  const gfStyleForWall = (wallType: number): import('./DungeonStyles1457').DungeonStyleData | null => {
+    for (const style of gfStyles) {
+      if (style.Style === 0 && wallType >= 0 && DG_DUNGEON_WALLS.has(wallType)) return style;
+      if (wallIsInStyle(style, wallType, false, true)) return style;
+      if (style.SubStyles !== undefined && style.SubStyles.length > 0) {
+        for (const sub of style.SubStyles) if (wallIsInStyle(sub, wallType, false, true)) return sub;
+      }
+    }
+    return null;
+  };
+  /** GroundFurniture_GetFurnitureItem（cs:863-874）：null→-1 不掷；空表∨Style==0→default；
+   *  否则 items[Next(len)]（恰一掷）。 */
+  const gfGetItem = (
+    styleData: import('./DungeonStyles1457').DungeonStyleData,
+    defaultItem: number, items: readonly number[] | null,
+  ): number => {
+    if (items === null) return -1;
+    if (items.length === 0 || styleData.Style === 0) return defaultItem;
+    return items[rn(items.length)]!;
+  };
+  // noRegularFurnitureAreaChecks 尺寸全表（cs:466-509）×常规表（cs:375-439）
+  const _G19 = [5, 4, 3, 4, 3, 5, 5, 5, 5, 5, 2, 3, 2];
+  const _G20 = [4, 3, 5, 6, 3, 3, 4, 4, 4, 3, 4, 3, 5];
+  const _GN19R = [3, 2, 3, 3, 1, 4, 4, 4, 4, 4, 1, 2, 2];
+  const _GN20R = [4, 3, 5, 6, 3, 4, 4, 4, 4, 3, 4, 3, 5];
+  const ipOf = (item: number): { t: number; s: number } => {
+    const rec = ITEM_PLACE[item];
+    return { t: rec ? TILE_INTERNAL_BY_SHEET.get(rec.t) ?? -1 : -1, s: rec?.s ?? 0 };
+  };
+  /**
+   * GroundFurniture_ActuallyGenerateFurniture（cs:255-861）dual 全参体。
+   * refs.alch/bew/minWC 以 holder 模拟 C# ref（tmp 零计数支原文共享同一变量，但在
+   * num21 门处必双双为零 ⇒ 两独立零值行为等价）；minWC 恒共享同一 ref。
+   */
+  function gfDActual(
+    i: number, j: number, wallType: number,
+    refs: { alch: GFItemRef; bew: GFItemRef; minWC: GFItemRef },
+    stricterSpecialCheck: boolean, noReg: boolean,
+  ): boolean {
+    dgFurnDualResult = '';
+    let num = i, k = i;
+    while (inW(num, j, 0) && actAt(num, j) === 0 && dgSolidFT(num, j + 1)) num--;   // :259-262（左沿）
+    num++;
+    while (inW(k, j, 0) && actAt(k, j) === 0 && dgSolidFT(k, j + 1)) k++;            // :264-266（右沿）
+    k--;
+    const num2 = k - num, num3 = Math.trunc((k + num) / 2);                          // :268-269
+    emit132(`MARK|dg_fs ${i},${j} n=${num} k=${k} n2=${num2} n3=${num3} alch=${refs.alch.v} bew=${refs.bew.v}`);
+    if (!featOK(num3, j, 0)) return false;                        // data.CanGenerateFeatureAt(this,num3,j) :270
+    // :274 候选门（active∨dungeon-wall∨下格实心∨下格 spike 簇四连判——wall=per-seat IsConsideredDungeonWall）
+    if (!(inW(num3, j, 0) && actAt(num3, j) === 0 && gfIsDW(wallAt(num3, j))
+      && dgSolidFT(num3, j + 1) && typAt(num3, j + 1) !== SPIKE)) {
+      emit132(`MARK|dg_fc CR ${num3},${j}`); return false;
+    }
+    // :276-289 默认族基值（switch(wallType)：default=蓝蓝蓝…、case 8=绿、case 9=粉）
+    let iChair = 1396, iTable = 1397, iWork = 1398, iCandle = 1405, iVase = 1408;
+    let iBook = 1414, iBed = 1470, iPiano = 2376, iDress = 2386, iSofa = 2402;
+    let iTub = 2658, iCand = 2664, iLamp = 2645, iClock = 3900;
+    if (wallType === 8) {
+      iChair = 1399; iTable = 1400; iWork = 1401; iCandle = 1406; iVase = 1409;
+      iBook = 1415; iBed = 1471; iPiano = 2377; iDress = 2387; iSofa = 2403;
+      iTub = 2659; iCand = 2665; iLamp = 2646; iClock = 3901;
+    } else if (wallType === 9) {
+      iChair = 1402; iTable = 1403; iWork = 1404; iCandle = 1407; iVase = 1410;
+      iBook = 1416; iBed = 1472; iPiano = 2378; iDress = 2388; iSofa = 2404;
+      iTub = 2660; iCand = 2666; iLamp = 2647; iClock = 3902;
+    }
+    const cw2 = wallAt(num3, j);
+    if (cw2 >= 94 && cw2 <= 105) {                                // :325-341 GOTHIC 变体墙族
+      iChair = 1509; iTable = 1510; iWork = 1511; iCandle = 5743; iVase = -1; iBook = 1512;
+      iBed = 5740; iPiano = 5750; iDress = 5741; iSofa = 5753; iTub = 5739;
+      iCand = 5742; iLamp = 5748; iClock = 5746;
+    }
+    // :342-363 风格表替换（flag/flag2 语义 + 14 家族按原文顺序逐项 GetFurnitureItem）
+    let flag = true, flag2v = true;
+    const styleForWall = gfStyleForWall(cw2);
+    const FURNOFF = styleForWall?.Furn ?? null;
+    if (styleForWall !== null) {
+      flag = styleForWall.Style === 0;
+      flag2v = flag;
+      iTable = gfGetItem(styleForWall, iTable, FURNOFF ? FURNOFF.TableItemTypes : null);
+      iWork = gfGetItem(styleForWall, iWork, FURNOFF ? FURNOFF.WorkbenchItemTypes : null);
+      iCandle = gfGetItem(styleForWall, iCandle, FURNOFF ? FURNOFF.CandleItemTypes : null);
+      iVase = gfGetItem(styleForWall, iVase, FURNOFF ? FURNOFF.VaseOrStatueItemTypes : null);
+      iBook = gfGetItem(styleForWall, iBook, FURNOFF ? FURNOFF.BookcaseItemTypes : null);
+      iChair = gfGetItem(styleForWall, iChair, FURNOFF ? FURNOFF.ChairItemTypes : null);
+      iBed = gfGetItem(styleForWall, iBed, FURNOFF ? FURNOFF.BedItemTypes : null);
+      iPiano = gfGetItem(styleForWall, iPiano, FURNOFF ? FURNOFF.PianoItemTypes : null);
+      iDress = gfGetItem(styleForWall, iDress, FURNOFF ? FURNOFF.DresserItemTypes : null);
+      iSofa = gfGetItem(styleForWall, iSofa, FURNOFF ? FURNOFF.SofaItemTypes : null);
+      iTub = gfGetItem(styleForWall, iTub, FURNOFF ? FURNOFF.BathtubItemTypes : null);
+      iLamp = gfGetItem(styleForWall, iLamp, FURNOFF ? FURNOFF.LampItemTypes : null);
+      iCand = gfGetItem(styleForWall, iCand, FURNOFF ? FURNOFF.CandelabraItemTypes : null);
+      iClock = gfGetItem(styleForWall, iClock, FURNOFF ? FURNOFF.ClockItemTypes : null);
+    }
+    emit132(`MARK|dg_fw n3=${num3},${j} st=${styleForWall === null ? '-1' : String(styleForWall.Style)} n18=?`);
+    // :364-372 家具型抽奖（13 型 + 大件二次机会 + 空缺重抽环）
+    let num18 = rn(13);
+    if ((num18 === 10 || num18 === 11 || num18 === 12) && rn(4) !== 0) num18 = rn(13);
+    while ((num18 === 2 && iVase === -1) || (num18 === 5 && iBed === -1) || (num18 === 6 && iPiano === -1)
+      || (num18 === 7 && iDress === -1) || (num18 === 8 && iSofa === -1) || (num18 === 9 && iTub === -1)
+      || (num18 === 10 && iCand === -1) || (num18 === 11 && iLamp === -1) || (num18 === 12 && iClock === -1)) {
+      num18 = rn(13);
+    }
+    // :373-439 常规尺寸表 / :440-507 noReg 尺寸全表
+    let num19 = _G19[num18], num20 = _G20[num18];
+    if (noReg) {
+      num19 = _GN19R[num18];
+      num20 = _GN20R[num18];
+    }
+    // :508-542 特征区扫描（内 rect break 只跳内层；stricter 时 A/B 台邻域旗号）
+    let flag3 = false, flag4 = false;
+    const num21 = (refs.alch.v > 0 || refs.bew.v > 0) ? 15 : 0;
+    scanOuter:
+    for (let a = num3 - num19 - num21; a <= num3 + num19 + num21; a++) {
+      for (let b = j - num20 - num21; b <= j + num21; b++) {
+        if (!inW(a, b, 0)) continue;
+        if (a >= num3 - num19 && a <= num3 + num19 && b >= j - num20 && b <= j) {
+          if (!featOK(a, b, 0)) { flag3 = true; break; }         // CanGenerateFeatureAt 逐格门
+          if (!noReg && actAt(a, b) !== 0) { num18 = -1; break; }// noReg 时中止门关闭(:531)
+        }
+        if (stricterSpecialCheck && (refs.alch.v > 0 || refs.bew.v > 0)
+          && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) flag4 = true;
+      }
+    }
+    if (flag3) return false;
+    const widthMin = noReg ? num19 : num19 * 1.75;                // :547-555（noReg ⇒ num19）
+    if (num2 < widthMin) num18 = -1;
+    // :556-576 alch/bew 臂（stricterSpecialCheck 与 num18 无关照常受理）
+    if (!(flag4 && flag2v) && flag2v && (refs.alch.v > 0 || refs.bew.v > 0)) {
+      if (refs.alch.v > 0) {
+        if (place3x3D(num3, j, ALCHEMY)) { refs.alch.v--; dgFurnDualResult = 'alch'; return true; }
+      } else if (refs.bew.v > 0) {
+        if (place3x3D(num3, j, BEWITCH)) { refs.bew.v--; dgFurnDualResult = 'bew'; return true; }
+      }
+    }
+    const lightedAt = (x2: number, y2: number): boolean =>
+      inW(x2, y2, 0) ? TILE_LIGHTED_D.has(st.type[st.idx(x2, y2)]) : false;
+    /** candle 排池（cs:600-650 表支 / cs:637-649 非 Default 支） */
+    const candlePool = (
+      nFrom: number, nTo: number, rowOff: number,
+    ): void => {
+      for (let n = nFrom; n <= nTo; n++) {
+        if (rn(2) !== 0) continue;                                 // :602 掷恒耗
+        if (!inW(n, j + rowOff, 0) || actAt(n, j + rowOff) !== 0) continue;
+        const lt = lightedAt(n - 1, j + rowOff);
+        if (flag) {
+          const num23raw = rn(5);                                  // :608 先掷后钳
+          const num23 = refs.minWC.v > 0 ? 2 : num23raw;
+          if (iCandle > -1 && num23 <= 1 && !lt) {
+            const cd = ipOf(iCandle); placeOnTableD(n, j + rowOff, cd.t);
+          } else if (num23 === 2 && !lt) {                         // :618-626 水烛臂数递减
+            if (placeOnTableD(n, j + rowOff, WATER_CANDLE)) refs.minWC.v--;
+            continue;
+          } else if (num23 === 3) {
+            placeOnTableD(n, j + rowOff, BOOKS);
+          } else if (num23 === 4) {
+            place2x1D(n, j + rowOff, TILE_BY_KEY['v_103_bowls']!);
+          }
+        } else {
+          const num24 = rn(3);
+          if (iCandle > -1 && num24 <= 1 && !lt) {
+            const cd = ipOf(iCandle); placeOnTableD(n, j + rowOff, cd.t);
+          } else if (num24 === 2) {
+            place2x1D(n, j + rowOff, TILE_BY_KEY['v_103_bowls']!);
+          }
+        }
+      }
+    };
+    // :577-652 十三型放置级联（顺序=cs 原文；书架支不置成功位/不递减配额 :744-748）
+    if (iTable > -1 && num18 === 0) {
+      const dd = ipOf(iTable);
+      if (place3x2D(num3, j, dd.t, dd.s)) {
+        if (iChair > -1) {
+          const ch = ipOf(iChair);
+          if (inW(num3 - 2, j, 0) && actAt(num3 - 2, j) === 0
+            && place1x2D(num3 - 2, j, ch.t, ch.s)) {
+            st.frameX[st.idx(num3 - 2, j)] = (st.frameX[st.idx(num3 - 2, j)] ?? 0) + 18;
+            st.frameX[st.idx(num3 - 2, j - 1)] = (st.frameX[st.idx(num3 - 2, j - 1)] ?? 0) + 18;
+          }
+          if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) place1x2D(num3 + 2, j, ch.t, ch.s);
+        }
+        candlePool(num3 - 1, num3 + 1, -2);
+        dgFurnDualResult = 'ok'; return true;
+      }
+    } else if (iWork > -1 && num18 === 1) {
+      const dw = ipOf(iWork);
+      if (place2x1D(num3, j, dw.t, dw.s)) {
+        if (iChair > -1) {
+          const ch = ipOf(iChair);
+          if (rn(2) === 0) {
+            if (inW(num3 - 1, j, 0) && actAt(num3 - 1, j) === 0
+              && place1x2D(num3 - 1, j, ch.t, ch.s)) {
+              st.frameX[st.idx(num3 - 1, j)] = (st.frameX[st.idx(num3 - 1, j)] ?? 0) + 18;
+              st.frameX[st.idx(num3 - 1, j - 1)] = (st.frameX[st.idx(num3 - 1, j - 1)] ?? 0) + 18;
+            }
+          } else if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) {
+            place1x2D(num3 + 2, j, ch.t, ch.s);
+          }
+        }
+        candlePool(num3, num3 + 1, -1);
+        dgFurnDualResult = 'ok'; return true;
+      }
+    } else if (iVase > -1 && num18 === 2) {
+      const dv = ipOf(iVase);
+      if (dv.t >= 0 && place2xXD(num3, j, dv.t, 3, dv.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iBook > -1 && num18 === 3) {
+      const db = ipOf(iBook);
+      place3x4D(num3, j, db.t, db.s);                              // :744-748 无成功位
+    } else if (iChair > -1 && num18 === 4) {
+      const dc = ipOf(iChair);
+      if (rn(2) === 0) {                                           // :752 方向掷两支必耗
+        place1x2D(num3, j, dc.t, dc.s);
+        st.frameX[st.idx(num3, j)] = (st.frameX[st.idx(num3, j)] ?? 0) + 18;
+        st.frameX[st.idx(num3, j - 1)] = (st.frameX[st.idx(num3, j - 1)] ?? 0) + 18;
+      } else {
+        place1x2D(num3, j, dc.t, dc.s);
+      }
+      if (inW(num3, j, 0) && actAt(num3, j) !== 0 && st.type[st.idx(num3, j)] === dc.t) {
+        dgFurnDualResult = 'ok'; return true;
+      }
+    } else if (iBed > -1 && num18 === 5) {
+      const dbd = ipOf(iBed);
+      if (dbd.t >= 0) {                                            // :770 tileType>=0 门
+        const dir = rn(2) === 0 ? 1 : -1;
+        if (place4x2D(num3, j, dbd.t, dir, dbd.s)) { dgFurnDualResult = 'ok'; return true; }
+      }
+    } else if (iPiano > -1 && num18 === 6) {
+      const dp = ipOf(iPiano);
+      if (place3x2D(num3, j, dp.t, dp.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iDress > -1 && num18 === 7) {
+      const dd2 = ipOf(iDress);
+      if (place3x2D(num3, j, dd2.t, dd2.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iSofa > -1 && num18 === 8) {
+      const ds = ipOf(iSofa);
+      if (place3x2D(num3, j, ds.t, ds.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iTub > -1 && num18 === 9) {
+      const dt = ipOf(iTub);
+      if (dt.t >= 0) {                                             // :816
+        const dir = rn(2) === 0 ? 1 : -1;
+        if (place4x2D(num3, j, dt.t, dir, dt.s)) { dgFurnDualResult = 'ok'; return true; }
+      }
+    } else if (iLamp > -1 && num18 === 10) {
+      const dl = ipOf(iLamp);
+      if (dl.t >= 0 && place1xXD(num3, j, dl.t, 3, dl.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iCand > -1 && num18 === 11) {
+      const dca = ipOf(iCand);
+      if (place2x2D(num3, j, dca.t, dca.s)) { dgFurnDualResult = 'ok'; return true; }
+    } else if (iClock > -1 && num18 === 12) {
+      const dk = ipOf(iClock);
+      if (dk.t >= 0 && place2xXD(num3, j, dk.t, 5, dk.s)) { dgFurnDualResult = 'ok'; return true; }
+    }
+    return false;
+  }
+
+  /** DungeonUtils.FirstSolid(ceiling:false,…,:532-559) 下扫版（mscale=Main.maxTilesX*5 上限）。 */
+  function gfFirstSolidDown(sx: number, sy: number, bd: { L: number; T: number; R: number; B: number } | null): { x: number; y: number } {
+    let px = sx, py = sy;
+    let mscale = w * 5;
+    const inB = (): boolean => bd === null || (px >= bd.L && px < bd.R && py >= bd.T && py < bd.B);
+    do {
+      mscale--;
+      if (mscale <= 0) break;
+      if (solidAllowBottomDg(px, py)) return { x: px, y: py };
+      py++;
+    } while (py > 10 && py < h - 10 && inB());
+    return { x: px, y: py };
+  }
+
+  /** GroundFurniture_DualDungeons 分派主循环（cs:34-185：房间臂 InnerBounds / 大厅臂 Bounds）。 */
+  function dgFurnitureDual(): void {
+    const alb = { alch: { v: Math.trunc((1 + Math.trunc(w / 4200)) * gfFeatScalar) },
+      bew: { v: Math.trunc((1 + Math.trunc(w / 4200)) * gfFeatScalar) }, minWC: { v: worldSizeIdx() === 0 ? 5 : worldSizeIdx() === 1 ? 10 : 15 } };
+    {                                                              // :41-53 清零臂
+      let hasStyle0 = false;
+      for (const s of gfStyles) if (s.Style === 0) { hasStyle0 = true; break; }
+      if (!hasStyle0) { alb.alch.v = 0; alb.bew.v = 0; }
+    }
+    emit132(`MARK|I132 fhead alch=${alb.alch.v} bew=${alb.bew.v} wc=${alb.minWC.v} scalar=${gfFeatScalar}`);
+    const runArm = (
+      entries: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>,
+      defaultCount: number, hallMode: boolean,
+    ): void => {
+      for (const ent of entries) {
+        if (!ent.gen) continue;
+        let count = defaultCount;
+        let flagA = ent.st === 0 && (alb.alch.v > 0 || alb.bew.v > 0);   // :77/:136 flag2/flag4
+        let nTry = 50;
+        while (count > 0) {
+          nTry--;
+          if (nTry <= 0) break;
+          const px = ri(ent.L, ent.R), py = ri(ent.T, ent.B);            // RandomPointInBounds
+          if (!(gfIsDW(wallAt(px, py)) && actAt(px, py) === 0)) continue;// :88/:146 采点门
+          const fs = gfFirstSolidDown(px, py, hallMode ? { L: ent.L, T: ent.T, R: ent.R, B: ent.B } : null);
+          const fy = fs.y - 1;                                           // :92/:151-152 Y--
+          const fw2 = wallAt(fs.x, fy);
+          emit132(`MARK|I132 att st=${ent.st} p=${fs.x},${fy}`);
+          const snapA = alb.alch.v, snapB = alb.bew.v;
+          let ok = false;
+          if (flagA) {
+            if (hallMode) {
+              ok = gfDActual(fs.x, fy, fw2, alb, true, false);
+              if (!ok) ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), true, true);
+            } else {
+              ok = gfDActual(fs.x, fy, fw2, alb, true, false);
+              if (!ok) ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), false, nTry > 25);
+            }
+          } else if (hallMode) {
+            ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), true, false);
+            if (!ok) ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), true, true);
+          } else {
+            ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), false, nTry > 25);
+            if (!ok) ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), false, nTry > 25);
+          }
+          if ((flagA && snapA !== alb.alch.v) || snapB !== alb.bew.v) flagA = false;   // :115/:174
+          if (ok) { count--; }                                           // :119-123/:178-182
+        }
+      }
+    };
+    runArm(gfFeatRooms, 4, false);
+    runArm(gfFeatHalls, 6, true);
+  }
+  const zeroRefs = (minWC: GFItemRef) => ({ alch: { v: 0 }, bew: { v: 0 }, minWC });
+
+  // GetWorldSize()（WorldGen.cs:6507-6514）：<=4200→0 / <=6400→1 / else 2
+  function worldSizeIdx(): number { return w <= 4200 ? 0 : w <= 6400 ? 1 : 2; }
+  /** IsConsideredDungeonWall 的 dual 全量版（DU.cs:1929-1950）：Main.wallDungeon 静态族 ∪
+   *  CurrentDungeonGenVars.isDungeonWall（本座 styles+SubStyles 克隆合并扩张,DC.cs:147-185）。
+   *  普通/未装配 gfStyles 时退化为静态集（与旧 isDW 同口径）。 */
+  let _gfSeatDWSet: Set<number> | null = null;
+  const gfIsDW = (v2: number): boolean =>
+    v2 > 0 && (_gfSeatDWSet !== null ? _gfSeatDWSet.has(v2) : DG_DUNGEON_WALLS.has(v2));
+  /** ★IIIII105b 逐族分步 #1：Bookshelves 座面谓词（wall/tile 双集，同样克隆合并语义——
+   *  tile 集=DG_DUNGEON_TILES 基线 ∪ 本座 BrickTileType/BrickGrass/ExtraTileTypes）。 */
+  let _gfSeatDTSet: Set<number> | null = null;
+  const gfIsBkDW = (v3: number): boolean => gfIsDW(v3);
+  const gfIsBkDT = (t4: number): boolean => {
+    if (!(_gfSeatDTSet !== null)) return isDT(t4);
+    const sh4 = TILE_DEFS[t4]?.vanilla?.sheet ?? -1;
+    return sh4 > 0 && _gfSeatDTSet.has(sh4);
+  };
+
   // —— ★Place* 家族（2026-08-17 终清批，与 oracle DgP* 同构；帧走 setTileSilent 由调用方
   //    追加——此处保成功判定+写集 footprint；tileTable/tileLighted = Main.cs 全表提取）——
   const TILE_TABLE_D = new Set<number>([14,18,19,87,88,101,114,275,276,277,278,279,280,281,285,286,296,297,298,
@@ -5760,6 +6187,30 @@ const snap: SnapFn = (name) => {
       snap,
     }, { x0, y0, precalcOK, entX, entY, worldSize: 1, k: instIdx });
     posX = Math.trunc(res.posX); posY = Math.trunc(res.posY); topX = posX;
+    // ★IIIII105b：特征域载荷装配（GroundFurniture_DualDungeons 消费面）
+    if (res.styles !== undefined && res.styles.length > 0) {
+      gfStyles = res.styles;
+      const set2 = new Set<number>(DG_DUNGEON_WALLS);   // Main.wallDungeon 克隆基线
+      const addAll = (s0: import('./DungeonStyles1457').DungeonStyleData): void => {
+        set2.add(s0.BrickWallType);
+        for (const w3 of s0.ExtraWallTypes ?? []) set2.add(w3);
+        for (const sb of s0.SubStyles ?? []) addAll(sb);
+      };
+      for (const s0 of res.styles) addAll(s0);
+      _gfSeatDWSet = set2;
+      const tset = new Set<number>(DG_DUNGEON_TILES);   // Main.tileDungeon 克隆基线
+      const addT = (s0: import('./DungeonStyles1457').DungeonStyleData): void => {
+        tset.add(s0.BrickTileType);
+        if (s0.BrickGrassTileType !== undefined) tset.add(s0.BrickGrassTileType);
+        for (const tt of s0.ExtraTileTypes ?? []) tset.add(tt);
+        for (const sb of s0.SubStyles ?? []) addT(sb);
+      };
+      for (const s0 of res.styles) addT(s0);
+      _gfSeatDTSet = tset;
+    }
+    for (const fr of res.featRooms ?? []) gfFeatRooms.push(fr);
+    for (const fh of res.featHalls ?? []) gfFeatHalls.push(fh);
+    gfFeatScalar = res.scalar ?? 1.0;                    // DC.cs:381（provider 出口时点）
   } else {
     dgLayout(num);
   }
@@ -5767,6 +6218,9 @@ const snap: SnapFn = (name) => {
     const WV61c = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
     if (WV61c) ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|d61layoutEnd|rc=${dgMainRolls}`);
   }
+  // ★IIIII105b：provider 大厅基线（此后 halls 数组内新增=爬升走廊/插入厅,均 Default
+  // style0 语义——dgHall/dgEntHall* 的 StyleData=genVars.dungeonStyle,DC.cs:455-473 同位）
+  const gfClimbHallBase = isDualWorld ? halls.length : -1;
   if (!isDualWorld) {
   // cs:374-396：最高已生成房 InnerBounds 顶部中心回写（dual 支跳过——Provider 已按
   // dungeonRooms[0].InnerBounds 直接定位，DC.cs:391-413 分型语义）
@@ -5847,6 +6301,16 @@ const snap: SnapFn = (name) => {
   //   入口生成后 dungeonBounds.Top=25（Clamp[10,h-10] 同 DBnd.topSet）——房间
   //   Processing/平台门刷与装饰的上下文界面向天空扩展。仅 sgis 世界改值。
   if (gs.seedFlags.surfaceIsInSpace) bounds.topSet(25);
+  // ★IIIII105b：爬升/插入大厅并入特征域载荷（dungeonHalls 全集=C# data.dungeonHalls
+  // 含 LegacyEntrance 支；style=genVars.dungeonStyle=Default(style0)）
+  if (isDualWorld && gfClimbHallBase >= 0) {
+    for (let hi = gfClimbHallBase; hi < halls.length; hi++) {
+      const hl = halls[hi]!;
+      gfFeatHalls.push({ gen: !!hl.generated, st: 0,
+        L: hl.bounds.L, T: hl.bounds.T, R: hl.bounds.R, B: hl.bounds.B });
+    }
+    emit132(`MARK|I132 feats rooms=${gfFeatRooms.length} halls=${gfFeatHalls.length}`);
+  }
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
@@ -5906,7 +6370,10 @@ const snap: SnapFn = (name) => {
   bounds.inflate(25);
   dgLights(); snap('dungeonI'); stageDump('I');
   dgTraps(); snap('dungeonT'); stageDump('T');
-  dgFurniture(); snap('dungeonF'); stageDump('F');
+  // ★IIIII105b：GroundFurniture_DualDungeons 分派（cs:22-31 Type==DualDungeon 支）。
+  // gfStyles 空数组=非 dual/未装配 ⇒ 零掷零写（普通世界走 legacy 认证体不变）。
+  if (gfStyles.length > 0) { dgFurnitureDual(); } else { dgFurniture(); }
+  snap('dungeonF'); stageDump('F');
   dgPaintings(); snap('dungeonPa'); stageDump('Pa');
   dgBanners(); snap('dungeonBa'); stageDump('Ba');
   // ★HHHHHHH ⑤：DungeonGlobalLateDualDungeonFeatures（DungeonCrawler.cs:522-523,

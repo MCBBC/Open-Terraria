@@ -56,7 +56,7 @@ import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 // ★SSS-CELEB（2026-08-27）：FinishTenthAnniversaryWorld 全家（1458 cs:24502-24554）
 import { growTree } from './TreePass';
 // ★IIIII106：sandy britches 表层沙漠化核心（cs:2363 第二半；调用位 :22343）
-import { doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';
+import { convertWithSize, doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';   // ★IIIII107b 净化菱形 Convert(j,i,0,3)
 
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
 
@@ -3521,7 +3521,17 @@ export function runFinalCleanupPass(
           const i = st.idx(xx, yy);
           if (st.flags[i] && SWEEP_SHEET[st.type[i]] === 162) st.flags[i] = 0;
           st.wall[i] = 0;
-          // Convert(j,i,0,3)：结构性 no-op（见上注）——不移植
+          // ★IIIII107b（2026-09-01）：Convert(j,i,0,3) 净化菱形真值入列——旧注「结构性
+          //   no-op 不移植」只对非感染种子成立。purifythis(worldIsInfected) 链 mile8 #105
+          //   T1>25×17803 定谳：FinalizeSecretSeeds 内 DoWorldIsInfected(cs:2023-2060)
+          //   先全域腐化（石/tileMoss 族→25），随后本菱形把 GenVars.shimmerPosition 周边
+          //   压椭体 r<90 内腐化族反演回净化态（25→1/23→2/112→53/163→161/398→397/
+          //   400→396 + 荆棘 32 杀、r120 moss 环同理）——x86 实测残石区=以池心为中心的
+          //   压椭环带（横半轴 ~90 / 纵 1.4·1.2 压比），与 ShimmerMakeBiome 激活带共同
+          //   裁剪出非几何齐整的可视边界。普通种子仍零外溢：塑形后 r90 可转内容集空、
+          //   wall 已归零，convertCell 各支早退不掷。掷序=外层 k(col) 升序 × 内层
+          //   l(row) 升序照抄 cs:55555-55560；rng 缺省模式（诊断仪旧调用）维持跳过。
+          if (rng) convertWithSize(st, rng, gs, xx, yy, 0, 3);
         }
       }
     }

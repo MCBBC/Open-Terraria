@@ -687,6 +687,8 @@ function unembedPass(b: Body, world: World): void {
     b.embedPushed = 0;  // 横推预算同会话复位(2026-09-01 tent 收敛帽)
     return;
   }
+  const emb = (b.embedTicks ?? 0) + 1;
+  b.embedTicks = emb;
   // ★topEmbedded 快速响应(2026-08-31):头顶 solid 区嵌入的 15t 延迟期 = 无限上下
   //  弹跳期(站台+上方家具 1 格空隙),观感不可接受。top-embed 检出可靠性高(逐列扫
   //  solid 含坡面三角判定),2t 即可确认非瞬态。

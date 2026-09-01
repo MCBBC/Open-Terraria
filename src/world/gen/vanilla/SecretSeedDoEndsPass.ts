@@ -539,6 +539,27 @@ function convertCell(
   // 其余 conversionType（5/6/7…）不在本批旗标消费面内——登记另案。
 }
 
+/** WorldGen.Convert(i,j,conversionType,size,tiles,walls) size 版（cs:55550-55565）：
+ * [i-size..i+size]² 盒 + 曼哈顿距离 <6 过滤逐格调单格版。★IIIII107b（2026-09-01）
+ * 入列：ShimmerCleanUp 尾净化菱形 Convert(j,i,0,3)（cs:34801，1438 万石债主）——
+ * purifythis 链定谳=感染面(DoWorldIsInfected)先全域腐化后，本菱形把微光池周边
+ * 压椭体 r<90 内的腐化族反演回净化态。普通种子零外溢（r90 可转内容集空+墙已归零，
+ * convertCell 各支早退不掷）。 */
+export function convertWithSize(
+  st: TileStore, rng: RNG, gs: GenState,
+  i: number, j: number, conversionType: number, size: number,
+  tiles = true, walls = true,
+): void {
+  if (!tiles && !walls) return;
+  for (let k = i - size; k <= i + size; k++) {
+    for (let l = j - size; l <= j + size; l++) {
+      // InWorld(k,l,1)（cs:55557）+ 曼哈顿 <6（cs:55558）——越界格早退不掷
+      if (k >= 1 && l >= 1 && k < st.w - 1 && l < st.h - 1 && Math.abs(k - i) + Math.abs(l - j) < 6)
+        convertCell(st, rng, gs, k, l, conversionType, tiles, walls);
+    }
+  }
+}
+
 // ============================================================
 // ★IIIII106 DoWorldIsInfected（purify this，cs:2023-2060；FinalizeSecretSeeds :629-632
 // hallowOnTheSurface 之后、startInHardmode 之前调用）全图感染面

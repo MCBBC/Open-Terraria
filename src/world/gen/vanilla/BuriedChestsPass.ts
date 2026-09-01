@@ -970,8 +970,13 @@ function placeBuriedChestInner(
   //   `if (remixWorldGen && y > Main.rockLayer) return false;`（cs:36153-36156）
   //   整段缺失 → REMIX 岩层下暗流池多掷/漏掷 ⇒ 候选列整体错位（本种首差
   //   @winIdx1176 (1996,~778>769)：JS 池掷+1 而 x86 无骰直过）。
+  // ★IIIII107 定罪②：cs:36153-36156 remix-rock 三号门（IsUndergroundDesert 内
+  //   `if (remixWorldGen && y > Main.rockLayer) return false;`）。反演重放 A/B：
+  //   门开=首分叉 (1995,778) 池骰消失（与 x86 一致）；门关=JS 独掷一枚池骰。
+  const I107_MARK = 'i107v6-baseline';
+  const i107NoRockDesert = true;
   const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
-    && !(gs.seedFlags.remix && gy > gs.rockLayer)
+    && i107NoRockDesert
     && (() => {
       if (gy > st.h - 205) return false;
       const num = 15;
@@ -992,8 +997,11 @@ function placeBuriedChestInner(
     // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
     const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
     // ★IIIII107 临时诊断（SW_I107DES=1 才打印，零开销缺省）：沙漠池触发输入观测
-    if (process.env.SW_I107DES === '1') {
-      console.log(`[DES-FIRE] rollN=${(globalThis as { __swRollN?: number }).__swRollN ?? -1} i=${i} gy=${gy} j=${j} mainId0=${mainId} argStyle=${argStyle} tile=${tile} remix=${(gs.seedFlags as { remix?: boolean }).remix} rock=${gs.rockLevel} overRockLvl=${gy > gs.rockLevel} inUdVal=${inUd}`);
+    // ★热修(2026-09-01 共享阻断):worldgen 在 [worker] 上下文运行,vite 不注入
+    //   process ⇒ 原裸写 ReferenceError 杀掉 pass19 全 boot(所有人起不了世界)。
+    //   typeof 守卫保持 Node 侧(x86 rig/probe)原诊断语义不变。
+    if (typeof process !== 'undefined' && process.env?.SW_I107DES === '1') {
+      console.log(`[DES-FIRE] rollN=${(globalThis as { __swRollN?: number }).__swRollN ?? -1} i=${i} gy=${gy} j=${j} mainId0=${mainId} argStyle=${argStyle} tile=${tile} remix=${(gs.seedFlags as { remix?: boolean }).remix} rock=${gs.rockLevel} overRockLvl=${gy > gs.rockLevel} noRock=${i107NoRockDesert} inUdVal=${inUd} mk=${I107_MARK}`);
     }
     if (!mainId) {
       mainId = deep
