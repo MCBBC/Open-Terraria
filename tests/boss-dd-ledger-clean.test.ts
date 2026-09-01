@@ -362,7 +362,10 @@ describe('小妖精引信循环轨（台账⑨,startTrackedLoop 跟踪轨）', (
     k.ai0 = 40; k.ai1 = 0; k.vx = 0; k.vy = 0; k.facing = 1;    // 点火窗直驱
     for (let t = 0; t < 32; t++) ai107ImprovedWalkers(k, game, p);
     const started = rec.loops.filter((l) =>
-      l.file === 'dd2_kobold_ignite_loop' || l.file === 'dd2_kobold_scream_charge_loop');
+      l.file === 'dd2KoboldIgniteLoop' || l.file === 'dd2KoboldChargeLoop');
+    // ★终清波:键改 WAV_MAP 逻辑名(dd2KoboldIgniteLoop/dd2KoboldChargeLoop)——
+    //   旧 raw 文件名键未入 WAV_MAP,startTrackedLoop 在实机恒 null(仅测试 mock 收),
+    //   键补齐后两轨真通;测试随接线面改名
     expect(started.length).toBe(2);                    // 双轨各建一次(GetActiveSound-null 语义)
     k.ai0 = 0; k.ai1 = 1;                              // 冲锋窗
     ai107ImprovedWalkers(k, game, p);
@@ -387,7 +390,7 @@ describe('小妖精引信循环轨（台账⑨,startTrackedLoop 跟踪轨）', (
     f.spawnAlpha = 0;
     f.ai0 = 2; f.ai1 = 25;                             // 俯冲中段直驱
     divingFlyerAI(f, game, p);
-    const igns = rec.loops.filter((l) => l.file === 'dd2_kobold_ignite_loop');
+    const igns = rec.loops.filter((l) => l.file === 'dd2KoboldIgniteLoop');
     expect(igns.length).toBe(1);
     f.ai0 = 0; f.ai1 = 45;                             // 回旋态退出俯冲
     divingFlyerAI(f, game, p);

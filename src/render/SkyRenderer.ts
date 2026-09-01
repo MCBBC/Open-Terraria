@@ -37,7 +37,7 @@ function eventTintedSprite(
   let c = eventTintFree.pop();
   if (!c) c = document.createElement('canvas');
   if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
-  const cx = c.getContext('2d')!;
+  const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.globalCompositeOperation = 'copy';
   cx.drawImage(tex as CanvasImageSource, 0, 0);
   cx.globalCompositeOperation = 'multiply';
@@ -778,7 +778,7 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = tex.width; c.height = tex.height;
-  const cx = c.getContext('2d')!;
+  const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.imageSmoothingEnabled = true;
   cx.drawImage(tex, 0, 0);
   cx.globalCompositeOperation = 'multiply';
@@ -2544,7 +2544,7 @@ export class SkyRenderer {
     let c = this.cloudTintFree.pop();
     if (!c) c = document.createElement('canvas');
     if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
-    const cx = c.getContext('2d')!;
+    const cx = c.getContext('2d', { willReadFrequently: true })!;
     cx.imageSmoothingEnabled = true;
     // ★copy 整体替换(review 修,池化复用双坑):①上一轮遗留 globalCompositeOperation
     //  =destination-in 会让首绘变擦除;②残留旧云像素会透过新贴图透明区串色。
@@ -3249,8 +3249,9 @@ export class SkyRenderer {
     // 同一活体状态(本文件 drama 系既有模式),无 AI→renderer 直连通道
     if (fc) {
       for (const en of fc.entities) {
-        if ((en.vanillaId ?? 0) !== 548 || en.dead || en.ai1 !== 2 || en.ai0 <= 480) continue;
-        this.requestDramaLight(lerpValueClamped(480, 570, en.ai0), en.cx, en.cy);
+        const ai0 = en.ai0 ?? 0, ai1 = en.ai1 ?? 0;
+        if ((en.vanillaId ?? 0) !== 548 || en.dead || ai1 !== 2 || ai0 <= 480) continue;
+        this.requestDramaLight(lerpValueClamped(480, 570, ai0), en.cx, en.cy);
       }
     }
 

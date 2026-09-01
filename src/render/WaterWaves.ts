@@ -274,7 +274,7 @@ export function ensureWaveTextures(
   const grab = (img: ImageBitmap | HTMLImageElement) => {
     const c = document.createElement('canvas');
     c.width = img.width; c.height = img.height;
-    const cc = c.getContext('2d');
+    const cc = c.getContext('2d', { willReadFrequently: true });
     if (!cc) return null;
     cc.drawImage(img, 0, 0);
     return cc.getImageData(0, 0, c.width, c.height).data;

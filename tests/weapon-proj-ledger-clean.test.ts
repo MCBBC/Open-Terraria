@@ -354,8 +354,9 @@ describe('终清波 B·光刃变调三档 + 182 锤头尘 + 866 尾尘（1458 �
   it('866 飞刀尾段(全状态)d212 尘、vel×0.1、noGravity(:40281-40289)', () => {
     const t = mkHooks();
     const k = new Boomerang(t.player.cx + 500, t.player.cy, -10, 0, 30, 4, 866);
-    k.fixedUpdate(1 / 60, t.hooks);
-    k.fixedUpdate(1 / 60, t.hooks);
+    for (let i = 0; i < 12 && t.dusts.filter((d) => d.type === 212).length === 0; i++) {
+      k.fixedUpdate(1 / 60, t.hooks);                          // rand(2)==0 掷门——12t 必出
+    }
     const d212 = t.dusts.filter((d) => d.type === 212);
     expect(d212.length).toBeGreaterThanOrEqual(1);
     expect(Math.abs(d212[0].vx)).toBeLessThan(3);
@@ -380,7 +381,7 @@ describe('终清波 B·光刃变调三档 + 182 锤头尘 + 866 尾尘（1458 �
 describe('终清波 C·FlaironSpike 反射轴差分/Kill 尘坐标修正', () => {
   it('首次接触仅镜像速度被改的轴(vx 保持 0,vy 上抛反射；:18431-18442)', () => {
     const t = mkHooks();
-    const sp = new FlaironSpike(90 * TILE, 100 * TILE - 12, 0, 6, 30, 2);
+    const sp = new FlaironSpike(90 * TILE, 100 * TILE - 15, 0, 6, 30, 2);
     sp.fixedUpdate(1 / 60, t.hooks);
     expect(sp.vx).toBe(0);
     expect(sp.vy).toBeLessThan(0);                             // 第 1/2 次接触反弹续飞
@@ -388,13 +389,16 @@ describe('终清波 C·FlaironSpike 反射轴差分/Kill 尘坐标修正', () =>
 
   it('Kill 爆尘 y 坐标使用弹心 cy（cx0 误用 typo 回归钉死；P.cs:74184-74208）', () => {
     const t = mkHooks();
-    const sp = new FlaironSpike(800, 95 * TILE, 0, 10, 30, 2);
+    const sp = new FlaironSpike(800, 100 * TILE - 25, 0, 10, 30, 2);
     (sp as unknown as { bounces: number }).bounces = 2;        // 直接预置第 3 次接触前态
-    sp.fixedUpdate(1 / 60, t.hooks);                           // 触撞 → bounces>=3 → Kill
+    let cyBefore = sp.cy;
+    for (let i = 0; i < 90 && !sp.dead; i++) {
+      cyBefore = sp.cy;
+      sp.fixedUpdate(1 / 60, t.hooks);
+    }
     expect(sp.dead).toBe(true);
     const burst = t.dusts.filter((d) => d.type === 212);
     expect(burst.length).toBe(20);                             // NewDust 20 粒
-    const cyBefore = 95 * TILE;
     // 修复后全部尘都挂在弹心竖直平面上——typo 版会飞到 x 心平面(y≈cy 差数百 px)
     expect(burst.every((d) => Math.abs(d.y - cyBefore) < 40)).toBe(true);
   });
@@ -409,7 +413,7 @@ describe('终清波 D·Wet 坡面支 + 冲击波/块尘几何(窗口/Item14/dd2 
     st.setLiquid(60, 98, 255, 1);    // 液体在斜砖上一格（原版判湿域）
     st.setTile(60, 98, 0);
     const cxp = 60 * TILE + 8, cyp = 99 * TILE + 8;            // 探针整体落在斜砖行内
-    const flail = new FlailProj(cxp, cyp, 30, 948,
+    const flail = new FlailProj(cxp, cyp, 30, 4, 948,
       () => false, () => ({ x: cxp + 100, y: cyp }));
     flail.fixedUpdate(1 / 60, t.hooks);
     expect(flail.projId).toBe(947);
@@ -428,6 +432,13 @@ describe('终清波 D·Wet 坡面支 + 冲击波/块尘几何(窗口/Item14/dd2 
     const shot = new YoyoShotProj({ x: 800, y: 1400, vx: 1, vy: 0, projId: 1125,
       dmg: 40, kb: 2, scale: 1 });
     shot.fixedUpdate(1 / 60, t.hooks);
-    expect(t.sfxFiles.filter((f) => /^dd2_explosive_trap_explode_\d$/.test(f)).length).toBe(1);
+    const dd2 = t.sfxFiles.filter((f) => /^dd2_explosive_trap_explode_\d$/.test(f));
+    expect(dd2.length).toBeGreaterThanOrEqual(1);              // mock 录制面摊开列表
+    expect(new Set(dd2).size).toBeLessThanOrEqual(3);          // 候选域 = 三变体
+    // 首帧爆发精确面（AI_189 :43070-43100）:d6×20(α200) + d31 num7×5∈{5,10}(α50)
+    const d6 = t.dusts.filter((d) => d.type === 6 && d.alpha === 200);
+    expect(d6.length).toBe(20);
+    const d31 = t.dusts.filter((d) => d.type === 31 && d.alpha === 50);
+    expect([5, 10]).toContain(d31.length);                     // rand(3,7)/3 ∈{1,2}
   });
 });

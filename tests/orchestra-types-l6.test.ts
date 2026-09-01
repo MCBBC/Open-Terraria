@@ -428,10 +428,14 @@ describe('生产者接线结构断言（module8 上行/clientOnly 直驱按原 n
     expect(has('src/entities/WhipProj.ts', 'ParticleOrchestraType.MoonLordWhipHit'));
     expect(has('src/entities/proj1457.ts', 'blueLightningSmallLongFx(game, pxL.x, pxL.y, mvLx, mvLy)'));
   });
-  it('Game：Keybrand 近战接线 + QuickStack ItemTransfer 广播', () => {
+  it('Game：Keybrand 近战接线 + QuickStack ItemTransfer 广播（Q-F3/F4/F5 形翻新：端点=箱锚像素面、PlayerToChest 四旗、逐帧出站）', () => {
     expect(has('src/core/Game.ts', 'keybrandFx(this, kbX, kbY)'));
     expect(has('src/core/Game.ts', 'this.broadcastParticleOrchestra(ParticleOrchestraType.Keybrand, kbX, kbY)'));
-    expect(has('src/core/Game.ts', 'itemTransferFx(this, p.cx, p.cy, ch.x + 8, ch.y + 8, vids[0], 1)'));
+    // Q-F5 单帧退役 → emitItemTransferFx 逐帧出站（Q-F4 四旗随载荷,Q-F3 端点像素面）
+    expect(has('src/core/Game.ts',
+      'itemTransferFx(this, sx, sy, ex, ey, vid, ITEM_TRANSFER_PLAYER_TO_CHEST_BITS >> 24)'));
+    expect(has('src/core/Game.ts',
+      'this.broadcastParticleOrchestra(ParticleOrchestraType.ItemTransfer, sx, sy,\n      ex - sx, ey - sy, (vid & 0xffffff) | ITEM_TRANSFER_PLAYER_TO_CHEST_BITS)'));
     expect(has('src/core/Game.ts', 'ParticleOrchestraType.ItemTransfer'));
   });
   it('dispatch 分支覆盖终态清单；叶绿两型归代理域；PaladinsHammer=vanilla 孤儿登记', () => {

@@ -18,6 +18,7 @@ import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectP
   resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
   applyBannerDamageDealt } from './projTargets';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
+import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道（GorePiece 引擎池）
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
@@ -39,7 +40,7 @@ import { TORCH_DUST_BY_STYLE } from '../world/Torch';
  *  Main.cs:29560);雷管 29=上移 11(10×32)。
  *  方向/高度依赖项已入 PROJ_DRAW_OFFSET_DYN(959/1095/1096/1003/1004/112/
  *  191-194/390-392/313/397——待对应弹型接入时传 dirX 生效);
- *  浮标 proj.bobber=8 不适用(本仓 Bobber 自绘近似)。 */
+ *  浮标 proj.bobber=8 项不经本表——Bobber 实体自持绘制(AI_061 全语义移植)。 */
 const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
   1022: [1, 0], 175: [10, 0], 1036: [-4, 0], 1025: [22, 0],   // 392 移 DYN 表
   499: [12, 0], 765: [22, -16], 966: [-26, -6], 519: [6, -6], 520: [12, 0],
@@ -71,7 +72,7 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
  *  条目,2026-08-19 补齐机制）。dirX = 弹体朝向（spriteDirection 语义:+1 右/-1 左,
  *  调用方传实体 facing）。397 的 num145-=1 以第三元素表达（0/−1）。
  *  ★当前消费端（本仓 aiStyle 族的 drawProj 调用方）尚未覆盖这些型号——表先行就位,
- *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项本仓 Bobber 为自绘近似不适用 */
+ *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项由 Bobber 实体自持绘制,不入本表 */
 const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly [number, number, number]> = {
   // ★三轮蓝队 F5① 弩车三档（2026-08-31）：Main.cs:34097-34134 支派生——泛型锚 =
   //   proj.Center（Main.cs:33695）→ 分支内 vector99.Y++、+=2（677 基准=Bottom+3）
@@ -1013,8 +1014,32 @@ export class Boomerang extends Entity {
     const offWorldEdge = this.x <= 0 || this.x + this.w >= stB.w * TILE
       || this.y <= 0 || this.y + this.h >= stB.h * TILE;
     this.x = body.x; this.y = body.y;
-    this.vx = lvx; this.vy = lvy;
-    const hitX = chX, hitY = chY;
+    // ★采纳管线后速度(1:1 终版):slope 粘滞辅助/落面钳制等编辑持久化到下一帧——
+    // 恢复 lastV 的写法会让贴坡场景每帧从同一初速重触撞=阶梯右下永动向上弹射(实录)。
+    // 反射分支显式引用 lvx/lvy,lastVelocity 语义不变。
+    this.vx = body.vx; this.vy = body.vy;
+    let hitX = chX, hitY = chY;
+    // ★贴坡滑行特例(同批,用户实录):WALL_BOUNCE 族 Y 接触落斜砖(slope1/2)顶带且仅
+    // Y 变化——管线「整行最高面」拍平截停是分轴近似伪影(原版快速路径逐子步
+    // SlopeCollision 对角净滑),此情形不反弹不回收,以贴坡下行续飞。
+    const isWallBounce = !isPhase && WALL_BOUNCE_PROJ.has(this.projId);
+    let slopeSlide = false;
+    if (isWallBounce) {
+      const bx0 = Math.floor(this.x / TILE), bx1 = Math.floor((this.x + this.w - 0.01) / TILE);
+      const by0 = Math.floor((this.y + this.h - 0.01) / TILE);
+      for (let tx = bx0; tx <= bx1 && !slopeSlide; tx++) {
+        for (let ty = Math.max(0, by0 - 1); ty <= by0 && !slopeSlide; ty++) {
+          if (!stB.inBounds(tx, ty)) continue;
+          const idx = stB.idx(tx, ty);
+          if ((stB.slope[idx] === 1 || stB.slope[idx] === 2) && stB.isSolid(tx, ty)
+            && lvy > 0 && !chX
+            && ((stB.slope[idx] === 1 && lvx >= 0) || (stB.slope[idx] === 2 && lvx <= 0))) {
+            slopeSlide = true;
+          }
+        }
+      }
+      if (slopeSlide) { hitX = false; hitY = false; }
+    }
     if (!hitX && !hitY && !offWorldEdge) return;
     // 原版此点 velocity 已被 Collision 按碰撞轴清零（TileCollision 后写语义）——下游
     // 反射读数/LightDisc_Bounce 的 reflect 源都基于这份"轴零化视图"。管线以差分折叠
@@ -1044,14 +1069,20 @@ export class Boomerang extends Entity {
     }
     // :19667-19675 {33,106,866} 命中轴反弹不回收 / 其余 ai[0]=1 回收 + 双轴从
     // lastVelocity 全反（383 豁免,aiStyle13 型号在 AnchoredProj 侧另案）
-    if (WALL_BOUNCE_PROJ.has(this.projId)) {
-      if (hitX) this.vx = -lvx;
-      if (hitY) this.vy = -lvy;
+    if (isWallBounce) {
+      if (slopeSlide) {
+        // 贴坡下行续飞:跟随水平速度的对角下行分量(有界),不翻转、不回收。
+        // 原版净滑由逐子步 SlopeCollision 提供,此处为分轴架构下的行为级补偿。
+        this.vy = Math.max(this.vy, Math.abs(this.vx) * 0.9);
+      } else {
+        if (hitX) this.vx = -lvx;
+        if (hitY) this.vy = -lvy;
+      }
     } else {
       this.ai0 = 1; this.outT = 0;
       if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
     }
-    game.playSfx('dig', 1, this.cx, this.cy);                   // SoundID 0(:19670 共享尾)
+    if (!slopeSlide) game.playSfx('dig', 1, this.cx, this.cy);  // SoundID 0(:19670;滑行tick不响挖音)
   }
 
   /** LightDisc_Bounce（Projectile.cs:28787-28801,106 光碟撞墙溅射——C1 批"视觉略"
@@ -1585,39 +1616,67 @@ export class SpearProj extends Entity {
    *  链起点 origin = 弹心 ∓ velocity×(4/|v|)（出程向速度反向偏 4px/返回相正向,:29804-29813）;
    *  逐节朝玩家中心步进 Chain40 高×0.85、旋转恒 atan2(臂−节)−1.57（:29819）;上限 999 节
    *  （num133,mannequin 展示档才限 3）。逐节 Lighting.GetColor 着色同链枷链条口径。
-   *  登记近似：原版按前距 num137>Height×2 分段内插 1-2 节+玩家速度亮度调制
-   *  （:29856-29875）——本仓按固定步长逐节,观感等价。 */
+   *  终清波 1:1（Main.cs:29795-29920 全支）：链节【scale=0.85 绘制】+ 距离≤999 节
+   *  主停门(num133 档)——无 d<stepLen 早退(正常局允许过冲叠节,原版同态);
+   *  rotation20 单次定型(:29818-29822,步进共线故与逐节重算等价,保留单式防弯折漂移);
+   *  玩家速度弯折调制(:29856-29875):当前距 > H×2 时按玩家 vx/vy 方向把步进向量对应
+   *  分量 ×(1−num138)(num138=0.75×min(|playerV|,10)/10×clamp(dist/80,≤1)) ——链条随
+   *  移动垂坠/拖尾的本体（曾整缺）。dist 基准恒 mountedCenter。 */
   private drawChainGuillotine(r: Renderer): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const img = chainImg('Chain40');
     if (!img || !(img.width > 0)) return;
-    const armX = this.owner481?.cx ?? this.cx;
-    const armY = this.owner481?.cy ?? this.cy;
+    const pX = (this.owner481 as { cx?: number } | null)?.cx ?? this.cx;
+    const pY = (this.owner481 as { cy?: number } | null)?.cy ?? this.cy;
+    const pvx = (this.owner481 as { vx?: number } | null)?.vx ?? 0;   // player.velocity 弯折源
+    const pvy = (this.owner481 as { vy?: number } | null)?.vy ?? 0;
     const vmag = Math.hypot(this.vx, this.vy) || 1;
     const off = 4 / vmag;
     const sgn = this.gA0 === 0 ? -1 : 1;             // :29804-29812 出程 −/返回 +
     let ox = this.cx + this.vx * off * sgn;
     let oy = this.cy + this.vy * off * sgn;
-    const stepLen = img.height * 0.85;
     const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
     const lightAt = (wx: number, wy: number): number => {
       if (!lighting) return 1;
       const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
       return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
     };
-    for (let i = 0; i < 999; i++) {
-      const dx = armX - ox, dy = armY - oy;
-      const d = Math.hypot(dx, dy);
-      if (!Number.isFinite(d) || d < stepLen) break;
-      ox += dx / d * stepLen;
-      oy += dy / d * stepLen;
+    let dx = pX - ox, dy = pY - oy;                  // :29813-29816 x7/y7 初值
+    const rot20 = Math.atan2(dy, dx) - 1.57;         // 循环外一次定型(:29817)
+    const linkH = img.height;                        // TextureAssets.Chain40.Height()
+    for (let n134 = 1; n134 <= 999; n134++) {        // num133>0 && num134>num133 → break
+      const num136raw = Math.hypot(pX - ox, pY - oy);// origin6.Distance(mountedCenter)(:29830)
+      const num137 = num136raw;                      // 预步距离（弯折门用）
+      if (!Number.isFinite(num136raw) || (dx === 0 && dy === 0)) break;  // NaN/零向量门(:29838)
+      const f = (linkH * 0.85) / num136raw;          // 步长 = H×0.85 的比例推进(:29840)
+      ox += dx * f;
+      oy += dy * f;
+      dx = pX - ox;                                  // 重算臂向(:29843-29844)
+      dy = pY - oy;
+      if (num137 > linkH * 2) {                      // 玩家速度弯折调制(:29856-29874)
+        for (let b = 0; b < 2; b++) {
+          let num138 = 0.75;
+          let vel = b === 0 ? Math.abs(pvx) : Math.abs(pvy);
+          if (vel > 10) vel = 10;
+          num138 *= vel / 10;
+          let distF = num137 / 80;
+          if (distF > 1) distF = 1;
+          num138 *= distF;
+          if (b === 0) {
+            if ((pvx < 0 && this.cx < pX) || (pvx > 0 && this.cx > pX)) dy *= 1 - num138;
+          } else {
+            if ((pvy < 0 && this.cy < pY) || (pvy > 0 && this.cy > pY)) dx *= 1 - num138;
+          }
+        }
+      }
       ctx.save();
       ctx.translate(ox, oy);
-      ctx.rotate(Math.atan2(armY - oy, armX - ox) - Math.PI / 2);   // :29819 循环外式逐节重算
+      ctx.rotate(rot20);                             // EntitySpriteDraw(rotation20)(:29907)
       ctx.imageSmoothingEnabled = false;
       ctx.globalAlpha = lightAt(ox, oy);
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      const s = 0.85;                                // num135 恒 0.85(:29828)——绘制缩放
+      ctx.drawImage(img, -(img.width * s) / 2, -(linkH * s) / 2, img.width * s, linkH * s);
       ctx.restore();
     }
   }
@@ -3058,16 +3117,52 @@ export class YoyoShotProj extends Entity {
     this.age++;
     if (--this.life <= 0) { this.dead = true; return; }
     if (this.projId === 1125) {
-      // AI_189 1125 支：首帧 soundDelay==0 → DD2_ExplosiveTrapExplode(:43034-43041,
-      // 三变体随机——SoundID.LegacySoundStyle 档) + 首帧尘/软木爆（:43070-43100,
-      // 20 尘 6 号 + 烟 31 + gore 61-63——gore 池本仓无 API,资产缺登记）;
-      // scale=ai[1]（视觉缩放,本体不绘制）
+      // AI_189_Volcano 1125 档（1458 :43031-43110——终清波逐参实装,合成两粒退役）：
+      //   num=num2=8 → 圆形抖动域 Circular(8,8);num4=0.3;num3(RotatedBy)=0;
+      //   scale=ai[1]（视觉）;ai[0]==1 帧一次性:
+      //     d6 ×20(NPD α200 s1+r, vel=v.RotBy(±π/4×0.3)×(2+5r)) +
+      //     烟 d31 ×(rand(3,7)/3)*5(α50 s1+r noGravity vel 同上后 ×3) +
+      //     gore 61-63 ×(rand(3,7)/3)(NPD vel×4r 后 ×1.7,GorePiece.newGore 承载);
+      //   每 AI 帧 rand(3)<2 → d6 烟团(NPD α90 s2.5 noGravity fadeIn1)
+      //   首帧 soundDelay==0 → DD2_ExplosiveTrapExplode 三变体随机(:43034-43041,
+      //   public/sounds/dd2_explosive_trap_explode_{0..2}.wav 在盘资产)
+      const circ = (): { dx: number; dy: number } => {
+        const a = Math.random() * Math.PI * 2;
+        const m = Math.random() * 8;
+        return { dx: Math.cos(a) * m, dy: Math.sin(a) * m };
+      };
+      const rotVel = (mul: number, num4 = 0.3): { x: number; y: number } => {
+        const a = (Math.random() * 2 - 1) * (Math.PI / 4) * num4;   // NextFloatDirection×π/4×num4
+        const ca = Math.cos(a), sa = Math.sin(a);
+        return { x: (this.vx * ca - this.vy * sa) * mul, y: (this.vx * sa + this.vy * ca) * mul };
+      };
+      const d6Puff = (): void => {
+        const o = circ(), v = rotVel(1.5 + 2 * Math.random(), 1);   // 烟团无 num4 缩放(:43098)
+        game.spawnDust?.(this.cx + o.dx - 8, this.cy + o.dy - 8, 16, 16, 6,
+          v.x, v.y, 90, null, 2.5, true, true);
+      };
       if (this.age === 1) {
         game.playSfxFiles(['dd2_explosive_trap_explode_0', 'dd2_explosive_trap_explode_1',
           'dd2_explosive_trap_explode_2'], 1, this.cx, this.cy);
-        game.spawnParticles(this.cx, this.cy, '#F0A040', 14, 3 * this.scale, { life: 22, grav: 0.06, damp: 0.95 });
-        game.spawnParticles(this.cx, this.cy, '#807868', 8, 2 * this.scale, { life: 30, grav: -0.01, damp: 0.96 });
+        for (let i = 0; i < 20; i++) {                              // d6 火尘×20
+          const o = circ(), v = rotVel(2 + 5 * Math.random());
+          game.spawnDust?.(this.cx + o.dx - 8, this.cy + o.dy - 8, 16, 16, 6,
+            v.x, v.y, 200, null, 1 + Math.random(), false, true);
+        }
+        const num7 = Math.floor((3 + Math.floor(Math.random() * 4)) / 3);   // rand(3,7)/3 int 除
+        for (let j = 0; j < num7 * 5; j++) {                        // 烟 d31（vel 后置 ×3）
+          const o = circ(), v = rotVel(2 + 5 * Math.random());
+          const d = game.spawnDust?.(this.cx + o.dx - 8, this.cy + o.dy - 8, 16, 16, 31,
+            v.x * 3, v.y * 3, 50, null, 1 + Math.random());
+          if (d) d.noGravity = true;
+        }
+        for (let k = 0; k < num7; k++) {                            // 壳 gore 61-63（vel ×1.7）
+          const o = circ(), v = rotVel(4 * Math.random());
+          GorePiece.newGore(61 + Math.floor(Math.random() * 3),
+            this.cx + o.dx, this.cy + o.dy, v.x * 1.7, v.y * 1.7);
+        }
       }
+      if (Math.floor(Math.random() * 3) < 2) d6Puff();              // 每 AI 帧 rand(3)<2 烟团
     } else if (this.projId === 1130 || this.projId === 1135) {
       // AI_210（:37481-37570）：velocity ×0.92/t;1130 rotation=速度向−π/2、
       // frame 3-5 @6t;1135 rotation=速度向 + 首 20/3 t 每帧 8 尘（33 号,1/3 换 302）
@@ -5347,8 +5442,8 @@ export class DaybreakFlare extends Entity {
       //   StatusNPC 段 applyMeleeImbue(:10559 melee 门)/霜燃(:93712)/岩浆石(:10866)
       //   /party confetti(:13693-96)——与 hitEnemies 同序,"浸剂链未接"登记偏差清偿）
       const plFlare = game.player as unknown as {
-        buffs: { has: (b: BuffType) => boolean };
-        equipStats: { frostBurn?: boolean; magmaStone?: boolean };
+        buffs?: { has: (b: BuffType) => boolean };
+        equipStats?: { frostBurn?: boolean; magmaStone?: boolean };
         parryDamageBuff?: boolean;
         parryDamageBuffT?: number;
       };
@@ -5358,7 +5453,7 @@ export class DaybreakFlare extends Entity {
         plFlare.parryDamageBuff = false;                       // :13633
         plFlare.parryDamageBuffT = 0;                          // ClearBuff(198)
       }
-      if (plFlare.buffs.has(BuffType.ImbueNano)) mulFlare *= 1.05;  // :44790-44792
+      if (plFlare.buffs?.has(BuffType.ImbueNano)) mulFlare *= 1.05;  // :44790-44792（buffs 缺省=测试 mock 兼容,与 hitEnemies 同法）
       const dmg = Math.trunc((crit ? this.damage * 2 : this.damage) * mulFlare);
       // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序，
       // F3/F1 收编升级）——镖/标枪附着族首击结算位；门+触发 = projectileSnapStrikeBonus
@@ -5368,13 +5463,16 @@ export class DaybreakFlare extends Entity {
         (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
           cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
-      // ---- 浸剂三件套 + party 真弹（hitEnemies 同序,StrikeNPC 前原位）----
-      applyMeleeImbue(plFlare.buffs, e as unknown as Record<string, number>,
-        () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
-          ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
-      applyFrostBurn(plFlare.equipStats.frostBurn === true, e as unknown as Record<string, number>);
-      applyMagmaStoneProj(plFlare.equipStats.magmaStone === true, e as unknown as Record<string, number>);
-      if (plFlare.buffs.has(BuffType.ImbueParty)) {
+      // ---- 浸剂三件套 + party 真弹（hitEnemies 同序,StrikeNPC 前原位;
+      //      buffs/equipStats 缺省守卫 = 测试 mock 兼容）----
+      if (plFlare.buffs) {
+        applyMeleeImbue(plFlare.buffs, e as unknown as Record<string, number>,
+          () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
+            ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+      }
+      applyFrostBurn(plFlare.equipStats?.frostBurn === true, e as unknown as Record<string, number>);
+      applyMagmaStoneProj(plFlare.equipStats?.magmaStone === true, e as unknown as Record<string, number>);
+      if (plFlare.buffs?.has(BuffType.ImbueParty)) {
         game.spawnFriendlyProj?.(new ConfettiBurstProj(
           (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
           (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,

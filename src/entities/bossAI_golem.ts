@@ -613,35 +613,37 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         golemEyeLasersFree(game, e, player, noLosBody, r);
       }
     }
-    // ---- 排焰双流真实尘(NPC.cs(1458):31796-31812,!getGoodWorld 门):每 tick 两粒
-    //      Dust228/NewDustPerfect,均 +=velocity、noGravity——
-    //      流① Bottom+(±22·scale,−22·scale)(侧别 num779=Next(2)×2−1),速=
-    //      Rot(π/2−π/2·侧+NextFloatDirection·π/4)×(2+NextFloat);
-    //      流② Bottom+(NextFloatDirection·6·scale,(NextFloat·−4−8)·scale),速=UnitY×
-    //      (2+NextFloat),fadeIn=0/scale=0.7+NextFloat·0.5。(原注 ":31721-31740 纯视觉略"
-    //      整段缺失 —— 终清波实装;Perfect 通道经 VanillaDust spawn 内烟雾族特例后
-    //      position/velocity 双覆写,与原版 NewDustPerfect 仅覆写两字段语义一致) ----
-    if (!game.world.seedFlags?.getGoodWorld) {
-      const scc = sc(e);
-      const side = (Math.random() < 0.5 ? -1 : 1);          // Next(2)*2-1
-      const angA = Math.PI / 2 + (-Math.PI / 2) * side + rfDir() * (Math.PI / 4);
-      const spdA = 2 + rf();
-      const dA = game.spawnDust?.(
-        e.cx + side * 22 * scc, e.y + e.h - 22 * scc, 0, 0,
-        228, Math.cos(angA) * spdA, Math.sin(angA) * spdA, 0, null, 1, false, true);
-      if (dA) {
-        dA.vx += e.vx; dA.vy += e.vy;
-        dA.noGravity = true;
-      }
-      const dB = game.spawnDust?.(
-        e.cx + rfDir() * 6 * scc, e.y + e.h + (rf() * -4 - 8) * scc, 0, 0,
-        228, 0, 2 + rf(), 0, null, 1, false, true);
-      if (dB) {
-        dB.fadeIn = 0;
-        dB.scale = 0.7 + rf() * 0.5;
-        dB.vx += e.vx; dB.vy += e.vy;
-        dB.noGravity = true;
-      }
+  }
+
+  // ---- 排焰双流真实尘(NPC.cs(1458):31796-31812,aiStyle48 自由头专属+!getGoodWorld 门):
+  //      每 tick 两粒 Dust228/NewDustPerfect,均 +=velocity、noGravity——
+  //      流① Bottom+(±22·scale,−22·scale)(侧别 num779=Next(2)×2−1),速=
+  //      Rot(π/2−π/2·侧+NextFloatDirection·π/4)×(2+NextFloat);
+  //      流② Bottom+(NextFloatDirection·6·scale,(NextFloat·−4−8)·scale),速=UnitY×
+  //      (2+NextFloat),fadeIn=0/scale=0.7+NextFloat·0.5。(原注 ":31721-31740 纯视觉略"
+  //      整段缺失 —— 终清波实装;Perfect 通道经 VanillaDust spawn 内烟雾族特例后
+  //      position/velocity 双覆写,与原版 NewDustPerfect 仅覆写两字段语义一致)
+  //      原版位于 aiStyle48 尾段、player 门之外 —— 置于此处同位 ----
+  if (x.free && !game.world.seedFlags?.getGoodWorld) {
+    const scc = sc(e);
+    const side = (Math.random() < 0.5 ? -1 : 1);          // Next(2)*2-1
+    const angA = Math.PI / 2 + (-Math.PI / 2) * side + rfDir() * (Math.PI / 4);
+    const spdA = 2 + rf();
+    const dA = game.spawnDust?.(
+      e.cx + side * 22 * scc, e.y + e.h - 22 * scc, 0, 0,
+      228, Math.cos(angA) * spdA, Math.sin(angA) * spdA, 0, null, 1, false, true);
+    if (dA) {
+      dA.vx += e.vx; dA.vy += e.vy;
+      dA.noGravity = true;
+    }
+    const dB = game.spawnDust?.(
+      e.cx + rfDir() * 6 * scc, e.y + e.h + (rf() * -4 - 8) * scc, 0, 0,
+      228, 0, 2 + rf(), 0, null, 1, false, true);
+    if (dB) {
+      dB.fadeIn = 0;
+      dB.scale = 0.7 + rf() * 0.5;
+      dB.vx += e.vx; dB.vy += e.vy;
+      dB.noGravity = true;
     }
   }
 

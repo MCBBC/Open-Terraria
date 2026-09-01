@@ -528,6 +528,9 @@ function slopeCollide(
         b.x += (b.vx >= 0 ? -1 : 1) * 4;          // 半格推离（固定量，非比例）
       }
       b.vy = 0;
+      // 物理埋点（探针取证用；window.__swPhysDbg 为真时计数）
+      const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
+      if (dbg) dbg.shortfall = (dbg.shortfall ?? 0) + 1;
     }
   } else if (bestSnapY > 0) {
     // ★面随下贴执行（与抬升互斥——本 tick 有沉入贴合时无需下贴）：
@@ -583,9 +586,14 @@ function slopeCollide(
       b.y = ny;
       if (b.vy < 0.0101) b.vy = 0.0101; // 原版向下推离（:1902-1905）
     } else {
-      // 天花板坡下推受阻（原版 :2020-2033 镜像）：速度清零（X 补偿同上不取）
-      b.vx = 0;
-      b.vy = 0;
+      // 天花板坡下推受阻——★2026-09-01 阻尼定罪修复：旧实现此处 vx=0/vy=0，
+      // 与输入加速度构成「加 0.08 → 清零」每帧循环 = 蠕动+站立态滑行（实机探针
+      // i19 起逐样本同步定罪）。vanilla SlopeCollision 天花推离【无任何受阻清零】：
+      // :1897-1921 成功仅 vy≥0.0101；截短发生在收尾 TileCollision 校验，按
+      // bitsByte[3]/[4] 转水平滑动或直接采纳更短位移，从不碰 X 速度。分轴架构
+      // 等价做法 = 放弃本次下推（不应用 ny）、速度保持，X 交给下一帧正常链路。
+      const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
+      if (dbg) dbg.ceilDropBlocked = (dbg.ceilDropBlocked ?? 0) + 1;
     }
   }
   return bestLift < 0 || bestDrop > 0;
@@ -848,5 +856,7 @@ function unembedPass(b: Body, world: World): void {
     b.x = nx;
     b.vx = 0;
     if (topEmbedded) b.embedPushed = used + push;   // 预算记账(会话帽)
+    const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
+    if (dbg) dbg.unembedH = (dbg.unembedH ?? 0) + 1;
   }
 }

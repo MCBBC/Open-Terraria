@@ -101,6 +101,10 @@ export interface DungeonStyleData {
   /** ★IIIII105b：LivingWoodStyleData.GetBookshelfMinMaxSizes 覆写 (3,7)
    *  （DungeonGenerationStyles.cs:38-44）；其余档缺省 (1,4)。 */
   BookshelfMinMaxOverride?: [number, number];
+  /** ★IIIII105c：风格灯/箱 item 表 + 生物箱规格（DungeonStyleItems.STYLE_LIGHTCHEST_TABLES
+   *  装配;DungeonGenerationStyles.cs 各档 Chandelier/Lantern/ChestItemTypes 与
+   *  LockedBiomeChest/BiomeChest 终值）。 */
+  Lch?: import('./DungeonStyleItems').StyleLightChestSpec;
 }
 
 const T = DualDungeonUnbreakableWallTiers;

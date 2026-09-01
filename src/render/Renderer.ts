@@ -4223,7 +4223,10 @@ export class Renderer {
     //   （提取机/染料机横缝，用户截图 42）。接入同一 doctrine：退出缩放变换，
     //   逐格算共享边设备矩形（dxa/dxb 同 round 函数），格内内容以 s=宽/16 缩放
     //   回放——任意 zoom/相机下动态格边恒整数，且与 chunk 邻边同函数同值。
-    if (dev) {
+    const devOn = dev && (globalThis as { __SW_DYNSNAP_OFF?: boolean }).__SW_DYNSNAP_OFF !== true
+      && (typeof location === 'undefined'
+        || !new URLSearchParams(location.search).has('dynsnap0'));
+    if (devOn) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
@@ -4240,12 +4243,15 @@ export class Renderer {
         let fy = st.frameY[i];
         if (sheet === 215) fy = campfireYOffset(st.frameY[i]);
         else if (sheet === 207) fy = fountainYOffset(st.frameY[i], tx, st.frameX[i]);
-        if (dev) {
-          const { zz, ox, oy, camRX, camRY } = dev;
+        if (devOn) {
+          const { zz, ox, oy, camRX, camRY } = dev!;
           const dxa = ox + Math.round((tx * ts - camRX) * zz);
           const yda = oy + Math.round((ty * ts - camRY) * zz);
           const dxb = ox + Math.round(((tx + 1) * ts - camRX) * zz);
           const ydb = oy + Math.round(((ty + 1) * ts - camRY) * zz);
+          // ★缝指认 instrumentation（__SEAMTRACE 数组时登记逐格 dest 矩形）
+          const tr = (globalThis as { __SEAMTRACE?: unknown[] }).__SEAMTRACE;
+          if (tr && tr.length < 20000) tr.push({ tx, ty, sheet: van.sheet, dxa, yda, dxb, ydb });
           ctx.save();
           ctx.translate(dxa, yda);
           ctx.scale((dxb - dxa) / ts, (ydb - yda) / ts);
@@ -4269,7 +4275,7 @@ export class Renderer {
         }
       }
     }
-    if (dev) ctx.restore();
+    if (devOn) ctx.restore();
   }
 
   private drawDummyTileAnim(ctx: CanvasRenderingContext2D, world: World, entities: Entity[],
@@ -4762,7 +4768,7 @@ export class Renderer {
               c2.putImageData(idd, 0, 0);
               if (isStatic) {
                 const cc = document.createElement('canvas'); cc.width = 8; cc.height = 8;
-                cc.getContext('2d')!.drawImage(s2, 0, 0);
+                cc.getContext('2d', { willReadFrequently: true })!.drawImage(s2, 0, 0);
                 this.dustDyeCache!.set(key, cc);
                 canvas = cc;
               } else canvas = null;   // 动态族直接用 s2 现画
@@ -12506,15 +12512,27 @@ export class Renderer {
           rot = aim + 0.785;
         } else {
           const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
-          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter-fh/2（:50387），
-          // 绘制角 = itemRotation（PlayerDrawLayers.cs:3444）
+          // ★全量仪表:每次 useStyle5 绘制打一行完整变换数据(_swDrawDbg)
+          try {
+            if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
+              || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
+              console.log('[swDraw]', `vid=${vid} fw=${fw} fh=${fh}`,
+                `dp=[${dp[0]},${dp[1]}]`,
+                `pivot=(${(p.cx + p.facing * (-2)).toFixed(1)},${(p.y + p.h * 0.5 + dp[1]).toFixed(1)})`,
+                `rot=${rot.toFixed(3)} rad (${Math.round(rot * 180 / Math.PI)}°)`,
+                `drawO=(${drawOX},${drawOY})`,
+                `muzzle_local=(${(dp[0] + fw).toFixed(0)},${(dp[1] + fh * 0.5).toFixed(1)})`);
+            }
+          } catch { /* noop */ }
+          // 非法杖（枪/弓/悠悠球等）：
+          // ★金标审计修正(2026-09-01)：offY = h/2 + dp[1]（per-item dy 进未旋转 pivot，
+          //   原版 vector11.Y→position.y）；drawOY = −fh/2（原版 origin7.y = H/2，
+          //   在旋转帧内恒定）。旧 offY=h/2−fh/2 + drawOY=dp[1] 把两个量放反了 →
+          //   非水平瞄准时整枪按角度漂移（象限分裂根因）。
           offX = -2;
-          offY = p.h * 0.5 - fh * 0.5;
+          offY = p.h * 0.5 + dp[1];
           rot = aim;
-          // ★握把 origin=(-num9,H/2)（PlayerDrawLayers.cs:3434-3443 + Main.cs:3305
-          // DrawPlayerItemPos）：num9 默认 10、逐 id 修正；dir=-1 时原版取 (W+num9,H/2)，
-          // 镜像空间等价 → 精灵左上角钉在握点 +（num9, dy）
-          drawOX = dp[0]; drawOY = dp[1];
+          drawOX = dp[0]; drawOY = -fh * 0.5;
         }
         break;
       }

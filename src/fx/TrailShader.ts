@@ -68,7 +68,7 @@ function extraData(atlas: NonNullable<Renderer['atlas']>, path: string, _tMs: nu
   try {
     const cv = document.createElement('canvas');
     cv.width = img.width; cv.height = img.height;
-    const cx = cv.getContext('2d');
+    const cx = cv.getContext('2d', { willReadFrequently: true });
     if (!cx) return null;
     cx.drawImage(img as CanvasImageSource, 0, 0);
     const d = cx.getImageData(0, 0, img.width, img.height);

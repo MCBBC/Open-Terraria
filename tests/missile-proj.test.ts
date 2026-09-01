@@ -537,15 +537,16 @@ describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :
 
 // ===================== 79 彩虹魔杖 Kill 迸散(:72436-72487 终清波真值化) =====================
 describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数量按距头部衰减 + L=.65)', () => {
+  /** 入池尘最小读面（VanillaDust.VDust 字段子集） */
+  type Rec = {
+    x: number; y: number; vx: number; vy: number; type: number;
+    scale: number; fadeIn: number; alpha: number; noGravity: boolean;
+    color: { r: number; g: number; b: number; a: number } | null;
+  };
   /** rand 恒 0.5 钉死的确定性回归:NewDust 抖动归零(±0.1×((.5*41|0)-20)=0)、
    *  Next(1,4)→2、scale=(0.9+0.6)*k67=1.5*k67、fadeIn=0.6*k67 —— 全闭式可算 */
-  function makeRecording79Kill() {
+  function makeRecording79Kill(): { hooks: never; spawns267: Rec[]; clones: Rec[] } {
     const vd = new VanillaDust();
-    type Rec = {
-      x: number; y: number; vx: number; vy: number; type: number;
-      scale: number; fadeIn: number; alpha: number; noGravity: boolean;
-      color: { r: number; g: number; b: number; a: number } | null;
-    };
     const spawns267: Rec[] = [];
     const clones: Rec[] = [];
     const realClone = vd.clone.bind(vd);
@@ -580,14 +581,15 @@ describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数�
         channel: () => false,
       });
       fly(m, hooks, 15);                                  // trail 环拉满 → N=12 点
-      expect(m.trail.length).toBe(24);
+      const trailPts = (m as unknown as { trail: number[] }).trail;
+      expect(trailPts.length).toBe(24);
       (m as unknown as { killNow(g: never): void }).killNow(hooks);
 
       // 迸散段是 spawn 流前缀(randbowRodHitFx ×2 与 14×d66 尾随,同 d267 但在段后)
       // —— 按"连续同钉点"分组(N=12:阈 {3.6,7.8,10.2} → 减数型 d∈[0,3]×2/[4,7]×1/
       //     [8,11]×0)。若方向写反(旧 bug 对新点减),首组数会 ≤ 后组且合计缩为 8。
       expect(spawns267.length).toBeGreaterThanOrEqual(12);
-      const groups: typeof spawns267 = [];
+      const groups: Rec[][] = [];
       for (const d of spawns267.slice(0, 12)) {
         const cur = groups[groups.length - 1];
         if (cur && Math.abs(cur[0].x - d.x) < 1e-9 && Math.abs(cur[0].y - d.y) < 1e-9) {

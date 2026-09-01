@@ -221,7 +221,8 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
     it('WeaponProj 301 撞墙 → PaladinsHammerShockwave(Size 载荷) 本地+broadcast', () => {
       const s = src('../src/entities/WeaponProj.ts');
       expect(s.includes('paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h)')).toBe(true);
-      expect(s.includes('ParticleOrchestraType.PaladinsHammerShockwave,\n          this.x, this.y, this.w, this.h')).toBe(true);
+      // 终清波重排 moveStep 后调用缩进变化——载荷匹配放宽为行距无关
+      expect(/ParticleOrchestraType\.PaladinsHammerShockwave,\s*\n\s*this\.x, this\.y, this\.w, this\.h/.test(s)).toBe(true);
       expect(s.includes("from '../fx/orchestraFx'")).toBe(true);
     });
 

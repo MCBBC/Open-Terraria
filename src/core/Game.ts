@@ -34,7 +34,7 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
   // ★★对抗修复批②2026-09-01（C-F1 近链/C-F4 受理核/C-F6 松露条件）
   queryRoom, acceptTownNPCAtHouse, checkHousesNearAPlayer,
-  expandedMushroomCount, MUSHROOM_TILE_THRESHOLD } from '../world/Housing';
+  expandedMushroomCount, truffleHomeConditionOk, MUSHROOM_TILE_THRESHOLD } from '../world/Housing';
 import type { NearChainNpcView } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
@@ -339,7 +339,8 @@ import { bindGhostBudgetHost } from '../entities/SpectreSoulProj';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
-import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank } from '../stats/QuickStacking';
+import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
+  ITEM_TRANSFER_PLAYER_TO_CHEST_BITS, type SlotArray } from '../stats/QuickStacking';
 import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
@@ -401,7 +402,7 @@ import { TitaniumStormShard,
 import { ChloroLeafCrystalAnchor, ChloroLeafShot,
   CHLORO_LEAF_SHOT_SIZE, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
-import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
+import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, blockedChestFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
 import { RainbowBolt } from '../entities/RainbowProj';
@@ -450,7 +451,7 @@ import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
-import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
+import { createBrickBoxForWallOfFlesh, onGameEventClearedForDualDungeons, startHardmode } from '../world/gen/vanilla/HardmodePass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
 
@@ -7152,7 +7153,13 @@ export class Game implements GameHooks {
             if (!wasHard && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
               this.newText(Lang.misc(32), 50, 255, 130);
             }
-            if (!wasHard) LanternNight.onGameEventCleared(19);
+            if (!wasHard) {
+              LanternNight.onGameEventCleared(19);
+              // OnGameEventClearedForTheFirstTime 尾段（NPC.cs:79607-79650）：双地牢
+              // 世界按事件档批剥墙漆——肉山 19 → Dungeon 档；同在 !eventFlag 首翻门内
+              // （重复杀 WOF 不重触发，NPC.cs:80306 的 eventFlag 语义）
+              onGameEventClearedForDualDungeons(w, 19);
+            }
             this.newText(Lang.misc(15), 50, 255, 130);
             this.achievements.notifyProgressionEvent(9);
           }
@@ -7162,7 +7169,12 @@ export class Game implements GameHooks {
           // 6 石头人 7 猪鲨 9 邪教徒 10 月总 24 史后 23 光女 25 鹿角怪 16/17/18 三王
           if (this.boss.vanillaId != null) {
             const ev = BOSS_GAME_EVENT_BY_NPC[this.boss.vanillaId];
-            if (ev !== undefined && !wasDowned) LanternNight.onGameEventCleared(ev);
+            if (ev !== undefined && !wasDowned) {
+              LanternNight.onGameEventCleared(ev);
+              // 同函数尾段双地牢分支（NPC.cs:79607-79650）：boss 映射可达集
+              // 8/11/13/14/15/16-18/24 有墙漆档行为，其余 id 原版 switch 空转零行为
+              onGameEventClearedForDualDungeons(w, ev);
+            }
             // 三王全灭 → 保底世花球茎（NPC.cs:79578-79585 case 16/17/18 →
             // OnGameEventClearedForTheFirstTime 首杀翻转门内 →
             // WorldGen.GeneratePlanteraBulbOnAllMechsDefeated：netMode!=1 &&
@@ -13059,13 +13071,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  "缩短"是正确行为(不能隔墙开火);原版出生=盒中心同样永远够不到墙外语义。
    **/
   private resolveShotAnchor(spriteKey: string, ang: number): { x: number; y: number } {
-    // ★v11(2026-08-31 终版):heldItemTipWorld 极坐标(枪族:中心+瞄准·reach+(0,−fh/2))。
-    //  渲染隐藏由 Arrow.draw / GrenadeProj.draw 角色盒内不渲染弹体实现。
-    const vid = viIdFromKey(spriteKey);
-    const swAr = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, spriteKey) : null;
-    return heldItemTipWorld(
-      this.player.cx, this.player.cy, this.player.facing === -1 ? -1 : 1, ang,
-      vid, swAr?.sw ?? 16, swAr?.sh ?? 16);
+    // ★v8 终案(2026-08-31):出生=盒中心(原版字面 Player.cs:47603),永不穿墙/入地。
+    //  枪口出膛观感由渲染层实现:Arrow.draw / GrenadeProj.draw 角色盒内不渲染弹体。
+    return { x: this.player.cx, y: this.player.cy };
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -14762,8 +14770,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             'vy=' + (Math.sin(ang) * cw.shootSpeed).toFixed(1)); //$TEST
           const zapA = this.resolveShotAnchor(def.key, ang);
           const zap = new Arrow(zapA.x, zapA.y,
-            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-            cw.damage, cw.knockback, cw.shoot, null,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, cw.shoot, null,
             { grav: 0, life: pd?.timeLeft ?? 600, pierce: pd?.penetrate ?? 3 });
@@ -24058,7 +24064,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           let ry2b = 0;
           for (const ti of rq.room.tiles) { const ty = (ti / st.w) | 0; if (ty > ry2b) ry2b = ty; }
           ok = ry2b <= Math.floor(this.world.groundLevel)
-            && expandedMushroomCount(st, rq.room) >= MUSHROOM_TILE_THRESHOLD;
+            && truffleHomeConditionOk(st, hx, hy);
         }
         if (!ok) {
           n.home = null;
@@ -24282,7 +24288,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (ay >= limit) return;
       const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
       this.entities.add(npc, 'npcs');
-      this.homelessSpawnTimeout = 54000;   // ★1457 cs:4988：成功入住后一天一户节流
+      // （★批②2026-09-01：原在此处的 homelessSpawnTimeout=54000 已删——置位按
+      // cs:4986-4989 字面只在快路径成功支,见上方 house 支）
       this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
     }
     // ---- 分配收尾不变量（2026-08-30 增量#2）：本轮 ①''房况复核重锚 / ①QuickFindHome
@@ -25218,7 +25225,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let ry2b = 0;
       for (const ti of q.room.tiles) { const ty = (ti / this.world.store.w) | 0; if (ty > ry2b) ry2b = ty; }
       const surfOk = ry2b <= Math.floor(this.world.groundLevel);
-      const mushOk = expandedMushroomCount(st, q.room) >= MUSHROOM_TILE_THRESHOLD;
+      const mushOk = expandedMushroomCount(this.world.store, q.room) >= MUSHROOM_TILE_THRESHOLD;
       if (!surfOk || !mushOk) {
         console.info(`[housing] truffle assign 拒绝 @(${x},${y}) surf=${surfOk} mush=${mushOk}`);
         this.newText(Lang.inter(55), 255, 240, 20);
@@ -27353,52 +27360,79 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     options.set('quickStackMode', this.quickStackMode() === 'quick' ? 'smart' : 'quick');
   }
 
-  /** QuickStackAllChests（:22904-22911）：① 附近 bank（piggy/safe/forge/void vault
-   *  tile 29/97/463/491 盒扫 600px）合币 + 通用堆叠；② 附近宝箱（600px 欧氏）
-   *  quick/smart 堆叠。HasLockedInventory（占位物 4762 锁栏）本仓未实装，登记 */
+  /** QuickStackAllChests（Player.cs:22904-22911）：① 附近 bank（nearbyBanksInRange
+   *  盒扫：sheet 29/97/463/491 → 内部 tile 83/235/84/230,Q-F1 修复锚）MoveCoins 合币
+   *  + VisualizeChestTransfer_CoinsBatch 可视化 + 通用 Transfer（含逐帧 ItemTransfer,
+   *  Q-F5）；② 附近宝箱（600px 欧氏）quick/smart 堆叠——持虚空透镜（useVoidBag=
+   *  背包 58 格任一 4131）时走 PackQuickStackableItems includeVoidBag 臂把 banks[3]
+   *  追加为源件段（Q-F2）。HasLockedInventory（占位物 4762 锁栏）本仓未实装，登记。
+   *  触发面（F9 复核注：全链有调用方）：背包 UI 右上钮簇 ChestStack 钮已接线于
+   *  src/ui/UI.ts :3391-3406（左键本入口+音12 / 右键 cycleQuickStackMode+音10；
+   *  悬停文案走原版键 GameUI.QuickStackToNearby|SmartStackToNearby :4550-4556,
+   *  Main.cs:42563-42574 等价）；原版无独立键盘热键（仅指针钮）。 */
   quickStackAllChests(): void {
     const p = this.player;
-    // ① bank 段（QuickStackToNearbyBanks :230-241）——bankSource 盒扫与合成侧同源
-    const num = Math.trunc(600 / 16 + 2);
+    // ① bank 段（QuickStackToNearbyBanks :238-250 / 1456 :230-242）——tile 段盒扫
+    //   与合成侧同源（GetBanksInRangeOf :33-91）;bank 径源件不含袋臂（includeVoidBag:false）
     const cx = Math.floor(p.cx / TILE), cy = Math.floor(p.cy / TILE);
-    const st = this.world.store;
-    const nearBanks: Array<Array<{ id: number; stack: number; prefix?: number } | null>> = [];
-    const seen = new Set<number>();
-    for (let j = cx - num; j <= cx + num; j++) {
-      for (let k = cy - num; k <= cy + num; k++) {
-        if (!st.inBounds(j, k)) continue;
-        const t = st.type[st.idx(j, k)];
-        const bi = [29, 97, 463, 491].indexOf(t);
-        if (bi < 0) continue;
-        if (seen.has(bi)) continue;
-        const bank = p.banks[bi];
-        if (!bank) continue;
-        // void vault（491）：背包持有 vault 物 5325 → 不计（ContainerIndexToPlayerBank :119-130）
-        if (bi === 3 && p.inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 5325)) continue;
-        seen.add(bi);
-        nearBanks.push(bank);
+    const vaultHeld = p.inv.slots.some((s) => s && s.stack > 0 && vanillaIdOfItem(s.id) === 5325);
+    for (const b of nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld)) {
+      const bx = (b.tx + 1) * 16, by = (b.ty + 1) * 16;   // item.position=(j·16+16,k·16+16)
+      // MoveCoins + VisualizeChestTransfer_CoinsBatch(:243-244 / 1456 :235-236)：净转铜值
+      //   四档拆分（Utils.CoinsSplit Chest.cs:325），每档 ≥1 发一枚 ItemTransfer(71+i)
+      const cue = { playSound7: false };
+      const coinsMoved = moveCoinsIntoBank(p.inv, b.items, cue);
+      if (coinsMoved > 0) {
+        const denoms = [1, 100, 10000, 1000000];
+        const split = [0, 0, 0, 0];
+        let rest = Math.max(0, Math.trunc(coinsMoved));
+        for (let i = 3; i >= 0; i--) { split[i] = Math.floor(rest / denoms[i]); rest -= split[i] * denoms[i]; }
+        for (let i = 0; i < 4; i++) {
+          if (split[i] >= 1) this.emitItemTransferFx(p.cx, p.cy, bx, by, 71 + i);
+        }
       }
+      if (cue.playSound7) this.sfx.play('pickup', 1);   // Q-F6:ChestUI.MoveCoins 尾 flag 支 PlaySound(7)
+      // bank 径通用 Transfer（Invariant.Assert(!blockedChests.Any()) :248——bank 无 locked 面）
+      this.emitQuickStackResultFx(
+        quickStackToChests(p.inv, [{ x: b.tx, y: b.ty, items: b.items }], false));
     }
-    for (const bank of nearBanks) {
-      moveCoinsIntoBank(p.inv, bank);
-      quickStackToChests(p.inv, [{ x: 0, y: 0, items: bank }], false);
-    }
-    // ② 宝箱段（QuickStackToNearbyChests :243-259）——入箱编排粒子（Chest.VisualizeChestTransfer
-    //   Chest.cs:315 BroadcastOrRequest 面的仓内等价位;L5 长尾批 ItemTransfer 接线）:
-    //   position=玩家心、chestPosition=箱左上、itemType=首件型、flags=RandomizeStart 位。
-    {
-      const qsRes = quickStackToChests(p.inv, chestsInRangeOf(this.world.chests, p.x, p.y),
-        this.quickStackMode() === 'smart');
-      for (const ch of qsRes.touched) {
-        const vids = qsRes.movedVids.get(ch) ?? [];
-        if (!vids.length) continue;
-        itemTransferFx(this, p.cx, p.cy, ch.x + 8, ch.y + 8, vids[0], 1);
-        this.broadcastParticleOrchestra(ParticleOrchestraType.ItemTransfer,
-          p.cx, p.cy, (ch.x + 8) - p.cx, (ch.y + 8) - p.cy,
-          (vids[0] & 0xffffff) | (1 << 24));
-      }
-    }
+    // ② 宝箱段（QuickStackToNearbyChests :252-268 / 1456 :243-259）——持虚空透镜走
+    //   includeVoidBag 臂（PackQuickStackableItems :384-386 的 useVoidBag() & true 门）：
+    //   banks[3] 袋面追加为源件段,写回经 RestoreToPlayer 扩展位
+    this.emitQuickStackResultFx(quickStackToChests(p.inv,
+      chestsInRangeOf(this.world.chests, p.x, p.y),
+      this.quickStackMode() === 'smart',
+      { voidVaultSource: p.useVoidBag() ? p.banks[3] : null }));
     this.cb.onInventoryChanged?.();
+  }
+
+  /** QuickStacking 结果的编排出站（Visualize 族 BroadcastOrRequest 面,QuickStacking.cs
+   *  FillStack :533 / InsertIntoFreeSlot :564 每搬一件各发一帧带当次 type——Q-F5 从
+   *  「首件型单帧」升级为逐帧序列;touched/blocked 端点取 chest.position=箱锚像素面） */
+  private emitQuickStackResultFx(res: ReturnType<typeof quickStackToChests>): void {
+    const p = this.player;
+    for (const ch of res.touched) {
+      // ★Q-F3：端点 = 箱锚 (x·16+16, y·16+16)（NearbyChests.cs:23 的 PositionedChest.
+      //   position）——曾传 ch.x+8 造成终点落格左上象限 8px 偏移
+      const ex = (ch.x + 1) * 16, ey = (ch.y + 1) * 16;
+      for (const v of res.movedVids.get(ch) ?? []) {
+        this.emitItemTransferFx(p.cx, p.cy, ex, ey, v);
+      }
+    }
+    // IndicateBlockedChests 单人半边（QuickStacking.cs:270-287）→ Chest.IndicateBlockedChest
+    //   （:3578 红图标挂箱锚 60t）等价最低成本位=blockedChestFx 粒子通道（Q-F7）
+    for (const ch of res.blocked) blockedChestFx(this, (ch.x + 1) * 16, (ch.y + 1) * 16);
+  }
+
+  /** 单帧 ItemTransfer 出站半边（本地直生 + module8 上行,Chest.VisualizeChestTransfer
+   *  Chest.cs:312-321 直译）：PositionInWorld=起点(玩家心)、MovementVector=终点−起点、
+   *  UniqueInfoPiece=id | settings 位（PlayerToChest 四旗全真,ITEM_TRANSFER_PLAYER_TO_
+   *  CHEST_BITS）。★跨端形差备忘：远端消费端 itemTransferFx 只读 bit0——三位高旗按
+   *  原版值随载荷广播,形差登记见 fx/orchestraFx.itemTransferFx 注 */
+  private emitItemTransferFx(sx: number, sy: number, ex: number, ey: number, vid: number): void {
+    itemTransferFx(this, sx, sy, ex, ey, vid, ITEM_TRANSFER_PLAYER_TO_CHEST_BITS >> 24);
+    this.broadcastParticleOrchestra(ParticleOrchestraType.ItemTransfer, sx, sy,
+      ex - sx, ey - sy, (vid & 0xffffff) | ITEM_TRANSFER_PLAYER_TO_CHEST_BITS);
   }
 
   startInvasionWithAnnounce(type: number, ignoreDelay = false): boolean {

@@ -980,10 +980,23 @@ function placeBuriedChestInner(
   // ★IIIII107 定罪②：cs:36153-36156 remix-rock 三号门（IsUndergroundDesert 内
   //   `if (remixWorldGen && y > Main.rockLayer) return false;`）。反演重放 A/B：
   //   门开=首分叉 (1995,778) 池骰消失（与 x86 一致）；门关=JS 独掷一枚池骰。
-  const I107_MARK = 'i107v6-baseline';
-  const i107NoRockDesert = true;
+  // ★IIIII108（2026-09-01，承 IIII107 定罪②落地）：remix-rock 三号门转正——
+  //   Terarria1457 WorldGen.cs:36146-36149（1458 终值行号 cs:36153-36156）
+  //   `if (remixWorldGen && (double)y > Main.rockLayer) return false;`：
+  //   IsUndergroundDesert 前两门（y≥ws、x∈[0.15W,0.85W]）之后、±15 扫描之前的
+  //   第三道门，仅 remix 生效（非 remix 零扰动）。上文 I107 反演重放 A/B 已证
+  //   门开=首分叉 (1995,778) 池骰消失、与 x86 直过一致。
+  //   ★机制补记（IIIII108b）：slot 级配对律下该门是「同值异义」C↔B 池骰互换簇的
+  //   换腿点——JS 删去 @1176 的 B 类独掷后，CORE 三联相位与 x86 在下一候选
+  //   ★IIIII108b 实测裁决（今日同树 A/B）：SW_I108_GATE=1（门开）窗耗骰 53,043/
+  //   面 SELF=7482 vs 门关 66,524/568（=昨日 capB 基线逐字节复现）——单门先行
+  //   会拆掉现存补偿腿结构（C↔B 池骰互换簇），须与簇②..⑤(caves→UW 边界早入)
+  //   带窗推进到齐后整组转正。生产缺省维持门关（★但门体已按 cs 锚落位,非
+  //   remix 世界该分支恒不生效=零扰动）;后续批次翻门只改此一处开关。
+  const i108NoGate = !(typeof process !== 'undefined'
+    && (process as unknown as { env?: Record<string, string | undefined> }).env?.SW_I108_GATE === '1');
   const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
-    && i107NoRockDesert
+    && !(gs.seedFlags.remix && !i108NoGate && gy > gs.rockLevel)
     && (() => {
       if (gy > st.h - 205) return false;
       const num = 15;

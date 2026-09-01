@@ -254,7 +254,7 @@ export class TrapShot extends Entity {
     {
       const c = document.createElement('canvas');
       c.width = img.width; c.height = img.height;
-      const cx = c.getContext('2d')!;
+      const cx = c.getContext('2d', { willReadFrequently: true })!;
       cx.drawImage(img, 0, 0);
       const d = cx.getImageData(0, 0, c.width, c.height).data;
       for (let i = 3; i < d.length; i += 4) { if (d[i] > 30) { blank = false; break; } }

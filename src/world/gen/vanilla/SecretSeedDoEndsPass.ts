@@ -539,6 +539,16 @@ function convertCell(
   // 其余 conversionType（5/6/7…）不在本批旗标消费面内——登记另案。
 }
 
+/** ★F4② 单格神圣面转化公开入口（initializeHardMode remix 边缘带臂消费）：
+ *  WorldGen.Convert(i2,j2,2) 字面同参调用（tiles/walls 缺省 true）。Runtime 调用方
+ *  无 GenState——case2 全链对 gs 只做透传（树护栏 ConvertTreeAndGround→genKillTile
+ *  不解引用其字段），缺省注入最小占位对象与 convertActuallyTile 内既有 idiom 同款。 */
+export function convertHallowCell(
+  st: TileStore, rng: RNG, i: number, j: number, gs?: GenState,
+): void {
+  convertCell(st, rng, gs ?? ({ seedFlags: {} } as never), i, j, 2, true, true);
+}
+
 /** WorldGen.Convert(i,j,conversionType,size,tiles,walls) size 版（cs:55550-55565）：
  * [i-size..i+size]² 盒 + 曼哈顿距离 <6 过滤逐格调单格版。★IIIII107b（2026-09-01）
  * 入列：ShimmerCleanUp 尾净化菱形 Convert(j,i,0,3)（cs:34801，1438 万石债主）——
@@ -1212,9 +1222,13 @@ export function doSurfaceIsMushroomsCore(st: TileStore, rng: RNG, gs: GenState):
 // ============================================================
 // ⑥ DoStartInHardmode（too easy，cs:1905-1909）
 // ============================================================
+/** DoStartInHardmode（too easy，cs:1905-1909）。★F4：直调 initializeHardMode(world,rng)
+ *  传参路径共享其内的秘种子分支——dualDungeonsSeed 门（cs:31864-31867）/ remix 边缘带臂
+ *  （cs:31906-31941）/ Skyblock.lowTiles 早退（cs:76941-76943，生成期 lowTiles 恒缺省
+ *  false，与原版生成期 Calculate 未触发同态）——旗源一律读 world.seedFlags。 */
 export function doStartInHardmode(world: World, rng: RNG): void {
   world.flags.hardMode = true;                                          // Main.hardMode = true
-  initializeHardMode(world, rng);                                       // V 带 GERunner + 回填
+  initializeHardMode(world, rng);                                       // V 带臂 + 回填
 }
 
 // ============================================================

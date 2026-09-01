@@ -62,6 +62,10 @@ export interface VDust {
    *  npc.oldPos[1]）。闭包返回被跟实体【上一拍位移】；终清烟批（月总水蛭
    *  aiStyle82 d229 环 :37102-37116）为首个消费方。池复用安全：spawn() 归零。 */
   followEnt: (() => { dx: number; dy: number }) | null;
+  /** customData = Vector2（:906-912 吸向档）——velocity=(v×4 + 单位向·|v|)/5。
+   *  终清波批接入：幻影之门 aiStyle108 聚尘/开门两段（P.cs:34435/:34640 族,
+   *  门心快照）。followPlayer/followEnt 同档不共存（原版 customData 单值）。 */
+  attractTo: { x: number; y: number } | null;
   /** 染料 vid（-1 无；GetSecondaryShader(cShoe/cWings) 等价——渲染端跑
    *  SM2 染料字节码（63 pass 全技术，含彩虹/反射/凝胶等动态族）） */
   dyeVid: number;
@@ -100,6 +104,7 @@ export class VanillaDust {
         fadeIn: 0, noGravity: false, noLight: false, noLightEmittance: false,
         color: null, rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
         followEnt: null,
+        attractTo: null,
       });
     }
   }
@@ -146,6 +151,7 @@ export class VanillaDust {
     d.followPlayer = false;
     d.followOnce = false;
     d.followEnt = null;
+    d.attractTo = null;
     d.dyeVid = -1;
     // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
     if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
@@ -189,6 +195,7 @@ export class VanillaDust {
     c.followPlayer = rf.followPlayer;          // :286 customData=Player
     c.followOnce = rf.followOnce;
     c.followEnt = rf.followEnt;
+    c.attractTo = rf.attractTo;
     return c;
   }
 
@@ -284,6 +291,14 @@ export class VanillaDust {
             else if (d.followEnt) {
               const q = d.followEnt();
               d.x += q.dx; d.y += q.dy;
+            } else if (d.attractTo) {
+              // :906-912 customData=Vector2 吸向——速度方向折向锚点、模长保持
+              const axv = d.attractTo.x - d.x, ayv = d.attractTo.y - d.y;
+              const len = Math.hypot(axv, ayv);
+              const ux2 = len !== 0 ? axv / len : 0, uy2 = len !== 0 ? ayv / len : 0;
+              const mag = Math.hypot(d.vx, d.vy);
+              d.vx = (d.vx * 4 + ux2 * mag) / 5;
+              d.vy = (d.vy * 4 + uy2 * mag) / 5;
             }
           }
           if (!d.noLight && !d.noLightEmittance) {        // :918

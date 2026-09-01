@@ -28,7 +28,7 @@ export class AutoTiler {
     if (!c) {
       c = document.createElement('canvas');
       c.width = base.sw; c.height = base.sh;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       ctx.imageSmoothingEnabled = false;
       ctx.translate(base.sw / 2, base.sh / 2);
       // 位置旋转 (x,y)→(-y,x)（Unity y-up 的 90° 逆时针视觉方向）
@@ -181,7 +181,7 @@ export class AutoTiler {
     if (!entry || !img) return;
     const c = document.createElement('canvas');
     c.width = img.width; c.height = img.height;
-    const ctx = c.getContext('2d')!;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(img, 0, 0);
     const groups: Record<string, Array<{ key: string; rect: DrawRect }>> = {};
     for (const s of entry.sprites) {
@@ -255,7 +255,7 @@ export class AutoTiler {
     if (!c) {
       c = document.createElement('canvas');
       c.width = r.sw; c.height = r.sh;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
       const img = ctx.getImageData(0, 0, r.sw, r.sh);

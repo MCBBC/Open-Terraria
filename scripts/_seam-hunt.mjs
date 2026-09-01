@@ -49,7 +49,7 @@ await sleep(1200);
 // 玩家挪到存档里机器区（地图头 player 3197,395）
 await p.evaluate(async () => {
   const g = window.__swGame, pl = g.player;
-  pl.x = 51203.52 - pl.w / 2; pl.y = 6260.52 + 20 - pl.h; pl.vx = 0; pl.vy = 0;   // 站到用户相机中心处(脚在下方20px)
+  pl.x = 51187.08 - pl.w / 2; pl.y = 6244.08 - 120.7 + 21 - pl.h; pl.vx = 0; pl.vy = 0;   // 渲染相机=玩家中心+120.7(实测),反推站位
   try { g.camera.followPlayer = false; } catch {}
   try { g.camera.x = 3199 * 16; g.camera.y = 391 * 16; } catch {}
   const st = g.world.store;
@@ -65,7 +65,42 @@ await p.evaluate(async () => {
   window.__seamHits = hits;
   window.__swTILE_DEFS_OK = true;
 });
+await p.evaluate(() => { window.__SEAMTRACE = []; });
 await sleep(600);
+// ★精确瞄准:迭代玩家位置,使渲染相机(由 trace 已知格反解) == 记录相机
+const aim = async (tX, tY) => {
+  for (let it = 0; it < 6; it++) {
+    const cur = await p.evaluate(() => {
+      const tr = (globalThis.__SEAMTRACE ?? []).slice(-300);
+      globalThis.__SEAMTRACE.length = 0;
+      // 用最远的已知动态格反解:任取两格 (tx,ty,dxa,yda) 解 camRX/camRY
+      for (const c of tr) {
+        for (const d of tr) {
+          if (d === c || d.tx === c.tx || d.ty === c.ty) continue;
+          const zz = 1.25, ox = Math.round((window.innerWidth) / 2), oy = Math.round(window.innerHeight / 2);
+          const camRX = c.tx * 16 + (ox - c.dxa) / zz;
+          const camRY = c.ty * 16 + (oy - c.yda) / zz;
+          const camRX2 = d.tx * 16 + (ox - d.dxa) / zz;
+          const camRY2 = d.ty * 16 + (oy - d.yda) / zz;
+          if (Math.abs(camRX - camRX2) < 0.5 && Math.abs(camRY - camRY2) < 0.5) return { x: camRX, y: camRY };
+        }
+      }
+      return null;
+    }, tX, tY);
+    if (!cur) { await sleep(400); continue; }
+    const dx = tX - cur.x, dy = tY - cur.y;
+    console.log('AIM it' + it + ' render=(' + cur.x.toFixed(1) + ',' + cur.y.toFixed(1) + ') delta=(' + dx.toFixed(1) + ',' + dy.toFixed(1) + ')');
+    if (Math.abs(dx) < 0.6 && Math.abs(dy) < 0.6) return true;
+    await p.evaluate((ddx, ddy) => {
+      const pl = window.__swGame.player;
+      pl.x += ddx; pl.y += ddy; pl.vx = 0; pl.vy = 0;
+    }, dx, dy);
+    await sleep(500);
+  }
+  return false;
+};
+const aimed = await aim(renderMeta.camX, renderMeta.camY);
+console.log('AIMED:', aimed);
 // 诊断：暂停态/可见性/世界尺寸/chunk缓存
 const diag = await p.evaluate(() => {
   const g = window.__swGame;
@@ -81,7 +116,7 @@ if (renderMeta && (REPLAY === 'full' || REPLAY === 'cam')) {
 }
 const hits = await p.evaluate(() => window.__seamHits);
 console.log('MACHINES:', JSON.stringify(hits));
-const zooms = [1, 1.1, 1.2, 1.25, 1.27, 1.35, 1.5, 2];
+const zooms = [1.25];
 let zz0 = 1.27;
 for (const z of zooms) {
   zz0 = z;
@@ -104,9 +139,11 @@ for (const z of zooms) {
     }
   };
   await ensureNoModal();
-  for (const tag of ['a', 'b']) {
+  for (const tag of ['a', 'b', 'c', 'd']) {
     await ensureNoModal();
-    await sleep(tag === 'a' ? 50 : 640);
+    if (tag === 'c') await p.evaluate(() => { window.__SW_DYNSNAP_OFF = true; });
+    if (tag === 'd') await p.evaluate(() => { window.__SW_DYNSNAP_OFF = false; });
+    await sleep(tag === 'a' ? 50 : tag === 'c' ? 30 : 640);
     const clip = null; // 全幅截图（缝场景以相机为中心,不锚定出生点机器）
     await p.screenshot({ path: `${OUT}/z${z}-${tag}.png` });
     // 数值行剖扫(机器跨度窗)+ 4x 放大裁剪导出
@@ -119,7 +156,7 @@ for (const z of zooms) {
       cx2.drawImage(cv, 0, 0);
       const d = cx2.getImageData(0, 0, cv.width, cv.height).data;
       const W = cv.width;
-      const x0 = 130, x1 = 305;
+      const x0 = 236, x1 = 312;
       const lum = (x, y) => { const i = (y * W + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
       const out = [];
       for (let y = 80; y <= 150; y++) {
@@ -129,41 +166,89 @@ for (const z of zooms) {
       }
       // furnace 列带精确定位缝行
       const furnCol = [];
-      for (let y = 90; y <= 135; y++) {
+      for (let y = 275; y <= 300; y++) {
         let s2 = 0, n = 0;
-        for (let x = 138; x <= 178; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
+        for (let x = 244; x <= 306; x++) { s2 += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
         furnCol.push([y, +(s2 / n).toFixed(1)]);
       }
       // 找 furnace 带内的异常行(局部极值):与邻行均值差>18
       let seamY = -1, bestD = 0;
-      for (let i = 2; i < furnCol.length - 2; i++) {
-        const nb = (furnCol[i - 2][1] + furnCol[i - 1][1] + furnCol[i + 1][1] + furnCol[i + 2][1]) / 4;
-        const dd = furnCol[i][1] - nb;
-        if (dd > bestD) { bestD = dd; seamY = furnCol[i][0]; }
-      }
-      // 沿缝行采样色带(x=134..300 每8px) + 缝行世界坐标
+      void seamY; void bestD;
+      // ★审视 283..289 行横向色带
       const seamRow = [];
-      if (seamY > 0) {
-        for (let x = 134; x <= 300; x += 8) {
-          const i = (seamY * W + x) * 4;
-          seamRow.push(`${x}:${d[i]},${d[i + 1]},${d[i + 2]}`);
+      for (let yy = 283; yy <= 289; yy++) {
+        const band = [];
+        for (let x = 244; x <= 312; x += 8) {
+          const i = (yy * W + x) * 4;
+          band.push(`${d[i]},${d[i + 1]},${d[i + 2]}`);
         }
-        const wpt = g.camera.screenToWorld(x0 + 4, seamY);
-        seamRow.push(`worldY=${(wpt.y / 16).toFixed(2)}tiles`);
+        seamRow.push(`y${yy}[${band.join(' ')}]`);
       }
       // 机器区 4x 放大
       const mc = document.createElement('canvas');
-      mc.width = (x1 - x0) * 4; mc.height = 70 * 4;
+      mc.width = 90 * 4; mc.height = 75 * 4;
       const mcx = mc.getContext('2d');
       mcx.imageSmoothingEnabled = false;
-      mcx.drawImage(cv, x0, 80, x1 - x0, 70, 0, 0, mc.width, mc.height);
+      mcx.drawImage(cv, 262, 90, 90, 75, 0, 0, mc.width, mc.height);
       return { rows: out, png: mc.toDataURL('image/png'), furnCol, seamRow };
     }, tag);
     await p.evaluate((durl, z, tg) => {
       window.__seamCrops = window.__seamCrops ?? {};
       window.__seamCrops[`${z}-${tg}`] = durl;
     }, scan.png, z, tag);
-        console.log(`z${z}-${tag} furnCol=${JSON.stringify(scan.furnCol)} seamRowColors=${JSON.stringify(scan.seamRow)}`);
+        const trace = await p.evaluate((holeRows) => {
+      const trAll = (globalThis.__SEAMTRACE ?? []);
+      const tr = trAll.slice(-2000);   // 最近帧(全量累积数万条,取尾)
+      const stats = { total: trAll.length, sheets: [...new Set(trAll.map((c) => c.sheet))].join(','),
+        ty383: JSON.stringify(trAll.filter((c) => c.ty === 383).slice(-12)),
+        ty382: JSON.stringify(trAll.filter((c) => c.ty === 382).slice(-6)) };
+      const out = [];
+      for (const hr of holeRows) {
+        const cover = tr.filter((c) => c.yda <= hr && c.ydb >= hr + 1 && c.dxa <= 312 && c.dxb >= 236);
+        out.push('row' + hr + ': ' + (cover.map((c) => '(' + c.tx + ',' + c.ty + ')s' + c.sheet + '[' + c.dxa + ',' + c.yda + ',' + c.dxb + ',' + c.ydb + ']').join(' ') || 'NO-COVER'));
+        const spans = cover.map((c) => [Math.max(236, c.dxa), Math.min(312, c.dxb)]).sort((a, b) => a[0] - b[0]);
+        let cur = spans.length ? spans[0][0] : undefined;
+        const gaps = [];
+        for (const [s0, s1] of spans) {
+          if (cur === undefined) { cur = s0; continue; }
+          if (s0 > cur + 0.5) gaps.push('[' + cur + ',' + s0 + ')');
+          cur = Math.max(cur, s1);
+        }
+        if (gaps.length) out.push('  xGAPS=' + gaps.join(','));
+      }
+      globalThis.__SEAMTRACE = [];
+      out.unshift('stats=' + JSON.stringify(stats));
+      return out;
+    }, [285, 286, 287]);
+    // ★三列带逐行扫:左臂/晶石/右臂 内部是否出现墙色行
+    const colScan = await p.evaluate(() => {
+      const g = window.__swGame;
+      const cv = g.renderer?.canvas ?? document.querySelector('canvas');
+      const c2 = document.createElement('canvas');
+      c2.width = cv.width; c2.height = cv.height;
+      const cx2 = c2.getContext('2d');
+      cx2.drawImage(cv, 0, 0);
+      const d = cx2.getImageData(0, 0, cv.width, cv.height).data;
+      const W = cv.width;
+      const cols = { armL: 288, crys: 300, armR: 322 };
+      const out = {};
+      for (const [k, cx3] of Object.entries(cols)) {
+        const rows = [];
+        for (let y = 92; y <= 158; y++) {
+          const i = (y * W + cx3) * 4;
+          rows.push(`${y}:${d[i]},${d[i + 1]},${d[i + 2]}`);
+        }
+        out[k] = rows;
+      }
+      return out;
+    });
+    if (tag === 'b' || tag === 'c') {
+      const armR = colScan.armR.filter((r) => { const y = parseInt(r); return y >= 118 && y <= 132; });
+      console.log(`z${z}-${tag} armR=${JSON.stringify(armR)}`);
+    }
+    console.log(`z${z}-${tag} COLS=${JSON.stringify(colScan)}`);
+    console.log(`z${z}-${tag} TRACE=${JSON.stringify(trace)}`);
+    console.log(`z${z}-${tag} furnCol=${JSON.stringify(scan.furnCol)} seamRowColors=${JSON.stringify(scan.seamRow)}`);
   }
 }
 // 落盘全部放大裁剪
@@ -173,6 +258,35 @@ for (const [k, v] of Object.entries(crops)) {
   writeFileSync(`${OUT}/crop-${k}.png`, Buffer.from(v.split(',')[1], 'base64'));
 }
 console.log('CROPS:', Object.keys(crops).join(','));
+// ★光照层归因:同一设备行在 worldCanvas(乘光前) vs 主画布(乘光后) 的亮度差
+const lightDiff = await p.evaluate(() => {
+  const g = window.__swGame;
+  const r = g.renderer;
+  const main = r.canvas ?? document.querySelector('canvas');
+  const wc = r.worldCanvas;
+  if (!wc) return 'no worldCanvas';
+  const c1 = document.createElement('canvas'); c1.width = main.width; c1.height = main.height;
+  const x1 = c1.getContext('2d'); x1.drawImage(main, 0, 0);
+  const c2 = document.createElement('canvas'); c2.width = wc.width; c2.height = wc.height;
+  const x2 = c2.getContext('2d'); x2.drawImage(wc, 0, 0);
+  const d1 = x1.getImageData(0, 0, main.width, main.height).data;
+  const d2 = x2.getImageData(0, 0, wc.width, wc.height).data;
+  const W1 = main.width, W2 = wc.width;
+  const lum1 = (x, y) => { const i = (y * W1 + x) * 4; return 0.299 * d1[i] + 0.587 * d1[i+1] + 0.114 * d1[i+2]; };
+  const lum2 = (x, y) => { const i = (y * W2 + x) * 4; return 0.299 * d2[i] + 0.587 * d2[i+1] + 0.114 * d2[i+2]; };
+  const out = [];
+  for (let y = 110; y <= 120; y++) {
+    let s1 = 0, s2 = 0, n = 0;
+    for (let x = 236; x <= 312; x++) {
+      s1 += lum1(x, y);                     // 合成后
+      s2 += lum2(Math.round(x * (W2 / W1)), Math.round(y * (wc.height / main.height)));  // 乘光前(低清坐标)
+      n++;
+    }
+    out.push(y + ':post=' + (s1 / n).toFixed(1) + ' pre=' + (s2 / n).toFixed(1));
+  }
+  return out;
+});
+console.log('LIGHTDIFF:', JSON.stringify(lightDiff));
 console.log('DONE');
 // 数值行剖扫:机器区(世界 3188..3191 × 380..385)每设备行与上一行的平均|Δ|,
 // 输出异常行;并把机器区放大图导出 dataURL 供目检

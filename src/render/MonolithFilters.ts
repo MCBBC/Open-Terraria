@@ -713,7 +713,7 @@ export class MonolithFilters {
   private drawGraveyard(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, f: FilterState,
     w: number, h: number): void {
     const low = this.lowCanvas(w, h);
-    const lctx = low.getContext('2d')!;
+    const lctx = low.getContext('2d', { willReadFrequently: true })!;
     lctx.clearRect(0, 0, low.width, low.height);
     lctx.drawImage(canvas, 0, 0, low.width, low.height);
     const img = lctx.getImageData(0, 0, low.width, low.height);
@@ -748,7 +748,7 @@ export class MonolithFilters {
     const opacity = this.bloodMoonUseOpacity * f.opacity;
     if (opacity <= 0) return;
     const low = this.lowCanvas(w, h);
-    const lctx = low.getContext('2d')!;
+    const lctx = low.getContext('2d', { willReadFrequently: true })!;
     lctx.clearRect(0, 0, low.width, low.height);
     lctx.drawImage(ctx.canvas, 0, 0, low.width, low.height);
     const img = lctx.getImageData(0, 0, low.width, low.height);
@@ -799,7 +799,7 @@ export class MonolithFilters {
    *  参数 progress/intensity/color 全部来自 SepiaScreenShaderData.Update（:10-55） */
   private drawSepia(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, f: FilterState, w: number, h: number): void {
     const low = this.lowCanvas(w, h);
-    const lctx = low.getContext('2d')!;
+    const lctx = low.getContext('2d', { willReadFrequently: true })!;
     lctx.clearRect(0, 0, low.width, low.height);
     lctx.drawImage(canvas, 0, 0, low.width, low.height);
     const img = lctx.getImageData(0, 0, low.width, low.height);
@@ -849,7 +849,7 @@ export class MonolithFilters {
    *  调色板为视觉近似；半分辨率处理 + 最近邻放大） */
   private drawRetro(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, f: FilterState, w: number, h: number): void {
     const low = this.lowCanvas(w, h);
-    const lctx = low.getContext('2d')!;
+    const lctx = low.getContext('2d', { willReadFrequently: true })!;
     lctx.clearRect(0, 0, low.width, low.height);
     lctx.drawImage(canvas, 0, 0, low.width, low.height);
     const img = lctx.getImageData(0, 0, low.width, low.height);
@@ -910,7 +910,7 @@ export class MonolithFilters {
     if (!nd) return;   // 噪声图未载入：该帧不扭曲（渐入无感）
     const low = this.lowCanvas(w, h);
     const lw = low.width, lh = low.height;
-    const lctx = low.getContext('2d')!;
+    const lctx = low.getContext('2d', { willReadFrequently: true })!;
     lctx.clearRect(0, 0, lw, lh);
     lctx.drawImage(canvas, 0, 0, lw, lh);
     const img = lctx.getImageData(0, 0, lw, lh);

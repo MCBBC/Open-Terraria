@@ -14,11 +14,12 @@
 //      （Projectile.cs:41961-41972）
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
-import { TownNPC, townNpcBaseFrame, townNpcProgressionFromWorld, townNpcProgressionBoost } from '../src/entities/TownNPC';
+import { TownNPC, townNpcBaseFrame } from '../src/entities/TownNPC';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
 import { emoteCount, emoteSnapshot, emoteClearAll } from '../src/render/EmoteBubble';
-import { getAttackDamageForTownNPC, mainDifficulty } from '../src/stats/ScaleStats';
+import { getDryadsBaneDamagePerSecond } from '../src/stats/DryadsBane';
+import { mainDifficulty } from '../src/stats/ScaleStats';
 import type { GameHooks } from '../src/entities/types';
 
 const DIRT = TILE_BY_KEY['dirt']!;
@@ -330,10 +331,13 @@ describe('D⑦ 敌怪 186 DryadBane（Projectile.cs:41961-41972 else-if 臂）',
     (dryad as never as { updateDryadWardAura(w: World, g: GameHooks): void })
       .updateDryadWardAura(world, game);
     expect(e.dryadBaneT).toBeCloseTo(2, 5);                       // AddBuff(186,120)
-    const expected = getAttackDamageForTownNPC(
-      4 * townNpcProgressionBoost(townNpcProgressionFromWorld(world)).damageMul,
-      mainDifficulty(world));
-    expect(e.dryadBaneDps).toBe(expected);                        // dps=GetDryadsBaneDamagePerSecond
+    // dps=GetDryadsBaneDamagePerSecond（NPC.cs:92898-92963 专用进度链）。
+    // ★2026-09-01 F11 翻正：旧断言走自卫攻击链 townNpcProgressionBoost(:53400)
+    // 是误链——空旗世界两链基值同为 4 恰未爆雷；旗标三态表+战斗书反证例见
+    // tests/town-npc-dryads-bane.test.ts。本 fixture 无任何 downed/hardMode/
+    // seedFlags → 原文静态位全默认 false（:92900 num=4、:92901 num2=1f）
+    const expected = getDryadsBaneDamagePerSecond({}, mainDifficulty(world));
+    expect(e.dryadBaneDps).toBe(expected);                        // dps 写入与链条恒等
     const tBurst = e.dryadBaneT, dps = e.dryadBaneDps;
     (e as unknown as { dryadBaneT: number }).dryadBaneT = 1.5;     // >20t 余量
     (dryad as never as { updateDryadWardAura(w: World, g: GameHooks): void })

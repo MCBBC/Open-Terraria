@@ -30,7 +30,7 @@ import { setBoulderSolidity } from './TrapsPass';
 // 结构位接线见 dgEarlyDualFamilies；现行一切链形参表下纯惰性零掷。
 import { dropTrap as deDropTrap, tileClump as deTileClump } from './DungeonEarlyFeatures';
 import { runDualDungeonLayout } from './DungeonDualLayout';   // ★IIIII92 双地牢布局域
-import { registerChest } from '../ChestRegistry';             // ★IIII102c 洞数组 sink
+import { registerChest, findLiveChest } from '../ChestRegistry';   // ★IIII102c 洞数组 sink
 import type { SparseChestSink } from '../ChestRegistry';
 import { dualSnakes } from './DitherSnakePass';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
@@ -4083,7 +4083,11 @@ const snap: SnapFn = (name) => {
       // ★IIIII105b：Books 座面化（逐族分步 #1）——IsConsideredDungeonWall/Tile 的
       // per-seat 全集（DungeonUtils.cs:1929-1950/:1844-1869 genVars 克隆合并族）；
       // 普通世界 gfStyles 空 ⇒ 与旧 isDW/isDT 逐位同径零扰动。
-      if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
+      // ★IIIII105c：候选门座面化正式接线（此前 gfIsBkDW/gfIsBkDT 建成未消费——
+      //   XXX 章 §③1①「已挂装配点」半落地状态补全）。IsConsideredDungeonWall/Tile
+      //   消费 CurrentDungeonGenVars 合并表（DU.cs:1929-1950/:1844-1869）；_gfSeat*
+      //   未装配（普通世界）时回退静态 DG_DUNGEON_* 集=旧径逐位同。
+      if (gfIsBkDW(wallAt(x, y)) && actAt(x, y) === 0) {
         const iC = ((globalThis as unknown as { __swLastRollIdx?: number }).__swLastRollIdx ?? 0) + 1;
         const d98c = rn(2);
         if (I110bs) emitBS(`bsDi|${num3},${ncount}|${d98c} m=${dgMainRolls} i=${iC}`);
@@ -4091,12 +4095,12 @@ const snap: SnapFn = (name) => {
         while (flag && inW(x, y, 0) && actAt(x, y) === 0) {
           x -= n7;
           if (x < 5 || x > w - 5) flag = false;
-          else if (actAt(x, y) !== 0 && !isDT(typAt(x, y))) flag = false;
+          else if (actAt(x, y) !== 0 && !gfIsBkDT(typAt(x, y))) flag = false;   // ★105c
         }
         emitBS(`bsS|${num3},${ncount}|${x},${y} fl=${flag ? 1 : 0}`);
-        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && isDT(typAt(x, y))
-          && actAt(x, y - 1) !== 0 && isDT(typAt(x, y - 1))
-          && actAt(x, y + 1) !== 0 && isDT(typAt(x, y + 1))) {
+        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && gfIsBkDT(typAt(x, y))          // ★105c ×3
+          && actAt(x, y - 1) !== 0 && gfIsBkDT(typAt(x, y - 1))
+          && actAt(x, y + 1) !== 0 && gfIsBkDT(typAt(x, y + 1))) {
           x += n7;
           emitBS(`bsA|${num3},${ncount}|${x},${y}`);
           outer4:
@@ -4254,9 +4258,13 @@ const snap: SnapFn = (name) => {
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(bounds.T, bounds.B - 1);
-      if (isDW(wallAt(x, y))) {
+      // ★IIIII105c：Lights 全域谓词座面化（IsConsideredDungeonWall/Tile 消费
+      //   CurrentDungeonGenVars 合并表，DU.cs:1929-1950/:1844-1869）——seat1 的
+      //   Snow71/Desert187/Hallow28/Temple87 族墙此前被静态集整门拒斥=G→I 窗
+      //   −201k/−221k under-roll 主源。_gfSeat* 未装配（普通世界）回退旧径逐位同。
+      if (gfIsDW(wallAt(x, y))) {
         for (let cy = y; cy > bounds.T; cy--) {
-          if (lgTr && inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && isDT(typAt(x, cy - 1))) {
+          if (lgTr && inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && gfIsBkDT(typAt(x, cy - 1))) {
             const uL = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
             let fh = 0x811c9dc5;
             for (let q = 0; q < 56; q++) { const v = uL.seedArray[q]! >>> 0; for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((v >>> s2) & 0xff), 16777619) >>> 0; }
@@ -4264,9 +4272,9 @@ const snap: SnapFn = (name) => {
             for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((uix >>> s2) & 0xff), 16777619) >>> 0;
             console.log(`A|${x}|${cy}|${fh.toString(16)}`);
           }
-          if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && isDT(typAt(x, cy - 1))
+          if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && gfIsBkDT(typAt(x, cy - 1))
             && featOK(x, cy, 0)
-            && ((entExists && entBounds.contains(x, cy)) || isDW(wallAt(x, cy))))) continue;
+            && ((entExists && entBounds.contains(x, cy)) || gfIsDW(wallAt(x, cy))))) continue;
           let near = false;
           outer5:
           for (let a = x - 15; a < x + 15; a++) {
@@ -4291,17 +4299,14 @@ const snap: SnapFn = (name) => {
           const r7 = rn(7);
           if (lgTr) console.log(`DG R7 x=${x} cy=${cy} v=${r7}`);
           if (r7 === 0) {
-            // ★HHHHHHH（2026-08-24）② 吊灯资格门 1457 化（DungeonGlobalLights.cs:81-87
-            //   + DungeonGenerationStyles.GetStyleForWall :745-766）：1456 门
-            //   `wall==brickWallType`（Default 样式 WallIsInStyle 仅主砖墙）；1457
-            //   GetStyleForWall 加 `Style==0 && Main.wallDungeon[wall]` 快路径——
-            //   wallDungeon 全族 {7,8,9,94-99}（Main.cs:10737-10745）全有吊灯资格
-            //   （JS isDW≡该表）。Default 路径零掷差（ChandelierItemTypes=空数组,
-            //   Next(7) 在门之前）→ 纯放置集扩宽。
-            //   命中且墙∈[94,105] → GOTHIC 吊灯 item 5744（Lights.cs:85-88）=
-            //   DerivedPlacementDetails[5744]=tile34 style53（Item.cs:45030）。
-            const chGate = isDW(wallAt(x, cy));
-            let blocked = !chGate;
+            // ★HHHHHHH（2026-08-24）② 吊灯资格门 1457 化 + ★IIIII105c 座面化：
+            //   DungeonGlobalLights.cs:71-100 原文序——Next(7) 在前；阻挡扫描
+            //   SolidTile 全项版 k<15；GetStyleForWall(座表)=null∨ChandelierItemTypes
+            //   ==null ⇒ 整支不进；len==0∨Style==0 ⇒ data.chandelierItemType
+            //   （2652+theme）/GOTHIC 5744（墙 94-105），否则 items[Next(len)]。
+            //   成功判定=落型后 type==34（全部吊灯 item 的 Derived 均 tile34，
+            //   style 来自 ITEM_PLACE：Item.cs 25748(27+type−2652)/45030/样式各档）。
+            let blocked = false;
             for (let k = 0; k < 15 && !blocked; k++) {
               // ★IIIII87（DungeonGlobalLights.cs:75-80）：阻挡扫描用 WorldGen.SolidTile
               //   全项版（含 !halfBrick && slope==0，cs:70664）——与 IIII68 横幅停船
@@ -4309,8 +4314,27 @@ const snap: SnapFn = (name) => {
               //   多挂吊灯（sparkle/rainbow #32 残差主因之一）。
               if (inW(x, cy + k, 0) && dgSpreadSolid(x, cy + k)) { blocked = true; break; }
             }
-            if (lgTr) console.log(`DG CH x=${x} cy=${cy} gate=${chGate ? 1 : 0} blocked=${blocked ? 1 : 0}`);
-            if (!blocked && placeChand(x, cy)) {
+            const chwl = wallAt(x, cy);
+            const cSty = gfStyles.length > 0
+              ? gfStyleForWall(chwl)
+              : (gfIsDW(chwl) ? DG_DEFAULT_STUB : null);
+            let chOK = false;
+            if (!blocked && cSty !== null && cSty.Lch !== undefined && cSty.Lch.ChandelierItemTypes !== null) {
+              const chT = cSty.Lch.ChandelierItemTypes;
+              let chStyleNum = 0, chPlace = false;
+              if (chT.length === 0 || cSty.Style === 0) {
+                // Default 支：data.chandelierItemType（2652+theme）→ Derived=(34,27+theme)
+                chStyleNum = (chwl >= 94 && chwl <= 105) ? 53 : 27 + theme;   // GOTHIC=item5744
+                chPlace = true;
+              } else {
+                const chItem = chT[rn(chT.length)]!;
+                const pd = ipOf(chItem);
+                if (pd.t >= 0) { chStyleNum = pd.s ?? 0; chPlace = true; }    // tileType<0 整支跳过
+              }
+              chOK = chPlace && placeChand(x, cy, chStyleNum);
+            }
+            if (lgTr) console.log(`DG CH x=${x} cy=${cy} gate=${cSty !== null ? 1 : 0} blocked=${blocked ? 1 : 0}`);
+            if (chOK) {
               if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(`MARK|LCHD|${x},${cy}`);
               {
                 const ev = (globalThis as { __swDgDecor?: Array<unknown> }).__swDgDecor;
@@ -5389,9 +5413,21 @@ const snap: SnapFn = (name) => {
   //   长凳 89×6 根因；vanilla 金标帧完好存活）。style 缺省 0（塔篝火原文）。
   function place3x2D(x: number, y: number, t: number, style = 0): boolean {
     if (x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
+    let flag2 = true;
     for (let i = x - 1; i < x + 2; i++) {
-      for (let j = y - 1; j < y + 1; j++) if (!dgClr(i, j)) return false;
-      if (!solidTile2D(i, y + 1)) return false;
+      for (let j = y - 1; j < y + 1; j++) if (!dgClr(i, j)) flag2 = false;
+      if (!solidTile2D(i, y + 1)) flag2 = false;
+    }
+    // ★IIII102c（2026-09-01）：cs:52601-52610 `type==88 → Chest.CreateChest(x−1,y−1)`
+    //   ——在 clearance 终判(flag2)之后、瓦片写入之前。-1(同位被任何活箱占,FindEmptyChest
+    //   cs:516) → flag2=false 拒置；**flag2 已 false 时照样注册**(失败尝试烧一个注册表
+    //   槽=孤儿条目,vanilla 同构,HellFortPass.place3x2HF TTTT 同款先例)。本仓曾漏挂此
+    //   支 → 全部地牢梳妆台不进 chest sink（首个实证=x86 CHEST slot24 3237,759 t88
+    //   fx2538 于 JS 掉辖,IIIII101e §②首裂点）。
+    if (t === DRESSER) {
+      const sink = chests as SparseChestSink;
+      if (findLiveChest(sink, x - 1, y - 1) !== null) flag2 = false;   // 同位重占→拒置
+      else registerChest(sink, { x: x - 1, y: y - 1, items: [], locked: false });
     }
     const bx = 54 * style;
     for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 1; j++) {

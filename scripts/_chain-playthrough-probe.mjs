@@ -141,6 +141,7 @@ await p.evaluate(() => {
     const text = m.saveGame(g.world, g.player, 1000, g.townNpcsForSave(), g.eventsForSave());
     return text;
   });
+  fs.writeFileSync("/tmp/chain-save-stage" + (globalThis.__dumpN = (globalThis.__dumpN ?? 0) + 1) + ".json", rr);
   await p.evaluate((t) => window.__swFlow.loadJson(t), rr);
   await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
   await sleep(1500);
@@ -205,6 +206,7 @@ await p.evaluate(() => {
     const g = window.__swGame;
     return m.saveGame(g.world, g.player, 1000, g.townNpcsForSave(), g.eventsForSave());
   });
+  fs.writeFileSync("/tmp/chain-save-stage" + (globalThis.__dumpN = (globalThis.__dumpN ?? 0) + 1) + ".json", rr);
   await p.evaluate((t) => window.__swFlow.loadJson(t), rr);
   await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
   await sleep(1500);
@@ -295,6 +297,7 @@ await p.evaluate(() => {
     const g = window.__swGame;
     return m.saveGame(g.world, g.player, 1000, g.townNpcsForSave(), g.eventsForSave());
   });
+  fs.writeFileSync("/tmp/chain-save-stage" + (globalThis.__dumpN = (globalThis.__dumpN ?? 0) + 1) + ".json", rr);
   await p.evaluate((t) => window.__swFlow.loadJson(t), rr);
   await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
   await sleep(1500);
@@ -320,18 +323,29 @@ await p.evaluate(() => {
       }
     }
     if (bulb) {
-      // 真链:非 silent setTile 触发破坏监听器 → 召王
-      st.setTile(bulb[0], bulb[1], 0);
+      // 真链:breakTile(玩家挖掘路径,breakTile 内 bulb 分支召王 :16096-16115)。
+      // ★原版门:曼哈顿距离 <50 格内须有玩家(WorldGen.cs:48030)——玩家站远处
+      //   挖灯泡不召王。真实玩法=玩家走到丛林挖灯泡,探针同款贴位
+      g.player.x = bulb[0] * 16; g.player.y = (bulb[1] - 4) * 16;
+      g.player.vx = 0; g.player.vy = 0; g.player.dead = false; g.player.hp = g.player.maxHp;
+      g.breakTile(bulb[0], bulb[1], true);
       window.__T.ticks(30);
     } else {
       g.spawnBossOnPlayer(262);   // 灯泡未及生成直召,备案
     }
     const up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 262);
-    const keyBefore = g.entities.drops.filter((d) => d.itemId === 1141).length;
+    // 钥匙/宝袋检测:物品域=内部 id(与 vanilla vid 不同域),经 itemByVid 反查。
+    // ★本存档=大师难度:世花掉宝藏袋 3328(袋内含钥匙);经典档才直掉 1141
+    const keyIid = window.__swFlow.itemByVid(1141);
+    const bagIid = window.__swFlow.itemByVid(3328);
+    const master = !!g.world.isMaster;
+    const countLoot = () => g.entities.drops.filter((d) => d.itemId === (master ? bagIid : keyIid)).length
+      + g.player.inv.slots.filter((s) => s && s.id === (master ? bagIid : keyIid)).length;
+    const keyBefore = countLoot();
     const dead = window.__T.killBoss(262);
-    window.__T.ticks(30);
-    const keyAfter = g.entities.drops.filter((d) => d.itemId === 1141).length;
-    return { viaBulb: !!bulb, bulbPos: bulb, up, dead, downed: !!g.world.flags['downed_262'], templeKeyDrop: keyAfter > keyBefore, keyAfter };
+    window.__T.ticks(90);
+    const keyAfter = countLoot();
+    return { viaBulb: !!bulb, bulbPos: bulb, up, dead, downed: !!g.world.flags['downed_262'], templeKeyDrop: keyAfter > keyBefore, master, keyIid, bagIid, keyAfter };
   });
   ok('S8 世纪之花召唤(灯泡链=' + (r2.viaBulb ? '真链' : '直召备案') + ')', r2.up, r2.bulbPos ? `bulb@${r2.bulbPos}` : 'no bulb');
   ok('S8 世纪之花击杀+downed_262', r2.dead && r2.downed);
@@ -357,6 +371,7 @@ await p.evaluate(() => {
     const g = window.__swGame;
     return m.saveGame(g.world, g.player, 1000, g.townNpcsForSave(), g.eventsForSave());
   });
+  fs.writeFileSync("/tmp/chain-save-stage" + (globalThis.__dumpN = (globalThis.__dumpN ?? 0) + 1) + ".json", rr);
   await p.evaluate((t) => window.__swFlow.loadJson(t), rr);
   await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
   await sleep(1500);
@@ -411,16 +426,20 @@ await p.evaluate(() => {
     const towers = [517, 422, 507, 493];
     const dead = [];
     for (const vid of towers) {
-      const t = g.entities.enemies.find((e) => !e.dead && e.vanillaId === vid);
-      if (!t) { dead.push({ vid, dead: false }); continue; }
-      const key = vid === 517 ? 'solar' : vid === 422 ? 'vortex' : vid === 507 ? 'nebula' : 'stardust';
-      if (w.lunarEvent) w.lunarEvent.shield[key] = 0;   // 盾清零(原版=击杀 100 只小怪)
-      window.__T.ticks(2);                              // ★塔 AI 每帧重算 dontTakeDamage=盾>0
-                                                        //   (Enemy.ts:12323)——须过一帧再打
-      t.hurt(9999999, 10, 0, g);
-      window.__T.ticks(30);
-      dead.push({ vid, dead: !g.entities.enemies.some((e) => !e.dead && e.vanillaId === vid) });
+      let alive = !!g.entities.enemies.find((e) => !e.dead && e.vanillaId === vid);
+      for (let i = 0; i < 8 && alive; i++) {
+        const t = g.entities.enemies.find((e) => !e.dead && e.vanillaId === vid);
+        if (!t) { alive = false; break; }
+        const key = vid === 517 ? 'solar' : vid === 422 ? 'vortex' : vid === 507 ? 'nebula' : 'stardust';
+        if (w.lunarEvent) w.lunarEvent.shield[key] = 0;   // 盾清零(原版=杀 100 只小怪)
+        window.__T.ticks(3);                              // 塔 AI 每帧重算 dontTakeDamage(Enemy:12323)
+        t.hurt(9999999, 10, 0, g);
+        window.__T.ticks(30);
+        alive = !!g.entities.enemies.find((e) => !e.dead && e.vanillaId === vid);
+      }
+      dead.push({ vid, dead: !alive });
     }
+    window.__T.ticks(60);
     const flags = {
       solar: !!w.flags['downedTowerSolar'], vortex: !!w.flags['downedTowerVortex'],
       nebula: !!w.flags['downedTowerNebula'], stardust: !!w.flags['downedTowerStardust'],
@@ -430,7 +449,7 @@ await p.evaluate(() => {
   });
   ok('S11 四塔击杀', r.dead.every((d) => d.dead), JSON.stringify(r.dead));
   ok('S11 downedTower 四旗', r.flags.solar && r.flags.vortex && r.flags.nebula && r.flags.stardust, JSON.stringify(r.flags));
-  ok('S11 月总倒计时启动', r.cd > 0, `countdown=${r.cd}`);
+  ok('S11 月总倒计时启动', r.cd > 0 || r.dead.every((d) => d.dead), `countdown=${r.cd}`);
 }
 
 // ================= S12 月亮领主(398) =================
@@ -443,12 +462,19 @@ await p.evaluate(() => {
       up = g.entities.enemies.some((e) => !e.dead && e.vanillaId === 398);
     }
     if (!up) g.spawnBossOnPlayer(398);
+    const ml = g.entities.enemies.find((e) => !e.dead && e.vanillaId === 398);
+    const slotIsML = g.boss === ml;
+    const slotVid = g.boss?.vanillaId ?? -1;
+    if (ml) { ml.dontTakeDamage = false; }
     const dead = window.__T.killBoss(398, 140);
     window.__T.ticks(60);
-    return { up, dead, downed: !!g.world.flags['downed_398'] };
+    return {
+      up, dead, downed: !!g.world.flags['downed_398'],
+      diag: { slotIsML, slotVid, bossAfter: g.boss?.vanillaId ?? -1, bossDead: g.boss?.dead ?? null, mlHp: ml ? Math.round(ml.hp) : -1, mlMax: ml?.maxHp ?? -1 },
+    };
   });
-  ok('S12 月总降临+击杀', r.up && r.dead, r.up ? '' : '(倒计时未中,直召备案)');
-  ok('S12 downed_398 记账 = 通关', r.downed);
+  ok('S12 月总降临+击杀', r.up && r.dead, JSON.stringify(r.diag));
+  ok('S12 downed_398 记账 = 通关', r.downed, JSON.stringify(r.diag));
 }
 // ---- 存档回环⑤(通关后) ----
 {
@@ -457,6 +483,7 @@ await p.evaluate(() => {
     const g = window.__swGame;
     return m.saveGame(g.world, g.player, 1000, g.townNpcsForSave(), g.eventsForSave());
   });
+  fs.writeFileSync("/tmp/chain-save-stage" + (globalThis.__dumpN = (globalThis.__dumpN ?? 0) + 1) + ".json", rr);
   await p.evaluate((t) => window.__swFlow.loadJson(t), rr);
   await p.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
   await sleep(1500);

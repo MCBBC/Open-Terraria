@@ -27,6 +27,8 @@ import { TILE } from '../core/constants';
 import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHitLine } from '../physics/LineOfSight';
+// ★终清波批：930 圣坦爆散 gore 段（GorePiece.newGore 通道,旧"无 API 不接"退役）
+import { GorePiece } from './GorePiece';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -2280,7 +2282,9 @@ export class MountShot extends TownShot {
 //     → velocity×0/alpha=255/timeLeft=3 引信拍（lingering），timeLeft 尽 → Kill：
 //     PrepareBombToBlow Resize(128×128)/kb8（:47680-47684）→ Damage()（重盒结算，
 //     SelfHurtPlayers 对主人真伤 :15104 族）→ Kill_Bombs_DoUsualKillCode case133-930
-//     Item_14 音 + d31×30/d6×20+20 爆尘（:79828-79856；gore 段无 API 不接,登记）。
+//     Item_14 音 + d31×30/d6×20+20 爆尘（:79828-79856；视觉锚=弹心 22×22 收缩盒
+//     :79837-79842——终清波批订正）+ gore 两轮四对角 Next(61,64)（:79861-79885,
+//     GorePiece.newGore 通道,终清波批转正）。
 // ---------------------------------------------------------------------------
 
 export class SantankShellProj extends TownShot {
@@ -2355,12 +2359,36 @@ export class SantankShellProj extends TownShot {
         Math.sign(p.cx - this.cx) || 1, 0, game as never);
     }
     game.playSfxFile?.('Item_14', 0.9, this.cx, this.cy);
+    // ★终清波批：视觉锚订正——vanilla Kill 前把盒收缩回 22×22 中心（position±w/2,
+    // :79838-79842），d31/d6/gore 全部以【弹心 ±11】为生成窗;旧实现误用 128×128
+    // 爆炸结算盒左上角作锚(伤害盒仅 PrepareBombToBlow 用,视觉不入)
+    const gx = this.cx - 11, gy = this.cy - 11;
+    // gore 段转正（GorePiece.newGore 可用——旧"无 API 不接"登记退役）：
+    // 两轮 num61=0.4/0.8 × 四对角 NewGore(Next(61,64))、vel×k 后 X/Y 各 ±1（:79861-79885）
+    for (let round = 0; round < 2; round++) {
+      const k = round === 0 ? 0.4 : 0.8;
+      const dirs: Array<[number, number]> = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+      for (const [sx2, sy2] of dirs) {
+        const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), gx, gy, 0, 0);
+        if (!g) continue;
+        g.vx *= k; g.vy *= k;
+        g.vx += sx2;
+        g.vy += sy2;
+      }
+    }
     const pool = game.spawnDust;
     if (pool) {
-      for (let i = 0; i < 30; i++) pool(bx, by, 22, 22, 31, 0, 0, 100, null, 1.5);       // d31 ×30（:79844-79848）
-      for (let i = 0; i < 40; i++) {                                                     // d6 ×20+20（:79849-79855）
-        const d = pool(bx, by, 22, 22, 6, 0, 0, 100, null, i < 20 ? 3.5 : 1.5, i < 20);
-        if (d && i < 20) d.vx *= 7; else if (d) d.vx *= 3;
+      for (let i = 0; i < 30; i++) {
+        const d = pool(gx, gy, 22, 22, 31, 0, 0, 100, null, 1.5);   // d31 ×30（:79843-79848）
+        if (d) { d.vx *= 1.4; d.vy *= 1.4; }
+      }
+      for (let i = 0; i < 20; i++) {                                // d6 大烟 ×20（noGravity,scale3.5,×7）
+        const d = pool(gx, gy, 22, 22, 6, 0, 0, 100, null, 3.5, true);
+        if (d) { d.vx *= 7; d.vy *= 7; }
+      }
+      for (let i = 0; i < 20; i++) {                                // d6 小烟 ×20（scale1.5,×3）
+        const d = pool(gx, gy, 22, 22, 6, 0, 0, 100, null, 1.5);
+        if (d) { d.vx *= 3; d.vy *= 3; }
       }
     } else {
       game.spawnBurst?.(this.cx, this.cy, '#E8A24A', 24, 5, 0, Math.PI * 2, { life: 26 });

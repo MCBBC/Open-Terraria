@@ -1377,7 +1377,13 @@ export function spawnSingleLineDust(
  * Spawn_ItemTransfer（:2682-2703）＝ Chest.VisualizeChestTransfer（Chest.cs:309-317）
  * 入箱飞行件。uniqueInfo 低24位=itemType、高字节 bits{RandomizeStart,...}。本仓以
  * "金闪→终点吸入"双段近似 ItemTransferParticle 图标位移动画（图标贴图池无 API 登记）。
- * 生产者 = QuickStackToNearbyChests 包装位（BroadcastOrRequest 面）。
+ * 生产者 = QuickStackToNearbyChests 包装位（BroadcastOrRequest 面；QuickStacking.FillStack
+ * :533 / InsertIntoFreeSlot :564 每次实际搬运各一帧，Game.emitItemTransferFx 逐帧出站）。
+ * ★Q-F4 跨端形差备忘（2026-09-01）：生产端 Game 已按原版 PlayerToChest 四旗
+ * （RandomizeStart|RandomizeEnd|TransitionIn|Fullbright=Chest.cs:30-36 → uniqueInfo
+ * 高字节 0b1111）写入载荷，本消费端仍只读 bit0（flagsByte&0x01=散布项圈）——原版
+ * bit1 RandomizeEnd/bit2 TransitionIn/bit3 Fullbright 是 ItemTransferParticle 内部位面，
+ * 本仓金闪近似不含其几何语义；协议注释在 syncModules.ItemTransfer 处登记。
  */
 export function itemTransferFx(
   game: GameHooks, sx: number, sy: number, ex: number, ey: number,
@@ -1392,6 +1398,20 @@ export function itemTransferFx(
   }
   game.spawnParticles?.(sx, sy, '#FFE98A', 1, 1,
     { life, vx: dxs / life, vy: dys / life, damp: 1, grav: 0, size: 1.5 });
+}
+
+/**
+ * Chest.IndicateBlockedChest（Chest.cs:3578-3598）：快堆 locked 箱拒收回执——
+ * RoomCheckParticle（TextureAssets.Cd 图标）于箱锚 (chest.x*16+16, chest.y*16+16)
+ * 挂 60t：ColorTint (255,40,40)、Velocity=UnitY*0.1、AccelerationPerFrame=-UnitY*0.4/60
+ * （初速缓下后转上浮）、淡入淡出。生产者 = QuickStacking.IndicateBlockedChests
+ * （QuickStacking.cs:270-287 单人半边 → :285 循环）。
+ * ★仓内形差登记：RoomCheckParticle/Cd 图标无独立池,等价以红粒子通道表达
+ * （本条=Q-F7 的最低成本正确位——世界空间可感知,与原版同为单帧事件型反馈）。
+ */
+export function blockedChestFx(game: GameHooks, x: number, y: number): void {
+  game.spawnParticles?.(x, y + 2, 'rgba(255,40,40,0.95)', 1, 1,
+    { life: 60, vx: 0, vy: 0.1, damp: 1, grav: -(0.4 / 60), size: 2 });
 }
 
 /**

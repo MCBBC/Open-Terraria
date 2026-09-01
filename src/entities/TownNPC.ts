@@ -16,6 +16,9 @@ import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope 
 import { getAttackDamageForTownNPC, mainDifficulty } from '../stats/ScaleStats';
 // ★蓝队 F2：互殴首击 Main.DamageVar 单源（Main.cs:67097 ±15% 31 档 + 银行家舍入）
 import { damageVarRoll } from '../stats/DamageVar';
+// ★2026-09-01 F11：树妖煞 DoT dps 专用进度链单源（NPC.cs:92898-92963，
+// 与 AI_007 自卫攻击链 NPC.cs:53400-53557 是两条链——旧码误接见消费点注）
+import { getDryadsBaneDamagePerSecond } from '../stats/DryadsBane';
 import { hslToRgb } from '../player/Appearance';
 import { newNpcName } from '../i18n/RandomText';
 import { canHit } from '../physics/LineOfSight';
@@ -3826,8 +3829,31 @@ export class TownNPC extends Entity {
         // else-if 臂：非友好实体的 186 树妖煞（:41967 字面门序——重授窗 FindBuff==-1
         // || buffTime<=20 由 ≤20/120t 比例承载；LOS = CanHit(弹心,1,1, 敌盒))
         const progAura = townNpcProgressionFromWorld(world);
-        const baneDps = getAttackDamageForTownNPC(4 * townNpcProgressionBoost(progAura).damageMul,
-          mainDifficulty(world));
+        // GetDryadsBaneDamagePerSecond（NPC.cs:92898-92963，单源 stats/DryadsBane.ts）
+        // ——★2026-09-01 F11 翻正：树妖煞 DoT 用的是【专用】进度链，与 AI_007 自卫
+        // 攻击链 townNpcProgressionBoost(:53400-53557) 是两条链：本链无 combatBook/
+        // slimeKing/deerclops/tipsy/skyblock 条目、首段四王是 +0.10 档（自卫链混
+        // +0.05/+0.1）。旧码误接 townNpcProgressionBoost().damageMul 致战斗书世界
+        // 多算 +25%/+50%、各 boss 错档。字段逐一显式挑取防再串链；infectedSeed =
+        // Main.infectedSeed（Main.cs:350，"purify this"/worldIsInfected 种子）→
+        // 本仓 world.seedFlags.infectedSeed
+        const baneDps = getDryadsBaneDamagePerSecond({
+          downedBoss1: progAura.downedBoss1,
+          downedBoss2: progAura.downedBoss2,
+          downedBoss3: progAura.downedBoss3,
+          downedQueenBee: progAura.downedQueenBee,
+          hardMode: progAura.hardMode,
+          downedQueenSlime: progAura.downedQueenSlime,
+          downedMechBoss1: progAura.downedMechBoss1,
+          downedMechBoss2: progAura.downedMechBoss2,
+          downedMechBoss3: progAura.downedMechBoss3,
+          downedPlantBoss: progAura.downedPlantBoss,
+          downedGolemBoss: progAura.downedGolemBoss,
+          downedAncientCultist: progAura.downedAncientCultist,
+          downedEmpressOfLight: progAura.downedEmpressOfLight,
+          downedFishron: progAura.downedFishron,
+          infectedSeed: world.seedFlags?.infectedSeed,
+        }, mainDifficulty(world));
         for (const ent of (game.enemies?.() ?? [])) {
           const e = ent as unknown as import('./Enemy').Enemy & { dryadBaneT?: number };
           if (!e || e.dead || e.vanillaId === 488) continue;         // type!=488（蜂后）

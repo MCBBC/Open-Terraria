@@ -103,7 +103,11 @@ const countNpc = (game: GameHooks, id: number): number =>
 //     目标位 (ai[0],ai[1])；vel.Length() > 距目标 → Kill（抵靶消散 :33750-33753）；
 //     否则 normalize(Δ)×15、velocity=Lerp(velocity,val,0.1)（:33755-33757）；
 //     每 tick 2×d228 于 Center+(4,4)、noGravity、scale+=rand（:33758-33765）。
-//   本体渲染 alpha255 → 不画；额外登记：磁尘 customData 吸附支未接（视觉微差）。
+//   本体渲染 alpha255 → 不画。★终清波批勘误："磁尘 customData 吸附支未接"登记
+//   系误植——1458 原文 AI_098（:33745-33766）两粒 d228 仅设 noGravity+位置偏移
+//   (+4,+4)+scale 自增，【从不写 customData】（原样本仓实现已等价,登记撤销）；
+//   customData 吸附面在本文件属月总水蛭 aiStyle82 的 d229 环（NPC.cs:37102-37116,
+//   终清波批经 VanillaDust.followEnt 承载实装）。
 // ---------------------------------------------------------------------------
 export class TabletShardProj extends Entity {
   w = 8;
@@ -456,6 +460,11 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
 // 到位 1000 点治疗按 头→核心→手0→手1 亏血序回灌后消散（:37026-37083,序已对齐）。
 // ---------------------------------------------------------------------------
 const leechSrcProj = new WeakMap<Enemy, MoonLeechProj | null>();
+/** 水蛭 d229 环随行差（终清波批）：Dust.Update :896-917 228/229/279 档
+ *  customData=NPC → dust.position += npc.position − npc.oldPos[1]。本仓以
+ *  【本拍位移】承载（oldPos[1] 滞后一拍语义,≤1t 相位差登记口径同前批）——
+ *  共享可变 state 对象由 followEnt 闭包逐尘引用,每拍覆盖 → 已在场老尘持续跟随 */
+const leechRide = new WeakMap<Enemy, { dx: number; dy: number }>();
 
 function claimSourceLeechProj(game: GameHooks, head: Enemy): MoonLeechProj | null {
   for (const q of game.projectiles?.() ?? []) {
@@ -505,6 +514,7 @@ export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
   // ---- 插值飞行(:37090-37093)：Lerp(proj.Center, 头心+(0,216), ai2/90) ----
   e.vx = 0; e.vy = 0;
   const k = e.ai2 / LEECH_T;
+  const pxPrev = e.cx, pyPrev = e.cy;                       // 本拍位移采样基点（prev-center）
   const src = leechSrcProj.get(e) ?? undefined;
   if (src && !src.dead) {
     x[0] = src.x + src.w / 2;                               // proj.Center 当帧实位
@@ -514,7 +524,35 @@ export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
   }
   e.x = lerp(x[0], head.cx, k) - e.w / 2;
   e.y = lerp(x[1], head.cy + 216, k) - e.h / 2;
-  game.spawnParticles(e.cx, e.cy - e.h / 2, '#B040D0', 3, 0.7, { life: 20 });   // d229 双环近似
+  // ★终清波批：d229 双环精确化（原 spawnParticles 近似退役）——NPC.cs:37102-37116：
+  //   · 外环 6 粒 NewDust(Center − One*4 + UnitY*(−h/2).RotatedBy(i·τ/6))，vel=−UnitY、
+  //     noGravity、scale 0.7；内环 3 粒 NewDust(… UnitY*(−h/6) …, 0,−2)，scale 1.5；
+  //   · 两环均 customData=this → Dust.Update 228/229/279 档 dust.position +=
+  //     npc.position − npc.oldPos[1]（followEnt 承载,共享 ride 态）
+  const ride = (() => {
+    let r = leechRide.get(e);
+    if (!r) { r = { dx: 0, dy: 0 }; leechRide.set(e, r); }
+    r.dx = e.cx - pxPrev; r.dy = e.cy - pyPrev;             // 本拍位移（含设置段首拍 0 面）
+    return r;
+  })();
+  const emitRing = (count: number, halfH: number, svx: number, svy: number, scale: number): void => {
+    for (let i = 0; i < count; i++) {
+      const th = i * (Math.PI * 2) / count;
+      // RotatedBy 标准矩阵：x' = x·cos − y·sin、y' = x·sin + y·cos；x=0,y=−halfH
+      const ox = Math.sin(th) * halfH;
+      const oy = -Math.cos(th) * halfH;
+      const d = game.spawnDust?.(e.cx + ox - 4, e.cy + oy - 4, 0, 0,
+        229, svx, svy, 0, null, 1, false, true);            // perfect:true = 原文后置定值链
+      if (!d) continue;
+      d.x = e.cx + ox - 4; d.y = e.cy + oy - 4;             // NewDust 0 盒抖动窗消解（−One*4 保真）
+      d.vx = svx; d.vy = svy;
+      d.noGravity = true;
+      d.scale = scale;
+      d.followEnt = () => ({ dx: ride.dx, dy: ride.dy });
+    }
+  };
+  emitRing(6, e.h / 2, 0, -1, 0.7);                          // :37103-37111
+  emitRing(3, e.h / 6, 0, -2, 1.5);                          // :37112-37116
 }
 
 // ---------------------------------------------------------------------------
@@ -2291,6 +2329,7 @@ export class VortexPortalProj extends Entity {
               d.vx = -uy * 4; d.vy = ux * 4;      // RotatedBy(+π/2)×4
               d.scale = 0.5 + Math.random();
               d.fadeIn = 0.5;
+              d.attractTo = { x: this.cx, y: this.cy };   // customData=base.Center 快照（:34443）
             }
           }
           if (Math.floor(Math.random() * 4) === 0) {
@@ -2346,6 +2385,7 @@ export class VortexPortalProj extends Entity {
             d.vx = -uy * 6; d.vy = ux * 6;        // RotatedBy(+π/2)×6
             d.scale = 0.5 + Math.random();
             d.fadeIn = 0.5;
+            d.attractTo = { x: this.cx, y: this.cy };   // customData=门心快照（终清波批接 :906-912 吸向档）
           }
         }
         if (Math.random() < 0.5) {

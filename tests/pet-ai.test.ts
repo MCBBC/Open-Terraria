@@ -211,6 +211,8 @@ function stubWorld(FLOOR: number, WALL: number | null) {
     inBounds: (c: number, r: number) => c >= 0 && c < W && r >= 0 && r < H,
     idx: (c: number, r: number) => r * W + c,
     isSolid: (c: number, r: number) => r >= FLOOR || (WALL !== null && c === WALL && r >= FLOOR - 10 && r < FLOOR),
+    isActive: () => true,   // TileCollision.walkDownSlopePre :351 消费（真实 store 在位;
+                            // 该三例在此批之前已红——stub 滞后补齐,非行为改面）
     isPlatform: () => false,
   };
 }

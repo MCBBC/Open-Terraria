@@ -115,30 +115,21 @@ describe('回旋镖特例族（AI_003 分支）', () => {
     run(b, hooks, 3);
     expect(b.vy).toBeGreaterThan(0.5); // 10t 后垂落
   });
-  it('301 Bouncing Shield:按住 ≥20 AI 次回收+速度归零;松手 ≥100 AI 次', () => {
-    // ★源码修正(SetDefaults extraUpdates=2,Projectile.cs:3651):AI 每 tick 跑 3 次,
-    //   ai[1] 按 AI 次计数——按住门 20 次=7t、松手门 100 次=34t(旧断言 22t 未死是
-    //   无 extraUpdates 近似下的错标)
+  it('301 Bouncing Shield 出程式=1457 真值(锚定 ai[1]≥60 回收,无 channel 门——终清波重写)', () => {
+    // ★1456"按住≥20/松手≥100 双门"已退役:1457 起 AI_003 `type==301` 分支为悬停自旋+
+    //   scale=1.75+Item_1@ai[1]==20+ai[1]>=60 转回收速度归零（extraUpdates=2 → 每 tick
+    //   3 个 AI 子步,60 计数 = 20t 内完成）
     const { hooks, player } = makeHooks();
     const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 100, 4, 301);
-    b.channel = () => true; // 按住
     let gateTick = -1;
-    for (let i = 0; i < 12 && gateTick < 0; i++) {
+    for (let i = 0; i < 40 && gateTick < 0; i++) {
       b.fixedUpdate(1 / 60, hooks);
       if (b.returning) gateTick = i;
     }
-    expect(gateTick).toBe(6); // 第 7 tick = 21 AI 次 ≥ 20（:37062-37070）
-    // 回收瞬间速度归零（:37070）——同 tick 剩余返回步进最多再加一档 acc=3
-    expect(Math.hypot(b.vx, b.vy)).toBeLessThan(5);
+    expect(gateTick).toBeGreaterThanOrEqual(18);      // ai[1]>=60/3 子步 ≈ 第 20t
+    expect(gateTick).toBeLessThanOrEqual(22);
     run(b, hooks, 300);
-    expect(b.dead).toBe(true); // 回收后回手消失
-    // 松手门 100 AI 次 = 34t（:37074-37080）
-    const b2 = new Boomerang(player.cx, player.cy - 4, 14, 0, 100, 4, 301);
-    b2.channel = () => false;
-    run(b2, hooks, 33);
-    expect(b2.returning).toBe(false); // 33t = 99 次 < 100
-    run(b2, hooks, 2);
-    expect(b2.returning).toBe(true); // 35t = 105 次 ≥ 100
+    expect(b.dead).toBe(true);                        // 回收后回手消失
   });
   it('光刃族(1059):前 30t 直线,之后垂落', () => {
     const { hooks, player } = makeHooks();
@@ -530,13 +521,18 @@ describe('链球特例子子弹(AI_015 尾段)', () => {
 });
 
 describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => {
-  /** 录音版 hooks:粒子/定向爆发/音效计数(撞墙冲击波断言用) */
+  /** 录音版 hooks:粒子/定向爆发/音效/尘计数(撞墙冲击波断言用) */
   function makeRecorded() {
     const base = makeHooks();
-    const rec = { particles: 0, bursts: 0, sfx: [] as string[] };
+    const rec = { particles: 0, bursts: 0, sfx: [] as string[], dust31: 0 };
     base.hooks.spawnParticles = () => { rec.particles++; };
     base.hooks.spawnBurst = () => { rec.bursts++; };
     base.hooks.playSfx = (name: string) => { rec.sfx.push(name); };
+    base.hooks.spawnDust = (_x: number, _y: number, _w: number, _h: number,
+      type: number) => {
+      if (type === 31) rec.dust31++;
+      return null;
+    };
     return { ...base, rec };
   }
 
@@ -682,9 +678,11 @@ describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => 
     // ★2026-09-01 正典管线接入后断言改锚原版次序:Update 先由 TileCollision 把
     // 盒右缘解析到墙面(896−w),HandleMovementCollision 再 position -= vector(14)
     // ——旧值 xBefore−14 钉的是 bespoke 直写不贴面的旧行为
-    expect(f.x).toBeCloseTo((896 - f.w) - 14, 5);       // position -= vector(:44519)
+    expect(f.x).toBeCloseTo((896 - f.w) - 14, 5);       // position -= vector(:44518)
     expect(rec.sfx.filter((s) => s === 'dig').length).toBe(1); // SoundID 0 一响(num2 档收拢)
-    expect(rec.bursts).toBeGreaterThanOrEqual(1);       // CreateImpactExplosion2 冲击波环
+    // 终清波:CreateImpactExplosion2_FlailTileCollision d31 白尘椭圆环实装——
+    // 主档 8 颗(!shockwaves 再补 8),合成 spawnBurst 半环退役(:70857-70905)
+    expect(rec.dust31).toBeGreaterThanOrEqual(8);
   });
 });
 

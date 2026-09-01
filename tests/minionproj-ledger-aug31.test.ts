@@ -134,7 +134,7 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
     t2.fixedUpdate(1, hooks);
     expect(t2.vx).toBeCloseTo(0.7, 9);
   });
-  it('跳梯 flag3 覆写关闭面：目标同高（v15Y≥−80）遇墙不墙跳（:51428）', () => {
+  it('跳梯意图两面合流（终清波批订正）：flag20 关闭仅灭 (a)，(b) 前墙列扫家族无关仍起跳', () => {
     const selfCx = 60 * 16 + 40 + 8;
     const en = mkEnemy(3, selfCx + 320, 110 * 16 - 10);     // 前方同高目标（贴地）
     const { hooks, store, player } = makeHooks([en]);
@@ -142,8 +142,14 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
     const wallCol = Math.floor((t.x + t.w / 2) / 16) + 1;   // 中柱+intent(+1)
     for (let yy = 104; yy <= 109; yy++) store.setTile(wallCol, yy, 1);
     priv(t).pounceCd = 1000;
-    for (let k = 0; k < 12; k++) t.fixedUpdate(1, hooks);
-    expect(t.vy).toBeGreaterThanOrEqual(0);                 // 只有重力沉降,不起跳
+    let sawJump = false;
+    for (let k = 0; k < 12; k++) {
+      t.fixedUpdate(1, hooks);
+      if (t.vy < -4) sawJump = true;                        // 任一拍出现梯档负速
+    }
+    // ★1458 原文 :51424-51457：(b) 列扫 num55≠0∧flag21 家族无关 → 同高遇墙亦跳
+    // （旧断言"不跳"把虎的 (a) 条件 v15Y<-80 误并入列扫门,终清波批改判）
+    expect(sawJump).toBe(true);
   });
   it('跳梯五档直驱（:51476-51524 中腰探测列净空映射）', () => {
     const { store, player } = makeHooks();

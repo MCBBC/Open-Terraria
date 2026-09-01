@@ -20,7 +20,7 @@ export class WallTiler {
       if (!entry || !img) continue;
       const c = document.createElement('canvas');
       c.width = img.width; c.height = img.height;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       ctx.drawImage(img, 0, 0);
       for (const s of entry.sprites) {
         const rect = this.atlas.rect(file, s.name);
@@ -104,7 +104,7 @@ export class WallTiler {
     for (const item of interior) {
       const c = document.createElement('canvas');
       c.width = 64; c.height = 64;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       ctx.imageSmoothingEnabled = false;
       const r = item.rect;
       // A 层：64×64 四角平铺（完整覆盖），随后把整幅透明像素用自身土色填实

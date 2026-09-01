@@ -152,20 +152,22 @@ describe('② 地面步行族贴地行走（1457 AI_026 flag7 / AI_067 flag2）'
     expect(m.onGround).toBe(true);                       // 行走中保持贴地
     expect(m.y).toBe(100 * 16 - 16);
   });
-  it('蜘蛛遇障跳梯：前方 2 高墙 → 探测命中落地起跳 vy=-9.1（:63175-63290）', () => {
+  it('蜘蛛遇障跳梯：前方 2 高墙 → 探测命中落地起跳 vy=-7.1（:63208-63244 中腰行基准）', () => {
     const { hooks, player, store } = makeHooks();
     player.x = 60 * 16 + 200;
     player.y = 100 * 16 - 42;
     const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 16);
-    // 墙：蜘蛛前方 2-3 格、地上 2 格高（行 98/99）→ 跳梯 solid(-1)&&solid(-2) 且
-    // !solid(-4)/!solid(-5) → -9.1 档
+    // ★终清波批行基订正：AI_026 探测基准=中腰行（num190=centerY/16,:63222 重锚，
+    // 旧实现误用脚下行）。立行 99（中腰=99）：墙占行 98/99 两高 → 前墙单格(99)
+    // 检出、梯档 solid(-1)=98✓ 而 solid(-2)=97 空 → 第二档 -7.1（旧底行基算出
+    // -9.1 系失真面,随中腰重锚订正）
     for (let y = 98; y <= 99; y++) { store.setTile(63, y, 1); store.setTile(64, y, 1); }
     let vy = 0;
     for (let k = 0; k < 60; k++) {
       m.fixedUpdate(1, hooks);
       if (m.vy < 0) { vy = m.vy; break; }
     }
-    expect(vy).toBeCloseTo(-9.1, 6);
+    expect(vy).toBeCloseTo(-7.1, 6);
   });
   it('蜘蛛墙面爬行：竖列 3 格 ≥2 有墙 → 无重力爬向玩家、rotation 朝运动向（:65092-65175）', () => {
     const { hooks, player, store } = makeHooks();

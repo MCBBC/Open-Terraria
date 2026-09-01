@@ -172,7 +172,7 @@ function shimmerSparkleTint(tex: ImageBitmap | HTMLImageElement, hueIdx: number)
   if (bandW <= 0 || typeof document === 'undefined') return null;
   c = document.createElement('canvas');
   c.width = bandW; c.height = tex.height;
-  const cc = c.getContext('2d');
+  const cc = c.getContext('2d', { willReadFrequently: true });
   if (!cc) return null;
   cc.imageSmoothingEnabled = false;
   cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);

@@ -270,8 +270,115 @@ export const STYLE_FURN_TABLES: Record<number, FurnTables> = {
   },
 };
 
+/** ★IIIII105c：风格灯/箱 item 表 + 双地牢生物箱规格（DungeonGenerationStyles.cs 各档
+ *  终态逐值转录；null=C# null 分支语义）。
+ *  消费端=DungeonPass dgLights（Chandelier/Lantern 臂 GetStyleForWall 表支）、
+ *  dgBasicChests（GenerateDungeonRegularChest ChestItemTypes 支）、
+ *  dgBiomeChests dual 臂（BiomeChests_DualDungeons→GenerateDungeonBiomeChest
+ *  的 LockedBiomeChestType/Style 与 BiomeChestItemType/LootItemType 四字段）。 */
+export type StyleLightChestSpec = {
+  /** GenerateDungeonRegularChest 尾段表支（!flag && len!=0 → Next(len)→Derived） */
+  ChestItemTypes: number[] | null;
+  ChandelierItemTypes: number[] | null;
+  LanternItemTypes: number[] | null;
+  /** BiomeChests_DualDungeons→GenerateDungeonBiomeChest 规格（-1=C# -1 分支） */
+  LockedBiomeChestType: number;
+  LockedBiomeChestStyle: number;
+  BiomeChestItemType: number;
+  BiomeChestLootItemType: number;
+};
+const _BC = (chest: number[] | null, chand: number[] | null, lant: number[] | null,
+  lbct = -1, lbcs = -1, bci = -1, bcl = -1): StyleLightChestSpec =>
+  ({ ChestItemTypes: chest, ChandelierItemTypes: chand, LanternItemTypes: lant,
+    LockedBiomeChestType: lbct, LockedBiomeChestStyle: lbcs, BiomeChestItemType: bci, BiomeChestLootItemType: bcl });
+export const STYLE_LIGHTCHEST_TABLES: Record<number, StyleLightChestSpec> = {
+  11: _BC([5556], [5555], [5560]),                                  // Shimmer :65-105
+  12: _BC([952], [106, 107, 108, 710, 711, 712], [2037]),           // Spider  :106-145
+  13: _BC([831], [2141], [2145]),                                   // LivingWood :146-185
+  14: _BC([831], [2141], [2145]),                                   // LivingMahogany :557-597
+  9: _BC([2249], [2058], [2035]),                                   // Beehive :516-556
+  1: _BC([306, 5886], [106, 107, 108, 710, 711, 712, 5885], [2037, 5890]),   // Cavern :186-226
+  2: _BC([681, 5805], [2059, 5804], [2040, 5810], 21, 27, 1532, 1572),       // Snow :227-268
+  3: _BC([4267], [4305], [4309], 467, 13, 4712, 4607),                       // Desert :269-310
+  4: _BC([625, 3965, 5763], [2056, 3964, 5762], [2033, 3970, 5768], 21, 24, 1529, 1571), // Corruption
+  5: _BC([914, 2617, 5784], [2142, 2057, 5783], [2146, 2034, 5789], 21, 25, 1530, 1569), // Crimson
+  15: _BC([3884], [3894], [3891]),                                  // Crystal :393-432
+  6: _BC([627, 3884], [2061, 3894], [2039, 3891], 21, 26, 1531, 1260),      // Hallow :433-474
+  7: _BC([2544], [2543], [2546]),                                   // GlowingMushroom :475-515
+  8: _BC([626, 680], [2060], [2038, 4578], 21, 23, 1528, 1156),             // Jungle :598-642
+  10: _BC([1142], [2062], [2041]),                                  // Temple :643-676
+};
+
 /** item id → DerivedPlacementDetails{tileType,placeStyle}（Furniture 特征消费面）。 */
 export const ITEM_PLACE: Record<number, { t: number; s: number | null }> = {
+  106: { t: 34, s: null },
+  107: { t: 34, s: 1 },
+  108: { t: 34, s: 2 },
+  306: { t: 21, s: 1 },
+  625: { t: 21, s: 7 },
+  626: { t: 21, s: 8 },
+  627: { t: 21, s: 9 },
+  680: { t: 21, s: 10 },
+  681: { t: 21, s: 11 },
+  710: { t: 34, s: 3 },
+  711: { t: 34, s: 4 },
+  712: { t: 34, s: 5 },
+  831: { t: 21, s: 12 },
+  914: { t: 21, s: 14 },
+  952: { t: 21, s: 15 },
+  1142: { t: 21, s: 16 },
+  2033: { t: 42, s: 11 },
+  2034: { t: 42, s: 12 },
+  2035: { t: 42, s: 13 },
+  2037: { t: 42, s: 15 },
+  2038: { t: 42, s: 16 },
+  2039: { t: 42, s: 17 },
+  2040: { t: 42, s: 18 },
+  2041: { t: 42, s: 19 },
+  2056: { t: 34, s: 8 },
+  2057: { t: 34, s: 9 },
+  2058: { t: 34, s: 10 },
+  2059: { t: 34, s: 11 },
+  2060: { t: 34, s: 12 },
+  2061: { t: 34, s: 13 },
+  2062: { t: 34, s: 14 },
+  2141: { t: 34, s: 18 },
+  2142: { t: 34, s: 19 },
+  2145: { t: 42, s: 22 },
+  2146: { t: 42, s: 23 },
+  2249: { t: 21, s: 29 },
+  2617: { t: 21, s: 45 },
+  3884: { t: 467, s: 0 },
+  3891: { t: 42, s: 37 },
+  3894: { t: 34, s: 37 },
+  3964: { t: 34, s: 39 },
+  3965: { t: 467, s: 3 },
+  3970: { t: 42, s: 39 },
+  4267: { t: 467, s: 10 },
+  4305: { t: 34, s: 44 },
+  4309: { t: 42, s: 44 },
+  4578: { t: 42, s: 45 },
+  5555: { t: 34, s: 49 },
+  5556: { t: 467, s: 17 },
+  5560: { t: 42, s: 49 },
+  5762: { t: 34, s: 54 },
+  5763: { t: 467, s: 22 },
+  5768: { t: 42, s: 54 },
+  5783: { t: 34, s: 55 },
+  5784: { t: 467, s: 23 },
+  5789: { t: 42, s: 55 },
+  5804: { t: 34, s: 56 },
+  5805: { t: 467, s: 24 },
+  5810: { t: 42, s: 56 },
+  5885: { t: 34, s: 60 },
+  5886: { t: 467, s: 28 },
+  5890: { t: 42, s: 60 },
+  1528: { t: 21, s: 18 },
+  1529: { t: 21, s: 19 },
+  1530: { t: 21, s: 20 },
+  1531: { t: 21, s: 21 },
+  1532: { t: 21, s: 22 },
+  4712: { t: 467, s: 12 },
   32: { t: 14, s: null },
   34: { t: 15, s: null },
   36: { t: 18, s: null },
@@ -596,4 +703,11 @@ for (const [nm, id] of Object.entries(_NAME_TO_ID)) {
     st.Furn = tb;
     if (id === 13) st.BookshelfMinMaxOverride = [3, 7];   // LivingWoodStyleData 覆写
   }
+}
+
+// ★IIIII105c：灯/箱/生物箱规格随 import 装配（幂等,数据源自 cs 各档终态）
+for (const [nm, id] of Object.entries(_NAME_TO_ID)) {
+  const st2 = DungeonGenerationStyles[nm];
+  const lc = STYLE_LIGHTCHEST_TABLES[id];
+  if (st2 && lc) st2.Lch = lc;
 }

@@ -158,8 +158,11 @@ function chans(idx: number): Ch | null {
   const c: Ch = {
     t: le16(`${pre}.typ`), a: readFileSync(`${pre}.act`), w: le16(`${pre}.wal`), l: readFileSync(`${pre}.liq`),
     hf: readFileSync(`${pre}.half`), sl: readFileSync(`${pre}.slope`), lt: readFileSync(`${pre}.lty`), ia: readFileSync(`${pre}.inact`),
-    // ★IIII102c：wire 通道可选加载（存在才载——扩展式,旧链无 .wir 不受影响）
-    wir: existsSync(`${pre}.wir`) ? new Uint8Array(readFileSync(`${pre}.wir`).buffer, 0, N) : undefined,
+    // ★IIII102c：wire 通道可选加载（存在才载——扩展式,旧链无 .wir 不受影响）。
+    // ★Buffer 池坑:readFileSync 结果 buffer 可能带池偏移,必须经 byteOffset 起视图。
+    wir: existsSync(`${pre}.wir`)
+      ? (() => { const b = readFileSync(`${pre}.wir`); return new Uint8Array(b.buffer, b.byteOffset, Math.min(N, b.length)); })()
+      : undefined,
   };
   if (!NOCACHE) cache.set(idx, c);
   return c;

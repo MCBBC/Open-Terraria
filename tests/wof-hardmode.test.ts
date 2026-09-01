@@ -1,10 +1,17 @@
-// 肉山击杀→困难模式世界变换回归（对照 WorldGen.cs:31734-31860 GERunner/initializeHardMode
-// + NPC.cs:79837-79866 CreateBrickBoxForWallOfFlesh + :80281-80292 击杀序）
+// 肉山击杀→困难模式世界变换回归（对照 WorldGen.cs 57:31858-31988 / 56:31734-31860
+// GERunner/initializeHardMode + NPC.cs CreateBrickBoxForWallOfFlesh + 击杀序）
+// ★2026-09-01 F 批新增：F3 泛洪尾判据（ShapeFloodFill.cs 弹出丢弃 visited）/ F5 外描边
+// origin=(x,y) 落点下移一行 / F7 双地牢事件尾段批剥墙漆（NPC.cs:79607-79650）。
 import { describe, it, expect } from 'vitest';
 import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
-import { TILE_DEFS } from '../src/data/tiles';
-import { initializeHardMode, createBrickBoxForWallOfFlesh, startHardmode } from '../src/world/gen/vanilla/HardmodePass';
+import { TileStore } from '../src/world/TileStore';
+import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+import {
+  initializeHardMode, createBrickBoxForWallOfFlesh, startHardmode,
+  shapeFloodFillOnlyWalls, paintBackfillOutline,
+  onGameEventClearedForDualDungeons, clearUnbreakableWallsWithPaintUpTo,
+} from '../src/world/gen/vanilla/HardmodePass';
 
 const sheetOfId = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
 const idOfSheet = (sheet: number) => {
@@ -133,5 +140,172 @@ describe('砖盒 + startHardmode 置位链', () => {
     expect(first.wasHard).toBe(false);
     const second = startHardmode(world);
     expect(second.wasHard).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★F3/F5 洞穴墙回填机件（ShapeFloodFill.cs 全文 + ModShapes.OuterOutline Perform）
+// ---------------------------------------------------------------------------
+describe('★F3 泛洪尾判据（ShapeFloodFill.cs:49-58 弹出丢弃 visited）', () => {
+  /** 全实心石世界：IsNotSolid 谓词下只有 carve 出的非活性格参与泛洪 */
+  function grid(): TileStore {
+    const st = new TileStore(12, 12);
+    const stone = TILE_BY_KEY['stone']!;
+    for (let x = 0; x < 12; x++) for (let y = 0; y < 12; y++) st.setTileSilent(x, y, stone);
+    return st;
+  }
+  function carve(st: TileStore, cells: Array<[number, number]>): void {
+    for (const [x, y] of cells) { st.flags[st.idx(x, y)] = 0; st.wall[st.idx(x, y)] = 2; }
+  }
+
+  it('边窗 A：配额耗尽时队内只剩已访问格（重复入队）⇒ complete=true（旧判据误报 false）', () => {
+    const st = grid();
+    carve(st, [[5, 5], [6, 5]]);            // 两格水平腔；B 的左邻=A 是 visited 尾巴
+    const r = shapeFloodFillOnlyWalls(st, 5, 5, 2);
+    expect(Array.from(r.cells)).toEqual([st.idx(5, 5), st.idx(6, 5)]);
+    expect(r.complete).toBe(true);          // ShapeFloodFill 弹出 A(visited) 后队列空 ⇒ return true
+  });
+
+  it('边窗 B：配额耗尽且队首存在未访问格 ⇒ complete=false（真不完整照判）', () => {
+    const st = grid();
+    carve(st, [[5, 5], [6, 5]]);
+    const r = shapeFloodFillOnlyWalls(st, 5, 5, 1);   // 配额只够吃掉种子
+    expect(r.cells.has(st.idx(5, 5))).toBe(true);
+    expect(r.complete).toBe(false);         // 队列中的 B 未访问 ⇒ vanilla 同 false
+  });
+
+  it('边窗 C：无溢出时自然收口恒 complete=true（尾判据不得引入假阴）', () => {
+    const st = grid();
+    carve(st, [[4, 4], [5, 4], [4, 5], [5, 5]]);
+    const r = shapeFloodFillOnlyWalls(st, 4, 4, 1000);
+    expect(r.cells.size).toBe(4);
+    expect(r.complete).toBe(true);
+  });
+
+  it('非白名单墙/实心格拒扩邻（OnlyWalls+IsNotSolid 链保持）', () => {
+    const st = grid();
+    carve(st, [[5, 5], [6, 5]]);
+    st.setTileSilent(6, 5, TILE_BY_KEY['dirt']!);
+    void 0;
+    // 把 B 改回活性（IsNotSolid 拒绝）→ 只收到种子格
+    st.flags[st.idx(6, 5)] = 1;
+    const r = shapeFloodFillOnlyWalls(st, 5, 5, 10);
+    expect(r.cells.size).toBe(1);
+    expect(r.complete).toBe(true);
+  });
+});
+
+describe('★F5 外描边落点=泛洪格下移一行（GenAction 相对坐标 + origin=(x,y) 回放）', () => {
+  it('L 形腔全点集精确对位（含 8 邻环与中心一致平移 +1 行）', () => {
+    const st = new TileStore(16, 16);
+    const stone = TILE_BY_KEY['stone']!;
+    for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) st.setTileSilent(x, y, stone);
+    for (const [x, y] of [[5, 5], [6, 5], [5, 6]] as Array<[number, number]>) {
+      st.flags[st.idx(x, y)] = 0; st.wall[st.idx(x, y)] = 2;
+    }
+    const flood = shapeFloodFillOnlyWalls(st, 5, 5, 1000);
+    expect(flood.complete).toBe(true);
+    paintBackfillOutline(st, flood.cells, 196);
+
+    // 外描边 ∪ 中心，逐中心 Chebyshev 半径1 膨胀后整体 +1 行（手算期望集）
+    const expected = new Set<number>();
+    for (const c of [[5, 5], [6, 5], [5, 6]]) {
+      const cx = c[0], cy = c[1] + 1;                    // ★origin=(x,y) 回放：cy=cy0+1
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) expected.add((cy + dy) * 16 + (cx + dx));
+      }
+    }
+    const painted = new Set<number>();
+    for (let i = 0; i < st.wall.length; i++) if (st.wall[i] === 196) painted.add(i);
+    expect(painted.size).toBe(expected.size);
+    for (const e of expected) expect(painted.has(e)).toBe(true);
+    // 行基下移的直接证据：原泛洪顶行 y=5 上不应有新墙出现在 x∈{3}（未平移方案会画 (4,4) 等）
+    expect(st.wall[(4 * 16) + 4]).not.toBe(196);
+    expect(st.wall[(8 * 16) + 7]).toBe(196);             // 平移后最底行右下角在册
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★F7 双地牢事件尾段·批剥墙漆（NPC.cs:79607-79650 + WorldGen.cs:32033-32052）
+// ---------------------------------------------------------------------------
+const DD_TIERS = { EarlyGame: 0, EvilBoss: 1, JungleBoss: 2, Dungeon: 3, Hallow: 4 } as const;
+
+function ddWorld(dual: boolean): World {
+  const world = new World(24, 24, 55, 'dd-tail');
+  (world as unknown as { seedFlags: Record<string, boolean> }).seedFlags
+    = dual ? { dualDungeons: true } : {};
+  return world;
+}
+
+/** 铺一枚 wall350+tier 漆位探针格，返回其 idx */
+function probe350(world: World, sheet: number, paintTier: number): number {
+  const st = world.store;
+  const i = st.idx(5, 5);
+  st.type[i] = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sheet);
+  st.flags[i] = 1;
+  st.wall[i] = 350;
+  st.paintWall[i] = paintTier & 0xff;
+  return i;
+}
+
+describe('★F7 双地牢事件尾段批剥墙漆', () => {
+  it('事件→档位映射 1:1；(paintWall&0xF)<=tier 清刷、tier+16 中间档同 nibble 同判、超档保留', () => {
+    const CASES: Array<[number, number]> = [
+      [11, DD_TIERS.EarlyGame], [13, DD_TIERS.EarlyGame],
+      [14, DD_TIERS.EvilBoss], [8, DD_TIERS.JungleBoss],
+      [15, DD_TIERS.Dungeon], [19, DD_TIERS.Dungeon],
+      [16, DD_TIERS.Hallow], [17, DD_TIERS.Hallow],
+      [18, DD_TIERS.Hallow], [24, DD_TIERS.Hallow],
+    ];
+    for (const [ev, tier] of CASES) {
+      // 自身档与 tier+16 编码中间档（DitherSnakePass num4<=−2 分支）都命中低四位
+      for (const plus16 of [0, 16]) {
+        const w = ddWorld(true);
+        const i = probe350(w, 25, tier + plus16);            // 黑檀石 → 配套墙 EbonstoneUnsafe(3)
+        onGameEventClearedForDualDungeons(w, ev);
+        expect(w.store.wall[i]).toBe(3);
+        expect(w.store.paintWall[i]).toBe(0);
+      }
+      // 高一档漆保留（tier<4 才存在"下一档"）
+      if (tier < 4) {
+        const w = ddWorld(true);
+        const i = probe350(w, 25, tier + 1);
+        onGameEventClearedForDualDungeons(w, ev);
+        expect(w.store.wall[i]).toBe(350);
+        expect(w.store.paintWall[i]).toBe(tier + 1);
+      }
+    }
+  });
+
+  it('MatchingUnsafeWall 直查：黑檀石3/蓝板砖7/灰砖349/神庙砖87/冰块71；缺表 tile → defaultState 0', () => {
+    for (const [sheet, want] of [[25, 3], [41, 7], [38, 349], [226, 87], [161, 71]] as Array<[number, number]>) {
+      const world = ddWorld(true);
+      const i = probe350(world, sheet, 4);
+      clearUnbreakableWallsWithPaintUpTo(world, DD_TIERS.Hallow);
+      expect(world.store.wall[i]).toBe(want);
+      expect(world.store.paintWall[i]).toBe(0);
+    }
+    // 缺表 tile（火把 sheet4 不在 TileID.cs:425 表内）→ SetFactory defaultState=0
+    const world = ddWorld(true);
+    const i = probe350(world, 4, 2);
+    clearUnbreakableWallsWithPaintUpTo(world, DD_TIERS.Dungeon);
+    expect(world.store.wall[i]).toBe(0);
+  });
+
+  it('门语义：无 dualDungeons 旗 / 未映射事件 id（0/9/21/23）零行为', () => {
+    for (const ev of [11, 19, 16]) {
+      const plain = ddWorld(false);
+      const i = probe350(plain, 25, 0);
+      onGameEventClearedForDualDungeons(plain, ev);
+      expect(plain.store.wall[i]).toBe(350);
+      expect(plain.store.paintWall[i]).toBe(0);
+    }
+    for (const ev of [0, 9, 21, 23]) {
+      const world = ddWorld(true);
+      const i = probe350(world, 25, 0);
+      onGameEventClearedForDualDungeons(world, ev);
+      expect(world.store.wall[i]).toBe(350);
+      expect(world.store.paintWall[i]).toBe(0);
+    }
   });
 });

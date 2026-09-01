@@ -11,6 +11,11 @@ import { applyPaintTint, applyPaintTintSpecial, type LeafPaintSettings } from '.
 
 const tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
+// ★2026-09-01 readback 警告定谳：Chrome willReadFrequently 警告的读方=本函数 L27,
+// 但被读对象是【GPU 后备存储的 atlas/wall 页】——按 Chrome 建议挂 flag 会把页强制进
+// CPU 后备,伤每帧 drawImage 纹理采样(ChunkCache CPU_RENDER=false 的既定取舍)。
+// 16×16 小区读回实测亚毫秒级、仅含油漆格的 chunk 首烘/失效重烘触发,属可接受成本,
+// 登记为已知设计取舍； scratch(tintCanvas)已带 flag 消另一半警告。
 const tintCtx = tintCanvas ? tintCanvas.getContext('2d', { willReadFrequently: true }) : null;  // 纯 CPU scratch:SHM 后备不占 IOSurface(第六场双开 16x16 失败的当事画布)
 
 /** 对 canvas 的 (readX,readY) 16×16 区域按 paint 逐像素着色,回写到 ctx 的 (writeX,writeY)。

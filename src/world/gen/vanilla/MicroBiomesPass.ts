@@ -423,7 +423,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       // RandomWorldPoint(worldSurface+20, 50, 200, 50)(cs:21836)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
-      segProbe('iceTry', [ox, oy]);      const _tiOk = placeThinIcePatch(st, rng, gs, ox, oy);
+      const _tiOk = placeThinIcePatch(st, rng, gs, ox, oy);
+      // ★IIII102c：镜像 rig `118TI|{num8}|{x},{y}|{okTI}|rc` 行（SW_I121_SEG=1 才落盘,
+      //   生成面零行为影响）。num8=组内连续失败计数,x86 在 Place 后按前置值打印。
+      segProbe('118TI', `${iceFail}|${ox},${oy}|${_tiOk ? 1 : 0}`);
       if (_tiOk) {
         iceDone++;
         iceFail = 0;
