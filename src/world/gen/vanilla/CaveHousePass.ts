@@ -1899,6 +1899,26 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   （#58 窗 typ≈15k 自因主根因，2026-08-17 隔离重放实锤）
     if (theme === 'wood' || theme === 'ice' || theme === 'jungle' || theme === 'desert') {
       rng.next(); // PotentiallyConvertToSeedHouse：NextFloat >0.4f 早退，普通种子仅保流
+      // ★IIIII110 PotentiallyConvertToSeedHouse else 支全臂（HouseBuilder.cs:228-261）：
+      //   ≤0.4f 命中后按序组 special list——①NTB+tenth 丛林屋 {562,563,229}；
+      //   ②(drunk+tenth)×(wood|ice) 屋 {197 糖果木|193};③(frozen×ice)屋 Next(3)==0 →
+      //   {145 糖果块/wall29, 146 绿糖果块/wall30}；④(remix+getGood)沙漠屋 {188}。
+      //   list>0 再掷 Next(list.Count) 定型。普通/冬链走不到的组合支零添加零掷
+      //   （①②④旗关时纯条件短路）。
+      const spList: Array<[number, number]> = [];      // [tileSheet, wallSheet]
+      if (theme === 'jungle' && !!gs.seedFlags?.notTheBees && !!gs.seedFlags?.tenthAnniversary)
+        spList.push([562, 312], [563, 313], [229, 86]);            // cs:233-238
+      if ((theme === 'wood' || theme === 'ice') && !!gs.seedFlags?.drunkWorld && !!gs.seedFlags?.tenthAnniversary)
+        spList.push(theme === 'ice' ? [197, 76] : [193, 76]);      // cs:239-249
+      if (theme === 'ice' && !!gs.seedFlags?.worldIsFrozen && rng.nextInt(3) === 0)
+        spList.push([145, 29], [146, 30]);                         // cs:250-254 ★winter 主支
+      if (theme === 'desert' && !!gs.seedFlags?.remix && !!gs.seedFlags?.getGoodWorld)
+        spList.push([188, 72]);                                    // cs:255-258
+      if (spList.length > 0) {
+        const pick = spList[rng.nextInt(spList.length)];           // cs:259-261
+        const spT = sheetTile(pick[0]);
+        if (spT >= 0) { def.tile = spT; def.wall = pick[1]; }      // BeamType=574 为 ice 缺省态同值（IceHouseBuilder.cs:15）
+      }
       // PotentiallyConvertToRainbowBrick（ctor 第 2 掷；WoodHouseBuilder 专属）
       if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
         if (rng.nextIntRange(0, 2) === 0) {

@@ -19,7 +19,7 @@ import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
 // （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
-import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle, tileIsInStyle } from './DungeonStyles1457';
+import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle, tileIsInStyle, DungeonGenerationStyles } from './DungeonStyles1457';
 import type { PotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII93b 双座 pb 面
 // ★IIIII105b：风格家具 item 表（ItemID.Sets.DerivedPlacementDetails 提取域）
 import { ITEM_PLACE, STYLE_LIGHTCHEST_TABLES } from './DungeonStyleItems';   // ★105c 灯/箱/生物箱表
@@ -2242,11 +2242,22 @@ const snap: SnapFn = (name) => {
     winBoxes.push(box);                           // GenerateFeature 恒 true → generated=true
   }
   // DungeonWindowMosaic.Window_Skeletron（:46-190）——17×15 颅 + 11×7 颚 + 边缘描线
-  function dgWindowMosaicSkel(px: number, py: number, glass: number): void {
+  // ★IIIII109（2026-09-01）：glassPaint 面（OverrideGlassPaint→Window_Skeletron paint 参）。
+  //   Window_Skeletron 对玻璃格恒 wallColor(paint>0?paint:0)、对边缘/描线格恒 wallColor(0)
+  //   （DungeonWindowMosaic.cs:70-77/:80-96/:111-137）。x86 rig 插桩实证（i139 trace）：
+  //   invis 塔 mosaic@ (777,135) 共写 288 格=204 格 89+p26 ∪ 84 格 edge=9+c0（嘴眼腔
+  //   即描线写入体），随后无任何回改——八通道 W 全等、唯 Pw 差的纯漆面残差由此闭环。
+  function dgWindowMosaicSkel(px: number, py: number, glass: number, glassPaint = 0): void {
+    const gpE = glassPaint > 0 ? glassPaint : 0;   // Mosaic.Window :39 byte((ovp>0)?ovp:0)
     const box = new DBnd(w, h);
     box.set(px, py, px + 1, py + 1);              // Mosaic: SetBounds(placeX,placeY,placeX+1,placeY+1)
     const setW = (x: number, y: number, v: number): void => {
-      if (st.inBounds(x, y)) { st.wall[st.idx(x, y)] = v; box.upd(x, y); }
+      if (st.inBounds(x, y)) {
+        const ti = st.idx(x, y);
+        st.wall[ti] = v;
+        st.paintWall[ti] = v === glass ? gpE : 0;
+        box.upd(x, y);
+      }
     };
     const skullOK = (x: number, y: number, ww: number, wh: number): boolean => {
       if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
@@ -2334,11 +2345,19 @@ const snap: SnapFn = (name) => {
     winBoxes.push(box);
   }
   // DungeonWindowMosaic.Window_MoonLord（:192-330）——左右 8×7+7×6 侧眼 + 7×8 中眼
-  function dgWindowMosaicMoon(px: number, py: number, glass: number): void {
+  // ★IIIII109：同 Skeletron 接 glassPaint 参（Tower/Dome MoonLord 分支不注 OverrideGlassPaint
+  //   ⇒ 调用点传 0；玻璃格 wallColor(0)、边缘格 wallColor(0) 与 CS 恒等）
+  function dgWindowMosaicMoon(px: number, py: number, glass: number, glassPaint = 0): void {
+    const gpE = glassPaint > 0 ? glassPaint : 0;
     const box = new DBnd(w, h);
     box.set(px, py, px + 1, py + 1);              // Mosaic: SetBounds(placeX,placeY,placeX+1,placeY+1)
     const setW = (x: number, y: number, v: number): void => {
-      if (st.inBounds(x, y)) { st.wall[st.idx(x, y)] = v; box.upd(x, y); }
+      if (st.inBounds(x, y)) {
+        const ti = st.idx(x, y);
+        st.wall[ti] = v;
+        st.paintWall[ti] = v === glass ? gpE : 0;
+        box.upd(x, y);
+      }
     };
     const sideOK = (x: number, y: number, left: boolean, ww: number, wh: number): boolean => {
       if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
@@ -2641,7 +2660,8 @@ const snap: SnapFn = (name) => {
         dgWindowBasic(i + 9, n30 + 4, 5, 24, twG);
         dgWindowBasic(i, n30 + 3, 5, 28, twG);
       } else if (windowType === 1) {
-        dgWindowMosaicSkel(i, n30 - 1, entUnderground ? winGlassClosed : 89);   // Override=89 仅非地下
+        // ★IIIII109：OverrideGlassPaint=26 无条件（TED.cs:465）——Pw26 首例真债（Tower 入口）
+        dgWindowMosaicSkel(i, n30 - 1, entUnderground ? winGlassClosed : 89, 26);   // Override=89 仅非地下
       } else {
         dgWindowMosaicMoon(i, n30 + 5, entUnderground ? winGlassClosed : 91);
       }
@@ -2877,8 +2897,9 @@ const snap: SnapFn = (name) => {
     if (gs.seedFlags.drunkWorld) {
       dgTowerDoor(i, n7, n4, n3, !leftSide);
     }
-    // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；OverrideGlassPaint=26 墙漆不入
-    //   四通道不建模，同 Tower 备案）
+    // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；★IIIII109 Mosaic 已建模 glassPaint，
+    //   Dome Basic 对 paint26 仍未建模——Dome+windowType1/2 组合在四涂装链基线 P/Pw
+    //   全程零差，未见触发样本，如现新种子红再扩 dgWindowBasic 参）
     {
       if (windowType === 0) {
         dgWindowBasic(i - 8, n7 - 16, 5, 24, -1);
@@ -2889,7 +2910,8 @@ const snap: SnapFn = (name) => {
         dgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
         dgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, -1);
       } else if (windowType === 1) {
-        dgWindowMosaicSkel(i, n7 - 19, 89);      // OverrideGlassType=89（非 underground）
+        // ★IIIII109：Dome Skeletron 分支同注 OverrideGlassPaint=26（DDD.cs:349 前行）
+        dgWindowMosaicSkel(i, n7 - 19, 89, 26);      // OverrideGlassType=89（非 underground）
         dgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, -1);
         dgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, -1);
         dgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
@@ -5162,7 +5184,9 @@ const snap: SnapFn = (name) => {
   interface GFItemRef { v: number }
   let dgFurnDualResult: '' | 'alch' | 'bew' | 'ok' = '';
   /** per-seat 特征载荷与 climb 大厅基线（runDualDungeonLayout 返回后装配） */
-  const gfFeatRooms: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
+  // ★IIIII107c：+o*/bio 可选字段（S1..S7 臂 OuterBounds/BiomeDungeonRoom 门消费面）
+  const gfFeatRooms: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number;
+    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean }> = [];
   const gfFeatHalls: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
   let gfFeatScalar = 1.0;
   let gfStyles: import('./DungeonStyles1457').DungeonStyleData[] = [];

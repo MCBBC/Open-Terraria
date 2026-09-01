@@ -226,6 +226,32 @@ export function noSpiderCavesILiedMoreSpiderCaves(_f: SeedFlags): boolean {
   return false; // 组合债：需要 activeSecretSeedCount≥4 才为真（:17537/:20185 域）
 }
 
+/** ★IIIII110：activeSecretSeedCount（WorldGen.SecretSeed.Enable :527-542 计数域）的
+ *  JS 对应位——仅 37 枚 Register 秘种子（1456:340-408 + 1457:411/413）计入；
+ *  特殊种子九位（AWorldGenerationOption 路,drunk/notTheBees/getfixedboi 等）
+ *  与派生 Variations 子位（grayUseWhite 等）不计数。消费面例：
+ *  DoWorldIsFrozen 带=UnderworldLayer-H/10（count<6）/rockLayer（≥6）（cs:2231-2234）。 */
+const SECRET_SEED_FLAGS = new Set([
+  'paintEverythingGray', 'paintEverythingNegative', 'coatEverythingEcho',
+  'coatEverythingIlluminant', 'noSurface', 'extraLivingTrees', 'extraFloatingIslands',
+  'errorWorld', 'graveyardBloodmoonStart', 'surfaceIsInSpace', 'rainsForAYear',
+  'biggerAbandonedHouses', 'randomSpawn', 'addTeleporters', 'startInHardmode',
+  'noInfection', 'hallowOnTheSurface', 'infectedSeed', 'surfaceIsMushrooms',
+  'surfaceIsDesert', 'pooEverywhere', 'noSpiderCaves', 'actuallyNoTraps',
+  'rainbowStuff', 'digExtraHoles', 'roundLandmasses', 'extraLiquid',
+  'portalGunInChests', 'worldIsFrozen', 'halloweenGen', 'endlessHalloween',
+  'endlessChristmas', 'vampireSeed', 'teamBasedSpawns', 'dualDungeons',
+  'moreLightning', 'noLightning',
+]);
+
+export function activeSecretSeedCountOf(f: SeedFlags): number {
+  let n = 0;
+  for (const k of SECRET_SEED_FLAGS) {
+    if ((f as unknown as Record<string, boolean>)[k]) n++;
+  }
+  return n;
+}
+
 /** SeedFlags 中的派生 Variations 子旗标名（非注册种子位，不计入保守计数）。 */
 const DERIVED_VARIATION_KEYS = new Set([
   'echoJustSomeThings', 'echoJustInnerBlocks', 'illuminantJustSomeThings',

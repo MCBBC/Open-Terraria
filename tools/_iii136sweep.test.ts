@@ -64,7 +64,7 @@ function makeSt(): TileStore {
   return st;
 }
 
-type Pt = { j?: number; k?: number; att?: number; tag?: string };
+type Pt = { j?: number; k?: number; att?: number; tag?: string; trk?: number };
 const ANCHOR_TAGS = ['deadCands', 'deadCount', 'iceCount', 'swordAttempts', 'campCount',
   'MINEPRE', 'trapCount', 'treeCount', 'longTrackCount', 'stdTrackCount', 'mbLavaS', 'passStart'];
 function mkInjector(points: Pt[]): {
@@ -83,6 +83,11 @@ function mkInjector(points: Pt[]): {
   }
   let jCount = -1;
   let attCount = -1;
+  let trkCount = 0;
+  const trkMap = new Map<number, number>();
+  for (const p of points) {
+    if (p.trk !== undefined) trkMap.set(p.trk, p.k ?? 0);
+  }
   let rngRef: { next(): void } | null = null;
   const injectHere = (k: number, tag: string): void => {
     if (!rngRef) return;
@@ -112,6 +117,14 @@ function mkInjector(points: Pt[]): {
           tagMap.delete(name);
           injectHere(kt, name);
         }
+      } else if (name.startsWith('LTRK') || name.startsWith('STRK')) {
+        // track attempt 序（全局跨长短轨，独立于 lava 计数）
+        trkCount++;
+        const kt2 = trkMap.get(trkCount);
+        if (kt2 !== undefined && kt2 > 0) {
+          trkMap.delete(trkCount);
+          injectHere(kt2, `trk#${trkCount}`);
+        }
       } else if ((name === 'passStart') && tagMap.has(name)) {
         const kt = tagMap.get(name)!;
         if (kt > 0) {
@@ -122,6 +135,7 @@ function mkInjector(points: Pt[]): {
     },
     curJ: (): number => jCount,
     curAtt: (): number => attCount,
+    curTrk: (): number => trkCount,
   };
 }
 
@@ -140,6 +154,11 @@ it('III136 lava-loop per-group bias spectrum', () => {
   if (process.env.SW_I136_ANCHORS) {
     const K0 = Number(process.env.SW_I136_K ?? '1');
     for (const t of ANCHOR_TAGS) groups.push([{ tag: t, k: K0 }]);
+  } else if (process.env.SW_I136_TRKS) {
+    const spec = process.env.SW_I136_TRKS;
+    const ks = (process.env.SW_I136_KS ?? '1').split(',').map(Number);
+    const [loT, hiT] = spec.split('..').map(Number);
+    for (let n = loT; n <= hiT; n++) for (const kk of ks) groups.push([{ trk: n, k: kk }]);
   } else if (SETS.length) {
     // 模式1：显式集合（SW_I136_SET="3@1,7@2" 或 "a120@1"）
     groups.push(SETS);
@@ -203,7 +222,7 @@ it('III136 lava-loop per-group bias spectrum', () => {
       if (vw !== jw) { dWir++; continue; }
     }
     const tot = dA + dT + dW2 + dL + dHf + dSl + dLt + dIa + dWir;
-    console.log(`SPEC jset=${JSON.stringify(pts)} rolls=${trueRolls} jEnd=${inj.curJ()} attEnd=${inj.curAtt()}`
+    console.log(`SPEC jset=${JSON.stringify(pts)} rolls=${trueRolls} jEnd=${inj.curJ()} attEnd=${inj.curAtt()} trkEnd=${inj.curTrk()}`
       + ` A=${dA} T=${dT} W=${dW2} L=${dL} Hf=${dHf} Sl=${dSl} Lt=${dLt} Ia=${dIa}`
       + ` Wir=${dWir} TOTAL=${tot} [${Date.now() - r0}ms]`);
   }

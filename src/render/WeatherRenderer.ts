@@ -204,6 +204,36 @@ export class WeatherRenderer {
   private weather: WeatherState | null = null;
   hooks: WeatherFxHooks | null = null;
 
+  // ---- PR#2:烘焙结果跨帧 memo（trace 2026-09-01 定位 drawRain 链占主线程 17%）──
+  // 同屏雨/雪/沙的光照色在邻格间高度聚集 ⇒ 相同 (tex,rect,RGB) 的烘焙被大量重复。
+  // 安全性论证：
+  //   · bakeTintFrame 的 scratch 画布按【key 字符串】专属绑定——命中即跳过 gen，
+  //     该 key 的 scratch 自创建起绝不被覆写，缓存引用内容恒有效；
+  //   · 其它 key 使用各自专属 scratch，互不可见；
+  //   · key 覆盖全部语义输入（rect/frame/全精度 RGB String() 往返/k 系数），命中
+  //     与重烘产出逐位相同；键空间无界由 BAKE_MEMO_CAP 全清兜底（同 swayTintCache
+  //     >512 清空惯例，清后首帧补烘代价微小）。
+  private bakeMemo = new Map<string, HTMLCanvasElement | null>();
+  private static readonly BAKE_MEMO_CAP = 4096;
+  /** ★F1 热修（2026-09-01 二轮 review 自捕）：初始实现把 gen() 返回的【固定 key 共享
+   *  scratch】直接存表——同一原始 key 的两次不同语义烘焙（不同 RGB）互相覆写像素，
+   *  旧 memo 条目命中时画出的是后烘颜色=错色雨条。修正：miss 时对 scratch 立即做
+   *  【自有克隆】再入表，条目对外不可变；原始 key 的后续烘焙永远伤不到缓存内容。
+   *  克隆本身按"写一次→反复采样"形态走默认 GPU 后备（见 memory canvas-readback-flag-policy）。 */
+  private bakeMemoized(key: string, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
+    const hit = this.bakeMemo.get(key);
+    if (hit !== undefined) return hit;
+    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) this.bakeMemo.clear();
+    const baked = gen();
+    if (!baked) { this.bakeMemo.set(key, null); return null; }
+    const own = document.createElement('canvas');
+    own.width = baked.width; own.height = baked.height;
+    const octx = own.getContext('2d')!;
+    octx.drawImage(baked, 0, 0);                 // 像素级克隆（w/h 相同无缩放歧义）
+    this.bakeMemo.set(key, own);
+    return own;
+  }
+
   /** Game 每帧注入（weather 状态 + hooks） */
   attach(weather: WeatherState, hooks: WeatherFxHooks) {
     this.weather = weather;
@@ -563,13 +593,15 @@ export class WeatherRenderer {
       if (texOk) {
         // 光照着色（Main.cs:38248-38252）1:1：color = GetColor(light)×0.85f，shimmerAlpha>0
         // 再 ×(1−shimmerAlpha)——都是【逐通道连续值】乘法（XNA Color*float 只乘 RGB 不动 A）。
-        // 每滴在模块级 2×40 scratch 上按全精度 RGB 烘焙（multiply+destination-in 两步式，
-        // 同 Renderer.tintedSprite 单帧路径），取用即弃、无缓存无量化。
-        // ★旧实现把光照折成均值灰量化 8 档再乘（±9% 误差且彩色光照丢通道），2026-09-01 弃用。
-        //   shimmer 系数合并进 k：shimmerAlpha=0 时 (1−0)=1，乘法恒等，与原版分支逐位同值
+        // PR#2：烘焙结果按 (type,精确 RGB,k) 进跨帧 memo——邻格光照聚集 ⇒ 大量去重，
+        // 命中与重烘逐位相同（见类内安全性论证）。★旧实现把光照折成均值灰量化 8 档再乘
+        // （±9% 误差且彩色光照丢通道），2026-09-01 弃用。shimmer 系数合并进 k：
+        // shimmerAlpha=0 时 (1−0)=1，乘法恒等，与原版分支逐位同值。
         const k = 0.85 * (1 - hooks.shimmerAlpha);
-        const tinted = bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40,
-          Math.round(lr * k), Math.round(lg * k), Math.round(lb * k));
+        const cr = Math.round(lr * k), cg = Math.round(lg * k), cb = Math.round(lb * k);
+        const tinted = this.bakeMemoized(
+          `rain-strip|${d.type}|${cr},${cg},${cb}|k=${k}`,
+          () => bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40, cr, cg, cb));
         if (tinted) {
           ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
         }
@@ -603,7 +635,10 @@ export class WeatherRenderer {
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
         if (lr === 0 && lg === 0 && lb === 0) { f.active = false; continue; } // :39730
         // 单画（GetAlpha 路径，dust 76 无 color 不叠）——雪花本体白格阵，RGB 直接乘全精度光
-        const tinted = tintedFlake(dTex, lr, lg, lb, f.frame);
+        // PR#2：memo（键含全精度 String() 往返,命中逐位相同）
+        const tinted = this.bakeMemoized(
+          `flake|${f.frame}|${lr},${lg},${lb}`,
+          () => tintedFlake(dTex, lr, lg, lb, f.frame));
         if (tinted) ctx.drawImage(tinted, f.x - 4 * f.scale, f.y - 4 * f.scale, 8 * f.scale, 8 * f.scale);
       }
       // ---- 沙尘 grain（dust 268；DrawDust 通用支双画：环境光底 + GetColor 叠画）----
@@ -613,8 +648,10 @@ export class WeatherRenderer {
         const ty = Math.floor((g.y + 4) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
         if (lr === 0 && lg === 0 && lb === 0) { g.active = false; continue; } // :39730
-        const base = bakeTintFrame('dust268-base', dTex, 680, 60 + 10 * g.frame, 8, 8,
-          lr, lg, lb);                                        // 基画 = GetAlpha(light)（全幅）
+        const base = this.bakeMemoized(
+          `dust268-base|${g.frame}|${lr},${lg},${lb}`,
+          () => bakeTintFrame('dust268-base', dTex, 680, 60 + 10 * g.frame, 8, 8,
+            lr, lg, lb));                                       // 基画 = GetAlpha(light)（全幅）
         // 叠画 = GetColor(基画) = color − (255 − 基画) 逐通道钳 [0,255]（Dust.cs:2802-2854）；
         // 基画各通道取全精度光。★本模型不含 GetAlpha 的 ka=(255−alpha)/255 与 light.A 项
         // （dust.alpha 场未建模，与定谳批一致）；A 槽见下方 ga 注。
@@ -623,7 +660,9 @@ export class WeatherRenderer {
         const gcr = Math.max(0, Math.min(255, g.cr + lr - 255));
         const gcg = Math.max(0, Math.min(255, g.cg + lg - 255));
         const gcb = Math.max(0, Math.min(255, g.cb + lb - 255));
-        const over = bakeTintFrame('dust268-tint', dTex, 680, 60 + 10 * g.frame, 8, 8, gcr, gcg, gcb);
+        const over = this.bakeMemoized(
+          `dust268-tint|${g.frame}|${gcr},${gcg},${gcb}`,
+          () => bakeTintFrame('dust268-tint', dTex, 680, 60 + 10 * g.frame, 8, 8, gcr, gcg, gcb));
         // A 槽：old 曾把灰度 v 代入 GetColor 的 alpha 式 clamp(A+v−255)（量化遗留耦合，
         // 暗 光下叠画整层消失）。斩断后按 light.A≡255 + 本仓不建模 dust.alpha → A = color.A
         // 常量；若日后建模两场再补完整 A 链
@@ -659,9 +698,11 @@ export class WeatherRenderer {
  *  旧实现把光照折成均值灰、量化 8 档后按档预烘焙乘色画布（rainTintCache/
  *  flakeTintCache/sandTintCache 三张 Map）——亮度误差约 ±9%、彩色光照丢通道。
  *  现改为每粒在【模块级共享 scratch】上按全精度 RGB 现烘（multiply 铺色 +
- *  destination-in 保形两步式，等价 Renderer.tintedSprite 的单帧路径）。不建缓存：
- *  连续光照下键空间无界必漏；scratch 复用取代（同 Renderer.dustScratch 模式）。
- *  ★scratch 内容会被下一次烘焙覆写——拿到引用的调用方必须【当场】消费。 */
+ *  destination-in 保形两步式，等价 Renderer.tintedSprite 的单帧路径）。
+ *  ★PR#2（2026-09-01 trace 复盘）增补跨帧 memo：scratch 按 key 字符串专属绑定，
+ *    命中即跳过重烘 ⇒ scratch 自创建起不被覆写,缓存引用恒有效;键含全部语义输入
+ *    （rect/frame/精确 RGB/k），无界空间由 4096 全清兜底——同帧去重之外的邻帧
+ *    光照重复(同一格雨连滴)亦被吸收。类内 bakeMemoized+安全论证全文见此类头。 */
 
 interface TintScratch { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }
 const tintScratches = new Map<string, TintScratch>();

@@ -36,6 +36,22 @@ it('III136 trace collector', () => {
   const rows: string[] = [];
   let jIdx = -1;
   let rngCount = 0;
+  // 段间快照：每锚记录残差带位面 → 终局做时间线归属
+  const BANDX0 = Number(process.env.SW_I136_X0 ?? '1020'), BANDX1 = Number(process.env.SW_I136_X1 ?? '1090');
+  const BANDY0 = Number(process.env.SW_I136_Y0 ?? '955'), BANDY1 = Number(process.env.SW_I136_Y1 ?? '1000');
+  type SnapMap = Map<string, string>;
+  const snaps = new Map<string, SnapMap>();
+  const takeSnap = (tag: string): void => {
+    const m: SnapMap = new Map();
+    for (let y = BANDY0; y <= BANDY1; y++) {
+      for (let x = BANDX0; x <= BANDX1; x++) {
+        const i = y * W + x;
+        m.set(`${x},${y}`, `${st.flags[i]}${st.type[i]}w${st.wire[i]}s${st.slope[i]}h${st.half[i]}`);
+      }
+    }
+    snaps.set(tag, m);
+  };
+  takeSnap('__pre');
   const g = globalThis as {
     __swSeg?: (n: string, d?: unknown) => void;
     __swOnRoll?: unknown;
@@ -50,20 +66,47 @@ it('III136 trace collector', () => {
   const BIASES: Array<{ tag: string | number; k: number }> = [];
   for (const pair of (process.env.SW_I136_SETS ?? '').split(',')) {
     if (!pair) continue;
-    const [a, b] = pair.split('@').map(Number);
-    BIASES.push({ tag: pair.startsWith('a') || pair.startsWith('MINEPRE') || ANCHOR_WORDS.includes(pair.split('@')[0]!) ? String(pair.split('@')[0]) : NaN, k: b });
-    void a;
+    const b = Number(pair.split('@')[1] ?? 0);
+    BIASES.push({ tag: String(pair.split('@')[0]), k: b });
   }
   const anchorHit = new Map<string, number>();
+  const attCoord: Array<[number, number, number, number]> = [];
+  const attDiffs: Array<{ att: number; xy: [number, number] | null; ok: number; diffs: string[] }> = [];
+  let lastM: Map<string, string> | null = null;
+  let lastTag = -1;
+  const PERTATT = (process.env.SW_I136_PERTATT ?? '') === '1';
   g.__swSeg = (name: string, d?: unknown): void => {
     if (name.startsWith('lavaJ')) { jIdx++; }
+    if (name.startsWith('tAtt')) {
+      const attN = (anchorHit.get('__tAtt') ?? -1) + 1;
+      anchorHit.set('__tAtt', attN);
+      if (PERTATT) {
+        // 增量快照：与上一份对比，若带内有变化则记为 attempt(上一号) 的产出
+        const cur: Map<string, string> = new Map();
+        for (let y = BANDY0; y <= BANDY1; y++) {
+          for (let x = BANDX0; x <= BANDX1; x++) {
+            const i = y * W + x;
+            cur.set(`${x},${y}`, `${st.flags[i]}${st.type[i]}w${st.wire[i]}s${st.slope[i]}h${st.half[i]}`);
+          }
+        }
+        if (lastM) {
+          const diffs: string[] = [];
+          for (const [cell, v] of cur) if (lastM.get(cell) !== v) diffs.push(`${cell}:${lastM.get(cell)}->${v}`);
+          if (diffs.length) {
+            attDiffs.push({ att: lastTag, xy: null, ok: -1, diffs });
+          }
+        }
+        lastM = cur;
+        lastTag = attN;
+        attCoord.push([attN, ...(Array.isArray(d) ? d.slice(0, 3) : [0, 0, 0]) as number[]]);
+      }
+    }
     if (ANCHOR_WORDS.includes(name)) {
       anchorHit.set(name, (anchorHit.get(name) ?? 0) + 1);
-      for (const bb of BIASES) if (bb.tag === name && bb.k > 0 && !bb.used) { for (let z = 0; z < bb.k; z++) rng.next(); (bb as { used?: boolean }).used = true; }
+      for (const bb of BIASES) if (bb.tag === name && bb.k > 0 && !(bb as { used?: boolean }).used) { for (let z = 0; z < bb.k; z++) rng.next(); (bb as { used?: boolean }).used = true; }
+      takeSnap(name);
       if ((process.env.SW_I136_ALLSEG ?? '') === '1') rows.push(`ANCH ${name} rc=${rngCount}`);
     }
-    if (name.startsWith('tAtt') && (process.env.SW_I136_TATT ?? '') === '1') rows.push(`tAtt#${(anchorHit.get('__tAtt') ?? -1)} d=${JSON.stringify(d)} j=${jIdx} rc=${rngCount}`);
-    else if (name.startsWith('tAtt')) { anchorHit.set('__tAtt', (anchorHit.get('__tAtt') ?? -1) + 1); }
     // 矩形命中过滤
     const hits = coordProbe(name, d);
     if (hits) rows.push(`${name}${d !== undefined ? '|' + JSON.stringify(d) : ''} j=${jIdx} rc=${rngCount}`);
@@ -97,12 +140,41 @@ it('III136 trace collector', () => {
   }
   const rng = new RNG(SEED);
   runMicroBiomesPass(st, rng, gs, chests as never);
+  takeSnap('__end');
   g.__swSeg = oSeg;
   g.__swOnRoll = oRoll;
   g.__swMbDraws = oDraws;
   console.log(`anchors=${JSON.stringify([...anchorHit.entries()].filter(([k]) => !k.startsWith('__')))}`);
   console.log(`TRACE(${OUTTAG}) rows=${rows.length}`);
   for (const r of rows.slice(0, 400)) console.log('R| ' + r);
+  // ---- 段间时间线归属：对带内每个变化格,找第一个改变的锚段 ----
+  const preM = snaps.get('__pre')!;
+  const endM = snaps.get('__end')!;
+  const segOrder = [...snaps.keys()];
+  const attributions = new Map<string, string[]>();
+  for (const [cell, vEnd] of endM) {
+    const vPre = preM.get(cell)!;
+    if (vEnd === vPre) continue;
+    let firstSeg = '(__end only)';
+    for (const seg of segOrder) {
+      if (seg === '__pre' || seg === '__end') continue;
+      if (snaps.get(seg)!.get(cell) !== vPre) { firstSeg = seg; break; }
+    }
+    const arr = attributions.get(firstSeg) ?? [];
+    arr.push(`${cell} ${vPre}->${vEnd}${firstSeg.startsWith('(__') ? '' : `(or later)`}`);
+    attributions.set(firstSeg, arr);
+  }
+  for (const [seg, list] of attributions) {
+    console.log(`ATTR seg=${seg} changedCells=${list.length} first: ${list.slice(0, 8).join(' ; ')}`);
+  }
+  // ---- per-attempt 增量归属（SW_I136_PERTATT=1 时）----
+  if (PERTATT) {
+    for (const drow of attDiffs) {
+      // 该 attempt 的落点（tAtt 序号对应 attCoord 中同序号行）
+      const row = attCoord.find(a2 => a2[0] === drow.att + 1);
+      console.log(`PERATT att#${drow.att} nextXY=(${row?.[1]},${row?.[2]}) ok=${row?.[3]} cells=${drow.diffs.length} :: ${drow.diffs.slice(0, 5).join(' ; ')}`);
+    }
+  }
 }, 900_000);
 
 const ANCHOR_WORDS = ['passStart', 'deadCands', 'deadCount', 'iceCount', 'swordAttempts',

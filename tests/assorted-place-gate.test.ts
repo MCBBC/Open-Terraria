@@ -3,7 +3,7 @@
 // false 后回落通用"空格+邻接支撑"铺块链（已修=族内物品终止通用链）。
 // 本表另锁 nactive() 门：非法杖种子对空格恒 false（empty 入参）。
 import { describe, it, expect } from 'vitest';
-import { assortedPlaceOk, GRASS_SEED_STAFF_VIDS } from '../src/world/evolution/PlantRules';
+import { assortedPlaceOk, GRASS_SEED_STAFF_VIDS, GRASS_CONVERT_SHEETS } from '../src/world/evolution/PlantRules';
 import { vanillaItemCreateTile } from '../src/data/items';
 
 describe('assortedPlaceOk（AssortedThings 门）', () => {
@@ -51,5 +51,15 @@ describe('草族路由三要素（2026-09-01 三修：meta 推导）', () => {
     expect(vanillaItemCreateTile(5214)).toBe(633);  // 灰烬草种
     expect(vanillaItemCreateTile(10171)).toBe(-1);  // place_v_109（本仓 vid，无 meta）
     expect(vanillaItemCreateTile(-1)).toBe(-1);
+  });
+});
+
+// ★路由域单源锁定（Game.ts 字面量副本已删）。= assortedPlaceOk 非法杖各支受理面。
+//  增减成员须同步 Player.cs:41372/:41378/:41390/:41403/:41416 对应分支——
+//  tileMoss 族/227/滴水族/火把族【不在】此集（各自专路，勿混入）。
+describe('GRASS_CONVERT_SHEETS 路由域（单源）', () => {
+  it('全集恰为九员：草/腐草(2) 泥草转坏族(23,199,661,662→59) 丛林(60) 圣草(109) 灰烬草(633)', () => {
+    expect([...GRASS_CONVERT_SHEETS].sort((a, b) => a - b))
+      .toEqual([2, 23, 60, 70, 109, 199, 633, 661, 662]);
   });
 });

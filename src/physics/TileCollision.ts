@@ -434,25 +434,17 @@ function slopeCollide(
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
   let positionChanged = false;  // 贴合是否实际移动了 body（消费方 Y 冻结判定）
-  // [临时逐格取证口]
-  const TRACE = (globalThis as Record<string, unknown>)?.__SW_SCTRACE as { feetLo?: number; feetHi?: number; out: unknown[] } | undefined;
-  const trk = TRACE && (!TRACE.feetLo || (feetEntry >= TRACE.feetLo && feetEntry <= TRACE.feetHi)) ? TRACE.out : undefined;
 
   // ★贴地前瞻行（+1）：跨坡格交界时脚底尚未探入下一行、旧格又已水平出窗——
   // 两候选皆不可见的裸奔缝（v5 探针 t47 定案,每列一次 5 帧空簇的根源）。
   // 仅贴地下行时多扫一行,让下一列对角线提前一帧进入候选窗。
   const yProbe = (wasGround && b.vy >= 0) ? y1 + 1 : y1;
-  if (trk) trk.push(`  scan x[${x0}..${x1}] y[${y0}..${y1}]+probe=${yProbe} body=[${b.x.toFixed(1)},${(b.x+b.w).toFixed(1)}]x[${b.y.toFixed(1)},${(b.y+b.h).toFixed(1)}] feetEntry=${feetEntry.toFixed(1)} vyEntry=${vyEntry.toFixed(2)} wasG=${wasGround}`);
   for (let tx = x0; tx <= x1; tx++) {
     for (let ty = y0; ty <= yProbe; ty++) {
-      const __t0 = trk ? { cell: `${tx},${ty}` } : null;
-      if (trk) trk.push(`c ${tx},${ty} sl=${st.slope[st.idx(tx, ty)]} hf=${st.half[st.idx(tx, ty)]} act=${(st.flags[st.idx(tx, ty)] & 1) || 0}`);
-      const __t0dead: unknown = __t0;
       if (!st.inBounds(tx, ty)) continue;
       const i = st.idx(tx, ty);
       const slope = st.slope[i];
       if (slope === 0 || st.half[i]) {
-        if (trk) trk.push(`  flat sl${slope} hf${st.half[i]} t${st.type[i]}`);
         continue;
       }
       const vx0 = tx * TILE, vy0 = ty * TILE;
@@ -494,27 +486,17 @@ function slopeCollide(
       const isPlatSlope = !isSolidCell && st.isPlatform(tx, ty)
         && (slope === 1 || slope === 2);
       if (!isSolidCell && !isPlatSlope) {
-        if (trk) trk.push(`  reject notSlopeSupport kind=${isSolidCell?'solid':'plat'}`);
+        
         continue;
       }
-      //  isSolidCell ? 'solid' : 'plat';
       if (isPlatSlope) {
-        if (b.dropThrough) { if (trk && __t0) trk.push('  plat dropThrough'); continue; }
-        if (b.vy < 0) { if (trk && __t0) trk.push('  plat vy<0'); continue; }
-        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) {
-          if (trk && __t0) trk.push(`  plat band feet=${(b.y+b.h).toFixed(1)} [${ty*TILE},${ty*TILE+TILE+1+Math.abs(b.vx)}]`);
-          continue;
-        }
+        if (b.dropThrough) continue;   // 按住下 = 楼梯下穿（stairFall 可见语义）
+        if (b.vy < 0) continue;
+        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) continue;
         if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
-          && Math.floor((b.y + b.h) / TILE) - 1 === ty) {
-          if (trk && __t0) trk.push('  plat dirGate');
-          continue;
-        }
+          && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
       }
-      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) {
-        if (trk && __t0) trk.push('  overlap-out');
-        continue;
-      }
+      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
       // slope2/4 取右缘。钳到 ≥0（与原版 num4<0 即跳过的差异,见函数头注释）：
       // 坡顶过渡瞬间(高侧缘越过坡面)原版会脱钩,脚底残留在对角线端点下方数像素,
@@ -552,31 +534,16 @@ function slopeCollide(
         // 地面坡（:1935-1966）：沉到斜面下才抬回（gap<0 即抬升；面随下贴候选
         // 已上提到重叠门前,此处只保留抬升路径）
         const gap = vy0 + num4 - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入面下
-        if (gap >= 0) {
-          if (trk && __t0) __t0.r = `gap>=0 ${gap.toFixed(1)}`;
-          continue;                        // 未沉入 → 无抬升（原 :3621 面）
-        }
+        if (gap >= 0) continue;                        // 未沉入 → 无抬升（原 :3621 面）
         const num7 = gap;
         // ★G2 速度门（:1947）：贴合结果必须高于「入口英尺+本帧速度Y」与当前
         //   落地位的较小者——上升/掠过者拒贴（阻尼根因）
-        if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) {
-          if (trk && __t0) __t0.r = `G2 tgt=${(b.y+num7).toFixed(1)} min=${Math.min(b.y+b.h,feetEntry+vyEntry).toFixed(1)}`;
-          continue;
-        }
+        if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
         if (num7 < bestLift) {
           bestLift = num7;
           if (SLOPE_G2) b.collideY = true;   // bitsByte[num3]=true（:1954）
         }
       }
-    }
-  }
-  // [临时取证口] 探针观测用，用后即删
-  {
-    const dbg = (globalThis as Record<string, unknown>)?.__SW_SCDBG as unknown[] | undefined;
-    if (dbg) dbg.push({ wl: bestLift, ws: bestSnapY, wg: bestSnapGap });
-    if (trk) {
-      trk.push(`  best: lift=${bestLift.toFixed(2)} snapY=${bestSnapY} snapGap=${bestSnapGap}`);
-      for (const line of trk.slice(0)) { /* noop keep */ }
     }
   }
   if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记

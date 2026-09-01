@@ -186,7 +186,14 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
     return !!st.flags[si] && FIT.has(st.type[si]);
   };
   if (!fitSide(-1) && !fitSide(1)) return false;
-  const height = rng.int(5, 16) + heightAddon;         // Next(5,17)+treeHeightAddon（1458 :30078）
+  let height = rng.int(5, 16) + heightAddon;           // Next(5,17)+treeHeightAddon（1458 :30078）
+  // ★IIIII111（cs:30080-30086）：errorWorld ⇒ Next(errorWorldAdjustment(3.0))==0 时
+  //   高度改 Next(2,101)；else-if extraLivingTrees ⇒ 高度 += Next(0,11)。
+  if (!!gs.seedFlags.errorWorld && rng.nextInt((gs as unknown as { __ewAdj3?: number }).__ewAdj3 ?? 4) === 0) {
+    height = rng.int(2, 100);
+  } else if (!!gs.seedFlags.extraLivingTrees) {
+    height += rng.int(0, 10);                          // eLT 树高加成
+  }
   let clear = height + 4;                              // num3
   if (JUNGLE_GRASS.has(st.type[gi])) clear += 5;
   // 净空盒（cs:29962-29972）：ignoreID=20——蘑菇草(70)基座有专属双段通道，

@@ -901,13 +901,13 @@ function isTileReplaceable(st: Game['world']['store'], x: number, y: number): bo
   return true;
 }
 // PlantCheck 判定/换型规则已迁 src/world/evolution/PlantRules.ts 单点（Game 与演化放置门共用）
-import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY, assortedPlaceOk } from "../world/evolution/PlantRules";
+import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY, assortedPlaceOk, GRASS_CONVERT_SHEETS } from "../world/evolution/PlantRules";
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
 // 灰烬草种→灰烬块(57)。再生法杖 213/再生之斧 5295（createTile=2）额外可转
 // 石头(1)/灰砖(38)——"凭空种草"的本体（Item.cs:4003-4016 createTile=2）
-const GRASS_CONVERT_SHEETS = new Set([2, 23, 60, 70, 109, 199, 633, 661, 662]);
+// ★集合本体已单源迁至 PlantRules.GRASS_CONVERT_SHEETS（2026-09-01，测试锁定）
 /** 八向至少一格暴露（草种/苔藓/再生法杖放置门共用，SmartCursor :273-274 同源） */
 function exposed8ForPlant(st: TileStore, x: number, y: number): boolean {
   for (let oy = -1; oy <= 1; oy++) {

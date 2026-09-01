@@ -107,6 +107,8 @@ const SMALL_PILE = TILE_BY_KEY['v_185_small_decos']!;
 
 /** 活木墙（w244_livingwoodunsafe；原版墙 id 直存） */
 const WALL_LIVING_WOOD = 244;
+/** TileID.Sets.Clouds（Terraria.ID/TileID.cs:197 Factory.CreateBoolSet）——eLT 云锚附近截断用 */
+const LT_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
 /** Main.wallDungeon（cs:10777 起）= 地牢墙族 */
 const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 /** TileID.Sets.Ore（TileID.cs:399）——GrowLivingTree 地面类型门禁用 */
@@ -249,6 +251,16 @@ function setLivingWood(st: TileStore, x: number, y: number): void {
   st.type[i] = LIVING_WOOD;
   st.flags[i] = 1;
   st.half[i] = 0;
+}
+/** ★IIIII111（cs:28444-28447/:28469-28473）：eLT 收窄事件「边列足写」——原版仅
+ *  `.active(true); .type=191; .wall=0` 三连，**不带 halfBrick 复位**（区别于行写入器）。
+ *  注：右侧臂的墙面判定读的是左缘 num3 列（反编译字面，照录）。 */
+function ltFoot191(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  st.type[i] = LIVING_WOOD;
+  st.flags[i] = 1;
+  st.wall[i] = 0;
 }
 function setLeaf(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
@@ -707,7 +719,16 @@ function growLivingTreePassageRoom(
 function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): boolean {
   const worldSurface = gs.worldSurface;
   let left = i, right = i;
-  const num3 = 80;                                               // cs:28786
+  let num3 = 80;                                                 // cs:28786
+  // ★IIIII111（cs:28787-28790）：eLT 横隧长度臂——Next(5)==0 ⇒ Next(400,600)；
+  //   否则 Next(2)!=0 ⇒ Next(80,200)、else Next(200,400)。（g 链不触，骰序以原文为准）
+  if (!!gs.seedFlags.extraLivingTrees) {
+    if (rng.int(0, 4) === 0) num3 = rng.int(400, 599);
+    else if (rng.int(0, 1) !== 0) num3 = rng.int(80, 199);
+    else num3 = rng.int(200, 399);
+  } else if (gs.seedFlags.notTheBees && !gs.seedFlags.drunkWorld) {
+    num3 *= 3;                                                   // cs:28791-28792（NTB 原臂）
+  }
   let num4 = 1;
   if (rng.int(0, 1) === 0) num4 *= -1;                           // cs:28793
   mk109(`TU0|i=${i}|j=${j}|dir=${num4}`);
@@ -843,6 +864,18 @@ function growLivingTreeMakePassage(
   let num4 = j - 6;
   let num5 = 50;
   let num6 = rng.int(400, 699);                  // cs:29033 Next(400,700)
+  // ★IIIII111（cs:29035-29045）：eLT 竖井加深——num6*=5；1/3 ⇒ Next(200,1500)*scale、
+  //   else-if Next(2)==0 ⇒ Next(50,400)*scale（scale=maxTilesY/1200）；notTheBees×tenth 分支另案。
+  if (!!gs.seedFlags.extraLivingTrees) {
+    const ltScale = st.h / 1200;
+    num6 *= 5;
+    if (rng.int(0, 2) === 0) {
+      num5 = Math.trunc(rng.int(200, 1499) * ltScale);
+    } else if (rng.int(0, 1) === 0) {
+      num5 = Math.trunc(rng.int(50, 399) * ltScale);
+    }
+  }
+  // ★IIIII111（cs:29061-29064）：eLT 微光邻近停井（shimmerPosition 距离 <120）
   let num8 = 0;
   let flag3 = true;
   let num9 = rng.int(5, 15);
@@ -851,6 +884,11 @@ function growLivingTreeMakePassage(
   if (LT_TRACE) console.log(`MP enter st=${ltStream()} num6=${num6} num9=${num9}`);
   while (num6 > 0) {
     if (num4 > underworldLayer + rng.int(15, 30)) num6 = 0;   // cs:29053
+    // ★IIIII111（cs:29061-29064）：eLT 微光以太邻近（<120px）停井——shimmerX/Y=-1 未生成时不触发。
+    if (!!gs.seedFlags.extraLivingTrees && gs.shimmerX >= 0
+      && Math.hypot((minl + minr) / 2 - gs.shimmerX, num4 - (gs.shimmerY ?? 0)) < 120.0) {
+      num5 = 0; num6 = 0;
+    }
     num4++;
     num6--;
     num5--;
@@ -1079,15 +1117,41 @@ export function growLivingTree(
   let num12 = rng.int(-8, -5);    // cs:28264
   let num13 = rng.int(0, 1);      // cs:28265
   let num14 = rng.int(5, 14);     // cs:28266
-  const maxValue = 2;             // cs:28267（extraLivingTrees 才会 >2）
+  // ★IIIII111：eLT 树冠特化支入口（cs:28401-28407）——!skyblock ∧ extraLivingTrees ∧
+  //   干宽 num4-num3≥7 ⇒ flag3=true、maxValue 收窄概率改 Next(7)；云层底接触后主干停。
+  let maxValue = 2;               // cs:28267
+  const sfELTg = !!gs.seedFlags.extraLivingTrees;
+  const ltFlag3 = !gs.seedFlags.skyblock && sfELTg && num4 - num3 >= 7;
+  if (ltFlag3) maxValue = 7;
+  /** TileID.Sets.Clouds（TileID.cs:197={189,196,460,717,718,719}）±distance 盒探针 */
+  const ltCloudsNear = (cx0: number, cy0: number, dist: number): boolean => {
+    for (let i2 = cx0 - dist; i2 <= cx0 + dist; i2++) {
+      for (let j2 = cy0 - dist; j2 <= cy0 + dist; j2++) {
+        if (!st.inBounds(i2, j2)) continue;
+        if (st.flags[st.idx(i2, j2)] && LT_CLOUD_SHEETS.has(sheetAt(st, i2, j2))) return true;
+      }
+    }
+    return false;
+  };
   const ax = new Int32Array(1000), ax2 = new Int32Array(1000), ax3 = new Int32Array(1000), ax4 = new Int32Array(1000);
   let num = 0;
   const ax5 = new Int32Array(2000), ax6 = new Int32Array(2000), ax7 = new Uint8Array(2000);
   let num2 = 0;
   if (LT_TRACE) console.log(`GLTp head st=${ltStream()} g=${ltGridHash(st)} num3=${num3} num4=${num4} num5=${num5}`);
   if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gt0|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gt0')
-  // ---- 主干收窄循环（cs:28271-28345） ----
-  while (flag2) {
+  // ---- 主干收窄循环（cs:28271-28345）----
+  //   ★IIIII111：循环条件补 eLT 云锚截断（cs:28406）——`while (flag2 && (skyblock ||
+  //   !extraLivingTrees || !(num11 < worldSurface) || !AreAnyTilesInSetNearby(
+  //   (num3+num4)/2, num11-35, Clouds, 10)))`；高度带宽调整（cs:28408-28415）与
+  //   条件式侧计数（cs:28298/:28317）+ 边列足写（cs:28441-28447/28466-28473）
+  //   全部为 extraLivingTrees 特化支，g/s22222 等认证链零触碰。
+  while (flag2 && (!sfELTg || gs.seedFlags.skyblock || !(num11 < worldSurface)
+    || !ltCloudsNear(((num3 + num4) / 2) | 0, num11 - 35, 10))) {
+    // ★IIIII111（cs:28408-28415）：eLT 高度带——<130 ⇒ Next(1)=必收窄；<180 ⇒ Next(2)
+    if (ltFlag3) {
+      if (num11 < 130) maxValue = 1;
+      else if (num11 < 180) maxValue = 2;
+    }
     num12++;
     if (num12 > num14) {
       num14 = rng.int(5, 14);
@@ -1098,22 +1162,49 @@ export function growLivingTree(
         ax3[num] = -1;
         ax[num] = num3;
         ax4[num] = num4 - num3;
-        if (rng.int(0, maxValue - 1) === 0) num3++;      // cs:28294 Next(maxValue)
-        num9++;                                          // cs:28301（flag3 恒 false）
+        if (rng.int(0, maxValue - 1) === 0) {            // cs:28294
+          num3++;
+          if (ltFlag3) num9++;                           // cs:28298（!flag3 时下面补计）
+          // ★IIIII111（cs:28441-28447）：eLT 边列足写（不带 halfBrick 复位、墙清零）
+          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) ltFoot191(st, num3, num11 + 1);
+        }
+        if (!ltFlag3) num9++;                            // cs:28301
         num13 = 1;
       } else {
         ax3[num] = 1;
         ax[num] = num4;
         ax4[num] = num4 - num3;
-        if (rng.int(0, maxValue - 1) === 0) num4--;      // cs:28313
-        num10--;                                         // cs:28320
+        if (rng.int(0, maxValue - 1) === 0) {            // cs:28313
+          num4--;
+          if (ltFlag3) num10--;                          // cs:28317
+          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) ltFoot191(st, num4, num11 + 1);
+        }
+        if (!ltFlag3) num10--;                           // cs:28320
         num13 = 0;
       }
       if (num9 === num10) flag2 = false;
       num++;
     }
     for (let m = num3; m <= num4; m++) {
-      if (!isDungeonWall(wallAt(st, m, num11))) setLivingWood(st, m, num11);   // cs:28343
+      // ★IIIII111（cs:28485-28519）：行写入器 eLT 特化——边列=实心活木、内列=
+      //   墙 244+惰性，深空(n≥6)时铺活木平台（PlaceTile 19 style23）。
+      if (ltFlag3 && num4 - num3 > 2) {
+        if (m === num3 || m === num4) {
+          if (!isDungeonWall(wallAt(st, m, num11))) setLivingWood(st, m, num11);   // 边列实心
+        } else if (!isDungeonWall(wallAt(st, m, num11))) {
+          const iRow = st.idx(m, num11);
+          st.wall[iRow] = WALL_LIVING_WOOD;
+          st.flags[iRow] = 0;                            // active(false)：清除活性
+          let nDeep = 1;
+          for (; !activeAt(st, ((num3 + num4) / 2) | 0, num11 + nDeep); nDeep++) { /* 探底 */ }
+          if (nDeep >= 6) {
+            st.flags[st.idx(m, num11)] = 0;
+            placePlatform(st, rng, m, num11, 23);        // 活木平台（PlaceTile …,19,…,23）
+          }
+        }
+      } else if (!isDungeonWall(wallAt(st, m, num11))) {
+        setLivingWood(st, m, num11);                     // cs:28343（非 eLT 原路径不变）
+      }
     }
     num11--;
   }
@@ -1281,6 +1372,9 @@ export function growLivingTree(
           const dx = ax5[n43] - n50, dy = ax6[n43] - n51;
           const lenSq = Math.fround(Math.fround(Math.fround(dx * dx) + Math.fround(dy * dy)));
           if (Math.sqrt(lenSq) < n44 * 0.9) setLeaf(st, n50, n51);
+          // ★IIIII111（cs:28805-28807）：eLT 圆冠内圈补墙写 60（< num44*0.7，
+          //   与叶写同一 Vector2D.Length() 取值；独立 if，不随叶写短路）
+          if (sfELTg && Math.sqrt(lenSq) < n44 * 0.7) st.wall[st.idx(n50, n51)] = 60;
         } else if (Math.abs(ax5[n43] - n50) + Math.abs(ax6[n43] - n51) * n49 < n44) {
           setLeaf(st, n50, n51);                            // cs:28648
         }

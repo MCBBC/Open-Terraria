@@ -62,7 +62,7 @@ import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
 import type { SeedFlags } from '../SeedEasterEggs';
-import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★IIIII41-T3② 变体门
+import { noSpiderCavesActuallyNoSpiderCaves, activeSecretSeedCountOf } from '../SeedEasterEggs';   // ★IIIII41-T3② 变体门 / ★IIIII110 count 域
 import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { initializeHardMode } from './HardmodePass';
 import { genKillTile, genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
@@ -657,8 +657,15 @@ export function doSurfaceIsDesertCore(st: TileStore, rng: RNG, gs: GenState): vo
   if (!!gs.seedFlags.skyblock) return;
   const setT = (x: number, y: number, sheet: number): void => { st.type[st.idx(x, y)] = idOf(sheet); };
   for (let m = 0; m < st.w; m++) {
-    const lim = Math.floor(gs.worldSurface + rng.nextInt(3));          // per-column 必掷
-    for (let n = 0; n < lim; n++) {
+    // ★IIIII111 勘误：cs:2476 内层是 `for (n=0; (double)n < ws + genRand.Next(3); n++)`
+    //   ——**条件每次迭代重估、Next(3) 每行一掷**（n 循环头逐次求值），非「每列一掷」。
+    //   旧码把 Next(3) 提出循环只掷一次 ⇒ sandy 链核心转换段与 x86 流位失同步
+    //   （~34 万掷差量级），全窗口后续骰序级联错位。g 链不触发此臂故恒绿。
+    let n = 0;
+    for (;;) {
+      const lim = gs.worldSurface + rng.nextInt(3);
+      if (!(n < lim)) break;
+      {
       const ii = st.idx(m, n);
       if (st.flags[ii]) {
         let t = shOf(st, ii);
@@ -700,6 +707,8 @@ export function doSurfaceIsDesertCore(st: TileStore, rng: RNG, gs: GenState): vo
       if ((st.wall[jj] === 2 || st.wall[jj] === 59) && st.flags[jj] && shOf(st, jj) === 53) {
         st.wall[jj] = 0;
       }
+      }
+      n++;
     }
   }
 }
@@ -1558,6 +1567,95 @@ function growPumpkinStep(st: TileStore, i: number, superY: number): void {
 }
 
 // ============================================================
+// ★IIIII110 worldIsFrozen（"winter is coming"）世界冰化主面
+// ============================================================
+/** DoWorldIsFrozen 主面换算表（cs:2239-2282 逐条 1:1；vanilla sheet id 对）。
+ *  注意 C# 是**顺序独立 if**（非 else-if）：每格按当前值依序比对——但任意
+ *  目标值都不再出现在后续源集里 ⇒ 数学上与单映射等价（保留注释供对账）。 */
+const FROZEN_TILE_SHEET_MAP = new Map<number, number>([
+  [1, 161],    // Stone → Ice Block（cs:2239-2242）
+  [25, 163],   // Ebonstone → Corrupt Ice（cs:2243-2246）
+  [203, 200],  // Crimstone → Flesh Ice（cs:2247-2250）
+  [117, 164],  // Pearlstone → Hallowed Ice（cs:2251-2254）
+  [0, 147],    // Dirt → Snow Block（cs:2255-2258）
+  [2, 147],    // Grass → Snow（cs:2259-2262）
+  [23, 147],   // Corrupt Grass → Snow（cs:2263-2266）
+  [199, 147],  // Crimson Grass → Snow（cs:2267-2270）
+  [109, 147],  // Hallowed Grass → Snow（cs:2271-2274）
+  [123, 224],  // Silt → Slush（cs:2275-2278）
+  [196, 460],  // Rain Cloud → Snow Cloud（cs:2279-2282）
+]);
+const FROZEN_WALL_MAP = new Map<number, number>([
+  [2, 40],     // Dirt Wall → Snow Wall（cs:2283-2286）
+  [59, 40],    // Cave-6 Wall → Snow Wall（cs:2287-2290）
+]);
+
+/** DoWorldIsFrozen 本体（cs:2224-2293）。
+ *  带界 num=UnderworldLayer-H/10；activeSecretSeedCount≥6 时 num=(int)Main.rockLayer
+ *  （gs.rockLevel ≡ Main.rockLayer —— doWorldIsInfected 同款字段先例 :597/:601）。
+ *  inner 循环条件 `j < num + genRand.Next(3)` 在 C# 里每次迭代判定都重掷 ⇒
+ *  每列掷骰数=迭代数+1（含最后一次失败判定），逐测转录不预取（★本函数的
+ *  全部骰耗所在；tile/wall 写本身零掷）。带内写不看 active 位（air 幽灵型一并
+ *  改型，x86 raw-write 语义）；slope/half/paint 等位不动。 */
+export function doWorldIsFrozenSweep(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;                                          // cs:2226-2229
+  let num = (st.h - 200) - Math.floor(st.h / 10);                    // cs:2230
+  if (activeSecretSeedCountOf(F) >= 6) num = Math.trunc(gs.rockLevel); // cs:2231-2234
+  const targets = new Int32Array(TILE_DEFS.length).fill(-1);
+  for (const [sh, to] of FROZEN_TILE_SHEET_MAP) {
+    const id = INTERNAL_OF_SHEET.get(to);
+    if (id === undefined) continue;
+    const from = INTERNAL_OF_SHEET.get(sh);
+    if (from !== undefined && targets[from] < 0) targets[from] = id;
+  }
+  // 墙域：本仓 WALL_DEFS「id 直用原版 wld 墙 id」⇒ 无需内部↔sheet 换算（tiles.ts:175）
+  for (let i = 0; i < st.w; i++) {
+    let j = 0;
+    while (j < num + rng.nextInt(3)) {                               // cs:2237 判定即掷（含失败末掷）
+      const ii = st.idx(i, j);
+      const sh = SHEET_OF_TYPE[st.type[ii]];
+      const to = sh >= 0 ? targets[st.type[ii]] : -1;
+      if (to >= 0) st.type[ii] = to;
+      const wto = FROZEN_WALL_MAP.get(st.wall[ii]);
+      if (wto !== undefined) st.wall[ii] = wto;
+      j++;
+    }
+  }
+}
+
+/** Chest.maxItems（Item[].Length=40 定长；errorWorld 同款槽窗视图 :791）。 */
+const WIF_CHEST_MAX_ITEMS = 40;
+
+/** DoWorldIsFrozenFinish（cs:2183-2222）：
+ *  ① 宝箱冻结箱物变换：Next(2)==0 且 item[1].stack≠0 的箱，把第 2..39 槽里
+ *     第一个空槽 SetDefaults(1869 Present)（stack=1 默认态）。50% 掷先于空判短路
+ *     （`genRand.Next(2)!=0 || stack==0` 左支必掷）——Next(2) 是本端点唯一骰源。
+ *  ② endlessChristmas 组合臂（cs:2205-2221）：老头 22 → Santa 142 homeless 异位替换
+ *     ——town NPC 实体域（starterTownNpcs 注册表在 finalize 后段组装,gen 期无
+ *     Main.npc 实体可寻），见函数尾注记，冬天单旗标链不含 endlessChristmas、零消费。 */
+export function doWorldIsFrozenFinish(store: TileStore, rng: RNG, gs: GenState,
+  chests: ReadonlyArray<Array<{ id: number; stack: number } | null>>): void {
+  const presentVid = VANILLA_ITEM_KEY_BY_ID[1869];
+  void store;
+  for (const ch of chests) {                                         // cs:2185-2204
+    if (rng.nextInt(2) !== 0) continue;                              // Next(2) 必掷
+    // item[1].stack == 0（非 item[1].type==0！首件奖励槽必须已有物）
+    const s1 = ch.length > 1 && ch[1] ? ch[1].stack : 0;
+    if (s1 === 0 || !presentVid) continue;
+    for (let j = 1; j < WIF_CHEST_MAX_ITEMS; j++) {
+      if (!(j < ch.length) || !ch[j]) {
+        ewSlotWrite(ch, j, { id: ITEM_BY_KEY[presentVid]!, stack: 1 });
+        break;
+      }
+    }
+  }
+  // ② endlessChristmas 老头→Santa 臂：组合域（vampire/endlessChristmas 另案车道），
+  //   登记未承接位；冬单旗标世界 endlessChristmas 关 ⇒ 原样零行为零掷（同 skyblock 早退）。
+  if (!!gs.seedFlags.skyblock) return;                               // cs:2205 门镜像占位
+}
+
+// ============================================================
 // finalize 入口（FinalizeSecretSeeds 本批子集，序 = 原 if 链 :589-663）
 // ============================================================
 export function finalizeSecretSeedDoEnds(
@@ -1567,12 +1665,16 @@ export function finalizeSecretSeedDoEnds(
   // ★IIIII106 cs:591-594：surfaceIsDesert Finish 端点（本函数首端点）
   if (F.surfaceIsDesert) doSurfaceIsDesertFinish(store, rng, gs);
   // extraLiquid Finish（cs:595-598，waterpark 批域登记）；actuallyNoTraps(:603)
-  // /worldIsFrozen Do(:617)/noSurface(:639) 同属未承接位——保持原版序占位
+  // 与 noSurface(:639) 仍属未承接位——保持原版序占位（★IIIII110 承接 worldIsFrozen Do :615）
   if (F.surfaceIsInSpace) doSurfaceIsInSpace(store, gs);
   if (F.surfaceIsMushrooms) {
     if (!F.noSurface) doSurfaceIsMushroomsCore(store, rng, gs);         // cs:607-614 ×2 怪癖照录
     doSurfaceIsMushroomsCore(store, rng, gs);
   }
+  // ★IIIII110 cs:615-618：worldIsFrozen 主面（noInfection 前——同一 pass 流内
+  //   先冰化后净化/神圣化的序即原版终貌；hallowOnTheSurface/worldIsInfected
+  //   组合臂在同一流内后置正确生效）
+  if (F.worldIsFrozen) doWorldIsFrozenSweep(store, rng, gs);
   if (F.noInfection) doNoInfection(store, rng, gs);
   if (F.hallowOnTheSurface) doHallowOnSurface(store, rng, gs);
   // ★IIIII106 cs:629-632：purify this 全图感染面（Convert case1/4 入列后可达）
@@ -1591,6 +1693,14 @@ export function finalizeSecretSeedDoEnds(
   //   本仓 SpawnPoint 写回被上提到 finalize()＝管线末，臂须挂尾段才不被覆盖）。
   //   其互斥语义/掷骰域与 vampire 臂共核（randomizeWorldSpawnCore/doAdditional…）。
   if (F.rainbowStuff) doRainbowStuff(store, rng, gs, world.chests);
+  // （portalGunInChests DoPortalGunInChests :663-666 箱枪臂=其他车道债,未承接占位）
+  // ★IIIII110 cs:667-670：worldIsFrozen Finish（箱物 Present 变换+endlessChristmas
+  //   Santa 臂）——原版序在 portalGunInChests 之后、errorWorld Finish(:671)/
+  //   teamBasedSpawns(:675) 之前；本仓 teamBasedSpawns 面在 ExtraSpawnsRoyale 槽自持。
+  if (F.worldIsFrozen) {
+    doWorldIsFrozenFinish(store, rng, gs,
+      world.chests as unknown as ReadonlyArray<Array<{ id: number; stack: number } | null>>);
+  }
   // ★IIIII41-T3②：arachnophobia 运行时面首点（cs:688-691 `NPC.savedStylist = true`，
   //   原 if 链 teamBasedSpawns 之后、FinalSeedCleanup(:694) 之前；无掷骰序约束）。
   //   落键 = world.flags.savedStylist（VanillaSpawner.ts 刷怪条件/WldParser 导入路同键；

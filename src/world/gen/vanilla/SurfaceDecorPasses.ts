@@ -915,12 +915,21 @@ export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
             }
           }
         }
-        // ★UUUUUU（cs:18749）：NTB 基座族扩展——草 2 ∪ 丛林草 60（worldIsFrozen/
-        //   surfaceIsDesert 组合支本仓未建，备案）
+        // ★UUUUUU（cs:18767）：基座族四支——草 2 ∪（NTB 丛林草 60）∪（★IIIII110
+        //   worldIsFrozen 雪 147）∪（surfaceIsDesert 沙 53）。冻结世界地表草已在本链
+        //   前位 Ice pass（#55<x86 dump 序）被 DoWorldIsFrozen 换型成雪，倒木水景
+        //   要还认得出"原草岸"必须靠 147 支承接（x86 同理）。
         const ntb = !!gs.seedFlags?.notTheBees;
-        const grassHere = sheetAt(st, x, j) === 2 || (ntb && sheetAt(st, x, j) === 60);
-        const grassL = sheetAt(st, x - 1, j) === 2 || (ntb && sheetAt(st, x - 1, j) === 60);
-        const grassR = sheetAt(st, x + 1, j) === 2 || (ntb && sheetAt(st, x + 1, j) === 60);
+        const frozen = !!gs.seedFlags?.worldIsFrozen;
+        const desertSeed = !!gs.seedFlags?.surfaceIsDesert;
+        const base = sheetAt(st, x, j);
+        const baseL = sheetAt(st, x - 1, j);
+        const baseR = sheetAt(st, x + 1, j);
+        const baseOk = (s: number): boolean =>
+          s === 2 || (ntb && s === 60) || (frozen && s === 147) || (desertSeed && s === 53);
+        const grassHere = baseOk(base);
+        const grassL = baseOk(baseL);
+        const grassR = baseOk(baseR);
         const dryAbove = st.inBounds(x, j - 1) && (st.liquid[st.idx(x, j - 1)] === 0 || budget < relaxAt / 5);
         if (ok && dryAbove && grassHere && grassL && grassR) {
           j--;

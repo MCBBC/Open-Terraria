@@ -106,6 +106,13 @@ export function assortedPlaceOk(staff: boolean, gsheet: number, tsheet: number, 
   }
 }
 
+/** 草族"转化"放置路由域（Game.tryPlace 路由判据用）。= assortedPlaceOk 非法杖分支
+ *  覆盖的 createTile 全集（Player.cs:41372/:41378/:41390/:41403/:41416 各支受理面）。
+ *  ★单源化：Game.ts 不再持字面量副本；AssortedThings 其余分支不在此集——
+ *  staff(213/5295 特权随 vid 判)、tileMoss 族（石/灰砖转化，双模放置）、227 染料植物
+ *  （无条件门）、滴水族/火把族各有专路 —— 见 assortedPlaceOk 注释档 */
+export const GRASS_CONVERT_SHEETS: ReadonlySet<number> = new Set([2, 23, 60, 70, 109, 199, 633, 661, 662]);
+
 /** ItemID.Sets.GrassSeeds（1457 ItemID.cs:84：62 草种/59 腐化种/2171 猩红种/369 神圣种/
  *  195 丛林种/194 蘑菇种/5214 灰烬草种）＋ 再生法杖 213/再生之斧 5295 特权族。
  *  ★定位=原版集合备忘与测试锚。运行时路由（Game.tryPlace 三修后）按「createTile

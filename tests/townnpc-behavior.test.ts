@@ -269,8 +269,12 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
         npc.fixedUpdate(1 / 60, game);
         if (npc.attackState === 12) frames.push(npc.frame);
       }
-      expect(frames[0]).toBe(21 + 2);   // 入态 ai[2]=0（:54931 清零）→ 平射档
-      expect(frames[1]).toBe(21 + 0);   // 发射档 aim=-0.5 → <−0.1 档 0
+      // ★对抗修复批⑤ A6（cs:56052-59）：入态种子 = vector8.Y——仰射候选
+      //   DirectionTo.Y≈−0.42（带检 ±0.5 内受理）入态拍即落 ai[2] → 持械仰角
+      //   第 0 档自首帧生效；guide 无连发链（flag28 恒 false）→ 态内零覆写,
+      //   发射拍仍是同值旧种子。旧注「入态清零 :54931」实为态【尽】归零位错挂
+      expect(frames[0]).toBe(21 + 0);
+      expect(frames[1]).toBe(21 + 0);
     }
   });
 

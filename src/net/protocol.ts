@@ -291,7 +291,17 @@ export function rulesFromBits(bits: number): RoomRules {
  *  JoinLeave=3 与原版 NetAmbienceModule 撞号——本协议双端自洽，无互操作需求）
  *  LeashedEntity=13 对齐原版注册序（NetworkInitializer.cs:25 第 14 个 Register）：
  *  旧双端 default 忽略未知 moduleId，新增通道不破坏在跑实例——故不升 PROTO_VER
- *  （升版会踢掉正在运行的旧 server 进程，共享开发环境不宜） */
+ *  （升版会踢掉正在运行的旧 server 进程，共享开发环境不宜）
+ *
+ *  ★RV-R2② 分叉笺（2026-09-01）：本表 wire id 钉在 1.4.5.6 注册序基线
+ *  （NetworkInitializer Register 顺序即 NetManager 分配的 moduleId）。1.4.5.7 在
+ *  Bestiary 之后插入了 NetCreativeUnlocksModule（新 module，1457 占 id 5），其后所有
+ *  原版 module 的原版侧 id 相对 1456 **整体 +1**：CreativePowers 5→6、PlayerReport
+ *  6→7、TeleportPylon 7→8、Particles 8→9、PowerPermissions 9→10、Banners 10→11、
+ *  CraftingRequests 11→12。本表不做跟随改号——SW 双端自洽无互操作需求，且改号会
+ *  打断与在跑旧 server 的兼容。仅两处名义恰平：LeashedEntity 与 UnbreakableWallScan
+ *  （1457 插入 +1 被 1456 独有的 TagEffectState.NetModule 注销位 −1 抵消，仍为
+ *  13/14）。日后若接真实跨服互操作，须按 1457 序重排并升 PROTO_VER */
 export const enum NetModule {
   Liquid = 0,   // 液体网格同步（原版 NetLiquidModule——注册序 id=0；net/syncModules.ts）：
                 //   变化格 {i32 packed(x<<16|y), u8 liquid, u8 liquidType} 批量。房主

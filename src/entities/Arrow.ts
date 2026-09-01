@@ -512,7 +512,11 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 34, 93, 94, 95, 96, 1114, 253, 258, 102
   //  XNA 预乘语义 A=0 → dst+=tex.rgb 全强度叠加；source-over 直译=暗紫细线不可见
   //  （用户报「激光好细看不清」定罪：贴图本体 Projectile_88.png 仅 2×60，
   //  scale 0.65 起步 ≈1.3px 细线 + 缺加算发光层双重不可见）
-  83, 88, 89, 90, 100, 104, 279, 283, 284, 285, 286, 287, 1134]);
+  83, 88, 89, 90, 100, 104, 279, 283, 284, 285, 286, 287, 1134,
+  // ★2026-09-01 全弹域审计补：GetAlpha A=0 加算支再补三例——604 孢子云/631 幻象矢
+  // (:80818) 与 131 蘑菇孢子(:81325) 原式同为 (255−α,…,**A=0**) 纯加算白闪,
+  // 此前 drawGlobalAlpha 走 source-over fade（同公式三种处置并存的口径漂移点）
+  604, 631, 131]);
 /** GetAlpha :81457 支里走共享 −15/update 渐显的成员（Projectile.cs:56570-56592
  *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集）。
  *  本仓只接本批 GetAlpha 支成员（14/20/36 等 1456 期已有渲染面不动）；90/1134 不减
@@ -1707,7 +1711,12 @@ export class Arrow extends Entity {
       // 92（aiStyle5 通用闪烁档 :22222-22238，alpha 0↔200 振荡）/
       // 163 族信号弹（SetDefaults alpha=255 :2523，AI_033 −50/t 渐显 :27428-27435
       // → 缺省路径同式，5 拍淡入）
-      case 207: case 837: case 92: return (255 - this.alpha) / 255;
+      // 207 死存储→纯缺省★(:81353 赋值后被 :81507 覆写=通用式同义)/92 同缺省。
+      // ★837 拆出二态门(:80726 与 :57636 270||837 同支)：α>0 → Transparent 全隐
+      //   （SetDefaults 255 起 −50/t 至零,AI fade 见 subStepAI 837 分支）、
+      //   α==0 → 瞬显 (255,255,255,200)=78% 白常驻——线性 fade 是错译
+      case 207: case 92: return (255 - this.alpha) / 255;
+      case 837: return this.alpha === 0 ? 200 / 255 : 0;
       case 442: return (255 - this.alpha) / 255;   // 电圈导弹渐显（缺省 GetAlpha 路径同式 :76837-76850）
       case 114: return (255 - this.alpha) / 255;   // 邪恶三叉戟（缺省路径同式;AI 侧速度 Remap 改写）
       case 604: return (255 - this.alpha) / 255;   // 孢子云（aiStyle 115 alpha+10/t 淡出 :35062-35068）
@@ -1750,7 +1759,14 @@ export class Arrow extends Entity {
       case 630: return 0;
       case 410: return (255 - this.alpha) / 255;   // 泡泡枪泡体（ai72 alpha 255→50,缺省 GetAlpha 路径同式）
       case 467: return (255 - this.alpha) / 255;   // 教徒火球（AI_001 467 支 α−40/update 渐显 :55194-55200,同式）
-      case 631: case 661: case 819: case 955: case 728: return (255 - this.alpha) / 255;
+      // ★631 摘出→加算组(:80818 (255−a,…,A=0) 白闪,ADDITIVE_GLOW 承载合成方式,
+      //   本表只给强度)——曾在 fade 支走 source-over;728 同理另有恒隐改判
+      case 661: case 819: case 955: return (255 - this.alpha) / 255;
+      // 728 超级星星炮星：GetAlpha :80995 恒 (255,255,255,0)*Opacity 隐体
+      // （:80995 支成员 9/723-726/1133 待后续批核实 vanillaProjAlpha off 档承接面）
+      case 728: return 0;
+      // 91 光棱剑波：GetAlpha :81003 (200,200,200,0) 恒隐（此前无档接住=满显反向错）
+      case 91: return 0;
       // 337 暴雪法杖雪片（GetAlpha :81157 = (250,250,250,150) 半透白——恒定档,
       // 不随 alpha 字段变化）
       case 337: return 150 / 255;
@@ -2079,6 +2095,12 @@ export class Arrow extends Entity {
       if (mod) {
         ctx.globalAlpha = Math.max(0, Math.min(1, mod.ga));
         tableFilter = mod.filter;
+      } else {
+        // ★GetAlpha 缺省路径全局兜底（2026-09-01 全弹域审计补；Projectile.cs:81507-81521）：
+        //   num14=(255−alpha)/255、r/g/b×num14、A=clamp(newColor.A−alpha,0,255) ——
+        //   两表均未接的 id 此前残留满显(globalAlpha 保持外部值);α≡0 未动的绝大多数
+        //   弹型此式恒 ×1 零观感差,AI 会改写 alpha 的未来型自动正确
+        ctx.globalAlpha = Math.max(0, Math.min(1, (255 - this.alpha) / 255));
       }
     }
     const xenoFilter = this.drawXenoFilter();
@@ -3782,6 +3804,24 @@ export class Arrow extends Entity {
           this.pierceInit += penUp;
         }
       }
+    } else if (this.projId === 20) {
+      // ---- ★2026-09-01 全弹域审计：二代木弹/星怒投掷 20 成长段（Projectile.cs
+      //  :55004-55021，AI_001 type 段，与 88 同款结构）----
+      //  scale<3 帽包整块（到帽即停止一切成长）；scale+=0.0189 至 cap3、owner 门内
+      //  knockback×1.0025、localAI[0](aiCnt) 满 25 重置并 damage+Next(1,3)=1..2、
+      //  penetrate++（pierce/pierceInit 同步抬=maxPenetrate 上移）。
+      //  α 面：SetDefaults 20 无 alpha 行≡0 → 共享 fade 组(:56569)恒不触发=全程
+      //  可见 ✓ 与现渲染一致,不入 LASER_FADE15。
+      if (this.drawScale < 3) {
+        this.drawScale = Math.min(3, this.drawScale + 0.0189);
+        this.knockback *= 1.0025;
+        if (++this.aiCnt >= 25) {
+          this.aiCnt = 0;
+          this.damage += Math.floor(Math.random() * 2) + 1;   // Next(1,3)=1..2
+          this.pierce += 1;
+          this.pierceInit += 1;
+        }
+      }
     } else if (LASER_FADE15_PROJS.has(this.projId)) {
       // ---- GetAlpha :81457 白加算支的共享渐显（Projectile.cs:56570-56592 case 组
       //  本族子集直抄：alpha −15/子步至 0;EU 弹每游戏帧 ×5 ≈ 出生一闪即亮） ----
@@ -3941,7 +3981,12 @@ export class Arrow extends Entity {
       // ⑤ !friendly 不追踪（敌方同型弹直飞）；转向 v=(v×(N−1)+dir×speed)/N
       //   （207 N=8 :57868-57872；★837 N=20——1457 :57861-57864 把 1456 的 32 改 20
       //   （1456 :54001-54005），转向响应 ×1.6，蓝队 R7-1 曾照抄 1456 旧值）
-      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
+      // α 步进按型拆分：207 在 :53937-53943（−25/t 渐显,随 <170 尘迹窗口）；
+      // ★837 实际在 :57636-57645 与 270 同支（共享 −50/t clamp0）——曾并入
+      //   −25 档=不可见窗过长;GetAlpha 二态门(:80726)下全程隐形至归零瞬白
+      if (this.alpha > 0) {
+        this.alpha = Math.max(0, this.alpha - (this.projId === 837 ? 50 : 25));
+      }
       // 207 光走静态表(数据 light=0.5 × MUL [0.4,1,0.4]=原版绿)——曾实体白光覆盖
       // ★1457 新增（:57774-57779，1456 无此块）：837 弹心埋进实心格时每 update 额外
       //   烧 33t 寿命（timeLeft>33 门）——防骷髅头穿墙滞留（480t → 最快 ~15 拍耗尽），

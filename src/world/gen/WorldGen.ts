@@ -1552,14 +1552,16 @@ function surfaceWaterAboveSandPass({ store }: GenCtx) {
   runRemoveSurfaceWaterAboveSandPass(store, gs);
 }
 
-// 薄冰（FragileIceOverIceBiomeWater cs:16756）：零掷骰
+// 薄冰（FragileIceOverIceBiomeWater cs:16771-16799）：worldIsFrozen 时含全带冰化重放掷骰
 function fragileIcePass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenySome(gs.seedFlags)) return;                // ★IIIII44 cs:16773
-  // ★UUUUUU：NotTheBees() 槽头（cs:16762——pass 头首掷消费者位）
+  // ★UUUUUU：NotTheBees() 槽头（cs:16775——pass 头首掷消费者位）
   if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
-  runFragileIcePass(store, gs);
+  // ★IIIII110：rng 直传（冻结世界 DoWorldIsFrozen 重放的每列 Next(3) 流在本 pass 内消化，
+  //   per-pass reseed 纪律下不外溢到后续槽）
+  runFragileIcePass(store, gs, rng);
 }
 
 // 蜂巢幼虫（BeeLarvaInBeehives cs:21018）：蜂巢 pass 已登记坐标，此处放置

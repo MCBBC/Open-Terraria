@@ -3563,7 +3563,11 @@ export interface DualLayoutResult {
    *  scalar=data.globalFeatureScalar（DC.cs:375-382 max(1,rooms.Count/20) 双精度原值——
    *  截断发生在消费端 (int)((1f+(int)(w/4200))*scalar)）；styles=本座 dungeonGenerationStyles
    *  表（GetStyleForWall / IsConsideredDungeonWall 的 per-seat 扩张消费源）。 */
-  featRooms?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
+  featRooms?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number;
+    /** ★IIIII107c：EarlyDual S1..S7 臂扩展面（可选字段,旧消费者零感知）——
+     *  o*=OuterBounds 四界（DungeonBounds 域,含即 [L,R)×[T,B) 半开语义由消费端自解释）；
+     *  bio=BiomeDungeonRoom 实例旗（S4 候选剔除门 cs:205-209）。 */
+    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean }>;
   featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
   scalar?: number;
   styles?: import('./DungeonStyles1457').DungeonStyleData[];
@@ -3697,6 +3701,9 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   const featRooms = data.rooms.map((rm) => ({
     gen: rm.generated, st: rm.settings.style.Style,
     L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B,
+    // ★IIIII107c：S4 ConnectedRoom.OuterBounds 门 + BiomeDungeonRoom 剔除门投影
+    oL: rm.outer.L, oT: rm.outer.T, oR: rm.outer.R, oB: rm.outer.B,
+    bio: rm instanceof DBiomeRoomBase,
   }));
   const featHalls = data.halls.map((hh) => ({
     gen: hh.generated, st: hh.settings.style.Style,

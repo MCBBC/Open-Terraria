@@ -145,17 +145,28 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
     const enemy: TestEnemy = { x: ex, y: ey, w: ew, h: eh, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(enemy, 0);
     runUntil(princess, game, () => shots.some((s) => s.projId === 950));
-    const shot = shots.find((s) => s.projId === 950);
+    const shot = shots.find((s) => s.projId === 950)!;
     expect(shot).toBeDefined();
-    expect(shot!.vx).toBe(0);                                       // 落点弹 velocity=0
-    expect(shot!.vy).toBe(0);
-    expect(shot!.damage).toBe(15);                                  // 非硬模式 15(硬模式 20)
-    const px = shot!.x + 5;                                         // TownShot 10px 锚 −5 回采样点
-    const py = shot!.y + 5;
+    expect(shot.vx).toBe(0);                                       // 落点弹 velocity=0
+    expect(shot.vy).toBe(0);
+    expect(shot.damage).toBe(15);                                  // 非硬模式 15(硬模式 20)
+    // ★对抗修复批⑤ A4：反推采样点改 x+w/2 口径——落点弹出膛换算按弹真实
+    //   SetDefaults 半宽（950=104×104,半宽 52）;旧 10px 锚 −5 对大弹偏离 ±47px
+    expect(shot.w).toBe(104);
+    expect(shot.h).toBe(104);
+    const px = shot.x + shot.w / 2;
+    const py = shot.y + shot.h / 2;
     expect(px).toBeGreaterThanOrEqual(ex);                          // :55367 [x, x+w]
     expect(px).toBeLessThanOrEqual(ex + ew);
     expect(py).toBeGreaterThanOrEqual(ey);                          // [y, y+h]
     expect(py).toBeLessThanOrEqual(ey + eh);
+    // 950 回归样例：若仍用旧 10×10 口径反推（x+5），中心读数横/竖各偏 47px
+    // （(104−10)/2）且必越窗——以差值恒等式钉死尺寸源
+    expect((shot.x + shot.w / 2) - (shot.x + 5)).toBe(47);
+    expect((shot.y + shot.h / 2) - (shot.y + 5)).toBe(47);
+    const oldX = shot.x + 5, oldY = shot.y + 5;
+    expect(oldX >= ex && oldX <= ex + ew && oldY >= ey && oldY <= ey + eh)
+      .toBe(false);                                                 // 旧口径假阳性暴露面
   });
 
   it('松露人(160)落点弹:position−Size×2+Size×rand×5 采样盒,velocity=0,dmg 40', () => {
@@ -164,18 +175,76 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
     const enemy: TestEnemy = { x: 104 * 16, y: ey, w: ew, h: eh, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(enemy, 0);
     chaseUntil(truffle, enemy, game, () => shots.some((s) => s.projId === 590));
-    const shot = shots.find((s) => s.projId === 590);
+    const shot = shots.find((s) => s.projId === 590)!;
     expect(shot).toBeDefined();
-    expect(shot!.vx).toBe(0);
-    expect(shot!.vy).toBe(0);
-    expect(shot!.damage).toBe(40);
+    expect(shot.vx).toBe(0);
+    expect(shot.vy).toBe(0);
+    expect(shot.damage).toBe(40);
     const ex = enemy.x;   // 发射档敌位（追踪定格于触发刻）
-    const px = shot!.x + 5;
-    const py = shot!.y + 5;
+    // ★对抗修复批⑤ A4：同公主例——590=14×14 半宽 7,反推换 x+w/2 口径
+    expect(shot.w).toBe(14);
+    expect(shot.h).toBe(14);
+    const px = shot.x + shot.w / 2;
+    const py = shot.y + shot.h / 2;
     expect(px).toBeGreaterThanOrEqual(ex - ew * 2);                 // :55349 [x−2w, x+3w]
     expect(px).toBeLessThanOrEqual(ex + ew * 3);
     expect(py).toBeGreaterThanOrEqual(ey - eh * 2);                 // [y−2h, y+3h]
     expect(py).toBeLessThanOrEqual(ey + eh * 3);
+  });
+
+  it('★A3 电子人(209)逐弹冷却:SelectRandom 每拍一骰,退出冷却用本拍选中值', () => {
+    // cs:55138-60 参数块常驻求值 → 态内（含无发射拍/退出拍）每 tick 恰耗一张
+    // kind 骰;num52/num53/kb/num57 与 num55/maxValue2 由 switch 覆写;退出块
+    // cs:55362-66 直读本拍终值（旧实现仅发射拍掷且退出用静态表值——均已销）
+    const cyborg = new TownNPC('cyborg', 100 * 16, 99 * 16);
+    let seed = 20260901;
+    let diceThisTick = 0;
+    cyborg.rng = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      diceThisTick++;
+      return seed / 0x100000000;
+    };
+    // 敌位斜率校准：dy/pdx ≈ −0.36 ∈ 弓族带检 ±0.5（1457 cs:56048-49）确保入态
+    const enemy: TestEnemy = { x: 104 * 16, y: 97.5 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    const { game, shots } = makeGame(enemy, 0);
+    chaseUntil(cyborg, enemy, game, () => cyborg.attackState === 12, 3000);
+    expect(cyborg.attackState).toBe(12);
+
+    // 态内逐拍骰计数：非发射/退出拍恒 1 张（发射拍 +2 散布、退出拍 +2 腿程冷却）
+    const counts: number[] = [];
+    for (let t = 0; t < 80 && cyborg.attackState === 12; t++) {
+      diceThisTick = 0;
+      cyborg.fixedUpdate(1 / 60, game as never);
+      counts.push(diceThisTick);
+    }
+    expect(cyborg.attackState).toBe(0);                       // AttackTime=60 已退
+    expect(counts.length).toBeGreaterThanOrEqual(10);
+    for (const c of counts) expect([1, 3]).toContain(c);      // 纯选弹拍 / 加骰拍
+    expect(counts.filter((c) => c === 1).length).toBeGreaterThan(5);
+    // 发射用本拍选中弹
+    expect(shots.some((s) => s.projId === 134 || s.projId === 133 || s.projId === 135)).toBe(true);
+
+    // 退出冷却是【末拍选中弹】的 num55/maxValue2 形——三态各自成立且与静态默认
+    // (14+Next(4)/14/2+Next(4)) 不相交
+    const roll = (cyborg as unknown as Record<string, unknown>).cyborgRoll as
+      { kind: number; cdBase: number; cdRand: number } | undefined;
+    expect(roll).toBeDefined();
+    const atkCd = (cyborg as unknown as Record<string, number>).atkCd;
+    const walkT = (cyborg as unknown as Record<string, number>).walkT;
+    const turnLock = (cyborg as unknown as Record<string, number>).turnLock;
+    expect(turnLock).toBe(atkCd);        // localAI[1]≡localAI[3] 同值共享（cs:55364-65）
+    const bands: Record<number, [[number, number], [number, number]]> = {
+      //   kind: [atkCd = base/2+[0..rand−1]] , [walkT = base+[0..rand−1]]
+      134: [[10, 19], [20, 29]],                              // case 134 :55158-59
+      133: [[5, 5], [10, 10]],                                // case 133 :55147-48
+      135: [[15, 24], [30, 39]],                              // case 135 :55141-42
+    };
+    expect(bands[roll!.kind]).toBeDefined();
+    const [cdBand, legBand] = bands[roll!.kind];
+    expect(atkCd).toBeGreaterThanOrEqual(cdBand[0]);
+    expect(atkCd).toBeLessThanOrEqual(cdBand[1]);
+    expect(walkT).toBeGreaterThanOrEqual(legBand[0]);
+    expect(walkT).toBeLessThanOrEqual(legBand[1]);
   });
 });
 

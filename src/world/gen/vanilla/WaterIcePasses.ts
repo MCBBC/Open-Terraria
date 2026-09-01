@@ -7,8 +7,10 @@
 // 两 pass 均零掷骰（纯扫描），不影响 RNG 流。
 import type { TileStore } from '../../TileStore';
 import type { GenState } from './GenState';
+import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid } from './GenSolid';
+import { doWorldIsFrozenSweep } from './SecretSeedDoEndsPass';   // ★IIIII110 冻结重放
 
 const SAND = TILE_BY_KEY['sand']!;                 // 53
 const SAND_HARD = TILE_BY_KEY['hardened_sand']!;   // 397
@@ -111,15 +113,27 @@ function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false):
   }
 }
 
-/** FragileIce pass（cs:16756-16785）：y∈[(int)worldSurface, h-100) 的液体格（岩浆跳过）
- *  → MakeWateryIceThing。零掷骰。 */
-export function runFragileIcePass(st: TileStore, gs: GenState): void {
-  // ★pass 头 tileSolid 翻转（cs:16782-16783）：226 蜥蜴砖 / 162 薄冰自此非实心——
+/** FragileIce pass（1457 cs:16771-16799；行号勘误=1457 AddGenerationPass 位）：
+ *  ★IIIII110 结构补全——pass 体（cs:16773 `!Skyblock.denySomeGeneration` 门由
+ *  WorldGen.ts 槽包装承担）内序：
+ *    notTheBees()（槽包装）→ num=(int)worldSurface / num2=h-100 →
+ *    **worldIsFrozen 时 DoWorldIsFrozen() 全带重放再置 num=0**（cs:16781-16785）
+ *    → y∈[num,h-100) 液体格 MakeWateryIceThing → 尾 tileSolid 226/162=false。 */
+export function runFragileIcePass(st: TileStore, gs: GenState, rng?: RNG): void {
+  // ★pass 头 tileSolid 翻转（cs:16797-16798）：226 蜥蜴砖 / 162 薄冰自此非实心——
   //   UndergroundHouses 头（cs:17076-79）短暂回实心、尾（cs:17220-23）再翻 false,
   //   226 到 CaveWalls 头（cs:17822）回 true,162 到 BeeLarva 尾（cs:21048）回 true。
   //   生成期无还原本句之后到上述各点之间,相关消费端经 GenSolid 可见非实心态。
   flipGenSolid([226, 162], false);
-  const y0 = Math.floor(gs.worldSurface);
+  let y0 = Math.floor(gs.worldSurface);                                // cs:16779
+  if (gs.seedFlags.worldIsFrozen) {                                    // cs:16781-16785
+    // 冻结世界：全带冰化在此重放（深层石/土/草族 → 冰/雪/冰浆糖层,单种子 count=1
+    // <6 带=UnderworldLayer-H/10≈880 与 x86 实测冻结面底界 881 吻合）；水面薄冰
+    // 扫描起点同时降到 0（深域液面也铺薄冰）。骰耗=每列 Next(3) 重掷流,见本体注。
+    if (!rng) throw new Error('runFragileIcePass: worldIsFrozen 需要 rng（管线应传入）');
+    doWorldIsFrozenSweep(st, rng, gs);
+    y0 = 0;
+  }
   const y1 = st.h - 100;
   // ★R9-5：调用门 `liquid>0 && (!lava || remix)`（cs:16791）——remix 世界岩浆格
   //  照样进 MakeWateryIceThing（倒置世界冰原岩浆袋表面铺薄冰）。
