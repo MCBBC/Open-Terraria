@@ -760,15 +760,22 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
           ? fy * TILE + (centerX - vx0)
           : fy * TILE + (vx0 + TILE - centerX);
         const num4 = fs === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w);
+        // ★门终形(2026-09-01 踏入下坠终修):窗口 = 半身 + 单帧位移。
+        //   踏入瞬间落差 = 半身(w/2≈10px)——定值门 deficit≤10 被浮空增长
+        //   (无辅助时落差每帧增长 |dx|)一步越限后【永久关闭】,且浮空时
+        //   wasGround=false 锁死 wasGround 门 → 无恢复路径 → 自由落体
+        //   (用户实录 125px)。动态窗 = b.w/2 + |dx| 恰容纳「上帧未辅助的
+        //   本帧增长」,跳跃跨越(落差按弧线增长远超 |dx|)仍被排除;
+        //   补差帽同窗,单帧贴面不瞬移。
+        const deficitCap = b.w / 2 + Math.abs(dx);
         const deficit = surfCenter - (b.y + b.h);
-        // ★门辨(2026-09-01 冲刺坠落案):deficit≤半身门在冲刺时一步越限后永久关闭
-        //   → 自由落体 7.8 格(实测)。门的本意=防跳跃跨越被拽下——以 wasGround
-        //   区分:行走中(wasGround)落差不限量,单 tick 补差帽 1 tile 防瞬移;
-        //   空中(跳跃/坠落跨越)维持 ≤半身 旧门。
-        if (num4 >= 0 && deficit >= -TILE
-          && (deficit <= b.w / 2 || wasGround)
+        const ztr = (globalThis as { __GLUETRACE?: unknown[] }).__GLUETRACE;
+        if (ztr && ztr.length < 400) ztr.push({ dx: +dx.toFixed(2), mid: midCol, fy, fs, num4: +num4.toFixed(1), def: +deficit.toFixed(1), feet: +(b.y + b.h).toFixed(1), vy: +b.vy.toFixed(2), applied: false });
+        if (num4 >= 0 && deficit >= -TILE && deficit <= deficitCap
           && ((fs === 1 && b.vx > 0) || (fs === 2 && b.vx < 0))) {
-          dy += Math.max(Math.abs(dx), Math.min(deficit, TILE));
+          const add = Math.max(Math.abs(dx), Math.min(deficit, deficitCap));
+          dy += add;
+          if (ztr && ztr.length) (ztr[ztr.length - 1] as { applied?: number }).applied = +add.toFixed(2);
         }
         break;   // 找到首个坡格即止(无论是否命中辅助)
       }

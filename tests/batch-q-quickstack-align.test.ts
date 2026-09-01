@@ -362,6 +362,36 @@ describe('★①-F1 收集范围全部 banks → 单次 Transfer(banksInRangeOf)
     expect(r.movedVids.get(r.touched[0]!)).toEqual([8, 8, 8]);
   });
 
+  it('红队 driver 原文场景（wood×700/300）：合并入保险箱且猪猪格零触碰、背包位清空', () => {
+    // 商品=木料 vid9（本仓数据面 maxStack=9999）——断言用真实 CAP，禁写死字面量
+    const WOOD = iid(9);
+    const CAP = ITEM_DEFS[WOOD].maxStack;
+    const store = new TileStore(200, 120);
+    store.setTileSilent(99, 63, 83);     // 猪猪
+    store.setTileSilent(110, 66, 235);   // 保险箱
+    const piggy = Array<Slot>(40).fill(null);
+    const safe = Array<Slot>(40).fill(null);
+    piggy[0] = { id: WOOD, stack: CAP };                        // 满叠登记面
+    for (let i = 1; i < 40; i++) piggy[i] = { id: dirt, stack: 1 };
+    safe[0] = { id: WOOD, stack: 100 };
+    safe[1] = { id: iid(8), stack: 1 };
+    const inv = new Inventory();
+    inv.slots[10] = { id: WOOD, stack: 700 };
+    inv.slots[11] = { id: WOOD, stack: 300 };
+
+    const hits = nearbyBanksInRange(store, 105, 66, [piggy, safe, null, null], false);
+    const r = quickStackToChests(inv,
+      hits.map((b) => ({ x: b.tx, y: b.ty, items: b.items })), false);
+    // 双箱终局：CAP≥1100 ⇒ A 阶 FillStack 把 700/300 全数并入保箱既有叠；
+    expect(CAP).toBeGreaterThanOrEqual(1100);
+    expect(safe[0]!.stack).toBe(1100);                          // 100+700+300 单叠归并
+    expect(inv.slots[10]).toBeNull();
+    expect(inv.slots[11]).toBeNull();
+    expect(piggy[0]!.stack).toBe(CAP);                          // 猪猪格零触碰
+    expect(r.touched.length).toBe(1);                           // 唯一实收箱=保险箱
+    expect(r.movedVids.get(r.touched[0]!)).toEqual([9, 9]);     // 两帧 FillStack（无残余直送）
+  });
+
   it('聚合语义判别器：B 阶受理集为跨 bank 登记表（余量须跳过登记但无空位的先行 bank 整件后送）', () => {
     const T8 = iid(8);
     const CAP = ITEM_DEFS[T8].maxStack;

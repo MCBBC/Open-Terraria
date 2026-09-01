@@ -12007,10 +12007,8 @@ export class Enemy extends Entity {
         this.dashing = true;
       } else if (this.state === 2) {
         // ---- 冲刺（:20170-20222）：40t 后 0.98 摩擦（专家再 ×0.985）；冲程 150 / 专家 100 ----
+        // （无粒子:原版冲刺无尘,速度感=共享血雾(:20112)+P2 残影;曾加合成灰粒补偿,清）
         this.dashing = true;
-        if (this.ai2 % 2 === 0) {
-          game.spawnParticles(this.cx, this.cy, '#D0D0D0', 2, 2);
-        }
         this.ai2 += 1;
         if (this.ai2 >= 40) {
           this.vx *= 0.98; this.vy *= 0.98;
@@ -12277,9 +12275,7 @@ export class Enemy extends Entity {
         //  曾 0.7 音量+无变调,2026-08-18 对账修）
         if (this.ai2 === 0) game.playSfxWav?.('Roar_0', 1, this.cx, this.cy, 0.6, true);
         this.dashing = true;
-        if (this.ai2 % 2 === 0) {
-          game.spawnParticles(this.cx, this.cy, '#FF4040', 2, 2);
-        }
+        // （无粒子:原版连冲无尘,速度感=共享血雾+残影;曾加合成红粒补偿,清）
         const num62 = num4;
         this.ai2 += 1;
         if (this.ai2 === num62 && Math.hypot(this.x - player.x, this.y - player.y) < 200) {

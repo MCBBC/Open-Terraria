@@ -299,6 +299,7 @@ describe('④Enemy.hurt OnHit 链（:6937 神圣/:6942 帕拉钯/:6963 山铜 �
     // 0.5（防跨 1 取整边界分岔），单拍增量只差 flat +4/120
     const acc = (): number => (p as unknown as { regenAccum: number }).regenAccum;
     expect(p.maxHp).toBeGreaterThanOrEqual(100);
+    for (let i = 0; i < 30 && !p.onGround; i++) p.fixedUpdate(1 / 60, hooks as never);   // 落地稳态
     p.hp = p.maxHp - 40;                       // 开再生窗（hp<maxHp 且非致死档）
     p.buffs.apply(BuffType.RapidHealing, 10);
     p.lifeRegenTime = 600;
@@ -313,5 +314,28 @@ describe('④Enemy.hurt OnHit 链（:6937 神圣/:6942 帕拉钯/:6963 山铜 �
     const withoutDelta = acc() - 0.5;
     expect(withoutDelta).toBeGreaterThanOrEqual(0);
     expect(withDelta - withoutDelta).toBeCloseTo(4 / 120, 2);   // lifeRegenCount += 4/拍
+  });
+});
+
+describe('⑤甲件 aggro 轴（终零波批,GrantArmorBenefits :13852-13874/:13983-13997）', () => {
+  it('龟甲三件 1316/1317/1318 → aggro +750（250×3 多源叠加）', () => {
+    const p = playerStub();
+    equipSet(p, 1316, 1317, 1318);
+    expect(p.equipStats.aggroPiece).toBe(750);
+    expect(p.aggro).toBe(750);              // 无潜行链 → 裸叠
+  });
+  it('甲虫防御档 2199/2201/2202 → +900（头/腿 250 + 壳胸 400）;进攻档 2200 无贡献', () => {
+    const def = playerStub();
+    equipSet(def, 2199, 2201, 2202);
+    expect(def.equipStats.aggroPiece).toBe(900);
+    const off = playerStub();
+    equipSet(off, 2199, 2200, 2202);
+    expect(off.equipStats.aggroPiece).toBe(500);
+  });
+  it('日曜三件 → +900；无潜行链时 getter 直通', () => {
+    const p = playerStub();
+    equipSet(p, 2763, 2764, 2765);
+    expect(p.equipStats.aggroPiece).toBe(900);
+    expect(p.aggro).toBe(900);
   });
 });

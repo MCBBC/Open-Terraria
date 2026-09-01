@@ -161,6 +161,24 @@ const KITE_ITEM_VIDS = new Set([4367, 4368, 4369, 4370, 4371, 4379, 4610, 4611,
  *  "绳穿平台/花盆箱/矿轨"支（WorldGen.cs:70140-70146：314 矿轨 / 380 花盆箱 /
  *  平台族格，上下 5 格内皆有绳时该格视作绳，可攀穿） */
 const VANILLA_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** Player.AFKTimeNeededForNoWormSpawns（Player.cs:971）——AFK 计数达此值 →
+ *  NPC.cs:412 noGroundWorms=true（挂机玩家周围不出蠕虫族） */
+export const AFK_TIME_NEEDED_FOR_NO_WORM_SPAWNS = 300;
+/** AFK 计数链步进核（纯函数,tests/finalzero-game-domain 直测）——
+ *  Player.cs:25692-25701 Update 段 1:1：IsConsideredStandingStill(:3307 |vx|<0.05
+ *  && |vy|<0.05) && (itemAnimation==0 || IsAKite[HeldItem]) && 六输入皆空
+ *  （controlUp/Down/Left/Right/Jump/Torch）→ ++；否则清零。 */
+export function stepAfkCounter(s: {
+  vx: number; vy: number; itemAnimTicks: number; heldIsKite: boolean;
+  inputX: number; inputUp: boolean; inputDown: boolean;
+  inputJump: boolean; inputTorch: boolean; afkCounter: number;
+}): number {
+  const standingStill = Math.abs(s.vx) < 0.05 && Math.abs(s.vy) < 0.05;
+  const animIdle = s.itemAnimTicks <= 0 || s.heldIsKite;   // ItemID.Sets.IsAKite 豁免支
+  const noCtrl = s.inputX === 0 && !s.inputUp && !s.inputDown
+    && !s.inputJump && !s.inputTorch;
+  return standingStill && animIdle && noCtrl ? s.afkCounter + 1 : 0;
+}
 /** 绳索攀爬速度链（Player.cs:26016-26125）：上爬 -0.2/-0.02 下限 -8；
  *  下滑 +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7（|vy|<0.1 归 0 :26120-26124） */
 const ROPE_IDLE_ZERO = 0.1;
@@ -234,8 +252,18 @@ function refreshMechanicalAccsFromItemType(m: MechanicalAccFlags, vid: number): 
 export { refreshMechanicalAccsFromItemType };
 
 /** ItemID.Sets.WorksInVoidBag（ItemID.cs:82 `Factory.CreateBoolSet(true, 4346, 5095)`）：
- *  默认全真，例外仅此二件——虚空袋内【不】重放信息/机械刷新。 */
+ *  默认全真，例外仅此二件——虚空袋内【不】重放信息/机械刷新。
+ *  ★终零波批注订正：CanVoidVaultAccept 注"例外未逐 id 建表"退役——本表即逐 id 真值 */
 const WORKS_IN_VOID_BAG_FALSE = new Set<number>([4346, 5095]);
+/** 甲件 aggro 轴（终零波批 2026-09-01）——GrantArmorBenefits :13201 逐 armorPiece.type
+ *  if 链的 aggro 半臂（:13852-13874/:13983-13997）：龟甲三件 1316/1317/1318 各 +250、
+ *  甲虫头/腿 2199/2202 各 +250、壳胸 2201 +400、日曜三件 2763/2764/2765 各 +300。
+ *  数值面其余字段（meleeDamage/crit/lifeRegen 等）走既有各自通道；aggro getter 并入 */
+const AGGRO_ARMOR_PIECE: Record<number, number> = {
+  1316: 250, 1317: 250, 1318: 250,
+  2199: 250, 2201: 400, 2202: 250,
+  2763: 300, 2764: 300, 2765: 300,
+};
 /** 机械族 vid 全集（equipStatsKey 虚空袋段用；与上方
  *  refreshMechanicalAccsFromItemType 的分支表一一对应，改其一必同步另一） */
 const MECH_ACC_VIDS = new Set<number>([3619, 3624, 2216, 3061, 5126, 4767, 5323]);
@@ -2191,15 +2219,15 @@ export class Player extends Entity {
     const s1 = 1 - this.stealth;
     // 原版 aggro 是累加字段（ResetEffects :18491 清零 → 装备 ±400/套装 ±250·300
     // 逐源 += → 潜行装 else-if 链减一面）+ 配饰轴 aggroAcc 并入（±400 七件,
-    // ApplyEquipFunctional :13992-14109/+250 甲件 :13853-13874/日曜甲 +300 ×3 :
-    // 13983-13997 走 GrantArmorBenefits 逐槽循环=可叠到 -900 的多源 +=
-    // ——本仓配饰轴已 += 累加同构;甲件轴暂未建模,登记）
+    // ApplyEquipFunctional :13992-14109）+甲件轴（龟/甲虫/日曜 :13852-97,
+    // GrantArmorBenefits 逐槽循环=多源 +=——★终零波批实装,旧注"甲件轴暂未建模"
+    // 退役;AGGRO_ARMOR_PIECE 表见模块常量区）
     let a: number;
     if (this.heldPsychoKnife) a = -Math.round(750 * s1);             // :25976 平铺 (1−s),首支
     else if (this.equipStats.shroomiteSet) a = -Math.round(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26016 Remap 轴
     else if (this.equipStats.vortexSet) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
     else a = 0;
-    a += this.equipStats.aggroAcc;
+    a += this.equipStats.aggroAcc + this.equipStats.aggroPiece;   // 配饰轴+甲件轴（多源 +=,终零波批）
     // 隐身药水(10)：aggro 钳位（Player.cs:25437-25445）——未挥击钳 -750（索敌距离
     // +750 曼哈顿 = 敌怪"看不见"），挥击中只钳 -250；只降不升（潜行套 -1200 不被抬回）
     if (this.buffs.has(BuffType.Invisibility)) {
@@ -5149,28 +5177,24 @@ export class Player extends Entity {
       this.envHurtThroughFunnel(game, 9999, this.cx, this.y, ImmunityCooldownID.General);
     }
     // ---- AFK 计数链（Player.cs:25692-25701 Update 段 1:1；终零波 补 Game 层链）：
-    //      IsConsideredStandingStill(:3307 |vx|<0.05 && |vy|<0.05) &&
-    //      (itemAnimation==0 || IsAKite[HeldItem]) && 六输入皆空 → ++，否则清零。
     //      消费=NPC.cs:412 noGroundWorms（≥300=AFKTimeNeededForNoWormSpawns）→
     //      SetSpawnFlagsForChosenTile:1053 !skyMob 门起 noWorms（挂机不出蠕虫族）。
     //      ★计时粒度：本仓 fixedUpdate 定步频 60Hz 与原版 Update 同拍。
     //      controlTorch=this.inputTorch（Game 输入合成段写入）;体力面（petting/
     //      sitting/sleeping 清 afkCounterForKiting :25702-25705）只涉风筝自动切、
     //      未建模（登记）；死亡观战退出钳 300（HandleSpectatingControls :17200）
-    //      同属风筝计数链旁支不接。Select 族清零在 Game 键位段（ Digit/Hotbar±） ----
+    //      同属风筝计数链旁支不接。Select 族清零在 Game 键位段（ Digit/Hotbar±）。
+    //      步进核心抽 stepAfkCounter 纯函数（tests/finalzero-game-domain 直测） ----
     {
-      const standingStill = Math.abs(this.vx) < 0.05 && Math.abs(this.vy) < 0.05;
       const heldAfk = this.inv.heldItem();
       const heldVidAfk = heldAfk ? (ITEM_DEFS[heldAfk.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldAfk.id].key)) : -1;
-      const animIdle = this.itemAnimTicks <= 0 || KITE_ITEM_VIDS.has(heldVidAfk);   // ItemID.Sets.IsAKite
-      const noCtrl = this.inputX === 0 && !this.inputUp && !this.inputDown
-        && !this.inputJump && !this.inputTorch;
-      if (standingStill && animIdle && noCtrl) {
-        this.afkCounter++;                        // :25694-25695（原版两计并列——
-                                                  //  afkCounterForKiting 随风筝系统另批）
-      } else {
-        this.afkCounter = 0;                      // :25699
-      }
+      this.afkCounter = stepAfkCounter({
+        vx: this.vx, vy: this.vy, itemAnimTicks: this.itemAnimTicks,
+        inputX: this.inputX, inputUp: this.inputUp, inputDown: this.inputDown,
+        inputJump: this.inputJump, inputTorch: this.inputTorch,
+        heldIsKite: KITE_ITEM_VIDS.has(heldVidAfk),
+        afkCounter: this.afkCounter,
+      });
     }
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
@@ -7590,7 +7614,9 @@ export class Player extends Entity {
    *  ★F2 词缀语义补齐）→ 空位整堆落格(:39835-39857,inv[i]=returnItem 整件随行含 prefix)。
    *  @param prefix 手头件的词缀（Item.prefix，缺省=无）——合并门与空位落格共用。
    *  CanVoidVaultAccept(:39733-39745)：questItem ∪ 3822(DD2EnergyCrystal 埃特尼亚魔力)
-   *  拒——WorksInVoidBag 缺省全真(SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。
+   *  拒——WorksInVoidBag 缺省全真(ItemID.cs:82 仅 4346/5095 两件例外)。
+   *  ★终零波批注订正：旧注"例外未逐 id 建表"退役——WORKS_IN_VOID_BAG_FALSE 即逐
+   *  id 真值表（模块常量区）。
    *  返回仍未入袋数量。
    *  ★F4 拒收门补挂（此前漏 CanVoidVaultAccept 半臂）：任务鱼 questFish 全表
    *  （QUEST_ITEM_VIDS = DefaultToQuestFish 调用面 [2450..2488]∪{4393,4394}，见常量注）

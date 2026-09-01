@@ -59,6 +59,7 @@ it('III135 MB replay with anchored bias injection', () => {
   const { st, gs, chests } = hydrate();
   const rng = new RNG(SEED);
   let trueRolls = 0;
+  const ledger: Array<[string, number]> = [];
   const oRoll = (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll;
   (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll = () => { trueRolls++; };
   (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg =
@@ -68,13 +69,16 @@ it('III135 MB replay with anchored bias injection', () => {
         for (let z = 0; z < k; z++) rng.next();
         console.log(`[bias] injected +${k} raw samples @${name}`);
       }
-      void name;
+      if (['passStart', 'deadCount', 'iceCount', 'swordAttempts', 'campCount', 'trapCount', 'treeCount', 'longTrackCount', 'stdTrackCount', 'mbLavaS'].includes(name)) {
+        ledger.push([name, trueRolls]);
+      }
     };
   const r0 = Date.now();
   runMicroBiomesPass(st, rng, gs, chests as never);
   (globalThis as unknown as { __swSeg?: unknown }).__swSeg = undefined;
   (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll = oRoll;
   console.log(`pass done ${Date.now() - r0}ms trueRolls=${trueRolls}`);
+  console.log('LEDGER ' + ledger.map(([n, v]) => `${n}=${v}`).join(' '));
 
   // ---- 九通道对拍 ----
   const load16 = (p: string) => new Uint16Array(readFileSync(p).buffer, 0, N);

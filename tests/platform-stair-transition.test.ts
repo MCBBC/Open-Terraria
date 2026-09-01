@@ -111,7 +111,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
     if (maxLag > 3) console.log('注: maxLag 可能落在平台帽区(row275 平平台叠于斜坡上方)——需按地形分层判读');
   });
 
-  it.skip('冲刺速度踏入斜坡不深坠(用户 vx≈3.0)——已知残留: sprint 跨越 (3166,275) 斜坡带仍有 ~1 格下坠,与行走修复分开收口', () => {
+  it('冲刺速度踏入斜坡跟随阶梯下行(用户 vx≈3.0)', () => {
     const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
     const b = {
       x: 3158 * TILE, y: 4400 - 42,
@@ -120,28 +120,25 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
       collideY: false, stepUp: true, stepUpHolds: true, stepUpNpc: true,
       liqFactor: 1,
     } as unknown as Parameters<typeof moveAndCollide>[0];
-    let maxUnder = 0;
-    const dbg: string[] = [];
-    for (let t = 0; t < 80; t++) {
+    let maxDrift = 0;
+    const tr: string[] = [];
+    for (let t = 0; t < 140; t++) {
       b.vx = 3.0;
-      const feetRowB = Math.floor((b.y + b.h) / TILE);
-      const midColB = Math.floor((b.x + b.w / 2) / TILE);
-      const stB = world.store;
-      const slopeHere = stB.inBounds(midColB, feetRowB) ? stB.slope[stB.idx(midColB, feetRowB)] : -9;
-      const slopeBelow1 = stB.inBounds(midColB, feetRowB + 1) ? stB.slope[stB.idx(midColB, feetRowB + 1)] : -9;
-      const solidHere = stB.inBounds(midColB, feetRowB) ? stB.isSolid(midColB, feetRowB) : false;
+      const preG = b.onGround;
       b.vy = Math.min(b.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(b, world, b.vx, b.vy);
       const feet = (b.y + b.h) / TILE, tx = b.x / TILE;
-      const ideal = tx <= 3166 ? 275 + (tx - 3166) : 275;
-      if (tx > 3164 && tx < 3170 && t % 2 === 0) {
-        dbg.push(`t${t} x${tx.toFixed(1)} feet${feet.toFixed(2)} G${b.onGround ? 1 : 0} mid${midColB} fr${feetRowB} sl${slopeHere}/${slopeBelow1} sol${solidHere ? 1 : 0} lag${(feet - ideal).toFixed(1)}`);
+      // 理想面按地形分段:实心/平平台(≤3172)面=275;阶梯下行(>3172)面=275+(tx-3172)
+      const ideal = tx <= 3172 ? 275 : 275 + (tx - 3172);
+      if (tx > 3164 && tx < 3182) {
+        const drift = feet - ideal;
+        if (Math.abs(drift) > Math.abs(maxDrift)) maxDrift = drift;
+        if (t % 4 === 0) tr.push(`t${t} x${tx.toFixed(1)} ft${feet.toFixed(1)} ideal${ideal.toFixed(1)} d${drift.toFixed(1)} ${preG?'G':'.'}${b.onGround?'G':'.'}`);
       }
-      if (tx > 3171.4) break;                     // 悬崖前停
-      maxUnder = Math.max(maxUnder, feet - ideal);
+      if (tx > 3182) break;
     }
-    console.log('SPRINT_DBG:', dbg.join('\n'));
-    if (maxUnder > 6) throw new Error(`冲刺踏入深坠 maxUnder=${maxUnder.toFixed(2)}t`);
+    console.log('TRAIL:\n' + tr.join('\n'));
+    if (Math.abs(maxDrift) > 1.5) throw new Error(`阶梯下行漂移 maxDrift=${maxDrift.toFixed(2)}t`);
   });
   it('跳跃登顶后在顶台上落地(用户跳跃场景)', () => {
     const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));

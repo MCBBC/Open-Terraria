@@ -1808,6 +1808,10 @@ export class Game implements GameHooks {
   /** 原版 HitTile 伤害积累（劈砍/挖掘通用，阈值 100） */
   private hitTiles = new HitTile();
   private lastMineHitTick = -999;
+  /** 锤整形闩（Player.poundRelease :46010-46020）：释放后置位（fixedUpdate
+   *  !mouseHeld 每帧维护），锤整形挥击消费（TryPoundingTile），瞄准非锤目标复位。
+   *  节拍 = 按住拆墙 / 松开整形（见 tryMine 锤段头注） */
+  private hammerPoundRelease = false;
   /** 摇树状态（WorldGen.treeShakeX/Y + numTreeShakes，WorldGen.cs:4353-4359）——
    *  每树每日一摇；黎明/换世界清空（Main.cs:64846 / WorldGen.cs:6896） */
   private treeShakes = new TreeShakeState();
@@ -8318,6 +8322,9 @@ export class Game implements GameHooks {
 
     // ---- 粒子与飘字 ----
     this.flushInvNotify();
+    // 锤整形闩维护（Player.poundRelease :46010 释放置位面——TryPoundingTile 消费、
+    // 瞄准非锤目标复位，见 tryMine 锤段）
+    if (this.input && !this.input.mouseHeld) this.hammerPoundRelease = true;
     // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
     // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
     this.evolution.update();
@@ -15333,125 +15340,201 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (num2 !== 0) this.pruneHitTiles();                 // Player.cs:45083 if(damage!=0) Prune
       return;
     }
-    // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
+    // 锤（Player.cs:45990-46470 ItemCheck_UseMiningTools 全链 1:1，2026-09-01 用户实报
+    // 「锤方块/平台总变整形、拆不了背后墙」定罪批）。★原版节拍 = poundRelease 双态：
+    //   按住挥击 = TryHittingWall 拆【准星格的背景墙】——canHitWalls 对非祭坛族恒 true
+    //   （Main.tileHammer 集合全树仅 {26,31,695,696} 祭坛族，Main.cs:7343-7346；普通块/
+    //   平台/轨道不在内 → TryHittingWall 的 `!tileHammer && !poundRelease` 门在按住态
+    //   恒真 = 该格墙被锤），方块本身无动作；松开闩（poundRelease）的那一挥 =
+    //   TryPoundingTile 整形一步（平台坡循环/普通块 整→半→四向坡/轨道换向）且不拆墙。
+    //   此前实现「每挥整形、永不拆墙」= 缺 poundRelease 状态机的偏离，即用户痛点根因。
     if (toolType === 'hammer') {
-      // 矿车轨道锤击（Player.cs:45442-45447）：FrameTrack(pound) 循环切换连接/加速向。
-      // 帧有变（FrameTrack 内 flag4）→ KillTile(fail:true)（Minecart.cs:1167-1170）——
-      // 走 KillTile_PlaySounds case 314 = SoundID.Item52（WorldGen.cs:66587-66590）
-      if (type === this.trackTile && this.trackTile !== 0) {
-        if (this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
-          this.lastMineHitTick = this.tickCount;
-          const ti = this.world.store.idx(tx, ty);
-          const beforeX = this.world.store.frameX[ti], beforeY = this.world.store.frameY[ti];
-          frameTrack(this.world.store, tx, ty, true);
-          if (this.world.store.frameX[ti] !== beforeX || this.world.store.frameY[ti] !== beforeY) {
-            this.playSfxFile('Item_52', 0.8, tx * TILE, ty * TILE);
+      const st = this.world.store;
+      const poundRelease = this.hammerPoundRelease;   // 松开闩（fixedUpdate !mouseHeld 置位）
+      const throttled = this.tickCount - this.lastMineHitTick < Math.max(8, speed);
+      // ---- TryPoundingTile（poundRelease 态整形一步，:46359+；IsAHammerTarget :45920）----
+      if (poundRelease && !throttled && type !== 0) {
+        // IsAHammerTarget = tileHammer({26,31,695,696}) || IsTilePoundable(:45929)——
+        // IsTilePoundable：实心恒真；非实心须 ∈ {314 轨道, 424 时钟, 442 灯串, 351, 470 假人}
+        const dH = TILE_DEFS[type];
+        const shH = dH?.vanilla?.sheet ?? -1;
+        const isHammerTarget = type === TILE_BY_KEY['v_26_altars'] || !!dH?.solid
+          || shH === 314 || shH === 424 || shH === 442 || shH === 351 || shH === 470;
+        if (!isHammerTarget) {
+          this.hammerPoundRelease = false;            // :46015-46020 非锤目标复位闩
+        } else {
+          this.hammerPoundRelease = false;            // 消费闩（:46699 尾段同款）
+          this.lastMineHitTick = this.tickCount;      // ApplyItemTime(:46368)
+          // 矿车轨道换向（:45442-45447 FrameTrack(pound)；帧变 → Item52）
+          if (type === this.trackTile && this.trackTile !== 0) {
+            const ti = st.idx(tx, ty);
+            const beforeX = st.frameX[ti], beforeY = st.frameY[ti];
+            frameTrack(st, tx, ty, true);
+            if (st.frameX[ti] !== beforeX || st.frameY[ti] !== beforeY) {
+              this.playSfxFile('Item_52', 0.8, tx * TILE, ty * TILE);
+            }
+            this.mining = null;
+            return;
+          }
+          // 平台坡循环（:45394-45440 1:1）：半砖 → PoundTile 回整；整 → slope(num) →
+          // 另一侧 → CanPoundTile 过门 → slope0+半砖。num 默认 1；右邻(y-1)/左下邻(y+1)
+          // 是平台或「右实左空」→ num=2
+          if (dH?.platform) {
+            const i = st.idx(tx, ty);
+            if (st.half[i]) {
+              st.setHalfBrick(tx, ty, false);           // :45398-45402 PoundTile（半砖回整）
+            } else {
+              const solidFullP = (x: number, y: number): boolean => {
+                if (!st.inBounds(x, y)) return false;
+                const j = st.idx(x, y);
+                const dj = TILE_DEFS[st.type[j]];
+                return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
+              };
+              const platAt = (x: number, y: number): boolean =>
+                st.inBounds(x, y) && !!TILE_DEFS[st.type[st.idx(x, y)]]?.platform;
+              let num = 1, other = 2;                   // :45406-45415
+              if (platAt(tx + 1, ty - 1) || platAt(tx - 1, ty + 1)
+                || (solidFullP(tx + 1, ty) && !solidFullP(tx - 1, ty))) { num = 2; other = 1; }
+              const s = st.slope[i];
+              if (s === 0) {
+                st.setSlope(tx, ty, num);               // :45417-45421 SlopeTile(num)
+              } else if (s === num) {
+                st.setSlope(tx, ty, other);             // :45422-45428 SlopeTile(另一侧)
+              } else if (this.canPoundTile(tx, ty)) {
+                st.setSlope(tx, ty, 0);                 // :45429-45438 slope0 + PoundTile → 半砖
+                st.setHalfBrick(tx, ty, true);
+              }
+            }
+            this.sfx.play('tink');
+            this.mining = null;
+            return;
+          }
+          // 普通可整形块（:46470 尾段 1:1）：整 → PoundTile 半砖；已整形 → 坡循环
+          // （方向感知：右实左空 → 先 slope2；上实下空 → num11=-1 反向），循环尾
+          // SlopeTile() 复位 → 半砖；整→半由尾段 else PoundTile 承接
+          const poundable = !!dH && dH.solid && !dH.framed;
+          if (poundable && st.isSolid(tx, ty)) {
+            const i = st.idx(tx, ty);
+            // WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0
+            const solidFull = (x: number, y: number) => {
+              if (!st.inBounds(x, y)) return false;
+              const j = st.idx(x, y);
+              const dj = TILE_DEFS[st.type[j]];
+              return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
+            };
+            if (st.half[i] || st.slope[i] !== 0) {
+              let num11 = 1, num12 = 1, num13 = 2;
+              if ((solidFull(tx + 1, ty) || st.slope[st.idx(tx + 1, ty)] === 1 || st.slope[st.idx(tx + 1, ty)] === 3)
+                && !solidFull(tx - 1, ty)) { num12 = 2; num13 = 1; }
+              if (solidFull(tx, ty - 1) && !solidFull(tx, ty + 1)) num11 = -1;
+              const s = st.slope[i];
+              const next = num11 === 1
+                ? (s === 0 ? num12 : s === num12 ? num13 : s === num13 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : 0)
+                : (s === 0 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : s === num13 + 2 ? num12 : s === num12 ? num13 : 0);
+              st.setSlope(tx, ty, next); // setSlope 无条件清 half——与原版 SlopeTile 一致
+            } else {
+              st.setHalfBrick(tx, ty, true); // :46698 PoundTile：整砖→半砖
+            }
+            this.sfx.play('tink');
+            this.mining = null;
+            return;
+          }
+          // 424 时钟/442 灯串/470 假人等特例整形未建模（现状同，备案）→ 落墙段
+        }
+      }
+      // ---- 拆墙（TryFindingWallToHammer :46221 + TryHittingWall :46297 +
+      //      CanPlayerSmashWall :46322 + PickWall :46343 全链 1:1）----
+      const wallAt = (x: number, y: number): number =>
+        st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;   // 原版越界 tile=null → wall 视 0
+      const cellActive = (x: number, y: number): boolean =>
+        st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0 && st.get(x, y) !== 0;
+      // Main.tileHammer 域（盾墙谓词）：仅祭坛族。祭坛格已在上分支拦截，此处恒 false
+      // ——按原式保留（!tileHammer 恒真 = 非祭坛格不盾墙）
+      const tileHammerAt = (x: number, y: number): boolean =>
+        cellActive(x, y) && st.get(x, y) === TILE_BY_KEY['v_26_altars'];
+      // CanPlayerSmashWall（:46322）：350 恒拒；房墙恒可；自然墙需 3×3 邻域有开口
+      // （空墙或房墙）——成片自然墙内部不可拆，防拆穿地牢/丛林结构墙
+      const canPlayerSmashWall = (x: number, y: number): boolean => {
+        const w = wallAt(x, y);
+        if (w === 350) return false;
+        if (WALL_HOUSE.has(w)) return true;
+        for (let a = x - 1; a <= x + 1; a++) for (let b = y - 1; b <= y + 1; b++) {
+          const w2 = wallAt(a, b);
+          if (w2 === 0 || WALL_HOUSE.has(w2)) return true;
+        }
+        return false;
+      };
+      // 定墙格（TryFindingWallToHammer :46221）：起点=准星格；「净」= 无墙 或 非房墙
+      // 且 3×3 同墙一致。净且空 → 按鼠标亚格象限（<0.5 → 0 否则 −1）扫 2×2 邻域，
+      // 取首个「有墙且 3×3 同墙一致」的格（转角瞄准 QoL：可拆到贴角方块后面的墙）
+      let wX = tx, wY = ty;
+      const wallClean = (x: number, y: number): boolean => {
+        const w = wallAt(x, y);
+        if (w <= 0) return true;
+        if (WALL_HOUSE.has(w)) return false;
+        for (let a = x - 1; a <= x + 1; a++) for (let b = y - 1; b <= y + 1; b++) {
+          if (wallAt(a, b) !== w) return false;
+        }
+        return true;
+      };
+      let flag = wallClean(tx, ty);
+      if (!flag || cellActive(tx, ty)) {
+        // 原格参与 TryHittingWall 自决（active 格的盾/非盾、空格直拆）
+      } else {
+        const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+        const gx = mwx / TILE, gy = mwy / TILE;
+        const num = (gx - Math.floor(gx)) < 0.5 ? 0 : -1;
+        const num2 = (gy - Math.floor(gy)) < 0.5 ? 0 : -1;
+        for (let k = tx + num; k <= tx + num + 1; k++) {
+          for (let l = ty + num2; l <= ty + num2 + 1; l++) {
+            if (!flag) continue;
+            wX = k; wY = l;
+            const w = wallAt(k, l);
+            if (w <= 0) continue;
+            if (!WALL_HOUSE.has(w)) {
+              for (let a = k - 1; a <= k + 1; a++) for (let b = l - 1; b <= l + 1; b++) {
+                if (wallAt(a, b) !== w) flag = false;
+              }
+            } else {
+              flag = false;
+            }
           }
         }
-        this.mining = null;
-        return;
       }
-      // 原版锤循环（Player.cs:45625-45695）：整砖→半砖→slope1→2→3→4→整砖。
-      // 方向感知：右实左空 → 先 slope2；上实下空（天花板模式）→ 先 slope3/4。
-      // ---- 平台族锤循环（Player.cs:45394-45440 1:1）：半砖 → PoundTile 回整；
-      //      整砖 → slope(num) → slope(另一侧) → CanPoundTile 过门 → slope0+半砖。
-      //      num 默认 1；右邻(y-1)/左下邻(y+1) 是平台或"右实左空" → num=2。
-      //      坡面平台的可行走楼梯碰撞在 TileCollision.slopeCollide 平台单向门 ----
-      const hdP = TILE_DEFS[type];
-      if (type !== 0 && hdP?.platform && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
-        this.lastMineHitTick = this.tickCount;
-        const st = this.world.store;
-        const i = st.idx(tx, ty);
-        if (st.half[i]) {
-          st.setHalfBrick(tx, ty, false);           // :45398-45402 PoundTile（半砖回整）
-        } else {
-          const solidFullP = (x: number, y: number): boolean => {
-            if (!st.inBounds(x, y)) return false;
-            const j = st.idx(x, y);
-            const dj = TILE_DEFS[st.type[j]];
-            return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
-          };
-          const platAt = (x: number, y: number): boolean =>
-            st.inBounds(x, y) && !!TILE_DEFS[st.type[st.idx(x, y)]]?.platform;
-          let num = 1, other = 2;                   // :45406-45415
-          if (platAt(tx + 1, ty - 1) || platAt(tx - 1, ty + 1)
-            || (solidFullP(tx + 1, ty) && !solidFullP(tx - 1, ty))) { num = 2; other = 1; }
-          const s = st.slope[i];
-          if (s === 0) {
-            st.setSlope(tx, ty, num);               // :45417-45421 SlopeTile(num)
-          } else if (s === num) {
-            st.setSlope(tx, ty, other);             // :45422-45428 SlopeTile(另一侧)
-          } else if (this.canPoundTile(tx, ty)) {
-            st.setSlope(tx, ty, 0);                 // :45429-45438 slope0 + PoundTile → 半砖
-            st.setHalfBrick(tx, ty, true);
-          }
-        }
-        this.sfx.play('tink');
-        this.mining = null;
-        return;
-      }
-      const hd = TILE_DEFS[type];
-      const poundable = type !== 0 && !!hd && hd.solid && !hd.platform && !hd.framed;
-      if (poundable && this.world.store.isSolid(tx, ty) && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
-        this.lastMineHitTick = this.tickCount;
-        const st = this.world.store;
-        const i = st.idx(tx, ty);
-        // WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0
-        const solidFull = (x: number, y: number) => {
-          if (!st.inBounds(x, y)) return false;
-          const j = st.idx(x, y);
-          const dj = TILE_DEFS[st.type[j]];
-          return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
-        };
-        if (st.half[i] || st.slope[i] !== 0) {
-          let num11 = 1, num12 = 1, num13 = 2;
-          if ((solidFull(tx + 1, ty) || st.slope[st.idx(tx + 1, ty)] === 1 || st.slope[st.idx(tx + 1, ty)] === 3)
-            && !solidFull(tx - 1, ty)) { num12 = 2; num13 = 1; }
-          if (solidFull(tx, ty - 1) && !solidFull(tx, ty + 1)) num11 = -1;
-          const s = st.slope[i];
-          const next = num11 === 1
-            ? (s === 0 ? num12 : s === num12 ? num13 : s === num13 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : 0)
-            : (s === 0 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : s === num13 + 2 ? num12 : s === num12 ? num13 : 0);
-          st.setSlope(tx, ty, next); // setSlope 无条件清 half——与原版 SlopeTile 一致
-        } else {
-          st.setHalfBrick(tx, ty, true); // PoundTile：整砖→半砖
-        }
-        this.sfx.play('tink');
-        this.mining = null;
-        return;
-      }
-      // 墙读取不受前景 tile 影响（原版：火把/平台/门后的墙可锤；实心块已被上方
-      // 半砖分支拦截——实心块后的墙原版同样不可直接锤，语义一致）
-      const wall = this.world.store.wall[this.world.store.idx(tx, ty)];
-      // ★割草判据 = tileCut 显式表（同上）；framed 家具（墓碑）不在表内
-      //  → 落到墙锤击（原版可锤家具后的墙）。曾只判 decor → 锤子一击拆墓碑
-      if (type !== 0 && TILE_CUT.has(type)) {
-        this.breakTile(tx, ty, true);
-        this.sfx.play('chop');
-        this.mining = null;
-        return;
-      }
-      if (!wall) { this.mining = null; return; }
-      // HitTile 制（type 2 = 墙）：每挥一击，阈值 100
-      if (this.tickCount - this.lastMineHitTick < Math.max(8, speed)) {
-        this.hardnessCache = 100;
-        this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty, 2) };
+      // TryHittingWall（:46297）：墙>0 且（格空 ∨ 非准星格 ∨（非盾墙 ∧ 非松开闩））
+      // 且 节拍 ∨ 锤力>0 ∨ CanPlayerSmashWall
+      const w = wallAt(wX, wY);
+      const activeC = cellActive(wX, wY);
+      const canHitWall = w > 0
+        && (!activeC || wX !== tx || wY !== ty || (!tileHammerAt(wX, wY) && !poundRelease))
+        && !throttled
+        && power > 0
+        && canPlayerSmashWall(wX, wY);
+      if (!canHitWall) {
+        // 节流窗内维持墙裂缝显示（原版 toolTime 门同效）
+        this.mining = (wallAt(tx, ty) > 0 && throttled)
+          ? { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty, 2) }
+          : null;
         return;
       }
       this.lastMineHitTick = this.tickCount;
-      const dmgW = Math.round(power * 2);
-      const total = this.hitTiles.addDamage(tx, ty, dmgW, 2); // 锤墙：木 5 击 / 铜 2 击
+      // PickWall（:46343）：damage = (int)(hammer × 1.5f)——曾误 ×2（木锤 5 击→应 3 击）
+      const dmgW = Math.floor(power * 1.5);
+      const total = this.hitTiles.addDamage(wX, wY, dmgW, 2);
       this.hardnessCache = 100;
-      this.mining = { x: tx, y: ty, progress: total };
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2);
+      this.mining = { x: wX, y: wY, progress: total };
+      this.spawnParticles(wX * TILE + 8, wY * TILE + 8, '#5C4436', 2, 1.2);
       if (total >= 100) {
-        this.hitTiles.clear(tx, ty, 2);
-        this.world.store.setWall(tx, ty, 0);
-        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 8, 1.8);
+        this.hitTiles.clear(wX, wY, 2);
+        st.setWall(wX, wY, 0);
+        this.spawnParticles(wX * TILE + 8, wY * TILE + 8, '#5C4436', 8, 1.8);
         this.sfx.play('chop');
         this.mining = null;
       }
-      if (dmgW !== 0) this.pruneHitTiles();               // Player.cs:45351 if(damage!=0) Prune
+      // PickWall 尾（:45351 → :46377 if(damage!=0) Prune）+ itemTime = useTime/2
+      // （:46313 半速节拍 → 有效冷却 ≈ ceil(cooldown/2)）
+      if (dmgW !== 0) this.pruneHitTiles();
+      this.lastMineHitTick = this.tickCount - (Math.max(8, speed) >> 2);
       return;
     }
     if (type === 0 || !this.toolMatchesTile(type, toolType)) {
@@ -27715,16 +27798,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */
-  /** Main.GetNurseHealCost（Main.cs:39463-39511）1:1：(缺血 + 100×可移除 debuff)
+  /** Main.GetNurseHealCost（1458 Main.cs:40752-40795）1:1：(缺血 + 100×可移除 debuff)
    *  × 进度倍率链（石头人200/世花150/三王100/困难60/骷髅王|蜂后25/世吞|克脑10/
-   *  EoC 3）× 专家 2 ×（折扣 0.8 未实装——discountAvailable 恒 false，登记） */
+   *  EoC 3）× 专家 2 × 折扣卡 0.8。★终零波销核：旧注「折扣 0.8 未实装——
+   *  discountAvailable 恒 false」为陈旧账——discountAvailable 生产链
+   *  （P.discountEquipped=UpdateEquips 854 折扣卡/3035 贪婪之戒 → :25833
+   *  discountAvailable=discountEquipped；本仓 equipStats.discount 同源聚合,
+   *  vanilla-accfx.json "854"/"3035" discount:1）与下方消费行均已在位 */
   private nurseHealCost(): number {
     const p = this.player;
     const f = this.world.flags;
     let num = p.maxHp - p.hp;
-    // 可移除 debuff：buffTime>60 且非 NurseCannotRemoveDebuff 表——本仓 debuff 族
-    // 全部可移除（该排除表多为 boss 专属 debuff，未实装，登记）
-    num += 100 * p.buffs.debuffCount(60);
+    // 可移除 debuff：Main.cs:40758 `debuff[t] && buffTime>60 &&
+    // !BuffID.Sets.NurseCannotRemoveDebuff[t]`——排除表消费面在 Buffs.debuffCount
+    // （NURSE_CANNOT_REMOVE_VANILLA 反查过滤,终零波接入）。★阈值修正：本仓
+    // debuffCount 参数是【秒】而原版门是 60【tick】=1 秒——旧传 60 令门槛抬高
+    // 60 倍（中毒 30s 内护士不计价,与原版相悖）,改传 1
+    num += 100 * p.buffs.debuffCount(1);
     if (f['downed_245']) num *= 200;        // Golem
     else if (f['downed_262']) num *= 150;   // Plantera
     else if (f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']) num *= 100;
@@ -27743,7 +27833,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private nurseHeal() {
     const p = this.player;
-    if (p.hp >= p.maxHp && p.buffs.debuffCount(60) === 0) {
+    if (p.hp >= p.maxHp && p.buffs.debuffCount(1) === 0) {   // 60t 阈=1s（同 nurseHealCost 注）
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy'));
       return;
     }

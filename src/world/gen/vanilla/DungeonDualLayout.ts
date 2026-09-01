@@ -3571,6 +3571,10 @@ export interface DualLayoutResult {
    *  键=settings.StyleData.Style；biome=BiomeDungeonRoom 实例（每样式至多一席,后写覆盖）；
    *  rooms=其余房 InnerBounds 列表（Next(list.Count) 采样+Remove）。 */
   chestPlan?: Record<number, { biome?: { L: number; T: number; R: number; B: number } | null; rooms: Array<{ L: number; T: number; R: number; B: number }> }>;
+  /** ★IIIII106b：outerProgressionBounds（DU.cs CalculateDungeonBounds 同名面——每样式
+   *  一席=全座房/厅外框并集经 outerPotential Top/Bottom 钳制；EarlyDual TileClump/DropTrap
+   *  抽样窗消费源）。styles 数组同序。普通世界（provider 未跑）恒 undefined=零扰动。 */
+  progBounds?: Array<{ L: number; T: number; R: number; B: number }>;
 }
 
 export interface DualLayoutOpts {
@@ -3711,7 +3715,10 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     cell.rooms.push({ L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B });
   }
   const scalar = Math.max(1.0, data.rooms.length / 20.0);   // DC.cs:381 双精度
-  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles };
+  // ★IIIII106b：outerProgressionBounds 投影（provider 收口时 outerProgBounds 已由
+  // calculateDungeonBounds 装配=styles 同序；空数组防御=legacy 回退面）
+  const progBounds = (data.outerProgressionBounds ?? []).map((b2) => ({ L: b2.L, T: b2.T, R: b2.R, B: b2.B }));
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles, progBounds };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {
