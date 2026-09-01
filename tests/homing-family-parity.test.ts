@@ -451,4 +451,20 @@ describe('★F7 蜂族入水判死几何三态固防（深水/浅缘/邻格/蜜�
     expect(probe(3)).toMatchObject({ wet: true, honey: true, shimmer: false });    // 蜂蜜计入
     expect(probe(4)).toMatchObject({ wet: true, honey: false, shimmer: true });    // 微光计入
   });
+
+  it('★L1+L2 致动斜坡出生判死（:1632 纯在场位 + wet 缓存出生预置）：接线致动坡格+上格液体 → 出生拍即判死', () => {
+    // 坡格 (60,95) slope=1 且【致动】、上格 (60,94) 满水——原版 :1632 门是
+    // tile.active() 纯在场位（无 inActive 检查）⇒ 致动斜坡照样判湿;蜂族 AI 头
+    // :27685 读 wet 缓存,出生拍 = NewProjectile :10887-93 预置（本仓 fixedUpdate
+    // 头等价块）——出生即在致动坡湿带上,首子步即 Kill。
+    const { hooks, store } = makeHooks([]);
+    store.setTile(60, 95, 1);
+    store.setSlope(60, 95, 1);
+    putLiquid(store, 60, 94, 255, 1);           // 液带 [1504.06,1520.06)
+    store.setActuated(60, 95, true);            // ★致动位（修复前 nactive 口径 → 漏判存活）
+    // 探针盒 y[1521,1525)：越过液带底 1520.06（255 满水带 0.06px 渗出,不落液体支）、落坡行 [1520,1536)
+    // → 湿判定只能来自坡面支;蜂 8×8：vy = py + 4 − 2 = py + 2
+    const bee = bee181(60 * 16 + 4, 94 * 16 + 15);
+    expect(diesWithin(bee, 1, hooks)).toBe(true);
+  });
 });

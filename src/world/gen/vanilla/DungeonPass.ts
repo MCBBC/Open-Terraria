@@ -99,6 +99,11 @@ const DG_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 2
   601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
 const DG_DUNGEON_TILES = new Set([41, 43, 44, 677, 678, 679]);
 const DG_DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+// ★IIIII112：TileID.Sets.Clouds（TileID.cs:197）——DungeonDesertCleanup→FindLowestCloud
+//   的活性格判定面（vanilla sheet 域→内部 id）
+const DG_CLOUD_SHEETS = new Set(
+  [189, 196, 460, 717, 718, 719].map((sh) => TILE_INTERNAL_BY_SHEET.get(sh)).filter((v) => v !== undefined),
+);
 const DG_FRAMED_NOT_CUT = new Set<number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const d = TILE_DEFS[i];
@@ -510,12 +515,21 @@ const snap: SnapFn = (name) => {
     if (entKind !== 0) {
       const rough = entKind === 2 ? 120 : 55;    // RoughHeight：Tower 120 / Dome 55（DC.cs:830-834）
       let tries = 3000;
+      // ★IIIII112（cs:286-303）：下爬起点 y 三态门补「被埋」支——cs 序为
+      //   num2=10；`if(DungeonEntranceIsBuried) num2=(int)worldSurface-10+BuriedEntranceYOffset`
+      //   （DungeonEntranceIsBuried=surfaceIsDesert&&!IsUnderground，SpecialSeedFeatures.cs:53-59；
+      //    Tower/Dome 的 BuriedEntranceYOffset=20+dualNum，DC.cs:831/:846/:852）；随后
+      //   `if(IsUnderground) num2=…rockLayer-20…` 覆写。此前 JS 只有 drunk 支 ⇒ sandy 塔墩
+      //   类入口下爬自地表以上起扫、落点与尝试耗骰双差（首差即结构级联的全域移位）。
+      const eBuriedF = !!gs.seedFlags.surfaceIsDesert && !gs.seedFlags.noSurface && !gs.seedFlags.drunkWorld;
+      const nyStart = eBuriedF ? Math.trunc(ws) - 10 + 20 + (IS_DUAL ? 30 : 0)
+        : (gs.seedFlags.drunkWorld ? Math.trunc(gs.genRockLayer) - 20 : 10);
       while (true) {
         tries--;
         if (tries <= 0) break;
         const nx = locK - 100 + rn(200);
         if (nx > BEACH && nx < w - BEACH) {
-          let ny = gs.seedFlags.drunkWorld ? Math.trunc(gs.genRockLayer) - 20 : 10;
+          let ny = nyStart;                  // cs:num2 每 attempt 重置（:295-303）
           while (ny < h && st.flags[st.idx(nx, ny)] === 0
             && st.liquid[st.idx(nx, ny)] <= 0 && st.wall[st.idx(nx, ny)] <= 0) ny++;
           if (!cloudsNear(nx, ny, 15) && !cloudsNear(nx, Math.max(50, ny - 50), 50)
@@ -582,6 +596,9 @@ const snap: SnapFn = (name) => {
   const doorData: DDoor[] = [];
   const platData: DPlat[] = [];
   const pits: DBnd[] = [];
+  // ★IIIII108c 第④刀：DropTrap 成功盒（dual S5-S7 deDropTrap 上报；CanGenerateFeatureAt
+  //   恒 false ⇒ 全特征拒收区）。普通世界零追加=零扰动。
+  const dropBoxes: DBnd[] = [];
   // ★QQQQQQ（2026-08-22）：已生成窗盒（DungeonWindow 子类构造即入 dungeonFeatures，
   //   GenerateFeature 恒 true→generated=true；Bounds=逐写格 UpdateBounds）——
   //   DungeonWindow.CanGenerateFeatureAt 对**非 WallVariants** 特征恒 false
@@ -620,6 +637,51 @@ const snap: SnapFn = (name) => {
   //   （老人预置地下屋/守卫限深放宽同族）；零骰。SecretSeed.noSurface 豁免支不适用。
   if (gs.seedFlags.drunkWorld) {
     y0 = Math.trunc(ws) + 70;
+  }
+  // ★IIIII112（cs:14878-14882）：sandy britches（surfaceIsDesert）被埋地牢入口的
+  //   沙「挖空臂」——每座 MakeDungeon 前必跑（首座 :14881，dual 座循环 :14931 同臂）。
+  //   此前 JS 整缺：功能面=门口上方漏斗形掏空（行内 tile.active(false)+本/下行
+  //   wall 清零），掷账面=Next(25,46)×1 + 每行 num2/num3 各一掷——缺掷令 MakeDungeon
+  //   全部骰位整体后移（#32 双向砖体级联的定罪链；IIIII112 批窗口对拍实证）。
+  //   offset=preGenDungeonEntranceSettings.BuriedEntranceSandDugoutYOffset=−num，
+  //   num=0（普通）/30（dualDungeons）（DC.cs:831/:840/:846/:852）。
+  /** DungeonDesertCleanup（WorldGen.cs:35531-35557）：自 num 起逐行上掏至
+   *  FindLowestCloud()（cs:25637：y∈[20,worldSurface) 行扫 x∈[20,maxTilesX−20)
+   *  任一活性 Clouds{189,196,460,717,718,719} 格，取最下一行、无云 0；sandy 链在
+   *  本调用前全管线无 FindLowestCloud 前序消费点（Corruption :13939 只在
+   *  surfaceIsInSpace 分支、DoSurfaceIsDesertFinish 属收尾段在 Dungeon 之后）——
+   *  fresh 计算与 GenVars.lowestCloud 缓存同值）。行尾 num-- 且 num2/num3=半宽：
+   *  <20 加 Next(4,5)（恒 4）、<40 加 Next(2,4)、其余加 Next(1,3)，两计各一掷。 */
+  const dgDesertCleanup = (x: number): void => {
+    const offset = IS_DUAL ? 30 : 0;
+    let num = Math.trunc(ws) - 10 - offset - ri(25, 45);
+    let num2 = 1, num3 = 1;
+    const cloudLowest = (() => {
+      let lowest = 0;
+      for (let yy = 20; yy < ws; yy++) {
+        for (let xx = 20; xx < w - 20; xx++) {
+          const qi = st.idx(xx, yy);
+          if (st.flags[qi] && DG_CLOUD_SHEETS.has(st.type[qi])) { lowest = yy; break; }
+        }
+      }
+      return lowest;
+    })();
+    while (num > cloudLowest) {
+      for (let i = x - num2; i <= x + num3; i++) {
+        if (i >= 5 && i < w - 5 && num >= 5 && num < h - 5) {          // InWorld(i,num,5)
+          const ti = st.idx(i, num);
+          st.flags[ti] &= ~1;                                          // tile.active(active:false)
+          st.wall[ti] = 0;
+          st.wall[st.idx(i, num + 1)] = 0;                             // tile2.wall=0
+        }
+      }
+      num--;
+      num2 += num2 >= 20 ? ((num2 >= 40) ? ri(1, 2) : ri(2, 3)) : ri(4, 4);
+      num3 += num3 >= 20 ? ((num3 >= 40) ? ri(1, 2) : ri(2, 3)) : ri(4, 4);
+    }
+  };
+  if (gs.seedFlags.surfaceIsDesert) {
+    dgDesertCleanup(dgLoc);
   }
   // —— MakeDungeon（cs:327-505）——
   dgpMark("before_strengths");
@@ -2419,9 +2481,16 @@ const snap: SnapFn = (name) => {
   }
   // TowerEntrance_Door（:433-461）：num/num2 门洞扫带 + 墙清/k≥-2..0 清块 +
   // 双 PlaceTile(10,style13)（PlaceDoor 3×Next(3) 成功即掷）
-  function dgTowerDoor(i: number, floorY: number, outer: number, inner: number, left: boolean): void {
-    const num = left ? inner - 1 : -outer - 2;
-    const num2 = left ? outer + 2 : -inner + 1;
+  // ★IIIII112：补 buried 形参（DomeDungeonEntrance.cs:485-502 / TowerDungeonEntrance.cs:507-524
+  //  两体逐行同源）——buried 支三件：①跨度 num+=2(右门)/num2-=2(左门) ②wall=0 清墙支整跳
+  //  ③PlaceTile 玻璃点不变。此前恒按 !buried 口径跑 ⇒ sandy 被埋穹门右侧多清 2×3 沙岩窗。
+  function dgTowerDoor(i: number, floorY: number, outer: number, inner: number, left: boolean, buried: boolean): void {
+    let num = left ? inner - 1 : -outer - 2;
+    let num2 = left ? outer + 2 : -inner + 1;
+    if (buried) {
+      num += (!left) ? 2 : 0;
+      num2 += left ? -2 : 0;
+    }
     const p1x = i + (left ? outer - 1 : -outer + 1);
     const p2x = i + (left ? inner + 1 : -inner - 1);
     for (let j = num; j <= num2; j++) {
@@ -2429,7 +2498,7 @@ const snap: SnapFn = (name) => {
         const x = i + j, y = floorY + k;
         if (!st.inBounds(x, y)) continue;
         const ti = st.idx(x, y);
-        if ((left && x >= p1x) || (!left && x <= p1x)) st.wall[ti] = 0;
+        if (!buried && ((left && x >= p1x) || (!left && x <= p1x))) st.wall[ti] = 0;
         if (k >= -2 && k <= 0) { st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0; }
       }
     }
@@ -2672,9 +2741,9 @@ const snap: SnapFn = (name) => {
       dgWindowBasic(i, n7 - 39, 7, 13, twG);
     }
 
-    // 双侧门洞（:431-433）
-    dgTowerDoor(i, n7, n4, n3, leftSide);
-    dgTowerDoor(i, n7, n4, n3, !leftSide);
+    // 双侧门洞（:431-433/:489-490 无条件双门）★IIIII112 补 buried 形参
+    dgTowerDoor(i, n7, n4, n3, leftSide, entBuried);
+    dgTowerDoor(i, n7, n4, n3, !leftSide, entBuried);
     // 老头锚（SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——dungeonX/Y=(i,num7)）
     dungeonX = i; dungeonY = n7;
     // ★IIIII98b2：FTW NewNPC 头 Next(3) 主流掷镜像（同 legacy 锚注释；Tower :492）
@@ -2731,18 +2800,24 @@ const snap: SnapFn = (name) => {
     const n7 = j - 30;                             // 基线（num6=30，cs:81）
     const num18 = n7 + 1;                          // cs:239
     // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4；
-    // ★IIIII21：drunk 入口地下 → `!buried&&!underground` 门恒假（cs:95）→ 整段跳过）
-    if (!(gs.seedFlags.drunkWorld)) {
-      const cx = leftSide ? i + n4 - 1 : i - n4 + 1;
-      const cy = n7 - 20, rad = 20, sq = (rad + 1) * (rad + 1);
-      for (let yy = cy - rad; yy <= cy + rad; yy++) {
-        const num2 = yy - cy;
-        const num3 = Math.min(rad, Math.trunc(Math.sqrt(sq - num2 * num2)));
-        for (let xx = cx - num3; xx <= cx + num3; xx++) {
-          if (!st.inBounds(xx, yy)) continue;
-          const ti = st.idx(xx, yy);
-          st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
-          st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+    // ★IIIII21：drunk 入口地下 → 门恒假 → 整段跳过；★IIIII112（cs:95）：门原文=
+    //   `!dungeonEntranceIsBuried && !dungeonEntranceIsUnderground`——buried（sandy 被埋
+    //   穹顶）同样整跳。此前只挡 drunk ⇒ JS 把穹顶右侧沙带 Circle 清空（T53/L255 残差带）。
+    {
+      const ugD = !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface;
+      const buriedD = !!gs.seedFlags.surfaceIsDesert && !ugD;
+      if (!buriedD && !ugD) {
+        const cx = leftSide ? i + n4 - 1 : i - n4 + 1;
+        const cy = n7 - 20, rad = 20, sq = (rad + 1) * (rad + 1);
+        for (let yy = cy - rad; yy <= cy + rad; yy++) {
+          const num2 = yy - cy;
+          const num3 = Math.min(rad, Math.trunc(Math.sqrt(sq - num2 * num2)));
+          for (let xx = cx - num3; xx <= cx + num3; xx++) {
+            if (!st.inBounds(xx, yy)) continue;
+            const ti = st.idx(xx, yy);
+            st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+            st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+          }
         }
       }
     }
@@ -2867,23 +2942,33 @@ const snap: SnapFn = (name) => {
       if (st.wall[ti] === wall) return;
       st.wall[ti] = wall;
     });
-    // ③表土穹丘（cs:254）：Slime(40,0.9,1.1)@(i,n7-4) y<n7-1 且非砖/非主墙 → 清+置土(0)
+    // ③表土穹丘（cs:254-261）：Slime(40,0.9,1.1)@(i,n7-4) y<n7-1 且非砖/非主墙 → 清+置土。
+    //   ★IIIII112（cs:287-302）：`num19=0,num20=2; if(surfaceIsDesert){num19=53;num20=-1}`
+    //   —— sandy 世界穹壳表土改写【沙(53)】且草皮臂整跳（num20=-1 ⇒ OnlyTiles+IsTouchingAir
+    //   → SetTile(2) 的 Gen 不执行）；此前 JS 只有 vanilla 土/草两臂 ⇒ 穹丘土/草 vs x86 沙。
+    const domeSurfaceDesert = !!gs.seedFlags.surfaceIsDesert;
+    const entUgDome = !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface;   // DungeonEntranceIsUnderground
+    const domeBuried = !!gs.seedFlags.surfaceIsDesert && !entUgDome;           // DungeonEntranceIsBuried
+    const SANDV = TILE_INTERNAL_BY_SHEET.get(53) ?? -1;
     slime(i, n7 - n2 + 1, n4, 0.9, 1.1, (x, y) => {
       if (y >= num18 - 2 || !st.inBounds(x, y)) return;
       const ti = st.idx(x, y);
       if (st.flags[ti] !== 0 && st.type[ti] === brick) return;   // SkipTiles(brickTileType)
       if (st.wall[ti] === wall) return;                          // SkipWalls(brickWallType)
       clrAll(ti);
-      st.flags[ti] = 1; st.type[ti] = DIRT;
+      st.flags[ti] = 1; st.type[ti] = domeSurfaceDesert ? SANDV : DIRT;
     });
-    // ④草皮（cs:255-258）：同形状 OnlyTiles(0)+IsTouchingAir(对角) → SetTile(2)
-    slime(i, n7 - n2 + 1, n4, 0.9, 1.1, (x, y) => {
-      if (y >= num18 - 2 || !st.inBounds(x, y)) return;
-      const ti = st.idx(x, y);
-      if (st.flags[ti] === 0 || st.type[ti] !== DIRT) return;    // OnlyTiles(num19)
-      if (!exposedToAir(x, y)) return;                           // IsTouchingAir(useDiagonals:true)
-      st.flags[ti] = 1; st.type[ti] = GRASS;
-    });
+    // ④草皮（cs:255-258→cs:299-302）：同形状 OnlyTiles(num19)+IsTouchingAir(对角) →
+    //   SetTile(num20)；desert num20=-1 / underground ⇒ 双跳。
+    if (!domeSurfaceDesert && !entUgDome) {
+      slime(i, n7 - n2 + 1, n4, 0.9, 1.1, (x, y) => {
+        if (y >= num18 - 2 || !st.inBounds(x, y)) return;
+        const ti = st.idx(x, y);
+        if (st.flags[ti] === 0 || st.type[ti] !== DIRT) return;    // OnlyTiles(num19)
+        if (!exposedToAir(x, y)) return;                           // IsTouchingAir(useDiagonals:true)
+        st.flags[ti] = 1; st.type[ti] = GRASS;
+      });
+    }
     // ⑤内腔清块（cs:262）：Slime(35,1,1)@(i,n7) y<n7+1 → ClearTile（保墙）
     slime(i, n7, n3, 1.0, 1.0, (x, y) => {
       if (y >= num18 || !st.inBounds(x, y)) return;
@@ -2893,9 +2978,9 @@ const snap: SnapFn = (name) => {
     // 门（cs:264-271）：DomeEntrance_Door 与 TowerEntrance_Door 逐行同源——正常种子
     //   仅 dungeon 侧单门（buried/underground 特典才补镜像门）
     //   ★IIIII21：drunk=入口地下 → `buried|underground` 支（cs:309-311）追加对侧门
-    dgTowerDoor(i, n7, n4, n3, leftSide);
-    if (gs.seedFlags.drunkWorld) {
-      dgTowerDoor(i, n7, n4, n3, !leftSide);
+    dgTowerDoor(i, n7, n4, n3, leftSide, domeBuried);
+    if (domeBuried || entUgDome) {          // cs:309-311 `buried | underground` 补镜像门
+      dgTowerDoor(i, n7, n4, n3, !leftSide, domeBuried);
     }
     // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；★IIIII109 Mosaic 已建模 glassPaint，
     //   Dome Basic 对 paint26 仍未建模——Dome+windowType1/2 组合在四涂装链基线 P/Pw
@@ -3076,6 +3161,10 @@ const snap: SnapFn = (name) => {
     if (wallAt(x, y) === 350) return false;
     if (feat === 1 && entExists && entBounds.contains(x, y)) return false;
     // feat 3=WallVariants（pit/window 门均放行：DungeonPitTrap.cs:35/DungeonWindow.cs:11）
+    // ★IIIII108c 第④刀：DropTrap 成功盒（DungeonDropTrap.CanGenerateFeatureAt 恒 false
+    //   ⇒ data.CanGenerateFeatureAt 的 dungeonFeatures 扫描对**一切**特征恒拒收,
+    //   含窗/PitTrap 本身——故必须先于下面两个 feat!== 条件,全特征生效）。
+    for (const db of dropBoxes) if (db.contains(x, y)) return false;
     if (feat !== 2 && feat !== 3) {
       for (const pb of pits) if (pb.contains(x, y)) return false;
     }
@@ -7018,7 +7107,14 @@ const snap: SnapFn = (name) => {
           if (shOfAt(px, sy) !== styObj.BrickTileType) continue;
           const kind = kindPick === 'random' ? (rn(2) !== 0 ? 'Lava' : 'Sand')
             : kindPick === 'Slush' ? 'Slush' : 'Silt';
-          if (deDropTrap({ st, w, h, ws, uw: h - 200, rng, canGenerateFeatureAt: (qx, qy) => featOK(qx, qy, 0) },
+          if (deDropTrap({ st, w, h, ws, uw: h - 200, rng,
+            canGenerateFeatureAt: (qx, qy) => featOK(qx, qy, 0),
+            // ★IIIII108c 第④刀：成功盒登记（cs SetBounds 直值,hitbox 半开语义同构）
+            registerDropBox: (box) => {
+              const db = new DBnd(w, h);
+              db.set(box.L, box.T, box.R, box.B);
+              dropBoxes.push(db);
+            } },
             px, sy, proj, kind)) budget--;
         }
         listX.splice(listX.indexOf(pick), 1);
@@ -7144,6 +7240,64 @@ const snap: SnapFn = (name) => {
           onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
         });
         nE2--;
+      }
+    }
+  }
+  // ======== S9 祭坛尾（cs:592-637；★IIIII108c 第③刀·纯写面零主流掷）========
+  //   temple(style10) Biome 房末席制（cs:124-140 赋值不覆盖已选）→ 顶沿下扫首活性行，
+  //   三列(−1..1)自该行起逐格「ClearTile+active+type226」充砖至下一活性格，尾接
+  //   WorldGen.AddLihzahrdAltar(x2−1,y−2) 3×2 祭坛(t237)+底缘 t226（ClearEverything 全清保墙）。
+  //   ★启用门与 S1..S7 同（SW_I138_EARLY）；GenerateEarlyDungeonFeaturesInRoom 每房分派面
+  //   未随本小节移植（Biome 结构房窗柱/rugged 钟乳石系），另行承接——本段按 cs 次序恰位于其后。
+  if (gfStyles.length > 0 && _gfSeatProgBounds !== null && gfFeatRooms.length > 0
+    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    const insSh = (sheetId: number): number => TILE_INTERNAL_BY_SHEET.get(sheetId) ?? -1;   // 本块局部映射
+    let templeRm: { L: number; T: number; R: number; B: number } | null = null;
+    for (const rr of gfFeatRooms) {                         // cs 循环内持续赋值=末席制
+      if (rr.bio && rr.st === 10) templeRm = rr;
+    }
+    if (templeRm !== null) {
+      const cxT = (templeRm.L + templeRm.R) >> 1;           // InnerBounds.Center.X
+      const cyT = (templeRm.T + templeRm.B) >> 1;           // Center.Y
+      void cyT;
+      let num40 = (templeRm.T + cyT) >> 1;                  // cs:595 (Top+Center.Y)/2
+      const actAtI = (x3: number, y3: number): boolean => st.inBounds(x3, y3) && (st.flags[st.idx(x3, y3)] & 1) !== 0;
+      while (num40 < h - 1 && !actAtI(cxT, num40)) num40++;  // cs:596-601 首活性下扫
+      for (let nA2 = -1; nA2 <= 1; nA2++) {                  // cs:602-616 三列充砖
+        const colX = cxT + nA2;
+        let num42 = num40;
+        while (num42 < h - 1 && !actAtI(colX, num42)) {
+          if (!st.inBounds(colX, num42)) break;
+          const ti2 = st.idx(colX, num42);
+          st.flags[ti2] |= 1;                               // active(true)
+          st.wire[ti2] &= ~32;                              // inActive(false)（inactive 位=wire:5）
+          st.slope[ti2] = 0; st.half[ti2] = 0;              // ClearSlope（type/wall/liquid/paint 均保留）
+          st.type[ti2] = insSh(226);
+          num42++;
+        }
+      }
+      const ax0 = cxT - 1, ay0 = num40 - 2;                 // cs:617 AddLihzahrdAltar(x2−1,num40−2)
+      for (let i2b = 0; i2b < 3; i2b++) {
+        for (let j2b = 0; j2b < 2; j2b++) {
+          if (!st.inBounds(ax0 + i2b, ay0 + j2b)) continue;
+          const ti3 = st.idx(ax0 + i2b, ay0 + j2b);
+          st.flags[ti3] |= 1; st.wire[ti3] &= ~32;          // ClearEverything 后重激活（保原墙号）
+          st.type[ti3] = insSh(237);
+          st.frameX[ti3] = (i2b * 18) & 0xffff;
+          st.frameY[ti3] = (j2b * 18) & 0xffff;
+          st.liquid[ti3] = 0; st.liquidType[ti3] = 0;
+          st.slope[ti3] = 0; st.half[ti3] = 0;
+          st.paint[ti3] = 0; st.paintWall[ti3] = 0;
+          st.coat[ti3] = 0;                                 // bTileHeader3=0：涂装四链全清
+        }
+        if (!st.inBounds(ax0 + i2b, ay0 + 2)) continue;
+        const tb2 = st.idx(ax0 + i2b, ay0 + 2);
+        st.flags[tb2] |= 1; st.wire[tb2] &= ~32;
+        st.type[tb2] = insSh(226);
+        st.slope[tb2] = 0; st.half[tb2] = 0;
+        st.liquid[tb2] = 0; st.liquidType[tb2] = 0;
+        st.paint[tb2] = 0; st.paintWall[tb2] = 0; st.coat[tb2] = 0;
+        st.frameX[tb2] = 0; st.frameY[tb2] = 0;
       }
     }
   }

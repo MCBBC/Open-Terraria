@@ -55,10 +55,15 @@ class UnifiedRandomAdapter implements RngLike {
 }
 const v2 = (x: number, y: number): V2 => ({ x, y });
 function safeNormalize(vx: number, vy: number, fx: number, fy: number): V2 {
-  if (vx === 0 && vy === 0) return v2(fx, fy);
-  const l = Math.sqrt(vx * vx + vy * vy);
-  if (l === 0) return v2(fx, fy);
-  return v2(vx / l, vy / l);
+  if (vx === 0 && vy === 0) return v2(fx, fy);   // Utils.cs:1948 v==Vector2D.Zero 精确判
+  // ★IIIII108c 刀①定谳：Utils.cs:1953 SafeNormalize(Vector2D)→System.Numerics.Vector2D
+  //   .Normalize=**乘倒数**（f=1/sqrt 后 x*f,y*f），非除式——旧 v/l 在本文件 CP 走线
+  //   上产生 ~1ulp 分裂（g2v3/dr-mark.log vs js-dr-ledger-107c.txt 首差 CP 行
+  //   cx=1009,cy=442,ox=778,oy=404 v=bfc2cb00775e965e X ‖ …5d J），经走线整数化
+  //   放大成 2-3 格连接点漂移（halls 147↔151）。同 DitherSnakePass.ts recNorm
+  //   （IIII101c 认证体）——凡 Vector2D.SafeNormalize 移植一律乘倒数。
+  const f = 1.0 / Math.sqrt(vx * vx + vy * vy);
+  return v2(vx * f, vy * f);
 }
 const crossV = (a: V2, b: V2): number => a.x * b.y - a.y * b.x;
 const lenD = (x: number, y: number): number => Math.sqrt(x * x + y * y);
@@ -3010,7 +3015,7 @@ function roomGetHallwayConnectionPoint(room: DRoomBase, ctx: DualLayoutCtx, othe
   if (room instanceof DBiomeRoomBase) {
     return { quality: CPQuality.Good, point: room.biomeConnectionPoint(ctx, otherRoomPos) };
   }
-  let connectionPoint = v2(room.centerX(), room.centerY());
+  let connectionPoint = roomGetHallwayCenterFor(room, otherRoomPos);   // ★IIIII108c：GenShape 覆写起始点
   let val2 = safeNormalize(otherRoomPos.x - connectionPoint.x, otherRoomPos.y - connectionPoint.y, 1, 0);
   let drlVyBits = bits64x(val2.y);
   let drlBr = -1;
@@ -3041,10 +3046,26 @@ function roomGetHallwayConnectionPoint(room: DRoomBase, ctx: DualLayoutCtx, othe
   return { quality: CPQuality.Good, point: connectionPoint };
 }
 
+/** GetRoomCenterForHallway（DungeonRoom.cs:152-155；GenShapeDungeonRoom.cs:78-96 覆写）。
+ * ★IIIII108c 刀①第二落点：Doughnut 族房 CP 起始点=中心+单位向·(W/2,H/2) 径向外推
+ * （int 整除后转 double，X/Y 逐轴重算），非 Doughnut GenShape 与普通房=原 Center。
+ * 旧镜像（所有调用面恒用几何中心）=房间级走线差首恶：rect 反演 J 全行自洽
+ * B/T=(462,434) 而 X 逐行散乱（U∈452..463.6）⇒ X 走的正是本覆写分支。 */
+function roomGetHallwayCenterFor(room: DRoomBase, otherRoomPos: V2): V2 {
+  if (!(room instanceof DGenShapeRoom)) return v2(room.centerX(), room.centerY());
+  const vx0 = room.centerX() + 0.0, vy0 = room.centerY() + 0.0;
+  if (room.settings.roomType !== DPRoomType.GenShapeDoughnut) return v2(vx0, vy0);
+  const ux = safeNormalize(otherRoomPos.x - vx0, otherRoomPos.y - vy0, 1, 0);
+  const hw = Math.trunc(room.inner.width / 2);
+  const hh = Math.trunc(room.inner.height / 2);
+  return v2(Math.trunc(vx0 + ux.x * hw), Math.trunc(vy0 + ux.y * hh));
+}
+
 /** ConnectToTopOfRoomOnly（Provider.cs:1020-1056）。 */
 function connectToTopOfRoomOnly(room: DRoomBase, otherRoomPos: V2): { quality: number; point: V2 } {
-  let py = room.centerY();
-  let px = room.centerX();
+  const c0 = roomGetHallwayCenterFor(room, otherRoomPos);
+  let py = c0.y;
+  let px = c0.x;
   while (room.isInsideRoom(_probeSt!, Math.trunc(px), Math.trunc(py))) py--;
   py += 3.0;
   const n = safeNormalize(otherRoomPos.x - px, otherRoomPos.y - py, 0, 0);
@@ -3055,8 +3076,9 @@ function connectToTopOfRoomOnly(room: DRoomBase, otherRoomPos: V2): { quality: n
 }
 /** ConnectToBottomOfRoomOnly（Provider.cs:1058-1094）。 */
 function connectToBottomOfRoomOnly(room: DRoomBase, otherRoomPos: V2): { quality: number; point: V2 } {
-  let py = room.centerY();
-  let px = room.centerX();
+  const c0 = roomGetHallwayCenterFor(room, otherRoomPos);
+  let py = c0.y;
+  let px = c0.x;
   while (room.isInsideRoom(_probeSt!, Math.trunc(px), Math.trunc(py))) py++;
   py -= 3.0;
   const n = safeNormalize(otherRoomPos.x - px, otherRoomPos.y - py, 0, 0);

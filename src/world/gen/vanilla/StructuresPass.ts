@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
@@ -105,7 +105,13 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
     while (--budget > 0) {
       let ok = true;
       let x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);   // Next(0.1w, 0.9w)
-      while (x > w / 2 - centerBand && x < w / 2 + centerBand) x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
+      // ★IIIII112（cs:13041-13048）：中带重掷整段包在 `!errorWorld.Enabled` 门内——
+      //   i am error 世界 x86 **不重掷**（error 岛允许压中带）；此前 JS 无门 ⇒ er 世界
+      //   x 落中带的 attempt 每次多耗 1+ 掷 → 深岛重掷序列后半段全体错位
+      //   （#23 Floating_Islands 5 座错配的真源）。
+      if (!sfI106.errorWorld) {
+        while (x > w / 2 - centerBand && x < w / 2 + centerBand) x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
+      }
       for (let j = 0; j < housesX.length; j++) {
         if (x > housesX[j]! - houseSpacing && x < housesX[j]! + houseSpacing) { ok = false; break; }
       }
@@ -945,6 +951,80 @@ export function runPyramidPass(
       console.log(`PYR cand#${idx} x=${num} k=${k} minDist=${minDist} REJECT-dist`);
     }
   }
+  // ★IIIII112（cs:15503-15523）：sandy britches 额外金字塔臂——候选环收尾后按
+  //   Next(5,8)×(maxTilesX/4200) 座全图随机补塔（无 220 间距账，仅 Pyramid() 内
+  //   IsTileNearby 受理门）：x=Next(300,w-300) 带 0.47w..0.53w 中带重掷；自
+  //   FindLowestCloud() 下扫首个活性格须为沙 53 → n-- 后 Pyramid(n)（默认深 75/125）。
+  //   此前整缺 ⇒ sandy 少 5-7 座金字塔（#40 首差 (1095,255) T151>53 双塔级联）。
+  if (gs.seedFlags.surfaceIsDesert) {
+    const cloud = pyrFindLowestCloud(st, gs);
+    const num6 = rng.int(5, 7) * Math.trunc(st.w / 4200);
+    for (let m = 0; m < num6; m++) {
+      let num7 = rng.int(300, st.w - 301);          // Next(300, maxTilesX-300)
+      while (num7 > st.w * 0.47 && num7 < st.w * 0.53) num7 = rng.int(300, st.w - 301);
+      let n = cloud;
+      while (n < st.h && !st.flags[st.idx(num7, n)] && n < gs.worldSurface) n++;
+      if (n < gs.worldSurface && st.type[st.idx(num7, n)] === SAND) {
+        n--;
+        if (PYR_TRACE) console.log(`PYR sandy#${m} @(${num7},${n})`);
+        pyramid(st, rng, gs, chests, num7, n, 75, 125, false);
+      }
+    }
+  }
+  // ★IIIII112（cs:15524-15546）：i am error 额外金字塔臂——Next(5,8)×(w/4200) 座，
+  //   num8 再 /=errorWorldAdjustment(1.0)（单旗标因子=1，恒等；组合域另案备案）；
+  //   x/y 双掷 y∈[FindLowestCloud(), (int)rockLayer)，中带 + 微光 300 距重掷；
+  //   下扫首个活性格（无 worldSurface 上界,原版裸扫）→ num11-- 后 Pyramid。
+  if (gs.seedFlags.errorWorld) {
+    const cloud = pyrFindLowestCloud(st, gs);
+    let num8 = rng.int(5, 7) * Math.trunc(st.w / 4200);
+    num8 = Math.trunc(num8 / 1);                    // ewAdjust(1.0)=1（单旗标域）
+    for (let num9 = 0; num9 < num8; num9++) {
+      let num10 = rng.int(300, st.w - 301);
+      let num11 = rng.int(cloud, Math.trunc(gs.rockLevel) - 1);   // Next(FindLowestCloud(), (int)rockLayer)
+      while ((num10 > st.w * 0.47 && num10 < st.w * 0.53)
+        || (gs.shimmerX >= 0 && Math.hypot(num10 - gs.shimmerX, num11 - gs.shimmerY) < 300)) {
+        num10 = rng.int(300, st.w - 301);
+        num11 = rng.int(cloud, Math.trunc(gs.rockLevel) - 1);
+      }
+      for (; num11 < st.h && st.inBounds(num10, num11) && !st.flags[st.idx(num10, num11)]; num11++) {
+      }
+      num11--;
+      if (PYR_TRACE) console.log(`PYR error#${num9} @(${num10},${num11})`);
+      pyramid(st, rng, gs, chests, num10, num11, 75, 125, false);
+    }
+  }
+}
+
+/** FindLowestCloud（cs:25637-25661）Pyramids 域本地版：y∈[20,worldSurface) 行扫
+ *  x∈[20,w-20) 任一活性 Clouds{189,196,460,717,718,719}，取最下一行、无云 0。
+ *  （x86 侧 GenVars.lowestCloud 在 Dungeon 域 DesertCleanup 首调即缓存；云在本窗口
+ *  间不变 ⇒ fresh 计算≡缓存值。） */
+function pyrFindLowestCloud(st: TileStore, gs: GenState): number {
+  const CLOUD = new Set([189, 196, 460, 717, 718, 719]
+    .map((sh) => TILE_INTERNAL_BY_SHEET.get(sh)).filter((v) => v !== undefined) as number[]);
+  let lowest = 0;
+  for (let y = 20; y < gs.worldSurface; y++) {
+    for (let x = 20; x < st.w - 20; x++) {
+      const i = st.idx(x, y);
+      if (st.flags[i] && CLOUD.has(st.type[i])) { lowest = y; break; }
+    }
+  }
+  return lowest;
+}
+
+/** IsTileNearby（cs:8812-8832，step=1；235 特例 step=3 与本消费面无关）——active∧type */
+function pyrNear(st: TileStore, x: number, y: number, sheet: number, radius: number): boolean {
+  const t = TILE_INTERNAL_BY_SHEET.get(sheet);
+  if (t === undefined) return false;
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      if (!st.inBounds(x + dx, y + dy)) continue;
+      const k = st.idx(x + dx, y + dy);
+      if (st.flags[k] && st.type[k] === t) return true;
+    }
+  }
+  return false;
 }
 
 /** WorldGen.Pyramid（1456 cs:27816-28160）1:1：沙岩砖 151 主体 + 墙 34 +
@@ -961,6 +1041,16 @@ function pyramid(
   const wall = 34;               // SandstoneBrickUnsafe
   const gi = st.idx(i, j);
   if (st.flags[gi] && (st.type[gi] === num || st.wall[gi] === 151)) return false;
+  // ★IIIII112（1457 cs:27940-27956 = 1458 cs:27958-27974，1456 同门）：受理门第二段——
+  //   surfaceIsDesert/errorWorld 世界加验 151/203/25 邻域，三旗世界（含 dual）加验
+  //   41/43/44（蓝/绿/粉地牢砖）邻域，任一命中即拒。此前 JS 整缺 ⇒ sandy 金字塔
+  //   压上沙丘区照样建（x86 拒）→ #41 全域移位（首差 (351,248) T151>53）。
+  if (gs.seedFlags.surfaceIsDesert || gs.seedFlags.errorWorld || gs.seedFlags.dualDungeons) {
+    if (gs.seedFlags.surfaceIsDesert || gs.seedFlags.errorWorld) {
+      if (pyrNear(st, i, j, 151, 100) || pyrNear(st, i, j, 203, 100) || pyrNear(st, i, j, 25, 100)) return false;
+    }
+    if (pyrNear(st, i, j, 41, 100) || pyrNear(st, i, j, 43, 100) || pyrNear(st, i, j, 44, 100)) return false;
+  }
   const active = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
   const deact = (x: number, y: number) => { if (st.inBounds(x, y)) st.flags[st.idx(x, y)] = 0; };
   const setBrick = (x: number, y: number) => {

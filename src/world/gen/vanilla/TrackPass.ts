@@ -570,6 +570,36 @@ export class TrackGenerator {
     const dust = killTileDustAmount(sheet, fx);
     for (let k = 0; k < dust; k++) makeTileDustRoll(rng, sheet, fx);
     this.attemptFossilShatter(rng, x, y, sheet, false);   // cs:63756(FFFFF 补:#101 巷内 404 可达——曾误判不可达)
+    // ★IIII110b：getGoodWorld 灰烬崩塌级联(Terarria1458/Terraria/WorldGen.cs:64259 分支头,
+    //   体 :64260-64306;与 IIII67b 引擎侧 HalfBrickPass.killTile 同支——
+    //   本巷内 killTileLane 为独立复刻,同支曾按"getGoodWorld 门不适用"误判缺漏)。
+    //   x86 定罪:FTW 短轨 seq#128 STRK(824,946) 巷内 43 枚活性灰烬(57)击杀逐格
+    //   8 邻 Next(2) 短路掷合计 201 样本(JS 曾零掷),即 XXXIII §①「净多掷 +1」
+    //   (奇性一致)与 §④ killTileLane 家族三候选中 killTileLane 支的真源点。
+    if (this.gs.seedFlags.getGoodWorld && sheet === 57) {
+      for (let m = 0; m < 8; m++) {
+        let qx = x;
+        let qy = y;
+        switch (m) {          // 邻序 L,R,U,D,UL,UR,DL,DR(cs 原文序)
+          case 0: qx--; break;
+          case 1: qx++; break;
+          case 2: qy--; break;
+          case 3: qy++; break;
+          case 4: qx--; qy--; break;
+          case 5: qx++; qy--; break;
+          case 6: qx--; qy++; break;
+          case 7: qx++; qy++; break;
+        }
+        if (!st.inBounds(qx, qy)) continue;               // 原版 Main.tile OOB=null→!active,不掷
+        const qi = st.idx(qx, qy);
+        // 短路序与 cs 逐项一致:active && Next(2)==0 && 邻为 57 && 下方非实心
+        if (st.flags[qi] && rng.nextInt(2) === 0 && SHEET_OF[st.type[qi]!] === 57
+          && !solidTile(st, qx, qy + 1)) {
+          this.killTileLane(rng, qx, qy);
+          // Projectile(40 落灰)/NetMessage:零 genRand、八通道不可见,不移植
+        }
+      }
+    }
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
   }

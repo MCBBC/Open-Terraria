@@ -74,18 +74,12 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
  *  ★当前消费端（本仓 aiStyle 族的 drawProj 调用方）尚未覆盖这些型号——表先行就位,
  *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项由 Bobber 实体自持绘制,不入本表 */
 const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly [number, number, number]> = {
-  // ★三轮蓝队 F5① 弩车三档（2026-08-31）：Main.cs:34097-34134 支派生——泛型锚 =
-  //   proj.Center（Main.cs:33695）→ 分支内 vector99.Y++、+=2（677 基准=Bottom+3）
-  //   /678 再 −4 /679 再 −2；origin32=frame.Size/2。折算进本表「贴图左上=盒左+num144,
-  //   盒上−num143」公式（帧尺寸 677:124×56 / 678:140×56 / 679:142×56）：
-  //   num143 = fh/2 − bh − dyOffset 之负逆（dyOffset: 677:+3 / 678:−1 / 679:+1 相对
-  //   Bottom 的贴图心锚距）；num144 = bw/2 − fw/2。放大前后视觉差：旧兜底=[0,0,0]
-  //   盒顶左锚 ⇒ 贴图整体偏下/右 fh/2−bh 量级且随真盒扩容雪崩;现按原版 Bottom 系
-  //   锚复现。残余已知差：分支头 `dir ^= FlipH|FlipV` 双轴镜像背面朝向语义（XNA
-  //   顶点绕 origin 镜像对本仓 scale(-1,1) 单轴式）未复刻——非翻转主位与原版一致。
-  677: () => [-29, -49, 0],
-  678: () => [-25, -57, 0],
-  679: () => [-27, -58, 0],
+  // ★T9（2026-09-01）：弩车三档 677/678/679 表项退役——F5① 折算（2026-08-31）把
+  //   Main.cs:34097-34137 支的锚误读为 Bottom 系（该支【不】重置 vector99,继承
+  //   :33695 的 Center 缺省;663/691 支 :34082/:34091 才显式 Bottom）,折算结果整体
+  //   偏低 27px 且漏塔座 Extra_83/84/85,连带「dir^=FlipH|FlipV 双轴镜像背面朝向」
+  //   无法在单轴 num143/144 公式内表达。已由 MinionProj.draw 弩车专绘 1:1 替代
+  //   （锚/origin/dir 组合逐项照录,含 AI_134 rotation 状态机接入）,本表不再承载。
   959: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
   1095: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
   1096: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
@@ -3894,7 +3888,11 @@ export class FlailProj extends Entity {
           // active+slope!=0+j>0 且上方格液体>0 → 【整深 16px】矩形相交即湿。
           // type 参数过滤同样作用于上方格液体型。★store.slope 数据面已就位
           // （TileStore.ts:29）——"坡面支未建模(store 无斜度旗)"登记缺口清偿（终清波）
-          if (ty <= 0 || st.slope[idx] === 0 || !st.isActive(tx, ty)) continue;
+          // ★L1（2026-09-01 NX3 遗留清偿）：active = 原版 tile.active()【纯在场位】
+          //   （Tile.cs active()=HasTile，无 inActive 检查）⇒ 致动斜坡同样判湿；
+          //   旧 isActive=nactive() 口径漏判——与 npcLiquid/SmartSelect 三副本
+          //   同步改纯在场 type!==0。
+          if (ty <= 0 || st.type[idx] === 0 || st.slope[idx] === 0) continue;
           const upIdx = st.idx(tx, ty - 1);
           if (st.liquid[upIdx] <= 0) continue;
           if (type !== undefined && st.liquidType[upIdx] !== type) continue;

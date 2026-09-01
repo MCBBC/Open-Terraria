@@ -39,8 +39,9 @@ function cornerAt(targetX: number, targetY: number): { players: Array<{ x: numbe
   };
 }
 
-/** 标准房（同 town-npc-movein.buildHouse 形态）：ox..ox+10 × oy..oy+5 */
-function buildHouse(w: World, ox: number, oy: number): void {
+/** 标准房（同 town-npc-movein.buildHouse 形态）：ox..ox+10 × oy..oy+5
+ *  opts.lightless=true 时跳过两只火把 = 缺 RoomNeeds 光源件的 B1 负例构造 */
+function buildHouse(w: World, ox: number, oy: number, opts?: { lightless?: boolean }): void {
   const st = w.store;
   for (let x = ox; x <= ox + 10; x++) {
     st.setTileSilent(x, oy, TILE_BY_KEY['wood']!, 0, 0);
@@ -54,8 +55,10 @@ function buildHouse(w: World, ox: number, oy: number): void {
   for (const dx of [ox, ox + 10]) {
     for (let y = oy + 2; y <= oy + 4; y++) st.setTileSilent(dx, y, DOOR_C, 0, (y - oy - 2) * 18);
   }
-  st.setTileSilent(ox + 1, oy + 1, TILE_BY_KEY['torch']!, 22, 0);
-  st.setTileSilent(ox + 9, oy + 1, TILE_BY_KEY['torch']!, 44, 0);
+  if (!opts?.lightless) {
+    st.setTileSilent(ox + 1, oy + 1, TILE_BY_KEY['torch']!, 22, 0);
+    st.setTileSilent(ox + 9, oy + 1, TILE_BY_KEY['torch']!, 44, 0);
+  }
   st.setTileSilent(ox + 4, oy + 3, TILE_BY_KEY['chair']!, 0, 0);
   for (let dx = 0; dx <= 2; dx++) {
     st.setTileSilent(ox + 5 + dx, oy + 3, TILE_BY_KEY['table']!, dx * 18, 0);
@@ -274,5 +277,33 @@ describe('(v) 松露人居所条件外扩域（E-11/C-F6）', () => {
     expect(put).toBeGreaterThanOrEqual(MUSHROOM_TILE_THRESHOLD);
     const room = queryRoom(st, 2404, 303, { ignoreNeeds: true }).room!;
     expect(expandedMushroomCount(st, room)).toBeGreaterThanOrEqual(MUSHROOM_TILE_THRESHOLD);
+  });
+
+  // ---------------- 对抗修复批⑤B 2026-09-01 (vi)(B1) 追加段 ----------------
+  it('(B1) 无光源房：近链命中采样点 → 静默不迁入且【不缓存】LastFoundHouse（Blocked 早退支）', () => {
+    const w = new World(4200, 1200, 56, 'open');
+    const st = w.store;
+    buildHouse(w, 2100, 300, { lightless: true });   // 门/桌/椅齐,仅缺光源
+    const mover = { key: 'merchant', npcId: 17, bound: false, home: null as { x: number; y: number } | null, ref: {} };
+    const { players, rand } = cornerAt(2102, 302);
+    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], rand);
+    expect(hitR.seedHit).toEqual([2102, 302]);        // 背墙命中照常发生
+    expect(hitR.relocated).toBeNull();                // B1 前:此房被静默迁入(比 vanilla 宽松)
+    expect(hitR.home).toBeNull();
+    expect(hitR.foundHouseNoSpawn).toBeNull();        // Blocked 支不缓存(cs:5535 在全过之后)
+  });
+
+  it('(B1) 快路径生人支同拒：acceptTownNPCAtHouse 对无光源房 ok=false（LastFoundHouse 安置位）', () => {
+    const w = new World(4200, 1200, 57, 'open');
+    const st = w.store;
+    buildHouse(w, 2200, 300, { lightless: true });
+    expect(WALL_HOUSE.has(st.wall[st.idx(2202, 302)])).toBe(true);
+    const acc = acceptTownNPCAtHouse(st, [], 2202, 302, 17);
+    expect(acc.ok).toBe(false);                       // RoomNeeds 档即出（vanilla cs:5344-47）
+    expect(acc.home).toBeNull();
+    st.setTileSilent(2205, 301, TILE_BY_KEY['torch']!, 22, 0);   // 补上光源——隔离变量
+    const acc2 = acceptTownNPCAtHouse(st, [], 2202, 302, 17);
+    expect(acc2.ok).toBe(true);
+    expect(acc2.home).not.toBeNull();
   });
 });

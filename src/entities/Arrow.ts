@@ -5,7 +5,8 @@
 import { Entity } from './Entity';
 import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 // L5 长尾批：弧线引矢家族/银箭/微光箭编排收编（fx/orchestraFx 池）
-import { harpyCharmFamilyFx, silverBulletSparkleFx, shimmerArrowFx } from '../fx/orchestraFx';
+import { harpyCharmFamilyFx, silverBulletSparkleFx, shimmerArrowFx,
+  deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
@@ -592,6 +593,43 @@ const PROJ_ALPHA0: Record<number, number> = {
   //  → 兜底式承接;唯 180 走 Lerp 白支(:80734)由 PROJ_ALPHA_MOD lerp 档消费 fade
   36: 255, 84: 255, 110: 255, 158: 255, 159: 255, 160: 255, 161: 255,
   180: 255, 389: 255,
+
+  // ★2026-09-01 批三（a/b/c 三分法，α 初值账本收尾批）——
+  // [c 类·须连 AI 减段一起移（subStepAI 同名分支已配套）]
+  //  576/577 星晕/漩涡激光（NebulaLaser/VortexLaser）SetDefaults :6267/:6279
+  //   alpha=255；AI_001 共享 fade 开关第二组 P.cs:56601-56613：localAI[1]++ >2 后
+  //   每子步 −15 至 0（EU=2 → ×3 子步/帧）。承载=576 bossAI_lunar_misc 星晕环绕球
+  //   线发(Arrow 直构)；577 实际出生端=风暴潜水员(fighterFamilies.ts spawnHostileProj→Dart,
+  //   DART_STYLE 无表项) —— Dart 载体不读本表,Arrow 路径 dormant 备案
+  //  1037/1049 星陨落星（MeteorWhipMeteor/MeteorStormMeteor）SetDefaults :9792/:9950
+  //   alpha=254（罕见非 255）；aiStyle5 分支 P.cs:24137-24150 每子步 −10 钳 0。
+  //   承载=1037 WhipTag.ts 星陨 proc 首跳(活跃)；1049 原版唯一出生=DST+FTW+风暴天
+  //   WorldGen.cs:72292 陨雨(本仓无此世界事件组合,dormant)
+  576: 255, 577: 255, 1037: 254, 1049: 254,
+  // ★2026-09-01 批四（T2/H7）：968 气喇叭弹 PewMaticHornShot（SetDefaults :9169-9176
+  //  alpha=255、aiStyle2）——AI() aiStyle2 顶层 type 段 α=Math.Max(0,α−50)/拍
+  //  （P.cs:23429），subStepAI 968 支配套（c 类·表键+AI 减段成对）。GetAlpha 无
+  //  专属支 → 缺省路径（:81507-81521）由 draw 侧通用兜底 (255−α)/255 消费。
+  //  出生面=气喇叭 5117 枪链 Arrow 直构（Player.cs:48057-48064 唯一射手）
+  968: 255,
+  // [b 类·AI 写段已移植，补键即完成配对]
+  //  12 落星 FallingStar（:937 alpha=50）：aiStyle5 共享振荡档 ±25/t 0..200 已在
+  //   subStepAI 955||12 支（:3551 起,twinkleDir=1 起步与原版 localAI[0] 置 1 同相）、
+  //   PROJ_ALPHA_MOD[12] fade 档现役消费 → 补键修正起步相位（此前 α≡0 少 50 起点）。
+  //   出生面备案：1457 星炮族改射 955(Item 197 useAmmo75),弹幕 12 本仓现无出生路径
+  12: 50,
+  // [a 类·静态半透死存储惰性补键]——SetDefaults 有值、AI 全程不写、原版渲染面
+  //  不消费（GetAlpha 常量/固定 tint 支）；本仓承载均为专用类不读本表 = 视觉零影响,
+  //  纯台账真值。禁止把消费回填到 Arrow.draw 兜底（会被 (255−α)/255 折算出幽灵半显）
+  //  18 阴影球(:1003=150;GetAlpha :81484 恒 (255,255,255,130);载体 PetFollower 光宠)
+  //  50/53/515 荧光棒三型(:1335/:1363/:5860 唯一锚点=75;GetAlpha :80983 白 A=0;
+  //   aiStyle14 的 alpha 写支仅 352/538/480 自有(:25149/:25428-25442/:25541);
+  //   载体 GlowstickProj)
+  //  396 史莱姆钩爪(:4781=100;AI_007_GrapplingHooks 全程无 alpha 写;钩面绘制
+  //   GrappleProj spec.alphaFactor 已自钉 ×155/255=(255−100)/255)
+  //  1103 史莱姆长枪(:10290=90,DefaultToSpear aiStyle19;AI_019_Spears 的 −40 渐显
+  //   仅 877-879:P.cs:46717 (uint)(num2−877)<=2 门;载体 WeaponProj 矛族)
+  18: 150, 50: 75, 53: 75, 515: 75, 396: 100, 1103: 90,
 };
 
 /** AI_036 追踪内核逐型参数表（[speed, acc]，终零波单核收编导出面；tests/finalzero-game-domain
@@ -1117,8 +1155,10 @@ export class Arrow extends Entity {
   /** ★B1 接线批：死亡细胞桶发射器弹 1023 Kill 爆（Projectile.cs:78560-78585）：
    *  音 DeadCellsBarrelLauncherExplode（SoundID.cs:1104 WithVolume 0.6）→ 判定盒
    *  归心扩至 192×192 结算 Damage() → DeadCellsBarrelExplosion 编排粒子
-   *  （ParticleOrchestrator.cs:1710-1766 Extra_269 三帧青白闪 tint(52,208,254)
-   *  ——编排池未含该型，spawnParticles 青色近似）+ 8 枚烟 gore 61-63 八向环抛
+   *  （ParticleOrchestrator.cs:1710-1785——★2026-09-01 由"spawnParticles 青色近似"
+   *  升格为忠实本体 deadCellsBarrelExplosionFx + module8 上行；原版
+   *  RequestParticleSpawn(clientOnly:true) :78567-78572 → 本仓 owner 权威模拟广播
+   *  补远端，同 34 型偏差口径）+ 8 枚烟 gore 61-63 八向环抛
    *  （出生位=Center±24 盘内、速=2π·i/8 向 ×rand·8）+ 40× d31 从盒内向心位
    *  DirectionTo(dust) 径向 ×rand·8。 */
   private barrel1023Burst(game: GameHooks): void {
@@ -1139,7 +1179,9 @@ export class Arrow extends Entity {
           Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
-    game.spawnParticles(this.cx, this.cy, '#34D0FE', 26, 5, { life: 25, size: 3 });
+    deadCellsBarrelExplosionFx(game, this.cx, this.cy);
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBarrelExplosion,
+      this.cx, this.cy);
     for (let i = 0; i < 8; i++) {                      // 烟 gore 环抛（:78570-78573）
       const th = (Math.PI * 2 * i) / 8;
       GorePiece.newGore(61 + Math.floor(Math.random() * 3),
@@ -1220,6 +1262,24 @@ export class Arrow extends Entity {
   /** 蜂族 alpha 归零后 extraUpdates→0 挂起（:27693-27695——原版 numUpdates 每 tick
    *  头读取,当拍已入循环的子步数不变,下一 tick 起 1 子步/tick） */
   private bee36EU0 = false;
+  // ---- ★L2 湿缓存（Projectile.wet/honeyWet/shimmerWet 同名字段,2026-09-01 NX3 遗留2）----
+  //  原版三字段 = 出生预置（NewProjectile :10887-10893 WetCollision 首测）+ 每子步
+  //  液段刷新（:16900-16908 置位 / :17104-17108 !wet 三清）;AI 头读的是【缓存】,
+  //  即上一子步液段值（出生拍 = 预置值）。本仓消费族（wetCacheConsumer）按此时序
+  //  维护,蜂族/469 判湿位改读缓存——详见 fixedUpdate 出生预置块注。
+  wet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出生预置已做（一次;NewProjectile :10887-93 等价） */
+  private wetPresetDone = false;
+  /** 湿缓存消费族：aiStyle 36 蜂族（181/189/307/316/566,AI_036 :27685 读 wet 三旗）
+   *  + 469 蜂箭（AI_001 头 :54969 同三旗）。原版全体弹都维护此缓存;本仓其余弹族
+   *  的湿消费位（AI_001 IsDestroyedByWater 块等）仍走各自内联探测,不为无消费者
+   *  付每子步重测成本——消费面扩族时同步入表 */
+  private get wetCacheConsumer(): boolean {
+    const p = this.projId;
+    return p === 181 || p === 189 || p === 307 || p === 316 || p === 566 || p === 469;
+  }
   // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支 :58383-58465）----
   /** ai[0] 索敌延迟（>20 后激活，:58403-58405 自减钳 20） */
   private vx616Delay = 0;
@@ -1682,6 +1742,16 @@ export class Arrow extends Entity {
       this.blz337Pending = true;
       this.pinFrame = Math.floor(Math.random() * 5);
     }
+    // ★2026-09-01 批四（T2）：968 气喇叭弹静态随机帧——生成侧 ai[1]=
+    //  Main.rand.Next(Main.projFrames[968]=24)（Player.cs:48064，NewProjectile 第 9 参
+    //  aiArgs[1]），AI 全程只读（frame=(int)ai[1] P.cs:23430，无人递增）= 整生命周期
+    //  恒定随机帧（24 变体抽签，非逐帧动画；Main.cs:8845 projFrames[968]=24 是帧总数）。
+    //  渲染链 pinFrame!==null 早于 age 档（337 同款模式）——Game.ts 旧
+    //  `age=rand*24*5` 相位注入自此退役为冗余（库外文件不删；对 968 残余效应仅
+    //  mp 拖尾 age<30 可视窗）
+    if (projId === 968) {
+      this.pinFrame = Math.floor(Math.random() * 24);
+    }
     // 316 蝙蝠杖蝠：2-3 只散布自校正（:48820-48830 num124=rand.Next(2,4)）
     if (projId === 316 && !this.hostile && !Arrow.birthLock) {
       this.bat316Pending = true;
@@ -1713,6 +1783,15 @@ export class Arrow extends Entity {
     // proj1457 IdStaticSharedTable 先例;idStaticCdMs=10t≈167ms 同换算基数)
     if (projId === 181 || projId === 566) {
       this.idStaticGroup = 181;
+      this.idStaticCdMs = 167;
+    }
+    // 189 黄蜂枪蜂（★T1 批 2026-09-01）：SetDefaults（:2777-2778）裸写
+    // usesIDStaticNPCImmunity=true + idStaticNPCHitCooldown=10，【不】走
+    // UseGroupStaticImmunity ⇒ immunityIdentity 保持 spawn 期直写值 = type = 189
+    // （P.cs:784 `immunityIdentity = type`）——同 10t 静态窗但组键独立（蜂枪蜂群
+    // 不与黄蜂蜂群互斥结算）。组键 189、cd 同 10t≈167ms
+    else if (projId === 189) {
+      this.idStaticGroup = 189;
       this.idStaticCdMs = 167;
     }
   }
@@ -2738,13 +2817,17 @@ export class Arrow extends Entity {
       // （数据面 vanilla-projectiles.json 保持 SetDefaults 直写真值,combat-stitch-final
       // 金标断言 projClassOfProjId(181)=null 不动）。
       // ★同族发蜂位双式对账（grep 防第三处,2026-08-31）：①`.melee=true` 式——
-      //   蜂巢剑挥动蜂 Player.cs:43976-77、蜂王双路 :44478-79/:44872-73、黄蜂枪弹
-      //   命中伴生 Projectile.cs:13758-59、HiveFive yoyo 同支——仓内 Game.ts 挥动站已置
+      //   蜂巢剑挥动蜂 Player.cs:43976-77、蜂王双路 :44478-79/:44872-73、
+      //   HiveFive 悠悠球弹 Projectile.cs:13758-59——仓内 Game.ts 挥动站已置
       //   bee.projClass='melee';②`.ranged=true` 式——蜂蜜徽章箭 Player.cs:13959-61 与
       //   本站;③唯一【无】旗位 = 蜂蜜斗篷受击反击 Player.cs:38810-13（仓内 Game.ts
-      //   反击链不置 projClass,与原文一致）。★未来黄蜂枪 999 坑位：弹命中侧三成概率
-      //   放蜂必须照 Projectile.cs:13758-59 补 `.melee=true`（projClass='melee'）,
-      //   勿按"蜂=远程"直觉错挂。
+      //   反击链不置 projClass,与原文一致）。
+      //   ★999 陷阱拆除（2026-09-01 T1 批勘误）：上条 13758-59 支的受理门是
+      //   `type == 999` =【HiveFive 悠悠球弹 999】（物品 5294 Hive Five）——旧注
+      //   "黄蜂枪 999/黄蜂枪弹命中伴生"系型号误挂（原版物品 999=Amber 琥珀、
+      //   WaspGun=1155、黄蜂弹=189）。黄蜂枪全部行为都在【出手侧】2-4 连发
+      //   （Player.cs:48809-48820），189 弹命中侧【无】放蜂——已实装见 Game.ts
+      //   case 'magic' 1155 支，无坑位遗留。
       bee.projClass = 'ranged';             // 运行时旗覆写（:78077-79 本站）
       bee.critChance = this.critChance;
       bee.critBonus = this.critBonus;
@@ -3145,6 +3228,26 @@ export class Arrow extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ★L2 出生预置（NX3 遗留2 清偿,NewProjectile :10887-10893 1:1）：
+    //   `wet = WetCollision(position,width,height); if (ignoreWater) wet = false;
+    //   honeyWet = Collision.honey; shimmerWet = Collision.shimmer;`——原版弹体
+    //   出生即带 wet 缓存,AI 首子步读【出生拍值】而非"当场重测"。
+    //   时序书面化（出生即时测 ≡ 首子步头测,逐值等价）：①本仓位移积分在 AI 尾,
+    //   首个 fixedUpdate 时位置仍=出生盒;②液体步进在实体轮【后】(Game tick :
+    //   entities.update → 液体段),出生与首子步之间液体态不可变;③生成路径
+    //   （玩家 updateUse/敌怪/NPC/前序弹幕）全部落在实体轮内,for-of 活数组
+    //   当拍即更——仅 props/critters 桶生成体晚一拍,与原版 Main.projectile
+    //   freed-index 回槽错过当拍的延迟同构（原版亦非零延迟面）。
+    //   ⇒ 出生预置=首子步头同位同液态测值;消费位（subStepAI 头）读缓存与原版
+    //   读字段同源,时序差归零。消费者=wetCacheConsumer（蜂族+469）。
+    if (!this.wetPresetDone && this.wetCacheConsumer) {
+      this.wetPresetDone = true;
+      const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+      this.wet = rWet.wet;
+      if (rWet.honey) this.honeyWet = true;
+      if (rWet.shimmer) this.shimmerWet = true;
+      if (projectileData(this.projId)?.ignoreWater) this.wet = false;   // :10888-10890
+    }
     // R4-38：宝石法珠首帧音（1457 AI_029_GemStaffs_ActuallyGemStaffs :38543-38551
     // soundDelay==0→-1 闸,统一 Item_205=StackableItem8ForRubyStaff;1120→Item72）——
     // 傀儡侧不播（快照可晚到多拍,迟响比不响更怪;原版客户端全量模拟本 AI,此处
@@ -3195,6 +3298,17 @@ export class Arrow extends Entity {
     if (this.life <= 0) { this.killNow(game); return; }   // 防御（正常由尾部递减杀）
     this.subStepAI(game);
     if (this.dead) return;                                // AI 侧已杀（killNow 已走）
+    // ★L2 湿缓存逐子步刷新（Projectile.cs:16900-16908 wet 段时序=AI 后、timeLeft
+    //   递减前）：位置 = 本子步末（AI 尾位移后）= 下一子步 AI 头读位——消费位读
+    //   到的即"上子步液段值",与原版字段语义逐值同;旗位生命周期同 :17104-17108
+    //   （置位只增不清,!wet 三清;本仓消费族不读 lavaWet,不做 LavaCollision 全盒测）
+    if (this.wetCacheConsumer) {
+      const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+      this.wet = rWet.wet;
+      if (rWet.honey) this.honeyWet = true;
+      if (rWet.shimmer) this.shimmerWet = true;
+      if (!this.wet) { this.honeyWet = false; this.shimmerWet = false; }
+    }
     if (--this.life <= 0) this.killNow(game);
   }
 
@@ -3218,14 +3332,11 @@ export class Arrow extends Entity {
     }
     // 469 蜂箭入水即消亡（AI_001 头 Projectile.cs:54969 `type == 469 && wet &&
     // !honeyWet && !shimmerWet` → Kill()——水/岩浆档，蜂蜜/微光豁免）。
-    // 本仓 wet = 弹心格液量 >0 + liquidType ∈ {WATER, LAVA}（LIQUID_TYPE +1 编码）
+    // ★L2（2026-09-01 NX3 遗留2 清偿）：读【湿缓存】（出生预置+逐子步刷新,
+    // WetCollision 全几何）——旧写「弹心格 liquid>0 + 液型∈{WATER,LAVA}」为
+    // 中心格几何近似（浅缘半浸/邻格液面两向偏差）,登记近似退役
     if (this.projId === 469) {
-      const st469 = world.store;
-      const wx = Math.floor((this.x + this.w / 2) / TILE), wy = Math.floor((this.y + this.h / 2) / TILE);
-      if (st469.inBounds(wx, wy) && st469.liquid[st469.idx(wx, wy)] > 0) {
-        const lt = st469.liquidType[st469.idx(wx, wy)];
-        if (lt === LIQUID_TYPE.WATER || lt === LIQUID_TYPE.LAVA) { this.killNow(game); return; }
-      }
+      if (this.wet && !this.honeyWet && !this.shimmerWet) { this.killNow(game); return; }
     }
     // ---- 教徒火球 467 真制导（AI_001 type==467 支；1458 P.cs:55133-55253 /
     //      1457 :55132-55252 两版本逐字同段。2026-08-31 台账批——此前 Arrow 直飞桶
@@ -3585,6 +3696,19 @@ export class Arrow extends Entity {
           }
         }
       }
+    } else if (this.projId === 1037 || this.projId === 1049) {
+      // ---- ★2026-09-01 批三（T2）：星陨落星缓速渐显（AI() aiStyle5 分支
+      //  P.cs:24137-24150 直抄）：alpha −= 10/子步、钳 0——门内 num42 恒赋 0 的
+      //  死条件（:24140-24144）语义即 max(alpha−10, 0)。SetDefaults alpha=254
+      //  (:9792/:9950)、EU=1（:9791/:9949）→ AI ×2 子步/帧 ≈ 13 帧渐显完。
+      //  门内余项【不移植】：localAI[0] += |vx|+|vy| 求和×0.01×direction 仅 503 的
+      //  GetAlpha :81015 相位消费（1037/1049 无读者）;同门外 :24132 Item_9 音为
+      //  非本型（type != 1037 && type != 1049）;rotation = velocity.ToRotation()−π/2
+      //  （:24197-24199）属绘制姿态面,专用视觉锚定另行登记。
+      //  出生端：1037=WhipTag 星陨 proc 首跳（活跃）/1049=DST+FTW+风暴天陨雨
+      //  （WorldGen.cs:72292,本仓无此世界事件,dormant） ----
+      this.alpha -= 10;
+      if (this.alpha < 0) this.alpha = 0;
     }
     // ★661 黑爆显形链（AI_001 type==661 支 :56705-56745）：alpha−=55/t 渐显 +
     // scale=1.3；归零瞬间沿速度向排布 16×d62 暗环（scale1.5,noLight,noGravity,
@@ -3857,6 +3981,30 @@ export class Arrow extends Entity {
       //  路径(:81507-81520)/180 走 Lerp 白支(:80734),色彩解释在 draw 侧各自完成 ----
       if (this.alpha > 0) this.alpha -= 15;
       if (this.alpha < 0) this.alpha = 0;
+    } else if (this.projId === 576 || this.projId === 577) {
+      // ---- ★2026-09-01 批三（T1）：星晕/漩涡激光 576/577 延迟渐显——AI_001 共享
+      //  fade 开关第二组（P.cs:56601-56613，与上支同 switch 的相邻 case 组直抄）：
+      //  localAI[1]++ 每子步无条件；>2 后 alpha −= 15 至 0。SetDefaults alpha=255
+      //  (:6267/:6279)、EU=2（:6269/:6281）→ AI ×3 子步/帧（Update :16780-16880
+      //  numUpdates 循环），首帧第 3 子步起拉亮。计数槽 aiCnt 专项独占——grep 两 id
+      //  在本文件无其它 localAI[1] 消费者。出生端：576=星晕悬浮脑环绕球 574 线发
+      //  （bossAI_lunar_misc,Arrow 直构=本支活跃）；577=风暴潜水员 425 满蓄四连发
+      //  （fighterFamilies→Enemy.spawnHostileProj→Dart,DART_STYLE 无表项）——Dart
+      //  载体不进本支,本分支对 577 为 dormant 备案（键已在 PROJ_ALPHA0 批三注） ----
+      this.aiCnt++;
+      if (this.aiCnt > 2) {
+        if (this.alpha > 0) this.alpha -= 15;
+        if (this.alpha < 0) this.alpha = 0;
+      }
+    } else if (this.projId === 968) {
+      // ---- ★2026-09-01 批四（T2/H7）：968 渐显——AI() aiStyle2 顶层 type 段
+      //  （Projectile.cs:23413-23431）：alpha = Math.Max(0, alpha − 50) 每拍
+      //  （:23429；SetDefaults α=255 :9169-9176 → 6 拍淡入；aiStyle2 无 EU=1 拍/帧）。
+      //  同块 frame=(int)ai[1] 静态随机帧由 ctor pinFrame 掷签承载（见 ctor 注），
+      //  不在本支。出生尘爆（localAI[0]==0 → 8×尘31 持械初速派生 :23414-23428）
+      //  登记暂缓——视觉域，Remap(玩家初速)×RotatedByRandom 耦合，后续批接。 ----
+      if (this.alpha > 0) this.alpha -= 50;
+      if (this.alpha < 0) this.alpha = 0;
     } else if (this.projId === 876) {
       // ---- R27：876 zapinator AI 尾段（Projectile.cs:56892-56908，aiStyle1 type 段）----
       //  tileCollide 按 ai[1] 态逐拍恢复（命中侧随机化把撞块关掉后,下一次 Damage 结算
@@ -4118,20 +4266,21 @@ export class Arrow extends Entity {
       //    v.x < 目标 → +accel（变号再 +2×accel），反之 −accel——蜂群"振翅折线"观感。
       //    逐型 speed/accel：181 6/0.1、189 9/0.2、307 13/0.35、316 13/0.325(锁定)
       //    或 10/0.25(自由)、566 6.8/0.14（:27793-27822）。
-      const st36 = world.store;
       {
         // ★三轮蓝队 F7：判死几何升级（Collision.cs:1575-1656 全式,复用 npcLiquid
         //   1:1 移植）——单「弹心格 liquid>0」近似曾有两类真差异：
         //   a) 贴水面掠飞：弹心格 liquid>0 但液面下探((256-liquid)/32×2px)后探针盒
         //      （min(10,W)×min(H/2,H) 居中）与液体体积不相交 ⇒ 原版不死、我们误杀;
         //   b) 邻格液体 + 弹心格干燥：中心格判漏 ⇒ 原版 W≤10 蜂全宽探针可触邻格
-        //      液体而致死被漏;坡面格+上方液体(slope≠0 支 :1630-1647)同前一类。
-        //   升级后与原版逐值一致；熔岩致死保留（WetCollision 对岩浆格同样真）；
-        //   307 豁免/wet 标志时序差已证等价（AI 内即时读 vs 原版上子步 wet 缓存,
-        //   首子步 spawn-in-water 差 1 子步,<4px 不可感知）。honey/shimmer 由返回旗
-        //   精确豁免（liquidType 3/4——旧 WATER/LAVA 白名单等价消解进 ！honey&&!shimmer）。
-        const wc36 = wetCollision(st36, this.x, this.y, this.w, this.h);
-        if (wc36.wet && !wc36.honey && !wc36.shimmer && this.projId !== 307) {
+        //      液体而致死被漏;坡面格+上方液体(slope≠0 支 :1630-1647,★L1 纯在场位
+        //      致动斜坡同判)同前一类。
+        // ★L2（2026-09-01 NX3 遗留2）：原版 :27685 读【字段】wet/honeyWet/shimmerWet
+        //   （出生预置 NewProjectile :10887-93 + 每子步液段 :16900-16908/三清
+        //   :17104-17108），非当场重测——本仓同源缓存见 fixedUpdate 出生预置块/
+        //   subStep 刷新块；AI 头读缓存=读上子步液段值（出生拍=预置值），时序
+        //   与原版同构（旧"内联即时读差 1 子步"登记作废）。蜂蜜/微光旗随缓存
+        //   附带（置位只增不清——蜜→水直渡豁免语义同原版 !wet 三清位）。
+        if (this.wet && !this.honeyWet && !this.shimmerWet && this.projId !== 307) {
           this.killNow(game); return;                    //（:27685-27688）
         }
       }
@@ -5549,6 +5698,21 @@ export class Arrow extends Entity {
               this.sbAx, this.sbAy, Math.round(Math.hypot(this.vx, this.vy) * 1000));
           }
           this.sbAx = this.cx; this.sbAy = this.cy;
+          return;
+        }
+        // ---- 蜂族撞块弹反（HandleMovement type 段 :19019-19030，★T1 批 2026-09-01
+        //      补齐——181/189/357/566 四型 penetrate>0 时撞实心块不消亡）：
+        //      penetrate--（与命中敌共用同一穿透计数）+ 速度全速反号。357 每弹反
+        //      伤 ×0.9（(int) 截断，181/189/566 无折价）。原版按 `velocity !=
+        //      lastVelocity` 分轴反射（被撞轴反号）；本仓单点碰撞无轴信息——
+        //      与上方 294 暗影束臂同法按速度主轴反射（登记）；pierce 归零后不再入
+        //      本支 → 落下方通用消亡口（原版 `penetrate > 0` 门同语义）----
+        if ((this.projId === 181 || this.projId === 189 || this.projId === 357 || this.projId === 566)
+          && this.pierce > 0) {
+          if (this.projId === 357) this.damage = Math.max(1, Math.trunc(this.damage * 0.9));
+          this.pierce--;
+          if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx;
+          else this.vy = -this.vy;
           return;
         }
         // ---- 绳索线圈弹 171/475/505/506（aiStyle35 :27581-27720，2026-08-30 工单1

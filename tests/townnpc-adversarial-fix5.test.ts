@@ -531,39 +531,47 @@ describe('【A10】critter 三 bonus（★现行零实体区域——骰流位�
     expect(priv(plain, 'walkT')).toBe(350);          // 非 critter 路径不吃 bonus（流位保持）
   });
 
-  it('(a′)卡墙折返：critter 折返腿程 = base(499)+bonus(399)=898（对照非critter 499）', () => {
-    const world = flatWorld('fix5-a10p');
+  it('(a′-1)卡墙折返·critter：折返腿程 = base(499)+bonus(399)=898（cs:54795-97）', () => {
+    const world = flatWorld('fix5-a10p-c');
     const st = world.store;
     // 脚部行【单层】唇墙：阻挡位移但不落入任何越障梯档（t5/t4 空、t3 半格口径
     // bottomSink=16px≤20 不受理）→ 零跳零转纯卡位，stuckT 稳定累计到 30 触发
-    const buildLip = (): void => {
-      for (let x = 106; x <= 110; x++) st.setTileSilent(x, FLOOR_ROW - 1, DIRT);
-    };
-    const runSide = (startTile: number): number => {
-      const n = new TownNPC('guide', 0, 0) as AnyNpc;
-      placeOnFloor(world, n, startTile);
-      const fr = feetRowOf(n);                        // FLOOR_ROW−1（底贴地）
-      if (fr !== FLOOR_ROW - 1) throw new Error(`unexpected feetRow ${fr}`);
-      // stepUp 关断：单层唇墙不涉越障梯档（t5/t4 空、t3 半格口径 bottomSink=16≤20），
-      // 物理面把 X 钉死 → 卡位成立；步上台阶被禁防"跨唇通过"
-      privSet(n, { vanillaId: 46, walkMode: 1, walkT: 30000, onGround: true, vx: 0.9, stepUp: false });
-      n.facing = 1;
-      for (let x = startTile + 2; x <= startTile + 6; x++) st.setTileSilent(x, fr, DIRT);
-      const { game } = makeGame(world);
-      n.rng = rngQ([], 0.999);                        // 恒定 fallback → base/bonus 值可复现
-      let flipped = false;
-      for (let t = 0; t < 400 && !flipped; t++) {
-        n.fixedUpdate(1 / 60, game);
-        flipped = n.facing === -1;
-      }
-      expect(flipped).toBe(true);
-      return priv(n, 'walkT') as number;
-    };
+    const n = new TownNPC('guide', 0, 0) as AnyNpc;
+    placeOnFloor(world, n, 104);
+    const fr = feetRowOf(n);
+    expect(fr).toBe(FLOOR_ROW - 1);
+    // stepUp 关断防"跨唇通过"；物理面把 X 钉死 → 卡位成立
+    privSet(n, { vanillaId: 46, walkMode: 1, walkT: 30000, onGround: true, vx: 0.9, stepUp: false });
+    n.facing = 1;
+    for (let x = 106; x <= 110; x++) st.setTileSilent(x, fr, DIRT);
+    const { game } = makeGame(world);
+    n.rng = rngQ([], 0.999);                        // 恒定 fallback → base/bonus 值可复现
+    let flipped = false;
+    for (let t = 0; t < 400 && !flipped; t++) {
+      n.fixedUpdate(1 / 60, game);
+      flipped = n.facing === -1;
+    }
+    expect(flipped).toBe(true);
+    expect(priv(n, 'walkT')).toBe(898);             // (200+299)+(200+199)
+  });
 
-    // critter 46：base(499)+bonus(399)=898；非 critter 对照：仅 base 单写 499
-    expect(VANILLA_TOWN_CRITTER_SHEETS.has(46)).toBe(true);
-    expect(runSide(104)).toBe(898);
-    expect(runSide(120)).toBe(499);
+  it('(a′-2)卡墙折返·非 critter 对照：仅 base 单写 → 499（流位保持）', () => {
+    const world = flatWorld('fix5-a10p-p');
+    const st = world.store;
+    const n = new TownNPC('guide', 0, 0) as AnyNpc;   // guide=22 ∉ TownCritter
+    placeOnFloor(world, n, 104);
+    privSet(n, { walkMode: 1, walkT: 30000, onGround: true, vx: 0.9, stepUp: false });
+    n.facing = 1;
+    for (let x = 106; x <= 110; x++) st.setTileSilent(x, feetRowOf(n), DIRT);
+    const { game } = makeGame(world);
+    n.rng = rngQ([], 0.999);
+    let flipped = false;
+    for (let t = 0; t < 400 && !flipped; t++) {
+      n.fixedUpdate(1 / 60, game);
+      flipped = n.facing === -1;
+    }
+    expect(flipped).toBe(true);
+    expect(priv(n, 'walkT')).toBe(499);             // base 单写（200+299）
   });
 
   it('(b)走→停双分支：critter −Next(100) → 400 / 非 critter +Next(900) → 900（流位保持）', () => {

@@ -1400,7 +1400,7 @@ function vanillaStructures({ store, rng, world, prog }: GenCtx) {
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // Dirt Rock Wall Runner(15536,近地表泥土自然墙 2 → 石墙 59 游走斑)——注册序夹在
   // 金字塔与世界树之间；2026-08-13 前整 pass 缺失
-  rng.reseed(gs.seed); prog?.beginVan('Dirt Rock Wall Runner');        // ▶cs:15536
+  rng.reseed(gs.seed); prog?.beginVan('Dirt Rock Wall Runner');        // ▶DirtRockWallRunner cs:15536
   runDirtRockWallRunnerPass(store, rng, gs);
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
   // DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887)——世界树插在金字塔后、

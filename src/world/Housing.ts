@@ -1,5 +1,6 @@
 // 原版城镇房屋判定（WorldGen.StartRoomCheck / RoomNeeds / ScoreRoom 1:1，
-// Terarria1456 WorldGen.cs:4600-5350 + 5747-5940）：
+// 1457 实测：MoveTownNPC/SpawnTownNPC 面 WorldGen.cs:4602/:5332-5536、ScoreRoom
+// 面约 ：5736-5978,B6 注释考古批⑤B 已校）：
 //   房间 = 门内侧非实心区域泛洪填充，60 ≤ 格数 ≤ 750（maxRoomTiles），包围盒 < 100
 //   （maxRoomSize，WorldGen.cs:4210/4214）；纯空气格必须有"房墙"（Main.wallHouse 表），
 //   家具格（实标记非实心 tile）豁免墙判定；门/平台算边界不穿透；
@@ -63,7 +64,7 @@ const isDoorType = (t: number) => t === T.DOOR_CLOSED || t === T.DOOR_OPEN;
 // （WorldGen.cs:6113-6127）是逐 sheet 语义，此前 isDoorType 十门件【无帧】全当硬
 // 边界有两处偏差：开门(11)中段把应连通的两侧室切开；高门开启态 389/翻板 386 等
 // 非实心 COUNTS_AS_DOOR 件被误当边界。精确规则：
-//   · 实心（tileSolidLike 代理 tileSolid）一律封房（主规则 :6111-6113，平台/金属条同）；
+//   · 实心（tileSolidLike 代理 tileSolid）一律封房（主规则 :6108-6112，平台/金属条同）；
 //   · 开门 11 仅锚帧 frameX∈{0,54,72,126} 封——原始相等比较不用模制（对照 CloseDoor
 //     编码 cs:32094-32145：两叶四列 frameX%72∈{0,18,36,54}、+72 进第二叶,首末列贴
 //     墙为界,中列 18/36/90/108 是门洞穿透继续泛洪 → 开着的门两室合并为一间 =
@@ -152,10 +153,20 @@ export function snapSavedHome(st: TileStore, x: number, y: number): [number, num
   for (let dy = 0; dy <= 6; dy++) {
     const cy = y - dy;
     if (cy < 10 || cy >= st.h - 10) break;
-    // 实心格直接跳过（queryRoom 'solid' 种子预检也判负,显式跳过省一次全泛洪）
-    if (st.flags[st.idx(x, cy)] && tileSolidLike(st.type[st.idx(x, cy)])) continue;
+    // ★对抗修复批⑤B 2026-09-01（B3a）：种子帧自检（B3）落地后,'solid/门件边界帧'
+    // 候选必被 floodRoom 拒——此处显式跳过并继续上探一格再验（dy≤6 有界,无死锁
+    // 空转面）。容错契约：legacy 存档把 home 锚在开门铰链列时,列内室内格仍可命中
+    // （泛出房间同含原锚点与自身,开门锚帧格属房间界集合）;全候选失败则返 null,
+    // 调用方按既有路径优雅转 homeless。
+    const ii = st.idx(x, cy);
+    if (st.flags[ii]) {
+      const cT = st.type[ii];
+      if (tileSolidLike(cT)) continue;
+      const cDef = TILE_DEFS[cT];
+      if (cDef && doorFrameBoundary(cDef.vanilla?.sheet ?? -1, st.frameX[ii], st.frameY[ii])) continue;
+    }
     const q = queryRoom(st, x, cy, { ignoreNeeds: true });
-    if (q.room && q.room.tiles.has(origIdx) && q.room.tiles.has(st.idx(x, cy))) return [x, cy];
+    if (q.room && q.room.tiles.has(origIdx) && q.room.tiles.has(ii)) return [x, cy];
   }
   return null;
 }
@@ -227,7 +238,7 @@ export function dedupeHomes<C extends HomeClaim>(
   return { kept, dropped };
 }
 
-/** WorldGen.maxRoomTiles / maxRoomSize（WorldGen.cs:4210/4214） */
+/** WorldGen.maxRoomTiles / maxRoomSize（1457 实测 WorldGen.cs:4181/4185） */
 const MAX_TILES = 750;
 const MAX_ROOM_SPAN = 100;
 const MIN_TILES = 60;
@@ -239,7 +250,7 @@ const HOUSING_WALL_TILES = new Set([11, 386, 389]);
  *  封锁块（1×1 非实心陈设,tileSolid=false——房内可泛洪格,实心/门界分支在
  *  :6113-6127 提前 return 故只有【房内】命中可达置位行）。vanilla 消费面恰两处：
  *  MoveTownNPC 门（cs:4696-4718,宠物豁免=IsTownPet[type]）/ SpawnTownNPC 门
- *  （cs:5348-5355,豁免须再持 TownManager 登记房位）;QuickFindHome（:5633-5716）与
+ *  （cs:5348-5355,豁免须再持 TownManager 登记房位）;QuickFindHome（:5654-5716）与
  *  房况复核环不查此二旗——本仓同构只挂两受理门（housingCheckAt/acceptTownNPCAtHouse），
  *  findFreeHouse（QuickFindHome 语义）刻意不拒。 */
 const STINKBUG_SHEET = 630;
@@ -293,7 +304,7 @@ const DOOR_OPEN_SHEET = 11;
 const TALL_GATE_CLOSED_SHEET = 388;
 const TALL_GATE_OPEN_SHEET = 389;
 
-/** IsOpenDoorAnchorFrame（WorldGen.cs:69228-69240）：开门的顶/底锚帧（frameX%72
+/** IsOpenDoorAnchorFrame（1457 实测 WorldGen.cs:69697-69709）：开门的顶/底锚帧（frameX%72
  *  落在 [0,18)∪[54,72)），中段是门洞不算门体 */
 function isOpenDoorAnchorFrame(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
@@ -327,11 +338,12 @@ export interface RoomScore {
 export interface Occupant { x: number; y: number; /** 入住者原版 NPC id（CanNPCsLiveWithEachOther 判定；缺省按 cat 0 城镇 NPC） */ npcId?: number }
 
 /**
- * ScoreRoom 1:1（WorldGen.cs:5804-5940）：对已判合格的房间打分并选家位点。
+ * ScoreRoom 1:1（1457 实测 WorldGen.cs:5793-5978）：对已判合格的房间打分并选家位点。
  * occupied = 已入住 NPC 的 home tile（home 与 home-1 同在房内视为占用者；
  * ★批②2026-09-01 放宽为 ReadonlyArray——acceptTownNPCAtHouse 只读传参）；
  * askingNpcId = 申请入住的 NPC id（占用豁免用：同 housingCategory 才判占用，
- * WorldGen.cs:5754 CanNPCsLiveWithEachOther——城镇 NPC 与城镇宠物可同房）。
+ * ScoreRoom_IsThisRoomOccupiedBySomeone :5736 起,CanNPCsLiveWithEachOther 消费——
+ * 城镇 NPC 与城镇宠物可同房）。
  */
 export function scoreRoom(
   st: TileStore, room: Room,
@@ -473,9 +485,10 @@ export function checkRoom(st: TileStore, doorX: number, doorY: number): Room | n
   return null;
 }
 
-/** CheckRoom 宽松墙证据（WorldGen.cs:6150-6169）：横竖各 ±2 的 5×1 窗口内出现
- *  房墙（Main.wallHouse）或 nactive 且 tileSolid/HousingWalls 的 tile。
- *  flag=横向证据、flag2=纵向证据——两向都须命中，否则按漏墙处理（:6171-6184） */
+/** CheckRoom 宽松墙证据（1457 实测 WorldGen.cs:6139-6159）：横竖各 ±2 的 5×1 窗口内
+ *  出现房墙（Main.wallHouse）或 nactive 且 tileSolid/HousingWalls 的 tile。
+ *  flag=横向证据、flag2=纵向证据——两向都须命中,否则按漏墙处理（判决 ：6160-6174,
+ *  wall>0=TooManyUnsafeWalls/无墙=HoleInWallIsTooBig,B2 起逐格执行） */
 function hasLooseWallEvidence(st: TileStore, x: number, y: number): boolean {
   // TileID.Sets.HousingWalls（TileID.cs:377）：11 栅栏 / 386 高门 / 389
   const wallLike = (ii: number): boolean => {
@@ -512,6 +525,23 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   // 的临时翻转合成视角;显式传参仅 checkRoomEnclosure 床路径——同值）
   const extraSolid: ReadonlySet<number> | undefined = opts.extraSolid ?? MAIN_EXTRA_SOLID;
   const ignoreNeeds = opts.ignoreNeeds === true;
+  // ★对抗修复批⑤B 2026-09-01（B3|R1-F3 种子帧自检）：vanilla 种子格与普通格走同一条
+  // 处理管线——StartRoomCheck 把 (x,y) 直接入栈（cs:6016-6023）,首弹 CheckRoom 全量过
+  // 邻居侧同款分支：nactive→实心 BlockingWall（:6108-6112）/开门 11 锚帧（:6113-6117）/
+  // 高门开启态 389（:6118-6122）/翻板 386 边界帧（:6123-6127）/extraSolid 翻转窗。本仓
+  // 这组谓词只在「邻格审视」时消费,种子自身从不过检 → 锚帧开门列/泡沫块当种子会把
+  // 本应隔断的两室粘连泛起。入栈前补一次同一谓词任一命中即拒（查询入口 queryRoom/
+  // checkRoomEnclosure 已各自预检实心+379,此处是泛洪内核级兜底,增量面=doorFrameBoundary）。
+  const si = st.idx(sx, sy);
+  const sT = st.type[si];
+  const sDef = sT ? TILE_DEFS[sT] : undefined;
+  const sSheet = sDef ? (sDef.vanilla?.sheet ?? -1) : -1;
+  if (tileSolidLike(sT)
+    || (sT !== 0 && doorFrameBoundary(sSheet, st.frameX[si], st.frameY[si]))
+    || (sT !== 0 && extraSolid.has(sSheet))) {
+    lastRoomCheckFail = 'notValid';   // BlockingWall/BlockingOpenGate 族同域（未设 failureReason,归 notValid 档）
+    return null;
+  }
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
   // ★对抗修复批④2026-09-01（C-F5）：roomHasStinkbug/roomHasEchoStinkbug 的泛洪局部等价物
@@ -545,11 +575,16 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     const x = i % st.w, y = (i / st.w) | 0;
     const t = st.type[i];
     const def = t ? TILE_DEFS[t] : undefined;
-    // 纯空气格必须背靠房墙（原版 CheckRoom 墙判定；家具格豁免）。宽松分支
-    // （WorldGen.cs:6150-6185）：自身无房墙时，横/竖各 ±2 的 5×1 窗口内出现
-    // 房墙或实心/HousingWalls tile（nactive）即算有墙——横竖两向须都有证据
-    if (!st.flags[i] && !WALL_HOUSE.has(st.wall[i]) && !hasLooseWallEvidence(st, x, y)) {
-      // WorldGen.CheckRoom :6171-6181 尾：有墙但非房墙 = TooManyUnsafeWalls（天然
+    // ★对抗修复批⑤B 2026-09-01（B2|R1-F2 宽松墙证据窗逐格执行）：vanilla CheckRoom
+    // 对【每个被处理格】无条件跑五格横竖双向窗（WorldGen.cs:6139-6159 两向循环）,
+    // 任一向证据缺失即整房判负（:6160-6174）。此前仅纯空气格跑窗、active 家具格整段
+    // 跳过 = 单向偏松（蓝队 CONFIRMED：梁下悬空火把等无背墙家具被误放行）。「家具格
+    // 豁免墙判定」的原语义仅指『自身算不算房墙』的首半判定,宽松证据窗是其上的独立
+    // 复核闸,两者并列——本改动只拆 `!st.flags[i]` 门槛,窗口本体（wallLike:房墙 |
+    // nactive&&(tileSolidLike|HousingWalls),含 k=0 自身）与两向全过要求零变化;
+    // 自带房墙格两轴自证恒真,行为不变。
+    if (!hasLooseWallEvidence(st, x, y)) {
+      // WorldGen.CheckRoom 判决尾 ：6162-6171：有墙但非房墙 = TooManyUnsafeWalls（天然
       // 墙不安全）;无墙 = HoleInWallIsTooBig（漏墙）
       lastRoomCheckFail = st.wall[i] > 0 ? 'unsafeWalls' : 'hole';
       return null;
@@ -574,8 +609,8 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       if (tiles.has(ni)) continue;
       const nt = st.type[ni];
       const ndef = nt ? TILE_DEFS[nt] : undefined;
-      // 边界（CheckRoom cs:6111-6127 精确规则，见 doorFrameBoundary 注记）：
-      // 实心主规则 + 开门锚帧/389/386 逐帧门件分支。原版填充门 :6121 =
+      // 边界（CheckRoom cs:6108-6127 精确规则，见 doorFrameBoundary 注记）：
+      // 实心主规则 + 开门锚帧/389/386 逐帧门件分支。原版实心支 :6108-6111 =
       // nactive && tileSolid → 平台地板封房、桌/砧/笼等家具（tileSolid=false）
       // 为房内格可穿透。
       // 原版先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
@@ -635,9 +670,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
 }
 
 /**
- * 锚点 ±10 窗口内找一间无人入住的合格房屋。原版 QuickFindHome（WorldGen.cs:5665-
- * 5727）只对锚点校验：锚点自身（:5674 home-1）→ home±1（:5677-5682）→ home±10
- * 螺旋（:5684-5691），窗外不搜索——锚点 ±1 精查已由全格窗口覆盖（±10 窗含 ±1），
+ * 锚点 ±10 窗口内找一间无人入住的合格房屋。原版 QuickFindHome（1457 实测
+ * WorldGen.cs:5654-5716）只对锚点校验：锚点自身（homeTile-1）→ home±1 九宫 → home±10
+ * 螺旋，窗外不搜索——锚点 ±1 精查已由全格窗口覆盖（±10 窗含 ±1），
  * 螺旋的步长 2 粗采样不重刻（打分制需全格门锚，最小实现对齐）。
  * 房间枚举/多房打分为本仓库自有——原版 StartRoomCheck 自单点泛洪（SpawnTownNPC
  * :5345-5358 锚点须正好落在房内才成功），无多房择优；泛洪填充本身不受窗限制，
@@ -695,7 +730,7 @@ export function findFreeHouse(
 
 // ================= 住房查询/分配（原版住房界面 MoveTownNPC + moveRoom，2026-08-15 B 方案） =================
 
-/** 房屋需求旗标（RoomNeeds :5616-5660 四布尔；填充由 floodRoom 完成，失败时也保留已见项）
+/** 房屋需求旗标（1457 实测 RoomNeeds def :5601 起,四布尔；填充由 floodRoom 完成，失败时也保留已见项）
  *  ★对抗修复批④2026-09-01（C-F5）：并列新增臭虫否决旗二枚——非四件套成员（RoomNeeds
  *  语义不动），置位=CheckRoom cs:6128-6137、复位=StartRoomCheck 头/每次泛洪局部
  *  （cs:5986-5987），随 flush 与四件套同生命周期出参；queryRoom/housingCheckAt 返回
@@ -849,13 +884,40 @@ export function expandedMushroomCount(st: TileStore, room: Room): number {
   return count;
 }
 
+/**
+ * ★对抗修复批⑤B 2026-09-01（B4|R1-F5 松露地表门单源）：roomBottom（房内最深格 y）
+ * ≤ floor(worldSurface)——本仓 groundLevel 同一标量口径;特小世界旁路
+ * Main.NoFunctionalSurface（判据 worldSurface<=30.0,Main.cs:2721）免除该硬约束。
+ * unlockedTruffleSpawn 置位 = 整门免检（vanilla 条件首查语义,CheckSpecialTownNPC
+ * SpawningConditions cs:4890-4896 一带）。消费位统一收编本函数（★勿再开内联副本）：
+ * Game 入驻轮 ①'' 房况复核 / ③ 新住户安置 / housingAssign 手动分配。
+ */
+export function truffleSurfaceOk(
+  unlockedTruffleSpawn: boolean, roomBottom: number, surfaceLevel: number,
+): boolean {
+  if (unlockedTruffleSpawn) return true;
+  if (surfaceLevel <= 30.0) return true;   // NoFunctionalSurface：特小世界（Main.cs:2721）
+  return roomBottom <= Math.floor(surfaceLevel);
+}
+
 /** 松露现任房条件复核（①'' 复核环用）：自 home 站位点泛出所在房间后按外扩盒
- *  计数 ≥100 判定；泛不出房间=已失效=false。unlockedTruffleSpawn 置位免检由调用方
- *  附带（vanilla 条件首查 :4893-4895）；地表门 roomY2≤worldSurface 同样调用方判
- *  （groundLevel 口径,Game 入驻轮③同式）。 */
-export function truffleHomeConditionOk(st: TileStore, hx: number, hy: number): boolean {
+ *  计数 ≥100 判定；泛不出房间=已失效=false。opts.surfaceLevel 提供时并行执行地表门
+ *  （truffleSurfaceOk 单源）;未提供保持旧契约（仅蘑菇计数）。unlockedTruffleSpawn
+ *  免检由调用方随 opts 附带（vanilla 条件首查 :4893-4895）。 */
+export function truffleHomeConditionOk(
+  st: TileStore, hx: number, hy: number,
+  opts?: { unlockedTruffleSpawn?: boolean; surfaceLevel?: number },
+): boolean {
   const q = queryRoom(st, hx, hy, { ignoreNeeds: true });
   if (!q.room) return false;
+  if (opts?.surfaceLevel !== undefined) {
+    let roomBottom = 0;
+    for (const ti of q.room.tiles) {
+      const ty = (ti / st.w) | 0;
+      if (ty > roomBottom) roomBottom = ty;
+    }
+    if (!truffleSurfaceOk(opts.unlockedTruffleSpawn ?? false, roomBottom, opts.surfaceLevel)) return false;
+  }
   return expandedMushroomCount(st, q.room) >= MUSHROOM_TILE_THRESHOLD;
 }
 
@@ -897,19 +959,21 @@ export function sampleHouseSeed(
 }
 
 /**
- * SpawnTownNPC 受理核（cs:5332-5536 的房屋面合并实现）：StartRoomCheck（种子预检 +
- * 单点直锚泛洪,queryRoom 承担;ignoreNeeds——家具检查是 RoomNeeds 独立步骤,由
- * floodRoom 四旗随扫完成）→ 臭虫否决门（★★对抗修复批④2026-09-01 C-F5，
- * cs:5348-5355）→ ScoreRoom(-1,n) hiScore>0。bestX/bestY = score 位地板格,
- * vanilla homeTile 写 bestX/bestY,本仓 home 约定=站立格（地板上一行 s.y-1,同
- * updateTownNpcArrival ① 口径）;迁入（RelocatedHomeless :5367-5376）与新住户
- * （Successful）共用同一 home 位。ok=false 时 Blocked/FoundHouseNoSpawn 分支由调用方
- * 依 mover 有无落账（受理通过但无可迁者才缓存 LastFoundHouse :5535,早退支不缓存）。
- * ★C-F5 门位：原版豁免 = `IsTownPet[num] && TownManager.HasRoom(num)`（宠物持登记
- * 房位者;cs:5347 与 MoveTownNPC 面的无条件宠物豁免不同）——本仓无 TownManager 房位面,
- * 故此处对全部申请者一律否决（含近链流浪宠物——vanilla 该情形 flag=false 同样 Blocked）；
- * 种子房含臭虫时 ok=false ⇒ checkHousesNearAPlayer 走 Blocked 早退支【不】缓存
- * LastFoundHouse（近玩家受理面同检的落点即此门）。
+ * SpawnTownNPC 受理核（cs:5332-5536 的房屋面顺序重建）：StartRoomCheck（种子预检 +
+ * 单点直锚泛洪,queryRoom 承担,:5340）→ ★对抗修复批⑤B 2026-09-01（B1|R1-F1）补回
+ * RoomNeeds 门（默认 requireFurniture 家具档,早退先于臭虫门与 ScoreRoom——vanilla
+ * cs:5344-47,floodRoom 四旗 flush 后直接判 !(door&&table&&chair&&light) → 'notValid'
+ * → q.room=null）→ 臭虫否决门（★对抗修复批④ C-F5,cs:5348-5355）→ ScoreRoom(-1,n)
+ * hiScore>0（:5356）。bestX/bestY = score 位地板格,vanilla homeTile 写 bestX/bestY,
+ * 本仓 home 约定=站立格（地板上一行 s.y-1,同 updateTownNpcArrival ① 口径）;迁入
+ * （RelocatedHomeless :5367-5383）与新住户（Successful）共用同一 home 位。ok=false 时
+ * Blocked/FoundHouseNoSpawn 分支由调用方依 mover 有无落账（受理通过但无可迁者才缓存
+ * LastFoundHouse :5535,早退支【全部】不缓存——B1 后家具缺失房在 RoomNeeds 支即出,
+ * vanilla 到不了缓存支）。★C-F5 门位：原版豁免 = `IsTownPet[num] &&
+ * TownManager.HasRoom(num)`（宠物持登记房位者;cs:5351 与 MoveTownNPC 面的无条件宠物
+ * 豁免不同）——本仓无 TownManager 房位面,故此处对全部申请者一律否决（含近链流浪
+ * 宠物——vanilla 该情形 flag=false 同样 Blocked）；种子房含臭虫时 ok=false ⇒
+ * checkHousesNearAPlayer 走 Blocked 早退支【不】缓存 LastFoundHouse。
  */
 export interface HousingAcceptanceResult {
   ok: boolean;
@@ -923,7 +987,14 @@ export function acceptTownNPCAtHouse(
   occupied: ReadonlyArray<{ x: number; y: number; npcId?: number }>,
   x: number, y: number, askingNpcId = -1,
 ): HousingAcceptanceResult {
-  const q = queryRoom(st, x, y, { ignoreNeeds: true });
+  // ★对抗修复批⑤B 2026-09-01（B1|R1-F1）：去掉 {ignoreNeeds:true} 短路,改走默认
+  // requireFurniture 家具档——RoomNeeds 门由 floodRoom 终检直接判四旗（flush 已先行,
+  // 判据 !(flags.door&&flags.table&&flags.chair&&flags.light)）,缺件房 q.room=null,
+  // 在此与几何失败同形返回 Blocked（vanilla cs:5344-47 RoomNeeds 早退先于臭虫门
+  // :5348-52 与 ScoreRoom :5356）。近链（checkHousesNearAPlayer 迁入支）与 Game 快
+  // 路径（LastFoundHouse 生人安置支）两条消费路因此天然拒绝无家具房,不必各加门;
+  // vanilla 此处 Blocked 即到不了缓存支（LastFoundHouse :5535 位于全过之后）。
+  const q = queryRoom(st, x, y);
   if (!q.room) return { ok: false, home: null, room: null };
   // ★对抗修复批④（C-F5）：臭虫否决先于 ScoreRoom（原版 :5348-5355 在 ScoreRoom 前、
   // FindNPCLookingForHomeThatCanMoveIn 后——mover 先选出不影响结果,mover 只在受理

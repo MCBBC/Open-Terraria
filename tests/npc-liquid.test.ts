@@ -14,6 +14,7 @@ import { Inventory } from '../src/items/Inventory';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
 import { wetCollision, liquidMoveFactor, skipsWet, getWaterLine, updateNpcLiquid } from '../src/entities/npcLiquid';
+import { wetCollision as smartWetCollision } from '../src/player/SmartSelect';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import type { GameHooks } from '../src/entities/types';
 
@@ -607,5 +608,42 @@ describe('龟/蛙/游鸭鸥钉水面（AI_007 cs:55586 flag12 / AI_068 cs:34934�
     expect(getWaterLine(st, 20, 35).found).toBe(false);
     // 越界（InWorld margin 10）→ false
     expect(getWaterLine(st, 3, 34).found).toBe(false);
+  });
+});
+
+// ★L1 致动斜坡判湿（Collision.cs:1632 tile.active() 纯在场位——NX3 遗留清偿,2026-09-01）：
+// 原版坡面支门 = tile.active()（HasTile,无 inActive 检查）⇒ 接线致动斜坡同样判湿;
+// 旧实现走 TileStore.isActive = nactive()（active && !inActive）口径,致动斜坡漏判。
+// 三副本（npcLiquid/SmartSelect/WeaponProj.inLiquid）同步改纯在场 type!==0——
+// 本固防钉 npcLiquid 主副本 + SmartSelect 玩家湿探针两份的致动前/后同格判定。
+describe('★L1 致动斜坡判湿（Collision.cs:1632 纯在场位）', () => {
+  // 坡格 (20,36) slope=1、上格 (20,35) 满水（带 [560.06,576.06),液面下探 0.06px）;
+  // 探针 = 僵尸形 18×40 中心盒（num=10/num2=20）:x[326,336) ⊂ 坡列 [320,336)、
+  // y[577,597) 落坡行 [576,592) 且【越过上格液带底 576.06】→ wet 只能来自坡面支
+  // （:1635-1654）,非液体支——vy=576 会撞进液带 0.06px 渗出段,固防即失效
+  const slopeWorld = (): World => {
+    const w = new World(W, H, 11, 'npc-actuated-slope-test');
+    const st = w.store;
+    st.setTile(20, 36, 1);
+    st.setSlope(20, 36, 1);
+    st.setLiquid(20, 35, 255, 1);
+    return w;
+  };
+  const PX = 20 * TILE + 2;
+  const PY = 35 * TILE + 7;                     // vy = py + 20 − 10 = 577(>液带底 576.06)
+
+  it('致动前：坡面格 + 上方液体 → wet（纯在场位基线;上格清液 → 干,证明判定来自坡面支）', () => {
+    const w = slopeWorld();
+    expect(wetCollision(w.store, PX, PY, 18, 40).wet).toBe(true);
+    w.store.setLiquid(20, 35, 0, 0);            // 坡面支前提（上格液体）消失
+    expect(wetCollision(w.store, PX, PY, 18, 40).wet).toBe(false);
+  });
+
+  it('致动后：同格接线致动仍判 wet（原版 active() 无 inActive 检查;修复前 false = 翻转锚）', () => {
+    const w = slopeWorld();
+    w.store.setActuated(20, 36, true);
+    expect(wetCollision(w.store, PX, PY, 18, 40).wet).toBe(true);
+    // 三副本一致性：SmartSelect 玩家湿探针（同函数族 WetCollision 移植体）同 fixture 同判
+    expect(smartWetCollision(w.store, PX, PY, 18, 40)).toBe(true);
   });
 });

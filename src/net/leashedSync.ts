@@ -149,10 +149,13 @@ export function readLeashedMessage(r: NetReader): LeashedNetMsg | null {
   return null;
 }
 
-/** 物品 vid → 内部 item id（furniture 记录槽存内部 id；链路与 placeStyleOfVid 同源） */
+/** 物品 vid → 内部 item id（furniture 记录槽存内部 id；链路与 placeStyleOfVid 同源）。
+ *  ★2026-09-02 哨兵改 -1：ITEM_DEFS 下标 0 是合法位（恰为 vi_109_mana_crystal，
+ *  注册序首位），旧 0 哨兵会把 vid 109 判成「不存在」——消费侧 `!internalId /
+ *  <=0` 真值门曾把它从旅行浏览器/锚桩路径整条吞掉（JourneyPowersUI:721 实锤）。 */
 export function internalIdOfVid(itemVid: number): number {
   const key = VANILLA_ITEM_KEY_BY_ID[itemVid];
-  return key !== undefined ? (ITEM_BY_KEY[key] ?? 0) : 0;
+  return key !== undefined ? (ITEM_BY_KEY[key] ?? -1) : -1;
 }
 
 // ============================================================================

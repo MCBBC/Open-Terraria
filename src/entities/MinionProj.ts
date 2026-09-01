@@ -42,6 +42,15 @@ const FLAMEBURST_TOWER = new Set([663, 665, 667]);
  *  `num2 = num6` 覆写——旧"第12t"是初值误读,2026-08-31 批②修）、25t 结束、
  *  冷却 GetBallistraShotDelay */
 const BALLISTA_TOWER = new Set([677, 678, 679]);
+/** Utils.AngleLerp（Utils.cs:2154-2172）：圆周最短路插值（两分支均化简为
+ *  cur + wrap(target−cur)×amount——MathHelper.Lerp(cur, target±2π, amt) 展开同式）。
+ *  ★T9：AI_134 弩车 rotation 状态机消费（:69628 待机瞄准 0.08 / :69645 归位 0.05）。 */
+function angleLerp134(cur: number, target: number, amt: number): number {
+  let diff = target - cur;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return cur + diff * amt;
+}
 /** DD2 套装旗标消费位（2026-08-31 批②接线）。原版写入链 =
  *  ballistaPanic（buff 205,Player.cs:11933 读面——SquireT2 受击 AddBuff(205,300) :38526）：
  *  ★GB3（2026-08-31 清零批二波）：population 位补齐——Player.damage 授予端已落地，
@@ -4256,6 +4265,10 @@ export class MinionProj extends Entity {
         if (this.sInit === 0) {
           this.sInit = 1;
           this.sCool = ballistraShotDelayOf(game.player);
+          // ★T9 ai[0]==0 落位拍（:69610-69616）：direction=spriteDirection=
+          //   owner.direction；朝左时 rotation=π（本体贴图朝右-authored,背面朝向
+          //   的旋转基线由此起）——rotation 为 draw 侧 dir 组合的输入,见 draw 弩车支
+          this.rot = (game.player?.facing ?? 1) < 0 ? Math.PI : 0;
         }
         if (this.sFire === 0) {
           // 索敌门 = AI_134_Ballista_FindTarget（Projectile.cs:69465-69507）：
@@ -4265,8 +4278,23 @@ export class MinionProj extends Entity {
           const s134y = spotY134();
           const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900,
             { x: this.cx, y: s134y }, { deadBottomAngle: 0.75 });
-          if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
-          if (tgt && this.sCool <= 0) { this.sFire = 1; this.sFireT = 0; }
+          // ★T9 ai[0]==1 待机臂（:69627-69649）：有标 → rotation=AngleLerp(rot,
+          //   aim,0.08) 后 direction 取旋转半平面（|rot|>π/2 ⇒ −1,等价 cosθ<0 ⟺
+          //   v.X<0）；无标 → 向归位角（direction==−1?π:0）0.05 速率回摆。
+          //   rotation 只作 draw 输入,facing 派生序照原文（lerp→半平面→转火覆写）
+          if (tgt) {
+            this.rot = angleLerp134(this.rot,
+              Math.atan2(tgt.cy - s134y, tgt.cx - this.cx), 0.08);
+            this.facing = this.rot > Math.PI / 2 || this.rot < -Math.PI / 2 ? -1 : 1;
+          } else {
+            this.rot = angleLerp134(this.rot, this.facing < 0 ? Math.PI : 0, 0.05);
+          }
+          if (tgt && this.sCool <= 0) {
+            // ★T9 :69650-69655 转火拍 direction=Sign(v.X) 覆写（仅此瞬拍；非转火
+            // 拍方向恒=旋转半平面派生,lerp 滞后照原文）
+            this.facing = tgt.cx >= this.cx ? 1 : -1;
+            this.sFire = 1; this.sFireT = 0;
+          }
           if (this.sCool > 0) this.sCool--;
         } else {
           if (this.sFireT === 5) {
@@ -4284,6 +4312,11 @@ export class MinionProj extends Entity {
               vx = ((tgt.cx - this.cx) / d) * shotSpeed134;
               vy = ((tgt.cy - sy134) / d) * shotSpeed134;
             }
+            // ★T9 ai[0]==2 出弹拍（:69680-69690）：rotation=vector.ToRotation()
+            //   精确钉角（fallback vector=(direction,0) ⇒ 0/π），direction 再取
+            //   旋转半平面——先于出弹（NewProjectile 速度=同 vector×num3）
+            this.rot = Math.atan2(vy, vx);
+            this.facing = this.rot > Math.PI / 2 || this.rot < -Math.PI / 2 ? -1 : 1;
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               // 680 弩箭：AI_001 默认档（0.1@15 缓坠）——重力缺省走规格链（2026-08-14 对账）
               Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680, null),
@@ -5123,6 +5156,72 @@ export class MinionProj extends Entity {
         ctx.drawImage(sheet as CanvasImageSource,
           sx, sy, halfW, fh,
           -halfW / 2, -(fh - 4), halfW, fh);              // origin=(半宽/2, 半高−4)
+        ctx.restore();
+        return;
+      }
+    }
+    // ---- ★T9（2026-09-01）：弩车族 677/678/679 专绘（Main.cs:34097-34137 1:1，
+    //      锚/origin 缺省 = :33695/:33787、dir 缺省 = :30529-30532、公共尾绘 :34212）----
+    // 原版本族 = 塔座 Extra_83/84/85 + 本体帧两贴图叠绘；分支头 `dir ^=
+    // FlipHorizontally | FlipVertically`（:34099-34103）即 B2γ 登记的「双轴镜像背面
+    // 朝向」正身：
+    //  · dir 组合：缺省 None；spriteDirection==-1 先 FlipHorizontally（:30531），
+    //    分支头 XOR(FlipH|FlipV) ⇒ 净 FlipVertically（1^3=2）——XNA SpriteBatch 顶点
+    //    序 world = T·R(θ)·F·(p−o)（镜像先于旋转），AI_134 朝左时 rotation≈π
+    //    （落位 :69614 / 待机归位 :69645）⇒ R(π)·FlipV = 纯水平镜像 + 随瞄准角
+    //    连续偏转 = 「背面朝向」。canvas 同序等价：translate(anchor) → rotate(rot)
+    //    → scale(1,-1)（scale 施于旋转前局部系）。旧 scale(-1,1) 单轴式仅在
+    //    rot==0 时恰同净效果；rot≠0 时镜像轴错（本仓 rot 已随 T9 接 AI_134 状态机）。
+    //  · 塔座（:34105-34116）：position=proj.Bottom、origin=(w/2, h−2)、rotation=0、
+    //    effects = dir&FlipH【两侧恒 None】⇒ 塔座永不镜像；ai[2]==1（哨兵背包
+    //    携行）不画——本仓 carriedByBackpack 承接。
+    //  · 本体帧（:34117-34126 + 公共尾 :34212）：anchor = center+(0,+3)
+    //    （vector99.Y++、+=2；678 再 −4 / 679 再 −2）；origin = (fw/2 + ToDirectionInt(
+    //    dir&FlipH≠0)=−1 恒 [, 679 再 ×4 同式 −4], fh/2 [仅 679：非翻转侧 +4 /
+    //    翻转侧 −4，:34130-34134——垂直镜像绕 origin 翻转,±4 反补维持塔身贴地]),
+    //    rotation=proj.rotation、effects=dir。proj.scale=1（SetDefaults 无改）。
+    //  · F5① 折算表 [−29,−49]（PROJ_DRAW_OFFSET_DYN 677/678/679）系把本支锚误读为
+    //    Bottom 系（663/691 支 :34082/:34091 才显式重置 vector99=proj.Bottom；本支
+    //    继承 :33695 的 Center 缺省）⇒ 旧绘整体偏低 fh/2−bh−3=27px 且缺塔座,
+    //    本专绘替代（三表项退役,WeaponProj 侧注同）。
+    if (this.sentry && BALLISTA_TOWER.has(this.projId)) {
+      const sheet = projSprite(this.projId);
+      if (sheet) {
+        const framesN = Math.max(1, frames);
+        const fh = sheet.height / framesN;               // 56（projFrames[677/678/679]=6）
+        const fw = sheet.width;                          // 124/140/142
+        const flipV = this.facing < 0;                   // dir 净 FlipVertically（①）
+        let ay = 3;                                      // vector99.Y++、+=2（:34119-34121）
+        if (this.projId === 678) ay += -4;               // :34122-34123
+        if (this.projId === 679) ay += -2;               // :34125
+        let ox = fw / 2 - 1;                             // Size/2 + ToDirectionInt(恒假)=−1（:34127）
+        let oy = fh / 2;
+        if (this.projId === 679) {
+          ox -= 4;                                       // :34136 同式 ×4
+          oy += flipV ? -4 : 4;                          // :34130-34134
+        }
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+        // ② 塔座（先画,本体叠其上）：Bottom 系底心锚（gfxOffY 恒 0,塔不入水）
+        if (!this.carriedByBackpack) {
+          const baseTex = r.atlas?.ensureVImage(
+            `vanilla/Extra_${this.projId === 678 ? 84 : this.projId === 679 ? 85 : 83}.png`) ?? null;
+          if (baseTex) {
+            const by = this.y + this.h;                  // proj.Bottom
+            ctx.translate(this.cx, by);
+            ctx.drawImage(baseTex as CanvasImageSource, -baseTex.width / 2, -(baseTex.height - 2));
+            ctx.translate(-this.cx, -by);
+          }
+        }
+        // ③ 本体帧：anchor=center+(0,ay)、rotate(rot)、镜像=scale(1,−1)（FlipV）
+        ctx.translate(this.cx, this.cy + ay);
+        ctx.rotate(this.rot);
+        if (flipV) ctx.scale(1, -1);
+        const fimg = projFrameImg(this.projId, frame);
+        if (fimg) ctx.drawImage(fimg as CanvasImageSource, -ox, -oy);
+        else ctx.drawImage(sheet as CanvasImageSource, 0, Math.round(frame * fh), fw, fh,
+          -ox, -oy, fw, fh);
         ctx.restore();
         return;
       }

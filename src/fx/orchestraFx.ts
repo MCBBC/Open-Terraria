@@ -12,6 +12,7 @@
 //     请求端 SpawnParticlesDirect 本地直生 + Broadcast 排除发送者,两面对同一本体）。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
+import { playHurtVoice } from '../player/PlayerVoice';
 
 /** 测试/生成共用 rng 形参缺省 */
 type Rng = () => number;
@@ -259,6 +260,146 @@ export function deadCellsDownDashExplosionFx(
 export function mushroomBoiTargetFoundFx(game: GameHooks, x: number, y: number): void {
   game.spawnParticles?.(x, y, '#FFFF0A', 3, 0.6,
     { life: 15, grav: 0, damp: 0.97, size: 3.4, vy: -0.2 });
+}
+
+/**
+ * Spawn_DeadCellsBarnacleShotFiring（:2534-2560）：藤壶哨站弹 1026 出膛特效。
+ * producer = AI_028 1026 支 ai[1]==0 首子步门（Projectile.cs:27028-27038,
+ * clientOnly:true,PositionInWorld=Center、MovementVector=velocity）：
+ *   Item95 音 + 15×d2（NewDustPerfect 位±4、vel=moveDir.RotatedByRandom(0.19635)×
+ *   (i≥8?3+r×2:7+r×2)、α50/scale 1.2±0.05/fadeIn .5/noGravity）+ 5×d267
+ *   （±4、RotatedByRandom(0.09817)×r×8、α127、Lerp(DarkOliveGreen,White,r×0.25)、
+ *   fadeIn .6+r×.6、scale .5、noGravity）。
+ * ★2026-09-01 producer 锚补齐批：本仓 AI_197 出弹站（MinionProj 1025 支）首拍接线,
+ * clientOnly:true → 本仓 owner 权威广播补远端（同 34 型偏差口径）。
+ */
+export function deadCellsBarnacleShotFiringFx(
+  game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
+): void {
+  game.playSfxWav?.('Item_95', 1, x, y);                   // SoundID.Item95（:2537）
+  const ml = Math.hypot(moveX, moveY) || 1;
+  const bx = moveX / ml, by = moveY / ml;                  // SafeNormalize
+  const rot = (baseX: number, baseY: number, half: number): [number, number] => {
+    const ja = (rng() * 2 - 1) * half;                     // RotatedByRandom(half)
+    const c = Math.cos(ja), s = Math.sin(ja);
+    return [baseX * c - baseY * s, baseX * s + baseY * c];
+  };
+  for (let i = 0; i < 15; i++) {                           // 15×d2（:2539-2550）
+    const spd = i >= 8 ? 3 + rng() * 2 : 7 + rng() * 2;
+    const [vx, vy] = rot(bx, by, 0.19634954631328583);
+    const d = game.spawnDust?.(x + Math.floor(rng() * 8 - 4), y + Math.floor(rng() * 8 - 4),
+      0, 0, 2, vx * spd, vy * spd, 0, null, 1.2 + Math.floor(rng() * 11 - 5) * 0.01, true);
+    if (d) { d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true; }
+  }
+  for (let j = 0; j < 5; j++) {                            // 5×d267（:2551-2559）
+    const t = rng() * 0.25;                                // Lerp(DOG,White,r×.25)
+    const [vx, vy] = rot(bx, by, 0.09817477315664291);
+    const spd = rng() * 8;
+    const d = game.spawnDust?.(x + Math.floor(rng() * 8 - 4), y + Math.floor(rng() * 8 - 4),
+      0, 0, 267, vx * spd, vy * spd, 127,
+      { r: Math.round(85 + 170 * t), g: Math.round(107 + 148 * t), b: Math.round(47 + 208 * t), a: 255 },
+      0.5, true);
+    if (d) { d.fadeIn = 0.6 + rng() * 0.6; d.noGravity = true; }
+  }
+}
+
+/**
+ * Spawn_DeadCellsBarrelExplosion（:1710-1785）：木桶发射器弹 1023 Kill 爆编排——
+ * 4 层 Extra[269] 三帧扩张环（TTL 25/20/25/25,tint(52,208,254,20)×1/.25/.3/1,
+ * ScaleVelocity 2/8.5/2/3 per-25t,自旋 ±τ/25）+ 25 道 Extra[89] 辐条拖尾
+ * （0.04 步进全圆,vel=dir×(4+7r)、pos=center+dir×(10+90r)−vel×4、accel=−vel/25、
+ * FadeIn .2/Out .3,scale(0.4,0.8)×(0.6+0.6r),BehindPlayers）+ 7×d267
+ * （α127 色(100,200,255,127)、scale2、vel=(0,12).RotatedBy(τ·j)×r,noGravity）。
+ * FadingParticle 贴图池无登记：环层以 spawnParticles 单粒近似（尺寸=100px 帧 ×
+ * 峰值 scale 0.4-0.6 域,池偏差同 L5 收编规则）,辐条/尘两段逐参数直译。
+ * producer = Projectile.Kill 1023 支 :78567-78572（clientOnly:true）→ 本仓
+ * Arrow.barrel1023Burst 接线+owner 权威广播补远端（34 型口径）。
+ */
+export function deadCellsBarrelExplosionFx(
+  game: GameHooks, x: number, y: number, rng: Rng = Math.random,
+): void {
+  // 4 层扩张环（:1716-1770——帧序 0/101/101/202,TTL 25/20/25/25）
+  const rings: Array<[number, number, string]> = [
+    [25, 44, 'rgba(52,208,254,0.08)'],      // frame0 tint×1   scale 1→3
+    [20, 22, 'rgba(52,208,254,0.02)'],      // frame1 tint×.25 scale .5→(0.5+6.8/25·20≈2.9)×.5
+    [25, 40, 'rgba(52,208,254,0.024)'],     // frame1 tint×.3  同 p1 尺度
+    [25, 36, 'rgba(52,208,254,0.08)'],      // frame2 tint×1   scale .9→(.9+3/25·25·1.5≈3.9)×.9
+  ];
+  for (const [life, size, col] of rings) {
+    game.spawnParticles?.(x, y, col, 1, 0, { life, vx: 0, vy: 0, damp: 1, grav: 0, size });
+  }
+  for (let n = 0; n < 25; n++) {                           // 25 道辐条（:1772-1784,num+=0.04）
+    const ang = Math.PI * 2 * (n * 0.04);
+    const spd = 4 + 7 * rng();
+    const px = x + Math.cos(ang) * (10 + 90 * rng()) - Math.cos(ang) * spd * 4;
+    const py = y + Math.sin(ang) * (10 + 90 * rng()) - Math.sin(ang) * spd * 4;
+    const k = 1 - 1 / 25;                                  // AccelerationPerFrame = −vel/25
+    game.spawnParticles?.(px, py, 'rgba(52,208,254,0.08)', 1, spd,
+      { life: 25, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, damp: k, grav: 0,
+        size: 3.2 * (0.6 + 0.6 * rng()) });
+  }
+  for (let j = 0; j < 7; j++) {                            // 7×d267（:1786-1791 原文计段）
+    const ang = Math.PI * 2 * j;
+    const spd = rng();                                     // (0,12).RotatedBy(ang)×r
+    const d = game.spawnDust?.(x, y, 0, 0, 267,
+      -Math.sin(ang) * 12 * spd, Math.cos(ang) * 12 * spd, 127,
+      { r: 100, g: 200, b: 255, a: 127 }, 2, true);
+    if (d) d.noGravity = true;
+  }
+}
+
+/**
+ * Spawn_DeadCellsHeadEffect（dispatch :300-302 → :1920-1953）：枭首者头部 282
+ * 联动残影——2 粒 FadingPlayerShaderParticle（num 0→1 步 .5）：num2=.5×Remap(|move|,
+ * 0,10,.5,1)、TTL 15、vel=move×0.5、accel=vel/60、pos=载荷位+randUnit×num2×15×.5
+ * +circular(4,4)×num2+move×num−vel×.5、scale(0.6,1.2)×num2、Rotation=move 角+π/2。
+ * ★池偏差：FadingPlayerShaderParticle=玩家头贴图×cHead 染料着色的本体残影,本仓
+ * 粒子池无贴图/染料通道 → 暖色光点近似（结构=数量/寿命/速度耦合/位置公式逐值）。
+ * producer = Player.DoDeadCellsBeheadedParticles :24491-24510（head==282 逐帧,
+ * clientOnly:true）→ 本仓 Player.deadCellsBeheadedStep 接线+广播补远端（34 型口径）。
+ */
+export function deadCellsBeheadedHeadFx(
+  game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
+): void {
+  const num2 = 0.5 * remap(Math.hypot(moveX, moveY), 0, 10, 0.5, 1);
+  for (let num = 0; num < 1; num += 0.5) {
+    const f = rng() * Math.PI * 2;
+    const vx = moveX * 0.5, vy = moveY * 0.5;              // Velocity（:1936）
+    const px = x + Math.cos(f) * num2 * 15 * 0.5 + (rng() * 2 - 1) * 4 * num2
+      + moveX * num - vx * 0.5;
+    const py = y + Math.sin(f) * num2 * 15 * 0.5 + (rng() * 2 - 1) * 4 * num2
+      + moveY * num - vy * 0.5;
+    game.spawnParticles?.(px, py, 'rgba(255,200,120,0.55)', 1, Math.hypot(vx, vy),
+      { life: 15, vx, vy, damp: 1, grav: 0, size: 1.2 * num2 * 2 });
+  }
+}
+
+/**
+ * Spawn_StellarTune（:3675-3705）：星律吉他弹 856 Kill 星屑——5 粒 PrettySparkle
+ * （ang=τ·(i/5)+phase+NextFloatDirection×.25、vel=dir×1.5×(0.7,0.7)=1.05、TTL 60、
+ * acc=−vel/60、pos=载荷位+circular(12,12)×(0.7,0.7)、scale=(0.7,0.7)×(.2+.8r)、
+ * 色=1/2 掷：Lerp(Gold,HotPink,r) ∶ Lerp(Violet,HotPink,r)）。
+ * producer = Projectile.Kill 856 段 :72825-72831（clientOnly:true,invoker=owner）
+ * → 本仓 SparkleGuitarProj.killStellarTune 接线+广播补远端（34 型口径）。
+ */
+export function stellarTuneFx(
+  game: GameHooks, x: number, y: number, rng: Rng = Math.random,
+): void {
+  const phase = rng() * Math.PI * 2;                       // num（:3676）
+  const lerpCss = (a: [number, number, number], b: [number, number, number], t: number): string =>
+    `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
+  for (let i = 0; i < 5; i++) {                            // num2=5（:3678-3701）
+    const ang = Math.PI * 2 * (i / 5) + phase + (rng() * 2 - 1) * 0.25;
+    const spd = 1.5 * 0.7;                                 // vector2 = 1.5×(0.7,0.7)
+    const scale = 0.2 + rng() * 0.8;
+    const t = rng();
+    const col = rng() < 0.5
+      ? lerpCss([255, 215, 0], [255, 105, 180], t)         // Lerp(Gold,HotPink,r)
+      : lerpCss([238, 130, 238], [255, 105, 180], t);      // Lerp(Violet,HotPink,r)
+    game.spawnParticles?.(x + (rng() * 2 - 1) * 12 * 0.7, y + (rng() * 2 - 1) * 12 * 0.7,
+      col, 1, spd, { life: 60, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        damp: 1 - 1 / 60, grav: 0, size: 1.4 * scale });
+  }
 }
 
 // ==================== Shadowbeam 束铺撒（Spawn_Shadowbeam :1987-2005）===================
@@ -1451,13 +1592,18 @@ export function heroicisSetSpawnSoundFx(game: GameHooks, x: number, y: number): 
 
 /**
  * Spawn_PlayerVoiceOverrideSound（:2870-2885）：远端玩家受击变声播报——原版收端临时置
- * voiceOverride(sbyte)后 PlayHurtSound。仓内无 per-player 变声样本：按 PlaySound 锚直译为主受击音；
- * voiceOverride 状态字未建模登记。生产者 Player.cs:45813 clientOnly:false。
+ * player.voiceOverride=(sbyte)settings.UniqueInfoPiece 后 PlayHurtSound()（:2874-2883,
+ * 播毕还原）。★2026-09-01"变声字未建模"登记消账：uniqueInfo 字节 = 语音饰品
+ * Item.voiceSlot（DefaultToVoiceOverrideAccessory 家族,voiceSlotOfItem 同源域）→
+ * 直通 player/PlayerVoice 的 override 受击分派（hurtVoicePlan OVERRIDE_HURT 表,
+ * 与本地 PlayHurtSound 同一口）。生产者 Player.cs:45810-45818
+ * ItemCheck_UsePlayerSoundOverrideAccessory（clientOnly:false,uniqueInfo=voiceSlot）。
  */
 export function playerVoiceOverrideSoundFx(
-  game: GameHooks, _invokerSlot: number, x: number, y: number, _voiceOverrideByte = 0,
+  game: GameHooks, _invokerSlot: number, x: number, y: number, voiceOverrideByte = 0,
 ): void {
-  game.playSfxAt?.('hurt', x, y);
+  void x; void y;                                          // 原版按 invoker 玩家本位播放（无坐标衰减面）
+  playHurtVoice(game, { voiceOverride: voiceOverrideByte });
 }
 
 /** Spawn_NatureFly（:1323-1334）：森林花虻（hsl ≤.14/α170、寿命 180-300）。生产者

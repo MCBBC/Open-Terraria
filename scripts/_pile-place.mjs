@@ -137,8 +137,72 @@ const out = await page.evaluate(async () => {
     g['tryPlace'].call(g, base.click[0], base.click[1], wbDef);
     return { benchAt: st.get(qx, qy) === W, orphanCleaned: st.get(qx, qy - 1) !== WEED };
   };
+  // ---- ④ 三轮 review：多格豁免件部分覆盖（Check2x2Style 254 / CheckSuper 444·485 /
+  //      Check3x3 231 整件 wipe 真值,WorldGen.cs:52753/:48523/:53520）----
+  // 免除件与工作台占位矩形只交 1 格 → 原版 Check* 族=整件消除+特支效应
+  // （南瓜帧段掉 1725(:52831-52855)/蜂巢 → 655 弹落地蜂群(:48697+76611)/
+  //   蚁狮幼虫 → 放 582(:48731-48750)/幼虫 → 召蜂后(KillTile case 231)）。
+  const GRASS2 = idOfSheet(2);
+  const PUMPKIN = idOfSheet(254), HIVES = idOfSheet(444), ANTL = idOfSheet(485), LARVA3 = idOfSheet(231);
+  const enemyCount = (vid) => (g.entities.enemies ?? []).filter((e) => !e.dead && e.vanillaId === vid).length;
+  const dropCount = (vid) => (g.entities.drops ?? []).filter((d) => !d.dead
+    && String(items.ITEM_DEFS[d.itemId]?.key ?? '').startsWith(`vi_${vid}_`)).length;
+  // 合成多格件（帧 col*18 / row*18;bl=底左原点,底行=bl.y=占位矩形行）
+  const buildObj = (tid, blx, bly, ow2, oh2) => {
+    for (let dx = 0; dx < ow2; dx++) {
+      for (let dy = 0; dy < oh2; dy++) {
+        st.setTile(blx + dx, bly - (oh2 - 1) + dy, tid, dx * 18, dy * 18);
+      }
+    }
+  };
+  const envFloorGrass = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly + 1, GRASS2, 0, 0); };
+  const envFloorStone = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly + 1, STONE, 0, 0); };
+  const envCeil = (blx, bly, ow2) => { for (let dx = 0; dx < ow2; dx++) st.setTile(blx + dx, bly - 2, STONE, 0, 0); };
+  const objTest = async (tid, ow2, oh2, env) => {
+    wipe();
+    const blx = qx + 1, bly = qy;
+    env(blx, bly, ow2);
+    buildObj(tid, blx, bly, ow2, oh2);
+    const pre = { p1725: dropCount(1725), bees: enemyCount(210) + enemyCount(211), a582: enemyCount(582) };
+    holdItem(wbIdx);
+    stand(base.click[0], base.click[1]);
+    await new Promise((r) => setTimeout(r, 40));
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, base.click[0], base.click[1], wbDef);
+    let residue = 0;
+    for (let cx2 = blx - 1; cx2 <= blx + ow2; cx2++) {
+      for (let cy2 = bly - oh2; cy2 <= bly + 1; cy2++) {
+        if (st.inBounds(cx2, cy2) && st.get(cx2, cy2) === tid) residue++;
+      }
+    }
+    return {
+      residue,
+      benchPlaced: findTileIn(W, qx - 2, qx + 5, qy - 3, qy + 1) !== null,
+      p1725: dropCount(1725) - pre.p1725,
+      bees: enemyCount(210) + enemyCount(211) - pre.bees,
+      a582: enemyCount(582) - pre.a582,
+    };
+  };
+  // 支撑方向：挖掉南瓜下方草 → D-1 链 checkFurnitureSupport(南瓜底行) →
+  // Check2x2Style 底质门 → 整件消除 + 1725（原版 TileFrame 级联同款）
+  const pumpkinSupport = async () => {
+    wipe();
+    const blx = qx + 1, bly = qy;
+    envFloorGrass(blx, bly, 2);
+    buildObj(PUMPKIN, blx, bly, 2, 2);
+    const pre = dropCount(1725);
+    g['breakTile'].call(g, blx, bly + 1);   // 挖支撑草（等价 TileFrame 级联触发源）
+    let residue = 0;
+    for (let cx2 = blx - 1; cx2 <= blx + 2; cx2++) {
+      for (let cy2 = bly - 2; cy2 <= bly + 1; cy2++) {
+        if (st.inBounds(cx2, cy2) && st.get(cx2, cy2) === PUMPKIN) residue++;
+      }
+    }
+    return { residue, p1725: dropCount(1725) - pre };
+  };
   const res = {
-    ids: { pile: PILE, stone: STONE, weed: WEED, workbench: W, torch: TORCH, web: WEB },
+    ids: { pile: PILE, stone: STONE, weed: WEED, workbench: W, torch: TORCH, web: WEB,
+      pumpkin: PUMPKIN, hive: HIVES, antlion: ANTL, larva3: LARVA3, grass: GRASS2 },
     itemKey: wbDef.key, anchorProbe: vav.validateAnchors(st, qx, qy, rec18),
     base,
     bare: await singleShot('bare'),
@@ -149,12 +213,25 @@ const out = await page.evaluate(async () => {
     torchStone: torchDef ? await torchTest('stone') : 'no-torch-def',
     webSurvivor: await webSurvivor(),
     weedOrphan: await weedOrphan(),
+    pumpkinHalf: PUMPKIN >= 0 ? await objTest(PUMPKIN, 2, 2, envFloorGrass) : 'no-def',
+    hiveHalf: HIVES >= 0 ? await objTest(HIVES, 2, 2, envCeil) : 'no-def',
+    antlionHalf: ANTL >= 0 ? await objTest(ANTL, 2, 2, envFloorStone) : 'no-def',
+    larvaHalf: LARVA3 >= 0 ? await objTest(LARVA3, 3, 3, envFloorStone) : 'no-def',
+    pumpkinSupport: PUMPKIN >= 0 ? await pumpkinSupport() : 'no-def',
   };
+  const halfOk = (r) => typeof r === 'object' && r.residue === 0 && r.benchPlaced;
   res.verdict = res.base.placed && res.bare.placedHere && res.pile.placedHere && res.pile.cleanCleared
     && res.weed.placedHere && res.weed.cleanCleared && !res.stone.placedHere
     && (torchDef ? res.torchWeed.nowTorch && res.torchStone.obstacleKept : true)
     && res.webSurvivor.benchAt && res.webSurvivor.outerWebSurvives
-    && res.weedOrphan.benchAt && res.weedOrphan.orphanCleaned ? 'PASS' : 'FAIL';
+    && res.weedOrphan.benchAt && res.weedOrphan.orphanCleaned
+    // 多格豁免件整件消除 + 原版特支效应（南瓜掉 1725/蜂巢出蜂/蚁狮幼虫放 582）
+    && halfOk(res.pumpkinHalf) && res.pumpkinHalf.p1725 > 0
+    && halfOk(res.hiveHalf) && res.hiveHalf.bees > 0
+    && halfOk(res.antlionHalf) && res.antlionHalf.a582 > 0
+    && halfOk(res.larvaHalf)
+    && typeof res.pumpkinSupport === 'object' && res.pumpkinSupport.residue === 0
+    && res.pumpkinSupport.p1725 > 0 ? 'PASS' : 'FAIL';
   inv.slots[selIdx] = savedSlot;
   return res;
 });

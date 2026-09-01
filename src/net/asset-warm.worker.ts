@@ -5,6 +5,7 @@
 //   出: {type:'files', names:[...], bufs:[ArrayBuffer 转移]}  分批(≤128 文件/条)
 //       {type:'progress', done} / {type:'partDone', file, failed}
 //       {type:'done', failed}   全部跑完(failed=条目级失败总数;片下载 3 重试失败=片内 missing 全计)
+import '../workers/procShim';   // ★process 兜底首导入(见 workers/procShim.ts;2026-09-02 扩面)
 import { unzipSync } from 'fflate';
 
 const MIME: Record<string, string> = {

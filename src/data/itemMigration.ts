@@ -95,10 +95,13 @@ export function viKeyOfRetired(key: string): string | undefined {
   return vid !== undefined ? VANILLA_ITEM_KEY_BY_ID[vid] : undefined;
 }
 
-/** 退役键 → vi_ 内部 id(读档 remap 漏斗用) */
+/** 退役键 → vi_ 内部 id(读档 remap 漏斗用)。
+ *  ★2026-09-02 哨兵改 -1(见 leashedSync.internalIdOfVid 同批注)——内部 id 0 是
+ *  合法位(vi_109_mana_crystal),旧 0 哨兵+消费侧 >0 门会漏掉落在 0 号位的
+ *  remap 目标 */
 export function viIdOfRetired(key: string): number {
   const viKey = viKeyOfRetired(key);
-  return viKey !== undefined ? (ITEM_BY_KEY[viKey] ?? 0) : 0;
+  return viKey !== undefined ? (ITEM_BY_KEY[viKey] ?? -1) : -1;
 }
 
 // ---- 读档 remap 单漏斗(退役定义删除后生效;删除前是 no-op) ----
@@ -109,5 +112,5 @@ for (const [key, stable] of Object.entries(PRIV_ITEM_STABLE)) {
   if (ITEM_BY_KEY[key] !== undefined) continue;       // 定义幸存,照旧
   if (DELETED_KEYS.has(key)) continue;                 // 纯自创删除,弃
   const viId = viIdOfRetired(key);
-  if (viId > 0 && !ITEM_INTERNAL_OF_STABLE.has(stable)) ITEM_INTERNAL_OF_STABLE.set(stable, viId);
+  if (viId >= 0 && !ITEM_INTERNAL_OF_STABLE.has(stable)) ITEM_INTERNAL_OF_STABLE.set(stable, viId);
 }

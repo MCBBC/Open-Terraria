@@ -1807,7 +1807,13 @@ export class TownNPC extends Entity {
       const exemptAtk = this.atkState === 10 || this.atkState === 12
         || this.atkState === 14 || this.atkState === 15;
       if (!exemptAtk) {
-        const num9 = p && !p.dead ? (p.cx < this.cx ? -1 : 1) : 0;
+        // ★T6（2026-09-01）：num9 门照原文（:53871-53883）只剔 `!active ||
+        //   talkNPC != whoAmI`——【无 dead 门】（Player.KillMe 只置 dead，
+        //   不清 talkNPC；talkNPC=-1 仅 SetTalkNPC(-1)/stinky buff(Player.cs:10366)/
+        //   玩家重置(:56745)）⇒ 死亡对话者照常计朝向。旧 !p.dead 剔除系过度删除
+        //   （尸位对话朝向冻结=偏离；talking 入场门 CanBeTalkedTo 另查 dead,
+        //   那才是原版收 dead 的位）
+        const num9 = p ? (p.cx < this.cx ? -1 : 1) : 0;
         // 对话打断坐姿（ai[0]==5 非豁免列 → 归 0）；治疗态同被打断（★F2：
         // :53871-53875 无 13——弹已离手独立存活，重入由后续 NurseHeal 触发面承担）
         if (this.sitting) { this.sitting = false; this.sitTimer = 0; }
@@ -1866,11 +1872,15 @@ export class TownNPC extends Entity {
         })();
       if ((flag || feetDungeonTile) && restTp != null && !nearHome) {
         const pl = (game as unknown as { player: { x: number; y: number; w: number; h: number; dead: boolean } | null }).player;
-        // 矩形视野门（:53831-53846）：k=0 以 NPC 位中心、k=1 以 home(FindGoodRestingSpot) 位中心；
-        // 尺寸 = (sWidth+2×safeRangeX) × (sHeight+2×safeRangeY) = 2044×1278
+        // 矩形视野门（原文位 :53977-53998；k=0 以 NPC 位中心、k=1 以
+        // home(FindGoodRestingSpot) 位中心）；尺寸 = (sWidth+2×safeRangeX) ×
+        // (sHeight+2×safeRangeY) = 2044×1278。
+        // ★T6（2026-09-01）：门只查 `Main.player[l].active`（:53994）——【无 dead 门】
+        //   ⇒ 死亡玩家尸体在窗内照常算"可见"、照样压住回家传送。旧 pl.dead 剔除
+        //   系过度删除（死亡瞬间 NPC 会被拽回家=偏离），废。
         const rw = TP_SCREEN_W + TP_SAFE_X * 2, rh = TP_SCREEN_H + TP_SAFE_Y * 2;
         const visible = (cx: number, cy: number): boolean => {
-          if (!pl || pl.dead) return false;
+          if (!pl) return false;   // !active 槽（:53994 唯一剔除位）
           const rx = cx - rw / 2, ry = cy - rh / 2;
           return pl.x < rx + rw && pl.x + pl.w > rx && pl.y < ry + rh && pl.y + pl.h > ry;
         };

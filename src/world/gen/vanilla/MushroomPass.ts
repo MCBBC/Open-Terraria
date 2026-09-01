@@ -159,9 +159,22 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (tries > Math.floor(w / 4)) {
         x = rng.int(Math.floor(w * 0.025), Math.floor(w * 0.975) - 1); // 兜底带（cs:12620）
       }
-      const y = !!gs.seedFlags.remix
-        ? rng.int(gs.worldSurface + 50, gs.rockLevel - 51)
-        : rng.int(gs.rockLevel + 50, h - 301);                       // Main.rockLayer
+      // ★IIIII111（cs:12632-12647）：i am error 特化 Y 臂整缺——!errorWorld||notTheBees
+      //   走常规两支；否则 y=Next(200,H-300)，且「y<ws+300 ∧ x∈中央±300」时连 x 一起
+      //   重掷（x 重掷用主带区间，不回兜底带）直到落出中央浅区。骰耗差是 #20 蘑菇洞
+      //   边缘族首响的真源之一（旧码把云岛深掷臂当唯一 error 支、漏了本位）。
+      let y: number;
+      if (!gs.seedFlags.errorWorld || gs.seedFlags.notTheBees) {
+        y = !!gs.seedFlags.remix
+          ? rng.int(gs.worldSurface + 50, gs.rockLevel - 51)
+          : rng.int(gs.rockLevel + 50, h - 301);                     // Main.rockLayer
+      } else {
+        y = rng.int(200, h - 301);
+        while (y < gs.worldSurface + 300 && x > Math.trunc(w / 2) - 300 && x < Math.trunc(w / 2) + 300) {
+          x = rng.int(Math.floor(w * 0.2), Math.floor(w * 0.8) - 1);
+          y = rng.int(200, h - 301);
+        }
+      }
       flag = false;
       // ★IIIII88 双地牢拒带（WorldGen.cs:12655-12667）：dual 时先查
       //   IntersectsAnyPotentialDungeonBounds(rect(±100)) —— 命中直接置 flag 重掷，
@@ -200,9 +213,12 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (tries > Math.floor(w / 2)) break;
     }
   }
-  // SpreadGrass 全图扫描（cs:12721-12730 普通世界分支：InWorld(i,j,50)）
+  // SpreadGrass 全图扫描（cs:12721-12749 普通世界分支：InWorld(i,j,50)）
+  // ★IIIII111（cs:12709-12727）：i am error 特化臂——errorWorld 走【全列 0..H】扩散
+  //   （从天顶云带起扫），非 error 世界才钳 worldSurface 起。 spreads 同式零掷差。
   for (let x = 0; x < w; x++) {
-    for (let y = gs.worldSurface; y < h; y++) {
+    const yStart = !!gs.seedFlags.errorWorld ? 0 : gs.worldSurface;
+    for (let y = yStart; y < h; y++) {
       if (x >= 50 && x < w - 50 && y >= 50 && y < h - 50 && st.flags[st.idx(x, y)]) {
         spreadGrassOnce(st, x, y, MUD, MUSH_GRASS);
       }

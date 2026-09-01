@@ -512,7 +512,9 @@ describe('信封防御（NetModule.Deserialize :22-41 default 分支）', () => 
       const id = internalIdOfVid(vid);
       expect(id).toBeGreaterThan(0);
     }
-    expect(internalIdOfVid(999999)).toBe(0);
+    // ★2026-09-02 哨兵改 -1（def 下标 0=合法位,恰为 vi_109_mana_crystal;
+    //   见 leashedSync.internalIdOfVid 注）
+    expect(internalIdOfVid(999999)).toBe(-1);
     // 风筝 vid 的 projType 与捕获小动物的 makeNPC 双向可查（房主校验链数据源）
     expect(KITE_ITEM_PROJ[4610]).toBe(822);
   });

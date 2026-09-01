@@ -35,7 +35,8 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
   // ★★对抗修复批②2026-09-01（C-F1 近链/C-F4 受理核/C-F6 松露条件）
   queryRoom, acceptTownNPCAtHouse, checkHousesNearAPlayer,
-  expandedMushroomCount, truffleHomeConditionOk, MUSHROOM_TILE_THRESHOLD } from '../world/Housing';
+  expandedMushroomCount, truffleHomeConditionOk, truffleSurfaceOk,
+  MUSHROOM_TILE_THRESHOLD } from '../world/Housing';
 import type { NearChainNpcView } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
@@ -1201,6 +1202,13 @@ export function starCloakStarInfo(accVids: number[], starCloakFlag: boolean): { 
     active: starCloakFlag || veil || bee || mana || snake,
     projType: snake ? 1133 : mana ? 723 : bee ? 724 : veil ? 725 : 726,
   };
+}
+
+/** 黄蜂枪每击掷骰（Player.cs:48809-48820 ItemCheck_Shoot 1155 专支）：数量 =
+ *  Main.rand.Next(2, 5) = 2..4 只/击（C# Next(min,max) 右开）。纯函数导出供金标
+ *  直测（beeRetaliateRoll 同法）；速度散布 ±Next(-35,36)×0.02 在调用侧逐只重掷 */
+export function waspGunVolleyRoll(rnd: () => number): number {
+  return 2 + Math.floor(rnd() * 3);
 }
 
 /** 蜂巢族受击反击掷骰（Player.cs:37871-37907）：数量 num19 =
@@ -11033,6 +11041,16 @@ export class Game implements GameHooks {
       } else if (b3Vid === 4131 || b3Vid === 5325) this.throwVoidLens(heldDef, b3Vid);
       else if (b3Vid === 859) this.throwBeachBall(heldDef);
       else if (b3Vid === 4743) this.throwFootball(heldDef);
+    } else if (heldDef && inp.rightDown && !this._prevRightDown && this.player.useTime === 0) {
+      // 旧世界跑酷指南 6190↔6195 右键互换（★T2 批 2026-09-01；Player.cs:31764-31877
+      // ItemCheck_ManageRightClickFeatures 快换表——SetDefaults 无 useStyle 族物品
+      // 的唯一消费面）。原版门 = controlUseTile + 边沿 + 无使用在途（仓内
+      // rightDown 边沿 + useTime===0 同式,swapVoidBagVisual 同位先例）；
+      // 成功吞边沿防 tile 互动二次消费
+      const pbVid = viIdFromKey(heldDef.key) ?? -1;
+      if ((pbVid === 6190 || pbVid === 6195) && this.swapParkourBookVisual(pbVid)) {
+        this.input.rightDown = false;
+      }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 75) {
       // 坠落星 75 点击消耗（Item.cs:2283-2297 useStyle4/useAnimation=useTime=17/
       // consumable/UseSound Item4；Player.cs:42602 消耗门无豁免——手持点击即
@@ -13954,6 +13972,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.useTime = this.cycleCooldown(critVid,
             Math.max(1, Math.round(cw.useTime * (ps?.spd ?? 1))));
           this.useSwing(def, angB, ps?.spd ?? 1);
+          this.input.mouseDown = false;
+          break;
+        }
+        // ---- ★黄蜂枪 1155 多发 volley（2026-09-01 缺失子系统补齐批 T1；与上方 1121
+        //      蜂枪专支在原版相邻——Player.cs:48809-48820 ItemCheck_Shoot 专支）：
+        //      每击 n = Next(2,5) = 2..4 只；每只 vx/vy += Next(-35,36)×0.02 双轴散布
+        //      （原版 num4/num5 已归一到 shootSpeed 9，散布后【不】再归一）；弹 189 =
+        //      aiStyle36 蜂族（Arrow 追踪内核全量在位：speed 9/accel 0.2 @P36 表、
+        //      30update 索敌延迟、800 曼哈顿+CanHit、入水消亡、pen 3/armorPen 10/
+        //      timeLeft 600/extraUpdates 3 全自 vanilla-projectiles.json 数据面）。
+        //      ★定谳（999 陷阱拆除）：Projectile.cs:13752-13760 的 OnHit 放蜂支
+        //      `type == 999` 是【HiveFive 悠悠球弹 999】（物品 5294 Hive Five），
+        //      与黄蜂枪无关——1155 全部行为都在出手侧（本支），命中侧无放蜂。
+        //      Hive Pack（3333 strongBees）加成 = Damage 面 :12855-12858
+        //      `case 189: num6 += 5`（穿甲 +5）+ :12905-12907 `num7 += 5`
+        //      （终伤 +5，暴击翻倍前）——189 只由 1155 生成，出生位一次注入
+        //      （equipStats 玩家侧池仓内本就 spawn 期捕获，与 GetArmorPenetration
+        //      注入时机同档；暴击翻倍序：+5 在 this.damage，crit ×2 同拍放大=同式）----
+        if (critVid === 1155) {
+          const angW0 = Math.atan2(mzMouseY - this.player.cy, mzMouseX - this.player.cx);
+          const wzA = this.resolveShotAnchor(def.key, angW0);
+          const angW = Math.atan2(mzMouseY - wzA.y, mzMouseX - wzA.x);
+          this.player.facing = Math.cos(angW0) > 0 ? 1 : -1;
+          const wvx0 = Math.cos(angW) * cw.shootSpeed, wvy0 = Math.sin(angW) * cw.shootSpeed;
+          const nWasp = waspGunVolleyRoll(Math.random);
+          // Hive Pack（蜂巢背包 3333）:12855/:12905 双 +5——终伤 +5 在暴击翻倍前，
+          // 故直接并入 this.damage（crit 时 ×2 同拍放大=原版 (num7+5)×2 序）
+          const hiveWasp = this.player.equipStats.strongBees === true;
+          for (let iw = 0; iw < nWasp; iw++) {
+            const wasp = new Arrow(wzA.x, wzA.y,
+              wvx0 + nrand(35) * 0.02, wvy0 + nrand(35) * 0.02,
+              cw.damage + (hiveWasp ? 5 : 0), cw.knockback, 189, null, { grav: 0 });
+            wasp.frostEligible = false;   // magic=true 弹（SetDefaults 189 :2779）不吃冰霜引擎
+            // 类别通道走数据面（vanilla-projectiles.json 189 magic=true = SetDefaults
+            // 直写 → projClassOfProjId(189)='magic'，无需 1121 那样的 spawn 位覆写）
+            wasp.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            wasp.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0) + (hiveWasp ? 5 : 0);
+            this.entities.add(wasp, 'projectiles');
+          }
+          this.playUseSound(critVid, 'tink');   // UseSound Item_11（vanilla-itemusesound 表值）
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.useSwing(def, angW, ps?.spd ?? 1);
           this.input.mouseDown = false;
           break;
         }
@@ -17831,6 +17891,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!st.inBounds(tx, ty + 1) || !st.inBounds(tx, ty - 1)) return false;
     const aboveActive = st.isActive(tx, ty - 1);
     const belowActive = st.isActive(tx, ty + 1);
+    // ★口径备案：PlaceDye 上/下邻读的是裸 .active()，style6 下邻与 SolidTile 内才是
+    //  nactive()——两者仅在邻格带致动器时分歧。本路由统一取仓内 nactive 口径
+    //  （TileStore.isActive≡原版 nactive,Tile.cs:383-394），与既有 'dyeplant' 失撑链
+    //  同一口径（checkDecorSupport case 'dyeplant'），不混两种活性位
     const spot: DyePlantSpot = {
       style,
       aboveActive, aboveSheet: aboveActive ? sheetAt(st, tx, ty - 1) : -1,
@@ -22730,6 +22794,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 此前误挂"蜂王针"名号）；数据面 vanilla-projectiles.json 保持 SetDefaults
         // 直写真值（combat-stitch-final 金标断言 projClassOfProjId(181)=null 不变），
         // 类别通道走 Arrow.projClass 实例显式字段（spawn 位覆写机制的仓内形态）。
+        // ★T1 已实装（2026-09-01）：黄蜂枪 1155（189 消费者,case 'magic' 专支）
+        // 上线——189 类别旗走数据面（SetDefaults magic=true 投影）无需覆写。
         bee.projClass = 'melee';                       // 运行时旗覆写（原版 spawn 位）
         bee.critChance = Math.min(1, (4 + p.critChance('melee')) / 100);  // 恢复近战池掷
         bee.armorPen = p.equipStats.armorPen + p.meleeArmorPen;           // GetArmorPenetration(melee)
@@ -24505,7 +24571,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （原版 Main.rand 域,非确定性判定,与掷流对拍无关,登记）。
    *  ★★对抗修复批④2026-09-01（C-F5）：臭虫否决门落 Housing.acceptTownNPCAtHouse
    *  内（SpawnTownNPC cs:5348-5355 同序——先于 ScoreRoom）,含臭虫房 = Blocked 级
-   *  早退【不缓存】lastFoundHouse、不迁入;本函数零改动即生效（近链同检位）。 */
+   *  早退【不缓存】lastFoundHouse、不迁入;本函数零改动即生效（近链同检位）。
+   *  ★对抗修复批⑤B 2026-09-01（B1|R1-F1）：RoomNeeds 家具档门同位收编（vanilla 门序
+   *  cs:5340 StartRoomCheck→:5344 RoomNeeds→:5348 臭虫→:5356 ScoreRoom）,无家具房
+   *  在更前一支即 Blocked 不缓存——近链迁入支零改动即拒绝。 */
   private checkForHousesNearPlayer(): void {
     const w = this.world;
     if (!w?.store) return;
@@ -24582,14 +24651,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 内室底在地表带内且外扩盒蘑菇族 ≥100。不过 → 转 homeless 并回收占位
       // （下轮 ①/A 近链重找;与下方 rehouse 失败分支同处置形态）。
       if (n.vanillaId === 160 && !this.world.flags.unlockedTruffleSpawn) {
-        const rq = queryRoom(st, hx, hy, { ignoreNeeds: true });
-        let ok = false;
-        if (rq.room) {
-          let ry2b = 0;
-          for (const ti of rq.room.tiles) { const ty = (ti / st.w) | 0; if (ty > ry2b) ry2b = ty; }
-          ok = ry2b <= Math.floor(this.world.groundLevel)
-            && truffleHomeConditionOk(st, hx, hy);
-        }
+        // ★对抗修复批⑤B 2026-09-01（B4|R1-F5）：松露地表门（roomBottom≤floor(worldSurface),
+        // groundLevel 同标量口径）收编 Housing.truffleHomeConditionOk 单源并补特小世界
+        // 旁路 Main.NoFunctionalSurface（worldSurface<=30.0,Main.cs:2721）——①'' 复核/
+        // ③ 新住户/housingAssign 三处不再各持内联副本。复核含蘑菇外扩盒计数一体判定。
+        const ok = truffleHomeConditionOk(st, hx, hy, { surfaceLevel: this.world.groundLevel });
         if (!ok) {
           n.home = null;
           n.leashHome = false;
@@ -24638,11 +24704,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   近玩家回收链是独立通路,vanilla 里它同样不依赖锚池）
     if (anchorPool.length === 0) return;
     // ★★对抗修复批②2026-09-01（B-5 昼上午门）：自然生成段（③新住户/流浪兜底/宠物）
-    // 的唯一原版调用位 SpawnHomelessNPC 带昼上午门（Main.cs:66028-66036 dayTime &&
-    // time<27000,travel 同窗 :66003-66009）——新住户到达只能发生在上午;复核/自动
+    // 的唯一原版调用位 SpawnHomelessNPC 带昼上午门（1457 实测 Main.cs:66026 dayTime &&
+    // time<27000,travel 同窗 :65993）——新住户到达只能发生在上午;复核/自动
     // 分配（既有住民面）白天全程照跑（上方 isDay 总门）。Main.time 27000=正午
     // （4:30AM 起 54000 制中点）→ 本仓绝对钟面口径 timeOfDay<0.5。
-    if (!(this.world.clock.isDay && this.world.clock.timeOfDay < 0.5)) return;
+    // ★对抗修复批⑤B 2026-09-01（B4|R1-F6）：补 !IsFastForwardingTime() 合取
+    // （vanilla 同窗 ：66026 字面——晷快进期间流浪生成链整体停摆）。
+    if (!(this.world.clock.isDay && this.world.clock.timeOfDay < 0.5)
+      || this.world.isFastForwardingTime()) return;
     const merchantHere = has('merchant');
     const allow = (key: string) => this.townNpcSpawnAllowed(key);
     const n = npcs.length; // num40：在场城镇 NPC 总数（含守卫老人，原版同）
@@ -24708,8 +24777,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     let viaLastFoundHouse = false;
     // ★★对抗修复批②2026-09-01（A-3 LastFoundHouse 快路径，SpawnHomelessNPC
     // cs:4979-4994）：上轮近链/本轮更早缓存 lastFoundHouse 时【优先】以它作
-    // SpawnTownNPC(LastFoundHouse) 落点——受理核 acceptTownNPCAtHouse（StartRoomCheck+
-    // RoomNeeds+ScoreRoom 合并面,extraSolid{379} 内建）成功即把快路径房当本轮安置位；
+    // SpawnTownNPC(LastFoundHouse) 落点——受理核 acceptTownNPCAtHouse 按 vanilla 门序
+    // 重建（queryRoom 围合泛洪 → RoomNeeds 家具档 → 臭虫否决 → ScoreRoom 打分,
+    // ★对抗修复批⑤B 2026-09-01 B1 补回 RoomNeeds 门;extraSolid{379} 内建）,
+    // 成功即把快路径房当本轮安置位；
     // 失败走既有 findFreeHouse 锚扫。成功后置 homelessSpawnTimeout=54000 并清缓存
     // （★纠错：原版置 54000 的位置只在快路径成功支 :4986-4989；此前本仓在流浪兜底
     // 生成分支置值属错位,该处原版只置 homelessDespawn 等价物——已删）。
@@ -24729,7 +24800,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const name = Lang.npcName(id) ?? pick;
     // NPCID.Sets.IsTownPet（NPCID.cs:4444）= 宠物三只+全部城镇史莱姆：WorldGen.
-    // IsThereASpawnablePrioritizedTownNPC(:4855) 对本集免房放行——无房时在出生点
+    // IsThereASpawnablePrioritizedTownNPC(1457 实测 :4801) 对本集免房放行——无房时在出生点
     // 附近流浪生成（不设 home），不占用 SpawnHomelessNPC 的白天/有家锚点门
     const TOWN_PET_KEYS = new Set(['town_bunny', 'town_cat', 'town_dog',
       'town_slime_blue', 'town_slime_cool', 'town_slime_old', 'town_slime_clumsy',
@@ -24748,19 +24819,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    // 松露人特判（WorldGen.CheckSpecialTownNPCSpawningConditions :4919-4946）：
+    // 松露人特判（WorldGen.CheckSpecialTownNPCSpawningConditions :4890-4918）：
     // unlockedTruffleSpawn 未置时房间须整体在地表（roomY2 ≤ worldSurface），
     // 且蘑菇族 tile（70 草/71 植/72 树/528 藤）≥ SceneMetrics.MushroomTileThreshold
     // (=100)——★★对抗修复批②2026-09-01（E-11）：计数域从「房内 tiles」扩成
-    // GetTestedRoomBounds 外扩盒（±46 同构,expandedMushroomCount 单源）；不满足则本轮跳过
+    // GetTestedRoomBounds 外扩盒（±46 同构,expandedMushroomCount 单源）；不满足则本轮跳过。
+    // ★对抗修复批⑤B 2026-09-01（B4|R1-F5）：surfOk 收编 truffleSurfaceOk 单源,
+    // 并补 NoFunctionalSurface 特小世界旁路（worldSurface<=30.0,Main.cs:2721）。
     if (house && pick === 'truffle') {
       let roomBottom = 0;
       for (const ti of house.tiles) {
         const ty = Math.floor(ti / st.w);
         if (ty > roomBottom) roomBottom = ty;
       }
-      const surfOk = !!this.world.flags.unlockedTruffleSpawn
-        || roomBottom <= Math.floor(this.world.groundLevel);
+      const surfOk = truffleSurfaceOk(
+        !!this.world.flags.unlockedTruffleSpawn, roomBottom, this.world.groundLevel,
+      );
       if (!surfOk || expandedMushroomCount(st, house) < MUSHROOM_TILE_THRESHOLD) {
         return;   // 房不合格：本轮放弃（下轮重试）
       }
@@ -25764,7 +25838,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (npc.vanillaId === 160 && !this.world.flags.unlockedTruffleSpawn) {
       let ry2b = 0;
       for (const ti of q.room.tiles) { const ty = (ti / this.world.store.w) | 0; if (ty > ry2b) ry2b = ty; }
-      const surfOk = ry2b <= Math.floor(this.world.groundLevel);
+      // ★对抗修复批⑤B 2026-09-01（B4|R1-F5）：地表门收编 truffleSurfaceOk 单源
+      // （NoFunctionalSurface 特小世界旁路,Main.cs:2721;unlocked 置位时整门免检——
+      // 本支守卫已保证未置位,传实旗保持语义诚实）
+      const surfOk = truffleSurfaceOk(
+        !!this.world.flags.unlockedTruffleSpawn, ry2b, this.world.groundLevel,
+      );
       const mushOk = expandedMushroomCount(this.world.store, q.room) >= MUSHROOM_TILE_THRESHOLD;
       if (!surfOk || !mushOk) {
         console.info(`[housing] truffle assign 拒绝 @(${x},${y}) surf=${surfOk} mush=${mushOk}`);
@@ -27722,7 +27801,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    // 到访 roll 门（Main.cs:64483-64484）：!IsFastForwardingTime()（晷快进中不刷）&& 白天上午
+    // 到访 roll 门（1457 实测 Main.cs:65991-66002,roll 条件 ：65993）：!IsFastForwardingTime()
+    // （晷快进中不刷）&& 白天上午——★对抗修复批⑤B 2026-09-01（B4|R1-F6 核对面）：
+    // 合取在本仓已齐（下方两道 return 即该窗）,仅订正陈旧行号引注
     if (w.isFastForwardingTime()) return;
     if (!w.clock.isDay || t >= 0.5) return;                       // 仅上午（Main.time<27000）
     // 概率吃 dayRate（Main.cs:64484-64491）：num6=max(dayRate,1)、num7=(27000/num6)×4，
@@ -30399,6 +30480,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     slot.id = defIdxTarget;                               // ChangeItemType：id 换/堆叠不动（:47841-47850）
     // :31870 legacy PlaySound(7)=Grab 本仓等价 'pickup';非 UseSound 族不占使用冷却
     this.sfx.play('pickup');
+    this.cb.onInventoryChanged();
+    return true;
+  }
+
+  /** 手持旧世界跑酷指南激活态互换（★T2 批 2026-09-01；Player.cs:31804-31808
+   *  ItemCheck_ManageRightClickFeatures 快换表支：case 6190→num=6195 /
+   *  case 6195→num=6190,type 缺省 7=legacy Grab 音；:31869-31874
+   *  releaseUseTile=false + mouseRightRelease=false + ChangeItemType(num)）。
+   *  同 swapVoidBagVisual（4131↔5325）仓内形态：仅换 def id（ChangeItemType
+   *  :47841-47850 stack/prefix 不动）、PlaySound(7)→'pickup'、非 UseSound 族
+   *  不占使用冷却。★SetDefaults 6190（:47656-47660）无 useStyle/useTime/
+   *  useAnimation/accessory ——左键整支无使用（combatWeapon 返 null）,唯一
+   *  消费面 = 本右键互换 + 全物品栏在场授予 oldStyleParkour（Player.ts F5③）。
+   *  两型 IsConsideredSameItemAsType（Item.cs:47878-47884）→ ITEM_ONLY_NEED_ONE_
+   *  OVERRIDE 已含 6190/6195。 */
+  private swapParkourBookVisual(heldVid: number): boolean {
+    const target = heldVid === 6190 ? 6195 : heldVid === 6195 ? 6190 : -1;
+    if (target < 0) return false;
+    const inv = this.player.inv;
+    const defIdxTarget = invIndexOfVanilla(target);
+    if (defIdxTarget < 0) return false;
+    const slot = inv.slots[inv.selected];
+    if (!slot) return false;
+    slot.id = defIdxTarget;                               // ChangeItemType：id 换/堆叠不动
+    this.sfx.play('pickup');                              // :31872 legacy PlaySound(7)=Grab
     this.cb.onInventoryChanged();
     return true;
   }

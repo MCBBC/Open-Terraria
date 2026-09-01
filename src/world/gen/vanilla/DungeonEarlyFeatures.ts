@@ -56,6 +56,12 @@ export interface DECtx {
   /** data.CanGenerateFeatureAt(this,x,y) 全链（InWorld5/wall350/入口盒/protected/
    *  features.Boxes/rooms.OuterBounds）——由 DungeonPass.featOK(x,y,0) 同源供给。 */
   canGenerateFeatureAt(x: number, y: number): boolean;
+  /** ★IIIII108c 第④刀（DropTrap 盒注册 veto 面）：成功生成后上报最终 Bounds——
+   *  cs DungeonDropTrap.cs:355-357 成功尾 SetBounds(i−n11−1, n10−n12, i+n11+1, n26)
+   *  + ctor addToFeatures 默认 true 入 data.dungeonFeatures；CanGenerateFeatureAt
+   *  恒 false ⇒ 该盒成为后续一切特征的拒收区。L/R/T/B=C# SetBounds 直值
+   *  （hitbox=Rectangle(L,T,R−L,B−T) 半开，调用方 DBnd.set 同构，零换算）。 */
+  registerDropBox?(box: { L: number; T: number; R: number; B: number }): void;
 }
 
 const fr = Math.fround;
@@ -292,7 +298,10 @@ export function dropTrap(
       }
     }
   }
-  void num26;                                                             // 终 Bounds 供调用方登记
+  void num26;
+  // ★IIIII108c 第④刀：终 Bounds 上报（cs:355 成功尾 SetBounds 直值；失败路径无此调用
+  //  ——ctor 登记实例虽恒在,但 generated=false 的实例不参与 veto 扫描,与 cs 等价）
+  ctx.registerDropBox?.({ L: i - num11 - 1, T: num10 - num12, R: i + num11 + 1, B: num26 });
   return true;
 }
 

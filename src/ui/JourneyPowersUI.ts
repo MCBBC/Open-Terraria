@@ -60,7 +60,10 @@ function internalIdOfVid(vid: number): number {
       }
     }
   }
-  return vidReverse.get(vid) ?? 0;
+  // ★2026-09-02 哨兵 -1（见 leashedSync.internalIdOfVid 注）——ITEM_DEFS[0]
+  //  是合法位,旧 ??0 让魔力水晶(vid 109→def0)在浏览器 mousedown 的 !internalId
+  //  门被当「无此物」静默退场
+  return vidReverse.get(vid) ?? -1;
 }
 
 /** PowerId 常量（CreativePowerManager.Initialize 注册序 :90-104 = JOURNEY_POWER_REGISTRY id） */
@@ -718,7 +721,8 @@ function makeCell(game: Game, vid: number, x: number, y: number): HTMLButtonElem
     b.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       const internalId = internalIdOfVid(vid);
-      if (!internalId) return;
+      if (internalId < 0) return;   // ★-1 哨兵(0=合法 def 位,v 109 魔力水晶)
+      
       const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
       giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
       game.sfx.play('menuTick', 1);

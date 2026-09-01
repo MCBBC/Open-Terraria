@@ -2,6 +2,7 @@
 // 全程纯计算（generateWorld/settleWorldLiquids/loadSaveData 均无 DOM 依赖），
 // 结果 packWorld 转移所有权回传。错误按请求 id 回传，绝不静默 pending。
 /// <reference lib="webworker" />
+import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { generateWorld } from '../world/gen/WorldGen';
 import { settleWorldLiquids } from '../world/liquid/settle';
@@ -175,10 +176,15 @@ ctx.onmessage = async (e) => {
       return;
     }
   } catch (err) {
+    const e = err as Error & { cause?: unknown };
+    // ★cause 透传(2026-09-02):generateWorld 的槽包装 Error 把原始栈藏在 cause,
+    //   只回传 wrapped.stack 会永远指到包装点(本次 pass4 'process is not defined'
+    //   定位即靠此拿到真栈)
     ctx.postMessage({
       id: req.id, type: 'error',
       message: err instanceof Error ? `${err.message}` : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
+      stack: (err instanceof Error ? err.stack : undefined)
+        + (e.cause instanceof Error ? `\n--cause--\n${e.cause.stack ?? ''}` : ''),
     });
   }
 };

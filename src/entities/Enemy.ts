@@ -2536,7 +2536,8 @@ export class Enemy extends Entity {
     // EncourageDespawn(10) 封顶后离屏 ~10t 即消；屏内每 tick 被重置抵挡——
     // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
     // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
-    // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
+    // 同样倒数——玩家缺席（联机空场/无候选）时视为离屏（原版 CheckActive 不依赖
+    // 玩家存活：死亡玩家 active 仍真，照常计屏内，见下方 T6 注）
     if (this.vanillaId === 488
       || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
       || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))
@@ -2553,8 +2554,18 @@ export class Enemy extends Entity {
       // 四塔同样豁免（DoesntDespawnToInactivity 名单 NPC.cs:78634-78635 含 422/493/507/517
       // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
     } else if (!this.def.boss || this.despawnEncouraged) {
-      // 屏内判定跳过死亡玩家（原版 CheckActive 只用 active 玩家重置 timeLeft：
-      // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）。
+      // ★T6（2026-09-01，RV-R4 附带定罪）：候选剔 dead 系过度删除，废——原版扫描门
+      //   只有 `if (!Main.player[i].active) continue;`（:78706-78710），死亡玩家
+      //   active 仍真（Player.KillMe 只置 dead/respawnTimer，不动 active；active=false
+      //   仅离线/槽回收）⇒ 尸体照样吃两窗几何：activeRange 盒照常置 flag2 保命、
+      //   屏幕盒照常 timeLeft=750 + 清鼓励旗——死亡玩家屏内仍阻挠 despawn 续命。
+      //   旧「尸体不算屏内」（M11 dev 注）双向偏离：死亡瞬间全场怪离屏倒数、Boss
+      //   鼓励消散在尸位屏内提前成立。
+      //   同口径收窄参照：原版【不查 dead】的门 = CheckActive :78706 /
+      //   CanAnyPlayerSeeThisTile :43877 / AI_007 回家传送视野门 :53994 /
+      //   对话朝向 num9 :53871-53883（KillMe 不清 talkNPC）；【查 dead】的门 =
+      //   TargetClosest :78459 / stinky 玩家扫 :54081 / CanBeTalkedTo
+      //   Player.cs:3872 / dryad 咏唱 Projectile.cs:41952——后者本仓均已保留。
       // M11：原版 :78703-78720 扫全部 255 槽——任一活跃玩家在屏内即重置；
       // 联机下访客在屏内同样压制 despawn（单机 = 仅本地，零回归）
       // 消散副作用（bossFled/风气球挂载/蠕虫整链）——两条路径共用
@@ -2583,11 +2594,11 @@ export class Enemy extends Entity {
       //    ——这是 EncourageDespawn 钉低值的唯一抵消点:怪天亮向上飞,**在屏内绝不
       //    消散**;飞出屏幕瞬间 reset 停止 → 剩余 timer≈封顶值(10t)→ 秒消散
       //  ④timer 每帧无条件−1,归零 → flag2 强制翻假(:78791-78794,无视①②保命门)
-      const cands = (game.candidatePlayers?.() ?? [localPlayer as Player])
-        .filter((q) => !!q && !q.dead);
+      const cands = game.candidatePlayers?.() ?? [localPlayer as Player];
       if (cands.length > 0) {
         let flag2 = false;
         for (const q of cands) {
+          if (!q) continue;   // !active 槽（候选表空位）——唯一合法剔除位(:78706)
           // activeRangeX/Y=4032/2268px → |Δ|<半幅(half=252/142 格),中心距近似
           // (±玩家半宽 ≤1tile 登记差);此窗曾漏接=远处怪少一道提前清账门
           if (Math.abs(q.cx - this.cx) < TILE * 252
@@ -2602,7 +2613,7 @@ export class Enemy extends Entity {
           || this.def.boss)) {
           flag2 = true;
         }
-        const onScreen = cands.some((q) =>
+        const onScreen = cands.some((q) => !!q &&
           Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
         if (onScreen) {
           this.despawnTimer = 750;
@@ -2614,8 +2625,8 @@ export class Enemy extends Entity {
         }
         if (!flag2) runDespawnFx();
       } else {
-        // 无活跃候选者(本地死亡/联机空场):维持 C 批既有语义=纯离屏倒计时
-        // (死亡玩家不算几何,§M11 dev 注释;不作 flag2 即死以免死亡瞬间团灭)
+        // 零活跃玩家（联机空场；单机本地恒入候选、死亡玩家也照常算几何=T6）：
+        // 原版语义 = flag2 恒假 + 屏盒永不重置 → 纯倒数归零即消（:78791-78794）
         this.despawnTimer--;
         if (this.despawnTimer <= 0) runDespawnFx();
       }
@@ -6575,7 +6586,8 @@ export class Enemy extends Entity {
       // 玩家死亡/无目标（原版语义：TargetClosest 落空是【无操作】——
       // TargetClosestUpgraded :78421 无有效玩家时 num4 哨兵未动直接 return，
       // direction/directionY 全部保持原值）→ 保持当前朝向 + 沿用上次垂直方向
-      // 滑行，由 despawn 系统（CheckActive 死亡玩家不重置屏内）750t 倒数消散。
+      // 滑行，由 despawn 系统（CheckActive 屏外倒数；死亡玩家 active 仍真照常
+      // 计屏内=T6 收窄，:78706 只剔 !active）750t 倒数消散。
       // 曾写 dirX=-sign(vx)（朝自己速度的反方向看 → X 反复减速过零 = 左右朝向
       // 抽搐）+ 恒 dirY=-1（无条件上飞——上飞是白天驱散分支专属），2026-08-19 修正
       dirX = this.facing;

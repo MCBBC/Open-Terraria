@@ -1,5 +1,6 @@
 // 入口：加载素材/字体/文案 → VUI 主菜单 → 生成/加载世界 → 进入游戏
 // 流程编排见 mainFlow.ts；本文件只做装配 + 游戏内键盘/开发者工具接线。
+import './workers/procShim';   // ★首导入兜底(见 procShim.ts;worker 侧同款已挂 worldGen.worker)
 import { Game } from './core/Game';
 import { showSplash } from './ui/Splash';
 import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';

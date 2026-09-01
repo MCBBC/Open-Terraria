@@ -229,10 +229,12 @@ export function wetCollision(st: TileStore, x: number, y: number, w: number, h: 
         // 整格按满高 16 计判湿（水体沿坡面浸润；不做液面下移）。上方格只读
         // liquid>0，不查 active/nactive（原版即如此）；j<=0 为世界顶界守门。
         // honey/shimmer 位取上方液型——本副本不承（同 npcLiquid 版差异登记）。
-                // ★语义登记：原版此判断走 tile.active()（纯在场位,含致动态）——本仓
-        //   isActive 实为 nactive()（active && !inActuated）⇒ 接线致动的斜坡不判湿。
-        //   与 npcLiquid 版同口径(继承性偏差);若要对齐原版需同步三副本+重校湿身回归。
-if (!st.isActive(i, j) || st.slope[idx] === 0 || j <= 0) continue;
+        // ★L1（2026-09-01 NX3 遗留清偿）：原版 :1632 门 = tile.active()【纯在场位】
+        //   （Tile.cs active()=HasTile，无 inActive 检查）⇒ 致动斜坡同样判湿。
+        //   本仓 isActive 实为 nactive()（active && !inActuated），曾致接线致动
+        //   斜坡漏判湿——与 npcLiquid/WeaponProj.inLiquid 三副本同步改纯在场
+        //   type!==0（SC 线禁令解除，本副本属同函数族 WetCollision 移植体）。
+if (st.type[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
         const above = st.idx(i, j - 1);
         if (st.liquid[above] <= 0) continue;
         if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > j * 16 && vy < j * 16 + 16) {

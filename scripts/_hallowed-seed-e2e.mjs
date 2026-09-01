@@ -16,10 +16,52 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
-await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
-await new Promise((r) => setTimeout(r, 1500));
+// ★worker 原始 error 嗅探(WorldGenClient 只透传 message;栈在此截获)。必须
+//   evaluateOnNewDocument 于首个 goto 前,后续每次导航都注入
+await page.evaluateOnNewDocument(() => {
+  const NativeWorker = window.Worker;
+  window.Worker = class extends NativeWorker {
+    constructor(url, opts) {
+      super(url, opts);
+      this.addEventListener('message', (e) => {
+        const d = e.data;
+        if (d && d.type === 'error') {
+          (window.__wErr = window.__wErr || []).push(d);
+        }
+      });
+    }
+  };
+});
+// ★先清 Service Worker/CacheStorage(游戏壳会缓存 /src/* 模块;并行会话刚修的
+//   worldgen 守卫若被旧 SW 喂回,新实例仍炸——探针必须从真源冷载)
+await page.goto(ORIGIN + '/?__nocache=' + Date.now(), { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.evaluate(async () => {
+  try {
+    const regs = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+    for (const r of regs) await r.unregister();
+    const keys = caches ? await caches.keys() : [];
+    for (const k of keys) await caches.delete(k);
+  } catch { /* 无 SW 环境忽略 */ }
+}).catch(() => {});
+// ★页面侧全局错误栈收集(worldgen 若降级主线程,裸 process 引用会带完整栈冒到这)
+await page.evaluate(() => {
+  const w = window;
+  w.__errStacks = [];
+  window.addEventListener('error', (e) => {
+    w.__errStacks.push(String((e.error && e.error.stack) || e.message).slice(0, 500));
+  });
+});
 await page.waitForFunction(() => !!window.__swFlow, { timeout: 120000 });
-await page.evaluate(() => window.__swFlow.newWorld('1295198809', 4200, 1200)); // 用户同 seed
+let bootError = null;
+try { await page.evaluate(() => window.__swFlow.newWorld('1295198809', 4200, 1200)); }
+catch (e) {
+  bootError = String(e);
+  const werr = await page.evaluate(() => window.__wErr ?? 'none').catch(() => 'eval-fail');
+  console.log('BOOT-FAIL:', bootError);
+  console.log('WORKER-ERRS:', JSON.stringify(werr, null, 2));
+  await browser.close();
+  process.exit(3);
+}
 await page.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
 await page.waitForFunction(() => window.__swGame.world?.store?.w > 0, { timeout: 300000, polling: 1000 });
 await new Promise((r) => setTimeout(r, 2500));
@@ -62,7 +104,7 @@ const findDirtUnderAir = async () => await page.evaluate(async () => {
   for (let y = 20; y < Math.min(st.h - 60, 900); y++) {
     for (let x = ((st.w / 2 - 300) | 0); x < ((st.w / 2 + 300) | 0); x++) {
       const sheet = TD.TILE_DEFS[st.get(x, y)]?.vanilla?.sheet;
-      if ((sheet === 0 || sheet === 2) && st.get(x, y - 1) === 0) return [x, y];
+      if (sheet === 0 && st.get(x, y - 1) === 0) return [x, y];   // ★只找真泥土(圣种唯一基座)
     }
   }
   return null;
@@ -117,7 +159,7 @@ out.blockOnAirCtrl = await page.evaluate(async () => {
   g.player.inv.selected = slot;
   const p = g.player;
   const st = g.world.store;
-  const tx = Math.round((p.x + p.w / 2) / 16) + 1, ty = Math.round(p.y / 16) - 6;
+  const tx = Math.round((p.x + p.w / 2) / 16) + 1, ty = Math.round((p.y + p.h * 0.6) / 16);
   const wasEmpty = st.get(tx, ty) === 0;
   const TD = await import('/src/data/tiles.ts');
   if (wasEmpty) g.tryPlace(tx, ty, DEFS.ITEM_DEFS[internalId]);

@@ -72,10 +72,12 @@ export function wetCollision(
         }
       } else {
         // 坡面格 + 上方格有液体 → 整格按满高 16 计（:1635-1654）
-                // ★语义登记：原版走 tile.active()（纯在场位,含致动态）——本仓 isActive 为
-          //   nactive() 口径 ⇒ 接线致动斜坡不判湿。SmartSelect 副本同差;对齐原版需
-          //   三副本同步+重校湿身回归(鸭面跳切锚定过的几何勿轻动)。
-        if (!st.isActive(i, j) || st.slope[idx] === 0 || j <= 0) continue;
+        // ★L1（2026-09-01 NX3 遗留清偿）：:1632 门 = tile.active()【纯在场位】
+        //   （Tile.cs active()=HasTile，无 inActive 检查）⇒ 接线致动斜坡同样判湿。
+        //   本仓 isActive 是 nactive()（active && !inActive）口径，曾致致动斜坡
+        //   漏判湿——三副本（npcLiquid/SmartSelect/WeaponProj.inLiquid）同步改
+        //   纯在场 type!==0；DrownCollision 豁免行同位同步核正（stats/TouchDamage）。
+        if (st.type[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
         const above = st.idx(i, j - 1);
         if (st.liquid[above] <= 0) continue;
         if (vx + num > i * TS && vx < i * TS + TS && vy + num2 > j * TS && vy < j * TS + TS) {

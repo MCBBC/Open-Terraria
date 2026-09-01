@@ -20,6 +20,15 @@ const tid = (sheet: number): number => BY_SHEET.get(sheet) ?? -1;
 const setOf = (sheets: number[]) => new Set(sheets.map(tid).filter((v) => v >= 0));
 
 /**
+ * TileSolidTop ∩ TileSolid 可达族（平台行为族四件套,TileStore.isPlatform 注①）。
+ * Main.tileSolidTop 是【类型静态表】（致动不变）——对 tileSolid 族的可达成员
+ * 只有这四件套（其余 solidTop 型均 tileSolid=false,被 tileSolid 项先行否决）。
+ * DrownCollision 豁免行（Collision.cs:1418）tileSolidTop 项消费——不可用
+ * TileStore.isPlatform 代替：其带 nactive() 致动闸,致动平台原版恒吃 tileSolidTop。
+ */
+const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427]);
+
+/**
  * 触碰直接伤害【基准】值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等）。
  * ★F4：此表为原版 TileID.Sets.TouchDamageImmediate 的静态原始值——消费端
  * ApplyTouchDamage（Player.cs:29205-29211）先过 `Main.DamageVar(num, −luck)` 单源
@@ -103,7 +112,13 @@ export function drownCollision(
       const idx = st.idx(i, j);
       const liq = st.liquid[idx], lt = st.liquidType[idx];
       if (liq <= 0 || lt === 2 || lt === 4) continue; // !lava && !shimmer
-      if (j === topRow && st.isActive(i, j) && st.isSolid(i, j) && !st.isPlatform(i, j)) continue;
+      // 豁免行排除（Collision.cs:1418）：j==num4 且 tile.active()【纯在场位——
+      //   ★L1 NX3 同位核正（2026-09-01）：原版无 inActive 检查,致动实心块头顶那行
+      //   液体同样不计水;旧 isActive=nactive() 口径把致动实心放行成"淹水"】且
+      //   tileSolid（Main.tileSolid 静态表——st.isSolid 带致动闸不可用）且
+      //   非 tileSolidTop（静态族表,见 TILE_SOLID_TOP_FAMILY 注）→ 该行液体不计
+      const t = st.type[idx];
+      if (j === topRow && t !== 0 && !!TILE_DEFS[t]?.solid && !TILE_SOLID_TOP_FAMILY.has(t)) continue;
       const drop = (256 - liq) / 32;
       const surfY = j * TS + drop * 2;
       const surfH = TS - Math.trunc(drop * 2);

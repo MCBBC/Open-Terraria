@@ -426,9 +426,17 @@ function slopeCollide(
   //   空窗（下一坡格脚带未入）→ 无候选无支撑 2-3 帧纯重力坠落（实测 SPD 全速
   //   每处台阶端点漏帧、feet 追线中断实录）。并入集后旧格保持可评直至身体
   //   【完整】离开其跨度——与原版逐格语义一致。
+  // [取证钩子] window.__SW_SLOPE_LOG 为数组时逐次记录候选评估（探针用；恒关零成本）
+  const SLOGR = (globalThis as Record<string, unknown> | undefined)?.__SW_SLOPE_LOG as unknown[] | undefined;
+  let srec: string[] | null = null;
+  if (SLOGR && SLOGR.length < 300000) {
+    srec = [];
+    srec.push(`CALL feet=${(b.y + b.h).toFixed(2)} vy=${b.vy.toFixed(2)} vx=${b.vx.toFixed(2)} wasG=${wasGround ? 1 : 0} body=[${b.x.toFixed(1)},${(b.x + b.w).toFixed(1)}]`);
+  }
   const ux0 = Math.min(b.x, xPre), ux1 = Math.max(b.x + b.w, xPre + b.w);
   const x0 = Math.floor(ux0 / TILE), x1 = Math.floor((ux1 - 0.01) / TILE);
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
+  if (srec) srec.push(`  win x[${x0}..${x1}] y[${y0}..${y1}] probe=+${((wasGround && b.vy >= 0) ? 1 : 0)}`);
   let bestLift = 0;      // 最大抬升量（负 y 位移;0 = 无贴合）
   let bestDrop = 0;      // 天花板最大下推量
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
@@ -476,6 +484,7 @@ function slopeCollide(
         if (gapS > 0.05 && gapS <= b.w / 2 + Math.abs(b.vx) && gapS < bestSnapGap) {
           bestSnapGap = gapS;
           bestSnapY = vy0 + n4s;
+          if (srec) srec.push(`  snap@${tx},${ty} y=${bestSnapY} gap=${bestSnapGap.toFixed(2)}`);
         }
       }
       // 坡面平台（平台锤楼梯，slope 恒 1/2——3/4 不存在于平台锤循环）：单向门
@@ -490,13 +499,15 @@ function slopeCollide(
         continue;
       }
       if (isPlatSlope) {
+        if (srec) srec.push(`  ${tx},${ty} dropThrough`);
         if (b.dropThrough) continue;   // 按住下 = 楼梯下穿（stairFall 可见语义）
+        if (srec) srec.push(`  ${tx},${ty} vy<0:${b.vy.toFixed(2)}`);
         if (b.vy < 0) continue;
-        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) continue;
+        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) { if (srec) srec.push(`  ${tx},${ty} band feet=${(b.y+b.h).toFixed(1)} [${ty*TILE},${ty*TILE+TILE+1+Math.abs(b.vx).toFixed(1)}]`); continue; }
         if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
-          && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
+          && Math.floor((b.y + b.h) / TILE) - 1 === ty) { if (srec) srec.push(`  ${tx},${ty} dirGate feetRow=${Math.floor((b.y+b.h)/TILE)}`); continue; }
       }
-      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
+      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) { if (srec) srec.push(`  ${tx},${ty} overlap body=[${b.x.toFixed(1)},${(b.x+b.w).toFixed(1)}]x[${b.y.toFixed(1)},${(b.y+b.h).toFixed(1)}]`); continue; }
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
       // slope2/4 取右缘。钳到 ≥0（与原版 num4<0 即跳过的差异,见函数头注释）：
       // 坡顶过渡瞬间(高侧缘越过坡面)原版会脱钩,脚底残留在对角线端点下方数像素,
@@ -534,7 +545,7 @@ function slopeCollide(
         // 地面坡（:1935-1966）：沉到斜面下才抬回（gap<0 即抬升；面随下贴候选
         // 已上提到重叠门前,此处只保留抬升路径）
         const gap = vy0 + num4 - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入面下
-        if (gap >= 0) continue;                        // 未沉入 → 无抬升（原 :3621 面）
+        if (gap >= 0) { if (srec) srec.push(`  ${tx},${ty} gap>=0 ${gap.toFixed(2)} num4=${num4.toFixed(2)}`); continue; }
         const num7 = gap;
         // ★G2 速度门（:1947）：贴合结果必须高于「入口英尺+本帧速度Y」与当前
         //   落地位的较小者——上升/掠过者拒贴（阻尼根因）
@@ -653,6 +664,10 @@ function slopeCollide(
       const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
       if (dbg) dbg.ceilDropBlocked = (dbg.ceilDropBlocked ?? 0) + 1;
     }
+  }
+  if (srec) {
+    srec.push(`END lift=${bestLift.toFixed(2)} snap=${bestSnapY.toFixed(2)} drop=${bestDrop.toFixed(2)} posChanged=${positionChanged ? 1 : 0}`);
+    SLOGR!.push(srec.join('\n'));
   }
   return bestLift < 0 || bestDrop > 0;
 }
