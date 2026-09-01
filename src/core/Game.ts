@@ -1,9 +1,8 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
 import { prewarmTrailTextures } from '../fx/TrailShader';
-import { GrappleProj } from '../entities/GrappleProj';
+import { GrappleProj, GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
-import { GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { Research } from '../stats/Research';
 import { PetFollower } from '../entities/PetFollower';
 import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
@@ -15,7 +14,7 @@ import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedals, spendDefenderMedals } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
-import { PREFIX_NAMES } from '../data/vanillaPrefixes';
+import { PREFIX_NAMES, rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -26,7 +25,7 @@ import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
-import { generateWorld } from '../world/gen/WorldGen';
+import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
@@ -87,11 +86,10 @@ import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonS
 import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
-import { glStatFrame, maybeInstallGpuLoggerFromUrl } from '../render/GLStats';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, starvedEver } from '../render/GLStats';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { repairChimneyCaps } from '../world/ChimneyCapRepair';
-import { starvedEver } from '../render/GLStats';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
@@ -127,7 +125,7 @@ import {
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
 import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
@@ -138,10 +136,10 @@ import {
 // spawnEmote 统一从 :163 的合并导入（spawnEmote, tickEmotes）取——重复导入已清
 import { itemUseSoundWav, itemUseSoundPerceivedVol } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
-import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing } from '../entities/projStatus';
+import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing, applyBuffTicks, type StatusEnemyLike } from '../entities/projStatus';
 import { trySnapStrike, snapStrikeDust } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
-import { equipKindOfInternal } from '../data/vanillaEquip';
+import { equipKindOfInternal, isDyeItem } from '../data/vanillaEquip';
 import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
 import { checkBoulderFamily, BOULDER_FAMILY_SHEETS, BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
 import { RollingBoulder } from '../entities/RollingBoulder';
@@ -153,14 +151,12 @@ for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBu
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
-import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike } from '../data/vanillaRecipes';
-import { invIndexOfVanilla } from '../data/vanillaRecipes';
+import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
-import { CHESTER_CONTAINER, MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
+import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
 // 孤儿武器 B3 波（2026-08-30 工单1/2/4）：虚空袋对 4131/5325 + 沙滩球 859 + 橄榄球 4743
-import { VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { VoidLensProj } from '../entities/VoidLensProj';
 import { BeachBallProj, FootballProj } from '../entities/BallProjs';
 // 三地球仪 Kill 重掷消费面（树球 868/世界球 869/月亮球 996 —— Projectile.cs:75111-75131）
@@ -171,7 +167,6 @@ import {
   pickZoneArea, ensureTreeTops13, oceanDepths,
   TREE_AREA_BY_GROUND_TILE, mathRng, type BgAreaKind,
 } from '../world/styleRerolls';
-import { rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
@@ -180,13 +175,12 @@ import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm } from
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
-import { TownNPC, isItStormingNext } from '../entities/TownNPC';
+import { TownNPC, isItStormingNext, walkPrediction } from '../entities/TownNPC';
 import { spawnStormLightningTick } from '../world/StormLightningSpawner';
 import { stormLightningGenerator } from '../fx/LightningGenerator';
 import { DontStarveDarkness } from '../player/DontStarveDarkness';
 import { SkyblockRuntime } from '../world/SkyblockRuntime';
-import { DUNGEON_WALL_IDS } from '../world/SceneMetrics';
-import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
+import { DUNGEON_WALL_IDS, scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 // ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
 import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
@@ -205,7 +199,6 @@ import { portraitForNpc, portraitUrl, type DialoguePortraitPayload } from '../da
 import { oreRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
 import type { GenState } from '../world/gen/vanilla/GenState';
-import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlayerEmote } from '../render/EmoteBubble';
 // M3 聊天命令系统（Terraria.Chat.Commands 全目录）+ Boss 伤害统计（/boss伤害）
 import { createOutgoingMessage, executeCommand, chatColorOfDifficulty, type OutgoingChatMessage } from '../chat/ChatCommands';
@@ -302,7 +295,6 @@ function popupCoinText(value: number): string {
   }
   return parts.join(' ') || `0 ${Lang.itemNameByKey(String(COIN_KEYS[0]))}`;
 }
-import { isDyeItem } from '../data/vanillaEquip';
 import {
   instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
   hiveBeeRoll, fairyBellVariant, chestLockOf,
@@ -361,18 +353,13 @@ import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks, LootPlayerCtx } from '../entities/types';
 import { BehaviorRecorder } from '../debug/BehaviorRecorder';
-import { walkPrediction } from '../entities/TownNPC';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
-import { Dart } from '../entities/Dart';
-import { TrapShot, TowerBolt } from '../entities/Dart';
-import type { TrapShotKind } from '../entities/Dart';
+import { Dart, TrapShot, TowerBolt, type TrapShotKind, prefetchTrapProjectiles } from '../entities/Dart';
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE, BULLET_KILL_SFX } from '../entities/Arrow';
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
-import { prefetchTrapProjectiles } from '../entities/Dart';
 import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample } from '../entities/projTargets';
-import { applyBuffTicks, type StatusEnemyLike } from '../entities/projStatus';
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import { grantCollisionAttackImmunity } from '../entities/MountCombat';
 import {
@@ -405,10 +392,9 @@ import { TitaniumStormShard,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
 // 叶绿水晶叶套装弹族（台账 L3 清偿批 2026-08-31——锚体 226 + 隐藏叶弹 227；
 // canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
-import { ChloroLeafCrystalAnchor, ChloroLeafShot } from '../entities/ChloroLeafCrystalProj';
-import { getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
+import { ChloroLeafCrystalAnchor, ChloroLeafShot, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
-import { leafCrystalShotFx as leafCrystalShotFxLocal } from '../fx/orchestraFx';
+import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
 import { RainbowBolt } from '../entities/RainbowProj';
@@ -436,25 +422,9 @@ import { Bobber, bobberProjIdFor } from '../entities/Bobber';
 import { updateFakeFishSchool, clearFakeFish, repelParticlesAt } from '../entities/FakeFish';
 import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
 // module8 编排粒子 Spawn_* 收编池（fx/orchestraFx.ts;台账 L5 批 2026-08-31）
-import {
-  rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx,
-  classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx,
-} from '../fx/orchestraFx';
 // module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
-import {
-  keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx,
-  cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx,
-  pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx,
-  natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx,
-  blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra,
-  blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx,
-  nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx,
-  moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx,
-  snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor,
-  paladinsShieldHitFx,
-} from '../fx/orchestraFx';
+// module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
-import { npcRarityOf } from '../data/vanillaNpcs';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { GolfState } from '../world/golf/GolfState';
 import { golfVanillaTileId } from '../world/golf/golfPhysics';
@@ -470,8 +440,7 @@ import { canHit, canHitLine, playerCanHitEntity } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
-import type { DropExtras } from '../drops/NpcDrops';
-import { npcValueOf } from '../drops/NpcDrops';
+import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';

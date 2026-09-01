@@ -160,12 +160,16 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
   flipGenSolid([481, 482, 483], false);
   const rng = new RNG(cap.gs.seed);
   const mainU = rng.vanilla;
+  // ★IIIII104b 判读翻案：x86 pc-lineage（rig85/lq3/canon）的 R/FNV =【任意 UnifiedRandom 实例】
+  //   的全部 internalSample（JJHook.OnRoll 无 identity 过滤）——SW_I104_ALL=1 时镜像同口径
+  //   （含 dgUR 私有房/廊种子实例），缺省维持旧主实例口径以便复现旧档数字。
+  const CAPTURE_ALL = process.env.SW_I104_ALL === '1';
   const kStart = Number(process.env.SW_I104_KS ?? -1);
   const kWid = Number(process.env.SW_I104_KW ?? 0);
   const stacks: string[] = [];
   (globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll =
     (v: number, inst: object) => {
-      if (inst !== mainU) return;
+      if (!CAPTURE_ALL && inst !== mainU) return;
       vals.push(v);
       rollHash = ((rollHash ^ (v >>> 0)) * 16777619) >>> 0;
       const n2 = vals.length;
@@ -220,6 +224,10 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
     writeFileSync(`${OUTDIR}/stage-info.json`, JSON.stringify(stageInfo, null, 1));
     writeFileSync(`${OUTDIR}/layout-trace.json`, JSON.stringify(layoutTrace));
     console.log(`[mc] pass-total main samples=${vals.length} final-rh=${(rollHash >>> 0).toString(16)}`);
+    {
+      const bv = (globalThis as unknown as { __gfbxBounds?: Record<string, number> }).__gfbxBounds;
+      if (bv) console.log(`[dg_bW-js] L=${bv.L} R=${bv.R} T=${bv.T} B=${bv.B} wv=${bv.wv0},${bv.wv1},${bv.wv2} ws=${bv.ws}`);
+    }
   }
   const row = diffBoard('replay dungeon(31→32)', chOf(32, 'Dungeon'), st);
   writeFileSync(`${OUTDIR}/row.json`, JSON.stringify(row, null, 1));

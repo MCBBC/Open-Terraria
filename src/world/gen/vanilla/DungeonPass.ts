@@ -5893,6 +5893,11 @@ const snap: SnapFn = (name) => {
   dgSpikes(); snap('dungeonS'); stageDump('S');
   dgDoorsF(); snap('dungeonD'); stageDump('D');
   dgWallVariants(); snap('dungeonW'); stageDump('W');
+  // ★IIIII104b 诊断钩（零开销常态）：W 段末 bounds/wv 快照对账（与 x86 rigA 'dg_bW' mark 同位）
+  if (segWatch) {
+    (globalThis as unknown as { __gfbxBounds?: Record<string, number> }).__gfbxBounds =
+      { L: bounds.L, R: bounds.R, T: bounds.T, B: bounds.B, wv0: wallVariants[0], wv1: wallVariants[1], wv2: wallVariants[2], ws: Math.trunc(ws) };
+  }
   if (dgTW) dgTW.plat1 = dgMainRolls;
   dgPlatforms(); snap('dungeonP'); stageDump('P');
   dgBiomeChests(); snap('dungeonC'); stageDump('C');

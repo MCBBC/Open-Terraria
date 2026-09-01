@@ -32,6 +32,11 @@ import {
   type GolfTileMap,
 } from '../world/golf/golfPhysics';
 import type { GolfState } from '../world/golf/GolfState';
+import { tintedTex } from '../render/StringLine';
+
+/** oldPos 环长（ProjectileID.Sets.TrailCacheLength[721/739-752] = 20，ProjectileID.cs:387）
+ *  ——Resting 弱判定读尾槽（GolfHelper.cs:404）；渲染支只另读 [4]（Main.cs:31507） */
+export const GOLF_TRAIL_CACHE_LEN = 20;
 
 /** 高尔夫宿主（Game 注入：LocalGolfState + 进洞结算回调 = GolfHelper.PutBallInCup） */
 export interface GolfHost {
@@ -60,9 +65,15 @@ export class GolfBall extends Entity {
   ballState: BallState = BallState.Resting;
   /** 渲染旋转累加（Projectile.rotation，AI_149 :18956-18960） */
   rotation = 0;
-  /** oldPos 环（DrawProjDirect 高尔夫支读 oldPos[4]——Main.cs:31505；Main 每 tick
-   *  平移缓存 1 格,与 extraUpdates 无关。5 槽 = 未满不画插值尾迹(:31507 Zero 门) */
+  /** oldPos 渲染窗（DrawProjDirect 高尔夫支读 oldPos[4]——Main.cs:31507；Update
+   *  尾随平移 Projectile.cs:17200-17203 每 tick 1 格，SetDefaults :7636 无
+   *  extraUpdates ⇒ 不多步。5 槽 = 未满不画插值尾迹(:31507 Zero 门) */
   private posHist: Array<{ x: number; y: number }> = [];
+  /** IsGolfBallResting 弱判定窗（GolfHelper.cs:400-407）：oldPos 实长 =
+   *  TrailCacheLength[721/739-752] = 20（ProjectileID.cs:387），尾槽 = 20 tick 前
+   *  位置——与渲染窗（只用 [4]）分用独立环。未满时尾槽为 Zero，世界坐标距离恒
+   *  >1px ⇒ 视同未静（与原版零槽等价） */
+  private restHist: Array<{ x: number; y: number }> = [];
   owner: () => unknown;
 
   constructor(cx: number, cy: number, projId: number, owner: () => unknown, onTee = false) {
@@ -80,10 +91,18 @@ export class GolfBall extends Entity {
     return !!host && this.owner() === host.playerRef();
   }
 
-  /** IsGolfBallResting（GolfHelper.cs:400-407）：原版对 Moving 态另比对 oldPos 位移 <1px，
-   *  本作 localAI[1] 直接存 BallState 枚举，Resting 即等价停球 */
+  /** IsGolfBallResting（GolfHelper.cs:400-407）：
+   *   localAI[1]==0 → 真（(:402) 强支，本作 ballState 直存枚举）；
+   *   Moving 态弱支（:404）：Distance(position, oldPos[尾]) < 1px 才算静球——
+   *  滚动末段 <1px/20tick 爬行时按静球处理（尾迹消失 + 瞄准白圈提前亮）。 */
   get atRest(): boolean {
-    return this.ballState === BallState.Resting;
+    if (this.ballState === BallState.Resting) return true;
+    const h = this.restHist;
+    if (h.length >= GOLF_TRAIL_CACHE_LEN) {
+      const o = h[h.length - GOLF_TRAIL_CACHE_LEN];
+      return Math.hypot(this.x - o.x, this.y - o.y) < 1;   // Vector2.Distance < 1f
+    }
+    return false;                                          // 尾槽 Zero ⇒ 恒 >1px
   }
 
   get moving(): boolean { return this.ballState !== BallState.Resting; }
@@ -137,23 +156,41 @@ export class GolfBall extends Entity {
     if (this.vy !== 0 && state === BallState.Moving) {
       this.rotation += this.vx * 0.1 + this.vy * 0.1;
     }
-    // oldPos 平移缓存（Main 每 tick 一格,DrawProjDirect :31505 读 oldPos[4]）
-    this.posHist.push({ x: this.x, y: this.y });
+    // oldPos 平移缓存（Projectile.cs:17200-17203 每 Update 尾随平移 1 格，
+    // SetDefaults :7636 无 extraUpdates ⇒ 每 tick 恰 1 次）：渲染窗(posHist,
+    // DrawProjDirect :31507 读 oldPos[4])+Resting 弱判定窗(restHist,尾槽
+    // =TrailCacheLength 20,GolfHelper.cs:404) 同源双环
+    const pos = { x: this.x, y: this.y };
+    this.posHist.push(pos);
     if (this.posHist.length > 5) this.posHist.shift();
+    this.restHist.push(pos);
+    if (this.restHist.length > GOLF_TRAIL_CACHE_LEN) this.restHist.shift();
   }
 
-  /** 绘制保真（2026-08-31 平涂扫描批）：高尔夫球贴图在盘（Projectile_721/739..752.png
-   *  均 8×8 实图）——旧 fillStyle 平涂圆点退役，转 drawImage 原版染色链。
-   *  原版主支（Main.cs :31578 无条件本体）= GetAlpha(light)(α 缺省 0 ⇒ 全亮)×center、
-   *  rotation、scale；动球追加点(:31464-31507 !IsGolfBallResting 支)=
-   *   · 速因子 num188=min(1,|v|/16)，trail 色 GetGolfTrailColor×num188；
-   *   · oldPos[4]→position 插值尾迹 f=0..1 步 .04：色×f、scale=Lerp(.7,1.5,f)；
-   *   · 本体染色复刻色 ×scale×1.5。
-   *  停杆瞄准 GolfBallOutline 叠层(:31569 只在持杆可打时)归 Game 瞄准 UI 域,登记不接。 */
+  /** 绘制保真（2026-08-31 平涂扫描批 → 2026-09-01 层序+乘色修正批[G1/G2]）：
+   *  高尔夫球贴图在盘（Projectile_721/739..752.png 均 8×8 实图）。原版动球支
+   *  （Main.cs:31475 !IsGolfBallResting 门）先画——插值尾迹(:31507-31513
+   *  oldPos[4]≠Zero 门)f=0..1 步 .04 共 26 发 + 本体染色复刻 scale×1.5(:31500)，
+   *  通用主本体（color48,:31578）在支后无条件补画盖顶 ⇒ 叠层恒为
+   *  「尾迹垫底 / ×1.5 彩晕居中 / 本体最顶」（[G1] 旧实现反序先本体后彩晕 =
+   *  层级倒置，滚动球面发"脆"、彩色晕染被本体压没，已修为原版流序）。
+   *  乘色面（[G2]）：原版实体 pass = BlendState.AlphaBlend 预乘混合，画色 C 的
+   *  效果 =「加色贡献 贴图.rgb×C.rgb ＋ 背景衰减 ×(1−C.A)」（StringLine.ts 头注
+   *  口径）——RGB 色调用 globalAlpha 单通道复现不了（16 色表 rgb 分量曾整链丢失，
+   *  740 蓝/748 红晕成苍白 wash）。修法 = 仓内现成 multiply+destination-in 助手
+   *  tintedTex（StringLine.ts:120，texReady 半加载窗守卫）预烘两张**静态缓存**
+   *  副本：cut=[0,0,0] 保形黑背板走 source-over @q·f（A 衰减面，α 数值与旧实现
+   *  一致），add=[色表 rgb] 保形染走 'lighter' @k·f（色值面：速度因子只进 rgb
+   *  通道——原版 C'=golfTrailColor×k·f 四通道同乘，预乘式里 rgb 面不吃表 A）；
+   *  贴图自身像素 alpha 经 destination-in 保留,加色面连 AA 边缘的贴图 α 也逐项
+   *  相等。本体（:31578 GetAlpha(light)，α 缺省 0 ⇒ 全亮原色）不动。
+   *  node 单测无 document / 贴图半加载窗拒烘时退回 globalAlpha 兜底（同几何同
+   *  A 面,仅缺乘色下帧自愈）；停杆瞄准 GolfBallOutline 叠层(:31569 持杆可打门)
+   *  归 Game 瞄准 UI 域,登记不接。 */
   draw(r: import('../render/Renderer').Renderer): void {
     const ctx = r.ctx;
     if (!ctx) return;
-    // GetGolfTrailColor（Projectile.cs:11154-11174）—— 球色按投射物 id(A 支=染体 alpha)
+    // GetGolfTrailColor（Projectile.cs:11154-11174）—— 球色按投射物 id(A 支=衰减面)
     const colors: Record<number, [number, number, number, number]> = {
       739: [50, 50, 50, 80], 740: [30, 50, 255, 40], 741: [150, 90, 60, 90], 742: [30, 255, 170, 30],
       743: [30, 255, 30, 40], 744: [190, 255, 30, 50], 745: [255, 130, 30, 50], 746: [255, 50, 110, 50],
@@ -164,48 +201,62 @@ export class GolfBall extends Entity {
     const img = projSprite(this.projId);
     if (!img || !(img.width > 0)) return;                   // 懒加载未就绪(下帧自愈)
     const sz = img.width;                                   // 8×8(proj.scale 缺省 1)
+    // ---- [G2] 预烘乘色副本（两键均静态缓存于 tintedTex WeakMap,零逐帧重烘）----
+    const addTex = tintedTex(img, [c[0], c[1], c[2]], false);  // 加色贡献面(色表 rgb)
+    const cutTex = tintedTex(img, [0, 0, 0], false);           // 黑背板=A 衰减面载体
+    const hasTint = !!addTex && !!cutTex;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    // ---- 无条件本体（Main.cs:31578）：GetAlpha(light),α 缺省 0 ⇒ 全亮原色,
-    // rotation、origin=center ----
-    ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.rotate(this.rotation);
-    ctx.drawImage(img, -sz / 2, -sz / 2);
-    ctx.restore();
     if (!this.atRest) {
-      // ---- 动球追加链（!IsGolfBallResting :31475,GolfHelper.cs:400-410）----
+      // ---- 动球追加链（!IsGolfBallResting 门,GolfHelper.cs:400-407）----
       const k = Math.min(1, Math.hypot(this.vx, this.vy) / 16);   // num188(:31477)
-      const q = k * (c[3] / 255);
-      const tintedCopy = (): void => {           // 本体染色复刻色（:31500,scale×1.5）
-        ctx.save();
-        ctx.translate(this.cx, this.cy);
-        ctx.rotate(this.rotation);
-        ctx.globalAlpha = Math.max(0, Math.min(1, q));
-        ctx.drawImage(img, -sz * 0.75, -sz * 0.75, sz * 1.5, sz * 1.5);
-        ctx.restore();
+      const q = k * (c[3] / 255);                              // A 面=衰减系数
+      /** 一处落点双通道：f=null=本体染色复刻档（色不带 f 因子,:31500-31501）。
+       *  cut@q·f 与旧实现 globalAlpha 数值全同 = alpha 面一致；'lighter' 补上
+       *  加色贡献=P.rgb×C.rgb×P.a×k·f,与预乘混合最终式逐项相等。 */
+      const put = (ix: number, iy: number, sp: number, f: number | null): void => {
+        if (hasTint && cutTex && addTex) {
+          ctx.save();                                          // pass1 背景 A 衰减
+          ctx.translate(ix, iy);
+          ctx.rotate(this.rotation);
+          ctx.globalAlpha = Math.max(0, Math.min(1, q * (f ?? 1)));
+          ctx.drawImage(cutTex, -sp / 2, -sp / 2, sp, sp);
+          ctx.restore();
+          ctx.save();                                          // pass2 rgb 加色贡献
+          ctx.translate(ix, iy);
+          ctx.rotate(this.rotation);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = Math.max(0, Math.min(1, k * (f ?? 1)));
+          ctx.drawImage(addTex, -sp / 2, -sp / 2, sp, sp);
+          ctx.restore();
+        } else {
+          // 兜底（node 无 DOM/半加载窗）：legacy 单笔——A 面保留,乘色缺失备案
+          ctx.save();
+          ctx.translate(ix, iy);
+          ctx.rotate(this.rotation);
+          ctx.globalAlpha = Math.max(0, Math.min(1, q * (f ?? 1)));
+          ctx.drawImage(img, -sp / 2, -sp / 2, sp, sp);
+          ctx.restore();
+        }
       };
-      // 插值尾迹（:31505-31513 oldPos[4]≠Zero 门 ⇔ 轨迹窗满）——f 步 .04 共 26 发,
-      // 色×num188×A/255×f,scale=Lerp(.7,1.5,f)
+      // 插值尾迹（:31507-31513 oldPos[4]≠Zero 门 ⇔ 轨迹窗满）——先画垫底
       if (this.posHist.length >= 5) {
         const o = this.posHist[0];               // oldest ≈ oldPos[4](每 tick 平移一格)
         for (let n = 0; n <= 25; n++) {
           const f = n / 25;                      // 等价 f+=0.04 浮点序列
           const ix = o.x + (this.x - o.x) * f + this.w / 2;   // Lerp+Size/2
           const iy = o.y + (this.y - o.y) * f + this.h / 2;
-          const fs = 0.7 + 0.8 * f;              // Lerp(0.7,1.5,f)
-          ctx.save();
-          ctx.translate(ix, iy);
-          ctx.rotate(this.rotation);
-          ctx.globalAlpha = Math.max(0, Math.min(1, q * f));
-          ctx.drawImage(img, -(sz * fs) / 2, -(sz * fs) / 2, sz * fs, sz * fs);
-          ctx.restore();
+          put(ix, iy, sz * (0.7 + 0.8 * f), f);  // scale=Lerp(.7,1.5,f)(:31511)
         }
-        tintedCopy();
-      } else {
-        tintedCopy();
       }
+      put(this.cx, this.cy, sz * 1.5, null);     // 本体染色复刻 ×1.5(:31500)
     }
+    // ---- 无条件本体最后画盖顶（Main.cs:31578 通用支,[G1] 层序终点）----
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rotation);
+    ctx.drawImage(img, -sz / 2, -sz / 2);
+    ctx.restore();
     ctx.restore();
   }
 }

@@ -1,5 +1,5 @@
 // 沙尘暴 grain 复合色探针（2026-08-31「沙尘暴飞树叶」定谳回归）:
-// dust 268 真帧 = Dust.png (680, 60+10×rand3) 8×8 灰十字;曾误裁 (680,20)=dust 168
+// dust 268 真帧 = Dust.png (680, 60+10×rand3) 8×8 灰十字;曾误裁 (680,20)=dust 68
 // 蓝十字 → ×沙色乘 = 暗绿"树叶"。本探针直接驱动 WeatherRenderer.drawPrecipDust
 // 生产路径(fake hooks),采样复合像素 + 帧区分性 + 黑光死亡门。
 import puppeteer from 'puppeteer-core';

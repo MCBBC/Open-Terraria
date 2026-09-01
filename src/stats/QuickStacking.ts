@@ -354,16 +354,22 @@ export function chestSettingsAllowsVault(openChestX: number | undefined): boolea
  *  本函数只把"是否允许进袋"的表达面按上面 settings 规则传入。
  *  @param voidSpill 由调用方按 chestSettingsAllowsVault 决定是否携带（绑
  *  player.depositIntoVoidVault）；返回值=仍未入袋余量。
+ *  @param opts.skipFavorited 收藏锁（ChestUI.cs:443-452：bank4/虚空袋面板 -5 支
+ *  `!item.favorited` 门槛 :447——唯一带此判定的容器分支；真箱/猪猪/保险箱/熔炉
+ *  分支无收藏锁）。收藏物可经 UI 拖拽落进 bank4 格（heldStack favorited 透传），
+ *  vault 面板 Loot All 时按原文跳过不拉取。
  *  @returns 有任何实际搬移（入包或溢流入袋）时 true */
 export function lootAllFromContainer(
   inv: Inventory,
   items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>,
   voidSpill?: ((itemId: number, stack: number) => number) | undefined,
+  opts?: { skipFavorited?: boolean },
 ): boolean {
   let anyMoved = false;
   for (let i = 0; i < items.length; i++) {
     const cur = items[i];
     if (!cur || cur.stack <= 0) continue;
+    if (opts?.skipFavorited && cur.favorited) continue;   // ChestUI.cs:447 收藏锁（-5 面板支）
     const before = cur.stack;
     let left = inv.add(cur.id, before, cur.prefix);   // 词缀随新放置槽写入,合并保留现有堆词缀
     if (left > 0 && voidSpill) left = voidSpill(cur.id, left);

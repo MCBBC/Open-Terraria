@@ -1847,15 +1847,22 @@ export class MolotovProj extends Entity {
     if (this.t >= 15) this.vy = Math.min(this.vy + 0.2, 16); // :29063
     else this.vy = Math.min(this.vy + 0.1, 16);
     this.vx *= 0.99;
-    let nx = this.x + this.vx, ny = this.y + this.vy;
-    const st = game.world.store;
-    const solidAt = (px: number, py: number) => {
-      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    // ★残余债清偿(2026-09-01):点采样撞块(中心+底部)在斜砖/半砖上要么漏检(斜面空区)
+    // 要么误检(全格上半),改走正典管线——原版 Molotov 即标准 TileCollision 撞击即裂,
+    // 任一轴接触或落面即 breakOpen。dropThrough=true 对齐弹体 fallThrough 缺省。
+    const lvx = this.vx, lvy = this.vy;
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: true,
     };
-    if (solidAt(nx + this.w / 2, this.y + this.h / 2)) { this.breakOpen(game); return; } // 撞块即裂
-    if (solidAt(this.x + this.w / 2, ny + this.h - 1)) { this.breakOpen(game); return; }
-    this.x = nx; this.y = ny;
+    moveAndCollide(body, game.world, lvx, lvy);
+    this.x = body.x; this.y = body.y;
+    this.vx = lvx; this.vy = lvy;
+    if (body.hitWall || body.collideY || body.onGround || body.hitHead) {
+      this.breakOpen(game); return;   // 撞块即裂(:29052 系)
+    }
     if (this.t > 600) { this.dead = true; return; }
     // 命中敌即裂（penetrate 1）
     for (const ent of game.enemies()) {
@@ -3304,45 +3311,50 @@ export class FlailProj extends Entity {
       }
       default: break;
     }
-    // 位移 + tile 碰撞（AI_015_HandleMovementCollision :40982-41049）：
-    // 旋转态位置由 AI 直接钉死不积分;回收态 tileCollide=false
+    // 位移 + tile 碰撞（AI_015_HandleMovementCollision :44460-44527）：
+    // ★原版链球本体不扫格——lastVelocity 差分读数来自【标准弹体 Collision.TileCollision】
+    // （Update 序:AI 先行/TileCollision 随后,AI_015_HandleMovementCollision 于 :19437
+    // 后置调用）。此前 bespoke 全格扫描在斜砖/半砖上重演「几何空区被判实心」的帧0互锁
+    // （Boomerang 三批同病）;2026-09-01 改走 moveAndCollide 正典管线:
+    //   · 命中轴判定 = 管线 hitWall/collideY 旗标(纯 tile 拦截才计撞)。原版差分会把
+    //     slopeCollide 贴附等速度编辑一并计数——此处保守口径排除,登记差异
+    //   · 命中轴覆写为 -lastV×rest(:44478/:44484 反射式),bounces++ 每次 tick 全计
+    //   · dropThrough=true(弹体 fallThrough 缺省 true)/旋转态由 AI 钉位不进本支/
+    //     回收态 st==4 由外层 continue 跳过 → tileCollide 恒 true 进管线
     if (this.st !== 0 && this.st !== 4) {
       const rest = this.st === 1 || this.st === 5 ? 0.4 : this.st === 6 ? 0 : 0.2;
       const world = game.world;
-      const solid = (x: number, y: number): boolean => {
-        const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
-        const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
-        for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
-          if (world.store.inBounds(tx, ty) && world.store.isSolid(tx, ty)) return true;
-        }
-        return false;
-      };
       const lvx = this.vx, lvy = this.vy;
-      // num2(int,:40985):0=无音尘 / |lastV|>4 按轴置 1(:41001-41003/:41008-41010)/ 掷出态强制 2
-      // (:41021)。结算(:41026-41033) = num2 次 Collision.HitTiles 尘 + 一次 SoundID 0
-      // (挖掘音只一响,尘份量随档)——此前按轴各播一次会双响,1:1 收拢
       let dustN = 0;
-      const nx = this.x + this.vx;
-      if (solid(nx, this.y)) {
+      const body = {
+        x: this.x, y: this.y, w: this.w, h: this.h,
+        vx: this.vx, vy: this.vy,
+        onGround: false, hitWall: false, hitHead: false, collideY: false,
+        tileCollide: true, dropThrough: true,
+      };
+      moveAndCollide(body, world, lvx, lvy);
+      const chX = body.hitWall, chY = body.collideY;
+      this.x = body.x; this.y = body.y;
+      this.vx = lvx; this.vy = lvy;
+      if (chX) {
         this.vx = -lvx * rest;
-        this.bounces++; // localAI[0]:每次接触都计(:41005/:41012)——只计 >4 会让缓磨墙永不触发逃生
-        if (Math.abs(lvx) > 4) dustN = 1; // num2>0 门(:41001-41003)
-      } else this.x = nx;
-      const ny = this.y + this.vy;
-      if (solid(this.x, ny)) {
+        this.bounces++; // localAI[0]:每次接触都计(:44476/:44482)——只计 >4 会让缓磨墙永不触发逃生
+        if (Math.abs(lvx) > 4) dustN = 1; // num2>0 门(:44470-44472)
+      }
+      if (chY) {
         this.vy = -lvy * rest;
         this.bounces++;
-        if (Math.abs(lvy) > 4) dustN = 1; // (:41008-41010)
-      } else this.y = ny;
-      // 掷出态撞墙 → 坠落态(:41014-41024):位移回卷 + num2 强制 2 + 冲击波(GAP#8 ④)
-      if (this.st === 1 && (this.vx !== lvx || this.vy !== lvy)) {
+        if (Math.abs(lvy) > 4) dustN = 1; // (:44477-44479)
+      }
+      // 掷出态撞墙 → 坠落态(:44509-44524):位移回卷 + num2 强制 2 + 冲击波(GAP#8 ④)
+      if (this.st === 1 && (chX || chY)) {
         this.st = 5; this.stT = 0;
-        this.x -= lvx; this.y -= lvy; // position -= vector(:41024)——撞墙 tick 不陷墙
-        dustN = 2;                    // :41021 无视 |lastV|>4 门,音尘双份
+        this.x -= lvx; this.y -= lvy; // position -= vector(:44519)——撞墙 tick 不陷墙
+        dustN = 2;                    // 无视 |lastV|>4 门,音尘双份
         this.impactExplosion(game, lvx, lvy);
       }
       if (dustN > 0) this.hitTileFx(game, this.x, this.y, dustN);
-      // 卡死逃生（:41035-41039）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
+      // 卡死逃生（:44529-44533）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
       if (this.st !== 3 && this.st !== 0 && this.st !== 5 && this.st !== 6 && this.bounces >= 10) {
         this.st = 4; this.stT = 0;
       }
@@ -3650,46 +3662,55 @@ export class FlaironSpike extends Entity {
       this.alpha = Math.max(50, this.alpha - 25);
       this.vx *= 0.95; this.vy *= 0.95;
     }
-    this.x += this.vx;
-    this.y += this.vy;
-    // 撞块:前 2 次反弹、第 3 次 Kill(:16905-16921)
-    const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (game.world.store.inBounds(tx, ty) && game.world.store.isSolid(tx, ty)) {
-      this.bounces++;
-      if (this.bounces < 3) {
-        this.x -= this.vx; this.y -= this.vy;
+    // ★残余债清偿(2026-09-01):中心点采样改走正典管线。原版 type405 反弹计数 =
+    // HandleMovement 无条件 localAI[0]++(:18429),此处保留【事件计数】口径
+    // (bounces 仅真接触时自增)并登记差异;几何判定 half/坡面由管线正确化
+    {
+      const body = {
+        x: this.x, y: this.y, w: this.w, h: this.h,
+        vx: this.vx, vy: this.vy,
+        onGround: false, hitWall: false, hitHead: false, collideY: false,
+        tileCollide: true, dropThrough: true,
+      };
+      moveAndCollide(body, game.world, this.vx, this.vy);
+      const collided = body.hitWall || body.collideY || body.onGround || body.hitHead;
+      if (collided && this.bounces < 2) {
+        // 第1/2次接触:全反射续飞(:18433-18440)
         this.vx = -this.vx; this.vy = -this.vy;
-      } else {
-        this.dead = true;
-        // Kill 爆尘（1458 P.cs:74184-74208;台账 C 批清偿——旧合成橙粒近似退役）:
-        // Item54 音 + 20× d212 真值尘——NewDust(20×20 盒)后落点归位到半径
-        // 10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
-        // color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
-        // scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
-        game.playSfxFiles(['Item_54'], 1, cx0, cy0);
-        if (game.spawnDust) {
-          for (let i = 0; i < 20; i++) {
-            const d = game.spawnDust(cx0 - 10, cy0 - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
-            if (!d) break;
-            const len = Math.hypot(d.x - cx0, d.y - cy0) || 1;
-            const ux = (d.x - cx0) / len, uy = (d.y - cy0) / len;
-            const spdLen = Math.hypot(d.vx, d.vy);
-            d.x = cx0 + ux * 10 * this.ai1;
-            d.y = cy0 + uy * 10 * this.ai1;
-            d.vx = ux * spdLen; d.vy = uy * spdLen;
-            const hue = 0.4 + Math.random() * 0.2;
-            const col = hslToRgbColor(hue, 0.9, 0.5);
-            d.color = { r: Math.round(col.r + (255 - col.r) * 0.3),
-              g: Math.round(col.g + (255 - col.g) * 0.3),
-              b: Math.round(col.b + (255 - col.b) * 0.3), a: 255 };
-            d.noGravity = true;
-            d.scale = 0.7;
-          }
-        } else {
-          game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
-        }
-        return;
       }
+      this.x = body.x; this.y = body.y;
+      if (collided) this.bounces++;   // ★仅接触自增(修复曾放条件外每 tick 计数)
+    }
+    if (this.bounces >= 3) {
+      this.dead = true;
+      // Kill 爆尘（1458 P.cs:74184-74208;台账 C 批清偿——旧合成橙粒近似退役）:
+      // Item54 音 + 20× d212 真值尘——NewDust(20×20 盒)后落点归位到半径
+      // 10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
+      // color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
+      // scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
+      game.playSfxFiles(['Item_54'], 1, cx0, cy0);
+      if (game.spawnDust) {
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust(cx0 - 10, cy0 - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
+          if (!d) break;
+          const len = Math.hypot(d.x - cx0, d.y - cy0) || 1;
+          const ux = (d.x - cx0) / len, uy = (d.y - cy0) / len;
+          const spdLen = Math.hypot(d.vx, d.vy);
+          d.x = cx0 + ux * 10 * this.ai1;
+          d.y = cx0 + uy * 10 * this.ai1;
+          d.vx = ux * spdLen; d.vy = uy * spdLen;
+          const hue = 0.4 + Math.random() * 0.2;
+          const col = hslToRgbColor(hue, 0.9, 0.5);
+          d.color = { r: Math.round(col.r + (255 - col.r) * 0.3),
+            g: Math.round(col.g + (255 - col.g) * 0.3),
+            b: Math.round(col.b + (255 - col.b) * 0.3), a: 255 };
+          d.noGravity = true;
+          d.scale = 0.7;
+        }
+      } else {
+        game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+      }
+      return;
     }
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1);
   }
@@ -3982,40 +4003,40 @@ export class GrenadeProj extends Entity {
       }
     }
     if (this.stickPending) return;                                        // 贴墙待爆：vel=0 静止
-    // ---- 位移（无重力）+ 撞块（:18339-18371 响应表）----
-    // ★撞块采样全部用【新位置 nx/ny】——曾 Y 轴第二项用旧 x 右缘(this.x+w-1):
-    //   出生盒与邻格实心(像素方块夹缝)重叠时该项恒真 → 无论朝哪都判竖向撞块
-    //   → 贴墙 timeLeft=3 原地爆(2026-08-23 用户报"站在像素方块地形火箭任何
-    //   角度都在脚下爆")。原版先移动后按新盒检查(:18342 系),离墙方向第一子步
-    //   即脱离重叠正常飞出
+    // ---- 位移（无重力）+ 撞块（AI_016 响应表）----
+    // ★残余债清偿(2026-09-01):三点半采样撞块在斜砖/半砖上漏检(几何空区)+误检并存,
+    // 改走 moveAndCollide 正典管线——hitWall/collideY/onGround 旗标驱动原响应分支
+    // 分毫不变(stick 待爆/×−0.4 反弹/lastVy>0.7 门槛/1088 橡实种植)。火箭"像素方块
+    // 地形脚下必爆"(2026-08-23 用户报)这类出生盒重叠病灶由管线嵌入自愈一并终结。
     const lastVx = this.vx, lastVy = this.vy;
-    let nx = this.x + this.vx;
-    let ny = this.y + this.vy;
-    const solidAt = (px: number, py: number) => {
-      const tx = Math.floor(px / TILE);
-      const ty = Math.floor(py / TILE);
-      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: true,
     };
-    // 1088 橡实种弹：撞块先查种树点（:18342-18346 CanAcornPlant → Kill——
-    // Kill 内种植/掉落，oldVelocity = 入撞前速度）
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    this.x = body.x; this.y = body.y;
+    this.vx = lastVx; this.vy = lastVy;
+    const hitX = body.hitWall, hitY = body.collideY || body.onGround || body.hitHead;
+    // 1088 橡实种弹：撞块先查种树点（CanAcornPlant → Kill——Kill 内种植/掉落，
+    // oldVelocity = 入撞前速度）。管线版接触面含坡面落面(onGround)
     if (this.projId === 1088 && this.bouncePlantCheck
-      && (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)
-        || solidAt(nx + this.w - 1, ny + this.h - 1))
+      && (hitX || hitY)
       && this.bouncePlantCheck(this.cx, this.cy)) {
       this.dead = true;
       this.destroy();
-      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, lastVx, lastVy);
+      this.onExplode(this.cx, this.cy, this.damage, lastVx, lastVy);
       return;
     }
-    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)) {
+    if (hitX) {
       if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
       } else {
-        this.vx = lastVx * -0.4;                                          // 榴弹/雷反弹 ×−0.4（:18349-18356）
+        this.vx = lastVx * -0.4;                                          // 榴弹/雷反弹 ×−0.4（:18349-18356 系）
       }
-      nx = this.x;
     }
-    if (solidAt(nx + this.w / 2, ny + this.h - 1) || solidAt(nx + this.w - 1, ny + this.h - 1)) {
+    if (hitY) {
       if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
       } else if (lastVy > 0.7) {
@@ -4023,10 +4044,7 @@ export class GrenadeProj extends Entity {
       } else {
         this.vy = 0;
       }
-      ny = this.y;
     }
-    this.x = nx;
-    this.y = ny;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
       this.dead = true;
       this.destroy();
@@ -4152,7 +4170,10 @@ export class GrenadeProj extends Entity {
       let stuck = false;
       for (let i = x0; i < x1 && !stuck; i++) {
         for (let j = y0; j < y1 && !stuck; j++) {
-          if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j) || st.isPlatform(i, j)) continue;
+          // ★2026-09-01 取证对拍(vanilla AI_016_Bombs 粘性段 P.cs:47850-47873):
+        //   条件矩阵 nactive+tileSolid+非solidTop、外扩左上-1右下+2、内缩4px 完全一致;
+        //   原版不看 slope/halfBrick ⇒ 斜砖整格可粘 = 本实现已是 parity
+        if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j) || st.isPlatform(i, j)) continue;
           if (this.x + this.w - 4 > i * TILE && this.x + 4 < i * TILE + TILE
             && this.y + this.h - 4 > j * TILE && this.y + 4 < j * TILE + TILE) {
             stuck = true;
@@ -4249,8 +4270,9 @@ export class GrenadeProj extends Entity {
             }
           }
         }
-        // 911 推出（:44385-44393）：弹心所在格实心 → 沿（块心−弹心）反向退 4px，
-        // 让炸弹停在墙面外侧而非嵌进砖里（SolidOrSlopedTile ≈ isSolid）
+        // 911 推出（P.cs:47860-47888）：弹心所在格实心 → 沿（块心−弹心）反向退 4px。
+        // ★取证对拍:WorldGen.SolidOrSlopedTile(W.cs:70515)=active+tileSolid+非solidTop+
+        //   非致动,slope/halfBrick 不参与判定矩阵 ⇒ 本处 isSolid 即等价(parity)
         if (this.projId === 911) {
           const ptx = Math.floor(this.cx / TILE), pty = Math.floor(this.cy / TILE);
           if (st.inBounds(ptx, pty) && st.isSolid(ptx, pty)) {
@@ -4429,20 +4451,39 @@ export class GlowstickProj extends Entity {
       this.vy += 0.2;
     }
     this.rot += this.vx * 0.1;
-    // 粘性（53）：tileCollide=false，与实心重叠 → 粘住
+    // 粘性（53）：tileCollide=false，盒外扩(−1/+2)扫实心、【无内缩】完整包围盒重叠
+    // → 粘住（vanilla StickyGlowstick 段 @25215-25250 同款:条件 nactive+tileSolid+
+    //   非 solidTop;斜砖/半砖整格计——残余债清偿对齐原版矩阵）。黏后速度 (0,-0.2)
     if (this.projId === 53) {
-      const overlap = solidAt(this.x + this.w / 2, this.y + this.h / 2)
-        || solidAt(this.x + 1, this.y + 1) || solidAt(this.x + this.w - 2, this.y + this.h - 2);
-      if (overlap) { this.vx = 0; this.vy = -0.2; return; }
+      const x0s = Math.max(0, Math.floor(this.x / TILE) - 1);
+      const x1s = Math.min(st.w - 1, Math.floor((this.x + this.w) / TILE) + 2);
+      const y0s = Math.max(0, Math.floor(this.y / TILE) - 1);
+      const y1s = Math.min(st.h - 1, Math.floor((this.y + this.h) / TILE) + 2);
+      let stuck = false;
+      for (let i = x0s; i <= x1s && !stuck; i++) {
+        for (let j = y0s; j <= y1s && !stuck; j++) {
+          if (!st.isActive(i, j) || !st.isSolid(i, j)) continue;   // isActive=nactive 口径
+          if (this.x + this.w > i * TILE && this.x < i * TILE + TILE
+            && this.y + this.h > j * TILE && this.y < j * TILE + TILE) stuck = true;
+        }
+      }
+      if (stuck) { this.vx = 0; this.vy = -0.2; return; }
       this.x += this.vx; this.y += this.vy;
       return;
     }
     // 移动 + 碰撞反弹（反弹表 cs:18261-18333）
+    // ★残余债清偿(2026-09-01):点采样改正典管线(half 下半/坡面对角/平台 fallThrough),
+    // 反射表逐型数值不变;hitX/hitY 由管线旗标驱动
     const lastVx = this.vx, lastVy = this.vy;
-    let nx = this.x + this.vx, ny = this.y + this.vy;
-    let hitX = false, hitY = false;
-    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, this.y + 1)) { hitX = true; nx = this.x; }
-    if (solidAt(nx + this.w / 2, ny + this.h) || solidAt(nx + 1, ny + this.h) || solidAt(nx + this.w - 1, ny + this.h)) { hitY = true; ny = this.y; }
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: true,
+    };
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    const hitX = body.hitWall, hitY = body.collideY || body.onGround || body.hitHead;
+    const nx = body.x, ny = body.y;
     if (hitX || hitY) {
       if (this.projId === 870) {
         // 妖精首次反弹：全反射进入 170 阶段（cs:18270-18276）
@@ -4663,10 +4704,20 @@ export class TorchGodProj extends Entity {
     // ai[1] -= velocity.Length()（:40112-40119）：射程内 tileCollide=false
     this.rangeLeft -= Math.hypot(this.vx, this.vy);
     if (this.rangeLeft <= 0) this.tileCollide = true;
-    const nx = this.x + this.vx, ny = this.y + this.vy;
-    if (this.tileCollide) {
-      const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.kill(game); return; }
+    // ★残余债清偿(2026-09-01):中心点采样在斜砖/半砖上漏检(空区)/误检并存——
+    // 射程内 tileCollide=false 直写、超程后任一轴接触即 Kill(AI_184 :40112 系)
+    {
+      const body = {
+        x: this.x, y: this.y, w: this.w, h: this.h,
+        vx: this.vx, vy: this.vy,
+        onGround: false, hitWall: false, hitHead: false, collideY: false,
+        tileCollide: !!this.tileCollide, dropThrough: true,
+      };
+      moveAndCollide(body, game.world, this.vx, this.vy);
+      this.x = body.x; this.y = body.y;
+      if (this.tileCollide && (body.hitWall || body.collideY || body.onGround || body.hitHead)) {
+        this.kill(game); return;
+      }
     }
     // 尾迹（AI_184 :40120-40130）：每 AI 4 粒,沿 velocity/4×k 段布点,vel×0.3
     for (let k = 0; k < 4; k++) {
@@ -4679,8 +4730,9 @@ export class TorchGodProj extends Entity {
     // SetDefaults 去 hostile（:8950）。本仓 unlockedBiomeTorches（火把神图腾
     // 解锁位）未登记 → 恒未解锁 = 恒真伤（与 1456 假伤 0 的差异即本批修正点）
     const p = game.player;
+    // 位移已由管线落位(nx/ny → this.x/this.y)
     if (!game.world.flags.unlockedBiomeTorches
-      && nx < p.x + p.w && nx + this.w > p.x && ny < p.y + p.h && ny + this.h > p.y) {
+      && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
       p.lastDamageCause = {
         kind: 'projectile',
         name: game.projectileName?.(this.projId) ?? '弹幕',
@@ -4690,16 +4742,14 @@ export class TorchGodProj extends Entity {
       // 曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
       // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
       p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
-        Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
+        Math.sign(p.cx - this.cx) || 1, 0, game as never);
       // ★R3-16（1457 P57:43575-43579 AI_184_BadTorchLuck → SelfHurtPlayers
       //  :15104-15152）：原版命中后**不杀弹**——949 继续飞，玩家无敌帧内由
       //  immune 门静默、无敌帧结束再判（SelfHurtPlayers 每 AI 帧调用）。本仓曾
       //  this.kill → 火把神之焰碰玩家即消失（原版穿透续飞反复判定）。
-      //  位置仍须推进（SelfHurtPlayers 不冻结弹），否则卡原地每帧重复判定
-      this.x = nx; this.y = ny;
+      //  位置已由管线推进（SelfHurtPlayers 不冻结弹），否则卡原地每帧重复判定
       return;
     }
-    this.x = nx; this.y = ny;
   }
 }
 
@@ -4886,15 +4936,24 @@ export class DaybreakFlare extends Entity {
     this.hitStep(game);                    // 附着后 Damage_CanDealDamage=false（:11782）
   }
 
-  /** 飞行位移 + 撞块即毁（标枪族无反弹分支，Arrow 同口径） */
+  /** 飞行位移 + 撞块即毁（标枪族无反弹分支，Arrow 同口径）。
+   *  ★残余债清偿(2026-09-01):中心点采样改走正典管线——斜砖/半砖按真实几何判定,
+   *  dropThrough=true 对齐弹体 fallThrough 缺省 true。 */
   private moveStep(game: GameHooks): void {
-    this.x += this.vx; this.y += this.vy;
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: true,
+    };
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    this.x = body.x; this.y = body.y;
     const st = game.world.store;
-    const tx = Math.floor((this.x + this.w / 2) / TILE);
-    const ty = Math.floor((this.y + this.h / 2) / TILE);
+    const tx = Math.floor(this.cx / TILE);
+    const ty = Math.floor(this.cy / TILE);
     if (!st.inBounds(tx, ty)) { this.killNow(game); return; }
     game.cutTile(tx, ty);
-    if (st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) this.killNow(game);
+    if (body.hitWall || body.collideY || body.onGround || body.hitHead) this.killNow(game);
   }
 
   /** 首击结算：伤害 + AddBuff(189,300) + 附着 + 上限 8 淘汰（单目标即止） */

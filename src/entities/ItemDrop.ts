@@ -240,7 +240,8 @@ export class ItemDrop extends Entity {
         //  left>0（有装不下的余量）时触达，即满背包装不下的溢流语义）----
         if (left > 0 && player.useVoidBag()) {
           const preVoid = left;
-          const dep = player.depositIntoVoidVault(this.itemId, left);
+          // ★F2 手头件词缀随行（Player.cs:39845 inv[i]=returnItem 含 prefix / :39749 同词缀合并门）
+          const dep = player.depositIntoVoidVault(this.itemId, left, this.prefix);
           if (dep < preVoid) {
             const vidV = vanillaIdOfItem(this.itemId);
             if (vidV > 0) game.achievements?.notifyItemPickup(vidV);   // :39768 NotifyItemPickup

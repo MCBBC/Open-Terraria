@@ -40,7 +40,7 @@ interface SandGrain {
   /** EmitDust 四色（(200,160,20)/(103,98,122)/(135,43,34)/(213,196,197)，alpha 180） */
   cr: number; cg: number; cb: number;
   /** NewDust 帧掷（Dust.cs:177+186-190 双重 while：X=10×268−2000=680、Y=10×rand(3)+60）
-   *  → 源矩形 (680, 60+10×frame, 8, 8)。★曾误读 (680,20)=dust 168 的蓝十字格，
+   *  → 源矩形 (680, 60+10×frame, 8, 8)。★曾误读 (680,20)=dust 68 的蓝十字格，
    *  蓝底×沙色乘=暗绿被用户当"树叶"（2026-08-31 定谳） */
   frame: number;
   active: boolean;
@@ -557,7 +557,7 @@ export function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, fram
 }
 
 /** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,60+10×frame,8,8) = dust 268 三帧
- *  （NewDust while 双轮：frame.Y = 10×rand(3)+60——★(680,20) 是 dust 168 的蓝十字格，
+ *  （NewDust while 双轮：frame.Y = 10×rand(3)+60——★(680,20) 是 dust 68 的蓝十字格，
  *  蓝底被 GetColor 沙色乘成暗绿 = 「树叶」假象根因，2026-08-31 定谳）。
  *  RGB 乘色入缓存；overlay 的 alpha 通道（GetColor 同式）由调用方 globalAlpha 施加 */
 const sandTintCache = new Map<string, HTMLCanvasElement>();

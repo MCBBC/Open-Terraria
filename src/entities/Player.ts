@@ -568,7 +568,7 @@ export class Player extends Entity {
    *  [0]=bank 存钱罐(29) / [1]=bank2 保险箱(97) / [2]=bank3 守护者熔炉(463) /
    *  [3]=bank4 虚空保险库(491)——右键绑定见 Player.cs:32598+。内容随玩家存档，
    *  方块破坏不丢内容（原版同语义，掉落回收 place_v_ 物品） */
-  banks: Array<Array<{ id: number; stack: number } | null>> = [
+  banks: Array<Array<{ id: number; stack: number; /** 重铸词缀（Item.prefix，0/缺省=无）——★F2：虚空袋空位落格整件随行须带（Player.cs:39845） */ prefix?: number } | null>> = [
     Array(40).fill(null), Array(40).fill(null), Array(40).fill(null), Array(40).fill(null),
   ];
   buffs = new BuffState();
@@ -7435,7 +7435,9 @@ export class Player extends Entity {
    *  （GetItemSettings.cs:12；同旗通道还有 LootAllFromChest/RefundConsumedItem，
    *  LootAllFromChest 消费位 Terraria.UI/ChestUI.cs:391-412，RefundConsumedItem 消费位
    *  CraftingRequests.cs:339-341），背包 58 格接不住的余量进 bank4：占用堆叠先合并
-   *  (CanStack=同 type;bank4 槽无词缀位 :39747-39792) → 空位整堆落格(:39835-39857)。
+   *  （CanStack=同 type【且同 prefix】,Player.cs:39749→Item.CanStack Item.cs:49870-49876;
+   *  ★F2 词缀语义补齐）→ 空位整堆落格(:39835-39857,inv[i]=returnItem 整件随行含 prefix)。
+   *  @param prefix 手头件的词缀（Item.prefix，缺省=无）——合并门与空位落格共用。
    *  CanVoidVaultAccept(:39733-39745)：questItem ∪ 3822(DD2EnergyCrystal 埃特尼亚魔力)
    *  拒——WorksInVoidBag 缺省全真(SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。
    *  返回仍未入袋数量。
@@ -7446,29 +7448,34 @@ export class Player extends Entity {
    *  dep==stack 自然走残余路径。
    *  ★原版语义澄清：虚袋不持续吸物,只在背包装不下时兜底（IsVoidVaultEnabled 空位判定
    *  支 Player.cs:39509-39525）；本方法即溢流通道唯一入口。 */
-  depositIntoVoidVault(itemId: number, stack: number): number {
+  depositIntoVoidVault(itemId: number, stack: number, prefix?: number): number {
     if (!this.useVoidBag() || stack <= 0) return stack;
     // ★F4 门序对齐原文：CanVoidVaultAccept 在 GetItem 收尾汇流门（Player.cs:39703）
     // 判一次,GetItem_VoidVault 函数体内再判一次（:39711-39714）——本仓单点等价
     if (!canVoidVaultAccept(vanillaIdOfItem(itemId))) return stack;
     const vault = this.banks[3];
     let left = stack;
+    const pfx = prefix ?? 0;   // Item.prefix 缺省=无;比对式对齐 QuickStacking.canStack 先例
     // 占用堆叠合并（GetItem_FillIntoOccupiedSlot_VoidBag :39747-39792——该支原文无
-    // DoCoins,占用合并不触发换币）
+    // DoCoins,占用合并不触发换币）。★F2 受理门=Item.CanStack(returnItem, inv[i])
+    // （Player.cs:39749 → Item.cs:49870-49876：同 type【且同 prefix】才可并堆）,
+    // 异词缀互融=词缀堆污染(原版同词缀门,QuickStacking.canStack 同款判定先例)
     for (let i = 0; i < vault.length && left > 0; i++) {
       const s = vault[i];
       if (!s || s.stack <= 0 || vanillaIdOfItem(s.id) !== vanillaIdOfItem(itemId)) continue;
+      if ((s.prefix ?? 0) !== pfx) continue;
       const max = ITEM_DEFS[s.id]?.maxStack ?? 999;
       const put = Math.min(max - s.stack, left);
       if (put <= 0) continue;
       s.stack += put;
       left -= put;
     }
-    // 空位落格（GetItem_FillEmptyInventorySlot_VoidBag :39835-39857）
+    // 空位落格（GetItem_FillEmptyInventorySlot_VoidBag :39835-39857）——★F2 原文
+    // `inv[i] = returnItem` 整件随行含 prefix（:39845),新建槽带词缀位
     for (let i = 0; i < vault.length && left > 0; i++) {
       if (vault[i]) continue;
       const put = Math.min(ITEM_DEFS[itemId]?.maxStack ?? left, left);
-      vault[i] = { id: itemId, stack: put };
+      vault[i] = pfx ? { id: itemId, stack: put, prefix: pfx } : { id: itemId, stack: put };
       left -= put;
       // ★DoCoins 币种兑换尾随（:39844-39847 PopText 之后逐槽 `if(!NoCoinMerge)
       //  DoCoins(i)`）——★反编译原文读的是 this.inventory（主背包）同下标位,【不是】

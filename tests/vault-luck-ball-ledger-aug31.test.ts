@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { Player, canVoidVaultAccept, QUEST_ITEM_VIDS } from '../src/entities/Player';
 import { Inventory, COIN_KEYS } from '../src/items/Inventory';
-import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { FootballProj } from '../src/entities/BallProjs';
 import { TileStore } from '../src/world/TileStore';
 import { chestSettingsAllowsVault, lootAllFromContainer } from '../src/stats/QuickStacking';
@@ -234,5 +234,52 @@ describe('④ FootballProj 接触回收宽限窗（owner-only,:23677-23691）', 
     expect(fb.graceTicks()).toBe(30);                              // min(30, ++localAI) 钳位
     expect(drops.filter((d) => d.key === 'vi_4743_Football')).toHaveLength(1);
     expect(drops[0].n).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑤ F2 词缀语义：合并支同 prefix 门 + 空位支整件随行
+//   · 占用合并受理门 = Item.CanStack(returnItem, inv[i])（Player.cs:39749 →
+//     Item.CanStack :49870-49876 = 同 type【且同 prefix】）——异词缀互融堆叠=
+//     词缀堆污染。仓内同款判定先例 QuickStacking.canStack。
+//   · 空位落格 `inv[i] = returnItem`（Player.cs:39845）整件随行含 prefix——
+//     新建裸 {id,stack} 槽=存档可观测的词缀丢失（SavedItem.prefix 原样透传）。
+//   · 词缀取实值：PrefixID.Unreal=82（PrefixID.cs:174）/ PrefixID.Deadly=20
+//     （PrefixID.cs:50）；弹药可重铸+带词缀掉落，木箭 vid=40 为典型受害者面。
+// ---------------------------------------------------------------------------
+describe('⑤ vault 词缀语义（F2：P.cs:39749/:39845 + Item.cs:49870-49876）', () => {
+  const UNREAL = 82;
+  const DEADLY = 20;
+
+  it('同一 prefix 溢流：先并满既有堆、残段续落新格且带前缀', () => {
+    const p = vaultPlayer();
+    const arrow = iidOf(40);                        // 木箭 vid=40（可重铸弹药）
+    // 容量与被测代码同源读法（ITEM_DEFS[?].maxStack ?? 999）——桥接批缺省 maxStack
+    // 非 999 字面，钉死注册表真值防脆断
+    const amax = ITEM_DEFS[arrow]?.maxStack ?? 999;
+    p.banks[3][0] = { id: arrow, stack: amax - 4, prefix: UNREAL };
+    expect(p.depositIntoVoidVault(arrow, amax, UNREAL)).toBe(0);
+    expect(p.banks[3][0]).toEqual({ id: arrow, stack: amax, prefix: UNREAL });          // 并满
+    expect(p.banks[3][1]).toEqual({ id: arrow, stack: amax - 4, prefix: UNREAL });      // 段随行保词缀
+  });
+
+  it('不同 prefix 分槽：Unreal 堆不被 Deadly 灌入（互融=bug 面钉死）', () => {
+    const p = vaultPlayer();
+    const arrow = iidOf(40);
+    p.banks[3][0] = { id: arrow, stack: 5, prefix: UNREAL };
+    expect(p.depositIntoVoidVault(arrow, 3, DEADLY)).toBe(0);
+    expect(p.banks[3][0]).toEqual({ id: arrow, stack: 5, prefix: UNREAL });     // 既有堆原样不动
+    expect(p.banks[3][1]).toEqual({ id: arrow, stack: 3, prefix: DEADLY });     // 异词缀独立落格
+    expect(p.banks[3][2]).toBe(null);
+  });
+
+  it('空位落格整件随行：新槽携词缀字段；无词缀走旧形不写字段', () => {
+    const p = vaultPlayer();
+    const star = iidOf(19);                         // 掉落拾取面同理；空袋直落空位
+    expect(p.depositIntoVoidVault(star, 7, UNREAL)).toBe(0);
+    expect(p.banks[3][0]).toEqual({ id: star, stack: 7, prefix: UNREAL });
+    // 缺省（无词缀）：保持裸 {id,stack}，与存档 SavedItem.prefix||undefined 双向对称
+    expect(p.depositIntoVoidVault(iidOf(1), 2)).toBe(0);
+    expect(p.banks[3][1]).toEqual({ id: iidOf(1), stack: 2 });
   });
 });

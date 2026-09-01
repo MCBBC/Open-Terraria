@@ -401,6 +401,48 @@ describe('治疗弹飞行结算（aiStyle 52 :27114-27165）', () => {
     expect(target.hp).toBe(100);
   });
 
+  it('到达帧仍出整批尾迹尘（原版命中分支无 return :28952-28986，dead 同拍置位不截尾）', () => {
+    const recs: { type: number }[] = [];
+    const hooksDust = {
+      addDamageNumber: () => {},
+      spawnDust: (_x: number, _y: number, _w: number, _h: number, type: number) => {
+        recs.push({ type });
+        return null;
+      },
+    } as never;
+    // 出生即在命中窗内（dist<50 ∧ 盒相交 ⇒ 首子步即到达）
+    const target = { x: 190, y: 0, w: 20, h: 42, hp: 50, maxHp: 100 };
+    const proj = new HealProj(305, 205, 10, 7.7, target);
+    expect(Math.hypot(205 + 3 - 200, 10 + 3 - 21)).toBeLessThan(50);   // 命中门前置
+    let dustOnArrival = -1;
+    let ticks = 0;
+    while (!proj.dead && ticks++ < 20) {
+      recs.length = 0;
+      proj.fixedUpdate(1 / 60, hooksDust);
+      dustOnArrival = recs.filter((d) => d.type === 183).length;
+    }
+    expect(proj.dead).toBe(true);
+    expect(target.hp).toBe(57);          // 结算照常
+    expect(ticks).toBe(1);               // 首拍即到达
+    expect(dustOnArrival).toBe(3);       // 到达帧仍出 d183×3 整批（旧 return 截成 0）
+  });
+
+  it('月噬(145)在身：不结算不飘字，但仍消亡不续飞（Kill 在 moonLeech 门之外 :28952）', () => {
+    const hits: number[] = [];
+    const hooksLeech = {
+      addDamageNumber: (_x: number, _y: number, n: number) => { hits.push(n); },
+      player: { buffs: { moonLeech: true } },
+    } as never;
+    const target = { x: 190, y: 0, w: 20, h: 42, hp: 50, maxHp: 100 };
+    const proj = new HealProj(305, 205, 10, 7.7, target);
+    let ticks = 0;
+    while (!proj.dead && ticks++ < 20) proj.fixedUpdate(1 / 60, hooksLeech);
+    expect(proj.dead).toBe(true);        // Kill 无条件（续飞=红队表述经 :28952 复核否决）
+    expect(ticks).toBe(1);               // 到达帧即消亡，不滞留续飞
+    expect(target.hp).toBe(50);          // 不结算
+    expect(hits).toEqual([]);            // 不飘字
+  });
+
   it('追踪方向正确：从目标右侧起飞必向左接近（速度插值 :27142-27145）', () => {
     const target = { x: 0, y: 0, w: 20, h: 42, hp: 50, maxHp: 100 };
     const proj = new HealProj(305, 200, 0, 5, target);

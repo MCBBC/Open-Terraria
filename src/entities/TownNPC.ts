@@ -317,6 +317,19 @@ export const TP_SCREEN_H = 1200;
 export const TP_SAFE_X = Math.trunc((TP_SCREEN_W / 16) * 0.52);   // 62
 export const TP_SAFE_Y = Math.trunc((TP_SCREEN_H / 16) * 0.52);   // 39
 
+/** Main.tileDungeon 表（Main.cs:8131-8136 字面全集）：地牢砖族 {41,43,44}+
+ *  古砖 {677,678,679}。回家传送触发的守卫老人备用臂——`type==37 && tileDungeon[
+ *  脚格]` 时无视昼夜/天气旗直接参与「不在驻地→拽回」（NPC.cs:53973 OR 臂）。
+ *  集合按本仓 tile 域物化：遍历 TILE_DEFS 以 vanilla.sheet 归一，免引 Housing.sheetOf */
+const VANILLA_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+const VANILLA_DUNGEON_TILES = (() => {
+  const s = new Set<number>();
+  for (let t = 1; t < TILE_DEFS.length; t++) {
+    if (TILE_DEFS[t]?.vanilla && VANILLA_DUNGEON_SHEETS.has(TILE_DEFS[t].vanilla!.sheet)) s.add(t);
+  }
+  return s;
+})();
+
 /** TileID.Sets.AvoidedByNPCs（TileID.cs:373）：SearchAvoidedByNPCs 谓词底表 */
 export const AVOIDED_BY_NPC_SHEETS = new Set([
   21, 467, 55, 85, 395, 88, 463, 334, 29, 97, 99, 356, 663, 425, 440, 209,
@@ -1070,6 +1083,8 @@ export class TownNPC extends Entity {
   get walking(): boolean { return this.walkMode === 1; }
   /** 测试/读档注入：直接置走态（原版 ai[0]=1、ai[1]=t、localAI[3]=0） */
   setWalking(t: number): void { this.walkMode = 1; this.walkT = t; this.turnLock = 0; }
+  /** 测试注入：直接置站定态（原版 ai[0]=0、ai[1]=t；★R3 拴绳只在站定臂生效） */
+  setStanding(t: number): void { this.walkMode = 0; this.walkT = t; this.turnLock = 0; }
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -1719,9 +1734,19 @@ export class TownNPC extends Entity {
       const nearHome = restTp != null && (this.sitting && !world.clock.isDay
         ? Math.abs(myX6 - restTp.x) <= 7 && Math.abs(myY7 - restTp.y) <= 7
         : myX6 === restTp.x && myY7 === restTp.y);
-      if (flag && restTp != null && !nearHome) {
+      // ★红蓝批 R2（2026-09-01）：补守卫老人备用臂——原版触发条件 OR 右项
+      //  `type==37 && Main.tileDungeon[脚格]`（NPC.cs:53973；tileDungeon 全集
+      //  Main.cs:8131-8136）：老人白天驻足地牢砖上时同样参与「不在驻地→拽回」，
+      //  不受昼夜/天气旗约束。脚格坐标即 num6/num7（myX6/myY7 同源同值）。
+      const feetDungeonTile = this.vanillaId === 37
+        && (() => {
+          const stx = world.store;
+          return stx.inBounds(myX6, myY7)
+            && VANILLA_DUNGEON_TILES.has(stx.type[stx.idx(myX6, myY7)]);
+        })();
+      if ((flag || feetDungeonTile) && restTp != null && !nearHome) {
         const pl = (game as unknown as { player: { x: number; y: number; w: number; h: number; dead: boolean } | null }).player;
-        // 矩形视野门（:53831-53846）：k=0 以 NPC 位中心、k=1 以 home 位中心；
+        // 矩形视野门（:53831-53846）：k=0 以 NPC 位中心、k=1 以 home(FindGoodRestingSpot) 位中心；
         // 尺寸 = (sWidth+2×safeRangeX) × (sHeight+2×safeRangeY) = 2044×1278
         const rw = TP_SCREEN_W + TP_SAFE_X * 2, rh = TP_SCREEN_H + TP_SAFE_Y * 2;
         const visible = (cx: number, cy: number): boolean => {
@@ -1729,18 +1754,26 @@ export class TownNPC extends Entity {
           const rx = cx - rw / 2, ry = cy - rh / 2;
           return pl.x < rx + rw && pl.x + pl.w > rx && pl.y < ry + rh && pl.y + pl.h > ry;
         };
-        if (!visible(this.cx, this.cy) && !visible(this.home.x * TILE + 8, this.home.y * TILE + 8)) {
-          // 三列落位（:56066-56085：home−1/home/home+1，头顶 3 行×3 列净空即收）
+        if (!visible(this.cx, this.cy) && !visible(restTp.x * TILE + 8, restTp.y * TILE + 8)) {
+          // 三列落位（TeleportToHome :56211-56237：入参=FindGoodRestingSpot 输出，
+          // 即【地面行】restTp——非 home 站格！2026-09-01 定谳「拆椅冻结风暴」根因：
+          // 旧实现以 home.y(站格,地面行−1) 当落位基线,y=(home.y)*TILE−h−0.1 脚底落在
+          // 地面行上 16px 的空中行——nearHome 精确等值门(myY7===restTp.y)永假 ⇒ 每拍
+          // 重传永不满足，onGround 恒 false 连锁钉死攻击门(case2 零还击)与逃离位移。
+          // 列序 num=homeFloorX+i{0,−1,+1}（switch 字面）、净空窗 SolidTiles(num±1,
+          // homeFloorY−3..−1)、type37 免净空、落点 (num*16+8−w/2, homeFloorY*16−h−0.1)
+          // ——脚底恰贴地面行顶,e(int)((Y+H+1)/16)==restTp.y 一拍收敛。
           let moved = false;
           for (const off of [0, -1, 1]) {
-            const hx = this.home.x + off, hy = this.home.y;
+            const hx = restTp.x + off, hy = restTp.y;
             let clear = true;
             for (let ax = hx - 1; ax <= hx + 1 && clear; ax++) {
               for (let ay = hy - 3; ay <= hy - 1; ay++) {
                 if (world.store.inBounds(ax, ay) && world.store.isSolid(ax, ay)) { clear = false; break; }
               }
             }
-            if (!clear) continue;
+            if (!clear && this.vanillaId !== 37) continue;   // :56222 type37 免净空
+            if (!world.store.inBounds(hx, hy)) continue;
             this.x = hx * TILE + 8 - this.w / 2;
             this.y = hy * TILE - this.h - 0.1;
             this.vx = 0; this.vy = 0;
@@ -2097,9 +2130,17 @@ export class TownNPC extends Entity {
         // 几何下挂上归家 −5/t 附加扣减——无 wet 门（★F4 换真探针）
         const drownGeom = drownCollision(st, this.x, this.y, this.w, this.h, true);
         if (!drownGeom) {
-          if (this.home && rest != null
+          // ★红蓝批 R4（2026-09-01）：背离 drain 臂对齐 :54364-54374 字面——
+          //   ①门加 `!tileDungeon[脚格]`（守卫老人驻砖上时整臂豁免,否则老人地牢
+          //     游走被恒定加速耗腿）；
+          //   ②方向判定改 position.X 与 home 列【左缘】比较（原版 position.X vs
+          //     floorX*16）,非中心 sign 式；
+          //   ③排布序=先 drain 后 ai[1]--（同拍两扣原版同序）。
+          const feetOnDungeonTile = VANILLA_DUNGEON_TILES.has(st.type[st.idx(myX, myY)]);
+          if (!feetOnDungeonTile && this.home && rest != null
             && (myX < rest.x - HOME_DRIFT_RANGE || myX > rest.x + HOME_DRIFT_RANGE)
-            && this.facing === Math.sign(this.x - (rest.x * TILE + 8))) {
+            && ((this.x < rest.x * TILE && this.facing === -1)
+              || (this.x > rest.x * TILE && this.facing === 1))) {
             this.walkT -= HOME_DRIFT_TICK;
           }
           this.walkT--;
@@ -2116,8 +2157,12 @@ export class TownNPC extends Entity {
       }
       wantDir = this.facing;
     }
-    // ---- 拴绳（:54169-54188）：(!sitFlag || 在好休息位) 时才掷随机转身 ----
-    if ((!sitFlag || atRest) && rest != null) {
+    // ---- 拴绳（:54324-54348）：【仅站定态 ai[0]==0 臂内】——(!flag || IsInGoodRest)
+    //      门下 ±25 软界 rand(80) 随机转身 / ±50 硬界同向强制折返。★红蓝批 R3
+    //      （2026-09-01）翻案：旧实现把本块放在 walkMode 无关的函数尾 ⇒ 行走态
+    //      也吃随机转身/硬折返——原版行走态无拴绳干预（自然走程由 walkT/预测门
+    //      终结），mid-walk 翻向会造成折返抖动。现随原版挂站定态内。
+    if (this.walkMode === 0 && (!sitFlag || atRest) && rest != null) {
       if (myX < rest.x - LEASH_SOFT || myX > rest.x + LEASH_SOFT) {
         if (this.turnLock <= 0) {
           if (myX < rest.x - LEASH_HARD && this.facing === -1) this.facing = 1;

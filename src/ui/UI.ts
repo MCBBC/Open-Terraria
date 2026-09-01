@@ -4066,7 +4066,10 @@ export class UI {
    *  (CanGoIntoVoidVault=true),bank 面板（本仓 openChest.x<0 的 -2..-5 约定,
    *  :414-465 分支)=LootAllFromBank(default=false)。允许时余量经
    *  Player.depositIntoVoidVault（GetItem_VoidVault Player.cs:39710——questItem/3822
-   *  拒收门 + DoCoins 主背包尾随都在内闭环）溢流灌虚空袋。 */
+   *  拒收门 + DoCoins 主背包尾随都在内闭环）溢流灌虚空袋。
+   *  -5 虚空袋面板另有收藏锁（ChestUI.cs:443-452 `!bank4.item[l].favorited` :447——
+   *  唯一带此判定的容器分支,其他面板无）。Grab 音=有实际搬移才播（原版逐 GetItem
+   *  事件播,本仓单次,同 DepositAll 登记式）。 */
   private chestLootAll(): void {
     const chest = this.openChest;
     if (!chest) return;
@@ -4074,8 +4077,11 @@ export class UI {
     const spill = chestSettingsAllowsVault(chest.x)
       ? (itemId: number, stack: number): number => this.game.player.depositIntoVoidVault(itemId, stack)
       : undefined;
-    lootAllFromContainer(inv, chest.items as Array<{ id: number; stack: number; prefix?: number } | null>, spill);
-    this.game.sfx.play('pickup');
+    const moved = lootAllFromContainer(inv,
+      chest.items as Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>,
+      spill,
+      { skipFavorited: chest.x === -5 });
+    if (moved) this.game.sfx.play('pickup');
     this.refreshAll();
   }
 

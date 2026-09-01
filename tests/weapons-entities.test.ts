@@ -679,7 +679,10 @@ describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => 
       if (f.aiState === 5) hitTick = i;
     }
     expect(hitTick).toBeGreaterThanOrEqual(0);          // 撞墙 → 坠落态(:41028)
-    expect(f.x).toBeCloseTo(xBefore - 14, 5);           // position -= vector(:41035)
+    // ★2026-09-01 正典管线接入后断言改锚原版次序:Update 先由 TileCollision 把
+    // 盒右缘解析到墙面(896−w),HandleMovementCollision 再 position -= vector(14)
+    // ——旧值 xBefore−14 钉的是 bespoke 直写不贴面的旧行为
+    expect(f.x).toBeCloseTo((896 - f.w) - 14, 5);       // position -= vector(:44519)
     expect(rec.sfx.filter((s) => s === 'dig').length).toBe(1); // SoundID 0 一响(num2 档收拢)
     expect(rec.bursts).toBeGreaterThanOrEqual(1);       // CreateImpactExplosion2 冲击波环
   });

@@ -72,8 +72,10 @@ const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
  *  逐型分支读 color.R/G/B 时按此兜底——无色尘的发光贡献恒 0（与原版一致）。 */
 const BLACK: DustColor = { r: 0, g: 0, b: 0, a: 0 };
 
-/** NewDust 帧映射（:176-191）：X = 10·type，type≥100 每 100 减 1000 加 Y+30 */
-function frameOf(type: number): { fx: number; fy: number } {
+/** NewDust 帧映射（:176-191）：X = 10·type，type≥100 每 100 减 1000 加 Y+30。
+ *  导出供回归测试锚定（dust 268 帧曾因心算少一轮循环裁成 (680,20)=dust 168 格,
+ *  蓝十字×沙色=暗绿"树叶",2026-08-31 定谳——本公式是唯一权威,禁手算内联） */
+export function dustFrameOf(type: number): { fx: number; fy: number } {
   let fx = 10 * type, fy = 10 * (Math.random() * 3 | 0);
   let t = type;
   while (t >= 100) { t -= 100; fx -= 1000; fy += 30; }
@@ -118,7 +120,7 @@ export class VanillaDust {
     d.y = y + (Math.random() * (h2 - 4) | 0) + 4;
     d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 + speedX;
     d.vy = ((Math.random() * 41 | 0) - 20) * 0.1 + speedY;
-    const f = frameOf(type);
+    const f = dustFrameOf(type);
     d.fx = f.fx; d.fy = f.fy;
     d.rotation = 0;
     d.scale = (1 + ((Math.random() * 41 | 0) - 20) * 0.01) * scale;

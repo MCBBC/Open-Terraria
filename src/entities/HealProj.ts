@@ -1,10 +1,13 @@
 // 治疗弹（原版 Projectile 298 GhostHeal / 305 VampireHeal，aiStyle 52）：
 // 吸血/鬼疗命中敌怪后从命中点起飞，追踪目标玩家，抵达（距离<50 且盒相交）结算
-// 回复 floor(ai[1]) 并消亡。Projectile.AI aiStyle 52 :27114-27165 1:1：
-//   - 速度 4（num399 :27117），速度插值 (v×15+dir)/16（:27142-27145——298/305 同档）；
+// 回复 floor(ai[1]) 并消亡。Projectile.AI aiStyle 52（1457 :28929-28987；旧引 :27114-
+// 27165 为 1456 行号）1:1：
+//   - 速度 4（num390 :28932），速度插值 (v×15+dir)/16（:28957-28958——298/305 同档）；
 //     每子步位移 extraUpdates+1 次（298=3 :3614 / 305=10 :3696）
-//   - 命中门（:27122-27128）：dist<50 且弹盒与目标矩形相交
-//   - 结算（:27129-27141）：HealEffect((int)ai[1]) + statLife 上限钳制 + Kill
+//   - 命中门（:28938）：dist<50 且弹盒与目标矩形相交
+//   - 结算门（:28940）：owner==本地 ∧ !moonLeech——月噬(145)在身只免结算不免死，
+//     Kill(:28952) 在门外；主门在生成端 Game.applyLifeSteal（月噬全禁发射）
+//   - 命中分支内无 return：消亡当拍仍执行速度混合 + 整批尾迹尘（:28954-28986）
 // 弹体参数（SetDefaults :3610-3617 / :3692-3698）：6×6、alpha 255、tileCollide=false
 // （穿墙）、298 magic=true（已由调用点魔法门保证）。
 // 单人语义：原版鬼疗跨队友选最缺血者（ghostHeal :11424-11434），本仓无队友体系，
@@ -49,26 +52,37 @@ export class HealProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
-    // 原版 extraUpdates：每 tick AI+位移共 extraUpdates+1 次
-    for (let u = 0; u <= this.extraUpdates; u++) {
+    // 原版 extraUpdates：每 tick AI+位移共 extraUpdates+1 次；消亡后 active=false
+    // ⇒ 残余子步 AI 不再进（Projectile.Update :16878-16881）——当拍子步走完后止
+    for (let u = 0; u <= this.extraUpdates && !this.dead; u++) {
       const vcx = this.x + this.w / 2, vcy = this.y + this.h / 2;
       const dx = this.target.x + this.target.w / 2 - vcx;
       const dy = this.target.y + this.target.h / 2 - vcy;
       const dist = Math.hypot(dx, dy);
-      // 命中门（:27122-27128）：dist<50 且盒相交 → 结算回复并消亡
+      // 命中门（:27122-27128 / 1457 :28938）：dist<50 且盒相交 → 结算+消亡。
+      // ★原版命中分支内【无 return】（1457 :28952-28986）：Kill 只停后续子步的
+      // AI（Projectile.Update :16878-16881 if(active) 门），当拍余段——速度混合与
+      // 整批尾迹尘——照常执行，故此处不提前退出。
       if (dist < 50 && this.x < this.target.x + this.target.w && this.x + this.w > this.target.x
         && this.y < this.target.y + this.target.h && this.y + this.h > this.target.y) {
-        const n = Math.floor(this.heal);             // (int)ai[1] :27130
-        this.target.hp = Math.min(this.target.maxHp, this.target.hp + n);
-        if (n > 0) game.addDamageNumber(this.target.x + this.target.w / 2, this.target.y, n, false, '#40E080');
-        this.dead = true;
-        return;
+        // 结算门（1458 :28941 = 1457 :28940 = 1456 :27124）：owner==Main.myPlayer
+        // ∧ !moonLeech。月噬(145)在身时不回复也不飘字；★Kill 在此【门外】——
+        // 弹照常消亡、尾迹尘照常出（1456 :27136 / 1457 :28952 / 1458 :28953 三基线
+        // 一致）。单人 owner 恒本地玩家（头注），仅余本地 buff 一项；生成端主门
+        // 在 Game.applyLifeSteal（月噬全禁发射），此为弹已在中飞时 debuff 上身的兜底。
+        const pl = (game as Partial<GameHooks>).player;   // mock hooks 可缺 player
+        if (!pl?.buffs?.moonLeech) {
+          const n = Math.floor(this.heal);             // (int)ai[1] :27130 / :28942
+          this.target.hp = Math.min(this.target.maxHp, this.target.hp + n);
+          if (n > 0) game.addDamageNumber(this.target.x + this.target.w / 2, this.target.y, n, false, '#40E080');
+        }
+        this.dead = true;                              // Kill() :28952 无条件
       }
       // 速度 4 归一方向 + (v×15+dir)/16 插值趋近（:27138-27145）
       const nx = dx / dist * 4, ny = dy / dist * 4;
       this.vx = (this.vx * 15 + nx) / 16;
       this.vy = (this.vy * 15 + ny) / 16;
-      // ---- AI_052 尾段尘拖尾（原式 :28960-29004；每【子步】一批）----
+      // ---- AI_052 尾段尘拖尾（原式 1457 :28959-28986；每【子步】一批）----
       // 305：d183 ×3、scale1.1、后移距 v×0.334×i；298（else 支）：d175 ×5、
       // scale1.3、v×0.2×i。公共态 noGravity=true(第 11 参=NewDust 后置等价位)、
       // velocity*=0（清 NewDust 抖动）、α 参数 100、盒=弹盒 6×6。
@@ -78,18 +92,18 @@ export class HealProj extends Entity {
           const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
             183, 0, 0, 100, null, 1.1, true);
           if (!d) continue;
-          d.vx = 0; d.vy = 0;                        // dust.velocity *= 0f（:28967）
-          d.x -= this.vx * 0.334 * i;                // :28968 position.X -= num397
-          d.y -= -(this.vy * 0.334) * i;             // :28969 position.Y -= num398
+          d.vx = 0; d.vy = 0;                        // dust.velocity *= 0f（:28968）
+          d.x -= this.vx * 0.334 * i;                // :28969 position.X -= num397
+          d.y -= -(this.vy * 0.334) * i;             // :28970 position.Y -= num398
         }
       } else {
         for (let i = 0; i < 5; i++) {
           const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
             175, 0, 0, 100, null, 1.3, true);
           if (!d) continue;
-          d.vx = 0; d.vy = 0;                        // :28988
-          d.x -= this.vx * 0.2 * i;                  // :28989
-          d.y -= -(this.vy * 0.2) * i;               // :28990
+          d.vx = 0; d.vy = 0;                        // :28982
+          d.x -= this.vx * 0.2 * i;                  // :28983
+          d.y -= -(this.vy * 0.2) * i;               // :28984
         }
       }
       this.x += this.vx;   // tileCollide=false——穿墙不检碰撞（:3615/:3696）

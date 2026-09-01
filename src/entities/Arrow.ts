@@ -24,11 +24,6 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
-/** 无 Hook 兜底：空实现碎面，使编排纯函数可被无上下文路径直驱（测试/模拟存档） */
-function noHookGame(x?: number, y?: number): GameHooks {
-  void x; void y;
-  return { spawnParticles: () => {}, spawnDust: () => null } as unknown as GameHooks;
-}
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
@@ -2840,7 +2835,7 @@ export class Arrow extends Entity {
    *  6181→PhoenixQuivered（:58788-58791）/ 6180→SeraphNecklaced（:58792-58795）+
    *  timeLeft 钳 ≤300（:58797-58800）。粒子（:58802 HarpyCharm/PhoenixQuiver/
    *  SeraphNecklace 三型）视觉面省略。 */
-  applyHarpyCharm(tcx: number, tcy: number, itemVid: number): void {
+  applyHarpyCharm(tcx: number, tcy: number, itemVid: number, game?: GameHooks | null): void {
     const sp = Math.hypot(this.vx, this.vy);
     const want = Math.atan2(tcy - this.cy, tcx - this.cx);
     this.vx = Math.cos(want) * sp;                       // rotateTowards π = 全角一步到位
@@ -2853,13 +2848,13 @@ export class Arrow extends Entity {
     // SeraphNecklace|PhoenixQuiver|HarpyCharm, PositionInWorld=Center、MovementVector=velocity)
     // ——L5 长尾批收编真值本体 harpyCharmFamilyFx（FadingParticle 外抛/内环两组+十字
     // PrettySparkle+Item39/Item20 音）+ module8 上行。旧注「粒子视觉面省略」退役。
-    const gameA = (this as unknown as { __game?: GameHooks | null }).__game ?? null;
-    const gA: GameHooks | null = gameA
+    const gA: GameHooks | null = game
       ?? (globalThis as unknown as { __swGameHook?: GameHooks }).__swGameHook ?? null;
-    gA?.broadcastParticleOrchestra?.(itemVid === 6180 ? ParticleOrchestraType.SeraphNecklace
-      : itemVid === 6181 ? ParticleOrchestraType.PhoenixQuiver : ParticleOrchestraType.HarpyCharm,
-      this.cx, this.cy, this.vx, this.vy);
-    harpyCharmFamilyFx(gA ?? noHookGame(this.cx, this.cy), itemVid, this.cx, this.cy, this.vx, this.vy);
+    if (!gA) return;                                       // 无 Hook（测试桩面）静默——视觉缺通道登记
+    const tType = itemVid === 6180 ? ParticleOrchestraType.SeraphNecklace
+      : itemVid === 6181 ? ParticleOrchestraType.PhoenixQuiver : ParticleOrchestraType.HarpyCharm;
+    harpyCharmFamilyFx(gA, itemVid, this.cx, this.cy, this.vx, this.vy);
+    gA.broadcastParticleOrchestra?.(tType, this.cx, this.cy, this.vx, this.vy);
   }
 
   /** Collision.SolidCollision 等价（aiStyle 33 贴壁判定 :27480/:27487）：弹体
@@ -6399,7 +6394,7 @@ export function harpyCharmEffect(game: GameHooks, player: HarpyCharmPlayer): voi
     // :28700 标记件 id 三档 → :28701 ApplyHarpyCharm → :28702 冷却写入
     const itemVid = player.equipStats.hasPhoenixQuiver ? 6181
       : player.equipStats.accSeraphNecklace ? 6180 : 6166;
-    best.applyHarpyCharm(target.cx, target.cy, itemVid);
+    best.applyHarpyCharm(target.cx, target.cy, itemVid, game);
     player.accHarpyCharmCooldown = cd;
     // ★R25-⑦ 音效段先行（Spawn_HarpyCharm,ParticleOrchestrator1458.cs:477-504）：
     //   默认 SoundID.Item39（6166 鹰妖护符/6180 炽天使项链）、flag=6181 凤凰箭袋→

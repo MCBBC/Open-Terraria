@@ -494,13 +494,15 @@ describe('P1-1 游走双态+拴绳（NPC.cs:54135-54288）', () => {
     expect(maxVx).toBeCloseTo(WALK_SPEED, 1);    // 稳态贴帽 1.0
   });
 
-  it('拴绳 ±50 强制折返（:54177-54187）：离锚 51 格朝外走 → 折返朝锚', () => {
+  it('拴绳 ±50 强制折返（★红蓝批 R3 定谳 :54324-54348 站定态臂）：离锚 51 格朝外站定 → 折返朝锚', () => {
+    // 原版拴绳块位于 ai[0]==0 站定态内——行走态不受干预（自然腿程由 walkT 终结,
+    // 行走耗尽的落位锁 localAI[3]=60 过后才折返）。setStanding 直接构词站定语义词。
     const { npc, game } = walker(100);
     for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);   // 落地锚定 col≈100
     npc.x = 152 * 16;                                            // 推到锚+52 格
     npc.facing = 1;                                              // 朝外
-    npc.setWalking(3000);
-    for (let t = 0; t < 2; t++) npc.fixedUpdate(1 / 60, game);
+    npc.setStanding(200);                                        // ai[0]=0 站定态
+    npc.fixedUpdate(1 / 60, game);
     expect(npc.facing).toBe(-1);                 // 强制折返
   });
 

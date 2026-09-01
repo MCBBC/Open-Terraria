@@ -230,6 +230,13 @@ describe('坐姿状态机（fixedUpdate 集成）', () => {
     // 敌后入场（敌在场时危险扫描每刻拽起——先坐稳再加敌）
     const foes: unknown[] = [];
     const { game, shots } = makeGame(world, { npcs: [npc], enemies: foes });
+    // ★2026-09-01 坐姿修正批：回家传送（TeleportToHome :56211）触发门含「双视野
+    // 矩形均无活玩家」——玩家死亡/远遁时夜间逃离一离开 resting 精确同格即被拽回
+    // （原版语义成立，本仓 1:1）。本用例考察【可见场景】的逃离/还击物理,须给活
+    // 玩家把双矩形视野门关上（2044×1278 门,NPC/家两锚点均需覆盖）;脱离视野门的
+    // 拽回语义由文件尾「回家传送 grounding」专用回归锁定。
+    (game as unknown as { player: unknown }).player =
+      { x: 150 * 16, y: 90 * 16, w: 20, h: 42, dead: false };
     for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.sitting).toBe(true);
     // 敌在右侧 ~84px（< PrettySafe 200）→ 次刻拽起背向左逃（2026-08-17 接危险扫描）
@@ -261,6 +268,10 @@ describe('坐姿状态机（fixedUpdate 集成）', () => {
     npc.home = { x: SPOT_X, y: FLOOR - 1 };
     const foes: unknown[] = [];
     const { game, shots } = makeGame(world, { npcs: [npc], enemies: foes });
+    // ★2026-09-01 坐姿修正批：同上——视野门内考察还击物理(否则夜间远离锚点瞬移
+    //  语义合法地反复打断战斗序;落地风暴回归见文件尾专用用例)
+    (game as unknown as { player: unknown }).player =
+      { x: 150 * 16, y: 90 * 16, w: 20, h: 42, dead: false };
     for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.sitting).toBe(true);
     // 拆椅 + 敌入场（拆椅与危险同帧——椅没了即起身，攻击门不再被坐姿挡）
@@ -715,5 +726,87 @@ describe('★C1 ai[0]==25 上升态内环境生命周期三连(NPC.cs:91590-9160
     enemy.x = npc.x - 4;                                  // 保持重叠
     npc.fixedUpdate(1 / 60, game);
     expect(npc.hp).toBeLessThan(250);
+  });
+});
+
+// =====================================================================
+// ★2026-09-01 坐姿修正批：回家传送 grounding 回归（TeleportToHome NPC.cs:56211-
+// 56237）。定谳「拆椅+夜=冻结风暴」根因——落位基线曾用 home 站格(地面行−1)而非
+// FindGoodRestingSpot 输出的【地面行】,y=(home.y)*TILE−h−0.1 脚底悬在地面行上方
+// 16px 空中行 ⇒ nearHome 精确等值门(非坐姿脚格==restTp)永假、每拍重传永不满足：
+// onGround 恒 false 连锁钉死攻击门(ai[0] 入态门 :55769 首因子)与逃离位移。
+// 本块锁两件事:①落位后脚行==restTp.y 且落位收敛;②无「悬浮静止风暴」复发。
+// （拽回触发本体=raining||!dayTime|eclipse|slimeRain|storm :53532-53548,无危险
+//  豁免——逃离中被拽回属原版语义,由视野门矩形保持可见场景的测试分离考察。）
+// =====================================================================
+describe('回家传送 grounding（TeleportToHome :56211-56237 修正回归）', () => {
+  /** 平地 + 可选椅 + 夜；玩家死遁=双矩形视野门开 */
+  function tpWorld(atWorld = true, chairAt?: number) {
+    const world = new World(200, 200, 100, 'tp-ground');
+    const st = world.store;
+    for (let x = 20; x <= 180; x++) st.setTileSilent(x, FLOOR, DIRT);
+    if (chairAt != null) {
+      st.setTileSilent(chairAt, FLOOR - 2, CHAIR, 0, 0);
+      st.setTileSilent(chairAt, FLOOR - 1, CHAIR, 0, 18);
+    }
+    world.clock.timeOfDay = atWorld ? 0 : SIT_DAY_MOCK_TIME;
+    return world;
+  }
+  const SIT_DAY_MOCK_TIME = 27000;   // 白天 (isDay)
+  const feetRow = (npc: TownNPC): number => Math.floor((npc.y + npc.h + 1) / 16);
+
+  it('拆椅家·远死玩家：离开锚点即被拽回,落位脚行==restFloor.y,onGround 收敛', () => {
+    const world = tpWorld(true);          // 无椅 → 锚点走 restFloor(home 列向下找地面行)
+    const anchorY = FLOOR;                // home={110,F−1} 向下命中地面行 F
+    const npc = new TownNPC('guide', spotCenter(SPOT_X - 4), FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });   // 死亡远处玩家→门开
+    let warped = false;
+    for (let t = 0; t < 300; t++) {
+      const before = (npc as unknown as { teleportedHome: boolean }).teleportedHome;
+      npc.fixedUpdate(1 / 60, game);
+      const after = (npc as unknown as { teleportedHome: boolean }).teleportedHome;
+      if (!before && after) {
+        warped = true;
+        expect(feetRow(npc), `t${t} 落位脚行应==${anchorY}`).toBe(anchorY);
+      }
+      void before; void after;
+    }
+    expect(warped).toBe(true);            // 远离锚点在夜里必然被拽回（原版语义）
+    // 收敛态：站于地面或已入座；脚行与锚点一致
+    expect(npc.sitting || feetRow(npc) === anchorY).toBe(true);
+    if (!npc.sitting) {
+      expect((npc as unknown as { onGround: boolean }).onGround).toBe(true);
+      expect(Math.abs(npc.cx - spotCenter(SPOT_X))).toBeLessThanOrEqual(16.5);
+    }
+  });
+
+  it('无悬浮风暴不变量：任何时刻「位置静止×连续 12t」必须伴随 sitting 或 onGround', () => {
+    const world = tpWorld(true, SPOT_X);
+    const npc = new TownNPC('guide', spotCenter(SPOT_X - 6), FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });
+    let frozenAir = 0;
+    for (let t = 0; t < 600; t++) {
+      npc.fixedUpdate(1 / 60, game);
+      const g = npc as unknown as { onGround: boolean };
+      if (Math.abs(npc.vx) < 1e-6 && Math.abs(npc.vy) < 1e-6 && !g.onGround) {
+        frozenAir++;
+        expect(frozenAir, `t${t}: 悬浮静止 ${frozenAir}t`).toBeLessThan(12);
+      } else {
+        frozenAir = 0;
+      }
+    }
+    expect(frozenAir).toBe(0);
+  });
+
+  it('白天（flag=false）同一布局不触发传送', () => {
+    const world = tpWorld(false);         // isDay → sitFlag false
+    const npc = new TownNPC('guide', spotCenter(SPOT_X - 4), FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 120; t++) npc.fixedUpdate(1 / 60, game);
+    expect((npc as unknown as { teleportedHome: boolean }).teleportedHome).toBe(false);
+    expect(Math.abs(npc.cx - spotCenter(SPOT_X - 4))).toBeLessThan(120);   // 游走半径内
   });
 });
