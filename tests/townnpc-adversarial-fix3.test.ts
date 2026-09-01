@@ -69,6 +69,14 @@ function baseGame(world: World, enemies: unknown[] = [], npcs: unknown[] = []) {
   return { shots, game: game as never, gameRaw: game as unknown as { shots: TownShot[] } };
 }
 
+/** 私有字段白盒读写（绕 TS 私有性；与本仓既有测试同口径——写走 Object.assign） */
+function priv(n: object, k: string): any {
+  return (n as Record<string, unknown>)[k];
+}
+function privSet(n: object, kv: Record<string, unknown>): void {
+  Object.assign(n, kv);
+}
+
 type AnyNpc = TownNPC & Record<string, unknown>;
 
 // =====================================================================
@@ -86,15 +94,15 @@ describe('【1】368 游商夜臂（蓝队A-F2 尾差收口）', () => {
     // homeless=true 字面：家槽每 tick 清空（昼同，见下一例）
     expect(npc.home).toBeNull();
     // 夜臂锚定：UpdateHomeTileState(homeless, Center列, (Bottom+2px)/16)（:53913-14）
-    const anchor = (npc as AnyNpc).anchorTile as { x: number; y: number };
+    const anchor = priv(npc, 'anchorTile') as { x: number; y: number };
     expect(anchor.x).toBe(Math.floor(npc.cx / 16));
     expect(anchor.y).toBe(Math.floor((npc.y + npc.h + 2) / 16));
     // !flag5 && ai[0]==0 → ai[0]=1,ai[1]=200（:53916-20）；走态链当拍 ai[1]--
     expect(npc.walking).toBe(true);
-    expect((npc as AnyNpc).walkT).toBeLessThanOrEqual(200);
-    expect((npc as AnyNpc).walkT).toBeGreaterThan(190);
+    expect(priv(npc, 'walkT')).toBeLessThanOrEqual(200);
+    expect(priv(npc, 'walkT')).toBeGreaterThan(190);
     // :53922 flag=false → 开门掷门免必开通道失活
-    expect((npc as AnyNpc).homeFlag).toBe(false);
+    expect(priv(npc, 'homeFlag')).toBe(false);
   });
 
   it('白天同样强制 homeless（:53909 在昼夜门外），但走态/家旗不被改写', () => {
@@ -102,14 +110,14 @@ describe('【1】368 游商夜臂（蓝队A-F2 尾差收口）', () => {
     world.clock.timeOfDay = 0.5;
     const npc = new TownNPC('travelling_merchant', 104 * 16, FLOOR_ROW * 16);
     npc.home = { x: 104, y: FLOOR_ROW - 1 };
-    (npc as AnyNpc).walkMode = 0;
-    (npc as AnyNpc).walkT = 500;                  // 大腿程防常态站定倒计时起走
+    privSet(npc, { walkMode: 0 })
+    privSet(npc, { walkT: 500 });                 // 大腿程防常态站定倒计时起走
     const { game } = baseGame(world);
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.home).toBeNull();                  // homeless 恒真（昼夜一体）
     expect(npc.walking).toBe(false);              // 无夜臂 → 不启走
-    expect((npc as AnyNpc).homeFlag).toBe(false); // 白天旗本就 false
+    expect(priv(npc, 'homeFlag')).toBe(false); // 白天旗本就 false
   });
 
   it('夜间对话中不启动夜走（!flag5 门）且对话归位块接管', () => {
@@ -121,7 +129,7 @@ describe('【1】368 游商夜臂（蓝队A-F2 尾差收口）', () => {
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.walking).toBe(false);              // 对话臂 ai[0]=0 归位覆盖
-    expect((npc as AnyNpc).walkT).toBe(300);      // :53876 ai[1]=300
+    expect(priv(npc, 'walkT')).toBe(300);      // :53876 ai[1]=300
   });
 
   it('拴绳/回家传送对 368 天然失配：有 home 也被当拍清空、传送网不触发（注释钉死）', () => {
@@ -137,7 +145,7 @@ describe('【1】368 游商夜臂（蓝队A-F2 尾差收口）', () => {
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.home).toBeNull();
-    expect((npc as AnyNpc).teleportedHome ?? false).toBe(false);
+    expect(priv(npc, 'teleportedHome') ?? false).toBe(false);
     expect(Math.abs(npc.x - startX)).toBeLessThan(64);
     expect(Math.abs(npc.y - startY)).toBeLessThan(64);
   });
@@ -164,9 +172,9 @@ describe('【2】369 渔夫世界边缘臂', () => {
     const { game } = baseGame(world);
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
-    expect((npc as AnyNpc).anchorTile).toEqual({ x: 150, y: FLOOR_ROW - 1 });
+    expect(priv(npc, 'anchorTile')).toEqual({ x: 150, y: FLOOR_ROW - 1 });
     expect(npc.walking).toBe(true);               // ai[0]=1
-    expect((npc as AnyNpc).walkT).toBeGreaterThan(190);   // ai[1]=200 当拍 --1
+    expect(priv(npc, 'walkT')).toBeGreaterThan(190);   // ai[1]=200 当拍 --1
     expect(npc.facing).toBe(-1);                  // position.X > (maxTilesX−300)*16
   });
 
@@ -180,13 +188,13 @@ describe('【2】369 渔夫世界边缘臂', () => {
     wet.rng = rngQueue([], undefined);
     wet.fixedUpdate(1 / 60, g1);
     expect(wet.facing).toBe(1);                   // position.X/16f < 300f
-    expect((wet as AnyNpc).anchorTile).toEqual({ x: 600, y: FLOOR_ROW - 1 });
+    expect(priv(wet, 'anchorTile')).toEqual({ x: 600, y: FLOOR_ROW - 1 });
 
     const dry = new TownNPC('angler', 200, FLOOR_ROW * 16);
     dry.wet = false;
     const { game: g2 } = baseGame(world);
     dry.fixedUpdate(1 / 60, g2);
-    expect((dry as AnyNpc).anchorTile ?? null).toBeNull();     // 整臂未触发
+    expect(priv(dry, 'anchorTile') ?? null).toBeNull();     // 整臂未触发
   });
 
   it('居家渔夫（湿身）不进本臂（type==369 && homeless && wet 三联门）', () => {
@@ -199,7 +207,7 @@ describe('【2】369 渔夫世界边缘臂', () => {
     const { game } = baseGame(world);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.home).toEqual({ x: 500, y: FLOOR_ROW - 1 });
-    expect((npc as AnyNpc).anchorTile ?? null).toBeNull();
+    expect(priv(npc, 'anchorTile') ?? null).toBeNull();
   });
 });
 
@@ -256,8 +264,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
     world.clock.timeOfDay = 0.5;                    // 白天避开回家臂
     const npc = new TownNPC('town_cat', 104 * 16, FLOOR_ROW * 16);
     npc.onGround = true;
-    (npc as AnyNpc).walkMode = 0;
-    (npc as AnyNpc).walkT = 125;                    // 命中窗口 [100,150]
+    privSet(npc, { walkMode: 0 })
+    privSet(npc, { walkT: 125 });                   // 命中窗口 [100,150]
     // 队首 .99 垫问好门（socialUpdate 无 !isPet 门）；后接 hit/kind/基档/覆写
     npc.rng = rngQueue([0.99, 0.0000001, 0.33, 0.4, 0.7]);
     const { game } = baseGame(world, [], []);
@@ -274,8 +282,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
       world.clock.timeOfDay = 0.5;
       const npc = new TownNPC('town_dog', 104 * 16, FLOOR_ROW * 16);
       npc.onGround = true;
-      (npc as AnyNpc).walkMode = 0;
-      (npc as AnyNpc).walkT = wt;
+      privSet(npc, { walkMode: 0 })
+      privSet(npc, { walkT: wt })
       const { game } = baseGame(world, [], []);
       npc.rng = rngQueue([0.99], undefined);          // 垫问好门，其余默认不中
       npc.fixedUpdate(1 / 60, game);
@@ -286,8 +294,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
     const talker = new TownNPC('town_bunny', 104 * 16, FLOOR_ROW * 16);
     talker.onGround = true;
     talker.talking = true;
-    (talker as AnyNpc).walkMode = 0;
-    (talker as AnyNpc).walkT = 125;
+    privSet(talker, { walkMode: 0 })
+    privSet(talker, { walkT: 125 })
     const { game } = baseGame(world, [], []);
     talker.rng = rngQueue([0.99], undefined);
     talker.fixedUpdate(1 / 60, game);
@@ -300,8 +308,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
       world.clock.timeOfDay = 0.5;
       const npc = new TownNPC('town_cat', 104 * 16, FLOOR_ROW * 16);
       npc.onGround = true;
-      (npc as AnyNpc).walkMode = 0;
-      (npc as AnyNpc).walkT = 140;
+      privSet(npc, { walkMode: 0 })
+      privSet(npc, { walkT: 140 })
       // 垫问好门 → 进猫@20（t=632：基档 .5 + 猫覆写 .66）
       npc.rng = rngQueue([0.99, 0.0000001, 0.33, 0.5, 0.66]);
       const { game } = baseGame(world, [], []);
@@ -320,10 +328,10 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
       }
       expect(npc.social).toBeNull();                  // 到期退场
       expect(npc.walking).toBe(false);                // ai[0]=0 站定
-      expect((npc as AnyNpc).walkT).toBeGreaterThanOrEqual(60);   // 60+Next(60)
-      expect((npc as AnyNpc).walkT).toBeLessThanOrEqual(119);
-      expect((npc as AnyNpc).turnLock).toBeGreaterThanOrEqual(30);// localAI[3]=30+Next(60)
-      expect((npc as AnyNpc).turnLock).toBeLessThanOrEqual(89);
+      expect(priv(npc, 'walkT')).toBeGreaterThanOrEqual(60);   // 60+Next(60)
+      expect(priv(npc, 'walkT')).toBeLessThanOrEqual(119);
+      expect(priv(npc, 'turnLock')).toBeGreaterThanOrEqual(30);// localAI[3]=30+Next(60)
+      expect(priv(npc, 'turnLock')).toBeLessThanOrEqual(89);
     });
 
   it('FindFrame 带（:69454-96）：兔@20 吸附带 [7..9]、步进循环保持带内、尾窗溢出离带', () => {
@@ -331,8 +339,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
     world.clock.timeOfDay = 0.5;
     const npc = new TownNPC('town_bunny', 104 * 16, FLOOR_ROW * 16);
     npc.onGround = true;
-    (npc as AnyNpc).walkMode = 0;
-    (npc as AnyNpc).walkT = 130;
+    privSet(npc, { walkMode: 0 })
+    privSet(npc, { walkT: 130 })
     npc.frame = 3;                                    // 行走残留帧行——首拍应被吸回带内
     npc.rng = rngQueue([0.99, 0.0000001, 0.1, 0.5, 0.5]);   // 兔@22? kind=20+.3floor→20
     const { game } = baseGame(world, [], []);
@@ -359,8 +367,8 @@ describe('【3】宠物表演态族（social.kind 20/21/22 影子承接）', () 
     const npc = new TownNPC('town_cat', hx * 16 + 3, FLOOR_ROW * 16);   // 左缘在列内、底边贴地行
     npc.onGround = true;
     npc.home = { x: hx, y: FLOOR_ROW - 1 };           // 站格 = 地面行−1
-    (npc as AnyNpc).walkMode = 0;
-    (npc as AnyNpc).walkT = 30;                       // 站定短腿
+    privSet(npc, { walkMode: 0 })
+    privSet(npc, { walkT: 30 });                    // 站定短腿
     npc.vx = 0;                                       // velocity.X==0f 门
     const { game } = baseGame(world, [], [npc]);
     // 垫问好门 → 中口（1/(120*4)=1/480）→ kind=⌊.6·3⌋=1? 取 .93 → 22
@@ -631,15 +639,15 @@ describe('【9】flag22 三态（stepDownGate / stepUpHolds 每 tick 拨正）',
     world.clock.timeOfDay = 0.5;
     const npc = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16) as AnyNpc;
     npc.onGround = true;
-    npc.walkMode = 0;
-    npc.walkT = 400;
+    privSet(npc, { walkMode: 0 });
+    privSet(npc, { walkT: 400 });
     const { game } = baseGame(world, [], []);
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     // flag22 判定在 anchorTile 由游走头建立之前（块位于 fixedUpdate 前段）
-    expect(((npc as AnyNpc).anchorTile ?? null) === null || true).toBe(true);
-    expect((npc as AnyNpc).stepDownGate).toBe('never');
-    expect((npc as AnyNpc).stepUpHolds).toBe(true);
+    expect((priv(npc, 'anchorTile') ?? null) === null || true).toBe(true);
+    expect(priv(npc, 'stepDownGate')).toBe('never');
+    expect(priv(npc, 'stepUpHolds')).toBe(true);
   });
 
   it('低于家平线侧（字面 (Hm−32)>top 为假 → flag22=true）：gate=\'never\' / holds=true', () => {
@@ -650,14 +658,14 @@ describe('【9】flag22 三态（stepDownGate / stepUpHolds 每 tick 拨正）',
     const npc = new TownNPC('guide', 104 * 16, FLOOR_ROW * 16) as AnyNpc;
     npc.onGround = true;
     npc.home = { x: 104, y: 96 };                     // 站格 96 → 地行 97
-    npc.walkMode = 0;
-    npc.walkT = 400;
+    privSet(npc, { walkMode: 0 });
+    privSet(npc, { walkT: 400 });
     const { game } = baseGame(world, [], []);
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.y + npc.h).toBe(FLOOR_ROW * 16);
-    expect((npc as AnyNpc).stepDownGate).toBe('never');
-    expect((npc as AnyNpc).stepUpHolds).toBe(true);
+    expect(priv(npc, 'stepDownGate')).toBe('never');
+    expect(priv(npc, 'stepUpHolds')).toBe(true);
   });
 
   it('高于家平线 32px+ 侧（二层楼板，flag22=false）：gate=\'grounded\' / holds=false', () => {
@@ -670,13 +678,13 @@ describe('【9】flag22 三态（stepDownGate / stepUpHolds 每 tick 拨正）',
     const npc = new TownNPC('guide', 110 * 16, 106 * 16) as AnyNpc;
     npc.onGround = true;
     npc.home = { x: 110, y: 105 };                    // 站格 105 → 地行 106
-    npc.walkMode = 0;
-    npc.walkT = 400;
+    privSet(npc, { walkMode: 0 });
+    privSet(npc, { walkT: 400 });
     const { game } = baseGame(world, [], []);
     npc.rng = rngQueue([], undefined);
     npc.fixedUpdate(1 / 60, game);
     expect(npc.y + npc.h).toBe(106 * 16);
-    expect((npc as AnyNpc).stepDownGate).toBe('grounded');   // !flag22 侧开门吸附
-    expect((npc as AnyNpc).stepUpHolds).toBe(false);         // holdsMatching=flag22=false
+    expect(priv(npc, 'stepDownGate')).toBe('grounded');   // !flag22 侧开门吸附
+    expect(priv(npc, 'stepUpHolds')).toBe(false);         // holdsMatching=flag22=false
   });
 });

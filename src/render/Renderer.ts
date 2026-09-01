@@ -228,7 +228,7 @@ import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
-import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell } from './VanillaTiler';
+import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
@@ -4253,16 +4253,25 @@ export class Renderer {
         if (devOn) {
           const { zz, ox, oy, camRX, camRY } = dev!;
           const dxa = ox + Math.round((tx * ts - camRX) * zz);
-          const yda = oy + Math.round((ty * ts - camRY) * zz);
           const dxb = ox + Math.round(((tx + 1) * ts - camRX) * zz);
-          const ydb = oy + Math.round(((ty + 1) * ts - camRY) * zz);
+          // ★tileTop 并入取整表达式（2026-09-01 缝终修）：画稿盒 = 格盒平移 dyOff
+          //   （tileTop）。旧法在缩放变换内部 +dyOff——画稿上下边缘 = 格边界取整值
+          //   ± dyOff·s（s=1.25 时 2.5 设备 px，分数）→ 相邻格分数边缘各自就近取整
+          //   → 交界处 1 设备行缝隙（露背景）/重叠，随相机分数相位漂移（特定位置），
+          //   整数缩放下 dyOff·s 恒整（无症状）。修 = 画稿盒上下边界直接以
+          //   「世界 y + dyOff」进同一 round 表达式——共享边恒等、恒整数。
+          const dyOff = tileTopOf(sheet, st.frameX[i], fy);
+          const yda = oy + Math.round((ty * ts + dyOff - camRY) * zz);
+          const ydb = oy + Math.round(((ty + 1) * ts + dyOff - camRY) * zz);
           // ★缝指认 instrumentation（__SEAMTRACE 数组时登记逐格 dest 矩形）
           const tr = (globalThis as { __SEAMTRACE?: unknown[] }).__SEAMTRACE;
-          if (tr && tr.length < 20000) tr.push({ tx, ty, sheet: van.sheet, dxa, yda, dxb, ydb });
+          if (tr && tr.length < 20000) tr.push({ tx, ty, sheet: van.sheet, dxa, yda: oy + Math.round((ty * ts - camRY) * zz), dxb, ydb: oy + Math.round(((ty + 1) * ts - camRY) * zz) });
           ctx.save();
           ctx.translate(dxa, yda);
           ctx.scale((dxb - dxa) / ts, (ydb - yda) / ts);
-          ctx.translate(-tx * ts, -ty * ts);
+          // 平移原点 = 画稿盒顶（含 dyOff）——drawVanillaCell 内部再加 dyOff 恰抵消,
+          // 画稿落在 [yda, ydb) 整数盒内
+          ctx.translate(-tx * ts, -(ty * ts + dyOff));
           drawVanillaCell(ctx, atlas, sheet, van.frame,
             van.fw ?? 1, van.fh ?? 1,
             st, tx, ty, type,

@@ -234,6 +234,17 @@ const MIN_TILES = 60;
 /** TileID.Sets.HousingWalls（TileID.cs:377）：栅栏 11 / 高门 386 / 389 */
 const HOUSING_WALL_TILES = new Set([11, 386, 389]);
 
+// ================= 臭虫否决件（★★对抗修复批④2026-09-01 C-F5） =================
+/** CheckRoom 命中置位面（WorldGen.cs:6128-6137）：630 臭虫封锁块 / 631 幽灵臭虫
+ *  封锁块（1×1 非实心陈设,tileSolid=false——房内可泛洪格,实心/门界分支在
+ *  :6113-6127 提前 return 故只有【房内】命中可达置位行）。vanilla 消费面恰两处：
+ *  MoveTownNPC 门（cs:4696-4718,宠物豁免=IsTownPet[type]）/ SpawnTownNPC 门
+ *  （cs:5348-5355,豁免须再持 TownManager 登记房位）;QuickFindHome（:5633-5716）与
+ *  房况复核环不查此二旗——本仓同构只挂两受理门（housingCheckAt/acceptTownNPCAtHouse），
+ *  findFreeHouse（QuickFindHome 语义）刻意不拒。 */
+const STINKBUG_SHEET = 630;
+const ECHO_STINKBUG_SHEET = 631;
+
 // ================= ScoreRoom 静态表（WorldGen.cs:5773-5788 GetTileTypeCountByCategory） =================
 
 const sheetOf = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
@@ -503,6 +514,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   const ignoreNeeds = opts.ignoreNeeds === true;
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
+  // ★对抗修复批④2026-09-01（C-F5）：roomHasStinkbug/roomHasEchoStinkbug 的泛洪局部等价物
+  // （StartRoomCheck 头复位 cs:5986-5987 ↔ 本函数每次调用清零;CheckRoom 置位 :6128-6137）
+  let hasStinkbug = false, hasEchoStinkbug = false;
   // houseTile 登记（CheckRoom :6089-6090 `if nactive → houseTile[type]=true` 在
   // tileSolid 短路前执行——房内家具格与【边界实心/平台格】都入表,RoomNeeds 四表按
   // sheet 查（vanilla 用独立 if 非互斥链:487 同在桌/椅两表）
@@ -521,6 +535,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     if (needsOut) needsOut.chair = needsOut.chair || hasChair;
     if (needsOut) needsOut.light = needsOut.light || hasLight;
     if (needsOut) needsOut.door = needsOut.door || hasDoor;
+    // ★对抗修复批④（C-F5）：臭虫旗与四件套同生命周期出参（并列新字段,四件套语义不动）
+    if (needsOut) needsOut.stinkbug = needsOut.stinkbug || hasStinkbug;
+    if (needsOut) needsOut.echoStinkbug = needsOut.echoStinkbug || hasEchoStinkbug;
   };
 
   while (head < queue.length) {
@@ -538,7 +555,14 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       return null;
     }
     if (st.flags[i] && def) {
-      markHouseTile(def.vanilla?.sheet ?? -1);
+      const sh = def.vanilla?.sheet ?? -1;
+      markHouseTile(sh);
+      // ★对抗修复批④（C-F5）：臭虫旗置位（CheckRoom cs:6128-6137 同构）。本仓
+      // 泛洪队列格 = 原版 CheckRoom 处理过 solid/门界早退后的【房内非实心】格,
+      // 边界邻格支（下方 markHouseTile 第二调用位）不入——630/631 非实心,原版
+      // BlockingWall 早退(:6113-6117)同样先于置位行,口径一致
+      if (sh === STINKBUG_SHEET) hasStinkbug = true;
+      else if (sh === ECHO_STINKBUG_SHEET) hasEchoStinkbug = true;
     }
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const nx = x + dx, ny = y + dy;
@@ -671,16 +695,29 @@ export function findFreeHouse(
 
 // ================= 住房查询/分配（原版住房界面 MoveTownNPC + moveRoom，2026-08-15 B 方案） =================
 
-/** 房屋需求旗标（RoomNeeds :5616-5660 四布尔；填充由 floodRoom 完成，失败时也保留已见项） */
-export interface RoomNeedsFlags { table: boolean; chair: boolean; light: boolean; door: boolean }
+/** 房屋需求旗标（RoomNeeds :5616-5660 四布尔；填充由 floodRoom 完成，失败时也保留已见项）
+ *  ★对抗修复批④2026-09-01（C-F5）：并列新增臭虫否决旗二枚——非四件套成员（RoomNeeds
+ *  语义不动），置位=CheckRoom cs:6128-6137、复位=StartRoomCheck 头/每次泛洪局部
+ *  （cs:5986-5987），随 flush 与四件套同生命周期出参；queryRoom/housingCheckAt 返回
+ *  形状向后兼容（仅增键,消费面皆按名读取）。 */
+export interface RoomNeedsFlags {
+  table: boolean; chair: boolean; light: boolean; door: boolean;
+  /** 房内含臭虫封锁块（roomHasStinkbug，cs:6128-6133；置位→受理门否决档 'stinkbug'） */
+  stinkbug: boolean;
+  /** 房内含幽灵臭虫封锁块（roomHasEchoStinkbug，cs:6135-6137；'echoStinkbug' 档） */
+  echoStinkbug: boolean;
+}
 
 /** 查询失败原因（TownNPCRoomCheckFailureReason 对齐 + 我们的合成档；
- *  'standing'=★C-F8/F-13 新增数据位：房况四件套齐全但 ScoreRoom 无正分站位
- *  （hasStandingSpace=false）——UI 文案映射挂账（见 Game.housingQuery），原版此档
- *  落「不是有效房屋」inter[40] 兜底） */
+ *  'standing'=★C-F8/F-13 数据位（四件套齐全但 ScoreRoom 无正分站位,hasStandingSpace=
+ *  false）——UI 文案已接专项键 TownNPCHousingFailureReasons.RoomHasNoStandingSpace,
+ *  ★对抗修复批④2026-09-01 C-F8 收尾）;
+ *  'stinkbug'/'echoStinkbug'=★C-F5 新增档：MoveTownNPC 臭虫否决门命中（cs:4696-4718，
+ *  宠物申请者豁免在 housingCheckAt 门内判；原文案键 RoomHasAStinkbug/
+ *  RoomHasAnEchoStinkbug,两档按 vanilla 报文序先常规臭虫后幽灵臭虫）。 */
 export type HousingFailReason =
   | 'ok' | 'edge' | 'solid' | 'tooBig' | 'tooSmall' | 'hole' | 'occupied' | 'evil'
-  | 'needs' | 'standing';
+  | 'needs' | 'standing' | 'stinkbug' | 'echoStinkbug';
 
 export interface HousingQueryResult {
   room: Room | null;
@@ -704,7 +741,10 @@ export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
 export function queryRoom(st: TileStore, x: number, y: number,
   opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid'> = {}): HousingQueryResult {
-  const flags: RoomNeedsFlags = { table: false, chair: false, light: false, door: false };
+  const flags: RoomNeedsFlags = {
+    table: false, chair: false, light: false, door: false,
+    stinkbug: false, echoStinkbug: false,
+  };
   if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) {
     return { room: null, flags, reason: 'edge' };
   }
@@ -731,6 +771,13 @@ export function queryRoom(st: TileStore, x: number, y: number,
  * 住房查询 + 打分合并入口（PerformHousingCheck 两次 MoveTownNPC 的合并语义）：
  * 合格且未被占用且未腐化 → reason='ok'；占用/腐化取自 scoreRoom（RoomScore
  * score=-1=occupied、roomEvil=evil）。供查询 UI 与分配共用。
+ * ★★对抗修复批④2026-09-01（C-F5 臭虫否决链落地）：门序对齐 MoveTownNPC 原序——
+ * RoomNeeds（queryRoom 内 requireFurniture 档）→ 臭虫否决（cs:4696-4718）→
+ * ScoreRoom 占用/邪恶/站位。宠物豁免面：`IsTownPet[type]`（NPCID.cs:4446 全集
+ * 与本仓 housingCategory 宠物集逐一相等,复用 npcHousingCategory 判——原版两表
+ * 独立定义但成员相同,勿混同其语义来源）;申请者 -1（查询器"?"问号档）=非宠物,
+ * 否决生效即报臭虫文案（vanilla 同）。findFreeHouse（QuickFindHome 语义）不过此门，
+ * 与原版一致（QuickFindHome :5633-5716 全程不查 roomHasStinkbug 二旗）。
  */
 export function housingCheckAt(
   st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
@@ -739,6 +786,12 @@ export function housingCheckAt(
   // 主链 extraSolid 缺省（C-F4）：queryRoom/floodRoom 默认带 MAIN_EXTRA_SOLID{379}
   const q = queryRoom(st, x, y);
   if (!q.room) return { ...q, score: 0 };
+  // ★对抗修复批④（C-F5）：臭虫否决先于占用/邪恶评分位判定（cs:4694-4718 位于
+  // ScoreRoom 调用之前）。score 保持 0（不反映 ScoreRoom——原版此处尚未打分）；
+  // 双旗齐备时报常规臭虫档（vanilla stopOnFail 首支即断，:4697 先于 :4706）
+  if ((q.flags.stinkbug || q.flags.echoStinkbug) && npcHousingCategory(askingNpcId) !== 1) {
+    return { ...q, room: q.room, reason: q.flags.stinkbug ? 'stinkbug' : 'echoStinkbug', score: 0 };
+  }
   const s = scoreRoom(st, q.room, occupied, askingNpcId);
   if (s.score < 0) return { ...q, room: q.room, reason: 'occupied', score: -1 };
   if (s.roomEvil) return { ...q, room: q.room, reason: 'evil', score: s.score };
@@ -846,11 +899,17 @@ export function sampleHouseSeed(
 /**
  * SpawnTownNPC 受理核（cs:5332-5536 的房屋面合并实现）：StartRoomCheck（种子预检 +
  * 单点直锚泛洪,queryRoom 承担;ignoreNeeds——家具检查是 RoomNeeds 独立步骤,由
- * floodRoom 四旗随扫完成）→ ScoreRoom(-1,n) hiScore>0。bestX/bestY = score 位地板格,
+ * floodRoom 四旗随扫完成）→ 臭虫否决门（★★对抗修复批④2026-09-01 C-F5，
+ * cs:5348-5355）→ ScoreRoom(-1,n) hiScore>0。bestX/bestY = score 位地板格,
  * vanilla homeTile 写 bestX/bestY,本仓 home 约定=站立格（地板上一行 s.y-1,同
  * updateTownNpcArrival ① 口径）;迁入（RelocatedHomeless :5367-5376）与新住户
  * （Successful）共用同一 home 位。ok=false 时 Blocked/FoundHouseNoSpawn 分支由调用方
  * 依 mover 有无落账（受理通过但无可迁者才缓存 LastFoundHouse :5535,早退支不缓存）。
+ * ★C-F5 门位：原版豁免 = `IsTownPet[num] && TownManager.HasRoom(num)`（宠物持登记
+ * 房位者;cs:5347 与 MoveTownNPC 面的无条件宠物豁免不同）——本仓无 TownManager 房位面,
+ * 故此处对全部申请者一律否决（含近链流浪宠物——vanilla 该情形 flag=false 同样 Blocked）；
+ * 种子房含臭虫时 ok=false ⇒ checkHousesNearAPlayer 走 Blocked 早退支【不】缓存
+ * LastFoundHouse（近玩家受理面同检的落点即此门）。
  */
 export interface HousingAcceptanceResult {
   ok: boolean;
@@ -866,6 +925,12 @@ export function acceptTownNPCAtHouse(
 ): HousingAcceptanceResult {
   const q = queryRoom(st, x, y, { ignoreNeeds: true });
   if (!q.room) return { ok: false, home: null, room: null };
+  // ★对抗修复批④（C-F5）：臭虫否决先于 ScoreRoom（原版 :5348-5355 在 ScoreRoom 前、
+  // FindNPCLookingForHomeThatCanMoveIn 后——mover 先选出不影响结果,mover 只在受理
+  // 通过后才有意义）。SpawnTownNPC 面无无条件宠物豁免（见上注 TownManager 差异）
+  if (q.flags.stinkbug || q.flags.echoStinkbug) {
+    return { ok: false, home: null, room: q.room };
+  }
   const s = scoreRoom(st, q.room, occupied, askingNpcId);
   if (s.score <= 0) return { ok: false, home: null, room: q.room };
   return { ok: true, home: { x: s.x, y: s.y - 1 }, room: q.room };

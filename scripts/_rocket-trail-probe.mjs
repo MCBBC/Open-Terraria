@@ -24,11 +24,13 @@ const out = await page.evaluate(async () => {
   if (!(window.__swGame?.world)) return { bootFail: true };
   await new Promise((r) => setTimeout(r, 1500));
   const g = window.__swGame;
-  const { Dart } = await import('/src/entities/Dart.ts');
+  const { GrenadeProj } = await import('/src/entities/WeaponProj.ts');
   const X = (g.world.spawnX + 10) * 16, Y = (Math.floor(g.world.groundLevel) - 6) * 16;
   g.vanillaDust.pool.length = 0;
-  const d = new Dart(X, Y, 12, 0, 60, 303);
-  d.hostile = false;
+  // 玩家火箭发射器弹族:134 火箭 I(直飞无重力),onExplode 走 explodeAt 桩
+  const d = new GrenadeProj(X, Y, 12, 0, 60, 3600, 134,
+    () => {});
+  d.fired = true;
   for (let i = 0; i < 8 && !d.dead; i++) d.fixedUpdate(1 / 60, g);
   let smoke = 0, flame = 0, flameFade = 0, smokeScale = 0, gravityFree = 0;
   for (const dd of g.vanillaDust.pool) {

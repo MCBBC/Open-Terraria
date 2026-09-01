@@ -23994,7 +23994,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  lastFoundHouse（LastFoundHouse :5535）供入驻轮快路径（SpawnHomelessNPC
    *  cs:4979-4994）。本通路独立于入驻环锚池——vanilla 近链同样不查锚池,
    *  2026-08-15「锚池空→整轮 return」契约不受影响。采样用 Math.random=非掷流锚
-   *  （原版 Main.rand 域,非确定性判定,与掷流对拍无关,登记）。 */
+   *  （原版 Main.rand 域,非确定性判定,与掷流对拍无关,登记）。
+   *  ★★对抗修复批④2026-09-01（C-F5）：臭虫否决门落 Housing.acceptTownNPCAtHouse
+   *  内（SpawnTownNPC cs:5348-5355 同序——先于 ScoreRoom）,含臭虫房 = Blocked 级
+   *  早退【不缓存】lastFoundHouse、不迁入;本函数零改动即生效（近链同检位）。 */
   private checkForHousesNearPlayer(): void {
     const w = this.world;
     if (!w?.store) return;
@@ -24201,7 +24204,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // RoomNeeds+ScoreRoom 合并面,extraSolid{379} 内建）成功即把快路径房当本轮安置位；
     // 失败走既有 findFreeHouse 锚扫。成功后置 homelessSpawnTimeout=54000 并清缓存
     // （★纠错：原版置 54000 的位置只在快路径成功支 :4986-4989；此前本仓在流浪兜底
-    // 生成分支置值属错位,该处原版只置 homelessDespawn 等价物——已删）
+    // 生成分支置值属错位,该处原版只置 homelessDespawn 等价物——已删）。
+    // ★对抗修复批④2026-09-01（C-F5）：臭虫否决在受理核内（原版 SpawnHomelessNPC→
+    // SpawnTownNPC 面同查此门 cs:5348-5355），含臭虫房受理失败自动落回锚扫。
     if (this.lastFoundHouse) {
       const lf = this.lastFoundHouse;
       const acc = acceptTownNPCAtHouse(st, homes, lf.x, lf.y, id);
@@ -25191,14 +25196,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.newText(Lang.inter(39), 255, 240, 20);
       return;
     }
+    // ★★对抗修复批④2026-09-01（C-F5 臭虫否决文案）：MoveTownNPC 臭虫门报文键
+    // （cs:4696-4718：roomHasStinkbug→TownNPCHousingFailureReasons.RoomHasAStinkbug、
+    // roomHasEchoStinkbug→...RoomHasAnEchoStinkbug;同色三元组 255,240,20）。
+    // 键已在 public/l10n 产物（原版 Town 语言表随提取管线入包,零补键零重建）
+    if (q.reason === 'stinkbug') {
+      this.newText(Lang.text('TownNPCHousingFailureReasons.RoomHasAStinkbug'), 255, 240, 20);
+      return;
+    }
+    if (q.reason === 'echoStinkbug') {
+      this.newText(Lang.text('TownNPCHousingFailureReasons.RoomHasAnEchoStinkbug'), 255, 240, 20);
+      return;
+    }
     if (q.reason === 'occupied') { this.newText(Lang.inter(41), 255, 240, 20); return; }
     if (q.reason === 'evil') { this.newText(Lang.inter(42), 255, 240, 20); return; }
     if (q.reason === 'standing') {
-      // ★★对抗修复批②2026-09-01（C-F8 数据位已接、文案挂账）：四件套齐全但
-      // ScoreRoom 无正分站位（hasStandingSpace=false）。原版无专项文案,此档在
-      // MoveTownNPC displayText 里同落「不是有效房屋」——维持 inter[40] 兜底,
-      // 专用键挂账待补（若补需走 tools/l10n-custom 双语 + build-l10n 流程）
-      this.newText(Lang.inter(40), 255, 240, 20);
+      // ★★对抗修复批②2026-09-01（C-F8 数据位）：四件套齐全但 ScoreRoom 无正分站位
+      // （hasStandingSpace=false）。
+      // ★★对抗修复批④2026-09-01（C-F8 收尾·文案改接专项键）：原版 hiScore<=0 分支
+      // 有 !roomHasStandingSpace 专属文案 TownNPCHousingFailureReasons.RoomHasNoStandingSpace
+      // （WorldGen.cs:4734-4736 字符串族第三档）——此前挂账兜底 inter[40] 摘除,键已
+      // 在 public/l10n 产物,零补键零重建。观测日志保留（dedupe/站位居舍复核用）
+      this.newText(Lang.text('TownNPCHousingFailureReasons.RoomHasNoStandingSpace'), 255, 240, 20);
       console.info('[housing] 无站位空间(score<=0 且 hasStandingSpace=false) @', x, y);
       return;
     }

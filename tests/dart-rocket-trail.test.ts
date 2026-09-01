@@ -37,7 +37,8 @@ describe('303 火箭尾烟（AI_016_Bombs :48181-48233）', () => {
     const d = new Dart(32 * TILE, 20 * TILE, 12, 0, 60, 303);
     for (let i = 0; i < 8; i++) d.fixedUpdate(1 / 60, game as never);
     let smoke = 0, flame = 0, smokeScale = 0, flameFade = 0, noGrav = 0, flameScale = 9;
-    for (const dd of vd.pool) {
+    const pool = (vd as unknown as { pool: Array<{ active: boolean; type: number; scale: number; fadeIn: number; noGravity: boolean }> }).pool;
+    for (const dd of pool) {
       if (!dd.active) continue;
       if (dd.type === 6) { smoke++; smokeScale = Math.max(smokeScale, dd.scale); if (dd.noGravity) noGrav++; }
       if (dd.type === 31) { flame++; flameFade = Math.max(flameFade, dd.fadeIn); flameScale = Math.min(flameScale, dd.scale); }

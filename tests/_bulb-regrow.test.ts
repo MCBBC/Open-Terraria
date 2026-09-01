@@ -59,22 +59,16 @@ describe('灯泡再生机制(肉后+三王)', () => {
       windSpeedCurrent: 0,
       playerTile: () => ({ x: 1640, y: 300 }),   // 远离丛林(不触发召王/LOS 门)
     });
-    const orig = Math.random;
-    // ★灯泡门是【连续两掷】(1/25 与 1/60)——单点小值序列永远给不出连续两小,
-    //   模式改=每第 7 次起连续两次 0.001(call%7∈{0,1}),其余 0.9(植物/藤蔓/蜂巢/
-    //   染料阈值 ≤1/3 全败,不占 minJ;相位随每采样掷数走 7 循环必对齐)
-    let call = 0;
-    Math.random = () => (call++ % 7) < 2 ? 0.001 : 0.9;
+    // ★★必须真随机:替换 Math.random 会把演化采样的 x/y 坐标一起坍缩到
+    //   0.001→≈0 / 0.9→≈90% 两个点,永远采不到丛林草(此前 0 灯泡=探针伪影)。
+    //   真随机下:P(采样命中草)≈1.9%,150k tick×~75 地下采样≈21 万次草命中,
+    //   灯泡门 1/25×1/60=1/1500 → 期望百级灯泡;150 格独占门限制并存数
     let regrown: Array<[number, number]> = [];
-    try {
-      for (let t = 0; t < 150000 && regrown.length === 0; t++) {
-        evo.update();
-        if (t % 2000 === 1999) regrown = findAnchors();
-      }
-      regrown = findAnchors();
-    } finally {
-      Math.random = orig;
+    for (let t = 0; t < 150000 && regrown.length === 0; t++) {
+      evo.update();
+      if (t % 2000 === 1999) regrown = findAnchors();
     }
+    regrown = findAnchors();
     expect(regrown.length, '再生分支应落新灯泡').toBeGreaterThan(0);
 
     // ④ 底承=双列丛林草(fitJunglePairFlat 放置门)

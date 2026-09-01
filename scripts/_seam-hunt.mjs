@@ -66,6 +66,9 @@ await p.evaluate(async () => {
   window.__swTILE_DEFS_OK = true;
 });
 await p.evaluate(() => { window.__SEAMTRACE = []; });
+if (process.env.SW_FB) {
+  await p.evaluate(() => { window.__swGame.renderer.fullbright = true; });
+}
 await sleep(600);
 // ★精确瞄准:迭代玩家位置,使渲染相机(由 trace 已知格反解) == 记录相机
 const aim = async (tX, tY) => {
@@ -146,34 +149,60 @@ for (const z of zooms) {
     await sleep(tag === 'a' ? 50 : tag === 'c' ? 30 : 640);
     const clip = null; // 全幅截图（缝场景以相机为中心,不锚定出生点机器）
     await p.screenshot({ path: `${OUT}/z${z}-${tag}.png` });
-    // ★全宽行缝归因扫描:能量>18 的行 → 世界tile行 + 分类
+    // ★终审:worldCanvas 缝行剖面(render cam 由 SEAMTRACE 反解)+ Wall_142 画稿行对照
     const scan = await p.evaluate(() => {
       const g = window.__swGame;
-      const cv = g.renderer?.canvas ?? document.querySelector('canvas');
-      const c2 = document.createElement('canvas');
-      c2.width = cv.width; c2.height = cv.height;
-      const cx2 = c2.getContext('2d');
-      cx2.drawImage(cv, 0, 0);
-      const d = cx2.getImageData(0, 0, cv.width, cv.height).data;
-      const W = cv.width;
-      const lum = (x, y) => { const i = (y * W + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
-      const out = [];
-      const camY = g.camera.y, z = g.camera.zoom, oy = Math.round(cv.height / 2);
-      for (let y = 3; y < cv.height - 3; y++) {
-        let e = 0, n = 0;
-        for (let x = 100; x < W - 100; x += 2) { e += Math.abs(lum(x, y) - lum(x, y - 1)); n++; }
-        e /= n;
-        if (e > 18) {
-          const worldY = (y - oy) / z + camY;
-          const tile = worldY / 16;
-          const kind = Math.abs(tile - Math.round(tile)) < 0.02 && Math.round(tile) % 16 === 0 ? 'CHUNKROW'
-            : Math.abs(tile - Math.round(tile)) < 0.05 ? 'TILEROW' : 'mid';
-          out.push(y + '(' + tile.toFixed(2) + 't,' + kind + ',' + e.toFixed(0) + ')');
+      const st = g.world.store;
+      const r = g.renderer;
+      const wc = r.worldCanvas;
+      const cv = r.canvas ?? document.querySelector('canvas');
+      // 反解 render cam:任取 SEAMTRACE 尾部两格
+      const tr = (globalThis.__SEAMTRACE ?? []).slice(-400);
+      let cam = null;
+      const zz = g.camera.zoom, oxc = Math.round(cv.width / 2), oyc = Math.round(cv.height / 2);
+      for (const c of tr) {
+        for (const d2 of tr) {
+          if (d2 === c || d2.tx === c.tx || d2.ty === c.ty) continue;
+          const rx = c.tx * 16 + (oxc - c.dxa) / zz;
+          const ry = c.ty * 16 + (oyc - c.yda) / zz;
+          const rx2 = d2.tx * 16 + (oxc - d2.dxa) / zz;
+          const ry2 = d2.ty * 16 + (oyc - d2.yda) / zz;
+          if (Math.abs(rx - rx2) < 0.5 && Math.abs(ry - ry2) < 0.5) { cam = { x: rx, y: ry }; break; }
         }
+        if (cam) break;
       }
-      return out;
+      if (!cam) return { err: 'cam unsolved' };
+      const c2 = document.createElement('canvas');
+      c2.width = wc.width; c2.height = wc.height;
+      const cx2 = c2.getContext('2d');
+      cx2.drawImage(wc, 0, 0);
+      const dd = cx2.getImageData(0, 0, wc.width, wc.height).data;
+      const W2 = wc.width;
+      const lum = (x, y) => { const i = (y * W2 + x) * 4; return 0.299 * dd[i] + 0.587 * dd[i+1] + 0.114 * dd[i+2]; };
+      // 缝行 = world 6128-6136 → canvas y
+      const rows = [];
+      for (let wy = 6122; wy <= 6138; wy++) {
+        const cy = Math.round((wy - cam.y) * zz + oyc);
+        if (cy < 2 || cy >= wc.height - 2) continue;
+        // 墙列段(机器透明处 x 3183-3187)与机器列段(3188-3192)分开
+        const seg = (a, b) => { let s2 = 0, n = 0; for (let wx = a; wx <= b; wx++) { const cx3 = Math.round((wx - cam.x) * zz + oxc); s2 += lum(cx3, cy); n++; } return (s2 / n).toFixed(1); };
+        rows.push(wy + '(t' + (wy / 16).toFixed(2) + ')[墙' + seg(3183, 3187) + '|机' + seg(3188, 3192) + '|墙' + seg(3194, 3198) + ']');
+      }
+      // 暗带 RGB 采样:哪一层画的看颜色特征
+      const rgb = [];
+      for (const wy of [6128, 6131, 6132, 6133, 6135]) {
+        const cy = Math.round((wy - cam.y) * zz + oyc);
+        const band = [];
+        for (let wx = 3183; wx <= 3193; wx += 2) {
+          const cx3 = Math.round((wx - cam.x) * zz + oxc);
+          const i = (cy * W2 + cx3) * 4;
+          band.push(dd[i] + ',' + dd[i+1] + ',' + dd[i+2]);
+        }
+        rgb.push(wy + '[' + band.join(' ') + ']');
+      }
+      return { cam, rows, rgb };
     });
-    console.log(`z${z}-${tag} SEAMROWS=${JSON.stringify(scan)}`);
+    console.log(`z${z}-${tag} FINAL=${JSON.stringify(scan)}`);
     console.log(`z${z}-${tag} furnCol=${JSON.stringify(scan.furnCol)} seamRowColors=${JSON.stringify(scan.seamRow)}`);
   }
 }

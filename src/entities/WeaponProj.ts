@@ -4460,8 +4460,11 @@ export class GrenadeProj extends Entity {
           const py = this.y + 3 + oy - this.vy * 0.5;
           const bw = Math.max(5, this.w - 8), bh = Math.max(5, this.h - 8);
           const d13 = game.spawnDust?.(px, py, bw, bh, dust13, 0, 0, 100, null,
-            2 + Math.floor(Math.random() * 10) * 0.1, true);
-          if (d13) { d13.vx *= 0.2; d13.vy *= 0.2; }
+            2 + Math.floor(Math.random() * 10) * 0.1);
+          if (d13) {
+            d13.vx *= 0.2; d13.vy *= 0.2;
+            d13.noGravity = true;   // :48204 ★曾漏——火焰(尘 6=Torch)每拍 +0.05 下坠,
+          }                         // 链 B ×0.92 衰减也失配,尾焰读成"只有烟"(2026-09-01)
           const d31 = game.spawnDust?.(px, py, bw, bh, 31, 0, 0, 100, null, 0.5);
           if (d31) { d31.fadeIn = 1 + Math.floor(Math.random() * 5) * 0.1; d31.vx *= 0.05; d31.vy *= 0.05; }
         }

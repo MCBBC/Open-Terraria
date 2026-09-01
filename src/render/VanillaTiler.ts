@@ -1589,6 +1589,16 @@ export function tileDrawYOffsetOf(sheet: number, fx: number, fy: number): number
   return cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
 }
 
+/** tileTop 合一取值（动态层设备对齐用，2026-09-01 缝修复）：cond 优先、表兜底——
+ *  与 drawVanillaCell 内部 `dyOff = cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0)`
+ *  完全同源。调用方（drawAnimatedTileLayer dev 包装）用它把格的【画稿 dest 盒】
+ *  （= 格盒整体平移 dyOff）的上下边界在设备空间取整——相邻格共享边 =
+ *  round(同一表达式) 恒等，消除 tileTop+缩放产生的分数边缘各自取整的 1px 缝。 */
+export function tileTopOf(sheet: number, fx: number, fy: number): number {
+  const cond = tileTopCond(sheet, fx, fy);
+  return cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+}
+
 export const DRAW_Y_OFFSET: Record<number, number> = {
   // ★12(生命水晶)/31(暗影球) 曾误标 +4：原版 36px 动画组（TileDrawing.cs :5524-5529
   //   case 12/31/96/639/665/696）只设 addFrY、tileTop 恒 0（DrawBasicTile 锚 y*16+0）——

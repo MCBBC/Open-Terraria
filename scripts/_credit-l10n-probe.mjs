@@ -1,7 +1,7 @@
 // 探针：右下署名两行多语化（Mods.SandboxWorld.Credits.Line1/Line2）端到端验证。
 // 断言：
 //  1. [data-credit] 存在且在右下角（右缘距屏右 < 60px、底缘距屏底 < 40px）
-//  2. zh-Hans：Line1 含「GLM-5.3」「OX-Alpha」且为 <b> 包裹（加粗+margin 内联样式），
+//  2. zh-Hans：Line1 含「GLM-5.3」「GLM-5.3-Flash」且为 <b> 包裹（加粗+margin 内联样式），
 //     Line2 = 「仅用于AI学习研究…」；无裸露 {0}/{1} 占位符残留
 //  3. 切 en-US：Line1 = Co-created by …、Line2 = For AI learning…（Lang.setLanguage →
 //     onChange → renderTexts 重取）
@@ -40,7 +40,9 @@ const grab = () => page.evaluate(() => {
 // （options.load → Lang.init(lang) → TitleMenu 模板/renderTexts 按该语言取词）
 const seedLang = async (lang) => {
   await page.evaluate((lang2) => new Promise((resolve, reject) => {
-    const req = indexedDB.open('sandboxworld', 2);
+    // 不带版本号打开（DB 版本随迁移演进，钉 2 会在高版本库上 VersionError）；
+    // langExplicit=true 必带——options.load 对未显式选择的语言会按 navigator 重探
+    const req = indexedDB.open('sandboxworld');
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
     };
@@ -48,7 +50,7 @@ const seedLang = async (lang) => {
     req.onsuccess = () => {
       const db = req.result;
       const tx = db.transaction('kv', 'readwrite');
-      tx.objectStore('kv').put(JSON.stringify({ lang: lang2 }), 'sandboxworld.options');
+      tx.objectStore('kv').put(JSON.stringify({ lang: lang2, langExplicit: true }), 'sandboxworld.options');
       tx.oncomplete = () => { db.close(); resolve(); };
       tx.onerror = () => reject(tx.error);
     };
@@ -73,7 +75,7 @@ for (const [loc, o] of [['zh', out.zh], ['en', out.en]]) {
   A(!/\{\d\}/.test(o.text), `${loc}: 占位符 {0}/{1} 未替换`);
   A(o.bs.length === 2, `${loc}: b 元素数量 ${o.bs.length} ≠ 2`);
   const names = o.bs.map((b) => b.text);
-  A(names.includes('GLM-5.3') && names.includes('OX-Alpha'), `${loc}: 加粗名不符 ${names}`);
+  A(names.includes('GLM-5.3') && names.includes('GLM-5.3-Flash'), `${loc}: 加粗名不符 ${names}`);
   for (const b of o.bs) {
     A(b.shadow.includes('rgb(255, 255, 255)'), // Chrome 规范化 #fff → rgb(255,255,255)（色值前置）
       `${loc}: b 缺白色复制法加粗 shadow: ${b.shadow}`);
