@@ -52,7 +52,7 @@ function makeHooks(store: TileStore): GameHooks & {
     enemies: () => [], critters: () => [], npcs: () => [],
     projectiles: () => [],
     spawnDrop: (x: number, y: number, key: string, n?: number) => { drops.push({ key, x, y, n: n ?? 1 }); return null; },
-    damagePlayer: () => {}, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => true,
@@ -501,7 +501,7 @@ describe('工单2b buff 353 消费接通（X-F4：Enemy 侧不要求浸池的变
         enemies: () => enemies, critters: () => [], npcs: () => [],
         entities: { add: () => {} },                      // EoC 二阶段召仆通道(:11557)
         spawnDrop: () => null,
-        damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+        damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
         onEnemyKilled: () => {}, spawnEnemy: () => {},
         spawnParticles: () => { cnt.dust++; }, notifyInventoryChanged: () => {},
         playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

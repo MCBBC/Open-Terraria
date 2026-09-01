@@ -19,7 +19,7 @@ function dartHooks() {
     addDamageNumber: () => {},
     spawnParticles: () => {},
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     entities: { add: () => {} },
   } as never;
   return { hooks, player, sfx };

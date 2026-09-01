@@ -67,7 +67,7 @@ function makeGame(w: World, enemies: unknown[] = [], hooks: Record<string, unkno
     playSfxFiles: (files: string[]) => { sfx.push(files.join(',')); },
     playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     broadcastParticleOrchestra: () => {},
     worldGroundLevelHook: undefined,

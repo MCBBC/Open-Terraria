@@ -607,7 +607,7 @@ describe('R3 回归：控跳清湿无液体位置要求——出水上岸按跳�
       entities: { nextId: 1, add: () => {} },
       playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
       spawnParticles: () => {}, spawnDust: () => ({ vx: 0, vy: 0, scale: 1 }),
-      addDamageNumber: () => {}, spawnDrop: () => null, damagePlayer: () => {},
+      addDamageNumber: () => {}, spawnDrop: () => null, damagePlayer: (): number => 0,
       notifyInventoryChanged: () => {}, onEnemyKilled: () => {},
       spawnEnemy: () => {}, cutTile: () => {},
     } as unknown as GameHooks;

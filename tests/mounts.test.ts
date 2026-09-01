@@ -34,7 +34,7 @@ import { playerMountRotation } from '../src/render/Renderer';
 // ---- 测试世界/玩家（breath.test.ts 同款 harness） ----
 const fakeHooks = (w: World, p?: Player) => ({
   world: w, player: p, enemies: () => [], critters: () => [],
-  spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+  spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
   cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
   spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
   playSfxFiles: () => {}, showPickupLabel: () => {},
@@ -1604,11 +1604,11 @@ describe('X2① QuickMinecartSnap（Player.cs:6140-6176 oldStyleParkour 臂 + :6
     const keep = new Set(rails.map(([x, y]) => `${x},${y}`));
     const { g, spy } = snapShell(rails,
       blockers.filter(([x, y]) => !keep.has(`${x},${y}`)), true);
-    // 判据对齐候选选择面：result 依赖 mountMinecartAt 车位实心受体门（环堵布局
-    // 下车体座位被围实心占据 → 拒载收尾，quickMinecartSnap 返回 false 放行普通
-    // 召唤——实现注所记「403 异步钩塌缩为立即上车」的偏差面，非候选规则失真）。
-    // 与前一无书例成对差分：B=零候选零接管 / 此处=候选必中（:6155-6157 无条件臂）。
-    g.quickMinecartSnap();
+    // 判据 = 候选选择面 + result 语义解耦钉死：候选命中恒 true（vanilla result 不看
+    // 403 挂载终局——环堵布局下车位被围实心 → mountMinecartAt 拒载,但 flag 仍吃掉
+    // 本拍 SetMount：原版此时留悬钩待松手,本仓空手拍=登记偏差）。与无书例成对差分：
+    // B=零候选零接管 / 此处=候选必中（:6155-6157 无条件臂）。
+    expect(g.quickMinecartSnap()).toBe(true);
     expect(spy.mock.calls.length).toBe(1);
     expect(spy.mock.calls[0][0]).toBe(31);                         // GetTilesIn 列序首个（x 外层升序）
     expect(spy.mock.calls[0][1]).toBe(60);
@@ -1622,7 +1622,7 @@ describe('X2① QuickMinecartSnap（Player.cs:6140-6176 oldStyleParkour 臂 + :6
     const keep = new Set(rails.map(([x, y]) => `${x},${y}`));
     const { g, spy } = snapShell(rails,
       blockers.filter(([x, y]) => !keep.has(`${x},${y}`)), true);
-    g.quickMinecartSnap();
+    expect(g.quickMinecartSnap()).toBe(true);                       // 候选命中恒接管（result 不随挂载成败）
     expect(spy.mock.calls.length).toBe(1);
     expect(spy.mock.calls[0][0]).toBe(28);                          // 首枚锁死（CanHitLine 全断无法替换）
     expect(spy.mock.calls[0][1]).toBe(56);

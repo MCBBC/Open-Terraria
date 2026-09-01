@@ -26,7 +26,7 @@ function flatWorld(playerAt: { x: number; y: number } | null = null) {
       dead: false, useTime: 0,
     } : null,
     playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
     entities: { add: () => {} },
     enemies: () => [] as unknown[],
   } as never;

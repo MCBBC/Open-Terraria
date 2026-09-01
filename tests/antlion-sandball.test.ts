@@ -30,7 +30,7 @@ function makeHooks(w: World): { hooks: GameHooks; rec: Rec } {
   const hooks = {
     world: w, player,
     enemies: () => [], critters: () => [], npcs: () => [],
-    damagePlayer: () => {}, spawnDrop: () => null, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, spawnDrop: () => null, addDamageNumber: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     spawnBurst: () => {}, addLightAt: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},

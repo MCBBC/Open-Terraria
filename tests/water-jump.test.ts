@@ -15,7 +15,7 @@ import type { GameHooks } from '../src/entities/types';
 
 const hooks = (w: World, p?: Player): GameHooks => ({
   world: w, player: p, enemies: () => [], critters: () => [],
-  spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+  spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
   cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
   spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
   playSfxFiles: () => {}, showPickupLabel: () => {},

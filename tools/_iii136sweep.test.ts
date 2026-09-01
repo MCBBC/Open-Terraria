@@ -64,7 +64,9 @@ function makeSt(): TileStore {
   return st;
 }
 
-type Pt = { j?: number; k?: number; att?: number };
+type Pt = { j?: number; k?: number; att?: number; tag?: string };
+const ANCHOR_TAGS = ['deadCands', 'deadCount', 'iceCount', 'swordAttempts', 'campCount',
+  'MINEPRE', 'trapCount', 'treeCount', 'longTrackCount', 'stdTrackCount', 'mbLavaS', 'passStart'];
 function mkInjector(points: Pt[]): {
   bind: (rng: { next(): void }) => void;
   onSeg: (n: string) => void;
@@ -73,8 +75,10 @@ function mkInjector(points: Pt[]): {
 } {
   const map = new Map<number, number>();
   const attMap = new Map<number, number>();
+  const tagMap = new Map<string, number>();
   for (const p of points) {
     if (p.att !== undefined) attMap.set(p.att, p.k ?? 0);
+    else if (p.tag !== undefined) tagMap.set(p.tag, p.k ?? 0);
     else if (p.j !== undefined) map.set(p.j, p.k ?? 0);
   }
   let jCount = -1;
@@ -102,9 +106,18 @@ function mkInjector(points: Pt[]): {
           attMap.delete(attCount);   // 一次性
           injectHere(ka, `att#${attCount}`);
         }
-      } else if ((name === 'mbLavaS' || name === 'passStart') && map.has(name === 'passStart' ? -99 : -1)) {
-        const k = map.get(name === 'passStart' ? -99 : -1)!;
-        if (k > 0) injectHere(k, name);
+      } else if (ANCHOR_TAGS.includes(name) && tagMap.has(name)) {
+        const kt = tagMap.get(name)!;
+        if (kt > 0) {
+          tagMap.delete(name);
+          injectHere(kt, name);
+        }
+      } else if ((name === 'passStart') && tagMap.has(name)) {
+        const kt = tagMap.get(name)!;
+        if (kt > 0) {
+          tagMap.delete(name);
+          injectHere(kt, name);
+        }
       }
     },
     curJ: (): number => jCount,
@@ -123,9 +136,14 @@ it('III136 lava-loop per-group bias spectrum', () => {
   const xwir = readFileSync(`${tPre}.wir`);
 
   const groups: Array<Pt[]> = [];
-  // 模式1：显式集合（SW_I136_SET="3@1,7@2" 或 "a120@1"）
-  if (SETS.length) groups.push(SETS);
-  else if (ATT !== undefined) {
+  // 模式0：段锚谱（SW_I136_ANCHORS=1）——十个 MB 段锚各注入 k 一轮
+  if (process.env.SW_I136_ANCHORS) {
+    const K0 = Number(process.env.SW_I136_K ?? '1');
+    for (const t of ANCHOR_TAGS) groups.push([{ tag: t, k: K0 }]);
+  } else if (SETS.length) {
+    // 模式1：显式集合（SW_I136_SET="3@1,7@2" 或 "a120@1"）
+    groups.push(SETS);
+  } else if (ATT !== undefined) {
     const [rng_, K2] = ATT.split(',').length > 1
       ? [ATT.split(',')[0], Number(ATT.split(',')[1])] : [ATT, 1];
     const lo = Number(rng_.split('..')[0]);

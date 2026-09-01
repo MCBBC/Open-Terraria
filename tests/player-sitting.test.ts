@@ -120,7 +120,7 @@ function sleepPlayer(): { p: Player; hooks: import('../src/entities/types').Game
   p.sleeping = true;
   const hooks = {
     world: { store }, enemies: () => [], critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
   } as never;

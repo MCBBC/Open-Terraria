@@ -41,7 +41,7 @@ function projWorld() {
     enemies: () => [] as unknown[],
     spawnParticles: () => {},
     notifyInventoryChanged: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     playSfxAt: () => {},
   } as unknown as GameHooks & {

@@ -23,7 +23,7 @@ function makeHooks(world: World) {
     world,
     player: { x: 150 * TILE, y: 50 * TILE, w: 20, h: 42, cx: 150 * TILE, cy: 50 * TILE, dead: true },
     enemies: () => [], critters: () => [], spawnDrop: () => null,
-    damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
   } as never;
@@ -84,7 +84,7 @@ describe('丢弃抛出（DropSelectedItem，Player.cs:4990-4997）', () => {
     return {
       world, player,
       enemies: () => [], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
       showPickupLabel: () => {},

@@ -24,7 +24,7 @@ function makeGame(projectiles: unknown[], sfx: string[][]) {
     playSfxFiles: (files: string[]) => { sfx.push(files); },
     playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
   } as unknown as GameHooks;
 }

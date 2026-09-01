@@ -199,7 +199,7 @@ describe('史后仆从 658/659 射击', () => {
       enemies: () => [] as Enemy[],
       entities: { add: (e: unknown) => { shots.push(e as Arrow); } },
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
     } as never;
     return { hooks, shots };
   }

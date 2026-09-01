@@ -40,7 +40,7 @@ function stubGame(world: World, playerTile = { x: 120, y: 60 }, out?: Enemy[]): 
     },
     scene: null,
     playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
-    damagePlayer: () => {}, spawnParticles: () => {}, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, spawnParticles: () => {}, addDamageNumber: () => {},
     enemies: () => [], critters: () => [], npcs: () => [],
     entities: { nextId: 1, add: (e: unknown) => { out?.push(e as Enemy); } },
   } as never;

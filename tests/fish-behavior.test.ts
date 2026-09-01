@@ -18,7 +18,7 @@ function makeGame(): GameHooks {
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     spawnParticles: () => {},

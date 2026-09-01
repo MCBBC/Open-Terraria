@@ -57,7 +57,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

@@ -33,7 +33,7 @@ const fakeHooks = (w: World, p?: Player, over: Partial<GameHooks> = {}): GameHoo
   enemies: () => [],
   critters: () => [],
   spawnDrop: () => null,
-  damagePlayer: () => {},
+  damagePlayer: (): number => 0,
   addDamageNumber: () => {},
   cutTile: () => {},
   onEnemyKilled: () => {},

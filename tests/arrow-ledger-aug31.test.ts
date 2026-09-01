@@ -22,7 +22,7 @@ function makeGame(w: World, enemies: unknown[] = [], bucket: unknown[] = []): Ga
     },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     addLightAt: () => {}, spawnDust: () => ({ x: 0, y: 0, vx: 0, vy: 0 }),
     broadcastParticleOrchestra: () => {},

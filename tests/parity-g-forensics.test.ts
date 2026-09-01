@@ -51,7 +51,7 @@ function makeHooks(w: World, playerAt?: { x: number; y: number } | null) {
     world: w, player: playerAt === null ? null : player,
     enemies: () => rec.enemies,
     critters: () => [], npcs: () => [],
-    damagePlayer: (dmg: number, x: number, y: number) => { rec.damageCalls.push({ dmg, x, y }); },
+    damagePlayer: (dmg: number, x: number, y: number): number => { rec.damageCalls.push({ dmg, x, y }); return 0; },
     spawnDrop: () => null, addDamageNumber: () => {}, onEnemyKilled: () => {},
     spawnEnemy: () => {}, spawnParticles: () => {}, spawnBurst: () => {},
     addLightAt: () => {}, notifyInventoryChanged: () => {},

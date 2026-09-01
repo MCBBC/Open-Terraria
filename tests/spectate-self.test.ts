@@ -33,6 +33,8 @@ interface Shell {
   lostCoins: number;
   playSfxFile: ReturnType<typeof vi.fn>;
   canDeathSpectate(): boolean;
+  /** X1：溺水直伤拍观战回体桥（GameHooks.askSpectateExit 的 Game 实现） */
+  askSpectateExit(): void;
   spectateNextPlayer(step: number, includeSelf: boolean): boolean;
   spectateCycle(step: number): boolean;
   spectateKeyExits(code: string): boolean;

@@ -24,7 +24,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType } from './GenSolid';
 import { matureHerbPlants } from './StructuresPass';
@@ -104,9 +104,8 @@ const DYE_PLANT_SIDE = new Set([3, 51, 697, 61, 703, 73, 74, 184]);
 const SAND_FAM_3X2 = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
 /** TileID.Sets.Conversion.Ice（TileID.cs:28）——Check3x2 186 底材质门 */
 const ICE_SET = new Set([161, 163, 164, 200]);
-/** TileID.Sets.BreakableWhenPlacing（TileID.cs:379）——PlaceTile(656) 放置分支的
- *  可覆写族（cs:59519 !active || tileCut || BreakableWhenPlacing） */
-const BREAKABLE_WHEN_PLACING = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
+// BreakableWhenPlacing 唯一权威表 = data/tiles.ts 的 BREAKABLE_WHEN_PLACING_SHEETS
+// （TileID.cs:383；本 pass 消费点见下方 PlaceTile(656) 放置分支可覆写族 cs:59519）
 /** GetTileMossColor（cs:81954）：苔藓 sheet → 色号（TileFrame 184 的 frameX=22*色号） */
 const MOSS_COLOR: Record<number, number> = {
   179: 0, 512: 0, 180: 1, 513: 1, 181: 2, 514: 2, 182: 3, 515: 3, 183: 4, 516: 4,
@@ -1152,7 +1151,7 @@ function tryGrowGlowTulip(st: TileStore, rng: RNG, i: number, j: number): boolea
     const k0 = st.idx(x, y);
     if (!placeTileHead(st, x, y, 656)) continue;                        // 倒木守卫/液体拒置（656 在拒置表）
     const sh0 = SHEET[st.type[k0]];
-    const cutOk = !st.flags[k0] || TILE_CUT.has(sh0) || BREAKABLE_WHEN_PLACING.has(sh0);
+    const cutOk = !st.flags[k0] || TILE_CUT.has(sh0) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh0);
     if (cutOk) {
       st.setTileSilent(x, y, GLOW_TULIP, 0, 0);
       st.half[k0] = 0;

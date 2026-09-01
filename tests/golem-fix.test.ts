@@ -15,7 +15,7 @@ function makeGame(world: World, enemies: Enemy[] = []): GameHooks {
     enemies: () => enemies,
     spawnParticles: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
-    addDamageNumber: () => {}, damagePlayer: () => {}, spawnDrop: () => {},
+    addDamageNumber: () => {}, damagePlayer: (): number => 0, spawnDrop: () => {},
     spawnEnemy: () => null, spawnProj: () => {},
     onEnemyKilled: () => {}, critters: () => [],
   } as unknown as GameHooks;

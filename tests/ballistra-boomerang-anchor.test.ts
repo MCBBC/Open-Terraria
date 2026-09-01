@@ -23,7 +23,7 @@ function makeHooks(opts: { player?: unknown; enemies?: Array<Record<string, unkn
     critters: () => [],
     npcs: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

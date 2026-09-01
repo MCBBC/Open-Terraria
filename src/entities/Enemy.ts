@@ -13336,6 +13336,24 @@ export class Enemy extends Entity {
       const wofHungryAuthority = wofDeadVid === 115 && !this.netPuppet;
       if (wofDeadVid === 113 || wofDeadVid === 114) {
         const hdWofD = Math.sign(kbx) || 1;
+        // StrikeNPC 扇出派发（1457 NPC.cs:82313-82328；1456 :82240-82255）：113/114
+        // 致死拍不直接 self-HitEffect，而是遍历全场 active 的 113/114 逐个调
+        // HitEffect——受击者之外的眼/墙此刻 life 仍是上一帧 AI 镜像值（眼
+        // :26209-26213 仅在 host.life>0 时回填）→ 落各自盒的受击支 20 簇；
+        // 同帧已 life<=0 的同型（多重致命 AOE，理论态）按原版落同款死亡支。
+        // 只做视觉重放：不置 dead、不进掉落（CheckDead 链原版另派发，
+        // :82392-82397），部件消散仍由 bossAI_wof 的静默离场承担
+        for (const oRaw of game.enemies()) {
+          const o = oRaw as Enemy;
+          if (o === this || o.dead || (o.vanillaId !== 113 && o.vanillaId !== 114)) continue;
+          if (o.hp > 0) {
+            for (let k = 0; k < 20; k++) game.dust?.spawn(o.x, o.y, o.w, o.h, 5, hdWofD, -1);
+          } else {
+            for (let k = 0; k < 50; k++) game.dust?.spawn(o.x, o.y, o.w, o.h, 5, 2 * hdWofD, -1);
+            spawnNpcDeathGore(o, game, hdWofD, o.facing);
+          }
+        }
+        // 受击者自身死亡支
         for (let k = 0; k < 50; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hdWofD, -1);
       } else if (wofHungryAuthority) {
         const hdWofD = Math.sign(kbx) || 1;

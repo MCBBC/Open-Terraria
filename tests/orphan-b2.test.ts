@@ -39,7 +39,7 @@ function makeHooks(store: TileStore): GameHooks {
     enemies: () => [], critters: () => [], npcs: () => [],
     projectiles: () => [],
     spawnParticles: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => true,
     showPickupLabel: () => {}, spawnDust: () => null,

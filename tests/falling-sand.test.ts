@@ -15,7 +15,7 @@ function makeGame(): { game: GameHooks; world: World; dmg: number[] } {
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (d: number) => { dmg.push(d); },
+    damagePlayer: (d: number): number => { dmg.push(d); return 0; },
     addDamageNumber: () => {},
     cutTile: () => {},
     spawnParticles: () => {},

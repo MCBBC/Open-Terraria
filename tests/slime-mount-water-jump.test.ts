@@ -15,7 +15,7 @@ function makeHooks(w: World) {
     entities: { nextId: 1, add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {}, playSfxWav: () => {},
     spawnParticles: () => {}, spawnDust: () => ({ vx: 0, vy: 0, scale: 1 }),
-    addDamageNumber: () => {}, spawnDrop: () => null, damagePlayer: () => {},
+    addDamageNumber: () => {}, spawnDrop: () => null, damagePlayer: (): number => 0,
     notifyInventoryChanged: () => {}, onEnemyKilled: () => {},
     spawnEnemy: () => {}, cutTile: () => {},
   } as never as Parameters<import('../src/entities/Player').Player['fixedUpdate']>[1];

@@ -69,7 +69,7 @@ describe('playerProjectileCanHitNpcGate（统一出口真值表）', () => {
     const game = {
       world: w, player: null,
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { add: () => {} }, enemies: () => [] as unknown[],
       critters: () => [sq] as unknown[],          // 真实桶成员（spawnNpcByVanilla 同构）
       achievements: { handleSpecialEvent: () => {} },

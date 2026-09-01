@@ -215,7 +215,7 @@ describe('Player.checkCrackedBrickBreak（跑/落撞碎 :23040-23110）', () => 
     const hooks = {
       world: w,
       enemies: () => [], critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
       cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
       spawnParticles: () => {}, notifyInventoryChanged: () => {},
       playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

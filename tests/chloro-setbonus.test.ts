@@ -49,7 +49,7 @@ function fakeHooks(w: World, p?: Player, enemies: unknown[] = [], extra: Record<
     critters: () => [],
     projectiles: [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

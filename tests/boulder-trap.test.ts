@@ -16,7 +16,7 @@ function makeGame(w: World): GameHooks {
     entities: { add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {},
-    spawnDrop: () => null, cutTile: () => {}, damagePlayer: () => {},
+    spawnDrop: () => null, cutTile: () => {}, damagePlayer: (): number => 0,
     onEnemyKilled: () => {},
     critters: () => [], npcs: () => [], projectiles: () => [],
     spawnEnemy: () => {},

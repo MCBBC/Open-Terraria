@@ -18,7 +18,7 @@ function stubGame(world: World) {
     world,
     player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 100, maxHp: 100, dead: false, aabbOverlaps: () => false },
     playSfx: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     spawnParticles: () => {},
   } as never;
 }

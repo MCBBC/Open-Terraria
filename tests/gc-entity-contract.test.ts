@@ -174,7 +174,7 @@ describe('GB2 预算池真源 = player.ghostDmg（Player.cs:991/:24654）', () =
       entities: { nextId: 1, add: () => {} },
       playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {}, playSfxWav: () => {},
       spawnParticles: () => {}, spawnDust: () => ({ vx: 0, vy: 0, scale: 1 }),
-      addDamageNumber: () => {}, damagePlayer: () => {},
+      addDamageNumber: () => {}, damagePlayer: (): number => 0,
     } as never as Parameters<typeof p.fixedUpdate>[1];
     for (let i = 0; i < 3; i++) p.fixedUpdate(1 / 60, game);
     expect(p.ghostDmg).toBeCloseTo(25 - 3 * 6.6666665, 4);
@@ -212,7 +212,7 @@ describe('GB3 ballistaPanic（buff 205,Player.cs:38526 SquireT2 受击 AddBuff(2
       entities: { nextId: 1, add: () => {} },
       playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {}, playSfxWav: () => {},
       spawnParticles: () => {}, spawnDust: () => ({ vx: 0, vy: 0, scale: 1 }),
-      addDamageNumber: () => {}, damagePlayer: () => {},
+      addDamageNumber: () => {}, damagePlayer: (): number => 0,
     } as never as Parameters<Player['fixedUpdate']>[1];
   }
 

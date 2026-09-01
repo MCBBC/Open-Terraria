@@ -31,7 +31,7 @@ function makeGame(world: World, sounds: string[]) {
     playSfxWav: (file: string) => { sounds.push(file); },
     playSfxFiles: () => {},
     addDamageNumber: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     spawnDrop: () => {},
     spawnEnemy: () => null,
     spawnProj: () => {},

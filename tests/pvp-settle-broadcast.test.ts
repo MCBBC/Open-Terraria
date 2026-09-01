@@ -222,10 +222,10 @@ function hellfireShell() {
   g.player = p;
   g.pvpAuraCd = new Map<number, number>();
   const dmgTaken: number[] = [];
-  g.damagePlayer = (dmg: number) => {                     // 实扣桩：20 → 全额扣
+  g.damagePlayer = (dmg: number): number => {             // 实扣桩：20 → 全额扣
     dmgTaken.push(dmg);
     p.hp = Math.max(0, p.hp - dmg);
-    return true;
+    return dmg;
   };
   const sent: Array<{ dmg: number; dir: number; flags: number }> = [];
   g.net = {
@@ -383,7 +383,7 @@ describe('FR3-F settle：856 弹型真值裁决四点（视线门豁免/crit 不
       pvpImmuneT: 0,
     }]]);
     const hurtCalls: number[] = [];
-    g.damagePlayer = (dmg: number) => { hurtCalls.push(dmg); victim.iframes += 8; };
+    g.damagePlayer = (dmg: number): number => { hurtCalls.push(dmg); victim.iframes += 8; return dmg; };
     const reports: Array<{ hpBefore: number; srcX: number; crit: boolean }> = [];
     g.reportPlayerHurt = (hpBefore: number, srcX: number, critFlag: boolean) =>
       reports.push({ hpBefore, srcX, crit: critFlag });

@@ -366,7 +366,7 @@ function makeGame(w: World): GameHooks {
     world: w, player: null as unknown, enemies: () => [], critters: () => [],
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
   } as unknown as GameHooks;
 }

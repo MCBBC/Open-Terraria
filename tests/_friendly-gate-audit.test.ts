@@ -33,7 +33,7 @@ function setup() {
     enemies: () => enemies,
     critters: () => critters,
     npcs: () => npcs,
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     playSfxWav: () => {}, playSfxFile: () => false, spawnBurst: () => {},
     entities: {

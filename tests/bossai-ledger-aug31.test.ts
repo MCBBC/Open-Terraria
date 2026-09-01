@@ -52,7 +52,7 @@ function makeHooks(world?: World, playerAt?: { x: number; y: number }): Fixture 
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (dmg: number) => { dmgCalls.push(dmg); },
+    damagePlayer: (dmg: number): number => { dmgCalls.push(dmg); return 0; },
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

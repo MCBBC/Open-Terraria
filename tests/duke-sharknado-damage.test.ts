@@ -16,7 +16,7 @@ function hitDamage(big: boolean, difficulty: number): number {
   const game = {
     world: { difficulty, store: { inBounds: () => false, isSolid: () => false } },
     player: { dead: false, cx: 100 * 16, cy: 100 * 16, w: 16, h: 16 },
-    damagePlayer: (dmg: number) => { captured.push(dmg); },
+    damagePlayer: (dmg: number): number => { captured.push(dmg); return 0; },
   };
   t.fixedUpdate(1 / 60, game as never);
   return captured[0] ?? -1;
@@ -39,7 +39,7 @@ describe('鲨鱼龙卷伤害链（385 弹生弹 + Damage_EVP）', () => {
     const game = {
       world: { difficulty: 0, store: { inBounds: () => false, isSolid: () => false } },
       player: { dead: false, cx: 100 * 16, cy: 100 * 16, w: 16, h: 16 },
-      damagePlayer: (_d: number, _x: number, _y: number, a: unknown) => { attacker = a; },
+      damagePlayer: (_d: number, _x: number, _y: number, a: unknown): number => { attacker = a; return 0; },
     };
     t.fixedUpdate(1 / 60, game as never);
     expect(attacker).toBe(src);

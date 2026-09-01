@@ -34,7 +34,7 @@ function flatWorld(): { w: World; hooks: import('../src/entities/types').GameHoo
       dead: false, useTime: 0, luckState: new LuckState(),
     },
     playSfx: () => {}, playSfxFiles: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
     entities: { add: () => {} },
     enemies: () => [] as unknown[],
     onEnemyKilled: () => {}, critters: () => [] as unknown[],

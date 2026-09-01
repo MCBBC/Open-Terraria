@@ -74,7 +74,7 @@ function makeHooks(store: TileStore): GameHooks & {
     enemies: () => [], critters: () => [], npcs: () => [],
     projectiles: () => [] as unknown[],
     spawnDrop: (x: number, y: number, key: string, n?: number) => { drops.push({ key, x, y, n: n ?? 1 }); return null; },
-    damagePlayer: () => {}, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => true,

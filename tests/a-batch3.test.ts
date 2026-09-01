@@ -211,7 +211,7 @@ function fishingHooks(opts: {
     },
     player,
     enemies: () => [], critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
   } as unknown as GameHooks;
@@ -418,7 +418,7 @@ describe('混沌元素 120 传送（:57431-57460 / :60679-60696 / :18876-18946�
     return {
       world: w, player,
       enemies: () => [], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     } as unknown as GameHooks;

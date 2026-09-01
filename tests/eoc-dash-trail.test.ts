@@ -40,7 +40,7 @@ function makeGame(difficulty: number) {
     enemies: () => [],
     cutTile: () => {},
     breakTile: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     hurtNPC: () => {},
     newText: () => {},
     entities: { add: () => {} },

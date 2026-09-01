@@ -197,7 +197,7 @@ function arcHooks(enemy: unknown, added: unknown[]) {
     enemies: () => [enemy],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

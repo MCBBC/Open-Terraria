@@ -416,26 +416,45 @@ function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
  *    钳位已覆盖其主收益;受阻回退语义由嵌入守卫分支等价提供） */
 function slopeCollide(
   b: Body, world: World, feetEntry: number, vyEntry: number, wasGround: boolean,
-  captureOnly = false,
+  captureOnly = false, xPre = b.x,
 ): boolean {
   const st = world.store;
-  const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
+  // ★扫描窗 = 本帧 X 移动前后的并集跨度（2026-09-01 台阶交界漏帧终修）：
+  //   原版 SlopeCollision 与 TileCollision 的跨格判定全部以【移动前】vector
+  //   （position 或 position+velocity 预测）为准——20px 身体横穿 16px 坡格时，
+  //   仅看移动后位置会让旧坡格在贴线过程中提前 1-2 帧"水平出窗"，恰逢换格
+  //   空窗（下一坡格脚带未入）→ 无候选无支撑 2-3 帧纯重力坠落（实测 SPD 全速
+  //   每处台阶端点漏帧、feet 追线中断实录）。并入集后旧格保持可评直至身体
+  //   【完整】离开其跨度——与原版逐格语义一致。
+  const ux0 = Math.min(b.x, xPre), ux1 = Math.max(b.x + b.w, xPre + b.w);
+  const x0 = Math.floor(ux0 / TILE), x1 = Math.floor((ux1 - 0.01) / TILE);
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
   let bestLift = 0;      // 最大抬升量（负 y 位移;0 = 无贴合）
   let bestDrop = 0;      // 天花板最大下推量
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
   let positionChanged = false;  // 贴合是否实际移动了 body（消费方 Y 冻结判定）
+  // [临时逐格取证口]
+  const TRACE = (globalThis as Record<string, unknown>)?.__SW_SCTRACE as { feetLo?: number; feetHi?: number; out: unknown[] } | undefined;
+  const trk = TRACE && (!TRACE.feetLo || (feetEntry >= TRACE.feetLo && feetEntry <= TRACE.feetHi)) ? TRACE.out : undefined;
+
   // ★贴地前瞻行（+1）：跨坡格交界时脚底尚未探入下一行、旧格又已水平出窗——
   // 两候选皆不可见的裸奔缝（v5 探针 t47 定案,每列一次 5 帧空簇的根源）。
   // 仅贴地下行时多扫一行,让下一列对角线提前一帧进入候选窗。
   const yProbe = (wasGround && b.vy >= 0) ? y1 + 1 : y1;
+  if (trk) trk.push(`  scan x[${x0}..${x1}] y[${y0}..${y1}]+probe=${yProbe} body=[${b.x.toFixed(1)},${(b.x+b.w).toFixed(1)}]x[${b.y.toFixed(1)},${(b.y+b.h).toFixed(1)}] feetEntry=${feetEntry.toFixed(1)} vyEntry=${vyEntry.toFixed(2)} wasG=${wasGround}`);
   for (let tx = x0; tx <= x1; tx++) {
     for (let ty = y0; ty <= yProbe; ty++) {
+      const __t0 = trk ? { cell: `${tx},${ty}` } : null;
+      if (trk) trk.push(`c ${tx},${ty} sl=${st.slope[st.idx(tx, ty)]} hf=${st.half[st.idx(tx, ty)]} act=${(st.flags[st.idx(tx, ty)] & 1) || 0}`);
+      const __t0dead: unknown = __t0;
       if (!st.inBounds(tx, ty)) continue;
       const i = st.idx(tx, ty);
       const slope = st.slope[i];
-      if (slope === 0 || st.half[i]) continue;
+      if (slope === 0 || st.half[i]) {
+        if (trk) trk.push(`  flat sl${slope} hf${st.half[i]} t${st.type[i]}`);
+        continue;
+      }
       const vx0 = tx * TILE, vy0 = ty * TILE;
       // ★面随下贴候选（真·must-be-first，2026-08-31 存档复现定案）：必须置于
       // 【所有】前进性 continue（平台脚带门/上行方向档/重叠门）之前——跨两坡格
@@ -471,17 +490,31 @@ function slopeCollide(
       // 1:1（Collision.cs:1851-1866）——上升中不挡（交给 stepUp 爬楼梯）；
       // 脚带内 [格顶, 格底+1+|vx|] 才接；上行方向档（slope1 且 vx≥0 /
       // slope2 且 vx≤0 且脚恰在上一行）不接
-      const isPlatSlope = !st.isSolid(tx, ty) && st.isPlatform(tx, ty)
+      const isSolidCell = st.isSolid(tx, ty);
+      const isPlatSlope = !isSolidCell && st.isPlatform(tx, ty)
         && (slope === 1 || slope === 2);
-      if (!st.isSolid(tx, ty) && !isPlatSlope) continue;
-      if (isPlatSlope) {
-        if (b.dropThrough) continue;   // 按住下 = 楼梯下穿（stairFall 可见语义）
-        if (b.vy < 0) continue;
-        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) continue;
-        if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
-          && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
+      if (!isSolidCell && !isPlatSlope) {
+        if (trk) trk.push(`  reject notSlopeSupport kind=${isSolidCell?'solid':'plat'}`);
+        continue;
       }
-      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
+      //  isSolidCell ? 'solid' : 'plat';
+      if (isPlatSlope) {
+        if (b.dropThrough) { if (trk && __t0) trk.push('  plat dropThrough'); continue; }
+        if (b.vy < 0) { if (trk && __t0) trk.push('  plat vy<0'); continue; }
+        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) {
+          if (trk && __t0) trk.push(`  plat band feet=${(b.y+b.h).toFixed(1)} [${ty*TILE},${ty*TILE+TILE+1+Math.abs(b.vx)}]`);
+          continue;
+        }
+        if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
+          && Math.floor((b.y + b.h) / TILE) - 1 === ty) {
+          if (trk && __t0) trk.push('  plat dirGate');
+          continue;
+        }
+      }
+      if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) {
+        if (trk && __t0) trk.push('  overlap-out');
+        continue;
+      }
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
       // slope2/4 取右缘。钳到 ≥0（与原版 num4<0 即跳过的差异,见函数头注释）：
       // 坡顶过渡瞬间(高侧缘越过坡面)原版会脱钩,脚底残留在对角线端点下方数像素,
@@ -519,11 +552,17 @@ function slopeCollide(
         // 地面坡（:1935-1966）：沉到斜面下才抬回（gap<0 即抬升；面随下贴候选
         // 已上提到重叠门前,此处只保留抬升路径）
         const gap = vy0 + num4 - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入面下
-        if (gap >= 0) continue;                        // 未沉入 → 无抬升（原 :3621 面）
+        if (gap >= 0) {
+          if (trk && __t0) __t0.r = `gap>=0 ${gap.toFixed(1)}`;
+          continue;                        // 未沉入 → 无抬升（原 :3621 面）
+        }
         const num7 = gap;
         // ★G2 速度门（:1947）：贴合结果必须高于「入口英尺+本帧速度Y」与当前
         //   落地位的较小者——上升/掠过者拒贴（阻尼根因）
-        if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
+        if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) {
+          if (trk && __t0) __t0.r = `G2 tgt=${(b.y+num7).toFixed(1)} min=${Math.min(b.y+b.h,feetEntry+vyEntry).toFixed(1)}`;
+          continue;
+        }
         if (num7 < bestLift) {
           bestLift = num7;
           if (SLOPE_G2) b.collideY = true;   // bitsByte[num3]=true（:1954）
@@ -535,6 +574,10 @@ function slopeCollide(
   {
     const dbg = (globalThis as Record<string, unknown>)?.__SW_SCDBG as unknown[] | undefined;
     if (dbg) dbg.push({ wl: bestLift, ws: bestSnapY, wg: bestSnapGap });
+    if (trk) {
+      trk.push(`  best: lift=${bestLift.toFixed(2)} snapY=${bestSnapY} snapGap=${bestSnapGap}`);
+      for (const line of trk.slice(0)) { /* noop keep */ }
+    }
   }
   if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记
   if (bestLift < 0) {
@@ -807,6 +850,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   //   修=贴合后 dy=0：坡面贴合即最终 Y 定位（等同原版 SlopeCollision 先行、
   //   Y-sweep 见 vy=0 无附加位移）。X 分轴照常（行走不受影响）。
   //   面随 assist 的 dy+=|dx| 已被贴合本身覆盖（贴合=定位在坡面上）。
+  const xPre = b.x;   // slopeCollide 扫描并集窗基準（见函数注释）
   const maxStep = 8;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep));
   for (let i = 0; i < steps; i++) {
@@ -817,7 +861,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (dx === 0 && dy === 0) break;
   }
   // ★轴后贴合（稳定序）+ 振幅限幅 + G2 + collideY：分轴架构下最稳组合
-  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
+  slopeCollide(b, world, feetEntry, vyEntry, wasGround, false, xPre);
   unembedPass(b, world);
 }
 

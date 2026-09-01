@@ -1138,9 +1138,22 @@ export function doHallowOnSurface(st: TileStore, rng: RNG, gs: GenState): void {
       ? Math.floor(gs.rockLevel)
       : Math.floor(gs.rockLevel / 2);                                   // cs:1963-1966
   }
+  // ★RV-R4（2026-09-01）条件式内嵌掷骰照录。cs:1969 原文
+  //   `for (int j = 0; j < num + genRand.Next(3); j++)` 的循环条件【每次行迭代重估】：
+  //   判定即掷骰、恒真判亦耗骰（j<num 段每行各耗一掷，对行程无影响但值流必耗）、
+  //   终止负判再耗一掷 ⇒ 每列骰耗 = 受访行数 K + 1；行程本身随机——K ∈ {num,
+  //   num+1, num+2}（p = {1/3, 4/9, 2/9}：j=num 需 r≥1、j=num+1 需 r=2、j=num+2
+  //   被 int 加法判死（r≤2<3））。旧实现「per-column 恰一掷 upfront lim=num+r」=
+  //   定长行程（K 分布 {1/3,1/3,1/3}≠{1/3,4/9,2/9} 且每列少耗 ~num 掷）⇒ 双发散
+  //   （掷流错位 + 行程尾带覆盖频率差），凡走该臂（hallowOnTheSurface /
+  //   noSurface×infectedSeed finalize 面）与 x86 失步；七认证链不含这些组合故此前
+  //   恒绿。同族先例：doSurfaceIsMushroomsCore（cs:2176，IIIII97b 已照录同型 while）/
+  //   DoWorldIsFrozen（cs:2237 条件式同族，未承接位登记另案）；cs:2067 为 initializer
+  //   掷（per-column 单掷），两处形态不可互混。
+  //   形状断言：tests/secret-seed-hallow-cascade.test.ts「RV-R4 行程随机性形状」describe。
   for (let i = 0; i < st.w; i++) {
-    const lim = num + rng.nextInt(3);                                   // per-column 必掷
-    for (let j = 0; j < lim; j++) {
+    let j = 0;
+    while (j < num + rng.nextInt(3)) {
       const ii = st.idx(i, j);
       let t = shOf(st, ii);
       if (t === 2) convertCell(st, rng, gs, i, j, 2, true, false);
@@ -1156,6 +1169,7 @@ export function doHallowOnSurface(st: TileStore, rng: RNG, gs: GenState): void {
       if (wl === 65) convertCell(st, rng, gs, i, j, 2, false, true);
       if (wl === 66) convertCell(st, rng, gs, i, j, 2, false, true);
       if (wl === 68) convertCell(st, rng, gs, i, j, 2, false, true);
+      j++;
     }
   }
 }

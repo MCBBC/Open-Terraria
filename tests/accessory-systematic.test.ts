@@ -362,7 +362,7 @@ describe('配饰系统性③：翅膀横移加速倍率消费（WingAirLogicTwea
       world: { store: w.store } as never,
       player: p as never,
       enemies: () => [], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
       showPickupLabel: () => {},

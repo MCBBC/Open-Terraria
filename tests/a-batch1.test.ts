@@ -28,7 +28,7 @@ const fakeHooks = (w: World, p?: Player) => ({
   enemies: () => [],
   critters: () => [],
   spawnDrop: () => null,
-  damagePlayer: () => {},
+  damagePlayer: (): number => 0,
   addDamageNumber: () => {},
   cutTile: () => {},
   onEnemyKilled: () => {},

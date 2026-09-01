@@ -31,7 +31,7 @@ function makeGame() {
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: (_x: number, _y: number, _c: string, n: number) => { parts.push(n); },
     addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
   };
   return { g: g as unknown as GameHooks, npcs, parts };

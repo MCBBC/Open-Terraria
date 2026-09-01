@@ -35,7 +35,7 @@ function stubGame(world: World, playerTile = { x: 120, y: 60 }, out?: Enemy[]) {
       w: 16, h: 28, vx: 0, vy: 0, hp: 100, maxHp: 100, dead: false,
     },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
-    damagePlayer: () => {}, spawnParticles: () => {}, addDamageNumber: () => {},
+    damagePlayer: (): number => 0, spawnParticles: () => {}, addDamageNumber: () => {},
     enemies: () => [], critters: () => [],
     entities: { nextId: 1, add: (e: unknown) => { out?.push(e as Enemy); } },
   } as never;
@@ -225,7 +225,7 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
     const game = {
       world: w,
       player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 400, maxHp: 400, dead: false },
-      playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {}, damagePlayer: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {}, damagePlayer: (): number => 0,
       spawnParticles: () => {}, addDamageNumber: () => {},
       enemies: () => [cultist, ...spawned],
       critters: () => [],

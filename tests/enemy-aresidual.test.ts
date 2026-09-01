@@ -46,7 +46,7 @@ function makeHooks(w: World) {
     world: w, player,
     enemies: () => enemies,
     critters: () => [], npcs: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     showPickupLabel: () => {}, cutTile: () => {},

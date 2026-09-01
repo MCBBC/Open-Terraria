@@ -26,7 +26,7 @@ function flatWorld(playerAt: { x: number; y: number }) {
     },
     playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
     spawnDust: () => null,
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
     entities: { add: (e: unknown) => { shots.push(e as DartLike); } },
   } as never;
   return { w, hooks, shots, ens };

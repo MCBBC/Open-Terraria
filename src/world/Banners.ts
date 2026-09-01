@@ -117,6 +117,42 @@ export function scanBannerNpcs(
   return npcs;
 }
 
+/** 屏内旗的【代表 NPC】集（旗 buff tooltip 名单用，Main.cs:21558-21612
+ *  bannerMouseOver 1:1：循环按 BannerSystem 旗种枚举，每面旗经 BannerToNPC(i)
+ *  取一个代表 NPC 名 = 一旗一行。同种多面旗去重（Set）；多 NPC 旗（僵尸旗覆盖
+ *  全僵尸族变体）只出一行代表名，不逐变体罗列——2026-09-01 用户实报名单重复根因。
+ *  代表取该旗 NPC 集最小 id（原版注册序 ≈ id 升序的确定性等价物） */
+export function scanBannerReps(
+  store: import('./TileStore').TileStore,
+  x0: number, y0: number, x1: number, y1: number,
+): Set<number> {
+  const reps = new Set<number>();
+  const bannerTileId = TILE_BY_KEY['v_91_banners'];
+  if (bannerTileId === undefined) return reps;
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      if (!store.isActive(x, y)) continue;
+      const i = store.idx(x, y);
+      if (store.type[i] !== bannerTileId) continue;
+      const fx = Math.floor(store.frameX[i] / 18), fyRaw = store.frameY[i];
+      let rows = 0;
+      for (let fy = fyRaw; fy >= 54; fy -= 54) rows++;
+      const num = fx + rows * 111;
+      if ((store.frameX[i] < 396 && fyRaw < 54) || num === 311 || num === 312) continue;
+      let banner = fx - 21 + rows * 111;
+      if (num >= 311) banner--;
+      if (num >= 312) banner--;
+      const set = BANNER_TO_NPCS.get(banner);
+      if (set) {
+        let min = Infinity;
+        for (const n of set) if (n < min) min = n;
+        reps.add(min);
+      }
+    }
+  }
+  return reps;
+}
+
 /** 旗 buff 乘区（ItemID.Sets.BannerStrength:普通族 1.0 → 伤 ×1.5/受伤 ×0.75,
  *  专家 ×2/×0.5;DD2 族(itemId 3837-3846)0.2 档 → ×1.1/×0.917,专家 ×1.2/×0.833
  *  ——2026-08-13 区分,itemId 参数=旗的对应物品 id） */

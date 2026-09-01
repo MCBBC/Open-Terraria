@@ -20,7 +20,9 @@ interface Hooks {
   dust: number;
   playSfxFiles(files: string[]): void;
   spawnParticles(_x: number, _y: number, _c: string, count: number): void;
-  damagePlayer(): void;
+  /** 对齐 GameHooks.damagePlayer 终态签名（清零批·受击域）：实扣 HP，桩恒 0 */
+  damagePlayer(_dmg?: number, _sx?: number, _sy?: number, _attacker?: unknown,
+    _contactOnly?: boolean, _pvp?: boolean, _knockback?: boolean, _opts?: unknown): number;
   addDamageNumber(): void;
   enemies(): unknown[];
   entities: { add(e: unknown, b: string): void };
@@ -37,7 +39,7 @@ function casterWorld() {
     sfx: [], shots: [], dust: 0,
     playSfxFiles(files) { hooks.sfx.push(files); },
     spawnParticles(_x, _y, _c, count) { hooks.dust += count; },
-    damagePlayer() {},
+    damagePlayer() { return 0; },   // GameHooks 终态:返回实扣 number
     addDamageNumber() {},   // Enemy.hurt 伤害数字链（RV3 后桩缺口补）
     enemies: () => [],
     entities: {

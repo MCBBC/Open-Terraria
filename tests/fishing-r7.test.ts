@@ -37,7 +37,7 @@ function makeHooks(waterAt?: { x: number; y: number; w?: number }) {
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

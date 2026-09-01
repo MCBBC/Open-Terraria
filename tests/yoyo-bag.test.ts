@@ -239,7 +239,7 @@ describe('配重球 AI_099_1', () => {
       enemies: () => enemies,
       critters: () => [],
       spawnDrop: () => null,
-      damagePlayer: () => {},
+      damagePlayer: (): number => 0,
       addDamageNumber: () => {},
       cutTile: () => {},
       onEnemyKilled: () => {},
@@ -407,7 +407,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
       enemies: () => [],
       critters: () => [],
       spawnDrop: () => null,
-      damagePlayer: () => {},
+      damagePlayer: (): number => 0,
       addDamageNumber: () => {},
       cutTile: () => {},
       onEnemyKilled: () => {},
@@ -485,7 +485,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
     const player = mkPlayer();
     const hooks: GameHooks = {
       world: { store } as never, player: player as never, enemies: () => [], critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
     };
@@ -539,7 +539,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
     });
     const hooks: GameHooks = {
       world: { store } as never, player: player as never, enemies: () => enemies, critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
     };
@@ -579,7 +579,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
     });
     const hooks: GameHooks = {
       world: { store } as never, player: player as never, enemies: () => enemies, critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
     };

@@ -46,7 +46,7 @@ function makeGame(w: World, list: unknown[] = []) {
     spawnParticles: () => {},
     spawnBurst: () => {},
     addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, critters: () => [], notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, critters: () => [], notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     addLightAt: () => {},
   } as unknown as GameHooks & typeof state;

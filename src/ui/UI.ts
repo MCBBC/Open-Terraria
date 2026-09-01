@@ -3869,11 +3869,12 @@ export class UI {
       }
       ui.block.style.display = 'flex';
       ui.block.dataset.swTipName = buffName(t);
-      // 旗帜(147)：描述后追加名单行（Main.cs:21558-21612 bannerMouseOver 第二循环——
-      // BannerToNPC≠0 且 HasNPCBannerBuff(i) 的每样式一行 NPC 名；本仓=屏内覆盖集）
+      // 旗帜(147)：描述后追加名单行（Main.cs:21558-21612 bannerMouseOver 第二循环
+      // 1:1——按 BannerSystem 旗种枚举,BannerToNPC(i) 每旗种一行代表名;此前用
+      // 全覆盖集逐变体罗列=多 NPC 旗名单重复（2026-09-01 用户实报））
       let tipDesc = buffDesc(t);
       if (BUFF_DEFS[t].vanillaBuff === 147 && this.game) {
-        const bn = bannerBuffNames(this.game.bannerNpcIds(), (id) => Lang.npcName(id));
+        const bn = bannerBuffNames(this.game.bannerRepIds(), (id) => Lang.npcName(id));
         if (bn) tipDesc += '\n' + bn;
       }
       ui.block.dataset.swTipDesc = tipDesc;

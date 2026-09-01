@@ -100,7 +100,7 @@ function makeHooks(opts: { pickPower?: number | null; pickOk?: boolean; heldVid?
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

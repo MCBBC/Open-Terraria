@@ -18,7 +18,7 @@ function plantWorld(playerAt: { x: number; y: number }) {
     world: w,
     player,
     playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
     entities: { add: () => {} },
   } as never;
   return { w, hooks, player };

@@ -21,7 +21,7 @@ function mockGame(): GameHooks {
     spawnParticles: () => {}, addDamageNumber: () => {},
     spawnDrop: () => null, cutTile: () => {},
     onEnemyKilled: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     spawnEnemy: () => {},
     critters: () => [],
     notifyInventoryChanged: () => {},

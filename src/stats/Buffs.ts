@@ -777,9 +777,9 @@ export function buffDesc(t: BuffType): string {
 }
 
 /** 旗帜 buff 描述附加名单（Main.cs:21558-21612 MouseText_DrawBuffTooltip 的
- *  bannerMouseOver 第二循环：BannerSystem.BannerToNPC(i)≠0 且
- *  Player.HasNPCBannerBuff(i) 的每个样式追加一行 NPC 名——本仓=屏内覆盖集升序
- *  npcId 逐个翻名，'\n' 分行由 DOM 气泡渲染端天然换行）。
+ *  bannerMouseOver 第二循环 1:1：按 BannerSystem 旗种枚举,BannerSystem.BannerToNPC(i)
+ *  每面旗取一个代表 NPC → 一旗一行名；ids 须传【旗种代表集】（Game.bannerRepIds）,
+ *  传全覆盖集会逐变体重名罗列。'\n' 分行由 DOM 气泡渲染端天然换行）。
  *  缺名 id 剔除（原版 GetNPCNameValue 恒有名；NPC_NAME_BY_ID 缺口防御）。 */
 export function bannerBuffNames(ids: number[], nameOf: (id: number) => string | null): string {
   return ids.slice().sort((a, b) => a - b).map(nameOf).filter((s): s is string => !!s).join('\n');

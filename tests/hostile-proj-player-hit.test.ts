@@ -22,9 +22,10 @@ function makeGame(p: Player, log: { dmg: number[] }): GameHooks {
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (dmg: number, sx: number, sy: number) => {
+    damagePlayer: (dmg: number, sx: number, sy: number): number => {
       log.dmg.push(dmg);
       p.damage(dmg, sx, sy); // 真 Game.damagePlayer 同链:Player.damage 落地即置 iframes
+      return dmg;
     },
     addDamageNumber: () => {},
     cutTile: () => {},

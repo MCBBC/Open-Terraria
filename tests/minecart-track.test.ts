@@ -346,7 +346,7 @@ describe('Minecart 坐骑实体（Mount 6 + 每帧 TrackCollision）', () => {
       enemies: () => [],
       critters: () => [],
       spawnDrop: () => null,
-      damagePlayer: () => {},
+      damagePlayer: (): number => 0,
       addDamageNumber: () => {},
       cutTile: () => {},
       onEnemyKilled: () => {},
@@ -473,7 +473,11 @@ describe('骑乘接触伤害（HurtTiles 采样盒 = 坐骑盒）', () => {
       world: w, player: p,
       enemies: () => [], critters: () => [],
       spawnDrop: () => null,
-      damagePlayer: () => {},
+      // ★A2 漏斗契约镜像（2026-09-01）：触碰伤已走 Game.damagePlayer 通用漏斗——
+      // 返回实扣值（>0=受理），归零=被免伤吞；曾恒 undefined → 漏斗判 0 判 blocked，
+      // 尖刺直伤/流血断言集体失效（旧 stub 是漏斗化前的直扣形）。最小真身 = 直扣 hp
+      // 并回传实扣值（本套断言不依赖 Iframes/飘字细节）。
+      damagePlayer: (dmg: number) => { p.hp = Math.max(0, p.hp - dmg); return dmg; },
       addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {},
       spawnParticles: () => {}, notifyInventoryChanged: () => {},

@@ -10,7 +10,7 @@ const fakeHooks = (w: World) => ({
   addDamageNumber: () => {},
   spawnParticles: () => {},
   spawnDrop: () => null,
-  damagePlayer: () => {},
+  damagePlayer: (): number => 0,
 });
 
 /** 蜘蛛洞近似：一片背景墙(62) + 底部地板，无其他实心块 */

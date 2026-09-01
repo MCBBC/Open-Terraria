@@ -126,7 +126,9 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
     // PlaceSandColumn：从 surfY 填到 sandBottom（沙/激活；height 可为负→零次）
     // ★IIIII48 REMIX（SandMound.cs:59-62）：非 remix 才清液体——remix「dont dig up」
     //   沙柱保留原地液量（水袋），Y 通道对拍的油源之一。
-    const keepLiquid = !!seedFlagsRef?.remix;   // cs:59：非 remix ∧(swap∨nonsurface) 才清；remix 一律保留
+    const keepLiquid = !!seedFlagsRef?.remix || (!!seedFlagsRef?.surfaceIsDesert && !!seedFlagsRef?.noSurface);
+    // ★IIIII111 勘误（SandMound.cs:58-63）：clear 门=`!remix && !(sandEnabled && noSurface)`——
+    //   双旗组合(sandy britches+mole people)沙柱保留液体；此前注释误写为 rem 专有保留。
     for (let y = surfY + (sandBottom - surfY) - 1; y >= surfY; y--) {
       if (y < 0 || y >= h) continue;
       const ti = st.idx(cx, y);
@@ -769,6 +771,11 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       //   保持原值。本仓 type 是显式枚举，须按 wiped 标志回填 WATER（否则水袋格
       //   变成「量 255/类型 NONE」半清除态=Y1>0×7483 的真源）。
       const remixHive = !!gs.seedFlags.remix;
+      // ★IIIII111（Y2>1×833 定罪）：Variations.surfaceIsDesertSwapDesertAndSnowBiomes
+      //   = surfaceIsDesert.Enabled **且** noSurface.Enabled 双旗（WorldGen.cs:317-324）——
+      //   纯 sandy britches 只置 Enabled ⇒ swap=false ⇒ 本三臂的液体操作照走
+      //   （DesertHive.cs:338-346/:360-362/:381-389）。旧码把「组合链不触」误建在单旗上。
+      const sandyHiveSwap = !!gs.seedFlags.surfaceIsDesert && !!gs.seedFlags.noSurface;
       const liquidSaved = st.liquid[i];
       const liquidSavedTy = st.liquidType[i];
       let headerWiped = false;
@@ -784,7 +791,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       } else if (field > 1.8) {
         const sup = deepSuppress();
         if (!sup) st.wall[i] = 187;
-        if (!gs.seedFlags.surfaceIsDesert) {                 // swap 组合链不触
+        if (!sandyHiveSwap) {                                // swap 组合链不触（DesertHive.cs:338）
           if (py < gs.worldSurface) st.liquid[i] = 0;
           else if (!remixHive) st.liquidType[i] = 2;         // remix 不铺岩浆
         }
@@ -797,7 +804,8 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         const sup = deepSuppress();
         if (!sup) {
           st.wall[i] = 216;
-          st.liquid[i] = 0;                                  // swap 门内；纯链照走
+          // ★IIIII111：liquid=0 也在 !swap 门内（DesertHive.cs:360-362）
+          if (!sandyHiveSwap) st.liquid[i] = 0;
         }
         if (!isEdge || st.flags[i]) {
           resetToType(px, py, shellType);
@@ -809,7 +817,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         if (fr2.nextDouble() < (field - 0.25) / 0.45) {
           const sup = deepSuppress();
           if (!sup) st.wall[i] = 187;
-          if (!gs.seedFlags.surfaceIsDesert) {
+          if (!sandyHiveSwap) {                              // ★IIIII111（DesertHive.cs:381）
             if (py < gs.worldSurface) st.liquid[i] = 0;
             else if (!remixHive) st.liquidType[i] = 2;
           }

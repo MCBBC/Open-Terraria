@@ -46,7 +46,7 @@ function makeHooks(enemies: unknown[] = [], tiles = 300): GameHooks {
     npcs: () => [],
     playSfx: () => {}, playSfxFiles: () => {},
     spawnParticles: () => {},
-    addDamageNumber: () => {}, damagePlayer: () => {},
+    addDamageNumber: () => {}, damagePlayer: (): number => 0,
     cutTile: () => {}, onProjectileDeath: () => {}, applyLifeSteal: () => 0,
   };
   return hooks as unknown as GameHooks;
@@ -141,7 +141,7 @@ describe('A2 537 观星者激光：宿主失联下拍即灭', () => {
     d.fixedUpdate(1, g);
     expect(d.dead).toBe(false);
     let dmgCalls = 0;
-    (g as unknown as { damagePlayer: () => void }).damagePlayer = () => { dmgCalls++; };
+    (g as unknown as { damagePlayer: () => number }).damagePlayer = () => { dmgCalls++; return 0; };
     host.dead = true;
     d.fixedUpdate(1, g);
     expect(d.dead).toBe(true);

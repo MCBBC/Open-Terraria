@@ -69,7 +69,7 @@ describe('火把僵尸 590/591 手持火把点光（NPC.cs:57309-57366）', () =
       world: new World(80, 40, 7, '测试'),
       player: new Player(0, 0, new Inventory()),
       enemies: () => [], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       spawnParticles: () => {}, playSfxFiles: () => {},
     } as unknown as GameHooks;
   }
@@ -100,7 +100,7 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
       world: new World(64, 32, 42, '测试'),
       player: new Player(0, 0, new Inventory()),
       enemies: () => [enemy], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       spawnParticles: () => {}, playSfxFiles: () => {},
       applyLifeSteal: (kind: 'vampire' | 'ghost', dmg: number) => { log.calls.push([kind, dmg]); return 0; },
     } as unknown as GameHooks;

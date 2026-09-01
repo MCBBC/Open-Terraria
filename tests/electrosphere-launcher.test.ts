@@ -41,7 +41,7 @@ const mkMissileHooks = (enemies: unknown[] = []) => {
     critters: () => [],
     npcs: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

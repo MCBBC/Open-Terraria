@@ -533,7 +533,7 @@ describe('⑤ 恒消耗门：撞块消亡不回收（P.cs Kill 无掉落段）',
       player: null,
       enemies: () => [], critters: () => [], npcs: () => [],
       spawnDrop: (_x: number, _y: number, key: string) => void drops.push(key),
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onProjectileDeath: () => {},
     } as unknown as GameHooks;
     return { game, drops };
@@ -711,7 +711,7 @@ describe('B1-6 零伤投掷出口根治：damage≤0 直传 + penetrate raw（23
           player: null,
           enemies: () => [e], critters: () => [], npcs: () => [],
           spawnDrop: () => null,
-          damagePlayer: () => {},
+          damagePlayer: (): number => 0,
           addDamageNumber: (x: number, y: number, n: number) =>
             void numbers.push({ x, y, n }),
           cutTile: () => {}, onProjectileDeath: () => {},

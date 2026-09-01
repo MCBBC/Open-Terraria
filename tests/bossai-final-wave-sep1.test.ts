@@ -69,7 +69,7 @@ function makeHooks(difficulty = 1): {
     player,
     enemies: () => enemies,
     critters: () => [],
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     onEnemyKilled: () => {},
     spawnParticles: () => {},

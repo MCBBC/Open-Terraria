@@ -11,7 +11,7 @@ function makeGame(): GameHooks {
   world.rockLevel = 32;
   return {
     world, player: null, enemies: () => [], critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, spawnParticles: () => {}, playSfxFiles: () => {},
     onEnemyKilled: () => {},
   } as unknown as GameHooks;

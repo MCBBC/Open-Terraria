@@ -229,7 +229,7 @@ function makeGame() {
     player: { x: -500, y: -500, w: 20, h: 20, dead: false, cx: -490, damage: (d: number) => playerHits.push(d) },
     enemies: () => [enemy],
     critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {}, notifyInventoryChanged: () => {},
   } as unknown as GameHooks;

@@ -407,7 +407,7 @@ describe('Enemy 死亡结算整合（per-client 发放 + closest 注入）', () 
             luck: 0.15, addDPS: () => {},
           },
           playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
-          damagePlayer: () => {}, spawnParticles: () => {}, spawnBurst: () => {},
+          damagePlayer: (): number => 0, spawnParticles: () => {}, spawnBurst: () => {},
           addDamageNumber: () => {},
           spawnDrop: (_x: number, _y: number, key: string) => { worldDrops.push(key); return null; },
           enemies: () => [] as unknown[], critters: () => [] as unknown[], npcs: () => [] as unknown[],

@@ -48,7 +48,7 @@ function makeWorld(name = 'open') {
     enemies: () => [],
     critters: () => [],
     spawnEnemy: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
   } as never;
   return { w, st, p, hooks };
 }

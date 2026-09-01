@@ -1,5 +1,7 @@
 // 小石块(185 SmallPiles) vs 家具放置占位豁免面探针（TileObject.cs:357/:84-86 对齐）
-// 场景:合成平地+工作台,足迹行内分别压 bare/小石块/石块(对照)/杂草(tileCut 对照)
+// 流程:①在合成平地上找到工作台可放锚点 A 与其点击格 C
+//      ②把障碍(tileCut 杂草/BreakableWhenPlacing 小石块/石块对照)放进 A 占位矩形内,
+//        用同一点击格 C 单发放置——石块必须被拒,杂草/小石块必须清除并放成。
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
@@ -15,117 +17,93 @@ const out = await page.evaluate(async () => {
   const st = g.world.store;
   const tiles = await import('/src/data/tiles.ts');
   const items = await import('/src/data/items.ts');
+  const vav = await import('/src/world/TileAnchorValidator.ts');
   const idOfSheet = (sh) => {
     for (let i = 0; i < tiles.TILE_DEFS.length; i++) if (tiles.TILE_DEFS[i]?.vanilla?.sheet === sh) return i;
     return -1;
   };
-  const PILE = idOfSheet(185);   // SmallPiles 微小石块
-  const STONE = idOfSheet(1);    // 石块（阻挡对照）
-  const WEED = idOfSheet(3);     // 杂草 Plants（tileCut 对照）
+  const PILE = idOfSheet(185), STONE = idOfSheet(1), WEED = idOfSheet(3);
   let W = -1;
   for (let i = 0; i < tiles.TILE_DEFS.length; i++) if (tiles.TILE_DEFS[i]?.key === 'workbench') W = i;
-  let wbId = -1, wbDef = null;
-  const cands = [];
+  let wbDef = null;
   for (let i = 0; i < items.ITEM_DEFS.length; i++) {
-    const d = items.ITEM_DEFS[i];
-    const k = String(d?.key ?? ''), t = String(d?.tile ?? '');
-    if (k.includes('workbench') || t.includes('workbench') || k === 'vi_22_workbench') cands.push([i, k, t]);
-    if ((d?.tile === tiles.TILE_DEFS[W]?.key || t.endsWith('_workbench')) && !wbDef) { wbDef = d; wbId = i; }
+    if (items.ITEM_DEFS[i]?.tile === tiles.TILE_DEFS[W]?.key) { wbDef = items.ITEM_DEFS[i]; break; }
   }
-  if (!wbDef && items.ITEM_BY_KEY['workbench'] !== undefined) {
-    wbId = items.ITEM_BY_KEY['workbench']; wbDef = items.ITEM_DEFS[wbId];
+  if (!wbDef || W < 0 || PILE < 0 || STONE < 0 || WEED < 0) {
+    return { fail: 'resolve', PILE, STONE, WEED, W };
   }
-  if (!wbDef || W < 0 || PILE < 0 || STONE < 0 || WEED < 0) return { fail: 'id resolve', PILE, STONE, WEED, W, cands };
-  // 合成场景：x0 中线高空
+  const wbIdx = items.ITEM_DEFS.indexOf(wbDef);
+  // 合成场景：中线高空,无天然液体/建筑干扰
   const x0 = Math.min(Math.max(Math.floor(st.w / 2), 20), st.w - 20);
-  const F = Math.floor(st.h / 2);
-  if (!st.inBounds(x0 + 6, F + 1)) return { fail: 'bounds', x0, F };
-  const clearBox = () => { for (let x = x0 - 1; x <= x0 + 6; x++) for (let y = F - 3; y <= F + 1; y++) {
+  const F = Math.floor(st.h / 2) - 260;   // 抬到天空层
+  if (!st.inBounds(x0 + 6, F + 2)) return { fail: 'bounds', x0, F };
+  const clearBox = () => { for (let x = x0 - 2; x <= x0 + 6; x++) for (let y = F - 5; y <= F + 2; y++) {
     if (!st.inBounds(x, y)) continue;
     if (st.isActive(x, y)) st.setTile(x, y, 0, 0, 0);
     const i2 = st.idx(x, y);
-    if (st.liquid[i2] > 0 || st.isPlatform?.(x, y)) st.liquid[i2] = 0;
+    if (st.liquid[i2] > 0) st.liquid[i2] = 0;
   } };
-  const reset = (mode) => {
-    clearBox();
-    for (let x = x0; x <= x0 + 4; x++) st.setTile(x, F, STONE, 0, 0);      // 地面行
-    const obs = mode === 'pile' ? PILE : mode === 'stone' ? STONE : mode === 'weed' ? WEED : -1;
-    if (obs >= 0) st.setTile(x0 + 1, F - 1, obs, 0, 0);                    // 足迹行内障碍格
-  };
-  const foundPlaced = (expectTid) => {
-    for (let x = x0 - 1; x <= x0 + 6; x++) for (let y = F - 3; y <= F - 1; y++) if (st.get(x, y) === expectTid) return [x, y];
-    return null;
-  };
+  const fillFloor = () => { for (let x = x0; x <= x0 + 4; x++) st.setTile(x, F, STONE, 0, 0); };
+  const wipe = () => { clearBox(); fillFloor(); };
   const inv = g.player.inv;
   const selIdx = inv.selected;
   const savedSlot = inv.slots[selIdx];
-  let dirtId = items.ITEM_BY_KEY['stone_block'] ?? -1;
-  let dirtDef = dirtId >= 0 ? items.ITEM_DEFS[dirtId] : null;
-  if (!dirtDef) {
-    for (let i = 0; i < items.ITEM_DEFS.length; i++) {
-      if (items.ITEM_DEFS[i]?.tile === tiles.TILE_DEFS[STONE]?.key) { dirtId = i; dirtDef = items.ITEM_DEFS[i]; break; }
+  const holdItem = (id) => { inv.slots[selIdx] = { id, stack: 10, favorited: false, prefix: 0 }; inv.selected = selIdx; };
+  const stand = (px, py) => {
+    g.player.x = px * 16 + 8; g.player.y = (py - 2) * 16; g.player.vx = 0; g.player.vy = 0; g.player.useTime = 0;
+  };
+  const findTileIn = (tid, xa, xb, ya, yb) => {
+    for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++)
+      if (st.inBounds(x, y) && st.get(x, y) === tid) return [x, y];
+    return null;
+  };
+  // ---- ①找基准锚点：裸地放置直到扫到工作台 ----
+  wipe();
+  holdItem(wbIdx);
+  let base = null;
+  for (let cx = x0 - 2; cx <= x0 + 6 && !base; cx++) {
+    for (let cy = F - 3; cy <= F && !base; cy++) {
+      stand(cx, cy);
+      await new Promise((r) => setTimeout(r, 40));
+      g['tryPlace'].call(g, cx, cy, wbDef);
+      const p = findTileIn(W, x0 - 2, x0 + 6, F - 5, F + 2);
+      if (p) base = { click: [cx, cy], placed: p };
+      wipe();
     }
   }
-  const DIAG = { wbKey: wbDef?.key, wbTile: wbDef?.tile, dirtOk: !!dirtDef };
-  const attempt = async (mode, useDef, holdId, expectTid) => {
-    inv.slots[selIdx] = { id: holdId, stack: 10, favorited: false, prefix: 0 };
-    inv.selected = selIdx;
-    reset(mode);
-    let okAt = null, err = null;
-    for (let cx = x0 - 2; cx <= x0 + 6 && !okAt; cx++) {
-      for (let cy = F - 2; cy <= F && !okAt; cy++) {
-        g.player.x = cx * 16 + 8; g.player.y = (F - 3) * 16 - 8;   // 站到目标旁（放置有触达半径门）
-        g.player.vx = 0; g.player.vy = 0; g.player.useTime = 0;
-        await new Promise((r) => setTimeout(r, 40));   // 物理帧同步（触碰达半径门用实时坐标）
-        if (!useDef) break;
-        try { g['tryPlace'].call(g, cx, cy, useDef); } catch (e) { err = String(e); }
-        const p = expectTid >= 0 ? foundPlaced(expectTid) : foundPlaced(expectTid);
-        if (p) okAt = [cx, cy];
-        reset(mode);   // 复位进下一次尝试
-      }
-    }
-    if (!okAt) { return { placedOk: false, err }; }
-    // 成功后重放一次并检查障碍物清除
-    reset(mode);
-    g.player.x = okAt[0] * 16 + 8; g.player.y = (F - 3) * 16 - 8; g.player.vx = 0; g.player.vy = 0;
-    g.player.useTime = 0;
-    g['tryPlace'].call(g, okAt[0], okAt[1], wbDef);
-    const p2 = foundPlaced();
-    let removed = true;
-    if (mode === 'pile') removed = st.get(x0 + 1, F - 1) !== PILE;
-    if (mode === 'weed') removed = st.get(x0 + 1, F - 1) !== WEED;
-    if (mode === 'stone') removed = false;
-    if (p2 === null) removed = false;
-    return { placedOk: true, at: okAt, obstructRemoved: removed };
-  };
-  // 直接单元调用锚点验证器，隔离“是闸门拒绝还是 tryPlace 前置门拦截”
-  const vav = await import('/src/world/TileAnchorValidator.ts');
+  if (!base) return { fail: 'no-base-anchor', x0, F };
   const rec18 = vav.anchorSpecOf(18);
-  reset('bare');
-  const vaBare = rec18 ? vav.validateAnchors(st, x0 + 1, F - 1, rec18) : 'no-rec';
-  reset('pile');
-  const vaPile = rec18 ? vav.validateAnchors(st, x0 + 1, F - 1, rec18) : 'no-rec';
-  // 存档写位探针：观察 bare 场景 tryPlace 是否真正写格
-  const writes = [];
-  const origSet = st.setTile.bind(st);
-  st.setTile = (...a) => { writes.push([a[0], a[1], a[2]]); return origSet(...a); };
-  g.player.x = (x0 + 1) * 16; g.player.y = (F - 3) * 16 - 8; g.player.vx = 0; g.player.vy = 0;
-  g.player.useTime = 0;
-  await new Promise((r) => setTimeout(r, 40));
-  g['tryPlace'].call(g, x0 + 1, F - 1, wbDef);
-  st.setTile = origSet;
+  const [qx, qy] = base.placed;
+  const rw = rec18 ? rec18.w : 2, rh = rec18 ? rec18.h : 1;
+  // 障碍落点：占位矩形内取一格(矩形不足时取脚点本身)
+  const ox = Math.min(qx + rw - 1, qx + 1), oy = qy;
+  // ---- ②同点击格单发对拍 ----
+  const singleShot = async (mode) => {
+    wipe();
+    if (mode !== 'bare') {
+      const tid = mode === 'pile' ? PILE : mode === 'stone' ? STONE : WEED;
+      st.setTile(ox, oy, tid, 0, 0);
+    }
+    stand(base.click[0], base.click[1]);
+    await new Promise((r) => setTimeout(r, 40));
+    holdItem(wbIdx);
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, base.click[0], base.click[1], wbDef);
+    const placedHere = findTileIn(W, qx - 2, qx + rw + 1, oy - 2, oy + rh + 1) !== null;
+    const cleanCleared = st.get(ox, oy) !== { pile: PILE, stone: STONE, weed: WEED }[mode];
+    return { mode, placedHere, cleanCleared, obsLeft: st.get(ox, oy) };
+  };
   const res = {
     ids: { pile: PILE, stone: STONE, weed: WEED, workbench: W },
-    DIAG,
-    anchorProbe: { recW: rec18 ? { w: rec18.w, h: rec18.h } : null, vaBare, vaPile, writes },
-    sanity: await attempt('bare', dirtDef, dirtId, STONE),
-    bare: await attempt('bare', wbDef, items.ITEM_DEFS.indexOf(wbDef), W),
-    pile: await attempt('pile', wbDef, items.ITEM_DEFS.indexOf(wbDef), W),
-    stone: await attempt('stone', wbDef, items.ITEM_DEFS.indexOf(wbDef), W),
-    weed: await attempt('weed', wbDef, items.ITEM_DEFS.indexOf(wbDef), W),
+    itemKey: wbDef.key, anchorProbe: vav.validateAnchors(st, qx, qy, rec18),
+    base,
+    bare: await singleShot('bare'),
+    pile: await singleShot('pile'),
+    weed: await singleShot('weed'),
+    stone: await singleShot('stone'),
   };
-  res.verdict = res.bare.placedOk && res.pile.placedOk && res.pile.obstructRemoved
-    && !res.stone.placedOk && res.weed.placedOk ? 'PASS' : 'FAIL';
+  res.verdict = res.base.placed && res.bare.placedHere && res.pile.placedHere && res.pile.cleanCleared
+    && res.weed.placedHere && res.weed.cleanCleared && !res.stone.placedHere ? 'PASS' : 'FAIL';
   inv.slots[selIdx] = savedSlot;
   return res;
 });

@@ -109,7 +109,7 @@ const hitHooks = (enemies: unknown[]): GameHooks => {
     critters: () => [],
     npcs: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

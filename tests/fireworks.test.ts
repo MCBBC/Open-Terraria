@@ -86,7 +86,7 @@ function makeGame(world?: World, ex = 150, ey = 150) {
     player: { x: -500, y: -500, w: 20, h: 20, dead: false, cx: -490 },
     enemies: () => [enemy],
     critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     spawnBurst: (x: number, y: number, color: string, count: number, speed: number) =>
       bursts.push({ x, y, color, count, speed }),

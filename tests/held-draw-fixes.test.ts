@@ -139,7 +139,7 @@ function makeGame(w: World, enemies: unknown[] = [], hooks: Record<string, unkno
     entities: { nextId: 1, add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     ...hooks,
   } as unknown as GameHooks;
@@ -279,7 +279,7 @@ describe('⑤ Kill 三件（Projectile.cs Kill 段）', () => {
       dusts.push(d);
       return d;
     };
-    g.damagePlayer = (n: number) => { playerHits.push(n); };
+    g.damagePlayer = (n: number): number => { playerHits.push(n); return 0; };
     return { g, added, sfx, dusts, playerHits };
   }
   const mkEnemy = (cx: number, cy: number) => ({

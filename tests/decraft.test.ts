@@ -137,7 +137,7 @@ function hooks(w: World, p: Player, spawned: Spawned[]): GameHooks {
       spawned.push({ key, count: count ?? 1, drop: d });
       return d;
     },
-    damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

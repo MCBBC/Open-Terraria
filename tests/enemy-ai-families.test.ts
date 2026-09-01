@@ -21,7 +21,7 @@ function flatWorld(playerAt: { x: number; y: number }) {
     // 台账清偿批(2026-08-31)：AI_044 同型聚群互斥环(:31189)新增 game.enemies()
     // 扫描消费——mock hooks 补空表(原 581 参数档用例断言不变)
     enemies: () => [],
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
     entities: { add: (e: unknown) => { shots.push(e as DartLike); } },
   } as never;
   return { w, hooks, shots };

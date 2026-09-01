@@ -93,7 +93,7 @@ function makeHooks() {
       } as never,
       player: player as never,
       enemies: () => [], critters: () => [], spawnDrop: () => null,
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
       notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
       showPickupLabel: () => {},

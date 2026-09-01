@@ -77,7 +77,7 @@ function makeSimGame(w: World): GameHooks {
     entities: { nextId: 1, add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     breakTile: (x: number, y: number) => w.store.setTile(x, y, 0),
   } as unknown as GameHooks;

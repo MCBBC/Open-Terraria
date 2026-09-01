@@ -21,7 +21,7 @@ function makeGame(w: World, list: unknown[] = [], projectiles: unknown[] = []) {
     entities: { nextId: 1, add: (e: unknown, b: string) => { (b === 'projectiles' ? projectiles : list).push(e); } },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, critters: () => [], notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, critters: () => [], notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
   } as unknown as GameHooks;
 }

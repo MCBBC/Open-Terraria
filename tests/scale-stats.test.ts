@@ -405,7 +405,7 @@ function makeGame(w: World, list: unknown[] = []) {
     entities: { nextId: 1, add: (en: unknown, bucket: string) => { if (bucket !== 'projectiles') list.push(en); } },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, critters: () => [], notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, critters: () => [], notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
   } as never;
 }

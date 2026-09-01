@@ -20,7 +20,7 @@ function hooks(npcs: TownNPC[], killGuide = false, killClothier = false): GameHo
     npcs: () => npcs,
     enemies: () => [], critters: () => [],
     entities: { nextId: 1, add: () => {} },
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     showPickupLabel: () => {}, cutTile: () => {},

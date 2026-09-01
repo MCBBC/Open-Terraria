@@ -60,7 +60,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},
@@ -268,7 +268,7 @@ describe('⑧ onProjectileDeath 467/468:Resize(176)+Damage()+Item_14', () => {
       x: playerAt.x, y: playerAt.y, w: 20, h: 42,
       cx: playerAt.x + 10, cy: playerAt.y + 21,
     };
-    g.damagePlayer = (n: number) => { damaged.push(n); };
+    g.damagePlayer = (n: number): number => { damaged.push(n); return 0; };
     return { g, damaged, sfx };
   }
 

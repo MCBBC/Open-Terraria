@@ -62,7 +62,7 @@ function fakeHooks(w: World, p?: Player): Record<string, unknown> {
   return {
     world: w, player: p ?? null,
     enemies: () => [], critters: () => [], projectiles: [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},

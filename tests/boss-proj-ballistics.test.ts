@@ -67,7 +67,7 @@ function makeHarness(playerAt: { x: number; y: number }): Harness {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (dmg: number, sx: number, sy: number) => { hits.push(dmg); p.iframes = 60; p.damage(dmg, sx, sy); },
+    damagePlayer: (dmg: number, sx: number, sy: number): number => { hits.push(dmg); p.iframes = 60; p.damage(dmg, sx, sy); return dmg; },
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

@@ -23,7 +23,7 @@ function shooterWorld(playerAt: { x: number; y: number }) {
     addDamageNumber: () => {},
     spawnParticles: () => {},
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     entities: { add: (e: unknown) => { shots.push(e as DartLike); } },
   } as never;
   return { w, hooks, shots, player: player as unknown as { useTime: number } };

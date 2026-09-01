@@ -119,11 +119,16 @@ export class TownShot extends Entity {
   damage: number;
   knockback: number;
   projId: number;
-  life = 600;
+  /** life 缺省 = Projectile.SetDefaults 预置档 timeLeft=3600（Projectile.cs:789），
+   *  构造器内按 vanilla-projectiles.json timeLeft 字段逐款覆写——★对抗修复批⑤
+   *  A5（2026-09-01）：旧硬编码 600 与原版缺省相悖 */
+  life = 3600;
   dead = false;
   /** 弹附加 ai 参数(124/142/227 等特化弹;本仓多数弹不消费,仅存档语义) */
   ai1 = 0; ai2 = 0;
-  /** 588 弹体 timeLeft=480(:54922-54925) */
+  /** 发射级覆写(如 588·107 弹体 timeLeft=480,cs:55070-55077 两连支)——
+   *  ★必须后于 json 默认赋值,与原版「SetDefaults 预置→类型支覆写→调用点
+   *  .timeLeft=480」三层序同形 */
   private lifeOverride?: number;
   /** 绘制 scale(SetDefaults;绘制尺寸 = 贴图原生 × scale,与判定盒解耦) */
   drawScale = 1;
@@ -149,6 +154,13 @@ export class TownShot extends Entity {
     const def = projectileData(projId);
     if (def) { this.w = def.width || 10; this.h = def.height || 10; }
     this.drawScale = def?.scale ?? 1;
+    // ★对抗修复批⑤ A5：life 管线三层序——①SetDefaults 预置 3600（字段缺省,
+    //   Projectile.cs:789）→②逐款 SetDefaults 覆写(json timeLeft:24→4800/
+    //   590→900/950→180/1·2→1200/14·242·357→600,与反编译 Projectile.cs 各
+    //   type 支双向核对一致;未设支走 3600 缺省)→③发射级覆写(588·107→480,
+    //   cs:55070-55077,【后于默认】同形 SetDefaults 后 .timeLeft=480)
+    // 核对记录(2026-09-01):json↔decompiled 双向抽查全数命中。
+    this.life = def?.timeLeft ?? 3600;
     if (this.lifeOverride !== undefined) this.life = this.lifeOverride;
     this.age0 = this.life;
     // ★对抗修复批③ B-F10b：589 五列变体由发射端显式传 ai1（NPC.cs:55067 三元末支
@@ -265,7 +277,12 @@ export class TownShot extends Entity {
       // friendly 弹 × friendly 目标 → Damage_PVE_Inner :11898 return（同 kill669 段）
       if (e.dead || e.def?.friendly || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
       e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false);   // 音/飘值=单点
-      this.dead = true; // 穿透 1(城镇自卫弹均为 penetrate 1 或 -1 特化弹,近似单发)
+      // ★对抗修复批⑤ A5 注释拨正（原注「均为 penetrate 1 或 -1」与反编译不符）：
+      //   实际 per SetDefaults——585=584=3(Projectile.cs:6349/:6356)、48=2(:1318)、
+      //   其余发射型多为 -1(133/134/135/590:2225-2254 族)或 1。本仓管线仍近似
+      //   单杀即亡;多穿缺口【登记台账】不动码(penetrate 计数/localNPCImmunity
+      //   未建——批⑤范围外,后续批次清偿)
+      this.dead = true;
       if (this.projId === 669) this.kill669(game);  // Kill() 爆炸(同敌免疫帧拦双吃)
       return;
     }

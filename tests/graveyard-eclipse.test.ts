@@ -79,7 +79,7 @@ function flatWorld(px = 45, py = 57, w = 80, h = 80, floorRow = 60) {
     spawnParticles: () => {},
     spawnBurst: () => {},
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     entities: { add: (e: unknown) => { shots.push(e as DartLike); } },
   } as never;
   return { world, st, shots, player: player as unknown as Player, hooks };

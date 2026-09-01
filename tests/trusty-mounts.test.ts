@@ -258,7 +258,7 @@ function makeHooks(enemies: unknown[] = [], wet = false) {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

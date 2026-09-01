@@ -25,9 +25,10 @@ function makeCtx(enemies: unknown[] = [], playerX = 8 * 16): Ctx {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (dmg: number, sx: number, sy: number) => {
+    damagePlayer: (dmg: number, sx: number, sy: number): number => {
       dmgLog.push(dmg);
       player.damage(dmg, sx, sy);
+      return dmg;
     },
     addDamageNumber: () => {},
     cutTile: () => {},

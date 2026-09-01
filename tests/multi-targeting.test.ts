@@ -46,7 +46,7 @@ function flatWorld(local: MockPlayer, remotes: MockPlayer[] = []) {
     player: local,
     candidatePlayers: () => [local, ...remotes],
     playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-    spawnDrop: () => null, damagePlayer: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0,
   } as never;
   return { w, hooks };
 }
@@ -151,7 +151,7 @@ describe('M11 TargetClosest 全玩家槽索敌', () => {
       world: w,
       player: local,                                    // 无 candidatePlayers（旧式 mock）
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
     } as never;
     const e = Enemy.fromVanilla(3, 40 * TILE, 59 * TILE)!;
     const x0 = e.x;

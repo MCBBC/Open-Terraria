@@ -107,7 +107,7 @@ describe('蜜蜂 AI（AI_005 210/211 分支）', () => {
     const game = {
       world: w,
       player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 100, maxHp: 100, dead: false, aabbOverlaps: () => false },
-      playSfx: () => {}, damagePlayer: () => {}, spawnParticles: () => {},
+      playSfx: () => {}, damagePlayer: (): number => 0, spawnParticles: () => {},
     } as never;
     const bee = Enemy.fromVanilla(210, 20 * TILE, 60 * TILE)!;
     // 原版暖机语义（NPC.cs:50768-50793，1:1）：accel=0.1×num3、num3=(ai1-60)/60

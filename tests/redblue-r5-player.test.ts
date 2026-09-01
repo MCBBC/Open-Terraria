@@ -37,7 +37,7 @@ const fakeHooks = (w: World, p?: Player) => ({
   enemies: () => [],
   critters: () => [],
   spawnDrop: () => null,
-  damagePlayer: () => {},
+  damagePlayer: (): number => 0,
   addDamageNumber: () => {},
   cutTile: () => {},
   onEnemyKilled: () => {},
@@ -436,7 +436,7 @@ describe('R5-F21/F22 DamageVar', () => {
     const e = new Enemy(20 * 16, 28 * 16, 'zombie', w);
     (e as unknown as { def: { damage: number } }).def = { damage: 100 };
     let got = -1;
-    const hooks = { ...fakeHooks(w, p), damagePlayer: (d: number) => { got = d; } };
+    const hooks = { ...fakeHooks(w, p), damagePlayer: (d: number): number => { got = d; return 0; } };
     (e as unknown as { fixedUpdate: (dt: number, g: unknown) => void }).fixedUpdate(1 / 60, hooks);
     if (got > 0) {
       expect(got).toBeGreaterThanOrEqual(85);          // 掷骰后仍落在 ±15% 带
@@ -452,7 +452,7 @@ describe('R5-F21/F22 DamageVar', () => {
     const got: number[] = [];
     const hooks = {
       ...fakeHooks(w, p),
-      damagePlayer: (d: number) => { got.push(d); },
+      damagePlayer: (d: number): number => { got.push(d); return 0; },
       bannerNpcActive: (id: number) => id === 50,      // 僵尸旗在栏
     };
     const self = { x: p.x, y: p.y, w: 8, h: 8, ownerNpcId: 50, projId: 12 };
@@ -460,7 +460,7 @@ describe('R5-F21/F22 DamageVar', () => {
     // 经典：DamageVar(100)=100 → 旗 ×0.75=75 → 缩放 ×1 → EVP ×2 = 150
     expect(got[0]).toBe(150);
     // 无旗对照：100 → ×2 = 200
-    const hooks2 = { ...fakeHooks(w, p), damagePlayer: (d: number) => { got.push(d); } };
+    const hooks2 = { ...fakeHooks(w, p), damagePlayer: (d: number): number => { got.push(d); return 0; } };
     hitPlayer(self, hooks2 as never, 100);
     expect(got[1]).toBe(200);
   });

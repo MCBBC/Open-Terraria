@@ -158,7 +158,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
-import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
+import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
@@ -3493,6 +3493,8 @@ export class Game implements GameHooks {
   private mushroomSmooth = 0;
   /** 屏内旗激活的 npcId 集（旗 buff 乘区消费） */
   private _bannerNpcs = new Set<number>();
+  /** 屏内旗代表 NPC 集（每旗种一枚最小 id；tooltip 名单用，旗种级去重） */
+  private _bannerReps = new Set<number>();
   private musicState: MusicState = newMusicState();
   /** 派对态（BirthdayParty 精简核：ManualParty；派对纪念碑 455 驱动） */
   private partyState: PartyState = newPartyState();
@@ -3737,8 +3739,10 @@ export class Game implements GameHooks {
    *  本仓等价收敛：原版命中后 LaunchMinecartHook（:33817-33824）发 403 轨道钩、由
    *  GrappleMovement 贴轨支随拍完成 SetMount——本仓无 403 异步钩体建模,塌缩为立即
    *  mountMinecartAt（getOnTrack 吸附 + 落点实心门与 403 上车段 :22406-22426 同语义,
-   *  与右键轨道路径同款既有模式）；落点被实心卡住时回退 false 放行普通召唤
-   *  （原版此处留悬钩由玩家松手清理,不建模）。矿车型取 bestCartMount()
+   *  与右键轨道路径同款既有模式）。★返回值语义按 :6080 `flag=!QuickMinecartSnap()`
+   *  定死：候选命中恒 true（与后续挂载成败解耦,原版 result 同样不看 403 终局）——
+   *  落点被实心卡住时上车落空且【不放行】普通召唤（原版此时留悬钩待玩家松手,本仓
+   *  无悬钩体不建模=空手拍,此处为已登记偏差）。矿车型取 bestCartMount()
    *  （miscEquips[2] > 手持 > 背包后备近似;原版 :22401 num4=13 缺省同源） */
   private quickMinecartSnap(): boolean {
     if (this.minecart) return false;
@@ -3765,7 +3769,8 @@ export class Game implements GameHooks {
       }
     }
     if (!point) return false;
-    return this.mountMinecartAt(point.x, point.y, this.bestCartMount());
+    this.mountMinecartAt(point.x, point.y, this.bestCartMount());
+    return true;
   }
 
   /** QuickMinecart（Player.cs:6107-6138）：射程内取视线可达的最近轨道格上车 */
@@ -5949,6 +5954,7 @@ export class Game implements GameHooks {
       // 屏内旗扫描（SceneMetrics.cs:420-443）——每 20tick 随 scene 刷新,旗 buff npc 集
       const bpx = Math.floor(this.player.cx / TILE), bpy = Math.floor(this.player.cy / TILE);
       this._bannerNpcs = scanBannerNpcs(w.store, bpx - 100, bpy - 70, bpx + 100, bpy + 70);
+      this._bannerReps = scanBannerReps(w.store, bpx - 100, bpy - 70, bpx + 100, bpy + 70);
       w.scene = this.scene; // Enemy 等只读消费（zoneGraveyard 攻门门等）
       this.player.zoneDesert = this.scene.zoneDesert; // 沙漠区旗标（沙丘行者靴已改消费 runningOnSand，:26225-26231）
       // ---- 幸运度环境扫描（Player.TryRecalculatingTorchLuck :17580-17939 净效果版）----
@@ -33947,10 +33953,14 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   /** 旗 buff：该 npc 是否被屏内旗覆盖（ItemID.Sets.BannerStrength 普通族） */
   bannerNpcActive(npcId: number): boolean { return this._bannerNpcs.has(npcId); }
 
-  /** 屏内旗覆盖的 npcId 列表（升序）。旗帜 buff tooltip 名单消费
-   *  （Main.cs:21558-21612 bannerMouseOver 附加循环的 BannerSystem 枚举序等价物——
-   *  BannerToNPC 注册序在原版亦近乎 id 升序；HasNPCBannerBuff(i) 门=同源覆盖集） */
+  /** 屏内旗覆盖的 npcId 列表（升序,含全部变体；效果覆盖判定消费）
+   *  ⚠️tooltip 名单勿用本表——多 NPC 旗（僵尸旗族）会逐变体重名罗列 */
   bannerNpcIds(): number[] { return [...this._bannerNpcs].sort((a, b) => a - b); }
+
+  /** 屏内旗【代表 NPC】列表（升序,每旗种一枚）。tooltip 名单消费
+   *  （Main.cs:21558-21612 bannerMouseOver 1:1：按 BannerSystem 旗种枚举,
+   *  BannerToNPC(i) 每旗一行名）——僵尸/恶魔眼等多变体旗只出一行 */
+  bannerRepIds(): number[] { return [...this._bannerReps].sort((a, b) => a - b); }
 
   /** ★IIIII22b：royale-with-cheese 队伍出生点落位（TeamBasedSpawns 批主接面）。
    *  Player.Spawn :37911-37916 三分支 = 床点(SpawnX≥0) > teamBasedSpawnsSeed 队点 >

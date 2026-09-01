@@ -34,7 +34,7 @@ function makeGame(w: World, enemies: unknown[] = [], hooks: Record<string, unkno
     entities: { nextId: 1, add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     ...hooks,
   } as unknown as GameHooks;

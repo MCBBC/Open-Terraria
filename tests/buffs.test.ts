@@ -192,7 +192,7 @@ describe('Wet 潮湿（103）', () => {
     const p = new Player(30 * 16, 77 * 16, new Inventory());
     const fakeHooks = {
       world: w, player: p, enemies: () => [], critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
       cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
       spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
       playSfxFiles: () => {}, showPickupLabel: () => {},

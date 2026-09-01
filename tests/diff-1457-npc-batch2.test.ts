@@ -37,7 +37,7 @@ function makeHooks(): { hooks: GameHooks; enemies: Enemy[]; em: { nextId: number
     world: w, player,
     enemies: () => enemies,
     critters: () => [], npcs: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     playSfxFile: () => {}, playSfxWav: () => {},

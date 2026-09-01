@@ -37,7 +37,7 @@ describe('抚摸复合后臂参数（ItemCheck_ApplyHoldStyle :49499-49508）', 
     for (let x = 10; x <= 44; x++) w.store.setTileSilent(x, 40, 1 /* dirt */);
     const hooks = {
       world: w, player: null, enemies: () => [], critters: () => [],
-      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
       cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
       spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
       playSfxFiles: () => {}, showPickupLabel: () => {}, playerEmote: () => {},

@@ -56,7 +56,7 @@ function makeHooks(enemies: MockEnemy[] = [], opts?: { solidAt?: (tx: number, ty
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (() => {}) as never,        // 签名宽 mock（同 spawnDust 口径）
+    damagePlayer: (): number => 0,           // 签名宽 mock（同 spawnDust 口径）
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},
@@ -314,7 +314,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
       world: { store: st, flags: { hardMode: false } } as never,
       player: player as never,
       enemies: () => [decoy, target],
-      critters: () => [], spawnDrop: () => null, damagePlayer: () => {},
+      critters: () => [], spawnDrop: () => null, damagePlayer: (): number => 0,
       addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
       spawnEnemy: () => {}, spawnParticles: () => {}, notifyInventoryChanged: () => {},
       playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

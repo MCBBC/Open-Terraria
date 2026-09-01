@@ -42,7 +42,7 @@ function makeGame(w: World, enemies: unknown[] = []) {
     addDamageNumber: (_x: number, _y: number, amount: number, _c: boolean) => {
       bites.push({ t: game.tick, dmg: amount });
     },
-    damagePlayer: () => {}, notifyInventoryChanged: () => {}, spawnDrop: () => null,
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {}, spawnDrop: () => null,
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     tick: 0,
   } as unknown as GameHooks & { tick: number };

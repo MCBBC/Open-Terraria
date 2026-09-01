@@ -28,7 +28,7 @@ import { TILE } from '../src/core/constants';
 // ---- 测试世界/玩家（tests/mounts.test.ts 同款 harness） ----
 const fakeHooks = (w: World, p?: Player) => ({
   world: w, player: p, enemies: () => [], critters: () => [],
-  spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+  spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
   cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
   spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
   playSfxFiles: () => {}, showPickupLabel: () => {},

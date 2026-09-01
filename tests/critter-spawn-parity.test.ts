@@ -110,7 +110,7 @@ describe('松鼠黑化彩蛋 + 蝴蝶物种槽（2026-08-17 修复批）', () =>
     const hooks = {
       world: w, player: null,
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { add: () => {} }, enemies: () => [] as unknown[],
     } as never;
     const seedMath = Math.random;
@@ -134,7 +134,7 @@ describe('松鼠黑化彩蛋 + 蝴蝶物种槽（2026-08-17 修复批）', () =>
     const hooks = {
       world: w, player: null,
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { add: () => {} }, enemies: () => [] as unknown[],
     } as never;
     const seen = new Set<number>();
@@ -159,7 +159,7 @@ describe('松鼠黑化彩蛋 + 蝴蝶物种槽（2026-08-17 修复批）', () =>
     const hooks = {
       world: w, player: null,
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { add: () => {} }, enemies: () => [] as unknown[],
     } as never;
     const e = Enemy.fromVanilla(661, 40 * 16, 50 * 16)!;
@@ -264,7 +264,7 @@ describe('多部件 Boss 层序（master 锚:挂件画本体前,2026-08-19 石�
     const game = {
       world: w, player: null,
       playSfx: () => {}, playParticles: () => {}, addDamageNumber: () => {},
-      spawnParticles: () => {}, spawnDrop: () => null, damagePlayer: () => {},
+      spawnParticles: () => {}, spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { nextId: 1, add: () => {}, enemies: [] as unknown[], critters: [] },
       enemies: () => [] as unknown[],
     } as never;

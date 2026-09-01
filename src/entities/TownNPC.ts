@@ -39,6 +39,8 @@ import {
   type TownShotParams,
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
+// ★对抗修复批⑤ A4：出膛锚点半宽/半高按弹真实 SetDefaults 尺寸换算
+import { projectileData } from '../data/vanillaProjectiles';
 import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -109,8 +111,12 @@ export const VANILLA_TOWN_CRITTER_SHEETS = new Set([
   538, 539, 540, 583, 584, 585, 592, 593, 602, 607, 608, 610, 616, 617, 625, 626,
   627, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 687, 688,
 ]);
-/** NPCID.Sets.IsTownSlime（NPCID.cs:4446）——站定态湿身强制走动门（:54047） */
+/** NPCID.Sets.IsTownSlime（NPCID.cs:4446）——站定态湿身强制走动门（真锚
+ *  cs:54171-76；★对抗修复批⑤ A11 行号考古：旧注 ":54047-4054" 系错引） */
 const SLIME_TOWN_IDS = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
+/** AI_007 flag7（cs:54001 `type==300||447||610`）：啮齿族特化——两格高墙折返臂
+ *  （cs:54657-64）与湿跳 ×1.2 豁免面（cs:54751-55）。三型按字面抄录 */
+const TOWN_FLAG7_IDS = new Set([300, 447, 610]);
 
 /** FindGoodRestingSpot 扫描期成员判定（:53223 CanBeSatOnForNPCs，无 style 门——
  *  style 门在 TryForcingSitting，见 canSitAt） */
@@ -304,10 +310,14 @@ export const FLEE_ACCEL = 0.1;
 /** 走态走程入态 ai[1] = 200+Next(300)（:54146/:54245/:54409） */
 export const WALK_LEG_BASE = 200;
 export const WALK_LEG_RAND = 300;
-/** 停态停程入态 ai[1] = 300+Next(300)+Next(900)（:54232-54242 走→停换态） */
+/** 停态停程入态 ai[1] = 300+Next(300) 后按 critter 双分支 −Next(100)/+Next(900)
+ *  （★对抗修复批⑤ A11 行号考古 + A10：真锚 cs:54377-54390 走→停换态,
+ *  旧注 ":54232-54242" 系错引——:54241 一带是站定回家走臂的 200+Next(200)） */
 export const STOP_LEG_BASE = 300;
 export const STOP_LEG_RAND1 = 300;
 export const STOP_LEG_RAND2 = 900;
+/** 走→停换态 critter 臂第三掷跨度（cs:54384-85 `ai[1] -= Next(100)`） */
+export const STOP_LEG_RAND_CRITTER = 100;
 /** 拴绳（:54169-54188）：|myX−homeX|>25 出软界（随机转身 rand(80) 只在此内掷，
  *  命中锁 localAI[3]=200）；>50 同向 → 强制折返 */
 export const LEASH_SOFT = 25;
@@ -317,7 +327,9 @@ export const LEASH_TURN_LOCK = 200;
 /** 背离 home 超 ±35 格且方向背家 → 停程倒计时额外 −5/t（:54220-54231） */
 export const HOME_DRIFT_RANGE = 35;
 export const HOME_DRIFT_TICK = 5;
-/** 到家站定入停态 ai[1] = 200+Next(200)（:54100/:54195） */
+/** 到家站定入停态 ai[1] = 200+Next(200)（★对抗修复批⑤ A11 行号考古：真锚
+ *  cs:54241-43 站定回家未到走臂 / cs:54353-56 行走到家刹停入停,旧注
+ *  ":54100/:54195" 系错引） */
 export const REST_LEG_BASE = 200;
 export const REST_LEG_RAND = 200;
 /** 站定态起身走程（湿畜 :54196-54198 = 200+Next(500,700) = **700..899**；
@@ -732,6 +744,9 @@ export function townNpcProgressionFromWorld(world: {
 export interface ThreatRef {
   x: number; y: number; w: number; h: number;
   cx: number; cy: number;
+  /** ★对抗修复批⑤ A6：DirectionTo(候选中心).Y（pdy/pdl 归一）。pickSideTarget
+   *  终选时写入——弓族入态种子 ai[2]=vector8.Y（cs:56052-59 同带检门内成值） */
+  aimY?: number;
 }
 
 /** 危险扫描候选池快照（★C2 统一定案：原版 num13..num17 结构面单点产出——
@@ -1139,7 +1154,9 @@ export class TownNPC extends Entity {
   get attackTimer(): number { return this.atkTimer; }
   /** localAI[3] 态内 tick 只读（AttackType2 光环 4 帧动画相位消费） */
   get attackTick(): number { return this.atkTick; }
-  /** ai[2]：弓族发射档写入，其余恒 0 */
+  /** ai[2]：入态种子（弓族 cs:56052-59 = vector8.Y）+ 弓族连发推进档 flag28
+   *  带内回写（cs:55382-91,±0.5 带外保留旧值——★对抗修复批⑤ A6）;其余态恒 0,
+   *  态尽 exitAttackCommon 归零 */
   private holdAim = 0;
   /** ai[1]:态倒计时(AttackTime) */
   private atkTimer = 0;
@@ -1150,6 +1167,15 @@ export class TownNPC extends Entity {
   /** 当前发射档 num46/55/65(连发升级链推进) */
   private atkNextShot = 0;
   private atkBurstIdx = 0;
+  /** ★对抗修复批⑤ A3（2026-09-01）：209 电子人逐弹冷却缓存。
+   *  原版 SelectRandom(134,133,135) 在 ai[0]==12 参数块内【每 tick】求值
+   *  （cs:55138-55160——num51 随拍刷新,态内持续耗流,对齐 NPC.cs SelectRandom
+   *  常驻调用位序）;num55/maxValue2 由 switch 按【本拍选中弹】覆写（135:30/10,
+   *  133:10/1, 134:20/10）,退出块 cs:55362-55366 直读本拍终值:
+   *  ai[1]=num55+Next(maxValue2) / localAI[1]=localAI[3]=num55/2+Next(maxValue2)。
+   *  本仓发射档前每 tick 掷 kind 存此,退出时 exitAttackCommon 覆写参消费——
+   *  非 209 / 非态 12 时恒 undefined。 */
+  private cyborgRoll?: { kind: number; cdBase: number; cdRand: number };
   /** 树妖祝福光环弹 586 弹龄（AI_111 自身 ai[0]——出生(atkTick 24)起计，>=570 熄灭；
    *  半径渐扩 300→600→1200 的相位源）。非树妖恒 0 */
   private wardT = 0;
@@ -1490,8 +1516,9 @@ export class TownNPC extends Entity {
 
   get tipsy(): boolean { return this.tipsyNow; }
 
-  /** GetMagicAuraColor（NPC.cs:53317-53332）1:1：NPCID.Sets.MagicAuraColor
-   *  （NPCID.cs:4853）五人恰好 = AttackType-2 魔法攻击族（54 裁缝/108 巫师/
+  /** GetMagicAuraColor（★对抗修复批⑤ A11 行号考古：真锚 NPC.cs:53466 起,旧注
+   *  ":53317-53332"/NPCID ":4853" 系错引——表定义体在 NPCID.cs:4859）1:1：
+   *  NPCID.Sets.MagicAuraColor 五人恰好 = AttackType-2 魔法攻击族（54 裁缝/108 巫师/
    *  160 松露/20 树妖/663 公主；五人 TownNPCProfiles 全走 LegacyWithSimpleShimmer
    *  二档 StackedNPCProfile → variationIndex∈{0,1}，==1 ⟺ 微光变体）。
    *  townNpcVariationIndex==1（= 本仓 shimmered，IsShimmerVariant NPC.cs:6646-6650）
@@ -2045,10 +2072,16 @@ export class TownNPC extends Entity {
       // 冷却 180t（num28）。跳点记录（position.X）在原版次帧被 flag21 段清
       // ——非溺水即清（jumpBackX 只管跳出后回落同点的转身检测）
       if (this.wet && drowningNow && this.turnLock <= 0) {
+        // ★对抗修复批⑤ A8（2026-09-01）：测深环改 GetTileSafely 出界语义
+        // （Framing.cs:426-431 InWorld false → 空 tile,液 0/type 0——计数即止）
+        // ——旧 max/min 钳制把越界读折到边界列/行,边缘列的实体边界格液体计深
+        // 虚高 → 跳速虚高。深查列 = num25−direction、基行 = num27 同原版。
         let depth = 0;
-        for (let j = 0; j <= 10
-          && st.liquid[st.idx(Math.max(0, Math.min(st.w - 1, ax - wantDir)),
-            Math.max(0, Math.min(st.h - 1, fy - j)))] !== 0; j++) depth++;
+        const qx = ax - wantDir;
+        for (let j = 0; j <= 10 && st.inBounds(qx, fy - j); j++) {
+          if (st.liquid[st.idx(qx, fy - j)] === 0) break;
+          depth++;
+        }
         let jumpV = Math.sqrt((depth * 16 + 16) * 2 * 0.3);
         if (jumpV > 26) jumpV = 26;
         this.vy = -jumpV;
@@ -2097,6 +2130,41 @@ export class TownNPC extends Entity {
       // 每 tick 复合 → 溺水跳 vy-10.7 指数放大到 -300+，渔夫一跳窜上万格高空
       //（2026-08-21 用户报障，探针 _anglerjump 复现 vy-373/y-228179）
       if (this.vy < 0 && this.wet) this.vy *= 1.2;
+      // ★对抗修复批⑤ A10(c)（cs:54751-55）：TownCritter 第二乘子——【独立 if】非
+      // else-if（湿身 critter 同拍可两连乘 ×1.44,原版字面如此）;flag7（300/447/610）
+      // 豁免。★死域预防：本区域现行零实体(VANILLA_TOWN_CRITTER_SHEETS 无既有
+      // 城镇 NPC 载体),无既有回放依赖——rng 流位变化已记录在案
+      if (this.vy < 0 && isCritter && !TOWN_FLAG7_IDS.has(this.vanillaId)) {
+        this.vy *= 1.2;
+      }
+    } else if (!this.onGround && wantDir !== 0 && !this.wet
+      && SLIME_TOWN_IDS.has(this.vanillaId)) {
+      // ★对抗修复批⑤ A9 臂B（cs:54760-87：velocity.Y==0 大门的 IsTownSlime 否支,
+      // 即行走中【腾空】拍——史莱姆蹦跳相）下方 ±1 列×6 行支撑格（液体>0 或
+      // active&&实心)≤2 → 停走五常数：walkMode=0 / walkT=50+Next(50) /
+      // turnLock=40（localAI[3] 承接）/ ai[2]=0 / vx×0.2。GetTileSafely 出界空格
+      // 语义同 A8（不计入）。骰面：仅触发时耗一张 Next(50)。wantDir 归零承接
+      // 原版 ai[0]=0（本 tick 不再作加速度/朝向消费位）
+      const st = world.store;
+      const bx = Math.floor(this.cx / TILE);
+      const fyA = Math.floor((this.y + this.h - 16) / TILE);
+      let supports = 0;
+      for (let o = -1; o <= 1 && supports <= 2; o++) {
+        for (let d = 1; d <= 6; d++) {
+          if (!st.inBounds(bx + o, fyA + d)) continue;   // 出界 = 空 tile 不计
+          const ii = st.idx(bx + o, fyA + d);
+          if (st.liquid[ii] > 0 || (st.type[ii] !== 0 && st.isSolid(bx + o, fyA + d))) {
+            supports++;
+          }
+        }
+      }
+      if (supports <= 2) {
+        this.walkMode = 0;
+        this.walkT = 50 + Math.floor(this.rng() * 50);
+        this.turnLock = 40;
+        this.vx *= 0.2;
+        wantDir = 0;
+      }
     }
     const preX = this.x;
     // 湿身重力档（UpdateNPC_UpdateGravity :91940-91956）：浸水 0.2/蜜 0.1/
@@ -2125,6 +2193,12 @@ export class TownNPC extends Entity {
         this.facing = -this.facing;
         this.vx = -this.vx;
         this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
+        // ★对抗修复批⑤ A10(a)（cs:54795-97）：critter 腿程 bonus 第三掷
+        // Next(200,400)=200+⌊r×200⌋（UnifiedRandom.cs:121-132 单采,勿双采）。
+        // ★死域预防：该区域现行零实体,无既有回放依赖
+        if (VANILLA_TOWN_CRITTER_SHEETS.has(this.vanillaId)) {
+          this.walkT += 200 + Math.floor(this.rng() * 200);
+        }
         turned = true;
       }
     } else {
@@ -2178,8 +2252,10 @@ export class TownNPC extends Entity {
 
     if (this.walkMode === 0) {
       // ---- 站定态（:54032-54168）----
-      // 湿身城镇史莱姆强制走动（:54047-54054 flag10 = IsTownSlime；鳄鱼 flag9
-      // 是 616/617/625/687 非 TownNPC 家族不适用）
+      // 湿身城镇史莱姆强制走动（★对抗修复批⑤ A11 行号考古：真锚 cs:54171-76
+      // `(flag9|flag10) && wet → ai[0]=1, ai[1]=200+Next(500,700)`；旧注
+      // ":54047-54054" 系错引。flag10 = IsTownSlime；鳄鱼 flag9 是
+      // 616/617/625/687 非 TownNPC 家族不适用）
       if (this.wet && SLIME_TOWN_IDS.has(this.vanillaId)) {
         this.walkMode = 1;
         this.walkT = RISE_LEG_WET_BASE + Math.floor(this.rng() * RISE_LEG_WET_RAND);
@@ -2216,6 +2292,9 @@ export class TownNPC extends Entity {
         if (drowning) {
           this.walkMode = 1;
           this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
+          // ★对抗修复批⑤ A10(a)（cs:54287-92 溺水起身臂）：critter 第三掷
+          // Next(200,400) 单采。★死域预防：该区域现行零实体,无既有回放依赖
+          if (isCritter) this.walkT += 200 + Math.floor(this.rng() * 200);
           this.turnLock = 0;
         } else if (this.walkT <= 0) {
           const af = walkPrediction(
@@ -2226,6 +2305,9 @@ export class TownNPC extends Entity {
           if (!af) {
             this.walkMode = 1;
             this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
+            // ★对抗修复批⑤ A10(a)（cs:54306-13 站桩耗尽起身臂）：critter 第三掷
+            // Next(200,400) 单采。★死域预防：该区域现行零实体,无既有回放依赖
+            if (isCritter) this.walkT += 200 + Math.floor(this.rng() * 200);
             this.turnLock = 0;
           } else {
             this.facing *= -1;
@@ -2269,10 +2351,17 @@ export class TownNPC extends Entity {
         // `if(!flag21)` 内（cs:54361-54375），没顶期间腿程【冻结】不减（drain −5/t
         // 同伞豁免，本仓结构照旧）；旧 else 臂照扣是造面
         if (this.walkT <= 0) {
-          // 走→停换态（:54232-54242）：停程 300+Next(300)+Next(900)
+          // 走→停换态（真锚 cs:54377-90——★对抗修复批⑤ A11 行号考古,旧注
+          // ":54232-54242" 错引）：ai[1]=300+Next(300) 后 TownCritter 双分支
+          // critter −Next(100) / 非 +Next(900)（cs:54384-85）;非 critter 路径逐骰
+          // 逐值与旧实现等价（BASE+R1 两掷次序不变,第三掷即原 R2）
           this.walkMode = 0;
-          this.walkT = STOP_LEG_BASE + Math.floor(this.rng() * STOP_LEG_RAND1)
-            + Math.floor(this.rng() * STOP_LEG_RAND2);
+          this.walkT = STOP_LEG_BASE + Math.floor(this.rng() * STOP_LEG_RAND1);
+          if (isCritter) {
+            this.walkT -= Math.floor(this.rng() * STOP_LEG_RAND_CRITTER);
+          } else {
+            this.walkT += Math.floor(this.rng() * STOP_LEG_RAND2);
+          }
           this.turnLock = 60;
         }
       }
@@ -2506,6 +2595,7 @@ export class TownNPC extends Entity {
           && INTERACTABLE_BY_NPC_TILES.has(tid)) {
           this.social = { kind: 9, t: 40 + Math.floor(rnd() * 90), other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
           this.vx = 0;                                      // :55831 velocity=0
+          this.turnLock = 0;                                // ★对抗修复批⑤ A7（RB-L3）:55982 localAI[3]=0f——入态清驻足锁,防上拍残锁冻结转身/拴绳链
           return true;
         }
       }
@@ -2845,7 +2935,9 @@ export class TownNPC extends Entity {
         // 尾窗溢出走「落 0」端帧（演出收尾定格一拍再回站姿）。
         // 帧↔型的行带：20 {史莱姆 8-13 循环 / 兔 7-9 / 猫 10-16(尾冻13) /
         //   狗 23-27(尾冻24)}；21 {兔 10-16(冻13) / 猫 17-21(冻19) / 狗 17-22(冻18)}；
-        // 22 {兔 17..frames-1(冻19) / 猫 17-27 双尾态}。
+        // 22 {兔 17..20 摆动(cs:69647 `num64>20&&ai[1]>40 → num64=19`——越 20 回弹
+        //   到 19,即演出后段在 19/20 两行间往复,非"冻结到 frames-1";
+        //   ★对抗修复批⑤ A1 拨正,2026-09-01) / 猫 17-27 双尾态}。
         const sP = s;
         const cnt0 = sP.pc ?? 0;
         let cnt = cnt0;             // FindFrame frameCounter 影子（帧行循环计数）
@@ -2930,7 +3022,10 @@ export class TownNPC extends Entity {
             if (cnt > 4) {
               cnt = 0;              // 越阈清零（原版 frameCounter=0）
               row++;
-              if (row > 19 && sP.t > 40) row = 19;
+              // ★对抗修复批⑤ A1（cs:69647-50）：门值 20 非旧码的 19——越 20 回弹
+              //   到 19 形成 17..20 摆动带（旧 `row>19→19` 使 19/20 两行永不可达
+              //   后半,兔表演尾段提前一拍折返）
+              if (row > 20 && sP.t > 40) row = 19;
               if (row >= nf) row = 0;
             }
           }
@@ -3495,6 +3590,8 @@ export class TownNPC extends Entity {
 
   /** 越障三档跳 + 净空失败转身/被逼停（NPC.cs:54514-54611）。返回 true = 已折返
    *  （调用方保住翻转后的 facing 不被 wantDir 回写）。
+   *  ★对抗修复批⑤ A9 补两臂：啮齿两格墙折返（cs:54657-64 flag7,一档子支）与
+   *  史莱姆侧带净空小跳（cs:54721-25 梯序末档）。
    *  tile 探针（:54499-54501）：num26 = 前方列（center+15×dir）、num27 = 脚部行
    *  （Bottom−16px）；tileSafely5/4/3 = num27−2/−1/num27 本行。净空检查
    *  SolidTilesVersatile（Collision.cs:3450，越界视为堵 :3468-3479）——isSolid
@@ -3523,6 +3620,17 @@ export class TownNPC extends Entity {
       // 两格上障碍：净空 = 身侧两列 num27−5..−1 + 障碍列 −5..−3（:54522-54526）
       if (!solidRange(ax - dir * 2, ax - dir, fy - 5, fy - 1)
         && !solidRange(ax, ax, fy - 5, fy - 3)) this.vy = -6;
+      else if (TOWN_FLAG7_IDS.has(this.vanillaId)) {
+        // ★对抗修复批⑤ A9 啮齿折返臂（cs:54657-64 flag7）：被 SolidTiles 卡死的
+        //   两格高墙 + 身侧格实心 → direction*=−1 / velocity.X=0——不走 flag26 的
+        //   −vx 反冲面（速度直接清零）
+        const cxT = Math.floor(this.cx / TILE), cyT = Math.floor(this.cy / TILE);
+        if (st.inBounds(cxT + dir, cyT) && st.isSolid(cxT + dir, cyT)) {
+          this.facing = -dir;
+          this.vx = 0;
+          return true;
+        }
+      }
       else if (this.dangerNear) { freeze = true; turn = true; }   // flag16（:54527-54530）
       else turn = true;
     } else if (t4) {
@@ -3552,6 +3660,14 @@ export class TownNPC extends Entity {
       // （flag24 溺水跳出时例外——跳出当帧不转身）；危险中叠冻结
       turn = true;
       if (this.dangerNear) freeze = true;
+    } else if (SLIME_TOWN_IDS.has(this.vanillaId)
+      && !solidRange(ax - dir * 2, ax - dir, fy - 2, fy - 1)) {
+      // ★对抗修复批⑤ A9 臂A（cs:54721-25 flag14=IsTownSlime 末档）：侧带两列×
+      //   两行净空 → 史莱姆小跳 vy=-5。插入序=【cs 字面梯序】置于 avoidFalling
+      //   支之后（:54710 避坠臂 :54721 史莱姆臂相邻 else-if；任务书"支前"表述与
+      //   反编译相邻序不符，以 cs 为准——仅当「无墙阻、非避坠」同时成立才受理，
+      //   与原版受理面一致）
+      this.vy = -5;
     }
     if (freeze) {                                        // flag27（:54596-54600）
       this.corneredT = 240;                              // ai[0]=8 / ai[1]=240
@@ -3565,12 +3681,16 @@ export class TownNPC extends Entity {
     return turn;
   }
 
-  /** 行走随机坐椅（NPC.cs:55774-55814）：行走态（wantDir!=0 ≈ ai[0]==1）站地
-   *  rand(300)==0 → 脚下格（Bottom−2px）为椅/马桶（canSitAt 含 style 27 排除，
-   *  :55803-55807）且无占位 → 坐。占位门 = 其他坐姿城镇 NPC（Bottom−2px 同格，
-   *  :55782-55790）+ 坐姿玩家（Center 同格，:55791-55799）。落座锚与夜路径同构：
-   *  原版 Bottom=(x*16+8+2*dir, y*16+16)（:55810）≡ sittingAnchor(x, y+1, dir)，
-   *  故复用 forceSit（占位/朝向/锚点/时长 900+rand(10800) 全同链） */
+  /** 行走随机坐椅（★对抗修复批⑤ A11 行号考古：真锚 cs:55922-85
+   *  `flag30 && ai[0]==1 && velocity.Y==0 && num>0 && rand(num)==0`,掷跨度常量
+   *  num=300 置于 AI_007 头部 cs:53527-31——狗 638/兔 656/IsTownSlime 恒 0;
+   *  旧注 ":55774-55814" 与 ":53369-53373" 均系错引,语义面不变）：
+   *  行走态（wantDir!=0 ≈ ai[0]==1）站地 rand(300)==0 → 脚下格（Bottom−2px）
+   *  为椅/马桶（tile2.type∈{15,497} + style 27 排除,cs:55958-61）且无占位 → 坐。
+   *  占位门 = 其他坐姿城镇 NPC（Bottom−2px 同格,:55942-49）+ 坐姿玩家（Center 同格,
+   *  :55950-57）。落座锚与夜路径同构：原版 Bottom=(x*16+8+2*dir, y*16+16)
+   *  （:55972-75）≡ sittingAnchor(x, y+1, dir)，故复用 forceSit
+   *  （占位/朝向/锚点/时长 900+rand(10800) 全同链） */
   private tryRandomChairSit(
     world: import('../world/World').World, game: GameHooks, wantDir: number,
   ): boolean {
@@ -3579,8 +3699,8 @@ export class TownNPC extends Entity {
       || this.atkState !== 0 || this.corneredT > 0
       || this.dangerNear                                  // flag30 的 !flag16（:55768）
       || this.wet                                         // flag30 的 !wet（:55768 字面）
-      || NO_SIT_NPC_IDS.has(this.vanillaId)) return false; // num=0 恒不触发（:53369-53373）
-    if (this.rng() >= 1 / 300) return false;              // rand(num)==0（num=300）
+      || NO_SIT_NPC_IDS.has(this.vanillaId)) return false;   // num=0 恒不触发（cs:53527-31）
+    if (this.rng() >= 1 / 300) return false;              // rand(num)==0（num=300,cs:55922）
     const st = world.store;
     const px = Math.floor(this.cx / TILE);
     const py = Math.floor((this.y + this.h - 2) / TILE);  // Bottom−2px（:55777）
@@ -3628,8 +3748,10 @@ export class TownNPC extends Entity {
    *  「换敌再接」重起手链,2026-08-31 对齐批②(swingUpdate 重写,登记销账);
    *  对话还手(:55761 总伞 (!flag5|flag16) + num3×0.8 减频,2026-08-31 对账批②接
    *  ——旧「talking 不入攻击态·0.8 不可达」登记系误判作废)。
-   *  登记未接::55864 族 flag28 LOS 掷骰直存;防御链 :53401-53531(dryadWard+Boss 防,
-   *  另批; ward 防御枝载体 dryadWardT 已在 hurt() 内联) */
+   *  登记销账（★对抗修复批⑤ A6）：flag28 带检回写已接——入态种子=vector8.Y
+   *  （真锚 cs:55098 起四攻击支序列,旧注 ":55864 族" 系 1456 行号残留错引）+
+   *  连发推进档 cs:55382-91 回写;防御链 :53401-53531(dryadWard+Boss 防,另批;
+   *  ward 防御枝载体 dryadWardT 已在 hurt() 内联) */
   private attackUpdate(world: import('../world/World').World, game: GameHooks): boolean {
     // ★F3：atkCd(localAI[1]) 递减已上提到 fixedUpdate 危险扫描之后（NPC.cs:55770-55772
     // 挂 `(!flag5|flag16)` 伞内——对话且无险不递减;治疗/社交/坐姿各路径统一覆盖）
@@ -3726,10 +3848,14 @@ export class TownNPC extends Entity {
       // 586 是自身光环弹不需瞄准）——else if (type == 20) 无条件入态分支
       if (!target && this.vanillaId !== 20) return false;
       this.atkState = atkType === 0 ? 10 : atkType === 1 ? 12 : atkType === 2 ? 14 : 15;
-      this.holdAim = 0;                       // ai[2] 入态清零(:54931 族)
+      // ★对抗修复批⑤ A6：入态种子——弓族 cs:56052-59 `ai[2]=vector8.Y`（带检
+      //   ±0.5 同门内成值,pickSideTarget 终选已落 aimY）;近战/魔法/挥击入态支
+      //   显式 ai[2]=0f（cs:56027/:56071/:56100 字面）。旧实现无条件清零系漏读
+      this.holdAim = atkType === 1 ? (target?.aimY ?? 0) : 0;
       this.atkTimer = TOWN_ATTACK_TIME[this.vanillaId] ?? 30;
       this.atkTick = 0;
       this.atkBurstIdx = 0;
+      this.cyborgRoll = undefined;          // ★A3：上轮残留清偿（入态拍不掷）
       this.atkNextShot = (params as TownShotParams | undefined)?.shootTick ?? 1;
       if (target) {
         // :56031 入态方向 = position.X（盒左缘）字面比较——四攻击态 + 治疗(:56004)
@@ -3740,6 +3866,19 @@ export class TownNPC extends Entity {
       return true;
     }
     // ---- 态内推进 ----
+    // ★对抗修复批⑤ A3：209 逐弹冷却参数块——原版 SelectRandom(134,133,135)
+    //   位于 ai[0]==12 参数块首（cs:55138-55139），随态内【每 tick】求值（含无发射
+    //   拍与退出拍），switch 覆写 num55/maxValue2 为退出块所用；故先于 vx*0.8/倒计
+    //   时掷出。本仓缓存入 cyborgRoll，shootAt 发射面直接消费本拍选中值。
+    if (this.vanillaId === 209 && this.atkState === 12) {
+      const kind = [134, 133, 135][Math.floor(this.rng() * 3)];   // cs:55139 SelectRandom<int>
+      const per: Record<number, [number, number]> = {             // switch num55/maxValue2
+        134: [20, 10],                                            //   case 134 :55158-59
+        133: [10, 1],                                             //   case 133 :55147-48
+        135: [30, 10],                                            //   case 135 :55141-42
+      };
+      this.cyborgRoll = { kind, cdBase: per[kind][0], cdRand: per[kind][1] };
+    }
     this.atkTimer--;
     this.atkTick++;
     this.vx *= 0.8;
@@ -3766,9 +3905,15 @@ export class TownNPC extends Entity {
     if (this.atkTimer <= 0 && this.atkState !== 0 && this.atkState !== 15) {
       // 退出（:54927-54934/:55196-55203/:55381-55389 共用形状→exitAttackCommon:
       // 腿程/冷却同掷序,localAI[1]≡localAI[3],cornered 复位四态一致）
+      // ★对抗修复批⑤ A3：209 的 cdBase/cdRand 用【本拍选中弹】的 num55/maxValue2
+      //   覆写静态表值（cs:55362-66 num52→num55 随参数块每拍刷新——退出块直读）
       const p = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId]);
-      const cdBase = (p as TownShotParams | undefined)?.cdBase ?? 10;
-      const cdRand = (p as TownShotParams | undefined)?.cdRand ?? 1;
+      let cdBase = (p as TownShotParams | undefined)?.cdBase ?? 10;
+      let cdRand = (p as TownShotParams | undefined)?.cdRand ?? 1;
+      if (this.vanillaId === 209 && this.cyborgRoll) {
+        cdBase = this.cyborgRoll.cdBase;
+        cdRand = this.cyborgRoll.cdRand;
+      }
       this.atkState = 0;
       this.exitAttackCommon(cdBase, cdRand);
     }
@@ -3846,10 +3991,11 @@ export class TownNPC extends Entity {
         nvx = this.facing; nvy = -1;
       }
       const shot = new NurseSyringeShot(
-        // NewProjectile(X,Y,…)=中心坐标（:55376）→ 本仓 Entity 顶左锚换算 −halfSize
-        // （584 SetDefaults 10×10，Projectile.cs:6344-6345）
-        this.cx + this.facing * 16 - 5,
-        this.cy - 2 - 5,
+        // NewProjectile(X,Y,…)=锚点（:55376 Center+(dir*16,−2)）→ 本仓 Entity
+        // 顶左锚换算 −halfSize——★对抗修复批⑤ A4：半宽取弹真实 SetDefaults 尺寸源
+        // （584 恰 10×10,Projectile.cs:6343-6345,数值与旧硬编码不变）
+        this.cx + this.facing * 16 - (projectileData(584)?.width ?? 10) / 2,
+        this.cy - 2 - (projectileData(584)?.height ?? 10) / 2,
         nvx * 8, nvy * 8,                                  // vec × 8
         patient,
         (amt, px, py) => {                                 // HealEffect(:34712→:78239)
@@ -4171,6 +4317,9 @@ export class TownNPC extends Entity {
       const dl = Math.hypot(sel.cx - this.cx, sel.cy - this.cy) || 1;
       if (Math.abs((sel.cy - this.cy) / dl) > opts.slopeCapY) return null;
     }
+    // ★对抗修复批⑤ A6：入态种子载体——aimY = DirectionTo(中心).Y（原版在
+    //   弓族入态支 :56051-57 同门内先求 vector8 再带检,此处统一随终选落位）
+    sel.aimY = (sel.cy - this.cy) / (Math.hypot(sel.cx - this.cx, sel.cy - this.cy) || 1);
     return sel;
   }
 
@@ -4194,23 +4343,38 @@ export class TownNPC extends Entity {
       kb = params.panic.kb; spread = params.panic.spread;
     }
     // 209 三选一弹(:55139)
+    // ★对抗修复批⑤ A3：逐弹参数改为读本拍缓存(this.cyborgRoll)——SelectRandom
+    //   已上移至 attackUpdate 态推进头每 tick 掷(原版常驻求值位),此处不再掷,
+    //   防同一拍双耗流
     if (this.vanillaId === 209 && !params.panic) {
-      const pick = [134, 133, 135][Math.floor(this.rng() * 3)];
-      proj = pick;
-      const m: Record<number, [number, number, number, number, number]> = {
-        134: [20, 13, 4, 0.1, 20], 133: [25, 10, 6, 0.2, 10], 135: [30, 12, 7, 0.2, 30],
-      };
-      [dmg, speed, kb, spread] = [m[pick][0], m[pick][1], m[pick][2], m[pick][3]];
+      const roll = this.cyborgRoll;
+      const pick = roll?.kind ?? proj;
+      if (roll || pick !== params.proj) {
+        proj = pick;
+        const m: Record<number, [number, number, number, number]> = {
+          134: [20, 13, 4, 0.1], 133: [25, 10, 6, 0.2], 135: [30, 12, 7, 0.2],
+        };
+        if (m[pick]) {
+          [dmg, speed, kb, spread] = m[pick];
+          // 出膛速度散布 num57 各弹不同(134:0.1/133·135:0.2)——本仓 spread
+          // 亦即 RandomVector2 半幅,等价覆写
+        }
+      }
     }
     // 瞄准:弓 = 目标上抬 aimLift 取向;近战/魔法 = aimLiftScaled×(dist/range 归一)上抬
     let vx = this.facing, vy = 0;
     if (target) {
-      // ai[2] 持械瞄准值(:55191-55197):弓族发射档取【目标中心】方向 Y 钳 ±0.5
-      // (原版另有 flag28 LOS 门——触发门已验 LOS,此处近似直存;aimLift 不参与)
-      if (this.atkState === 12) {
+      // ai[2] 持械瞄准值——★对抗修复批⑤ A6（cs:55382-55391）：发射档回写仅在
+      // `(localAI[3]==num54) & flag28 && num58 != -1` 时发生——flag28 只由连发
+      // 升级链置位（19 硬模/227/178/229,本仓载体 = atkBurstIdx>0 的推进拍）,
+      // 带 |Y|≤0.5 外【不写保留旧值】（入态种子 vector8.Y / 上拍值）。
+      // 非连发型 flag28 恒 false → 整态零覆写。旧实现无条件钳写是病根
+      // （登记注 :3631 一带的旧「:55864 族直存」说法随本批销账）
+      if (this.atkState === 12 && this.atkBurstIdx > 0) {
         const pdx = target.cx - this.cx, pdy = target.cy - this.cy;
         const pdl = Math.hypot(pdx, pdy) || 1;
-        this.holdAim = Math.max(-0.5, Math.min(0.5, pdy / pdl));
+        const aimY = pdy / pdl;
+        if (aimY >= -0.5 && aimY <= 0.5) this.holdAim = aimY;
       }
       let lift = params.aimLift ?? 0;
       if (this.atkState === 10 || this.atkState === 14) {
@@ -4241,8 +4405,17 @@ export class TownNPC extends Entity {
     progShot.tipsy = this.tipsy;
     const num2 = townNpcProgressionBoost(progShot).damageMul;
     const dmgFinal = getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world));
-    const sx = this.cx + this.facing * 16 - 5;
-    const sy = this.cy - 2 - 5;
+    // ★对抗修复批⑤ A4（2026-09-01）：出膛锚点「中心」→ 顶左换算改用弹真实
+    // SetDefaults 半宽/半高（vanilla-projectiles.json 载体），替换硬编码 ±5——
+    // 原式假设全弹体 10×10，对 950(104×104)/590(14×14) 等错半宽。586 无 TownShot
+    // 出膛点不适用；1/583/584/587/589 恰 10×10 → 数值不变量保持。
+    // 锚点公式本体不变：Center + (dir*16, −2)（近战 :54997-55005 / 弓 :55371-79 /
+    // 魔法 :55425-33 同形）。
+    const shotDef = projectileData(proj);
+    const shotHW = (shotDef?.width ?? 10) / 2;
+    const shotHH = (shotDef?.height ?? 10) / 2;
+    const sx = this.cx + this.facing * 16 - shotHW;
+    const sy = this.cy - 2 - shotHH;
     // 落点弹(160/663):目标区域随机点生成 velocity=0;实心重掷(160≤10/:55351、
     // 663≤5/:55369),重掷耗尽仍实心则按末次落点照常生成(原版 while 语义)
     // ★对抗修复批③ B-F10c：出膛附 ai2=townNpcVariationIndex（:55490-95/:55503-08/
@@ -4260,7 +4433,8 @@ export class TownNPC extends Entity {
           py = target.y + target.h * this.rng();
         }
       } while (retries-- > 0 && st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE)));
-      game.spawnTownShot?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj,
+      // ★对抗修复批⑤ A4：落点弹换算同步半宽化——950(104×104) 曾按 10×10 收半宽
+      game.spawnTownShot?.(new TownShot(px - shotHW, py - shotHH, 0, 0, dmgFinal, kb, proj,
         { noGravity: true, ai2: this.shimmered ? 1 : 0 }));
       return;
     }
@@ -4292,8 +4466,11 @@ export class TownNPC extends Entity {
     //   · 树妖 20 原版同样附 ai1=whoAmI/ai2=variationIndex（:55533），但光环弹 586
     //     走 updateDryadWardAura 直驱、无 TownShot 出膛点 → 不适用（登记）。
     const varIdx = this.shimmered ? 1 : 0;           // townNpcVariationIndex
-    let shotOpts: { ai1?: number; ai2?: number; life?: number } | undefined;
-    if (this.vanillaId === 124) shotOpts = { ai1: this.probeTag, ai2: varIdx };
+    let shotOpts: { ai1?: number; ai2?: number; life?: number; noGravity?: boolean } | undefined;
+    // 582 侦察弹无重力直飞（Projectile.cs AI_109 :34651-34689 仅速度保持/Lerp 归位,
+    // 无自管重力项;aiStyle-1 型自管重力族才走 ai 内重力）——★对抗修复批⑤ A5 补
+    // noGravity 探针窗前提(缺省 GRAV 入门会使探针抛物触地早亡,窗口塌缩)
+    if (this.vanillaId === 124) shotOpts = { ai1: this.probeTag, ai2: varIdx, noGravity: true };
     else if (this.vanillaId === 227) shotOpts = { ai1: Math.floor(this.rng() * 12) / 6 };
     else if (this.vanillaId === 142) shotOpts = { ai1: Math.floor(this.rng() * 5) };
     else shotOpts = { life: (this.vanillaId === 588 || this.vanillaId === 107) ? 480 : undefined };

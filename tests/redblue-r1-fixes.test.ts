@@ -56,7 +56,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }): Harness {
     enemies: () => enemies,
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {},
     cutTile: () => {},
     onEnemyKilled: () => {},

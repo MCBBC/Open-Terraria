@@ -98,7 +98,7 @@ describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2
       enemies: () => [], critters: () => [], spawnDrop: () => null,
       addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
       spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
-      damagePlayer: () => {}, notifyInventoryChanged: () => {}, showPickupLabel: () => {},
+      damagePlayer: (): number => 0, notifyInventoryChanged: () => {}, showPickupLabel: () => {},
       spawnEnemy: () => {},
     } as never;
     a.fixedUpdate(1, hooks);

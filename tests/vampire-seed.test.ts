@@ -51,7 +51,7 @@ function setup(opts: {
     world: w, player: p,
     enemies: () => [] as unknown[],
     critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
     playSfxWav: () => {},
     startLoopSfx: (_f: string, vol: number) => {

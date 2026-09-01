@@ -125,7 +125,7 @@ describe('敌怪掉落 isExpert/isMaster 读世界难度（Enemy.ts 消费点）
       world, player,
       enemies: () => [], critters: () => [],
       spawnDrop: (_x: number, _y: number, key: string) => { drops.push(key); return null; },
-      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
       spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
       onEnemyKilled: () => {}, spawnEnemy: () => {}, notifyInventoryChanged: () => {},
       showPickupLabel: () => {},

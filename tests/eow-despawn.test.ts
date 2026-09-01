@@ -21,7 +21,7 @@ function hooks(w: World, p: Player): GameHooks {
   return {
     world: w, player: p,
     enemies: () => [], critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

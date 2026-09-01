@@ -57,7 +57,7 @@ function mkHooks(enemies: StubEnemy[], world: ReturnType<typeof mkWorld>['world'
     critters: () => [],
     npcs: () => [],
     spawnDrop: () => null,
-    damagePlayer: (...a: unknown[]) => { calls.damagePlayer.push(a); },
+    damagePlayer: (...a: unknown[]): number => { calls.damagePlayer.push(a); return 0; },
     punchCamera: (...a: unknown[]) => { calls.punchCamera.push(a); },
     cutTile: () => {},
     addDamageNumber: () => {},

@@ -177,7 +177,7 @@ function ballHooks(self: Box, others: Box[]): { hooks: GameHooks; drops: Array<{
       drops.push({ key, n: n ?? 1 });
       return null;
     },
-    damagePlayer: (): void => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: (): void => {},
     playSfx: (): void => {},
     playSfxFiles: (): void => {},

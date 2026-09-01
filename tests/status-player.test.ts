@@ -23,7 +23,7 @@ function makeGame(difficulty = 0): { game: GameHooks; player: Player } {
   const game = {
     world, player,
     enemies: () => [], critters: () => [],
-    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+    spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
   } as unknown as GameHooks;
   return { game, player };

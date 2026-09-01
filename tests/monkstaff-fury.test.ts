@@ -27,7 +27,7 @@ function makeGame(w: World, list: unknown[] = [], sfx?: string[][]) {
     playSfx: () => {}, playSfxFile: () => {},
     playSfxFiles: (files: string[]) => { sfxCalls.push(files); },
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
-    damagePlayer: () => {}, critters: () => [], notifyInventoryChanged: () => {},
+    damagePlayer: (): number => 0, critters: () => [], notifyInventoryChanged: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     sfxCalls,
   } as unknown as GameHooks & { sfxCalls: string[][] };

@@ -494,7 +494,7 @@ describe('AI 侧视觉字段', () => {
     const p = new Player(30 * TILE, 40 * TILE, new Inventory());
     const game = { world: w, player: p, spawnDrop: () => null, addDamageNumber: () => {},
       playSfx: () => {}, spawnParticles: () => {}, onInventoryChanged: () => {},
-      enemies: () => [], critters: () => [], spawnEnemy: () => {}, damagePlayer: () => {} } as never;
+      enemies: () => [], critters: () => [], spawnEnemy: () => {}, damagePlayer: (): number => 0 } as never;
     // 玩家正上 300px、速度 0 → FLY 态静止（射程门 500-600 不触发）
     const g = new GrappleProj(p.cx - 9, p.cy - 300 - 9, 0, 0, projType,
       () => (p.dead ? null : p));

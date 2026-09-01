@@ -13,7 +13,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -60,8 +60,8 @@ export const TILE_NO_ATTACH_SHEETS: ReadonlySet<number> = new Set([
   387, 388, 427, 435, 436, 437, 438, 439, 390,
 ]);
 
-/** TileID.Sets.BreakableWhenPlacing（TileID.cs:379）——放置时自动顶掉的方块族 */
-const BREAKABLE_WHEN_PLACING = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
+/** TileID.Sets.BreakableWhenPlacing（TileID.cs:383）——放置时被自动顶掉的方块
+ *  （唯一权威表 = data/tiles.ts 的 BREAKABLE_WHEN_PLACING_SHEETS，本处只做谓词封装） */
 
 /** TileID.cs:355 NotReallySolid（高门 387/388 与开着的门 10——"看着实心其实能穿"） */
 const NOT_REALLY_SOLID = new Set([387, 388, 10]);
@@ -220,8 +220,8 @@ const inActiveAt = (st: TileStore, x: number, y: number): boolean => st.isActuat
 /** Main.tileNoAttach（Main.cs:7260-10258 全表，见 TILE_NO_ATTACH_SHEETS）：该方块不可作为附着锚 */
 const tileNoAttachType = (sheet: number): boolean => TILE_NO_ATTACH_SHEETS.has(sheet);
 
-/** TileID.Sets.BreakableWhenPlacing（TileID.cs:379）：放置时被自动顶掉的方块 */
-const breakableWhenPlacing = (sheet: number): boolean => BREAKABLE_WHEN_PLACING.has(sheet);
+/** TileID.Sets.BreakableWhenPlacing（TileID.cs:383）：放置时被自动顶掉的方块 */
+const breakableWhenPlacing = (sheet: number): boolean => BREAKABLE_WHEN_PLACING_SHEETS.has(sheet);
 
 /** WorldGen.SolidTile（WorldGen.cs SolidTile(Tile)）:nactive && tileSolid && !tileSolidTop && !half && slope==0 */
 function solidTile(st: TileStore, x: number, y: number): boolean {

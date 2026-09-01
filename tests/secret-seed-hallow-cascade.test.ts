@@ -171,3 +171,106 @@ describe('★III-F5 HardmodePass remix 边缘带臂连带（convertHallowCell �
     expect(wall70).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ============================================================
+// ★RV-R4 行程随机性形状（2026-09-01）——cs:1969 条件式内嵌掷骰语义移植回归。
+//   原文：`for (int j = 0; j < num + genRand.Next(3); j++)` 条件【每行迭代重估】⇒
+//   行程 K∈{num,num+1,num+2}（p={1/3,4/9,2/9}）、每列骰耗=K+1（恒真判亦耗骰、
+//   终止负判再耗一掷）。旧「per-column 恰一掷 upfront lim」= 定长 {1/3,1/3,1/3} +
+//   每列恰 num+1 掷 ⇒ 双发散（掷流错位 + 尾带覆盖频率差）。
+//   空库实测（w=2400,num=20）：extra/列 = 0.9033/0.9038/0.8838（seeds 20260901/777/41；
+//   理论 8⁄9≈0.889）；草带覆盖实测 rNum=1205 / rNum+1=414 / rNum+2=0（新律 2/3·2/9·0，
+//   旧定长 {1/3,1/3,1/3} 期望 rNum+1≈600 带外分离）。
+//   观察基座：__swOnRoll 内部样本钩（观测不消费；hardmode-init 先例）。
+//   ① 空库 fixture（全格 inactive/wall0 ⇒ convertCell 在 cs:55562 早退零掷）
+//      下全部骰=条件重估掷 ⇒ 镜像 while 形逐位可对拍；
+//   ② 内容 fixture（草带）下转化骰混流 ⇒ 只做确定性 + 覆盖频率律断言。
+// ============================================================
+describe('★RV-R4 行程随机性形状（cs:1969 条件重估语义，SecretSeedDoEndsPass.doHallowOnSurface）', () => {
+  const GRASS = TILE_BY_KEY['grass']!;
+  const NUM = 20;
+
+  /** 空 hallow 面：cs:1972 循环体内 6 tile 臂 + 6 wall 臂全空转、convertCell 零入账 */
+  function mkEmpty(w: number, h: number): TileStore {
+    return new TileStore(w, h);
+  }
+
+  /** 镜像参照体（与移植体同构的 while 形）：空库下其掷数必须逐列逐位相等 */
+  function referenceConditionRolls(w: number, num: number, seed: number): number {
+    const r = new RNG(seed);
+    let total = 0;
+    for (let i = 0; i < w; i++) {
+      let j = 0;
+      while (j < num + r.nextInt(3)) j++;                       // 判定即掷骰（含恒真段）
+      total += j + 1;                                           // + 终止负判一掷
+    }
+    return total;
+  }
+
+  const digestOf = (st: TileStore): string =>
+    `${Array.from(st.type).join(',')}|${Array.from(st.wall).join(',')}`;
+
+  it('同 seed 重放恒定：骰耗计数与全库 type/wall 位面双恒定（草带混流域）', () => {
+    const w = 420, h = 90;
+    const run = (): { rolls: number; digest: string } => {
+      const st = new TileStore(w, h);
+      for (let x = 0; x < w; x++) st.setTileSilent(x, NUM - 1, GRASS);
+      const gs = mkGs(NUM);                                     // floor(ws)=20 ⇒ 带 [0,20+2]
+      return { ...countRolls(() => doHallowOnSurface(st, new RNG(90210), gs)), digest: digestOf(st) };
+    };
+    const a = run(), b = run();
+    expect(a.rolls).toBe(b.rolls);
+    expect(a.digest).toBe(b.digest);
+    expect(a.rolls).toBeGreaterThan(w * (NUM + 1));             // 旧定长形每列恰 num+1 掷——必不同值域
+  });
+
+  it('空库镜像对拍：条件重估总掷数 == 参照体逐列逐位相等；旧定长形差异可观测', () => {
+    const w = 2400, num = NUM;
+    for (const seed of [20260901, 777, 41]) {
+      const st = mkEmpty(w, 64);
+      const gs = mkGs(num);
+      const { rolls } = countRolls(() => doHallowOnSurface(st, new RNG(seed), gs));
+      expect(rolls).toBe(referenceConditionRolls(w, num, seed)); // 镜像逐位
+      expect(rolls).toBeGreaterThanOrEqual(w * (num + 1));       // 下界：终止负判至少 1 掷/列
+      expect(rolls).toBeLessThanOrEqual(w * (num + 3));          // 上界：K≤num+2 ⇒ 掷≤num+3
+      const extra = rolls - w * (num + 1);                       // 多耗的中间行判定掷
+      const mu = (8 / 9) * w;                                    // E[extra]=Σp={0,1,2}·{⅓,4⁄9,2⁄9}=8w/9
+      const sd = Math.sqrt((80 / 81) * w);                       // Var=16/9−64/81=80/81 每 8 列——per col
+      expect(Math.abs(extra - mu)).toBeLessThanOrEqual(6 * sd);  // 分布形状核（本仓值流已实测锁定）
+      expect(extra).toBeGreaterThan(w * 0.5);                    // 旧定长形恒 extra=0 ⇒ 差异硬可观测
+    }
+  });
+
+  it('覆盖面抽查：尾带覆盖律 2/3·2/9·恒零 + 基线行恒满（与旧定长 {1/3,1/3,1/3} 分离）', () => {
+    const w = 1800, h = 90, num = 45;
+    const st = new TileStore(w, h);
+    for (let x = 0; x < w; x++) {
+      st.setTileSilent(x, num - 1, GRASS);                      // 基线带（任何行程必访）
+      st.setTileSilent(x, num, GRASS);                          // 需 j=num 过判（r≥1）p=2/3
+      st.setTileSilent(x, num + 1, GRASS);                      // 需连过两判 p=(2/3)(1/3)=2/9
+      st.setTileSilent(x, num + 2, GRASS);                      // int 加法判死 ⇒ p=0（上限锚）
+    }
+    const gs = mkGs(num);
+    countRolls(() => doHallowOnSurface(st, new RNG(315000), gs));
+    const inner = (y: number): number => {                     // cs:55562 InWorld(i,j,1)：i∈{0,w-1} 禁转
+      let c = 0;
+      for (let x = 1; x < w - 1; x++) if (sheetAt(st, x, y) === 109) c++;
+      return c;
+    };
+    expect(inner(num - 1)).toBe(w - 2);                         // 基线行 100%（无覆盖缺口）
+    const rNum = inner(num);                                    // 新律 μ≈1199 σ≈20；旧定长同 p ——非判别点，形状锚
+    expect(Math.abs(rNum - (2 / 3) * (w - 2))).toBeLessThanOrEqual(150);
+    const rPlus1 = inner(num + 1);                              // 新律 μ≈399±106（实测 414）；旧定长 μ≈600±60 带不相交
+    expect(rPlus1).toBeLessThan(506);                           // 判别点：新律上界（旧律下界 540 以上必不落）
+    expect(rPlus1).toBeGreaterThan(294);                        // 新律 6σ 下界
+    expect(inner(num + 2)).toBe(0);                             // 上限锚：Next(3)∈{0,1,2} 无法满足 j=num+2
+  });
+
+  it('noSurface finalize 面：rockLevel 臂（cs:1963-1966 num 换源）走同一条件重估形态', () => {
+    const w = 900, rl = 24, h = 64;
+    const st = mkEmpty(w, h);
+    const gs = { seedFlags: { noSurface: true }, worldSurface: 300, rockLevel: rl } as never;
+    const { rolls } = countRolls(() => doHallowOnSurface(st, new RNG(606), gs));
+    expect(rolls).toBe(referenceConditionRolls(w, Math.floor(rl), 606)); // 镜像逐位
+  });
+});

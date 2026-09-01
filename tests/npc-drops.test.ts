@@ -324,7 +324,7 @@ describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
     const hooks = {
       world: w, player: null,
       playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
-      spawnDrop: () => null, damagePlayer: () => {},
+      spawnDrop: () => null, damagePlayer: (): number => 0,
       entities: { add: () => {} }, enemies: () => [] as unknown[],
     } as never;
     const ALLOWED = new Set([-1, 2, 3, 8, 9, 11, 12, 13, 14, 29, 58, 71, 72, 73, 75, 147,

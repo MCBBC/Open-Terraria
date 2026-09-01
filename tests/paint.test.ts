@@ -58,7 +58,7 @@ function hooks(w: World, p: Player): GameHooks {
     world: w, player: p,
     enemies: () => [], critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},

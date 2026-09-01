@@ -29,7 +29,7 @@ function makeGame(world: World, sounds: string[]): GameHooks {
     playSfxFiles: (files: string[]) => { sounds.push(...files); },
     playSfxWav: (file: string) => { sounds.push(file); },
     addDamageNumber: () => {},
-    damagePlayer: () => {},
+    damagePlayer: (): number => 0,
     spawnDrop: () => {},
     spawnEnemy: () => null,
     spawnProj: () => {},

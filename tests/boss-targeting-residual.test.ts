@@ -55,7 +55,7 @@ function makeHooks(world: World, player: Player, cands: Player[]): Harness {
     world, player, enemies: () => enemies,
     candidatePlayers: () => cands,
     entities: em,
-    critters: () => [], spawnDrop: () => null, damagePlayer: () => {},
+    critters: () => [], spawnDrop: () => null, damagePlayer: (): number => 0,
     addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
     spawnEnemy: () => {}, spawnParticles: () => {}, notifyInventoryChanged: () => {},
     playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
