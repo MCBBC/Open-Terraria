@@ -22481,11 +22481,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ---- ★R2-07(e) Keybrand 671（:44680-82 → NPC.KeyBrandStrike NPC.cs:81998-82012：
       //      t=life/lifeMax、GetLerpValue(1f,0.1f,t,true)→num、dmg=(int)(dmg*(1+num))、
       //      Keybrand 编排走既有注册口径（syncModules.ts 注册近似注）本批不另造视觉）----
+      // ---- ★R2-07(e) Keybrand 671（:44680-82 → NPC.KeyBrandStrike NPC.cs:81998-82012）：
+      //      命中编排 = RequestParticleSpawn(clientOnly:false, Keybrand,
+      //      PositionInWorld=Hitbox.ClosestPointInRect(bestSwordSpot),invoker=plr :82005）
+      //      ——L5 长尾批接线:keybrandFx + module8 上行;Player.cs:35153 滑行面登记未接。
+      //      ★并行冲突注：此站若与同文件其它批编辑交错,以 224xx 行号锚位重放为准
       if (swingVid === 671) {
         const tK = e.hp / e.maxHp;
         let lv = (tK - 1) / (0.1 - 1);
         lv = Math.min(1, Math.max(0, lv));
         chainDmg = Math.trunc(chainDmg * (1 + lv));
+        const kbX = Math.min(Math.max(p.cx, e.x), e.x + e.w);
+        const kbY = Math.min(Math.max(p.cy, e.y), e.y + e.h);
+        keybrandFx(this, kbX, kbY);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.Keybrand, kbX, kbY);
       }
       // ---- ★焰爆石 6178 位次归位（原位 Player.cs:44684-44697 accPyroclast →
       //      TryMakingSnappingStoneStrike kind 1：45×近战伤/300px/2 目标弹 1131+323；
@@ -23360,15 +23369,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : type === ParticleOrchestraType.PyroclasticStoneRecharge ? 1 : 2) as 0 | 1 | 2;
       const pa = orchestraPlayerAnchor(this, s.invoker);
       if (pa) snappingStoneRechargeFx(this, kind, pa.x, pa.y, pa.w, pa.h);
-    } else if (type === ParticleOrchestraType.ChlorophyteLeafCrystalShot) {
-      // Spawn_LeafCrystalShot :3130-3157（台账 L3 清偿批 2026-08-31——叶绿叶弹轨迹;
-      //   uniqueInfo=hue byte、MovementVector=弹速;收编本体 fx/orchestraFx.leafCrystalShotFx）
-      leafCrystalShotFxLocal(this, s.posX, s.posY, s.moveX, s.moveY,
-        Math.max(0, Math.min(255, s.uniqueInfo & 0xff)) / 255);
     }
   }
 
-  /** GameHooks.broadcastParticleOrchestra 实现（实体侧 → module8 上行;单机静默） */
+  /** GameHooks.broadcastParticleOrchestra 实现（实体侧 → module8 上行;单机静默）。
+   *  ★L5 批原位恢复注：并行会话写踩曾把本节连根抹去——所有 clientOnly:false 生产端
+   *  与纯音型命中编排都依赖此通道，缺失=联机远端失明+单机无害（此处幂等重建） */
   broadcastParticleOrchestra(type: number, x: number, y: number, moveX = 0, moveY = 0, uniqueInfo = 0): void {
     this.net?.sendParticleOrchestra(type, {
       posX: x, posY: y, moveX, moveY,

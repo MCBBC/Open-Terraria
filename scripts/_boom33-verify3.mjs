@@ -195,6 +195,43 @@ const res = await page.evaluate(() => {
   //        tests/halfbrick-boomerang-collision.test.ts 对 boomerangCellBlocks 直测
   //        (平台 tile 在本仓 TILE_DEFS.solid=false ⇒ isSolid=false 恒不拦=原版
   //         flag6 fallThrough 缺省 true 同义),不再做端到端断言。
+  // ---- G 斜砖站立发射（2026-09-01 用户实录 behavior-log…16-41-58）----
+  const gySlope = py + 44;
+  const buildSlopeRow = () => {
+    for (let dx = -40; dx <= 40; dx++) {
+      for (let dy = -18; dy <= 4; dy++) st.setTile(px0 + dx, gySlope + dy, 0);
+    }
+    for (let dx = -30; dx <= 30; dx++) { st.setTile(px0 + dx, gySlope + 2, 2); }
+    for (let dx = -12; dx <= 12; dx++) { st.setTile(px0 + dx, gySlope + 1, 2); st.setTile(px0 + dx, gySlope, 0); st.setSlope(px0 + dx, gySlope + 1, 1); }
+    for (let dx = -13; dx <= 13; dx++) st.setHalfBrick(px0 + dx, gySlope + 1, false);
+  };
+  out.G = {};
+  for (const [name, standDX] of [['slopeHigh', -6], ['slopeLow', 10]]) {
+    buildSlopeRow();
+    equipKey('vi_191_ThornChakram');
+    settleOnRow(gySlope + (name === 'slopeHigh' ? 1 : 2));
+    // 精站位:横轴压到坡段指定偏移再补一次落地收敛
+    g.player.x = (px0 + standDX) * 16 + 8 - g.player.w / 2;
+    if ('vx' in g.player) g.player.vx = 0; if ('vy' in g.player) g.player.vy = 8;
+    for (let i = 0; i < 60; i++) g.fixedUpdate(1 / 60);
+    g.camera.x = g.player.cx; g.camera.y = g.player.cy;
+    const footInCellPx = +(g.player.y + g.player.h - Math.floor((g.player.y + g.player.h) / 16) * 16).toFixed(2);
+    g.input.mouseX = 960; g.input.mouseY = 400;
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    g.fixedUpdate(1 / 60);
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    const p0 = chaks()[0];
+    let maxDist = 0, alive10 = false;
+    if (p0) for (let i = 0; i < 14; i++) {
+      g.fixedUpdate(1 / 60);
+      if (!chaks().includes(p0)) break;
+      maxDist = Math.max(maxDist, Math.abs(p0.cx - g.player.cx));
+      if (i >= 9) { alive10 = true; break; }
+    }
+    out.G[name] = { spawned: !!p0, footInCellPx, maxDist: Math.round(maxDist), alive10 };
+    cleanUpToIdle();
+  }
+
   return out;
 });
 
@@ -210,6 +247,8 @@ check('D 木回旋镖站立盒心+飞出', !!res.D && Math.abs(res.D.bornDX) < 0
 check('E 半砖横掷不再原地锁死(foot=+8, 飞≥10t)', !!res.E && res.E.standFootInCellPx === 8
   && res.E.horizRight.spawned && res.E.horizRight.alive10 && res.E.horizRight.maxDist > 40
   && res.E.up.alive10, JSON.stringify(res.E));
+check('G 斜砖高/低侧横掷飞出', !!res.G && res.G.slopeHigh.alive10 && res.G.slopeLow.spawned
+  && res.G.slopeHigh.maxDist > 40 && res.G.slopeLow.maxDist > 20, JSON.stringify(res.G));
 if (errors.length) console.log('[pageerrors]', errors.slice(0, 4));
 console.log(`${pass} pass / ${fail} fail`);
 process.exitCode = fail ? 1 : 0;

@@ -410,6 +410,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
 
+  segProbe('mbThin');
   // ---- 2. Thin Ice(cs:21825-21854)----
   gp?.set(0.06);   // 进度锚：段首平台（包内估计,非反编译字面）
   if (!gs.seedFlags.notTheBees || gs.seedFlags.remix) {
@@ -466,6 +467,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
 
+  segProbe('mbSword');
   // ---- 3. Campsites(cs:21915-21936,最多 1000 次尝试;cs:21914 notTheBees 门)----
   gp?.set(0.25);   // 进度锚：段首平台（包内估计,非反编译字面）
   const campOk = !gs.seedFlags.notTheBees || gs.seedFlags.remix;
@@ -487,6 +489,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     } else mbProbe(`CAMP ${ox},${oy} rc=${mbDraws() - d0c} ok=0 gate=1`);
   }
 
+  segProbe('mbMine');
   // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试;cs:21956 notTheBees 门)----
   gp?.set(0.45);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trapOk = campOk;
@@ -515,6 +518,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     } else mbProbe(`MINE ${ox},${oy} rc=${mbDraws() - d0m} ok=0 gate=1`);
   }
 
+  segProbe('mbTree');
   // ---- 4.5 Mahogany 丛林活桃花心木树(cs:22052-22077 + MahoganyTreeBiome.cs)----
   gp?.set(0.6);   // 进度锚：段首平台（包内估计,非反编译字面）
   // ★2026-08-17 前整段缺失:原版在 MiningExplosives 与 TrackGenerator 之间,
@@ -537,6 +541,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
 
+  segProbe('mbTrack');
   // ---- 5. TrackGenerator(cs:22014-22091)----
   gp?.set(0.68);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trackGen = new TrackGenerator(st, gs, chests);
@@ -580,6 +585,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
 
+  segProbe('mbLavaS');
   // ---- 6. placeLavaTrap(cs:22093-22127):w*0.02 次 × 10150 尝试 ----
   gp?.set(0.82);   // 进度锚：段首平台（包内估计,非反编译字面）
   if (!gs.seedFlags.notTheBees) {
@@ -595,6 +601,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       }
     }
   }
+  segProbe('mbEnd');
 }
 
 /** CampsiteBiome.Place(CampsiteBiome.cs:9-116) */

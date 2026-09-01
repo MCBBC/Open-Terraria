@@ -12,6 +12,7 @@ import { World } from '../src/world/World';
 import { Wiring } from '../src/world/Wiring';
 import { deviceTable, type DeviceCtx } from '../src/world/wiring/devices';
 import { TAG_EFFECTS, resolveWhipTagHit } from '../src/entities/WhipTag';
+import { ParticleOrchestraType } from '../src/net/syncModules';
 import { Arrow } from '../src/entities/Arrow';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
@@ -36,6 +37,7 @@ function makeHooks(enemies: MockEnemy[] = []) {
   for (let x = 0; x < 200; x++) for (let y = 100; y < 120; y++) store.setTile(x, y, 1);
   const player = new Player(60 * 16, 90 * 16, new Inventory());
   const added: unknown[] = [];
+  const broadcasts: Array<{ type: number; x: number; y: number }> = [];
   const hooks: GameHooks = {
     world: { store } as never,
     player: player as never,
@@ -52,11 +54,14 @@ function makeHooks(enemies: MockEnemy[] = []) {
     playSfx: () => {},
     playSfxFiles: () => {},
     showPickupLabel: () => {},
+    broadcastParticleOrchestra: ((type: number, x: number, y: number) => {
+      broadcasts.push({ type, x, y });
+    }) as never,
   };
   (hooks as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities = {
     add: (e: unknown) => { added.push(e); },
   };
-  return { hooks, store, player, added };
+  return { hooks, store, player, added, broadcasts };
 }
 /** 栈侧打 tag + 启 proc（等价鞭命中写入 + TryEnableProcOnNPC） */
 const tagEnemy = (player: Player, e: MockEnemy, itemId: number): void => {
@@ -111,15 +116,17 @@ describe('鞭 tag 三新类 + 花鞭字段对拍（ItemID.cs:1368-1405）', () =
 
 // ============ 2 4678 SwordWhip（_SwordWhip.cs:8-27） ============
 describe('4678 剑鞭 MegaSlash', () => {
-  it('proc 窗内命中：+30 flat（:26）+ TrueExcalibur 粒子（本仓 916 弹近似）+ OnProcHit true 消费（:13-16）', () => {
+  it('proc 窗内命中：+30 flat（:26）+ TrueExcalibur 编排粒子（L5 长尾批收编=fx 本体+module8 上行;旧 916 弹近似退役）+ OnProcHit true 消费（:13-16）', () => {
     const e = mkEnemy(1, 100, 200);
-    const { hooks, player, added } = makeHooks([e]);
+    const { hooks, player, added, broadcasts } = makeHooks([e]);
     tagEnemy(player, e, 4678);
     expect(player.whipBuffs[308]).toBe(180);   // OnTagAppliedToNPC → AddTheBuff（WhipTagEffect.cs:45-59）
     const res = resolveWhipTagHit(e, 10, hooks, (el) => { added.push(el); }, 1, e.cx, e.cy, player);
     expect(res.dmg).toBe(10 + 9 + 30);         // TagDamage 9（:1371）+ MegaSlash 30（_SwordWhip.cs:20/:26）
-    const slash = added.find((a) => a instanceof Arrow && (a as Arrow).projId === 916);
-    expect(slash).toBeTruthy();                // 粒子通道（_SwordWhip.cs:21-25 → 本仓 916 近似）
+    const bcs = broadcasts.filter((b) => b.type === ParticleOrchestraType.TrueExcalibur);
+    expect(bcs.length).toBe(1);                // WhipTagEffect_SwordWhip.cs:22 clientOnly:false 面
+    expect(bcs[0].x).toBeCloseTo(e.cx, 0);     // 命中锚点（Spawn_TrueExcalibur PositionInWorld 同位）
+    expect(broadcasts.some((b) => b.type === ParticleOrchestraType.NightsEdge)).toBe(false);
     expect(player.tagEffectStack.canProcOnNPC(4678, e.id)).toBe(false);  // 消费（TagEffectState.cs:114-117）
   });
 

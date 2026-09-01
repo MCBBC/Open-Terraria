@@ -277,9 +277,13 @@ describe('叶弹 227 结算面（dealContacts 单源;pierce=1;sweep 一拍全路
     const expKb = Math.sign((victim.x + victim.w / 2) - (400 + CHLORO_LEAF_KB / 2 + CHLORO_LEAF_KB - 13))
       || 1;
     void expKb;
-    expect(Math.abs(args[1])).toBe(CHLORO_LEAF_KB);     // 归一击退幅值=10
-    expect(Math.sign(args[1])).toBe(
-      Math.sign((victim.x + victim.w / 2) - (412 + 14 / 2)) || 1);
+    const kbVal = args[1] as number;
+    expect(Math.abs(kbVal)).toBe(CHLORO_LEAF_KB);       // 归一击退幅值=10
+    expect(kbVal).toBe(
+      (Math.sign((victim.x + victim.w / 2) - (412 + 14 / 2)) || 1) * CHLORO_LEAF_KB);
+    expect(args[0] as number).toBe(expectedDmg);        // DamageVar/banner/crit 链终端值
+    expect(args[6] as number).toBe(1);                  // pierce=1 flag3
+    expect(args[9] as number).toBe(227);                // srcProjId → ON_HIT_EXCLUDED 断链
     expect(args[6]).toBe(1);                            // pierce=1 flag3
     expect(args[9]).toBe(227);                          // srcProjId → ON_HIT_EXCLUDED 断链
     expect(shot.dead).toBe(true);                       // penetrate=1 命中即亡
@@ -301,7 +305,8 @@ describe('叶弹 227 结算面（dealContacts 单源;pierce=1;sweep 一拍全路
     const shot = new ChloroLeafShot(5000, 500, -12, 0); // 反向飞行
     shot.fixedUpdate(1 / 60, g);
     expect(shot.dead).toBe(true);                       // 寿命尽自然 Kill
-    expect(g.playSfxWav).toHaveBeenCalledWith('Item_6', 1, expect.anything(), expect.anything());
+    const playSfx = (g as unknown as { playSfxWav: ReturnType<typeof vi.fn> }).playSfxWav;
+    expect(playSfx).toHaveBeenCalledWith('Item_6', 1, expect.anything(), expect.anything());
   });
 });
 
@@ -323,7 +328,9 @@ describe('chloroOnHitLeafStrike 三门+桶序怪癖（Game 端 Player.OnHit 尾�
     g.entities = { projectiles: projArr, add: (e: unknown) => { projArr.push(e); return e; } };
     const fired: Array<{ x: number; y: number }> = [];
     g.spawnChloroLeafShot = (x: number, y: number): void => { fired.push({ x, y }); };
-    return { g, p, projArr, fired };
+    const chloroOnHitLeafStrike = (g as unknown as { chloroOnHitLeafStrike: (v: unknown) => void }).chloroOnHitLeafStrike;
+    return { g: g as unknown as { chloroOnHitLeafStrike: (v: unknown) => void }, p, projArr, fired,
+      chloroOnHitLeafStrike };
   }
 
   const victim = {
@@ -335,7 +342,7 @@ describe('chloroOnHitLeafStrike 三门+桶序怪癖（Game 端 Player.OnHit 尾�
     const anchor = new ChloroLeafCrystalAnchor();
     anchor.pinTo(p);                                   // 同点出生,距离 0
     projArr.push(anchor);
-    (g.chloroOnHitLeafStrike(victim));
+    g.chloroOnHitLeafStrike(victim);
     expect(fired.length).toBe(1);                      // break 单发（:7033）
     expect(fired[0].x).toBe(anchor.cx - 4);            // Center.X−4f（:7029）
     expect(fired[0].y).toBe(anchor.cy);
@@ -348,7 +355,7 @@ describe('chloroOnHitLeafStrike 三门+桶序怪癖（Game 端 Player.OnHit 尾�
     const anchor = new ChloroLeafCrystalAnchor();
     anchor.pinTo(p);
     projArr.push(anchor);
-    (g.chloroOnHitLeafStrike(victim));
+    g.chloroOnHitLeafStrike(victim);
     expect(fired.length).toBe(0);
     expect(p.petalTimer).toBe(20);                     // 早退不重钉
   });
@@ -362,7 +369,7 @@ describe('chloroOnHitLeafStrike 三门+桶序怪癖（Game 端 Player.OnHit 尾�
     const nearSecond = new ChloroLeafCrystalAnchor();  // 更近但不获机会
     nearSecond.pinTo(p);
     projArr.push(nearSecond);
-    (g.chloroOnHitLeafStrike(victim));
+    g.chloroOnHitLeafStrike(victim);
     expect(fired.length).toBe(0);
     expect(p.petalTimer).toBe(0);                      // 未进入赋位段
   });
@@ -372,7 +379,7 @@ describe('chloroOnHitLeafStrike 三门+桶序怪癖（Game 端 Player.OnHit 尾�
     const anchor = new ChloroLeafCrystalAnchor();
     anchor.pinTo(p);
     projArr.push(anchor);
-    (g.chloroOnHitLeafStrike(victim));
+    g.chloroOnHitLeafStrike(victim);
     expect(fired.length).toBe(0);
     expect(p.petalTimer).toBe(0);
   });

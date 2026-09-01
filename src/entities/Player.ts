@@ -640,6 +640,7 @@ export class Player extends Entity {
   /** 叶绿水晶叶锚体出手冷却（Player.crystalLeafCooldown :1367,Projectile aiStyle42
    *  :28254 写 40、:25664-25667 每 tick 递减——fixedUpdate 减位点在本类同段） */
   crystalLeafCooldown = 0;
+
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
@@ -2740,6 +2741,11 @@ export class Player extends Entity {
     this.sinceHurt++;
     // 幻影闪避重整冷却（Player.shadowDodgeTimer :25656-25659 每 tick 递减）
     if (this.shadowDodgeTimer > 0) this.shadowDodgeTimer--;
+    // 金花/叶绿共享 on-hit 计时（petalTimer :25652-25655）+ 叶绿锚体出手冷却
+    // （crystalLeafCooldown :25664-25667——原版同段位次：petal 在 shadowDodge 之前、
+    //  cd 在 boneGloveTimer 之后；本仓无 boneGlove 位,cd 承接其后语义）
+    if (this.petalTimer > 0) this.petalTimer--;
+    if (this.crystalLeafCooldown > 0) this.crystalLeafCooldown--;
     // 日曜护盾回充（Player.cs ApplySetBonus_Solar :16222-16296 全链：
     //   回充 +1 层时 16×尘6(ArmorSetDye 染料) + AddBuff(170+shields,5)；
     //   盾球环绕轨道 :16258-16283——Y=半径 6 圆×相位(miscCounter/100·2π+l·2π/shields),

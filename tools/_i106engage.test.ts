@@ -22,44 +22,31 @@ const SLOTS: Record<number, string> = {
 };
 
 (RUN ? it : it.skip)('IIIII106 engagement diff', async () => {
-  const base = 'x'; // 占位
-  void base;
-  const cap: Record<string, Record<number, unknown>> = { plain: {}, flag: {} };
+  // ★快照语义勘误：onWorldPartial 回调的是【同一 TileStore 引用】——存引用=只拍终态。
+  //   本仪按「终态普查」设计：两模式各跑一遍生成后直接比对 store 终值。
+  const finals: Record<string, Record<string, Uint8Array | Uint16Array>> = {};
   for (const mode of ['plain', 'flag'] as const) {
-    const snap: Record<number, unknown> = {};
-    await generateWorld({
+    const w = await generateWorld({
       width: 4200, height: 1200,
       // ★控制臂必须同 seed 文本（世界种子=CRC32(整串)）——旗关位走 seedFlags={} 直注
       seedText: `${TEXT}|${SEED}`,
       evil: 0,
       ...(mode === 'flag' ? {} : { seedFlags: {} }),
-      onWorldPartial: (w, i) => {
-        if (SLOTS[i] !== undefined && snap[i] === undefined) {
-          snap[i] = (w.store as unknown as Record<string, Uint8Array | Uint16Array>);
-        }
-      },
     });
-    cap[mode] = snap;
+    finals[mode] = w.store as unknown as Record<string, Uint8Array | Uint16Array>;
   }
-  const CH = ['flags', 'type', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire'] as const;
-  console.log(`\n── IIII106 engagement ${TEXT} (seed=${SEED}) ──`);
-  for (const [slotStr, nm] of Object.entries(SLOTS)) {
-    const k = Number(slotStr);
-    const a = cap.plain[k] as Record<string, Uint8Array | Uint16Array> | undefined;
-    const b = cap.flag[k] as Record<string, Uint8Array | Uint16Array> | undefined;
-    if (!a || !b) { console.log(`slot#${k} ${nm}: (missing snapshot)`); continue; }
-    const parts: string[] = [];
-    let total = 0;
-    for (const c of CH) {
-      const va = a[c] as Uint8Array, vb = b[c] as Uint8Array;
-      let d = 0;
-      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) d++;
-      if (c === 'type') {
-        // type 需按 flags 位展开对比太重，此处按内部值直比（同一路径下活性一致时有效）
-      }
-      total += d;
-      if (d) parts.push(`${c}:${d}`);
-    }
-    console.log(`slot#${String(k).padStart(2)} ${nm}: ${total === 0 ? 'SAME' : parts.join(' ')}`);
+  const CH = ['flags', 'type', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire',
+    'paint', 'paintWall', 'coat'] as const;
+  console.log(`\n── IIII106 engagement ${TEXT} (seed=${SEED})·终态 ──`);
+  let total = 0;
+  const parts: string[] = [];
+  for (const c of CH) {
+    const va = finals.plain[c] as Uint8Array, vb = finals.flag[c] as Uint8Array;
+    if (!va || !vb) continue;
+    let d = 0;
+    for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) d++;
+    total += d;
+    if (d) parts.push(`${c}:${d}`);
   }
+  console.log(`diff census: ${total === 0 ? 'SAME（旗标未驱动任何生成面写！）' : parts.join(' ')}`);
 }, 900_000);

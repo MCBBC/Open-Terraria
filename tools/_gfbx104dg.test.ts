@@ -178,8 +178,7 @@ function diffBoard(tag: string, xs: Ch, st: TileStore, cellCap = 60): DiffRow {
       }
     };
   (globalThis as unknown as { __dgSegWatch?: (name: string, s: TileStore) => void }).__dgSegWatch =
-    (name: string, s: TileStore) => {
-      const typ = new Uint8Array(rw * rhn * 2), wal = new Uint8Array(rw * rhn * 2);
+    (name: string, s: TileStore) => {      const typ = new Uint8Array(rw * rhn * 2), wal = new Uint8Array(rw * rhn * 2);
       const act = new Uint8Array(rw * rhn), liq = new Uint8Array(rw * rhn);
       const hf = new Uint8Array(rw * rhn), sl = new Uint8Array(rw * rhn);
       const lt = new Uint8Array(rw * rhn), ia = new Uint8Array(rw * rhn);

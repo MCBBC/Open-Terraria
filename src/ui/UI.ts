@@ -3845,8 +3845,12 @@ export class UI {
     if (!this.game || !this.buffBar) return;
     const buffs = this.game.player.buffs;
     const invOpen = this.invPanel.style.display === 'block';
+    // ★收气泡只走“栏隐藏”边沿（2026-08-28 用户报"hover 道具气泡过一会自己消失"）：
+    //  .sw-tooltip 元素为 Buff 气泡与【物品详情气泡】共用——曾每秒无条件收,
+    //  背包开着时把物品气泡也一并秒杀。边沿 = 栏从可见转隐藏的那一帧收一次
+    const barWas = this.buffBar.style.display !== 'none';
     this.buffBar.style.display = invOpen ? 'none' : 'flex';
-    if (invOpen) this.hideBuffTooltip();   // 整栏隐藏时_pointer 不触发 leave（挂护栏）
+    if (invOpen && barWas) this.hideBuffTooltip();   // 可见→隐藏边沿,一次收气泡
     const seen = new Set<BuffType>();
     for (const [t, left] of buffs.active) {
       seen.add(t);

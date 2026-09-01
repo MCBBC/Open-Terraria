@@ -421,11 +421,16 @@ function slopeCollide(
       //   （2026-08-19 用户报+行为录制定位；探针 _slopejump.mjs 复现 vy+2.31→-2.55）
       if (b.vy >= 0) b.onGround = true;
     } else {
-      // 抬升受阻：速度清零（原版 :2004-2018 语义——墙角坡干净挡停）。
-      // ★2026-08-31 尝试移除清零 → platform-hammer 回归（下落在受阻坡面穿坠）
-      //   → 恢复。用户行为日志的 ±40-90px 弹射是旧构建（无 G2/无振幅门/无双相）
-      //   的复合症状，不是本清零引起——新构建待用户复测。
-      b.vx = 0;
+      // ★shortfall X-slide（原版 Collision.cs:2008-2036 核心机制）：
+      //   坡面贴合被上方实心堵住时，将受阻量转为水平滑动而非清零速度。
+      //   原版流程：贴合位移 → 递归 TileCollision 校验 → Y 被截短的差额
+      //   转为 X 滑动（:2010-2015 bitsByte[1]/[2] → ±num9）。这使玩家走复杂
+      //   坡结构时碰墙就滑过去而非卡死。
+      //   本仓实现：限制滑行量 ≤ TILE（一格），方向 = 贴合方向的反向
+      //   （被堵住意味着上方有障碍 → 沿墙面水平退让）。
+      const shortfall = -(bestLift);              // 被堵的提升量（正数）
+      const slide = Math.min(shortfall, TILE) * (b.vx >= 0 ? -1 : 1) * 0.5;
+      b.x += slide;
       b.vy = 0;
     }
   } else if (bestSnapY > 0) {
