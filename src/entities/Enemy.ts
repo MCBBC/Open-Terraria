@@ -5112,8 +5112,10 @@ export class Enemy extends Entity {
         // 枪口（cs:59323/:59340）：基点 (cx + 10×朝向, y + 20) 瞄准（含 ±40 散布），
         // 出生点再沿弹向 +vel×3（速 15 → 前移 45px）
         const baseX = this.cx + 10 * this.facing, baseY = this.y + 20;
-        const bdx = player.cx - baseX + (Math.random() * 80 - 40);
-        const bdy = player.cy - baseY + (Math.random() * 80 - 40);
+        // ★O3 漏网核销(2026-09-02)：1457 NPC.cs:59516-59517 = Next(-40,41)（81 值域
+        // [−40..40]）——曾 `Math.random()*80-40` 浮点 80 宽 off-by-one（+40 端永不可取）
+        const bdx = player.cx - baseX + (Math.floor(Math.random() * 81) - 40);
+        const bdy = player.cy - baseY + (Math.floor(Math.random() * 81) - 40);
         const bd = Math.hypot(bdx, bdy) || 1;
         this.shootDart(game, baseX + (bdx / bd) * 45, baseY + (bdy / bd) * 45,
           bdx, bdy, 15, 32, 257);
@@ -5222,7 +5224,9 @@ export class Enemy extends Entity {
         && this.canSeePlayer(st, player)) {
         // 枪口（:59356-59357）：(Center.X + 6×direction, position.Y + 12)
         const mx = this.cx + 6 * this.facing, my = this.y + 12;
-        let num144 = player.cx - mx + (Math.random() * 82 - 41);         // :59358/:59360 ±41
+        // ★O3 漏网核销(2026-09-02)：1457 NPC.cs:59558 = Next(-40,41)（81 值域 [−40..40]，
+        // 非 ±41！）——曾 `Math.random()*82-41` 双端错位（min −41 越界 + max 41 不可取）
+        let num144 = player.cx - mx + (Math.floor(Math.random() * 81) - 40);   // 1456:59358 / 1457:59558
         let num145 = player.cy - my + (Math.floor(Math.random() * 30) - 30); // :59359/:59361 −30..−1
         const num146 = Math.hypot(num144, num145);                       // :59362
         if (num146 < 700) {                                              // :59363-59364 距离门
@@ -11786,9 +11790,12 @@ export class Enemy extends Entity {
           vid <= 282 || vid >= 285 ? 40 : 30,
           (vid <= 282 || vid >= 285 ? 40 : 30) * 0.8, this.difficulty);
         let dx = player.cx - this.cx, dy = player.cy - this.cy;
-        if (vid === 283 || vid === 284) {           // :21163-21166 散布 + 前置补偿
-          dx += (Math.random() * 60 - 30) - player.vx * 10;
-          dy += (Math.random() * 60 - 30) - player.vy * 10;
+        if (vid === 283 || vid === 284) {           // 散布 + 前置补偿（1456:21157-21162 / 1457:21268-21272）
+          // ★O1 核销(2026-09-02)：1457 NPC.cs:21269-21270 = Next(-30,31)（61 值域
+          // 整型 [−30..30]）——曾 `Math.random()*60-30` 浮点 60 宽 off-by-one
+          // （+30 端永不可取），改 floor 精确整型形。
+          dx += (Math.floor(Math.random() * 61) - 30) - player.vx * 10;
+          dy += (Math.floor(Math.random() * 61) - 30) - player.vy * 10;
         }
         const d = Math.hypot(dx, dy) || 1;
         const dart = new Dart(this.cx, this.y, (dx / d) * spd, (dy / d) * spd, dmg, proj);
@@ -11830,8 +11837,10 @@ export class Enemy extends Entity {
       } else if (vid === 172) {
         // 符文法师（:21228-21240）：单发符文爆弹 129——速 10、伤 40、瞄准 ±10 抖动、
         //  timeLeft 300；发射音 21196 例外门已在外层跳过（172 无声）
-        let dx = player.cx - this.cx + (Math.random() * 20 - 10);
-        let dy = player.cy - this.cy + (Math.random() * 20 - 10);
+        // ★O3 漏网核销(2026-09-02)：1457 NPC.cs:21343-21344 = Next(-10,11)（21 值域
+        // [−10..10]）——曾 `Math.random()*20-10` 浮点 20 宽 off-by-one（+10 端永不可取）
+        let dx = player.cx - this.cx + (Math.floor(Math.random() * 21) - 10);
+        let dy = player.cy - this.cy + (Math.floor(Math.random() * 21) - 10);
         const d = Math.hypot(dx, dy) || 1;
         dx = (dx / d) * 10; dy = (dy / d) * 10;
         const dmg172 = getAttackDamageForProjectiles(40, 32, this.difficulty);
@@ -12215,16 +12224,18 @@ export class Enemy extends Entity {
             // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 5 ×20 + Roar(15)
             game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
             game.playSfx('roar', 1, this.cx, this.cy);   // :20329 style0(带坐标衰减,曾缺坐标)
-            // gore 8/7/6 ×2（:20321-20327）：眼肉红条飞散(Gore_6/7/8),速度 ±6px/t,
+            // gore 8/7/6 ×2（1456:20321-20326 / 1457:20421-20424）：眼肉红条飞散(Gore_6/7/8),速度 ±6px/t,
             // GorePiece.newGore 内叠 NewGore 随机扰动——★曾是 '#8A1A1A' 色块近似,
             // 二阶段变身后的红色触须飞散观感全靠它们(2026-09-01 用户对照原版视频)
+            // ★O1 核销(2026-09-02)：原文本目 Next(-30,31)*0.2（61 值域）——61 形合法,勿"修"成 60
             for (let gi = 0; gi < 2; gi++) {
               for (const gid of [8, 7, 6]) {
                 GorePiece.newGore(gid, this.x, this.y,
                   (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
               }
             }
-            // 尘 5 ×20（:20328-20330 EoC 血雾;★曾误注"尘 20"且用色块近似）
+            // 尘 5 ×20（1456:20327 / 1457:20428 EoC 血雾;★曾误注"尘 20"且用色块近似）
+            // ★O1 核销(2026-09-02)：同上 Next(-30,31)*0.2 61 形合法
             for (let di = 0; di < 20; di++) {
               game.spawnDust?.(this.x, this.y, this.w, this.h, 5,
                 (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
@@ -12232,7 +12243,8 @@ export class Enemy extends Entity {
           }
         }
       }
-      // :20434 变身期每 tick 掉 1 颗 5 号尘（±6px/t 初速;曾用 '#FF3030' 色块近似）
+      // :20434（1456:20333）变身期每 tick 掉 1 颗 5 号尘（±6px/t 初速;曾用 '#FF3030' 色块近似）
+      // ★O1 核销(2026-09-02)：原文本目 Next(-30,31)*0.2（61 值域）——61 形合法,勿"修"成 60
       game.spawnDust?.(this.x, this.y, this.w, this.h, 5,
         (Math.random() * 61 - 30) * 0.2, (Math.random() * 61 - 30) * 0.2);
       // 速度 0.98/t 阻尼 + 小值清零（:20333-20343）

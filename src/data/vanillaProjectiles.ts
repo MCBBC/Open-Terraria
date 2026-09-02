@@ -66,6 +66,16 @@ export interface ProjectileData {
   minion?: boolean;
   hostile?: boolean;
   tileCollide?: boolean;
+  /** 原版水敏门（Projectile.cs:412；1457 SetDefaults 置位 270 型 = 240 直写 +
+   *  DefaultToSpray() :10703 展开 1015/1016/1017；:763 全量初始化 false ⇒
+   *  缺省 undefined ≡ false）。★原版运行时仅两口消费本旗：出生预置 :10888-10890
+   *  `if (ignoreWater) wet = false` 与逐 tick 缓存刷新 :16895 `if (!ignoreWater)`
+   *  整段跳过（wet/lavaWet/honeyWet/shimmerWet 四旗冻结）——AI 一律读 `wet` 字段
+   *  而非本旗（蜂族 :27685 / 469 :54969 / 706 :56743 / 948 :44542），对本族天然恒假；
+   *  AI_060 黏液族液体触杀（:29584-29602）直扫 Main.tile.liquid 与本旗无关
+   *  （358/406/1042 虽有门照灭）。动态置位唯一例外 = AI_113_TargetSticker :41398
+   *  （636/971/1024 蓄力支，数据面外）。本仓消费 = Arrow.ts wet 缓存三写点
+   *  （出生预置 :3491/:3495 + 逐子步刷新 :3555），真值面回归 = proj-wet-cache F3③ */
   ignoreWater?: boolean;
 }
 

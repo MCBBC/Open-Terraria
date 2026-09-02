@@ -1127,7 +1127,9 @@ export class Player extends Entity {
     let d = this.buffs.defenseBonus + this.equipStats.def + this.cartDefenseBonus;
     if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
     for (const id of this.inv.equippedArmor()) {
-      if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
+      // ★armor.defense 死前腿已随 ItemDef.armor 死字段移除（2026-09-02,全仓零写入,
+      //   真值源 = vanilla-itemstats.json,与配饰段同源）
+      if (id != null) d += statOfInternal(id)?.def ?? 0;
     }
     // 破甲(36)/枯萎护甲(195)：终值各减半（Player.cs:25704/:25708——全部来源加总之后）
     if (this.buffs.has(BuffType.BrokenArmor)) d = Math.floor(d / 2);
@@ -1556,17 +1558,24 @@ export class Player extends Entity {
       else if (accVid === 6187) { panic = true; longInvince = true; }              // 十字心项链（:14730-14733）
       else if (accVid === 6188) noKnockback = true;                                // 复原之盾（:14734-14736;1457 case 只置 noKnockback——缓回+法40 走 vanilla-accfx.json '6188' mana40/regen60,已生效）
       else if (accVid === 6189) mysticSashDodge = true;                            // 神秘艺术腰布（:14737-14739）
+      // ★UpdateEquips_CanItemGrantBenefits :12977-12985（case 3-9 = item.accessory）——
+      //   GrantArmorBenefits（:13220 def/:13221 lifeRegen）与 GrantPrefixBenefits
+      //   （:13020-13022）两支的受理门；ApplyEquipFunctional :13046 只门槽位解锁，
+      //   勿上提到整圈（行为旗/绘制槽会被误伤）。谓词与 armorAccepts 功能段同式
+      //   （vi_ 走 itemstats acc,6188/6189 走 ACC_STATS_1457 并表;legacy 走
+      //   accessory 效果标签）——UI 面 armorAccepts 已拦,此处为存档异常兜底
+      const grantArmorBenefits = statOfInternal(s.id)?.acc === 1 || !!ITEM_DEFS[s.id]?.accessory;
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
-      if (itemLife) life += itemLife;
+      if (grantArmorBenefits && itemLife) life += itemLife;
       // ★item.defense 面（GrantArmorBenefits :13220 statDefense += armorPiece.defense——
       //   原版 UpdateEquips :13015-13026 k=0..9 全装备槽统一加算；盔甲 0-2 走 defense
       //   getter 的 equippedArmor()，此处只补配饰段 3..accSlotMax 防双计。曾整面缺失=
       //   脚镣/钴盾/黑曜石骷髅/黑曜石盾/圣骑士盾/魔力手铐/天界手铐/肉拳/克苏鲁盾/
       //   狂战士手套/冰冻盾/英雄盾/6177/6183 防御不叠，仅 6188 由 BEHAVIOR_FX 硬补）
       const itemDef = statOfInternal(s.id)?.def ?? 0;
-      if (itemDef) def += itemDef;
+      if (grantArmorBenefits && itemDef) def += itemDef;
       if (fx) {
         if (fx.def) def += fx.def;
         if (fx.mana) mana += fx.mana;
@@ -1689,9 +1698,10 @@ export class Player extends Entity {
         if (fx.jellyfishGlow) jellyfishGlow = true;      // 1860
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
-      // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
+      // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80;受理门同 grantArmorBenefits——
+      //  原版 :13020-13022 if (effectiveArmor.accessory) 方入）
       const p = s.prefix;
-      if (p && p >= 62 && p <= 80) {
+      if (grantArmorBenefits && p && p >= 62 && p <= 80) {
         if (p <= 65) def += p - 61;              // 62-65：+1..4 防御
         else if (p === 66) mana += 20;           // Arcane：魔力 +20
         else if (p === 67) { critMelee += 2; critRanged += 2; critMagic += 2; }
@@ -2743,8 +2753,10 @@ export class Player extends Entity {
     if (this.equipStats.wing?.logic === 22 && --this.itemFlameCount <= 0) {
       this.itemFlameCount = 5;
       for (let i = 0; i < 7; i++) {
+        // ★O3 漏网核销(2026-09-02)：Y 掷=LegacyPlayerRenderer.cs:501 Next(-10,1)
+        // （11 值域 [−10..0]）——曾 `Math.random()*10|0` 10 宽 off-by-one（0 端永不可取）
         this.itemFlamePos[i].x = ((Math.random() * 21 | 0) - 10) * 0.15;   // Next(-10,11)×0.15
-        this.itemFlamePos[i].y = ((Math.random() * 10 | 0) - 10) * 0.35;   // Next(-10,1)×0.35
+        this.itemFlamePos[i].y = ((Math.random() * 11 | 0) - 10) * 0.35;   // Next(-10,1)×0.35
       }
     }
 
@@ -4258,9 +4270,12 @@ export class Player extends Entity {
             if (!d) continue;
             if (l % 2 === 0) d.vx += (30 + Math.random() * 41 | 0) * 0.1;
             else d.vx -= (30 + Math.random() * 41 | 0) * 0.1;
-            d.vy += (Math.random() * 41 - 10 | 0) * 0.1;
+            // ★O3 漏网核销(2026-09-02)：1457 Player.cs:21003/:21005 = Next(-10,31)/
+            //   Next(-10,41) 整型掷——曾 `rand*41-10|0`/`rand*51-10|0` 用 |0 向零截断，
+            //   负数侧整桶上移且 −10 端永不可取（floor 才是 Next 直译），改 floor 形
+            d.vy += (Math.floor(Math.random() * 41) - 10) * 0.1;
             d.noGravity = true;
-            d.scale += (Math.random() * 51 - 10 | 0) * 0.01;
+            d.scale += (Math.floor(Math.random() * 51) - 10) * 0.01;
             d.vx *= d.scale * 0.7; d.vy *= d.scale * 0.7;
           }
         }
@@ -5242,6 +5257,8 @@ export class Player extends Entity {
       if (d) {
         d.vx = d.vx * jit() + jit() - 0.5 + this.vx * 0.2;
         d.vy = d.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
+        //   ★O1 核销(2026-09-02)：scale 行=1456:24007 / 1457:24473 Next(-30,31)（61 值域
+        //   整型）——floor(rand*61)-30 逐位精确,合法勿动
         d.scale *= 0.7 + (Math.floor(Math.random() * 61) - 30) * 0.01;
       }
     }
@@ -5839,7 +5856,9 @@ export class Player extends Entity {
         d.dyeVid = shoeDye;
         d.noGravity = true;
         d.vx *= 0.2; d.vy *= 0.2;
-        d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
+        // ★O3 漏网核销(2026-09-02)：1457 Player.cs:20385 = Next(-5,3)（8 值域 [−5..2]）
+        //   整型掷——曾 `rand*8-5|0` 向零截断（−5 端永不可取、负侧整桶上移），改 floor 形
+        d.scale += (Math.floor(Math.random() * 8) - 5) * 0.1;
       }
     } else if (fx === 'desert') {
       const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 32, -this.vx * 0.5, this.vy * 0.5, 0, null, 1) : null;
@@ -5943,7 +5962,9 @@ export class Player extends Entity {
       for (let j = 0; j < n; j++) {
         const d = mk(this.x, by, this.w, 12, 253, 100, 1.5, this.vx * 0.3, this.vy * 0.3);
         if (!d) continue;
-                d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
+                // ★O3 漏网核销(2026-09-02)：1457 Player.cs:22139 = Next(-5,3)（8 值域
+                //   [−5..2]）——同 :5857 改 floor 形
+                d.scale += (Math.floor(Math.random() * 8) - 5) * 0.1;
         if (this.jumpHold <= 0) d.scale *= 0.8;
         else { d.vx -= this.vx / 5; d.vy -= this.vy / 5; }
         d.noGravity = true;

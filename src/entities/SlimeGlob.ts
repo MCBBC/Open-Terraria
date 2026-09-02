@@ -151,7 +151,8 @@ export class SlimeGlob extends Entity {
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     const ctx = r.ctx;
     if (!ctx || !r.atlas) return;
-    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_406.png') : r.atlas.vimages.get('vanilla/Projectile_406.png');
+    // 懒加载通道(lazyload-guards):ensureVImage miss 返 null→本帧早退,下帧自愈;禁直取贴图表
+    const img = r.atlas.ensureVImage?.('vanilla/Projectile_406.png') ?? null;
     if (!img || !img.width) return;
     // alpha 恒 255(SetDefaults,无 AI 改写段)=不透明绘制,以 scale 收缩呈现消亡
     const s = Math.max(0.05, this.scale);

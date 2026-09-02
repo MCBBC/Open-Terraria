@@ -64,6 +64,23 @@ const res = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 300));
   st.backOwnFrame = slotEl(0)?.querySelector('.sw-share-frame')?.dataset.src ?? null;
   st.backGhostAbsent = !slotEl(0)?.querySelector('.sw-share-ghost');
+  // 挂账②：Alt 收藏 → ShowLoadoutShareHint options 持久化（DisableLoadoutShareHint）
+  const OPT = await import('/src/core/Options.ts');
+  st.hintBefore = OPT.options.data.showLoadoutShareHint;
+  inv.armor[0].favorited = false;   // 先摘,再 Alt 重挂=ON 路径
+  ui.refreshAllNow?.() ?? ui.refreshAll();
+  slotEl(0).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, altKey: true }));
+  await new Promise((r) => setTimeout(r, 700));   // options.set 防抖 400ms
+  st.hintAfterShare = OPT.options.data.showLoadoutShareHint;
+  st.hintPersisted = await OPT.options.set('showLoadoutShareHint', false).then(() => OPT.options.data.showLoadoutShareHint);
+  // 挂账③：misc 族 Alt 无语义（原版 canFavoriteAt/canLoadoutShareAt 均不含）
+  const petSlot = document.querySelector('.sw-slot[data-where="misc"][data-idx="0"]');
+  const petBefore = inv.miscEquips[0]?.favorited ?? false;
+  petSlot?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, altKey: true }));
+  await new Promise((r) => setTimeout(r, 200));
+  st.miscAltNoToggle = (inv.miscEquips[0]?.favorited ?? false) === petBefore;
+  st.miscDragArmed = ui.dragFrom?.where === 'misc';   // 落空=常规拖拽armed（原版 Alt 不抑制点击）
+  ui.dragFrom = null;
   return st;
 });
 console.log(JSON.stringify(res, null, 2));

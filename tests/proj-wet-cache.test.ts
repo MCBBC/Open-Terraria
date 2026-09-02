@@ -167,7 +167,9 @@ describe('★F3② 缓存刷新块 ignoreWater 门（原文 if(!ignoreWater) 全
     const pd = projectileData(2)! as { ignoreWater?: boolean };
     const saved = pd.ignoreWater;
     try {
-      pd.ignoreWater = true;             // 数据面置门（本仓提取表现无 true 行,测试位直置）
+      pd.ignoreWater = true;             // 数据面置门（proj 2 原文本就无 ignoreWater 行=
+                                         //   真值非提取缺口——水death 族与本门互斥,F3③
+                                         //   禁入不变式钉死;直置仅护门路径）
       const W = mkArrow(st, 322, 637);   // 出生即泡在水里
       W.tick(4);
       expect(W.a.dead).toBe(false);
@@ -180,5 +182,55 @@ describe('★F3② 缓存刷新块 ignoreWater 门（原文 if(!ignoreWater) 全
     const C = mkArrow(st, 322, 637);
     C.tick(2);
     expect(C.a.projId).toBe(1);
+  });
+});
+
+// =====================================================================
+// F3③ ignoreWater 数据面真值（2026-09-02 清账批——B6B「数据面恒 vacuous」遗留定谳）
+//  提取器 BOOL_FIELDS 已含 ignoreWater（tools/extract-projectiles.mjs），json 现载
+//  1457 终值：SetDefaults 直写 240 位（全部位于顶层 else-if 链块语句层,零嵌套
+//  if/零 switch,块内无 =false 覆写）+ DefaultToSpray() :10703 展开（1015/1016/1017
+//  喷射族）= 270 型 true。来源审计（2026-09-02）：240 置位点逐块求值 ∪ json 集合
+//  双向零差（MISSING/EXTRA 双空）;dump-vs-磁盘 52 格差异全为已登记手补列
+//  （localNPCHitCooldown/idStaticNPCHitCooldown/1117·1122 元组/639·121-126·597
+//  算式列）,ignoreWater 列零漂移=无需重生成（裸重跑反抹手补列）。
+//  消费面核对结论：原版仅两口读本旗（出生预置 :10888-10890 / 缓存刷新 :16895）,
+//  AI 全读 `wet` 字段;本仓全部湿敏位的 id 域与 270 集互斥（F3③② 不变式）。
+describe('★F3③ ignoreWater 数据面真值（1457 终值 270 型）', () => {
+  it('列计数=270 且逐族抽查（直写族/helper 展开/1457 新弹）', () => {
+    const ids: number[] = [];
+    for (let t = 0; t <= 1135; t++) if (projectileData(t)?.ignoreWater === true) ids.push(t);
+    expect(ids).toHaveLength(270);
+    // 直写族锚点：水矢 5 / 水球 7,8 / 光标 86 / 毒刺 226 / 彩虹头 250 / 黏液族
+    //   358,406,1042 / 随从五射手 373,375,407,423,613 + 963 / 凤凰载体 705 /
+    //   骷髅王头 874 / 1457 新弹 1115,1119,1122,1125,1126,1129
+    for (const t of [5, 7, 8, 86, 226, 250, 358, 406, 1042, 373, 375, 407, 423, 613,
+      963, 705, 874, 1115, 1119, 1122, 1125, 1126, 1129]) {
+      expect(projectileData(t)?.ignoreWater, `proj ${t}`).toBe(true);
+    }
+    // helper 展开位：DefaultToSpray() 三型（SetDefaults 本体仅一行调用 :9635-9638,
+    //  提取器 DefaultTo* 展开通道交付——直写扫描看不到它们）
+    for (const t of [1015, 1016, 1017]) {
+      expect(projectileData(t)?.ignoreWater, `proj ${t}`).toBe(true);
+    }
+  });
+
+  it('消费族禁入不变式：wet 缓存消费族+湿敏直探位 全表无 true（提取回归即爆红）', () => {
+    // ① Arrow.ts:1442 wetCacheConsumer（蜂族 181/189/307/316/566 + 469 + 2 +
+    //    IsDestroyedByWater 六型 85/15/188/34/1097/1106）——原文本就无 ignoreWater
+    //    置位（水death/变型语义与本门互斥）;若提取回归误置 true,Arrow 三写点的
+    //    门会静默吞掉水death ⇒ 本断言钉死提取面。
+    for (const t of [181, 189, 307, 316, 566, 469, 2, 85, 15, 188, 34, 1097, 1106]) {
+      expect(projectileData(t)?.ignoreWater ?? false, `proj ${t}`).toBe(false);
+    }
+    // ② 湿敏直探位（非缓存消费、直读液格/字段的登记近似,合法前提=id 域与 270 集互斥）：
+    //    PhoenixBolt 706（AI_001 :56743 读 wet 字段→灭;载体 704 才真有门,尾行对照）/
+    //    BallProjs 155,861 / 毛刺弹 376 / 钓浮标 360-366 / 虎 833-835 / 飞蛙 758 /
+    //    连枷水变型 947,948（:44542 读字段）
+    for (const t of [706, 155, 861, 376, 360, 361, 362, 363, 364, 365, 366,
+      833, 834, 835, 758, 947, 948]) {
+      expect(projectileData(t)?.ignoreWater ?? false, `proj ${t}`).toBe(false);
+    }
+    expect(projectileData(704)?.ignoreWater).toBe(true);   // 同族对照：704 载体真有门
   });
 });

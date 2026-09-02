@@ -236,7 +236,8 @@ export class GlobProj extends Entity {
     const ctx = r.ctx;
     if (!ctx || !r.atlas) return;
     const key = `vanilla/Projectile_${this.projId}.png`;
-    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage(key) : r.atlas.vimages.get(key);
+    // 懒加载通道(lazyload-guards):ensureVImage miss 返 null→本帧早退,下帧自愈;禁直取贴图表
+    const img = r.atlas.ensureVImage?.(key) ?? null;
     if (!img || !img.width) return;
     const s = Math.max(0.05, this.scale);
     ctx.save();

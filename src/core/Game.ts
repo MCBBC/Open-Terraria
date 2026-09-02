@@ -578,6 +578,70 @@ export function travelAdjustSlotRarities(rarity: number[], slotItemAttempts: num
   if (rarity[0] > 1 && slotItemAttempts > 4200) rarity[0] = 1;
 }
 
+// ---- 商人离屏消散屏盒族常量（★M1 2026-09-02 对齐——旧 TILE*62 Chebyshev 系近似）----
+// NPC.cs:6789-6793 sWidth=1920/sHeight=1200；:6172-6175
+// safeRangeX=(int)((sWidth/16)×0.52)=(int)(120×0.52)=62、
+// safeRangeY=(int)((sHeight/16)×0.52)=(int)(75×0.52)=39；:6188 activeTime=750。
+// 骷髅商 CheckActive 屏盒(:78691-93)与游商 UnspawnTravelNPC 盒(WorldGen.cs:4931-4943)
+// 同吃这组静态值——两盒形状各自独立（屏盒族吃 NPC 自身 width/height,游商盒吃
+// safeRange;formerly 两处同抄 TILE*62=992px 定值,纵向差 661→992/660→992px 级）
+/** NPC.sWidth/2（屏盒族横向基半幅） */
+export const NPC_SCREEN_HALF_X = 960;
+/** NPC.sHeight/2（屏盒族纵向基半幅） */
+export const NPC_SCREEN_HALF_Y = 600;
+/** NPC.safeRangeX = (int)((1920/16)×0.52)（游商 UnspawnTravelNPC 盒附加半幅） */
+export const NPC_SAFE_RANGE_X = 62;
+/** NPC.safeRangeY = (int)((1200/16)×0.52) */
+export const NPC_SAFE_RANGE_Y = 39;
+/** NPC.activeTime（CheckActive 离屏续命满值/NewNPC 出生起值 :8570） */
+export const NPC_ACTIVE_TIME = 750;
+
+/** CheckActive 屏盒（rectangle2, NPC.cs:78691-78693）中心距式相交判：盒心 = NPC
+ *  中心,半幅 = sWidth/2+width / sHeight/2+height（453 为 18×40 ⇒ 978/640px）,再
+ *  外扩玩家半宽/半高 = 玩家 hitbox 相交的等价改写（同 Enemy.ts 屏盒族写法;
+ *  XNA Rectangle.Intersects 严格不等号,贴边相切=不相交）。true = 相交 */
+export function npcScreenBoxHit(
+  npcCx: number, npcCy: number, npcW: number, npcH: number,
+  plCx: number, plCy: number, plW: number, plH: number,
+): boolean {
+  return Math.abs(plCx - npcCx) < NPC_SCREEN_HALF_X + npcW + plW / 2
+    && Math.abs(plCy - npcCy) < NPC_SCREEN_HALF_Y + npcH + plH / 2;
+}
+
+/** UnspawnTravelNPC 盒（WorldGen.cs:4931-4943）中心距式相交判：盒心 = NPC 中心
+ *  所在【格格心】（num2*16+8 量化,:4931-4932——NPC 在格内偏移 ≤8px 不动盒）,
+ *  半幅 = sWidth/2+safeRangeX / sHeight/2+safeRangeY = 1022/639 px,再外扩玩家
+ *  半宽/半高（原版 Rectangle((int)position…,width,height) = 玩家 hitbox）。
+ *  true = 相交（任一玩家留场;全员出盒 → 当 tick 移除,无计时器） */
+export function travelMerchantBoxHit(
+  npcCx: number, npcCy: number,
+  plCx: number, plCy: number, plW: number, plH: number,
+): boolean {
+  const bx = Math.floor(npcCx / TILE) * TILE + TILE / 2;
+  const by = Math.floor(npcCy / TILE) * TILE + TILE / 2;
+  return Math.abs(plCx - bx) < NPC_SCREEN_HALF_X + NPC_SAFE_RANGE_X + plW / 2
+    && Math.abs(plCy - by) < NPC_SCREEN_HALF_Y + NPC_SAFE_RANGE_Y + plH / 2;
+}
+
+/** 骷髅商 CheckActive 单步（NPC.cs:78689-78816 纯函数投影,单 tick 时序 1:1）：
+ *  ①屏盒 rectangle2 相交 → timeLeft=activeTime 续命（:78715-78719；屏盒 ⊂
+ *    activeRange〔978<4032/640<2520〕→ 回屏必同时落保命盒）
+ *  ②activeRange 盒相交 → flag2 置真（:78705-78727;453 非 townNPC〔isLikeATownNPC
+ *    专支 :6880-6885〕不早退 → 走全链）
+ *  ③timeLeft--（:78790）,归零强制翻假 flag2（:78791-78794）
+ *  ④!flag2 → 消散（:78795-78798,active=false 无离场播报;入侵/事件不 gate）。
+ *  ⟹ 消散条件 = 「玩家出 activeRange 盒（当 tick 即消,不看余量）」或
+ *  「timeLeft 倒计时到 0（activeRange 盒内照消,1405 :38648-38652 同构）」；
+ *  活着 ⟺ 盒内且 timeLeft>0。屏盒与 activeRange 之间（992~4032px 带）= 纯倒计时带 */
+export function skeletonMerchantCheckActiveStep(
+  prevTimeLeft: number, activeRangeHit: boolean, screenBoxHit: boolean,
+): { timeLeft: number; despawn: boolean } {
+  let flag2 = activeRangeHit;
+  const timeLeft = (screenBoxHit ? NPC_ACTIVE_TIME : prevTimeLeft) - 1;
+  if (timeLeft <= 0) flag2 = false;
+  return { timeLeft, despawn: !flag2 };
+}
+
 /** 树苗扫描切片计划（growSaplings 消费）。原版 WorldGen.UpdateWorld 每 tick 在全图
  *  均匀采样（地下 (w×h)×1.5e-05 格 :71622-71631；地表 (w×h)×3e-05 格 :71549-71555，
  *  worldUpdateRate=1）——单苗每 tick 被采中概率 = rate×(w×h)/区格数。本仓 300 tick
@@ -8095,10 +8159,11 @@ export class Game implements GameHooks {
     // 子弹/糖玉米/木桩/飞镖/溶液武器 → 0.5（:62216，须右键按住）；1254 狙击步枪 →
     // 2/3，带镜 → 0.8（:62219-62226，须右键）；1299 望远镜 → 2/3 无右键门
     // （flag=false :62229-62231）。targetPan = vector×ScaledSize/2×num（:62252）。
-    // lastMouseInterface 门以 uiBlocking 近似（原版 noThrow||lastMouseInterface
-    // 且无进行中平移才拦，:62201-62204）；选中槽 58（光标持物）同拦。
+    // lastMouseInterface 门以 uiBlocking+光标悬 DOM UI 近似（原版 noThrow||
+    // lastMouseInterface 且无进行中平移才拦，:62201-62204；2026-09-02 背包不置
+    // uiBlocking 后悬停面由 inpOverDomUi 承担）；选中槽 58（光标持物）同拦。
     // 仅手持期间叠加（follow 每帧重锚玩家——卸枪即复位，无残留状态）
-    if (!this.input.uiBlocking) {
+    if (!this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
       const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
       // scope 配饰佩戴判定（Player.cs:14356-14360：饰品在身 + 手持武器 useAmmo
@@ -9558,7 +9623,7 @@ export class Game implements GameHooks {
     // SmartCursor action（默认 LeftControl/RightControl；M5 经键位表）
     const controlSmart = inp.downAction('SmartCursor');
     if (sc.updateWanted(controlSmart, !!inp.mouseDown, s)) this.sfx.play('menuTick');
-    const blocked = inp.uiBlocking || this.player.dead || !!this.minecart
+    const blocked = inp.uiBlocking || this.inpOverDomUi() || this.player.dead || !!this.minecart
       || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
       || this.annotateMode;
     if (blocked || !sc.wanted) { sc.showing = false; VUI.smartCursorOn = false; return; }
@@ -9824,8 +9889,13 @@ export class Game implements GameHooks {
     }
     if (!inp.downAction('QuickMount')) this.cartKeyLatch = false;
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
-    // 时间调整按钮/面板悬停同理（renderer.timeUiHover 渲染期写入）
-    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover) {
+    // 时间调整按钮/面板悬停同理（renderer.timeUiHover 渲染期写入）。
+    // ★2026-09-02 背包展开解锁世界输入（原版 playerInventory 开启不拦使用链）：
+    //  「光标压在 DOM UI 上」改由 inpOverDomUi 承担（原版 mouseInterface 等价,
+    //  含按住横扫掠过面板=使用中断）；光标持物由 uiHeldItemRef 承担（无抛掷路径,
+    //  持物点击世界不误挥手中武器）；模态面板（暂停/图鉴等）仍走 uiBlocking。
+    if (inp.uiBlocking || this.inpOverDomUi() || !!this.uiHeldItemRef?.()
+      || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover) {
       this.mining = null;
       return;
     }
@@ -21996,6 +22066,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   closeChestPanel: (() => void) | null = null;
   /** 死亡收背包（Main.cs:46435 dead ⇒ playerInventory=false；UI 注入） */
   closeInventory: (() => void) | null = null;
+  /** UI 光标持物查询（UI.ts 注入,2026-09-02）：非空返回值=光标捏着物品。原版该态
+   *  点击世界=抛掷 mouseItem（Player.cs:5139）,本仓无抛掷路径——updateUse 据此
+   *  拦下世界使用,防「背包解锁后持物点击世界误挥手中武器」 */
+  uiHeldItemRef: (() => boolean) | null = null;
   /** 亡命箱死亡成就窗口（Player.cs:24811 _framesLeftEligibleForDeadmansChest
    *  DeathAchievement——开布线箱置 600,每 tick 递减,死亡时 >0 → 成就 23
    *  "Dead Men Tell No Tales"(任何死法,原版语义即如此) */
@@ -28172,21 +28246,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else this.shopSellbackMemo.set(memoKey, left);
   }
 
-  /** 骷髅商离屏计时（CheckActive timeLeft=750 语义） */
-  private skeletonMerchantDespawnT = 0;
+  /** 骷髅商离屏计时（CheckActive timeLeft 语义；NewNPC 出生起值 activeTime=750
+   *  :8570——消散后归位,防下次到访带旧残值） */
+  private skeletonMerchantTimeLeft = NPC_ACTIVE_TIME;
   /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失（CheckActive 语义） */
   private updateTravellingMerchant(): void {
     const w = this.world;
     const t = w.clock.timeOfDay;
-    // 骷髅商：离屏累计 750 tick 消失（在屏重置——CheckActive 屏内矩形语义；
-    // 入侵不影响其消散）
+    // 骷髅商（453）离屏消散 = CheckActive 全链（★M1 2026-09-02 对齐——旧 TILE*62
+    // Chebyshev 近似退役）：453 非 townNPC（isLikeATownNPC 专支 NPC.cs:6880-6885,
+    // townNPC=false）→ 通用消散链不放行早退（:78700）,单步时序见
+    // skeletonMerchantCheckActiveStep（消散 = 出 activeRange 盒当 tick 即消 ∨
+    // timeLeft 归零;屏盒 978/640px 相交则续命 750）。几何食 NPC 自身 18×40 盒,
+    // activeRange 用与 Enemy.ts CheckActive 同源常量 CHECK_ACTIVE_HALF_X/Y。
+    // 中心距式均再外扩玩家半宽/半高 = hitbox 相交等价改写。入侵不影响其消散
+    // （:78700 门链无入侵节）;无离场播报（:78795-98 静默 active=false）
     const sm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant') as TownNPC | undefined;
     if (sm) {
-      const ds = Math.max(Math.abs(sm.cx - this.player.cx), Math.abs(sm.cy - this.player.cy));
-      if (ds > TILE * 62) {
-        if (++this.skeletonMerchantDespawnT >= 750) { sm.dead = true; this.skeletonMerchantDespawnT = 0; }
-      } else this.skeletonMerchantDespawnT = 0;
+      const pl = this.player;
+      const step = skeletonMerchantCheckActiveStep(
+        this.skeletonMerchantTimeLeft,
+        Math.abs(sm.cx - pl.cx) < CHECK_ACTIVE_HALF_X + pl.w / 2
+          && Math.abs(sm.cy - pl.cy) < CHECK_ACTIVE_HALF_Y + pl.h / 2,
+        npcScreenBoxHit(sm.cx, sm.cy, sm.w, sm.h, pl.cx, pl.cy, pl.w, pl.h),
+      );
+      this.skeletonMerchantTimeLeft = step.timeLeft;
+      if (step.despawn) {
+        sm.dead = true;
+        this.skeletonMerchantTimeLeft = NPC_ACTIVE_TIME;
+      }
     }
     // 入侵/月事件进行中旅行商不到访（SpawnTravelNPC :5189 门；月事件原版经 !dayTime
     // 间接压制——此处同入驻轮显式补）
@@ -28194,11 +28283,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const tm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'travelling_merchant') as TownNPC | undefined;
     if (tm) {
-      // 离场：白天过 48600 或入夜，且玩家离屏后移除（UnspawnTravelNPC）。
+      // 离场：白天过 48600 或入夜（Main.cs:65985-65989 !dayTime || time>48600 →
+      // 每 tick 调 WorldGen.UnspawnTravelNPC），玩家出 UnspawnTravelNPC 盒即移除
+      // （★M1 2026-09-02 对齐：WorldGen.cs:4931-4943——盒心 = NPC 中心所在格格心
+      // （num2*16+8 量化）,半幅 = sWidth/2+safeRangeX / sHeight/2+safeRangeY =
+      // 1022/639px【轴不对称,旧 TILE*62 Chebyshev/欧氏距 992px 定值近似退役】;
+      // 全员出盒当 tick 消散,无计时器）。
       // 48600/54000 = 0.9（昼内进度，Main.cs:64477——曾误按 0.8 = 43200 提前一小时赶人）
       if (!w.clock.isDay || (t - Clock.DAWN) / 0.625 > 0.9) {
-        const d = Math.hypot(tm.cx - this.player.cx, tm.cy - this.player.cy);
-        if (d > TILE * 62) {
+        if (!travelMerchantBoxHit(tm.cx, tm.cy, this.player.cx, this.player.cy,
+          this.player.w, this.player.h)) {
           tm.dead = true;
           this.newText(Lang.text('LegacyMisc.35', Lang.npcName(368) ?? ''), 50, 125, 255);
         }

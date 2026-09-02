@@ -409,6 +409,8 @@ const CSS = `
 .sw-trash .sw-trash-icon { position:absolute; left:8.5px; top:8.5px; width:27px; height:27px;
   image-rendering:pixelated; pointer-events:none; filter:brightness(0.39); opacity:0.39; }
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
+/* 右下角无框坞（2026-09-02）：列标签直接叠在世界画面上,加黑投影保可读 */
+.sw-eqdock .sw-lbl { text-shadow:1px 1px 0 #000; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -527,9 +529,6 @@ export function pvpIconFrame(hostile: boolean, hover: boolean, team: number): re
 export const PVP_COOLDOWN_MS = 5000;
 
 export class UI {
-  /** LoadoutShare 首用提示可见性（Player.Settings.ShowLoadoutShareHint,M57:4303/:4645——
-   *  R4-15;原版持久化到 settings,本仓会话态,首次共享后置否。持久化随 R4-14） */
-  static loadoutShareHintVisible = true;
   devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
   root: HTMLElement;
   game!: Game;  // 生命周期由 enterGame 置入;quitToMenu 经 detachGame() 摘引用(2026-08-13 泄露 review)
@@ -1032,10 +1031,13 @@ export class UI {
     game.openChestRef = () => this.openChest;
     // Game 侧收起面板（Main.cs:38455-38458 chest=-1 + Player.cs:31264/:31277 追踪失联
     // ——容器宠物（Chester 960/飞猪 525）再右键/走远/宠物消失路径）。★须全关
-    // closeInventory：本仓 uiBlocking=背包开着即拦世界输入，若只关箱子、
-    // uiBlocking 残留=自动关后立刻无法攻击/挖掘（2026-08-28 探针实测）；
-    // 原版 chest=-1 后 playerInventory 保持但世界输入不拦——全关即本仓等价
+    // closeInventory：原版 chest=-1 后 playerInventory 保持但世界输入不拦——
+    // 全关即本仓等价（2026-09-02 起背包本身不置 uiBlocking,无残留问题）
     game.closeChestPanel = () => this.closeInventory();
+    // 光标持物查询（Game.updateUse 门,2026-09-02）：光标捏着物品时禁世界使用——
+    // 原版该态点击世界=抛掷 mouseItem（Player.cs:5139 mouseItem 臂）,本仓无抛掷
+    // 路径,保持「持物时世界点击不触发使用」的现状语义
+    game.uiHeldItemRef = () => !!this.heldStack;
     // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
     // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
     // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）
@@ -1234,10 +1236,10 @@ export class UI {
         return;
       }
       // Alt+左键（OverrideHover :533-561）：背包/钱币/弹药格=收藏/取消（favorited 禁
-      // Shift 转移）;装备五类格=跨配装共享开关（R4-15,canLoadoutShareAt[8-12]
+      // Shift 转移）;装备/染料格=跨配装共享开关（R4-15,canLoadoutShareAt[8-12]
       // IS57:367-371 → ToggleLoadoutShare :851-861：置 favorited+音12+
-      // ClearSlotShareInOtherLoadouts :863-884 同槽仅一套可共享;misc 族原版
-      // assert 跳过清理=仅 toggle）
+      // ClearSlotShareInOtherLoadouts :863-884 同槽仅一套可共享）。★misc 族原版
+      // 无任何 Alt 语义（canFavoriteAt 仅 0/1/2/32,R4-15③ 已清零=落空走常规点击）
       if (e.altKey && !e.shiftKey) {
         const inv = this.game.player.inv;
         if (where === 'inv' && i < 58) {
@@ -1248,12 +1250,16 @@ export class UI {
             this.refreshAll();
             return;
           }
-        } else if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+        } else if (where === 'armor' || where === 'dye') {
+          // ★misc/miscDye 原版无任何 Alt 语义（canFavoriteAt 仅 context 0/1/2/32,
+          // IS57:358-361;canLoadoutShareAt 仅 8-12,:367-371）——此前 toggle=R4-15
+          // 登记偏离,清零：Alt 在杂项格落空走常规点击/拖拽（原版 Alt 不抑制普通
+          // 点击）;旧档残留收藏由 sanitizeEquipStacks 剥除
           const cur = this.slotContent(where, i);
           if (cur) {
             cur.favorited = !cur.favorited;
-            if (cur.favorited) UI.loadoutShareHintVisible = false;   // DisableLoadoutShareHint :857
-            if (cur.favorited && (where === 'armor' || where === 'dye')) {
+            if (cur.favorited) void options.set('showLoadoutShareHint', false);   // DisableLoadoutShareHint :857-860（R4-14 持久化清偿）
+            if (cur.favorited) {
               const backups = inv.loadouts.map((l) => (where === 'armor' ? l.armor : l.dye));
               for (const arr of backups) {
                 const b = arr[i];
@@ -1326,7 +1332,8 @@ export class UI {
   private canSwapEquip(id: number): boolean {
     const d = ITEM_DEFS[id];
     if (!d) return false;
-    if (d.armor || d.accessory) return true;
+    // ★d.armor 死前腿已移除（2026-09-02:字段全仓零写入）——legacy 效果标签独占此腿
+    if (d.accessory) return true;
     if (armorSlotIndexOfInternal(id) >= 0 || statOfInternal(id)?.acc !== undefined) return true;
     const k = equipKindOfInternal(id);
     return k === 'dye' || k === 'pet' || k === 'light' || k === 'cart' || k === 'mount' || k === 'hook';
@@ -1350,9 +1357,8 @@ export class UI {
     // 社交段（盔甲 10-12 / 配饰 13+）——曾恒进功能段:纯社交配饰(acc=0)被功能槽
     // armorAccepts 门拒 = "时装穿不上"根因（2026-08-14 用户实抓）
     const van = statOfInternal(cur.id)?.van === 1;
-    if (d.armor) {
-      target = d.armor.slot + (van ? 10 : 0);
-    } else if (armorSlotIndexOfInternal(cur.id) >= 0) {
+    // ★d.armor 死分支已移除（2026-09-02:字段全仓零写入,恒走 itemstats 部位表）
+    if (armorSlotIndexOfInternal(cur.id) >= 0) {
       target = armorSlotIndexOfInternal(cur.id) + (van ? 10 : 0); // vi_ 盔甲（vanilla-itemstats 部位）
     } else if (d.accessory || statOfInternal(cur.id)?.acc !== undefined) {
       // vi_ 配饰走 itemstats acc 判定(legacy accessory 字段已随退役消失——曾只认
@@ -1532,7 +1538,8 @@ export class UI {
     document.addEventListener('mousedown', (e) => {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.('.sw-slot') || t?.closest?.('.sw-panel') || t?.closest?.('.sw-btn')) return;
+      // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
+      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock')) return;
       // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:41279-41282 商店格区）：
       //  · 行/按钮 → 各自 click 链（行 = 有货商店格；光标持有时 Game.npcShopBuy 内
       //    的 CanStack/满叠门裁决，异型整链无动作 PickItemMovementAction :1427-1438）
@@ -1790,8 +1797,9 @@ export class UI {
       this.placeTrash();
       return;
     }
-    // 面板外：丢进世界；面板内空白：放回原格
-    const inPanel = target?.closest?.('.sw-panel');
+    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
+    // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
+    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock');
     if (!inPanel) {
       this.throwHeldToWorld();
     } else {
@@ -2040,21 +2048,20 @@ export class UI {
     };
     let linesHtml = '';
     // ---- LoadoutShare 行族（R4-15,M57:20824-20833 共享两行 + :21517-21519 首用提示）：
-    // 装备五类格（canLoadoutShareAt[8-12],IS57:367-371）悬停时,紧随名称行（GetLinesInfo
+    // 装备/染料格（canLoadoutShareAt[8-12],IS57:367-371）悬停时,紧随名称行（GetLinesInfo
     // 里在全部统计行之前）：共享来源行 > 共享标记行 > （未收藏且未用过共享时）提示行。
     // 提示色 = OurFavoriteColor(255,231,69) α190（Main.cs:886/:21520）;共享两行走默认
-    // 文字色（GetLinesInfo 未赋 lineColors）。ShowLoadoutShareHint 设置持久化缺（R4-14）
-    // ——本仓会话内首次共享后不再显示（DisableLoadoutShareHint :857 语义）
-    if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+    // 文字色（GetLinesInfo 未赋 lineColors）。★misc 族无此行族（canLoadoutShareAt 不含,
+    // R4-15③ 清偿——此前 favorited misc 误显"已共享"）。ShowLoadoutShareHint 走
+    // options 持久化（R4-14 清偿,M57:4303/:4645 config.json 同位）
+    if (where === 'armor' || where === 'dye') {
       const inv = this.game.player.inv;
-      const from = (where === 'armor' || where === 'dye')
-        ? inv.effectiveSharedFrom(i, where === 'dye')
-        : null;
+      const from = inv.effectiveSharedFrom(i, where === 'dye');
       if (from !== null) {
         linesHtml += `<br>${Lang.text('UI.ItemLoadoutSharedFrom', from + 1)}`;
       } else if (s.favorited) {
         linesHtml += `<br>${Lang.text('UI.ItemLoadoutShared')}`;
-      } else if (UI.loadoutShareHintVisible) {
+      } else if (options.data.showLoadoutShareHint) {   // ShowLoadoutShareHint（options 持久化,R4-14 清偿;Main.cs:21517 同门）
         linesHtml += `<br><span style="color:rgba(255,231,69,0.75)">${Lang.text('UI.ItemLoadoutShareHint')}</span>`;
       }
     }
@@ -2229,8 +2236,10 @@ export class UI {
     this.invPanel.style.boxShadow = '0 0 0 1px rgba(10,14,30,0.45), 0 4px 16px rgba(0,0,0,0.4)';
   }
 
-  openInventory() {
-    if (this.invPanel.style.display === 'block') {
+  /** force=跳过开/关翻转（开箱路径 openChestPanel 用：解锁世界输入后「背包开着
+   *  右键开箱」可达,翻转语义会把背包连箱子一起关掉） */
+  openInventory(force = false) {
+    if (!force && this.invPanel.style.display === 'block') {
       this.closeInventory();
       return;
     }
@@ -2238,6 +2247,7 @@ export class UI {
     this.closeHousingPanel();
     this.positionInvPanel();
     this.invPanel.style.display = 'block';
+    if (this.eqDockEl) this.eqDockEl.style.display = 'flex';   // 右下角坞随开显
     // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正；
     // 配方列表高度同批二次刷新（首次采样布局未稳,LIST_H 偏大,hover 前不收敛）
     setTimeout(() => {
@@ -2245,7 +2255,10 @@ export class UI {
       this.refreshVanillaCrafting();
     }, 120);
     this.refreshAll();
-    this.game.input.uiBlocking = true;
+    // ★2026-09-02 用户要求：背包展开解锁世界操作——原版 playerInventory 开启不拦
+    // 输入（移动/跳跃/攻击/挖掘/交互照常,Main.mouseInterface 只在光标压 UI 时拦）。
+    // 本仓等价 = 不再置 uiBlocking;「光标压 DOM UI」由 Game.updateUse 的
+    // inpOverDomUi 门承担,光标持物由 uiHeldItemRef 门承担。
   }
 
   /** 装备页追加槽显隐（Player.cs:4279 Shown=解锁∨占格；效果门在 accSlotMax） */
@@ -2266,6 +2279,7 @@ export class UI {
   closeInventory() {
     this.closeHousingPanel();
     this.invPanel.style.display = 'none';
+    if (this.eqDockEl) this.eqDockEl.style.display = 'none';   // 右下角坞随关收
     this.closeItemSearch();
     this.closeGuideSearch();
     this.closeChest();
@@ -2279,7 +2293,8 @@ export class UI {
     this.craftGridRecipe = null;
     // 垃圾桶为持久槽（Player.trashItem 语义）：关闭背包保留，仅死亡时由 Game 清空
     this.moveGhost();
-    this.game.input.uiBlocking = false;
+    // ★2026-09-02：不再清 uiBlocking——背包自 2026-09-02 起不置位（世界输入解锁）,
+    // 无条件清会打翻其他模态面板（手册/表情/图鉴）的 wasBlocking 恢复语义
   }
 
   // ============ 调试用：道具搜索器（背包面板"🔍 道具搜索"按钮） ============
@@ -3004,8 +3019,12 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
-  /** 右缘列（成就卡+杂项+PvP）——配方列表高度的上对齐基准（列表底 ≤ 列底） */
+  /** 右缘列（成就卡+图标行；杂项/PvP 列 2026-09-02 迁出）——配方列表高度的上对齐
+   *  基准（列表底 ≤ 列底） */
   private advRailEl: HTMLElement | null = null;
+  /** 右下角无框坞（2026-09-02 用户要求）：装备列（配装行+染料/时装/装备+防御计数）
+   *  与杂项/PvP 列的浮置容器——无面板底框,随背包开合显隐（open/closeInventory） */
+  private eqDockEl: HTMLElement | null = null;
   /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
   private accEyeEls = new Map<number, HTMLElement>();
   private loadoutBtns: HTMLButtonElement[] = [];
@@ -3212,6 +3231,13 @@ export class UI {
       // 如需再补应落在 Settings 而非背包顶栏）
     // 图标行挂右缘列顶部（原 invPanel 顶行,2026-08-27）——advRail 创建于下方彼处 prepend
 
+    // ---- 右下角无框坞（2026-09-02 用户要求：配装列 + 杂项/PvP 列整体迁出背包
+    //  面板，浮置屏幕右下角、无面板底框——降低对世界画面的遮挡。随背包开合显隐,
+    //  见 openInventory/closeInventory；点击命中登记进 domTargets 名单 .sw-eqdock）----
+    const eqDock = el('div', 'sw-eqdock');
+    eqDock.style.cssText = 'position:fixed; right:10px; bottom:10px; display:none; pointer-events:auto;'
+      + 'align-items:flex-end; gap:26px; z-index:11;';
+    this.eqDockEl = eqDock;
     // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 染料 0-2+3-7 | 时装 10-12 + 时装配饰 13-17）
     // / 杂项页（miscEquips[5] + miscDyes[5]，Main.cs:40616-40672 EquipPage==2）+
     // 垃圾桶 + 钱币 + 弹药；右背包 10×4（10-49）。原版三列 x=sw-92/-139/-186。
@@ -3219,7 +3245,7 @@ export class UI {
     body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
     const left = el('div');
     // 装备组（2026-08-27 用户要求：配装行+染料/时装/装备列整体迁至成就/杂项列左侧,
-    // 背包贴热键栏）——挂载点移至 body 尾部 rightRail 之后
+    // 背包贴热键栏；2026-09-02 再迁右下角无框坞——挂载点见 eqDock.appendChild(left)）
     left.style.cssText = 'display:flex; flex-direction:column; gap:6px; flex:none;';
     left.appendChild(loadoutRow);
     // 竖排列构建器（原版 DrawInventory :40844-40968 语义：同 x 纵向排，label 顶部）
@@ -3452,12 +3478,11 @@ export class UI {
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
     // 要求——背包+合成整体贴向装备列,顺手中转距离更短）
     body.appendChild(rightRail);
-    // 装备组（配装行+染料/时装/装备列）→ 成就/杂项列左侧（2026-08-27 用户要求：
-    // 背包整体贴左上热键栏,换物路径最短）
-    body.appendChild(left);
-    // 右缘列：成就提示牌 + 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页迁入）
-    // + PvP/队伍钮（2026-08-27 用户指定：杂项搬玩家对决原位,对决/队伍钮被顶下去；
-    //   列高 ≈ 成就卡+杂项 310+PvP 120 ≈ 左装备列 620,面板高度不受影响。
+    // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
+    // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
+    eqDock.appendChild(left);
+    // 右缘列：成就提示牌 + 顶排图标行（杂项/PvP 列 2026-09-02 迁右下角无框坞,
+    // advRail 只留图标行+成就卡——面板高度随之下收窄）
     //   ★与左列 rightRail（垃圾桶/钱币）重名,此为 advRail）
     const advRail = el('div');
     this.advRailEl = advRail;
@@ -3466,7 +3491,12 @@ export class UI {
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
     this.achAdvisorEl.style.alignSelf = 'stretch';
     advRail.appendChild(this.achAdvisorEl);
-    advRail.appendChild(miscRail);   // 杂项（玩家对决原位）——PvP/队伍在其下方
+    // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列
+    //（2026-09-02 用户要求；此前挂 advRail 玩家对决原位）
+    const miscStack = el('div');
+    miscStack.style.cssText = 'display:flex; flex-direction:column; gap:10px; align-items:center;';
+    miscStack.appendChild(miscRail);
+    eqDock.appendChild(miscStack);
     body.appendChild(advRail);
     this.invPanel.appendChild(body);
 
@@ -3475,8 +3505,9 @@ export class UI {
     //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
     //      语义（单机调试便利 + 联机 msg13 同步）） ----
     const pvpWrap = el('div');
-    // margin-top 拉开与钩爪行（杂项列末行）的间距（2026-08-27 用户要求）
-    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; margin-top:24px;';
+    // margin-top 拉开与钩爪行（杂项列末行）的间距（2026-08-27 用户要求；2026-09-02
+    // 随杂项列迁右下角坞,miscStack gap 10px 已含基础间距,此 margin 减半）
+    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; margin-top:12px;';
     // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
     this.pvpSwordBtn = el('button', 'sw-btn');
     this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
@@ -3516,7 +3547,7 @@ export class UI {
       this.pvpTeamBtns.push(cell);
     }
     pvpWrap.appendChild(teamGrid);
-    advRail.appendChild(pvpWrap);   // 右缘列成就卡下方（流内，不挤合成区）
+    miscStack.appendChild(pvpWrap);   // 右下角坞杂项列下方（2026-09-02 迁出 advRail）
     this.refreshPvpButtons();
 
     // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
@@ -3605,6 +3636,7 @@ export class UI {
     });
     craftWrap.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
+    this.root.appendChild(eqDock);   // 右下角无框坞与面板平级（root 直挂,2026-09-02）
   }
 
   /** 滚轮时间戳——hover 预览 350ms 门（原生滚动经停行的 mouseenter 不预选） */
@@ -4196,7 +4228,7 @@ export class UI {
       if (s) s.style.display = i < n ? '' : 'none';
     }
     this.chestPanel.style.display = 'block';
-    this.openInventory();
+    this.openInventory(true);   // force：背包已开着时右键开箱不解背包（2026-09-02 解锁后此路可达）
     this.refreshAll();
   }
 
@@ -4584,7 +4616,8 @@ export class UI {
     const game = this.game;
     if (!game || !this.craftListEl) return;
     const stations = game.stationsNearby();
-    const defEl = this.invPanel.querySelector('[data-role="defense"]') as HTMLElement | null; // left 仍在 invPanel 内
+    // 防御计数器随装备列迁右下角坞（2026-09-02）——root 级查（面板/坞都覆盖）
+    const defEl = this.root.querySelector('[data-role="defense"]') as HTMLElement | null;
     if (defEl) {
       // 防御计数器刷新（DrawDefenseCounter :41557）：盾帧 = 难度列(0/1/2),
       // 专家/大师叠辉光行(静态 α0.45 近似原版脉动;大师红绿脉冲未做,偏差记录)。
@@ -5075,10 +5108,14 @@ export class UI {
    *  ★ class 必须播完即摘：display:none→block 会使 CSS 动画重播，
    *    残留 class 会导致此后每次打开背包全体槽位白闪 */
   flashLoadoutSwitch(): void {
-    this.invPanel.classList.remove('sw-loadout-flash');
-    void this.invPanel.offsetWidth;
-    this.invPanel.classList.add('sw-loadout-flash');
-    setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
+    // 面板+右下角坞一起闪（装备槽 2026-09-02 迁坞,只闪面板会漏装备/染料列）
+    for (const root of [this.invPanel, this.eqDockEl]) {
+      if (!root) continue;
+      root.classList.remove('sw-loadout-flash');
+      void root.offsetWidth;
+      root.classList.add('sw-loadout-flash');
+      setTimeout(() => root.classList.remove('sw-loadout-flash'), 600);
+    }
   }
 
   /** ★Q-F9 槽级 blocked 回执（QuickStacking.cs:360-363 RestoreToPlayer flag 支 →

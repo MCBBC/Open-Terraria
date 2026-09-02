@@ -135,7 +135,11 @@ export class Input {
       this.onKeyEvent?.(e.code, false);  // 行为录制：键沿（松开）
     }) as EventListener);
     onWin('blur', (() => this.clearForBlur()) as EventListener);
-    onEl('mousemove', ((e: MouseEvent) => {
+    // ★mousemove 挂 window（2026-09-02 背包解锁世界输入配套）：光标压在 DOM 面板上
+    // 时 canvas 收不到 mousemove,坐标会冻结在面板边界——Game.inpOverDomUi
+    // （elementFromPoint 按 mouseX/Y 采样）就读到旧点=悬停判定失效。挂 window 后
+    // 坐标全屏跟随,悬停 UI 期间世界使用/智能光标/朝向门按真实光标位置拦截。
+    onWin('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
       this.mouseX = e.clientX - r.left;
       this.mouseY = e.clientY - r.top;

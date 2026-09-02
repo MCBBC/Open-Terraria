@@ -94,7 +94,8 @@ export class SkyLanternProj extends Entity {
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     const ctx = r.ctx;
     if (!ctx || !r.atlas) return;
-    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_855.png') : r.atlas.vimages.get('vanilla/Projectile_855.png');
+    // 懒加载通道(lazyload-guards):ensureVImage miss 返 null→本帧早退,下帧自愈;禁直取贴图表
+    const img = r.atlas.ensureVImage?.('vanilla/Projectile_855.png') ?? null;
     if (!img || !img.width) return;
     // 竖向 4 帧（frame 高 = 图高/4,AI_166 定 0..3 环）;光环四副本(Main.cs:33887 ±4px
     // flinker)以 shadowBlur 近似,登记

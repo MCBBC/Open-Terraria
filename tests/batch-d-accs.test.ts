@@ -164,6 +164,17 @@ describe('1457 远程配饰旗', () => {
     q.inv.armor[4] = { id: iid(1613), stack: 1 };
     expect(q.equipStats.def).toBe(6);
     expect(q.defense).toBe(6);
+    // ★受理门（UpdateEquips_CanItemGrantBenefits :12977 case 3-9 = item.accessory）：
+    //   非配饰占用配饰槽（UI 侧 armorAccepts 已拦,仅存档异常可达）不授 def/前缀/life
+    const g = makeHooks().player;
+    g.inv.armor[3] = { id: iid(37), stack: 1 };              // 护目镜=头盔部位件,非配饰
+    expect(g.equipStats.def).toBe(0);
+    g.inv.armor[3] = { id: iid(37), stack: 1, prefix: 65 };  // 险恶+4 同样不授
+    expect(g.equipStats.def).toBe(0);
+    // 门内配饰词缀照常叠加：脚镣1 + 险恶4 = 5（:13020-13022 if (accessory) 方入）
+    const w = makeHooks().player;
+    w.inv.armor[3] = { id: iid(216), stack: 1, prefix: 65 };
+    expect(w.equipStats.def).toBe(5);
   });
 });
 

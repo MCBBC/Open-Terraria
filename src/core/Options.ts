@@ -165,6 +165,10 @@ export interface OptionsData {
   manualSeen: boolean;
   /** 永久隐藏说明书（勾选"不再显示"后落真）——按钮整体不建;设置页可重开 */
   manualHidden: boolean;
+  /** LoadoutShare 首用提示可见性（Player.Settings.ShowLoadoutShareHint 静态默认 true;
+   *  config.json 持久化 M57:4303 Put/:4645 Get;DisableLoadoutShareHint Player.cs:389-393
+   *  首次共享置否——R4-14 清偿,曾会话态） */
+  showLoadoutShareHint: boolean;
   // ---- 触屏/移动端操控(mobile-adaptation-plan docs/mobile-adaptation-plan.md 模块⑤;
   //      ★隔离纪律:coarse=false 的桌面会话全部不消费——写入面只有 MobileControls/
   //      HudScale 的触屏分支) ----
@@ -247,6 +251,7 @@ export class OptionsStore {
     settingsVersion: 325,                   // LastLaunchedVersion（M57:4241）
     manualSeen: false,                      // 说明书未读=红点气泡闪烁
     manualHidden: false,                    // 说明书按钮显示中
+    showLoadoutShareHint: true,             // Player.Settings.ShowLoadoutShareHint 默认 true（Player.cs:367）
     // 触屏组(mobile-adaptation-plan 模块⑤;SC 默认开=2026-08-28 用户定案)
     touchJoystickFloat: false,              // 固定罗盘摇杆=2026-08-29 官方截图定案;浮动转可选档
     touchButtonAlpha: 0.82,
@@ -356,6 +361,8 @@ export class OptionsStore {
       // 建造饰品开关（终零波）：坏值回默认「启用」
       if (typeof this.data.builderAutoActuatorDisabled !== 'boolean') this.data.builderAutoActuatorDisabled = false;
       if (typeof this.data.builderAutoPaintDisabled !== 'boolean') this.data.builderAutoPaintDisabled = false;
+      // LoadoutShare 首用提示（R4-14 清偿）：坏值回默认「显示」
+      if (typeof this.data.showLoadoutShareHint !== 'boolean') this.data.showLoadoutShareHint = true;
       // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----
       if (typeof this.data.touchButtonAlpha !== 'number'
         || !Number.isFinite(this.data.touchButtonAlpha)) this.data.touchButtonAlpha = 0.82;

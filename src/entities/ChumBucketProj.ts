@@ -146,7 +146,8 @@ export class ChumBucketProj extends Entity {
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     const ctx = r.ctx;
     if (!ctx || !r.atlas) return;
-    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_820.png') : r.atlas.vimages.get('vanilla/Projectile_820.png');
+    // 懒加载通道(lazyload-guards):ensureVImage miss 返 null→本帧早退,下帧自愈;禁直取贴图表
+    const img = r.atlas.ensureVImage?.('vanilla/Projectile_820.png') ?? null;
     if (!img || !img.width) return;
     // 竖排 4 帧（Main.cs:8591 projFrames[820]=4;真资产 12×56 → 帧格 12×14）。原版
     // 弹体绘制 = 帧矩形 Rectangle(0, fh*frame, texW, fh) + 帧心原点(EntitySpriteDraw

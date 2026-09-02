@@ -7201,11 +7201,13 @@ export function harpyCharmEffect(game: GameHooks, player: HarpyCharmPlayer): voi
       : player.equipStats.accSeraphNecklace ? 6180 : 6166;
     best.applyHarpyCharm(target.cx, target.cy, itemVid, game);
     player.accHarpyCharmCooldown = cd;
-    // ★R25-⑦ 音效段先行（Spawn_HarpyCharm,ParticleOrchestrator1458.cs:477-504）：
-    //   默认 SoundID.Item39（6166 鹰妖护符/6180 炽天使项链）、flag=6181 凤凰箭袋→
-    //   SoundID.Item20；SoundEngine.PlaySound(type, 弹体位置, pitch 0/vol 1)。
-    //   粒子族（FadingParticle 双环带 num2×4/num3×3、6181/6180 ×2 与 PrettySparkle）
-    //   待 FadingParticle 原语另批（R15-17 登记维持）。
-    game.playSfxWav?.(itemVid === 6181 ? 'Item_20' : 'Item_39', 1, best.cx, best.cy);
+    // ★O2 双音仲裁（2026-09-02 清账批）：原版节拍=【单点】——Player.HarpyCharmEffect
+    //   （1457 Player.cs:28661-28702）全段零 PlaySound；声在 ApplyHarpyCharm→
+    //   RequestParticleSpawn(clientOnly:false)（Projectile.cs:58802-58809）→
+    //   Spawn_HarpyCharm（ParticleOrchestrator.cs:472-512，PlaySound 唯一一处 :512，
+    //   Item39 默认 / flag=6181 凤凰箭袋→Item20，pitch 0/vol 1，位=弹体 Center）。
+    //   本仓单点=applyHarpyCharm→harpyCharmFamilyFx（orchestraFx.ts:1983-1984，随
+    //   粒子族同落）；此处原 R25-⑦「音效段先行」桩与 familyFx 对同一引矢各播一声
+    //   （双音）——删除桩，保留 familyFx 单点（redblue-r25 判长=1 复验）。
   }
 }

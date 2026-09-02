@@ -3,8 +3,8 @@ export type ToolType = 'pick' | 'axe' | 'sword' | 'hammer';
 // Buff 类型（药水饮用后生效）
 export type PotionBuff = 'agility' | 'ironskin' | 'resistance' | 'thorns' | 'regen'
   | 'obsidianSkin' | 'gills' | 'manaRegen' | 'magicPower' | 'featherfall' | 'waterWalking' | 'archery' | 'nightOwl';
-// 盔甲部位：0 头盔 1 胸甲 2 胫甲（与 Inventory.armorSlotReq 的格位对应）
-export type ArmorSlot = 0 | 1 | 2;
+// 盔甲部位：0 头盔 1 胸甲 2 胫甲（ArmorSlot 类型已随 ItemDef.armor 死字段移除——
+// 部位归属走 vanillaItemStats.armorSlotIndexOfInternal）
 
 export interface ItemDef {
   key: string;
@@ -70,7 +70,8 @@ export interface ItemDef {
     isHealType: boolean;  // 受"耐药性"封锁
   };
   accessory?: 'lucky_horseshoe' | 'feral_claws'; // 配饰效果
-  armor?: { slot: ArmorSlot; defense: number };   // 盔甲（可穿装备/时装格，仅装备格计防御）
+  // ★armor 字段已移除（2026-09-02 死字段清理：全仓零写入,防御/部位真值源 =
+  //   vanilla-itemstats.json 经 statOfInternal/armorSlotIndexOfInternal）
   value?: number;         // 钱币价值（铜币）
   wireTool?: {            // 电路工具（原版 Player.cs:30289-30444 ItemCheck_UseWiringTools）
     place?: number;       // 单击放置的导线位掩码(TOOL_RED/BLUE/GREEN/YELLOW/ACTUATOR)

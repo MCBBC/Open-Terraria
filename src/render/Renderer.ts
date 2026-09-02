@@ -107,7 +107,7 @@ import { TileStore } from '../world/TileStore';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
-import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
+import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
@@ -185,13 +185,12 @@ function setMatchLegs(legs: number, male: boolean): number {
 }
 
 /** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
- *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表。
- *  ★vi_ 物品无 legacy def.armor——部位/贴图序号改走 vanilla-itemstats（s + hs/bs/ls，
- *  与 armorIndex 同源;2026-08-14 前只认 def.armor → vi_ 盔甲/面具全不渲染,
- *  "时装头不显示"根因）。armorIndex 兜底保留（legacy/place_ 物品）。
+ *  非物品 id——铁甲三件的槽位序号都是 2）；部位/贴图序号走 vanilla-itemstats
+ *  （s + hs/bs/ls,2026-08-14 起接管——此前只认 def.armor → vi_ 盔甲/面具全不渲染,
+ *  "时装头不显示"根因;2026-09-02 def.armor 死字段及其 legacy 兜底分支整体移除）。
  *  app 传入时跑 SetMatch 三查（PlayerFrame :35336-35374：①身甲裙腿替 ②腿甲性别
  *  换装 ③头 201 女换 202——armor[10-12] 时装覆盖优先已由 displayArmor 处理 ✓） */
-function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas').SpriteAtlas | null, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
+function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
   const idx = (itemId: number | null | undefined, slot: 0 | 1 | 2): number | null => {
     if (itemId == null) return null;
     const def = ITEM_DEFS[itemId];
@@ -204,15 +203,11 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
       const tex = part === 0 ? st.hs : part === 1 ? st.bs : st.ls;
       return tex ?? null;
     }
-    // legacy/place_ 物品：def.armor + vanilla.json armorIndex 查表
-    if (!def.armor) return null;
-    const key = def.key;
-    const vid = VANILLA_ITEM_ICON_MAP[key] ?? (key.startsWith('vi_') ? parseInt(key.slice(3), 10) : NaN);
-    if (!Number.isFinite(vid)) return null;
-    const entry = atlas?.vanilla.armorIndex?.[String(vid)];
-    if (!entry) return null;
-    if (def.armor.slot !== slot) return null;
-    return slot === 0 ? (entry.head || null) : slot === 1 ? (entry.body || null) : (entry.legs || null);
+    // ★legacy/place_ 物品的 def.armor + vanilla.json armorIndex 兜底分支已移除
+    //  （2026-09-02 死代码清理：ItemDef.armor 全仓零写入,该分支自 2026-08-14 起
+    //  对所有物品恒在首行 return null——vi_ 走上方 itemstats 路径,armorIndex
+    //  数据键仍保留在 vanilla.json）
+    return null;
   };
   const disp = inv.displayArmor();
   let head = idx(disp[0], 0), body = idx(disp[1], 1), legs = idx(disp[2], 2);
@@ -11236,7 +11231,7 @@ export class Renderer {
       ctx.restore();
       return;
     }
-    let dollEquip = dollEquipFromInv(p.inv, this.atlas, a);
+    let dollEquip = dollEquipFromInv(p.inv, a);
     if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
     if (p.merman) dollEquip = { head: 39, body: 22, legs: 21 };   // 人鱼强制三件（:35473-35494，死亡态同置）
     const full = compositePaperDoll(a, dollEquip);
@@ -11592,7 +11587,7 @@ export class Renderer {
     let accDollEquip: { head: number | null; body: number | null; legs: number | null } | null = null;
     let accRows: { body: number; legs: number } = { body: 0, legs: 0 };
     if (!mntHidden) {
-      accDollEquip = p.appearance ? dollEquipFromInv(p.inv, this.atlas, p.appearance, mnt?.type === 54) : null;
+      accDollEquip = p.appearance ? dollEquipFromInv(p.inv, p.appearance, mnt?.type === 54) : null;
       if (accDollEquip) {
         if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { head: 38, body: 21, legs: 20 };
         if (p.merman) accDollEquip = { head: 39, body: 22, legs: 21 };
@@ -11711,7 +11706,7 @@ export class Renderer {
     const veloHead = mntHidden && p.mount.type === 54;
     if (p.appearance && (!mntHidden || veloHead)) {
       if (veloHead) {
-        let vh = dollEquipFromInv(p.inv, this.atlas, p.appearance, true);
+        let vh = dollEquipFromInv(p.inv, p.appearance, true);
         if (p.buffs.has(BuffType.Werewolf)) vh = { head: 38, body: 21, legs: 20 };
         if (p.merman) vh = { head: 39, body: 22, legs: 21 };
         const vr = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, vh.legs ?? 0);
@@ -14440,7 +14435,7 @@ export class Renderer {
     // 纸娃娃帧 0 顶部 40×32 裁头带(整宽+发冠带,24×22 会削发型——用户报"绘制不完整");
     // 无外观回退头贴图 0
     if (player.appearance) {
-      const equip = dollEquipFromInv(player.inv, this.atlas) as { head?: number | null };
+      const equip = dollEquipFromInv(player.inv) as { head?: number | null };
       // 发色剂激活：地图头带同样拆发层（40×32 裁头带按 后发→本体→前发→头甲 合成）
       const dyeColor = world ? this.hairDyeRenderColor(player, world, null) : null;
       const doll = compositePaperDoll(player.appearance, equip, dyeColor ? { skipHair: true } : undefined);
@@ -14465,7 +14460,7 @@ export class Renderer {
       if (rp.dead) continue;
       if (player.hostile && rp.hostile && !(player.team > 0 && player.team === rp.team)) continue;
       if (!rp.appearance) continue;
-      const equip = dollEquipFromInv(rp.inv, this.atlas) as { head?: number | null };
+      const equip = dollEquipFromInv(rp.inv) as { head?: number | null };
       const dyeColor = world ? this.hairDyeRenderColor(rp, world, null) : null;
       const doll = compositePaperDoll(rp.appearance, equip, dyeColor ? { skipHair: true } : undefined);
       if (!doll) continue;

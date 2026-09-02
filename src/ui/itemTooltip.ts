@@ -198,7 +198,8 @@ export function buildTooltipBody(
       lines.push({ text: T(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power), tag: 'toolpower' });
     }
     const st0 = statOfInternal(slot.id);
-    const d0 = def.armor?.defense ?? st0?.def;
+    // ★def.armor 死前腿已移除（2026-09-02,字段全仓零写入——与 Player.defense 同源清理）
+    const d0 = st0?.def;
     if (d0) lines.push({ text: d0 + T('LegacyTooltip.25'), tag: 'defense' });
     if (def.heal) lines.push({ text: T('CommonItemTooltip.RestoresLife', def.heal), tag: 'heallife' });
     return { lines, durationLine: null, yoyoLogoLine: null, setBonusLine: null, expertMasterLines: [], researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };

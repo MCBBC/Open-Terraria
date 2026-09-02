@@ -55,6 +55,7 @@ describe('equipStats 记忆化(内容键六路锁)', () => {
 
   it('extraAccessory(恶魔心) → 第 6 饰品位生效', () => {
     const p = mk();
+    p.inv.gateExpert = true;   // ★2026-08-28 门（cs:18402-18409）：恶魔心槽需专家/大师世界
     const bagId = ITEM_BY_KEY['vi_3366_YoyoBag']!;
     p.inv.armor[ACC_ARMOR_START + 5] = { id: bagId, stack: 1 };   // 第 6 位(未开)
     expect(p.equipStats.yoyoBag).toBe(false);                     // 不在扫描界内

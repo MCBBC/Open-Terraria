@@ -398,7 +398,19 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   //   **无视深度恒走地表/金字塔分支**——曾只按深度判（深层金字塔箱误入金箱分支，
   //   掷骰序列整体偏移，金字塔出口隧道相位漂移，dump 对拍实锤）
   const isPyrMain = mainVanillaId === 848 || mainVanillaId === 857 || mainVanillaId === 934;
-  const isSurface = isPyrMain || (gy < gs.worldSurface + 25 && !!(flags.wooden || flags.sky));
+  // ★IIIII166（2026-09-02）：flag23 remix 换轴臂补移植（cs:36603-36608，1458 同行号）
+  //   `bool flag23 = num7 < ws+25; if (remixWorldGen) flag23 = num7 >= (rockLayer + (h-350)*2)/3.0;`
+  //   JS 曾只剩非 remix 形（IIIII86 只补了第二档金门的 remix 形）⇒ REMIX 底带
+  //   （@h1200 gy≥823）wooden/sky 箱（UW 段 style-1 全家族 num9==0→wooden）被误送
+  //   金/洞穴/地狱档。UW#14 (338,1018)→(337,1063) w.wld 直读箱内容
+  //   168×3/铜锭×5/40×35/28×3/2350×5/8×10/72×15/9×51 = 表层档全表逐件命中
+  //   （主件 1065 仍由地狱门供给——hell 门只定 num10，loot 档选择与之独立）；
+  //   上批 LVII §⑤「地狱箱尾 6 骰直加段」假设据此翻案：29 骰=表层档全表拟合
+  //   零缺段，彼 6 骰实为表层尾 8/31·72·9 三门六掷的值拟合幻象。
+  const flag23 = gs.seedFlags.remix
+    ? gy >= (gs.rockLevel + (ctx.worldH - 350) * 2) / 3
+    : gy < gs.worldSurface + 25;
+  const isSurface = isPyrMain || (flag23 && !!(flags.wooden || flags.sky));
   // ★cs:36839 第二档门 = num7 < maxTilesY-250（地狱档为 else）——曾用 rockLevel
   //   判金档：蜘蛛巢深带 y∈[h-250,h-205) 误走地狱档（#63 波前分叉根因之一）
   // ★四档链（IL 实证 +0x1419/+0x1DFB：反编译把第二档门折进 flag23 remix 段致漏读）：
@@ -1002,7 +1014,10 @@ function placeBuriedChestInner(
   //   remix 世界该分支恒不生效=零扰动）;后续批次翻门只改此一处开关。
   const i108NoGate = !(typeof process !== 'undefined'
     && (process as unknown as { env?: Record<string, string | undefined> }).env?.SW_I108_GATE === '1');
-  const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
+  // ★IIIII166（2026-09-02）：x 带边界 1:1 化（cs:36142 拒收形 `x<0.15W || x>0.85W`
+  //   ⇒ 受理域含整点 630/3570@W4200；JS 旧严格不等号整点双拒——LVII §⑤备案1 清偿。
+  //   本种无 attempt 落格=零扰动，跨种子 1:1 保险）。
+  const inUd = !mainId && gy >= gs.worldSurface && i >= st.w * 0.15 && i <= st.w * 0.85
     && !(gs.seedFlags.remix && !i108NoGate && gy > gs.rockLevel)
     && (() => {
       if (gy > st.h - 205) return false;

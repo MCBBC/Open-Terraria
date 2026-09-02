@@ -4923,7 +4923,11 @@ const snap: SnapFn = (name) => {
   }
   function dgSwitch(x: number, y: number): void {
     const swTr = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_DG_LIGHTS_TRACE;
+    // ★IIIII165：LSW 每调用 iters/ok 账（__swI113 未挂载=零开销 dormant；x86 DR|LSW 同构）
+    const i165 = (globalThis as { __swI113?: (line: string) => void }).__swI113;
+    let lswIters = 0, lswOk = 0;
     for (let i = 0; i < 1000; i++) {
+      lswIters++;
       const a = x + ri(-12, 12);
       const b = y + ri(3, 20);
       const sgInW = inW(a, b, 0) && inW(a, b + 1, 0);
@@ -4944,6 +4948,7 @@ const snap: SnapFn = (name) => {
           const si = st.idx(a, b);
           st.flags[si] = 1; st.type[si] = DSWITCH;
           st.slope[si] = 0; st.half[si] = 0;   // PlaceTile(136)（DGL Lights_GenerateSwitch:173）
+          lswOk = 1;
         }
       }
       if (actAt(a, b) === 0) continue;
@@ -4969,6 +4974,7 @@ const snap: SnapFn = (name) => {
       if (swTr) console.log(`DG SWX i=${i} a=${a} b=${b}`);
       break;
     }
+    i165?.(`DR|LSW|x=${x}|y=${y}|iters=${lswIters}|ok=${lswOk}`);
   }
   // Collision.CanHit（Collision.cs:388-460）——两点视线。★#32 终清（2026-08-18）：
   //   原版是 do-while，**三重**终止：①到点 true；②步进后邻对（横步查上下格/
@@ -5933,6 +5939,9 @@ const snap: SnapFn = (name) => {
       entries: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>,
       defaultCount: number, hallMode: boolean,
     ): void => {
+      // ★IIIII165：GFD 每臂 picks/ok 账（dormant 同 LSW；x86 DR|GFD 同构）
+      const i165g = (globalThis as { __swI113?: (line: string) => void }).__swI113;
+      let gPicks = 0, gOk = 0;
       for (const ent of entries) {
         if (!ent.gen) continue;
         let count = defaultCount;
@@ -5941,6 +5950,7 @@ const snap: SnapFn = (name) => {
         while (count > 0) {
           nTry--;
           if (nTry <= 0) break;
+          gPicks++;
           const px = ri(ent.L, ent.R), py = ri(ent.T, ent.B);            // RandomPointInBounds
           if (!(gfIsDW(wallAt(px, py)) && actAt(px, py) === 0)) continue;// :88/:146 采点门
           const fs = gfFirstSolidDown(px, py, hallMode ? { L: ent.L, T: ent.T, R: ent.R, B: ent.B } : null);
@@ -5965,9 +5975,10 @@ const snap: SnapFn = (name) => {
             if (!ok) ok = gfDActual(fs.x, fy, fw2, zeroRefs(alb.minWC), false, nTry > 25);
           }
           if ((flagA && snapA !== alb.alch.v) || snapB !== alb.bew.v) flagA = false;   // :115/:174
-          if (ok) { count--; }                                           // :119-123/:178-182
+          if (ok) { count--; gOk++; }                                    // :119-123/:178-182
         }
       }
+      i165g?.(`DR|GFD|arm=${hallMode ? 'hall' : 'room'}|picks=${gPicks}|ok=${gOk}`);
     };
     runArm(gfFeatRooms, 4, false);
     runArm(gfFeatHalls, 6, true);

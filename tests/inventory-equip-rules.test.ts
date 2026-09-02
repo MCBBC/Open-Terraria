@@ -105,6 +105,8 @@ describe('装备唯一性（CanEquipAccessoryInSlot :1311-1327）', () => {
   it('空配饰槽位范围:accSlotMax 内可用(5 基座 + 恶魔之心)', () => {
     const inv = new Inventory();
     expect(inv.accSlotMax).toBe(ACC_ARMOR_START + 5);
+    // ★2026-08-28 门（cs:18402-18409 extraAccessory && (expertMode||gameMenu)）：
+    inv.gateExpert = true;
     inv.extraAccessory = true;
     expect(inv.accSlotMax).toBe(ACC_ARMOR_START + 6);
     void ARMOR_SLOTS;

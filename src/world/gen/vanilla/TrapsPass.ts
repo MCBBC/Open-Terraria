@@ -366,7 +366,7 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     //   坍塌；JS 旧近似漏派发 ⇒ sandy (3636,440) 井邻树 8 格 x86 塌/JS 存（#76 残差）。
     //   走 FinalCleanup 引擎 1:1 TileFrame（resetFrame=false 邻格语义，YYYYY 批
     //   s22222 #97 树坍塌 118 杀实证）；树族 dust=0（KDUST 表）掷中性。
-    if (rng && !i13Legacy() && TREE_DISPATCH_SHEETS.has(sh)) { trapEv('TD', ux, uy, sh); genTileFrameNeighbor(st, rng, ux, uy); continue; }
+    if (rng && !i13Legacy() && TREE_DISPATCH_SHEETS.has(sh)) { genTileFrameNeighbor(st, rng, ux, uy); continue; }
     if (sh === 185) { checkPileTrap(st, ux, uy); continue; }
     // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
@@ -1665,6 +1665,14 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   }
   placeHeadMirrorT(st, i5, j2, 137);                                 // ★III13 镖身写位头变异（137 非实心）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 18 * num33);  // cs:9115（frameY=18*style）
+  // ★IIII162（sandy #76 定罪修复③）：vanilla PlaceTile 对一切成功放置尾调
+  //   SquareTileFrame(i, j)（cs:60992 `if (tile.active()) { ...; SquareTileFrame(i, j); }`
+  //   ——137 落 default 臂无 per-type 级联但走本通用尾）⇒ 飞镖写格尾环 3×3
+  //   TileFrame 触邻树帧检 → CheckTree 断基整树坍塌（sandy (3636,440) 井穿案：
+  //   dart 格=树基丛林草 60（KillTile 被 IsATreeTrunk 帧门拒杀）→ 镖写格后树
+  //   440..446+3637,446 八格经尾环坍塌，x86 KLOG ln26661 全录）。JS setTileSilent
+  //   漏尾环 ⇒ 树 8 格存活（mile8 #76 唯一残差）。树族尘掷全零档 ⇒ 掷流中性。
+  cascade3x3T(st, i5, j2, rng);
   trapEv('DTW', num33, dir, 0);
   lWire(st, x2, py, i5, j2);
   return true;

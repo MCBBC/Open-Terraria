@@ -339,6 +339,8 @@ export class ConfettiBurstProj extends Entity {
         //   vX/vY 各 += Next(-50,51)×0.01 → 各 ×(1+Next(-50,51)×0.01)
         //   → 各 += Next(-50,51)×0.05（旧实现缺此 4 笔中的"×0.05 加项"两笔）
         //   + scale 微抖 ×(1+Next(-30,31)×0.01)（旧全缺）
+        //   ★O1 核销(2026-09-02)：scale 行=1456:71613 / 1457:76104 Next(-30,31)（61 值域
+        //   整型）——floor(rand*61)-30 逐位精确,合法勿动
         d.vx += (Math.floor(Math.random() * 101) - 50) * 0.01;
         d.vy += (Math.floor(Math.random() * 101) - 50) * 0.01;
         d.vx *= 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;

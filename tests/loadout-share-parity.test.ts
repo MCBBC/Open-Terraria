@@ -95,4 +95,42 @@ describe('LoadoutShare 机制三律（GetEffectiveArmor/GetEffectiveDye 1:1）',
     expect(inv.getEffectiveArmor(0)).toBeNull();
     expect(inv.effectiveSharedFrom(0, false)).toBeNull();
   });
+
+  it('存档往返：收藏标记（共享源数据）worn+loadout 双侧保留，读回共享仍生效', async () => {
+    const { World } = await import('../src/world/World');
+    const { Player } = await import('../src/entities/Player');
+    const { saveGame, loadSave } = await import('../src/save/SaveFile');
+    const w = new World(60, 40, 42, 'lo-share-test');
+    const p = new Player(100, 100, new Inventory());
+    p.inv.armor[0] = { id: iid(90), stack: 1, favorited: true };            // 身上共享源
+    p.inv.loadouts[0].armor[3] = { id: iid(492), stack: 1, favorited: true }; // 仓内共享源
+    p.inv.currentLoadout = 1;
+    const { player } = loadSave(saveGame(w, p, 0));
+    expect(player.loadouts?.[0].armor[3]?.favorited).toBe(true);
+    expect(player.armor?.[0]?.favorited).toBe(true);
+    // 回填后共享语义不灭（mainFlow 回填 {...it} 浅克隆保留 favorited）
+    const inv2 = new Inventory();
+    inv2.armor = player.armor!.map((it) => it ? { ...it } : null);
+    inv2.loadouts = player.loadouts!.map((l) => ({
+      armor: l.armor.map((it) => it ? { ...it } : null),
+      dye: l.dye.map((it) => it ? { ...it } : null),
+      hide: l.hide ? [...l.hide] : Array(10).fill(false),
+    }));
+    inv2.currentLoadout = player.currentLoadout ?? 0;
+    expect(inv2.getEffectiveArmor(3)?.id).toBe(iid(492));
+    expect(inv2.effectiveSharedFrom(3, false)).toBe(0);
+  });
+
+  it('misc 族收藏偏离清零（R4-15③）：sanitizeEquipStacks 剥旧档残留,甲/仓收藏不动', () => {
+    const inv = new Inventory();
+    inv.miscEquips[0] = { id: iid(1169), stack: 1, favorited: true };   // 宠物(旧档残留)
+    inv.miscDyes[2] = { id: iid(1007), stack: 1, favorited: true };     // 杂项染料(残留)
+    inv.armor[0] = { id: iid(90), stack: 1, favorited: true };          // 共享源,勿动
+    inv.loadouts[1].armor[3] = { id: iid(492), stack: 1, favorited: true }; // 共享源,勿动
+    Inventory.sanitizeEquipStacks(inv);
+    expect(inv.miscEquips[0]?.favorited).toBe(false);
+    expect(inv.miscDyes[2]?.favorited).toBe(false);
+    expect(inv.armor[0]?.favorited).toBe(true);
+    expect(inv.loadouts[1].armor[3]?.favorited).toBe(true);
+  });
 });

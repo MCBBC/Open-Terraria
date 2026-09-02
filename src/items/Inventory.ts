@@ -8,7 +8,7 @@
 //   trash        垃圾桶持久槽（Player.trashItem——关背包保留，死亡清空）
 // 旧版（2026-08-11 前）自创布局 0-39 背包/40-44 配饰/45-47 盔甲/48-50 时装/51-53 钱币
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
-import { ITEM_DEFS, ITEM_BY_KEY, type ArmorSlot } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { VI_KEY } from '../data/itemKeys';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -134,7 +134,8 @@ export function isAccessoryItem(id: number): boolean {
 }
 
 export function isArmorItem(id: number): boolean {
-  return !!ITEM_DEFS[id]?.armor || armorSlotIndexOfInternal(id) >= 0;
+  // ★d.armor 死前腿已移除（2026-09-02:字段全仓零写入,部位真值源=itemstats 部位表）
+  return armorSlotIndexOfInternal(id) >= 0;
 }
 
 export class Inventory {
@@ -351,7 +352,8 @@ export class Inventory {
     if (!d) return false;
     const part = i % VANITY_ARMOR_START; // 0-2=部位 3-9=配饰（与 10-19 镜像同判）
     if (part <= 2) {
-      const ok = d.armor ? d.armor.slot === (part as ArmorSlot) : armorSlotIndexOfInternal(id) === part;
+      // ★d.armor 死分支已移除（2026-09-02：字段全仓零写入,恒走 itemstats 部位表）
+      const ok = armorSlotIndexOfInternal(id) === part;
       if (!ok) return false;
       // 功能↔时装同款互斥（HasSameItemInSlot 对段扫描;DualEquipArmor 例外 :1251/:1260）
       const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
@@ -664,6 +666,13 @@ export class Inventory {
     };
     clamp(inv.armor); clamp(inv.dye); clamp(inv.miscEquips); clamp(inv.miscDyes);
     for (const lo of inv.loadouts) { clamp(lo.armor); clamp(lo.dye); }
+    // LoadoutShare 偏离清零（R4-15③）：misc 族原版无收藏语义（canFavoriteAt 仅
+    // context 0/1/2/32,IS57:358-361）——偏离批曾可 toggle,旧档残留剥除,杜绝杂项格
+    // 金边/tooltip"已共享"行假象。★armor/dye/loadouts 的收藏=共享源数据,勿动
+    const stripFav = (arr: Array<InvItem | null>) => {
+      for (const it of arr) if (it) it.favorited = false;
+    };
+    stripFav(inv.miscEquips); stripFav(inv.miscDyes);
   }
 
   static migrateLegacy(legacy: Array<{ id: number; stack: number } | null>): {

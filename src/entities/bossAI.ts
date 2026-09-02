@@ -677,9 +677,10 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
     e.dead = true; e.bossFled = true;
     return;
   }
-  // 初次生成爬行者（:32540-32553）：GetBrainOfCthuluCreepersCount(:51330-51338)=20，
+  // 初次生成爬行者（1456:32540-32553 / 1457:32616-32636）：GetBrainOfCthuluCreepersCount(:51330-51338)=20，
   // getGoodWorld（for the worthy 种子）= 40；出点 = 本体中心 ±(width/height) 随机，
-  // 初速 = Next(-30,31)*0.1。爬行者锚定本体（原版 crimsonBoss 静态位 → master 引用）
+  // 初速 = Next(-30,31)*0.1（1456:32551 / 1457:32630，61 值域整型——★O1 核销 2026-09-02：
+  // floor(rand*61)-30 形逐位精确,合法勿"修"成 60）。爬行者锚定本体（原版 crimsonBoss 静态位 → master 引用）
   // 本仓 ai0 缺省 -1120 是史莱姆 hop 计数哨兵；原版 NPC.ai[0] 缺省 0（一阶段态）。
   // 放在 bInit 门之外：存档载入的实体同样需要归一（载入值 0/-1..-3 不受影响）
   if (e.ai0 === -1120) e.ai0 = 0;
@@ -704,8 +705,9 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
     // :32650-32653 FTW:二阶段每 tick 置位重力倒置锚(消费端 Player.fixedUpdate:
     //   距脑<4000px → gravDir=-1;Main.cs:18127 锚失效清除。R23a 补——曾整缺)
     if (game.world.seedFlags?.getGoodWorld) game.world.brainOfGravity = e.id;
-    // :32575-32588 入场演出一次性（localAI[2] 门）：SoundID 3（Zombie_1）+
-    //   血块 gore 392-395（position 左上角出、初速 Next(-30,31)*0.2 各自独立掷，
+    // :32575-32588（1456 / 1457:32649-32667）入场演出一次性（localAI[2] 门）：SoundID 3（Zombie_1）+
+    //   血块 gore 392-395（position 左上角出、初速 Next(-30,31)*0.2 各自独立掷——
+    //   1456:32579-32582 / 1457:32658-32661，61 值域整型,★O1 核销 2026-09-02 合法勿改,
     //   NewGore 尾段另有 :1347-1348 扰动）+ 尘 5 号 ×20 + SoundID 15
     //   （ZombieMoan wav 未提取 → 略，登记）
     if (e.lai2 === 0) {
