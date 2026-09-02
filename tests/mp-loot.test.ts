@@ -441,5 +441,5 @@ describe('Enemy 死亡结算整合（per-client 发放 + closest 注入）', () 
     e2.hurt(999999, 10, 0, sp.hooks, 0, false, 0, true);
     expect(sp.grants).toHaveLength(0);
     expect(sp.worldDrops).toContain('vi_4957_QueenSlimeBossBag');
-  });
+  }, 30000);   // 专家袋结算 CPU 重(3 端逐个 grant+世界掉落卷),负载 70 时 5s 顶格抖动——终审定谳上调
 });

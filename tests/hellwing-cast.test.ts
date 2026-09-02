@@ -58,9 +58,9 @@ function openWorld(): World {
 }
 
 /** 私有字段括号访问(同 tests/arrow-flight-trail-dust killNow 先例) */
-const hwOf = (a: Arrow): { hx: number; hy: number } => {
+const hwOf = (a: Arrow): { x: number; y: number } => {
   const o = a as unknown as { hwAiX: number; hwAiY: number };
-  return { hx: o.hwAiX, hy: o.hwAiY };
+  return { x: o.hwAiX, y: o.hwAiY };                 // ★字段名对齐消费面(.x/.y,原稿 hx/hy 错位=NaN 根因)
 };
 
 /** 双掷角(相对基向量 x 轴正方向的带符号角) */

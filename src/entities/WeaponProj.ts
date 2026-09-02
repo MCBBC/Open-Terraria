@@ -8,7 +8,8 @@
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
-import { LIQUID_TYPE } from '../world/TileStore';
+import { LIQUID_TYPE, TileStore } from '../world/TileStore';
+import { TILE_DEFS } from '../data/tiles';
 import { TtlSpriteMap } from '../assets/ttlSprite';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -3158,12 +3159,34 @@ export class YoyoProj extends Entity {
  *   1125 CascadeExplosion（aiStyle 189）:32×32、alpha 255、hide=true（原版不画本体,
  *    视觉=AI_189 首帧尘/软木爆炸）、5 帧 ×2t=10t 存活、scale=ai[1]、
  *    usesLocalNPCImmunity+cooldown -1（每弹每敌一次;出生时对触发敌 localNPCImmunity=-1）
- *   1130 TheEyeOfCthulhuDash（aiStyle 210）:100×100、penetrate -1、AI 20t 存活
- *    （velocity ×0.92/t、MultiLerp 淡入淡出、frame 3-5 @6t）、local 免疫 -1
+ *   1130 TheEyeOfCthulhuDash（aiStyle 210,SetDefaults :10599-10610）:100×100、penetrate -1、
+ *    scale=1、AI 20t 存活（velocity ×0.92/t、α=MultiLerp 渐显 :37517-37518、frame 3-5 @6t
+ *    :37504-37512、出生音 :37485-37502）、local 免疫 -1。
+ *    ★红队 B#4 勘误（2026-09-03 逐行核 1457 原文）：「damage/kb 按 Remap 递增(:37648-37651)/
+ *    penetrate=num7 重置/scale=Remap(:37694)/成长尾尘(:37743)」全属 AI_208_GlacierFangShot
+ *    = 1115（aiStyle 208 :10407;proj1457.ts GlacierFangShot 已实装 damage×4/kb×4/pen1-3 曲线）,
+ *    非 1130——AI_210(:37480-37526)对 1130 无任何 damage/kb/penetrate/scale 写面,不移植防假对齐。
+ *    （数据层台账"1130 出生路径=蜜雷锋爆裂 WeaponProj.ts:3022"同系张冠李戴:蜜雷锋=物品 1130
+ *    Beenade,爆裂=Arrow.ts beenadeBurst 放蜂 181/566;弹 1130 唯一出生路径=555 Yelets 每 7 击
+ *    →×200% 冲撞,本文件 onYoyoHit spawnShot 支。）
  *   1134 CrystalShardMelee（aiStyle 24）:6×6、penetrate 1、light 0.5、alpha 50、
  *    scale 1.2、timeLeft 600、usesIDStaticNPCImmunity+cooldown 20（同型共享 20t 静态免疫）
  *   1135 KrakenWave（aiStyle 210）:100×100、penetrate -1、AI 同 1130（无帧动画,
  *    rotation=速度向;首 6-7t 尘尾）、IDStatic 免疫 10（三波共享） */
+/** Utils.MultiLerp（Utils.cs:279-288）——等宽分段线性锚点插值（AI_210 α 曲线 :37517-37518） */
+function utilMultiLerp(percent: number, floats: readonly number[]): number {
+  const seg = 1 / (floats.length - 1);
+  let lo = 0;
+  let hi = seg;
+  while (percent / hi > 1 && lo < floats.length - 2) {
+    hi += seg;
+    lo++;
+  }
+  return floats[lo] + (floats[lo + 1] - floats[lo]) * ((percent - seg * lo) / seg);
+}
+/** AI_210 α 插值锚（:37517/:37532）：MultiLerp(localAI[0]/20, 0,1,1,1,0.5,0) */
+const YOYO_SHOT_ALPHA_ANCHORS: readonly number[] = [0, 1, 1, 1, 0.5, 0];
+
 export interface YoyoShotSpec {
   x: number; y: number;          // 出生中心（NewProjectile 居中语义,构造内换算盒左上）
   vx: number; vy: number;
@@ -3188,6 +3211,7 @@ export class YoyoShotProj extends Entity {
   private sharedCd: HitCooldown | null;
   private ownCd = new HitCooldown();     // local 免疫（1125/1130 每弹一张）
   private age = 0;                       // localAI[0]（AI_210 20t 寿命 / 1125 帧计数）
+  private alphaVal = 0;                  // 原版 alpha（SetDefaults 缺省 0;AI_210 每拍覆写 :37518/:37533）
   private frame = 0;
   private frameCounter = 0;
 
@@ -3267,16 +3291,31 @@ export class YoyoShotProj extends Entity {
       }
       if (Math.floor(Math.random() * 3) < 2) d6Puff();              // 每 AI 帧 rand(3)<2 烟团
     } else if (this.projId === 1130 || this.projId === 1135) {
-      // AI_210（:37481-37570）：velocity ×0.92/t;1130 rotation=速度向−π/2、
+      // AI_210（:37480-37570）：velocity ×0.92/t;1130 rotation=速度向−π/2、
       // frame 3-5 @6t;1135 rotation=速度向 + 首 20/3 t 每帧 8 尘（33 号,1/3 换 302）
       this.vx *= 0.92; this.vy *= 0.92;
       if (this.projId === 1130) {
+        // 出生音（localAI[0]==0 门 = 首拍,:37485-37502）：Next(100)==0 → Roar_0 彩蛋吼
+        // （legacy 15/LegacySoundPlayer.cs:829 与 36/:1316 皆 SoundRoar[0]）×0.3、
+        // pitch 0.1−rand×0.2;否则 Item_20 ×0.08（盘上 Item_20.wav/Roar_0.wav 在库）
+        if (this.age === 1) {
+          if (Math.floor(Math.random() * 100) === 0) {
+            game.playSfxWav?.('Roar_0', 0.3, this.cx, this.cy, 0.1 - Math.random() * 0.2);
+          } else {
+            game.playSfxWav?.('Item_20', 0.08, this.cx, this.cy);
+          }
+        }
         this.frameCounter++;
         if (this.frameCounter >= 6) { this.frameCounter = 0; this.frame++; }
-        if (this.frame < 3) this.frame = 3;
+        if (this.frame < 3 || this.frame >= 6) this.frame = 3;   // :37510-37512（projFrames=6）
       } else if (this.age <= 6) {
         game.spawnParticles(this.cx, this.cy, '#C0C8E0', 3, 1.4, { life: 14, grav: 0, damp: 0.92 });
       }
+      // α 渐显（:37517-37518/:37533）：value=MultiLerp(localAI[0]/20,0,1,1,1,0.5,0)
+      // → alpha=(int)Lerp(255,0,clamp(value,0,1))——首 4 拍 255→0 淡入、中段全显、
+      // 16-20 拍 0→255 淡出（Op=(255−α)/255 由 draw 消费,与 GetAlpha A 通道相乘）
+      const mv = utilMultiLerp(this.age / 20, YOYO_SHOT_ALPHA_ANCHORS);
+      this.alphaVal = Math.trunc(255 + (0 - 255) * Math.min(1, Math.max(0, mv)));
     }
     // ---- 命中（Damage 通用管线：盒相交 → hurt;免疫表按型）----
     const cd = this.sharedCd ?? this.ownCd;
@@ -3348,14 +3387,20 @@ export class YoyoShotProj extends Entity {
       ctx.save();
       ctx.translate(this.cx, this.cy);
       ctx.rotate(rot);
-      ctx.globalAlpha = 1 - this.age / 20;
+      // GetAlpha(:80595-80602) A 通道 = Lerp(0,255,localAI[0]/19)×Opacity((255−α)/255)
+      // ——出膛淡入 × α 曲线淡出双段;RGB 侧 max(50,光照)底亮乘色由全局光照 pass 承载,
+      // 暗处 50/255 自发光底亮通道未建模（登记）;netPuppet 不跑 AI（age/α 冻结）→ 恒显
+      ctx.globalAlpha = (this.netPuppet ? 1 : Math.min(1, this.age / 19))
+        * (255 - this.alphaVal) / 255;
       ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
         -img.width / 2, -fh / 2, img.width, fh);
       ctx.restore();
       return;
     }
     drawProj(r, cam, this, this.projId, rot, this.projId === 1134 ? '#E0C0FF' : '#8090E0',
-      this.projId === 1134 ? 0.8 : Math.max(0, 1 - this.age / 20));
+      this.projId === 1134 ? 0.8                                  // α=50 → (255−50)/255（:10645）
+        : (this.netPuppet ? 1 : Math.min(1, this.age / 19))       // 1135 同 GetAlpha 支（:80595）
+          * (255 - this.alphaVal) / 255);
   }
 }
 
@@ -5942,18 +5987,44 @@ export class DaybreakExplosionProj extends Entity {
 // ==================== 雨云魔杖 1244 / 猩红魔杖 1256 云弹家族(aiStyle 45 1:1) ====================
 // 机制(Projectile.cs:28351-28520 + Player.cs:48745-48752 + Kill 钩 :76032-76037):
 //  ①施法:杖尖生成 237/243 移动云,速度=瞄准×shootSpeed(16),ai[0]/ai[1]=光标世界坐标(锚)。
-//  ②移动云:直线飞行,过锚逐轴清速(vx==0 || 已越过锚 → 该轴置 0),双轴齐停 → Kill;
+//  ②移动云:直线飞行,过锚逐轴【置零该轴速度】(:28361-28371),双轴齐停 → Kill;
 //    Kill 钩(:76032-76037)按死亡点 Center 生成 238/244 降雨云。
-//  ③降雨云:54×28 tileCollide=false,ai[1]=生存计数,≥18000 起 alpha+5/t 淡出至 255 亡
-//    (5min 寿命);云底 (centerX,bottomY) 起 2×20 带内有实心=受阻(不降雨,帧 0-2);
+//  ③降雨云:54×28 tileCollide=false,ai[1]=生存计数,≥18000 起 alpha+5/t 至 >255 亡
+//    (5min 寿命);受阻探针=云底中缝 2px×向下 20px 像素盒(Collision.SolidTiles,云底
+//    贴地才算受阻,帧 0-2);
 //    开阔每 >8t(238)/>10t(244) 从云底 ±14px 落 friendly 雨滴 239/245(vy 5,承 damage);
 //    每 10t 同主同型存活计数:238 活>2 / 244 活>1 → 最老者 ai[1]=18000 起淡出
 //    (雨云魔杖可并存 2 朵、猩红魔杖 1 朵)。
-//  ④雨滴 239/245:4×40,vy=5 恒速下落(无重力),tileCollide 即亡,penetrate 5;微光液
-//    满液 vy 反转(:28503-28508);alpha 50/100。
+//  ④雨滴 239/245:4×40,vy=5/子步 恒速下落(EU=1 → 一 tick 两子步=10px/t),tileCollide
+//    即亡,penetrate 239=5/245=2;微光液满液 vy 反转(:28503-28508);alpha 50/100;
+//    timeLeft=300 每子步递减(:17307)=150 实 tick;全场同型共享免疫 10t(:3211);
+//    Kill 尘 154/114(:75964-75993)。
 //  多人:本地权威实体,MP spawn-kind 序列化未接(登记——v3 协议 4=MagicProj 族外)。
 const RAIN_CLOUD_MOVE = new Set([237, 243]);
 const RAIN_CLOUD_RAIN = new Set([238, 244]);
+
+/** 全场同型共享静态免疫表——雨滴 239/245 `usesIDStaticNPCImmunity=true +
+ *  idStaticNPCHitCooldown=10`(SetDefaults :3211-3212/:3277-3278)= 同型所有雨滴共用
+ *  一张免疫账(非每弹一张);proj1457.IdStaticSharedTable 同构,时间驱动免逐弹 tick。
+ *  ★2026-09-03 红蓝定谳:曾用每弹私有 HitCooldown → 同一敌 10t 内可被多滴各中一次
+ *  = 雨云 DPS 虚高。结构兼容 HitCooldown(extends)可直接喂 hitEnemies */
+class RainDropSharedImmunity extends HitCooldown {
+  private sm = new Map<number, number>();
+  private readonly cdMs = Math.round(10 * 1000 / 60);    // 10t ≈ 167ms(60fps 基数)
+  override tick(): void { /* 时间驱动,无逐拍衰减 */ }
+  override ready(id: number, _cooldown: number): boolean {
+    const now = Date.now();
+    if ((this.sm.get(id) ?? 0) > now) return false;
+    this.sm.set(id, now + this.cdMs);
+    if (this.sm.size > 512) {
+      for (const [k, v] of this.sm) if (v <= now) this.sm.delete(k);
+    }
+    return true;
+  }
+  override clear(): void { this.sm.clear(); }
+}
+const RAIN_DROP_IMMUNE_239 = new RainDropSharedImmunity();
+const RAIN_DROP_IMMUNE_245 = new RainDropSharedImmunity();
 
 export class RainCloudProj extends Entity {
   w = 28; h = 28;
@@ -5985,7 +6056,11 @@ export class RainCloudProj extends Entity {
     this.projId = projId;
     this.anchorX = anchorX; this.anchorY = anchorY;
     if (RAIN_CLOUD_RAIN.has(projId)) { this.w = 54; this.h = 28; }
-    if (projId === 239 || projId === 245) { this.w = 4; this.h = 40; }
+    if (projId === 239 || projId === 245) {
+      this.w = 4; this.h = 40;
+      this.life = projectileData(projId)?.timeLeft ?? 300;   // timeLeft=300(:3210/:3292)
+      this.hitCd = projId === 239 ? RAIN_DROP_IMMUNE_239 : RAIN_DROP_IMMUNE_245;
+    }
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -6003,7 +6078,10 @@ export class RainCloudProj extends Entity {
   /** ①移动云(:28353-28379):直线飞行,过锚逐轴清速,双轴齐停 → 亡(Kill 钩原位变降雨云)。
    *  ★237/243 未关 tileCollide(SetDefaults 无该行)——撞墙/撞地同走 Kill → 钩子照样
    *  在受撞点变雨云(vanilla「云卡墙边也开始下雨」实况);管线轴零化视图先写回,
-   *  到锚判定按【碰撞后速度】读(velocity==0 即该轴完成,与原版 AI 读数序一致) */
+   *  到锚判定按【碰撞后速度】读(velocity==0 即该轴完成,与原版 AI 读数序一致)。
+   *  ★2026-09-03 红蓝定谳(:28361-28371):过锚轴须【置零该轴速度】——原版判定门本身
+   *  就是 `velocity=0` 赋值臂,漏置零=过锚轴继续全速漂移,另一轴到位时雨云落点已
+   *  越过光标(斜射最早差 1 tick 起步,最远漂出数格) */
   private aiMove(game: GameHooks): void {
     const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
@@ -6011,18 +6089,26 @@ export class RainCloudProj extends Entity {
     moveAndCollide(body, game.world, this.vx, this.vy);
     this.x = body.x; this.y = body.y;
     this.vx = body.vx; this.vy = body.vy;   // TileCollision 后写:受阻轴置 0(原版同)
-    const doneX = this.vx === 0
-      || (this.vx < 0 && this.cx < this.anchorX) || (this.vx > 0 && this.cx > this.anchorX);
-    const doneY = this.vy === 0
-      || (this.vy < 0 && this.cy < this.anchorY) || (this.vy > 0 && this.cy > this.anchorY);
-    if (doneX && doneY) {
-      this.dead = true;                                    // Kill(:28373)
-      // Kill 钩(:76032-76037):死亡点 Center 生成 238/244(0 速驻留)
-      const rain = new RainCloudProj(this.cx - 27, this.cy - 14, 0, 0, this.damage,
-        this.knockback, this.projId === 237 ? 238 : 244);
-      (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
-        .entities.add(rain, 'projectiles');
-      return;
+    if (this.anchorX !== 0 && this.anchorY !== 0) {        // :28356 num333/334 != 0 门
+      let flagX = false;
+      let flagY = false;
+      if (this.vx === 0 || (this.vx < 0 && this.cx < this.anchorX) || (this.vx > 0 && this.cx > this.anchorX)) {
+        this.vx = 0;                                       // :28362-28364
+        flagX = true;
+      }
+      if (this.vy === 0 || (this.vy < 0 && this.cy < this.anchorY) || (this.vy > 0 && this.cy > this.anchorY)) {
+        this.vy = 0;                                       // :28367-28369
+        flagY = true;
+      }
+      if (flagX && flagY) {
+        this.dead = true;                                  // Kill(:28373)
+        // Kill 钩(:76032-76037):死亡点 Center 生成 238/244(0 速驻留)
+        const rain = new RainCloudProj(this.cx - 27, this.cy - 14, 0, 0, this.damage,
+          this.knockback, this.projId === 237 ? 238 : 244);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
+          .entities.add(rain, 'projectiles');
+        return;
+      }
     }
     this.rot += this.vx * 0.02;                            // :28374
     this.frameT++;
@@ -6034,16 +6120,28 @@ export class RainCloudProj extends Entity {
     this.age++;
     if (this.age >= 18000) {                               // 5min 寿终 → 淡出
       this.fade += 5;
-      if (this.fade >= 255) this.dead = true;
+      if (this.fade > 255) { this.fade = 255; this.dead = true; }   // :28411-28416 alpha>255 才 Kill
       return;                                              // 淡出期不降雨(:28417 else-if 链)
     }
     const st = game.world.store;
-    // flag21:云底 (centerX, bottomY) 起 2×20 带无实心(:28393-28396 SolidTiles)
-    const bx = Math.floor(this.cx / 16), by = Math.floor((this.y + this.h) / 16);
+    // flag21(:28391-28396):Collision.SolidTiles(new Vector2(Center.X, bottomY), 2, 20)
+    // =【像素盒】非 tile 带——Collision.cs:3463-3465 (int)(pos/16)..(int)((pos+size)/16)
+    // 转格、:3468-3493 逐格 INCLUSIVE 判 → 实际= 云底中缝 2px 宽 × 向下 20px 深的小探针
+    // (1-2 列 × 2-3 行)。出界(:3472-3485 startX<0 / endX>=maxTilesX / startY<0 /
+    // endY>=maxTilesY-40)=受阻。★曾按「2 格宽×20 格深」误译=云下 20 格内有任意实心
+    // 即判受阻不降雨(户外近地施法整段哑弹,与原版「只挡云底贴地」语义完全两回事)
+    const cxPix = Math.trunc(this.cx);                     // num335 = (int)Center.X
+    const byPix = Math.trunc(this.y + this.h);             // num336 = (int)(position.Y + height)
+    const sx = Math.floor(cxPix / 16), ex = Math.floor((cxPix + 2) / 16);
+    const sy = Math.floor(byPix / 16), ey = Math.floor((byPix + 20) / 16);
     let open = true;
-    for (let yy = by; yy < by + 20 && open; yy++) {
-      for (let xx = bx; xx <= bx + 1; xx++) {
-        if (st.inBounds(xx, yy) && st.isSolid(xx, yy)) { open = false; break; }
+    if (sx < 0 || ex >= st.w || sy < 0 || ey >= st.h - 40) {
+      open = false;                                        // :3472-3485 出界=受阻
+    } else {
+      for (let yy = sy; yy <= ey && open; yy++) {
+        for (let xx = sx; xx <= ex; xx++) {
+          if (RainCloudProj.probeSolid(st, xx, yy)) { open = false; break; }
+        }
       }
     }
     this.frameT++;
@@ -6055,9 +6153,11 @@ export class RainCloudProj extends Entity {
       this.beat++;                                         // ai[0]++
       if (this.beat > (this.projId === 244 ? 10 : 8)) {    // :28428 >10 / :28436 >8
         this.beat = 0;
-        // NewProjectile(num335±14, num336=云底, 0, 5)——Center 语义 → 左上回写
+        // NewProjectile(num335±14, num336=云底, 0, 5)——Center 语义 → 左上回写。
+        // ★2026-09-03 红队纠偏:Next(-14, 15) = [-14,14](29 值),曾写 rand*30-15
+        //  = [-15,14] 低端多 1px
         const drop = new RainCloudProj(
-          this.cx + (Math.floor(Math.random() * 30) - 15) - 2,
+          this.cx + (Math.floor(Math.random() * 29) - 14) - 2,
           this.y + this.h - 20, 0, 5, this.damage, 0,
           this.projId === 238 ? 239 : 245);
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
@@ -6079,25 +6179,206 @@ export class RainCloudProj extends Entity {
     }
   }
 
-  /** ③雨滴(:28478-28495):vy=5 恒速下落,撞格亡,penetrate 5;微光液 vy 反转 */
+  /** ③雨滴(:28478-28510):vy=5 恒速下落,撞格亡,微光液满液 vy 反转。
+   *  ★2026-09-03 红蓝定谳:239/245 extraUpdates=1(SetDefaults :3211/:3293,数据表已载)
+   *  → 原版 Update 子步环(:16781-17345)一 tick 跑【两次】AI+位移+Damage+timeLeft--
+   *  (:17307 递减也在环内)——落速 10px/t、timeLeft=300 ÷ 2 = 150 实 tick 寿命。
+   *  曾单步 5px/t + life 3600 = 落速减半且永超时。AI 先于位移(AI():16880 →
+   *  HandleMovement:17120)——微光反转当子步即生效 */
   private aiDrop(game: GameHooks): void {
     const st = game.world.store;
-    const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h) / 16);
-    if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] === 255
-      && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.SHIMMER && this.vy > 0) {
-      this.vy *= -1;                                       // :28503-28508
+    const substeps = (projectileData(this.projId)?.extraUpdates ?? 0) + 1;   // MaxUpdates(:556-565)
+    for (let sub = 0; sub < substeps && !this.dead; sub++) {
+      const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h) / 16);
+      if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] === 255
+        && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.SHIMMER && this.vy > 0) {
+        this.vy *= -1;                                   // :28503-28508
+      }
+      const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
+        onGround: false, hitWall: false, hitHead: false, collideY: false,
+        tileCollide: true, dropThrough: false };
+      moveAndCollide(body, game.world, this.vx, this.vy);
+      this.x = body.x; this.y = body.y;
+      if (body.hitWall || body.collideY || body.hitHead) { this.killDrop(game); return; }
+      hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => { this.dropHits++; });
+      if (this.dropHits >= (projectileData(this.projId)?.penetrate ?? 5)) {   // 239=5(:3213)/245=2(:3280)
+        this.killDrop(game);                             // penetrate==0 → Kill(:17313) → 尘
+        return;
+      }
+      this.life--;                                       // timeLeft-- 每子步(:17307)
+      if (this.life <= 0) { this.killDrop(game); return; }
     }
-    const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
-      onGround: false, hitWall: false, hitHead: false, collideY: false,
-      tileCollide: true, dropThrough: false };
-    moveAndCollide(body, game.world, this.vx, this.vy);
-    this.x = body.x; this.y = body.y;
-    if (body.hitWall || body.collideY || body.hitHead) { this.dead = true; return; }
-    hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => {
-      this.dropHits++;
-      if (this.dropHits >= 5) this.dead = true;            // penetrate 5(:3209)
-    });
-    this.life--;
-    if (this.life <= 0) this.dead = true;
+  }
+
+  /** Kill 钩(:75964-75993):下落态(vy>0)溅花尘——239=154(带重力)/245=114(noGravity),
+   *  盒 (x, y+h-2, 2, 2) + position.X-=2 + alpha 38 + vel×0.1 + vel-=oldVel×0.25 + scale 0.95 */
+  private killDrop(game: GameHooks): void {
+    this.dead = true;
+    if (this.vy <= 0) return;                            // :75965/:75979 仅下落态
+    const d = game.spawnDust?.(this.x, this.y + this.h - 2, 2, 2, this.projId === 239 ? 154 : 114);
+    if (d) {
+      d.x -= 2;
+      d.alpha = 38;
+      d.vx = d.vx * 0.1 - this.vx * 0.25;
+      d.vy = d.vy * 0.1 - this.vy * 0.25;
+      d.scale = 0.95;
+      if (this.projId === 245) d.noGravity = true;
+    }
+  }
+
+  /** Collision.SolidTiles 逐格判定(Collision.cs:3488-3491):active && !inActive &&
+   *  tileSolid && !tileSolidTop(平台/家具顶豁免;坡/半砖不豁免——SolidTiles 不查,
+   *  LineOfSight.plainSolid 同串);Main.tile null(:3487)与本仓 flags==0 幽灵格同义 */
+  private static probeSolid(st: GameHooks['world']['store'], x: number, y: number): boolean {
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.flags[i] === 0) return false;
+    if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;   // inActive()
+    const d = TILE_DEFS[st.type[i]];
+    return !!d && d.solid && !d.platform;                // tileSolid && !tileSolidTop
   }
 }
+
+// ================= 水晶蛇 3210 → 523（aiStyle 95 独占族,Projectile.cs:33572-33597） =================
+// 1457 定谳:非蛇形追踪弹——直飞 → 相位闸到点上浮+横向阻尼;详见本文件头台账。
+
+export const CRYSTAL_SERPENT_PROJ = 523;
+
+/** 出手速度掷（Player.cs:48892-48902 逐行 1:1,掷序 = X,Y,速度,X,Y,相位 = 原版语句序）:
+ *  ①方向向量(=杖尖→光标 raw 差向量 :47687-47688,不乘 shootSpeed)X ±Next(31)×0.04=±1.2 /
+ *    Y ±Next(31)×0.03=±0.9 → Normalize(:48896)——归一化在前 ⇒ shootSpeed 8.5 只进方向
+ *  ②×Next(70,91)×0.1 = 7.0..9.0(:48897)
+ *  ③再来一轮同幅抖动(:48898-48900)→ 终速域 ≈ [7−1.5, 9+1.5] = 5.5..10.5
+ *    (抖动向量模长上界 √(1.2²+0.9²)=1.5)
+ *  相位 = Next(20)(:48902 第 10 参 = ai[0],自由段 = 31−相位 拍)。
+ *  rand 可注入（测试钉值）;缺省 Math.random。零向量方向保持 (0,0) 防 NaN（原版
+ *  Normalize 除零行为,仅在光标=杖尖时可达,实际不可触）。 */
+export function rollCrystalSerpentVelocity(aimX: number, aimY: number,
+  rand: () => number = Math.random): { vx: number; vy: number; phase: number } {
+  const jx = () => (Math.floor(rand() * 61) - 30) * 0.04;   // Main.rand.Next(-30,31)*0.04f
+  const jy = () => (Math.floor(rand() * 61) - 30) * 0.03;   // Main.rand.Next(-30,31)*0.03f
+  let x = aimX + jx();                                       // :48893-48894
+  let y = aimY + jy();
+  const len = Math.hypot(x, y);                              // :48895-48896 Normalize
+  if (len > 0) { x /= len; y /= len; }
+  const spd = (70 + Math.floor(rand() * 21)) * 0.1;          // :48897 Next(70,91)*0.1 = 7.0..9.0
+  x *= spd; y *= spd;
+  x += jx();                                                 // :48898-48900 二轮抖动
+  y += jy();
+  return { vx: x, vy: y, phase: Math.floor(rand() * 20) };   // :48902 Next(20)
+}
+
+export class CrystalSerpentProj extends Entity {
+  w = 32; h = 32;                                  // SetDefaults :5931-5932(贴图+NPC 命中盒)
+  damage: number;
+  knockback: number;
+  projId = CRYSTAL_SERPENT_PROJ;
+  critChance = 0.04;
+  armorPen = 0;
+  /** timeLeft 全局缺省 3600(:789)——实际上浮必先出世界界(:16790),本值仅兜底 */
+  life = 3600;
+  dead = false;
+  /** 冰霜引擎资格（ranged=true :5935 → melee||ranged 门 :11512-11515;onHit 自补,
+   *  绕开 hitEnemies 只挂 melee 门的引擎级偏差） */
+  frostEligible = true;
+  /** ai[0] 相位(出手 rand(20) 传入):<=30 期间每拍自增不转向——自由段 = 31−相位 拍 */
+  private phase: number;
+  /** alpha 淡入(XNA 语义:255=全透;SetDefaults :5935 → AI −20/拍 下钳 100 :33573-33582) */
+  private alpha = 255;
+  private localAI0 = 0;
+  private rot = 0;                                 // rotation = vx×0.1(:33592)
+  private wet = false;
+  private honey = false;
+  private shimmer = false;
+  private hitCd = new HitCooldown();
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number,
+    knockback: number, phase = 0) {
+    super();
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.damage = damage; this.knockback = knockback;
+    this.phase = phase;
+  }
+
+  /** 绘制不透明度 = (255−alpha)/255（XNA alpha 语义;终值 100 → 0.6078,非全不透明） */
+  get drawAlpha(): number { return Math.max(0, (255 - this.alpha) / 255); }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.dead) return;
+    // ① 世界边界出界 = active=false 无 Kill 特效（Update :16790 aiStyle!=3 支——
+    //    上浮必出顶界,Item_54/尘花只属 Kill 路径,此处静默消散）
+    const st0 = game.world.store;
+    if (this.x <= 0 || this.y <= 0
+      || this.x + this.w >= st0.w * TILE || this.y + this.h >= st0.h * TILE) {
+      this.dead = true;
+      return;
+    }
+    // ② 淡入(:33573-33582):localAI[0] 先数 3 拍,其后 alpha −20/拍,下钳 100
+    if (this.localAI0 > 2) {
+      this.alpha -= 20;
+      if (this.alpha < 100) this.alpha = 100;
+    } else {
+      this.localAI0++;
+    }
+    // ③ 相位闸上浮(:33583-33591):自由段 = 31−相位 拍;其后 vy −0.05/拍(软帽 −8)+vx ×0.98
+    if (this.phase > 30) {
+      if (this.vy > -8) this.vy -= 0.05;
+      this.vx *= 0.98;
+    } else {
+      this.phase++;
+    }
+    // ④ 旋转 = vx × 0.1(:33592;"蛇"的全部摆动感 = 贴图随横速微倾)
+    this.rot = this.vx * 0.1;
+    // ⑤ 液体浮升【无视相位闸】(:33593-33596;wet 位 = 上一拍湿判——原版序 AI(:15434)
+    //    先于湿判(:16901),1 拍滞后照抄)
+    if (this.wet) {
+      if (this.vy > 0) this.vy *= 0.98;
+      if (this.vy > -8) this.vy -= 0.2;
+      this.vx *= 0.94;
+    }
+    // ⑥ 湿判(Update :16901 WetCollision,Collision.cs:1578-1592 整除版复用)
+    const wc = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+    this.wet = wc.wet; this.honey = wc.honey; this.shimmer = wc.shimmer;
+    // ⑦ 位移+tile 碰撞:tile 盒 = 中心 10×10 缩盒(:20072-20075,锚 0.5,0.5 :19982-19984,
+    //    32×32 盒左上回写差 11px);湿态位移折减 = Body.liqFactor 通道(水/岩浆 .5、
+    //    蜂蜜 .25、微光 .375 = wetVelocity 派生 :17032-17036;纯岩浆无折减=1);fallThrough
+    //    缺省 true(:17587) → dropThrough=true 穿平台;受阻 = 通用默认支 HitTiles+Kill
+    //    (:18160-18166)
+    const body = { x: this.x + 11, y: this.y + 11, w: 10, h: 10, vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: true,
+      liqFactor: this.shimmer ? 0.375 : this.honey ? 0.25 : this.wet ? 0.5 : 1 };
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    this.x = body.x - 11; this.y = body.y - 11;
+    if (body.hitWall || body.collideY || body.hitHead) { this.killFx(game); return; }
+    // ⑧ 命中敌(Damage_GetHitbox :15037 = 全 32×32 盒,523 无特例;penetrate=1 首中耗尽 →
+    //    Damage() 尾 Kill;Poisoned 600..1740t 由 hitEnemies 尾 applyProjStatus(523) 表驱动)
+    hitEnemies(this, game, this.hitCd, 9999, 0, this.armorPen, (ent) => {
+      if (this.frostEligible) {
+        // 冰霜盔甲引擎(melee||ranged 门 :11512-11515,ranged 弹在门内)
+        applyFrostBurn((game.player as unknown as { equipStats: { frostBurn: boolean } })
+          .equipStats.frostBurn, ent as unknown as Record<string, number>);
+      }
+      this.killFx(game);                           // penetrate 1 → 首中即亡(Kill 钩)
+    });
+    if (this.dead) return;
+    // ⑨ 寿终(timeLeft 3600 :789 → Kill 同钩)
+    this.life--;
+    if (this.life <= 0) this.killFx(game);
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, this.projId, this.rot, '#E58CFF', this.drawAlpha);
+  }
+
+  /** Kill 钩(:74622-74633):Item_54 + 25×dust256(盒内随机径向 Next(1,30)×0.1,noGravity,
+   *  dust.alpha=弹 alpha——视觉近似:统一取盒中心/径向 1.5/粉晶色,尘花域全盒 32×32) */
+  private killFx(game: GameHooks): void {
+    if (this.dead) return;
+    this.dead = true;
+    game.playSfxFiles(['Item_54'], 1, this.cx, this.cy);
+    game.spawnParticles(this.cx, this.cy, '#E58CFF', 25, 1.5, { life: 60, grav: 0, size: 4 });
+  }
+}
+
+// ============================================================================

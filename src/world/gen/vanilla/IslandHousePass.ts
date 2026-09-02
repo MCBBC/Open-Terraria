@@ -19,6 +19,8 @@ const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
 const TABLE = TILE_BY_KEY['table']!;
 const CHAIR = TILE_BY_KEY['chair']!;
 const BANNER = TILE_BY_KEY['v_91_banners']!;
+/** ★IIIII186：remix 桌组 tile469（tables_group_2,1457 cs:80589 corrupt 支） */
+const TABLE_GROUP = TILE_BY_KEY['v_469_tables_group_2']!;
 /** cs:79869 叶族豁免（tile.type != 192/191/384）。★MMMMMMM 同型审计（#46 家族）：
  *  必须比对 **JS tile id**——原版字面量是 vanilla sheet 号,本仓 id=注册序
  *  （sheet192→id103/sheet191→id104/sheet384→id99;曾直比 192/191/384 实际命中的是
@@ -97,6 +99,14 @@ function islandHouse(
   const dir = rng.next() < 0.5 ? -1 : 1;
   const halfW = rng.int(7, 11);
   const hgt = rng.int(5, 6);
+  // ★IIIII186 remix 三段分叉（1457/1458 cs:80496-80509 门≡80569-80618/80591-80604≡同号）：
+  //   remixArm = remixWorldGen && (!tenthAnniversaryWorldGen || getGoodWorldGen)——
+  //   ①门 style：remix=crimson?5:38（非 remix=9,cs:80500-80508）
+  //   ②窗(21)+横幅(91)：整段在 `!remixArm` 门内（remix 世界**不放窗/横幅且不掷 3 次横幅骰**）
+  //   ③桌椅：remix=crimson?(桌14 s5,椅15 s8):(桌469 s2,椅15 s38)（非 remix=桌14 s7,椅15 s10）
+  const remixArm = gs.seedFlags.remix === true
+    && !(gs.seedFlags.tenthAnniversary === true && gs.seedFlags.getGoodWorld !== true);
+  const crimsonArm = !!gs.crimson;   // cs:80361 `flag = crimson`（drunk 分支 remix 不达）
   ihMark(`IH|stepA|i=${i}|j=${j}|${dir},${halfW},${hgt}`);
   // 找地板(cs:79857-79868):探测列上找"wall>0 && active && SolidTile 且
   // type∉{192,191,384}(生命树叶/生命木/红木叶族)"的首行,取其上一格;
@@ -186,9 +196,10 @@ function islandHouse(
     const ti3 = st.idx(doorX, floorY - 3);
     const guard3 = st.flags[ti3] === 1 && st.half[ti3] === 0 && !!TILE_DEFS[st.type[ti3]]?.solid;
     if (guard3 && solidTile(st, doorX, floorY + 1)) {
+      const doorStyle = remixArm ? (crimsonArm ? 5 : 38) : 9;   // ★IIIII186 cs:80500-80508
       for (let dy = 0; dy < 3; dy++) {
         const variant = rng.int(0, 2); // PlaceDoor 每行独立 genRand.Next(3)
-        st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED, variant * 18, 486 + dy * 18);
+        st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED, variant * 18, 54 * doorStyle + dy * 18);
       }
       // ★QQQQQ（m20260811 #69 定谳）：case10 成功支尾 SquareTileFrame(doorX,floorY)
       //   （cs:59895/59902）——3×3 TileFrame 头对非活跃格清 halfBrick/slope/块漆
@@ -253,15 +264,18 @@ function islandHouse(
       }
     }
   }
-  // 窗(Glass Wall 21,cs L48312-48327):halfW>10 → ±2 宽,否则 ±1;
+  // 窗(Glass Wall 21,1457 cs:80570-80585):halfW>10 → ±2 宽,否则 ±1;
   // 中心 x = i∓halfW/2±1,y = (j1+j2)/2 - 1 ± 1
-  const winHalf = halfW > 10 ? 2 : 1;
-  const winY = Math.floor((j1 + j2) / 2) - 1;
-  for (const wx of [i - Math.floor(halfW / 2) + 1, i + Math.floor(halfW / 2) - 1]) {
-    for (let dx = -winHalf; dx <= winHalf; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        if (!st.inBounds(wx + dx, winY + dy)) continue;
-        st.wall[st.idx(wx + dx, winY + dy)] = 21;
+  // ★IIIII186：整段在 `!remixArm` 门内（cs:80569）——remix 世界不放窗
+  if (!remixArm) {
+    const winHalf = halfW > 10 ? 2 : 1;
+    const winY = Math.floor((j1 + j2) / 2) - 1;
+    for (const wx of [i - Math.floor(halfW / 2) + 1, i + Math.floor(halfW / 2) - 1]) {
+      for (let dx = -winHalf; dx <= winHalf; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (!st.inBounds(wx + dx, winY + dy)) continue;
+          st.wall[st.idx(wx + dx, winY + dy)] = 21;
+        }
       }
     }
   }
@@ -274,21 +288,39 @@ function islandHouse(
   //  SolidTile2】——锚格(椅底格)不查净空，放置时直接覆写（旧实现走 placeFurn
   //  全格净空=比原版严，桌失败时还会连带跳过两椅）。
   const tableX = i + (Math.floor(halfW / 2) + 1) * -dir;
-  placeFurn(st, tableX, j2 - 1, TABLE, 7);
-  placeChairD(st, tableX - 2, j2 - 1, CHAIR);
-  placeChairD(st, tableX + 2, j2 - 1, CHAIR);
+  // ★IIIII186（cs:80591-80604）：桌椅 remix 三分——crimson:桌14 s5+椅15 s8;
+  //   corrupt:桌469 s2+椅15 s38;非 remix:桌14 s7+椅15 s10（帧步:椅 40/风格）
+  if (remixArm) {
+    if (crimsonArm) {
+      placeFurn(st, tableX, j2 - 1, TABLE, 5);
+      placeChairD(st, tableX - 2, j2 - 1, CHAIR, 8);
+      placeChairD(st, tableX + 2, j2 - 1, CHAIR, 8);
+    } else {
+      placeFurn(st, tableX, j2 - 1, TABLE_GROUP, 2);
+      placeChairD(st, tableX - 2, j2 - 1, CHAIR, 38);
+      placeChairD(st, tableX + 2, j2 - 1, CHAIR, 38);
+    }
+  } else {
+    placeFurn(st, tableX, j2 - 1, TABLE, 7);
+    placeChairD(st, tableX - 2, j2 - 1, CHAIR);
+    placeChairD(st, tableX + 2, j2 - 1, CHAIR);
+  }
   // 左椅翻转（cs:80069-80070 对 (num28-2, num8-1/-2) frameX+=18——原版无脑加，
   // 椅未放置时两格 inactive 帧不值钱；此处只对真放置的椅格加，可见行为等价）
   for (const dy of [-1, 0]) {
     const ci = st.idx(tableX - 2, j2 - 1 + dy);
     if (st.flags[ci] && st.type[ci] === CHAIR) st.frameX[ci] += 18;
   }
-  // 横幅(cs L48334-48348):1×3 顶锚,style 7-9(步长 18)
-  for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
-    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top', 1, false);
+  // 横幅(cs:80619-80637):1×3 顶锚,style 7-9(步长 18)
+  // ★IIIII186：整段在 `!remixArm` 门内（cs:80619 同窗门）——remix 不放横幅
+  //   且**不掷 3 次 Next(7,10)**（remix 每屋 −3 掷,掷账主源之一）
+  if (!remixArm) {
+    for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
+      placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top', 1, false);
+    }
+    const bannerX = dir > 0 ? i - halfW : i + halfW;
+    placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
   }
-  const bannerX = dir > 0 ? i - halfW : i + halfW;
-  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
   ihMark(`IH|BAN|i=${i}`);
   // ★IIIII21（cs:80630-80653）：islandStyle==1（沙漠云岛）→ 岛面棕榈丛
   //   TryGrowingTreeByType(323)=GrowPalmTree；Next(3,6) 目标数、每轮二掷采样
@@ -348,9 +380,10 @@ function tileActiveAt(st: TileStore, x: number, y: number): boolean {
 }
 
 /** Place1x2（cs:46665-46691）椅子语义：SolidTile2(x,y+1) && !active(x,y-1)
- *  才放；锚格(底格)不查净空（原版直接覆写）。帧 = style10 → fy 400/418
- *  （furnitureStyleBase sheet15 竖排 40 步；朝向翻转 +18 由调用方追加）。 */
-function placeChairD(st: TileStore, x: number, anchorY: number, chair: number): boolean {
+ *  才放；锚格(底格)不查净空（原版直接覆写）。帧 = style（默认10）→ fy 40*style/40*style+18
+ *  （furnitureStyleBase sheet15 竖排 40 步；朝向翻转 +18 由调用方追加）。
+ *  ★IIIII186 补 style 参（remix 椅 s8/s38,cs:80592-80603）。 */
+function placeChairD(st: TileStore, x: number, anchorY: number, chair: number, style = 10): boolean {
   // SolidTile2（cs:70497）：active && tileSolid && slope==0 && !halfBrick
   if (!st.inBounds(x, anchorY + 1)) return false;
   const bi = st.idx(x, anchorY + 1);
@@ -358,8 +391,8 @@ function placeChairD(st: TileStore, x: number, anchorY: number, chair: number): 
     || st.slope[bi] !== 0 || st.half[bi]) return false;
   // 上格须净空（Place1x2 只查这一格）
   if (!st.inBounds(x, anchorY - 1) || st.flags[st.idx(x, anchorY - 1)]) return false;
-  st.setTileSilent(x, anchorY - 1, chair, 0, 400);
-  st.setTileSilent(x, anchorY, chair, 0, 418);
+  st.setTileSilent(x, anchorY - 1, chair, 0, 40 * style);
+  st.setTileSilent(x, anchorY, chair, 0, 40 * style + 18);
   return true;
 }
 

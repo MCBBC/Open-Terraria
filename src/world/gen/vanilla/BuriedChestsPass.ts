@@ -1316,6 +1316,23 @@ function placeBuriedChestInner(
   if (style === 32) flags.mushroom = true;
   if (style === 16) flags.temple = true;
   if (style === 13) flags.skyTheme = true;
+  // ★IIIII186 天空箱 remix 转换（1457/1458 cs:36557-36575≡同号）：tile21 且
+  //   (style13 或主件∈{159,65,158,2219}) 时 remix&&!getGood&&!tenth →
+  //   crimson(含 drunk 左右支) → style=43；否则 tile=467 + style=3。
+  //   JS 曾整缺 → remix 浮空岛箱 12 格 T467>21（#69 尾残）。
+  if (gs.seedFlags.remix && !gs.seedFlags.getGoodWorld && !gs.seedFlags.tenthAnniversary
+    && tile === CHEST && (style === 13 || mainId === 159 || mainId === 65 || mainId === 158 || mainId === 2219)) {
+    let flag22 = gs.crimson;
+    if (gs.seedFlags.drunkWorld) {
+      flag22 = (gs.crimsonLeft && i < st.w / 2) || (!gs.crimsonLeft && i > st.w / 2);
+    }
+    if (flag22) {
+      style = 43;
+    } else {
+      tile = CHEST2;
+      style = 3;
+    }
+  }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
   {
     const wDbg = (globalThis as { __swChestWrite?: (i: number, topY: number, tile: number, style: number, fx: number) => void }).__swChestWrite;

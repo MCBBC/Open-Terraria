@@ -1933,7 +1933,11 @@ export class Minimap {
     const st = world.store;
     const lut = this._mapLUT!;
     const buf = this.p32!;
-    const { type, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
+    // ★幽灵保域（2026-09-03）：flags bit0（active 位）首门——幽灵格（flags=0,type≠0,
+    // x86 对齐行为,finalize 不净化）只留残型,小地图不得按 type 直画成实体（雪楔/
+    // 沙漠蛋/矿石散点化石层）。与增量路径 colorFor（st.flags[i] && st.type[i]!==0）
+    // 同一门;墙/液体/背景分支不查 active（幽灵格 wall 仍有效,同 MapHelper 模型）
+    const { type, flags, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
     const mapPaintPacked = (packed: number, colorType: number, isWall: boolean): number => {
       const r = packed & 255, g = (packed >>> 8) & 255, b = (packed >>> 16) & 255;
@@ -1967,7 +1971,7 @@ export class Minimap {
       for (let x = 0; x < world.w; x++) {
         const i = rowOff + x;
         const t = type[i];
-        if (t !== 0) {
+        if (t !== 0 && flags[i] !== 0) {
           if (t === PIXEL_ART_TILE) {
             const r = frameX[i] >> 8, g = frameX[i] & 255, b = frameY[i];
             buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
@@ -4449,7 +4453,8 @@ export class Renderer {
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = st.idx(tx, ty);
-        if (st.type[i] !== DUMMY || st.frameY[i] !== 0 || st.frameX[i] % 36 !== 0) continue;
+        // ★幽灵保域（2026-09-03）：原版主绘制循环 active() 门同款——幽灵残型不画
+        if (!st.flags[i] || st.type[i] !== DUMMY || st.frameY[i] !== 0 || st.frameX[i] % 36 !== 0) continue;
         const flip = st.frameX[i] >= 36;
         const e = byAnchor.get(ty * 100000 + tx);
         let row = 0;
@@ -6301,6 +6306,26 @@ export class Renderer {
         if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
         if (wyrmMirror && (e.wormFollow ? e.facing > 0 : e.facing < 0)) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
+        // 血肉墙三件套 113 嘴/114 之眼/115 饥饿者：AI 逐 tick 写 spriteDirection——
+        // 113 wallOfFleshAI spriteDirection=direction(:26102)/114 之眼
+        // direction=墙.direction;spriteDirection=direction(:26216-26217)/115 饥饿者
+        // spriteDirection=sign(玩家−部件)(:26546-26555)；通用 Draw :23358-23360
+        // `spriteDirection==1 → FlipHorizontally`。三件套同在 ROTATION_NPC 旋转档
+        // （rotationDriven 禁通用镜像行）曾漏翻 = 墙左→右行进(facing=1)时嘴/眼贴图
+        // 不镜像（原版贴图原生朝左,本仓 facing=1 ≙ spriteDirection=1）——用户实报
+        // 2026-09-02。右→左(facing=-1)原版本就不翻,该向渲染参数零变化。
+        // 翻转位于 rotate(e.spin) 之后 = XNA origin 系内层 flip,与 vanilla 矩阵序一致
+        if (idR === 113 || idR === 114 || idR === 115) {
+          if (e.facing > 0) ctx.scale(-1, 1);
+        }
+        // ★P′-MAJOR（红队 P′ 复捞,2026-09-02）：同机制家族缺口——128-131 骷髅泰坦
+        //  四臂（129 锯/130 钳/128 炮/131 激光,aiStyle 33-36）AI 每 tick
+        //  spriteDirection = -(int)ai[0]（NPC.cs:28133/:28423/:28703/:28939）,本仓
+        //  AI 侧已算好等值字段 bossAI.ts:1655 `e.facing = -side` 但渲染端无人消费
+        //  =四臂贴图左右朝向恒镜像错误（pre-existing 债,与三件套同机制同批清偿）。
+        if (idR >= 128 && idR <= 131) {
+          if (e.facing > 0) ctx.scale(-1, 1);
+        }
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         // ★有 color 的 NPC：base+color 两遍合一为单张合成精灵（xnaCombined 注），
@@ -14510,19 +14535,24 @@ export class Renderer {
     const hit = (x: number, y: number, w: number, h: number) =>
       mx >= x && mx <= x + w && my >= y && my <= y + h;
     const btnX = ox + size - 22, btnY = oy + 252, btnS = 20;
-    const btnHover = hit(btnX, btnY, btnS, btnS);
+    // ★2026-09-02 用户要求：按钮迁入背包 2×4 钮格（UI 侧 DOM 钮,开同一面板）——
+    //   背包打开时画布按钮不再绘制（防双份）;面板本体（若已开）照常绘制/可交互
+    const hudBtns = !this.playerInventory;
+    const btnHover = hudBtns && hit(btnX, btnY, btnS, btnS);
     this.timeUiHover = btnHover || (this.timePanelOpen && hit(ox, oy + 276, size, 64));
-    ctx.fillStyle = btnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
-    ctx.fillRect(btnX, btnY, btnS, btnS);
-    ctx.strokeStyle = btnHover ? '#ffd76e' : '#4a5aa0';
-    ctx.strokeRect(btnX + 0.5, btnY + 0.5, btnS - 1, btnS - 1);
-    ctx.fillStyle = '#e8e8f4';
-    ctx.font = 'bold 13px monospace';
-    ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
-    if (clicked && btnHover) {
-      // ★首用确认门（2026-08-27 用户要求,同道具搜索）：未确认 → 弹窗明示超游
-      //   风险,确认后 localStorage 持久放行且本次即开面板；已确认 → 直接开合
-      showJourneyQuickGate('time', () => { this.timePanelOpen = !this.timePanelOpen; });
+    if (hudBtns) {
+      ctx.fillStyle = btnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
+      ctx.fillRect(btnX, btnY, btnS, btnS);
+      ctx.strokeStyle = btnHover ? '#ffd76e' : '#4a5aa0';
+      ctx.strokeRect(btnX + 0.5, btnY + 0.5, btnS - 1, btnS - 1);
+      ctx.fillStyle = '#e8e8f4';
+      ctx.font = 'bold 13px monospace';
+      ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
+      if (clicked && btnHover) {
+        // ★首用确认门（2026-08-27 用户要求,同道具搜索）：未确认 → 弹窗明示超游
+        //   风险,确认后 localStorage 持久放行且本次即开面板；已确认 → 直接开合
+        showJourneyQuickGate('time', () => { this.timePanelOpen = !this.timePanelOpen; });
+      }
     }
     if (this.timePanelOpen) {
       const px = ox, py = oy + 276, pw = size, ph = 64;
@@ -14559,19 +14589,21 @@ export class Renderer {
 
     // ---- 天气调整按钮 + 面板（同时间按钮模式；预设回调由 Game 注入 weatherPreset） ----
     const wBtnX = ox + size - 46, wBtnY = oy + 252;
-    const wBtnHover = hit(wBtnX, wBtnY, btnS, btnS);
+    const wBtnHover = hudBtns && hit(wBtnX, wBtnY, btnS, btnS);
     const wPanelY = oy + 276 + (this.timePanelOpen ? 72 : 0);
     const wPanelH = 112;
     this.weatherUiHover = wBtnHover || (this.weatherPanelOpen && hit(ox, wPanelY, size, wPanelH));
-    ctx.fillStyle = wBtnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
-    ctx.fillRect(wBtnX, wBtnY, btnS, btnS);
-    ctx.strokeStyle = wBtnHover ? '#ffd76e' : '#4a5aa0';
-    ctx.strokeRect(wBtnX + 0.5, wBtnY + 0.5, btnS - 1, btnS - 1);
-    ctx.fillStyle = '#e8e8f4';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('⛅', wBtnX + btnS / 2, wBtnY + 15);
-    if (clicked && wBtnHover) {
-      showJourneyQuickGate('weather', () => { this.weatherPanelOpen = !this.weatherPanelOpen; });
+    if (hudBtns) {
+      ctx.fillStyle = wBtnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
+      ctx.fillRect(wBtnX, wBtnY, btnS, btnS);
+      ctx.strokeStyle = wBtnHover ? '#ffd76e' : '#4a5aa0';
+      ctx.strokeRect(wBtnX + 0.5, wBtnY + 0.5, btnS - 1, btnS - 1);
+      ctx.fillStyle = '#e8e8f4';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText('⛅', wBtnX + btnS / 2, wBtnY + 15);
+      if (clicked && wBtnHover) {
+        showJourneyQuickGate('weather', () => { this.weatherPanelOpen = !this.weatherPanelOpen; });
+      }
     }
     if (this.weatherPanelOpen) {
       const px2 = ox, py2 = wPanelY, pw2 = size;

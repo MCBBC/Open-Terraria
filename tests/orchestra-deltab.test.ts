@@ -16,7 +16,7 @@ import {
 
 type PartRec = {
   x: number; y: number; color: string;
-  vx?: number; vy?: number; life?: number; size?: number;
+  vx?: number; vy?: number; life?: number; lifeExact?: number; size?: number;
 };
 type DustRec = { type: number; scale: number };
 type DustLike = Record<string, unknown>;
@@ -181,7 +181,9 @@ describe('δB 参数级清偿回归（红队五项;rng 注入）', () => {
     expect(h.particles.length).toBe(3 + 3 + 1);             // 第一带 3+第二带 3+第三带 1
     const band2 = h.particles.slice(3, 6);
     for (const p of band2) {
-      expect(p.life).toBe(30);                              // num8=30
+      // ★⑨lifeExact 清偿（2026-09-03）：TTL=num8=30f 定值（:3842→SetTypeInfo :3849）——
+      //  spawnParticles 走 lifeExact 档（opts 键随改,原 life 抖动档退役）
+      expect(p.lifeExact).toBe(30);                         // num8=30
       expect(Math.hypot(Number(p.vx), Number(p.vy))).toBeCloseTo(0.7);   // velocity=dir(num7)×vector4
       expect(Math.hypot(p.x - 300, p.y - 300))
         .toBeLessThanOrEqual(0.7 * 0.7 * 30 * 0.2 + 4 * 0.7 + 1e-9);     // 位向偏移+抖动包络

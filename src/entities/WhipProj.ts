@@ -498,6 +498,9 @@ export class WhipProj extends Entity {
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, this.dmgNow,
         Math.sign(p.x - this.x) * 2, 'playerProj');
       for (const ent of game.enemies()) {
+        // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
+        //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）
+        if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean } & import('./WhipTag').WhipTagged;

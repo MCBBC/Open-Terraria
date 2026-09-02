@@ -1127,7 +1127,8 @@ describe('十批 pot-goreTier：CheckPot per-style 瓦砾 Gore 分档', () => {
     st.setTileSilent(px + 1, py - 1, POT, 18, style * 36);
     return { hit: [px + 1, py] as const, anchor: [px, py - 1] as const };
   };
-  const goreIdsOf = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c[0] as number);
+  // 泛型接收（vi.spyOn(GorePiece,'newGore') 的具体 MockInstance 不便协变到 unknown 形参签名）
+  const goreIdsOf = (spy: { mock: { calls: Array<unknown[]> } }) => spy.mock.calls.map((c) => c[0] as number);
 
   it('定档：0/4/7/10/13/34 六档三元组与二元组逐 id 相等', () => {
     const w = new World(40, 40, 7, 'decor-support-pot-gore');

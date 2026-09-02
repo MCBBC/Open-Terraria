@@ -219,7 +219,7 @@ export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
 /** 岩浆石/火焰护手——近战【弹幕】命中（StatusNPC :11529-11541：melee 门，
  *  **必中三支**：Next(7)==0 → OnFire3(323) 360t=6s；else Next(3)==0 → 120t=2s；
  *  else → 60t=1s。★曾只移植第一支+落空即 return=6/7 命中无 buff。
- *  挥砍侧是另一公式（applyMagmaStoneSwing） */
+ *  挥砍侧是另一公式（applyMagmaStoneSwing,Player.cs:6551-6562:1/4→6s、否则1/2→4s、否则2s） */
 export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): void {
   // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
   // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
@@ -244,7 +244,7 @@ export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): v
   if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!magmaStone) return;
   const r = Math.random();
-  const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 1;
+  const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 2;   // ★R3 F2:否则档 120t=2s(Player.cs:6551-6562),曾误 1s
   if (sec > (enemy.onFire3T ?? 0)) enemy.onFire3T = sec;
 }
 

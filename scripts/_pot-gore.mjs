@@ -140,6 +140,50 @@ const res = await page.evaluate(async () => {
   gp.GorePiece.newGore = origNewGore;
   g.sfx.play = origSfx;
   g.potLoot = origLoot;
+
+  // ---- ⑦ 十二批：653 Rubblemaker 材质罐定额带（CheckPot 653 分支 :57432-57487）----
+  // 整件清 + style 定额带掉材质块一件 + 显式不吃 SpawnThingsFromPot（:57488）；
+  // potLoot 被替换为哨兵（抛错）以证明 653 不到达罐族战利品表
+  try {
+    const items = await import('/src/data/items.ts');
+    const tiles653 = await import('/src/data/tiles.ts');
+    const T653 = idOfSheet(653);
+    const origLoot653 = g.potLoot;
+    g.potLoot = () => { throw new Error('653 reached potLoot'); };
+    const bands = [[0, 133], [6, 664], [9, 4564], [12, 154], [33, 3081], [37, 0]];
+    const out653 = [];
+    let seq6 = 0;
+    for (const [style, wantVid] of bands) {
+      const by = PY + 2 + (seq6 % 4) * 8; seq6++;
+      const bx = PX + 40 + (seq6 % 3) * 8;
+      timeline.length = 0;
+      for (let dx = -1; dx <= 3; dx++) for (let dy = -3; dy <= 1; dy++) {
+        if (st.inBounds(bx + dx, by + dy)) st.setTileSilent(bx + dx, by + dy, 0, 0, 0);
+      }
+      for (let dx = 0; dx < 2; dx++) st.setTileSilent(bx + dx, by, STONE, 0, 0);
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++)
+        st.setTileSilent(bx + dx, by - 2 + dy, T653, dx * 18, style * 36 + dy * 18);
+      const cap = [];
+      const origSpawn = g.spawnDrop.bind(g);
+      g.spawnDrop = (px, py, key, n) => {
+        const m = /^vi_(\d+)/.exec(String(key));
+        if (m) cap.push(Number(m[1]));
+        return origSpawn(px, py, key, n);
+      };
+      let lootErr = false;
+      try { g['breakTile'].call(g, bx + 1, by - 1); } catch (e) { lootErr = String(e).includes('potLoot'); }
+      g.spawnDrop = origSpawn;
+      let cleared = true;
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++)
+        if (st.get(bx + dx, by - 2 + dy) !== 0) cleared = false;
+      const resolvable = wantVid > 0 && !!items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[wantVid] ?? ''];
+      out653.push({ style, wantVid, got: cap, resolvable, cleared, lootErr });
+    }
+    g.potLoot = origLoot653;
+    out.p653 = out653;
+    out.p653ok = out653.every((r) => r.cleared && !r.lootErr
+      && (r.resolvable ? r.got.includes(r.wantVid) : r.got.length === 0));
+  } catch (e) { out.p653 = { error: String(e) }; out.p653ok = false; }
   return out;
 });
 
@@ -156,5 +200,6 @@ for (const c of res.cases) {
 }
 console.log(`asset Gore_51.png: ${JSON.stringify(res.asset)}`);
 if (!res.asset?.loaded) fail++;
+if (!res.p653ok) { fail++; console.log('p653:', JSON.stringify(res.p653)); }
 console.log(fail === 0 ? 'ALL PASS' : `FAILED: ${fail}`);
 process.exitCode = fail === 0 ? 0 : 1;

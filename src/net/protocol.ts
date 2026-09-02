@@ -132,17 +132,19 @@ export const enum Msg {
   SyncItem = 21,       // 房主→广播 {u32 netId, u8 op(0=spawn/1=take/2=despawn), str key,
                        //   u16 stack, f32 x,y,vx,vy}（原版同号 SyncItem）
   SyncNPC = 23,        // C→S（房主上行）：{u16 count, [u32 netId, str key, f32 x,y,vx,vy,
-                       //    i16 hp, i16 maxHp, u16 animT, u8 flags(bit0=boss)
-                       //    [f32 ai1, f32 ai2（flags bit1=1 时条件携带——刺球 NPC 70
-                       //    aiStyle 20 锚点，位在条目内=读取无歧义；旧端无位即无段）]]}
+                       //    i16 hp, i16 maxHp, u16 animT, u8 flags(bit0=boss)]}
+                       //    [u16 anchorCount, [u32 netId, f32 ai1, f32 ai2]×anchorCount
+                       //     （帧级尾段，≥1 条锚点才附——刺球 NPC 70 aiStyle 20 锚点）]}
                        // S→C（v4 短码+AOI 逐端过滤）：{u16 count, [u8 eflags, ...,
                        //    eflags.bit0=含 key 全量(u32 netId + u16 codeId + str key)
-                       //             bit1=boss, bit2=含刺球锚点（值走帧级尾段）
-                       //             否则仅 u16 codeId（客户端 codeId→netId/key 表）]
+                       //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
                        //    [u16 aiCount, [u16 code, f32 ai1, f32 ai2]×aiCount（帧级尾段，
-                       //    ≥1 条锚点才附——旧访客读完 count 条即返回,帧尾残余永不被
-                       //    当下一条 eflags 消费=零错位；条目内携带会让旧端错位+越界读
-                       //    抛 RangeError 毒化 FrameParser）]}
+                       //    ≥1 条锚点才附）]
+                       //  ★两向尾段都必须在条目循环【后】：条目定长推进的旧端（旧 server/
+                       //  旧访客）读完 count 条即返回，帧尾残余永不被当下一条 netId/eflags
+                       //  消费=零错位（旧端无长度校验，条目内携带=整批错位+越界读抛
+                       //  RangeError 毒化 FrameParser）。尾段自身=唯一标记（无新增位），
+                       //  上行按 netId、下行按 code 关联回填
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
                        //   （kind 低 6 位（接收掩码 0x3f）: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot

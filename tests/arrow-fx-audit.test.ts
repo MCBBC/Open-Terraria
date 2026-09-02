@@ -11,10 +11,11 @@
 //     尘速×2+=弹速、fadeIn 1.22/裂片 1.5）+ 入水灭（wet → Kill）
 // 附：1097 火绒狐火球（:57513-57573）出生尘爆一次性 + scale −0.01/子步 <0.3 自爆
 //     （71 子步,EU=1 → ≈36 帧,先于 timeLeft=300）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
-import { Arrow } from '../src/entities/Arrow';
+import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
+import type { Renderer } from '../src/render/Renderer';
 
 interface DustRec {
   type: number; alpha: number; scale: number; noGravity: boolean; sx: number; sy: number;
@@ -52,6 +53,26 @@ function emptyWorld(): World {
 
 function flyFrames(a: Arrow, game: GameHooks, frames: number): void {
   for (let i = 0; i < frames && !a.dead; i++) a.fixedUpdate(1 / 60, game);
+}
+
+/** 录制型 ctx：只在 drawImage 时快照 globalAlpha/globalCompositeOperation（⑧ 加算
+ *  合成面断言用——node 环境无 canvas,其余成员给空实现）。 */
+function makeDrawCtx() {
+  const calls: Array<{ ga: number; gco: string }> = [];
+  let ga = 1;
+  let gco = 'source-over';
+  const ctx = {
+    save: () => {}, restore: () => {}, translate: () => {}, rotate: () => {}, scale: () => {},
+    beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => {},
+    set globalAlpha(v: number) { ga = v; },
+    get globalAlpha() { return ga; },
+    set globalCompositeOperation(v: string) { gco = v; },
+    get globalCompositeOperation() { return gco; },
+    filter: 'none',
+    imageSmoothingEnabled: false,
+    drawImage: () => { calls.push({ ga, gco }); },
+  } as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
 }
 
 describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
@@ -187,5 +208,79 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     expect(a.dead).toBe(false);
     flyFrames(a, game, 10);                              // 71 子步 → scale<0.3 自爆
     expect(a.dead).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★2026-09-02 遗留批金标：⑦ 1097 tileCollide 动态翻转（:58255-58269）/
+//   ⑧ 265·355 α==0 期加算白合成面（GetAlpha :81286-81293 → alpha0additive 档）
+// ---------------------------------------------------------------------------
+describe('Arrow 遗留批金标（2026-09-02 ②）', () => {
+  it('⑦ 1097 tileCollide 动态翻转：SetDefaults false 起步 → 下坠期撞块/上升期穿墙 → 40 子步后恒撞块', () => {
+    // 起始值：数据表 tileCollide=false（SetDefaults :10236）→ ctor noTileCollide=true
+    const down = new Arrow(400, 288, 6, 5, 10, 1, 1097, null, { life: 300 });
+    const up = new Arrow(400, 288, 6, -5, 10, 1, 1097, null, { life: 300 });
+    const gate = (a: Arrow) => (a as unknown as { noTileCollide: boolean }).noTileCollide;
+    expect(gate(down)).toBe(true);
+    expect(gate(up)).toBe(true);
+    const game = makeGame(emptyWorld(), []);
+    flyFrames(down, game, 1);                            // vy=5>0 → tileCollide=true
+    expect(gate(down)).toBe(false);
+    flyFrames(up, game, 1);                              // vy=−5<0 → tileCollide=false（穿墙）
+    expect(gate(up)).toBe(true);
+    // 40 子步（EU=1 → 20 帧）后恒撞块：强置 vy<0 仍 tileCollide=true（age≥40 支与 vy 无关）
+    flyFrames(down, game, 19);
+    expect(down.age).toBeGreaterThanOrEqual(40);
+    (down as unknown as { vy: number }).vy = -5;
+    flyFrames(down, game, 1);
+    expect(gate(down)).toBe(false);
+    // 上升期分支在 age≥40 后不再生效（age<40 支同参对照=曾会置 true）
+    flyFrames(up, game, 19);                             // 40 子步，vy 仍由重力链负向? grav=+0.15@40 → 已趋正
+    expect(gate(up)).toBe(false);
+  });
+
+  it("⑧ 265/355 α>0 期全隐（ga=0）/ α==0 期 ga=1 + 'lighter' 加算白；charm 分流走常规合成", () => {
+    setProjSpriteOverride(265, { width: 12, height: 12 } as unknown as HTMLImageElement);
+    setProjSpriteOverride(355, { width: 12, height: 12 } as unknown as HTMLImageElement);
+    const game = makeGame(emptyWorld(), []);
+    const a = new Arrow(400, 288, 6, 0, 10, 1, 265, null, { grav: 0 });
+    const snap = (arr: Array<{ ga: number; gco: string }>) => arr[0];
+    const c1 = makeDrawCtx();
+    a.draw({ ctx: c1.ctx } as unknown as Renderer, {} as never);
+    expect(a.alpha).toBe(255);
+    expect(snap(c1.calls)).toEqual({ ga: 0, gco: 'lighter' });   // α>0→Transparent：入组 lighter 但 ga=0 零贡献
+    flyFrames(a, game, 6);                               // −50/子步 ×6 → α==0
+    expect(a.alpha).toBe(0);
+    const c2 = makeDrawCtx();
+    a.draw({ ctx: c2.ctx } as unknown as Renderer, {} as never);
+    expect(snap(c2.calls)).toEqual({ ga: 1, gco: 'lighter' });   // (255,255,255,0) A=0 满强加算白
+    // 355 同档
+    const b = new Arrow(400, 288, 6, 0, 10, 1, 355, null, { grav: 0 });
+    flyFrames(b, game, 6);
+    const c3 = makeDrawCtx();
+    b.draw({ ctx: c3.ctx } as unknown as Renderer, {} as never);
+    expect(snap(c3.calls)).toEqual({ ga: 1, gco: 'lighter' });
+    // ★charm 分流（M-2 同案）：aiStyle=1 被 :80605-80611 White*Opacity 截走 → 常规合成
+    a.phoenixQuivered = true;
+    // whiteSpriteOf 需要 document.createElement（charm 白帧烘焙）——node 环境打桩
+    const ctx2d = {
+      imageSmoothingEnabled: false, globalCompositeOperation: 'source-over',
+      fillStyle: '#fff', drawImage: () => {}, fillRect: () => {},
+    };
+    vi.stubGlobal('document', {
+      createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }),
+    });
+    try {
+      const c4 = makeDrawCtx();
+      a.draw({ ctx: c4.ctx } as unknown as Renderer, {} as never);
+      expect(snap(c4.calls)).toEqual({ ga: 1, gco: 'source-over' });  // α=0 → White×Opacity 满亮
+      const c5 = makeDrawCtx();
+      (a as unknown as { alpha: number }).alpha = 100;
+      a.draw({ ctx: c5.ctx } as unknown as Renderer, {} as never);
+      expect(snap(c5.calls).ga).toBeCloseTo((255 - 100) / 255, 9);
+      expect(snap(c5.calls).gco).toBe('source-over');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

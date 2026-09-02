@@ -92,7 +92,9 @@ export function solidTile3DD(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   const tid = st.type[i];
-  if (tid === 0) return false;
+  // ★幽灵保域（2026-09-03）：nactive() 首支 active() 补 flags bit0（原版
+  //  WorldGen.cs SolidTile3(Tile) `t.nactive() && …`）——幽灵格不可站不受理扫描
+  if (tid === 0 || (st.flags[i] & 1) === 0) return false;
   if ((st.wire[i] & TileStore.WIRE_ACTUATED) !== 0) return false;   // inActive 位
   return TileStore.SOLID_LUT[tid] === 1 && !TILE_DEFS[tid]?.platform;
 }

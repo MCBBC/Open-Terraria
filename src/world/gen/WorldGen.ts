@@ -165,7 +165,7 @@ export function tryApplyingCopiedSeed(input: string): {
   };
 }
 
-/** 管线附属尾段（finalize 幽灵/帧净化、墓园时钟、vampire/randomSpawn 终段、
+/** 管线附属尾段（finalize 帧净化+幻影活性清扫、墓园时钟、vampire/randomSpawn 终段、
  *  多格残片兜底扫）——非原版 GenPass，给一个小权重自尾窗供长条走完。 */
 const GEN_TAIL_WEIGHT = 4;
 
@@ -523,7 +523,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
   }
 
-  ctx.prog?.beginTail();     // 附尾窗：finalize 幽灵/帧净化 + 墓园时钟 + 秘种子终段 + 残片兜底
+  ctx.prog?.beginTail();     // 附尾窗：finalize 帧净化/幻影活性清扫 + 墓园时钟 + 秘种子终段 + 残片兜底
   finalize(ctx);
   // ★IIIII16：night of the living dead 初始态（ResetTempsToDayTime WorldFile.cs:1019-1024
   //   ——首存复位 dayTime=false/bloodMoon=true/time=1.0/moonPhase=0；tile 面（遍地墓园）
@@ -547,9 +547,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
   //   #105 快照位 → mile8 槽 57 把静态化差全记在 #105。现经 finalCleanupPass
   //   的 opts.beforeShimmer 钩子在原版位执行（hfIs1457 门同前；1456 口径无此扫，
   //   双态文件不受扰）。
-  // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
-  // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
-  // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
+  // ★终扫(finalize 之后):曾因 finalize 幽灵净化把"flags=0 但 type 残留"的多格
+  // 物体清成 0、在清扫 pass 之后【再造残片】而设兜底(2026-08-13 缺位断言实锤:
+  // 生成后 pot 残片 1 处)。★幽灵保域后净化已删,残片主源消失,但清扫对活性格
+  // 的残片判定(findFragments 活性格候选门)仍幂等且廉价,此处保留兜底。
   runMultitileFragmentSweepPass(ctx.store);
   // ★IIII102c：出口稠密化——生成全程 sink 稀疏（洞=null 镜像 Main.chest）,此处剥离
   // 洞保留槽序的活箱坐标序列（与 .wld chests 段同构;运行期/存档面零感知）。
@@ -587,7 +588,7 @@ import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
-import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood } from './vanilla/HalfBrickPass';
+import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood, setKillTileTailFlags } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
@@ -620,7 +621,7 @@ import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
 import {
-  runSurfaceOreAndStonePass, runFallenLogsPass, runDyePlantsPass, runVinesPass,
+  runSurfaceOreAndStonePass, runFallenLogsPass, runExtraLiquidAddBubbleBlocks, runDyePlantsPass, runVinesPass,
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
   runGrassPlantsPass, runGlowingMushroomPlantsPass,
   runSunflowersPart2Pass, runJunglePlantsPart2Pass,
@@ -802,6 +803,8 @@ function vanillaTerrain(ctx: GenCtx) {
   //   ——世界级 Main.getGoodWorld，作用于生成期一切 KillTile 调用方（Smooth/Waterfalls/
   //   TileCleanup/陷阱等），经本 setter 广播给共享 killTile 引擎，等价 vanilla 全局数组读。
   setKillTileGetGood(!!gs.seedFlags.getGoodWorld);
+  // ★IIIII187：KillTile 尾冰族灌水臂（cs:64439-41）的 remix/drunkenWorld 腿同点注入
+  setKillTileTailFlags(!!gs.seedFlags.remix, !!gs.seedFlags.drunkWorld);
   // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
@@ -1139,6 +1142,12 @@ function vanillaSurfaceOre({ store, rng }: GenCtx) {
 function vanillaFallenLogs({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs || sbDenySome(gs.seedFlags)) return;         // ★IIIII44 cs:18645
+  // ★IIIII189（cs:18647-18651）：extraLiquid(waterpark) bubble(379) 团块臂——
+  //   倒木段前置、同一 fresh pass 流内消费（每槽头 reseed=vanilla RunPass 重播）。
+  //   首差=「倒木水景」槽 (591,79) A/T/L/Lt 全通道（/tmp/iii185-out 首差 #75）。
+  if (gs.seedFlags.extraLiquid && !gs.seedFlags.roundLandmasses) {
+    runExtraLiquidAddBubbleBlocks(store, rng, gs);
+  }
   runFallenLogsPass(store, rng, gs);
 }
 
@@ -2303,10 +2312,19 @@ const V_SHEET_DIM: Record<number, [number, number]> = (() => {
 //   finalize 帧净化纵向豁免的消费面（见 finalize 内注）。
 const VERTICAL_STYLE_SHEETS = new Set([92, 93, 453]);
 function finalize({ store, world }: GenCtx) {
-  // 幽灵净化:生成期 TileRunner 会在空气格写残留 type(原版语义,渲染不可见),
-  // 但我们的存档格式无 active 位——进入存档前归零(防重读激活成浮空块)
+  // ★幽灵保域（2026-09-02 GH-A/GH-B 双审计定谳）：幽灵净化【删除】——原指征
+  //   （存档格式无 active 位，防重读激活成浮空块）已由 serialize.ts 的 tileActive
+  //   差分通道（v5）根治，active 位随档落盘=对齐原版 .wld（inactive 位随档）。
+  //   x86 pre 世界有 1,471,380 幽灵格（act=0,type≠0），本净化曾使 JS pre=0：
+  //   138 个裸 active(false) 保型写点（ghost-audit.tsv DEACT 族）的产出被出口
+  //   一笔勾销，GERunner（WG.cs:77013 裸读 type 转化链，HardmodePass IIIII177
+  //   纯 type 直写）/TileCleanup/FinalCleanup 等裸读 type 消费者失配。
+  //   消费者门（vanilla 语义）：非活性格不渲染（ChunkCache 主遍 flags 门）、
+  //   不碰撞（TileStore.isSolid/isPlatform/isActive active 位门=SolidTile/
+  //   TileCollision :2331 首》、不挡光（TileLightScanner LightIsBlocked :154
+  //   active 门）、不挡液（LiquidSim blocksLiquid flags 门=IIIII70b 在案）。
+  //   仅保留幻影活性不变量：type=0 格不可带活位（裸写遗留的活位幻影）。
   for (let i = 0; i < store.type.length; i++) {
-    if (!store.flags[i] && store.type[i] !== 0) store.type[i] = 0; // 幽灵 type
     if (store.type[i] === 0) store.flags[i] = 0; // 幻影活性(type 0 不可有 flags)
   }
   // ---- 帧越界净化：生成期大量 type 直写/覆盖不清帧（LivingTree setLeaf、Terrain

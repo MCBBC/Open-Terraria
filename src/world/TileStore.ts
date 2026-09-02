@@ -124,8 +124,12 @@ export class TileStore {
   get(x: number, y: number): number { return this.inBounds(x, y) ? this.type[this.idx(x, y)] : 0; }
 
   isActive(x: number, y: number): boolean {
-    // 原版 nactive() = active && !inActive（Tile.cs:383-394）：已致动格视为不活跃
-    return this.inBounds(x, y) && this.type[this.idx(x, y)] !== 0
+    // 原版 nactive() = active && !inActive（Tile.cs:242-248/:591-606）：已致动格视为不活跃。
+    // ★幽灵保域（2026-09-02）：active 位读 flags bit0——幽灵格（flags=0,type≠0,
+    // 原版 active(false) 残型）不算活跃。此前 flags≡(type≠0) 恒等式（finalize
+    // 出口净化维持）下省略 flags 读无害，保域后必须显式查位（vanilla
+    // SolidTile/TileCollision:2331/液体/寻家等全走 active()）。
+    return this.inBounds(x, y) && this.flags[this.idx(x, y)] !== 0
       && (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) === 0;
   }
 
@@ -141,6 +145,11 @@ export class TileStore {
     //  ① idx 只算一次 ② 实心判定走 SOLID_LUT(类型 id → 1/0 的 Uint8Array,
     //  免对象查找与属性访问;TILE_DEFS 构建后不变,LUT 同构)
     const i = this.idx(x, y);
+    // ★幽灵保域（2026-09-02）：首门=原版 SolidTile(i,j) 的 active()（WorldGen.cs
+    //  :70650-70652 `active() && tileSolid[type] && …`）——幽灵格（flags=0,type≠0,
+    //  x86 pre 世界 1,471,380 格）非实心不碰撞；此前靠 finalize 出口净化维持
+    //  "type≠0⇒active" 恒等式,保域后必须显式查位
+    if (this.flags[i] === 0) return false;
     if (this.wire[i] & TileStore.WIRE_ACTUATED) return false; // 已致动不碰撞
     return TileStore.SOLID_LUT[this.type[i]] === 1;
   }
@@ -177,6 +186,9 @@ export class TileStore {
   isPlatform(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const i = this.idx(x, y);
+    // ★幽灵保域（2026-09-02）：active 位首门（原版 TileCollision :2331
+    //  `!tile.active() → continue` 的平台支同门）——幽灵平台不可站
+    if (this.flags[i] === 0) return false;
     if (this.wire[i] & TileStore.WIRE_ACTUATED) return false;   // nactive()（致动=不可站）
     const d = TILE_DEFS[this.type[i]];
     if (!d?.platform) return false;

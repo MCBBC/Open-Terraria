@@ -140,7 +140,10 @@ export function drownCollision(
       //   坡面/半砖带液反例计水;blockType()=halfBrick?1:(slope?slope+1:0),
       //   !=0 ⇔ half||slope>0（Tile.cs:204-216）。
       const t = st.type[idx];
-      if (j === topRow && t !== 0 && !!TILE_DEFS[t]?.solid && !TILE_SOLID_TOP_FAMILY.has(t)
+      // ★幽灵保域（2026-09-03）：active() 纯在场位补 flags bit0（原版 Collision.cs:1418
+      //  `!tile.active()` 支）——幽灵实心格头顶那行液体照常计水（不豁免）
+      if (j === topRow && t !== 0 && (st.flags[idx] & 1) !== 0 && !!TILE_DEFS[t]?.solid
+        && !TILE_SOLID_TOP_FAMILY.has(t)
         && !(includeSlopes && (st.half[idx] !== 0 || st.slope[idx] > 0))) continue;
       const drop = (256 - liq) / 32;
       const surfY = j * TS + drop * 2;

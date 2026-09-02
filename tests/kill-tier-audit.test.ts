@@ -317,14 +317,14 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const a = mkDeathGame({ world: w });
     (a.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
     (a.g as unknown as Record<string, unknown>).spawnDrop =
-      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
+      (x: number, y: number, key: string, n = 1) => { drops.push([x, y, key, n]); };
     a.g.onProjectileDeath(412, 30 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
     expect(w.store.get(30, 189)).toBe(silverPile);           // 银币堆落格（:79191-79194）
     expect(drops).toHaveLength(0);
     const b = mkDeathGame({ world: w });
     (b.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
     (b.g as unknown as Record<string, unknown>).spawnDrop =
-      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
+      (x: number, y: number, key: string, n = 1) => { drops.push([x, y, key, n]); };
     w.store.setTileSilent(32, 189, silverPile, 0, 0);        // 格已占
     b.g.onProjectileDeath(412, 32 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
     expect(w.store.get(32, 189)).toBe(silverPile);           // 被占不变
@@ -349,27 +349,27 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const far = mkDeathGame({ world: w });
     (far.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
     (far.g as unknown as Record<string, unknown>).spawnDrop =
-      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
-    far.g.onProjectileDeath(109, 25 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
-    expect(w.store.get(25, 189)).toBe(0);                    // 过远不放（num17=-1）
+      (x: number, y: number, key: string, n = 1) => { drops.push([x, y, key, n]); };
+    far.g.onProjectileDeath(109, 40 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(40, 189)).toBe(0);                    // 过远不放（num17=-1）
     expect(drops).toHaveLength(1);
-    expect(drops[0][2]).toBe('vi_593_snow_block');           // num18=593（:79217-79218）
+    expect(drops[0][2]).toBe('vi_593_SnowBlock');           // num18=593（:79217-79218）
   });
 
   it('⑩ HitTiles 面（660 冒烟）：命中格撒 tile 色系尘 3 粒（mapColor、格心锚）；悬空消亡不撒', () => {
     const w = emptyWorld();
     const stone = TILE_INTERNAL_BY_SHEET.get(1);
     expect(stone).toBeDefined();
-    w.store.setTileSilent(25, 188, stone!, 0, 0);
+    w.store.setTileSilent(25, 100, stone!, 0, 0);
     const parts: Array<[number, number, string, number]> = [];
     const hit = mkDeathGame({ world: w });
     (hit.g as unknown as Record<string, unknown>).spawnParticles =
       (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
-    hit.g.onProjectileDeath(660, 25 * TILE, 188 * TILE - 10, 10, 10, 0, 4, 20, {});
+    hit.g.onProjectileDeath(660, 25 * TILE, 100 * TILE - 10, 10, 10, 0, 4, 20, {});
     expect(parts).toHaveLength(1);                           // 1 命中格 × GetTileDustAmount(fail)=3
     expect(parts[0][3]).toBe(3);
     expect(parts[0][0]).toBe(25 * TILE + 8);                 // 格心锚
-    expect(parts[0][1]).toBe(188 * TILE + 8);
+    expect(parts[0][1]).toBe(100 * TILE + 8);
     const miss = mkDeathGame({ world: w });
     (miss.g as unknown as Record<string, unknown>).spawnParticles =
       (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };

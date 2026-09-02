@@ -269,7 +269,6 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     const edgeY = dir > 0 ? b.y + b.h : b.y;
     const ty = Math.floor(edgeY / TILE);
     const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
-    if (b.y > 5000 && b.y < 6000) console.log('DBGY x=', Math.round(b.x), 'y=', Math.round(b.y), 'ty=', ty, 'cols=', x0, x1, 'solid54,357=', world.store.isSolid(54, 357), 'solid53,357=', world.store.isSolid(53, 357));
     // 原版取整行最高面（Collision.cs:1610-1631 num13 取最大盒顶），不能 break 在最左列——
     // 否则左列半砖/右列整砖时身体会嵌进整砖 8px
     let bestTop = Infinity;
@@ -911,16 +910,22 @@ function unembedPass(b: Body, world: World): void {
     return;
   }
   // ★悬空刷角假嵌入门（2026-09-02 向导电梯定谳,用户实报 Starter World 楔死+
-  //   行为日志 326 事件+探针 _guidewedge4/5 A/B 复现）：仅【顶行】刷实心墙角
-  //  （topEmbedded,中心格干净）且身体悬空下落（!onGround && vy>0）的姿态 =
-  //  「坠落掠过墙顶/平台角」的瞬态假嵌入——真城镇 NPC 案例：向导 18×40 挤
-  //  1 格宽门洞,左缘 1px 嵌进 (3180,378) 花岗岩、脚下 379-383 全空,顶行每
-  //  10t 擦到 (3180,378)→抬升支 +16px→重力拉回,极限环 cy 6055↔6070 永久
-  //  电梯（日志 hw=1 顶墙+g=0+末尾 −14px 回弹）。原版无 unembed 等价机制,
-  //  此姿态交还原版物理：继续下沉直至被下方合法面 catch（实测落到 slope2
-  //  平台坡道→自行走脱困）。真卡顶（站台态 onGround=true,凹龛/tent 案）与
-  //  活埋（centerSolid）不走本门,照旧救援。
-  if (topEmbedded && !centerSolid && !b.onGround && b.vy > 0) return;
+  //   行为日志 326 事件+探针 _guidewedge-verdict A/B 复现）：仅【顶行】刷实心
+  //  墙角（topEmbedded,中心格干净）且身体【无支撑】(!onGround)的姿态 = 掠过
+  //  墙顶/平台角的瞬态假嵌入——真城镇 NPC 案例：向导 18×40 挤 1 格宽门洞,
+  //  左缘 1px 嵌进 (3180,378) 王朝木、脚下 379-383 全空,顶行每 10t 擦到
+  //  (3180,378)→抬升支 +16px→重力拉回,极限环 cy 6055↔6070 永久电梯（日志
+  //  hw=1 顶墙+g=0+末尾 −14px 回弹）。★门取 vy>=0 非 >0（2026-09-02 备案
+  //  收齐扩面）：vy==0 悬空态（跳跃顶点恰刷角 / 顶头 catch 当拍 / 悬停飞行
+  //  体贴檐）同属无支撑,抬升同样是 16px 非原版瞬移;vy<0 真上升段保持旧路径
+  //  不扩面。有支撑面（地面 catch / 坡面 glue）在 unembedPass 时点恒
+  //  onGround=true 或 vy 已被清零→不落本门（slopeCollide :190 贴合置
+  //  onGround 实证）。原版无 unembed 等价机制,此姿态交还原版物理：继续
+  //  下沉直至被下方合法面 catch（实测落到下方平台/坡道→自行走脱困）；
+  //  若下方全实心则沉成 centerSolid 活埋→15t 延迟支接管,无漏救窗口。
+  //  真卡顶（站台态 onGround=true,凹龛/tent 案）与活埋（centerSolid）不走
+  //  本门,照旧救援。
+  if (topEmbedded && !centerSolid && !b.onGround && b.vy >= 0) return;
   const emb = (b.embedTicks ?? 0) + 1;
   b.embedTicks = emb;
   // ★topEmbedded 快速响应(2026-08-31):头顶 solid 区嵌入的 15t 延迟期 = 无限上下

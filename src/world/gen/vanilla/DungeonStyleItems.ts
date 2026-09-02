@@ -350,6 +350,7 @@ export const ITEM_PLACE: Record<number, { t: number; s: number | null }> = {
   2145: { t: 42, s: 22 },
   2146: { t: 42, s: 23 },
   2249: { t: 21, s: 29 },
+  2544: { t: 21, s: 32 },
   2617: { t: 21, s: 45 },
   3884: { t: 467, s: 0 },
   3891: { t: 42, s: 37 },

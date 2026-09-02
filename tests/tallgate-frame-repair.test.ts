@@ -213,3 +213,61 @@ describe('M-2c 行归一（tallGateRowOf = CheckTallGate :52129-52133 heights �
     expect(tallGateRowOf(188 + 56)).toBe(3);                          // band 2
   });
 });
+
+// ★2026-09-03 红蓝对抗批:补 TallGateOpeningInfoProvider.TryOpenDoor 几何门
+//  (DoorOpeningHelper.cs:172-192)——曾缺此门=扫描(玩家盒±2px)命中 388 即开:
+//  站门顶脚下被开洞/悬空半身对门也误开。vanilla 门盒=(锚X*16,锚Y*16,16,80),
+//  gravDir=1 → 高度+16(底外延一格);须与收缩盒(hitbox.Y+1/H-2,:322-324)相交
+//  (严格不等式)且玩家垂直全含。
+describe('高门自动开几何门（TryOpenDoor :172-192 行为锁）', () => {
+  const mkGate = () => {
+    const w = new World(60, 120, 1, 'tg3');
+    const st = w.store;
+    const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
+    const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; sfx: { play(n: string): void };
+      input: { rightDown: boolean; downAction(a: string): boolean };
+      openTallGates: Map<number, number>; tickCount: number; player: unknown;
+      updateTallGateAuto(): void;
+    };
+    g.world = w;
+    g.sfx = { play: () => {} };
+    g.input = { rightDown: false, downAction: () => true };   // 持输入(过站定门)
+    g.openTallGates = new Map();
+    g.tickCount = 0;
+    const player = { x: 30 * 16 + 4, y: 44 * 16, w: 20, h: 42, vx: 1, dead: false };
+    g.player = player;
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    return { g, st, player, T388, T389 };
+  };
+
+  it('玩家垂直全含于门盒(640..736) → 开', () => {
+    const { g, st, player, T389 } = mkGate();
+    player.y = 45 * 16 - player.h;          // 脚=门底(720),盒 678..720 → 收缩 679..719 ⊆ 640..736
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T389);
+  });
+
+  it('站门顶(脚=门顶 640)不开——vanilla 不开脚下门(相交门失败)', () => {
+    const { g, st, player, T388 } = mkGate();
+    player.y = 40 * 16 - player.h;          // 盒 598..640,收缩 599..639:与门盒不相交(639 < 640)
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T388);
+  });
+
+  it('脚在门底+16 以下(752)不开——垂直全含失败(751 > 736)', () => {
+    const { g, st, player, T388 } = mkGate();
+    player.y = 47 * 16 - player.h;
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T388);
+  });
+
+  it('贴边不算相交(Rectangle.Intersects 严格):玩家左缘=门右缘(496)不开', () => {
+    const { g, st, player, T388 } = mkGate();
+    player.x = 31 * 16;                     // 盒 496..516:左缘贴门右缘,扫描(±2px)仍会扫到列 30
+    player.y = 45 * 16 - player.h;
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T388);
+  });
+});

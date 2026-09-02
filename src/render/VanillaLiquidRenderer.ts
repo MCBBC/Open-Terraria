@@ -368,8 +368,12 @@ export function drawVanillaLiquids(
       typeA[i] = toVanillaType(st.liquidType[si]);
       visTypeA[i] = typeA[i]; // P3 只跑到底部 10 行外（同原版 L152）——预填本格类型兜底，
                               // 否则底带格子 visTypeA=0 被当水画（原版靠跨帧残留缓存掩蔽）
+      // ★幽灵保域（2026-09-03）：实心判定首门 = 原版 LiquidCache.IsSolid =
+      // WorldGen.SolidOrSlopedTile（LiquidRenderer.cs:198）的 tile.active() 门——
+      // 幽灵格（flags=0,type≠0,x86 对齐残型）不算实心,否则其"化石层"会压住
+      // 邻格液面形态。halfBrick 支无 active 门（vanilla :197 裸读）保持原样
       const d = TILE_DEFS[st.type[si]];
-      isSolidA[i] = d && d.solid ? 1 : 0;
+      isSolidA[i] = st.flags[si] !== 0 && !!d && d.solid ? 1 : 0;
     }
   }
   }   // P1 结束
@@ -387,8 +391,12 @@ export function drawVanillaLiquids(
       typeA[i] = toVanillaType(st.liquidType[si]);
       visTypeA[i] = typeA[i]; // P3 只跑到底部 10 行外（同原版 L152）——预填本格类型兜底，
                               // 否则底带格子 visTypeA=0 被当水画（原版靠跨帧残留缓存掩蔽）
+      // ★幽灵保域（2026-09-03）：实心判定首门 = 原版 LiquidCache.IsSolid =
+      // WorldGen.SolidOrSlopedTile（LiquidRenderer.cs:198）的 tile.active() 门——
+      // 幽灵格（flags=0,type≠0,x86 对齐残型）不算实心,否则其"化石层"会压住
+      // 邻格液面形态。halfBrick 支无 active 门（vanilla :197 裸读）保持原样
       const d = TILE_DEFS[st.type[si]];
-      isSolidA[i] = d && d.solid ? 1 : 0;
+      isSolidA[i] = st.flags[si] !== 0 && !!d && d.solid ? 1 : 0;
     }
   }
   // 液体包围盒(P1 扫描产出,内区坐标):P2-P7 裁剪用。+1 余量覆盖夹心格邻域

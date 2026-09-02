@@ -254,6 +254,9 @@ export class MuramasaSlashProj extends Entity {
     for (const raw of game.enemies()) {
       const e = raw as EnemyLike;
       if (!e || e.dead || this.hitSet.has(e.id)) continue;
+      // ★dontTakeDamage 目标排除（:12600 同款——tryConsumingTimerCrit 在 hurt 前,
+      //   被拒命中不得烧蓄能充能,终审补）
+      if ((raw as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (!playerCanHitEnemy(raw as never, game)) continue;
       const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
       if (gate.meleeNpcImmuneGateOf && !gate.meleeNpcImmuneGateOf(e.id)) continue;
@@ -429,6 +432,8 @@ export class BladetongueGlobProj extends Entity {
       for (const raw of game.enemies()) {
         const e = raw as EnemyLike;
         if (!e || e.dead) continue;
+        // ★dontTakeDamage 目标排除（:12600 同款,终审补——同上环）
+        if ((raw as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
         if (!playerCanHitEnemy(raw as never, game)) continue;
         const exp = GLOB_IDSTATIC_HITS.get(e.id);
         if (exp !== undefined && now < exp) continue;

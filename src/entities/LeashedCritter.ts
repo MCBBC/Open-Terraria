@@ -132,7 +132,9 @@ export class LCG32Random {
 export function solidTile2(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false; // 原版越界 Main.tile[i,j]==null → true；本仓越界恒空（防边缘卡死）
   const i = st.idx(x, y);
-  if (st.type[i] === 0) return false;                       // !active
+  // ★幽灵保域（2026-09-03）：active 门读 flags bit0（原版 WorldGen.cs:70667
+  //  `testTile.active() && …`）——幽灵格（flags=0,type≠0）非实心
+  if (st.type[i] === 0 || (st.flags[i] & 1) === 0) return false; // !active
   if (st.wire[i] & 32) return false;                        // inActive（致动缩入）
   if (st.half[i]) return false;                             // halfBrick（含平台 halfBrick 变体——同被 !halfBrick 否决）
   const d = TILE_DEFS[st.type[i]];
@@ -200,7 +202,9 @@ export function solidTileAllowTopSlope(st: TileStore, x: number, y: number): boo
   if (!st.inBounds(x, y)) return false;                     // 本仓越界恒空（solidTile2 同口径登记）
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0 || (st.wire[i] & 32) !== 0) return false;     // !nactive
+  // ★幽灵保域（2026-09-03）：nactive() 补 flags bit0（原版 WorldGen.cs:70859
+  //  `tile.active() && …`）——幽灵格不承台阶
+  if (t === 0 || (st.flags[i] & 1) === 0 || (st.wire[i] & 32) !== 0) return false; // !nactive
   if (!vanTileSolid(t)) return false;                       // type==380 已并入 EXTRA
   if (vanPlatformSet(t)) return !!st.half[i];               // Platforms 分支只认 halfBrick
   return !(st.slope[i] === 3 || st.slope[i] === 4);         // !bottomSlope()
@@ -217,7 +221,9 @@ export function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): 
   if (!st.inBounds(x, y)) return true;                      // InWorld 门（:70710）：界外=承放
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0 || (st.wire[i] & 32) !== 0 || !!st.half[i]) return false;
+  // ★幽灵保域（2026-09-03）：active 门补 flags bit0（原版 WorldGen.cs:70710
+  //  `tile.active() && …`）——幽灵格不承落点
+  if (t === 0 || (st.flags[i] & 1) === 0 || (st.wire[i] & 32) !== 0 || !!st.half[i]) return false;
   if (!vanTileStandable(t)) return false;
   if (!(st.slope[i] === 1 || st.slope[i] === 2)) return true;  // 非顶坡直通
   return vanPlatformSet(t) && platformProperTopFrame(st.frameX[i]);
@@ -232,7 +238,9 @@ export function solidTileNoPlatforms(st: TileStore, x: number, y: number): boole
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0 || (st.wire[i] & 32) !== 0) return false;
+  // ★幽灵保域（2026-09-03）：active 门补 flags bit0（原版 WorldGen.cs:70739
+  //  `tile.active() && …`）——幽灵格不算占用
+  if (t === 0 || (st.flags[i] & 1) === 0 || (st.wire[i] & 32) !== 0) return false;
   if (vanPlatformSet(t)) return false;
   return vanTileStandable(t);
 }
@@ -248,7 +256,9 @@ export function solidTileAllowPlatformTopFrame(st: TileStore, x: number, y: numb
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0 || (st.wire[i] & 32) !== 0) return false;
+  // ★幽灵保域（2026-09-03）：active 门补 flags bit0（原版 WorldGen.cs:70763
+  //  `tile.active() && …`）——幽灵格不可站
+  if (t === 0 || (st.flags[i] & 1) === 0 || (st.wire[i] & 32) !== 0) return false;
   if (vanPlatformSet(t) && !platformProperTopFrame(st.frameX[i])) return false;
   return vanTileStandable(t);
 }
@@ -278,7 +288,8 @@ export function isFlyerLiquidBoundary(
   const weird = k >= 0 && amount > 0 && vanLiquidTypeOf(st.liquidType[k]) > 0;
   if (k >= 0) {
     const t = st.type[k];
-    const nactive = t !== 0 && (st.wire[k] & 32) === 0;
+    // ★幽灵保域（2026-09-03）：nactive() 补 flags bit0（原版 FlyerLeashedCritter.cs:164）
+    const nactive = t !== 0 && (st.flags[k] & 1) !== 0 && (st.wire[k] & 32) === 0;
     if (nactive && vanTileSolid(t) && !TILE_DEFS[t]?.platform) {
       return [false, amount, weird];                        // :164-167 实心非台面
     }
@@ -288,7 +299,8 @@ export function isFlyerLiquidBoundary(
     const kb = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
     if (kb >= 0 && st.liquid[kb] === 255) {
       const tb = st.type[kb];
-      const nB = tb !== 0 && (st.wire[kb] & 32) === 0;
+      // ★幽灵保域（2026-09-03）：nactive() 补 flags bit0（原版 FlyerLeashedCritter.cs:178）
+      const nB = tb !== 0 && (st.flags[kb] & 1) !== 0 && (st.wire[kb] & 32) === 0;
       if (nB && vanTileSolid(tb)) return [!!TILE_DEFS[tb]?.platform, amount, weird]; // :178-181
       return [true, amount, weird];
     }
@@ -297,7 +309,8 @@ export function isFlyerLiquidBoundary(
   const ka = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;    // :186-196 满液上探
   if (ka >= 0 && st.liquid[ka] === 0) {
     const ta = st.type[ka];
-    const nA = ta !== 0 && (st.wire[ka] & 32) === 0;
+    // ★幽灵保域（2026-09-03）：nactive() 补 flags bit0（原版 FlyerLeashedCritter.cs:190）
+    const nA = ta !== 0 && (st.flags[ka] & 1) !== 0 && (st.wire[ka] & 32) === 0;
     if (nA && vanTileSolid(ta)) return [!!TILE_DEFS[ta]?.platform, amount, weird];
     return [true, amount, weird];
   }
@@ -382,7 +395,8 @@ export function leashedBubbleVisible(st: TileStore, cx: number, cy: number, isAq
   };
   const i0 = st.inBounds(tx, ty) ? st.idx(tx, ty) : -1;
   // nactive()（active && !inActive）——本仓 wire bit5 = inActive
-  const active = i0 >= 0 && st.type[i0] !== 0 && (st.wire[i0] & 32) === 0;
+  // ★幽灵保域（2026-09-03）：active 补 flags bit0（原版 LeashedCritter.cs:221）
+  const active = i0 >= 0 && st.type[i0] !== 0 && (st.flags[i0] & 1) !== 0 && (st.wire[i0] & 32) === 0;
   const d = i0 >= 0 ? TILE_DEFS[st.type[i0]] : undefined;
   if (!active || !d?.solid || d.platform) return requires(tx, ty);   // :221-224
   const half = !!st.half[i0];
@@ -2558,7 +2572,9 @@ function boxHitsSolid(st: TileStore, px: number, py: number, w: number, h: numbe
     for (let j = y0; j <= y1; j++) {
       if (!st.inBounds(i, j)) continue;
       const k = st.idx(i, j);
-      if (st.type[k] === 0) continue;
+      // ★幽灵保域（2026-09-03）：nactive() 补 flags bit0（原版 Collision.TileCollision
+      //  nactive 门）——幽灵格不阻风筝位移
+      if (st.type[k] === 0 || (st.flags[k] & 1) === 0) continue;
       if (st.wire[k] & 32) continue;                       // !nactive
       const d = TILE_DEFS[st.type[k]];
       if (d && d.solid && !d.platform) return true;
@@ -2576,7 +2592,9 @@ function solidFullTiles(st: TileStore, px: number, py: number, w: number, h: num
   for (let i = x0; i <= x1; i++) {
     for (let j = y0; j <= y1; j++) {
       const k = st.idx(i, j);
-      if (st.type[k] === 0) continue;
+      // ★幽灵保域（2026-09-03）：active() 门补 flags bit0（原版 Collision.cs:3553-3574
+      //  SolidFullTiles）——幽灵格不算整实心
+      if (st.type[k] === 0 || (st.flags[k] & 1) === 0) continue;
       if (st.wire[k] & 32) continue;                       // !nactive
       if (st.half[k]) continue;                            // blockType != 0
       if (st.slope[k] !== 0) continue;                     // blockType != 0

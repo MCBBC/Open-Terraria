@@ -104,11 +104,15 @@
 //       走 perfect 通道+落池 scale=1.4（:724-729,消解烟雾 ×0.7 终值 0.98）/F-7 kind1
 //       双臂恒真 ×1.5 支=速度幅 21+位偏 dir×147（:688-692/:715-719;旧 14/dir×63=漏支）;
 //       MINOR=kind1 红臂色 Color(1,0,0,0.5)（:665,旧 (255,40,20) 臆造偏色）。
-//     ⑨★lifeExact 系统性旧账【只登记不修】（2026-09-02 L′ 收尾）：spawnParticles 的
-//       `life` 档=base×(0.6+0.4r) 抖动基值（types.ts 契约）,凡原版 TimeToLive 钉值站本应
-//       走 lifeExact——存量漏网=keybrand 带1/2/3（60/30/30）/cattivaHit（16）/
-//       snappingStone kind1 sparkle（30）等全池旧账,待系统性清偿批统一翻新
-//       （改动会漂移固定种子行为,须连带测试锚同步重排,勿零散手改）。
+//     ⑨★lifeExact 系统性旧账（2026-09-02 L′ 登记→2026-09-03 蓝队首批清偿）：spawnParticles
+//       的 `life` 档=base×(0.6+0.4r) 抖动基值（types.ts 契约）,凡原版 TimeToLive 钉值站本应
+//       走 lifeExact——首批清偿=keybrand 带1/2/3（60/30/30：带1 num5=60f :3825+PrettySparkle
+//       池缺省 60f、带2 num8=30f :3842→SetTypeInfo :3849、带3 timeToLive=30f :3865→:3872）/
+//       cattivaHit（16：num5=16f :3774→TimeToLive :3791）/snappingStone kind1 sparkle
+//       （30：int num=30 :658→TimeToLive :677/:706）;同批附带 kind1 size 归位（11/7→
+//       6.6/4.2,2×Scale.Y 长轴换算,T5 同款）+d6 对重构只挂金臂（:722-730 i 循环嵌套,
+//       掷账 9 掷对表）。**全池其余 life:N 站仍走抖动档**,后续批逐站读原文 TimeToLive
+//       再翻新（改动会漂移固定种子行为,须连带测试锚同步重排,勿零散手改）。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -1404,9 +1408,13 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
     //  金(255,215,0)→橙红(255,69,0)：r≡255、g=215−146t、b=0，单掷与旧 hsl 同槽位
     //  （流对齐不变）；旧 orchestraHslCss(0.08+0.03r,1,0.45) 色相带近似退役
     const t1 = rng();
+    // ★⑨lifeExact 清偿（2026-09-03）：带 1 TTL=60 定值——num5=60f（:3825,APF
+    //  −vector2/num5 的减速零点）且本带未显式赋 TimeToLive → PrettySparkleParticle
+    //  池缺省 60f（PrettySparkleParticle.cs:13 字段/:33 FetchFromPool）同窗;
+    //  旧 life:60 抖动档实得 60×(0.6+0.4r)∈[36,60] 系统性偏短
     game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7,
       fc(1, (215 - 146 * t1) / 255, 0, 1), 1, spd,
-      { life: 60, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, size: 1.6 });
+      { lifeExact: 60, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, size: 1.6 });
   }
   const aBase = rng() * Math.PI * 2;                     // num 重掷（:3836 死步长句后 :3837 基相位重掷,带 2 消费）
   for (let k = 0; k < 3; k++) {                          // 第二带 ×3（:3838-3859）
@@ -1419,7 +1427,9 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
       x + Math.cos(a2) * 0.7 * 0.7 * 30 * 0.2 + jitter.x * 0.7,
       y + Math.sin(a2) * 0.7 * 0.7 * 30 * 0.2 + jitter.y * 0.7,
       col2, 1, 0.7,
-      { life: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 2 });
+      // ★⑨lifeExact 清偿（2026-09-03）：带 2 TTL=num8=30f 定值（:3842 → SetTypeInfo
+      //  :3849 → FadingParticle.cs:36 timeTolive）;旧 life:30 抖动档同病
+      { lifeExact: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 2 });
   }
   rng();                                                 // ★F-5 带 3 基相位（:3861,消费进 Rotation——本池无旋转通道→流对齐掷）
   const t3 = rng();                                      // :3866 Lerp(CornflowerBlue=(100,149,237),White,t) A=127（★F-5 消费接线）
@@ -1431,7 +1441,8 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
   const sqy = rng() * 0.6 + 0.7;
   game.spawnParticles?.(x + off3.x * 0.7, y + off3.y * 0.7,   // 第三带（:3862-3882）
     col3, 1, 0,
-    { life: 30, grav: -0.02, damp: 0.97, size: 0.07 + 0.375 * ((sqx + sqy) / 2) });
+    // ★⑨lifeExact 清偿（2026-09-03）：带 3 TTL=timeToLive=30f 定值（:3865 → SetTypeInfo :3872）
+    { lifeExact: 30, grav: -0.02, damp: 0.97, size: 0.07 + 0.375 * ((sqx + sqy) / 2) });
 }
 
 /**
@@ -1672,7 +1683,9 @@ export function cattivaHitFx(game: GameHooks, x: number, y: number, _moveX = 0, 
       : orchestraLerpCss('rgb(255,215,0)', 'rgb(255,165,0)', t);        // Lerp(Gold,Orange,t)（金支）
     const scl = 0.1 + rng() * 0.7;
     game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7, col, 1, spd,
-      { life: 16, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, damp: 0.95, size: 1.4 * scl, grav: 0 });
+      // ★⑨lifeExact 清偿（2026-09-03）：TTL=num5=16f 定值（:3774 → TimeToLive=num5 :3791）——
+      //  旧 life:16 抖动档实得 16×(0.6+0.4r)∈[9.6,16]
+      { lifeExact: 16, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, damp: 0.95, size: 1.4 * scl, grav: 0 });
   }
 }
 
@@ -2069,21 +2082,38 @@ export function snappingStoneRingFx(
     //  sparkle 速度幅=num2×1.5=21（旧 14=漏 ×1.5）;位偏=基支 vector×num×num3（:683/:711,
     //  14×30×0.15=63）+恒真支 Velocity×4（21×4=84）→ dir×147（旧 dir×63=半程）
     const spd = num2 * 1.5;
-    for (const red of [true, false]) {
-      // ★T3（2026-09-02 蓝队清偿）：红金同角——原文 :670（红,num5=1）/:699（金,num6=1）
-      //  同式 (π/4+π/4·num+num4).ToRotationVector2()×14 → 恒 π/2+boltPhase（num4 :668
-      //  单掷共享）。旧金臂 π/4+π/2=3π/4 的 45° 分叉系自造
-      const a0 = Math.PI / 4 + Math.PI / 4 + boltPhase;
-      // ★MINOR（L′ 对抗批）：红臂色=原版 :665 Color(1f,0f,0f,0.5f)——旧 (255,40,20) 臆造偏色
-      const col = red ? 'rgba(255,0,0,0.5)' : 'rgba(255,242,0,1)';
-      game.spawnParticles?.(x - Math.cos(a0) * (num2 * 30 * 0.15 + spd * 4),
-        y - Math.sin(a0) * (num2 * 30 * 0.15 + spd * 4),
-        col, 1, spd, { life: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: red ? 11 : 7 });
-      // d6 微尘对（:724 正臂先/:727 负臂后——★F-3 2026-09-02 对抗批,曾 [-1,1] 反序）★M1（F6）
+    // ★T3（2026-09-02 蓝队清偿）：红金同角——原文 :670（红,num5=1）/:699（金,num6=1）
+    //  同式 (π/4+π/4·num+num4).ToRotationVector2()×14 → 恒 π/2+boltPhase（num4 :662
+    //  单掷共享）。旧金臂 π/4+π/2=3π/4 的 45° 分叉系自造
+    const a0 = Math.PI / 4 + Math.PI / 4 + boltPhase;
+    const posOff = num2 * 30 * 0.15 + spd * 4;             // 基支 63（:683/:711）+恒真支 84（:692/:719）
+    // 红 sparkle（num5 循环 :667-695,单次）——★MINOR（L′ 对抗批）：红臂色=原版 :665
+    //  Color(1f,0f,0f,0.5f)（旧 (255,40,20) 臆造偏色已正）
+    // ★⑨lifeExact 清偿（2026-09-03）：TTL=int num=30 定值（:658 → TimeToLive=num
+    //  :677 红/:706 金）——旧 life:30 抖动档实得 30×(0.6+0.4r)∈[18,30] 系统性偏短
+    // ★★size 归位（2026-09-03 本批）：旧 11/7=1.1/0.7×10 臆断基退役。换算式
+    //  （本仓 size 语义=世界 px 方块边长,Renderer 画 fillRect(size,size)）：
+    //  PrettySparkleParticle.Draw（PrettySparkleParticle.cs:59-77）只画水平臂
+    //  （:686/:713 DrawVerticalAxis=false）,臂 scale=(0.3,2)×Scale → 长轴=2×Scale.Y
+    //  （T5 cattiva 同款换算,Extra[98] 纹理基尺并档登记债）→
+    //    红 = 2×Scale.Y = 2×(2×1.1)×1.5 = 6.6（Scale=(8,2)×1.1 :674,×1.5 恒真支 :690）
+    //    金 = 2×Scale.Y = 2×(2×0.7)×1.5 = 4.2（×0.7 :703,×1.5 恒真支 :717）
+    game.spawnParticles?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff,
+      'rgba(255,0,0,0.5)', 1, spd,
+      { lifeExact: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: 6.6 });
+    // 金 sparkle（num6 循环 :696-731,单次;色 :666 Color(1f,0.95f,0f,1f)）
+    game.spawnParticles?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff,
+      'rgba(255,242,0,1)', 1, spd,
+      { lifeExact: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: 4.2 });
+    // d6 成对微尘【只挂金带内】（:722-730 i 循环 ×2,每轮 ± 金臂各一粒 NewDustPerfect;
+    //  旧挂在红/金两色循环内=红臂也对生一对,方向标签错但数值恰同（T3 后红金同角）——
+    //  本批按原版嵌套重构,掷数/掷序不变：每轮 正臂 ja→spd2 → 负臂 ja→spd2（:724 正臂
+    //  先/:727 负臂后,★F-3 曾 [-1,1] 反序;★M1（F6）第二粒取负向量,ja/spd2 各自独掷,
+    //  ja 单掷共享 xy、半径 NextFloat 单掷乘整向量——旧逐分量独掷已退役;幅=基 vector4
+    //  （×14 非 ×1.5 档）;全站掷账=1（num4）+4 尘×2 掷=9 掷对表）
+    for (let i = 0; i < 2; i++) {
       for (const side of [1, -1]) {
-        //  第二粒取负向量（旧 side 乘角=自造形变）、ja 单掷共享 xy、半径 NextFloat
-        //  单掷乘整向量（旧 dvx*rng(),dvy*rng() 每分量独掷）;幅=基 vector4（×14 非 ×1.5 档）
-        const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×τ×0.025
+        const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×τ×0.025（:724/:727）
         const spd2 = rng();                                // NextFloat 半径单掷
         // ★L′-F6（2026-09-02 红队对抗,仲裁成立）：原版 NewDustPerfect（:724/:727）→
         //  spawnDust 补第 12 参 perfect=true（定向速度原样入池,烟雾族 vy 重掷+vx×0.3 消解）

@@ -6488,6 +6488,9 @@ export class Player extends Entity {
         const k = st.idx(i, j);
         const def = TILE_DEFS[st.type[k]];
         if (!def?.solid || def.platform) continue;     // tileSolid && !tileSolidTop（:2728）
+        // ★幽灵保域（2026-09-02）：补原版 :2728 active() 门（`… && tile.active() && …`）
+        // ——幽灵格（flags=0,type≠0）不计实心；此前靠 finalize 出口净化维持恒等式
+        if (st.flags[k] === 0) continue;
         if (st.wire[k] & 32) continue;                 // !inActive()（致动缩入）
         let ty = j * TILE, th = TILE;
         if (st.half[k]) { ty += 8; th -= 8; }          // halfBrick：下半实心（:2734-2737）

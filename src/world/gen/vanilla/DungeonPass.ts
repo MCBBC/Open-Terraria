@@ -183,6 +183,14 @@ const DG_PRE_CLASS: Record<number, string> = {
   //   ——1457 地牢箱 flag9 组第三掷（WG.cs:37252 金支 :36951/中深支）Next(4)==0→
   //   SetDefaults(6156)+Prefix(-1)。缺此掷=G 段起主流永久相移（七链 #32 首差共同根因）。
   6156: 'acc',
+  // ★IIIII188：dgBasicChests 表支/箱型支主件前缀池补全（PrefixLegacy.cs 集表逐 id 认证）
+  //   ——211/212=accessory+CanGetPrefixes 缺省 true（ItemID.cs:179 异常表无此二 id）
+  //   →'acc';213(Staff of Regrowth)∈SwordsHammersAxesPicks(:81);964∈GunsBows(:77);
+  //   4281∈Summon(:75);670∈BoomerangsChakrams(:69);724∈Swords(:81);1319∈GunsBows(:77);
+  //   6153∈Magic(:73);4061∈Spears(:79);4062∈Magic(:73)。缺登=Prefix(-1) 零掷 →
+  //   每 jungle/flag2 主件少 1-2 骰（style8/9 ok 成本 x86 30.78/28.60 vs JS 23.48/24.40 实证）。
+  211: 'acc', 212: 'acc', 213: 'swords', 964: 'guns', 4281: 'summon',
+  670: 'boom', 724: 'swords', 1319: 'guns', 6153: 'magic', 4061: 'spears', 4062: 'magic',
   // ★BBBBB 勘误：327=Golden Key（ItemID.cs:2193）——非 accessory/无任何前缀类
   //   （Item.cs case 327 仅 width/height）→ GetRollablePrefixes=null → Prefix(-1) 零掷。
   //   水覆写箱（num2<ws+50 → itemType=327）的 loot 修正点在 surf 支门（见 dgChestLoot），
@@ -628,6 +636,9 @@ const snap: SnapFn = (name) => {
   let posX = 0, posY = 0, topX = 0;
   let dungeonX = 0, dungeonY = 0;
   let shadowKey = false, ramRune = false;
+  // ★IIIII188：CurrentDungeonGenVars.desertChestLootState（DungeonGenVars.cs:66,每座
+  //  一份,初值 false）——flag3 沙漠支（WG.cs:36416-36418）取反翻转选 loot 池,零掷。
+  let desertChestLootState = false;
   // —— 深度锚点（cs:14828-14870）——★x0 取 precalc 改写后的 genVars.dungeonLocation
   //   （原版 :14827 在 SetupDungeonDataVariables 之后才读——precalc 成功时已偏移
   //   num+25-Next(50)；Legacy/失败路径原值不动）
@@ -4051,6 +4062,28 @@ const snap: SnapFn = (name) => {
   // ★IIIII114b2：G 段受理失败原因镜像钩（x86 rig GC-RSN/GC-PC 同格式；dormant——
   //   仅 dgBasicChests 房环内 + SW_DG_GC=1 时发 log，零掷）
   let gcRsnOn = false;
+  // ★IIIII188：WorldGen.IsUndergroundDesert（WG.cs:36136-36162 1:1）——y≥ws、
+  //   x∈[0.15W,0.85W]、remix∧y>rock 早退、±15 邻域 wall∈{187,216} 扫描。零掷纯谓词。
+  //   （BuriedChestsPass 有同源 cert 实现;此处 dgAddBuriedChest flag3 支消费面。）
+  const isUndergroundDesert = (x: number, y: number): boolean => {
+    if (y < ws) return false;
+    if (x < w * 0.15 || x > w * 0.85) return false;
+    if (gs.seedFlags.remix && y > rock) return false;
+    for (let a = x - 15; a <= x + 15; a++) {
+      for (let b = y - 15; b <= y + 15; b++) {
+        if (!inW(a, b, 0)) continue;
+        const wl = wallAt(a, b);
+        if (wl === 187 || wl === 216) return true;
+      }
+    }
+    return false;
+  };
+  // ★IIIII188：flag2 冰 tile 门（WG.cs:36454 `Main.tile[i,k].type ∈ {147,161,162,197}`）
+  //   ——雪原/冰族（147 冰、161 雪块、162 雪砖、197 紫冰）。零掷纯谓词。
+  const iceTileAt = (x: number, y: number): boolean => {
+    const sh = TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1;
+    return sh === 147 || sh === 161 || sh === 162 || sh === 197;
+  };
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
     const rsn = gcRsnOn && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
     if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_CHEST_TRACE) {
@@ -4091,35 +4124,108 @@ const snap: SnapFn = (name) => {
       if (boulder) return false;
       if (!dgSolid(ix, k)) continue;
       const num7 = k;
-      const num9 = style, num10 = mainItem;
+      // ★IIIII188：C# num9/num10 初值语义（WG.cs:36279-36287）——num9=0 起,(flag15∨
+      //   num10>0) 升 1,chestStyle≥0 覆写;num10=mainItemInChest≥0?mainItemInChest:0。
+      //   曾 num10 恒传 -1 ⇒ C# 的 num10==0 支（flag3 沙 tile 门/flag2 冰 tile 门/
+      //   flag8 hell 门/939 填充）在本域整失活=dgBasicChests 无主件房掷序债主源之一。
+      let num9 = style;
+      let num10 = mainItem >= 0 ? mainItem : 0;
+      if ((num7 >= ws + 25 || num10 > 0) && style < 0) num9 = 1;   // flag15 臂;本调用面 chestStyle 恒≥0 → 覆写,照抄
+      let chestTileType = chestTile;                               // flag3/flag6 等支可改写（21↔467）
       let flag9 = false, flag10 = false;
-      // ★BBBBB（2026-08-19）：vanilla flag（WG.cs:36062）——21 号箱 chestStyle==0
+      // ★BBBBB（2026-08-19）：vanilla flag（WG.cs:36309）——21 号箱 chestStyle==0
       //   （含 dgBasicChests 的水覆写箱：num2<ws+50 → itemType=327/chestStyle=0）
       //   即"地表箱"标记；loot 的 surface 支门 = (flag23 && (flag || flag6)) || flag11
-      //   （:36280）。曾 surf 恒 false → 水箱误走金箱支 → 掷流错位连坐全段
-      //   （s22222 room0 首箱 C|502|283|327|0 实证）。flag6（style12 丛林）/flag11
-      //   （848/857/934）地牢调用点恒 false，不建模。
-      const flag0 = chestTile === TILE_BY_KEY['chest'] && (style === 0 || (style === -1 && num9 === 0));
-      if (chestTile === TILE_BY_KEY['chest'] && num9 !== 0 && num7 >= ws && isDW(wallAt(ix, num7))) flag9 = true;
-      if ((chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) || (chestTile === CHEST2 && num9 === 13)) {
-        flag9 = true; flag10 = true;
+      //   （:36280）。曾 surf 恒 false → 水箱误走金箱支 → 掷流错位连坐全段。
+      let flag0 = chestTileType === TILE_BY_KEY['chest'] && (style === 0 || (style === -1 && num9 === 0));
+      let flag2 = false, flag3 = false, flag4 = false, flag5 = false, flag6 = false;
+      let flag7 = false, flag8 = false, flag11 = false, flag12 = false, flag13 = false, flag14 = false;
+      const IS_21 = TILE_BY_KEY['chest'], IS_467 = CHEST2;
+      // —— ★IIIII188 style→箱型支链（WG.cs:36409-36583 全序 1:1；dual 座表支触发面：
+      //    467/10(4267 Desert 表)→flag3、21/11(681)·467/24(5805)→flag2、21/8(626)·
+      //    21/10(680)·21/29(2249,dual 门)→flag4、21/15(952)→939 填充、21/12(831)→
+      //    flag6、21/32(2544)→flag7、21/16(1142)→flag13。骰面支=flag3 SelectRandom
+      //    1 掷+flag2 SelectRandom(7)+Next(20) 2 掷。曾整缺 → x86 每 attempt 多掷
+      //    （rig 实测 seat1 st2=5.00/st3=4.00 vs JS 3.00）=BASICCHESTS 掷序债主源。
+      // flag3 沙漠支（WG.cs:36409-36425）
+      if ((chestTileType === IS_467 && num9 === 10)
+        || (num10 === 0 && num7 <= h - 205 && isUndergroundDesert(ix, k))) {
+        flag3 = true;
+        num9 = 10;
+        chestTileType = IS_467;
+        // (flag16 && chestStyle == 42) & flag19 — remix∧getGood 交组合,本 seed 恒假
+        let flag20: boolean;
+        if (dualDungeonState.enabled) {
+          flag20 = desertChestLootState;
+          desertChestLootState = !desertChestLootState;    // WG.cs:36417-36418（零掷状态翻转）
+        } else {
+          flag20 = num7 > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
+        }
+        // Utils.SelectRandom = 池表 Next(len),恰 1 骰（:36421）
+        num10 = flag20 ? [4061, 4062, 4276][rn(3)]! : [4056, 4055, 4262, 4263][rn(4)]!;
       }
-      // ★NTB32（2026-08-23）：AddBuriedChest 的 notTheBees 蜂蜜箱带判定支（WG.cs:36104-36112
+      // ★NTB32（2026-08-23）：AddBuriedChest 的 notTheBees 蜂蜜箱带判定支（WG.cs:36426-36450
       //   `if (notTheBees && !remixWorldGen && !dontStarveWorldGen)`）——Next(5)+Next(-2,3)
       //   恒耗 2 颗；深度带（num13=ws+Next(-2,3)+35 门）命中再按 `i<beach+180-Next(-2,3)`
-      //   `|| i>maxX-beach-180+Next(-2,3)` 短路再耗 1-2 颗 Next(-2,3)。位置=SolidTile
-      //   行命中后、PlaceChest 前——**PlaceChest 败也照耗**（:37578 败即 return false，
-      //   但 NTB 支在其前；G 段 8 连败调用=8 连 quad 的 x86 span 实证 v[128164..195]）。
-      //   地牢/生物箱 num10>0 → flag21 下游 style-11 支恒不触发，纯掷流语义。缺此支 =
-      //   每次找到实心行的调用少耗 2-4 颗 → G 段起主流永久相移 → I/Pa/Ba 段灯笼/画作/
-      //   横幅全 displaced（NTB 链 #32 首差根因）。
+      //   `|| i>maxX-beach-180+Next(-2,3)` 短路再耗 1-2 颗 Next(-2,3)。位置=flag3 支后、
+      //   flag2 支前（:36426;flag21 是 flag2 冰 tile 门的析取支）——**PlaceChest 败也照耗**。
+      //   地牢/生物箱 num10>0 → flag21 下游 style-11 支恒不触发,纯掷流语义。缺此支 =
+      //   每次找到实心行的调用少耗 2-4 颗 → G 段起主流永久相移（NTB 链 #32 首差根因）。
+      //   ★IIIII188：位置从链尾前移到 C# 原位（flag3 与 flag2 之间）+ flag21 接线。
+      let flag21 = false;
       if (gs.seedFlags.notTheBees && !gs.seedFlags.remix && !gs.seedFlags.theConstant) {
         const num12 = gs.lavaLine + rn(5);
         const num13 = Math.trunc(ws) + ri(-2, 2) + 35;
         if (num7 > num13 && num7 <= num12
           && (ix < BEACH + 180 - ri(-2, 2) || ix > w - BEACH - 180 + ri(-2, 2))) {
-          // flag21=true：蜂蜜箱带——本 pass 箱族 num10>0 无下游消费，仅掷流
+          flag21 = true;   // SkipOnDualDungeons 拒面:dual 座内=原版 false(见下)
         }
+      }
+      // flag2 冰支（WG.cs:36452-36468）
+      if ((chestTileType === IS_21 && num9 === 11) || (chestTileType === IS_467 && num9 === 24)
+        || (num10 === 0 && num7 >= ws + 25 && num7 <= h - 205 && (flag21 || iceTileAt(ix, k)))) {
+        flag2 = true;
+        if (chestTileType === IS_21) num9 = 11;
+        // (flag17 && chest21 && chestStyle==34) — drunk∧tenth 交组合,本 seed 恒假
+        num10 = [670, 724, 950, 1319, 987, 1579, 6153][rn(7)]!;   // :36457 SelectRandom 1 骰
+        if (rn(20) === 0) num10 = 997;                            // :36461 1 骰（remix 1319→725 恒假）
+      }
+      // flag4 丛林支（WG.cs:36470-36495）——GeneratingDungeon 全程 true（DungeonCrawler.cs:356
+      //   置位/:521 才清）⇒ `if (!GeneratingDungeon)` 改写臂恒跳,零骰纯旗
+      if ((chestTileType === IS_21 && (num9 === 10 || ((num9 === 8 || num9 === 29) && dualDungeonState.enabled)))
+        || (chestTileType === IS_467 && num9 === 11)
+        || num10 === 211 || num10 === 212 || num10 === 213 || num10 === 753) {
+        flag4 = true;
+      }
+      // flag8 地狱支（WG.cs:36497-36508）
+      if (chestTileType === IS_21 && (num9 === 4 || (num7 > h - 205 && num10 === 0))) {
+        flag8 = true;
+        // num10=GenVars.hellChestItem[hellChest]（:36500）;本 pass chestStyle==4/h-205 带
+        // 不可达,items 空值兜底仅护型（BuriedChestsPass 同源语义）。
+        num10 = gs.hellChestItems ? gs.hellChestItems[gs.hellChestIdx % gs.hellChestItems.length]! : 0;
+        num9 = 4;
+        flag14 = true;
+      }
+      // flag5（:36510）/flag6（:36517-36527）/flag7（:36530）/flag13（:36536）
+      if (chestTileType === IS_21 && num9 === 17) flag5 = true;
+      if (chestTileType === IS_21 && num9 === 12) {
+        if (wallAt(ix - 1, num7 - 1) !== 244) { num9 = 0; num10 = 0; flag0 = true; }
+        else flag6 = true;
+      }
+      if (chestTileType === IS_21 && num9 === 32) flag7 = true;
+      if (chestTileType === IS_21 && num9 === 16) flag13 = true;
+      // flag9/flag10（:36540-36547）——**在 style 支链之后**（消费改写后的
+      //   num9/chestTileType;曾置于链前=flag3 改 467 后仍误记 dungeon 箱旗）
+      if (chestTileType === IS_21 && num9 !== 0 && num7 >= ws && isDW(wallAt(ix, num7))) flag9 = true;
+      if ((chestTileType === IS_21 && num9 >= 23 && num9 <= 27) || (chestTileType === IS_467 && num9 === 13)) {
+        flag9 = true; flag10 = true;
+      }
+      // flag11（:36548）/flag12（:36551）
+      if (chestTileType === IS_21 && num9 !== 0 && (num10 === 848 || num10 === 857 || num10 === 934)) flag11 = true;
+      if (chestTileType === IS_21 && (num9 === 13 || num10 === 159 || num10 === 65 || num10 === 158 || num10 === 2219)) flag12 = true;
+      // 939 填充（:36574-36577）
+      if ((num10 === 939 || (chestTileType === IS_21 && num9 === 15) || (chestTileType === IS_467 && num9 === 2)) && num10 === 0) {
+        num10 = 939;
       }
       // —— PlaceChest（:57828）→ TileObject.CanPlace chest21/467 全链（TileObject.cs:174-857）——
       // ★U 批修正（oracle DGSEGHASH/宝箱落位实证，2026-08-17）：旧近似只查右列实心 +
@@ -4154,22 +4260,31 @@ const snap: SnapFn = (name) => {
       for (let a = 0; a < 2; a++) {
         for (let b = -1; b <= 0; b++) {
           const ti = st.idx(px + a, py + b);
-          chTile(ti, chestTile, false);
+          chTile(ti, chestTileType, false);   // ★IIIII188：用改写后 chestTileType（flag3→467）
           // PlaceChestDirect 帧式（:57864-57903）：顶行 fy=0 / 底行 fy=18；
           // 列 fx=36*style / 18+36*style。★此前不写帧=残留旧帧,宝箱单格贴图错乱
-          st.frameX[ti] = 36 * style + a * 18;
+          st.frameX[ti] = 36 * num9 + a * 18; // ★IIIII188：style→num9（style 支链改写后值）
           st.frameY[ti] = b === -1 ? 0 : 18;
         }
       }
-      dgChestLoot(num7, num10, flag9, flag10, num9, chestTile, flag0);
+      // ★IIIII188：loot 旗全量下传（flag2/3/4/5/6/7/8/11/12/13/14 新建模）
+      dgChestLoot(num7, num10, flag9, flag10, num9, chestTileType, flag0,
+        flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag11, flag12, flag13);
       // ★IIII102c：push → registerChest（Main.chest 首空槽复用,Chest.cs:584）
       registerChest(chests as SparseChestSink, { x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
+      // ★IIIII188：hell 箱轮转推进（WG.cs:36600-36604 `if (flag14) { GenVars.hellChest++ ... }`）
+      if (flag14 && gs.hellChestItems) gs.hellChestIdx = (gs.hellChestIdx + 1) % gs.hellChestItems.length;
       return true;
     }
     return false;
   }
   // 战利品掷骰流（AddBuriedChest 深三分支 + 尾段；与 oracle DgAddBuriedChest 同构）
-  function dgChestLoot(num7: number, num10: number, flag9: boolean, flag10: boolean, num9: number, chestTile: number, flag0 = false): void {
+  // ★IIIII188：旗面扩展——flag2(冰)/flag3(沙)/flag4(丛林)/flag5(17 号常春藤)/flag6(活木墙)/
+  //   flag7(32 蜂巢死箱)/flag8(地狱)/flag11(848/857/934)/flag12(13 号或暗影珠族)/
+  //   flag13(16 号)全量 1:1（WG.cs:36306-36583 计算面）。
+  function dgChestLoot(num7: number, num10: number, flag9: boolean, flag10: boolean, num9: number, chestTile: number, flag0 = false,
+    flag2 = false, flag3 = false, flag4 = false, flag5 = false, flag6 = false, flag7 = false, flag8 = false,
+    flag11 = false, flag12 = false, flag13 = false): void {
     dgLoot.length = 0;
     if (num10 > 0) dgLoot.push(num10);
     // ★BBBBB：surface 支门 = flag23 && (flag0 || flag6)（WG.cs:36280）——flag0=地表箱
@@ -4182,7 +4297,9 @@ const snap: SnapFn = (name) => {
     //   战利品掷骰流位整体平移——mile8 REMIX #32 首段级联（C→I→T→F→Pa→Ba 全族
     //   displaced）根因。本 pass flag6(活木墙 244)/flag11(848/857/934) 恒假不建。
     const f23 = gs.seedFlags.remix ? num7 >= (rock + 2 * (h - 350)) / 3.0 : num7 < ws + 25;
-    const surf = f23 && flag0;
+    // ★IIIII188：surface 支门补全 `(flag23 && (flag|flag6)) | flag11`（WG.cs:36822）——
+    //   flag6=21 号 12 型箱落在活木墙 244 侧（flag6 支置位）;flag11=主件 848/857/934。
+    const surf = (f23 && (flag0 || flag6)) || flag11;
     const bandMid = gs.seedFlags.remix ? (num7 > rock && num7 < h - 250) : num7 < rock;
     if (surf) {
       if (num10 > 0) prefixRolls(num10);
@@ -4206,6 +4323,19 @@ const snap: SnapFn = (name) => {
     } else if (bandMid) {
       if (num10 > 0) {
         prefixRolls(num10);
+        // ★IIIII188：中深支 flag5/flag12/flag6 附加支（WG.cs:36896-36935 全序 1:1）——
+        //   LivingWood 表 831→21/12 → flag6 支三掷（5629/4429|4427/5528）;flag5=17 号;
+        //   flag12=13 号暗影珠族（Next(40)→4978）。
+        if (flag5) {
+          if (rn(2) === 0) dgLoot.push(4425);             // WG.cs:36898-36901
+          if (rn(2) === 0) dgLoot.push(4460);             // :36902-36905
+        }
+        if (flag12 && rn(40) === 0) { prefixRolls(4978); dgLoot.push(4978); }   // :36907-36912
+        if (flag6) {
+          if (rn(3) === 0) dgLoot.push(5629);             // :36913-36916
+          if (rn(6) === 0) { dgLoot.push(rn(2) === 0 ? 4429 : 4427); }    // :36917-36931（Next(6)+命中 Next(2)）
+          if (rn(3) !== 0) dgLoot.push(5528);             // :36932-36935
+        }
         if (flag9 && !flag10) {
           // ★KKKKKKK：金支同款第三掷（WG.cs:36951-36958）——Next(4)==0→6156+Prefix(-1)。
           if (!shadowKey || rn(3) === 0) shadowKey = true;
@@ -4233,7 +4363,30 @@ const snap: SnapFn = (name) => {
     } else if (num7 < h - 250 || (gs.seedFlags.remix && (num9 === 7 || num9 === 14))) {
       if (num10 > 0) {
         prefixRolls(num10);
-        // flag2（冰）/flag3（沙）地牢箱恒 false → 两段掷骰不触发（cs:36846-36858）
+        // ★IIIII188：flag2/3/4/5 loot 附加支（WG.cs:37191-37235 全序 1:1）——旧注
+        //   「flag2（冰）/flag3（沙）地牢箱恒 false」系**误判**：dgBasicChests 表支把
+        //   chestStyle 落到 11/24（681/5805→冰）、10（4267→沙）、8/10/29（626/680/2249
+        //   →丛林 flag4）,num10 又被 flag2/flag3 支改写为真主件 → 三旗在 dual 座实触发。
+        //   flag2→Next(5) 命中 3199;flag3→Next(7) 4346+Next(15) 4066;flag4→首件免掷
+        //   （gennedLivingMahoganyWands 世界旗）否则 Next(5) 3360+3361、Next(10) 4426、
+        //   Next(10) 5525;flag5→Next(2) 4425+Next(2) 4460。
+        if (flag2 && rn(5) === 0) dgLoot.push(3199);                      // WG.cs:37191-37195
+        if (flag3) {
+          if (rn(7) === 0) dgLoot.push(4346);                             // :37198-37202
+          if (rn(15) === 0) dgLoot.push(4066);                            // :37203-37207
+        }
+        if (flag4) {
+          if (!gs.gennedMahoganyWands || rn(5) === 0) {                   // :37211-37216（GenVars.gennedLivingMahoganyWands）
+            gs.gennedMahoganyWands = true;
+            dgLoot.push(3360); dgLoot.push(3361);
+          }
+          if (rn(10) === 0) dgLoot.push(4426);                            // :37217-37220
+          if (rn(10) === 0) dgLoot.push(5525);                            // :37221-37224
+        }
+        if (flag5) {
+          if (rn(2) === 0) dgLoot.push(4425);                             // :37228-37231
+          if (rn(2) === 0) dgLoot.push(4460);                             // :37232-37235
+        }
         if (flag9 && !flag10) {
           if (!shadowKey || rn(3) === 0) { shadowKey = true; dgLoot.push(329); }
           if (!ramRune || rn(8) === 0) { ramRune = true; prefixRolls(5465); dgLoot.push(5465); }
@@ -4338,14 +4491,14 @@ const snap: SnapFn = (name) => {
         const num2 = Math.trunc(cY + (bnd.B - cY) * rd());
         if (!featAreaOK(num, num2, 1)) return false;         // CanGenerateFeatureInArea(:296)
         if (spec.BiomeChestLootItemType < 0) return false;   // num3==0 早退(:317-320)
-        let chestTileVid = 21, chestStyleV = 2;              // 缺省 21/2(:301-302)
+        let chestTileInternal = CHEST, chestStyleV = 2;      // 缺省 21/2(:301-302)
         if (spec.BiomeChestItemType >= 0) {
           const pd = ipOf(spec.BiomeChestItemType);
-          if (pd.t >= 0) { chestTileVid = pd.t; chestStyleV = pd.s ?? 0; }
+          // ★IIIII188：pd.t 已是 internal 域——曾二次映射 get(16)=15(铁砧) 同源病
+          if (pd.t >= 0) { chestTileInternal = pd.t; chestStyleV = pd.s ?? 0; }
         }
         if (spec.LockedBiomeChestStyle >= 0) chestStyleV = spec.LockedBiomeChestStyle;   // locked=true
-        const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
-        return dgAddBuriedChest(num, num2, spec.BiomeChestLootItemType, chestStyleV, ctInternal);
+        return dgAddBuriedChest(num, num2, spec.BiomeChestLootItemType, chestStyleV, chestTileInternal);
       };
       for (const gsty of groups) {
         const ent = gfChestPlan[gsty];
@@ -4482,16 +4635,24 @@ const snap: SnapFn = (name) => {
         lo = rm.inner.L; hi = rm.inner.R;
         loY = Math.trunc((rm.inner.T + rm.inner.B) / 2); hiY = rm.inner.B;
       }
-      if (gcT) console.log(`GC-RM ${gcRm++} leg=${leg ? 1 : 0} lo=${lo} hi=${hi} loY=${loY} hiY=${hiY} st=${rmSt}`);
+      // ★IIIII188：GC-RM/GC-FA/GC-TRY 补 |mr=|rc= 注脚（x86 rig JJHook.Mark 同构格式,
+      //   per-style 掷率对账用;logging-only 零掷）
+      const gcRc = (): number => (globalThis as { __swRollTotal?: number }).__swRollTotal ?? 0;
+      if (gcT) console.log(`GC-RM ${gcRm++} leg=${leg ? 1 : 0} lo=${lo} hi=${hi} loY=${loY} hiY=${hiY} st=${rmSt}|mr=${dgMainRolls}|rc=${gcRc()}`);
       (globalThis as { __swI154GRm?: number }).__swI154GRm = gcRm - 1;
       gcRsnOn = true;
       for (let j = 0; j < 1000; j++) {
         // num=(int)Lerp(minX,maxX,rd)、num2=(int)Lerp(minY,maxY,rd)（DU.cs:337-338）
         const num = Math.trunc(lo + (hi - lo) * rd());
         const num2 = Math.trunc(loY + (hiY - loY) * rd());
-        if (!featAreaOK(num, num2, 1)) continue;            // data.CanGenerateFeatureInArea(:339)
+        if (!featAreaOK(num, num2, 1)) {
+          // ★IIIII188：GC-FA 镜像（rig DU.cs:347-353 gate 拒支,曾整缺=JS 侧 gate 拒无声）
+          if (gcT) console.log(`GC-FA rm=${gcRm - 1} num=${num} num2=${num2}|mr=${dgMainRolls}|rc=${gcRc()}`);
+          continue;                                        // data.CanGenerateFeatureInArea(:339)
+        }
         let itemType = rmSt === 0 ? 0 : -1, chestStyle = 2;
-        let chestTileVid = 21;                              // ushort chestTileType=21
+        let chestTileVid = 21;                              // ushort chestTileType=21（sheet 域,日志用）
+        let chestTileInternal = CHEST;                      // ★IIIII188：缺省 21 号箱 internal（ chestTileType=21）
         if (rmSt === 0) {
           // GetDungeonLootAndChestStyle（WorldGen.cs:36189-36238，style0 旗 face）
           if (lootStyle >= 8) lootStyle = 0;
@@ -4522,16 +4683,20 @@ const snap: SnapFn = (name) => {
           if (spec137 !== undefined && spec137.ChestItemTypes !== null && spec137.ChestItemTypes.length !== 0) {
             const it = spec137.ChestItemTypes[rn(spec137.ChestItemTypes.length)]!;
             const pd = ipOf(it);
-            chestTileVid = pd.t >= 0 ? pd.t : 21;
+            // ★IIIII188：pd.t 已是 **internal 域**（ipOf 内部过 TILE_INTERNAL_BY_SHEET）——
+            //   曾再喂 get(chestTileVid) 二次映射：get(16)=15(铁砧)/get(175)=289(锡砖) →
+            //   表支箱格全写错 tile 且 chestStyle 域失配（flag2/3/4/6/7 支全瘫）。
+            //   js033 实证：座0 铁砧 342 格+锡砖 120 格、座1 铁砧 560+锡砖 176。
+            if (pd.t >= 0) chestTileInternal = pd.t;
             chestStyle = pd.s ?? 0;
           }
         }
         if (itemType === 0 && rn(2) === 0) break;           // :375-378 空手受领（本域不可达,照抄）
-        const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
-        const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, ctInternal);   // :379
+        const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, chestTileInternal);   // :379
         // ★IIIII179：BCH=箱逐 attempt（x86 同构）
         if (i179F) mk179R(`DR|BCH|r=${gcRm - 1}|j=${j}|ok=${gcOk ? 1 : 0}`);
-        if (gcT) console.log(`GC-TRY rm=${gcRm - 1} num=${num} num2=${num2} ok=${gcOk ? 1 : 0}`);
+        // ★IIIII188：sty=/it=/cs= 注脚为本批排障扩展（x86 GC-TRY 无此字段,对账仪忽略）
+        if (gcT) console.log(`GC-TRY rm=${gcRm - 1} num=${num} num2=${num2} ok=${gcOk ? 1 : 0} sty=${rmSt} it=${itemType} c=${chestStyle}/${chestTileVid}|mr=${dgMainRolls}|rc=${gcRc()}`);
         if (gcOk) {
           if (rmSt === 0) lootStyle++;                      // :380-383 仅 style0 面 lootStyle++
           break;

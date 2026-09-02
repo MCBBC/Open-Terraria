@@ -4737,6 +4737,10 @@ export class MinionProj extends Entity {
       // :56120 spriteDirection=-direction——喷火朝向反向贴图
       this.facing = -(Math.sign(this.foxAimX) || p.facing);
       if (++this.foxT % 4 === 1) {
+        // ★R4 F3:1113 每 4 连发第 4 发 ai[1]=1（:62744-62752 localAI[2]<=-3 回卷,
+        // num159=3→1）——1097 拆弹自爆门(Arrow ai[1]==1&&age>=30→Kill:58258)的
+        // 激活注入面;1094 无此机制(1097 恒普通火球)
+        const fourthShot = this.projId === 1113 && this.foxT % 4 === 0;
         const flameSpd = this.projId === 1113 ? 31.5 : 15; // num17 ×3 补偿（:60072/:60074）
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * flameSpd, this.foxAimY * flameSpd,
           Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106, null,
@@ -4745,6 +4749,7 @@ export class MinionProj extends Entity {
         // OnFire3(323) else OnFire(24),300t 定值。★判门须用原版弹速(num17:1094=5/
         // 1113=10.5,:60072-60074),勿用本仓 ×3 补偿后速度(15/31.5 恒>10 会双双误翻)
         const origSpd = this.projId === 1113 ? 10.5 : 5;
+        if (fourthShot) flame.foxAi1 = 1;
         flame.onFireHit = {
           buff: Math.hypot(this.foxAimX, this.foxAimY) * origSpd > 10 ? 323 : 24,
           minT: 300, maxT: 300,

@@ -34,10 +34,13 @@ const MAX_FALLS = () => Math.floor(BASE_MAX_FALLS * gfxQuality.value);
 /** 原版 waterfallDist = 75×gfxQuality + 25(WaterfallManager.cs:116) */
 const WATERFALL_DIST = () => Math.floor(75 * gfxQuality.value) + 25;
 
-/** 雨幕用的实心判定（WorldGen.SolidTile 等价，非半砖非坡） */
+/** 雨幕用的实心判定（WorldGen.SolidTile 等价，非半砖非坡）。
+ *  ★幽灵保域（2026-09-03）：首门 = 原版 tile.active()——幽灵格（flags=0,type≠0,
+ *  x86 对齐残型）不算实心 */
 function solidSimple(st: TileStore, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
   const i = st.idx(x, y);
+  if (st.flags[i] === 0) return false;
   const t = st.type[i];
   if (t === 0) return false;
   const d = TILE_DEFS[t];
@@ -84,7 +87,9 @@ export class WaterfallRenderer {
     const y0 = Math.max(2, ty0 - WD), y1 = Math.min(st.h - 3, ty1 + 20);
     const solid = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
-      const t = st.type[st.idx(x, y)];
+      const i2 = st.idx(x, y);
+      if (st.flags[i2] === 0) return false; // 幽灵格残型不算实心（原版 active() 门）
+      const t = st.type[i2];
       if (t === 0) return false;
       const d = TILE_DEFS[t];
       return !!d && d.solid && !d.platform;
@@ -252,6 +257,7 @@ export class WaterfallRenderer {
       const solidT = (x: number, y: number) => {
         if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
         const i = st.idx(x, y);
+        if (st.flags[i] === 0) return false; // 幽灵格残型不算实心（原版 active() 门）
         const t = st.type[i];
         if (t === 0) return false;
         const d = TILE_DEFS[t];

@@ -115,4 +115,19 @@ describe('unembedPass(嵌入自救)', () => {
     expect(b.y).toBeGreaterThanOrEqual(60 * 16 + 32);  // 已坠过墙角 ≥2 格(旧电梯环困在 960..977)
     expect(b.onGround).toBe(false);                    // 悬空态不被 16px 抬升支接住
   });
+
+  // ★备案收齐(2026-09-02):门扩 vy>=0——vy==0 悬空态(跳跃顶点恰刷角/顶头
+  //   catch 当拍/悬停飞行体贴檐)同属无支撑假嵌入,不抬升;vy<0 真上升不扩面。
+  it('悬空零速刷角(vy==0):顶点/悬停态不被抬升,位置原样', () => {
+    const w = new World(120, 120, 42, 'apex');
+    const st = w.store;
+    st.setTileSilent(51, 60, 1);                 // 单块实心墙角
+    const b = mkBody(51 * 16 + 15, 60 * 16, 18, 40);  // 顶行=60 实心行,中心格干净
+    b.vy = 0;
+    const y0 = b.y;
+    for (let t = 0; t < 15; t++) moveAndCollide(b, w, 0, 0);   // 悬停驱动(vy 恒 0)
+    expect(b.y).toBe(y0);                        // 无抬升(旧路径 2t 后 +16px)、无下坠(dy=0)
+    expect(b.onGround).toBe(false);
+    expect(b.hitHead).toBe(false);
+  });
 });

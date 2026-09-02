@@ -72,7 +72,9 @@ export function scanPylons(world: World): TeleportPylonInfo[] {
     const row = y * st.w;
     for (let x = 0; x < st.w; x++) {
       const i = row + x;
-      if (st.type[i] !== tileId) continue;
+      // ★幽灵保域（2026-09-03）：active() 门（原版 TETeleportationPylon.cs:136
+      //  `!Main.tile[x,y].active() || type != 597 …`）——幽灵晶塔残型不算已放置
+      if (st.type[i] !== tileId || (st.flags[i] & 1) === 0) continue;
       if (st.frameY[i] !== 0 || st.frameX[i] % 54 !== 0) continue;
       out.push({ x, y, type: pylonStyleFromFrame(st.frameX[i]) });
     }

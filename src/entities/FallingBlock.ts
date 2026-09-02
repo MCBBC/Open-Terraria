@@ -92,12 +92,21 @@ export class FallingBlock extends Entity {
       const tid = TILE_BY_KEY[this.tileKey];
       const below = st.inBounds(prevTx, prevTy + 1) ? st.get(prevTx, prevTy + 1) : 0;
       const below2 = st.inBounds(prevTx, prevTy + 2) ? st.get(prevTx, prevTy + 2) : 0;
+      // ★幽灵保域（2026-09-03）：下方"空"判定补 flags bit0——原版
+      //  BlockBelowMakesSandFall（WorldGen.cs:87879-87889）首支 `!tile.nactive()`
+      //  （幽灵格=未激活=下方空→不放,防放置即再落）
+      const belowGhost = st.inBounds(prevTx, prevTy + 1)
+        && (st.flags[st.idx(prevTx, prevTy + 1)] & 1) === 0;
+      const below2Ghost = st.inBounds(prevTx, prevTy + 2)
+        && (st.flags[st.idx(prevTx, prevTy + 2)] & 1) === 0;
       let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
-      if (!noPlace && below === 0) noPlace = true;
-      else if (!noPlace && below2 === 0 && !st.isSolid(prevTx, prevTy + 1)) noPlace = true;
+      if (!noPlace && (below === 0 || belowGhost)) noPlace = true;
+      else if (!noPlace && (below2 === 0 || below2Ghost) && !st.isSolid(prevTx, prevTy + 1)) noPlace = true;
       else if (!noPlace && below === T_STALAC) noPlace = true;
+      // ★幽灵保域（2026-09-03）：放置门 = 原版 Projectile.cs:79248 `!tile.active()`
+      //  ——幽灵格（flags=0,type≠0）视为空可落格
       if (tid !== undefined && !noPlace && st.inBounds(prevTx, prevTy)
-        && st.type[st.idx(prevTx, prevTy)] === 0) {
+        && (st.type[st.idx(prevTx, prevTy)] === 0 || (st.flags[st.idx(prevTx, prevTy)] & 1) === 0)) {
         st.setTile(prevTx, prevTy, tid, 0, 0);
         game.playSfx?.('dig', 0.6);
         // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus

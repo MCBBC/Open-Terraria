@@ -59,7 +59,7 @@ import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 
-type Store = Pick<TileStore, 'w' | 'h' | 'type' | 'wire' | 'half' | 'slope' | 'inBounds' | 'idx'>;
+type Store = Pick<TileStore, 'w' | 'h' | 'type' | 'flags' | 'wire' | 'half' | 'slope' | 'inBounds' | 'idx'>;
 
 /** tile == null（未加载/越界）→ 调用方 return false */
 function isNull(st: Store, x: number, y: number): boolean {
@@ -71,7 +71,10 @@ function isNull(st: Store, x: number, y: number): boolean {
 function fullSolid(st: Store, x: number, y: number): boolean {
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0) return false;                                   // !active()
+  // ★幽灵保域（2026-09-03）：active 门读 flags bit0（原版 cs:447/:463
+  //  `tile.active() && tileSolid[…]`）——幽灵格（flags=0,type≠0）不阻挡视线；
+  //  旧 `t===0` 代理在 finalize 净化维持恒等式时无害，保域后失效
+  if (t === 0 || (st.flags[i] & 1) === 0) return false;        // !active()
   if (st.wire[i] & TS.WIRE_ACTUATED) return false;             // inActive()
   const d = TILE_DEFS[t];
   return !!d && d.solid && !d.platform && st.slope[i] === 0 && st.half[i] === 0;
@@ -81,7 +84,9 @@ function fullSolid(st: Store, x: number, y: number): boolean {
 function plainSolid(st: Store, x: number, y: number): boolean {
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0) return false;
+  // ★幽灵保域（2026-09-03）：active 门读 flags bit0（原版 cs:696/:740/:768
+  //  `tile.active() && …`）——幽灵格不阻挡 CanHitLine
+  if (t === 0 || (st.flags[i] & 1) === 0) return false;        // !active()
   if (st.wire[i] & TS.WIRE_ACTUATED) return false;
   const d = TILE_DEFS[t];
   return !!d && d.solid && !d.platform;
@@ -92,7 +97,9 @@ function passable(st: Store, x: number, y: number): boolean {
   const i = st.idx(x, y);
   const t = st.type[i];
   if (st.wire[i] & TS.WIRE_ACTUATED) return true;              // inActive → 可穿
-  if (t === 0) return true;                                    // !active → 可穿
+  // ★幽灵保域（2026-09-03）：!active 判可穿补 flags bit0（原版 cs:477 do-while
+  //  条件 `inActive() || !active() || !tileSolid || tileSolidTop`）——幽灵残型可穿
+  if (t === 0 || (st.flags[i] & 1) === 0) return true;         // !active → 可穿
   const d = TILE_DEFS[t];
   return !d || !d.solid || !!d.platform;                       // !tileSolid || tileSolidTop
 }
@@ -299,7 +306,9 @@ export function solidTileAt(st: Store, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;                         // Main.tile==null → true（怪癖保真）
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0) return false;                                   // !active()
+  // ★幽灵保域（2026-09-03）：active 门读 flags bit0（原版 WorldGen.cs:70652
+  //  `active() && tileSolid[…]`）——幽灵格非实心
+  if (t === 0 || (st.flags[i] & 1) === 0) return false;        // !active()
   if (st.wire[i] & TS.WIRE_ACTUATED) return false;             // inActive()
   const d = TILE_DEFS[t];
   return !!d && d.solid && !d.platform && st.slope[i] === 0 && st.half[i] === 0;

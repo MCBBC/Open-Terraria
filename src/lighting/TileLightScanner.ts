@@ -525,7 +525,10 @@ export function specialTileLight(
       if (!ctx.st.inBounds(ctx.x, above)) return null;
       const ai = ctx.st.idx(ctx.x, above);
       const ad = TILE_DEFS[ctx.st.type[ai]];
-      const solid3 = ctx.st.type[ai] !== 0 && (ad?.solid ?? false) && !ad?.platform;
+      // ★幽灵保域（2026-09-03）：WorldGen.SolidTile3 首门 = nactive()（active&&!inActive,
+      // WorldGen.cs:71005-71015）——幽灵格残型不算实心
+      const solid3 = ctx.st.flags[ai] !== 0 && (ctx.st.wire[ai] & TileStore.WIRE_ACTUATED) === 0
+        && ctx.st.type[ai] !== 0 && (ad?.solid ?? false) && !ad?.platform;
       if (solid3) return null;   // WorldGen.SolidTile3
       return [
         rnd.nextFloat() * 0.04 + 0.1 + (d[0] * 255) / 800,
@@ -658,8 +661,12 @@ export class TileLightScanner {
   }
 
   /** LightIsBlocked(TileLightScanner.cs:154-165):active && tileBlockLight[type],
-   *  隐形涂层(invisibleBlock)按显示开关放行——不查坡度/致动(那在 GetTileMask 外层) */
+   *  隐形涂层(invisibleBlock)按显示开关放行——不查坡度/致动(那在 GetTileMask 外层)。
+   *  ★幽灵保域（2026-09-02）：active 门落地——幽灵格（flags=0,type≠0,x86 pre 世界
+   *  1,471,380 格）不挡光（原版 tile.active() 首门;此前靠 finalize 出口净化维持
+   *  "type≠0⇒active" 恒等式）。缺此门 → 洞穴雕刻幽灵带整体挡光=地底黑墙。 */
   private lightIsBlocked(st: TileStore, i: number): boolean {
+    if (!st.flags[i]) return false;               // 原版 :156 tile.active() 首门
     const type = st.type[i];
     if (type === 0 || !this.blocksLight[type]) return false;
     if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) return false;
@@ -700,11 +707,13 @@ export class TileLightScanner {
     const type = st.type[i];
     const wallOk = this.wallPasses(st, i);
     if (!wallOk) return this.ret(0, 0, 0);
-    if (type !== 0 && this.allowWaterById[type]) {
+    // ★幽灵保域（2026-09-02）：两支均补原版 tile.active() 门（:3159/:3170 首析取支
+    //  `!tile.active()` ⇒ 光放行）——幽灵格按非活动格放行天空光
+    if (st.flags[i] && type !== 0 && this.allowWaterById[type]) {
       return sky;  // :3160-3168 无液量/半砖限制
     }
-    // :3170 一般放行门
-    if (type !== 0 && this.noSunLight[type]) {
+    // :3170 一般放行门（!active || !noSunLight || (坡/半砖 && 四邻干)）
+    if (st.flags[i] && type !== 0 && this.noSunLight[type]) {
       const invisible = (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks;
       const sloped = st.slope[i] !== 0 || st.half[i] !== 0 || invisible;
       if (!sloped) return this.ret(0, 0, 0);
@@ -730,7 +739,8 @@ export class TileLightScanner {
     const i = st.idx(x, y);
     const type = st.type[i];
     if (!this.wallPasses(st, i)) return false;
-    if (type !== 0 && this.noSunLight[type]) {
+    // ★幽灵保域（2026-09-02）：补原版 :3269 首析取支 `!tile.active()` 门
+    if (st.flags[i] && type !== 0 && this.noSunLight[type]) {
       const sloped = st.slope[i] !== 0 || st.half[i] !== 0;
       if (!sloped) return false;
       if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
@@ -801,7 +811,10 @@ export class TileLightScanner {
           // 天空/地狱全量)再逐通道乘染色;门 = (!active||半砖||!挡阳) && liquid<255
           if (((wall >= 88 && wall <= 93) || wall === 241) && st.liquid[i] < 255) {
             const t = st.type[i];
-            const tileOk = t === 0 || st.half[i] !== 0 || !this.noSunLight[t];
+            // ★幽灵保域（2026-09-03）：首析取支 = 原版 !tile.active()（:3191）——
+            // 幽灵格（flags=0,type≠0）按非活动格放行彩玻璃染色（原 t===0 只覆盖
+            // 空气,漏幽灵残型）
+            const tileOk = st.flags[i] === 0 || st.half[i] !== 0 || !this.noSunLight[t];
             if (tileOk) {
               const k = wall === 241 ? 6 : wall - 88;
               const TINT: Array<[number, number, number]> = [
@@ -866,9 +879,11 @@ export class TileLightScanner {
         }
         // ③ 发光 tile(:103-106)
         const type = st.type[i];
-        // ★原版门是 tile.active()（:103）——致动只置 inActive 不清 type → 致动火把/
-        // 蜡烛仍发光；曾加 !actuated 门致致动即熄灭
-        if (type !== 0) {
+        // ★原版门是 tile.active()（:103）——致动只置 inActive 不清 type/active → 致动
+        // 火把/蜡烛仍发光；曾加 !actuated 门致致动即熄灭。
+        // ★幽灵保域（2026-09-03）：flags bit0（active 位）首门——幽灵格（flags=0,
+        // type≠0,x86 对齐残型）残型不发光
+        if (st.flags[i] !== 0 && type !== 0) {
           const sheet = this.sheetById[type];
           // 蘑菇雕像 349 门控(:2940):frameX<36 的 style 完全不发光——
           // 同时压制组公式与 def.light 静态兜底,故提到入口处判

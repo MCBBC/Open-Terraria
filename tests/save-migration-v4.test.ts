@@ -28,7 +28,9 @@ describe('存档 v4', () => {
     player.inv.trash = { id: torchId, stack: 5 };
     const json = saveGame(world, player, 0);
     const data = JSON.parse(json) as SaveData;
-    expect(data.version).toBe(4);
+    // ★幽灵保域批（2026-09-02）：写侧版本 4→5（tileActive 差分通道落地）——
+    //   v4 全槽位稳定 id 语义原样延续，v4 档继续可读（loadSaveData >=4 门不受扰）
+    expect(data.version).toBe(5);
     expect(data.player.armor?.[0]?.favorited).toBe(true);
     expect(data.player.armor?.[0]?.prefix).toBe(62);
     const back = loadSave(json);

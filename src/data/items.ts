@@ -1158,6 +1158,14 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
   // v_227_dye_plants),此处只补 style。GAP-B 清偿批 2026-09-01。
   [3385, 'v_227_dye_plants', 8], [3386, 'v_227_dye_plants', 9],
   [3387, 'v_227_dye_plants', 10], [3388, 'v_227_dye_plants', 11],
+  // 复刻装饰件四件（Item.cs:43144-43154 DefaultToPlaceableTile((ushort)695/696, N)——
+  // 同②晶塔的双参 helper 盲区：itemfunc 无条目（提取器不解析 DefaultToPlaceableTile），
+  // tile 已由 createTile 双源回填（vanilla.json meta createTile 695/696 一致），此处补
+  // style：0=恶魔祭坛/暗影珠档 1=猩红档。帧偏移 = style*fw*18 → 695:54 / 696:36，
+  // 与 Game.breakTile 复刻件破坏分支猩红谓词（:16998 frameX>=36 / :17013 >=54）同口径。
+  // 配方侧 vanilla-recipes.json 5467-5470 已在册（Recipe.cs:14689-14709）。SW-C1 2026-09-03。
+  [5467, 'v_695_replica_demon_altar', 0], [5468, 'v_695_replica_demon_altar', 1],
+  [5469, 'v_696_replica_shadow_orb', 0], [5470, 'v_696_replica_shadow_orb', 1],
 ];
 for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];

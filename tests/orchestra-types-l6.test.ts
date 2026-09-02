@@ -241,7 +241,17 @@ describe('配饰（SnapStrike 三味脉冲环带+充能三连+弧线引矢家族
     const b = mkGame();
     apply(b.g, ParticleOrchestraType.SnappingStoneMelee, 400, 400, 120, 1);
     expect(b.wavs.some((w) => w.file === 'pyroclastic_stone' && w.vol === 0.5)).toBe(true);
-    expect(b.dusts.filter((d) => d.type === 6).length).toBe(4);          // 红/金两束各一对
+    expect(b.particles.length).toBe(2);
+    // ★⑨lifeExact+size 归位（2026-09-03）：TTL=int num=30 定值（:658→TimeToLive :677 红/:706 金,
+    //  旧 life:30 抖动档退役）;size=2×Scale.Y 长轴换算（T5 cattiva 同款）——红=(8,2)×1.1（:674）
+    //  ×1.5 恒真支（:690）→2×3.3=6.6、金=×0.7（:703）×1.5（:717）→2×2.1=4.2（旧 11/7 臆断退役）
+    expect(b.particles[0].color).toBe('rgba(255,0,0,0.5)');
+    expect(b.particles[1].color).toBe('rgba(255,242,0,1)');
+    expect(b.particles[0].opts.lifeExact).toBe(30);
+    expect(b.particles[1].opts.lifeExact).toBe(30);
+    expect(b.particles[0].opts.size).toBe(6.6);
+    expect(b.particles[1].opts.size).toBe(4.2);
+    expect(b.dusts.filter((d) => d.type === 6).length).toBe(4);          // ★⑨批重构（2026-09-03）：d6 对只挂金带内（:722-730 i 循环 ×2,每轮 ± 金臂各一粒）——旧红/金两束各一对（红臂对生）退役
     const c = mkGame();
     apply(c.g, ParticleOrchestraType.SnappingStoneSummon, 400, 400, 120, 2);
     expect(c.wavs.some((w) => w.file === 'armlet_of_ruin')).toBe(true);
@@ -321,7 +331,9 @@ describe('杂项（Keybrand/GasTrap/Shimmer/TownSlime/Cattiva/RB 族/BestReforge
     const { g, particles } = mkGame();
     apply(g, ParticleOrchestraType.CattivaHit);
     expect(particles.length).toBe(6);
-    expect(particles.every((p) => p.opts.life === 16)).toBe(true);
+    // ★⑨lifeExact 清偿（2026-09-03）：TTL=num5=16f 定值（:3774→TimeToLive :3791）——
+    //  旧 life:16 抖动档退役,opts 键随改
+    expect(particles.every((p) => p.opts.lifeExact === 16)).toBe(true);
   });
   it('RainbowBoulder 族：RB1 环列/RB2 双星/RB4 带音/pet 无音', () => {
     const b1 = mkGame();

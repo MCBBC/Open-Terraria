@@ -439,6 +439,18 @@ const CSS = `
   background:transparent; mix-blend-mode:normal; }
 .sw-invgrid .sw-slot:hover::after, .sw-inv .sw-slot.sm:hover::after, .sw-inv .sw-trash:hover::after {
   opacity:1; }
+/* 右下角坞槽位同款半透（2026-09-02 用户要求：装备/染料/时装/杂项格此前无半透）。
+   loadout 乘色（armor/dye 配装色、默认 220 灰）以 gradient+background-blend:multiply
+   在纹理层【内部】合成——不透明白灰叠半透底=加性发白（第七批同根因）,故禁用
+   ::before 乘色、纹理层内自乘 */
+.sw-eqdock .sw-slot { background-image:none; isolation:isolate; }
+.sw-eqdock .sw-slot::after { content:''; position:absolute; inset:0; z-index:-1;
+  background-image: linear-gradient(var(--slot-tint, rgb(220,220,220)), var(--slot-tint, rgb(220,220,220))), var(--slot-bgimg, url(sprites/vanilla/Inventory_Back20.png));
+  background-size: 100% 100%, 100% 100%;
+  background-blend-mode: multiply, normal;
+  opacity: var(--slot-alpha, 0.575); }
+.sw-eqdock .sw-slot::before { background:transparent; mix-blend-mode:normal; }
+.sw-eqdock .sw-slot:hover::after { opacity:1; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -576,7 +588,7 @@ export class UI {
   heldFrom: SlotWhere | null = null;
   openChest: ChestData | null = null;
   /** 装备页追加槽引用（恶魔心 8 / 大师 9 及时装 18/19——refreshEquipExtras 显隐） */
-  private equipExtraSlots: { equip: HTMLElement[]; vanity: HTMLElement[] } | null = null;
+  private equipExtraSlots: { equip: HTMLElement[]; vanity: HTMLElement[]; dye: HTMLElement[] } | null = null;
   private toastTimer: number | null = null;
   /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */
   onBestiary?: () => void;
@@ -2251,9 +2263,10 @@ export class UI {
       if (Number.isFinite(l) && l < bestL) { bestL = l; best = s; }
     }
     const left = best ? Math.max(4, Math.round(bestL)) : 8;
-    const h = best ? (parseFloat(best.style.height) || best.getBoundingClientRect().height || 52) : 52;
-    const topPx = best ? parseFloat(best.style.top) : NaN;
-    const top = Number.isFinite(topPx) ? Math.round(topPx + h + 2) : 84;   // +2:面板贴近热键栏（2026-09-02 用户复报距离大,原 +8）
+    // ★2026-09-02 用户复报 padding-top 太高：热键栏槽盒 52px 但视觉 ×0.75=39——
+    //   按 inline top+height(盒底)贴位会多出 13px 幽灵空隙。改用实测【视觉底】
+    //   （getBoundingClientRect 含缩放）+2px 贴合
+    const top = best ? Math.round(best.getBoundingClientRect().bottom + 2) : 84;
     // ★2026-09-02 透明化后无框（用户要求）：padding 会把内容往右/下推——面板锚点
     //   内收 padding,使【内容左缘】对齐热键栏最左格左缘、内容顶距热键栏底 8px
     //   （=整体上移;此前内容左/顶各偏 +12）
@@ -3318,7 +3331,7 @@ export class UI {
     this.accEyeEls.clear();   // 面板重建（重进世界）时旧眼钮引用作废
     const eqPage = el('div');
     eqPage.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
-    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
+    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 5, 'dye'));            // 染料 dye[0-2]+[3-7]（追加格 dye[8]/[9] 按解锁显隐,见 extras 段——与装备/时装列逐行对应）
     eqPage.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
     const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
     eqPage.appendChild(equipCol);
@@ -3493,7 +3506,8 @@ export class UI {
         this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
         this.refreshAll();
       });
-      b.title = Lang.text(mode === 'smart' ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+      // title 不用 GameUI.* 官译——官译带「右键点击切换堆叠方式」提示,双钮拆分后无此交互
+      b.title = mode === 'smart' ? '智能堆叠至附近宝箱' : '快速堆叠至附近宝箱';
       return b;
     };
     this.quickStackBtn = mkStackBtn('quick');
@@ -4664,7 +4678,8 @@ export class UI {
     for (const [b, mode] of [[this.quickStackBtn, 'quick'], [this.qsSmartBtn, 'smart']] as const) {
       if (!b) continue;
       b.style.display = this.openChest ? 'none' : '';
-      b.title = Lang.text(mode === 'smart' ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+      // title 不走 GameUI.* 官译（带「右键点击切换堆叠方式」提示,双钮拆分后无此交互）
+      b.title = mode === 'smart' ? '智能堆叠至附近宝箱' : '快速堆叠至附近宝箱';
     }
     // 多人玩家列表钮：仅联机态显示（单机无名单可列）
     if (this.playerListBtn) this.playerListBtn.style.display = this.game.net?.active ? '' : 'none';

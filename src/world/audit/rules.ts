@@ -51,9 +51,15 @@ export function findFragments(st: TileStore, onlyKeys?: ReadonlySet<string>): Ar
   const byType = new Map(multi.map((m) => [m.type, m]));
   for (let y = 0; y < st.h; y++) {
     for (let x = 0; x < st.w; x++) {
-      const t = st.type[st.idx(x, y)];
+      const i0 = st.idx(x, y);
+      const t = st.type[i0];
       const m = byType.get(t);
       if (!m) continue;
+      // ★幽灵保域（2026-09-02）：候选门=本函数文档口径「每【活跃】格」——幽灵格
+      //  （flags=0,type≠0）不是活跃格，不作为残片判定起点（保域后 finalize 净化
+      //  已删,幽灵型若恰为多格 framed 型曾会被误判残片→清扫清掉=x86 幽灵债）。
+      //  缺角检查（下 inner 循环）维持原样：幽灵同型格仍算"在"（type 相等短路）。
+      if (!st.flags[i0]) continue;
       let ok = false;
       for (let ay = y; ay > y - m.h && !ok; ay--) {
         for (let ax = x; ax > x - m.w; ax--) {
@@ -92,9 +98,15 @@ export const RULE_R1_MULTITILE: AuditRule = {
     const byType = new Map(multi.map((m) => [m.type, m]));
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        const t = st.type[st.idx(x, y)];
+        const iC = st.idx(x, y);
+        const t = st.type[iC];
         const m = byType.get(t);
         if (!m) continue;
+        // ★幽灵保域（2026-09-02）：候选门=本规则文档口径「每【活跃】格」——幽灵格
+        //  （flags=0,type≠0,x86 DEACT 残型,净化删除后存活到出口）不是活跃格，
+        //  不作为 R1 判定起点（与 findFragments 清扫侧同门；缺角检查仍按 type
+        //  相等短路=幽灵同型格算"在"）。曾无此门时幽灵坛/罐/蛋格被误记残片。
+        if (!st.flags[iC]) continue;
         // 枚举候选锚点 ∈ [x-w+1..x]×[y-h+1..y]:任一使 w×h 全同即合法
         let ok = false;
         let bestAx = x, bestAy = y, missDx = -1, missDy = -1;

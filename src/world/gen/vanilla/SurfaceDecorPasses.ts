@@ -20,13 +20,18 @@
 //    花草替换后整干浮空一格（"无根树"，seed 12345 小世界 15 列实锤）；原版整树消失。
 //    其余击杀位（185/186/187 堆、香蒲、海藻、蜂巢凹龛、233 容忍格）邻域无树干/级联
 //    恒 no-op，维持单格杀；529/530 邻接重帧为存量近似（稀有、零掷骰）备案不改。
-//  - 秘密种子分支（notTheBees / remix / frozen / extraLiquid）全部不触发，未移植。
-import type { TileStore } from '../../TileStore';
+//  - 秘密种子分支：extraLiquid 的 bubble 团块臂已移植（★IIIII189，见 1b 节）；
+//    其余（notTheBees / frozen）仍不触发。
+import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
-import { genSolidType } from './GenSolid';
+import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
+import { setBoulderSolidity } from './TrapsPass';
+import { dualDungeonState, inAnyPotentialDungeonBounds } from './DungeonStyles1457';
+import { LiquidSim } from '../../liquid/LiquidSim';
+import type { World } from '../../World';
 import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
 import { genSquareTileFrame, genTileFrame, genKillTile } from './FinalCleanupPass';
@@ -865,7 +870,239 @@ export function runSurfaceOreAndStonePass(st: TileStore, rng: RNG, gs: GenState)
 }
 
 // ============================================================
-// 2. FallenLogsAndWaterFeatures（cs:18625，仅倒木段——水景段属秘密种子）
+// 1b. ★IIIII189 SecretSeed.DoExtraLiquidAddBubbleBlocks（WorldGen.cs:1652-1813，
+//     1458 同行）——extraLiquid(waterpark) bubble(379) 团块臂。调用位=
+//     FallenLogsAndWaterFeatures pass 头（cs:18647-18651，extraLiquid.Enabled &&
+//     !roundLandmasses.Enabled 门），先于倒木段消费掷流（每 pass 头重播流）。
+//     本时点生成期 tileSolid 时间线：[225]=false（CaveHouse 尾 cs:17223，JS
+//     CaveHousePass:2179）/ [379]=true（UndergroundJungleTrees cs:17956，JS
+//     UndergroundJungleTreesPass:157）/ [484]=false（DesertBiome cs:12537）——
+//     bubble 循环的 SolidTile 全按该活面板读（genSolidType）。
+// ============================================================
+
+/** sheet 225 Hive 内部 id 族（[225] 临时括弧读原值/复原用；flipGenSolid 走 sheet id） */
+const HIVE_IDS_189: number[] = [];
+for (let id = 0; id < TILE_DEFS.length; id++) {
+  if (TILE_DEFS[id]?.vanilla?.sheet === 225) HIVE_IDS_189.push(id);
+}
+const BUBBLE_189 = TILE_BY_KEY['v_379_bubble']!;
+/** border 环 flag3 拒置实心表（cs:1747 字面量：type==10/192/384/189/196/460/48/232
+ *  ∪ TileID.Sets.Boulders）——active 且（非实心 ∪ 本表）→ 方格拒 */
+const BORDER_REJECT_189 = new Set([10, 192, 384, 189, 196, 460, 48, 232]);
+
+/** WorldGen.SolidTile(i,j)（cs:70642）生成期口径（SecretSeedDoEndsPass.solidTileGround
+ *  同式自持）：active && 生成期 tileSolid && !tileSolidTop && !halfBrick && !slope
+ *  && !inActive。tileSolid 读 GenSolid 活面板（[379]/[225]/[484] 时间线态）。 */
+const solidTileGen189 = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if ((st.flags[i] & 1) === 0) return false;
+  if ((st.wire[i] & 32) !== 0) return false;                  // inActive(致动)
+  const sh = SHEET[st.type[i]];
+  if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;   // tileSolidTop 家族
+  return genSolidType(st.type[i]) && !st.half[i] && st.slope[i] === 0;
+};
+
+/** IsTileNearby(x,y,379,distance)（cs:8812-8834）：±distance 盒扫 active && type==379。
+ *  type≠235 → 步长 1；InWorld(i,j)（fluff=0）。零掷骰。 */
+const isBubbleNearby189 = (st: TileStore, x: number, y: number, distance: number): boolean => {
+  for (let i = x - distance; i <= x + distance; i++) {
+    for (let j = y - distance; j <= y + distance; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const k = st.idx(i, j);
+      if ((st.flags[k] & 1) !== 0 && SHEET[st.type[k]] === 379) return true;
+    }
+  }
+  return false;
+};
+
+/** IsConsideredTheSpawnArea(x,y)（cs:1815-1834）。worldSpawnHasBeenRandomized 本
+ *  pass 时点恒 false（四置位全晚于本 pass：RandomizeWorldSpawn cs:24114/vampire
+ *  cs:22659/skyblock 尾 cs:23015/DoRandomSpawn cs:1900）；isThereAWorldSurface
+ *  生成期恒 true（半支不可达细分按 vanilla 形保留）。 */
+const isConsideredTheSpawnArea189 = (gs: GenState, h: number, y: number): boolean => {
+  if (gs.seedFlags.remix) {
+    return y > gs.remixSurfaceLayerLow && y < gs.remixSurfaceLayerHigh;
+  }
+  if (gs.worldSpawnHasBeenRandomized) {
+    if (y > gs.worldSurface) return y < h - 200;              // Main.UnderworldLayer = h-200
+    return false;
+  }
+  return y < gs.worldSurface;
+};
+
+/** SkipOnDualDungeons(x,y)（cs:25364-25380）：dualDungeons 禁置域守卫。
+ *  ★缺口备案：isCrackedBrick/isDungeonWallEdge/isDungeonWallGlass 三 per-dungeon
+ *  联合表 JS 未建（dualDungeonState 只有 tile/wallProtection 两张）——本三子臂仅
+ *  dual+extraLiquid 组合可达（现役金标链无此组合），域内恒 false 处理。 */
+const skipOnDualDungeons189 = (st: TileStore, gs: GenState, x: number, y: number): boolean => {
+  if (!gs.seedFlags.dualDungeons || !inAnyPotentialDungeonBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if ((st.flags[i] & 1) !== 0) {
+    const sh = SHEET[st.type[i]];
+    const tp = dualDungeonState.tileProtection;
+    if (tp && sh >= 0 && tp.some((t) => sh < t.length && t[sh])) return true; // IsConsideredDungeonTile(all)
+  }
+  const wp = dualDungeonState.wallProtection;
+  const wv = st.wall[i];
+  if (wp && wv < wp.length && wp[wv]) return true;            // IsConsideredDungeonWall(all)（含 wallDungeon 基表）
+  return false;
+};
+
+/** Liquid.QuickWater(-2) 的 GenSolid 括弧（Liquid.cs:104-148；★IIIII176 同族）：
+ *  头 [379]=true（粘性）+ SetBoulderSolidity(false) + [546]=false，尾
+ *  SetBoulderSolidity(true) + [546]=true——巨石九族（含 484）沉降毕回实心。
+ *  sim 内部 tilesIgnoreWater 自带 solidNP 备份/复原，两层各管各的读者。 */
+const quickWaterBracketed189 = (sim: LiquidSim): void => {
+  flipGenSolid([379], true);
+  setBoulderSolidity(false);
+  flipGenSolid([546], false);
+  sim.quickWater();
+  setBoulderSolidity(true);
+  flipGenSolid([546], true);
+};
+
+/** PlaceTile(x,y,379) 生成期直置（cs:59833 入场门/59964 Clear/60725 default 支/
+ *  60746-60752 尾奏）：!active 门由调用侧保证 → EmptyTile 生成期恒 true（无玩家/
+ *  NPC；液体不阻 EmptyTile）→ 379 不在液体拒置表 {3,20,24,27,32,51,69,72,201,352,
+ *  529,624,700,637,656,701,697}（cs:59959）→ Clear(Tile|TilePaint|Slope) → active+
+ *  type=379 帧零 → SquareTileFrame 九宫（379 非 TruncatesWalls{54,328,459,748}、
+ *  非 53/396/397 染色支；tileFrameImportant[379] 无赋值=false）。零掷骰。 */
+const placeBubble189 = (st: TileStore, rng: RNG, x: number, y: number): void => {
+  const i = st.idx(x, y);
+  st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0;
+  st.slope[i] = 0; st.half[i] = 0; st.paint[i] = 0;
+  st.setTileSilent(x, y, BUBBLE_189, 0, 0);
+  genSquareTileFrame(st, rng, x, y);
+};
+
+/** DoExtraLiquidAddBubbleBlocks 主体（cs:1652-1813） */
+export function runExtraLiquidAddBubbleBlocks(st: TileStore, rng: RNG, gs: GenState): void {
+  const w = st.w, h = st.h;
+  if (gs.seedFlags.skyblock) return;                          // cs:1656-1659 skyblockWorldGen 早退
+  const flag225 = HIVE_IDS_189.length > 0 ? genSolidType(HIVE_IDS_189[0]!) : false;
+  flipGenSolid([225], true);                                  // cs:1660-1661 [225] 临时实心括弧（开）
+  // Liquid.QuickWater(-2)（cs:1662）——一次性 LiquidSim（UnderworldPass ★IIIII176 同款接线）
+  const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
+  sim.isGeneratingOrLoadingWorld = true;
+  sim.generatingWorld = true;
+  sim.passRand = (max) => rng.nextInt(max);                   // ★IIIII100d：KillTile 级联掷入 pass 流
+  sim.passRng = rng;
+  sim.genWaterLine = gs.waterLine;                            // Liquid.cs:177-190 落水越线→岩浆
+  if (gs.seedFlags.remix) {
+    sim.remixWaterRule = true;
+    sim.remixLavaLine = gs.lavaLine;
+    sim.remixRockLevel = gs.rockLevel;
+    sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+  }
+  sim.remixWorldGen = !!gs.seedFlags.remix;
+  sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+  // GenVars.shimmerPosition：以太 pass（cs:15317）已过 → 以太中心；未生成世界
+  // vanilla 缺省 (0,0)（cs:6989），JS -1 哨兵同效归 (0,0)
+  if (gs.shimmerX > 0) sim.shimmerCenter = { x: gs.shimmerX, y: gs.shimmerY };
+  // solidNP ← 当前面板（含 225=true）——先于 sim 内部巨石括弧注入（备份/复原保序）
+  sim.applyGenSolidOverrides(snapshotGenSolid());
+  quickWaterBracketed189(sim);
+  // —— cs:1663-1703 remix 清水支（waterpark 不触发；[225] 仍 true 窗内）——
+  if (gs.seedFlags.remix) {
+    let flag2 = true;
+    while (flag2) {
+      const num = Math.trunc(w * 0.38);
+      const num2 = Math.trunc(w * 0.62);
+      const num3 = h - 135;
+      for (let i = num; i < num2 + 15; i++) {
+        for (let j = h - 200; j < num3 + 10; j++) st.liquid[st.idx(i, j)] = 0;
+      }
+      quickWaterBracketed189(sim);                            // cs:1678 第二次 QuickWater(-2)
+      flag2 = false;
+      const num4 = Math.floor(w / 2);
+      let num5 = h - 10;
+      while (solidTileGen189(st, num4, num5)) num5--;
+      const num6 = num5 + 1;
+      for (let k = num4 - 40; k <= num4 + 40 && !flag2; k++) {
+        for (let l = num6 - 10; l <= num6 + 10; l++) {
+          if (st.liquid[st.idx(k, l)] > 0) { flag2 = true; break; }
+        }
+      }
+    }
+  }
+  // —— cs:1704 [225] 复原（★括弧族判例：漏复原=半成品——bubble 循环 SolidTile 域
+  //    走原值 false，蜂巢格在写面后仍按非实心处理）——
+  flipGenSolid([225], flag225);
+  sim.dispose();
+  // —— cs:1705-1802 bubble(379) 团块主循环：每迭代恒 3 掷（两坐标 + 半径），skip
+  //    分支全在掷后（★先掷后覆写的被弃值是活掷）——
+  const num7 = w * 20;
+  const num8 = 10, num9 = 30, num11 = 15;
+  const minValue = gs.seedFlags.teamBasedSpawns ? 20 : num8;  // cs:1711-1715（num10 恒 30）
+  const num10 = num9;
+  const sx = gs.shimmerX >= 0 ? gs.shimmerX : 0;              // GenVars.shimmerPosition（缺省 (0,0)）
+  const sy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
+  const f334 = Math.fround(0.334);                            // C# 0.334f——num15 float32 累加
+  for (let m = 0; m < num7; m++) {
+    let flag3 = false;
+    const num12 = rng.int(100, w - 101);                      // Next(100, maxTilesX-100)
+    const num13 = rng.int(100, h - 101);                      // Next(100, maxTilesY-100)
+    const num14raw = isConsideredTheSpawnArea189(gs, h, num13)
+      ? rng.int(minValue, num10) : rng.int(num8, num9);       // cs:1722（spawn 域/普通域各一掷）
+    const ddx = num12 - sx, ddy = num13 - sy;
+    if (Math.sqrt(ddx * ddx + ddy * ddy) < 100 || skipOnDualDungeons189(st, gs, num12, num13)) continue;
+    let num14 = num14raw;
+    if (m > ((num7 / 2) | 0)) num14 = (num14 / 2) | 0;        // cs:1727-1730 后半程半径减半（int 除）
+    if (isBubbleNearby189(st, num12, num13, num14 + num11)) continue;
+    let num15 = 0;                                            // float32 累加器
+    let num16 = 0;                                            // border 实心计数
+    outer:
+    for (let n = num12 - num14; n <= num12 + num14; n++) {
+      for (let n17 = num13 - num14; n17 <= num13 + num14; n17++) {
+        const inB = st.inBounds(n, n17);
+        const i = inB ? st.idx(n, n17) : 0;
+        const border = n === num12 - num14 || n === num12 + num14 || n17 === num13 - num14 || n17 === num13 + num14;
+        const solid = solidTileGen189(st, n, n17);
+        if (border) {
+          if (solid) num16++;                                 // cs:1743-1746
+          const sh = inB ? SHEET[st.type[i]] : -1;            // cs:1747-1750：active &&（非实心 ∪ 拒置表）
+          if (inB && (st.flags[i] & 1) !== 0
+            && (!solid || BORDER_REJECT_189.has(sh) || BOULDERS.has(sh))) flag3 = true;
+        }
+        if (solid) num15 = Math.fround(num15 + f334);         // cs:1752-1755 实心 +0.334f
+        else if (inB && st.liquid[i] > 0) num15 = Math.fround(num15 + 1);  // 液体 +1f
+        if (inB) {
+          const wv = st.wall[i];
+          if (wv === 86 || wv === 62) flag3 = true;           // cs:1760-1763 蛛网/蜂窝墙拒
+        }
+        if (flag3) break outer;
+      }
+    }
+    const side = num14 * 2 + 1;
+    if (flag3 || num15 < Math.floor((side * side) / 2) || num16 < Math.floor(side / 3)) continue; // cs:1774-1777
+    // 写面（cs:1778-1794）：border 环 PlaceTile(379)+坡/半砖归零；全方格 liquid=0
+    // +fullbrightBlock(true)。★逐格顺序与 vanilla 一致（放置级联与清液交错）
+    for (let n18 = num12 - num14; n18 <= num12 + num14; n18++) {
+      for (let n19 = num13 - num14; n19 <= num13 + num14; n19++) {
+        const i = st.idx(n18, n19);
+        if (n18 === num12 - num14 || n18 === num12 + num14 || n19 === num13 - num14 || n19 === num13 + num14) {
+          if ((st.flags[i] & 1) === 0) placeBubble189(st, rng, n18, n19);
+          st.slope[i] = 0;
+          st.half[i] = 0;
+        }
+        st.liquid[i] = 0;                                     // 原版只清 liquid 量，liquidType 位不动
+        st.setCoatSilent(n18, n19, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
+      }
+    }
+    // LandmassData{ExtraLiquidBubbleSquare} push（cs:1795-1801）——唯一读者
+    // ExtraSpawnPointManager（运行期），生成期 dump 零面 → 备案跳过
+  }
+  // —— cs:1803-1812 实心格残液终扫（[15, w-15)×[15, h-15)）——
+  for (let x = num11; x < w - num11; x++) {
+    for (let y = num11; y < h - num11; y++) {
+      if (solidTileGen189(st, x, y)) st.liquid[st.idx(x, y)] = 0;
+    }
+  }
+}
+
+// ============================================================
+// 2. FallenLogsAndWaterFeatures（cs:18625，倒木段——水景段=上方 runExtraLiquidAddBubbleBlocks）
 // ============================================================
 
 /** FallenLogsAndWaterFeatures pass 1:1（cs:18637-18765） */
@@ -904,12 +1141,17 @@ export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
             }
           }
           if (ok) {
-            // 上方 20×10 须净空无墙（cs:18731-18747）
+            // 上方 20×10 须净空无墙（cs:18731-18747）——cs:18755 实心谓词=active &&
+            //   Main.tileSolid[type]（**生成期活面板**，无 half/slope/top 修饰）。
+            //   ★IIIII189：旧读 TILE_DEFS 静态 solid——waterpark 本时点 [379]=true
+            //   （UndergroundJungleTrees 翻转）而静态 379=false，21371 个 bubble 格
+            //   净空盒毒化面（x86 拒 JS 收）→ 倒木 #2 位分歧 (3327,260) vs (3798,253)。
+            //   改 genSolidType 活面板（live 唯一真值；普通链净空域无翻转族格=零扰动）。
             for (let m = x - 10; m < x + 10 && ok; m++) {
               for (let n = j - 10; n < j - 1 && ok; n++) {
                 if (!st.inBounds(m, n)) { ok = false; break; }
                 const k = st.idx(m, n);
-                if (st.flags[k] && TILE_DEFS[st.type[k]]?.solid) ok = false;
+                if (st.flags[k] && genSolidType(st.type[k])) ok = false;
                 else if (st.wall[k] !== 0) ok = false;
               }
             }

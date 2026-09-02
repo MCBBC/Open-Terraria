@@ -120,6 +120,13 @@ export interface SaveData {
   /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099；旧档缺省 0） */
   shadowOrbCount?: number;
   tiles: string;   // base64 RLE
+  /** ★幽灵保域（v5，2026-09-02）：active 位差分通道（base64 RLE，0/1 值域）。
+   *  v[i] = (flags[i]&1) XOR (type[i]≠0)——1 = 活位布局与"type≠0 即激活"派生式
+   *  不同：幽灵格（type≠0 未激活，原版 active(false) 残型）与幻影活性
+   *  （type=0 带活位）落 1。缺段（≤v4 旧档）=读档端按派生式还原，语义与旧
+   *  「写侧幽灵净化」完全一致（旧档本就无幽灵）。旧版构建读新档会忽略本键
+   *  →幽灵按派生式激活成浮空块（前向不兼容已登记，同 v2 接受破损政策先例）。 */
+  tileActive?: string;
   walls: string;
   liquid: string;
   liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜 4微光）
@@ -343,19 +350,38 @@ export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: U
   return out.bytes();
 }
 
-/** 存档序列化主体。幽灵净化在视图上就地执行(主线程=活存储原语义;
- * worker=副本,净化不影响游戏内状态,存档字节一致) */
+/** ★幽灵保域（v5）：active 位差分通道编码。逐格 v = (flags&1) XOR (type≠0)，
+ *  RLE 游程压缩；全零（无幽灵/无幻影，即旧净化语义世界）返回 null=不落段。
+ *  幽灵格成片（洞穴雕刻带）→ 游程数远小于格数，典型世界几十 KB 量级。 */
+export function rleTileActiveDiff(st: Pick<SaveStoreView, 'type' | 'flags'>): Uint8Array | null {
+  const out = new ByteWriter();
+  const n = st.type.length;
+  let any = false;
+  let i = 0;
+  while (i < n) {
+    const v = (st.flags[i] & 1) ^ (st.type[i] !== 0 ? 1 : 0);
+    if (v !== 0) any = true;
+    let run = 1;
+    while (i + run < n
+      && ((st.flags[i + run] & 1) ^ (st.type[i + run] !== 0 ? 1 : 0)) === v
+      && run < 0x7fffffff) run++;
+    out.varint(run - 1);
+    out.varint(v);
+    i += run;
+  }
+  return any ? out.bytes() : null;
+}
+
+/** 存档序列化主体。★幽灵保域（2026-09-02）：曾在此对视图就地做幽灵净化
+ *  （!flags && type≠0 → type=0）——已删除：v5 起 tileActive 差分通道承载 active
+ *  位，幽灵格（act=0,type≠0）原样落档（对齐原版 .wld inactive 位随档）。
+ *  本函数现在【零就地写】，主线程活存储与 worker 副本路径字节一致。 */
 export function serializeSave(
   st: SaveStoreView, meta: SaveMeta,
   player: SaveData['player'], playTimeMs: number,
   townNpcs?: SaveData['npcs'],
   events?: SaveData['events'],
 ): string {
-  // 幽灵净化:存档格式不携带 active 位(加载时 type≠0 即激活),
-  // 非活性格上的残留 type 必须归零,否则重读后全部变成浮空实体块
-  for (let i = 0; i < st.type.length; i++) {
-    if (!st.flags[i] && st.type[i] !== 0) st.type[i] = 0;
-  }
   // 物品 id → 稳定 id(全槽位统一;量小直接遍历)。保留 favorited/prefix。
   // v4 起 armor/dye/trash/miscEquips/miscDyes/loadouts 也走稳定 id(v3 曾裸透传内部
   // 下标——注册表一变即错位;本地物品退役时顺手根治)
@@ -369,9 +395,11 @@ export function serializeSave(
         placeStyle: it.placeStyle ?? undefined,
       }
       : null;
+  // ★幽灵保域（v5）：active 位差分（无幽灵世界=null → 不落段，读档端派生式还原）
+  const tileActDiff = rleTileActiveDiff(st);
   const data: SaveData = {
     format: 'sandboxworld.save',
-    version: 4,
+    version: 5,
     header: {
       name: meta.name, seed: meta.seed, width: meta.w, height: meta.h,
       spawn: [meta.spawnX, meta.spawnY], groundLevel: meta.groundLevel, rockLevel: meta.rockLevel,
@@ -407,6 +435,8 @@ export function serializeSave(
     oreTiersPH: meta.oreTiersPH ?? { copper: 7, iron: 6, silver: 9, gold: 8 },
     shadowOrbCount: meta.shadowOrbCount ?? 0,
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
+    // ★幽灵保域（v5）：active 位差分通道（缺段=读档端按 type≠0 派生，同 v4 语义）
+    tileActive: tileActDiff ? bytesToB64(tileActDiff) : undefined,
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),
     liquidType: bytesToB64(rlePairs(st.liquidType)),

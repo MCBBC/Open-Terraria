@@ -233,6 +233,9 @@ export class VolcanoBlastProj extends Entity {
     for (const rawEnt of game.enemies()) {
       const e = rawEnt as FireEnemyLike;
       if (!e || e.dead || this.hitSet.has(e.id)) continue;
+      // ★dontTakeDamage 目标排除（:12600 同款——tryConsumingTimerCrit 在 hurt 前,
+      //   被拒命中不得烧蓄能充能,终审补）
+      if ((rawEnt as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (!playerCanHitEnemy(rawEnt as never, game)) continue;
       // ★R2-04 ①全局免疫窗（Damage_PVE_Inner :12641-46）：immune[owner]!=0 即拒
       const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };

@@ -4,8 +4,9 @@
 // 的核心：Smooth World 把地表凸起砸成半砖/坡面，Waterfalls pass 专门在水边唇缘砸半砖。
 // 坡面渲染见 VanillaTiler.drawSlopedFrame（TileDrawing.cs:1328-1360 切条 1:1）。
 // 仍近似原版处（逐条对照 1456 源码后保留）：
-//  - CanPoundTile 的 CanKillTile 结构检查（cs:62249）近似为 !framed
-//    （黑名单/Boulders/生成期 190,30/ForbidsSloping 上方表均已 1:1，见 canPoundTile）
+//  - [★IIIII187 已清偿] CanPoundTile 的 CanKillTile 结构检查已 1:1 化（canKillTileGen,
+//    cs(1458):62699-62823）——旧 `!framed`+genSolidType 近似在 GFB 灰烬域带残坡
+//    TreeAsh(634) 上首触翻案（loop-B 回落臂 4 格 s/h 残差）
 //  - SolidTile 的 tileSolidTop 近似为 !platform；PlaceTile 的 495 特判未移植
 //  - KillTile 尾 SquareTileFrame 级联已移植（UUU 批,见 killTile 注）：非活性清
 //    half/slope 残基 + 巨石族 Check2x2 整组杀;其余 TileFrameImportant 族生成期
@@ -982,8 +983,19 @@ function shouldTileSurviveKT(st: TileStore, x: number, y: number): boolean {
  * 此支在 FTW/getGoodWorld 世界**全程活性**（不限 SmoothWorld；凡生成期 KillTile 即判），
  * 普通/其他种子世界恒 inert——9293480 等七满绿链的金标零扰动由旗标门保证。 */
 let killGetGoodWorld = false;
+/** ★IIIII187：KillTile 尾冰族灌水臂（cs:64439-41）的 remix/drunkenWorld 旗——与
+ *  killGetGoodWorld 同点注入（缺一臂即短路基不完整）。 */
+let killTailRemixWorld = false;
+let killTailDrunkWorld = false;
 /** 由 WorldGen bootstrap 注入（vanillaTerrain 内 gs.seedFlags 就绪后一次；等价 Main.getGoodWorld 全局读） */
 export function setKillTileGetGood(v: boolean): void { killGetGoodWorld = v; }
+/** ★IIIII187：同上注入点（remix/drunkenWorld;冰族灌水臂第三、四腿） */
+export function setKillTileTailFlags(remix: boolean, drunk: boolean): void {
+  killTailRemixWorld = remix;
+  killTailDrunkWorld = drunk;
+}
+/** TileID.Sets.Ices（TileID.cs:293）∪{147 Snow,224 PurpleIce}——cs:64439 冰族灌水臂成员 */
+const ICE_WATER_TAIL = idsByVanillaSheet(147, 224, 161, 200, 163, 164);
 
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
@@ -1084,8 +1096,25 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（cs:63904 > cs:63748 尘环）——
   //   曾前置 → 掷序错,CONST 链 LavaLayerCaverer 雕到蛛网+蜘蛛墙即从该点流移
   if (sheet === 51 && st.wall[i] === 62) rng.nextInt(4);
-  // cs:63941：地狱石(58) 击杀于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128
-  if (sheet === 58 && y > st.h - 200) { st.liquid[i] = 128; st.liquidType[i] = 2; }
+  // cs(1458):64427-64441 KillTile 尾液体灌入族（Main.netMode != 1 恒真;三臂互斥 else-if）：
+  //   ①58 狱石 于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128（无掷）
+  //   ②★IIIII187 −747 定谳：230 脆蜂蜜块 && Main.getGoodWorld → Next(2)==0 灌岩浆 128。
+  //     短路序 = type==230 && getGoodWorld 先于 Next ⇒ **每个 230 击杀无条件占 1 流位**
+  //     （掷值只决定是否灌岩浆）。GFB getGoodWorld=true 全程活性（052 快照活性脆蜂蜜块
+  //     112,233,loop A 击杀 442+）；JS 曾整缺 → loop A 掷流缺口首源（(618,526) 为首个
+  //     可见下游态差，流移诞生格在更早列）。
+  //   ③冰族 Ices{161,200,163,164}∪{147,224} && getGoodWorld && remixWorld && !drunkWorld
+  //     → Next(2)==0 灌水 64。GFB drunkWorld=true ⇒ 第三腿短路恒假（掷不消耗）;remix
+  //     链无 getGoodWorld ⇒ 同惰性——现役全链 inert,按原文补全防未来种子组合。
+  //   灌液体写在 deactivate 之后、SquareTileFrame 之前;liquid 通道不经 setTileSilent。
+  if (sheet === 58 && y > st.h - 200) {
+    st.liquid[i] = 128;
+    st.liquidType[i] = 2;
+  } else if (sheet === 230 && killGetGoodWorld) {
+    if (rng.nextInt(2) === 0) { st.liquid[i] = 128; st.liquidType[i] = 2; }
+  } else if (ICE_WATER_TAIL.has(sheet) && killGetGoodWorld && killTailRemixWorld && !killTailDrunkWorld) {
+    if (rng.nextInt(2) === 0) { st.liquid[i] = 64; st.liquidType[i] = 1; }
+  }
   st.setTileSilent(x, y, 0);
   // cs:63947 尾 SquareTileFrame(i,j)：3×3 TileFrame 级联（见上 UUU 批注）
   squareTileFrame(st, rng, x, y);
@@ -1144,32 +1173,84 @@ const TREE_TRUNK = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 5
 export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  if (!st.flags[i]) return false; // 同 solidTile：幽灵 tile 不可砸
+  if (!st.flags[i]) return false; // 同 solidTile：幽灵 tile 不可砸（vanilla !active → CanKillTile false，等效前移）
   const t = st.type[i];
   if (t === 0) return false;
+  // ① type 黑名单（cs:81997-82003）：10 门/48 尖刺/137 陷阱/232 木刺/380 花盆箱/
+  //    387 陷阱门/388 高闸/476 高尔夫洞/484 滚动仙人掌
   if (POUND_BLACKLIST.has(t)) return false;
+  // ② TileID.Sets.Boulders（cs:82006-09）
   if (BOULDERS.has(t)) return false;
+  // ③ 生成期追加（cs:82011-18）：190 荧光菇块 / 30 木平台
   if (POUND_GEN_SKIP.has(t)) return false;
-  // ④ 上格 ForbidsSloping（cs:81475-81478：上格 active 且禁坡物 → 不可砸）
+  // ④ 上格 ForbidsSloping（cs:82004：上格 active 且禁坡物 → 不可砸）
   if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
     if (st.flags[up] && FORBIDS_SLOPING.has(st.type[up])) return false;
-    // ⑤' cs:62270-62281 CanKillTile 树干族早退：上格 active 且 IsATreeTrunk
-    //    {5,72,583-589,596,616,634} 且与本格异型 且帧门全过（非(66,0..44) 非
-    //    (88,66..110) 且 frameY<198——frameY<0 于 u16 不可能）→ false。
-    //    ★IIIII 定罪（12345 #54 单差）：(3845,1045) AshGrass(633) 顶 TreeAsh(634)
-    //    ——vanilla CanKillTile false → PoundTile 返 false 不砸（WFProbe PH 3610
-    //    PR=0 织入实证；JS 近似漏此腿砸出 half=1）。9293480 #53/#54 全绿 ⇒ 该腿
-    //    在彼链零命中（回归护栏）。
-    if (st.flags[up] && TREE_TRUNK.has(st.type[up]) && st.type[up] !== t
-      && (st.frameX[up] !== 66 || st.frameY[up]! > 44)
-      && (st.frameX[up] !== 88 || st.frameY[up]! < 66 || st.frameY[up]! > 110)
-      && st.frameY[up]! < 198) return false;
   }
-  const d = TILE_DEFS[t];
-  // !framed ≈ CanKillTile 的框架物拦截（箱/罐/雕像等不可砸半砖）——CanKillTile 整体仍近似
-  // tileSolid 走 GenSolid（同 solidTile：生成期翻转表）
-  return genSolidType(t) && !!d && !d.platform && !d.framed;
+  // ⑤ 尾 = return CanKillTile(x, y)（cs:82021）——★IIIII187 1:1 化（canKillTileGen），
+  //    取代旧 `genSolidType && !platform && !framed` 近似：GFB 灰烬域带残坡的
+  //    TreeAsh(634,framed) 在 loop-B 回落臂须可砸（SlopeTile(0)+PoundTile → s0h1），
+  //    旧近似拒砸 → (1603,1046)/(1680-1682,1058-1060) 4 格 s/h 残差。
+  return canKillTileGen(st, x, y);
+}
+
+/** ★IIIII187：WorldGen.CanKillTile（cs(1458):62699-62823）生成期路径 1:1。
+ *  上格腿（树干族异型+帧门/323 棕榈/21,26,72,77,88,467,488 异型/80 仙人掌帧门）+
+ *  Boulders→CheckBoulderChest + 本格 10 锁门/235 三格上扫/21,467,88 箱族
+ *  （生成期箱恒有物 ⇒ Chest.CanDestroyChest=false ⇒ 拒毁，与 shouldTileSurviveKT
+ *  同一口径）。type 比较均在原版 sheet 空间（SHEET_OF）。 */
+function canKillTileGen(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  if (st.wall[i] === 350) return false;                        // cs:62717 wall==350
+  const t = st.type[i];
+  const ts = SHEET_OF[t] ?? -1;
+  if (y >= 1) {
+    const ui = st.idx(x, y - 1);
+    if (st.flags[ui]) {
+      const ut = st.type[ui];
+      const uts = SHEET_OF[ut] ?? -1;
+      const ufx = st.frameX[ui]!, ufy = st.frameY[ui]!;
+      // cs:62714-19 树干族早退：IsATreeTrunk[上格] && 异型 && 帧门全过
+      //（非(66,0..44) 非(88,66..110) 且 frameY<198——frameY<0 于 u16 不可能）
+      if (TREE_TRUNK.has(ut) && ut !== t
+        && (ufx !== 66 || ufy > 44)
+        && (ufx !== 88 || ufy < 66 || ufy > 110)
+        && ufy < 198) return false;
+      switch (uts) {
+        case 323:                                              // cs:62722-27 棕榈干
+          if (ts !== uts && (ufx === 66 || ufx === 220)) return false;
+          break;
+        case 21: case 26: case 72: case 77: case 88: case 467: case 488:
+          if (ts !== uts) return false;                        // cs:62728-35 容器/祭坛族
+          break;
+        case 80: {                                             // cs:62736-44 仙人掌帧门
+          if (ts !== uts) {
+            const num = Math.trunc(ufx / 18);
+            if (num === 0 || num === 1 || num === 4 || num === 5) return false; // (uint)num<=1 ∪ (uint)(num-4)<=1
+          }
+          break;
+        }
+      }
+    }
+  }
+  if (BOULDERS.has(t) && checkBoulderChestKT(st, x, y)) return false;   // cs:62746-51
+  switch (ts) {
+    case 10:                                                   // cs:62753-59 锁门
+      if (isLockedDoorKT(st, x, y)) return false;
+      break;
+    case 235: {                                                // cs:62760-74 传送器三格上扫
+      const num2 = x - Math.trunc((st.frameX[i]! % 54) / 18);
+      for (let k = 0; k < 3; k++) {
+        if (st.inBounds(num2 + k, y - 1) && st.flags[st.idx(num2 + k, y - 1)]
+          && hasReasonToReturnEarlyKT(st, ts, num2 + k, y - 1, true)) return false;
+      }
+      break;
+    }
+    case 21: case 467: case 88:                                // cs:62775-86 箱族
+      return false;                                            // 生成期恒有物 → CanDestroyChest=false
+  }
+  return true;
 }
 
 /** 坡面(WorldGen.cs:81507 SlopeTile 的生成期路径):清 half、写 slope(0-4)。

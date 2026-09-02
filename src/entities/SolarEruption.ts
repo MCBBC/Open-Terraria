@@ -53,6 +53,8 @@ export class SolarFlare extends Entity {
     }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
+      // ★dontTakeDamage 目标排除（:12600 同款——applyDaybreak 直写 daybreakT 在 hurt 前,终审补）
+      if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       const reach = 40 * this.sc;                      // 爆焰视觉半径命中盒近似
@@ -142,6 +144,8 @@ export class SolarEruptionWhip extends Entity {
     }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
+      // ★dontTakeDamage 目标排除（:12600 同款,终审补——同上环）
+      if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; cx: number; cy: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

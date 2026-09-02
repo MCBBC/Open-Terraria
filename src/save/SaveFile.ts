@@ -145,8 +145,7 @@ export function loadSave(json: string): ReturnType<typeof loadSaveData> {
 
 /** 服务器侧世界-only 存档（P3.1 持久化）：tile/箱子/clock/flags/天气，不含玩家/城镇NPC。
  *  player 字段以空壳占位（格式必填；语义上服务器档无玩家，加载方忽略）。
- *  注意：serializeSave 的幽灵净化会就地写 store——服务器存储由 setTileSilent/
- *  loadSaveData 保持 type/flags 一致，该循环为 no-op，活存储不受影响。 */
+ *  注：serializeSave 现零就地写（幽灵保域批删除了写侧幽灵净化），活存储不受影响。 */
 export function saveWorldOnly(world: World): string {
   const parts = buildSaveParts(world);
   return serializeSave(parts.view, parts.meta, parts.player, 0);
@@ -425,6 +424,26 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       if (onTilesProgress && i >= nextMilestone) {
         onTilesProgress(i / nAll);
         nextMilestone += nAll / 100;
+      }
+    }
+  }
+  // ★幽灵保域（v5）：active 位差分通道（serialize.ts rleTileActiveDiff 的逆变换）。
+  //   v[i]=1 → 活位与"type≠0 即激活"派生式取反：幽灵格（type≠0 未激活）保持
+  //   未激活存活、幻影活性（type=0 带活位）还原活位。缺段（≤v4 旧档）=保持
+  //   派生式，语义与旧「写侧幽灵净化」一致（旧档本就无幽灵）。
+  {
+    const u8 = b64ToBytes(data.tileActive ?? '');
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      if (v) {
+        for (; i < end; i++) tyF[i] ^= 1;
+      } else {
+        i = end;
       }
     }
   }

@@ -40,11 +40,14 @@ const info = await page.evaluate(async () => {
   const { ITEM_DEFS } = await import('/src/data/items.ts');
   const { Arrow } = await import('/src/entities/Arrow.ts');
   const ammoDefIdxByAmmoId = (ammoId) => {
+    let byVid = -1;
     for (let i = 0; i < ITEM_DEFS.length; i++) {
       const d = ITEM_DEFS[i];
+      const vid = d?.vid ?? (d?.key ? Number(String(d.key).match(/^vi_(\d+)_/)?.[1] ?? -1) : -1);
       if ((d?.ammoId ?? -1) === ammoId) return i;
+      if (byVid < 0 && vid === ammoId) byVid = i;
     }
-    return -1;
+    return byVid;
   };
   const wid = window.__swItems[findKey(3540)];
   const aid = ammoDefIdxByAmmoId(40);
@@ -64,6 +67,14 @@ const info = await page.evaluate(async () => {
   let volleySeen = -1;
   const dbg = { carrierEver: 0, useTime0: g.player.useTime, uiBlocking: g.input.uiBlocking,
     heldId: g.player.inv.heldItem()?.id ?? null, mouse: [g.input.mouseX, g.input.mouseY] };
+  {
+    const hd = g.player.inv.heldItem();
+    const hdDef = hd ? ITEM_DEFS[hd.id] : null;
+    dbg.heldKey = hdDef?.key ?? null;
+    dbg.heldVid = hdDef?.vid ?? null;
+    dbg.swItemsKey = findKey(3540);
+    dbg.swItemsId = wid;
+  }
   for (let t = 0; t < 60; t++) {
     g.fixedUpdate(1 / 60);
     if (g.entities.projectiles.some((q) => q.projId === 630)) dbg.carrierEver++;
@@ -73,6 +84,7 @@ const info = await page.evaluate(async () => {
   dbg.useTimeAfter = g.player.useTime;
   dbg.mouseDownAfter = g.input.mouseDown;
   dbg.pidsAfter = g.entities.projectiles.map((q) => q.projId);
+  dbg.swingAfter = g.swing ? { t: g.swing.t, dur: g.swing.dur, item: g.swing.item, useStyle: g.swing.useStyle } : null;
   for (let t = 0; t < 3 && volleySeen >= 0; t++) g.fixedUpdate(1 / 60);
   // ---- B 组:同 pid 直接生成（对照组,生成于玩家右上 200px 处,同速向上右）----
   const bx = g.player.cx + 200, by = g.player.cy - 200;

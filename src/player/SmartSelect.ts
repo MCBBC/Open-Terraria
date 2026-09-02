@@ -61,7 +61,7 @@ const FLARE_AMMO_ITEMS: ReadonlySet<number> = new Set([931, 1614]);
 
 // ===================== 原版 Main.tileHammer / Main.tileAxe（以 sheet = 原版 tile id 表达） =====================
 
-/** Main.cs:7153-7156 tileHammer 全表（26 祭坛 / 695 / 31 音符块 / 696） */
+/** Main.cs:7153-7156 tileHammer 全表（26 祭坛 / 695 / 31 暗影珠（猩红心=frameX≥36 同格样式）/ 696） */
 const TILE_HAMMER_SHEETS: ReadonlySet<number> = new Set([26, 31, 695, 696]);
 
 /** Main.cs:7157-7171 tileAxe 全表（树 5 / 蘑菇树 72 / 仙人掌 80 / 倒木 488 / 倒木回响 704 /

@@ -2159,6 +2159,12 @@ export class TownNPC extends Entity {
     //      ":54403-54422"）：无位移连续 ≥30 拍触发【一次】后计数清零再积
     //      （原版 oldPosition==position && oldVelocity==velocity+gravity &&
     //      localAI[2]++>=30 → localAI[2]=0 + ai[0]=1/ai[1]=200+Next(300)/双翻）。
+    //      ★原版语义精读（2026-09-02 备案收齐）：oldVelocity 在碰撞结算前快照
+    //      （:93681）、oldPosition 在移动前快照（:93748）——条件本质 =「贴地+
+    //      AI 走行意图逐拍原样保留+碰撞只吃速度」的贴地顶墙检测器；本仓 onGround
+    //      门是该速度等式的贴地投影（非偏离），原版全等含 y 轴 → 悬空坠落态
+    //      （y 逐拍变）原版同样不触发（向导电梯案实证，见 TileCollision
+    //      unembedPass 悬空刷角门）。
     //      PARTIAL 余留（蓝队允许降级）：速度同符号近似判定未建，仅 x 轴位移；
     //      触发前提加 !flag16（危险中不折返,dangerNear 承接）与 !talking，
     //      旧 walkT<100 门/模10 摊销删除——原版无此二条件 ----

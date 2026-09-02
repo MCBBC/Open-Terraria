@@ -23,6 +23,9 @@
  *   lerpcolor     ga=(1−α/255) + 固定色亮度近似滤镜
  *   lerpalphain   ga=(α/255)×(mul??1) + lerpWhite(k) 滤镜
  *   alpha0        ga=α===0? rgba.a/255 : 0
+ *   alpha0additive ga=α===0? 1 : 0（A=0 满强加算白,:81286 265/355 族——须配
+ *                 Arrow ADDITIVE_GLOW_PROJS 'lighter' 合成;α>0 期=Color.Transparent 全隐,
+ *                 可见面=AI 毒尘,「渐显 ramp」是错译）
  *   alphaLt       ga=α<lt? rgba.a/255 : 0
  *   alpha255hide  ga=α>=255? 0 : 1
  *   random        ga=α>0? 0 : 200/255（随机 rgb 近似白）
@@ -44,8 +47,8 @@
  *  生成：解析 :75940 方法体全部分支（源码条件提及 307 个 id，首中即返序；default 7 id/死支 16 id 不进表），表 300 项。 */
 export interface ProjAlphaMod {
   kind: 'invisible' | 'fade' | 'fade2' | 'fixed' | 'fixedfade' | 'afade' | 'lerp' | 'lerpkeep'
-    | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alphaLt' | 'alpha255hide'
-    | 'random' | 'disco' | 'pulse40' | 'life' | 'life2';
+    | 'lerpblack' | 'lerpcolor' | 'lerpalphain' | 'alpha0' | 'alpha0additive' | 'alphaLt'
+    | 'alpha255hide' | 'random' | 'disco' | 'pulse40' | 'life' | 'life2';
   /** lerp 族白化系数 / alphaLt 阈值复用 */
   k?: number;
   /** 固定色 [r,g,b,a]（afade 的 a=a0 基值） */
@@ -131,7 +134,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   258: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },  // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   259: { kind: 'invisible', off: 1 },  // α>200→Transparent 真零 / else (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   263: { kind: 'life' },  // :76551 | timeLeft<255→(255,255,255,timeLeft) else 全白（life 淡入）
-  265: { kind: 'invisible', off: 1 },  // α>0→Transparent 真零 / α=0→(255,255,255,0) A=0 满强加算白——非全隐形;SKIP→正确承接=GA α==0?1:0+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  265: { kind: 'alpha0additive' },  // :81286-81293（1457）| α>0→Transparent 全隐（fade 期可见面=AI d163 毒泡）/ α==0→(255,255,255,0) A=0 满强加算白——已接线（★2026-09-02 遗留批）:GA alpha0additive 档 + ADDITIVE_GLOW_PROJS 'lighter';旧 off 残留解除（M-4 反转先例=5 小丑箭）
   270: { kind: 'pulse40' },  // :76051 | White A=WrappedLerp(0,255,(timeLeft%40)/40) 40t 锯齿脉冲
   274: { kind: 'life2' },  // :76559 | timeLeft<85→(tL·3 灰, 100·tL·3/255) else (255,255,255,100)
   279: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
@@ -164,7 +167,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   350: { kind: 'lerp', k: 0.15, off: 1 },  // :76110 | gate WorldGen.SolidTile：实心→Lerp(0.05)/悬空→0.15（按悬空档，实心门登记忽略）；SKIP: 门控条件未建模（登记忽略）
   351: { kind: 'lerp', k: 0.15, off: 1 },  // :76110 | gate WorldGen.SolidTile：实心→Lerp(0.05)/悬空→0.15（按悬空档，实心门登记忽略）；SKIP: present 专属档（礼盒淡入覆盖 globalAlpha）
   352: { kind: 'lerpalphain', k: 0.5 },  // :76456 | Lerp(White,0.5) A×(α/255)（α 越大越显）
-  355: { kind: 'invisible', off: 1 },  // α>0→Transparent 真零 / α=0→(255,255,255,0) A=0 满强加算白——非全隐形;SKIP→正确承接=GA α==0?1:0+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  355: { kind: 'alpha0additive' },  // :81286-81293（1457）| α>0→Transparent 全隐（fade 期可见面=AI d205 毒泡）/ α==0→(255,255,255,0) A=0 满强加算白——已接线（★2026-09-02 遗留批）:GA alpha0additive 档 + ADDITIVE_GLOW_PROJS 'lighter';旧 off 残留解除（M-4 反转先例=5 小丑箭）
   400: { kind: 'invisible', off: 1 },  // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   401: { kind: 'invisible', off: 1 },  // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   402: { kind: 'invisible', off: 1 },  // Color.Transparent=(0,0,0,0) XNA 预乘真零（rgb=0 无加算贡献,与'A=0 加算白'两类,隐形结论本就成立）;SKIP 维持（视觉载体=AI 尘/粒）——但引证勘误:'同 5 小丑箭 PROJ_ALPHA0 先例'已废（5 实为加算白,R1/M-4 反转）,本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
