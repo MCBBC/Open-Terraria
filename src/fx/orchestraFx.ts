@@ -91,6 +91,24 @@
 //       （:3787+:3792+:3788——×4 是宽度轴,长轴=Scale.Y,PrettySparkle 双轴基建债登记）/
 //       arcSurge pitch 掷真接线（:1268 Game.playSfxFiles 扩 pitch 形参）/631 无 charm 面
 //       闭疑（aiStyle122≠1,Arrow.ts ★F5 注）。
+//     ⑧★L′ 对抗批（2026-09-02 红队 L′ findings→蓝队修复,1 CRITICAL+5 MAJOR+4 MINOR
+//       仲裁成立全清偿）：F-1 arcSurge 音档错名 'arcsurge'→'Item_203'（SoundID.cs:822
+//       LegacySoundStyle(2,203)=Item 族→sounds/Item_203.wav）+有效音量 0.4^1.6609×0.6
+//       ≈0.131（WithVolumePerceived,LegacySoundStyle.cs:69-74）/F-2 keybrand 带 3 掷序=
+//       色(:3866)→Circular(4,4)(:3868)→Square(0.7,1.3)(:3869)（旧 circ 置 Square 后）/
+//       F-3 townSlime 铜/长两味 vy 翻转门 `rng()<0.5`（Copper :2597/Elder :2570
+//       Next(2)==0 ⟺ u<0.5,旧 >=0.5 反相）/F-4 Elder gore 位逐轴盒直译
+//       RandomVector2(−30,30)×(0.5,1)（:2578;掷数 2+1 逐站对表,旧速度掷删=升腾常数）/
+//       F-5 ElderSlime 尘 Lerp 起点=OurFavoriteColor 常量 (255,231,69)（Main.cs:886
+//       全树唯一赋值,"随机型"前提为假,旧 rgb(97,146,213) helper 退役）/F-6 kind1 d6
+//       走 perfect 通道+落池 scale=1.4（:724-729,消解烟雾 ×0.7 终值 0.98）/F-7 kind1
+//       双臂恒真 ×1.5 支=速度幅 21+位偏 dir×147（:688-692/:715-719;旧 14/dir×63=漏支）;
+//       MINOR=kind1 红臂色 Color(1,0,0,0.5)（:665,旧 (255,40,20) 臆造偏色）。
+//     ⑨★lifeExact 系统性旧账【只登记不修】（2026-09-02 L′ 收尾）：spawnParticles 的
+//       `life` 档=base×(0.6+0.4r) 抖动基值（types.ts 契约）,凡原版 TimeToLive 钉值站本应
+//       走 lifeExact——存量漏网=keybrand 带1/2/3（60/30/30）/cattivaHit（16）/
+//       snappingStone kind1 sparkle（30）等全池旧账,待系统性清偿批统一翻新
+//       （改动会漂移固定种子行为,须连带测试锚同步重排,勿零散手改）。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -1264,7 +1282,8 @@ export function stormLightningWindupFx(
 
 /**
  * Spawn_ArcLightning（:1245-1321;1457/1458 同锚行）收编段：1122 出手拍余像——玩家锚
- * 驻留帧条一束+终点 RandomizedFrame 对+AddLight+双音（Item15/ArcSurge vol .6 pitch
+ * 驻留帧条一束+终点 RandomizedFrame 对+AddLight+双音（Item15/Item_203 有效 vol
+ * 0.131=0.4^1.6609×0.6（★L′-F1 感知档,SoundID.cs:822 WithVolumePerceived(0.4)）pitch
  * ±0.05..−0.25）。折线本体由 proj1457 自绘 LightningGenerator 路径承担（M 级⑥清偿,
  * 不重复生成）。★δB6（2026-09-01）按原文修正寿命/载荷面：
  *   · num2=16 基准、settings.MovementVector.Y==1f（雷暴档 :1253/:1257-1259）→ ×3=48;
@@ -1303,7 +1322,13 @@ export function arcSurgeFx(
   //  pitch, 0.6)（SoundEngine.cs:88 重载=第 3 参 pitchOffset/第 4 参 volumeScale;Style 自身
   //  PitchVariance=0 默认,GetRandomPitch 走 SoundStyle 私有 _random 不耗 Main.rand 流）
   //  → Game.playSfxFiles 扩可选 pitch 形参（types.ts/Game.ts/Sfx.playFiles 三点透传）
-  game.playSfxFiles?.(['arcsurge'], 0.6, anchorX, anchorY, pitch);   // SoundID.ArcSurge 组播兜底文件名（:1268）
+  // ★L′-F1（2026-09-02 红队对抗,仲裁成立）：音档错名定罪——SoundID.cs:822 ArcSurge=
+  //  LegacySoundStyle(2,203)=Item 族 style203 → sounds/Item_203.wav（盘上 24300B）;
+  //  旧 'arcsurge' 臆造名盘上无档=哑音。音量=style 感知档 WithVolumePerceived(0.4)
+  //  （LegacySoundStyle.cs:69-74 volume^1.6609,与 itemUseSound.ts:29 R4-41 同式）
+  //  ×调用 volumeScale 0.6 → 有效 0.4^1.6609×0.6≈0.131（Item_203 不在 FILE_CASE_VOL
+  //  表,playWavFile 直乘 1——调用参即终值）
+  game.playSfxFiles?.(['Item_203'], 0.4 ** 1.6609 * 0.6, anchorX, anchorY, pitch);   // SoundID.ArcSurge=Item 族 203 号（SoundID.cs:822）
   // 第一循环（num3=1 单拍,:1272-1289）：三掷先于锚粒 Add
   rng();                                                 // 死掷（原版 :1274 Next(4,9) 掷不消费,RNG 流对齐）
   circ(rng, 6);                                          // 死掷（原版 :1275 Circular——:1282 LocalPosition 覆写,视觉死掷）
@@ -1399,9 +1424,11 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
   rng();                                                 // ★F-5 带 3 基相位（:3861,消费进 Rotation——本池无旋转通道→流对齐掷）
   const t3 = rng();                                      // :3866 Lerp(CornflowerBlue=(100,149,237),White,t) A=127（★F-5 消费接线）
   const col3 = `rgba(${Math.round(100 + 155 * t3)},${Math.round(149 + 106 * t3)},${Math.round(237 + 18 * t3)},0.498)`;
+  // ★L′-F2（2026-09-02 红队对抗,仲裁成立）：带 3 掷序=色(:3866)→Circular(4,4)(:3868)→
+  //  Square(0.7,1.3)(:3869)——旧 circ 置 sqx/sqy 之后=末三掷错位,固定种子流漂移
+  const off3 = circ(rng, 4);                             // ★C2：第三带 circular(4,4)×0.7（:3868）单掷共享
   const sqx = rng() * 0.6 + 0.7;                         // :3869 NextVector2Square(0.7,1.3)（Utils.cs:1286 逐轴,★F-5 补掷）
   const sqy = rng() * 0.6 + 0.7;
-  const off3 = circ(rng, 4);                             // ★C2：第三带 circular(4,4)×0.7（:3868）单掷共享
   game.spawnParticles?.(x + off3.x * 0.7, y + off3.y * 0.7,   // 第三带（:3862-3882）
     col3, 1, 0,
     { life: 30, grav: -0.02, damp: 0.97, size: 0.07 + 0.375 * ((sqx + sqy) / 2) });
@@ -1515,13 +1542,10 @@ function orchestraLerpRgb(
   };
 }
 
-/** Main.OurFavoriteColor 近似档（ElderSlime 尘 Lerp 起点,原版随机型登记恒定近似） */
-function orchestraOurFavoriteColor(): string { return 'rgb(97,146,213)'; }
-
 /**
  * Spawn_TownSlimeTransform 三味档（:2410 分派 → Nerdy :2561 / Copper :2577 / Elder :2545）。
- * kind：0 书呆（d4×60 蓝 α175）/ 1 铜（d43×40 铜白）/ 2 长（d43×30 OurFavoriteColor→白
- * + gore61-63×8 近似升腾粒）。NPC.cs:19186/:19210/:80339 Broadcast 面。
+ * kind：0 书呆（d4×60 蓝 α175）/ 1 铜（d43×40 铜白）/ 2 长（d43×30 OurFavoriteColor
+ * (255,231,69) 常量→白 + gore61-63×8 近似升腾粒）。NPC.cs:19186/:19210/:80339 Broadcast 面。
  */
 export function townSlimeTransformFx(
   game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
@@ -1552,7 +1576,9 @@ export function townSlimeTransformFx(
           26, hexToRgbArr(orchestraLerpCss('rgb(183,88,25)', 'rgb(255,255,255)', rng() * 0.5)), 1 + rng() * 1.4, false, true);
         if (!d) continue;
         d.fadeIn = 1.5;
-        if (d.vy > 0 && rng() >= 0.5) d.vy *= -1;
+        // ★L′-F3（2026-09-02 红队对抗,仲裁成立）：翻转门=Next(2)==0 ⟺ u<0.5（Copper :2597/
+        //  Elder :2570;同文件 cattivaHitFx 同式先例）——旧 `rng() >= 0.5` 反相
+        if (d.vy > 0 && rng() < 0.5) d.vy *= -1;
         d.noGravity = true;
       }
       break;
@@ -1562,16 +1588,29 @@ export function townSlimeTransformFx(
         const cv = circ(rng, 6);                         // ★C2：同上单掷共享（:2570）
         const u = rng();
         const d = game.spawnDust?.(x + c.x, y + c.y, 1, 1, 43, (mvx + cv.x) * u, (mvy + cv.y) * u,
-          26, hexToRgbArr(orchestraLerpCss(orchestraOurFavoriteColor(), 'rgb(255,255,255)', rng())), 1 + rng() * 1.4, false, true);
+          // ★L′-F5（2026-09-02 红队对抗,仲裁成立）：Lerp 起点=Main.OurFavoriteColor 常量
+          //  (255,231,69)（Main.cs:886 全树唯一赋值,随机型前提为假）——旧"近似档"
+          //  rgb(97,146,213) helper 退役
+          26, hexToRgbArr(orchestraLerpCss('rgb(255,231,69)', 'rgb(255,255,255)', rng())), 1 + rng() * 1.4, false, true);
         if (!d) continue;
         d.fadeIn = 1.5;
-        if (d.vy > 0 && rng() >= 0.5) d.vy *= -1;
+        // ★L′-F3（2026-09-02 红队对抗,仲裁成立）：翻转门=Next(2)==0 ⟺ u<0.5（Copper :2597/
+        //  Elder :2570;同文件 cattivaHitFx 同式先例）——旧 `rng() >= 0.5` 反相
+        if (d.vy > 0 && rng() < 0.5) d.vy *= -1;
         d.noGravity = true;
       }
       for (let i = 0; i < 8; i++) {
-        const c = circ(rng, 15, 30);
-        game.spawnParticles?.(x + c.x, y + c.y * 0.5, '#EFEFBF', 1, 1.2,
-          { life: 36, vx: circ(rng, 1).x * 0.5, vy: -(1 + rng()), grav: 0.12, size: 1.6 });
+        // ★L′-F4（2026-09-02 红队对抗,仲裁成立）：gore 位逐轴盒直译——:2578
+        //  RandomVector2(rand,−30,30)×(0.5,1)（Utils.cs:2599 逐轴 (60r−30),X 轴 ×0.5/
+        //  Y 轴全幅）;旧 circ(rng,15,30) 线性盘+Y 再 ×0.5=分布形+掷数双错。掷数逐站
+        //  对表=2+1（位 X/Y 两掷+61+Next(3) 择型一掷）;速度掷 circ(rng,1)/1+rng()
+        //  原版不存在（gore velocity=Zero×0.5）→ 删,升腾近似层改常数（旧均值）
+        const gx = (rng() * 60 - 30) * 0.5;                // RandomVector2 X ×0.5（:2578）
+        const gy = rng() * 60 - 30;                        // RandomVector2 Y 全幅（:2578）
+        const goreId = 61 + ((rng() * 3) | 0);             // 61+Next(3) 择型（:2578;本池三型同款近似,值不入视觉面）
+        void goreId;
+        game.spawnParticles?.(x + gx, y + gy, '#EFEFBF', 1, 1.2,
+          { life: 36, vx: 0, vy: -1.5, grav: 0.12, size: 1.6 });   // 升腾近似常数（原版 velocity=Zero,不掷）
       }
       break;
     }
@@ -2024,25 +2063,37 @@ export function snappingStoneRingFx(
   if (kind === 1) {
     game.playSfxWav?.('pyroclastic_stone', 0.5, x, y);
     const boltPhase = (rng() * 2 - 1) * Math.PI * 2 * 0.05;
-    const spd = 14;
+    const num2 = 14;                                     // :660 速度基幅（d6 微尘同吃此幅）
+    // ★L′-F7（2026-09-02 红队对抗,仲裁成立）：两循环 num5/num6 各只取值 1 → `if (num==1f)`
+    //  恒真支（:688-692/:715-719）=Velocity×1.5+LocalPosition−=Velocity×4 两臂同吃——
+    //  sparkle 速度幅=num2×1.5=21（旧 14=漏 ×1.5）;位偏=基支 vector×num×num3（:683/:711,
+    //  14×30×0.15=63）+恒真支 Velocity×4（21×4=84）→ dir×147（旧 dir×63=半程）
+    const spd = num2 * 1.5;
     for (const red of [true, false]) {
       // ★T3（2026-09-02 蓝队清偿）：红金同角——原文 :670（红,num5=1）/:699（金,num6=1）
       //  同式 (π/4+π/4·num+num4).ToRotationVector2()×14 → 恒 π/2+boltPhase（num4 :668
       //  单掷共享）。旧金臂 π/4+π/2=3π/4 的 45° 分叉系自造
       const a0 = Math.PI / 4 + Math.PI / 4 + boltPhase;
-      const col = red ? 'rgba(255,40,20,0.5)' : 'rgba(255,242,0,1)';
-      game.spawnParticles?.(x - Math.cos(a0) * spd * 30 * 0.15, y - Math.sin(a0) * spd * 30 * 0.15,
+      // ★MINOR（L′ 对抗批）：红臂色=原版 :665 Color(1f,0f,0f,0.5f)——旧 (255,40,20) 臆造偏色
+      const col = red ? 'rgba(255,0,0,0.5)' : 'rgba(255,242,0,1)';
+      game.spawnParticles?.(x - Math.cos(a0) * (num2 * 30 * 0.15 + spd * 4),
+        y - Math.sin(a0) * (num2 * 30 * 0.15 + spd * 4),
         col, 1, spd, { life: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: red ? 11 : 7 });
       // d6 微尘对（:724 正臂先/:727 负臂后——★F-3 2026-09-02 对抗批,曾 [-1,1] 反序）★M1（F6）
       for (const side of [1, -1]) {
         //  第二粒取负向量（旧 side 乘角=自造形变）、ja 单掷共享 xy、半径 NextFloat
-        //  单掷乘整向量（旧 dvx*rng(),dvy*rng() 每分量独掷）
+        //  单掷乘整向量（旧 dvx*rng(),dvy*rng() 每分量独掷）;幅=基 vector4（×14 非 ×1.5 档）
         const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×τ×0.025
         const spd2 = rng();                                // NextFloat 半径单掷
+        // ★L′-F6（2026-09-02 红队对抗,仲裁成立）：原版 NewDustPerfect（:724/:727）→
+        //  spawnDust 补第 12 参 perfect=true（定向速度原样入池,烟雾族 vy 重掷+vx×0.3 消解）
         const d = game.spawnDust?.(x, y, 1, 1, 6,
-          side * spd * Math.cos(a0 + ja) * spd2, side * spd * Math.sin(a0 + ja) * spd2,
-          0, null, 1.4);
-        if (d) d.noGravity = true;
+          side * num2 * Math.cos(a0 + ja) * spd2, side * num2 * Math.sin(a0 + ja) * spd2,
+          0, null, 1.4, false, true);
+        if (d) {
+          d.noGravity = true;
+          d.scale = 1.4;                                   // Perfect 后覆写（:726/:729——消解烟雾族 ×0.7,旧终值 0.98）
+        }
       }
     }
     return;

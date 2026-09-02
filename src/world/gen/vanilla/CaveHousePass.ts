@@ -51,6 +51,12 @@ const PLATFORM = TILE_BY_KEY['platform']!;
 /** IIII60 单屋 mark 序仪挂点（dormant）：无 env/globalThis 注入时零路径变化。
  *  名称/位序与 x86 rig(Terraria1458 JJHook.Mark) 对位：PH 阶段界/STI 梯项/
  *  DOR 门点/PLT 平台列/BEM 梁柱。 */
+/** IIII174 探针钩（dormant）：段内掷类标记（对拍 x86 taglog 帧类 PW/DG/B/CW/AGE/
+ *  FR/PD/PC/BC）。无钩零开销；正常生成不读 globalThis。 */
+function hMark(tag: string): void {
+  (globalThis as { __swHMark?: (t: string) => void }).__swHMark?.(tag);
+}
+
 function houseMk(name: string, a?: string | number, b?: string | number): void {
   if (!a && a !== 0) {
     (globalThis as { __swHouseMk?: (n: string) => void }).__swHouseMk?.(name);
@@ -647,6 +653,7 @@ function wallFrameResetRoll(st: TileStore, rng: RNG, x: number, y: number): void
 }
 /** Actions.PlaceWall（neighbors=true 恒真）逐格掷序 */
 function placeWallRolled(st: TileStore, rng: RNG, x: number, y: number, wall: number): void {
+  hMark('PW');
   st.setWallSilent(x, y, wall);
   wallFrameResetRoll(st, rng, x, y);
   wallFrameResetRoll(st, rng, x + 1, y);
@@ -663,10 +670,12 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
     case 'dither':
       // Modifiers.cs:630-635:NextDouble() >= _failureChance 才 UnitApply
       (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie?.('D'); // IIII56 dormant
+      hMark('DG');
       return rng.next() >= s.p && applyChain(st, rng, steps, i + 1, x, y);
     case 'blotches': {
       const __tg2 = (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie;
       __tg2?.('B');                                                  // IIII56 dormant 丢掷
+      hMark('B');
       rng.next();                                                    // 丢 1 掷(Modifiers.cs:132)
       __tg2?.('B');
       if (rng.next() < s.chance) {                                   // 成斑判定(:133)
@@ -755,6 +764,7 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       // （中心格掷——尾批 2-C 墙重帧掷模型）；frame 缺省 false（蘑菇 ③）零掷
       st.setWallSilent(x, y, 0);
       if (s.frame) {
+        hMark('CW');
         wallFrameResetRoll(st, rng, x + 1, y);
         wallFrameResetRoll(st, rng, x - 1, y);
         wallFrameResetRoll(st, rng, x, y - 1);
@@ -1195,6 +1205,7 @@ function kfCheckObject(st: TileStore, rng: RNG, ni: number, checked: Set<number>
 /** AgeRoom 七主题蚀变:逐主题把原版 WorldUtils.Gen 链逐条转录(行号 = 各
  *  *HouseBuilder.cs AgeRoom)。Dither/Blotches 语义见 applyChain 头注(C1/C2/C3) */
 function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, def: ThemeDef): void {
+  hMark('AGE');
   // Blotches(scale=2)→ minX=maxX=minY=maxY=2(Modifiers.cs:95-100)
   const B2 = (chance: number): ChainStep => ({ k: 'blotches', minX: 2, maxX: 2, minY: 2, maxY: 2, chance });
   // 墙段收尾:room.Y > worldSurface 时清墙、否则铺墙——按【房间】整体二选一
@@ -1331,6 +1342,7 @@ function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, d
 
 // ---------- FillRooms(画/烛台交替 + 装饰循环) ----------
 function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme, gs: GenState): void {
+  hMark('FR');
   // 家具七选(HouseBuilder.FillRooms choices;沙漠 Tables2 → tile 469)
   const choices: Array<[string, number]> = [
     [def.tables2 ? 'v_469_tables_group_2' : 'table', def.table],
@@ -1412,6 +1424,7 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
 // ---------- 楼梯 / 门 / 平台 / 梁 ----------
 /** CreateStairsList + PlaceStairs:相邻房间对角平台链 + 顶步 4×1 平台 + 斜坡 */
 function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
+  hMark('STG');
   for (let i = 1; i < rooms.length; i++) {
     const cur = rooms[i], prev = rooms[i - 1];
     const leftGap = prev.x - cur.x;
@@ -1496,6 +1509,7 @@ function findSideExit(st: TileStore, wallX: number, wallY: number, wallH: number
 }
 
 function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
+  hMark('PD');
   for (const r of rooms) {
     // 墙列矩形 (X, Y+1, 1, H-2)
     // ★DDDD 逐谓词重对齐（WorldGen.PlaceTile case10 cs:59867-59906 + PlaceDoor
@@ -1577,6 +1591,7 @@ function findVerticalExit(st: TileStore, rectX: number, rectY: number, rectW: nu
 }
 
 function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
+  hMark('PLG');
   const top = rooms[0], bot = rooms[rooms.length - 1];
   // 顶层顶壁(isUp:候选自壁上 5 格起);帧同楼梯(C6):HouseBuilder.cs:574
   //   PlaceTile(19, PlatformStyle) → frameY = 18*style。
@@ -1608,6 +1623,7 @@ function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): 
 
 /** CreateSupportBeamList + PlaceSupportBeams:6→4 步长梁列,落下一房顶/实心 */
 function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[], def: ThemeDef): void {
+  hMark('SBG');
   const minX = Math.min(...rooms.map((r) => r.x));
   const maxX = Math.max(...rooms.map((r) => r.x + r.w)) - 1;
   let step = 6;
@@ -1680,6 +1696,7 @@ function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[],
  *  任一命中即停(true = 放置成功,调用方据此递增计数)。
  *  旧实现是"rooms[0] 单发随机公式"——三级级联与逐房推进全部缺失(C7) */
 function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceilingFallback: boolean): boolean {
+  hMark('BP');
   const tryRow = (r: Rect, y: number): boolean => {
     for (let t = 0; t < 10; t++) {
       if (placeFurniture(st, rng, key, rng.int(2, r.w - 3) + r.x, y)) return true;
@@ -1704,10 +1721,12 @@ function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceili
 
 // ---------- 宝箱四级联(PlaceChests) ----------
 function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, rooms: Rect[], def: ThemeDef, theme: Theme): void {
+  hMark('PC');
   // 头掷（HouseBuilder.cs:672）：`NextDouble() > ChestChance` —— ChestChance=1.0
   // 恒过门但【掷骰照耗】。旧实现缺此掷 → 箱段流漂 -1（house0 AB#558 dk=-1 实锤）
   rng.next();
   const tryAt = (x: number, y: number): boolean => {
+    hMark('BC');
     const underground = y > gs.worldSurface;
     // 冰屋：显式 style 11 直入冰箱门（cs:36107 第一析取）→ 主件池 + 1/20 提炼机 +
     // 1/50 鱼覆盖块自动生效（旧实现显式 loot 绕过覆盖——审计三.4 修复）。

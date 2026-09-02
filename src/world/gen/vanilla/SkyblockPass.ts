@@ -17,7 +17,7 @@ import { sheetId } from './TileCleanupPass';
 import { genSquareTileFrame } from './FinalCleanupPass';
 import { squareWallFrameRoll } from './MarbleGranitePass';
 import { genSolidType, vanSolidOrSloped } from './GenSolid';
-import { doAdditionalChangesAroundSpawnCore } from './SecretSeedDoEndsPass';
+import { doAdditionalChangesAroundSpawnCore, doPooEverywhere } from './SecretSeedDoEndsPass';   // ★IIIII176 poo 端点
 
 /** Main.UnderworldLayer（Main.cs:2886，全仓约定 maxTilesY-200） */
 const UW_OF = (h: number): number => h - 200;
@@ -825,8 +825,10 @@ export function runSkyblockPass(st: TileStore, rng: RNG, gs: GenState, world: Wo
     gs.skyblockExtraTreeAt = { x: sx + dxo, y: sy };
   }
 
-  // poo/errorWorld 直调支（cs:23008-23013）——DoPooEverywhere/DoErrorWorldShuffleBlocks
-  //   未在本仓 DoEnds 落地（组合种子专用），备案 GAP-IIII44。
+  // ★IIIII176：poo 直调支（cs:23007-23010）——doPooEverywhere（SecretSeedDoEndsPass，
+  //   1:1=cs:2975-3002）。GAP-IIII44 poo 半边销账。
+  if (sf.pooEverywhere) doPooEverywhere(st, rng, gs);
+  // errorWorld 直调支（cs:23011-23013）——DoErrorWorldShuffleBlocks 仍未落地，备案 GAP-IIII44（余半）。
 
   gs.worldSpawnHasBeenRandomized = true;               // cs:23015
   if (sy > ws && sy < uw) {

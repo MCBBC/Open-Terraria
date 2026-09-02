@@ -2075,6 +2075,11 @@ function generateSquareHall(
   const b = hall.settings.overridePaintTile > -1 ? hall.settings.overridePaintTile : (style.TilePaintColor ?? 0);
   const b2 = hall.settings.overridePaintWall > -1 ? hall.settings.overridePaintWall : (style.WallPaintColor ?? 0);
   const num = innerSize + outerSize;
+  // ★IIIII172：spider 厅 stamp 迹（零掷;仅 Style==12 且开闸窗内;与 x86 DR|HST 同位）
+  if (style.Style === 12 && _i172SpiderSeq >= 0) {
+    _i172SpiderSeq++;
+    drlMark(`DR|HST|q=${_i172SpiderSeq}|x=${curX}|y=${curY}|in=${innerSize}|out=${outerSize}`);
+  }
   const cx = Math.trunc(curX), cy = Math.trunc(curY);
   for (let i = -num; i <= num; i++) {
     for (let j = -num; j <= num; j++) {
@@ -2140,6 +2145,8 @@ const VANILLA_TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
 const VANILLA_WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 let _gvHolder: DungeonGenVars1457 | null = null;
 function setGvHolder(gv: DungeonGenVars1457, dual: boolean): void { _gvHolder = gv; void dual; }
+/** ★IIIII172：spider 厅 stamp 迹序号（s 环开闸清零;<0=关闸,零开销） */
+let _i172SpiderSeq = -1;
 
 /** GetHighestProtectionTypeFromPoint（DU:1705-1724）。 */
 function highestProtectionFromPoint(st: TileStore, x: number, y: number, rooms: DRoomBase[]): number {
@@ -3641,6 +3648,11 @@ class DualProvider {
       const rm = data.rooms[i]!;
       const bl = i168bb ? rm.outer.L : 0, bt = i168bb ? rm.outer.T : 0, br = i168bb ? rm.outer.R : 0, bb2 = i168bb ? rm.outer.B : 0;
       i168bb?.(`i${iN}r${i}a`, bl, bt, br, bb2);
+      // ★IIIII172：房心/内外径钉死钩（零掷;rugged 房专属;与 x86 DR|RC 同构）
+      if (rm.settings.roomType === DPRoomType.BiomeRugged) {
+        const rc = rm as unknown as { position: { x: number; y: number }; roomInnerSize: number; roomOuterSize: number; wallDepth: number };
+        drlMark(`DR|RC|i${iN}|r=${i}|px=${rc.position.x}|py=${rc.position.y}|is=${rc.roomInnerSize}|os=${rc.roomOuterSize}|wd=${rc.wallDepth}`);
+      }
       rm.generateRoom(data, ctx);
       i168bb?.(`i${iN}r${i}b`, bl, bt, br, bb2);
     }
@@ -3676,6 +3688,9 @@ class DualProvider {
       if (hh.calculated && !hh.generated) {
         const bl = i168bb ? hh.bounds.L : 0, bt = i168bb ? hh.bounds.T : 0, br = i168bb ? hh.bounds.R : 0, bb2 = i168bb ? hh.bounds.B : 0;
         i168bb?.(`i${iN}s${l}a`, bl, bt, br, bb2);
+        // ★IIIII172：spider 厅 stamp 迹开闸（零掷;与 x86 DR|HGEN/DR|HST 同构）
+        _i172SpiderSeq = 0;
+        drlMark(`DR|HGEN|i${iN}|s${l}|k=${data.halls.indexOf(hh)}`);
         countGen++; hh.generateHallData(data, ctx);
         i168bb?.(`i${iN}s${l}b`, bl, bt, br, bb2);
       }

@@ -193,7 +193,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
 
       if (which) {
+        __mark?.(`crimStart#${g}`);
         crimStart(st, rng, gs, cx, bandTop - 10, hearts);
+        __mark?.(`crimEnd#${g}`);
         // 丛林草→猩红丛林草（cs:14110-14122：仅 type 60→662；曾误把泥也清成 0）
         for (let x = zLo; x < zHi; x++) {
           for (let y = bandTop; y < gs.worldSurface - 1; y++) {
@@ -208,11 +210,14 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
             break;
           }
         }
+        __mark?.(`crimJungle#${g}`);
         convertSurface(st, rng, gs, zLo, zHi, true, bandTop);
+        __mark?.(`crimConv#${g}`);
         // 猩红**逐组**祭坛（cs:14241，本 pass 猩红分支内）——原版就在 Corruption pass 里，
         // 与独立 pass "Demon And Crimson Altars"(cs:15825，全图随机撒) 是两处放置,
         // 勿把这里挪到 15825 位（会同时丢流序与逐组锚定，见 runAltarsPass 头注）。
         placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
+        __mark?.(`crimAltars#${g}`);
       } else {
         // 腐化裂隙（cs:14368-14390）+ 丛林草→腐化丛林草（cs:14392-14404）
         let cooldown = 0;
@@ -743,6 +748,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     if (py > gs.worldSurface + 100) break;
   }
   // 终点囊群（cs:75700-75732）：50 个半径 40-54 椭球（x/y 独立 ±20% 缩放）
+  __mark?.('crimTunnelDone');
   let endR = rng.int(40, 54);                                  // Next(40,55)
   for (let n = 0; n < 50; n++) {
     const cx = Math.floor(px) + rng.int(-20, 20);
@@ -765,6 +771,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     }
   }
   // 血管（cs:75735-75779）
+  __mark?.('crimPocketsDone');
   const veinCount = rng.int(5, 8);                             // Next(5,9)
   const usedV: Array<[number, number]> = [];
   for (let n = 0; n < veinCount; n++) {
@@ -793,6 +800,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     hearts.push(hp);
   }
   // 地表囊群（cs:75781-75832）
+  __mark?.('crimVeinsDone');
   px = i; py = startY;
   endR = rng.int(25, 34);                                      // Next(25,35)
   let rise = rng.int(0, 5);                                    // Next(0,6)
@@ -844,6 +852,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
   // CrimEnt（cs:75852）：锚 = 壳群行走后的 (val.X, val.Y) = (i, startY-累计抬升)——
   //   非 startY（曾误传 startY → 入口隧道整体下移 rise 格）。
   //   crimDir 语义 = vx<0 → -1，内部速度 = 2*-crimDir
+  __mark?.('crimSurfDone');
   crimEnt(st, rng, px, py, crimDir);
 }
 

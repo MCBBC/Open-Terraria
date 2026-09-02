@@ -476,7 +476,11 @@ describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
     g.checkFurnitureSupport(10, 9);
     expect(gone(w, OPEN)).toBe(true);
     expect(gone(w, CLOSED)).toBe(true);
-    expect(drops).toEqual([{ key: 'place_v_388_tall_gate_closed', n: 1 }]);   // D-8 备案兜底
+    // ★⑤（2026-09-02 缓修小账）：CheckTallGate 杀段（WorldGen.cs:52151-52163）
+    //   `int type2 = 3240; if (point.Y == 0) { type2 = 3240; }` 两支同值恒 3240=
+    //   反编译本相——闭态 388 与开态 389 同掉原版 Tall Gate vi_3240;旧钉
+    //   place_v_388_tall_gate_closed 兜底（本仓面板伪物品）按原版依据翻正
+    expect(drops).toEqual([{ key: 'vi_3240_TallGate', n: 1 }]);
   });
 });
 

@@ -727,6 +727,18 @@ const PROJ_ALPHA0: Record<number, number> = {
   //   new Boomerang,傀儡弹重建走 Boomerang 载体）,686 的 AI001_FADE_AGE2 死键已删;
   //   本键维持纯台账 dormant 备案
   174: 255, 176: 255, 302: 255, 635: 255, 686: 255,
+
+  // ★2026-09-02 观感面缺口批（AI_001 出膛/尾迹 FX 清偿,subStepAI 逐型块配套）——
+  //  265 剧毒法杖弹/:3505-3516 α=255、355 毒液法杖弹/:4453-4464 α=255——AI_001
+  //   per-type 段 :57690-57724 每子步 −50（AI001_FADE_RATE 键成对）；GetAlpha
+  //   :81286-81293 α>0→Transparent / α==0→(255,255,255,0) 满强加算白（加算合成面
+  //   未接线=PROJ_ALPHA_MOD[265/355] off 残留,本键先承接 fade 门控语义）
+  //  660 天界碎裂/:7098-7109 α=255、712 书杖弹/:7551-7562 α=255——AI_001 :56638/
+  //   :56662 首拍白闪门 `if (alpha > 0)` 恒真一次 → 当拍 α=0（无持续 fade 段）
+  //  376 随从鬼火/:4602-4614 α=255——AI_001 :56524-56551 全程无 α 减段（α 恒 255）,
+  //   GetAlpha 缺省路径 :81507 读 α → 弹体原版即全隐,可见面全在 d6 尘羽
+  //   （本仓此前 α≡0 = 弹体贴图恒满显,违原版）
+  265: 255, 355: 255, 376: 255, 660: 255, 712: 255,
 };
 
 /** AI_001 顶层 per-type fade 恒率表（★2026-09-01 批五收官批；表驱动单支替代按率
@@ -743,6 +755,10 @@ const AI001_FADE_RATE: Record<number, number> = {
   710: 25, 671: 20, 675: 20, 676: 20, 357: 25,
   275: 30, 276: 30, 593: 10,
   440: 25, 449: 25, 606: 25,                          // :55741（Xenopopper 弹,EU=2/1/2；白剪影档已摘=T3）
+  // ★2026-09-02 观感面缺口批：265/355 毒系法杖弹（:57690-57706/:57708-57724）
+  //  `if (alpha > 0) alpha -= 50` 钳 0——同块 α==0 门接 d163/d205 毒尘（subStepAI
+  //  fade 支内配套,见该支注释）;EU=0 → 每 tick 一减,255 起步 6 子步归零
+  265: 50, 355: 50,
 };
 
 /** AI_001 fade 带龄门档：[每子步减量, 门=localAI/ai 计数 > 门值]。344 :58053
@@ -1550,6 +1566,25 @@ export class Arrow extends Entity {
   private bArrow819Born = false;
   /** 469 蜂箭渐显计数（localAI[1],>2 后 alpha−=50/update :56164-56174） */
   private ph469T = 0;
+  // ---- ★2026-09-02 观感面缺口批（AI_001 出膛/尾迹 FX 清偿）配套态 ----
+  /** 374 随从蜂刺 localAI[0] 出生音闸（:56511-56515 首拍 Item_17 后置 1）。
+   *  ★与 MinionProj.MINION_SHOT_SFX[374] 出膛音原版同拍双播（AI_062 射出站点 +
+   *  AI_001 首子步各一次）——非重复登记,原版即两响叠声 */
+  private hornetSndL0 = 0;
+  /** 376 随从鬼火 localAI[0] 计数（:56525-56531 首拍音不置位、逐子步自增;
+   *  >3 起每子步 1 枚 d6、>5 起 2 枚;同上与 MINION_SHOT_SFX[376] 同拍双播） */
+  private impFlameL0 = 0;
+  /** 1097 火绒狐火球 localAI[0] 出生门（:57514-57534——首子步 Item_20 +
+   *  DD2_BetsyFireballShot + 10×(d6 双尘) 一次性;ai[1]==2 拆分子弹不复播,本仓
+   *  生成面 ai[1]≡0 恒过门） */
+  private foxL0 = 0;
+  /** 1097 oldPos 环（TrailingMode 0 每 tick 后移 :17202-17206,10 槽=20 数）——
+   *  :57558 d55 尾迹读 oldPos[9]（=10 tick 前出生位）,环未满（前 9 tick）不撒 */
+  private foxTrail: number[] = [];
+  /** 712 书杖弹帧（frame/frameCounter :56664-56678——draw fIdx 链消费;
+   *  两带各 4 帧:出生 α==255 拍 frame=rand(2)*4 选带,每 4 子步 +1,带内回绕） */
+  private f712Frame = 0;
+  private f712FrameT = 0;
   /** ★R29 幻象弓 phantasmTime 窗口（静态时间戳,ms）：630 载体每子步续窗
    *  （player.phantasmTime=2 :68239）;命中侧补刀链消费（:13935）。33ms ≈ 2t */
   static phantasmWindowUntil = 0;
@@ -3729,6 +3764,13 @@ export class Arrow extends Entity {
       this.stripTrailPts.unshift(this.x, this.y);
       if (this.stripTrailPts.length > 24) this.stripTrailPts.length = 24;
     }
+    // 1097 火绒狐火球 oldPos 环（TrailingMode 0 每 tick 后移 :17202-17206——tick 头
+    // 位后移 10 槽;AI 侧 :57558 d55 尾迹读 oldPos[9],前 9 tick 环未满=全 Zero 不撒,
+    // 与原版 `oldPos[9] != Vector2.Zero` 门同相）
+    if (this.projId === 1097) {
+      this.foxTrail.unshift(this.x, this.y);
+      if (this.foxTrail.length > 20) this.foxTrail.length = 20;
+    }
     // 食人鱼 190 独占状态机（aiStyle 39）——重力/穿透递减/撞块消亡等通用语义不适用
     if (this.piranha) { this.piranhaStep(game); return; }
     // 出生预置局部免疫逐帧递减（DecrementLocalImmuneTimeCounters :15919-15936——
@@ -4117,6 +4159,34 @@ export class Arrow extends Entity {
     if (this.projId === 41) {
       game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.6, true);
       game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 2, true);
+    } else if (this.projId === 374) {
+      // 374 随从蜂刺（:56510-56522）：localAI[0]==0 首拍 Item_17 后置 1（出膛音,
+      // 与 MinionProj 射出站点原版同拍双播,见字段注）;1/2 概率 d18 毒雾
+      // （α0,scale0.9,noGravity,尘速×0.5——NewDust 未传速=纯内建抖动）
+      if (this.hornetSndL0 === 0) {
+        this.hornetSndL0 = 1;
+        game.playSfxFiles?.(['Item_17'], 1, this.cx, this.cy);
+      }
+      if (Math.floor(Math.random() * 2) === 0) {
+        const d374 = game.spawnDust?.(this.x, this.y, this.w, this.h, 18, 0, 0, 0, null, 0.9, true);
+        if (d374) { d374.vx *= 0.5; d374.vy *= 0.5; }
+      }
+    } else if (this.projId === 376) {
+      // 376 随从鬼火（:56524-56551）：localAI[0]==0 首拍 Item_20（不置位,计数控尘）
+      // → 逐子步自增;>3 起每子步 1 枚（>5 起 2 枚）d6 火羽（出生位=(x, y+2)、
+      // 速=弹速×0.2 继承后再 ×0.3、scale2、noGravity、noLight）;wet && !lavaWet
+      // → Kill 入水灭（:56548-56550）。弹体 α 恒 255=原版即隐身（PROJ_ALPHA0 注）
+      if (this.impFlameL0 === 0) game.playSfxFiles?.(['Item_20'], 1, this.cx, this.cy);
+      this.impFlameL0++;
+      if (this.impFlameL0 > 3) {
+        const n376 = this.impFlameL0 > 5 ? 2 : 1;
+        for (let i = 0; i < n376; i++) {
+          const d376 = game.spawnDust?.(this.x, this.y + 2, this.w, this.h, 6,
+            this.vx * 0.2, this.vy * 0.2, 100, null, 2, true);
+          if (d376) { d376.vx *= 0.3; d376.vy *= 0.3; d376.noLight = true; }
+        }
+        if (this.wet && !this.lavaWet) { this.killNow(game); return; }
+      }
     } else if (this.projId === 91) {
       // 91 圣箭（:56554-56560）：1/2 概率 d58|d15（v×0.25 后再 ×0.25,alpha150,scale0.9）
       if (Math.floor(Math.random() * 2) === 0) {
@@ -4143,6 +4213,14 @@ export class Arrow extends Entity {
       const d282 = game.spawnDust?.(this.x, this.y, this.w, this.h, 171, 0, 0, 100, null,
         (1 + Math.floor(Math.random() * 9)) * 0.1, true);
       if (d282) { d282.fadeIn = 1.5; d282.vx = d282.vx * 0.25 + this.vx * 0.25; d282.vy = d282.vy * 0.25 + this.vy * 0.25; }
+    } else if (this.projId === 495) {
+      // 495 暗影焰弓箭（:58461-58465，AI_001 速度链内同块）：每 update d27 暗焰
+      // （出生位=position−velocity 反向偏置、速=弹速继承后 ×0.3、α100、scale1.2、
+      // noGravity）——本体为暗影焰可视主体;ai[0]≥30 后 vy+0.04 重力段已在
+      // AI1_GRAV[495]=[0.04,30] 承载（vanillaItemCombat.ts :54597）
+      const d495 = game.spawnDust?.(this.x - this.vx, this.y - this.vy, this.w, this.h, 27,
+        this.vx, this.vy, 100, null, 1.2, true);
+      if (d495) { d495.vx *= 0.3; d495.vy *= 0.3; }
     } else if (this.projId === 469) {
       // 469 蜂箭渐显（:56164-56174）：localAI>2 后 alpha−=50 钳 0（镜像已有）
       this.ph469T++;

@@ -1149,6 +1149,55 @@ export function doExtraLiquidAddLiquid(st: TileStore, rng: RNG, gs: GenState): v
 }
 
 // ============================================================
+// ①d DoPooEverywhere（truck stop，cs:2975-3002）——IIIII176 批移植
+// ============================================================
+/** "truck stop" 秘种子端点：全图随机粪块（vanilla sheet 666）TileRunner 矿脉。
+ *  ★1457↔1458 同段字节级一致（DoPooEverywhere cs:2975-3002 两树同行号）。
+ *  vanilla 消费面三处：①BeachesAndOceanCleanup pass 头（cs:14963-14965，普通世界
+ *  链首差本体=mile8 truckstop #034 T666>0×24,427 族，本仓 BeachPass 接线）；
+ *  ②GenerateSkyBlockWorld 尾（cs:23007-23010，skyblock 组合专用，SkyblockPass 接线
+ *  =GAP-IIII44 poo 半边销账）；③placeTrap 巨石 712 便便变体臂（cs:9294，
+ *  `(ntb||noTraps||poo.Enabled)&&Next(5)==0`——旗关短路不掷，旗开掷序变化；已由
+ *  SSSSSS-NOTRAPS 批承载于 TrapsPass vroll(4,5) 支，本批仅复核）。
+ *  骰面：每迭代恒 2 掷（Next(40,w-40)/Next(40,h-40)）+ 下扫 ≤30 步零掷 + 通过
+ *  受体门后才掷强度/步数（C# 实参内联求值序，TileRunner 内部骰面由 tileRunner
+ *  本体承载）。num2 均分域=activeSecretSeedCountOf（SeedEasterEggs ★IIIII110 计数域，
+ *  仅 37 枚 Register 秘种子计入；truckstop 单旗标 ⇒ num3=(2+1)/3=1 不均分）。 */
+export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  const num = 40;                                                       // cs:2977
+  let num2 = Math.trunc(st.w * st.h * 0.0002);                          // cs:2978 (int)((double)(w*h)*0.0002)
+  const num3 = Math.max(1, Math.trunc((2 + activeSecretSeedCountOf(F)) / 3));  // cs:2979-2983 整除+<1 钳 1
+  num2 = Math.trunc(num2 / num3);                                       // cs:2984
+  for (let i = 0; i < num2; i++) {
+    const num4 = rng.nextIntRange(num, st.w - num);                     // cs:2987 Next(40, w-40)
+    let num5 = rng.nextIntRange(num, st.h - num);                       // cs:2988 Next(40, h-40)
+    for (let j = 0; j < 30; j++) {                                      // cs:2989-2996 下扫寻实心（≤30 步，零掷）
+      if (solidTileGround(st, num4, num5)) break;
+      num5++;
+    }
+    // cs:2997-2998 受体门（De Morgan 反演）：(skyblock || !active ||
+    //   (!tileDungeon && !wallDungeon && !Clouds && wall!=73)) && SolidTile。
+    const ii = st.idx(num4, num5);
+    const sh = shOf(st, ii);
+    const wal = st.wall[ii];
+    const reject = !F.skyblock && (st.flags[ii] & 1) !== 0
+      && (sh === 41 || sh === 43 || sh === 44 || sh === 677 || sh === 678 || sh === 679   // Main.tileDungeon（Main.cs:8131-8136）
+        || wal === 7 || wal === 8 || wal === 9 || (wal >= 94 && wal <= 99)               // Main.wallDungeon（Main.cs:10737-10745）
+        || DESERT_CLOUD_IDS.has(sh)                                                      // TileID.Sets.Clouds（TileID.cs:197，与沙漠锚同集）
+        || wal === 73);                                                                  // 蜂蜜生成墙
+    if (!reject && solidTileGround(st, num4, num5)) {
+      tileRunner(st, rng, gs, num4, num5, {                                             // cs:2999
+        strength: rng.nextIntRange(5, 12),                                              // Next(5,12)
+        steps: rng.nextIntRange(10, 31),                                                // Next(10,31)
+        type: idOf(666),
+        addTile: true,
+      });
+    }
+  }
+}
+
+// ============================================================
 // ② DoNoInfection（fish mox，cs:1911-1954；全图净化）
 // ============================================================
 export function doNoInfection(st: TileStore, rng: RNG, gs: GenState): void {

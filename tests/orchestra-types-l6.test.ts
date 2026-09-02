@@ -219,11 +219,15 @@ describe('雷族（黑雷三味/蓝红小雷共体/长链/蓄势/护壁/ArcSurge
       { posX: 0, posY: 0, moveX: 0, moveY: 0, uniqueInfo: 0, invoker: 0 });
     expect(dusts.filter((d) => d.type === 57).length).toBe(8);
   });
-  it('ArcSurge(71)：Item15+arcsurge 双音与端点闪光', () => {
+  it('ArcSurge(71)：Item15+Item_203 双音与端点闪光（★L′-F1 音档错名定罪）', () => {
     const { g, particles, wavs, files } = mkGame();
     apply(g, ParticleOrchestraType.ArcSurge, 600, 700, 100, 200);
     expect(wavs.some((w) => w.file === 'Item_15')).toBe(true);
-    expect(files.some((f) => f.names[0] === 'arcsurge')).toBe(true);
+    // ★L′-F1（2026-09-02 红队对抗,仲裁成立）：SoundID.cs:822 ArcSurge=LegacySoundStyle(2,203)
+    //  =Item 族 → Item_203.wav（盘上 24300B;旧 'arcsurge' 臆造名盘上无档=哑音）——
+    //  有效音量=WithVolumePerceived(0.4)^1.6609（LegacySoundStyle.cs:69-74）×volumeScale 0.6
+    expect(files.some((f) => f.names[0] === 'Item_203')).toBe(true);
+    expect(files.some((f) => f.names[0] === 'Item_203' && Math.abs((f.vol ?? 1) - 0.131) < 0.001)).toBe(true);
     expect(particles.length).toBeGreaterThanOrEqual(3);
   });
 });

@@ -10,7 +10,7 @@
 //   使用侧 RegisterKill（:44616-44620）+ 进世界已解锁回填（:37109-37116）
 // 附：546 亮核 Extra[76] 叠画 rotation 钳（Main.cs:26156-26158）+
 //   393 飞碟炮塔 origin+UnitY×(−8) 枢轴（Main.cs:24208-24213,rotation 台账登记项）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { World } from '../src/world/World';
@@ -80,7 +80,12 @@ function makeProjHarness(unlocked: boolean, solidAt?: [number, number]) {
   const player = {
     x: 100, y: 100, w: 20, h: 42, cx: 110, cy: 121,
     lastDamageCause: null as unknown,
-    damage: (amt: number, srcX?: number) => { dmgCalls.push(amt); dmgSrcX.push(srcX ?? NaN); },
+    // ★M′-MINOR-3：本仓 hit 支按 damage 返回值（reduction>0=受理）才置 lastDamageCause
+    // ——桩模拟 Player.damage 正常受理返回实扣 HP;闪避/无敌用例自行覆写返回 0
+    damage: (amt: number, srcX?: number) => {
+      dmgCalls.push(amt); dmgSrcX.push(srcX ?? NaN);
+      return Math.max(1, Math.round(amt));
+    },
   };
   const game = {
     world: w,
@@ -330,7 +335,24 @@ describe('弹 949 生成与行为（AI_184）', () => {
     const p1 = new TorchGodProj(98, 118, 8, 0, 1000, 6, locked.dust);
     p1.fixedUpdate(1 / 60, locked.game);
     expect(locked.dmgCalls.length, '未解锁 → 真伤（1457 :43575-43579 SelfHurtPlayers）').toBe(1);
-    expect(locked.dmgCalls[0]).toBe(40);   // ★V5 复核补强：经典档基伤 40（hostileProjectileDamage(40,classic);曾只断 >0,回归 20 不红）
+    // ★M′-MAJOR-1：1457 :15113-15117 `num2=Main.DamageVar(damage, 0f-luck)`（949 不在
+    // ProjectileID.Sets.FixedSelfDamageForPlayers 表,ID/ProjectileID.cs:193）→ 命中时
+    // ±15% 离散档掷骰（stats/DamageVar 单源;桩玩家无 luck → 无重掷）。
+    // 确定性锚：桩 Math.random=0.5 → 档 Math.floor(0.5*31)-15=0 → 经典档基伤 40 恰中
+    //（★V5 补强保留:曾恒 40,回归 20/80 不红）;未桩面再断 ±15% 值域 34..46。
+    const det = makeProjHarness(false);
+    const rndSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    let rolled40: number | undefined;
+    try {
+      new TorchGodProj(98, 118, 8, 0, 1000, 6, det.dust).fixedUpdate(1 / 60, det.game);
+      rolled40 = det.dmgCalls[0];
+    } finally {
+      rndSpy.mockRestore();
+    }
+    expect(rolled40, 'rnd=0.5 → 档 0 → 基伤 40（hostileProjectileDamage(40,classic)）').toBe(40);
+    expect(locked.dmgCalls[0], '±15% 离散档值域：40×(1+t×0.01),t∈[-15,15] + ToEven 舍入')
+      .toBeGreaterThanOrEqual(34);
+    expect(locked.dmgCalls[0]).toBeLessThanOrEqual(46);
     // ★1457 裁决：AI_184 命中走 SelfHurtPlayers（:15104-15152）——该方法不杀弹
     // （无 Kill/active=false,immune 门静默、无敌帧结束再判,穿透续飞）;1456 语义
     // （owner=255 假伤）已退役。旧断言 dead=true 锁 1456 前行为,按原版改。
@@ -362,6 +384,24 @@ describe('弹 949 生成与行为（AI_184）', () => {
     // 音/射程/尾迹/位移,SelfHurtPlayers 不冻结弹）
     expect(h.dustCalls.length, '命中拍尾迹照出（AI 不因命中早退）').toBe(4);
     for (const c of h.dustCalls) expect(c.velMul, '尾迹 vel×0.3').toBe(0.3);
+  });
+
+  it('★M′-MINOR-3：damage 返回 0（闪避/无敌帧/免伤早退族）→ lastDamageCause 不置位不覆写', () => {
+    // 受理门：原版 SelfHurtPlayers :15106 早退族（!active||dead||immune||!Colliding）
+    // 先于 DeathReason 构造,Hurt 返回 0 无受理语义;本仓 p.damage 返回 reduction>0
+    // 才写 lastDamageCause——桩覆写 damage 返回 0 模拟闪避/无敌帧受理失败。
+    const h = makeProjHarness(false);
+    h.player.damage = (amt: number, srcX?: number) => {
+      h.dmgCalls.push(amt); h.dmgSrcX.push(srcX ?? NaN);
+      return 0;                                    // 闪避族/无敌帧 return 0 同构
+    };
+    h.player.lastDamageCause = { kind: 'fall', name: '摔落' };   // 残留旧死因
+    const p = new TorchGodProj(98, 118, 8, 0, 1000, 6, h.dust);
+    p.fixedUpdate(1 / 60, h.game);
+    expect(h.dmgCalls.length, '掷骰/damage 调用照进（原版 DamageVar 在早退门后照掷）').toBe(1);
+    expect(h.player.lastDamageCause, '未受理（reduction=0）→ 残留旧死因不覆写')
+      .toEqual({ kind: 'fall', name: '摔落' });
+    expect(p.dead, '命中后仍穿透续飞（R3-16,不杀弹）').toBe(false);
   });
 });
 

@@ -2178,13 +2178,14 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 6×101≈606px/t
   //    全屋瞬达)。★寿命换算:原版 timeLeft 在 numUpdates 子步循环内逐【子步】消耗
   //    (AI() :16880 与 timeLeft-- :17307 同在 while(numUpdates>=0) :16780-17345 内)
-  //    → timeLeft 300 = 300 子步 ≈ 3 tick(101 子步/拍);本仓 life 按 tick 递减
-  //    (fixedUpdate 头),表值=换算终值 3(±1 tick 量化,末拍余 3 子步弃置)。
+  //    → timeLeft 300 = 300 子步 ≈ 2.96 拍(101 子步/拍);本仓 life 按 tick 头递减
+  //    (fixedUpdate 先减后步) → 取 4 = 3 全拍飞行(303 子步,较原版 +3 子步≈18px,
+  //    取 life 3 会少 98 子步=整拍缺飞,两害取轻登记)。
   //    本体恒隐:alpha=255 由 AI 每子步写(:28630-28632)+贴图官方空桩;可视面=束段尘
   //    ——【撞块反弹】(Update :18975-19018 全速反号+束铺撒+重锚)/【Kill】
   //    (:71825-71870 锚点→死亡位铺撒)两口,见 dartStep 290 支;首子步 Item8(:28633)。
   //    敌版铺撒标量 0.03334(Orchestrator :1989-1993),友版 294 的 0.25 别值勿混
-  290: { w: 4, h: 4, rot: 'none', alpha0: 255, life: 3, updates: 100, fallback: '#B090FF' },
+  290: { w: 4, h: 4, rot: 'none', alpha0: 255, life: 4, updates: 100, fallback: '#B090FF' },
   // 291 地狱火弹(魔法师 285/286):12×12,alpha255 本体恒隐(SetDefaults :3812;AI 291 支
   //    :28738-28767 无 alpha 行=不渐显,旧 fade:50 退役),tileCollide=false 穿墙,
   //    penetrate=-1 穿人不消亡(Damage_EVP 无 Kill);发射点 NPC.cs:21294 ai[0]/[1]=

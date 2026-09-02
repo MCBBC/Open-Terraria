@@ -34,7 +34,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { furnitureStyleBase } from '../../FurnitureStyle';
+import { furnitureStyleBase } from '../FurnitureStyle';   // ★⑥（2026-09-02 缓修小账）：gen/ 下相对深度正确化（'../../' 指到 src/ 不存在,TS2307）
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';

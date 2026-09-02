@@ -223,27 +223,29 @@ describe('raise/restore 幂等（compositeLight 前后光数组还原）', () =>
   });
 });
 
-// ================================== ③′ ★I″ 去色（2026-09-02 白化批,原边界③）
-describe('★I″ 去色：raise 白化 R=G=B=max(r,g,b,fr)（有色光区白剪影不再被染色）', () => {
-  it('熔岩红光 (200,40,10) + 814（fr=89）→ 白化为灰 (200,200,200);restore 还原有色原值', () => {
+// = ③′ ★I″ 去色 + ★M′-MAJOR-2 白化按 k 分档（2026-09-02 红蓝对抗定谳）
+describe('★M′ 白化分档：596/811 whiten（消色差）vs 814 逐通道 max（保留 65% 光色相）', () => {
+  it('熔岩红光 (200,40,10) + 814（fr=89）→ 逐通道 max (200,89,89) 不白化（色相保留）;restore 还原', () => {
     const L = mkLight();
     L.r[li(1, 2)] = 200; L.g[li(1, 2)] = 40; L.b[li(1, 2)] = 10;
     raiseOf().raiseSelfLuminousProjLight([dart(814, 1, 2)], L.r, L.g, L.b, 0, 0, W4, W4);
-    // 旧形逐通道 max → (200,89,89) 有色（染红）;新形消色差 = 三通道同值
-    expect(L.r[li(1, 2)], '最大通道保底（只升不降）').toBe(200);
-    expect(L.g[li(1, 2)], 'G 白化（旧形 89）').toBe(200);
-    expect(L.b[li(1, 2)], 'B 白化（旧形 89）').toBe(200);
+    // whiten=false（顶点色=Lerp(格光,White,0.35) 读格光）→ 逐通道 max 旧形：
+    // 低于地板的 G/B 抬到 89,红通道原值保留（I″ 旧形白化 (200,200,200) 破坏色相,已废）
+    expect(L.r[li(1, 2)], 'R≥fr 原值保留（65% 色相）').toBe(200);
+    expect(L.g[li(1, 2)], 'G<fr 抬到地板').toBe(89);
+    expect(L.b[li(1, 2)], 'B<fr 抬到地板').toBe(89);
     raiseOf().restoreSelfLuminousProjLight(L.r, L.g, L.b);
     expect(L.r[li(1, 2)]).toBe(200);
     expect(L.g[li(1, 2)]).toBe(40);
     expect(L.b[li(1, 2)]).toBe(10);
   });
 
-  it('亮橙光 (255,128,30) + 814：各通道≥fr 也白化（登记③熔岩亮光区主诉,旧形零改动）', () => {
+  it('亮橙光 (255,128,30) + 814：仅 B<fr 抬 89,R/G≥fr 零写（逐通道 max 不白化成全白）', () => {
     const L = mkLight();
     L.r[li(2, 1)] = 255; L.g[li(2, 1)] = 128; L.b[li(2, 1)] = 30;
     raiseOf().raiseSelfLuminousProjLight([dart(814, 2, 1)], L.r, L.g, L.b, 0, 0, W4, W4);
-    expect([L.r[li(2, 1)], L.g[li(2, 1)], L.b[li(2, 1)]]).toEqual([255, 255, 255]);
+    expect([L.r[li(2, 1)], L.g[li(2, 1)], L.b[li(2, 1)]],
+      'I″ 旧形全白 (255,255,255) 破坏色相 → 逐通道 max').toEqual([255, 128, 89]);
   });
 
   it('暗红光 (100,20,10) + 596 全显态（fr=255）→ 全白（原版 GetAlpha 恒白不读格光）', () => {
@@ -251,6 +253,22 @@ describe('★I″ 去色：raise 白化 R=G=B=max(r,g,b,fr)（有色光区白剪
     L.r[li(0, 3)] = 100; L.g[li(0, 3)] = 20; L.b[li(0, 3)] = 10;
     raiseOf().raiseSelfLuminousProjLight([dart(596, 0, 3)], L.r, L.g, L.b, 0, 0, W4, W4);
     expect([L.r[li(0, 3)], L.g[li(0, 3)], L.b[li(0, 3)]]).toEqual([255, 255, 255]);
+  });
+
+  it('判别保留：同格熔岩红光 (200,40,10)——811 whiten=true 白化灰阶,814 保留色相', () => {
+    const lava = (L: { r: Uint8Array; g: Uint8Array; b: Uint8Array }) => {
+      L.r[li(1, 2)] = 200; L.g[li(1, 2)] = 40; L.b[li(1, 2)] = 10;
+    };
+    const L811 = mkLight(); lava(L811);
+    raiseOf().raiseSelfLuminousProjLight([dart(811, 1, 2)], L811.r, L811.g, L811.b, 0, 0, W4, W4);
+    expect([L811.r[li(1, 2)], L811.g[li(1, 2)], L811.b[li(1, 2)]],
+      '811 顶点色恒白（Main.cs:30846 Lerp 恒白端）→ ★I″ 消色差（fr=255 全程 → 三通道同值）')
+      .toEqual([255, 255, 255]);
+    const L814 = mkLight(); lava(L814);
+    raiseOf().raiseSelfLuminousProjLight([dart(814, 1, 2)], L814.r, L814.g, L814.b, 0, 0, W4, W4);
+    expect([L814.r[li(1, 2)], L814.g[li(1, 2)], L814.b[li(1, 2)]],
+      '814 顶点色读格光（Lerp(格光,White,0.35)）→ 逐通道 max 色相保留')
+      .toEqual([200, 89, 89]);
   });
 });
 

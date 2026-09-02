@@ -61,7 +61,7 @@ export class InfernoHostileBlast extends Entity {
       game.playSfxFiles?.(['Item_74'], 1, this.cx, this.cy);
     }
     this.age++;                                             // ai[0]++（:28787）
-    if (this.age > 540) { this.dead = true; return; }       // :28792-28800（541 拍杀）
+    if (this.age >= INFERNO_BLAST_LIFETIME) { this.dead = true; return; }   // :28792-28800
     // ---- 25×d174 火焰柱（:28806-28823）----
     //  原式：NewDust(盒,174,0,0,100,default,1.5) 后逐尘覆写 position=Center+Next(-10,11)
     //  与 velocity=归一向——本仓 spawnDust 同式出生后覆写（掠过 NewDust 随机 ±2 掺速）

@@ -7,11 +7,53 @@
 //  3) 行归一 tallGateRowOf（CheckTallGate :52129-52133 heights 递减）与
 //     shiftTallGate/devices 行解码同源（Door.ts 唯一权威）。
 import { describe, expect, it } from 'vitest';
+import { Game } from '../src/core/Game';
 import { World } from '../src/world/World';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { framedCellFrame } from '../src/world/FurnitureStyle';
 import { repairTallGateFramesInStore } from '../src/world/tallgateFrameRepair';
 import { TALL_GATE_ROW_FY, TALL_GATE_CFH, TALL_GATE_HEIGHTS, tallGateRowOf } from '../src/world/Door';
+
+// 高门右键交互回归锁（Player.cs:32552-32560 右键 388→开/389→关;怪物攻开的 389
+//  玩家可右键复原——DoorOpeningHelper 只自动关【helper 自己开的】门,vanilla 同）
+describe('高门右键切换（toggleTallGate 行为锁）', () => {
+  it('389 右键 → 388 关闭复原;388 右键 → 389 开启;非门格/结构残缺不动', () => {
+    const w = new World(60, 120, 1, 'tg');
+    const st = w.store;
+    // sheet 389 有 decor 别名 def(v_389_tallgateopen),idOfSheet 首中会错——
+    // 用 TILE_BY_KEY 权威键(Door.shiftTallGate 写入同源)
+    const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
+    const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; sfx: { play(n: string): void }; input: { rightDown: boolean };
+      toggleTallGate(x: number, y: number, closing: boolean): void;
+    };
+    g.world = w;
+    const played: string[] = [];
+    g.sfx = { play: (n: string) => played.push(n) };
+    g.input = { rightDown: true };
+
+    // 布一扇右开向高门:锚 (30, 40),388 五行
+    st.setTileSilent(30, 40, T388, 0, 0);
+    for (let dy = 1; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, 0);
+    // 帧面:走 shiftTallGate 开→关 自循环生成合法帧（构造期直接手写帧易错,用产物）
+    g.toggleTallGate(30, 40, false);                       // 右键闭态=开
+    console.log('DBGTG T388=', T388, 'T389=', T389, 'got=', st.get(30, 40),
+      'bykey389=', TILE_BY_KEY['v_389_tall_gate_open'], 'bykeyAlias=', TILE_BY_KEY['v_389_tallgateopen']);
+    expect(st.get(30, 40)).toBe(T389);
+    expect(g.input.rightDown).toBe(false);                 // 成功消费右键
+    g.input.rightDown = true;
+    g.toggleTallGate(30, 41, true);                        // 点中段格同样命中（锚归一）
+    expect(st.get(30, 40)).toBe(T388);                     // 复原关闭态
+    expect(st.get(30, 41)).toBe(T388);
+    expect(g.input.rightDown).toBe(false);
+    // 非门格:失败不消费
+    g.input.rightDown = true;
+    g.toggleTallGate(31, 40, true);
+    expect(g.input.rightDown).toBe(true);
+    expect(played.length).toBeGreaterThan(0);              // 开/关音经回调发生
+  });
+});
 
 const idOfSheet = (s: number) => {
   const id = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === s);

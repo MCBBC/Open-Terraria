@@ -12227,6 +12227,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           rocket.contactKb = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
           rocket.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
           rocket.fired = true;
+          // ★出生锚回正（2026-09-02 用户实报"右朝向垂直向上弹体出生点偏离盒中心"）：
+          //  ax/ay=resolveShotAnchor 中心语义（y 已上抬 projH/2=14/2）——构造器首参
+          //  收【左上角】,直接传锚=弹盒偏 (+7,+7)（半弹宽右移+projH/2 抬升丢失）,
+          //  垂直举枪时与头顶武器贴图完全分离。投掷族五支（手雷 :13758/粘性 :13778/
+          //  炸弹 :13806/锚 :13850/链球 :14069）均有 placeAtShootSpawn 回正——
+          //  发射支（fired 族）整支漏,唯此一处（2026-08-14 fired 模式重构时引入）。
+          placeAtShootSpawn(rocket, ax, ay);
           this.entities.add(rocket, 'projectiles');
           // 段尾与 Arrow 路径共用（消耗→useTime→swing→音效→UI 刷新）
           const ammoVid16 = viIdFromKey(ammoDef.key);
@@ -16981,12 +16988,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // GetItemDrop_FakeChests -1 档）——压 place_v_/def.drop 兜底,与 0「无表族」区分
         else if (sv < 0) dropKey = '';
       }
-      // D-8：活板门/高门开态 386/389 零返还补齐（CheckTrapDoor 1457 :52050/
-      // CheckTallGate :52111——两态恒掉关闭态物品 3239/3240;关门态 387/388 已由
-      // place_v_ 兜底,开态无放置物品 → multiTileDropKey 落空,见
-      // vanillaStyleDrops.openStateDoorDropVid 注）
+      // D-8：活板门/高门 386/387/388/389 掉落翻正（CheckTrapDoor 1457 :52050/
+      // CheckTallGate :52111——杀段两态恒掉关闭态物品 3239/3240）
+      // ★⑤+新账（2026-09-02 缓修小账/同批收编）：CheckTallGate 杀段（:52151-52163）
+      //   `int type2 = 3240; if (point.Y == 0) { type2 = 3240; }` 两支同值恒 3240=
+      //   反编译本相;CheckTrapDoor :52093-52095 `int type2 = 3239; if (point.Y == 0)
+      //   { type2 = 3239; }` 两支同值恒 3239——【387 闭态同掉 3239】。原 place_v_ 兜底
+      //   掉的是本仓面板伪物品非原版物品（vi_3240 items.ts:910）→ door-drop 链收编
+      //   （tiles.ts def.drop 不动,勿双写）。开态 386/389 同 3239/3240。
       {
-        const gd = openStateDoorDropVid(def.vanilla?.sheet ?? -1);
+        const ds = def.vanilla?.sheet ?? -1;
+        const gd = ds === 388 ? 3240 : ds === 387 ? 3239 : openStateDoorDropVid(ds);
         if (gd > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[gd] ?? dropKey;
       }
       // TNT 桶 654（❌1 复核定谳勘误 2026-08-23）：无物品返还正确——KillTile 654 在
@@ -17393,10 +17405,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[hive]?.mapColor ?? '#bfb07c', 8, 1.6);
     if (!wet) {
-      // num653 = 2 + 三次 Next(3)==0 增量（:76650-76658）;槽位门单点恒真
+      // num653 = 2 + 三次 Next(3)==0 增量（:76650-76658）;★m-1 槽位门见
+      // availableNPCSpawnsUpToSlot 注（Projectile.cs:76645 GetAvailableAmountOfNPCsToSpawnUpToSlot）
       let bees = 2;
       for (let k = 0; k < 3; k++) if (Math.random() < 1 / 3) bees++;
-      this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+      bees = this.availableNPCSpawnsUpToSlot(bees);
+      // ★新账（2026-09-02）：弹亡奏 legacy 4=NPCKilled（SoundID.cs:30,曾误注"挖掘音"
+      // ——legacy 0 才是 Dig 家族）→ 'killed' 键（NPC_Killed_1-3 族）
+      this.sfx.play('killed', 1, x * TILE + 8, y * TILE + 8);
       const cx = ax * TILE + 16, cy = ay * TILE + 16;
       for (let k = 0; k < bees; k++) {
         const bee = Enemy.fromVanilla(Math.random() < 0.5 ? 210 : 211, cx, cy);
@@ -17407,6 +17423,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.entities.add(bee, 'enemies');
       }
     }
+  }
+
+  /** GetAvailableAmountOfNPCsToSpawnUpToSlot（NPC.cs:81459-81479）仓内等价门（★m-1,
+   *  2026-09-02 缓修小账）。原版：数 Main.npc[0..100) 空槽,返回 min(amountWeWant,
+   *  空槽数)。本仓无定长 NPC 槽数组——映射论证：
+   *  ① 原版 NPC.NewNPC 取最低空槽,总活跃 <100 时活跃 NPC 必全落 [0..100)
+   *     （槽 ≥100 只在前 100 全占后启用）⇒ 空槽=100-活跃总数;
+   *  ② 总活跃 ≥100 ⇒ 前 100 槽满 ⇒ 恒 0（原版在 despawn 空洞情形下前 100 槽
+   *     可有零星空位,本仓无槽位概念取保守端,备案）;
+   *  ③ 计数域=Main.npc 一表混装（敌怪+城镇 NPC+小动物+幼虫）→ 本仓 entities
+   *     的 enemies+npcs 两桶 !dead（critters 桶原版同属 Main.npc,暂不计数,
+   *     仅在 ≥100 量级的边缘世界造成「多出几只」的宽侧偏差,备案）。
+   *  消费面：蜂群 Projectile.cs:76645（num653=2-5）、幼虫 WorldGen.cs:48779
+   *  （amountWeWant=1——空槽为 0 时幼虫不出） */
+  private availableNPCSpawnsUpToSlot(amountWeWant: number): number {
+    if (amountWeWant <= 0) return 0;
+    let active = 0;
+    // ★新账（2026-09-02）：原版 Main.npc 一表含小动物（critter 也是 NPC 占槽）——
+    //   本仓 critters 桶并入计数（前批备案收编;仍为等价近似,见方法注）
+    for (const e of this.entities.enemies) if (!e.dead) active++;
+    for (const e of this.entities.npcs) if (!e.dead) active++;
+    for (const e of this.entities.critters) if (!e.dead) active++;
+    return active >= 100 ? 0 : Math.min(amountWeWant, 100 - active);
   }
 
   /** 蚁狮幼虫破坏（CheckSuper :48731-48750 1:1）：2×2 整件清 + 释放幼虫小怪 582
@@ -17428,6 +17467,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[ant]?.mapColor ?? '#C68658', 6, 1.5);
+    // ★m-1（2026-09-02 缓修小账）：原版 WorldGen.cs:48778-48780 amountWeWant=1 过
+    // GetAvailableAmountOfNPCsToSpawnUpToSlot 门——空槽为 0 时幼虫不出（:48779-48782
+    // 循环 0 次）。旧码恒出 1 只
+    if (this.availableNPCSpawnsUpToSlot(1) < 1) return;
     const larva = Enemy.fromVanilla(582, ax * TILE, ay * TILE + 32);
     if (larva) {
       larva.vx = (this.player.x >= ax * TILE ? 1 : -1) * 1.5;
@@ -18631,6 +18674,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  翻折尝试。命中失败立即 return（原版不扫半径,靠 Origin 对位）。
     //  支撑校验同步替换 hasSupport 近似：wall 只认显式 AnchorWall 四族
     //  （240/334/440/471），其余一律不再因背景墙放行 → "挂墙不落地"根治。
+    // ★m-5（2026-09-02 缓修小账）：放置尾级联的参格=【原始点击格】。原版
+    //  Player.PlaceThing_Tiles_PlaceIt（Player.cs:40438-40439）在 TileObject.Place 后
+    //  SquareTileFrame(tileTargetX, tileTargetY)——tileTarget 是鼠标点击格而非物件
+    //  锚左上（TileObject.cs:846-848 xCoord=click-Origin 只在 Place 内部换算,
+    //  外面 tileTarget 仍指点击格）。本仓 checkDecorSquareFrame 是以参格为中心的
+    //  3×3 邻域扫,参格差一个 Origin 偏移时邻窗错位（贴边/单侧邻件的复验漏格）。
+    //  下方 chooseAnchorFromClick（表驱动锚）/门特例（双锚寻位）/底行换算都会改写
+    //  tx,ty → 在首个改写点【之前】保存原始点击格,写循环结束后用它复验。
+    const clickX = tx, clickY = ty;
     let anchorCovered = false;
     const anchorRec = (() => {
       if (!def?.framed || !def.vanilla || !def.vanilla.sheet) return null;
@@ -18959,11 +19011,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 原版时点补级联（债 A 后半）：放置目标点一次 SquareTileFrame 等价（WorldGen.cs:
     // 51888 / Player.cs:40439 都只在 Place 成功后调一次）——对本仓即 DECOR 支的
-    // checkDecorSquareFrame(tx, ty)：构造完成的整件 + 九宫邻格 DECOR 件复验
+    // checkDecorSquareFrame：构造完成的整件 + 九宫邻格 DECOR 件复验
     // （放置清格相 :18507-18535 的 breakTile 在旗窗之外,其级联照常先行）。
     // 家具链维持现状（原版该 SquareTileFrame 同样触发家具 Check*,本仓家具半件态
     // 自保护 + 写循环内上方格派发已等效覆盖,不另补）
-    this.checkDecorSquareFrame(tx, ty);
+    // ★m-5：参格=原始点击格（原版 tileTargetX/Y 非锚左上,Player.cs:40439 +
+    // TileObject.cs:846-848;保存点见上方 anchorCovered 前）——tx,ty 此时已是锚左上
+    this.checkDecorSquareFrame(clickX, clickY);
     // 容器族放置登记（PlaceChest → Chest.CreateChest :57840-57842;梳妆台
     //  PlaceDresserDirect → CreateChest(x-1,y-1) :57899——锚同为物件左上格）:
     //  21/467/88 三族（此前只登 21 → 放置的梳妆台/二类箱成"孤儿",悬停文本支误进）
@@ -19568,6 +19622,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 玩家储物族/读碑文/设床不受限（前者是玩家自有物品，后两者不改方块）。
     const editDenied = !this.netCanEditTile() && (
       type === T.DOOR_CLOSED || type === T.DOOR_OPEN || type === TILE_BY_KEY['v_83_herbs_mature']
+      || type === TILE_BY_KEY['v_388_tall_gate_closed'] || type === TILE_BY_KEY['v_389_tall_gate_open']
       || type === TILE_BY_KEY['v_84_herbs_bloom'] || type === TILE_BY_KEY['crystal_heart']
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
       || type === TILE_BY_KEY['v_356_enchanted_sundial'] || type === TILE_BY_KEY['v_663_enchanted_moondial'] // 日晷/月晷右键改世界时间态
@@ -19640,6 +19695,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
       this.toggleDoor(tx, ty, false);
+    } else if (type === (TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1)) {
+      this.toggleTallGate(tx, ty, false);   // 右键闭态高门 = 开(Player.cs:32552-32560)
+    } else if (type === (TILE_BY_KEY['v_389_tall_gate_open'] ?? -1)) {
+      this.toggleTallGate(tx, ty, true);    // 右键开态高门 = 关(怪物开的也走此路复原)
     } else if (type === T.CHEST || this.wiring?.sheetOf(tx, ty) === 21 || this.wiring?.sheetOf(tx, ty) === 467) {
       // 真容器交互走此路（Chest.FindChest 族：21 基础箱 ∪ 467 Containers2——
       // 亡命箱=467 style4 同样开出内容面板，Player.cs:33503 OpenChest 后才 HitSwitch）。
@@ -22183,6 +22242,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.input.rightDown = false;
   }
 
+  /** 高门右键切换(Player.cs:32552-32560):388→ShiftTallGate(closing:false)=开、
+   *  389→closing:true=关——怪物攻开的门(389)玩家右键即可复原(vanilla 同语义;
+   *  DoorOpeningHelper 的自动关只认【helper 自己开的】门 _ongoingOpenDoors,
+   *  怪物开的门 vanilla 也不自动关——玩家手动关是唯一复原通道)。成功消费右键,
+   *  失败(结构残缺/占用)不消费可重试;手动开关不入 updateTallGateAuto 的
+   *  openTallGates 跟踪(vanilla 右键开不进 _ongoingOpenDoors 同语义) */
+  private toggleTallGate(x: number, y: number, closing: boolean) {
+    const st = this.world.store;
+    if (!shiftTallGate(st, x, y, closing, (n: string) => this.sfx.play(n as SfxName))) return;
+    this.input.rightDown = false;
+  }
+
   openChest: ((c: ChestData) => void) | null = null;
   /** UI 侧当前打开的箱子（Wiring.cs:2571 Chest.UsingChest 判定用；UI.ts 赋值） */
   openChestRef: (() => ChestData | null) | null = null;
@@ -22435,8 +22506,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // KillTile_GetItemDrops 无 case 28,内容物全在 SpawnThingsFromPot :57490）
     for (const [cx, cy] of cells) st.setTile(cx, cy, 0);
     this.recLog('tile', { x, y, from: TILE_DEFS[POT_TILE]?.key ?? POT_TILE, to: 0, cause: 'pot', n: cells.length });   // 行为录制：瓦罐整罐破碎汇总
-    // CheckPot 音效（普通瓦罐 SoundID 13 = Shatter.wav）+ 陶瓷碎片粒子
-    this.sfx.play('shatter', 1, ax * TILE + 16, ay * TILE + 16);
+    // CheckPot 音效 per-style 分档（WorldGen.cs:57333-57344 亲读,num4=style）：
+    //   style 7-9（丛林罐）→ PlaySound(6)=Grass.wav（仓内既有键 'chop' 同文件）、
+    //   style 16-24（腐化/猩红罐）→ PlaySound(4)=NPC_Killed_1-3（既有键 'killed'）、
+    //   其余 → 13=Shatter（缺省档,含 10-15/25+）。★⑦（2026-09-02 缓修小账）仅移植
+    //   音效分档;:57355-57431 per-style 瓦砾(Gore)分档 76 行 20+ gore id 未移植,备案
+    this.sfx.play(style >= 7 && style <= 9 ? 'chop'
+      : style >= 16 && style <= 24 ? 'killed' : 'shatter', 1, ax * TILE + 16, ay * TILE + 16);
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#C4A48C', 6, 2.0, { life: 180, damp: 0.985, grav: 0.09 });
     this.potLoot(ax, ay, style);
@@ -30433,7 +30509,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.spawnDust(x, y, w, h, 58, oldVx * 0.1, oldVy * 0.1, 150, null, 1.2);
       }
       for (let i = 0; i < 3; i++) {
-        GorePiece.newGore(16 + Math.floor(Math.random() * 2), x + w / 2, y + h / 2,
+        // vanilla 传 position（GorePiece.x = 左上锚,与原版同语义——1085 支传 Center 是
+        // 因为原文显式 base.Center,两支锚点勿混同）
+        GorePiece.newGore(16 + Math.floor(Math.random() * 2), x, y,
           oldVx * 0.05, oldVy * 0.05);
       }
       return;
@@ -33211,6 +33289,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return sl !== 3 && sl !== 4;
   }
 
+  /** IsBelowANonHammeredPlatform（WorldGen.cs:38682-38693）1:1：(x,y) 上一格
+   *  active+平台+非半砖+无坡 → true（被锤平台=false）。y<1 早退（:38684-38686）;
+   *  界外=原版 Main.tile 越界 null → false。消费面：checkDecorSupport 'hangtop'
+   *  平台支档位二分（:38477——真→档 8,假→档 0 仍算有效支撑 :38478） */
+  private isBelowNonHammeredPlatformAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (y < 1 || !st.inBounds(x, y - 1)) return false;
+    const i = st.idx(x, y - 1);
+    return st.isActive(x, y - 1) && !!TILE_DEFS[st.type[i]]?.platform
+      && !st.half[i] && st.slope[i] === 0;
+  }
+
   /** SolidTileAllowLeftSlope（WorldGen.cs:70875）：左向锚判据——active+solid+非半砖
    *  +非右坡（slope 2/4,Tile.cs leftSlope/rightSlope 编码）+非平台+未致动 */
   private solidAllowLeftSlopeAt(x: number, y: number): boolean {
@@ -33415,14 +33505,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'pot': {
-        // CheckPot（:57273,引注随 1457 基线校正,旧注 :56807）：2×2 完整性 + 底行两列 SolidTile2（active+solid+无坡+
-        // 非半砖,:70178）→ 失配整罐碎（breakTile → smashPot 战利品链）
+        // CheckPot（:57273,引注随 1457 基线校正,旧注 :56807）：2×2 完整性【绝对帧式】
+        // + 底行两列 SolidTile2（active+solid+无坡+非半砖,:70178）→ 失配整罐碎
+        // （breakTile → smashPot 战利品链）。★m-3（2026-09-02 缓修小账）：完整性原
+        // 只查 active+type,现补 :57307 原文逐格帧比对——num5=(frameX/18)%2 须=列号
+        // （★仅列号奇偶,变体 36px 基【不】入判=PotsPass 变体 Next(3)*36 全域合法）+
+        // frameY 须=row*18+style*36（style 带 36px 基,:57288-57293 num4=frameY/36）。
+        // 帧写入面（PotsPass/HiveSpiderPass/StructuresPass/DungeonPass/WldImport
+        // copyFrame）前批已复核全原版序,绝对式安全（smashPotInner 同式校验在案）
         const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
         const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const potStyle = Math.floor(st.frameY[i] / 36);
         let bad = false;
         for (let dx = 0; dx < 2 && !bad; dx++) {
           for (let dy = 0; dy < 2; dy++) {
-            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || (Math.floor(st.frameX[qi] / 18) % 2) !== dx
+              || st.frameY[qi] !== dy * 18 + potStyle * 36) { bad = true; break; }
           }
           const bi2 = st.idx(ax + dx, ay + 2);
           if (!(st.isSolid(ax + dx, ay + 2) && st.slope[bi2] === 0 && !st.half[bi2])) bad = true;
@@ -33452,12 +33552,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 半砖/坡面实心亦可锚）。原版 data 面 AnchorTop SolidTile|SolidSide cnt2 +
         // AnchorBottom=Empty（TileObjectData.cs:3556-3561/:3562-3567）→ 吊挂件。
         // 曾走家具 hasSupport 底行/墙近似=语义反向,正确吊挂放置在写循环末格被整件误杀
+        // ★m-3（2026-09-02 缓修小账）：补 :48834 绝对帧比对（Check2x2 主循环 :48824-48831
+        // 的四联判据）——frameX=dx*18+变体基（:48819-48822 `num2<-1 → num=36`,即
+        // frameX/18>1 → 变体基 36）、frameY=dy*18+style*36（:48824-48828 num5=frameY/36）
         const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
         const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const h2Var = Math.floor(st.frameX[i] / 18) > 1 ? 36 : 0;
+        const h2Style = Math.floor(st.frameY[i] / 36);
         let bad = false;
         for (let dx = 0; dx < 2 && !bad; dx++) {
           for (let dy = 0; dy < 2; dy++) {
-            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== dx * 18 + h2Var
+              || st.frameY[qi] !== dy * 18 + h2Style * 36) { bad = true; break; }
           }
           const ud = st.inBounds(ax + dx, ay - 1) ? TILE_DEFS[st.get(ax + dx, ay - 1)] : null;
           if (!st.isActive(ax + dx, ay - 1) || !ud?.solid || ud.platform) bad = true;
@@ -33506,10 +33614,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const sd = TILE_DEFS[st.get(sx, anchorRow)];
           return !!(sd?.solid && !sd.platform);
         };
+        // ★m-3（2026-09-02 缓修小账）：补 CheckTileFrames（:52245-52259,386 臂 :52062 调）
+        // 绝对帧比对——frameX=styleX*w*18+dx*18=styleX*36+dx*18、frameY=styleY*36+dy*18
+        // （w=h=2,styleX/Y=GetTopLeftAndStyles :52230 point=frameX/36、frameY/36;
+        // 387 闭态臂同式已接,见上 M-1 注）
+        const tdStyleX = Math.floor(st.frameX[i] / 36);
+        const tdStyleY = Math.floor(st.frameY[i] / 36);
         let bad = false;
         for (let dx = 0; dx < 2 && !bad; dx++) {
           for (let dy = 0; dy < 2; dy++) {
-            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== tdStyleX * 36 + dx * 18
+              || st.frameY[qi] !== tdStyleY * 36 + dy * 18) { bad = true; break; }
           }
           if (!bad && !(sideOK(ax - 1) && sideOK(ax + 2))) bad = true;
         }
@@ -33534,8 +33651,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   （'trapdoor' 侧锚同款;noAttach/inActive 位锚判据族未建模,备案）。
         // 掉落（:52156-52161）：两态恒 3240（`if (point.Y == 0)` 两支同值恒真=反编译
         //   本相）——389 经 killDecorTile→breakTile object 支 openStateDoorDropVid
-        //   （vanillaStyleDrops D-8）→ vi_3240;388 关态 place_v_388_tall_gate_closed
-        //   兜底（D-8 备案：item3240 createTile=388 同语义）。
+        //   （vanillaStyleDrops D-8）→ vi_3240;★⑤（2026-09-02 缓修小账）388 关态同翻
+        //   正 → vi_3240（breakTile D-8 块 388 特补,旧 place_v_388 兜底退役,探针
+        //   _decor-sweep ㉒ tallGate388Drop 守门）。
         // ★388/389 混合格容忍（本仓私有,非原版偏离）：原版 ShiftTallGate（:52175）先
         //   直写全列 type（:52215-52219 tile.type 直赋无 TileFrame）再整体 TileFrame
         //   （:52224-52231 x-1..x+1 × y-1..y+h）——运行期从不评估半写态;本仓
@@ -33963,7 +34081,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const upSheet = sheetAt(st, ax + dx, ay - 1);
           let myBand = -2;
           if (sheet !== 531 && upSheet === 380) myBand = 0;
-          else if (sheet !== 531 && TILE_DEFS[st.get(ax + dx, ay - 1)]?.platform) myBand = 8;
+          else if (sheet !== 531 && TILE_DEFS[st.get(ax + dx, ay - 1)]?.platform) {
+            // ★m-2（2026-09-02 缓修小账）：平台档按原版二分——IsBelowANonHammeredPlatform
+            // （WorldGen.cs:38682-38693,在 :38477 平台支内被调）真=完好平台（active+非半砖
+            // +无坡）→ 档 8;假=被锤平台（半砖/坡）→ 档仍 0（flag2=true,被锤平台照样算
+            // 有效支撑 :38478,只是档位落 0 营）→ 与实心同档,两列混档即杀（:38489-38493
+            // num7!=num8 → flag）。旧码平台恒档 8=完好/被锤同档,完好+被锤混列不杀。
+            // 原版此处 active() 非负向 nactive——致动(active)平台也入本支,亲读核实。
+            myBand = this.isBelowNonHammeredPlatformAt(ax + dx, ay) ? 8 : 0;
+          }
           else if (this.solidAllowTopSlopeAt(ax + dx, ay - 1)) myBand = 0;
           else myBand = -1;
           if (myBand === -1) bad = true;
@@ -34360,8 +34486,12 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       }
       // D-8：活板门/高门开态 386/389 失撑同掉（原版失撑与挖掉同走 CheckTrapDoor/
       // CheckTallGate 帧检,见 vanillaStyleDrops.openStateDoorDropVid 注）
+      // ★⑤（2026-09-02 缓修小账）388 失撑同翻正：CheckTallGate :52156-52161 两态恒
+      //   3240（同挖掉路 D-8 块注;与上方 object 支同口径,勿双写 tiles.ts def.drop）
       {
-        const gd = openStateDoorDropVid(sheet);
+        // ★新账（2026-09-02）：387 闭态同掉 3239（CheckTrapDoor :52093-52095 两支
+        //   同值恒 3239=反编译本相,同挖掉路 D-8 块注;勿双写 tiles.ts def.drop）
+        const gd = sheet === 388 ? 3240 : sheet === 387 ? 3239 : openStateDoorDropVid(sheet);
         if (gd > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[gd] ?? dropKey;
       }
       // Echo 资源组 8 def（⚠️4 接档）失撑同掉（原版失撑与挖掉同走 Check* 帧检

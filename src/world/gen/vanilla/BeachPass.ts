@@ -7,6 +7,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T } from '../../../data/tiles';
 import { genSolidType } from './GenSolid';
+import { doPooEverywhere } from './SecretSeedDoEndsPass';   // ★IIIII176 DoPooEverywhere（cs:2975-3002）
 
 /** Ocean Sand:海滩铺沙 + 金字塔候选(L4962-5042) */
 export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
@@ -112,6 +113,10 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // 一次性探针钩（同 WebsPass 模式）：Beaches 入口快照（债时间线用）
   const g0 = globalThis as { __swBchCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swBchCap?.(gs, st); } catch { /* probe */ }
+  // ★IIIII176：DoPooEverywhere（cs:14963-14965）——BeachesAndOceanCleanup pass 头首支，
+  //   位于 noSurface 门/florida 掷之前；旗关零掷（truckstop 链 #034 T666 首差本体）。
+  //   （cs:14961 !Skyblock.denyAllGeneration 外门由管线 vanillaBiomes sbDenyAll 束门承载。）
+  if (gs.seedFlags?.pooEverywhere) doPooEverywhere(st, rng, gs);
   const w = st.w;
   const oceanWaterMin = 220, oceanWaterMax = 260, forcedJungleLen = 275, minSand = 50;
   const edgeWall = 30;

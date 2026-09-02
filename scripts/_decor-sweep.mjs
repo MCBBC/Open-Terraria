@@ -34,6 +34,9 @@
 //                          :54795/:54796 写 5000+100+id / 10000+prefix;二行带 20000/25000
 //                          :54790-54794;CheckWeaponsRack :46802-46828 剥 5000 系再 %54）
 //                          → 邻格扰动幸存;无标记对照幸存;清一角墙 → 整架塌
+// —— 2026-09-02 缓修小账（红蓝对抗六项,详见场景块前注）——
+//  ㉒ tallGate388Drop ⑤  ㉓ hangtopPlatBand m-2  ㉔ potFrames m-3
+//  ㉕ hang2x2Frames m-3  ㉖ trapdoor386Frames m-3  ㉗ npcSlotGate m-1
 // 几何：bl=底左原点（buildObj 行区 bly-(oh-1)..bly）；444 顶行=F-2 锚行=F-3；
 //       34/454 行区 F-3..F-1 锚行=F-4；389 行区 F-5..F-1 锚行 F/F-6；
 //       440 行区 F-4..F-2（背墙同域）；hangtop 行区 F-3..F-1 锚行=F-4
@@ -434,6 +437,173 @@ const out = await page.evaluate(async () => {
     res.rack334Ctrl = { unmarked, wallDig: countIn(RK, x0 + 2, x0 + 9, F - 5, F + 1) };
   }
 
+  // —— 2026-09-02 缓修小账（红蓝对抗六项）追加 ——
+  // ㉒ tallGate388Drop    ⑤：388 闭态挖顶锚 → 掉原版 vi_3240 恰 1（CheckTallGate
+  //                      杀段 :52151-52163 `if (point.Y == 0) type2 = 3240` 两支同值
+  //                      =两态恒 3240）,不再掉 place_v_388 面板伪物品
+  // ㉓ hangtopPlatBand    m-2：591 吊盆双列平台档——[完好+完好]幸存/[完好+被锤]杀/
+  //                      [被锤+被锤]幸存（IsBelowANonHammeredPlatform :38682-38693
+  //                      二分档 8/0,混档即杀 :38489-38493;被锤=半砖,仍算有效支撑）
+  // ㉔ potFrames          m-3：style0/style1+variant36 罐干净帧邻扰动幸存（CheckPot
+  //                      :57307 绝对式不得误杀合法变体/带基帧）+帧混格邻扰动整罐清
+  // ㉕ hang2x2Frames      m-3：95 frameX 变体基 36/fy style 基——干净邻扰动幸存/
+  //                      帧混格邻扰动整件清（Check2x2 :48824-48831 绝对式）
+  // ㉖ trapdoor386Frames  m-3：386 开态 2×2 侧锚在——干净邻扰动幸存/帧混格邻扰动
+  //                      整件清（CheckTileFrames :52245-52259 绝对式,386 臂 :52062）
+  // ㉗ npcSlotGate        m-1：availableNPCSpawnsUpToSlot 门矩阵（NPC.cs:81459-81479
+  //                      等价:数空槽=min(需求,100-活跃)）+100 活跃实体端到端蜂群 0 只
+  //                      （Projectile.cs:76645;合成 100 怪不可行 → proto/数组拦截法同 ⑧）
+
+  // ㉒ ⑤：388 闭态掉落翻正
+  tgSetup(TALL_C);
+  {
+    const pre3240 = dropCount(3240);
+    g['breakTile'].call(g, x0 + 5, F - 6);   // 闭态顶锚挖 → 整件清 + 掉 3240
+    res.tallGate388Drop = {
+      residue: countIn(TALL_C, x0 + 3, x0 + 8, F - 7, F + 2),
+      drop3240: dropCount(3240) - pre3240,
+      noPlaceFallback: !(g.entities.drops ?? []).some((d) => !d.dead
+        && String(items.ITEM_DEFS[d.itemId]?.key ?? '').startsWith('place_v_388')),
+    };
+  }
+
+  // ㉓ m-2：591 吊盆平台档三态（完好/被锤=半砖）
+  {
+    const PLAT = idOfSheet(19);
+    const hpSetup = (hammerL, hammerR) => {
+      clearBox();
+      row(x0 + 4, F, 4, STONE);            // 地面垫底
+      for (let dx = 0; dx < 2; dx++) st.setTileSilent(x0 + 5 + dx, F - 4, PLAT, 0, 0);
+      if (hammerL) st.half[st.idx(x0 + 5, F - 4)] = 1;   // 被锤平台（半砖=hammered）
+      if (hammerR) st.half[st.idx(x0 + 6, F - 4)] = 1;
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 3; dy++)
+        st.setTileSilent(x0 + 5 + dx, F - 3 + dy, idOfSheet(591), 36 + dx * 18, dy * 18);
+    };
+    const hpDig = () => {   // 旁格扰动触发 3×3 扫（含右列格）
+      st.setTileSilent(x0 + 7, F - 3, STONE, 0, 0);
+      g['breakTile'].call(g, x0 + 7, F - 3);
+      return countIn(idOfSheet(591), x0 + 3, x0 + 9, F - 5, F + 1);
+    };
+    hpSetup(false, false);
+    const platOk = st.get(x0 + 5, F - 4) === PLAT && !!tiles.TILE_DEFS[PLAT]?.platform;
+    const bothIntact = hpDig();
+    hpSetup(false, true);
+    const mixed = hpDig();
+    hpSetup(true, true);
+    const bothHammered = hpDig();
+    res.hangtopPlatBand = { platOk, bothIntact, mixed, bothHammered };
+  }
+
+  // ㉔ m-3：罐绝对帧（CheckPot :57307）——干净帧幸存/混格杀
+  {
+    const POT = idOfSheet(28);
+    const potFSetup = (style, variant, corrupt) => {
+      clearBox();
+      row(x0 + 3, F, 8, STONE);
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++)
+        st.setTileSilent(x0 + 5 + dx, F - 2 + dy, POT, variant + dx * 18, dy * 18 + style * 36);
+      if (corrupt) st.frameY[st.idx(x0 + 6, F - 1)] = 18;   // 底右格失 style 基（应 54）
+    };
+    const potAdjDig = () => {   // 邻格扰动触发 3×3 扫（支承行不动）
+      st.setTileSilent(x0 + 7, F, STONE, 0, 0);
+      g['breakTile'].call(g, x0 + 7, F);
+      return countIn(POT, x0 + 3, x0 + 9, F - 4, F + 1);
+    };
+    potFSetup(0, 0, false);
+    const style0Clean = potAdjDig();
+    potFSetup(1, 36, false);
+    const style1Clean = potAdjDig();
+    potFSetup(1, 36, true);
+    const style1Mixed = potAdjDig();
+    res.potFrames = { style0Clean, style1Clean, style1Mixed };
+  }
+
+  // ㉕ m-3：95 吊挂 2×2 绝对帧（Check2x2 :48824-48831）
+  {
+    const H2 = idOfSheet(95);
+    const h2Setup = (corrupt) => {
+      clearBox();
+      row(x0 + 4, F, 6, STONE);
+      row(x0 + 5, F - 3, 2, STONE);        // 顶锚行（两列上方各 1 格）
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++)
+        st.setTileSilent(x0 + 5 + dx, F - 2 + dy, H2, 36 + dx * 18, dy * 18 + 36);   // variant1+style1
+      if (corrupt) st.frameX[st.idx(x0 + 6, F - 2)] = 18;   // 顶右格失变体基（应 54）
+    };
+    const h2AdjDig = () => {
+      st.setTileSilent(x0 + 7, F - 2, STONE, 0, 0);
+      g['breakTile'].call(g, x0 + 7, F - 2);
+      return countIn(H2, x0 + 3, x0 + 9, F - 4, F + 1);
+    };
+    h2Setup(false);
+    const h2Clean = h2AdjDig();
+    h2Setup(true);
+    const h2Mixed = h2AdjDig();
+    res.hang2x2Frames = { h2Clean, h2Mixed };
+  }
+
+  // ㉖ m-3：386 开态活板门绝对帧（CheckTileFrames :52245-52259,386 臂 :52062）
+  {
+    const TDO = idOfSheet(386);
+    const tdOSetup = (corrupt) => {
+      clearBox();
+      row(x0 + 3, F, 8, STONE);
+      // style0 锚行 = ay+1 = F-2（:52064-52066 CheckTileAnchors(x,y+1,2,1,mode1)）——
+      // 左右外格在【底行】两侧（开态活板门贴墙,侧锚=底行外一格 StrictSolid :52290-52294）
+      st.setTileSilent(x0 + 4, F - 2, STONE, 0, 0);   // 左侧支承
+      st.setTileSilent(x0 + 7, F - 2, STONE, 0, 0);   // 右侧支承
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++)
+        st.setTileSilent(x0 + 5 + dx, F - 3 + dy, TDO, dx * 18, dy * 18);
+      if (corrupt) st.frameY[st.idx(x0 + 6, F - 3)] = 18;   // 顶右格失基（应 0,给 18=行错）
+    };
+    const tdOAdjDig = () => {
+      st.setTileSilent(x0 + 4, F - 3, STONE, 0, 0);   // 左上旁格（非锚行,非侧支承）
+      g['breakTile'].call(g, x0 + 4, F - 3);
+      return countIn(TDO, x0 + 3, x0 + 9, F - 5, F + 1);
+    };
+    tdOSetup(false);
+    const tdOClean = tdOAdjDig();
+    tdOSetup(true);
+    const tdOMixed = tdOAdjDig();
+    res.trapdoor386Frames = { tdOClean, tdOMixed };
+  }
+
+  // ㉗ m-1：槽位门等价（NPC.cs:81459-81479）——门矩阵 + 100 活跃实体端到端蜂群 0
+  {
+    const proto = Object.getPrototypeOf(g);
+    const gate = (want) => g['availableNPCSpawnsUpToSlot'].call(g, want);
+    const realEnemies = g.entities.enemies, realNpcs = g.entities.npcs;
+    const fakes = (n) => Array.from({ length: n }, () => ({ dead: false }));
+    const withCounts = (en, np, fn) => {
+      g.entities.enemies = fakes(en); g.entities.npcs = fakes(np);
+      try { return fn(); } finally { g.entities.enemies = realEnemies; g.entities.npcs = realNpcs; }
+    };
+    // 门矩阵：0 活跃→min(want,100);98 活跃→100-98=2;100/150 活跃→0;dead 不计
+    const matrix = {
+      want3at0: withCounts(0, 0, () => gate(3)),
+      want5at98: withCounts(95, 3, () => gate(5)),
+      want3at98withDead: withCounts(90, 8, () => { g.entities.npcs[0].dead = true; return gate(3); }),
+      want1at100: withCounts(60, 40, () => gate(1)),
+      want1at150: withCounts(150, 0, () => gate(1)),
+    };
+    // 端到端：100 活跃实体下敲蜂巢 → 蜂群 0 只;对照（真实实体表）> 0 只
+    const hiveSetup2 = () => {
+      clearBox();
+      row(x0 + 4, F, 4, STONE);
+      row(x0 + 5, F - 3, 2, STONE);
+      buildObj(HIVES, x0 + 5, F - 1, 2, 2);
+    };
+    const beeCount = () => (g.entities.enemies ?? []).filter((e) => !e.dead
+      && (e.vanillaId === 210 || e.vanillaId === 211)).length;
+    const preBees0 = beeCount();
+    withCounts(60, 40, () => { hiveSetup2(); g['breakTile'].call(g, x0 + 5, F - 3); });
+    const beesAtCap = beeCount() - preBees0;
+    const preBees1 = beeCount();
+    hiveSetup2();
+    g['breakTile'].call(g, x0 + 5, F - 3);
+    const beesControl = beeCount() - preBees1;
+    res.npcSlotGate = { ...matrix, beesAtCap, beesControl };
+  }
+
   res.verdict = res.hiveCeiling.residue === 0 && res.hiveCeiling.bees > 0 && res.hiveCeiling.ceilRightSurvives
     && res.hiveDiagControl.residue === 4
     && res.chandelierHook.residue === 0 && res.chandelierHook.drop106 > 0
@@ -465,7 +635,21 @@ const out = await page.evaluate(async () => {
     && res.trapdoor387.sideCtrl === 2 && res.trapdoor387.residue === 0
     && res.trapdoor387.drop3239 === 1
     && res.rack334Marked.residue === 9
-    && res.rack334Ctrl.unmarked === 9 && res.rack334Ctrl.wallDig === 0 ? 'PASS' : 'FAIL';
+    && res.rack334Ctrl.unmarked === 9 && res.rack334Ctrl.wallDig === 0
+    // —— 缓修小账（⑤ / m-2 / m-3 / m-1）——
+    && res.tallGate388Drop.residue === 0 && res.tallGate388Drop.drop3240 === 1
+    && res.tallGate388Drop.noPlaceFallback
+    && res.hangtopPlatBand.platOk
+    && res.hangtopPlatBand.bothIntact === 6 && res.hangtopPlatBand.mixed === 0
+    && res.hangtopPlatBand.bothHammered === 6
+    && res.potFrames.style0Clean === 4 && res.potFrames.style1Clean === 4
+    && res.potFrames.style1Mixed === 0
+    && res.hang2x2Frames.h2Clean === 4 && res.hang2x2Frames.h2Mixed === 0
+    && res.trapdoor386Frames.tdOClean === 4 && res.trapdoor386Frames.tdOMixed === 0
+    && res.npcSlotGate.want3at0 === 3 && res.npcSlotGate.want5at98 === 2
+    && res.npcSlotGate.want3at98withDead === 3
+    && res.npcSlotGate.want1at100 === 0 && res.npcSlotGate.want1at150 === 0
+    && res.npcSlotGate.beesAtCap === 0 && res.npcSlotGate.beesControl > 0 ? 'PASS' : 'FAIL';
   return res;
 });
 fs.writeFileSync('/tmp/decor-sweep.json', JSON.stringify(out));
