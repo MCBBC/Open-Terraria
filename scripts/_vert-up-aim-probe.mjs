@@ -7,6 +7,7 @@
 import puppeteer from 'puppeteer-core';
 import { writeFileSync } from 'node:fs';
 import { PNG } from '/Users/vinlic/Project/GLM/SandboxWorld/game/node_modules/pngjs/lib/png.js';
+const shotDir = '/tmp/vertup-probe';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
@@ -21,39 +22,9 @@ await new Promise(r => setTimeout(r, 400));
 // 音频门吃首击（menu-boot 惯例）：先预点一次再正式进
 await page.click('[data-act=sp]').catch(() => {});
 await new Promise(r => setTimeout(r, 600));
-await page.click('[data-act=sp]');
-try {
-  await page.waitForSelector('.sw-list-panel', { timeout: 12000 });
-} catch {
-  await page.click('[data-act=sp]').catch(() => {});
-  await page.waitForSelector('.sw-list-panel', { timeout: 12000 });
-}
-await new Promise(r => setTimeout(r, 800));
-const hasChar = await page.evaluate(() => !!document.querySelector('.sw-item'));
-if (!hasChar) {
-  await page.click('.sw-list-footer [data-act=new]');
-  await page.waitForSelector('.sw-char-panel', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 500));
-  await page.click('.sw-char-row input[type=text]');
-  await page.keyboard.type('vertup');
-  await new Promise(r => setTimeout(r, 200));
-  await page.click('[data-act=create]');
-  await page.waitForSelector('.sw-item', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 600));
-}
-await page.click('.sw-item');
-await page.waitForFunction(() => document.querySelector('.sw-list-title')?.textContent === '选择世界', { timeout: 10000 });
-await new Promise(r => setTimeout(r, 700));
-const hasWorld = await page.evaluate(() => !!document.querySelector('.sw-list-panel .sw-item'));
-if (!hasWorld) {
-  await page.click('.sw-list-footer [data-act=new]');
-  await page.waitForSelector('.sw-wc-panel', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 500));
-  await page.click('[data-g=size] .sw-wc-opt');
-  await new Promise(r => setTimeout(r, 200));
-  await page.click('[data-act=create]');
-}
-await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 240000 });
+// 探针桥直达世界创建（canvas UI 免点击链）
+await page.evaluate(() => window.__swFlow.newWorld('42424242', 4200, 1200));
+await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 300000 });
 await new Promise(r => setTimeout(r, 2000));
 
 // ---------- A) 隔离台 ----------
@@ -125,7 +96,8 @@ const partA = await page.evaluate(async () => {
   }
   return out;
 });
-console.log('PART-A:', JSON.stringify(partA, null, 1));
+writeFileSync('/tmp/vertup-probe-partA.json', JSON.stringify(partA, null, 1));
+console.log('PART-A saved');
 
 // ---------- B) 实机 ----------
 const partB = await page.evaluate(async () => {
@@ -134,15 +106,28 @@ const partB = await page.evaluate(async () => {
   const { ITEM_BY_KEY } = await import('/src/data/items.ts');
   const id759 = ITEM_BY_KEY['vi_759_火箭发射器'];
   p.inv.slots.fill(null);
+  const idRocket = ITEM_BY_KEY['vi_771_火箭一型'];
   p.inv.slots[0] = { id: id759, stack: 99 };
+  p.inv.slots[1] = { id: idRocket, stack: 99 };
   p.inv.selected = 0;
   p.vx = 0; p.vy = 0; p.useTime = 0;
   // 岩浆台面防摔（就地站立即可）
   const frozen = g.world.clock; void frozen;
   const res = { shots: [] };
-  // 关掉 HUD 干扰读数（保留世界渲染）
   const cvs = g.renderer.canvas;
   const shot = async () => cvs.toDataURL('image/png');
+  // 仪器：包住真实帧的 drawUseItem（消费段 translate/rotate/drawImage 原值）
+  const real = g.renderer.drawUseItem.bind(g.renderer);
+  const realLog = [];
+  g.renderer.drawUseItem = function (c, pl, sw, f) {
+    const calls = { translate: [], rotate: [], dest: [] };
+    const t = c.translate.bind(c), ro = c.rotate.bind(c), di = c.drawImage.bind(c);
+    c.translate = (a, b) => { calls.translate.push([+a.toFixed(1), +b.toFixed(1)]); t(a, b); };
+    c.rotate = (a) => { calls.rotate.push(+a.toFixed(4)); ro(a); };
+    c.drawImage = (...args) => { if (calls.dest.length < 2) calls.dest.push(args.slice(5, 9).map(Math.round)); di(...args); };
+    real(c, pl, sw, f);
+    if (calls.translate.length) realLog.push({ aim: sw.aim, us: sw.useStyle, facing: pl.facing, ...calls });
+  };
   // 静息基线
   g.input.mouseDown = false;
   await new Promise(r => setTimeout(r, 700));
@@ -155,18 +140,35 @@ const partB = await page.evaluate(async () => {
     p.useTime = 0;
     if (g.swing) g.swing.t = 0;
     g.input.mouseDown = true;
-    await new Promise(r => setTimeout(r, 120));
+    let first = null;
+    for (let i = 0; i < 60 && !first; i++) {
+      await new Promise(r => setTimeout(r, 16));
+      first = g.entities.projectiles.find(e => !e.dead) ?? null;
+    }
+    await new Promise(r => setTimeout(r, 60));
     const aimSeen = g.swing ? g.swing.aim : null;
-    const projs = g.entities.projectiles.filter(e => !e.dead);
-    const first = projs[projs.length - 1];
     res.shots.push({
       dir, facing: p.facing,
       aimDeg: aimSeen == null ? null : Math.round(aimSeen * 180 / Math.PI),
       pivotSeen: null,
       playerCx: +p.cx.toFixed(1), playerCy: +p.cy.toFixed(1),
       mouse: [g.input.mouseX, g.input.mouseY],
-      proj: first ? { x: +first.x.toFixed(1), y: +first.y.toFixed(1), vx: +first.vx.toFixed(2), vy: +first.vy.toFixed(2) } : null,
+      proj: first ? { x: +first.x.toFixed(1), y: +first.y.toFixed(1), w: first.w, h: first.h, vx: +first.vx.toFixed(2), vy: +first.vy.toFixed(2), vid: first.vanillaId ?? first.type ?? null } : null,
       png: await shot(),
+      predict: (() => {
+        const W = 400, H = 400, PCX = 200, PCY = 200;
+        const cvs2 = document.createElement('canvas'); cvs2.width = W; cvs2.height = H;
+        const c2 = cvs2.getContext('2d', { willReadFrequently: true });
+        const p2 = { cx: PCX, cy: PCY, x: PCX - 8, y: PCY - 21, w: 16, h: 42, facing: p.facing, gravDir: 1,
+          equipStats: {}, ridingMount: false, mount: { type: -1 }, sleeping: false, miscCounter: 0 };
+        g.renderer.drawUseItem(c2, p2, { t: 20, dur: 30, item: id759, useStyle: 5, aim: aimSeen }, null);
+        const d = c2.getImageData(0, 0, W, H).data;
+        let minx = 1e9, maxx = -1, miny = 1e9, maxy = -1;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 8) {
+          if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+        }
+        return maxx < 0 ? null : { relMinX: minx - PCX, relMaxX: maxx - PCX, relMinY: miny - PCY, relMaxY: maxy - PCY };
+      })(),
     });
     g.input.mouseDown = false;
     if (g.swing) g.swing.t = 0;
@@ -176,11 +178,15 @@ const partB = await page.evaluate(async () => {
     for (const e of g.entities.projectiles) e.dead = true;
   }
   res.basePng = base;
+  res.realLog = realLog.slice(-6);
+  res.zoom = { camZoom: g.camera.zoom ?? null, camScale: g.camera.scale ?? null };
+  res.canvasW = cvs.width; res.canvasH = cvs.height;
   res.screenCenter = g.camera.worldToScreen(p.cx, p.cy);
-  return { ...res, basePng: undefined, base: undefined };
+  return { ...res, basePng: base };
 });
+// base 帧也落盘（差分基线）
+writeFileSync(`${shotDir}-base.png`, Buffer.from(partB.basePng.split(',')[1], 'base64'));
 // 截屏数据量太大，只打印元信息 + 落盘
-const shotDir = '/tmp/vertup-probe';
 writeFileSync(shotDir + '-meta.json', JSON.stringify({ ...partB, shots: partB.shots.map(s => ({ ...s, png: undefined })) }, null, 1));
 let i = 0;
 for (const s of partB.shots) writeFileSync(`${shotDir}-shot${i++}-${s.dir}.png`, Buffer.from(s.png.split(',')[1], 'base64'));

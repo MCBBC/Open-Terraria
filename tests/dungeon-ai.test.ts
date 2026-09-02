@@ -1,5 +1,7 @@
-// 地牢 AI 族行为冒烟（AI_010 诅咒头骨 / AI_011 守卫 / AI_020 火轮 / AI_021 刺球）：
+// 地牢 AI 族行为冒烟（AI_010 诅咒头骨 / AI_011 守卫 / AI_020 刺球(70) / AI_021 火轮(72)）：
 // tick 若干帧不抛异常 + 运动方向符合原版语义
+// ★名字权威 = NPCID.cs:11205/:11209（70=SpikeBall 尖刺球=aiStyle20 锚链摆荡、
+//   72=BlazingWheel 烈焰火轮=aiStyle21 恒速滚动）——仓内 AI 函数名历史互换勿照抄
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
@@ -46,7 +48,7 @@ describe('地牢 AI 族', () => {
     expect(e.cx).toBeGreaterThan(20 * TILE); // 朝玩家(+x)移动
   });
 
-  it('火轮(70)：首段竖直后转为水平弹跳，逐轴速度 ≤ 6×2.4', () => {
+  it('刺球(70)：首段竖直后转为水平弹跳，逐轴速度 ≤ 6×2.4', () => {
     const w = makeWorld();
     const e = Enemy.fromVanilla(70, 60 * TILE, 10 * TILE)!;
     tick(e, stubGame(w), 200);
@@ -57,7 +59,18 @@ describe('地牢 AI 族', () => {
     expect(Math.abs(e.vy)).toBeLessThanOrEqual(cap);
   });
 
-  it('刺球(72)：对角移动并在撞墙/撞地后反弹（vy 有翻转）', () => {
+  it('刺球(70)：锚点快照=像素坐标（DrawNPCDirect Main.cs:23087 消费面,回归=除以 TILE 格单位）', () => {
+    const w = makeWorld();
+    const e = Enemy.fromVanilla(70, 60 * TILE, 10 * TILE)!;
+    tick(e, stubGame(w), 1);
+    // AI_020 帧首（NPC.cs:24671-24673）：y += h/2+8 后取中心——首帧俯冲 ≤6×2.4=14.4px,
+    // 锚点与中心差恒 <40px（像素）；若回归成格单位(|差|≈cx×15/16)此处必炸
+    expect(Math.abs(e.ai1 - e.cx)).toBeLessThan(40);
+    expect(Math.abs(e.ai2 - e.cy)).toBeLessThan(40);
+    expect(e.aiInit).toBe(true);
+  });
+
+  it('火轮(72)：对角移动并在撞墙/撞地后反弹（vy 有翻转）', () => {
     const w = makeWorld();
     const e = Enemy.fromVanilla(72, 60 * TILE, 90 * TILE)!; // 地面上方
     const game = stubGame(w);

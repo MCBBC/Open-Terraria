@@ -66,6 +66,9 @@ export const VANILLA_MISC = [
   'vanilla/Tiles_323.png', 'vanilla/Tiles_72.png',  // 棕榈/发光蘑菇树干(群系专属但极小,常驻防传送闪失)
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
   'vanilla/Shroom_Tops.png',
+  // ①-bis 刺球锚链面(70 常刷于地牢,玩家首见=零预热情景;各 ~300B,同上防首帧闪失
+  // ——drawSpikeBallChain 的 Chain/锚座 Spike_Base,红蓝对抗 2026-09-02 定谳补)
+  'vanilla/Chain.png', 'vanilla/Spike_Base.png',
   // ② 液体首帧必需(其余 waterStyle 变体由 VanillaLiquidRenderer/WaterfallRenderer
   //    的 ensureVImage 活画路径按当前样式自取)
   'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',

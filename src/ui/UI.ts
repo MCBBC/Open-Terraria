@@ -414,6 +414,13 @@ const CSS = `
 .sw-eqdock .sw-lbl { text-shadow:1px 1px 0 #000; }
 /* 背包面板透明底（2026-09-02 用户要求去底去框）：同补偿,标题/标签/合成站文字投影 */
 .sw-inv .sw-lbl, .sw-inv .sw-title, .sw-inv [data-role="stations"] { text-shadow:1px 1px 0 #000; }
+/* 背包网格=热键栏同款渲染（2026-09-02 用户要求格距/透明度对齐）：52px 盒 ×0.75
+   缩放（视觉 39=--slot 轨道,节距 43+4 与热键栏一致）+ Inventory_Back20 半透
+   0.575（热键栏未选中同款,alpha 147/255）。transform 缩放后命中区=视觉盒,
+   不越轨拦截邻格;悬停回满透明度（亮度滤镜保留） */
+.sw-invgrid .sw-slot { width:52px; height:52px; transform:scale(0.75); transform-origin:top left;
+  opacity:0.575; background-image:url(sprites/vanilla/Inventory_Back20.png); }
+.sw-invgrid .sw-slot:hover { opacity:1; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -3441,8 +3448,11 @@ export class UI {
       // 通道如需再开走 Guide 对话入口）
       right.appendChild(lblRow);
     }
-    const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10, var(--slot)); gap:4px;';
+    const grid = el('div', 'sw-invgrid');
+    // grid-auto-rows=--slot（39px）：52px 盒经 ×0.75 缩放后视觉 39,行距 39+4=43
+    // 与热键栏一致（缺此行会被未缩放的 52px 内容盒撑成 56 行距,2026-09-02 实测）
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10, var(--slot));'
+      + 'grid-auto-rows:var(--slot); gap:4px;';
     // 背包网格 = 槽 10-49（10×4）。★曾写到 INV_SIZE=58——50-57 是钱币/弹药槽
     // （COIN_START/AMMO_START,已在左列渲染），混进网格成第 5 行幻影格：query 首匹配
     // 让左列元素吃掉绘制、悬停却读出钱币/弹药 tooltip（2026-08-26 用户实报红框行）。
@@ -3515,11 +3525,11 @@ export class UI {
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
     // ---- 合成右侧竖列（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列
-    //  只剩联机/旅程钮行 + 成就卡。flex:1 吃满 rightRail 被(body stretch)拉起的余高,
-    //  卡保持在列顶）----
+    //  只剩联机/旅程钮行 + 成就卡。margin 收 6px=成就卡紧贴钮格下方（用户复报
+    //  "成就按钮也要顶上去"）;不再 flex:1——搜索入格后列内无需撑满）----
     const sideCol = el('div');
     sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center;'
-      + 'margin-top:10px; flex:1 1 auto;';
+      + 'margin-top:6px;';
     row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 联机/旅程钮行（竖排）
     sideCol.appendChild(row);   // 联机玩家列表/旅程入口钮（单机经典世界不可见）
     sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
@@ -4291,7 +4301,10 @@ export class UI {
    *  装备/时装/染料=13 / 杂项装备=3 / 杂项染料=12 / 箱=5 / 其余=默认 Back；
    *  收藏=10 覆盖（:1987，除 13/21/22/14/35 等——快捷栏不在本路径） */
   private paintSlotChrome(slotEl: HTMLElement, where: SlotWhere, i: number): void {
-    let tex = 'Inventory_Back';
+    // inv 族（背包网格/钱币/弹药）用 Back20 = 热键栏未选中同款贴图（2026-09-02
+    // 用户要求背包格渲染对齐热键栏;网格槽另有 ×0.75 缩放+0.575 透明度,见
+    // .sw-invgrid CSS）
+    let tex = where === 'inv' ? 'Inventory_Back20' : 'Inventory_Back';
     let tint: string | null = null;
     if (where === 'armor' || where === 'dye') {
       tex = 'Inventory_Back13';

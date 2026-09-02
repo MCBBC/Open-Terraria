@@ -18899,9 +18899,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (PLACE_OVER_PLAYER_ROSTER.has(def.vanilla?.sheet ?? -1)
         && this.playerOverlapsRect(tx * TILE, ty * TILE, ow * TILE, oh * TILE)) return;
     } else if (def.solid) {
-      for (let dx2 = 0; dx2 < ow; dx2++) {
-        for (let dy2 = 0; dy2 < oh; dy2++) {
-          if (this.overlapsEntity(tx + dx2, ty + dy2)) return;
+      // ★新账（2026-09-02 十一批）：门 10/11 豁免——门在原版是 ObjectData 件
+      //  （CustomPlace 路径 Player.cs:40085-40092）→ 实体门=窄名单 :41747-41810,
+      //  门【不在名单】→ 可原地放置（玩家/敌怪重叠允许,门会把实体挤出的碰撞语义
+      //  另行承担）。本仓门走专用双锚分支（anchorRec 豁免 :18162 区）落本 legacy 档,
+      //  须按 ObjectData 语义豁免,勿吃 Collision.EmptyTile 近似门。
+      const isDoorSheet = def.vanilla?.sheet === 10 || def.vanilla?.sheet === 11;
+      if (!isDoorSheet) {
+        for (let dx2 = 0; dx2 < ow; dx2++) {
+          for (let dy2 = 0; dy2 < oh; dy2++) {
+            if (this.overlapsEntity(tx + dx2, ty + dy2)) return;
+          }
         }
       }
     }
@@ -22515,12 +22523,54 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // CheckPot 音效 per-style 分档（WorldGen.cs:57333-57344 亲读,num4=style）：
     //   style 7-9（丛林罐）→ PlaySound(6)=Grass.wav（仓内既有键 'chop' 同文件）、
     //   style 16-24（腐化/猩红罐）→ PlaySound(4)=NPC_Killed_1-3（既有键 'killed'）、
-    //   其余 → 13=Shatter（缺省档,含 10-15/25+）。★⑦（2026-09-02 缓修小账）仅移植
-    //   音效分档;:57355-57431 per-style 瓦砾(Gore)分档 76 行 20+ gore id 未移植,备案
+    //   其余 → 13=Shatter（缺省档,含 10-15/25+）。★⑦音效分档;gore 分档见下段
     this.sfx.play(style >= 7 && style <= 9 ? 'chop'
       : style >= 16 && style <= 24 ? 'killed' : 'shatter', 1, ax * TILE + 16, ay * TILE + 16);
-    this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
-    this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#C4A48C', 6, 2.0, { life: 180, damp: 0.985, grav: 0.09 });
+    // ★pot-goreTier（2026-09-02 十批）：CheckPot per-style 瓦砾 Gore 分档 1:1 清偿
+    //   （WorldGen.cs:57358-57431 整段亲读）。语义要点：
+    //   · 生成【整件一次】——段在 2×2 KillTile 杀环（:57347-57356）之后、
+    //     SpawnThingsFromPot（:57490）之前,不在杀环内逐格;
+    //   · 位置=【命中格】左上角 (i*16,j*16)（各档同式,i/j=CheckPot 入参=本函数
+    //     x/y,非锚 ax/ay）;速度实参 default(0,0),NewGore :1347-1348 自带
+    //     vy-=Next(10,31)*0.1 / vx+=Next(-20,21)*0.1 扰动（GorePiece.newGore 非
+    //     Perfect 档内置同式）;Scale=1f（NewGore 第 4 参缺省）;
+    //   · 随机源：原版 genRand（WorldGen.genRand :57399/:57404/:57410）——与
+    //     potLoot 同 Math.random 口径（原版 genRand 掷流不逐位模拟,音效/loot 同例）;
+    //   · isGeneratingOrLoadingWorld 门（Gore.NewGore :1312-1319 载入期静默返回
+    //     600——载入期液体收敛 waterCheck→killTile→smashPot 砸水边罐无瓦砾）：
+    //     以 this.player 判同门（spawnBoulderRoll :34530 同款近似）。
+    //   分档（switch(num4),style=frameY/36;世界生成源 :18248-18298/:60648/:3681/:28159）：
+    //     0/1/2/3 → 51,52,53 | 166-168 | 169-171 | 172-174（普通罐 4 变体,Next(4)）
+    //     4-6 → 197,198（雪原 147/161/162）   7-9 → 199,200（丛林 tile 60,Grass 音同档）
+    //     10-12 → 201,202（地牢墙/41/43/44/481-483）  13-15 → 203,204（地狱 UnderworldLayer）
+    //     16-24 →【无瓦砾】（:57388-57389 显式 break——腐化 16-18 / 蜘蛛 19-20(:3681) /
+    //             猩红 22-24 只出音效不出块）
+    //     25-27 → Next(217,220)×2（金字塔 :28159）  28-30 → Next(315,317)×2（神庙 226）
+    //     31-33 → Next(2,5) 枚 698+Next(6)（沙漠 367）  34-36 → 1122,1123,1124（
+    //             花岗/大理石/地狱墙 187/216/223）  其余 style → 无分支=无瓦砾
+    //   （旧 #9A6A5A/#C4A48C 双行近似粒子由本段替代移除——原版罐破无尘只有瓦砾,
+    //     两行正是 gore 分档移植前的占位近似）
+    if (this.player) {
+      const gx = x * TILE, gy = y * TILE;
+      const potGoreTierSpawn = (id: number) => { GorePiece.newGore(id, gx, gy, 0, 0); };   // default(Vector2)+Scale=1f
+      const gr = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));   // genRand.Next(lo,hi)
+      if (style === 0) { potGoreTierSpawn(51); potGoreTierSpawn(52); potGoreTierSpawn(53); }
+      else if (style === 1) { potGoreTierSpawn(166); potGoreTierSpawn(167); potGoreTierSpawn(168); }
+      else if (style === 2) { potGoreTierSpawn(169); potGoreTierSpawn(170); potGoreTierSpawn(171); }
+      else if (style === 3) { potGoreTierSpawn(172); potGoreTierSpawn(173); potGoreTierSpawn(174); }
+      else if (style >= 4 && style <= 6) { potGoreTierSpawn(197); potGoreTierSpawn(198); }
+      else if (style >= 7 && style <= 9) { potGoreTierSpawn(199); potGoreTierSpawn(200); }
+      else if (style >= 10 && style <= 12) { potGoreTierSpawn(201); potGoreTierSpawn(202); }
+      else if (style >= 13 && style <= 15) { potGoreTierSpawn(203); potGoreTierSpawn(204); }
+      else if (style <= 24) { /* :57388 显式 break：腐化/蜘蛛/猩红罐只出音效不出瓦砾 */ }
+      else if (style <= 27) { potGoreTierSpawn(gr(217, 220)); potGoreTierSpawn(gr(217, 220)); }   // :57399
+      else if (style <= 30) { potGoreTierSpawn(gr(315, 317)); potGoreTierSpawn(gr(315, 317)); }   // :57404
+      else if (style <= 33) {                                                                     // :57410-57414
+        const n6 = gr(2, 5);                                                                      // Next(2,5)=[2,4]
+        for (let q = 0; q < n6; q++) potGoreTierSpawn(698 + Math.floor(Math.random() * 6));       // 698+Next(6)=[698,703]
+      }
+      else if (style <= 36) { potGoreTierSpawn(1122); potGoreTierSpawn(1123); potGoreTierSpawn(1124); }  // :57415-57419
+    }
     this.potLoot(ax, ay, style);
   }
 

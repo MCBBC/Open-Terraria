@@ -133,8 +133,8 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     flyFrames(a, game, 40);                              // EU=1 → 80 子步
     const d6 = dusts.filter((d) => d.type === 6);
     const d31 = dusts.filter((d) => d.type === 31);
-    expect(d6.length).toBeGreaterThanOrEqual(10);        // 期望 20（80×1/4）,5σ 带宽
-    expect(d6.length).toBeLessThanOrEqual(30);
+    expect(d6.length).toBeGreaterThanOrEqual(7);         // 期望 20（80×1/4）,±3.4σ 带宽防 flake
+    expect(d6.length).toBeLessThanOrEqual(33);
     expect(d31.length).toBeLessThanOrEqual(d6.length);   // d31 = d6 的 1/2 率
     expect(d6.every((d) => d.alpha === 100 && d.scale === 1.2 && d.noGravity)).toBe(true);
     expect(d6.every((d) => d.fadeIn === 1.22)).toBe(true);          // 本体 ai[1]=0 档

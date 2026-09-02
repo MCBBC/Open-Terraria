@@ -4364,8 +4364,12 @@ export class Renderer {
     //  处于【世界变换】,dev 数学若裸跑=双重变换恒画屏外(训练假人隐形,
     //  2026-09-02 用户实报)——dev 数学与空间包装【必须成对】,结构闸门
     //  tests/dynsnap-space-wrapper.test.ts 强制(凡用 dev.ox 的绘制函数必须含
-    //  恒等 setTransform + restore)。
-    const devOn = !!dev;
+    //  恒等 setTransform + restore)。无 dev 时世界坐标直画=可见降级
+    //  (对齐 doctrine 源的 else 分支,绝不静默消失);devOn 逃生门同源。
+    const devOn = !!dev
+      && (globalThis as { __SW_DYNSNAP_OFF?: boolean }).__SW_DYNSNAP_OFF !== true
+      && (typeof location === 'undefined'
+        || !new URLSearchParams(location.search).has('dynsnap0'));
     if (devOn) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -4390,13 +4394,19 @@ export class Renderer {
           for (let cx = 0; cx < 2; cx++) {
             const r = this.atlas!.vframeAt(378, vx + cx * 18, row * 54 + cy * 18);
             if (!r) continue;
-            const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
-            const dxa = dev!.ox + Math.round((wx - dev!.camRX) * dev!.zz);
-            const yda = dev!.oy + Math.round((wy - dev!.camRY) * dev!.zz);
-            const dxb = dev!.ox + Math.round((wx + ts - dev!.camRX) * dev!.zz);
-            const ydb = dev!.oy + Math.round((wy + ts - dev!.camRY) * dev!.zz);
-            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
-              dxa, yda, dxb - dxa, ydb - yda);
+            if (devOn) {
+              const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
+              const dxa = dev!.ox + Math.round((wx - dev!.camRX) * dev!.zz);
+              const yda = dev!.oy + Math.round((wy - dev!.camRY) * dev!.zz);
+              const dxb = dev!.ox + Math.round((wx + ts - dev!.camRX) * dev!.zz);
+              const ydb = dev!.oy + Math.round((wy + ts - dev!.camRY) * dev!.zz);
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+                dxa, yda, dxb - dxa, ydb - yda);
+            } else {
+              // 无 dev:世界坐标直画（可见降级,对齐 doctrine 源 else 分支）
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+                (tx + cx) * ts, (ty + cy) * ts + dy, ts, ts);
+            }
           }
         }
       }
@@ -9434,17 +9444,25 @@ export class Renderer {
   /** 刺球锚链+锚座（Main.cs:23087-23113 1:1）：aiStyle 20（刺球 70）——
    *  锚点 = ai[1]/ai[2]（像素，AI_020 帧首 :24671-24673 快照：position.Y += h/2+8
    *  后的中心）；球心 → 锚点每 12px 画一段 Chain（源矩形高 = 12，距锚 <20 段收尾
-   *  seg = dist−8，恒步进 12px 可越过锚点=原版怪癖照搬），rotation = atan2(锚−球)
+   *  seg = ⌊dist⌋−8，恒步进 12px 可越过锚点=原版怪癖照搬），rotation = atan2(锚−球)
    *  −π/2（:23092 同帧写 npc.rotation → 本体贴图随链向旋转，:23660 通用绘制消费
    *  ——本仓经 visAngle 传递给下方旋转分支）；锚座 Spike_Base 16×16 画在锚点、
    *  rotation−0.75（:23113）。逐段光照（:23110 GetColor）由主光照合成承担
-   *  （同食人怪藤蔓先例）。链在本体精灵前画=原版层序（链垫球下） */
+   *  （同食人怪藤蔓先例）。链在本体精灵前画=原版层序（链垫球下）。
+   *  ★aiInit 前不画（出生帧/联机傀儡锚未同步态,见函数体首行门注） */
   private drawSpikeBallChain(e: Enemy): void {
     if (!this.atlas) return;
+    // ★锚点未快照态不画：出生帧（本仓刷怪相位在 entities.update 之后,球会先被画
+    // 一次才轮到首个 AI tick 写 ai1/ai2）与联机傀儡（netPuppet 不跑 AI,ai1/ai2 恒
+    // 类默认 0）都属此类——不门则链画向世界原点+锚座画在 (0,0)。原版因
+    // SpawnNPCs→UpdateNPCs 同 tick 相位序（Main.cs:17944-17958）从不绘制 pre-init 态
+    // （红蓝对抗 2026-09-02 两案定谳）。aiInit 恰在首 AI tick 快照分支置位=精确门。
+    if (!e.aiInit) return;
     const ctx = this.ctx;
     const ax = e.ai1, ay = e.ai2;                      // 锚点（像素）
     let dx = ax - e.cx, dy = ay - e.cy;
-    if (dx === 0 && dy === 0) return;                  // dist=0 除零保护（原版 NaN 态不画）
+    // ★dist=0 不早退：原版 :23092 无条件写 rotation（Atan2(0,0)=0 → −1.57）、
+    // :23113 锚座照画;链循环由下方 dist<=0 break 兜除零（红蓝对抗定谳撤早退）
     const rot = Math.atan2(dy, dx) - Math.PI / 2;      // num37（:23092）
     e.visAngle = rot;
     const chain = this.atlas.vmisc('vanilla/Chain.png');
@@ -9454,9 +9472,9 @@ export class Renderer {
       let guard = 0;
       while (running && guard++ < 200) {
         const dist = Math.hypot(dx, dy);
-        if (dist <= 0) break;                          // 球叠锚（出生帧相邻态）
+        if (dist <= 0) break;                          // 球叠锚：链退化（原版 NaN 位置绘制无输出=等价）
         let seg = 12;                                  // :23096
-        if (dist < 20) { seg = dist - 20 + 12; running = false; }   // :23098-23101 尾段
+        if (dist < 20) { seg = Math.floor(dist) - 20 + 12; running = false; }   // :23098-23101 尾段（C# (int) 向零截断）
         const k = 12 / dist;                           // :23103 步进恒 12px
         px += dx * k; py += dy * k;
         dx = ax - px; dy = ay - py;                    // :23108-23109
@@ -12884,6 +12902,34 @@ export class Renderer {
           //   原版 vector11.Y→position.y）；drawOY = −fh/2（原版 origin7.y = H/2，
           //   在旋转帧内恒定）。旧 offY=h/2−fh/2 + drawOY=dp[1] 把两个量放反了 →
           //   非水平瞄准时整枪按角度漂移（象限分裂根因）。
+          // ★2026-09-02 四向几何推演定版（用户"垂直向上贴图偏右~7px"报障取证结论：
+          //   本复合式与原版逐项恒等、上下两向逐像素对称，无不对称面可修——改钉点即破
+          //   原版对齐，禁动）。原版合成（dir=1、gravDir=1 展开）：
+          //   · itemLocation = (cx − 2·dir, cy − fh/2)（Player.cs:51751-51755；固定
+          //     式【不随 itemRotation 旋转】，旋转跟随只在 staff 支 :51756-51760）
+          //   · position = itemLocation + (0, fh/2 + dy)（PlayerDrawLayers.cs:3458-3461
+          //     vector11=(0, DrawPlayerItemPos().Y)；vector11.X 恒 0；Main.cs:3697
+          //     result.X=num / case 759: num=10−18=−8、Y+=2 → 与 ITEM_DRAW_POS[759]=
+          //     [−8,2] 同源）⇒ pivot = (cx−2, cy+dy)
+          //   · origin7 = (−num9, fh/2)（PlayerDrawLayers.cs:3462-3469 原文
+          //     `new Vector2(-num9, rectangle.Height / 2)`；dir=−1 支 = (W+num9, H/2)。
+          //     【origin.y = H/2 而非 H】，:3260 (W/2−W/2·dir, H) 只属通用尾支 :3529
+          //     ——useStyle5 非法杖走本专用支，09-01 金标注确
+          //   · rotation = itemRotation = Atan2(aimY·dir, aimX·dir) − fullRotation
+          //     （Player.cs:47781）
+          //   四向推演（759: dp=[−8,2] fw=52 fh=22；弹列 = 盒中心 cx，:47603
+          //   pointPosition=RotatedRelativePoint(MountedCenter)，发射器无枪口特档——
+          //   特档仅 281/986/3007 三支 :47719-47727）：
+          //   · 右水平 rot=0：贴图 x∈[cx−10,cx+42]、轴 y=cy+2（弹列过轴上方 2px=对齐）
+          //   · 左水平 facing=−1：镜像对称 x∈[cx−42,cx+10]
+          //   · 垂直向上 rot=−π/2：贴图 x∈[cx−13,cx+9]（轴心 cx−2）、枪口 (cx−4.5,
+          //     cy−41.5)；弹列 x=cx → 线过贴图右半 = 原版本相（用户所见"线在贴图
+          //     右侧"即此，非贴图偏移）
+          //   · 垂直向下 rot=+π/2：x∈[cx−13,cx+9] 与向上逐像素对称、y∈[cy−8,cy+46]
+          //   实机探针复核（scripts/_vert-up-aim-probe{,2}.mjs，相机钉死+调色板匹配+
+          //   弹出生点即采）：up/down 贴图跨度均 [−13.6,+8.0]（世界 px，1.25 缩放取整
+          //   误差 ≤0.8），弹列恒 cx；"7px≈fh/2" 假说不成立（759 fh/2=11，且
+          //   origin.y=H/2 为原文）。
           offX = -2;
           offY = p.h * 0.5 + dp[1];
           rot = aim;

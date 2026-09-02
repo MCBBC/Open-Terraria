@@ -37,11 +37,11 @@ const out = await page.evaluate(async () => {
   const Y = Math.floor(g.world.groundLevel) + 2;
   const X0 = g.world.spawnX;
   for (let dy = -14; dy <= -1; dy++) {
-    for (let dx = -30; dx <= 30; dx++) {
+    for (let dx = -35; dx <= 35; dx++) {
       if (st.inBounds(X0 + dx, Y + dy) && st.get(X0 + dx, Y + dy) !== 0) st.setTile(X0 + dx, Y + dy, 0, 0, 0);
     }
   }
-  for (let dx = -30; dx <= 30; dx++) st.setTile(X0 + dx, Y, dirt, 0, 0);
+  for (let dx = -35; dx <= 35; dx++) st.setTile(X0 + dx, Y, dirt, 0, 0);
 
   const p = g.player;
   p.debugGod = true;                       // 探针防死：圣锤 60×2 伤会杀 100hp 新号
@@ -60,6 +60,9 @@ const out = await page.evaluate(async () => {
     }
     return n;
   };
+  const clearHammer = () => {
+    g.entities.projectiles = g.entities.projectiles.filter((pr) => pr.projId !== 300);
+  };
   const sample = (e) => ({ x: +e.cx.toFixed(1), y: +e.cy.toFixed(1), vx: +e.vx.toFixed(3), ai1: e.ai1, ai2: e.ai2, ai3: e.ai3, aiT: e.aiT, facing: e.facing, onGround: e.onGround, hitWall: e.hitWall, inList: g.entities.enemies.includes(e), dead: e.dead, paused: g.paused, vis: document.visibilityState, pdead: p.dead, php: p.hp, pdist: Math.hypot(p.cx - e.cx, p.cy - e.cy).toFixed(0) });
 
   // 玩家放场地左端站地
@@ -67,18 +70,20 @@ const out = await page.evaluate(async () => {
 
   // ---- A) 视线通 + 300px：期望开瞄掷锤、基本定身 ----
   {
+    clearHammer();                       // 场景隔离：清上场景残留弹（活体计数差会被寿命稀释成负值）
     const e = spawnPaladin((X0 + 1) * 16 + 300 - 17);
     await sleep(300);
     const s0 = sample(e);
-    let hammers0 = countHammer();
+    let hammerMax = countHammer();
     const maxXmove = { fwd: 0, total: 0 };
     for (let i = 0; i < 60; i++) {
       await sleep(i < 16 ? 60 : 150);            // 前 1s 逐 60ms 细采样看 ai1 步进
       const s = sample(e);
       maxXmove.total = Math.max(maxXmove.total, Math.abs(s.x - s0.x));
-      if (i < 16 || i % 10 === 0) (res.A_samples ??= []).push({ t: i * 150, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), hammers: countHammer() - hammers0 });
+      hammerMax = Math.max(hammerMax, countHammer());
+      if (i < 16 || i % 10 === 0) (res.A_samples ??= []).push({ t: i * 150, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), hammers: hammerMax });
     }
-    res.A = { s0, total: maxXmove.total, hammers: countHammer() - hammers0, aimTicks: e.ai2, cd: e.ai1 };
+    res.A = { s0, total: maxXmove.total, hammers: hammerMax, aimTicks: e.ai2, cd: e.ai1 };
     e.dead = true; e.active = false;
   }
 
@@ -86,17 +91,19 @@ const out = await page.evaluate(async () => {
   {
     // 墙在玩家右 6 格,高 8（挡住 62 高圣骑士的视线）
     for (let dy = -8; dy <= -1; dy++) for (let dx = 0; dx <= 2; dx++) st.setTile(X0 - 14 + dx, Y + dy, dirt, 0, 0);
+    clearHammer();
     const e = spawnPaladin((X0 + 6) * 16);
     e.x = (X0 + 6) * 16; e.y = groundYpx - e.h; // 墙右 20 格
     await sleep(300);
     const s0 = sample(e);
-    let hammers0 = countHammer();
+    let hammerMax = countHammer();
     for (let i = 0; i < 60; i++) {
       await sleep(150);
       const s = sample(e);
-      if (i % 10 === 0) (res.B_samples ??= []).push({ t: i * 150, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), moved: +(s.x - s0.x).toFixed(1), hammers: countHammer() - hammers0 });
+      hammerMax = Math.max(hammerMax, countHammer());
+      if (i % 10 === 0) (res.B_samples ??= []).push({ t: i * 150, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), moved: +(s.x - s0.x).toFixed(1), hammers: hammerMax });
     }
-    res.B = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: countHammer() - hammers0 };
+    res.B = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: hammerMax };
     // 拆墙
     for (let dy = -8; dy <= -1; dy++) for (let dx = 0; dx <= 2; dx++) st.setTile(X0 - 14 + dx, Y + dy, 0, 0, 0);
     e.dead = true; e.active = false;
@@ -105,16 +112,22 @@ const out = await page.evaluate(async () => {
   // ---- C) 距离 >700px 视线通：期望不开瞄、行走 ----
   {
     p.x = (X0 - 20) * 16; p.y = groundYpx - p.h; p.vx = 0; p.vy = 0;
-    const e = spawnPaladin((X0 - 20) * 16 + 900);
+    // 出生点改带内（清整区 X0±35）：X0+29 距玩家 49 tile=784px——须超出【抖动外扩
+    // 包络】（开瞄门=±40 抖动+0.1|dx| 下坠后的矢量长,720px 处 min=sqrt(680²+122²)
+    // ≈691<700 仍可开瞄=原版本相,784px 处 min≈744>700 恒不走瞄）
+    const e = spawnPaladin((X0 + 29) * 16);
     await sleep(300);
     const s0 = sample(e);
-    let hammers0 = countHammer();
+    const los0 = canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h);
+    let hammerMax = countHammer();
     for (let i = 0; i < 60; i++) {
       await sleep(150);
       const s = sample(e);
-      if (i % 10 === 0) (res.C_samples ??= []).push({ t: i * 150, ...s, dist: Math.hypot(p.cx - e.cx, p.cy - e.cy).toFixed(0), los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), moved: +(s.x - s0.x).toFixed(1), hammers: countHammer() - hammers0 });
+      hammerMax = Math.max(hammerMax, countHammer());
+      if (i % 10 === 0) (res.C_samples ??= []).push({ t: i * 150, ...s, dist: Math.hypot(p.cx - e.cx, p.cy - e.cy).toFixed(0), los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), moved: +(s.x - s0.x).toFixed(1), hammers: hammerMax });
     }
-    res.C = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: countHammer() - hammers0 };
+    // 场景完好性护栏：LOS 通（清整带内无地形遮挡）+ 未被顶出出生位姿
+    res.C = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: hammerMax, sceneLosOk: los0 };
     e.dead = true; e.active = false;
   }
 

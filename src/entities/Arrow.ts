@@ -5918,7 +5918,9 @@ export class Arrow extends Entity {
       //  Penetrate 由 pierce=1 承载）+每枚 5×d170 noGravity;478 ai[1]++>Next(5,20) →
       //  归零 + timeLeft>40 扣 20 + 放 480 诅咒火（dmg×0.8、kb×0.5,:58332-58343）
       if (this.age > 3) this.alpha = 0;
-      if (this.age >= 20 && this.projId !== 477) this.vy += 0.075;
+      // 微重力 vy+=0.075@20(:58281-58284)由 AI1_GRAV[267/478/479] 表承载(提取器
+      // 已收)——本支曾手写一份=双份(arrow-gravity-parity 红);477 无重力(表亦无键)
+      if (this.age >= 20 && this.projId !== 477 && AI1_GRAV[this.projId] === undefined) this.vy += 0.075;
       const ents4x = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
       if (this.projId === 479 && !this.hostile) {
         if (this.ai1Mirror >= 0) {
@@ -6008,7 +6010,8 @@ export class Arrow extends Entity {
       // 710 空中祸害（:56348-56380）：1/4 子步掷——1/2 再掷 d31 烟（α100,scale1.6,
       // noGravity）+ 恒 d6 火（α100,scale1.2,noGravity,尘速×2 后 += 弹速、
       // fadeIn=ai[1]==-1 ? 1.5 : 1.22——ai[1]=-1 即 BetsySharpnel 裂片=abShard 标）;
-      // 掷中且 wet → Kill 入水灭（:56569-56575 原文即嵌在尘块内）
+      // 掷中且 wet → Kill 入水灭（:56375-56378 原文即嵌在尘块内,无 return——本仓
+      // 消亡即 return 为架构等价翻译：命中/位移链在 subStepAI 内,死体不再结算）
       if (this.projId === 710 && Math.floor(Math.random() * 4) === 0) {
         if (Math.floor(Math.random() * 2) === 0) {
           game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.6, true);

@@ -238,6 +238,16 @@ const PRE_CLASS: Record<number, string> = {
   //   ②517（表面箱主物池 remix 换位 3069→517,cs(1457):36688-36694）Magic 类同漏,
   //   预防性登记（同表 1:1,非本种实爆位）。
   725: 'guns', 517: 'magic',
+  // ★IIIII175（2026-09-02）：尾段秘种子臂新件补登记（AddBuriedChest 尾段 1458 终值
+  //   cs:37923-37932）——①1260=RainbowGun（RainbowGun=Magic 武器,Item.cs:15625-15641,
+  //   magic=true）：rainbowStuff 臂 `num10∈{1156,1571,1569,1572,4607}→SetDefaults(1260)
+  //   +Prefix(-1)` 可前缀化【耗掷】;②900=MoonStone（Item.cs:11789-11796 accessory=true
+  //   → IsAPrefixableAccessory 恒真）vampireSeed 洞穴臂 `Next(2)==0?1800:900` 两件均
+  //   Prefix(-1),900 可前缀化【耗掷】。③1800=BatHook：钩爪不在 PrefixLegacy 七集
+  //   （GetRollablePrefixes→null→CanHavePrefixes()=false）→ Prefix(-1) **零掷**,
+  //   照「不可前缀化（零掷,勿加）」名单处置,勿登记。remix 世界 rainbow/vampire 臂
+  //   恒关门=零流影响,登记为跨种子保险（同 725/517 先例）。
+  1260: 'magic', 900: 'acc',
 };
 // ---- 主件 Prefix(-1)（尾批 2-C）：四分支头 SetDefaults(num10)+Prefix(-1) 无条件调用
 //   （surface cs:36287 / gold cs:36554 / cave cs:36841 / hell cs:37167）——可前缀化
@@ -360,6 +370,10 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   //   防未来登记性失准,同 6153 先例）。
   725: { d: 39, ua: 14, mana: 0, kb0: false },
   517: { d: 30, ua: 8, mana: 6, kb0: false },
+  // ★IIIII175：1260 RainbowGun（Item.cs:15625-15641 damage 45/useAnimation 40/mana 20/
+  //   knockBack 2.5f）。900 MoonStone 系 acc 类——acc 池前缀（62-80）无四元乘子恒通过,
+  //   照 6165/5010 先例不入 PRE_STATS。
+  1260: { d: 45, ua: 40, mana: 20, kb0: false },
 };
 const __fr = Math.fround;
 /** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入） */
@@ -727,9 +741,17 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       if (rng.int(0, 4) === 0) pushItem(2767);
       else pushItem(2766, rng.int(3, 7));
     }
-    // voice 门（cs:37557）：恒掷 Next(12)；命中 1/12 时 AddVoiceChangeItemToChest
-    // 内 Item.GetRandomVoiceItem 还要掷 Next(14)——曾漏（命中即短一掷，流漂移）
-    if (rng.int(0, 11) === 0) rng.int(0, 13);
+    // voice 门（1458 终值 cs:37945-37950；块位=tile21/467 两尾块【之外】恒掷）：恒掷
+    //   Next(12)；命中 1/12 时 AddVoiceChangeItemToChest(cs:37961) 内
+    //   Item.GetRandomVoiceItem(cs:49431) 掷 Next(14) → 5499/5500-5509/5484/5485/5534。
+    //   ★IIIII175（2026-09-02）：曾只掷不 push → 命中箱静默缺 voice 件（箱内容对拍
+    //   x86 wld 实例 5507@(2674,948)/5534@(2630,827)/5499@(3249,1063) 等 8 例）。voice
+    //   件 GetRollablePrefixes=null → CanHavePrefixes()=false → Prefix(-1) 零掷（不调
+    //   prefixRolls）。else-if AddMonsterVoiceChangeItemToChest = vampireSeed 专属
+    //   （remix 恒短门,零掷,不建模;vampire 车道移交）。
+    if (rng.int(0, 11) === 0) {
+      pushItem([5499, 5500, 5501, 5502, 5503, 5504, 5505, 5506, 5507, 5508, 5509, 5484, 5485, 5534][rng.int(0, 13)]!);
+    }
   }
   // 键主件(如金字塔/蛛网/世界树的特殊掉落直接给 key)置首。
   // 同一原版物品可能有两个注册键:调用方显式键(如 vi_832_living_wood_wand)与
@@ -1488,7 +1510,7 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
         // !==0(原版 Water=0) 会让水格恒不命中,拒绝采样死循环(世界生成卡"生物群系"根因)。
         // ★UUUUUU（cs:17425 趟1 `liquidType()!=0 && !notTheBees && !remixWorldGen`）：
         //   NTB/Remix 趟1 接受任意液体类型（蜜池水箱）。
-        //   ★IIIII175（2026-09-02）趟2 定谳（1457 cs:17441 = 1458 cs:17449 字节同）：
+        //   ★IIIII175（2026-09-02）趟2 定谳（1457 cs:17455 = 1458 cs:17455 字节同;趟1=cs:17437）：
         //   `while (liquid < 250 || (liquidType()!=0 && !notTheBees))`——**无 !remix 项**,
         //   趟2 恒只收水（remix 也不放行蜜/岩浆/微光）。曾两趟共用趟1 形 ⇒ remix 世界
         //   趟2 受理面整带偏移：本种趟2 域 [337,1000) 有蜜 1,703 格+微光 734+岩浆

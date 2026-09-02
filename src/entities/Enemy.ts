@@ -1334,6 +1334,10 @@ export class Enemy extends Entity {
     // 328 南瓜王之刃 SetDefaults :13092 dontTakeDamage=true——恒不可击的表情节拍体
     // （曾缺=可被玩家打死,2026-08-19 终审修）
     if (id === 328) e.dontTakeDamage = true;
+    // 70 刺球(:9722)/72 火轮(:9757) SetDefaults dontTakeDamage=true——两只地牢机关球
+    // 恒不可击（def.dontTakeDamage 提取面不含此字段,手补表同款;曾缺=可被磨死/放死音/
+    // 出尸块,地牢永久威胁可被清空——2026-09-02 红蓝对抗完备性批评定谳补）
+    if (id === 70 || id === 72) e.dontTakeDamage = true;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -4952,7 +4956,10 @@ export class Enemy extends Entity {
     //  2026-08-19）：落地 + 视线 + 距离<射程 → 开瞄（ai[2]=姿态分档 1-5），ai[1]
     //  倒数至 num165 发射；justHit → ai[1]=30、ai[2]=0（F3，cs:59486-59492 重瞄）。
     //  槽位：ai1=蓄力倒数（vanilla ai[1]）、ai2=瞄准姿态（vanilla ai[2]）----
-    if (player && this.vanillaId != null && Enemy.RANGED_FIGHTERS.has(this.vanillaId)) {
+    // ★原版射击族块对 target 无条件跑（NPC.cs:59659-60393,坐标消费含尸体）——本仓
+    // 用 rawPlayer（A 批口径）；仅开瞄门保留 !dead（:60226）。曾用 null 滤后的
+    // player=整块随玩家死亡冻结（ai1/ai2 停摆,复活瞬间续掷）——红蓝对抗清偿
+    if (rawPlayer && this.vanillaId != null && Enemy.RANGED_FIGHTERS.has(this.vanillaId)) {
       const vidR = this.vanillaId;
       const R = Enemy.RANGED_TABLE[vidR];
       // ---- 216 海盗船长分档（F4，cs:59562-59579）：localAI[2]≥20（命中计数）→
@@ -4986,25 +4993,33 @@ export class Enemy extends Entity {
         this.ai1 = 30;                                         // :59489
         this.ai2 = 0;                                          // :59490
       }
+      // 困惑清计时（NPC.cs:59788-59792，后于 justHit 前于瞄掷分支）：confused →
+      // ai[1]=0、ai[2]=0——困惑态停火且压掉 justHit 的 ai1=30 重瞄（射击族全型共用；
+      // 曾整缺=困惑态照常掷锤,2026-09-02 红蓝对抗 R3 定谳补）
+      if (this.confused) {
+        this.ai1 = 0;
+        this.ai2 = 0;
+      }
       // 枪口（chaserPosition2，cs:59674-59703）
       const mx = this.cx, my = this.cy + (R.oy ?? 0);
       if (this.ai2 > 0) {           // 瞄准中
-        // :59599-59602 flag18（411 ai1>220 才 TargetClosest——窗外冻结朝向）
-        if (!(vidR === 411 && this.ai1 <= 220)) this.facing = this.seekDirX(player);
+        // :59599-59602 flag18（411 ai1>220 才 TargetClosest——窗外冻结朝向）；
+        // TargetClosest 对死者只冻结朝向不改向（:78538-78541）→ dead 时停更 facing
+        if (!(vidR === 411 && this.ai1 <= 220) && !rawPlayer.dead) this.facing = this.seekDirX(rawPlayer);
         if (this.ai1 === fireAt) {
           if (vidR === 216) this.lai2 += 1;                    // :59605-59608
           // ---- 弹速/瞄准（cs:59609-59703）----
-          let num168 = Math.abs(player.cx - mx) * 0.1;         // :59704-59705 默认下坠补偿
+          let num168 = Math.abs(rawPlayer.cx - mx) * 0.1;      // :59704-59705 默认下坠补偿
           if (vidR === 291 || vidR === 292) num168 = 0;        // :59706-59709
           if (vidR === 215) num168 *= 0.8;                     // :59710-59713 ×0.08
           if (vidR === 214 || (vidR === 216 && !flag20)) num168 = 0;  // :59714-59717
           if (vidR === 381 || vidR === 382 || vidR === 520) num168 = 0;  // :59719-59722
-          if (vidR >= 449 && vidR <= 452) num168 = Math.abs(player.cx - mx) * (10 + Math.floor(Math.random() * 40)) * 0.01;  // :59723-59726
-          if (vidR === 468) num168 = Math.abs(player.cx - mx) * (10 + Math.floor(Math.random() * 40)) * 0.01;   // :59727-59730
-          if (vidR === 481) num168 = Math.abs(player.cx - mx) * (Math.floor(Math.random() * 21) - 10) * 0.0035; // :59731-59734
-          if (vidR >= 498 && vidR <= 506) num168 = Math.abs(player.cx - mx) * (1 + Math.floor(Math.random() * 10)) * 0.0025; // :59735-59738
-          let tx = player.cx - mx;
-          let ty = player.cy - my - num168;                    // :59739
+          if (vidR >= 449 && vidR <= 452) num168 = Math.abs(rawPlayer.cx - mx) * (10 + Math.floor(Math.random() * 40)) * 0.01;  // :59723-59726
+          if (vidR === 468) num168 = Math.abs(rawPlayer.cx - mx) * (10 + Math.floor(Math.random() * 40)) * 0.01;   // :59727-59730
+          if (vidR === 481) num168 = Math.abs(rawPlayer.cx - mx) * (Math.floor(Math.random() * 21) - 10) * 0.0035; // :59731-59734
+          if (vidR >= 498 && vidR <= 506) num168 = Math.abs(rawPlayer.cx - mx) * (1 + Math.floor(Math.random() * 10)) * 0.0025; // :59735-59738
+          let tx = rawPlayer.cx - mx;
+          let ty = rawPlayer.cy - my - num168;                 // :59739
           // 散布链（cs:59740-59791）
           if (vidR === 291) {
             tx += (Math.floor(Math.random() * 81) - 40) * 0.2; // :59742-59743 ±8
@@ -5056,8 +5071,8 @@ export class Enemy extends Entity {
           if (vidR === 292) {
             // 战术骷髅四连发（:59955-59968）：每发重新瞄准 ±40、速 12
             for (let n = 0; n < 4; n++) {
-              const fx2 = player.cx - mx + Math.floor(Math.random() * 81) - 40;
-              const fy2 = player.cy - my + Math.floor(Math.random() * 81) - 40;
+              const fx2 = rawPlayer.cx - mx + Math.floor(Math.random() * 81) - 40;
+              const fy2 = rawPlayer.cy - my + Math.floor(Math.random() * 81) - 40;
               const fd = Math.hypot(fx2, fy2) || 1;
               this.spawnHostileProj(game, mx, my, (fx2 / fd) * 12, (fy2 / fd) * 12, dmgF, proj);
             }
@@ -5080,9 +5095,9 @@ export class Enemy extends Entity {
             }
           } else if (vidR === 426) {
             // 蜂后（:59924-59937）：玩家盒内随机点 + GetChaseResults 前置补偿
-            const px2 = player.x + Math.random() * player.w;
-            const py2 = player.y + Math.random() * player.h;
-            const chase = getChaseResults(mx, my, speed, px2, py2, player.vx, player.vy);
+            const px2 = rawPlayer.x + Math.random() * rawPlayer.w;
+            const py2 = rawPlayer.y + Math.random() * rawPlayer.h;
+            const chase = getChaseResults(mx, my, speed, px2, py2, rawPlayer.vx, rawPlayer.vy);
             if (chase) {
               const v2 = factorAcceleration(chase.x, chase.y, chase.t, 0.1, 15);
               vx = v2.x; vy = v2.y;
@@ -5113,23 +5128,28 @@ export class Enemy extends Entity {
       // ---- 开瞄（cs:60026-60109）：468 非日食整段跳过（flag16=true 分支）----
       const canOpenAim = !(vidR === 468 && !game.world.clock.eclipse);
       if (canOpenAim && (this.ai2 <= 0 || flag16) && (this.vy === 0 || flag17)
-        && this.ai1 <= 0 && !player.dead) {
-        let flag21 = this.canSeePlayer(st, player);            // :60032
+        && this.ai1 <= 0 && !rawPlayer.dead) {
+        let flag21 = this.canSeePlayer(st, rawPlayer);         // :60032
         if (vidR === 520) {
           // :60033-60036 CanHitLine(Top+(0,20) → 玩家)
-          flag21 = canHitLine(st, this.cx, this.y + 20, 0, 0, player.cx, player.cy, 0, 0);
+          flag21 = canHitLine(st, this.cx, this.y + 20, 0, 0, rawPlayer.cx, rawPlayer.cy, 0, 0);
         }
         // :60233-60236（1456 :60037-60040）满潜行(stealth==0)且未挥击(itemAnimation==0)
         // → CanHit=false：施法/射击族对满潜行玩家停火（不开瞄）。曾只转录
         // itemAnimation 半边且反向（idle 即停火,潜行半边整缺）——黄蜂待机清零
         // :51312 同款动画窗代理 = itemAnimTicks>0||useTime>0（Enemy.ts:6142 口径）
-        if (!(player.stealth > 0) && !(player.itemAnimTicks > 0 || player.useTime > 0)) {
+        if (!(rawPlayer.stealth > 0) && !(rawPlayer.itemAnimTicks > 0 || rawPlayer.useTime > 0)) {
           flag21 = false;
         }
         if (flag21) {
-          const dx = player.cx - this.cx, dy = player.cy - this.cy;
-          const dist = Math.hypot(dx, dy);
-          if (dist < R.range) {
+          const dx = rawPlayer.cx - this.cx, dy = rawPlayer.cy - this.cy;
+          // :60241-60246 开瞄门矢量 = 原始中心差先做 0.1|dx| 下坠补偿、再 ±40 抖动，
+          // 射程判 hypot(gdx,gdy) < num180——非原始中心距（曾按裸 hypot 判,边界差
+          // 最多 ±40 抖动 + 0.1|dx| 下坠项 ~70px@700,红蓝对抗 C 定谳 2026-09-02 补；
+          // 抖动 81 值域整数 Next(−40,41) 惯用法,勿写 ×80 off-by-one）
+          const gdx = dx + (Math.floor(Math.random() * 81) - 40);
+          const gdy = dy - Math.abs(dx) * 0.1 + (Math.floor(Math.random() * 81) - 40);
+          if (Math.hypot(gdx, gdy) < R.range) {
             this.vx *= 0.5;                                    // :60079
             this.ai2 = 3;                                      // :60083（发射段再细分 1-5）
             this.ai1 = cooldown;
@@ -5144,9 +5164,9 @@ export class Enemy extends Entity {
       if (moveOk) {
         const num182 = R.moveMax ?? 1, num183 = R.moveAccel ?? 0.07, num184 = R.moveDamp ?? 0.8;
         let flag22 = false;
-        if (R.nearDampRange && player
-          && Math.hypot(player.cx - this.cx, player.cy - this.cy) < R.nearDampRange
-          && canHitLine(st, this.cx, this.cy, 0, 0, player.cx, player.cy, 0, 0)) {
+        if (R.nearDampRange
+          && Math.hypot(rawPlayer.cx - this.cx, rawPlayer.cy - this.cy) < R.nearDampRange
+          && canHitLine(st, this.cx, this.cy, 0, 0, rawPlayer.cx, rawPlayer.cy, 0, 0)) {
           flag22 = true;
           this.ai3 = 0;                                        // :60157/:60162
         }
@@ -5568,6 +5588,9 @@ export class Enemy extends Entity {
   private static readonly RANGED_TABLE: Record<number, {
     cooldown: number; speed: number; dmg: number; range: number;
     fireAt?: number;
+    // ★drop/spread/burst 是【记录性字段,运行链零消费】——实际下坠补偿/散布/连发
+    // 全在下方 if 链硬编码（弹速补偿 :5008-5017、散布 :5019-5051、四连发 :5068-5074）。
+    // 改数值必须改 if 链,改表无效（红蓝对抗 R3 定谳:290 曾误记 drop:0,实为 0.1 默认链）
     drop?: number | [number, number]; spread?: number; oy?: number; burst?: number;
     aimDecelOffEclipse?: boolean;
     aimFreeMove?: boolean;
@@ -5587,7 +5610,7 @@ export class Enemy extends Entity {
     216: { cooldown: 9, speed: 9, dmg: 30, range: 700, drop: 0.1, spread: 50, proj: 180 },
     110: { cooldown: 70, speed: 11, dmg: 35, range: 700, drop: 0.1, proj: 82 },          // 骷髅弓手 火焰箭
     206: { cooldown: 50, speed: 7, dmg: 37, range: 700, drop: 0.1, oy: -10, proj: 177 },  // 冰鱼人 冰水吐息
-    290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0, oy: -10,
+    290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0.1, oy: -10,
       projDmgScale: [60, 45], proj: 300 },   // 圣骑士 圣锤（:59945-59948 (60,45)）
     291: { cooldown: 200, speed: 11, dmg: 100, range: 700, drop: 0, spread: 8, proj: 302 },// 骷髅神射 狙击弹（R6-B 1-4：num165 无覆写=默认 11，:59805；曾误 4=293 的值）
     292: { cooldown: 120, speed: 11, dmg: 50, range: 700, drop: 0, fireAt: 60, burst: 4, proj: 180 }, // 战术骷髅（F2：num165=120/2=60；速度同为默认 11，:59805 无 292 覆写）
@@ -7681,10 +7704,13 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
-  /** AI_021 刺球（NPC.cs:24674-24725，type 72）：出生 TargetClosest + directionY=1；
-   *  恒速 6 对角移动，撞轴翻转（collideX→dirY 翻、collideY→facing 翻）；
-   *  rotation ±0.13/t 随 direction×directionY 与 ai[1] 交替符号步进（W2 批
-   *  2026-08-19——npc.rotation 累计角写入 visAngle，渲染侧未消费仅保状态） */
+  /** AI_021 火轮（NPC.cs:24740-24790，type 72 烈焰火轮 BlazingWheel——NPCID.cs:11209；
+   *  本函数沿用历史名 spikeBallAI，与 70 刺球的 blazingWheelAI 名字互换,dispatch 正确）：
+   *  出生 TargetClosest + directionY=1；恒速 6 对角移动，撞轴翻转（collideX→dirY 翻、
+   *  collideY→facing 翻）；rotation ±0.13/t 随 direction×directionY 与 ai[1] 交替符号
+   *  步进（W2 批 2026-08-19——npc.rotation 累计角写 visAngle；渲染侧 Renderer.drawEnemy
+   *  旋转链 aiStyle 21 分支 ctx.rotate(e.visAngle) 每帧消费,rotationDriven 含 21 禁镜像
+   *  ——同原版 Main.cs:23660 通用绘制消费 rotation） */
   private spikeBallAI(game: GameHooks) {
     if (!this.aiInit) { this.aiInit = true;
       {

@@ -457,7 +457,8 @@ export interface DungeonGenVars1457 {
 
 /** 构建一套 genvars 判定数组。非 dual：直接引用注入的基础表（原版=引用静态
  *  Main.tileDungeon/wallDungeon 等,不克隆不扩表）;dual：克隆后按风格档扩表
- *  （含 SubStyles 展开位——本仓暂无 SubStyles 数据,备案）。 */
+ *  （★IIIII172：SubStyles 展开已补——IIIII121 回填了 Cavern/Hallow/Jungle 三档
+ *  SubStyles 数据,本函数随之按 DC.cs:146-152 展开合并;旧注「暂无数据,备案」失效）。 */
 export function buildDungeonGenVars(
   styles: DungeonStyleData[],
   dualDungeons: boolean,
@@ -481,7 +482,16 @@ export function buildDungeonGenVars(
   gv.isDungeonWall = base.wallDungeon.slice();
   gv.isDungeonWallEdge = base.wallDungeon.slice();
   gv.isDungeonWallGlass = base.glassWalls.slice();
-  for (const item of styles) {
+  // ★IIIII172：SubStyles 展开补齐（DungeonCrawler.cs:146-152 一字不差）——
+  //   `list = styles + 各 style.SubStyles`，随 list 全字段合并。IIII105b 注记
+  //   「本仓暂无 SubStyles 数据,备案」在 IIIII121 子风格回填后已失效——Spider 墙 62
+  //   缺席 isDungeonWall ⇒ 蜘蛛厅 CanPlaceTileAt/flag2 全域反转（s0/s1/s2 写面
+  //   62↔0 主根）+ tier ctx isDungeonWall 消费面连锁。
+  const stylesWithSubs: DungeonStyleData[] = [...styles];
+  for (const s0 of styles) {
+    if (s0.SubStyles !== undefined) stylesWithSubs.push(...s0.SubStyles);
+  }
+  for (const item of stylesWithSubs) {
     gv.isDungeonTile[item.BrickTileType] = true;
     if (item.BrickGrassTileType !== undefined) gv.isDungeonTile[item.BrickGrassTileType] = true;
     gv.isCrackedBrick[item.BrickCrackedTileType] = true;

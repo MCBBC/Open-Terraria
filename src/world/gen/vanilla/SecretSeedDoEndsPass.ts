@@ -1185,6 +1185,9 @@ export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
     const ii = st.idx(num4, num5);
     const sh = shOf(st, ii);
     const wal = st.wall[ii];
+    if (pooProbe) {
+      pooProbe(`E|${i}|${num4}|${num5}|t${sh}|s${genSolidType(st.type[ii]) ? 1 : 0}|h${st.half[ii]}|l${st.slope[ii]}|w${(st.wire[ii] & 32) ? 1 : 0}|a${st.flags[ii] & 1}`);
+    }
     const reject = !F.skyblock && (st.flags[ii] & 1) !== 0
       && (sh === 41 || sh === 43 || sh === 44 || sh === 677 || sh === 678 || sh === 679   // Main.tileDungeon（Main.cs:8131-8136）
         || wal === 7 || wal === 8 || wal === 9 || (wal >= 94 && wal <= 99)               // Main.wallDungeon（Main.cs:10737-10745）
@@ -1194,15 +1197,31 @@ export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
       const s = rng.nextIntRange(5, 12);                                                // Next(5,12)
       const t = rng.nextIntRange(10, 31);                                               // Next(10,31)
       pooProbe?.(`${i}|${num4}|${raw5}|${num5}|1|${s}|${t}`);
+      const g2 = globalThis as { __swTrRunSeq?: { v: number } };
+      if (g2.__swTrRunSeq) g2.__swTrRunSeq.v = i;
       tileRunner(st, rng, gs, num4, num5, {                                             // cs:2999
         strength: s,
         steps: t,
         type: idOf(666),
         addTile: true,
       });
+      if (g2.__swTrRunSeq) g2.__swTrRunSeq.v = -1;
     } else {
       pooProbe?.(`${i}|${num4}|${raw5}|${num5}|0`);
     }
+  }
+  // 探针尾：R756 菱形域 + 首差格邻域窗口终态 dump（诊断期临时件）
+  if (pooProbe) {
+    const dumpWin = (x0: number, x1: number, y0: number, y1: number, tag: string) => {
+      for (let x = x0; x <= x1; x++) {
+        for (let y = y0; y <= y1; y++) {
+          const k = st.idx(x, y);
+          pooProbe(`${tag}|${x}|${y}|${shOf(st, k)}|${st.flags[k] & 1}`);
+        }
+      }
+    };
+    dumpWin(2498, 2520, 806, 832, 'D756');
+    dumpWin(786, 802, 222, 236, 'D794');
   }
 }
 

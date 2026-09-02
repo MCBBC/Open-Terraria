@@ -78,23 +78,25 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182，每 tick 恰 1 �
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
     const a = new Arrow(400, 300, 6, 0, 10, 1, 103, null, { grav: 0, life: 600 });
-    flyFrames(a, game, 10);
+    // ★2026-09-02 flake 修：n=10 的 1/2 掷带宽 [2,8] 漏检率 ≈2.1%/次（二项 10,0.5）
+    // ——闸门批量跑常假红。样本 30、带宽 ±3σ（期望 15）→ 漏检 ≈0.2%,比例语义不变
+    flyFrames(a, game, 30);
     const d75 = dusts.filter((d) => d.type === 75);
-    expect(d75.length).toBe(10);
+    expect(d75.length).toBe(30);
     const boosted = d75.filter((d) => d.noGravity && d.scale > 1).length;
-    expect(boosted).toBeGreaterThanOrEqual(2);
-    expect(boosted).toBeLessThanOrEqual(8);
+    expect(boosted).toBeGreaterThanOrEqual(7);
+    expect(boosted).toBeLessThanOrEqual(23);
   });
   it('弹 278 绿藻弹：d169 ×10，1/2 掷 noGravity+scale×1.5', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
     const a = new Arrow(400, 300, 6, 0, 10, 1, 278, null, { grav: 0, life: 600 });
-    flyFrames(a, game, 10);
+    flyFrames(a, game, 30);
     const d169 = dusts.filter((d) => d.type === 169);
-    expect(d169.length).toBe(10);
+    expect(d169.length).toBe(30);
     const boosted = d169.filter((d) => d.noGravity && d.scale > 1).length;
-    expect(boosted).toBeGreaterThanOrEqual(2);
-    expect(boosted).toBeLessThanOrEqual(8);
+    expect(boosted).toBeGreaterThanOrEqual(7);
+    expect(boosted).toBeLessThanOrEqual(23);
   });
   it('弹 4 星星：1/5 掷 d14（60 帧 → 6..24 粒，α150 scale1.1）', () => {
     const dusts: DustRec[] = [];

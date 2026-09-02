@@ -605,7 +605,7 @@ uniform sampler2D uS1;   // UseImage1（Extra_193 等）
 uniform vec4 uSSD;       // uShaderSpecificData=(4,0,0,4)
 out vec4 oC;
 void main(){
-  float p = vTC.x;                       // progressOnStrip（chronological, oldest=0）
+  float p = vTC.x;                       // progressOnStrip（[0]=顶点序最新端=0）
   float across = vTC.z != 0.0 ? vTC.y / vTC.z : 0.0;   // B 侧 0、A 侧 1
   float wEnv = p * 1.5 - 0.5;            // mad r0.w（alpha 线性包络）
   float ph = p * uSSD.x + uSSD.y;        // 锯齿相位（obj58 r0.x 前段）
@@ -619,7 +619,13 @@ void main(){
   vec4 r0 = vec4(dim, edge, 1.0, max(wEnv, 0.0));      // 尾乘四 lane（反汇编逐通道）
   vec4 oc = col * edge;                  // mul r1, r0.y（标量广播）
   oc *= r0;                              // mul r0, r0, r1（lane 独立）
-  oC = vec4(oc.rgb * oc.a, oc.a);        // 预乘适配 (ONE, INV_SRC_ALPHA)
+  // ★(ONE,ONE) 真加算直写（2026-09-02 月牙亮度翻案）：XNA 侧该条带的设备混合贡献=
+  //   字节码 rgb 全量——原版 GIF 单剑峰值 +145 复算（blade 0.96×fade 0.35×edge →
+  //   ~86/剑，多剑叠加 150-220 ✓）只吻合 (One,One)/(One,1−a)；(SrcAlpha,One) 会被
+  //   out.a(~0.1-0.2) 压到 ~8/剑 = 可见部分塌成细丝（本仓"细螺旋"亮度病根，与
+  //   贴图裁剪病叠加）。取 (One,One)：直加 oc.rgb、零压暗（GIF 实测零暗带）；
+  //   alpha 恒写 1——预乘画布读出有 rgb≤a 隐式钳制，恒 1 杜绝 rgb>a 被钳暗。
+  oC = vec4(oc.rgb, 1.0);
 }`;
 
   /** 惰性编译拖尾程序（失败→trailOK=false 永久走 2D 兜底） */
@@ -659,8 +665,10 @@ void main(){
   /**
    * 帧首：调用方在首个条带前调用（清屏 + 相机 uniform）。
    * viewW/viewH = 设备像素（glfx.canvas 同尺寸，调用方先 resize）。
+   * zoom = 相机缩放（Camera.zoom 默认 1.25）——世界层按 z 落画布，条带 clip 须同乘
+   * （uHalf=halfView/z），否则条带比世界几何小 1/z 并向相机中心收缩（2026-09-02 修）。
    */
-  trailFrameBegin(viewW: number, viewH: number, camX: number, camY: number): void {
+  trailFrameBegin(viewW: number, viewH: number, camX: number, camY: number, zoom = 1): void {
     if (!this.ensureTrail() || !this.gl) return;
     const gl = this.gl;
     this.resize(viewW, viewH);
@@ -672,7 +680,7 @@ void main(){
     }
     gl.useProgram(this.trailProg);
     gl.uniform2f(this.trailUni.uCam, camX, camY);
-    gl.uniform2f(this.trailUni.uHalf, viewW / 2, viewH / 2);
+    gl.uniform2f(this.trailUni.uHalf, viewW / (2 * zoom), viewH / (2 * zoom));
     gl.uniform1i(this.trailUni.uS0, 0);
     gl.uniform1i(this.trailUni.uS1, 1);
     gl.bindVertexArray(this.trailVAO);

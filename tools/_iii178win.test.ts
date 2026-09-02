@@ -8,7 +8,7 @@
 import { it } from 'vitest';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
-import { RNG } from '../src/core/rng';
+import { RNG, UnifiedRandom } from '../src/core/rng';
 
 const RUN = process.env.SW_I178 === '1';
 const G2 = process.env.SW_I178_G2 ?? `${process.env.HOME}/GoldenChains/golden-gfb-c`;
@@ -28,8 +28,15 @@ const fnvVals = (vals: number[]): number => {
 
 (RUN ? it : it.skip)('IIIII178 temple-window roll stream + snapshot probe', { timeout: 1_200_000 }, async () => {
   // ── 掷窗账（A）──
-  const all: number[] = [];
-  (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v) => { all.push(v); };
+  // ★IIIII178 首跑教训：全量攒数组会在 GFB underworld 掷爆 2^32（RangeError Invalid
+  //   array length @push）——改为计数器 + 窗口开关（只在 46 窗内存样本）。
+  let cnt = 0;
+  let capture = false;
+  const win: number[] = [];
+  (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v) => {
+    cnt++;
+    if (capture && win.length < 5_000_000) win.push(v);
+  };
   // reseed 边界标签（mile8 labelOf 同式）
   const srcCache = new Map<string, string[]>();
   const labelOf = (file: string, line: number): string => {
@@ -49,7 +56,10 @@ const fnvVals = (vals: number[]): number => {
     for (const line of stack.split('\n')) {
       const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
       if (m && !m[1].includes('/core/rng') && !m[1].includes('_iii178')) {
-        marks.push({ label: labelOf(m[1], Number(m[2])), at: all.length });
+        const lab = labelOf(m[1], Number(m[2]));
+        marks.push({ label: lab, at: cnt });
+        if (lab === 'LihzahrdTemple') capture = true;
+        else if (lab === 'Beehives') capture = false;
         break;
       }
     }
@@ -66,9 +76,14 @@ const fnvVals = (vals: number[]): number => {
   }
   const iTp = marks.findIndex((m) => m.label === 'LihzahrdTemple');
   const iBv = marks.findIndex((m) => m.label === 'Beehives');
-  console.log(`[i178] marks: LihzahrdTemple@${iTp} Beehives@${iBv} (of ${marks.length}); total rolls=${all.length}`);
+  console.log(`[i178] marks: LihzahrdTemple@${iTp} Beehives@${iBv} (of ${marks.length}); total rolls=${cnt}`);
+  // 逐 pass 掷数表（前 60）——underworld 等大掷 pass 与 x86 pc R 对读
+  console.log('[i178] per-pass rolls: ' + marks.map((m, k) => {
+    const n = (k + 1 < marks.length ? marks[k + 1]!.at : cnt) - m.at;
+    return `${m.label}=${n}`;
+  }).join(' '));
   if (iTp < 0 || iBv < 0 || iBv <= iTp) throw new Error(`边界缺失: LihzahrdTemple=${iTp} Beehives=${iBv}`);
-  const seg = all.slice(marks[iTp]!.at, marks[iBv]!.at);
+  const seg = win;
   console.log(`[i178] JS 46 窗(▶LihzahrdTemple..▶Beehives) 掷数=${seg.length} 头 12=[${seg.slice(0, 12).join(',')}]`);
   writeFileSync(`${OUT}/js-win46.txt`, seg.join('\n'));
 
@@ -78,7 +93,8 @@ const fnvVals = (vals: number[]): number => {
   if (existsSync(pcPath)) {
     for (const ln of readFileSync(pcPath, 'utf8').split('\n')) {
       const m = ln.match(/^P\|46\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|R:(\d+):(\d+)$/);
-      if (m) x86R46 = { cnt: Number(m[1]), hash: Number(m[2]) >>> 0 };
+      // pc 每 pass 两行（R:cnt:hash + R:0 复位行）——取首个非零计数行
+      if (m && Number(m[1]) > 0) { x86R46 = { cnt: Number(m[1]), hash: Number(m[2]) >>> 0 }; break; }
     }
   }
   const rwPath = process.env.SW_I178_RW ?? `${OUT}/rig178/rollwin.txt`;
@@ -113,4 +129,34 @@ const fnvVals = (vals: number[]): number => {
   }
   void N;
   console.log(`[i178] dumps: js-win46.txt / x86-win46.txt`);
+});
+
+/** 离线闭合检（免 worldgen）：js-win46.txt 应逐位=普适流前缀 [0..n)；FNV(流⊕尾样本)
+ *  应闭合金标 pc P|46 RollHash（判例：x86 R=体掷+尾 RandNext 恒 +1）。
+ *  用法：npx vitest run tools/_iii178win.test.ts -t 'offline' */
+(it as (n: string, f: () => void) => void)('IIIII178 offline FNV closure (no worldgen)', () => {
+  const winPath = `${OUT}/js-win46.txt`;
+  if (!existsSync(winPath)) { console.log('[i178-fnv] js-win46.txt 缺失,跳过'); return; }
+  const vals = readFileSync(winPath, 'utf8').split('\n').filter(Boolean).map(Number);
+  const ur = new UnifiedRandom(Number(SEED));
+  const tailIdx = vals.length;               // 尾样本=普适流第 n+1 个样本（0 基 n）
+  let firstDif = -1;
+  for (let k = 0; k < vals.length; k++) {
+    if (ur.next() !== vals[k]) { firstDif = k; break; }
+  }
+  const tail = ur.next();
+  let h = 2166136261 >>> 0;
+  for (const v of vals) h = (Math.imul(h ^ (v >>> 0), 16777619)) >>> 0;
+  h = (Math.imul(h ^ (tail >>> 0), 16777619)) >>> 0;
+  // 金标 pc P|46 首个非零计数行
+  let x86: { cnt: number; hash: number } | null = null;
+  if (existsSync(`${G2}/pc.txt`)) {
+    for (const ln of readFileSync(`${G2}/pc.txt`, 'utf8').split('\n')) {
+      const m = ln.match(/^P\|46\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|R:(\d+):(\d+)$/);
+      if (m && Number(m[1]) > 0) { x86 = { cnt: Number(m[1]), hash: Number(m[2]) >>> 0 }; break; }
+    }
+  }
+  console.log(`[i178-fnv] JS流=${vals.length} 普适流逐位=${firstDif < 0 ? '恒等' : `首差@${firstDif}`} ` +
+    `尾样本(普适流[${tailIdx}])=${tail} FNV(流⊕尾)=${h} x86 P|46=${x86 ? `${x86.cnt}:${x86.hash}` : '(无)'} → ` +
+    `${x86 && h === x86.hash ? '闭合 ✓' : '不闭合 ✗'}`);
 });

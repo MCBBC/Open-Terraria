@@ -274,7 +274,9 @@ export function drawStripTrail(
           const vW = Math.max(2, Math.round(renderer.glViewW));
           const vH = Math.max(2, Math.round(renderer.glViewH));
           glfx.resize(vW, vH);
-          glfx.trailFrameBegin(vW, vH, renderer.glCamX, renderer.glCamY);
+          // zoom 透传（Camera.zoom 默认 1.25——世界按 z 落画布，条带 clip 同乘）
+          glfx.trailFrameBegin(vW, vH, renderer.glCamX, renderer.glCamY,
+            (renderer as unknown as { glZoom?: number }).glZoom ?? 1);
           const t0e = glfx.texFromImage(`trail:${set.imgs[0]}`, img0 as unknown as TexImageSource, false, true, true);
           const t1e = glfx.texFromImage(`trail:${set.imgs[1]}`, img1 as unknown as TexImageSource, false, true, true);
           if (!t0e || !t1e) dbg('tex-upload-null');
@@ -335,11 +337,12 @@ export function drawStripTrail(
         const aOut = ca * edge * Math.max(0, wEnv);            // out.a = col.a×edge×wEnv
         if (aOut <= 0.004) continue;
         // out.rgb = blade×vColor×lane(dim,edge,1)（含 obj58 第 16 指令 edge 标量广播）；
-        // XNA Additive 贡献 = out.rgb×out.a → 本图经 'lighter' 直加，rgb 须预乘
-        fd[o] = blade * cr * edge * dim * aOut * 255;
-        fd[o + 1] = blade * cg * edge * edge * aOut * 255;
-        fd[o + 2] = blade * cb * edge * aOut * 255;
-        fd[o + 3] = aOut * 255;
+        // XNA 设备混合贡献 = out.rgb 全量直加（(One,One) 语义，见 GLSpriteLayer TRAIL_FS
+        // 注）→ 'lighter' 直加不预乘；alpha 写 0（'lighter' 会加 a，勿动主画布 alpha）
+        fd[o] = blade * cr * edge * dim * 255;
+        fd[o + 1] = blade * cg * edge * edge * 255;
+        fd[o + 2] = blade * cb * edge * 255;
+        fd[o + 3] = 0;
         continue;
       }
 
