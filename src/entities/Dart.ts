@@ -1120,14 +1120,14 @@ export class Dart extends Entity {
         const ddx = this.spawnAi0 - this.cx, ddy = this.spawnAi1 - this.cy;
         if (ddx * this.vx + ddy * this.vy <= 0) {          // Dot<=0 越点（:28748-28756）
           this.vx = 0; this.vy = 0;
-          this.inferno291Kill(game);
-          return;
+          this.inferno291Kill(game);                        // Kill → 292（:75802-75807）
         }
       }
       for (let i = 0; i < 10; i++) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 174, 0, 0, 100, null, 1.2, true);
         if (d) { d.vx *= 0.5; d.vy *= 0.5; d.vx += this.vx * 0.1; d.vy += this.vy * 0.1; }
       }
+      if (this.dead) return;                               // 引爆拍尘已结,跳过位移/后续面
     }
     // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
     //  596 自管（aiStyle107 :34208-34219 带 timeLeft>30 门+实心盒钳 128,见 596 段）;
@@ -1613,6 +1613,41 @@ export class Dart extends Entity {
       }
     }
     this.dead = true;
+  }
+
+  /** ★① 290 暗影束束段铺撒（Spawn_Shadowbeam 敌版 :1987-2000 + SpawnHelper_SpawnInLine
+   *  :2002-2034）：从锚点(sb290Ax/Ay)到当前心按步距 max(4,|v|) 铺点,每步 3×d173
+   *  （本位/−dir·0.03334|v|/−dir·0.06668|v|——敌版 velocityScalar=0.03334,友版 294
+   *  的 0.25 别值,ParticleOrchestrator.cs:1989-1993）、scale rand(70..110)×0.013、
+   *  尘速 ×0.2。视觉本体走 fx/orchestraFx.shadowbeamLineFx（消费端共体,hostile 档） */
+  private beam290Segment(game: GameHooks): void {
+    shadowbeamLineFx(game, this.sb290Ax, this.sb290Ay, this.cx, this.cy,
+      Math.hypot(this.vx, this.vy), true);
+  }
+
+  /** ★① 290 Kill（Projectile.cs:71825-71870 aiStyle48 组）：锚点→死亡位再铺一次束
+   *  （localAI[0]>=delay(3) 且锚点>0 门,:71835-71859——290 恒 ShadowbeamHostile 型）
+   *  + module8 联机中继。死亡面=寿终/InWorld 内缘越界（:28610-28614） */
+  private killBeam290(game: GameHooks): void {
+    if (this.sb290L0 >= 3 && this.sb290Ax > 0 && this.sb290Ay > 0) {
+      this.beam290Segment(game);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShadowbeamHostile,
+        this.cx, this.cy, this.sb290Ax, this.sb290Ay,
+        Math.round(Math.hypot(this.vx, this.vy) * 1000));
+    }
+    this.dead = true;
+  }
+
+  /** ★② 291 地狱火弹 Kill（Projectile.cs:75802-75807）：owner 门（单机恒真）内
+   *  原位 NewProjectile 292（速度 0、同 damage、同 kb）——爆区实体承接持续伤害,
+   *  取代旧 rocket:65 通用爆（原版 291 Kill 无爆炸尘/音,纯 spawn 转接）。死亡面 =
+   *  越点引爆（:28748-28756）/寿终 timeLeft 300（HardmodeDungeonSkeletonShot,
+   *  NewProjectileModifiers.cs:5-8） */
+  private inferno291Kill(game: GameHooks): void {
+    this.dead = true;
+    const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
+    (game as unknown as { entities: { add(e: unknown, b: string): void } })
+      .entities.add(blast, 'projectiles');
   }
 
   /** 无表项通用弹（projId=0 历史路径）:直线+撞块消亡 */
@@ -2138,13 +2173,26 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    ai0≥18 起摩擦 vx×0.995 + 重力 0.2(:21804-21811),之前直飞
   501: { w: 14, h: 14, rot: 'align90', scale: 1.1, grav: 0.2, gravDelay: 18, xDamp: 0.995,
     fallback: '#C8E060' },
-  // ---- 史后三法师（NPC.cs:21146-21191,timeLeft 均覆写 300）----
-  // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 ~6×101≈606px/t
-  //    全屋瞬达);life 300(NPC.cs:21191 对 281-286 射击统一覆写,覆盖 SetDefaults 的 100)
-  290: { w: 4, h: 4, rot: 'align90', life: 300, updates: 100, fallback: '#B090FF' },
-  // 291 地狱火弹(魔法师 285/286):12×12,alpha255 渐入,tileCollide=false,Kill→130×130 爆炸
-  //    (弹 292,半宽 65;原版 aiStyle50 到点即爆——此处撞人/到期爆,到点判据登记待补)
-  291: { w: 12, h: 12, rot: 'align90', alpha0: 255, fade: 50, life: 300, noTile: true, rocket: 65, fallback: '#FF9040' },
+  // ---- 史后三法师（NPC.cs:21260-21312,1457 timeLeft 覆写经 NewProjectileModifiers
+  //      .HardmodeDungeonSkeletonShot = timeLeft 300,NewProjectileModifiers.cs:5-8）----
+  // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 6×101≈606px/t
+  //    全屋瞬达)。★寿命换算:原版 timeLeft 在 numUpdates 子步循环内逐【子步】消耗
+  //    (AI() :16880 与 timeLeft-- :17307 同在 while(numUpdates>=0) :16780-17345 内)
+  //    → timeLeft 300 = 300 子步 ≈ 3 tick(101 子步/拍);本仓 life 按 tick 递减
+  //    (fixedUpdate 头),表值=换算终值 3(±1 tick 量化,末拍余 3 子步弃置)。
+  //    本体恒隐:alpha=255 由 AI 每子步写(:28630-28632)+贴图官方空桩;可视面=束段尘
+  //    ——【撞块反弹】(Update :18975-19018 全速反号+束铺撒+重锚)/【Kill】
+  //    (:71825-71870 锚点→死亡位铺撒)两口,见 dartStep 290 支;首子步 Item8(:28633)。
+  //    敌版铺撒标量 0.03334(Orchestrator :1989-1993),友版 294 的 0.25 别值勿混
+  290: { w: 4, h: 4, rot: 'none', alpha0: 255, life: 3, updates: 100, fallback: '#B090FF' },
+  // 291 地狱火弹(魔法师 285/286):12×12,alpha255 本体恒隐(SetDefaults :3812;AI 291 支
+  //    :28738-28767 无 alpha 行=不渐显,旧 fade:50 退役),tileCollide=false 穿墙,
+  //    penetrate=-1 穿人不消亡(Damage_EVP 无 Kill);发射点 NPC.cs:21294 ai[0]/[1]=
+  //    玩家心(发射拍)。AI:Item20 首拍(:28740-28744)+10×d174 尾迹/拍(:28758-28766)
+  //    +越点引爆(Dot(target−Center,v)<=0 → v=0 → Kill :28748-28756——本仓锚点缺省
+  //    =首子步捕玩家心,spawnAi0/1 可显式覆写);Kill(:75802-75807)=原位 spawn 292
+  //    爆区(同伤),旧 rocket:65 通用爆退役
+  291: { w: 12, h: 12, rot: 'none', alpha0: 255, life: 300, noTile: true, fallback: '#FF9040' },
   // 293 迷失之魂(布道者 281/282):12×12,旋转恒 0,alpha255,tileCollide=false,extraUpdates1,
   //    200px 内追踪(:AI_051 target v=norm×3,vel=(vel*100+t)/101);尘 175 ×9/更新;Item8
   //    ★R5(T5,2026-09-02)：lerp 口径=乘子=除数−1——原式 P.cs:28911-28912

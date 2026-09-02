@@ -4699,9 +4699,13 @@ export class Renderer {
     bc.drawImage(img, fx, fy, 8, 8, 0, 0, 8, 8);
     const baked = dustPremulBake(bc.getImageData(0, 0, 8, 8).data, mR, mG, mB, mA);
     const addC = document.createElement('canvas'); addC.width = 8; addC.height = 8;
-    addC.getContext('2d')!.putImageData(new ImageData(baked.add, 8, 8), 0, 0);
+    const addCtx = addC.getContext('2d')!;
+    const addIm = addCtx.createImageData(8, 8); addIm.data.set(baked.add);
+    addCtx.putImageData(addIm, 0, 0);
     const eraseC = document.createElement('canvas'); eraseC.width = 8; eraseC.height = 8;
-    eraseC.getContext('2d')!.putImageData(new ImageData(baked.erase, 8, 8), 0, 0);
+    const eraseCtx = eraseC.getContext('2d')!;
+    const eraseIm = eraseCtx.createImageData(8, 8); eraseIm.data.set(baked.erase);
+    eraseCtx.putImageData(eraseIm, 0, 0);
     const entry = { add: addC, erase: eraseC };
     if (this.dustPmCache.size > 2048) this.dustPmCache.clear();
     this.dustPmCache.set(key, entry);
@@ -9214,16 +9218,22 @@ export class Renderer {
    *  区不再把白剪影染红（原版 596/811 顶点色不读格光色=恒白,Projectile.cs:80903/
    *  Main.cs:30846 Lerp 恒白端）;白化值取三通道最大值再抬地板 = 只升不降（白天
    *  暖光不压暗,原"光照≥地板零改动"语义对消色差光仍成立）;账本照记原 RGB×3、
-   *  restore 同账逐字节还原。残留微差（备案）:814 原版 Lerp(projectileColor,
-   *  White,0.35) 保留 65% 光色相,本白化为全白——逐像素重放该 Lerp 须 post-light
-   *  弹绘制通道（未建,同月总补差 z 序取舍账）。 */
-  private static readonly SELF_LUMINOUS_PROJS = new Map<number, (proj: Entity) => number>([
+   *  restore 同账逐字节还原。
+   *  ★M′-MAJOR-2 修订（2026-09-02 红蓝对抗定谳）:白化按 k 分档——白化只对
+   *  596/811 成立（顶点色恒白,不读格光色）;814 顶点色=Lerp(格光,White,0.35)
+   *  【读格光】（Main.cs:30068+:30855）,全白白化破坏 65% 色相保留+地形漂白 →
+   *  回归逐通道 max 旧形（红队确认旧形更近原版 Lerp 的近似,原"残留微差"备案
+   *  就此清偿）。表值改 (proj)=>{floor,whiten},消费点按 whiten 分道。 */
+  private static readonly SELF_LUMINOUS_PROJS = new Map<number, (proj: Entity) => { floor: number; whiten: boolean }>([
     // 596: RGB(255−α) 白化（GetAlpha 专支不读格光色）;effAlpha 已含 timeLeft<30 渐隐窗
-    [596, (proj) => (255 - Renderer.selfLumEffAlpha(proj)) / 255],
+    //  → 顶点色恒白（Projectile.cs:80903）→ whiten=true（★I″ 消色差）
+    [596, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
     // 811: whiteLerp k=1.0（Remap(ai0,0,15,1,0.3) 恒下端,ai[0] 全域无写入方）× (255−α)/255
-    [811, (proj) => (255 - Renderer.selfLumEffAlpha(proj)) / 255],
-    // 814: whiteLerp k=0.35 × (255−α)/255
-    [814, (proj) => 0.35 * (255 - Renderer.selfLumEffAlpha(proj)) / 255],
+    //  → 顶点色恒白（Main.cs:30846 Lerp 恒白端）→ whiten=true（★I″ 消色差）
+    [811, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
+    // 814: whiteLerp k=0.35 × (255−α)/255 —— 顶点色=Lerp(格光,White,0.35)【读格光】
+    //  （Main.cs:30068+:30855）→ whiten=false:逐通道 max 旧形（保留 65% 光色相）
+    [814, (proj) => ({ floor: 0.35 * (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: false })],
   ]);
 
   /** 弹自身 effAlpha（★F2:与 Dart.draw 消费式同源）——596 在 timeLeft<30 渐隐窗内
@@ -9238,9 +9248,11 @@ export class Renderer {
     return Math.max(0, Math.min(255, p.alpha ?? 0));
   }
 
-  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板并【白化去色】
-   *  （★I″:R=G=B=max(r,g,b,fr) 消色差;账本记原 RGB×3,restore 同账。★F2 地板 =
-   *  表值逐弹求值,弹自身 α 窗内同步缩放） */
+  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到地板——
+   *  596/811【白化去色】R=G=B=max(r,g,b,fr)（★I″ 消色差,顶点色恒白）、
+   *  814 逐通道 max 抬 fr（★M′-MAJOR-2,顶点色读格光=Lerp(格光,White,0.35) 的近似,
+   *  色相保留）。账本记原 RGB×3,restore 同账;★F2 地板 = 表值逐弹求值,弹自身
+   *  α 窗内同步缩放 */
   private raiseSelfLuminousProjLight(
     entities: Entity[],
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -9258,7 +9270,7 @@ export class Renderer {
       // ★F2 逐弹求值地板：596=(255−α)/255（渐显/渐隐窗/穿墙钳三段）、
       //    811/814=whiteLerp k×(255−α)/255（出场渐显）——近不可见窗（<0.06）
       //    整体跳过,防"无源白块"
-      const floor = lumOf(e);
+      const { floor, whiten } = lumOf(e);
       if (floor < 0.06) continue;
       const fr = Math.round(255 * floor);
       // 弹 AABB 覆盖格（中心单点不够——大弹跨格,白剪影须整盒抬亮）
@@ -9271,16 +9283,24 @@ export class Renderer {
         for (let tx = tx0; tx <= tx1; tx++) {
           if (tx < rx || tx >= rx + rw) continue;
           const li = (ty - ry) * rw + (tx - rx);
-          // ★I″ 去色:白化 = 三通道归一到同一值 max(r,g,b,fr)——只升不降（白天
-          // 暖光不压暗,地板语义不变）且消色差（有色光区白剪影不再被染色,原版
-          // 596/811 顶点色不读格光色=恒白）;已消色差达标的格零写零记账
+          // ★M′-MAJOR-2（2026-09-02 红蓝对抗定谳）写面按 whiten 分道,两形都只升不降、
+          // 已达标格零写零记账：
+          //  · whiten=true（596/811,顶点色恒白 Projectile.cs:80903/Main.cs:30846 恒白
+          //    端,不读格光色）→ ★I″ 三通道归一 max(r,g,b,fr)：只升不降（白天暖光
+          //    不压暗）且消色差（有色光区白剪影不再被染色）。
+          //  · whiten=false（814,顶点色=Lerp(格光,White,0.35)【读格光】
+          //    Main.cs:30068+:30855）→ 逐通道 max 旧形：保留 65% 光色相（全白白化
+          //    会把熔岩红光区漂白成灰阶,红队确认旧形更近原版 Lerp）。
           const w = Math.max(lightR[li], lightG[li], lightB[li], fr);
-          if (lightR[li] === w && lightG[li] === w && lightB[li] === w) continue;
+          const r2 = whiten ? w : Math.max(lightR[li], fr);
+          const g2 = whiten ? w : Math.max(lightG[li], fr);
+          const b2 = whiten ? w : Math.max(lightB[li], fr);
+          if (lightR[li] === r2 && lightG[li] === g2 && lightB[li] === b2) continue;
           if (!seen.has(li)) {
             seen.add(li);
             touched.push(li, lightR[li], lightG[li], lightB[li]);
           }
-          lightR[li] = w; lightG[li] = w; lightB[li] = w;
+          lightR[li] = r2; lightG[li] = g2; lightB[li] = b2;
         }
       }
     }

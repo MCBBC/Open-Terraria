@@ -3615,6 +3615,20 @@ class DualProvider {
     (data as unknown as { __i103Calc?: HallwayCalculator }).__i103Calc = calculator;
     const halls = calculator.generate();
     this.convertSpecializedHalls(halls);
+    // ★IIIII172 厅类钉死钩（零掷,logging-only;与 x86 rig DR|HALL 同构对拍）：
+    //   逐厅 hallType/Style/起讫/sine 三参/CrackedBrick/CarveOnly/RandomSeed。
+    for (let hki = 0; hki < halls.length; hki++) {
+      const hk = halls[hki]!;
+      const s = hk.settings as HallSettingsBase & { magnitude?: number; iterations?: number; flipSine?: boolean };
+      let extra = '';
+      if (s.hallType === DPHallType.Sine) {
+        extra = `|mg=${s.magnitude}|it=${s.iterations}|fs=${s.flipSine ? 1 : 0}`;
+      }
+      drlMark(`DR|HALL|i${iN}|k=${hki}|ht=${s.hallType}|st=${s.style.Style}`
+        + `|sb=${hk.startPosition.x},${hk.startPosition.y}`
+        + `|eb=${hk.endPosition.x},${hk.endPosition.y}`
+        + `|cb=${hk.crackedBrick ? 1 : 0}|co=${s.carveOnly ? 1 : 0}|sd=${s.randomSeed}${extra}`);
+    }
     drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|mr=${drlMr()}|rc=${drlRc()}`);
     ctx.snap('dualHalls');
     this.calculateDungeonBounds(data.halls);

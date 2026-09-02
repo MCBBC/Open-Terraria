@@ -9,11 +9,15 @@
 //   ③ raise/restore 幂等：compositeLight 前后光数组逐字节还原（含多弹同格重叠——
 //      账本须记【原值】,Set 去重改造不得记账抬亮后的值）；
 //   ④ F3 粒子缺省重力契约：ax/ay 通道在位 → 缺省 grav=0（Game.particleGravDefault）。
-//   ⑤ ★I″ 去色（2026-09-02 蓝队白化批,原"已知边界③"清偿）：raise 写面由逐通道
-//      max 改为白化 R=G=B=max(r,g,b,fr)——消色差,熔岩红光区白剪影不再被染色
-//      （原版 596/811 顶点色不读格光色=恒白）;白化值取三通道最大值=只升不降
-//      （白天暖光不压暗）;账本记原 RGB×3、restore 逐字节还原。备案残留:814 原版
-//      Lerp(光,White,0.35) 保留 65% 光色相,白化为全白（post-light 弹绘制通道未建）。
+//   ⑤ ★I″ 去色（2026-09-02 蓝队白化批,原"已知边界③"清偿）+ ★M′-MAJOR-2 白化按 k
+//      分档（2026-09-02 红蓝对抗定谳）：raise 写面分道——
+//      · 596/811 顶点色恒白（Projectile.cs:80903 / Main.cs:30846 Lerp 恒白端,不读
+//        格光色）→ whiten=true：白化 R=G=B=max(r,g,b,fr) 消色差,熔岩红光区白剪影
+//        不再被染色;白化值取三通道最大值=只升不降（白天暖光不压暗）;
+//      · 814 顶点色=Lerp(格光,White,0.35)【读格光】（Main.cs:30068+:30855）→
+//        whiten=false：逐通道 max 抬 fr 旧形,保留 65% 光色相（全白白化破坏色相+
+//        地形漂白,红队确认旧形更近原版;原 I″"残留微差"备案就此清偿）;
+//      账本记原 RGB×3、restore 逐字节还原,两形已达标格零写零记账。
 // 锚:Projectile.cs GetAlpha 575/596/659 专支 + 缺省段 :81503-81510、Main.cs
 //   轨迹支 :30841-30856、Dust 缺省重力 Dust.cs:894 族。
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -44,10 +48,10 @@ beforeAll(async () => {
   r = new Renderer(null as never);
 }, 120000);
 
-/** 私有静态系数表直调（Map 值 = (proj)=>number 动态形态） */
-const lumOf = (pid: number): ((proj: object) => number) => {
+/** 私有静态系数表直调（Map 值 = (proj)=>{floor,whiten} 动态形态,★M′-MAJOR-2） */
+const lumOf = (pid: number): ((proj: object) => { floor: number; whiten: boolean }) => {
   const map = (Renderer as unknown as {
-    SELF_LUMINOUS_PROJS: Map<number, (proj: never) => number>;
+    SELF_LUMINOUS_PROJS: Map<number, (proj: never) => { floor: number; whiten: boolean }>;
   }).SELF_LUMINOUS_PROJS;
   const f = map.get(pid);
   expect(f).toBeDefined();
@@ -88,15 +92,21 @@ const raiseOf = () =>
   });
 
 // ============================================================ ① F1 系数表
-describe('F1: SELF_LUMINOUS_PROJS 地板动态化（RGB 顶点色乘数口径）', () => {
-  it('596 全显态（α=0）= 1.0（原 RGB(255−α) 乘数,非旧 A 通道 0.5 档）', () => {
-    expect(lumOf(596)(dart(596, 1, 2))).toBeCloseTo(1.0, 6);
+describe('F1: SELF_LUMINOUS_PROJS 地板动态化（RGB 顶点色乘数口径 + whiten 分档）', () => {
+  it('596 全显态（α=0）= floor 1.0（原 RGB(255−α) 乘数,非旧 A 通道 0.5 档）+ whiten=true', () => {
+    const v = lumOf(596)(dart(596, 1, 2));
+    expect(v.floor).toBeCloseTo(1.0, 6);
+    expect(v.whiten, '顶点色恒白（Projectile.cs:80903 GetAlpha 专支不读格光）→ ★I″ 消色差').toBe(true);
   });
-  it('811 恒亮端 k=1.0（Remap(ai0,0,15,1,0.3) 恒下端）', () => {
-    expect(lumOf(811)(dart(811, 1, 2))).toBeCloseTo(1.0, 6);
+  it('811 恒亮端 k=1.0（Remap(ai0,0,15,1,0.3) 恒下端）+ whiten=true', () => {
+    const v = lumOf(811)(dart(811, 1, 2));
+    expect(v.floor).toBeCloseTo(1.0, 6);
+    expect(v.whiten, '顶点色恒白（Main.cs:30846 Lerp 恒白端不读格光）→ ★I″ 消色差').toBe(true);
   });
-  it('814 = 0.35（轨迹支 Lerp(·,White,0.35) 常数）', () => {
-    expect(lumOf(814)(dart(814, 1, 2))).toBeCloseTo(0.35, 6);
+  it('814 = floor 0.35（轨迹支 Lerp(·,White,0.35) 常数）+ whiten=false（★M′-MAJOR-2 顶点色读格光）', () => {
+    const v = lumOf(814)(dart(814, 1, 2));
+    expect(v.floor).toBeCloseTo(0.35, 6);
+    expect(v.whiten, '顶点色=Lerp(格光,White,0.35) 读格光（Main.cs:30068+:30855）→ 逐通道 max 保留色相').toBe(false);
   });
 });
 

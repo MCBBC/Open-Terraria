@@ -269,6 +269,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     const edgeY = dir > 0 ? b.y + b.h : b.y;
     const ty = Math.floor(edgeY / TILE);
     const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
+    if (b.y > 5000 && b.y < 6000) console.log('DBGY x=', Math.round(b.x), 'y=', Math.round(b.y), 'ty=', ty, 'cols=', x0, x1, 'solid54,357=', world.store.isSolid(54, 357), 'solid53,357=', world.store.isSolid(53, 357));
     // 原版取整行最高面（Collision.cs:1610-1631 num13 取最大盒顶），不能 break 在最左列——
     // 否则左列半砖/右列整砖时身体会嵌进整砖 8px
     let bestTop = Infinity;

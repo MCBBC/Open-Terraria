@@ -55,6 +55,7 @@ function mkDeathGame(opts?: {
   };
   g.entities = { enemies, critters: [], projectiles: [], add: (_e: unknown, _b: string) => {} };
   g.playSfxFiles = (names: string[]) => { sfx.push(...names); };
+  g.sfx = { play: () => {} };   // 31/42 沙块弹 Kill 音尘支（:77809 dig 音）桩补齐（Kill 消亡面批 2026-09-02）
   g.spawnDust = () => {
     const d: DustLike = { vx: 1, vy: 1, noGravity: false, scale: 1 };
     dusts.push(d);

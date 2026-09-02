@@ -30,6 +30,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { damageVarRoll } from '../stats/DamageVar';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 import { BuffType } from '../stats/Buffs';
 import { TORCH_DUST_BY_STYLE } from '../world/Torch';
@@ -5258,16 +5259,39 @@ export class TorchGodProj extends Entity {
     const p = game.player;
     if (!game.world.flags.unlockedBiomeTorches
       && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-      p.lastDamageCause = {
-        kind: 'projectile',
-        name: game.projectileName?.(this.projId) ?? '弹幕',
-      };
-      // 1457 :18000：`damage = (int)(40f × HostileProjectileDamageMultiplier.Sample(
-      // Main.Difficulty))`——经典 40/专家 80(×2)/大师 120(×3)（GameDifficultyData.cs:67
-      // 曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
-      // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
-      p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
-        this.cx, 0, true);
+      // ★M′-MAJOR-1（2026-09-02 红蓝对抗定谳）：1457 :15113-15117 `value=damage;
+      //  num2=Main.DamageVar(value, 0f - localPlayer.luck)`——949 不在
+      //  ProjectileID.Sets.FixedSelfDamageForPlayers 表（Terraria.ID/ProjectileID.cs:193
+      //  CreateCustomSet 78 项全 134-801 族+1117）→ 命中时按弹 damage 面 ±15% 离散档
+      //  掷骰 + −luck 重掷取低带（同族先例 Player.ts applyTouchDamage :7371
+      //  `damageVarRoll(touchBase, -this.luck)`;单源 stats/DamageVar）。难度乘区维持
+      //  1457 :18000 生成式 `damage=(int)(40f×HostileProjectileDamageMultiplier.Sample(
+      //  Main.Difficulty))`——经典 40/专家 80(×2)/大师 120(×3)（GameDifficultyData.cs:67
+      //  曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
+      //  乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
+      //  （949 飞行期 damage 字段不变,roll 时点仅记账面差异）。
+      const rolled = damageVarRoll(hostileProjectileDamage(40, mainDifficulty(game.world)),
+        -(p.luck ?? 0));
+      // ★M′-MINOR-3：lastDamageCause 受理后才写——p.damage 返回 reduction（实扣 HP,
+      // Player.ts:7100 契约「0=完全未受伤」）>0 才置位：闪避族（mysticSash/黑带/
+      // 混乱脑/幻影闪避）/无敌帧/debugGod/shimmering/dead 早退族全 return 0 → 不覆写
+      // 残留旧值。原版位次：:15106 早退族（!active||dead||immune||!Colliding）先于
+      // DeathReason 构造（:15128 ByProjectile），Hurt 返回 0 不产生受理语义同构。
+      if (p.damage(rolled, this.cx, 0, true) > 0) {
+        p.lastDamageCause = {
+          kind: 'projectile',
+          name: game.projectileName?.(this.projId) ?? '弹幕',
+        };
+      }
+      // ★M′-MINOR-4/5 登记（备案不修,红队仲裁登记项）：
+      //  ④ MP 镜像位——原版 AI_184 :43575-43576 门 = `owner == Main.myPlayer &&`：
+      //     SelfHurtPlayers 只在弹主端判定+扣血,非主端镜像弹整段跳过;本仓
+      //     game.player 恒本地权威（单 authority 漏斗）,联机镜像弹各端都进 hit 支,
+      //     伤害裁决归 host——owner 校验位差异登记不修。
+      //  ⑤ 闪避语义差——原版 :15106 早退族（immune/dead/Colliding）在 DeathReason
+      //     构造【前】整段跳过;本仓 Player.damage 的早退位次（闪避族在 immune 门
+      //     之后）与原版两段式不逐一对应。MINOR-3 已覆盖一半（不受理不置位）,
+      //     余下位次差（原版 pre-DeathReason 早退 vs 本仓 damage 内部早退）登记不修。
       // ★R3-16（1457 P57:43575-43579 AI_184_BadTorchLuck → SelfHurtPlayers
       //  :15104-15152）：原版命中后**不杀弹**——949 继续飞，玩家无敌帧内由
       //  immune 门静默、无敌帧结束再判（SelfHurtPlayers 每 AI 帧调用）。本仓曾

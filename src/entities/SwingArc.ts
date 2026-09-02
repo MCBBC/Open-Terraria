@@ -564,7 +564,7 @@ export class NightsEdgeFly extends Entity {
  *  45/30/15，60 越界跳过）→ ③ 本体 =【ai[1] 物品贴图】（:29945-29953 LoadItem、
  *  origin=中心、基角 −π/4×spriteDir；GetAlpha :76047 = White×Opacity ×num182
  *  淡入 0-20/淡出 68-60）→ ④ 1.25× 白叠绘（:30841 色 (255,255,255,127)×Opacity
- *  ×num186）→ ⑤ 刃尖星芒（:30845 DrawPrettyStarSparkle，15-45 counter 窗）。
+ *  ×num186）→ ⑤ 刃尖星芒（1457 Main.cs:31620 DrawPrettyStarSparkle，15-45 counter 窗）。
  *  档案表（FinalFractalHelper.cs:81-168：剑物品 id → 全刃长/拖尾色）。 */
 const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, number] }> = {
   65: { len: 48, color: [236, 62, 192] }, 1123: { len: 48, color: [255, 231, 69] },  // 1123=Main.OurFavoriteColor（Main.cs:868）
@@ -985,9 +985,11 @@ export class ZenithSword extends Entity {
       1.25, 127 / 255 * ov);
     drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
       1.25, 128 / 255 * ov, true);
-    // ---- ⑤ 刃尖星芒（:30842-30845）：DrawPrettyStarSparkle(Opacity, dir, Center+
-    // (rot−π/2)向×trailWidth, White×num186, trailColor(A/2)×num186, localAI[0],
-    // 15,30,30,45, 0, (5,2), (1,1))——15-45 counter 窗内十字星芒 ----
+    // ---- ⑤ 刃尖星芒（1457 Main.cs:31620）：DrawPrettyStarSparkle(Opacity, dir, Center+
+    // (rot−π/2)向×trailWidth, White×num197, trailColor(A/2)×num197, localAI[0],
+    // 15,30,30,45, 0, (5,2), (1,1))——15-45 counter 窗内十字星芒
+    // （num197 = GetLerpValue(0,20,t)×GetLerpValue(68,60,t) = 本档 num182，draw=White/
+    //   shine=trailColor 与原版实参序一致——2026-09-02 黑十字案复核勘误,原注 num186 系笔误）----
     if (this.opacity > 0.01 && num182 > 0.01) {
       prettyStarSparkle(ctx, this.opacity,
         this.cx + Math.cos(this.rot - Math.PI / 2) * tw,

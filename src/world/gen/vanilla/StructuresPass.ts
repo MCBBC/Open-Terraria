@@ -960,7 +960,11 @@ export function runPyramidPass(
   //   金字塔（Center.X, Top-10；Pyramid(x,j) 默认 75/125），且候选循环排除沙漠矩形内
   //   的候选点（Rectangle.Contains 半开区间）。
   const udPyr = gs.undergroundDesert;
-  const celbPyr = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags.remix;
+  // ★IIIII173（2026-09-02）定谳：tenth 保底金字塔门=`tenth && !dualDungeons`（1457 cs:15446 /
+  //   1458 cs:15445 同形 `Main.tenthAnniversaryWorld && !SecretSeed.dualDungeons.Enabled`）
+  //   ——曾误抄 Lakes 的 tenth&&!remix 形（Pyramids 原版无 remix 排除）→ GFB(tenth+remix，
+  //   无 dualDungeons) 保底金字塔整缺。
+  const celbPyr = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags.dualDungeons;
   if (celbPyr && udPyr) {
     const px = udPyr.x0 + Math.trunc((udPyr.x1 - udPyr.x0) / 2);   // Rectangle.Center.X=X+W/2
     const pj = udPyr.y0 - 10;                                      // Top-10

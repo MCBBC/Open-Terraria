@@ -18,7 +18,7 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 160)));
 page.on('console', (m) => { const t = m.text(); if (t.includes('[Game]') || t.includes('sparkle')) console.log('CONSOLE:', t.slice(0, 160)); });
 
-await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5216') + '/?sparkle=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5216') + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 // 清 SW 供新模块（cache-first 坑）
 await page.evaluate(async () => {
   try {
@@ -32,12 +32,12 @@ await page.waitForFunction(() => !!window.__swLoadJson, { timeout: 90000, pollin
 try { await page.mouse.click(8, 8); } catch {}
 await new Promise((r) => setTimeout(r, 800));
 
-// ① 执行代码指纹（防陈旧 bundle）：prettyStarSparkle 源码须含现役隔离式合成特征
+// ① 执行代码指纹（防陈旧 bundle）：复役后应无 ?sparkle 门、有隔离 sbuf + lighter
 const fingerprint = await page.evaluate(async () => {
   const m = await import('/src/render/Renderer.ts');
   const src = m.prettyStarSparkle.toString();
   return {
-    hasSparkleGate: src.includes("'sparkle'") || src.includes('sparkle'),
+    gateRemoved: !src.includes("get('sparkle')"),
     hasLighter: src.includes('lighter'),
     hasIsolatedSbuf: src.includes('sbuf'),
     len: src.length,
@@ -112,54 +112,48 @@ const diff = await page.evaluate(async () => {
     return cc.getImageData(0, 0, W, H);
   };
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const setSparkle = (v) => {
-    const u = new URL(location.href); u.searchParams.set('sparkle', v);
-    history.replaceState(null, '', u.toString());
-  };
   const grabs = { A: [], B: [] };
   // A/B 差分机制（?sparkle 门已撤）：B 态 = 四剑平移 +5000px 出屏（本体/残影/拖尾/
-  // 星芒全部随 cx/cy+trail 移走）——同一静态场景的无星芒参照。暂停下位置稳定。
-  const shift = (dx: number) => {
-    for (const s of (window.__probeSwords ?? [])) {
-      if (!s || s.dead) continue;
-      s.x += dx; s.trail = s.trail.map((v: number, i: number) => (i % 3 === 0 ? v + dx : v));
+  // 星芒/随身光源全部随 cx/cy+trail 移走）——同一静态场景的无星芒参照。暂停下位置稳定。
+  const cam = g.camera;
+  const swords = (window.__probeSwords ?? []).filter((s) => s && !s.dead);
+  const Apos = swords.map((s) => {
+    const [sx, sy] = cam.worldToScreen ? cam.worldToScreen(s.cx, s.cy) : [s.cx, s.cy];
+    return { sx: Math.round(sx), sy: Math.round(sy) };
+  });
+  const shift = (dx) => {
+    for (const s of swords) {
+      s.x += dx; s.trail = s.trail.map((v, i) => (i % 3 === 0 ? v + dx : v));
     }
   };
-  shift(0);
-  setSparkle('1'); await wait(90); grabs.A.push(grab());
+  await wait(90); grabs.A.push(grab());
   shift(5000); await wait(90); grabs.B.push(grab());
   shift(-5000); await wait(90); grabs.A.push(grab());
   shift(5000); await wait(90); grabs.B.push(grab());
   shift(-5000); await wait(90);
   const Aref = grab(); grabs.A.push(Aref);
-  shift(5000);
-  // 剑位裁剪帧（世界→屏幕）
-  const cam = g.camera;
+  // 剑位裁剪帧（A 态屏位,取自 Aref）
   const crops = [];
-  for (const s of (window.__probeSwords ?? [])) {
-    if (!s || s.dead) continue;
-    const [sx, sy] = cam.worldToScreen ? cam.worldToScreen(s.cx, s.cy) : [s.cx, s.cy];
+  for (const p of Apos) {
     const c = document.createElement('canvas');
     c.width = 240; c.height = 160;
     const cc = c.getContext('2d', { willReadFrequently: true });
-    cc.drawImage(cv, Math.max(0, Math.min(W - 240, sx - 120 | 0)), Math.max(0, Math.min(H - 160, sy - 80 | 0)), 240, 160, 0, 0, 240, 160);
-    crops.push({ sx: sx | 0, sy: sy | 0, url: c.toDataURL('image/png') });
+    cc.drawImage(cv, Math.max(0, Math.min(W - 240, p.sx - 120 | 0)), Math.max(0, Math.min(H - 160, p.sy - 80 | 0)), 240, 160, 0, 0, 240, 160);
+    crops.push({ sx: p.sx, sy: p.sy, url: c.toDataURL('image/png') });
   }
   // ★局部化 + 形态学：只统计星芒臂包围盒（zoom=2 时横臂 720×72、纵臂 72×288），
   //   且要求 8×8 块内 ≥60% 像素一致变暗（云/星闪烁=散点,整带=块状）——
   //   黑十字若在,横带应有 ~90×9=810 个块命中
   const [A1, A2, A3] = grabs.A, [B1, B2] = grabs.B;
   const perSword = [];
-  for (const s of (window.__probeSwords ?? [])) {
-    if (!s || s.dead) continue;
-    const [sx0, sy0] = cam.worldToScreen ? cam.worldToScreen(s.cx, s.cy) : [s.cx, s.cy];
-    const cx0 = Math.round(sx0), cy0 = Math.round(sy0);
+  for (let si = 0; si < swords.length; si++) {
+    const s = swords[si], p = Apos[si];
+    const cx0 = p.sx, cy0 = p.sy;
     const bands = [
       { x: cx0 - 380, y: cy0 - 40, w: 760, h: 80 },     // 横臂带(zoom≈2: 720×72)
       { x: cx0 - 40, y: cy0 - 150, w: 80, h: 300 },     // 纵臂带(72×288)
     ];
-    let darkPx = 0, brightPx = 0, tot = 0, darkBlocks = 0, brightBlocks = 0;
-    const mark = [];
+    let darkPx = 0, brightPx = 0, tot = 0, darkBlocks = 0, brightBlocks = 0, darkCriterion = 0;
     for (const b of bands) {
       const x0 = Math.max(0, b.x), y0 = Math.max(0, b.y);
       const x1 = Math.min(W, b.x + b.w), y1 = Math.min(H, b.y + b.h);
@@ -176,6 +170,11 @@ const diff = await page.evaluate(async () => {
               n++; tot++;
               if (mnA - mxB <= -14) { dn++; darkPx++; }
               else if (mxA - mnB >= 14) { bn++; brightPx++; }
+              // 任务判据（连续）：A 侧变暗 ≥3 且底色属"深蓝灰"域
+              if (A1.data[i] - mxB <= -3) {
+                const r = B1.data[i], gg = B1.data[i + 1], bb = B1.data[i + 2];
+                if (bb < 140 && r < 90 && (bb - r) > 25) darkCriterion++;
+              }
             }
           }
           if (n && dn / n >= 0.6) darkBlocks++;
@@ -183,7 +182,7 @@ const diff = await page.evaluate(async () => {
         }
       }
     }
-    perSword.push({ counter: s.counter, cx: cx0, cy: cy0, darkPx, brightPx, darkBlocks, brightBlocks, boxPx: tot });
+    perSword.push({ counter: s.counter, cx: cx0, cy: cy0, darkPx, brightPx, darkBlocks, brightBlocks, darkCriterion, boxPx: tot });
   }
   return { W, H, perSword, crops };
 });
