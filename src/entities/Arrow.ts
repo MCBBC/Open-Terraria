@@ -682,6 +682,13 @@ const PROJ_ALPHA0: Record<number, number> = {
   //   PROJ_ALPHA_MOD[12] fade 档现役消费 → 补键修正起步相位（此前 α≡0 少 50 起点）。
   //   出生面备案：1457 星炮族改射 955(Item 197 useAmmo75),弹幕 12 本仓现无出生路径
   12: 50,
+  // ★2026-09-03 斗篷星 alpha 渐减批：723-726/1133 星光/蜂蜜/魔力/蛇斗篷反击星
+  //  （SetDefaults :7655 alpha=50 起）。AI_005 :24165-24176 −15/t + 条件下限
+  //  num44=100（Center.Y>=ai[1] 越线后 0）——带越线条件门,不入 AI001_FADE_RATE
+  //  （那是 AI_001 无门恒率表）,消费点=starY 通道（starCollide 旁,起步差经构造器
+  //  本表注入）。907 不入:aiStyle30（:8619-8626）SetDefaults 无 alpha 行,GetAlpha
+  //  :76102 fixed (255,255,255,150) 恒,已由 PROJ_ALPHA_MOD[907] 承载
+  723: 50, 724: 50, 725: 50, 726: 50, 1133: 50,
   // [a 类·静态半透死存储惰性补键]——SetDefaults 有值、AI 全程不写、原版渲染面
   //  不消费（GetAlpha 常量/固定 tint 支）；本仓承载均为专用类不读本表 = 视觉零影响,
   //  纯台账真值。禁止把消费回填到 Arrow.draw 兜底（会被 (255−α)/255 折算出幽灵半显）
@@ -1047,10 +1054,13 @@ export class Arrow extends Entity {
   private f349Phase = 0;
   // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
   terra = false;
-  // ---- 星怒剑 503 专属态 ----
-  /** 目标线 Y（null=非星怒弹）；cy>targetY 后 tileCollide 生效（:22139-22143） */
+  // ---- 星怒剑 503 / 斗篷星 723-726/1133 共享态（starY 目标线通道）----
+  /** 目标线 Y（null=非星弹）；cy>targetY 后 tileCollide 生效（:24105-24108 503/723 族同支） */
   starY: number | null = null;
-  /** alpha（255 起 −15/t；线上钳 150 / 线下钳 0——:22197-22206） */
+  /** alpha（503:255 起 −15/t,线上钳 150/线下钳 0——:24149-24158 num43。斗篷星
+   *  723-726/1133:SetDefaults 50 起（:7655）−15/t,线上钳 100/越线钳 0——:24165-24176
+   *  num44,起步差由构造器按 PROJ_ALPHA0 注入。★两门口径不同:tileCollide=严格 >
+   *  （:24106）,α 下限=>=（:24152/:24169）——边界格上 α 已开钳而碰块未开,按原文保留 */
   starAlpha = 255;
   /** 周期音（Item9 :22177-22180，20-60t 掷一次） */
   private starSndT = 20;
@@ -1951,7 +1961,12 @@ export class Arrow extends Entity {
       this.terraAi1 = opts.terra.ai1;
       this.terraAi2 = opts.terra.ai2;
     }
-    if (opts?.star) this.starY = opts.star.targetY;
+    if (opts?.star) {
+      this.starY = opts.star.targetY;
+      // 斗篷星族起步 α=50（SetDefaults :7655,PROJ_ALPHA0 表注入）;503 星怒星无键 →
+      //  保持缺省 255（SetDefaults :5750 alpha=255）
+      this.starAlpha = PROJ_ALPHA0[this.projId] ?? this.starAlpha;
+    }
     // tileCollide=false：显式优先，缺省按 SetDefaults 数据表（325/329/348/350/351…）
     if (opts?.noTileCollide !== undefined) this.noTileCollide = opts.noTileCollide;
     else if (pd0?.tileCollide === false) this.noTileCollide = true;
@@ -3211,11 +3226,13 @@ export class Arrow extends Entity {
           //（:74828-74830——本仓 EntityManager 活数组追加,子体当拍必入同轮 update,
           //  补偿恒成立;原版 GetNextSlot 低序复用槽可免补偿,本仓无此路径）。寿命尽
           // 杀口 this.life 已减至 0 ≙ 原版 Kill 入口 timeLeft（:71763 num 取已减值）。
-          // extraUpdates 显式 3（:6900 MaxUpdates=3）——vanilla-projectiles.json 640 行
-          // 缺该列（639 有 2）,提取器列缺;opts 直补不改 json（数据对账闸门域外,已上报）
+          // extraUpdates 已由 vanilla-projectiles.json 640 行承载（2026-09-03 提取器
+          //  MaxUpdates 别名修复后手补）。★MaxUpdates=3 ≙ extraUpdates=2——P.cs:556-565
+          //  setter `extraUpdates = value - 1`，子步循环 :16780 numUpdates=extraUpdates
+          //  → 3 子步/拍（旧 opts 显式 3 系直读 SetDefaults 字面量的 off-by-one
+          //  =4 子步/拍,且 ai1Delay 每子步 −1 会被多扣,治标随 json 补列一并撤）
           const c640 = new Arrow(this.moonArrowL0, this.moonArrowL1,
-            this.moonArrowA0, this.moonArrowA1, this.damage, this.knockback, 640, null,
-            { extraUpdates: 3 });
+            this.moonArrowA0, this.moonArrowA1, this.damage, this.knockback, 640, null);
           c640.ai1Delay = Math.max(0, this.life) + 2;
           ents639.add(c640, 'projectiles');
         }
@@ -6485,10 +6502,15 @@ export class Arrow extends Entity {
     // 线上方穿墙（tileCollide=false）→ 越线后撞块；alpha 255−15/t 渐显（线上
     // 钳 150 / 线下钳 0）；周期 Item9 星啸；尘 58 星尘尾；rotation=vel−π/2（draw 侧）
     if (this.starY !== null) {
-      // :22139-22143 tileCollide=true 仅当 Center.Y > ai[1]（严格大于——边界对齐）
+      // :24105-24108 tileCollide=true 仅当 Center.Y > ai[1]（严格大于——边界对齐）
       this.starCollide = this.cy > this.starY;
-      const above = this.cy < this.starY;
-      const floorA = above ? 150 : 0;
+      // α 渐减 −15/t：503/9 下限 150（:24151-24158 num43）；★2026-09-03 接斗篷星
+      //  723-726/1133 alpha 面（:24165-24176 num44=100,此前族内无减段=星体全程全亮）
+      //  越线门=Center.Y >= ai[1]（:24152/:24169）——与 tileCollide 的严格 > 差一拍,
+      //  边界格上 α 已开钳、碰块未开,按原文保留
+      const cloakStar = this.projId === 723 || this.projId === 724
+        || this.projId === 725 || this.projId === 726 || this.projId === 1133;
+      const floorA = this.cy < this.starY ? (cloakStar ? 100 : 150) : 0;
       this.starAlpha = Math.max(floorA, this.starAlpha - 15);
       if (--this.starSndT <= 0) {
         this.starSndT = 20 + Math.floor(Math.random() * 40);

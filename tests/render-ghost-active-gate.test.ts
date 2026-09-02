@@ -1,17 +1,21 @@
 // 幽灵保域渲染门（2026-09-03）回归：flags bit0（active 位）过滤
 // 背景：幽灵保域批移除 finalize 出口净化（x86 对齐,残型必须保留）后,渲染路径
 // 不得按 type 直画幽灵格（flags=0,type≠0）——否则新世界小地图显形雪楔/沙漠蛋/
-// 矿石散点"化石层"。本套件锁四条渲染面：
+// 矿石散点"化石层"。本套件锁六条渲染面：
 //   ① 小地图全量(fillBand) ② 小地图增量(colorFor/flushDirty) ③ 生成预览(mapColor24)
 //   ④ 液体渲染实心判定(LiquidCache.IsSolid = SolidOrSlopedTile 的 active() 门)
+//   ⑤ 帧邻查路径(mask8/auto 帧回退;仙人掌贴图沙型扫描)
+//   ⑥ 真实生成世界渲染缓存(幽灵残型零像素权重——清除残型缓存逐位不变)
 // 墙面不查 active（幽灵格 wall 仍有效,同 MapHelper 模型）——一并锁死防回归。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Minimap } from '../src/render/Renderer';
 import { mapColor24 } from '../src/render/MapColors';
-import { T, TILE_DEFS } from '../src/data/tiles';
+import { T, TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 import { drawVanillaLiquids } from '../src/render/VanillaLiquidRenderer';
+import { mask8, cactusTextureFor } from '../src/render/VanillaTiler';
+import { generateWorld } from '../src/world/gen/WorldGen';
 import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 
 function makeWorld(): { w: World; st: TileStore } {
@@ -143,4 +147,65 @@ describe('幽灵保域渲染门：液体渲染实心判定（LiquidCache.IsSolid
     expect(solid).not.toEqual(air);  // 实体确有形态差（对照非退化）
     expect(air.length).toBeGreaterThan(0);
   });
+});
+
+describe('幽灵保域渲染门：帧邻查路径（mask8 auto 帧回退）', () => {
+  it('幽灵邻格不算同型连接（原版 active() 门）：U 位与 UL/UR 角位清零', () => {
+    const { st } = makeWorld();
+    const t = T.STONE;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) st.setTile(10 + dx, 50 + dy, t);
+    }
+    const same = (v: number) => v === t;
+    expect(mask8(st, 10, 50, t, same)).toBe(255);          // 全连接基线
+    st.deactivateTile(10, 49);                             // 上邻 → 幽灵残型（type 保留）
+    expect(st.type[st.idx(10, 49)]).toBe(t);
+    // vanilla 位序 U=1 UL=16 UR=32：幽灵上邻 = 空气 = 暴露边（type-only 旧读会误连 255）
+    expect(mask8(st, 10, 50, t, same)).toBe(255 - 1 - 16 - 32);
+    // 恢复 active 后回到全连接（门只作用 flags=0 的格）
+    st.setTile(10, 49, t);
+    expect(mask8(st, 10, 50, t, same)).toBe(255);
+  });
+});
+
+describe('幽灵保域渲染门：仙人掌贴图沙型扫描（cactusTextureFor）', () => {
+  it('幽灵沙不定沙型（视同空气继续扫）；活性沙照定', () => {
+    const { st } = makeWorld();
+    const CACT = TILE_BY_KEY['v_80_cactus']!;
+    const EBON = TILE_BY_KEY['v_112_ebonsand_block']!;
+    st.setTile(5, 40, CACT);
+    st.setTile(5, 41, EBON);
+    const atlas = { ensureVImage: (n: string) => ({ name: n }) } as never as Parameters<typeof cactusTextureFor>[0];
+    expect((cactusTextureFor(atlas, st, 5, 40) as { name: string }).name).toBe('vanilla/Evil_Cactus.png');
+    st.deactivateTile(5, 41);                              // 幽灵黑檀沙
+    expect((cactusTextureFor(atlas, st, 5, 40) as { name: string }).name).toBe('vanilla/Tiles_80.png');
+  });
+});
+
+describe('幽灵保域渲染门：真实生成世界渲染缓存', () => {
+  it('幽灵残型零像素权重：批量清除残型后 fillBand 缓存逐位不变', async () => {
+    const world = await generateWorld({ width: 2100, height: 600, seedText: '9293480', evil: 0 });
+    const st = world.store;
+    // 幽灵普查（非退化门）：保域后 flags=0 && type≠0 必须存在（x86 对齐行为本体）
+    let ghosts = 0;
+    for (let i = 0; i < st.w * st.h; i++) if (st.flags[i] === 0 && st.type[i] !== 0) ghosts++;
+    expect(ghosts).toBeGreaterThan(0);
+    const mm = new Minimap(world);                         // 同步全量 fillBand
+    const before = mm.p32!.slice();
+    // 抽样 300 个幽灵格批量清除残型：渲染缓存不得有任何像素变化
+    //（幽灵格若被按 type 直画,清除其 type 必然改变该格颜色 = 本断言抓的就是那条 bug）
+    let sampled = 0;
+    outer: for (let y = 0; y < st.h; y++) {
+      for (let x = 0; x < st.w; x++) {
+        const i = st.idx(x, y);
+        if (st.flags[i] === 0 && st.type[i] !== 0) {
+          st.setTile(x, y, 0);
+          if (++sampled >= 300) break outer;
+        }
+      }
+    }
+    expect(sampled).toBeGreaterThan(0);
+    for (let k = 0; k < 40; k++) mm.flushDirty();          // 24 chunk/次,40 次必排空
+    expect(Array.from(mm.p32!)).toEqual(Array.from(before));
+  }, 240000);
 });

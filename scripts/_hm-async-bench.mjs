@@ -18,7 +18,7 @@ await sleep(400);
 // 需要一个"未困难化"世界:RainLab 已被上次 job 置 hardMode——新建专用世界
 await page.click('.sw-vsel [data-act=new]');
 await page.waitForSelector('[data-f=name]', { timeout: 10000 }); await sleep(300);
-await page.click('[data-f=name]'); await page.keyboard.type('HmLab'); await sleep(120);
+await page.click('[data-f=name]'); await page.keyboard.type('HmLab2'); await sleep(120);
 await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-opt')][0]?.click());
 await sleep(80);
 await page.click('[data-act=create]');

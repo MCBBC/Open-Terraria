@@ -14,6 +14,7 @@ import type { VDust } from '../src/fx/VanillaDust';
 import {
   ParticleOrchestraType, writeParticleModule, readParticleModule,
 } from '../src/net/syncModules';
+import * as syncModulesNS from '../src/net/syncModules';
 import { NetModule, NetReader } from '../src/net/protocol';
 import {
   terraBladeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx,
@@ -89,8 +90,12 @@ const VANILLA_ENUM = [
 
 describe('L6 长尾批·枚举值域（vanilla 序列直译）+ wire 往返', () => {
   it('enum 全表值 == vanilla 1458 序列', () => {
+    // ★TS2475 归零（2026-09-03 顺手,同文件锚同步批）：const enum 值不得进任意表达式
+    //  （含 as cast——原 (ParticleOrchestraType as Record..)[name] 自 9-1 syncModules
+    //  const enum 化起即 type 红）——动态查表改经 namespace 对象 cast,运行时语义不变
+    const enumTable = syncModulesNS as unknown as Record<string, Record<string, number>>;
     VANILLA_ENUM.forEach((name, i) => {
-      expect((ParticleOrchestraType as unknown as Record<string, number>)[name]).toBe(i);
+      expect(enumTable.ParticleOrchestraType[name]).toBe(i);
     });
   });
   it('module8 write→read 往返保真（新增长尾型抽样）', () => {

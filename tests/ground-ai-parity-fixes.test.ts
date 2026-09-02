@@ -1,7 +1,7 @@
 // 2026-08-19 台账 C 批（地面主力）+ A 批（null-player 早退冻结）回归。
 // 驱动方式 = 原型直调（drive 私有 AI 方法）+ 少量 fixedUpdate 全链（卡死计数须走
 // fixedUpdate 的 prevX 快照）。标杆 Terarria1456/Terraria/NPC.cs，行号见各用例注释。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
@@ -453,7 +453,16 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     const e = spawn(h, 449, 40, FLOOR - 2);
     settle(h, e);
     e.ai2 = 0; e.ai1 = 0; e.vx = 0;
-    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    // ★F20 flake 清偿（2026-09-03）：开瞄门矢量含 ±40 抖动（Next(−40,41) 双轴,
+    //  开瞄支 gdx/gdy）——无种子时 |gdy|>32 掷到 1/2/4/5 档,批量跑偶发 4。
+    //  Math.random 恒 0.5 → 抖动=floor(0.5×81)−40=0（居中）,射程门必中、姿态
+    //  分档确定=3；try/finally restore 防泄漏进后续用例
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    } finally {
+      rnd.mockRestore();
+    }
     expect(e.ai2).toBe(3);             // 开瞄成功（射程门内）
   });
 });

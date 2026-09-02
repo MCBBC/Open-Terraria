@@ -1994,7 +1994,7 @@ export class Game implements GameHooks {
   private forceHalloweenForToday = false;
   private forceXMasForToday = false;
   private tickCount = 0;
-  /** 肉山死亡困难模式转换分步 job（PR-async）：updateWorld 每 tick ≤2.5ms 预算步进,
+  /** 肉山死亡困难模式转换分步 job（PR-async）：updateWorld 每 tick ≤5ms 预算步进(60fps 帧≈8ms/120Hz≈7ms,均在线内),
    *  完成置 null。step()=true 即全部瓦片工作完成。 */
   private hardmodeJob: HardmodeJob | null = null;
   /** ★PR-async 落盘前快收口：job 进行中存档会把 hardMode=true+半成品转化写盘，
@@ -7159,6 +7159,25 @@ export class Game implements GameHooks {
         });
       }
     }
+    // 行走遥测:敌怪每 30t 采样(与 npcMove 同构;2026-09-03 用户需求——丛林史莱姆
+    // 水囊弹跳案取证时敌怪无轨迹记录,排查全靠手工探针)。字段与 npcMove 对齐:
+    // eT/eP=unembedPass 嵌入计数/横推预算（电梯环取证关键旗）,wet=湿身态。
+    if (this.tickCount % 30 === 0) {
+      for (const e of this.entities.enemies) {
+        if (e.dead) continue;
+        const ex = e as unknown as { cx: number; cy: number; vx: number; vy: number;
+          facing: number; hitWall: boolean; hitHead: boolean; onGround: boolean;
+          wet?: boolean; embedTicks?: number; embedPushed?: number;
+          vanillaId: number | null; key: string; def?: { key?: string } };
+        this.recorder.log('enemyMove', {
+          key: ex.key, id: ex.vanillaId,
+          x: Math.round(ex.cx), y: Math.round(ex.cy),
+          vx: +ex.vx.toFixed(2), vy: +ex.vy.toFixed(2), dir: ex.facing,
+          hw: !!ex.hitWall, hh: !!ex.hitHead, g: !!ex.onGround,
+          wet: !!ex.wet, eT: ex.embedTicks ?? 0, eP: ex.embedPushed ?? 0,
+        });
+      }
+    }
     // 玩家采样(同周期)
     if (this.tickCount % 30 === 15) {
       const p = this.player;
@@ -8729,7 +8748,7 @@ export class Game implements GameHooks {
     if (this.hardmodeJob) {
       const hmT0 = performance.now();
       let hmDone = false;
-      do { hmDone = this.hardmodeJob.step(); } while (!hmDone && performance.now() - hmT0 < 2.5);
+      do { hmDone = this.hardmodeJob.step(); } while (!hmDone && performance.now() - hmT0 < 5);
       if (hmDone) this.hardmodeJob = null;
     }
     this.evolution.update();
@@ -15778,6 +15797,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return { strength: rng.int(5, 9), steps: rng.int(5, 9) };
   }
 
+  /** 锁矿首掷极性（SavedOreTiers 首砸,WorldGen.cs:49385-49392 钴档同构直译——
+   *  :49387 先置 base 107、:49389 `genRand.Next(2) == 0` 才改写 :49390 alt 221；
+   *  秘银 :49419-49426(108/222)、精金 :49451-49458(111/223) 同构）：
+   *  掷 0 → 替代矿(alt)、掷 1 → 常规矿(base)。
+   *  ★此前 `int(0,1)===0 ? base : alt` 反极性（注释对、代码反）。 */
+  static altarOreTierPick(rng: RNG, base: number, alt: number): number {
+    return rng.int(0, 1) === 0 ? alt : base;
+  }
+
+  /** 祭坛矿脉条数取整（WorldGen.cs:49473 `for (int k = 0; (double)k < num3; k++)`）：
+   *  循环条件直译 = ceil 语义——num3=3.5 → k=0..3 共 4 条、3.0 → 3 条、
+   *  ≤0 → 0 条（Math.ceil 负值不进循环体）。★此前 Math.floor 对分数脉恒少 1 条。 */
+  static altarVeinCount(veins: number): number {
+    return Math.ceil(veins);
+  }
+
   /** 砸祭坛 = 原版 KillTile case 26 → SmashAltar（WorldGen.cs:48949）1:1：
    *  altarCount%3 选矿档(0 钴/钯、1 秘银/山铜、2 精金/钛)，/3+1 为波次衰减；
    *  矿脉数 num3 = w/4200×310 − 85×档 ×0.85 ÷ 波次——钴档恒 ×1.05（:49008），
@@ -15820,7 +15855,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // initializeHardMode 备案口径一致);矿种 roll 同流(:49384-49393 SavedOreTiers 首砸)
     const rng = new RNG((this.world.seed ^ 0x5eed_0001) | 0);
     if (this.world.savedOreTiers[td.slot] === -1) {
-      this.world.savedOreTiers[td.slot] = rng.int(0, 1) === 0 ? td.base : td.alt; // Next(2)==0 → 替代
+      // Next(2)==0 → 替代矿(alt)/否则 base（:49385-49392/:49419-49426/:49451-49458，
+      // 极性见 altarOreTierPick——此前 ===0→base 反极性）
+      this.world.savedOreTiers[td.slot] = Game.altarOreTierPick(rng, td.base, td.alt);
     }
     const oreSheet = this.world.savedOreTiers[td.slot];
     const ore = TILE_INTERNAL_BY_SHEET.get(oreSheet) ?? TILE_BY_KEY['ore_cobalt'];
@@ -15833,7 +15870,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (tier === 0) veins *= 1.05;              // 钴档恒 ×1.05（:49008）
     if (oreSheet !== td.base) veins *= 0.9;     // 替代矿更稀有（:48991/:49016/:49029）
     const band = tier === 0 ? this.world.groundLevel : tier === 1 ? this.world.rockLevel : (this.world.rockLevel * 2 + st.h) / 3;
-    const cap = Math.floor(veins);
+    // 矿脉条数 = ceil 语义（:49473 `(double)k < num3` 循环直译,见 altarVeinCount）
+    const cap = Game.altarVeinCount(veins);
     for (let k = 0; k < cap; k++) {
       // :49488-49494 OreRunner(Next(100,w-100), Next((int)band, h-150), …)
       const x = rng.int(100, st.w - 100);
@@ -16459,6 +16497,45 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (sheet === 404) dmg += 5;
       if (sheet === 165 || TILE_ROPE_SHEETS.has(sheet) || sheet === 199) dmg = 100;
       if (sheet === 504) dmg = 0;
+      // ★SW-A1(2026-09-03) GetPickaxeDamage 尾段命中转移/锁定帧特例补遗（Player.cs:54628-54689）：
+      // ① tile 128 Mannequin/269 Womannequin（:54628-54641）【格在本仓不可达=不移植，仅备案】。
+      //    原版：frameX==18||54（右列裸架；帧编码=100×挂物数+36×style+18×列,CheckMan/
+      //    CheckWoman :47001-47008 同式剥系）→ x-- 后 hitTile.UpdatePosition(hitBufferIndex,
+      //    x,y) 把本击伤害缓冲改址到左列格（跨列共享池）；随后 frameX>=100（挂甲标记,
+      //    ItemCheck_TryPlacingWearablesOnMannequins :53345+ 写）→ num=0+Main.blockMouse=true
+      //    （:44357 单帧吞点击）。不移植依据：TILE_DEFS 虽有 legacy 槽
+      //    （v_128_mannequin_legacy/v_269_womannequin_legacy,tiles.ts:553/590）但三条进入通道
+      //    全断——(a)放置：1.4.5.7 无物品 createTile=128/269（Item.cs:7310-7321 case 498
+      //    createTile 128→470 终值 placeStyle 0;:21280 case 1989 269→470 placeStyle 2;
+      //    :35346 case 3977 269→475）;(b)世界生成：PlaceMan/PlaceWoman 仅 PlaceTile(128/269)
+      //    可达（WorldGen.cs:60383-60391）=同上无调用方;(c).wld 导入：WldParser.ts:144
+      //    version<210 一律拒收且 1.4+ 世界模特恒为 470（style 0/1 帧带）→ 两 id 永不被
+      //    命中,写死即死代码。
+      // ② tile 334 legacy 武器架（:54642-54689）【可达（WldImport 老世界导入）→只移植锁定帧】。
+      //    y 命中转移（:54644-54655 frameY==0→y++/frameY==36→y-- 后 hitTile.UpdatePosition
+      //    改址到同行中行格=三行共享池,池在中行同列）不移植：本仓 hitTiles（HitTile.ts 键值
+      //    Map）无 UpdatePosition/改址 API 且积累点在调用方（tryMine addDamage(tx,ty) 后
+      //    >=100 才 kill）——tileHitDamage 只返回标量,方法体内等价实现（迁池/对邻格结算）
+      //    会令 >=100 判定读不到转移后的池（顶/底行永远攒不满 100）。行为差仅限跨行混打
+      //    须单行攒满 100;同格连打时序与原版全同（整架仍经 TileFrame case 334→
+      //    CheckWeaponsRack :46796 整件塌）。
+      //    锁定帧（:54656-54688）=可移植：本格 frameX>=5000（PlaceWeapon 持武标记
+      //    5000+100+itemType/10000+prefix,二行带 20000/25000 :54789-54798）,或裸格按
+      //    num3=floor(frameX/18)%3 左移锚格（col0;frameX 按列编码,与原版 y 转移后读锚格
+      //    同值）后锚格 frameX>=5000（原版 while 剥 5000 计 num4,num4!=0→flag2——
+      //    frameX>=5000 蕴含 num4>=1,flag2≡flag）→ num=0:持武架不可挖,须先取枪。
+      //    可达面：334 经 WldImport sheetFallback copyFrame 逐字入世界（RACK334 解码
+      //    WldImport.ts:586+ 还原裸架,但七批④前旧存档/杂波帧可残留 5000 系标记——
+      //    wallhang stripRackFx（m-4 批）同款容忍）→ 本仓无 334 写入面,
+      //    标记帧唯此两源。Main.blockMouse 本仓无对应输入旗标,不移植,仅 dmg=0。
+      if (sheet === 334) {
+        const wr = this.world.store;
+        const rackFx = wr.frameX[wr.idx(tx, ty)];
+        const n3 = Math.floor(rackFx / 18) % 3;   // :54661-54662 列内偏移
+        const lockFx = rackFx >= 5000 ? rackFx    // :54657 本格带标记
+          : (tx - n3 >= 0 ? wr.frameX[wr.idx(tx - n3, ty)] : 0);   // :54663-54668 锚格（越界=无锁）
+        if (lockFx >= 5000) dmg = 0;              // :54679-54688 num=0
+      }
     } else {
       // 斧/锤点在非斧族 tile：原版该分支无伤害（hammer 墙路径在上方已分流）
       dmg = 0;
@@ -16990,9 +17067,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // 复刻珠/复刻祭坛（696/695=1.4.4 复刻装饰件，物品 5467-5470 合成放置
-    // Recipe.cs:14689/14709——本仓物品/配方侧未入 DB=格 dormant，机制面先 1:1）：
-    // 破坏只掉对应复刻物品【无】真珠的计数/召主链（:54713 case 696 仅 Item.NewItem；
-    // 695 :49893 `(num6==0)?5467:5468`），音=尾段 flag 4/13 分档（:54801-54806）
+    // Recipe.cs:14689/14709——物品阶段5自动注册+配方在册+placeStyle 走
+    // PLACE_STYLE_BACKFILL_1458 回填（SW-C1），格【可达】=本分支为活代码；
+    // 放置帧 FurnitureStyle style*fw*18 → 695 猩红=54/696 猩红=36，与下方
+    // 猩红谓词同口径）：破坏只掉对应复刻物品【无】真珠的计数/召主链
+    // （:54713 case 696 仅 Item.NewItem；695 :49893 `(num6==0)?5467:5468`），
+    // 音=尾段 flag 4/13 分档（:54801-54806）
     if (type === TILE_BY_KEY['v_696_replica_shadow_orb']) {
       const i696 = st.idx(x, y);
       const crimson696 = st.frameX[i696] >= 36;          // flag 同 smashOrbHeart isDemonHeart
@@ -17001,7 +17081,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.chunks.markDirtyArea(ax696 - 1, ay696 - 1, ax696 + 2, ay696 + 2);
       for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) st.setTile(ax696 + dx, ay696 + dy, 0);
       const key696 = VANILLA_ITEM_KEY_BY_ID[crimson696 ? 5470 : 5469];
-      if (key696) this.spawnDrop(ax696 * TILE + 8, ay696 * TILE + 8, key696, 1, 0, -2); // 物品未入 DB=静默（债）
+      if (key696) this.spawnDrop(ax696 * TILE + 8, ay696 * TILE + 8, key696, 1, 0, -2); // SW-C1 placeStyle 回填后=真掉落
       if (crimson696) this.sfx.playWavFile('NPC_Killed_1', 1, ax696 * TILE + 16, ay696 * TILE + 16);
       else this.sfx.play('shatter', 1, ax696 * TILE + 16, ay696 * TILE + 16);
       return;

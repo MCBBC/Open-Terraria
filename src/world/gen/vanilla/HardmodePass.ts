@@ -56,13 +56,20 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof sh === 'number' && !SHEET_TO_INTERNAL.has(sh)) SHEET_TO_INTERNAL.set(sh, i);
 }
 const id = (sheet: number): number => SHEET_TO_INTERNAL.get(sheet) ?? 0;
+/** 内部 tile id → sheet id 直查 LUT（PR-async 性能刀：GERunner 热循环每格一次
+ *  TILE_DEFS 对象图游走 ≈40-80ns → Int16Array 直读 ≈2ns;~4.5 亿格合计省 15-30s） */
+const SHEET_LUT = new Int16Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const sh = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof sh === 'number') SHEET_LUT[i] = sh;
+}
 
 /** TileID.Sets（TileID.cs:329-347）：回填门与转化表用 */
 const SET_CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
 const SET_HALLOW = new Set([109, 492, 117, 116, 164, 402, 403, 115]);
 const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
 const sheetOf = (st: TileStore, x: number, y: number): number =>
-  TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1;
+  SHEET_LUT[st.type[st.idx(x, y)]];
 
 /** GERunner（57 cs:76923-77214 / 56 76385-76683）1:1。good=true 神圣带；false 时按
  *  world.crimson 走猩红/腐化表。hive>200k 门（flag）：全图 225 Hive 计数 >200000 时条带穿
@@ -74,6 +81,13 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
   good: boolean, crimson: boolean, lowTilesGate: boolean): Generator<void, void, void> {
   if (lowTilesGate) return;                              // ★F4③ Skyblock.lowTiles（cs:76941）
   const w = st.w, h = st.h;
+  // ★PR-async 内联（2026-09-03）：UnifiedRandom.InternalSample 逐字转录
+  //  （decompiled Terraria.Utilities/UnifiedRandom.cs:68-88—— Terraria 自带变体无
+  //  inextp 双指针,num2=inext+21 环 55）。rng.seedArray 共享引用直读直写,inext 走
+  //  生成器局部（跨 yield 存活,列 yield/返回前回写）;每格省一次方法调用+区间包装,
+  //  值序/消费序与 rng.nextIntRange(-10,11) 位级一致（hardmode-async-matrix 锁）。
+  const sa = (rng as unknown as { seedArray: Int32Array }).seedArray;
+  const ROLL_HOOK = (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll;
   // ★F2'（2026-09-02 review 回滚外提）：hive 扫描回归本函数内部逐 runner 新鲜扫描
   //  （原版 cs:77013 在 GERunner 体内）——外提版在"runner1 带内转化 225 使计数跌破
   //  20 万阈值"的极端世界会改变 runner2 的 flag=终态偏差;扫描本身是可切片单元,
@@ -98,6 +112,7 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
   let dx = rng.nextIntRange(-10, 11) * 0.1, dy = rng.nextIntRange(-10, 11) * 0.1;
   if (speedX !== 0 || speedY !== 0) { dx = speedX; dy = speedY; }
   let running = true;
+  let inextLoc = (rng as unknown as { inext: number }).inext;   // ★捕获必须在 V 带掷骰之后(否则重放错位)
   while (running) {
     let x0 = Math.trunc(vx - num4 * 0.5), x1 = Math.trunc(vx + num4 * 0.5);
     let y0 = Math.trunc(vy - num4 * 0.5), y1 = Math.trunc(vy + num4 * 0.5);
@@ -109,10 +124,18 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
       for (let n = y0; n < y1; n++) {
         // 菱形刷（cs:77003）：|dm|+|dn| < 带宽/2 × (1±1.5% 逐格抖动)——★F1 同款右开
         // 区间 Next(-10,11)，含 +10 端点
-        if (Math.abs(m - vx) + Math.abs(n - vy) >= num2 * 0.5 * (1 + rng.nextIntRange(-10, 11) * 0.015)) continue;
+        let iN = inextLoc + 1; if (iN > 55) iN = 1;
+        let iP = iN + 21; if (iP > 55) iP -= 55;
+        let smp = sa[iN] - sa[iP];
+        if (smp === 2147483647) smp--;
+        smp += (smp >> 31) & 0x7fffffff;
+        sa[iN] = smp;
+        inextLoc = iN;
+        ROLL_HOOK?.(smp, rng);
+        if (Math.abs(m - vx) + Math.abs(n - vy) >= num2 * 0.5 * (1 + (Math.trunc(smp * 4.656612875245797e-10 * 21) - 10) * 0.015)) continue;
         const ii = st.idx(m, n);
         const wl = st.wall[ii];
-        const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? -1;
+        const sh = SHEET_LUT[st.type[ii]];
         // ★NB-A 级联（2026-09-02，36,288 格差异的单一根因）：原版每支 type 写后紧跟
         //  SquareTileFrame(m,n)（57 :77011/:77014/:77017/…逐支内联；本体 cs:81462）——
         //  3×3 邻域 TileFrame 重框（苔藓/植被邻格改型）+ 失支撑格 KillTile。墙写四支
@@ -178,16 +201,26 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (sh === 397) { st.type[ii] = id(398); }
         }
       }
+      (rng as unknown as { inext: number }).inext = inextLoc;   // yield 边界回写(代价 1 写)
       yield;                                             // PR-async：每刷写列一个单元
     }
     // 速度积分 + 扰动（57 :77197-77212 / 56 76669-76682）：val2.X += Next(-10,11)*0.05，
     // 钳 speedX±1（★F1：同样补 +10 端点）
     vx += dx; vy += dy;
-    dx += rng.nextIntRange(-10, 11) * 0.05;
+    let sI = inextLoc + 1; if (sI > 55) sI = 1;
+    let sP = sI + 21; if (sP > 55) sP -= 55;
+    let sV = sa[sI] - sa[sP];
+    if (sV === 2147483647) sV--;
+    sV += (sV >> 31) & 0x7fffffff;
+    sa[sI] = sV;
+    inextLoc = sI;
+    ROLL_HOOK?.(sV, rng);
+    dx += (Math.trunc(sV * 4.656612875245797e-10 * 21) - 10) * 0.05;
     if (dx > speedX + 1) dx = speedX + 1;
     if (dx < speedX - 1) dx = speedX - 1;
     if (vx < -num2 || vy < -num2 || vx > w + num2 || vy > h + num2) running = false;
   }
+  (rng as unknown as { inext: number }).inext = inextLoc;      // 收尾回写(backfill/后续消费面接续)
 }
 
 /** 洞穴墙回填 OnlyWalls 白名单（cs:31979 原文列表照抄：0/54-59/61/185/212-215/2/196-199/
@@ -349,7 +382,7 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
     const py = rng.nextIntRange(pyMin, h - 190);         // Next(top, maxY-bottom)
     if (!st.inBounds(px, py)) continue;
     const ii = st.idx(px, py);
-    const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? -1;
+    const sh = SHEET_LUT[st.type[ii]];
     let wallId = 0;
     if (SET_CRIMSON.has(sh)) wallId = 192 + rng.nextInt(4);       // 猩红墙 192-195
     else if (SET_CORRUPT.has(sh)) wallId = 188 + rng.nextInt(4);  // 腐化墙 188-191

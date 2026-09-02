@@ -288,7 +288,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(25, { entry: 's24', steps: [{ dump: 70, base: 69, run: (st, gs, rng) => runQuickCleanupPass(st, rng, gs) }] });
   P.set(26, { entry: 's25', steps: [{ dump: 71, base: 70, run: (st, gs, rng) => runPotsPass(st, rng, gs) }] });
   P.set(27, { entry: 's26', steps: [{ dump: 72, base: 71, run: (st, _gs, rng) => runHellforgesPass(st, rng) }] });
-  P.set(28, { entry: 's27', steps: [{ dump: 73, base: 72, run: (st, gs) => spreadingGrassPass(st, gs) }] });
+  P.set(28, { entry: 's27', steps: [{ dump: 73, base: 72, run: (st, gs, rng) => spreadingGrassPass(st, gs, rng) }] });
   P.set(29, { entry: 's28', steps: [{ dump: 74, base: 73, run: (st, gs, rng) => runSurfaceOreAndStonePass(st, rng, gs) }] });
   P.set(30, { entry: 's29', steps: [{ dump: 75, base: 74, run: (st, gs, rng) => runFallenLogsPass(st, rng, gs) }] });
   P.set(31, {

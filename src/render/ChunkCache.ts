@@ -827,7 +827,9 @@ export class ChunkCache {
           for (let tx = x0 - EXT; tx < x0 + CHUNK + EXT; tx++) {
             if (!st.inBounds(tx, ty)) continue;
             const i = st.idx(tx, ty);
-            if (st.type[i] !== v5) continue;
+            // ★幽灵保域（2026-09-03）：flags bit0（active）首门——幽灵残型（flags=0,
+            // type≠0,x86 对齐行为）不进树干静态补绘（主遍 665 同款门）
+            if (st.type[i] !== v5 || !st.flags[i]) continue;
             const fx = st.frameX[i], fy = st.frameY[i];
             const def = TILE_DEFS[st.type[i]];
             const sheet = def?.vanilla?.sheet ?? 5;

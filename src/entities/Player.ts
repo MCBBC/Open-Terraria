@@ -4815,7 +4815,9 @@ export class Player extends Entity {
         for (let ty = ty0; ty <= ty1; ty++) {
           if (!st.inBounds(tx, ty)) continue;
           const t = st.type[st.idx(tx, ty)];
-          if (t === 0) continue;
+          // ★幽灵保域（2026-09-03）：active() 门补 flags bit0（原版 Collision.cs:3404
+          //  `!Main.tile[i,j].active() → continue`）——幽灵蛛网/蜂蜜块不黏滞
+          if (t === 0 || (st.flags[st.idx(tx, ty)] & 1) === 0) continue;
           const cell = { x: tx * TILE, y: ty * TILE };
           const pad = t === honeyId ? 1 : 0;
           if (this.x + this.w > cell.x - pad && this.x < cell.x + TILE + pad

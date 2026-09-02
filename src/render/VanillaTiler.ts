@@ -449,7 +449,13 @@ export function mask8(st: TileStore, x: number, y: number, type: number, same: (
     if (dx < 0) need |= 0b1000; else if (dx > 0) need |= 0b0100; // 对角在右→left / 在左→right
     return need;
   };
-  const at = (ax: number, ay: number) => st.inBounds(ax, ay) && same(st.type[st.idx(ax, ay)]);
+  // ★幽灵保域（2026-09-03）：邻格首查 flags bit0——幽灵残型（flags=0,type≠0）视同
+  // 空气（原版 active() 门;与 VanillaFraming 链 mkTile 的 act 门同语义）
+  const at = (ax: number, ay: number) => {
+    if (!st.inBounds(ax, ay)) return false;
+    const ai = st.idx(ax, ay);
+    return !!st.flags[ai] && same(st.type[ai]);
+  };
   const cHalf = !!st.half[st.idx(x, y)];
   const cNum = normalizedVidOf(type);
   let m = 0;
@@ -463,7 +469,7 @@ export function mask8(st: TileStore, x: number, y: number, type: number, same: (
     if ((edges(oi) & nNeed) !== nNeed) continue;
     if (!st.inBounds(x + dx, y + dy)) continue;
     const ot = st.type[oi];
-    const chain = same(ot) || frameMergesWith(type, ot);
+    const chain = !!st.flags[oi] && (same(ot) || frameMergesWith(type, ot));   // ★幽灵残型不算连接
     if (!chain) continue;
     if (!halfNeighborConnects(DIRCHAR[di], cHalf, cNum, !!st.half[oi], vanillaIdOf(ot),
       !!TILE_DEFS[ot]?.platform, true)) continue;
@@ -663,8 +669,11 @@ export function drawTreeCell(
       for (let i = 0; i < 100; i++) {
         const ty = y + i;
         if (ty >= st.h) break;
-        const t = st.type[st.idx(x, ty)];
-        if (t === 0) continue;
+        const pi = st.idx(x, ty);
+        const t = st.type[pi];
+        // ★幽灵保域（2026-09-03）：幽灵残型视同空气继续扫（原版 GetPalmTreeVariant
+        // :3519-3543 对消费格查 active()——幽灵沙不得定沙型）
+        if (t === 0 || !st.flags[pi]) continue;
         const tk = TILE_DEFS[t]?.key;
         palmType = tk === 'v_234_crimsand_block' ? 1 : tk === 'v_116_pearlsand_block' ? 2
           : tk === 'v_112_ebonsand_block' ? 3 : 0;
@@ -857,7 +866,9 @@ export function drawTreeCell(
 export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): ImageBitmap | HTMLImageElement | null {
   let img = atlas.ensureVImage('vanilla/Tiles_80.png');
   // 角色判定：与 cactusFrameAt 同一列高比较 → 决定扫描列偏移
-  const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === TILE_BY_KEY['v_80_cactus'];
+  // ★幽灵保域（2026-09-03）：幽灵残型不算仙人掌/不算沙（cactusFrameAt 同款 flags 门）
+  const isC = (ax: number, ay: number) =>
+    st.inBounds(ax, ay) && !!st.flags[st.idx(ax, ay)] && st.type[st.idx(ax, ay)] === TILE_BY_KEY['v_80_cactus'];
   let top = y;
   while (isC(x, top - 1)) top--;
   const colH = (ax: number) => { let n = 0; while (isC(ax, top + n)) n++; return n; };
@@ -867,8 +878,9 @@ export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y
   const crimsand = TILE_BY_KEY['v_234_crimsand_block'] ?? -1;
   const pearlsand = TILE_BY_KEY['v_116_pearlsand_block'] ?? -1;
   for (let i = 0; i < 100 && y + i < st.h; i++) {
-    const t = st.type[st.idx(x + baseX, y + i)];
-    if (t === 0) continue;
+    const si2 = st.idx(x + baseX, y + i);
+    const t = st.type[si2];
+    if (t === 0 || !st.flags[si2]) continue;   // ★幽灵残型视同空气继续扫
     if (t === ebonsand) { img = atlas.ensureVImage('vanilla/Evil_Cactus.png') ?? img; break; }
     if (t === crimsand) { img = atlas.ensureVImage('vanilla/Crimson_Cactus.png') ?? img; break; }
     if (t === pearlsand) { img = atlas.ensureVImage('vanilla/Good_Cactus.png') ?? img; break; }
@@ -1174,7 +1186,9 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       if (!st.inBounds(ax, ay)) continue;
       const oi = st.idx(ax, ay);
       const ot = st.type[oi];
-      if (ot === 0) continue;
+      // ★幽灵保域（2026-09-03）：幽灵残型视同空气（原版合并邻查 active() 门;
+      // 链引擎 VanillaFraming 已门,此处为链未命中的 TEdit 近似回落路径同语义）
+      if (ot === 0 || !st.flags[oi]) continue;
       // 中心或邻居任一侧 BlockStyle 断边 → 该方向不连通（不算 same/merge）
       if ((cE & cNeed) !== cNeed || (edgesOf(oi) & nNeed) !== nNeed) continue;
       // 角方向:两个正交邻居的交叉边也要放行
@@ -1304,7 +1318,8 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       for (let k = 1; k <= 256; k++) {
         if (!st.inBounds(x - k, y)) break;
         const li = st.idx(x - k, y);
-        if (st.type[li] === type && st.frameX[li] === 0 && st.frameY[li] === 0) ax = k;
+        // ★幽灵保域（2026-09-03）：幽灵残型（零帧但 flags=0）不并进同物体 run
+        if (st.flags[li] && st.type[li] === type && st.frameX[li] === 0 && st.frameY[li] === 0) ax = k;
         else break;
       }
       ofx = (ax % fw) * 18;
@@ -1312,7 +1327,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       for (let k = 1; k <= 256; k++) {
         if (!st.inBounds(x, y - k)) break;
         const ui2 = st.idx(x, y - k);
-        if (st.type[ui2] === type && st.frameX[ui2] === 0 && st.frameY[ui2] === 0) ay = k;
+        if (st.flags[ui2] && st.type[ui2] === type && st.frameX[ui2] === 0 && st.frameY[ui2] === 0) ay = k;
         else break;
       }
       ofy = (ay % fh) * 18;

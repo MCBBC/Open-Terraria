@@ -284,3 +284,34 @@ describe('Arrow 遗留批金标（2026-09-02 ②）', () => {
     }
   });
 });
+
+// ===========================================================================
+// 斗篷星 alpha 渐减金标（2026-09-03）——723-726/1133 starY 通道接 α 面
+// ===========================================================================
+describe('斗篷星 alpha 渐减金标（2026-09-03）', () => {
+  it('⑨ 723 斗篷星：α=50 起 −15/t,线上钳 100 / Center.Y>=ai[1] 越线后钳 0（:7655/:24165-24176）', () => {
+    const game = makeGame(emptyWorld(), []);
+    const targetY = 120 * 16;
+    // 出生于目标线上方（100*16 < 120*16）——线上期 α 先减后上钳 100（num44）
+    const a = new Arrow(80 * 16, 100 * 16, 0, 2, 75, 5, 723, null, { star: { targetY } });
+    expect(a.starAlpha).toBe(50);                       // SetDefaults :7655（PROJ_ALPHA0 注入）
+    flyFrames(a, game, 1);
+    expect(a.starAlpha).toBe(100);                      // 50−15=35 <100 → 上钳 100
+    flyFrames(a, game, 10);
+    expect(a.starAlpha).toBe(100);                      // 线上恒钳 100
+    // 拽到目标线下（Center.Y >= ai[1]）→ 下限 0,−15/t 渐显至全亮
+    a.y = targetY + 8;
+    flyFrames(a, game, 1);
+    expect(a.starAlpha).toBe(85);
+    flyFrames(a, game, 6);
+    expect(a.starAlpha).toBe(0);                        // 85→70→…→0 下限 0
+    flyFrames(a, game, 5);
+    expect(a.starAlpha).toBe(0);
+    // 回归线：503 星怒星 α 面不变（255 起 −15/子步,线上钳 150——:24151-24158 num43;
+    //  EU=1 → 2 子步/拍 → 每游戏拍 −30,与原版 AI()×2 同拍）
+    const b = new Arrow(80 * 16, 100 * 16, 0, 2, 95, 5, 503, null, { star: { targetY } });
+    expect(b.starAlpha).toBe(255);
+    flyFrames(b, game, 1);
+    expect(b.starAlpha).toBe(225);                      // 255−15×2（150 钳未触及）
+  });
+});

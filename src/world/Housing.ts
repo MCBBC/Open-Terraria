@@ -536,9 +536,13 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   const sT = st.type[si];
   const sDef = sT ? TILE_DEFS[sT] : undefined;
   const sSheet = sDef ? (sDef.vanilla?.sheet ?? -1) : -1;
-  if (tileSolidLike(sT)
-    || (sT !== 0 && doorFrameBoundary(sSheet, st.frameX[si], st.frameY[si]))
-    || (sT !== 0 && extraSolid.has(sSheet))) {
+  // ★幽灵保域（2026-09-03）：BlockingWall/BlockingOpenGate/extraSolid 三支全在
+  //  nactive 门内（原版 WorldGen.cs:6108-6127 `Main.tile[x,y].nactive() → …`）
+  //  ——幽灵格（flags=0,type≠0）不封房不作门界,种子帧自检同域放行
+  if ((st.flags[si] & 1) !== 0
+    && (tileSolidLike(sT)
+      || (sT !== 0 && doorFrameBoundary(sSheet, st.frameX[si], st.frameY[si]))
+      || (sT !== 0 && extraSolid.has(sSheet)))) {
     lastRoomCheckFail = 'notValid';   // BlockingWall/BlockingOpenGate 族同域（未设 failureReason,归 notValid 档）
     return null;
   }
@@ -616,9 +620,12 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       // 原版先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
       // ScoreRoom 的 Housing_CheckIfInRoom(地板格) 依赖这一点
       const nsheet = ndef ? (ndef.vanilla?.sheet ?? -1) : -1;
-      if (tileSolidLike(nt)
-        || (nt !== 0 && doorFrameBoundary(nsheet, st.frameX[ni], st.frameY[ni]))
-        || (nt !== 0 && extraSolid.has(nsheet))) {
+      // ★幽灵保域（2026-09-03）：边界三支全在 nactive 门内（WorldGen.cs:6108-6127）
+      //  ——幽灵格可穿透,泛洪继续（houseTile 登记同门,原版 :6109 在 nactive 内）
+      if ((st.flags[ni] & 1) !== 0
+        && (tileSolidLike(nt)
+          || (nt !== 0 && doorFrameBoundary(nsheet, st.frameX[ni], st.frameY[ni]))
+          || (nt !== 0 && extraSolid.has(nsheet)))) {
         // 边界格同样登记 houseTile（原版在 tileSolid 短路前 :6090）——平台 19
         // 地板即"门"（R21:平台入口房不再一律 notValid）
         if (ndef) markHouseTile(ndef.vanilla?.sheet ?? -1);
@@ -659,7 +666,10 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   // isSolid 直扫会穿透平台地板落到下层他室的空气里,产出跨室幽灵 home
   // (2026-08-30 housing 旗重叠·副因B);且落点必须仍在本次泛洪的 tiles 集内。
   let fy = sy;
-  while (fy < st.h - 2 && !tileSolidLike(st.type[st.idx(sx, fy)])) fy++;
+  // ★幽灵保域（2026-09-03）：房界只认活跃格（泛洪侧同口径——幽灵格非 BlockingWall,
+  //  WorldGen.cs:6108 nactive 门）,幽灵残型继续下探
+  while (fy < st.h - 2
+    && !((st.flags[st.idx(sx, fy)] & 1) !== 0 && tileSolidLike(st.type[st.idx(sx, fy)]))) fy++;
   const startSolidLike = st.flags[st.idx(sx, sy)] && tileSolidLike(st.type[st.idx(sx, sy)]);
   const standIdx = st.idx(sx, Math.max(sy, fy - 1));
   if (startSolidLike || fy >= st.h - 2 || !tiles.has(standIdx)) {
@@ -707,7 +717,11 @@ export function findFreeHouse(
         // 水平长平台只从【左端】探针一次（左邻同 sheet = 长条中段），
         // 且上方格须非实心（房内侧）才值得泛洪
         const leftSame = st.inBounds(x - 1, y) && sheetOf(st.type[st.idx(x - 1, y)]) === sheetOf(t);
-        if (!leftSame && st.inBounds(x, y - 1) && !tileSolidLike(st.type[st.idx(x, y - 1)])) {
+        // ★幽灵保域（2026-09-03）：上方格"非实心"判定补 flags bit0（幽灵格=非实心,
+        //  泛洪可自其上方格起探——与 floodRoom 边界 nactive 门同口径）
+        const ai = st.idx(x, y - 1);
+        if (!leftSame && st.inBounds(x, y - 1)
+          && !((st.flags[ai] & 1) !== 0 && tileSolidLike(st.type[ai]))) {
           room = floodRoom(st, x, y - 1);
         }
       }

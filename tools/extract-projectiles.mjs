@@ -257,6 +257,19 @@ for (const { id, block } of blocks) {
       const line = lastMatch(ls, new RegExp(`^${f} = -?[\\d.]+f?;`));
       if (line) rec[f] = parseFloat(line.match(/-?[\d.]+/)[0]);
     }
+    // ★2026-09-03 640 行 extraUpdates 列缺修复：1457 SetDefaults 有六族经 MaxUpdates
+    //  属性别名直写（496 :5702 / 582 :6325 / 636 :6850 / 639 :6883 / 640 :6898 / 902 :8609）
+    //  ——P.cs:556-565 getter=extraUpdates+1 / setter `extraUpdates = value - 1`，即
+    //  MaxUpdates=N ≙ extraUpdates=N−1（每拍子步数,Update :16780 numUpdates=extraUpdates
+    //  走 >=0 循环 = N+1 步/拍,与仓内 Arrow u<=extraUpdates 同拍口径,3053-shadowflame-
+    //  cast.test.ts:270 同解读）。json 列语义=原版 extraUpdates 字段 → 折算 −1；
+    //  直写 `extraUpdates = ` 的族不经过此支（lastMatch 同行结果一致）。表达式形态
+    //  （639 `timeLeft = MaxUpdates * 45`）仍按既有限制跳过,不在本修范围。
+    const euLine = lastMatch(ls, /^(MaxUpdates|extraUpdates) = -?[\d.]+f?;/);
+    if (euLine) {
+      const euM = euLine.match(/^(MaxUpdates|extraUpdates) = (-?[\d.]+)f?;/);
+      if (euM) rec.extraUpdates = Number(euM[2]) - (euM[1] === 'MaxUpdates' ? 1 : 0);
+    }
     for (const f of BOOL_FIELDS) {
       if (ls.some((l) => l === `${f} = true;`)) rec[f] = true;
       else if (ls.some((l) => l === `${f} = false;`)) rec[f] = false;

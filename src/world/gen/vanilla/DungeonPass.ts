@@ -7382,6 +7382,11 @@ const snap: SnapFn = (name) => {
   //     （配额>0 时 Next(8) 不掷！C# num16>0||Next(8)==0）；S5-S7 每 attempt Next(W)+Next(H)
   //     +Desert 命中 Next(2)；deDropTrap 自身恰两掷 Next(6,12)/Next(6,14)。clump 五臂仍在其后。
   //   ★门=SW_I138_EARLY（★IIIII164 缺省 ON，=0 显式回退 IIII106b 账面）：与五臂 TileClump 同门共批。
+  //   ★IIIII192：EARLY 窗补标（x86 rig DungeonCrawler.cs:495-499 同位——EARLY i/o 包裹
+  //   DungeonGlobalEarlyDualDungeonFeatures.GenerateFeature 整段=本仓 S1..S9 新径∨dgEarly
+  //   旧径两态；此前 JS 仅旧径分支发行 ⇒ dual 链 EARLY 窗无行、+190 差只能借
+  //   PDH_o↔SPIKES_i 未标记窗间接测得，无法归因到臂）。
+  mk179F('EARLY', 'i');
   if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
     console.log(`GC-S7GATE styles=${gfStyles.length} pbg=${_gfSeatProgBounds === null ? 'null' : _gfSeatProgBounds.length} featRooms=${gfFeatRooms.length} flag=${i138EarlyGate() ? '1' : '0'}`);
   }
@@ -7721,37 +7726,46 @@ const snap: SnapFn = (name) => {
       const flagS1 = stlS1.Style === 5;
       let nCount = nAlt;
       let guard = 1000;
+      let s1att = 0, s1hit = 0, s1ok = 0;   // ★IIIII192 观测（零掷）
+      mk179R(`EAR|S1|st=${stlS1.Style}|i`);
       while (nCount > 0) {
         guard--;
         if (guard <= 0) break;
+        s1att++;
         const nx = bbS1.L + ri(0, bbS1.R - bbS1.L - 1);
         let ny = bbS1.T + ri(0, bbS1.B - bbS1.T - 1);
         while (!(actAt(nx, ny) !== 0) && ny < h - 10) ny++;
         ny--;
         if (!(actAt(nx, ny) !== 0) && wallAt(nx, ny) === stlS1.BrickWallType) {
+          s1hit++;
           const belowSheet = shOfAt(nx, ny + 1);
           const sft = dgECss(belowSheet);
           if (sft !== null && sft === (flagS1 ? 5 : 4)
             && belowSheet !== stlS1.BrickCrackedTileType && belowSheet !== stlS1.PitTrapTileType) {
             place3x2Altar(nx, ny, flagS1 ? 1 : 0);
-            if ((actAt(nx, ny) !== 0) && typAt(nx, ny) === insSh(26)) nCount--;
+            if ((actAt(nx, ny) !== 0) && typAt(nx, ny) === insSh(26)) { nCount--; s1ok++; }
           }
         }
       }
+      mk179R(`EAR|S1|st=${stlS1.Style}|o|att=${s1att}|hit=${s1hit}|ok=${s1ok}|rem=${nCount}`);
     }
     // ======== S2：orb 臂（cs:126-160）========
     for (const orbKey of [4, 5]) {
       if (!gfFeatRooms.some((rr) => rr.st === orbKey)) continue;
       const list = gfFeatRooms.filter((rr) => rr.st === orbKey).slice();
       let placed = nOrb;
+      let s2att = 0, s2ok = 0;              // ★IIIII192 观测（零掷）
+      mk179R(`EAR|S2|k=${orbKey}|i|n=${list.length}`);
       while (list.length > 0 && placed > 0) {
+        s2att++;
         const pick = list[rn(list.length)]!;
         const cx2 = Math.trunc((pick.L + pick.R) / 2);
         const cy2 = Math.trunc((pick.T + pick.B) / 2);
         addShadowOrbE(cx2, cy2, orbKey === 5);
-        if (typAt(cx2, cy2) === insSh(31)) placed--;
+        if (typAt(cx2, cy2) === insSh(31)) { placed--; s2ok++; }
         list.splice(list.indexOf(pick), 1);
       }
+      mk179R(`EAR|S2|k=${orbKey}|o|att=${s2att}|ok=${s2ok}|rem=${placed}`);
     }
     // ======== S3：bee larva 臂（cs:163-172；dict[9] 双座不可达备案）========
     {
@@ -7773,7 +7787,10 @@ const snap: SnapFn = (name) => {
       let n15 = nPitPerStyle;                               // num6（世界规模档）
       let n16 = wszE === 1 ? 4 : wszE === 2 ? 6 : 2;        // Flooded 配额（cs:192-197）
       if (list4.length === 0) continue;
+      let s4att = 0, s4ok = 0, s4f2 = 0;                    // ★IIIII192 观测（零掷）
+      mk179R(`EAR|S4|st=${stlS4.Style}|i|n=${list4.length}`);
       while (list4.length > 0 && n15 > 0) {
+        s4att++;
         const pick = list4[rn(list4.length)]!;              // list4[Next(count)]
         if (pick.bio) { list4.splice(list4.indexOf(pick), 1); continue; }
         const iw = pick.R - pick.L;                         // DungeonBounds.Width=R−L
@@ -7783,10 +7800,11 @@ const snap: SnapFn = (name) => {
         let wid = Math.trunc(iw / 2);
         let hgt = Math.trunc(Math.fround(ih * 0.75));
         const flag2 = n16 > 0 || rn(8) === 0;               // ★短路：配额>0 时 Next(8) 不掷
+        if (flag2) s4f2++;
         // styleHook：DungeonGenerationStyles.cs Shimmer/LivingWood/Beehive/Temple/LivingMahogany 覆写
         const styleHookOk = !(pick.st === 9 || pick.st === 10 || pick.st === 11
           || pick.st === 13 || pick.st === 14);
-        if (!styleHookOk) { list4.splice(list4.indexOf(pick), 1); continue; }
+        if (!styleHookOk) { mk179R(`EAR|S4X|st=${stlS4.Style}|rs=${pick.st}|hook=1`); list4.splice(list4.indexOf(pick), 1); continue; }
         const findSty = (cand: import('./DungeonStyles1457').DungeonStyleData | undefined):
           import('./DungeonStyles1457').DungeonStyleData | undefined => {
           if (!cand) return undefined;
@@ -7802,27 +7820,35 @@ const snap: SnapFn = (name) => {
           const got = findSty(s0);
           if (got) { styObj = got; break; }
         }
-        if (styObj === undefined) { list4.splice(list4.indexOf(pick), 1); continue; }
+        if (styObj === undefined) { mk179R(`EAR|S4X|st=${stlS4.Style}|rs=${pick.st}|sty=0`); list4.splice(list4.indexOf(pick), 1); continue; }
         /** 三段梯共用受理+计数尾（cs 成功支：features.Add→quota→num15--） */
         const pitTry = (wN: number, hN: number): boolean =>
           dualPitTrap(px, py, wN, hN, 2, 2, 8, flag2, styObj!, pick)
           ? ((flag2 && n16 > 0 && (n16--, true)), n15--, true)
           : false;
+        let stage = 0;
         if (!pitTry(wid, hgt)) {
           hgt = Math.max(10, Math.trunc(Math.fround(ih * 0.5)));      // 第二段收窄（cs:243）
           if (!pitTry(wid, hgt)) {
             wid = Math.trunc(Math.fround(Math.trunc(iw / 2) * 0.75));  // 第三段（cs:271,W/2 先整除）
-            pitTry(wid, hgt);
-          }
-        }
+            stage = pitTry(wid, hgt) ? 3 : 0;
+          } else { stage = 2; }
+        } else { stage = 1; }
+        if (stage > 0) s4ok++;
+        mk179R(`EAR|S4T|st=${stlS4.Style}|rs=${pick.st}|f2=${flag2 ? 1 : 0}|w=${wid}|h=${hgt}|sg=${stage}`);
         list4.splice(list4.indexOf(pick), 1);
       }
+      mk179R(`EAR|S4|st=${stlS4.Style}|o|att=${s4att}|ok=${s4ok}|f2=${s4f2}|rem=${n15}`);
     }
     // ======== S5/S6/S7：DropTrap 字典三臂（cs:304-412）========
     const dropArm = (roomStyleKey: number, styObj: import('./DungeonStyles1457').DungeonStyleData,
       budget: number, kindPick: 'random' | 'Slush' | 'Silt'): void => {
       const listX = gfFeatRooms.filter((rr) => rr.st === roomStyleKey).slice();
+      let datt = 0, dtile = 0, dkind = 0, dok = 0;          // ★IIIII192 观测（零掷）
+      const armName = roomStyleKey === 3 ? 'S5' : roomStyleKey === 2 ? 'S6' : 'S7';
+      mk179R(`EAR|${armName}|st=${roomStyleKey}|i|n=${listX.length}|bud=${budget}`);
       while (listX.length > 0 && budget > 0) {
+        datt++;
         const pick = listX[rn(listX.length)]!;
         let tries = 20;                                     // num17/num20/num23=20 内环
         const proj = { style: styObj.Style, brickTileType: styObj.BrickTileType, brickWallType: styObj.BrickWallType };
@@ -7835,9 +7861,11 @@ const snap: SnapFn = (name) => {
           while (sy < (h - 200) - 10 && !(actAt(px, sy) !== 0)) sy++;
           if (actAt(px, sy) === 0) continue;                 // C# 读 tile.active() 终判
           if (shOfAt(px, sy) !== styObj.BrickTileType) continue;
+          dtile++;
           const kind = kindPick === 'random' ? (rn(2) !== 0 ? 'Lava' : 'Sand')
             : kindPick === 'Slush' ? 'Slush' : 'Silt';
-          if (deDropTrap({ st, w, h, ws, uw: h - 200, rng,
+          if (kindPick === 'random') dkind++;
+          const okD = deDropTrap({ st, w, h, ws, uw: h - 200, rng,
             canGenerateFeatureAt: (qx, qy) => featOK(qx, qy, 0),
             // ★IIIII108c 第④刀：成功盒登记（cs SetBounds 直值,hitbox 半开语义同构）
             registerDropBox: (box) => {
@@ -7845,10 +7873,12 @@ const snap: SnapFn = (name) => {
               db.set(box.L, box.T, box.R, box.B);
               dropBoxes.push(db);
             } },
-            px, sy, proj, kind)) budget--;
+            px, sy, proj, kind);
+          if (okD) { budget--; dok++; }
         }
         listX.splice(listX.indexOf(pick), 1);
       }
+      mk179R(`EAR|${armName}|st=${roomStyleKey}|o|att=${datt}|tile=${dtile}|kind=${dkind}|ok=${dok}|rem=${budget}`);
     };
     for (const s0 of gfStyles) {
       if (s0.Style === 3) dropArm(3, s0, nDesert, 'random');
@@ -7898,8 +7928,10 @@ const snap: SnapFn = (name) => {
       if (!bbE) continue;
       if (stlE.Style === 3) {
         // arm1 ×num7：TileType=53(Sand) WallType=216(HardenedSand)（cs:443-477）
+        let a1att = 0, a1ok = 0;
+        mk179R(`EAR|CL|arm=1|st=3|i`);
         for (let nA = num7E, capA = 1000; nA > 0 && capA > 0;) {
-          capA--;
+          capA--; a1att++;
           const ax = bbE.L + ri(0, bbE.R - bbE.L - 1);
           const ay = bbE.T + ri(0, bbE.B - bbE.T - 1);
           if (!inW(ax, ay, 0) || st.wall[st.idx(ax, ay)] !== stlE.BrickWallType) continue;
@@ -7909,11 +7941,14 @@ const snap: SnapFn = (name) => {
             tileType: 53, wallType: 216,
             onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
           });
-          nA--;
+          nA--; a1ok++;
         }
+        mk179R(`EAR|CL|arm=1|st=3|o|att=${a1att}|ok=${a1ok}`);
         // arm2 ×num7：TileType=397(HardenedSand 块) WallType=216（cs:480-514）
+        let a2att = 0, a2ok = 0;
+        mk179R(`EAR|CL|arm=2|st=3|i`);
         for (let nB = num7E, capB = 1000; nB > 0 && capB > 0;) {
-          capB--;
+          capB--; a2att++;
           const bx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
           const by2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
           if (!inW(bx2, by2, 0) || st.wall[st.idx(bx2, by2)] !== stlE.BrickWallType) continue;
@@ -7923,11 +7958,14 @@ const snap: SnapFn = (name) => {
             tileType: 397, wallType: 216,
             onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
           });
-          nB--;
+          nB--; a2ok++;
         }
+        mk179R(`EAR|CL|arm=2|st=3|o|att=${a2att}|ok=${a2ok}`);
         // arm3 ×num8*2：TileType=404(DesertFossil) WallType=223；strength/steps=15+N(5)（cs:517-551）
+        let a3att = 0, a3ok = 0;
+        mk179R(`EAR|CL|arm=3|st=3|i`);
         for (let nC = num8E * 2, capC = 1000; nC > 0 && capC > 0;) {
-          capC--;
+          capC--; a3att++;
           const cx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
           const cy2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
           if (!inW(cx2, cy2, 0) || st.wall[st.idx(cx2, cy2)] !== stlE.BrickWallType) continue;
@@ -7937,15 +7975,18 @@ const snap: SnapFn = (name) => {
             tileType: 404, wallType: 223,
             onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
           });
-          nC--;
+          nC--; a3ok++;
         }
+        mk179R(`EAR|CL|arm=3|st=3|o|att=${a3att}|ok=${a3ok}`);
       }
       if (stlE.Style !== 2) {
         continue;                                               // cs:554 continue（styles 迭代）
       }
       // arm4 ×num8：TileType=147(SnowBlock) WallType=40（cs:561-597）
+      let a4att = 0, a4ok = 0;
+      mk179R(`EAR|CL|arm=4|st=2|i`);
       for (let nD = num8E, capD = 1000; nD > 0 && capD > 0;) {
-        capD--;
+        capD--; a4att++;
         const dx2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
         const dy2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
         if (!inW(dx2, dy2, 0) || st.wall[st.idx(dx2, dy2)] !== stlE.BrickWallType) continue;
@@ -7955,11 +7996,14 @@ const snap: SnapFn = (name) => {
           tileType: 147, wallType: 40,
           onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
         });
-        nD--;
+        nD--; a4ok++;
       }
+      mk179R(`EAR|CL|arm=4|st=2|o|att=${a4att}|ok=${a4ok}`);
       // arm5 ×num8：TileType=224(Slush) WallType=40（cs:599-635）
+      let a5att = 0, a5ok = 0;
+      mk179R(`EAR|CL|arm=5|st=2|i`);
       for (let nE2 = num8E, capE = 1000; nE2 > 0 && capE > 0;) {
-        capE--;
+        capE--; a5att++;
         const ex2 = bbE.L + ri(0, bbE.R - bbE.L - 1);
         const ey2 = bbE.T + ri(0, bbE.B - bbE.T - 1);
         if (!inW(ex2, ey2, 0) || st.wall[st.idx(ex2, ey2)] !== stlE.BrickWallType) continue;
@@ -7969,8 +8013,9 @@ const snap: SnapFn = (name) => {
           tileType: 224, wallType: 40,
           onlyReplaceThisTileType: stlE.BrickTileType, onlyReplaceThisWallType: stlE.BrickWallType,
         });
-        nE2--;
+        nE2--; a5ok++;
       }
+      mk179R(`EAR|CL|arm=5|st=2|o|att=${a5att}|ok=${a5ok}`);
     }
   }
   // ======== S9 每房分派面（cs:588-591 GenerateEarlyDungeonFeaturesInRoom 循环；★IIIII109b）========
@@ -7985,6 +8030,7 @@ const snap: SnapFn = (name) => {
   //   主流掷面=每窗 GetWindowPlatformStyle 1 掷（cs:161-168,表空不掷）。
   if (gfStyles.length > 0 && gfEarlyRooms.length > 0
     && i138EarlyGate()) {
+    mk179R(`EAR|S9|i|rooms=${gfEarlyRooms.length}`);        // ★IIIII192 观测（零掷）
     // ★IIIII110c 诊断钩（零开销常态：__wvLines 未装配时全程空转）：S9 每房分派面
     //   写时账——room 序/kind/style/seed/box/门 + 每窗写位/档，供 x86 窗簇逐房对拍。
     const _w9L = (globalThis as { __wvLines?: string[] }).__wvLines ?? null;
@@ -8044,7 +8090,9 @@ const snap: SnapFn = (name) => {
     for (const er of gfEarlyRooms) {
       w9(`room|${_w9i++}|kind=${er.kind}|st=${er.st}|seed=${er.seed}|box=${er.L},${er.T},${er.R},${er.B}|c=${er.cx},${er.cy}|ok=${er.winOK ? 1 : 0}|liq=${er.liquid}`);
       if (er.kind === 5) {                                       // BiomeRugged
+        mk179R(`EAR|S9RUG|i=${_w9i - 1}|st=${er.st}|rc0=${dgMainRolls}`);
         if (dualLayoutCtxS) dualRuggedEarlyFeatures(dualLayoutCtxS, er);
+        mk179R(`EAR|S9RUG|i=${_w9i - 1}|o|rc1=${dgMainRolls}`);
       } else if (er.kind === 6) {                                // BiomeStructured
         const ur = new UnifiedRandom(er.seed);
         const width = er.R - er.L, height = er.B - er.T, bottom = er.B;
@@ -8125,6 +8173,7 @@ const snap: SnapFn = (name) => {
         }
       }
     }
+    mk179R(`EAR|S9|o`);                                     // ★IIIII192 观测（零掷）
   }
   // ======== S9 祭坛尾（cs:592-637；★IIIII108c 第③刀·纯写面零主流掷）========
   //   temple(style10) Biome 房末席制（cs:124-140 赋值不覆盖已选）→ 顶沿下扫首活性行，
@@ -8205,10 +8254,10 @@ const snap: SnapFn = (name) => {
   //   故默认维持旧行为；★IIIII164 缺省已翻转 ON（S4/S1..S7 写面认证后,双座整跳=vanilla 本相；
   //   SW_I138_EARLY=0 显式回退旧径对照态）。
   if (!(gfStyles.length > 0 && i138EarlyGate())) {
-    mk179F('EARLY', 'i');
     dgEarly();
-    mk179F('EARLY', 'o');
   }
+  // ★IIIII192：EARLY o 与 i 成对（包裹 S1..S9 新径∨dgEarly 旧径；x86 同窗 SPIKES_i 前）
+  mk179F('EARLY', 'o');
   snap('dungeonPi');
   dgpMark('pit_loop_end');
   mk179F('SPIKES', 'i'); dgSpikes(); mk179F('SPIKES', 'o'); snap('dungeonS'); stageDump('S');

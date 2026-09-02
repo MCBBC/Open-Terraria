@@ -2860,7 +2860,9 @@ const SUNFLOWER_T = TILE_BY_KEY['v_27_sunflower']!;
  *  ② 补 PlaceTile 前奏（cs:59491-59501）——num 27 ∈ 液体拒置表（锚格 liquid>0
  *    即退，零掷）+ 锚格 inactive 时 Clear(Tile|TilePaint|Slope)（ghost type/帧/
  *    漆/坡/半砖归零——下游 rawSheetAt 消费者可见）。 */
-function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
+/** ★IIII191 export：SpreadingGrass remix 臂④（cs:18504 PlaceTile(x,y-1,27,mute)）复用。
+ *  语义不变（本 pass 普通种子消费面零改动）。 */
+export function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
   // PlaceTile 前奏（cs:59491-59501）：num=27 的液体门 + !active 清位。
   // （checkingLiquid 位生成期未建模——本 pass 时点无液体仿真实例，恒 false）
   if (!st.inBounds(x, y)) return;
@@ -2870,7 +2872,10 @@ function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: num
     st.type[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
     st.paint[ai] = 0; st.slope[ai] = 0; st.half[ai] = 0;
   }
-  if (y > gs.worldSurface - 1) return;   // （remix 恒假，不入判定）
+  // ★IIII191 cs:54100-54102 `if ((double)y > Main.worldSurface - 1.0 && !Main.remixWorld) return;`
+  //   ——原注「remix 恒假」有误：remix 恰是豁免臂（SpreadingGrass remix 臂④在深带放置,
+  //   若无豁免则整臂向日葵全拒=Next(20) 白掷）。非 remix 语义零变。
+  if (y > gs.worldSurface - 1 && !gs.seedFlags.remix) return;
   const air = (cx: number, cy: number): boolean => {
     if (!st.inBounds(cx, cy)) return true;
     const i = st.idx(cx, cy);

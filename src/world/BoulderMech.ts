@@ -13,7 +13,7 @@ import { TileStore } from './TileStore';
 
 /** 结构最小视图：真实 TileStore 或测试 mock 均可注入 */
 export type BoulderCellGrid = Pick<TileStore,
-  'inBounds' | 'idx' | 'type' | 'frameX' | 'frameY' | 'half' | 'slope' | 'wire'>;
+  'inBounds' | 'idx' | 'type' | 'flags' | 'frameX' | 'frameY' | 'half' | 'slope' | 'wire'>;
 
 
 /** 参与完整性校验的 sheet 集（TileFrameImportant 分派全集，cs:86924/87040/87218 三簇并集） */
@@ -61,7 +61,9 @@ function solidAllowBottomSlope(st: BoulderCellGrid, x: number, y: number): boole
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (t === 0) return false;
+  // ★幽灵保域（2026-09-03）：active 门补 flags bit0（原版 WorldGen.cs:70710
+  //  SolidTileAllowBottomSlope `tile.active() && …`）——幽灵支撑不算承放
+  if (t === 0 || (st.flags[i] & 1) === 0) return false;
   const d = TILE_DEFS[t];
   if (!d) return false;
   if (st.half[i]) return false;                       // halfBrick 不算实心（helper 显式排除）
@@ -100,7 +102,10 @@ export function checkBoulderFamily(st: BoulderCellGrid, x: number, y: number, ct
     for (let l = ay; l < ay + 2; l++) {
       if (!st.inBounds(k, l)) { flag = true; break outer; }
       const ci = st.idx(k, l);
-      if (st.type[ci] !== internalType
+      // ★幽灵保域（2026-09-03）：成员格判据 = 原版 cs:48852
+      //  `!tileSafely.active() || type != … || frame…`——幽灵成员格（flags=0）
+      // 即完整性失败（原版同态：残型成员不拦截 flag）
+      if (st.flags[ci] === 0 || st.type[ci] !== internalType
         || st.frameX[ci] !== (k - ax) * 18 + fxo
         || st.frameY[ci] !== (l - ay) * 18 + rowOff * 36) {
         flag = true; break outer;
@@ -128,7 +133,10 @@ export function checkBoulderFamily(st: BoulderCellGrid, x: number, y: number, ct
       for (let n = ay; n < ay + 2; n++) {
         if (st.inBounds(m, n)) {
           const ci = st.idx(m, n);
-          if (st.type[ci] === internalType) ctx.breakCell(m, n);   // KillTile
+          // ★幽灵保域（2026-09-03）：KillTile 仅及活跃成员（原版 cs:48982
+          //  `tile5.type == type && tile5.active()`）——幽灵成员格不清除（原版同态,
+          //  残型留在原地）
+          if (st.type[ci] === internalType && (st.flags[ci] & 1) !== 0) ctx.breakCell(m, n);   // KillTile
         }
       }
     }

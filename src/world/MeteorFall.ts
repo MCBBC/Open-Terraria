@@ -85,9 +85,18 @@ function protectedAt(h: MeteorHost, i: number, j: number): boolean {
   return false;
 }
 
-/** 陨石落点生成（WorldGen.meteor :6381-6508 五层独立循环——顺序有语义：
- *  空腔在主体之后雕刻、清理环修剪浮空矿；合并单遍会致空腔失效,勿回改） */
-function placeMeteor(h: MeteorHost, i: number, j: number): void {
+/** 陨石落点生成（WorldGen.meteor :6307，五层独立循环 :6370/:6394/:6410/:6440/:6465
+ *  ——顺序有语义：空腔在主体之后雕刻、清理环修剪浮空矿；合并单遍会致空腔失效,勿回改）。
+ *  ★循环序逐位对齐（2026-09-03）：原版全部 x 外 y 内（:6371-6372 num2 扫 x 外层/
+ *  num3 扫 y 内层,②③④⑤同构）——此前 y 外 x 内=形状统计等价非逐位（掷→格分配错位）。
+ *  ★层④⑤门序逐位对齐：原版短路 || 链 `顶切掷(genRand.Next(±n)) || !active ||
+ *  Main.rand.Next(10/20) != 0`（:6445/:6470）= 顶切掷每格必掷 → active 门（无掷）→
+ *  1/10·1/20 掷 → 距离门——此前 active 门前置,非活格跳过顶切掷=掷流错位。
+ *  顶切掷置于本仓 inBounds 门之前：原版矩形全在图内（InWorld 外沿 10 格门 :6320
+ *  保证 r≤37 时不越界）无越界格可跳;越界格照掷保持"矩形每格一顶切掷"的流型。
+ *  备案:原版层①②掷 Main.rand、层④⑤顶切掷 genRand——本仓宿主单流折叠
+ *  （生产 rand/int 均 Math.random）,掷值来源不作双流区分。 */
+export function placeMeteor(h: MeteorHost, i: number, j: number): void {
   const st = h.store;
   const type = METEOR_TILE();
   const dist = (x: number, y: number) => Math.sqrt((x - i) * (x - i) + (y - j) * (y - j));
@@ -96,33 +105,34 @@ function placeMeteor(h: MeteorHost, i: number, j: number): void {
     st.half[st.idx(x, y)] = 0;   // ClearSlope 语义（setTileSilent 非零不清坡面）
     st.slope[st.idx(x, y)] = 0;
   };
-  // ① 主体（:6381-6404）：r1*0.9±4；非实心 → 挖空（原版 active=false），
-  //    实心 → 转 37。顶部削平：行 > j + Next(-2,2) - 5
+  // ① 主体（:6370-6392）：x 外 y 内；r1*0.9±4；非实心 → 挖空（原版 active=false），
+  //    实心 → 转 37。顶部削平：行 > j + Next(-2,2) - 5（掷先于距离掷,每格各一掷）
   let r = next(h, 17, 23);
-  for (let y = j - r; y < j + r; y++) {
-    for (let x = i - r; x < i + r; x++) {
-      if (!st.inBounds(x, y)) continue;
+  for (let x = i - r; x < i + r; x++) {
+    for (let y = j - r; y < j + r; y++) {
       if (y <= j + next(h, -2, 3) - 5) continue;
+      if (!st.inBounds(x, y)) continue;
       if (dist(x, y) >= r * 0.9 + next(h, -4, 5)) continue;
       const idx = st.idx(x, y);
       set(x, y, isSolidSheet(st, idx) ? type : 0);
     }
   }
-  // ② 空腔（:6405-6420）：r2*0.8±3，主体内部再挖空
+  // ② 空腔（:6394-6408）：x 外 y 内；r2*0.8±3，主体内部再挖空
   r = next(h, 8, 14);
-  for (let y = j - r; y < j + r; y++) {
-    for (let x = i - r; x < i + r; x++) {
-      if (!st.inBounds(x, y)) continue;
+  for (let x = i - r; x < i + r; x++) {
+    for (let y = j - r; y < j + r; y++) {
       if (y <= j + next(h, -2, 3) - 4) continue;
+      if (!st.inBounds(x, y)) continue;
       if (dist(x, y) >= r * 0.8 + next(h, -3, 4)) continue;
       set(x, y, 0);
     }
   }
-  // ③ 清理环（:6421-6450）：r3*0.7 内——毁灭表 KillTile（不掉落）+ 清液体 +
-  //    浮空 37 修剪（四邻无实心 → 挖）+ 半砖/上坡无支撑 → 挖
+  // ③ 清理环（:6410-6438）：x 外 y 内（无掷层,换序不影响掷流）;r3*0.7 内——
+  //    毁灭表 KillTile（不掉落）+ 清液体 + 浮空 37 修剪（四邻无实心 → 挖）+
+  //    半砖/上坡无支撑 → 挖
   r = next(h, 25, 35);
-  for (let y = j - r; y < j + r; y++) {
-    for (let x = i - r; x < i + r; x++) {
+  for (let x = i - r; x < i + r; x++) {
+    for (let y = j - r; y < j + r; y++) {
       if (!st.inBounds(x, y)) continue;
       const idx = st.idx(x, y);
       if (dist(x, y) < r * 0.7) {
@@ -141,33 +151,35 @@ function placeMeteor(h: MeteorHost, i: number, j: number): void {
         } else if ((st.half[idx] !== 0
           || (st.inBounds(x - 1, y) && (st.slope[st.idx(x - 1, y)] === 1 || st.slope[st.idx(x - 1, y)] === 2)))
           && !solid(0, 1)) {
-          // 半砖/左邻上坡（topSlope=1|2）且下方无支撑 → 挖（:6441-6449）
+          // 半砖/左邻上坡（topSlope=1|2）且下方无支撑 → 挖（:6430-6436）
           st.setTileSilent(x, y, 0);
         }
       }
     }
   }
-  // ④ 散布内环（:6451-6471）：r4*0.8，实心块 1/10 转 37
+  // ④ 散布内环（:6440-6463）：x 外 y 内；r4*0.8，实心块 1/10 转 37。
+  //    门序 = 顶切掷（:6445 链首,每格必掷）→ inBounds → active（无掷）→ 1/10 掷 → 距离门
   r = next(h, 23, 32);
-  for (let y = j - r; y < j + r; y++) {
-    for (let x = i - r; x < i + r; x++) {
+  for (let x = i - r; x < i + r; x++) {
+    for (let y = j - r; y < j + r; y++) {
+      if (y <= j + next(h, -3, 4) - 3) continue;
       if (!st.inBounds(x, y)) continue;
       const idx = st.idx(x, y);
       if (st.flags[idx] === 0) continue;
-      if (y <= j + next(h, -3, 4) - 3) continue;
       if (next(h, 0, 10) !== 0) continue;
       if (dist(x, y) >= r * 0.8) continue;
       set(x, y, type);
     }
   }
-  // ⑤ 散布外环（:6472-6492）：r5*0.85，实心块 1/20 转 37
+  // ⑤ 散布外环（:6465-6490）：x 外 y 内；r5*0.85，实心块 1/20 转 37。
+  //    门序同④：顶切掷 Next(-2,3)（:6470 链首）→ active → 1/20 掷 → 距离门
   r = next(h, 30, 38);
-  for (let y = j - r; y < j + r; y++) {
-    for (let x = i - r; x < i + r; x++) {
+  for (let x = i - r; x < i + r; x++) {
+    for (let y = j - r; y < j + r; y++) {
+      if (y <= j + next(h, -2, 3)) continue;
       if (!st.inBounds(x, y)) continue;
       const idx = st.idx(x, y);
       if (st.flags[idx] === 0) continue;
-      if (y <= j + next(h, -2, 3)) continue;
       if (next(h, 0, 20) !== 0) continue;
       if (dist(x, y) >= r * 0.85) continue;
       set(x, y, type);

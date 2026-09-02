@@ -557,6 +557,16 @@ function convertCell(
   // 其余 conversionType（5/6/7…）不在本批旗标消费面内——登记另案。
 }
 
+/** ★IIII191：WorldGen.Convert(i2,j2,conversionType) 单格字面同参入口（tiles/walls
+ *  缺省 true）——SpreadingGrass remix 臂⑤（cs:18528/18532/18537/18541/18546）
+ *  消费。case 1/4 在 convertCell 内无掷骰（转化面纯查表），掷骰全部在臂⑤门条件
+ *  与 drunk 分流侧。 */
+export function convertSingleCell(
+  st: TileStore, rng: RNG, gs: GenState, i: number, j: number, conversionType: number,
+): void {
+  convertCell(st, rng, gs, i, j, conversionType, true, true);
+}
+
 /** ★F4② 单格神圣面转化公开入口（initializeHardMode remix 边缘带臂消费）：
  *  WorldGen.Convert(i2,j2,2) 字面同参调用（tiles/walls 缺省 true）。Runtime 调用方
  *  无 GenState——case2 全链对 gs 只做透传（树护栏 ConvertTreeAndGround→genKillTile

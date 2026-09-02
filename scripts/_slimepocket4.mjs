@@ -15,6 +15,14 @@ const out = await page.evaluate(async (text) => {
   await window.__swFlow.loadJson(text);
   const g = window.__swGame;
   window.__swPhysDbg = {};
+  // ★玩家放回存档位（用户会话玩家站 (49537,3808)=cx/cy 围观）——probe 加载器
+  // 默认把 player 放在世界出生点(2098,230)，距水囊 996 格 → activeRange 外
+  // despawn 秒杀 = 伪影。放回后 AI 索敌/消散域全部真实。
+  {
+    const p = g.player;
+    p.x = 49537 - p.w / 2; p.y = 3808 - p.h / 2;
+    p.vx = 0; p.vy = 0;
+  }
 
   const spots = [
     { name: 'sealed_water_cell', x: 3094.5, y: 244.5 },

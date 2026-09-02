@@ -153,7 +153,9 @@ export function findChairSpot(st: TileStore, homeX: number, homeY: number): SitS
     for (let r = fy + 2; r >= fy - 6; r -= 2) {
       if (!st.inBounds(i, r)) continue;
       const ti = st.idx(i, r);
-      if (!isSitTile(st.type[ti])) continue;               // tile.active() 同义（type!=0）
+      // ★幽灵保域（2026-09-03）：active() 门补 flags bit0（原版 NPC.cs:53377
+      //  `tile.active() && TileID.Sets.CanBeSatOnForNPCs[…]`）——幽灵椅残型不可坐
+      if (st.type[ti] === 0 || (st.flags[ti] & 1) === 0 || !isSitTile(st.type[ti])) continue;
       const topFrame = st.frameY[ti] % 40 === 0;
       if (topFrame && !(r + 1 <= fy + 2)) continue;        // :53224
       const d = Math.abs(i - fx) + Math.abs(r - fy);       // :53226
@@ -4652,7 +4654,9 @@ export class TownNPC extends Entity {
     const cx = spot.x, cy = spot.y - 1;            // 椅格 = 落座地面格上一行（:53270）
     if (!st.inBounds(cx, cy)) return false;
     const ci = st.idx(cx, cy);
-    if (st.type[ci] === 0 || !canSitAt(st.type[ci], st.frameY[ci])) return false;
+    // ★幽灵保域（2026-09-03）：active() 门补 flags bit0（原版 NPC.cs:53424
+    //  `tile != null && tile.active() && (type==15||497)`）——幽灵椅不可落座
+    if (st.type[ci] === 0 || (st.flags[ci] & 1) === 0 || !canSitAt(st.type[ci], st.frameY[ci])) return false;
     // 占位门（:53278-53286）：任一坐姿城镇 NPC 的 Bottom−2px 格 == 本椅格 → 放弃
     for (const o of game.npcs?.() ?? []) {
       const n = o as { sitting?: boolean; cx?: number; y?: number; h?: number; dead?: boolean };

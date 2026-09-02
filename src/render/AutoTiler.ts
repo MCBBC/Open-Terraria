@@ -59,7 +59,9 @@ export class AutoTiler {
       let exposed = false;
       for (const [px, py] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
         if (!store.inBounds(x + px, y + py)) continue;
-        if (store.type[store.idx(x + px, y + py)] === 0) { exposed = true; break; }
+        const ni = store.idx(x + px, y + py);
+        // ★幽灵保域（2026-09-03）：flags bit0 首门——幽灵残型（flags=0,type≠0）视同空气暴露
+        if (store.flags[ni] === 0 || store.type[ni] === 0) { exposed = true; break; }
       }
       if (!exposed) {
         const base = this.baseSprite(ruleName, x, y);
@@ -70,6 +72,8 @@ export class AutoTiler {
       // 0=air 1=this 2=other
       if (!store.inBounds(nx, ny)) return 0;
       const i = store.idx(nx, ny);
+      // ★幽灵保域（2026-09-03）：tile 层幽灵残型（flags=0）视同空气（墙层不受幽灵影响）
+      if (layer === 'tile' && store.flags[i] === 0) return 0;
       const v = layer === 'wall' ? store.wall[i] : store.type[i];
       if (v === 0) return 0;
       return v === tileType ? 1 : 2;
@@ -229,7 +233,8 @@ export class AutoTiler {
     if (!g.T && !g.L && !g.R && !g.B) return null;
     const air = (nx: number, ny: number) => {
       if (!store.inBounds(nx, ny)) return true;
-      return store.type[store.idx(nx, ny)] === 0;
+      const ni = store.idx(nx, ny);
+      return store.flags[ni] === 0 || store.type[ni] === 0;   // ★幽灵残型视同空气
     };
     const sideAir = [air(x, y - 1), air(x + 1, y), air(x, y + 1), air(x - 1, y)]; // 上右下左
     // 优先：暴露侧的垂落变体；多侧暴露取上 > 侧 > 下；无暴露用顶绿
@@ -325,7 +330,9 @@ export class AutoTiler {
     if (!Object.keys(groups).length) return null;
     const sideState = (nx: number, ny: number): 'grass' | 'air' | 'other' => {
       if (!store.inBounds(nx, ny)) return 'air';
-      const t = store.type[store.idx(nx, ny)];
+      const si = store.idx(nx, ny);
+      const t = store.type[si];
+      if (store.flags[si] === 0) return 'air';   // ★幽灵保域:幽灵残型视同空气
       if (t === tileType) return 'grass';
       if (t === T_TREE) return 'air'; // 树干不是实心连接：草皮可贴着树干生长
       return t === 0 ? 'air' : 'other';

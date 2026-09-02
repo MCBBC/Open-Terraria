@@ -5,9 +5,10 @@ import { TileStore } from '../src/world/TileStore';
 
 /** 内部 id 伪造表：sheet→internal 由消费方注入；此处用 internal==sheet 的恒等假表 */
 function mkStore(): Pick<TileStore,
-  'inBounds' | 'idx' | 'type' | 'frameX' | 'frameY' | 'half' | 'slope' | 'wire'> {
+  'inBounds' | 'idx' | 'type' | 'flags' | 'frameX' | 'frameY' | 'half' | 'slope' | 'wire'> {
   const W = 16, H = 16;
   const type = new Uint16Array(W * H);
+  const flags = new Uint8Array(W * H);
   const frameX = new Uint16Array(W * H);
   const frameY = new Uint16Array(W * H);
   const half = new Uint8Array(W * H);
@@ -16,7 +17,7 @@ function mkStore(): Pick<TileStore,
   return {
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H,
     idx: (x: number, y: number) => y * W + x,
-    type, frameX, frameY, half, slope, wire,
+    type, flags, frameX, frameY, half, slope, wire,
   };
 }
 
@@ -32,13 +33,17 @@ function fixture(st: ReturnType<typeof mkStore>) {
         for (let n = ay; n < ay + 2; n++) {
           const i = st.idx(m, n);
           st.type[i] = sheet;
+          st.flags[i] = 1;   // 活跃位（幽灵保域后 Check2x2 成员判据消费）
           st.frameX[i] = (m - ax) * 18;
           st.frameY[i] = (n - ay) * 18;
         }
       }
     },
-    clear(x: number, y: number) { st.type[st.idx(x, y)] = 0; },
-    solidStone(x: number, y: number) { st.type[st.idx(x, y)] = 1; },   // 1=dirt(assume solid)
+    clear(x: number, y: number) { st.type[st.idx(x, y)] = 0; st.flags[st.idx(x, y)] = 0; },
+    solidStone(x: number, y: number) {
+      st.type[st.idx(x, y)] = 1;   // 1=dirt(assume solid)
+      st.flags[st.idx(x, y)] = 1;
+    },
     wireBelow() {
       st.wire[st.idx(6, 8)] |= 1;
       st.wire[st.idx(7, 8)] |= 1;
@@ -97,6 +102,7 @@ describe('BoulderMech（Check2x2 移植）', () => {
     for (const [ax] of [[6], [7]]) {
       const i = st.idx(ax, 5);
       st.type[i] = 467;
+      st.flags[i] = 1;
       st.frameX[i] = (ax - 6) * 18;
       st.frameY[i] = 0;
     }

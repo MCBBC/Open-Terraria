@@ -567,7 +567,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
 import { densify as densifyChests } from './ChestRegistry';   // ★IIII102c 出口稠密化
-import { flipGenSolid, resetGenSolid, vanSolidOrSloped } from './vanilla/GenSolid';
+import { flipGenSolid, resetGenSolid, snapshotGenSolid, vanSolidOrSloped } from './vanilla/GenSolid';
+// ★IIII191：SpreadingGrass remix 臂⑥ QuickWater(-2) 一次性实例（runExtraLiquidAddBubbleBlocks 同款接线）
+import { LiquidSim } from '../liquid/LiquidSim';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
 import { parseSeedChain, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
@@ -603,6 +605,7 @@ import {
   doDigExtraHoles, doSurfaceIsMushroomsEarly, pumpkinSeasonArm,
   finalizeSecretSeedDoEnds, applyGraveyardInitialClockState,
   doRoundLandMasses, doExtraLiquidAddLiquid,
+  convertSingleCell,
   // ★IIIII41-T3①：vampire/randomSpawn 共宿核心（avoid 表四支补全在彼处）
   randomizeWorldSpawnCore, doAdditionalChangesAroundSpawnCore,
 } from './vanilla/SecretSeedDoEndsPass';
@@ -625,6 +628,7 @@ import {
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
   runGrassPlantsPass, runGlowingMushroomPlantsPass,
   runSunflowersPart2Pass, runJunglePlantsPart2Pass,
+  placeSunflower,   // ★IIII191：SpreadingGrass remix 臂④ PlaceTile(27) 复用
 } from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runBeeLarvaPass } from './vanilla/HiveSpiderPass';
@@ -2171,11 +2175,12 @@ const TILE_379 = TILE_BY_KEY['v_379_bubble'] ?? -1;
 // 已由 vanilla/LakesPass.ts（原版 pass 31）替换，旧 liquidPass 删除
 
 // ---------- 表面 ----------
-function surfacePass({ store, surface, world }: GenCtx) {
+function surfacePass({ store, surface, world, rng }: GenCtx) {
   const gs0 = ctxGs[0];
   // 铺草（原版 SpreadingGrassOnSurfaceSunflowersEvilsOnSurfaceAndLavaCleanup cs:18349-18460）：
   //  段① 丛林草 3×3 邻接泥土填充 + 地表暴露石/黏土/矿 7×7 扫描转周边群系；
-  //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）。
+  //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）；
+  //  ★IIII191 段③④⑤⑥ remix 臂（cs:18484-18573）——见 spreadingGrassPass 尾注。
   //  Trees/AlchemyHerbs/GrassPlants/GlowingMushroomPlants 曾内嵌于此（地表矿石/倒木/
   //  陷阱/矿骨堆/草墙之前）——2026-08-13 按 1456 注册序拆出独立槽归位（Batch D）
   //  ★UUUUUU：NTB 整 pass 跳过（cs:18351 `(!notTheBees || remix || tenth)`——蜂蜜
@@ -2186,14 +2191,16 @@ function surfacePass({ store, surface, world }: GenCtx) {
   //   与原版相悖:x86 实证 slot73 Spreading Grass 零掷冻结）
   if (gs0 && !(f0!.notTheBees && !f0!.remix && !f0!.tenthAnniversary)
     && !sbDenyAll(f0)) {
-    spreadingGrassPass(store, gs0);
+    spreadingGrassPass(store, gs0, rng);
   }
   void surface; void world;
 }
 
-/** SpreadingGrass 段①②（cs:18354-18460）1:1（导出供 WWW 基座重放 rig 复用） */
-export function spreadingGrassPass(store: World['store'], gs: GenState) {
+/** SpreadingGrass 段①②（cs:18354-18460）+ remix 臂③④⑤⑥（cs:18484-18573）1:1
+ *  （导出供 WWW 基座重放 rig 复用；rng 为槽流 genRand——remix 臂为重掷消费者） */
+export function spreadingGrassPass(store: World['store'], gs: GenState, rng: RNG) {
   const w = store.w;
+  const h = store.h;   // ★IIII191：remix 臂⑤⑥ y 域用（cs:18518 num11 < maxTilesY-10 等）
   const sheetAt = (x: number, y: number): number => {
     if (!store.inBounds(x, y)) return -1;
     const i = store.idx(x, y);
@@ -2272,6 +2279,126 @@ export function spreadingGrassPass(store: World['store'], gs: GenState) {
         flag2 = true;
       }
     }
+  }
+  // ---- ★IIII191 remix 臂（cs:18484-18573）——Don't Dig Up 表面带整段，此前整缺 =
+  //      mile8 REMIX #73 Spreading_Grass 首差域（A=8/T=347,710/W=24,524/L=17,214/
+  //      Lt=15,154 @ (3701,70)，x86 金标 pass73 R=11,590,708 掷 vs JS 段①②零掷）。
+  //      ③孤块草化 ④remix 向日葵 ⑤全域邪恶转化（||短路掷骰）⑥出生腔清液+
+  //      QuickWater(-2) 括弧（GenSolid 时间线注「SpreadingGrass cs:18556/18570-71
+  //      remix 翻转不接线,备案」在本批清偿）。1457≡1458 同域（1458 增量对账零变更）。
+  if (!!gs.seedFlags.remix) {
+    // 段③（cs:18487-18496）：每列掷 Next(-1,2) 定起始行（列头活掷,被弃 x/y 判例族）；
+    //   活性泥土(sheet0) 八邻有缺 → 裸 type=2 直写（活性位/帧/漆不动,同 C# 赋值）
+    for (let x = 5; x < w - 5; x++) {
+      for (let y = gs.remixSurfaceLayerLow + rng.int(-1, 1); y < gs.remixSurfaceLayerHigh; y++) {
+        if (!store.inBounds(x, y)) continue;
+        const ii = store.idx(x, y);
+        if (!store.flags[ii] || sheetAt(x, y) !== 0) continue;
+        let edge = false;
+        for (let dx = -1; dx <= 1 && !edge; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            if (!store.flags[store.idx(x + dx, y + dy)]) { edge = true; break; }
+          }
+        }
+        if (edge) store.type[ii] = T.GRASS;
+      }
+    }
+    // 段④（cs:18498-18507）：remix 向日葵——type==2 为**裸 type 读不问活性**（幽灵草
+    //   同受理）；上格非活性才掷 Next(20)（两门后短路）；命中 PlaceTile(x,y-1,27,mute)
+    //   → PlaceSunflower（cs:60643-60645 case27=PlaceSunflower+SquareTileFrame,完整
+    //   2×4 写时级联恒 no-op 未移植——SurfaceDecorPasses 同判例）。PlaceSunflower 的
+    //   y>worldSurface 门带 !Main.remixWorld 豁免（cs:54100-54102）,remix 深带可放置。
+    for (let x = 5; x < w - 5; x++) {
+      for (let y = gs.remixSurfaceLayerLow + rng.int(-1, 1); y < gs.remixSurfaceLayerHigh; y++) {
+        const ii = store.idx(x, y);
+        const sh = TILE_DEFS[store.type[ii]]?.vanilla?.sheet ?? -1;
+        if (sh !== 2 || store.flags[store.idx(x, y - 1)]) continue;
+        if (rng.nextInt(20) !== 0) continue;
+        placeSunflower(store, rng, gs, x, y - 1);
+      }
+    }
+    // 段⑤（cs:18509-18552）：全域邪恶转化——crimson?4:1；门条件三支 || 逐支短路掷骰
+    //   （`y<ws+Next(3)` 每格必掷 1;假才掷左带 `x<num9+Next(3)`;再假才掷右带
+    //   `x>=w-num9-Next(3)`——命中格 1/2/3 掷可变）;命中 → Convert(x,y,conv)
+    //   （drunk 左右分流各掷 Next(-2,3)）+ color/wallColor 归零（Convert 亦写墙）。
+    const conv = gs.crimson ? 4 : 1;
+    const num9 = Math.trunc(w / 7);
+    for (let x = 10; x < w - 10; x++) {
+      for (let y = 10; y < h - 10; y++) {
+        let hit: boolean;
+        if (y < gs.worldSurface + rng.nextInt(3)) {
+          hit = true;
+        } else if (x < num9 + rng.nextInt(3)) {
+          hit = true;
+        } else {
+          hit = x >= w - num9 - rng.nextInt(3);
+        }
+        if (!hit) continue;
+        const ii = store.idx(x, y);
+        if (!!gs.seedFlags.drunkWorld) {
+          // cs:18522-18547：drunk 半场分流（Next(-2,3)=int(-2,2) 双闭三值域 -2..2）
+          if (gs.crimsonLeft) {
+            if (x < Math.trunc(w / 2) + rng.int(-2, 2)) convertSingleCell(store, rng, gs, x, y, 4);
+            else convertSingleCell(store, rng, gs, x, y, 1);
+          } else if (x < Math.trunc(w / 2) + rng.int(-2, 2)) {
+            convertSingleCell(store, rng, gs, x, y, 1);
+          } else {
+            convertSingleCell(store, rng, gs, x, y, 4);
+          }
+        } else {
+          convertSingleCell(store, rng, gs, x, y, conv);
+        }
+        store.paint[ii] = 0;      // cs:18548 color(0)
+        store.paintWall[ii] = 0;  // cs:18549 wallColor(0)
+      }
+    }
+    // 段⑥（cs:18554-18572）：出生腔清液——[225] 实心括弧（开）→ QuickWater(-2) 全图
+    //   单趟沉降（生成期语义：首尾 ShimmerRemoveWater+LiquidInteractionsCleanup;
+    //   落水分型=remix 恒改写臂 Liquid.cs:182-185 + 地牢墙豁免 :186-188）→ 中央带
+    //   (0.31w..0.69w+15)×(h-200..h-135) 液体清零 → [225]=false、[484]=false。
+    //   一次性 LiquidSim 接线=runExtraLiquidAddBubbleBlocks 同款（★IIIII100d passRand
+    //   入 pass 流;solidNP←当前 GenSolid 面板,含 225=true——先翻转后注入保序）。
+    flipGenSolid([225], true);
+    {
+      const sim = new LiquidSim({ store, seed: gs.seed } as unknown as World);
+      sim.isGeneratingOrLoadingWorld = true;
+      sim.generatingWorld = true;
+      sim.passRand = (max) => rng.nextInt(max);
+      sim.passRng = rng;
+      sim.genWaterLine = gs.waterLine;
+      // 地牢墙豁免盒（liquidSettlePass 同构重建：CreatePotentialDungeonBounds 半图矩形）
+      {
+        const edge = Math.floor(w * 0.05);
+        const mid = Math.floor(w * 0.55);
+        const d = gs.dungeonSide < 0
+          ? { x0: edge, x1: Math.floor(w * 0.45), y0: Math.floor(gs.worldSurface) + 10, y1: h - 210 }
+          : { x0: mid, x1: w - edge, y0: Math.floor(gs.worldSurface) + 10, y1: h - 210 };
+        sim.dungeonWaterExempt = (x, y, wl) => x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1
+          && (wl === 7 || wl === 8 || wl === 9 || (wl >= 94 && wl <= 99));
+      }
+      sim.remixWaterRule = true;    // ★IIIII58：remix 落水分型带（本臂恒真）
+      sim.remixLavaLine = gs.lavaLine;
+      sim.remixRockLevel = gs.rockLevel;
+      sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+      sim.remixWorldGen = true;
+      sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+      if (gs.shimmerX > 0) sim.shimmerCenter = { x: gs.shimmerX, y: gs.shimmerY };
+      sim.applyGenSolidOverrides(snapshotGenSolid());
+      flipGenSolid([379], true);    // Liquid.cs:105 粘性（quickWater 头臂,JS 侧显式）
+      setBoulderSolidity(false);
+      flipGenSolid([546], false);
+      sim.quickWater();
+      sim.dispose();
+      setBoulderSolidity(true);
+      flipGenSolid([546], true);
+    }
+    const x12 = Math.trunc(w * 0.31), x13 = Math.trunc(w * 0.69), y14 = h - 135;
+    for (let x = x12; x < x13 + 15; x++) {
+      for (let y = h - 200; y < y14; y++) store.liquid[store.idx(x, y)] = 0;
+    }
+    flipGenSolid([225], false);
+    flipGenSolid([484], false);
   }
 }
 
