@@ -3363,6 +3363,10 @@ export class Renderer {
         if (c2) {
           c2.save();
           c2.setTransform(1, 0, 0, 1, 0, 0);
+          // ★'lighter' 加算合成（2026-09-02）：层内已按 XNA Additive 累积条带贡献
+          //   （预乘 out.rgb×out.a），主链直加=原版"只增亮零压暗"；source-over 会把
+          //   条带 alpha 当覆盖度吞掉背景（月牙底座发闷）。
+          c2.globalCompositeOperation = 'lighter';
           c2.drawImage(gx.canvas, 0, 0);
           c2.restore();
         }
@@ -4355,6 +4359,18 @@ export class Renderer {
     const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
     const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
     const dy = DRAW_Y_OFFSET[378] ?? 0;
+    // ★设备空间 doctrine（同 drawAnimatedTileLayer,2026-09-02 结构性约束）:
+    //  save + setTransform 恒等 → 全程设备矩形 → restore。2c''.5 块 ambient ctx
+    //  处于【世界变换】,dev 数学若裸跑=双重变换恒画屏外(训练假人隐形,
+    //  2026-09-02 用户实报)——dev 数学与空间包装【必须成对】,结构闸门
+    //  tests/dynsnap-space-wrapper.test.ts 强制(凡用 dev.ox 的绘制函数必须含
+    //  恒等 setTransform + restore)。
+    const devOn = !!dev;
+    if (devOn) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+    }
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = st.idx(tx, ty);
@@ -4374,30 +4390,18 @@ export class Renderer {
           for (let cx = 0; cx < 2; cx++) {
             const r = this.atlas!.vframeAt(378, vx + cx * 18, row * 54 + cy * 18);
             if (!r) continue;
-            // ★2c''.5 块 ctx 处于【世界变换空间】（同风摆层"世界变换内世界坐标";
-            //   实测 a/d=zz、e=ox−camRX·zz,2026-09-02 用户报假人不渲染定谳）——
-            //   设备取整必须换算回世界坐标再画:先按 dev 映射取整到设备像素,
-            //   再逆映射回世界 x/y。曾直接画设备坐标=双重变换,恒画到屏外
-            //   （1.25×640−64132≈−6.3 万）=假人隐形。
-            if (dev) {
-              const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
-              const dxa = dev.ox + Math.round((wx - dev.camRX) * dev.zz);
-              const yda = dev.oy + Math.round((wy - dev.camRY) * dev.zz);
-              const dxb = dev.ox + Math.round((wx + ts - dev.camRX) * dev.zz);
-              const ydb = dev.oy + Math.round((wy + ts - dev.camRY) * dev.zz);
-              const wxa = dev.camRX + (dxa - dev.ox) / dev.zz;
-              const wya = dev.camRY + (yda - dev.oy) / dev.zz;
-              const wwb = (dxb - dxa) / dev.zz;
-              const whb = (ydb - yda) / dev.zz;
-              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, wxa, wya, wwb, whb);
-            } else {
-              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
-                (tx + cx) * ts, (ty + cy) * ts + dy, ts, ts);
-            }
+            const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
+            const dxa = dev!.ox + Math.round((wx - dev!.camRX) * dev!.zz);
+            const yda = dev!.oy + Math.round((wy - dev!.camRY) * dev!.zz);
+            const dxb = dev!.ox + Math.round((wx + ts - dev!.camRX) * dev!.zz);
+            const ydb = dev!.oy + Math.round((wy + ts - dev!.camRY) * dev!.zz);
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+              dxa, yda, dxb - dxa, ydb - yda);
           }
         }
       }
     }
+    if (devOn) ctx.restore();
   }
 
   private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {

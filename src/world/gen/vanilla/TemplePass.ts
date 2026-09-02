@@ -231,10 +231,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   // 不缺席(见下方 sx<0 分支)。
   //
   // ★IIIII94（2026-08-31）REMIX 深度换轴支（1458 cs:15932-16014）：`if (remixWorldGen &&
-  //   !noSurface)` 在每轮掷完 y/x 头两骰后整段改道——x 覆掷 Next(0.2w,0.8w) 并
-  //   while 拒绝中央带 (0.4w,0.6w)（双闭边界入带；曾被「深度锚不换轴」误判为非债，
-  //   实证本种子 x86 神庙 bbox=[873,224]-[1189,501] 全落左叶,而 vanilla 支
-  //   x=((d×band+0.1)×(-side)+0.5)w 只能给出右侧地带）；随后自该格向上游走
+  //   !noSurface)` 在每轮掷完 y/x 头两骰后整段改道——★IIIII178 勘补：改道内先分
+  //   notTheBees 两支（cs:15944-15947 ntb 臂=Next(0.6w,0.8w)|Next(0.2w,0.4w) 无拒绝环;
+  //   cs:15948-15953 else 臂=x 覆掷 Next(0.2w,0.8w) 并 while 拒绝中央带 (0.4w,0.6w)
+  //   双闭边界入带；IIIII94 实证 remix 纯种 x86 神庙 bbox=[873,224]-[1189,501] 全落
+  //   左叶,而 vanilla 支 x=((d×band+0.1)×(-side)+0.5)w 只能给出右侧地带）；随后自该格向上游走
   //   （active||wall>0||j>worldSurface-5 即减,退出后 +1）,锚点须 active 且为
   //   丛林草60或泥59,±10 邻域无 191 活木/tileDungeon{41,43,44,677,678,679} 才接受,
   //   成功时再 `y -= 10 + Next(10)` 下修锚并落 makeTemple。掷流三骰/轮与 vanilla
@@ -252,10 +253,22 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       let y = rng.int(yTop, yBot - 1);
       const xVan = Math.floor(((rng.next() * band + 0.1) * -gs.dungeonSide + 0.5) * w);
       if (tmRemix) {
-        // cs:15937-15951：x 覆掷 + 中央带拒绝环（Next(int)double 边界语义照抄）
-        const xLo = Math.floor(w * 0.2), xHi = Math.floor(w * 0.8);
-        let ax = rng.int(xLo, xHi - 1);
-        while (ax > w * 0.4 && ax < w * 0.6) ax = rng.int(xLo, xHi - 1);
+        // ★IIIII178（2026-09-02）cs:15944-15947 notTheBees 臂整缺定罪修复：remix 分支内
+        //   原版先分 notTheBees 两支——ntb 臂按 dungeonSide<Right 选 Next(0.6w,0.8w) /
+        //   Next(0.2w,0.4w)，**无中央带拒绝环**；JS 曾恒走 else 臂（IIIII94 纯 remix 形）
+        //   → GFB（七旗含 notTheBees）锚点 x 落错叶+掷耗分支不同，#46 Jungle_Temple
+        //   @Beehives T226/T161 族 27 万（x86 神庙 bbox=[2865,216]-[3327,600] 右叶）。
+        let ax: number;
+        if (gs.seedFlags.notTheBees) {
+          ax = gs.dungeonSide < 1
+            ? rng.int(Math.floor(w * 0.6), Math.floor(w * 0.8) - 1)   // cs:15946 右带
+            : rng.int(Math.floor(w * 0.2), Math.floor(w * 0.4) - 1);  // cs:15946 左带
+        } else {
+          // cs:15948-15953：x 覆掷 + 中央带拒绝环（Next(int)double 边界语义照抄）
+          const xLo = Math.floor(w * 0.2), xHi = Math.floor(w * 0.8);
+          ax = rng.int(xLo, xHi - 1);
+          while (ax > w * 0.4 && ax < w * 0.6) ax = rng.int(xLo, xHi - 1);
+        }
         // cs:15953-15956：向上游走到首个「虚空且无墙且 j≤worldSurface-5」格的下一行
         while (st.inBounds(ax, y)) {
           const i0 = st.idx(ax, y);

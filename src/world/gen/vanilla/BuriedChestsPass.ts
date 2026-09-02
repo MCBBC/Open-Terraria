@@ -1486,13 +1486,25 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
         // cs:17425-17428/17441-17444：液体不足或非水 → 重掷。
         // liquidType 修 2026-08-12：本仓库 +1 编码(水=LIQUID_TYPE.WATER=1)——照抄原版
         // !==0(原版 Water=0) 会让水格恒不命中,拒绝采样死循环(世界生成卡"生物群系"根因)。
-        // ★UUUUUU（cs:17422/17440 `liquidType()!=0 && !notTheBees && !remixWorldGen`）：
-        //   NTB/Remix 接受任意液体类型（蜜池水箱）。
+        // ★UUUUUU（cs:17425 趟1 `liquidType()!=0 && !notTheBees && !remixWorldGen`）：
+        //   NTB/Remix 趟1 接受任意液体类型（蜜池水箱）。
+        //   ★IIIII175（2026-09-02）趟2 定谳（1457 cs:17441 = 1458 cs:17449 字节同）：
+        //   `while (liquid < 250 || (liquidType()!=0 && !notTheBees))`——**无 !remix 项**,
+        //   趟2 恒只收水（remix 也不放行蜜/岩浆/微光）。曾两趟共用趟1 形 ⇒ remix 世界
+        //   趟2 受理面整带偏移：本种趟2 域 [337,1000) 有蜜 1,703 格+微光 734+岩浆
+        //   61,765(≥250)——JS 在 (869,708) 蜜池整 2×2 放水箱（x86 ABLOG2 该候选永不
+        //   受理,改 (3848,554)），attempt 台账 JS 106 vs x86 78（岩浆候选 roll-free
+        //   失败不移流,蜜/微光候选成功放置=相位级联）→ mile8 #62 10 箱错位主根因。
         // 守卫:100 万掷未命中 → 大声报错降级继续(防同类移植错位再变静默死循环)
         let __guard = 0;
+        // 非水重掷门（1:1）：趟1 = !ntb && !remix（remix 放行任意液型）；
+        // 趟2 = !ntb（remix 不放行——cs:17441 无 !remix 项）
+        const __rejNonWater = loop === 0
+          ? (!gs.seedFlags.notTheBees && !gs.seedFlags.remix)
+          : !gs.seedFlags.notTheBees;
         while (st.liquid[st.idx(x, y)] < 250
           || (st.liquidType[st.idx(x, y)] !== LIQUID_TYPE.WATER
-            && !gs.seedFlags.notTheBees && !gs.seedFlags.remix)) {
+            && __rejNonWater)) {
           x = rng.int(50, w - 51);
           y = rng.int(yReLo, st.h - 201);
           if (++__guard >= 1_000_000) {

@@ -118,6 +118,13 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
         //  3×3 邻域 TileFrame 重框（苔藓/植被邻格改型）+ 失支撑格 KillTile。墙写四支
         //  原版无任何帧调用，故墙侧不接级联。genSquareTileFrame 本域零掷骰（x86 hm 段
         //  22,475,354 样本与本文件旧版逐位全等=级联掷零，NB-A 已证）。
+        // ★IIII177（2026-09-02）：type 写改**纯 type 直写**（原版 `Main.tile[m,n].type = X`
+        //  不置 active/不清帧/漆/涂层——cs:77009-77202 逐支裸赋值）——旧 st.setTile 会把
+        //  非活性幽灵格**激活**（flags=1）并清漆/涂层，x86 转化格活性位原样保留：
+        //  tooeasy #105 终态 x86 type117 act=60,068/115,410（55,342 格幽灵 117），
+        //  JS 全部激活 ⇒ A=110,194/T0>117×57,533/T0>25×39,295 激活伪影（dump 对比实证，
+        //  /tmp/iii177-out）。tileFrameGen 的 !active 支（清 half/slope/漆/涂层）与
+        //  x86 TileFrame 非活性支同构，级联语义不受本改动影响。
         if (good) {
           // 神圣（57 :77007-77024 / 56 76496-…）：墙 63/65/66/68/69/81→70、216→219、187→222、3/83→28
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68 || wl === 69 || wl === 81) st.setWall(m, n, 70);
@@ -127,16 +134,16 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           // tile：2→109 草；1/25/203→117 珍珠岩；53/123/112/234→116 珍珠沙；
           // 661/662→60 丛林草；23/199→109；161/163/200 冰→164 粉冰；396→403、397→402；
           // flag 门：225 Hive→117、230 CrispyHoney→402（cs:76486-76488）
-          if (flag && sh === 225) { st.type[ii] = id(117)); genSquareTileFrame(st, rng, m, n); }
-          else if (flag && sh === 230) { st.type[ii] = id(402)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 2) { st.type[ii] = id(109)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 661 || sh === 662) { st.type[ii] = id(60)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 23 || sh === 199) { st.type[ii] = id(109)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 396) { st.type[ii] = id(403)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 397) { st.type[ii] = id(402)); genSquareTileFrame(st, rng, m, n); }
+          if (flag && sh === 225) { st.type[ii] = id(117); genSquareTileFrame(st, rng, m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(402); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 2) { st.type[ii] = id(109); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 661 || sh === 662) { st.type[ii] = id(60); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 23 || sh === 199) { st.type[ii] = id(109); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 396) { st.type[ii] = id(403); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 397) { st.type[ii] = id(402); genSquareTileFrame(st, rng, m, n); }
         } else if (crimson) {
           // 猩红（57 :77076-77135 / 56 76541-…）：墙 63/65/66/68→81、216→218、187→221
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 81);
@@ -144,15 +151,15 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (wl === 187) st.setWall(m, n, 221);
           // tile：60/661→662；2/109→199；1/117→203；53/123/116→234；161/164→200；396→401、397→399；
           // flag 门：225 Hive→203、230 CrispyHoney→399（cs:76550-76557）
-          if (flag && sh === 225) { st.type[ii] = id(203)); genSquareTileFrame(st, rng, m, n); }
-          else if (flag && sh === 230) { st.type[ii] = id(399)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 60 || sh === 661) { st.type[ii] = id(662)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 2 || sh === 109) { st.type[ii] = id(199)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 1 || sh === 117) { st.type[ii] = id(203)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(234)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 161 || sh === 164) { st.type[ii] = id(200)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 396) { st.type[ii] = id(401)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 397) { st.type[ii] = id(399)); genSquareTileFrame(st, rng, m, n); }
+          if (flag && sh === 225) { st.type[ii] = id(203); genSquareTileFrame(st, rng, m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(399); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 60 || sh === 661) { st.type[ii] = id(662); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 2 || sh === 109) { st.type[ii] = id(199); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 1 || sh === 117) { st.type[ii] = id(203); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(234); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 161 || sh === 164) { st.type[ii] = id(200); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 396) { st.type[ii] = id(401); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 397) { st.type[ii] = id(399); genSquareTileFrame(st, rng, m, n); }
         } else {
           // 腐化（57 :77136-77195 / 56 76605-…）：墙 63/65/66/68→69、216→217、187→220
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 69);
@@ -160,15 +167,15 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (wl === 187) st.setWall(m, n, 220);
           // tile：60/662→661；2/109→23；1/117→25；53/123/116→112；161/164→163；396→400、397→398；
           // flag 门：225 Hive→25、230 CrispyHoney→398（腐化分支同构）
-          if (flag && sh === 225) { st.type[ii] = id(25)); genSquareTileFrame(st, rng, m, n); }
-          else if (flag && sh === 230) { st.type[ii] = id(398)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 60 || sh === 662) { st.type[ii] = id(661)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 2 || sh === 109) { st.type[ii] = id(23)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 1 || sh === 117) { st.type[ii] = id(25)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 161 || sh === 164) { st.type[ii] = id(163)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 396) { st.type[ii] = id(400)); genSquareTileFrame(st, rng, m, n); }
-          else if (sh === 397) { st.type[ii] = id(398)); genSquareTileFrame(st, rng, m, n); }
+          if (flag && sh === 225) { st.type[ii] = id(25); genSquareTileFrame(st, rng, m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(398); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 60 || sh === 662) { st.type[ii] = id(661); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 2 || sh === 109) { st.type[ii] = id(23); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 1 || sh === 117) { st.type[ii] = id(25); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 161 || sh === 164) { st.type[ii] = id(163); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 396) { st.type[ii] = id(400); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 397) { st.type[ii] = id(398); genSquareTileFrame(st, rng, m, n); }
         }
       }
       yield;                                             // PR-async：每刷写列一个单元

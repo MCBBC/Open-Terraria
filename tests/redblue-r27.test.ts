@@ -290,7 +290,7 @@ describe('⑥ Rainbow Rod 1458 飞行尘+循环音+Kill AoE（AI_009 :44390-4440
     return new MagicMissileProj(80 * TILE, 100 * TILE, 20, 0, {
       projId: 79, damage: 50, knockback: 4, useTime: 20,
       channelCb: () => false,
-      aim: () => ({ x: 90 * TILE, y: 100 * TILE }),
+      aimCb: () => ({ x: 90 * TILE, y: 100 * TILE }),   // MissileCtor 键名（旧 aim 为死键,TS2353）
       payMana: () => true,
     }) as MagicMissileProj;
   }

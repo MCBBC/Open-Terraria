@@ -6,6 +6,9 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "strict": true,
     "noEmit": true,
+    // allowImportingTsExtensions: tests 动态 import('../../server/src/room') 拉入
+    //   server 域,其 .ts 后缀导入约定(自身 tsconfig 已放行)在此同放——2026-09-02 收遗留
+    "allowImportingTsExtensions": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,

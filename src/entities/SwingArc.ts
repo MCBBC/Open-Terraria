@@ -916,20 +916,23 @@ export class ZenithSword extends Entity {
     // 1:1），主 ctx 每帧单次合成；GL 不可用时其内部退化 CPU 版仍可用。
     if (n >= 2) {
       if (r.atlas) {
+        // ★顶点色=原版 StripColors（FinalFractalHelper.cs:54-59）逐字：
+        //   rgb = trailColor×fade、a = trailColor.A/2×fade（Color×float 四通道同乘
+        //   后 A/=2）——曾 rgb 不乘 fade、a 不减半 = 条带沿程不衰减且 alpha 翻倍。
+        //   ★点集不裁剪（原版 positions 循环只在 Vector2.Zero 处停，:59）；progress
+        //   分母钉 59（PrepareStrip 第 6 参 expectedVertexPairsAmount=oldPos.Length=60，
+        //   VertexStrip.cs:55-63——与实际点数无关，幼剑条带只到 p=(n−1)/59）。
         const ptsFS: Array<{ x: number; y: number; hw: number; rot: number; r: number; g: number; b: number; a: number }> = [];
         for (let i = n - 1; i >= 1; i--) {
           const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
-          if (f <= 0.02) continue;
-          // trailWidth = profile 全刃长/2（StripWidth :61-64 恒宽）——0.85 系近似期
-          // 压制倍率，随平色层一并退役
           ptsFS.push({ x: this.trail[i * 3], y: this.trail[i * 3 + 1], hw: tw,
             rot: this.trail[i * 3 + 2],
-            r: prof.color[0] / 255, g: prof.color[1] / 255, b: prof.color[2] / 255, a: f });
+            r: prof.color[0] / 255 * f, g: prof.color[1] / 255 * f, b: prof.color[2] / 255 * f, a: f * 0.5 });
         }
         if (ptsFS.length >= 2) {
           try {
             drawStripTrail(ctx, r as unknown as Parameters<typeof drawStripTrail>[1],
-              { set: 'FinalFractal' as never, pts: ptsFS, opacity: 1,
+              { set: 'FinalFractal' as never, pts: ptsFS, opacity: 1, expectedPairs: 60,
                 time: performance.now() / 1000, zigzag: 0.5 });
           } catch { /* atlas 未就绪静默 */ }
         }

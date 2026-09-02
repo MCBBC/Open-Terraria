@@ -28777,7 +28777,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  src/ui/UI.ts :3391-3406（左键本入口+音12 / 右键 cycleQuickStackMode+音10；
    *  悬停文案走原版键 GameUI.QuickStackToNearby|SmartStackToNearby :4550-4556,
    *  Main.cs:42563-42574 等价）；原版无独立键盘热键（仅指针钮）。 */
-  quickStackAllChests(): void {
+  quickStackAllChests(mode: 'quick' | 'smart' = this.quickStackMode()): void {
     if (this.hasLockedInventory()) return;         // :22905 门（动画窗内静默拒绝）
     this.quickStackLockTicks = Game.QUICK_STACK_LOCK_TICKS;
     const p = this.player;
@@ -28822,7 +28822,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   banks[3] 袋面追加为源件段,写回经 RestoreToPlayer 扩展位
     this.emitQuickStackResultFx(quickStackToChests(p.inv,
       chestsInRangeOf(this.world.chests, p.x, p.y),
-      this.quickStackMode() === 'smart',
+      mode === 'smart',
       { voidVaultSource: p.useVoidBag() ? p.banks[3] : null }));
     this.cb.onInventoryChanged?.();
   }

@@ -2228,7 +2228,7 @@ export class UI {
     const left = best ? Math.max(4, Math.round(bestL)) : 8;
     const h = best ? (parseFloat(best.style.height) || best.getBoundingClientRect().height || 52) : 52;
     const topPx = best ? parseFloat(best.style.top) : NaN;
-    const top = Number.isFinite(topPx) ? Math.round(topPx + h + 8) : 84;
+    const top = Number.isFinite(topPx) ? Math.round(topPx + h + 2) : 84;   // +2:面板贴近热键栏（2026-09-02 用户复报距离大,原 +8）
     // ★2026-09-02 透明化后无框（用户要求）：padding 会把内容往右/下推——面板锚点
     //   内收 padding,使【内容左缘】对齐热键栏最左格左缘、内容顶距热键栏底 8px
     //   （=整体上移;此前内容左/顶各偏 +12）
@@ -3040,12 +3040,15 @@ export class UI {
   /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
   private accEyeEls = new Map<number, HTMLElement>();
   private loadoutBtns: HTMLButtonElement[] = [];
-  /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
+  /** 背包侧"堆叠至附近宝箱"双钮（2026-09-02 用户要求：原单钮右键切模式拆成
+   *  quick/smart 两枚并排,左键各按固定模式执行;ChestStack 帧 0/1=quick 常态/悬停、
+   *  2/3=smart;开箱时隐藏） */
   private quickStackBtn!: HTMLButtonElement;
-  /** 道具搜索钮（🔍,合成右侧竖列底——row 里构建,竖列段取挂,2026-09-02 移位） */
+  private qsSmartBtn!: HTMLButtonElement;
+  /** 道具搜索钮（🔍,簇格 2×3 末位——row 里构建,取挂,2026-09-02 移位） */
   private itemSearchBtn!: HTMLButtonElement;
-  /** ChestStack 钮悬停态（帧选 0/1 常态·悬停位） */
-  private qsHover = false;
+  /** 图鉴钮（簇格 2×3 取挂引用） */
+  private bestiaryBtn!: HTMLButtonElement;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
   private playerListBtn: HTMLButtonElement | null = null;
   /** 住房面板开合（mainFlow.openHousing/面板 onClosed 回写）——住房图标钮
@@ -3230,6 +3233,7 @@ export class UI {
       }
       {
         const bBst = el('button');
+        this.bestiaryBtn = bBst;
         bBst.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
         bBst.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none; border:none;'
           + 'background:url(sprites/vanilla-ui/UI_Bestiary.png) 0 0/200% 100%;'
@@ -3427,7 +3431,11 @@ export class UI {
     {
       const lblRow = el('div');
       lblRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; width:100%;';
-      lblRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
+      {   // 背包标签=面板最顶内容,margin-top 清零（sw-lbl 默认 6px,2026-09-02 贴近热键栏）
+        const invLbl = el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel'));
+        invLbl.style.marginTop = '0';
+        lblRow.appendChild(invLbl);
+      }
       // 道具搜索文字钮已摘（2026-08-27 图标化上移顶排图标组,见上方 buildInventoryPanel）
       // 向导配方反查按钮已摘（2026-08-14 用户要求；openGuideSearch 逻辑保留，
       // 通道如需再开走 Guide 对话入口）
@@ -3445,35 +3453,41 @@ export class UI {
     right.appendChild(grid);
     // ---- 右上钮簇（原版背包开时 2×2 30×30 裸图标：QuickStack(498,244)/Sort(534,244)/
     //      Bestiary(498,278)/Emote(534,278)，Main.cs:41276-41355/:41815-41930——
-    //      位于背包格右下与合成区之间。本仓 Sort 未实装、Bestiary 贴图缺 →
-    //      簇内只落 QuickStack 一枚。2026-09-02 用户要求：居中对齐（原右对齐不美观）----
+    //      2026-09-02 用户要求：改为 2 列 × 3 行钮格——第 1 行 = 堆叠双钮（原单钮
+    //      右键切模式拆开,左键各按固定模式执行）,第 2 行 = 住房/图鉴,第 3 行 =
+    //      表情/道具搜索（均取挂自原竖列/图标组）----
     const clusterRow = el('div');
-    clusterRow.style.cssText = 'display:flex; justify-content:center; gap:6px; margin:2px 0 4px;';
+    clusterRow.style.cssText = 'display:grid; grid-template-columns:repeat(2,30px); gap:6px;'
+      + 'justify-content:center; align-items:center; justify-items:center; margin:2px 0 4px;';
     // 堆叠至附近宝箱（ChestStack 贴图 4 帧 = 悬停位+模式位：0 常态-quick/1 悬停-quick/
     //  2 常态-smart/3 悬停-smart，Main.cs:41311 num80 += mode*2 + hover）——左键
-    // QuickStackAllChests + 音 12 / 右键 CycleQuickStackMode + 音 10；开箱/商店隐藏
-    this.quickStackBtn = el('button', 'sw-btn');
-    this.quickStackBtn.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
-      + 'border:none; background:url(sprites/vanilla-ui/UI_ChestStack_0.png) 0 0 / 100% 100%;'
-      + 'image-rendering:pixelated; cursor:pointer;';
-    this.quickStackBtn.addEventListener('mouseenter', () => { this.qsHover = true; this.refreshAll(); });
-    this.quickStackBtn.addEventListener('mouseleave', () => { this.qsHover = false; this.refreshAll(); });
-    this.quickStackBtn.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      if (e.button !== 0) return;   // ★右键 = contextmenu 切模式（2026-08-27 用户报：
-                                    //  mousedown 无键判 → 右键先触发堆叠再切模式）
-      this.game.quickStackAllChests();
-      this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
-      this.refreshAll();
-    });
-    this.quickStackBtn.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.game.cycleQuickStackMode();             // CycleQuickStackMode（:41297-41301）
-      this.game.sfx.play('menuOpen', 1);          // SoundID 10 + SaveSettings
-      this.refreshAll();
-    });
-    clusterRow.appendChild(this.quickStackBtn);
+    // QuickStackAllChests + 音 12；开箱/商店隐藏
+    const mkStackBtn = (mode: 'quick' | 'smart'): HTMLButtonElement => {
+      const b = el('button', 'sw-btn');
+      const base = mode === 'smart' ? 2 : 0;
+      b.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
+        + `border:none; background:url(sprites/vanilla-ui/UI_ChestStack_${base}.png) 0 0 / 100% 100%;`
+        + 'image-rendering:pixelated; cursor:pointer;';
+      b.addEventListener('mouseenter', () => {
+        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base + 1}.png)`;
+      });
+      b.addEventListener('mouseleave', () => {
+        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+      });
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        this.game.quickStackAllChests(mode);
+        this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
+        this.refreshAll();
+      });
+      b.title = Lang.text(mode === 'smart' ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+      return b;
+    };
+    this.quickStackBtn = mkStackBtn('quick');
+    this.qsSmartBtn = mkStackBtn('smart');
+    clusterRow.append(this.quickStackBtn, this.qsSmartBtn);
+    // 2×2 图标行（住房/图鉴/表情/搜索）在 bEmote 创建后装配（TDZ;见下方 append）
     // 表情入口（原版簇位 (534,278)：EmoteMenuButton 双帧裸图标，左键开 UIEmotesMenu
     // :41850；打开逻辑经 Game 注入 onEmoteMenu）。2026-09-02 用户要求：30×30 →
     // 24×24,与住房/图鉴图标统一（原尺寸偏大）
@@ -3488,9 +3502,10 @@ export class UI {
       e.stopPropagation();
       this.onEmoteMenu?.();
     });
-    // 表情钮 → 合成右侧竖列（2026-09-02 用户要求,挂载点见下方 sideCol 段）
+    // 表情钮 → 簇格 2×3（2026-09-02 用户要求,装配见下方 clusterRow.append）
     // ★2026-08-27 用户要求：堆叠钮挂垃圾桶下方（原在背包网格下沿）——
-    //  右列构成：弹药|钱币 → 垃圾桶 → 堆叠 → 图标/成就/表情竖列
+    //  右列构成：弹药|钱币 → 垃圾桶 → 2×3 钮格 → 成就卡竖列
+    clusterRow.append(this.housingBtn, this.bestiaryBtn, bEmote, this.itemSearchBtn);   // 2×2 图标行
     rightRail.appendChild(clusterRow);
     body.appendChild(right);
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
@@ -3499,21 +3514,15 @@ export class UI {
     // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
-    // ---- 合成右侧竖列（2026-09-02 用户要求：图标+表情+成就卡+搜索 竖排在合成区
-    //  右侧=rightRail 尾部（弹药|钱币/垃圾桶/堆叠钮下方空档）,不占面板额外宽度。
-    //  排序（2026-09-02 用户定案）：住房/图鉴 → 表情（上移到成就卡上方,尺寸对齐
-    //  24×24）→ 成就卡（竖式图上文下）→ 道具搜索（垫底）。成就卡竖式 CSS 见
-    //  AchievementsUI。flex:1 吃满 rightRail 被(body stretch)拉起的余高——
-    //  搜索钮 margin-top:auto 钉到列底（=合成列表底部一线,用户复报"没置底"）----
+    // ---- 合成右侧竖列（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列
+    //  只剩联机/旅程钮行 + 成就卡。flex:1 吃满 rightRail 被(body stretch)拉起的余高,
+    //  卡保持在列顶）----
     const sideCol = el('div');
     sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center;'
       + 'margin-top:10px; flex:1 1 auto;';
-    row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 图标行横排→竖排（原顶行/横条两改）
-    sideCol.appendChild(row);   // 图标（住房/图鉴+联机/旅程钮）
-    sideCol.appendChild(bEmote);   // 表情钮（成就卡上方,2026-09-02 用户定案）
+    row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 联机/旅程钮行（竖排）
+    sideCol.appendChild(row);   // 联机玩家列表/旅程入口钮（单机经典世界不可见）
     sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
-    this.itemSearchBtn.style.marginTop = 'auto';   // 吃掉余白钉到列底（搜索垫底）
-    sideCol.appendChild(this.itemSearchBtn);   // 道具搜索（垫底,2026-09-02 用户定案）
     rightRail.appendChild(sideCol);
     // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列
     //（2026-09-02 用户要求；此前挂 advRail 玩家对决原位）
@@ -4582,15 +4591,13 @@ export class UI {
       this.achAdvisorEl = null;   // 坏 advisor 自摘（成就顾问是 QoL 件，不拖垮背包刷新）
       console.warn('[UI] achAdvisor update failed, detached:', e);
     }
-    // 堆叠至附近宝箱钮（Main.cs:41276 chest == -1 && npcShop == 0 门——开箱/商店
-    // 不显示；ChestStack 4 帧 = 悬停位+模式位（:41311 num80 += mode*2 + hover），
-    // 文案按当前模式进 title）
-    if (this.quickStackBtn) {
-      const frame = (this.game.quickStackMode() === 'smart' ? 2 : 0) + (this.qsHover ? 1 : 0);
-      this.quickStackBtn.style.display = this.openChest ? 'none' : '';
-      this.quickStackBtn.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${frame}.png)`;
-      this.quickStackBtn.title = Lang.text(this.game.quickStackMode() === 'smart'
-        ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+    // 堆叠至附近宝箱双钮（Main.cs:41276 chest == -1 && npcShop == 0 门——开箱/商店
+    // 不显示；2026-09-02 拆双钮后帧固定：quick=0/1、smart=2/3（悬停态由钮自身
+    // mouseenter/leave 切,此处只管显隐+title）
+    for (const [b, mode] of [[this.quickStackBtn, 'quick'], [this.qsSmartBtn, 'smart']] as const) {
+      if (!b) continue;
+      b.style.display = this.openChest ? 'none' : '';
+      b.title = Lang.text(mode === 'smart' ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
     }
     // 多人玩家列表钮：仅联机态显示（单机无名单可列）
     if (this.playerListBtn) this.playerListBtn.style.display = this.game.net?.active ? '' : 'none';
