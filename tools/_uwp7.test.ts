@@ -30,7 +30,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') { SHEET[i] = s; if (!REV.has(s)) REV.set(s, i); }
 }
-const LT = readFileSync('/tmp/sw-uwp/entry.lty');
+const LT = RUN ? readFileSync('/tmp/sw-uwp/entry.lty') : Buffer.alloc(0);   // ★套件门(2026-09-02):夹具在 /tmp,RUN=1 才读——防默认 sweep 收集期炸
 
 type Grid = { act: Uint8Array; wal: Uint16Array; typ: Uint16Array; liq: Uint8Array };
 const vanG: Grid = { act: a28, wal: w28, typ: t28, liq: l28 };

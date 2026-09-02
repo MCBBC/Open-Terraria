@@ -4693,7 +4693,29 @@ export class Renderer {
       }
       const [px, py] = cam.worldToScreen(d.x, d.y);
       const { rgb, a } = VanillaDust.alphaOf(d);
-      if (a <= 0.004 && !d.color) continue;
+      if (a <= 0.004 && !d.color) {
+        // A=0 加性族（182/206/230/58/110-114/311-313：GetAlpha 恒 (255,255,255,0)
+        // 型、不读尘 α）——XNA 预乘 AlphaBlend 纯加法（α=0 惯用法，非"纯光照尘
+        // 不可见"）；canvas 等价 = RGB×rgb、α 通道保留贴图羽化、'lighter' 叠画
+        if (rgb <= 0.004) continue;
+        c1.clearRect(0, 0, 8, 8);
+        c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+        const ida = c1.getImageData(0, 0, 8, 8);
+        for (let i = 0; i < ida.data.length; i += 4) {
+          ida.data[i] = ida.data[i] * rgb;
+          ida.data[i + 1] = ida.data[i + 1] * rgb;
+          ida.data[i + 2] = ida.data[i + 2] * rgb;
+        }
+        c1.putImageData(ida, 0, 0);
+        ctx.save();
+        ctx.translate(px, py);
+        if (d.rotation) ctx.rotate(d.rotation);
+        if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(s1, -4, -4);
+        ctx.restore();
+        continue;
+      }
       // 本体 pass（GetAlpha 精确通道）
       c1.clearRect(0, 0, 8, 8);
       c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);

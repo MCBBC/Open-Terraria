@@ -1258,7 +1258,11 @@ export class UI {
           const cur = this.slotContent(where, i);
           if (cur) {
             cur.favorited = !cur.favorited;
-            if (cur.favorited) void options.set('showLoadoutShareHint', false);   // DisableLoadoutShareHint :857-860（R4-14 持久化清偿）
+            // DisableLoadoutShareHint :857-860（R4-14 持久化清偿）——原版 :391 有
+            // if(ShowLoadoutShareHint) 卫门,已熄则不触发 emit/防抖写盘
+            if (cur.favorited && options.data.showLoadoutShareHint) {
+              void options.set('showLoadoutShareHint', false);
+            }
             if (cur.favorited) {
               const backups = inv.loadouts.map((l) => (where === 'armor' ? l.armor : l.dye));
               for (const arr of backups) {

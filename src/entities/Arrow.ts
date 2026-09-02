@@ -5424,6 +5424,18 @@ export class Arrow extends Entity {
     } else if (AI001_FADE_RATE[this.projId] !== undefined) {
       // ---- ★2026-09-01 批五：AI_001 顶层 per-type fade（恒率族，AI001_FADE_RATE
       //  键注释逐 id 标 P.cs 行号；R6 判定见 PROJ_ALPHA0 批五段）----
+      // 357 脉冲矢拖尾（P.cs:57733-57748 同段先尘后 fade）：α<170 期每子步沿速度
+      //  反向排 10 粒尘 206（间距 −v/10×i、尘 α=弹体 α、velocity×0、noGravity，
+      //  后置钉位/清速=逐字覆写）。可见面全在尘——本体贴图原版即 1×1 全透明
+      //  （Steam 1.4.5 Content Projectile_357.xnb 实解为 1×1 空图），尘 206 走
+      //  GetAlpha (255,255,255,0) 预乘加法白光（Renderer A=0 加性通道消费）
+      if (this.projId === 357 && this.alpha < 170) {
+        for (let i = 0; i < 10; i++) {
+          const tx = this.x - (this.vx / 10) * i, ty = this.y - (this.vy / 10) * i;
+          const d = game.spawnDust?.(tx, ty, 1, 1, 206, 0, 0, this.alpha, null, 1, true);
+          if (d) { d.x = tx; d.y = ty; d.vx = 0; d.vy = 0; }
+        }
+      }
       this.alpha = Math.max(0, this.alpha - AI001_FADE_RATE[this.projId]);
     } else if (this.projId === 348 || this.projId === 349) {
       // ---- ★2026-09-01 批五：双向脉冲对（AI_001 :57226-57245 348 / :57201-57220

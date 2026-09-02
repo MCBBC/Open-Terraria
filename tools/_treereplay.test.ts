@@ -12,6 +12,8 @@ import { TILE_DEFS } from '../src/data/tiles';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const W = 4200, H = 1200, N = W * H;
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -71,7 +73,7 @@ function storeTrees(st: TileStore, sheet: number) {
   return trees;
 }
 
-describe('Trees 隔离重放（dump081 → TreePass vs dump082）', { timeout: 300_000 }, () => {
+(RUN ? describe : describe.skip)('Trees 隔离重放（dump081 → TreePass vs dump082）', { timeout: 300_000 }, () => {
   it('两变体 half/slope 夹逼', async () => {
     // 拿我们「向日葵」末态的 half/slope 代理 + groundLevel
     let proxyHalf: Uint8Array | null = null, proxySlope: Uint8Array | null = null;

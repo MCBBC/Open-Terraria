@@ -10,12 +10,14 @@ import { TileStore } from '../src/world/TileStore';
 import { TILE_DEFS } from '../src/data/tiles';
 import { runLivingTreesPass } from '../src/world/gen/vanilla/LivingTreePass';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const OUT = process.env.SW_I101_OUT ?? '/tmp/iii101-out/cap-lt';
 const G2 = process.env.SW_I101_G2 ?? '/tmp/iii80-out/x86-sparkle';
 const CMP_IDX = Number(process.env.SW_I101_CMP ?? 42);
 const STREAM = process.env.SW_I109_X86STREAM ?? '';
-const W = Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).w);
-const H = Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).h);
+const W = RUN ? Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).w) : 0;   // ★套件门:RUN=0 不读夹具
+const H = RUN ? Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).h) : 0;
 const N = W * H;
 
 function slicePass(p: string): number[] {
@@ -116,7 +118,7 @@ function desVal(v: unknown): unknown {
   return v;
 }
 
-it('III109s: stream-fed reverse replay', async () => {
+(RUN ? it : it.skip)('III109s: stream-fed reverse replay', async () => {
   const DUMPNAME = new Map<number, string>();
   for (const f of readdirSync(G2)) {
     const m = f.match(/^(\d{3})_(.+)\.typ$/);

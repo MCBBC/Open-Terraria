@@ -4,7 +4,9 @@ import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 
-it('iii10b offline cmp', () => {
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
+(RUN ? it : it.skip)('iii10b offline cmp', () => {
   const W = Number(process.env.SW_III10_W ?? 4200);
   const N = W * 1200;
   const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

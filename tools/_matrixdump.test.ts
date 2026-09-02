@@ -9,6 +9,8 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { BinaryReaderLE } from '../src/wld/BinaryReaderLE';
 import { UnifiedRandom, translateSeed } from '../src/core/rng';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const VSRV = '/tmp/vserver';
 const TSV = `${VSRV}/matrix-anchors.tsv`;
 // Next(maxValue) = trunc(sample * max)；sample = raw * 4.656612875245797e-10（rng.ts 同序乘法）
@@ -82,7 +84,7 @@ function findWorldIdDraw(seedInt: number, target: number, max = 600): number {
   return -1;
 }
 
-it('matrix anchors dump', () => {
+(RUN ? it : it.skip)('matrix anchors dump', () => {
   const files = readdirSync(VSRV).filter((f) => /^[sml].+\.wld$/.test(f));
   if (!files.length) throw new Error('/tmp/vserver 无 .wld');
   // 排序：按尺寸前缀（s<m<l）再按文件名

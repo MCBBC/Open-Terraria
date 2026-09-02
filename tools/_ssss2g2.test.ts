@@ -8,6 +8,8 @@ import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { TILE_DEFS } from '../src/data/tiles';
 import type { RNG as RNGT } from '../src/core/rng';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const W = 4200, H = 1200;
 const REPLAY = '/tmp/vvv-out/replay';
 const CAPTURE = '/tmp/w27-out/panel-call2.json';
@@ -49,7 +51,7 @@ class CountingRNG implements RNGT {
   get vanilla(): RNGT['vanilla'] { return this.inner.vanilla; }
 }
 
-it('ssss2g2 per-iteration parity', () => {
+(RUN ? it : it.skip)('ssss2g2 per-iteration parity', () => {
   const cfg = { width: W, height: H, seedText: '9293480', evil: 0 as const };
   const ctxR = runResetAndTerrain(cfg);
   const world = ctxR.world;

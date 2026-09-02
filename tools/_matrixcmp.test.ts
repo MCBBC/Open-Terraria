@@ -4,7 +4,9 @@ import { it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 
-it('convergence matrix compare', () => {
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
+(RUN ? it : it.skip)('convergence matrix compare', () => {
   const seeds = readdirSync('/tmp/vserver')
     .filter((f) => /^s\d+\.wld$/.test(f))
     .map((f) => f.replace(/^s(\d+)\.wld$/, '$1'))

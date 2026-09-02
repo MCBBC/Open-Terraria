@@ -43,7 +43,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (s !== undefined && !REV.has(s)) REV.set(s, i);
 }
 const DUMPNAME = new Map<number, string>();
-for (const f of readdirSync(VG)) {
+if (RUN) for (const f of readdirSync(VG))   // ★套件门(2026-09-02):夹具目录缺省不扫 {
   const m = f.match(/^(\d{3})_(.+)\.typ$/);
   if (m) DUMPNAME.set(Number(m[1]), m[2]);
 }

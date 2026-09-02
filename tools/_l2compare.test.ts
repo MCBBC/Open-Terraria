@@ -7,10 +7,12 @@ import { parseWld } from '../src/wld/WldParser';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const V = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') V[i] = s; }
 
-it('L2: full-grid JS vs vanilla wld', async () => {
+(RUN ? it : it.skip)('L2: full-grid JS vs vanilla wld', async () => {
   const seeds = readdirSync('/tmp/vserver').filter((f) => /^s\d+\.wld$/.test(f)).map((f) => f.replace(/^s(\d+)\.wld$/, '$1')).sort().slice(0, 3);
   for (const seed of seeds) {
     const g = parseWld(new Uint8Array(readFileSync(`/tmp/vserver/s${seed}.wld`))).tiles;

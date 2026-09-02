@@ -14,6 +14,8 @@ import { RNG } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
 import { runDualDungeonsDitherSnakePass, dualSnakes } from '../src/world/gen/vanilla/DitherSnakePass';
+
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
 void 0;
 
 const TAG = process.env.SW_I89_TAG ?? 'rainbow';
@@ -46,7 +48,7 @@ function desVal(v: unknown): unknown {
   return v;
 }
 
-it(`IIII98c rainbow dungeon replay + candidate state marks`, () => {
+(RUN ? it : it.skip)(`IIII98c rainbow dungeon replay + candidate state marks`, () => {
   const hdr = JSON.parse(readFileSync(`${CAP}/base_hdr.json`, 'utf8'));
   const st = new TileStore(hdr.w as number, hdr.h as number);
   const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;

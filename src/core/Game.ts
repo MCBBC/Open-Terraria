@@ -4272,7 +4272,9 @@ export class Game implements GameHooks {
     // ---- 键位动作边沿派发（M5：全部经 core/Keybinds.ts 绑定表读用户自定义；
     //      默认值=迁移前硬编码，重绑前行为 100% 不变）。
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）。
-    // 背包打开时不切栏（原版 inventory 开启时数字键归 UI 导航）
+    // ★背包开着照切栏（2026-09-02 校正）：1457 原版数字切栏无 playerInventory 门
+    // （Player.cs:25286-25330 只滤 drawingPlayerChat/editSign/editChest）——此前
+    // 「背包打开不切栏」系误加；uiBlocking 只剩模态面板（暂停/图鉴/手册等）语义
     this.input.keydownHandlers.push((code, e) => {
       // 聊天输入（原版 Enter 开聊语义）：联机态 + 无 UI 阻塞时打开。
       // 输入期键位豁免由 Input 的 INPUT 元素守卫承担（打字不触发跳跃/数字键）。

@@ -11,6 +11,8 @@ import {
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
 const FTW = '/Users/vinlic/Downloads/FTW V2.wld';
 
@@ -27,7 +29,7 @@ function loadDump(path: string): Row[] {
   return out;
 }
 
-describe('vf codegen parity', () => {
+(RUN ? describe : describe.skip)('vf codegen parity', () => {
   it('interp == codegen == rig (grass region + FTW golden)', () => {
     const main = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
     const solid = new Array(800).fill(false);

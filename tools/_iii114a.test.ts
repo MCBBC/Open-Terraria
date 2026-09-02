@@ -9,6 +9,8 @@ import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
 import { runDualDungeonsDitherSnakePass, dualSnakes } from '../src/world/gen/vanilla/DitherSnakePass';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const CAP = process.env.SW_I89_OUT ?? '/tmp/iii99-out/cap-rainbow';
 const G2 = process.env.SW_I89_G2 ?? '/tmp/iii80-out/x86-rainbow';
 const CMP_IDX = Number(process.env.WIN_CMP ?? 32);
@@ -37,7 +39,7 @@ function desVal(v: unknown): unknown {
   return v;
 }
 
-it(`IIII99d rainbow #32 diff-cluster locator`, () => {
+(RUN ? it : it.skip)(`IIII99d rainbow #32 diff-cluster locator`, () => {
   const hdr = JSON.parse(readFileSync(`${CAP}/base_hdr.json`, 'utf8'));
   const st = new TileStore(hdr.w as number, hdr.h as number);
   const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;

@@ -20,7 +20,7 @@ const W = 4200, H = 1200, N = W * H;
 const MALL = process.env.SW_I55B_M === undefined;
 
 // —— 原版表 + SpiderCaves 时点的生成期翻转补丁（GenSolid 时间线核实）
-const vt = JSON.parse(readFileSync(`${OUT}/van-tables.json`, 'utf8')) as { solid: number[]; top: number[] };
+const vt = RUN ? JSON.parse(readFileSync(`${OUT}/van-tables.json`, 'utf8')) as { solid: number[]; top: number[] } : { solid: [] as number[], top: [] as number[] };   // ★套件门:RUN=0 不读夹具
 const V_SOLID = new Uint8Array(1024);
 const V_TOP = new Uint8Array(1024);
 for (const s of vt.solid) V_SOLID[s] = 1;

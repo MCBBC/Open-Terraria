@@ -16,6 +16,7 @@ import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII161：campfire PlaceTile 尾 SquareTileFrame 级联
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 import { mayanTrap } from './TemplePass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
@@ -2280,7 +2281,18 @@ const snap: SnapFn = (name) => {
     //   旧移植传 false → 底部步块在活动地形上整列 break，塔脚 400-409/440-469 残差。
     dgPillar(px, py - 1, 7, false, false, 3, true);
     dgPillar(px, py - 4, 5, false, false, 7, true);
-    if (py - 11 >= 10 && CAMPFIRE > 0) place3x2D(px, py - 11, CAMPFIRE);   // PlaceTile(215)→Place3x2 零掷
+    if (py - 11 >= 10 && CAMPFIRE > 0) {
+      // ★IIIII161：PlaceTile case 215（cs:60621-60627）= Place3x2 + SquareTileFrame——
+      //   SquareTileFrame **无条件**跟在 Place3x2 之后（净空受阻也级联）——x86 rig 实证：
+      //   塔 P=357 篝火盒被 active t165 钟乳石阻置(ok=False)仍 STF → TileFrame 3×3 →
+      //   CheckStalactite 失承杀 (357,495 fY=36)/(357,496 fY=54)/(358,496 fY=90)
+      //   三格＝GFB #32 家族-α「T0>165×3」真源。
+      //   post-switch active-anchor 支（cs:60887-60893）：锚格 active → 再 STF+result=true。
+      //   零掷（x86 ENTR 段 472 样点全账无 framing 掷；destroyObject 杀无尘掷）。
+      place3x2D(px, py - 11, CAMPFIRE);
+      genSquareTileFrame(st, rng, px, py - 11);
+      if (actAt(px, py - 11) !== 0) genSquareTileFrame(st, rng, px, py - 11);
+    }
     for (let k = 0; k < 5; k++) dgPlaceWallFence(px - 2 + k, py - 11);
     if (py - 12 >= 10) { dgPlaceWallFence(px - 2, py - 12); dgPlaceWallFence(px + 2, py - 12); }
     if (py - 10 >= 10) { dgPlaceWallFence(px - 2, py - 10); dgPlaceWallFence(px + 2, py - 10); }
@@ -6052,6 +6064,12 @@ const snap: SnapFn = (name) => {
       if (findLiveChest(sink, x - 1, y - 1) !== null) flag2 = false;   // 同位重占→拒置
       else registerChest(sink, { x: x - 1, y: y - 1, items: [], locked: false });
     }
+    // ★IIIII161（2026-09-02）：cs:52611-52695 `if (flag2) { …写入… }`——净空终判**在写入前**,
+    //   任一格 active(或 campfire 带液)→ 整件拒置且【不写不掷】。JS 曾算 flag2 而从未判定
+    //   (写入循环无条件跑) ⇒ 塔外柱篝火/桌椅钢琴梳妆台在受阻格强写成功——GFB #32 家族-α
+    //   (268..270/356..358@495..496 T215×30)与家族-β 首锚 KIND/锚序翻转(alch/bew 配额被
+    //   虚假成功提前耗尽)同根。本行补回终判;成功返回值不变(true)。
+    if (!flag2) return false;
     const bx = 54 * style;
     for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 1; j++) {
       dgWr(i, j, t);
@@ -6435,6 +6453,12 @@ const snap: SnapFn = (name) => {
     if (!inW(x, y, 0)) return false;
     const i = st.idx(x, y);
     if (st.flags[i] === 0) return false;
+    // ★IIIII161：SolidTile2 读【运行时 tileSolid】——MakeDungeon 头 SetCrackedBrickSolidity(false)
+    //   （DungeonCrawler.cs:361）窗口内裂纹砖 481/482/483 非实心。旧实现裸读 TILE_DEFS.solid
+    //   ⇒ 炼金/巫惑台 Place3x3 支撑判定在裂纹砖地上假真 → 家族-β KIND/锚序翻转首裂点
+    //   （x86 P33 ok=False s2=False @(514,719) 实证）。genSolidType 无 override 时回落
+    //   TILE_DEFS.solid ⇒ 窗口外零行为差。
+    if (!genSolidType(st.type[i])) return false;
     const d = TILE_DEFS[st.type[i]];
     return !!d && !!d.solid && !d.platform;
   }

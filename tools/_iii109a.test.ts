@@ -14,10 +14,12 @@ import { TILE_DEFS } from '../src/data/tiles';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runLivingTreesPass } from '../src/world/gen/vanilla/LivingTreePass';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const OUT = process.env.SW_I101_OUT ?? '/tmp/iii101-out/cap-lt';
 const G2 = process.env.SW_I101_G2 ?? '/tmp/iii80-out/x86-sparkle';
 const CMP_IDX = Number(process.env.SW_I101_CMP ?? 42);
-const W = Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).w);
+const W = RUN ? Number(JSON.parse(readFileSync(`${OUT}/base_hdr.json`, 'utf8')).w) : 0;   // ★套件门:RUN=0 不读夹具
 const N = W * 1200;
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -52,7 +54,7 @@ function hydrate(): { st: TileStore; gs: GenState } {
   return { st, gs: { ...GS_MIN, seedFlags: { hallowOnTheSurface: true }, numMCaves: 0, mCaveX: [] } as never as GenState };
 }
 
-it('III109 analysis: net contributions + loci', async () => {
+(RUN ? it : it.skip)('III109 analysis: net contributions + loci', async () => {
   const DUMPNAME = new Map<number, string>();
   for (const f of readdirSync(G2)) {
     const m = f.match(/^(\d{3})_(.+)\.typ$/);

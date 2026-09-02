@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
-const RUN = true;
+const RUN = !!process.env.SW_I81_WLD;   // ★套件门(2026-09-02):调试期硬编码残留还原——按用法行,给了 SW_I81_WLD 才跑
 const WLD = process.env.SW_I81_WLD ?? '';
 const OUT = process.env.SW_I81_OUT ?? '/tmp/iii81-out/wld-dump';
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

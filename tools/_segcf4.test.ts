@@ -10,6 +10,8 @@ import { TileStore } from '../src/world/TileStore';
 import { RNG, UnifiedRandom } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const W = 4200, H = 1200, N = W * H;
 const G2 = process.env.SW_DG_G2 ?? '/tmp/sw-slp/g';
 const CAP = '/tmp/dgcap';
@@ -25,7 +27,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 const le16 = (p: string): Uint16Array => { const b = readFileSync(p); return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1); };
 
-it('patched-lantern CF replay (F/Ba final verdict)', () => {
+(RUN ? it : it.skip)('patched-lantern CF replay (F/Ba final verdict)', () => {
   const pre = `${G2}/031_Slush`;
   const dTyp = le16(`${pre}.typ`), dAct = readFileSync(`${pre}.act`), dWal = le16(`${pre}.wal`);
   const dLiq = readFileSync(`${pre}.liq`), dHalf = readFileSync(`${pre}.half`), dSlope = readFileSync(`${pre}.slope`);

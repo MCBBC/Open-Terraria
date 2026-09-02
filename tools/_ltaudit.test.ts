@@ -35,6 +35,8 @@ import { runDirtRockWallRunnerPass } from '../src/world/gen/vanilla/DirtRockWall
 import { runLivingTreesPass, runLivingTreeWallsPass } from '../src/world/gen/vanilla/LivingTreePass';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const V = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') V[i] = s; }
 
@@ -182,7 +184,7 @@ const PRE_OF: Record<string, string> = {
   livingtreewalls: 'livingtrees',
 };
 
-it('LT/OceanCave JS vs vanilla dump (9293480)', () => {
+(RUN ? it : it.skip)('LT/OceanCave JS vs vanilla dump (9293480)', () => {
   const t0 = Date.now();
   const { world, rng, gs, seed } = runResetAndTerrain({ width: W, height: H, seedText: '9293480', evil: 0 });
   const st = world.store;

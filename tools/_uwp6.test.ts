@@ -24,7 +24,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number' && !REV.has(s)) REV.set(s, i);
 }
-const LT = readFileSync('/tmp/sw-uwp/entry.lty');
+const LT = RUN ? readFileSync('/tmp/sw-uwp/entry.lty') : Buffer.alloc(0);   // ★套件门(2026-09-02):夹具在 /tmp,RUN=1 才读——防默认 sweep 收集期炸
 
 (RUN ? it : it.skip)('HF phase roll calibration', () => {
   // A) 原版各相位 FNV → 掷数定标(单次推进扫全部目标)

@@ -7,10 +7,10 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) => readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
 const t28 = new Uint16Array(load(28, 'typ', 'Underworld').buffer.slice(0));
-const a28 = load(28, 'act', 'Underworld');
+const a28 = RUN ? load(28, 'act', 'Underworld') : Buffer.alloc(0);   // ★套件门(2026-09-02):RUN=0 不读夹具
 const w28 = new Uint16Array(load(28, 'wal', 'Underworld').buffer.slice(0));
 const t29 = new Uint16Array(load(29, 'typ', 'Corruption').buffer.slice(0));
-const a29 = load(29, 'act', 'Corruption');
+const a29 = RUN ? load(29, 'act', 'Corruption') : Buffer.alloc(0);
 const w29 = new Uint16Array(load(29, 'wal', 'Corruption').buffer.slice(0));
 
 (RUN ? it : it.skip)('vanilla corruption footprint + orbs', () => {

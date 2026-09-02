@@ -27,7 +27,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 SHEET[0] = 0;
 
 const dumpFiles: { idx: number; base: string; name: string }[] = [];
-for (const f of readdirSync(VG)) {
+if (RUN) for (const f of readdirSync(VG))   // ★套件门(2026-09-02):夹具目录缺省不扫 {
   const m = /^(\d{3})_(.+)\.typ$/.exec(f);
   if (m) dumpFiles.push({ idx: +m[1], base: `${VG}/${f.slice(0, -4)}`, name: m[2] });
 }

@@ -15,6 +15,8 @@ import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 import type { World } from '../src/world/World';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -103,7 +105,7 @@ function regionStats(trees: { x: number }[], treeX: number[], w: number) {
 
 const TREE_FAMILY = [323, 191, 192, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634];
 
-describe('树木数量大额差异专项', { timeout: 600_000 }, () => {
+(RUN ? describe : describe.skip)('树木数量大额差异专项', { timeout: 600_000 }, () => {
   it('AB：Trees pass 输出对账（9293480 evil=0 4200×1200）', async () => {
     const W = 4200, H = 1200, N = W * H;
     const van = fromDump('/tmp/sw-num4/van_x86_g/082_Planting_Trees', W, H, N);

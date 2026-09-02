@@ -8,9 +8,11 @@ import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant, setVa
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const ROOT = join(dirname(fileURLToPath(new URL(import.meta.url))), '../..');
 
-describe('用户标注区 rig 对拍', () => {
+(RUN ? describe : describe.skip)('用户标注区 rig 对拍', () => {
   it('3985-4010×450-465 全格', () => {
     const main = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
     const solid = new Array(800).fill(false);

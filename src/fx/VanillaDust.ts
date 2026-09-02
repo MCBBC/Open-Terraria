@@ -251,6 +251,12 @@ export class VanillaDust {
           d.vx *= 0.99;                                   // :2136-2139 兜底（230≠304 恒命中）
           break;
         }
+        case 206: { // :808-818 脉冲矢尘（独立 if 段,非链 A 链接,不置 chainLink）：先自减再取 k——
+          d.scale -= 0.1;                                // :809（+通用老化 −0.01 ≈ −0.11/拍,~9 拍灭）
+          const k = d.scale * 0.4;                       // :811 num40（自减后取值）
+          this.lights.push({ x: d.x, y: d.y, r: k * k * 0.1, g: k * k * 0.6, b: k * k });   // :813-817 无门恒发光
+          break;
+        }
         case 264:   // :625-641：光 + 一次性主角跟随
           if (!d.noLight) {
             this.lights.push({ x: d.x, y: d.y, r: (d.color?.r ?? 0) / 255 * d.scale * 0.4,
@@ -567,7 +573,7 @@ export class VanillaDust {
     switch (d.type) {
       case 261: return { rgb: 230 / 255, a: 115 / 255 };                       // :2521
       case 6: return { rgb: 1, a: 25 / 255 };                                   // :2583
-      case 182: return { rgb: 1, a: 0 };                                        // :2517
+      case 182: case 206: return { rgb: 1, a: 0 };   // :2517/:2595 同句 (255,255,255,0)——A=0 预乘加法白光,恒亮不读尘 α
       case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass
       case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)

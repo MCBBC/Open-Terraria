@@ -8,6 +8,8 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import type { World } from '../src/world/World';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const W = 4200, H = 1200, N = W * H;
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -15,7 +17,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET[i] = s;
 }
 
-describe('Trees pass 输入隔离对账（9293480 evil=0）', { timeout: 300_000 }, () => {
+(RUN ? describe : describe.skip)('Trees pass 输入隔离对账（9293480 evil=0）', { timeout: 300_000 }, () => {
   it('向日葵末态 vs 081 dump', async () => {
     let pre: World['store'] | null = null;
     await generateWorld({

@@ -27,13 +27,15 @@ import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === "1";   // ★一次性 rig/oracle 仪(2026-09-02 补门):夹具在 /tmp 不入库,缺省 skip 防默认 sweep 红;SW_ORACLE=1 启用
+
 const V_ID = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const sheet = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof sheet === 'number') V_ID[i] = sheet;
 }
 
-it('dump dungeonE four channels (post-stairs port)', () => {
+(RUN ? it : it.skip)('dump dungeonE four channels (post-stairs port)', () => {
   const { world, rng, gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText: '9293480', evil: 0 });
   const st = world.store;
   const dump = (name: string) => {
