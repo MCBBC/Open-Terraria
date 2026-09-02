@@ -2,9 +2,18 @@
 // 泥/石完全被包住（3×3 全实心）不转；岩浆邻格把 enclosed 拉回 true 但只断内层列循环
 // （后续列仍可再拉回 false）；CanBeClearedDuringGeneration=false 不转。
 import type { TileStore } from '../../TileStore';
+import type { RNG } from '../../../core/rng';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
+// ★IIII177（2026-09-02）：frameImportant 分派补 165 钟乳石支（TileFrameImportant case 165
+//  → CheckStalactite，rig WorldGen.cs:86789）——dontstarve #065 (1491,533) 单格实证：
+//  x86 Moss 尾段 SpreadGrass 石→苔转化的 SquareTileFrame 级联触达基座已失（悬空）的
+//  165 地面钟乳石 → CheckStalactite fy==90 支 !SolidTile(下格) → KillTile（零掷，
+//  fail2 短路在 updateStalagtiteStyle 之前）；JS 子集分派缺该支 → 残格存活至 #100。
+//  rng 仅 style 失配 reframe 支消费（Next(3)）——未透传 rng 的调用点保持原样跳过
+//  （该支只写帧不写 8 通道，缺省不入），MossPass（实证触发点）已透传。
+import { checkStalactite } from './ShimmerPass';
 // 与 MushroomPass.spreadGrassOnce 共用同一洪水计数器（原版 grassSpread 是单一静态字段，
 // cs:75305-75316——限的是整场洪水总量，非单链深度）
 import { grassSpreadState } from './MushroomPass';
@@ -190,7 +199,7 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
  *  写"论断对 185 不成立）有清除语义；其余 frameImportant/仙人掌/藤蔓分支在本管线
  *  触发时点（树未生成/沙上无草/藤悬于草下）不产生 8 通道可观测写——
  *  LivingTreePass.squareTileFrameGen 同款口径。 */
-function tileFrameScoped(st: TileStore, x: number, y: number): void {
+function tileFrameScoped(st: TileStore, x: number, y: number, rng?: RNG): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) {
@@ -203,6 +212,10 @@ function tileFrameScoped(st: TileStore, x: number, y: number): void {
   if (sh === 186 || sh === 187) check3x2PileFull(st, x, y, sh);
   else if (sh === 26) check3x2AltarFull(st, x, y);
   else if (sh === 185) checkPileGen(st, x, y);
+  // ★IIII177：165 钟乳石支撑复查（TileFrameImportant case 165 → CheckStalactite）。
+  //  悬空钟乳石在支撑失格时被杀（dontstarve #065 实证）；风格失配 reframe 支只写
+  //  帧 + 掷 Next(3)，帧不在 8 通道域——rng 未透传的调用点整支跳过（零行为变化）。
+  else if (sh === 165 && rng) checkStalactite(st, rng, x, y);
 }
 
 /** vanilla destroyObject（WorldGen 静态位）的本语境镜像：Check2x1/Check3x2 杀除期
@@ -364,11 +377,11 @@ function check3x2AltarFull(st: TileStore, i: number, j: number): boolean {
   return true;
 }
 
-/** SquareTileFrame（cs:80924-80934）：列优先 3×3 调用序。 */
-function squareTileFrameGen(st: TileStore, x: number, y: number): void {
+/** SquareTileFrame（cs:80924-80934）：列优先 3×3 调用序。★IIII177 透传 rng（165 支）。 */
+function squareTileFrameGen(st: TileStore, x: number, y: number, rng?: RNG): void {
   for (let d = 0; d < 9; d++) {
     const dx = ((d / 3) | 0) - 1, dy = (d % 3) - 1;
-    tileFrameScoped(st, x + dx, y + dy);
+    tileFrameScoped(st, x + dx, y + dy, rng);
   }
 }
 
@@ -392,7 +405,7 @@ function squareTileFrameGen(st: TileStore, x: number, y: number): void {
  *  长进出生点/滩带）。tenth 经可选参透传（本函数无 gs 访问；现调用方恒 false）。 */
 const CRIMSON_GRASS_S = TILE_BY_KEY['v_199_crimson_grass_block'];
 const CORRUPT_GRASS_S = TILE_BY_KEY['v_23_corrupt_grass_block'];
-export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, wsSurface = Number.POSITIVE_INFINITY, tenth = false): void {
+export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, wsSurface = Number.POSITIVE_INFINITY, tenth = false, rng?: RNG): void {
   // InWorld(i,j,10)（cs:75218）
   if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return;
   const i = st.idx(x, y);
@@ -431,7 +444,7 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   // ★NNNNN：cs:75288 SquareTileFrame(i,j)——TileFrame 头清位 + 186/187 大石堆
   // Check3x2 一致性/支撑校验级联（#73 5 格残差根因；flag2 转化支/树杀手前置在本
   // 管线所有调用时点恒 no-op，见文件头注）
-  squareTileFrameGen(st, x, y);
+  squareTileFrameGen(st, x, y, rng);
   if (!repeat) return;
   // cs:75305-75316：邻格 active && 同 dirt，grassSpread<1000 才递归
   for (let m = x0; m < x1; m++) {
@@ -439,7 +452,7 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
       const ni = st.idx(m, n);
       if (st.flags[ni] && st.type[ni] === dirt && grassSpreadState.n < 1000) {
         grassSpreadState.n++;
-        spreadGrass(st, m, n, dirt, grass, true, wsSurface);
+        spreadGrass(st, m, n, dirt, grass, true, wsSurface, tenth, rng);
         grassSpreadState.n--;
       }
     }

@@ -34,12 +34,9 @@ describe('高门右键切换（toggleTallGate 行为锁）', () => {
     g.input = { rightDown: true };
 
     // 布一扇右开向高门:锚 (30, 40),388 五行
-    st.setTileSilent(30, 40, T388, 0, 0);
-    for (let dy = 1; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, 0);
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);   // 行帧 0/20/38/56/74
     // 帧面:走 shiftTallGate 开→关 自循环生成合法帧（构造期直接手写帧易错,用产物）
     g.toggleTallGate(30, 40, false);                       // 右键闭态=开
-    console.log('DBGTG T388=', T388, 'T389=', T389, 'got=', st.get(30, 40),
-      'bykey389=', TILE_BY_KEY['v_389_tall_gate_open'], 'bykeyAlias=', TILE_BY_KEY['v_389_tallgateopen']);
     expect(st.get(30, 40)).toBe(T389);
     expect(g.input.rightDown).toBe(false);                 // 成功消费右键
     g.input.rightDown = true;

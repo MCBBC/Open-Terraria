@@ -5,7 +5,7 @@
 //   A. 提取器金标（manifest == golden + 关键家族字面量钉值）
 //   B. CanPlace 语义验证（Origin 对位/all-or-nothing/wall 白名单）
 import { describe, it, expect } from 'vitest';
-import { TileStore } from '../src/world/TileStore';
+import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import manifestJson from '../src/data/tile-anchors.json';
 import goldenJson from './golden/tile-anchor-authority.json';
@@ -20,6 +20,11 @@ function mkStore(w = 40, h = 30): TileStore {
 /** 地板行 row；墙数据用 wall 数组直填 */
 function layFloor(st: TileStore, x0: number, x1: number, row: number): void {
   for (let x = x0; x <= x1; x++) st.setTile(x, row, DIRT);
+}
+/** 占位矩形灌液（M-3 液体门测试）；本仓 liquidType 为原版 +1 编码（LIQUID_TYPE 枚举） */
+function flood(st: TileStore, x: number, y: number, w: number, h: number,
+  type: LIQUID_TYPE, amt = 255): void {
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) st.setLiquid(x + i, y + j, amt, type);
 }
 
 describe('A. 提取器金标（防静默漂移）', () => {
@@ -115,7 +120,7 @@ describe('B. CanPlace 语义（TileObject.cs 满分制移植）', () => {
     expect(rec91.anchorTop!.t).not.toContain('SolidWithTop');
     // Origin=(0,0):点击格=锚本身
     expect(validateAnchors(st as never, 11, 11, rec91)).toBe(true);
-    for (let x = 10; x <= 14; x++) st.setTile(x, 10, 0 as never), st.clearTile?.(x, 10);
+    for (let x = 10; x <= 14; x++) st.setTile(x, 10, 0 as never);   // setTile(0) 即清格（TileStore 无 clearTile 方法,旧可选调用恒 no-op,已删）
     layFloor(st, 10, 14, 14);                        // 仅地面无天花板
     expect(validateAnchors(st as never, 11, 11, rec91)).toBe(false);
   });
@@ -124,5 +129,82 @@ describe('B. CanPlace 语义（TileObject.cs 满分制移植）', () => {
     const rec13 = anchorSpecOf(13);
     expect(rec13).not.toBeNull();                    // 路径仍表驱动可用
     expect(rec13!.anchorBottom!.t).toContain('Table');
+  });
+});
+
+describe('C. 液体放置两维门（M-3 翻正：TileObjectData.LiquidPlace :1853-1907）', () => {
+  // 布景：地板 row12（x 6..22）；门用天花板 row8。灌液走 LIQUID_TYPE 枚举
+  // （本仓 +1 编码：WATER=1/LAVA=2/HONEY=3/SHIMMER=4——禁止裸写数字）。
+  it('翻正代表件（基样式缺省 WaterPlacement=Allowed）：工作台18/箱21/门10 满水可放', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    for (let x = 6; x <= 22; x++) st.setTile(x, 8, DIRT);      // 门顶锚
+    const wb = anchorSpecOf(18)!, chest = anchorSpecOf(21)!, door = anchorSpecOf(10)!;
+    // 原版缺省（SetupBaseObject TileObjectData.cs:1767-1768）：基样式水里可放——
+    // 旧 liqAllow 单维 false 与原版 382/382 反向，本用例翻正
+    expect(wb.liq).toEqual({ water: 'allowed', lava: 'notAllowed' });
+    flood(st, 10, 11, wb.w, wb.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 10, 11, wb)).toBe(true);
+    flood(st, 14, 10, chest.w, chest.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 14, 10, chest)).toBe(true);
+    flood(st, 18, 9, door.w, door.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 18, 9, door)).toBe(true);
+  });
+
+  it('水禁族（显式 WaterPlacement=NotAllowed）：篝火215/吊灯93 满水拒、半水亦拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const campfire = anchorSpecOf(215)!, lamp = anchorSpecOf(93)!;
+    expect(campfire.liq.water).toBe('notAllowed');   // TileObjectData.cs:3326
+    expect(lamp.liq.water).toBe('notAllowed');       // :2408-2409（style40 水灯为子样式覆写,基样式禁）
+    flood(st, 10, 10, campfire.w, campfire.h, LIQUID_TYPE.WATER, 255);
+    expect(validateAnchors(st, 10, 10, campfire)).toBe(false);
+    flood(st, 16, 9, lamp.w, lamp.h, LIQUID_TYPE.WATER, 120);   // 非满液同样拒（NotAllowed 无满液豁免）
+    expect(validateAnchors(st, 16, 9, lamp)).toBe(false);
+  });
+
+  it('岩浆维缺省 NotAllowed（SetupBaseObject :1768）：箱21/工作台18 岩浆拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const wb = anchorSpecOf(18)!, chest = anchorSpecOf(21)!;
+    flood(st, 10, 11, wb.w, wb.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 10, 11, wb)).toBe(false);
+    flood(st, 14, 10, chest.w, chest.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 14, 10, chest)).toBe(false);
+  });
+
+  it('显式 LavaPlacement=Allowed：蜥蜴祭坛237/盆栽熔岩植物613 岩浆可放（:3131/:3213）', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const altar = anchorSpecOf(237)!, potted = anchorSpecOf(613)!;
+    expect(altar.liq.lava).toBe('allowed');
+    expect(potted.liq.lava).toBe('allowed');
+    flood(st, 10, 10, altar.w, altar.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 10, 10, altar)).toBe(true);
+    flood(st, 15, 7, potted.w, potted.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 15, 7, potted)).toBe(true);
+  });
+
+  it('蜜/微光同走 water 维（原版 liquidType 0/2/3 同 case，:1876-1884）', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const wb = anchorSpecOf(18)!;
+    flood(st, 10, 11, wb.w, wb.h, LIQUID_TYPE.HONEY);
+    expect(validateAnchors(st, 10, 11, wb)).toBe(true);
+    flood(st, 14, 11, wb.w, wb.h, LIQUID_TYPE.SHIMMER);
+    expect(validateAnchors(st, 14, 11, wb)).toBe(true);
+  });
+
+  it('onlyInFull 语义（数据面基样式无值,合成记录验门）：半液拒/满液放/dry 拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const base = anchorSpecOf(18)!;
+    const rec = { ...base, liq: { water: 'onlyInFull' as const, lava: 'notAllowed' as const } };
+    flood(st, 10, 11, rec.w, rec.h, LIQUID_TYPE.WATER, 100);
+    expect(validateAnchors(st, 10, 11, rec)).toBe(false);        // 非满液拒（:1879-1881）
+    flood(st, 10, 11, rec.w, rec.h, LIQUID_TYPE.WATER, 255);
+    expect(validateAnchors(st, 10, 11, rec)).toBe(true);         // 满液放
+    for (let x = 10; x < 10 + rec.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
+    expect(validateAnchors(st, 10, 11, rec)).toBe(false);        // dry 拒（:1886-1904 else 支）
   });
 });

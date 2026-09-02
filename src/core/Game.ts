@@ -13569,9 +13569,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private resolveShotAnchor(spriteKey: string, ang: number, projH = 0): { x: number; y: number } {
     // ★v8 终案(2026-08-31):出生=盒中心(原版字面 Player.cs:47603),永不穿墙/入地。
     //  枪口出膛观感由渲染层实现:Arrow.draw / GrenadeProj.draw 角色盒内不渲染弹体。
-    // ★弹体半高上抬(2026-08-31 用户实测):出生 y − projH/2 对准炮管高度;
-    //  projH = projectileData(shoot).height,调用侧从弹表传入(如火箭 14 → −7)
-    return { x: this.player.cx, y: this.player.cy - projH / 2 };
+    // ★projH/2 上抬撤销(2026-09-02 用户四向实测定谳):该上抬系「枪画位装反时代」
+    //  的补丁——当日 drawUseItem 武器贴图错位(画在偏上位),弹上抬 projH/2 恰凑对;
+    //  三重偏差定罪后武器贴图修正回盒中心,上抬即成残余 7px 偏差(水平射击弹比
+    //  中心线高 projH/2,右/左朝向均见;垂直向下全对=向下臂锚与弹起点恰同位)。
+    //  原版字面=RotatedRelativePoint(MountedCenter) 无 projH 修正(:47603/:47640
+    //  枪口偏移支仅吹箭筒 281/吹箭枪 986/飞镖手枪 3007 三支显式)。projH 形参保留
+    //  (调用侧不动),归零。
+    void projH;
+    return { x: this.player.cx, y: this.player.cy };
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {

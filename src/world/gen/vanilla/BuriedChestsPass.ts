@@ -452,7 +452,12 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   const isGold = gs.seedFlags.remix
     ? (gy > gs.rockLevel && gy <= ctx.worldH - 251)
     : gy < gs.rockLevel;
-  const caveElig = gy <= ctx.worldH - 250
+  // ★IIIII174（2026-09-02）边界定谳：vanilla 1457 cs:37184 `num7 < Main.maxTilesY - 250`
+  //   【严格 <】——曾写 `<=` ⇒ 恰落在 gy=h-250 的箱（房箱地板行恰=950/4200×1200 等）
+  //   被误送洞穴档而原版走地狱档：house-1 箱 (2645,950) x86 25 掷（地狱 num32 四选
+  //   +Prefix+副物 22）vs JS 22 掷（洞穴表）= Δ3/屋 ×159 屋复合（grv #59 房屋段
+  //   13.5k 差主源）。定值重放 harness：x86 25 值在 hell 表恰耗 25、在 cave 表 22。
+  const caveElig = gy < ctx.worldH - 250
     || (gs.seedFlags.remix && (ctx.chestStyle === 7 || ctx.chestStyle === 14));   // ★IIIII86：style 载体=LootCtx.chestStyle（ChestFlags 无 style 字段）
 
   if (isSurface) {

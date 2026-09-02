@@ -4374,15 +4374,22 @@ export class Renderer {
           for (let cx = 0; cx < 2; cx++) {
             const r = this.atlas!.vframeAt(378, vx + cx * 18, row * 54 + cy * 18);
             if (!r) continue;
+            // ★2c''.5 块 ctx 处于【世界变换空间】（同风摆层"世界变换内世界坐标";
+            //   实测 a/d=zz、e=ox−camRX·zz,2026-09-02 用户报假人不渲染定谳）——
+            //   设备取整必须换算回世界坐标再画:先按 dev 映射取整到设备像素,
+            //   再逆映射回世界 x/y。曾直接画设备坐标=双重变换,恒画到屏外
+            //   （1.25×640−64132≈−6.3 万）=假人隐形。
             if (dev) {
-              // 设备空间取整（同 drawAnimatedTileLayer doctrine,发丝缝）
               const wx = (tx + cx) * ts, wy = (ty + cy) * ts + dy;
               const dxa = dev.ox + Math.round((wx - dev.camRX) * dev.zz);
               const yda = dev.oy + Math.round((wy - dev.camRY) * dev.zz);
               const dxb = dev.ox + Math.round((wx + ts - dev.camRX) * dev.zz);
               const ydb = dev.oy + Math.round((wy + ts - dev.camRY) * dev.zz);
-              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
-                dxa, yda, dxb - dxa, ydb - yda);
+              const wxa = dev.camRX + (dxa - dev.ox) / dev.zz;
+              const wya = dev.camRY + (yda - dev.oy) / dev.zz;
+              const wwb = (dxb - dxa) / dev.zz;
+              const whb = (ydb - yda) / dev.zz;
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, wxa, wya, wwb, whb);
             } else {
               ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
                 (tx + cx) * ts, (ty + cy) * ts + dy, ts, ts);

@@ -1165,13 +1165,17 @@ export function doExtraLiquidAddLiquid(st: TileStore, rng: RNG, gs: GenState): v
  *  仅 37 枚 Register 秘种子计入；truckstop 单旗标 ⇒ num3=(2+1)/3=1 不均分）。 */
 export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
   const F = gs.seedFlags;
+  // ★IIIII176 对拍探针钩（诊断期临时件，定谳后拆除）——与 rig SW_I176_POO trace 逐字段同构
+  const pooProbe = (globalThis as { __swI176Poo?: (line: string) => void }).__swI176Poo;
   const num = 40;                                                       // cs:2977
   let num2 = Math.trunc(st.w * st.h * 0.0002);                          // cs:2978 (int)((double)(w*h)*0.0002)
   const num3 = Math.max(1, Math.trunc((2 + activeSecretSeedCountOf(F)) / 3));  // cs:2979-2983 整除+<1 钳 1
   num2 = Math.trunc(num2 / num3);                                       // cs:2984
+  pooProbe?.(`count|${activeSecretSeedCountOf(F)}|num2|${num2}`);
   for (let i = 0; i < num2; i++) {
     const num4 = rng.nextIntRange(num, st.w - num);                     // cs:2987 Next(40, w-40)
     let num5 = rng.nextIntRange(num, st.h - num);                       // cs:2988 Next(40, h-40)
+    const raw5 = num5;
     for (let j = 0; j < 30; j++) {                                      // cs:2989-2996 下扫寻实心（≤30 步，零掷）
       if (solidTileGround(st, num4, num5)) break;
       num5++;
@@ -1187,12 +1191,17 @@ export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
         || DESERT_CLOUD_IDS.has(sh)                                                      // TileID.Sets.Clouds（TileID.cs:197，与沙漠锚同集）
         || wal === 73);                                                                  // 蜂蜜生成墙
     if (!reject && solidTileGround(st, num4, num5)) {
+      const s = rng.nextIntRange(5, 12);                                                // Next(5,12)
+      const t = rng.nextIntRange(10, 31);                                               // Next(10,31)
+      pooProbe?.(`${i}|${num4}|${raw5}|${num5}|1|${s}|${t}`);
       tileRunner(st, rng, gs, num4, num5, {                                             // cs:2999
-        strength: rng.nextIntRange(5, 12),                                              // Next(5,12)
-        steps: rng.nextIntRange(10, 31),                                                // Next(10,31)
+        strength: s,
+        steps: t,
         type: idOf(666),
         addTile: true,
       });
+    } else {
+      pooProbe?.(`${i}|${num4}|${raw5}|${num5}|0`);
     }
   }
 }

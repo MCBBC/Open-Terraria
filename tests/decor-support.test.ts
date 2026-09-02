@@ -986,10 +986,10 @@ describe('九批 M-1：387 闭态活板门（CheckTrapDoor 387 臂）', () => {
     g.checkFurnitureSupport(10, 10);
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(11, 10)).toBe(0);
-    // 掉落语义=item 3239（CheckTrapDoor :52097-52108 Item.NewItem(3239)）——本仓
-    // 走 multiTileDropKey place_v_ 兜底（item 3239 createTile=387 同语义,D-8 备案族;
-    // vi_3239_Trapdoor def 在册但 placeable 兜底优先,备案）
-    expect(drops).toContainEqual({ key: 'place_v_387_trap_door_closed', n: 1 });
+    // 掉落语义=item 3239（CheckTrapDoor :52097-52108 Item.NewItem(3239);:52093-52095
+    // 两支恒 3239=反编译本相）——★新账收编（2026-09-02）：D-8 door-drop 链 387→3239,
+    // place_v_ 面板伪物品兜底退役（同 388→3240 口径）
+    expect(drops).toContainEqual({ key: 'vi_3239_Trapdoor', n: 1 });
   });
   it('侧锚扰动对照（右锚旁格非锚）→ 幸存;帧失配（异 36 带基）→ 判坏清（CheckTileFrames）', () => {
     const w = new World(40, 40, 7, 'decor-support-td387-ctrl');

@@ -99,6 +99,37 @@ function lerpValue(from: number, to: number, t: number): number {
 /** MathHelper.Lerp */
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+/** Main.rand.NextVector2Circular(rx, ry)——角度均匀 + 半径 √rand 圆盘取样 */
+function circularVec2(r: number): [number, number] {
+  const a = Math.random() * Math.PI * 2;
+  const m = Math.sqrt(Math.random()) * r;
+  return [Math.cos(a) * m, Math.sin(a) * m];
+}
+
+/** 34 白热光环用全白帧（Main.cs:33680-33694 画的是 GlowMask 白模;本仓无 glowmask
+ *  图集 → 本体帧 source-in 白填充等价合成,Arrow.whiteSpriteOf 同法。按帧缓存） */
+const WHITE34_CACHE = new Map<number, HTMLCanvasElement>();
+function whiteHot34(frame: number): HTMLCanvasElement | null {
+  const key = ((frame % 6) + 6) % 6;
+  const hit = WHITE34_CACHE.get(key);
+  if (hit) return hit;
+  const src = projFrameImg(34, key);
+  if (!src) return null;
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  const cc = c.getContext('2d');
+  if (!cc) return null;
+  cc.imageSmoothingEnabled = false;
+  cc.drawImage(src, 0, 0);
+  cc.globalCompositeOperation = 'source-in';
+  cc.fillStyle = '#fff';
+  cc.fillRect(0, 0, c.width, c.height);
+  if (WHITE34_CACHE.size > 64) WHITE34_CACHE.clear();
+  WHITE34_CACHE.set(key, c);
+  return c;
+}
+
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** float.AngleTowards（Utils.cs:2142-2159）：最短路径钳 maxChange/tick */
@@ -174,6 +205,78 @@ interface MissileEnemyView {
 /** 同族存活链：尾部 = 最新弹，独占"持按连发"循环（原版每 useAnimation 一发新弹） */
 const ALIVE: MagicMissileProj[] = [];
 
+/**
+ * ★MAJOR-4（2026-09-02 红队 J′ 定罪）：Kill 死亡爆散逐型参数表——把 79 已真值化的
+ * killNow 爆散骨架（Resize(盒)→penetrate=−1→Damage() AoE→Item10→沿 oldPos 全程
+ * d267 尾迹迸散+CloneDust 白影）按型差异入表后接 16/34。原文三段：
+ *   79 :72426-72503 / 16 :72503-72596 / 34 :72597-72650（1458 同）。
+ * 字段：
+ *   aoe       Resize 盒边长（死亡 AoE 半宽 = aoe/2；16=128 / 34=96 / 79=128）
+ *   huePhase  79 式色相 = 单 rand 相位逐点累进 lvp2（:72440）;false = 逐点独立 rand
+ *             经 hueOf（16 :72516 固定档 4/9+rand×2/9 / 34 :72611 rand×1/9）
+ *   lum       hslToRgb 亮度档（79/16 = .65、34 = .5）
+ *   count     迸散计数基数 Next(1,count)（79/16 = 4、34 = 5）
+ *   decay     [阈值×N, 减数] 升序（79 三级 .3/.65/.85→1/2/3 :72446-72454;
+ *             16/34 两级 .3/.75→1/2 :72520-72530/:72615-72625）
+ *   scale267  267 主尘 scale 初值闭式（:72448 .9+1.2r / :72536 r×.8 / :72627 r×1）
+ *   fadeIn267 267 主尘 fadeIn 闭式(k67)（:72449 1.2r·k67 / :72537 1.2r·k67 / :72628 2r）
+ *   chase     267 主尘 +=单位向×chase（79/16 = 6 :72452/:72540、34 = 8 :72631）
+ *   gate267   267 支受理门 Next(gate267)==0（16/34 = 3 :72533/:72622 即 1/3 门;
+ *             79 = 0 恒走 267）;未受理走备支尘（alt）
+ *   cloneFadeIn CloneDust 尾系数（79 = fadeIn×0.85 :72495;16/34 = fadeIn/2
+ *             :72593/:72645;scale/2 与纯白覆写三型同）
+ *   alt       备支尘（16 = d15 :72570-72588 / 34 = d6 :72619-72632;79 无）——
+ *             初速 −vel×0.2、alpha100、vel×2、+=单位向×chase、scale×k67、noLight;
+ *             16 恒 noGravity + fadeIn=(0.6+r×0.4)k67;34 是 50% 门 noGravity+scale×2.5
+ *   tail      Kill 尾段 20 循环径向尘（16 = d15 圆盘 1.5/scale1.2+.5r/pos+=v×Next(1,16)
+ *             :72578-72596;34 = d6 圆盘 6/scale1.6/fadeIn1.3+r :72633-72650;79 无）
+ */
+interface KillBurstSpec {
+  aoe: number;
+  huePhase: boolean;
+  hueOf?: (r: number) => number;
+  lum: number;
+  count: number;
+  decay: ReadonlyArray<readonly [number, number]>;
+  scale267: (r: number) => number;
+  fadeIn267: (r: number, k: number) => number;
+  chase: number;
+  gate267: number;
+  cloneFadeIn: 'mul0.85' | 'half';
+  alt?: {
+    type: number;
+    chase: number;
+    fadeInOf?: (r: number, k: number) => number;
+    heavyGate?: boolean;
+  };
+  tail?: 'd15' | 'd6';
+}
+
+const KILL_BURST: Record<number, KillBurstSpec> = {
+  79: {
+    aoe: 128, huePhase: true, lum: 0.65, count: 4,
+    decay: [[0.3, 1], [0.65, 2], [0.85, 3]],
+    scale267: (r) => 0.9 + r * 1.2, fadeIn267: (r, k) => r * 1.2 * k, chase: 6,
+    gate267: 0, cloneFadeIn: 'mul0.85',
+  },
+  16: {
+    aoe: 128, huePhase: false, hueOf: (r) => 4 / 9 + r * (2 / 9), lum: 0.65, count: 4,
+    decay: [[0.3, 1], [0.75, 2]],
+    scale267: (r) => r * 0.8, fadeIn267: (r, k) => r * 1.2 * k, chase: 6,
+    gate267: 3, cloneFadeIn: 'half',
+    alt: { type: 15, chase: 9, fadeInOf: (r, k) => (0.6 + r * 0.4) * k },
+    tail: 'd15',
+  },
+  34: {
+    aoe: 96, huePhase: false, hueOf: (r) => r * (1 / 9), lum: 0.5, count: 5,
+    decay: [[0.3, 1], [0.75, 2]],
+    scale267: (r) => r, fadeIn267: (r) => r * 2, chase: 8,
+    gate267: 3, cloneFadeIn: 'half',
+    alt: { type: 6, chase: 6, heavyGate: true },
+    tail: 'd6',
+  },
+};
+
 export interface MissileCtor {
   projId: number;
   damage: number;
@@ -229,19 +332,17 @@ export class MagicMissileProj extends Entity {
   /** 上 tick 速度（:40686 flag3 急转判定） */
   private pvx = 0;
   private pvy = 0;
-  /** 上一帧中心（34 绘制位 = oldPos[0]+Size/2−vel/2，Main.cs:32436） */
-  private prevCx: number;
-  private prevCy: number;
-  /** 79 彩虹拖尾采样环（RainbowRodDrawer oldPos 链） */
-  private trail: number[] = [];
-  /** 34/16 着色器火带顶点带（TrailingMode[34]=[16]=3 的 oldPos 复刻——P.cs:17236-17253
-   *  每 EU 子步【位移后】记录 oldPos[0]=position、旧点整体后移,再自尾向头逐点向邻新
-   *  点 Lerp 0.65 收缩（距离>2 才收缩）;TrailCacheLength[34]=[16]=30 → 30 槽,新→老,
-   *  [0]=头=本拍位移后弹心,与原版 Drawer 侧 +Size/2 同位）。★T1 清偿（2026-09-02,
-   *  红队 E′）：原版 Main.cs:28617/:28621 由 FlameLashDrawer/MagicMissileDrawer 沿
-   *  该带绘着色器火带,本仓此前整缺。79 的 this.trail（旧→新 12 点,killNow 迸散与
-   *  彩虹拖尾消费,终清波校准口径）不受影响——两条带并存 */
+  /** 16/34/79 着色器拖尾顶点带（TrailingMode[16]=[34]=[79]=3 的 oldPos 复刻——
+   *  P.cs:17246-17253 每 tick【位移后】记录 oldPos[0]=position、旧点整体后移,再自尾
+   *  向头逐点向邻新点 Lerp 0.65 收缩（距离>2 才收缩）;新→老,[0]=头=本拍位移后弹心,
+   *  与原版 Drawer 侧 +Size/2 同位）。容量 TrailCacheLength（ProjectileID.cs:387）：
+   *  16/34=30、79=60。★裁定 a（2026-09-02 J′）：79 彩虹带并入同构记录——旧 push 追尾
+   *  12 点带（无收缩、旧→新存数、killNow 迸散与拖尾消费）退役,三条带单源。
+   *  ★T1 清偿（2026-09-02,红队 E′）：原版 Main.cs:28615-28622 由 FlameLashDrawer/
+   *  MagicMissileDrawer 沿该带绘着色器火带,本仓此前整缺 */
   private strip: Array<{ x: number; y: number }> = [];
+  /** 本型带容量（TrailCacheLength;0 = 无带型——本实体只接 16/34/79,恒非 0） */
+  private stripCap: number;
   /** Main.GlobalTimeWrappedHourly（Main.cs:17014 游戏运行秒 %3600）——拖尾色相相位
    *  基准。★2026-08-31 台账 C1 清偿：曾用逐弹本地钟（每 tick +1/60 自起点起算），
    *  同帧发射的多弹色相恒差一个常数偏移、也和世界的 GlobalTime 不同相；改为直读
@@ -280,8 +381,7 @@ export class MagicMissileProj extends Entity {
     this.drawScale = pd?.scale ?? 1;
     this.timeLeft = pd?.timeLeft ?? 3600;
     this.pierce = this.pierceInit = Math.max(1, pd?.penetrate ?? 1);
-    this.prevCx = this.cx;
-    this.prevCy = this.cy;
+    this.stripCap = o.projId === 79 ? 60 : 30;   // TrailCacheLength（ProjectileID.cs:387）
     ALIVE.push(this);
   }
 
@@ -295,31 +395,27 @@ export class MagicMissileProj extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.timeLeft <= 0) { this.killNow(game); return; }
     this.pvx = this.vx; this.pvy = this.vy;
-    this.prevCx = this.cx; this.prevCy = this.cy;
     this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
-    // 尾迹采样点序对齐原版 oldPos 写入面(:17200-17204 每拍先快照当前位再跑
-    // AI/位移——oldPos[0] 恒落后当前位一个位移步)：push 先于积分，非后随。
-    // ★终清波校准：曾采"移动后中心"，头点与弹心重合 → Kill 迸散的
-    // DirectionTo 链首段零长退化（SafeNormalize(Vector2.Zero)=零向），拖尾
-    // 绘制亦整体前移一段。vanilla 时序下头距=上一拍速度模长恒非零。
-    this.trail.push(this.cx, this.cy);
-    if (this.trail.length > 24) this.trail.splice(0, this.trail.length - 24);
     this.steer(game);
     if (this.dead) return;
     this.x += this.vx;
     this.y += this.vy;
-    if (this.projId === 34 || this.projId === 16) this.stripRecord();   // P.cs:17199（位移后）
+    if (this.stripCap > 0) this.stripRecord();   // P.cs:17197（位移后;TrailingMode[16/34/79]=3）
     this.hitStep(game);
   }
 
-  /** TrailingMode 3 记录+收缩（P.cs:17236-17253；本族 extraUpdates=0 → 每 tick 一次）。
+  /** TrailingMode 3 记录+收缩（P.cs:17246-17253；本族 extraUpdates=0 → 每 tick 一次）。
    *  整带后移一位、[0]=本次位移后心；再自尾（i=末槽）向头逐点：与邻新点距离>2 时
    *  向其 Lerp 0.65 收缩（原版 `oldPos[num28]=Vector2.Lerp(oldPos[num28],oldPos[num28-1],0.65f)`）。
-   *  同段还重算 oldRot[i]=指向邻新点方向——canvas 带以段向法线承载（drawShaderTrail），
-   *  不维护 rot 镜像。碰撞/AI 致死子步不入带（原版 :17135 `if(!active) return` 先于记录段） */
+   *  同段还重算 oldRot[i]=指向邻新点方向——canvas 带以段向法线承载（drawShaderTrail/
+   *  draw79Trail 与 killNow 迸散环同消费此带），不维护 rot 镜像。容量 =stripCap
+   *  （TrailCacheLength[16]=[34]=30、[79]=60,ProjectileID.cs:387）。
+   *  ★时序注（记录 vs 致死）：原版记录段在 Damage()(:17182) 之后、位移致死在
+   *  HandleMovement 内 :17129 `if(!active) return` 早退不入带——本仓记录先于 hitStep,
+   *  故撞块致死拍的死亡点也入带（=原版 Damage 致死拍同款、碰撞致死拍多一柱,登记残差） */
   private stripRecord(): void {
     this.strip.unshift({ x: this.cx, y: this.cy });
-    if (this.strip.length > 30) this.strip.length = 30;   // TrailCacheLength[34]=[16]=30
+    if (this.strip.length > this.stripCap) this.strip.length = this.stripCap;
     for (let i = this.strip.length - 1; i >= 1; i--) {
       const cur = this.strip[i], newer = this.strip[i - 1];
       const dx = newer.x - cur.x, dy = newer.y - cur.y;
@@ -335,7 +431,9 @@ export class MagicMissileProj extends Entity {
     const num = 32;   // :40525 最大速度
     // ---- type 34：帧动画 + 翻页/发红计时（:40534-40558）----
     if (this.projId === 34) {
-      if (++this.frameCounter >= 4) {
+      // ★MINOR-5（P.cs:44013-44019 `frameCounter++ >= 4` 后增比较）——旧 ++前增
+      //  4 拍/帧,原版 5 拍/帧（计数值 0..4 五拍后换帧）
+      if (this.frameCounter++ >= 4) {
         this.frameCounter = 0;
         this.frame = (this.frame + 1) % projFrameCount(34);
       }
@@ -629,15 +727,19 @@ export class MagicMissileProj extends Entity {
       && --this.pierce <= 0) { this.killNow(game); return; }
   }
 
-  /** 统一消亡出口。★R27：79 彩虹魔杖补 Kill 爆（Projectile.cs:72426-72503，1458 同）：
-   *  Resize(128,128) → maxPenetrate=−1 → Damage()（128px 死亡 AoE 二次结算）→
-   *  Item10 音 + 沿 oldPos 全程彩虹 d267 尾迹迸散（逐点 hue 相位/数量按「距头部」
-   *  衰减/白影 = Dust.CloneDust 真克隆体——2026-09-01 终清波真值化，见体内注）
-   *  + RainbowRodHit 编排粒子×2（L5 批收编 fx/orchestraFx 真值本体）+ 14×d66 随机色 */
+  /** 统一消亡出口。★R27：79 彩虹魔杖 Kill 爆（Projectile.cs:72426-72503，1458 同）+
+   *  ★MAJOR-4（2026-09-02 红队 J′）：同骨架参数化接 16（:72503-72596）/34（:72597-72650）——
+   *  Resize(盒) → maxPenetrate=−1 → Damage()（死亡 AoE 二次结算）→ Item10 音 →
+   *  沿 oldPos（=本批 strip 带：79 60 槽 / 16/34 30 槽,裁定 a ③④）全程 d267 尾迹
+   *  迸散（逐点 hue/数量按「距头部」衰减/白影 = Dust.CloneDust 真克隆体——
+   *  2026-09-01 终清波真值化）→ 型专属尾段（79 = RainbowRodHit 编排×2 + 14×d66;
+   *  16/34 = 20 循环径向尘）。逐型差异全在 KILL_BURST 表（见其头注） */
   private killNow(game: GameHooks): void {
-    if (this.projId === 79 && !this.dead) {
-      // Resize(128,128) 死亡 AoE（:72428-72434）：以弹心为心 128px 盒重结算一次伤害
-      const R = 64;
+    const spec = KILL_BURST[this.projId];
+    if (spec && !this.dead) {
+      // Resize(盒) 死亡 AoE（:72428-72434/:72504-72510/:72598-72604）：以弹心为心
+      // 128px(79/16)/96px(34) 盒重结算一次伤害
+      const R = spec.aoe / 2;
       for (const ent of game.enemies()) {
         const e = ent as MissileEnemyView;
         if (e.dead) continue;
@@ -645,8 +747,8 @@ export class MagicMissileProj extends Entity {
         if (!(Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2)) continue;
         if (!playerCanHitEnemy(e, game, this.projId)) continue;
         const crit = Math.random() < this.critChance;
-        // ★F3 对账收口（蓝队四轮）：79 彩虹魔杖 Kill 死亡爆 = Resize 后 Damage()
-        // 二次结算面 → 双支单源站位（79 数据面 magic ⇒ 恒拒=原版同真值,翻旗自动生效）
+        // ★F3 对账收口（蓝队四轮）：Kill 死亡爆 = Resize 后 Damage()
+        // 二次结算面 → 双支单源站位（79/16 数据面 magic ⇒ 恒拒=原版同真值,翻旗自动生效）
         const snapBonusRainbow = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, e.id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });
@@ -655,79 +757,145 @@ export class MagicMissileProj extends Entity {
           Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       }
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
-      // 沿 oldPos 尾迹迸散（:72436-72487，1458 与 1047 彩虹巨石族同构）。
-      // ★终清波真值化（2026-09-01）：旧实现两处失真退役——①数量衰减方向写反
-      // （vanilla 对「距头部」≥N×{.3/.65/.85} 的老点减，旧码却对靠近爆心的新点减）
-      // ②白影系独立半尺白粒——vanilla 是 Dust.CloneDust 真克隆体：字段级复制回池
-      // （position/velocity/fadeIn/scale 原样继承,Dust.cs:260-288）后 scale/=2、
-      // fadeIn×=0.85、color=纯白。本段全链：
-      //   · 迭代序 = 最新点（oldPos[0]=前拍位,:17204 oldPos[0]=position 写入面）
-      //     → 最老；target4 从 Center 起步逐点回走（:72439），DirectionTo().Safe
-      //     Normalize(Vector2.Zero)（零长→零向）。
-      //   · 主尘：NewDust(vector13,w,h,267,0,0,0,newColor3) → velocity×=r×0.8 →
-      //     noGravity=true → scale=(.9+r×1.2)【覆写消抖动】 → fadeIn=r×1.2×num67 →
-      //     velocity += 向更近点单位向×6 → scale×=num67（与上行合并为整式）→
-      //     position=Lerp(盒心,dustPos,lvp2)。
-      //   · newColor3 = hslToRgb((hue0+lvp2)%1, 1, .65)——L=.65 亮度档（:72441）。
-      //   · num67 = Lerp(.3,1,lvp2)、lvp2 = GetLerpValue(N,0,num65) = 1−num65/N；
-      //     count = Next(1,4) − {≥.3N:1, ≥.65N:再2, ≥.85N:再3}（可负 = 不出粒）。
+      // 沿 oldPos 尾迹迸散（79 :72436-72487 / 16 :72511-72577 / 34 :72605-72632，
+      // 1458 与 1047 彩虹巨石族同构）。
+      // ★终清波真值化（2026-09-01）+ MAJOR-4 参数化：消费带 = strip（新→老,[0]=头
+      // 与原版 oldPos 同序,故 num=下标即「距头部」）——旧 12 点 push 带退役（裁定 a）。
+      // 本段全链：
+      //   · 迭代序 = 头（oldPos[0]）→尾；target4 从 Center 起步逐点回走（:72439），
+      //     DirectionTo().SafeNormalize(Vector2.Zero)（零长→零向）。
+      //   · 主尘 267：NewDust(vector13,w,h,267,0,0,0,newColor) → velocity×=r×0.8 →
+      //     noGravity=true → scale=scale267(r) → fadeIn=fadeIn267(r,k67) →
+      //     velocity += 向更近点单位向×chase → scale×=k67 →
+      //     position=Lerp(盒心,dustPos,lvp2)。16/34 有 Next(3)==0 受理门,未受理走
+      //     备支尘（16=d15 / 34=d6,见 KILL_BURST.alt 注）。
+      //   · newColor = hslToRgb(hue, 1, lum)——hue/lum 逐型（79 单 rand 相位逐点累进;
+      //     16 固定档 4/9+2r/9;34 rand/9）。
+      //   · lvp2 = GetLerpValue(N,0,num) = 1−num/N；k67 = Lerp(.3,1,lvp2)；
+      //     count = Next(1,count) − decay 表逐阈减（可负 = 不出粒）。
       //   · 克隆仅在主尘成功时进行（:72491 `if (num69 != 6000)` 门 ↔ 引擎池满 null）；
       //     克隆走引擎 VanillaDust.clone 1:1 件（Game.vanillaDust 直读，缺省面静默
       //     跳过——测试桩/池满同兜底语义）。
       interface DustCloneHost { clone(rf: VDust): VDust | null }
-      const pts79 = this.trail;                            // 老→新存数（oldPos 为新→老，反向等价）
-      const N = pts79.length / 2;
+      const pts = this.strip;
+      const N = pts.length;
       const hue0 = Math.random();
       const dustCloneHost = (game as unknown as { vanillaDust?: DustCloneHost }).vanillaDust;
       let tgx = this.cx, tgy = this.cy;                    // target4（:72438 初值 Center）
-      for (let i = N - 1; i >= 0; i--) {                   // num65=0（head）→ N-1（tail）
-        const px = pts79[i * 2], py = pts79[i * 2 + 1];
-        const num65 = (N - 1) - i;                         // 距头部（oldPos 下标语义）
+      for (let num = 0; num < N; num++) {                  // num=距头部（oldPos 下标语义）
+        // ★带坐标 = 本仓 strip 存【中心】（= oldPos+Size/2,Drawer 侧同位）;原文本段
+        // 读【左上】oldPos 且 target4 初值是 Center——num=0 的 vector14 因此恒为
+        // Size/2 对角向（:72440 DirectionTo(Center)）,逐点回走后 tg=上一点左上、
+        // 与左上差分 = 中心差分同向。px/py 取左上以逐字对齐原文几何
+        const px = pts[num].x - this.w / 2, py = pts[num].y - this.h / 2;   // vector13=oldPos
         const dl = Math.hypot(tgx - px, tgy - py);
         const uxv = dl > 0 ? (tgx - px) / dl : 0;
         const uyv = dl > 0 ? (tgy - py) / dl : 0;
         tgx = px; tgy = py;                                // target4 = vector13（:72474）
-        const lvp2 = 1 - num65 / N;                        // GetLerpValue(N,0,num65)（:72444）
-        const k67 = lerp(0.3, 1, lvp2);                    // num67（:72445）
-        let count = 1 + Math.floor(Math.random() * 3);     // Next(1,4)（:72442）
-        if (num65 >= N * 0.3) count--;                     // :72446-72454
-        if (num65 >= N * 0.65) count -= 2;
-        if (num65 >= N * 0.85) count -= 3;
-        const [rr, gg, bb] = hueToRgb((hue0 + lvp2) % 1, 0.65);
+        const lvp2 = 1 - num / N;                          // GetLerpValue(N,0,num)（:72444）
+        const k67 = lerp(0.3, 1, lvp2);                    // num67/num75/num81（:72445 系）
+        let count = 1 + Math.floor(Math.random() * (spec.count - 1));   // Next(1,count)
+        for (const [thr, sub] of spec.decay) {             // :72446-72454 / :72520-72530 / :72615-72625
+          if (num >= N * thr) count -= sub;
+        }
+        const hue = spec.huePhase ? (hue0 + lvp2) % 1 : spec.hueOf!(Math.random());
+        const [rr, gg, bb] = hueToRgb(hue, spec.lum);
         for (let k = 0; k < Math.max(count, 0); k++) {
-          const dd = game.spawnDust?.(px - this.w / 2, py - this.h / 2, this.w, this.h,
+          if (spec.gate267 > 0 && Math.floor(Math.random() * spec.gate267) !== 0) {
+            // 备支尘（16 :72570-72588 d15 / 34 :72619-72632 d6；79 无备支）
+            const alt = spec.alt!;
+            const heavy = alt.heavyGate === true && Math.floor(Math.random() * 2) === 0;
+            const ad = game.spawnDust?.(px, py, this.w, this.h,
+              alt.type, -this.vx * 0.2, -this.vy * 0.2, 100, null, undefined,
+              alt.heavyGate ? heavy : true);
+            if (ad) {
+              if (heavy) ad.scale *= 2.5;                  // :72623-72626（同一掷定 noGravity+×2.5）
+              ad.vx *= 2; ad.vy *= 2;                      // :72576/:72628 velocity×2
+              ad.vx += uxv * alt.chase; ad.vy += uyv * alt.chase;   // +=vector17*9 / vector19*6
+              ad.scale *= k67;                             // :72579/:72630
+              ad.noLight = true; ad.noLightEmittance = true;   // :72585/:72632
+              if (alt.fadeInOf) ad.fadeIn = alt.fadeInOf(Math.random(), k67);   // :72583
+            }
+            continue;
+          }
+          const dd = game.spawnDust?.(px, py, this.w, this.h,
             267, 0, 0, 0, { r: rr, g: gg, b: bb, a: 255 }, undefined, true);
           if (!dd) continue;                               // num69 != 6000 门（主尘失败无克隆）
-          dd.vx *= Math.random() * 0.8;                    // :72446
+          dd.vx *= Math.random() * 0.8;                    // :72446/:72534/:72624
           dd.vy *= Math.random() * 0.8;
-          dd.scale = (0.9 + Math.random() * 1.2) * k67;    // :72448/:72453 两步覆写并一步
-          dd.fadeIn = Math.random() * 1.2 * k67;           // :72449
-          dd.vx += uxv * 6;                                // :72452 velocity += vector14*6f
-          dd.vy += uyv * 6;
-          dd.x = px + (dd.x - px) * lvp2;                  // :72455 position Lerp 盒心钉头
-          dd.y = py + (dd.y - py) * lvp2;
-          const cd = dustCloneHost?.clone(dd as VDust);    // CloneDust(num69)（:72492）
+          dd.scale = spec.scale267(Math.random()) * k67;   // :72448+:72453 两步覆写并一步
+          dd.fadeIn = spec.fadeIn267(Math.random(), k67);  // :72449/:72537/:72628
+          dd.vx += uxv * spec.chase;                       // :72452 velocity += vector14*chase
+          dd.vy += uyv * spec.chase;
+          const ax0 = px + this.w / 2, ay0 = py + this.h / 2;   // vector13+vector15 = Center
+          dd.x = ax0 + (dd.x - ax0) * lvp2;                // :72455 position Lerp 盒心钉头
+          dd.y = ay0 + (dd.y - ay0) * lvp2;
+          const cd = dustCloneHost?.clone(dd as VDust);    // CloneDust(num69)（:72492 系）
           if (cd) {
-            cd.scale /= 2;                                 // :72493
-            cd.fadeIn *= 0.85;                             // :72495
-            cd.color = { r: 255, g: 255, b: 255, a: 255 }; // :72496
+            cd.scale /= 2;                                 // :72493/:72591/:72637
+            if (spec.cloneFadeIn === 'mul0.85') cd.fadeIn *= 0.85;   // :72495（79 专属）
+            else cd.fadeIn /= 2;                           // :72593/:72645（16/34 ÷2）
+            cd.color = { r: 255, g: 255, b: 255, a: 255 }; // :72496/:72594/:72646
           }
         }
       }
-      // RainbowRodHit 编排粒子 ×2（:72486-72496）——L5 批收编真值本体（六掷虹彩
-      // 簇+12×d267 双层）;原版 clientOnly:true 不上网,本地直驱同口径。
-      // ★终零波补载荷（:72492 MovementVector=UnitX.RotatedBy(num70·2π)·16,num70
-      //  步 0/0.25 → (16,0)/(0,16)):movement 向量进 Spawn_ 的抖动向量与 d267 出速
-      // （fx/orchestraFx.rainbowRodHitFx moveX/moveY 消费位）——曾传缺省 0 = 两组
-      // 编排完全同参,远端复放与本地皆失一轴偏置。
-      rainbowRodHitFx(game, this.cx, this.cy, 16, 0);
-      rainbowRodHitFx(game, this.cx, this.cy, 0, 16);
-      // 14×d66 随机色 vel×3（:72496-72502）
-      for (let i = 0; i < 14; i++) {
-        const [rr, gg, bb] = hueToRgb(Math.random());
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 66, 0, 0, 100,
-          { r: rr, g: gg, b: bb, a: 255 }, 1.7, true);
-        if (d) { d.vx *= 3; d.vy *= 3; }
+      if (this.projId === 79) {
+        // RainbowRodHit 编排粒子 ×2（:72486-72496）——L5 批收编真值本体（六掷虹彩
+        // 簇+12×d267 双层）;原版 clientOnly:true 不上网,本地直驱同口径。
+        // ★终零波补载荷（:72492 MovementVector=UnitX.RotatedBy(num70·2π)·16,num70
+        //  步 0/0.25 → (16,0)/(0,16)):movement 向量进 Spawn_ 的抖动向量与 d267 出速
+        // （fx/orchestraFx.rainbowRodHitFx moveX/moveY 消费位）——曾传缺省 0 = 两组
+        // 编排完全同参,远端复放与本地皆失一轴偏置。
+        rainbowRodHitFx(game, this.cx, this.cy, 16, 0);
+        rainbowRodHitFx(game, this.cx, this.cy, 0, 16);
+        // 14×d66 随机色 vel×3（:72496-72502）
+        for (let i = 0; i < 14; i++) {
+          const [rr, gg, bb] = hueToRgb(Math.random());
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 66, 0, 0, 100,
+            { r: rr, g: gg, b: bb, a: 255 }, 1.7, true);
+          if (d) { d.vx *= 3; d.vy *= 3; }
+        }
+      } else if (spec.tail) {
+        // ★MAJOR-4 尾段：Kill 尾 20 循环径向尘（16 :72578-72596 d15 / 34 :72633-72650 d6）
+        for (let i = 0; i < 20; i++) {
+          const type = spec.tail === 'd15' ? 15 : 6;
+          const sx = spec.tail === 'd15' ? 0 : -this.vx * 0.2;
+          const sy = spec.tail === 'd15' ? 0 : -this.vy * 0.2;
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, type, sx, sy,
+            spec.tail === 'd15' ? 0 : 100, null, undefined,
+            spec.tail === 'd15' ? true : undefined);
+          if (d) {
+            if (spec.tail === 'd15') {
+              d.noGravity = true;                          // :72581
+              [d.vx, d.vy] = circularVec2(1.5);            // :72582 NextVector2Circular(1,1)×1.5
+              d.scale = 1.2 + Math.random() * 0.5;         // :72583
+            } else {
+              d.noGravity = true;                          // :72636
+              [d.vx, d.vy] = circularVec2(6);              // :72637 ×6
+              d.scale = 1.6;                               // :72638
+              d.fadeIn = 1.3 + Math.random();              // :72639
+            }
+            d.noLight = true; d.noLightEmittance = true;   // :72584/:72640
+            d.vx += this.vx * (spec.tail === 'd15' ? 0.01 : 0.1);   // :72585/:72641
+            d.vy += this.vy * (spec.tail === 'd15' ? 0.01 : 0.1);
+          }
+          const d2 = game.spawnDust?.(this.x, this.y, this.w, this.h, type, sx, sy, 100,
+            null, undefined, undefined);
+          if (d2) {
+            if (spec.tail === 'd15') {
+              d2.vx *= 1.2; d2.vy *= 1.2;                  // :72588
+              d2.noLight = true; d2.noLightEmittance = true;
+              d2.vx += this.vx * 0.01; d2.vy += this.vy * 0.01;   // :72590
+              d2.scale *= 0.8 + Math.random() * 0.2;       // :72592
+            } else {
+              d2.vx *= 2; d2.vy *= 2;                      // :72644
+              d2.noLight = true; d2.noLightEmittance = true;
+              d2.vx += this.vx * 0.1; d2.vy += this.vy * 0.1;   // :72647
+            }
+            const m = 1 + Math.floor(Math.random() * 15);  // Next(1,16)（16 专有 :72586/:72593）
+            if (spec.tail === 'd15') { d2.x += d2.vx * m; d2.y += d2.vy * m; }
+          }
+        }
       }
     }
     this.dead = true;
@@ -741,19 +909,26 @@ export class MagicMissileProj extends Entity {
     if (!ctx) return;
     const speed = Math.hypot(this.vx, this.vy);
     // ---- 79 彩虹拖尾（RainbowRodDrawer.cs:12-37 的 canvas 近似：沿 oldPos 逐段绘
-    //      hue=(p*1.6−GlobalTime)%1 色、宽 lerp(0,32,1−(1−lerp(0,0.2,p))²)、尾淡出；
-    //      本体贴图恒 alpha0（Main.cs:32438-32442）不画 ----
+    //      hue=(p*1.6−GlobalTime)%1 色、宽 lerp(0,64,1−(1−lerp(0,0.2,p))²)、尾淡出；
+    //      本体贴图恒 alpha0（Main.cs:33231-33236 color87.A=0）不画 ----
+    // ★裁定 a（2026-09-02 J′）：①p 方向倒置修正——原版 progressOnStrip=0 在弹头
+    //   （VertexStrip.cs:97-100 逐 oldPos 正序入带,oldPos[0]=最新;RainbowRodDrawer
+    //   顶点序即此序）,旧码把 0 给了带尾（trail 旧→新存数,p=i/(N-1) 头在 1）→ 色/宽/
+    //   淡出全线倒置。现 p = 段新端 strip[i-1] 的原版进度 = (i-1)/(N-1)（等价旧数组
+    //   语义 (N-1-i)/(N-1)）。②StripWidth 返回【半宽】（VertexStrip.AddVertexPair
+    //   pos±(rot−π/2)·half）→ ×2 全宽 64。③消费带 = strip 60 槽 mode-3 收缩记录
+    //   （旧 12 点 push 带退役,与 34/16 同构——stripRecord）。
     if (this.projId === 79) {
-      const N = this.trail.length / 2;
+      const N = this.strip.length;
       if (N >= 3) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
         for (let i = 1; i < N; i++) {
-          const p = i / (N - 1);                       // progressOnStrip（0 头 → 1 尾）
+          const p = (i - 1) / (N - 1);                 // progressOnStrip（0 头 → 1 尾）
           const [rr, gg, bb] = hueToRgb(p * 1.6 - this.globalT);
           const wGrow = lerpValue(0, 0.2, p);
-          const width = 32 * (1 - (1 - wGrow) * (1 - wGrow));   // StripWidth :31-37
+          const width = 64 * (1 - (1 - wGrow) * (1 - wGrow));   // StripWidth :31-37（半宽×2）
           const white = lerpValue(-0.2, 0.5, p);
           const fade = 1 - lerpValue(0, 0.98, p);               // StripColors :26
           const a = Math.max(0, Math.min(1, fade * 0.8));
@@ -764,15 +939,19 @@ export class MagicMissileProj extends Entity {
           ctx.strokeStyle = `rgba(${cr},${cg},${cb},${a.toFixed(3)})`;
           ctx.lineWidth = width;
           ctx.beginPath();
-          ctx.moveTo(this.trail[(i - 1) * 2], this.trail[(i - 1) * 2 + 1]);
-          ctx.lineTo(this.trail[i * 2], this.trail[i * 2 + 1]);
+          ctx.moveTo(this.strip[i - 1].x, this.strip[i - 1].y);
+          ctx.lineTo(this.strip[i].x, this.strip[i].y);
           ctx.stroke();
         }
         ctx.restore();
       }
       return;
     }
-    // ---- 16/34 旋转族（Main.cs:32360 族分支 + :32420-32436 各型覆写）----
+    // ---- 34/16 着色器火带（★MINOR-1：本体【之前】绘——原版 DrawProj 在
+    //      Main.cs:28615-28622 由 FlameLashDrawer/MagicMissileDrawer 先绘带,
+    //      本体在其后 DrawProjDirect 通用段;旧序=带压本体,倒置）----
+    if (this.projId === 34 || this.projId === 16) this.drawShaderTrail(ctx);
+    // ---- 16/34 旋转族（Main.cs:33192 族段 + :33192-33236 各型覆写）----
     const img = this.projId === 34 ? projFrameImg(34, this.frame) : projSprite(this.projId);
     if (img) {
       const asImg = img as HTMLImageElement;
@@ -780,13 +959,42 @@ export class MagicMissileProj extends Entity {
         ? (img as HTMLCanvasElement).width > 0
         : (asImg.width > 0) && asImg.width > 0;
       if (ready) {
-        const lerpS = lerpValue(0, 8, speed);   // GetLerpValue(0,8,|vel|)（:32421/:32430）
+        const lerpS = lerpValue(0, 8, speed);   // GetLerpValue(0,8,|vel|)（:33194/:33222）
         const iw = (img as HTMLCanvasElement).width || asImg.width;
         const ih = (img as HTMLCanvasElement).height || asImg.height;
+        if (this.projId === 34) {
+          // ★MINOR-2：34 充能白热光环（Main.cs:33680-33694,glow 链段本体前）——
+          // redT>0 时 4 份白模本体绕 anchor 公转：offset=(4×t2d,0) RotBy
+          // (rot+num387×2π)（num387 0.25 步进 0/.25/.5/.75）、绘制 rotation=本体角、
+          // scale=t2d、color=(255,255,255,127)×0.75 → alpha≈0.373。本仓无 glowmask
+          // 图集,以本体帧 source-in 白填充等价合成（whiteHot34 按帧缓存）
+          const t2d = lerpValue(0, 6, this.redT);          // lerpValue10（:33682 GetLerpValue(0,6,localAI[0])）
+          if (t2d > 0) {
+            const wf = whiteHot34(this.frame);
+            if (wf) {
+              const drawRot = lerpS * this.rot - Math.PI / 2 * lerpS;   // num340（:33223/:33225）
+              const ax = this.cx - this.vx / 2, ay = this.cy - this.vy / 2;   // vector81（:33229）
+              ctx.save();
+              ctx.imageSmoothingEnabled = false;
+              ctx.globalAlpha = (127 * 0.75) / 255;        // color105.A=127×0.75
+              const rw = wf.width * t2d, rh = wf.height * t2d;
+              for (let k = 0; k < 4; k++) {
+                const oa = drawRot + k * 0.25 * Math.PI * 2;            // num387×2π 步进
+                ctx.save();
+                ctx.translate(ax + Math.cos(oa) * 4 * t2d, ay + Math.sin(oa) * 4 * t2d);
+                ctx.rotate(drawRot);
+                ctx.drawImage(wf, -rw / 2, -rh / 2, rw, rh);            // scale16=t2d
+                ctx.restore();
+              }
+              ctx.restore();
+              ctx.globalAlpha = 1;
+            }
+          }
+        }
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         if (this.projId === 16) {
-          // :32420-32427：rotation×lerp8；scale 0.6、X lerp(1,1.5)、Y lerp(1,0.8)；
+          // :33192-33199：rotation×lerp8；scale 0.6、X lerp(1,1.5)、Y lerp(1,0.8)；
           // SetDefaults alpha100 → GetAlpha ≈ (255−100)/255
           ctx.globalAlpha = 155 / 255;
           ctx.translate(this.cx, this.cy);
@@ -795,9 +1003,12 @@ export class MagicMissileProj extends Entity {
           const sy = 0.6 * lerp(1, 0.8, lerpS) * this.drawScale;
           ctx.drawImage(img as CanvasImageSource, -iw * sx / 2, -ih * sy / 2, iw * sx, ih * sy);
         } else {
-          // :32429-32436：rotation = lerp9×(rot−π/2)、X scale lerp(1,0.8)、
-          // 绘制位 = oldPos[0]+Size/2−vel/2（上一帧中心 − 速度/2）
-          ctx.translate(this.prevCx - this.vx / 2, this.prevCy - this.vy / 2);
+          // ★裁定 b（2026-09-02 J′）：:33229-33236 rotation = lerp9×(rot−π/2)、
+          // X scale lerp(1,0.8)、绘制位 = oldPos[0]+Size/2−vel/2。oldPos[0] 是
+          // 【本拍位移后】心（P.cs:17246 mode-3 记录在位移后写 oldPos[0]=position）,
+          // 即 this.cx——旧码用 prevCx（拍前心）= 整体落后一个位移步;
+          // 注释原引 Main.cs:32436 系 stale 行号（1456 基线遗留）,更正为 :33229。
+          ctx.translate(this.cx - this.vx / 2, this.cy - this.vy / 2);
           ctx.rotate(lerpS * this.rot - Math.PI / 2 * lerpS);
           const sx = lerp(1, 0.8, lerpS) * this.drawScale;
           const sy = this.drawScale;
@@ -807,8 +1018,6 @@ export class MagicMissileProj extends Entity {
         ctx.globalAlpha = 1;
       }
     }
-    // ---- 34/16 着色器火带（本体【之后】绘,Main.cs:28617/:28621 挂载序同）----
-    if (this.projId === 34 || this.projId === 16) this.drawShaderTrail(ctx);
   }
 
   /** 34/16 着色器火带拖尾（T1 清偿 2026-09-02——红队 E′ 定罪:原版由 Drawer 绘宽带

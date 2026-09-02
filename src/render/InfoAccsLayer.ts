@@ -130,8 +130,9 @@ export class InfoAccsLayer {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     if (inventoryOpen) {
-      // 背包横排(:46681):X = W-280+20*k-10, Y = 94(+261 大地图);图标原生 14×14
-      const y = 94 + (bigMapOpen ? 261 : 0);
+      // 背包横排(:46681):X = W-280+20*k-10, Y = 94(+261 大地图);图标原生 14×14。
+      // 2026-09-02 用户要求：折叠横排整体上移一点（94→82,心行 y≤80 之下）
+      const y = 82 + (bigMapOpen ? 261 : 0);
       let k = 0;
       for (const r of rows) {
         const x = canvasW - 280 + 20 * k - 10;

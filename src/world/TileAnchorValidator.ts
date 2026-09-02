@@ -5,14 +5,24 @@
 //   （num35/num36 双满分制），备选方向按序取首个满分者。
 import anchorsJson from '../data/tile-anchors.json';
 import { TILE_DEFS, TILE_TABLE_SHEETS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
+import { LIQUID_TYPE } from './TileStore';
 import type { World } from './World';
 
 export interface AnchorDataRec { t: string[]; cnt: number | string; start: number | string }
+/** LiquidPlacement 枚举值入库形态（Terraria.Enums/LiquidPlacement.cs 四值；
+ *  1457 基样式数据实际只出现前两者，'onlyInFull' 为子样式级（227 style5）预留。
+ *  原版 OnlyInLiquid 基样式零出现，不入库值域。 */
+export type LiquidPlacementVal = 'allowed' | 'notAllowed' | 'onlyInFull';
 export interface AnchorRec {
   w: number; h: number; ox: number; oy: number;
   anchorTop: AnchorDataRec | null; anchorBottom: AnchorDataRec | null;
   anchorLeft: AnchorDataRec | null; anchorRight: AnchorDataRec | null;
-  wall: boolean; liqAllow: boolean; flatten: boolean; dir: string; yOff: number;
+  wall: boolean;
+  /** ★M-3 液体放置两维（TileObjectData.LiquidPlace :1853-1907）：
+   *  water 维 = 原版 liquidType 0/2/3（水/蜜/微光）；lava 维 = 1（岩浆）。
+   *  缺省 = SetupBaseObject :1767-1768（water Allowed / lava NotAllowed）。 */
+  liq: { water: LiquidPlacementVal; lava: LiquidPlacementVal };
+  flatten: boolean; dir: string; yOff: number;
   dirs?: Array<{ dir: string }>;
 }
 const RAW = (anchorsJson as unknown as { v: string; tiles: Record<string, AnchorRec | null> }).tiles;
@@ -91,8 +101,9 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
 }
 
 /** 检验“某物放在 ax,ay 是否满足全部锚点”。CanPlace 的 all-or-nothing 判定。
- *  liquid 非允许集时占用格有水即拒；wall 族沿用 isValidWallAnchor 默认分支
- *  （任意非零墙均有效）。occupiedIgnore：调用方为“原地重放”场景给的豁免面。 */
+ *  液体门 = 两维建模（rec.liq.water/lava，见下方逐格注释）；wall 族沿用
+ *  isValidWallAnchor 默认分支（任意非零墙均有效）。occupiedIgnore：调用方为
+ *  “原地重放”场景给的豁免面。 */
 export function validateAnchors(st: World['store'], ax: number, ay: number, rec: AnchorRec,
   occupiedIgnore?: (x: number, y: number) => boolean): boolean {
   if (!Number.isFinite(ax) || !Number.isFinite(ay)) return false;
@@ -112,7 +123,27 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
           && TILE_CUT_SHEETS.has(shOc)) || BREAKABLE_WHEN_PLACING_SHEETS.has(shOc);
         if (st.isActive(x, y) && !clearable) return false;
       }
-      if (st.liquid[i2] > 0 && !rec.liqAllow) return false;
+      // ★M-3 液体放置两维门（vanilla TileObjectData.LiquidPlace 全支，TileObjectData.cs
+      //  :1853-1907；CanPlace 逐格消费 TileObject.cs:342 → :361 flag3 并入拒放）：
+      //  · 液体量 >0：lava 型（LIQUID_TYPE.LAVA=原版 liquidType 1）走 lava 维，其余
+      //    （WATER/HONEY/SHIMMER=原版 0/2/3）走 water 维；NotAllowed 拒；
+      //    onlyInFull 非满液（255）拒。
+      //  · 液体量 ==0（dry）：onlyIn* 语义拒（:1886-1904 else 支——onlyInFull/onlyInLiquid
+      //    在无液格恒拒）。基样式数据暂无 onlyIn 值，分支为语义完备性保留。
+      //  旧实现 liqAllow 单维布尔（缺省 false=液体中一律拒）与原版 382/382 反向，已翻正。
+      {
+        const liqAmt = st.liquid[i2];
+        // 本仓 liquidType 为原版 +1 编码（TileStore.LIQUID_TYPE）；0(NONE) 视同水（同
+        //  Game.ts:21951 惯例——原版 liquidType()==0 即水）
+        const isLava = st.liquidType[i2] === LIQUID_TYPE.LAVA;
+        const spec = isLava ? rec.liq.lava : rec.liq.water;
+        if (liqAmt > 0) {
+          if (spec === 'notAllowed') return false;
+          if (spec === 'onlyInFull' && liqAmt !== 255) return false;
+        } else if (spec === 'onlyInFull') {
+          return false;
+        }
+      }
       if (rec.wall && st.wall[i2] === 0) return false;
     }
   }

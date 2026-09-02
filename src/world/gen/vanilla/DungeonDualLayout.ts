@@ -179,6 +179,8 @@ class ShapeData {
   }
   clear(): void { this.pts.clear(); }
   contains(x: number, y: number): boolean { return this.pts.has(ShapeData.key(x, y)); }
+  /** ★IIIII172：形状账（DR|RB sc= 字段）。 */
+  size(): number { return this.pts.size; }
   forEachPoint(cb: (dx: number, dy: number) => void): void {
     for (const k of this.pts) cb((k >> 16) - 32768, ((k << 16) >> 16) - 32768);
   }
@@ -2089,6 +2091,10 @@ function generateSquareHall(
       let flag = true;
       let flag2 = true;
       const prot = highestProtectionFromPoint(st, x2, y3, roomsInArea);
+      // ★IIIII172：spider 厅逐格写面迹（零掷;SW_I172_WTRACE=1 时启用;与 x86 DR|HW 同构）
+      if (style.Style === 12 && _i172SpiderSeq >= 0 && (typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_I172_WTRACE === '1' : undefined)) {
+        drlMark(`DR|HW|q=${_i172SpiderSeq}|i=${i}|j=${j}|x=${x2}|y=${y3}|p=${prot}|t=${sheetOfInternal(st.type[ii])}|a=${st.flags[ii] & 1}|w=${st.wall[ii]}`);
+      }
       if (prot === (Protection.TilesAndWalls as number)) continue;
       if (prot === Protection.Tiles) flag = false;
       if (prot === Protection.Walls && __tierRef().isDungeonWall(st.wall[ii])) flag2 = false;
@@ -3657,6 +3663,14 @@ class DualProvider {
       i168bb?.(`i${iN}r${i}b`, bl, bt, br, bb2);
     }
     drlMark(`DR|S|i${iN}|RGN rc=${drlRc()}`);
+    // ★IIIII172：房终态界域/形状账（零掷;与 x86 DR|RB 同构,protection 逐格差对拍用）
+    for (let rbi = 0; rbi < data.rooms.length; rbi++) {
+      const rb = data.rooms[rbi]!;
+      drlMark(`DR|RB|i${iN}|r=${rbi}|ty=${rb.settings.roomType}`
+        + `|L=${rb.outer.L}|T=${rb.outer.T}|R=${rb.outer.R}|B=${rb.outer.B}`
+        + `|iL=${rb.inner.L}|iT=${rb.inner.T}|iR=${rb.inner.R}|iB=${rb.inner.B}`
+        + (rb.shapeDataOuter ? `|sc=${rb.shapeDataOuter.size()}` : ''));
+    }
     ctx.snap('dualRoomsGen');
     for (let j = 0; j < data.rooms.length; j++) {
       const rm = data.rooms[j]!;

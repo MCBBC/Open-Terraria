@@ -14,7 +14,13 @@ for (const ln of rollwin) {
   if (ln !== '' && cur) cur.vals.push(Number(ln));
 }
 for (const s of segs) console.log(`${s.tag}  vals=${s.vals.length}`);
-const seg = (n) => segs.find((s) => s.tag.startsWith(`---PASS ${n} `)) ?? segs.find((s) => s.tag === `---START ${n - 1}`);
+/** ★段界语义（实测标定）：rig 在 AfterPass(idx)（pass idx 末尾）写标记，
+ *  标记【之后】的值段 = pass idx+1 的掷窗（---START f 同式）。故
+ *  seg(n) = pass n 的值段 = 「idx=n-1 的标记」与「idx=n 的标记」之间。 */
+const seg = (n) => {
+  const i = segs.findIndex((s) => s.tag.startsWith(`---PASS ${n - 1} `) || s.tag === `---START ${n - 1}`);
+  return i >= 0 ? segs[i] : undefined;
+};
 
 /** 删节感知对齐：找首个分歧点，判定 x86 侧多 k 掷（k=1/2）或 JS 侧多掷，继续走查。 */
 function align(name, xv, jv) {
@@ -49,7 +55,7 @@ function align(name, xv, jv) {
     edits.push({ at: i, kind: '值差', xv: xv[i], jv: jv[j] });
     i++; j++;
   }
-  console.log(`  前缀恒等到 idx=${edits.length ? edits[0].at : Math.min(i, j)}; edits=${edits.length}`);
+  console.log(`  前缀恒等到 idx=${edits.length ? edits[0].at : Math.min(i, j)}; edits=${edits.length}; 尾残 x86=${xv.length - i} js=${jv.length - j}`);
   for (const e of edits.slice(0, 8)) console.log(`  @${e.at} ${e.kind} ${e.vals ?? (e.kind === '值差' ? `x86=${e.xv} js=${e.jv}` : '')}`);
   return edits;
 }

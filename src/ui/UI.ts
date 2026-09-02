@@ -2229,13 +2229,19 @@ export class UI {
     const h = best ? (parseFloat(best.style.height) || best.getBoundingClientRect().height || 52) : 52;
     const topPx = best ? parseFloat(best.style.top) : NaN;
     const top = Number.isFinite(topPx) ? Math.round(topPx + h + 8) : 84;
+    // ★2026-09-02 透明化后无框（用户要求）：padding 会把内容往右/下推——面板锚点
+    //   内收 padding,使【内容左缘】对齐热键栏最左格左缘、内容顶距热键栏底 8px
+    //   （=整体上移;此前内容左/顶各偏 +12）
+    const pad = parseFloat(getComputedStyle(this.invPanel).paddingLeft) || 0;
+    const panelLeft = Math.max(0, left - pad);
+    const panelTop = Math.max(0, top - pad);
     // ★position:fixed/overflow 必须在此维持（.sw-panel 类无定位——曾重写贴位时
     //   丢掉 fixed → 面板回落文档流 = 满宽平铺、left/top 全失效）
     this.invPanel.style.position = 'fixed';
     this.invPanel.style.overflow = 'auto';
-    this.invPanel.style.left = `${left}px`;
-    this.invPanel.style.top = `${top}px`;
-    this.invPanel.style.maxHeight = `calc(100vh - ${top + 12}px)`;
+    this.invPanel.style.left = `${panelLeft}px`;
+    this.invPanel.style.top = `${panelTop}px`;
+    this.invPanel.style.maxHeight = `calc(100vh - ${panelTop + 12}px)`;
     // ★2026-09-02 用户要求：背包面板去底去框透明化（试试）——.sw-panel 类的渐变
     //   底/2px 描边/投影全部内联覆盖为透明（此处每次打开重算=权威落点;若要回底色
     //   只需还原本段）。可读性补偿：.sw-inv 作用域给标签/标题加文字投影;
@@ -3118,7 +3124,7 @@ export class UI {
     // ---- Loadout 切换行（DrawLoadoutButtons Main.cs:41386+：当前套高亮）——
     //  ★2026-08-27 用户要求：随装备列整体迁至右缘（成就/杂项列左侧）,不再占顶排
     const loadoutRow = el('div');
-    loadoutRow.style.cssText = 'display:flex; gap:4px; align-items:center; margin-bottom:6px;';
+    loadoutRow.style.cssText = 'display:flex; gap:4px; align-items:center; margin:12px 0 6px;';   // margin-top:配装行离坞顶下移一点（2026-09-02 用户要求）
     loadoutRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
     this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
@@ -3497,13 +3503,16 @@ export class UI {
     //  右侧=rightRail 尾部（弹药|钱币/垃圾桶/堆叠钮下方空档）,不占面板额外宽度。
     //  排序（2026-09-02 用户定案）：住房/图鉴 → 表情（上移到成就卡上方,尺寸对齐
     //  24×24）→ 成就卡（竖式图上文下）→ 道具搜索（垫底）。成就卡竖式 CSS 见
-    //  AchievementsUI ----
+    //  AchievementsUI。flex:1 吃满 rightRail 被(body stretch)拉起的余高——
+    //  搜索钮 margin-top:auto 钉到列底（=合成列表底部一线,用户复报"没置底"）----
     const sideCol = el('div');
-    sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center; margin-top:10px;';
+    sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center;'
+      + 'margin-top:10px; flex:1 1 auto;';
     row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 图标行横排→竖排（原顶行/横条两改）
     sideCol.appendChild(row);   // 图标（住房/图鉴+联机/旅程钮）
     sideCol.appendChild(bEmote);   // 表情钮（成就卡上方,2026-09-02 用户定案）
     sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
+    this.itemSearchBtn.style.marginTop = 'auto';   // 吃掉余白钉到列底（搜索垫底）
     sideCol.appendChild(this.itemSearchBtn);   // 道具搜索（垫底,2026-09-02 用户定案）
     rightRail.appendChild(sideCol);
     // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列

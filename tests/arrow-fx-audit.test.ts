@@ -1,0 +1,191 @@
+// Arrow 观感面缺口批金标（★2026-09-02 AI_001 出膛/尾迹 FX 清偿）——5 断言：
+//   ①660 天界碎裂出膛白闪（:56642-56660）：首拍（alpha>0 门,SetDefaults α=255 →
+//     首子步恒真一次）16×d180 环（scale1.5,noGravity,位=Center+椭圆偏移、速=偏移
+//     单位向×1）+ Item_9 单响 + 当拍 α=0/scale=1.1——EU=1 首帧第 2 子步门已关
+//   ②712 书杖弹出膛（:56662-56702）：4×d15 环（scale1.7,noGravity,速=(尘速×2+偏移
+//     单位向×0.3+速度单位向×3)×0.7、位+=速×5）+ 帧链 4 拍/帧两带各 4 帧
+//   ③265/355 毒系法杖弹（:57690-57724）：α=255 起步 −50/子步渐显序列、α==0 起每
+//     子步 1 粒 d163/d205（α100,scale1.2,noGravity,速=弹速×0.3−弹速×0.4）
+//   ④495 暗影焰弓箭尾迹（:58461-58465）：每子步 1×d27（α100,scale1.2,noGravity）
+//   ⑤710 空中祸害尾迹（:56348-56380）：1/4 子步掷 d31(1/2)+d6 恒（α100、noGravity、
+//     尘速×2+=弹速、fadeIn 1.22/裂片 1.5）+ 入水灭（wet → Kill）
+// 附：1097 火绒狐火球（:57513-57573）出生尘爆一次性 + scale −0.01/子步 <0.3 自爆
+//     （71 子步,EU=1 → ≈36 帧,先于 timeLeft=300）
+import { describe, it, expect } from 'vitest';
+import { World } from '../src/world/World';
+import type { GameHooks } from '../src/entities/types';
+import { Arrow } from '../src/entities/Arrow';
+
+interface DustRec {
+  type: number; alpha: number; scale: number; noGravity: boolean; sx: number; sy: number;
+  vx: number; vy: number; x: number; y: number; fadeIn?: number;
+  noLight?: boolean; noLightEmittance?: boolean;
+}
+
+function makeGame(w: World, dusts: DustRec[], sfx: string[] = []) {
+  return {
+    world: w, player: null as unknown, enemies: () => [], critters: () => [],
+    projectiles: () => [],
+    entities: { nextId: 1, add: () => {} },
+    playSfx: () => {}, playSfxFiles: (files: string[]) => { sfx.push(...files); },
+    playSfxFile: (f: string) => { sfx.push(f); },
+    spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
+    damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
+    onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
+    addLightAt: () => {},
+    spawnDust: (_x: number, _y: number, _w: number, _h: number, type: number,
+      sx = 0, sy = 0, alpha = 0, _c: unknown = null, scale = 1, ng = false) => {
+      const d: DustRec = {
+        type, alpha, scale, noGravity: !!ng, sx, sy, vx: 0, vy: 0, x: 0, y: 0 };
+      dusts.push(d);
+      return d;
+    },
+    broadcastParticleOrchestra: () => {},
+  } as unknown as GameHooks;
+}
+
+function emptyWorld(): World {
+  const w = new World(160, 200, 30, 'open');
+  for (let x = 0; x < 160; x++) w.store.setTileSilent(x, 190, 1, 0, 0);
+  return w;
+}
+
+function flyFrames(a: Arrow, game: GameHooks, frames: number): void {
+  for (let i = 0; i < frames && !a.dead; i++) a.fixedUpdate(1 / 60, game);
+}
+
+describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
+  it('① 660 天界碎裂：首拍 16×d180 白闪环 + Item_9 单响，随后不再出（α=0 门关）', () => {
+    const dusts: DustRec[] = [];
+    const sfx: string[] = [];
+    const game = makeGame(emptyWorld(), dusts, sfx);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 660, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 3);
+    const ring = dusts.filter((d) => d.type === 180);
+    expect(ring.length).toBe(16);                       // 恰一次（EU=1 首帧第 2 子步门已关）
+    expect(ring.every((d) => d.scale === 1.5 && d.noGravity)).toBe(true);
+    // 环几何：位=弹心+椭圆偏移（|偏移|∈[1,4]）、速=偏移单位向×1（|v|=1）
+    expect(ring.every((d) => Math.hypot(d.vx, d.vy) - 1 < 1e-9)).toBe(true);
+    expect(dusts.filter((d) => d.type === 180).length).toBe(16);
+    expect(sfx.filter((s) => s === 'Item_9').length).toBe(1);
+    expect(a.alpha).toBe(0);
+    expect(a.drawScale).toBeCloseTo(1.1, 9);
+  });
+
+  it('② 712 书杖弹：出膛 4×d15 环恰一次 + 帧链 4 拍/帧带内回绕', () => {
+    const dusts: DustRec[] = [];
+    const sfx: string[] = [];
+    const game = makeGame(emptyWorld(), dusts, sfx);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 712, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 1);
+    const ring = dusts.filter((d) => d.type === 15);
+    expect(ring.length).toBe(4);
+    expect(ring.every((d) => d.scale === 1.7 && d.noGravity)).toBe(true);
+    expect(sfx.length).toBe(0);                          // 712 出膛无音（音面=武器 UseSound）
+    const f0 = (a as unknown as { f712Frame: number; f712FrameT: number }).f712Frame;
+    flyFrames(a, game, 5);                               // 累计 6 帧 = 12 子步 → 推帧 3 次
+    const st = a as unknown as { f712Frame: number; f712FrameT: number };
+    const step = (v: number): number => {
+      v += 1;
+      if (v === 4) v = 0;
+      if (v >= 8) v = 4;
+      return v;
+    };
+    let v = f0;
+    for (let i = 0; i < 3; i++) v = step(v);
+    expect(st.f712Frame).toBe(v);
+    expect(st.f712FrameT).toBe(0);                       // 12 子步 → 计数器恰归零
+    expect(dusts.filter((d) => d.type === 15).length).toBe(4);   // 不再出
+  });
+
+  it('③ 265 剧毒法杖：α=255 −50/子步渐显序列,α==0 起每子步 1×d163;355 同式 d205', () => {
+    for (const [pid, dustId] of [[265, 163], [355, 205]] as const) {
+      const dusts: DustRec[] = [];
+      const game = makeGame(emptyWorld(), dusts);
+      const a = new Arrow(400, 300, 6, 0, 10, 1, pid, null, { grav: 0 });   // life=SetDefaults
+      const seq: number[] = [a.alpha];
+      for (let i = 0; i < 7; i++) {
+        a.fixedUpdate(1 / 60, game);
+        seq.push(a.alpha);
+      }
+      expect(seq).toEqual([255, 205, 155, 105, 55, 5, 0, 0]);   // 6 子步归零（EU=0）
+      const dTrail = dusts.filter((d) => d.type === dustId);
+      expect(dTrail.length).toBe(2);                            // α==0 的第 6/7 拍各 1 粒
+      expect(dTrail.every((d) => d.alpha === 100 && d.scale === 1.2 && d.noGravity)).toBe(true);
+      expect(dusts.filter((d) => d.type !== dustId).length).toBe(0);
+    }
+  });
+
+  it('④ 495 暗影焰弓箭：每 tick 恰 1×d27 尾迹（α100,scale1.2,noGravity）', () => {
+    const dusts: DustRec[] = [];
+    const game = makeGame(emptyWorld(), dusts);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 495, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 10);
+    const t = dusts.filter((d) => d.type === 27);
+    expect(t.length).toBe(10);
+    expect(t.every((d) => d.alpha === 100 && d.scale === 1.2 && d.noGravity)).toBe(true);
+  });
+
+  it('⑤ 710 空中祸害：1/4 子步掷尘（d31 半率 + d6 恒,fadeIn 1.22/裂片 1.5）+ 入水灭', () => {
+    const dusts: DustRec[] = [];
+    const game = makeGame(emptyWorld(), dusts);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 40);                              // EU=1 → 80 子步
+    const d6 = dusts.filter((d) => d.type === 6);
+    const d31 = dusts.filter((d) => d.type === 31);
+    expect(d6.length).toBeGreaterThanOrEqual(10);        // 期望 20（80×1/4）,5σ 带宽
+    expect(d6.length).toBeLessThanOrEqual(30);
+    expect(d31.length).toBeLessThanOrEqual(d6.length);   // d31 = d6 的 1/2 率
+    expect(d6.every((d) => d.alpha === 100 && d.scale === 1.2 && d.noGravity)).toBe(true);
+    expect(d6.every((d) => d.fadeIn === 1.22)).toBe(true);          // 本体 ai[1]=0 档
+    expect(a.alpha).toBe(0);                             // −25/子步早已归零
+    // 裂片（abShard=ai[1]=-1）档 fadeIn=1.5
+    const dusts2: DustRec[] = [];
+    const game2 = makeGame(emptyWorld(), dusts2);
+    const s = new Arrow(400, 300, 6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    s.abShard = true;
+    flyFrames(s, game2, 40);
+    const d6s = dusts2.filter((d) => d.type === 6);
+    expect(d6s.length).toBeGreaterThan(0);
+    expect(d6s.every((d) => d.fadeIn === 1.5)).toBe(true);
+    // 入水灭：置水环境（湿旗经 wetCacheConsumer 逐子步刷新）→ 1/4/子步概率 Kill
+    const w2 = emptyWorld();
+    const st2 = w2.store;
+    for (let x = 20; x < 36; x++) for (let y = 16; y < 26; y++) {
+      const i = st2.idx(x, y);
+      st2.liquid[i] = 255; st2.liquidType[i] = 1;
+    }
+    const dusts3: DustRec[] = [];
+    const game3 = makeGame(w2, dusts3);
+    const w = new Arrow(656, 320, -6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    for (let i = 0; i < 60 && !w.dead; i++) w.fixedUpdate(1 / 60, game3);
+    expect(w.dead).toBe(true);                           // (3/4)^120 ≈ 3e-15 漏杀率
+  });
+
+  it('⑥ 1097 火绒狐火球：出生尘爆一次性（10×双 d6）+ scale 收缩自爆（71 子步）', () => {
+    const dusts: DustRec[] = [];
+    const sfx: string[] = [];
+    const game = makeGame(emptyWorld(), dusts, sfx);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 1097, null, { grav: 0, life: 300 });
+    expect(a.drawScale).toBeCloseTo(1, 9);
+    flyFrames(a, game, 1);
+    // 出生尘爆：10×(细尘 scale×0.7 + 大尘 scale×1.25)——与 1/4 掷尾迹尘(scale×1.3)
+    // 按 scale 区分（首帧 2 子步尾迹命中 0..2 粒）
+    const bornA = dusts.filter((d) => d.type === 6 && Math.abs(d.scale - 0.7) < 1e-9);
+    const bornB = dusts.filter((d) => d.type === 6 && Math.abs(d.scale - 1.25) < 1e-9);
+    const trail = dusts.filter((d) => d.type === 6 && Math.abs(d.scale - 1.3) < 1e-9);
+    expect(bornA.length).toBe(10);
+    expect(bornB.length).toBe(10);
+    expect(trail.length).toBeLessThanOrEqual(2);
+    expect([...bornA, ...bornB].every((d) => d.noLightEmittance)).toBe(true);
+    expect(bornA.every((d) => d.alpha === 200)).toBe(true);
+    expect(bornB.every((d) => d.alpha === 50)).toBe(true);
+    expect(sfx).toContain('Item_20');
+    expect(sfx).toContain('dd2_betsy_fireball_shot');
+    expect(a.dead).toBe(false);
+    flyFrames(a, game, 30);                              // 累计 31 帧 = 62 子步（scale≈0.38）
+    expect(a.dead).toBe(false);
+    flyFrames(a, game, 10);                              // 71 子步 → scale<0.3 自爆
+    expect(a.dead).toBe(true);
+  });
+});

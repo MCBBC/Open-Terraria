@@ -214,7 +214,7 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
     expect(m.timeLeft).toBeGreaterThanOrEqual(60);
   });
 
-  it('16 命中即灭（penetrate 缺省 1，SetDefaults :714-724）', () => {
+  it('16 命中即灭（penetrate 缺省 1，SetDefaults :714-724）+ Kill 死亡爆 AoE 二跳（MAJOR-4 :72503-72510）', () => {
     const en = enemyAt(2, 42, 40);
     const { hooks } = makeHooks({ enemies: [en] });
     const m = mkMissile(hooks, {
@@ -224,10 +224,12 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
     expect(m.pierce).toBe(1);
     fly(m, hooks, 10);
     expect(m.dead).toBe(true);
-    expect(en.hits).toBe(1);
+    // 接触 1 跳 + Kill Resize(128) Damage() AoE 2 跳（敌在爆心 128px 盒内;
+    // 测试 mock hurt 无免疫帧——实机由 Enemy.hurt 的 immune 门裁定是否二跳）
+    expect(en.hits).toBe(2);
   });
 
-  it('34 穿透 2 + 同敌 12t 冷却（SetDefaults :902-912 localNPCHitCooldown=12）', () => {
+  it('34 穿透 2 + 同敌 12t 冷却（SetDefaults :902-912 localNPCHitCooldown=12）+ Kill 爆 AoE', () => {
     const en = enemyAt(3, 42, 40);
     const { hooks } = makeHooks({ enemies: [en] });
     const m = mkMissile(hooks, {
@@ -236,18 +238,20 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
     });
     expect(m.pierce).toBe(2);
     fly(m, hooks, 20);
-    expect(en.hits).toBe(2);                     // 第 2 次须等 12t 冷却
+    expect(en.hits).toBe(3);                     // 2 次接触（第 2 次等 12t 冷却）+ Kill 爆 1 跳
     expect(m.dead).toBe(true);                   // 穿透耗尽消亡
   });
 
-  it('34 六帧动画推进（:40534-40543，frameCounter≥4 换帧；Main.cs:8403 共 6 帧）', () => {
+  it('34 六帧动画推进（P.cs:44013-44019，frameCounter++ >= 4 后增比较 = 5 拍/帧；Main.cs:8403 共 6 帧）', () => {
     const { hooks } = makeHooks();
     const m = mkMissile(hooks, {
       projId: 34, x: 40 * 16, y: 40 * 16, aim: () => ({ x: 40 * 16 + 200, y: 40 * 16 }),
     });
     fly(m, hooks, 4);
-    expect(m['frame']).toBe(1);
-    fly(m, hooks, 20);
+    expect(m['frame']).toBe(0);                  // 计数值 0..3 四拍内不换帧
+    fly(m, hooks, 1);
+    expect(m['frame']).toBe(1);                  // 第 5 拍（计数值 4）换帧
+    fly(m, hooks, 25);                           // 累计 30 拍 = 6 次换帧
     expect(m['frame']).toBe(0);                  // 6 帧回卷
   });
 
@@ -572,7 +576,7 @@ describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数�
     return { hooks, spawns267, clones };
   }
 
-  it('head-first 三级减数分组 [2,2,2,2,1,1,1,1](正向!镜像实现给出 [..]=8 组)+速度=朝更近点单位向×6', () => {
+  it('head-first 三级减数分组(60 槽带:阈 18/39/51 → [2×18,1×21])+速度=朝更近点单位向×6', () => {
     const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     try {
       const { hooks, spawns267 } = makeRecording79Kill();
@@ -580,23 +584,27 @@ describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数�
         projId: 79, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
         channel: () => false,
       });
-      fly(m, hooks, 15);                                  // trail 环拉满 → N=12 点
-      const trailPts = (m as unknown as { trail: number[] }).trail;
-      expect(trailPts.length).toBe(24);
+      // ★裁定 a：Kill 迸散消费带 = strip 60 槽 mode-3 记录（旧 12 点 push 带退役）。
+      // 直注整带（新→老,[0]=头;命中致死拍 strip[0]=弹心——P.cs:17246 位移后写）,
+      // 弹向右飞 → 老点 x 递减
+      const strip = (m as unknown as { strip: Array<{ x: number; y: number }> }).strip;
+      for (let i = 0; i < 60; i++) strip.push({ x: 656 - i * 6, y: 656 });
       (m as unknown as { killNow(g: never): void }).killNow(hooks);
 
-      // 迸散段是 spawn 流前缀(randbowRodHitFx ×2 与 14×d66 尾随,同 d267 但在段后)
-      // —— 按"连续同钉点"分组(N=12:阈 {3.6,7.8,10.2} → 减数型 d∈[0,3]×2/[4,7]×1/
-      //     [8,11]×0)。若方向写反(旧 bug 对新点减),首组数会 ≤ 后组且合计缩为 8。
-      expect(spawns267.length).toBeGreaterThanOrEqual(12);
+      // 迸散段是 spawn 流前缀(rainbowRodHitFx ×2 与 14×d66 尾随,同 d267 但在段后)。
+      // N=60:阈 {18,39,51} → 减数型 num∈[0,17]×2/[18,38]×1/[39,∞)×0 = 39 枚主尘。
+      // 若方向写反(旧 bug 对新点减),首组数会 ≤ 后组。
+      expect(spawns267.length).toBeGreaterThanOrEqual(57);
+      const burst = spawns267.slice(0, 57);   // 18 点×2 + 21 点×1 = 57 主尘
       const groups: Rec[][] = [];
-      for (const d of spawns267.slice(0, 12)) {
+      for (const d of burst) {
         const cur = groups[groups.length - 1];
         if (cur && Math.abs(cur[0].x - d.x) < 1e-9 && Math.abs(cur[0].y - d.y) < 1e-9) {
           cur.push(d);
         } else groups.push([d]);
       }
-      expect(groups.map((g) => g.length)).toEqual([2, 2, 2, 2, 1, 1, 1, 1]);
+      expect(groups.map((g) => g.length))
+        .toEqual([...Array(18).fill(2), ...Array(21).fill(1)]);
       // k67 严格单调下降(head=1 → 老点→0.3 带):scale 组间严格递减(旧码反向会给尾部大值)
       for (let gi = 1; gi < groups.length; gi++) {
         expect(groups[gi][0].scale).toBeLessThan(groups[gi - 1][0].scale);
@@ -604,18 +612,20 @@ describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数�
       // scale/fadeIn 闭式核对:head 组 k67=1 → scale=1.5 / fadeIn=0.6
       expect(groups[0][0].scale).toBeCloseTo(1.5, 10);
       expect(groups[0][0].fadeIn).toBeCloseTo(0.6, 10);
-      // 速度链:jitter(0)×r0.8 → += 朝更近点单位向×6 ⇒ |v|≡6 且 head 组指向爆心
-      //（尾迹采样已校准为原版 oldPos 先于位移快照——头点距弹心 = 上一拍速模恒非零）
+      // 速度链:jitter(0)×r0.8 → += 朝更近点单位向×6 ⇒ |v|≡6（head 组向 =
+      // 原版 vector13(左上).DirectionTo(Center) = Size/2 对角向,:72440）
       for (const g of groups) {
         for (const d of g) {
           expect(Math.hypot(d.vx, d.vy)).toBeCloseTo(6, 6);
         }
       }
       const head = groups[0][0];
-      expect(head.vx * ((m.cx ?? 0) - head.x) + head.vy * ((m.cy ?? 0) - head.y))
-        .toBeGreaterThan(0);
+      expect(head.vx).toBeGreaterThan(0);
+      expect(head.vy).toBeGreaterThan(0);                 // num=0 对角踢（左上→Center）
+      // num=1 组向 = 朝邻新点(+x,弹头方向)
+      expect(groups[1][0].vx).toBeGreaterThan(0);
       // 主尘面:α=0/noGravity/type267,L=.65 彩色(非纯白)
-      for (const d of spawns267.slice(0, 12)) {
+      for (const d of burst) {
         expect(d.alpha).toBe(0);
         expect(d.noGravity).toBe(true);
         expect(d.type).toBe(267);
@@ -635,9 +645,10 @@ describe('79 Kill 尾迹迸散全链(Dust.cs:260-288 CloneDust 真克隆 + 数�
         projId: 79, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
         channel: () => false,
       });
-      fly(m, hooks, 15);
+      const strip = (m as unknown as { strip: Array<{ x: number; y: number }> }).strip;
+      for (let i = 0; i < 60; i++) strip.push({ x: 656 - i * 6, y: 656 });
       (m as unknown as { killNow(g: never): void }).killNow(hooks);
-      expect(clones.length).toBe(12);                     // 引擎 clone 仅迸散段使用
+      expect(clones.length).toBe(57);                     // 引擎 clone 仅迸散段使用(逐主尘一枚)
       for (let i = 0; i < clones.length; i++) {
         const p = spawns267[i];                           // clone push 序 == 主尘序(逐对紧跟)
         const c = clones[i];

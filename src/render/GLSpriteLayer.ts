@@ -715,7 +715,14 @@ void main(){
     gl.bindSampler(0, this.trailWrapSampler);
     gl.bindSampler(1, this.trailWrapSampler);
     gl.uniform4f(this.trailUni.uSSD, ssd[0], ssd[1], ssd[2], ssd[3]);
+    // ★真加算（2026-09-02 月牙形态翻案）：XNA 侧该条带在 spriteBatch(AlphaBlend) 开批
+    //   期间以 DrawUserIndexedPrimitives 直绘，实测原版（Zenith_(demo).gif 暗砖底逐
+    //   像素剖面）条带【只增亮、零压暗】= BlendState.Additive 语义（contribution =
+    //   out.rgb×out.a；FS 已预乘 → blend (ONE,ONE)）。旧 (ONE,INV_SRC_ALPHA) 会把
+    //   blade 贴图 rgb=0∧a>0 的暗 texel 画成压暗底（黑十字病根）。绘后还原层默认。
+    gl.blendFunc(gl.ONE, gl.ONE);
     gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     glStatDraw(this.statName, idx.length / 3);
     gl.bindSampler(0, null); gl.bindSampler(1, null);
     gl.activeTexture(gl.TEXTURE0);

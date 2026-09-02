@@ -106,31 +106,15 @@ function ensureRawImg(path: string): HTMLImageElement | null {
   rawImgs.set(path, rec);
   const im = new Image();
   im.onload = () => {
-    // ★内容区裁剪重映射（2026-08-31 定谳）：Extra_201/209 实际内容仅底左角
-    //   ~16×16px（其余全透明），全范围 uv 采样必然切成细丝（用户实报"拖尾过细"）。
-    //   裁出内容块作为纹理，(sfrac,across) 即扫满整块 = 原版胖带观感。
-    //   XNA 侧同图全范围采样得胖带的机制待考（疑导出管线行序差），此为等价修复。
-    try {
-      if (/Extra_20[19]/.test(path)) {
-        const cv = document.createElement('canvas');
-        cv.width = 16; cv.height = 16;
-        const cx = cv.getContext('2d', { willReadFrequently: true })!;
-        // 内容块 = 底左 (0, H-16, 16, 16)
-        cx.drawImage(im, 0, im.naturalHeight - 16, 16, 16, 0, 0, 16, 16);
-        // ★黑底键控（2026-08-31 黑十字定谳）：内容块背景=不透明黑，预乘混合下
-        //   rgb=0∧a=1 的段把天空压暗=剑指向哪哪出黑框（横/竖=十字）。
-        //   按亮度键控 alpha（黑=无贡献），XNA 侧等价于预乘贴图黑=无贡献语义。
-        const id = cx.getImageData(0, 0, 16, 16);
-        const dd = id.data;
-        for (let i = 0; i < dd.length; i += 4) {
-          const lum = Math.max(dd[i], dd[i + 1], dd[i + 2]);
-          dd[i + 3] = Math.min(dd[i + 3], lum);
-        }
-        cx.putImageData(id, 0, 0);
-        rec.img = cv as unknown as HTMLImageElement;
-        return;
-      }
-    } catch { /* 回退原图 */ }
+    // ★2026-09-02 月牙形态翻案：Extra_201/209 的 16×16 裁剪+黑底键控【整体撤销】。
+    //   当年"内容仅底左角 16×16"系误诊——磁盘文件（=terraria-assets 原件逐字节
+    //   一致，PIL/浏览器双读）实为 512² 全幅、alpha 恒 255：内容=底左角亮扇形
+    //   （rows 204-510 × cols 0-359，per-row/col max lum 单调渐变），XNA 侧正是
+    //   全范围采样该扇形得【截面亮外缘 + 4 次 sfrac 波纹】的宽月牙；裁剪把扇形
+    //   压进 16×16 = 只剩一条细亮纹（"细螺旋线"根因）。黑十字之病根在本层曾用
+    //   预乘 over 混合——rgb=0∧a>0 的暗 texel 压暗背景；现 trailStrip 改真加算
+    //   (ONE,ONE)+主链 'lighter' 合成（=XNA BlendState.Additive 语义），暗 texel
+    //   贡献恒 0，无需键控。贴图一概原样直传（与 XNA Texture2D 同口径）。
     rec.img = im;
   };
   im.onerror = () => { rec.failedAt = performance.now(); };
@@ -162,6 +146,11 @@ export interface TrailSpec {
   time: number;                  // 秒（滚动相位；obj58 未消费 uTime，保留接口）
   /** 兼容位：锯齿强度。真字节码下由 SSD 决定（不再是自由参数） */
   zigzag?: number;
+  /** 原版 VertexStrip.PrepareStrip 第 6 参 expectedVertexPairsAmount（:55-63）：
+   *  progressOnStrip = i/(该值−1)——【与实际点数无关】（天顶剑恒传 oldPos.Length=60，
+   *  幼剑/裁剪点数后 progress 仍按 /59 摊，短条带只到 p=(n−1)/59 不到 1）。缺省回退
+   *  实际点数（旧口径）。 */
+  expectedPairs?: number;
 }
 
 /**
@@ -294,6 +283,7 @@ export function drawStripTrail(
             const verts = new Float32Array(m * 2 * 9);
             const idx = new Uint16Array((m - 1) * 12);
             const op = spec.opacity;
+            const pairs = spec.expectedPairs ?? m;   // :55-63 分母=期望对数−1（≠实际点数）
             for (let i = 0; i < m; i++) {
               const q = pts[i];
               const rot = q.rot
@@ -301,7 +291,7 @@ export function drawStripTrail(
                   : i > 0 ? Math.atan2(q.y - pts[i - 1].y, q.x - pts[i - 1].x) : 0);
               const dxC = Math.cos(rot - Math.PI / 2) * q.hw;
               const dyC = Math.sin(rot - Math.PI / 2) * q.hw;
-              const prog = m > 1 ? i / (m - 1) : 0;   // XNA [0]=newest ⇒ p=0 刃后最近段
+              const prog = pairs > 1 ? i / (pairs - 1) : 0;   // XNA [0]=newest ⇒ p=0 刃后最近段
               const d = q.hw * 2;
               const b = i * 18;
               // A 侧(+widthDir)：progress=p；B 侧：progress=0（VertexStrip 语义）
@@ -327,24 +317,29 @@ export function drawStripTrail(
         }
         // GL 不可用 → CPU obj58 退化（半分辨率+覆盖格已限流）
         // ===== obj58 逐指令忠实执行 =====
-        // ★p 取【时间序】progress：调用方数组 index0=最新（本仓历史环约定），而 XNA
-        //   VertexStrip 以 oldest-first 迭代——此处翻转换算，wEnv 尾段(旧端)收 0 才符合
-        //   原版"拖尾远离剑身端淡出"
-        const p = 1 - bestV;
+        // ★p 方向：XNA oldPos[0]=最新（Projectile.cs:15841 压栈序），VertexStrip 从
+        //   i=0 迭代（:59-63）⇒ p=0 在【剑侧】；ptsFS[0]=最新 ⇒ p=bestV 直取
+        //   （曾反转为 1−bestV = 包络方向颠倒：剑侧渐隐、尾端全亮，2026-09-02 勘误）。
+        //   分母按 expectedPairs−1（:55-63 恒定，与实际点数无关）。
+        const pairs = spec.expectedPairs ?? n;
+        const p = pairs > 1 ? Math.min(1, bestV * (n - 1) / (pairs - 1)) : 0;
         const wEnv = p * 1.5 - 0.5;
         const ph = p * set.ssd[0] + set.ssd[1];
         const sfrac = (ph % 1 + 1) % 1;                        // frc（cmp 分支对 Repeat 无感）
         const dim = 1 - ph * ssdInvW;                          // ★锯齿链（活）
         const across = uN;                                     // t0.y/t0.z
         const gate = sampleAt(s1im, sfrac, across);            // s1（Repeat 寻址）
-        void sampleAt(s0im, sfrac, across);                    // s0 blade（当前贴图为均匀噪底，
-                                                               // 与 gate 同源；保留调用占位锚定语义）
+        const blade = sampleAt(s0im, sfrac, across);           // s0 全幅扇形贴图（截面+4 波纹本体）
         const edgeRaw = (gate - wEnv) * 2;
         const edge = edgeRaw < 0 ? 0 : edgeRaw > 1 ? 1 : edgeRaw;
-        fd[o] = cr * dim * edge * 255;
-        fd[o + 1] = cg * edge * 255;
-        fd[o + 2] = cb * 255;
-        fd[o + 3] = ca * edge * Math.max(0, wEnv) * 255;
+        const aOut = ca * edge * Math.max(0, wEnv);            // out.a = col.a×edge×wEnv
+        if (aOut <= 0.004) continue;
+        // out.rgb = blade×vColor×lane(dim,edge,1)（含 obj58 第 16 指令 edge 标量广播）；
+        // XNA Additive 贡献 = out.rgb×out.a → 本图经 'lighter' 直加，rgb 须预乘
+        fd[o] = blade * cr * edge * dim * aOut * 255;
+        fd[o + 1] = blade * cg * edge * edge * aOut * 255;
+        fd[o + 2] = blade * cb * edge * aOut * 255;
+        fd[o + 3] = aOut * 255;
         continue;
       }
 

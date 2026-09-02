@@ -133,7 +133,9 @@ function neonMossBiome(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
           // ★MMMMM：vanilla SpreadGrass(k-1,l,1,neonMossType)（cs:9800）repeat 缺省=true
           // ——苔藓沿洞壁石头递归洪水（grassSpread<1000 全局闸）；曾写 false 只转单格，
           // 洞壁苔藓覆盖暴跌 + countTiles rockCount 分歧滚成全 pass 掷流错位（首差@604）
-          spreadGrass(st, x - 1, y, STONE, neon, true);
+          // ★IIII177：尾参透传 rng（SquareTileFrame 级联 165 钟乳石复查支——零掷实证，
+          // 仅风格失配 reframe 支掷 Next(3)，见 Spread.ts tileFrameScoped）
+          spreadGrass(st, x - 1, y, STONE, neon, true, Number.POSITIVE_INFINITY, false, rng);
         }
       }
     }
@@ -332,7 +334,8 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
         const nx = k === 0 ? x - 1 : k === 1 ? x + 1 : x;
         const ny = k === 2 ? y - 1 : k === 3 ? y + 1 : y;
         // try/catch 的 repeat:false 回退对应本仓递归深度上限（无栈溢出语义，等效)
-        spreadGrass(st, nx, ny, STONE, st.type[ii], true);
+        // ★IIII177：尾参透传 rng（165 钟乳石级联支——dontstarve #065 (1491,533) 实证）
+        spreadGrass(st, nx, ny, STONE, st.type[ii], true, Number.POSITIVE_INFINITY, false, rng);
       }
     }
   }

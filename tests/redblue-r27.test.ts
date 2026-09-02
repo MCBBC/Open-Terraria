@@ -320,10 +320,14 @@ describe('⑥ Rainbow Rod 1458 飞行尘+循环音+Kill AoE（AI_009 :44390-4440
     };
     const game = makeGame(w, [enemy]);
     const m = mkMissile(game);
-    // 预置尾迹（模拟飞行期 oldPos 链——Kill 尾迹迸散沿 trail 逐点）
-    (m as unknown as { trail: number[] }).trail.push(
-      78 * TILE, 100 * TILE, 79 * TILE, 100 * TILE, 80 * TILE, 100 * TILE,
-      81 * TILE - 8, 100 * TILE, 81 * TILE, 100 * TILE);
+    // 预置尾迹（模拟飞行期 oldPos 链,新→老 [0]=头——Kill 尾迹迸散沿 strip 逐点;
+    // ★裁定 a:旧 12 点 push 带退役,改 mode-3 strip 带）
+    (m as unknown as { strip: Array<{ x: number; y: number }> }).strip.push(
+      { x: 81 * TILE, y: 100 * TILE },
+      { x: 81 * TILE - 8, y: 100 * TILE },
+      { x: 80 * TILE, y: 100 * TILE },
+      { x: 79 * TILE, y: 100 * TILE },
+      { x: 78 * TILE, y: 100 * TILE });
     const r0 = rec(game).dusts.length;
     m['killNow'](game);
     expect(rec(game).sfx.filter((s) => s.includes('Item_10')).length).toBe(1);

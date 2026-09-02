@@ -6,6 +6,16 @@
 // 顺序模拟赋值面；未知语句置 poisoned，该 addTile 记为 unparsed=null 回落旧近似路径。
 // 已知缺口（fallback 安全域）：RandomStyleRange/HookCheck/SubTiles 族、数组循环构造的多 style 变体——
 //   主 style 维度仍正确时 partial 输出并标 warn。
+// ★M-3（2026-09-02 液体放置面两维建模）：liqAllow 单维布尔（缺省 false=液体中全拒，
+//   与原版 382/382 反向）升级为 `liq: { water, lava }` 两维、值 ∈ 'allowed'|'notAllowed'|
+//   'onlyInFull'。真值结构（TileObjectData.cs）：SetupBaseObject 缺省 water=Allowed/
+//   lava=NotAllowed（:1767-1768）；newTile 级显式赋值 25 行（WaterPlacement 16 全
+//   NotAllowed / LavaPlacement 9 含 3 条 Allowed）；newSubTile 级液体赋值 86 行
+//   （WaterPlacement 18 / LavaPlacement 27 / Death 41）为子样式覆写【不进入基记录】
+//   ——消费端单记录模型=基样式语义，子样式例外台账见批次报告；LiquidDeath 经
+//   Calculate()（:1820-1833）提交耦合强制 NotAllowed。消费端 TileAnchorValidator 按
+//   liquidType 分流（water 维=WATER/HONEY/SHIMMER，lava 维=LAVA；LIQUID_TYPE 枚举换算，
+//   原版 liquidType 0/2/3↔水维、1↔岩浆维）。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const SRC = process.env.TOD_SRC ?? '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ObjectData/TileObjectData.cs';
@@ -17,6 +27,45 @@ const lines = cs.split(/\r?\n/);
 
 // ---- 状态机 ----
 // work: 当前 newTile 工作面；bases: addBaseTile 命名样式；pendingAlts: 尚未随 addTile 提交的备选方向
+// ---- M-3 液体放置两维建模（vanilla Terraria.Enums/LiquidPlacement.cs 四值枚举）----
+//  值域（基样式级实际出现前三者；OnlyInLiquid 为原版枚举值但 1457 全表基样式零出现，
+//  入库值域按任务规格收窄为三值——子样式级 OnlyInFullLiquid 仅 227 style5 一例，不入基记录）：
+//    allowed / notAllowed / onlyInFull
+//  维度 = LiquidPlacementModule.water/.lava（Terraria.Modules/LiquidPlacementModule.cs:5-8）：
+//    water 维管原版 liquidType 0/2/3（水/蜜/微光），lava 维管 1（TileObjectData.LiquidPlace
+//    :1853-1907 switch 分支）。本仓 TileStore.LIQUID_TYPE 是原版 +1 编码，消费端换算。
+//  缺省 = SetupBaseObject（TileObjectData.cs:1767-1768）：WaterPlacement=Allowed /
+//    LavaPlacement=NotAllowed。⚠️ LiquidPlacementModule 自身 ctor 缺省是两维全 Allowed
+//    （Module cs:11-14），但 _baseObject 构造后立即被 SetupBaseObject 覆盖为岩浆禁。
+const LIQ_DEFAULTS = Object.freeze({ water: 'allowed', lava: 'notAllowed' });
+const LIQ_VAL_MAP = { Allowed: 'allowed', NotAllowed: 'notAllowed', OnlyInFullLiquid: 'onlyInFull', OnlyInLiquid: 'onlyInLiquid' };
+function parseLiqVal(rhs) {
+  const m = rhs.match(/LiquidPlacement\.(\w+)/);
+  return m ? (LIQ_VAL_MAP[m[1]] ?? null) : null;
+}
+/** Calculate() 提交耦合（TileObjectData.cs:1820-1833）：WaterDeath/LavaDeath=true ⇒
+ *  对应维 placement 强制 NotAllowed（setter 走 COW，只影响提交对象）。 */
+function applyLiquidDeathCoupling(rec) {
+  if (rec.waterDeath) rec.liq.water = 'notAllowed';
+  if (rec.lavaDeath) rec.liq.lava = 'notAllowed';
+}
+
+function mkWork() {
+  return {
+    w: 0, h: 0, ox: 0, oy: 0,
+    anchorTop: null, anchorBottom: null, anchorLeft: null, anchorRight: null,
+    wall: false, liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false,
+    flatten: false, dir: '', yOff: 0,
+    // 转义：AnchorData 第二参为 newTile.Width 表达式时需在快照期以最终 W 具象化
+  };
+}
+/** addTile/addBaseTile 提交后的 newTile 复位（TileObjectData.cs:2005/:2013
+ *  `newTile = new TileObjectData(_baseObject)`）——几何字段沿用本提取器"家族头净化"
+ *  约定不在此复位（靠 CopyFrom(Style*)/Width 头重建），液体两维按原版语义复位。 */
+function resetLiquid(w) {
+  w.liq = { ...LIQ_DEFAULTS };
+  w.waterDeath = false; w.lavaDeath = false;
+}
 let work = mkWork();
 const bases = new Map();
 const manifest = {};
@@ -26,14 +75,6 @@ const pendingAudit = [];
 function curIdGuess(rec){ return rec._lastId ?? -1; }
 let poisoned = null;         // {tile,into} 复杂构造污染标记（当前对象不可信）
 
-function mkWork() {
-  return {
-    w: 0, h: 0, ox: 0, oy: 0,
-    anchorTop: null, anchorBottom: null, anchorLeft: null, anchorRight: null,
-    wall: false, liqAllow: false, flatten: false, dir: '', yOff: 0,
-    // 转义：AnchorData 第二参为 newTile.Width 表达式时需在快照期以最终 W 具象化
-  };
-}
 const deep = (w) => structuredClone(w);
 
 function parseAnchor(rhs) {
@@ -70,7 +111,14 @@ for (let ln = 0; ln < lines.length; ln++) {
     continue;
   }
   if ((m = L.match(/^addBaseTile\(out (\w+)\)\s*;/))) {
-    bases.set(m[1], deep(work));
+    // addBaseTile（TileObjectData.cs:2001-2008）：newTile.Calculate() 先跑（death 耦合
+    //   落进快照，StyleAlch 等 LavaDeath=true 的基样式快照 lava=notAllowed），再存快照、
+    //   newTile 复位缺省。Style* 快照含 liq/death，后续 CopyFrom(Style*) 继承。
+    const snap = deep(work);
+    applyLiquidDeathCoupling(snap);
+    delete snap.waterDeath; delete snap.lavaDeath;
+    bases.set(m[1], snap);
+    resetLiquid(work);
     continue;
   }
   if ((m = L.match(/^(?:newTile|Style\w+)\.(?:CopyFrom\(.*?\)|ResetToTile\(\))\s*;/)) && !/^newTile\.CopyFrom/.test(L)) {
@@ -83,6 +131,8 @@ for (let ln = 0; ln < lines.length; ln++) {
     if (work.w > 0 && work.h > 0) {
       const rec = deep(work);
       resolveExprs(rec);
+      applyLiquidDeathCoupling(rec);     // Calculate() :1820-1833 提交耦合
+      delete rec.waterDeath; delete rec.lavaDeath;   // death 旗不入库（瞬时量）
       if (pendingAlts.length) rec.dirs = pendingAlts.slice();
       manifest[id] = rec;
       stats.parsed++;
@@ -94,6 +144,7 @@ for (let ln = 0; ln < lines.length; ln++) {
     }
     pendingAlts = [];
     poisoned = null;
+    resetLiquid(work);                   // 原版 addTile 尾 newTile = new(_baseObject)（:2013）
     continue;
   }
   if (/^addAlternate\(/.test(L)) {
@@ -102,9 +153,37 @@ for (let ln = 0; ln < lines.length; ln++) {
     continue;
   }
 
-  // ---- 属性赋值 ----
-  if ((m = L.match(/^newTile\.(\w+)\s*=\s*(.+);\s*$/))) {
-    const [, prop, raw] = m;
+  // ---- FullCopyFrom（TileObjectData.cs:1717-1731）：整表拷贝已提交 tile（模块引用共享）。
+  //      1457 三处调用：388→389（门右开）、82→83→84（药草）。仅液体两维需要显式搬运
+  //      （几何字段本就沿 work 继承等价）。 ----
+  if ((m = L.match(/^newTile\.FullCopyFrom\((\d+)\)\s*;/))) {
+    const srcRec = manifest[m[1]];
+    if (srcRec?.liq) { work.liq = structuredClone(srcRec.liq); }
+    else { poisoned = true; }
+    continue;
+  }
+  // ---- 子样式区：newSubTile.CopyFrom(newTile/newSubTile) —— 子样式经模块引用共享继承
+  //      当前工作面（TileObjectData.cs:1698-1715 CopyFrom 语义）；基样式记录不受子样式
+  //      覆写影响 → 显式跳过不再置毒（基样式值仍按 newTile 自身赋值面提取）。 ----
+  if (/^newSubTile\.CopyFrom\(/.test(L)) { stats.subCopyFrom = (stats.subCopyFrom ?? 0) + 1; continue; }
+
+  // ---- 属性赋值（newTile. / newSubTile. 双前缀；newAlternate.* 无液体赋值（grep 全文件
+  //      证实），仍走后置毒分支）----
+  if ((m = L.match(/^(newTile|newSubTile)\.(\w+)\s*=\s*(.+);\s*$/))) {
+    const [, prefix, prop, raw] = m;
+    if (prefix === 'newSubTile') {
+      // 子样式写入永不落基样式记录（原版子样式对象独立于 newTile；CopyFrom 共享引用
+      // 后的覆写经 setter COW 只落在子样式模块上——见 TileObjectData.cs:574-640 setter）。
+      // 液体四属性 = 本批升级的解析目标（计数审计、不置毒）；其余属性维持旧行为置毒
+      // （审计信号：该族含未建模子样式几何，AnchorValidWalls/Height 等只在子样式生效）。
+      const lp = prop.toLowerCase();
+      if (lp === 'waterplacement' || lp === 'lavaplacement' || lp === 'waterdeath' || lp === 'lavadeath') {
+        stats.subLiqWrites = (stats.subLiqWrites ?? 0) + 1;
+      } else {
+        poisoned = poisoned ?? true;
+      }
+      continue;
+    }
     const rhs = raw.trim();
     switch (prop.toLowerCase()) {
       case 'width': {
@@ -117,7 +196,7 @@ for (let ln = 0; ln < lines.length; ln++) {
         const hadAnchors = !!(prev.anchorTop ?? prev.anchorBottom ?? prev.anchorLeft ?? prev.anchorRight) || prev.wall;
         work.anchorTop = null; work.anchorBottom = null;
         work.anchorLeft = null; work.anchorRight = null;
-        work.wall = false; work.liqAllow = false; work.flatten = false;
+        work.wall = false; work.flatten = false;
         work.dir = ''; lastAltDir = ''; pendingAlts = [];
         work.w = parseInt(rhs) || 0;
         if (hadAnchors && !Object.isFrozen(prev)) {
@@ -153,16 +232,32 @@ for (let ln = 0; ln < lines.length; ln++) {
         break;
       }
       case 'anchorwall': work.wall = /true/i.test(rhs); break;
-      case 'liquidplacement': {
-        // Allowed / NotAllowed / OnlyInLiquid 等 —— 只有明确“液体中可放”才记 allow
-        work.liqAllow = /Allowed/.test(rhs) && !/Not/.test(rhs);
+      case 'waterplacement':
+      case 'lavaplacement': {
+        // ★M-3：newTile.WaterPlacement/LavaPlacement 显式赋值（TileObjectData.cs:574-640
+        //   属性 setter，COW 写入 _liquidPlacement.water/.lava）。值 = LiquidPlacement
+        //   四值枚举（本表仅出现 Allowed/NotAllowed；子样式级 OnlyInFullLiquid 仅 227
+        //   style5 一例，newSubTile 前缀已在上方短路为审计计数、不入基记录）。
+        const v = parseLiqVal(rhs);
+        if (!v) { poisoned = true; break; }
+        if (prop.toLowerCase() === 'waterplacement') work.liq.water = v;
+        else work.liq.lava = v;
+        break;
+      }
+      case 'waterdeath':
+      case 'lavadeath': {
+        // LiquidDeathModule.water/lava（TileObjectData.cs:508-547 属性）——提交时经
+        // Calculate() 耦合强制对应维 NotAllowed（applyLiquidDeathCoupling）。
+        const dv = /true/i.test(rhs);
+        if (prop.toLowerCase() === 'waterdeath') work.waterDeath = dv;
+        else work.lavaDeath = dv;
         break;
       }
       case 'flattenanchors': work.flatten = /true/i.test(rhs); break;
       case 'direction': work.dir = rhs.replace(/^TileObjectDirection\./, '').trim(); lastAltDir = work.dir; break;
       case 'drawyoffset': work.yOff = parseInt(rhs) || 0; break;
-      // 白名单中性项（不建模但合法）：跳过，不污染
-      case 'lavadegth': case 'lavadeath': case 'coordinatewidth': case 'coordinatepadding':
+      // 白名单中性项（不建模但合法）：跳过，不污染（waterdeath/lavadeath 已升级为实义解析）
+      case 'coordinatewidth': case 'coordinatepadding':
       case 'coordinateheights': case 'usescustomcanplace': case 'stylehorizontal': case 'style':
       case 'randomstylerange': case 'allowalwaysonscreen': case 'wraps':
         break;
@@ -204,8 +299,19 @@ mkdirSync('src/data', { recursive: true });
 mkdirSync('tests/golden', { recursive: true });
 writeFileSync(OUT_RUNTIME, JSON.stringify({ v: '1457', tiles: manifest }, null, 1));
 writeFileSync(OUT_GOLDEN, JSON.stringify({ v: '1457', tiles: manifest }, null, 1));
-console.log(`total=${stats.total} parsed=${stats.parsed} unparsed=${stats.unparsed.length} warned=${stats.warned.length}`);
+console.log(`total=${stats.total} parsed=${stats.parsed} unparsed=${stats.unparsed.length} warned=${stats.warned.length} subCopyFrom=${stats.subCopyFrom ?? 0} subLiqWrites=${stats.subLiqWrites ?? 0}`);
 console.log('unparsed ids:', stats.unparsed.join(','));
+// 液体两维分布抽查（M-3）
+{
+  const waterNA = [], lavaAllow = [], onlyInFull = [];
+  for (const [id, r] of Object.entries(manifest)) {
+    if (!r) continue;
+    if (r.liq.water === 'notAllowed') waterNA.push(id);
+    else if (r.liq.water === 'onlyInFull') onlyInFull.push(id);
+    if (r.liq.lava === 'allowed') lavaAllow.push(id);
+  }
+  console.log(`liq: water=notAllowed(${waterNA.length}): ${waterNA.join(',')} | lava=allowed: ${lavaAllow.join(',')} | water=onlyInFull: ${onlyInFull.join(',') || '无'}`);
+}
 // 抽查
 for (const k of ['220', '10', '11', '212', '91', '13', '4']) {
   const r = manifest[k];

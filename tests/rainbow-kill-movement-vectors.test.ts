@@ -50,9 +50,10 @@ describe('终零波：79 Kill RainbowRodHit ×2 载荷（MovementVector=(16,0)/(
   it('双掷 movement 向量按 RotatedBy 步进序列入参；Kill 段零广播', () => {
     try {
       const { m, bcast, hooks } = mk79();
-      // 直注 12 点尾迹（oldPos 环满语义;killNow 迭代面只读 trail）
-      const t = (m as unknown as { trail: number[] }).trail;
-      for (let i = 0; i < 12; i++) t.push(m.cx - i * 6, m.cy);
+      // 直注 12 点尾迹（oldPos 环满语义,新→老 [0]=头;killNow 迭代面只读 strip——
+      // ★裁定 a:旧 12 点 push 带退役,改 mode-3 strip 带）
+      const t = (m as unknown as { strip: Array<{ x: number; y: number }> }).strip;
+      for (let i = 0; i < 12; i++) t.push({ x: (m.cx ?? 0) - i * 6, y: m.cy ?? 0 });
       (m as unknown as { killNow(g: never): void }).killNow(hooks as never);
       expect((m as unknown as { dead: boolean }).dead).toBe(true);
       // 命中:两次直调,载荷 = (16,0) 然后 RotatedBy(π/2)→(0,16)

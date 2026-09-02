@@ -29,6 +29,7 @@ import { noteVanillaProjImmune } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
+import { wetCollision } from './npcLiquid';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { damageVarRoll } from '../stats/DamageVar';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
@@ -2092,9 +2093,11 @@ function spearPerTypeDust(s: SpearProj, game: GameHooks): void {
   fn(s, game, (game.player.facing ?? (s.dx > 0 ? 1 : -1)) >= 0 ? 1 : -1); // direction=玩家朝向(:46712)
 }
 
-// ================= 燃烧瓶（proj 399 aiStyle 68；Molotov 2590→399，Kill 链 :70889-70928） =================
-// 弹跳物理（ai[0]>=15 起重力 0.2/t，AI_068 :29048-29100）；死亡（撞块/命中/超时）→
-// 6 朵火云 400+rand3（:70918-70927：散布 ±8/上抛，伤 ×0.5，火云=aiStyle 14 弹跳穿透 3、
+// ================= 燃烧瓶（proj 399 aiStyle 68；Molotov 2590→399，Kill 链 :75347-75383） =================
+// 弹跳物理（★MAJOR-3 2026-09-02 J′：ai[0]>=15 才起重力 0.2/t + 摩擦 0.99——
+// :30672-30676 同支内两式,15 拍前【零改速】;旧码 15 拍前自造 0.1 重力+无条件摩擦
+// = 出生即下坠打滑,与本注自相矛盾处一并更正）;死亡（撞块/命中/入水/期满）→
+// 6 朵火云 400+rand3（:75370-75382：散布 ±8/上抛，伤 ×0.5，火云=aiStyle 14 弹跳穿透 3、
 // 360t、命中 OnFire 3-6s :10850-10852）
 // ★T2 清偿（2026-09-02,原"登记不修"升格）:飞行火焰尾迹——原版 AI_068 :30655-30692,
 // alpha==0 门（ai[0]>=3 起 −40/t → 第 9 拍归零）后每拍 1×d6 火尘:锚=Center+
@@ -2102,7 +2105,11 @@ function spearPerTypeDust(s: SpearProj, game: GameHooks): void {
 // 单位(spinningpoint2) 再整体 RotatedBy(−π/2×direction)。spinningpoint2 随原版
 // rotation（每拍 +=0.25×direction）旋转——本类补 rotation/direction 镜像字段供尘锚
 // （direction=原版 AutomaticallyChangesDirection 每拍 HandleMovement 后按
-// velocity.X 定号 :17121-17127,<0 取 −1 否则 1）;draw 朝向不动（未定罪面）。
+// velocity.X 定号 :17121-17127,<0 取 −1 否则 1）。
+// ★MINOR-3/4（2026-09-02 J′）：draw 改 rotation 绘制+alpha 淡入
+// （Main.cs:35135-35140 rotation+GetAlpha=(255−alpha)/255）;入液链 :30704-30722——
+// wet→timeLeft 钳 3,timeLeft<=3 → tileCollide=false/alpha=255/盒 80×80 中心重排/
+// kb=8,期满 Kill=火云出口。
 export class MolotovProj extends Entity {
   w = 14; h = 14;
   vx: number;
@@ -2111,6 +2118,11 @@ export class MolotovProj extends Entity {
   critChance = 0.04;
   armorPen = 0;
   private t = 0;
+  /** 原版 timeLeft（SetDefaults 缺省 3600 :789;AI :30720-30722 wet → 钳 3——
+   *  入水 3 拍后 Kill=火云出口;旧 `t>600` 静默消失退役） */
+  private timeLeft = 3600;
+  /** 原版 knockBack（SetDefaults 缺省 0;:30717 timeLeft<=3 涨盒支置 8） */
+  knockback = 0;
   /** 原版 rotation（:30655 每拍 +=0.25×direction——尘锚 spinningpoint2 旋转基准） */
   private rot = 0;
   /** 原版 direction（:17121 自动朝向;出生按初速 X 定号） */
@@ -2145,9 +2157,13 @@ export class MolotovProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     if (++this.t >= 3) this.alpha = Math.max(0, this.alpha - 40);   // :30657-30664
-    if (this.t >= 15) this.vy = Math.min(this.vy + 0.2, 16); // :29063
-    else this.vy = Math.min(this.vy + 0.1, 16);
-    this.vx *= 0.99;
+    // ★MAJOR-3（:30672-30676）：`if (ai[0] >= 15f) { velocity.Y += 0.2f; cap16;
+    // velocity.X *= 0.99f; }` —— 重力与摩擦同支、15 拍前【零改速】。旧 else 支
+    // （0.1 重力）与无条件 ×0.99 摩擦均无原文出处,退役
+    if (this.t >= 15) {
+      this.vy = Math.min(this.vy + 0.2, 16);
+      this.vx *= 0.99;
+    }
     // ---- 飞行火焰尾迹（T2 清偿 2026-09-02;AI_068 :30655-30692,尘在 AI 段=位移前）----
     this.rot += 0.25 * this.dir;                                    // :30655
     if (this.alpha === 0) {
@@ -2173,12 +2189,13 @@ export class MolotovProj extends Entity {
     // ★残余债清偿(2026-09-01):点采样撞块(中心+底部)在斜砖/半砖上要么漏检(斜面空区)
     // 要么误检(全格上半),改走正典管线——原版 Molotov 即标准 TileCollision 撞击即裂,
     // 任一轴接触或落面即 breakOpen。dropThrough=true 对齐弹体 fallThrough 缺省。
+    // ★MINOR-4:timeLeft<=3（入水倒计时档）tileCollide=false——穿墙直落待爆(:30706)
     const lvx = this.vx, lvy = this.vy;
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
-      tileCollide: true, dropThrough: true,
+      tileCollide: this.timeLeft > 3, dropThrough: true,
     };
     moveAndCollide(body, game.world, lvx, lvy);
     this.x = body.x; this.y = body.y;
@@ -2187,7 +2204,23 @@ export class MolotovProj extends Entity {
       this.breakOpen(game); return;   // 撞块即裂(:29052 系)
     }
     this.dir = this.vx < 0 ? -1 : 1;   // :17121-17127 自动朝向（<0 取 −1,否则恒 1）
-    if (this.t > 600) { this.dead = true; return; }
+    // ★MINOR-4（:30713-30722 入液链,原版顺序=AI 尾 wet 钳 → Update 尾 timeLeft--/Kill
+    // → 次拍 AI 头涨盒;本仓 wet 钳/递减/涨盒同拍连排,死亡拍同域、涨盒早一拍——
+    // 该拍起 alpha=255 已隐身,无观感差）：
+    // wet（WetCollision 全几何,岩浆/蜂蜜亦真）→ timeLeft 钳 3;期满 Kill = 火云出口
+    // breakOpen（:75347 Kill 链）。旧 `t>600` 静默消失（无爆裂）退役
+    const w68 = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+    if (w68.wet && this.timeLeft > 3) this.timeLeft = 3;
+    if (--this.timeLeft <= 0) { this.breakOpen(game); return; }
+    if (this.timeLeft <= 3) {
+      // 涨盒支（:30704-30717）：tileCollide=false（上支已读）/alpha=255（隐身）/
+      // 盒 80×80 中心重排（position±width/2 重排原文）/knockBack=8
+      this.alpha = 255;
+      const pcx = this.cx, pcy = this.cy;
+      this.w = 80; this.h = 80;
+      this.x = pcx - 40; this.y = pcy - 40;
+      this.knockback = 8;
+    }
     // 命中敌即裂（penetrate 1）
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean };
@@ -2201,7 +2234,14 @@ export class MolotovProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    drawProj(r, cam, this, 399, Math.atan2(this.vy, this.vx) + Math.PI / 2, '#804020');
+    // ★MINOR-3（Main.cs:35135-35140,type 399/383 支）：`EntitySpriteDraw(tex,
+    // proj.Center, null, proj.GetAlpha(color), proj.rotation, tex.Size()/2, scale, dir)`
+    // —— 绘制角 = 原版自旋 rotation（:30655 +=0.25×direction,本类 this.rot 镜像）、
+    // 中心锚/中心 origin（centerAnchor 档）;透明度 = GetAlpha=(255−alpha)/255
+    // （:30657-30664 出生 alpha=255 → 约 7 拍淡入;涨盒支 alpha=255 → 隐身待爆）。
+    // 旧码用速度角 atan2(vy,vx)+π/2 且无淡入 = 朝向+出生两处失真
+    drawProj(r, cam, this, 399, this.rot, '#804020',
+      Math.max(0, (255 - this.alpha) / 255), 0, false, true);
   }
 }
 
@@ -4092,7 +4132,8 @@ export class FlailProj extends Entity {
  *  ai0==0 首寻(:29191-29215)：650px 内最近敌(CanHit 视线门)→ ai0=idx+1 并
  *  初次转向 (v×20+dir×Next(35,75)/30)/21；无目标 → ai0=-15(再漂 15t);
  *  ai0>0 追踪段(:29217-29219)：(v×40+dir×12)/41;
- *  撞块(:16905-16921)：前 2 次接触反弹、第 3 次 Kill;Kill 爆 20 颗火尘(:69686)。
+ *  撞块(:16905-16921 → 接触响应链 :18428-18446)：第 1 次接触反弹、第 2 次接触 Kill
+ *  （localAI[0] 前增,<2 反射/否则 Kill——★MAJOR-1 2026-09-02 J′）;Kill 爆 20 颗火尘(:69686)。
  *  scale=ai1=Next(80,121)/100(:29233-29239);timeLeft 120/penetrate 1(SetDefaults :4584)
  *  ★T3 清偿（2026-09-02,原"登记不修"升格）:杀尘/音基准位改用碰撞后心 this.cx/cy
  *  （原版 Kill 自接触响应段 :18443 调用,position 已被 TileCollision 夹贴墙;
@@ -4183,9 +4224,11 @@ export class FlaironSpike extends Entity {
     }
     // 反弹计数（1458 P.cs:18429-18445 type==405 支，位于 if(flag)=【lastVelocity !=
     // velocity】接触响应链内——localAI[0]++ 只在真接触时执行；旧注"无条件每 tick 计数"
-    // 系对该行位上下文的误读，本仓事件计数口径即 parity）。反射改轴级差分判定：
-    // 碰撞轴逐一从 lastVelocity 镜像（第 1/2 次接触），第 3 次接触 Kill(:18443 else)；
-    // 几何 half/坡面由正典管线承载（残余债清偿 2026-09-01 口径不变）
+    // 系对该行位上下文的误读，本仓事件计数口径即 parity）。反射改轴级差分判定。
+    // ★MAJOR-1（2026-09-02 红队 J′）：原版 `localAI[0]++; if (localAI[0] < 2f) 反射
+    // else Kill()` 是【前增】（0 起）——第 1 次接触 localAI=1 反射、第 2 次接触
+    // localAI=2 → Kill(:18443 else)。旧码 `bounces<2 反射`+`>=3 Kill` = 反弹两次多飞
+    // 一轮;等价式 = `bounces<1 反射` + `bounces>=2 Kill`（本仓 bounces 后增语义核对后）
     {
       const lvx0 = this.vx, lvy0 = this.vy;
       const body = {
@@ -4198,50 +4241,57 @@ export class FlaironSpike extends Entity {
       const collided = body.hitWall || body.collideY || body.onGround || body.hitHead;
       this.x = body.x; this.y = body.y;
       if (collided) {
-        if (this.bounces < 2) {
-          // 第 1/2 次接触：命中轴取 −lastVelocity 续飞（:18431-18442,轴独立判定）
+        if (this.bounces < 1) {
+          // 第 1 次接触：命中轴取 −lastVelocity 续飞（:18431-18442,轴独立判定）
           if (body.vx !== lvx0) this.vx = -lvx0;
           if (body.vy !== lvy0) this.vy = -lvy0;
         }
         this.bounces++;
       }
     }
-    if (this.bounces >= 3) {
-      this.dead = true;
-      // Kill 爆尘（1458 P.cs:74184-74208;台账 C 批清偿——旧合成橙粒近似退役）:
-      // Item54 音 + 20× d212 真值尘——NewDust(20×20 盒)后落点归位到半径
-      // 10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
-      // color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
-      // scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
-      // ★T3 清偿（2026-09-02,红队 H′）:基准位 = 碰撞后心 this.cx/cy——原版 Kill 自
-      // 接触响应段调用（:18443 else→Kill）,此时 position 已被 TileCollision 夹到
-      // 贴墙位,尘/音取 Kill 时 Center（:74185-74188）;旧 cx0/cy0 为帧首心（一步之前）,
-      // 贴墙场景差半格~一格。AI 段索敌仍用帧首 cx0/cy0（AI 先于位移,原版同序）不动
-      game.playSfxFiles(['Item_54'], 1, this.cx, this.cy);
-      if (game.spawnDust) {
-        for (let i = 0; i < 20; i++) {
-          const d = game.spawnDust(this.cx - 10, this.cy - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
-          if (!d) break;
-          const len = Math.hypot(d.x - this.cx, d.y - this.cy) || 1;
-          const ux = (d.x - this.cx) / len, uy = (d.y - this.cy) / len;
-          const spdLen = Math.hypot(d.vx, d.vy);
-          d.x = this.cx + ux * 10 * this.ai1;
-          d.y = this.cy + uy * 10 * this.ai1;   // ★此前误写 cx0（y 坐标用了 x 心）= 终清波 typo 回归钉死
-          d.vx = ux * spdLen; d.vy = uy * spdLen;
-          const hue = 0.4 + Math.random() * 0.2;
-          const col = hslToRgbColor(hue, 0.9, 0.5);
-          d.color = { r: Math.round(col.r + (255 - col.r) * 0.3),
-            g: Math.round(col.g + (255 - col.g) * 0.3),
-            b: Math.round(col.b + (255 - col.b) * 0.3), a: 255 };
-          d.noGravity = true;
-          d.scale = 0.7;
-        }
-      } else {
-        game.spawnParticles(this.cx, this.cy, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+    if (this.bounces >= 2) { this.killExplode(game); return; }   // :18443 else→Kill
+    // ★MAJOR-2（2026-09-02 红队 J′）：penetrate=1 命中敌 → Damage() 内 :14189
+    // penetrate-- → 0（keepIterating=false）→ Update :17312 `if (penetrate == 0) Kill()`
+    // 同拍消亡——旧码命中后继续飞 = 无限穿透。onHit 回调记账后走既有爆尘出口
+    let hitAny = false;
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, 0, () => { hitAny = true; });
+    if (hitAny) { this.killExplode(game); return; }
+  }
+
+  /** Kill 出口（:18443 else→Kill → P.cs:74184-74208 爆尘;MAJOR-2 命中致灭同走此件）。
+   *  Kill 爆尘（台账 C 批清偿——旧合成橙粒近似退役）:
+   *  Item54 音 + 20× d212 真值尘——NewDust(20×20 盒)后落点归位到半径
+   *  10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
+   *  color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
+   *  scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
+   *  ★T3 清偿（2026-09-02,红队 H′）:基准位 = 碰撞后心 this.cx/cy——原版 Kill 自
+   *  接触响应段调用（:18443 else→Kill）,此时 position 已被 TileCollision 夹到
+   *  贴墙位,尘/音取 Kill 时 Center（:74185-74188）;旧 cx0/cy0 为帧首心（一步之前）,
+   *  贴墙场景差半格~一格。AI 段索敌仍用帧首 cx0/cy0（AI 先于位移,原版同序）不动 */
+  private killExplode(game: GameHooks): void {
+    this.dead = true;
+    game.playSfxFiles(['Item_54'], 1, this.cx, this.cy);
+    if (game.spawnDust) {
+      for (let i = 0; i < 20; i++) {
+        const d = game.spawnDust(this.cx - 10, this.cy - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
+        if (!d) break;
+        const len = Math.hypot(d.x - this.cx, d.y - this.cy) || 1;
+        const ux = (d.x - this.cx) / len, uy = (d.y - this.cy) / len;
+        const spdLen = Math.hypot(d.vx, d.vy);
+        d.x = this.cx + ux * 10 * this.ai1;
+        d.y = this.cy + uy * 10 * this.ai1;   // ★此前误写 cx0（y 坐标用了 x 心）= 终清波 typo 回归钉死
+        d.vx = ux * spdLen; d.vy = uy * spdLen;
+        const hue = 0.4 + Math.random() * 0.2;
+        const col = hslToRgbColor(hue, 0.9, 0.5);
+        d.color = { r: Math.round(col.r + (255 - col.r) * 0.3),
+          g: Math.round(col.g + (255 - col.g) * 0.3),
+          b: Math.round(col.b + (255 - col.b) * 0.3), a: 255 };
+        d.noGravity = true;
+        d.scale = 0.7;
       }
-      return;
+    } else {
+      game.spawnParticles(this.cx, this.cy, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
     }
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1);
   }
 }
 
@@ -5473,8 +5523,9 @@ export class DaybreakFlare extends Entity {
    *  与原版 _oldPos 一致,[0]=最新记录;TrailingMode[636]=0 → 每 EU 子步 AI+位移后
    *  记一条,P.cs:17199-17204;容量 TrailCacheLength[636]=20） */
   private oldPos: Array<{ x: number; y: number }> = [];
-  /** direction（尘速度 2.5×direction 用;飞行相跟随 vx 符号——AI_113 不更新 direction,
-   *  原版由 AutomaticallyChangesDirection 在 aiStyle3 段管辖外维持最后飞行朝向） */
+  /** direction（尘速度 2.5×direction 用;每子步跟随 vx 符号——:17122-17128
+   *  AutomaticallyChangesDirection=HandleMovement 后无条件段,飞行/附着两相都跑
+   *  （附着相 vx=悬挂偏移,方向随其重定号——MINOR-6 2026-09-02） */
   private killDir = 1;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
@@ -5518,6 +5569,12 @@ export class DaybreakFlare extends Entity {
       if (!t) { this.killNow(game); return; }  // :38333-38336/:38346-38349 目标失效
       this.x = (t as { cx: number }).cx - this.vx * 2 - this.w / 2;     // :38338-38339
       this.y = (t as { cy: number }).cy - this.vy * 2 - this.h / 2;
+      // ★MINOR-6（2026-09-02 J′）：direction 每拍按 velocity.X 定号（:17122-17128
+      // AutomaticallyChangesDirection=HandleMovement 后无条件段,附着相不豁免——
+      // 附着拍 vx 已被改写为悬挂偏移（首击结算 :38287 前）,方向随冻结 vx 重定号,
+      // Kill 尘 2.5×direction（:73395）取该值;旧码只在飞行相定号 = 附着后 Kill 尘
+      // 用首击前的飞行朝向,向左附着时尘向反转
+      this.killDir = Math.sign(this.vx) || this.killDir;
       if (this.localT % 30 === 0) {        // :41443-41450 flag2 = localAI[0]%30==0
         // flag2 → targetNPC.HitEffect(0, 1.0)(:41453)——【NPC.HitEffect 敌怪自体受击尘族】
         // (按敌型出血液/尘埃/gore)系统待移植;合成两粒火花为观感占位（C 类登记,

@@ -1477,9 +1477,14 @@ export class Arrow extends Entity {
    *  必须入消费面才有人维护）。原版全体弹都维护此缓存;本仓其余弹族不为无消费者
    *  付每子步重测成本——消费面扩族时同步入表 */
   private get wetCacheConsumer(): boolean {
+    // ★2026-09-02 观感面缺口批扩员：376 随从鬼火（:56548-56550 wet && !lavaWet →
+    // Kill）/ 710 空中祸害（:56375 wet → Kill）——两型 SetDefaults 均无 ignoreWater
+    // 行 → 原版共享 wet 段每 update 全量刷新湿旗,湿旗不刷新则其 AI 内 wet 消亡门
+    // 仅出生入水才可能触发（冻结算死代码）。入自家 AI 消亡块消费（subStepAI 各自
+    // 分支）,不含 IsDestroyedByWater 泛杀语义（泛杀面仍走 ARROW_DESTROYED_BY_WATER）。
     const p = this.projId;
     return p === 181 || p === 189 || p === 307 || p === 316 || p === 566 || p === 469
-      || p === 2 || ARROW_DESTROYED_BY_WATER.has(p);
+      || p === 2 || p === 376 || p === 710 || ARROW_DESTROYED_BY_WATER.has(p);
   }
   // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支 :58383-58465）----
   /** ai[0] 索敌延迟（>20 后激活，:58403-58405 自减钳 20） */
@@ -1819,6 +1824,14 @@ export class Arrow extends Entity {
     this.grav2 = opts?.grav2 ?? (gravExplicit ? 0 : spec0.grav2 ?? 0);
     this.grav2At = opts?.grav2At ?? (gravExplicit ? 0 : spec0.grav2At ?? 0);
     this.dragAlways = opts?.dragAlways ?? (gravExplicit ? 0 : spec0.drag ?? 0);
+    // 1097 火绒狐火球（★2026-09-02 观感批顺带修复）：MinionProj 生成端
+    // `grav: shooter.grav ?? 0` 对无 grav 键的 shooter 恒显式传 0 → 绕过规格链,
+    // AI1_GRAV[1097]=[0.15,40]（:58255-58269 ai[0]≥40 后 vy+=0.15）在唯一生产路径
+    // （Foxparks 1094/1113 射出）恒死键——显式 0 时回落规格链（显式非 0 的调用面不动）
+    if (projId === 1097 && gravExplicit && this.grav === 0) {
+      this.grav = spec0.grav;
+      this.gravDelay = opts?.gravDelay ?? spec0.delay;
+    }
     // 寿命表（修复2）：opts 显式优先 → SetDefaults timeLeft（vanilla-projectiles.json
     // 提取自 Projectile.cs SetDefaults）→ 缺省 3600（P.cs:526）。逐型覆写：小丑箭
     // 5=120(:599)/诅咒镖 478=300(:5264)/水晶风暴 94=600(:1517)/月总箭 639=90(:6603)
@@ -2636,7 +2649,8 @@ export class Arrow extends Entity {
               : this.bee36Tilt !== null ? this.bee36Frame   // aiStyle 36 蜂族：3/6 拍/帧（:27699/:27720）
                 : this.pinFrame !== null ? this.pinFrame    // ★R28 337 帧恒 ai[1]（发射掷,AI 不推进 :57927）
                   : this.projId === 467 ? this.f467Frame    // 教徒火球：3 拍/帧 4 帧循环（:55208-55218）
-                    : Math.floor(this.age / 5) % frames;
+                    : this.projId === 712 ? this.f712Frame  // 712 书杖弹：AI 推帧 4 拍/帧两带各 4 帧（:56664-56678,projFrames=8 :8596）
+                      : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     let drawImg: CanvasImageSource | null = frameImg ?? img;
     // R4-32（GetAlpha,Projectile.cs:80604-80613）：aiStyle1 且 PhoenixQuivered||
@@ -4304,6 +4318,68 @@ export class Arrow extends Entity {
       this.alpha -= 10;
       if (this.alpha < 0) this.alpha = 0;
     }
+    // ---- ★2026-09-02 观感面缺口批：660 天界碎裂 / 712 书杖弹（AI_001 顶层独立块
+    //      :56638-56660 / :56662-56702）——EU=1 → ×2 子步/帧,白闪门首子步即关 ----
+    // 共同骨架：Utils.PlotTileLine(Center → Center+v×10,带宽 8,CastLightOpen) 逐格
+    // 线光带每子步发光——本仓以弹心点光 lightRGB 通道近似（ChainsawProj 弹心点光
+    // 同先例,线带未建模登记）;出膛白闪门 `if (alpha > 0)`：SetDefaults α=255
+    // （PROJ_ALPHA0 批注）→ 首子步恒真一次,当拍 α=0、scale=1.1。
+    if (this.projId === 660 || this.projId === 712) {
+      // 光色 v3_1：660 (0.6,1,1)×0.2（:56639）/ 712 (0.4,0.4,0.4)×0.7（:56663）
+      this.lightRGB = this.projId === 660 ? [0.12, 0.2, 0.2] : [0.28, 0.28, 0.28];
+      const vl660 = Math.hypot(this.vx, this.vy);
+      // SafeNormalize(Zero) 语义：|v|=0 → (0,0)；旋转角 cosA/sinA 取速度向（v=0 → 1,0）
+      const nv660x = vl660 > 0 ? this.vx / vl660 : 0, nv660y = vl660 > 0 ? this.vy / vl660 : 0;
+      const ca660 = vl660 > 0 ? this.vx / vl660 : 1, sa660 = vl660 > 0 ? this.vy / vl660 : 0;
+      if (this.projId === 712) {
+        // 帧链（:56664-56678）：α==255 拍 frame=rand(2)*4 选带 → 每 4 子步 +1,
+        // ==4 回 0 / ≥8 回 4（两带各 4 帧,projFrames[712]=8 :8596——draw fIdx 链消费）
+        if (this.alpha === 255) this.f712Frame = Math.floor(Math.random() * 2) * 4;
+        if (++this.f712FrameT >= 4) {
+          this.f712FrameT = 0;
+          this.f712Frame++;
+          if (this.f712Frame === 4) this.f712Frame = 0;
+          if (this.f712Frame >= 8) this.f712Frame = 4;
+        }
+      }
+      if (this.alpha > 0) {
+        if (this.projId === 660) game.playSfxFiles?.(['Item_9'], 1, this.cx, this.cy);
+        this.alpha = 0;
+        this.drawScale = 1.1;
+        this.f712Frame = Math.floor(Math.random() * 14);   // frame=rand.Next(14)（:56651/:56684）——660 贴图恒 1 帧=死写入;712 8 帧表越界值由 projFrameImg 钳末帧（XNA 无钳=原版采样越界瑕疵,登记）
+        // 环形白闪：n=16（660）/ 4（712）,偏移=−UnitY.Rot(θ)×(1,4) 再 Rot(速度角)
+        const n660 = this.projId === 660 ? 16 : 4;
+        for (let i = 0; i < n660; i++) {
+          const th660 = i * (Math.PI * 2 / n660);
+          const ox660 = Math.sin(th660) * 1, oy660 = -Math.cos(th660) * 4;
+          const oxr = ox660 * ca660 - oy660 * sa660;
+          const oyr = ox660 * sa660 + oy660 * ca660;
+          const ol660 = Math.hypot(oxr, oyr);
+          const dux = ol660 > 0 ? oxr / ol660 : 0;         // SafeNormalize(UnitY) 回退 (0,1)
+          const duy = ol660 > 0 ? oyr / ol660 : 1;
+          if (this.projId === 660) {
+            // d180 玻屑环：scale1.5、noGravity、位=Center+偏移、速=偏移单位向×1（:56654-56659）
+            const d660 = game.spawnDust?.(this.cx, this.cy, 0, 0, 180, 0, 0, 0, null, 1.5, true);
+            if (d660) {
+              d660.x = this.cx + oxr;
+              d660.y = this.cy + oyr;
+              d660.vx = dux;
+              d660.vy = duy;
+            }
+          } else {
+            // d15 书页环 ×4：scale1.7、noGravity、位=Center+偏移+速度单位向×50、
+            // 速=(尘速×2+偏移单位向×0.3+速度单位向×3)×0.7、位再 += 速×5（:56689-56696）
+            const d712 = game.spawnDust?.(this.cx, this.cy, 0, 0, 15, 0, 0, 0, null, 1.7, true);
+            if (d712) {
+              d712.vx = (d712.vx * 2 + dux * 0.3 + nv660x * 3) * 0.7;
+              d712.vy = (d712.vy * 2 + duy * 0.3 + nv660y * 3) * 0.7;
+              d712.x = this.cx + oxr + nv660x * 50 + d712.vx * 5;
+              d712.y = this.cy + oyr + nv660y * 50 + d712.vy * 5;
+            }
+          }
+        }
+      }
+    }
     // ★661 黑爆显形链（AI_001 type==661 支 :56705-56745）：alpha−=55/t 渐显 +
     // scale=1.3；归零瞬间沿速度向排布 16×d62 暗环（scale1.5,noLight,noGravity,
     // v×4+velocity×0.3）；alpha≤0 期每子步 3×d240 暗尘（noGravity,v×0.3）
@@ -4333,6 +4409,60 @@ export class Arrow extends Entity {
           }
         }
       }
+    }
+    // ---- ★2026-09-02 观感面缺口批：1097 火绒狐火球（AI_001 type==1097 支
+    //      :57513-57573；AI_001 速度链嵌套段 :58255-58269）----
+    // 出生（localAI[0]==0 一次性门,ai[1]!=2 恒真——本仓生成面 ai[1]≡0）：
+    // Item_20 + DD2_BetsyFireballShot（PlayTrackedSound, tracked 语义=随弹移动衰减,
+    // 本仓单点近似）+ 10×(d6 α200 scale×0.7 速×0.5+=v×rand·0.6 noLightEmittance /
+    // d6 α50 scale×1.25 +=v×0.45×rand noLightEmittance) 双尘组。
+    // 尾迹：1/4 d6(α200,scale×1.3,+=v×0.4,noLightEmittance) + 1/2 d30(α100,scale×0.7,
+    // +=v×1) + 1/3 d55@oldPos[9](α50,scale×0.85,+=v×0.85,color(255,60,20),
+    // 环未满不撒——foxTrail 见 fixedUpdate 注)。
+    // 寿命语义（:57569-57572）：scale −= 0.01/子步、<0.3 → Kill 自爆——出生 scale=1
+    // （SetDefaults 无 scale 行）→ 第 71 子步自爆（EU=1 ≈ 36 帧）,先于 timeLeft=300；
+    // ai[1]==2 子弹 scale 钳 0.7 / ai[1]==1 且 ai[0]≥30 拆弹提前 Kill（:58265）——
+    // ai[1] 两档仅 1113 地狱火拆分子弹使用,本仓生成面不注入 ai[1]（dormant 登记）。
+    // α 减段（:57535-57541 ai[0]≥2 门 −25）对 α≡0 起步为空转（AI001_FADE_AGE2 注）。
+    if (this.projId === 1097) {
+      if (this.foxL0 === 0) {
+        this.foxL0 = 1;
+        if (game.playSfxFiles) game.playSfxFiles(['Item_20'], 1, this.cx, this.cy);
+        game.playSfxFile?.('dd2_betsy_fireball_shot', 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) {
+          const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 200, null, 1);
+          if (dA) {
+            dA.scale *= 0.7;
+            dA.vx *= 0.5; dA.vy *= 0.5;
+            dA.vx += this.vx * Math.random() * 0.6;
+            dA.vy += this.vy * Math.random() * 0.6;
+            dA.noLightEmittance = true;
+          }
+          const dB = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 50, null, 1);
+          if (dB) {
+            dB.scale *= 1.25;
+            dB.vx += this.vx * 0.45 * Math.random();
+            dB.vy += this.vy * 0.45 * Math.random();
+            dB.noLightEmittance = true;
+          }
+        }
+      }
+      if (Math.floor(Math.random() * 4) === 0) {
+        const dT = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 200, null, 1);
+        if (dT) { dT.scale *= 1.3; dT.vx += this.vx * 0.4; dT.vy += this.vy * 0.4; dT.noLightEmittance = true; }
+      }
+      if (Math.floor(Math.random() * 2) === 0) {
+        const dT2 = game.spawnDust?.(this.x, this.y, this.w, this.h, 30, 0, 0, 100, null, 1);
+        if (dT2) { dT2.scale *= 0.7; dT2.vx += this.vx; dT2.vy += this.vy; }
+      }
+      if (Math.floor(Math.random() * 3) === 0 && this.foxTrail.length >= 20) {
+        // oldPos[9] = 环第 10 槽（扁平 [x0,y0,x1,y1,…] → 下标 18/19）
+        const dT3 = game.spawnDust?.(this.foxTrail[18], this.foxTrail[19], this.w, this.h, 55,
+          0, 0, 50, { r: 255, g: 60, b: 20, a: 255 }, 1);
+        if (dT3) { dT3.scale *= 0.85; dT3.vx += this.vx * 0.85; dT3.vy += this.vy * 0.85; }
+      }
+      this.drawScale -= 0.01;
+      if (this.drawScale < 0.3) { this.killNow(game); return; }
     }
     // AI_001 重力链（2026-08-14 对账，:53083-54698 全链规格走 projGravSpec）：
     //   默认 = ai0≥15 update 后 +0.1/update、终端 16（:54686-54696/:54871-54887）
@@ -5874,6 +6004,38 @@ export class Arrow extends Entity {
         }
       }
       this.alpha = Math.max(0, this.alpha - AI001_FADE_RATE[this.projId]);
+      // ---- ★2026-09-02 观感面缺口批（同表键的配套尘/消亡段,原位次=fade 后）----
+      // 710 空中祸害（:56348-56380）：1/4 子步掷——1/2 再掷 d31 烟（α100,scale1.6,
+      // noGravity）+ 恒 d6 火（α100,scale1.2,noGravity,尘速×2 后 += 弹速、
+      // fadeIn=ai[1]==-1 ? 1.5 : 1.22——ai[1]=-1 即 BetsySharpnel 裂片=abShard 标）;
+      // 掷中且 wet → Kill 入水灭（:56569-56575 原文即嵌在尘块内）
+      if (this.projId === 710 && Math.floor(Math.random() * 4) === 0) {
+        if (Math.floor(Math.random() * 2) === 0) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.6, true);
+        }
+        const d710 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 1.2, true);
+        if (d710) {
+          d710.vx = d710.vx * 2 + this.vx;
+          d710.vy = d710.vy * 2 + this.vy;
+          d710.fadeIn = this.abShard ? 1.5 : 1.22;
+        }
+        if (this.wet) { this.killNow(game); return; }
+      }
+      // 265 剧毒法杖 / 355 毒液法杖（:57690-57706 / :57708-57724）：α 归零后每子步
+      // 1 粒 d163/d205 毒泡（速=弹速继承后 ×0.3 再 −= 弹速×0.4、α100、scale1.2、
+      // noGravity）——弹体可见面由 GetAlpha :81286 门控（α>0 全隐/α==0 满强加算白,
+      // 加算合成面 PROJ_ALPHA_MOD off 登记）,fade 期即"无形尘先行"
+      if (this.projId === 265 || this.projId === 355) {
+        if (this.alpha === 0) {
+          const d265 = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            this.projId === 265 ? 163 : 205, this.vx, this.vy, 100, null, 1.2);
+          if (d265) {
+            d265.noGravity = true;
+            d265.vx = d265.vx * 0.3 - this.vx * 0.4;
+            d265.vy = d265.vy * 0.3 - this.vy * 0.4;
+          }
+        }
+      }
     } else if (this.projId === 348 || this.projId === 349) {
       // ---- ★2026-09-01 批五：双向脉冲对（AI_001 :57226-57245 348 / :57201-57220
       //  349）——scale ±0.01 与 α ∓50 相位耦合：显相(0/2) scale+0.01 & α−50（≤0 翻

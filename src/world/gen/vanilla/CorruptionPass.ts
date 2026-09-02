@@ -278,6 +278,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
     // `if (drunkWorldGen) flag=false; if (!flag)`：普通腐化世界或 drunk 的第二段
     runBranch(false);
   }
+  // ▶探针钩（槽末直递；tools/_t2cordigest.test.ts 用）：store 在 pass 末（Lakes reseed 前）
+  //   与 x86 pc.txt 的 T/A/W/L 同相位（AfterPass 槽末 dump 同位）
+  const __capEnd = (globalThis as { __swCorSlotEnd?: (st: TileStore, gs: GenState) => void }).__swCorSlotEnd;
+  if (__capEnd) __capEnd(st, gs);
 }
 
 /** ★独立 pass "Demon And Crimson Altars"（cs:15825-15885，注册序 LivingTreeWalls(15792)
@@ -700,6 +704,7 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
  *  val2 而非新采样——cs:75790-75797）；地表囊群 50 球+列填充；CrimEnt 入口。
  *  hearts 由调用方收集（原版 CrimPlaceHearts 全组后统一放）。 */
 function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, hearts: Array<[number, number]>): void {
+  const __mark = (globalThis as { __swCorMark?: (s: string) => void }).__swCorMark;
   const solidAt = (x: number, y: number) =>
     st.inBounds(x, y) && st.flags[st.idx(x, y)] && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;  // SolidTile
   let py = Math.min(j, gs.worldSurface);
