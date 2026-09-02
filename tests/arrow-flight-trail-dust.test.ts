@@ -140,6 +140,26 @@ describe('309 冰九头蛇冰弹（aiStyle28 尘尾 :26996-27004 每**子步**;E
   });
 });
 
+describe('42 沙枪沙球（AI_010 per-type 尘链 :58852-58857,每子步 1/2 掷）', () => {
+  it('飞行：8 帧 → d32 4..12 粒（EU=1 → 2 子步/帧 ×8 = 16 掷,1/2 期望 ~8）', () => {
+    const dusts: DustRec[] = [];
+    const game = makeGame(emptyWorld(), dusts);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 42, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 8);
+    const d32 = dusts.filter((d) => d.type === 32);
+    expect(d32.length).toBeGreaterThanOrEqual(4);
+    expect(d32.length).toBeLessThanOrEqual(13);
+  });
+  it('354 维多利亚沙球 → d36（同 EU=1,8..24 掷）', () => {
+    const dusts: DustRec[] = [];
+    const game = makeGame(emptyWorld(), dusts);
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 354, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 8);
+    expect(dusts.filter((d) => d.type === 36).length).toBeGreaterThanOrEqual(3);
+    expect(dusts.filter((d) => d.type === 32).length).toBe(0);
+  });
+});
+
 describe('Kill 尘档（P.cs:77169-77257）', () => {
   it('弹 2：d6×10（α100）', () => {
     const dusts: DustRec[] = [];

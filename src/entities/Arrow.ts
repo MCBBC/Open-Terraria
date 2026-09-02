@@ -900,6 +900,11 @@ export class Arrow extends Entity {
   /** 命中施加地狱火 OnFire3(323) 300-600t（1097 生成侧 ai[1]>0 档 :11315-11318——
    *  1113 可靠的火绒狐射弹 ai[1]=3/1 全地狱火，与 1094 的 OnFire(24) 档区分） */
   igniteHellfire = false;
+  /** 命中施加火系 buff 直译档（AddBuff(buff, minT+Next(max−min+1))，2026-09-02
+   *  buff 表审计批）——1106 焰狐速度门(:11665-11668:vel>10→323 else 24,300t 定值)
+   *  与 1097 火球(:11315-11319:ai[1]>0→323 else 24,Next(300,600))共用;设置时优先
+   *  于 ignite/igniteHellfire 消费 */
+  onFireHit?: { buff: 24 | 323; minT: number; maxT: number };
   /** 暴击加成（百分点，spawn 侧注入：player.critChance(kind)+item.crit；基 4% 另计。
    *  审计 §6：此前硬编码 4% 导致远程/魔法/投掷吃不到装备/套装/词缀/item.crit */
   critBonus = 0;
@@ -4198,6 +4203,16 @@ export class Arrow extends Entity {
     if (this.sandBall) {
       this.aiCnt++;                                              // ai[1] += 1（:55069）
       if (this.aiCnt >= 60) this.vy = Math.min(this.vy + 0.2, 10);
+      // ---- AI_010 per-type 飞行尘链（:58821-58928,每子步 1/2 掷;2026-09-02 补——
+      //      此前整链缺失=沙枪弹哑飞）:42→d32 / 65→d14 / 68→d51 / 354→d36,
+      //      尘速 X×0.4;其余 aiStyle10 型另有 else 兜底(≠109 且 1/20 → d0)未建模
+      //      ——现役 sandBall 四型全入表,兜底无消费方 ----
+      const sdT = this.projId === 42 ? 32 : this.projId === 65 ? 14
+        : this.projId === 68 ? 51 : 36;                          // 354(:58896-58901)
+      if (Math.random() < 0.5) {
+        const sd = game.spawnDust?.(this.x, this.y, this.w, this.h, sdT);
+        if (sd) sd.vx *= 0.4;
+      }
       const stS = world.store;
       const sx0 = Math.floor(this.x / TILE), sx1 = Math.floor((this.x + this.w) / TILE);
       const sy0 = Math.floor(this.y / TILE), sy1 = Math.floor((this.y + this.h) / TILE);
@@ -6584,7 +6599,19 @@ export class Arrow extends Entity {
               | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
           if (crit) dmg *= 2;
         }
-        if (this.ignite) {
+        if (this.onFireHit) {
+          // AddBuff(buff, minT + Next(max−min+1)) 直译（1106/1097 共用,见字段注）
+          const t = this.onFireHit.minT
+            + Math.floor(Math.random() * (this.onFireHit.maxT - this.onFireHit.minT + 1));
+          const sec = t / 60;
+          if (this.onFireHit.buff === 323) {
+            const enF = e as unknown as { onFire3T?: number };
+            enF.onFire3T = Math.max(enF.onFire3T ?? 0, sec);
+          } else {
+            const enF = e as unknown as { onFireT?: number };
+            enF.onFireT = Math.max(enF.onFireT ?? 0, sec);
+          }
+        } else if (this.ignite) {
           const en3 = e as unknown as { onFireT?: number };
           en3.onFireT = Math.max(en3.onFireT ?? 0, 5); // AddBuff(24,300)=5s
         }

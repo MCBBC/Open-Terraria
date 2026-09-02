@@ -1130,6 +1130,25 @@ export class Enemy extends Entity {
     addEnemy(game, spit);
   }
 
+  /** AI_006 逐型链规格（自然生成/召唤共用——NPC.cs:51660-51905 建链块 + :51853-51905
+   *  通用头 ai[2] 覆写表;C# Next(lo,hi) 上界不含）。87 飞龙 = 固定 14 段精确序列
+   *  (:51700-51724 m0..m13:1/8=88 翼段、11/12=90/91、13=92 尾,余 89)。
+   *  EoW 13 走 boss 召唤专属路径(GetEaterOfWorldsSegmentsCount,realLife=-1)不在此表;
+   *  134-136 毁灭者/454-459 幻影龙/412-414 爬尾虫由各自 AI/召唤点自建 */
+  static wormChainSpec(vid: number, rand: () => number): { count: number; segIds?: number[] } {
+    const next = (lo: number, hi: number) => lo + ((rand() * (hi - lo)) | 0);
+    switch (vid) {
+      case 87: return { count: 14, segIds: [89, 88, 89, 89, 89, 89, 89, 89, 88, 89, 89, 90, 91, 92] };
+      case 510: return { count: next(12, 21) + 1 };
+      case 513: return { count: next(6, 10) + 1 };
+      case 39: return { count: next(14, 23) + 1 };
+      case 95: return { count: next(6, 12) + 1 };
+      case 98: return { count: next(20, 26) + 1 };
+      case 117: return { count: next(3, 6) + 1 };
+      default: return { count: next(8, 13) + 1 };   // 7 吞噬怪等通用头(ai[2]=Next(8,13))
+    }
+  }
+
   /** 由头生成段链（原版各 worm 的 NewNPC 链，NPC.cs:18174+）：body×n + tail。
    *  segIds 显式段表（454 幻影龙 = 455-458 身 ×4 + 459 尾——非 head+1/head+2 连号族）；
    *  sharedLife = realLife 共享头血池（StrikeNPC :82132-82137——毁灭者/幻影龙段不可单独打死） */

@@ -4741,7 +4741,14 @@ export class MinionProj extends Entity {
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * flameSpd, this.foxAimY * flameSpd,
           Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106, null,
           { grav: 0, life: 24, pierce: 4 });
-        flame.ignite = true; // 命中 OnFire 300t（PR:11002-11004）
+        // 命中火 buff:速度门 StatusNPC :11665-11668——velocity.Length()>10 →
+        // OnFire3(323) else OnFire(24),300t 定值。★判门须用原版弹速(num17:1094=5/
+        // 1113=10.5,:60072-60074),勿用本仓 ×3 补偿后速度(15/31.5 恒>10 会双双误翻)
+        const origSpd = this.projId === 1113 ? 10.5 : 5;
+        flame.onFireHit = {
+          buff: Math.hypot(this.foxAimX, this.foxAimY) * origSpd > 10 ? 323 : 24,
+          minT: 300, maxT: 300,
+        };
         // 喷火嘶声（Projectile.cs:38958）：1106 弹 whoAmI%3==0 才播——三发一门近似；
         // FoxparksFlame=Item_34 音量 0.15（SoundID.cs:1098）
         if ((this.foxFlameN = (this.foxFlameN + 1) % 3) === 1) {
@@ -4980,8 +4987,8 @@ export class MinionProj extends Entity {
           // 1097 火球命中按生成侧 ai[1] 分档（Projectile.cs:11315-11318）：ai[1]>0 →
           // OnFire3(323) 300-600t / 否则 OnFire(24)——1094 ai[1]=0 恒火、1113 ai[1]=3/1
           // 地狱火（:62744-62752 num159）
-          if (shooter.burn === 'fire') shot.ignite = true;
-          else if (shooter.burn === 'hellfire') shot.igniteHellfire = true;
+          if (shooter.burn === 'fire') shot.onFireHit = { buff: 24, minT: 300, maxT: 600 };
+          else if (shooter.burn === 'hellfire') shot.onFireHit = { buff: 323, minT: 300, maxT: 600 };
           const shotSfx = MINION_SHOT_SFX[shooter.shot];
           if (shotSfx) game.playSfxFiles(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');

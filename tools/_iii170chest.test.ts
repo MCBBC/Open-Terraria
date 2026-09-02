@@ -7,8 +7,10 @@
 // JS-only / 双侧同位（附 loot 恒等性）三组 + 全带箱数。
 // 用法：cd game && SW_I170=1 npx vitest run tools/_iii170chest.test.ts
 import { it } from 'vitest';
-import { readFileSync, createHash } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { parseWld } from '../src/wld/WldParser';
+import { ITEM_DEFS } from '../src/data/items';
 
 const RUN = process.env.SW_I170 === '1';
 const X86WLD = process.env.SW_I170_WLD ?? '/tmp/iii160-out/x86/w.wld';
@@ -19,7 +21,17 @@ const YLO = Number(process.env.SW_I170_YLO ?? 794);
 const YHI = Number(process.env.SW_I170_YHI ?? 1056);
 
 type C = { x: number; y: number; items: Array<{ id: number; stack: number } | null>; name?: string };
-const lootOf = (c: C): string => JSON.stringify(c.items.filter(Boolean).map((i) => `${i!.id}x${i!.stack}`));
+// JS 箱内 id=本仓内部 id；x86 w.wld=vanilla id —— JS 侧统一经 ITEM_DEFS[].vid 映射后再对表
+let VID: Int32Array | null = null;
+const toVan = (id: number): number => {
+  if (!VID) {
+    VID = new Int32Array(ITEM_DEFS.length).fill(-1);
+    for (let i = 0; i < ITEM_DEFS.length; i++) VID[i] = ITEM_DEFS[i]?.vid ?? -1;
+  }
+  return VID[id] ?? -1;
+};
+const lootOf = (c: C, toVanMode = false): string =>
+  JSON.stringify(c.items.filter(Boolean).map((i) => `${toVanMode ? toVan(i!.id) : i!.id}x${i!.stack}`));
 
 (RUN ? it : it.skip)('iii170 remix surface-band chest forensics', { timeout: 900_000 }, async () => {
   // ---- 0) rig 复跑保真复核（dumps 抽样 md5 vs golden-remix）----
@@ -59,18 +71,14 @@ const lootOf = (c: C): string => JSON.stringify(c.items.filter(Boolean).map((i) 
   const onlyX = x86.filter((c) => !jk.has(`${c.x},${c.y}`));
   const onlyJ = js.filter((c) => !xk.has(`${c.x},${c.y}`));
   const both = x86.filter((c) => jk.has(`${c.x},${c.y}`));
-  const lootMismatch = both.filter((c) => lootOf(c) !== lootOf(jk.get(`${c.x},${c.y}`)!));
+  const lootMismatch = both.filter((c) => lootOf(c) !== lootOf(jk.get(`${c.x},${c.y}`)!, true));
   console.log(`I170 both=${both.length} lootMismatch=${lootMismatch.length} onlyX86=${onlyX.length} onlyJS=${onlyJ.length}`);
   console.log('--- I170 onlyX86 ---');
   for (const c of onlyX) console.log(`I170 X @(${c.x},${c.y}) loot=${lootOf(c)}`);
   console.log('--- I170 onlyJS ---');
-  for (const c of onlyJ) console.log(`I170 J @(${c.x},${c.y}) loot=${lootOf(c)}`);
+  for (const c of onlyJ) console.log(`I170 J @(${c.x},${c.y}) lootVan=${lootOf(c, true)}`);
   if (lootMismatch.length) {
     console.log('--- I170 lootMismatch (same pos) ---');
-    for (const c of lootMismatch) console.log(`I170 M @(${c.x},${c.y}) x86=${lootOf(c)} js=${lootOf(jk.get(`${c.x},${c.y}`)!)}`);
+    for (const c of lootMismatch) console.log(`I170 M @(${c.x},${c.y}) x86=${lootOf(c)} jsVan=${lootOf(jk.get(`${c.x},${c.y}`)!, true)}`);
   }
-  console.log('--- I170 all band x86 ---');
-  for (const c of x86) console.log(`I170 XA @(${c.x},${c.y}) loot=${lootOf(c)}`);
-  console.log('--- I170 all band js ---');
-  for (const c of js) console.log(`I170 JA @(${c.x},${c.y}) loot=${lootOf(c)}`);
 });

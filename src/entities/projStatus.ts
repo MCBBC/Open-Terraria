@@ -208,11 +208,19 @@ export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
   if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
 }
 
-/** 岩浆石/火焰护手——近战【弹幕】命中（StatusNPC :10866-10869：melee 门，
- *  1/7 → OnFire3 360t=6s）。挥砍侧是另一公式（applyMagmaStoneSwing） */
+/** 岩浆石/火焰护手——近战【弹幕】命中（StatusNPC :11529-11541：melee 门，
+ *  **必中三支**：Next(7)==0 → OnFire3(323) 360t=6s；else Next(3)==0 → 120t=2s；
+ *  else → 60t=1s。★曾只移植第一支+落空即 return=6/7 命中无 buff。
+ *  挥砍侧是另一公式（applyMagmaStoneSwing） */
 export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): void {
-  if (!magmaStone || Math.random() >= 1 / 7) return;
-  if (6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
+  if (!magmaStone) return;
+  if (Math.random() < 1 / 7) {
+    if (6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
+  } else if (Math.random() < 1 / 3) {
+    if (2 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 2;
+  } else {
+    if (1 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 1;
+  }
 }
 
 /** 岩浆石/火焰护手——近战【挥砍】命中（Player.cs:6184-6198 三段掷）：

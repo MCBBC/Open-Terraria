@@ -60,13 +60,27 @@ const sheetOf = (st: TileStore, x: number, y: number): number =>
  *  world.crimson 走猩红/腐化表。hive>200k 门（flag）：全图 225 Hive 计数 >200000 时条带穿
  *  丛林连 225 Hive/230 CrispyHoney 一并转化（57 :77013-77024 / 56 :76433-76445）。
  *  lowTilesGate=Skyblock.lowTiles（cs:76941-76943）：空岛低格档在一切掷骰之前整段早退。
- *  ★PR-async 重构：hive 计数外提（两次 runner 调用的计数值恒等,单次计算零偏差）、
- *  改为 generator——逐【刷写列】yield（单元 ≤ 数百格），rng 消费序/写序逐字不变。 */
+ *  ★PR-async 重构：generator 化——逐【刷写列】yield（单元 ≤ 数百格），rng 消费序/
+ *  写序逐字不变；hive 扫描保留在本函数体内逐 runner 新鲜计算（切片 yield），见 F2' 注。 */
 function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: number, speedY: number,
-  good: boolean, crimson: boolean, lowTilesGate: boolean, hiveFlag: boolean): Generator<void, void, void> {
+  good: boolean, crimson: boolean, lowTilesGate: boolean): Generator<void, void, void> {
   if (lowTilesGate) return;                              // ★F4③ Skyblock.lowTiles（cs:76941）
   const w = st.w, h = st.h;
-  const flag = hiveFlag;                                 // 外提单算（两 runner 同值）
+  // ★F2'（2026-09-02 review 回滚外提）：hive 扫描回归本函数内部逐 runner 新鲜扫描
+  //  （原版 cs:77013 在 GERunner 体内）——外提版在"runner1 带内转化 225 使计数跌破
+  //  20 万阈值"的极端世界会改变 runner2 的 flag=终态偏差;扫描本身是可切片单元,
+  //  异步预算无压力。切片单元=256 列。
+  let hiveCount = 0;
+  for (let hx = 20; hx < w - 20; hx += 256) {
+    const hx1 = Math.min(w - 20, hx + 256);
+    for (let k = hx; k < hx1; k++) {
+      for (let l = 20; l < h - 20; l++) {
+        if (st.flags[st.idx(k, l)] && TILE_DEFS[st.type[st.idx(k, l)]]?.vanilla?.sheet === 225) hiveCount++;
+      }
+    }
+    yield;
+  }
+  const flag = hiveCount > 200000;
   let num2 = rng.nextIntRange(200, 250);                 // Next(200,250)（cs:76961）
   num2 = Math.trunc(num2 * (w / 4200));                  // ×(w/4200) 截断
   const num4 = num2;                                     // 刷半宽
@@ -154,22 +168,6 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
     if (dx < speedX - 1) dx = speedX - 1;
     if (vx < -num2 || vy < -num2 || vx > w + num2 || vy > h + num2) running = false;
   }
-}
-
-/** 225 Hive 全图计数（57 :77013-77024）。★PR-async：切片 generator（每 256 列一个
- *  单元）+ 单次计算外提——原版两 runner 各自重扫全图（同值重复劳动），此为无偏差微优化。 */
-function* hiveScanGen(st: TileStore): Generator<void, number, void> {
-  let hiveCount = 0;
-  for (let x0 = 20; x0 < st.w - 20; x0 += 256) {
-    const x1 = Math.min(st.w - 20, x0 + 256);
-    for (let k = x0; k < x1; k++) {
-      for (let l = 20; l < st.h - 20; l++) {
-        if (st.flags[st.idx(k, l)] && TILE_DEFS[st.type[st.idx(k, l)]]?.vanilla?.sheet === 225) hiveCount++;
-      }
-    }
-    yield;
-  }
-  return hiveCount;
 }
 
 /** 洞穴墙回填 OnlyWalls 白名单（cs:31979 原文列表照抄：0/54-59/61/185/212-215/2/196-199/
@@ -303,11 +301,8 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
         }
       }
     } else {
-      // hive 计数单算外提（两 runner 同值——原版各扫一遍为重复劳动,PR-async 微优化）
-      const hiveCount = yield* hiveScanGen(st);
-      const hiveFlag = hiveCount > 200000;
-      yield* geRunnerGen(st, rng, num3, 0, 3 * num5, 5.0, true, world.crimson, lowTilesGate, hiveFlag);
-      yield* geRunnerGen(st, rng, num4, 0, -3 * num5, 5.0, false, world.crimson, lowTilesGate, hiveFlag);
+      yield* geRunnerGen(st, rng, num3, 0, 3 * num5, 5.0, true, world.crimson, lowTilesGate);
+      yield* geRunnerGen(st, rng, num4, 0, -3 * num5, 5.0, false, world.crimson, lowTilesGate);
     }
   }
   // ---- 洞穴墙回填（cs:31944-31986）：25×(w/4200) 片（dualDungeons/remix 不豁免）----

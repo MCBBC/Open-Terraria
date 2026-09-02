@@ -21,7 +21,7 @@
 //  ⑫ Lunar Flare 645 lineY：负 dy 时钳 ≥出生 Y+20（首帧 aimWY 重估）
 //  ⑬ Medusa Head 535：per-volley 计费（首轮预付+后续 checkMana 每 15t 一次）+
 //     即时伤害落账 + autoReuse 重扣退款去重（AI_100 :45296-45454）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Arrow } from '../src/entities/Arrow';
 import { projGravSpec } from '../src/data/vanillaItemCombat';
@@ -184,6 +184,13 @@ describe('R28 §12 Unholy Trident Kill 迸散', () => {
 });
 
 describe('R28 §9 Blizzard Staff', () => {
+  beforeEach(() => {
+    // ★测试隔离(2026-09-02):blz337LatchAt 是 Arrow 静态墙钟闩(350ms 补发窗)——
+    //   同文件前序 §9 用例刚发过 337 时,本用例的箭被误判「同挥第二发」静默处死,
+    //   动态穿墙门从未评估→断言翻红(-t 单跑绿/全文件跑红即此征)。复位闩+birthLock。
+    (Arrow as unknown as { blz337LatchAt: number }).blz337LatchAt = -Infinity;
+    (Arrow as unknown as { birthLock: boolean }).birthLock = false;
+  });
   it('天顶双锥几何：出生位重锚到玩家上方 600/700px 带、vy 向下、|dy| 钳 ≥20', () => {
     const g = makeGame(emptyWorld());
     const p = (g as unknown as { player: { cy: number; aimWY: number; aimWX: number } }).player;

@@ -1,4 +1,9 @@
-# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01，红蓝对抗收官）
+# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01/02，挂账清零+双轮红蓝对抗收官）
+
+> **★R 类清零+双轮对抗终局（2026-09-02）**：用户拍板"登记全部一起做"→五路蓝队（E/F/G/H/I）清偿 R1-R4+掷序漂移+814 尾+torch-god 序倒置+基建级（post-light 自发光/Accel 契约/399/594）→五路红队（E′-I′）对抗复捞 **2C+10M**（orchestraFx 恢复完整但"零残余"证伪=17 站外 6 笔掷序债/charm 态回归/post-light 三契约/夜星 MAJOR/FlailProj 同病/torch-god Kill 帧尾迹）→五路补刀（E″/F″/G″/H″/I″）全清偿。
+> **重大定性反转**：①R1 92 坠星"恒隐登记"系 A=0 误读——真值=加算白可见体（预乘语义），夜星=FallingStar 对应弹 12 可见金星，"观感 vs 保真"悬案消解；②229=ChlorophyteOrb 非"暗影束炮座"；③mainExpertMode master 下=true（批四虚惊）；④蓝队 G 的 FallingStar 裁断=720→12 链（非 92）。
+> **运营事故两起**：git stash 裹走 60 文件（orchestraFx 由蓝队 F 自行从备份恢复重放，stash@{0} 保留）；Enemy.ts 10:37 整文件回写退回旧版（对端 10:40 自恢复）——共享文件纪律两次实战。
+> **终态：22 套件 398/398 绿（复跑两轮确认）+ 全触碰文件 tsc 零错**。orchestraFx 掷数对账=原版手数（哑元池仪 13+6 断言）；orchestra-f6-shape/self-luminous-floor 两套新锚补闸门缺口。
 
 > **★红蓝对抗终局（2026-09-01/02）**：四路红队（Arrow α/fade 域/Dart 域/消散系统/orchestraFx 分布形）11 findings 全采信全清偿——
 > ①**消散 CRITICAL**：外层门 boss 短路放错层（原版 boss flag2 挡不住 timeLeft 归零 ：78790-78794）→ boss 走四步+668 鹿角怪补豁免（DoesntDespawnToInactivityAndCountsNPCSlots 唯一成员,`if(flag) return` 在 timeLeft-- 前）+690 收窄+583-585 钉活+两窗半幅+noSpawnCycle+DiscourageDespawn 移植+EoC 双触发摘除；

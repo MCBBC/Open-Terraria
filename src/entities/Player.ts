@@ -3670,8 +3670,20 @@ export class Player extends Entity {
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
     //（原版 Player.Update :27783-27850 的 TrackCollision 段替代常规移动链）。
     // 上面的 buff/液体/受伤逻辑照常 tick；位置每 tick 由矿车回写。
+    // ★肉山舌头对骑乘者同样生效（vanilla :28384 tongued 积分为 Update 顶层分支,
+    //   骑矿车可达——矿车桥拽回是肉山战经典形态;曾整体早退=骑乘者永不上舌不拽,
+    //   2026-09-02 评审补）。先清速度再跑舌头段:防上舌 tick 陈旧矿车速度混入。
     if (this.ridingCart) {
       this.vx = 0; this.vy = 0;
+      this.wofTongue(game, world, dt);
+      if (this.buffs.has(BuffType.TheTongue)) {
+        // 拖拽穿墙：消费上帧拖速（与步行段 tongued 旁路同构,vanilla 同一积分分支）；
+        // 矿车本 tick 让位（Minecart.fixedUpdate 头同门禁：位置权威=玩家,车随人）
+        this.x += this.vx;
+        this.y += this.vy;
+        this.fallStartY = null;
+        return;
+      }
       this.onGround = true;
       this.fallStartY = null;
       this.pulley = false;   // mount.Active → pulley=false（:25815-25818——早退路径
@@ -5637,7 +5649,14 @@ export class Player extends Entity {
     // :21993-21997 Main.wofNPCIndex<0 / 墙 inactive → 直接返回
     //（enemies 可选调用：测试假宿主常缺该钩子）
     const wall = ((game.enemies?.() ?? []) as Enemy[]).find((n) => !n.dead && n.vanillaId === 113) ?? null;
-    if (!wall) return;
+    if (!wall) {
+      // ★墙亡/离场：vanilla 立即摘 37（UpdateBuffs :11072-11076 DelBuff）与 38
+      //   （tongued 段 flag22 :27687-27694 DelBuff）——曾自然到期（≤10t 残留），
+      //   残留期 TheTongue 穿墙旁路仍生效=无墙仍相位穿行（2026-09-02 评审补）
+      this.buffs.remove(BuffType.TheTongue);
+      this.buffs.remove(BuffType.Horrified);
+      return;
+    }
     // UpdateBuffs :10578-10587：buff 37 在且墙在场 → gross + buffTime 钳 10（apply 续期）；
     // 墙不在场则不续期自然消散（原版 DelBuff）
     const gross = this.buffs.has(BuffType.Horrified);

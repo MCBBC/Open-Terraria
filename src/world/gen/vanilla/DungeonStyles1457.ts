@@ -273,6 +273,22 @@ export function getCurrentDungeonStyle(g: {
     PlatformItemTypes: g.windowPlatformItemTypes,
     UnbreakableWallProgressionTier: T.Dungeon,
     EdgeDither: false,
+    // ★IIIII168：x86 GetCurrentDungeonStyle（DungeonGenerationStyles.cs:683-733）对全部
+    //   陈设/灯/箱表显式置 **int[0] 空数组非 null**——GetFurnitureItem 空表短路返 defaultItem
+    //   （零掷零 -1）、Lights 的 Chandelier/Lantern null 门为真走默认臂。JS 曾整缺 ⇒
+    //   gfDActual 的 FURNOFF=null → 14 族全 -1 → num18 重抽环狂转（F 窗房臂 +14,254 掷）、
+    //   dgLights 的 Lch undefined 门整支跳（I 窗残差）。空表≠null,勿改 null。
+    Furn: {
+      TableItemTypes: [], WorkbenchItemTypes: [], CandleItemTypes: [], VaseOrStatueItemTypes: [],
+      BookcaseItemTypes: [], ChairItemTypes: [], BedItemTypes: [], PianoItemTypes: [],
+      DresserItemTypes: [], SofaItemTypes: [], BathtubItemTypes: [], LampItemTypes: [],
+      CandelabraItemTypes: [], ClockItemTypes: [],
+    },
+    Lch: {
+      ChestItemTypes: [], ChandelierItemTypes: [], LanternItemTypes: [],
+      LockedBiomeChestType: -1, LockedBiomeChestStyle: -1,
+      BiomeChestItemType: -1, BiomeChestLootItemType: -1,
+    },
   };
 }
 

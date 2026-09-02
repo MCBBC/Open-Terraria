@@ -77,6 +77,9 @@ const SEED = process.env.SW_I170_SEED ?? '1138154190';
       const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
       if (m && !m[1].includes('/core/rng') && !m[1].includes('_iii170')) { siteLine = Number(m[2]); break; }
     }
+    // ★主实例每 pass 重锚（与 x86 AfterPass MainInst=0 同式）——reseed 会 new
+    //   UnifiedRandom 实例，旧实例身份失效；下一掷（新 pass 首掷）重锚。
+    if (winOn) mainInst = null;
     if (siteLine === LN_UHBC) {
       winOn = true; ln = 0; mainInst = null; seg = 'uhbc'; segSites = false;
       vals.push('---START 58');
@@ -116,7 +119,7 @@ const SEED = process.env.SW_I170_SEED ?? '1138154190';
   };
   g.__swAbGate = (tag: string, ai: number, aj: number, extra?: number) => {
     if (!winOn) return;
-    if (tag === 'land') evs.push(`land|${ai}|${aj}|${extra ?? ''}|n=${ln}`);
+    evs.push(`g|${tag}|${ai}|${aj}|${extra ?? ''}|n=${ln}`);
   };
 
   try {

@@ -1955,6 +1955,16 @@ export class Game implements GameHooks {
   /** 肉山死亡困难模式转换分步 job（PR-async）：updateWorld 每 tick ≤2.5ms 预算步进,
    *  完成置 null。step()=true 即全部瓦片工作完成。 */
   private hardmodeJob: HardmodeJob | null = null;
+  /** ★PR-async 落盘前快收口：job 进行中存档会把 hardMode=true+半成品转化写盘，
+   *  重读档 F2 门（hardMode && !force → return）使剩余转换永久丢失——故所有
+   *  序列化路径（doSave/createRoom）先同步 drain 剩余单元（≤秒级一次,等价原版
+   *  同 tick 冻结语义）。 */
+  finishHardmodeJob(): void {
+    if (!this.hardmodeJob) return;
+    let done = false;
+    do { done = this.hardmodeJob.step(); } while (!done);
+    this.hardmodeJob = null;
+  }
   /** ★IIIII61 The Constant 黑暗伤害系统（DontStarveDarknessDamageDealer.cs 全文 1:1：
    *  Player.Update :24550 本地玩家 && Main.dontStarveWorld 消费；光采样=玩家中心格
    *  Lighting.GetColor().ToVector3().Length()>=0.1 即安全）。状态字段=原版静态等价，
@@ -24877,25 +24887,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 不走本分支）→ sharedLife=true。
       // ★曾统一 5+Next(4) 段全 head+1（掘地虫 10 语义）——飞龙被捏成 5-8 节全翼段
       // 88 的"毛毛虫"、真尾 92/段 90/91 永不出现（2026-09-02 用户实报）。
-      const vid6 = picked.vanillaId ?? -1;
-      const rnd6 = (lo: number, hi: number) => lo + ((rng.next() * (hi - lo)) | 0);   // C# Next(lo,hi) 上界不含
-      let segIds6: number[] | undefined;
-      let count6: number;
-      if (vid6 === 87) {
-        segIds6 = [89, 88, 89, 89, 89, 89, 89, 89, 88, 89, 89, 90, 91, 92];
-        count6 = 14;
-      } else if (vid6 === 510) count6 = rnd6(12, 21) + 1;
-      else if (vid6 === 513) count6 = rnd6(6, 10) + 1;
-      else if (vid6 === 39) count6 = rnd6(14, 23) + 1;
-      else if (vid6 === 95) count6 = rnd6(6, 12) + 1;
-      else if (vid6 === 98) count6 = rnd6(20, 26) + 1;
-      else if (vid6 === 117) count6 = rnd6(3, 6) + 1;
-      else count6 = rnd6(8, 13) + 1;   // 7 吞噬怪等通用头（ai[2]=Next(8,13)）
+      const spec6 = Enemy.wormChainSpec(picked.vanillaId ?? -1, () => rng.next());
       picked.x = ptx * TILE + 8 - picked.w / 2;
       picked.y = pty * TILE + 8 - picked.h / 2;
       picked.id = this.entities.nextId++;
       this.entities.enemies.push(picked);
-      const segs = Enemy.spawnWormChain(picked, count6, segIds6, true);
+      const segs = Enemy.spawnWormChain(picked, spec6.count, spec6.segIds, true);
       for (const seg of segs) { seg.id = this.entities.nextId++; this.entities.enemies.push(seg); }
       return;
     }
@@ -31582,6 +31579,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (id === 13) {                     // 世吞:体节链随头召唤(同 summonBossAtTx)
         const segs = Enemy.spawnWormChain(e, 15 + Math.floor(Math.random() * 16));
+        for (const sg of segs) { sg.id = this.entities.nextId++; this.entities.add(sg, 'enemies'); }
+      } else if (e.vanilla?.aiStyle === 6 && !e.wormFollow) {
+        // 其余蠕虫头随召唤建链（逐型段表/段数 1:1,同 trySpawnEnemy 自然生成——
+        // 曾只补 13 世吞,87 飞龙面板召唤=光杆头,2026-09-02 用户实报）
+        const spec = Enemy.wormChainSpec(id, () => Math.random());
+        const segs = Enemy.spawnWormChain(e, spec.count, spec.segIds, true);
         for (const sg of segs) { sg.id = this.entities.nextId++; this.entities.add(sg, 'enemies'); }
       }
     }

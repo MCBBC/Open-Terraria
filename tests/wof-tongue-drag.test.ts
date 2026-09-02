@@ -11,6 +11,7 @@ import { Inventory } from '../src/items/Inventory';
 import { BuffType } from '../src/stats/Buffs';
 import { TILE } from '../src/core/constants';
 import { World } from '../src/world/World';
+import { Minecart } from '../src/entities/Minecart';
 
 const HELL = 4200;   // world.h（地狱带在 3950*16 以下）
 
@@ -138,5 +139,32 @@ describe('肉山舌头拖拽穿地形（2026-09-02 用户报"遇到地形卡住�
     // 拖拽期 20 tick 全程向东(被拽向 1810),拖速不被地形清零
     expect(p.vx).toBeGreaterThan(0);
     expect(minX).toBeGreaterThan(0);
+  });
+
+  // ============ 骑矿车同样被拽（vanilla :28384 顶层积分,矿车桥拽回经典形态） ============
+  it('骑乘者 tongue 生效：ridingCart 早退分支跑舌头段+拖拽位移(曾整体早退=永不上舌)', () => {
+    const { p, hooks } = makeBypassSetup();
+    p.ridingCart = true;                                // 无需真实 Minecart——骑乘分支自包含
+    p.fixedUpdate(1 / 60, hooks);                       // t1: Horrified
+    p.fixedUpdate(1 / 60, hooks);                       // t2: 上舌
+    expect(p.buffs.has(BuffType.TheTongue)).toBe(true);
+    for (let t = 0; t < 30; t++) p.fixedUpdate(1 / 60, hooks);
+    expect(p.cx).toBeGreaterThan(100 * TILE);           // 穿板拽到墙前面
+    expect(p.buffs.has(BuffType.TheTongue)).toBe(false); // 到达松口
+  });
+
+  it('矿车回写让位：骑乘者 tongued 期间车随人锁位(不吃自身运动学)', () => {
+    const { p, hooks } = makeBypassSetup();
+    const cart = new Minecart();
+    cart.mounted = true;
+    p.ridingCart = true;
+    p.cart = cart;
+    cart.x = p.x + 50;                                  // 故意错位
+    cart.y = p.y;
+    p.buffs.apply(BuffType.TheTongue, 10 / 60);
+    cart.fixedUpdate(1 / 60, hooks);
+    expect(cart.x).toBe(p.x);                           // 车锁到玩家(位置权威=玩家)
+    expect(cart.y).toBe(p.y);
+    expect(cart.vx).toBe(0);
   });
 });

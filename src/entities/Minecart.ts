@@ -1,4 +1,5 @@
 import { playerHurtFloatColor } from '../fx/CombatTextColors';
+import { BuffType } from '../stats/Buffs';
 // 矿车坐骑实体（原版语义 = Mount：坐骑位锁定 + Minecart.cs 轨道跟随运动学）。
 // 原版矿车不是独立实体——玩家 mount 后玩家 hitbox 即车（20×(42+heightBoost)），
 // 每帧走 Player.cs:27783-27850 的 TrackCollision 段 + 常规 DryCollision。本作以
@@ -261,6 +262,17 @@ export class Minecart extends Entity {
     const p = game.player;
     const st = game.world.store;
     const maxRun = this.runSpeed;
+
+    // ★骑乘者被肉山舌头拖拽时本 tick 让位（vanilla :28384 tongued 积分为顶层分支,
+    //   覆盖矿车运动=位置权威在玩家,车随人锚定;Player.fixedUpdate 骑乘分支
+    //   tongued 时已位移玩家——此处锁车到玩家并跳过贴轨运动学,拖回释放后按
+    //   onWrongGround 语义重判脱轨/下车。2026-09-02 评审补）
+    if (p.buffs.has(BuffType.TheTongue)) {
+      this.x = p.x;
+      this.y = p.y;
+      this.vx = 0; this.vy = 0;
+      return;
+    }
 
     // ---- 贴轨/脱轨态（Player.cs:26344-26360：mount.Cart && velocity.Y==0 时判）----
     //  vy==0 取上一 tick 碰撞后态（原版该段在 HorizontalMovement 之前，读的就是

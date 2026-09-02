@@ -89,6 +89,7 @@ function hydrate(): { st: TileStore; gs: GenState } {
   // ★i168b：wv marks（snap/dgpMark 段界行,五窗对账用）
   const wvLines: string[] = [];
   (globalThis as { __wvLines?: string[] }).__wvLines = wvLines;
+  (globalThis as { __swWvLog?: unknown }).__swWvLog = true;
 
   // ★i168：bbox 快照挂载——格式与 x86 JJHook.DumpBox 逐字节同构（零掷,logging-only）
   let bbCount = 0;
@@ -126,6 +127,7 @@ function hydrate(): { st: TileStore; gs: GenState } {
   delete (globalThis as { __swI113?: unknown }).__swI113;
   delete (globalThis as { __swI168BB?: unknown }).__swI168BB;
   delete (globalThis as { __wvLines?: unknown }).__wvLines;
+  delete (globalThis as { __swWvLog?: unknown }).__swWvLog;
 
   writeFileSync(`${JOUT}/js-dr-trace.txt`, drLines.join('\n') + '\n');
   writeFileSync(`${JOUT}/js-wv-marks.txt`, wvLines.join('\n') + '\n');

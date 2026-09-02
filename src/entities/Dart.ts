@@ -1235,6 +1235,12 @@ export class Dart extends Entity {
           if (SHATTER_SET.has(sst.get(bx, by))) game.breakTile?.(bx, by);
         }
       }
+      // 31 敌沙球飞行尘（AI_010 尘链与 42 同支 :58852-58857:1/2 掷 d32、尘速 X×0.4
+      // ——Arrow 载体 42/65/68/354 四型同链已补,此处补 Dart 载体的 31）
+      if (this.projId === 31 && Math.random() < 0.5) {
+        const sd = game.spawnDust?.(this.x, this.y, this.w, this.h, 32);
+        if (sd) sd.vx *= 0.4;
+      }
     }
     // ---- 拖尾尘（原版每更新 NewDust;近似为低频 spawnParticles 防刷屏）----
     if (st.trail && (this.tick & 1) === 0) {
@@ -2004,7 +2010,7 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 沿途击碎水晶/雕像/宝石/石堆族(KillTile :55110-55136);落地放沙 53(:75430-75536,
   // 轨道 314/传送带 421-422 例外)——sandBall 档见撞块段
   31: { w: 10, h: 10, rot: 'spin', spinRate: 0.1, grav: 0.2, xFrict: 0.04, vCap: 10, life: 300,
-    sandBall: true, trail: { color: '#D8C890', count: 1 }, fallback: '#D8C890' },
+    sandBall: true, fallback: '#D8C890' },   // 飞行尘走 d32 真尘段(:58852 同 42 支)——泛色 trail 已退役
   // 471 骷髅骨(投骨骷髅 449-452 :59844):16×16,scale1.2,roll,重力 0.4@20+xDamp0.97(aiStyle2 通用尾 :21976)
   471: { w: 16, h: 16, rot: 'roll', scale: 1.2, grav: 0.4, gravDelay: 20, xDamp: 0.97, fallback: '#E0D8C8' },
   // 508 标枪(希腊骷髅 481 :59855):16×16,重力 0.3+xDamp0.98@ai0>60(:54589)
