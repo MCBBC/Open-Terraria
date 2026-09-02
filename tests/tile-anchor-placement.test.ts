@@ -10,6 +10,7 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import manifestJson from '../src/data/tile-anchors.json';
 import goldenJson from './golden/tile-anchor-authority.json';
 import { anchorSpecOf, chooseAnchorFromClick, validateAnchors } from '../src/world/TileAnchorValidator';
+import type { AnchorRec } from '../src/world/TileAnchorValidator';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const PLATFORM_TILE = TILE_BY_KEY['platform']!;
@@ -206,5 +207,107 @@ describe('C. 液体放置两维门（M-3 翻正：TileObjectData.LiquidPlace :18
     expect(validateAnchors(st, 10, 11, rec)).toBe(true);         // 满液放
     for (let x = 10; x < 10 + rec.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
     expect(validateAnchors(st, 10, 11, rec)).toBe(false);        // dry 拒（:1886-1904 else 支）
+  });
+});
+
+describe('D. 子样式液体档（M-3b：newSubTile.* → liqStyles per-style 记录）', () => {
+  // 真值 = TileObjectData.cs addSubTile/addSubTileRange（:2016-2096）提交到 SubTiles[style]
+  // 槽;CanPlace（TileObject.cs:205-208/:342）逐 style 的 GetTileData(type,style[,alternate])
+  // 消费。alternate 维不建模：1457 全表 newAlternate.* 液体赋值 0 行（_tod-substyle-audit
+  // 双向发散计数=0）。数据面 = recon-tileobj.mjs liqStyles（只存与基记录发散的样式）。
+  const manifestTiles = manifestJson.tiles as Record<string, any>;
+
+  it('数据面钉值：火把4/工作台18/染料227/灯93 的 liqStyles 字面', () => {
+    // 火把 4 subStyles 8/11/17：水+岩浆均放（TileObjectData.cs:4610-4613/:4617-4620/:4624-4627）
+    expect(manifestTiles['4'].liqStyles).toEqual({
+      '8': { water: 'allowed', lava: 'allowed' },
+      '11': { water: 'allowed', lava: 'allowed' },
+      '17': { water: 'allowed', lava: 'allowed' },
+    });
+    expect(manifestTiles['4'].liq).toEqual({ water: 'notAllowed', lava: 'notAllowed' });  // StyleTorch :4589-4590
+    // 工作台 18 styles 14/43：岩浆放行（:2823-2824 addSubTile(14,43) :2825）
+    expect(manifestTiles['18'].liqStyles).toEqual({
+      '14': { water: 'allowed', lava: 'allowed' },
+      '43': { water: 'allowed', lava: 'allowed' },
+    });
+    // 染料 227：style5 onlyInFull（:2196-2197）/ style7 水（:2205/:2208）
+    expect(manifestTiles['227'].liqStyles).toEqual({
+      '5': { water: 'onlyInFull', lava: 'notAllowed' },
+      '7': { water: 'allowed', lava: 'notAllowed' },
+    });
+    // 灯 93：style40 水（:2416-2417）/ styles 23/42 岩浆（:2412-2413/:2414）
+    expect(manifestTiles['93'].liqStyles).toEqual({
+      '23': { water: 'notAllowed', lava: 'allowed' },
+      '40': { water: 'allowed', lava: 'notAllowed' },
+      '42': { water: 'notAllowed', lava: 'allowed' },
+    });
+  });
+
+  it('火把口径对拍（Game.ts 专用分支勿双改）：liqStyles 8/11/17 ≡ isWaterTorchStyle 表', () => {
+    // Game.tryPlace 火把分支（Game.ts 火把锚定区）不经 validateAnchors——其
+    // WATER_TORCH_STYLES = {8,11,17}（Torch.ts:79,frameY/22=style）须与 liqStyles 一致
+    const torch = manifestTiles['4'].liqStyles;
+    for (const st of [8, 11, 17]) expect(torch[String(st)]).toEqual({ water: 'allowed', lava: 'allowed' });
+    for (const st of [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]) expect(torch[String(st)]).toBeUndefined();
+  });
+
+  it('药草 83（FullCopyFrom 82 继承子样式 :4786-4789）：style4/6 水放、style5 岩浆放、style0 全拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    // 药草 anchorBottom 含 AlternateTile（:4749）走 anchorSpecOf 豁免回落——门级直取
+    // manifest 原始记录验液体档（液体门与锚点门独立,AlternateTile 位 evalCell 不吃）
+    const herb = manifestTiles['83'] as never as AnchorRec;  // StyleAlch 基记录水/岩浆全禁（:4750-4752）
+    // style4（死亡草种子 vi_310 placeStyle=4）：水放（:4772 addSubTile(4) :4773）
+    flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 8, 11, herb, 4)).toBe(true);
+    expect(validateAnchors(st, 8, 11, herb, 0)).toBe(false);   // style0（daybloom）基档水禁
+    for (let x = 8; x < 8 + herb.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
+    // style5（火焰花种子 vi_312 placeStyle=5）：岩浆放（:4777-4778 addSubTile(5) :4779）
+    flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 8, 11, herb, 5)).toBe(true);
+    expect(validateAnchors(st, 8, 11, herb, 4)).toBe(false);   // style4 岩浆仍禁
+    expect(validateAnchors(st, 8, 11, herb, 0)).toBe(false);
+    for (let x = 8; x < 8 + herb.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
+    // style6（雪花莲 vi_2357 placeStyle=6）：水放（:4783 addSubTile(6) :4784）
+    flood(st, 8, 11, herb.w, herb.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 8, 11, herb, 6)).toBe(true);
+  });
+
+  it('工作台 18（黑曜石变体 style14/43 无在册物品,门级验证）：style14/43 岩浆放、style0 岩浆拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const wb = anchorSpecOf(18)!;
+    flood(st, 10, 11, wb.w, wb.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 10, 11, wb, 0)).toBe(false);    // 基档岩浆拒（SetupBaseObject :1768）
+    expect(validateAnchors(st, 10, 11, wb, 14)).toBe(true);    // 子样式 14 岩浆放（:2823-2825）
+    expect(validateAnchors(st, 10, 11, wb, 43)).toBe(true);
+    for (let x = 10; x < 10 + wb.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
+    expect(validateAnchors(st, 10, 11, wb, 14)).toBe(true);    // dry 同放（allowed 无 onlyIn 語義）
+  });
+
+  it('染料 227 style5 满水门槛（onlyInFull :2196）：半水拒/满水放/style7 半水亦放', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const dye = anchorSpecOf(227)!;
+    flood(st, 10, 11, dye.w, dye.h, LIQUID_TYPE.WATER, 120);   // 非满液
+    expect(validateAnchors(st, 10, 11, dye, 5)).toBe(false);   // style5 onlyInFull 半水拒
+    expect(validateAnchors(st, 10, 11, dye, 7)).toBe(true);    // style7 Allowed 半水放
+    expect(validateAnchors(st, 10, 11, dye, 0)).toBe(false);   // 基档水禁（StyleDye :2179）
+    flood(st, 10, 11, dye.w, dye.h, LIQUID_TYPE.WATER, 255);   // 满液
+    expect(validateAnchors(st, 10, 11, dye, 5)).toBe(true);
+    for (let x = 10; x < 10 + dye.w; x++) st.setLiquid(x, 11, 0, LIQUID_TYPE.NONE);
+    expect(validateAnchors(st, 10, 11, dye, 5)).toBe(false);   // dry 拒（:1886-1904 else 支）
+  });
+
+  it('篝火 215 子样式 1/4/9/17/20/25 水放（:3330-3352）：style1 水放、style0/基档水拒', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const cf = anchorSpecOf(215)!;
+    flood(st, 10, 10, cf.w, cf.h, LIQUID_TYPE.WATER);
+    expect(validateAnchors(st, 10, 10, cf, 0)).toBe(false);    // 基档水禁（:3324-3326）
+    for (const style of [1, 4, 9, 17, 20, 25]) {
+      expect(validateAnchors(st, 10, 10, cf, style), `style ${style}`).toBe(true);
+    }
+    expect(validateAnchors(st, 10, 10, cf, 2)).toBe(false);    // 无子样式档回落基记录
   });
 });

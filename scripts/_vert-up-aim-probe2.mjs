@@ -14,7 +14,7 @@ await page.evaluate(() => window.__swFlow.newWorld('42424242', 4200, 1200));
 await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 300000 });
 await new Promise(r => setTimeout(r, 1500));
 
-const out = await page.evaluate(async () => {
+const out = await page.evaluate(async (dir) => {
   const g = window.__swGame;
   const p = g.player;
   const { ITEM_BY_KEY } = await import('/src/data/items.ts');
@@ -43,7 +43,6 @@ const out = await page.evaluate(async () => {
   };
   // 开火：鼠标钉头顶正上
   const [sx, sy] = g.camera.worldToScreen(p.cx, p.cy);
-  const dir = 'down';
   g.input.mouseX = sx; g.input.mouseY = dir === 'down' ? sy + 400 : sy - 400;
   g.input.mouseDown = true;
   let proj = null, shotCam = null;
@@ -64,7 +63,7 @@ const out = await page.evaluate(async () => {
   g.input.mouseDown = false;
   clearInterval(iv);
   return res;
-});
+}, DIR);
 writeFileSync('/tmp/vertup2-' + DIR + '.json', JSON.stringify({ ...out, basePng: undefined, shotPng: undefined }, null, 1));
 writeFileSync('/tmp/vertup2-' + DIR + '-base.png', Buffer.from(out.basePng.split(',')[1], 'base64'));
 writeFileSync('/tmp/vertup2-' + DIR + '-shot.png', Buffer.from(out.shotPng.split(',')[1], 'base64'));

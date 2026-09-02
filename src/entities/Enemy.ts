@@ -13127,6 +13127,17 @@ export class Enemy extends Entity {
       // 结算、:82400 `return num` 恒 ≥1 与 immortal 无关——lastStrikeDealt 必须
       // 写足额，否则幽灵套 ghostHurt 的 `dealt<=1 早退` 门让假人永不 proc。
       this.lastStrikeDealt = dmg;
+      // 玩家侧公共受击尾段（本分支早退须自带,否则永久跳过——原版 ApplyDamageToNPC
+      // 对假人同样置位）：①DPS 计累计（Player.cs:20165-20168 accDreamCatcher 门禁
+      // 在 addDPS 内侧）——曾漏=DPS 计量器对假人恒"无 DPS"（2026-09-02 用户实报）;
+      // ②AnyInteractions 玩家交互位（雕像门 :79651 同源）+ MP 交互登记。
+      if (fromPlayer) {
+        const pl = game.player as Player | null;
+        pl?.addDPS(dmg);
+        this.playerInteracted = true;
+        const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
+        if (net?.active) this.applyNetInteraction(net.mySlot, game);
+      }
       return true;
     }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像

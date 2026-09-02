@@ -5918,9 +5918,9 @@ export class Arrow extends Entity {
       //  Penetrate 由 pierce=1 承载）+每枚 5×d170 noGravity;478 ai[1]++>Next(5,20) →
       //  归零 + timeLeft>40 扣 20 + 放 480 诅咒火（dmg×0.8、kb×0.5,:58332-58343）
       if (this.age > 3) this.alpha = 0;
-      // 微重力 vy+=0.075@20(:58281-58284)由 AI1_GRAV[267/478/479] 表承载(提取器
-      // 已收)——本支曾手写一份=双份(arrow-gravity-parity 红);477 无重力(表亦无键)
-      if (this.age >= 20 && this.projId !== 477 && AI1_GRAV[this.projId] === undefined) this.vy += 0.075;
+      // 微重力 vy+=0.075@20(:58281-58284,267/478/479)由 AI1_GRAV 表承载(projGravSpec
+      // 访问,通用重力段消费)——本支曾手写一份=双份(arrow-gravity-parity 红);
+      // 477 原版无此重力(表亦无键),普通箭亦无——勿在本支补写
       const ents4x = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
       if (this.projId === 479 && !this.hostile) {
         if (this.ai1Mirror >= 0) {

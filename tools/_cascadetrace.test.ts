@@ -46,6 +46,17 @@ const Y0 = Number(process.env.SW_TRACE_Y0 ?? 210), Y1 = Number(process.env.SW_TR
     log.push(`W ${x},${y} a=${st.flags[i]} t=${sheetOf(i)} w=${st.wall[i]} by=${stk}`);
   };
   st.listeners.push(listener);
+  // SQ/TF/KT 探针钩（genSquareTileFrame/tileFrameGen/killTileGen 发射点）：抓级联事件流
+  // rc = __swOnRoll 计数（本段只有 initializeHardMode 的单 RNG 实例在消费）
+  let rollCount = 0;
+  const g = globalThis as unknown as { __swOnRoll?: (v: number, i: object) => void; __swFntProbeI39?: { emit?: (l: string) => void; rc?: () => number } };
+  const prevRoll = g.__swOnRoll;
+  g.__swOnRoll = () => { rollCount++; };
+  const sqEvents: string[] = [];
+  g.__swFntProbeI39 = {
+    emit: (l: string) => { if (sqEvents.length < 4000000) sqEvents.push(l); },
+    rc: () => rollCount,
+  };
   const famCount = (): string => {
     const fams: Record<string, number> = { h109: 0, h117: 0, c23: 0, c25: 0, c112: 0 };
     for (let i = 0; i < st.w * st.h; i++) {
@@ -66,7 +77,39 @@ const Y0 = Number(process.env.SW_TRACE_Y0 ?? 210), Y1 = Number(process.env.SW_TR
     regionBefore.push(`(${cx},${cy}) ${cellState(cx, cy)}`);
   }
   initializeHardMode(world, new RNG(world.seed));
+  g.__swOnRoll = prevRoll;
+  (g as { __swFntProbeI39?: unknown }).__swFntProbeI39 = undefined;
   st.listeners.pop();
+  // SQ 事件分析：按 rc 段切分 runner1/runner2（sim 口径：r1 掷 [3,10126144) r2 [10126144,22375185)）
+  const R1_END = Number(process.env.SW_TRACE_R1END ?? 10126144);
+  const R2_END = Number(process.env.SW_TRACE_R2END ?? 22375185);
+  const split = (pred: (rc: number) => boolean): Array<[number, number]> => {
+    const xs: Array<[number, number]> = [];
+    for (const l of sqEvents) {
+      const parts = l.split('|');
+      if (parts[0] !== 'SQ') continue;
+      const rc = Number(parts[parts.length - 1]);
+      if (!pred(rc)) continue;
+      const [x, y] = parts[1].split(',').map(Number);
+      xs.push([x, y]);
+    }
+    return xs;
+  };
+  for (const [tag, pred] of [['r1', (rc: number) => rc < R1_END], ['r2', (rc: number) => rc >= R1_END && rc < R2_END], ['post', (rc: number) => rc >= R2_END]] as const) {
+    const xs = split(pred);
+    if (xs.length === 0) { console.log(`[cascade-trace] ${tag}: SQ=0`); continue; }
+    const xss = xs.map((p) => p[0]);
+    const ymin = Math.min(...xs.map((p) => p[1]));
+    const ymax = Math.max(...xs.map((p) => p[1]));
+    const dense = new Map<number, number>();
+    for (const x of xss) dense.set(x, (dense.get(x) ?? 0) + 1);
+    const cols = [...dense.keys()].sort((a, b) => a - b);
+    console.log(
+      `[cascade-trace] ${tag}: SQ=${xs.length} x=[${cols[0]}..${cols[cols.length - 1]}] y=[${ymin}..${ymax}] ` +
+        `cols=${cols.length}`,
+    );
+  }
+  writeFileSync(OUT + '.sq', sqEvents.join('\n') + '\n');
   const regionAfter: string[] = [];
   for (const [cx, cy] of [[2281, 229], [2283, 229], [2292, 229], [2278, 230], [2289, 229]] as const) {
     regionAfter.push(`(${cx},${cy}) ${cellState(cx, cy)}`);

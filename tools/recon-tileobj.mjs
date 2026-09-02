@@ -6,6 +6,18 @@
 // 顺序模拟赋值面；未知语句置 poisoned，该 addTile 记为 unparsed=null 回落旧近似路径。
 // 已知缺口（fallback 安全域）：RandomStyleRange/HookCheck/SubTiles 族、数组循环构造的多 style 变体——
 //   主 style 维度仍正确时 partial 输出并标 warn。
+// ★M-3b（2026-09-02 子样式级液体例外建模）：newSubTile.* 液体写入解析成 per-style 记录
+//   `liqStyles: { [style]: {water,lava} }`【只存与基记录发散的样式】——GetTileData
+//   （TileObjectData.cs:5127-5162）对 SubTiles[style]==null/越界回落基记录,发散过滤
+//   恰好等价;addSubTile/addSubTileRange（:2016-2096）的 style 序号=SubTiles 列表下标
+//   （params 展开逐个提交,addSubTileRange 按 startStyle+i 递增）;newSubTile.CopyFrom
+//   (newTile/StyleX/自身) 继承源液体态,覆写经 setter COW 只落子样式模块（:1698-1715
+//   CopyFrom 不拷 _hasOwn* 旗,首写必 COW）。alternate 维不建模：CanPlace（TileObject.cs
+//   :205-208）结构上逐 alternate 取 GetTileData(type,style,num7) 做 LiquidPlace（:342）,
+//   但 1457 全表 newAlternate.* 液体赋值 0 行（382 行 newAlternate 零命中）,addAlternate/
+//   内联 Alternates.Add 的 alternate 液体与所属记录恒等（tools/_tod-substyle-audit.mjs
+//   双向发散计数=0）→ 无 alternate 记录可建。LiquidDeath 的 Calculate() 耦合
+//   （:1821-1831）在 addSubTile 提交前对子样式同样适用。
 // ★M-3（2026-09-02 液体放置面两维建模）：liqAllow 单维布尔（缺省 false=液体中全拒，
 //   与原版 382/382 反向）升级为 `liq: { water, lava }` 两维、值 ∈ 'allowed'|'notAllowed'|
 //   'onlyInFull'。真值结构（TileObjectData.cs）：SetupBaseObject 缺省 water=Allowed/
@@ -67,6 +79,13 @@ function resetLiquid(w) {
   w.waterDeath = false; w.lavaDeath = false;
 }
 let work = mkWork();
+// ---- M-3b 子样式工作面：newSubTile 液体态（缺省 = new TileObjectData(_baseObject)
+//      继承 SetupBaseObject :1767-1768 两维缺省）+ 已提交 per-style 记录 + int 局部变量
+//      （addSubTileRange(num,num) / addSubTile(1+newTile.StyleWrapLimit) 求值所需）。 ----
+let subWork = { liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false };
+let pendingSubLiq = new Map();      // style → liq（addSubTile 提交,death 耦合已应用）
+const intLocals = new Map();        // `int num = 39;` 局部变量（:4230/:4417）
+let styleWrapLimit = 0;             // newTile.StyleWrapLimit（addSubTile 表达式求值所需,不入库）
 const bases = new Map();
 const manifest = {};
 let pendingAlts = [];
@@ -76,6 +95,32 @@ function curIdGuess(rec){ return rec._lastId ?? -1; }
 let poisoned = null;         // {tile,into} 复杂构造污染标记（当前对象不可信）
 
 const deep = (w) => structuredClone(w);
+
+// ---- M-3b 子样式液体辅助 ----
+/** addSubTile 提交耦合（newSubTile.Calculate() :2018/:2046/:2075 → :1821-1831）：
+ *  子样式 WaterDeath/LavaDeath=true ⇒ 对应维 placement 强制 NotAllowed。 */
+function subCoupled() {
+  const out = { ...subWork.liq };
+  if (subWork.waterDeath) out.water = 'notAllowed';
+  if (subWork.lavaDeath) out.lava = 'notAllowed';
+  return out;
+}
+/** addSubTile 样式表达式求值：整数字面 / `int num` 局部变量 / newTile.StyleWrapLimit
+ *  （:3344 `1 + newTile.StyleWrapLimit`、:4239 `addSubTileRange(num, num)`）。
+ *  styleWrapLimit 用独立变量（不入 work/记录；:3323 同块先赋值后用,无 CopyFrom 传递需求）。 */
+function evalTodExpr(raw) {
+  let s = raw.trim().replace(/newTile\.StyleWrapLimit/g, `(${styleWrapLimit})`);
+  // ★整词替换（num2 含 num 前缀,裸 split/join 会把 num2 吃成 (39)2 → 求值 NaN）
+  for (const [k, v] of [...intLocals].sort((a, b) => b[0].length - a[0].length)) {
+    s = s.replace(new RegExp(`\\b${k}\\b`, 'g'), `(${v})`);
+  }
+  if (!/^[\d\s()+\-*/]+$/.test(s)) return NaN;
+  try { return Function(`"use strict";return (${s})`)(); } catch { return NaN; }
+}
+function resetSubWork() {
+  // addSubTile/addSubTileRange 尾 `newSubTile = new TileObjectData(_baseObject)`（:2041/:2070/:2095）
+  subWork = { liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false };
+}
 
 function parseAnchor(rhs) {
   // new AnchorData(AnchorType.A | AnchorType.B, <expr>, <expr>)
@@ -134,6 +179,13 @@ for (let ln = 0; ln < lines.length; ln++) {
       applyLiquidDeathCoupling(rec);     // Calculate() :1820-1833 提交耦合
       delete rec.waterDeath; delete rec.lavaDeath;   // death 旗不入库（瞬时量）
       if (pendingAlts.length) rec.dirs = pendingAlts.slice();
+      // M-3b：per-style 液体记录——只存与基记录【发散】的样式（GetTileData :5142-5150
+      // 对 SubTiles[style]==null/越界回落基记录,发散过滤恰好等价;同值条目省略）
+      const liqStyles = {};
+      for (const [st, lq] of pendingSubLiq) {
+        if (lq.water !== rec.liq.water || lq.lava !== rec.liq.lava) liqStyles[String(st)] = lq;
+      }
+      if (Object.keys(liqStyles).length) rec.liqStyles = liqStyles;
       manifest[id] = rec;
       stats.parsed++;
       if (poisoned) { stats.warned.push(id); }
@@ -144,6 +196,9 @@ for (let ln = 0; ln < lines.length; ln++) {
     }
     pendingAlts = [];
     poisoned = null;
+    pendingSubLiq = new Map();           // 子样式归属 newTile,addTile 一并复位
+    resetSubWork();
+    styleWrapLimit = 0;                  // 原版 newTile=new(_baseObject) 复位 StyleWrapLimit
     resetLiquid(work);                   // 原版 addTile 尾 newTile = new(_baseObject)（:2013）
     continue;
   }
@@ -153,19 +208,56 @@ for (let ln = 0; ln < lines.length; ln++) {
     continue;
   }
 
-  // ---- FullCopyFrom（TileObjectData.cs:1717-1731）：整表拷贝已提交 tile（模块引用共享）。
-  //      1457 三处调用：388→389（门右开）、82→83→84（药草）。仅液体两维需要显式搬运
-  //      （几何字段本就沿 work 继承等价）。 ----
+  // ---- FullCopyFrom（TileObjectData.cs:1717-1741）：整表拷贝已提交 tile（模块引用共享）。
+  //      1457 三处调用：388→389（门右开）、82→83→84（药草）。液体两维 + per-style 液体
+  //      记录（:1738 `_subTiles = new TileObjectSubTilesModule(copy._subTiles)` 整表拷贝）
+  //      需要显式搬运（几何字段本就沿 work 继承等价）。 ----
   if ((m = L.match(/^newTile\.FullCopyFrom\((\d+)\)\s*;/))) {
     const srcRec = manifest[m[1]];
-    if (srcRec?.liq) { work.liq = structuredClone(srcRec.liq); }
-    else { poisoned = true; }
+    if (srcRec?.liq) {
+      work.liq = structuredClone(srcRec.liq);
+      pendingSubLiq = new Map();
+      for (const [st, lq] of Object.entries(srcRec.liqStyles ?? {})) pendingSubLiq.set(Number(st), structuredClone(lq));
+    } else { poisoned = true; }
     continue;
   }
-  // ---- 子样式区：newSubTile.CopyFrom(newTile/newSubTile) —— 子样式经模块引用共享继承
-  //      当前工作面（TileObjectData.cs:1698-1715 CopyFrom 语义）；基样式记录不受子样式
-  //      覆写影响 → 显式跳过不再置毒（基样式值仍按 newTile 自身赋值面提取）。 ----
-  if (/^newSubTile\.CopyFrom\(/.test(L)) { stats.subCopyFrom = (stats.subCopyFrom ?? 0) + 1; continue; }
+  // ---- 子样式区：newSubTile.CopyFrom(newTile/newSubTile/StyleX) —— 子样式经模块引用
+  //      共享继承源液体态（TileObjectData.cs:1698-1715 CopyFrom 语义；_hasOwn* 旗不随
+  //      CopyFrom 拷贝,后续覆写必 COW 只落子样式模块）；基样式记录不受子样式覆写影响
+  //      → 基样式值仍按 newTile 自身赋值面提取。 ----
+  if ((m = L.match(/^newSubTile\.CopyFrom\((newTile|newSubTile|newAlternate|Style\w+)\)\s*;/))) {
+    stats.subCopyFrom = (stats.subCopyFrom ?? 0) + 1;
+    const src = m[1] === 'newTile' ? work
+      : m[1] === 'newSubTile' ? subWork
+      : m[1] === 'newAlternate' ? null      // newAlternate 从未持有液体覆写（M-3b 定谳）
+      : bases.get(m[1]);
+    if (src) subWork = { liq: { ...src.liq }, waterDeath: !!src.waterDeath, lavaDeath: !!src.lavaDeath };
+    continue;
+  }
+  // ---- M-3b：addSubTile/addSubTileRange（TileObjectData.cs:2016-2096）——当前 newSubTile
+  //      经 Calculate()（death 耦合）提交到指定 style 槽（=SubTiles 列表下标）后复位。
+  //      params 展开逐 style 提交同一快照;addSubTileRange 按 startStyle+i 递增。 ----
+  if ((m = L.match(/^addSubTileRange\(([^,]+),\s*([^)]+)\)\s*;/))) {
+    const start = evalTodExpr(m[1]), cnt = evalTodExpr(m[2]);
+    if (Number.isFinite(start) && Number.isFinite(cnt)) {
+      const snap = subCoupled();
+      for (let i = 0; i < cnt; i++) pendingSubLiq.set(start + i, { ...snap });
+    } else { console.error(`[warn] addSubTileRange 样式表达式不可求值 @${ln + 1}`); }
+    resetSubWork();
+    continue;
+  }
+  if ((m = L.match(/^addSubTile\(([^)]*)\)\s*;/))) {
+    const snap = subCoupled();
+    for (const rawSt of m[1].split(',')) {
+      const st = evalTodExpr(rawSt);
+      if (!Number.isFinite(st)) { console.error(`[warn] addSubTile 样式表达式不可求值 @${ln + 1}: ${m[1]}`); continue; }
+      pendingSubLiq.set(st, { ...snap });
+    }
+    resetSubWork();
+    continue;
+  }
+  // ---- M-3b：`int num = 39;` 局部变量（:4230/:4417，addSubTileRange 参数求值所需）----
+  if ((m = L.match(/^int (\w+) = (.+?);\s*$/))) { intLocals.set(m[1], evalTodExpr(m[2])); continue; }
 
   // ---- 属性赋值（newTile. / newSubTile. 双前缀；newAlternate.* 无液体赋值（grep 全文件
   //      证实），仍走后置毒分支）----
@@ -174,11 +266,20 @@ for (let ln = 0; ln < lines.length; ln++) {
     if (prefix === 'newSubTile') {
       // 子样式写入永不落基样式记录（原版子样式对象独立于 newTile；CopyFrom 共享引用
       // 后的覆写经 setter COW 只落在子样式模块上——见 TileObjectData.cs:574-640 setter）。
-      // 液体四属性 = 本批升级的解析目标（计数审计、不置毒）；其余属性维持旧行为置毒
-      // （审计信号：该族含未建模子样式几何，AnchorValidWalls/Height 等只在子样式生效）。
+      // 液体四属性 = M-3b 解析目标：写入 subWork 工作面（addSubTile 提交时成 per-style
+      // 记录）；其余属性维持旧行为置毒（审计信号：该族含未建模子样式几何，
+      // AnchorValidWalls/Height 等只在子样式生效）。
       const lp = prop.toLowerCase();
-      if (lp === 'waterplacement' || lp === 'lavaplacement' || lp === 'waterdeath' || lp === 'lavadeath') {
+      if (lp === 'waterplacement' || lp === 'lavaplacement') {
         stats.subLiqWrites = (stats.subLiqWrites ?? 0) + 1;
+        const v = parseLiqVal(raw.trim());
+        if (!v) { poisoned = true; break; }
+        if (lp === 'waterplacement') subWork.liq.water = v;
+        else subWork.liq.lava = v;
+      } else if (lp === 'waterdeath' || lp === 'lavadeath') {
+        stats.subLiqWrites = (stats.subLiqWrites ?? 0) + 1;
+        if (lp === 'waterdeath') subWork.waterDeath = /true/i.test(raw);
+        else subWork.lavaDeath = /true/i.test(raw);
       } else {
         poisoned = poisoned ?? true;
       }
@@ -261,6 +362,11 @@ for (let ln = 0; ln < lines.length; ln++) {
       case 'coordinateheights': case 'usescustomcanplace': case 'stylehorizontal': case 'style':
       case 'randomstylerange': case 'allowalwaysonscreen': case 'wraps':
         break;
+      case 'stylewraplimit':
+        // M-3b：样式表达式求值所需（:3344 `1 + newTile.StyleWrapLimit` 等）。
+        // 中性样式字段不入库；仅记入独立变量,addTile 尾复位（原版 newTile=new(_baseObject)）。
+        styleWrapLimit = parseInt(rhs) || 0;
+        break;
       default:
         // HookCheckIfCanPlace / Options / 新 API 全部视为复杂构造 → 该对象回落
         poisoned = true;
@@ -311,6 +417,17 @@ console.log('unparsed ids:', stats.unparsed.join(','));
     if (r.liq.lava === 'allowed') lavaAllow.push(id);
   }
   console.log(`liq: water=notAllowed(${waterNA.length}): ${waterNA.join(',')} | lava=allowed: ${lavaAllow.join(',')} | water=onlyInFull: ${onlyInFull.join(',') || '无'}`);
+}
+// 子样式液体记录分布（M-3b）：per-style 发散条目数与逐 tile 清单
+{
+  const tiles = [], total = { styles: 0, entries: 0 };
+  for (const [id, r] of Object.entries(manifest)) {
+    if (!r?.liqStyles) continue;
+    const n = Object.keys(r.liqStyles).length;
+    total.styles++; total.entries += n;
+    tiles.push(`${id}(${Object.entries(r.liqStyles).map(([st, lq]) => `${st}:${lq.water[0]}${lq.lava[0] === 'a' ? 'L' : ''}`).join('/')})`);
+  }
+  console.log(`liqStyles: tiles=${total.styles} entries=${total.entries} | ${tiles.join(' ')}`);
 }
 // 抽查
 for (const k of ['220', '10', '11', '212', '91', '13', '4']) {

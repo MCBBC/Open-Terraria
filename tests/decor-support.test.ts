@@ -12,6 +12,7 @@ import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { LIQUID_TYPE } from '../src/world/TileStore';
+import { GorePiece } from '../src/entities/GorePiece';
 
 const keyOf = (k: string) => {
   const id = TILE_BY_KEY[k];
@@ -1102,5 +1103,87 @@ describe('九批 m-4：334 武器架 5000 系帧剥离（wallhang 支）', () =>
     g.checkFurnitureSupport(10, 10);
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(12, 12)).toBe(0);
+  });
+});
+
+// ★pot-goreTier（2026-09-02 十批）：CheckPot per-style 瓦砾 Gore 分档（WorldGen.cs
+// :57358-57431 整段 1:1,移植于 Game.smashPotInner）。分档=switch(num4)：
+//   0→[51,52,53] / 1→[166-168] / 2→[169-171] / 3→[172-174] / 4-6→[197,198] /
+//   7-9→[199,200] / 10-12→[201,202] / 13-15→[203,204] / 16-24→【无】(:57388 显式
+//   break) / 25-27→2 枚 Next(217,220) / 28-30→2 枚 Next(315,317) / 31-33→Next(2,5)
+//   枚 698+Next(6) / 34-36→[1122,1123,1124] / 其余→无。位置=【命中格】左上角
+//   (i*16,j*16) 非锚;整件一次（不在杀环逐格）;实机端到端另见 scripts/_pot-gore.mjs
+//   （时序 [sfx,gore×n,loot] + 素材链 Gore_51.png 断言）。
+describe('十批 pot-goreTier：CheckPot per-style 瓦砾 Gore 分档', () => {
+  /** 石基 + 2×2 罐（顶行 fy=style*36 / 底行 fy=style*36+18,frameX=0/18——PotsPass 原版序） */
+  const potSetup = (w: World, style: number, px = 20, py = 10) => {
+    const st = w.store;
+    const POT = idOfSheet(28), STONE = idOfSheet(1);
+    st.setTileSilent(px, py + 2, STONE, 0, 0);
+    st.setTileSilent(px + 1, py + 2, STONE, 0, 0);
+    st.setTileSilent(px, py, POT, 0, style * 36 + 18);
+    st.setTileSilent(px + 1, py, POT, 18, style * 36 + 18);
+    st.setTileSilent(px, py - 1, POT, 0, style * 36);
+    st.setTileSilent(px + 1, py - 1, POT, 18, style * 36);
+    return { hit: [px + 1, py] as const, anchor: [px, py - 1] as const };
+  };
+  const goreIdsOf = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c[0] as number);
+
+  it('定档：0/4/7/10/13/34 六档三元组与二元组逐 id 相等', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot-gore');
+    const g = mkShell(w, []);
+    g.potLoot = vi.fn();
+    const spy = vi.spyOn(GorePiece, 'newGore');
+    try {
+      for (const [style, want] of [
+        [0, [51, 52, 53]], [4, [197, 198]], [7, [199, 200]],
+        [10, [201, 202]], [13, [203, 204]], [34, [1122, 1123, 1124]],
+      ] as Array<[number, number[]]>) {
+        spy.mockClear();                     // 逐案隔离（mock.calls 跨 smash 累积）
+        const { hit } = potSetup(w, style);
+        (g.smashPot as (x: number, y: number) => void).call(g, hit[0], hit[1]);
+        expect(goreIdsOf(spy)).toEqual(want);
+        // 位置=命中格（右下格触发）左上角,非锚（锚=左上,相差 (+16,+16) 像素）
+        const first = spy.mock.calls[spy.mock.calls.length - want.length]!;
+        expect(first[1]).toBe(hit[0] * 16);
+        expect(first[2]).toBe(hit[1] * 16);
+      }
+    } finally { spy.mockRestore(); }
+  });
+
+  it('16-24 腐化/蜘蛛/猩红档与越界 style 无瓦砾（:57388 显式 break / 无分支）', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot-gore-none');
+    const g = mkShell(w, []);
+    g.potLoot = vi.fn();
+    const spy = vi.spyOn(GorePiece, 'newGore');
+    try {
+      for (const style of [16, 19, 24, 37]) {
+        spy.mockClear();
+        const { hit } = potSetup(w, style);
+        (g.smashPot as (x: number, y: number) => void).call(g, hit[0], hit[1]);
+        expect(goreIdsOf(spy)).toEqual([]);
+      }
+    } finally { spy.mockRestore(); }
+  });
+
+  it('掷档：25-27 两枚 ∈{217,218,219};28-30 两枚 ∈{315,316};31-33 2-4 枚 ∈{698..703}', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot-gore-rand');
+    const g = mkShell(w, []);
+    g.potLoot = vi.fn();
+    const spy = vi.spyOn(GorePiece, 'newGore');
+    try {
+      for (const style of [25, 28, 31]) {
+        spy.mockClear();
+        const { hit } = potSetup(w, style);
+        (g.smashPot as (x: number, y: number) => void).call(g, hit[0], hit[1]);
+        const ids = goreIdsOf(spy);
+        const [lo, hi] = style === 31 ? [2, 4] : [2, 2];
+        expect(ids.length).toBeGreaterThanOrEqual(lo);
+        expect(ids.length).toBeLessThanOrEqual(hi);
+        const pool = style === 25 ? [217, 218, 219]
+          : style === 28 ? [315, 316] : [698, 699, 700, 701, 702, 703];
+        for (const id of ids) expect(pool).toContain(id);
+      }
+    } finally { spy.mockRestore(); }
   });
 });

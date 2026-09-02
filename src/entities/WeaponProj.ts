@@ -4450,6 +4450,18 @@ export class GrenadeProj extends Entity {
   /** 发射支（AI_016 else :44542-44911）：无重力直线 + 家族行为 + 撞块语义表 */
   private firedStep(game: GameHooks): void {
     const st = game.world.store;
+    // ★v8 排烟门补落（2026-09-01 终案「渲染层角色盒内不渲染弹体/烟尾」——当日只
+    //   落了弹体门（GrenadeProj.draw/Arrow.draw）,尘支被同日 noGravity 修复重写时
+    //   丢失;2026-09-02 用户实报"垂直向上发射火箭,弹出生后尾焰堆在武器贴图上"）。
+    //   原版无此门（烟尾尘在玩家上层照画——DrawDust Main.cs:63241 在玩家 :63204
+    //   之后,出生窗被压住的只有弹体层非尘层）——按 v8 渲染层可见性惯用法收口:
+    //   烟尾出生点落在主角碰撞盒内不出尘,盒外（枪口带）照常,观感=尾焰从枪口冒出。
+    //   门=pure 观测（不掷 RNG 不改物理）,mock game.player 缺省=门常开。
+    const mp = game.player as { x: number; y: number; w: number; h: number } | undefined;
+    const inBodyBox = mp
+      ? (px: number, py: number): boolean =>
+          px > mp.x && px < mp.x + mp.w && py > mp.y && py < mp.y + mp.h
+      : () => false;
     // 液体火箭入液即爆（AI_016 头 :44267 wet → timeLeft=1，与 903-906 同门）
     if (LIQUID_ROCKET_PROJ.has(this.projId)) {
       const tx0 = Math.floor(this.x / TILE), tx1 = Math.floor((this.x + this.w - 1) / TILE);
@@ -4543,6 +4555,7 @@ export class GrenadeProj extends Entity {
           const oy = n === 1 ? this.vy * 0.5 : 0;
           const px = this.x + 3 + ox - this.vx * 0.5;
           const py = this.y + 3 + oy - this.vy * 0.5;
+          if (inBodyBox(px, py)) continue;   // ★排烟门：出生点在角色盒内不出尘（firedStep 头注）
           const bw = Math.max(5, this.w - 8), bh = Math.max(5, this.h - 8);
           const d13 = game.spawnDust?.(px, py, bw, bh, dust13, 0, 0, 100, null,
             2 + Math.floor(Math.random() * 10) * 0.1);
@@ -4556,7 +4569,8 @@ export class GrenadeProj extends Entity {
       }
     }
     if (GrenadeProj.FIRED_GRENADE.has(this.projId)) {
-      if (Math.random() < 0.5) game.spawnParticles(this.cx, this.cy, '#B8B8A8', 1, 1.2, { life: 18 });  // 尾尘 31（:44745-44748）
+      // 排烟门：出生点（=弹心）在主角盒内不出尘（同 firedStep 头注；RNG 掷序不变）
+      if (Math.random() < 0.5 && !inBodyBox(this.cx, this.cy)) game.spawnParticles(this.cx, this.cy, '#B8B8A8', 1, 1.2, { life: 18 });  // 尾尘 31（:44745-44748）
       if (this.firedAi0 > 15) {                                           // 15u 后重力 + 落地摩擦（:44870-44879）
         if (this.vy === 0 && this.vx !== 0) this.vx *= 0.95;
         this.vy = Math.min(this.vy + 0.2, 16);
@@ -4581,7 +4595,7 @@ export class GrenadeProj extends Entity {
         this.armedAlpha = Math.min(200, this.armedAlpha + 2);             // 布防半隐（:44752-44758）
       } else {
         this.armedAlpha = 0;
-        if (Math.random() < 0.5) game.spawnParticles(this.cx, this.cy, '#C0C0B0', 1, 1.4, { life: 16 });
+        if (Math.random() < 0.5 && !inBodyBox(this.cx, this.cy)) game.spawnParticles(this.cx, this.cy, '#C0C0B0', 1, 1.4, { life: 16 });
       }
     }
     if (this.stickPending) return;                                        // 贴墙待爆：vel=0 静止

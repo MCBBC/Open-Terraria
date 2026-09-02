@@ -71,6 +71,15 @@ export const FURNITURE_TILE_KIND: ReadonlyMap<number, FurnitureKind> = (() => {
   const pairs: Array<[string, FurnitureKind]> = [
     ['v_395_item_frame', 'item_frame'],
     ['v_471_weapon_rack', 'weapon_rack'],
+    // ★七批备案④收尾（2026-09-02）：334 = 1.4 前的 legacy 武器架（TileID.cs:1105
+    //  WeaponsRack=334；现行 471=WeaponsRack2 :1379，放置物品 2699 createTile=471）。
+    //  与 471 是【同一件家具的两种存物通道】（471=TEWeaponsRack.item 单槽 TE，
+    //  334=帧内嵌标记 PlaceWeapon Player.cs:54721 写 5000 系 frameX），槽位模型
+    //  1:1 同构 → 并入 weapon_rack（区别于 128/269 legacy 模特：那是 19 槽模特的
+    //  异构帧编码，无单记录模型对应，故不进本表——system-coverage.test.ts 锁定）。
+    //  本仓无 334 写入面（无物品 createTile=334），此登记只服务 WldImport 老世界
+    //  导入的持武还原（WldImport ★334 段解码落记录）与破坏/右键/渲染链。
+    ['v_334_weapon_rack_legacy_do_not_use', 'weapon_rack'],
     ['v_470_mannequins', 'display_doll'],
     ['v_475_hat_rack', 'hat_rack'],
     ['v_520_plate', 'food_platter'],

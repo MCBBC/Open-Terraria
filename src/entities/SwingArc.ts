@@ -791,6 +791,13 @@ export class ZenithSword extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      // Critter 同伤（原版 critters 即 NPC：弹幕可伤小动物——ZenithSword 曾漏桶）
+      for (const cent of (game as unknown as { critters?: () => Array<{ x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (g: GameHooks) => boolean }> }).critters?.() ?? []) {
+        const c = cent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (g: GameHooks) => boolean };
+        if (c.dead || (this.hitCd.get(c.id) ?? 0) > 0) continue;
+        if (!this.bladeHits(c.x, c.y, c.w, c.h)) continue;
+        if (c.hurt(game)) this.hitCd.set(c.id, 7);
+      }
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;

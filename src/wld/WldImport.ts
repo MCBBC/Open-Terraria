@@ -549,6 +549,87 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
+  // ★七批备案④收尾（2026-09-02）：334 legacy 武器架持武还原。
+  //  原版 334（TileID.cs:1105 WeaponsRack；现行 471=WeaponsRack2 :1379）把架上武器
+  //  直接嵌在帧里（TE 出现前的 1.2 存物通道，1.4.5.7 仍可交互）：
+  //  写入 = Player.PlaceWeapon（Player.cs:54721-54813）：命中格归一到标记行
+  //  （:54723-54734 frameY/18==1）后写同行两格帧标记——
+  //    锚格（col0）frameX = itemType + num5 + 100（:54797，num5=5000）；
+  //    朝向 alternate（PlaceRight，裸架 base=54）改用二带 num5=20000（:54789-54794）
+  //    前缀格（col1）frameX = prefix + num6（:54798，num6=10000 / 二带 25000）。
+  //  读取 = KillTile_DropItems（WorldGen.cs:64122-64164）：剥 5000 系定列
+  //  （:64126-64136）、itemType=锚 frameX%5000-100（:64145-64146）、
+  //  prefix=右邻 frameX-10000/25000 两带式（:64147-64149），掉武器后帧还原裸架
+  //  （:64155-64162 base=(n5000-1)*18、前缀格=base+18）。TEdit 独立同式解码
+  //  （WorldRenderXna.xaml.cs:4669-4675 weapon=(U%5000)-100）。
+  //  导入侧：解码 → materialize furnitureItems 的 weapon_rack 单槽记录（本仓 TE
+  //  等价物，FURNITURE_TILE_KIND 已收 334 → 破坏弹物/右键取放/渲染叠画全链生效），
+  //  同时把两格帧还原裸架态（此后渲染/锚点归一/支撑检全走裸帧；Game wallhang 支
+  //  m-4 的 5000 系剥离退居历史档兜底）。 itemType≥4900 时锚帧 ≥10000 会被剥系
+  //  误判成 col1（vanilla 同款歧义：其解码 :64146 恒出负 id 不掉）——按「左邻无标记
+  //  且右邻有标记」的帧对签名救回。解码失败/未知物品 → 保守清标记并计数登记
+  //  （itemsSkipped/warnings），不造幽灵物品。
+  const RACK334 = TILE_BY_KEY['v_334_weapon_rack_legacy_do_not_use'];
+  const furnitureSave: NonNullable<SaveData['furniture']> = [];
+  let rackDecodeFail = 0;
+  if (RACK334 !== undefined) {
+    for (let i = 0; i < n; i++) {
+      if (type[i] !== RACK334) continue;
+      const fx = frameX[i];
+      if (fx < 5000) continue;               // 无标记裸架：帧原样保留，不物化
+      const row = frameY[i];
+      if (row % 18 !== 0 || row > 36) continue;   // 非 18px 行带帧=杂波
+      const x = i % w;
+      // 列分类（WorldGen.cs:64126-64136 同式剥 5000 系）：col0=锚格 col1=前缀格
+      let v = fx, cnt = 0;
+      while (v >= 5000) { v -= 5000; cnt++; }
+      if (cnt !== 0) v = (cnt - 1) * 18;
+      const col = Math.floor((v % 54) / 18);
+      if (col === 2) continue;
+      if (col === 1) {
+        // 前缀格不独立成件。仅当「左邻无标记 且 右邻(col1 带标记)」时本格才是被
+        // 剥系误判的高段锚格；其余（左邻有标记=正常前缀格 / 右邻无标记=孤儿标记）
+        // 不物化，孤儿帧归位裸架后计数。
+        const leftMarked = x > 0 && type[i - 1] === RACK334 && frameY[i - 1] === row
+          && frameX[i - 1] >= 5000;
+        const rightMarked = x + 1 < w && type[i + 1] === RACK334 && frameY[i + 1] === row
+          && frameX[i + 1] >= 10000;
+        if (leftMarked || !rightMarked) {
+          if (!leftMarked && !rightMarked) {   // 孤儿前缀标记（外部工具产物）
+            frameX[i] = fx >= 25000 ? 72 : 18;
+            rackDecodeFail++;
+          }
+          continue;
+        }
+      }
+      // 解码：band 按帧值定（5000/20000 与 10000/25000，Player.cs:54789-54798），
+      // 不用剥系余数（规避 ≥4900 段 %5000 歧义）
+      const vid = fx < 20000 ? fx - 5100 : fx - 20200;
+      let prefix: number | undefined;
+      if (x + 1 < w) {
+        const fx2 = frameX[i + 1];
+        const p = fx2 >= 25000 ? fx2 - 25000 : fx2 >= 10000 ? fx2 - 10000 : -1;
+        if (p >= 0 && p <= 255) prefix = p;    // 非 byte 域=损坏 → 保武器弃词缀
+      }
+      const key = vid > 0 ? VANILLA_ITEM_KEY_BY_ID[vid] : undefined;
+      const iid = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+      const topY = Math.floor(i / w) - row / 18;   // 记录锚=物件左上格（中行标记 → 上一行）
+      if (iid === undefined) {
+        if (vid > 0) bump(itm, vid); else rackDecodeFail++;
+      } else if (topY >= 0) {
+        furnitureSave.push({
+          x, y: topY, kind: 'weapon_rack',
+          slots: [{ id: iid, stack: 1, ...(prefix !== undefined && prefix > 0 ? { prefix } : {}) }],
+        });
+      }
+      // 帧还原裸架态（WorldGen.cs:64155-64162；base=朝向带 0/54，前缀格=base+18）
+      const base = fx < 20000 ? 0 : 54;
+      frameX[i] = base;
+      if (x + 1 < w && type[i + 1] === RACK334) frameX[i + 1] = base + 18;
+    }
+    if (rackDecodeFail > 0) warnings.push(`${rackDecodeFail} 个武器架持武帧标记损坏已清除`);
+  }
+
   // 宝箱：转内部格式（锚点 + 战利品）。
   // ★R21（2026-08-24）：帧【保留原样】——tile 循环(:486-489 framed 直拷)已按原版
   //  像素帧写入（wld 存的就是 style*36 带 + 0/18 格偏移,parser :590 直拷）,
@@ -696,6 +777,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     // 导入后从头探索（与旧存档行为一致）
     explored: undefined,
     chests,
+    // ★七批备案④收尾：334 legacy 武器架持武还原记录（内部 id——本 SaveData 为
+    //  v2 内存态，loadSaveData v3=false 同 chests 直读；落盘经 serialize 转稳定 id）
+    furniture: furnitureSave.length ? furnitureSave : undefined,
     player: {
       hp: 100,
       x: wld.spawnX * 16 + 8,

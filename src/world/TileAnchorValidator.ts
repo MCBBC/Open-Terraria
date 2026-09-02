@@ -22,6 +22,13 @@ export interface AnchorRec {
    *  water 维 = 原版 liquidType 0/2/3（水/蜜/微光）；lava 维 = 1（岩浆）。
    *  缺省 = SetupBaseObject :1767-1768（water Allowed / lava NotAllowed）。 */
   liq: { water: LiquidPlacementVal; lava: LiquidPlacementVal };
+  /** ★M-3b 子样式级液体例外（TileObjectData.cs addSubTile/addSubTileRange :2016-2096
+   *  提交到 SubTiles[style] 槽;GetTileData :5142-5150 对无子样式/越界 style 回落基记录
+   *  ——故只存与基记录发散的样式,命中用 style 档,未命中落 liq 基档）。
+   *  alternate 维不建模：CanPlace（TileObject.cs:205-208/:342）结构上逐 alternate 取
+   *  GetTileData(type,style,num7) 做 LiquidPlace,但 1457 全表 newAlternate.* 液体赋值
+   *  0 行,alternate 液体恒等于所属记录（_tod-substyle-audit.mjs 双向发散计数=0）。 */
+  liqStyles?: Record<string, { water: LiquidPlacementVal; lava: LiquidPlacementVal }>;
   flatten: boolean; dir: string; yOff: number;
   dirs?: Array<{ dir: string }>;
 }
@@ -103,9 +110,12 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
 /** 检验“某物放在 ax,ay 是否满足全部锚点”。CanPlace 的 all-or-nothing 判定。
  *  液体门 = 两维建模（rec.liq.water/lava，见下方逐格注释）；wall 族沿用
  *  isValidWallAnchor 默认分支（任意非零墙均有效）。occupiedIgnore：调用方为
- *  “原地重放”场景给的豁免面。 */
+ *  “原地重放”场景给的豁免面。style = itemDef.placeStyle（原版 Item.placeStyle →
+ *  TileObjectData style,TileObject.CanPlace :176 GetTileData(type,style)）：
+ *  ★M-3b 命中 rec.liqStyles[style] 子样式档,未命中回落 rec.liq 基档（vanilla
+ *  GetTileData :5142-5150 SubTiles[style]==null/越界回落基记录的同构语义）。 */
 export function validateAnchors(st: World['store'], ax: number, ay: number, rec: AnchorRec,
-  occupiedIgnore?: (x: number, y: number) => boolean): boolean {
+  style = 0, occupiedIgnore?: (x: number, y: number) => boolean): boolean {
   if (!Number.isFinite(ax) || !Number.isFinite(ay)) return false;
   if (ax < 1 || ay < 1 || ax + rec.w > st.w - 1 || ay + rec.h > st.h - 1) return false;
   for (let j = 0; j < rec.h; j++) {
@@ -131,12 +141,16 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       //  · 液体量 ==0（dry）：onlyIn* 语义拒（:1886-1904 else 支——onlyInFull/onlyInLiquid
       //    在无液格恒拒）。基样式数据暂无 onlyIn 值，分支为语义完备性保留。
       //  旧实现 liqAllow 单维布尔（缺省 false=液体中一律拒）与原版 382/382 反向，已翻正。
+      //  ★M-3b：style 档解析——命中 liqStyles[style] 用子样式记录（如火把 4 styles
+      //  8/11/17 水岩浆均放 TileObjectData.cs:4612-4613、染料 227 style5 onlyInFull
+      //  :2196），未命中落基档（= GetTileData 回落语义,TileObjectData.cs:5142-5150）。
       {
         const liqAmt = st.liquid[i2];
         // 本仓 liquidType 为原版 +1 编码（TileStore.LIQUID_TYPE）；0(NONE) 视同水（同
         //  Game.ts:21951 惯例——原版 liquidType()==0 即水）
         const isLava = st.liquidType[i2] === LIQUID_TYPE.LAVA;
-        const spec = isLava ? rec.liq.lava : rec.liq.water;
+        const liq = rec.liqStyles?.[String(style)] ?? rec.liq;
+        const spec = isLava ? liq.lava : liq.water;
         if (liqAmt > 0) {
           if (spec === 'notAllowed') return false;
           if (spec === 'onlyInFull' && liqAmt !== 255) return false;
@@ -181,14 +195,15 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
  *  ①主 Origin 对位；②方向备选水平镜像；③★全窗吸附——
  *    水平覆盖点击列落在物件横向跨度内的所有锚（贴墙缝点首/尾格即成），垂直
  *    覆盖「点击格作为底锚行正上方悬坐」（点到地表固体上时幽灵整体上移），
- *    按「Origin 所在格到点击的曼哈顿距」升序取首个满分者。 */
-export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number, rec: AnchorRec):
-  { x: number; y: number } | null {
+ *    按「Origin 所在格到点击的曼哈顿距」升序取首个满分者。
+ *  style = itemDef.placeStyle（★M-3b 子样式液体档,透传 validateAnchors）。 */
+export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number, rec: AnchorRec,
+  style = 0): { x: number; y: number } | null {
   const prim = { x: cx - rec.ox, y: cy - rec.oy };
-  if (validateAnchors(st, prim.x, prim.y, rec)) return prim;
+  if (validateAnchors(st, prim.x, prim.y, rec, style)) return prim;
   if ((rec.dirs?.length ?? 0) > 0 && rec.w > 1) {
     const mx = { x: cx - ((rec.w - 1) - rec.ox), y: cy - rec.oy };
-    if (mx.x !== prim.x && validateAnchors(st, mx.x, mx.y, rec)) return mx;
+    if (mx.x !== prim.x && validateAnchors(st, mx.x, mx.y, rec, style)) return mx;
   }
   // ③ 全窗吸附：横向让点击列 ∈ [ax, ax+w-1]（ax ∈ [cx-w+1, cx]，与 Origin 解耦），
   //    纵向 ay ∈ [cy-h, cy]：「物件直接坐在点击行上方」(ay=cy-h, 点地表块本体)
@@ -205,7 +220,7 @@ export function chooseAnchorFromClick(st: World['store'], cx: number, cy: number
   }
   out.sort((a, b) => a.d - b.d || a.ay - b.ay || a.ax - b.ax);
   for (const c of out) {
-    if (validateAnchors(st, c.ax, c.ay, rec)) return { x: c.ax, y: c.ay };
+    if (validateAnchors(st, c.ax, c.ay, rec, style)) return { x: c.ax, y: c.ay };
   }
   return null;
 }

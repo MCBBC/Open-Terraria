@@ -18701,7 +18701,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return sp;
     })();
     if (anchorRec && anchorRec.w > 1 || anchorRec && anchorRec.h > 1) {
-      const pick = chooseAnchorFromClick(st, tx, ty, anchorRec!);
+      // stylePlumb（M-3b）：placeStyle → TileObjectData style → validateAnchors 子样式
+      // 液体档（heldInst 实例级覆盖已在 :18666 合并进 itemDef）
+      const pick = chooseAnchorFromClick(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0);
       if (!pick) return;
       tx = pick.x; ty = pick.y;
       anchorCovered = true;
@@ -18868,7 +18870,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
       ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
     if (needSupport && anchorCovered
-      && !validateAnchors(st, tx, ty, anchorRec!)) return;   // 双保险(状态未变时恒真)
+      // stylePlumb（M-3b）：placeStyle 子样式液体档（火把外 27 族水下/岩浆可放性，
+      // recon-tileobj liqStyles；缺省 0=基记录,行为不变）
+      && !validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;   // 双保险(状态未变时恒真)
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
     //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
     if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
@@ -26554,6 +26558,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         break;
       }
       case 597: set(table.pylons[String(Math.floor(fx / 54))] ?? 4876); break;    // 传送塔(:33158)
+      case 10: case 11: {                                            // 门(:34038-34064)
+        // style = 行段 fy/54 + 列段×36(闭 fx/54、开 fx/72);样式 11 神庙锁门 =
+        // 神庙钥匙图标 1141(:34056-34058 覆写,GetDoorItem(11) 本身=0);>68 档外
+        // GetDoorItem default=0 → 无图标(:34062 num9!=0 门)。走 styleDropVidOfFrames
+        // 同源 Doors 表(域内=GetDoorItem 精确,失谐钳制仅在掉落侧契约)
+        const style = Math.floor(fy / 54) + 36 * Math.floor(fx / (sheet === 10 ? 54 : 72));
+        if (style === 11) { set(1141); break; }
+        if (style > 68) break;
+        const vid = styleDropVidOfFrames(sheet, fx, fy);
+        if (vid > 0) set(vid);
+        break;
+      }
       default: break;
     }
   }

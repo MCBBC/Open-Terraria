@@ -76,10 +76,15 @@ const shot = await page.evaluate(async () => {
     i++;
     await wait(620);
   }
-  await wait(500);
-  return { ok: true, fired: i, alive: (g.entities?.projectiles ?? []).filter((e) => !e.dead).length };
+  await wait(200);
+  // 画布直读（DOM 面板不挡）
+  const rx = 0, ry = 0, rw = W, rh = H;
+  const sc = document.createElement('canvas');
+  sc.width = rw; sc.height = rh;
+  sc.getContext('2d').drawImage(cv, 0, 0);
+  return { ok: true, fired: i, alive: (g.entities?.projectiles ?? []).filter((e) => !e.dead).length, png: sc.toDataURL('image/png') };
 });
 if (!shot.ok) { console.log(JSON.stringify(shot)); await browser.close(); process.exit(1); }
-try { await page.screenshot({ path: '/tmp/zc-wreath.png' }); } catch {}
+writeFileSync('/tmp/zc-wreath.png', Buffer.from(shot.png.split(',')[1], 'base64'));
 console.log(JSON.stringify({ fired: shot.fired, alive: shot.alive }));
 await browser.close();

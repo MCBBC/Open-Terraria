@@ -321,6 +321,54 @@ const STAFF_ITEMS = new Set([
   6152, 6153, 6154, 6155, 6173,
 ]);
 
+/** ★投射物绘制分层（2026-09-02 用户实报"垂直向上发射火箭,弹体+尾焰叠在武器
+ *  贴图上"定罪重写）。原版投射物默认层 = DrawProjectiles（Main.cs:63199,只画
+ *  drawLayer==0,:22405）画在 DrawPlayers_AfterProjectiles（:63204）【之前】
+ *  = 弹在玩家/武器【下层】——1405(:42720→:42722)/1456(:56481→:56482)/1457
+ *  三代基准全一致。本仓 2026-08-25 冰川之牙批曾注"原版 DrawProjectiles 在
+ *  DrawPlayers 之后、弹在玩家之上"系行号误引（:63204 实为
+ *  DrawPlayers_AfterProjectiles 本体）。
+ *  分层字段 = Projectile.drawLayer（Projectile.cs:422;SetDefaults :757 归零;
+ *  CacheProjDraws Main.cs:38822 switch 1-6 分档）：
+ *    4 → DrawCacheProjsOverPlayers（:63205,玩家层组【之后】）= 冰川之牙 1115
+ *        等 4 型——2026-08-25 用户实报的蓄力冰矛压角色即此族的个别待遇;
+ *    7/8 → PlayerDrawLayers.cs:3154/:3891 在玩家绘制管线内持弹位插入
+ *          （DrawHeldProj :4325）= 身体【前】——DefaultToSpear/Whip/Flail/
+ *          Yoyo/DrillOrChainsaw/Shortsword（Projectile.cs:10706-10787）与静态
+ *          7/8 表全走此档（近战持弹族从不出现在玩家身后）;
+ *    5 → OverWiresUI（:63263,导线之上）。
+ *  本仓无"玩家管线内持弹位"通用通道（仅 190 食人鱼账本/633 棱镜队列专用）→
+ *  4/5/7/8 族统一留在既有"玩家后"冲刷（对 7/8 族=身体前的既有观感零回归）,
+ *  0 层族（火箭/箭/法弹/召唤/敌弹等大多数）改画玩家【前】冲刷=原版层序。
+ *  表值 = 1457 SetDefaults 全量提取（DefaultTo* 调用点 :10711-:10787 +
+ *  静态赋值点逐行归型）。 */
+const PROJ_DRAW_OVER_PLAYERS = new Set<number>([
+  // drawLayer=4（OverPlayers,Main.cs:38834）:
+  759, 1106, 1115, 1116,
+  // drawLayer=5（OverWiresUI）:
+  651,
+  // drawLayer=7/8 静态（PlayerDrawLayers.cs:3154/:3891 持弹位;AI_DisplayDoll
+  //   的动态 7 系模特展示弹,本仓未实装=不收）:
+  439, 445, 460, 535, 536, 591, 595, 600, 611, 615, 630, 633,
+  697, 699, 705, 707, 708, 714, 735, 927, 1040,
+  // DefaultToSpear（:10722）:
+  46, 47, 49, 64, 66, 97, 105, 130, 153, 212, 215, 218, 222, 342, 367, 368,
+  730, 877, 878, 879, 1103,
+  // DefaultToDrillOrChainsaw（:10734）:
+  57, 58, 59, 60, 61, 62, 107, 213, 214, 216, 217, 219, 220, 223, 224, 252,
+  369, 427, 428, 429, 430, 431, 432, 509, 609, 610,
+  // DefaultToFlail（:10755）:
+  25, 26, 35, 63, 154, 247, 757, 947, 948, 1058,
+  // DefaultToYoyo（:10766）:
+  534, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554,
+  555, 562, 563, 564, 999,
+  // DefaultToShortsword（:10775）:
+  802, 842, 938, 939, 940, 941, 942, 943, 944, 945, 1127,
+  // DefaultToWhip（:10706;ProjectileID.Sets.IsAWhip 18 枚,ID/ProjectileID.cs:35）:
+  841, 847, 848, 849, 912, 913, 914, 915, 952, 1028, 1029, 1030, 1031, 1032,
+  1033, 1034, 1035, 1104,
+]);
+
 /** Main.DrawPlayerItemPos（Main.cs:3305-3663）1:1：useStyle 5 非法杖（枪/弓）握把。
  *  值 = [num（origin.X = -num），dy（result.Y = H/2 + dy）]；缺省 [10, 0]。
  *  外层 switch 在前（95..1835）；default 内层 switch 只对未命中外层的 id 生效
@@ -3306,13 +3354,17 @@ export class Renderer {
       if ((rp.sitting || rp.sleeping) && !rp.dead) this.drawPlayer(rp, world, rp.swingNet, flicker);
     }
     if ((player.sitting || player.sleeping) && !player.dead) this.drawPlayer(player, world, swing, flicker);
-    // ★投射物层前移登记（2026-08-25 用户实报冰川之牙蓄力冰矛被角色贴图遮挡）：
-    //   原版层序 = DrawNPCs → DrawPlayers → DrawProjectiles（弹在玩家【之上】）
-    //   ——本仓曾把自带 draw 的弹混入本 y 排序循环画在 drawPlayer【之前】= 玩家
-    //   贴图整体盖住弹体（蓄力冰矛挂玩家中心,只露两端刺尖）。弹的 draw 挪到
-    //   drawPlayer 之后（下方 postPlayerDraws 冲刷）,账本登记仍在原位（drawPlayer
-    //   同帧消费 heldProj 指向）
+    // ★投射物双队列分层（2026-09-02 重写,定罪见 PROJ_DRAW_OVER_PLAYERS 表注）：
+    //   2026-08-25 冰川之牙(1115)批把全部自带 draw 的弹挪到 drawPlayer 之后,
+    //   系对原版序的行号误引——原版 DrawProjectiles（Main.cs:63199）在
+    //   DrawPlayers_AfterProjectiles（:63204）之【前】（弹在玩家/武器下层,
+    //   1405/1456/1457 三代一致）;1115 真身是 drawLayer=4 OverPlayers 族,
+    //   "弹在玩家上层"是它一族的个别待遇而非全体弹的层序。现按原版 drawLayer
+    //   分层：0 层族画玩家【前】（prePlayerDraws,出生时武器压住弹体=原版观感）,
+    //   4/5/7/8 族维持玩家【后】冲刷。heldProj 账本登记仍在原位（drawPlayer
+    //   同帧消费 heldProj 指向,与本队列无耦合）
     const postPlayerDraws: Array<() => void> = [];
+    const prePlayerDraws: Array<() => void> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
@@ -3339,15 +3391,16 @@ export class Renderer {
       }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
-        // 投射物(带 projId:箭/法弹/蓄力件等)→ 玩家【之后】绘制（原版
-        //   DrawProjectiles 在 DrawPlayers 之后;曾画在玩家之前=冰川之牙蓄力
-        //   冰矛被角色贴图遮挡,用户实报）。其余自带 draw 实体(小动物等
-        //   原版 NPC 族)仍在玩家前。heldProj 账本登记两路都在（drawPlayer
-        //   同帧消费 heldProj 指向）
+        // 投射物(带 projId)按原版 drawLayer 分层（定罪见 PROJ_DRAW_OVER_PLAYERS
+        //   表注:0 层=火箭/箭/法弹/召唤/敌弹等→玩家【前】;4/5/7/8 族→玩家【后】）。
+        //   其余自带 draw 实体(小动物等原版 NPC 族)仍在玩家前。
         noteHeldProjEntity(e);
         if ('projId' in (e as object)) {
           const ee = e as unknown as { draw(r: Renderer, cam: Camera): void };
-          postPlayerDraws.push(() => ee.draw(this, cam));
+          const queue = PROJ_DRAW_OVER_PLAYERS.has((e as { projId?: number }).projId ?? -1)
+            ? postPlayerDraws
+            : prePlayerDraws;
+          queue.push(() => ee.draw(this, cam));
         } else {
           (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
         }
@@ -3378,6 +3431,15 @@ export class Renderer {
       const eb = this.emoteSheet();
       if (eb) drawEmotes(this.ctx, eb);
     }
+    // ---- 投射物 0 层族冲刷（★2026-09-02 分层修复：原版 DrawProjectiles
+    //      Main.cs:63199 在 DrawPlayers_AfterProjectiles(:63204)【之前】——弹在
+    //      玩家/武器【下层】,出生瞬间武器压住弹体,飞离后自然露出（1405/1456/
+    //      1457 三代一致）。本仓 2026-08-25 起全体弹画在玩家后（行号误引）,
+    //      火箭等贴脸武器出生弹体叠在武器贴图上=用户实报;0 层族现回原版位,
+    //      4/5/7/8 族仍走下方 postPlayerDraws（表注见 PROJ_DRAW_OVER_PLAYERS）。
+    //      位置=FlameParticle(3.85=ParticleSystem_World_BehindPlayers :63200-03,
+    //      原版在弹与玩家之间)【之前】→ :63199→:63200→:63204 三段序 1:1）----
+    for (const draw of prePlayerDraws) draw();
     // 3.85 FlameParticle 层（Main.ParticleSystem_World_BehindPlayers，Main.cs:61692-61693：
     //     投射物之后、玩家之前——山羊坐骑 47 地面冲刺火焰本体；dust 6 段在
     //     Player.goatFlames 回调，编排器 Spawn_WallOfFleshGoatMountFlames :3259-3306）。
@@ -3403,9 +3465,13 @@ export class Renderer {
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
     for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet, flicker); }
-    // ---- 投射物层（原版 DrawProjectiles :63204 段序 = DrawPlayers 之后、
-    //      DrawItems 之前——弹在玩家【之上】。2026-08-25 用户实报冰川之牙蓄力
-    //      冰矛长在角色贴图后面：弹曾混入实体 y 排序循环画在 drawPlayer 之前）----
+    // ---- 投射物 4/5/7/8 层族冲刷（原版 DrawCachedProjs(OverPlayers) Main.cs:63205
+    //      在 DrawPlayers_AfterProjectiles(:63204) 之后——drawLayer=4 族画在玩家
+    //      层组【上】（冰川之牙 1115/1116/1106/759,2026-08-25 用户实报的蓄力冰矛
+    //      压角色即此族待遇）;7/8 族=玩家绘制管线内持弹位（PlayerDrawLayers.cs:
+    //      3154/:3891——矛/鞭/连枷/悠悠球/钻头/短剑/DefaultTo* 全家,身体【前】）,
+    //      本仓以玩家后冲刷近似=既有观感零回归。0 层族已回玩家【前】冲刷
+    //      （Main.cs:63199 在 :63204 之前）,见 3.85 段前注）----
     for (const draw of postPlayerDraws) draw();
     // 终极棱镜晶体(633 drawLayer=7)冲刷:原版在玩家绘制层组内持物层位置插入
     // (PlayerDrawLayers.cs:3154→:4318)= 身体【前】——实体循环直画被纸娃娃盖住
@@ -12930,7 +12996,13 @@ export class Renderer {
           //   弹出生点即采）：up/down 贴图跨度均 [−13.6,+8.0]（世界 px，1.25 缩放取整
           //   误差 ≤0.8），弹列恒 cx；"7px≈fh/2" 假说不成立（759 fh/2=11，且
           //   origin.y=H/2 为原文）。
-          offX = -2;
+          // ★用户拍板（2026-09-02，刻意非原版偏离）：垂直/斜向上时贴图视觉居中——
+          //  原版钉 cx−2，中心线穿贴图一侧（蓝队 N 定谳=原版本相）；用户裁定对齐
+          //  中心线：上半平面 sin(aim)<0 线性补偿（水平 ±π 零、垂直向上满额
+          //  7px=用户目测，斜向上按 −sin 渐入）。★方向勘误：首版 −7（左移）
+          //  用户实测偏移 7→14 反向加深，实偏=中心线左 7px → 补偿改 +7（右移）。
+          //  消费段 facing×offX 镜像自动对称——水平两向/垂直向下零改动。
+          offX = -2 + Math.max(0, -Math.sin(aim)) * 7;
           offY = p.h * 0.5 + dp[1];
           rot = aim;
           drawOX = dp[0]; drawOY = -fh * 0.5;

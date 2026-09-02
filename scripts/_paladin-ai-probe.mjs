@@ -1,7 +1,8 @@
 // 圣骑士 290 AI 行为探针（AI_003_Fighters 射击族分支 NPC.cs:59659-60393）
 // A) 有视线 <700px → 开瞄(ai2>0)+掷锤(弹 300)、vx 衰减定身（原版如此）
 // B) 视线被墙挡 → 不开瞄、行走 vx≈±1 朝玩家
-// C) 距离 >700px 有视线 → 不开瞄、行走
+// C) 超开瞄包络出生(784px) → 行走逼近，入包络(≈691px=±40抖动+0.1|dx|下坠后矢量)
+//    后转开瞄掷锤——演示原版「走→瞄」完整动态（射程门是抖动包络非裸 700px）
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

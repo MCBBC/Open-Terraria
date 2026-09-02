@@ -3665,7 +3665,7 @@ class DualProvider {
     drlMark(`DR|S|i${iN}|RGN rc=${drlRc()}`);
     // ★IIIII172：房终态界域/形状账（零掷;与 x86 DR|RB 同构,protection 逐格差对拍用）
     for (let rbi = 0; rbi < data.rooms.length; rbi++) {
-      const rb = data.rooms[rbi]!;
+      const rb = data.rooms[rbi] as DRoomBase & { shapeDataOuter?: ShapeData };
       drlMark(`DR|RB|i${iN}|r=${rbi}|ty=${rb.settings.roomType}`
         + `|L=${rb.outer.L}|T=${rb.outer.T}|R=${rb.outer.R}|B=${rb.outer.B}`
         + `|iL=${rb.inner.L}|iT=${rb.inner.T}|iR=${rb.inner.R}|iB=${rb.inner.B}`

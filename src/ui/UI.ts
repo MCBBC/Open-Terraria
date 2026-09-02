@@ -414,13 +414,23 @@ const CSS = `
 .sw-eqdock .sw-lbl { text-shadow:1px 1px 0 #000; }
 /* 背包面板透明底（2026-09-02 用户要求去底去框）：同补偿,标题/标签/合成站文字投影 */
 .sw-inv .sw-lbl, .sw-inv .sw-title, .sw-inv [data-role="stations"] { text-shadow:1px 1px 0 #000; }
-/* 背包网格=热键栏同款渲染（2026-09-02 用户要求格距/透明度对齐）：52px 盒 ×0.75
-   缩放（视觉 39=--slot 轨道,节距 43+4 与热键栏一致）+ Inventory_Back20 半透
-   0.575（热键栏未选中同款,alpha 147/255）。transform 缩放后命中区=视觉盒,
-   不越轨拦截邻格;悬停回满透明度（亮度滤镜保留） */
+/* 槽底统一走 ::after 纹理层（z -1 压在图标/数字/收藏角标之下）+ --slot-alpha
+   半透：半透明只作用于格子底,道具物品本体全亮（2026-09-02 用户要求;原版
+   Back20 alpha147 同语义）。元素自身 background-image 关掉防双重贴图;
+   isolation 防负 z 伪元素逃出槽的堆叠上下文 */
+.sw-hotbar .sw-slot, .sw-invgrid .sw-slot, .sw-inv .sw-slot.sm, .sw-inv .sw-trash {
+  background-image:none; isolation:isolate; }
+.sw-hotbar .sw-slot::after, .sw-invgrid .sw-slot::after, .sw-inv .sw-slot.sm::after, .sw-inv .sw-trash::after {
+  content:''; position:absolute; inset:0; z-index:-1;
+  background:var(--slot-bgimg, url(sprites/vanilla/Inventory_Back20.png)) 0 0 / 100% 100%;
+  opacity:var(--slot-alpha, 1); }
+/* 背包网格=热键栏同款渲染（2026-09-02）：52px 盒 ×0.75 缩放（视觉 39=--slot
+   轨道）;节距由 syncInvGridGeometry 按热键栏实测值运行时写入（grid 轨道+间距）,
+   任何环境缩放下与热键栏逐像素一致 */
 .sw-invgrid .sw-slot { width:52px; height:52px; transform:scale(0.75); transform-origin:top left;
-  opacity:0.575; background-image:url(sprites/vanilla/Inventory_Back20.png); }
-.sw-invgrid .sw-slot:hover { opacity:1; }
+  --slot-alpha:0.575; }
+.sw-invgrid .sw-slot:hover::after, .sw-inv .sw-slot.sm:hover::after, .sw-inv .sw-trash:hover::after {
+  opacity:1; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -3056,6 +3066,8 @@ export class UI {
   private itemSearchBtn!: HTMLButtonElement;
   /** 图鉴钮（簇格 2×3 取挂引用） */
   private bestiaryBtn!: HTMLButtonElement;
+  /** 背包网格容器（syncInvGridGeometry 写轨道用,2026-09-02） */
+  private invGridEl: HTMLElement | null = null;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
   private playerListBtn: HTMLButtonElement | null = null;
   /** 住房面板开合（mainFlow.openHousing/面板 onClosed 回写）——住房图标钮
@@ -3432,27 +3444,15 @@ export class UI {
     // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
     this.achAdvisorEl = createAchievementAdvisor(this.game);
 
-    // 背包 10×4（10-39）
+    // 背包 10×4（10-39）。★「背包」标签行已摘（2026-09-02 用户要求：去掉二字
+    // 直接贴紧热键栏;道具搜索文字钮此前已图标化,向导反查钮 2026-08-14 摘）
     const right = el('div');
-    // 背包标签行 + 调试搜索按钮（原版无此按钮——调试用道具检索器）
-    {
-      const lblRow = el('div');
-      lblRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; width:100%;';
-      {   // 背包标签=面板最顶内容,margin-top 清零（sw-lbl 默认 6px,2026-09-02 贴近热键栏）
-        const invLbl = el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel'));
-        invLbl.style.marginTop = '0';
-        lblRow.appendChild(invLbl);
-      }
-      // 道具搜索文字钮已摘（2026-08-27 图标化上移顶排图标组,见上方 buildInventoryPanel）
-      // 向导配方反查按钮已摘（2026-08-14 用户要求；openGuideSearch 逻辑保留，
-      // 通道如需再开走 Guide 对话入口）
-      right.appendChild(lblRow);
-    }
     const grid = el('div', 'sw-invgrid');
-    // grid-auto-rows=--slot（39px）：52px 盒经 ×0.75 缩放后视觉 39,行距 39+4=43
-    // 与热键栏一致（缺此行会被未缩放的 52px 内容盒撑成 56 行距,2026-09-02 实测）
+    // 轨道/间距初值 = --slot(39)+4（D0 桌面恒等值）;此后每帧由
+    // syncInvGridGeometry 按热键栏实测节距改写（任何缩放环境下与热键栏逐像素一致）
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(10, var(--slot));'
       + 'grid-auto-rows:var(--slot); gap:4px;';
+    this.invGridEl = grid;
     // 背包网格 = 槽 10-49（10×4）。★曾写到 INV_SIZE=58——50-57 是钱币/弹药槽
     // （COIN_START/AMMO_START,已在左列渲染），混进网格成第 5 行幻影格：query 首匹配
     // 让左列元素吃掉绘制、悬停却读出钱币/弹药 tooltip（2026-08-26 用户实报红框行）。
@@ -3516,6 +3516,7 @@ export class UI {
     // ★2026-08-27 用户要求：堆叠钮挂垃圾桶下方（原在背包网格下沿）——
     //  右列构成：弹药|钱币 → 垃圾桶 → 2×3 钮格 → 成就卡竖列
     clusterRow.append(this.housingBtn, this.bestiaryBtn, bEmote, this.itemSearchBtn);   // 2×2 图标行
+    clusterRow.appendChild(row);   // 联机/旅程钮行（display:contents,子项成第 4 行格;见 sideCol 段）
     rightRail.appendChild(clusterRow);
     body.appendChild(right);
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
@@ -3524,14 +3525,13 @@ export class UI {
     // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
-    // ---- 合成右侧竖列（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列
-    //  只剩联机/旅程钮行 + 成就卡。margin 收 6px=成就卡紧贴钮格下方（用户复报
-    //  "成就按钮也要顶上去"）;不再 flex:1——搜索入格后列内无需撑满）----
+    // ---- 成就卡（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列只剩
+    //  成就卡;margin 6→2px=用户复报"依然离太远,继续缩小"。联机/旅程钮行以
+    //  display:contents 入簇格（其子成为第 4 行格,单机不可见不占位）----
     const sideCol = el('div');
-    sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center;'
-      + 'margin-top:6px;';
-    row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 联机/旅程钮行（竖排）
-    sideCol.appendChild(row);   // 联机玩家列表/旅程入口钮（单机经典世界不可见）
+    sideCol.style.cssText = 'display:flex; flex-direction:column; gap:4px; align-items:center;'
+      + 'margin-top:2px;';
+    row.style.cssText = 'display:contents;';   // 联机/旅程钮 → 簇格第 4 行（子项直入网格）
     sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
     rightRail.appendChild(sideCol);
     // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列
@@ -4318,7 +4318,9 @@ export class UI {
     // 权威重绘：清掉残留的 glow 色层（面板 display:none 期间动画被 cancel 而非
     // end——overlay 会以基础样式（不透明）卡死在槽上，重开面板即一排色块）
     slotEl.querySelector('.sw-glow-overlay')?.remove();
-    slotEl.style.backgroundImage = `url(sprites/vanilla/${tex}.png)`;
+    // 槽底贴图走 --slot-bgimg（::after 纹理层消费,2026-09-02）——物品/数字不随
+    // 格子半透明（半透只在 ::after 的 opacity 上）
+    slotEl.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${tex}.png)`);
     if (tint) slotEl.style.setProperty('--slot-tint', tint);
     else slotEl.style.removeProperty('--slot-tint');
   }
@@ -4481,8 +4483,8 @@ export class UI {
         slotEl.style.width = slotEl.style.height = '52px';
         slotEl.style.transform = `scale(${compact.q})`;
         slotEl.style.transformOrigin = 'top left';
-        slotEl.style.opacity = i === inv.selected ? '1' : '0.62';
-        slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${i === inv.selected ? 14 : 20}.png)`;
+        slotEl.style.setProperty('--slot-alpha', i === inv.selected ? '1' : '0.62');
+        slotEl.style.setProperty('--slot-bgimg', `url(sprites/vanilla/Inventory_Back${i === inv.selected ? 14 : 20}.png)`);
         slotEl.style.boxShadow = '';
         if (!slotEl.querySelector('.sw-slot-num')) {
           const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
@@ -4507,8 +4509,8 @@ export class UI {
         slotEl.style.width = slotEl.style.height = '52px';
         slotEl.style.transform = `scale(${scale})`;
         slotEl.style.transformOrigin = 'top left';
-        slotEl.style.opacity = sel ? '1' : '0.575';
-        slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${sel ? 14 : 20}.png)`;
+        slotEl.style.setProperty('--slot-alpha', sel ? '1' : '0.575');
+        slotEl.style.setProperty('--slot-bgimg', `url(sprites/vanilla/Inventory_Back${sel ? 14 : 20}.png)`);
         slotEl.style.boxShadow = ''; // 原版快捷栏不画收藏高亮（ItemSlot :1987 context!=13）
         if (!slotEl.querySelector('.sw-slot-num')) {
           const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
@@ -4530,6 +4532,32 @@ export class UI {
     const held = inv.slots[inv.selected];
     const name = held ? Lang.itemNameByKey(ITEM_DEFS[held.id]?.key ?? '') : null;
     this.hotbarNameEl.textContent = name || Lang.inter(37);
+  }
+
+  /** 背包网格几何=热键栏实测值（2026-09-02 用户复报格距不一致）：读热键栏【未选中】
+   *  相邻两槽的实测节距/视觉宽（getBoundingClientRect 已含缩放/档位/浏览器缩放；
+   *  选中槽 scale 1.0 步进 56 会污染节距,故取一对连续未选中槽），写回网格轨道与
+   *  间距——任何环境下两者逐像素一致 */
+  private syncInvGridGeometry(): void {
+    const grid = this.invGridEl;
+    if (!grid) return;
+    const sel = this.game?.player.inv.selected ?? -1;
+    let a: HTMLElement | null = null, b: HTMLElement | null = null;
+    for (let i = 0; i < 9; i++) {
+      if (i === sel || i + 1 === sel) continue;
+      a = this.slotEl(i, 'inv'); b = this.slotEl(i + 1, 'inv');
+      if (a && b) break;
+      a = b = null;
+    }
+    if (!a || !b) return;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const pitch = rb.left - ra.left;
+    const cell = ra.width;
+    if (!(pitch > cell) || !(cell > 8)) return;   // 过渡期/异常布局不写
+    const gap = Math.max(0, pitch - cell);
+    grid.style.gridTemplateColumns = `repeat(10, ${cell}px)`;
+    grid.style.gridAutoRows = `${cell}px`;
+    grid.style.columnGap = grid.style.rowGap = `${gap}px`;
   }
 
   /** 触屏长按槽位 tooltip(mobile-adaptation-plan 模块④):显示后挂一次性
@@ -4565,11 +4593,9 @@ export class UI {
         else slotEl.appendChild(el('span', 'cnt', String(content.stack)));
       } else if (oldCnt) oldCnt.remove();
     }
-    // 收藏星标（原版 Inventory_Back10 金边贴图——ItemSlot :1966-1985 favorited 分支）
-    const inHotbar = !!slotEl.closest('.sw-hotbar');
-    if (!inHotbar) {
-      slotEl.style.backgroundImage = content?.favorited ? 'url(sprites/vanilla/Inventory_Back10.png)' : '';
-    }
+    // 收藏星标（原版 Inventory_Back10 金边贴图——ItemSlot :1966-1985 favorited 分支）：
+    // 贴图由 paintSlotChrome 的 --slot-bgimg 统一绘制（favorited → Back10），此处
+    // 不再直写 backgroundImage——2026-09-02 槽底迁 ::after 后直写会绕过半透层
     slotEl.title = content?.favorited ? Lang.text('Mods.SandboxWorld.Toast.Favorited') : '';
   }
 
@@ -4593,6 +4619,7 @@ export class UI {
     // 快捷栏刷新（2026-08-18 用户报"数字键失效"：advisor 段异常曾把 rAF 回调
     // 整体炸掉，selected 已变而画面不动）
     this.refreshHotbar();
+    this.syncInvGridGeometry();   // 网格节距/格宽=热键栏实测（2026-09-02）
     this.moveGhost();
     this.paintTrash();
     this.paintAccEyes();

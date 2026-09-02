@@ -52,6 +52,51 @@ describe('高门右键切换（toggleTallGate 行为锁）', () => {
   });
 });
 
+// 门悬停图标回归锁(tileInteractionsMouseOver:Player.cs:34038-34064 普通门/34148 高门)
+describe('门悬停图标（tileInteractionsMouseOver）', () => {
+  it('普通门:样式0=木门25、fx=54 列段=style36、神庙锁门 fy594=神庙钥匙1141;高门=3240', () => {
+    const w = new World(60, 120, 1, 'hover');
+    const st = w.store;
+    const T10 = TILE_BY_KEY['door_closed'] ?? -1;
+    const T11 = TILE_BY_KEY['door_open'] ?? -1;
+    const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
+    const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; player: unknown; input: { rightDown: boolean };
+      inTileRange(x: number, y: number, tb?: number): boolean;
+      tileInteractionsMouseOver(tx: number, ty: number, p: unknown): void;
+    };
+    g.world = w;
+    g.inTileRange = () => true;                        // 射程门桩(单独覆盖面已由 r24 锁)
+    const p = {
+      cursorItemIconEnabled: false, cursorItemIconID: 0,
+      cursorItemIconPush: 0, cursorItemIconText: '', cursorItemIconReversed: false,
+    };
+    const hover = (tx: number, ty: number) => {
+      p.cursorItemIconEnabled = false; p.cursorItemIconID = 0;
+      g.tileInteractionsMouseOver(tx, ty, p);
+      return p.cursorItemIconID;
+    };
+    // 闭态木门:fy=0,fx=0 → style 0 → 25
+    st.setTileSilent(30, 40, T10, 0, 0);
+    expect(hover(30, 40)).toBe(25);
+    // 闭态列段 1:fx=54 → style 36(Items 33 档:Doors 表域内)
+    st.setTileSilent(31, 40, T10, 54, 0);
+    expect(hover(31, 40)).toBeGreaterThan(0);
+    // 神庙锁门:fy=594(行段 11) → 神庙钥匙 1141(:34056-34058 覆写)
+    st.setTileSilent(32, 40, T10, 0, 594);
+    expect(hover(32, 40)).toBe(1141);
+    // 开态:fx=0 → style 0 → 25
+    st.setTileSilent(33, 40, T11, 0, 0);
+    expect(hover(33, 40)).toBe(25);
+    // 高门 388/389 → 3240(:34148-34152)
+    st.setTileSilent(34, 40, T388, 0, 0);
+    st.setTileSilent(35, 40, T389, 0, 0);
+    expect(hover(34, 40)).toBe(3240);
+    expect(hover(35, 40)).toBe(3240);
+  });
+});
+
 const idOfSheet = (s: number) => {
   const id = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === s);
   expect(id, `sheet ${s} 应有 def`).toBeGreaterThan(0);
