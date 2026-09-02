@@ -3,7 +3,9 @@ import { it } from 'vitest';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { UnifiedRandom } from '../src/core/rng';
 
-it('patch visibility in pipeline', async () => {
+const RUN = process.env.SW_ORACLE === '1';   // ★一次性生成仪(2026-09-02 补门):全管线重活在身,缺省 skip 防默认 sweep 超时;SW_ORACLE=1 启用
+
+(RUN ? it : it.skip)('patch visibility in pipeline', async () => {
   const urp = UnifiedRandom.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
   const seen: string[] = [];
   const originals: Record<string, (...a: unknown[]) => unknown> = {};

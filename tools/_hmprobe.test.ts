@@ -25,6 +25,9 @@ import type { World } from '../src/world/World';
 const RUN = process.env.SW_HM === '1';
 const OUT = process.env.SW_HM_OUT ?? '/tmp/hm1458-rig/out/g/js';
 const SEED = process.env.SW_HM_SEED ?? '9293480';
+// evil：0/1=强制（缺省 0，与 x86 run-hm-probe.sh 的 SW_EVIL 同口径）；-1=自然掷
+// （Reset cs:11321 crimson=genRand.Next(2)==0 原样生效）——crimson-roll 读取位判定实验用
+const EVIL = Number(process.env.SW_HM_EVIL ?? 0) as -1 | 0 | 1;
 const W = Number(process.env.SW_HM_W ?? 4200);
 const H = Number(process.env.SW_HM_H ?? 1200);
 
@@ -113,7 +116,7 @@ function dumpStore(st: TileStore, dir: string, tag: string): void {
   apiPatch('next', origNext);
   let world: World;
   try {
-    world = await generateWorld({ width: W, height: H, seedText: SEED, evil: 0 });
+    world = await generateWorld({ width: W, height: H, seedText: SEED, evil: EVIL });
   } finally {
     g.__swOnRoll = prevHook;
   }
@@ -145,12 +148,19 @@ function dumpStore(st: TileStore, dir: string, tag: string): void {
     ),
   );
   dumpStore(world.store, OUT, 'pre');
+  // hardmode 段全量掷流捕获（x86 roll-x86-hm.txt 同口径对齐）
+  const hmLog: number[] = [];
+  g.__swOnRoll = (value: number) => {
+    hmLog.push(value);
+  };
   console.log(
     `[hm-probe-js] pre dumped seed=${world.seed} dungeonX=${world.dungeonX} ` +
       `groundLevel=${world.groundLevel} crimson=${world.crimson} ` +
       `dualDungeons=${!!world.seedFlags?.dualDungeons} remix=${!!world.seedFlags?.remix}`,
   );
   initializeHardMode(world, new RNG(world.seed));
+  g.__swOnRoll = prevHook;
+  writeFileSync(join(OUT, 'roll-js-hm.txt'), hmLog.join('\n') + '\n');
   dumpStore(world.store, OUT, 'post');
   console.log('[hm-probe-js] post dumped -> ' + OUT);
 }, 600000);

@@ -1,6 +1,9 @@
-// 瓦罐破坏回归：帧布局（底行 frameY=0 / 顶行 18——与家具相反）+ 整罐清除语义。
-// 背景：breakTile 的 object 锚点公式假设 frameY=0 在顶行，瓦罐相反 → 曾清错位置，
-// 罐体留在原地可无限刷战利品。修复：smashPot 洪水填充后逐格直接清除。
+// 瓦罐破坏回归：帧布局（原版序：顶行 frameY=0 / 底行 frameY=18——PotsPass.placePot
+// :112-117 与 wld 导入同序）+ 整罐清除语义。
+// 背景：反序帧时代（罐帧曾底行 0/顶行 18）object 锚点公式清错位、罐体残留可无限刷
+// 战利品 → 当时以四邻洪水找齐。★B-1（2026-09-02 九批）：全部罐帧写入面已归原版序,
+// smashPot 改【帧解码 2×2】精确收集（CheckPot :57287-57296 锚反推同式）——相邻共边
+// 罐不再被越权收编（洪泛仅作帧不自洽的理论回退臂保留）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
@@ -9,11 +12,12 @@ describe('瓦罐破坏', () => {
   const POT = TILE_BY_KEY['pot']!;
 
   function placePot(st: World['store'], x: number, y: number) {
-    // 与 potPass 相同的帧布局：底行 fy=0、顶行 fy=18
+    // 与 PotsPass.placePot 相同的帧布局（原版 PlacePot :54553-54562 序）：
+    // 占行 y-1（顶,fy=0）/y（底,fy=18）,锚行 y+1
     st.setTileSilent(x, y - 1, POT, 0, 0);
     st.setTileSilent(x + 1, y - 1, POT, 18, 0);
-    st.setTileSilent(x, y - 2, POT, 0, 18);
-    st.setTileSilent(x + 1, y - 2, POT, 18, 18);
+    st.setTileSilent(x, y, POT, 0, 18);
+    st.setTileSilent(x + 1, y, POT, 18, 18);
   }
 
   it('瓦罐 def 为 2×2 framed', () => {
@@ -22,15 +26,15 @@ describe('瓦罐破坏', () => {
     expect(def?.h).toBe(2);
   });
 
-  it('洪水填充清除：从任一格都能清掉整罐 2×2（smashPot 修复后语义）', () => {
-    for (const [hx, hy] of [[0, 1], [1, 1], [0, 2], [1, 2]]) {
+  it('洪泛回退臂（与 smashPotInner 保留臂同构）：从任一格都能收齐整罐 2×2', () => {
+    for (const [hx, hy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
       const w = new World(32, 32, 1, 't');
       const st = w.store;
       placePot(st, 10, 20);
-      // smashPot 的洪水填充（与实现同构）
+      // smashPotInner 回退臂的洪泛（与实现同构）
       const cells: Array<[number, number]> = [];
-      const stack: Array<[number, number]> = [[10 + hx, 20 - hy]];
-      const seen = new Set<number>([(10 + hx) * 100000 + (20 - hy)]);
+      const stack: Array<[number, number]> = [[10 + hx, 19 + hy]];
+      const seen = new Set<number>([(10 + hx) * 100000 + (19 + hy)]);
       while (stack.length) {
         const [cx, cy] = stack.pop()!;
         cells.push([cx, cy]);
@@ -44,26 +48,28 @@ describe('瓦罐破坏', () => {
       }
       expect(cells.length).toBe(4);
       for (const [cx, cy] of cells) st.setTile(cx, cy, 0);
-      // 整罐清空、且没误伤地面（y=20 行地面保持实心）
+      // 整罐清空（行 19/20）
       for (let dx = 0; dx < 2; dx++) {
-        for (let dy = 1; dy <= 2; dy++) expect(st.get(10 + dx, 20 - dy)).toBe(0);
+        for (let dy = 0; dy <= 1; dy++) expect(st.get(10 + dx, 19 + dy)).toBe(0);
       }
     }
   });
 
-  it('旧锚点公式对瓦罐失效（回归注释：frameY=0 在底行 → gy 语义反转）', () => {
-    // 命中顶行格 (x, y-2) 时 fyv=18 → gy=1 → 锚点上移到 y-3，
-    // 清除区域 (x, y-3)..(x+1, y-2) —— 误清罐上方空气且罐底残留在 y-1 行
+  it('★B-1 帧解码：任一格触发 → 锚反推=左上（10,19）,variant 带基不干扰（:57287-57296 同式）', () => {
     const w = new World(32, 32, 1, 't');
     const st = w.store;
-    for (let x = 0; x < 32; x++) st.setTileSilent(x, 20, T.DIRT);
-    placePot(st, 10, 20);
-    const fi = st.idx(10, 18); // 顶行
-    const gy = Math.floor(st.frameY[fi] / 18);
-    expect(gy).toBe(1);
-    const anchorY = 18 - gy; // 旧公式
-    // 旧清除区域：16..17 行——不含罐底 19 行 → 罐体残留可重复破坏
-    expect(anchorY + 1).toBeLessThan(19);
+    for (let x = 0; x < 32; x++) st.setTileSilent(x, 21, T.DIRT);
+    // variant 36 带基（PlacePot :54544 genRand.Next(3)*36 的中带）
+    st.setTileSilent(10, 19, POT, 36, 0);
+    st.setTileSilent(11, 19, POT, 54, 0);
+    st.setTileSilent(10, 20, POT, 36, 18);
+    st.setTileSilent(11, 20, POT, 54, 18);
+    for (const [hx, hy] of [[10, 19], [11, 19], [10, 20], [11, 20]]) {
+      const fi = st.idx(hx, hy);
+      const ax = hx - (Math.floor(st.frameX[fi] / 18) % 2);
+      const ay = hy - (Math.floor(st.frameY[fi] / 18) % 2);
+      expect([ax, ay]).toEqual([10, 19]);
+    }
   });
 
   it('generic object 锚点（breakTile 新算法）：styled 家具从任一格命中都清对整框', () => {

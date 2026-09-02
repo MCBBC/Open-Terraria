@@ -550,11 +550,25 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 93, 94, 95, 96, 1114, 253, 258, 102,
   //  α=255"系错锚（该行是 602 的）；GetAlpha 同支 (255−α,…,0) 加算白、
   //  aiStyle115 :35062-35076 ai[1]>30 后 α+=10 至 255 Kill = 先满亮后淡出自灭。
   //  若未来接出生面须连 AI_115 fade 段一并移植再评估入组。
+  //  ★T6 闭疑（2026-09-02 蓝队）：631【无 charm 面】——弧线引矢重定向门 Player.cs
+  //  :28680（HarpyCharmEffect）要求 `!projectile.arrow || owner!=me || aiStyle != 1 ||
+  //  HarpyCharmed` 即 aiStyle==1 才可引;631 SetDefaults（:6781-6792）aiStyle=122
+  //  （arrow=true 但 aiStyle 门直接排除）→ ADDITIVE_GLOW ∩ charm 重定向交集为空,
+  //  本仓 harpyCharmEffect 的 `(projectileData(631)?.aiStyle ?? -1) !== 1` 同判
+  //  （vanilla-projectiles.json 631.aiStyle=122 与原版一致）——疑点关闭零代码面。
   131, 631,
   // ★R1(T1,2026-09-02)：92 坠星入组——GetAlpha :80999 恒 (255,255,255,0) 纯加算白
   //  （GA case 92 return 1 配对;aiStyle5 通用闪烁档 0..200 不进 GetAlpha=振而不闪）。
-  //  可见面=本体加算 + light0.9 + 尘58@1/10 + gore16-18@1/20（subStepAI 92 支）。
-  92]);
+  //  可见面=本体加算 + light0.9 + 尘58@1/10 + gore 16-17（Next(16,18) 右开）@1/20
+  //  （subStepAI 92 支）。
+  92,
+  // ★T1（2026-09-02）：91 圣箭波入组——GetAlpha :81003 (200,200,200,0) A=0 加算灰
+  //  （"5 小丑箭"隐形先例反转后定谳:XNA 预乘 dst+=tex.rgb×(200/255),非隐形）;
+  //  GA case 91 return 200/255 配对,'lighter' 下 ga=200/255 = 同强度加算直译。
+  //  出生面核实=圣箭 516（vanilla-itemcombat.json shoot:91/shootSpeed 3.5,非红队
+  //  标注的"Starfury 星怒"——星怒剑星=503/星怒弹=9）;AI 尘（:56553-56560 d58|d15）
+  //  与 Kill 星雨（Game.onProjectileDeath 91/92 支）均已在,唯合成方式缺。
+  91]);
 /** GetAlpha :81457 支里走共享 −15/update 渐显的成员（Projectile.cs:56570-56592
  *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集，
  *  组体在 AI_001() 内(:54950 起)，全部 aiStyle=1 型每 AI update 恰一消费）。
@@ -573,6 +587,8 @@ const LASER_FADE15_PROJS = new Set([
   36, 84, 110, 158, 159, 160, 161, 180, 389]);
 const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
+  640: 255,                                    // 月总箭衍生体（SetDefaults :6902 alpha=255；
+                                                //  AI −25/substep 渐显并入 639 支,Kill 批 2026-09-02）
   207: 255, 837: 255,
   // R27：22 水花权杖 alpha=255(:1048)/27 水矢 alpha=255(:1103)+timeLeft/=2=1800(:1104)/
   // 45 恶魔镰刀 alpha=100(:1288，GetAlpha :81465-81468 恒 White 不读 α)——★F2 升格：
@@ -1691,6 +1707,16 @@ export class Arrow extends Entity {
   mlBoulder = false;
   /** 1021 localAI[1]：X 反弹计数（>3 消亡；轻落置 999 = rest 标） */
   private boulderBounces = 0;
+  /** localAI[1] 镜像（镖族 267/477/478/479 的分裂计数/放火节拍 :58273-58345、
+   *  1023 首拍旗 :56175——各弹互斥使用,479 分裂子镖注入 -1000 = 已分裂不再分） */
+  ai1Mirror = 0;
+  /** 639 月总箭 Kill 衍生初态四槽（P.cs:56381-56386 localAI[0]/[1]=出生 Center 快照、
+   *  ai[0]/[1]=初速快照,零零门首拍写入）——Kill :74825 owner 侧 NewProjectile(640)
+   *  的出生位/初速数据源（Kill 消亡面批 2026-09-02） */
+  moonArrowL0 = 0;
+  moonArrowL1 = 0;
+  moonArrowA0 = 0;
+  moonArrowA1 = 0;
   /** 448 火箭激活 */
   martianRocket = false;
   /** 沙球族（aiStyle 10，42/65/68/354）激活——ctor 按 SAND_BALL_PROJ 自动置位 */
@@ -2045,8 +2071,13 @@ export class Arrow extends Entity {
       // 728 超级星星炮星：GetAlpha :80995 恒 (255,255,255,0)*Opacity 隐体
       // （:80995 支成员 9/723-726/1133 待后续批核实 vanillaProjAlpha off 档承接面）
       case 728: return 0;
-      // 91 光棱剑波：GetAlpha :81003 (200,200,200,0) 恒隐（此前无档接住=满显反向错）
-      case 91: return 0;
+      // ★T1（2026-09-02）：91 圣箭波——GetAlpha :81003 (200,200,200,0) 同 92 式 A=0
+      //  加算灰（旧 case return 0 系"A=0 隐形"错案=源叠隐）。XNA 预乘 out=tex×(200/255)
+      //  加算 → lighter + ga=200/255（配 ADDITIVE_GLOW_PROJS 入组）。charm 态同 5：
+      //  aiStyle1 的 :80604-80615 White*Opacity 支先于 :81003 截走 = 常规合成乘子
+      //  ga=(255−α)/255 分流（M-2 同案;91 SetDefaults aiStyle=1/arrow=true）。
+      case 91:
+        return this.phoenixQuivered || this.seraphNecklaced ? (255 - this.alpha) / 255 : 200 / 255;
       // ★T1（R 类清账,2026-09-02 用户拍板）：79 彩虹魔杖弹——GetAlpha :81469-81474
       //  `if (type == 79) { r/g/b = Main.Disco*; return default(Color); }`：
       //  Disco 三写系死存储（随后即 default(Color)=(0,0,0,0) 恒隐）——红队 D 早期
@@ -2113,9 +2144,11 @@ export class Arrow extends Entity {
       // ★R1(T1,2026-09-02)：92 坠星本体面——GetAlpha :80999-81001 恒
       //  (255,255,255,0) 不读 alpha/光照（aiStyle5 闪烁档 0..200 振荡不进 GetAlpha）
       //  ——XNA 预乘语义 A=0 → dst+=tex.rgb 全强度 = 纯加算白星体（配
-      //  ADDITIVE_GLOW_PROJS lighter 合成,见 :2490）；91 同式 (200,200,200,0) 未
-      //  接线（Starfury 星,登记）。可见面=本体加算 + light 0.9(:24310) + 尘 58@1/10
-      //  (:24313-24315) + gore 16-18@1/20(:24316-24318) + Kill 共段(Game 侧)。
+      //  ADDITIVE_GLOW_PROJS lighter 合成,见 :2490）；91 同族 (200,200,200,0) 加算灰
+      //  已接线（★T1 2026-09-02:GA case 91 200/255+lighter;出生面=圣箭 516,旧注
+      //  "Starfury 星"系错锚——星怒剑星=503/星怒弹=9）。可见面=本体加算 +
+      //  light 0.9(:24310) + 尘 58@1/10(:24313-24315) + gore 16-17（Next(16,18) 右开）
+      //  @1/20(:24316-24318) + Kill 共段(Game 侧)。
       case 92: return 1;
       // ★R2(T2,2026-09-02)：229 叶绿球（ChlorophyteOrb,叶绿党旗枪 222 链,
       //  PROJECTILE_NAME_BY_ID+SetDefaults P.cs:3153-3163）——Main.cs:28340-28343
@@ -2454,13 +2487,15 @@ export class Arrow extends Entity {
     // 双正交拉伸层（rot+π/4,4Hz 快脉冲 f=1+cos(GTW·8π)·0.2,:33681-33689）
     if (isGemBolt(this.projId) || this.projId === 1120) {
       const imgG = img;
+      // （注：已处于外层 save+translate(弹心) 坐标系内——此处只转姿态不再平移）
+      // ★2026-09-02 旋转提出贴图卫门:姿态变换独立于贴图在否(无贴图=空旋转,vanilla
+      //   同语义)——卫门内曾令 node 单测/无图环境 rotate 缺失(proj-rotation 121 例红)
+      ctx.rotate(ang);                                       // num341 = velocity.ToRotation()
       if (imgG && (imgG.width > 0)) {
         const gtS = performance.now() / 1000;                 // GlobalTimeWrappedHourly 近似
         const slowPulse = 1 + Math.cos(gtS * Math.PI * 2) * 0.2;
         const sBase = this.drawScale;
         const iw0 = imgG.width * sBase, ih0 = imgG.height * sBase;
-        // （注：已处于外层 save+translate(弹心) 坐标系内——此处只转姿态不再平移）
-        ctx.rotate(ang);                                       // num341 = velocity.ToRotation()
         ctx.globalCompositeOperation = 'lighter';
         ctx.filter = 'grayscale(1)';
         ctx.imageSmoothingEnabled = false;
@@ -2591,9 +2626,11 @@ export class Arrow extends Entity {
       // ★E′ M-2（2026-09-02）：5 charm 态出组走常规合成（GetAlpha :80609-80615
       // `aiStyle1 → White*Opacity` 先于 :81240 加算支截走,乘子非加算）——仅
       // id5+charm 分流,组内其余 id 恒留组零改动（组∩箭族={5,631},631 charm 面
-      // 本批未裁决不动,登记）。
+      // 本批未裁决不动,登记）。★T1（同日）：91 圣箭波同属 aiStyle1,charm 截走
+      // 同案成立（SetDefaults aiStyle=1 :1745-1754）——分流同式扩展到 91。
       if (ADDITIVE_GLOW_PROJS.has(this.projId)
-        && !(this.projId === 5 && (this.phoenixQuivered || this.seraphNecklaced))) {
+        && !((this.projId === 5 || this.projId === 91)
+          && (this.phoenixQuivered || this.seraphNecklaced))) {
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
         ctx.globalCompositeOperation = 'source-over';
@@ -2630,13 +2667,20 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
-    // 斗篷星落地(Kill :76693-76715):723 音 Item10+尘 88(noGravity 紫)×10+碎砾 16/17×3(v×2);
-    // 法力档(ai2=1 ≙ manaStar)→ RequestNewItem(4143 法力斗篷之星,:76712-76714)
+    // 斗篷星落地(Kill :76692-76748)——尘型按 id:723→88 紫 / 724·725·726·907→58 /
+    // 1133→57 绿;音:723/724/725/726/1133=Item10、907=Item27;全组碎砾 gore16/17×3
+    // (vel×0.05 后 ×2;907 ×0.5 略);法力档(ai2=1 ≙ manaStar)→ RequestNewItem(4143)
     if ([723, 724, 725, 726, 907, 1133].includes(this.projId) && !this.dead) {
-      if (this.projId === 723) game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
+      const dustT = this.projId === 723 ? 88 : this.projId === 1133 ? 57 : 58;
+      game.playSfxFile?.(this.projId === 907 ? 'Item_27' : 'Item_10', 1, this.cx, this.cy);
       for (let i = 0; i < 10; i++) {
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 88, this.vx * 0.2, this.vy * 0.2, 150, null, 1.2);
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustT, this.vx * 0.2, this.vy * 0.2, 150, null, 1.2);
         if (d) { d.noGravity = true; d.vx *= 2; }
+      }
+      for (let i = 0; i < 3; i++) {
+        const g = GorePiece.newGore(Math.random() < 0.5 ? 16 : 17, this.cx, this.cy,
+          this.vx * 0.05, this.vy * 0.05);
+        if (g) { g.vx *= 2; g.vy *= 2; }
       }
       if (this.manaStar) game.spawnDrop?.(this.x, this.y, 'vi_4143_manacloakstar', 1);
     }
@@ -2696,13 +2740,18 @@ export class Arrow extends Entity {
     }
     // ★2026-08-26 宝石法珠 Kill 公共段（Projectile.cs:76985-77010,1458；用户实报批）：
     // SoundEngine.PlaySound(0)=Dig 音 + 15 枚同色尘（noGravity、scale×1.25、
-    // v=dir:(v<1 归零向) → ×2.2 +dir×1.5 → ×randFloat——六连式与原版逐式对齐）
-    if ((isGemBolt(this.projId) || this.projId === 1120) && !this.dead) {
+    // v=dir:(v<1 归零向) → ×2.2 +dir×1.5 → ×randFloat——六连式与原版逐式对齐）。
+    // ★2026-09-02 审计：121-126/597 的同款在 Game.onProjectileDeath:30068 已有单口
+    // （killNow 尾统一回调）——本支曾条件重复=双音双尘；收窄为仅 1120（其 Kill 面
+    // d170×15+30 OPD 无对应）
+    if (this.projId === 1120 && !this.dead) {
       game.playSfx?.('dig', 1, this.cx, this.cy);            // PlaySound(0,...)（:76987）
       const kSpd = Math.hypot(this.vx, this.vy);
       const kdx = kSpd < 1 ? 0 : this.vx / kSpd;             // vector67（<1 取 Zero,:76995）
       const kdy = kSpd < 1 ? 0 : this.vy / kSpd;
-      const kdust = this.projId === 597 ? 262 : this.projId === 1120 ? 170 : this.projId - 35;
+      // ★蓝队批（2026-09-02）：上方门已收窄为仅 1120（同日审计注）——597/−35 两支
+      //  不可达（TS2367 死比较）,kdust 恒 170,死支摘除（门语义零改动）
+      const kdust = 170;
       for (let i = 0; i < 15; i++) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, kdust,
           kdx, kdy, 50, null, 1.2);
@@ -2769,6 +2818,27 @@ export class Arrow extends Entity {
       for (let i = 0; i < 10; i++) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 185);
         if (d && Math.random() < 0.5) { d.vx *= 2; d.vy *= 2; d.noGravity = true; d.scale *= 1.75; }
+      }
+    } else if (this.projId === 478 && !this.hostile) {
+      // 478 诅咒镖消亡再放一轮 480 诅咒火(Kill :77151-77157,owner 门→!hostile;
+      // dmg×0.8、kb×0.5——与 AI 侧周期放火 :58332 并行,原版两处都有)
+      const ents478 = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+      if (ents478?.add) {
+        ents478.add(new Arrow(this.cx, this.cy, 0, 0,
+          Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480, null,
+          { grav: 0 }), 'projectiles');
+      }
+    } else if (this.projId === 503) {
+      // 503 天顶剑星亡面(Kill :77259-77318 else 支):Item10 + vel/2 + d58×40 +
+      // gore16×2(vel×0.05)
+      game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
+      this.vx /= 2; this.vy /= 2;
+      for (let i = 0; i < 40; i++) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 58, this.vx * 0.1, this.vy * 0.1, 150, null, 1.2);
+      }
+      for (let i = 0; i < 2; i++) {
+        const g = GorePiece.newGore(16, this.cx, this.cy, this.vx * 0.05, this.vy * 0.05);
+        void g;
       }
     } else if (this.projId === 469 && !this.hostile) {
       // 469 蜂箭 Kill 放蜂（:73369-73390，owner==myPlayer 门 → !hostile 近似）
@@ -2977,6 +3047,94 @@ export class Arrow extends Entity {
         if (d) {
           d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true;
           d.vx = (Math.random() * 2 - 1) * 5; d.vy = (Math.random() * 2 - 1) * 5;
+        }
+      }
+    }
+    // ---- ★Kill 消亡面清偿批（2026-09-02，Projectile.cs 分档链缺口，高优先两件）----
+    // 639/640 月总箭 Kill（:74813-74842）：d220×Next(5,9) 粒（scale0.5、vel×1.6、Y−1、
+    // noGravity、位置=Lerp(pos,Center,0.5)——0 尺寸盒下 NewDust +4 偏移经 Lerp 半程=+2,
+    // 本仓 0 尺寸盒直生同式）;owner 本机且 639 → 衍生 640（出生位=localAI[0]/[1] 出生心
+    // 快照、初速=ai[0]/[1] 快照、伤/kb 继承——★NewProjectile 传位即 top-left,原文本就
+    // 是 Center 值=半盒偏移怪癖,按原文保留）。★aiArg1=timeLeft+1 的 640 ai[1] 延迟计数
+    // 未建模（消费面在 Update 环 :16784,AI 域非本批域,登记）
+    if ((this.projId === 639 || this.projId === 640) && !this.dead) {
+      const n639 = 5 + Math.floor(Math.random() * 5);            // Next(5,10) = 5..9
+      for (let i = 0; i < n639; i++) {
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 220, 0, 0, 100, null, 0.5, true);
+        if (!d) break;
+        d.vx *= 1.6; d.vy *= 1.6;
+        d.vy -= 1;
+        d.x += (this.cx - d.x) * 0.5;                            // Lerp(pos, Center, 0.5)
+        d.y += (this.cy - d.y) * 0.5;
+      }
+      if (this.projId === 639 && !this.hostile) {                // owner == Main.myPlayer 门
+        const ents639 = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+        if (ents639?.add) {
+          ents639.add(new Arrow(this.moonArrowL0, this.moonArrowL1,
+            this.moonArrowA0, this.moonArrowA1, this.damage, this.knockback, 640, null, {}),
+            'projectiles');
+        }
+      }
+    }
+    // 283 VenomBullet Kill（:77513-77580）：Item10 + 30×d171 三组各 10（scale=
+    // Next(1,10)×0.1 直赋、noGravity、fadeIn1.5;组1 v×0.75;组2 +oldV×0.5×rand;
+    // 组3 v×1.5+oldV×1.5×rand）;owner 本机 → penetrate=1 + 判定盒归心 Resize(80×80)
+    // 后沿 oldV 单位向步进 width×0.75=60px 三次 Damage() 重结算。
+    // ★等价口径（本仓无 Damage() 重入原语,rocketExplode 重结算先例同族）：一次敌集
+    // 扫描、三段 80×80 盒独立命中判定（283 SetDefaults 未启用 local/ID-static 免疫表
+    // → 原版三连 Damage 对同敌可三跳;per-strike 免疫写 idStaticNPCHitCooldown=5 与
+    // ResetStaticImmunityMatching 对未启用静态免疫的 283 为无消费死配置,不复刻;
+    // active=false 防 Kill 级联由 !this.dead 门承担）。pierce=1 → Enemy.hurt 豁免
+    // 免疫帧同构（单发弹 flag3）;critter 走单参 shim（settleKillExplosion 同式）
+    if (this.projId === 283 && !this.dead) {
+      game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
+      for (let g283 = 0; g283 < 3; g283++) {
+        for (let i = 0; i < 10; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 171, 0, 0, 100);
+          if (!d) break;
+          d.scale = (1 + Math.floor(Math.random() * 9)) * 0.1;   // Next(1,10) 右开 = 1..9
+          d.noGravity = true;
+          d.fadeIn = 1.5;
+          d.vx *= g283 === 2 ? 1.5 : 0.75;
+          d.vy *= g283 === 2 ? 1.5 : 0.75;
+          if (g283 >= 1) {
+            const r283 = Math.random();                          // Main.rand.NextFloat()
+            d.vx += this.vx * (g283 === 2 ? 1.5 : 0.5) * r283;
+            d.vy += this.vy * (g283 === 2 ? 1.5 : 0.5) * r283;
+          }
+        }
+      }
+      if (!this.hostile) {                                       // owner == Main.myPlayer 门
+        const vl283 = Math.hypot(this.vx, this.vy);
+        const nx283 = vl283 > 0 ? this.vx / vl283 : 0;           // oldVelocity 归一（:77571）
+        const ny283 = vl283 > 0 ? this.vy / vl283 : 0;
+        const R283 = 40;                                         // Resize(80,80) 半宽
+        const segs283 = [0, 1, 2].map((k) => ({
+          cx: this.cx + nx283 * 60 * k,                          // width×0.75 = 60px/段
+          cy: this.cy + ny283 * 60 * k,
+        }));
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as { x: number; y: number; w: number; h: number;
+            dead?: boolean; hurt?: (...a: unknown[]) => boolean; id?: number };
+          if (e.dead || !e.hurt) continue;
+          const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+          for (const seg of segs283) {                           // 每段独立命中判定
+            if (Math.abs(ecx - seg.cx) < R283 + e.w / 2 && Math.abs(ecy - seg.cy) < R283 + e.h / 2) {
+              e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
+                Math.sign(ecx - seg.cx) * this.knockback, 0, game, this.settlePen, false, 1, true);
+            }
+          }
+        }
+        for (const cent of game.critters()) {
+          const c = cent as unknown as { x: number; y: number; w: number; h: number;
+            dead?: boolean; hurt?: (...a: unknown[]) => boolean };
+          if (c.dead || !c.hurt) continue;
+          const ccx = c.x + c.w / 2, ccy = c.y + c.h / 2;
+          for (const seg of segs283) {
+            if (Math.abs(ccx - seg.cx) < R283 + c.w / 2 && Math.abs(ccy - seg.cy) < R283 + c.h / 2) {
+              c.hurt(Math.max(1, Math.trunc(this.damage)), Math.sign(ccx - seg.cx) * this.knockback, 0, game);
+            }
+          }
         }
       }
     }
@@ -4026,7 +4184,7 @@ export class Arrow extends Entity {
       if (this.alpha <= 0) { this.alpha = 0; this.twinkleDir = 1; }
       if (--this.starSndCd <= 0) {
         this.starSndCd = 20 + Math.floor(Math.random() * 40);
-        game.playSfxFiles?.(['Item_9'], 0.5, this.cx, this.cy);
+        game.playSfxFiles?.(['Item_9'], 1, this.cx, this.cy);   // ★T4：原版 PlaySound 无音量参=缺省 1.0（:24133/AI_151 :22345）
       }
       if (Math.floor(Math.random() * 20) === 0) {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 58, this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);
@@ -4039,7 +4197,7 @@ export class Arrow extends Entity {
       this.alpha = Math.max(100, this.alpha - 10);
       if (--this.starSndCd <= 0) {
         this.starSndCd = 20 + Math.floor(Math.random() * 40);
-        game.playSfxFiles?.(['Item_9'], 0.5, this.cx, this.cy);
+        game.playSfxFiles?.(['Item_9'], 1, this.cx, this.cy);   // ★T4：原版 PlaySound 无音量参=缺省 1.0（:24133/AI_151 :22345）
       }
       for (let i = 0; i < 2; i++) {
         if (Math.floor(Math.random() * 8) === 0) {
@@ -5328,7 +5486,8 @@ export class Arrow extends Entity {
       // Kill 链）：无重力直飞（aiStyle5 无重力段）；弹顶越过 ai[1] 命中线才恢复撞块
       // （:24108-24112，SetDefaults tileCollide=false → 线上方穿墙）；
       // ★R1(T1,2026-09-02) 可见面全录（aiStyle5 `ai[1]==1||type==92` 支 :24308-24318）：
-      // light 0.9（:24310）+ 1/10 尘 58 星屑尾（:24311-24315）+ 1/20 gore 16-18（v×0.2,
+      // light 0.9（:24310）+ 1/10 尘 58 星屑尾（:24311-24315）+ 1/20 gore 16-17
+      // （Next(16,18) 右开={16,17},v×0.2,
       // :24316-24318——本批补）；本体=GetAlpha :80999 恒 (255,255,255,0) 纯加算白
       // （GA case 92 + ADDITIVE_GLOW_PROJS 配对）；alpha 通用闪烁档 0↔200（:24182-24196）
       // 振而不入 GetAlpha=观感无闪烁；Item_9 星啸每 20-59t（:24133-24136）；
@@ -5348,7 +5507,7 @@ export class Arrow extends Entity {
       if (this.alpha <= 0) { this.alpha = 0; this.twinkleDir = 1; }
       if (--this.starSndCd <= 0) {
         this.starSndCd = 20 + Math.floor(Math.random() * 40);
-        game.playSfxFiles?.(['Item_9'], 0.5, this.cx, this.cy);
+        game.playSfxFiles?.(['Item_9'], 1, this.cx, this.cy);   // ★T4：原版 PlaySound 无音量参=缺省 1.0（:24133/AI_151 :22345）
       }
     } else if (this.projId === 485) {
       // 485 狱翼箭（AI_001 type 段，Projectile.cs:54826-54850）：v=(v×39+ai)/40
@@ -5486,6 +5645,35 @@ export class Arrow extends Entity {
       // −50/t 渐显（SetDefaults 255 :4041）+ ai[0]≥30 后 vy+0.5/t 下坠
       if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 50);
       if (this.age >= 30) this.vy += 0.5;
+    } else if (this.projId === 1023) {
+      // 1023 死亡细胞木桶（AI_001 :58143-58152，5460 链）：ai[0]>=6 → alpha=0；
+      // ai[0]>=20 → ai[0]=30 钳 + vy+=0.25/子步（钳后 >=20 恒真=持续）。
+      // 首拍 25×d31 出生尘爆（:56175-56194，爆心=Center+vel向×54（+y −4×Directions
+      // 略），速度=vel 旋扰 ±0.195 ×(0.2+Remap(|v|,0..3→0..0.5))×3×rand，noGravity）
+      if (this.age >= 6) this.alpha = 0;
+      if (this.age >= 20) this.vy += 0.25;
+      if (this.ai1Mirror === 0) {
+        this.ai1Mirror = 1;
+        const vl = Math.hypot(this.vx, this.vy);
+        const ux = vl > 0 ? this.vx / vl : 0, uy = vl > 0 ? this.vy / vl : 0;
+        const bx = this.cx + ux * 54, by = this.cy + uy * 54;
+        const remap = Math.min(0.5, (vl / 3) * 0.5);
+        for (let i = 0; i < 25; i++) {
+          const d = game.spawnDust?.(bx, by, 16, 8, 31, this.vx, this.vy, 50,
+            null, 1 + Math.random() * 0.3, true);
+          if (!d) continue;
+          const ang = Math.atan2(this.vy, this.vx) + (Math.random() - 0.5) * 0.39;
+          const sp = vl * (0.2 + remap) * Math.random() * 3;
+          d.vx = Math.cos(ang) * sp; d.vy = Math.sin(ang) * sp;
+          d.x = bx + (Math.random() - 0.5) * 16; d.y = by + (Math.random() - 0.5) * 16;
+        }
+      }
+    } else if (this.projId === 312) {
+      // 312 南瓜灯（AI_001 :58153-58166，南瓜月 1784/1785）：ai[0]>=5 → alpha=0；
+      // ai[0]>=20 → ai[0]=30 钳 + vy+=0.5/子步；恒光 AddLight(0.6,0.4,0.3)
+      if (this.age >= 5) this.alpha = 0;
+      if (this.age >= 20) this.vy += 0.5;
+      game.addLightAt?.(this.cx, this.cy, 0.6, 0.4, 0.3);
     }
     // ---- alpha 通道 AI 侧（修复4：Projectile.alpha 逐型衰减）----
     if (this.projId === 521) {
@@ -5496,17 +5684,79 @@ export class Arrow extends Entity {
         game.spawnParticles(this.cx, this.cy, '#B878E8', 3, 0.6, { life: 16, grav: 0 });
         game.spawnParticles(this.cx, this.cy, '#F0C8F8', 2, 0.2, { life: 14, grav: 0 });
       }
-    } else if (this.projId === 639) {
-      // 639 月总箭（AI_001，Projectile.cs:56381-56396；1456 :52537-52550 同值）：
-      // alpha −25/substep 淡入（SetDefaults α=255 :6881、MaxUpdates=2 → EU=2 → ×3
-      // 子步/帧）。★批五勘误：旧注 ":52999-53003 −55" 引到 Shimmer() 方法体（该处
+    } else if (this.projId === 639 || this.projId === 640) {
+      // 639/640 月总箭（AI_001，Projectile.cs:56381-56401；1456 :52537-52550 同值）：
+      // alpha −25/substep 淡入（SetDefaults α=255 :6881/:6902、639 MaxUpdates=2 → EU=2
+      // → ×3 子步/帧）。★批五勘误：旧注 ":52999-53003 −55" 引到 Shimmer() 方法体（该处
       // 无 alpha 写），−55 系行号错锚伪值——1456/1457 两代均为 −25，按 1457 修。
-      // （归零 16 芒星环特效属"特殊箭特效"后续批，登记未接）
+      // （640 的 velocity==Zero 星芒支 :56403-56453 未移植——衍生体恒带母箭初速,登记）
+      // ★Kill 消亡面批（2026-09-02）：640 并入本支渐显（否则衍生体 α=255 恒隐）；
+      // 639 专属初态四槽快照（:56381-56386 localAI[0]/[1] 出生心、ai[0]/[1] 初速，
+      // 零零门首拍写）→ Kill :74825 owner 侧 NewProjectile(640) 数据源
       if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
-    } else if (this.projId === 477 || this.projId === 478) {
-      // 477/478 镖（AI_001，Projectile.cs:54412-54415）：localAI[0]>3 → alpha=0
-      // （前 3 拍隐形——GetAlpha :76303-76308 alpha≠0 返回 (0,0,0,0)）
+      if (this.projId === 639 && this.moonArrowL0 === 0 && this.moonArrowL1 === 0) {
+        this.moonArrowL0 = this.cx;
+        this.moonArrowL1 = this.cy;
+        this.moonArrowA0 = this.vx;
+        this.moonArrowA1 = this.vy;
+      }
+    } else if (this.projId === 267 || this.projId === 477 || this.projId === 478 || this.projId === 479) {
+      // ---- 267/477/478/479 镖族（AI_001 :58273-58345;477 alpha 门原引 :54412-54415
+      //  已并入本支）:localAI[0]>3 → alpha=0（前 3 拍隐形——GetAlpha :76303-76308
+      //  alpha≠0 返回 (0,0,0,0)）;ai[0]>=20 → ai[0]=20 钳 +（477 除外）vy+=0.075/子步
+      //  微重力;479（owner 门→!hostile）ai[1]>=0 → penetrate=-1 母镖无限穿、ai[1]++
+      //  >Next(5,30) → ai[1]=-1000 分裂 2-4 枚（dmg×0.9、向=norm(rand±100 向)+vel向×2
+      //  再归一×速、子镖 ai[1]<0 → penetrate=1,NewProjectileModifiers.IchorDartUpdate
+      //  Penetrate 由 pierce=1 承载）+每枚 5×d170 noGravity;478 ai[1]++>Next(5,20) →
+      //  归零 + timeLeft>40 扣 20 + 放 480 诅咒火（dmg×0.8、kb×0.5,:58332-58343）
       if (this.age > 3) this.alpha = 0;
+      if (this.age >= 20 && this.projId !== 477) this.vy += 0.075;
+      const ents4x = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+      if (this.projId === 479 && !this.hostile) {
+        if (this.ai1Mirror >= 0) {
+          this.pierce = -1;
+          this.ai1Mirror++;
+        }
+        if (this.ai1Mirror > 5 + Math.floor(Math.random() * 25)) {          // Next(5,30)=[5,29]
+          this.ai1Mirror = -1000;
+          const v0 = Math.hypot(this.vx, this.vy);
+          const nx0 = v0 > 0 ? this.vx / v0 : 0, ny0 = v0 > 0 ? this.vy / v0 : 0;
+          let cnt = 2 + Math.floor(Math.random() * 2);                      // Next(2,4)=[2,3]
+          if (Math.floor(Math.random() * 4) === 0) cnt++;                   // 1/4 → +1
+          for (let i = 0; i < cnt && ents4x?.add; i++) {
+            let dx = Math.floor(Math.random() * 201) - 100;
+            let dy = Math.floor(Math.random() * 201) - 100;
+            const dl = Math.hypot(dx, dy) || 1;
+            dx = dx / dl + nx0 * 2; dy = dy / dl + ny0 * 2;
+            const dl2 = Math.hypot(dx, dy) || 1;
+            const sx = (dx / dl2) * v0, sy = (dy / dl2) * v0;
+            const sub = new Arrow(this.cx, this.cy, sx, sy,
+              Math.max(1, Math.trunc(this.damage * 0.9)), this.knockback, 479, null,
+              { pierce: 1, grav: 0 });
+            sub.ai1Mirror = -1000;                                          // 子镖不再分裂
+            ents4x.add(sub, 'projectiles');
+            for (let k = 0; k < 4; k++) {
+              const zz = 0.4 + k * 0.075;
+              game.spawnDust?.(this.cx + sx * zz * 1.5 - 1, this.cy + sy * zz * 1.5 - 1,
+                2, 2, 170, sx * zz, sy * zz, 0, null, 1, true);
+            }
+            game.spawnDust?.(this.cx - 1, this.cy - 1, 2, 2, 170,
+              -sx * 0.2, -sy * 0.2, 0, null, 1, true);
+          }
+        }
+      }
+      if (this.projId === 478 && !this.hostile) {
+        this.ai1Mirror++;
+        if (this.ai1Mirror > 5 + Math.floor(Math.random() * 15)) {          // Next(5,20)=[5,19]
+          this.ai1Mirror = 0;
+          if (this.life > 40) this.life -= 20;
+          if (ents4x?.add) {
+            ents4x.add(new Arrow(this.cx, this.cy, 0, 0,
+              Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480, null,
+              { grav: 0 }), 'projectiles');
+          }
+        }
+      }
     } else if (AI001_FADE_SPEEDK[this.projId] !== undefined) {
       // ---- ★2026-09-01 批五：AI_001 顶层 per-type fade（速度积分式族）----
       //  alpha −= (byte)(|velocity| × k)（:56631 242/438/462/592 ×0.9、:56849 638
@@ -5815,7 +6065,7 @@ export class Arrow extends Entity {
       this.starAlpha = Math.max(floorA, this.starAlpha - 15);
       if (--this.starSndT <= 0) {
         this.starSndT = 20 + Math.floor(Math.random() * 40);
-        game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
+        game.playSfxFiles(['Item_9'], 1, this.cx, this.cy);   // ★T4：原版 PlaySound 无音量参=缺省 1.0（:24133）
       }
       if (Math.random() < 0.3) {
         game.spawnParticles(this.cx, this.cy, '#FFF8C8', 1, 0.9, { life: 20 });

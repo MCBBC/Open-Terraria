@@ -338,9 +338,11 @@ describe('⑥ SetID 9+：小件接线与定谳', () => {
 
   it('RemoveWhenUnderSpawn 已接：vampireSeedFinishPass 出生点竖带清障（WorldGen.cs:25229-25263）', () => {
     expect(TILE_REMOVE_WHEN_UNDER_SPAWN).toEqual([135, 442, 428, 48, 443]);
-    const worldGen = readFileSync(resolve(process.cwd(), 'src/world/gen/WorldGen.ts'), 'utf8');
-    expect(worldGen).toContain('RemoveSpecificTilesUnderSpawn');
-    expect(worldGen).toContain('TILE_REMOVE_WHEN_UNDER_SPAWN');
+    // ★2026-09-02 重构随迁:该节自 vampireSeedFinishPass 原位外提至 SecretSeedDoEndsPass
+    //   (SecretSeedDoEndsPass.ts:1771 外提注),钉值文件随之
+    const doEnds = readFileSync(resolve(process.cwd(), 'src/world/gen/vanilla/SecretSeedDoEndsPass.ts'), 'utf8');
+    expect(doEnds).toContain('RemoveSpecificTilesUnderSpawn');
+    expect(doEnds).toContain('TILE_REMOVE_WHEN_UNDER_SPAWN');
   });
 
   it('ParticleOrchestrator 4 效果处置：SnappingStone 尘段已接 / SporeCloud 已有近似 / FormatC·ArcSurge 登记', () => {

@@ -9,6 +9,10 @@ beforeAll(() => {
   for (const c of ['en-US', 'zh-Hans']) {
     languageManager.loadPackJson(JSON.parse(readFileSync(`public/l10n/${c}.json`, 'utf8')));
   }
+  // ★node 环境无浏览器语言探测→activeCulture 未初始化→itemNameByKey isZh=false 走
+  //   en 兜底(原版 LoadSettings 非法值落 en-US 的语义)。测试意图=zh,显式置位。
+  (languageManager as unknown as { activeCulture: unknown }).activeCulture =
+    { name: 'zh-Hans', legacyId: 0, displayNameKey: '' };
 });
 
 // 全量物品多语言覆盖：6146 件原版物品 + place_v_* 放置物品走方块译名链

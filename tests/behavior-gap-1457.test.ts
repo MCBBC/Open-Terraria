@@ -47,7 +47,13 @@ const mkEnemy = (id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy 
 
 /** 通用 GameHooks 桩（World 真实例——弹幕 LaserScan/tile 门要查方块） */
 function makeHooks(enemies: MockEnemy[] = [], player?: Player) {
-  const world = new World(80, 40, 42, '测试');
+  // ★2026-09-02 F2 随迁:脉冲扫描已按原文重建 FindTargetWithLineOfSight(带 canHit
+  //   视线门)——canHit 的 clampYTile 含 maxTilesY-40 字面上界(cs:414-416),h=40 的
+  //   微型测试世界会把全部 y 格钳到 0(越界必败),故世界加高 + 清出交战带净空。
+  const world = new World(80, 400, 42, '测试');
+  for (let x = 0; x < 80; x++) {
+    for (let y = 4; y <= 16; y++) world.store.setTileSilent(x, y, 0, 0, 0);
+  }
   const pl = player ?? new Player(40 * 16, 20 * 16, new Inventory());
   const added: unknown[] = [];
   const hooks = {

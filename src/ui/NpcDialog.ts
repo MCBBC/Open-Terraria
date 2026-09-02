@@ -310,14 +310,28 @@ export class NpcDialog {
       const off = PORTRAIT_OFFSETS[mode][String(payload.vanillaId)] ?? [0, 0];
       const img = new Image();
       // 兜底：Profile 档缺失（解包缺口/未来新类型）→ NPC_<id> 竖条（行 0 全展，
-        // 视觉近似 Retro 档）；再失败=留空（canvas 已 clear，与原版无资产不画同义）。
-        // onerror 自清防递归；onload 换绑 paintSheet 复用行0几何
-      img.onerror = () => {
-        img.onerror = null;
+        // 视觉近似 Retro 档）。★IMG-SELF-HEAL（2026-09-02 image-retry-audit 清偿）：
+        // 面板一次性建绘，一次失败=整段对话缺头像（首访冷缓存窗口高危）——两段
+        // URL 耗尽后按 1s/2s/4s 退避重试整链，TTL 10s 封顶（负缓存错误语义参照
+        // ensureVImage TTL；超时后留空=与原版无资产不画同义）
+      const urls = [sheet, `vanilla/NPC_${payload.vanillaId}.png`];
+      const bornAt = Date.now();
+      let seg = 0;
+      let round = 0;
+      const tryLoad = () => {
         img.onload = () => { paintSheet(); };
-        img.src = `sprites/vanilla/NPC_${payload.vanillaId}.png`;
+        img.onerror = () => {
+          seg++;
+          if (seg < urls.length) { img.src = `sprites/${urls[seg]}`; return; }
+          const delay = 1000 * 2 ** round;
+          round++;
+          if (Date.now() - bornAt + delay <= 10_000) {
+            setTimeout(() => { seg = 0; tryLoad(); }, delay);
+          }
+        };
+        img.src = `sprites/${urls[seg]}`;
       };
-      img.onload = () => { paintSheet(); };
+      tryLoad();
       /** 行 0 直绘主体（onload 与兜底共用）：fh = 整条高/帧数
        *  （vanilla-npcs.json frames=Main.npcFrameCount） */
       const paintSheet = () => {

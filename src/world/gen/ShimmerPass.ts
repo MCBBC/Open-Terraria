@@ -73,7 +73,9 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState, onStage?: 
   //   num7=((int)(rl+ws+200))/2（下限钳制 num6+50）；首掷 num4 改 Next(num6,num7)
   //   （x 带不变，标准带先掷后仅覆写 y），重试环 num8<10000 时同带重掷 y+x，
   //   ≥10000 落回普通 else 支（y 下限 (ws+rl)/2+20）、>20000 才进放宽支。
-  const celbShim = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
+  // ★IIIII173（2026-09-02）：tenth 浅带门=纯 tenthAnniversary（1457/1458 cs:15293 无 !remix
+  //   排除；镜像副本同步修——本文件为 gen/vanilla/ShimmerPass.ts 的旧镜像,以彼为准）
+  const celbShim = !!gs.seedFlags?.tenthAnniversary;
   const shimYLo = Math.floor(gs.worldSurface) + 150;
   const shimYHiRaw = Math.trunc((gs.rockLevel + gs.worldSurface + 200) / 2);
   const celbYHi = Math.max(shimYHiRaw, shimYLo + 50);   // cs:15290 if(num7<=num6) num7=num6+50

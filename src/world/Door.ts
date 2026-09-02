@@ -123,9 +123,36 @@ export function closeDoor(st: TileStore, x: number, y: number, rng: () => number
   return true;
 }
 
-// ================= 高门（Tall Gate 388/389，WorldGen.ShiftTallGate L51747 1:1） =================
-// 关(388)/开(389) 两张表同布局（18×188）：切换 = 保帧换 type；开门声 SoundID 8。
-// 锚点回溯：frameY % 90（CoordinateFullHeight）→ 行内偏移 /18 = 距顶格格数。
+// ================= 高门（Tall Gate 388/389，WorldGen.ShiftTallGate :52175-52231） =================
+// 关(388)/开(389) 两张表同布局（18×188）：切换 = 保帧换 type（:52215-52219 只直写
+// tile.type,帧不动）；开门声 SoundID 8（:52213）。
+// ★2026-09-02 九批（M-2）帧约定归一：CoordinateHeights={18,16,16,16,18}+pad2
+// （TileObjectData.cs:2303-2306,addTile(388) :2323;389=FullCopyFrom(388) :2324-2325），
+// CoordinateFullHeight=Σ(heights+pad)=94（:1805-1820 Calculate）——行帧=TileObject.Place
+// heights+padding 累进（TileObject.cs:96-108 num9）= 0/20/38/56/74。★旧实现在此用
+// 「fy%90 /18」行解码（90=5×18）只对本仓旧 18px 步进自洽；frames 归原版后按原版
+// heights 递减法（CheckTallGate :52129-52133 同式）解码,两端（放置面/迁移）统一。
+
+/** 高门 CoordinateHeights（TileObjectData.cs:2303）——唯一权威表（Game.ts 同源引用） */
+export const TALL_GATE_HEIGHTS: readonly number[] = [18, 16, 16, 16, 18];
+/** CoordinateFullHeight = Σ(heights+2) = 94（TileObjectData.cs:1805-1820 Calculate） */
+export const TALL_GATE_CFH = TALL_GATE_HEIGHTS.reduce((a, b) => a + b + 2, 0);
+/** 行内 frameY 累进（TileObject.Place :96-108 num9 += heights[l]+padding）= 0/20/38/56/74 */
+export const TALL_GATE_ROW_FY: readonly number[] = (() => {
+  const out: number[] = [0];
+  for (let i = 0; i < TALL_GATE_HEIGHTS.length - 1; i++) out.push(out[i] + TALL_GATE_HEIGHTS[i] + 2);
+  return out;
+})();
+/** CheckTallGate/ShiftTallGate 行归一（WorldGen.cs:52129-52133）：frameY%CFH 经
+ *  heights 递减 → 行内序号 0..4（负值防御性取正模,原版帧域不产负） */
+export function tallGateRowOf(frameY: number): number {
+  let row = 0;
+  let num = ((frameY % TALL_GATE_CFH) + TALL_GATE_CFH) % TALL_GATE_CFH;
+  for (; row < TALL_GATE_HEIGHTS.length && num - TALL_GATE_HEIGHTS[row] >= 0; row++) {
+    num -= TALL_GATE_HEIGHTS[row];
+  }
+  return row;
+}
 
 /** 切换高门（closing=true 关、false 开）。锚点可为门内任意格；返回锚点坐标或 null */
 export function shiftTallGate(
@@ -140,13 +167,13 @@ export function shiftTallGate(
   const i0 = st.idx(x, y);
   if (st.type[i0] !== from) return null;
   const fy = st.frameY[i0];
-  const anchorY = y - Math.floor((fy % 90) / 18); // CoordinateFullHeight 90 / 18
+  const anchorY = y - tallGateRowOf(fy);   // :52129-52134 heights 递减行归一
   for (let dy = 0; dy < 5; dy++) {
     const ii = st.idx(x, anchorY + dy);
     if (!st.inBounds(x, anchorY + dy) || st.type[ii] !== from) return null; // ValidateTileSquare
   }
   for (let dy = 0; dy < 5; dy++) st.setTile(x, anchorY + dy, to, st.frameX[i0], st.frameY[st.idx(x, anchorY + dy)]);
-  sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(WorldGen.cs:51786);旧'door'非法名经 as 断言静默失效
+  sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(ShiftTallGate :52213,★引注修正:旧注 :51786 失真);旧'door'非法名经 as 断言静默失效
   return [x, anchorY];
 }
 

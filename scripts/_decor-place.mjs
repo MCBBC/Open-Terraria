@@ -164,6 +164,10 @@ const out = await page.evaluate(async () => {
     // 高门(开态) 1×5 Origin(0,0)：AnchorTop+AnchorBottom SolidTile cnt1 start0
     // （TileObjectData.cs:2293-2325 addTile(388);389=FullCopyFrom(388) :2324-2325）
     389: { w: 1, h: 5, ox: 0, oy: 0, top: { t: ['SolidTile'], cnt: 1, start: 0 }, bottom: { t: ['SolidTile'], cnt: 1, start: 0 }, left: null, right: null, wall: false },
+    // 高门(闭态) 388=FullCopyFrom(389) 同锚面（TileObjectData.cs:2324-2325）;
+    // ★M-4⑂：388 solid:true 且【不在】BlockPlacementIfOverPlayers 名单 → 原版无实体
+    // 门,玩家压占位框仍放成（runSeven 缺省玩家位 (x0+5,F-5) 恰在门列内=重叠态）
+    388: { w: 1, h: 5, ox: 0, oy: 0, top: { t: ['SolidTile'], cnt: 1, start: 0 }, bottom: { t: ['SolidTile'], cnt: 1, start: 0 }, left: null, right: null, wall: false },
     // 宝石锁 3×3 Origin(1,1)：AnchorWall=true,无侧面锚（TileObjectData.cs:4790-4807
     // ——isValidWallAnchor 默认支 wall==0 拒 TileObjectData.cs:1948-1962）
     440: { w: 3, h: 3, ox: 1, oy: 1, top: null, bottom: null, left: null, right: null, wall: true },
@@ -237,7 +241,15 @@ const out = await page.evaluate(async () => {
     const placed = stackBefore - (inv.slots[selIdx]?.stack ?? -1) === 1;
     const cells = countIn(tid, ax - 2, ax + spec.w + 2, ay - 2, ay + spec.h + 2);
     const framesOk = countIn(tid, ax, ax + spec.w - 1, ay, ay + spec.h - 1) === spec.w * spec.h;
-    return { sheet, key: tdef?.key, vanilla: van, placed, cells, full: spec.w * spec.h, framesOk };
+    // ★M-2（2026-09-02 九批）：放置帧序列捕获（按行主序）——388/389 判定=原版
+    // TileObject.Place heights+padding 累进 0/20/38/56/74（TileObject.cs:96-108,
+    // heights{18,16,16,16,18}+pad2 TileObjectData.cs:2301-2303）
+    const frameSeq = [];
+    for (let dy = 0; dy < spec.h; dy++) for (let dx = 0; dx < spec.w; dx++) {
+      const qx = ax + dx, qy = ay + dy, qi = st.idx(qx, qy);
+      if (st.inBounds(qx, qy) && st.get(qx, qy) === tid) frameSeq.push([st.frameX[qi], st.frameY[qi]]);
+    }
+    return { sheet, key: tdef?.key, vanilla: van, placed, cells, full: spec.w * spec.h, framesOk, frameSeq };
   };
   // 环境基元：清场（tile+wall+liquid）/行/列/单格
   const clearEnv = (xa, xb, ya, yb) => {
@@ -287,6 +299,14 @@ const out = await page.evaluate(async () => {
     for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F, STONEC2);
     for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F - 7, STONEC2);
   }, x0 + 5, F - 5));
+  // —— 388 高门闭态（★九批 M-2 帧序列断言 + M-4⑂ 名单外 solid 表驱动件玩家重叠放成：
+  //  runSeven 缺省玩家位 (x0+5,F-5)*16 恰压门列 F-5..F-3 行=重叠态,388 不在
+  //  BlockPlacementIfOverPlayers 名单 → 原版无实体门 → 必须放成）
+  vanillaSeven.push(await runSeven(388, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F, STONEC2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F - 6, STONEC2);
+  }, x0 + 5, F - 5));
   // —— 440 宝石锁：positive=3×3 背墙 wall=1;negative=无墙（原版 isValidWallAnchor 拒）
   vanillaSeven.push(await runSeven(440, () => {
     clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
@@ -303,9 +323,86 @@ const out = await page.evaluate(async () => {
   for (const r of vanillaSeven) {
     const okVan = r.vanilla === true && r.placed && r.cells === r.full && r.framesOk;
     const okRej = r.vanilla === false && !r.placed && r.cells === 0;
+    // ★M-2：388/389 放置帧序列必须===原版约定 0/20/38/56/74
+    if ((r.sheet === 388 || r.sheet === 389) && r.placed
+      && JSON.stringify(r.frameSeq?.map((p) => p[1]) ?? []) !== JSON.stringify([0, 20, 38, 56, 74])) {
+      vFail.push(`${r.sheet}:frameSeq=${JSON.stringify(r.frameSeq)}`);
+      continue;
+    }
     if (!okVan && !okRej) vFail.push(`${r.sheet}:van=${r.vanilla},placed=${r.placed},cells=${r.cells}/${r.full}`);
   }
   res.vanillaSevenFailures = vFail;
+
+  // ---- ⑦ M-4（2026-09-02 九批）放置实体重叠门两档建模（Player.cs:41747-41810 名单
+  //  {138,664,711-716,484}32×32/{235}48×16/{476}16×16/{387}32×16 只查 Main.player
+  //  active&&!dead&&!ghost;legacy 实心件=PlaceTile→Collision.EmptyTile(Collision.cs:1361)
+  //  查玩家+敌怪;名单外表驱动件无实体门）+ 门在清格相【之前】（失败零格变更）。
+  //  ㊀ 235 传送器（名单内 48×16px=3×1）：玩家与占位框重叠 → 拒,且占位格内的
+  //     tileCut 障碍（杂草 3）【不被清】=残段清偿断言;玩家移开 → 放成（对照）。
+  const TP = tidOfSheet(235);
+  const tpItem = findItem2(tiles.TILE_DEFS[TP]?.key);
+  res.m4TeleporterOverlap = 'no-item';
+  if (tpItem >= 0) {
+    const WEED = idOfSheet(3);
+    const tpEnv = () => {
+      clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+      for (let x = x0 + 3; x <= x0 + 6; x++) put(x, F, STONEC2);   // 底锚行（3 宽）
+    };
+    tpEnv();
+    put(x0 + 5, F - 1, WEED);                          // 占位格内 tileCut 障碍
+    holdItem(tpItem);
+    g.player.useTime = 0;
+    g.player.x = (x0 + 4) * 16 + 8; g.player.y = (F - 2) * 16;   // 玩家压占位框（行 F-2..F-1）
+    g.player.vx = 0; g.player.vy = 0;
+    await new Promise((r) => setTimeout(r, 40));
+    const sb1 = inv.slots[selIdx]?.stack ?? -1;
+    g['tryPlace'].call(g, x0 + 4 + 1, F - 1 + 0, items.ITEM_DEFS[tpItem]);   // 点击=Origin(1,0)
+    const sb1b = inv.slots[selIdx]?.stack ?? -1;   // ★即时取（对照调用会再动堆栈）
+    const weedBefore = st.get(x0 + 5, F - 1) === WEED;
+    // 对照：玩家移开 → 放成（ weed 被清格相正常清除=tileCut ∪ BreakableWhenPlacing 面不变）
+    g.player.x = (x0 + 8) * 16 + 8; g.player.y = (F - 6) * 16;
+    g.player.vx = 0; g.player.vy = 0; g.player.useTime = 0;
+    await new Promise((r) => setTimeout(r, 40));
+    const sb2 = inv.slots[selIdx]?.stack ?? -1;
+    g['tryPlace'].call(g, x0 + 4 + 1, F - 1 + 0, items.ITEM_DEFS[tpItem]);
+    res.m4TeleporterOverlap = {
+      rejected: sb1 - sb1b === 0,
+      weedIntact: weedBefore,                          // 拒绝路径零格变更
+      placedAfter: sb2 - (inv.slots[selIdx]?.stack ?? -1) === 1,
+      tpCells: countIn(TP, x0 + 2, x0 + 9, F - 3, F + 1),
+    };
+  }
+  // ㊁ legacy 实心件（泥土）+ 敌怪重叠 → 拒（Collision.EmptyTile :1361 查 NPC）;
+  //   无敌怪对照 → 放成。敌怪用最小 AABB 桩压目标格（overlapsEntity 消费面）。
+  {
+    const DIRT2 = idOfSheet(0);
+    const dirtIdx2 = findItem2(tiles.TILE_DEFS[DIRT2]?.key);
+    res.m4DirtEnemyOverlap = 'no-item';
+    if (dirtIdx2 >= 0) {
+      clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+      for (let x = x0 + 3; x <= x0 + 6; x++) put(x, F, STONEC2);
+      const mock = { x: (x0 + 5) * 16, y: (F - 1) * 16, w: 16, h: 16, dead: false };
+      g.entities.enemies.push(mock);
+      holdItem(dirtIdx2);
+      g.player.useTime = 0;
+      g.player.x = (x0 + 8) * 16 + 8; g.player.y = (F - 6) * 16;   // 玩家让开,只敌怪压格
+      g.player.vx = 0; g.player.vy = 0;
+      await new Promise((r) => setTimeout(r, 40));
+      const sb1 = inv.slots[selIdx]?.stack ?? -1;
+      g['tryPlace'].call(g, x0 + 5, F - 1, items.ITEM_DEFS[dirtIdx2]);
+      const rejected = sb1 - (inv.slots[selIdx]?.stack ?? -1) === 0;
+      g.entities.enemies = g.entities.enemies.filter((e) => e !== mock);   // 对照:移除敌怪
+      g.player.useTime = 0;
+      await new Promise((r) => setTimeout(r, 40));
+      const sb2 = inv.slots[selIdx]?.stack ?? -1;
+      g['tryPlace'].call(g, x0 + 5, F - 1, items.ITEM_DEFS[dirtIdx2]);
+      res.m4DirtEnemyOverlap = {
+        rejected,
+        placedAfter: sb2 - (inv.slots[selIdx]?.stack ?? -1) === 1,
+        dirtCells: countIn(DIRT2, x0 + 3, x0 + 8, F - 3, F + 1),
+      };
+    }
+  }
   // ---- ⑤ 备案②清零（2026-09-01 五批）：全部可放置多格 decor 候选逐件跑——
   // 放置成功（持物堆 -1）→ 必须整件存活（cells===full,自毁=部分格被吃）;
   // 双尝试：先地板,被拒再试天花板（34 吊灯/42 挂灯等顶锚件）;
@@ -332,6 +429,15 @@ const out = await page.evaluate(async () => {
     && res.sunflowerDigSupport.placedBefore === 8 && res.sunflowerDigSupport.residue === 0
     && cFail.length === 0
     && vFail.length === 0
+    // —— 九批 M-4（两档实体重叠门 + 残段清偿）——
+    && (typeof res.m4TeleporterOverlap === 'object'
+      ? res.m4TeleporterOverlap.rejected && res.m4TeleporterOverlap.weedIntact
+        && res.m4TeleporterOverlap.placedAfter && res.m4TeleporterOverlap.tpCells === 3
+      : res.m4TeleporterOverlap === 'no-item')
+    && (typeof res.m4DirtEnemyOverlap === 'object'
+      ? res.m4DirtEnemyOverlap.rejected && res.m4DirtEnemyOverlap.placedAfter
+        && res.m4DirtEnemyOverlap.dirtCells === 1
+      : res.m4DirtEnemyOverlap === 'no-item')
     ? 'PASS' : 'FAIL';
   inv.slots[selIdx] = savedSlot;
   return res;

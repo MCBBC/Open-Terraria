@@ -39,6 +39,7 @@ function casterWorld() {
     sfx: [], shots: [], dust: 0,
     playSfxFiles(files) { hooks.sfx.push(files); },
     spawnParticles(_x, _y, _c, count) { hooks.dust += count; },
+    spawnDust() { hooks.dust += 1; return { x: 0, y: 0, vx: 0, vy: 0, scale: 1 }; },
     damagePlayer() { return 0; },   // GameHooks 终态:返回实扣 number
     addDamageNumber() {},   // Enemy.hurt 伤害数字链（RV3 后桩缺口补）
     enemies: () => [],

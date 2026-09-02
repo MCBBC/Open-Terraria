@@ -412,6 +412,8 @@ const CSS = `
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 /* 右下角无框坞（2026-09-02）：列标签直接叠在世界画面上,加黑投影保可读 */
 .sw-eqdock .sw-lbl { text-shadow:1px 1px 0 #000; }
+/* 背包面板透明底（2026-09-02 用户要求去底去框）：同补偿,标题/标签/合成站文字投影 */
+.sw-inv .sw-lbl, .sw-inv .sw-title, .sw-inv [data-role="stations"] { text-shadow:1px 1px 0 #000; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -1543,8 +1545,8 @@ export class UI {
     document.addEventListener('mousedown', (e) => {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
-      // ★.sw-eqdock/.sw-invstrip 同算面板（2026-09-02 无框区无 .sw-panel 底框）
-      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock, .sw-invstrip')) return;
+      // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
+      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock')) return;
       // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:41279-41282 商店格区）：
       //  · 行/按钮 → 各自 click 链（行 = 有货商店格；光标持有时 Game.npcShopBuy 内
       //    的 CanStack/满叠门裁决，异型整链无动作 PickItemMovementAction :1427-1438）
@@ -1802,9 +1804,9 @@ export class UI {
       this.placeTrash();
       return;
     }
-    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞/面板下横条同算面板内
-    //（2026-09-02 无框区在 .sw-panel 之外——漏登记会把拖到其上标签/缝隙的物品当世界抛掷）
-    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-invstrip');
+    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
+    // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
+    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock');
     if (!inPanel) {
       this.throwHeldToWorld();
     } else {
@@ -2234,12 +2236,13 @@ export class UI {
     this.invPanel.style.left = `${left}px`;
     this.invPanel.style.top = `${top}px`;
     this.invPanel.style.maxHeight = `calc(100vh - ${top + 12}px)`;
-    // ★透明只调面板底色 alpha（0.78/0.8 → 0.55/0.58）——不动 opacity（曾用面板级
-    //   opacity 连格子/文字一起半透,2026-08-27 用户纠正）
-    this.invPanel.style.background = 'linear-gradient(rgba(38,50,90,0.55), rgba(22,30,58,0.58))';
-    this.invPanel.style.borderColor = 'rgba(125,146,214,0.4)';
-    this.invPanel.style.boxShadow = '0 0 0 1px rgba(10,14,30,0.45), 0 4px 16px rgba(0,0,0,0.4)';
-    this.positionDockStrip();   // 面板底缘随贴位变化 → 横条尾随（未显示时内部自守卫）
+    // ★2026-09-02 用户要求：背包面板去底去框透明化（试试）——.sw-panel 类的渐变
+    //   底/2px 描边/投影全部内联覆盖为透明（此处每次打开重算=权威落点;若要回底色
+    //   只需还原本段）。可读性补偿：.sw-inv 作用域给标签/标题加文字投影;
+    //   配方行/搜索框/槽位贴图自带底,不受影响
+    this.invPanel.style.background = 'transparent';
+    this.invPanel.style.border = 'none';
+    this.invPanel.style.boxShadow = 'none';
   }
 
   /** force=跳过开/关翻转（开箱路径 openChestPanel 用：解锁世界输入后「背包开着
@@ -2254,15 +2257,10 @@ export class UI {
     this.positionInvPanel();
     this.invPanel.style.display = 'block';
     if (this.eqDockEl) this.eqDockEl.style.display = 'flex';   // 右下角坞随开显
-    if (this.invStripEl) {   // 面板下横条随开显+贴位
-      this.invStripEl.style.display = 'flex';
-      this.positionDockStrip();
-    }
     // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正；
     // 配方列表高度同批二次刷新（首次采样布局未稳,LIST_H 偏大,hover 前不收敛）
     setTimeout(() => {
       this.positionInvPanel();
-      this.positionDockStrip();
       this.refreshVanillaCrafting();
     }, 120);
     this.refreshAll();
@@ -2291,7 +2289,6 @@ export class UI {
     this.closeHousingPanel();
     this.invPanel.style.display = 'none';
     if (this.eqDockEl) this.eqDockEl.style.display = 'none';   // 右下角坞随关收
-    if (this.invStripEl) this.invStripEl.style.display = 'none';   // 面板下横条随关收
     this.closeItemSearch();
     this.closeGuideSearch();
     this.closeChest();
@@ -3031,9 +3028,6 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
-  /** 面板下横条（2026-09-02）：图标行（搜索/住房/图鉴）+成就卡+表情钮——锚在
-   *  背包面板底缘下方（positionDockStrip）,随背包开合显隐 */
-  private invStripEl: HTMLElement | null = null;
   /** 右下角无框坞（2026-09-02 用户要求）：装备列（配装行+染料/时装/装备+防御计数）
    *  与杂项/PvP 列的浮置容器——无面板底框,随背包开合显隐（open/closeInventory） */
   private eqDockEl: HTMLElement | null = null;
@@ -3042,6 +3036,8 @@ export class UI {
   private loadoutBtns: HTMLButtonElement[] = [];
   /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
   private quickStackBtn!: HTMLButtonElement;
+  /** 道具搜索钮（🔍,合成右侧竖列底——row 里构建,竖列段取挂,2026-09-02 移位） */
+  private itemSearchBtn!: HTMLButtonElement;
   /** ChestStack 钮悬停态（帧选 0/1 常态·悬停位） */
   private qsHover = false;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
@@ -3108,7 +3104,9 @@ export class UI {
   }
 
   private buildInventoryPanel() {
-    this.invPanel = el('div', 'sw-panel');
+    // sw-inv 作用域类（2026-09-02）：透明底下面板文字直接叠世界画面,该作用域统一
+    // 加文字投影（CSS 见 .sw-inv 规则）;其余 .sw-panel（箱子/设置等）不受影响
+    this.invPanel = el('div', 'sw-panel sw-inv');
     // 位置（2026-08-27 用户要求）：对齐左上工具栏最左格（面板跑工具栏正下方一点）,
     // 不再水平居中——左=热键栏首格左缘,顶=热键栏底+8px;透明度再拉高（opacity .75,
     // 叠 .sw-panel 半透底）+ 边框/投影弱化。★每次 openInventory 重算（贴位取热键栏
@@ -3184,9 +3182,11 @@ export class UI {
       }
       // 道具搜索（调试检索器）：图标化入顶排图标组（2026-08-27 用户要求,原背包
       // 标签行文字钮退役）——★Bestiary 搜索贴图自带蓝底面板非裸 icon,用户定策
-      // 改用 emoji 🔍 + hover 金色衬底
+      // 改用 emoji 🔍 + hover 金色衬底。2026-09-02 用户要求：搜索钮移到竖列最底
+      // （不随 row,挂载点见下方 sideCol 段尾）
       {
         const bS = el('button');
+        this.itemSearchBtn = bS;
         bS.title = '道具搜索';
         bS.textContent = '🔍';
         bS.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none; border:none;'
@@ -3199,12 +3199,11 @@ export class UI {
           e.stopPropagation();
           this.openItemSearch();
         });
-        row.appendChild(bS);
       }
       {
         const b = el('button');
         b.title = Lang.text('Mods.SandboxWorld.Housing.Button');
-        b.style.cssText = 'margin:0; width:22px; height:24px; padding:0; flex:none; border:none;'
+        b.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none; border:none;'
           + 'background:url(sprites/vanilla-ui/UI_DisplaySlots_4.png) 0 0/100% 100%;'
           + 'image-rendering:pixelated; cursor:pointer;';
         this.housingBtn = b;
@@ -3226,7 +3225,7 @@ export class UI {
       {
         const bBst = el('button');
         bBst.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
-        bBst.style.cssText = 'margin:0; width:32px; height:30px; padding:0; flex:none; border:none;'
+        bBst.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none; border:none;'
           + 'background:url(sprites/vanilla-ui/UI_Bestiary.png) 0 0/200% 100%;'
           + 'image-rendering:pixelated; cursor:pointer;';
         bBst.addEventListener('mouseenter', () => { bBst.style.backgroundPosition = '100% 0'; });
@@ -3441,9 +3440,9 @@ export class UI {
     // ---- 右上钮簇（原版背包开时 2×2 30×30 裸图标：QuickStack(498,244)/Sort(534,244)/
     //      Bestiary(498,278)/Emote(534,278)，Main.cs:41276-41355/:41815-41930——
     //      位于背包格右下与合成区之间。本仓 Sort 未实装、Bestiary 贴图缺 →
-    //      簇内只落 QuickStack + Emote 两枚，右对齐两行）----
+    //      簇内只落 QuickStack 一枚。2026-09-02 用户要求：居中对齐（原右对齐不美观）----
     const clusterRow = el('div');
-    clusterRow.style.cssText = 'display:flex; justify-content:flex-end; gap:6px; margin:2px 0 4px;';
+    clusterRow.style.cssText = 'display:flex; justify-content:center; gap:6px; margin:2px 0 4px;';
     // 堆叠至附近宝箱（ChestStack 贴图 4 帧 = 悬停位+模式位：0 常态-quick/1 悬停-quick/
     //  2 常态-smart/3 悬停-smart，Main.cs:41311 num80 += mode*2 + hover）——左键
     // QuickStackAllChests + 音 12 / 右键 CycleQuickStackMode + 音 10；开箱/商店隐藏
@@ -3470,10 +3469,11 @@ export class UI {
     });
     clusterRow.appendChild(this.quickStackBtn);
     // 表情入口（原版簇位 (534,278)：EmoteMenuButton 双帧裸图标，左键开 UIEmotesMenu
-    // :41850；打开逻辑经 Game 注入 onEmoteMenu）
+    // :41850；打开逻辑经 Game 注入 onEmoteMenu）。2026-09-02 用户要求：30×30 →
+    // 24×24,与住房/图鉴图标统一（原尺寸偏大）
     const bEmote = el('button', 'sw-btn');
     bEmote.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
-    bEmote.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
+    bEmote.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none;'
       + 'background:url(sprites/vanilla-ui/UI_Emotes.png) 0 0 / 200% 100%;'
       + 'image-rendering:pixelated; border:none; cursor:pointer;';
     bEmote.addEventListener('mouseenter', () => { bEmote.style.backgroundPosition = '100% 0'; });
@@ -3482,9 +3482,9 @@ export class UI {
       e.stopPropagation();
       this.onEmoteMenu?.();
     });
-    // 表情钮 → 面板下横条（2026-09-02 用户要求,挂载点见下方 invStrip 段）
+    // 表情钮 → 合成右侧竖列（2026-09-02 用户要求,挂载点见下方 sideCol 段）
     // ★2026-08-27 用户要求：堆叠钮挂垃圾桶下方（原在背包网格下沿）——
-    //  右列构成：弹药|钱币 → 垃圾桶 → 堆叠 的纵向工具列
+    //  右列构成：弹药|钱币 → 垃圾桶 → 堆叠 → 图标/成就/表情竖列
     rightRail.appendChild(clusterRow);
     body.appendChild(right);
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
@@ -3493,16 +3493,19 @@ export class UI {
     // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
-    // ---- 面板下横条（2026-09-02 用户要求：图标行+成就卡+表情钮迁到背包面板
-    //  下方,advRail 侧列退役=面板进一步收窄）。透明无底框,位置随面板底缘走
-    //  （positionDockStrip:positionInvPanel/refreshVanillaCrafting 后重算）----
-    const invStrip = el('div', 'sw-invstrip');
-    invStrip.style.cssText = 'position:fixed; left:0; top:0; display:none; align-items:center;'
-      + 'gap:14px; pointer-events:auto; z-index:11;';
-    this.invStripEl = invStrip;
-    invStrip.appendChild(row);   // 图标行（搜索/住房/图鉴+联机/旅程钮）
-    invStrip.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡）同条
-    invStrip.appendChild(bEmote);   // 表情钮（原堆叠/表情簇,2026-09-02 迁此）
+    // ---- 合成右侧竖列（2026-09-02 用户要求：图标+表情+成就卡+搜索 竖排在合成区
+    //  右侧=rightRail 尾部（弹药|钱币/垃圾桶/堆叠钮下方空档）,不占面板额外宽度。
+    //  排序（2026-09-02 用户定案）：住房/图鉴 → 表情（上移到成就卡上方,尺寸对齐
+    //  24×24）→ 成就卡（竖式图上文下）→ 道具搜索（垫底）。成就卡竖式 CSS 见
+    //  AchievementsUI ----
+    const sideCol = el('div');
+    sideCol.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:center; margin-top:10px;';
+    row.style.cssText = 'display:flex; flex-direction:column; gap:6px; align-items:center; margin:0;';   // 图标行横排→竖排（原顶行/横条两改）
+    sideCol.appendChild(row);   // 图标（住房/图鉴+联机/旅程钮）
+    sideCol.appendChild(bEmote);   // 表情钮（成就卡上方,2026-09-02 用户定案）
+    sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
+    sideCol.appendChild(this.itemSearchBtn);   // 道具搜索（垫底,2026-09-02 用户定案）
+    rightRail.appendChild(sideCol);
     // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列
     //（2026-09-02 用户要求；此前挂 advRail 玩家对决原位）
     const miscStack = el('div');
@@ -3655,20 +3658,6 @@ export class UI {
     craftWrap.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
     this.root.appendChild(eqDock);   // 右下角无框坞与面板平级（root 直挂,2026-09-02）
-    this.root.appendChild(invStrip);   // 面板下横条（root 直挂,随面板底缘贴位）
-    this.positionDockStrip();
-  }
-
-  /** 面板下横条贴位（2026-09-02）：左对齐面板左缘,顶=面板底+8。面板底随合成列表
-   *  高度动态变化（refreshVanillaCrafting 的 LIST_H）——该处尾随重算;面板藏起时
-   *  rect=0,只在打开路径调用即可 */
-  private positionDockStrip(): void {
-    const strip = this.invStripEl;
-    if (!strip || !this.invPanel) return;
-    const pr = this.invPanel.getBoundingClientRect();
-    if (pr.width < 4) return;   // 面板未显示（display:none 采到 0 尺寸）——跳过
-    strip.style.left = `${Math.round(pr.left)}px`;
-    strip.style.top = `${Math.round(pr.bottom + 8)}px`;
   }
 
   /** 滚轮时间戳——hover 预览 350ms 门（原生滚动经停行的 mouseenter 不预选） */
@@ -4747,15 +4736,14 @@ export class UI {
       .map((e, i) => ({ ...e, met: metFlags[i] }))
       .sort((x, y) => Number(y.met) - Number(x.met));
     // ★2026-08-27 用户要求：列表高度钳视口（曾恒 240px 底部死区→改视口限）。
-    // 2026-09-02：advRail 侧列退役（图标行/成就卡/表情迁面板下横条）——上限只剩
-    // 视口钳制,并预留横条高度（96px ≈ 成就卡 56 + 图标行 32 + 缝）防列表底压住
-    // 横条；钳下限 240,按行高整除取整（末行半裁观感即消失）。max-height 令短列表
-    // 自然收合（不再手算 min(len*H)）。首帧布局未就绪（rect 0）时落 240 下限
+    // 2026-09-02：右侧竖列（图标/成就卡/表情）已入 rightRail 流内——上限只剩
+    // 视口钳制（-32 底缘余量）；钳下限 240,按行高整除取整（末行半裁观感即消失）。
+    // max-height 令短列表自然收合（不再手算 min(len*H)）。首帧布局未就绪（rect 0）
+    // 时落 240 下限,后续刷新自校正
     const rectTop = cl.getBoundingClientRect().top;
-    const byViewport = window.innerHeight - 96 - rectTop;
+    const byViewport = window.innerHeight - 32 - rectTop;
     const LIST_H = Math.max(240, Math.floor(byViewport));
     cl.style.maxHeight = `${Math.floor(LIST_H / UI.CRAFT_ROW_H) * UI.CRAFT_ROW_H}px`;
-    this.positionDockStrip();   // 列表高度变化 → 面板底缘移动 → 横条重贴
     // 内容签名比对：配方集/计数/满足态全等 → 跳过整表重建（列表 DOM 原样驻留，
     // 原生滚动位置天然不动）——hover/无关 refreshAll 不再付出 3300 行重建
     const prev = this.craftAvailRef;

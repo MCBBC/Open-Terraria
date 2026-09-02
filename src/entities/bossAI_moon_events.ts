@@ -1153,11 +1153,44 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
     // of light"）；25 的 AddLight(1,0.3,0.1) 已在上方原样接
     if (vid === 33) {
       e.lightRGB = [0.55, 0.75, 1];
-      game.spawnParticles(e.x + 2, e.y + 2, '#9AC8E8', 2, 0.4, { life: 30, size: 2 });
+      // 尘迹升级为原版真尘（NPC.cs:21618-21639，双循环每 tick 6 粒 d172 + 1/5 掷
+      // 第 7 粒 scale0.6）：尘速 ×0.1+vel×0.5、位置沿 −vel/3×循环序 递推拖影、
+      // noGravity、α100——曾是 2 粒泛色近似（密度/材质双差，用户报"法师弹幕效果"）
+      for (let loop = 0; loop < 2; loop++) {
+        for (let i = 0; i < 3; i++) {
+          const d = game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
+            172, 0, 0, 100, null, 1.2, true);
+          if (!d) continue;
+          d.vx = d.vx * 0.1 + e.vx * 0.5;
+          d.vy = d.vy * 0.1 + e.vy * 0.5;
+          d.x -= (e.vx / 3) * loop;
+          d.y -= (e.vy / 3) * loop;
+        }
+        if (Math.random() < 0.2) {
+          const d2 = game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
+            172, 0, 0, 100, null, 0.6, true);
+          if (d2) { d2.vx = d2.vx * 0.25 + e.vx * 0.5; d2.vy = d2.vy * 0.25 + e.vy * 0.5; }
+        }
+      }
     } else if (vid === 30 || vid === 665) {
-      game.spawnParticles(e.x + 2, e.y + 2, '#7A5AC8', 2, 0.4, { life: 30, size: 2 });
+      // 原版真尘(NPC.cs:21601-21616,alpha=255 强置隐形,可视面全在尘):双循环每
+      // tick 4 粒 d27 阴影焰紫(sp=v×0.2、尘速×0.3−vel×0.2、noGravity、scale1.3)
+      for (let loop = 0; loop < 2; loop++) {
+        for (let i = 0; i < 2; i++) {
+          const d = game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
+            27, e.vx * 0.2, e.vy * 0.2, 100, null, 1.3, true);
+          if (!d) continue;
+          d.vx = d.vx * 0.3 - e.vx * 0.2;
+          d.vy = d.vy * 0.3 - e.vy * 0.2;
+        }
+      }
     } else if (vid === 25) {
-      game.spawnParticles(e.x + 2, e.y + 2, '#FFB050', 1, 0.5, { life: 26, size: 2 });
+      // 原版真尘(else 桶 :21560-21577:1/6 掷 d6 火尘 sp=v×0.2、scale1.65、noGravity;
+      // 光 AddLight 已在上方原样接)
+      if (Math.random() < 1 / 6) {
+        game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
+          6, e.vx * 0.2, e.vy * 0.2, 100, null, 1.65, true);
+      }
     }
     e.visAngle += 0.4 * e.facing;                    // :21547
   }

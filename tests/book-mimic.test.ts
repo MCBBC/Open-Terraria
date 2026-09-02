@@ -219,7 +219,7 @@ describe('spawner 书掷（地牢分支 NPC.cs:2655-2677）', () => {
 });
 
 describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
-  it('age==300 首召幻影龙 454 头 + 455-458 身 + 459 尾（共享头血池）；已有龙 → 召 521', () => {
+  it('age==300 首召幻影龙 454 头 + 30 段链（456×21+455×6+457/458/459 尾,NPC.cs:51743-51769；共享头血池）；已有龙 → 召 521', () => {
     const w = makeWorld();
     const spawned: Enemy[] = [];
     const game = {
@@ -239,7 +239,11 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
     expect(dragon.length).toBe(1);
     const segIds = spawned.filter((s) => s.vanillaId !== 454 && s.vanillaId !== 439)
       .map((s) => s.vanillaId).sort((a, b) => a! - b!);
-    expect(segIds).toEqual([455, 456, 457, 458, 459]);
+    // 原版 AI_006 专块(:51743-51769):n=0..29 默认 456,(n-2)%4==0 且 n<26 → 455
+    // (n=2,6,10,14,18,22 共 6 节),27/28/29 → 457/458/459——曾按 5 段 [455..459]=误读
+    expect(segIds).toEqual([
+      ...Array(6).fill(455), ...Array(21).fill(456), 457, 458, 459,
+    ]);
     // realLife 共享：打任意段扣头 10000 血池（StrikeNPC :82132-82137）
     const body = spawned.find((s) => s.vanillaId === 456)!;
     expect(body.realLifeHost).toBe(dragon[0]);

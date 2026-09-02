@@ -7,6 +7,7 @@ import { PREVENTS_ACTUATION_UNDER } from '../Wiring';
 import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
 import { flipSwitchTrack } from '../MinecartTrack';
+import { tallGateRowOf } from '../Door';
 
 /** 器件运行环境(Game 实现;保持窄接口以便单测注入) */
 export interface DeviceCtx {
@@ -953,7 +954,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
       if (!target) return true;
       const ox = x - Math.floor(st.frameX[i] % 20 / 18);
-      const oy = y - Math.floor(st.frameY[i] % 90 / 18);
+      // ★M-2（2026-09-02）行归一随帧约定归原版：fy%90/18（旧 18px 步进自洽）→
+      // heights 递减（CheckTallGate :52129-52133 同式,CFH=94,Door.ts 唯一权威）
+      const oy = y - tallGateRowOf(st.frameY[i]);
       if (!toOpen && ctx.areaEmpty && !ctx.areaEmpty(ox, oy, 1, 5)) return true;  // ★R20-I8
       for (let ix = ox; ix < ox + 1; ix++) {
         for (let iy = oy; iy < oy + 5; iy++) {

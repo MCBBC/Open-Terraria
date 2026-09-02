@@ -1130,15 +1130,36 @@ export class Enemy extends Entity {
     addEnemy(game, spit);
   }
 
+  /** AI_006 链头白名单（自然生成池/召唤可达的建链头）。不在表内 = 原版不建链：
+   *  体/尾段裸生(面板)=光杆；402 星尘织带蠕虫原版无链(全树无 403/404 生成点,
+   *  天柱生成=光杆头)；412 爬尾虫/621 血鳗鱼由各自 AI 首帧自建(再建=双链)；
+   *  375 鳀鱼? 375=NPC_375 单体蠕虫(原版同名单独,链上 376/377=错族)；
+   *  13 EoW 走 boss 召唤专属路径(GetEaterOfWorldsSegmentsCount,realLife=-1)；
+   *  134-136 毁灭者 aiStyle 37 非蠕虫 */
+  static readonly WORM_CHAIN_HEADS = new Set([7, 10, 39, 87, 95, 98, 117, 454, 510, 513]);
+
   /** AI_006 逐型链规格（自然生成/召唤共用——NPC.cs:51660-51905 建链块 + :51853-51905
    *  通用头 ai[2] 覆写表;C# Next(lo,hi) 上界不含）。87 飞龙 = 固定 14 段精确序列
-   *  (:51700-51724 m0..m13:1/8=88 翼段、11/12=90/91、13=92 尾,余 89)。
-   *  EoW 13 走 boss 召唤专属路径(GetEaterOfWorldsSegmentsCount,realLife=-1)不在此表;
-   *  134-136 毁灭者/454-459 幻影龙/412-414 爬尾虫由各自 AI/召唤点自建 */
-  static wormChainSpec(vid: number, rand: () => number): { count: number; segIds?: number[] } {
+   *  (:51700-51724 m0..m13:1/8=88 翼段、11/12=90/91、13=92 尾,余 89);454 幻影龙 =
+   *  固定 30 段(:51743-51769:默认 456、(n-2)%4==0 且 n<26 → 455、27/28/29 →
+   *  457/458/459——曾按仪式点 5 段 [455..459]=误读,2026-09-02 全面 review 纠)。
+   *  非链头（段裸生/自建链族/无链族）返回 undefined=不建链 */
+  static wormChainSpec(vid: number, rand: () => number): { count: number; segIds?: number[] } | undefined {
+    if (!Enemy.WORM_CHAIN_HEADS.has(vid)) return undefined;
     const next = (lo: number, hi: number) => lo + ((rand() * (hi - lo)) | 0);
     switch (vid) {
       case 87: return { count: 14, segIds: [89, 88, 89, 89, 89, 89, 89, 89, 88, 89, 89, 90, 91, 92] };
+      case 454: {
+        const segIds: number[] = [];
+        for (let n = 0; n < 30; n++) {
+          if (n === 27) segIds.push(457);
+          else if (n === 28) segIds.push(458);
+          else if (n === 29) segIds.push(459);
+          else if ((n - 2) % 4 === 0 && n < 26) segIds.push(455);
+          else segIds.push(456);
+        }
+        return { count: 30, segIds };
+      }
       case 510: return { count: next(12, 21) + 1 };
       case 513: return { count: next(6, 10) + 1 };
       case 39: return { count: next(14, 23) + 1 };
@@ -1150,7 +1171,8 @@ export class Enemy extends Entity {
   }
 
   /** 由头生成段链（原版各 worm 的 NewNPC 链，NPC.cs:18174+）：body×n + tail。
-   *  segIds 显式段表（454 幻影龙 = 455-458 身 ×4 + 459 尾——非 head+1/head+2 连号族）；
+   *  segIds 显式段表（454 幻影龙 = wormChainSpec 的 30 段表——456 主体+455 翼节+
+   *  457/458/459 尾三连,非 head+1/head+2 连号族）；
    *  sharedLife = realLife 共享头血池（StrikeNPC :82132-82137——毁灭者/幻影龙段不可单独打死） */
   static spawnWormChain(head: Enemy, segCount: number, segIds?: number[], sharedLife = false): Enemy[] {
     const segs: Enemy[] = [];
@@ -1779,6 +1801,13 @@ export class Enemy extends Entity {
    *  原版 NPC.spriteDirection 字段缺省一致（NPC.cs:6430）。渲染层
    *  drawEnemy 消费（==1 镜像,Main.cs:22984） */
   ravenSdir = -1;
+  /** AI_026 跳梯行进侧门的 spriteDirection 闩（NPC.cs:63513 num24）：86/155/329/
+   *  315/410/423 全族在 AI_026 内【只】在卡墙折返写 spriteDirection=direction
+   *  （:63251）——出生缺省 -1（Entity 字段缺省 :6522,SetDefaults 不复位）,
+   *  平时是滞后闩;546 每 tick 写 -direction（:63571）。消费=跳梯门 num24
+   *  (410/423/546 再 ×−1 :63514-63517)。不可用 facing 代位:facing(=direction)
+   *  随仇恨重瞄逐帧翻转,闩不随(2026-09-02 遗留对齐批) */
+  sdir26 = -1;
   /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
   aiInit = false;
   /** AI_024 鸮族 localAI[0]（出生即飞行一次性门,NPC.cs:25410-25416） */
@@ -1986,13 +2015,15 @@ export class Enemy extends Entity {
           else skeletronBossAI(this, game, p);
           break;                                                         // AI_011 骷髅王头战斗核/地牢守卫
         case 12: skeletronHandAI(this, game, p); break;                    // AI_012 骷髅王手(锚定头)
-        // ★aiStyle↔type 权威对齐（SetDefaults :9617/:9651 + AI 分发 :24596/:24674）：
-        //  type 70 Blazing Wheel（火轮）= aiStyle 20；type 72 Spike Ball（刺球）= aiStyle 21。
-        //  行为归属核验：aiStyle 20（:24596-24673）= 随机速档 6×(1+Next(15)×0.1) + 初段
-        //  垂直俯冲 15t + 恒速弹跳加速——火轮；aiStyle 21（:24674-24725）= 恒速 6 对角 +
-        //  rotation ±0.13/t——刺球。1405/1456 两版一致 → 现行 dispatch 正确,不换名。
-        case 20: this.blazingWheelAI(game); break;                           // AI_020 火轮（type 70，:24596）
-        case 21: this.spikeBallAI(game); break;                          // AI_021 刺球（type 72，:24674）
+        // ★aiStyle↔type 权威对齐（SetDefaults :9708-9724 + AI 分发 :24662/:24740，
+        //  名字权威 = NPCID.cs:11205/:11209：70=SpikeBall 刺球、72=BlazingWheel 火轮）：
+        //  type 70 刺球 = aiStyle 20（锚点 ai[1]/ai[2] 像素 + 随机速档 6×(1+Next(15)×0.1)
+        //  + 初段垂直俯冲 15t + 恒速弹跳加速——锚链摆荡体,渲染面 Main.cs:23087-23113
+        //  锚链+锚座）；type 72 火轮 = aiStyle 21（恒速 6 对角 + rotation ±0.13/t 滚动）。
+        //  1405/1456/1457 三版一致 → 现行 dispatch 正确;两个函数名沿用历史（互换）,
+        //  行为归属以本注为准（2026-09-02 勘误：旧注释把 70/72 名字写反）。
+        case 20: this.blazingWheelAI(game); break;                           // AI_020 刺球（type 70，:24662）
+        case 21: this.spikeBallAI(game); break;                          // AI_021 火轮（type 72，:24740）
         case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
         case 16: this.swimAI(game, p); break;                           // AI_016 游泳族（鲨鱼/食人鱼）
         case 18:
@@ -7597,12 +7628,16 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
-  /** AI_020 火轮（NPC.cs:24596-24673，type 70）：ai[3]=1+Next(15)*0.1 速度档；
-   *  出生 W1 批（2026-08-19）补 TargetClosest + 双取反（:24602-24604 direction 与
-   *  directionY 各 ×−1——面朝玩家后再反向，出生即背向玩家俯冲）；首段垂直俯冲
-   *  spd/acc/2≈15 tick（L24617-24622），随后恒速 ±spd 弹跳——noTileCollide 穿墙，
-   *  "弹"靠 |v|≥spd 时 direction 翻转（L24637-24660）而非碰撞。
-   *  ai[1]/ai[2] = 出生中心格快照（:24606-24607，netcode 语义，无本地消费） */
+  /** AI_020 刺球（NPC.cs:24662-24739，type 70 SpikeBall——NPCID.cs:11205；本函数
+   *  沿用历史名 blazingWheelAI，与 72 火轮的 spikeBallAI 名字互换，dispatch 正确）：
+   *  ai[3]=1+Next(15)*0.1 速度档；出生 W1 批（2026-08-19）补 TargetClosest + 双取反
+   *  （:24668-24670 direction 与 directionY 各 ×−1——面朝玩家后再反向，出生即背向
+   *  玩家俯冲）；首段垂直俯冲 spd/acc/2≈15 tick（:24694-24701），随后恒速 ±spd
+   *  弹跳——noTileCollide 穿墙，"弹"靠 |v|≥spd 时 direction 翻转（:24711-24731）
+   *  而非碰撞。
+   *  ai[1]/ai[2] = 锚点像素快照（:24672-24673，position.Y += h/2+8 后的中心）——
+   *  ★渲染侧消费：Main.cs:23087-23113 据此画锚链 Chain+锚座 Spike_Base（曾误当
+   *  "格快照无本地消费"除以 TILE → 链画不到锚点，2026-09-02 用户报地牢刺球缺链） */
   private blazingWheelAI(game?: GameHooks) {
     if (!this.aiInit) { this.aiInit = true;
       // :24602 TargetClosest（有玩家即朝向；无目标 direction 保持 0→1 兜底）。
@@ -7611,11 +7646,11 @@ export class Enemy extends Entity {
       if (p) this.facing = this.seekDirX(p);
       this.facing *= -1;                    // :24603 direction ×−1
       this.dirY *= -1;                      // :24604 directionY ×−1（W1 双取反）
-      this.y += this.h / 2 + 8;             // :24605
+      this.y += this.h / 2 + 8;             // :24671
       if (this.facing === 0) this.facing = 1;
       if (this.dirY === 0) this.dirY = 1;
-      this.ai1 = (this.cx) / TILE;          // :24606 ai[1] = Center.X（netcode 快照）
-      this.ai2 = (this.cy) / TILE;          // :24607 ai[2] = Center.Y
+      this.ai1 = this.cx;                   // :24672 ai[1] = Center.X（像素锚点）
+      this.ai2 = this.cy;                   // :24673 ai[2] = Center.Y（像素锚点）
       this.ai3 = 1 + Math.floor(Math.random() * 15) * 0.1;
       this.vy = 6 * this.ai3 * this.dirY;
       this.ai0 = 1;
@@ -7841,6 +7876,7 @@ export class Enemy extends Entity {
       } else this.ai0 = 0;
       this.dirY = -1;
       if (this.facing === 0) this.facing = 1;
+      this.sdir26 = this.facing;   // 卡墙折返同步闩（cs:63251 spriteDirection = direction）
     }
     // ---- 水平推进（cs:63069-63165）：门 = !flag &&（落地 || wet || 顺向）;
     //      基档 num11=6 / num12=0.07 ----
@@ -7926,18 +7962,50 @@ export class Enemy extends Entity {
     // 跳梯（前方探测带 5×vx 提前量）——整块仅落地帧执行（AI_026 总门
     // NPC.cs:63455 `if (velocity.Y == 0f)`）。曾缺门=空中每帧照跑,悬崖档每帧
     // vy=-8 覆盖重力 → 独角兽 86 恒速 8px/t 爬升"飞天"（2026-09-02 用户实报,
-    // case 26 全族 86/155/329/315/410/423/546 同吃;fighterAI 同款块 :4666 有门）
-    if (this.vy === 0 && vxSign === dir && vxSign !== 0) {
-      const fx = Math.floor((this.x + this.w / 2 + (this.w / 2 + 2) * dir + this.vx * 5) / TILE);
-      const fy = Math.floor((this.y + this.h - 15) / TILE);
-      if (this.h >= 32 && solidAt(fx, fy - 2)) {
-        this.vy = solidAt(fx, fy - 3) ? -8.5 : -7.5;
-      } else if (solidAt(fx, fy - 1)) {
-        this.vy = -7;
-      } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy)) {
-        this.vy = -6;
-      } else if (!solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1) && !solidAt(fx + dir, fy + 2)) {
-        this.vy = -8; // 前方悬空（悬崖/沟）大跳
+    // case 26 全族 86/155/329/315/410/423/546 同吃;fighterAI 同款块 :4666 有门）。
+    // 遗留对齐批（2026-09-02）1:1 补齐：
+    // ① flag6 头顶净空（:63457-63468）：行 (y-7)/16、列 (x-7)/16..(x+w+7)/16
+    //   任一实心 → 整块不跑（顶头不跳）;
+    // ② 行进侧门 num24 = spriteDirection 闩 sdir26,410/423/546 再 ×−1
+    //   （:63513-63518）——曾以 facing(=direction) 代位=逐帧随仇恨翻转,闩不随;
+    // ③ -7/-6 档 !topSlope（:63535-63542,slope 1|2=坡顶不判墙）;曾带 h>=32 高度门
+    //   系 AI_003 :60692 串味（AI_026 无 → 410 星尘蜘蛛 h<32 墙档被吞）;
+    // ④ 悬崖档门+格位（:63545-63548）：(directionY<0 ∥ |vx|>3) 且 [n23+2] 空 且
+    //   [n22+dir,n23+3] 空（410/423 flag7 才加看 [n23+1]）——曾查 n+1/n+dir+1/
+    //   n+dir+2 且无速度门=浅一格+误跳。
+    if (this.vy === 0) {
+      const rTop = Math.floor((this.y - 7) / TILE);
+      const cL = Math.floor((this.x - 7) / TILE);
+      const cR = Math.floor((this.x + this.w + 7) / TILE);
+      let headroom = true;
+      for (let c = cL; c <= cR; c++) {
+        if (solidAt(c, rTop)) { headroom = false; break; }
+      }
+      if (headroom) {
+        const fx = Math.floor((this.x + this.w / 2 + (this.w / 2 + 2) * dir + this.vx * 5) / TILE);
+        const fy = Math.floor((this.y + this.h - 15) / TILE);
+        const topSlopeAt = (x: number, y: number) => {
+          if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+          const sl = st.slope[st.idx(x, y)];
+          return sl === 1 || sl === 2;
+        };
+        let num24 = this.sdir26;
+        if (vid === 410 || vid === 423 || vid === 546) num24 = -num24;
+        if ((this.vx < 0 && num24 === -1) || (this.vx > 0 && num24 === 1)) {
+          const flag7 = vid === 410 || vid === 423;
+          if (solidAt(fx, fy - 2)) {
+            this.vy = solidAt(fx, fy - 3) ? -8.5 : -7.5;
+          } else if (solidAt(fx, fy - 1) && !topSlopeAt(fx, fy - 1)) {
+            this.vy = -7;
+          } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy) && !topSlopeAt(fx, fy)) {
+            this.vy = -6;
+          } else if ((this.dirY < 0 || Math.abs(this.vx) > 3)
+            && (!flag7 || !solidAt(fx, fy + 1))
+            && !solidAt(fx, fy + 2)
+            && !solidAt(fx + dir, fy + 3)) {
+            this.vy = -8; // 前方悬空（悬崖/沟）大跳
+          }
+        }
       }
     }
     // ---- 423 冲刺尾尘（cs:63365-63377）：|vx| ≥ num11×0.95 → 2×(1/3) 尘 242 ----
@@ -7950,6 +8018,7 @@ export class Enemy extends Entity {
     //      兼作本 AI 的 direction 不可就地取反）；渲染派发门 stR===26&&idR===546 ----
     if (vid === 546) {
       this.visAngle += this.vx * 0.05;
+      this.sdir26 = -this.facing;   // spriteDirection=−direction（cs:63571 每 tick 闩写）
     }
     // 注意：原版 AI_026 无逐帧地面摩擦（速度持续加到 maxSpd，只有逆向阻尼/超速落地衰减）——
     // 不能带 fighterAI 的 onGround *=0.9，否则平衡点被压到 0.63 远低于 6
@@ -10241,6 +10310,13 @@ export class Enemy extends Entity {
       // 野生仙灵生成即 ai[2]=2 引导态（NPC.cs:3615-3623 SpawnNPC 第 8 参传 2f）,
       // 曾在此无条件清零=引导链死码、fairyAge 永不累计(2026-09-02 审计 D7)
       if (this.ai0 === 0 && this.ai1 === 0) { this.ai0 = this.cx; this.ai1 = this.cy; }
+      // 状态 0 首帧漂移起速（cs:48625-48631 localAI[0]==0 门）：vx=±Lerp(2,4)、
+      // vy=±Lerp(1,2) 再 ×0.7——曾缺=闲置微漂从零起步发死(遗留批 D10 细节)
+      if (this.ai2 === 0) {
+        const sgn = () => (Math.random() < 0.5 ? -1 : 1);
+        this.vx = (2 + Math.random() * 2) * sgn() * 0.7;
+        this.vy = (1 + Math.random()) * sgn() * 0.7;
+      }
     }
     // ---- 点光（cs:48991-49010）：value3 主色 ×0.7（value4 仅尘色不进光）
     //  583 粉仙灵 HotPink(255,105,180) / 584 绿仙灵 LimeGreen(50,205,50) /
@@ -10256,11 +10332,14 @@ export class Enemy extends Entity {
     }
     if (this.ai2 === 0) {
       this.noTileCollide = false;   // 引导态 2-6 置 true,回 0/1 显式清（cs:48480）
-      // 绕锚点微漂
+      // 绕锚点微漂（cs:48636-48645 1:1）:离锚 >20 → sign×0.04 + |vy|>2 时 ×0.95
+      // 阻尼——曾自造 else 抖动 + ±2 硬钳（硬钳把首帧起速当场压平）
       const dx = this.ai0 - this.cx, dy = this.ai1 - this.cy;
-      if (Math.hypot(dx, dy) > 20) { this.vx += Math.sign(dx) * 0.04; this.vy += Math.sign(dy) * 0.04; }
-      else { this.vx += (Math.random() - 0.5) * 0.04; this.vy += (Math.random() - 0.5) * 0.04; }
-      this.vy = Math.max(-2, Math.min(2, this.vy));
+      if (Math.hypot(dx, dy) > 20) {
+        this.vx += Math.sign(dx) * 0.04;
+        this.vy += Math.sign(dy) * 0.04;
+        if (Math.abs(this.vy) > 2) this.vy *= 0.95;
+      }
       // 玩家 250px 内 → 状态 1;direction 取【背向玩家】（cs:48499-48505
       // `direction = !(player.X > X) ? 1 : -1`——野生仙灵是逃离不是追随,
       // 曾逐帧 seekDirX 追人像宠物,审计 10.1,2026-08-19）

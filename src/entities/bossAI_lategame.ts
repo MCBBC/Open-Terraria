@@ -265,8 +265,11 @@ export class CultistRitualCircle extends Entity {
         addEnemy(game, head);
         this.srcId = head.id;              // ai[1] = NewNPC 返回索引（:31283/:31287）
         if (id === 454) {
-          // 链段（NewNPC 段链展开）：455-458 + 尾 459，realLife 共享头 10000 血
-          const segs = Enemy.spawnWormChain(head, 5, [455, 456, 457, 458, 459], true);
+          // 链段（NPC.cs:51743-51769 AI_006 专块 1:1）：30 段=456 主体 + 455 翼节
+          // （(n-2)%4==0 且 n<26）+ 457/458/459 尾三连，realLife 共享头 10000 血。
+          // 曾按 5 段 [455..459]=把专块读成仪式特例（2026-09-02 全面 review 纠）
+          const spec = Enemy.wormChainSpec(454, Math.random)!;   // 454 ∈ WORM_CHAIN_HEADS 恒有表
+          const segs = Enemy.spawnWormChain(head, spec.count, spec.segIds, true);
           for (const sg of segs) addEnemy(game, sg);
         }
       }

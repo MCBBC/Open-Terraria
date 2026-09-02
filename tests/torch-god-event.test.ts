@@ -76,10 +76,11 @@ function makeProjHarness(unlocked: boolean, solidAt?: [number, number]) {
   const dustCalls: Array<{ x: number; y: number; type: number; velMul: number }> = [];
   const sfx: string[] = [];
   const dmgCalls: number[] = [];
+  const dmgSrcX: number[] = [];
   const player = {
     x: 100, y: 100, w: 20, h: 42, cx: 110, cy: 121,
     lastDamageCause: null as unknown,
-    damage: (amt: number) => { dmgCalls.push(amt); },
+    damage: (amt: number, srcX?: number) => { dmgCalls.push(amt); dmgSrcX.push(srcX ?? NaN); },
   };
   const game = {
     world: w,
@@ -88,7 +89,7 @@ function makeProjHarness(unlocked: boolean, solidAt?: [number, number]) {
   } as unknown as GameHooks;
   const dust = (x: number, y: number, type: number, velMul: number) =>
     dustCalls.push({ x, y, type, velMul });
-  return { w, game, dustCalls, sfx, dmgCalls, player, dust };
+  return { w, game, dustCalls, sfx, dmgCalls, dmgSrcX, player, dust };
 }
 
 /** 记录型 ctx 直调 drawEnemy（rotation-ledger-remainder 同款 + set 通道） */
@@ -321,9 +322,12 @@ describe('弹 949 生成与行为（AI_184）', () => {
     expect(h.sfx, '首帧 Item8（localAI[0]==0 :40109-40111）').toContain('Item_8');
   });
 
-  it('命中玩家：未解锁真伤+穿透续飞;已解锁无伤直穿（AI_184 :43575-43579）', () => {
+  it('命中玩家：未解锁真伤+穿透续飞;已解锁无伤直穿（AI_184 :43575-43579）;★T2 移前盒', () => {
+    // ★T2（2026-09-02 红队 H′ 清偿）：原版 SelfHurtPlayers（P.cs:15104-15152）在
+    // AI_184 头部 = 移前盒判定——出生位改为移前盒已与玩家盒重叠的 (98,118)
+    // （玩家盒 [100,120]×[100,142]）,旧形读移后位须靠 +8 位移才搭上,已不适用
     const locked = makeProjHarness(false);
-    const p1 = new TorchGodProj(90, 118, 8, 0, 1000, 6, locked.dust);
+    const p1 = new TorchGodProj(98, 118, 8, 0, 1000, 6, locked.dust);
     p1.fixedUpdate(1 / 60, locked.game);
     expect(locked.dmgCalls.length, '未解锁 → 真伤（1457 :43575-43579 SelfHurtPlayers）').toBe(1);
     expect(locked.dmgCalls[0]).toBe(40);   // ★V5 复核补强：经典档基伤 40（hostileProjectileDamage(40,classic);曾只断 >0,回归 20 不红）
@@ -332,13 +336,32 @@ describe('弹 949 生成与行为（AI_184）', () => {
     // （owner=255 假伤）已退役。旧断言 dead=true 锁 1456 前行为,按原版改。
     expect(p1.dead, 'SelfHurtPlayers 不杀弹（:15104-15152）→ 穿透续飞').toBe(false);
     expect(locked.player.lastDamageCause).toMatchObject({ kind: 'projectile' });
+    // ★T2 击退方向源：srcX = 弹【移前】中心 cx（98+2=100）;原版 direction =
+    // (!(playerCX < base.Center.X))?1:−1 → 玩家 cx=110 ≥ 100 → +1（远离弹心）
+    expect(locked.dmgSrcX[0], 'srcX=弹移前中心（原版 base.Center.X @AI 头部）').toBe(100);
 
     const unlockedH = makeProjHarness(true);
-    const p2 = new TorchGodProj(90, 118, 8, 0, 1000, 6, unlockedH.dust);
+    const p2 = new TorchGodProj(98, 118, 8, 0, 1000, 6, unlockedH.dust);
     p2.fixedUpdate(1 / 60, unlockedH.game);
     expect(unlockedH.dmgCalls, 'unlockedBiomeTorches → SelfHurtPlayers 整段不进（:43576）')
       .toHaveLength(0);
     expect(p2.dead).toBe(false);
+  });
+
+  it('★T2 移前位判别：移前盒重叠、移后盒已脱离 → 仍命中（原版 AI 头部时序）', () => {
+    // 弹 (110,138) h=4 → 移前盒 y[138,142] 与玩家盒 y[100,142] 相切重叠;x 直传
+    // vy=8 位移后盒 y[146,150] 已脱离——旧形（移后位）无伤,新形必伤
+    const h = makeProjHarness(false);
+    const p = new TorchGodProj(110, 138, 0, 8, 1000, 6, h.dust);
+    p.fixedUpdate(1 / 60, h.game);
+    expect(h.dmgCalls.length, '移前盒重叠即命中（P.cs:15104-15152 Colliding@AI 头部）').toBe(1);
+    expect(p.dead, '命中不杀弹 → 穿透续飞').toBe(false);
+    // 击退方向：弹心 cx=112 在玩家 cx=110 右侧 → srcX=112 → dir=−1（向左弹开）
+    expect(h.dmgSrcX[0], 'srcX=移前弹心 112（居中穿越不再符号翻转）').toBe(112);
+    // 命中后 AI 继续（不 return）：本拍尾迹 4 粒照出（原版 SelfHurtPlayers 后接
+    // 音/射程/尾迹/位移,SelfHurtPlayers 不冻结弹）
+    expect(h.dustCalls.length, '命中拍尾迹照出（AI 不因命中早退）').toBe(4);
+    for (const c of h.dustCalls) expect(c.velMul, '尾迹 vel×0.3').toBe(0.3);
   });
 });
 

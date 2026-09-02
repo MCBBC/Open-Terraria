@@ -808,8 +808,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  v8 rules 透传（serverAuth=true = 服务器权威房,世界由 SimHost 计算,建房者亦为访客） */
   async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number; rules?: Partial<import('./net/protocol').RoomRules> } = {}): Promise<{ code: string; hostToken: string; gmToken?: string; error?: string }> {
     try {
-      game.finishHardmodeJob();   // ★PR-async：房主侧世界快照先收口 job
-    if (!game) return { error: 'no game', code: '', hostToken: '' };
+      if (!game) return { error: 'no game', code: '', hostToken: '' };
+      game.finishHardmodeJob();   // ★PR-async：房主侧世界快照先收口 job（须在 null 门后——
+                                  // 曾在门前行,tsc 18047+无游戏实例时裸崩,2026-09-02 收遗留修）
       const { saveGame } = await import('./save/SaveFile');
       await worldStore.ensureLoaded();
       if (!currentWorld) {

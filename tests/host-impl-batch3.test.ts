@@ -14,7 +14,10 @@ import { World } from '../src/world/World';
 import { LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE } from '../src/core/constants';
 import { Arrow } from '../src/entities/Arrow';
-import { TownNPC } from '../src/entities/TownNPC';
+// ★副作用导入(2026-09-02):TownNPC.ts 模块尾 registerTownNpcCtor 注册是本链的前提;
+//   下面仅作类型位的值导入会被 esbuild 剔除→注册不发生→diva 静默跳过(环切补丁后语义)
+import '../src/entities/TownNPC';
+import type { TownNPC } from '../src/entities/TownNPC';
 import { getPass, runPassOnImageData, defaultUniforms } from '../src/fx/SM2Effect';
 import type { GameHooks } from '../src/entities/types';
 

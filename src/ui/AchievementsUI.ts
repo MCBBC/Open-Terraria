@@ -50,16 +50,18 @@ const CSS = `
 .sw-ach-bar { height:8px; background:#1a1f3a; border-radius:4px; margin-top:5px;
   border:1px solid #444c7a; overflow:hidden; }
 .sw-ach-bar .fill { height:100%; background:linear-gradient(90deg,#6a8ae0,#8ad0e0); }
-/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡 0.35 缩放近似） ---- */
-.sw-ach-advisor { pointer-events:auto; display:flex; align-items:center; gap:8px;
+/* ---- 背包提示牌（AchievementAdvisor.DrawOneAchievement 小卡近似）。
+ *      2026-09-02 用户要求改竖式（图上文下,省宽度——挂在合成右侧竖列）；
+ *      图标 32px 窗 = 0.5 倍图集缩放（此前不缩放,只裁出 64px 帧左上 1/4=填充残缺） ---- */
+.sw-ach-advisor { pointer-events:auto; display:flex; flex-direction:column; align-items:center; gap:4px;
   background:rgba(33,43,79,0.75); border:1px solid #7d92d6; border-radius:6px;
-  padding:4px 8px; cursor:pointer; margin-top:4px; }
+  padding:5px 6px 4px; cursor:pointer; }
 .sw-ach-advisor:hover { filter:brightness(1.2); }
 .sw-ach-advisor .glyph { width:32px; height:32px; flex:none;
   background-image:url(sprites/vanilla/Achievements.png);
   background-repeat:no-repeat; image-rendering:pixelated; }
-.sw-ach-advisor .tx { font-size:12px; color:#e8ecf8; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; max-width:150px; }
+.sw-ach-advisor .tx { font-size:11px; color:#e8ecf8; text-align:center; line-height:1.3;
+  max-width:72px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 `;
 
 let cssInjected = false;
@@ -78,12 +80,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-/** 图标帧 → CSS background-position（引擎 iconFrameOf：66 步长/8 列/锁定 +528） */
-function glyphStyle(div: HTMLElement, a: Game['achievements'], name: string): void {
+/** 图标帧 → CSS background-position（引擎 iconFrameOf：66 步长/8 列/锁定 +528）。
+ *  scale<1 时同步缩放整张图集（backgroundSize）——Advisor 小卡 32px 窗用 0.5：
+ *  此前 32px 窗不缩放,只裁出 64px 帧的左上 1/4（2026-09-02 用户报填充残缺） */
+const ACH_SHEET_W = 1054;   // sprites/vanilla/Achievements.png 实测尺寸
+const ACH_SHEET_H = 1186;
+function glyphStyle(div: HTMLElement, a: Game['achievements'], name: string, scale = 1): void {
   const f = a.iconFrameOf(name);
   if (!f) return;
   const x = f.locked ? f.x + f.lockedDx : f.x;
-  div.style.backgroundPosition = `${-x}px ${-f.y}px`;
+  div.style.backgroundPosition = `${-x * scale}px ${-f.y * scale}px`;
+  if (scale !== 1) div.style.backgroundSize = `${ACH_SHEET_W * scale}px ${ACH_SHEET_H * scale}px`;
 }
 
 // ---- 成就菜单（开关式：再次调用关闭） ----
@@ -228,7 +235,7 @@ export function createAchievementAdvisor(game: Game): HTMLElement & { update(): 
     }
     if (!best) { card.style.display = 'none'; return; }
     card.style.display = 'flex';
-    glyphStyle(glyph, a, best);
+    glyphStyle(glyph, a, best, 0.5);   // 32px 窗 = 图集 0.5 倍（整帧完整显示）
     tx.textContent = Lang.text(`Achievements.${best}_Name`);
   };
   card.update();

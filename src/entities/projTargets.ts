@@ -345,11 +345,22 @@ export function playerCanHitEnemy(
   return false;
 }
 
+/** NPC.cs SetDefaults immortal/chaseable=false 全表（1457 逐支机械提取,golden 测试
+ *  tests/npc-flags-golden.test.ts 与反编译逐行对账防复发）：
+ *  immortal=true：{488 训练假人 :14630, 690 伪装雕像 :17715}（全表仅此两支;
+ *    运行时支唯 infectedSeed type20 :53687,不入静态表）；
+ *  chaseable=false：{379,380 教徒弓手 :13882, 399 火星探测 :14106, 437 :14221,
+ *    438 :14238, 440 :14273, 523 :15837}（运行期唯 DukeFishron AI :50086/:50203
+ *    相位暂关）。★2026-09-02 纠偏：曾误列 133(游荡眼球怪)/416(日耀钻背骑士)——
+ *    两型 SetDefaults/AI 均无此三门,原版叶绿弹对游荡眼球正常索敌（用户实报失效）。 */
+export const CHASE_EXCLUDED_VIDS: ReadonlySet<number> = new Set(
+  [488, 690, 379, 380, 399, 437, 438, 440, 523]);
+
 /** 原版 NPC.CanBeChasedBy（NPC.cs:91141-91147）索敌门——仅供【目标选取】使用：
- *  immortal 族（488 训练假人/690 伪装雕像/133 巡游之眼）与 chaseable=false 族
- *  （399 火星探测/416 日耀骑手骑体/437 祭坛石板/438 信徒/440 教主克隆/523 远古末日球）
- *  不入索敌；friendly 同拒。玩家直接命中不受此限——命中校验用 playerCanHitEnemy。
- *  （2026-08-24 "召唤宠物追打假人"修复的正解层；当时误改 playerCanHitEnemy 致次日回归） */
+ *  immortal/chaseable=false 族（=CHASE_EXCLUDED_VIDS,golden 对账）不入索敌；
+ *  friendly 同拒。玩家直接命中不受此限——命中校验用 playerCanHitEnemy。
+ *  （2026-08-24 "召唤宠物追打假人"修复的正解层；当时误改 playerCanHitEnemy 致次日
+ *  回归） */
 export function canBeChasedBy(e: unknown): boolean {
   const t = e as { dead?: boolean; vanillaId?: number | null; def?: { friendly?: boolean; lifeMax?: number };
     dontTakeDamage?: boolean } | null | undefined;
@@ -358,8 +369,7 @@ export function canBeChasedBy(e: unknown): boolean {
   if (lm !== undefined && lm <= 5) return false;          // lifeMax > 5(:91141 小生命 critter 族不入索敌）
   if (t.dontTakeDamage) return false;                    // !dontTakeDamage（克脑一阶 266/伪装 690/起飞飞碟 395 等）
   const vid = t.vanillaId;
-  if (vid !== undefined && vid !== null && (vid === 488 || vid === 690 || vid === 133 || vid === 399
-    || vid === 416 || vid === 437 || vid === 438 || vid === 440 || vid === 523)) return false;
+  if (vid !== undefined && vid !== null && CHASE_EXCLUDED_VIDS.has(vid)) return false;
   return !t.def?.friendly;
 }
 
@@ -377,7 +387,7 @@ export function canBeChasedBy(e: unknown): boolean {
 /** ProjectileID.Sets.SkipDamage_EVP（1457 :275 新表,1456 无）={108,164,1002}——
  *  爆炸物/地雷/TNT 桶类敌对弹不再走 EVP 打主人（自伤语义移交 Kill→SelfHurtPlayers
  *  的 FixedSelfDamageForPlayers 定伤链） */
-const SKIP_DAMAGE_EVP = new Set([108, 164, 1002]);
+export const SKIP_DAMAGE_EVP: ReadonlySet<number> = new Set([108, 164, 1002]);
 
 /** ★Boss 面⑥（2026-08-31 台账清偿）Damage_EVP 免工件分槽表——bossAI 双件批。
  *  原版 Projectile.Damage_EVP（1458 :14847-14858 / 1456 :13704-13720）在命中玩家

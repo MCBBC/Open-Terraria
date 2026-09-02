@@ -415,6 +415,7 @@ describe('AI_026 charger + 620 陆地段', () => {
     const uni = mkEnemy(86, 36, 24);
     uni.y = 24 * 16 - uni.h;
     uni.vx = 6; uni.facing = 1;
+    uni.sdir26 = 1;   // 行进侧门闩(:63251 卡墙折返同步后的状态;出生=-1 则向右不跳)
     const p = mkPlayer(uni.x + 400, uni.y);
     let jumped = false;
     for (let t = 0; t < 80; t++) {
@@ -426,6 +427,23 @@ describe('AI_026 charger + 620 陆地段', () => {
       }
     }
     expect(jumped).toBe(true);
+  });
+
+  it('86 跳梯行进侧门=spriteDirection 闩（:63513-63518）:出生闩 -1 → 向右行不跳;卡墙折返同步后向右才跳', () => {
+    const g = makeGame(false);
+    for (let x = 30; x <= 44; x++) g.world.store.setTileSilent(x, 24, 1, 0, 0);
+    // 出生闩 -1:向右行不触发跳梯（num24=-1,vx>0 门不匹配）
+    const uni = mkEnemy(86, 36, 24);
+    uni.y = 24 * 16 - uni.h;
+    uni.vx = 6; uni.facing = 1;
+    drive(uni, 'chargerAI', g, mkPlayer(uni.x + 400, uni.y));
+    expect(uni.vy).toBeGreaterThanOrEqual(-4 + 0.075);   // 未触发跳梯(仅重力/扑跳域)
+    // 闩同步为 +1(卡墙折返态)后同向才进跳梯档
+    const uni2 = mkEnemy(86, 36, 24);
+    uni2.y = 24 * 16 - uni2.h;
+    uni2.vx = 6; uni2.facing = 1; uni2.sdir26 = 1;
+    drive(uni2, 'chargerAI', g, mkPlayer(uni2.x + 400, uni2.y));
+    expect(uni2.vy).toBeLessThan(-4);              // 悬崖档 -8 生效
   });
 
   it('410 自爆:头顶 20px 内 800px 玩家 → 3 发 538 + 即灭（cs:62940-62977）', () => {

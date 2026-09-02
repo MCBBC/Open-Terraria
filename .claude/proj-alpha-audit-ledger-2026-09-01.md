@@ -140,3 +140,15 @@
 | H14 | aiStyle65/106 剑系三段曲线等 | 组衰减/生命周期尺寸 | :30035/:34383-34575 | 需先展开成员工名单再升格 |
 
 承载判定（无需动作）：Celeb2(Celeb2.ts)、星尘龙(MinionProj)、pal 出场(MinionProj:4069)、手雷布防 A 族核心(WeaponProj:4271)、469 蜂箭、659、207、150-152+7/8、yoyo 相位机、GemStaffs 五旗(FinalizeProjectile 等价)。
+
+## §9 九批备案（2026-09-02 红蓝对抗后裁定存活项修复批——新账只登记,勿当新红）
+
+| # | 项 | 内容 | 证据/行号 |
+|---|---|---|---|
+| 备1 | 387/386 掉落键近似 | CheckTrapDoor 失配杀恒 `Item.NewItem(3239)`（:52097-52108,`if (point.Y == 0)` 两支同值=反编译本相）;本仓经 multiTileDropKey 落 `place_v_387_trap_door_closed`（item 3239 createTile=387 同语义,D-8 备案族）。vi_3239_Trapdoor def 在册,若要逐字直掉可把 387/388 关态并入 openStateDoorDropVid（现只收 386→3239/389→3240 两开态） | WorldGen.cs:52090-52108/vanillaStyleDrops.ts:759 |
+| 备2 | CheckPot 音效/瓦砾按 style 分档未移植 | 原版 CheckPot 杀环后按 num4(=pot style) 分档选声（7-9→SoundID 6、16-24→SoundID 4、余 13）+ per-style gore 组（:57340-57414 switch num4）;本仓恒 SoundID 13(shatter)+通用陶瓷粒子。风格罐（金字塔/神庙/常春藤袋等 style≥4）破碎演出与原版有差,掉落表本身已分档 | WorldGen.cs:57338-57364/:57370-57414 |
+| 备3 | 567 侏儒 frameX 步进 28 未接 | 原版 CoordinateWidth=26+pad2 → 横排 style 步 28（TileObjectData.cs:4223;CheckGnome :54415 `_ = frameX/28` 残迹）,导入档实测 frameX=112（28×4 带）;本仓放置面 placeStyle 恒 0（frameX=0 两端同值）故暂无行为差——一旦引入侏儒朝向 placeStyle 须补 furnitureStyleBase 竖排 case | TileObjectData.cs:4222-4227 |
+| 备4 | 334 武器架右列标记 | PlaceWeapon 右格写 `frameX=prefix+10000`（二行带 25000;Player.cs:54796/:54790-54794）,剥 5000 系后 (n-1)*18 对 10000/25000 两带都还原列 1——本仓 stripRackFx 已逐字承载;TEWeaponsRack 持武数据（DropItem）仍是容器近似,武器本体不掉（本仓无 TE 武器架实体） | Player.cs:54790-54796 |
+| 备5 | 'gnome'/'pot' 等 DECOR case 帧检宽松 | CheckGnome 原版含 `frameY==0 && frameY2==20` 完整性（:54419）;本仓 'gnome' case 只查拓扑+地基不查帧。迁移+放置面归原版后已具备收紧条件,留待下批（收紧后旧档依赖 tallgateFrameRepair 先行） | WorldGen.cs:54400-54432 |
+| 备6 | 引注勘误清单（本批已修） | TILE_CUT_VANILLA「Main.cs:7312-7754 全表 38 项」→ **41 项/:7502-:10388**（41 条赋值逐条核对,Set 41 唯一值全等）;幼虫链「KillTile case 231 :53254-53280」→ :53254-53280 实为 **CheckChand** 函数头,gore 300-302+蜂后召在 **Check3x3 case 231 :53691-53720**（杀环 :53610-53616;KillTile 本体只有无掉落组 :66348+命中音族 :67134）;CheckPot :56807→:57273;CheckTallGate 派发 :86990-86994→:86990-86993;ShiftTallGate L51747→:52175-52231（声 :52213）;spawnThingsFromPot :57100→:57566（调用 :57490） | Main.cs:7502-10388/WorldGen.cs 多处 |
+| 备7 | tallgateFrameRepair 迁移域 | 只动 vanilla sheet {388,389,567} 且 frameY∈{18,36,54,72} 的活格——与原版帧域（0/20/38/56/74+94k 带基;侏儒 0/20）交集为空=幂等。worldgen 不放三件;wld 导入 copyFrame 直拷原版帧（Starter World 实测 388:(0,94)/(0,20)、567:(112,0)/(112,20) 全不在键集）——存量自放档首进世界迁移一次 | world/tallgateFrameRepair.ts |

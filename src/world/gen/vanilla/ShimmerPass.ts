@@ -79,7 +79,13 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState, onStage?: 
   //   num7=((int)(rl+ws+200))/2（下限钳制 num6+50）；首掷 num4 改 Next(num6,num7)
   //   （x 带不变，标准带先掷后仅覆写 y），重试环 num8<10000 时同带重掷 y+x，
   //   ≥10000 落回普通 else 支（y 下限 (ws+rl)/2+20）、>20000 才进放宽支。
-  const celbShim = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
+  // ★IIIII173（2026-09-02）定谳：微光 tenth 浅带门=**纯 tenthAnniversary**（1457 cs:15293 /
+  //   1458 cs:15293 同形 `if (tenthAnniversaryWorldGen)`，无 !remix 排除）——曾按 Lakes/
+  //   Tunnels/Moss 的 tenth&&!remix 形误抄（那三处原版确有 remix 排除：Lakes cs:14646、
+  //   Tunnels cs:11776 嵌套 !remix、Moss cs:17601 else-if remix 优先）。GFB(tenth+remix)
+  //   首掷 y 曾错走深带 [(ws+rl)/2+50, yHi)，而 x86 走浅带 [ws+150,(rl+ws+200)/2)，
+  //   且首掷即成功率分叉（深带右翼猩红/黑檀密集 → JS ~1.1 万次失败重掷）→ #38 全域错位。
+  const celbShim = !!gs.seedFlags?.tenthAnniversary;
   const shimYLo = Math.floor(gs.worldSurface) + 150;
   const shimYHiRaw = Math.trunc((gs.rockLevel + gs.worldSurface + 200) / 2);
   // ★IIIII46 勘误：C# 钳制是**条件式**（仅 num7<=num6 才抬到 num6+50），非恒 max。

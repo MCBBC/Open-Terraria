@@ -10,7 +10,7 @@ import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { parseWld } from '../src/wld/WldParser';
-import { ITEM_DEFS } from '../src/data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 
 const RUN = process.env.SW_I170 === '1';
 const X86WLD = process.env.SW_I170_WLD ?? '/tmp/iii160-out/x86/w.wld';
@@ -21,14 +21,19 @@ const YLO = Number(process.env.SW_I170_YLO ?? 794);
 const YHI = Number(process.env.SW_I170_YHI ?? 1056);
 
 type C = { x: number; y: number; items: Array<{ id: number; stack: number } | null>; name?: string };
-// JS 箱内 id=本仓内部 id；x86 w.wld=vanilla id —— JS 侧统一经 ITEM_DEFS[].vid 映射后再对表
-let VID: Int32Array | null = null;
+// JS 箱内 id=本仓内部 id；x86 w.wld=vanilla id —— JS 侧经 VANILLA_ITEM_KEY_BY_ID
+// (vanilla→key) × ITEM_BY_KEY (key→internal) 反演映射后再对表（ITEM_DEFS[].vid 在
+// worldgen-only 进程内未装配,probe 实测恒 -1,禁用）。
+let VID: Map<number, number> | null = null;
 const toVan = (id: number): number => {
   if (!VID) {
-    VID = new Int32Array(ITEM_DEFS.length).fill(-1);
-    for (let i = 0; i < ITEM_DEFS.length; i++) VID[i] = ITEM_DEFS[i]?.vid ?? -1;
+    VID = new Map<number, number>();
+    for (const [vidStr, key] of Object.entries(VANILLA_ITEM_KEY_BY_ID)) {
+      const iid = ITEM_BY_KEY[key as string];
+      if (typeof iid === 'number') VID.set(iid, Number(vidStr));
+    }
   }
-  return VID[id] ?? -1;
+  return VID.get(id) ?? -1;
 };
 const lootOf = (c: C, toVanMode = false): string =>
   JSON.stringify(c.items.filter(Boolean).map((i) => `${toVanMode ? toVan(i!.id) : i!.id}x${i!.stack}`));

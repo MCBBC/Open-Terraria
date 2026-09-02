@@ -1,7 +1,10 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt, statusPlayer } from './projTargets';
+import { InfernoHostileBlast } from './InfernoHostileBlast';
+import { shadowbeamLineFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
@@ -843,6 +846,21 @@ export class Dart extends Entity {
   private beamLen = 0;
   /** 299 暗影焰 localAI[0] 镜像（子步计数:第 6 子步爆发、>6 起尾尘,P.cs:57611-57637） */
   private ai299Local = 0;
+  /** 290 暗影束 localAI 镜像（aiStyle48 :28615-28621）——L0=子步龄（锚定 delay=3,
+   *  :54934-54941 case 260/290 → 3）;Ax/Ay=束段锚点（localAI[1]/[2],撞块反弹
+   *  :18975-19018 与 Kill :71825-71870 铺撒消费） */
+  private sb290L0 = 0;
+  private sb290Ax = 0;
+  private sb290Ay = 0;
+  /** 291 地狱火弹 ai[0]/ai[1] 目标锚点（NewProjectile aiArgs——原版发射点
+   *  NPC.cs:21294 传 Main.player[target].Center;越点引爆 :28748-28756 消费）。
+   *  本仓发射位 Enemy.fireCasterVolley 直构未传参 → 缺省 0,首子步捕玩家心等价
+   *  补偿（同拍 NPC AI 所读玩家位,值域等价）;显式注入位留给未来直构调用方 */
+  spawnAi0 = 0;
+  spawnAi1 = 0;
+  /** 291 单次音门（localAI[0]==0 → Item20 :28740-28744）与锚点补偿一次性门 */
+  private if291Sounded = false;
+  private if291Anchor = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
@@ -992,6 +1010,8 @@ export class Dart extends Entity {
     if (--this.life <= 0) {
       if (st?.rocket) this.rocketKill(game);
       else if (this.projId === 596) this.curse596Kill(game);   // ★批四 T1：Kill 爆（P.cs:73762-73794）
+      else if (this.projId === 290) this.killBeam290(game);    // aiStyle48 Kill 铺撒收尾（:71825-71870）
+      else if (this.projId === 291) this.inferno291Kill(game); // Kill=原位 spawn 292（:75802-75807）
       else if (this.projId === 811 || this.projId === 814) {
         // ★批六 M6：811/814 Kill 共组尘收口 killBloodShot（Projectile.Kill :74019-74027）
         // ——寿终口；814 tileCollide=false 无撞块口,唯一可达死亡路径自此有尘
@@ -1064,10 +1084,57 @@ export class Dart extends Entity {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 27, 0, 0, 100, null, 1, true);
       }
     }
+    // ---- 290 暗影束 AI 段（aiStyle48 :28608-28646,每子步;EU=100 → ×101/拍）----
+    //  InWorld 内缘 5 格门外 Kill（:28610-28614,WorldGen.InWorld :9642-9649）;
+    //  delay=3 锚点（localAI[0]==3 先存 Center 再 ++,:28615-28621+:54934-54941）;
+    //  alpha=255 每子步写（:28630-28632 本体恒隐,可视面=束段尘）;首子步 Item8
+    //  （localAI[0]++ 后 ==1 即第一跑,:28633-28636）。束铺撒在撞块反弹/Kill 两口
+    if (this.projId === 290) {
+      const st290 = game.world.store;
+      const tx290 = Math.floor(this.cx / TILE), ty290 = Math.floor(this.cy / TILE);
+      if (tx290 < 5 || tx290 >= st290.w - 5 || ty290 < 5 || ty290 >= st290.h - 5) {
+        this.killBeam290(game);
+        return;
+      }
+      this.sb290L0++;
+      if (this.sb290L0 - 1 === 3) { this.sb290Ax = this.cx; this.sb290Ay = this.cy; }
+      this.alpha = 255;
+      if (this.sb290L0 === 1) game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);
+    }
+    // ---- 291 地狱火弹 AI 段（aiStyle50 291 支 :28738-28767,每拍;无 extraUpdates）----
+    //  Item20 单次;目标锚点越点即爆（Dot(target−Center,velocity)<=0 → velocity=Zero
+    //  → Kill）;10×d174 尾迹/拍（noGravity,scale1.2,尘速×0.5+弹速×0.1）
+    if (this.projId === 291) {
+      if (!this.if291Sounded) {
+        this.if291Sounded = true;
+        game.playSfxFiles?.(['Item_20'], 1, this.cx, this.cy);
+      }
+      if (!this.if291Anchor) {
+        this.if291Anchor = true;
+        if (this.spawnAi0 === 0 && this.spawnAi1 === 0) {
+          const p291 = game.player;                        // 发射侧未传 ai 参 → 玩家心补偿
+          if (p291) { this.spawnAi0 = p291.cx; this.spawnAi1 = p291.cy; }
+        }
+      }
+      if (this.spawnAi0 !== 0 || this.spawnAi1 !== 0) {
+        const ddx = this.spawnAi0 - this.cx, ddy = this.spawnAi1 - this.cy;
+        if (ddx * this.vx + ddy * this.vy <= 0) {          // Dot<=0 越点（:28748-28756）
+          this.vx = 0; this.vy = 0;
+          this.inferno291Kill(game);
+          return;
+        }
+      }
+      for (let i = 0; i < 10; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 174, 0, 0, 100, null, 1.2, true);
+        if (d) { d.vx *= 0.5; d.vy *= 0.5; d.vx += this.vx * 0.1; d.vy += this.vy * 0.1; }
+      }
+    }
     // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
     //  596 自管（aiStyle107 :34208-34219 带 timeLeft>30 门+实心盒钳 128,见 596 段）;
-    //  fadeDelay=前 N 拍免衰（577/576 localAI[1]>2 门,P.cs:56603-56613,批六 m1）
-    if (this.alpha > 0 && this.projId !== 596 && this.age > (st.fadeDelay ?? 0)) {
+    //  290/291 恒隐不衰（alpha=255 原版无渐入——AI 48 每子步写 255/291 支无 alpha 行,
+    //  见上两段）;fadeDelay=前 N 拍免衰（577/576 localAI[1]>2 门,P.cs:56603-56613,批六 m1）
+    if (this.alpha > 0 && this.projId !== 596 && this.projId !== 290 && this.projId !== 291
+      && this.age > (st.fadeDelay ?? 0)) {
       this.alpha -= st.fade === 'speed'
         ? Math.hypot(this.vx, this.vy) * 0.9
         : (typeof st.fade === 'number' ? st.fade : 50);
@@ -1363,6 +1430,24 @@ export class Dart extends Entity {
     const tx = Math.floor(this.cx / TILE);
     const ty = Math.floor(this.cy / TILE);
     if (game.world.store.isSolid(tx, ty)) {
+      // ★①290 暗影束撞块反弹（Update HandleMovement :18975-19018）：全速反号不消亡
+      //  （penetrate=-1 无限反弹）+ 束段铺撒（上一锚点→当前心,Spawn_Shadowbeam
+      //  敌版 velocityScalar=0.03334,ParticleOrchestrator.cs:1987-1993）后重锚。
+      //  原版按 velocity!=lastVelocity 分轴反射;本仓单点碰撞无轴信息 → 主轴反射
+      //  （Arrow 294 友版同款登记）。广播走 module8 ShadowbeamHostile=联机中继,
+      //  本地视觉=beam290Segment;Kill 收尾段在 killBeam290（fixedUpdate 寿终口）
+      if (this.projId === 290) {
+        if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx;
+        else this.vy = -this.vy;
+        if (this.sb290L0 >= 3 && this.sb290Ax > 0 && this.sb290Ay > 0) {
+          this.beam290Segment(game);
+          game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShadowbeamHostile,
+            this.cx, this.cy, this.sb290Ax, this.sb290Ay,
+            Math.round(Math.hypot(this.vx, this.vy) * 1000));
+        }
+        this.sb290Ax = this.cx; this.sb290Ay = this.cy;
+        return;
+      }
       if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
       // ★批六 M6：811 Kill 尘收口 killBloodShot（Projectile.Kill 共组 :74019-74027——
       //  30×d5 scale1.25+rand、vel×2、α=0 缺省。814 tileCollide=false 不撞墙,唯 811 走本口）
@@ -1404,7 +1489,16 @@ export class Dart extends Entity {
       //  + penetrate=-1,P.cs:21229/:6452-6461——曾折中为接触即死+爆,伤害面错位:
       //  飞行 baseDamage 冒充了本应为 0 的接触伤;稳定伤害面只保留寿终 curse596Kill）
       if (st.noPlayerHit) return;
-      hitPlayer(this, game, this.damage);
+      const hit290 = hitPlayer(this, game, this.damage);
+      // ★①/②（2026-09-02 敌侧弹幕三缺口批）：290 暗影束/291 地狱火弹穿透不消亡——
+      //  Damage_EVP 全段无 Kill（P.cs:14846-14971）,penetrate=-1（SetDefaults :3804/:3815）
+      //  穿过玩家继续飞（290 继续反弹巡场、291 到锚点才爆）;iframes 门 = 原版
+      //  player.immune 去重。命中实扣才接 StatusPlayer（Arrow :6511 同式）：
+      //  290 → Slow(32)（:12357-12360）/ 291 → On Fire(24)（:12337-12340,表已载）
+      if (this.projId === 290 || this.projId === 291) {
+        if (hit290) statusPlayer(game, this.projId);
+        return;
+      }
       // ★批六 M6：811 有伤穿透——Damage_EVP 全段无 Kill（P.cs:14846-14971）,
       //  penetrate=-1 穿过玩家继续飞、撞后墙才死；hitPlayer 内 iframes 门 =
       //  原版 player.immune 去重,重叠期不连扣（其余弹型保持命中即灭）

@@ -237,7 +237,9 @@ export interface GameHooks {
   /** 播放音效 */
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
-  playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 怪物专属声效（原版文件名列表随机选）。pitch = XNA pitchOffset（SoundEngine.PlaySound
+   *  SoundStyle 重载第 3 参——arcSurgeFx :1268 NextFloatDirection×0.2−0.05 变调消费） */
+  playSfxFiles(files: string[], vol?: number, x?: number, y?: number, pitch?: number): void;
   /** 行为决策日志（debug-report behaviorTail 段;缺省=单人安静路径不记） */
   behavioLog?(k: string, d: unknown): void;
   /** 城镇 NPC 开关门即时事件广播（原版 msg19 DoorOpen 的等价通道，NPC.cs:54398/54610）：

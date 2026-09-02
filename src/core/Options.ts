@@ -300,7 +300,11 @@ export class OptionsStore {
       }
       if (autoDetectLang) {
         // 桌面壳 localeHint 优先(2026-08-29 用户定案默认中文;macOS --lang 不可靠)
-        const shellHint = (window as unknown as { sandboxDesktop?: { localeHint?: string } }).sandboxDesktop?.localeHint;
+        // ★2026-09-02 环境守卫:node 单测/worker 无 window——裸读曾 ReferenceError
+        //   被 load 的 try/catch 吞掉→后续全部钳制/归一化被静默跳过(r24 zoom+map-skins 双红根因)
+        const shellHint = typeof window !== 'undefined'
+          ? (window as unknown as { sandboxDesktop?: { localeHint?: string } }).sandboxDesktop?.localeHint
+          : undefined;
         const detected = detectBrowserLang(shellHint ? [shellHint] : undefined);
         if (detected) this.data.lang = detected;
       }

@@ -21,6 +21,19 @@
 //                          清一角墙→整件清（setWall 监听链）/帧混格→判坏
 //  ⑱ hangtopRightCol       465/591/592/531 右列挖锚→整件清 + 右列旁扰动→幸存（六批
 //                          mod36 列解码修复的回归哨兵;style 带基 36 合成）
+// —— 2026-09-02 九批（红蓝对抗后裁定存活项修复批）追加：
+//  ⑲ potAdjacency          B-1：两罐共边（A 列 x0+5..6、B 列 x0+7..8,variant 0/36）——
+//                          敲 A → A 4 格清+B 4 格幸存+loot 恰 1 次;再敲 B → loot 累计 2
+//                          （PlacePot :54529 净空只查自身 2×2+底行 → 相邻罐合法;
+//                          CheckPot 杀环 :57347-57356 只杀本件 2×2 → loot 各掉各的）
+//  ⑳ trapdoor387          M-1：387 2×1 嵌两实心块间（CheckTrapDoor 387 臂 :52059-52063
+//                          完整性 CheckTileFrames :52245+左右外格 mode1 StrictSolid
+//                          :52063/:52261-52276）→ 挖一侧支承 → 整件清+掉落（item 3239
+//                          语义,本仓 place_v_387 兜底）;旁扰动对照幸存
+//  ㉑ rack334              m-4：3×3 武器架带 PlaceWeapon 5000 系标记帧（Player.cs:54721+
+//                          :54795/:54796 写 5000+100+id / 10000+prefix;二行带 20000/25000
+//                          :54790-54794;CheckWeaponsRack :46802-46828 剥 5000 系再 %54）
+//                          → 邻格扰动幸存;无标记对照幸存;清一角墙 → 整架塌
 // 几何：bl=底左原点（buildObj 行区 bly-(oh-1)..bly）；444 顶行=F-2 锚行=F-3；
 //       34/454 行区 F-3..F-1 锚行=F-4；389 行区 F-5..F-1 锚行 F/F-6；
 //       440 行区 F-4..F-2（背墙同域）；hangtop 行区 F-3..F-1 锚行=F-4
@@ -212,14 +225,15 @@ const out = await page.evaluate(async () => {
   // ⑩-⑭ 八批①：389/388 高门幸存链（CheckTallGate WorldGen.cs:52111——完整性+顶/底
   //   双行 SolidTile :52292-52305;旧 'furniture' kind=底行∨墙伪支撑,388 solid 早退无链）。
   //   vanilla-faithful 几何（同 _decor-place.mjs 389 positive）：地面 F + 天花 F-6
-  //   （恰 5 格净空 F-5..F-1,双锚）,门列 x0+5。帧双约定分测：自放=dy*18（18px 步进）
-  //   /导入=vanilla heights+padding 步进（0/20/38/56/74）——行解码两套同值,绝对帧
-  //   比对按序列匹配,任一套都不得误杀（⑭）。
-  const tgSetup = (tid, vanillaFrames = false) => {
+  //   （恰 5 格净空 F-5..F-1,双锚）,门列 x0+5。★M-2（2026-09-02 九批）合成帧统一
+  //   原版序 0/20/38/56/74（TileObject.Place :96-108 heights+padding 累进）——本仓
+  //   放置面/迁移后存量/wld 导入三面同序;旧 18px 步进态=判坏（⑭守门,存量由
+  //   tallgateFrameRepair 于 afterWorldLoad 迁移）。
+  const tgSetup = (tid, legacyFrames = false) => {
     clearBox();
     row(x0 + 4, F, 3, STONE);              // 底锚行
     row(x0 + 4, F - 6, 3, STONE);          // 顶锚行（净空恰 5）
-    const FYS = vanillaFrames ? [0, 20, 38, 56, 74] : [0, 18, 36, 54, 72];
+    const FYS = legacyFrames ? [0, 18, 36, 54, 72] : [0, 20, 38, 56, 74];
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(x0 + 5, F - 5 + dy, tid, 0, FYS[dy]);
   };
   tgSetup(TALL_O);
@@ -258,15 +272,11 @@ const out = await page.evaluate(async () => {
   }
   tgSetup(TALL_O, true);
   {
-    // ⑭ 导入帧约定（0/20/38/56/74）不得误杀：侧扰动幸存 + 顶锚挖整件清
+    // ⑭ ★M-2c 守门：旧 18px 步进帧（迁移前存量态）完整性判坏 → 侧扰动即整件清。
+    //   真实存档由 tallgateFrameRepair 迁移（afterWorldLoad）,运行期不该再见此态
     st.setTileSilent(x0 + 4, F - 3, STONE, 0, 0);
     g['breakTile'].call(g, x0 + 4, F - 3);
-    const sideResidue = countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2);
-    g['breakTile'].call(g, x0 + 5, F - 6);
-    res.tgVanillaFrames = {
-      sideResidue,
-      topDigResidue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2),
-    };
+    res.tgLegacyFramesKilled = { residue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2) };
   }
 
   // ⑮-⑰ 八批②：440 宝石锁 → 'wallhang'（Check3x3Wall :44690 逐格 wall>0+完整性,
@@ -325,6 +335,105 @@ const out = await page.evaluate(async () => {
     });
   }
 
+  // ⑲ 九批 B-1：两罐共边（几何同 _blue-pot-adjacency.mjs）。原版 PlacePot（:54529）
+  //   净空只查自身 2×2+底行 → 相邻共边罐合法;CheckPot 杀环（:57347-57356）只杀本件
+  //   2×2、loot 在 :57490 每件各一次。旧洪泛实现会把 B 并进 A 的收集（B 被清+其
+  //   loot 被吞）。帧解码收集：colIdx=(fx/18)%2、rowIdx=(fy/18)%2、style=fy/36。
+  {
+    const POT = idOfSheet(28);
+    const potSetup = () => {
+      clearBox();
+      row(x0 + 3, F, 8, STONE);            // 共用锚行（PlacePot 底行 SolidTile2 门）
+      for (const [cx, v] of [[x0 + 5, 0], [x0 + 7, 36]]) {
+        for (let k = 0; k < 2; k++) for (const [ry, fy] of [[F - 2, 0], [F - 1, 18]])
+          st.setTileSilent(cx + k, ry, POT, v + k * 18, fy);
+      }
+    };
+    const potCells = (lo, hi) => countIn(POT, x0 + lo, x0 + hi, F - 3, F + 1);
+    const proto = Object.getPrototypeOf(g);
+    const origLoot = proto.potLoot;
+    let lootCalls = 0;
+    proto.potLoot = function (...a) { lootCalls++; return origLoot.apply(this, a); };
+    try {
+      potSetup();
+      g['breakTile'].call(g, x0 + 6, F - 1);      // 敲 A 右下格
+      const afterA = { a: potCells(5, 6), b: potCells(7, 8), lootCalls };
+      g['breakTile'].call(g, x0 + 8, F - 2);      // 再敲 B 右上格
+      res.potAdjacency = {
+        ...afterA,
+        lootCallsTotal: lootCalls,
+        bAfterSmash: potCells(7, 8),
+      };
+    } finally {
+      proto.potLoot = origLoot;
+    }
+  }
+
+  // ⑳ 九批 M-1：387 闭态活板门 2×1 嵌两实心块间（CheckTrapDoor 387 臂 :52059-52063：
+  //   完整性 CheckTileFrames :52245 + 左右外格 mode1 StrictSolid :52063;失配杀+
+  //   Item.NewItem(3239) :52097-52108）。帧：fx=dx*18（styleX0）、fy=styleY*18=0。
+  {
+    const TD = idOfSheet(387);
+    const tdSetup = () => {
+      clearBox();
+      row(x0 + 3, F, 8, STONE);
+      st.setTileSilent(x0 + 4, F - 1, STONE, 0, 0);   // 左侧支承
+      st.setTileSilent(x0 + 7, F - 1, STONE, 0, 0);   // 右侧支承
+      st.setTileSilent(x0 + 5, F - 1, TD, 0, 0);
+      st.setTileSilent(x0 + 6, F - 1, TD, 18, 0);
+    };
+    const match387 = () => (g.entities.drops ?? []).filter((d) => !d.dead
+      && /vi_3239_|place_v_387_/.test(String(items.ITEM_DEFS[d.itemId]?.key))).map((d) => items.ITEM_DEFS[d.itemId]?.key);
+    tdSetup();
+    st.setTileSilent(x0 + 7, F - 2, STONE, 0, 0);     // 旁格（非锚,对照）
+    g['breakTile'].call(g, x0 + 7, F - 2);
+    const sideCtrl = countIn(TD, x0 + 3, x0 + 9, F - 3, F + 1);
+    tdSetup();
+    // ★掉落计数基线取在 kill 前（tdSetup#2 的 clearBox 拆前件会触发 CheckTrapDoor
+    //  掉落——任一格被毁 → 整件判坏+掉 1 份=原版语义 :52090-52108,非双发 bug）
+    const preDrops = match387();
+    g['breakTile'].call(g, x0 + 4, F - 1);            // 挖左侧支承
+    const postDrops = match387();
+    res.trapdoor387 = {
+      sideCtrl,                                       // 2 格幸存
+      residue: countIn(TD, x0 + 3, x0 + 9, F - 3, F + 1),   // 整件清=0
+      drop3239: postDrops.length - preDrops.length,   // 恰 1 份（Item.NewItem(3239) 语义）
+      preDrops, postDrops,
+    };
+  }
+
+  // ㉑ 九批 m-4：334 武器架 5000 系标记帧剥离（CheckWeaponsRack :46802-46810 锚格/
+  //   :46819-46827 各格剥 5000 系再 %54;标记=PlaceWeapon Player.cs:54795/:54796 写
+  //   5000+100+itemType / 10000+prefix）。裸 %54 对 5100+id 恒失配 → 整架误杀丢武器
+  //   （:46840 DropItem + Item.NewItem(2699)）。
+  {
+    const RK = idOfSheet(334);
+    const rackSetup = (marked) => {
+      clearBox();
+      for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+        st.wall[st.idx(x0 + 4 + dx, F - 3 + dy)] = 1;                  // 背墙 3×3
+        st.setTileSilent(x0 + 4 + dx, F - 3 + dy, RK, dx * 18, dy * 18);
+      }
+      if (marked) {   // 中行（fy=18）左格挂武器、右格前缀
+        st.frameX[st.idx(x0 + 4, F - 2)] = 5100 + 123;
+        st.frameX[st.idx(x0 + 5, F - 2)] = 10000 + 5;
+      }
+    };
+    rackSetup(true);
+    st.setTileSilent(x0 + 3, F - 2, STONE, 0, 0);     // 左侧旁格（非架体）
+    g['breakTile'].call(g, x0 + 3, F - 2);
+    res.rack334Marked = { residue: countIn(RK, x0 + 2, x0 + 9, F - 5, F + 1) };
+    rackSetup(false);
+    st.setTileSilent(x0 + 3, F - 2, STONE, 0, 0);
+    g['breakTile'].call(g, x0 + 3, F - 2);
+    const unmarked = countIn(RK, x0 + 2, x0 + 9, F - 5, F + 1);
+    // 清一角墙 → 整架塌（对照）。★清墙位取中行：墙变更监听链 checkFurnitureSupport(x,y-1)
+    //  派发【上方一格】——(x0+5,F-2) 的上格 (x0+5,F-3) 是架顶行格（同 ⑯ gemlock 取位）;
+    //  若清顶行格的墙,派发落在架上方的空格 → 不派发（探针假红,非引擎债）
+    st.setWall(x0 + 5, F - 2, 0);
+    res.rack334Ctrl = { unmarked, wallDig: countIn(RK, x0 + 2, x0 + 9, F - 5, F + 1) };
+  }
+
   res.verdict = res.hiveCeiling.residue === 0 && res.hiveCeiling.bees > 0 && res.hiveCeiling.ceilRightSurvives
     && res.hiveDiagControl.residue === 4
     && res.chandelierHook.residue === 0 && res.chandelierHook.drop106 > 0
@@ -343,12 +452,20 @@ const out = await page.evaluate(async () => {
     && res.tgClosedToggleDig.opened && res.tgClosedToggleDig.closed
     && res.tgClosedToggleDig.openCount === 5 && res.tgClosedToggleDig.closeCount === 5
     && res.tgClosedToggleDig.residue === 0
-    && res.tgVanillaFrames.sideResidue === 5 && res.tgVanillaFrames.topDigResidue === 0
+    && res.tgLegacyFramesKilled.residue === 0
     && res.glStyleSurvive.residue === 9
     && res.glWallDig.residue === 0 && res.glWallDig.drops === 1
     && res.glFrameMixKilled.residue === 0
     && res.hangtopIdsOk
-    && res.hangtopRightCol.every((r) => r.rightDig === 0 && r.sideCtrl === 6) ? 'PASS' : 'FAIL';
+    && res.hangtopRightCol.every((r) => r.rightDig === 0 && r.sideCtrl === 6)
+    // —— 九批（B-1 / M-1 / m-4）——
+    && res.potAdjacency.a === 0 && res.potAdjacency.b === 4
+    && res.potAdjacency.lootCalls === 1 && res.potAdjacency.lootCallsTotal === 2
+    && res.potAdjacency.bAfterSmash === 0
+    && res.trapdoor387.sideCtrl === 2 && res.trapdoor387.residue === 0
+    && res.trapdoor387.drop3239 === 1
+    && res.rack334Marked.residue === 9
+    && res.rack334Ctrl.unmarked === 9 && res.rack334Ctrl.wallDig === 0 ? 'PASS' : 'FAIL';
   return res;
 });
 fs.writeFileSync('/tmp/decor-sweep.json', JSON.stringify(out));

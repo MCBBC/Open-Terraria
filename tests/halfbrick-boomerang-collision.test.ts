@@ -101,7 +101,10 @@ describe('Boomerang 弹体×地形形态(moveStep 正典管线接入)', () => {
 //      solid@363+2k / slope4@364+2k;站位 c3352,feetY=5856)——修「右下扔只向上」判例 ----
 it('用户阶梯地形:右下投掷可进入下行走廊(非永动向上弹射)', () => {
   // 坐标系:世界列 local = 存档列 - 3300(BASE 列 50 起步),行不变
-  const w = new World(120, 220, 7, 'user-stair');
+  // ★2026-09-02 修复:阶梯行 r0=342..370(362+2k-12)与下落起点 y=340*TILE 均超出
+  //   h=220——自 492cde03 落盘起全部 setTile 越界被略=无地板必红。按 fixture 自身
+  //   数学加高(H≥378 容阶梯+8 净空,420 留余量)。
+  const w = new World(120, 420, 7, 'user-stair');
   const st = w.store;
   const COL0 = 46;               // 对应存档 c3346(k=-4)
   for (let k = -4; k <= 10; k++) {
@@ -113,7 +116,7 @@ it('用户阶梯地形:右下投掷可进入下行走廊(非永动向上弹射)'
   for (let k = -4; k <= 10; k++) {
     const tx = 46 + (k + 4);      // local col of archive tx=3350+k
     const r0 = 362 + 2 * k - 12;  // 行整体上移 12 行留头顶空间(362→350 基准)
-    if (r0 < 8 || r0 + 8 >= 220) continue;
+    if (r0 < 8 || r0 + 8 >= 420) continue;   // ★2026-09-02 随 H=420 同步(旧 220 使全部阶梯列被略)
     st.setTile(tx, r0, 2); st.setSlope(tx, r0, 1);
     st.setTile(tx, r0 + 1, 2);
     st.setTile(tx, r0 + 2, 2); st.setSlope(tx, r0 + 2, 4);
@@ -130,13 +133,18 @@ it('用户阶梯地形:右下投掷可进入下行走廊(非永动向上弹射)'
   const footRow = Math.floor((b.y + b.h) / TILE);
   expect(footRow, '应落在阶梯斜面带').toBeGreaterThanOrEqual(352);
   const cy = b.y + 21;
+  const hooks = mkHooks(w);   // ★2026-09-02 补桩:该用例漏建 hooks(492cde03 半成品),否则 142 行 ReferenceError
   for (const [label, vx, vy] of [['steep', 11.4, 8], ['shallow', 13, 5], ['down', 5, 12]] as [string, number, number][]) {
+      const __trace = label === 'steep';
     const bom = new Boomerang(b.x + 10, cy, vx, vy, 25, 8, 33, 1);
+    if (__trace) console.log('TRC0 ctor vy=', bom.vy, 'y=', bom.y);
     bom.x -= bom.w / 2; bom.y -= bom.h / 2;
+    if (__trace) console.log('TRC0 adj y=', bom.y, 'b.y=', b.y, 'cy=', cy);
     let minYAboveStart = 0;
     let maxX = 0;
     for (let t = 0; t < 60 && !bom.dead; t++) {
       bom.fixedUpdate(1 / 60, hooks);
+      if (__trace && t % 3 === 0) console.log('TRC', t, 'dx=', Math.round(bom.cx - (b.x + 10)), 'dy=', Math.round(bom.cy - cy), 'v=', Math.round(bom.vx * 10) / 10, Math.round(bom.vy * 10) / 10);
       maxY_OFFSET_CHECK: void 0;
       maxX = Math.max(maxX, bom.cx - (b.x + 10));
       // 「向上弹射锁死」特征:长时间位于出生点上方 >24px

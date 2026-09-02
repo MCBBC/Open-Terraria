@@ -2095,8 +2095,13 @@ function spearPerTypeDust(s: SpearProj, game: GameHooks): void {
 // 弹跳物理（ai[0]>=15 起重力 0.2/t，AI_068 :29048-29100）；死亡（撞块/命中/超时）→
 // 6 朵火云 400+rand3（:70918-70927：散布 ±8/上抛，伤 ×0.5，火云=aiStyle 14 弹跳穿透 3、
 // 360t、命中 OnFire 3-6s :10850-10852）
-// ★登记不修（红队仲裁 2026-09-02）:飞行火焰尾迹整缺——原版 AI_068 :30688 每拍
-// AI_068_Dust 系尘,本类尘系统整缺（非序倒置,与 #3/#4 挪序不同病）;独立立项补齐。
+// ★T2 清偿（2026-09-02,原"登记不修"升格）:飞行火焰尾迹——原版 AI_068 :30655-30692,
+// alpha==0 门（ai[0]>=3 起 −40/t → 第 9 拍归零）后每拍 1×d6 火尘:锚=Center+
+// spinningpoint2(±4,−8)−One×5、4×4 盒,scale1.5/noGravity,velocity=抖动×0.25+
+// 单位(spinningpoint2) 再整体 RotatedBy(−π/2×direction)。spinningpoint2 随原版
+// rotation（每拍 +=0.25×direction）旋转——本类补 rotation/direction 镜像字段供尘锚
+// （direction=原版 AutomaticallyChangesDirection 每拍 HandleMovement 后按
+// velocity.X 定号 :17121-17127,<0 取 −1 否则 1）;draw 朝向不动（未定罪面）。
 export class MolotovProj extends Entity {
   w = 14; h = 14;
   vx: number;
@@ -2105,6 +2110,12 @@ export class MolotovProj extends Entity {
   critChance = 0.04;
   armorPen = 0;
   private t = 0;
+  /** 原版 rotation（:30655 每拍 +=0.25×direction——尘锚 spinningpoint2 旋转基准） */
+  private rot = 0;
+  /** 原版 direction（:17121 自动朝向;出生按初速 X 定号） */
+  private dir = 1;
+  /** 原版 alpha（SetDefaults 255 起;:30657-30664 ai[0]>=3 后 −40/t 钳 0——==0 开尘门） */
+  private alpha = 255;
   private hitSet = new Set<number>();
   dead = false;
   /** 火云生成回调（Game 注入——避免实体循环依赖） */
@@ -2116,6 +2127,7 @@ export class MolotovProj extends Entity {
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
+    this.dir = vx < 0 ? -1 : 1;   // NewProjectile 出生朝向（初速 X 定号）
     this.spawnFires = spawnFires;
   }
 
@@ -2131,10 +2143,32 @@ export class MolotovProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    if (++this.t >= 3) { /* alpha 淡入（:29054）视觉从略 */ }
+    if (++this.t >= 3) this.alpha = Math.max(0, this.alpha - 40);   // :30657-30664
     if (this.t >= 15) this.vy = Math.min(this.vy + 0.2, 16); // :29063
     else this.vy = Math.min(this.vy + 0.1, 16);
     this.vx *= 0.99;
+    // ---- 飞行火焰尾迹（T2 清偿 2026-09-02;AI_068 :30655-30692,尘在 AI 段=位移前）----
+    this.rot += 0.25 * this.dir;                                    // :30655
+    if (this.alpha === 0) {
+      // spinningpoint2=(4,−8);direction==−1 时 X=−4（:30681-30685）,随 rotation 旋转
+      let sx = 4, sy = -8;
+      if (this.dir === -1) sx = -4;
+      const c = Math.cos(this.rot), s = Math.sin(this.rot);
+      const ax = sx * c - sy * s, ay = sx * s + sy * c;             // RotatedBy(rotation)
+      // NewDust(Center+spinningpoint2−One×5, 4,4, 6)（:30688）——初速抖动由引擎承担
+      const d = game.spawnDust?.(this.cx + ax - 5, this.cy + ay - 5, 4, 4, 6, 0, 0, 0, null);
+      if (d) {
+        d.scale = 1.5;                                              // :30689（覆写消抖动）
+        d.noGravity = true;                                         // :30690
+        const nl = Math.hypot(ax, ay) || 1;                         // Normalize(spinningpoint2)
+        d.vx = d.vx * 0.25 + ax / nl;                               // :30691
+        d.vy = d.vy * 0.25 + ay / nl;
+        const va = -Math.PI / 2 * this.dir;                         // :30692 RotatedBy(−π/2×dir)
+        const vx0 = d.vx, vy0 = d.vy;
+        d.vx = vx0 * Math.cos(va) - vy0 * Math.sin(va);
+        d.vy = vx0 * Math.sin(va) + vy0 * Math.cos(va);
+      }
+    }
     // ★残余债清偿(2026-09-01):点采样撞块(中心+底部)在斜砖/半砖上要么漏检(斜面空区)
     // 要么误检(全格上半),改走正典管线——原版 Molotov 即标准 TileCollision 撞击即裂,
     // 任一轴接触或落面即 breakOpen。dropThrough=true 对齐弹体 fallThrough 缺省。
@@ -2151,6 +2185,7 @@ export class MolotovProj extends Entity {
     if (body.hitWall || body.collideY || body.onGround || body.hitHead) {
       this.breakOpen(game); return;   // 撞块即裂(:29052 系)
     }
+    this.dir = this.vx < 0 ? -1 : 1;   // :17121-17127 自动朝向（<0 取 −1,否则恒 1）
     if (this.t > 600) { this.dead = true; return; }
     // 命中敌即裂（penetrate 1）
     for (const ent of game.enemies()) {
@@ -4058,8 +4093,9 @@ export class FlailProj extends Entity {
  *  ai0>0 追踪段(:29217-29219)：(v×40+dir×12)/41;
  *  撞块(:16905-16921)：前 2 次接触反弹、第 3 次 Kill;Kill 爆 20 颗火尘(:69686)。
  *  scale=ai1=Next(80,121)/100(:29233-29239);timeLeft 120/penetrate 1(SetDefaults :4584)
- *  ★登记不修（红队仲裁 2026-09-02）:杀尘基准位——原版贴墙点 vs 本仓帧首,数 px 级
- *  既有债,随独立尘序批次清偿 */
+ *  ★T3 清偿（2026-09-02,原"登记不修"升格）:杀尘/音基准位改用碰撞后心 this.cx/cy
+ *  （原版 Kill 自接触响应段 :18443 调用,position 已被 TileCollision 夹贴墙;
+ *   旧帧首 cx0/cy0 差半格~一格）——详见 fixedUpdate Kill 块内注 */
 export class FlaironSpike extends Entity {
   w = 14; h = 14;
   damage: number;
@@ -4176,16 +4212,20 @@ export class FlaironSpike extends Entity {
       // 10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
       // color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
       // scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
-      game.playSfxFiles(['Item_54'], 1, cx0, cy0);
+      // ★T3 清偿（2026-09-02,红队 H′）:基准位 = 碰撞后心 this.cx/cy——原版 Kill 自
+      // 接触响应段调用（:18443 else→Kill）,此时 position 已被 TileCollision 夹到
+      // 贴墙位,尘/音取 Kill 时 Center（:74185-74188）;旧 cx0/cy0 为帧首心（一步之前）,
+      // 贴墙场景差半格~一格。AI 段索敌仍用帧首 cx0/cy0（AI 先于位移,原版同序）不动
+      game.playSfxFiles(['Item_54'], 1, this.cx, this.cy);
       if (game.spawnDust) {
         for (let i = 0; i < 20; i++) {
-          const d = game.spawnDust(cx0 - 10, cy0 - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
+          const d = game.spawnDust(this.cx - 10, this.cy - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
           if (!d) break;
-          const len = Math.hypot(d.x - cx0, d.y - cy0) || 1;
-          const ux = (d.x - cx0) / len, uy = (d.y - cy0) / len;
+          const len = Math.hypot(d.x - this.cx, d.y - this.cy) || 1;
+          const ux = (d.x - this.cx) / len, uy = (d.y - this.cy) / len;
           const spdLen = Math.hypot(d.vx, d.vy);
-          d.x = cx0 + ux * 10 * this.ai1;
-          d.y = cy0 + uy * 10 * this.ai1;   // ★此前误写 cx0（y 坐标用了 x 心）= 终清波 typo 回归钉死
+          d.x = this.cx + ux * 10 * this.ai1;
+          d.y = this.cy + uy * 10 * this.ai1;   // ★此前误写 cx0（y 坐标用了 x 心）= 终清波 typo 回归钉死
           d.vx = ux * spdLen; d.vy = uy * spdLen;
           const hue = 0.4 + Math.random() * 0.2;
           const col = hslToRgbColor(hue, 0.9, 0.5);
@@ -4196,7 +4236,7 @@ export class FlaironSpike extends Entity {
           d.scale = 0.7;
         }
       } else {
-        game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+        game.spawnParticles(this.cx, this.cy, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
       }
       return;
     }
@@ -5199,6 +5239,40 @@ export class TorchGodProj extends Entity {
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
       this.dead = true; return;
     }
+    // 命中玩家（★T2 挪前位,红队 H′ 清偿 2026-09-02:原版 SelfHurtPlayers
+    // （Projectile.cs:15104-15152）由 AI_184 头部调用（:43575-43579）——判定发生在
+    // UpdatePosition（:19973）之前 = 移前盒;旧形在 moveAndCollide 之后读移后位 =
+    // ≤1 tick 相位差 + 居中穿越拍击退符号翻转。门集对齐（:15106-15107
+    // !active||dead||immune||!Colliding）:dead/immune 由 Player.damage 内部门承接
+    // （Player.ts :7114 dead 早退 / :7141 General iframes 位）,!Colliding = 下 AABB。
+    // 击退方向原版 direction = (!(playerCX < base.Center.X)) ? 1 : -1 = 远离弹心
+    // ——srcX 直传弹【移前】中心 cx（旧形 Math.sign(p.cx−this.cx) 被当坐标传,
+    // damage 侧 dir=cx<srcX?−1:1 恒 +1,一并清偿）。命中后【不 return】——原版 AI
+    // 命中后继续音/射程/尾迹/位移（SelfHurtPlayers 不冻结弹,穿透续飞;无敌帧内由
+    // damage 侧 immune 门静默）。死亡归因 = ByProjectile（Projectile.Damage→Hurt
+    // 同源弹型名;此前漏设→死因残留旧值）。1457 :43575-43578（1456 :40100-40107
+    // owner=255/damage=0 假伤）:改 owner==myPlayer && !unlockedBiomeTorches →
+    // SelfHurtPlayers() 真伤;SetDefaults 去 hostile（:8950）。本仓
+    // unlockedBiomeTorches（火把神图腾解锁位）未登记 → 恒未解锁 = 恒真伤
+    // （与 1456 假伤 0 的差异即本批修正点）
+    const p = game.player;
+    if (!game.world.flags.unlockedBiomeTorches
+      && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+      p.lastDamageCause = {
+        kind: 'projectile',
+        name: game.projectileName?.(this.projId) ?? '弹幕',
+      };
+      // 1457 :18000：`damage = (int)(40f × HostileProjectileDamageMultiplier.Sample(
+      // Main.Difficulty))`——经典 40/专家 80(×2)/大师 120(×3)（GameDifficultyData.cs:67
+      // 曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
+      // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
+      p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
+        this.cx, 0, true);
+      // ★R3-16（1457 P57:43575-43579 AI_184_BadTorchLuck → SelfHurtPlayers
+      //  :15104-15152）：原版命中后**不杀弹**——949 继续飞，玩家无敌帧内由
+      //  immune 门静默、无敌帧结束再判（SelfHurtPlayers 每 AI 帧调用）。本仓曾
+      //  this.kill → 火把神之焰碰玩家即消失（原版穿透续飞反复判定）。
+    }
     // 首帧 Item8 音（AI_184 :40109-40111 localAI[0]==0——事件全程连射的本族主声,终审补）
     if (!this.sndT) { this.sndT = 1; game.playSfxWav?.('Item_8', 1, this.cx, this.cy); }
     // ai[1] 射程（1457 :43591-43598 if/else:ai[1]>0 拍才递减——穿零拍【不置】
@@ -5228,35 +5302,6 @@ export class TorchGodProj extends Entity {
       if (this.tileCollide && (body.hitWall || body.collideY || body.onGround || body.hitHead)) {
         this.kill(game); return;
       }
-    }
-    // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
-    // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）。
-    // 1457 :43575-43578（1456 :40100-40107 owner=255/damage=0 假伤）:改
-    // owner==myPlayer && !unlockedBiomeTorches → SelfHurtPlayers() 真伤;
-    // SetDefaults 去 hostile（:8950）。本仓 unlockedBiomeTorches（火把神图腾
-    // 解锁位）未登记 → 恒未解锁 = 恒真伤（与 1456 假伤 0 的差异即本批修正点）
-    const p = game.player;
-    // 位移已由管线落位(nx/ny → this.x/this.y)
-    // ★登记不修（红队仲裁 2026-09-02）:本命中判定读移后位,原版 SelfHurtPlayers
-    // 在 AI 内（:43575-43579）=移前位——≤1 tick 相位差,红队确认无漏命中,保持现形。
-    if (!game.world.flags.unlockedBiomeTorches
-      && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-      p.lastDamageCause = {
-        kind: 'projectile',
-        name: game.projectileName?.(this.projId) ?? '弹幕',
-      };
-      // 1457 :18000：`damage = (int)(40f × HostileProjectileDamageMultiplier.Sample(
-      // Main.Difficulty))`——经典 40/专家 80(×2)/大师 120(×3)（GameDifficultyData.cs:67
-      // 曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
-      // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
-      p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
-        Math.sign(p.cx - this.cx) || 1, 0, game as never);
-      // ★R3-16（1457 P57:43575-43579 AI_184_BadTorchLuck → SelfHurtPlayers
-      //  :15104-15152）：原版命中后**不杀弹**——949 继续飞，玩家无敌帧内由
-      //  immune 门静默、无敌帧结束再判（SelfHurtPlayers 每 AI 帧调用）。本仓曾
-      //  this.kill → 火把神之焰碰玩家即消失（原版穿透续飞反复判定）。
-      //  位置已由管线推进（SelfHurtPlayers 不冻结弹），否则卡原地每帧重复判定
-      return;
     }
   }
 }
@@ -5363,8 +5408,15 @@ export function daybreakStacks(enemyId: number): number {
 }
 
 export class DaybreakFlare extends Entity {
-  // ★登记不修（红队仲裁 2026-09-02）:oldPos 半拍差——EU（extraUpdates）子步记账口径
-  // 与原版差半拍,观感不可辨,维持现形。
+  // ★T4 清偿（2026-09-02,原"半拍差登记不修"升格修复）:oldPos 改按 EU 子步逐条记录
+  // （TrailingMode[636]=0,ProjectileID.cs:385;每子步 AI+位移后 oldPos[0]=position,
+  //  P.cs:17199-17204）——旧实现每 tick 一条且取 tick 起点（= 原版 oldPos[2] 位）,
+  //  Kill 双环尘（num174∈{0,3},:73384-73396）落点整体落后一拍、第二条环取到原版
+  //  oldPos[6] 位;现 [0]=死亡子步前一子步位（死亡子步不入带,:17135 if(!active)return
+  //  先于记录段——碰撞 Kill 时尘环贴在半途位,非帧首位）、[3]=上上 tick 末位,与原版
+  //  逐位对齐。容量同步 TrailCacheLength[636]=20（ProjectileID.cs:387,旧 10）。
+  //  唯一残差：repo 的 timeLeft Kill 在 step 头（原版在记录段后 :17304-17310）——
+  //  该相位 636 实际不可达（timeLeft 3600,先到期的是 localT 600/碰撞/失靶）。
   readonly projId = 636;
   damage: number;
   knockback: number;
@@ -5394,7 +5446,8 @@ export class DaybreakFlare extends Entity {
   /** timeLeft（SetDefaults 缺省 3600，:526；KillOldestJavelin 的"最老"序据） */
   private timeLeft = 3600;
   /** oldPos 环（Kill 双环尘落点用:P.cs:73385-73396 num174∈{0,3}——unshift 语义
-   *  与原版 _oldPos 一致,[0]=上一帧） */
+   *  与原版 _oldPos 一致,[0]=最新记录;TrailingMode[636]=0 → 每 EU 子步 AI+位移后
+   *  记一条,P.cs:17199-17204;容量 TrailCacheLength[636]=20） */
   private oldPos: Array<{ x: number; y: number }> = [];
   /** direction（尘速度 2.5×direction 用;飞行相跟随 vx 符号——AI_113 不更新 direction,
    *  原版由 AutomaticallyChangesDirection 在 aiStyle3 段管辖外维持最后飞行朝向） */
@@ -5408,12 +5461,16 @@ export class DaybreakFlare extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    // oldPos 环入队（tick 起点快照 = 上一帧位）
-    const snap = { x: this.x, y: this.y };
-    // extraUpdates=1：AI+移动每 tick 跑 2 次（Update :15336-15339 while 语义同 Boomerang）
-    for (let i = 0; i < DaybreakFlare.RUNS && !this.dead; i++) this.step(game);
-    this.oldPos.unshift(snap);
-    if (this.oldPos.length > 10) this.oldPos.pop();
+    // extraUpdates=1：AI+移动每 tick 跑 2 次（Update :15336-15339 while 语义同 Boomerang）；
+    // oldPos 每【子步】AI+位移后记一条（TrailingMode 0,P.cs:17199-17204）——★T4 清偿
+    // 见类头注。死亡子步不入带（原版 :17135 `if(!active) return` 先于记录段）
+    for (let i = 0; i < DaybreakFlare.RUNS && !this.dead; i++) {
+      this.step(game);
+      if (!this.dead) {
+        this.oldPos.unshift({ x: this.x, y: this.y });
+        if (this.oldPos.length > 20) this.oldPos.length = 20;   // TrailCacheLength[636]=20
+      }
+    }
   }
 
   /** 单次 AI 迭代（AI_113_TargetSticker 一次） */

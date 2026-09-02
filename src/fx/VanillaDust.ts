@@ -639,3 +639,38 @@ function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
   const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331;
   return wantFb === fb;
 }
+
+/** 预乘 AlphaBlend 烘焙（纯函数;Renderer.drawVanillaDustPass 消费,
+ *  tests/dust-premultiplied-blend.test.ts 数值验证）。
+ *
+ *  XNA SpriteBatch BlendState.AlphaBlend = 预乘混合（ColorSourceBlend=One、
+ *  ColorDestinationBlend=InverseSourceAlpha,Main.cs:39503 spriteBatch.Begin）,
+ *  贴图经 XNA 内容管线默认预乘（tex.rgb 已含 tex.a）——本仓 PNG 为直色解包,
+ *  须先转预乘 texP.rgb = tex.rgb×tex.a。Draw 的 Color 入参 c（=GetAlpha/GetColor
+ *  返回值）在 sprite shader 里逐通道调制:
+ *    src.rgb = texP.rgb×c.rgb（不乘 c.a!——c.a 只进混合的 dst 因子）
+ *    src.a   = tex.a×c.a
+ *    final   = dst×(1−src.a) + src.rgb = dst×(1−texA×cA) + texP.rgb×cRGB
+ *  canvas 两步精确等价（每尘 2 次 drawImage,零逐帧 getImageData）:
+ *    ① 'destination-out' 画 erase 面（alpha=texA×cA,按贴图形状限域）→ dst×(1−texA×cA)
+ *    ② 'lighter' 画 add 面（RGB=texP×cRGB、A=255 全额加法）→ +texP.rgb×cRGB
+ *  A=0 档（cA=0）自动退化为纯加法（erase 无操作）——与既有 A=0 'lighter' 通道同式。
+ *
+ *  入参 mR/mG/mB/mA 为字节化乘数（0-255,调用侧 Math.round(c×255)）:直色→预乘×Color
+ *  单次量化（round(tex×texA×m/255²)）与 XNA shader 输出 8bit 同精度。
+ *  返回两张 RGBA 面:add.A 钉 255、erase.RGB 置 0（blend 不读）。 */
+export function dustPremulBake(
+  tex: Uint8ClampedArray, mR: number, mG: number, mB: number, mA: number,
+): { add: Uint8ClampedArray; erase: Uint8ClampedArray } {
+  const add = new Uint8ClampedArray(tex.length);
+  const erase = new Uint8ClampedArray(tex.length);
+  for (let i = 0; i < tex.length; i += 4) {
+    const tA = tex[i + 3];
+    add[i] = (tex[i] * tA * mR) / 65025;
+    add[i + 1] = (tex[i + 1] * tA * mG) / 65025;
+    add[i + 2] = (tex[i + 2] * tA * mB) / 65025;
+    add[i + 3] = 255;
+    erase[i + 3] = (tA * mA) / 255;
+  }
+  return { add, erase };
+}

@@ -14,11 +14,11 @@ import { Arrow } from '../src/entities/Arrow';
 
 interface DustRec { type: number; alpha: number; scale: number; noGravity: boolean; sx: number; sy: number; }
 
-function makeGame(w: World, dusts: DustRec[]) {
+function makeGame(w: World, dusts: DustRec[], bucket?: unknown[]) {
   return {
     world: w, player: null as unknown, enemies: () => [], critters: () => [],
     projectiles: () => [],
-    entities: { nextId: 1, add: () => {} },
+    entities: { nextId: 1, add: (e: unknown) => { if (bucket) bucket.push(e); } },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
     damagePlayer: (): number => 0, notifyInventoryChanged: () => {},
@@ -137,6 +137,35 @@ describe('309 冰九头蛇冰弹（aiStyle28 尘尾 :26996-27004 每**子步**;E
     const boosted = d185.filter((d) => d.noGravity && d.scale > 1).length;
     expect(boosted).toBeGreaterThanOrEqual(2);
     expect(boosted).toBeLessThanOrEqual(8);
+  });
+});
+
+describe('镖族 479/478 行为面（AI_001 :58288-58343）', () => {
+  it('479 母镖:pierce=-1 无限穿;超阈分裂 2-4 枚子镖(pierce=1,ai1Mirror=-1000)+每枚 5×d170', () => {
+    const dusts: DustRec[] = [];
+    const bucket: unknown[] = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const a = new Arrow(400, 300, 6, 0, 100, 2, 479, null, { grav: 0, life: 600 });
+    flyFrames(a, game, 40);
+    expect((a as unknown as { pierce: number }).pierce).toBe(-1);
+    const subs = bucket.filter((b) => (b as Arrow).projId === 479
+      && (b as unknown as { ai1Mirror: number }).ai1Mirror === -1000) as Arrow[];
+    expect(subs.length).toBeGreaterThanOrEqual(2);
+    expect(subs.length).toBeLessThanOrEqual(4);
+    expect((subs[0] as unknown as { pierce: number }).pierce).toBe(1);
+    expect(dusts.filter((d) => d.type === 170).length).toBeGreaterThanOrEqual(subs.length * 5);
+  });
+  it('478 诅咒镖:周期放 480 诅咒火(dmg×0.8,kb×0.5)且 life 扣 20', () => {
+    const dusts: DustRec[] = [];
+    const bucket: unknown[] = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const a = new Arrow(400, 300, 6, 0, 100, 2, 478, null, { grav: 0, life: 600 });
+    const life0 = (a as unknown as { life: number }).life;
+    flyFrames(a, game, 45);
+    const fires = bucket.filter((b) => (b as Arrow).projId === 480) as Arrow[];
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    expect((fires[0] as unknown as { damage: number }).damage).toBe(80);   // 100×0.8
+    expect((a as unknown as { life: number }).life).toBeLessThan(life0);
   });
 });
 

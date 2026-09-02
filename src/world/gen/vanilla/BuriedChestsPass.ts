@@ -229,6 +229,15 @@ const PRE_CLASS: Record<number, string> = {
   //   Item.cs:47524 DefaultToAccessory → acc 类（同 6156 银护腕案）。仅 SW_MB_1457=1
   //   线可达（1456 池十选无此位）
   6165: 'acc',
+  // ★IIIII170（2026-09-02）：remix 换件主件类表补登记——PrefixLegacy.ItemSets 实测
+  //   （Terarria1457 Terraria.GameContent.Prefixes/PrefixLegacy.cs:77 GunsBows 含 725
+  //   IceBow；:78 Magic 集 含 517）：①725=冰雪弓（冰箱池 remix 换件 1319→725,
+  //   cs:36457-36459）可前缀化【耗掷】——曾漏登记 → remix 冰箱主件 725 的
+  //   Prefix(-1) 零掷 vs vanilla Next(4)+池（x86 ABLOG2+值流对拍实证：箱 (2604,804)
+  //   loot 段 JS 20 掷 vs x86 21 掷,自此 +1 相移 → 本 pass 尾 +143 骰、余 2+2 箱错位）
+  //   ②517（表面箱主物池 remix 换位 3069→517,cs(1457):36688-36694）Magic 类同漏,
+  //   预防性登记（同表 1:1,非本种实爆位）。
+  725: 'guns', 517: 'magic',
 };
 // ---- 主件 Prefix(-1)（尾批 2-C）：四分支头 SetDefaults(num10)+Prefix(-1) 无条件调用
 //   （surface cs:36287 / gold cs:36554 / cave cs:36841 / hell cs:37167）——可前缀化
@@ -343,6 +352,14 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   //   恒不重掷（经核算 magic 池四失败门对这套 stats 恒不触发,掷数等价）;补登记防未来
   //   池/门变动时静默失准
   6153: { d: 11, ua: 24, mana: 10, kb0: false },
+  // ★IIIII170：remix 换件主件 stats 登记（与 PRE_CLASS 725/517 配对,漏 stats 则四失败
+  //   门恒不触发）：①725 冰雪弓 Item.cs:9859-9880 base 变体 damage 39/useAnimation 14/
+  //   mana 缺省 0/knockBack 4.5f——guns 池 82 号前缀(m[3]=0.9)对 mana=0 物恒触发
+  //   mana 门失败重环,缺登记会少掷;②517 魔法匕首 Item.cs:7542-7566 base 变体
+  //   damage 30/useAnimation 8/mana 6/knockBack 3.75f（magic 池经核算四门恒不触发,
+  //   防未来登记性失准,同 6153 先例）。
+  725: { d: 39, ua: 14, mana: 0, kb0: false },
+  517: { d: 30, ua: 8, mana: 6, kb0: false },
 };
 const __fr = Math.fround;
 /** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入） */
@@ -1364,9 +1381,15 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
       // ★★★IIIII95（Terarria1458 cs:17256-17263）：remix 臂两件——①Y 域覆写重掷
       //   Next(maxY-400, maxY-150) 且 **跳过** oceanDepths 回避环（else 才有回避）；
       //   此前漏移植 → REMIX 地表箱/天空箱候选全漂。
+      //   ★IIIII170（2026-09-02）下界勘误：Next(maxY-400, maxY-150) = Next(800,1050)
+      //   → int(800,1049)=int(h-400, h-151)。旧码 int(h-401, h-151)=Next(799,1050)
+      //   下界 799+range 251 各差 1 → 每 attempt 起始行 ∈ {vanilla-1, vanilla}，
+      //   ±1 行跨活性格门（cs:17265 `!tile.active()`）时 attempt 受理面分叉
+      //   （x86 ABLOG2 实证：JS 多呼 (3480,829)（该格 inactive 而 830 active），
+      //   流账 +284 骰、4+4 箱错位、hellChest 轮转件错位）。
       const remixSC = !!gs.seedFlags.remix;
       if (remixSC) {
-        y = rng.int(st.h - 401, st.h - 151);
+        y = rng.int(st.h - 400, st.h - 151);
       } else {
         while (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance)) {
           x = rng.int(300, w - 301);

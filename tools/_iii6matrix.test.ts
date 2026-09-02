@@ -9,6 +9,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 
+const RUN = process.env.SW_ORACLE === '1';   // ★一次性生成仪(2026-09-02 补门):全管线重活在身,缺省 skip 防默认 sweep 超时;SW_ORACLE=1 启用
+
 const W = 4200, H = 1200;
 const READY = existsSync('/tmp/sw-slp/g1458-celeb/105_Final_Cleanup.typ');
 const DUMP = '/tmp/sw-slp/g1458-celeb/105_Final_Cleanup';

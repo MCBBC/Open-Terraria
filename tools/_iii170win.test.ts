@@ -43,6 +43,7 @@ const SEED = process.env.SW_I170_SEED ?? '1138154190';
   const vals: string[] = [];
   const evs: string[] = [];
   const sites: string[] = [];
+  let curStore: unknown = null;
   let winOn = false;
   let ln = 0;
   let mainInst: object | null = null;
@@ -92,6 +93,24 @@ const SEED = process.env.SW_I170_SEED ?? '1138154190';
       vals.push('---PASS 60 Surface Chests');
       seg = 'junc'; segSites = false;
       console.log(`[WIN] ---PASS 60 at ln=${ln}`);
+      // ★pass60 末态箱面快照（curStore=pass60 末 onWorldPartial 态）：全图 21/467 活性格
+      //   → 2×2 左上锚清单，与 x86 dump060 同口径对表（4+4 错位箱定谳用）
+      try {
+        const stt = curStore as unknown as { flags: Uint8Array; type: Uint16Array; w: number; h: number; idx: (x: number, y: number) => number } | null;
+        if (stt) {
+          const cells: Array<[number, number, number]> = [];
+          for (let y = 0; y < stt.h; y++) {
+            for (let x = 0; x < stt.w; x++) {
+              const i2 = stt.idx(x, y);
+              if ((stt.flags[i2]! & 1) && (stt.type[i2] === 21 || stt.type[i2] === 467)) cells.push([x, y, stt.type[i2]!]);
+            }
+          }
+          const s = new Set(cells.map((c) => `${c[0]},${c[1]}`));
+          const tl = cells.filter((c) => !s.has(`${c[0] - 1},${c[1]}`) && !s.has(`${c[0]},${c[1] - 1}`)).map((c) => `${c[0]},${c[1]}`).sort();
+          writeFileSync(`${OUT}/js-chests-pass60end.txt`, tl.join('\n') + '\n');
+          console.log(`[SNAP] pass60end chest toplefts=${tl.length}`);
+        }
+      } catch (e) { console.log(`[SNAP] failed ${e}`); }
     } else if (siteLine === LN_UWAT && winOn) {
       vals.push('---END 61 Jungle Chests Placement');
       console.log(`[WIN] ---END 61 at ln=${ln} -> close`);
@@ -126,6 +145,7 @@ const SEED = process.env.SW_I170_SEED ?? '1138154190';
     const w = await generateWorld({
       width: 4200, height: 1200, seedText: SEED, evil: -1 as -1 | 0 | 1,
       seedFlags: { remix: true },
+      onWorldPartial: (w2) => { curStore = (w2 as unknown as { store: unknown }).store; },
     });
     const chests = (w as unknown as { chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }> }).chests;
     writeFileSync(`${OUT}/js-chests-final.txt`,

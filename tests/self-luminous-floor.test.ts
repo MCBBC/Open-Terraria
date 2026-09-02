@@ -9,6 +9,11 @@
 //   ③ raise/restore 幂等：compositeLight 前后光数组逐字节还原（含多弹同格重叠——
 //      账本须记【原值】,Set 去重改造不得记账抬亮后的值）；
 //   ④ F3 粒子缺省重力契约：ax/ay 通道在位 → 缺省 grav=0（Game.particleGravDefault）。
+//   ⑤ ★I″ 去色（2026-09-02 蓝队白化批,原"已知边界③"清偿）：raise 写面由逐通道
+//      max 改为白化 R=G=B=max(r,g,b,fr)——消色差,熔岩红光区白剪影不再被染色
+//      （原版 596/811 顶点色不读格光色=恒白）;白化值取三通道最大值=只升不降
+//      （白天暖光不压暗）;账本记原 RGB×3、restore 逐字节还原。备案残留:814 原版
+//      Lerp(光,White,0.35) 保留 65% 光色相,白化为全白（post-light 弹绘制通道未建）。
 // 锚:Projectile.cs GetAlpha 575/596/659 专支 + 缺省段 :81503-81510、Main.cs
 //   轨迹支 :30841-30856、Dust 缺省重力 Dust.cs:894 族。
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -205,6 +210,37 @@ describe('raise/restore 幂等（compositeLight 前后光数组还原）', () =>
     raiseOf().raiseSelfLuminousProjLight([dart(811, 1, 2)], L.r, L.g, L.b, 0, 0, W4, W4);
     expect(Array.from(L.r)).toEqual(snap);
     fb.fullbright = prevFb;
+  });
+});
+
+// ================================== ③′ ★I″ 去色（2026-09-02 白化批,原边界③）
+describe('★I″ 去色：raise 白化 R=G=B=max(r,g,b,fr)（有色光区白剪影不再被染色）', () => {
+  it('熔岩红光 (200,40,10) + 814（fr=89）→ 白化为灰 (200,200,200);restore 还原有色原值', () => {
+    const L = mkLight();
+    L.r[li(1, 2)] = 200; L.g[li(1, 2)] = 40; L.b[li(1, 2)] = 10;
+    raiseOf().raiseSelfLuminousProjLight([dart(814, 1, 2)], L.r, L.g, L.b, 0, 0, W4, W4);
+    // 旧形逐通道 max → (200,89,89) 有色（染红）;新形消色差 = 三通道同值
+    expect(L.r[li(1, 2)], '最大通道保底（只升不降）').toBe(200);
+    expect(L.g[li(1, 2)], 'G 白化（旧形 89）').toBe(200);
+    expect(L.b[li(1, 2)], 'B 白化（旧形 89）').toBe(200);
+    raiseOf().restoreSelfLuminousProjLight(L.r, L.g, L.b);
+    expect(L.r[li(1, 2)]).toBe(200);
+    expect(L.g[li(1, 2)]).toBe(40);
+    expect(L.b[li(1, 2)]).toBe(10);
+  });
+
+  it('亮橙光 (255,128,30) + 814：各通道≥fr 也白化（登记③熔岩亮光区主诉,旧形零改动）', () => {
+    const L = mkLight();
+    L.r[li(2, 1)] = 255; L.g[li(2, 1)] = 128; L.b[li(2, 1)] = 30;
+    raiseOf().raiseSelfLuminousProjLight([dart(814, 2, 1)], L.r, L.g, L.b, 0, 0, W4, W4);
+    expect([L.r[li(2, 1)], L.g[li(2, 1)], L.b[li(2, 1)]]).toEqual([255, 255, 255]);
+  });
+
+  it('暗红光 (100,20,10) + 596 全显态（fr=255）→ 全白（原版 GetAlpha 恒白不读格光）', () => {
+    const L = mkLight();
+    L.r[li(0, 3)] = 100; L.g[li(0, 3)] = 20; L.b[li(0, 3)] = 10;
+    raiseOf().raiseSelfLuminousProjLight([dart(596, 0, 3)], L.r, L.g, L.b, 0, 0, W4, W4);
+    expect([L.r[li(0, 3)], L.g[li(0, 3)], L.b[li(0, 3)]]).toEqual([255, 255, 255]);
   });
 });
 

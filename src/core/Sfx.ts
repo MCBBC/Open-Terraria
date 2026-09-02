@@ -867,10 +867,13 @@ export class Sfx {
     return this.playWavFile(list[Math.floor(Math.random() * list.length)], vol, x, y);
   }
 
-  /** 播放任意 wav 文件列表（随机选 + 音高扰动）；供怪物专属声效用 */
-  playFiles(files: string[], vol = 1, x?: number, y?: number): boolean {
+  /** 播放任意 wav 文件列表（随机选 + 音高扰动）；供怪物专属声效用。
+   *  pitch = 显式 XNA pitchOffset（arcSurgeFx :1268 变调消费,经 playWavFile 直入
+   *  pitchRateFor explicitPitch 档 2^pitch——传入即跳过该文件 PITCH_CASE 抖动表,原版
+   *  Style.PitchVariance=0 时 GetRandomPitch 恒 0 同语义） */
+  playFiles(files: string[], vol = 1, x?: number, y?: number, pitch?: number): boolean {
     if (!files.length) return false;
-    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y);
+    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y, pitch);
   }
 
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound 语义，AI_016 :44276 引信嘶声）:

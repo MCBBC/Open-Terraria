@@ -109,6 +109,22 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
  *  原版帧语义（TileObject.Place L74-102）：frameY 从顶行 0 向下递增，
  *  dx/dy 为物件内偏移（dx=0,dy=0 即顶行锚格）
  */
+/** ★M-2（2026-09-02）：非 18px 行步进族——原版 TileObject.Place 写帧行步进 =
+ *  num9 += CoordinateHeights[l] + CoordinatePadding（TileObject.cs:96-108）,绝大多数
+ *  族 heights 全 18 时恰为 18px。例外按反编译 heights 表累进：
+ *  · 388/389 高门 heights{18,16,16,16,18}+pad2（TileObjectData.cs:2301-2303,
+ *    addTile(388) :2323/389=FullCopyFrom :2324-2325）→ 行帧 0/20/38/56/74
+ *    （Tiles_388.png 内容带 0-17/20-35/38-53/56-71/74-91 实证同构）。
+ *  · 567 花园侏儒 heights{18,18}+pad2（TileObjectData.cs:4222-4224 addTile :4227）
+ *    → 行帧 0/20（CheckGnome :54419 `frameY==0 && frameY2==20` 完整性亦按 20 步）。
+ *  列向 388/389 无横排 style（frameX 恒 0）;567 frameX 步原版=CoordinateWidth 26+2=28
+ *  （:4223）——本仓 placeStyle 恒 0（frameX=0 两端同值）,备案不改。
+ */
+const PLACE_ROW_FY: Record<number, readonly number[]> = {
+  388: [0, 20, 38, 56, 74],
+  389: [0, 20, 38, 56, 74],
+  567: [0, 20],
+};
 export function framedCellFrame(sheet: number, fw: number, style: number, dx: number, dy: number): [number, number] {
   if (sheet === 91) {
     let row = 0;
@@ -116,5 +132,6 @@ export function framedCellFrame(sheet: number, fw: number, style: number, dx: nu
     return [Math.max(0, (style + 21 - 111 * row) * 18), row * 54 + dy * 18];
   }
   const [bx, by] = furnitureStyleBase(sheet, style, fw);
-  return [bx + dx * 18, by + dy * 18];
+  const rows = PLACE_ROW_FY[sheet];
+  return [bx + dx * 18, by + (rows ? rows[dy] ?? dy * 18 : dy * 18)];
 }

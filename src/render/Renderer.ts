@@ -95,7 +95,9 @@ function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh:
   return out;
 }
 /** 落脚豁免:独占绘制路径自带锚点(它们根本不走通用尾段,防御性登记) */
-const FOOT_FLUSH_EXEMPT = new Set<number>([393, 416]);   // 416 骑手原点=掠兽 Bottom(B路R3备案)
+const FOOT_FLUSH_EXEMPT = new Set<number>([393, 416,   // 416 骑手原点=掠兽 Bottom(B路R3备案)
+  583, 584, 585]);   // 仙灵悬浮族:原版帧中心锚(Main.cs:23400 无 num46/47 条目),
+                     // "内容底贴盒底"对飞行体无意义,+2px 沉降=倒挂观感(2026-09-02 遗留批 D9)
 function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
@@ -445,11 +447,17 @@ export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | nul
 }
 
 /** Extra_98 星芒染色缓存。
- *  ★2026-08-30 修正：旧版"alpha 摊平 255"把整张矩形烘成实心色块——Extra_98 是
- *  【alpha 塑形】贴图（透明区 rgb 无意义），原版不透明感来自 XNA 预乘贴图
- *  （透明区 rgb=黑，A=0 纯加算时黑=无贡献）。canvas 侧等价 = 逐像素预乘
- *  （rgb×=a）后乘 tint、alpha 摊平（主画布不透明，lighter 只消费 rgb）。
- *  旧版实报症状：星芒两臂渲染成大矩形色块（用户截图 2026-08-31）。 */
+ *  ★2026-09-02 黑十字案终审定谳（最小复现 + 冻结帧 A/B 双取证）：
+ *  「两臂包围盒半透明深蓝灰矩形底」= 历史旧版（alpha 摊平 255 的染色画布 ×
+ *  source-over 合成）的 deterministic 复现——最小复现中该路径 88% 臂带像素变暗
+ *  （minΔ=−207），而现行 lighter 链（隔离式/直绘两形态）暗像素恒 0（'lighter'
+ *  逐像素 dst+αs·Cs 只能加色）；游戏内冻结帧对拍四剑臂带 darkBlocks=0。
+ *  修复后观察到的"仍复现"均为陈旧 bundle（SW cache-first/HMR 半旧模块）。
+ *  ★本函数像素语义（= XNA 预乘贴图 + AlphaBlend(A=0) 的 canvas 等价）：
+ *  原版贡献 = texRGB×texA×tintRGB（纯加色，dst 不衰减）。canvas 'lighter'
+ *  贡献 = αs×Cs，故染色画布只需存 rgb×tint（【勿】再乘 a——曾 ×a 预乘 =
+ *  贡献变 rgb×tint×a²，臂锥能量减半）；alpha 保留真实值（摊平 255 = 空区
+ *  "rgb=0∧a=255"，遇任何非 lighter 路径即整包围盒暗底 = 黑十字本体）。 */
 const sparkleTintCache = new Map<string, HTMLCanvasElement>();
 function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasElement | null {
   const img = loadExtraSprite(98);
@@ -467,13 +475,12 @@ function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasEle
     const id = cx.getImageData(0, 0, c.width, c.height);
     const d = id.data;
     for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3] / 255;
-      d[i] = d[i] * a * rgb[0];
-      d[i + 1] = d[i + 1] * a * rgb[1];
-      d[i + 2] = d[i + 2] * a * rgb[2];
-      // ★保留真实 alpha（2026-08-31 终修）：曾摊平 255 = 空区变"rgb=0∧a=255"画布，
-      //   任何非 lighter 合成路径（状态泄漏/HMR 半旧模块）都会把臂包围盒画成暗底
-      //   = 用户三轮截图的黑十字。空区 a=0 后【任何】路径数学上零贡献。
+      // ★2026-09-02 去预乘：rgb×tint、alpha 原样——'lighter' 自乘 αs 得
+      //  rgb×tint×a = XNA 预乘加色精确等价。曾 ×a（2026-08-30"修正"）= a² 双乘，
+      //  臂锥亮度对折（最小复现：cur=10275 vs 精确=19629 亮像素）。
+      d[i] = d[i] * rgb[0];
+      d[i + 1] = d[i + 1] * rgb[1];
+      d[i + 2] = d[i + 2] * rgb[2];
     }
     cx.putImageData(id, 0, 0);
   } catch {
@@ -492,7 +499,10 @@ function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasEle
  *  ③draw 旋 π/2+rotation @vector·0.6 ④draw 旋 rotation @vector2·0.6。
  *  color = shine×opacity×0.5（A=0）、color2 = draw×0.5——A=0 预乘语义 = 纯加色，
  *  亮度全部折进 tint·globalAlpha（原版 (int) 截断舍入差 ≤1/255 不逐笔复刻）。
- *  消费端：402 星尘蠕虫头（:23888）/SwingArc 真刃弧族（:27424 族）/425 枪口星芒。 */
+ *  消费端：402 星尘蠕虫头（:23888）/SwingArc 真刃弧族（:27424 族）/425 枪口星芒。
+ *  ★2026-09-02 复役：黑十字已定谳为历史旧版"alpha 摊平×source-over"残留（见
+ *  sparkleTintedTex 头注），最小复现+游戏内冻结帧对拍双侧零暗底——撤去
+ *  2026-08-31 的 ?sparkle 停用门，恢复原版恒绘。 */
 export function prettyStarSparkle(
   ctx: CanvasRenderingContext2D,
   opacity: number, x: number, y: number,
@@ -509,10 +519,6 @@ export function prettyStarSparkle(
   };
   const num = lv(fadeInStart, fadeInEnd, flareCounter) * lv(fadeOutEnd, fadeOutStart, flareCounter);
   if (num <= 0) return;
-  // ★2026-08-31 默认停用：星芒四笔 stroke 的臂包围盒存在无法归因的暗十字
-  //  （隔离式合成后仍复现，且出现位置可与星体分离——疑似跨帧/GL 层残留）。
-  //  拖尾主体（GL 条带）不受影响。?sparkle=1 重新启用供下轮断点调试。
-  { try { if (new URLSearchParams(location.search).get('sparkle') !== '1') return; } catch { } }
   const shine = sparkleTintedTex(shineColor);
   const draw = sparkleTintedTex(drawColor);
   if (!shine || !draw) return;
@@ -522,9 +528,10 @@ export function prettyStarSparkle(
   const aShine = 0.5 * opacity * num * shineDim, aDraw = 0.5 * num * drawDim;
   // drawDim/shineDim：原版调用侧预乘进色的因子（如 SwingArc 的 White×num3×0.5、
   // 973 的 shine×num13）——折进 globalAlpha 而非逐帧染色（防 tintCache 打爆）
-  // ★隔离式合成（2026-08-31 黑十字案）：每笔先在独立离屏铺好再以 lighter 一次性
+  // ★隔离式合成（2026-08-31 黑十字案留防）：每笔先在独立离屏铺好再以 lighter 一次性
   //   合成——主 ctx 任何残留合成态/异常路径都不可能把臂包围盒画成暗块。
-  //   （用户二分定谳：?nosparkle 消失/?nocomposite 仍在 = 来源即本函数四笔 stroke）
+  //   （当年"?nosparkle 消失"二分实为旧版代码 era 的证据；黑十字真身 =
+  //   摊平 alpha 画布 × source-over，2026-09-02 最小复现 E 面板逐像素复现定谳）
   let sbuf: HTMLCanvasElement | null = null;
   const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
     if (alpha <= 0 || sw <= 0 || sh <= 0) return;
@@ -605,7 +612,7 @@ import {
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
-import { VanillaDust } from '../fx/VanillaDust';
+import { VanillaDust, dustPremulBake } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible, bubbleScaleTier } from '../entities/LeashedCritter';
@@ -4667,12 +4674,69 @@ export class Renderer {
   private dustScratch2: HTMLCanvasElement | null = null;
   /** 尘染料帧缓存（ArmorColored 静态族；key=dyeVid|fx|fy，256 上限） */
   private dustDyeCache: Map<string, HTMLCanvasElement> | null = null;
+  /** 预乘 AlphaBlend 烘焙对缓存（Main.DrawDust spriteBatch=BlendState.AlphaBlend 预乘混合）。
+   *  key=fx,fy + 乘数字节化(mR,mG,mB,mA)——alphaOf/colorPass 乘数与 XNA shader 输出同为
+   *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048 溢出清空。 */
+  private dustPmCache: Map<string, { add: HTMLCanvasElement; erase: HTMLCanvasElement }> | null = null;
+  private dustPmBake: HTMLCanvasElement | null = null;
+
+  /** 取/烘一帧的预乘对。mr/mg/mb/ma ∈0-1 = XNA Draw 的 Color 入参逐通道
+   *  （alphaOf.rgb → 三通道同值;colorPass/331 贴片 → 逐通道色）。 */
+  private dustPremulPair(
+    img: CanvasImageSource, fx: number, fy: number, mr: number, mg: number, mb: number, ma: number,
+  ): { add: HTMLCanvasElement; erase: HTMLCanvasElement } {
+    const mR = Math.round(Math.max(0, Math.min(1, mr)) * 255);
+    const mG = Math.round(Math.max(0, Math.min(1, mg)) * 255);
+    const mB = Math.round(Math.max(0, Math.min(1, mb)) * 255);
+    const mA = Math.round(Math.max(0, Math.min(1, ma)) * 255);
+    const key = `${fx},${fy},${mR},${mG},${mB},${mA}`;
+    this.dustPmCache ??= new Map();
+    const hit = this.dustPmCache.get(key);
+    if (hit) return hit;
+    const bake = (this.dustPmBake ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    const bc = bake.getContext('2d', { willReadFrequently: true })!;
+    bc.clearRect(0, 0, 8, 8);
+    bc.drawImage(img, fx, fy, 8, 8, 0, 0, 8, 8);
+    const baked = dustPremulBake(bc.getImageData(0, 0, 8, 8).data, mR, mG, mB, mA);
+    const addC = document.createElement('canvas'); addC.width = 8; addC.height = 8;
+    addC.getContext('2d')!.putImageData(new ImageData(baked.add, 8, 8), 0, 0);
+    const eraseC = document.createElement('canvas'); eraseC.width = 8; eraseC.height = 8;
+    eraseC.getContext('2d')!.putImageData(new ImageData(baked.erase, 8, 8), 0, 0);
+    const entry = { add: addC, erase: eraseC };
+    if (this.dustPmCache.size > 2048) this.dustPmCache.clear();
+    this.dustPmCache.set(key, entry);
+    return entry;
+  }
+
+  /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
+   *  mul = Color×k 档（同乘擦除强度与加性项——XNA 里 Color×k 逐通道含 α,如 264
+   *  拖影 GetAlpha×0.3）。出口复位 gCO/globalAlpha。 */
+  private drawDustPremul(
+    ctx: CanvasRenderingContext2D, pair: { add: HTMLCanvasElement; erase: HTMLCanvasElement },
+    mul = 1, ox = -4, oy = -4,
+  ): void {
+    ctx.globalAlpha = mul;
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(pair.erase, ox, oy);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(pair.add, ox, oy);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
 
   /** DrawDust 单尘（屏幕空间，经 worldToScreen + zoom）。fullbright pass 画在
    *  光照合成后（= 原版 type 6/15/59-64 强制 White :38406）；lit pass 画在合成前
    *  （逐像素乘光 ≈ 原版逐尘取光）。两段共用本体（GetAlpha）+ 自定义色
    *  （GetColor :2773 加性钳位）双 pass。屏外矩形（±1000/±1050）外尘直接失活
-   *  （:38272-38284 Intersects 语义） */
+   *  （:38272-38284 Intersects 语义）。
+   *  ★2026-09-02 预乘混合语义校正：XNA AlphaBlend = One/InverseSourceAlpha 预乘,
+   *  final = dst×(1−texA×cA) + texP.rgb×cRGB（tex.rgb 预乘含 texA;c.a 只进 dst 因子,
+   *  c.rgb 全额加法不乘 c.a）——旧实现 source-over 把加性项额外乘了 c.a（src 被压暗;
+   *  实测对公式最大偏差 38/255,a 小时呈半透灰）。canvas 精确等价 = 烘焙对两步
+   *  （'destination-out' 擦 + 'lighter' 叠,dustPremulBake）。A=0 无色族 'lighter'
+   *  加性通道（下分支）本式 a=0 特例,保持不变;a>0 全量档（本体/拖影/colorPass/
+   *  331 贴片）全部换烘焙对;染料 pass（shader 产物面）维持 source-over 不变式;
+   *  Color.White 档（331 白心/纯白 drawImage）预乘=直色恒等,维持原样。 */
   private drawVanillaDustPass(fullbright: boolean, cam: Camera, player?: Player): void {
     const vd = this.vanillaDust;
     if (!vd) return;
@@ -4722,17 +4786,9 @@ export class Renderer {
         ctx.restore();
         continue;
       }
-      // 本体 pass（GetAlpha 精确通道）
-      c1.clearRect(0, 0, 8, 8);
-      c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-      const id = c1.getImageData(0, 0, 8, 8);
-      for (let i = 0; i < id.data.length; i += 4) {
-        id.data[i] = id.data[i] * rgb;
-        id.data[i + 1] = id.data[i + 1] * rgb;
-        id.data[i + 2] = id.data[i + 2] * rgb;
-        id.data[i + 3] = id.data[i + 3] * a;
-      }
-      c1.putImageData(id, 0, 0);
+      // 本体 pass（GetAlpha 精确通道）——预乘烘焙对（本体+通用拖影共用一份,
+      //  拖影只是重画同色;264 ×0.3 档走 mul 参数,不另烘）
+      const pair = this.dustPremulPair(img, d.fx, d.fy, rgb, rgb, rgb, a);
       // 速度拖影链（★2026-08-24 r15 R15-20：M57:39537-39658 if/else-if 六族——
       //   本体绘制前的残影带,通式 i<min(10,(|vx|+|vy|)·0.3·10)、位置−velocity·i、
       //   scale×(1−i/10)、origin(4,4)）：
@@ -4754,22 +4810,12 @@ export class Renderer {
           if (d.rotation) ctx.rotate(d.rotation);
           ctx.scale(sc, sc);
           if (d.type === 264) {
-            ctx.globalAlpha = 0.3;               // GetAlpha(light)×0.3 基画
-            ctx.drawImage(s1, -5, -5);
-            ctx.globalAlpha = 1;
-            const cp264 = VanillaDust.colorPass(d, rgb, a);
+            this.drawDustPremul(ctx, pair, 0.3, -5);   // GetAlpha(light)×0.3 基画（mul 同乘擦除+加性=Color×0.3）
+            // :39612 GetColor(color4) 入参 = GetAlpha×0.3（与基画同色）——曾漏 ×0.3 折减
+            const cp264 = VanillaDust.colorPass(d, rgb * 0.3, a * 0.3);
             if (cp264 && cp264.a > 0.004) {
-              c2.clearRect(0, 0, 8, 8);
-              c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-              const idt = c2.getImageData(0, 0, 8, 8);
-              for (let i = 0; i < idt.data.length; i += 4) {
-                idt.data[i] = idt.data[i] * cp264.r;
-                idt.data[i + 1] = idt.data[i + 1] * cp264.g;
-                idt.data[i + 2] = idt.data[i + 2] * cp264.b;
-                idt.data[i + 3] = idt.data[i + 3] * cp264.a;
-              }
-              c2.putImageData(idt, 0, 0);
-              ctx.drawImage(s2, -5, -5);         // GetColor 叠画
+              const p264 = this.dustPremulPair(img, d.fx, d.fy, cp264.r, cp264.g, cp264.b, cp264.a);
+              this.drawDustPremul(ctx, p264, 1, -5);   // GetColor 叠画
             }
           } else if (d.type === 331 && d.color) {
             // :39650-39652 331 拖影色 = GetColor(GetAlpha(White)):GetAlpha(White)=
@@ -4780,31 +4826,13 @@ export class Renderer {
             const tg = Math.max(0, c.g - d.alpha) / 255;
             const tb = Math.max(0, c.b - d.alpha) / 255;
             const ta = Math.max(0, Math.min(255, c.a - d.alpha)) / 255;
-            c2.clearRect(0, 0, 8, 8);
-            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-            const idt3 = c2.getImageData(0, 0, 8, 8);
-            for (let i = 0; i < idt3.data.length; i += 4) {
-              idt3.data[i] = idt3.data[i] * tr;
-              idt3.data[i + 1] = idt3.data[i + 1] * tg;
-              idt3.data[i + 2] = idt3.data[i + 2] * tb;
-              idt3.data[i + 3] = idt3.data[i + 3] * ta;
-            }
-            c2.putImageData(idt3, 0, 0);
-            ctx.drawImage(s2, -4, -4);
+            const p331t = this.dustPremulPair(img, d.fx, d.fy, tr, tg, tb, ta);
+            this.drawDustPremul(ctx, p331t);
           } else if (trailCp) {
-            c2.clearRect(0, 0, 8, 8);
-            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-            const idt = c2.getImageData(0, 0, 8, 8);
-            for (let i = 0; i < idt.data.length; i += 4) {
-              idt.data[i] = idt.data[i] * trailCp.r;
-              idt.data[i + 1] = idt.data[i + 1] * trailCp.g;
-              idt.data[i + 2] = idt.data[i + 2] * trailCp.b;
-              idt.data[i + 3] = idt.data[i + 3] * trailCp.a;
-            }
-            c2.putImageData(idt, 0, 0);
-            ctx.drawImage(s2, -4, -4);
+            const ptc = this.dustPremulPair(img, d.fx, d.fy, trailCp.r, trailCp.g, trailCp.b, trailCp.a);
+            this.drawDustPremul(ctx, ptc);
           } else {
-            ctx.drawImage(s1, -4, -4);
+            this.drawDustPremul(ctx, pair);
           }
           ctx.restore();
         }
@@ -4813,7 +4841,7 @@ export class Renderer {
       ctx.translate(px, py);
       if (d.rotation) ctx.rotate(d.rotation);
       if (d.scale !== 1) ctx.scale(d.scale, d.scale);
-      ctx.drawImage(s1, -4, -4);
+      this.drawDustPremul(ctx, pair);            // 预乘本体（erase+lighter 两步）
       ctx.restore();
       // 染料 pass（GetSecondaryShader：SM2 字节码 63 pass 全技术 1:1——含彩虹
       // uTime 动态/凝胶相位/反射光照/HallowBoss 双采样。静态 ArmorColored 族走
@@ -4866,22 +4894,14 @@ export class Renderer {
         if (c) {
           const num = (255 - d.alpha) / 255;
           const pa = Math.max(0, Math.min(255, c.a - d.alpha)) / 255;
-          c2.clearRect(0, 0, 8, 8);
-          c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-          const idp = c2.getImageData(0, 0, 8, 8);
-          for (let i = 0; i < idp.data.length; i += 4) {
-            idp.data[i] = idp.data[i] * (c.r / 255) * num;
-            idp.data[i + 1] = idp.data[i + 1] * (c.g / 255) * num;
-            idp.data[i + 2] = idp.data[i + 2] * (c.b / 255) * num;
-            idp.data[i + 3] = idp.data[i + 3] * pa;
-          }
-          c2.putImageData(idp, 0, 0);
+          const p331 = this.dustPremulPair(img, d.fx, d.fy,
+            (c.r / 255) * num, (c.g / 255) * num, (c.b / 255) * num, pa);
           for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
             ctx.save();
             ctx.translate(px + ox * zoom, py + oy * zoom);
             if (d.rotation) ctx.rotate(d.rotation);
             if (d.scale !== 1) ctx.scale(d.scale, d.scale);
-            ctx.drawImage(s2, -4, -4);
+            this.drawDustPremul(ctx, p331);
             ctx.restore();
           }
         }
@@ -4894,23 +4914,15 @@ export class Renderer {
         continue;                                // vanilla 331 无 GetColor 叠画
       }
       // 自定义色 pass（GetColor :2773：clamp(color.ch − (255 − base.ch)) 后再乘贴图）
+      //  ——GetColor 是第二次独立 SpriteBatch.Draw：同预乘语义,同烘焙对（独立档）
       const cp = VanillaDust.colorPass(d, rgb, a);
       if (cp && (cp.a > 0.004)) {
-        c2.clearRect(0, 0, 8, 8);
-        c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
-        const id2 = c2.getImageData(0, 0, 8, 8);
-        for (let i = 0; i < id2.data.length; i += 4) {
-          id2.data[i] = id2.data[i] * cp.r;
-          id2.data[i + 1] = id2.data[i + 1] * cp.g;
-          id2.data[i + 2] = id2.data[i + 2] * cp.b;
-          id2.data[i + 3] = id2.data[i + 3] * cp.a;
-        }
-        c2.putImageData(id2, 0, 0);
+        const cpPair = this.dustPremulPair(img, d.fx, d.fy, cp.r, cp.g, cp.b, cp.a);
         ctx.save();
         ctx.translate(px, py);
         if (d.rotation) ctx.rotate(d.rotation);
         if (d.scale !== 1) ctx.scale(d.scale, d.scale);
-        ctx.drawImage(s2, -4, -4);
+        this.drawDustPremul(ctx, cpPair);
         ctx.restore();
       }
     }
@@ -5526,16 +5538,20 @@ export class Renderer {
     const ar = this.atlasIcon(d.itemId);
     if (ar) {
       const ctx = this.ctx;
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, ar.sw, ar.sh);
+      // ★贴图中心对齐命中盒中心（Main.DrawItem : position+size/2−texSize/2）——
+      //   曾按盒左上角画 = 大贴图物品（坠落星 22×26 盒 16×16）精灵溢出右下、
+      //   选中框视觉钉在左上（用户实报 2026-09-02）
+      const ddx = d.x - (ar.sw - d.w) / 2, ddy = d.y - (ar.sh - d.h) / 2 + bob;
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
       // 原版 Item.color（彩色凝胶）：同贴图逐像素乘 color，XNA 预乘两步（同 NPC color pass）
       if (d.color && d.color[3] > 0) {
         const tinted = this.tintedSprite(`item${d.itemId}`, ar, d.color);
         ctx.globalCompositeOperation = 'destination-out';
         ctx.globalAlpha = d.color[3] / 255;
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, ar.sw, ar.sh);
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 1;
-        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, d.x, d.y + bob, ar.sw, ar.sh);
+        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'source-over';
       }
       return;
@@ -5829,6 +5845,10 @@ export class Renderer {
     // AI_013 食人怪族茎蔓（Main.cs:22433-22514 1:1）：头中心 → 锚点格(ai0/ai1)
     // 每 28px 一段 Chain 贴图步进，剩余 <40px 画一段收缩尾段对齐锚点
     if (e.vanilla?.aiStyle === 13) this.drawPlantVine(e);
+    // 刺球锚链+锚座（Main.cs:23087-23113 1:1）：aiStyle 20（刺球 70）——锚点
+    // = ai[1]/ai[2]（像素，AI_020 帧首快照）→ 球心 12px 段 Chain 链 + Spike_Base
+    // 锚座；同帧写 rotation（:23092）→ 本体随链向旋转（下方旋转分支消费 visAngle）
+    if (e.vanilla?.aiStyle === 20) this.drawSpikeBallChain(e);
     // 石巨人拳链（Main.cs:22593-22632）：拳 → 本体（AI 侧 master；本体死透锚自由头）
     if (e.vanilla?.aiStyle === 47 && e.master) this.drawGolemFistChain(e, !!world.seedFlags?.getGoodWorld);
     // Prime 部件臂骨（Main.cs:22633-22675）：锯/激光/钳/炮 → 头 两段 IK
@@ -6034,10 +6054,15 @@ export class Renderer {
         const tiltOnly5 = stR === 5 && (idR === 23 || idR === 42 || idR === 139 || idR === 176 || idR === 205
           || idR === 210 || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
-          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 9 || stR === 19 || stR === 21 || stR === 23
-            || stR === 40 || stR === 56 || stR === 76);   // 76=火星飞碟核心 395(spriteDirection 恒默认从不写)
-        if (e.vanilla?.aiStyle === 21) {
-          // AI_021 刺球（type 72，cs:24685/:24704）：rotation ±direction×directionY×0.13/t
+          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 9 || stR === 19 || stR === 20 || stR === 21 || stR === 23
+            || stR === 40 || stR === 56 || stR === 76);   // 76=火星飞碟核心 395(spriteDirection 恒默认从不写);20=刺球70(链向旋转,同恒默认)
+        if (e.vanilla?.aiStyle === 20) {
+          // AI_020 刺球（type 70，Main.cs:23092 绘制侧写 rotation=atan2(锚−球)−π/2
+          // → 本体贴图随链向对齐；:23660 通用绘制消费）——drawSpikeBallChain 已算好
+          // 存 visAngle；spriteDirection 恒默认从不写 → 禁 facing 镜像（rotationDriven）
+          ctx.rotate(e.visAngle);
+        } else if (e.vanilla?.aiStyle === 21) {
+          // AI_021 火轮（type 72，cs:24685/:24704）：rotation ±direction×directionY×0.13/t
           // 随 ai[1] 相位交替——visAngle 承载累计角（Enemy.spikeBallAI W2 批 2026-08-19）
           ctx.rotate(e.visAngle);
         } else if (e.vanillaId === 4) ctx.rotate(e.visAngle);
@@ -6070,7 +6095,7 @@ export class Renderer {
         else if (stR === 39) ctx.rotate(e.visAngle);   // AI_039 陆龟族 153/154/417:弹射态恒速自旋(ai[2]=0.3/t)、下落态衰减、复位归零(cs:29562-29645);spriteDirection 仍镜像
         else if (stR === 9) ctx.rotate(e.visAngle);    // AI_009 弹跳球族:rotation += 0.1/0.4×direction(bouncingBallAI 已写 cs:21473/:21549);spriteDirection 恒默认→禁镜像(rotationDriven)
         else if (stR === 60 || stR === 62 || stR === 63) ctx.rotate(e.visAngle);  // AI_060/062/063 冰雪女王/玩具直升机/弗洛科——AI 已写(冰后 vx×0.05/0.01/+=0.2 cs:33601-33853;直升机 |vx|×dir×0.1 :34158;弗洛科 +=dir×0.3 与 vx×0.15 :34239/:34254)曾无消费门=半断链;spriteDirection 仍镜像
-        else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 仍镜像
+        else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 通用镜像(422 反翻见 revFlipMirror :39900)
         else if (stR === 85) ctx.rotate(e.visAngle);   // AI_085 星细胞/星云头蟹/致命球:0 态 +=dir×0.3 自旋、2/3/4 态 vx×0.1(cs:39030/:39076/:39096/:39121);spriteDirection 仍镜像
         else if (idR === 301) ctx.rotate(e.visAngle);  // 渡鸦(FindFrame :74287 vx×0.1;aiStyle1 战士族逐 id 接)
         else if (stR === 14 && (idR === 156 || idR === 226)) ctx.rotate(e.visAngle);  // 红恶魔/飞蛇(FindFrame :74604/:75510 vx×0.1;蝙蝠族逐 id)
@@ -6126,7 +6151,7 @@ export class Renderer {
           if (e.snailSdir === 1) ctx.scale(-1, 1);
         }
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
-        else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
+        else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection=-direction 反翻(见 revFlipMirror;:47700,旧注"仍镜像"=误)
         else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
         else if (stR === 10) ctx.rotate(e.visAngle);   // AI_010 诅咒头骨族:rotation=atan2(v)(vx<0 再+π,cs:21713-21721;694 伪装/觉醒态钉 0);spriteDirection 仍镜像→不进 rotationDriven
         else if (stR === 68) ctx.rotate(e.vx * 0.1);   // AI_068 水鸟族:同款倾斜 vx*0.1(cs:74487,湿态归零近似省略)
@@ -6145,6 +6170,10 @@ export class Renderer {
         // 贴图原生朝右、反翻族,与鸮族同款"facing<0 才翻"(曾走通用 facing>0 翻=
         // 倒飞背对行进向,2026-09-02 用户实报)
         const fairyMirror = idR === 583 || idR === 584 || idR === 585;
+        // 反翻族补遗（2026-09-02 遗留批审计:-direction 写点全量扫）:
+        // 618 血鹦鹉螺 AI_117 头段 spriteDirection=-direction(:47700,曾注"仍镜像"=错);
+        // 422 aiStyle 97 专属支 spriteDirection=-direction(:39900,同族 493/507/517 通用)
+        const revFlipMirror = idR === 618 || idR === 422;
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
         // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
         const sdirNeg = e.vanillaId === 546;
@@ -6169,8 +6198,8 @@ export class Renderer {
         // → flip 门 facing>0。vx==0/dxC==0 原版保前值,此处静态近似(瞬态)。
         const wyrmMirror = stR === 6
           && ((idR >= 87 && idR <= 92) || (idR >= 454 && idR <= 459) || (idR >= 621 && idR <= 623));
-        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
-        if (!rotationDriven && (owlMirror || sdirNeg || fairyMirror) && e.facing < 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !revFlipMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && (owlMirror || sdirNeg || fairyMirror || revFlipMirror) && e.facing < 0) ctx.scale(-1, 1);
         if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
         if (wyrmMirror && (e.wormFollow ? e.facing > 0 : e.facing < 0)) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
@@ -9179,9 +9208,15 @@ export class Renderer {
    *  调用）。与既有白剪影滤镜叠加语义成立:终像素 = 白剪影 × 抬亮地板 ✓
    *  已知边界（备案,同月总补差的 z 序取舍）:①同格地形/后画实体像素同吃抬亮,
    *  原版只亮弹本体;②弹盒跨格边缘受双线性插值向邻格暗值渐变——白天光照≥地板
-   *  时零改动零开销;③有色光区白剪影仍被染色（原版 596 GetAlpha 不读格光色=恒白,
-   *  本仓弹画在乘光前）——去色不做（2026-09-02 红队 I′ 仲裁登记:与月总补差
-   *  z 序取舍同账,待 post-light 弹绘制通道一并清偿）。 */
+   *  时零改动零开销。
+   *  ★I″ 去色清偿（2026-09-02 蓝队,原边界③"有色光区白剪影被染红"）:raise 写面
+   *  从「逐通道 max 抬到 fr」改为「白化 R=G=B=max(r,g,b,fr)」——消色差,熔岩红光
+   *  区不再把白剪影染红（原版 596/811 顶点色不读格光色=恒白,Projectile.cs:80903/
+   *  Main.cs:30846 Lerp 恒白端）;白化值取三通道最大值再抬地板 = 只升不降（白天
+   *  暖光不压暗,原"光照≥地板零改动"语义对消色差光仍成立）;账本照记原 RGB×3、
+   *  restore 同账逐字节还原。残留微差（备案）:814 原版 Lerp(projectileColor,
+   *  White,0.35) 保留 65% 光色相,本白化为全白——逐像素重放该 Lerp 须 post-light
+   *  弹绘制通道（未建,同月总补差 z 序取舍账）。 */
   private static readonly SELF_LUMINOUS_PROJS = new Map<number, (proj: Entity) => number>([
     // 596: RGB(255−α) 白化（GetAlpha 专支不读格光色）;effAlpha 已含 timeLeft<30 渐隐窗
     [596, (proj) => (255 - Renderer.selfLumEffAlpha(proj)) / 255],
@@ -9203,8 +9238,9 @@ export class Renderer {
     return Math.max(0, Math.min(255, p.alpha ?? 0));
   }
 
-  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板（账本记账；
-   *  ★F2 地板 = 表值逐弹求值,弹自身 α 窗内同步缩放） */
+  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板并【白化去色】
+   *  （★I″:R=G=B=max(r,g,b,fr) 消色差;账本记原 RGB×3,restore 同账。★F2 地板 =
+   *  表值逐弹求值,弹自身 α 窗内同步缩放） */
   private raiseSelfLuminousProjLight(
     entities: Entity[],
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -9235,14 +9271,16 @@ export class Renderer {
         for (let tx = tx0; tx <= tx1; tx++) {
           if (tx < rx || tx >= rx + rw) continue;
           const li = (ty - ry) * rw + (tx - rx);
-          if (lightR[li] >= fr && lightG[li] >= fr && lightB[li] >= fr) continue;
+          // ★I″ 去色:白化 = 三通道归一到同一值 max(r,g,b,fr)——只升不降（白天
+          // 暖光不压暗,地板语义不变）且消色差（有色光区白剪影不再被染色,原版
+          // 596/811 顶点色不读格光色=恒白）;已消色差达标的格零写零记账
+          const w = Math.max(lightR[li], lightG[li], lightB[li], fr);
+          if (lightR[li] === w && lightG[li] === w && lightB[li] === w) continue;
           if (!seen.has(li)) {
             seen.add(li);
             touched.push(li, lightR[li], lightG[li], lightB[li]);
           }
-          if (lightR[li] < fr) lightR[li] = fr;
-          if (lightG[li] < fr) lightG[li] = fr;
-          if (lightB[li] < fr) lightB[li] = fr;
+          lightR[li] = w; lightG[li] = w; lightB[li] = w;
         }
       }
     }
@@ -9358,6 +9396,58 @@ export class Renderer {
       // 8px 步长(FTW)互相叠压,2026-08-19 终审修）
       ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
         (-chain.sw / 2) * scale, (-chain.sh / 2) * scale, chain.sw * scale, chain.sh * scale);
+      ctx.restore();
+    }
+  }
+
+  /** 刺球锚链+锚座（Main.cs:23087-23113 1:1）：aiStyle 20（刺球 70）——
+   *  锚点 = ai[1]/ai[2]（像素，AI_020 帧首 :24671-24673 快照：position.Y += h/2+8
+   *  后的中心）；球心 → 锚点每 12px 画一段 Chain（源矩形高 = 12，距锚 <20 段收尾
+   *  seg = dist−8，恒步进 12px 可越过锚点=原版怪癖照搬），rotation = atan2(锚−球)
+   *  −π/2（:23092 同帧写 npc.rotation → 本体贴图随链向旋转，:23660 通用绘制消费
+   *  ——本仓经 visAngle 传递给下方旋转分支）；锚座 Spike_Base 16×16 画在锚点、
+   *  rotation−0.75（:23113）。逐段光照（:23110 GetColor）由主光照合成承担
+   *  （同食人怪藤蔓先例）。链在本体精灵前画=原版层序（链垫球下） */
+  private drawSpikeBallChain(e: Enemy): void {
+    if (!this.atlas) return;
+    const ctx = this.ctx;
+    const ax = e.ai1, ay = e.ai2;                      // 锚点（像素）
+    let dx = ax - e.cx, dy = ay - e.cy;
+    if (dx === 0 && dy === 0) return;                  // dist=0 除零保护（原版 NaN 态不画）
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;      // num37（:23092）
+    e.visAngle = rot;
+    const chain = this.atlas.vmisc('vanilla/Chain.png');
+    if (chain) {
+      let px = e.cx, py = e.cy;
+      let running = true;
+      let guard = 0;
+      while (running && guard++ < 200) {
+        const dist = Math.hypot(dx, dy);
+        if (dist <= 0) break;                          // 球叠锚（出生帧相邻态）
+        let seg = 12;                                  // :23096
+        if (dist < 20) { seg = dist - 20 + 12; running = false; }   // :23098-23101 尾段
+        const k = 12 / dist;                           // :23103 步进恒 12px
+        px += dx * k; py += dy * k;
+        dx = ax - px; dy = ay - py;                    // :23108-23109
+        const sh = Math.min(seg, chain.sh);
+        if (sh > 0) {                                  // 尾段 seg≤0 不画（canvas 0 高会抛）
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(rot);
+          // XNA origin=整图中心(6,6)——尾段源高收窄仍以整图中心为轴（:23111）
+          ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, sh,
+            -chain.sw / 2, -chain.sh / 2, chain.sw, sh);
+          ctx.restore();
+        }
+      }
+    }
+    const base = this.atlas.vmisc('vanilla/Spike_Base.png');
+    if (base) {
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(rot - 0.75);                          // :23113 num37−0.75
+      ctx.drawImage(base.img, base.sx, base.sy, base.sw, base.sh,
+        -base.sw / 2, -base.sh / 2, base.sw, base.sh);
       ctx.restore();
     }
   }

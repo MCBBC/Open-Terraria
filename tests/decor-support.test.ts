@@ -1,7 +1,7 @@
 // D-1/D-3/D-4 decor 失撑链单元测试（审计 docs/audit/tile-audit-2026-08-23.md 分区 D）：
 //   D-1 运行期 decor 失撑：原版 TileFrameImportant(:85703) Check* 族（PlantCheck :81280/
 //       CheckAlch :45981/CheckSunflower :53744/Check1x1 :45243/CheckLogicTiles :45288/
-//       CheckOrb :54187/CheckPot :56807）——挖支撑格 → 清除+掉落；未列入支撑语义表的
+//       CheckOrb :54187/CheckPot :57273）——挖支撑格 → 清除+掉落；未列入支撑语义表的
 //       decor（绳/梁/币堆/蛛网…Main.tileFrameImportant=0）悬空保留=原版同款（勿误修）。
 //   D-3 火把 24 档 style 掉落（KillTile case 4 :65106-65164）——失撑按档还炬。
 //   D-4 割藤 cordage（case 52/62/382 :65087-65092）1/2 掉藤绳 2996（装备 3068）。
@@ -406,22 +406,22 @@ describe('D-1c 画/武器架墙锚族（任一格 wall<=0 即塌）', () => {
 });
 
 // ================= 八批幸存链缺口（2026-09-02）：CheckTallGate / 440 wallhang =================
-// CheckTallGate（WorldGen.cs:52111-52173;派发 case 组 :86990-86994 388/389 同函数）：
+// CheckTallGate（WorldGen.cs:52111-52173;派发 case 组 :86990-86993 388/389 同函数）：
 // 完整性（:52136-52145）+顶/底双行 SolidTile（:52142 → CheckTileAnchors mode2
 // :52292-52305）。几何：地面行 14、天花行 8（净空恰 5 行 9..13）,门列 x=10——
 // 远离 3×3 扫的 ny<=5 边界门。触发=checkFurnitureSupport(门格)（=扫派发单格等价）。
 describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
-  /** 门体合成：engineFrames=false 用 vanilla heights+padding 步进（wld 导入形,
-   *  TileObject.Place TileObject.cs:102-110）,true 用本仓放置面 18px 步进
-   *  （framedCellFrame default 支,FurnitureStyle.ts:158） */
-  const tallSetup = (w: World, tid: number, engineFrames: boolean) => {
+  /** 门体合成：统一 vanilla 行帧 0/20/38/56/74（TileObject.Place TileObject.cs:96-108
+   *  heights+padding 累进;★M-2（2026-09-02 九批）后本仓放置面/导入/迁移全部此序,
+   *  旧 18px 步进仅存在于迁移前的存量档——运行期出现即判坏,见下方守门用例 */
+  const tallSetup = (w: World, tid: number) => {
     const st = w.store;
     const SN = idOfSheet(1);
     for (let x = 8; x <= 12; x++) {
       st.setTileSilent(x, 14, SN, 0, 0);   // 底锚行
       st.setTileSilent(x, 8, SN, 0, 0);    // 顶锚行
     }
-    const FYS = engineFrames ? [0, 18, 36, 54, 72] : [0, 20, 38, 56, 74];
+    const FYS = [0, 20, 38, 56, 74];
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(10, 9 + dy, tid, 0, FYS[dy]);
   };
   const gone = (w: World, tid: number) => {
@@ -429,12 +429,12 @@ describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
     return true;
   };
 
-  it('389 开态（本仓放置帧）：双锚在 → 幸存;挖顶锚 → 整件清+掉 3240（:52142/:52156）', () => {
+  it('389 开态（原版帧序）：双锚在 → 幸存;挖顶锚 → 整件清+掉 3240（:52142/:52156）', () => {
     const w = new World(40, 40, 7, 'decor-support-tallgate');
     const drops: Drop[] = [];
     const g = mkShell(w, drops);
     const OPEN = idOfSheet(389);
-    tallSetup(w, OPEN, true);
+    tallSetup(w, OPEN);
     g.checkFurnitureSupport(10, 11);          // 中格扰动（双锚在,非锚向）
     expect(w.store.get(10, 11)).toBe(OPEN);
     w.store.setTile(10, 8, 0);                // 挖顶锚行格（天花恰在门顶上一格）
@@ -443,18 +443,15 @@ describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
     expect(drops).toContainEqual({ key: VANILLA_ITEM_KEY_BY_ID[3240], n: 1 });   // :52156-52161
   });
 
-  it('389 导入帧约定（0/20/38/56/74）：扰动 → 幸存;顶锚挖 → 清（两约定不得互相误杀）', () => {
-    const w = new World(40, 40, 7, 'decor-support-tallgate-wld');
+  it('★M-2c 守门：旧 18px 步进帧（迁移前存量态,0/18/36/54/72）完整性判坏 → 整件清', () => {
+    const w = new World(40, 40, 7, 'decor-support-tallgate-legacy');
     const drops: Drop[] = [];
     const g = mkShell(w, drops);
     const OPEN = idOfSheet(389);
-    tallSetup(w, OPEN, false);
-    g.checkFurnitureSupport(10, 9);
-    expect(w.store.get(10, 9)).toBe(OPEN);
-    expect(w.store.get(10, 13)).toBe(OPEN);
-    w.store.setTile(10, 8, 0);
-    g.checkFurnitureSupport(10, 9);
-    expect(gone(w, OPEN)).toBe(true);
+    tallSetup(w, OPEN);
+    for (let dy = 0; dy < 5; dy++) w.store.setTileSilent(10, 9 + dy, OPEN, 0, 18 * dy);   // 旧约定重写
+    g.checkFurnitureSupport(10, 10);
+    expect(gone(w, OPEN)).toBe(true);   // 存量档由 tallgateFrameRepair 迁移,运行期不该再见此态
   });
 
   it('388 闭态：双锚在 → 幸存（旧家具链 solid 早退=无幸存链）;388/389 半写态容忍', () => {
@@ -462,19 +459,19 @@ describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
     const drops: Drop[] = [];
     const g = mkShell(w, drops);
     const CLOSED = idOfSheet(388), OPEN = idOfSheet(389);
-    tallSetup(w, CLOSED, true);
+    tallSetup(w, CLOSED);
     g.checkFurnitureSupport(10, 11);
     expect(w.store.get(10, 11)).toBe(CLOSED);
-    // ShiftTallGate（Door.ts:131/devices.ts:950）逐格 setTile 半写态：前 2 格已换
+    // ShiftTallGate（Door.ts:158/devices.ts:951）逐格 setTile 半写态：前 2 格已换
     // OPEN、后 3 格仍 CLOSED——原版运行期不评估半写态（:52215-52219 直写后整体
     // TileFrame :52224-52231）,配对态格放行=「写完再评估」等价
-    for (let dy = 0; dy < 2; dy++) w.store.setTileSilent(10, 9 + dy, OPEN, 0, 18 * dy);
+    for (let dy = 0; dy < 2; dy++) w.store.setTileSilent(10, 9 + dy, OPEN, 0, 20 * dy);
     g.checkFurnitureSupport(10, 10);
     expect(w.store.get(10, 10)).toBe(OPEN);
     expect(w.store.get(10, 12)).toBe(CLOSED);
     // 切换写完（全列还原 CLOSED）后异型混入（非配对态）→ 完整性判坏整件清
     w.store.setTileSilent(10, 9, CLOSED, 0, 0);
-    w.store.setTileSilent(10, 10, CLOSED, 0, 18);
+    w.store.setTileSilent(10, 10, CLOSED, 0, 20);
     w.store.setTileSilent(10, 11, idOfSheet(1), 0, 0);
     g.checkFurnitureSupport(10, 9);
     expect(gone(w, OPEN)).toBe(true);
@@ -954,5 +951,152 @@ describe('D-1h 二批补遗（454/590/639/653/696/579/704-706/滴落族）', () 
     w.store.setTile(11, 10, 0);
     g.checkFurnitureSupport(10, 11);
     expect(w.store.get(10, 10)).toBe(0);           // 自身缺件 → 塌
+  });
+});
+
+// ================= 2026-09-02 九批（红蓝对抗后裁定存活项修复批） =================
+// M-1：387 闭态活板门幸存链（CheckTrapDoor 387 臂 :52059-52063 完整性 CheckTileFrames
+// :52245 + 左右外格 mode1 StrictSolid :52063/:52261-52276;失配杀+掉 3239 :52090-52108）。
+// 387 常态来源 = WldImport copyFrame + 电线开合 devices.ts case 386/387（无放置物品）。
+describe('九批 M-1：387 闭态活板门（CheckTrapDoor 387 臂）', () => {
+  /** 几何：门 2×1 行 10 列 10..11（frameX=dx*18,frameY=0）;侧锚列 9/12 实心 */
+  const tdSetup = (w: World, tid: number) => {
+    const st = w.store;
+    const SN = idOfSheet(1);
+    st.setTileSilent(9, 10, SN, 0, 0);
+    st.setTileSilent(12, 10, SN, 0, 0);
+    st.setTileSilent(10, 10, tid, 0, 0);
+    st.setTileSilent(11, 10, tid, 18, 0);
+  };
+  it('侧锚在 → 两格派发均幸存;挖一侧支承 → 整件清+掉 3239（:52063/:52090-52108）', () => {
+    const w = new World(40, 40, 7, 'decor-support-td387');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const TD = idOfSheet(387);
+    tdSetup(w, TD);
+    g.checkFurnitureSupport(10, 10);          // 左格派发
+    expect(w.store.get(10, 10)).toBe(TD);
+    g.checkFurnitureSupport(11, 10);          // 右格派发（锚反推=10）
+    expect(w.store.get(11, 10)).toBe(TD);
+    w.store.setTile(9, 10, 0);                // 挖左侧支承
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(11, 10)).toBe(0);
+    // 掉落语义=item 3239（CheckTrapDoor :52097-52108 Item.NewItem(3239)）——本仓
+    // 走 multiTileDropKey place_v_ 兜底（item 3239 createTile=387 同语义,D-8 备案族;
+    // vi_3239_Trapdoor def 在册但 placeable 兜底优先,备案）
+    expect(drops).toContainEqual({ key: 'place_v_387_trap_door_closed', n: 1 });
+  });
+  it('侧锚扰动对照（右锚旁格非锚）→ 幸存;帧失配（异 36 带基）→ 判坏清（CheckTileFrames）', () => {
+    const w = new World(40, 40, 7, 'decor-support-td387-ctrl');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const TD = idOfSheet(387), STONE = idOfSheet(1);
+    tdSetup(w, TD);
+    w.store.setTileSilent(12, 9, STONE, 0, 0);
+    w.store.setTile(12, 9, 0);                // 右锚上方旁格扰动（非锚）
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(TD);
+    // 帧带基失配：右格 frameX 改 36+18=54（styleX=1 的 dx=0 位）→ 与左格(0)不同带
+    w.store.frameX[w.store.idx(11, 10)] = 54;
+    g.checkFurnitureSupport(11, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(11, 10)).toBe(0);
+  });
+});
+
+// B-1：相邻共边罐不被越权收编（原版 PlacePot :54529-54566 净空只查自身 2×2+底行 →
+// 相邻罐合法;CheckPot 杀环 :57347-57356 只杀本件 2×2 → loot 各掉各的 :57490）。
+describe('九批 B-1：smashPot 帧解码收集（相邻共边罐隔离）', () => {
+  /** A 罐列 10..11、B 罐列 12..13（共竖边）,行 9(fy=0)/10(fy=18),锚行 11 实心 */
+  const potsSetup = (w: World) => {
+    const st = w.store;
+    const POT = idOfSheet(28), STONE = idOfSheet(1);
+    for (let x = 9; x <= 14; x++) st.setTileSilent(x, 11, STONE, 0, 0);
+    for (let k = 0; k < 2; k++) {
+      for (const [row, fy] of [[9, 0], [10, 18]] as const) {
+        st.setTileSilent(10 + k, row, POT, k * 18, fy);            // A（variant 0）
+        st.setTileSilent(12 + k, row, POT, 36 + k * 18, fy);       // B（variant 36）
+      }
+    }
+    return POT;
+  };
+  it('敲 A → A 4 格清、B 4 格幸存、loot 恰 1 次;再敲 B → loot 累计 2 次', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot-adj');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const POT = potsSetup(w);
+    const loot = vi.fn();
+    g.potLoot = loot;
+    (g.smashPot as (x: number, y: number) => void).call(g, 11, 10);   // A 右下格
+    expect(w.store.get(10, 9)).toBe(0);
+    expect(w.store.get(11, 10)).toBe(0);
+    expect(w.store.get(12, 9)).toBe(POT);
+    expect(w.store.get(13, 10)).toBe(POT);
+    expect(loot).toHaveBeenCalledTimes(1);
+    (g.smashPot as (x: number, y: number) => void).call(g, 13, 9);   // B 右上格
+    expect(w.store.get(12, 10)).toBe(0);
+    expect(w.store.get(13, 9)).toBe(0);
+    expect(loot).toHaveBeenCalledTimes(2);
+  });
+  it('单罐对照：任一格触发 → 整罐 2×2 清（帧解码锚反推）', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot-solo');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const POT = potsSetup(w);
+    const loot = vi.fn();
+    g.potLoot = loot;
+    // 只留 A：清 B 的 4 格（静默,不触发链）
+    for (let x = 12; x <= 13; x++) for (let y = 9; y <= 10; y++) w.store.setTileSilent(x, y, 0, 0, 0);
+    (g.smashPot as (x: number, y: number) => void).call(g, 12, 9 - 1 + 1);   // 越界格无害
+    (g.smashPot as (x: number, y: number) => void).call(g, 10, 10);
+    for (let x = 10; x <= 11; x++) for (let y = 9; y <= 10; y++) expect(w.store.get(x, y)).toBe(0);
+    expect(loot).toHaveBeenCalledTimes(1);
+  });
+});
+
+// m-4：武器架 334 带 5000 系帧剥离（CheckWeaponsRack :46802-46810 锚格/:46819-46827
+// 各格剥 5000 系再 %54;标记=PlaceWeapon Player.cs:54721+ :54795/:54796 写
+// 5000+100+itemType / 10000+prefix,二行带 20000/25000 :54790-54794）。
+describe('九批 m-4：334 武器架 5000 系帧剥离（wallhang 支）', () => {
+  /** 3×3 架列 10..12 行 10..12,背墙全 1;中行左格挂武器（5000+100+id）右格前缀（10000+prefix） */
+  const rackSetup = (w: World, marked = true) => {
+    const st = w.store;
+    const RK = idOfSheet(334);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      const x = 10 + dx, y = 10 + dy;
+      w.store.setWall(x, y, 1);
+      w.store.setTileSilent(x, y, RK, dx * 18, dy * 18);
+    }
+    if (marked) {
+      st.frameX[st.idx(10, 11)] = 5100 + 123;    // 5000+100+itemType（ itemId=123 ）
+      st.frameX[st.idx(11, 11)] = 10000 + 5;     // 10000+prefix
+    }
+    return RK;
+  };
+  it('带武器架（5000 系标记帧）：邻格扰动 → 整架幸存（剥离后列号 0/18 自洽）', () => {
+    const w = new World(40, 40, 7, 'decor-support-rack334');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const RK = rackSetup(w);
+    const STONE = idOfSheet(1);
+    w.store.setTileSilent(9, 11, STONE, 0, 0);
+    w.store.setTile(9, 11, 0);                 // 左侧旁格扰动（非架体）
+    g.checkFurnitureSupport(10, 11);           // 自带标记格派发（锚剥离解码）
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      expect(w.store.get(10 + dx, 10 + dy)).toBe(RK);
+    }
+  });
+  it('无标记对照幸存;清一角墙 → 整架塌（Check3x3Wall 逐格 wall 门同链）', () => {
+    const w = new World(40, 40, 7, 'decor-support-rack334-ctrl');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const RK = rackSetup(w, false);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(RK);
+    w.store.setWall(10, 10, 0);                // 清一角墙（监听链 → wallhang 逐格 wall 门）
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(12, 12)).toBe(0);
   });
 });

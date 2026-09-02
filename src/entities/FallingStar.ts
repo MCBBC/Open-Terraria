@@ -18,10 +18,23 @@
 //         （AI :24235 light=0.9 覆写 × ProjLight 乘区,同 Arrow 955||12 支）+ 滚转
 //         (|vx|+|vy|)×0.01×direction（:24203 else 支,替换旧"对齐速度向"）+ 飞行
 //         尾迹 1/20 尘 58 + 屏门 1/6 gore（:24226-24239,替换旧 0.5/t 近似）。
+// ★蓝队清偿批（2026-09-02,T2/T3/T4）：
+//         T2 十周年变体（Main.tenthAnniversaryWorld → 本仓 world.seedFlags.tenthAnniversary,
+//         原版 :77265/:24229/:24236 三消费位）——Kill 环 CornflowerBlue→HotPink 且
+//         newColor8.A /= 2（:77265-77268）/AI 尾迹尘门 Next(20) ∪ Next(15)（:24236）/
+//         AI gore 池 {16,17,17,17}→{16,16,16,17}（:24229-24232）。Kill 段 gore 池
+//         SelectRandom(16,17×7)=1/8 抽 16（:77290,旧 0.25 系误读——无十周年支）。
+//         T3 对小动物/城镇 NPC 伤害面（原版 Damage 全 NPC 循环——小动物=非 friendly
+//         NPC 走主门;trap=true 位 :939 在 Player.CanNPCBeHitByPlayerOrPlayerProjectile
+//         :20676-20679 复位 dontHurtCritters 门=坠星恒可杀小动物;城镇 NPC=friendly
+//         NPC 玩家弹免伤,唯巫毒窄门 :11970-11972）——hitTownNpcs('playerProj')/
+//         hitCritters({trap}) 接线,penetrate=-1 命中不消亡。
+//         T4 音量重校：Kill SoundID.Item10（:77261）与 AI SoundID.Item9（:24133-24136）
+//         两处 PlaySound 均无音量参=缺省 1.0,旧 0.8/0.5 系手调近似。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { GorePiece } from './GorePiece';
-import { applyBannerDamageDealt, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
+import { applyBannerDamageDealt, hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
 
 /** 弹 12 数据面（AI_148 星临盆 NewProjectile :54059 实参）：damage=1000（natural 星
@@ -76,6 +89,9 @@ export class FallingStar extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     const w = game.world;
+    // ★T2：十周年世界旗（Main.tenthAnniversaryWorld）——Kill HotPink 环 :77265-77268 /
+    //  AI 尘 1/15 并联门 :24236 / AI gore 池反转 :24229-24232 三消费位共用
+    const anniv = !!w.seedFlags?.tenthAnniversary;
     // 白天清除（Spawner :50193 / 正星 :22141——仅自然星）
     if (w.clock.isDay) {
       if (this.natural || this.warmup > 0) { this.dead = true; return; }
@@ -117,20 +133,28 @@ export class FallingStar extends Entity {
       }
       // ★G′ T4：Kill 12 特效逐项（Projectile.cs:77259-77323；替换旧 spawnParticles/
       //  spawnBurst 近似——原版为 VanillaDust 池尘 + Gore 火苗,非编排粒子）
-      game.playSfxFiles(['Item_10'], 0.8, this.cx, this.cy);            // SoundID.Item10 :77261
+      // ★T4：原版 SoundEngine.PlaySound(SoundID.Item10, position)（:77261）无音量参
+      //  = 缺省 1.0（旧 0.8 系手调近似,同 :24133 Item9 一并重校）
+      game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
       for (let i = 0; i < 7; i++) {                                     // 7×d58 :77270-77273
         game.spawnDust?.(this.x, this.y, this.w, this.h, 58,
           this.vx * 0.1, this.vy * 0.1, 150, null, 0.8);
       }
-      for (let i = 0; i < 8; i++) {                                     // CornflowerBlue 环 :77274-77277
+      // ★T2：外环色 = CornflowerBlue(100,149,237)；十周年 → HotPink(255,105,180) 且
+      //  newColor8.A /= 2（:77265-77268）= a 255→127（newColor8 同供 :77274 外环,
+      //  Gold 内环 :77278 不吃该改色）
+      const ringC = anniv
+        ? { r: 255, g: 105, b: 180, a: 127 }
+        : { r: 100, g: 149, b: 237, a: 255 };
+      for (let i = 0; i < 8; i++) {                                     // CornflowerBlue/HotPink 环 :77274-77277
         // NewDustPerfect(Center, 278, UnitY.RotatedBy(i·2π+rand·0.5)×(4+rand·4), 150,
-        // CornflowerBlue(100,149,237)).noGravity——perfect 通道消解 NewDust 盒抖动,
+        // newColor8).noGravity——perfect 通道消解 NewDust 盒抖动,
         // 位=弹心、速=定向环速原样入池
         const a8 = i * (Math.PI * 2) / 8 + Math.random() * 0.5;
         const sp8 = 4 + Math.random() * 4;
         game.spawnDust?.(this.cx, this.cy, 0, 0, 278,
           -Math.sin(a8) * sp8, Math.cos(a8) * sp8, 150,
-          { r: 100, g: 149, b: 237, a: 255 }, 1, true, true);
+          ringC, 1, true, true);
       }
       for (let i = 0; i < 4; i++) {                                     // Gold 环 :77278-77281（曾整缺）
         // NewDustPerfect(Center, 278, UnitY.RotatedBy(i·2π+rand·0.5)×(2+rand·3), 150,
@@ -145,10 +169,12 @@ export class FallingStar extends Entity {
         for (let i = 0; i < 7; i++) {
           // Gore.NewGore(position, NextVector2CircularEdge(0.5,0.5)×velocity.Length(),
           // SelectRandom(16,17×7))——圆缘半径 0.5×|v|=6 定向,newGore 非 perfect 保
-          // 原版 NewGore 尾部扰动（Gore.cs:1347-1348,vy−=[1,3]/vx±[−2,2]）
+          // 原版 NewGore 尾部扰动（Gore.cs:1347-1348,vy−=[1,3]/vx±[−2,2]）。
+          // ★1/8 抽 16（8 参均匀抽,旧 0.25 系误读——Game.onProjectileDeath 955/728
+          // 面同锚 0.125 先例;此池无十周年变体支,与 AI 尾迹池区分）
           const ga = Math.random() * Math.PI * 2;
           const gv = 0.5 * Math.hypot(this.vx, this.vy);
-          GorePiece.newGore(Math.random() < 0.25 ? 16 : 17, this.x, this.y,
+          GorePiece.newGore(Math.random() < 1 / 8 ? 16 : 17, this.x, this.y,
             Math.cos(ga) * gv, Math.sin(ga) * gv);
         }
       }
@@ -157,12 +183,16 @@ export class FallingStar extends Entity {
     this.x = nx; this.y = ny;
     // ★G′ T3：飞行尾迹 1:1（AI_005 type12 支 :24226-24239,替换旧 0.5/t spawnParticles
     //  近似）——1/20 尘 58（v×0.5,α150,scale1.2）+ 屏内 1/6 gore 16/17(1:3, v×0.2)。
-    //  （十周年变体 :24229-24232/:24236 HotPink/1/15 未接,随 Arrow 955||12 支同账登记）
-    if (Math.floor(Math.random() * 20) === 0) {
+    // ★T2 十周年变体：尘门 `Next(20)==0 || (十周年 && Next(15)==0)`（:24236,原版短路
+    //  同构——十周年 P=1/20+(19/20)/15）;gore 池 SelectRandom(16,17,17,17)→
+    //  (16,16,16,17)（:24229-24232,1/4→3/4 抽 16）
+    if (Math.floor(Math.random() * 20) === 0
+      || (anniv && Math.floor(Math.random() * 15) === 0)) {
       game.spawnDust?.(this.x, this.y, this.w, this.h, 58, this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);
     }
     if (Math.floor(Math.random() * 6) === 0 && this.onScreen(game)) {
-      GorePiece.newGore(Math.random() < 0.25 ? 16 : 17, this.x, this.y, this.vx * 0.2, this.vy * 0.2);
+      GorePiece.newGore(Math.random() < (anniv ? 3 / 4 : 1 / 4) ? 16 : 17,
+        this.x, this.y, this.vx * 0.2, this.vy * 0.2);
     }
     // ★G′ T1：对敌伤害面（原版 Damage() 于 Update :17184 位移后结算）——SetDefaults
     //  :926-940 friendly=true / penetrate=-1,AI_148 临盆 :54059 damage=1000/kb 10f/
@@ -170,9 +200,22 @@ export class FallingStar extends Entity {
     //  =撞地/白天/越界）;去重 = NPC.immune[owner] 语义:e.iframes（Enemy.hurt 头门
     //  :12752 pierce!==1 档,写 10t :13013）+ GC1 桥写 noteVanillaProjImmune（近战域
     //  表,Arrow/TrapShot 同款;crit=false = 原版面——弹 12 无近战/远程/魔法位,
-    //  Damage :12909-12927 三掷支全不受理）。friendly NPC 免伤门同陷阱弹先例。
-    //  小动物/城镇 NPC 不在 game.enemies() 桶 → 不入判定（本仓 friendly 弹同口径,
-    //  登记残差;原版 trap=true 位 :939 的 critter 复权语义随之不涉）。
+    //  Damage :12909-12927 三掷支全不受理）。
+    // ★T3（2026-09-02 残差清偿）小动物/城镇 NPC 面（原版 Damage 全 NPC 循环同桶——
+    //  小动物=非 friendly NPC 走 Damage_PVE_Inner :12622 flag 主门;SetDefaults
+    //  trap=true 位 :939 在 Player.CanNPCBeHitByPlayerOrPlayerProjectile :20676-20679
+    //  复位 dontHurtCritters 门 = 坠星恒可杀小动物（小动物友谊指南 5218 亦不豁免,
+    //  此即 trap 的【critter 复权位】）。城镇 NPC=friendly NPC → 玩家弹免伤
+    //  （:12622-12631 受理式 `(!friendly || (!flag && !Zap)) && !(hostile&flag2)` 对
+    //  friendly 目标恒 return）,唯巫毒窄门
+    //  :11970-11972（向导 22 killGuide/裁缝师 54 killClothier）——hitTownNpcs
+    //  ('playerProj') 内建同门,无娃零命中。原版/remix SetDefaults hostile=true
+    //  分支（:1759-1761）未建模=登记残差。本仓两桶独立于 enemies 桶;hitCritters
+    //  一击致死/hitTownNpcs 8t 无敌帧,均不消亡本弹（penetrate=-1,同 FallingBlock/
+    //  Piranha 先例）;kb 同敌怪环 direction×10,伤面平传 STAR_DAMAGE（helper 单值
+    //  参,旗面乘区同其他调用点粒度）。
+    hitTownNpcs(this, game, STAR_DAMAGE, (this.vx < 0 ? -1 : 1) * STAR_KB, 'playerProj', 12);
+    hitCritters(this, game, { trap: true });
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;      // Damage_PVE_Inner :11892 friendly NPC 门
       const e = ent as unknown as {
@@ -194,7 +237,9 @@ export class FallingStar extends Entity {
     if (++this.soundT >= this.nextSound) {
       this.soundT = 0;
       this.nextSound = 20 + Math.floor(Math.random() * 40);
-      game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
+      // ★T4：原版 SoundEngine.PlaySound(SoundID.Item9, base.position)（:24133-24136）
+      //  无音量参 = 缺省 1.0（旧 0.5 系手调近似）
+      game.playSfxFiles(['Item_9'], 1, this.cx, this.cy);
     }
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;
   }

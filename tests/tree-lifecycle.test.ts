@@ -124,7 +124,7 @@ describe('树苗成长分发（AttemptToGrowTreeFromSapling 档位）', () => {
     const w = ground(new World(30, 40, 15, 'open'), 53);   // 沙地
     const st = w.store;
     st.setTileSilent(10, 19, T.SAPLING, (18 + 1) * 18, 0);  // 档 18 → /54 = 6
-    const gs = { genTrees: w.trees } as unknown as GenState;
+    const gs = { genTrees: w.trees, seedFlags: {} } as unknown as GenState;   // TreePass 直读 gs.seedFlags.errorWorld 等,真实 worldgen 恒有(普通档={})
     expect(growPalmTree(st, new RNG(12345), 10, 19, gs)).toBe(true);
     // 棕榈已立（该列出现 v_323）
     let anyPalm = false;
@@ -136,7 +136,7 @@ describe('树苗成长分发（AttemptToGrowTreeFromSapling 档位）', () => {
     const w = ground(new World(30, 40, 15, 'open'), 2);
     const st = w.store;
     st.setTileSilent(10, 19, T.SAPLING, 0, 0);
-    const gs = { genTrees: w.trees } as unknown as GenState;
+    const gs = { genTrees: w.trees, seedFlags: {} } as unknown as GenState;   // TreePass 直读 gs.seedFlags.errorWorld 等,真实 worldgen 恒有(普通档={})
     expect(growTree(st, new RNG(777), gs, 10, 19)).toBe(true);
     let crown = false;
     for (let y = 0; y < 20; y++) {

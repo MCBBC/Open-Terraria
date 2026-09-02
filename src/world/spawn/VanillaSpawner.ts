@@ -2344,14 +2344,17 @@ export class VanillaSpawner {
           && this.spawnTileY > (this.world.groundLevel * 4 + this.world.rockLevel) / 5) {
           return D(123);
         }
-        // L2570-2585 hardDungeon（hardMode && downedPlantBoss）：1/30 技师 287 + 各墙变体 1/15
+        // L2570-2585 hardDungeon（hardMode && downedPlantBoss）：1/30 骷髅李 287（BoneLee，
+        //  NPCID.cs:11643）+ 各墙变体 1/15
         if (hardDungeon && N(30)) return D(287);
         if (hardDungeon && variant === 0 && N(15)) return D(293);
         if (hardDungeon && variant === 1 && N(15)) return D(291);
         if (hardDungeon && variant === 2 && N(15)) return D(292);
-        // L2588：骷髅神枪手 290——墙变体 0（蓝）专属，场上唯一，1/35
+        // L2588：圣骑士 290（Paladin，NPCID.cs:11651；aiStyle 3 射击族）——墙变体 0（蓝）
+        //  专属，场上唯一，1/35（旧注误写"骷髅神枪手"——神枪手=291）
         if (hardDungeon && !any(290) && variant === 0 && N(35)) return D(290);
-        // L2593：骷髅突击队长 289——墙变体 1/2（绿/粉），1/30
+        // L2593：巨型诅咒头骨 289（Giant Cursed Skull，NPCID.cs:11647）——墙变体 1/2（绿/粉），
+        //  1/30（旧注误写"骷髅突击队长"——突击队长=293，在上方 variant 0 档）
         if (hardDungeon && (variant === 1 || variant === 2) && N(30)) return D(289);
         // L2598：死灵法师族 281-286——1/20 → 281+2(蓝变体)+4(粉变体)+Next(2)，
         //  场上已有该 id 则空过（原版 return，不落后续支）
