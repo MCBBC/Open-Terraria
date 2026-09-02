@@ -455,7 +455,7 @@ import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
-import { createBrickBoxForWallOfFlesh, onGameEventClearedForDualDungeons, startHardmode } from '../world/gen/vanilla/HardmodePass';
+import { createBrickBoxForWallOfFlesh, onGameEventClearedForDualDungeons, startHardmodeJob, type HardmodeJob } from '../world/gen/vanilla/HardmodePass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
 
@@ -494,6 +494,16 @@ const SHOTGUN_PELLETS: Record<number, [number, number, number, number]> = {
  *  （原版散布全部是整数掷：Main.rand.Next(-40,41) 等） */
 function nrand(b: number): number {
   return Math.floor(Math.random() * (b * 2 + 1)) - b;
+}
+
+/** ★F3 粒子缺省重力契约（2026-09-02 红队 I′ 定罪,channel 级条款）：
+ *  ax/ay 加速度通道在位时缺省零重力——原版编排粒子（ParticleOrchestrator Spawn_*）
+ *  轨迹由 Velocity+AccelerationPerFrame 全责（如 princess/stardust sparkle
+ *  Velocity=vector×0.66、APF=−vector/60 的 60 拍减速-反漂),叠加 Dust 缺省重力
+ *  +0.05/t 会把 60 拍减速零点拽偏成火箭形下坠。无通道的普通重力尘维持
+ *  +0.05（Dust.cs:894 族）不变。显式 grav 恒优先（lakeSparkleFx 等已显式传 0）。 */
+export function particleGravDefault(p: { grav?: number; ax?: number; ay?: number }): number {
+  return p.grav ?? (p.ax != null || p.ay != null ? 0 : 0.05);
 }
 
 /** ★GA4 弹幕 crit 掷点上下文编码（PvP 弹快照 aux 高位段）。
@@ -1942,6 +1952,9 @@ export class Game implements GameHooks {
   private forceHalloweenForToday = false;
   private forceXMasForToday = false;
   private tickCount = 0;
+  /** 肉山死亡困难模式转换分步 job（PR-async）：updateWorld 每 tick ≤2.5ms 预算步进,
+   *  完成置 null。step()=true 即全部瓦片工作完成。 */
+  private hardmodeJob: HardmodeJob | null = null;
   /** ★IIIII61 The Constant 黑暗伤害系统（DontStarveDarknessDamageDealer.cs 全文 1:1：
    *  Player.Update :24550 本地玩家 && Main.dontStarveWorld 消费；光采样=玩家中心格
    *  Lighting.GetColor().ToVector3().Length()>=0.1 即安全）。状态字段=原版静态等价，
@@ -7472,7 +7485,13 @@ export class Game implements GameHooks {
           if (this.boss.vanillaId === 113) {
             const wof = this.boss;
             createBrickBoxForWallOfFlesh(w.store, Math.trunc(wof.cx / 16), Math.trunc(wof.cy / 16), wof.w, w.crimson);
-            const { wasHard } = startHardmode(w);
+            // ★PR-async（2026-09-02）：世界瓦片转换改分步 job——旗标/公告/灯笼夜照原版序
+            //   同步触发（本块内），tile 面（V 带/remix/回填/Dungeon 档剥漆）由
+            //   updateWorld 每帧 ≤2.5ms 预算步进。已知偏差登记：瓦片转化在 ~1-3s 内
+            //   渐进完成（原版同 tick 全量+冻结），终态逐位一致（hardmode-async 测试锁）。
+            const job: HardmodeJob = startHardmodeJob(w);
+            this.hardmodeJob = job;
+            const { wasHard } = job;
             this.recLog('world', { ev: 'hardmode', on: w.flags.hardMode });   // 行为录制：困难模式置位（肉山首杀）
             // drunk/FTW 边缘（NPC.cs:80287-80290）：三机械旗全齐（机械 Boss 先于
             // 肉山被杀,本仓键 downed_134/125/127 = downedMechBoss1/2/3）且杀前
@@ -7487,7 +7506,8 @@ export class Game implements GameHooks {
               // OnGameEventClearedForTheFirstTime 尾段（NPC.cs:79607-79650）：双地牢
               // 世界按事件档批剥墙漆——肉山 19 → Dungeon 档；同在 !eventFlag 首翻门内
               // （重复杀 WOF 不重触发，NPC.cs:80306 的 eventFlag 语义）
-              onGameEventClearedForDualDungeons(w, 19);
+              // ★PR-async：此全图剥漆扫描已并入 hardmodeJob（Dungeon 档,首翻门同源），
+              //   此处不再同步跑（其余 boss 事件仍走同步 onGameEventClearedForDualDungeons）
             }
             this.newText(Lang.misc(15), 50, 255, 130);
             this.achievements.notifyProgressionEvent(9);
@@ -8629,6 +8649,14 @@ export class Game implements GameHooks {
     // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
     // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
     this.evolution.update();
+    // ---- 肉山死亡困难模式转换分步驱动（PR-async）：≤2.5ms/tick 预算,
+    //      终态与同步版逐位一致（hardmode-async 测试锁）,瓦片渐进呈现为登记偏差 ----
+    if (this.hardmodeJob) {
+      const hmT0 = performance.now();
+      let hmDone = false;
+      do { hmDone = this.hardmodeJob.step(); } while (!hmDone && performance.now() - hmT0 < 2.5);
+      if (hmDone) this.hardmodeJob = null;
+    }
     this.torchGod.update();
     // 火把神药水 buff 376 效果端（Player.UpdateBuffs :10594-10596 → TorchGodsFlavor
     // :39529 每 tick 1/10 扫屏 → 弹 1084 自动转换异群系群系炬，2026-08-22 补 C 批）
@@ -8678,7 +8706,7 @@ export class Game implements GameHooks {
       p.life--;
       p.vx += p.ax ?? 0;        // 加速度通道（原版编排粒子 AccelerationPerFrame,先加速后位移）
       p.vy += p.ay ?? 0;
-      p.vy += p.grav ?? 0.05;   // 原版重力尘 +0.05(Dust.cs:894 族),无参默认对齐
+      p.vy += particleGravDefault(p); // ★F3 缺省重力契约（见函数注:ax/ay 在位=编排粒子全责轨迹）
       if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 原版阻尼 0.93/0.97 族,发射端按型给
       p.x += p.vx;
       p.y += p.vy;
@@ -24838,12 +24866,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     if (picked.vanilla?.aiStyle === 6) {
-      // 蠕虫族：段链（AI_006 的 NewNPC 链）
+      // 蠕虫族：段链（AI_006 的 NewNPC 链）——逐型段数/段表 1:1：
+      // 87 飞龙 = 固定 14 段 [89,88,89,89,89,89,89,89,88,89,89,90,91,92]
+      //（NPC.cs:51700-51724 m0..m13：1/8=88 翼段、11=90、12=91、13=92 尾，余 89）；
+      // 510 沙丘切片虫 = Next(12,21) 身(511)+尾(512)（:51798-51823）；513 墓穴爬虫 =
+      // Next(6,10) 身(514)+尾(515)（:51865-51901）；其余通用头 ai[2]：7=Next(8,13)/
+      // 10=Next(4,7)/39=Next(14,23)/95=Next(6,12)/98=Next(20,26)/117=Next(3,6)
+      //（:51853-51905 覆写表），链 = 身(type+1)×N + 尾(type+2)。全族段 realLife=头
+      //（各建链块 ai[3]=whoAmI+realLife=whoAmI 逐段继承；EoW 13-15 realLife=-1
+      // 不走本分支）→ sharedLife=true。
+      // ★曾统一 5+Next(4) 段全 head+1（掘地虫 10 语义）——飞龙被捏成 5-8 节全翼段
+      // 88 的"毛毛虫"、真尾 92/段 90/91 永不出现（2026-09-02 用户实报）。
+      const vid6 = picked.vanillaId ?? -1;
+      const rnd6 = (lo: number, hi: number) => lo + ((rng.next() * (hi - lo)) | 0);   // C# Next(lo,hi) 上界不含
+      let segIds6: number[] | undefined;
+      let count6: number;
+      if (vid6 === 87) {
+        segIds6 = [89, 88, 89, 89, 89, 89, 89, 89, 88, 89, 89, 90, 91, 92];
+        count6 = 14;
+      } else if (vid6 === 510) count6 = rnd6(12, 21) + 1;
+      else if (vid6 === 513) count6 = rnd6(6, 10) + 1;
+      else if (vid6 === 39) count6 = rnd6(14, 23) + 1;
+      else if (vid6 === 95) count6 = rnd6(6, 12) + 1;
+      else if (vid6 === 98) count6 = rnd6(20, 26) + 1;
+      else if (vid6 === 117) count6 = rnd6(3, 6) + 1;
+      else count6 = rnd6(8, 13) + 1;   // 7 吞噬怪等通用头（ai[2]=Next(8,13)）
       picked.x = ptx * TILE + 8 - picked.w / 2;
       picked.y = pty * TILE + 8 - picked.h / 2;
       picked.id = this.entities.nextId++;
       this.entities.enemies.push(picked);
-      const segs = Enemy.spawnWormChain(picked, 5 + ((rng.next() * 4) | 0));
+      const segs = Enemy.spawnWormChain(picked, count6, segIds6, true);
       for (const seg of segs) { seg.id = this.entities.nextId++; this.entities.enemies.push(seg); }
       return;
     }
@@ -28265,8 +28317,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 骷髅商离屏计时（CheckActive timeLeft 语义；NewNPC 出生起值 activeTime=750
-   *  :8570——消散后归位,防下次到访带旧残值） */
+   *  :8570——生成/消散两侧归位,防下次到访带旧残值） */
   private skeletonMerchantTimeLeft = NPC_ACTIVE_TIME;
+  /** 骷髅商在场沿（无→有 转沿按 NewNPC 起值归位——被击杀退场时 timeLeft 残值
+   *  不应遗传给下一只） */
+  private skeletonMerchantSeen = false;
   /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失（CheckActive 语义） */
   private updateTravellingMerchant(): void {
     const w = this.world;
@@ -28282,6 +28337,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const sm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant') as TownNPC | undefined;
     if (sm) {
+      if (!this.skeletonMerchantSeen) {
+        this.skeletonMerchantSeen = true;             // 出生沿 → timeLeft=750（:8570）
+        this.skeletonMerchantTimeLeft = NPC_ACTIVE_TIME;
+      }
       const pl = this.player;
       const step = skeletonMerchantCheckActiveStep(
         this.skeletonMerchantTimeLeft,
@@ -28292,9 +28351,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.skeletonMerchantTimeLeft = step.timeLeft;
       if (step.despawn) {
         sm.dead = true;
+        this.skeletonMerchantSeen = false;
         this.skeletonMerchantTimeLeft = NPC_ACTIVE_TIME;
       }
-    }
+    } else this.skeletonMerchantSeen = false;
     // 入侵/月事件进行中旅行商不到访（SpawnTravelNPC :5189 门；月事件原版经 !dayTime
     // 间接压制——此处同入驻轮显式补）
     if (invasionActive(w) || moonEventActive(w)) return;
@@ -31867,7 +31927,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const SAK = TILE_BY_KEY['v_595_sakura_sapling'];
     const WIL = TILE_BY_KEY['v_615_yellow_willow_sapling'];
     const vanityP = Math.min(1, sapP * 4);   // 1/5 vs 1/20 采样差折算
-    const gs = { genTrees: this.world.trees } as unknown as GenState;   // 生长登记进 world.trees
+    const gs = { genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {} } as unknown as GenState;   // 生长登记进 world.trees;★seedFlags 必带:TreePass:200/202/237 无守卫直读(drunkWorld 短干/errorWorld 枯木)——原版游戏期生长读全局旗,缺=undefined 崩
     const tryGrow = (x: number, y: number, sheet: number, fx: number): boolean => {
       const rng = new RNG((Math.random() * 1e9) | 0);
       const style = Math.floor(fx / 54);
@@ -31968,7 +32028,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
         if (sheet !== 20 && sheet !== 590 && sheet !== SAKURA_SHEET && sheet !== WILLOW_SHEET) continue;
         const rng = new RNG((Math.random() * 1e9) | 0);
-        const gsShim = { genTrees: this.world.trees } as unknown as GenState;  // 同 growSaplings 先例
+        const gsShim = { genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {} } as unknown as GenState;  // 同 growSaplings 先例;★seedFlags 必带(TreePass 无守卫直读,2026-09-02 orphan-b2 炸点)
         // S1（B2-S1）：调用侧判据原式 `num59 > (int)worldSurface - 1`（Projectile.cs:24488）
         // ——原版把 ws 行本身算地下；曾写 `j > groundLevel` 从 ws+1 起（off-by-one 边界行丢失）
         const underground = j >= Math.floor(this.world.groundLevel);
@@ -32589,15 +32649,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 弹 949 TorchGod 尘回调（AI_184 :40120-40130 每 AI 4 粒尾迹 vel×0.3 /
    *  Kill :67632-67652 爆 20 粒 vel×0.8——型=TorchID.Dust[ai0]、4×4 alpha100、
-   *  Next(3)!=0→noGravity（:40122/:67640）;样式 66 彩炬 Disco 色本仓以
-   *  noLightEmittance 登记,与 1084 同款微差） */
+   *  Next(3)!=0→noGravity（:40122/:67640）;样式 66 彩炬专支 :43605-43609/:72125-72129
+   *  = color=Disco 色+强制 noGravity,m-2 补）;6 型火幕原版照亮环境（尘 6 链
+   *  Dust.cs :918 noLightEmittance 门 → 尾档 :1083-1090 灰橙光）——m-3 去旗归原版相 */
   private torchGodDust(): (x: number, y: number, type: number, velMul: number) => void {
     return (dx, dy, dustType, velMul) => {
       const d = this.spawnDust(dx, dy, 4, 4, dustType, 0, 0, 100, null, 1);
       if (d) {
         if (Math.random() >= 1 / 3) d.noGravity = true;
         d.vx *= velMul; d.vy *= velMul;
-        d.noLightEmittance = true;
+        if (dustType === 66) {                       // :43605-43609（Kill :72125-72129 同）
+          d.color = { r: this.lighting.clock.discoR, g: this.lighting.clock.discoG,
+            b: this.lighting.clock.discoB, a: 255 };  // new Color(DiscoR,DiscoG,DiscoB)
+          d.noGravity = true;
+        }
       }
     };
   }
@@ -34018,11 +34083,25 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     x: number, y: number, color: string, count: number, speed = 2,
     opts: { life?: number; damp?: number; grav?: number; size?: number; /** 逐粒显式初速（提供时替换随机方向速度——原版 NewDust+逐尘 velocity 修型 1:1 用） */ vx?: number; vy?: number;
       /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道,★F2/F4 2026-09-01）。
-       *  ★T2 接线待办：orchestraFx princess/stardust 两站接线待 F 完成后一行补
-       *  （princessWeapon/stardustPunch sparkle 原版 AccelerationPerFrame=−vector/60,
-       *  60t 线性衰减;ax/ay 与 life 须同 TTL 口径,耦合见 lifeExact 注） */
+       *  ★F3 接线契约三件套（2026-09-02 红队 I′ 仲裁钉死,T2 待办消账）：
+       *  ①【缺省重力】ax/ay 任一在位 → 缺省 grav=0（particleGravDefault,编排粒子
+       *    轨迹由 Velocity+APF 全责;显式 grav 恒优先）;
+       *  ②【TTL 耦合】APF 按 TTL 折算的站必须传 lifeExact——spawnParticles 缺省
+       *    life = base×(0.6+0.4r) 抖动,抖动基值喂 TTL 耦合公式 = 终速/位移积分漂移;
+       *  ③【princess/stardust 两站接线公式】（orchestraFx princessWeaponFx /
+       *    stardustPunchFx sparkle,ParticleOrchestrator.cs:3363/:3373-3374 及
+       *    stardustPunch 同构段,两站参数现成:moveX/moveY/rng）——
+       *      ax = −(moveX×(0.6+0.35r))/60, ay = −(moveY×(0.6+0.35r))/60,
+       *      vx = moveX×(0.6+0.35r)×0.66, vy = moveY×(0.6+0.35r)×0.66,
+       *      lifeExact: 60, grav: 0（同一 rng 掷先取 pre-×0.66 的 vector 因子,
+       *      mf = 因子×0.66 双用,不增掷）。
+       *    即 APF=−vector/60（vector=MovementVector×(0.6+0.35r),×0.66 之前的段）,
+       *    Velocity=vector×0.66 → 减速零点 t=39.6,余 20 拍反向漂移 = 原版手感;
+       *    两站 spark 的 f.ToRotationVector2()×vector3 项被 :3374/:3385 终值覆写
+       *    （原版死代码,不入公式）。 */
       ax?: number; ay?: number;
-      /** 寿命不抖动档（TTL 耦合参数——加速度按 TTL 折算时必须同值） */
+      /** 寿命不抖动档（TTL 耦合参数——加速度按 TTL 折算时必须同值;
+       *  ★F3 契约②:APF 站一律走本档,缺省抖动基值不得喂 TTL 耦合公式） */
       lifeExact?: number } = {},
   ) {
     const base = opts.life ?? 40;

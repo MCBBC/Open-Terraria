@@ -2044,7 +2044,7 @@ item({ key: 'vi_2354_f2354', name: '', maxStack: 999, value: 1 }); // 药水(钓
 item({ key: 'vi_2355_f2355', name: '', maxStack: 999, value: 1 }); // 药水(声呐药水)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2356_f2356', name: '', maxStack: 999, value: 1 }); // 药水(宝匣药水)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2438_f2438', name: '', maxStack: 999, value: 1 }); // 饵(蜗牛?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2613_f2613', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2613_f2613', name: '', maxStack: 999, value: 1, tile: 'chest' }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_2613_PinkDungeonChest 独有字段搬移(批次A追补 2026-09-02:驼峰 def 的 tile=chest 系 createTile 双源回填[51fefa56]所补,2613 在 itemfunc 提取外、走 vanilla.json createTile 21)
 item({ key: 'vi_2673_f2673', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(松露虫)——数值/名走 itemfunc+l10n 链 // ←vi_2673_TruffleWorm 独有字段搬移(批次A)
 item({ key: 'vi_2674_f2674', name: '', maxStack: 999, value: 1 }); // 饵(学徒饵)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2675_f2675', name: '', maxStack: 999, value: 1 }); // 饵(行家饵)——数值/名走 itemfunc+l10n 链

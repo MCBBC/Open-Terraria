@@ -88,14 +88,21 @@ const curveLen = (w: WhipProj, ai0: number): number => {
 
 // ============ 1 鞭主干（AI_165 + FillWhipControlPoints） ============
 describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
-  it('锚点 = 玩家中心，玩家移动后下一 tick 曲线根随动（:45645/:45652）', () => {
+  it('锚点 = GetArmPosition 手位（1457 Projectile.cs:49183/Player.cs:51208），随 owner 逐 tick 重算随动', () => {
+    // 台账批 B 档(94599795)已按 1458 Player.cs:51206-51225 落地 1:1 臂位锚——
+    // 「玩家中心」是旧近似钉值(手位≈中心仅在个别帧行巧合),按反编译真值重钉:
+    // 不变量 = 根从 owner 实时重算(手位在玩家盒附近)+ owner 平移根严格随动。
     const { hooks, player } = makeHooks();
     const w = new WhipProj(player.cx, player.cy, 0, 841, 4672, 14, 1, 30, 4, () => player);
     w.fixedUpdate(1, hooks);
-    expect(w.controlPoints(true)[0]).toEqual({ x: player.cx, y: player.cy });
+    const root0 = w.controlPoints(true)[0];
+    expect(Math.abs(root0.x - player.cx)).toBeLessThanOrEqual(12);
+    expect(Math.abs(root0.y - player.cy)).toBeLessThanOrEqual(12);
     player.x += 100;
     w.fixedUpdate(1, hooks);
-    expect(w.controlPoints(true)[0]).toEqual({ x: player.cx, y: player.cy });
+    const root1 = w.controlPoints(true)[0];
+    expect(root1.x - root0.x).toBe(100);   // 前 2 tick 同帧行(head 三相),手位偏移恒定→严格 +100
+    expect(root1.y).toBe(root0.y);
   });
 
   it('分段数 = GetWhipSettings 表（:45690 默认 20；1104=36/1028=12/848=40/1033=45/1035=30）', () => {

@@ -2037,6 +2037,7 @@ const snap: SnapFn = (name) => {
     const vx = len === 0 ? 1 : dvx / len, vy = len === 0 ? 0 : dvy / len;
     const num5 = 0.5;
     const n6 = 30;
+    let ehS = 0, ehL = 0, ehT = 0, ehR = 0, ehB = 0;      // ★IIIII168 bbox 快照暂存（零掷）
     const hb = new DBnd(w, h);
     hb.set(Math.trunc(sx0), Math.trunc(sy0), Math.trunc(sx0), Math.trunc(sy0));
     const hall: DHall = { seed, generated: true, forceX: false, isEntrance: true, bounds: hb, sx: sx0, sy: sy0, ex: 0, ey: 0, sdx: vx, sdy: vy, edx: vx, edy: vy };
@@ -2117,6 +2118,21 @@ const snap: SnapFn = (name) => {
     }
     posX = Math.trunc(px); posY = Math.trunc(py);
     hall.ex = px; hall.ey = py;
+    // ★IIIII168 bbox 快照钩（dormant,零掷）——与 x86 rig climb LegacyEntrance 厅
+    //   eh{seq}a/b 同位（'a'=CalculateHall(pass0) 后 Bounds,'b'=GenerateHall(pass1) 后,
+    //   域固定取 'a' 时刻值）。seq 与 x86 JJHook.BbSeq 同序（cl/eh 交替 ++）。
+    const bbEh = (globalThis as { __swI168BB?: (tag: string, l: number, t: number, r: number, b: number) => void }).__swI168BB;
+    if (bbEh) {
+      if (dryP === 0) {
+        const gsB = globalThis as { __swI168BBSeq?: number };
+        gsB.__swI168BBSeq = (gsB.__swI168BBSeq ?? 0) + 1;
+        ehS = gsB.__swI168BBSeq;
+        ehL = hb.L; ehT = hb.T; ehR = hb.R; ehB = hb.B;
+        bbEh(`eh${ehS}a`, ehL, ehT, ehR, ehB);
+      } else {
+        bbEh(`eh${ehS}b`, ehL, ehT, ehR, ehB);
+      }
+    }
     }
   }
 
@@ -6973,9 +6989,20 @@ const snap: SnapFn = (name) => {
       if (roomDelay === 0 && rn(5) === 0 && posY > ws + 100) {
         roomDelay = 10;
         const sx = posX, sy = posY;
+        // ★IIIII168 bbox 快照钩（dormant,零掷）——与 x86 rig climb 插入臂 cl{seq}a/b 同位
+        //   （域=插入点 ±80 固定窗,与 x86 JJHook.DumpBox cl 臂同值）。
+        const bbCl = (globalThis as { __swI168BB?: (tag: string, l: number, t: number, r: number, b: number) => void }).__swI168BB;
+        let clN = 0;
+        if (bbCl) {
+          const gsB = globalThis as { __swI168BBSeq?: number };
+          gsB.__swI168BBSeq = (gsB.__swI168BBSeq ?? 0) + 1;
+          clN = gsB.__swI168BBSeq;
+          bbCl(`cl${clN}a`, sx - 80, sy - 80, sx + 80, sy + 80);
+        }
         dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
         dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
         posX = sx; posY = sy;
+        bbCl?.(`cl${clN}b`, sx - 80, sy - 80, sx + 80, sy + 80);
         if (TT) TT.inserts = (TT.inserts as number) + 1;
       }
       if (precalcOK) {

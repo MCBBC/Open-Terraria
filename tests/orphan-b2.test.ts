@@ -138,7 +138,7 @@ describe('行为面①：肥料云落苗成树（growFertilizedSapling 世界管
       for (let x = 46; x <= 54; x++) st.setTileSilent(x, 160, grass, 0, 0);
       st.setTileSilent(50, 159, T.SAPLING, 0, 0);
       const ok = growTree(st, new RNG(20260830),
-        { genTrees: [] as unknown[] } as never as Parameters<typeof growTree>[2],
+        { genTrees: [] as unknown[], seedFlags: {} } as never as Parameters<typeof growTree>[2],   // 真实 worldgen gs.seedFlags 恒在(SeedEasterEggs 普通档={})
         50, 159, true /*ignoreWalls*/, addon);
       if (!ok) return null;
       for (let y = 100; y <= 158; y++) if (st.get(50, y) === TREE_ID()) return y;

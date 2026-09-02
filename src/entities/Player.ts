@@ -4907,7 +4907,17 @@ export class Player extends Entity {
         : (this.inWater || this.inLava) && !this.merman && !ignoreWater && heldVid2 !== 277 ? 0.5
         : 1;
     }
-    if (this.shimmering) {
+    if (this.buffs.has(BuffType.TheTongue)) {
+      // 舌头拖拽穿墙（Player.cs:28384-28388 `if (tongued) position += velocity`）——
+      // **完全绕过 tile collision**（moveAndCollide/SlopingCollision/传送带
+      // :28435-28440 同跳），肉山反绕后拽回无视地形，否则绕后玩家会被隧道/
+      // 熔岩窑卡死拽不回（2026-09-02 用户实测卡地形）。onGround/hitWall 不更新
+      // （原版同语义）；flag33 置假=跑动成就里程不计（:28386,本仓无此消费面）。
+      // 拖拽速度 = wofTongue ④ 上帧覆写值（次帧消费,原版同 tick 一拍差备案）
+      this.x += this.vx;
+      this.y += this.vy;
+      this.landImpactVy = 0;
+    } else if (this.shimmering) {
       // 穿墙下坠（Player.cs:27868-27870）：position += velocity × 0.375（num111）——
       // **完全绕过 tile collision**（moveAndCollide/DryCollision 不跑），穿湖底与
       // 岩层直落；onGround/hitWall 不更新（原版同语义——穿墙中不落地不贴墙）
@@ -5711,6 +5721,9 @@ export class Player extends Entity {
     //     目标 = 墙 Center.X + direction×200（行进方向前缘 200px）、Y = 墙 Center.Y;
     //     速度 = (目标−玩家) 钳长 ≤ 11(经典)/lerp(11→22, 墙速/5)(专家);
     //     距离 ≤ 拖速 → 速度直取 + 解除舌头(gross 未消则下帧重新上舌,原版拔河语义)。
+    //     ★速度的【消费端】在 fixedUpdate 运动段：tongued 分支 position += velocity
+    //     穿墙（:28384-28388 绕过瓦片碰撞,2026-09-02 补）——速度覆写+无碰撞位移
+    //     两半合起来才是原版拉回语义,缺一半=开放地带能拽回、遇地形卡死。
     //     ★曾整个缺失——绕到肉山背后只会持续吃伤害,不会被舌头拽回前面(2026-09-01)
     const front = wall.cx + (wall.facing >= 0 ? 1 : -1) * 200;
     const ddx = front - this.cx, ddy = wall.cy - this.cy;

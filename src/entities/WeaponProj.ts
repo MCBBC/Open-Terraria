@@ -2095,6 +2095,8 @@ function spearPerTypeDust(s: SpearProj, game: GameHooks): void {
 // 弹跳物理（ai[0]>=15 起重力 0.2/t，AI_068 :29048-29100）；死亡（撞块/命中/超时）→
 // 6 朵火云 400+rand3（:70918-70927：散布 ±8/上抛，伤 ×0.5，火云=aiStyle 14 弹跳穿透 3、
 // 360t、命中 OnFire 3-6s :10850-10852）
+// ★登记不修（红队仲裁 2026-09-02）:飞行火焰尾迹整缺——原版 AI_068 :30688 每拍
+// AI_068_Dust 系尘,本类尘系统整缺（非序倒置,与 #3/#4 挪序不同病）;独立立项补齐。
 export class MolotovProj extends Entity {
   w = 14; h = 14;
   vx: number;
@@ -3676,6 +3678,66 @@ export class FlailProj extends Entity {
       }
       default: break;
     }
+    // ---- AI_015_Flails_Dust（1457 :45218-45294,调用挂 AI_015_Flails 尾 :44983;
+    // doFastThrowDust=掷出态 :41232）----
+    // ★挪序修正(2026-09-02 红队 #4):原版该调用在 AI_015_Flails 尾部（AI() 分派器
+    // :25630 内）=【移前位】——此前本块落在 moveAndCollide(:44460 系)之后读移后位,
+    // 掷出态 14-16px/t 偏移比 949 更大;现整块上移到位移之前,与原版 AI 先行序对齐
+    // （六型 26/35/948/25/154/757 共用同一尘块一处改）。上游触发条件核实:原版每 tick
+    // 无条件调用（AI 尾,无 ai[0]/态门）,本块同形（态机 case 内 return 的 Kill 拍
+    // 早退无尘,两侧一致）。
+    // R30 §5.3 P2：26=每 tick d172（v×0.4,alpha100,scale1.5,noGravity,v÷2,:45268-45274）/
+    // 35=每 tick d6 火（v×0.4,alpha100,scale3,noGravity,v×2,:45285-45292）/
+    // 948=!wet 门 d6（v×0.4,alpha100,scale1.2,noGravity,v×4 再与弹速取均值,:45275-45284）
+    // ——此前 35/948 无条件 spawnParticles 橙粒、26 走 20% 自绘,粒型/概率/scale 三元组全错。
+    if (this.projId === 26) {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 172,
+        this.vx * 0.4, this.vy * 0.4, 100, null, 1.5);
+      if (d) { d.noGravity = true; d.vx /= 2; d.vy /= 2; }
+    } else if (this.projId === 948) {
+      // !wet 门（1458 :45263-45267 wet=Collision.WetCollision 探针形——inLiquid 缺省档
+      // 同式（B⑥ 清偿;坡面支终清波并入））
+      if (!this.inLiquid(game)) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+          this.vx * 0.4, this.vy * 0.4, 100, null, 1.2);
+        if (d) { d.noGravity = true; d.vx = (d.vx * 4 + this.vx) / 2; d.vy = (d.vy * 4 + this.vy) / 2; }
+      }
+    } else if (this.projId === 35) {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+        this.vx * 0.4, this.vy * 0.4, 100, null, 3);
+      if (d) { d.noGravity = true; d.vx *= 2; d.vy *= 2; }
+    } else if (this.projId === 25) {
+      // 25（:41742-41751）：尘 14,Next(掷出态?1:15)==0——掷出态每 tick,其余 1/15
+      if (Math.floor(Math.random() * (fastThrow ? 1 : 15)) === 0) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.3);
+      }
+    } else if (this.projId === 154) {
+      // 154（:41800-41805）：尘 115,noGravity,初速 v×0.4 后 ×0.25（净 ×0.1）
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 115,
+        this.vx * 0.4, this.vy * 0.4, 140, null, 1.5);
+      if (d) { d.noGravity = true; d.vx *= 0.25; d.vy *= 0.25; }
+    } else if (this.projId === 757) {
+      // 757（:41753-41770）双段：①弹体处 2 掷 Next(|v|<8?10:4)==0 尘 5（scale 0.8、
+      //   fadeIn 1.3、velocity+=v/4;掷出态 num 减半）②链上 lerp 段 10 掷 Next(40)==0,
+      //   位置=Lerp(玩家心,球心,rand)+(−8,0) 落 16×16 盒,scale 1.3、velocity+=v/4
+      const fastDiv = fastThrow ? 2 : 1;
+      const num1 = (Math.hypot(this.vx, this.vy) < 8 ? 10 : 4) / fastDiv;
+      for (let i = 0; i < 2; i++) {
+        if (Math.floor(Math.random() * num1) === 0) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 5, 0, 0, 0, null, 0.8);
+          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; d.fadeIn = 1.3; }
+        }
+      }
+      const num2 = 40 / fastDiv;
+      for (let i = 0; i < 10; i++) {
+        if (Math.floor(Math.random() * num2) === 0) {
+          const lx = p.cx + (this.cx - p.cx) * Math.random() - 8;
+          const ly = p.cy + (this.cy - p.cy) * Math.random();
+          const d = game.spawnDust?.(lx, ly, 16, 16, 5, 0, 0, 0, null, 1.3);
+          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; }
+        }
+      }
+    }
     // 位移 + tile 碰撞（AI_015_HandleMovementCollision :44460-44527）：
     // ★原版链球本体不扫格——lastVelocity 差分读数来自【标准弹体 Collision.TileCollision】
     // （Update 序:AI 先行/TileCollision 随后,AI_015_HandleMovementCollision 于 :19437
@@ -3792,59 +3854,6 @@ export class FlailProj extends Entity {
           this.spawnProj(this.x + this.w / 2, this.y + this.h / 2,
             Math.cos(ang) * spd, Math.sin(ang) * spd, 405, this.damage,
             this.st === 0 ? this.knockback * 0.5 : this.knockback);
-        }
-      }
-    }
-    // ---- AI_015_Flails_Dust（1458 :45219-45294;doFastThrowDust=掷出态 :41232）----
-    // R30 §5.3 P2：26=每 tick d172（v×0.4,alpha100,scale1.5,noGravity,v÷2,:45268-45274）/
-    // 35=每 tick d6 火（v×0.4,alpha100,scale3,noGravity,v×2,:45285-45292）/
-    // 948=!wet 门 d6（v×0.4,alpha100,scale1.2,noGravity,v×4 再与弹速取均值,:45275-45284）
-    // ——此前 35/948 无条件 spawnParticles 橙粒、26 走 20% 自绘,粒型/概率/scale 三元组全错。
-    if (this.projId === 26) {
-      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 172,
-        this.vx * 0.4, this.vy * 0.4, 100, null, 1.5);
-      if (d) { d.noGravity = true; d.vx /= 2; d.vy /= 2; }
-    } else if (this.projId === 948) {
-      // !wet 门（1458 :45263-45267 wet=Collision.WetCollision 探针形——inLiquid 缺省档
-      // 同式（B⑥ 清偿;坡面支终清波并入））
-      if (!this.inLiquid(game)) {
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
-          this.vx * 0.4, this.vy * 0.4, 100, null, 1.2);
-        if (d) { d.noGravity = true; d.vx = (d.vx * 4 + this.vx) / 2; d.vy = (d.vy * 4 + this.vy) / 2; }
-      }
-    } else if (this.projId === 35) {
-      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
-        this.vx * 0.4, this.vy * 0.4, 100, null, 3);
-      if (d) { d.noGravity = true; d.vx *= 2; d.vy *= 2; }
-    } else if (this.projId === 25) {
-      // 25（:41742-41751）：尘 14,Next(掷出态?1:15)==0——掷出态每 tick,其余 1/15
-      if (Math.floor(Math.random() * (fastThrow ? 1 : 15)) === 0) {
-        game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.3);
-      }
-    } else if (this.projId === 154) {
-      // 154（:41800-41805）：尘 115,noGravity,初速 v×0.4 后 ×0.25（净 ×0.1）
-      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 115,
-        this.vx * 0.4, this.vy * 0.4, 140, null, 1.5);
-      if (d) { d.noGravity = true; d.vx *= 0.25; d.vy *= 0.25; }
-    } else if (this.projId === 757) {
-      // 757（:41753-41770）双段：①弹体处 2 掷 Next(|v|<8?10:4)==0 尘 5（scale 0.8、
-      //   fadeIn 1.3、velocity+=v/4;掷出态 num 减半）②链上 lerp 段 10 掷 Next(40)==0,
-      //   位置=Lerp(玩家心,球心,rand)+(−8,0) 落 16×16 盒,scale 1.3、velocity+=v/4
-      const fastDiv = fastThrow ? 2 : 1;
-      const num1 = (Math.hypot(this.vx, this.vy) < 8 ? 10 : 4) / fastDiv;
-      for (let i = 0; i < 2; i++) {
-        if (Math.floor(Math.random() * num1) === 0) {
-          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 5, 0, 0, 0, null, 0.8);
-          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; d.fadeIn = 1.3; }
-        }
-      }
-      const num2 = 40 / fastDiv;
-      for (let i = 0; i < 10; i++) {
-        if (Math.floor(Math.random() * num2) === 0) {
-          const lx = p.cx + (this.cx - p.cx) * Math.random() - 8;
-          const ly = p.cy + (this.cy - p.cy) * Math.random();
-          const d = game.spawnDust?.(lx, ly, 16, 16, 5, 0, 0, 0, null, 1.3);
-          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; }
         }
       }
     }
@@ -4048,7 +4057,9 @@ export class FlailProj extends Entity {
  *  初次转向 (v×20+dir×Next(35,75)/30)/21；无目标 → ai0=-15(再漂 15t);
  *  ai0>0 追踪段(:29217-29219)：(v×40+dir×12)/41;
  *  撞块(:16905-16921)：前 2 次接触反弹、第 3 次 Kill;Kill 爆 20 颗火尘(:69686)。
- *  scale=ai1=Next(80,121)/100(:29233-29239);timeLeft 120/penetrate 1(SetDefaults :4584) */
+ *  scale=ai1=Next(80,121)/100(:29233-29239);timeLeft 120/penetrate 1(SetDefaults :4584)
+ *  ★登记不修（红队仲裁 2026-09-02）:杀尘基准位——原版贴墙点 vs 本仓帧首,数 px 级
+ *  既有债,随独立尘序批次清偿 */
 export class FlaironSpike extends Entity {
   w = 14; h = 14;
   damage: number;
@@ -5218,13 +5229,6 @@ export class TorchGodProj extends Entity {
         this.kill(game); return;
       }
     }
-    // 尾迹（AI_184 :40120-40130;1457 :43596-43609）：每 AI 4 粒,沿 velocity/4×k 段布点,
-    // vel×0.3——基准 = 帧首快照 preMoveX/preMoveY（移前位,vanilla AI 先行序,见上修正注）。
-    // Kill 帧早退无尾迹（重构前后一致;原版本拍 AI 已先出 4 粒——登记微残差,杀帧尘
-    // 断言钉"仅爆尘 20 粒"这一既有形,不随本修扩张）
-    for (let k = 0; k < 4; k++) {
-      this.dust?.(preMoveX + (this.vx / 4) * k, preMoveY + (this.vy / 4) * k, this.dustType, 0.3);
-    }
     // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
     // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）。
     // 1457 :43575-43578（1456 :40100-40107 owner=255/damage=0 假伤）:改
@@ -5233,6 +5237,8 @@ export class TorchGodProj extends Entity {
     // 解锁位）未登记 → 恒未解锁 = 恒真伤（与 1456 假伤 0 的差异即本批修正点）
     const p = game.player;
     // 位移已由管线落位(nx/ny → this.x/this.y)
+    // ★登记不修（红队仲裁 2026-09-02）:本命中判定读移后位,原版 SelfHurtPlayers
+    // 在 AI 内（:43575-43579）=移前位——≤1 tick 相位差,红队确认无漏命中,保持现形。
     if (!game.world.flags.unlockedBiomeTorches
       && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
       p.lastDamageCause = {
@@ -5357,6 +5363,8 @@ export function daybreakStacks(enemyId: number): number {
 }
 
 export class DaybreakFlare extends Entity {
+  // ★登记不修（红队仲裁 2026-09-02）:oldPos 半拍差——EU（extraUpdates）子步记账口径
+  // 与原版差半拍,观感不可辨,维持现形。
   readonly projId = 636;
   damage: number;
   knockback: number;

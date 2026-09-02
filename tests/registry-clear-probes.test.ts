@@ -121,6 +121,7 @@ describe('生成探针：收尾批三个上游 pass', () => {
     const gs = {
       worldSurface: 60, rockLevel: 120, waterLine: 175, lavaLine: 300,
       shimmerX: -1, shimmerY: -1,
+      seedFlags: {},   // 生成 pass 直读 gs.seedFlags.remix(MossPass:165),真实管线恒有(普通档={})
     } as unknown as GenState;
     for (let x = 0; x < 600; x++) {
       for (let y = 60; y < 500; y++) st.setTileSilent(x, y, TILE_BY_KEY['stone']!);

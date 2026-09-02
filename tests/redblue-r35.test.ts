@@ -28,8 +28,10 @@ describe('R35-A 3065 Star Wrath 天降三剑', () => {
 });
 
 describe('R35-F 5667/6174 钻地龟落点与按键语义', () => {
-  it('F-1 落点=左上角直传 (x*16+8, y*16-32),无 −17 半身位(TrySpawnDigtoiseAt :50039)', () => {
-    expect(gameSrc).toContain('new MinionProj(x * TILE + 8, y * TILE - 32');
+  it('F-1 落点=中心锚 (x*16+8, y*16-32) 经 minionTrueBox/2 回写盒左上,无 −17 半身位(:50043)', () => {
+    // ★2026-08-31 蓝队三批(γ 移交):NewProjectile=中心语义,旧"盒左上"直传令
+    //  34×34 箱首帧右下偏 17px——现在中心坐标不变,减 bwT.w/h/2 落到 Entity 盒左上。
+    expect(gameSrc).toContain('new MinionProj(x * TILE + 8 - bwT.w / 2, y * TILE - 32 - bwT.h / 2');
     expect(gameSrc).not.toContain('x * TILE + 8 - 17');
   });
   it('F-2 右键=全体回收(flag5 支 :48701-48702),左键在场=指挥(:48705-48727)', () => {

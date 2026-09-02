@@ -59,17 +59,14 @@ const sheetOf = (st: TileStore, x: number, y: number): number =>
 /** GERunner（57 cs:76923-77214 / 56 76385-76683）1:1。good=true 神圣带；false 时按
  *  world.crimson 走猩红/腐化表。hive>200k 门（flag）：全图 225 Hive 计数 >200000 时条带穿
  *  丛林连 225 Hive/230 CrispyHoney 一并转化（57 :77013-77024 / 56 :76433-76445）。
- *  lowTilesGate=Skyblock.lowTiles（cs:76941-76943）：空岛低格档在一切掷骰之前整段早退。 */
-function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number, speedY: number, good: boolean, crimson: boolean, lowTilesGate: boolean): void {
+ *  lowTilesGate=Skyblock.lowTiles（cs:76941-76943）：空岛低格档在一切掷骰之前整段早退。
+ *  ★PR-async 重构：hive 计数外提（两次 runner 调用的计数值恒等,单次计算零偏差）、
+ *  改为 generator——逐【刷写列】yield（单元 ≤ 数百格），rng 消费序/写序逐字不变。 */
+function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: number, speedY: number,
+  good: boolean, crimson: boolean, lowTilesGate: boolean, hiveFlag: boolean): Generator<void, void, void> {
   if (lowTilesGate) return;                              // ★F4③ Skyblock.lowTiles（cs:76941）
   const w = st.w, h = st.h;
-  let hiveCount = 0;                                     // 225 Hive 全图计数（57 :77013-77024）
-  for (let k = 20; k < w - 20; k++) {
-    for (let l = 20; l < h - 20; l++) {
-      if (st.flags[st.idx(k, l)] && TILE_DEFS[st.type[st.idx(k, l)]]?.vanilla?.sheet === 225) hiveCount++;
-    }
-  }
-  const flag = hiveCount > 200000;
+  const flag = hiveFlag;                                 // 外提单算（两 runner 同值）
   let num2 = rng.nextIntRange(200, 250);                 // Next(200,250)（cs:76961）
   num2 = Math.trunc(num2 * (w / 4200));                  // ×(w/4200) 截断
   const num4 = num2;                                     // 刷半宽
@@ -147,6 +144,7 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
           else if (sh === 397) st.setTile(m, n, id(398));
         }
       }
+      yield;                                             // PR-async：每刷写列一个单元
     }
     // 速度积分 + 扰动（57 :77197-77212 / 56 76669-76682）：val2.X += Next(-10,11)*0.05，
     // 钳 speedX±1（★F1：同样补 +10 端点）
@@ -156,6 +154,22 @@ function geRunner(st: TileStore, rng: RNG, i: number, j: number, speedX: number,
     if (dx < speedX - 1) dx = speedX - 1;
     if (vx < -num2 || vy < -num2 || vx > w + num2 || vy > h + num2) running = false;
   }
+}
+
+/** 225 Hive 全图计数（57 :77013-77024）。★PR-async：切片 generator（每 256 列一个
+ *  单元）+ 单次计算外提——原版两 runner 各自重扫全图（同值重复劳动），此为无偏差微优化。 */
+function* hiveScanGen(st: TileStore): Generator<void, number, void> {
+  let hiveCount = 0;
+  for (let x0 = 20; x0 < st.w - 20; x0 += 256) {
+    const x1 = Math.min(st.w - 20, x0 + 256);
+    for (let k = x0; k < x1; k++) {
+      for (let l = 20; l < st.h - 20; l++) {
+        if (st.flags[st.idx(k, l)] && TILE_DEFS[st.type[st.idx(k, l)]]?.vanilla?.sheet === 225) hiveCount++;
+      }
+    }
+    yield;
+  }
+  return hiveCount;
 }
 
 /** 洞穴墙回填 OnlyWalls 白名单（cs:31979 原文列表照抄：0/54-59/61/185/212-215/2/196-199/
@@ -178,8 +192,9 @@ export function shapeFloodFillOnlyWalls(
   const queue: Array<[number, number]> = [[sx, sy]];
   let quota = quotaMax;
   const w = st.w, h = st.h;
-  while (queue.length > 0 && quota > 0) {
-    const [qx, qy] = queue.shift()!;
+  let head = 0;                                          // ★PR-async 微优化：head 指针替代 shift()（O(1) 出队,序不变）
+  while (head < queue.length && quota > 0) {
+    const [qx, qy] = queue[head++];
     const qi = st.idx(qx, qy);
     if (cells.has(qi)) continue;
     // ★R12-4（2026-08-24）：IsNotSolid（Modifiers.cs:563-571）=
@@ -200,8 +215,8 @@ export function shapeFloodFillOnlyWalls(
   }
   // 尾段（ShapeFloodFill.cs:49-58）：逐个弹出丢弃已访问格；遇到未访问格回压并断言
   // incomplete（queue.Count==0 ⇔ complete）。quota 用尽不是判据本身。
-  while (queue.length > 0) {
-    const [rx, ry] = queue.shift()!;
+  while (head < queue.length) {
+    const [rx, ry] = queue[head++];
     if (!cells.has(st.idx(rx, ry))) return { cells, complete: false };
   }
   return { cells, complete: true };
@@ -228,8 +243,10 @@ export function paintBackfillOutline(st: TileStore, cells: Set<number>, wallId: 
 
 /** initializeHardMode（57 cs:31858-31988 / 56 31734-31860）1:1。
  *  秘种子分支由 world.seedFlags 供旗（运行时 startHardmode 与生成期 doStartInHardmode
- *  共用本函数自然生效）：dualDungeons 门 / remix 边缘带臂 / Skyblock.lowTiles 早退。 */
-export function initializeHardMode(world: World, rng: RNG): void {
+ *  共用本函数自然生效）：dualDungeons 门 / remix 边缘带臂 / Skyblock.lowTiles 早退。
+ *  ★PR-async：generator 化（单元=刷写列/回填 attempt/剥漆批次），rng 消费序与写序
+ *  与同步版逐字一致；同步包装=全量 drain（测试与既有调用面契约不变）。 */
+export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, void, void> {
   const st = world.store, w = st.w, h = st.h;
   const sf = world.seedFlags ?? {};
   const bandsEnabled = !sf.dualDungeons;                 // ★F4① dualDungeonsSeed 门（cs:31864-31867）
@@ -268,7 +285,9 @@ export function initializeHardMode(world: World, rng: RNG): void {
             const sh = sheetOf(st, i, j);                  // cs 字面裸读 type（活性无关）
             if (i > w - num7) convertHallowCell(st, rng, i, j);
             else if (SET_CRIMSON.has(sh) || SET_CORRUPT.has(sh)) convertHallowCell(st, rng, i, j);
+            if ((j & 255) === 255) yield;                  // PR-async：每 256 行一个单元
           }
+          yield;                                           // 每列收尾单元
         }
       } else {
         // 地牢在右 → 左缘带：[0, num7+num8)
@@ -278,12 +297,17 @@ export function initializeHardMode(world: World, rng: RNG): void {
             const sh = sheetOf(st, k, l);                  // cs 字面裸读 type（活性无关）
             if (k < num7) convertHallowCell(st, rng, k, l);
             else if (SET_CRIMSON.has(sh) || SET_CORRUPT.has(sh)) convertHallowCell(st, rng, k, l);
+            if ((l & 255) === 255) yield;
           }
+          yield;
         }
       }
     } else {
-      geRunner(st, rng, num3, 0, 3 * num5, 5.0, true, world.crimson, lowTilesGate);
-      geRunner(st, rng, num4, 0, -3 * num5, 5.0, false, world.crimson, lowTilesGate);
+      // hive 计数单算外提（两 runner 同值——原版各扫一遍为重复劳动,PR-async 微优化）
+      const hiveCount = yield* hiveScanGen(st);
+      const hiveFlag = hiveCount > 200000;
+      yield* geRunnerGen(st, rng, num3, 0, 3 * num5, 5.0, true, world.crimson, lowTilesGate, hiveFlag);
+      yield* geRunnerGen(st, rng, num4, 0, -3 * num5, 5.0, false, world.crimson, lowTilesGate, hiveFlag);
     }
   }
   // ---- 洞穴墙回填（cs:31944-31986）：25×(w/4200) 片（dualDungeons/remix 不豁免）----
@@ -313,7 +337,14 @@ export function initializeHardMode(world: World, rng: RNG): void {
         budget--;
       }
     }
+    yield;                                               // PR-async：每 attempt 一个单元
   }
+}
+
+/** 同步包装（全量 drain）——既有测试/调用面契约不变。 */
+export function initializeHardMode(world: World, rng: RNG): void {
+  const it = initializeHardModeGen(world, rng);
+  for (let r = it.next(); !r.done; r = it.next()) void r.value;
 }
 
 /** CreateBrickBoxForWallOfFlesh（NPC.cs:79837-79866）：击杀点空心砖盒+清岩浆。
@@ -342,12 +373,50 @@ export function createBrickBoxForWallOfFlesh(st: TileStore, cxTile: number, cyTi
  *  （原版 netMode==1 客户端支在本仓无拓扑对应，省略——联机权威在主机侧独立结算）。
  *  调用方（Game 击杀流）按原版顺序执行：brickbox → 捕获旧 hardMode → 本函数 →
  *  (!wasHard 时) 灯笼夜 19 + 双地牢墙漆档 → misc[15] 公告 + 成就 9（由返回值委托，
- *  调用方消费）。 */
+ *  调用方消费）。
+ *  ★PR-async：同步路径改为【全量 drain 组合步进】，终态与逐字版完全一致；
+ *  世界瓦片工作 = initializeHardMode + (dualDungeons 且首翻) Dungeon 档剥漆全图扫描
+ *  （原 NPC.cs:79650 在 LanternNight 19 之后同 tick 同步跑——现并入 job 由调用方
+ *  分步驱动,其余 boss 事件的 onGameEventClearedForDualDungeons 同步路径不变）。 */
 export function startHardmode(world: World): { wasHard: boolean } {
   const wasHard = !!world.flags.hardMode;
   (world.flags as Record<string, boolean>).hardMode = true;
-  if (!wasHard) initializeHardMode(world, new RNG(world.seed));   // ★F2 hardMode && !force 门
+  const it = startHardmodeStepsGen(world, wasHard, false);
+  for (let r = it.next(); !r.done; r = it.next()) void r.value;
   return { wasHard };
+}
+
+/** 组合步进流：conversion → (dualDungeons 首翻) Dungeon 档剥漆。
+ *  includeDualClear=false = 既有 sync startHardmode 契约（Game 的 WOF 链显式调用
+ *  onGameEventClearedForDualDungeons 的位置保持原序）。 */
+function* startHardmodeStepsGen(world: World, wasHard: boolean,
+  includeDualClear: boolean): Generator<void, void, void> {
+  if (!wasHard) {
+    yield* initializeHardModeGen(world, new RNG(world.seed));
+    if (includeDualClear && world.seedFlags?.dualDungeons) {
+      yield* clearUnbreakableWallsWithPaintUpToGen(world, DUAL_DUNGEON_WALL_TIERS.Dungeon);
+    }
+  }
+}
+
+/** 肉山死亡异步 job（PR-async 主入口）：Game 击杀流即刻拿 wasHard（公告/旗标/灯笼夜
+ *  照原版序同步触发），世界瓦片转换由调用方每 tick `step()` 预算驱动。
+ *  wasHard=true（重复激活）⇒ job 立即完成（F2 门：只重铺砖盒，无世界工作）。 */
+export interface HardmodeJob { wasHard: boolean; step(): boolean }
+export function startHardmodeJob(world: World): HardmodeJob {
+  const wasHard = !!world.flags.hardMode;
+  (world.flags as Record<string, boolean>).hardMode = true;
+  const it = startHardmodeStepsGen(world, wasHard, true);
+  let done = wasHard;                                    // F2 门：重复激活无世界工作
+  return {
+    wasHard,
+    step(): boolean {
+      if (done) return true;
+      const r = it.next();
+      if (r.done) { done = true; return true; }
+      return false;
+    },
+  };
 }
 
 // ============================================================
@@ -382,8 +451,9 @@ const MATCHING_UNSAFE_WALL = new Map<number, number>([
 
 /** ClearUnbreakableWallsWithPaintUpTo(tierColor)（WorldGen.cs:32033-32052）：全图把
  *  「双地牢不可破标记墙 350 且墙漆低四位 ≤ 档色」的格还原成其下 tile 的配套可破墙并清漆；
- *  paintWall 存档通道见 DitherSnakePass 注（tier+16 编码的中间档同 nibble 同判）。 */
-export function clearUnbreakableWallsWithPaintUpTo(world: World, tierColor: number): void {
+ *  paintWall 存档通道见 DitherSnakePass 注（tier+16 编码的中间档同 nibble 同判）。
+ *  ★PR-async：generator 化（每 256 列一个单元）；同步包装契约不变。 */
+export function* clearUnbreakableWallsWithPaintUpToGen(world: World, tierColor: number): Generator<void, void, void> {
   const st = world.store;
   for (let x = 0; x < st.w; x++) {
     for (let y = 0; y < st.h; y++) {
@@ -393,7 +463,14 @@ export function clearUnbreakableWallsWithPaintUpTo(world: World, tierColor: numb
         st.paintWall[i] = 0;
       }
     }
+    if ((x & 255) === 255) yield;
   }
+}
+
+/** 同步包装（全量 drain）——其余 boss 事件链（11/13/14/8/15/16-18/24）的既有调用面不变。 */
+export function clearUnbreakableWallsWithPaintUpTo(world: World, tierColor: number): void {
+  const it = clearUnbreakableWallsWithPaintUpToGen(world, tierColor);
+  for (let r = it.next(); !r.done; r = it.next()) void r.value;
 }
 
 /** OnGameEventClearedForTheFirstTime 尾段双地牢分支（NPC.cs:79607-79650）。挂点=

@@ -178,11 +178,19 @@ describe('B 货郎背包 5343 peddlersSatchelWasUsed → SetupTravelShop num+1�
 
 // ============ C. 恶魔之心 3335：第 6 配饰槽 ============
 describe('C 恶魔之心 3335 extraAccessory → 配饰槽容量（:44575-44581）', () => {
-  it('accSlotMax：基座 8（3+5），恶魔之心后 9（armor[8] 第 6 槽）', () => {
+  it('accSlotMax：经典 8（3+5）；恶魔之心仅专家/大师 +1（:18402-18409，08-28 翻案后门可达）；大师原生第 7 格', () => {
+    // ★2026-08-28 翻案(Inventory.ts:163):旧钉值"extraAccessory=true 恒 +1"为
+    //  门不可达时代的近似——原版门=extraAccessory && (expertMode||gameMenu),
+    //  本仓玩家档跨世界携带(.sbw)后门可达,按原版 1:1 重钉。
     const p = mkPlayer();
-    expect(p.inv.accSlotMax).toBe(8);
+    expect(p.inv.accSlotMax).toBe(8);                 // 经典:恶魔之心不 +1
     p.inv.extraAccessory = true;
-    expect(p.inv.accSlotMax).toBe(9);
+    expect(p.inv.accSlotMax).toBe(8);
+    p.inv.gateExpert = true;
+    expect(p.inv.accSlotMax).toBe(9);                 // 专家:第 6 槽(armor[8])
+    p.inv.gateExpert = false;
+    p.inv.gateMaster = true;
+    expect(p.inv.accSlotMax).toBe(10);                // 大师:+1 心槽 + 原生第 7 格(9 号槽)
   });
   it('消费端在位：装备枚举/聚合/掉落判定均以 accSlotMax 为界', () => {
     expect(playerSrc.match(/accSlotMax/g)?.length).toBeGreaterThanOrEqual(4);
@@ -196,7 +204,7 @@ describe('C 恶魔之心 3335 extraAccessory → 配饰槽容量（:44575-44581�
   it('★难度门偏差备案在案（:18139-18145 extraAccessorySlots 仅 expert/gameMenu 生效——'
     + '本仓玩家档与世界档同存亡,门结构不可达）', () => {
     expect(readFileSync(new URL('../src/items/Inventory.ts', import.meta.url), 'utf8'))
-      .toContain('★偏差备案(2026-08-22 补 C 审计 3335 批)');
+      .toContain('★2026-08-28 翻案旧"不设门偏差备案"：门可达');
   });
 });
 

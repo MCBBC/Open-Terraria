@@ -33,6 +33,10 @@ const defOf = (sheet: number): TileDef | undefined => BY_SHEET.get(sheet)?.[0];
 const RUNTIME_SPECIAL = new Map<number, string>([
   [379, 'Bubble：tileSolid 每帧更新期被置 false（Main.cs DoUpdateInWorld 头/尾三明治）→ 碰撞语义=非实心'],
 ]);
+/** 自研件刻意偏差（原版无此 tile,借原版 sheet 绘制;非数据错误） */
+const CUSTOM_DELIBERATE = new Set<string>([
+  'pixel_block',   // 像素方块 solid=false 可通行（用户 2026-08-25 定案）+自发光,借 sheet0 绘制
+]);
 
 const oursSolid = (d: TileDef) => d.solid && !d.platform;
 const oursStandTop = (d: TileDef) => d.platform;
@@ -47,6 +51,7 @@ describe('物块通行性对账（Main.cs tileSolid/tileSolidTop 全表）', () 
       const wantSolid = v.solid && !v.solidTop;
       const wantTop = v.solidTop || v.platform;
       for (const d of defs) {
+        if (CUSTOM_DELIBERATE.has(d.key)) continue;   // 自研刻意偏差:非对账对象
         if (oursSolid(d) !== wantSolid || oursStandTop(d) !== wantTop) {
           mismatch.push(`${v.id}=${v.name}: vanilla(solid=${+v.solid},top=${+v.solidTop}) vs ` +
             `${d.name}(solid=${+d.solid},platform=${+d.platform})`);

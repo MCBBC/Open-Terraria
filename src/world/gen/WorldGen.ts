@@ -847,8 +847,13 @@ function vanillaTerrain(ctx: GenCtx) {
     }
   }
   // ④ 地狱箱主件洗牌（cs:11262-11274）：Next(5..1) 逐个抽出 → gs.hellChestItems
+  // ★IIIII166（2026-09-02）：remix 池换件补移植（cs:11273-11277）——vanilla 洗牌前
+  //   `if (remixWorldGen) list = { 274, 220, 683, 218, 3019 }`（112 花火→683 邪恶三叉戟）。
+  //   JS 曾恒用非 remix 池 → REMIX 地狱主件轮转第二件恒错（x86 w.wld 直读 UW#1
+  //   (418,1052) 主件 683 vs JS 112 实锤；骰面零差（洗牌掷数同 5）故值流对拍不可见,
+  //   唯箱内容可判——战利品内容级取证仪 tools/_iii166loot.test.ts 首例战果）。
   {
-    const pool = [274, 220, 112, 218, 3019];
+    const pool = gs.seedFlags.remix ? [274, 220, 683, 218, 3019] : [274, 220, 112, 218, 3019];
     const out: number[] = [];
     while (pool.length > 0) out.push(...pool.splice(rng.nextInt(pool.length), 1));
     gs.hellChestItems = out;

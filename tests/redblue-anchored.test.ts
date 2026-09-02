@@ -35,6 +35,7 @@ function makeHooks(opts: { enemies?: Array<Record<string, unknown>> } = {}) {
     spawnParticles: () => {},
     notifyInventoryChanged: () => {},
     playSfx: (n: string) => { sfx.push(n); },
+    playSfxFile: (n: string) => { sfx.push(n); },   // 音频 B 类修正后 262 冲击走 Item_14 文件轨(WeaponProj.ts:1816)
     playSfxFiles: () => {},
     showPickupLabel: () => {},
   };
@@ -141,7 +142,7 @@ describe('回收触发三门(命中敌/撞块/超程)', () => {
     expect(f.a0).toBe(1);                       // 提前回收(远未到 500 门)
     expect(e.hits).toBeGreaterThanOrEqual(1);
     f.fixedUpdate(1 / 60, hooks);                // 返回相首拍:起手冲击结算
-    expect(sfx).toContain('explosion');         // dist>=150 → Item14+200×200 冲击盒
+    expect(sfx).toContain('Item_14');           // dist>=150 → HitTilesInACircle+Item14(:25068,音频 B 类修正后为文件轨)
   });
 
   it('262 冲击盒一帧性:localA0 消费后不再触发(localAI[0]==0 单发门 :15057)', () => {
@@ -149,7 +150,7 @@ describe('回收触发三门(命中敌/撞块/超程)', () => {
     const { hooks, sfx } = makeHooks({ enemies: [e] });
     const f = fire(hooks, 262);
     for (let t = 0; t < 90 && !f.dead; t++) f.fixedUpdate(1 / 60, hooks);
-    expect(sfx.filter((s) => s === 'explosion')).toHaveLength(1);
+    expect(sfx.filter((s) => s === 'Item_14')).toHaveLength(1);   // localA0 单发门:冲击音恰一次
   });
 
   it('262 撞块转回收(HandleMovement aiStyle13 支 :19627-19663)', () => {

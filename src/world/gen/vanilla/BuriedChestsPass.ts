@@ -145,7 +145,10 @@ function barIds(gs: GenState): { copper: number; iron: number; silver: number; g
 /** 地狱箱主件序：Reset 已按原版位置洗牌（WorldGen.ts vanillaTerrain ④，
  *  cs:11262-11274——种子等价要求该洗牌发生在 pass 循环前，此处只轮换取用） */
 function nextHellItem(gs: GenState): number {
-  const items = gs.hellChestItems ?? [274, 220, 112, 218, 3019]; // 兜底（探针直调）
+  // 兜底（探针直调）——★IIIII166：remix 池 112→683 换件（cs:11274-11277）与
+  // WorldGen.ts ④ 洗牌同源；管线内 gs.hellChestItems 恒已洗好,此兜底不可达。
+  const items = gs.hellChestItems
+    ?? (gs.seedFlags.remix ? [274, 220, 683, 218, 3019] : [274, 220, 112, 218, 3019]);
   return items[gs.hellChestIdx % items.length]; // 自增移到放置成功后（cs:36257-36264）
 }
 
@@ -239,7 +242,8 @@ Object.assign(PRE_CLASS, {
   // spears（SpearsMacesChainsaws… 集）：4061 风暴矛/277 三叉戟/274 暗黑长枪/220 日怒
   4061: 'spears', 277: 'spears', 274: 'spears', 220: 'spears',
   // magic（Magic 集）：4062 雷击杖/112 火之花/218 烈焰鞭
-  4062: 'magic', 112: 'magic', 218: 'magic',
+  //   ★IIIII166：+683 邪恶三叉戟（remix 地狱主件池换件 112→683 后可达,cs:11276）
+  4062: 'magic', 112: 'magic', 218: 'magic', 683: 'magic',
   // boom（BoomerangsChakrams 集）：670 寒冰回旋镖
   670: 'boom',
   // ★1457 新内容：6153 GlacierFang（PrefixLegacy.Magic 集,cs:73）——1457 冰箱 7 元池
@@ -324,6 +328,12 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   277: { d: 14, ua: 31, mana: 0, kb0: false }, 274: { d: 34, ua: 22, mana: 0, kb0: false },
   220: { d: 32, ua: 45, mana: 0, kb0: false }, 112: { d: 48, ua: 16, mana: 12, kb0: false },
   218: { d: 32, ua: 30, mana: 21, kb0: false }, 670: { d: 21, ua: 20, mana: 0, kb0: false },
+  // ★IIIII166：683 邪恶三叉戟（remix 地狱主件池 cs:11274-11277 换件 112→683 后可达）
+  //   Item.cs:9424-9448 base 变体（生成期非 WeakerVariant,同 112 取 base 惯例）：
+  //   damage 150/useAnimation 27/mana 19/knockBack 6.66f。曾缺登记 → prefixRolls(683)
+  //   零掷 vs vanilla 1-3 掷 → UW 尾箱集合级联错位（x86 run149 (418,1052) 前缀门
+  //   Next(4)=0 早退 1 掷实证;战利品内容仪 _iii166loot 首例定位）。
+  683: { d: 150, ua: 27, mana: 19, kb0: false },
   4061: { d: 14, ua: 28, mana: 0, kb0: false }, 4062: { d: 24, ua: 17, mana: 6, kb0: false },
   // ★TTTT 批：4281 雀杖（Item.cs:36817-36836：damage 7/useAnimation 36/mana 缺省 0/
   //   knockBack 4）——summon 池 89/91/55 三前缀触发四失败门（见 PRE_CLASS 处注）
@@ -426,7 +436,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     ? (gy > gs.rockLevel && gy <= ctx.worldH - 251)
     : gy < gs.rockLevel;
   const caveElig = gy <= ctx.worldH - 250
-    || (gs.seedFlags.remix && (flags.style === 7 || flags.style === 14));
+    || (gs.seedFlags.remix && (ctx.chestStyle === 7 || ctx.chestStyle === 14));   // ★IIIII86：style 载体=LootCtx.chestStyle（ChestFlags 无 style 字段）
 
   if (isSurface) {
     // ===== 地表木箱/天空箱(cs:36283-36468)=====

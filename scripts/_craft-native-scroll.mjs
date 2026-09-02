@@ -77,7 +77,7 @@ const step2 = await page.evaluate(() => {
 console.log(JSON.stringify({ ...base, clBox, step1, step2 }, null, 1));
 const ok = base.overflowY === 'auto' && !base.trackResidue && !base.hasTrackField && base.invDisplay === 'block'
   && base.rowCount > 100 && base.scrollable && base.row0H === 30
-  && base.barW0 >= 8 && step1.barW >= 8 && step2.barW >= 8
+  && base.barW0 === 5 && step1.barW === 5 && step2.barW === 5   // 2026-09-02 用户要求滚条细一点(8→5)
   && step1.scrollTop > 0 && step2.scrollTop > 0 && step2.rowCount > 100;
 console.log(ok ? 'PASS: 原生滚动+滚动条常显+重建保位' : 'FAIL: 见上');
 await page.screenshot({ path: '/tmp/craft-native-scroll.png' });

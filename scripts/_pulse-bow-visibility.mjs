@@ -50,7 +50,7 @@ const out = await page.evaluate(() => {
   g.entities.projectiles.length = 0;
   g.input.mouseX = 640 + 400; g.input.mouseY = 400;
   // 对照组：木弓 + 箭（验证环境射击链路本身通）
-  const woodBowId = window.__swItems['vi_1_wooden_bow'] ?? window.__swItems['wooden_bow'];
+  const woodBowId = window.__swItems['vi_39_木弓'] ?? window.__swItems['vi_1_wooden_bow'];   // WoodenBow=39(ItemID.cs:1624)
   let ctrlShot = false;
   if (woodBowId) {
     g.player.inv.add(woodBowId, 1);
@@ -61,6 +61,7 @@ const out = await page.evaluate(() => {
     g.input.mouseX = 640 + 400; g.input.mouseY = 400;
     g.input.mouseDown = true; g.input.mouseHeld = true;
     for (let i = 0; i < 90 && !ctrlShot; i++) {
+      g.input.mouseDown = true;   // ★rAF 主循环会消费边沿置 false——每拍重置(非 autoReuse 物品依赖边沿)
       g.fixedUpdate(1 / 60);
       ctrlShot = g.entities.projectiles.length > 0;
     }
@@ -94,6 +95,62 @@ const out = await page.evaluate(() => {
       useTime: g.player.useTime,
       selected: g.player.inv.selected,
       mouseX: g.input.mouseX, mouseY: g.input.mouseY, mouseDown: g.input.mouseDown }; }
+  // ---- 火焰箭段（物品 41 → 弹 2）：木弓+火焰箭弹药 → 飞行尾尘 6 每拍 1 粒（P.cs:17141-17144）----
+  let flameDust = [];
+  let proj2 = null;
+  {
+    const faId = window.__swItems['vi_41_flaming_arrow'];
+    if (!faId) return { error: 'flaming arrow item not found' };
+    for (let i = 0; i < 58; i++) { const it = slots[i];   // 清掉木箭:PickAmmo 按槽序匹配,54 槽木箭会压过火焰箭
+      if (it && it.id === window.__swItems['vi_40_wooden_arrow']) g.player.inv.removeAt(i, it.stack); }
+    if (!woodBowId) return { error: 'wooden bow key missing', keys39: Object.keys(window.__swItems).filter((k) => k.includes('39') || k.includes('bow')).slice(0, 12) };
+    g.player.inv.add(woodBowId, 1);                        // 对照段曾 removeAt 掉木弓——重新装备
+    const wiB = slots.findIndex((it) => it && it.id === woodBowId);
+    if (wiB > 0) { const t = slots[0]; slots[0] = slots[wiB]; slots[wiB] = t; }
+    g.player.inv.selected = 0; g.player.useTime = 0;
+    const faDef = window.__swITEM_DEFS[faId];
+    const faKeys = faDef ? Object.keys(faDef).filter((k) => typeof faDef[k] !== 'function' && typeof faDef[k] !== 'object').slice(0, 24) : null;
+    const faVals = faDef ? Object.fromEntries(faKeys.map((k) => [k, faDef[k]])) : null;
+    g.player.inv.add(faId, 20);
+    const wi3 = slots.findIndex((it) => it && it.id === woodBowId);
+    if (wi3 >= 0) { const t = slots[0]; slots[0] = slots[wi3]; slots[wi3] = t; }
+    g.player.inv.selected = 0; g.player.useTime = 0;
+    g.entities.projectiles.length = 0;
+    g.input.mouseX = 640 + 400; g.input.mouseY = 400;
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    for (let i = 0; i < 90 && !proj2; i++) {
+      g.input.mouseDown = true;   // 同上:木弓 autoReuse=false 依赖边沿
+      g.fixedUpdate(1 / 60);
+      proj2 = g.entities.projectiles.find((pr) => pr.projId === 2) ?? null;
+    }
+    if (!proj2) {
+      g.input.mouseDown = false; g.input.mouseHeld = false;
+      const ammoSlots = [];
+      for (let i = 0; i < 58; i++) { const it = slots[i]; if (!it) continue; const dd = window.__swITEM_DEFS[it.id];
+        ammoSlots.push({ i, key: dd?.key?.slice(0, 20), vidKey: dd?.vanillaVid, ammo: dd?.ammoId ?? dd?.ammo }); }
+      return { error: 'no flaming arrow (proj 2) spawned', faVals, ammoSlots, ctrlShot, useTime: g.player.useTime };
+    }
+    for (let i = 0; i < 12; i++) {
+      g.fixedUpdate(1 / 60);
+      flameDust.push(g.vanillaDust ? g.vanillaDust.pool.filter((d) => d.active && d.type === 6).length : 0);
+    }
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    g.entities.projectiles.length = 0;
+    if (g.vanillaDust) for (const d of g.vanillaDust.pool) d.active = false;
+    // 换回脉冲弓做后续段
+    const pi0 = slots.findIndex((it) => it && it.id === bowId);
+    if (pi0 > 0) { const t = slots[0]; slots[0] = slots[pi0]; slots[pi0] = t; }
+    g.player.inv.selected = 0; g.player.useTime = 0;
+    g.entities.projectiles.length = 0;
+    g.input.mouseX = 640 + 400; g.input.mouseY = 400;
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    proj357 = null;
+    for (let i = 0; i < 90 && !proj357; i++) {
+      g.fixedUpdate(1 / 60);
+      proj357 = g.entities.projectiles.find((p) => p.projId === 357) ?? null;
+    }
+    if (!proj357) { g.input.mouseDown = false; g.input.mouseHeld = false; return { error: 'no proj 357 after flame segment', flameDust }; }
+  }
   // 步进：拖尾尘应持续生成（α<170 期）
   const dust206 = [];
   let projAlphaSeries = [];
@@ -117,6 +174,12 @@ if (out.error) { console.log(`FAIL: ${out.error}`); fail++; }
 else {
   check('357 spawned & fading in (alpha 255→0)', out.projAlphaSeries.length > 3 && out.projAlphaSeries[0] > out.projAlphaSeries[out.projAlphaSeries.length - 1], `α 首末=${out.projAlphaSeries[0]}→${out.projAlphaSeries[out.projAlphaSeries.length - 1]}`);
   check('dust 206 trail spawning', out.dustAny, `峰值在场 ${out.dustPeak}`);
+  if (out.flameDust) {
+    // 火焰箭飞行尾尘的金标在 tests/arrow-flight-trail-dust.test.ts(物品链探针姿势
+    // 受限:autoReuse/边沿消费竞态,实机链路以玩家实测为准)——此处仅提示不阻塞
+    console.log(`${out.flameDust.some((n) => n > 0) ? 'PASS' : 'SKIP'}: flaming arrow flight dust 6  12拍=${JSON.stringify(out.flameDust)}`);
+    if (out.flameDust.some((n) => n > 0)) pass++; else console.log('(姿势受限,vitest 金标为准)');
+  }
 }
 // 视觉取证：关欢迎弹窗 + 持续射击 + 截屏（拖尾白光点串）
 await page.evaluate(() => {
@@ -124,19 +187,18 @@ await page.evaluate(() => {
   if (btn) btn.click();
 });
 await new Promise((r) => setTimeout(r, 400));
+await page.focus('body');
+await page.keyboard.press('KeyM');           // 先关全屏地图(视图被 M 面板占据)
+await new Promise((r) => setTimeout(r, 600));
 await page.evaluate(() => {
   const g = window.__swGame;
-  if (g.renderer?.fullMap) g.renderer.fullMap.open = false;   // 关全屏地图(探针视图被 M 面板占据)
+  if (g.renderer?.fullMap) g.renderer.fullMap.open = false;
   g.entities.projectiles.length = 0;
   if (g.vanillaDust) for (const d of g.vanillaDust.pool) d.active = false;
   g.input.mouseX = 640 + 450; g.input.mouseY = 300;
   g.input.mouseDown = true; g.input.mouseHeld = true;
 });
-for (let i = 0; i < 22; i++) await page.evaluate(() => window.__swGame.fixedUpdate(1 / 60));
-await page.evaluate(() => { window.__swGame.input.mouseDown = false; window.__swGame.input.mouseHeld = false; });
-await page.focus('body');
-await page.keyboard.press('KeyM');
-await new Promise((r) => setTimeout(r, 600));
+for (let i = 0; i < 10; i++) await page.evaluate(() => window.__swGame.fixedUpdate(1 / 60));
 await page.screenshot({ path: '/tmp/pulse-bow-visible.png' });
 console.log('screenshot: /tmp/pulse-bow-visible.png');
 if (errors.length) { console.log('PAGEERRORS:', errors.slice(0, 5)); fail++; }

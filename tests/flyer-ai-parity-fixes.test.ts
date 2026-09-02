@@ -408,6 +408,26 @@ describe('AI_026 charger + 620 陆地段', () => {
     expect(wolf.vy).not.toBe(-4);
   });
 
+  it('86 跳梯总门 vy==0（NPC.cs:63455）:悬崖跳后空中仅重力累加,不被悬崖档每帧 vy=-8 重置', () => {
+    const g = makeGame(false);
+    // 地板 30..44 + 45+ 悬崖:独角兽冲出崖沿 → 落地帧跳梯一次(-8),此后腾空
+    for (let x = 30; x <= 44; x++) g.world.store.setTileSilent(x, 24, 1, 0, 0);
+    const uni = mkEnemy(86, 36, 24);
+    uni.y = 24 * 16 - uni.h;
+    uni.vx = 6; uni.facing = 1;
+    const p = mkPlayer(uni.x + 400, uni.y);
+    let jumped = false;
+    for (let t = 0; t < 80; t++) {
+      drive(uni, 'chargerAI', g, p);
+      if (uni.vy < -4) jumped = true;            // 跳梯已触发(-8 档)
+      else if (jumped && uni.vy !== 0) {
+        // 空中:vy 只能 += 重力(高空衰减下限 0.25×0.3=0.075,同 155/329 用例口径)
+        expect(uni.vy).toBeGreaterThan(-8 + 0.075);  // 曾缺门=每帧重置回 -8 恒速爬升飞天
+      }
+    }
+    expect(jumped).toBe(true);
+  });
+
   it('410 自爆:头顶 20px 内 800px 玩家 → 3 发 538 + 即灭（cs:62940-62977）', () => {
     const g = makeGame(false);
     const skl = mkEnemy(410, 40, 20);

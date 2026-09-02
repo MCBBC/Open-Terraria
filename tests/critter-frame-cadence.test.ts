@@ -110,4 +110,16 @@ describe('小动物帧速档（FindFrame 专属 case）', () => {
     expect(vanillaFrameIdx(shell(65, 16, { wet: false }), 4)).toBe(3);
     expect(vanillaFrameIdx(shell(542, 16, { animT: 4 }), 4)).toBe(1);
   });
+
+  it('仙灵 583-585：4t 一帧全循环（cs:70617-70630;曾落 6t 兜底=拍翅慢 1.5×）', () => {
+    const f = shell(583, 112, { vx: 1 });
+    f.animT = 0; expect(vanillaFrameIdx(f, 4)).toBe(0);
+    f.animT = 3; expect(vanillaFrameIdx(f, 4)).toBe(0);   // counter<4 仍帧0
+    f.animT = 4; expect(vanillaFrameIdx(f, 4)).toBe(1);
+    f.animT = 8; expect(vanillaFrameIdx(f, 4)).toBe(2);
+    f.animT = 16; expect(vanillaFrameIdx(f, 4)).toBe(0);  // 4 帧回卷
+    for (const id of [584, 585]) {
+      expect(vanillaFrameIdx(shell(id, 112, { animT: 12 }), 4)).toBe(3);
+    }
+  });
 });

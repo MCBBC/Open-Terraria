@@ -10,9 +10,10 @@
 export const DOM_UI_TARGET_SELECTOR =
   '.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-chatbox,' +
   '.sw-mobile, .sw-hotbar, .sw-tooltip, .sw-drag-ghost,' +
-  '.sw-ach-panel, .sw-res-panel, .sw-eqdock';
+  '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-invstrip';
   // .sw-eqdock = 右下角无框装备/杂项坞(2026-09-02):无 .sw-panel 底框,不登记会把
   // 坞上标签/缝隙点击漏成世界挥击(槽/钮本身已被 .sw-slot/.sw-btn 覆盖)
+  // .sw-invstrip = 背包面板下横条(图标行+成就卡+表情钮,2026-09-02):同理整条登记
 
 /** event.target 是否落在 DOM UI 上(命中=点击归 UI,不透传为世界输入) */
 export function isDomUiTarget(t: EventTarget | null | undefined): boolean {

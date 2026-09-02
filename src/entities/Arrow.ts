@@ -2093,8 +2093,8 @@ export class Arrow extends Entity {
       //  ★E′ M-2（2026-09-02 仲裁成立）：charm 态（PhoenixQuivered||SeraphNecklaced）
       //  在原版先于 :81240 被 :80609-80615 `aiStyle==1 → Color.White*Opacity` 截走
       //  （Opacity=1−α/255,P.cs:542-547）= 乘子 (155,155,155,155)≈61%【常规合成非加算】
-      //  → ga=(255−α)/255 分流,合成方式出组走 source-over（draw :2578 区 ADDITIVE_GLOW
-      //  分支按 id5+charm 分流,组内其余 id 零改动）;R4-32 白帧路径（whiteSpriteOf）
+      //  → ga=(255−α)/255 分流,合成方式出组走 source-over（draw 侧 ADDITIVE_GLOW
+      //  消费分支按 id5+charm 分流,组内其余 id 零改动）;R4-32 白帧路径（whiteSpriteOf）
       //  不变——全白帧+常规合成即原版 White*Opacity 观感。
       //  旧"防整弹消失"登记偏离就此解除（PROJ_ALPHA0[5]=100 死值保留台账,兜底禁入）。
       case 5: return this.phoenixQuivered || this.seraphNecklaced ? (255 - this.alpha) / 255 : 1;
@@ -2728,6 +2728,43 @@ export class Arrow extends Entity {
       // 474 骨箭：legacy PlaySound(0) + 骨尘 26×20（scale 0.9，:72550-72557）
       game.playSfx?.('dig', 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 26, 0, 0, 0, null, 0.9);
+    } else if (this.projId === 172) {
+      // 172 毒镖：legacy PlaySound(0) + 毒尘 135×20 α100（:77202-77208）
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100);
+    } else if (this.projId === 103) {
+      // 103 流星弹：legacy PlaySound(0) + d75×20 α100，1/2 掷 {scale×2.5,noGravity,v×5}（:77209-77222）
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 75, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.scale *= 2.5; d.noGravity = true; d.vx *= 5; d.vy *= 5; }
+      }
+    } else if (this.projId === 278) {
+      // 278 绿藻弹：legacy PlaySound(0) + d169×20 α100，1/2 掷 {scale×1.5,noGravity,v×5}（:77223-77236）
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 169, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.scale *= 1.5; d.noGravity = true; d.vx *= 5; d.vy *= 5; }
+      }
+    } else if (this.projId === 4) {
+      // 4 星星：legacy PlaySound(0) + d14×10 α150 scale1.1（:77237-77243）
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 10; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.1);
+    } else if (this.projId === 5) {
+      // 5 猎鹰刃：Item10 音 + rand(15,57,58)×60 v×0.5 α150 scale1.5（:77244-77257，Next(3) 单次采样）
+      game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
+      for (let i = 0; i < 60; i++) {
+        const r5 = (Math.random() * 3) | 0;
+        game.spawnDust?.(this.x, this.y, this.w, this.h,
+          r5 === 0 ? 15 : r5 === 1 ? 57 : 58, this.vx * 0.5, this.vy * 0.5, 150, null, 1.5);
+      }
+    } else if (this.projId === 309) {
+      // 309 冰九头蛇冰弹：Item27 音 + d185×10，1/2 掷 {v×2,noGravity,scale×1.75}（:76894-76908）
+      game.playSfxFile?.('Item_27', 1, this.cx, this.cy);
+      for (let i = 0; i < 10; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 185);
+        if (d && Math.random() < 0.5) { d.vx *= 2; d.vy *= 2; d.noGravity = true; d.scale *= 1.75; }
+      }
     } else if (this.projId === 469 && !this.hostile) {
       // 469 蜂箭 Kill 放蜂（:73369-73390，owner==myPlayer 门 → !hostile 近似）
       this.spawnBeeSwarm(game);
@@ -3546,6 +3583,40 @@ export class Arrow extends Entity {
       this.subStep(game);
       if (this.dead) return;
     }
+    // ---- Update 尾尘通用段（Projectile.cs:17141-17182，AI/位移后每 tick 恰 1 粒，
+    //      extraUpdates 无乘——段在 numUpdates 循环外）：2/82 燃烧箭 d6 α100 /
+    //      172 毒镖 d135 / 103 流星弹 d75（1/2 noGravity+scale×2）/ 278 绿藻弹
+    //      d169（1/2 noGravity+scale×1.5）/ 4 星星 1/5 掷 d14（α150 scale1.1）/
+    //      5 猎鹰刃 rand(15,57,58)+v×0.5（α150 scale1.2）——speedX/Y 走 NewDust
+    //      "随机±2.0+speedX" 合成式（spawn 通道同式），后置字段逐字覆写
+    switch (this.projId) {
+      case 2: case 82:
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+        break;
+      case 172:
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100);
+        break;
+      case 103: {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 75, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 2; }
+        break;
+      }
+      case 278: {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 169, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 1.5; }
+        break;
+      }
+      case 4:
+        if (Math.random() < 0.2) game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.1);
+        break;
+      case 5: {
+        const r5 = (Math.random() * 3) | 0;              // Main.rand.Next(3) 单次采样
+        game.spawnDust?.(this.x, this.y, this.w, this.h,
+          r5 === 0 ? 15 : r5 === 1 ? 57 : 58,
+          this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);
+        break;
+      }
+    }
   }
 
   /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
@@ -3576,6 +3647,16 @@ export class Arrow extends Entity {
         this.lavaWet = false;
         this.honeyWet = false;
         this.shimmerWet = false;
+      }
+    }
+    // ---- 309 冰九头蛇冰弹尘尾（AI_028 :26996-27004,每子步;EU=3 → ×4/帧）:
+    //      3×d185（spd=弹速、尘速×0.3、scale1.2、noGravity、α50）——309 本体贴图
+    //      1×1 官方空桩,可见面全在此尘（1×1 族审计真缺口①）
+    if (this.projId === 309) {
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 185,
+          this.vx, this.vy, 50, null, 1.2, true);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; }
       }
     }
     if (--this.life <= 0) this.killNow(game);

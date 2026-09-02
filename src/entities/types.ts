@@ -171,11 +171,21 @@ export interface GameHooks {
     opts?: { life?: number; damp?: number; grav?: number; size?: number; vx?: number; vy?: number;
       /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道——湖面星闪
        *  (move/60)/TTL、枭首者残影 vel/60 等双轴加速型 1:1 用；缺省 0）。
-       *  ★T2 接线待办：orchestraFx princess/stardust 两站接线待 F 完成后一行补
-       *  （princessWeapon/stardustPunch sparkle 原版 AccelerationPerFrame=−vector/60） */
+       *  ★F3 接线契约三件套（2026-09-02 红队 I′ 仲裁钉死,T2 待办消账）：
+       *  ①【缺省重力】ax/ay 任一在位 → 缺省 grav=0（Game.particleGravDefault;
+       *    编排粒子轨迹由 Velocity+APF 全责,显式 grav 恒优先）;
+       *  ②【TTL 耦合】APF 按 TTL 折算的站一律传 lifeExact（缺省 life 是
+       *    base×(0.6+0.4r) 抖动基值,喂 TTL 耦合公式=终速/位移积分漂移）;
+       *  ③【princess/stardust 两站接线公式】（orchestraFx,参数现成 moveX/moveY/rng,
+       *    ParticleOrchestrator.cs:3363/:3373-3374 及 stardustPunch 同构段）——
+       *      ax = −(moveX×(0.6+0.35r))/60, ay = −(moveY×(0.6+0.35r))/60,
+       *      vx/vy = move×(0.6+0.35r)×0.66, lifeExact: 60, grav: 0
+       *    （APF 用 ×0.66 之前的 vector;减速零点 t=39.6 后反向漂移 20 拍=原版手感;
+       *    同一 rng 掷取 pre-0.66 因子,mf=因子×0.66 双用不增掷）。 */
       ax?: number; ay?: number;
       /** 寿命不抖动档（编排粒子 TTL 耦合参数——加速度按 TTL 折算时必须同值,
-       *  否则终速/位移积分漂移；缺省走 base×(0.6+0.4r) 抖动） */
+       *  否则终速/位移积分漂移；★F3 契约②:APF 站一律走本档,
+       *  缺省走 base×(0.6+0.4r) 抖动） */
       lifeExact?: number },
   ): void;
   /** 定向粒子爆发（烟花爆花/喷泉/马桶水花等原版 dust 带初速方向的场景；

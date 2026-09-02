@@ -186,7 +186,12 @@ describe('δB 参数级清偿回归（红队五项;rng 注入）', () => {
       expect(Math.hypot(p.x - 300, p.y - 300))
         .toBeLessThanOrEqual(0.7 * 0.7 * 30 * 0.2 + 4 * 0.7 + 1e-9);     // 位向偏移+抖动包络
       expect(p.x !== 300 || p.y !== 300).toBe(true);        // 无钉死中心位（旧白伴生粒已删）
-      expect(p.color).toBe('rgba(255,184,71,0)');
+      // ★F-5（2026-09-02 对抗批）：色掷接线原文 :3843-3845 =Lerp(White,Lerp(Gold,
+      //  OrangeRed,t),0.5) A=0（r=255 恒/b=round(127.5)=128/g=235−73t∈[162,235]）——
+      //  旧钉死同色 fc(1,.72,.28,0)=rgba(255,184,71,0) 退役:三粒各掷各色
+      //  （mulberry32(67) → t=0.3725/0.5313/0.5368 → g=208/196/196）
+      expect(p.color).toBe(['rgba(255,208,128,0)', 'rgba(255,196,128,0)',
+        'rgba(255,196,128,0)'][band2.indexOf(p)]);
     }
     const src = readFileSync('src/fx/orchestraFx.ts', 'utf8');
     expect(src.includes('for (let k = 0; k < 3; k++)')).toBe(true);

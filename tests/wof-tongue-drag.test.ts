@@ -2,11 +2,15 @@
 // 原版 Player.WOFTongue(:22449-22515 上舌门) + Player.Update 拖拽段(:27623-27662,
 // tongued 时速度全覆写 → 拉向墙行进方向前缘 200px,11px/t、专家 lerp→22;到达松口)。
 // 本仓 wofTongue(Player.ts)——★拖拽段曾整段缺失(只有上舌/伤害/死亡判定)。
+// 2026-09-02 用户报"遇到地形拽不回来被卡住"：原版积分段 :28384-28388
+// `if (tongued) { position += velocity; }` 完全绕过瓦片碰撞（Sloping/传送带
+// :28435-28440 同跳）——速度覆写+无碰撞位移两半合起来才是完整拉回语义。
 import { describe, it, expect } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { BuffType } from '../src/stats/Buffs';
 import { TILE } from '../src/core/constants';
+import { World } from '../src/world/World';
 
 const HELL = 4200;   // world.h（地狱带在 3950*16 以下）
 
@@ -67,3 +71,72 @@ describe('肉山狂卷之舌拖拽（Player.cs:27623-27662）', () => {
 function worldOf(game: { world: unknown }): unknown {
   return game.world;
 }
+
+// ============ 穿地形拽回（Player.cs:28384-28388 tongued 绕过瓦片碰撞） ============
+describe('肉山舌头拖拽穿地形（2026-09-02 用户报"遇到地形卡住拽不回"）', () => {
+  /** 紧凑世界：墙 x=100*16 向东行进,玩家背后 x=1500,实体板 96-99 列横在拽回路径上 */
+  function makeBypassSetup() {
+    const w = new World(200, 600, 1, 'wof-tongue-bypass');   // ≥546:底部 40 格禁区(h*16-640)不得吃进地狱带
+    const wall = {
+      dead: false, vanillaId: 113, x: 100 * TILE, y: 4900, w: 20, h: 400,
+      cx: 100 * TILE + 10, cy: 500 * TILE, facing: 1, vx: 2.4, vy: 0, difficulty: 0,
+    };
+    const p = new Player(1500, 500 * TILE - 21, new Inventory());
+    (p as unknown as { baseMaxHp: number }).baseMaxHp = 9999;   // 过嘴部伤害带不死
+    p.hp = 9999;
+    // 实体板：拽回路径(1510→1810)上的 96-99 列,竖跨玩家身高带
+    for (let col = 96; col <= 99; col++) {
+      for (let row = 494; row <= 506; row++) w.store.setTileSilent(col, row, 1);
+    }
+    const hooks = {
+      world: w, player: p,
+      enemies: () => [wall],
+      critters: () => [],
+      spawnDrop: () => null,
+      damagePlayer: (): number => 0,
+      addDamageNumber: () => {},
+      cutTile: () => {},
+      onEnemyKilled: () => {},
+      spawnEnemy: () => {},
+      spawnParticles: () => {},
+      spawnDust: () => null,
+      notifyInventoryChanged: () => {},
+      playSfx: () => {},
+      playSfxFiles: () => {},
+      playSfxWav: () => {},
+      showPickupLabel: () => {},
+    };
+    return { w, wall, p, hooks: hooks as never };
+  }
+
+  it('tongued 位移绕过瓦片碰撞：实体板挡路仍被拽到墙前面(修复前卡在板西侧)', () => {
+    const { w, p, hooks } = makeBypassSetup();
+    const slabRight = 100 * TILE;                       // 板右缘 = 1600
+    expect(p.buffs.has(BuffType.TheTongue)).toBe(false);
+    p.fixedUpdate(1 / 60, hooks);                       // tick1: 地狱带自动上 Horrified
+    // tick2: gross 局部读数生效 + 背后 40px 外 → 上舌 38（wofTongue 头部读 gross/
+    // tongued 局部快照,申请.tick 次帧才进拖拽——上舌时序两 tick,与原版 UpdateBuffs
+    // 先置 tongued 再进拖拽段的一拍差同构）
+    p.fixedUpdate(1 / 60, hooks);
+    expect(p.buffs.has(BuffType.TheTongue)).toBe(true);
+    for (let t = 0; t < 60; t++) p.fixedUpdate(1 / 60, hooks);
+    // 穿板：无碰撞位移不吃 moveAndCollide 的挡板(修复前恒被挡在 ~1516)
+    expect(p.cx).toBeGreaterThan(slabRight);
+    // 到达前缘(墙前 200px 带) → 舌头松口
+    expect(p.buffs.has(BuffType.TheTongue)).toBe(false);
+  });
+
+  it('拖拽穿地形期间逐帧位移不归零(修复前 moveAndCollide 清 vx 卡死)', () => {
+    const { p, hooks } = makeBypassSetup();
+    p.fixedUpdate(1 / 60, hooks);                       // 上舌两拍预热(t1 Horrified/t2 舌)
+    p.fixedUpdate(1 / 60, hooks);
+    let minX = Infinity;
+    for (let t = 0; t < 20; t++) {
+      p.fixedUpdate(1 / 60, hooks);
+      minX = Math.min(minX, p.vx);
+    }
+    // 拖拽期 20 tick 全程向东(被拽向 1810),拖速不被地形清零
+    expect(p.vx).toBeGreaterThan(0);
+    expect(minX).toBeGreaterThan(0);
+  });
+});

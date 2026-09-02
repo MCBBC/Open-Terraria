@@ -3446,7 +3446,17 @@ export class Enemy extends Entity {
     // :61436-61441 ai[0]==-999 风气球挂载冻结（帧 0 不行动，位置由气球驱动）——
     //  原版时序在掷骰+携物梯之后：挂载体照掷物/照跑梯（风筝桶 isBallooned 链即
     //  依赖此序）。尾段点光（原版 :61442-61531）本就在早退后，无分歧
-    if (this.ai0 === -999) return;
+    //  ★F4（2026-09-02 红队 I′）：原版 AI 早退仍落【共享尾】velocity.Y+=gravity
+    //  +UpdateCollision（NPC.cs:91580-91607）——slave（type1 noGravity=false）挂载
+    //  期照吃重力,气球消散后 ~19 拍落地坐地;本仓冻结支裸 return = 零物理悬浮尸。
+    //  补共享尾等价（groundPhysics = applyGravity(:91580-91607+:91882-91952 含
+    //  per-type/高空/wet 档,ENEMY_GRAVITY 0.3+MAX_FALL_SPEED 10)+moveAndCollide,
+    //  与 slimeAI 正常尾 :3772 同款）再 return;气球活时下拍挂载写回
+    //  （windyBalloonAI 尾 slave.x/y/vx/vy 钉位）覆盖,零可见差异。
+    if (this.ai0 === -999) {
+      this.groundPhysics(game);
+      return;
+    }
     // ---- 史莱姆族点光（cs:61445-61456 / :61508-61515 / :61527-61531 / :61866-61870）----
     if (this.vanillaId === 244) {
       // :61444-61456 彩虹史莱姆 = Main.Disco 三色（6 相状态机 ≈ hsl 时间色，s=1 l=0.5）
@@ -7894,8 +7904,11 @@ export class Enemy extends Entity {
     if (this.justHit) this.stuckT = 0;
     // 近身（<200px 且本 tick 未计数）→ 清卡墙（cs:62928-62931）
     if (dist9 < 200 && !flag3) this.stuckT = 0;
-    // 跳梯（前方探测带 5×vx 提前量）
-    if (vxSign === dir && vxSign !== 0) {
+    // 跳梯（前方探测带 5×vx 提前量）——整块仅落地帧执行（AI_026 总门
+    // NPC.cs:63455 `if (velocity.Y == 0f)`）。曾缺门=空中每帧照跑,悬崖档每帧
+    // vy=-8 覆盖重力 → 独角兽 86 恒速 8px/t 爬升"飞天"（2026-09-02 用户实报,
+    // case 26 全族 86/155/329/315/410/423/546 同吃;fighterAI 同款块 :4666 有门）
+    if (this.vy === 0 && vxSign === dir && vxSign !== 0) {
       const fx = Math.floor((this.x + this.w / 2 + (this.w / 2 + 2) * dir + this.vx * 5) / TILE);
       const fy = Math.floor((this.y + this.h - 15) / TILE);
       if (this.h >= 32 && solidAt(fx, fy - 2)) {
@@ -10200,7 +10213,16 @@ export class Enemy extends Entity {
    *  （状态 2-7 宝箱引导链需要宝箱搜索基建，未移植备案） */
   private fairyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
-    if (!this.aiInit) { this.aiInit = true; this.ai0 = this.cx; this.ai1 = this.cy; this.ai2 = 0; this.ai3 = 0; }
+    // 圆舞朝向门（cs:49134 尾写 flag 门）——状态 3 / 状态 4 等玩家臂 / 状态 5 圆舞段
+    // 直写面向玩家并跳过方向尾写
+    let danceFace = false;
+    if (!this.aiInit) {
+      this.aiInit = true;
+      // 锚点补设（cs:48621-48623 仅 ai[0]==0&&ai[1]==0 时）。ai[2]/ai[3] 不清——
+      // 野生仙灵生成即 ai[2]=2 引导态（NPC.cs:3615-3623 SpawnNPC 第 8 参传 2f）,
+      // 曾在此无条件清零=引导链死码、fairyAge 永不累计(2026-09-02 审计 D7)
+      if (this.ai0 === 0 && this.ai1 === 0) { this.ai0 = this.cx; this.ai1 = this.cy; }
+    }
     // ---- 点光（cs:48991-49010）：value3 主色 ×0.7（value4 仅尘色不进光）
     //  583 粉仙灵 HotPink(255,105,180) / 584 绿仙灵 LimeGreen(50,205,50) /
     //  585 蓝仙灵 RoyalBlue(65,105,225)
@@ -10225,25 +10247,46 @@ export class Enemy extends Entity {
       // 曾逐帧 seekDirX 追人像宠物,审计 10.1,2026-08-19）
       if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) {
         this.facing = player.cx > this.cx ? -1 : 1;
+        if (this.vx * this.facing < 0) this.vx = this.facing * 2;   // 逃离起步踢(cs:48502-48504)
+        this.ai3 = 0;
         this.ai2 = 1;
       }
     } else if (this.ai2 === 1) {
-      // 逃逸飞（cs:48530-48553）：direction 只在 0→1 转换时设（背向玩家）,
-      // 此后仅 collideX 翻向;X 步进 0.04/逆行补 0.2、帽 4.5。引导态只能经
-      // 虫网释放进入（ReleaseNPC :80911 预置 ai[2]=2）——曾 40px 自发进引导
-      this.noTileCollide = false;   // cs:48521
-      if (this.facing === 1) { this.vx += 0.04; if (this.vx < 0) this.vx += 0.2; }
-      else { this.vx -= 0.04; if (this.vx > 0) this.vx -= 0.2; }
-      this.vx = Math.max(-4.5, Math.min(4.5, this.vx));
-      const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
-      const cy = Math.floor(this.cy / TILE);
-      let obstruction = 0;
-      for (let k = 0; k < 8; k++) {
-        if (st.isSolid(aheadX, cy + k) || st.liquid[st.idx(aheadX, cy + k)] > 0) { obstruction = k + 1; break; }
+      // 逃逸飞（cs:48660-48752）：direction 只在 0→1 转换时设（背向玩家）,
+      // 引导态只能经虫网释放进入（ReleaseNPC :80911 预置 ai[2]=2）——曾 40px 自发进引导
+      this.noTileCollide = false;   // cs:48661
+      // 撞墙折返 / 撞顶反向（cs:48663-48668 collideX/collideY;本仓 X 位=hitWall）
+      // ——曾缺=持续顶墙不折返(审计 D8;preCollideVy=碰撞前 vy 快照,moveAndCollide 前存)
+      if (this.hitWall) { this.facing *= -1; this.vx = this.facing * 2; }
+      if (this.collideY) this.vy = this.preCollideVy > 0 ? 1 : -1;
+      // X 渐近 4.5（cs:48670-48682 1:1:逆行补速分两档 |vx|>4.5→0.4/否则 0.2）
+      const num12 = 4.5;
+      if (Math.sign(this.vx) !== this.facing || Math.abs(this.vx) < num12) {
+        this.vx += this.facing * 0.04;
+        if (this.vx * this.facing < 0) {
+          if (Math.abs(this.vx) > num12) this.vx += this.facing * 0.4;
+          else this.vx += this.facing * 0.2;
+        } else if (Math.abs(this.vx) > num12) {
+          this.vx = this.facing * num12;
+        }
       }
-      if (obstruction > 0 && obstruction <= 5) this.vy -= 0.3;
-      else if (obstruction > 0) this.vy -= 0.2;
-      else this.vy += 0.05;
+      // 前方扫描窗 21×8（cs:48684-48717:num13=中心列、dir<0 左移 20——行进侧
+      // 整幅而非单列;内层 break 外层【不】break,任一列上 5 行有挡即 flag6）
+      const num13 = Math.floor(this.cx / TILE) + (this.facing < 0 ? -20 : 0);
+      const num15 = Math.floor((this.y + this.h) / TILE);
+      let allClear = true, highBlocked = false;
+      for (let i = num13; i <= num13 + 20; i++) {
+        for (let j = num15; j < num15 + 8; j++) {
+          if (st.isSolid(i, j) || st.liquid[st.idx(i, j)] > 0) {
+            if (j < num15 + 5) highBlocked = true;
+            allClear = false;
+            break;
+          }
+        }
+      }
+      if (allClear) this.vy += 0.05;
+      else this.vy -= 0.2;
+      if (highBlocked) this.vy -= 0.3;
       this.vy = Math.max(-5, Math.min(3, this.vy));
     } else if (this.ai2 === 2) {
       // ---- 状态 2 玩家引导（:48602-48684）：飞向玩家锚盒；接触 → 宝箱搜索 →
@@ -10281,7 +10324,7 @@ export class Enemy extends Entity {
         const r2 = 18;
         const nx = tx + Math.cos(ang) * r2, ny = ty + Math.sin(ang) * r2 - 14;
         this.vx = nx - this.cx; this.vy = ny - this.cy;
-        if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+        if (player && !player.dead) { this.facing = player.cx > this.cx ? 1 : -1; danceFace = true; }   // cs:48852-48860
       }
       this.ai3 += 1;
       if (this.ai3 >= 210) { this.ai2 = 4; this.ai3 = 0; }
@@ -10298,11 +10341,14 @@ export class Enemy extends Entity {
         } else if (player) {
           const dp = Math.hypot(player.cx - this.cx, player.cy - this.cy);
           if (dp > 300) {
-            // 等玩家（环形徘徊 + 召唤音 1/30,:48839 音27=Pixie）
+            // 等玩家（环形徘徊 + 召唤音 1/30,:48839 音27=Pixie）;面向玩家+尾写门
+            //（cs:48976-48984 flag=true + spriteDirection 直写）
             if (Math.random() < 1 / 30) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);
             const d2 = Math.hypot(this.cx - tx, this.cy - ty) || 1;
             this.vx += (this.cx - tx) / d2 * 0.1;
             this.vy += (this.cy - ty) / d2 * 0.1;
+            this.facing = player.cx > this.cx ? 1 : -1;
+            danceFace = true;
           } else {
             const d2 = Math.hypot(tx - this.cx, ty - this.cy) || 1;
             this.vx += (tx - this.cx) / d2 * 0.1;
@@ -10317,14 +10363,16 @@ export class Enemy extends Entity {
       //      消失 + FairyEffects（尘 278×40 爆散 + 音 Item4）----
       this.noTileCollide = true;
       const valid = fairyTreasureValidAt(st, this.ai0, this.ai1);
+      this.fairyAge = 0;   // localAI[1]=0(cs:49058 逐 tick 清=终演期不累计寿龄)
       if (this.ai3 === 15) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48913 音27=Pixie
       if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
       else {
-        // 绕目标小圆舞（同状态 3 简化）
+        // 绕目标小圆舞（同状态 3 简化）;面向玩家+尾写门（cs:49073-49091）
         const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
         const ang = (this.ai3 - 15) / 65 * Math.PI;
         const nx = tx + Math.cos(ang) * 18, ny = ty + Math.sin(ang) * 18 - 14;
         this.vx = nx - this.cx; this.vy = ny - this.cy;
+        if (player && !player.dead) { this.facing = player.cx > this.cx ? 1 : -1; danceFace = true; }
       }
       this.ai3 += 1;
       if (!valid) this.ai3 = Math.max(this.ai3, 201);   // 目标没了提前毕
@@ -10368,7 +10416,26 @@ export class Enemy extends Entity {
       this.vy -= 0.025;
       this.vy = Math.max(-5, Math.min(5, this.vy));
     }
-    this.facing = this.vx > 0 ? 1 : -1;
+    // ---- 呼吸闪粉尘 278（cs:49139-49161）：每 2 视效 tick 一粒,8×8 盒 @Center−2、
+    //      v=本速×0.3（spawn 自带 ±2 随机漂,后置覆写精确化）、scale 0.65、α 200、
+    //      noGravity/noLight;色 = Lerp(主色,副色,rand) ----
+    if (game.vanillaDust && visEffectFrames() % 2 === 0) {
+      const pal = this.vanillaId === 584 ? [[50, 205, 50], [32, 178, 170]]
+        : this.vanillaId === 585 ? [[65, 105, 225], [173, 216, 230]]
+        : [[255, 105, 180], [255, 182, 193]];
+      const k = Math.random();
+      const c = {
+        r: Math.round(pal[0][0] + (pal[1][0] - pal[0][0]) * k),
+        g: Math.round(pal[0][1] + (pal[1][1] - pal[0][1]) * k),
+        b: Math.round(pal[0][2] + (pal[1][2] - pal[0][2]) * k),
+        a: 255,
+      };
+      const d = game.vanillaDust.spawn(this.cx - 2, this.cy - 2, 8, 8, 278,
+        this.vx * 0.3, this.vy * 0.3, 200, c, 0.65);
+      if (d) { d.noGravity = true; d.noLight = true; d.vx = this.vx * 0.3; d.vy = this.vy * 0.3; }
+    }
+    if (!danceFace) this.facing = this.vx > 0 ? 1 : -1;   // cs:49134-49138 flag 门
+    this.preCollideVy = this.vy;   // oldVelocity 快照(:93739)——下一 tick 撞顶反向用
     moveAndCollide(this, game.world, this.vx, this.vy);
   }
 

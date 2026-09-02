@@ -292,11 +292,21 @@ describe('弹 949 生成与行为（AI_184）', () => {
 
     const spent = makeProjHarness(false, [20, 12]);
     const p2 = new TorchGodProj(16 * 20 - 8, 16 * 12, 8, 0, 8, 6, spent.dust);
-    p2.fixedUpdate(1 / 60, spent.game);         // ai[1]-=8 → ≤0 → tileCollide=true → 撞块
-    expect(p2.dead, '射程耗尽撞实心块 Kill').toBe(true);
+    p2.fixedUpdate(1 / 60, spent.game);         // ai[1]-=8 → 0：穿零拍不置 tileCollide（m-1）
+    expect(p2.dead, '穿零拍不置 tileCollide（:43591-43598 if/else）→ 当拍尚不 Kill').toBe(false);
+    p2.fixedUpdate(1 / 60, spent.game);         // 下一拍 else 支才置位 → 撞块 Kill
+    expect(p2.dead, '射程耗尽次拍撞实心块 Kill').toBe(true);
     expect(spent.sfx, 'Kill 音 Item10（:67634）').toContain('Item_10');
-    expect(spent.dustCalls.length, 'Kill 爆 20 粒（num18=20f :67636）').toBe(20);
-    expect(spent.dustCalls[0].velMul, 'Kill 尘 vel×0.8（:67646）').toBe(0.8);
+    // Kill 帧 = AI 先行 4 尾迹（vel×0.3,移前位）→ 位移 → Kill 20 爆尘（vel×0.8）= 24 粒
+    // （#3:尾迹循环上移到 moveAndCollide 之前;首拍尾迹 4 粒在最前,故 slice(4) 起为本杀帧）
+    const killFrame = spent.dustCalls.slice(4);
+    expect(killFrame.length, 'Kill 帧 4 尾迹 + 20 爆尘（:43596-43609 + :67636）').toBe(24);
+    for (const c of killFrame.slice(0, 4)) {
+      expect(c.velMul, 'Kill 帧尾迹 vel×0.3（:40127/:43599）').toBe(0.3);
+    }
+    for (const c of killFrame.slice(4)) {
+      expect(c.velMul, 'Kill 爆尘 vel×0.8（:67646）').toBe(0.8);
+    }
   });
 
   it('弹 AI：每 AI 4 粒尾迹沿 velocity/4×k 布点 vel×0.3（:40120-40130）', () => {

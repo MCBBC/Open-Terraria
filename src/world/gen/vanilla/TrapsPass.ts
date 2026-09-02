@@ -469,7 +469,7 @@ function checkBreakabilityT(st: TileStore, x: number, y: number): 0 | 1 | 2 {
     const scanForContainer = !CONTAINER_SHEETS.has(sh);
     // CheckTileBreakability_HasReasonToReturnEarly（cs:62524）
     // ★IIIII169（2026-09-02）拒杀树干豁免臂补移植（1457 cs:62906-62921；1456 同形
-    //   cs:62380-62435）——HasReason 命中后 vanilla 先分型再定拒/放：
+    //   cs:62435-62445）——HasReason 命中后 vanilla 先分型再定拒/放：
     //   ①上格=IsATreeTrunk（TileID.cs:161 全集）→ 三种"基座/树冠"帧形豁免放行
     //     （frameX 66 且 frameY 0..44 / frameX 88 且 frameY 66..110 / frameY≥198
     //     ⇒ return 0 可杀），其余帧形（干身/侧枝带）⇒ return 2 拒杀；

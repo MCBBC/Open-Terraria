@@ -126,6 +126,7 @@ import { assembleTooltipLines, materialIids } from './itemTooltip';
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
+import { mainDifficulty, GDL } from '../stats/ScaleStats';
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
@@ -472,9 +473,9 @@ const CSS = `
    自定义滚动条走经典常显渲染,绕开 macOS 覆盖式"滚动时才现"）。★不可叠加
    标准属性 scrollbar-width/scrollbar-color——Chromium 121+ 二者非 auto 即
    停用 ::-webkit-scrollbar 整套样式,退回覆盖式瞬现（2026-09-02 用户实报） */
-.sw-craft-list::-webkit-scrollbar { width:8px; }
-.sw-craft-list::-webkit-scrollbar-track { background:rgba(58,52,108,0.75); border-radius:4px; }
-.sw-craft-list::-webkit-scrollbar-thumb { background:rgb(150,170,236); border-radius:4px; }
+.sw-craft-list::-webkit-scrollbar { width:5px; }
+.sw-craft-list::-webkit-scrollbar-track { background:rgba(58,52,108,0.75); border-radius:3px; }
+.sw-craft-list::-webkit-scrollbar-thumb { background:rgb(150,170,236); border-radius:3px; }
 .sw-progress { position:fixed; inset:0; background:rgba(5,5,12,0.85); display:flex;
   flex-direction:column; align-items:center; justify-content:center; color:#e8e4f0; }
 .sw-progress .bar { width:320px; height:14px; background:#2a2440; border:1px solid #6a5a8a; border-radius:7px; margin-top:14px; overflow:hidden; }
@@ -1542,8 +1543,8 @@ export class UI {
     document.addEventListener('mousedown', (e) => {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
-      // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
-      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock')) return;
+      // ★.sw-eqdock/.sw-invstrip 同算面板（2026-09-02 无框区无 .sw-panel 底框）
+      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock, .sw-invstrip')) return;
       // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:41279-41282 商店格区）：
       //  · 行/按钮 → 各自 click 链（行 = 有货商店格；光标持有时 Game.npcShopBuy 内
       //    的 CanStack/满叠门裁决，异型整链无动作 PickItemMovementAction :1427-1438）
@@ -1801,9 +1802,9 @@ export class UI {
       this.placeTrash();
       return;
     }
-    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
-    // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
-    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock');
+    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞/面板下横条同算面板内
+    //（2026-09-02 无框区在 .sw-panel 之外——漏登记会把拖到其上标签/缝隙的物品当世界抛掷）
+    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-invstrip');
     if (!inPanel) {
       this.throwHeldToWorld();
     } else {
@@ -2238,6 +2239,7 @@ export class UI {
     this.invPanel.style.background = 'linear-gradient(rgba(38,50,90,0.55), rgba(22,30,58,0.58))';
     this.invPanel.style.borderColor = 'rgba(125,146,214,0.4)';
     this.invPanel.style.boxShadow = '0 0 0 1px rgba(10,14,30,0.45), 0 4px 16px rgba(0,0,0,0.4)';
+    this.positionDockStrip();   // 面板底缘随贴位变化 → 横条尾随（未显示时内部自守卫）
   }
 
   /** force=跳过开/关翻转（开箱路径 openChestPanel 用：解锁世界输入后「背包开着
@@ -2252,10 +2254,15 @@ export class UI {
     this.positionInvPanel();
     this.invPanel.style.display = 'block';
     if (this.eqDockEl) this.eqDockEl.style.display = 'flex';   // 右下角坞随开显
+    if (this.invStripEl) {   // 面板下横条随开显+贴位
+      this.invStripEl.style.display = 'flex';
+      this.positionDockStrip();
+    }
     // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正；
     // 配方列表高度同批二次刷新（首次采样布局未稳,LIST_H 偏大,hover 前不收敛）
     setTimeout(() => {
       this.positionInvPanel();
+      this.positionDockStrip();
       this.refreshVanillaCrafting();
     }, 120);
     this.refreshAll();
@@ -2284,6 +2291,7 @@ export class UI {
     this.closeHousingPanel();
     this.invPanel.style.display = 'none';
     if (this.eqDockEl) this.eqDockEl.style.display = 'none';   // 右下角坞随关收
+    if (this.invStripEl) this.invStripEl.style.display = 'none';   // 面板下横条随关收
     this.closeItemSearch();
     this.closeGuideSearch();
     this.closeChest();
@@ -3023,9 +3031,9 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
-  /** 右缘列（成就卡+图标行；杂项/PvP 列 2026-09-02 迁出）——配方列表高度的上对齐
-   *  基准（列表底 ≤ 列底） */
-  private advRailEl: HTMLElement | null = null;
+  /** 面板下横条（2026-09-02）：图标行（搜索/住房/图鉴）+成就卡+表情钮——锚在
+   *  背包面板底缘下方（positionDockStrip）,随背包开合显隐 */
+  private invStripEl: HTMLElement | null = null;
   /** 右下角无框坞（2026-09-02 用户要求）：装备列（配装行+染料/时装/装备+防御计数）
    *  与杂项/PvP 列的浮置容器——无面板底框,随背包开合显隐（open/closeInventory） */
   private eqDockEl: HTMLElement | null = null;
@@ -3233,7 +3241,7 @@ export class UI {
       // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
       // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
       // 如需再补应落在 Settings 而非背包顶栏）
-    // 图标行挂右缘列顶部（原 invPanel 顶行,2026-08-27）——advRail 创建于下方彼处 prepend
+    // 图标行挂面板下横条（2026-09-02 用户要求,原 invPanel 顶行 2026-08-27 曾挂右缘列）
 
     // ---- 右下角无框坞（2026-09-02 用户要求：配装列 + 杂项/PvP 列整体迁出背包
     //  面板，浮置屏幕右下角、无面板底框——降低对世界画面的遮挡。随背包开合显隐,
@@ -3474,9 +3482,9 @@ export class UI {
       e.stopPropagation();
       this.onEmoteMenu?.();
     });
-    clusterRow.appendChild(bEmote);
-    // ★2026-08-27 用户要求：堆叠/表情钮挂垃圾桶下方（原在背包网格下沿）——
-    //  与右缘列构成：弹药|钱币 → 垃圾桶 → 堆叠+表情 的纵向工具列
+    // 表情钮 → 面板下横条（2026-09-02 用户要求,挂载点见下方 invStrip 段）
+    // ★2026-08-27 用户要求：堆叠钮挂垃圾桶下方（原在背包网格下沿）——
+    //  右列构成：弹药|钱币 → 垃圾桶 → 堆叠 的纵向工具列
     rightRail.appendChild(clusterRow);
     body.appendChild(right);
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
@@ -3485,23 +3493,22 @@ export class UI {
     // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
-    // 右缘列：成就提示牌 + 顶排图标行（杂项/PvP 列 2026-09-02 迁右下角无框坞,
-    // advRail 只留图标行+成就卡——面板高度随之下收窄）
-    //   ★与左列 rightRail（垃圾桶/钱币）重名,此为 advRail）
-    const advRail = el('div');
-    this.advRailEl = advRail;
-    advRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; flex:none; align-items:center;';
-    advRail.appendChild(row);   // 图标行（搜索/住房/图鉴+联机/旅程钮）挂列顶
-    // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
-    this.achAdvisorEl.style.alignSelf = 'stretch';
-    advRail.appendChild(this.achAdvisorEl);
+    // ---- 面板下横条（2026-09-02 用户要求：图标行+成就卡+表情钮迁到背包面板
+    //  下方,advRail 侧列退役=面板进一步收窄）。透明无底框,位置随面板底缘走
+    //  （positionDockStrip:positionInvPanel/refreshVanillaCrafting 后重算）----
+    const invStrip = el('div', 'sw-invstrip');
+    invStrip.style.cssText = 'position:fixed; left:0; top:0; display:none; align-items:center;'
+      + 'gap:14px; pointer-events:auto; z-index:11;';
+    this.invStripEl = invStrip;
+    invStrip.appendChild(row);   // 图标行（搜索/住房/图鉴+联机/旅程钮）
+    invStrip.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡）同条
+    invStrip.appendChild(bEmote);   // 表情钮（原堆叠/表情簇,2026-09-02 迁此）
     // 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页）+ PvP/队伍钮 → 右下角坞右列
     //（2026-09-02 用户要求；此前挂 advRail 玩家对决原位）
     const miscStack = el('div');
     miscStack.style.cssText = 'display:flex; flex-direction:column; gap:10px; align-items:center;';
     miscStack.appendChild(miscRail);
     eqDock.appendChild(miscStack);
-    body.appendChild(advRail);
     this.invPanel.appendChild(body);
 
     // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：原版背包右下角；
@@ -3579,15 +3586,22 @@ export class UI {
       const p = this.game.player;
       const st = p.defense;
       const w = this.game.world;
-      // 伤害减免换算（:41567-41572）：大师 ×1.0 / 专家 ×0.75 / 普通 ×0.5
+      // 伤害减免换算（Main.cs:42831-42840）：大师 ×1.0 / 专家 ×0.75 / 普通 ×0.5,ceil
       const mul = w.isMaster ? 1.0 : w.isExpert ? 0.75 : 0.5;
       const reduce = Math.ceil(st * mul);
-      // 难度名 = 原版官译（UI.Softcore 经典 / UI.Expert 专家 / UI.Master 大师）
-      const diff = w.isMaster ? Lang.text('UI.Master') : w.isExpert ? Lang.text('UI.Expert') : Lang.text('UI.Softcore');
-      this.tooltip.innerHTML = `<b>${st} 防御</b><br><span style="color:#9a8ab8">伤害减免 ${reduce}%（${diff}）</span>`;
-      this.tooltip.style.display = 'block';
+      // 悬停文本三行结构（Main.cs:42878-42890）："N 防御"（inter[10]）/
+      // "受到的伤害降低N"（UI.DefenseDamageReduction）/难度行 传奇>大师>专家
+      //（经典无行）。★曾硬编码中文+难度并括号（双语档偏离）且【漏定位】——
+      // 共享 tooltip 元素停在旧位置=用户报"气泡不太对"（2026-09-02）
+      const dl = mainDifficulty(w);
+      const tipLines = [`${st} ${Lang.text('LegacyInterface.10')}`,
+        Lang.text('UI.DefenseDamageReduction', reduce)];
+      if (dl >= GDL.LEGENDARY) tipLines.push(Lang.text('UI.Legendary'));
+      else if (dl >= GDL.MASTER) tipLines.push(Lang.text('UI.Master'));
+      else if (dl >= GDL.EXPERT) tipLines.push(Lang.text('UI.Expert'));
+      this.showBuffTooltip(defWrap, tipLines[0], tipLines.slice(1).join('\n'));
     });
-    defRow.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
+    defRow.addEventListener('mouseleave', () => this.hideBuffTooltip());
     equipCol.appendChild(defRow);   // 装备列（第三列）正下方（原版画在装备区左侧垂直居中,用户指定装备列底）
 
     // 合成区 —— 挂 right（物品格容器）内部底部=物品格正下方（用户指定，
@@ -3641,6 +3655,20 @@ export class UI {
     craftWrap.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
     this.root.appendChild(eqDock);   // 右下角无框坞与面板平级（root 直挂,2026-09-02）
+    this.root.appendChild(invStrip);   // 面板下横条（root 直挂,随面板底缘贴位）
+    this.positionDockStrip();
+  }
+
+  /** 面板下横条贴位（2026-09-02）：左对齐面板左缘,顶=面板底+8。面板底随合成列表
+   *  高度动态变化（refreshVanillaCrafting 的 LIST_H）——该处尾随重算;面板藏起时
+   *  rect=0,只在打开路径调用即可 */
+  private positionDockStrip(): void {
+    const strip = this.invStripEl;
+    if (!strip || !this.invPanel) return;
+    const pr = this.invPanel.getBoundingClientRect();
+    if (pr.width < 4) return;   // 面板未显示（display:none 采到 0 尺寸）——跳过
+    strip.style.left = `${Math.round(pr.left)}px`;
+    strip.style.top = `${Math.round(pr.bottom + 8)}px`;
   }
 
   /** 滚轮时间戳——hover 预览 350ms 门（原生滚动经停行的 mouseenter 不预选） */
@@ -4718,16 +4746,16 @@ export class UI {
     const rows: Array<{ r: VanillaRecipeLike; count: number; met: boolean }> = avail
       .map((e, i) => ({ ...e, met: metFlags[i] }))
       .sort((x, y) => Number(y.met) - Number(x.met));
-    // ★2026-08-27 用户要求：列表高度对齐右缘列底（曾恒 240px 底部死区→改视口限
-    // 又溢出右缘列底 200px）——上限 = min(视口底-32, 右缘列底-8)，钳下限 240，
-    // 按行高整除取整（末行半裁观感即消失）。max-height 令短列表自然收合
-    // （不再手算 min(len*H)）。首帧布局未就绪（rect 0）时落 240 下限,后续刷新自校正
+    // ★2026-08-27 用户要求：列表高度钳视口（曾恒 240px 底部死区→改视口限）。
+    // 2026-09-02：advRail 侧列退役（图标行/成就卡/表情迁面板下横条）——上限只剩
+    // 视口钳制,并预留横条高度（96px ≈ 成就卡 56 + 图标行 32 + 缝）防列表底压住
+    // 横条；钳下限 240,按行高整除取整（末行半裁观感即消失）。max-height 令短列表
+    // 自然收合（不再手算 min(len*H)）。首帧布局未就绪（rect 0）时落 240 下限
     const rectTop = cl.getBoundingClientRect().top;
-    const advBottom = this.advRailEl?.getBoundingClientRect().bottom ?? 0;
-    const byViewport = window.innerHeight - 32 - rectTop;
-    const byRail = advBottom > rectTop ? advBottom - 8 - rectTop : Infinity;
-    const LIST_H = Math.max(240, Math.floor(Math.min(byViewport, byRail)));
+    const byViewport = window.innerHeight - 96 - rectTop;
+    const LIST_H = Math.max(240, Math.floor(byViewport));
     cl.style.maxHeight = `${Math.floor(LIST_H / UI.CRAFT_ROW_H) * UI.CRAFT_ROW_H}px`;
+    this.positionDockStrip();   // 列表高度变化 → 面板底缘移动 → 横条重贴
     // 内容签名比对：配方集/计数/满足态全等 → 跳过整表重建（列表 DOM 原样驻留，
     // 原生滚动位置天然不动）——hover/无关 refreshAll 不再付出 3300 行重建
     const prev = this.craftAvailRef;

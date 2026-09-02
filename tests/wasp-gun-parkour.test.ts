@@ -683,7 +683,10 @@ describe('M3 HiveFive 999：Game.spawnBee 落桶三链（Player.cs:12506-12531 +
   function beeGame(strongBees: boolean) {
     const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
     const player = new Player(50 * TILE, 90 * TILE, new Inventory());
-    (player.equipStats as unknown as { strongBees: boolean }).strongBees = strongBees;
+    if (strongBees) {
+      // 蜂巢背包 3333 走真装备链（equipStats 为计算 getter,不可直写——r30r31 ⑤ 同法）
+      player.inv.armor[3] = { id: invIndexOfVanilla(3333), stack: 1 };
+    }
     const added: Array<{ bucket?: string }> = [];
     g.player = player;
     g.entities = { add: (e: unknown, b?: string) => { added.push(Object.assign(e as object, { bucket: b })); }, projectiles: [] };

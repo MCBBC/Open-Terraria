@@ -913,8 +913,8 @@ class DWormlikeRoom extends DRoomBase {
   private sizeMin = 0; private sizeMax = 0;
   floodedTileCount(): number { return this.floodedN; }
   protectionAt(_st: TileStore, x: number, y: number): number {
-    // WormlikeDungeonRoom.cs:59-71
-    if (this.calculated && !this.outer.contains(x, y)) return Protection.Walls;   // base 外框内
+    // WormlikeDungeonRoom.cs:59-71 ★IIIII168 修正：守卫支回落基类= !Contains → None（曾误 Walls）
+    if (this.calculated && !this.outer.contains(x, y)) return Protection.None;
     const p0 = this.positionsArr[0];
     if (!this.positionsArr.length || !this.outer.contains(x, y)) return Protection.None;
     // ★IIIII156：C# `Positions[0].ToPoint()` 先截 origin（WormlikeDungeonRoom.cs:65）——
@@ -1042,8 +1042,10 @@ class DGenShapeRoom extends DRoomBase {
   private floodedN = 0;
   floodedTileCount(): number { return this.floodedN; }
   protectionAt(_st: TileStore, x: number, y: number): number {
-    // GenShapeDungeonRoom.cs:126-137
-    if (this.calculated && !this.outer.contains(x, y)) return Protection.Walls;
+    // GenShapeDungeonRoom.cs:126-137 ★IIIII168 修正：守卫支 (calculated && !OuterBounds.Contains)
+    // 回落基类=基类 !Contains → **None**（曾误写 Walls=外点保护反转——spider 厅 s0 墙写
+    // 62/0 vs JS 349 的对拍定谳：JS 把 GenShape 房外点当 Walls 保护,压住厅 wall 清写）。
+    if (this.calculated && !this.outer.contains(x, y)) return Protection.None;
     if (!this.outer.contains(x, y)) return Protection.None;
     if (!this.outerShape.contains(x - this.centerX(), y - this.centerY())) return Protection.None;
     return Protection.Walls;
@@ -1579,7 +1581,9 @@ class DLivingTreeRoom extends DRoomBase {
   private positionsArr: { x: number; y: number }[] = [];
   floodedTileCount(): number { return this.floodedN; }
   protectionAt(_st: TileStore, x: number, y: number): number {
-    if (this.calculated && !this.outer.contains(x, y)) return Protection.Walls;
+    // ★IIIII168 修正：守卫支 (calculated && !OuterBounds.Contains) 回落基类= None（曾误 Walls,
+    //   LivingTreeDungeonRoom.cs:54-64 同族三杀之一）。
+    if (this.calculated && !this.outer.contains(x, y)) return Protection.None;
     const p0 = this.positionsArr[0];
     if (!this.positionsArr.length || !this.outer.contains(x, y)) return Protection.None;
     if (!p0 || !this.outerShape.contains(x - p0.x, y - p0.y)) return Protection.None;
@@ -2132,6 +2136,8 @@ function hallCanPlaceAt(hall: DHallBase, st: TileStore, x: number, y: number, br
 }
 
 const VANILLA_TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.wallDungeon 基线集（Main.cs:10507-10513：7/8/9+94-99,不含神庙墙 87）。 */
+const VANILLA_WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 let _gvHolder: DungeonGenVars1457 | null = null;
 function setGvHolder(gv: DungeonGenVars1457, dual: boolean): void { _gvHolder = gv; void dual; }
 
@@ -2298,6 +2304,22 @@ class DSineHall extends DHallBase {
 class DStairwellHall extends DHallBase {
   declare settings: StairwellHallSettings;
   private segRoomsArea: DRoomBase[] = [];
+  /** ★IIIII168：StairwellDungeonHall.CanPlaceTileAt 覆写（StairwellDungeonHall.cs:227-234）
+   *  ——入口 stairwell 对已存在的 active dungeon 砖（Main.tileDungeon 静态集 41/43/44/677-679）
+   *  或 dungeon 墙（Main.wallDungeon 静态集 7/8/9/94-99）拒写。曾整缺 ⇒ 入口竖井把
+   *  先到的蓝砖(t41)覆写成本座砖(38)——x86 h0 post 对拍 9 格坐实（pre 双端全等、
+   *  x86 零写=覆写门拒,JS 覆写=门缺）。 */
+  canPlaceHallTile(st: TileStore, x: number, y: number, sheetTileType: number, sheetCrackedType: number): boolean {
+    if (!st.inBounds(x, y)) return false;
+    if ((this.settings as StairwellHallSettings).isEntranceHall) {
+      const i = st.idx(x, y);
+      if ((st.flags[i]! & 1 && VANILLA_TILE_DUNGEON.has(sheetOfInternal(st.type[i]!)))
+        || VANILLA_WALL_DUNGEON.has(st.wall[i]!)) {
+        return false;
+      }
+    }
+    return super.canPlaceHallTile(st, x, y, sheetTileType, sheetCrackedType);
+  }
   private run(data: DualDungeonData, ctx: DualLayoutCtx, sx: number, sy: number, ex2: number, ey2: number, generating: boolean): void {
     const ur = new UnifiedRandom(this.settings.randomSeed);
     this.bounds.set(Math.trunc(sx), Math.trunc(sy), Math.trunc(sx), Math.trunc(sy));
@@ -3598,10 +3620,25 @@ class DualProvider {
     this.calculateDungeonBounds(data.halls);
     drlMark(`DR|S|i${iN}|BND rc=${drlRc()}`);
     // —— 房间 GenerateRoom 循环 + PreHallways 特征 ——
-    for (const rm of data.rooms) rm.generateRoom(data, ctx);
+    // ★IIIII168：bbox 快照钩（dormant,零掷;__swI168BB 未挂载=零开销）——与 x86 rig
+    //   DumpBox i{iN}r{i}a/b、i{iN}p{j}a/b 同位同构（域固定取 generate 前值）。
+    const i168bb = (globalThis as { __swI168BB?: (tag: string, l: number, t: number, r: number, b: number) => void }).__swI168BB;
+    for (let i = 0; i < data.rooms.length; i++) {
+      const rm = data.rooms[i]!;
+      const bl = i168bb ? rm.outer.L : 0, bt = i168bb ? rm.outer.T : 0, br = i168bb ? rm.outer.R : 0, bb2 = i168bb ? rm.outer.B : 0;
+      i168bb?.(`i${iN}r${i}a`, bl, bt, br, bb2);
+      rm.generateRoom(data, ctx);
+      i168bb?.(`i${iN}r${i}b`, bl, bt, br, bb2);
+    }
     drlMark(`DR|S|i${iN}|RGN rc=${drlRc()}`);
     ctx.snap('dualRoomsGen');
-    for (const rm of data.rooms) rm.generatePreHallwaysFeatures?.(data, ctx);
+    for (let j = 0; j < data.rooms.length; j++) {
+      const rm = data.rooms[j]!;
+      const bl = i168bb ? rm.outer.L : 0, bt = i168bb ? rm.outer.T : 0, br = i168bb ? rm.outer.R : 0, bb2 = i168bb ? rm.outer.B : 0;
+      i168bb?.(`i${iN}p${j}a`, bl, bt, br, bb2);
+      rm.generatePreHallwaysFeatures?.(data, ctx);
+      i168bb?.(`i${iN}p${j}b`, bl, bt, br, bb2);
+    }
     drlMark(`DR|S|i${iN}|PRH rc=${drlRc()}`);
     ctx.snap('dualPreHall');
     // —— 大厅次序生成：cracked-brick → spider(style12) → 其余 ——
@@ -3609,18 +3646,36 @@ class DualProvider {
     const spiderList = data.halls.filter((hh) => hh.settings.style.Style === 12);
     let countGen = 0;           // C# num2 同口径：仅 calculated 时++
     let anyTouched = 0;
-    for (const hh of crackedList) {
+    for (let k = 0; k < crackedList.length; k++) {
+      const hh = crackedList[k]!;
       void ++anyTouched;
-      if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
+      if (hh.calculated && !hh.generated) {
+        const bl = i168bb ? hh.bounds.L : 0, bt = i168bb ? hh.bounds.T : 0, br = i168bb ? hh.bounds.R : 0, bb2 = i168bb ? hh.bounds.B : 0;
+        i168bb?.(`i${iN}c${k}a`, bl, bt, br, bb2);
+        countGen++; hh.generateHallData(data, ctx);
+        i168bb?.(`i${iN}c${k}b`, bl, bt, br, bb2);
+      }
     }
-    for (const hh of spiderList) {
+    for (let l = 0; l < spiderList.length; l++) {
+      const hh = spiderList[l]!;
       void ++anyTouched;
-      if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
+      if (hh.calculated && !hh.generated) {
+        const bl = i168bb ? hh.bounds.L : 0, bt = i168bb ? hh.bounds.T : 0, br = i168bb ? hh.bounds.R : 0, bb2 = i168bb ? hh.bounds.B : 0;
+        i168bb?.(`i${iN}s${l}a`, bl, bt, br, bb2);
+        countGen++; hh.generateHallData(data, ctx);
+        i168bb?.(`i${iN}s${l}b`, bl, bt, br, bb2);
+      }
     }
-    for (const hh of data.halls) {
+    for (let m = 0; m < data.halls.length; m++) {
+      const hh = data.halls[m]!;
       if (!hh.crackedBrick && hh.settings.style.Style !== 12) {
         void ++anyTouched;
-        if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
+        if (hh.calculated && !hh.generated) {
+          const bl = i168bb ? hh.bounds.L : 0, bt = i168bb ? hh.bounds.T : 0, br = i168bb ? hh.bounds.R : 0, bb2 = i168bb ? hh.bounds.B : 0;
+          i168bb?.(`i${iN}h${m}a`, bl, bt, br, bb2);
+          countGen++; hh.generateHallData(data, ctx);
+          i168bb?.(`i${iN}h${m}b`, bl, bt, br, bb2);
+        }
       }
     }
     drlMark(`DR|S|i${iN}|HG g=${countGen}|mr=${drlMr()}|rc=${drlRc()}`);

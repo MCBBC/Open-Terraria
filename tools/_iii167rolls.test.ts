@@ -10,6 +10,8 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG, UnifiedRandom } from '../src/core/rng';
 
 const RUN = process.env.SW_I167_ROLLS === '1';
+/** SW_I167_STACKS=1：每掷附最近 3 帧（src 域过滤）——与 rig SW_TAGLOG 帧序列对位 */
+const STACKS = process.env.SW_I167_STACKS === '1';
 const SEED = process.env.SW_I167_SEED ?? 'waterpark|20260905';
 const EVIL = Number(process.env.SW_I167_EVIL ?? 0);
 const OUT = process.env.SW_I167_ROLLS_OUT ?? '/tmp/iii167-out/jsrolls-wpk.txt';
@@ -46,7 +48,20 @@ const DUMPNAME = new Map<number, string>();
   g.__swOnRoll = (v: number, inst: object) => {
     if (!rec || lines.length > 60_000_000) return;
     ln++;
-    lines.push(`R|${ln}|${v}`);
+    if (STACKS && ln <= 6000) {
+      const save = Error.stackTraceLimit;
+      Error.stackTraceLimit = 10;
+      const st = new Error().stack ?? '';
+      Error.stackTraceLimit = save;
+      const fr = st.split('\n').slice(2)
+        .map((s) => s.trim())
+        .filter((s) => !/rng\.ts|core\/|node_modules|vitest/.test(s))
+        .map((s) => s.replace(/^at /, '').replace(/ \/Users[^ ]*game\//, ' ').replace(/\?.*$/, '').slice(0, 80))
+        .slice(0, 3);
+      lines.push(`R|${ln}|${v}|${fr.join('|')}`);
+    } else {
+      lines.push(`R|${ln}|${v}`);
+    }
     if (ln % 65536 === 0) process.stderr.write(`[rolls] ${ln}\n`);
   };
   class AbortOK extends Error {}

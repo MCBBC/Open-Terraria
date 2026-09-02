@@ -120,6 +120,9 @@ export interface ProjStatusCtx {
  *  局部变量时长表达式提取器不识别（SKIP 名单在案），按源码钉值代码层并表 */
 const PROJ_STATUS_1457_HANDPATCH: Record<number, StatusEntry[]> = {
   549: [{ buff: 70, chance: 1, durMin: 120, durMax: 120, src: 11456 }],
+  // 309 冰九头蛇冰弹:Frostburn2 300t 固定(AddBuff(324,300),StatusNPC :11307-11309
+  // ——提取器 SKIP(友好召唤弹无 ExtractBuff 链);frostburn2T 消费=25 HP/s :92668-92680)
+  309: [{ buff: 324, chance: 1, durMin: 300, durMax: 300, src: 11307 }],
 };
 
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, ctx?: ProjStatusCtx): void {

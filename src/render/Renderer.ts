@@ -1421,6 +1421,9 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 月总游离眼 400（FindFrame case 400，cs:72650-72664）：counter 每 tick +1，
   // ai[0]∈{0,3}（悬停/洒射）再 +1 = 2t 一帧、否则 4t；≥16 回卷 → 帧 0-3
   if (id === 400) return Math.floor(t / (e.ai0 === 0 || e.ai0 === 3 ? 2 : 4)) % 4;
+  // 仙灵三色 583-585（FindFrame case 583-585，cs:70617-70630）：4t 一帧全循环
+  // （曾落 6t 兜底=拍翅慢 1.5×,2026-09-02 用户实报神圣精灵动画不对）
+  if (id === 583 || id === 584 || id === 585) return Math.floor(t / 4) % frames;
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -3597,8 +3600,11 @@ export class Renderer {
       ctx.translate(-camRX2, -camRY2);
       ctx.imageSmoothingEnabled = false;
       for (const ent of entities) {
-        if (ent instanceof Enemy && !ent.dead && ent.vanillaId === 677) {
-          this.drawFaeling(ent, world);
+        if (ent instanceof Enemy && !ent.dead) {
+          if (ent.vanillaId === 677) this.drawFaeling(ent, world);
+          else if (ent.vanillaId === 583 || ent.vanillaId === 584 || ent.vanillaId === 585) {
+            this.drawFairyBright(ent);   // GetAlpha Lerp(light,White,0.5)（cs:94662-94665）
+          }
         }
       }
       ctx.restore();
@@ -6126,6 +6132,7 @@ export class Renderer {
         else if (stR === 68) ctx.rotate(e.vx * 0.1);   // AI_068 水鸟族:同款倾斜 vx*0.1(cs:74487,湿态归零近似省略)
         else if (stR === 65) ctx.rotate(e.vx * 0.3);   // AI_065 蝶族:倾斜 vx*0.3(cs:73426)
         else if (stR === 66) ctx.rotate(e.spin);      // AI_066 蠕虫族:FindFrame case 357/485(:73460/:73541)——腾空自旋方向×0.1/t 累积、贴地归零、坡面 ±0.785(wormCritterAI 维护)
+        else if (stR === 112) ctx.rotate(e.vx * 0.1);  // AI_112 仙灵:FindFrame case 583-585 rotation=vx×0.1(cs:70620)——飞行俯仰倾斜;spriteDirection 仍镜像(反翻族见下)
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         // 原版默认朝左(flip 当 spriteDirection==1);旋转族(rotationDriven)禁镜像;
@@ -6134,6 +6141,10 @@ export class Renderer {
         // 蚯蚓族 357/374/448/484/606 case 从不设 spriteDirection(:73455)→恒不镜像
         // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
+        // 仙灵三色 583-585:AI_112 尾 spriteDirection=-direction(cs:49134-49138)——
+        // 贴图原生朝右、反翻族,与鸮族同款"facing<0 才翻"(曾走通用 facing>0 翻=
+        // 倒飞背对行进向,2026-09-02 用户实报)
+        const fairyMirror = idR === 583 || idR === 584 || idR === 585;
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
         // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
         const sdirNeg = e.vanillaId === 546;
@@ -6148,9 +6159,20 @@ export class Renderer {
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
-        if (!rotationDriven && (owlMirror || sdirNeg) && e.facing < 0) ctx.scale(-1, 1);
+        // AI_006 三族定向镜像（NPC.cs:52163-52173 逐 tick 速度写 spriteDirection +
+        // :52459-52467 段跟随块按 num49 写;DrawNPC :23357-23361 sdir==1 → 翻面）:
+        // 87-92 飞龙/454-459 幻影龙/621-623 血鳗鱼贴图基础【朝右】、向左行进才翻——
+        // 与通用 facing 门极性相反,且 rotationDriven 族不进通用门,曾缺=向左飞时
+        // 背腹倒置(绿鳍朝下/肚皮朝上,2026-09-02 用户实报飞龙)。
+        // 极性:头 facing=vx 符号(1=向右,Enemy:903)→ flip 门 facing<0;
+        // 段 facing=dxC 符号(1=头在左=向左行,Enemy:930,≡原版 spriteDirection)
+        // → flip 门 facing>0。vx==0/dxC==0 原版保前值,此处静态近似(瞬态)。
+        const wyrmMirror = stR === 6
+          && ((idR >= 87 && idR <= 92) || (idR >= 454 && idR <= 459) || (idR >= 621 && idR <= 623));
+        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !fairyMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && (owlMirror || sdirNeg || fairyMirror) && e.facing < 0) ctx.scale(-1, 1);
         if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
+        if (wyrmMirror && (e.wormFollow ? e.facing > 0 : e.facing < 0)) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -6527,6 +6549,9 @@ export class Renderer {
   /** 自发光弹光照地板账本（raiseSelfLuminousProjLight 抬亮过的格,四元组平铺
    *  idx,r,g,b——compositeLight 后 restoreSelfLuminousProjLight 按此还原原值） */
   private _lumFloorTouched: number[] = [];
+  /** 同账本去重面（★2026-09-02 对抗附带项：原 includes 线性扫 = 大弹跨格/多弹同格
+   *  O(n²)——Set O(1) 命中等价,首触记账语义不变（先记原值再抬亮） */
+  private _lumFloorSeen = new Set<number>();
 
   // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
@@ -7461,6 +7486,44 @@ export class Renderer {
       this._faelingTint = t; this._faelingSil = s;
     }
     return this._faelingTint && this._faelingSil ? [this._faelingTint, this._faelingSil] : null;
+  }
+
+  /** 仙灵三色 583-585 GetAlpha 半白提亮（NPC.cs:94662-94665
+   *  `Lerp(lightColor, White, 0.5)`）——光照合成后以 α=0.5 复绘同帧,与主 pass
+   *  光照×精灵叠加精确等价：0.5·(light·s) + 0.5·s ≡ s·Lerp(light,White,0.5)。
+   *  曾缺=暗处精灵本体被全屏乘光压暗只剩自家光晕（2026-09-02 用户实报
+   *  神圣精灵动画效果不对）。变换三件套（rotation=vx×0.1 cs:70620 / 反翻镜像
+   *  cs:49137 / 锚+footFlush :6212-6218 同式）与主 pass 逐项一致防鬼影。 */
+  private drawFairyBright(e: Enemy) {
+    if (!this.atlas || e.vanillaId == null) return;
+    const img = this.atlas.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
+    if (!img || !(img.width > 0)) return;
+    const frames = 4, fw = img.width, fh = img.height / frames;   // 24×96 → 24×24 帧
+    const idx = vanillaFrameIdx(e, frames);
+    const sy = idx * fh;
+    const scale = e.vanillaScale || 1;
+    // 锚复刻（drawEnemy :6212-6218 同式;仙灵 HB_ADD_H/DRAW_NUM47_OVERRIDE 无条目
+    // → addY=0;num46/num47 亦无条目=0）
+    let footFlush = 0;
+    if (npcFootFlushOn() && !npcFootBiasExempt(e.vanillaId)) {
+      const fmaxRow = npcContentBottomRow(img, sy, fw, fh);
+      if (fmaxRow >= 0) {
+        const dyTarget = e.h / (2 * scale) - fmaxRow - 1;
+        footFlush = Math.max(-24, Math.min(24,
+          Math.round((dyTarget - (-fh / 2)) * 100) / 100
+          + npcFootBiasExtra() + npcFootBiasOverride(e.vanillaId)));
+      }
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(e.cx, e.cy);
+    ctx.rotate(e.vx * 0.1);
+    ctx.scale(scale, scale);
+    if (e.facing < 0) ctx.scale(-1, 1);
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(img, 0, sy, fw, fh, -fw / 2, -fh / 2 + footFlush, fw, fh);
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   private drawFaeling(e: Enemy, world: World) {
@@ -9090,52 +9153,93 @@ export class Renderer {
     }
   }
 
-  /** ★T1 自发光弹光照地板系数表（2026-09-02 清偿"登记不修"批）：原版这些弹的
-   *  绘制顶点色在【光照结算之后】向白提亮 = 自发光,暗处仍亮——
+  /** ★T1 自发光弹光照地板系数表（2026-09-02 清偿"登记不修"批;同日红队 I′ 对抗
+   *  F1/F2 修订:地板动态化 + 对弹自身 α 敏感）——原版这些弹的绘制顶点色在
+   *  【光照结算之后】向白提亮 = 自发光,暗处仍亮——
    *    · 596（星旋族弹,GetAlpha 同表 575/659）：白剪影 Projectile.cs:80903-80910
-   *      `new Color(255-alpha,255-alpha,255-alpha,128-alpha/2)`——灰度通道不乘光照色,
-   *      白度动态值 (128−α/2)/255 按全显态 α=0 简化为固定地板 0.5 档（备案）；
+   *      `new Color(255-alpha,255-alpha,255-alpha,128-alpha/2)`——**RGB=(255−α) 才是
+   *      顶点色乘数（α=0 全显态=1.0）**,A 通道 128−α/2 的半透已由 Dart.draw
+   *      globalAlpha 重放、不进地板（★F1 定罪:旧固定 0.5 档系误把 A=128/255 当
+   *      自发光档）；
    *    · 811：Main.cs:30841-30848 轨迹支 `Lerp(projectileColor,White,Remap(ai0,
-   *      0,15,1,0.3))` 取恒亮端 k=1.0 档（本仓 Dart 侧 whiteLerp 同源已画）；
-   *    · 814：Main.cs:30849-30856 轨迹支 `Lerp(projectileColor,White,0.35)` → 0.35 档。
+   *      0,15,1,0.3))` 恒亮端 k=1.0（本仓 Dart 侧 whiteLerp 同源已画）；
+   *    · 814：Main.cs:30849-30856 轨迹支 `Lerp(projectileColor,White,0.35)` → k=0.35。
+   *      811/814 轨迹 Lerp 发生在 GetAlpha 缺省段（P.cs:81503-81510 RGB×(255−α)/255）
+   *      【之前】→ 白度终值 = k×(255−α)/255（811 AI α−20/t 出场 13 拍渐显,
+   *      P.cs:57347-57351）。
+   *  ★F2:地板必须逐弹按自身 α 缩放——596 渐显（AI α−25/拍）/渐隐窗（timeLeft<30
+   *  GetAlpha 就地覆写）/穿墙钳 128（:34208-34219）三段、811/814 出场渐显窗内,
+   *  原版弹不可见或半透,地板恒满档 = 无源白块。故表值改 `(proj)=>number` 动态
+   *  形态,消费点（raiseSelfLuminousProjLight）逐弹求值;系数 <0.06 整体跳过该实体
+   *  （原版近不可见窗）。effAlpha 式与 Dart.draw 同源,见 selfLumEffAlpha。
    *  本仓实体层（含弹）画在 compositeLight 全屏乘光【之前】→ 暗处被乘黑,与原版
    *  "白剪影×任意光照恒可见"相悖。最小侵入挂点 = 光值数组写入口（applyMoonLord
    *  LightFloor 加性补差方案的轻量变体,弹无独立绘制通道不宜重画）:合成前把弹
    *  AABB 覆盖格的光通道抬到 floor×255 白地板,合成后立即还原（render 7 段成对
    *  调用）。与既有白剪影滤镜叠加语义成立:终像素 = 白剪影 × 抬亮地板 ✓
    *  已知边界（备案,同月总补差的 z 序取舍）:①同格地形/后画实体像素同吃抬亮,
-   *  原版只亮弹本体;②弹盒跨格边缘受双线性插值向邻格暗值渐变——固定地板系数
-   *  已按最暗侧可辨识度取档,白天光照≥地板时零改动零开销。 */
-  private static readonly SELF_LUMINOUS_PROJS = new Map<number, number>([
-    [596, 0.5], [811, 1.0], [814, 0.35],
+   *  原版只亮弹本体;②弹盒跨格边缘受双线性插值向邻格暗值渐变——白天光照≥地板
+   *  时零改动零开销;③有色光区白剪影仍被染色（原版 596 GetAlpha 不读格光色=恒白,
+   *  本仓弹画在乘光前）——去色不做（2026-09-02 红队 I′ 仲裁登记:与月总补差
+   *  z 序取舍同账,待 post-light 弹绘制通道一并清偿）。 */
+  private static readonly SELF_LUMINOUS_PROJS = new Map<number, (proj: Entity) => number>([
+    // 596: RGB(255−α) 白化（GetAlpha 专支不读格光色）;effAlpha 已含 timeLeft<30 渐隐窗
+    [596, (proj) => (255 - Renderer.selfLumEffAlpha(proj)) / 255],
+    // 811: whiteLerp k=1.0（Remap(ai0,0,15,1,0.3) 恒下端,ai[0] 全域无写入方）× (255−α)/255
+    [811, (proj) => (255 - Renderer.selfLumEffAlpha(proj)) / 255],
+    // 814: whiteLerp k=0.35 × (255−α)/255
+    [814, (proj) => 0.35 * (255 - Renderer.selfLumEffAlpha(proj)) / 255],
   ]);
 
-  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板（账本记账） */
+  /** 弹自身 effAlpha（★F2:与 Dart.draw 消费式同源）——596 在 timeLeft<30 渐隐窗内
+   *  GetAlpha 就地覆写 α=255−255·timeLeft/30（P.cs:80905-80907）,其余读
+   *  projectile.alpha（AI 维护:596 渐显 −25/拍 + 实心盒钳 128 :34208-34219 /
+   *  811·814 α−20/t 渐显 :57347-57351）。netPuppet 傀儡不跑 dartStep 而 draw 恒
+   *  可见（Dart.draw netPuppet 门）→ 按全显 α=0 计 */
+  private static selfLumEffAlpha(proj: Entity): number {
+    const p = proj as { projId?: number; alpha?: number; life?: number; netPuppet?: boolean };
+    if (p.netPuppet) return 0;
+    if (p.projId === 596 && (p.life ?? 600) < 30) return 255 - 255 * ((p.life ?? 0) / 30);
+    return Math.max(0, Math.min(255, p.alpha ?? 0));
+  }
+
+  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板（账本记账；
+   *  ★F2 地板 = 表值逐弹求值,弹自身 α 窗内同步缩放） */
   private raiseSelfLuminousProjLight(
     entities: Entity[],
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ): void {
     this._lumFloorTouched.length = 0;
+    this._lumFloorSeen.clear();
     if (this.fullbright) return;
     for (const e of entities) {
       if (e.dead) continue;
       const pid = (e as { projId?: number }).projId;
       if (pid === undefined) continue;
-      const floor = Renderer.SELF_LUMINOUS_PROJS.get(pid);
-      if (floor === undefined) continue;
+      const lumOf = Renderer.SELF_LUMINOUS_PROJS.get(pid);
+      if (lumOf === undefined) continue;
+      // ★F2 逐弹求值地板：596=(255−α)/255（渐显/渐隐窗/穿墙钳三段）、
+      //    811/814=whiteLerp k×(255−α)/255（出场渐显）——近不可见窗（<0.06）
+      //    整体跳过,防"无源白块"
+      const floor = lumOf(e);
+      if (floor < 0.06) continue;
+      const fr = Math.round(255 * floor);
       // 弹 AABB 覆盖格（中心单点不够——大弹跨格,白剪影须整盒抬亮）
       const tx0 = Math.floor(e.x / TILE), tx1 = Math.floor((e.x + e.w) / TILE);
       const ty0 = Math.floor(e.y / TILE), ty1 = Math.floor((e.y + e.h) / TILE);
       const touched = this._lumFloorTouched;
+      const seen = this._lumFloorSeen;
       for (let ty = ty0; ty <= ty1; ty++) {
         if (ty < ry || ty >= ry + rh) continue;
         for (let tx = tx0; tx <= tx1; tx++) {
           if (tx < rx || tx >= rx + rw) continue;
           const li = (ty - ry) * rw + (tx - rx);
-          const fr = Math.round(255 * floor);
           if (lightR[li] >= fr && lightG[li] >= fr && lightB[li] >= fr) continue;
-          if (!touched.includes(li)) touched.push(li, lightR[li], lightG[li], lightB[li]);
+          if (!seen.has(li)) {
+            seen.add(li);
+            touched.push(li, lightR[li], lightG[li], lightB[li]);
+          }
           if (lightR[li] < fr) lightR[li] = fr;
           if (lightG[li] < fr) lightG[li] = fr;
           if (lightB[li] < fr) lightB[li] = fr;
@@ -9155,6 +9259,7 @@ export class Renderer {
       lightB[t[i]] = t[i + 3];
     }
     this._lumFloorTouched.length = 0;
+    this._lumFloorSeen.clear();
   }
 
   private drawBrightVines(

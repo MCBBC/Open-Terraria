@@ -595,6 +595,27 @@ export class VanillaDust {
       case 110: case 111: case 112: case 113: case 114:
       case 311: case 312: case 313:
         return { rgb: 200 / 255, a: 0 };
+      // ---- ★2026-09-02 A=0 加性族完备批（GetAlpha :2497-2755 全量 A=0 档对账，
+      //  消费走 Renderer A=0 'lighter' 加性通道；rgb=返回色 RGB/255）----
+      case 204: return { rgb: 1, a: 0 };                                        // :2593-2595 (255,255,255,0)
+      case 181: return { rgb: 200 / 255, a: 0 };                                // :2596-2598 (200,200,200,0)
+      case 163: case 205: return { rgb: 250 / 255, a: 0 };                      // :2605-2607 (250,250,250,0)
+      case 180: case 175: return { rgb: 200 / 255, a: 0 };                      // :2612-2618 (200,200,200,0)
+      case 183: return { rgb: 0, a: 0 };                                        // :2619-2621 (50,0,0,0)——红通道非白，rgb≈0 弃本体（备案）
+      case 160: case 162: case 164: case 173:                                   // :2627-2630 (250×scale,…,0)
+        return { rgb: Math.min(1, (250 * d.scale) / 255), a: 0 };
+      case 92: case 106: case 107: return { rgb: 1, a: 0 };                     // :2631-2633 (255,255,255,0)
+      case 156: case 234: return { rgb: 1, a: 0 };                              // :2664-2666 与 230 同句 (255,255,255,0)
+      case 68: case 70: return d.noGravity ? { rgb: 1, a: 0 } : { rgb: num, a: num };   // :2692-2695 noGravity 门
+      case 254: case 255: return { rgb: 1, a: 0 };                              // :2516-2518 (255,255,255,0)
+      case 235: return { rgb: 1, a: 0 };                                        // :2562-2564 (255,255,255,0)
+      case 258: return { rgb: 0, a: 0 };                                        // :2519-2521 (150,50,50,0)——彩色非白，本体弃（备案）
+      case 262: case 286: case 138: case 325:                                   // :2565-2568 与 86-91 同句 !noLight 门
+        if (!d.noLight) return { rgb: 1, a: 0 };
+        return { rgb: num, a: num };
+      case 64:                                                                  // :2576-2578 α==255&&noLight 门
+        if (d.alpha === 255 && d.noLight) return { rgb: 1, a: 0 };
+        return { rgb: num, a: num };
       default:
         return { rgb: num, a: num };
     }

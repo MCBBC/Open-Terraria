@@ -66,9 +66,10 @@ function mkH(): H {
 }
 const asG = (h: H): Parameters<typeof itemTransferFx>[0] => h as unknown as Parameters<typeof itemTransferFx>[0];
 
-describe('★F6 形锚① circ 线性盘（NextVector2Circular,Utils.cs:1301-04）', () => {
-  // itemTransferFx bit0 项圈粒初速 = circ(24,24)（仓内 Square 近似位,单掷共享）
-  it('支撑集 P(R>max)=0 且 E[R]≈max/2（盒均匀版 E=2/3·max、P(R>max)>0 均判红）', () => {
+describe('★F6 形锚① itemTransfer bit0 初速（NextVector2Square,Utils.cs:1286-88）', () => {
+  // ★F-14（2026-09-02 对抗批）：原版 :2697=NextVector2Square(-1,1) 逐轴均匀 ×24——
+  //  旧 circ(24,24) 线性盘近似退役（支撑集=方形、E[R]=24·E[√(U²+V²)]=24×0.76520≈18.36）
+  it('支撑集=方形（|vx|,|vy|≤24）且 E[R]≈18.36（旧 circ 盘 E=12 判红）', () => {
     const N = 100000;
     const rng = mulberry32(20260901);
     let sum = 0;
@@ -79,18 +80,18 @@ describe('★F6 形锚① circ 线性盘（NextVector2Circular,Utils.cs:1301-04�
       const p = h.particles[0];
       const r = Math.hypot(Number(p.vx), Number(p.vy));
       sum += r;
-      if (r > 24 + 1e-9) overflow++;
+      if (Math.abs(Number(p.vx)) > 24 + 1e-9 || Math.abs(Number(p.vy)) > 24 + 1e-9) overflow++;
     }
-    expect(overflow).toBe(0);                       // 支撑集闭合（盘内）
-    expect(sum / N).toBeGreaterThan(11.9);          // E[R]=24/2=12（SE≈0.022）
-    expect(sum / N).toBeLessThan(12.1);
+    expect(overflow).toBe(0);                       // 逐轴支撑闭合（方形）
+    expect(sum / N).toBeGreaterThan(18.26);         // E[R]≈18.36（SE≈0.022）
+    expect(sum / N).toBeLessThan(18.46);
   });
 
-  it('C2 单掷契约：station 掷数=原版（位 circ 2+速 circ 2）', () => {
+  it('掷数契约：恒 3 掷=原版（:2695 TTL 死掷 1+:2697 Square×2,★F-14）', () => {
     let calls = 0;
     const crng = (): number => { calls++; return 0.5; };
     itemTransferFx(asG(mkH()), 0, 0, 10, 10, 1, 0b0001, crng);
-    expect(calls).toBe(4);                          // 曾逐分量双调用=8
+    expect(calls).toBe(3);                          // ★F-14：原版=3（曾 circ 位2+速2=4、逐分量双调用=8）
     calls = 0;
     silverBulletSparkleFx(asG(mkH()), 0, 0, 3, -2, crng);
     // ★⑥掷序清偿（2026-09-02）：补 :3280/:3283 两死掷 → 5=死掷2+scale1+位 circ2（曾 3）
@@ -248,7 +249,7 @@ describe('★F6 收尾批结构锚（M3/M4/M5/M6 站）', () => {
     let calls = 0;
     const crng = (): number => { calls++; return 0.5; };
     inScreenDungeonSpawnFx(asG(mkH()), 0, 0, 40, 60, 1, null, crng);
-    expect(calls).toBe(1 + 4 * 3);                  // n=Next(2,5)=3,每粒 位2+速circ2
+    expect(calls).toBe(1 + 5 * 3);                  // n=Next(2,5)=3,每粒 位2+速circ2+gore型死掷1（★F-7 :891 Next(61,64)）
   });
 
   it('M6② classyCane：位=整数栅 Next(20)−10、速=Next(−10,11)×0.4（旧连续 ±6/±4 判红）', () => {

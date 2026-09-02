@@ -841,6 +841,8 @@ export class Dart extends Entity {
   ownerNpcId = 0;
   /** 537 激光束长 Lerp 值（原版 localAI[1]，LaserScan→0.5/t Lerp） */
   private beamLen = 0;
+  /** 299 暗影焰 localAI[0] 镜像（子步计数:第 6 子步爆发、>6 起尾尘,P.cs:57611-57637） */
+  private ai299Local = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
@@ -1048,6 +1050,20 @@ export class Dart extends Entity {
         break;
       case 'none': this.rot = 0; break;
     }
+    // ---- 44 魔鬼飞镰尾迹（AI_018 尾尘链，Projectile.cs:25793-25797）：每 update
+    //      2× NewDust(盒=弹体 position+w×h=48×48 全盒,尘 27,速(0,0),alpha100) +
+    //      逐尘 noGravity=true——尘散布在盒内缩 4px 的 [x+4,x+w-1] 区(Dust.cs:169-170
+    //      position.X+rand(w-4)+4),即绕弹心 ±20px 铺满弹盒。★对齐根因：本弹贴图
+    //      (Projectile_44.png 48×48)弯月内容只占上半 y0-27(质心≈(23.5,10.6)),本体
+    //      绕弹心自旋(DrawProjDirect 贴图帧心=proj.Center)——尾迹必须铺满弹盒才能与
+    //      扫掠环重叠;旧通用 trail 是 spawnParticles 单点 cx/cy(旋转中心)恒落在
+    //      镰口空腔里=2026-09-02 用户报"尾迹恒偏出弹体"。44 无 extraUpdates →
+    //      dartStep 每 tick 一次 = 原版每 update 一跑,2 尘/tick 同频次 ----
+    if (this.projId === 44) {
+      for (let i = 0; i < 2; i++) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 27, 0, 0, 100, null, 1, true);
+      }
+    }
     // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
     //  596 自管（aiStyle107 :34208-34219 带 timeLeft>30 门+实心盒钳 128,见 596 段）;
     //  fadeDelay=前 N 拍免衰（577/576 localAI[1]>2 门,P.cs:56603-56613,批六 m1）
@@ -1130,7 +1146,9 @@ export class Dart extends Entity {
     //  α−20/拍由表 fade:20 承载。
     if (this.projId === 811 || this.projId === 814) {
       const is811 = this.projId === 811;
-      // oldPos 快照（原版 Update 头 oldPos[0]=position 逐位后移;本拍未位移,unshift 即同口径）
+      // oldPos 快照（★G′ T5 勘误：原版 oldPos[0]=position 写入在 Update【尾】post-move
+      //  （TrailingMode[814]=2,P.cs:17234-17245）,本仓 unshift 在位移【前】取 pre-move
+      //  位——带标签比原版多一槽（含出生位 P0）,差账由 814 消费环上界 age−2 剪除）
       this.trailHist.unshift({ x: this.x, y: this.y });
       if (this.trailHist.length > 10) this.trailHist.length = 10;
       if (this.age === 1) {
@@ -1160,10 +1178,15 @@ export class Dart extends Entity {
       // ★R4(T4-①,2026-09-02)：814 长程拖尾尘（P.cs:57427-57435）——oldPos[1..9] 逐位
       //  1/3 掷（Main.rand.Next(3)==0）,命中位出 d5：vel=dust/4+proj.v/2、scale1.2、
       //  pos=oldPos[i]+Size/2+NextFloat()×v×2（单掷 x/y 同因子）。快照带见 trailHist
-      //  字段注——814 tileCollide=false 长程穿场,唯此面给"血弹雨"尾迹纵深;
-      //  原版 Zero 哨兵截断 = 本仓快照带天然等价（带内全为真实历史位）
+      //  字段注——814 tileCollide=false 长程穿场,唯此面给"血弹雨"尾迹纵深。
+      //  ★G′ T5（2026-09-02）：消费带上界 min(9, age−2)。原版 oldPos 写入在 Update
+      //  【尾】（TrailingMode[814]=2,P.cs:17234-17245 post-move oldPos[0]=position,
+      //  出生位 P0 从不写入）+ AI 环 :57430 首个 Zero 槽即断——P0 永不入消费带,t=k
+      //  拍消费 oldPos[1..min(9,k−2)]。本仓 unshift 在位移【前】取 pre-move 位,
+      //  hist[i]=i 拍前位恰比原版带多一槽——上界 age−2 恰剪掉 P0（t=2..10 期间
+      //  每拍多出的枪口出生位掷点瞬态）;t≥11 带满上下界归 9,与原版逐位同带。
       if (this.projId === 814) {
-        for (let i = 1; i < this.trailHist.length; i++) {
+        for (let i = 1; i <= Math.min(9, this.age - 2) && i < this.trailHist.length; i++) {
           if (Math.random() >= 1 / 3) continue;          // Main.rand.Next(3) == 0
           const hp = this.trailHist[i];
           const d814t = game.spawnDust?.(hp.x, hp.y, this.w, this.h, 5, this.vx, this.vy, 100);
@@ -1390,6 +1413,37 @@ export class Dart extends Entity {
       && Math.hypot(game.player.cx - this.cx, game.player.cy - this.cy) < st.proxKill) {
       this.rocketKill(game);
     }
+    // ---- 299 暗影焰尘尾（AI_001 :57611-57637,每子步;EU=2 → ×3/帧）:localAI==6
+    //      同拍 = Item8 音 + 40×d181 爆发（尘速×3+v×0.75、scale×1.2、noGravity）;
+    //      ++ 后 >6 起每子步 3×d181（spd=v×0.2、尘速×0.6、scale×1.4、noGravity）。
+    //      299 本体贴图 1×1 空桩 → 可见面全在此尘（spec.trail 泛色单粒子退役由本段取代）
+    if (this.projId === 299) {
+      if (this.ai299Local === 6) {
+        game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);
+        for (let i = 0; i < 40; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 181, 0, 0, 100);
+          if (d) { d.vx = d.vx * 3 + this.vx * 0.75; d.vy = d.vy * 3 + this.vy * 0.75;
+            d.scale *= 1.2; d.noGravity = true; }
+        }
+      }
+      this.ai299Local++;
+      if (this.ai299Local > 6) {
+        for (let i = 0; i < 3; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 181,
+            this.vx * 0.2, this.vy * 0.2, 100);
+          if (d) { d.vx *= 0.6; d.vy *= 0.6; d.scale *= 1.4; d.noGravity = true; }
+        }
+      }
+    }
+    // ---- 293 迷失魂尘尾（aiStyle51 :28842-28854,每子步;EU=1 → ×2/帧）:
+    //      首拍 localAI==0 → Item8（出生音由 spec.sfx 承载,不双播）;
+    //      每子步 9×d175（scale1.3、noGravity、尘速×0）
+    if (this.projId === 293) {
+      for (let i = 0; i < 9; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 175, 0, 0, 100, null, 1.3);
+        if (d) { d.vx = 0; d.vy = 0; d.noGravity = true; }
+      }
+    }
   }
 
   /** 303 骷髅火箭 Kill（Projectile.Kill :74533 组:128×128 伤害盒 + 22 盒烟尘/火/Gore +
@@ -1614,10 +1668,12 @@ export class Dart extends Entity {
   private frame = 0;        // 多帧行帧号(909/836)
   private dir = 1;          // projectile.direction(旋转符号)
   private pulseDir = 0;     // 115 呼吸相位
-  /** 814 血弹 oldPos 快照带（★R4 T4-①：原版 Projectile.oldPos 10 深,Update 每拍
-   *  oldPos[0]=position(本拍起点)逐位后移；本仓 Dart 无该带,于 811/814 AI 段
-   *  （位移前,= 原版 oldPos 写入口径）每拍 unshift 起点位,消费=dartStep 814 长程
-   *  拖尾尘(P.cs:57427-57435)。hist[0]=本拍起点=oldPos[0],hist[i]=i 拍前位） */
+  /** 814 血弹 oldPos 快照带（★R4 T4-①：原版 Projectile.oldPos 10 深；本仓 Dart 无
+   *  该带,于 811/814 AI 段每拍 unshift 当前位。★G′ T5 勘误：原版 oldPos[0]=position
+   *  写入在 Update【尾】（TrailingMode[814]=2,P.cs:17234-17245 post-move）且出生位
+   *  从不写入——本仓 unshift 在位移【前】取 pre-move 位,hist[i]=i 拍前位比原版带
+   *  长一槽（含出生位 P0）;差账由消费侧上界 min(9,age−2) 剪除（见 dartStep 814 环）。
+   *  hist[0]=本拍起点,hist[i]=i 拍前位） */
   private trailHist: Array<{ x: number; y: number }> = [];
 }
 
@@ -1923,7 +1979,7 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 299 暗影焰(巨型诅咒颅 289 :21795):6×6,alpha255,tileCollide=false 穿墙,extraUpdates2,
   //    贴图 1×1 空桩→纯尘埃(尘 181);Item8@第6更新(:53761)
   299: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, updates: 2, noTile: true, noTex: true,
-    trail: { color: '#7A5AFF', count: 1 }, fallback: '#7A5AFF' },
+    fallback: '#7A5AFF' },   // 尾尘走 d181 真尘段(dartStep 尾,P.cs:57611-57637)——泛色 trail 已退役
   // 300 圣锤(圣骑士 290 :59887):38×38 roll,重力 0.2@60(:21893),tileCollide=false 穿墙;Item1
   300: { w: 38, h: 38, rot: 'roll', grav: 0.2, gravDelay: 60, noTile: true, sfx: ['Item_1'], fallback: '#C8B860' },
   // 302 狙击弹(骷髅神射 291 :59883):4×4,scale1.18,alpha255 渐入(|v|*0.9),extraUpdates7(!) →
@@ -1956,11 +2012,13 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 572 蝾螈吐息(蝾螈族 498-506 :59849):10×10,alpha255 渐入;尘 40 ×2;Item17
   572: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 50,
     trail: { color: '#8AD8A0', count: 2 }, sfx: ['Item_17'], fallback: '#8AD8A0' },
-  // 44 魔鬼飞镰(恶魔 62/66 :23504):48×48,scale0.9,alpha100,spin 0.8(:23814),
-  //    加速 ×1.06@ai0[30,100)(:23816),光=ProjLight 0.2×(0.6,0.1,B=1 绝对)(:15054);尘 27;Item8(:23723)
+  // 44 魔鬼飞镰(恶魔 62/66 NPC.cs:23533 弹型 44):48×48,scale0.9,alpha100,spin 0.8×direction
+  //    (AI_018 P.cs:25780),加速 ×1.06@ai0[30,100)(:25782-25792),光=ProjLight 0.2×(0.6,0.1,B=1
+  //    绝对)(:15054);Item8(:23723)。★尾迹=原版 AI 尾尘链(见 dartStep 44 支)——曾用通用
+  //    trail(spawnParticles 单点 cx/cy,1/2 拍)2026-09-02 用户报"尾迹恒偏出弹体"退役
   44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100, life: 300,
     accel: { from: 30, to: 100, mul: 1.06 },
-    trail: { color: '#B08050', count: 1 }, sfx: ['Item_8'], fallback: '#B08050' },
+    sfx: ['Item_8'], fallback: '#B08050' },
   // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
   // 83 死光 EyeLaser(Eyezor 251 :59373；EoC 雷眼 :26726 同弹):4×4,aiStyle1 直飞,
@@ -1996,7 +2054,7 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    ——两处原版结构同型 (v×(D−1)+dir·spd)/D,单约定覆盖,无需分型。
   293: { w: 12, h: 12, rot: 'none', alpha0: 255, fade: 50, life: 300, noTile: true, updates: 1,
     home: { spd: 3, lerp: 100, range: 200 },
-    trail: { color: '#C8C0FF', count: 2 }, sfx: ['Item_8'], fallback: '#D8D0FF' },
+    sfx: ['Item_8'], fallback: '#D8D0FF' },   // 尾尘走 d175 真尘段(dartStep 尾,:28842-28854)——泛色 trail 已退役
   // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
   836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, hFrames: 4, windSeed: true, fallback: '#E8E8D0' },
   // 814 血弹(恐惧鹦鹉螺 AI_117 :47751):10×10 aiStyle1,alpha255 渐入 -20/t(:53573),
