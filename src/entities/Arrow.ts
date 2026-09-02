@@ -1042,7 +1042,7 @@ export class Arrow extends Entity {
   hwFrame = 0;
   private hwFrameT = 0;
   /** 477 水晶镖平滑姿态角（前 5 拍对齐速度角+π/2、之后 (rot×2+aim)/3，
-   *  :54802-54812——draw 消费；null = 未初始化走默认档） */
+   *  :58666-58676——draw 消费；null = 未初始化走默认档） */
   dartRot: number | null = null;
   // ---- 1457 弧线引矢（AI_001_Features 位标 Projectile.cs:243-289——ai[2] 的
   //      FloatIntUnion 位 0..3；本仓展开为四布尔。写入端 = Player 侧
@@ -2033,10 +2033,9 @@ export class Arrow extends Entity {
       //   纯加算白,合成方式由 ADDITIVE_GLOW_PROJS 承载（lighter）,强度不走本表
       //   （本表无 631 档）而由通用兜底 (255−α)/255 活读 AI_122 渐显终值;
       //   728 同理另有恒隐改判
-      //   ★T5 注释债登记：src/data/vanillaProjAlpha.ts:237 的 631 条目注释仍书
-      //   "A=0 隐形/原版视觉载体=AI 尘/粒,防整弹消失"——与 F5 定罪（真值=加算白
-      //   本体,已入 lighter 组+PROJ_ALPHA0[631]=255 在账）相悖;该文件不在本单
-      //   改动面（限定 Arrow.ts）,债务指向登记于此,待表侧批次勘误。
+      //   ★T5 注释债已清（E′ M-4 表侧批次勘误,2026-09-02）：vanillaProjAlpha.ts:237
+      //   的 631 条目注释原书 "A=0 隐形/原版视觉载体=AI 尘/粒,防整弹消失"（与 F5
+      //   定罪真值=加算白本体相悖）,已改"恒 (255−a,…,A=0) 加算白箭体渐显…"。
       case 661: case 819: case 955: return (255 - this.alpha) / 255;
       // 728 超级星星炮星：GetAlpha :80995 恒 (255,255,255,0)*Opacity 隐体
       // （:80995 支成员 9/723-726/1133 待后续批核实 vanillaProjAlpha off 档承接面）
@@ -2083,13 +2082,22 @@ export class Arrow extends Entity {
       //  已出组、ga=1。Opacity 系数缺失=既有 E2 债（Opacity<1 潜行/淡出面未建模,
       //  44/45 同债,登记）。本体绘制面=MissileProj 专属类（34 系 16/34/79 新导弹族
       //  成员,MagicMissileProj 源叠常规绘已是此语义）——本档为 Arrow 侧兜底防改道。
+      //  ★债登记（E′ M-1,2026-09-02 仲裁,只登记不修）：34/16 拖尾真身=FlameLashDrawer/
+      //  MagicMissileDrawer 着色器 VertexStrip 管线（Main.cs:28616-28690）,实机绘制面
+      //  在 MissileProj 专属类（简 polyline 拖尾）——1:1 管线残差超出 Arrow.ts 域,挂账另批。
       case 34: return 1;
       // ★T3（F3 长期正解落定,2026-09-02 用户拍板,R 类挂账按原版真值清零）：
       //  5 小丑箭——GetAlpha :81240-81242 恒 (255,255,255,0) 纯加算白（XNA 预乘
-      //  A=0 → dst+=tex.rgb 全强度发光）。已入 ADDITIVE_GLOW_PROJS 走 lighter,
+      //  A=0 → dst+=tex.rgb 全强度发光）。常态已入 ADDITIVE_GLOW_PROJS 走 lighter,
       //  'lighter' 下 ga=1=满强加算=预乘真值（实机观感=普通贴图→白亮发光体,原版相）。
+      //  ★E′ M-2（2026-09-02 仲裁成立）：charm 态（PhoenixQuivered||SeraphNecklaced）
+      //  在原版先于 :81240 被 :80609-80615 `aiStyle==1 → Color.White*Opacity` 截走
+      //  （Opacity=1−α/255,P.cs:542-547）= 乘子 (155,155,155,155)≈61%【常规合成非加算】
+      //  → ga=(255−α)/255 分流,合成方式出组走 source-over（draw :2578 区 ADDITIVE_GLOW
+      //  分支按 id5+charm 分流,组内其余 id 零改动）;R4-32 白帧路径（whiteSpriteOf）
+      //  不变——全白帧+常规合成即原版 White*Opacity 观感。
       //  旧"防整弹消失"登记偏离就此解除（PROJ_ALPHA0[5]=100 死值保留台账,兜底禁入）。
-      case 5: return 1;
+      case 5: return this.phoenixQuivered || this.seraphNecklaced ? (255 - this.alpha) / 255 : 1;
       // ---- Xenopopper 子弹族（GetAlpha :81040-81100 区段）——白化档走 drawXenoFilter ----
       case 445: return (128 / 255) * (1 - this.alpha / 255);   // (255,255,255,128)×(1-α/255)
       case 446: return 1 - this.alpha / 255;                   // Lerp(白,0.8)×(1-α/255)
@@ -2523,7 +2531,7 @@ export class Arrow extends Entity {
     } else if (PROJ_ROT_ASIS.has(this.projId)) {
       ctx.rotate(ang);               // R27：宝石珠 rotation=velocity.ToRotation()（:38691）
     } else if (this.projId === 477 && this.dartRot !== null) {
-      ctx.rotate(this.dartRot);      // 477 水晶镖平滑姿态（:54802-54812，AI 侧维护）
+      ctx.rotate(this.dartRot);      // 477 水晶镖平滑姿态（:58666-58676，AI 侧维护）
     } else if (this.bee36Tilt !== null) {
       ctx.rotate(this.bee36Tilt);    // aiStyle 36 蜂族（:27716 rotation = velocity.X*0.1f
     } else {                         //   ——微倾不振转；307 小吞噬者 = atan2−π/2（:27698）
@@ -2574,8 +2582,13 @@ export class Arrow extends Entity {
       // GetAlpha=(200,200,200,25) 加算族（Projectile.cs:81007：15 火球/34 火焰鞭/
       // 93 魔法匕首/94 水晶风暴/95 诅咒之焰/96 敌诅咒火/1114 日耀花/253 霜球/258 火球
       // /102 Prime 炸弹(alpha<255)）——XNA 预乘语义 RGB 全额加算（2026-08-24 清零批
-      // 扩族；source-over 直译=半透灰/死板不透明两态皆非）
-      if (ADDITIVE_GLOW_PROJS.has(this.projId)) {
+      // 扩族；source-over 直译=半透灰/死板不透明两态皆非）。
+      // ★E′ M-2（2026-09-02）：5 charm 态出组走常规合成（GetAlpha :80609-80615
+      // `aiStyle1 → White*Opacity` 先于 :81240 加算支截走,乘子非加算）——仅
+      // id5+charm 分流,组内其余 id 恒留组零改动（组∩箭族={5,631},631 charm 面
+      // 本批未裁决不动,登记）。
+      if (ADDITIVE_GLOW_PROJS.has(this.projId)
+        && !(this.projId === 5 && (this.phoenixQuivered || this.seraphNecklaced))) {
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
         ctx.globalCompositeOperation = 'source-over';
@@ -5463,10 +5476,12 @@ export class Arrow extends Entity {
         }
       }
     }
-    // 477 水晶镖旋转平滑（AI_001 type 段，Projectile.cs:54802-54812）：localAI[1]<5
+    // 477 水晶镖旋转平滑（AI_001 type 段，Projectile.cs:58666-58676）：localAI[1]<5
     // 前 rotation = atan2(vy,vx)+π/2（对齐速度角），之后 (rot×2+aim)/3 渐近平滑
     //（镖体翻滚滞后感）——draw 侧消费 dartRot。localAI[1] 每 AI 步 +1（extraUpdates
     // 1 → 2 子步/帧，age 即子步龄，前 5 子步对齐）
+    //（★E′ M-3 锚勘误 2026-09-02：旧锚 :54802-54812 系 AI_061_FishingBobber_GetWaterLine
+    // 错行，真身 :58666-58676）
     if (this.projId === 477) {
       const aim477 = Math.atan2(this.vy, this.vx) + Math.PI / 2;
       if (this.age <= 5) this.dartRot = aim477;
@@ -6135,7 +6150,7 @@ export class Arrow extends Entity {
         //      本仓 nearestEnemyWithLos 直线可视近似同 chloroBounceOff 口径）。
         //  477 CrystalDart：★F4 重写（下方独立支）——Kill 序修正 + 撞块归巢补段
         //      （:18776-18813 随机取样 9 收集枚之一全速转向）;rotation 速度角重锚
-        //      由 PROJ_ROT_RIGHT 通用绘制式覆盖。
+        //      =下方支尾 dartRot 重锚（★E′ M-3 补,:18773,见独立支注）。
         //      两型原版按 velocity!=lastVelocity 分轴反射；本仓单点碰撞按速度
         //      主轴反射（294/蜂族档同法，登记）----
         if (this.projId === 285) {
@@ -6163,8 +6178,9 @@ export class Arrow extends Entity {
         //      撞块事件触发;`owner == Main.myPlayer` 门=本仓单机语义恒真）——
         //      收集 (20,700) 距离内 CanHitLine(弹心 1×1→敌心) 敌怪 ≤9 个
         //      （严格 >20 且 <700）→ Main.rand.Next(n) 随机取一枚全速转向
-        //      v=归一(目标心−弹心)×|v|;rotation 速度角重锚由 PROJ_ROT_RIGHT
-        //      通用绘制式覆盖（同 ①注）。
+        //      v=归一(目标心−弹心)×|v|;rotation 速度角重锚=支尾 dartRot 重锚
+        //      （★E′ M-3 补,:18773——477 不在 PROJ_ROT_RIGHT,旧注"由通用绘制式
+        //      覆盖"系误记;实际消费位=draw 侧 :2525 dartRot 档）。
         //      ★归巢实现选型：nearestEnemyWithLos「取最近」不合原版（随机取样）,
         //      复用本文件 297/659 支同式 canHitLine 物理工具+canBeChasedBy 门,
         //      Center 1×1 盒以 0 尺寸点近似（本文件既有口径）。
@@ -6185,6 +6201,12 @@ export class Arrow extends Entity {
             this.vx = (dx477 / dl477) * sp477;
             this.vy = (dy477 / dl477) * sp477;
           }
+          // ★E′ M-3（2026-09-02 仲裁成立）：撞块支 rotation 重锚——原版 :18773
+          //  `rotation = velocity.ToRotation() + MathF.PI/2`（支体 :18756-18775,
+          //  仲裁锚 :18771 系同支上一行 bounce 轴写,勘误至此）,置于转向/归巢【后】
+          //  =新速度角,补 dartRot 在反弹/归巢拍残留旧角度的滞后;下一 AI 步 :58666
+          //  平滑链以 (rot×2+aim)/3 续承。
+          this.dartRot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
           return;
         }
         // ---- 绳索线圈弹 171/475/505/506（aiStyle35 :27581-27720，2026-08-30 工单1

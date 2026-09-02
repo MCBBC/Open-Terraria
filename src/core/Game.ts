@@ -15342,6 +15342,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     yoyo.spawnShot = (spec) => {
       this.entities.add(new YoyoShotProj(spec), 'projectiles');
     };
+    // 999 HiveFive 每击 1/3 放蜂（Projectile.cs:13752-13760；掷位/速度/伤基在
+    //  YoyoProj.onYoyoHit 侧——此处只做 Player.beeType/beeDamage/beeKB 三链
+    //  （Player.cs:12506-12531）与 spawn 位 `.melee=true` 覆写（:13759,Z-F1 槽））
+    yoyo.spawnBee = (bx, by, bvx, bvy, dmg, kb) => {
+      // beeType()：strongBees（蜂巢背包 3333）&& Next(2)==0 → 566 强蜂,否则 181
+      const strongBee = this.player.equipStats.strongBees && Math.floor(Math.random() * 2) === 0;
+      // beeDamage()：强蜂 dmg+Next(1,4)=+1..3 / 普蜂 dmg+Next(2)=+0..1
+      const beeDmg = dmg + (strongBee ? 1 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2));
+      // beeKB()：强蜂 0.5+KB×1.1 / 普蜂 KB 原值
+      const beeKb = strongBee ? 0.5 + kb * 1.1 : kb;
+      const bee = new Arrow(bx, by, bvx, bvy, beeDmg, beeKb, strongBee ? 566 : 181, null, { grav: 0 });
+      bee.projClass = 'melee';                 // 运行时旗覆写（原版 spawn 位,Z-F1 槽）
+      bee.critChance = Math.min(1, (4 + this.player.critChance('melee')) / 100);   // 近战池掷（:12916 melee 门,1124 蜂巢同式）
+      bee.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;  // GetArmorPenetration(melee)
+      this.entities.add(bee, 'projectiles');
+    };
   }
 
   /** 配重球运行上下文（CounterweightProj ctx——Game 闭包;魔法线克隆复用同物品 channel） */

@@ -607,3 +607,118 @@ describe('F1 6190↔6195 快换可达性（原版手势 !controlUseItem,Player.c
     expect(player.inv.heldItem()!.id).toBe(invIndexOfVanilla(6190));
   });
 });
+
+// =====================================================================
+// M3 HiveFive 999 每击 1/3 放蜂（Projectile.cs:13752-13760，P4 遗留清偿 2026-09-02）
+//   原式：type==999 && owner==Main.myPlayer && Next(3)==0 →
+//     NewProjectile(Center, (Center−target.Center).SafeNormalize(Zero)×0.25,
+//                   player.beeType(), player.beeDamage(damage/2), player.beeKB(kb), owner)
+//     + 落桶后 `.melee = true` 覆写（Z-F1 槽 = Arrow.projClass 实例字段）
+//   ★无 ai[0] 门（545 支的 ai[0]!=-2 门在其后一块）——回收/脱离态命中同享放蜂
+// =====================================================================
+import { YoyoProj } from '../src/entities/WeaponProj';
+
+describe('M3 HiveFive 999：YoyoProj 命中链放蜂 proc（Projectile.cs:13752-13760）', () => {
+  function mkYoyo(projId: number, cx = 2000, cy = 2000): YoyoProj {
+    const y = new YoyoProj(cx - 8, cy - 8, 30, 2, projId, 200, () => true, () => ({ x: 0, y: 0 }));
+    return y;
+  }
+
+  it('掷中（Next(3)==0）：背敌向 ×0.25 出蜂,伤 = trunc(damage/2),球心出生', () => {
+    const y = mkYoyo(999, 2000, 2000);                    // 中心 (2000,2000),damage 30
+    const e = mkEnemy(1, 2040, 2000);                     // 敌心在球心 +40x → 蜂速 (-0.25, 0)
+    const { hooks } = makeHooks([e]);
+    const bees: Array<{ x: number; y: number; vx: number; vy: number; dmg: number; kb: number }> = [];
+    y.spawnBee = (x, yy, vx, vy, dmg, kb) => bees.push({ x, y: yy, vx, vy, dmg, kb });
+    withRng(0, () => (y as unknown as { onYoyoHit: (e: unknown, g: GameHooks) => void }).onYoyoHit(e, hooks));
+    expect(bees).toHaveLength(1);
+    expect(bees[0]).toEqual({ x: 2000, y: 2000, vx: -0.25, vy: 0, dmg: 15, kb: 2 });
+  });
+
+  it('零距档：SafeNormalize(Zero)=零向量 → 零速出蜂（原版 SafeNormalize(Vector2.Zero)）', () => {
+    const y = mkYoyo(999, 2000, 2000);
+    const e = mkEnemy(1, 2000, 2000);                     // 球心=敌心
+    const { hooks } = makeHooks([e]);
+    const bees: Array<{ vx: number; vy: number }> = [];
+    y.spawnBee = (x, yy, vx, vy) => bees.push({ vx, vy });
+    withRng(0, () => (y as unknown as { onYoyoHit: (e: unknown, g: GameHooks) => void }).onYoyoHit(e, hooks));
+    expect(bees).toHaveLength(1);
+    expect(bees[0].vx).toBe(0);
+    expect(bees[0].vy).toBe(0);
+  });
+
+  it('掷不中（Next(3)!=0）：无伴生蜂', () => {
+    const y = mkYoyo(999);
+    const e = mkEnemy(1, 2040, 2000);
+    const { hooks } = makeHooks([e]);
+    const bees: unknown[] = [];
+    y.spawnBee = () => bees.push(1);
+    withRng(0.999, () => (y as unknown as { onYoyoHit: (e: unknown, g: GameHooks) => void }).onYoyoHit(e, hooks));
+    expect(bees).toHaveLength(0);
+  });
+
+  it('型号门：非 999 悠悠球（545 Cascade）同命中面零放蜂', () => {
+    const y = mkYoyo(545);
+    const e = mkEnemy(1, 2040, 2000);
+    const { hooks } = makeHooks([e]);
+    const bees: unknown[] = [];
+    y.spawnBee = () => bees.push(1);
+    withRng(0, () => (y as unknown as { onYoyoHit: (e: unknown, g: GameHooks) => void }).onYoyoHit(e, hooks));
+    expect(bees).toHaveLength(0);
+  });
+
+  it('无 ai[0] 门：脱离态（ai0=-2）命中同样放蜂（545 支的排除门不在 999 支）', () => {
+    const y = mkYoyo(999);
+    y.ai0 = -2;
+    const e = mkEnemy(1, 2040, 2000);
+    const { hooks } = makeHooks([e]);
+    const bees: unknown[] = [];
+    y.spawnBee = () => bees.push(1);
+    withRng(0, () => (y as unknown as { onYoyoHit: (e: unknown, g: GameHooks) => void }).onYoyoHit(e, hooks));
+    expect(bees).toHaveLength(1);
+  });
+});
+
+describe('M3 HiveFive 999：Game.spawnBee 落桶三链（Player.cs:12506-12531 + :13759 melee 覆写）', () => {
+  function beeGame(strongBees: boolean) {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    const player = new Player(50 * TILE, 90 * TILE, new Inventory());
+    (player.equipStats as unknown as { strongBees: boolean }).strongBees = strongBees;
+    const added: Array<{ bucket?: string }> = [];
+    g.player = player;
+    g.entities = { add: (e: unknown, b?: string) => { added.push(Object.assign(e as object, { bucket: b })); }, projectiles: [] };
+    const y = new YoyoProj(100, 100, 30, 2, 999, 200, () => true, () => ({ x: 0, y: 0 }));
+    (g as unknown as { wireYoyoCallbacks: (y: YoyoProj, id: number) => void }).wireYoyoCallbacks(y, 999);
+    return { g, player, added, y };
+  }
+
+  it('普蜂档：弹 181 / 伤 dmg+Next(2) / kb 原值 / melee 旗 + 近战暴击池 + 穿甲池', () => {
+    const { player, added, y } = beeGame(false);
+    withRng(0.4, () => y.spawnBee!(100, 100, 0.25, 0, 12, 2));   // 0.4×2=floor 0 → 普蜂伤 +0
+    expect(added).toHaveLength(1);
+    const bee = added[0] as unknown as Arrow & { bucket?: string };
+    expect(bee.bucket).toBe('projectiles');
+    expect(bee.projId).toBe(181);
+    expect(bee.damage).toBe(12);                                 // 12+floor(0.4×2)=12+0
+    expect(bee.knockback).toBe(2);                               // 普蜂 kb 原值
+    expect(bee.projClass).toBe('melee');                         // :13759 spawn 位覆写
+    expect(bee.critChance).toBeCloseTo(Math.min(1, (4 + player.critChance('melee')) / 100), 10);
+    expect(bee.armorPen).toBe(player.equipStats.armorPen + player.meleeArmorPen);
+  });
+
+  it('强蜂档（strongBees）：掷 0 → 弹 566 / 伤 dmg+1 / kb 0.5+KB×1.1', () => {
+    const { added, y } = beeGame(true);
+    withRng(0, () => y.spawnBee!(100, 100, 0, 0.25, 12, 2));     // 首掷 Next(2)=0 中强蜂
+    const bee = added[0] as unknown as Arrow;
+    expect(bee.projId).toBe(566);
+    expect(bee.damage).toBe(13);                                 // 12 + Next(1,4)=1（掷 0）
+    expect(bee.knockback).toBeCloseTo(0.5 + 2 * 1.1, 10);
+    expect(bee.projClass).toBe('melee');
+  });
+
+  it('普蜂伤 +1 档（Next(2)=1）：掷 0.5 → floor(1)', () => {
+    const { added, y } = beeGame(false);
+    withRng(0.5, () => y.spawnBee!(100, 100, 0, 0, 12, 2));      // floor(0.5×2)=1
+    expect((added[0] as unknown as Arrow).damage).toBe(13);
+  });
+});

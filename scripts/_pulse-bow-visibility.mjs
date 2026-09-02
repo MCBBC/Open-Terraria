@@ -36,28 +36,62 @@ const out = await page.evaluate(() => {
   let bowKey = Object.keys(window.__swItems).find((k) => k.startsWith('vi_2223')) ?? null;
   if (!bowKey) return { error: 'pulse bow item not found in __swItems' };
   const bowId = window.__swItems[bowKey];
-  g.player.inv.add(bowId, 1);
+  for (let i = 0; i < 60; i++) { const sl = g.player.inv.slots[i]; if (sl) g.player.inv.slots[i] = null; }
+  g.player.inv.add(bowId, 5);
   const slots = g.player.inv.slots;
   const bi = slots.findIndex((it) => it && it.id === bowId);
   if (bi > 0) { const t = slots[0]; slots[0] = slots[bi]; slots[bi] = t; }
   g.player.inv.selected = 0;
+  g.player.useTime = 0;
   // 供弹：原版 2223 SetDefaults useAmmo=Arrow（Item.cs:22423-22435），须有箭在包
-  const arrowId = window.__swItems['wooden_arrow'];
+  const arrowId = window.__swItems['vi_40_wooden_arrow'];
   if (arrowId) g.player.inv.add(arrowId, 30);
   // 无箭状态射击——原版脉冲弓不耗箭、恒射 357（vanillaItemCombat:616 bowVid===2223→p=357）
   g.entities.projectiles.length = 0;
   g.input.mouseX = 640 + 400; g.input.mouseY = 400;
-  g.input.mouseDown = true;
+  // 对照组：木弓 + 箭（验证环境射击链路本身通）
+  const woodBowId = window.__swItems['vi_1_wooden_bow'] ?? window.__swItems['wooden_bow'];
+  let ctrlShot = false;
+  if (woodBowId) {
+    g.player.inv.add(woodBowId, 1);
+    const wi = slots.findIndex((it) => it && it.id === woodBowId);
+    if (wi > 0) { const t = slots[0]; slots[0] = slots[wi]; slots[wi] = t; }
+    g.player.inv.selected = 0; g.player.useTime = 0;
+    g.entities.projectiles.length = 0;
+    g.input.mouseX = 640 + 400; g.input.mouseY = 400;
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    for (let i = 0; i < 90 && !ctrlShot; i++) {
+      g.fixedUpdate(1 / 60);
+      ctrlShot = g.entities.projectiles.length > 0;
+    }
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    const wi2 = g.player.inv.slots.findIndex((it) => it && it.id === woodBowId);
+    if (wi2 >= 0) g.player.inv.removeAt(wi2, 1);
+  }
+  // 主组：脉冲弓（vi_2223）→ 357
+  const pi = slots.findIndex((it) => it && it.id === bowId);
+  if (pi > 0) { const t = slots[0]; slots[0] = slots[pi]; slots[pi] = t; }
+  g.player.inv.selected = 0; g.player.useTime = 0;
+  g.entities.projectiles.length = 0;
+  g.input.mouseX = 640 + 400; g.input.mouseY = 400;
+  g.input.mouseDown = true; g.input.mouseHeld = true;   // 按下边沿 + 持续(参 _weapons-family-probe)
   let proj357 = null;
   for (let i = 0; i < 90 && !proj357; i++) {
     g.fixedUpdate(1 / 60);
     proj357 = g.entities.projectiles.find((p) => p.projId === 357) ?? null;
   }
   if (!proj357) {
-    g.input.mouseDown = false;
-    return { error: 'no proj 357 spawned', bowKey,
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    return { error: 'no proj 357 spawned', bowKey, ctrlShot,
       shotIds: g.entities.projectiles.map((p) => p.projId).slice(-10),
       held: slots[0] ? { id: slots[0].id, key: slots[0].key, vid: slots[0].vanilla?.vid ?? slots[0].vanilla } : null,
+      cw: (() => { try { const defs = window.__swITEM_DEFS; const d = defs[slots[0].id]; const c = window.__swCombatWeapon(d);
+        return { vid: d.vid ?? null, key: d.key, kind: c?.kind ?? null, useAmmo: c?.useAmmo ?? null, useTime: c?.useTime ?? null, autoReuse: c?.autoReuse ?? null }; } catch (e) { return String(e); } })(),
+      ammoScan: (() => { const defs = window.__swITEM_DEFS; const out = [];
+        for (let i = 0; i < 58; i++) { const it = slots[i]; if (!it) continue; const d = defs[it.id];
+          out.push({ slot: i, key: d?.key?.slice(0, 22), vid: d?.vid ?? null, ammoId: d?.ammoId ?? null }); }
+        return out.slice(0, 8); })(),
+      useTime: g.player.useTime,
       selected: g.player.inv.selected,
       mouseX: g.input.mouseX, mouseY: g.input.mouseY, mouseDown: g.input.mouseDown }; }
   // 步进：拖尾尘应持续生成（α<170 期）
@@ -68,12 +102,12 @@ const out = await page.evaluate(() => {
     const alive = g.entities.projectiles.filter((p) => p.projId === 357 && !p.dead);
     const d206 = g.vanillaDust ? g.vanillaDust.pool.filter((d) => d.active && d.type === 206) : [];
     dust206.push(d206.length);
-    if (alive.length) projAlphaSeries.push(alive[0].alpha);
+    if (alive.length) projAlphaSeries.push(Math.round(alive[0].alpha));
   }
   g.input.mouseDown = false;
   const speed = Math.hypot(proj357.vx, proj357.vy);
   return {
-    bowKey, projAlphaSeries, dust206,
+    bowKey, ctrlShot, projAlphaSeries, dust206,
     speed: +speed.toFixed(2), alpha0: proj357.alpha,
     dustPeak: Math.max(...dust206), dustAny: dust206.some((n) => n > 0),
   };
@@ -84,16 +118,25 @@ else {
   check('357 spawned & fading in (alpha 255→0)', out.projAlphaSeries.length > 3 && out.projAlphaSeries[0] > out.projAlphaSeries[out.projAlphaSeries.length - 1], `α 首末=${out.projAlphaSeries[0]}→${out.projAlphaSeries[out.projAlphaSeries.length - 1]}`);
   check('dust 206 trail spawning', out.dustAny, `峰值在场 ${out.dustPeak}`);
 }
-// 视觉取证：持续射击 + 截屏（拖尾白光点串）
+// 视觉取证：关欢迎弹窗 + 持续射击 + 截屏（拖尾白光点串）
+await page.evaluate(() => {
+  const btn = [...document.querySelectorAll('button')].find((b) => /我已知晓/.test(b.textContent ?? ''));
+  if (btn) btn.click();
+});
+await new Promise((r) => setTimeout(r, 400));
 await page.evaluate(() => {
   const g = window.__swGame;
+  if (g.renderer?.fullMap) g.renderer.fullMap.open = false;   // 关全屏地图(探针视图被 M 面板占据)
   g.entities.projectiles.length = 0;
   if (g.vanillaDust) for (const d of g.vanillaDust.pool) d.active = false;
   g.input.mouseX = 640 + 450; g.input.mouseY = 300;
-  g.input.mouseDown = true;
+  g.input.mouseDown = true; g.input.mouseHeld = true;
 });
-for (let i = 0; i < 26; i++) await page.evaluate(() => window.__swGame.fixedUpdate(1 / 60));
-await page.evaluate(() => { window.__swGame.input.mouseDown = false; });
+for (let i = 0; i < 22; i++) await page.evaluate(() => window.__swGame.fixedUpdate(1 / 60));
+await page.evaluate(() => { window.__swGame.input.mouseDown = false; window.__swGame.input.mouseHeld = false; });
+await page.focus('body');
+await page.keyboard.press('KeyM');
+await new Promise((r) => setTimeout(r, 600));
 await page.screenshot({ path: '/tmp/pulse-bow-visible.png' });
 console.log('screenshot: /tmp/pulse-bow-visible.png');
 if (errors.length) { console.log('PAGEERRORS:', errors.slice(0, 5)); fail++; }

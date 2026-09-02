@@ -1561,10 +1561,11 @@ export class Player extends Entity {
       // ★UpdateEquips_CanItemGrantBenefits :12977-12985（case 3-9 = item.accessory）——
       //   GrantArmorBenefits（:13220 def/:13221 lifeRegen）与 GrantPrefixBenefits
       //   （:13020-13022）两支的受理门；ApplyEquipFunctional :13046 只门槽位解锁，
-      //   勿上提到整圈（行为旗/绘制槽会被误伤）。谓词与 armorAccepts 功能段同式
-      //   （vi_ 走 itemstats acc,6188/6189 走 ACC_STATS_1457 并表;legacy 走
-      //   accessory 效果标签）——UI 面 armorAccepts 已拦,此处为存档异常兜底
-      const grantArmorBenefits = statOfInternal(s.id)?.acc === 1 || !!ITEM_DEFS[s.id]?.accessory;
+      //   勿上提到整圈（行为旗/绘制槽会被误伤）。谓词 = vanilla accessory 旗等价：
+      //   acc 1 功能/0 社交【都】设 accessory=true（SetDefaults 抽查 208/1987/2276/
+      //   2501 均 accessory=true+vanity=true）故取 acc 有定义而非 acc===1;legacy 走
+      //   accessory 效果标签——UI 面 armorAccepts 已拦非配饰,此处为存档异常兜底
+      const grantArmorBenefits = statOfInternal(s.id)?.acc !== undefined || !!ITEM_DEFS[s.id]?.accessory;
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;

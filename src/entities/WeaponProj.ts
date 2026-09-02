@@ -2634,6 +2634,10 @@ export class YoyoProj extends Entity {
   /** 1457 EverySomeYoyoHits per-hit 族伴生弹生成回调（:13761-13870 NewProjectile——
    *  entities.add 不在 GameHooks,Game 侧 wireYoyoCallbacks 注入） */
   spawnShot?: (spec: YoyoShotSpec) => void;
+  /** 999 HiveFive 每击 1/3 放蜂生成回调（Projectile.cs:13752-13760 NewProjectile——
+   *  蜂弹 = Player.beeType()/beeDamage()/beeKB() 三链 + spawn 位 .melee=true 覆写;
+   *  入参 (x,y,vx,vy,dmg,kb),x/y=源球中心（Game 侧按 NewProjectile 居中语义落桶）） */
+  spawnBee?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number) => void;
   /** 出生物品内部 id（Game 注入——channel 闭包的手持核对/族成员遗传：手套二号球、
    *  魔法线克隆、配重球 ctx 共用同物品 channel 判定） */
   itemId?: number;
@@ -2948,6 +2952,23 @@ export class YoyoProj extends Entity {
         const vms = 1 / (p.attackSpeedMult || 1);
         this.lifeT += (noLos ? 60 : 20) / 60 / ((1 + vms) / 2);
       }
+    }
+    // ---- 999 HiveFive 每击 1/3 放蜂（★M3 2026-09-02 补,P4 遗留；Projectile.cs:13752-13760）----
+    // 原式：type==999 && owner==Main.myPlayer && Next(3)==0 →
+    //   NewProjectile(Center.X, Center.Y, (Center−target.Center).SafeNormalize(Zero)×0.25,
+    //   player.beeType(), player.beeDamage(damage/2), player.beeKB(knockBack), owner)
+    //   + 落桶后 `.melee = true` 覆写（Z-F1 槽语义,Arrow.projClass='melee'）。
+    // ★无 ai[0] 门（同函数 545 支的 ai[0]!=-2 门在下一块）——回收(-1)/脱离(-2)态命中同享
+    //   放蜂;SafeNormalize(Zero)=零向量档（球心与敌心重合）→ 零速出蜂。
+    // 伤基口径同 per-hit 族（545 ×2/554 ×0.5 用 this.damage 源值）：dmg2=trunc(damage/2)
+    //   ——vanilla 此处 damage 为结算局地值,族内既定 this.damage 直取（登记在先勿重复登记）
+    if (this.projId === 999 && Math.floor(Math.random() * 3) === 0) {
+      const bgx = this.cx - ecx, bgy = this.cy - ecy;
+      const bgd = Math.hypot(bgx, bgy);
+      this.spawnBee?.(this.cx, this.cy,
+        bgd > 0 ? (bgx / bgd) * 0.25 : 0,
+        bgd > 0 ? (bgy / bgd) * 0.25 : 0,
+        Math.trunc(this.damage / 2), this.knockback);
     }
     // ---- 1457 EverySomeYoyoHits per-hit 族（Projectile.cs:13761-13870,批 D 落地）----
     // 545 Cascade 每 2 击 → 1125 CascadeExplosion ×200%（208px 最近敌向,scale=
@@ -5159,19 +5180,29 @@ export class TorchGodProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     const st = game.world.store;
+    // 出界杀（Update 通用门 1457 :16793-16802,aiStyle≠3——出界 active=false 静默隐灭,
+    // 无音无尘;置于 AI 前同原版序:出界检查先于 AI() :16880）。中心格 inBounds 口径
+    // 与 GrenadeProj 出界杀先例（本文件 :4824）对齐;登记微差:原版=整弹盒四缘越界
+    // （position.X ≤ leftWorld ∨ X+w ≥ rightWorld ∨ Y… ∨ NaN）,本仓=中心格——
+    // 世界缘 16px 带内多飞 ≤1 拍,观感不可辨。
+    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+      this.dead = true; return;
+    }
     // 首帧 Item8 音（AI_184 :40109-40111 localAI[0]==0——事件全程连射的本族主声,终审补）
     if (!this.sndT) { this.sndT = 1; game.playSfxWav?.('Item_8', 1, this.cx, this.cy); }
-    // ai[1] -= velocity.Length()（:40112-40119）：射程内 tileCollide=false
-    this.rangeLeft -= Math.hypot(this.vx, this.vy);
-    if (this.rangeLeft <= 0) this.tileCollide = true;
-    // ★序倒置修正(2026-09-02):原版 Update 序 = AI()（1457 Projectile.cs:16880）先于
-    // UpdatePosition（:19973;aiStyle 184 不在 :20549-20552 跳过表）——AI_184 尾迹尘
-    // （1457 :43596-43609 / 1456 :40120-40130）以【移前位】为基准（尾迹从旧位置拖出）。
-    // 2026-09-01 管线重构把积分上移到尘循环前,尘跟着新位走 = "环绕新位的烟花"而非
-    // "拖出的尾巴"（tests/torch-god-event.test.ts trail[3].x 14≠6 红）。积分不可回挪
-    // （斜砖/半砖正典管线系残余债清偿,见下注）,故帧首快照作尘基准 = 同效;
-    // vx/vy 本类不被管线写回（仅 position 落位）,快照+现速 = AI 时刻原语义。
-    const preMoveX = this.x, preMoveY = this.y;
+    // ai[1] 射程（1457 :43591-43598 if/else:ai[1]>0 拍才递减——穿零拍【不置】
+    // tileCollide,下一拍 else 支才置位;旧 `-= 后判 ≤0` 穿零当拍开撞=提前 1 拍,m-1 修正）
+    if (this.rangeLeft > 0) this.rangeLeft -= Math.hypot(this.vx, this.vy);
+    else this.tileCollide = true;
+    // 尾迹（AI_184 :40120-40130;1457 :43596-43609）：每 AI 4 粒,沿 velocity/4×k 段布点,
+    // vel×0.3——★基准 = 此刻 this.x/this.y。原版 Update 序 = AI()（1457 :16880）先于
+    // UpdatePosition（:19973;aiStyle 184 不在 :20549-20552 跳过表）,AI_184 尾迹以
+    // 【移前位】为基准（尾迹从旧位置拖出）。红队 #3(2026-09-02):尾迹循环整体上移到
+    // moveAndCollide 之前——该点即移前位,快照层 preMoveX/preMoveY 删除（冗余间接层）;
+    // Kill 帧早退前尾迹已出 = 原版杀帧 4 尾迹+20 爆尘 24 粒语义达成。
+    for (let k = 0; k < 4; k++) {
+      this.dust?.(this.x + (this.vx / 4) * k, this.y + (this.vy / 4) * k, this.dustType, 0.3);
+    }
     // ★残余债清偿(2026-09-01):中心点采样在斜砖/半砖上漏检(空区)/误检并存——
     // 射程内 tileCollide=false 直写、超程后任一轴接触即 Kill(AI_184 :40112 系)
     {

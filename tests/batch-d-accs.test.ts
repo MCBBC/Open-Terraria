@@ -175,6 +175,11 @@ describe('1457 远程配饰旗', () => {
     const w = makeHooks().player;
     w.inv.armor[3] = { id: iid(216), stack: 1, prefix: 65 };
     expect(w.equipStats.def).toBe(5);
+    // acc:0 社交件 vanilla 同样 accessory=true（SetDefaults 208 等抽查）——门放行：
+    // 词缀授（存档异常面唯一实差,社交件 itemstats 零 def/life）,裸件 def 恒 0
+    const s0 = makeHooks().player;
+    s0.inv.armor[3] = { id: iid(208), stack: 1, prefix: 65 };
+    expect(s0.equipStats.def).toBe(4);
   });
 });
 

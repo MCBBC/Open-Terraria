@@ -70,7 +70,9 @@ function le16(path: string): Uint16Array {
   return new Uint16Array(b.buffer.slice(0));
 }
 const DUMPNAME = new Map<number, string>();
-if (RUN) for (const f of readdirSync(G2))   // ★套件门(2026-09-02):夹具目录缺省不扫 {
+// ★套件门(2026-09-02)
+// ★套件门(2026-09-02):夹具目录缺省不扫
+if (RUN) for (const f of readdirSync(G2)) {
   const m = f.match(/^(\d{3})_(.+)\.typ$/);
   if (m) DUMPNAME.set(Number(m[1]), m[2]);
 }

@@ -21,11 +21,11 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200, N = W * H;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const d19 = {
+const d19 = RUN ? {   // ★套件门(2026-09-02):RUN=0 不读夹具
   typ: new Uint16Array(load(19, 'typ', 'Full_Desert').buffer.slice(0)),
   act: load(19, 'act', 'Full_Desert'),
   wal: new Uint16Array(load(19, 'wal', 'Full_Desert').buffer.slice(0)),
-};
+} : { typ: new Uint16Array(0), act: Buffer.alloc(0), wal: new Uint16Array(0) };
 
 const cloneStore = (src: TileStore): TileStore => {
   const t = new TileStore(W, H);

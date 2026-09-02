@@ -34,7 +34,9 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 
 const DUMPNAME = new Map<number, string>();
-if (RUN) for (const f of readdirSync(G2))   // ★套件门(2026-09-02):夹具目录缺省不扫 {
+// ★套件门(2026-09-02)
+// ★套件门(2026-09-02):夹具目录缺省不扫
+if (RUN) for (const f of readdirSync(G2)) {
   const m = /^(\d{3})_(.+)\.typ$/.exec(f);
   if (m) DUMPNAME.set(Number(m[1]), m[2]);
 }

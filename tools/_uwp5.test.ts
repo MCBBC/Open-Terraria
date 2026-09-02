@@ -14,14 +14,14 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const t27 = new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0));
-const a27 = load(27, 'act', 'Webs');
-const w27 = new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0));
-const l27 = load(27, 'liq', 'Webs');
-const t28 = new Uint16Array(load(28, 'typ', 'Underworld').buffer.slice(0));
-const a28 = load(28, 'act', 'Underworld');
-const w28 = new Uint16Array(load(28, 'wal', 'Underworld').buffer.slice(0));
-const l28 = load(28, 'liq', 'Underworld');
+const t27 = RUN ? new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0)) : new Uint16Array(0);
+const a27 = RUN ? load(27, 'act', 'Webs') : Buffer.alloc(0);
+const w27 = RUN ? new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0)) : new Uint16Array(0);
+const l27 = RUN ? load(27, 'liq', 'Webs') : Buffer.alloc(0);
+const t28 = RUN ? new Uint16Array(load(28, 'typ', 'Underworld').buffer.slice(0)) : new Uint16Array(0);
+const a28 = RUN ? load(28, 'act', 'Underworld') : Buffer.alloc(0);
+const w28 = RUN ? new Uint16Array(load(28, 'wal', 'Underworld').buffer.slice(0)) : new Uint16Array(0);
+const l28 = RUN ? load(28, 'liq', 'Underworld') : Buffer.alloc(0);
 
 const REV = new Map<number, number>();
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

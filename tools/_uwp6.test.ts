@@ -14,10 +14,10 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const t27 = new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0));
-const a27 = load(27, 'act', 'Webs');
-const w27 = new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0));
-const l27 = load(27, 'liq', 'Webs');
+const t27 = RUN ? new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0)) : new Uint16Array(0);
+const a27 = RUN ? load(27, 'act', 'Webs') : Buffer.alloc(0);
+const w27 = RUN ? new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0)) : new Uint16Array(0);
+const l27 = RUN ? load(27, 'liq', 'Webs') : Buffer.alloc(0);
 
 const REV = new Map<number, number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {

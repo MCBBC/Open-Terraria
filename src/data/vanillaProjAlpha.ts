@@ -64,7 +64,7 @@ export interface ProjAlphaMod {
 }
 
 export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
-  5: { kind: 'invisible', off: 1 },    // :76569 | (255,255,255,0) A=0 隐形（PROJ_ALPHA0 已登记不消费）；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
+  5: { kind: 'invisible', off: 1 },    // :76569 | 恒 (255,255,255,0) 纯加算白（XNA 预乘；1457 锚 :81240-81242），GA case 5 return 1+lighter 承接；charm 态走 :80609 White×Opacity 分支（★M-4 勘误 2026-09-02）
   9: { kind: 'invisible', off: 1 },    // :76324 | (255,255,255,0)*Opacity A=0 隐形；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
   12: { kind: 'fade' },   // :76823 | (255,255,255,newColor.A−α) 白色 A=255−α
   15: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },   // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
@@ -88,7 +88,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   89: { kind: 'invisible', off: 1 },   // :76786 | α<200→(255−α,…,0) / α≥200→Transparent——两支皆隐形；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
   90: { kind: 'invisible', off: 1 },   // :76786 | α<200→(255−α,…,0) / α≥200→Transparent——两支皆隐形；SKIP: SquidCloud 专属类消费
   91: { kind: 'invisible', off: 1 },   // :76332 | (200,200,200,0) A=0 隐形；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
-  92: { kind: 'fade', off: 1 },   // :76328 | 1456: (255,255,255,0) A=0 隐形——现有 aiStyle5 闪烁 fade 档保留；SKIP: drawGlobalAlpha aiStyle5 闪烁档
+  92: { kind: 'fade', off: 1 },   // :76328 | 恒 (255,255,255,0) 纯加算白星体（1457 锚 :80999-81001），GA return 1+lighter+gore 面已接（★R1 反转批；★M-4 勘误 2026-09-02）
   93: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },   // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   94: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },   // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha (200,200,200,25)→200/255 近加算档
   95: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },   // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 同 94
@@ -234,7 +234,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   626: { kind: 'fade', off: 1 },  // :76167 | r=g=b=255−α a=255−α（rgb 衰减折进 ga）；SKIP: MinionProj 专属类消费
   627: { kind: 'fade', off: 1 },  // :76167 | r=g=b=255−α a=255−α（rgb 衰减折进 ga）；SKIP: MinionProj 专属类消费
   628: { kind: 'fade', off: 1 },  // :76167 | r=g=b=255−α a=255−α（rgb 衰减折进 ga）；SKIP: MinionProj 专属类消费
-  631: { kind: 'invisible', off: 1 },  // :76147 | (255−α,255−α,255−α,0) A=0 隐形（604 现有 fade 档保留）；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
+  631: { kind: 'invisible', off: 1 },  // :76147 | 恒 (255−a,…,A=0) 加算白箭体渐显（1457 锚 :80818-80821），AI −15/子步（同 LASER_FADE15 式,subStepAI 631 支承接），ADDITIVE_GLOW lighter（★F5 定罪；★M-4 勘误 2026-09-02）
   633: { kind: 'fixed', rgba: [255,255,255,200] },  // :76163 | (255,255,255,200) 恒
   634: { kind: 'fixedfade', rgba: [255,255,255,127], off: 1 },  // :76359 | (255,255,255,127)*Opacity——LunarNebula 消费 skip；SKIP: LunarNebula 专属类消费
   635: { kind: 'fixedfade', rgba: [255,255,255,127], off: 1 },  // :76359 | (255,255,255,127)*Opacity——LunarNebula 消费 skip；SKIP: LunarNebula 专属类消费

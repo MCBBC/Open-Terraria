@@ -13,14 +13,14 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const t22 = new Uint16Array(load(22, 'typ', 'Granite').buffer.slice(0));
-const a22 = load(22, 'act', 'Granite');
-const w22 = new Uint16Array(load(22, 'wal', 'Granite').buffer.slice(0));
-const l22 = load(22, 'liq', 'Granite');
-const t23 = new Uint16Array(load(23, 'typ', 'Floating_Islands').buffer.slice(0));
-const a23 = load(23, 'act', 'Floating_Islands');
-const w23 = new Uint16Array(load(23, 'wal', 'Floating_Islands').buffer.slice(0));
-const l23 = load(23, 'liq', 'Floating_Islands');
+const t22 = RUN ? new Uint16Array(load(22, 'typ', 'Granite').buffer.slice(0)) : new Uint16Array(0);
+const a22 = RUN ? load(22, 'act', 'Granite') : Buffer.alloc(0);   // ★套件门:RUN=0 不读夹具
+const w22 = RUN ? new Uint16Array(load(22, 'wal', 'Granite').buffer.slice(0)) : new Uint16Array(0);
+const l22 = RUN ? load(22, 'liq', 'Granite') : Buffer.alloc(0);
+const t23 = RUN ? new Uint16Array(load(23, 'typ', 'Floating_Islands').buffer.slice(0)) : new Uint16Array(0);
+const a23 = RUN ? load(23, 'act', 'Floating_Islands') : Buffer.alloc(0);
+const w23 = RUN ? new Uint16Array(load(23, 'wal', 'Floating_Islands').buffer.slice(0)) : new Uint16Array(0);
+const l23 = RUN ? load(23, 'liq', 'Floating_Islands') : Buffer.alloc(0);
 
 // sheet → repo id 反查
 const REV = new Map<number, number>();

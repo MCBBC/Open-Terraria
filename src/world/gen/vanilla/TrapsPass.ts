@@ -425,6 +425,11 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
 // ---- vanilla TileFrame 分派族（SSSSS 批） ----
 /** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169） */
 const PREVENTS_REMOVAL = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161，sheet 空间）——不含 323（棕榈干单列
+ *  独立臂，1457 cs:62914-62921 与树干族帧形豁免表不同）。★IIIII169：本域
+ *  checkBreakabilityT 的树干帧门用（与 HalfBrickPass.TREE_TRUNK/TrackPass.
+ *  TREE_TRUNK_SS 同一全集，第三副本勿再散表）。 */
+const TREE_TRUNK_T = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 /** IsAContainer（cs:48831）：BasicDresser{88}+{470,475}+BasicChest{21,467}+Fake{441,468} */
 const CONTAINER_SHEETS = new Set([88, 470, 475, 21, 467, 441, 468]);
 
@@ -463,7 +468,32 @@ function checkBreakabilityT(st: TileStore, x: number, y: number): 0 | 1 | 2 {
     const at = st.type[ai]!, ash = sheetOf(at);
     const scanForContainer = !CONTAINER_SHEETS.has(sh);
     // CheckTileBreakability_HasReasonToReturnEarly（cs:62524）
-    if (sh !== ash && (ash === 77 || PREVENTS_REMOVAL.has(ash))) return 2;
+    // ★IIIII169（2026-09-02）拒杀树干豁免臂补移植（1457 cs:62906-62921；1456 同形
+    //   cs:62380-62435）——HasReason 命中后 vanilla 先分型再定拒/放：
+    //   ①上格=IsATreeTrunk（TileID.cs:161 全集）→ 三种"基座/树冠"帧形豁免放行
+    //     （frameX 66 且 frameY 0..44 / frameX 88 且 frameY 66..110 / frameY≥198
+    //     ⇒ return 0 可杀），其余帧形（干身/侧枝带）⇒ return 2 拒杀；
+    //   ②上格=323 棕榈干 → frameX∈{66,220} 拒杀，其余放行；
+    //   ③其余 HasReason 类型（77/488/26/470/475/锁门/容器）维持无条件拒杀。
+    //   此前本域副本对全部 PREVENTS_REMOVAL 直接 return 2 ⇒ 树干基座帧形/棕榈
+    //   非锚帧形下的 kill 目标被多拒：vanilla 杀（尘掷流位+killTileWhole 尾
+    //   cascade3x3T 级联全跑）而 JS 零掷零写，随后 PlaceTile(forced) 照写同型
+    //   ——掷流差 + 写位双级联差。sandy (3636,440) 站点上格恰为侧枝帧形（两侧
+    //   同拒）故 mile8 未爆；本臂为结构缺口预防性清偿（HalfBrick 引擎副本
+    //   cs:62427-62437 臂 918-927 行与 TrackPass 642-650 行早已同形）。
+    if (sh !== ash && (ash === 77 || PREVENTS_REMOVAL.has(ash))) {
+      if (TREE_TRUNK_T.has(ash)) {                        // IsATreeTrunk 帧门（cs:62906-62913）
+        const fx = st.frameX[ai]!, fy = st.frameY[ai]!;
+        if ((fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110) || fy >= 198) return 0;
+        return 2;
+      }
+      if (ash === 323) {                                  // 棕榈干锚帧门（cs:62914-62921）
+        const fx = st.frameX[ai]!;
+        if (fx === 66 || fx === 220) return 2;
+        return 0;
+      }
+      return 2;
+    }
     if (isLockedDoorT(st, ai)) return 2;
     if (scanForContainer && CONTAINER_SHEETS.has(ash)) return 2;
     if (ash === 80 && at !== t) {                                 // cs:62445 仙人掌基座

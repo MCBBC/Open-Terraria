@@ -1012,13 +1012,19 @@ function placeBuriedChestInner(
   //   会拆掉现存补偿腿结构（C↔B 池骰互换簇），须与簇②..⑤(caves→UW 边界早入)
   //   带窗推进到齐后整组转正。生产缺省维持门关（★但门体已按 cs 锚落位,非
   //   remix 世界该分支恒不生效=零扰动）;后续批次翻门只改此一处开关。
-  const i108NoGate = !(typeof process !== 'undefined'
-    && (process as unknown as { env?: Record<string, string | undefined> }).env?.SW_I108_GATE === '1');
+  //   ★IIIII166（2026-09-02）缺省翻转（XXXIII §⑥.4 三绿协议达成）：①caves 段
+  //   555↔555 全等（LVII §③）②UW 段 301 attempts 全等+UW#14 耗骰 29=29（本批）
+  //   ③UHBC 全窗值流 62,251/62,251 位对位恒等+dump059 chest-cell/active 差=0
+  //   （本批,flag23 remix 臂补移植后 SELF 面残差 7,482→540 系 Junc 后
+  //   SurfaceChests 段污染+id 空间伪影,纯净口径=0）。门开=1:1 缺省,
+  //   SW_I108_GATE=0 显式回退 160 批前账面（对照态保留,照 i138EarlyGate 先例）。
+  const i108GateOff = typeof process !== 'undefined'
+    && (process as unknown as { env?: Record<string, string | undefined> }).env?.SW_I108_GATE === '0';
   // ★IIIII166（2026-09-02）：x 带边界 1:1 化（cs:36142 拒收形 `x<0.15W || x>0.85W`
   //   ⇒ 受理域含整点 630/3570@W4200；JS 旧严格不等号整点双拒——LVII §⑤备案1 清偿。
   //   本种无 attempt 落格=零扰动，跨种子 1:1 保险）。
   const inUd = !mainId && gy >= gs.worldSurface && i >= st.w * 0.15 && i <= st.w * 0.85
-    && !(gs.seedFlags.remix && !i108NoGate && gy > gs.rockLevel)
+    && !(gs.seedFlags.remix && !i108GateOff && gy > gs.rockLevel)
     && (() => {
       if (gy > st.h - 205) return false;
       const num = 15;
