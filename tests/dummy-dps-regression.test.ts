@@ -2,9 +2,11 @@
 //  Enemy.hurt 的 488 分支曾提前 return true,永久跳过公共受击尾段——
 //  ①addDPS 累计（原版 ApplyDamageToNPC :20164-20168 对假人同样累计,accDreamCatcher
 //    门禁在 addDPS 内侧）②AnyInteractions 玩家交互位（雕像门 :79651）③MP 交互登记。
+//  同批:DoT 直扣 immortal 守卫（闪烁血条）+ realLife 重定向 + soulDrain realLife 门。
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
 
 function makeGame(): GameHooks {
@@ -57,5 +59,41 @@ describe('训练假人 488 受击公共尾段', () => {
     dummy.hurt(100, 1, 0, g, 0, false, 0, false);
     expect(dpsHits).toEqual([]);
     expect(dummy.lastStrikeDealt).toBe(100);       // 摇晃/结算照走
+  });
+
+  it('DoT immortal 守卫:488 吃燃烧不扣血/不拉血条计时（曾闪烁血条）', () => {
+    const g = makeGame();
+    for (let x = 36; x <= 44; x++) g.world.store.setTileSilent(x, 24, 1, 0, 0);   // 地板
+    // 锚 tile 378（internal 238）——dummyAI 每拍校验,缺=自灭
+    g.world.store.setTileSilent(40, 22, TILE_BY_KEY['v_378_target_dummy'], 0, 0);
+    const dummy = mkDummy(40, 22);
+    dummy.y = 24 * 16 - dummy.h;
+    expect(dummy.immortal).toBe(true);             // fromVanilla 接线（NPC.cs:14630）
+    dummy.onFireT = 600;                           // 燃烧 10s
+    for (let i = 0; i < 120; i++) dummy.fixedUpdate(1 / 60, g);
+    expect(dummy.hp).toBe(dummy.maxHp);            // hp 恒满(曾每 tick 被 DoT 裸扣)
+    expect(dummy.hpBarT).toBe(0);                  // 血条计时零=血条不出现
+    expect(dummy.dead).toBe(false);
+  });
+
+  it('DoT realLife 重定向:共享血池族打节段=扣头血池;soulDrain 对共享池族免伤（:92802）', () => {
+    const g = makeGame();
+    const head = Enemy.fromVanilla(454, 40 * 16, 20 * 16)!;
+    head.id = 1;
+    // 幻影龙 5 节链（455-459,sharedLife → 节 realLifeHost=头）
+    const segs = Enemy.spawnWormChain(head, 5, [455, 456, 457, 458, 459], true);
+    const seg = segs[0];
+    const poolBefore = head.hp;
+    seg.shadowFlameT = 600;                        // 暗焰 DoT 打节段
+    for (let i = 0; i < 120; i++) seg.fixedUpdate(1 / 60, g);
+    expect(head.hp).toBeLessThan(poolBefore);      // ★曾直扣节段 hp=下次 hurt 被头池覆盖(DoT 白打)
+    expect(seg.hp).toBe(head.hp);                  // 节 hp 镜像头池
+    // soulDrain 对共享池族:不扣（:92802 realLife==-1 门）
+    const poolAt = head.hp;
+    seg.soulDrainT = 600;
+    seg.shadowFlameT = 0;
+    seg.shadowFlameDoT = 0;
+    for (let i = 0; i < 120; i++) seg.fixedUpdate(1 / 60, g);
+    expect(head.hp).toBe(poolAt);
   });
 });

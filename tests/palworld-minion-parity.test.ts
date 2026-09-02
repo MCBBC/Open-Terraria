@@ -381,7 +381,7 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     // 2026-09-02 buff 审计批:1106/1097 火面统一 onFireHit 直译通道(1106 速度门
     // :11665-11668 / 1097 ai[1] 分档 :11315-11318)——ignite/igniteHellfire 退役
     const f1113 = (shot as unknown as { onFireHit?: { buff: number; minT: number; maxT: number } }).onFireHit;
-    expect(f1113).toEqual({ buff: 323, minT: 300, maxT: 600 });   // 1097 火球=Next(300,600);300 定值是 1106 焰狐弹的语义
+    expect(f1113).toEqual({ buff: 323, minT: 300, maxT: 599 });   // 1097 火球=Next(300,600);300 定值是 1106 焰狐弹的语义
     expect((shot as unknown as { whipTagShot: boolean }).whipTagShot).toBe(true);
     // cd=30：30t 内不再射（:62569 num135=30；递减/开火互斥分支——归零次 tick 才射）
     added.length = 0;
@@ -401,7 +401,7 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const shot = added.find((x) => x instanceof Arrow) as Arrow | undefined;
     expect(shot?.projId).toBe(1097);
     const f1094 = (shot as unknown as { onFireHit?: { buff: number; minT: number; maxT: number } }).onFireHit;
-    expect(f1094).toEqual({ buff: 24, minT: 300, maxT: 600 });   // OnFire 档 Next(300,600)
+    expect(f1094).toEqual({ buff: 24, minT: 300, maxT: 599 });   // OnFire 档 Next(300,600)
   });
   it('喷火通道：1113 弹速 31.5（num17=10.5 ×3 补偿 :60074）/1094 15（num17=5 :60072）', () => {
     for (const [projId, spd] of [[1113, 31.5], [1094, 15]] as const) {

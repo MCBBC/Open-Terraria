@@ -26,6 +26,11 @@ const MOSS_WALL_BASE = 54;
 /** 霓虹苔藓洞禁区（cs:17598-17616 非 remix 分支）：砂岩/丛林草/蘑菇草/冰雪/
  *  硬化沙/地牢族——苔藓洞不与既有群系叠加 */
 const NEON_FORBIDDEN = idsByVanillaSheet(70, 60, 367, 368, 161, 147, 396, 397);
+/** ★IIII184 霓虹禁区 remix 支（cs:17604-17609）：60 丛林草/161 冰/147 雪砖+
+ *  tileDungeon+25 黑石/203 猩红石——remix 苔洞避让邪恶石与冰雪丛林 */
+const NEON_FORBIDDEN_REMIX = idsByVanillaSheet(60, 161, 147, 25, 203);
+/** ★IIII184 霓虹禁区 (notTheBees&&dontStarve) 支（cs:17610-17615）：同默认但无 60 */
+const NEON_FORBIDDEN_NTB_DS = idsByVanillaSheet(70, 367, 368, 161, 147, 396, 397);
 /** Main.tileDungeon（Main.cs:7941-7946：41 青砖/43 蓝砖/44 绿砖/677-679 变体） */
 const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
 /** Main.tileMoss（Main.cs:6956-6996，按 sheet id）——尾段 SpreadGrass 的苔藓块判定 */
@@ -120,7 +125,12 @@ function neonMossBiome(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
     if (x1 > st.w - 1) x1 = st.w - 1;
     if (y0 < 1) y0 = 1;
     if (y1 > st.h - 1) y1 = st.h - 1;
-    if (y0 < gs.rockLevel) { y0 = Math.trunc(gs.rockLevel); if (vy < 5) vy = 5; }
+    // ★IIII184（1457 cs:9793-9802 ≡1458 同号）：椭圆上界钳制 remix 分支——remixWorld
+    //  钳 Main.worldSurface（假地表），非 remix 才钳 rockLayer（else-if 阶梯）；曾恒走
+    //  rockLevel 臂 ⇒ remix 苔洞整体下坠一层。
+    if (gs.seedFlags.remix) {
+      if (y0 < gs.worldSurface) { y0 = Math.trunc(gs.worldSurface); if (vy < 5) vy = 5; }
+    } else if (y0 < gs.rockLevel) { y0 = Math.trunc(gs.rockLevel); if (vy < 5) vy = 5; }
     if (y1 > maxY) { y1 = maxY; if (vy > -5) vy = -5; }
     const rr = radius * (1 + rng.next() * 0.4 - 0.2);
     for (let x = x0; x < x1; x++) {
@@ -169,7 +179,12 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   let placed = 0, fails = 0;
   while (placed < caveCount) {
     let x = rng.nextIntRange(100, st.w - 100);
-    if (gs.seedFlags.remix) { /* remix 带重掷域未接（组合域债，登记） */ }
+    if (gs.seedFlags.remix) {
+      // ★IIII184（1457 cs:17591-17593 ≡1458 同号）：remix 选点 x 覆写重掷——初掷
+      //  Next(100,w-100) 后恒补一掷 Next(0.3w,0.7w)（被弃 x 是活掷,#64 判例）；
+      //  曾整缺（IIII180 移交登记债回收）⇒ 每 pick 少 1 骰全 pass 流错位。
+      x = rng.nextIntRange(Math.trunc(st.w * 0.3), Math.trunc(st.w * 0.7));
+    }
     else if (celbMoss) {
       if (rng.nextIntRange(0, 2) === 0) neon = pickNeon();               // cs:17610-17616
     }
@@ -181,16 +196,27 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
       // ★IIIII14（1457 cs:17632-17640）：drunk 跳过中带拒绝环（苔藓洞可落在出生点下方）
       while (x > st.w * 0.38 && x < st.w * 0.62) x = rng.nextIntRange(100, st.w - 100);
     }
-    const y = rng.nextIntRange(gs.rockLevel + 40, gs.lavaLine - 40);
+    // ★IIII184（1457 cs:17644-17646 ≡1458 同号）：remix 选点 y 域=Next(ws+50,rock-50)
+    //  （假地表浅带），非 remix 才是 Next(rock+40,lavaLine-40)；曾恒走非 remix 域。
+    const y = gs.seedFlags.remix
+      ? rng.nextIntRange(gs.worldSurface + 50, gs.rockLevel - 50)
+      : rng.nextIntRange(gs.rockLevel + 40, gs.lavaLine - 40);
     let forbidden = false;
     outer:
     for (let a = x - 50; a <= x + 50; a++) {
       for (let b = y - 50; b <= y + 50; b++) {
         if (!st.inBounds(a, b)) continue;
         const ii = st.idx(a, b);
-        // cs:17602-17616：仅查 active 格的 tile 族（70 砂岩/60 丛林草/367/368 蘑菇草/
-        // 161 冰/147 雪砖/396/397 硬化沙族 + Main.tileDungeon）；墙不参与
-        if (st.flags[ii] && (NEON_FORBIDDEN.has(st.type[ii]) || DUNGEON_TILES.has(st.type[ii]))) {
+        // cs:17602-17616：仅查 active 格的 tile 族；墙不参与。★IIII184：三支阶梯
+        // remix 优先（1457 cs:17602-17616 ≡1458 同号）——remix={60,161,147}+tileDungeon
+        // +{25,203}（邪恶石）；(ntb&&dontStarve)={70,367,368,161,147,396,397}（无 60）；
+        // 默认={70,60,367,368,161,147,396,397}。曾恒走默认支。
+        const bad = gs.seedFlags.remix
+          ? (NEON_FORBIDDEN_REMIX.has(st.type[ii]) || DUNGEON_TILES.has(st.type[ii]))
+          : ((gs.seedFlags.notTheBees && gs.seedFlags.theConstant)
+            ? (NEON_FORBIDDEN_NTB_DS.has(st.type[ii]) || DUNGEON_TILES.has(st.type[ii]))
+            : (NEON_FORBIDDEN.has(st.type[ii]) || DUNGEON_TILES.has(st.type[ii])));
+        if (st.flags[ii] && bad) {
           forbidden = true; break outer;
         }
       }
@@ -201,7 +227,9 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
     } else {
       fails = 0;
       placed++;
-      neonMossBiome(st, rng, gs, x, y, gs.lavaLine, neon);
+      // ★IIII184（1457 cs:17687-17690 ≡1458 同号）：remix neonMossBiome maxY=
+      //  rockLayer+50（洞底压在假地表岩层带），非 remix=lavaLine。
+      neonMossBiome(st, rng, gs, x, y, gs.seedFlags.remix ? gs.rockLevel + 50 : gs.lavaLine, neon);
     }
   }
 
@@ -242,6 +270,10 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   for (let n = 0; n < patches; n++) {
     let x = rng.nextIntRange(200, st.w - 200);
     let y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.waterLine);
+    // ★IIII184（1457 cs:17704-17706 ≡1458 同号）：remix 苔斑 y 覆写重掷 Next(ws,rock)
+    //  ——在 shimmer 距离检查**之前**无条件补掷（被弃 y 是活掷,#64 判例）；曾整缺
+    //  ⇒ 每斑少 1 骰（含 shimmer 跳过斑，42 斑全差）。
+    if (gs.seedFlags.remix) y = rng.nextIntRange(gs.worldSurface, gs.rockLevel);
     const nearShimmer = gs.shimmerX >= 0
       && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY;
     if (nearShimmer) continue;
@@ -263,7 +295,11 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   // ---- 全图散点（cs:17714-17723）：每列一次随机石头 → 苔藓 ----
   for (let n = 0; n < st.w; n++) {
     const x = rng.nextIntRange(50, st.w - 50);
-    const y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
+    // ★IIII184（1457 cs:17721-17722 ≡1458 同号）：散点 y remix 域=Next(ws,h-300)
+    //  （假地表全带），非 remix=Next((ws+rock)/2,lavaLine)；曾恒走非 remix 域。
+    const y = gs.seedFlags.remix
+      ? rng.nextIntRange(gs.worldSurface, st.h - 300)
+      : rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
     if (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY) continue;
     const ii = st.idx(x, y);
     if (st.flags[ii] && st.type[ii] === STONE) {
@@ -281,7 +317,10 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   let budget = st.w * 0.05;
   for (let iter = 0; budget > 0 && iter < 1e7; iter++) {
     const x = rng.nextIntRange(50, st.w - 50);
-    const y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
+    // ★IIII184（1457 cs:17732-17733 ≡1458 同号）：暴露石头 y remix 域同散点=Next(ws,h-300)。
+    const y = gs.seedFlags.remix
+      ? rng.nextIntRange(gs.worldSurface, st.h - 300)
+      : rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
     if (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY) continue;
     const ii = st.idx(x, y);
     if (st.flags[ii] && st.type[ii] === STONE
@@ -297,9 +336,16 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   //  命中（25 半径框岩浆>20）-1，命中但岩浆不足 -0.002，每迭代无条件 -0.001。
   //  无迭代上限（原版 while(num13>0)；预算下限 0.001/迭代 → 迭代数有界）
   budget = st.w * 0.065;
+  // ★IIII184（1457 cs:17743-17745 ≡1458 同号）：remix 氦苔藓预算 ×2.0；曾缺 ⇒ 预算
+  //  半额且后续迭代数/掷流全错位。
+  if (gs.seedFlags.remix) budget *= 2.0;
   while (budget > 0) {
     const x = rng.nextIntRange(50, st.w - 50);
-    const y = rng.nextIntRange(gs.waterLine, st.h - 200);
+    // ★IIII184（1457 cs:17749-17750 ≡1458 同号）：remix 氦苔藓 y 域=Next(lavaLine,
+    //  rock+50)（remix 岩浆带在假地表下方），非 remix=Next(waterLine,UnderworldLayer)。
+    const y = gs.seedFlags.remix
+      ? rng.nextIntRange(gs.lavaLine, gs.rockLevel + 50)
+      : rng.nextIntRange(gs.waterLine, st.h - 200);
     const ii = st.idx(x, y);
     if (st.flags[ii] && st.type[ii] === STONE
       && (!st.flags[st.idx(x - 1, y)] || !st.flags[st.idx(x + 1, y)]

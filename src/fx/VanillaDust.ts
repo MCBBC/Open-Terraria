@@ -75,9 +75,13 @@ export interface VDust {
   dyeVid: number;
 }
 
-/** Main.maxDustToDraw 的实用上限（翅膀场景并发 ≤40；6000 池的密度门是满载启发式，
- *  此规模永不触发——dCount 五档缩放不建模） */
-const POOL = 512;
+/** 尘池容量 = 原版 Main.dust[6000]（Main.cs :734 dust = new Dust[6000]）。
+ *  ★2026-09-02 定谳：曾 512=把「Main.maxDustToDraw 绘制分档」误当池容量——
+ *  两概念在原版分离（池 6000 / 绘制遍历另有 maxDustToDraw 分档）。512 实测：
+ *  连发火箭 8 发尘池 504/512、spawnDust nullDrops=170（火箭烟尾 d6/火 d31 被
+ *  池满丢弃=用户实报"连发只看到弹体没有尾焰"根因）。6000 遍历成本：空槽
+ *  active 早退，draw 侧另有视口剔除（±1000/±1050）双重过滤。 */
+const POOL = 6000;
 
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 
@@ -130,11 +134,20 @@ export class VanillaDust {
     // 屏外裁剪需要视口信息——由 Game 侧 update 先暂存；spawn 时跳过（池小、
     // 视口裁剪在 update/draw 双重兜底），此处仅密度池满兜底
     let d: VDust | null = null;
+    let slot = -1;
     for (let i = 0; i < POOL; i++) {
       const c = this.pool[(this.cursor + i) % POOL];
-      if (!c.active) { d = c; this.cursor = (this.cursor + i + 1) % POOL; break; }
+      if (!c.active) { slot = (this.cursor + i) % POOL; d = c; this.cursor = (slot + 1) % POOL; break; }
     }
     if (!d) return null;
+    // ★R2 #4:原版 dCount 概率密度门（Dust.cs:122-151,无环形覆盖——CloneDust 池满
+    // 返回 null 契约保持）:池压五档渐进拒绝（>90% 3/4 / >80% 2/3 / >70% 1/2 /
+    // >60% 1/4 / >50% 1/5;≤50% 不拒）——292 爆区 25/t 的自节流通道,不饿死他人
+    const frac = slot / POOL;
+    const r = Math.random();
+    if ((frac > 0.9 && r >= 0.25) || (frac > 0.8 && r >= 1 / 3) ||
+        (frac > 0.7 && r < 0.5) || (frac > 0.6 && r < 0.25) ||
+        (frac > 0.5 && r < 0.2)) return null;
     const w2 = Math.max(5, w), h2 = Math.max(5, h);
     d.active = true;
     d.type = type;
@@ -257,6 +270,14 @@ export class VanillaDust {
           this.lights.push({ x: d.x, y: d.y, r: k * k * 0.1, g: k * k * 0.6, b: k * k });   // :813-817 无门恒发光
           break;
         }
+        case 174: { // :873-882（独立 if 段,非链 A 链接）：专属 scale−0.01（+通用 −0.01=−0.02/t）
+          d.scale -= 0.01;
+          if (!d.noLight && !d.noLightEmittance) {        // :880-881 光 min(scale,0.6)×(1,0.4,0)
+            const k = Math.min(d.scale, 0.6);
+            this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.4, b: 0 });
+          }
+          break;
+        }
         case 264:   // :625-641：光 + 一次性主角跟随
           if (!d.noLight) {
             this.lights.push({ x: d.x, y: d.y, r: (d.color?.r ?? 0) / 255 * d.scale * 0.4,
@@ -291,7 +312,11 @@ export class VanillaDust {
           d.scale -= 0.0025;
           if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
           break;
-        case 6: case 229: case 228: case 279: { // :883-1092 烟雾族链接：轻重力 + 光
+        case 6: case 229: case 228: case 279:
+        case 75: case 135: case 169: case 127: case 187: case 242: case 29:
+        case 158: case 302: case 307: case 310:
+        case 293: case 294: case 295: case 296: case 297: case 298:
+        case 59: case 60: case 61: case 62: case 63: case 64: case 65: { // :885 烟雾族链接（★R2 扩成员）
           if (!d.noGravity) d.vy += 0.05;                 // :892-895（非通用 0.1）
           // :896-917（229/228/279 三型 customData 档）——_Player 已由 followPlayer
           // 承载；_NPC 档由 followEnt 闭包承载（终清波批接入月总水蛭 d229 环）。
@@ -312,12 +337,20 @@ export class VanillaDust {
             }
           }
           if (!d.noLight && !d.noLightEmittance) {        // :918
+            const k = Math.min(d.scale * 1.4, 1);          // :919 num60（75/169/135/158 钳 1）
             if (d.type === 229) {                          // :976-983 蓝 青 光
-              const k = Math.min(d.scale * 1.4, 1);
               this.lights.push({ x: d.x, y: d.y, r: k * 0.3, g: k * 0.65, b: k * 0.7 });
-            } else {                                       // :1083-1090 尾档（6 型灰橙）
-              const k = Math.min(d.scale * 1.4, 0.6);
-              this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.65, b: k * 0.4 });
+            } else if (d.type === 75) {                    // :928-941 火把 8 诅咒 (1,1.6,0.5)
+              this.lights.push({ x: d.x, y: d.y, r: k, g: k * 1.6, b: k * 0.5 });
+            } else if (d.type === 135) {                   // :952-961 火把 9 冰 (0.75,0.85,1.4)
+              this.lights.push({ x: d.x, y: d.y, r: k * 0.75, g: k * 0.85, b: k * 1.4 });
+            } else if (d.type === 169) {                   // :942-951 火把 11 伊克萨尔 (1.4,1.4,0.7)
+              this.lights.push({ x: d.x, y: d.y, r: k * 1.4, g: k * 1.4, b: k * 0.7 });
+            } else if (d.type === 158) {                   // :962-971 火把 10 橙 (1,0.5,0)
+              this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.5, b: 0 });
+            } else {                                       // :1083-1090 尾档（6 型灰橙;127/187 光色未查备案）
+              const k2 = Math.min(d.scale * 1.4, 0.6);
+              this.lights.push({ x: d.x, y: d.y, r: k2, g: k2 * 0.65, b: k2 * 0.4 });
             }
           }
           chainLink = true;
@@ -573,6 +606,16 @@ export class VanillaDust {
     switch (d.type) {
       case 261: return { rgb: 230 / 255, a: 115 / 255 };                       // :2521
       case 6: return { rgb: 1, a: 25 / 255 };                                   // :2583
+      // ---- ★R2 补档(:2656 与 6 同句 A=25 族;光色随环境——rgb=1 为既有 6 号近似口径):
+      // 174/75/135/169/242/20/21/231/130-134/158/293-298/307/310(292 火柱/291 尾迹/
+      // 103·172·278 尾尘曾落 default 压暗档) + 127/187(:2684 同句)
+      case 174: case 242: case 20: case 21: case 231: case 75: case 135: case 169:
+      case 158: case 307: case 310: case 127: case 187:
+      case 130: case 131: case 132: case 133: case 134:
+      case 293: case 294: case 295: case 296: case 297: case 298:
+        return { rgb: 1, a: 25 / 255 };
+      case 170: return { rgb: 200 / 255, a: 100 / 255 };                        // :2606-2608
+      case 185: return { rgb: 200 / 255, a: 125 / 255 };                        // :2635-2637(蓝通道 255 标量近似备案)
       case 182: case 206: return { rgb: 1, a: 0 };   // :2517/:2595 同句 (255,255,255,0)——A=0 预乘加法白光,恒亮不读尘 α
       case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass
       case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25

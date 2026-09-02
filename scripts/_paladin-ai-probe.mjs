@@ -77,15 +77,20 @@ const out = await page.evaluate(async () => {
     const s0 = sample(e);
     let hammerMax = countHammer();
     const maxXmove = { fwd: 0, total: 0 };
+    let el = 0;
     for (let i = 0; i < 60; i++) {
-      await sleep(i < 16 ? 60 : 150);            // 前 1s 逐 60ms 细采样看 ai1 步进
+      const dt = i < 16 ? 60 : 150;              // 前 1s 逐 60ms 细采样看 ai1 步进
+      el += dt;
+      await sleep(dt);
       const s = sample(e);
       maxXmove.total = Math.max(maxXmove.total, Math.abs(s.x - s0.x));
       hammerMax = Math.max(hammerMax, countHammer());
-      if (i < 16 || i % 10 === 0) (res.A_samples ??= []).push({ t: i * 150, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), hammers: hammerMax });
+      if (i < 16 || i % 10 === 0) (res.A_samples ??= []).push({ t: el, ...s, los: canHit(st, e.x, e.y, e.w, e.h, p.x, p.y, p.w, p.h), hammers: hammerMax });
     }
     res.A = { s0, total: maxXmove.total, hammers: hammerMax, aimTicks: e.ai2, cd: e.ai1 };
-    e.dead = true; e.active = false;
+    // 直接出桶：置 dead 旗后尸体仍会吃一次 fixedUpdate（Entities.update 先遍历后
+    // compact）→ 可在清桶后再掷一把幽灵锤污染下场景
+    const arr = g.entities.enemies; arr.splice(arr.indexOf(e), 1);
   }
 
   // ---- B) 视线挡墙：3 宽×8 高墙隔开 → 期望不开瞄、行走 ----
@@ -107,7 +112,7 @@ const out = await page.evaluate(async () => {
     res.B = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: hammerMax };
     // 拆墙
     for (let dy = -8; dy <= -1; dy++) for (let dx = 0; dx <= 2; dx++) st.setTile(X0 - 14 + dx, Y + dy, 0, 0, 0);
-    e.dead = true; e.active = false;
+    const arrB = g.entities.enemies; arrB.splice(arrB.indexOf(e), 1);
   }
 
   // ---- C) 距离 >700px 视线通：期望不开瞄、行走 ----
@@ -129,7 +134,7 @@ const out = await page.evaluate(async () => {
     }
     // 场景完好性护栏：LOS 通（清整带内无地形遮挡）+ 未被顶出出生位姿
     res.C = { s0, moved: +(sample(e).x - s0.x).toFixed(1), hammers: hammerMax, sceneLosOk: los0 };
-    e.dead = true; e.active = false;
+    const arrC = g.entities.enemies; arrC.splice(arrC.indexOf(e), 1);
   }
 
   return res;

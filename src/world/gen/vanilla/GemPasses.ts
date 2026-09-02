@@ -369,20 +369,27 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     return { air, lava, ice, rock };
   };
   for (let i = 0; i < num; i++) {
-    // 选点（:17547-17565）：x∈[200,w-200)、y∈[rockLevel+30, h-230)、
-    // countTiles∈[50,300) 且 lavaCount==0 && iceCount==0 && rockCount>0（1000 次上限）。
-    // ★R13-10：remix 世界 y 带 = [worldSurface+30, rockLevel-30)（cs:17564-17578，
-    //  初选与重试同式——本循环单点选位天然覆盖两处）
+    // 选点（1457 cs:17563-17579；1458 同号）：x=Next(200,w-200)（:17563）后
+    // y=Next(rock+30,h-230)（:17564）**先掷**，remix 下再补掷 y=Next(ws+30,rock-30)
+    // （:17567）**覆写**——即 remix 每 pick 恒耗 3 骰（x+被弃 y+remix y），被弃 y 不是
+    // 死分支是活掷（x86 taglog 实证：49 pick×3=147 全 lambda 帧，cave#1 于 roll148 起）。
+    // 曾只掷 2 骰 → 每 pick 少 1 骰全 pass 流错位 871 骰（JS 20,382 vs x86 体 21,253），
+    // 世界面=T178 族全站漂移。
+    // ★IIII180：remix 三骰结构修复（上盖=R13-10 旧注「初选与重试同式」的 2 骰建模作废）。
+    // 重试上限（:17570 `while (bad && num2<1000)`，重试掷 ：17573-17577）：num2 计**重试
+    // 数**，P0 免计——总 pick 上限 1001（P0..P1000）；P1000 恒耗骰但 `if (num2<1000)`
+    // 门（:17579）永不受理（收尾幻骰）。曾 `tries<1000` 少一档（满拒世界 P1000 幻骰缺）。
     const remixY = !!gs.seedFlags?.remix;
     let sx = -1, sy = -1;
-    for (let tries = 0; tries < 1000; tries++) {
+    for (let tries = 0; tries <= 1000; tries++) {
       const x = rng.nextIntRange(200, st.w - 200);
       const y = remixY
-        ? rng.nextIntRange(gs.worldSurface + 30, gs.rockLevel - 30)
+        ? (rng.nextIntRange(gs.rockLevel + 30, st.h - 230),   // 被弃 y（活掷,cs:17559-17561）
+          rng.nextIntRange(gs.worldSurface + 30, gs.rockLevel - 30))
         : rng.nextIntRange(gs.rockLevel + 30, st.h - 230);
       const c = countTiles(x, y);
       g0.__swGcCap?.(i, x, y, tries, x, y, c.air, c.lava, c.ice, c.rock);
-      if (c.air >= 50 && c.air < 300 && c.lava === 0 && c.ice === 0 && c.rock > 0) { sx = x; sy = y; break; }
+      if (tries < 1000 && c.air >= 50 && c.air < 300 && c.lava === 0 && c.ice === 0 && c.rock > 0) { sx = x; sy = y; break; }
     }
     if (sx < 0) continue;
     // 选池（gemCave :9657-9673）：强制 1 种 + 各 1/6 追加（1~7 种）

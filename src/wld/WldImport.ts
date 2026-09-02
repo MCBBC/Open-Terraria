@@ -602,9 +602,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
           continue;
         }
       }
-      // 解码：band 按帧值定（5000/20000 与 10000/25000，Player.cs:54789-54798），
-      // 不用剥系余数（规避 ≥4900 段 %5000 歧义）
-      const vid = fx < 20000 ? fx - 5100 : fx - 20200;
+      // 解码：band 按帧值定——锚帧 = itemType + num5 + 100（num5=5000/20000，
+      // Player.cs:54789-54797）⇒ vid = fx-5100 / fx-20100；不用 %5000 余数式
+      // （WorldGen.cs:64146 的等价式）规避 ≥4900 段回绕歧义
+      const vid = fx < 20000 ? fx - 5100 : fx - 20100;
       let prefix: number | undefined;
       if (x + 1 < w) {
         const fx2 = frameX[i + 1];

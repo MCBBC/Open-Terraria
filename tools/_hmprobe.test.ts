@@ -153,6 +153,11 @@ function dumpStore(st: TileStore, dir: string, tag: string): void {
   g.__swOnRoll = (value: number) => {
     hmLog.push(value);
   };
+  // ★NB-A2：段界掷数表（IIII177 的 __swSeg 标记位记录 hmLog 长度）→ phases.txt
+  const segMarks: string[] = [];
+  (g as { __swSeg?: (tag: string) => void }).__swSeg = (tag: string) => {
+    segMarks.push(`${tag}|${hmLog.length}`);
+  };
   console.log(
     `[hm-probe-js] pre dumped seed=${world.seed} dungeonX=${world.dungeonX} ` +
       `groundLevel=${world.groundLevel} crimson=${world.crimson} ` +
@@ -160,7 +165,9 @@ function dumpStore(st: TileStore, dir: string, tag: string): void {
   );
   initializeHardMode(world, new RNG(world.seed));
   g.__swOnRoll = prevHook;
+  (g as { __swSeg?: (tag: string) => void }).__swSeg = undefined;
   writeFileSync(join(OUT, 'roll-js-hm.txt'), hmLog.join('\n') + '\n');
+  writeFileSync(join(OUT, 'phases-js.txt'), segMarks.join('\n') + '\n');
   dumpStore(world.store, OUT, 'post');
   console.log('[hm-probe-js] post dumped -> ' + OUT);
 }, 600000);

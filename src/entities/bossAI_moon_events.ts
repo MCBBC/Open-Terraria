@@ -1168,16 +1168,17 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
         }
         if (Math.random() < 0.2) {
           const d2 = game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
-            172, 0, 0, 100, null, 0.6, true);
-          if (d2) { d2.vx = d2.vx * 0.25 + e.vx * 0.5; d2.vy = d2.vy * 0.25 + e.vy * 0.5; }
+            172, 0, 0, 100, null, 0.6);
+          if (d2) { d2.vx = d2.vx * 0.25 + e.vx * 0.5; d2.vy = d2.vy * 0.25 + e.vy * 0.5; }   // ★R1:此粒无 noGravity(:21635-21639)
         }
       }
     } else if (vid === 30 || vid === 665) {
       // 原版真尘(NPC.cs:21601-21616,alpha=255 强置隐形,可视面全在尘):双循环每
-      // tick 4 粒 d27 阴影焰紫(sp=v×0.2、尘速×0.3−vel×0.2、noGravity、scale1.3)
+      // tick 4 粒 d27 阴影焰紫(sp=v×0.2、尘速×0.3−vel×0.2、noGravity、scale1.3)。
+      // ★R1 盒修正:原版 (pos.X, pos.Y+2, w, h)——X 不内缩(Y+2 是取尘锚)
       for (let loop = 0; loop < 2; loop++) {
         for (let i = 0; i < 2; i++) {
-          const d = game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
+          const d = game.spawnDust?.(e.x, e.y + 2, e.w, e.h,
             27, e.vx * 0.2, e.vy * 0.2, 100, null, 1.3, true);
           if (!d) continue;
           d.vx = d.vx * 0.3 - e.vx * 0.2;
@@ -1185,11 +1186,15 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
         }
       }
     } else if (vid === 25) {
-      // 原版真尘(else 桶 :21560-21577:1/6 掷 d6 火尘 sp=v×0.2、scale1.65、noGravity;
-      // 光 AddLight 已在上方原样接)
-      if (Math.random() < 1 / 6) {
-        game.spawnDust?.(e.x + 2, e.y + 2, e.w - 4, e.h - 4,
-          6, e.vx * 0.2, e.vy * 0.2, 100, null, 1.65, true);
+      // ★R1 桶勘误:type 25=aiStyle 9(NPC.cs:9121)→ aiStyle9 尾 else 桶
+      // (:21651-21661,在 num133<2 循环内):每 tick 2 粒 d6(sp=v×0.2 入参、
+      // 尘速 ×0.3→终 v×0.06、noGravity、scale2)、盒 (pos.X, pos.Y+2, w, h)——
+      // 此前误用 aiStyle8 尾的 1/6+scale1.65 档
+      for (let loop = 0; loop < 2; loop++) {
+        const d = game.spawnDust?.(e.x, e.y + 2, e.w, e.h,
+          6, e.vx * 0.2, e.vy * 0.2, 100, null, 2, true);
+        if (!d) continue;
+        d.vx *= 0.3; d.vy *= 0.3;
       }
     }
     e.visAngle += 0.4 * e.facing;                    // :21547

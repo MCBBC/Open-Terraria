@@ -121,3 +121,53 @@ describe('敌怪远程攻击（对照原版发射点）', () => {
     expect(shots[0].damage).toBe(25);
   });
 });
+
+describe('2026-09-02 评审清偿回归锚（共享热文件覆写报警）', () => {
+  it('困惑门：瞄准中困惑 → 永不开火（NPC.cs:59788 ai[1]/ai[2] 每帧清零）', () => {
+    const { hooks, shots, player } = shooterWorld({ x: 44, y: 57 });
+    player.useTime = 1;
+    const e = Enemy.fromVanilla(110, 40 * 16, 57 * 16)!;
+    let aimed = false;
+    for (let t = 0; t < 300 && !aimed; t++) { e.fixedUpdate(1 / 60, hooks); aimed = e.ai2 > 0; }
+    expect(aimed).toBe(true);
+    e.confusedT = 5;                       // confused getter = confusedT>0
+    expect(runUntilShot(e, hooks, shots, 240)).toBe(-1);
+    expect(shots.length).toBe(0);
+  });
+
+  it('死亡窗：玩家死亡后射击族块照常倒数（rawPlayer 通道,旧病=整块冻结）', () => {
+    const { hooks, player } = shooterWorld({ x: 44, y: 57 });
+    player.useTime = 1;
+    const e = Enemy.fromVanilla(110, 40 * 16, 57 * 16)!;
+    let aimed = false;
+    for (let t = 0; t < 300 && !aimed; t++) { e.fixedUpdate(1 / 60, hooks); aimed = e.ai2 > 0; }
+    expect(aimed).toBe(true);
+    (player as unknown as { dead: boolean }).dead = true;
+    const cd0 = e.ai1;
+    e.fixedUpdate(1 / 60, hooks);
+    expect(e.ai1).toBe(Math.max(0, cd0 - 1));
+  });
+
+  it('216 激怒计数双门：未入档(lai2<20)受击 lai3 不涨,入档才 +1（:59680-59766）', () => {
+    const { hooks } = shooterWorld({ x: 40, y: 50 });
+    const e = Enemy.fromVanilla(216, 38 * 16, 50 * 16)!;
+    e.ai2 = 3; e.ai1 = 10; e.lai2 = 19; e.justHitT = 2;
+    e.fixedUpdate(1 / 60, hooks);
+    expect(e.lai3).toBe(0);
+    e.ai2 = 3; e.ai1 = 10; e.lai2 = 20; e.justHitT = 2;
+    e.fixedUpdate(1 / 60, hooks);
+    expect(e.lai3).toBe(1);
+  });
+
+  it('70/72 机关球恒不可击（SetDefaults dontTakeDamage,NPC.cs:9722/:9757）', () => {
+    const { hooks } = shooterWorld({ x: 40, y: 50 });
+    for (const vid of [70, 72]) {
+      const e = Enemy.fromVanilla(vid, 40 * 16, 50 * 16)!;
+      expect(e.dontTakeDamage).toBe(true);
+      const hp0 = e.hp;
+      e.hurt(50, 1, 0, hooks);
+      expect(e.hp).toBe(hp0);
+      expect(e.dead).toBe(false);
+    }
+  });
+});

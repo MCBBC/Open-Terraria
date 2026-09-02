@@ -1338,6 +1338,10 @@ export class Enemy extends Entity {
     // 恒不可击（def.dontTakeDamage 提取面不含此字段,手补表同款;曾缺=可被磨死/放死音/
     // 出尸块,地牢永久威胁可被清空——2026-09-02 红蓝对抗完备性批评定谳补）
     if (id === 70 || id === 72) e.dontTakeDamage = true;
+    // SetDefaults immortal（NPC.cs:14630 假人 488/:17715 雕像宝箱怪 690——690 的
+    // 显隐态由其 AI :43873 翻 false）。DoT 直扣路径以本位守卫（GetHurtByDebuff
+    // :92995 同款）——DoT/血条曾绕过 488 守卫（2026-09-02 用户实报闪烁血条）
+    if (id === 488 || id === 690) e.immortal = true;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -1368,6 +1372,12 @@ export class Enemy extends Entity {
                          // ★曾用 π 做类默认，新接旋转的族不归零会倒栽葱，2026-08-20 根修）
   spin = 0;              // EoC 变身旋转进度 0..1
   hpBarT = 0;            // 受击后血条显示计时（tick）
+  /** 原版 NPC.immortal（NPC.cs:6266）：StrikeNPC/GetHurtByDebuff 只跳过 life 扣减,
+   *  飘值/音效照走、血条永不出现（life 恒=lifeMax）。SetDefaults 置位:488 训练假人
+   *  （:14630）/690 雕像宝箱怪（:17715,其 AI :43873 显隐态翻 false）;运行时置位:
+   *  infectedSeed 世界 type20（:53687,本仓未建模）。DoT 直扣路径必须以本位守卫——
+   *  曾 3 处 DoT 裸扣 hp 绕过 488 守卫=假人吃燃烧 buff 闪烁血条（2026-09-02 实报） */
+  immortal = false;
   // ---- EoC(AI_004)专属 ----
   servantT = 0;          // 悬浮时"位于玩家上方"累计(110t 召仆从)
   spinSpeed = 0;         // 自旋角速度(cs ai[2]:0.005 步进钳 0.5)
@@ -2322,10 +2332,8 @@ export class Enemy extends Entity {
       if (this.onFireDoT >= 1) {
         const n = Math.floor(this.onFireDoT);
         this.onFireDoT -= n;
-        this.hp -= n;
-        this.hpBarT = 240;
+        this.applyDoT(n, game);
         game.addDamageNumber(this.cx, this.y, n, false, '#FF8C28', true);   // DoT 飘值(LifeRegenNegative :93070,dot 小字)
-        if (this.hp <= 0) this.hurt(9999, 0, 0, game); // 走标准死亡管线(掉落/分裂/联机)
       }
       if (Math.random() < 0.75) {
         game.spawnParticles(
@@ -2396,10 +2404,8 @@ export class Enemy extends Entity {
     if (this.oiledDoT >= 1) {
       const n = Math.floor(this.oiledDoT);
       this.oiledDoT -= n;
-      this.hp -= n;
-      this.hpBarT = 240;
+      this.applyDoT(n, game);
       game.addDamageNumber(this.cx, this.y, n, false, '#FF8C28', true);
-      if (this.hp <= 0) this.hurt(9999, 0, 0, game);
     }
     for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT'],
       ['frostburnT', 'frostburnDoT'], ['frostburn2T', 'frostburn2DoT'],
@@ -2413,10 +2419,12 @@ export class Enemy extends Entity {
       if (acc >= 1) {
         const n = Math.floor(acc);
         this[dKey] -= n;
-        this.hp -= n;
-        this.hpBarT = 240;
-        game.addDamageNumber(this.cx, this.y, n, false, '#FF8C28', true);
-        if (this.hp <= 0) this.hurt(9999, 0, 0, game);
+        // soulDrain 条目带 realLife==-1 门（:92802）：共享血池族免 soulDrain——
+        // 原版该条目不进 tally,伤害与飘字都不出
+        if (!(dKey === 'soulDrainDoT' && this.realLifeHost && !this.realLifeHost.dead)) {
+          this.applyDoT(n, game);
+          game.addDamageNumber(this.cx, this.y, n, false, '#FF8C28', true);
+        }
       }
     }
     if (this.ichorT > 0) this.ichorT -= dt;
@@ -3999,6 +4007,25 @@ export class Enemy extends Entity {
    *  本仓 def.hitSound 是按型共享档——488 假人 AI 每 tick 重卷需实例槽承接,
    *  非空时 playEnemyHitSound 优先消费。勿写回 def(会串到同型所有实例)! */
   hitSoundOverride: string[] | null = null;
+  /** DoT 直扣统一结算（GetHurtByDebuff :92986-93006 1:1）：
+   *  ①immortal 守卫——不扣血/不拉血条/不触发死亡（训练假人 488 曾被三条 DoT 裸扣
+   *    hp 又被 dummyAI 回满=闪烁血条，2026-09-02 用户实报）；
+   *  ②realLife 重定向——共享血池族（毁灭者/幻影龙/血鳗鱼）打节段=扣头血池
+   *    （:92991-92993 num=realLife≥0?realLife:whoAmI;曾直扣节段 hp=下次 hurt 被
+   *    头池覆盖,DoT 白打）；血条照拉（头池<max 即出条,节段无条由 wormFollow 门）。
+   *  飘值【无条件】由调用侧保留（原版 LifeRegenNegative 对 immortal 同样出字）。 */
+  private applyDoT(n: number, game: GameHooks): void {
+    if (this.immortal) return;
+    if (this.realLifeHost && !this.realLifeHost.dead) {
+      this.realLifeHost.hp -= n;
+      this.hp = this.realLifeHost.hp;
+    } else {
+      this.hp -= n;
+    }
+    this.hpBarT = 240;
+    if (this.hp <= 0) this.hurt(9999, 0, 0, game);
+  }
+
   private dummyAI(game: GameHooks) {
     const st = game.world.store;
     const [ax, ay] = this.dummyAnchor ?? [-1, -1];
@@ -4985,11 +5012,14 @@ export class Enemy extends Entity {
         || (R.aimDecelOffEclipse && !game.world.clock.eclipse);
       // flag17 = 426（瞄准不因空中解除，cs:59467/:60015/:60020/:60030）
       const flag17 = vidR === 426;
+      const ai1Pre = this.ai1;                                 // :59666-59679 flag19 按减【前】值判（411 窗口）
       if (this.ai1 > 0) this.ai1 -= 1;                         // :59481-59484 先倒数
       // F3 justHit 重瞄（cs:59486-59492，后于倒数）：ai[1]=30、ai[2]=0；
-      // 216 瞄准中受击 → lai3+1
+      // 216 激怒档受击 → lai3+1（:59680-59687 flag20=受击时瞄准 + :59758-59766
+      // localAI[2]>=20 档门内计数——双门缺一不可,曾漏档门=激怒前白涨 lai3 预缩短
+      // 首个激怒冷却,2026-09-02 全面评审 C 定谳补）
       if (this.justHit) {
-        if (vidR === 216 && this.ai2 > 0) this.lai3 += 1;      // :59568-59571 flag19
+        if (vidR === 216 && flag20 && this.ai2 > 0) this.lai3 += 1;
         this.ai1 = 30;                                         // :59489
         this.ai2 = 0;                                          // :59490
       }
@@ -5000,12 +5030,14 @@ export class Enemy extends Entity {
         this.ai1 = 0;
         this.ai2 = 0;
       }
-      // 枪口（chaserPosition2，cs:59674-59703）
-      const mx = this.cx, my = this.cy + (R.oy ?? 0);
+      // 枪口（chaserPosition2，cs:59674-59703）：oy 均为中心相对；例外 520=:59887-59890
+      // 【赋值】Top+20（绝对顶边,盒高 110 → cy−35）、426=:59896-59901 追加横偏 +(sd*2,−12)
+      const mx = this.cx + (vidR === 426 ? this.facing * 2 : 0), my = this.cy + (R.oy ?? 0);
       if (this.ai2 > 0) {           // 瞄准中
-        // :59599-59602 flag18（411 ai1>220 才 TargetClosest——窗外冻结朝向）；
-        // TargetClosest 对死者只冻结朝向不改向（:78538-78541）→ dead 时停更 facing
-        if (!(vidR === 411 && this.ai1 <= 220) && !rawPlayer.dead) this.facing = this.seekDirX(rawPlayer);
+        // :59599-59602 flag18（411 ai1>220 才 TargetClosest——窗外冻结朝向,★按减前值
+        // ai1Pre 判:原版 flag19 求值在倒数前,:59666-59679）;TargetClosest 对死者只冻结
+        // 朝向不改向（:78538-78541）→ dead 时停更 facing
+        if (!(vidR === 411 && ai1Pre <= 220) && !rawPlayer.dead) this.facing = this.seekDirX(rawPlayer);
         if (this.ai1 === fireAt) {
           if (vidR === 216) this.lai2 += 1;                    // :59605-59608
           // ---- 弹速/瞄准（cs:59609-59703）----
@@ -5120,9 +5152,12 @@ export class Enemy extends Entity {
         }
         // 解除瞄准（cs:60015-60019）：空中（!flag17）或冷却尽
         if ((this.vy !== 0 && !flag17) || this.ai1 <= 0) { this.ai2 = 0; this.ai1 = 0; }
-        else if (!flag16 || (vidR === 411 && this.ai1 >= 120 && this.ai1 < 240
-          && (!flag17 || this.vy === 0))) {
-          this.vx *= 0.9;                                      // :60020-60024 瞄准减速（411 仅窗内）
+        // 瞄准减速（:60216-60220）：flag17=381/382/520（★不含 468——:60222 的非日食
+        // 置位在瞄准块【之后】,块内恒 false=468 残瞄窗照减速）；第二窗项对全型死码
+        // （num160 仅 411=120,而 411 已走 !flag17=true）→ 简化为非 freeMove 即减速。
+        // 曾误用含日食项的 flag16=468 非日食跳减速 + 411 窗外跳减速（评审 C 定谳修）
+        else if (!(vidR === 381 || vidR === 382 || vidR === 520)) {
+          this.vx *= 0.9;                                      // :60218 瞄准减速
         }
       }
       // ---- 开瞄（cs:60026-60109）：468 非日食整段跳过（flag16=true 分支）----
@@ -5151,8 +5186,13 @@ export class Enemy extends Entity {
           const gdy = dy - Math.abs(dx) * 0.1 + (Math.floor(Math.random() * 81) - 40);
           if (Math.hypot(gdx, gdy) < R.range) {
             this.vx *= 0.5;                                    // :60079
-            this.ai2 = 3;                                      // :60083（发射段再细分 1-5）
+            this.ai2 = 3;                                      // :60083
             this.ai1 = cooldown;
+            // 开瞄即细分姿态 1-5（:60279-60303,与发射段 :60187-60209 同式,消费抖动矢量
+            // num176/num178——曾只置 3,接姿态渲染时会露差;评审 C 定谳补）
+            if (Math.abs(gdy) > Math.abs(gdx) * 2) this.ai2 = gdy > 0 ? 1 : 5;
+            else if (Math.abs(gdx) > Math.abs(gdy) * 2) this.ai2 = 3;
+            else this.ai2 = gdy > 0 ? 2 : 4;
           }
         }
       }
@@ -5611,7 +5651,7 @@ export class Enemy extends Entity {
     110: { cooldown: 70, speed: 11, dmg: 35, range: 700, drop: 0.1, proj: 82 },          // 骷髅弓手 火焰箭
     206: { cooldown: 50, speed: 7, dmg: 37, range: 700, drop: 0.1, oy: -10, proj: 177 },  // 冰鱼人 冰水吐息
     290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0.1, oy: -10,
-      projDmgScale: [60, 45], proj: 300 },   // 圣骑士 圣锤（:59945-59948 (60,45)）
+      projDmgScale: [60, 45], proj: 300 },   // 圣骑士 圣锤（:60078-60082 (60,45)+:60142-60145 重映射）
     291: { cooldown: 200, speed: 11, dmg: 100, range: 700, drop: 0, spread: 8, proj: 302 },// 骷髅神射 狙击弹（R6-B 1-4：num165 无覆写=默认 11，:59805；曾误 4=293 的值）
     292: { cooldown: 120, speed: 11, dmg: 50, range: 700, drop: 0, fireAt: 60, burst: 4, proj: 180 }, // 战术骷髅（F2：num165=120/2=60；速度同为默认 11，:59805 无 292 覆写）
     293: { cooldown: 90, speed: 4, dmg: 60, range: 700, drop: 0.1, proj: 303 },           // 骷髅爆破 火箭
@@ -5621,15 +5661,15 @@ export class Enemy extends Entity {
     451: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: [0.1, 0.49], proj: 471 },
     452: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: [0.1, 0.49], proj: 471 },
     481: { cooldown: 100, speed: 8, dmg: 18, range: 400, drop: [-0.035, 0.035], spread: 16, oy: -14, proj: 508 }, // 希腊骷髅 标枪（F20：drop ±0.0035×rand(−10..10)）
-    498: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 }, // 蝾螈吐息（F20：rand(1..10)×0.0025）
-    499: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    500: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    501: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    502: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    503: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
-    506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.0275], spread: 12, oy: -8, proj: 572 },
+    498: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 }, // 蝾螈吐息（F20：rand(1..10)×0.0025）
+    499: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    500: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    501: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    502: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    503: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
+    506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: [0.0025, 0.025], spread: 12, oy: -8, proj: 572 },
     // 蝇博士 Dr. Man Fly（cs:59493 num163=70 默认 / :59662-59665 num166=7.5 /
     // :59727-59730 num168=rand(10..49)×0.01 / :59815-59818 num171=50 /
     // :59861-59864 num172=501 / :60072-60075 num181=400；:60026-60029 非日食不减速）
@@ -5637,7 +5677,7 @@ export class Enemy extends Entity {
       proj: 501, aimDecelOffEclipse: true },
     // ---- F9 火星批（2026-08-19）----
     // 381 脑洗器（:59498-59501 num163=80 / :59687-59690 枪口 +6 / :59719-59722 drop 0 /
-    //  :59745-59757 ±40×rand / :59827-59831 弹 436 伤 24 / :59949-59952 (24,19.2)）
+    //  :59745-59757 ±40×rand / :59827-59831 弹 436 伤 24 / 重映射(24,19.2)=:60146-60149,弹 436=:59827-59831）
     381: { cooldown: 80, speed: 11, dmg: 24, range: 700, drop: 0, oy: 6,
       aimFreeMove: true, projDmgScale: [24, 19.2],
       moveMax: 2, moveAccel: 0.5, nearDampRange: 300, proj: 436 },
@@ -5658,20 +5698,24 @@ export class Enemy extends Entity {
     // 424 预言者（:59554-59557 num163=180 / :59581-59584 num165=179 /
     //  :59870-59874 弹 573 伤 (60,45) / :59974-59979 四发扇：枪口 Center+(−sd*4,+6)、
     //  vx=(−3+2k)×0.15、vy=−rand(0,3)×0.2−0.1）
-    424: { cooldown: 180, speed: 7, dmg: 60, range: 700, drop: 0.1, fireAt: 179,
+    424: { cooldown: 180, speed: 11, dmg: 60, range: 700, drop: 0.1, fireAt: 179,
       projDmgScale: [60, 45], proj: 573 },
-    // 426 蜂后（:59558-59561 num163=60 / num165=59 / :59699-59703 枪口 +(sd*2,−12)
-    //  num166=7 / :59875-59879 弹 581 伤 (60,45) / :59924-59937 追逐者前置补偿：
-    //  玩家盒内随机点 GetChaseResults + FactorAcceleration((0,0.1),15) /
-    //  :60015 flag17：瞄准不因空中解除）
-    426: { cooldown: 60, speed: 7, dmg: 60, range: 700, drop: 0.1, fireAt: 59,
+    // 426 蜂后（:59558-59561 num163=60 / num165=59 / :59896-59901 枪口 +=(sd*2,−12)
+    //  ——纵半走 oy:−12、横半 sd*2 在枪口行 vidR===426 支；曾整缺=出膛/追逐点低 12px
+    //  横偏 ±2（评审 C 定谳补）/ num166=7 / :59875-59879 弹 581 伤 (60,45) /
+    //  :59924-59937 追逐者前置补偿：玩家盒内随机点 GetChaseResults +
+    //  FactorAcceleration((0,0.1),15) / :60015 flag17：瞄准不因空中解除）
+    426: { cooldown: 60, speed: 7, dmg: 60, range: 700, drop: 0.1, fireAt: 59, oy: -12,
       spread: 9, projDmgScale: [60, 45],
       moveMax: 4, moveAccel: 0.6, moveDamp: 0.95, proj: 581 },
     // 520 火星行者（:59502-59505 num163=15 / :59646-59649 num166=8 /
-    //  :59691-59694 枪口 y+20 / :59751-59757 双层抖动 / :59837-59841 弹 592 伤 35
-    //  / :59949-59952 (35,28) / :60131-60136 行走 4/1/0.7 / :60159-60163 flag22 400）
-    520: { cooldown: 15, speed: 8, dmg: 35, range: 700, drop: 0, oy: 20,
-      aimFreeMove: true, projDmgScale: [35, 28],
+    //  :59887-59890 枪口=【赋值】Top+20(顶边绝对,盒高 110→oy=−35;曾误记中心+20=低 55px)
+    //  / :59751-59757 双层抖动 / :60022-60026 num171=592/num170=35 固定——★无
+    //  ForProjectiles 重映射（重映射块 :60142-60149 仅 290/381-392）,expert 亦恒 35,
+    //  曾误记 projDmgScale[35,28]=高难度少伤 20%（评审 C 定谳撤）/
+    //  :60131-60136 行走 4/1/0.7 / :60159-60163 flag22 400）
+    520: { cooldown: 15, speed: 8, dmg: 35, range: 700, drop: 0, oy: -35,
+      aimFreeMove: true,
       moveMax: 4, moveAccel: 1, moveDamp: 0.7, nearDampRange: 400, proj: 592 },
   };
 
@@ -10903,6 +10947,7 @@ export class Enemy extends Entity {
       if (tgt && Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) < 96 && this.canSeePlayer(st, tgt)) {
         this.ai0 = 1;                                     // 唤醒（:43780-43788）
         this.dontTakeDamage = false;                      // immortal=false（:43873）
+        this.immortal = false;                            // 显身同拍（:44017 immortal=false——显身后 DoT 可伤）
         game.playSfx('statueMimicScare', 0.8, this.cx, this.cy);
         return;
       }

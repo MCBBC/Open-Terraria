@@ -9,10 +9,40 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { ctrunc } from '../../../core/csCompat';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { canBeClearedDuringGenerationDual, dualDungeonState } from './DungeonStyles1457';
 
 /** 山丘区域避让的沙族（原版 box 检查 type 53/151/274：沙/沙岩砖/沙岩板） */
 const SAND_AVOID = idsByVanillaSheet(53, 151, 274);
+
+/** internal tile id → vanilla sheet（CanBeClearedDuringGeneration dual 支/表查必走 sheet 域） */
+const sheetOf = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+
+/** ★IIIII179：WorldGen.CanBeClearedDuringGeneration（cs:81453-81460）1:1——
+ *  静态集 TileID.Sets.CanBeClearedDuringGeneration（NOT_CLEARABLE=internal 域）
+ *  ∪ dual 动态拒支（sheet 域）。@param t=internal id @returns true=可清 */
+const cbcDg = (t: number, x: number, y: number): boolean =>
+  t > 0 && !NOT_CLEARABLE.has(t) && canBeClearedDuringGenerationDual(sheetOf(t), x, y);
+
+/** ★IIIII179：IsConsideredDungeonTile(t,allDungeons:true)（DU.cs:1844-1862）——
+ *  Main.tileDungeon（TILE_DUNGEON=internal 域集）∪ ⋃_i dungeonGenVars[i]
+ *  .isDungeonTile（tileProtection=sheet 域并集）。@param t=internal id */
+const dtAll = (t: number): boolean => {
+  if (t <= 0) return false;
+  if (TILE_DUNGEON.has(t)) return true;
+  const sh = sheetOf(t);
+  if (sh < 0) return false;
+  const tp = dualDungeonState.tileProtection;
+  if (!tp) return false;
+  for (const tb of tp) if (sh < tb.length && tb[sh]) return true;
+  return false;
+};
+
+/** ★IIIII179：IsConsideredDungeonWall(w,allDungeons:true)（DU.cs:1929-1950）——
+ *  Main.wallDungeon ∪ ⋃_i dungeonGenVars[i].isDungeonWall（wallProtection 并集,
+ *  wall 本域=vanilla wall id）。 */
+const dwAll = (wall: number): boolean =>
+  wall > 0 && (WALL_DUNGEON.has(wall) || (dualDungeonState.wallProtection?.[wall] ?? false));
 
 /** Mountinater（L48367）：上漂泥土 blob = 山丘本体。只在空气格激活填土(type 0=Dirt) */
 function mountinater(st: TileStore, rng: RNG, i: number, j: number, remix: boolean): void {
@@ -122,9 +152,13 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
   let steps = 100;
   let vx = dir, vy = 0;
   while (steps > 0) {
-    const k = st.idx(Math.max(0, Math.min(st.w - 1, ctrunc(px))), Math.max(0, Math.min(st.h - 1, ctrunc(py))));
+    const cx = Math.max(0, Math.min(st.w - 1, ctrunc(px)));
+    const cy = Math.max(0, Math.min(st.h - 1, ctrunc(py)));
+    const k = st.idx(cx, cy);
     const t = st.type[k];
-    if (st.wall[k] === 0 || (st.flags[k] && NOT_CLEARABLE.has(t))) steps = 0;
+    // 停走门（cs:81366-81370）：wall==0 ∨ (active && !CanBeClearedDuringGeneration)
+    //   ——★IIIII179 补 dual 动态拒支（WorldGen.cs:81453-81460;曾只查静态集）
+    if (st.wall[k] === 0 || (st.flags[k] && !cbcDg(t, cx, cy))) steps = 0;
     steps--;
     let x0 = ctrunc(px - num1 * 0.5), x1 = ctrunc(px + num1 * 0.5);
     let y0 = ctrunc(py - num1 * 0.5), y1 = ctrunc(py + num1 * 0.5);
@@ -138,7 +172,9 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
         if (Math.sqrt(dx * dx + dy * dy) < r * 0.4) {
           const kk = st.idx(x, y);
-          if (st.flags[kk] && !NOT_CLEARABLE.has(st.type[kk])) st.flags[kk] = 0; // 原版 active(false) 保留幽灵 type
+          // 清格门（cs:81404-81408）：CanBeClearedDuringGeneration(type,k,l)
+          //   ——★IIIII179 补 dual 动态拒支（保护界内各座 dungeon tile）
+          if (st.flags[kk] && cbcDg(st.type[kk], x, y)) st.flags[kk] = 0; // 原版 active(false) 保留幽灵 type
         }
       }
     }
@@ -182,12 +218,21 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
         if (Math.sqrt(dx * dx + dy * dy) < r * 0.4) {
           const kk = st.idx(x, y);
           const active = st.flags[kk] !== 0;
+          // ★IIIII179 dual 停走支（cs:81277-81283）：dualDungeons.Enabled &&
+          //   ((active && IsConsideredDungeonTile(t,allDungeons:true)) ||
+          //    IsConsideredDungeonWall(w,allDungeons:true)) → num4=0 停走。
+          //   曾整缺 ⇒ 洞穴穿透座1 各厅砖墙多耗每步 3 骰+误清保护砖（#34 主差源）。
+          if (dualDungeonState.enabled && ((active && dtAll(st.type[kk])) || dwAll(st.wall[kk]))) {
+            num4 = 0;
+            break outer;
+          }
           if ((active && TILE_DUNGEON.has(st.type[kk])) || WALL_DUNGEON.has(st.wall[kk])) {
             num4 = 0;
             break outer;
           }
-          // 不可清块/沙：跳过该格（原版 continue，不终止）
-          if (active && (NOT_CLEARABLE.has(st.type[kk]) || st.type[kk] === SAND)) continue;
+          // 不可清块/沙：跳过该格（原版 continue，不终止）——★IIIII179 补
+          //   CanBeClearedDuringGeneration dual 动态拒支（:81453-81460）
+          if (active && (!cbcDg(st.type[kk], x, y) || st.type[kk] === SAND)) continue;
           if (active) st.flags[kk] = 0; // 原版 active(false) 保留幽灵 type（cavinator）
         }
         if (num4 <= 0) break;

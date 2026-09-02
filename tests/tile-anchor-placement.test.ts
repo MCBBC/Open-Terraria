@@ -9,7 +9,7 @@ import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import manifestJson from '../src/data/tile-anchors.json';
 import goldenJson from './golden/tile-anchor-authority.json';
-import { anchorSpecOf, chooseAnchorFromClick, validateAnchors } from '../src/world/TileAnchorValidator';
+import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../src/world/TileAnchorValidator';
 import type { AnchorRec } from '../src/world/TileAnchorValidator';
 
 const DIRT = TILE_BY_KEY['dirt']!;
@@ -45,6 +45,30 @@ describe('A. 提取器金标（防静默漂移）', () => {
     const WALL_IDS = Object.entries(manifestJson.tiles as Record<string, any>)
       .filter(([, r]) => r?.wall === true).map(([k]) => k).sort();
     expect(WALL_IDS).toEqual(['240', '334', '440', '471']);
+  });
+
+  it('M-3c 平台族 19/427 家族头缺省继承：1×1 无锚=原版数据形态（TileObjectData.cs:2128-2140/:2147-2149）', () => {
+    // 家族头不声明 W/H/Origin/锚 ⇒ 继承 _baseObject 终态（SetupBaseObject :1779-1781
+    // Width=1/Height=1/Origin=Point16.Zero + default(AnchorData) 锚全空）——
+    // recon-tileobj.mjs 已建模 Initialize 头部 newTile 重装（:2125），不再 unparsed。
+    // ★消费面注意：19/427 UsesCustomCanPlace=false（:2134/:2147）→ 原版走 legacy
+    // 置放（CustomPlace :5017-5038 不受理），本仓平台亦 legacy —— 记录属完备性。
+    const p19 = (manifestJson.tiles as Record<string, any>)['19']!;
+    const p427 = (manifestJson.tiles as Record<string, any>)['427']!;
+    expect(p19).toMatchObject({
+      w: 1, h: 1, ox: 0, oy: 0,
+      anchorTop: null, anchorBottom: null, wall: false,
+      liq: { water: 'allowed', lava: 'notAllowed' },   // 基档（:1767-1768）+ LavaDeath 耦合（:2135→Calculate :1826-1828）
+    });
+    expect(p19.liqStyles).toEqual({                    // 黑曜石平台 13/43/47（:2137-2139 addSubTile(13,43,47)）
+      '13': { water: 'allowed', lava: 'allowed' },
+      '43': { water: 'allowed', lava: 'allowed' },
+      '47': { water: 'allowed', lava: 'allowed' },
+    });
+    expect(p427).toMatchObject({ w: 1, h: 1, liq: { water: 'allowed', lava: 'notAllowed' } });
+    expect(p427.liqStyles).toBeUndefined();            // 团队平台无子样式（:2141-2149 裸块）
+    expect(anchorSpecOf(19)).not.toBeNull();           // 无 AlternateTile/Tree 位 → 可解析
+    expect(anchorSpecOf(19)!.liqStyles).toEqual(p19.liqStyles);
   });
 });
 
@@ -309,5 +333,65 @@ describe('D. 子样式液体档（M-3b：newSubTile.* → liqStyles per-style �
       expect(validateAnchors(st, 10, 10, cf, style), `style ${style}`).toBe(true);
     }
     expect(validateAnchors(st, 10, 10, cf, 2)).toBe(false);    // 无子样式档回落基记录
+  });
+});
+
+describe('E. M-3c 消费接线（门 10/11 岩浆门 liqGateDoor + 药草 legacy 岩浆门 liqGateHerb）', () => {
+  const manifestTiles = manifestJson.tiles as Record<string, any>;
+  /** Game.ts 门分支/药草分支共用的档解析式（与消费侧逐字同构） */
+  const liqOf = (sheet: number, style: number) =>
+    liquidSpecOf(sheet)!.liqStyles?.[String(style)] ?? liquidSpecOf(sheet)!.liq;
+
+  it('门 10/11 子样式钉值：19/48 黑曜石门水+岩浆均放（:2245-2247/:2289-2291）,基样式岩浆禁（:1768）', () => {
+    for (const id of ['10', '11']) {
+      expect(manifestTiles[id].liq).toEqual({ water: 'allowed', lava: 'notAllowed' });   // :1767-1768 + LavaDeath 耦合
+      expect(manifestTiles[id].liqStyles).toEqual({
+        '19': { water: 'allowed', lava: 'allowed' },     // obsidian door vid 1458 placeStyle=19（itemfunc）
+        '48': { water: 'allowed', lava: 'allowed' },     // 开门态
+      });
+    }
+  });
+
+  it('liqGateDoor 口径：普通门 style0 岩浆拒/水放；黑曜石 19 岩浆放；未注册 style 回落基档', () => {
+    const st = mkStore();
+    // 门格液体态（CanPlace TileObject.cs:342 逐格消费——门 1×3 全格,本处以单格代表）
+    flood(st, 10, 9, 1, 3, LIQUID_TYPE.LAVA);
+    expect(liquidCellOk(st as never, 10, 9, liqOf(10, 0))).toBe(false);    // 普通门基档岩浆拒
+    expect(liquidCellOk(st as never, 10, 9, liqOf(10, 5))).toBe(false);    // 未注册 style → 回落基档
+    expect(liquidCellOk(st as never, 10, 9, liqOf(10, 19))).toBe(true);    // 黑曜石门岩浆放
+    for (let y = 9; y < 12; y++) st.setLiquid(10, y, 0, LIQUID_TYPE.NONE);
+    flood(st, 10, 9, 1, 3, LIQUID_TYPE.WATER);
+    expect(liquidCellOk(st as never, 10, 9, liqOf(10, 0))).toBe(true);     // 基档水放（满水不变,Scene①回归）
+    expect(liquidCellOk(st as never, 10, 9, liqOf(11, 19))).toBe(true);    // 开门态 11 同构
+  });
+
+  it('liqGateHerb 口径（legacy 路径岩浆 only,Player.cs:40058/:41809-41824）：style5 岩浆放、其余岩浆拒', () => {
+    const st = mkStore();
+    flood(st, 10, 11, 1, 1, LIQUID_TYPE.LAVA);
+    expect(liquidCellOk(st as never, 10, 11, liqOf(83, 5))).toBe(true);    // 火焰花（:4777-4778）
+    expect(liquidCellOk(st as never, 10, 11, liqOf(83, 0))).toBe(false);   // daybloom 基档（:4752）
+    expect(liquidCellOk(st as never, 10, 11, liqOf(83, 4))).toBe(false);   // 水叶档只放水（:4772）
+    expect(liquidCellOk(st as never, 10, 11, liqOf(82, 3))).toBe(false);   // 死亡草（FullCopyFrom :4786-4788）
+  });
+
+  it('liquidSpecOf：豁免面独立——药草 82-84 anchorSpecOf 恒 null（AlternateTile :4749）而液体档可直读', () => {
+    for (const id of [82, 83, 84]) {
+      expect(anchorSpecOf(id)).toBeNull();
+      expect(liquidSpecOf(id)!.liq).toEqual({ water: 'notAllowed', lava: 'notAllowed' });   // StyleAlch（:4750-4752）
+      expect(liquidSpecOf(id)!.liqStyles).toEqual(manifestTiles[String(id)].liqStyles);
+    }
+    expect(liquidSpecOf(314)).toBeNull();      // 无记录 → 消费侧不开门（不臆造缺省）
+    expect(liquidSpecOf(19)!.liqStyles).toEqual(manifestTiles['19'].liqStyles);
+  });
+
+  it('validateAnchors 与 liquidCellOk 同源（M-3c 门体上移）：两维门逐格判据等价回归', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const wb = anchorSpecOf(18)!;
+    flood(st, 10, 11, wb.w, wb.h, LIQUID_TYPE.LAVA);
+    expect(validateAnchors(st, 10, 11, wb, 0)).toBe(false);
+    expect(liquidCellOk(st as never, 10, 11, wb.liqStyles?.['0'] ?? wb.liq)).toBe(false);
+    expect(validateAnchors(st, 10, 11, wb, 14)).toBe(true);
+    expect(liquidCellOk(st as never, 10, 11, wb.liqStyles!['14'])).toBe(true);
   });
 });

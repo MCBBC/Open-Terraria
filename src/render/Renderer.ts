@@ -9515,15 +9515,18 @@ export class Renderer {
    *  ——本仓经 visAngle 传递给下方旋转分支）；锚座 Spike_Base 16×16 画在锚点、
    *  rotation−0.75（:23113）。逐段光照（:23110 GetColor）由主光照合成承担
    *  （同食人怪藤蔓先例）。链在本体精灵前画=原版层序（链垫球下）。
-   *  ★aiInit 前不画（出生帧/联机傀儡锚未同步态,见函数体首行门注） */
+   *  ★锚点未知态不画（出生帧/联机锚未同步态,见函数体首行门注） */
   private drawSpikeBallChain(e: Enemy): void {
     if (!this.atlas) return;
-    // ★锚点未快照态不画：出生帧（本仓刷怪相位在 entities.update 之后,球会先被画
-    // 一次才轮到首个 AI tick 写 ai1/ai2）与联机傀儡（netPuppet 不跑 AI,ai1/ai2 恒
-    // 类默认 0）都属此类——不门则链画向世界原点+锚座画在 (0,0)。原版因
-    // SpawnNPCs→UpdateNPCs 同 tick 相位序（Main.cs:17944-17958）从不绘制 pre-init 态
-    // （红蓝对抗 2026-09-02 两案定谳）。aiInit 恰在首 AI tick 快照分支置位=精确门。
-    if (!e.aiInit) return;
+    // ★锚点未知态不画：(ai1,ai2)=(0,0) 且未 aiInit——不门则链画向世界原点+锚座画在
+    // (0,0)。覆盖两态：①本球出生帧（本仓刷怪相位在 entities.update 之后,球会先被画
+    // 一次才轮到首个 AI tick 写 ai1/ai2;aiInit 恰在首 AI tick 快照分支置位=精确门）;
+    // ②联机傀儡未同步帧（netPuppet 不跑 AI,aiInit 恒 false,锚点经 msg23 快照写入,
+    // 旧房主/旧 server 帧 ai1/ai2 缺省 0 仍拦）。判据改为「aiInit‖锚点非零」后,
+    // 已同步傀儡放行——链/锚座/本体随链旋转 visAngle 由此函数每帧自写,自动生效。
+    // 原版本相：SpawnNPCs→UpdateNPCs 同 tick 相位序（Main.cs:17944-17958）从不绘制
+    // pre-init 态（红蓝对抗 2026-09-02 两案定谳;联机锚同步批 2026-09-02 改判据）。
+    if (!e.aiInit && e.ai1 === 0 && e.ai2 === 0) return;
     const ctx = this.ctx;
     const ax = e.ai1, ay = e.ai2;                      // 锚点（像素）
     let dx = ax - e.cx, dy = ay - e.cy;
@@ -12997,12 +13000,13 @@ export class Renderer {
           //   误差 ≤0.8），弹列恒 cx；"7px≈fh/2" 假说不成立（759 fh/2=11，且
           //   origin.y=H/2 为原文）。
           // ★用户拍板（2026-09-02，刻意非原版偏离）：垂直/斜向上时贴图视觉居中——
-          //  原版钉 cx−2，中心线穿贴图一侧（蓝队 N 定谳=原版本相）；用户裁定对齐
-          //  中心线：上半平面 sin(aim)<0 线性补偿（水平 ±π 零、垂直向上满额
-          //  7px=用户目测，斜向上按 −sin 渐入）。★方向勘误：首版 −7（左移）
-          //  用户实测偏移 7→14 反向加深，实偏=中心线左 7px → 补偿改 +7（右移）。
-          //  消费段 facing×offX 镜像自动对称——水平两向/垂直向下零改动。
-          offX = -2 + Math.max(0, -Math.sin(aim)) * 7;
+          //  原版钉 cx−2（蓝队 N 定谳=原版本相，探针三重实证：贴图几何中心=pivot
+          //  =cx−2，弹列=cx，差 −2px 偏左+sprite 枪体像素轴心再偏左）。用户裁定
+          //  贴图几何中心对齐弹列：pivot.x=cx → 补偿 +2（探针实测：+7 态偏右 5px
+          //  → 归零需 +2；首版 −7 与 +7 两轮用户实测 7/14/7 排除后取探针真值）。
+          //  上半平面 sin(aim)<0 线性渐入（水平 ±π 零、垂直向上满额）；消费段
+          //  facing×offX 镜像自动对称——水平两向/垂直向下（下半平面）零改动。
+          offX = -2 + Math.max(0, -Math.sin(aim)) * 2;
           offY = p.h * 0.5 + dp[1];
           rot = aim;
           drawOX = dp[0]; drawOY = -fh * 0.5;

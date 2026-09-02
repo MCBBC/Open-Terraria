@@ -177,6 +177,8 @@ export interface NpcLiquidHost {
   shimmerWet: boolean;
   lavaWet: boolean;
   lavaCd: number;
+  /** SetDefaults dontTakeDamage 位（岩浆接触门 NPC.cs:94468 消费——70/72 机关体入浆无伤不上火） */
+  dontTakeDamage?: boolean;
   onFireT: number;
   onFire3T: number;
   /** stinky(120) 存量秒——液体即除（TryRemovingWaterPerishableEffects :94433） */
@@ -248,7 +250,11 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
       && (b.ai1 === 364 || b.ai1 === 1104 || b.ai1 === 365
         || b.ai1 === 1105 || b.ai1 === 366 || b.ai1 === 1106);
     const lavaImmune = metalOre || (b.vanillaId !== null && NPC_LAVA_IMMUNE.has(b.vanillaId));
-    if (!lavaImmune && b.lavaCd <= 0) {
+    // ★!dontTakeDamage 门（NPC.cs:94468 整块前置——AddBuff(24,420)+StrikeNPC(50)
+    // 都在其内）:70 刺球/72 火轮等 dontTakeDamage 机关体入岩浆毫发无伤不上火;
+    // 曾缺门=onFireT 直写(绕免疫表)+hurt(50) 被 hurt 入口静默吞 → DoT 把 hp 打穿
+    // 0 进永不死亡的僵尸态（评审 C 定谳 2026-09-02 补）
+    if (!lavaImmune && !b.dontTakeDamage && b.lavaCd <= 0) {
       b.lavaCd = 30;                                      // immune[255] = 30（:94527）
       b.onFireT = Math.max(b.onFireT, 7);                 // AddBuff(24, 420)
       b.hurt(50, 0, 0, game);                             // StrikeNPCNoInteraction(50)

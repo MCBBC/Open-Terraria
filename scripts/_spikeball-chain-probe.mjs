@@ -49,8 +49,10 @@ const out = await page.evaluate(async () => {
   g.entities.add(ball, 'enemies');
   ball.hp = ball.maxHp;
   await new Promise((r) => setTimeout(r, 600));
-  res.anchor = { ai1: +ball.ai1.toFixed(1), ai2: +ball.ai2.toFixed(1), expectX: +(sx + 17).toFixed(1), expectY: +(sy + 17 + 25).toFixed(1) };
-  res.anchor.unitOk = Math.abs(ball.ai1 - (sx + 17)) < 40 && Math.abs(ball.ai2 - (sy + 17 + 25)) < 40;
+  // 盒=round(34×1.5)=51（scale 1.5）→ 中心偏移 25.5；锚 y 中心+25.5+8=+33.5
+  res.anchor = { ai1: +ball.ai1.toFixed(1), ai2: +ball.ai2.toFixed(1), expectX: +(sx + 25.5).toFixed(1), expectY: +(sy + 25.5 + 33.5).toFixed(1) };
+  // 容差 12px：钉住 +h/2+8 偏移回归（丢偏移=差 33.5>12 必炸;格单位回归差 15 倍必炸）
+  res.anchor.unitOk = Math.abs(ball.ai1 - (sx + 25.5)) < 12 && Math.abs(ball.ai2 - (sy + 25.5 + 33.5)) < 12;
   const dist = (e) => Math.hypot(e.ai1 - e.cx, e.ai2 - e.cy).toFixed(0);
   res.dists = [];
   for (let i = 0; i < 14; i++) {

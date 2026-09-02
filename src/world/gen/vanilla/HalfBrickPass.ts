@@ -1458,6 +1458,54 @@ function placeCornerBlock(st: TileStore, rng: RNG, x: number, y: number, mat: nu
   squareTileFrame(st, rng, x, y);
 }
 
+/** ★IIIII183 门级对拍（dormant）：loop A 逐格状态向量——字段序与 x86 JJHook.HtCell 逐位对齐：
+ *  a0,t0,am1,tm1,ap1,tp1,aL,tL,aR,tR,aLm1,aRm1,aLp1,aRp1,hLp1,hRp1,
+ *  s0,sm1,sp1,sp2,sL,sR,sLp1,sRp1,sLp2,sRp2,sLm1,sRm1,bL,bR,cc
+ *  a*=active,s*=solidTile(本仓门谓词同源),h*=half,b*=blockType(half?1:slope>0?slope+1:0),
+ *  cc=CanBeClearedDuringGeneration(本仓=NOT_CLEARABLE 补集)。仅钩存在时构建。 */
+function swStateVec183(st: TileStore, i: number, j: number): string {
+  const idx = (x: number, y: number): number => st.idx(x, y);
+  const a = (x: number, y: number): number => st.flags[idx(x, y)] ? 1 : 0;
+  // ★IIIII183 t() 输出 vanilla sheet id（与 x86 HtType 的 Main.tileSolid 下标同空间对拍）
+  let _sheetCache: Int32Array | null = null;
+  const sheetOf = (id: number): number => {
+    if (!_sheetCache) {
+      _sheetCache = new Int32Array(TILE_DEFS.length).fill(-1);
+      for (let k = 0; k < TILE_DEFS.length; k++) {
+        const s = TILE_DEFS[k]?.vanilla?.sheet;
+        if (typeof s === 'number') _sheetCache[k] = s;
+      }
+    }
+    return _sheetCache[id] ?? -1;
+  };
+  const t = (x: number, y: number): number => {
+    const id = st.type[idx(x, y)];
+    return id === 0 ? 0 : sheetOf(id);   // 空气(内部0)双方同为 0;无 sheet 映射的活性格保留 -1
+  };
+  const s = (x: number, y: number): number => solidTile(st, x, y) ? 1 : 0;
+  const b = (x: number, y: number): number => {
+    const k = idx(x, y);
+    return st.half[k] ? 1 : (st.slope[k] > 0 ? st.slope[k] + 1 : 0);
+  };
+  const tyInternal = st.type[idx(i, j)];
+  const cc = !NOT_CLEARABLE.has(tyInternal) ? 1 : 0;
+  return [
+    a(i, j), t(i, j),
+    a(i, j - 1), t(i, j - 1),
+    a(i, j + 1), t(i, j + 1),
+    a(i - 1, j), t(i - 1, j),
+    a(i + 1, j), t(i + 1, j),
+    a(i - 1, j - 1), a(i + 1, j - 1),
+    a(i - 1, j + 1), a(i + 1, j + 1),
+    st.half[idx(i - 1, j + 1)] ? 1 : 0, st.half[idx(i + 1, j + 1)] ? 1 : 0,
+    s(i, j), s(i, j - 1), s(i, j + 1), s(i, j + 2),
+    s(i - 1, j), s(i + 1, j), s(i - 1, j + 1), s(i + 1, j + 1),
+    s(i - 1, j + 2), s(i + 1, j + 2), s(i - 1, j - 1), s(i + 1, j - 1),
+    b(i - 1, j), b(i + 1, j),
+    cc,
+  ].join(',');
+}
+
 /** 原版 pass "Smooth World"（1456 WorldGen.cs:16507-16687）：地表凸起 → 坡面/半砖/削除 */
 export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
   gp?: import('../GenProgress').GenProgress): void {
@@ -1476,6 +1524,9 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
       const ti = st.idx(i, j);
       const t = st.type[ti];
       (globalThis as { __swSWCell?: (x: number, y: number) => void }).__swSWCell?.(i, j);
+      // ★IIIII183 门级对拍钩（dormant,零开销）：loop A 逐格状态向量（x86 HtCell 同格式）
+      const __h183 = (globalThis as { __swSV183?: (x: number, y: number, sv: string) => void }).__swSV183;
+      if (__h183) __h183(i, j, swStateVec183(st, i, j));
       // 主门禁（1456 cs:16516）：本格与上格均"非活性 或 不在 PreventsSlopesDuringGeneration"
       const okSlope = (yy: number): boolean => {
         if (!st.inBounds(i, yy)) return true;
@@ -1502,11 +1553,15 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
               if (!solidTile(st, i - 1, j) && !st.half[st.idx(i - 1, j + 1)]
                 && solidTile(st, i - 1, j + 1) && solidTile(st, i + 1, j)
                 && !st.flags[st.idx(i + 1, j - 1)]) {
-                if (rng.int(0, 1) === 0) slopeTile(st, i, j, 2); else poundTile(st, i, j); // Next(2)==0
+                const hv183 = rng.int(0, 1); // ★IIIII183 门掷标签 A26
+                (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'A26', hv183);
+                if (hv183 === 0) slopeTile(st, i, j, 2); else poundTile(st, i, j); // Next(2)==0
               } else if (!solidTile(st, i + 1, j) && !st.half[st.idx(i + 1, j + 1)]
                 && solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
                 && !st.flags[st.idx(i - 1, j - 1)]) {
-                if (rng.int(0, 1) === 0) slopeTile(st, i, j, 1); else poundTile(st, i, j); // Next(2)==0
+                const hv183 = rng.int(0, 1); // ★IIIII183 门掷标签 B37
+                (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'B37', hv183);
+                if (hv183 === 0) slopeTile(st, i, j, 1); else poundTile(st, i, j); // Next(2)==0
               } else if (solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j + 1)
                 && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i - 1, j)]) {
                 // 孤立凸起（16548）：直接半砖
@@ -1525,15 +1580,27 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
                 } else if (!st.flags[st.idx(i - 1, j + 1)] && !st.flags[st.idx(i - 1, j)]
                   && solidTile(st, i + 1, j) && solidTile(st, i, j + 2)) {
                   // 三路（16562-16576）：Next(5)==0 删 → Next(5)==0 半砖 → 否则 slope2
-                  if (rng.int(0, 4) === 0) killTile(st, rng, i, j);
-                  else if (rng.int(0, 4) === 0) poundTile(st, i, j);
-                  else slopeTile(st, i, j, 2);
+                  const h5a183 = rng.int(0, 4); // ★IIIII183 门掷标签 T62
+                  (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'T62', h5a183);
+                  if (h5a183 === 0) killTile(st, rng, i, j);
+                  else {
+                    const h5b183 = rng.int(0, 4); // ★IIIII183 门掷标签 T62b
+                    (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'T62b', h5b183);
+                    if (h5b183 === 0) poundTile(st, i, j);
+                    else slopeTile(st, i, j, 2);
+                  }
                 } else if (!st.flags[st.idx(i + 1, j + 1)] && !st.flags[st.idx(i + 1, j)]
                   && solidTile(st, i - 1, j) && solidTile(st, i, j + 2)) {
                   // 镜像三路（16577-16591）：否则 slope1
-                  if (rng.int(0, 4) === 0) killTile(st, rng, i, j);
-                  else if (rng.int(0, 4) === 0) poundTile(st, i, j);
-                  else slopeTile(st, i, j, 1);
+                  const h5a183 = rng.int(0, 4); // ★IIIII183 门掷标签 T77
+                  (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'T77', h5a183);
+                  if (h5a183 === 0) killTile(st, rng, i, j);
+                  else {
+                    const h5b183 = rng.int(0, 4); // ★IIIII183 门掷标签 T77b
+                    (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'T77b', h5b183);
+                    if (h5b183 === 0) poundTile(st, i, j);
+                    else slopeTile(st, i, j, 1);
+                  }
                 }
               }
             }
@@ -1560,7 +1627,9 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
               //   SolidTile 门禁 → #53 S0↔S{1..4} 45k 格家庭（SQ 序对拍: X 16004
               //   vs JS 7227,首差 @ln11 (20,598) 正是补角支缺失级联）。
               if (!T.PLACE_REFUSE.has(mat)) placeCornerBlock(st, rng, i, j, mat);
-              if (rng.int(0, 1) === 0) slopeTile(st, i, j, 2); else poundTile(st, i, j);
+              const hv183 = rng.int(0, 1); // ★IIIII183 门掷标签 FILL1
+              (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'FILL1', hv183);
+              if (hv183 === 0) slopeTile(st, i, j, 2); else poundTile(st, i, j);
             }
             if (!T.NO_FILL_SIDE.has(st.type[st.idx(i - 1, j)])
               && solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
@@ -1570,19 +1639,26 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
               swAct('T', i, j, mat);
               // ★IIII66 同上（左邻腿）
               if (!T.PLACE_REFUSE.has(mat)) placeCornerBlock(st, rng, i, j, mat);
-              if (rng.int(0, 1) === 0) slopeTile(st, i, j, 1); else poundTile(st, i, j);
+              const hv183 = rng.int(0, 1); // ★IIIII183 门掷标签 FILL2
+              (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'FILL2', hv183);
+              if (hv183 === 0) slopeTile(st, i, j, 1); else poundTile(st, i, j);
             }
           }
         }
-      } else if (!st.flags[st.idx(i, j + 1)] && rng.int(0, 1) === 0
-        && solidTile(st, i, j) && solidTile(st, i, j - 1)
-        // 旁格 blockType()==0（16642：整砖或非活性;half/slope 均须为 0）
-        && fullOrEmpty(st, i - 1, j) && fullOrEmpty(st, i + 1, j)) {
-        // 悬顶坡面（16642-16652）：下方空 + 上方实心 → 依左右实心出 slope3/4
-        if (solidTile(st, i - 1, j) && !solidTile(st, i + 1, j) && solidTile(st, i - 1, j - 1)) {
-          slopeTile(st, i, j, 3);
-        } else if (solidTile(st, i + 1, j) && !solidTile(st, i - 1, j) && solidTile(st, i + 1, j - 1)) {
-          slopeTile(st, i, j, 4);
+      } else if (!st.flags[st.idx(i, j + 1)]) {
+        // ★IIIII183 悬顶臂掷位提升（与 x86 同构重组）：原 `!flags(j+1) && Next(2)==0 && …`
+        //  短路语义不变——Next(2) 仅在上方空时掷,掷后其余条件原序评估。
+        const hv183 = rng.int(0, 1);
+        (globalThis as { __swRoll183?: (x: number, y: number, tag: string, v: number) => void }).__swRoll183?.(i, j, 'HANG', hv183);
+        if (hv183 === 0 && solidTile(st, i, j) && solidTile(st, i, j - 1)
+          // 旁格 blockType()==0（16642：整砖或非活性;half/slope 均须为 0）
+          && fullOrEmpty(st, i - 1, j) && fullOrEmpty(st, i + 1, j)) {
+          // 悬顶坡面（16642-16652）：下方空 + 上方实心 → 依左右实心出 slope3/4
+          if (solidTile(st, i - 1, j) && !solidTile(st, i + 1, j) && solidTile(st, i - 1, j - 1)) {
+            slopeTile(st, i, j, 3);
+          } else if (solidTile(st, i + 1, j) && !solidTile(st, i - 1, j) && solidTile(st, i + 1, j - 1)) {
+            slopeTile(st, i, j, 4);
+          }
         }
       }
     }
@@ -1593,6 +1669,12 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
       const t = st.type[ti];
+      // ★IIIII181 取证钩（dormant,零开销）：loop B 逐格入口（对齐 loop A __swSWCell）
+      (globalThis as { __swSWCellB?: (x: number, y: number) => void }).__swSWCellB?.(i, j);
+      // ★IIIII181 loop A/B 边界快照钩（dormant）：loop B 首格回调一次
+      if (i === 20 && j === 20) {
+        (globalThis as { __swSWLoopB?: (st2: TileStore) => void }).__swSWLoopB?.(st);
+      }
       // 主门禁（16661）：Next(2)==0 + 上方空 + 排除 137/48/232/191/151/274/75/76
       if (rng.int(0, 1) === 0 && !st.flags[st.idx(i, j - 1)] && !T.LOOP_B_SKIP.has(t)
         && solidTile(st, i, j)

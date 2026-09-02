@@ -2716,20 +2716,33 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
-    // 斗篷星落地(Kill :76692-76748)——尘型按 id:723→88 紫 / 724·725·726·907→58 /
-    // 1133→57 绿;音:723/724/725/726/1133=Item10、907=Item27;全组碎砾 gore16/17×3
-    // (vel×0.05 后 ×2;907 ×0.5 略);法力档(ai2=1 ≙ manaStar)→ RequestNewItem(4143)
+    // 斗篷星落地(Kill :76692-76748)——★R1 红队逐参修正:723=NewDustDirect(88,
+    // v×0.1,150,s1.2)+noGravity+仅 X ×2(终值 vx×0.2/vy×0.1);else 桶(724/725/726/
+    // 1133→d57/907→d58)无 noGravity 无 ×2(907 尘 vel×0.75);音 723/724/725/726/
+    // 1133=Item10、907=Item27;碎砾 723=SelectRandom(16,17,17) 后 ×2、else=
+    // rand(16,18) 不乘(907 ×0.5);法力档(ai2=1 ≙ manaStar)→ RequestNewItem(4143)
     if ([723, 724, 725, 726, 907, 1133].includes(this.projId) && !this.dead) {
-      const dustT = this.projId === 723 ? 88 : this.projId === 1133 ? 57 : 58;
+      const is723 = this.projId === 723;
+      const dustT = is723 ? 88 : this.projId === 1133 ? 57 : 58;
       game.playSfxFile?.(this.projId === 907 ? 'Item_27' : 'Item_10', 1, this.cx, this.cy);
       for (let i = 0; i < 10; i++) {
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustT, this.vx * 0.2, this.vy * 0.2, 150, null, 1.2);
-        if (d) { d.noGravity = true; d.vx *= 2; }
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustT,
+          this.vx * 0.1, this.vy * 0.1, 150, null, 1.2);
+        if (d) {
+          if (is723) { d.noGravity = true; d.vx *= 2; }
+          else if (this.projId === 907) { d.vx *= 0.75; d.vy *= 0.75; }
+        }
       }
       for (let i = 0; i < 3; i++) {
-        const g = GorePiece.newGore(Math.random() < 0.5 ? 16 : 17, this.cx, this.cy,
-          this.vx * 0.05, this.vy * 0.05);
-        if (g) { g.vx *= 2; g.vy *= 2; }
+        const g = is723
+          ? GorePiece.newGore([16, 17, 17][Math.floor(Math.random() * 3)], this.cx, this.cy,
+            this.vx * 0.05, this.vy * 0.05)
+          : GorePiece.newGore(16 + Math.floor(Math.random() * 2), this.cx, this.cy,
+            this.vx * 0.05, this.vy * 0.05);
+        if (g) {
+          if (is723) { g.vx *= 2; g.vy *= 2; }
+          else if (this.projId === 907) { g.vx *= 0.5; g.vy *= 0.5; }
+        }
       }
       if (this.manaStar) game.spawnDrop?.(this.x, this.y, 'vi_4143_manacloakstar', 1);
     }
@@ -3802,40 +3815,7 @@ export class Arrow extends Entity {
       this.subStep(game);
       if (this.dead) return;
     }
-    // ---- Update 尾尘通用段（Projectile.cs:17141-17182，AI/位移后每 tick 恰 1 粒，
-    //      extraUpdates 无乘——段在 numUpdates 循环外）：2/82 燃烧箭 d6 α100 /
-    //      172 毒镖 d135 / 103 流星弹 d75（1/2 noGravity+scale×2）/ 278 绿藻弹
-    //      d169（1/2 noGravity+scale×1.5）/ 4 星星 1/5 掷 d14（α150 scale1.1）/
-    //      5 猎鹰刃 rand(15,57,58)+v×0.5（α150 scale1.2）——speedX/Y 走 NewDust
-    //      "随机±2.0+speedX" 合成式（spawn 通道同式），后置字段逐字覆写
-    switch (this.projId) {
-      case 2: case 82:
-        game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
-        break;
-      case 172:
-        game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100);
-        break;
-      case 103: {
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 75, 0, 0, 100);
-        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 2; }
-        break;
-      }
-      case 278: {
-        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 169, 0, 0, 100);
-        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 1.5; }
-        break;
-      }
-      case 4:
-        if (Math.random() < 0.2) game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.1);
-        break;
-      case 5: {
-        const r5 = (Math.random() * 3) | 0;              // Main.rand.Next(3) 单次采样
-        game.spawnDust?.(this.x, this.y, this.w, this.h,
-          r5 === 0 ? 15 : r5 === 1 ? 57 : 58,
-          this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);
-        break;
-      }
-    }
+
   }
 
   /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
@@ -3866,6 +3846,41 @@ export class Arrow extends Entity {
         this.lavaWet = false;
         this.honeyWet = false;
         this.shimmerWet = false;
+      }
+    }
+    // ---- Update 尾尘通用段（Projectile.cs:17141-17182;★R1 红队勘误:段在
+    //      numUpdates 子步循环【内】(:16781 while 体延伸至 :17345)——每【子步】1 粒,
+    //      278/5 EU=1 → ×2/帧,余型 EU=0 ×1):2/82 燃烧箭 d6 α100 /
+    //      172 毒镖 d135 / 103 流星弹 d75（1/2 noGravity+scale×2）/ 278 绿藻弹
+    //      d169（1/2 noGravity+scale×1.5）/ 4 星星 1/5 掷 d14（α150 scale1.1）/
+    //      5 猎鹰刃 rand(15,57,58)+v×0.5（α150 scale1.2）——speedX/Y 走 NewDust
+    //      "随机±2.0+speedX" 合成式（spawn 通道同式），后置字段逐字覆写
+    switch (this.projId) {
+      case 2: case 82:
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+        break;
+      case 172:
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100);
+        break;
+      case 103: {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 75, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 2; }
+        break;
+      }
+      case 278: {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 169, 0, 0, 100);
+        if (d && Math.random() < 0.5) { d.noGravity = true; d.scale *= 1.5; }
+        break;
+      }
+      case 4:
+        if (Math.random() < 0.2) game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.1);
+        break;
+      case 5: {
+        const r5 = (Math.random() * 3) | 0;              // Main.rand.Next(3) 单次采样
+        game.spawnDust?.(this.x, this.y, this.w, this.h,
+          r5 === 0 ? 15 : r5 === 1 ? 57 : 58,
+          this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);
+        break;
       }
     }
     // ---- 309 冰九头蛇冰弹尘尾（AI_028 :26996-27004,每子步;EU=3 → ×4/帧）:
@@ -5862,18 +5877,28 @@ export class Arrow extends Entity {
       if (this.age >= 20) this.vy += 0.25;
       if (this.ai1Mirror === 0) {
         this.ai1Mirror = 1;
+        // ★R1 逐参修正(:56178-56191):Remap 取【玩家速度】非弹速;尘速=vel×(0.2+
+        // num81) 旋扰 ±0.195 + 玩家速度×0.25 再 ×3×rand;抖动=速度向【垂直】±10 线段;
+        // fadeIn=0.1
+        const p = game.player;
+        const pvx = p?.vx ?? 0, pvy = p?.vy ?? 0;
+        const pvl = Math.hypot(pvx, pvy);
+        const remap = Math.min(0.5, (pvl / 3) * 0.5);          // Remap(|v|,0,3,0,0.5)
         const vl = Math.hypot(this.vx, this.vy);
         const ux = vl > 0 ? this.vx / vl : 0, uy = vl > 0 ? this.vy / vl : 0;
         const bx = this.cx + ux * 54, by = this.cy + uy * 54;
-        const remap = Math.min(0.5, (vl / 3) * 0.5);
+        const baseAng = Math.atan2(this.vy, this.vx);
         for (let i = 0; i < 25; i++) {
           const d = game.spawnDust?.(bx, by, 16, 8, 31, this.vx, this.vy, 50,
             null, 1 + Math.random() * 0.3, true);
           if (!d) continue;
-          const ang = Math.atan2(this.vy, this.vx) + (Math.random() - 0.5) * 0.39;
+          const ang = baseAng + (Math.random() - 0.5) * 0.39;  // RotatedByRandom(0.196)
           const sp = vl * (0.2 + remap) * Math.random() * 3;
-          d.vx = Math.cos(ang) * sp; d.vy = Math.sin(ang) * sp;
-          d.x = bx + (Math.random() - 0.5) * 16; d.y = by + (Math.random() - 0.5) * 16;
+          d.vx = Math.cos(ang) * sp + pvx * 0.25;
+          d.vy = Math.sin(ang) * sp + pvy * 0.25;
+          const off = (Math.random() - 0.5) * 20;              // NextFloatDirection ×10 线段
+          d.x = bx + -uy * off; d.y = by + ux * off;           // 垂直于速度向
+          d.fadeIn = 0.1;
         }
       }
     } else if (this.projId === 312) {
@@ -5926,6 +5951,8 @@ export class Arrow extends Entity {
         if (this.ai1Mirror >= 0) {
           this.pierce = -1;
           this.ai1Mirror++;
+        } else if (this.pierce < 0) {
+          this.pierce = 1;                                 // ★R1:分裂后母镖每拍回落 1(:58291-58294 else 支)
         }
         if (this.ai1Mirror > 5 + Math.floor(Math.random() * 25)) {          // Next(5,30)=[5,29]
           this.ai1Mirror = -1000;

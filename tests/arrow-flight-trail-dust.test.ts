@@ -51,7 +51,7 @@ function kill(a: Arrow, game: GameHooks): void {
 
 const TYPES = (dusts: DustRec[]) => dusts.map((d) => d.type);
 
-describe('AI Update 飞行尾尘通用段（P.cs:17141-17182，每 tick 恰 1 粒）', () => {
+describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpdates 循环内=每子步）', () => {
   it('弹 2 燃烧箭：10 帧 → d6 ×10（α100）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
@@ -87,16 +87,16 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182，每 tick 恰 1 �
     expect(boosted).toBeGreaterThanOrEqual(7);
     expect(boosted).toBeLessThanOrEqual(23);
   });
-  it('弹 278 绿藻弹：d169 ×10，1/2 掷 noGravity+scale×1.5', () => {
+  it('弹 278 绿藻弹：d169 ×60（30 帧 × EU=1 → ×2/帧;★R1 子步层级），1/2 掷 noGravity+scale×1.5', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
     const a = new Arrow(400, 300, 6, 0, 10, 1, 278, null, { grav: 0, life: 600 });
     flyFrames(a, game, 30);
     const d169 = dusts.filter((d) => d.type === 169);
-    expect(d169.length).toBe(30);
+    expect(d169.length).toBe(60);
     const boosted = d169.filter((d) => d.noGravity && d.scale > 1).length;
-    expect(boosted).toBeGreaterThanOrEqual(7);
-    expect(boosted).toBeLessThanOrEqual(23);
+    expect(boosted).toBeGreaterThanOrEqual(18);   // 二项(60,0.5) ±3σ
+    expect(boosted).toBeLessThanOrEqual(42);
   });
   it('弹 4 星星：1/5 掷 d14（60 帧 → 6..24 粒，α150 scale1.1）', () => {
     const dusts: DustRec[] = [];
@@ -108,12 +108,12 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182，每 tick 恰 1 �
     expect(d14.length).toBeLessThanOrEqual(24);
     expect(d14.every((d) => d.alpha === 150 && Math.abs(d.scale - 1.1) < 1e-9)).toBe(true);
   });
-  it('弹 5 猎鹰刃：Next(3)∈{15,57,58} ×10，speed=v×0.5（单次采样）', () => {
+  it('弹 5 猎鹰刃：Next(3)∈{15,57,58} ×20（EU=1 → ×2/帧），speed=v×0.5（单次采样）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
     const a = new Arrow(400, 300, 6, 0, 10, 1, 5, null, { grav: 0, life: 600 });
     flyFrames(a, game, 10);
-    expect(dusts.length).toBe(10);
+    expect(dusts.length).toBe(20);
     expect(dusts.every((d) => d.type === 15 || d.type === 57 || d.type === 58)).toBe(true);
     expect(dusts.every((d) => d.alpha === 150 && Math.abs(d.scale - 1.2) < 1e-9)).toBe(true);
     expect(dusts.every((d) => Math.abs(d.sx - 3) < 1e-9)).toBe(true);   // v=6 → sx=3
@@ -130,15 +130,15 @@ describe('309 冰九头蛇冰弹（aiStyle28 尘尾 :26996-27004 每**子步**;E
     expect(d185.length).toBe(48);                      // 4 帧 × 4 子步 × 3 粒
     expect(d185.every((d) => d.alpha === 50 && d.noGravity)).toBe(true);
   });
-  it('Kill：Item27 + d185×10（1/2 掷 v×2+noGravity+scale×1.75）', () => {
+  it('Kill：Item27 + d185×10（1/2 掷 v×2+noGravity+scale×1.75;40 次聚合 ±3σ 防单掷假红）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    kill(new Arrow(400, 300, 6, 0, 10, 1, 309), game);
+    for (let k = 0; k < 40; k++) kill(new Arrow(400, 300, 6, 0, 10, 1, 309), game);
     const d185 = dusts.filter((d) => d.type === 185);
-    expect(d185.length).toBe(10);
+    expect(d185.length).toBe(400);
     const boosted = d185.filter((d) => d.noGravity && d.scale > 1).length;
-    expect(boosted).toBeGreaterThanOrEqual(2);
-    expect(boosted).toBeLessThanOrEqual(8);
+    expect(boosted).toBeGreaterThanOrEqual(170);   // 二项(400,0.5) ±3σ
+    expect(boosted).toBeLessThanOrEqual(230);
   });
 });
 
@@ -149,7 +149,8 @@ describe('镖族 479/478 行为面（AI_001 :58288-58343）', () => {
     const game = makeGame(emptyWorld(), dusts, bucket);
     const a = new Arrow(400, 300, 6, 0, 100, 2, 479, null, { grav: 0, life: 600 });
     flyFrames(a, game, 40);
-    expect((a as unknown as { pierce: number }).pierce).toBe(-1);
+    // ★R1 F3:分裂后(ai1Mirror=-1000)母镖 penetrate 每拍回落 1(:58291-58294 else 支)
+    expect((a as unknown as { pierce: number }).pierce).toBe(1);
     const subs = bucket.filter((b) => (b as Arrow).projId === 479
       && (b as unknown as { ai1Mirror: number }).ai1Mirror === -1000) as Arrow[];
     expect(subs.length).toBeGreaterThanOrEqual(2);
@@ -187,6 +188,7 @@ describe('42 沙枪沙球（AI_010 per-type 尘链 :58852-58857,每子步 1/2 �
     const a = new Arrow(400, 300, 6, 0, 10, 1, 354, null, { grav: 0, life: 600 });
     flyFrames(a, game, 8);
     expect(dusts.filter((d) => d.type === 36).length).toBeGreaterThanOrEqual(3);
+    expect(dusts.filter((d) => d.type === 36).length).toBeLessThanOrEqual(14);   // 16 掷 1/2 ±3σ
     expect(dusts.filter((d) => d.type === 32).length).toBe(0);
   });
 });

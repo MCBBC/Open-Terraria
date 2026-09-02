@@ -63,7 +63,9 @@ function maxDev(a: number[], b: number[]): number {
 /** 已知背景（含 0/低/中/高/饱和五档,2×2=4 px × 3 组轮转） */
 const DSTS = [0, 64, 128, 200, 255];
 function mkDst(): number[] {
-  const px = (k: number) => [DSTS[k % 5], DSTS[(k + 1) % 5], DSTS[(k + 3) % 5], 1];
+  // ★R2 #8:dst 通道改 0-1 浮点渐变——字节域 + Math.min(1,·) 钳使 10/12 texel 双侧
+  // 饱和为 1,erase×dst 项零覆盖(通过理由失真);渐变域让每个 texel 的乘法项可见
+  const px = (k: number) => [Math.round(DSTS[k % 5] * 0.72), Math.round(DSTS[(k + 1) % 5] * 0.58), Math.round(DSTS[(k + 3) % 5] * 0.44), 1];
   return [...px(0), ...px(1), ...px(2), ...px(3)];
 }
 

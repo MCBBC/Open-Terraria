@@ -37,6 +37,16 @@ const OUT_GOLDEN = process.env.TOA_GOLDEN ?? 'tests/golden/tile-anchor-authority
 const cs = readFileSync(SRC, 'utf8');
 const lines = cs.split(/\r?\n/);
 
+// ★M-3c 家族头缺省继承锚点：Initialize 头部 `newTile = new TileObjectData(_baseObject);`
+// （TileObjectData.cs:2125，首个 addTile 调用之前）把工作面重装为 _baseObject 终态
+// ——SetupBaseObject :1779-1781 Width=1/Height=1/Origin=Point16.Zero + 锚全空
+// （default(AnchorData) tileCount=0）+ 液体缺省（:1767-1768）。tile 19/427 平台族
+// 家族头不声明 W/H/Origin/锚（:2126-2149）⇒「1×1 无锚」即原版数据形态（非解析
+// 缺陷）——此前未建模该语句 → work.w=0 落 unparsed。只认首个 addTile【调用】之前的
+// 该语句：:2006/:2013 两处在 addBaseTile/addTile 方法体内，语义已由 addTile 处理器
+// 的 resetLiquid（几何沿"家族头净化"约定跨定义继承）承载，不在此重复建模。
+const firstAddTileCallAt = lines.findIndex((l) => /^addTile\(-?\d+\)\s*;/.test(l.trim()));
+
 // ---- 状态机 ----
 // work: 当前 newTile 工作面；bases: addBaseTile 命名样式；pendingAlts: 尚未随 addTile 提交的备选方向
 // ---- M-3 液体放置两维建模（vanilla Terraria.Enums/LiquidPlacement.cs 四值枚举）----
@@ -149,6 +159,13 @@ for (let ln = 0; ln < lines.length; ln++) {
 
   // ---- 控制动词 ----
   let m;
+  // ---- ★M-3c：Initialize 头部 newTile 重装为 _baseObject 终态（1×1 无锚,见上方注）----
+  if (ln < firstAddTileCallAt && /^newTile = new TileObjectData\(_baseObject\);\s*$/.test(L)) {
+    work = mkWork();
+    work.w = 1; work.h = 1;           // Width=1/Height=1（SetupBaseObject :1779-1780）
+    work.ox = 0; work.oy = 0;         // Origin = Point16.Zero（:1781）
+    continue;
+  }
   if ((m = L.match(/^newTile\.CopyFrom\((\w+)\)\s*;/))) {
     const nm = m[1];
     if (!bases.has(nm)) { console.error(`[warn] CopyFrom 未知名 ${nm} @${ln + 1}`); }

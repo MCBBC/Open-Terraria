@@ -316,8 +316,9 @@ describe('⑨ 施法族满潜行停火门（NPC.cs:60233）', () => {
       .replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ');
 
   it('开瞄 CanHit 门 = 满潜行且未挥击 → flag21=false（黄蜂 :51312 同款动画窗代理）', () => {
+    // ★2026-09-02 随 6aed1236 变量改名随迁(player → rawPlayer)
     expect(enemySrc()).toContain(
-      'if (!(player.stealth > 0) && !(player.itemAnimTicks > 0 || player.useTime > 0)) { flag21 = false; }',
+      'if (!(rawPlayer.stealth > 0) && !(rawPlayer.itemAnimTicks > 0 || rawPlayer.useTime > 0)) { flag21 = false; }',
     );
   });
 

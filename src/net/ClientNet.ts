@@ -112,7 +112,10 @@ export interface NpcSnap {
   netId: number; key: string;
   x: number; y: number; vx: number; vy: number;
   hp: number; maxHp: number; animT: number;
-  flags: number; // bit0=boss
+  flags: number; // bit0=boss；bit1=hasAi12（刺球锚点随包）
+  /** 刺球锚点像素坐标（NPC 70 aiStyle 20；flags bit1 置位时上行按位携带、下行
+   *  帧级尾段按 code 回填——旧端无此段则字段缺省,消费端按存在性门控） */
+  ai1?: number; ai2?: number;
 }
 
 /** 弹幕快照（msg27；tag = projId(arrow/weapon) / dart kind / magic color） */
@@ -696,21 +699,23 @@ export class ClientNet {
       }
       case Msg.SyncNPC: {
         // v4 短码格式：每条 1B eflags——bit0=含 key 全量(u32 netId+u16 codeId+str key)，
-        // bit1=boss；否则仅 u16 codeId（查本端 codeId→netId/key 表）。
+        // bit1=boss，bit2=含刺球锚点（NPC 70 aiStyle 20 的 ai1/ai2，值走循环后帧级尾段）；
+        // 否则仅 u16 codeId（查本端 codeId→netId/key 表）。
         // 未知短码：**先把本条剩余字段读完再丢弃**——continue 前不消费会让读指针错位，
         // 毒化整条连接（review C1）；自愈靠 ≤2s 全量兜底重发
         const n = r.u16();
         const snaps: NpcSnap[] = [];
+        const byCode = new Map<number, NpcSnap>(); // 锚点尾段按 code 回填本帧快照
         for (let i = 0; i < n; i++) {
           const eflags = r.u8();
-          let netId = 0, key = '';
+          let netId = 0, key = '', code = 0;
           if (eflags & 1) {
             netId = r.u32();
-            const code = r.u16();
+            code = r.u16();
             key = r.str();
             this.npcCodes.set(code, { netId, key });
           } else {
-            const code = r.u16();
+            code = r.u16();
             const e = this.npcCodes.get(code);
             netId = e?.netId ?? 0;
             key = e?.key ?? '';
@@ -718,7 +723,24 @@ export class ClientNet {
           const x = r.f32(), y = r.f32(), vx = r.f32(), vy = r.f32();
           const hp = r.i16(), maxHp = r.i16(), animT = r.u16();
           if (!netId) continue; // 未知短码：字段已消费，仅丢弃本条快照
-          snaps.push({ netId, key, x, y, vx, vy, hp, maxHp, animT, flags: eflags & 2 ? 1 : 0 });
+          const snap: NpcSnap = { netId, key, x, y, vx, vy, hp, maxHp, animT,
+            flags: (eflags & 2 ? 1 : 0) | (eflags & 4 ? 2 : 0) };
+          snaps.push(snap);
+          byCode.set(code, snap);
+        }
+        // 刺球锚点尾段（帧级，条目循环【后】：{u16 count,[u16 code,f32 ai1,f32 ai2]×count}）。
+        // 放帧尾而非条目内是旧访客兼容的关键——旧端读完 n 条即返回，帧尾残余字节永不被
+        // 当作下一条 eflags 消费（条目内携带会让旧端在多条目帧上错位+NetReader 越界抛，
+        // 且 handle 无 try/catch 会毒化 FrameParser）。旧 server 无尾段 → remaining=0 不读；
+        // 同帧含锚点条目时服务器恒附尾段（值按 code 归条），全量/短码两路同构
+        if (r.remaining >= 2) {
+          const tn = r.u16();
+          for (let i = 0; i < tn && r.remaining >= 10; i++) {
+            const code = r.u16();
+            const ai1 = r.f32(), ai2 = r.f32();
+            const s = byCode.get(code);
+            if (s) { s.ai1 = ai1; s.ai2 = ai2; }
+          }
         }
         this.hooks.onNpcSnapshot?.(snaps);
         return;
@@ -1234,6 +1256,9 @@ export class ClientNet {
       w.i16(s.hp); w.i16(s.maxHp);
       w.u16(s.animT & 0xffff);
       w.u8(s.flags);
+      // 刺球锚点随包（flags bit1=hasAi12）——条目内条件尾段：位在条目内=读取无歧义；
+      // 旧 server 读完定长字段即整帧丢弃尾部残余（msg23 无长度校验），零影响
+      if (s.flags & 2) { w.f32(s.ai1 ?? 0); w.f32(s.ai2 ?? 0); }
     }
     this.send(w.finish());
   }

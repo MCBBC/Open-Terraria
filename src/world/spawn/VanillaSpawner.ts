@@ -385,6 +385,10 @@ export class VanillaSpawner {
    *  invIndexOfVanilla+inv.countOf 每周期喂入）——695/696 遇袭双宠池强制档 */
   palHas5663 = false;
   palHas5664 = false;
+  /** NearSpikeBall 锚点表（1456:90933-90948=1457:91002-91016）：场上 aiStyle 20
+   *  （刺球 70）的 ai[1]/ai[2] 像素锚快照——Game 每周期在 activeIds 同循环采集喂入
+   *  （spawner 无实体桶访问；未注入（测试/单机域）= 空数组 → 门恒 false） */
+  spikeBallAnchors: Array<{ x: number; y: number }> = [];
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
     invaders = false, activeIds: Set<number> = new Set(),
     moonEvent: MoonEventSpawnCtx | null = null,
@@ -2369,9 +2373,10 @@ export class VanillaSpawner {
           return D(269 + (variant === 0 ? 4 : 0) + (variant === 2 ? 8 : 0) + rng.int(0, 3));
         }
         if (N(35)) return D(71);   // 地牢史莱姆
-        // :2635 刺球 70（Spike Ball，NPCID.cs:11205，aiStyle 20）——绿变体 1/3 且
-        //  !NearSpikeBall（:90933 落点 ±300px 盒内已有 aiStyle==20 锚点则不出,防堆积）
-        if (variant === 1 && N(3) && !this.nearSpikeBall()) return D(70);
+        // :2635（1456）=1457:2728 刺球 70（Spike Ball，NPCID.cs:11205，aiStyle 20）——
+        //  绿变体 1/3 且 !NearSpikeBall（1456:90933-90948=1457:91002-91016，落点 ±300px
+        //  盒内已有 aiStyle==20 锚点则不出,防堆积；先掷后查序 1:1 勿改）
+        if (variant === 1 && N(3) && !this.nearSpikeBall(this.spawnTileX, this.spawnTileY)) return D(70);
         // :2640 火轮 72（Blazing Wheel，NPCID.cs:11209，aiStyle 21）——粉变体 1/5
         //  （旧注释把 70/72 名字写反,已按 NPCID.cs 勘误）
         if (variant === 2 && N(5)) return D(72);
@@ -3309,12 +3314,20 @@ export class VanillaSpawner {
     return D(49);  // Cave Bat
   }
 
-  /** NearSpikeBall（NPC.cs:90933-90948）：落点 ±300px（600×600 px 盒）与场上
-   *  aiStyle==20（刺球 70）的锚点 (ai1,ai2) 20×20 盒相交 → true。地牢 :2635 出刺球
-   *  前的防堆积门。本仓 spawner 无 NPC 坐标通道（仅 activeIds id 集）→ 以
-   *  "场上存在刺球 70"近似（同地牢场景下与 ±300px 盒高度重合;登记台账近似表） */
-  private nearSpikeBall(): boolean {
-    return this.activeIds.has(70);
+  /** NearSpikeBall（1456:90933-90948 = 1457:91002-91016，字面 1:1）：落点盒
+   *  (x*16-300, y*16-300, 600, 600)（x/y=落点格坐标）与场上每个 active && aiStyle==20
+   *  （刺球 70，SetDefaults :9713 全表唯一 aiStyle 20）的锚盒
+   *  ((int)ai[1], (int)ai[2], 20, 20) 相交 → true。锚点=像素世界坐标（AI_020 首 tick
+   *  中心快照 :24672-24673），盒左上角恰为 (ai1,ai2)（非中心±10 对称）。
+   *  XNA Rectangle.Intersects = 严格 <（边线相触不算）。零 RNG 消耗。锚点表由 Game
+   *  每周期注入 spikeBallAnchors（aiInit=false 未初始化个体已在上游剔除——原版该态
+   *  锚在 (0,0)，与地牢落点盒实际永不相交=等价）。地牢 :2635/:2728 出刺球前的防堆积门 */
+  private nearSpikeBall(x: number, y: number): boolean {
+    const bx = x * 16 - 300, by = y * 16 - 300;
+    for (const a of this.spikeBallAnchors) {
+      if (bx < a.x + 20 && a.x < bx + 600 && by < a.y + 20 && a.y < by + 600) return true;
+    }
+    return false;
   }
 
   /** AI_FindNearbyBook（NPC.cs:2656/2667 调用档：spawnTile−16 起 32×32 窗，

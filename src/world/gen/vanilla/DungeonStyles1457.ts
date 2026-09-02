@@ -101,6 +101,8 @@ export interface DungeonStyleData {
   /** ★IIIII105b：LivingWoodStyleData.GetBookshelfMinMaxSizes 覆写 (3,7)
    *  （DungeonGenerationStyles.cs:38-44）；其余档缺省 (1,4)。 */
   BookshelfMinMaxOverride?: [number, number];
+  /** ★IIIII179：BannerItemTypes（DungeonStyleItems.STYLE_BANNER_TABLES 装配;null=C# null 支） */
+  Banner?: number[] | null;
   /** ★IIIII105c：风格灯/箱 item 表 + 生物箱规格（DungeonStyleItems.STYLE_LIGHTCHEST_TABLES
    *  装配;DungeonGenerationStyles.cs 各档 Chandelier/Lantern/ChestItemTypes 与
    *  LockedBiomeChest/BiomeChest 终值）。 */
@@ -289,6 +291,7 @@ export function getCurrentDungeonStyle(g: {
       LockedBiomeChestType: -1, LockedBiomeChestStyle: -1,
       BiomeChestItemType: -1, BiomeChestLootItemType: -1,
     },
+    Banner: [],   // ★IIIII179：Default BannerItemTypes=int[0]（cs:699）
   };
 }
 
@@ -579,6 +582,11 @@ export const dualDungeonState: {
   /** ★IIIII121：CanBeClearedDuringGeneration 动态支的 isDungeonTile 合并表
    *  （每地牢一张,vanilla sheet id 索引;Dunes 头 setup 后绪,Silt/Ores 等清块面消费）。 */
   tileProtection?: boolean[][];
+  /** ★IIIII179：IsConsideredDungeonWall(w,allDungeons:true) 的并集面（vanilla sheet
+   *  wall id 索引）——MountCavesPass Cavinator dual 停走支消费。每座 genvars 的
+   *  isDungeonWall（base wallDungeon{7,8,9,94-99}∪各风格[+SubStyles]
+   *  BrickWallType/ExtraWallTypes）并集;setup 后绪。 */
+  wallProtection?: boolean[];
 } = { enabled: false, potentialBounds: [], dungeons: [], normalizedDistanceSafeFromDither: 1 };
 
 /** ★IIIII121：SetupDungeonGenVarVariables×2 的 isDungeonTile 合并面
@@ -624,6 +632,24 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
     return t;
   };
   dualDungeonState.tileProtection = [merge(styleListFor(d0Theme)), merge(styleListFor(d1Theme))];
+  // ★IIIII179：isDungeonWall 并集面（IsConsideredDungeonWall(w,allDungeons:true) 的
+  //  ⋃_i dungeonGenVars[i].isDungeonWall——DungeonUtils.cs:1929-1950;含 base
+  //  Main.wallDungeon 基表）。Cavinator dual 停走支（WorldGen.cs:81277-81283）消费。
+  const wallBase = boolArrayOf([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  const mergeW = (list: DungeonStyleData[]): boolean[] => {
+    const w = wallBase.slice();
+    for (const s of list) {
+      const fam: DungeonStyleData[] = [s, ...(s.SubStyles ?? [])];
+      for (const st of fam) {
+        w[st.BrickWallType] = true;
+        if (st.ExtraWallTypes !== undefined) for (const v of st.ExtraWallTypes) w[v] = true;
+      }
+    }
+    return w;
+  };
+  const w0 = mergeW(styleListFor(d0Theme));
+  const w1 = mergeW(styleListFor(d1Theme));
+  dualDungeonState.wallProtection = w0.map((v, i2) => v || w1[i2] || false);
 }
 
 /** WorldGen.CanBeClearedDuringGeneration 双地牢动态支（WorldGen.cs:81453-81460）：

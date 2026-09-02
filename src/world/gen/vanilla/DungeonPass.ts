@@ -4529,6 +4529,8 @@ const snap: SnapFn = (name) => {
         if (itemType === 0 && rn(2) === 0) break;           // :375-378 空手受领（本域不可达,照抄）
         const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
         const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, ctInternal);   // :379
+        // ★IIIII179：BCH=箱逐 attempt（x86 同构）
+        if (i179F) mk179R(`DR|BCH|r=${gcRm - 1}|j=${j}|ok=${gcOk ? 1 : 0}`);
         if (gcT) console.log(`GC-TRY rm=${gcRm - 1} num=${num} num2=${num2} ok=${gcOk ? 1 : 0}`);
         if (gcOk) {
           if (rmSt === 0) lootStyle++;                      // :380-383 仅 style0 面 lootStyle++
@@ -4572,6 +4574,8 @@ const snap: SnapFn = (name) => {
         y = dyv;
       }
       i158Log(`BATT-H s=${instIdx + 1} n3=${num3} st=${ncount} n5=${x} n6=${y}`);
+      // ★IIIII179：BSK=书架逐 attempt（x86 同构;墙门位直读）
+      if (i179F) mk179R(`DR|BSK|n=${ncount}|x=${x}|y=${y}|g=${gfIsBkDW(wallAt(x, y)) && actAt(x, y) === 0 ? 1 : 0}`);
       let flag = true;
       // ★IIIII105b：Books 座面化（逐族分步 #1）——IsConsideredDungeonWall/Tile 的
       // per-seat 全集（DungeonUtils.cs:1929-1950/:1844-1869 genVars 克隆合并族）；
@@ -4721,6 +4725,10 @@ const snap: SnapFn = (name) => {
   // ============ DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch（:144-193）============
   function dgLights(): void {
     const lgTr = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_DG_LIGHTS_TRACE;
+    // ★IIIII179 观测钩（SW_I179=1;零掷 logging-only,x86 DR| 同构）：
+    //   LN=near 破位 / L7=Next(7) 耗骰位 / LCHS·LLN=吊灯·灯笼臂样式表态 / LPCF=吊灯试后未落型
+    const i179L = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I179;
+    const mk179L = (ln: string): void => { (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
     if (lgTr) {
       console.log(`DG LG n5=${Math.trunc(28 * (w / 4200) * 1.0)} bnd=${bounds.L},${bounds.T},${bounds.R},${bounds.B} ent=${entExists ? 1 : 0} eb=${entBounds.L},${entBounds.T},${entBounds.R},${entBounds.B}`);
       console.log(`DG PITS${pits.map((p: DBnd) => ` ${p.L},${p.T},${p.R},${p.B}`).join('')}`);
@@ -4761,8 +4769,10 @@ const snap: SnapFn = (name) => {
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(bounds.T, bounds.B - 1);
+      // ★IIIII179：LAT=逐 attempt 墙门（x86 同构;受理面直读）
+      if (i179L) mk179L(`DR|LAT|x=${x}|y=${y}|g=${gfIsDW(wallAt(x, y)) ? 1 : 0}`);
       if (LF) { LF.attempt = (LF.attempt ?? 0) + 1;
-        if (!globalThis.__dglPrint) globalThis.__dglPrint = [bounds.L, bounds.T, bounds.R, bounds.B]; }
+        if (!(globalThis as { __dglPrint?: number[] }).__dglPrint) (globalThis as { __dglPrint?: number[] }).__dglPrint = [bounds.L, bounds.T, bounds.R, bounds.B]; }
       // ★IIIII105c：Lights 全域谓词座面化（IsConsideredDungeonWall/Tile 消费
       //   CurrentDungeonGenVars 合并表，DU.cs:1929-1950/:1844-1869）——seat1 的
       //   Snow71/Desert187/Hallow28/Temple87 族墙此前被静态集整门拒斥=G→I 窗
@@ -4800,9 +4810,11 @@ const snap: SnapFn = (name) => {
             || (inW(x + 1, cy + 1, 0) && actAt(x + 1, cy + 1) !== 0)
             || (inW(x, cy + 2, 0) && actAt(x, cy + 2) !== 0)) near = true;
           if (lgTr) console.log(`DG CAN n2=${ncount} n4=${num4} x=${x} y=${y} cy=${cy} near=${near ? 1 : 0}`);
-          if (near) break;
+          // ★IIIII179 观测钩（SW_I179=1;零掷,__swI113 未挂载=零开销）：LN=near 破位
+          if (near) { if (i179L) mk179L(`DR|LN|x=${x}|cy=${cy}`); break; }
           let placed = false;
           const r7 = rn(7);
+          if (i179L) mk179L(`DR|L7|x=${x}|cy=${cy}|v=${r7}`);
           if (lgTr) console.log(`DG R7 x=${x} cy=${cy} v=${r7}`);
           if (r7 === 0) {
             // ★HHHHHHH（2026-08-24）② 吊灯资格门 1457 化 + ★IIIII105c 座面化：
@@ -4825,19 +4837,25 @@ const snap: SnapFn = (name) => {
               ? gfStyleForWall(chwl)
               : (gfIsDW(chwl) ? DG_DEFAULT_STUB : null);
             let chOK = false;
+            // ★IIIII179：LCHS=吊灯臂样式/表态（x86 同构;仅 !blocked 臂与 cs 位置对位）
+            if (i179L && !blocked) mk179L(`DR|LCHS|x=${x}|cy=${cy}|s=${cSty === null ? -1 : cSty.Style}|ct=${cSty === null || cSty.Lch === undefined || cSty.Lch.ChandelierItemTypes === null ? -2 : cSty.Lch.ChandelierItemTypes.length}`);
             if (!blocked && cSty !== null && cSty.Lch !== undefined && cSty.Lch.ChandelierItemTypes !== null) {
               const chT = cSty.Lch.ChandelierItemTypes;
-              let chStyleNum = 0, chPlace = false;
+              let chStyleNum = 0, chPlace = false, chItemId = -1;
               if (chT.length === 0 || cSty.Style === 0) {
                 // Default 支：data.chandelierItemType（2652+theme）→ Derived=(34,27+theme)
                 chStyleNum = (chwl >= 94 && chwl <= 105) ? 53 : 27 + theme;   // GOTHIC=item5744
+                chItemId = (chwl >= 94 && chwl <= 105) ? 5744 : 2652 + theme;
                 chPlace = true;
               } else {
                 const chItem = chT[rn(chT.length)]!;
+                chItemId = chItem;
                 const pd = ipOf(chItem);
                 if (pd.t >= 0) { chStyleNum = pd.s ?? 0; chPlace = true; }    // tileType<0 整支跳过
               }
               chOK = chPlace && placeChand(x, cy, chStyleNum);
+              // ★IIIII179：LPCF=吊灯尝试后未落型（x86 同构;i=item id）
+              if (i179L && chPlace && !chOK) mk179L(`DR|LPCF|x=${x}|cy=${cy}|i=${chItemId}`);
             }
             if (lgTr) console.log(`DG CH x=${x} cy=${cy} gate=${cSty !== null ? 1 : 0} blocked=${blocked ? 1 : 0}`);
             if (chOK) {
@@ -4861,6 +4879,8 @@ const snap: SnapFn = (name) => {
           const lwl = wallAt(x, cy);
           const lSty = gfStyles.length > 0 ? gfStyleForWall(lwl) : (gfIsDW(lwl) ? DG_DEFAULT_STUB : null);
           const lantT = lSty !== null && lSty.Lch !== undefined ? lSty.Lch.LanternItemTypes : undefined;
+          // ★IIIII179：LLN=灯笼臂样式/表态（x86 同构;cs:104-112 位置）
+          if (i179L) mk179L(`DR|LLN|x=${x}|cy=${cy}|s=${lSty === null ? -1 : lSty.Style}|lt=${lSty === null || lSty.Lch === undefined || lSty.Lch.LanternItemTypes === null ? -2 : lSty.Lch.LanternItemTypes.length}`);
           // 外层门（cs:112）：null ∨ LanternItemTypes != null 才进两臂（否则不置不破）
           if (lSty === null || (lSty.Lch !== undefined && lantT !== null)) {
             const isDefArm = lSty === null || lSty.Style === 0
@@ -5092,6 +5112,8 @@ const snap: SnapFn = (name) => {
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(Math.trunc(ws), bounds.B - 1);
+      // ★IIIII179：TRP=陷阱逐 attempt（x86 同构;dual 支三门直读）
+      if (i179F) mk179R(`DR|TRP|x=${x}|y=${y}|g=${isDual ? (gfIsDW(wallAt(x, y)) && featOK(x, y, 0) && !wallIsInStyle(DungeonGenerationStyles.Temple, wallAt(x, y)) ? 1 : 0) : (gfIsDW(wallAt(x, y)) ? 1 : 0)}`);
       let okT = false;
       if (isDual) {
         // ★IIIII114b2：dual 支谓词一=**座面合并集** gfIsDW（C# IsConsideredDungeonWall=
@@ -5719,7 +5741,25 @@ const snap: SnapFn = (name) => {
    * refs.alch/bew/minWC 以 holder 模拟 C# ref（tmp 零计数支原文共享同一变量，但在
    * num21 门处必双双为零 ⇒ 两独立零值行为等价）；minWC 恒共享同一 ref。
    */
+  // ★IIIII179 观测钩（SW_I179=1;零掷,x86 DR|GFC 同构）：GA=采点门 / GFC=逐呼叫
+  //   （ss=GetStyleForWall.Style,n18=终抽型,rin=入口 jrc → 出口 jrc−rin=本呼叫掷耗）
+  const i179G = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I179;
+  const mk179G = (ln: string): void => { (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
+  let gfdArm = '?';
+  let gfdSFW = -9;
+  let gfdN18 = -9;
   function gfDActual(
+    i: number, j: number, wallType: number,
+    refs: { alch: GFItemRef; bew: GFItemRef; minWC: GFItemRef },
+    stricterSpecialCheck: boolean, noReg: boolean,
+  ): boolean {
+    const rin = i179G ? ((globalThis as { __swRollTotal?: number }).__swRollTotal ?? -1) : -1;
+    gfdSFW = -9; gfdN18 = -9;                                      // ★IIIII179 每呼复位（残值防污染）
+    const res = gfDActualInner(i, j, wallType, refs, stricterSpecialCheck, noReg);
+    if (i179G) mk179G(`DR|GFC|arm=${gfdArm}|x=${i}|y=${j}|w=${wallType}|ss=${gfdSFW}|n18=${gfdN18}|res=${res ? 1 : 0}|rin=${rin}`);
+    return res;
+  }
+  function gfDActualInner(
     i: number, j: number, wallType: number,
     refs: { alch: GFItemRef; bew: GFItemRef; minWC: GFItemRef },
     stricterSpecialCheck: boolean, noReg: boolean,
@@ -5760,6 +5800,7 @@ const snap: SnapFn = (name) => {
     // :342-363 风格表替换（flag/flag2 语义 + 14 家族按原文顺序逐项 GetFurnitureItem）
     let flag = true, flag2v = true;
     const styleForWall = gfStyleForWall(cw2);
+    gfdSFW = styleForWall === null ? -1 : styleForWall.Style;   // ★IIIII179 观测
     const FURNOFF = styleForWall?.Furn ?? null;
     if (styleForWall !== null) {
       flag = styleForWall.Style === 0;
@@ -5812,6 +5853,8 @@ const snap: SnapFn = (name) => {
     if (flag3) return false;
     const widthMin = noReg ? num19 : num19 * 1.75;                // :547-555（noReg ⇒ num19）
     if (num2 < widthMin) num18 = -1;
+    gfdN18 = num18;                                             // ★IIIII179 观测（终抽型）
+    if (i179G) mk179G(`DR|GFN|x=${i}|y=${j}|n18=${num18}`);      // ★IIIII179 表+抽奖段检查点
     // :556-576 alch/bew 臂（stricterSpecialCheck 与 num18 无关照常受理）
     if (!(flag4 && flag2v) && flag2v && (refs.alch.v > 0 || refs.bew.v > 0)) {
       if (refs.alch.v > 0) {
@@ -5969,6 +6012,7 @@ const snap: SnapFn = (name) => {
     ): void => {
       // ★IIIII165：GFD 每臂 picks/ok 账（dormant 同 LSW；x86 DR|GFD 同构）
       const i165g = (globalThis as { __swI113?: (line: string) => void }).__swI113;
+      gfdArm = hallMode ? 'H' : 'R';                                 // ★IIIII179 观测
       let gPicks = 0, gOk = 0;
       for (const ent of entries) {
         if (!ent.gen) continue;
@@ -5980,6 +6024,8 @@ const snap: SnapFn = (name) => {
           if (nTry <= 0) break;
           gPicks++;
           const px = ri(ent.L, ent.R), py = ri(ent.T, ent.B);            // RandomPointInBounds
+          // ★IIIII179：GA=采点门（g=IsConsideredDungeonWall∧inactive;x86 同构）
+          if (i179G) mk179G(`DR|GA|arm=${hallMode ? 'H' : 'R'}|x=${px}|y=${py}|g=${gfIsDW(wallAt(px, py)) && actAt(px, py) === 0 ? 1 : 0}`);
           if (!(gfIsDW(wallAt(px, py)) && actAt(px, py) === 0)) continue;// :88/:146 采点门
           const fs = gfFirstSolidDown(px, py, hallMode ? { L: ent.L, T: ent.T, R: ent.R, B: ent.B } : null);
           const fy = fs.y - 1;                                           // :92/:151-152 Y--
@@ -6503,14 +6549,16 @@ const snap: SnapFn = (name) => {
     // ★IIIII65 对账仪：与 rig JJHook.Mark(dg_pa*) 同位同 tag（__swWvLog 门控零开销）
     const WV65 = (globalThis as { __wvLines?: string[] }).__wvLines;
     const t65 = (ln: string): void => { if (WV65) WV65.push(ln); };
-    t65(`MARK|dg_pa0 n4=${Math.trunc(100 * (w / 4200) * Math.max(1, 0.75))} L=${bounds.L} R=${bounds.R} T=${bounds.T} B=${bounds.B} ws=${Math.trunc(ws)} wv0=${wallVariants[0]}`);
+    t65(`MARK|dg_pa0 n4=${Math.trunc(100 * (w / 4200) * Math.max(1, gfFeatScalar * 0.75))} L=${bounds.L} R=${bounds.R} T=${bounds.T} B=${bounds.B} ws=${Math.trunc(ws)} wv0=${wallVariants[0]}`);
     // lihzahrdPaintingsMax（DungeonGlobalPaintings.cs:36-42）：GetWorldSize()（WG:6518）
     // 4200 宽 → **0**（≤4200 case）→ switch default → max=1——**零掷**（仅 >6400 的
     // case 2 才掷 Next(2)）。★#32 终清批 III：此前误按"Large=4200"恒掷 → Pa 段全程
     // 流错位 +1（x86 逐事件反解：vanilla 首 PE@+5 而旧 JS@+6 起）。
     void 0;
     const num2v = wallVariants[0];
-    const num4 = Math.trunc(100 * (w / 4200) * Math.max(1, 0.75));
+    // ★IIIII179 配额标量补（DungeonGlobalPaintings.cs:44-46 num3=Max(1,globalFeatureScalar*0.75)
+    //  ——曾漏乘 ⇒ dual 座 num4 少 ~5×(=491vs100),Pa 段掷差主源;单座世界 scalar=1.0 零扰动）
+    const num4 = Math.trunc(100 * (w / 4200) * Math.max(1, gfFeatScalar * 0.75));
     let num5 = num4 * 3;
     const paEmit101 = (ln: string): void => { if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(ln); };
     for (let i = 0; i < num4; i++) {
@@ -6522,7 +6570,9 @@ const snap: SnapFn = (name) => {
       paEmit101(`MARK|pat|${x},${y}`);
       let n8 = 1000;
       if (WV65 && i < 12) WV65.push(`MARK|dg_paT i=${i} ${x},${y}`);
-      while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
+      // ★IIIII179 座面化（DungeonGlobalPaintings.cs:63 重掷环 IsConsideredDungeonWall
+      //  =座面合并集;曾静态 isDW ⇒ seat1 墙 71/187/28/87 全拒 → 1000 重掷烧骰 +191k）
+      while (!gfIsDW(wallAt(x, y)) || actAt(x, y) !== 0) {
         n8--;
         if (n8 <= 0) break;
         x = ri(bounds.L, bounds.R - 1);
@@ -6532,15 +6582,15 @@ const snap: SnapFn = (name) => {
       if ((typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DGPA_TRACE)) console.log(`S ${x} ${y}`);
       for (let t = 0; t < 2; t++) {
         let n9 = x, n10 = x;
-        while (n9 > 20 && actAt(n9, y) === 0 && isDW(wallAt(n9, y))) n9--;
+        while (n9 > 20 && actAt(n9, y) === 0 && gfIsDW(wallAt(n9, y))) n9--;   // ★IIIII179 座面化
         n9++;
-        while (n10 < w - 20 && actAt(n10, y) === 0 && isDW(wallAt(n10, y))) n10++;
+        while (n10 < w - 20 && actAt(n10, y) === 0 && gfIsDW(wallAt(n10, y))) n10++;
         n10--;
         x = Math.trunc((n9 + n10) / 2);
         let n11 = y, n12 = y;
-        while (n11 > 20 && actAt(x, n11) === 0 && isDW(wallAt(x, n11))) n11--;
+        while (n11 > 20 && actAt(x, n11) === 0 && gfIsDW(wallAt(x, n11))) n11--;
         n11++;
-        while (n12 < h - 20 && actAt(x, n12) === 0 && isDW(wallAt(x, n12))) n12++;
+        while (n12 < h - 20 && actAt(x, n12) === 0 && gfIsDW(wallAt(x, n12))) n12++;
         n12--;
         y = Math.trunc((n11 + n12) / 2);
       }
@@ -6703,7 +6753,9 @@ const snap: SnapFn = (name) => {
   }
   // ============ DungeonGlobalBanners（:24-104）============
   function dgBanners(): void {
-    const num3 = Math.trunc(200 * (w / 4200) * Math.max(1, 0.75));
+    // ★IIIII179 配额标量补（DungeonGlobalBanners.cs:34 num2=Max(1,globalFeatureScalar*0.75);
+    //  曾漏乘 ⇒ dual 座 num3 少 ~5×(=982vs200) + BannerItemTypes 表支整缺）
+    const num3 = Math.trunc(200 * (w / 4200) * Math.max(1, gfFeatScalar * 0.75));
     // ★IIIII65 对账仪：与 rig JJHook.Mark(dg_ba*) 同位同 tag（__swWvLog 门控零开销）
     const WV65b = (globalThis as { __wvLines?: string[] }).__wvLines;
     if (WV65b) WV65b.push(`MARK|dg_ba0 n3=${num3} L=${bounds.L} R=${bounds.R} T=${bounds.T} B=${bounds.B}`);
@@ -6723,7 +6775,9 @@ const snap: SnapFn = (name) => {
       if (WV65b && i < 12) WV65b.push(`MARK|dg_baT i=${i} ${x},${y}`);
       let n6 = 1000;
       let rr = 0;
-      while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
+      // ★IIIII179 座面化（DungeonGlobalBanners.cs:40 重掷环 IsConsideredDungeonWall
+      //  =座面合并集;曾静态 isDW ⇒ seat1 墙 71/187/28/87 全拒 → 1000 重掷烧骰 +98.5k）
+      while (!gfIsDW(wallAt(x, y)) || actAt(x, y) !== 0) {
         n6--;
         if (n6 <= 0) break;
         x = ri(bounds.L, bounds.R - 1);
@@ -6766,7 +6820,7 @@ const snap: SnapFn = (name) => {
           + ` ok=${featOK(x, y, 0) ? 1 : 0}${isDW(wallAt(x, y)) ? 1 : 0} spk=${typAt(x, y - 1) === SPIKE ? 1 : 0} dr=${dr}`
           + (mc99 !== undefined ? ` mc=${mc99}` : ''));   // ★IIIII99 主实例累计样本镜像
       }
-      if (!featOK(x, y, 0) || !isDW(wallAt(x, y))
+      if (!featOK(x, y, 0) || !gfIsDW(wallAt(x, y))   // ★IIIII179 座面化（Banners.cs:66）
         || typAt(x, y - 1) === SPIKE
         || actAt(x, y) !== 0
         || actAt(x, y + 1) !== 0
@@ -6780,18 +6834,34 @@ const snap: SnapFn = (name) => {
         }
       }
       if (near) continue;
-      let num8 = 0;
-      if (wallAt(x, y) === wallVariants[1]) num8 = 1;
-      if (wallAt(x, y) === wallVariants[2]) num8 = 2;
-      num8 = num8 * 2 + rn(2);
+      // ★IIIII179 风格臂 1:1（Banners.cs:72-96）：null 表（Spider/LivingWood/LivingMahogany/
+      //  Snow/Corruption/Crimson/Hallow/GlowingMushroom/Beehive/Temple/Crystal）→ 整支跳过；
+      //  Default(0/空表/null 样式)→ ladder+Next(2)（原文序在 null 门之后）；表支→Next(len)。
+      //  曾无 null 门无表支 ⇒ seat1 Spider 墙横幅照挂 + Next(2) 多掷。
+      const baSty = gfStyles.length > 0 ? gfStyleForWall(wallAt(x, y)) : null;
+      const baTab = baSty === null ? (gfStyles.length > 0 ? null : []) : (baSty.Style === 0 ? [] : (baSty.Banner ?? null));
+      if (baSty !== null && baTab === null) continue;
+      let bType = BANNER, bStyleV = 0;
+      if (baSty === null || baSty.Style === 0 || baTab === null || baTab.length === 0) {
+        let num8 = 0;
+        if (wallAt(x, y) === wallVariants[1]) num8 = 1;
+        if (wallAt(x, y) === wallVariants[2]) num8 = 2;
+        num8 = num8 * 2 + rn(2);
+        bStyleV = bannerStyles[num8] ?? 0;
+      } else {
+        const bItem = baTab[rn(baTab.length)]!;
+        const bpd = ipOf(bItem);
+        bType = bpd.t >= 0 ? bpd.t : BANNER;
+        bStyleV = bpd.s ?? 0;
+      }
       // ★横幅 key 是 v_91_banners 非 'banner'（tiles.ts:258）——曾 TILE_BY_KEY['banner']
       //  =undefined:近旁横幅排除恒假（横幅贴横幅照放）+ placeSimple 写 type=undefined
       //  （tile<0 拦下=横幅全部静默丢弃，JS 轨迹 134 vs oracle 129 的根因）。
       //  双侧逐样本轨迹对账实锤（N 426,570 typ=91，2026-08-15）
       // ★NNN 批 ②（2026-08-18）：style 经 bannerStyles[num8] 入帧（DungeonGlobal-
       //  Banners.cs:95 `num7 = data.bannerStyles[num8]`；查表零掷不扰流）
-      if (WV65b) WV65b.push(`MARK|dg_baP ${x},${y} t=${BANNER} s=${bannerStyles[num8]}`);
-      const baOk = placeBannerD(x, y, BANNER, bannerStyles[num8]);
+      if (WV65b) WV65b.push(`MARK|dg_baP ${x},${y} t=${bType} s=${bStyleV}`);
+      const baOk = placeBannerD(x, y, bType, bStyleV);
       // ★IIIII92 改型：vanilla PlaceTile case91（cs:60615-60618）PlaceBanner 后
       //   **无条件** SquareTileFrame(i,j)——成败同走；环=TileFrame(i±1,j-1..j+1)
       //   列主序九格，环内活性吊灯(34)格各自 CheckChand 全句复验（v2 页式帧重构
@@ -7073,19 +7143,30 @@ const snap: SnapFn = (name) => {
     emit132(`MARK|I132 feats rooms=${gfFeatRooms.length} halls=${gfFeatHalls.length}`);
   }
   snap('dungeonE');
+  // ★IIIII179 特征窗每段 entry/exit rc 钩（SW_I179;x86 DR|FEAT 同构,零掷）——
+  //   HG→Lights 窗 11.4k 掷差定位仪（PD_r/PD_h/EARLY..LATE 十六段）
+  const i179F = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I179;
+  const mk179F = (n: string, p: string): void => {
+    if (i179F) (globalThis as { __swI113?: (line: string) => void }).__swI113?.(`DR|FEAT|s=${instIdx}|n=${n}|p=${p}`);
+  };
+  const mk179R = (ln: string): void => { if (i179F) (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
+  mk179F('PDR', 'i');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
+  mk179F('PDR', 'o');
   // ★IIIII111c：C# 厅循环=rooms 循环后遍历 dungeonHalls 全序（DC.cs:484-487）——
   //  provider 厅（entrance stairwell→calculator 厅,gfPdHalls 序）先于 climb 厅（halls
   //  数组尾随）；Stairwell 无 extra、Sine 走 pp（|dy|≥0.65 已滤）、Legacy/Regular 走
   //  AddExtraPlatformsIfNeeded（载荷侧已展开）。entrance stairwell 厅**不**跳
   //  （StairwellDungeonHall.cs:16-25 无 IsEntranceHall 门;空体覆写只属
   //  LegacyEntranceDungeonHall=climb 走廊厅,JS 侧由 hallPlatformsDoors isEntrance 跳）。
+  mk179F('PDH', 'i');
   for (const ph of gfPdHalls) {
     pdHallPoint(Math.trunc(ph.sx), Math.trunc(ph.sy), ph.sdy, null);
     pdHallPoint(Math.trunc(ph.ex), Math.trunc(ph.ey), ph.edy, null);
     for (const e of ph.pp ?? []) pdHallPoint(Math.trunc(e.x), Math.trunc(e.y), e.dy, null);
   }
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
+  mk179F('PDH', 'o');
   snap('dungeonPD');
   // ★IIIII118：PD_OUT 全网格 dump（SW_DG_GC_DUMP 门控）——与 x86 rig DumpOnly
   //   x86_s*_PD_out 同位对拍（PD 收集完成时点 tile 状态=下游段共同初态）。
@@ -7959,35 +8040,39 @@ const snap: SnapFn = (name) => {
   //   故默认维持旧行为；★IIIII164 缺省已翻转 ON（S4/S1..S7 写面认证后,双座整跳=vanilla 本相；
   //   SW_I138_EARLY=0 显式回退旧径对照态）。
   if (!(gfStyles.length > 0 && i138EarlyGate())) {
+    mk179F('EARLY', 'i');
     dgEarly();
+    mk179F('EARLY', 'o');
   }
   snap('dungeonPi');
   dgpMark('pit_loop_end');
-  dgSpikes(); snap('dungeonS'); stageDump('S');
-  dgDoorsF(); snap('dungeonD'); stageDump('D');
-  dgWallVariants(); snap('dungeonW'); stageDump('W');
+  mk179F('SPIKES', 'i'); dgSpikes(); mk179F('SPIKES', 'o'); snap('dungeonS'); stageDump('S');
+  mk179F('DOORS', 'i'); dgDoorsF(); mk179F('DOORS', 'o'); snap('dungeonD'); stageDump('D');
+  mk179F('WALLVARIANTS', 'i'); dgWallVariants(); mk179F('WALLVARIANTS', 'o'); snap('dungeonW'); stageDump('W');
   // ★IIIII104b 诊断钩（零开销常态）：W 段末 bounds/wv 快照对账（与 x86 rigA 'dg_bW' mark 同位）
   if (segWatch) {
     (globalThis as unknown as { __gfbxBounds?: Record<string, number> }).__gfbxBounds =
       { L: bounds.L, R: bounds.R, T: bounds.T, B: bounds.B, wv0: wallVariants[0], wv1: wallVariants[1], wv2: wallVariants[2], ws: Math.trunc(ws) };
   }
   if (dgTW) dgTW.plat1 = dgMainRolls;
-  dgPlatforms(); snap('dungeonP'); stageDump('P');
-  dgBiomeChests(); snap('dungeonC'); stageDump('C');
-  dgBookshelves(); snap('dungeonB'); stageDump('B');
-  dgBasicChests(); snap('dungeonG'); stageDump('G');
+  mk179F('PLATFORMS', 'i'); dgPlatforms(); mk179F('PLATFORMS', 'o'); snap('dungeonP'); stageDump('P');
+  mk179F('BIOMECHESTS', 'i'); dgBiomeChests(); mk179F('BIOMECHESTS', 'o'); snap('dungeonC'); stageDump('C');
+  mk179F('BOOKSHELVES', 'i'); dgBookshelves(); mk179F('BOOKSHELVES', 'o'); snap('dungeonB'); stageDump('B');
+  mk179F('BASICCHESTS', 'i'); dgBasicChests(); mk179F('BASICCHESTS', 'o'); snap('dungeonG'); stageDump('G');
   bounds.inflate(25);
-  dgLights(); snap('dungeonI'); stageDump('I');
-  dgTraps(); snap('dungeonT'); stageDump('T');
+  mk179F('LIGHTS', 'i'); dgLights(); mk179F('LIGHTS', 'o'); snap('dungeonI'); stageDump('I');
+  mk179F('TRAPS', 'i'); dgTraps(); mk179F('TRAPS', 'o'); snap('dungeonT'); stageDump('T');
   // ★IIIII105b：GroundFurniture_DualDungeons 分派（cs:22-31 Type==DualDungeon 支）。
   // gfStyles 空数组=非 dual/未装配 ⇒ 零掷零写（普通世界走 legacy 认证体不变）。
+  mk179F('FURNITURE', 'i');
   if (gfStyles.length > 0) { dgFurnitureDual(); } else { dgFurniture(); }
+  mk179F('FURNITURE', 'o');
   snap('dungeonF'); stageDump('F');
-  dgPaintings(); snap('dungeonPa'); stageDump('Pa');
-  dgBanners(); snap('dungeonBa'); stageDump('Ba');
+  mk179F('PAINTINGS', 'i'); dgPaintings(); mk179F('PAINTINGS', 'o'); snap('dungeonPa'); stageDump('Pa');
+  mk179F('BANNERS', 'i'); dgBanners(); mk179F('BANNERS', 'o'); snap('dungeonBa'); stageDump('Ba');
   // ★HHHHHHH ⑤：DungeonGlobalLateDualDungeonFeatures（DungeonCrawler.cs:522-523,
   //   progress 0.99 DungeonLate）——Banners 之后、pass 收尾前
-  dgLate(); snap('dungeonLate');
+  mk179F('LATE', 'i'); dgLate(); mk179F('LATE', 'o'); snap('dungeonLate');
   snap('dungeon');
     return { posX, posY, dungeonX, dungeonY };
   }

@@ -623,7 +623,15 @@ def({ key: 'v_328_confetti_block', name: '', solid: true, opacity: 1, pick: 0, m
 def({ key: 'v_329_midnight_confetti_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0F0F0F', blend: true, drop: 2697, vanilla: { sheet: 329, frame: 'auto' } });
 def({ key: 'v_330_copper_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#E2764C', drop: null, vanilla: { sheet: 330, frame: 'auto' } });
 def({ key: 'v_331_silver_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#A1ACAD', drop: null, vanilla: { sheet: 331, frame: 'auto' } });
-def({ key: 'v_334_weapon_rack_legacy_do_not_use', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 334, frame: 'style', fw: 3, fh: 3 } });
+// legacy 武器架 334（TileID.cs:1105 WeaponsRack;1.4.5.7 无物品 createTile=334——
+// itemfunc/vanilla.json 双源 0 条,case 2699 Item.cs:26055 是 createTile=471）→ place_v_
+// 兜底判据不可达,须显式 def.drop=2699（WeaponRack,ItemID.cs:6944）。原版破坏不走
+// GetItemDrop（KillTile_GetItemDrops 共享 no-drop 组 case 334 WorldGen.cs:66406）,返还走
+// CheckWeaponsRack 完整性支（:46796 → Item.NewItem(...,2699) :46855,TileFrameImportant
+// case 334 :86785-86788 派发）——次数恒 1：destroyObject 旗 :46854 置位闭锁内层
+// KillTile 重入（:46798-46801 早退,:46869 复位）,与 breakTile object 支「锚点
+// Item.NewItem 一次」口径对齐（multiTileDropKey def.drop 数字路径,勿再叠加特判双掉）
+def({ key: 'v_334_weapon_rack_legacy_do_not_use', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: 2699, vanilla: { sheet: 334, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_336_living_fire_block', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#FD3E03', blend: true, drop: 2701, light: [217, 128, 76], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 336, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[336] 赋值（bool[] 默认 false）+TileID.cs:1109 LivingFire=装饰/彩带/烟/活火
 def({ key: 'v_337_text_statue', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 337, frame: 'style', fw: 2, fh: 3 } });
 def({ platform: true, key: 'v_339_grasshopper_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 339, frame: 'style', fw: 3, fh: 2 } });

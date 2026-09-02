@@ -37,5 +37,5 @@ describe('地牢生成（DungeonPass）', () => {
     expect(dungeonBricks).toBeGreaterThan(500);   // 地牢结构本体存在
     expect(dungeonWalls).toBeGreaterThan(200);    // 地牢背景墙存活
     expect(world.dungeonY).toBeGreaterThan(0);    // 入口 Y 已回填
-  }, 120000);
+  }, 300000);   // 管线本体 ~70s,120s 硬上限在并行会话负载期边际超时（评审 C 定谳上调）
 });

@@ -16,6 +16,8 @@ import { tileRunner } from './TileRunner';
 import { growAshTree } from './TreePass';
 import { LiquidSim } from '../../liquid/LiquidSim';
 import type { World } from '../../World';
+import { flipGenSolid } from './GenSolid';                     // ★IIIII176 QuickWater tileSolid 括弧
+import { setBoulderSolidity } from './TrapsPass';              // ★IIIII176 同上（SetBoulderSolidity cs:11036）
 
 const ASH = T.ASH;
 const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
@@ -96,8 +98,22 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState,
     // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
     sim.remixWorldGen = !!gs.seedFlags.remix;
     sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+    // ★IIIII176：QuickWater(-2) 首尾 tilesIgnoreWater 括弧（Liquid.cs:74/141）——
+    //   头 Main.tileSolid[379]=true（cs:105 粘性无还原）+ SetBoulderSolidity(false)、
+    //   [546]=false；尾 SetBoulderSolidity(true)、[546]=true。净效应=巨石九族
+    //   （138/484/664/711-716）沉降毕**回实心**——本 QuickWater（cs:13800）是
+    //   DesertBiome(19, 484=false) 与 Beaches(34) 间最后一次翻转，truckstop 链
+    //   #034 定谳：DoPooEverywhere 扫描停在 484 格（rig ts484|1 实证）而 JS 穿过
+    //   （GenSolid 旧注「484 恒非实心到结束」漏计本路径；SSSSSS 只建了
+    //   SettleLiquids 段尾臂）→ R756 起全链级联。noTraps 条件支（cs:111/141）与
+    //   tilesIgnoreWater 语义重合，净效应一致不另建。
+    flipGenSolid([379], true);
+    setBoulderSolidity(false);
+    flipGenSolid([546], false);
     sim.quickWater();
     sim.dispose();
+    setBoulderSolidity(true);
+    flipGenSolid([546], true);
   }
   // ④ 1/13 列灰烬柱 + 横向灰烬团 + 挖掘隧道
   // ★IIIII14（cs:13812/13821）：drunk/remix 中带（0.4w-0.6w）主柱与侧柱各加一道
@@ -222,8 +238,14 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
     // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
     sim.remixWorldGen = !!gs.seedFlags.remix;
     sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+    // ★IIIII176：QuickWater 首尾 tilesIgnoreWater 括弧（同 runUnderworldPass 注）
+    flipGenSolid([379], true);
+    setBoulderSolidity(false);
+    flipGenSolid([546], false);
     sim.quickWater();
     sim.dispose();
+    setBoulderSolidity(true);
+    flipGenSolid([546], true);
   }
 
   let colY = h - 1;                                    // num3
@@ -278,8 +300,14 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
     // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
     sim.remixWorldGen = !!gs.seedFlags.remix;
     sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+    // ★IIIII176：QuickWater 首尾 tilesIgnoreWater 括弧（同 runUnderworldPass 注）
+    flipGenSolid([379], true);
+    setBoulderSolidity(false);
+    flipGenSolid([546], false);
     sim.quickWater();
     sim.dispose();
+    setBoulderSolidity(true);
+    flipGenSolid([546], true);
   }
 
   // [num, num2+15) × [h-300, h-115)：清液 + 暴露灰烬草化（8 邻任一非活性）

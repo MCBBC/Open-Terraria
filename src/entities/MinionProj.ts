@@ -4987,8 +4987,8 @@ export class MinionProj extends Entity {
           // 1097 火球命中按生成侧 ai[1] 分档（Projectile.cs:11315-11318）：ai[1]>0 →
           // OnFire3(323) 300-600t / 否则 OnFire(24)——1094 ai[1]=0 恒火、1113 ai[1]=3/1
           // 地狱火（:62744-62752 num159）
-          if (shooter.burn === 'fire') shot.onFireHit = { buff: 24, minT: 300, maxT: 600 };
-          else if (shooter.burn === 'hellfire') shot.onFireHit = { buff: 323, minT: 300, maxT: 600 };
+          if (shooter.burn === 'fire') shot.onFireHit = { buff: 24, minT: 300, maxT: 599 };   // ★R1:Next(300,600)=[300,599]
+          else if (shooter.burn === 'hellfire') shot.onFireHit = { buff: 323, minT: 300, maxT: 599 };
           const shotSfx = MINION_SHOT_SFX[shooter.shot];
           if (shotSfx) game.playSfxFiles(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');

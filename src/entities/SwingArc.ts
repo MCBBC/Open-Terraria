@@ -22,6 +22,7 @@ import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
 import { cutTilesBox } from './ProjCutTiles';
+import { hitCritters } from './projTargets';
 // L5 长尾批：真刃系挥弧命中编排（Projectile.Damage case972-985 收编池）
 import { nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -112,6 +113,9 @@ export class SwingArc extends Entity {
     }
     // 命中：穿透（型号表）+ 同敌单跳（usesLocalNPCImmunity 族）
     for (const ent of game.enemies()) {
+      // ★dontTakeDamage 目标排除（近战 Player.cs:44618 目标选择门——挥砍对机关球零交互,
+      // 评审 C 定谳 2026-09-02 补）
+      if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; id: number; dead: boolean; dontTakeDamage?: boolean; spawnedFromStatue?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
@@ -791,12 +795,15 @@ export class ZenithSword extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
-      // Critter 同伤（原版 critters 即 NPC：弹幕可伤小动物——ZenithSword 曾漏桶）
-      for (const cent of (game as unknown as { critters?: () => Array<{ x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (g: GameHooks) => boolean }> }).critters?.() ?? []) {
-        const c = cent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (g: GameHooks) => boolean };
-        if (c.dead || (this.hitCd.get(c.id) ?? 0) > 0) continue;
-        if (!this.bladeHits(c.x, c.y, c.w, c.h)) continue;
-        if (c.hurt(game)) this.hitCd.set(c.id, 7);
+      // Critter 同伤（原版 critters 即 NPC：弹幕可伤小动物——ZenithSword 曾漏桶）。
+      // 走 canonical hitCritters（projTargets）：饰品 dontHurtCritters/MinionShot/
+      // 敌对弹面门全齐；self 盒按刃线放大（中心±40 沿刃向,厚 20——与 bladeHits 同域）
+      {
+        const dxc = Math.cos(this.rot - Math.PI / 2), dyc = Math.sin(this.rot - Math.PI / 2);
+        hitCritters(
+          { x: this.cx - 40 * Math.abs(dxc) - 10, y: this.cy - 40 * Math.abs(dyc) - 10,
+            w: 80 * Math.abs(dxc) + 20, h: 80 * Math.abs(dyc) + 20 },
+          game);
       }
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };

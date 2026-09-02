@@ -732,6 +732,13 @@ export async function liquidSettlePass({ world, rng, store, prog }: GenCtx, ocea
   }
   // ★进度：settle 收敛比例 0..1 直通当前窗 Value（settle.ts 的 ≥32ms yield 正是
   //   为让进度消息流出而保留——此前 #49/#97 槽位三参恒 undefined 等于白留）
+  // ★IIIII176：QuickWater(3) 头臂补全（Liquid.cs:74/105 tilesIgnoreWater(true)）——
+  //   SettleLiquids 段首巨石族/546 翻非实心（沉降窗口内语义），尾臂（↓ setBoulder-
+  //   Solidity(true)+[546] 括弧收尾）SSSSSS 已建。与 UnderworldPass 同一机制族
+  //   （truckstop #034 定谳：QuickWater 括弧是巨石族 tileSolid 的真实时间线）。
+  flipGenSolid([379], true);
+  setBoulderSolidity(false);
+  flipGenSolid([546], false);
   await settleWorldLiquids(world, 'gen', prog ? (p) => prog.set(p) : undefined, rng, false);
   // ★SSSSSS：QuickWater 尾 tilesIgnoreWater(false) → SetBoulderSolidity(true)
   //   （Liquid.cs:74/141——巨石九族沉降毕回实心；noTraps 的 cs:111/141 条件支与
@@ -739,8 +746,23 @@ export async function liquidSettlePass({ world, rng, store, prog }: GenCtx, ocea
   //   484 亦被还原（GenSolid 旧时间线注记「484 恒非实心到结束」漏计本路径,四链
   //   回归实证无读者不受扰）。
   setBoulderSolidity(true);
+  flipGenSolid([546], true);
+  // ★IIIII183（waterpark #53 +2 无主掷定谳）：SettleLiquids 尾 worldGenTilesIgnoreWater
+  //   (ignoreSolids:false)（1456 cs:16328 / rig 16329；#97 二次沉降尾 cs:21601 同臂）——
+  //   门 10/活树叶 192/活木 191/荧光菇块 190 沉降毕翻回实心。此臂在 pass 级
+  //   `!denyAll` 门内、**无 extraLiquid 排除**——extraLiquid(waterpark) 世界沙上清水
+  //   整 pass 早退（cs:16310 头门）跳过其内冗余的 16324 `tileSolid[192]=true` 后，
+  //   本臂是 SmoothWorld(#53) 期叶块实心的唯一来源。曾整缺 ⇒ JS 叶区 SolidTile 全差
+  //   （x86 三路 T62/悬顶 HANG 门在叶格进场,JS 零动作）= +2 相移诞生格 (3603,172)
+  //   与首杀集分歧 (3603,752) 的根因；门级钩 x86 HT/SV 对拍 /tmp/iii183-out 实证。
+  //   ★头臂 cs:16277 worldGenTilesIgnoreWater(true)（沉降窗内 10/191/190/192 非实心）
+  //   仍未建模（LiquidSim.ts:18 备案「无对应系统」）——16 链 #49 liq 通道全绿实证
+  //   沉降结果无读者,登记债不属本刀（加臂会改沉降引擎流动语义,16 链绿带面回归风险）。
+  flipGenSolid([10, 192, 191, 190], true);
   // ★pass 尾 tileSolid 翻转（cs:16292 `Main.tileSolid[484] = false`）——DesertBiome
-  //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
+  //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档。★IIIII176 勘误：旧注
+  //   「484 生成期恒非实心」不成立——QuickWater 首尾括弧（Underworld cs:13800 /
+  //   本段 cs:16252）在 DesertBiome 之后反复把巨石族翻回实心（truckstop #034 实证）。
   flipGenSolid([484], false);
 }
 

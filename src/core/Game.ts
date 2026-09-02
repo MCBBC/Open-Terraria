@@ -30,7 +30,7 @@ import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
-import { anchorSpecOf, chooseAnchorFromClick, validateAnchors } from '../world/TileAnchorValidator';
+import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes,
@@ -453,6 +453,7 @@ import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_
 import { canHit, canHitLine, playerCanHitEntity } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
+import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
@@ -2278,11 +2279,16 @@ export class Game implements GameHooks {
       const moved = Math.abs(e.x - last.x) > 0.5 || Math.abs(e.y - last.y) > 0.5 || e.hp !== last.hp;
       if (!moved && this.tickCount - last.t < 120) continue; // 2s 全量兜底
       last.x = e.x; last.y = e.y; last.hp = e.hp; last.t = this.tickCount;
+      // 刺球锚点随包（flags bit1=hasAi12）：仅 aiStyle 20 且已完成 aiInit 快照的
+      // 携带——aiInit 前 ai1/ai2=(0,0) 无意义；aiInit 后锚点恒定（blazingWheelAI
+      // 首分支 :24672-24673 写 cx/cy 后不再变），差分扫描随位移自然在 ≤2s 内补发
+      const hasAnchor = e.vanilla?.aiStyle === 20 && e.aiInit;
       snaps.push({
         netId: makeNetId(net.mySlot, e.id), key: e.key,
         x: e.x, y: e.y, vx: e.vx, vy: e.vy,
         hp: e.hp, maxHp: e.maxHp, animT: e.animT,
-        flags: e.def.boss ? 1 : 0,
+        flags: (e.def.boss ? 1 : 0) | (hasAnchor ? 2 : 0),
+        ...(hasAnchor ? { ai1: e.ai1, ai2: e.ai2 } : {}),
       });
     }
     this.netNpcCursor = (this.netNpcCursor + examined) % Math.max(1, n);
@@ -2688,6 +2694,10 @@ export class Game implements GameHooks {
       e.vx = s.vx; e.vy = s.vy;
       e.hp = s.hp; e.maxHp = s.maxHp;
       e.animT = s.animT;
+      // 刺球锚点随包（flags bit1/帧级尾段）：傀儡 netPuppet 不跑 AI，锚点只能靠快照
+      // 补——按字段存在性门控（旧房主/旧 server 无段=undefined 不动），非零锚点到达
+      // 后 drawSpikeBallChain 的「锚点未知」门放行（链+锚座+visAngle 旋转自动生效）
+      if (s.ai1 !== undefined && s.ai2 !== undefined) { e.ai1 = s.ai1; e.ai2 = s.ai2; }
       if (Math.abs(s.vx) > 0.1) e.facing = Math.sign(s.vx);
       pup.seen = this.tickCount;
     }
@@ -14898,6 +14908,55 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        // 异星法杖 2750 → 424 异星探针(Player.cs:48121-48153):探针自玩家上空随机天降点
+        // 生成(spawnX = centerX + rand(0,400)×-dir + (mouseX-player.x) 再与中心折半
+        // ±200;spawnY = MountedCenter.Y-600),速度=天降点→光标 归一×shootSpeed×0.75,
+        // 弹型 = projToShoot + rand.Next(3)(424/425/426 三型),ai[2]=0.5+rand×0.3
+        if (cw.shoot === 424) {
+          const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const dir2750 = this.player.facing >= 0 ? 1 : -1;
+          let sx = this.player.cx + Math.floor(Math.random() * 401) * -dir2750 + (mwx - this.player.x);
+          sx = (sx + this.player.cx) / 2 + Math.floor(Math.random() * 401) - 200;
+          const sy = this.player.cy - 600;
+          let dvx = mwx - sx + (Math.floor(Math.random() * 81) - 40) * 0.03;
+          let dvy = mwy - sy;
+          if (dvy < 0) dvy *= -1;
+          if (dvy < 20) dvy = 20;
+          const dl = Math.hypot(dvx, dvy) || 1;
+          const sp2750 = cw.shootSpeed / dl;
+          const vx2750 = dvx * sp2750 * 0.75;
+          const vy2750 = (dvy * sp2750 + Math.floor(Math.random() * 81) * 0.02) * 0.75;
+          const pid2750 = 424 + Math.floor(Math.random() * 3);   // projToShoot + rand(3)
+          const gs2750 = projGravSpec(pid2750);
+          const probe2 = new Arrow(sx, sy, vx2750, vy2750, cw.damage, cw.knockback, pid2750, null,
+            { grav: gs2750.grav, gravDelay: gs2750.delay, grav2: gs2750.grav2, grav2At: gs2750.grav2At,
+              dragAlways: gs2750.drag, life: 3600 });
+          probe2.critChance = critTotal;
+          probe2.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(probe2, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');
+          this.input.mouseDown = false;
+          break;
+        }
+        // 雨云魔杖 1244 / 猩红魔杖 1256 → 云 237/243(Player.cs:48745-48752):杖尖出生、
+        // 速度=瞄准×shootSpeed(16),ai[0]/ai[1]=光标世界坐标(锚)。非直射弹:过锚逐轴
+        // 清速、双轴齐停 → Kill 钩(:76032)原位变 238/244 降雨云(RainCloudProj 内链);
+        // 云本体不伤害,伤害由雨滴 239/245 承载
+        if (cw.shoot === 237 || cw.shoot === 243) {
+          const [tgx, tgy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const cloud = new RainCloudProj(mzX, mzY, Math.cos(mzAng) * cw.shootSpeed,
+            Math.sin(mzAng) * cw.shootSpeed, cw.damage, cw.knockback, cw.shoot, tgx, tgy);
+          cloud.critChance = critTotal;
+          cloud.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(cloud, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');
+          this.input.mouseDown = false;
+          break;
+        }
         // 大地法杖 1296 → 261（AI_014 弹跳巨石）：重力 0.3 + ai14 弹跳衰减
         // + extraUpdates 1（pd 驱动）；慢速消亡/墙撞爆岩在 Arrow boulder 模式
         if (cw.shoot === 261) {
@@ -18672,6 +18731,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.inTileRange(tx, ty, this.blockRange())) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
+    // liqGateHerb（★M-3c）：药草 legacy 置放路径岩浆门。定谳（亲读 1457）：种子物品
+    //  createTile=82 被 CustomCanPlace 显式排除（Player.cs:40083 `tileToCreate != 82`）
+    //  → 走 legacy 链,其液体门不在 TileObject.CanPlace/LiquidPlace,而在
+    //  PlaceThing_Tiles :40058 `!tile.active() && !PlaceThing_Tiles_IsBlockedByLava(...)`
+    //  → IsBlockedByLava（:41809-41824）【岩浆 only】（水/蜜/微光不设门——原版水中
+    //  可植,CheckAlch WorldGen.cs:46371 亦只杀岩浆格）→ 非固体件转
+    //  TileObjectData.CheckLiquidPlacement（TileObjectData.cs:5040-5043）
+    //  = GetTileData(82,placeStyle).LiquidPlace per-style 档：style5 火焰花
+    //  lava=Allowed（:4777-4778）可植岩浆,其余 style 岩浆拒（StyleAlch 基档
+    //  Water/LavaPlacement=NotAllowed :4751-4752）。82-84 的 anchorSpecOf 因
+    //  anchorBottom 含 AlternateTile（:4749）恒 null → 液体档走 liquidSpecOf 直读。
+    //  法杖补种（:45209 TryReplantingHerbs→PlaceAlch）与生成期不经理——原版同
+    //  （PlaceTile 拒置表 :59945-59963 无 82）。
+    {
+      const shHerb = def?.vanilla?.sheet ?? -1;
+      if (shHerb === 82 || shHerb === 83 || shHerb === 84) {
+        const spec = liquidSpecOf(shHerb);
+        if (spec && st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0
+          && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.LAVA) {
+          const liq = spec.liqStyles?.[String(itemDef.placeStyle ?? 0)] ?? spec.liq;
+          if (!liquidCellOk(st, tx, ty, liq)) return;
+        }
+      }
+    }
     // ★表驱动锚定（2026-09-01 用户实报固化机 3×3"只能点左下第一格/可挂墙"）：
     //  vanilla 判据 = TileObjectData 逐族 {W,H,Origin,Anchor*} 表 + CanPlace 满分制
     //  ——数据面 tools/recon-tileobj.mjs 从反编译 Terraria.ObjectData 提取（378 族）。
@@ -18737,6 +18820,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const sl = slopeAt(sx, sy);
           return (b.solid && !b.platform && sl === 0) || b.platform;
         };
+        // liqGateDoor（★M-3c）：门走专用双锚分支不过 validateAnchors → 液体门在此补。
+        //  vanilla 消费位 = TileObject.CanPlace 逐格 LiquidPlace（TileObject.cs:342
+        //  flag3 → :361 并入拒放），门 1×3 全格过门（10/11 两 sheet 记录都在册）。
+        //  style = placeStyle → GetTileData(type,style) 子样式档（基样式 lava=
+        //  NotAllowed SetupBaseObject TileObjectData.cs:1768 → 普通门岩浆拒；黑曜石门
+        //  1458 placeStyle=19 / 开门态 48 子样式 LavaPlacement=Allowed
+        //  :2245-2247 addSubTile(19,48) → addTile(10) / :2289-2291 同构 addTile(11)）。
+        //  水维基档 Allowed（:1767）→ 满水可放不变。门格此时必空（free 门后判），
+        //  只判液体维；无记录不开门（原版无记录走全局面,本仓无该表）。
+        const doorRec = anchorSpecOf(sheet);
+        const doorLiq = doorRec
+          ? (doorRec.liqStyles?.[String(itemDef.placeStyle ?? 0)] ?? doorRec.liq)
+          : null;
         const cands = [ty - 1, ty, ty - 2].filter((cy) => st.inBounds(tx, cy)
           && st.inBounds(tx + bw - 1, cy + bh - 1));
         let picked = false;
@@ -18748,6 +18844,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!free) continue;
           if (!this.hasSupport(tx, cy, bw, bh, true, false)) continue;
           if (!topAnchorOK(tx, cy - 1) || !botAnchorOK(tx, cy + bh)) continue;   // 双锚全满足
+          // 液体门（双锚全满足制之后、清格/写入前）——1×3 全格 LiquidPlace
+          if (doorLiq) {
+            let liqOk = true;
+            for (let di = 0; di < bh; di++) {
+              if (!st.inBounds(tx, cy + di) || !liquidCellOk(st, tx, cy + di, doorLiq)) { liqOk = false; break; }
+            }
+            if (!liqOk) continue;
+          }
           ty = cy; picked = true; break;
         }
         if (!picked) return;
@@ -24914,12 +25018,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （reachedInvasionBossCap，NPC.cs:159-183）——activeIds 只去重不够，同轮统计
     const moonCounts = new Map<number, number>();
     let moonBossSlotSum = 0;
+    // NearSpikeBall 锚点表（与 activeIds 同循环收集,避免第二次全表遍历）：
+    // aiStyle 20（刺球 70）的 ai[1]/ai[2] 像素锚（AI_020 首 tick 中心快照,
+    // NPC.cs:24672-24673）——aiInit=false 未初始化个体剔除（原版该态 ai[1]/ai[2]
+    // =(0,0),与地牢落点盒实际永不相交=等价）
+    const spikeBallAnchors: Array<{ x: number; y: number }> = [];
     for (const e of this.entities.enemies) {
       const en = e as Enemy;
       if (en.dead || en.vanillaId == null) continue;
       activeIds.add(en.vanillaId);
       moonCounts.set(en.vanillaId, (moonCounts.get(en.vanillaId) ?? 0) + 1);
       if (MOON_BOSS_IDS.has(en.vanillaId)) moonBossSlotSum += en.vanilla?.npcSlots ?? 1;
+      if (en.vanilla?.aiStyle === 20 && en.aiInit) spikeBallAnchors.push({ x: en.ai1, y: en.ai2 });
     }
     // 小动物桶并入 AnyNPCs 集（原版 Main.npc 全表一体：AnyNPCs(687) 等门对
     //  critters 桶可见；moonCounts 不并——小动物不计月事件 Boss 槽）
@@ -24968,6 +25078,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const cn = this.critterVid(c);
       return !c.dead && cn >= 583 && cn <= 585;
     });
+    // NearSpikeBall 锚点注入（同上"spawner 无实体桶访问"通道；消费=
+    // VanillaSpawner.nearSpikeBall 落点 600×600 盒与 (ai1,ai2,20,20) 锚盒相交门,
+    // 1456:90933-90948=1457:91002-91016）
+    this.vanillaSpawner.spikeBallAnchors = spikeBallAnchors;
     // downedBoss3 双键（骷髅王击杀链写 downed_35，旧档/导入可能写 downedSkeletron——
     // 此前只传 downedSkeletron 恒 false，地牢守卫池永不切换、绑缚三人组 685 门不开）
     // 双地牢越界（NPC.cs:313 = dualDungeonsSeed && insideUnbreakableWalls && 档位比较）：
@@ -33082,13 +33196,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const OPEN = TILE_BY_KEY['v_389_tall_gate_open'];
     if (!CLOSED || !OPEN) return;
     // 玩家覆盖格 ±1 扫关闭高门 → 自动开
-    const tx0 = Math.floor((p.x - 2) / TILE), tx1 = Math.floor((p.x + p.w + 2) / TILE);
-    const ty0 = Math.floor((p.y - 2) / TILE), ty1 = Math.floor((p.y + p.h + 2) / TILE);
-    for (let x = tx0; x <= tx1; x++) {
-      for (let y = ty0; y <= ty1; y++) {
-        if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== CLOSED) continue;
-        const anchor = shiftTallGate(st, x, y, false, (n: string) => this.sfx.play(n as SfxName));
-        if (anchor) this.openTallGates.set(st.idx(anchor[0], anchor[1]), this.tickCount);
+    // ★vanilla LookForDoorsToOpen 入口门(DoorOpeningHelper.cs:305-307):无方向输入
+    //  且 vx==0 → 整帧跳过开扫(站定不重开——右键关门后站在门口不被下一 tick 立即
+    //  弹开;持方向键贴门/被击退滑入仍照常开)。关门扫(离开检测)原版即分立方法
+    //  LookForDoorsToClose,不受此门。
+    const autoOpenAllowed = this.input.downAction('Left') || this.input.downAction('Right') || p.vx !== 0;
+    if (autoOpenAllowed) {
+      const tx0 = Math.floor((p.x - 2) / TILE), tx1 = Math.floor((p.x + p.w + 2) / TILE);
+      const ty0 = Math.floor((p.y - 2) / TILE), ty1 = Math.floor((p.y + p.h + 2) / TILE);
+      for (let x = tx0; x <= tx1; x++) {
+        for (let y = ty0; y <= ty1; y++) {
+          if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== CLOSED) continue;
+          const anchor = shiftTallGate(st, x, y, false, (n: string) => this.sfx.play(n as SfxName));
+          if (anchor) this.openTallGates.set(st.idx(anchor[0], anchor[1]), this.tickCount);
+        }
       }
     }
     // 已开门离开检测：门矩形（外扩 1px）与玩家 hitbox 不相交 → 关

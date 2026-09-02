@@ -270,6 +270,12 @@ export function dealContacts(
   for (const ent of game.enemies()) {
     const e = ent as unknown as HitTarget & { vanillaId?: number };
     if (!e || e.dead) continue;
+    // ★dontTakeDamage 目标排除（Projectile.cs:12600 目标选择门——dontTakeDamage 连
+    // Damage_PVE_Inner 都不进：StatusNPC/on-hit/TryConsumingTimerCrit 全不可达；
+    // ZappingJellyfish 例外集本仓暂无成员,登记）。曾缺=70/72 浸剂/DoT 把 hp 打穿 0
+    // 进永不死亡僵尸态（评审 C 定谳 2026-09-02 补;勿并入 playerCanHitEnemy/immortal
+    // ——488 训练假人靠 iframes=2 重打,键 immortal 是 2026-08-25 已知回归案）
+    if ((e as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
     if (!playerCanHitEnemy(ent, game, self.projId)) continue;
     if (gate) {
       // ownerHitCheckDistance：Distance(ent.Center) > N → 不命中（:12416-12418）

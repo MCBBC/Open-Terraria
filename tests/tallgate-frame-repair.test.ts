@@ -97,6 +97,38 @@ describe('门悬停图标（tileInteractionsMouseOver）', () => {
   });
 });
 
+// 站定门回归锁(DoorOpeningHelper.cs:305-307 LookForDoorsToOpen 入口门):
+// 无方向输入且 vx==0 → 自动开扫描整帧跳过(右键关门后站门口不被立即弹开);
+// 持方向键/滑速 → 照常自动开
+describe('高门自动开站定门', () => {
+  it('关门后站门口(无输入+vx=0)保持 388;持 Right 键 → 自动开 389', () => {
+    const w = new World(60, 120, 1, 'tg2');
+    const st = w.store;
+    const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
+    const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
+    const keys = new Set<string>();
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; sfx: { play(n: string): void };
+      input: { rightDown: boolean; downAction(a: string): boolean };
+      openTallGates: Map<number, number>; tickCount: number; player: unknown;
+      updateTallGateAuto(): void;
+    };
+    g.world = w;
+    g.sfx = { play: () => {} };
+    g.input = { rightDown: false, downAction: (a: string) => keys.has(a) };
+    g.openTallGates = new Map();   // 壳不跑字段初始化,手动补
+    g.tickCount = 0;
+    const player = { x: 30 * 16 - 2, y: 40 * 16, w: 20, h: 42, vx: 0, dead: false };
+    g.player = player;
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    g.updateTallGateAuto();                              // 站定:不重开
+    expect(st.get(30, 40)).toBe(T388);
+    keys.add('Right'); player.vx = 1;
+    g.updateTallGateAuto();                              // 持输入:自动开
+    expect(st.get(30, 40)).toBe(T389);
+  });
+});
+
 const idOfSheet = (s: number) => {
   const id = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === s);
   expect(id, `sheet ${s} 应有 def`).toBeGreaterThan(0);

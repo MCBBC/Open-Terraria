@@ -634,9 +634,10 @@ describe('VanillaDust：拴绳批逐型分支（43/15/267/278/6）', () => {
     // 源尘失活 → 自身返回（:267-270 dustIndex==maxDustToDraw 等价）
     d.active = false;
     expect(vd.clone(d)).toBe(d);
-    // 池满 → null
+    // 池满 → null（★R2 #4 密度门批：直填 pool 置 active——spawn 高水位会被
+    // dCount 密度门随机拒,「填满」意图无法经 spawn 达成）
     const full = new VanillaDust();
-    for (let i = 0; i < 512; i++) full.spawn(0, 0, 5, 5, 267);
+    for (const c of full.pool) { c.active = true; }
     const src = full.spawn(0, 0, 5, 5, 267);
     expect(src).toBeNull();
     const any = [...full.each(false)][0];

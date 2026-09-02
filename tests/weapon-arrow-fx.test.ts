@@ -298,7 +298,9 @@ describe('⑥ Kill 音/尘分档', () => {
       },
     });
     const a = new Arrow(100 * TILE, 186 * TILE, 2, 6, 10, 1, projId, null, {});
-    flyToTileDeath(a, game);
+    // ★R2 #7 重锚:2026-09-02 尾尘批后飞行期每 tick 撒尾尘(2/82→d6 与 Kill 尘同型
+    //  混流)——本用例锁【Kill 档】,直调 killNow 单口,不经飞行
+    (a as unknown as { killNow: (g: unknown) => void }).killNow(game);
     return { sfx, dusts };
   }
 

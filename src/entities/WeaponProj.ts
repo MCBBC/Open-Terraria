@@ -8,6 +8,7 @@
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
+import { LIQUID_TYPE } from '../world/TileStore';
 import { TtlSpriteMap } from '../assets/ttlSprite';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -280,6 +281,9 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
   const imbuNano = pl.buffs.has(BuffType.ImbueNano);
   const imbuParty = pl.buffs.has(BuffType.ImbueParty);
   for (const ent of game.enemies()) {
+    // ★dontTakeDamage 目标排除（近战侧 Player.cs:44618 目标选择门——浸剂/冰霜/岩浆石/
+    // confetti 全在其后,曾绕过 hurt 门照施加,评审 C 定谳 2026-09-02 补）
+    if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
     if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
@@ -5899,5 +5903,163 @@ export class DaybreakExplosionProj extends Entity {
     ctx.drawImage(img, 0, Math.round(this.frame * fh), sw, Math.round(fh),
       -(sw * ds) / 2, -(fh * ds) / 2, sw * ds, fh * ds);
     ctx.restore();
+  }
+}
+
+
+// ==================== 雨云魔杖 1244 / 猩红魔杖 1256 云弹家族(aiStyle 45 1:1) ====================
+// 机制(Projectile.cs:28351-28520 + Player.cs:48745-48752 + Kill 钩 :76032-76037):
+//  ①施法:杖尖生成 237/243 移动云,速度=瞄准×shootSpeed(16),ai[0]/ai[1]=光标世界坐标(锚)。
+//  ②移动云:直线飞行,过锚逐轴清速(vx==0 || 已越过锚 → 该轴置 0),双轴齐停 → Kill;
+//    Kill 钩(:76032-76037)按死亡点 Center 生成 238/244 降雨云。
+//  ③降雨云:54×28 tileCollide=false,ai[1]=生存计数,≥18000 起 alpha+5/t 淡出至 255 亡
+//    (5min 寿命);云底 (centerX,bottomY) 起 2×20 带内有实心=受阻(不降雨,帧 0-2);
+//    开阔每 >8t(238)/>10t(244) 从云底 ±14px 落 friendly 雨滴 239/245(vy 5,承 damage);
+//    每 10t 同主同型存活计数:238 活>2 / 244 活>1 → 最老者 ai[1]=18000 起淡出
+//    (雨云魔杖可并存 2 朵、猩红魔杖 1 朵)。
+//  ④雨滴 239/245:4×40,vy=5 恒速下落(无重力),tileCollide 即亡,penetrate 5;微光液
+//    满液 vy 反转(:28503-28508);alpha 50/100。
+//  多人:本地权威实体,MP spawn-kind 序列化未接(登记——v3 协议 4=MagicProj 族外)。
+const RAIN_CLOUD_MOVE = new Set([237, 243]);
+const RAIN_CLOUD_RAIN = new Set([238, 244]);
+
+export class RainCloudProj extends Entity {
+  w = 28; h = 28;
+  damage: number;
+  knockback: number;
+  projId: number;
+  critChance = 0.04;
+  armorPen = 0;
+  life = 3600;
+  dead = false;
+  /** 移动云=光标锚(ai[0]/ai[1]);降雨云/雨滴侧复用为生存计数(18000 起淡出) */
+  private anchorX: number;
+  private anchorY: number;
+  private age = 0;
+  private beat = 0;      // 雨滴节拍(ai[0])
+  private fade = 0;      // 淡出量(alpha 累加)
+  private rot = 0;
+  private frameT = 0; private frame = 0;
+  private sweepT = 0;    // localAI[0](10t 同型计数)
+  private hitCd = new HitCooldown();
+  private dropHits = 0;  // 雨滴 penetrate 5 计数
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
+    projId: number, anchorX = 0, anchorY = 0) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage; this.knockback = knockback;
+    this.projId = projId;
+    this.anchorX = anchorX; this.anchorY = anchorY;
+    if (RAIN_CLOUD_RAIN.has(projId)) { this.w = 54; this.h = 28; }
+    if (projId === 239 || projId === 245) { this.w = 4; this.h = 40; }
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (RAIN_CLOUD_MOVE.has(this.projId)) this.aiMove(game);
+    else if (RAIN_CLOUD_RAIN.has(this.projId)) this.aiRain(game);
+    else this.aiDrop(game);
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    const a = this.fade > 0 ? Math.max(0, 1 - this.fade / 255)
+      : this.projId === 239 ? 50 / 255 : this.projId === 245 ? 100 / 255 : 1;
+    drawProj(r, cam, this, this.projId, this.rot, '#B8CCE8', a);
+  }
+
+  /** ①移动云(:28353-28379):过锚逐轴清速,双轴齐停 → 亡(Kill 钩原位变降雨云) */
+  private aiMove(game: GameHooks): void {
+    this.x += this.vx; this.y += this.vy;
+    const doneX = this.vx === 0
+      || (this.vx < 0 && this.cx < this.anchorX) || (this.vx > 0 && this.cx > this.anchorX);
+    const doneY = this.vy === 0
+      || (this.vy < 0 && this.cy < this.anchorY) || (this.vy > 0 && this.cy > this.anchorY);
+    if (doneX) this.vx = 0;
+    if (doneY) this.vy = 0;
+    if (doneX && doneY) {
+      this.dead = true;                                    // Kill(:28373)
+      // Kill 钩(:76032-76037):死亡点 Center 生成 238/244(0 速驻留)
+      const rain = new RainCloudProj(this.cx - 27, this.cy - 14, 0, 0, this.damage,
+        this.knockback, this.projId === 237 ? 238 : 244);
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
+        .entities.add(rain, 'projectiles');
+      return;
+    }
+    this.rot += this.vx * 0.02;                            // :28374
+    this.frameT++;
+    if (this.frameT > 4) { this.frameT = 0; this.frame = (this.frame + 1) % 4; }
+  }
+
+  /** ②降雨云(:28388-28477) */
+  private aiRain(game: GameHooks): void {
+    this.age++;
+    if (this.age >= 18000) {                               // 5min 寿终 → 淡出
+      this.fade += 5;
+      if (this.fade >= 255) this.dead = true;
+      return;                                              // 淡出期不降雨(:28417 else-if 链)
+    }
+    const st = game.world.store;
+    // flag21:云底 (centerX, bottomY) 起 2×20 带无实心(:28393-28396 SolidTiles)
+    const bx = Math.floor(this.cx / 16), by = Math.floor((this.y + this.h) / 16);
+    let open = true;
+    for (let yy = by; yy < by + 20 && open; yy++) {
+      for (let xx = bx; xx <= bx + 1; xx++) {
+        if (st.inBounds(xx, yy) && st.isSolid(xx, yy)) { open = false; break; }
+      }
+    }
+    this.frameT++;
+    if (this.frameT > 8) {
+      this.frameT = 0;
+      this.frame = open ? (this.frame >= 5 ? 0 : this.frame + 1) : (this.frame >= 2 ? 0 : this.frame + 1);
+    }
+    if (open) {
+      this.beat++;                                         // ai[0]++
+      if (this.beat > (this.projId === 244 ? 10 : 8)) {    // :28428 >10 / :28436 >8
+        this.beat = 0;
+        // NewProjectile(num335±14, num336=云底, 0, 5)——Center 语义 → 左上回写
+        const drop = new RainCloudProj(
+          this.cx + (Math.floor(Math.random() * 30) - 15) - 2,
+          this.y + this.h - 20, 0, 5, this.damage, 0,
+          this.projId === 238 ? 239 : 245);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
+          .entities.add(drop, 'projectiles');
+      }
+    }
+    // 同主同型存活计数(:28457-28477):10t 一扫;238 活>2 / 244 活>1 → 最老者起淡出
+    this.sweepT++;
+    if (this.sweepT >= 10) {
+      this.sweepT = 0;
+      let count = 0, oldest: RainCloudProj | null = null, oldestAge = -1;
+      for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+        if (e instanceof RainCloudProj && e.projId === this.projId && !e.dead && e.age < 18000) {
+          count++;
+          if (e.age > oldestAge) { oldestAge = e.age; oldest = e; }
+        }
+      }
+      if (count > (this.projId === 244 ? 1 : 2) && oldest) oldest.age = 18000;
+    }
+  }
+
+  /** ③雨滴(:28478-28495):vy=5 恒速下落,撞格亡,penetrate 5;微光液 vy 反转 */
+  private aiDrop(game: GameHooks): void {
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h) / 16);
+    if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] === 255
+      && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.SHIMMER && this.vy > 0) {
+      this.vy *= -1;                                       // :28503-28508
+    }
+    const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: false };
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    this.x = body.x; this.y = body.y;
+    if (body.hitWall || body.collideY || body.hitHead) { this.dead = true; return; }
+    hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => {
+      this.dropHits++;
+      if (this.dropHits >= 5) this.dead = true;            // penetrate 5(:3209)
+    });
+    this.life--;
+    if (this.life <= 0) this.dead = true;
   }
 }

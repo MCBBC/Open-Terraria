@@ -423,12 +423,19 @@ const CSS = `
 .sw-hotbar .sw-slot::after, .sw-invgrid .sw-slot::after, .sw-inv .sw-slot.sm::after, .sw-inv .sw-trash::after {
   content:''; position:absolute; inset:0; z-index:-1;
   background:var(--slot-bgimg, url(sprites/vanilla/Inventory_Back20.png)) 0 0 / 100% 100%;
-  opacity:var(--slot-alpha, 1); }
+  opacity:var(--slot-alpha, 0.575); }
 /* 背包网格=热键栏同款渲染（2026-09-02）：52px 盒 ×0.75 缩放（视觉 39=--slot
-   轨道）;节距由 syncInvGridGeometry 按热键栏实测值运行时写入（grid 轨道+间距）,
-   任何环境缩放下与热键栏逐像素一致 */
+   轨道）;节距由 syncInvGridGeometry 按热键栏实测值运行时写入。半透 0.575=热键栏
+   未选中同款（用户确认半透要保留） */
 .sw-invgrid .sw-slot { width:52px; height:52px; transform:scale(0.75); transform-origin:top left;
   --slot-alpha:0.575; }
+/* ★发白根因（2026-09-02 用户报"半透效果与热键栏不一致/发白"）：半透格底之上
+   再叠不透明的 ::before 乘色层（220 灰 multiply）——背板半透时 blend 公式的
+   Cs×(1-αb) 项把浅灰直接加进画面=加性发白。热键栏 ::before 是 display:none
+   所以不发白。半透槽族（网格/钱币/弹药/垃圾桶）一律禁用乘色层;blocked 红脉冲
+   仍走 ::before（基色透明,动画期 mix-blend normal 不受影响） */
+.sw-invgrid .sw-slot::before, .sw-inv .sw-slot.sm::before, .sw-inv .sw-trash::before {
+  background:transparent; mix-blend-mode:normal; }
 .sw-invgrid .sw-slot:hover::after, .sw-inv .sw-slot.sm:hover::after, .sw-inv .sw-trash:hover::after {
   opacity:1; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
@@ -3526,11 +3533,12 @@ export class UI {
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
     // ---- 成就卡（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列只剩
-    //  成就卡;margin 6→2px=用户复报"依然离太远,继续缩小"。联机/旅程钮行以
-    //  display:contents 入簇格（其子成为第 4 行格,单机不可见不占位）----
+    //  成就卡;margin -6px 抵消 rightRail gap(8)+簇 margin-bottom(4)（用户复报
+    //  "依然离太远,继续缩小"→净距 ≈6px）。联机/旅程钮行以 display:contents 入
+    //  簇格（其子成为第 4 行格,单机不可见不占位）----
     const sideCol = el('div');
     sideCol.style.cssText = 'display:flex; flex-direction:column; gap:4px; align-items:center;'
-      + 'margin-top:2px;';
+      + 'margin-top:-6px;';
     row.style.cssText = 'display:contents;';   // 联机/旅程钮 → 簇格第 4 行（子项直入网格）
     sideCol.appendChild(this.achAdvisorEl);   // 成就提示牌（Advisor 卡,竖式）
     rightRail.appendChild(sideCol);
@@ -4498,10 +4506,13 @@ export class UI {
       this.hotbarNameEl.style.fontSize = '11px';
     } else {
       let x = 20;
+      // ★背包打开时热键栏整行均匀（2026-09-02 用户要求：不高亮/不放大当前项——
+      //   原版 playerInventory 开启时热键行不画选中放大与 Back14 高亮）
+      const invOpen = this.invPanel?.style.display === 'block';
       for (let i = 0; i < 10; i++) {
         const slotEl = this.slotEl(i, 'inv');
         if (!slotEl) continue;
-        const sel = i === inv.selected;
+        const sel = i === inv.selected && !invOpen;
         const scale = sel ? 1 : 0.75;
         this.paintSlot(slotEl, inv.slots[i]);
         slotEl.style.left = `${x}px`;

@@ -127,6 +127,10 @@ const PROJ_STATUS_1457_HANDPATCH: Record<number, StatusEntry[]> = {
 
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, ctx?: ProjStatusCtx): void {
   if (projId === undefined || projId < 0) return;
+  // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
+  // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
+  // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   // 催化指环 6185（StatusNPC :11189-11193）：任意命中 398 AcceleratePoisons 300t=5s
   //（无弹型门;398 ∈ SUPPORTED acceleratePoisonsT——可加速族 DoT ×2 消费在 Enemy DOTTally）
   if (ctx?.catalystBand) {
@@ -203,6 +207,10 @@ export function applyBuffTicks(enemy: StatusEnemy, buff: number, ticks: number):
  *  AddBuff(324 Frostburn2, 60×Next(5,15) tick=5-14s,max 合并)。
  *  魔法/召唤弹不吃。三挂点:挥砍(Game)/WeaponProj 近战四族/远程箭 */
 export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
+  // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
+  // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
+  // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!frostBurn) return;
   const sec = 5 + Math.floor(Math.random() * 10); // 60×Next(5,15)t——XNA Next(min,max) 含头不含尾=[5,14]秒
   if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
@@ -213,6 +221,10 @@ export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
  *  else → 60t=1s。★曾只移植第一支+落空即 return=6/7 命中无 buff。
  *  挥砍侧是另一公式（applyMagmaStoneSwing） */
 export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): void {
+  // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
+  // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
+  // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!magmaStone) return;
   if (Math.random() < 1 / 7) {
     if (6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
@@ -226,6 +238,10 @@ export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): vo
 /** 岩浆石/火焰护手——近战【挥砍】命中（Player.cs:6184-6198 三段掷）：
  *  1/4 → 360t=6s；否则 1/2 → 240t=4s；否则 60t=1s */
 export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): void {
+  // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
+  // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
+  // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!magmaStone) return;
   const r = Math.random();
   const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 1;
@@ -246,6 +262,10 @@ export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): v
  *     217 1/5 OnFire 3s / 1123 拍手 100% Confused(31) 2s
  *  免疫门与 applyProjStatus 同源（NPC.AddBuff buffImmune + DebuffImmunitySets，:90968） */
 export function applyWeaponStatusSwing(weaponVid: number, enemy: StatusEnemy): void {
+  // ★dontTakeDamage 目标零状态（原版状态只在 Damage_PVE_Inner 内可达,而其目标选择门
+  // Projectile.cs:12600 / 近战 Player.cs:44618 都先排 dontTakeDamage——刺球 70/火轮 72 等
+  // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (weaponVid < 0) return;
   const roll = (denom: number): boolean => denom <= 1 || Math.floor(Math.random() * denom) === 0;
   const add = (buff: number, ticks: number): void => {
@@ -279,6 +299,8 @@ export function applyMeleeImbue(
   enemy: StatusEnemy,
   partyFx?: () => void,
 ): void {
+  // ★dontTakeDamage 目标零状态（同 applyProjStatus 头注——原版浸剂在 StatusNPC 内,:12600 门后）
+  if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   const has = (bt: BuffType): boolean => buffs.has(bt as unknown as never);
   const max = (field: string, v: number): void => {
     if (v > (enemy[field] ?? 0)) enemy[field] = v;

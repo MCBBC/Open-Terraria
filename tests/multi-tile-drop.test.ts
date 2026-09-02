@@ -30,8 +30,9 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import {
-  vanillaPlaceableTileKeys, CAGE_ITEM_SHEET, VANILLA_ITEM_KEY_BY_ID,
+  vanillaPlaceableTileKeys, CAGE_ITEM_SHEET, VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY, ITEM_DEFS,
 } from '../src/data/items';
+import { getOrCreateFurniture } from '../src/world/FurnitureItems';
 import { coinBandVid, styleDropVid, styleDropVidOfFrames } from '../src/data/vanillaStyleDrops';
 import { VI } from '../src/data/itemKeys';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
@@ -179,11 +180,13 @@ describe('无原版放置物品的装饰：无放置物品返还（⚠️4 勘�
     }
   });
 
-  it('echo 变体/倒木/垃圾桶/legacy 武器架/开态门件（特例分支或特例拦截承担）', () => {
+  it('echo 变体/倒木/垃圾桶/开态门件（特例分支或特例拦截承担）', () => {
     // 488 倒木→mysticLogs 延迟旗分支+木头 9×Next(10,21)（:49561,⚠️4 已接）；
     // 706→breakShrineSword（4144/989）；236/238→生命果/世花分支；
     // 386/389=开态（关闭态 387/388 才有物品;389 双 def 已并入 v_389_tall_gate_open）
-    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_99_trash_can', 'v_334_weapon_rack_legacy_do_not_use', 'v_386_trapdooropen', 'v_389_tall_gate_open', 'v_165_cave_decos']) {
+    // ★v_334 legacy 武器架已移出本组（2026-09-02 ⑥-b 翻正）：def.drop=2699 直掉,
+    //   专档见下方「legacy 武器架 334」describe（原「无放置物品返还」锁定档系误判）
+    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_99_trash_can', 'v_386_trapdooropen', 'v_389_tall_gate_open', 'v_165_cave_decos']) {
       expect(dropKeyOf(k)).toBe('');
     }
   });
@@ -228,6 +231,72 @@ describe('无原版放置物品的装饰：无放置物品返还（⚠️4 勘�
     expect(coinBandVid(1170)).toBe(73);
     expect(coinBandVid(846)).toBe(0);
     expect(coinBandVid(1188)).toBe(0);
+  });
+});
+
+// ============ B2. legacy 武器架 334：架本体 2699 返还（2026-09-02 移交项⑥-b 翻正） ============
+// 原版定谳（全部亲读 ../Terarria1457）：tile 334 = TileID.cs:1105 WeaponsRack（1.4 前
+// legacy 架;现行 471 = :1379 WeaponsRack2）。1.4.5.7 无物品 createTile=334（itemfunc/
+// vanilla.json 双源 0 条;case 2699 Item.cs:26055 是 createTile=471）→ place_v_ 兜底
+// 判据（vanillaPlaceableTileKeys）对 334 永不可达 → 必须显式 def.drop=2699
+// （WeaponRack,ItemID.cs:6944）。破坏不走 GetItemDrop（KillTile_GetItemDrops 共享
+// no-drop 组 case 334 WorldGen.cs:66406 → 共享 break）,返还走 CheckWeaponsRack
+// 完整性支（:46796 → Item.NewItem(...,2699) :46855,TileFrameImportant case 334
+// :86785-86788 派发）——次数恒 1：destroyObject 旗 :46854 置位闭锁内层 KillTile 重入
+// （:46798-46801 早退,:46869 复位）。与 breakTile object 支「锚点 Item.NewItem 一次」
+// 口径对齐：multiTileDropKey def.drop 数字路径 → VI(2699),dropCount=1,无特判不双掉。
+describe('legacy 武器架 334：架本体 2699 返还（CheckWeaponsRack :46855 翻正）', () => {
+  const RACK = 'v_334_weapon_rack_legacy_do_not_use';
+
+  it('def.drop=2699 直掉（multiTileDropKey 数字路径）——place_v_ 兜底对 334 不可达', () => {
+    const d = TILE_DEFS[keyOf(RACK)]!;
+    expect(d.w).toBe(3); expect(d.h).toBe(3);   // 3×3 → object 分支
+    expect(d.drop).toBe(2699);
+    expect(dropKeyOf(RACK)).toBe(VI(2699));
+    expect(placeable.has(RACK)).toBe(false);    // 无物品 createTile=334 → 兜底判据不命中
+    expect(styleDropVidOfFrames(334, 0, 0)).toBe(0);   // 无 style 档表 → 不覆写 def.drop
+  });
+
+  it('裸架 runtime：breakTile → 2699 恰一次（非锚格命中同锚点返还）', () => {
+    const w = new World(40, 40, 7, 'mtd-rack334');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    const rk = keyOf(RACK);
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, rk, dx * 18, dy * 18);
+    }
+    g.breakTile(11, 11, false);   // 命中中格（非锚格）
+    expect(drops).toEqual([{ key: VI(2699), n: 1 }]);
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+      expect(w.store.get(10 + dx, 10 + dy), `(${10 + dx},${10 + dy})`).toBe(0);
+    }
+  });
+
+  it('持武架：第一击弹武器（架保留）、第二击碎架掉 2699 一次——武器+架体两件', () => {
+    const w = new World(40, 40, 7, 'mtd-rack334b');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    const rk = keyOf(RACK);
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+      w.store.setTileSilent(20 + dx, 10 + dy, rk, dx * 18, dy * 18);
+    }
+    const wid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[4]!]!;   // 4=铁阔剑（CanBePlacedOnWeaponRacks）
+    getOrCreateFurniture(w.furnitureItems, 'weapon_rack', 20, 10).slots[0] = { id: wid, stack: 1, prefix: 0 };
+    g.breakTile(20, 10, false);
+    expect(drops).toEqual([{ key: ITEM_DEFS[wid].key, n: 1 }]);            // 只弹武器
+    expect(w.store.get(20, 10)).toBe(rk);                                  // 架本体保留（两段式 pop）
+    g.breakTile(20, 10, false);
+    expect(drops).toEqual([
+      { key: ITEM_DEFS[wid].key, n: 1 },
+      { key: VI(2699), n: 1 },                                             // 架体恰一次
+    ]);
+    expect(w.furnitureItems.find((f) => f.x === 20 && f.y === 10)).toBeUndefined();
+    expect(w.store.get(22, 12)).toBe(0);
+    // ★备案（原版差异）：1457 原版 334 持武架【一击】双掉——武器帧嵌读取
+    // KillTile_DropItems :64122-64164（弹武器 :64146-64149+帧还原 :64155-64162,
+    // 无 early return）+ CheckWeaponsRack :46855 架体同击；本仓与 471 共用
+    // FURNITURE_TILE_KIND 两段式 pop 链（471 才有的 early-return :64186-64195 同构）,
+    // 物品集相同、架体多承一击——共享链改面属并行批次域,不在此批动。
   });
 });
 

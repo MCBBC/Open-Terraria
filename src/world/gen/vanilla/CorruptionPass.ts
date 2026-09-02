@@ -1,7 +1,16 @@
-// 原版 pass 28 "Corruption"(WorldGen.cs:6059)移植。
+// 原版 pass "CorruptionAndCrimson"(1457 WorldGen.cs:13931-14745 注册;全 pass 体在此区段,
+// 旧注 WorldGen.cs:6059 系 1405 行号)移植。
 // 腐化:ChasmRunner 裂隙(黑檀石 25 壳 + 暗影之球 31 style0 + 恶魔祭坛 26 style0);
 // 猩红:CrimStart 弹坑隧道(猩红石 203 墙 83 + 恶魔之心 31 style1 + 祭坛 style1)。
 // 区域避开:出生点±200、地下沙漠、地牢±100、丛林/雪原带(±10 收缩)。
+// ★t2 批定谳(2026-09-02,x86 rig /tmp/t2-out/{cor,crim} SW_EVIL=0/1 SW_PASSCHAIN):
+//   槽 #030 掷数 x86=5,128,078(腐化)/756,507(猩红) vs JS 5,128,077/756,506——Δ=1 恒定
+//   = vanilla RunPass 尾诊断掷(WorldGenerator.cs:515 RandNext=genRand.Next(),世界中立,
+//   下 pass 头重播种子),JS 不复刻正确。nba2「6.8× 差」=腐化世界 vs 猩红世界的 flavor
+//   功差(裂隙机件 ≫ 囊群机件),非债。槽末 act/wal/liq 三通道 FNV 双 flavor 全等;
+//   typ 48 格幽灵差=上游继承(Underworld 入口前已在,见 tests/corruption-evil-parity.test.ts)。
+//   本文件内 __mark 探针钩(t2crimStart/crimTunnelDone/... 系列)=掷数解剖仪
+//   tools/_t2coranat.test.ts 用,缺省零开销。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';

@@ -526,7 +526,27 @@ function derive(ids: number[]): Set<number> {
 }
 const CACHE = new Map<number, Set<number>>();
 /** 该 NPC 是否免疫指定 vanilla buff id（NPC.AddBuff :90968 免疫即 return） */
+// ★ImmuneToAll 档（NPCID.cs DebuffImmunitySets 的 ImmuneToAllBuffsThatAreNotWhips/
+//  ImmuneToWhips 双旗,37 键=NPCID.cs:818-819/:847-848/:888/:916 等全部注册——
+//  展开语义 = NPCDebuffImmunityData.cs:14-24 ApplyToNPC：非鞭档免疫一切
+//  【非】IsAnNPCWhipDebuff 的 buff；+Whips 档连鞭 tag 本体一起免。
+//  IsAnNPCWhipDebuff = {310, 362}（BuffID.cs:20——鞭命中 AddBuff(310/362,240),
+//  Projectile.cs:11753-11756）。曾整档漏提取=72 火轮/68 守卫/134-136 机械蠕虫等
+//  吃全部 debuff（评审 C 定谳 2026-09-02 补;debuffImmuneOverride 运行时位
+//  在 applyBuffTicks 先于此表判定,优先级不受影响））
+export const IMMUNE_ALL_NOT_WHIPS: ReadonlySet<number> = new Set([
+  82, 134, 135, 136, 139, 253, 288, 330, 384, 393, 394, 395, 422, 439,
+  454, 455, 456, 457, 458, 459, 492, 493, 507, 517, 662, 690,
+]);
+export const IMMUNE_ALL_PLUS_WHIPS: ReadonlySet<number> = new Set([
+  68, 72, 392, 440, 491, 549, 583, 584, 585, 686, 687,
+]);
+const WHIP_NPC_DEBUFF: ReadonlySet<number> = new Set([310, 362]);
+
 export function npcImmuneTo(npcId: number, vanillaBuffId: number): boolean {
+  // ImmuneToAll 档先于 DATA 派生表（提取面未含此旗）
+  if (IMMUNE_ALL_PLUS_WHIPS.has(npcId)) return true;
+  if (IMMUNE_ALL_NOT_WHIPS.has(npcId)) return !WHIP_NPC_DEBUFF.has(vanillaBuffId);
   let s = CACHE.get(npcId);
   if (!s) {
     const raw = DATA[String(npcId)];

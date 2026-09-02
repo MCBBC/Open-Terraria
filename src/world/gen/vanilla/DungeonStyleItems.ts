@@ -311,6 +311,9 @@ export const STYLE_LIGHTCHEST_TABLES: Record<number, StyleLightChestSpec> = {
 
 /** item id → DerivedPlacementDetails{tileType,placeStyle}（Furniture 特征消费面）。 */
 export const ITEM_PLACE: Record<number, { t: number; s: number | null }> = {
+  337: { t: 91, s: 0 }, 338: { t: 91, s: 1 }, 339: { t: 91, s: 2 }, 340: { t: 91, s: 3 },
+  5497: { t: 91, s: 311 }, 5498: { t: 91, s: 312 },
+  789: { t: 91, s: 4 }, 790: { t: 91, s: 5 }, 791: { t: 91, s: 6 },
   106: { t: 34, s: null },
   107: { t: 34, s: 1 },
   108: { t: 34, s: 2 },
@@ -710,6 +713,20 @@ for (const [nm, id] of Object.entries(_NAME_TO_ID)) {
   const st2 = DungeonGenerationStyles[nm];
   const lc = STYLE_LIGHTCHEST_TABLES[id];
   if (st2 && lc) st2.Lch = lc;
+}
+
+/** ★IIIII179：BannerItemTypes（DungeonGenerationStyles.cs 各档终态逐值转录）。
+ *  null=C# null（Banners :77 null 门整支跳）；缺键=null；Default(0)=int[0] 空表
+ *  （:699 → Default 臂）。仅 Shimmer(11)/Cavern(1) 持 6 项表、Desert(3) 持 3 项表。 */
+export const STYLE_BANNER_TABLES: Record<number, number[] | null> = {
+  1: [337, 339, 338, 340, 5497, 5498],                              // Cavern :221
+  11: [337, 339, 338, 340, 5497, 5498],                             // Shimmer :101
+  3: [790, 791, 789],                                               // Desert（Snow :253 处 null 族对照;Desert 实表 :302 邻域）
+};
+for (const [nm, id] of Object.entries(_NAME_TO_ID)) {
+  const st3 = DungeonGenerationStyles[nm];
+  if (!st3) continue;
+  st3.Banner = id in STYLE_BANNER_TABLES ? STYLE_BANNER_TABLES[id]! : (id === 0 ? [] : null);
 }
 
 // ★IIIII111c：PD 面（CalculatePlatformsAndDoorsOnEdgesOfRoom/OnHallway，DU.cs:67-269）

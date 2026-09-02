@@ -50,6 +50,20 @@ export function anchorSpecOf(sheet: number): AnchorRec | null {
   return out;
 }
 
+/** ★M-3c 液体档直读（绕开 anchorSpecOf 的 AlternateTile/Tree 豁免回落）。
+ *  消费位 = Game.ts 门双锚分支（liqGateDoor——门 10/11 被显式豁免走专用路径）与
+ *  药草 legacy 置放路径（liqGateHerb——药草 82-84 anchorBottom 含 AlternateTile
+ *  TileObjectData.cs:4749 → anchorSpecOf 恒 null，但【液体档】与该豁免无关，
+ *  liq/liqStyles 是独立两维数据）。
+ *  无记录返回 null：调用方不得臆造缺省、不开门（原版 GetTileData(type,style)==null
+ *  时 CheckLiquidPlacement TileObjectData.cs:5042 回落 Main.tileLavaDeath/WaterDeath
+ *  全局面——本仓无该表，无记录即无门，与既有行为一致）。 */
+export function liquidSpecOf(sheet: number):
+  { liq: AnchorRec['liq']; liqStyles?: AnchorRec['liqStyles'] } | null {
+  const raw = RAW[String(sheet)];
+  return raw ? { liq: raw.liq, liqStyles: raw.liqStyles } : null;
+}
+
 /** 原版 blockType()：0 平整 / 1 半砖 / 2..5 = slope1..4 */
 function btOf(st: World['store'], x: number, y: number): number {
   const i = st.idx(x, y);
@@ -107,6 +121,29 @@ function evalCell(side: string, spec: SideSpec, at: [number, number],
   return ok;
 }
 
+/** ★M-3c 单格液体放置门（TileObjectData.LiquidPlace TileObjectData.cs:1853-1907 全支）。
+ *  validateAnchors 的逐格液体门与【非锚点表消费位】（Game.ts 门双锚分支 liqGateDoor /
+ *  药草 legacy 路径 liqGateHerb）共用同一实现——液体语义单源，禁止在消费侧复刻。
+ *  维度：岩浆（LIQUID_TYPE.LAVA=原版 liquidType 1）走 lava 档，其余（WATER/HONEY/
+ *  SHIMMER=原版 0/2/3）走 water 档。液体量 >0：NotAllowed 拒 / onlyInFull 非满液(255) 拒；
+ *  量 ==0（dry）：onlyIn* 恒拒（:1886-1904 else 支——基样式数据无 onlyIn 值,分支为
+ *  语义完备性保留）。调用方保证 (x,y) 在界内（validateAnchors 已界内检查）。 */
+export function liquidCellOk(st: World['store'], x: number, y: number,
+  liq: { water: LiquidPlacementVal; lava: LiquidPlacementVal }): boolean {
+  const i = st.idx(x, y);
+  const amt = st.liquid[i];
+  // 本仓 liquidType 为原版 +1 编码（TileStore.LIQUID_TYPE）；0(NONE) 视同水（同
+  //  Game.ts:21951 惯例——原版 liquidType()==0 即水）
+  const spec = st.liquidType[i] === LIQUID_TYPE.LAVA ? liq.lava : liq.water;
+  if (amt > 0) {
+    if (spec === 'notAllowed') return false;
+    if (spec === 'onlyInFull' && amt !== 255) return false;
+  } else if (spec === 'onlyInFull') {
+    return false;
+  }
+  return true;
+}
+
 /** 检验“某物放在 ax,ay 是否满足全部锚点”。CanPlace 的 all-or-nothing 判定。
  *  液体门 = 两维建模（rec.liq.water/lava，见下方逐格注释）；wall 族沿用
  *  isValidWallAnchor 默认分支（任意非零墙均有效）。occupiedIgnore：调用方为
@@ -144,19 +181,10 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       //  ★M-3b：style 档解析——命中 liqStyles[style] 用子样式记录（如火把 4 styles
       //  8/11/17 水岩浆均放 TileObjectData.cs:4612-4613、染料 227 style5 onlyInFull
       //  :2196），未命中落基档（= GetTileData 回落语义,TileObjectData.cs:5142-5150）。
+      //  ★M-3c：门体实现上移 liquidCellOk（门双锚分支/药草 legacy 路径共源）。
       {
-        const liqAmt = st.liquid[i2];
-        // 本仓 liquidType 为原版 +1 编码（TileStore.LIQUID_TYPE）；0(NONE) 视同水（同
-        //  Game.ts:21951 惯例——原版 liquidType()==0 即水）
-        const isLava = st.liquidType[i2] === LIQUID_TYPE.LAVA;
         const liq = rec.liqStyles?.[String(style)] ?? rec.liq;
-        const spec = isLava ? liq.lava : liq.water;
-        if (liqAmt > 0) {
-          if (spec === 'notAllowed') return false;
-          if (spec === 'onlyInFull' && liqAmt !== 255) return false;
-        } else if (spec === 'onlyInFull') {
-          return false;
-        }
+        if (!liquidCellOk(st, x, y, liq)) return false;
       }
       if (rec.wall && st.wall[i2] === 0) return false;
     }

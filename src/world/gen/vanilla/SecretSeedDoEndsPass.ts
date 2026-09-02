@@ -1165,17 +1165,13 @@ export function doExtraLiquidAddLiquid(st: TileStore, rng: RNG, gs: GenState): v
  *  仅 37 枚 Register 秘种子计入；truckstop 单旗标 ⇒ num3=(2+1)/3=1 不均分）。 */
 export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
   const F = gs.seedFlags;
-  // ★IIIII176 对拍探针钩（诊断期临时件，定谳后拆除）——与 rig SW_I176_POO trace 逐字段同构
-  const pooProbe = (globalThis as { __swI176Poo?: (line: string) => void }).__swI176Poo;
   const num = 40;                                                       // cs:2977
   let num2 = Math.trunc(st.w * st.h * 0.0002);                          // cs:2978 (int)((double)(w*h)*0.0002)
   const num3 = Math.max(1, Math.trunc((2 + activeSecretSeedCountOf(F)) / 3));  // cs:2979-2983 整除+<1 钳 1
   num2 = Math.trunc(num2 / num3);                                       // cs:2984
-  pooProbe?.(`count|${activeSecretSeedCountOf(F)}|num2|${num2}`);
   for (let i = 0; i < num2; i++) {
     const num4 = rng.nextIntRange(num, st.w - num);                     // cs:2987 Next(40, w-40)
     let num5 = rng.nextIntRange(num, st.h - num);                       // cs:2988 Next(40, h-40)
-    const raw5 = num5;
     for (let j = 0; j < 30; j++) {                                      // cs:2989-2996 下扫寻实心（≤30 步，零掷）
       if (solidTileGround(st, num4, num5)) break;
       num5++;
@@ -1185,43 +1181,19 @@ export function doPooEverywhere(st: TileStore, rng: RNG, gs: GenState): void {
     const ii = st.idx(num4, num5);
     const sh = shOf(st, ii);
     const wal = st.wall[ii];
-    if (pooProbe) {
-      pooProbe(`E|${i}|${num4}|${num5}|t${sh}|s${genSolidType(st.type[ii]) ? 1 : 0}|h${st.half[ii]}|l${st.slope[ii]}|w${(st.wire[ii] & 32) ? 1 : 0}|a${st.flags[ii] & 1}`);
-    }
     const reject = !F.skyblock && (st.flags[ii] & 1) !== 0
       && (sh === 41 || sh === 43 || sh === 44 || sh === 677 || sh === 678 || sh === 679   // Main.tileDungeon（Main.cs:8131-8136）
         || wal === 7 || wal === 8 || wal === 9 || (wal >= 94 && wal <= 99)               // Main.wallDungeon（Main.cs:10737-10745）
         || DESERT_CLOUD_IDS.has(sh)                                                      // TileID.Sets.Clouds（TileID.cs:197，与沙漠锚同集）
         || wal === 73);                                                                  // 蜂蜜生成墙
     if (!reject && solidTileGround(st, num4, num5)) {
-      const s = rng.nextIntRange(5, 12);                                                // Next(5,12)
-      const t = rng.nextIntRange(10, 31);                                               // Next(10,31)
-      pooProbe?.(`${i}|${num4}|${raw5}|${num5}|1|${s}|${t}`);
-      const g2 = globalThis as { __swTrRunSeq?: { v: number } };
-      if (g2.__swTrRunSeq) g2.__swTrRunSeq.v = i;
       tileRunner(st, rng, gs, num4, num5, {                                             // cs:2999
-        strength: s,
-        steps: t,
+        strength: rng.nextIntRange(5, 12),                                              // Next(5,12)
+        steps: rng.nextIntRange(10, 31),                                                // Next(10,31)
         type: idOf(666),
         addTile: true,
       });
-      if (g2.__swTrRunSeq) g2.__swTrRunSeq.v = -1;
-    } else {
-      pooProbe?.(`${i}|${num4}|${raw5}|${num5}|0`);
     }
-  }
-  // 探针尾：R756 菱形域 + 首差格邻域窗口终态 dump（诊断期临时件）
-  if (pooProbe) {
-    const dumpWin = (x0: number, x1: number, y0: number, y1: number, tag: string) => {
-      for (let x = x0; x <= x1; x++) {
-        for (let y = y0; y <= y1; y++) {
-          const k = st.idx(x, y);
-          pooProbe(`${tag}|${x}|${y}|${shOf(st, k)}|${st.flags[k] & 1}`);
-        }
-      }
-    };
-    dumpWin(2498, 2520, 806, 832, 'D756');
-    dumpWin(786, 802, 222, 236, 'D794');
   }
 }
 
