@@ -630,7 +630,11 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
     //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
     //   NextDouble*2π,y 无压缩;落点横向 50 边距内或放置失败则不计
-    const patches = rng.int(0, 4);
+    // ★IIIII163（waterpark）：cs:16049-16052——num6=Next(5) **照掷**，extraLiquid 世界
+    //   num6 强制 0（蜂蜜斑循环不进，rad/ang 双骰不耗）。漏此臂=旗标真值 #47 Hives 起
+    //   骰流分叉（x86 蜜斑 0 斑 vs JS 乱斑，蜜/泥互化 ±2.9k 格）。
+    const patchesRoll = rng.int(0, 4);
+    const patches = gs.seedFlags.extraLiquid ? 0 : patchesRoll;
     let done = 0, budget = 10000;
     mk?.(`HV_PATCHN ${patches}`);
     while (done < patches && budget > 0) {

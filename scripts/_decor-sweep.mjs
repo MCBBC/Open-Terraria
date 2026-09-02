@@ -13,8 +13,17 @@
 //                           锚列同为左列+1）→ 整件清除
 //  ⑥pigronataOtherColCtrl   挖第 3 列上格（非锚列）→ 整件幸存
 //  ⑦plantBelowRegression    挖植物(3)下方草块（既有 D-1 上方格链,不回退）→ 整株清除
+// —— 2026-09-02 八批（幸存链缺口）追加：
+//  ⑩-⑭ tallgate           389/388 高门 CheckTallGate（:52111 完整性+顶/底双行 SolidTile）：
+//                          开态挖顶锚→整件清+掉 3240/挖中部→object 锚点支清/侧扰动→幸存/
+//                          闭态切换两态 5 格保全后顶锚挖清/导入帧约定（0/20/38/56/74）不误杀
+//  ⑮-⑰ gemlock 440        'wallhang'（Check3x3Wall :44690 逐格 wall>0）：带墙扰动幸存/
+//                          清一角墙→整件清（setWall 监听链）/帧混格→判坏
+//  ⑱ hangtopRightCol       465/591/592/531 右列挖锚→整件清 + 右列旁扰动→幸存（六批
+//                          mod36 列解码修复的回归哨兵;style 带基 36 合成）
 // 几何：bl=底左原点（buildObj 行区 bly-(oh-1)..bly）；444 顶行=F-2 锚行=F-3；
-//       34/454 行区 F-3..F-1 锚行=F-4
+//       34/454 行区 F-3..F-1 锚行=F-4；389 行区 F-5..F-1 锚行 F/F-6；
+//       440 行区 F-4..F-2（背墙同域）；hangtop 行区 F-3..F-1 锚行=F-4
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 const MAP = process.env.SW_MAP ?? '/Users/vinlic/Downloads/map-Starter_World (23).json';
@@ -36,6 +45,10 @@ const out = await page.evaluate(async () => {
   };
   const STONE = idOfSheet(1), WEED = idOfSheet(3), GRASS2 = idOfSheet(2);
   const HIVES = idOfSheet(444), CHAND = idOfSheet(34), PIGR = idOfSheet(454);
+  // 八批（幸存链缺口）：高门双态/宝石锁/hangtop 右列哨兵
+  const TALL_C = idOfSheet(388), TALL_O = idOfSheet(389), GLOCK = idOfSheet(440);
+  const HANGTOPS = [465, 591, 592, 531].map((s) => ({ sheet: s, tid: idOfSheet(s) }));
+  const DoorMod = await import('/src/world/Door.ts');
   const enemyCount = (vid) => (g.entities.enemies ?? []).filter((e) => !e.dead && e.vanillaId === vid).length;
   const dropCount = (vid) => (g.entities.drops ?? []).filter((d) => !d.dead
     && String(items.ITEM_DEFS[d.itemId]?.key ?? '').startsWith(`vi_${vid}_`)).length;
@@ -196,6 +209,122 @@ const out = await page.evaluate(async () => {
     res.edgeOutsideWiped = { residue: countIn(HIVES, 5, 10, ey - 4, ey + 1) };
   }
 
+  // ⑩-⑭ 八批①：389/388 高门幸存链（CheckTallGate WorldGen.cs:52111——完整性+顶/底
+  //   双行 SolidTile :52292-52305;旧 'furniture' kind=底行∨墙伪支撑,388 solid 早退无链）。
+  //   vanilla-faithful 几何（同 _decor-place.mjs 389 positive）：地面 F + 天花 F-6
+  //   （恰 5 格净空 F-5..F-1,双锚）,门列 x0+5。帧双约定分测：自放=dy*18（18px 步进）
+  //   /导入=vanilla heights+padding 步进（0/20/38/56/74）——行解码两套同值,绝对帧
+  //   比对按序列匹配,任一套都不得误杀（⑭）。
+  const tgSetup = (tid, vanillaFrames = false) => {
+    clearBox();
+    row(x0 + 4, F, 3, STONE);              // 底锚行
+    row(x0 + 4, F - 6, 3, STONE);          // 顶锚行（净空恰 5）
+    const FYS = vanillaFrames ? [0, 20, 38, 56, 74] : [0, 18, 36, 54, 72];
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(x0 + 5, F - 5 + dy, tid, 0, FYS[dy]);
+  };
+  tgSetup(TALL_O);
+  {
+    const preDrop = dropCount(3240);
+    g['breakTile'].call(g, x0 + 5, F - 6);   // 挖顶锚（天花恰在门顶上一格）
+    res.tgOpenTopDig = {
+      residue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2),
+      drop3240: dropCount(3240) - preDrop,   // CheckTallGate :52156-52161 两态恒 3240
+    };
+  }
+  tgSetup(TALL_O);
+  {
+    g['breakTile'].call(g, x0 + 5, F - 3);   // 挖中部格 → object 锚点支整件清（对照）
+    res.tgMidDigObject = { residue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2) };
+  }
+  tgSetup(TALL_O);
+  {
+    st.setTileSilent(x0 + 4, F - 3, STONE, 0, 0);   // 侧旁格（非锚,先放后挖）
+    g['breakTile'].call(g, x0 + 4, F - 3);
+    res.tgSideDisturb = { residue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2) };
+  }
+  tgSetup(TALL_C);
+  {
+    // 388 闭态：新链放置/切换不回归（ShiftTallGate Door.ts:131 逐格 setTile 半写态
+    // ——'tallgate' case 对 388/389 配对态格放行=原版「写完再评估」等价,见 case 注）
+    const opened = DoorMod.shiftTallGate(st, x0 + 5, F - 5, false);
+    const openCount = countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2);
+    const closed = opened ? DoorMod.shiftTallGate(st, opened[0], opened[1], true) : null;
+    const closeCount = countIn(TALL_C, x0 + 3, x0 + 8, F - 7, F + 2);
+    if (closed) g['breakTile'].call(g, x0 + 5, F - 6);   // 闭态顶锚挖 → 整件清
+    res.tgClosedToggleDig = {
+      opened: !!opened, closed: !!closed, openCount, closeCount,
+      residue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2) + countIn(TALL_C, x0 + 3, x0 + 8, F - 7, F + 2),
+    };
+  }
+  tgSetup(TALL_O, true);
+  {
+    // ⑭ 导入帧约定（0/20/38/56/74）不得误杀：侧扰动幸存 + 顶锚挖整件清
+    st.setTileSilent(x0 + 4, F - 3, STONE, 0, 0);
+    g['breakTile'].call(g, x0 + 4, F - 3);
+    const sideResidue = countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2);
+    g['breakTile'].call(g, x0 + 5, F - 6);
+    res.tgVanillaFrames = {
+      sideResidue,
+      topDigResidue: countIn(TALL_O, x0 + 3, x0 + 8, F - 7, F + 2),
+    };
+  }
+
+  // ⑮-⑰ 八批②：440 宝石锁 → 'wallhang'（Check3x3Wall :44690 逐格 wall>0+完整性,
+  //   派发组 :86765-86767 case 240/440）。style 带基 54（style1）合成顺带覆盖帧基解码。
+  const glSetup = () => {
+    clearBox();
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      st.wall[st.idx(x0 + 4 + dx, F - 4 + dy)] = 1;                       // 背墙 3×3
+      st.setTileSilent(x0 + 4 + dx, F - 4 + dy, GLOCK, 54 + dx * 18, dy * 18);   // style1 带基
+    }
+  };
+  glSetup();
+  {
+    st.setTileSilent(x0 + 3, F - 3, STONE, 0, 0);   // 侧旁格（非锚）
+    g['breakTile'].call(g, x0 + 3, F - 3);
+    res.glStyleSurvive = { residue: countIn(GLOCK, x0 + 2, x0 + 9, F - 6, F + 1) };
+  }
+  glSetup();
+  {
+    st.setWall(x0 + 5, F - 3, 0);   // 清一角墙（setWall 发监听 → wallhang 逐格 wall 门）
+    res.glWallDig = {
+      residue: countIn(GLOCK, x0 + 2, x0 + 9, F - 6, F + 1),
+      drops: (g.entities.drops ?? []).filter((d) => !d.dead
+        && String(items.ITEM_DEFS[d.itemId]?.key ?? '').match(/vi_364[4-9]_|vi_3650_/)).length,
+    };
+  }
+  glSetup();
+  {
+    // 帧混格判坏（:44724-44725 逐格 frameX 比对）：右下格帧改异 style 基（54→108 系）
+    st.frameX[st.idx(x0 + 6, F - 2)] = 108 + 2 * 18;
+    st.setTileSilent(x0 + 5, F - 1, STONE, 0, 0);   // 门件下方邻格（非锚）触发扫
+    g['breakTile'].call(g, x0 + 5, F - 1);
+    res.glFrameMixKilled = { residue: countIn(GLOCK, x0 + 2, x0 + 9, F - 6, F + 1) };
+  }
+
+  // ⑱ 八批③：hangtop 族（465/591/592/531）右列派发回归哨兵（六批备案④——mod36
+  //   列解码修复后的右列挖锚必须整件清 + 右列旁扰动必须幸存;style 带基 36 合成）
+  res.hangtopRightCol = [];
+  res.hangtopIdsOk = HANGTOPS.every((h) => h.tid > 0);
+  for (const ht of HANGTOPS) {
+    if (ht.tid <= 0) { res.hangtopRightCol.push({ sheet: ht.sheet, missing: true }); continue; }
+    const htSetup = () => {
+      clearBox();
+      row(x0 + 4, F, 4, STONE);            // 地面（垫底,族无底锚）
+      row(x0 + 4, F - 4, 4, STONE);        // 天花锚行（两列上各 1 格,AnchorTop cnt2 start0）
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 3; dy++)
+        st.setTileSilent(x0 + 5 + dx, F - 3 + dy, ht.tid, 36 + dx * 18, dy * 18);   // style1 带基
+    };
+    htSetup();
+    g['breakTile'].call(g, x0 + 7, F - 4);   // 右列旁非锚格 → 必须幸存（右列派发不得误杀）
+    const sideCtrl = countIn(ht.tid, x0 + 3, x0 + 9, F - 5, F + 1);
+    htSetup();
+    g['breakTile'].call(g, x0 + 6, F - 4);   // 挖【右列】上方锚格 → 整件清除
+    res.hangtopRightCol.push({
+      sheet: ht.sheet, rightDig: countIn(ht.tid, x0 + 3, x0 + 9, F - 5, F + 1), sideCtrl,
+    });
+  }
+
   res.verdict = res.hiveCeiling.residue === 0 && res.hiveCeiling.bees > 0 && res.hiveCeiling.ceilRightSurvives
     && res.hiveDiagControl.residue === 4
     && res.chandelierHook.residue === 0 && res.chandelierHook.drop106 > 0
@@ -206,7 +335,20 @@ const out = await page.evaluate(async () => {
     && res.potReentryGuard.residue === 0 && res.potReentryGuard.innerCalls === 1
     && res.potReentryGuard.lootCalls === 1
     && res.edgeGatedSurvives.residue === 4 && res.edgeGatedSurvives.bees === 0
-    && res.edgeOutsideWiped.residue === 0 ? 'PASS' : 'FAIL';
+    && res.edgeOutsideWiped.residue === 0
+    // —— 八批（幸存链缺口）——
+    && res.tgOpenTopDig.residue === 0 && res.tgOpenTopDig.drop3240 > 0
+    && res.tgMidDigObject.residue === 0
+    && res.tgSideDisturb.residue === 5
+    && res.tgClosedToggleDig.opened && res.tgClosedToggleDig.closed
+    && res.tgClosedToggleDig.openCount === 5 && res.tgClosedToggleDig.closeCount === 5
+    && res.tgClosedToggleDig.residue === 0
+    && res.tgVanillaFrames.sideResidue === 5 && res.tgVanillaFrames.topDigResidue === 0
+    && res.glStyleSurvive.residue === 9
+    && res.glWallDig.residue === 0 && res.glWallDig.drops === 1
+    && res.glFrameMixKilled.residue === 0
+    && res.hangtopIdsOk
+    && res.hangtopRightCol.every((r) => r.rightDig === 0 && r.sideCtrl === 6) ? 'PASS' : 'FAIL';
   return res;
 });
 fs.writeFileSync('/tmp/decor-sweep.json', JSON.stringify(out));

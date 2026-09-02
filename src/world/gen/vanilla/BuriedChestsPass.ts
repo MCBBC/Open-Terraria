@@ -251,6 +251,13 @@ Object.assign(PRE_CLASS, {
   950: 'acc', 987: 'acc', 1579: 'acc', 4055: 'acc', 4056: 'acc',
   211: 'acc', 212: 'acc', 3017: 'acc', 863: 'acc', 4404: 'acc', 187: 'acc',
   848: 'acc', 857: 'acc', 159: 'acc', 158: 'acc', 2219: 'acc',
+  // ★IIIII114b（carebears #40 定罪）：934 飞毯=accessory&&!vanity（Item.cs:12174-12180
+  //  accessory=true 无 vanity，CanGetPrefixes 排除表无 934）→ IsAPrefixableAccessory
+  //  恒真 → 可前缀化【耗掷】。此前误标不可前缀化（旧注释把 934 当「法老面罩」——
+  //  848 才是法老面具）⇒ 金字塔 934 主件箱少 1-2 掷，房内 num26/堆/罐/之字隧
+  //  全流相移（x86 联合约束解算：prefix Next(4)+Next(19) 恰 +2，门环/语音/堆位
+  //  三重联合验证，/tmp/iii151-out/raws-win.txt）。
+  934: 'acc',
   // ★TTTT 批：4281 雀杖（PrefixLegacy.ItemSets.Summon 集 cs:75 含 4281）——
   //   活树密室 1/3 主件（cs:29458 Next(3)==0）。stats：damage 7/ua 36/mana 0/
   //   kb 4（Item.cs:36817-36836）。池内四失败门命中前缀：89/91（dmg .95：7×.95=6.65
@@ -1009,6 +1016,27 @@ function placeBuriedChestInner(
       }
       return false;
     })();
+  // ★IIIII160（2026-09-02）沙漠池门序台账钩（dormant，__swAbRow 未挂载零开销）：
+  //   R=落定行三门+±15 扫描逐门判定 / D=沙漠池 fire / ICE=冰池 fire——字段序与
+  //   x86 rig JJHook.AbRow/AbDes/AbIce(SW_ABLOG2) 逐字段对齐,双侧 per-iter 对拍用。
+  const __abRow = (globalThis as { __swAbRow?: (rec: string) => void }).__swAbRow;
+  if (__abRow) {
+    const sheetOf = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? t;
+    const wsG = gy >= gs.worldSurface ? 1 : 0;
+    const xbG = i >= st.w * 0.15 && i <= st.w * 0.85 ? 1 : 0;
+    const rockG = gs.seedFlags.remix && gy > gs.rockLevel ? 0 : 1;
+    let scanG = 0;
+    if (wsG && xbG) {
+      for (let x = i - 15; x <= i + 15 && !scanG; x++) {
+        for (let y = gy - 15; y <= gy + 15; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const wl = st.wall[st.idx(x, y)];
+          if (wl === 187 || wl === 216) { scanG = 1; break; }
+        }
+      }
+    }
+    __abRow(`R|${i}|${gy}|${gy}|${style ?? -1}|${mainId}|${sheetOf(tile)}|${argStyle ?? -1}|0|0|${tBelow >= 0 ? sheetOf(tBelow) : -1}|${wsG}|${xbG}|${rockG}|${scanG}`);
+  }
   if ((tile === CHEST2 && argStyle === 10) || inUd) {
     tile = CHEST2;
     style = 10;
@@ -1021,6 +1049,7 @@ function placeBuriedChestInner(
         ? [4061, 4062, 4276][rng.int(0, 2)]
         : [4056, 4055, 4262, 4263][rng.int(0, 3)];
     }
+    __abRow?.(`D|${i}|${gy}|${gy}|10|${mainId}|${deep ? 1 : 0}|${mainId}`);
     // ★IIIII99e（cs:36477-36479）：沙漠池后 FTW 恒掷 Next(num)，命中主件改 52
     if (ftwChestDie() === 0) ftwTake52();
   }
@@ -1068,6 +1097,7 @@ function placeBuriedChestInner(
         if (rng.int(0, 49) === 0) mainId = MAIN_FALLBACK_669; // 1/50 主物门 cs:36130-36133（1457 删）
       }
     }
+    __abRow?.(`ICE|${i}|${gy}|${gy}|11|${mainId}|${mainId}`);
   }
   // ---- 地牢主件门 flag4（cs:36526-36550）：tile21 && (chestStyle==10 ||
   //   num10∈{211,212,213,753})。生成期 CurrentDungeonGenVars.GeneratingDungeon=false

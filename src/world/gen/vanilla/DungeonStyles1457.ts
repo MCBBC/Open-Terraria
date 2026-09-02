@@ -233,6 +233,24 @@ DungeonGenerationStyles.Cavern.SubStyles = [DungeonGenerationStyles.Shimmer, Dun
 DungeonGenerationStyles.Hallow.SubStyles = [DungeonGenerationStyles.Crystal];
 DungeonGenerationStyles.Jungle.SubStyles = [DungeonGenerationStyles.Beehive, DungeonGenerationStyles.LivingMahogany];
 
+/** ★IIIII118：各样式**真实** PlatformItemTypes（DungeonGenerationStyles.cs 逐档;item id 域）。
+ *  ⚠ DungeonStyleData.PlatformItemTypes 字段被【窗台】项占用（S9 窗面消费,勿动）——
+ *  本表为 PD 平台闩锁/Bookshelves GetPlatformStyle 的正确数据源。
+ *  Default(0)=int[0] 空表（DungeonCrawler.cs:699）⇒ 恒 -1 不掷。 */
+export const STYLE_PLAT_ITEM_IDS: Record<number, number[]> = {
+  1: [94, 4416], 2: [3908, 5812], 3: [4311], 4: [631, 3957, 5770], 5: [913, 3907, 5791],
+  6: [633, 3903], 7: [2549], 8: [632], 9: [2630], 10: [3906], 11: [5562], 12: [4416],
+  13: [2629], 14: [2629], 15: [3903],
+};
+/** 平台 item id → DerivedPlacementDetails.tileStyle（Item.cs placeStyle/DefaultToPlaceableTile(19,n);
+ *  非 tile 项（如 94）= 默认 0;2629/2630 走 placeStyle=21+type-2627 公式 → 23/24;
+ *  3903-3908 族=30+type-3903）。 */
+export const PLAT_ITEM_STYLE: Record<number, number> = {
+  94: 0, 4416: 43, 3908: 35, 4311: 42, 631: 1, 913: 5, 633: 3, 2549: 18,
+  632: 2, 2630: 24, 3906: 33, 5562: 50, 2629: 23,
+  3903: 30, 3907: 34, 3957: 37, 5770: 55, 5791: 56, 5812: 57,
+};
+
 /** DungeonGenerationStyles.GetCurrentDungeonStyle（:680-719）：Default 档工厂——
  *  砖族取自 CurrentDungeonGenVars（SetupDungeonGenVarVariables :56-108 掷的主题）。
  *  全家具 item 数组 = int[0]（★这是"变体墙在 1457 返回 Default 后各消费点零掷差"

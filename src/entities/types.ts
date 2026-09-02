@@ -31,8 +31,15 @@ export interface GameHooks {
    *  近似（本地=房主槽 0 最先，原版平距严格 < 比较取先扫描者） */
   candidatePlayers?(): import('./Player').Player[];
   /** 视口世界像素（Main.sWidth/sHeight 等价 = 画布尺寸÷缩放）——CanAnyPlayerSeeThisTile
-   *  （NPC.cs:43877-43890 屏盒求交）等消费源。缺省 = 1920×1080 静态退档（单机测试 mock 兼容） */
+   *  （NPC.cs:43877-43890 屏盒求交）等消费源。缺省 = 1920×1080 静态退档（单机测试 mock 兼容）。
+   *  ★MINOR-6（2026-09-02）：CanAnyPlayerSeeThisTile 已画布无关化（原版常量 1920×1200,
+   *  NPC.cs:6791-6793）,本钩子保留给其余真实视口消费点 */
   screenWorldSize?(): { w: number; h: number };
+  /** NPC.noSpawnCycle（MINOR-2,NPC.cs:6186/:78797/:80991-80995）：本帧任一怪经
+   *  CheckActive 消散（Enemy.runDespawnFx 置位）→ 同帧刷怪周期跳过一次
+   *  （Game.trySpawnEnemy 入口消费+清零）。模拟宿主（SimHost 等）不置位=无消散,
+   *  消费端读假值零回归 */
+  noSpawnCycleThisFrame?: boolean;
   /** MP 掉落结算玩家表（NPCLoot :79634 closestPlayer / per-client 族的数据源；
    *  2026-08-20 per-client 批）。Game 实现 = [本地(slot=mySlot) + 远端代理
    *  （msg13 位 + msg16 尾段 hp/mana/luck 镜像）]；SimHost 实现 = room.onlineClients
@@ -163,7 +170,9 @@ export interface GameHooks {
     x: number, y: number, color: string, count: number, speed?: number,
     opts?: { life?: number; damp?: number; grav?: number; size?: number; vx?: number; vy?: number;
       /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道——湖面星闪
-       *  (move/60)/TTL、枭首者残影 vel/60 等双轴加速型 1:1 用；缺省 0） */
+       *  (move/60)/TTL、枭首者残影 vel/60 等双轴加速型 1:1 用；缺省 0）。
+       *  ★T2 接线待办：orchestraFx princess/stardust 两站接线待 F 完成后一行补
+       *  （princessWeapon/stardustPunch sparkle 原版 AccelerationPerFrame=−vector/60） */
       ax?: number; ay?: number;
       /** 寿命不抖动档（编排粒子 TTL 耦合参数——加速度按 TTL 折算时必须同值,
        *  否则终速/位移积分漂移；缺省走 base×(0.6+0.4r) 抖动） */

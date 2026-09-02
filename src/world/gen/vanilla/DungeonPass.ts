@@ -17,19 +17,20 @@ import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
+import { mayanTrap } from './TemplePass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
 // （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
-import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle, tileIsInStyle, DungeonGenerationStyles } from './DungeonStyles1457';
+import { dualDungeonState, dualDungeonTrapWindow, createPotentialDungeonBounds, wallIsInStyle, tileIsInStyle, DungeonGenerationStyles, STYLE_PLAT_ITEM_IDS, PLAT_ITEM_STYLE } from './DungeonStyles1457';
 import type { PotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII93b 双座 pb 面
 // ★IIIII105b：风格家具 item 表（ItemID.Sets.DerivedPlacementDetails 提取域）
-import { ITEM_PLACE, STYLE_LIGHTCHEST_TABLES } from './DungeonStyleItems';   // ★105c 灯/箱/生物箱表
+import { ITEM_PLACE, STYLE_LIGHTCHEST_TABLES, STYLE_DOOR_ITEM_TABLES, DOOR_ITEM_STYLE } from './DungeonStyleItems';   // ★105c 灯/箱/生物箱表 ★111c PD 门表
 // ★LLL 批（2026-08-25）：placeTrap0 补 noTraps 巨石非实心窗（WorldGen.SetBoulderSolidity
 //   经 GenSolid 全局表翻转,dgSolid/genSolidType 即见）——与 TrapsPass 同源单实现。
 import { setBoulderSolidity, placePlate } from './TrapsPass';
 // ★IIIII59：双地牢家族二件套（DungeonDropTrap/DungeonTileClump，1457=1458）——
 // 结构位接线见 dgEarlyDualFamilies；现行一切链形参表下纯惰性零掷。
 import { dropTrap as deDropTrap, tileClump as deTileClump } from './DungeonEarlyFeatures';
-import { runDualDungeonLayout, dualRuggedEarlyFeatures, WINDOW_PLAT_ITEM_STYLE } from './DungeonDualLayout';   // ★IIIII92 双地牢布局域 ★109b 早特征面
+import { runDualDungeonLayout, dualRuggedEarlyFeatures, WINDOW_PLAT_ITEM_STYLE, i138EarlyGate } from './DungeonDualLayout';   // ★IIIII92 双地牢布局域 ★109b 早特征面 ★164 门单源化
 import { registerChest, findLiveChest } from '../ChestRegistry';   // ★IIII102c 洞数组 sink
 import type { SparseChestSink } from '../ChestRegistry';
 import { dualSnakes } from './DitherSnakePass';
@@ -282,13 +283,21 @@ interface DRoom {
   /** ★IIIII105c：房 StyleData.Style（GenerateDungeonRegularChest/BiomeChests_DualDungeons 消费）。
    *  普通世界未标注=0 → legacy Default 支逐位同。 */
   st?: number;
+  /** ★IIIII111c：PD 面载荷——bio=BiomeDungeonRoom（fluff 3→0+SkipOther/SkipSpace=true）；
+   *  forceDP=ForceStyleForDoorsAndPlatforms（LivingTree，DC.cs:646）。
+   *  leg=LegacyDungeonRoom 实例（G 面受理窗支键,Rooms/LegacyDungeonRoom.cs:78-92 覆写；
+   *  未标注（dgRoom 直造/climb 插入房）⇒ C# 同为 LegacyDungeonRoom=true）。 */
+  bio?: boolean; forceDP?: boolean; leg?: boolean;
 }
 interface DHall {
   seed: number; generated: boolean; forceX: boolean; isEntrance: boolean;
   bounds: DBnd; sx: number; sy: number; ex: number; ey: number;
   sdx: number; sdy: number; edx: number; edy: number;
 }
-interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: boolean; skipSpace: boolean; clear: boolean; fluff: number; }
+interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: boolean; skipSpace: boolean; clear: boolean; fluff: number;
+  /** ★IIIII111c：PD 面 OverrideStyle（≥0 才覆盖 writer 的 Next(3) 档位）；gsty=
+   *  OverrideGenerationStyle（writer 的砖/墙换风格,DU.cs:97-104）。 */
+  os?: number; gsty?: import('./DungeonStyles1457').DungeonStyleData; }
 /** hf = OverrideHeightFluff（DungeonPlatformData.cs:14）：房间候选=3、走廊/入口候选缺省=5。
  *  XX 批（2026-08-18）扩：Tower/Dome 入口候选带 ForcePlacement + 置物概率
  *  （pots/bottles/books/candles——IsAShelf=任一>0（DungeonPlatformData.cs:34-43
@@ -298,7 +307,9 @@ interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: b
  *  Next(50)（DU:432-435 默认支 waterbolt 门）。 */
 interface DPlat { x: number; y: number; hall: boolean; hf: number;
   force?: boolean; pots?: number; bottles?: number; books?: number; candles?: number;
-  nowb?: boolean; }
+  nowb?: boolean;
+  /** ★IIIII111c：PD 面 OverrideStyle（GetPlatformStyle 掷,≥0 覆盖座平台档位）。 */
+  os?: number; }
 
 /** ★IIIII93b：单座地牢实例参数束（dgSetup 产物 → oneDungeon 消费）。
  *  对应 vanilla GenVars.dungeonGenVars[k]（genvars 面）+ DungeonData[k]（表/预计算面）
@@ -3130,27 +3141,146 @@ const snap: SnapFn = (name) => {
   }
 
   // ============ 门/平台候选 ============
-  // CalculatePlatformsAndDoorsOnEdgesOfRoom（DungeonUtils.cs:91-224，fluff=3）
+  // CalculatePlatformsAndDoorsOnEdgesOfRoom（DungeonUtils.cs:91-224，房间 fluff=3/砖房 0）
+  // ★IIIII111c 掷位落地（PD −765 主刀）：①平台闩锁 OverrideStyle=GetPlatformStyle
+  //   （DU.cs:150-158——发现 Inactive 格才掷、空表不掷）②门样式 num5=DoorItemTypes[
+  //   Next(len)]（DU.cs:131 每房恰一次；Style==0∨空表不掷）③非 ForceStyle 房按房心格
+  //   三级解析（墙→活性砖→genVars.dungeonStyle，DU.cs:69-84）。
+  const PD_STUB = { Style: 0, PlatformItemTypes: [] as number[] };   // gfStyles 未装配面（普通世界恒零掷）
+  type PDStyle = import('./DungeonStyles1457').DungeonStyleData | typeof PD_STUB;
+  const __pdCnt: Record<string, number> = (globalThis as { __pdCnt?: Record<string, number> }).__pdCnt ??= {};
+  const __pdTag = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I152_PD === '1';
+  // ★IIIII118：段内仪具（SW_I158_PDC 门控,零掷）——PD 收集流 PDC-*/D 门 REJ-PLC/B 段 attempt 流 BATT-*。
+  //   镜像 x86 rig（/tmp/i158-rig-src）同名 marks；console.log 线由采集器按前缀收（|mr= 自动附）。
+  const I158PDC = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I158_PDC === '1';
+  const i158Log = (ln: string): void => { if (I158PDC) console.log(ln); };
+  const pdGetPlatformStyle = (sty: PDStyle, tag = 'hp'): number => {
+    // ⚠ C# GetCurrentDungeonStyle（DC.cs:699）的 Default style0 对象
+    //  PlatformItemTypes=new int[0]（空表,恒 -1 不掷）——JS 的 DungeonStyleData.
+    //  PlatformItemTypes 被【窗台】WindowPlatformItemTypes([1386]族)占用（S9 窗面消费,
+    //  勿动),故 PD 面在此按 Style===0 早退等效空表。
+    if (sty.Style === 0) return -1;
+    // ★IIIII118：改用真实 PlatformItemTypes（item id 域,STYLE_PLAT_ITEM_IDS）——
+    //   sty.PlatformItemTypes 字段被窗台项占用,曾致 biome 样式 os 值全错（x86 50 vs JS 0）。
+    const tbl = STYLE_PLAT_ITEM_IDS[sty.Style];
+    if (!tbl || tbl.length === 0) return -1;
+    const it = tbl[rn(tbl.length)]!;
+    if (__pdTag) __pdCnt[tag] = (__pdCnt[tag] ?? 0) + 1;
+    return PLAT_ITEM_STYLE[it] ?? -1;                       // DerivedPlacementDetails.tileStyle
+  };
+  const pdDoorNum5 = (sty: PDStyle, tag = 'hd'): number => {
+    const tbl = STYLE_DOOR_ITEM_TABLES[sty.Style];
+    if (tbl === undefined || tbl === null) return -1;       // DoorItemTypes==null 早退（本域无此档）
+    if (sty.Style === 0 || tbl.length === 0) return -1;     // flag ∨ len==0 → 不掷（DU.cs:131）
+    const it = tbl[rn(tbl.length)]!;
+    if (__pdTag) __pdCnt[tag === 'rp' ? 'rd' : 'hd'] = (__pdCnt[tag === 'rp' ? 'rd' : 'hd'] ?? 0) + 1;
+    return DOOR_ITEM_STYLE[it] ?? -1;
+  };
+  /** 房心/廊点三级解析（DU.cs:69-84）：GetStyleForWall → GetStyleForTile →
+   *  genVars.dungeonStyle。返回 null=InWorld(center,5) 失败=整房早退零掷。 */
+  const pdResolveStyle = (cx: number, cy: number, forceSty: import('./DungeonStyles1457').DungeonStyleData | null): PDStyle | null => {
+    if (forceSty) return forceSty;
+    if (!inW(cx, cy, 5)) return null;
+    const qi = st.idx(cx, cy);
+    const wl = st.wall[qi];
+    let sty = gfStyles.length > 0 ? gfStyleForWall(wl) : null;
+    if (sty === null && (st.flags[qi] & 1) !== 0) {
+      const sheet = TILE_DEFS[st.type[qi]]?.vanilla?.sheet ?? -1;
+      if (sheet >= 0) {
+        styLoop: for (const s0 of gfStyles) {
+          if (tileIsInStyle(s0, sheet, false, true)) { sty = s0; break; }
+          if (s0.SubStyles !== undefined && s0.SubStyles.length > 0) {
+            for (const ss of s0.SubStyles) {
+              if (tileIsInStyle(ss, sheet, false, true)) { sty = ss; break styLoop; }
+            }
+          }
+        }
+      }
+    }
+    return sty ?? (gfDefaultStyle ?? (gfStyles.length > 0 ? gfStyles[gfStyles.length - 1]! : PD_STUB));
+  };
+  /** 走廊单点分派（DU.cs:211-269）：|dirY|<=0.1 门支（DoorItemTypes!=null 恒入,
+   *  num5 非 Style0∧非空表才掷）否则平台支（GetPlatformStyle 一掷）。 */
+  const pdHallPoint = (px: number, py: number, dirY: number, forceSty: import('./DungeonStyles1457').DungeonStyleData | null): void => {
+    const sty = pdResolveStyle(px, py, forceSty);
+    if (__pdTag) {
+      const c2 = __pdCnt;
+      c2.pts = (c2.pts ?? 0) + 1;
+      c2['sty' + (sty === null ? 'X' : sty.Style)] = (c2['sty' + (sty === null ? 'X' : sty.Style)] ?? 0) + 1;
+    }
+    if (sty === null) return;
+    i158Log(`PDC-H s=${instIdx + 1} x=${px} y=${py} dy=${dirY} sty=${sty.Style}`);
+    if (Math.abs(dirY) <= 0.1) {
+      const num5 = pdDoorNum5(sty, 'hp');
+      const d: DDoor = { x: px, y: py, dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 10, gsty: sty.Style === 0 ? undefined : (sty as import('./DungeonStyles1457').DungeonStyleData) };
+      if (num5 >= 0) d.os = num5;
+      doorData.push(d);
+      i158Log(`PDC-DH s=${instIdx + 1} x=${px} y=${py} os=${num5}`);
+    } else {
+      const os = pdGetPlatformStyle(sty, 'hp');
+      const p: DPlat = { x: px, y: py, hall: true, hf: 5 };
+      if (os >= 0) p.os = os;
+      platData.push(p);
+      i158Log(`PDC-PH s=${instIdx + 1} x=${px} y=${py} os=${os}`);
+    }
+  };
   function roomPlatformsDoors(rm: DRoom): void {
+    // 房心三级解析（ForceStyle 房直接用 settings.StyleData；DU.cs:69-84）
+    // ★IIIII118 定罪：force 查找必须**含 SubStyles**——LivingWood(13)/Beehive(14) 等
+    //   专用房 rm.st 是子样式号，不在 gfStyles 顶表（=[Cavern,Crimson,Jungle,blue]）；
+    //   C# 直传 settings.StyleData 对象无查找 ⇒ 曾 find 落空回退 Default(0)，
+    //   房心样式解析/门表/平台表全错（LivingWood 房 os/门表位移,PD 收集流首差）。
+    const cx = Math.trunc((rm.inner.L + rm.inner.R) / 2), cy = Math.trunc((rm.inner.T + rm.inner.B) / 2);
+    const gfForceSty = rm.forceDP === true ? (() => {
+      for (const s0 of gfStyles) {
+        if (s0.Style === rm.st) return s0;
+        for (const ss of s0.SubStyles ?? []) if (ss.Style === rm.st) return ss;
+      }
+      return gfDefaultStyle ?? null;
+    })() : null;
+    const sty = pdResolveStyle(cx, cy, gfForceSty);
+    if (sty === null) return;
+    // 平台闩锁（顶先于底,x 扫描序内先到先掷,DU.cs:99-125）
     const num = Math.max(5, rm.inner.L), num2 = Math.min(w - 5, rm.inner.R);
     const num3 = Math.max(5, rm.inner.T), num4 = Math.min(h - 5, rm.inner.B);
+    i158Log(`PDC-R s=${instIdx + 1} L=${num} R=${num2} T=${num3} B=${num4} sty=${sty.Style}`);
     let f2 = false, f3 = false;
     for (let x = num; x <= num2; x++) {
       if (!f2 && inW(x, num3 - 1, 0) && actAt(x, num3 - 1) === 0) {
-        platData.push({ x, y: num3 - 1, hall: false, hf: 3 }); f2 = true;
+        const p: DPlat = { x, y: num3 - 1, hall: false, hf: rm.bio === true ? 0 : 3 };
+        const os = pdGetPlatformStyle(sty, 'rp');
+        if (os >= 0) p.os = os;
+        platData.push(p); f2 = true;
+        i158Log(`PDC-P s=${instIdx + 1} x=${p.x} y=${p.y} os=${os}`);
       }
       if (!f3 && inW(x, num4 + 1, 0) && actAt(x, num4 + 1) === 0) {
-        platData.push({ x, y: num4 + 1, hall: false, hf: 3 }); f3 = true;
+        const p: DPlat = { x, y: num4 + 1, hall: false, hf: rm.bio === true ? 0 : 3 };
+        const os = pdGetPlatformStyle(sty, 'rp');
+        if (os >= 0) p.os = os;
+        platData.push(p); f3 = true;
+        i158Log(`PDC-P s=${instIdx + 1} x=${p.x} y=${p.y} os=${os}`);
       }
       if (f2 && f3) break;
     }
+    // 门样式掷（每房恰一次,DU.cs:129-131）+ 门闩锁（DU.cs:134-176）
+    const num5 = pdDoorNum5(sty, 'rp');
+    // biome 房 doorFluff=0 ⇒ flag6=true ⇒ SkipOtherDoorsCheck/SkipSpaceCheck=true
+    // （BiomeDungeonRoom.cs:46 + DU.cs:105/:135）
+    const flag6 = rm.bio === true;
+    const styObj = sty.Style === 0 ? undefined : (sty as import('./DungeonStyles1457').DungeonStyleData);
     let f4 = false, f5 = false;
     for (let y = num3; y <= num4; y++) {
       if (!f4 && inW(num - 1, y, 0) && actAt(num - 1, y) === 0) {
-        doorData.push({ x: num - 1, y, dir: -1, hall: false, skipOther: false, skipSpace: false, clear: true, fluff: 3 }); f4 = true;
+        const d: DDoor = { x: num - 1, y, dir: -1, hall: false, skipOther: flag6, skipSpace: flag6, clear: true, fluff: rm.bio === true ? 0 : 3, gsty: styObj };
+        if (num5 >= 0) d.os = num5;
+        doorData.push(d); f4 = true;
+        i158Log(`PDC-D s=${instIdx + 1} x=${d.x} y=${d.y} dir=${d.dir} os=${num5}`);
       }
       if (!f5 && inW(num2 + 1, y, 0) && actAt(num2 + 1, y) === 0) {
-        doorData.push({ x: num2 + 1, y, dir: 1, hall: false, skipOther: false, skipSpace: false, clear: true, fluff: 3 }); f5 = true;
+        const d: DDoor = { x: num2 + 1, y, dir: 1, hall: false, skipOther: flag6, skipSpace: flag6, clear: true, fluff: rm.bio === true ? 0 : 3, gsty: styObj };
+        if (num5 >= 0) d.os = num5;
+        doorData.push(d); f5 = true;
+        i158Log(`PDC-D s=${instIdx + 1} x=${d.x} y=${d.y} dir=${d.dir} os=${num5}`);
       }
       if (f4 && f5) break;
     }
@@ -3158,12 +3288,11 @@ const snap: SnapFn = (name) => {
   // LegacyDungeonHall.CalculatePlatformsAndDoors（:26-34；LegacyEntrance 覆写为空）
   // ★2026-08-16 审计：走廊门无 OverrideWidthFluff → DungeonGlobalDoors.cs:58 num4=10
   //   （20 列扫描窗）；曾写 0 = 只扫门位单列。房间门才覆写 3。
+  // ★IIIII111c：掷位同 roomPlatformsDoors（pdHallPoint 三级解析+闩锁掷）。
   function hallPlatformsDoors(hl: DHall): void {
     if (hl.isEntrance) return;
-    if (Math.abs(hl.sdy) <= 0.1) doorData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 10 });
-    else platData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), hall: true, hf: 5 });
-    if (Math.abs(hl.edy) <= 0.1) doorData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 10 });
-    else platData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), hall: true, hf: 5 });
+    pdHallPoint(Math.trunc(hl.sx), Math.trunc(hl.sy), hl.sdy, null);
+    pdHallPoint(Math.trunc(hl.ex), Math.trunc(hl.ey), hl.edy, null);
   }
   // DungeonData.CanGenerateFeatureAt（:132-166）。feat: 0=常规 1=BiomeChests 2=Paintings/WallVariants
   function featOK(x: number, y: number, feat: number): boolean {
@@ -3517,7 +3646,15 @@ const snap: SnapFn = (name) => {
     for (const d of doorData) {
       if (drT) console.log(`DGD-IN x=${d.x} y=${d.y} dir=${d.dir} clear=${d.clear ? 1 : 0} hall=${d.hall ? 1 : 0}`);
       if (!inW(d.x, d.y, 30)) continue;
-      const style = rn(3) === 0 ? doorStyle : 13;
+      // ★IIIII111c：OverrideStyle 消费（DungeonGlobalDoors.cs:50-54——Next(3) 恒掷,
+      //  PD 面 num5 掷值 ≥0 时覆盖档位）；OverrideGenerationStyle 换砖/墙（:40-47）。
+      //  ⚠ BrickTileType=vanilla sheet 域 → 写 st.type 前经 TILE_INTERNAL_BY_SHEET 映射
+      //  （BrickWallType=vanilla 墙域,TileStore 墙即原版 id,直写）。
+      const styD = d.gsty;
+      const dBrick = styD ? (TILE_INTERNAL_BY_SHEET.get(styD.BrickTileType) ?? brick) : brick;
+      const dWall = styD ? styD.BrickWallType : wall;
+      let style = rn(3) === 0 ? doorStyle : 13;
+      if (d.os !== undefined && d.os >= 0) style = d.os;
       const num4 = d.fluff;
       const n5 = Math.max(25, Math.min(w - 25, d.x - num4));
       const n6 = Math.max(25, Math.min(w - 25, Math.max(n5, d.x + num4 - 1)));
@@ -3556,6 +3693,7 @@ const snap: SnapFn = (name) => {
           if (f2) { n8 = x; n7 = n10 - n9; }
         }
       }
+      if (drT && n7 >= 20) console.log(`DGD-REJ x=${d.x} y=${d.y} n7=${n7} n8=${n8}`);
       if (n7 >= 20) continue;
       if (drT) console.log(`DGD-PICK x=${d.x} y=${d.y} n8=${n8} n7=${n7}`);
       let n16 = n8;
@@ -3564,28 +3702,29 @@ const snap: SnapFn = (name) => {
       while (n18 > 0 && actAt(n16, n18) === 0) n18--;
       n17--; n18++;
       for (let y = n18; y < n17 - 2; y++) {
-        chTile(st.idx(n16, y), brick, false);
+        chTile(st.idx(n16, y), dBrick, false);
         for (const off of [-1, -2, 1, 2]) {
           if (inW(n16 + off, y, 0) && actAt(n16 + off, y) !== 0 && canKill(n16 + off, y)) {
             const k = st.idx(n16 + off, y);
             st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
-            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = dWall;   // ClearEverything+wall（DGD:173-190）
           }
         }
       }
       dgPlaceDoor(n16, n17, style);
+      if (drT) console.log(`DGD-PLC x=${d.x} y=${d.y} n16=${n16} n17=${n17} st=${style}`);
       n16--;
       let n20 = n17 - 3;
       while (n20 > 0 && actAt(n16, n20) === 0) n20--;
       let f3 = n17 - n20 < n17 - n18 + 5 && isDT(typAt(n16, n20));
       if (d.clear || f3) {
         for (let y = n17 - 4 - ri(0, 2); y > n20; y--) {
-          if (f3) chTile(st.idx(n16, y), brick, false);
+          if (f3) chTile(st.idx(n16, y), dBrick, false);
           for (const off of [-1, -2]) {
-            if (d.clear || typAt(n16 + off, y) === brick) {
+            if (d.clear || typAt(n16 + off, y) === dBrick) {
               const k = st.idx(n16 + off, y);
               st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
-            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = dWall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -3596,12 +3735,12 @@ const snap: SnapFn = (name) => {
       f3 = n17 - n20 < n17 - n18 + 5 && isDT(typAt(n16, n20));
       if (d.clear || f3) {
         for (let y = n17 - 4 - ri(0, 2); y > n20; y--) {
-          if (f3) chTile(st.idx(n16, y), brick, false);
+          if (f3) chTile(st.idx(n16, y), dBrick, false);
           for (const off of [1, 2]) {
-            if (d.clear || typAt(n16 + off, y) === brick) {
+            if (d.clear || typAt(n16 + off, y) === dBrick) {
               const k = st.idx(n16 + off, y);
               st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
-            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = dWall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -3610,15 +3749,15 @@ const snap: SnapFn = (name) => {
       n16--;
       for (let y = n17 - 8; y < n17; y++) {
         for (const off of [2, 3, -2, -3]) {
-          if (d.clear || typAt(n16 + off, y) === brick) {
+          if (d.clear || typAt(n16 + off, y) === dBrick) {
             const k = st.idx(n16 + off, y);
             st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
-            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = dWall;   // ClearEverything+wall（DGD:173-190）
           }
         }
       }
-      chTile(st.idx(n16 - 1, n17), brick, false);
-      chTile(st.idx(n16 + 1, n17), brick, false);
+      chTile(st.idx(n16 - 1, n17), dBrick, false);
+      chTile(st.idx(n16 + 1, n17), dBrick, false);
     }
   }
   // PlaceTile(10)（WorldGen.cs:59868 门分支）+ PlaceDoor（:31938：成功 3×Next(3)）
@@ -3745,7 +3884,10 @@ const snap: SnapFn = (name) => {
       //   ∈[94,105]（地牢 slab/tile 墙变体族,含 1456 即有的 94-99）→ 平台档强制
       //   54（GOTHIC 平台）。仅帧通道（frameY=18*54）,不改 tile/掷序——四通道金标
       //   零扰动。C# 判定用锚点 (x,y) 原位墙（行搜索前），此处同位。
-      const platStyleEff = (wallAt(x, y) >= 94 && wallAt(x, y) <= 105) ? 54 : platformStyle;
+      // ★IIIII111c：OverrideStyle 消费（DungeonGlobalPlatforms.cs:47-50——PD 面
+      //   GetPlatformStyle 掷值 ≥0 时覆盖座平台档位；54 钳制仍最后生效）。
+      const platBase = (d.os !== undefined && d.os >= 0) ? d.os : platformStyle;
+      const platStyleEff = (wallAt(x, y) >= 94 && wallAt(x, y) <= 105) ? 54 : platBase;
       let row = -1;
       // ★2026-08-16 审计：num3 = OverrideHeightFluff ?? 5（DungeonGlobalPlatforms.cs:44-57）
       //   ——房间候选（roomPlatformsDoors，platformFluff=3）扫 y±3；走廊/入口候选 ±5。
@@ -3878,7 +4020,11 @@ const snap: SnapFn = (name) => {
       if (DG_PRE_REDUCED.has(rolled)) rn(3);
     }
   }
+  // ★IIIII114b2：G 段受理失败原因镜像钩（x86 rig GC-RSN/GC-PC 同格式；dormant——
+  //   仅 dgBasicChests 房环内 + SW_DG_GC=1 时发 log，零掷）
+  let gcRsnOn = false;
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
+    const rsn = gcRsnOn && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
     if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_CHEST_TRACE) {
       const uL = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
       let fh = 0x811c9dc5;
@@ -3888,7 +4034,20 @@ const snap: SnapFn = (name) => {
       console.log(`C|${ix}|${jy}|${mainItem}|${style}|${chestTile === CHEST ? 21 : 467}|${fh.toString(16)}`);
     }
     for (let k = jy; k < h - 10; k++) {
-      if (actAt(ix, k) !== 0 && typAt(ix, k) === TILE_BY_KEY['v_231_larva']) return false;
+      // ★IIIII114b2 定罪（G 混沌·shimmer 群）：C# AddBuriedChest 扫描步首检
+      //   `if (Main.tile[i, k].anyShimmer()) return false;`（WorldGen.cs:36486-36489，
+      //   anyShimmer=liquid>0 且 liquidType==3）——ddual 双座地牢下沿房间整体浸没
+      //   于世界底 shimmer 池，x86 每样本 k=j 即拒 ⇒ 房耗满 1000；JS 曾整缺此检
+      //   ⇒ 扫描穿液到底落箱 ⇒ rm17 型房 JS 首试即成（G 族 −15.8k 主源之一）。
+      //   零掷纯谓词；失败原因仪 GC-RSN why=shimmer 与 rig 同格式。
+      if (st.liquid[st.idx(ix, k)]! > 0 && st.liquidType[st.idx(ix, k)]! === 4) {   // LIQUID_TYPE.SHIMMER（+1 编码）
+        if (rsn) console.log(`GC-RSN rm=${(globalThis as { __swI154GRm?: number }).__swI154GRm ?? -1} i=${ix} j=${jy} k=${k} why=shimmer`);
+        return false;
+      }
+      if (actAt(ix, k) !== 0 && typAt(ix, k) === TILE_BY_KEY['v_231_larva']) {
+        if (rsn) console.log(`GC-RSN rm=${(globalThis as { __swI154GRm?: number }).__swI154GRm ?? -1} i=${ix} j=${jy} k=${k} why=231`);
+        return false;
+      }
       let boulder = false;
       for (let a = ix - 2; a <= ix + 2 && !boulder; a++) {
         for (let b = k - 2; b <= k + 2; b++) {
@@ -3896,6 +4055,7 @@ const snap: SnapFn = (name) => {
           const sheet = TILE_DEFS[typAt(a, b)]?.vanilla?.sheet ?? -1;
           if (actAt(a, b) !== 0 && (sheet === 138 || sheet === 484 || sheet === 664 || sheet === 665
             || (sheet >= 711 && sheet <= 716) || typAt(a, b) === TILE_BY_KEY['v_26_altars'] || typAt(a, b) === TILE_BY_KEY['v_237_lihzahrd_altar'])) {
+            if (rsn) console.log(`GC-RSN rm=${(globalThis as { __swI154GRm?: number }).__swI154GRm ?? -1} i=${ix} j=${jy} k=${k} why=bld tx=${TILE_DEFS[typAt(a, b)]?.vanilla?.sheet ?? -1} at=${a},${b}`);
             boulder = true; break;
           }
         }
@@ -3946,17 +4106,18 @@ const snap: SnapFn = (name) => {
         const sheetB = TILE_DEFS[typAt(px, num7)]?.vanilla?.sheet ?? 0;
         const sheetB2 = TILE_DEFS[typAt(px + 1, num7)]?.vanilla?.sheet ?? 0;
         let ok = !(DG_BOULDERS.has(sheetB) || DG_BOULDERS.has(sheetB2));   // :57832 双腿巨石（type 不读 act）
+        if (!ok && rsn) console.log(`GC-PC x=${px} y=${num7 - 1} why=legs t=${sheetB},${sheetB2}`);
         if (ok) ok = cx >= 5 && cx + 2 <= w - 5 && cy >= 5 && cy + 2 <= h - 5;  // :215 边界 5 垫
         for (let a = 0; ok && a < 2; a++) {                                 // 内盒 :337-375（可覆盖 = tileCut∖{484,654}∪BreakableWhenPlacing）
           for (let b = 0; b < 2; b++) {
             if (actAt(cx + a, cy + b) === 0) continue;
             const t2 = TILE_DEFS[typAt(cx + a, cy + b)]?.vanilla?.sheet ?? 0;
-            if (!((DG_TILE_CUT.has(t2) && t2 !== 484 && t2 !== 654) || DG_BREAK_PLACE.has(t2))) { ok = false; break; }
+            if (!((DG_TILE_CUT.has(t2) && t2 !== 484 && t2 !== 654) || DG_BREAK_PLACE.has(t2))) { ok = false; if (rsn) console.log(`GC-PC x=${px} y=${num7 - 1} why=cp box t=${t2} at=${cx + a},${cy + b}`); break; }
           }
         }
         // 锚腿×2：①SolidTile（tileSolid&&!solidTop&&!noAttach&&!anchorInvalid）；
         // ②平台/solidTop/桌（SolidWithTop|Table 路——本段实测腿全 41/43/44 砖，备案近似）
-        if (ok && !(chestLegOK(px, num7) && chestLegOK(px + 1, num7))) ok = false;
+        if (ok && !(chestLegOK(px, num7) && chestLegOK(px + 1, num7))) { ok = false; if (rsn) console.log(`GC-PC x=${px} y=${num7 - 1} why=cp legs t=${sheetB},${sheetB2}`); }
         // ★cs:37578：PlaceChest 败 = 本调用即 return false——k 循环只在首实心行掷一次
         // （vanilla DgCanPlaceProbe 实证：失败调用恰 1 条 CanPlace 记录）。旧版续扫会在
         // 更深处凭空落箱。
@@ -4231,35 +4392,93 @@ const snap: SnapFn = (name) => {
     DG_JUNGLE_CHEST_COUNT++;
     return result;
   }
+  // ★IIIII118：G 段 dump 闭包提为 oneDungeon 级工厂（原 dgBasicChests 局部）——
+  //   PD_OUT dump（snap('dungeonPD') 处）与 G 段共用同一 dump 通道。
+  const mkGcDumpGrid = (): ((tag: string) => void) | null => {
+    const gcDumpPfx = typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_DG_GC_DUMP : undefined;
+    if (!gcDumpPfx) return null;
+    return (tag: string): void => {
+      const fsw = nodeFs();
+      if (!fsw) return;
+      const n = w * h;
+      const vtyp = new Uint16Array(n), vact = new Uint8Array(n), vhf = new Uint8Array(n), vsl = new Uint8Array(n), vlt = new Uint8Array(n), via = new Uint8Array(n), vwr = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        const ty = st.type[i]!;
+        vtyp[i] = ty === 0 ? 0 : (TILE_DEFS[ty]?.vanilla?.sheet ?? 9999);
+        vact[i] = st.flags[i]! & 1;
+        vhf[i] = st.half[i]!;
+        vsl[i] = st.slope[i]!;
+        vlt[i] = st.liquidType[i]!;
+        via[i] = (st.wire[i]! >>> 5) & 1;                      // inActive 位（WG wire bit5 惯例）
+        vwr[i] = st.wire[i]! & 1;
+      }
+      const wrB = (nm: string, a: Uint8Array | Uint16Array): void => {
+        const buf = Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+        fsw.writeFileSync(`${gcDumpPfx}${tag}.${nm}`, buf);
+      };
+      wrB('typ', vtyp); wrB('act', vact); wrB('wal', st.wall); wrB('half', st.half);
+      wrB('slope', st.slope); wrB('lty', vlt); wrB('inact', via); wrB('wire', vwr);
+    };
+  };
   function dgBasicChests(): void {
     // 对账插桩(dormant)：SW_DG_GC=1 时逐房/逐尝试记 lo/hi/num/num2（G 段流对拍用）
     const gcT = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
+    // ★IIIII114b2：G 段入口/出口 tile 快照（SW_DG_GC_DUMP=<pfx>；与 x86 rig SW_GDUMP
+    //   同通道 typ(vanilla sheet)/act/wal/half/slope/lty/inact/wire，零掷 logging-only）
+    let gcDumpGrid: ((tag: string) => void) | null = null;
+    if (typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_DG_GC_DUMP : undefined) {
+      const g = globalThis as { __swI154GSeat?: number };
+      const seatG = (g.__swI154GSeat ?? 0) + 1;
+      g.__swI154GSeat = seatG;
+      gcDumpGrid = mkGcDumpGrid();
+      gcDumpGrid!(`_js_s${seatG}_G_in`);
+    }
     let gcRm = 0;
     for (const rm of rooms) {
-      // ★IIIII105c：GenerateDungeonRegularChest 座分派（DU.cs:334-385）——room.style
-      //   非 Default（seat1 的 Snow2/Desert3/Hallow6/Temple10）走【case 表 + ChestItemTypes
-      //   表支】,不进 GetDungeonLootAndChestStyle（无 lootStyle 面）。gfStyles 空
-      //   （普通世界）或 st==0 → legacy 支逐位同。
-      if (gfStyles.length > 0 && (rm.st ?? 0) !== 0) {
-        const rmSt = rm.st ?? 0;
-        if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I137_CHESTS) {
-          const GC2 = ((globalThis as unknown as { __dgcF?: Record<string, number> }).__dgcF ??= {});
-          GC2[`st${rmSt}`] = (GC2[`st${rmSt}`] ?? 0) + 1;
-        }
-        // ★IIIII106b：受理窗勘误——provider 房（DRegularRoom/DBiomeRoomBase）走
-        //   DungeonRoom.TryGenerateChestInRoom 基类=InnerBounds 直传 Lerp 端点
-        //   （Rooms/DungeonRoom.cs:259-263）；EndPosition±(int)(Strength*0.4) 只属
-        //   LegacyDungeonRoom 覆写（:78-92,legacy 腿专属）。dual 座的全部非 Default 房
-        //   都是 provider 房 ⇒ 改用 rm.inner——上批 ex±half 曾把受理窗画错（④号件）。
-        const rmI6 = rm.inner;
-        const L = rmI6.L, R = rmI6.R, C = rmI6.T, Bt = rmI6.B;   // InnerBounds Left/Right/Top/Bottom
-        for (let j = 0; j < 1000; j++) {
-          // num=(int)Lerp(L,R,rd)、num2=(int)Lerp(C,B,rd)
-          const num = Math.trunc(L + (R - L) * rd());
-          const num2 = Math.trunc(C + (Bt - C) * rd());
-          if (!featAreaOK(num, num2, 1)) continue;            // data.CanGenerateFeatureInArea(:339)
-          let itemType = -1, chestStyle = 2;
-          let chestTileVid = 21;                              // ushort chestTileType=21
+      // ★IIIII111c：受理窗按【房型】分派（C# TryGenerateChestInRoom 两支）——
+      //   LegacyDungeonRoom 覆写支（Rooms/LegacyDungeonRoom.cs:78-92）=EndPosition±
+      //   (int)(Strength*0.4f) 方窗；基类支（Rooms/DungeonRoom.cs:259-263→DU.cs:325-331）
+      //   =InnerBounds 且 **minY=Center.Y=(Top+Bottom)/2（房下半）**。曾按 rm.st 分派且
+      //   基类支 minY=T（整高）——房型/窗域双偏差（G −15.9k 主因之一）。
+      //   非 dual（gfStyles 空）全房=Legacy 支逐位同（certified 面不动）；dual 的
+      //   provider 房由 roomSink 透传 leg=instanceof DLegacyRoom，climb 插入房
+      //   （dgRoom 直造,无 leg 字段）C# 亦为 LegacyDungeonRoom ⇒ 缺省 true。
+      const rmSt = rm.st ?? 0;
+      const leg = gfStyles.length === 0 ? true : (rm.leg !== undefined ? rm.leg : true);
+      let lo: number, hi: number, loY: number, hiY: number;
+      if (leg) {
+        const half = Math.trunc(rm.strength * 0.4);
+        const exI = Math.trunc(rm.ex), eyI = Math.trunc(rm.ey);
+        lo = exI - half; hi = exI + half; loY = eyI - half; hiY = eyI + half;
+      } else {
+        lo = rm.inner.L; hi = rm.inner.R;
+        loY = Math.trunc((rm.inner.T + rm.inner.B) / 2); hiY = rm.inner.B;
+      }
+      if (gcT) console.log(`GC-RM ${gcRm++} leg=${leg ? 1 : 0} lo=${lo} hi=${hi} loY=${loY} hiY=${hiY} st=${rmSt}`);
+      (globalThis as { __swI154GRm?: number }).__swI154GRm = gcRm - 1;
+      gcRsnOn = true;
+      for (let j = 0; j < 1000; j++) {
+        // num=(int)Lerp(minX,maxX,rd)、num2=(int)Lerp(minY,maxY,rd)（DU.cs:337-338）
+        const num = Math.trunc(lo + (hi - lo) * rd());
+        const num2 = Math.trunc(loY + (hiY - loY) * rd());
+        if (!featAreaOK(num, num2, 1)) continue;            // data.CanGenerateFeatureInArea(:339)
+        let itemType = rmSt === 0 ? 0 : -1, chestStyle = 2;
+        let chestTileVid = 21;                              // ushort chestTileType=21
+        if (rmSt === 0) {
+          // GetDungeonLootAndChestStyle（WorldGen.cs:36189-36238，style0 旗 face）
+          if (lootStyle >= 8) lootStyle = 0;
+          switch (lootStyle) {
+            case 0: itemType = 155; break;
+            case 1: itemType = 156; break;
+            case 2: itemType = 157; break;
+            case 3: itemType = 163; break;
+            case 4: itemType = 113; break;
+            case 5: itemType = 3317; break;
+            case 6: itemType = 327; chestStyle = 0; break;
+            default: itemType = 164; break;
+          }
+          if (num2 < ws + 50) { itemType = 327; chestStyle = 0; }   // :36231-36236
+        } else {
           switch (rmSt) {
             case 8: case 9: case 14: itemType = dgNextJungleChestItem(); break;   // :353-357
             case 10: itemType = 1293; break;                  // :358-360 Temple
@@ -4278,42 +4497,21 @@ const snap: SnapFn = (name) => {
             chestTileVid = pd.t >= 0 ? pd.t : 21;
             chestStyle = pd.s ?? 0;
           }
-          if (itemType === 0 && rn(2) === 0) break;           // :375-378 空手受领（本域不可达,照抄）
-          const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
-          if (dgAddBuriedChest(num, num2, itemType, chestStyle, ctInternal)) break;   // :379；style≠0 无 lootStyle++
         }
-        continue;
-      }
-      if (gcT) console.log(`GC-RM ${gcRm++} exI=${Math.trunc(rm.ex)} eyI=${Math.trunc(rm.ey)} half=${Math.trunc(rm.strength * 0.4)} str=${rm.strength} exf=${rm.ex.toFixed(6)} eyf=${rm.ey.toFixed(6)}`);
-      // ★#32 终清（2026-08-18）：LegacyDungeonRoom.cs:86-87 原文
-      //   `(int)endPosition.X - num`——**先 (int) 截断再 ± half**。曾以 double 的
-      //   rm.ex 直接 ±half 后 Lerp → 房尾坐标 369.9999 类小数尾巴把 (int)(Lerp)
-      //   抬高 1 格（dgchest 逐箱对拍 #19 例：v369 j370 同哈希）→ 箱位错 → G 段
-      //   流差（+7 掷）→ I/T/F/Pa/Ba 全段级联（#32 残余 A=1319 主根因）。
-      const half = Math.trunc(rm.strength * 0.4);
-      const exI = Math.trunc(rm.ex), eyI = Math.trunc(rm.ey);
-      for (let j = 0; j < 1000; j++) {
-        const lo = exI - half, hi = exI + half;
-        const num = Math.trunc(lo + (hi - lo) * rd());
-        const num2 = Math.trunc((eyI - half) + ((eyI + half) - (eyI - half)) * rd());
-        if (!featAreaOK(num, num2, 1)) continue;
-        let itemType = 0, chestStyle = 2;
-        if (lootStyle >= 8) lootStyle = 0;
-        switch (lootStyle) {
-          case 0: itemType = 155; break;
-          case 1: itemType = 156; break;
-          case 2: itemType = 157; break;
-          case 3: itemType = 163; break;
-          case 4: itemType = 113; break;
-          case 5: itemType = 3317; break;
-          case 6: itemType = 327; chestStyle = 0; break;
-          default: itemType = 164; break;
-        }
-        if (num2 < ws + 50) { itemType = 327; chestStyle = 0; }
-        const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, CHEST);
+        if (itemType === 0 && rn(2) === 0) break;           // :375-378 空手受领（本域不可达,照抄）
+        const ctInternal = TILE_INTERNAL_BY_SHEET.get(chestTileVid) ?? CHEST;
+        const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, ctInternal);   // :379
         if (gcT) console.log(`GC-TRY rm=${gcRm - 1} num=${num} num2=${num2} ok=${gcOk ? 1 : 0}`);
-        if (gcOk) { lootStyle++; break; }
+        if (gcOk) {
+          if (rmSt === 0) lootStyle++;                      // :380-383 仅 style0 面 lootStyle++
+          break;
+        }
       }
+      gcRsnOn = false;
+    }
+    if (gcDumpGrid) {
+      const g = globalThis as { __swI154GSeat?: number };
+      gcDumpGrid(`_js_s${g.__swI154GSeat}_G_out`);
     }
   }
 
@@ -4345,6 +4543,7 @@ const snap: SnapFn = (name) => {
         x = dxv;
         y = dyv;
       }
+      i158Log(`BATT-H s=${instIdx + 1} n3=${num3} st=${ncount} n5=${x} n6=${y}`);
       let flag = true;
       // ★IIIII105b：Books 座面化（逐族分步 #1）——IsConsideredDungeonWall/Tile 的
       // per-seat 全集（DungeonUtils.cs:1929-1950/:1844-1869 genVars 克隆合并族）；
@@ -4379,7 +4578,7 @@ const snap: SnapFn = (name) => {
           if (flag && inW(x, y - 1, 0) && actAt(x, y - 1) === 0
             && inW(x, y - 2, 0) && actAt(x, y - 2) === 0
             && inW(x, y - 3, 0) && actAt(x, y - 3) === 0) {
-            if (!featOK(x, y, 0) || entNoFeat(x, y)) { flag = false; continue; }
+            if (!featOK(x, y, 0) || entNoFeat(x, y)) { flag = false; i158Log(`BATT-CG s=${instIdx + 1} n5=${x} n6=${y}`); continue; }
             emitBS(`bsOK|${num3},${ncount}|${x},${y}`);
             let k = x;
             const num8 = x;
@@ -4401,11 +4600,12 @@ const snap: SnapFn = (name) => {
               if (_bksFW !== null) {
                 flag2 = _bksFW.Style === 0;
                 if (!flag2) flag3 = false;          // cs:101 !flag2 ⇒ flag3=false（首排平台不再带书/瓶尾挂件）
-                const bPlat = _bksFW.PlatformItemTypes ?? [];
+                // ★IIIII118：GetPlatformStyle 改真实平台项表（PLATFORM item id→tileStyle）——
+                //   曾用窗台占用字段+ITEM_PLACE 映射（书架平台样式错档+掷序错位）。
+                const bPlat = STYLE_PLAT_ITEM_IDS[_bksFW.Style] ?? [];
                 if (_bksFW.Style === 0 || bPlat.length === 0) num9 = -1;
                 else {
-                  const pv = ITEM_PLACE[bPlat[rn(bPlat.length)]!];   // GetPlatformStyle
-                  num9 = pv ? pv.s ?? -1 : -1;
+                  num9 = PLAT_ITEM_STYLE[bPlat[rn(bPlat.length)]!] ?? -1;   // GetPlatformStyle
                 }
                 const mmBk = _bksFW.BookshelfMinMaxOverride;
                 min = mmBk ? mmBk[0]! : 1;
@@ -4445,6 +4645,7 @@ const snap: SnapFn = (name) => {
                 x += n7;
                 n10--;
               }
+              i158Log(`BATT-OK s=${instIdx + 1} x=${num8} y=${y} c=${cnt98} min=${min} max=${max} n9=${num9} f3=${flag3 ? 1 : 0} w=${wallAt(num8, y)}`);
               ncount = 0; num3++;
               if (!flag3 && rn(2) === 0) {
                 x = num8; y--;
@@ -4467,7 +4668,7 @@ const snap: SnapFn = (name) => {
           }
         }
       }
-      if (ncount > 1000) { ncount = 0; num3++; }
+      if (ncount > 1000) { i158Log(`BATT-ST s=${instIdx + 1} n5=${x} n6=${y}`); ncount = 0; num3++; }
     }
     // ★QQQQQQ 探针旁路：窗盒汇总（tools/_qqqqq3.test.ts 消费）
     (globalThis as { __bsWin?: unknown[][] }).__bsWin =
@@ -4842,18 +5043,111 @@ const snap: SnapFn = (name) => {
   //   只在 TrapsPass（后置 pass）跑,窗口此处开闭即还原原版时序语义）。
   function dgTraps(): void {
     dualDungeonTrapWindow.allowTrapGenerationInDungeon = true;
-    const num5 = Math.trunc(8.4 * (w / 4200) * 1.0);
+    // ★IIIII114b2（T 同刀·三件套同落）：①配额 gfFeatScalar——C# `(int)((double)(8.4f*num)*
+    //   data.globalFeatureScalar)`（DungeonGlobalTraps.cs:31）dual 座≈6.55、普通世界恒 1.0
+    //   （XLIII 遗账「Traps:31 全额档」）；②dual 支受理序补齐 CanGenerateFeatureAt +
+    //   !Temple.WallIsInStyle（:515-517 三谓词序；legacy 支原文两谓词不动）；
+    //   ③Temple mayan 尾整缺补移植（:523-620：num8=30/50/70+Next 档→style10 厅/房/
+    //   progression 界域三段掷位，may_trap=TemplePass mayanTrap 复用，rng=主流同源）。
+    const isDual = gfStyles.length > 0;
+    const tAtt = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
+    const TF = tAtt && isDual ? ((globalThis as unknown as { __swT154?: Record<string, number> }).__swT154 ??= {}) : null;
+    const num5 = Math.trunc(8.4 * (w / 4200) * gfFeatScalar);
     let ncount = 0, num4 = 0;
     while (num4 < num5) {
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(Math.trunc(ws), bounds.B - 1);
-      if (isDW(wallAt(x, y)) && placeTrap0(x, y)) {
+      let okT = false;
+      if (isDual) {
+        // ★IIIII114b2：dual 支谓词一=**座面合并集** gfIsDW（C# IsConsideredDungeonWall=
+        //   Main.wallDungeon ∪ CurrentDungeonGenVars.isDungeonWall,DU.cs:1937-1957——
+        //   seat1 Snow/Desert/Hallow/Temple 墙 349/187/28/87 全靠座内扩张）；旧 isDW
+        //   静态 {7,8,9,94..99} 仅 legacy 等价。
+        const d1 = gfIsDW(wallAt(x, y));
+        const d2 = d1 && featOK(x, y, 0);
+        const d3 = d2 && !wallIsInStyle(DungeonGenerationStyles.Temple, wallAt(x, y));
+        okT = d3 && placeTrap0(x, y);
+        if (TF) {
+          TF.att = (TF.att ?? 0) + 1;
+          if (d1) TF.dw = (TF.dw ?? 0) + 1;
+          if (d2) TF.feat = (TF.feat ?? 0) + 1;
+          if (d3) TF.temple = (TF.temple ?? 0) + 1;
+          if (okT) TF.placed = (TF.placed ?? 0) + 1;
+        }
+      } else {
+        okT = isDW(wallAt(x, y)) && placeTrap0(x, y);
+      }
+      if (okT) {
         ncount = 1000;
         const WV65t = (globalThis as { __wvLines?: string[] }).__wvLines;
         if (WV65t) WV65t.push(`MARK|dg_trap ok ${num4} ${x},${y}`);
       }
+      if (tAtt) console.log(`T-ATT w=${num4} x=${x} y=${y} c=${ncount}|mr=${dgMainRolls}`);
       if (ncount > 1000) { num4++; ncount = 0; }
+    }
+    if (TF) {
+      console.log(`T-GATES att=${TF.att} dw=${TF.dw ?? 0} feat=${TF.feat ?? 0} temple=${TF.temple ?? 0} placed=${TF.placed ?? 0}|mr=${dgMainRolls}`);
+      (globalThis as unknown as { __swT154?: Record<string, number> }).__swT154 = undefined;
+    }
+    // —— Temple mayan 尾（cs:523-620，dual 独占；普通世界整跳零扰动）——
+    if (isDual) {
+      let num8 = 30;
+      switch (worldSizeIdx()) {
+        case 0: num8 = 30 + ri(0, 10); break;
+        case 1: num8 = 50 + ri(0, 15); break;
+        default: num8 = 70 + ri(0, 20); break;
+      }
+      if (gs.seedFlags.actuallyNoTraps) num8 = 0;
+      if (num8 > 0) {
+        if (tAtt) console.log(`T-TAIL num8=${num8}|mr=${dgMainRolls}`);
+        let num9 = num8;
+        let hhN = 0;
+        const mayanTry = (tx: number, ty: number, styObj: import('./DungeonStyles1457').DungeonStyleData): boolean =>
+          !((st.flags[st.idx(tx, ty)] ?? 0) & 1)
+          && wallIsInStyle(styObj, wallAt(tx, ty))
+          && mayanTrap(st, rng, gs, tx, ty);
+        // ①厅段（Style==10 且 generated，Bounds 半开界）
+        for (const hh of gfPdHalls) {
+          if (!hh.gen || hh.st !== 10 || hh.gL === undefined) continue;
+          hhN++;
+          const x = ri(hh.gL, hh.gR! - 1);
+          const y = ri(hh.gT!, hh.gB! - 1);
+          if (mayanTry(x, y, DungeonGenerationStyles.Temple)) { num9--; if (num9 <= 0) break; }
+        }
+        if (tAtt) console.log(`T-HALLS n=${hhN} left=${num9}|mr=${dgMainRolls}`);
+        // ②房段（Style==10 且 generated，InnerBounds）
+        if (num9 > 0) {
+          let rmN = 0;
+          for (const rm2 of rooms) {
+            if (rm2.st !== 10) continue;
+            rmN++;
+            const x = ri(rm2.inner.L, rm2.inner.R - 1);
+            const y = ri(rm2.inner.T, rm2.inner.B - 1);
+            if (mayanTry(x, y, DungeonGenerationStyles.Temple)) { num9--; if (num9 <= 0) break; }
+          }
+          if (tAtt) console.log(`T-ROOMS n=${rmN} left=${num9}|mr=${dgMainRolls}`);
+        }
+        // ③界域段（genVars.dungeonGenerationStyles style10 席 × outerProgressionBounds）
+        if (num9 > 0 && _gfSeatProgBounds !== null) {
+          for (let k2 = 0; k2 < gfStyles.length; k2++) {
+            if (gfStyles[k2]!.Style !== 10) continue;
+            const bb = _gfSeatProgBounds[k2]!;
+            let num14 = 1000;
+            let bbN = 0;
+            while (num9 > 0) {
+              num14--;
+              if (num14 <= 0) break;
+              const x = ri(bb.L, bb.R - 1);
+              const y = ri(bb.T, bb.B - 1);
+              bbN++;
+              if (mayanTry(x, y, gfStyles[k2]!)) num9--;
+            }
+            if (tAtt) console.log(`T-BOUNDS n=${bbN} left=${num9}|mr=${dgMainRolls}`);
+            break;
+          }
+        }
+      }
     }
     dualDungeonTrapWindow.allowTrapGenerationInDungeon = false;
   }
@@ -5325,6 +5619,11 @@ const snap: SnapFn = (name) => {
   const gfEarlyRooms: import('./DungeonDualLayout').DualEarlyRoom[] = [];
   let gfFeatScalar = 1.0;
   let gfStyles: import('./DungeonStyles1457').DungeonStyleData[] = [];
+  /** ★IIIII111c：本座 genVars.dungeonStyle（PD 面三级解析的末级回退,seat1 表无 style0）。 */
+  let gfDefaultStyle: import('./DungeonStyles1457').DungeonStyleData | null = null;
+  /** ★IIIII111c：PD 面厅载荷（provider 厅序=entrance stairwell→calculator 厅；climb 厅
+   *  由 halls 数组尾随=C# dungeonHalls 全序）。 */
+  const gfPdHalls: NonNullable<import('./DungeonDualLayout').DualLayoutResult['pdHalls']> = [];
   /** ★IIIII105c：BiomeChests_DualDungeons 桶（provider chestPlan 桥,普通世界恒 undefined） */
   let gfChestPlan: NonNullable<import('./DungeonDualLayout').DualLayoutResult['chestPlan']> | undefined;
   const _I132M = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I132_MARK;
@@ -6530,6 +6829,8 @@ const snap: SnapFn = (name) => {
           inner: new DBnd(w, h), outer: new DBnd(w, h),
           ex: rmv.ex, ey: rmv.ey, strength: rmv.strength,
           st: rmv.st ?? 0,                                    // ★105c：房样式透传
+          bio: rmv.bio === true, forceDP: rmv.forceDP === true,   // ★111c：PD 面载荷
+          leg: rmv.leg === true,                              // ★111c：G 面窗域支键
         };
         view.inner.set(rmv.innerL, rmv.innerT, rmv.innerR, rmv.innerB);
         view.outer.set(Math.max(10, rmv.innerL - 8), Math.max(10, rmv.innerT - 8), Math.min(w - 10, rmv.innerR + 8), Math.min(h - 10, rmv.innerB + 8));
@@ -6544,6 +6845,8 @@ const snap: SnapFn = (name) => {
     // ★IIIII105b：特征域载荷装配（GroundFurniture_DualDungeons 消费面）
     if (res.styles !== undefined && res.styles.length > 0) {
       gfStyles = res.styles;
+      gfDefaultStyle = res.defaultStyle ?? gfStyles.find((s0) => s0.Style === 0) ?? null;   // ★111c PD 回退样式
+      for (const ph of res.pdHalls ?? []) gfPdHalls.push(ph);                               // ★111c PD 厅载荷
       const set2 = new Set<number>(DG_DUNGEON_WALLS);   // Main.wallDungeon 克隆基线
       const addAll = (s0: import('./DungeonStyles1457').DungeonStyleData): void => {
         set2.add(s0.BrickWallType);
@@ -6709,8 +7012,25 @@ const snap: SnapFn = (name) => {
   }
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
+  // ★IIIII111c：C# 厅循环=rooms 循环后遍历 dungeonHalls 全序（DC.cs:484-487）——
+  //  provider 厅（entrance stairwell→calculator 厅,gfPdHalls 序）先于 climb 厅（halls
+  //  数组尾随）；Stairwell 无 extra、Sine 走 pp（|dy|≥0.65 已滤）、Legacy/Regular 走
+  //  AddExtraPlatformsIfNeeded（载荷侧已展开）。entrance stairwell 厅**不**跳
+  //  （StairwellDungeonHall.cs:16-25 无 IsEntranceHall 门;空体覆写只属
+  //  LegacyEntranceDungeonHall=climb 走廊厅,JS 侧由 hallPlatformsDoors isEntrance 跳）。
+  for (const ph of gfPdHalls) {
+    pdHallPoint(Math.trunc(ph.sx), Math.trunc(ph.sy), ph.sdy, null);
+    pdHallPoint(Math.trunc(ph.ex), Math.trunc(ph.ey), ph.edy, null);
+    for (const e of ph.pp ?? []) pdHallPoint(Math.trunc(e.x), Math.trunc(e.y), e.dy, null);
+  }
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
   snap('dungeonPD');
+  // ★IIIII118：PD_OUT 全网格 dump（SW_DG_GC_DUMP 门控）——与 x86 rig DumpOnly
+  //   x86_s*_PD_out 同位对拍（PD 收集完成时点 tile 状态=下游段共同初态）。
+  {
+    const pdDump = mkGcDumpGrid();
+    if (pdDump) pdDump(`_js_s${instIdx + 1}_PD_out`);
+  }
   dgpMark('finding_doors_end');
   // ★IIIII59 EarlyDual 家族调用面壳（DungeonGlobalEarlyDualDungeonFeatures.EarlyDungeonFeatures
   //   的 DropTrap/TileClump 段落占位，cs:287/:314/:341 与 cs:395-589）。可达域由
@@ -6753,9 +7073,15 @@ const snap: SnapFn = (name) => {
   //     S2 每 try Next(list.Count)；S3 零主流掷；S4 每 try Next(count)+flag2 短路门
   //     （配额>0 时 Next(8) 不掷！C# num16>0||Next(8)==0）；S5-S7 每 attempt Next(W)+Next(H)
   //     +Desert 命中 Next(2)；deDropTrap 自身恰两掷 Next(6,12)/Next(6,14)。clump 五臂仍在其后。
-  //   ★门=SW_I138_EARLY=1（缺省 OFF 维持 IIII106b 账面）：与五臂 TileClump 同门共批。
+  //   ★门=SW_I138_EARLY（★IIIII164 缺省 ON，=0 显式回退 IIII106b 账面）：与五臂 TileClump 同门共批。
+  if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
+    console.log(`GC-S7GATE styles=${gfStyles.length} pbg=${_gfSeatProgBounds === null ? 'null' : _gfSeatProgBounds.length} featRooms=${gfFeatRooms.length} flag=${i138EarlyGate() ? '1' : '0'}`);
+  }
   if (gfStyles.length > 0 && _gfSeatProgBounds !== null && gfFeatRooms.length > 0
-    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    && i138EarlyGate()) {
+    if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
+      console.log(`GC-S7BLK styles=${gfStyles.length} featRooms=${gfFeatRooms.length} st9=${gfFeatRooms.filter((r) => r.st === 9).length}`);
+    }
     const insSh = (sheetId: number): number => TILE_INTERNAL_BY_SHEET.get(sheetId) ?? -1;
     const shOfAt = (x2: number, y2: number): number => TILE_DEFS[typAt(x2, y2)]?.vanilla?.sheet ?? -1;
     const dwSh = (v: number): boolean => v > 0 && _gfSeatDWSet.has(v);
@@ -6849,9 +7175,10 @@ const snap: SnapFn = (name) => {
         st.frameY[tiB] = 18;
       }
     };
-    /** WorldGen.AddLarva 写体（cs:32347-32364 的 ClearEverything 族；尾 PlaceTile(231,mute)
-     *  本批按 cs 备案不展开——consumer 仅 Beehive(9) 房现行双座样式表不可达，PlaceTile
-     *  全链属 S9 批搬运面（零主流掷已核 WorldGen.PlaceTile 无 genRand 引用）。 */
+    /** WorldGen.AddLarva 写体（cs:32347-32364 的 ClearEverything 族 + 尾 PlaceTile(231,mute)）。
+     *  ★IIIII156 补尾：x86 实证 seat0 有 5 个 Beehive(9) 房（G_in t231=45 格,旧「双座
+     *  不可达」备案翻案）——补 PlaceTile(231)：3×3 Origin(1,2)，盒=(x−1..x+1, y−2..y)
+     *  恰覆 ClearTile 三行；帧按 18*col/18*row（帧面不进门闸,仅渲染）。零主流掷。 */
     const beeLarvaWrite = (x2: number, y2: number): void => {
       const larvaI = insSh(225);
       for (let i2 = x2 - 1; i2 <= x2 + 1; i2++) {
@@ -6871,6 +7198,25 @@ const snap: SnapFn = (name) => {
           st.flags[ti2] |= 1;
           st.type[ti2] = larvaI;
           st.wall[ti2] = wallKeep;
+        }
+      }
+      const larva231 = insSh(231);                   // PlaceTile(x2,y2,231,mute)（cs:32365）
+      if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
+        console.log(`GC-LV231 x=${x2} y=${y2} id=${larva231}`);
+      }
+      if (larva231 > 0) {
+        for (let i2 = x2 - 1; i2 <= x2 + 1; i2++) {
+          for (let j2 = y2 - 2; j2 <= y2; j2++) {
+            if (!st.inBounds(i2, j2)) continue;
+            const ti2 = st.idx(i2, j2);
+            st.flags[ti2] |= 1;
+            st.type[ti2] = larva231;
+            st.liquid[ti2] = 0; st.liquidType[ti2] = 0;
+            st.slope[ti2] = 0; st.half[ti2] = 0;
+            st.wire[ti2] &= ~(1 << 5);
+            st.frameX[ti2] = (i2 - (x2 - 1)) * 18;
+            st.frameY[ti2] = (j2 - (y2 - 2)) * 18;
+          }
         }
       }
     };
@@ -7102,6 +7448,9 @@ const snap: SnapFn = (name) => {
     // ======== S3：bee larva 臂（cs:163-172；dict[9] 双座不可达备案）========
     {
       const list = gfFeatRooms.filter((rr) => rr.st === 9).slice();
+      if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
+        console.log(`GC-S3 n=${list.length} st9=` + list.map((r) => `${r.L},${r.T},${r.R},${r.B}`).join('|'));
+      }
       while (list.length > 0) {
         const rm = list.shift()!;
         const cx3 = Math.trunc((rm.L + rm.R) / 2);
@@ -7211,10 +7560,10 @@ const snap: SnapFn = (name) => {
   //   continue）+命中后 seed/strength/steps 三掷；clump 本体走内部 UnifiedRandom(
   //   RandomSeed) 零主流掷（deTileClump=IIIII59 认证体 1:1）。num7/num8 按 GetWorldSize()
   //   case 取值（cs:36-75；4200²=case0→40/40）。GetStyleForTile 门按 cs:722-743 直译。
-  //   ★启用门=SW_I138_EARLY=1：本臂依赖 S1..S7（标枪探针/字典 DropTrap 臂）先行恢复
-  //   掷位与上游 ±Δ 归零,当前默认 OFF 维持既有账面（mile8 s4 实测 W+97k/T+42k 回退）。
+  //   ★启用门=SW_I138_EARLY（★IIIII164 缺省 ON）：本臂依赖 S1..S7（标枪探针/字典 DropTrap 臂）
+  //   掷位与上游 ±Δ 归零——s1 PD_OUT 门开 14,590→9,614 零新差后翻转。
   if (gfStyles.length > 0 && _gfSeatProgBounds !== null
-    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    && i138EarlyGate()) {
     const dgECss = (tileSheet: number): number | null => {
       if (tileSheet < 0) return null;
       for (const s0 of gfStyles) {
@@ -7327,7 +7676,7 @@ const snap: SnapFn = (name) => {
   //      LiquidType>=0 → FloodRoom（cs:293-304,Beehive 蜜/Shimmer 液）
   //   主流掷面=每窗 GetWindowPlatformStyle 1 掷（cs:161-168,表空不掷）。
   if (gfStyles.length > 0 && gfEarlyRooms.length > 0
-    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    && i138EarlyGate()) {
     // ★IIIII110c 诊断钩（零开销常态：__wvLines 未装配时全程空转）：S9 每房分派面
     //   写时账——room 序/kind/style/seed/box/门 + 每窗写位/档，供 x86 窗簇逐房对拍。
     const _w9L = (globalThis as { __wvLines?: string[] }).__wvLines ?? null;
@@ -7449,13 +7798,19 @@ const snap: SnapFn = (name) => {
           }
         }
         if (er.liquid >= 0) {                                    // FloodRoom（cs:293-304）
+          // ★IIIII114b2 定罪（G 混沌·FloodRoom 编码）：er.liquid=风格表 LiquidType
+          //   （vanilla/C# 基：Shimmer=3/Beehive=2/水=0）而本仓 liquidType 为 **+1 编码**
+          //   （TileStore.LIQUID_TYPE：水1/岩浆2/蜜3/微光4）——曾裸写 ⇒ shimmer 房整室
+          //   浸"蜜"(3)、beehive 房浸"岩浆"(2)、水泛写 0=无液。同族病 dgPitTrap 曾修
+          //   （:3402 写 1）此处漏跟。x86 侧 shimmer 房浸 shimmer ⇒ AddBuriedChest 扫描
+          //   步 anyShimmer()（WG.cs:36486）整房拒箱（rm17 型 1000/1000 why=shimmer 实证）。
           for (let i2 = er.L; i2 <= er.R; i2++) {
             for (let j2 = er.cy; j2 <= er.B; j2++) {
               if (!st.inBounds(i2, j2)) continue;
               const ti2 = st.idx(i2, j2);
               if (!(st.flags[ti2] & 1)) {
                 st.liquid[ti2] = 255;
-                st.liquidType[ti2] = er.liquid;
+                st.liquidType[ti2] = er.liquid + 1;
               }
             }
           }
@@ -7467,10 +7822,10 @@ const snap: SnapFn = (name) => {
   //   temple(style10) Biome 房末席制（cs:124-140 赋值不覆盖已选）→ 顶沿下扫首活性行，
   //   三列(−1..1)自该行起逐格「ClearTile+active+type226」充砖至下一活性格，尾接
   //   WorldGen.AddLihzahrdAltar(x2−1,y−2) 3×2 祭坛(t237)+底缘 t226（ClearEverything 全清保墙）。
-  //   ★启用门与 S1..S7 同（SW_I138_EARLY）；GenerateEarlyDungeonFeaturesInRoom 每房分派面
+  //   ★启用门与 S1..S7 同（SW_I138_EARLY，★IIIII164 缺省 ON）；GenerateEarlyDungeonFeaturesInRoom 每房分派面
   //   未随本小节移植（Biome 结构房窗柱/rugged 钟乳石系），另行承接——本段按 cs 次序恰位于其后。
   if (gfStyles.length > 0 && _gfSeatProgBounds !== null && gfFeatRooms.length > 0
-    && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1') {
+    && i138EarlyGate()) {
     const insSh = (sheetId: number): number => TILE_INTERNAL_BY_SHEET.get(sheetId) ?? -1;   // 本块局部映射
     let templeRm: { L: number; T: number; R: number; B: number } | null = null;
     for (const rr of gfFeatRooms) {                         // cs 循环内持续赋值=末席制
@@ -7539,8 +7894,9 @@ const snap: SnapFn = (name) => {
   //   DualDungeon 座**整跳**本循环（坑洞由 cs:172-303 per-room S4 臂承担）。但 S1..S7
   //   字典臂尚未移植、上游 ±Δ 未归零，现阶段跳过=−25,200 掷账缺口而保留=实测全拒
   //   （旧「PD→Pi 25,200 全常数 R3 风暴」）零写仅 +25,200 幻掷——两态下游同不可对齐。
-  //   故默认维持旧行为；S4/S1..S7 批次启用 SW_I138_EARLY=1 一并切走新径。
-  if (!(gfStyles.length > 0 && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I138_EARLY === '1')) {
+  //   故默认维持旧行为；★IIIII164 缺省已翻转 ON（S4/S1..S7 写面认证后,双座整跳=vanilla 本相；
+  //   SW_I138_EARLY=0 显式回退旧径对照态）。
+  if (!(gfStyles.length > 0 && i138EarlyGate())) {
     dgEarly();
   }
   snap('dungeonPi');

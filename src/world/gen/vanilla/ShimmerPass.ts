@@ -243,7 +243,7 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
     const ty = rng.int(Y - 2, Y + 2);                // Next(Y-2, Y+3)
     const treeType = GEM_TREES[rng.int(0, 6)];       // num24=Next(7)（SolidTile 判定前消耗，保持流位）
     if (!solidTile(tx - 1, ty) || !solidTile(tx + 1, ty)) continue;
-    growGemTree(st, rng, tx, ty, treeType);
+    growGemTree(st, rng, tx, ty, treeType, 0, false, gs);
   }
   // 检查点：aether 宝石树种完（cs:35091 循环出口 = oracle Checkpoint("shimmer")）
   onStage?.('shimmer');

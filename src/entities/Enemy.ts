@@ -193,25 +193,33 @@ const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
 /** DoesntDespawnToInactivity 名单（NPC.cs:78584-78641）中本批涉及的仪式/月总链类型——
  *  神秘石碑 437/忠实信徒 438/弓手 379,380（拜月仪式链条，离屏消失会断 439 召唤链）与
  *  月总游离眼 400（锚核心 398 生命周期，自身不参与离屏消散）。
- *  690 雕像宝箱怪休眠态（CheckActive :78692 `type==690 && ai[0]==0` 豁免）——AI_126
- *  未移植时 ai0 恒 0 = 永远休眠，离屏不消散与原版休眠态一致 */
+ *  ★690 雕像宝箱怪已从本名单摘除（MAJOR-1 收窄,2026-09-02）：原版头部门
+ *  CheckActive :78700 `type==690 && ai[0]==0` 只豁免【伪装态】——AI_126 已移植
+ *  （本文件 statueMimicAI,唤醒置 ai0=1）,整 id 入名单会让唤醒态也永生,场上有
+ *  690 时 !AnyNPCs(690) 再刷门永久闭死。现走消费端条件项 ai0===0（见下方豁免链）,
+ *  伪装态语义不变（该态另有每帧 despawnTimer=750 续命写,与本门并存不冲突） */
 /** DoesntDespawnToInactivity 名单外补丁（名单本体 NPC.cs:78584-78658）：血肉墙族
  *  113 墙/114 之眼/115 饥饿者/118+119 水蛭体节在列——离屏永不因闲置消散；
  *  ★116 饿魂与 117 水蛭头【不在】名单（照原文，任务单曾列 117 系笔误）——水蛭头
  *  消散时其体节链经下方 despawn 链杀级联（原版 :51832-51841 段自查前段失效自灭） */
-/** DoesntDespawnToInactivity（NPC.cs:78584-78679）全量 + 690（CheckActive 头部
- *  type==690&&ai0==0 门）。★14/15（EoW 体节/尾）必在——它们 SetDefaults boss=false
+/** DoesntDespawnToInactivity（NPC.cs:78584-78679）全量 + 668（DoesntDespawnTo
+ *  InactivityAndCountsNPCSlots :78587 唯一成员：CheckActive 循环内 `if (flag)
+ *  continue` :78725 跳过屏幕盒/boss/switch,循环尾 `if (flag) return` :78786-78789
+ *  在 timeLeft-- :78790 之前返回 → 668 永不倒数也永不消散。CRITICAL 摘 boss 短路
+ *  后若不豁免,668 鹿角怪会走四步离屏消散=新增回归,按原版钉活）。
+ *  ★14/15（EoW 体节/尾）必在——它们 SetDefaults boss=false
  * （仅头 13 是 boss）又不在此前名单,离屏 750t 消散会触发链级联整链同灭 →
  * "EoW 打两下自动战败"根因。★413/414（爬尾虫身/尾）同款补入：crawltipedeAI 的
  * 段完整性自查（NPC.cs:51807-51861）会把"邻段离屏消散"级联成整链 die（带掉落）
  * ——30 段长链尾段出屏即连锁塌链。139(Betsy 依赖 134 在场)/552-578(依赖 548 永恒
  * 水晶在场)为条件项,单独判定 */
 const NO_DESPAWN_IDS = new Set([
-  8, 9, 11, 12, 14, 15, 36, 40, 41, 88, 89, 90, 91, 92, 96, 97, 99, 100,
+  8, 9, 11, 12, 14, 15, 36, 40, 41, 668,
+  88, 89, 90, 91, 92, 96, 97, 99, 100,
   113, 114, 115, 118, 119, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249,
   263, 267, 328, 379, 380, 392, 393, 394, 396, 397, 398, 400, 413, 414, 422, 437, 438,
   439, 440,
-  488, 492, 493, 507, 517, 548, 549, 551, 564, 565, 690,
+  488, 492, 493, 507, 517, 548, 549, 551, 564, 565,
 ]);
 /** CheckActive flag2 强真名单（NPC.cs:78735-78758:boss 之外 type∈{7,10,13,35,36,
  *  39,87,127-131,392-394,491,492} 恒视屏内）。13=EoW 头（即便 boss 位被换锚到
@@ -226,12 +234,13 @@ const ALWAYS_ACTIVE_IDS = new Set([7, 10, 13, 35, 36, 39, 87, 127, 128, 129, 130
  *    = 960+w / 600+h px——旧 TILE*62/TILE*35（992/560px）系按 32×32 定宽 NPC 的
  *    中心距近似；现按本弹体盒宽高逐例求值（X 项与 32 宽 NPC 数值恰同,宽NPC/高NPC
  *    不再偏窄）。
- *  ★交测口径备案（F5c）：本仓为中心距式 |Δcenter|<半幅，原版为 rectangle2 与玩家
- *  hitbox 相交——等价于半幅再外扩玩家半宽/半高（≤21px），即本仓屏盒判定对"玩家
- *  贴边半身入屏"的场景偏窄一档。中心距式保留为登记近似（两侧同为屏内续命窗,
- *  差异仅在 21px 边缘带），ActiveRange 盒同口径（4032/2520 已远大于玩家半幅）。 */
-const CHECK_ACTIVE_HALF_X = 4032;
-const CHECK_ACTIVE_HALF_Y = 2520;
+ *  ★交测口径（F5c,MINOR-1 2026-09-02 落地）：本仓为中心距式 |Δcenter|<半幅+玩家半幅,
+ *  原版为矩形与玩家 hitbox 相交——中心距式须再外扩玩家半宽/半高（q.w/2、q.h/2）
+ *  才等价（曾登记为"偏窄一档"近似,现已按 canAnyPlayerSeeThisTile 同款写法在两处
+ *  消费点补齐：本文件 CheckActive 两窗 + Game.ts nearbyActiveNPCs 记账盒）。
+ *  导出供 Game.ts 复用（同源常量,禁再抄数字） */
+export const CHECK_ACTIVE_HALF_X = 4032;
+export const CHECK_ACTIVE_HALF_Y = 2520;
 /** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
 const STATUE_DROP_RARITY: Record<number, number> = {
   480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
@@ -2546,13 +2555,30 @@ export class Enemy extends Entity {
       }
     }
 
-    // Despawn 系统（原版 CheckActive, NPC.cs:78669-78798 + EncourageDespawn :7228-7235）：
-    // timeLeft(activeTime=750) 屏内矩形每 tick 重置+清鼓励旗；离屏从当前值倒数，归零即消失。
-    // EncourageDespawn(10) 封顶后离屏 ~10t 即消；屏内每 tick 被重置抵挡——
-    // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
-    // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
-    // 同样倒数——玩家缺席（联机空场/无候选）时视为离屏（原版 CheckActive 不依赖
-    // 玩家存活：死亡玩家 active 仍真，照常计屏内，见下方 T6 注）
+    // Despawn 系统（原版 CheckActive :78698-78810 + EncourageDespawn :7276-7283）：
+    // 四步流程——①activeRange 盒（2.1×屏,4032/2520px）相交任一活跃玩家 → flag2 存活门
+    // （+nearbyActiveNPCs 记账,现移 Game.ts 按盒累计）；②boss :78743 / 强真名单
+    // :78747-78767 存在活跃玩家即保命（无几何要求）；③屏幕盒（960+w/600+h）相交
+    // → timeLeft=activeTime(750)+清鼓励旗——EncourageDespawn 钉低值的唯一抵消点；
+    // ④timeLeft 每帧无条件 −1,归零 → flag2 强制翻假 :78791-78794 → 消散 :78795-78808。
+    // ★CRITICAL（2026-09-02 定罪落锤）：原版【无 boss 短路】——boss 的 flag2 强真
+    //   :78743 挡不住 timeLeft 归零强制翻假 ⇒ boss 离 activeRange 盒即消、盒内离屏
+    //   750t 也消（bossFled 记账承接,Game 端不写 downed/不播击败）。旧
+    //   `!this.def.boss || despawnEncouraged` 短路使 boss 从不进四步 = boss 永生偏离,
+    //   已摘除；boss 保命完全交②（任一活跃玩家在场,尸体 hitbox 照常,T6 注）。
+    //   推演：boss 离屏 750t → ④归零 → runDespawnFx → bossFled=true ✓；
+    //   boss 屏内/activeRange 内 → ①②保命 ✓；白天 EncourageDespawn(10) 封顶后
+    //   飞出屏带 → ③停更 → 剩余 timer≈10 → 秒消（原版天亮 boss 退场语义）✓。
+    // ★消散域登记不修（红队 C 仲裁,2026-09-02 备案,勿当新债重复报）：
+    //   ① cands 空支：零活跃玩家时原版经 !flag2 当帧消散(:78795),本仓取纯倒数归零
+    //     ——护栏是有意偏离（改立消=测试桩/无世界态场景死亡瞬间团灭;真实环境恒含
+    //     local player,量化差 0 帧 vs ≤12.5s）；
+    //   ② 594 风气球 slave 44px 屏幕边界几何巧合（挂载链路径,不可观测窗）
+    //     → 已清偿（T4 2026-09-02,删 runDespawnFx 随杀支,slave 自身四步清账）；
+    //   ③ case 399 火星探测器潜伏态缺口（:78768-78774 未移植——逃逸 ≤240t≪750t,
+    //     无可观测窗）→ 已清偿（T3 2026-09-02,四步内补 case 399 支,见 fairy 块后）；
+    //     ⑥清偿后 canAnyPlayerSeeThisTile 画布无关化已做,不在此列；
+    //   ④ nearbyActiveNPCs 按盒记账（Game.ts,MINOR-5）若引发刷怪回归则回退并登记。
     if (this.vanillaId === 488
       || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
       || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))
@@ -2564,11 +2590,15 @@ export class Enemy extends Entity {
       // 条件豁免（NPC.cs:78645-78679）：139 Betsy 需 134 在场；552-578 OOA 怪需 548
       // 永恒水晶在场（事件怪不应离屏自灭）
       || (this.vanillaId === 139 && this.anyNpcAlive(game, 134))
-      || (this.vanillaId != null && this.vanillaId >= 552 && this.vanillaId <= 578 && this.anyNpcAlive(game, 548))) {
+      || (this.vanillaId != null && this.vanillaId >= 552 && this.vanillaId <= 578 && this.anyNpcAlive(game, 548))
+      // 690 雕像宝箱怪伪装态（MAJOR-1 收窄,原版 CheckActive 头部门 :78700 只豁免
+      // ai[0]==0 伪装态;唤醒态 ai0=1 照走四步,离屏消散 → !AnyNPCs(690) 再刷门解除。
+      // 伪装态另有 statueMimicAI 每帧 despawnTimer=750 续命写(:43765),与本门并存不冲突）
+      || (this.vanillaId === 690 && this.ai0 === 0)) {
       // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）；
       // 四塔同样豁免（DoesntDespawnToInactivity 名单 NPC.cs:78634-78635 含 422/493/507/517
       // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
-    } else if (!this.def.boss || this.despawnEncouraged) {
+    } else {
       // ★T6（2026-09-01，RV-R4 附带定罪）：候选剔 dead 系过度删除，废——原版扫描门
       //   只有 `if (!Main.player[i].active) continue;`（:78706-78710），死亡玩家
       //   active 仍真（Player.KillMe 只置 dead/respawnTimer，不动 active；active=false
@@ -2585,16 +2615,23 @@ export class Enemy extends Entity {
       // 联机下访客在屏内同样压制 despawn（单机 = 仅本地，零回归）
       // 消散副作用（bossFled/风气球挂载/蠕虫整链）——两条路径共用
       const runDespawnFx = () => {
-        if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/玩家死后撤离
-        // 风气球 594 自然消散：挂载史莱姆一并消失（防 -999 冻结悬空）
-        if (this.vanillaId === 594) {
-          const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
-          if (sl) sl.dead = true;
-        }
+        // NPC.noSpawnCycle（:78797,先于 active=false :78798）：本帧消散 → 同帧刷怪
+        // 周期跳过一次（Game.trySpawnEnemy 入口消费+清零,原版 SpawnNPC :80991-80995）
+        game.noSpawnCycleThisFrame = true;
+        if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/离屏消散/玩家死后撤离
+        // ★T4 清偿（2026-09-02,用户拍板"登记不修"清零）：删「594 消散随杀 slave」支。
+        //   原版气球自然消散（CheckActive）不牵连挂载史莱姆——vanilla 无 594 支,slave
+        //   靠自身四步清账：ai[0]=-999 只冻结 AI_001 跳跃机（:61644 帧 0 return,冻结
+        //   的只是 AI 不冻 despawn）,slave vanillaId=1 不在 NO_DESPAWN_IDS/豁免表,
+        //   照走本四步;气球盒 20×20×scale 与 slave 吊挂 -44px 的屏幕边界带几何差
+        //   （红队 C"44px 巧合"）由 slave 独立计时自然抹平。爆裂（击杀）路径的解冻
+        //   臂不动（HitEffect :82586-82594 slave ai0=0+上移 10,死亡路径另有同款）
         this.dead = true;
-        // 蠕虫离屏消散 → 整链同灭（原版段自查 :51832-51841：前段 ai[0] 失效 →
-        // life=0 自灭级联；水蛭头 117 不在闲置豁免名单，离屏消散时其体节
-        // 118/119 在名单内不会自行消散，需此处级联，否则留无驱动的冻结残段）
+        // 蠕虫离屏消散 → 整链同灭（消散路径原版 = CheckActive_WormSegments
+        // :78812-78833：自 ai[0] 前向逐段 active=false——头消散即全链退场,Transform
+        // 自愈 :52059-52065 只服务伤害路径头死;水蛭头 117 不在闲置豁免名单，离屏
+        // 消散时其体节 118/119 在名单内不会自行消散，需此处级联，否则留无驱动的
+        // 冻结残段；段自查 :51832-51841 为伤害路径同归臂）
         if (this.wormNext || this.wormFollow) {
           let wh: Enemy = this;
           while (wh.wormFollow) wh = wh.wormFollow;
@@ -2617,29 +2654,53 @@ export class Enemy extends Entity {
         let flag2 = false;
         for (const q of cands) {
           // ★F1 纠偏：activeRangeX/Y = (int)(sWidth*2.1)/(int)(sHeight*2.1) =
-          //   4032/2520px（NPC.cs:6176-6178,sWidth/sHeight=1920/1200 :67892-67895,
+          //   4032/2520px（NPC.cs:6176-6178,sWidth/sHeight=1920/1200 :6791-6793,
           //   rectangle 相交 :78705-78706）——旧 Y 半幅 TILE*142=2272px 系误植,
-          //   2272~2520px 竖向带内原版保命、我方提前消散。中心距式=hitbox 相交的
-          //   登记近似（±玩家半幅,见 CHECK_ACTIVE_HALF_X 注 F5c 备案）
-          if (Math.abs(q.cx - this.cx) < CHECK_ACTIVE_HALF_X
-            && Math.abs(q.cy - this.cy) < CHECK_ACTIVE_HALF_Y) {
+          //   2272~2520px 竖向带内原版保命、我方提前消散。中心距式再外扩玩家
+          //   半宽/半高 = hitbox 相交的等价改写（MINOR-1,见 CHECK_ACTIVE_HALF_X 注）
+          if (Math.abs(q.cx - this.cx) < CHECK_ACTIVE_HALF_X + q.w / 2
+            && Math.abs(q.cy - this.cy) < CHECK_ACTIVE_HALF_Y + q.h / 2) {
             flag2 = true;
             break;
           }
         }
-        // boss(:78743)/ALWAYS_ACTIVE 名单(:78749-78767):存在活跃玩家即保命,
-        // 无几何要求(强真名单只置 flag2 不续 timeLeft)
+        // boss(:78743)/ALWAYS_ACTIVE 名单(:78747-78767):存在活跃玩家即保命,
+        // 无几何要求(强真名单只置 flag2 不续 timeLeft)。★boss 归零翻假 :78791-78794
+        // 仍会消散(CRITICAL 摘短路后的唯一 boss 保命通道就是本支+①几何窗)
         if (!flag2 && ((this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))
           || this.def.boss)) {
           flag2 = true;
         }
+        // case 583/584/585 仙灵钉活（MAJOR-2,NPC.cs:78775-78783）：夜间且 ai[2]==0
+        // （闲置微漂态;引导/逃逸/飞离等 ai2∈{1,2..7} 特殊行为态不续命,本仓 fairyAI
+        // ai2 语义同源）→ flag2=true + timeLeft=activeTime 每 tick 续命——仙灵夜里
+        // 离屏不消散,天亮即恢复普通倒数（原版昼消夜存的夜灯语义）
+        if (this.vanillaId != null && this.vanillaId >= 583 && this.vanillaId <= 585
+          && !game.world.clock.isDay && this.ai2 === 0) {
+          flag2 = true;
+          this.despawnTimer = 750;
+        }
+        // case 399 火星探测器（★T3 清偿 2026-09-02,NPC.cs:78768-78774 直译——原版
+        // switch 在玩家循环内、矩形门外=有活跃玩家即生效,与①无几何差）：
+        // flag2=true 恒置（潜伏 ai0=0 亦然——超出 activeRange 不再秒消,保命到
+        // timeLeft 归零强制翻假 :78791）;报警 ai0=1/逃逸 ai0=2 态再续
+        // timeLeft=activeTime → 计时器永不归零 = 逃逸全程不消散,直至 AI 侧出屏/
+        // 180t 入侵自灭（bossAI_martian.martianProbeAI ai0 三态与原版 1:1:
+        // 0 巡逻/1 受惊悬停 60t/2 逃逸,-1/-2 冻结态为飞碟专属不涉本支）
+        if (this.vanillaId === 399) {
+          flag2 = true;
+          if (this.ai0 === 1 || this.ai0 === 2) this.despawnTimer = 750;
+        }
         // ★F1 纠偏：rectangle2 半幅 = sWidth/2+width / sHeight/2+height = 960+w /
         //   600+h（NPC.cs:78691-78693 逐项展开）——旧 TILE*62/TILE*35（992/560px）
         //   系 32×32 定宽近似；高≥48 的怪（560<600+32≤600+h）屏内续命窗被低估
-        //   40~72px。逐例求值后 X 项对 32 宽 NPC 数值不变（960+32=992）
+        //   40~72px。逐例求值后 X 项对 32 宽 NPC 数值不变（960+32=992）。
+        //   MINOR-1：再外扩玩家半宽/半高 = hitbox 相交等价改写,消除"玩家贴边半身
+        //   入屏时 activeRange 窗续命、屏幕窗不续命"的边缘带不对称
         const screenHalfX = 960 + this.w, screenHalfY = 600 + this.h;
         const onScreen = cands.some((q) =>
-          Math.abs(q.cx - this.cx) < screenHalfX && Math.abs(q.cy - this.cy) < screenHalfY);
+          Math.abs(q.cx - this.cx) < screenHalfX + q.w / 2
+          && Math.abs(q.cy - this.cy) < screenHalfY + q.h / 2);
         if (onScreen) {
           this.despawnTimer = 750;
           this.despawnEncouraged = false;
@@ -2651,8 +2712,9 @@ export class Enemy extends Entity {
         if (!flag2) runDespawnFx();
       } else {
         // 零活跃玩家（仅测试桩/无世界态可现；真实游玩本地槽恒 active、死亡也照常
-        // 算几何=T6）：原版该态经 `!flag2` 立即消散(:78796-78797)——本仓保守取
-        // 纯倒数归零（C 批既有语义,登记的退化态偏离,防桩场景团灭误伤）
+        // 算几何=T6）：原版该态经 `!flag2` 立即消散(:78795-78798)——本仓保守取
+        // 纯倒数归零（登记项①,见上方消散域备案;防桩场景团灭误伤,量化差
+        // 0 帧 vs ≤12.5s）。runDespawnFx 照置 noSpawnCycle（:78797 该态同样置位）
         this.despawnTimer--;
         if (this.despawnTimer <= 0) runDespawnFx();
       }
@@ -2829,13 +2891,14 @@ export class Enemy extends Entity {
   }
 
   /** CanAnyPlayerSeeThisTile（1457/1458 NPC.cs:43877-43890 同锚）：以世界点为中心、
-   *  边长 = 视口像素(sWidth/sHeight)+32 的屏盒与任一【活跃】玩家命中盒求交。
-   *  原版只查 active 不查 dead——本仓 candidates 表含远端代理照算;视口像素 =
-   *  GameHooks.screenWorldSize 缺省退档 1920×1080（2026-08-31 ⑥清偿：换真实
-   *  屏盒求交语义,退役 62×35 格静态单人近似） */
+   *  边长 = sWidth/sHeight+32 的屏盒与任一【活跃】玩家命中盒求交。
+   *  原版只查 active 不查 dead——本仓 candidates 表含远端代理照算。
+   *  ★MINOR-6（2026-09-02 画布无关化）：sWidth/sHeight = 原版常量 1920×1200
+   *  （NPC.cs:6791-6793;消费点 :43879-43880 num=32 → 半幅 960+16/600+16）。
+   *  旧 GameHooks.screenWorldSize（真实视口,随窗口/缩放变化）会让可见域随设备
+   *  漂移且与 CheckActive 屏幕盒（960+w/600+h 常量）不同源——两处统一回常量 */
   private canAnyPlayerSeeThisTile(game: GameHooks, wx: number, wy: number): boolean {
-    const scr = game.screenWorldSize?.() ?? { w: 1920, h: 1080 };
-    const hw = scr.w / 2 + 16, hh = scr.h / 2 + 16;
+    const hw = 960 + 16, hh = 600 + 16;   // sWidth/2 + num/2, sHeight/2 + num/2（num=32）
     const cands = game.candidatePlayers?.() ?? [game.player];
     return cands.some((q) => !!q && Math.abs(q.cx - wx) < hw + q.w / 2
       && Math.abs(q.cy - wy) < hh + q.h / 2);
@@ -2850,6 +2913,18 @@ export class Enemy extends Entity {
     //  (曾两次误译:①despawnTimer=d 屏内也倒数=日出原地蒸发;②−=d 减法同为杜撰)
     if (this.despawnTimer > despawnTime) this.despawnTimer = despawnTime;
     this.despawnEncouraged = true;
+  }
+
+  /** 原版 DiscourageDespawn(despawnTime)（NPC.cs:7285-7292）：timeLeft 抬底（不封顶）
+   *  + 清鼓励旗——EncourageDespawn 的反操作。消费面=火星飞碟挂载部件 390/416/392/
+   *  393/394/492（aiStyle 75 锚定链 :35857/:35874/:35884/:35960/:35974/:35989 每 tick
+   *  重钉 ≥60）：锚主存活期间部件 despawnTimer 恒 ≥60,白天 EncourageDespawn 置位
+   *  也被此清回;锚主亡故（mountOk 假）不再调用 → 部件随消散系统退场。
+   *  其中 392/393/394/492 本身在 DoesntDespawnToInactivity 名单（永不倒数）,
+   *  调用为保真;实际功能面=390 骑手/416 骑手（不在名单,离屏 60t 保命窗） */
+  discourageDespawn(despawnTime: number): void {
+    if (this.despawnTimer < despawnTime) this.despawnTimer = despawnTime;
+    this.despawnEncouraged = false;
   }
 
   /** 敌怪弹幕发射辅助：从 (ox,oy) 朝 (tx,ty) 偏移方向以 speed 定速发射敌对 Dart；
@@ -7246,7 +7321,10 @@ export class Enemy extends Entity {
             const bx = player.cx + (Math.random() * 201 - 100) - this.cx;
             const by = player.y + (Math.random() * 201 - 100) - this.cy;
             const bl = Math.hypot(bx, by) || 1;
-            shoot(game, this.cx, this.cy, bx / bl * 15, by / bl * 15, 35, 811);
+            // ★批六 C1 载体归位：811 由 Arrow(shoot) 改走 spawnHostileProj→Dart——
+            //  批五在 DART_STYLE 811 的 AI 尘/Kill 尘/α 渐显/白化剪影在 Arrow 载体上
+            //  全部不可达;弹道参数不变（原版 NPC.cs:51435 速 15/伤 35/ai 缺省）
+            this.spawnHostileProj(game, this.cx, this.cy, bx / bl * 15, by / bl * 15, 35, 811);
           } else this.lai0 = 50;
         } else this.lai0 = 50;
       }
@@ -7899,7 +7977,9 @@ export class Enemy extends Entity {
           const bl = Math.hypot(bvxx, bvyy) || 1;
           const sx = bvxx / bl * 13 + (Math.random() * 5 - 2.5);        // num10=13、散布 ±2.5
           const sy = bvyy / bl * 13 + (Math.random() * 5 - 2.5);
-          shoot(game, mx, my, sx, sy, getAttackDamageForProjectiles(40, 30, this.difficulty), 811);
+          // ★批六 C1 载体归位（同 619 口）：Arrow(shoot)→spawnHostileProj→Dart——
+          //  case 620 伤 40/30 难度化、13 速 ±2.5 散布原样保留
+          this.spawnHostileProj(game, mx, my, sx, sy, getAttackDamageForProjectiles(40, 30, this.difficulty), 811);
           // 发后 ai[0] 记弹道方位档,flag16 → direction 随弹向（:64605-64623）
           if (Math.abs(sy) > Math.abs(sx) * 2) this.ai0 = sy > 0 ? 1 : 5;
           else if (Math.abs(sx) > Math.abs(sy) * 2) this.ai0 = 3;
@@ -11722,7 +11802,8 @@ export class Enemy extends Entity {
         const st = game.world.store;
         const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
         const mtx = Math.floor(this.cx / TILE), mty = Math.floor(this.cy / TILE);
-        const far = Math.abs(this.cx - player.cx) + Math.abs(this.cy - player.cy) > 2000; // :21100
+        // ★批六 M1：原版 far = Length()>2000f 欧氏度量（NPC.cs:21207）——曾误曼哈顿
+        const far = Math.hypot(this.cx - player.cx, this.cy - player.cy) > 2000;
         for (let att = 0; att < 50 && !far; att++) {
           const sx = ptx + Math.floor(Math.random() * 13) - 6;
           const sy = pty + Math.floor(Math.random() * 13) - 6;
@@ -11743,11 +11824,9 @@ export class Enemy extends Entity {
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(curse, 'projectiles');
           break;
         }
-        if (far) {
-          const curse = new Dart(this.cx, this.cy, 0, 0, this.baseDamage, 596);
-          curse.hostile = true;
-          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(curse, 'projectiles');
-        }
+        // ★批六 M1：far（>2000px）分支删除——原版超距只播 Item8 零弹（NPC.cs:21195
+        //  PlaySound 在 far 判定【前】恒播;while(!flag7) 门整跳 = 不生成任何弹体）。
+        //  本仓发射音已在 fireCasterVolley 尾非 172 恒播（Item_8）,far 语义自此成立
       } else if (vid === 172) {
         // 符文法师（:21228-21240）：单发符文爆弹 129——速 10、伤 40、瞄准 ±10 抖动、
         //  timeLeft 300；发射音 21196 例外门已在外层跳过（172 无声）
@@ -11987,13 +12066,19 @@ export class Enemy extends Entity {
       if (mist) { mist.vx *= 0.5; mist.vy *= 0.1; }
     }
 
-    // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（:20020-20025） ----
-    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续
-    if (game.world.clock.isDay || player.dead) {
+    // ---- 白天/NPC 自身死亡动画位：向上漂离 + EncourageDespawn(10)（:20122-20127）----
+    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续。
+    // ★MINOR-3（2026-09-02 双触发摘除）：原版门 = `Main.IsItDay() | dead`——dead 是
+    //   NPC 自身死亡动画位（checkDead 置位）,非玩家死亡。`|| player.dead` 系自加偏离,
+    //   摘除：死亡玩家 active 仍真、hitbox 照常参与索敌与 CheckActive 两窗（:78736
+    //   尸体几何）,EoC 夜间对尸继续状态机、复活原地续打;本仓死亡怪即时出桶,AI 不再
+    //   跑 → NPC 自身 dead 位无对应消费面（登记）。兜底 `dist > T*120 → dead=true`
+    //   同为自加偏离一并摘除——离屏退场统一由 CheckActive 四步承担（boss 归零翻假
+    //   :78791-78794,无需 AI 层自杀;旧兜底会把"玩家死后漂离"曲解为瞬灭）
+    if (game.world.clock.isDay) {
       this.vy -= 0.04;
       this.encourageDespawn(10);
       this.x += this.vx; this.y += this.vy;
-      if (dist > T * 120) this.dead = true;   // 漂远后兜底消失
       return;
     }
 

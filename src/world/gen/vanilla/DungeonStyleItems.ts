@@ -711,3 +711,19 @@ for (const [nm, id] of Object.entries(_NAME_TO_ID)) {
   const lc = STYLE_LIGHTCHEST_TABLES[id];
   if (st2 && lc) st2.Lch = lc;
 }
+
+// ★IIIII111c：PD 面（CalculatePlatformsAndDoorsOnEdgesOfRoom/OnHallway，DU.cs:67-269）
+// DoorItemTypes 表（DungeonGenerationStyles.cs 各档终态提取；键=Style 值）。
+// style0（Default）=空表（DC.cs:698 DoorItemTypes=new int[0]）——空表/Style==0 都不掷。
+export const STYLE_DOOR_ITEM_TABLES: Record<number, number[]> = {
+  0: [], 1: [25, 4415], 2: [2044, 5807], 3: [4307], 4: [650, 3967, 5765],
+  5: [912, 817, 5786], 6: [652, 3888], 7: [818], 8: [651], 9: [1711],
+  10: [1137], 11: [5558], 12: [4415], 13: [819], 14: [819], 15: [3888],
+};
+// 门 item → DerivedPlacementDetails.tileStyle（tile 10 placeStyle；Item.cs SetDefaults
+// 逐项提取：1709..1712 段=20+type−1709）。
+export const DOOR_ITEM_STYLE: Record<number, number> = {
+  25: 0, 650: 1, 651: 2, 652: 3, 817: 5, 818: 6, 819: 7, 912: 10, 1137: 12,
+  1711: 22, 2044: 27, 3888: 36, 4307: 43, 4415: 44, 5558: 49,
+  5765: 54, 5786: 55, 5807: 56,
+};

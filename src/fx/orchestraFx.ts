@@ -32,26 +32,57 @@
 //     moonLordWhipHitFx·arcSurgeFx(各 1)——后续新增型沿用同一登记不再逐站备注。
 //     ★F6 终局甄别（2026-09-01,全部内联 (rng×2−1) 站逐站对 1458 原版掷点判别收口;
 //     上清单系登记期嫌疑面,非全为三角/circ 债——NextFloatDirection 均匀站维持）：
-//     ①三角化（真 RotatedByRandom）=gasTrapFx 外/内环(:2939 π/20/:2953 π/15)+
-//       harpyCharmFamilyFx 外抛(:529 RotatedByRandom(6.28318548)→half π)/内抛(:551
-//       RotatedByRandom(0.31415927)),改 (rng()−rng())×half;
-//     ②circ 化（真 NextVector2Circular,单掷双分量共享）=rainbowRodHitFx sparkle
-//       (8,8)×scale(:3475)/d267(1,1)(:3498)+方向标量标量共享(:3499)/白影 CloneDust
-//       速度复制(:3511,Dust.cs:260 无掷)/deadCellsFlint(5,3)Y反(:1887)+位(7,0)(:1892)/
-//       deadCellsDownDash(5,3)Y反(:2144)+位(10,0)(:2153)/deadCellsBeheadedHead(4,4)
-//       ×num2(:1938)/stellarTune(12,12)×0.7(:3685)/snappingStoneRechargeFx pyroclastic
-//       (2,4)(:448,曾裸 Math.random 盒均匀);
+//     ①三角化（真 RotatedByRandom,式=(rng()−rng())×maxRadians）=gasTrapFx 外/内环
+//       (:2939 π/20/:2953 π/15)+harpyCharmFamilyFx 外抛(:529 maxRadians=本尊
+//       6.2831854820251465≈τ 全圆——F6 对抗 C1 纠"→half π"笔误,非半幅)/内抛(:551
+//       0.3141592741012573);
+//     ②circ 化（真 NextVector2Circular,单掷双分量共享;C2 系统性=17 站逐分量双调用
+//       清偿,掷数恢复原版=每站 2 掷）=rainbowRodHitFx sparkle(8,8)×scale(:3475)/
+//       d267(1,1)(:3498)+方向标量共享(:3499)/白影 CloneDust(Dust.cs:260 无掷)/
+//       deadCellsFlint(5,3)Y反(:1887)+位(7,0)(:1892)/deadCellsDownDash(5,3)Y反(:2144)
+//       +位(10,0)(:2153)/deadCellsBeheadedHead(4,4)×num2(:1938)/stellarTune(12,12)×
+//       0.7(:3685)/snappingStoneRechargeFx pyroclastic(2,4)(:448) ‖ C2 批新增：
+//       stardustPunch 位(8,8)(:3422)+d267 速(2,2)(:3437)/princessWeapon 位(8,8)(:3367)/
+//       formatC 位(8,8)(:3713)/blackLightningSmall 位(12,12)(:3527)/blackLightningHit
+//       位(12,12)(:3570)/lightningSmall 位(6,6)(:3646)/stormLightningWindup 位(6,6)
+//       (:1000)/keybrand 带1(4,4)(:3827)+带3(:3902)/townSlime 三味速(6,6)(:2570/:2584/
+//       :2590)/cattiva 位(6,6)(:3776)/rainbowBoulder v3 d267 速(1,1)(:1633)/
+//       bestReforge 位(16,16)(:3089 近似层)/silverBullet 位(4,4)(:3285)/itemTransfer
+//       位(8,8)+速(24,24)(:2692 Square 近似)/inScreenDungeon 速(2,2)(:888)——
+//       固定种子行为已漂移,锚这些站的坐标值须按新输出更新;
 //     ③NextVector2CircularEdge 直译修=rainbowBoulderFx v1 d66(:1551,角均匀无半径掷
 //       →X 清零(:1554)+Y>0 反号(:1556))——旧 dvyRaw 乘法为自造形变;
 //     ④维持均匀（原版即 NextFloatDirection/NextFloat×2−1/Next(-n,n) 整数档）=
-//       rainbowRodHit 抖动(:3468/:3499)/classyCane(:2900 Next20/:2901 Next(-10,11))/
 //       deadCellsFlint·DownDash 块尘近似层/flint 火花(:1836 前后无三角/circular 掷)/
 //       stellarTune·blackLightningSmall·blackLightningHit·lightningSmall·
 //       stormLightningWindup 角抖(:3682/:3525/:3566/:3638/:1002 均 NextFloatDirection×0.25)/
-//       swordConeArmDust(:2788 族)/moonLordWhip(:1698)/stardustPunch(:3421 角均匀)/
-//       formatC(:3705/:3710/:3711)/keybrand(:3823/:3840)/shimmerArrow(:2610/:2666)/
-//       cattiva(:3772)/rainbowBoulder v3(:1597/:1635)/snappingStone kind1(:662/:724)/
-//       gasTrap 径向 5+rand(:2937)。
+//       swordConeArmDust(:2788 族)/formatC(:3705/:3710/:3711)/shimmerArrow(:2610)/
+//       cattiva(:3772)/gasTrap 径向 5+rand(:2937)。
+//     ⑤★F6 对抗批收尾（2026-09-01 红队 findings→蓝队修复,tests/orchestra-f6-shape.test.ts
+//       形锚闸门）：M1 三站成对尘第二粒取负向量（moonLordWhip :1698/:1702、shimmerArrow
+//       :2666/:2671、snappingStone kind1 :724/:727——ja 单掷共享 xy+半径 NextFloat 单掷
+//       乘整向量,旧 side 乘 sin 项/dvx·rng(),dvy·rng() 每分量独掷退役）;M2 paladinsHammer
+//       径向速度单标量(:828-832);M3 rainbowBoulder v3 d267 Y 抖+CloneDust 精确复制
+//       (scale=源/2、fadeIn=源×0.75、零掷);M4 rainbowRodHit jitter 单标量+掷序归位
+//       (:3469/:3470)/princessWeapon 速度因子 (0.6+0.35r)×0.66(:3363+:3374)/
+//       stardustPunch 全圆两掷+振幅 0.1·scale(:3414/:3419/:3420);M5 inScreenDungeon
+//       矩形单侧采样+position−=velocity×5(:886-893);M6 rainbowBoulder v3 先加后旋+
+//       位偏移用旋前速度+臂色 (num5+num3)%1(:1597/:1609/:1614/:1615)/classyCane 整数栅
+//       位 Next(20)+速 Next(−10,11)×0.4(:2896-2902);MINOR=gasTrap sy 补 +moveY+
+//       径向幅单掷(:2938)/silverBullet accel=−mv/30(:3290)/moonLordWhipEye
+//       accel=−(mv×0.25)/45(:1914)/princessWeapon d267 CloneDust 白影整粒补(:3402-3408)。
+//     ⑥掷序漂移【已清偿】（2026-09-02 蓝队批,固定种子复现序与原版逐掷一致,零残余）：
+//       概念说明=「掷序漂移」指分布形（每掷的分布族/参数）已对、但掷的先后次序错位或
+//       死掷（原版掷而弃值/掷后被覆写,返回值不入视觉面）缺漏,导致固定种子复现流与原版
+//       Main.rand 调用序错位——死掷必须照样掷（补 `rng();`）才能保流对齐。清偿面：
+//       deadCellsBarnacle 位→旋→速→scale（:2541-2545）/rainbowBoulder v1 d66 色先于
+//       速度掷（:1549）/stellarTune 先 t 后 Next(2)+紫支补掷+scale 色后（:3686-3697）/
+//       cattivaHit 同型色掷序+scale 掷接线（:3776-3789）/arcSurge pitch 掷+4 死掷
+//       （:1268 pitch、:1274 死 Next(4,9)、:1275 死 Circular、:1278 Next(6) 帧）/
+//       lightningSmall 相位掷+死 Next(1,3)+mix 掷序+速度 (1,0.5)×0.2（:3621-3647）/
+//       blackLightningSmall 相位掷（:3515）+死双掷 Lerp、blackLightningHit 死双掷 Lerp
+//       （:3528/:3569）/silverBullet 首尾死掷（:3280/:3283）/stardustPunch CloneDust
+//       白影（:3454-3458,零掷）/moonLordWhip d229 noGravity+±臂先正后负（:1698-1703）。
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
@@ -102,13 +133,14 @@ export function rainbowRodHitFx(
   const baseAng = rng() * Math.PI * 2;                    // num（:3463）
   const hueBase = rng();                                  // num3（:3465）
   for (let k = 0; k < 6; k++) {                           // 1/num2 六掷（:3467）
-    const scale = rng() * 0.4 + 0.4;                      // vector2 ∈[0.4,0.8]（:3469）
-    const jitterX = moveX * (rng() * 2 - 1) * 0.15;       // vector（:3468 NextFloatDirection）
-    const jitterY = moveY * (rng() * 2 - 1) * 0.15;
+    // ★M4①（F6）：jitter=NextFloatDirection×0.15 单标量 xy 共享（:3469）——曾逐分量
+    //  双掷;掷序归位=先 jitter 后 scale（原文 :3469 vector → :3470 vector2）
+    const jit = (rng() * 2 - 1) * 0.15;
+    const scale = rng() * 0.4 + 0.4;                      // vector2 ∈[0.4,0.8]（:3470）
     const ang = baseAng + rng() * Math.PI * 2;            // f（:3471）
     const spd = 1.5 * scale;                              // vector3（:3474）
-    const vx = Math.cos(ang) * spd + jitterX;
-    const vy = Math.sin(ang) * spd + jitterY;
+    const vx = Math.cos(ang) * spd + moveX * jit;
+    const vy = Math.sin(ang) * spd + moveY * jit;
     const off = circ(rng, 8);                             // ★F6 清偿：NextVector2Circular(8,8)（:3475）
     const offX = off.x * scale, offY = off.y * scale;     //  线性盘,单掷双分量共享（双层 sparkle 同位）
     const life = 60;                                      // num5（:3475 衰减窗=寿命）
@@ -124,16 +156,20 @@ export function rainbowRodHitFx(
   for (let i = 0; i < 12; i++) {
     // ★F6 清偿：velocity=NextVector2Circular(1,1)（:3498）线性盘 + MovementVector×
     //  NextFloatDirection×0.5（:3499,标量 xy 共享单掷）；CloneDust（Dust.cs:260,:
-    //  3511）=velocity 全量复制白影,不再重掷
+    //  3511）=velocity/scale/alpha 逐字段复制白影——scale=源/2、fadeIn=源×0.75、零掷
+    //  （★MINOR 收尾：曾独立重掷 scale 源域+丢 fadeIn 复制）
     const cv = circ(rng, 1);
     const jd = (rng() * 2 - 1) * 0.5;
+    const scl = 0.6 + rng() * 0.9;                        // scale（:3506）
+    const fd = 0.7 + rng() * 0.8;                         // fadeIn（:3507）
     const d = game.spawnDust?.(x, y, 1, 1, 267,
       cv.x + moveX * jd, cv.y + moveY * jd,
-      0, null, 0.6 + rng() * 0.9, true);
-    if (d) d.fadeIn = 0.7 + rng() * 0.8;
-    game.spawnDust?.(x, y, 1, 1, 267,
+      0, null, scl, true);
+    if (d) d.fadeIn = fd;
+    const w = game.spawnDust?.(x, y, 1, 1, 267,           // CloneDust 白影（:3509-3512）
       cv.x + moveX * jd, cv.y + moveY * jd, 0,
-      { r: 255, g: 255, b: 255, a: 255 }, (0.6 + rng() * 0.9) / 2, true);   // CloneDust 白影
+      { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
+    if (w) w.fadeIn = fd * 0.75;
   }
 }
 
@@ -154,18 +190,22 @@ export function paladinsHammerShockwaveFx(
       const d = game.spawnDust?.(x, y, w, h, 57, 0, 0, 200, null, 1.8);
       if (d) {
         const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
+        // ★M2（F6）：Normalize×9.5×NextFloat 单掷乘整向量（:828-832）——曾 vx/vy
+        //  各掷一套半径（径向速度方向不变但模长分布=E[√(u v)] 偏离线性盘）
+        const u = rng();
         d.noGravity = true;
-        d.vx = ((d.x - ccx) / dl) * 9.5 * rng();
-        d.vy = ((d.y - ccy) / dl) * 9.5 * rng();
+        d.vx = ((d.x - ccx) / dl) * 9.5 * u;
+        d.vy = ((d.y - ccy) / dl) * 9.5 * u;
       }
     }
     if (rng() < 1 / 3) {                                  // Next(3)==0
       const d = game.spawnDust?.(x, y, w, h, 43, 0, 0, 254, null, 1.3);
       if (d) {
         const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
+        const u = rng();                                  // 同上单掷（:838-842）
         d.noGravity = true;
-        d.vx = ((d.x - ccx) / dl) * 9.5 * rng();
-        d.vy = ((d.y - ccy) / dl) * 9.5 * rng();
+        d.vx = ((d.x - ccx) / dl) * 9.5 * u;
+        d.vy = ((d.y - ccy) / dl) * 9.5 * u;
       }
     }
   }
@@ -208,8 +248,11 @@ export function flyMealFx(game: GameHooks, x: number, y: number): void {
 export function classyCaneFx(game: GameHooks, x: number, y: number, rng: Rng = Math.random): void {
   const g0 = rng();
   if (g0 >= 0.5) {                                        // Next(0,2)==1（:2900）
-    game.spawnParticles?.(x + (rng() * 2 - 1) * 6, y + (rng() * 2 - 1) * 6,
-      '#EDEDF2', 1, 1, { life: 40, vx: (rng() * 2 - 1) * 4, vy: -(3 + Math.floor(rng() * 6) * 0.3) });
+    // ★M6②（F6）：位=整数栅（base=X−num2/2 后 +Next(20),:2895-2901）/速=Next(−10,11)×0.4
+    //  （:2902）——曾连续均匀 ±6/±4 盒（原版是 20×20 格栅 21 档速度谱）
+    game.spawnParticles?.(x + Math.floor(rng() * 20) - 10, y + Math.floor(rng() * 20) - 10,
+      '#EDEDF2', 1, 1,
+      { life: 40, vx: (Math.floor(rng() * 21) - 10) * 0.4, vy: -(3 + Math.floor(rng() * 6) * 0.3) });
   }
   for (let j = 0; j < 7; j++) {                           // num=7（:2904）
     const d = game.spawnDust?.(x - 10, y - 10, 20, 20, 10, 0, -1, 80, null, 1.1);
@@ -322,6 +365,8 @@ export function mushroomBoiTargetFoundFx(game: GameHooks, x: number, y: number):
  *   fadeIn .6+r×.6、scale .5、noGravity）。
  * ★2026-09-01 producer 锚补齐批：本仓 AI_197 出弹站（MinionProj 1025 支）首拍接线,
  * clientOnly:true → 本仓 owner 权威广播补远端（同 34 型偏差口径）。
+ * ★⑥掷序清偿（2026-09-02）：两循环逐掷序归位原文（d2 位→旋→速→scale :2541-2544、
+ * d267 位→旋→速→色→fadeIn :2552-2556），分布形不变、仅固定种子复现流对齐。
  */
 export function deadCellsBarnacleShotFiringFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
@@ -337,17 +382,22 @@ export function deadCellsBarnacleShotFiringFx(
     return [baseX * c - baseY * s, baseX * s + baseY * c];
   };
   for (let i = 0; i < 15; i++) {                           // 15×d2（:2539-2550）
-    const spd = i >= 8 ? 3 + rng() * 2 : 7 + rng() * 2;
+    // ★⑥清偿（2026-09-02）：掷序=位(:2541)→旋(:2542 RotatedByRandom)→速(:2542 三元支
+    //  NextFloat)→scale(:2544)——曾 spd 先于 rot/位（固定种子复现流错位）
+    const px = x + Math.floor(rng() * 8 - 4), py = y + Math.floor(rng() * 8 - 4);   // Next(-4,4)×2
     const [vx, vy] = rot(bx, by, 0.19634954631328583);
-    const d = game.spawnDust?.(x + Math.floor(rng() * 8 - 4), y + Math.floor(rng() * 8 - 4),
+    const spd = i >= 8 ? 3 + rng() * 2 : 7 + rng() * 2;
+    const d = game.spawnDust?.(px, py,
       0, 0, 2, vx * spd, vy * spd, 0, null, 1.2 + Math.floor(rng() * 10 - 5) * 0.01, true);
     if (d) { d.alpha = 50; d.fadeIn = 0.5; d.noGravity = true; }
   }
   for (let j = 0; j < 5; j++) {                            // 5×d267（:2551-2559）
-    const t = rng() * 0.25;                                // Lerp(DOG,White,r×.25)
+    // ★⑥清偿：掷序=位(:2552)→旋(:2553)→速(:2553)→色(:2555)→fadeIn(:2556)——曾 t/位 错位
+    const px = x + Math.floor(rng() * 8 - 4), py = y + Math.floor(rng() * 8 - 4);   // Next(-4,4)×2
     const [vx, vy] = rot(bx, by, 0.09817477315664291);
     const spd = rng() * 8;
-    const d = game.spawnDust?.(x + Math.floor(rng() * 8 - 4), y + Math.floor(rng() * 8 - 4),
+    const t = rng() * 0.25;                                // Lerp(DOG,White,r×.25)
+    const d = game.spawnDust?.(px, py,
       0, 0, 267, vx * spd, vy * spd, 127,
       { r: Math.round(85 + 170 * t), g: Math.round(107 + 148 * t), b: Math.round(47 + 208 * t), a: 255 },
       0.5, true);
@@ -447,11 +497,13 @@ export function stellarTuneFx(
     const ang = Math.PI * 2 * (i / 5) + phase + (rng() * 2 - 1) * 0.25;   // NextFloatDirection×.25 均匀
     const spd = 1.5 * 0.7;                                 // vector2 = 1.5×(0.7,0.7)
     const jc = circ(rng, 12);                              // ★F6 清偿：NextVector2Circular(12,12)（:3685）
-    const scale = 0.2 + rng() * 0.8;
+    // ★⑥清偿（2026-09-02）：掷序=先 t（:3686 金 Lerp 恒掷）后 Next(2)（:3687）——紫支
+    //  再补掷 t2（:3689,金支 1 掷）;scale 掷归色后（:3697）——曾 scale 先于色掷且紫支漏 t2
     const t = rng();
     const col = rng() < 0.5
-      ? lerpCss([255, 215, 0], [255, 105, 180], t)         // Lerp(Gold,HotPink,r)
-      : lerpCss([238, 130, 238], [255, 105, 180], t);      // Lerp(Violet,HotPink,r)
+      ? lerpCss([238, 130, 238], [255, 105, 180], rng())   // Lerp(Violet,HotPink,t2)（Next(2)==0 紫支）
+      : lerpCss([255, 215, 0], [255, 105, 180], t);        // Lerp(Gold,HotPink,t)（金支）
+    const scale = 0.2 + rng() * 0.8;
     game.spawnParticles?.(x + jc.x * 0.7, y + jc.y * 0.7,
       col, 1, spd, { life: 60, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
         damp: 1 - 1 / 60, grav: 0, size: 1.4 * scale });
@@ -832,12 +884,18 @@ export function moonLordWhipHitFx(
     fc(0.2, 1, 0.4, 1), 1, 4, { life, vx, vy, size: 6 * 0.7 });
   for (let k = 0; k < 2; k++) {
     void k;
-    for (const side of [-1, 1]) {
-      const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;
-      const dvx = vx * Math.cos(ja) - side * vy * Math.sin(ja);
-      const dvy = vx * Math.sin(ja) + side * vy * Math.cos(ja);
-      game.spawnDust?.(x + vx * 4, y + vy * 4, 1, 1, 229,
-        dvx * rng(), dvy * rng(), 0, null, 1.2);
+    // ★M1（F6）：d229 成对尘=±(vector2.RotatedBy(ja)×NextFloat)（:1698/:1702）——
+    //  第二粒取负向量（旧 side 只乘 sin 项=自造形变）；ja 单掷共享 xy、半径 NextFloat
+    //  单掷乘整向量（旧 dvx*rng(),dvy*rng() 每分量独掷）；swordConeArmDust 同范式
+    // ★⑥清偿（2026-09-02）：臂序=先正后负（:1698 正臂先掷/:1702 负臂后掷,曾 [-1,1]
+    //  反序）+ noGravity=true（:1699/:1703 NewDustPerfect 后置字段,曾漏）
+    for (const side of [1, -1]) {
+      const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;  // NextFloatDirection×τ×0.025
+      const c = Math.cos(ja), s = Math.sin(ja);
+      const spd = rng();                                 // NextFloat 半径单掷
+      const d = game.spawnDust?.(x + vx * 4, y + vy * 4, 1, 1, 229,
+        side * (vx * c - vy * s) * spd, side * (vx * s + vy * c) * spd, 0, null, 1.2);
+      if (d) d.noGravity = true;
     }
   }
 }
@@ -852,7 +910,9 @@ export function moonLordWhipEyeFx(
   const ang = rng() * Math.PI * 2;                       // LocalPosition=+dir×num×num2×0.5
   game.spawnParticles?.(x + Math.cos(ang) * 22.5, y + Math.sin(ang) * 22.5,
     'rgba(255,255,255,0.65)', 1, 0,
-    { life: 45, vx: moveX * 0.05, vy: moveY * 0.05, damp: 1, grav: 0, size: 2.2 + rng() * 0.9 });
+    // ★MINOR（F6）：AccelerationPerFrame=−(MovementVector×0.25)/45（:1914,注释已有,曾漏实现）
+    { life: 45, vx: moveX * 0.05, vy: moveY * 0.05,
+      ax: -(moveX * 0.25) / 45, ay: -(moveY * 0.25) / 45, damp: 1, grav: 0, size: 2.2 + rng() * 0.9 });
 }
 
 /** hsl css → DustColor 反解（spawnDust color 形参直配,a 缺省 255） */
@@ -867,27 +927,45 @@ export function hexToRgbArr(css: string): { r: number; g: number; b: number; a: 
 
 /**
  * Spawn_StardustPunch（:3412-3461）：星尘拳命中紫罗兰光点（hue .59-.65）+ 白影 +
- * 2×d267 星屑（scale .6+r×2、position ±Circular(16)）。生产者 P.cs:14315(1039)/:14331(623)
- * ——MovementVector=(direction, rand±0.5)×(2..4),Position=lerp(center,盒最近点,.5)+Y 抖动。
+ * 2×d267 星屑×彩/白双层（scale .6+r×2、position ±Circular(16)）。生产者 P.cs:14315(1039)/
+ * :14331(623)——MovementVector=(direction, rand±0.5)×(2..4),Position=lerp(center,盒最近
+ * 点,.5)+Y 抖动。★⑥清偿（2026-09-02）：d267 CloneDust 白影整粒补（:3454-3458,零掷）。
  */
 export function stardustPunchFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
 ): void {
-  const scale = rng() * 0.4 + 0.4;
-  const vi = (rng() * 2 - 1) * Math.PI;
-  const vxp = moveX * (0.3 + rng() * 0.35);
-  const vyp = moveY * (0.3 + rng() * 0.35);
-  const px = x + circ(rng, 8).x * scale, py = y + circ(rng, 8).y * scale;
+  // ★M4③（F6）：角支撑全圆两掷 phase=rng×τ / ang=phase+rng×τ（:3414/:3419——曾单掷
+  //  均匀 ±π 半圆）+振幅 0.1·scale（:3420 曾 0.08）+速度因子 (0.3+0.35r) 单标量 xy
+  //  共享（:3417 曾逐分量双掷）
+  const phase = rng() * Math.PI * 2;                      // num（:3414）
+  const mf = 0.3 + rng() * 0.35;                          // vector=MovementVector×(0.3+0.35r)（:3417）
+  const scale = rng() * 0.4 + 0.4;                        // vector2 ∈[0.4,0.8]（:3418）
+  const ang = phase + rng() * Math.PI * 2;                // f（:3419）
+  const amp = 0.1 * scale;                                // vector3=0.1×vector2（:3420）
+  const vxp = moveX * mf + Math.cos(ang) * amp;
+  const vyp = moveY * mf + Math.sin(ang) * amp;
+  const off = circ(rng, 8);                               // ★C2：NextVector2Circular(8,8)（:3422）单掷共享
+  const px = x + off.x * scale, py = y + off.y * scale;
   game.spawnParticles?.(px, py, orchestraHslCss((0.6 + rng() * 0.05) % 1, 1, 0.4 + rng() * 0.25),
-    1, Math.hypot(vxp, vyp), { life: 60, vx: vxp + Math.cos(vi) * 0.08 * scale, vy: vyp + Math.sin(vi) * 0.08 * scale, size: 2 * scale });
+    1, Math.hypot(vxp, vyp), { life: 60, vx: vxp, vy: vyp, size: 2 * scale });
   game.spawnParticles?.(px, py, 'rgba(255,255,255,0.8)', 1, Math.hypot(vxp, vyp),
-    { life: 60, vx: vxp, vy: vyp, size: 1.2 * scale });
+    { life: 60, vx: vxp, vy: vyp, size: 1.2 * scale });   // Scale=vector2×0.6 白影同速
   for (let i = 0; i < 2; i++) {
-    const dc = circ(rng, 16);
-    const d = game.spawnDust?.(x + dc.x, y + dc.y, 1, 1, 267,
-      circ(rng, 2).x + moveX * (0.5 + rng() * 0.5) * 1.4, circ(rng, 2).y, 0,
-      hexToRgbArr(orchestraHslCss((0.59 + rng() * 0.05) % 1, 1, 0.4 + rng() * 0.25)), 0.6 + rng() * 2);
+    // ★C2（F6）：circ(2,2) 单掷共享 + move 因子 (0.5+0.5r)×1.4 单掷乘整向量
+    //  （:3437-3444 曾 circ 逐分量双掷且 moveY 丢因子）
+    const hueC = orchestraHslCss((0.59 + rng() * 0.05) % 1, 1, 0.4 + rng() * 0.25);
+    const cv = circ(rng, 2);
+    const df = (0.5 + rng() * 0.5) * 1.4;
+    const scl = 0.6 + rng() * 2;
+    const pc = circ(rng, 16);
+    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267,
+      cv.x + moveX * df, cv.y + moveY * df, 0, hexToRgbArr(hueC), scl);
     if (d) d.noGravity = true;
+    // ★⑥清偿（2026-09-02）：CloneDust 白影整粒补（:3454-3458 与 princessWeapon :3404-3408
+    //  全同构：scale=源/2、fadeIn=源×0.75（源 fadeIn=0→0）、color 白、零掷）——曾缺
+    const w = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267,
+      cv.x + moveX * df, cv.y + moveY * df, 0, { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
+    if (w) w.noGravity = true;
   }
 }
 
@@ -899,18 +977,28 @@ export function stardustPunchFx(
 export function princessWeaponFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
 ): void {
-  const scale = rng() * 0.4 + 0.2;
-  const vxp = moveX * 0.66, vyp = moveY * 0.66;
-  const px = x + circ(rng, 8).x * scale, py = y + circ(rng, 8).y * scale;
+  // ★M4②（F6）：速度=MovementVector×(0.6+0.35r)×0.66（:3363 终值覆写 :3374）——
+  //  曾完全丢 (0.6+0.35r) 因子（终值式直译缺前段）
+  const mf = (0.6 + rng() * 0.35) * 0.66;
+  const scale = rng() * 0.4 + 0.2;                        // vector2 ∈[0.2,0.6]（:3364）
+  const vxp = moveX * mf, vyp = moveY * mf;
+  const off = circ(rng, 8);                               // ★C2：NextVector2Circular(8,8)（:3367）单掷共享
+  const px = x + off.x * scale, py = y + off.y * scale;
   game.spawnParticles?.(px, py, orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25),
     1, Math.hypot(vxp, vyp), { life: 60, vx: vxp, vy: vyp, size: 2 * scale });
   game.spawnParticles?.(px, py, 'rgba(255,255,255,0.8)', 1, Math.hypot(vxp, vyp),
     { life: 60, vx: vxp, vy: vyp, size: 1.2 * scale });
   for (let i = 0; i < 2; i++) {
-    const dc = circ(rng, 16);
-    const d = game.spawnDust?.(x + dc.x, y + dc.y, 1, 1, 267, moveX, moveY, 0,
-      hexToRgbArr(orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25)), 0.1);
-    if (d) d.noGravity = true;
+    // ★C2（F6）+MINOR：velocity 终值=MovementVector 覆写（:3406）+CloneDust 白影整粒
+    //  补（:3402-3408 每彩尘配一白影：scale=源/2、fadeIn=源×0.75、color 白、零掷）
+    const hueC = orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25);
+    const pc = circ(rng, 16);
+    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, moveX, moveY, 0,
+      hexToRgbArr(hueC), 0.1);
+    if (d) { d.noGravity = true; d.fadeIn = 0; }
+    const w = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, moveX, moveY, 0,
+      { r: 255, g: 255, b: 255, a: 255 }, 0.1 / 2, true);
+    if (w) { w.noGravity = true; w.fadeIn = 0; }          // CloneDust 全字段复制（源 fadeIn=0）
   }
 }
 
@@ -926,8 +1014,9 @@ export function formatCFx(
   const a0 = base + (rng() * 2 - 1) * 0.1;
   const mag = 3 * 0.7 * ((rng() * 2 - 1) || 1);
   const vel = Math.abs(mag);
-  const off = Math.cos(a0) * -mag * 0.7 * 15 * 0.2 + circ(rng, 8).x;
-  const offY = Math.sin(a0) * -mag * 0.7 * 15 * 0.2 + circ(rng, 8).y;
+  const off3 = circ(rng, 8);                             // ★C2：NextVector2Circular(8,8)（:3713）单掷共享
+  const off = Math.cos(a0) * -mag * 0.7 * 15 * 0.2 + off3.x;
+  const offY = Math.sin(a0) * -mag * 0.7 * 15 * 0.2 + off3.y;
   game.spawnParticles?.(x + off, y + offY, 'rgba(255,215,0,0.5)', 1, vel,
     { life: 15, vx: Math.cos(a0) * mag, vy: Math.sin(a0) * mag, size: 2.2 });
   game.spawnParticles?.(x + off, y + offY, 'rgba(255,255,255,0.6)', 1, vel,
@@ -964,18 +1053,27 @@ function blackLightningTint(rng: Rng): string {
 /**
  * Spawn_BlackLightningSmall（:3513-3552）：黑雷拖带（径向×spd×(1,0.5)×0.2+movementVector
  * 纵向牵引,scale .5,fadeOut .5）。NPC.cs:92297/P.cs:48715（clientOnly:true）。
+ * ★⑥清偿（2026-09-02）：相位掷补（:3515 num=NextFloat×τ,曾漏掷）+死双掷 Lerp 补
+ * （:3528 `Color.Lerp(Color.Lerp(Black,indigo,r×.5),value,r×.6)` 弃色式,2 掷不入视觉）。
  */
 export function blackLightningSmallFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
 ): void {
-  const groups = ((rng() * 2) | 0) + 1;                  // Next(1,3)
-  const jitter = circ(rng, 12).x * 0.7;
+  const phase = rng() * Math.PI * 2;                     // num（:3515）
+  const groups = ((rng() * 2) | 0) + 1;                  // Next(1,3)（:3516）
   for (let g = 0; g < groups; g++) {
-    const a = Math.PI * 2 * (g / groups) + jitter;
+    // ★C3①（F6）：角抖=NextFloatDirection×0.25（:3525 均匀）——曾误接 circular(12).x×0.7
+    const a = Math.PI * 2 * (g / groups) + phase + (rng() * 2 - 1) * 0.25;
     const spd = rng() * 4 + 0.1;
-    const vx = Math.cos(a) * spd * 0.5 * 0.2 + moveX;
-    const vy = Math.sin(a) * spd * 0.25 * 0.2 + moveY;
-    game.spawnParticles?.(x + jitter, y + circ(rng, 12).y * 0.7, blackLightningTint(rng), 1,
+    // ★C3③（F6）：速度=dir×spd×(1,0.5)×0.2（:3542 逐轴）——y 系数曾 0.25、x 侧
+    //  亦残留 0.5（同比半幅）,按 (1f,0.5f) 向量式归位 → y/x 系数比=0.5
+    const vx = Math.cos(a) * spd * 0.2 + moveX;
+    const vy = Math.sin(a) * spd * 0.5 * 0.2 + moveY;
+    // ★C3②+C2（F6）：LocalPosition=NextVector2Circular(12,12)×0.7 单掷共享 xy（:3527）
+    const off = circ(rng, 12);
+    rng();                                               // 死掷（原版 :3528 弃色式 Lerp 第 1 掷,RNG 流对齐）
+    rng();                                               // 死掷（原版 :3528 弃色式 Lerp 第 2 掷,RNG 流对齐）
+    game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7, blackLightningTint(rng), 1,
       Math.hypot(vx, vy), { life: 24, vx, vy, damp: 1, size: 0.5, grav: 0 });
   }
 }
@@ -984,6 +1082,7 @@ export function blackLightningSmallFx(
  * Spawn_BlackLightningHit（:3554-3593）：黑雷爆——7 组扩散环帧条（scale One、
  * ScaleVelocity .05/t）。生产者 WhipTagEffect_DarkHarvest.cs:24 clientOnly:false +
  * P.EmitBlackLightningParticles :15201。
+ * ★⑥清偿（2026-09-02）：死双掷 Lerp 补（:3569 弃色式,2 掷不入视觉,同 Small :3528）。
  */
 export function blackLightningHitFx(
   game: GameHooks, x: number, y: number, _moveX = 0, _moveY = 0, rng: Rng = Math.random,
@@ -993,7 +1092,10 @@ export function blackLightningHitFx(
     const a = Math.PI * 2 * (g / 7) + phase + (rng() * 2 - 1) * 0.25;
     const spd = rng() * 4 + 0.1;
     const vx = Math.cos(a) * spd, vy = Math.sin(a) * spd * 0.5;
-    game.spawnParticles?.(x + circ(rng, 12).x * 0.7, y + circ(rng, 12).y * 0.7,
+    const off = circ(rng, 12);                           // ★C2：circular(12,12)×0.7（:3570）单掷共享
+    rng();                                               // 死掷（原版 :3569 弃色式 Lerp 第 1 掷,RNG 流对齐）
+    rng();                                               // 死掷（原版 :3569 弃色式 Lerp 第 2 掷,RNG 流对齐）
+    game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7,
       blackLightningTint(rng), 1, Math.hypot(vx, vy),
       { life: 24, vx, vy, damp: 0.99, size: 1, grav: 0 });
   }
@@ -1002,6 +1104,9 @@ export function blackLightningHitFx(
 /**
  * Spawn_LightningSmall 共通本体（:3619-3673）：蓝(37)/红(77) 判序共用——UniqueInfoPiece
  * 打包色覆盖缺省 cyan 档、AddLight(.28,.56,.7)、10t 帧条+50% d226/d331 微尘随行。
+ * ★⑥清偿（2026-09-02）：相位掷补（:3621 num=NextFloat×τ,曾漏掷）+死掷补（:3623 第二次
+ * `Next(1,3)` 弃值）+mix 掷归 circular 后（:3641）+速度系数 (1,0.5)×0.2 归位（:3645,
+ * 蓝 D 遗留=旧 (0.5,0.25)×0.2 同比半幅,与 blackLightningSmall C3③ 同族）。
  */
 export function lightningSmallOrchestra(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0,
@@ -1010,14 +1115,18 @@ export function lightningSmallOrchestra(
   game.addLightAt?.(x, y, 0.28, 0.56, 0.7);
   const colA = packedColor !== 0 ? orchestraPackedCss(packedColor, 255) : 'rgba(133,255,255,255)';
   const colB = packedColor !== 0 ? colA : 'rgba(15,100,155,255)';
-  const groups = ((rng() * 2) | 0) + 1;
+  const phase = rng() * Math.PI * 2;                     // num（:3621）
+  const groups = ((rng() * 2) | 0) + 1;                  // num2=Next(1,3)（:3622）
+  rng();                                                 // 死掷（原版 :3623 Next(1,3) 掷不消费,RNG 流对齐）
   for (let g = 0; g < groups; g++) {
-    const a = Math.PI * 2 * (g / groups) + (rng() * 2 - 1) * 0.25;
+    const a = Math.PI * 2 * (g / groups) + phase + (rng() * 2 - 1) * 0.25;
     const spd = rng() * 4 + 0.1;
-    const vx = Math.cos(a) * spd * 0.5 * 0.2 + moveX;
-    const vy = Math.sin(a) * spd * 0.25 * 0.2 + moveY;
-    const mix = rng() < 0.5 ? colA : colB;
-    game.spawnParticles?.(x + circ(rng, 6).x * 0.7, y + circ(rng, 6).y * 0.7, mix, 1,
+    // ★⑥清偿：速度=dir×spd×(1,0.5)×0.2（:3645 同 blackLightningSmall (1f,0.5f) 式）
+    const vx = Math.cos(a) * spd * 0.2 + moveX;
+    const vy = Math.sin(a) * spd * 0.5 * 0.2 + moveY;
+    const off = circ(rng, 6);                            // ★C2：circular(6,6)×0.7（:3640）单掷共享
+    const mix = rng() < 0.5 ? colA : colB;               // Lerp(color,value,r) 掷序归位（:3641）
+    game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7, mix, 1,
       Math.hypot(vx, vy), { life: 10, vx, vy, damp: 1, size: 1, grav: 0 });
     if (rng() >= 0.5) {                                  // Next(2)==0 → 1/2（:3660-3672）
       const d = game.spawnDust?.(x, y, 1, 1, packedColor !== 0 ? 331 : 226,
@@ -1079,7 +1188,8 @@ export function stormLightningWindupFx(
     const spd = rng() * 3 + 0.1;
     let vx = Math.cos(a) * spd + moveX * 0.5;
     let vy = Math.sin(a) * spd * 0.5 + moveY * 0.5;
-    let px = x + circ(rng, 6).x * 0.7, py = y + circ(rng, 6).y * 0.7;
+    const off = circ(rng, 6);                            // ★C2：circular(6,6)×0.7（:1000）单掷共享
+    let px = x + off.x * 0.7, py = y + off.y * 0.7;
     if (rng() < 1 / 3) {                                 // Next(3)==0（:1014-1017）
       px += vx * (frames - 1);
       py += vy * (frames - 1);
@@ -1108,7 +1218,11 @@ export function stormLightningWindupFx(
  *   · 端点白镜像粒与主粒共享同一 vector=circular(6,6)×0.7 偏移位（:1293 LocalPosition=
  *     settings.PositionInWorld(已覆写 EndPosition)+vector / :1311 mirror 同位）;scale 镜
  *     像 ×0.5=0.6375（:1317 Scale ×0.5f）。
- *   · rng 流差异登记：原文循环内吞 Main.rand.Next(4,9)(:1273 弃值)+Next(6) 帧——视觉零差。
+ *   · ★⑥清偿（2026-09-02）rng 流归位：pitch 掷（:1268 NextFloatDirection×0.2−0.05,
+ *     原版消费为变调——组播兜底通道无 pitch 形参,值暂弃,流对齐保序）+ 4 死掷 =
+ *     第一循环 `Next(4,9)`(:1274 弃值)、`NextVector2Circular(6,6)`(:1275,SetBasicInfo
+ *     消费后被 :1282 LocalPosition 覆写=视觉死掷)、帧选 `Next(6)`(:1278,原版消费为
+ *     FadingParticle 帧面——本仓锚驻留帧条无帧面,弃值保流)。
  * @param stormTier settings.MovementVector.Y==1f 雷暴三倍寿命档
  */
 export function arcSurgeFx(
@@ -1124,15 +1238,21 @@ export function arcSurgeFx(
   void rot;
   game.addLightAt?.(ex, ey, 0.4, 0.8, 1);                // AddLight(PositionInWorld=EndPosition)（:1264）
   game.playSfxWav?.('Item_15', 1, anchorX, anchorY);     // PlaySound(Item15, playerAnchorPos)（:1266）
-  game.playSfxFiles?.(['arcsurge'], 0.6, anchorX, anchorY);   // SoundID.ArcSurge 组播兜底文件名
+  const pitch = (rng() * 2 - 1) * 0.2 - 0.05;            // :1268 NextFloatDirection×0.2−0.05（原版=变调）
+  void pitch;                                            // 组播兜底通道无 pitch 形参→值暂弃（流对齐,扩签名超本文件域）
+  game.playSfxFiles?.(['arcsurge'], 0.6, anchorX, anchorY);   // SoundID.ArcSurge 组播兜底文件名（:1268）
+  // 第一循环（num3=1 单拍,:1272-1289）：三掷先于锚粒 Add
+  rng();                                                 // 死掷（原版 :1274 Next(4,9) 掷不消费,RNG 流对齐）
+  circ(rng, 6);                                          // 死掷（原版 :1275 Circular——:1282 LocalPosition 覆写,视觉死掷）
+  rng();                                                 // 死掷（原版 :1278 Next(6) 帧选,本仓无帧面,RNG 流对齐）
   game.spawnParticles?.(anchorX, anchorY, white, 1, 0,
-    { life: lifeNum2, vx: 0, vy: 0, damp: 1, size: 1.5, grav: 0 });   // 锚驻留帧条（:1274-1289）
-  const frames = lifeNum2 + ((rng() * 5) | 0) + 4;       // num7=num2+Next(4,9)（:1291）
-  const off = circ(rng, 6);                              // vector=circular(6,6) 两粒共享（:1292）
+    { life: lifeNum2, vx: 0, vy: 0, damp: 1, size: 1.5, grav: 0 });   // 锚驻留帧条（:1277-1289）
+  const frames = lifeNum2 + ((rng() * 5) | 0) + 4;       // num7=num2+Next(4,9)（:1293）
+  const off = circ(rng, 6);                              // vector=circular(6,6) 两粒共享（:1294）
   game.spawnParticles?.(ex + off.x * 0.7, ey + off.y * 0.7, white, 1, 0,
-    { life: frames, vx: 0, vy: 0, damp: 1, size: 1.275, grav: 0 });   // Scale=(1.5,0.75)×0.85（:1300）
+    { life: frames, vx: 0, vy: 0, damp: 1, size: 1.275, grav: 0 });   // Scale=(1.5,0.75)×0.85（:1303）
   game.spawnParticles?.(ex + off.x * 0.7, ey + off.y * 0.7, 'rgba(255,255,255,0)', 1, 0,
-    { life: frames, vx: 0, vy: 0, damp: 1, size: 0.6375, grav: 0 });  // 白镜像 ×0.5（:1310-1320）
+    { life: frames, vx: 0, vy: 0, damp: 1, size: 0.6375, grav: 0 });  // 白镜像 ×0.5（:1308-1319）
 }
 
 /**
@@ -1184,7 +1304,8 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
   for (let i = 0; i < 3; i++) {                          // 第一带（:3822-3845）
     const a = Math.PI * 2 * (i / 3) + (rng() * 2 - 1) * 0.1;
     const spd = 1.5 * 0.7;
-    game.spawnParticles?.(x + circ(rng, 4).x * 0.7, y + circ(rng, 4).y * 0.7,
+    const off = circ(rng, 4);                            // ★C2：circular(4,4)×0.7（:3827）单掷共享
+    game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7,
       orchestraHslCss(0.08 + rng() * 0.03, 1, 0.45), 1, spd,
       { life: 60, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, size: 1.6 });
   }
@@ -1198,7 +1319,8 @@ export function keybrandFx(game: GameHooks, x: number, y: number, rng: Rng = Mat
       fc(1, 0.72, 0.28, 0), 1, 0.7,
       { life: 30, vx: Math.cos(a2) * 0.7, vy: Math.sin(a2) * 0.7, size: 2 });
   }
-  game.spawnParticles?.(x + circ(rng, 4).x * 0.7, y + circ(rng, 4).y * 0.7,   // 第三带（:3894-3913）
+  const off3 = circ(rng, 4);                             // ★C2：第三带 circular(4,4)×0.7（:3902）单掷共享
+  game.spawnParticles?.(x + off3.x * 0.7, y + off3.y * 0.7,   // 第三带（:3894-3913）
     `rgba(100,143,255,0.5)`, 1, 0,
     { life: 30, grav: -0.02, damp: 0.97, size: 0.35 });
 }
@@ -1214,8 +1336,11 @@ export function gasTrapFx(
   game.playSfxWav?.('Item_16', 1, x, y);
   for (let i = 0; i < 12; i++) {
     const a0 = (i / 12) * Math.PI * 2;
-    let sx = moveX + (5 + rng()) * Math.cos(a0);
-    let sy = (5 + rng()) * Math.sin(a0);
+    // ★MINOR（F6）：spinninpoint=movementVector+(5+NextFloat,0).RotatedBy(角)（:2938）——
+    //  径向幅 (5+NextFloat) 单掷乘整臂；sy 补 +moveY（曾丢 movementVector.Y 项）
+    const mag = 5 + rng();
+    let sx = moveX + mag * Math.cos(a0);
+    let sy = moveY + mag * Math.sin(a0);
     const ja = (rng() - rng()) * Math.PI / 20;           // ★F6 清偿：RotatedByRandom(π/20)（:2939）三角
     const rx = sx * Math.cos(ja) - sy * Math.sin(ja);
     const ry = sx * Math.sin(ja) + sy * Math.cos(ja);
@@ -1256,11 +1381,15 @@ export function shimmerArrowFx(game: GameHooks, x: number, y: number, rng: Rng =
       game.spawnParticles?.(x, y, valCss, 1, 4,
         { life: 20, vx: vx * 0.2, vy: vy * 0.2, size: (oddA ? 4 : 2) * 0.7 });
       if (it === 0) {
+        // ★M1（F6）：d306 成对尘=±(vector2.RotatedBy(ja)×NextFloat)（:2666/:2671）——
+        //  第二粒取负向量、ja 单掷共享 xy、半径 NextFloat 单掷乘整向量
         for (const side of [-1, 1]) {
-          const ja = side * (rng() * 2 - 1) * Math.PI * 2 * 0.025;
-          const dxv = vx * Math.cos(ja) - vy * Math.sin(ja);
-          const dyv = vx * Math.sin(ja) + vy * Math.cos(ja);
-          const d = game.spawnDust?.(x, y, 1, 1, 306, dxv * rng(), dyv * rng(), 0, hexToRgbArr(hueC), 1.4);
+          const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×τ×0.025
+          const c = Math.cos(ja), s = Math.sin(ja);
+          const spd = rng();                             // NextFloat 半径单掷
+          const d = game.spawnDust?.(x, y, 1, 1, 306,
+            side * (vx * c - vy * s) * spd, side * (vx * s + vy * c) * spd,
+            0, hexToRgbArr(hueC), 1.4);
           if (d) { d.noGravity = true; d.fadeIn = 1.2; }
         }
       }
@@ -1316,7 +1445,11 @@ export function townSlimeTransformFx(
   switch (kind) {
     case 0:
       for (let i = 0; i < 60; i++) {
-        const d = game.spawnDust?.(x, y, 1, 1, 4, (mvx + circ(rng, 6).x) * rng(), (mvy + circ(rng, 6).y) * rng(),
+        // ★C2（F6）：(mv×0.75+circular(6,6))×NextFloat 单掷乘整臂（:2590）——曾 circ
+        //  逐分量双掷+半径每分量独掷
+        const cv = circ(rng, 6);
+        const u = rng();
+        const d = game.spawnDust?.(x, y, 1, 1, 4, (mvx + cv.x) * u, (mvy + cv.y) * u,
           175, { r: 0, g: 80, b: 255, a: 100 }, 0.6 + rng() * 1.4);
         if (d) d.noGravity = false;
       }
@@ -1324,7 +1457,9 @@ export function townSlimeTransformFx(
     case 1:
       for (let i = 0; i < 40; i++) {
         const c = circ(rng, 20);
-        const d = game.spawnDust?.(x + c.x, y + c.y, 1, 1, 43, (mvx + circ(rng, 6).x) * rng(), (mvy + circ(rng, 6).y) * rng(),
+        const cv = circ(rng, 6);                         // ★C2：同上单掷共享（:2584）
+        const u = rng();
+        const d = game.spawnDust?.(x + c.x, y + c.y, 1, 1, 43, (mvx + cv.x) * u, (mvy + cv.y) * u,
           26, hexToRgbArr(orchestraLerpCss('rgb(183,88,25)', 'rgb(255,255,255)', rng() * 0.5)), 1 + rng() * 1.4);
         if (!d) continue;
         d.fadeIn = 1.5;
@@ -1335,7 +1470,9 @@ export function townSlimeTransformFx(
     default: {
       for (let i = 0; i < 30; i++) {
         const c = circ(rng, 20);
-        const d = game.spawnDust?.(x + c.x, y + c.y, 1, 1, 43, (mvx + circ(rng, 6).x) * rng(), (mvy + circ(rng, 6).y) * rng(),
+        const cv = circ(rng, 6);                         // ★C2：同上单掷共享（:2570）
+        const u = rng();
+        const d = game.spawnDust?.(x + c.x, y + c.y, 1, 1, 43, (mvx + cv.x) * u, (mvy + cv.y) * u,
           26, hexToRgbArr(orchestraLerpCss(orchestraOurFavoriteColor(), 'rgb(255,255,255)', rng())), 1 + rng() * 1.4);
         if (!d) continue;
         d.fadeIn = 1.5;
@@ -1382,16 +1519,25 @@ export function leafCrystalShotTint(uniqueHueByte: number): string {
 /**
  * Spawn_CattivaHit（:3765-3796）：捣蛋猫命中金橙六芒簇（scale.X×4 长条拉伸近似档、寿命 16t）。
  * 生产者 Projectile.SpawnHitVisuals type1093/1112 + P.cs:52194 挖掘镐力面（BroadcastOrRequest）。
+ * ★⑥掷序清偿（2026-09-02）：逐掷序归位原文（jitter→circ→t→Next(2)[白支 t2]→scale
+ * :3772-3789）,scale 掷真值接线 size=2×Scale.X（旧固定 2.4 弃掷）。
  */
 export function cattivaHitFx(game: GameHooks, x: number, y: number, _moveX = 0, _moveY = 0, rng: Rng = Math.random): void {
   const phase = rng() * Math.PI * 2;
   for (let i = 0; i < 6; i++) {
     const a = Math.PI * 2 * (i / 6) + phase + (rng() * 2 - 1) * 0.25;
     const spd = 4.5 * 0.7;
-    const col = rng() >= 0.5 ? orchestraLerpCss('rgb(255,215,0)', 'rgb(255,165,0)', rng())
-      : orchestraLerpCss('rgb(255,255,255)', 'rgb(255,165,0)', rng());
-    game.spawnParticles?.(x + circ(rng, 6).x * 0.7, y + circ(rng, 6).y * 0.7, col, 1, spd,
-      { life: 16, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, damp: 0.95, size: 2.4, grav: 0 });
+    const off = circ(rng, 6);                            // ★C2：circular(6,6)×0.7（:3775）单掷共享
+    // ★⑥清偿（2026-09-02）：色掷序同 stellarTune=先 t（:3776 金 Lerp 恒掷）后 Next(2)
+    //  （:3777）——白支再补掷 t2（:3779）;scale 掷归色后（:3789）并按长条拉伸近似档
+    //  接线 size=2×Scale.X=5.6×(0.1+0.7r)（E≈2.52,旧固定 2.4 同域）
+    const t = rng();
+    const col = rng() < 0.5
+      ? orchestraLerpCss('rgb(255,255,255)', 'rgb(255,165,0)', rng())   // Lerp(White,Orange,t2)（Next(2)==0 白支）
+      : orchestraLerpCss('rgb(255,215,0)', 'rgb(255,165,0)', t);        // Lerp(Gold,Orange,t)（金支）
+    const scl = 0.1 + rng() * 0.7;
+    game.spawnParticles?.(x + off.x * 0.7, y + off.y * 0.7, col, 1, spd,
+      { life: 16, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, damp: 0.95, size: 5.6 * scl, grav: 0 });
   }
 }
 
@@ -1463,9 +1609,12 @@ export function rainbowBoulderFx(
       // ★F6 清偿：velocity=NextVector2CircularEdge(1,1)（:1551,单位圆边=角均匀、无半径掷）
       //  ×(8+2×NextFloat) → X 清零（:1554）+ Y>0 反号（:1556-1558）——旧 dvyRaw 乘法为
       //  自造形变（速度密度被压向 0,非原版 |sin| 谱）
+      // ★⑥清偿（2026-09-02）：色掷在先（:1549 NewDustDirect 色参恒先于速度掷求值）——
+      //  曾 ang/sp 先掷色后掷（固定种子复现流错位）
+      const hue = hslRand();
       const ang = rng() * Math.PI * 2;
       const sp = 8 + 2 * rng();
-      const d = game.spawnDust?.(x, y, 16, 16, 66, Math.cos(ang) * sp, Math.sin(ang) * sp, 100, hexToRgbArr(hslRand()), 1.7);
+      const d = game.spawnDust?.(x, y, 16, 16, 66, Math.cos(ang) * sp, Math.sin(ang) * sp, 100, hexToRgbArr(hue), 1.7);
       if (d) {
         d.noGravity = true;
         d.fadeIn = 1 + rng();
@@ -1485,23 +1634,34 @@ export function rainbowBoulderFx(
     const sz = (rng() * 0.2 + 0.3) * 0.8 * (0.3 + 1.5 * rng());
     const ringR = 14 - arms + rng() * 3;
     const px = x + Math.cos(a) * ringR, py = y + Math.sin(a) * ringR;
-    const jr = moveX * (rng() * 2 - 1) * 0.15;
-    const jd = moveY * (rng() * 2 - 1) * 0.15;
-    const baseVx = Math.cos(a) * sz, baseVy = Math.sin(a) * sz;
-    const vx = baseVx * Math.cos(spinA) - baseVy * Math.sin(spinA) + jr;
-    const vy = baseVx * Math.sin(spinA) + baseVy * Math.cos(spinA) + jd;
-    game.spawnParticles?.(px + vx * 4, py + vy * 4, orchestraHslCss((i / arms + rng()) % 1, 1, 0.5), 1,
+    // ★M6①（F6）：jitter=MovementVector×NextFloatDirection×0.15 单标量 xy 共享（:1597）
+    const jit = (rng() * 2 - 1) * 0.15;
+    const sumX = Math.cos(a) * sz + moveX * jit;         // 先加：臂向×幅+jitter 同式（:1604）
+    const sumY = Math.sin(a) * sz + moveY * jit;
+    const cR = Math.cos(spinA), sR = Math.sin(spinA);
+    const vx = sumX * cR - sumY * sR;                    // 后旋：对 sum 整体 RotBy(num4)（:1615）
+    const vy = sumX * sR + sumY * cR;                    //  ——曾先旋基向量再加逐分量 jitter
+    game.spawnParticles?.(px + sumX * 4, py + sumY * 4,  // 位偏移=旋前速度×4（:1614）
+      orchestraHslCss((i / arms + phase) % 1, 1, 0.5), 1,          // 臂色=(num5+num3)%1（:1609）
       Math.hypot(vx, vy), { life: 90, vx, vy, damp: 0.99, grav: 0, size: 1.6 });
-    game.spawnParticles?.(px + vx * 4, py + vy * 4, 'rgba(255,255,255,0.35)', 1, Math.hypot(vx, vy),
+    game.spawnParticles?.(px + sumX * 4, py + sumY * 4, 'rgba(255,255,255,0.35)', 1, Math.hypot(vx, vy),
       { life: 90, vx, vy, damp: 0.99, grav: 0, size: 0.48 });
   }
   for (let i = 0; i < 4; i++) {                          // d267 双层（:1641-1652）
-    const hueC = orchestraHslCss((rng() + rng() * 0.12) % 1, 1, 0.4 + rng() * 0.25);
-    const d = game.spawnDust?.(x, y, 1, 1, 267, circ(rng, 1).x + moveX * (rng() * 2 - 1) * 0.5,
-      circ(rng, 1).y, 0, hexToRgbArr(hueC), 0.6 + rng() * 0.9);
-    if (d) { d.noGravity = true; d.fadeIn = 0.7 + rng() * 0.8; d.noLight = true; d.noLightEmittance = true; }
-    game.spawnDust?.(x, y, 1, 1, 267, circ(rng, 1).x, circ(rng, 1).y, 0,
-      { r: 255, g: 255, b: 255, a: 255 }, (0.6 + rng() * 0.9) / 2);
+    // ★M3（F6）：①jitter=MovementVector×NextFloatDirection×0.5 单标量 xy 共享（:1635,
+    //  曾逐分量双掷且 moveY 丢项）②白影=CloneDust 精确复制（Dust.cs:260：velocity/
+    //  scale/fadeIn 逐字段复制——scale=源/2、fadeIn=源×0.75、color 白、零掷）
+    const hueC = orchestraHslCss((phase + rng() * 0.12) % 1, 1, 0.4 + rng() * 0.25);
+    const cv = circ(rng, 1);                             // ★C2：circular(1,1) 单掷共享
+    const jd = (rng() * 2 - 1) * 0.5;
+    const scl = 0.6 + rng() * 0.9;
+    const fd = 0.7 + rng() * 0.8;
+    const d = game.spawnDust?.(x, y, 1, 1, 267,
+      cv.x + moveX * jd, cv.y + moveY * jd, 0, hexToRgbArr(hueC), scl);
+    if (d) { d.noGravity = true; d.fadeIn = fd; d.noLight = true; d.noLightEmittance = true; }
+    const w = game.spawnDust?.(x, y, 1, 1, 267,          // CloneDust 白影（:1647-1652）
+      cv.x + moveX * jd, cv.y + moveY * jd, 0, { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
+    if (w) { w.fadeIn = fd * 0.75; w.noLight = true; w.noLightEmittance = true; }
   }
 }
 
@@ -1514,7 +1674,8 @@ export function bestReforgeFx(game: GameHooks, x: number, y: number, rng: Rng = 
   for (let i = 0; i < 8; i++) {
     const c = circ(rng, 3, 4);
     const vy = (c.y > 0 ? -c.y : c.y) - 2;
-    game.spawnParticles?.(x + circ(rng, 16).x, y + circ(rng, 16).y, '#FFE98A', 1, 1,
+    const po = circ(rng, 16);                            // ★C2：位抖单掷共享（原文本粒位=PositionInWorld 无偏移,仓内近似维持）
+    game.spawnParticles?.(x + po.x, y + po.y, '#FFE98A', 1, 1,
       { life: 60, vx: c.x, vy, grav: 0.1635, damp: 0.995, size: 1.1 });
   }
 }
@@ -1523,14 +1684,20 @@ export function bestReforgeFx(game: GameHooks, x: number, y: number, rng: Rng = 
  * Spawn_SilverBulletSparkle（:3278-3300）：银箭白炽单粒 streak（FadeInEnd 10/
  * FadeOutStart 20/FadeOutEnd 30 特档、accel=−movementVector/30）。
  * 生产者 P.cs:71888(SeraphNecklaced 飞行体)/77659 弹981 贴块段（clientOnly:true）。
+ * ★⑥掷序清偿（2026-09-02）：原文首尾各一死掷（:3280 `_ = NextFloat()×τ`、
+ * :3283 `NextFloat();` 均弃值）——补掷保 RNG 流对齐（全站 5 掷=原版）。
  */
 export function silverBulletSparkleFx(
   game: GameHooks, x: number, y: number, moveX = 0, moveY = 0, rng: Rng = Math.random,
 ): void {
-  const sz = rng() * 0.2 + 0.4;
-  game.spawnParticles?.(x + circ(rng, 4).x * sz, y + circ(rng, 4).y * sz,
+  rng();                                                 // 死掷（原版 :3280 掷不消费,RNG 流对齐）
+  const sz = rng() * 0.2 + 0.4;                          // vector（:3282）
+  rng();                                                 // 死掷（原版 :3283 掷不消费,RNG 流对齐）
+  const off = circ(rng, 4);                              // ★C2：circular(4,4)×scale（:3285）单掷共享
+  game.spawnParticles?.(x + off.x * sz, y + off.y * sz,
     'rgba(255,255,255,0.85)', 1, Math.hypot(moveX, moveY),
-    { life: 30, vx: moveX, vy: moveY, damp: 1, grav: 0, size: 2 * sz });
+    // ★MINOR（F6）：AccelerationPerFrame=−MovementVector/30（:3290,注释已有,曾漏实现）
+    { life: 30, vx: moveX, vy: moveY, ax: -moveX / 30, ay: -moveY / 30, damp: 1, grav: 0, size: 2 * sz });
 }
 
 /** Spawn_UFOLaser（:1956-1963）：d160 LimeGreen/CornflowerBlue 二选一双层行进尘 */
@@ -1598,8 +1765,11 @@ export function itemTransferFx(
   const dxs = ex - sx, dys = ey - sy;
   const life = 60;
   if ((flagsByte & 0x01) !== 0) {
-    game.spawnParticles?.(sx + circ(rng, 8).x, sy + circ(rng, 8).y, '#FFF3B0', 1, 2,
-      { life: life - 10, vx: circ(rng, 24).x, vy: circ(rng, 24).y, damp: 0.94, grav: -0.02, size: 1.3 });
+    // ★C2（F6）：位抖/初速两 circ 各单掷共享 xy（NextVector2Square 近似位,曾逐分量双掷）
+    const po = circ(rng, 8);
+    const vv = circ(rng, 24);
+    game.spawnParticles?.(sx + po.x, sy + po.y, '#FFF3B0', 1, 2,
+      { life: life - 10, vx: vv.x, vy: vv.y, damp: 0.94, grav: -0.02, size: 1.3 });
   }
   game.spawnParticles?.(sx, sy, '#FFE98A', 1, 1,
     { life, vx: dxs / life, vy: dys / life, damp: 1, grav: 0, size: 1.5 });
@@ -1638,10 +1808,16 @@ export function inScreenDungeonSpawnFx(
   hitSfx: string | null, rng: Rng = Math.random,
 ): void {
   const n = ((rng() * 3) | 0) + 2;                       // Next(2,5)
+  const bx = x - 0.5 * w, by = y - h;                    // vector=positionInWorld+(−0.5,−1)×mv（:886）
   for (let i = 0; i < n; i++) {
-    const jx = circ(rng, w, h * (0.5 + rng() * 0.5));
-    game.spawnParticles?.(x - 16 + jx.x, y - 16 + jx.y, '#EDEDF2', 1, circ(rng, 2).x,
-      { life: 44, vx: circ(rng, 2).x, vy: circ(rng, 2).y, grav: 0.22, damp: 0.99, size: 1.4 });
+    // ★M5（F6）：出生位=基点+(−16,−16)+mv×(NextFloat, 0.5+NextFloat×0.5) 矩形单侧采样
+    //  （:887-891,曾 circular 盘误形）；速度=NextVector2Circular(2,2) 单掷共享（:888）+
+    //  补 position−=velocity×5（:893,曾漏——出生瞬间回拖 5t 航程）
+    const px = bx - 16 + w * rng();
+    const py = by - 16 + h * (0.5 + rng() * 0.5);
+    const gv = circ(rng, 2, 2);
+    game.spawnParticles?.(px - gv.x * 5, py - gv.y * 5, '#EDEDF2', 1, Math.hypot(gv.x, gv.y),
+      { life: 44, vx: gv.x, vy: gv.y, grav: 0.22, damp: 0.99, size: 1.4 });
   }
   if (hitSfx) game.playSfxFiles?.([hitSfx], 1, x, y);
 }
@@ -1726,11 +1902,14 @@ export function snappingStoneRingFx(
       const col = red ? 'rgba(255,40,20,0.5)' : 'rgba(255,242,0,1)';
       game.spawnParticles?.(x - Math.cos(a0) * spd * 30 * 0.15, y - Math.sin(a0) * spd * 30 * 0.15,
         col, 1, spd, { life: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: red ? 11 : 7 });
-      for (const side of [-1, 1]) {                      // d6 微尘对（:715-732）
-        const ja = side * (rng() * 2 - 1) * Math.PI * 2 * 0.025;
-        const dvx = spd * Math.cos(a0 + ja) * rng();
-        const dvy = spd * Math.sin(a0 + ja) * rng();
-        const d = game.spawnDust?.(x, y, 1, 1, 6, dvx, dvy, 0, null, 1.4);
+      for (const side of [-1, 1]) {                      // d6 微尘对（:724/:727）★M1（F6）
+        //  第二粒取负向量（旧 side 乘角=自造形变）、ja 单掷共享 xy、半径 NextFloat
+        //  单掷乘整向量（旧 dvx*rng(),dvy*rng() 每分量独掷）
+        const ja = (rng() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×τ×0.025
+        const spd2 = rng();                                // NextFloat 半径单掷
+        const d = game.spawnDust?.(x, y, 1, 1, 6,
+          side * spd * Math.cos(a0 + ja) * spd2, side * spd * Math.sin(a0 + ja) * spd2,
+          0, null, 1.4);
         if (d) d.noGravity = true;
       }
     }
@@ -1805,8 +1984,9 @@ export function harpyCharmFamilyFx(
   else game.playSfxWav?.('Item_39', 1, x, y);
   const life = 30;
   for (let i = 0; i < 4 * up; i++) {
-    // ★F6 清偿：RotatedByRandom(6.28318548)（:529）三角=NextDouble×r−NextDouble×r
-    const ja = (rng() - rng()) * Math.PI;
+    // ★F6 清偿（C1）：RotatedByRandom(6.2831854820251465)（:529）三角=NextDouble×r−
+    //  NextDouble×r——参数=maxRadians 本尊（≈τ 全圆）非半幅,曾 ×π 砍半支撑集
+    const ja = (rng() - rng()) * 6.2831854820251465;
     const bx = moveX * Math.cos(ja) - moveY * Math.sin(ja);
     const by = moveX * Math.sin(ja) + moveY * Math.cos(ja);
     const spd = rng() * 0.25 * up;

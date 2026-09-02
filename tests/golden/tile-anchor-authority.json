@@ -495,16 +495,7 @@
    "ox": 0,
    "oy": 1,
    "anchorTop": null,
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -547,16 +538,7 @@
     "cnt": 1,
     "start": 1
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 3,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -1233,16 +1215,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -1617,16 +1590,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -1979,15 +1943,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -4304,15 +4260,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -4333,15 +4281,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -4362,15 +4302,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -4460,16 +4392,7 @@
    "ox": 0,
    "oy": 1,
    "anchorTop": null,
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": {
     "t": [
      "SolidTile"
@@ -4496,15 +4419,7 @@
    "ox": 0,
    "oy": 0,
    "anchorTop": null,
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": {
     "t": [
      "SolidTile"
@@ -5189,16 +5104,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -5381,15 +5287,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -5480,15 +5378,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -6382,15 +6272,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -7057,13 +6939,7 @@
    "h": 1,
    "ox": 0,
    "oy": 0,
-   "anchorTop": {
-    "t": [
-     "EmptyTile"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorTop": null,
    "anchorBottom": {
     "t": [
      "SolidTile",
@@ -7196,15 +7072,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -7233,15 +7101,7 @@
     "cnt": 2,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -8603,15 +8463,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -8635,15 +8487,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -8681,16 +8525,7 @@
    "ox": 0,
    "oy": 1,
    "anchorTop": null,
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "Table",
-     "SolidSide"
-    ],
-    "cnt": 2,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,
@@ -8946,15 +8781,7 @@
     "cnt": 1,
     "start": 0
    },
-   "anchorBottom": {
-    "t": [
-     "SolidTile",
-     "SolidWithTop",
-     "SolidSide"
-    ],
-    "cnt": 1,
-    "start": 0
-   },
+   "anchorBottom": null,
    "anchorLeft": null,
    "anchorRight": null,
    "wall": false,

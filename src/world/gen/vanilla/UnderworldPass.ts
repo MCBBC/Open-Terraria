@@ -304,7 +304,7 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
       const ii = st.idx(m, n);
       if (st.type[ii] !== ASH_GRASS || !st.flags[ii]) continue;
       if (n - 1 < 0 || st.flags[st.idx(m, n - 1)]) continue;
-      if (rng.int(0, 2) === 0) growAshTree(st, rng, m, n);
+      if (rng.int(0, 2) === 0) growAshTree(st, rng, m, n, 0, false, gs);
     }
   }
 }
@@ -342,7 +342,7 @@ export function underworldAshGrassTrees(st: TileStore, rng: RNG, gs: GenState, f
       const i = st.idx(x, y);
       if (st.type[i] !== ASH_GRASS || !st.flags[i]) continue;
       if (y - 1 < 0 || st.flags[st.idx(x, y - 1)]) continue;
-      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);   // Next(3)==0 → TryGrowingTreeByType(634)
+      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y, 0, false, gs);   // Next(3)==0 → TryGrowingTreeByType(634)
     }
   }
 }

@@ -405,6 +405,121 @@ describe('D-1c 画/武器架墙锚族（任一格 wall<=0 即塌）', () => {
   });
 });
 
+// ================= 八批幸存链缺口（2026-09-02）：CheckTallGate / 440 wallhang =================
+// CheckTallGate（WorldGen.cs:52111-52173;派发 case 组 :86990-86994 388/389 同函数）：
+// 完整性（:52136-52145）+顶/底双行 SolidTile（:52142 → CheckTileAnchors mode2
+// :52292-52305）。几何：地面行 14、天花行 8（净空恰 5 行 9..13）,门列 x=10——
+// 远离 3×3 扫的 ny<=5 边界门。触发=checkFurnitureSupport(门格)（=扫派发单格等价）。
+describe('八批①高门 CheckTallGate（388/389 双态同链）', () => {
+  /** 门体合成：engineFrames=false 用 vanilla heights+padding 步进（wld 导入形,
+   *  TileObject.Place TileObject.cs:102-110）,true 用本仓放置面 18px 步进
+   *  （framedCellFrame default 支,FurnitureStyle.ts:158） */
+  const tallSetup = (w: World, tid: number, engineFrames: boolean) => {
+    const st = w.store;
+    const SN = idOfSheet(1);
+    for (let x = 8; x <= 12; x++) {
+      st.setTileSilent(x, 14, SN, 0, 0);   // 底锚行
+      st.setTileSilent(x, 8, SN, 0, 0);    // 顶锚行
+    }
+    const FYS = engineFrames ? [0, 18, 36, 54, 72] : [0, 20, 38, 56, 74];
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(10, 9 + dy, tid, 0, FYS[dy]);
+  };
+  const gone = (w: World, tid: number) => {
+    for (let dy = 0; dy < 5; dy++) if (w.store.get(10, 9 + dy) === tid) return false;
+    return true;
+  };
+
+  it('389 开态（本仓放置帧）：双锚在 → 幸存;挖顶锚 → 整件清+掉 3240（:52142/:52156）', () => {
+    const w = new World(40, 40, 7, 'decor-support-tallgate');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const OPEN = idOfSheet(389);
+    tallSetup(w, OPEN, true);
+    g.checkFurnitureSupport(10, 11);          // 中格扰动（双锚在,非锚向）
+    expect(w.store.get(10, 11)).toBe(OPEN);
+    w.store.setTile(10, 8, 0);                // 挖顶锚行格（天花恰在门顶上一格）
+    g.checkFurnitureSupport(10, 9);           // 门顶格复验（3×3 扫派发单格等价）
+    expect(gone(w, OPEN)).toBe(true);
+    expect(drops).toContainEqual({ key: VANILLA_ITEM_KEY_BY_ID[3240], n: 1 });   // :52156-52161
+  });
+
+  it('389 导入帧约定（0/20/38/56/74）：扰动 → 幸存;顶锚挖 → 清（两约定不得互相误杀）', () => {
+    const w = new World(40, 40, 7, 'decor-support-tallgate-wld');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const OPEN = idOfSheet(389);
+    tallSetup(w, OPEN, false);
+    g.checkFurnitureSupport(10, 9);
+    expect(w.store.get(10, 9)).toBe(OPEN);
+    expect(w.store.get(10, 13)).toBe(OPEN);
+    w.store.setTile(10, 8, 0);
+    g.checkFurnitureSupport(10, 9);
+    expect(gone(w, OPEN)).toBe(true);
+  });
+
+  it('388 闭态：双锚在 → 幸存（旧家具链 solid 早退=无幸存链）;388/389 半写态容忍', () => {
+    const w = new World(40, 40, 7, 'decor-support-tallgate-closed');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const CLOSED = idOfSheet(388), OPEN = idOfSheet(389);
+    tallSetup(w, CLOSED, true);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 11)).toBe(CLOSED);
+    // ShiftTallGate（Door.ts:131/devices.ts:950）逐格 setTile 半写态：前 2 格已换
+    // OPEN、后 3 格仍 CLOSED——原版运行期不评估半写态（:52215-52219 直写后整体
+    // TileFrame :52224-52231）,配对态格放行=「写完再评估」等价
+    for (let dy = 0; dy < 2; dy++) w.store.setTileSilent(10, 9 + dy, OPEN, 0, 18 * dy);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(OPEN);
+    expect(w.store.get(10, 12)).toBe(CLOSED);
+    // 切换写完（全列还原 CLOSED）后异型混入（非配对态）→ 完整性判坏整件清
+    w.store.setTileSilent(10, 9, CLOSED, 0, 0);
+    w.store.setTileSilent(10, 10, CLOSED, 0, 18);
+    w.store.setTileSilent(10, 11, idOfSheet(1), 0, 0);
+    g.checkFurnitureSupport(10, 9);
+    expect(gone(w, OPEN)).toBe(true);
+    expect(gone(w, CLOSED)).toBe(true);
+    expect(drops).toEqual([{ key: 'place_v_388_tall_gate_closed', n: 1 }]);   // D-8 备案兜底
+  });
+});
+
+describe('八批②440 宝石锁 wallhang（Check3x3Wall :44690 逐格 wall>0）', () => {
+  const glSetup = (w: World) => {
+    const GLOCK = idOfSheet(440);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setWall(10 + dx, 10 + dy, 1);
+      w.store.setTileSilent(10 + dx, 10 + dy, GLOCK, 54 + dx * 18, dy * 18);   // style1 带基
+    }
+    return GLOCK;
+  };
+
+  it('墙全在（style 带基 54）→ 幸存;清一格墙 → 整件塌+掉 3645（:44722-44727/:44915）', () => {
+    const w = new World(40, 40, 7, 'decor-support-gemlock');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const GLOCK = glSetup(w);
+    g.checkFurnitureSupport(11, 11);
+    expect(w.store.get(10, 10)).toBe(GLOCK);
+    w.store.setWall(11, 11, 0);              // 清中格墙（setWall 发监听 → wallhang 门）
+    g.checkFurnitureSupport(11, 11);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(12, 12)).toBe(0);     // 整件 9 格全清
+    expect(drops).toContainEqual({ key: VANILLA_ITEM_KEY_BY_ID[3645], n: 1 });   // GemLocks[1]
+  });
+
+  it('帧混格 → 判坏（:44724-44725 逐格 frameX 比对,八批对拍补缺）', () => {
+    const w = new World(40, 40, 7, 'decor-support-gemlock-frame');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const GLOCK = glSetup(w);
+    w.store.frameX[w.store.idx(12, 12)] = 108 + 2 * 18;   // 右下格改异 style 基
+    g.checkFurnitureSupport(11, 11);
+    expect(w.store.get(10, 10)).toBe(0);     // 完整性含帧 → 整件塌
+    expect(w.store.get(11, 11)).toBe(0);
+    expect(drops.length).toBe(1);
+  });
+});
+
 describe('D-1d 瓦砾/碎砾族（Check3x2 完整性支 / Check2x1 / Check1x1 / Check2x2）', () => {
   it('647 大碎砾 3×2：挖支撑 → 悬空保留（:86899 组→goto case 14→Check3x2 无支撑行=原版同款）', () => {
     const w = new World(40, 40, 7, 'decor-support-rubble');

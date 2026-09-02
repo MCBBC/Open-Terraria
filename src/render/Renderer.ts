@@ -69,7 +69,12 @@ function bmpUidOf(src: unknown): string {
   return u;
 }
 function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh: number): number {
-  if (!(img instanceof HTMLImageElement) && !(img instanceof HTMLCanvasElement) && typeof ImageBitmap !== 'undefined' && !(img instanceof ImageBitmap)) return -1;
+  // ★2026-09-02 node 补卫:测试环境无 DOM,裸 instanceof HTMLImageElement 会
+  //   ReferenceError(曾炸 drawEnemy 全部渲染单测 9 例)——逐型 typeof 门后再判;
+  //   浏览器语义不变:非 Image/Canvas/ImageBitmap 一律 −1 早退(与原判等价)
+  if (!(typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement)
+    && !(typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement)
+    && !(typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap)) return -1;
   const key = `${bmpUidOf(img)}|${sy}|${sw}|${sh}`;
   const hit = FOOT_ROW_CACHE.get(key);
   if (hit !== undefined) return hit;
@@ -3501,8 +3506,14 @@ export class Renderer {
     this.endWorldLayer(mainCtx);
     ctx = mainCtx;
 
-    // 7. 光照合成
+    // 7. 光照合成（★T1 自发光弹光照地板：596/811/814 原版顶点色白化作用在光照后
+    //    =暗处仍亮；本仓实体层（含弹）画在本合成之前 → 暗处被乘黑。合成前把这些
+    //    弹所在格光值抬到白地板、合成后立即还原数组（下游 applyMoonLordLightFloor/
+    //    drawBrightVines 等光照读点保持真值）——写入口方案,见 SELF_LUMINOUS_PROJS 注）
+    this.raiseSelfLuminousProjLight(entities, lightR, lightG, lightB,
+      lightRX, lightRY, lightRW, lightRH);
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    this.restoreSelfLuminousProjLight(lightR, lightG, lightB);
 
     // 7-死亡灰化（★用户需求 2026-08-24 修订：灰化只作用于【世界画面】——地形/实体/
     //    弹幕；右上 UI（小地图/信息饰品）、左下信息列表、死亡文字（保持偏红）不生效。
@@ -6496,6 +6507,9 @@ export class Renderer {
   private brightVineScratch: HTMLCanvasElement | null = null;
   /** 月总 30% 白斜坡补差 scratch（applyMoonLordLightFloor，Main.cs:24345 族） */
   private mlFloorScratch: HTMLCanvasElement | null = null;
+  /** 自发光弹光照地板账本（raiseSelfLuminousProjLight 抬亮过的格,四元组平铺
+   *  idx,r,g,b——compositeLight 后 restoreSelfLuminousProjLight 按此还原原值） */
+  private _lumFloorTouched: number[] = [];
 
   // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
@@ -9057,6 +9071,73 @@ export class Renderer {
       ctx.drawImage(scratch, bx0, by0);                        // 加性补差
       ctx.restore();
     }
+  }
+
+  /** ★T1 自发光弹光照地板系数表（2026-09-02 清偿"登记不修"批）：原版这些弹的
+   *  绘制顶点色在【光照结算之后】向白提亮 = 自发光,暗处仍亮——
+   *    · 596（星旋族弹,GetAlpha 同表 575/659）：白剪影 Projectile.cs:80903-80910
+   *      `new Color(255-alpha,255-alpha,255-alpha,128-alpha/2)`——灰度通道不乘光照色,
+   *      白度动态值 (128−α/2)/255 按全显态 α=0 简化为固定地板 0.5 档（备案）；
+   *    · 811：Main.cs:30841-30848 轨迹支 `Lerp(projectileColor,White,Remap(ai0,
+   *      0,15,1,0.3))` 取恒亮端 k=1.0 档（本仓 Dart 侧 whiteLerp 同源已画）；
+   *    · 814：Main.cs:30849-30856 轨迹支 `Lerp(projectileColor,White,0.35)` → 0.35 档。
+   *  本仓实体层（含弹）画在 compositeLight 全屏乘光【之前】→ 暗处被乘黑,与原版
+   *  "白剪影×任意光照恒可见"相悖。最小侵入挂点 = 光值数组写入口（applyMoonLord
+   *  LightFloor 加性补差方案的轻量变体,弹无独立绘制通道不宜重画）:合成前把弹
+   *  AABB 覆盖格的光通道抬到 floor×255 白地板,合成后立即还原（render 7 段成对
+   *  调用）。与既有白剪影滤镜叠加语义成立:终像素 = 白剪影 × 抬亮地板 ✓
+   *  已知边界（备案,同月总补差的 z 序取舍）:①同格地形/后画实体像素同吃抬亮,
+   *  原版只亮弹本体;②弹盒跨格边缘受双线性插值向邻格暗值渐变——固定地板系数
+   *  已按最暗侧可辨识度取档,白天光照≥地板时零改动零开销。 */
+  private static readonly SELF_LUMINOUS_PROJS = new Map<number, number>([
+    [596, 0.5], [811, 1.0], [814, 0.35],
+  ]);
+
+  /** 合成前抬亮：把 SELF_LUMINOUS_PROJS 弹覆盖格的光通道抬到白地板（账本记账） */
+  private raiseSelfLuminousProjLight(
+    entities: Entity[],
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    rx: number, ry: number, rw: number, rh: number,
+  ): void {
+    this._lumFloorTouched.length = 0;
+    if (this.fullbright) return;
+    for (const e of entities) {
+      if (e.dead) continue;
+      const pid = (e as { projId?: number }).projId;
+      if (pid === undefined) continue;
+      const floor = Renderer.SELF_LUMINOUS_PROJS.get(pid);
+      if (floor === undefined) continue;
+      // 弹 AABB 覆盖格（中心单点不够——大弹跨格,白剪影须整盒抬亮）
+      const tx0 = Math.floor(e.x / TILE), tx1 = Math.floor((e.x + e.w) / TILE);
+      const ty0 = Math.floor(e.y / TILE), ty1 = Math.floor((e.y + e.h) / TILE);
+      const touched = this._lumFloorTouched;
+      for (let ty = ty0; ty <= ty1; ty++) {
+        if (ty < ry || ty >= ry + rh) continue;
+        for (let tx = tx0; tx <= tx1; tx++) {
+          if (tx < rx || tx >= rx + rw) continue;
+          const li = (ty - ry) * rw + (tx - rx);
+          const fr = Math.round(255 * floor);
+          if (lightR[li] >= fr && lightG[li] >= fr && lightB[li] >= fr) continue;
+          if (!touched.includes(li)) touched.push(li, lightR[li], lightG[li], lightB[li]);
+          if (lightR[li] < fr) lightR[li] = fr;
+          if (lightG[li] < fr) lightG[li] = fr;
+          if (lightB[li] < fr) lightB[li] = fr;
+        }
+      }
+    }
+  }
+
+  /** 合成后还原：restore 抬亮账本（下游月总补差/茎蔓亮彩/鞭全亮读点保持真值） */
+  private restoreSelfLuminousProjLight(
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+  ): void {
+    const t = this._lumFloorTouched;
+    for (let i = 0; i < t.length; i += 4) {
+      lightR[t[i]] = t[i + 1];
+      lightG[t[i]] = t[i + 2];
+      lightB[t[i]] = t[i + 3];
+    }
+    this._lumFloorTouched.length = 0;
   }
 
   private drawBrightVines(

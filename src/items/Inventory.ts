@@ -234,7 +234,8 @@ export class Inventory {
    *  不存在"属性走裸 armor[]"的例外。视觉族（Main.cs:17552 头身腿帧/Player.cs:9696
    *  UpdateItemDye/UpdateVisibleAccessories）同样走 effective。
    *  CanShareArmor 的配件互斥深检（ItemSlot.CanEquipBothAccessories 物品对表）
-   *  未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 幽灵绘制登记未接 */
+   *  未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 幽灵绘制/角标/空槽
+   *  悬停代打已接（UI.paintLoadoutShare + showTooltipFor,ItemSlot.Draw :2454-2473） */
   getEffectiveArmor(slot: number): InvItem | null {
     const cur = this.armor[slot] ?? null;
     if (cur) return cur;

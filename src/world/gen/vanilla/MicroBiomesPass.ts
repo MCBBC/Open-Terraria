@@ -628,7 +628,14 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   }
   const num = rng.int(6, 9);  // Next(6,10)
   const num2 = rng.int(1, 4); // Next(1,5)
-  const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num + 1, y1: oy + num + 1 };
+  // ★IIIII113b：CampsiteBiome.cs:23/:121 `Rectangle(origin.X-num, origin.Y-num, num*2,
+  //   num*2)` → XNA Rectangle 右/下边界(Exclusive)= origin±num。曾写 x1=ox+num+1 /
+  //   y1=oy+num+1（按含端右下角直译）→ CanPlace 候选域与 AddProtectedStructure(Inflate 4)
+  //   的保护矩形各宽 1 格。winter(20260907) 实证：营 (979,971,num=7) 保护矩形右缘
+  //   991 vs 原版 990，剪掉矿爆候选 area(990..1020,980..1000) 首列 x=990 → 矿爆
+  //   attempt#46(origin (1018,990),anchor (1005,990)) JS 拒 x86 收（DmLog 对拍
+  //   ok=1/0 同 origin），+~360 掷级联使 6 座矿屋错位（#97 域 1059 格全差）。
+  const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num, y1: oy + num };
   mbProbe('CS2dims', () => [num, num2]);
   // structures.CanPlace(rect, pad 0)（CampsiteBiome.cs:20）——全局保护图互斥
   //   + GeneralPlacementTiles 默认内容扫描（单参重载）

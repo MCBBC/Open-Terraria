@@ -16,6 +16,10 @@ import { idsByVanillaSheet } from './TileRunner';
 /** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
  *  typeof 守卫同 DungeonPass SW_DGPA_TRACE——浏览器无 process,裸引用炸模块加载 */
 const PYR_TRACE = typeof process !== 'undefined' && !!process.env.PYR_TRACE;
+/** ★IIIII114b 诊断钩（休眠，__swPyrMark 未挂载零开销）：pyramid() 相位掷账标记 */
+const pyrMark = (typeof process !== 'undefined' && (process as unknown as { env?: Record<string, string | undefined> }).env?.SW_PYR_MARK === '1')
+  ? (tag: string) => { try { (globalThis as { __swPyrMark?: (t: string) => void }).__swPyrMark?.(tag); } catch { /* probe */ } }
+  : null;
 /** 浮空湖追踪开关——2026-09-02 曾以裸 `process.env.SW_FLTRACE` 直引用炸浏览器
  *  worker worldgen pass4(生物群系)（HellFortPass:106 同型事故二犯）；typeof 守卫 */
 const FLTRACE = typeof process !== 'undefined' && !!process.env.SW_FLTRACE;
@@ -1135,6 +1139,7 @@ function pyramid(
       }
     }
   }
+  pyrMark?.('wall-done');
   let num8 = 1;
   if (rng.int(0, 1) === 0) num8 = -1;                   // Next(2)==0 → -1
   let num9 = i - num3 * num8;
@@ -1166,6 +1171,7 @@ function pyramid(
     }
     num9 -= num8;
   }
+  pyrMark?.('stair-done');
   num9 = i - num3 * num8;
   let flag4 = true;
   let flag5 = false;
@@ -1211,9 +1217,12 @@ function pyramid(
         const lootKeys = ['vi_848_PharaohsMask', 'vi_857_sandstorm_in_a_bottle', 'vi_934_FlyingCarpet'];
         const lootKey = lootKeys[num25];
         if (PYR_TRACE) console.log(`PYR room num17=${num17} n23=${num23} n24=${num24} chestX=${Math.floor((num23 + num24) / 2)} num10=${num10} main=${lootKey} st=${pyrStream()}`);
+        pyrMark?.('room-chest-pre');
         placeBuriedChest(st, rng, gs, chests, Math.floor((num23 + num24) / 2), num10, {
           style: 1, loot: lootKey,
         });
+        pyrMark?.('room-chest-done');
+        pyrMark?.('room-piles-pre');
         const num26 = rng.int(1, 9);                    // Next(1,10)
         if (PYR_TRACE) console.log(`PYR rm1 num26=${num26} st=${pyrStream()}`);
         for (let n27 = 0; n27 < num26; n27++) {
@@ -1226,10 +1235,12 @@ function pyramid(
         placeTorch(st, num23 + 3, num10 - num17 + num11, rng.int(4, 6));
         placeTorch(st, num24 - 2, num10 - num17 + num11 + 1, rng.int(4, 6));
         placeTorch(st, num24 - 3, num10 - num17 + num11, rng.int(4, 6));
+        pyrMark?.('room-torch-pre');
         if (PYR_TRACE) console.log(`PYR rm3 torches-done st=${pyrStream()}`);
         for (let n28 = num23; n28 <= num24; n28++) {
           placePotRow(st, rng, n28, num10 + num11, rng.int(25, 27));   // Next(25,28)
         }
+        pyrMark?.('room-pots-pre');
         if (PYR_TRACE) console.log(`PYR rm4 pots-done st=${pyrStream()}`);
       }
       if (flag4) {
@@ -1247,6 +1258,7 @@ function pyramid(
   }
   if (noTunnel) return true;
   // 长出口隧道（cs:28052-28157）
+  pyrMark?.('zigzag-done');
   let num29 = rng.int(100, 199);                        // Next(100,200)
   let num30 = rng.int(500, 799);                        // Next(500,800)
   flag2 = true;
@@ -1287,6 +1299,7 @@ function pyramid(
     }
     if (num30 <= 0) flag2 = false;
   }
+  pyrMark?.('exit-done');
   return true;
 }
 

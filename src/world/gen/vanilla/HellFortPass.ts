@@ -56,6 +56,8 @@ import type { SparseChestSink } from '../ChestRegistry';
 //  由 runHellFortPass 入口置位（每世界刷新；探针可 setHellFortDrunkMode 直接钉档）。
 let hfDrunkMode = false;
 export function setHellFortDrunkMode(v: boolean): void { hfDrunkMode = v; }
+/** ★IIIII114b：i am error（errorWorld）塔锚/跨度臂档位（每世界刷新；hellFort 1457 形消费） */
+let hfErrorMode = false;
 
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
 const HELL_BRICK = TILE_BY_KEY['v_76_hellstone_brick'] ?? OBS_BRICK;
@@ -493,6 +495,7 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
   phaseMark?: (name: string) => void, chests?: import('./BuriedChestsPass').ChestSink): void {
   hfChests = chests;
   hfDrunkMode = !!gs.seedFlags.drunkWorld;   // ★IIIII14：双实现共享档位（每世界刷新）
+  hfErrorMode = !!gs.seedFlags.errorWorld;   // ★IIIII114b：errorWorld 塔臂档位（同上）
   const { w, h } = st;
   const hellTop = h - 200;
   if (hellTop >= h - 60) return;
@@ -838,7 +841,17 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
   //   1456 形已在 hellFort1456 内以同款门接线（IIIII14,hfDrunkMode 同源档位）。
   //   （worldgen-1457-rewire 字面量断言已随本批同步升级为双态形态。）
   const hfNum = hfDrunkMode ? 4 : 8;    // num
-  const hfNum2 = hfDrunkMode ? 40 : 20; // num2
+  let hfNum2 = hfDrunkMode ? 40 : 20;   // num2
+  // ★IIIII114b（1458 cs:32996-33004）：errorWorld 塔锚臂——两枚 Next(15) **恒掷**
+  //   （在 num/num2 醉门之后、列跨度首掷之前）：命中① num2 *= 3（列/翼跨度全域 ×3）；
+  //   命中② j -= Next(400)（塔锚上移 0..399——塔可整体高出地狱层，与格受理门
+  //   cs:33147-33152 的 UnderworldLayer 弃格臂配对：errorWorld 下高位格**不弃**）。
+  //   JS 两处整缺 ⇒ 每塔少 2-3 掷+塔形/塔位全异 → #28 W=34214 全要塞级分叉。
+  let fortAnchor = j;
+  if (hfErrorMode) {
+    if (rng.int(0, 14) === 0) hfNum2 *= 3;                        // Next(15)==0
+    if (rng.int(0, 14) === 0) fortAnchor -= rng.int(0, 399);      // Next(15)==0 → j-=Next(400)
+  }
   const colSpan = (): number => rng.int(hfNum >> 1, (hfNum2 >> 1) - 1);  // Next(num/2, num2/2)
   const wingSpan = (): number => rng.int(hfNum, hfNum2 - 1);             // Next(num, num2)
   const colL = new Array<number>(5), colR = new Array<number>(5);
@@ -848,9 +861,9 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
   colR[0] = colL[1]; colL[0] = colR[0] - wingSpan();
   colL[3] = colR[2]; colR[3] = colL[3] + wingSpan();   // ★1457 右翼后（掷 5-6）
   colL[4] = colR[3]; colR[4] = colL[4] + wingSpan();
-  // ---- 行上下界(cs L16575-16586):层高 6-11,行 3 锚定 j ----
+  // ---- 行上下界(cs L16575-16586):层高 6-11,行 3 锚定 j（errorWorld 臂后=fortAnchor）----
   const rowT = new Array<number>(10), rowB = new Array<number>(10);
-  rowT[3] = j - rng.int(6, 11); rowB[3] = j;
+  rowT[3] = fortAnchor - rng.int(6, 11); rowB[3] = fortAnchor;
   for (let r = 4; r < 10; r++) { rowT[r] = rowB[r - 1]; rowB[r] = rowT[r] + rng.int(6, 11); }
   for (let r = 2; r >= 0; r--) { rowB[r] = rowT[r + 1]; rowT[r] = rowB[r] - rng.int(6, 11); }
   // ---- 占用网格(1457 cs:32994-33062):2 轮各两个 1/3 翼 ----
@@ -910,9 +923,12 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
   }
   for (let r = spanLo; r <= spanHi; r++) occ[2][r] = true;
   // ---- 越界单元清除(cs L16683-16690)----
+  // ★IIIII114b（1458 cs:33147-33152）：格受理门= `rowTop < UnderworldLayer` 弃格，
+  //   但 **errorWorld 豁免**（`&& !SecretSeed.errorWorld.Enabled`）——上移塔
+  //   （fortAnchor-=Next(400)）的高位格照常受理。下界 rowB > h-20 两态同弃。
   for (let c = 0; c < 5; c++) {
     for (let r = 0; r < 10; r++) {
-      if (occ[c][r] && (rowT[r] < hellTop || rowB[r] > h - 20)) occ[c][r] = false;
+      if (occ[c][r] && ((rowT[r] < hellTop && !hfErrorMode) || rowB[r] > h - 20)) occ[c][r] = false;
     }
   }
   if (hfTrace) {

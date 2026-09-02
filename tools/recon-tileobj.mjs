@@ -139,6 +139,15 @@ for (let ln = 0; ln < lines.length; ln++) {
       case 'anchorright': {
         const key = { anchorbottom: 'anchorBottom', anchortop: 'anchorTop', anchorleft: 'anchorLeft', anchorright: 'anchorRight' }[prop.toLowerCase()];
         if (/^null/.test(rhs)) { work[key] = null; break; }
+        // ★修复（2026-09-02 七件 decor 放置审计）：AnchorData 是 struct
+        //   （Terraria.DataStructures/AnchorData.cs:4 `public struct AnchorData`），
+        //   `AnchorData.Empty`（AnchorData.cs:9）与 `default(AnchorData)` 均 =
+        //   tileCount=0 =「该侧无锚」——CanPlace 对每侧 `if (tileCount != 0)`
+        //   整侧跳过（TileObject.cs:377/:445/:550/:636）。此前未识别 → parseAnchor
+        //   失败置 poisoned 但 work[key] 保留模板/前值 → 34/95/126/386/531/31/165/
+        //   696 等「显式清空底锚的吊挂件」被多加一条底行锚（原版偏差：吊灯/灯笼/
+        //   迪斯科球/巨石像在仅有天花板时被本仓拒放）。
+        if (/^AnchorData\.Empty\s*$/.test(rhs) || /^default\s*\(\s*AnchorData\s*\)\s*$/.test(rhs)) { work[key] = null; break; }
         const a = parseAnchor(rhs);
         if (!a) poisoned = true; else work[key] = a;
         break;

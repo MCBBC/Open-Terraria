@@ -769,8 +769,8 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         if (sheetOf(st.type[i]!) === 60) {
           st.type[i] = GRASS;
           fntbTagSafe('TREE', x, y);
-          if (rng.int(0, 1) === 0) growVanityTree(st, rng, x, y, true);   // 616 柳
-          else growVanityTree(st, rng, x, y, false);                      // 596 樱
+          if (rng.int(0, 1) === 0) growVanityTree(st, rng, x, y, true, 0, false, gs);   // 616 柳
+          else growVanityTree(st, rng, x, y, false, 0, false, gs);        // 596 樱
           if (!activeAt(st, x, y - 1)) {
             fntbTagSafe('PL3', x, y - 1);
             placePlantTile(st, rng, x, y - 1, 3);

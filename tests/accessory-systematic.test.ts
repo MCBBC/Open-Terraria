@@ -101,6 +101,9 @@ describe('配饰系统性①：equipStats.accDraw 聚合（UpdateVisibleAccessor
   it('六槽同戴全出槽（54 鞋/536 双手/53 腰/554 颈/223 脸/156 盾）；49 手环单测 handOn', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.extraAccessory = true;
+    // ★2026-08-28 门修正（cs:18402-18409 extraAccessory && (expertMode||gameMenu) →
+    //  第 6 配饰槽生效）：第 6 件（156 盾,armor[8]）需专家/大师世界门
+    p.inv.gateExpert = true;
     [54, 536, 53, 554, 223, 156].forEach((vid, k) => { p.inv.armor[3 + k] = { id: _iid(vid), stack: 1 }; });
     const ad = p.equipStats.accDraw;
     expect(ad.shoe).toBe(6);
@@ -152,6 +155,7 @@ describe('配饰系统性①：渲染层十族绘制（记录型 ctx）', () => 
   it('身前族层序 = LegacyPlayerRenderer 身前段：Shoes→HandsOff→Waist→Neck→Beard→Face→Front→Shield→HandsOn', () => {
     const p2 = new Player(0, 0, new Inventory());
     p2.inv.extraAccessory = true;
+    p2.inv.gateExpert = true;   // ★同上：armor[8] 第 6 配饰槽需专家/大师门（cs:18402-18409）
     [54, 536, 53, 554, 223, 156].forEach((vid, k) => { p2.inv.armor[3 + k] = { id: _iid(vid), stack: 1 }; });
     p2.inv.armor[13] = { id: _iid(5104), stack: 1 };   // 威尔逊短胡（社交槽 beard=2）
     const { files } = drawAccWithFake('drawAccFrontLayers', p2);

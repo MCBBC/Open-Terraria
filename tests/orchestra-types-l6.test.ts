@@ -154,7 +154,10 @@ describe('剑刃轨迹族（SwingArc/Slash/Fly 生产锚 → dispatch 消费）'
       const { g, particles, dusts } = mkGame();
       apply(g, t, 300, 300, 2, 0.5);
       expect(particles.length).toBe(2);
-      expect(dusts.filter((d) => d.type === 267).length).toBe(2);
+      // ★F6 MINOR（2026-09-01）：PrincessWeapon 按 :3402-3408 每彩尘配一 CloneDust 白影
+      // 整粒补齐 → d267 2彩+2白=4；★⑥掷序清偿（2026-09-02）：StardustPunch 同构白影补
+      // （:3454-3458 与 princessWeapon 全同构,scale=源/2、color 白、零掷）→ 两型均 4
+      expect(dusts.filter((d) => d.type === 267).length).toBe(4);
     }
   });
 });

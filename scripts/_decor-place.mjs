@@ -140,6 +140,172 @@ const out = await page.evaluate(async () => {
     };
   }
   const okPlace = (r) => !!r && typeof r === 'object' && r.cells === r.full;
+  // ---- ⑥ 七件放置门原版真值定谳（2026-09-02）：前序批次暴露 7 件候选被本仓放置门
+  //  拒绝（合成环境:草地板+可选石天花板,无墙）。每件一个 vanilla-faithful 场景
+  //  （环境按反编译 TileObjectData 锚面搭）+ 双向断言：
+  //    vanilla 可放 → 本仓必须放成且整件存活（placed && cells===full）
+  //    vanilla 不可放 → 本仓必须拒绝（!placed && cells===0）
+  //  ★vanilla 真值 = 探针内独立实现的 CanPlace 子集（TileObject.cs:174-858 语义,
+  //  不读仓内 tile-anchors.json,防同源污染）：锚 spec 逐件硬编码自反编译源（行号见
+  //  VAN_SPEC 注释）。合成环境只有实心块/空气/墙 → 占位阻挡简化为 isActive、
+  //  液体门略（场景全干）、tileCut 豁免面不触发（场景不含割草族）。
+  //  占位豁免面/清格相已由前序批次钉死（TileObject.cs:357/:79-93）,不在此重复。
+  const VAN_SPEC = {
+    // 吊灯 3×3 Origin(1,0)：AnchorTop SolidTile|SolidSide cnt1 start1（顶行中列上方
+    // 1 格即锚）,AnchorBottom=Empty（TileObjectData.cs:3144-3161,Empty 于 :3147）
+    34: { w: 3, h: 3, ox: 1, oy: 0, top: { t: ['SolidTile', 'SolidSide'], cnt: 1, start: 1 }, bottom: null, left: null, right: null, wall: false },
+    // 中式灯笼/迪斯科球 2×2 Origin(1,0)：AnchorTop SolidTile|SolidSide cnt2 start0,
+    // AnchorBottom=Empty（TileObjectData.cs:3556-3561 / :3562-3567,Empty 于 :3559/:3565）
+    95: { w: 2, h: 2, ox: 1, oy: 0, top: { t: ['SolidTile', 'SolidSide'], cnt: 2, start: 0 }, bottom: null, left: null, right: null, wall: false },
+    126: { w: 2, h: 2, ox: 1, oy: 0, top: { t: ['SolidTile', 'SolidSide'], cnt: 2, start: 0 }, bottom: null, left: null, right: null, wall: false },
+    // 开态活板门 2×2 Origin(0,1)：AnchorLeft/Right SolidTile cnt1 start1（中部行左右
+    // 外各 1 格）,AnchorBottom=Empty（TileObjectData.cs:3806-3812,Empty 于 :3808）
+    386: { w: 2, h: 2, ox: 0, oy: 1, top: null, bottom: null, left: { t: ['SolidTile'], cnt: 1, start: 1 }, right: { t: ['SolidTile'], cnt: 1, start: 1 }, wall: false },
+    // 高门(开态) 1×5 Origin(0,0)：AnchorTop+AnchorBottom SolidTile cnt1 start0
+    // （TileObjectData.cs:2293-2325 addTile(388);389=FullCopyFrom(388) :2324-2325）
+    389: { w: 1, h: 5, ox: 0, oy: 0, top: { t: ['SolidTile'], cnt: 1, start: 0 }, bottom: { t: ['SolidTile'], cnt: 1, start: 0 }, left: null, right: null, wall: false },
+    // 宝石锁 3×3 Origin(1,1)：AnchorWall=true,无侧面锚（TileObjectData.cs:4790-4807
+    // ——isValidWallAnchor 默认支 wall==0 拒 TileObjectData.cs:1948-1962）
+    440: { w: 3, h: 3, ox: 1, oy: 1, top: null, bottom: null, left: null, right: null, wall: true },
+    // 巨石像 2×3 Origin(0,0)：AnchorTop SolidTile|SolidSide|SolidBottom cnt2 start0,
+    // AnchorBottom=default(AnchorData)（TileObjectData.cs:2987-2993,default 于 :2990;
+    // CopyFrom(Style2xX) 模板底锚被显式清空）
+    531: { w: 2, h: 3, ox: 0, oy: 0, top: { t: ['SolidTile', 'SolidSide', 'SolidBottom'], cnt: 2, start: 0 }, bottom: null, left: null, right: null, wall: false },
+  };
+  // 原版 CanPlace 子集（TileObject.cs:174-858）：ax,ay=占位左上。满分制=all-or-nothing
+  const vanillaCanPlace = (ax, ay, spec) => {
+    const inB = (x, y) => st.inBounds(x, y);
+    // :215 num8<5 || num8+W>max-5 …（五格边界门）
+    if (ax < 5 || ay < 5 || ax + spec.w > st.w - 5 || ay + spec.h > st.h - 5) return false;
+    const btOf = (x, y) => { const i2 = st.idx(x, y); return st.half[i2] ? 1 : (st.slope[i2] > 0 ? st.slope[i2] + 1 : 0); };
+    const defAt2 = (x, y) => tiles.TILE_DEFS[st.get(x, y)];
+    // 占位格（:337-374 合成环境简化=active 即阻挡）+ AnchorWall（:344-355）
+    for (let dx = 0; dx < spec.w; dx++) for (let dy = 0; dy < spec.h; dy++) {
+      const x = ax + dx, y = ay + dy;
+      if (!inB(x, y) || st.isActive(x, y)) return false;
+      if (spec.wall && st.wall[st.idx(x, y)] === 0) return false;   // isValidWallAnchor 默认支
+    }
+    // 锚格（:376-720）：SolidTile=nactive+tileSolid+非 solidTop+blockType==0;
+    // SolidSide(top)=bt 2/3 (bottom)=4/5;SolidBottom(:465)=实心非 solidTop ∪ 半砖 ∪ 顶坡
+    const anchorOK = (x, y, ts) => {
+      if (!inB(x, y)) return false;
+      if (!st.isActive(x, y)) return ts.includes('EmptyTile');
+      const d = defAt2(x, y);
+      if (!d) return false;
+      const bt = btOf(x, y);
+      let ok = false;
+      if (ts.includes('SolidTile')) ok = ok || (d.solid && !d.platform && bt === 0);
+      if (ts.includes('SolidSide')) ok = ok || (d.solid && !d.platform && (bt === 2 || bt === 3 || bt === 4 || bt === 5));
+      if (ts.includes('SolidBottom')) ok = ok || (d.solid && !d.platform) || st.half[st.idx(x, y)] === 1 || bt === 3 || bt === 4;
+      return ok;
+    };
+    const side = (a, rowOf) => {
+      if (!a) return true;
+      for (let k = 0; k < a.cnt; k++) { const [cx2, cy2] = rowOf(k); if (!anchorOK(cx2, cy2, a.t)) return false; }
+      return true;
+    };
+    if (!side(spec.bottom, (k) => [ax + spec.bottom.start + k, ay + spec.h])) return false;
+    if (!side(spec.top, (k) => [ax + spec.top.start + k, ay - 1])) return false;
+    if (!side(spec.left, (k) => [ax - 1, ay + spec.left.start + k])) return false;
+    if (!side(spec.right, (k) => [ax + spec.w, ay + spec.right.start + k])) return false;
+    return true;
+  };
+  // 场景 runner：setEnv() 搭环境 → vanilla 真值 → 本仓 tryPlace（点击=Origin 格）→
+  // 存活性（cells/frames）。每个 sheet 跑 positive + negative 两环境。
+  const findItem2 = (tileKey) => {
+    for (let i = 0; i < items.ITEM_DEFS.length; i++) if (items.ITEM_DEFS[i]?.tile === tileKey) return i;
+    return -1;
+  };
+  const tidOfSheet = (sh) => idOfSheet(sh);
+  const vanillaSeven = [];
+  const vFail = [];
+  const runSeven = async (sheet, setEnv, ax, ay) => {
+    const spec = VAN_SPEC[sheet];
+    const tid = tidOfSheet(sheet);
+    const tdef = tiles.TILE_DEFS[tid];
+    const itemIdx = findItem2(tdef?.key);
+    if (itemIdx < 0) return { sheet, error: 'no-item' };
+    // 环境构造（setEnv 内含 clearBox+wall 清零）
+    setEnv();
+    const van = vanillaCanPlace(ax, ay, spec);
+    holdItem(itemIdx);
+    g.player.x = (x0 + 5) * 16 + 8; g.player.y = (F - 5) * 16; g.player.vx = 0; g.player.vy = 0;
+    g.player.useTime = 0;
+    await new Promise((r) => setTimeout(r, 40));
+    const stackBefore = inv.slots[selIdx]?.stack ?? -1;
+    g['tryPlace'].call(g, ax + spec.ox, ay + spec.oy, items.ITEM_DEFS[itemIdx]);
+    const placed = stackBefore - (inv.slots[selIdx]?.stack ?? -1) === 1;
+    const cells = countIn(tid, ax - 2, ax + spec.w + 2, ay - 2, ay + spec.h + 2);
+    const framesOk = countIn(tid, ax, ax + spec.w - 1, ay, ay + spec.h - 1) === spec.w * spec.h;
+    return { sheet, key: tdef?.key, vanilla: van, placed, cells, full: spec.w * spec.h, framesOk };
+  };
+  // 环境基元：清场（tile+wall+liquid）/行/列/单格
+  const clearEnv = (xa, xb, ya, yb) => {
+    for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++) {
+      if (!st.inBounds(x, y)) continue;
+      if (st.isActive(x, y)) st.setTile(x, y, 0, 0, 0);
+      const i2 = st.idx(x, y);
+      st.wall[i2] = 0;
+      if (st.liquid[i2] > 0) st.liquid[i2] = 0;
+    }
+  };
+  const put = (x, y, tid2) => st.setTileSilent(x, y, tid2, 0, 0);
+  const STONEC2 = idOfSheet(1);
+  // —— 34 吊灯：positive=3 宽石天花 F-4（锚=中列上方 1 格）;negative=无天花
+  vanillaSeven.push(await runSeven(34, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 5; x <= x0 + 7; x++) put(x, F - 4, STONEC2);
+  }, x0 + 5, F - 3));
+  vanillaSeven.push(await runSeven(34, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 5, F - 3));
+  // —— 95 中式灯笼：positive=2 宽石天花 F-3;negative=无天花
+  vanillaSeven.push(await runSeven(95, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 5; x <= x0 + 6; x++) put(x, F - 3, STONEC2);
+  }, x0 + 5, F - 2));
+  vanillaSeven.push(await runSeven(95, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 5, F - 2));
+  // —— 126 迪斯科球：同 95
+  vanillaSeven.push(await runSeven(126, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 5; x <= x0 + 6; x++) put(x, F - 3, STONEC2);
+  }, x0 + 5, F - 2));
+  vanillaSeven.push(await runSeven(126, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 5, F - 2));
+  // —— 386 开态活板门：positive=中部行左右外各 1 实心块;negative=无侧块
+  vanillaSeven.push(await runSeven(386, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    put(x0 + 4, F - 1, STONEC2); put(x0 + 7, F - 1, STONEC2);
+  }, x0 + 5, F - 2));
+  vanillaSeven.push(await runSeven(386, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 5, F - 2));
+  // —— 389 高门开态：positive=地面 F+天花 F-6（恰 5 格净空,双锚）;negative=天花 F-7
+  //（6 格净空 → 顶锚落空=原版亦拒——前序探针 attempt:'rejected' 的正确拒绝根因）
+  vanillaSeven.push(await runSeven(389, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F, STONEC2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F - 6, STONEC2);
+  }, x0 + 5, F - 5));
+  vanillaSeven.push(await runSeven(389, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F, STONEC2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) put(x, F - 7, STONEC2);
+  }, x0 + 5, F - 5));
+  // —— 440 宝石锁：positive=3×3 背墙 wall=1;negative=无墙（原版 isValidWallAnchor 拒）
+  vanillaSeven.push(await runSeven(440, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 4; x <= x0 + 6; x++) for (let y = F - 3; y <= F - 1; y++) st.wall[st.idx(x, y)] = 1;
+  }, x0 + 4, F - 3));
+  vanillaSeven.push(await runSeven(440, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 4, F - 3));
+  // —— 531 巨石像：positive=2 宽石天花 F-4;negative=无天花
+  vanillaSeven.push(await runSeven(531, () => {
+    clearEnv(x0 - 2, x0 + 10, F - 8, F + 2);
+    for (let x = x0 + 5; x <= x0 + 6; x++) put(x, F - 4, STONEC2);
+  }, x0 + 5, F - 3));
+  vanillaSeven.push(await runSeven(531, () => { clearEnv(x0 - 2, x0 + 10, F - 8, F + 2); }, x0 + 5, F - 3));
+  res.vanillaSeven = vanillaSeven;
+  for (const r of vanillaSeven) {
+    const okVan = r.vanilla === true && r.placed && r.cells === r.full && r.framesOk;
+    const okRej = r.vanilla === false && !r.placed && r.cells === 0;
+    if (!okVan && !okRej) vFail.push(`${r.sheet}:van=${r.vanilla},placed=${r.placed},cells=${r.cells}/${r.full}`);
+  }
+  res.vanillaSevenFailures = vFail;
   // ---- ⑤ 备案②清零（2026-09-01 五批）：全部可放置多格 decor 候选逐件跑——
   // 放置成功（持物堆 -1）→ 必须整件存活（cells===full,自毁=部分格被吃）;
   // 双尝试：先地板,被拒再试天花板（34 吊灯/42 挂灯等顶锚件）;
@@ -165,6 +331,7 @@ const out = await page.evaluate(async () => {
     && typeof res.sunflowerDigSupport === 'object'
     && res.sunflowerDigSupport.placedBefore === 8 && res.sunflowerDigSupport.residue === 0
     && cFail.length === 0
+    && vFail.length === 0
     ? 'PASS' : 'FAIL';
   inv.slots[selIdx] = savedSlot;
   return res;

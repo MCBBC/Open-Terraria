@@ -5164,6 +5164,14 @@ export class TorchGodProj extends Entity {
     // ai[1] -= velocity.Length()（:40112-40119）：射程内 tileCollide=false
     this.rangeLeft -= Math.hypot(this.vx, this.vy);
     if (this.rangeLeft <= 0) this.tileCollide = true;
+    // ★序倒置修正(2026-09-02):原版 Update 序 = AI()（1457 Projectile.cs:16880）先于
+    // UpdatePosition（:19973;aiStyle 184 不在 :20549-20552 跳过表）——AI_184 尾迹尘
+    // （1457 :43596-43609 / 1456 :40120-40130）以【移前位】为基准（尾迹从旧位置拖出）。
+    // 2026-09-01 管线重构把积分上移到尘循环前,尘跟着新位走 = "环绕新位的烟花"而非
+    // "拖出的尾巴"（tests/torch-god-event.test.ts trail[3].x 14≠6 红）。积分不可回挪
+    // （斜砖/半砖正典管线系残余债清偿,见下注）,故帧首快照作尘基准 = 同效;
+    // vx/vy 本类不被管线写回（仅 position 落位）,快照+现速 = AI 时刻原语义。
+    const preMoveX = this.x, preMoveY = this.y;
     // ★残余债清偿(2026-09-01):中心点采样在斜砖/半砖上漏检(空区)/误检并存——
     // 射程内 tileCollide=false 直写、超程后任一轴接触即 Kill(AI_184 :40112 系)
     {
@@ -5179,9 +5187,12 @@ export class TorchGodProj extends Entity {
         this.kill(game); return;
       }
     }
-    // 尾迹（AI_184 :40120-40130）：每 AI 4 粒,沿 velocity/4×k 段布点,vel×0.3
+    // 尾迹（AI_184 :40120-40130;1457 :43596-43609）：每 AI 4 粒,沿 velocity/4×k 段布点,
+    // vel×0.3——基准 = 帧首快照 preMoveX/preMoveY（移前位,vanilla AI 先行序,见上修正注）。
+    // Kill 帧早退无尾迹（重构前后一致;原版本拍 AI 已先出 4 粒——登记微残差,杀帧尘
+    // 断言钉"仅爆尘 20 粒"这一既有形,不随本修扩张）
     for (let k = 0; k < 4; k++) {
-      this.dust?.(this.x + (this.vx / 4) * k, this.y + (this.vy / 4) * k, this.dustType, 0.3);
+      this.dust?.(preMoveX + (this.vx / 4) * k, preMoveY + (this.vy / 4) * k, this.dustType, 0.3);
     }
     // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
     // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）。

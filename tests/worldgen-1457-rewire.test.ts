@@ -119,7 +119,12 @@ describe('1457 对齐档 2：HellFort 1457 形（rollback1457/HellFort.1457.ts �
     expect(iLeft).toBeGreaterThan(-1);
     expect(iRight).toBeGreaterThan(iLeft);
     expect(s).toContain('const hfNum = hfDrunkMode ? 4 : 8;');
-    expect(s).toContain('const hfNum2 = hfDrunkMode ? 40 : 20;');
+    expect(s).toContain('let hfNum2 = hfDrunkMode ? 40 : 20;');   // IIII114b:errorWorld 臂 num2*=3 需 let
+    // ★IIIII114b（1458 cs:32996-33004）：errorWorld 塔锚臂——双 Next(15) 恒掷
+    expect(s).toContain('if (rng.int(0, 14) === 0) hfNum2 *= 3;');
+    expect(s).toContain('if (rng.int(0, 14) === 0) fortAnchor -= rng.int(0, 399);');
+    // ★IIIII114b（1458 cs:33147-33152）：格受理门 errorWorld 豁免（UnderworldLayer 弃格旁路）
+    expect(s).toContain('(rowT[r] < hellTop && !hfErrorMode) || rowB[r] > h - 20');
     expect(s).toContain('const colSpan = (): number => rng.int(hfNum >> 1, (hfNum2 >> 1) - 1);');
     expect(s).toContain('const wingSpan = (): number => rng.int(hfNum, hfNum2 - 1);');
     // 翼门四位（左右×外内）均为骰恒掷+drunk 恒真

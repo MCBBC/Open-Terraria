@@ -55,6 +55,21 @@ function mk118(s: string): void {
   const rc = (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1;
   console.log(`M118|${s}|rc=${rc}`);
 }
+// ★IIIII115b：FindLowestCloud 模块域缓存（cs GenVars.lowestCloud 语义：裸行，>0 即返）
+let ltCloudRowCache = 0;
+/** cs WorldGen.FindLowestCloud()（WorldGen.cs:2204-2226 1:1）：y∈[20,worldSurface)
+ *  逐行扫 x∈[20,w-20) 任一活性云族，返回**最低云行裸值**（调用方 +1；缓存跨调用）。 */
+function ltFindLowestCloudRow(st: TileStore, gs: GenState): number {
+  if (ltCloudRowCache) return ltCloudRowCache;
+  let lo = 0;
+  for (let y = 20; y < gs.worldSurface; y++) {
+    for (let x = 20; x < st.w - 20; x++) {
+      const ii0 = st.idx(x, y);
+      if (st.flags[ii0] && CLOUD_SHEETS.has(TILE_DEFS[st.type[ii0]]?.vanilla?.sheet ?? -1)) { lo = y; break; }
+    }
+  }
+  return (ltCloudRowCache = lo);
+}
 // ★IIIII97c 微段仪：叶簇/走道域每事件打印（SW_I109_MARK 门控；与 x86 taglog 主实例流对位）
 const MK109 = typeof process !== 'undefined' && !!process.env.SW_I109_MARK;
 if (typeof process !== 'undefined') console.log(`[LT109load] mark=${process.env.SW_I109_MARK} mk=${MK109}`);
@@ -62,6 +77,14 @@ function mk109(s: string): void {
   if (!MK109) return;
   const rc = (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1;
   console.log(`M109|${s}|rc=${rc}`);
+}
+// ★IIIII115b 藤写流全录（SW_LT_VN 池 / globalThis.__ltVn=(line)=>void）：TAPER 段
+//   下掘+num37 侧掘藤每零掷世界读（SolidTile/wall!=244/!active 下格）与写点逐行镜像
+//   x86 rig `VN|t|c|v|p|x|y|w|a`（/tmp/iii150-rig-src WorldGen.cs VD/VN/VH/VV/VU 标）。
+//   结构键 (t,c,v,p) 对齐；未装池时仅一次属性读，零格式化开销。
+type VnSink = (line: string) => void;
+function vnEmit(line: string): void {
+  (globalThis as unknown as { __ltVn?: VnSink }).__ltVn?.(line);
 }
 function ltStream(): string {
   if (!LT_TRACE) return '';
@@ -296,6 +319,12 @@ function deactivate(st: TileStore, x: number, y: number): void {
 function placePlatform(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   if (!st.inBounds(x, y)) return;
   st.setTileSilent(x, y, PLATFORM, 0, style * 18);
+  // ★IIIII115b：cs PlaceTile 主放置路径 `type=num; halfBrick(false); slope(0)`
+  //  （cs:60150-60160 字面）——平台覆盖斜坡残格时须清 half/slope；此前 setTileSilent
+  //  只在挖除(type0)时清位 ⇒ 竖井平台继承地形斜坡位（rf #42 Sl=3 @(2519,681)）。
+  const pi = st.idx(x, y);
+  st.half[pi] = 0;
+  st.slope[pi] = 0;
   genSquareTileFrame(st, rng, x, y);
 }
 /** TileID.Sets.Boulders（TileID.cs:195）——InvalidTileForPilesOrSpeleothems 用 */
@@ -1052,9 +1081,10 @@ export function growLivingTree(
       const gi = st.idx(i, j + 1);
       console.log(`GLT r1 x=${i} j=${j} !solid-foot act=${st.flags[gi]} sheet=${TILE_DEFS[st.type[gi]]?.vanilla?.sheet} key=${TILE_DEFS[st.type[gi]]?.key}`);
     }
+    vnEmit(`GF|x=${i}|y=${j}|n=1`);
     return false;
   }
-  if (activeAt(st, i, j)) { if (LT_TRACE) console.log(`GLT r2 x=${i} j=${j} anchor-active`); return false; }
+  if (activeAt(st, i, j)) { vnEmit(`GF|x=${i}|y=${j}|n=2`); if (LT_TRACE) console.log(`GLT r2 x=${i} j=${j} anchor-active`); return false; }
   const gSheet = sheetAt(st, i, j + 1);
   // ★YYYYYY（2026-08-23）NTB #42：cs:28163-28174 脚基门——非 NTB 脚基 ∉
   //   {0,2,1,40,Ore} 即拒；**NTB 追加放行 60 丛林草/59 泥**（`(!notTheBees ||
@@ -1062,8 +1092,8 @@ export function growLivingTree(
   //   （cs:28167-28173 的 tenthAnniversary 存活支=191/192/383/384 脚基拒——
   //   celebrationmk10 组合,常规路径不可达,不移植。）
   const ntbFoot = gs.seedFlags.notTheBees && (gSheet === 60 || gSheet === 59);
-  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
-  if (j < 150) { if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
+  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) { vnEmit(`GF|x=${i}|y=${j}|n=3`); if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
+  if (j < 150) { vnEmit(`GF|x=${i}|y=${j}|n=5`); if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
 
   // ★YYYYYY（2026-08-23）NTB #42：1458 cs:28312-28327 干宽四连——Next(2,3)×2 后
   //   **if/else-if 三支链**：skyblock(num3--/num4++ 零掷) / extraLivingTrees(
@@ -1107,14 +1137,20 @@ export function growLivingTree(
     flag = num5 >= 4;
   }
   // 净空检查（cs:28232-28255）：树冠投影内(上方到 j-5)不得有实心物
+  //   ★IIIII115b 定罪修正：num8 门= cs:28234-28238 `eLT ∨ eFI ⇒ num8=FindLowestCloud()+1`
+  //   （扫描自云层底下一格起）——此前写死 5（非 eLT 缺省），eLT 世界扫描面整片多出
+  //   天空带，云格(active,bad-type)使主树 n=6/patch n=7 在云带受理整族翻转（rf 链
+  //   x86 tree7(1902)/tree9(977)/tree10(939) 等五树 JS 侧整缺，mile8 #42 (1031,12) 级联）。
   {
-    const num8 = 5;
+    const num8 = (!!gs.seedFlags.extraLivingTrees || !!gs.seedFlags.extraFloatingIslands)
+      ? ltFindLowestCloudRow(st, gs) + 1
+      : 5;
     for (let k = num6; k <= num7; k++) {
       for (let l = num8; l < j - 5; l++) {
         if (activeAt(st, k, l)) {
-          if (!patch) { if (LT_TRACE) console.log(`GLT r5 x=${i} j=${j} clear-hit (${k},${l})`); return false; }
+          if (!patch) { vnEmit(`GF|x=${i}|y=${j}|n=6|x2=${k}|y2=${l}`); if (LT_TRACE) console.log(`GLT r5 x=${i} j=${j} clear-hit (${k},${l})`); return false; }
           const sh = sheetAt(st, k, l);
-          if (sh !== 2 && sh !== 0 && sh !== 1 && sh !== 191 && sh !== 192 && sh !== 383 && sh !== 384) { if (LT_TRACE) console.log(`GLT r6 x=${i} j=${j} patch-badtype (${k},${l}) sh=${sh}`); return false; }
+          if (sh !== 2 && sh !== 0 && sh !== 1 && sh !== 191 && sh !== 192 && sh !== 383 && sh !== 384) { vnEmit(`GF|x=${i}|y=${j}|n=7|x2=${k}|y2=${l}`); if (LT_TRACE) console.log(`GLT r6 x=${i} j=${j} patch-badtype (${k},${l}) sh=${sh}`); return false; }
         }
       }
     }
@@ -1179,7 +1215,7 @@ export function growLivingTree(
           num3++;
           if (ltFlag3) num9++;                           // cs:28298（!flag3 时下面补计）
           // ★IIIII111（cs:28441-28447）：eLT 边列足写（不带 halfBrick 复位、墙清零）
-          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) ltFoot191(st, num3, num11 + 1);
+          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) { vnEmit(`TF|x=${num3}|y=${num11 + 1}|s=L`); ltFoot191(st, num3, num11 + 1); }
         }
         if (!ltFlag3) num9++;                            // cs:28301
         num13 = 1;
@@ -1190,7 +1226,7 @@ export function growLivingTree(
         if (rng.int(0, maxValue - 1) === 0) {            // cs:28313
           num4--;
           if (ltFlag3) num10--;                          // cs:28317
-          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) ltFoot191(st, num4, num11 + 1);
+          if (sfELTg && !isDungeonWall(wallAt(st, num3, num11 + 1))) { vnEmit(`TF|x=${num4}|y=${num11 + 1}|s=R`); ltFoot191(st, num4, num11 + 1); }
         }
         if (!ltFlag3) num10--;                           // cs:28320
         num13 = 0;
@@ -1199,23 +1235,32 @@ export function growLivingTree(
       num++;
     }
     for (let m = num3; m <= num4; m++) {
+      vnEmit(`TR|r=${num11}|l=${num3}|rr=${num4}`);
       // ★IIIII111（cs:28485-28519）：行写入器 eLT 特化——边列=实心活木、内列=
       //   墙 244+惰性，深空(n≥6)时铺活木平台（PlaceTile 19 style23）。
-      if (ltFlag3 && num4 - num3 > 2) {
+      //   ★IIIII115b 定罪修正：分派门= `!skyblock ∧ eLT ∧ 当前行宽 num4-num3>2`
+      //   （cs:28485 原文），**无 flag3/≥7 条款**——此前误用 ltFlag3（头部
+      //   cs:28402 flag3=初始宽≥7 门），致 3..6 宽窄干树的内腔支整段死掉
+      //   （干腔全实心 vs 原版空腔+平台梯），rf 链 tree2 起 (2982,259) 堆门
+      //   active 态分叉级联（宽干树两支等价故 IIII111 认证域未暴露）。
+      if (!gs.seedFlags.skyblock && sfELTg && num4 - num3 > 2) {
         if (m === num3 || m === num4) {
-          if (!isDungeonWall(wallAt(st, m, num11))) setLivingWood(st, m, num11);   // 边列实心
+          if (!isDungeonWall(wallAt(st, m, num11))) { vnEmit(`TW|r=${num11}|m=${m}|w=${wallAt(st, m, num11)}|b=e`); setLivingWood(st, m, num11); }   // 边列实心
         } else if (!isDungeonWall(wallAt(st, m, num11))) {
+          vnEmit(`TW|r=${num11}|m=${m}|w=${wallAt(st, m, num11)}|b=i`);
           const iRow = st.idx(m, num11);
           st.wall[iRow] = WALL_LIVING_WOOD;
           st.flags[iRow] = 0;                            // active(false)：清除活性
           let nDeep = 1;
           for (; !activeAt(st, ((num3 + num4) / 2) | 0, num11 + nDeep); nDeep++) { /* 探底 */ }
+          vnEmit(`TP2|r=${num11}|m=${m}|n=${nDeep}`);
           if (nDeep >= 6) {
             st.flags[st.idx(m, num11)] = 0;
             placePlatform(st, rng, m, num11, 23);        // 活木平台（PlaceTile …,19,…,23）
           }
         }
       } else if (!isDungeonWall(wallAt(st, m, num11))) {
+        vnEmit(`TW|r=${num11}|m=${m}|w=${wallAt(st, m, num11)}|b=n`);
         setLivingWood(st, m, num11);                     // cs:28343（非 eLT 原路径不变）
       }
     }
@@ -1228,11 +1273,11 @@ export function growLivingTree(
     let n16 = ax[n15] + ax3[n15];
     let n17 = ax2[n15];
     let n18 = Math.trunc(ax4[n15] * (1 + rng.int(20, 29) * 0.1));  // cs:28352
-    if (!isDungeonWall(wallAt(st, n16, n17 + 1))) setLivingWood(st, n16, n17 + 1);
+    if (!isDungeonWall(wallAt(st, n16, n17 + 1))) { vnEmit(`BH|x=${n16}|y=${n17 + 1}|w=${wallAt(st, n16, n17 + 1)}`); setLivingWood(st, n16, n17 + 1); }
     let n19 = rng.int(3, 4);                              // cs:28360
     while (n18 > 0) {
       n18--;
-      if (!isDungeonWall(wallAt(st, n16, n17))) setLivingWood(st, n16, n17);
+      if (!isDungeonWall(wallAt(st, n16, n17))) { vnEmit(`BS|x=${n16}|y=${n17}|w=${wallAt(st, n16, n17)}`); setLivingWood(st, n16, n17); }
       if (rng.int(0, 9) === 0) {                          // cs:28365 10% 纵向抖动
         n17 = rng.int(0, 1) !== 0 ? n17 + 1 : n17 - 1;
       } else {
@@ -1243,6 +1288,7 @@ export function growLivingTree(
       } else if (rng.int(0, 1) === 0) {                   // cs:28371 长枝
         n19 = rng.int(2, 4);
         if (!isDungeonWall(wallAt(st, n16, n17))) {
+          vnEmit(`BT|x=${n16}|y=${n17}|w=${wallAt(st, n16, n17)}`);
           if (rng.int(0, 1) === 0) {
             setLivingWood(st, n16, n17);
             setLivingWood(st, n16, n17 - 1);
@@ -1267,7 +1313,7 @@ export function growLivingTree(
   let n22 = rng.int(num5 * 3, num5 * 5 - 1);              // cs:28424
   let n23 = 0, n24 = 0;
   while (n22 > 0 && n21 >= 30) {
-    if (!isDungeonWall(wallAt(st, n20, n21))) setLivingWood(st, n20, n21);
+    if (!isDungeonWall(wallAt(st, n20, n21))) { vnEmit(`TH|x=${n20}|y=${n21}|w=${wallAt(st, n20, n21)}`); setLivingWood(st, n20, n21); }
     if (n23 > 0) n23--;
     if (n24 > 0) n24--;
     for (let n25 = -1; n25 < 2; n25++) {
@@ -1280,11 +1326,11 @@ export function growLivingTree(
       while (n28 > 0) {
         n28--;
         n26 += n25;
-        if (!isDungeonWall(wallAt(st, n26, n27))) setLivingWood(st, n26, n27);
+        if (!isDungeonWall(wallAt(st, n26, n27))) { vnEmit(`BQ|x=${n26}|y=${n27}|w=${wallAt(st, n26, n27)}`); setLivingWood(st, n26, n27); }
         if (n28 === 0) { ax5[num2] = n26; ax6[num2] = n27; ax7[num2] = 1; num2++; }
         if (rng.int(0, 4) === 0) {
           n27 = rng.int(0, 1) !== 0 ? n27 + 1 : n27 - 1;
-          if (!isDungeonWall(wallAt(st, n26, n27))) setLivingWood(st, n26, n27);
+          if (!isDungeonWall(wallAt(st, n26, n27))) { vnEmit(`BJ|x=${n26}|y=${n27}|w=${wallAt(st, n26, n27)}`); setLivingWood(st, n26, n27); }
         }
         if (n29 > 0) {
           n29--;
@@ -1293,7 +1339,7 @@ export function growLivingTree(
           const n30 = n26;
           let n31 = n27;
           n31 = rng.int(0, 1) !== 0 ? n31 + 1 : n31 - 1;
-          if (!isDungeonWall(wallAt(st, n30, n31))) setLivingWood(st, n30, n31);
+          if (!isDungeonWall(wallAt(st, n30, n31))) { vnEmit(`BG|x=${n30}|y=${n31}|w=${wallAt(st, n30, n31)}`); setLivingWood(st, n30, n31); }
           ax5[num2] = n30; ax6[num2] = n31; ax7[num2] = 1; num2++;
           ax5[num2] = n30 + rng.int(-5, 5); ax6[num2] = n31 + rng.int(-5, 5); ax7[num2] = 1; num2++;
         }
@@ -1302,7 +1348,7 @@ export function growLivingTree(
     ax5[num2] = n20; ax6[num2] = n21; num2++;
     if (rng.int(0, 3) === 0) {
       n20 = rng.int(0, 1) !== 0 ? n20 + 1 : n20 - 1;
-      if (!isDungeonWall(wallAt(st, n20, n21))) setLivingWood(st, n20, n21);
+      if (!isDungeonWall(wallAt(st, n20, n21))) { vnEmit(`TJ|x=${n20}|y=${n21}|w=${wallAt(st, n20, n21)}`); setLivingWood(st, n20, n21); }
     }
     n21--;
     n22--;
@@ -1310,11 +1356,16 @@ export function growLivingTree(
   if (LT_TRACE) console.log(`GLTp top st=${ltStream()} g=${ltGridHash(st)}`);
   if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtD|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtD')
   // ---- 根系（cs:28511-28600） ----
+  const gVN = globalThis as unknown as { __ltVn?: VnSink; __ltVnT?: number };
+  const vn = gVN.__ltVn;
+  const vnT = (gVN.__ltVnT = (gVN.__ltVnT ?? 0) + 1); // x86: ++JJHook.VnTreeSeq
   for (let n32 = minl; n32 <= minr; n32++) {
     let n33 = rng.int(1, 5);                              // cs:28514
     let n34 = j + 1;
     while (n33 > 0) {
-      if (ltSolid(st, n32, n34)) n33--;              // cs:28709 SolidTile 全项版
+      const s = ltSolid(st, n32, n34) ? 1 : 0;       // cs:28709 SolidTile 全项版
+      if (s) n33--;
+      if (vn) vn(`VD|t=${vnT}|c=${n32}|y=${n34}|s=${s}`);
       setLivingWood(st, n32, n34);
       n34++;
     }
@@ -1329,6 +1380,8 @@ export function growLivingTree(
       const n41 = n39;
       let n42 = n32;
       n33 = rng.int(Math.trunc(num5 * 3.5), num5 * 6 - 1); // cs:28538
+      if (vn) vn(`VN|t=${vnT}|c=${n32}|v=${n37}|d=${n39}|L=${n33}`);
+      let vnP = 0;
       while (n33 > 0) {
         n33--;
         n42 += n39;
@@ -1336,9 +1389,12 @@ export function growLivingTree(
         // 1405:12796/12803 同）。★2026-08-16 对拍裁决：此前 JS 双门(wall≠244&&!wallDungeon)
         // /oracle 单 wallDungeon 门均非原版语义；步进 cs:28612 `num34 += num40`（0=平移
         // 不降,同格二次写幂等）此前两侧均误写死 1——n40 翻转一直被掷但从未生效。
+        if (vn) vn(`VH|t=${vnT}|c=${n32}|v=${n37}|p=${vnP}|x=${n42}|y=${n34}|w=${wallAt(st, n42, n34)}`);
         if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
         n34 += n40;
+        if (vn) vn(`VV|t=${vnT}|c=${n32}|v=${n37}|p=${vnP}|x=${n42}|y=${n34}|w=${wallAt(st, n42, n34)}`);
         if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
+        if (vn) vn(`VU|t=${vnT}|c=${n32}|v=${n37}|p=${vnP}|x=${n42}|y=${n34}|a=${activeAt(st, n42, n34 + 1) ? 1 : 0}`);
         if (!activeAt(st, n42, n34 + 1)) { n39 = 0; n40 = 1; }   // cs:28547 悬空改竖直下扎
         if (rng.int(0, 2) === 0) {
           n39 = n41 < 0 ? (n39 === 0 ? -1 : 0) : (n41 <= 0 ? rng.int(-1, 1) : (n39 === 0 ? 1 : 0));
@@ -1346,6 +1402,7 @@ export function growLivingTree(
         if (rng.int(0, 2) === 0) {
           n40 = n40 === 0 ? 1 : 0;
         }
+        vnP++;
       }
     }
   }
@@ -1384,11 +1441,12 @@ export function growLivingTree(
           // x86 见 187 / JS 见 192），并使本簇后续列的 canPlaceLeaves 扫描面翻转。
           const dx = ax5[n43] - n50, dy = ax6[n43] - n51;
           const lenSq = Math.fround(Math.fround(Math.fround(dx * dx) + Math.fround(dy * dy)));
-          if (Math.sqrt(lenSq) < n44 * 0.9) setLeaf(st, n50, n51);
+          if (Math.sqrt(lenSq) < n44 * 0.9) { vnEmit(`LW|c=${n43}|x=${n50}|y=${n51}`); setLeaf(st, n50, n51); }
           // ★IIIII111（cs:28805-28807）：eLT 圆冠内圈补墙写 60（< num44*0.7，
           //   与叶写同一 Vector2D.Length() 取值；独立 if，不随叶写短路）
           if (sfELTg && Math.sqrt(lenSq) < n44 * 0.7) st.wall[st.idx(n50, n51)] = 60;
         } else if (Math.abs(ax5[n43] - n50) + Math.abs(ax6[n43] - n51) * n49 < n44) {
+          vnEmit(`LW|c=${n43}|x=${n50}|y=${n51}`);
           setLeaf(st, n50, n51);                            // cs:28648
         }
       }
@@ -1479,22 +1537,17 @@ export function runLivingTreesPass(
   const { w } = st;
   // ★IIIII106：save the rainforest / the care bears movie 双臂入列——num 排除带收
   // 150（cs:15589）、num2=FindLowestCloud()+1（cs:15571/:15591，低锚=云层底）。
-  let ltCloudRow = 0;
-  const ltFindLowestCloud = (): number => {
-    if (ltCloudRow) return ltCloudRow;                     // FindLowestCloud GenVars 缓存语义
-    let lo = 0;
-    for (let y = 20; y < gs.worldSurface; y++) {
-      for (let x = 20; x < w - 20; x++) {
-        const ii0 = st.idx(x, y);
-        if (st.flags[ii0] && CLOUD_SHEETS.has(TILE_DEFS[st.type[ii0]]?.vanilla?.sheet ?? -1)) { lo = y; break; }
-      }
-    }
-    return (ltCloudRow = lo + 1);
-  };
+  ltCloudRowCache = 0;                                   // 本 pass 入口重算（cs GenVars 首算点=eLT 域 #42）
+  const ltFindLowestCloud = (): number => ltFindLowestCloudRow(st, gs) + 1; // cs 调用方 +1
   const sfLT106 = !!gs.seedFlags.extraLivingTrees;
   const sfCFB106 = !!gs.seedFlags.extraFloatingIslands;
-  if (sfCFB106) ltCloudRow = ltFindLowestCloud();          // cs:15570-15572 num2 预锚（缓存共享）
-  const num2b = sfLT106 ? ltFindLowestCloud() : 0;         // cs:15590-15592：树臂时云锚+1 覆写
+  if (sfCFB106) ltFindLowestCloud();                     // cs:15570-15572 num2 预锚（缓存共享）
+  // ★IIIII115c（1458 cs:15577-15580）：carebears 臂整缺——extraFloatingIslands 单旗
+  //   （无 eLT）时 num2 必须 =FindLowestCloud()+1（cs:15579）；原实现只预热缓存、
+  //   num2b 三元漏掉纯 carebears 域 ⇒ num2 恒 0，树锚扫描自 y=0 起命岛带顶岛土格
+  //   （j-- 后 `j>150` 门(cs:15636)拒死小行号岛锚）而 x86 自最低云下一格(170)起扫，
+  //   岛层/面锚族全错位（mile8 #42 T192>0×7440 T191>0×3347）。
+  const num2b = (sfCFB106 || sfLT106) ? ltFindLowestCloud() : 0; // cs:15579 carebears 臂 ∪ cs:15585 eLT 臂（GenVars 缓存两调同值）
   let num = 200;                          // cs:15560 与世界中心 ±200 排除带（eLT 收 150）
   let num2 = num2b;                       // cs:15561
   const num3 = w / 4200;                  // cs:15563
@@ -1580,7 +1633,9 @@ export function runLivingTreesPass(
               // ★IIIII96 对账仪：ltA/ltR 移到与 rig 同位（j-- 减基之后、gates 全过）；
               //   旧位置在减基前打印 → 与 rig 值恒差 +1（探针伪差，勿作真差解读）
               if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltA|${num6},${j}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
+              vnEmit(`AT|i=${num6}|j=${j}|p=0`);
               flag = growLivingTree(st, rng, gs, chests, num6, j);
+              vnEmit(`AR|r=${flag ? 1 : 0}`);
               if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltR|${num6},${j}|${flag ? 1 : 0}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
               if (LT_TRACE) console.log(`LT result x=${num6} ok=${flag} st=${ltStream()}`);
               if (flag) {
@@ -1626,7 +1681,9 @@ export function runLivingTreesPass(
                       if (flag2) {
                         if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltPA|${num7},${num10}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
                         if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10} st=${ltStream()}`);
+                        vnEmit(`AT|i=${num7}|j=${num10}|p=1`);
                         const okP = growLivingTree(st, rng, gs, chests, num7, num10, true);
+                        vnEmit(`AR|r=${okP ? 1 : 0}`);
                         if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltPD|${num7},${num10}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
                         if (LT_TRACE) console.log(`LT patchDone x=${num7} ok=${okP} st=${ltStream()}`);
                       }

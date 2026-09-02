@@ -34,8 +34,7 @@
 //   (Main.tileSolid 随读档重置),故 ③ 的 SolidTile 与 ⑥ 后的类型判断都要用覆写表。
 //
 // ③-⑫ 零掷骰(确定性写格);⑭ 每 `3000-剩余` 迭代 2 掷(rng 缺省跳过=旧行为)。
-import type { TileStore } from '../../TileStore';
-import { LIQUID_TYPE } from '../../TileStore';
+import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
@@ -708,6 +707,15 @@ export function genTileFrame(st: TileStore, rng: RNG, x: number, y: number): voi
   tileFrameGen(st, ctx, x, y, true);
 }
 
+/** ★IIII162 纯导出：WorldGen.TileFrame(i, j)（resetFrame=false 缺省）单格生成期入口
+ *  ——SquareTileFrame 九宫【非中心】位的 1:1 语义（cs:80941-80948 邻格全走缺省
+ *  resetFrame=false，仅中心 true）。供 TrapsPass cascade3x3T 树族邻格真分派
+ *  （sandy (3636,440) 飞镖井杀尾环触树帧检→CheckTree 整树坍塌案）。零行为新增。 */
+export function genTileFrameNeighbor(st: TileStore, rng: RNG | undefined, x: number, y: number): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  tileFrameGen(st, ctx, x, y, false);
+}
+
 /** AAAAAA 批新增纯导出：WorldGen.RangeFrame(startX, startY, endX, endY)（cs:81139）
  *  生成期入口——(startX-1..endX+1)×(startY-1..endY+1) 逐格 TileFrame(resetFrame=false)。
  *  GrowTreeWithSettings 尾扫（cs:30999）等消费端：区域帧扫触发的 184 苔芽 Next(3)
@@ -760,9 +768,21 @@ function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset:
   __swFnt39('TF', x, y);
   // 边距 5 早退（cs:82070）；!active 清 half/slope/块漆早退（cs:82078-82082，
   // ClearBlockPaintAndCoating——RRRR 补块漆清）
+  // ★IIIII111c（2026-09-02）涂层半边补清：Tile.cs:906-911 ClearBlockPaintAndCoating
+  //   = color(0) + fullbrightBlock(false) + invisibleBlock(false)——除块漆外还清
+  //   **涂层方块侧两位**（INVISIBLE_BLOCK|FULLBRIGHT_BLOCK），墙侧两位保留。
+  //   涂装链 invisibleplane #105 Cb=1 @(2310,555) 定罪：FinalCleanup 尾
+  //   LiquidCheck 全图环（cs:22645-50）触发合并事件 → CreateLiquidMergeTile 尾
+  //   SquareTileFrame（Liquid.cs:1377）→ 3×3 TileFrame 对非活性幽灵格走本支 →
+  //   x86 涂层块位被清（cbt 3→2，G2 dump -042_ShimEnd=3 → 105_Final_Cleanup=2
+  //   实证），JS 曾只清 paint 漏 coat ⇒ Cb 残差。旗关世界 coat 恒 0=零扰动。
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
   const i = st.idx(x, y);
-  if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; return; }
+  if (!st.flags[i]) {
+    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;
+    st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;   // ClearBlockPaintAndCoating 涂层方块侧（Tile.cs:906-911）
+    return;
+  }
   const sheet = SWEEP_SHEET[st.type[i]];
   if (sheet < 0) return;
 if (frameImportantDispatch(st, ctx, x, y, sheet, reset)) return;

@@ -1,4 +1,12 @@
-# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01）
+# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01，红蓝对抗收官）
+
+> **★红蓝对抗终局（2026-09-01/02）**：四路红队（Arrow α/fade 域/Dart 域/消散系统/orchestraFx 分布形）11 findings 全采信全清偿——
+> ①**消散 CRITICAL**：外层门 boss 短路放错层（原版 boss flag2 挡不住 timeLeft 归零 ：78790-78794）→ boss 走四步+668 鹿角怪补豁免（DoesntDespawnToInactivityAndCountsNPCSlots 唯一成员,`if(flag) return` 在 timeLeft-- 前）+690 收窄+583-585 钉活+两窗半幅+noSpawnCycle+DiscourageDespawn 移植+EoC 双触发摘除；
+> ②**Dart CRITICAL×2**：811 整链死代码（真载体=Arrow 经 bossAI.shoot,批五载体误判——**第五起载体错误,主线亲写违反自己的 grep 纪律**）→ spawnHostileProj 归位;811 age===0 永假门;596 far 反演/homing 2×/渲染模型(noPlayerHit 终态+whiteLerp/50%帽/帧动画)+傀儡面 noPlayerHit 门+killBloodShot 收敛;
+> ③**Arrow CRITICAL**：297 幽灵法杖全隐（R6 盲区=存量键×新兜底,尘载体未移植）→ d175 补载;45/5 兜底越权消费→GA 显式豁免;477 kill 序+700px 随机归巢补;631 入加算+604 错锚勘误;
+> ④**orchestraFx CRITICAL×3**：harpyCharm half=π 应 2π、**17 站 circ 逐分量双调用**（甄别代理机械替换形变）、blackLightningSmall 位置向量当角抖——蓝队全修+新建 orchestra-f6-shape 盘形统计锚（补"71 绿零闸门"缺口）。
+> **行为层/甄别层误报累计 6 起**（H6 counterweight/whip 归属/596 载体/633·632 身份/297 长尾键/harpyCharm half）——红蓝对抗+主线原文复核是唯一防线。
+> **终态：19 套件 328/328 绿+全触碰文件 tsc 零错**；parity-g 3 红定责=既有红（G3 陈旧测试/G4 Renderer.ts:72 守卫裸写 node 崩=生产修治愈 9 例/G8=1456 基线残留），torch-god 949 尾迹红移交（WeaponProj 管线重构序倒置,并行会话面）。
 
 > 三路并行子代理对 `Terarria1457/Terraria/Projectile.cs`（81527 行版）× 本仓 `Arrow.ts`
 > 完整审计的合并裁决单。锚版本验证：GetAlpha 区 + 弹 88 成长段 1457↔1458 字节级零差。

@@ -116,7 +116,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   221: { kind: 'fixed', rgba: [255,255,255,200] },  // :76666 | (255,255,255,200) 恒
   226: { kind: 'fixed', rgba: [255,255,255,200], off: 1 },  // :76722 | gate Main.mouseTextColor 脉冲亮度（r=g=b=255·num9+50）本仓未建模登记忽略；SKIP: 门控条件未建模（登记忽略）
   227: { kind: 'fade', off: 1 },  // :76748 | gate Main.mouseTextColor（a=100·num10 脉冲）本仓未建模登记忽略；SKIP: 门控条件未建模（登记忽略）
-  229: { kind: 'fixed', rgba: [255,255,255,50] },  // :76662 | (255,255,255,50) 恒
+  229: { kind: 'fixed', rgba: [255,255,255,50], off: 1 },  // :81333 | (255,255,255,50) 恒；SKIP: Main.cs:28340-28343 DrawProjDirect `type==229 return` 整弹不画=GetAlpha 死值——弹面归零走 Arrow drawGlobalAlpha case 229 return 0（★R2 2026-09-02；旧锚 :76662 系 Kill 段错行；本仓无 229 出生面=dormant 台账）
   242: { kind: 'alphaLt', rgba: [255,255,255,100], lt: 140 },  // :76690 | α<140→(255,255,255,100) else Transparent
   250: { kind: 'invisible', off: 1 },  // :76643 | Color.Transparent 隐形；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）
   251: { kind: 'invisible', off: 1 },  // :76647 | (255−α,255−α,255−α,0) A=0 隐形；SKIP: A=0 隐形档登记不消费（原版视觉载体=AI 尘/粒，防整弹消失；同 5 小丑箭 PROJ_ALPHA0 先例）

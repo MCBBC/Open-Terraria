@@ -1030,11 +1030,15 @@ export function doRoundLandMasses(st: TileStore, rng: RNG, gs: GenState): void {
     fb = new Uint8Array(N);
   } catch { throw new Error('doRoundLandMasses: 标记位分配失败'); }
   const markCircle = (cx: number, cy: number, r: number): void => {
+    // ★IIIII163（planetoids）dormant 取证钩：globalThis.__sw163Rlm 挂数组时逐圆记录
+    //   （圆心/半径=掷流对齐面;fb 位图=几何面）——缺省 undefined 零开销
+    const __dbg = (globalThis as { __sw163Rlm?: Array<[number, number, number]> }).__sw163Rlm;
     for (let j = cy - r; j <= cy + r; j++) {
       for (let i = cx - r; i <= cx + r; i++) {
         if (i >= 0 && i < w && j >= 0 && j < h && distLT(cx, cy, i, j, r)) fb[j * w + i] = 1;
       }
     }
+    __dbg?.push([cx, cy, r]);
   };
   // ——三个固定圆（cs:2876-2902；掷序=num3 先行、初值 Vector2 必掷两颗、case 覆写再掷）——
   for (let i = 0; i < 3; i++) {
@@ -1057,9 +1061,14 @@ export function doRoundLandMasses(st: TileStore, rng: RNG, gs: GenState): void {
   for (let l = 0; l < num; l++) {
     const cx = rng.nextIntRange(50, w - 50);                   // Next(50, maxX-50)
     const cy = rng.nextIntRange(50, h - 50);                   // Next(50, maxY-50)
-    const margin = 10;
+    let margin = 10;
     let r = rng.nextIntRange(30, 170);                         // Next(30,170)
-    if (l > half) { r = Math.trunc(r / 2); }                   // num5/=2（int 除法截断）
+    if (l > half) {
+      r = Math.trunc(r / 2);                                   // num5/=2（int 除法截断）
+      // ★IIIII163（planetoids）：cs:2941-2944 num4/=2——碰撞外沿**与半径同步减半**
+      //   （漏则后半程碰撞域恒 10 → 碰撞判定翻转→ ~200+ 小圆被误拒，#16 全域重排）
+      margin = 5;
+    }
     let collide = false;
     for (let m = cx - r - margin; m <= cx + r + margin && !collide; m++) {
       for (let n = cy - r - margin; n <= cy + r + margin; n++) {
@@ -1083,6 +1092,10 @@ export function doRoundLandMasses(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
+  // ★IIIII163 dormant 取证钩（配对 __sw163Rlm 圆表）：__sw163RlmFb 预挂 Uint8Array(w*h)
+  //   时回写 fb 位图——与 x86 act 对拍定谳几何规则（f32 链 vs double 链）。
+  const __dbgFb = (globalThis as { __sw163RlmFb?: Uint8Array }).__sw163RlmFb;
+  __dbgFb?.set(fb);
 }
 
 // ============================================================
@@ -1104,18 +1117,31 @@ export function doExtraLiquidAddLiquid(st: TileStore, rng: RNG, gs: GenState): v
       if (st.flags[idx] & 1) continue;            // active 早退（不掷骰）
       if (dualOn && isDungeonWallId(st.wall[idx])) continue;
       // 臂1 墙=0 且地表上：Next(3)==0 → 满 255 水
+      // ★IIIII163（waterpark）：原版只写 liquid=255、液型位不动——原版干格位=0=水；
+      //   本仓 +1 编码（NONE=0）下"位不动"须显式落 WATER，否则注水 59 万格 lty=NONE
+      //   → 旗标真值 #49 Settle_Liquids Y1>0×59.4 万定谳。（wall86 蜜臂显式写 HONEY 除外）
       if (st.wall[idx] === 0 && j < gs.worldSurface) {
-        if (rng.nextInt(3) === 0) st.liquid[idx] = 255;
+        if (rng.nextInt(3) === 0) {
+          st.liquid[idx] = 255;
+          if (st.liquidType[idx] === LIQUID_TYPE.NONE) st.liquidType[idx] = LIQUID_TYPE.WATER;
+        }
       // 臂2 地狱层下（!remix）：Next(4)==0 → 满（岩浆型由 Finalize 面 lava 门转）
       } else if (j > underworld) {
         if (!!F.remix) continue;                  // !remixWorldGen 条件内掷——remix 短路零掷
-        if (rng.nextInt(4) === 0) st.liquid[idx] = 255;
+        if (rng.nextInt(4) === 0) {
+          st.liquid[idx] = 255;
+          if (st.liquidType[idx] === LIQUID_TYPE.NONE) st.liquidType[idx] = LIQUID_TYPE.WATER;
+        }
       // 臂3 地牢外粉墙/猩红墙等特殊墙（216=绿藻砖墙?187=神圣化石墙）→ Next(3)
       } else if (st.wall[idx] === 216 || st.wall[idx] === 187) {
-        if (rng.nextInt(3) === 0) st.liquid[idx] = 255;
+        if (rng.nextInt(3) === 0) {
+          st.liquid[idx] = 255;
+          if (st.liquidType[idx] === LIQUID_TYPE.NONE) st.liquidType[idx] = LIQUID_TYPE.WATER;
+        }
       // 臂4 其余带墙格：Next(3)!=0 才满； HoneyBrickWall86 上先标蜂蜜型
       } else if (rng.nextInt(3) !== 0) {
         if (st.liquid[idx] === 0 && st.wall[idx] === 86) st.liquidType[idx] = LIQUID_TYPE.HONEY;
+        else if (st.liquidType[idx] === LIQUID_TYPE.NONE) st.liquidType[idx] = LIQUID_TYPE.WATER;
         st.liquid[idx] = 255;
       }
     }

@@ -43,6 +43,11 @@ const CHAINS: Record<string, ChainCfg> = {
   // ★IIIII104：pumpkin/jagged 五点接入（G2 同 IIII89/i80 桶；配方=m8all.sh/jagged 章）
   pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: { halloweenGen: true }, g2: '/tmp/iii84-out/x86-i78-pumpkin' },
   jagged:    { name: 'jagged',    seed: '771005',     evil: 0,  flags: { digExtraHoles: true }, g2: '/tmp/iii80-out/x86-jagged' },
+  // ★IIIII111c（2026-09-02）：涂装族五点接入（G2=IIII132 涂装桶 /tmp/iii132-out/paint；
+  //  五点不含 pnt/pwal/cbt 三通道——漆/涂层全域对拍以 mile8 _iii81m8 SW_I81_PAINT=1 为准，
+  //  invisibleplane/negativeinfinity 已 106 行满绿收官，xrayvision 同）
+  xrayvision: { name: 'xrayvision', seed: 'xrayvision|106107', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-xrayvision' },
+  monochrome: { name: 'monochrome', seed: 'monochrome|106108', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-monochrome' },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';

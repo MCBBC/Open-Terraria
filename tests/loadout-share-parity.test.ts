@@ -76,7 +76,7 @@ describe('LoadoutShare 机制三律（GetEffectiveArmor/GetEffectiveDye 1:1）',
     };
     inv.armor[3] = { id: wings, stack: 1 };
     toggleShare();
-    inv.loadouts[2].armor[3] = { id: iid(757), stack: 1, favorited: true };  // 旧残留(另一翼种占位)
+    inv.loadouts[2].armor[3] = { id: wings, stack: 1, favorited: true };  // 旧残留(另一仓同槽副翼)
     toggleShare(); toggleShare();   // OFF→ON：第二次收藏触发 ClearSlotShareInOtherLoadouts
     expect(inv.loadouts[2].armor[3]?.favorited).toBe(false);
     inv.trySwitchingLoadout(1);     // 切空仓（L1 槽空）

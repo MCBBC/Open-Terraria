@@ -16,6 +16,9 @@ import { hfIs1457 } from './HellFortPass';
 import type { SparseChestSink } from '../ChestRegistry';   // ★IIII102c 稀疏 sink 槽模型
 // ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
 import { placeTrapDualDungeonReject } from './DungeonStyles1457';
+// ★IIII162：树族邻格真分派引擎（vanilla/FinalCleanupPass 的 1:1 TileFrame；见
+//   cascade3x3T 树族支注释——与 FinishNoTrapsPass 同款 co-import 既有惯例）
+import { genTileFrameNeighbor } from './FinalCleanupPass';
 
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
 
@@ -181,8 +184,11 @@ const KDUST_FURN = new Set([358, 359, 360, 361, 362, 363, 364, 275, 276, 277, 27
   556, 558, 559, 542, 391, 394, 392, 393, 568, 569, 570, 582, 580, 598, 599, 600, 601, 602, 603,
   604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 620, 629, 632, 640, 643, 644, 645, 710]);
 function kdustRolls(st: TileStore, ci: number, rng: RNG): void {
-  const sh = sheetOf(st.type[ci]!);
-  const fx = st.frameX[ci]!;
+  kdustRollsSh(sheetOf(st.type[ci]!), st.frameX[ci]!, rng);
+}
+/** ★IIII162：kdust 的 sheet/fx 直参变体——供 killObjectAt destroyObject 补掷支
+ *  在【整块清除后】按快照重放其余格 dust 掷账（tile 已清,读不到 sh/fx）。 */
+function kdustRollsSh(sh: number, fx: number, rng: RNG): void {
   switch (sh) {                                            // 主 switch 内含掷支（cs 相对 342-386）
     case 583: case 584: case 585: case 586: case 587: case 588: case 589:
       rng.int(0, 9); break;                                // Next(10)
@@ -312,7 +318,7 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
   //   (147||224||Ices) && getGood&&remix&&!drunk && Next(2)==0（耗掷!）⇒ 留水64。
   //   本域此前直接清空 ⇒ X 深渊叶被镖锚杀后残 lava 半池、J 全净（单格差在 #76 即现，
   //   且被二次沉降池聚合放大）。netMode!=1 门生成期恒真。行号=1457。
-  killObjectAt(st, x, y);
+  killObjectAt(st, x, y, rng);   // ★IIII162 传 rng：destroyObject 其余格 dust 补掷（sandy #76 祭坛案）
   {
     // （湿尸支：死格残留液体——setTileSilent 清 type/帧不触 liquid）
     const wi = st.idx(x, y);
@@ -354,6 +360,13 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     if (CHECK1X1_SHEETS.has(sh)) { check1x1Gen(st, ux, uy, rng); continue; }
     if (CHEST_SHEETS.has(sh)) { checkChestGen(st, ux, uy, rng); continue; }
     if (CHECK2X2_SHEETS.has(sh)) { check2x2Gen(st, ux, uy, rng); continue; }
+    // ★IIII162（sandy #76 定罪修复②）：树族邻格真分派——TileFrameImportant
+    //   case 5/323/583-589/596/616/634 → CheckTree/CheckPalmTree/CheckTreeWithSettings
+    //   （cs:87421+）。vanilla 飞镖井 KillTile(dart格 cs:9105) 尾环触树帧检即整树
+    //   坍塌；JS 旧近似漏派发 ⇒ sandy (3636,440) 井邻树 8 格 x86 塌/JS 存（#76 残差）。
+    //   走 FinalCleanup 引擎 1:1 TileFrame（resetFrame=false 邻格语义，YYYYY 批
+    //   s22222 #97 树坍塌 118 杀实证）；树族 dust=0（KDUST 表）掷中性。
+    if (rng && !i13Legacy() && TREE_DISPATCH_SHEETS.has(sh)) { trapEv('TD', ux, uy, sh); genTileFrameNeighbor(st, rng, ux, uy); continue; }
     if (sh === 185) { checkPileTrap(st, ux, uy); continue; }
     // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
@@ -528,6 +541,10 @@ const GEM178 = sheetId(178);
  *  {132,138,142,143,288-295,484,664,665,711,712}）。★713-716（熔岩/蜘蛛/地牢
  *  巨石）在 cs:86410 break 列表=零分派，不在本族 */
 const CHECK2X2_SHEETS = new Set([132, 138, 142, 143, 288, 289, 290, 291, 292, 293, 294, 295, 335, 411, 484, 490, 564, 565, 594, 664, 665, 711, 712]);
+/** ★IIII162 树族分派表（TileFrameImportant cs:87421+ case 5/323/583-589/596/616/634
+ *  → CheckTree/CheckPalmTree/CheckTreeWithSettings）——邻格树帧检真分派（见
+ *  cascade3x3T 树族支）。fw/fh=1（无 MULTI_DEFS 成员），与 CHECK1X1/2X2/CHEST 无交。 */
+const TREE_DISPATCH_SHEETS = new Set([5, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 /** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+） */
 const CHEST_SHEETS = new Set([21, 467]);
 /** Main.tileTable（Main.cs:6828+ 全 75 项，= tileSolidTop ∖ {16,134,239}） */
@@ -1113,7 +1130,7 @@ function check2x1Trap(st: TileStore, x: number, y: number): void {
   if (sheetOf(st.type[iR]!) === 185 && st.flags[iR]) killTileWholeCore(st, num + 1, y);
   destroyObjectP2 = false;
 }
-function killObjectAt(st: TileStore, x: number, y: number): void {
+function killObjectAt(st: TileStore, x: number, y: number, rng?: RNG): void {
   const t = st.type[st.idx(x, y)];
   const m = MULTI_DEFS.get(t);
   // ★IIIII99c（jagged #76 定罪修复①）：巨石族（滚地仙人掌 484/石巨石 138 等）禁用
@@ -1134,6 +1151,34 @@ function killObjectAt(st: TileStore, x: number, y: number): void {
           }
         }
         if (full) {
+          // ★IIII162（sandy #76 巨石变体定罪修复）：vanilla 的整块死亡并非静默清除
+          //   ——Check3x2(cs:50081-50092)/Check2x2 等 destroyObject 循环对块内其余
+          //   活格【逐格 KillTile】（`type==type && active()` 门），递归格各自跑完整
+          //   KillTile 头链，其中 dust 循环（cs:64213-64218 GetTileDustAmount ×
+          //   MakeTileDust）是生成期唯一可达掷面（裂缝 481-483/蛛网 51/化石 404/
+          //   湿尸 58·230 皆 1×1 专支多格族不可达；再入级联被 destroyObject 头门
+          //   压制=零掷）。递归格序=rect 序（x 外 y 内）与 vanilla 一致。
+          //   案证：sandy (433,429) 站井穿祭坛 26 锚格 (433,446)——x86 60 掷
+          //   （6 格 × dustAmount 默认 10 × fx<54 每掷 1）vs JS 10 掷（仅锚格），
+          //   Δ=50 ⇒ 变体五连掷流位错位 ⇒ Next(20) 取值翻转（664↔宠 716）。
+          //   终态仍整块清除（陶罐/雕像族金标近似不变），仅补齐其余格 dust 掷账。
+          if (rng) {
+            for (let ddx = 0; ddx < m.w; ddx++) {
+              for (let ddy = 0; ddy < m.h; ddy++) {
+                const sx = ax + ddx, sy = ay + ddy;
+                if (sx === x && sy === y) continue;      // 锚格 dust 已在 killTileWholeCore 头消费（vanilla 期锚已死被 active() 门跳过）
+                if (!st.inBounds(sx, sy)) continue;
+                const si = st.idx(sx, sy);
+                if (!st.flags[si] || st.type[si] !== t) continue;
+                const br = checkBreakabilityT(st, sx, sy);
+                if (br === 2) continue;                  // cs:63584 num==2 拒杀（无尘无掷）
+                const sh = sheetOf(t);
+                const fx = st.frameX[si]!;
+                const amt = dustAmount(br === 1, sh, fx);
+                for (let k = 0; k < amt; k++) kdustRollsSh(sh, fx, rng);
+              }
+            }
+          }
           for (let dy = 0; dy < m.h; dy++) {
             for (let dx = 0; dx < m.w; dx++) st.setTileSilent(ax + dx, ay + dy, 0);
           }
@@ -1440,12 +1485,14 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     //   （golden 序=B(x2=2024,colX=2023) 先置石 → A(x2=2021,colX=2022) 后井穿杀 B 石
     //   → A 石落 (2022-2023,581-582)=终态金标）：曾按"EE 免杀"误豁免 → B 石错存、
     //   A 被占位 → 接受序假象。killTileWhole 直接命中=整块移除同构该级联终态。
+    trapEv('BS', 0, top, 0);                                          // ★IIII162 井杀前相标（x86 BSCAN 同位）
     for (let xx = colX; xx <= colX + 1; xx++) {
       for (let yy = top; yy <= py; yy++) {
         const ii = st.idx(xx, yy);
-        if (st.type[ii] !== SHEET379) killTileWhole(st, xx, yy, rng);
+        if (st.type[ii] !== SHEET379) { trapEv('BKI', xx, yy, sheetOf(st.type[ii])); killTileWhole(st, xx, yy, rng); }
       }
     }
+    trapEv('BK', 0, 0, 0);                                            // ★IIII162 井杀后（x86 BKILL 同位）
     // 6×6 实心转石头（cs:9242-9250 直写 .type=1：保半砖/坡/帧，无巨石豁免——
     //   被井杀后的巨石格已非实心自然跳过）
     for (let xx = colX - 2; xx <= colX + 3; xx++) {
@@ -1456,13 +1503,16 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
         }
       }
     }
+    trapEv('BSt', 0, 0, 0);                                           // ★IIII162 转石后（x86 BSTONE 同位）
     placePlate(st, x2, py, 7);                                        // cs:9252 style7
+    trapEv('BP', 0, 0, 0);                                            // ★IIII162 板后（x86 BPLATE 同位）
     // cs:9253-9254 两块石头（PlaceTile forced=false：EmptyTile 门，非空格不写）。
     // ★GGGGGGGG2-D 实证备裁：PlaceTile 尾 SquareTileFrame→TileFrame 的合并族帧号
     //   Next(0,3)（cs:82985）在 generatingWorld 下被整段跳过（cs:82659
     //   `!generatingWorld` 门包住 TileFrameCosmetic）——生成期零掷，勿补掷。
     if (!st.flags[st.idx(colX, top + 2)]) st.setTileSilent(colX, top + 2, STONE1);
     if (!st.flags[st.idx(colX + 1, top + 2)]) st.setTileSilent(colX + 1, top + 2, STONE1);
+    trapEv('B2', 0, 0, 0);                                            // ★IIII162 双石后（x86 BST2 同位）
     // 巨石变体掷（cs:9255-9306）。★SSSSSS-NOTRAPS：maxValue2/3/4（蛛/岩浆/地牢
     //   巨石分母）noTraps 时 1/2/4（普通 2/6/3）；maxValue（tenth 彩虹分母）
     //   noTraps&&!remix 时 5（普通 7）；新增 712 便便支（ntb||noTraps||poo 1/5）与
@@ -1472,15 +1522,19 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     const maxValue3 = nf.noTraps ? 2 : 3;
     const maxValue4 = nf.noTraps ? 4 : 6;
     const maxValue = nf.noTraps && !nf.remix ? 5 : 7;
-    if (rng.int(0, maxValue2 - 1) === 0 && closeSpiders(st, colX, top)) boulderId = BOULDER714;
-    else if (rng.int(0, maxValue4 - 1) === 0 && closeDungeon(st, colX, top, gs.dungeonSide)) boulderId = BOULDER715;
-    else if (rng.int(0, maxValue3 - 1) === 0 && closeLava(st, colX, top)) boulderId = BOULDER713;
-    else if ((nf.notTheBees || nf.noTraps || nf.pooEverywhere) && rng.int(0, 4) === 0) boulderId = BOULDER712;
-    else if (nf.tenthAnniversary && rng.int(0, maxValue - 1) === 0) boulderId = BOULDER711;
-    else if ((nf.tenthAnniversary || nf.noTraps) && rng.int(0, 2) === 0) boulderId = BOULDER664;
-    else if (rng.int(0, 24) === 0) boulderId = BOULDER711;
-    else if (rng.int(0, 19) === 0) boulderId = BOULDER664;
+    // ★IIII162（sandy #76 定罪仪）：变体八支逐掷旁路记账（vroll 与 rng.int 同参调用，
+    //   消费序不变；__swTrapEv 未注册时 trapEv 零开销）。
+    const vroll = (k: number, max: number): number => { const r = rng.int(0, max - 1); trapEv(`V${k}`, r, max, 0); return r; };
+    if (vroll(1, maxValue2) === 0 && closeSpiders(st, colX, top)) boulderId = BOULDER714;
+    else if (vroll(2, maxValue4) === 0 && closeDungeon(st, colX, top, gs.dungeonSide)) boulderId = BOULDER715;
+    else if (vroll(3, maxValue3) === 0 && closeLava(st, colX, top)) boulderId = BOULDER713;
+    else if ((nf.notTheBees || nf.noTraps || nf.pooEverywhere) && vroll(4, 5) === 0) boulderId = BOULDER712;
+    else if (nf.tenthAnniversary && vroll(5, maxValue) === 0) boulderId = BOULDER711;
+    else if ((nf.tenthAnniversary || nf.noTraps) && vroll(6, 3) === 0) boulderId = BOULDER664;
+    else if (vroll(7, 25) === 0) boulderId = BOULDER711;
+    else if (vroll(8, 20) === 0) boulderId = BOULDER664;
     if (boulderId === BOULDER138 && boulderPetsPlaced < petCap) { boulderPetsPlaced++; boulderId = BOULDER716; }
+    trapEv('PET', boulderPetsPlaced, petCap, 0);
     trapEv('VID', sheetOf(boulderId), top, colX);
     {
       // ★cs:9307 反编译印 PlaceTile(num4+1, num5+1)，x86 金标实证锚=(num4, num5)
@@ -1909,6 +1963,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
           x = rng.int(200, st.w - 201);
           y = rng.int(gs.worldSurface, st.h - 211);
         }
+        trapEv('AX', x, y, 0);   // ★IIII162 per-attempt 坐标记账（x86 rig ATT 同位,零开销钩）
         if (st.wall[st.idx(x, y)] === 0) {
           mPt++;
           trapEv('C', x, y, 0);

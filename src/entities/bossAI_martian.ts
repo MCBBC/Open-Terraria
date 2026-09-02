@@ -385,8 +385,15 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
 export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | null) {
   const id = e.vanillaId ?? 0;
   // ---- 荷兰大炮 492（DD2 批 bossAI_dd2.ts：锚船体偏移 cs:35889 + 240t 装填炮击
-  // cs:36008）——aiStyle 75 分发进本函数,转发后不走飞碟部件路径 ----
-  if (id === 492) { dutchmanCannonAI(e, game, player); return; }
+  // cs:36008）——aiStyle 75 分发进本函数,转发后不走飞碟部件路径。
+  // MINOR-4 第六挂载点（:35989）：锚船体 491 存活 → DiscourageDespawn(60)（校验门
+  // 与 dutchmanCannonAI 内 `!ship || ship.dead || vanillaId!==491` 同式;492 在
+  // DoesntDespawnToInactivity 名单=保真位）----
+  if (id === 492) {
+    if (e.master && !e.master.dead && e.master.vanillaId === 491) e.discourageDespawn(60);
+    dutchmanCannonAI(e, game, player);
+    return;
+  }
   // ---- 骑手首帧生成坐骑（:35750-35762）----
   if ((id === 390 || id === 416) && !e.bInit) {
     e.bInit = true;
@@ -407,6 +414,13 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
     return;
   }
   const m = mount as Enemy;
+  // ---- 挂载保活（MINOR-4,NPC.cs:35857/:35874/:35884/:35960/:35974/:35989）：原版
+  //      六部件锚定支首行 DiscourageDespawn(60)=timeLeft 抬底 ≥60+清鼓励旗,锚主存活
+  //      期间每 tick 重钉;锚主亡故（mountOk 假）不再调用 → 部件随消散系统退场。
+  //      覆盖本函数五部件 390→391/416→415/392→395/393→395/394→395（492→491 在上方
+  //      转发点单独补,见 :35989 注）;392/393/394 在 DoesntDespawnToInactivity 名单
+  //      （永不倒数）=保真位,实际功能面=390/416 骑手离屏 60t 保命窗 ----
+  e.discourageDespawn(60);
   // ---- 锚定跟随（:35764-35845 + 36200-36214）：零速贴主体 + 偏移 ----
   let ox = 0, oy = 0;
   // spriteDirection（:35908-35919）：394 按 ai[1] 固定侧（:35886 num1121）；392/393

@@ -1303,7 +1303,7 @@ function placeTrap137TP(st: TileStore, x: number, y: number, style: number): voi
 /** 玛雅陷阱（cs:8314-8644）1:1：落点下扫实心（SolidOrSlopedTile）→ 九格净空门 →
  *  横向（压板居中+两端墙飞镖+上延叠陷+KillTile 锚）或纵向（天花板火焰陷+两侧
  *  追加+无 KillTile）→ AddWireFromPointToPoint 三色导线。 */
-function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
+export function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
   // ★R3-10 同族（W57:8300-8303）：actuallyNoTrapsForRealIMeanIt → return true
   if (gs.seedFlags.actuallyNoTraps) return true;
   const wireBit = (n: number) => n === 0 ? TileStore.WIRE_RED : n === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;

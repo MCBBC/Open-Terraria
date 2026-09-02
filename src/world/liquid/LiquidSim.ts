@@ -1202,6 +1202,15 @@ export class LiquidSim {
     const i = this.idx(x, y);
     if (st.flags[i]) this.killTileAt(x, y); // ReplaceTile：KillTile_DropItems（火把/植物掉落）；生成收尾=尘掷
     st.setTile(x, y, tileType);
+    // ★IIIII111c（2026-09-02）尾 SquareTileFrame 补级联（Liquid.cs:1377，ReplaceTile/
+    //   PlaceTile 分支后**无条件**执行，中心 resetFrame=true）：3×3 TileFrame 对
+    //   非活性幽灵格走 cs:82623-82627 支 → ClearBlockPaintAndCoating 清**块侧**
+    //   漆/涂层（墙侧保留）。negativeinfinity #105 P=1 @(2624,725) 定罪：FinalCleanup
+    //   尾 LiquidCheck 环（cs:22645-50）合并事件落块于本格 → 原版九宫重帧波及邻格
+    //   幽灵 → 邻格块漆 30 被清（G2 -042_ShimEnd pnt=30/pwal=30 → 105 pnt=0/pwal=30
+    //   实证=只清块侧），JS 曾漏此尾级联 ⇒ 邻格漆残留。invis 同案（Cb 3→2）。
+    //   运行期同达（原版运行期亦走此尾）：passRng 缺位时 roll 占位 0（killTileAt 同惯例）。
+    this.squareTileFrameGen(x, y);
   }
 
   /** LiquidOverwriteStrip（Liquid.cs:1338-1352）：从 (x,y) 起向两侧延伸，

@@ -179,7 +179,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm } from '../entities/Enemy';
+import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -363,7 +363,7 @@ import { HitTile } from './HitTile';
 import type { GameHooks, LootPlayerCtx } from '../entities/types';
 import { BehaviorRecorder } from '../debug/BehaviorRecorder';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
-import { Dart, TrapShot, TowerBolt, type TrapShotKind, prefetchTrapProjectiles } from '../entities/Dart';
+import { Dart, TrapShot, TowerBolt, DART_STYLE, type TrapShotKind, prefetchTrapProjectiles } from '../entities/Dart';
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE, BULLET_KILL_SFX } from '../entities/Arrow';
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
@@ -701,7 +701,12 @@ type DecorSupportKind =
   | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip'
   // —— 2026-09-01 三批：放置清格豁免面多格件 Check* 族（tileCut 免除件原版
   // KillTile 尾 SquareTileFrame→TileFrame 级联的整件裁决,探针 _pile-place.mjs 四场景）——
-  | 'pumpkin' | 'super' | 'larva3x3';
+  | 'pumpkin' | 'super' | 'larva3x3'
+  // —— 2026-09-02 七件放置审计：Check2x2 95/126 吊挂特支 + CheckTrapDoor 386 侧锚支
+  | 'hang2x2' | 'trapdoor'
+  // —— 2026-09-02 八批（幸存链缺口）：388/389 高门双态 CheckTallGate 完整性+
+  //  顶/底双行 SolidTile（case 'tallgate'）
+  | 'tallgate';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -726,20 +731,43 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   28: 'pot',
   // 吊挂族：CheckChand（:52826，34 顶行中列上方实心）/Check1x2Top（:46719，42 上方实心/平台/绳）
   34: 'hangs', 42: 'hangs',
-  // 家具机制族（底行/墙/桌面近似）：烛 33/烛台 100/中骷灯笼 95/98/路灯 92/迪斯科球 126/
+  // 家具机制族（底行/墙/桌面近似）：烛 33/烛台 100/骷髅灯笼 98/路灯 92/
   // 八音盒 139/泵 142/143/节日灯 149/白金烛台 173/白金烛 174/炮 209/雪球发射器 212/
-  // 烟花 216/泡泡机 244/烟花盒 335/烟花喷泉 338/和平烛 372/活板门 386/高门 389/天塔柱 410/
-  // 广播盒 425/宝石锁 440/假容器 441/气球机 452/派对石 455/假容器二 468/血月石 480/
-  // 马桶 497/虚空石 509/巨石像 531/等离子灯 564/雾机 565/大火山 594/陶盆 78(CheckOnTable1x1
+  // 烟花 216/泡泡机 244/烟花盒 335/烟花喷泉 338/和平烛 372/天塔柱 410/
+  // 广播盒 425/假容器 441/气球机 452/派对石 455/假容器二 468/血月石 480/
+  // ★2026-09-02 八批（幸存链缺口）：高门 389/宝石锁 440 移出本组（388/389 → 'tallgate'
+  //  原版 CheckTallGate 完整性+顶/底双行 SolidTile;440 → 'wallhang' 原版 Check3x3Wall
+  //  逐格 wall>0——家具 hasSupport「底行∨任一格有墙」均弱于原版精确判据）
+  // 马桶 497/虚空石 509/等离子灯 564/雾机 565/大火山 594/陶盆 78(CheckOnTable1x1
   // :43548 的 78 特支=底格 SolidTileAllowBottomSlope,ground1x1 同判据)/墓碑 85(CheckSign)
+  // ★2026-09-02 七件放置审计：95/126/386/531 移出本组（吊挂/侧锚件走精确支,
+  //  家具 hasSupport 底行/墙近似对「AnchorTop 顶锚/AnchorLeft+Right 侧锚」语义反向,
+  //  正确放置后在写循环末格被误杀——95/126/531/386 实测 placed 后 cells=0）
   33: 'furniture', 49: 'furniture', 78: 'ground1x1', 85: 'furniture', 92: 'furniture',
-  95: 'furniture', 98: 'furniture', 100: 'furniture', 126: 'furniture', 139: 'furniture',
+  98: 'furniture', 100: 'furniture', 139: 'furniture',
   142: 'furniture', 143: 'furniture', 149: 'furniture', 173: 'furniture', 174: 'furniture',
   209: 'furniture', 212: 'furniture', 216: 'furniture', 244: 'furniture', 335: 'furniture',
-  338: 'furniture', 372: 'furniture', 386: 'furniture', 389: 'furniture', 410: 'furniture',
-  425: 'furniture', 440: 'furniture', 441: 'furniture', 452: 'furniture', 455: 'furniture',
-  468: 'furniture', 480: 'furniture', 497: 'furniture', 509: 'furniture', 531: 'furniture',
+  338: 'furniture', 372: 'furniture', 410: 'furniture',
+  425: 'furniture', 441: 'furniture', 452: 'furniture', 455: 'furniture',
+  468: 'furniture', 480: 'furniture', 497: 'furniture', 509: 'furniture',
   564: 'furniture', 565: 'furniture', 594: 'furniture',
+  // Check2x2 95/126 特支（WorldGen.cs:48844-48849）：中式灯笼/迪斯科球吊挂——
+  // TileObjectData AnchorTop SolidTile|SolidSide cnt2、AnchorBottom=Empty
+  // （TileObjectData.cs:3556-3561/:3562-3567）→ 幸存判据=顶行两列上方实心非 solidTop
+  95: 'hang2x2', 126: 'hang2x2',
+  // CheckTrapDoor（WorldGen.cs:52050）type 386 支：开态活板门 2×2 侧锚
+  // （TileObjectData.cs:3806-3812 AnchorLeft/Right SolidTile cnt1 start1,Bottom=Empty）
+  386: 'trapdoor',
+  // —— 2026-09-02 八批（幸存链缺口）：高门双态 + 宝石锁精确支 ——
+  // CheckTallGate（WorldGen.cs:52111;派发 case 组 :86990-86994 388/389【同函数】）：
+  // 完整性+顶/底双行 SolidTile（CheckTileAnchors mode2 :52292-52305）。388 闭态
+  // solid:true 曾落家具链 solid 早退=【无】幸存链;389 开态走 hasSupport 底行∨墙=
+  // 伪支撑（门洞内挖脚下/头顶不塌,与原版相反）→ 双态同入 'tallgate'（1:1 见 case 注）
+  388: 'tallgate', 389: 'tallgate',
+  // 440 宝石锁：原版与 240 同派 Check3x3Wall（:86765-86767 case 240/440 组）——
+  // 逐格 wall>0+完整性,任一格失墙整件塌;「任一格有墙即活」的家具近似弱于原版 →
+  // 移入 'wallhang'（清偿本组下方「★440 维持 'furniture' 近似备案」）
+  440: 'wallhang',
   // —— 2026-08-23 二批：多格植物/装饰/画族整族补齐（原为 def.decor 早退或家具
   // hasSupport 墙锚近似=挖根悬空,用户实报 233 丛林大型植物）----
   // CheckJunglePlant（派发 case 组 :86929-86934;函数 :48358）：233 双变体（3×2
@@ -749,7 +777,7 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // CheckOasisPlant（派发 :86935-86937;函数 :48026）：3×2,逐列 SolidTile+沙族
   530: 'oasisplant',
   // 画/武器架墙锚族（任一格 wall<=0 即整件塌）：Check3x3Wall :44690（240 墙挂 3×3;
-  // ★440 宝石锁同函数但维持 'furniture' 近似备案）/Check2x3Wall :44997（245）/
+  // 440 宝石锁同函数,2026-09-02 八批自 'furniture' 移入）/Check2x3Wall :44997（245）/
   // Check3x2Wall :45154（246）/Check4x3Wall :45284（241）/Check6x4Wall :45377（242）/
   // CheckWeaponsRack :46796（334）/TEWeaponsRack.Framing_CheckTile
   // （TEWeaponsRack.cs:74,471）。★464/466 战争桌/长老晶座=Check5x4 :50617 立地
@@ -789,11 +817,15 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // case 529 海燕麦（:86493-86510 内联）：下方 SolidTileAllowBottomSlope+沙族
   // （单格写入 PlantSeaOat :58782——def fw1×fh2 是贴图帧高非占格）
   529: 'sandplant',
-  // Check2xX 顶锚支（:87076-87083 派发组 42/270/271/572/581/660/698+465;函数
-  // :38376,465/531/591/592 吊挂支 :38464-38505——上方绳 380/平台/实心顶坡豁免）。
-  // ★591 吊盆/592 吊火盆/465 战争桌旗=吊顶族（TileObjectData 465 AnchorTop
-  // TileObjectData.cs:2981-2986;曾走家具底行支=语义反向,备案 531 同支维持家具近似）
-  465: 'hangtop', 591: 'hangtop', 592: 'hangtop',
+  // Check2xX 顶锚支（:87014 派发组 104/105/207/…/465/480/489/506/509/531/545/560/
+  // 591/592/657/658/663/720/721/725;函数 :38376,465/531/591/592 吊挂支 :38464-38505
+  // ——上方绳 380/平台/实心顶坡豁免,★531 该两特支被 `type != 531` 排除 :38471/:38474,
+  //  只走 SolidTileAllowTopSlope）。★591 吊盆/592 吊火盆/465 战争桌旗=吊顶族
+  // （TileObjectData 465 AnchorTop TileObjectData.cs:2975-2986;曾走家具底行支=语义反向）。
+  // ★2026-09-02 备案清偿：531 巨石像同支接入（TileObjectData.cs:2987-2993 AnchorTop
+  // SolidTile|SolidSide|SolidBottom、AnchorBottom=default(AnchorData)——家具底行近似
+  // 会在正确吊挂放置的写循环末格整件误杀）
+  465: 'hangtop', 531: 'hangtop', 591: 'hangtop', 592: 'hangtop',
   // CheckGnome（:87201-87204 派发 567;函数 :54400）：1×2（fy0|20）+下方
   // SolidTileAllowBottomSlope/平台
   567: 'gnome',
@@ -988,6 +1020,27 @@ function internalIdsOfVanSheets(sheets: readonly number[]): Set<number> {
 }
 /** DECOR 3×3 邻域扫候选 → 内部 id 集（checkDecorSquareFrame 逐格 O(1) 早退用） */
 const DECOR_SWEEP_TILE_IDS = internalIdsOfVanSheets(DECOR_SWEEP_SHEETS);
+// ---- 2026-09-02 八批：CheckTallGate（WorldGen.cs:52111）移植常量 ----
+// 高门双态全部内部 id（sheet 388/389——含 ⚠️5 已退役槽位 def v_389_tallgateopen,
+// internalIdsOfVanSheets 面与 DECOR_SWEEP_TILE_IDS 同口径）：'tallgate' case 的
+// 混合格容忍集（ShiftTallGate 半写态,见 case 注）
+const TALL_GATE_STATE_IDS = internalIdsOfVanSheets([388, 389]);
+/** 高门 CoordinateHeights（TileObjectData.cs:2303 addTile(388)） */
+const TALL_GATE_HEIGHTS: readonly number[] = [18, 16, 16, 16, 18];
+/** 高门 CoordinateFullHeight（TileObjectData.cs:1805-1820 Calculate=Σ(heights+padding)
+ *  =84+10=94;CoordinateFullWidth=(16+2)*1=18 :1812）——CheckTallGate :52125
+ *  point.Y=frameY/CFH 带基、:52129 frameY%CFH 行内偏移递减的模数 */
+const TALL_GATE_CFH = TALL_GATE_HEIGHTS.reduce((a, b) => a + b + 2, 0);
+/** 高门行内 frameY 累进双约定（完整性比对 :52136-52145 的 num2 累进消费面）：
+ *  [0]=vanilla 写入面 TileObject.Place（TileObject.cs:102-110 num9+=heights[l]+padding）
+ *  =0/20/38/56/74;[1]=本仓放置面 framedCellFrame default 支（FurnitureStyle.ts:158,
+ *  dy*18）=0/18/36/54/72。行内偏移解码（heights 递减法 :52129-52133）对两套偏移同值
+ *  （各偏移均落在 [Σ_{<i}heights, Σ_{≤i}heights) 桶内）,但【绝对帧】比对锁死一套会把
+ *  另一套整件误杀（wld 导入=vanilla 步进,自放=18px 步进）→ 顶行帧为基按序列匹配 */
+const TALL_GATE_ROW_FY: readonly number[][] = [
+  [0, 20, 38, 56, 74],   // vanilla TileObject.Place（heights+padding 累进）
+  [0, 18, 36, 54, 72],   // 本仓 framedCellFrame default（dy*18 累进）
+];
 // TileID.cs:89 Regrowth 表逐项
 const CUT_IGNORE_REGROWTH = internalIdsOfVanSheets([
   3, 24, 52, 382, 61, 703, 62, 71, 73, 74, 82, 83, 84, 110, 113, 115,
@@ -3423,6 +3476,11 @@ export class Game implements GameHooks {
         continue;
       }
       if (!pr.hostile) continue;
+      // ★批六 M4：noPlayerHit 弹访客端查表早退（选访客端查表,不改 msg27 投影）——
+      //  原版 Damage_EVP 头门 damage<=0 直接 return（Projectile.cs:14846-14850），
+      //  无伤不结算也不消亡；本地链同款门 = Dart.dartStep noPlayerHit 分支。
+      //  596 的 msg27 投影带 baseDamage（NewProjectile 原文 damage=0）,须按弹型归位
+      if (pr.projId != null && DART_STYLE[pr.projId]?.noPlayerHit) continue;
       // 判定用渲染位（插值+速度外推）而非权威位：原版各端本地模拟，"所见即所中"
       // 才是客户端权威语义；权威位在差分快照间隔内（慢速弹最长 60t）会冻结在过期
       // 位置——review F3 改权威位实测造成慢速敌弹系统性漏判（ax 漂出玩家盒仍判不中）
@@ -20504,6 +20562,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  clearWorld 重置=进世界清零；与血月 roll 互斥门 :64818） */
   /** 本夜流星强度（Star.starfallBoost——每夜 NightSetup 重掷；坠星频率乘子） */
   private starfallBoost = 1.0;
+  /** NPC.noSpawnCycle（MINOR-2,NPC.cs:6186 静态位）：本帧任一怪因 CheckActive 消散
+   *  （Enemy.runDespawnFx 置位 :78797）→ 同帧刷怪周期跳过一次（trySpawnEnemy 入口
+   *  消费+清零,原版 SpawnNPC 头 :80991-80995）——消散与生成同帧互斥 */
+  noSpawnCycleThisFrame = false;
   /** ★1457 新增（WorldGen.homelessSpawnTimeout :4161，cs:4956/72083/6976）：城镇 NPC
    *  流浪生成一天一户节流——>0 时 SpawnHomelessNPC 直接 return；成功生成置 54000
    *  （=1 天）；UpdateWorld 每 tick 递减；clearWorld 复位 54000。不入存档（原版
@@ -24459,6 +24521,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private trySpawnEnemy() {
+    // NPC.noSpawnCycle 消费（MINOR-2,原版 SpawnNPC 头 :80991-80995）：本帧有怪经
+    // CheckActive 消散（runDespawnFx 置位）→ 跳过本次刷怪并清零（同帧零生成;
+    // 消散与生成同帧互斥,原版无 SpawnNPC 调用窗内多次消费语义=单次等价）
+    if (this.noSpawnCycleThisFrame) {
+      this.noSpawnCycleThisFrame = false;
+      return;
+    }
     // 联机模式：刷怪归房主权威（房主跑完整模拟，快照广播给访客；访客不本地刷怪）
     if (this.net && !this.net.policy.isHost) return;
     const w = this.world;
@@ -24587,21 +24656,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : 0;
     }
     // TrySpawnAnNPC L23：nearbyActiveNPCs >= maxSpawns 拒绝
-    // （原版 nearbyActiveNPCs = 附近 NPC 的 npcSlots 加权和；我们的怪全部由 spawner 生成
-    //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
+    // ★MINOR-5（2026-09-02 定罪重写）：原版 nearbyActiveNPCs 记账在 CheckActive 的
+    //  activeRange 盒相交内【逐玩家】累计（NPC.cs:78705-78727：rectangle=NPC 中心
+    //  ±(4032,2520)px ∩ 玩家 hitbox → 该玩家 nearbyActiveNPCs += npcSlots）,非全体
+    //  求和——旧全量求和会让远处的怪挤占本玩家的刷怪帽（跨屏域串账）。
+    //  记账门（:78709-78714）：type∉{25,30,33} + releaseOwner==255（本仓
+    //  releasedFromItem 取反,释放出生的小动物不计）+ lifeMax>0（本仓 !dead 同义——
+    //  消散/死亡怪出桶前不再记账）；史莱姆雨蓝史莱姆 1 计 npcSlots×0.65
+    //  （Main.cs:8800/9003 slimeRainNPC[1] 全表唯一项）。蠕虫段也是独立 NPC,
+    //  原版同样计入;半幅常量与 Enemy.ts CheckActive 同源（CHECK_ACTIVE_HALF_X/Y）
+    const npcSlotsInActiveRange = (en: Enemy): number => {
+      const t = en.vanillaId;
+      if (t === 25 || t === 30 || t === 33) return 0;            // :78711
+      if (en.releasedFromItem) return 0;                          // releaseOwner==255 反相
+      if (en.dead) return 0;                                      // active 才 Update 才记账
+      const slots = en.vanilla?.npcSlots ?? 1;
+      if (this.world.weather.slimeRain && t === 1) return slots * 0.65;
+      return slots;
+    };
+    const nearBox = (cx: number, cy: number): boolean =>
+      Math.abs(cx - p.cx) < CHECK_ACTIVE_HALF_X + p.w / 2
+      && Math.abs(cy - p.cy) < CHECK_ACTIVE_HALF_Y + p.h / 2;    // 中心距式=盒∩hitbox 等价
     const nearby = this.entities.enemies.reduce((s, e) => {
       const en = e as Enemy;
-      // 全体 NPC 按 npcSlots 计入（NPC.cs:78709-78714——无 Boss 豁免；25/30/33/
-      // releaseOwner/lifeMax 门对桶内成员均不适用）；史莱姆雨蓝史莱姆 1 计
-      // npcSlots×0.65（Main.cs:8800/1114 slimeRainNPC/slimeRainNPCSlots）
-      const slots = en.vanilla?.npcSlots ?? 1;
-      if (this.world.weather.slimeRain && en.vanillaId === 1) return s + slots * 0.65;
-      return s + slots;
+      const slots = npcSlotsInActiveRange(en);
+      return slots > 0 && nearBox(en.cx, en.cy) ? s + slots : s;
     }, 0) + this.entities.critters.reduce((s, c) => {
-      // 小动物并入帽计数（同上全体语义；释放出生 releaseOwner!=255 不计）
+      // 小动物并入帽计数（同上全体语义+同盒记账;NPC.npcSlots 类默认 1f——未显式赋值的兔等）
       const cc = c as Enemy;
-      if (cc.releasedFromItem) return s;
-      return s + (cc.vanilla?.npcSlots ?? 1);   // NPC.npcSlots 类默认 1f（未显式赋值的兔等）
+      const slots = npcSlotsInActiveRange(cc);
+      return slots > 0 && nearBox(cc.cx, cc.cy) ? s + slots : s;
     }, 0);
     const sHeightPx = this.camera.viewH / (this.camera.zoom || 1);
     // 联机远端玩家注入（原版 CheckNotSpawningOnScreen L5344-5366 遍历全部玩家扩展屏）
@@ -32794,6 +32878,104 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!ok) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
         return;
       }
+      case 'hang2x2': {
+        // Check2x2 95/126 特支（WorldGen.cs:48811,95/126 臂 :48844-48849）：2×2 完整性
+        // （:48834-48843 帧=dx*18+style*36/dy*18,ax/ay 解码同 'pot' 支）+顶行两列上方格
+        // active+tileSolid+非 solidTop（:48845-48848——★该臂【不】查 blockType/noAttach,
+        // 半砖/坡面实心亦可锚）。原版 data 面 AnchorTop SolidTile|SolidSide cnt2 +
+        // AnchorBottom=Empty（TileObjectData.cs:3556-3561/:3562-3567）→ 吊挂件。
+        // 曾走家具 hasSupport 底行/墙近似=语义反向,正确吊挂放置在写循环末格被整件误杀
+        const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          const ud = st.inBounds(ax + dx, ay - 1) ? TILE_DEFS[st.get(ax + dx, ay - 1)] : null;
+          if (!st.isActive(ax + dx, ay - 1) || !ud?.solid || ud.platform) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'trapdoor': {
+        // CheckTrapDoor（WorldGen.cs:52050）type 386 支（:52058-52070）：2×2 完整性
+        // （CheckTileFrames :52062→:52245）+侧锚——GetTopLeftAndStyles（:52230）的
+        // point.X=frameX/36（StyleHorizontal 2 style）；style 0 锚行=y+1（:52064-52066
+        // CheckTileAnchors(x,y+1,2,1,mode1)）/style 1 锚行=y（:52067-52069）。mode1
+        // （:52266-52276）=左右外一格各 1 格 AnchorValid(SolidTile)（:52290-52294：
+        // active+tileSolid+非 solidTop+非 noAttach+blockType==0,即 solidTileStrict）。
+        // 原版 data 面 AnchorLeft/Right SolidTile cnt1 start1、AnchorBottom=Empty
+        // （TileObjectData.cs:3806-3812）。掉落 3239 沿 breakTile 既有链
+        const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const anchorRow = ay + (Math.floor(st.frameX[i] / 36) === 1 ? 0 : 1);
+        const sideOK = (sx: number) => {
+          if (!st.inBounds(sx, anchorRow)) return false;
+          const si = st.idx(sx, anchorRow);
+          if (!st.isActive(sx, anchorRow) || st.half[si] || st.slope[si] !== 0) return false;
+          const sd = TILE_DEFS[st.get(sx, anchorRow)];
+          return !!(sd?.solid && !sd.platform);
+        };
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (!bad && !(sideOK(ax - 1) && sideOK(ax + 2))) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'tallgate': {
+        // CheckTallGate（WorldGen.cs:52111-52173;TileFrameImportant 派发 case 组
+        // :86990-86994 388/389【同函数】——闭态/开态同链,八批前 388 落家具链 solid
+        // 早退=无幸存链、389 走 hasSupport 底行∨墙=伪支撑）。TileObjectData
+        // （TileObjectData.cs:2293-2325 addTile(388);389=FullCopyFrom(388) :2324）：
+        // Width1 Height5、AnchorTop/Bottom=AnchorData(SolidTile,1,0)。
+        // ① 行归一（:52125-52134）：point.Y=frameY/94 带基;frameY%94 经 heights 递减
+        //   （:52129-52133）得行内偏移 → y-=i 归一顶行。
+        // ② 完整性（:52136-52145）：单列 5 格 active+同型+frameX 恒等（:52138,
+        //   point.X*CFW=0——本仓 388/389 frameX 恒 0）+frameY=带基*94+行内累进。
+        //   ★累进双约定（TALL_GATE_ROW_FY 注）：wld 导入=vanilla heights+padding 步进、
+        //   自放=18px 步进——行解码两套同值,绝对帧比对按顶行实测步长序列匹配。
+        // ③ 顶/底双行锚（:52142 CheckTileAnchors(x,y,w,h,mode2,SolidTile) :52292-52305
+        //   → AnchorValid :52308-52318=nactive+tileSolid+非 solidTop+非 noAttach+
+        //   blockType==0）= 上下各一行整宽 StrictSolid → solidTileStrictAt 仓内移植
+        //   （'trapdoor' 侧锚同款;noAttach/inActive 位锚判据族未建模,备案）。
+        // 掉落（:52156-52161）：两态恒 3240（`if (point.Y == 0)` 两支同值恒真=反编译
+        //   本相）——389 经 killDecorTile→breakTile object 支 openStateDoorDropVid
+        //   （vanillaStyleDrops D-8）→ vi_3240;388 关态 place_v_388_tall_gate_closed
+        //   兜底（D-8 备案：item3240 createTile=388 同语义）。
+        // ★388/389 混合格容忍（本仓私有,非原版偏离）：原版 ShiftTallGate（:52175）先
+        //   直写全列 type（:52215-52219 tile.type 直赋无 TileFrame）再整体 TileFrame
+        //   （:52224-52231 x-1..x+1 × y-1..y+h）——运行期从不评估半写态;本仓
+        //   shiftTallGate（Door.ts:131）与 wiring devices case 388/389（devices.ts:950）
+        //   逐格 setTile 即时触发监听,半写态必被完整性判坏 → 对配对态格放行=「写完
+        //   再评估」等价（切换面保帧写,各格序列自洽）。
+        let row = 0;
+        for (let num = st.frameY[i] % TALL_GATE_CFH; row < 5 && num - TALL_GATE_HEIGHTS[row] >= 0; row++) {
+          num -= TALL_GATE_HEIGHTS[row];
+        }
+        if (row >= 5) { this.killDecorTile(x, y); return; }   // 帧越界（损坏态）：原版归一
+        // 后杀窗 [y,y+h) 不含触发格会留孤儿（:52149-52155）——收口杀触发格,备案
+        const ay = y - row;
+        const fyTop = st.frameY[st.idx(x, ay)];
+        // 行步进序列鉴定（顶行/第二行帧差 → 两约定之一;第二行缺失/异型即判坏）
+        const seqIdx = TALL_GATE_ROW_FY.findIndex(
+          (seq) => st.isActive(x, ay + 1) && st.frameY[st.idx(x, ay + 1)] - fyTop === seq[1] - seq[0]);
+        let bad = seqIdx < 0;
+        for (let dy = 0; !bad && dy < 5; dy++) {
+          const qi = st.idx(x, ay + dy);
+          if (!st.isActive(x, ay + dy) || !TALL_GATE_STATE_IDS.has(st.get(x, ay + dy))
+            || st.frameX[qi] !== st.frameX[st.idx(x, ay)]
+            || st.frameY[qi] !== fyTop + TALL_GATE_ROW_FY[seqIdx][dy]) bad = true;
+        }
+        // ③ 顶/底双行锚（width=1,CheckTileAnchors mode2 逐列循环退化为此两格）
+        if (!bad && !(this.solidTileStrictAt(x, ay - 1) && this.solidTileStrictAt(x, ay + 5))) bad = true;
+        if (bad) this.killDecorTile(Math.max(0, x), Math.max(0, ay));
+        return;
+      }
       case 'jungleplant': {
         // CheckJunglePlant（WorldGen.cs:48358）：233 双变体——3×2（frameY<36,列
         // frameX/18%3 商×54=style 基,行 frameY/18）/2×2（frameY>=36 或 236/238/702,
@@ -32842,19 +33024,50 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'wallhang': {
-        // 画/武器架墙锚族（Check3x3Wall :44690 / Check2x3Wall :44997 /
-        // Check3x2Wall :45154 / Check4x3Wall :45284 / Check6x4Wall :45377 /
-        // CheckWeaponsRack :46796 / TEWeaponsRack.Framing_CheckTile TEWeaponsRack.cs:74）：
-        // 整件 w×h 完整性+【逐格】wall>0——任一格失墙即整件塌（:44722-44727 等）。
-        // 锚=frameX/18%w、frameY/18%h（style 带基×w*18/h*18,支撑判定不消费 style 基）
+        // 画/武器架墙锚族（Check3x3Wall :44690（240/440,派发组 :86765-86767）/
+        // Check2x3Wall :44997 / Check3x2Wall :45154 / Check4x3Wall :45284 /
+        // Check6x4Wall :45377 / CheckWeaponsRack :46796 / TEWeaponsRack.Framing_CheckTile
+        // TEWeaponsRack.cs:74）：整件 w×h 完整性+【逐格】wall>0——任一格失墙即整件塌
+        // （:44722-44727 等）。锚=frameX/18%w、frameY/18%h（style 带基×w*18/h*18,
+        // 支撑判定不消费 style 基）。
+        // ★2026-09-02 八批（440 宝石锁移入本组,顺带与 Check3x3Wall 逐字对拍补缺）：
+        //   原版完整性循环还含【逐格 frameX/frameY 比对】——跨件/异 style 帧混格=判坏。
+        //   本族写入面两约定同为 18px 步进（vanilla Place2x3Wall :44985-44989 等直写
+        //   18*(k-x) 系,本仓 framedCellFrame default 支同）→ 带基可按格距逐字锁死,
+        //   无 'tallgate' 那类步进分叉。带基表（vanilla 行号）：
+        //   240/440 fx=floor(fx/54)*54+dx*18 fy=floor(fy/54)*54+dy*18（:44722-44727）
+        //   245 fx=floor(fx/36)*36+dx*18 fy=dy*18（:45021-45022）
+        //   246 fx=dx*18 fy=floor(fy/36)*36+dy*18（:45177-45178）
+        //   241 fx=dx*18 fy=floor(fy/54)*54+dy*18（:45304-45305）
+        //   242 fx/fy=27 打包式（:45394-45402 num=27*floor(fx/108)+floor(fy/72)→
+        //     fx=floor(num/27)*108+dx*18、fy=num%27*72+dy*18——双带基并存也对）
+        //   334 fx 剥 5000 系后 %54==dx*18、fy==dy*18（:46821-46828;本仓无 5000 系
+        //     写入=恒裸 %54,剥离步备案）;471 TEWeaponsRack.cs:88-91 无帧检
         const w = def.w ?? 1, h = def.h ?? 1;
         const ax = x - (Math.floor(st.frameX[i] / 18) % w);
         const ay = y - (Math.floor(st.frameY[i] / 18) % h);
+        const fxStep = w * 18, fyStep = h * 18;
+        const fxBase = Math.floor(st.frameX[i] / fxStep) * fxStep;
+        const fyBase = Math.floor(st.frameY[i] / fyStep) * fyStep;
+        const packedBase = 27 * Math.floor(st.frameX[i] / 108) + Math.floor(st.frameY[i] / 72);   // :45397
         let bad = false;
         for (let dx = 0; dx < w && !bad; dx++) {
           for (let dy = 0; dy < h; dy++) {
+            const qi = st.idx(ax + dx, ay + dy);
             if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
-              || st.wall[st.idx(ax + dx, ay + dy)] <= 0) { bad = true; break; }
+              || st.wall[qi] <= 0) { bad = true; break; }
+            if (sheet === 471) continue;   // :88-91 三判据,无帧检
+            const fxOk = sheet === 334
+              ? st.frameX[qi] % 54 === dx * 18                       // :46826-46828 %54 归一
+              : (sheet === 246 || sheet === 241)
+                ? st.frameX[qi] === dx * 18                          // 无 X 带基族
+                : st.frameX[qi] === (sheet === 242 ? Math.floor(packedBase / 27) * 108 : fxBase) + dx * 18;
+            const fyOk = (sheet === 245 || sheet === 334)
+              ? st.frameY[qi] === dy * 18                            // 无 Y 带基族
+              : sheet === 242
+                ? st.frameY[qi] === (packedBase % 27) * 72 + dy * 18
+                : st.frameY[qi] === fyBase + dy * 18;
+            if (!fxOk || !fyOk) { bad = true; break; }
           }
         }
         if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
@@ -33116,26 +33329,38 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       case 'hangtop': {
         // Check2xX 吊挂支（:38376;465/531/591/592 吊顶锚 :38464-38505）：2×h 完整性
-        // （fx 0|18 定左列,fy/18%h 定顶行）+逐列上方——绳 380（:38471-38473）/平台
+        // （fx 定左列,fy/18%h 定顶行）+逐列上方——绳 380（:38471-38473）/平台
         // （:38474-38479）/SolidTileAllowTopSlope（:38480）任一,两列须同档
-        // （num7!=num8 → flag :38489-38493）
+        // （num7!=num8 → flag :38489-38493）。★531 两特支被 `type != 531` 排除
+        // （:38471/:38474）→ 只走 SolidTileAllowTopSlope（:70851;其内部 rope 380
+        // 特支 :70856 对 531 仍生效=原版本相,勿重复加免）
+        // ★修复（2026-09-02 七件审计,531 接入引爆的潜伏病）：列解码须按原版
+        //   :38380-38384 `num2=frameX; while(num2>=36)num2-=36; if(num2==18)num--`
+        //   = mod36 取列（Style2xX 横排 style 带步进 36px,列宽 18px）。旧式
+        //   `frameX===18?1:0` 把右列派发的帧基算成 18-1=17px（格/像素步长混淆）,
+        //   完整性 c3 恒败 → 右列格派发即整件误杀（放置尾扫 3×3 必含右列 →
+        //   465/591/592 同样潜伏,531 首爆）。帧基同步改 baseFx=fx-col*18
+        //   （=原版以锚格实际 frameX 为基准比对 :38406-38431）
         const h = def.h ?? 3;
-        const ax = x - (st.frameX[i] === 18 ? 1 : 0);
+        const fx0 = st.frameX[i];
+        const col = Math.floor((fx0 % 36) / 18);
+        const baseFx = fx0 - col * 18;
+        const ax = x - col;
         const ay = y - (Math.floor(st.frameY[i] / 18) % h);
         let bad = false;
         let band = -1;
         for (let dx = 0; dx < 2 && !bad; dx++) {
           for (let dy = 0; dy < h; dy++) {
             if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
-              || st.frameX[st.idx(ax + dx, ay + dy)] !== st.frameX[i] - (st.frameX[i] === 18 ? 1 : 0) + dx * 18
+              || st.frameX[st.idx(ax + dx, ay + dy)] !== baseFx + dx * 18
               || st.frameY[st.idx(ax + dx, ay + dy)] !== (Math.floor(st.frameY[i] / 18) - (Math.floor(st.frameY[i] / 18) % h) + dy) * 18) {
               bad = true; break;
             }
           }
           const upSheet = sheetAt(st, ax + dx, ay - 1);
           let myBand = -2;
-          if (upSheet === 380) myBand = 0;
-          else if (TILE_DEFS[st.get(ax + dx, ay - 1)]?.platform) myBand = 8;
+          if (sheet !== 531 && upSheet === 380) myBand = 0;
+          else if (sheet !== 531 && TILE_DEFS[st.get(ax + dx, ay - 1)]?.platform) myBand = 8;
           else if (this.solidAllowTopSlopeAt(ax + dx, ay - 1)) myBand = 0;
           else myBand = -1;
           if (myBand === -1) bad = true;
@@ -33680,7 +33905,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   spawnParticles(
     x: number, y: number, color: string, count: number, speed = 2,
     opts: { life?: number; damp?: number; grav?: number; size?: number; /** 逐粒显式初速（提供时替换随机方向速度——原版 NewDust+逐尘 velocity 修型 1:1 用） */ vx?: number; vy?: number;
-      /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道,★F2/F4 2026-09-01） */
+      /** 逐 tick 恒定加速度（原版编排粒子 AccelerationPerFrame 通道,★F2/F4 2026-09-01）。
+       *  ★T2 接线待办：orchestraFx princess/stardust 两站接线待 F 完成后一行补
+       *  （princessWeapon/stardustPunch sparkle 原版 AccelerationPerFrame=−vector/60,
+       *  60t 线性衰减;ax/ay 与 life 须同 TTL 口径,耦合见 lifeExact 注） */
       ax?: number; ay?: number;
       /** 寿命不抖动档（TTL 耦合参数——加速度按 TTL 折算时必须同值） */
       lifeExact?: number } = {},

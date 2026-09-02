@@ -13,6 +13,9 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
 const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // tile 323
 const GEM_SAPLING = TILE_BY_KEY['v_590_gem_saplings']!; // tile 590（宝石树苗）
+// ★IIIII118：柱顶树对拍仪门（SW_I158_PDC,零掷）——镜像 x86 rig GTR-IN/H/OK。
+const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
+const I158GTR = (): boolean => __swProcessEnv.SW_I158_PDC === '1';
 /** IsTileTypeFitForTree（1456 cs:29852）：草族 12 种（含 633 灰烬草/661/662——
  *  1405 是 9 种，1456 终态为准） */
 const FIT = idsByVanillaSheet(2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662);
@@ -150,6 +153,7 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
   //  实证（树 (744,257) 盒 [742..746]×[247..258] 内残格坡位未清）。主链无此残格
   //  组合故未显形。genRangeFrame 与 growTreeWithSettings 尾扫（cs:30999）同源。
   genRangeFrame(st, rng, i - 2, index1 - height - 1, i + 2, index1 + 1);
+  if (I158GTR()) console.log(`GTR-OK i=${i} j=${index1} h=${height}`);
   gs.genTrees.push({ x: i, y: index1 - height, h: height }); // 砍伐整棵判定用
   return true;
 }
@@ -178,6 +182,8 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   //  两门皆 GrowTree 独有（GrowPalmTree/GrowEpicTree/GrowTreeWithSettings 无 NTB 支）。
   const ntb = !!gs.seedFlags?.notTheBees;
   if (!ntb && (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0)) return false;
+  // ★IIIII118：柱顶树对拍仪（SW_I158_PDC 门控,零掷）——镜像 x86 rig GTR-IN/H/OK（cs:30056 GrowTree）。
+  if (I158GTR()) console.log(`GTR-IN i=${i} j=${index1} y=${y} iw=${ignoreWalls ? 1 : 0}`);
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
   if (!ignoreWalls && !ntb && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
   const fitSide = (dx: number) => {
@@ -198,6 +204,7 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   }
   let clear = height + 4;                              // num3
   if (JUNGLE_GRASS.has(st.type[gi])) clear += 5;
+  if (I158GTR()) console.log(`GTR-H h=${height} clear=${clear}`);
   // 净空盒（cs:29962-29972）：ignoreID=20——蘑菇草(70)基座有专属双段通道，
   // 常规通道盒 [i-2,i+2]×[j-clear,j-1]（盒内树苗/杂草族不算占位）
   let flag2 = false;
@@ -508,7 +515,7 @@ const ASH_PROFILE: TreeProfile = {
  *  Projectile.cs:24486/:24488 恒传 true（B2-F3 批 2026-08-30 补参贯通：缺省
  *  false=既有调用点逐位原状，掷流零差）。 */
 export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile,
-  heightAddon = 0, ignoreWalls = false): boolean {
+  heightAddon = 0, ignoreWalls = false, gs?: GenState): boolean {
 
   // 越过树苗找地面行（cs:30547-30550）——★active() 读的是**原始 checkedY** 行
   //  （原版反编译实况），type 读推进中的 num 行
@@ -527,7 +534,17 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   const fitSide = (dx: number) => st.inBounds(x + dx, num)
     && st.flags[st.idx(x + dx, num)] && p.ground.has(st.type[st.idx(x + dx, num)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
-  const height = rng.int(p.heightMin, p.heightMax) + heightAddon;    // Next(min,max+1)+addon（1458 :30708）
+  let height = rng.int(p.heightMin, p.heightMax) + heightAddon;      // Next(min,max+1)+addon（1458 :30708）
+  // ★IIIII114b（1458 cs:30709-30712）：errorWorld 树高臂——Next(errorWorldAdjustment(2.0))==0
+  //   时高度**重置**（不带 heightAddon）：checkedY<worldSurface → Next(3,50)、否则
+  //   Next(3,15)。单旗标 ewAdjust(2.0)=2。此前整缺 ⇒ i am error 世界每棵成树
+  //   +1~2 掷，地狱首棵灰烬树后全流相移（#28 树丛首差 @(447,994) 铁证）。
+  //   gs 缺省（运行时直调/肥料云路径）不掷——生成流专属上下文。
+  if (gs?.seedFlags?.errorWorld) {
+    if (rng.int(0, 1) === 0) {
+      height = y < gs.worldSurface ? rng.int(3, 49) : rng.int(3, 14);
+    }
+  }
   const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
   // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）——统一走
   // emptyTileCheck 忠实语义（比旧 GEM_EMPTY_ALLOW 表多容忍 CommonSapling 族）
@@ -593,17 +610,17 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
  *  heightAddon：富集肥料云成树传入 15（B2 波）。ignoreWalls：同 GrowTreeWithSettings
  *  （1457 cs:30685），肥料云恒传 true（Projectile.cs:24488）；缺省 false 零差。 */
 export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeTileType: number,
-  heightAddon = 0, ignoreWalls = false): boolean {
+  heightAddon = 0, ignoreWalls = false, gs?: GenState): boolean {
   return growTreeWithSettings(st, rng, x, y, { ...GEM_PROFILE, treeTile: treeTileType },
-    heightAddon, ignoreWalls);
+    heightAddon, ignoreWalls, gs);
 }
 
 /** 观赏树（TryGrowingTreeByType 616 柳 / 596 樱 → VanityTree_Willow/Sakura profile，
  *  cs:3872-3894）：ignoreWalls 同上贯通（B2-F3 批补参）。 */
 export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, willow: boolean,
-  heightAddon = 0, ignoreWalls = false): boolean {
+  heightAddon = 0, ignoreWalls = false, gs?: GenState): boolean {
   return growTreeWithSettings(st, rng, x, y, willow ? WILLOW_PROFILE : SAKURA_PROFILE,
-    heightAddon, ignoreWalls);
+    heightAddon, ignoreWalls, gs);
 }
 
 /** 灰烬树（TryGrowingTreeByType 634 → GrowTreeSettings.Profiles.Tree_Ash，cs:3894-3903/
@@ -611,8 +628,8 @@ export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, wi
  *  ignoreWalls 同上贯通（B2-F3 批补参）：肥料云 tile20 style10 档（Projectile.cs:24486
  *  TryGrowingTreeByType(634,…,true)）。 */
 export function growAshTree(st: TileStore, rng: RNG, x: number, y: number, heightAddon = 0,
-  ignoreWalls = false): boolean {
-  return growTreeWithSettings(st, rng, x, y, ASH_PROFILE, heightAddon, ignoreWalls);
+  ignoreWalls = false, gs?: GenState): boolean {
+  return growTreeWithSettings(st, rng, x, y, ASH_PROFILE, heightAddon, ignoreWalls, gs);
 }
 
 /** AddTrees（1456 cs:31523-31578 / 1457 cs:31647-31733）1:1：逐列尝试（~1.6 列间距）；
@@ -656,7 +673,7 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
       const yi = st.idx(x, y);
       if (st.flags[yi] && st.type[yi] === GRASS_TILE
         && (f.tenthAnniversary || rng.int(0, num5 - 1) === 0)) {
-        growVanityTree(st, rng, x, y, rng.int(0, 1) === 0);
+        growVanityTree(st, rng, x, y, rng.int(0, 1) === 0, 0, false, gs);
         continue;
       }
       growTree(st, rng, gs, x, y);
@@ -674,7 +691,7 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
         const yi = st.idx(x, y);
         if (st.flags[yi] && st.type[yi] === GRASS_TILE
           && (f.tenthAnniversary || rng.int(0, 6) === 0)) {
-          growVanityTree(st, rng, x, y, rng.int(0, 1) === 0);
+          growVanityTree(st, rng, x, y, rng.int(0, 1) === 0, 0, false, gs);
         } else {
           growTree(st, rng, gs, x, y);
         }

@@ -41,9 +41,12 @@ import {
 
 const fr = Math.fround;
 
-/** SW_I138_EARLY 门（EarlyDual 家族批门,DungeonPass 同名门镜像——OFF=维持前批账面）。 */
+/** SW_I138_EARLY 门（EarlyDual 家族批门,DungeonPass 同名门镜像）。
+ *  ★IIIII164（2026-09-02）缺省翻转 OFF→ON：S4/S1-S7 写面认证（speleothems 3,492 掷全等
+ *  +PRH/早特征窗全等,s1 PD_OUT 14,590→9,614 且零新差/s1 G_in 81,035→49,513）后落缺省 ON；
+ *  SW_I138_EARLY=0 显式回退 IIII106b 前批账面（对照态保留,勿删）。 */
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
-const i138EarlyGate = (): boolean => __swProcessEnv.SW_I138_EARLY === '1';
+export const i138EarlyGate = (): boolean => (__swProcessEnv.SW_I138_EARLY ?? '1') !== '0';
 
 type V2 = { x: number; y: number };
 
@@ -341,7 +344,11 @@ export interface DualLayoutCtx {
   roomSink(rm: { x: number; y: number; ex: number; ey: number; strength: number; generated: boolean;
     innerL: number; innerR: number; innerT: number; innerB: number;
     /** ★IIIII105c：settings.style.Style（BasicChests/BiomeChests_DualDungeons 座分派） */
-    st?: number }): void;
+    st?: number;
+    /** ★IIIII111c：PD 面载荷——bio=BiomeDungeonRoom 实例（fluff 3→0+SkipOther/Space=true，
+     *  BiomeDungeonRoom.cs:46）；forceDP=settings.ForceStyleForDoorsAndPlatforms
+     *  （LivingTree=true，DC.cs:646；其余房 false→PD 走房心格三级解析）。 */
+    bio?: boolean; forceDP?: boolean; leg?: boolean; }): void;
   snap(name: string): void;
   /** tier 判定上下文（runDualDungeonLayout 装配） */
   tierCtx?: TierCtx | null;
@@ -602,7 +609,14 @@ abstract class DRoomBase {
   get processed(): boolean { return this.calculated ? true : this.generated; }
   centerX(): number { return this.inner.centerX(); }
   centerY(): number { return this.inner.centerY(); }
-  protectionAt(_st: TileStore, _x: number, _y: number): number { return Protection.None as number; }
+  protectionAt(_st: TileStore, x: number, y: number): number {
+    // ★IIIII118：C# 基类 DungeonRoom.GetProtectionTypeFromPoint
+    //   （Rooms/DungeonRoom.cs:269-276）= OuterBounds.Contains ? Walls : None。
+    //   JS 曾恒 None ⇒ DRegularRoom（RegularDungeonRoom 无覆写吃基类）等未覆写房
+    //   在厅/入口 carve 的 GetHighestProtectionTypeFromPoint 完全不设防（1:1 偏差）。
+    if (!this.outer.contains(x, y)) return Protection.None as number;
+    return Protection.Walls as number;
+  }
   isInsideRoom(_st: TileStore, x: number, y: number): boolean { return this.inner.contains(x, y); }
   floodedTileCount(): number { return this.inner.width * this.inner.height; }
   /** DungeonRoom.CanPlaceTileAt（:365-372）。 */
@@ -721,7 +735,13 @@ class DLegacyRoom extends DRoomBase {
   }
   isInsideRoom(st: TileStore, x: number, y: number): boolean {
     if (!this.inner.contains(x, y)) return false;
-    return this.innerShape.contains(Math.trunc(x - this.startPos.x), Math.trunc(y - this.startPos.y));
+    // ★IIIII156 定罪（seat0 写面位差根因）：C# `_innerShapeData.Contains(x - (int)StartPosition.X,
+    //   y - (int)StartPosition.Y)`（LegacyDungeonRoom.cs:69-76）——**先截 origin 再整数差**；
+    //   JS 曾 `trunc(x - startPos.x)`（先差后截）——startPos.y=j-num2v/2 在 num2v 奇数时
+    //   带 .5（如 401.5），trunc(415-401.5)=13 vs C# 415-401=14 ⇒ 形状查询整行 +1 漂移
+    //   ⇒ 连接点走出房多 1 步（HCW#410 p1 (770,415)→(769,416)）⇒ 厅 carve 位差级联
+    //   S4 坑/S5-S7 落箱/尖刺/门/板全线位移（rm8/61 耗尽群根因）。
+    return this.innerShape.contains(x - Math.trunc(this.startPos.x), y - Math.trunc(this.startPos.y));
   }
   floodedTileCount(): number { return this.floodedN; }
   /** FloodRoom（:47-54）：ModShapes.All + IsBelowHeight(centerY,inclusive) + IsNotSolid + SetLiquid。 */
@@ -743,6 +763,10 @@ class DLegacyRoom extends DRoomBase {
   private phase(generating: boolean, data: DualDungeonData, ctx: DualLayoutCtx): void {
     const st = ctx.st;
     const ur = new UnifiedRandom(this.settings.randomSeed);
+    // ★IIIII156 走线取证（dormant）：目标房逐步 float 位型
+    const wv156On = (globalThis as { __swI156Walk?: unknown }).__swI156Walk != null;
+    const f64x = (d: number): string => { const dv = new DataView(new ArrayBuffer(8)); dv.setFloat64(0, d); return (dv.getBigInt64(0, false) & 0xFFFFFFFFFFFFFFFFn).toString(16); };
+    if (wv156On && (this as { __i156Steps?: string[] }).__i156Steps === undefined) (this as { __i156Steps?: string[] }).__i156Steps = [];
     const brick = this.settings.style.BrickTileType;
     const brickWall = this.settings.style.BrickWallType;
     const b = this.settings.overridePaintTile > -1 ? this.settings.overridePaintTile : (this.settings.style.TilePaintColor ?? 0);
@@ -768,7 +792,13 @@ class DLegacyRoom extends DRoomBase {
     let roomStep = data.scalars.roomStep;
     if (this.settings.startingRoom) roomStep = 1.0;
     let num4 = Math.trunc(10.0 * roomStep) + ur.nextInt(10);
-    const num5 = num2v;
+    // ★IIIII114b2 定罪（G 窗半宽 10 房漂移）：C# `num2 = (num5 = OverrideStrength)`
+    //   （LegacyDungeonRoom.cs:219-221）**同时重赋 num5**，:304 `Strength=(int)num5`
+    //   ⇒ 覆写房 Strength=OverrideStrength（provider 主流 Next(13) 域）；JS 曾只重赋
+    //   num2、`const num5` 钉死本地 num2v（房私种子 Next(15) 域）⇒ roomSink 透传的
+    //   strength（→ dgBasicChests/dgBiomeChests 箱窗半宽 (int)(Strength*0.4f)）错源。
+    //   房体写面（num2 支）本就吃覆写值零变；唯 strengthVal 消费面（箱窗）改径。
+    let num5 = num2v;
     let num6 = data.scalars.roomITEx;
     if (this.settings.overrideStartPos != null && this.settings.overrideEndPos != null) {
       px = this.settings.overrideStartPos.x; py = this.settings.overrideStartPos.y;
@@ -782,7 +812,7 @@ class DLegacyRoom extends DRoomBase {
       vx = this.settings.overrideVelocity.x; vy = this.settings.overrideVelocity.y;
     }
     let num2 = num2v;
-    if (this.settings.overrideStrength > 0) num2 = this.settings.overrideStrength;
+    if (this.settings.overrideStrength > 0) { num5 = this.settings.overrideStrength; num2 = num5; }
     if (this.settings.overrideSteps > 0) num4 = this.settings.overrideSteps;
     if (this.settings.overrideITExRatio > 0) num6 = this.settings.overrideITExRatio;
     const lgHook = (globalThis as { __swI103Phase?: ((tag: string, gen: boolean, seed: number) => void) | undefined }).__swI103Phase;
@@ -840,6 +870,8 @@ class DLegacyRoom extends DRoomBase {
       px += vx; py += vy;
       vx = Math.max(-1.0, Math.min(1.0, vx + Math.fround(ur.nextIntRange(-10, 11) * Math.fround(0.05)) * data.scalars.roomSlant));
       vy = Math.max(-1.0, Math.min(1.0, vy + Math.fround(ur.nextIntRange(-10, 11) * Math.fround(0.05)) * data.scalars.roomSlant));
+      // ★IIIII156：walk 步序账（仅 __swI156Walk 挂载且目标房时收集；零掷）
+      if (wv156On) (this as { __i156Steps?: string[] }).__i156Steps!.push(`s|${f64x(px)},${f64x(py)}|${f64x(vx)},${f64x(vy)}|r=${x0},${y0},${x1},${y1}|i=${jx0},${jy0},${jx1},${jy1}`);
     }
     // ★IIIII98 第四轮定罪：C# StartPosition=val3（Vector2D **double**，含 .5 分量，
     //   LegacyDungeonRoom.cs:198/302；:194 calculated 分支恢复的正是这个双精度起点）。
@@ -848,6 +880,21 @@ class DLegacyRoom extends DRoomBase {
     this.startPos = v2(startX, startY);
     this.endPosV = v2(px, py);
     this.strengthVal = Math.trunc(num5);
+    // ★IIIII156 走线取证钩（dormant——__swI156Walk 未挂载时零开销零掷）：Legacy 房
+    //   walk 末态盒/起终点/步序 float 位型（HCW #410 连接点 1 格漂移定罪用）。
+    const w156 = (globalThis as { __swI156Walk?: (p: Record<string, unknown>) => void }).__swI156Walk;
+    if (w156) {
+      const f64 = (d: number): string => { const dv = new DataView(new ArrayBuffer(8)); dv.setFloat64(0, d); return (dv.getBigInt64(0, false) & 0xFFFFFFFFFFFFFFFFn).toString(16); };
+      w156({ x: this.settings.x, y: this.settings.y, gen: generating, seed: this.settings.randomSeed | 0,
+        n2: num2, n4: num4, ovS: this.settings.overrideStrength, ovSt: this.settings.overrideSteps,
+        ovV: this.settings.overrideVelocity ? `${f64(this.settings.overrideVelocity.x)},${f64(this.settings.overrideVelocity.y)}` : '-',
+        ib: `${this.inner.L},${this.inner.T},${this.inner.R},${this.inner.B}`,
+        ob: `${this.outer.L},${this.outer.T},${this.outer.R},${this.outer.B}`,
+        start: `${f64(startX)},${f64(startY)}`, end: `${f64(px)},${f64(py)}`, velEnd: `${f64(vx)},${f64(vy)}`,
+        shQ: [-3, 14, -2, 14, -3, 15, -2, 15, -1, 14, -2, 13].map((d, idx, arr) => idx % 2 === 0 ? (this.innerShape.contains(d, arr[idx + 1]!) ? 1 : 0) : -1).filter((v) => v >= 0).join(''),
+        steps: ((this as unknown as { __i156Steps?: string[] }).__i156Steps ?? []) as string[] });
+      (this as unknown as { __i156Steps?: string[] }).__i156Steps = undefined;
+    }
     if (lgHook && isEnt) lgHook(`LGend|ib=${this.inner.L},${this.inner.T},${this.inner.R},${this.inner.B}|start=${sx0},${sy0}`, false, 0);
     this.inner.calc(); this.outer.calc();
     this.floodedN = floodedCountOf(this.inner, this.innerShape, sx0, sy0);
@@ -870,14 +917,18 @@ class DWormlikeRoom extends DRoomBase {
     if (this.calculated && !this.outer.contains(x, y)) return Protection.Walls;   // base 外框内
     const p0 = this.positionsArr[0];
     if (!this.positionsArr.length || !this.outer.contains(x, y)) return Protection.None;
-    if (!p0 || !this.outerShape.contains(Math.trunc(x - p0.x), Math.trunc(y - p0.y))) return Protection.None;
+    // ★IIIII156：C# `Positions[0].ToPoint()` 先截 origin（WormlikeDungeonRoom.cs:65）——
+    //   与 isInsideRoom 同病同修：trunc-after-subtract 在 p0 带小数时整格漂移。
+    if (!p0 || !this.outerShape.contains(x - Math.trunc(p0.x), y - Math.trunc(p0.y))) return Protection.None;
     return Protection.Walls;
   }
   isInsideRoom(st: TileStore, x: number, y: number): boolean {
     if (this.positionsArr.length === 0) return this.inner.contains(x, y);
     if (!this.inner.contains(x, y)) return false;
     const p0 = this.positionsArr[0]!;
-    return this.innerShape.contains(Math.trunc(x - p0.x), Math.trunc(y - p0.y));
+    // ★IIIII156：C# `Positions[0].ToPoint()` 先截 origin（WormlikeDungeonRoom.cs:79-82），
+    //   形状录制 origin=trunc(position)（:127/:158 (int)vector2）——查询必须同 origin。
+    return this.innerShape.contains(x - Math.trunc(p0.x), y - Math.trunc(p0.y));
   }
   /** FloodRoom（:48-57）。 */
   floodRoom(ctx: DualLayoutCtx, liquidSheetType: number): void {
@@ -2450,8 +2501,11 @@ class DLegacyHall extends DHallBase {
     data.genPosY = Math.trunc(val.y);
     this.startPosition = v2(startOv.x, startOv.y);
     this.endPosition = v2(val.x, val.y);
-    this.startDirection = v2(zeroDir.x, zeroDir.y);
-    this.endDirection = v2(nv.x, nv.y);
+    // ★IIIII111c：C# LegacyDungeonHall.cs:679/:870 —— startDirection 局部变量恒 zero
+    //  且从未重赋、EndDirection=zero ⇒ 两端 Y=0（PD 走廊分派两端均门支）。
+    //  JS 曾以 zeroDir(=nv 副本,变量名误导)充零——PD 掷位/写入面双偏差。
+    this.startDirection = v2(0, 0);
+    this.endDirection = v2(0, 0);
     this.strengthVal = num4;
     this.stepsVal = stepsVal;
     data.lastDungeonHall = lastHallCapture;       // C# LastHall=lastHall（原值回存）
@@ -3078,8 +3132,26 @@ function roomGetHallwayConnectionPoint(room: DRoomBase, ctx: DualLayoutCtx, othe
   }
   val2 = safeNormalize(otherRoomPos.x - connectionPoint.x, otherRoomPos.y - connectionPoint.y, 1, 0);
   drlVyBits = bits64x(val2.y);
+  // ★IIIII156：walk 逐步取证（__swI156Walk 挂载时,零掷）
+  const wk156 = (globalThis as { __swI156Walk?: unknown }).__swI156Walk != null;
+  const wv156L: string[] | null = wk156 ? [] : null;
+  if (wk156 && room.centerX() === 778 && room.centerY() === 404) {
+    wv156L!.push(`W0|cp=${bits64x(connectionPoint.x)},${bits64x(connectionPoint.y)}|v=${bits64x(val2.x)},${bits64x(val2.y)}`);
+  }
   while (room.isInsideRoom(ctx.st, Math.trunc(connectionPoint.x), Math.trunc(connectionPoint.y))) {
     connectionPoint = v2(connectionPoint.x + val2.x, connectionPoint.y + val2.y);
+    if (wv156L && room.centerX() === 778 && room.centerY() === 404) {
+      const tx = Math.trunc(connectionPoint.x), ty = Math.trunc(connectionPoint.y);
+      const leg = room as unknown as { inner: { contains(x: number, y: number): boolean; L: number; T: number; R: number; B: number }; innerShape: { contains(x: number, y: number): boolean }; startPos: V2 };
+      wv156L!.push(`W+|cp=${bits64x(connectionPoint.x)},${bits64x(connectionPoint.y)}|t=${tx},${ty}|in=${room.isInsideRoom(ctx.st, tx, ty) ? 1 : 0}`
+        + `|ib=${leg.inner.L},${leg.inner.T},${leg.inner.R},${leg.inner.B}`
+        + `|sp=${bits64x(leg.startPos.x)},${bits64x(leg.startPos.y)}`
+        + `|q=${leg.inner.contains(tx, ty) ? 1 : 0}${leg.innerShape.contains(Math.trunc(tx - leg.startPos.x), Math.trunc(ty - leg.startPos.y)) ? 1 : 0}`);
+    }
+  }
+  if (wv156L && wv156L.length > 0) {
+    const gh = globalThis as { __swI156WalkLog?: string[] };
+    (gh.__swI156WalkLog ??= []).push(...wv156L);
   }
   if (settings.hallwayPointAdjuster !== null) {
     connectionPoint = v2(connectionPoint.x - val2.x * settings.hallwayPointAdjuster,
@@ -3634,8 +3706,24 @@ export interface DualLayoutResult {
      *  bio=BiomeDungeonRoom 实例旗（S4 候选剔除门 cs:205-209）。 */
     oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean }>;
   featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
+  /** ★IIIII111c：PD 面厅载荷（DungeonCrawler.cs:484-487 厅循环消费域）——
+   *  ht=HallType（0 Legacy/2 Regular/3 Stairwell/4 Sine）、ent=IsEntranceHall
+   *  （Stairwell 入口厅不带空体覆写，照走 start/end）；sdx/sdy/edx/edy=Start/End
+   *  Direction.Y 消费域；pp=Sine PotentialPlatformPoints（cs :33-42 只在 |d.Y|≥0.65
+   *  时受理）；extra=AddExtraPlatformsIfNeeded（Legacy/Regular 双座特典，cs :71-95：
+   *  |dirY|≥0.65 时每 20 格 Lerp 采样点）。 */
+  pdHalls?: Array<{ ht: number; st: number; ent: boolean;
+    sx: number; sy: number; ex: number; ey: number; sdy: number; edy: number;
+    pp?: Array<{ x: number; y: number; dy: number }>;
+    /** ★IIIII114b2：maya 尾载荷（DungeonGlobalTraps.Temple 厅段 DungeonHall.Bounds +
+     *  generated 门，C# Width=Right−Left 半开界）——generated 才参与掷位。 */
+    gL?: number; gT?: number; gR?: number; gB?: number; gen?: boolean }>;
   scalar?: number;
   styles?: import('./DungeonStyles1457').DungeonStyleData[];
+  /** ★IIIII111c：本座 genVars.dungeonStyle（Default style0 对象）——PD 面
+   *  GetStyleForWall/GetStyleForTile 双 null 时的回退样式（DU.cs:82-84）。
+   *  seat1 样式表无 style0 席位 ⇒ 不能从 styles[] 兜底。 */
+  defaultStyle?: import('./DungeonStyles1457').DungeonStyleData;
   /** ★IIIII105c：BiomeChests_DualDungeons 桶（cs DungeonGlobalBiomeChests.cs:34-76）——
    *  键=settings.StyleData.Style；biome=BiomeDungeonRoom 实例（每样式至多一席,后写覆盖）；
    *  rooms=其余房 InnerBounds 列表（Next(list.Count) 采样+Remove）。 */
@@ -3713,6 +3801,9 @@ void roomGetBounding;
 export const WINDOW_PLAT_ITEM_STYLE: Record<number, number> = {
   94: 0, 631: 1, 632: 2, 633: 3, 913: 5, 1384: 6, 1385: 7, 1386: 8,
   2549: 18, 2629: 23, 2630: 24, 3906: 33, 3908: 35, 4311: 42, 4416: 43,
+  // ★IIIII111c：PD 面扩表（Item.cs SetDefaults 各平台 item 终态）——
+  //  3903..3908 段=30+type−3903；5562/5770/5791/5812=DefaultToPlaceableTile(19,N)。
+  3903: 30, 3907: 34, 3957: 37, 5562: 50, 5770: 55, 5791: 56, 5812: 57,
 };
 
 export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): DualLayoutResult {
@@ -3798,6 +3889,10 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
       strength: legacy ? Math.max(1, Math.trunc(rm.strengthVal)) : Math.max(1, Math.min(rm.inner.width, rm.inner.height)),
       generated: true,
       st: rm.settings.style.Style,
+      // ★IIIII111c：PD 面载荷（BiomeDungeonRoom.cs:46 fluff0 支 + DC.cs:646 LivingTree 强制样式支）
+      bio: rm instanceof DBiomeRoomBase,
+      forceDP: !!(rm.settings as unknown as { forceStyleDP?: boolean }).forceStyleDP,
+      leg: rm instanceof DLegacyRoom,
       innerL: rm.inner.L, innerR: rm.inner.R, innerT: rm.inner.T, innerB: rm.inner.B,
     });
   }
@@ -3813,6 +3908,40 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     gen: hh.generated, st: hh.settings.style.Style,
     L: hh.bounds.L, T: hh.bounds.T, R: hh.bounds.R, B: hh.bounds.B,
   }));
+  // ★IIIII111c：PD 面厅载荷（DungeonCrawler.cs:484-487 厅循环=rooms 循环后同序遍历
+  //  dungeonHalls 全集）——Stairwell 无 extra/Sine 走 pp/Legacy+Regular 走
+  //  AddExtraPlatformsIfNeeded（DungeonHall.cs:71-95：|dirY|≥0.65 时每 20 格采样）。
+  const pdHalls = data.halls.map((hh) => {
+    const ht = hh.settings.hallType;
+    // AddExtraPlatformsIfNeeded（DungeonHall.cs:71-95）——C# 用 Vector2(float) 做差向量
+    //  与 SafeNormalize（float 域），距离用 double Distance；Lerp t=(float)(num4/num3)。
+    const fx = fr(hh.endPosition.x), fy = fr(hh.endPosition.y);
+    const sx0 = fr(hh.startPosition.x), sy0 = fr(hh.startPosition.y);
+    const fdx = fr(fx - sx0), fdy = fr(fy - sy0);
+    const dLen = Math.hypot(hh.endPosition.x - hh.startPosition.x, hh.endPosition.y - hh.startPosition.y);
+    const fl = Math.hypot(fdx, fdy);
+    const ndx = fdx !== 0 || fdy !== 0 ? fr(fdx / (fl === 0 ? 1 : fl)) : 0;
+    const ndy = fdx !== 0 || fdy !== 0 ? fr(fdy / (fl === 0 ? 1 : fl)) : 0;
+    const extra: Array<{ x: number; y: number; dy: number }> = [];
+    if ((ht === DPHallType.Legacy || ht === DPHallType.Regular) && (ndy >= fr(0.65) || ndy <= fr(-0.65))) {
+      let n4 = 20;
+      while (n4 < dLen) {
+        const t = fr(n4 / dLen);
+        extra.push({ x: fr(sx0 + fr(fdx * t)), y: fr(sy0 + fr(fdy * t)), dy: ndy });
+        n4 += 20;
+      }
+    }
+    return {
+      ht, st: hh.settings.style.Style, ent: (hh.settings as unknown as { isEntranceHall?: boolean }).isEntranceHall === true,
+      sx: hh.startPosition.x, sy: hh.startPosition.y, ex: hh.endPosition.x, ey: hh.endPosition.y,
+      sdy: hh.startDirection.y, edy: hh.endDirection.y,
+      gL: hh.bounds.L, gT: hh.bounds.T, gR: hh.bounds.R, gB: hh.bounds.B, gen: hh.generated,
+      pp: hh instanceof DSineHall
+        ? hh.potentialPlatformPoints.filter((e) => e.d.y >= fr(0.65) || e.d.y <= fr(-0.65))
+            .map((e) => ({ x: e.p.x, y: e.p.y, dy: e.d.y }))
+        : extra,
+    };
+  });
   // ★IIIII105c：BiomeChests_DualDungeons 桶（array2/array 同构）
   const chestPlan: Record<number, { biome?: { L: number; T: number; R: number; B: number } | null; rooms: Array<{ L: number; T: number; R: number; B: number }> }> =
     Object.create(null);
@@ -3893,7 +4022,7 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   // ★IIIII106b：outerProgressionBounds 投影（provider 收口时 outerProgBounds 已由
   // calculateDungeonBounds 装配=styles 同序；空数组防御=legacy 回退面）
   const progBounds = (data.outerProgressionBounds ?? []).map((b2) => ({ L: b2.L, T: b2.T, R: b2.R, B: b2.B }));
-  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, chestPlan, scalar, styles, progBounds, earlyRooms };
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, pdHalls, chestPlan, scalar, styles, defaultStyle, progBounds, earlyRooms };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {

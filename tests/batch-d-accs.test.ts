@@ -130,6 +130,41 @@ describe('1457 远程配饰旗', () => {
     for (let i = 0; i < 400; i++) if (c.damage(50, 0, 0, false) === 0) dodged++;
     expect(dodged).toBeGreaterThan(10);
   });
+
+  // ★item.defense 面（GrantArmorBenefits :13220 statDefense += armorPiece.defense，
+  //   UpdateEquips :13015-13026 k=0..9 全装备槽统一加算）——曾整面缺失=配饰防御不叠，
+  //   仅 6188 由 BEHAVIOR_FX 硬补（已删，避免与 itemstats 通道双计）。
+  //   数值 = vanilla-itemstats.json（1457 SetDefaults 终值：安卡盾 5/钴盾 1 均为 1.4.5.7 新值）
+  it('item.defense 面：经典防御配饰逐件叠入 equipStats.def', () => {
+    const CASES: Array<[vid: number, want: number]> = [
+      [216, 1],    // Shackle 脚镣
+      [156, 1],    // Cobalt Shield 钴盾
+      [193, 1],    // Obsidian Skull 黑曜石骷髅头
+      [397, 2],    // Obsidian Shield 黑曜石盾
+      [1595, 2],   // Magic Cuffs 魔力手铐
+      [2221, 2],   // Celestial Cuffs 天界手铐
+      [3097, 2],   // EoCShield 克苏鲁护盾
+      [1613, 5],   // Ankh Shield 安卡盾
+      [938, 6],    // PaladinsShield 圣骑士盾
+      [3997, 6],   // FrozenShield 冰冻盾
+      [3016, 8],   // FleshKnuckles 肉拳
+      [3992, 8],   // Berserker's Glove 狂战士手套
+      [3998, 10],  // HeroShield 英雄盾
+      [6177, 1],   // 皇家卫队背带（1457）
+      [6183, 2],   // 白银之盾（1457）
+    ];
+    for (const [vid, want] of CASES) {
+      const p = makeHooks().player;
+      p.inv.armor[3] = { id: iid(vid), stack: 1 };
+      expect(p.equipStats.def, `vid ${vid}`).toBe(want);
+    }
+    // 卸下归零 + 多件叠加（脚镣1+安卡盾5=6，Player.cs:13220 逐槽累加）
+    const q = makeHooks().player;
+    q.inv.armor[3] = { id: iid(216), stack: 1 };
+    q.inv.armor[4] = { id: iid(1613), stack: 1 };
+    expect(q.equipStats.def).toBe(6);
+    expect(q.defense).toBe(6);
+  });
 });
 
 // ============ 拍击石系三脉冲（TryMakingSnappingStoneStrike :14347-14420） ============
@@ -202,8 +237,9 @@ describe('LoadoutShare 收藏装备跨配装共享', () => {
     p.inv.loadouts[1].armor[0] = { id: iid(37), stack: 1, favorited: true };
     expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));  // 共享生效
     // 共享件是聚合输入 → 卸收藏必须失效缓存（键含共享件,与 computeEquipStats 同口径）
+    // ★勿钉内部 id 死值（曾钉 1352——注册表增项平移后炸红），动态取 iid(37)
     const k1 = p['equipStatsKey']();
-    expect(k1).toContain('1352p0.');
+    expect(k1).toContain(iid(37) + 'p0.');
     p.inv.loadouts[1].armor[0] = null;
     expect(p['equipStatsKey']()).not.toBe(k1);
     // 本槽非空 → 恒用本槽

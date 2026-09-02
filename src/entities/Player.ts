@@ -1560,6 +1560,13 @@ export class Player extends Entity {
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
       if (itemLife) life += itemLife;
+      // ★item.defense 面（GrantArmorBenefits :13220 statDefense += armorPiece.defense——
+      //   原版 UpdateEquips :13015-13026 k=0..9 全装备槽统一加算；盔甲 0-2 走 defense
+      //   getter 的 equippedArmor()，此处只补配饰段 3..accSlotMax 防双计。曾整面缺失=
+      //   脚镣/钴盾/黑曜石骷髅/黑曜石盾/圣骑士盾/魔力手铐/天界手铐/肉拳/克苏鲁盾/
+      //   狂战士手套/冰冻盾/英雄盾/6177/6183 防御不叠，仅 6188 由 BEHAVIOR_FX 硬补）
+      const itemDef = statOfInternal(s.id)?.def ?? 0;
+      if (itemDef) def += itemDef;
       if (fx) {
         if (fx.def) def += fx.def;
         if (fx.mana) mana += fx.mana;

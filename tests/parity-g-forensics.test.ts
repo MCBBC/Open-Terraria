@@ -93,7 +93,14 @@ describe('G3 弹-NPC 绑定通道（537 激光 / 573 蓄能弹）', () => {
     expect(beam.y).toBeCloseTo(host.cy - 4 - beam.h / 2, 5);
   });
 
-  it('537：宿主死后解除位锁（钉在最后位置，不 Kill 不追）；寿命 90t（:30441-30450）', () => {
+  // ★2026-09-02 定谳改判：本例旧断言「宿主死 → 解除位锁原地照完剩余寿命」系把
+  // 455 专属前置支误读成 aiStyle84 全族语义。位锁 if/else 链（537 支要求
+  // Main.npc[ai[1]].active && type==411）全落空时进尾支
+  // `if (type != 632 || …) { Kill(); return; }`（1456 :30327-30333 / 1458
+  // :31976-31982）→ type==537 ≠632 → 下拍立即 Kill，位置钉在末锁位（Kill 先于
+  // 一切位写）、不追尸位、不残留束伤。生产端 2026-08-31「A2 清偿」已对齐，此处
+  // 回归锁定新语义 + 90t 寿命（1456 :30441-30453 / 1458 :32092-32105）。
+  it('537：宿主死后下拍 Kill（钉在末锁位，不追尸位）；寿命 90t（:30327-30333/:30441-30453）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 120, y: FLOOR - 6 });
     const host = spawn(h, 411, 40, FLOOR - 3);
@@ -103,12 +110,19 @@ describe('G3 弹-NPC 绑定通道（537 激光 / 573 蓄能弹）', () => {
     host.dead = true;
     host.x += 100;                                      // 宿主尸位变化不应再拉束
     const lockX = beam.x, lockY = beam.y;
-    for (let i = 0; i < 30; i++) beam.fixedUpdate(1 / 60, h.hooks);
-    expect(beam.x).toBe(lockX);
+    beam.fixedUpdate(1 / 60, h.hooks);
+    expect(beam.x).toBe(lockX);                         // Kill 先于位写：钉在末锁位
     expect(beam.y).toBe(lockY);
-    expect(beam.dead).toBe(false);                      // 不随宿主死（:30308 只是位锁分支）
-    for (let i = 30; i < 90; i++) beam.fixedUpdate(1 / 60, h.hooks);
-    expect(beam.dead).toBe(true);                       // localAI[0] >= 90 Kill
+    expect(beam.dead).toBe(true);                       // 位锁链尾支 type!=632 → Kill
+    // 寿命 90t：type==537 localAI[0]++ ≥90 Kill（宿主全程存活）
+    const h2 = makeHooks(w, { x: 120, y: FLOOR - 6 });
+    const host2 = spawn(h2, 411, 40, FLOOR - 3);
+    const beam2 = new Dart(host2.cx, host2.cy, 1, 0, 60, 537);
+    beam2.ownerNpcId = host2.id;
+    for (let i = 0; i < 89; i++) beam2.fixedUpdate(1 / 60, h2.hooks);
+    expect(beam2.dead).toBe(false);
+    beam2.fixedUpdate(1 / 60, h2.hooks);
+    expect(beam2.dead).toBe(true);                      // localAI[0] >= 90 Kill
   });
 
   it('537：束线段命中伤害 = 原值 × 难度 ×2（:13770-13781；难度乘区随难度档）', () => {
@@ -266,17 +280,17 @@ describe('G7 鱿鱼/水母帧端', () => {
     const e = spawn(h, 221, 40, FLOOR - 3);
     const frames = Math.max(1, e.vanilla?.frames ?? 1);
     // 非 hunt：13t 一帧全循环
-    for (let i = 0; i < 13; i++) drive(e, 'squidFindFrame').call(e);
+    for (let i = 0; i < 13; i++) drive(e, 'squidFindFrame').call(e, h.hooks, null);   // ★tsc:无参 impl,补齐 drive 声明形参(JS 忽略)
     expect(e.customFrameIdx).toBe(1);
-    for (let i = 0; i < 13 * (frames - 1); i++) drive(e, 'squidFindFrame').call(e);
+    for (let i = 0; i < 13 * (frames - 1); i++) drive(e, 'squidFindFrame').call(e, h.hooks, null);   // ★tsc:无参 impl,补齐 drive 声明形参(JS 忽略)
     expect(e.customFrameIdx, '非 hunt 回卷帧 0').toBe(0);
     // hunt：8t 一帧、末帧钳住不回卷
     e.lai2 = 1;
-    for (let i = 0; i < 8 * frames * 3; i++) drive(e, 'squidFindFrame').call(e);
+    for (let i = 0; i < 8 * frames * 3; i++) drive(e, 'squidFindFrame').call(e, h.hooks, null);   // ★tsc:无参 impl,补齐 drive 声明形参(JS 忽略)
     expect(e.customFrameIdx, 'hunt 钳末帧').toBe(frames - 1);
     // 慢速触发：帧 0 + 清标志（一次）
     e.lai0 = 1;
-    drive(e, 'squidFindFrame').call(e);
+    drive(e, 'squidFindFrame').call(e, h.hooks, null);   // ★tsc:无参 impl,补齐 drive 声明形参(JS 忽略)
     expect(e.customFrameIdx).toBe(0);
     expect(e.lai0).toBe(0);
   });
@@ -320,8 +334,14 @@ describe('G8 月总死光伤害乘区', () => {
     const h = makeHooks(w, { x: 60, y: FLOOR - 8 });
     const src = spawn(h, 396, 40, FLOOR - 8);
     src.ai0 = 0;                                          // ≠-2（闭眼残肢门）
-    const ray = new MLDeathray(src, 'head', 0, Math.PI * 2 / 540, 75);
-    ray.fixedUpdate(1 / 60, h.hooks);
+    // ★2026-09-02 桩适配：1457 起 455 Colliding 有 20t 武装延迟（1457/1458
+    //   P.cs:16075-16082 `num44=20; localAI[0]<num44 → 不判伤`；1456 :14675-14683
+    //   无此门）——旧「单 tick 直驱」已被武装门合法拦截（R23b-K3 后空转）。
+    //   出生角预摆 −20×sweep：恰在第 20 tick（首个武装拍）束线转回玩家方向，
+    //   验证伤害乘区而非扫掠几何。
+    const sweep = Math.PI * 2 / 540;
+    const ray = new MLDeathray(src, 'head', -20 * sweep, sweep, 75);
+    for (let i = 0; i < 20; i++) ray.fixedUpdate(1 / 60, h.hooks);
     expect(h.rec.damageCalls.length).toBeGreaterThan(0);
     return h.rec.damageCalls[0].dmg;
   }

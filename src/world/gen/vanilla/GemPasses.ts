@@ -541,7 +541,7 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const treeRoll = alwaysTry ? true : rng.nextInt(5) === 0;
       if (treeRoll && st.liquid[st.idx(x, y - 1)] === 0) {
         const treeType = idsByVanillaSheet(583 + rng.nextInt(7)).values().next().value ?? 0;
-        if (treeType) growGemTree(st, rng, x, y, treeType);
+        if (treeType) growGemTree(st, rng, x, y, treeType, 0, false, gs);
       }
       // 地下钟乳石（:22239-22262）：非海洋、空格、1/5 → 上下邻石族清坡 + PlaceTight
       //   ★AAAAAA：族判定读**裸 type**（ghost 含）——原版 `Main.tile[i, j±1].type == 1
