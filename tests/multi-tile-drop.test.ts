@@ -272,7 +272,7 @@ describe('legacy 武器架 334：架本体 2699 返还（CheckWeaponsRack :46855
     }
   });
 
-  it('持武架：第一击弹武器（架保留）、第二击碎架掉 2699 一次——武器+架体两件', () => {
+  it('持武架：一击双掉（弹武器+碎架+2699 一次）——★七批④-c 对齐原版节奏', () => {
     const w = new World(40, 40, 7, 'mtd-rack334b');
     const drops: Drop[] = [];
     const g = boulderShell(w, drops, []);
@@ -282,21 +282,21 @@ describe('legacy 武器架 334：架本体 2699 返还（CheckWeaponsRack :46855
     }
     const wid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[4]!]!;   // 4=铁阔剑（CanBePlacedOnWeaponRacks）
     getOrCreateFurniture(w.furnitureItems, 'weapon_rack', 20, 10).slots[0] = { id: wid, stack: 1, prefix: 0 };
-    g.breakTile(20, 10, false);
-    expect(drops).toEqual([{ key: ITEM_DEFS[wid].key, n: 1 }]);            // 只弹武器
-    expect(w.store.get(20, 10)).toBe(rk);                                  // 架本体保留（两段式 pop）
+    // ★七批④-c（2026-09-02）翻正：原版 334 持武架【一击】双掉——KillTile_DropItems
+    // 对 334 只读帧掉武器【无 early return】（WorldGen.cs:64117-64165,武器 :64151+
+    // 帧还原 :64153-64156）+ TileFrame case 334（:86786）→ CheckWeaponsRack（:46796）
+    // 架体 2699 :46855 同击（destroyObject :46854 闭锁=恒一次）。旧断言「第一击只弹
+    // 武器、第二击碎架」锁的是与 471 共用的两段式 pop（471 early-return
+    // :64186-64192 TE 专属）——furnitureTryBreak 已按 tileType=334 特化,本用例改锁
+    // 一击双掉节奏。
     g.breakTile(20, 10, false);
     expect(drops).toEqual([
       { key: ITEM_DEFS[wid].key, n: 1 },
       { key: VI(2699), n: 1 },                                             // 架体恰一次
     ]);
     expect(w.furnitureItems.find((f) => f.x === 20 && f.y === 10)).toBeUndefined();
+    expect(w.store.get(20, 10)).toBe(0);
     expect(w.store.get(22, 12)).toBe(0);
-    // ★备案（原版差异）：1457 原版 334 持武架【一击】双掉——武器帧嵌读取
-    // KillTile_DropItems :64122-64164（弹武器 :64146-64149+帧还原 :64155-64162,
-    // 无 early return）+ CheckWeaponsRack :46855 架体同击；本仓与 471 共用
-    // FURNITURE_TILE_KIND 两段式 pop 链（471 才有的 early-return :64186-64195 同构）,
-    // 物品集相同、架体多承一击——共享链改面属并行批次域,不在此批动。
   });
 });
 

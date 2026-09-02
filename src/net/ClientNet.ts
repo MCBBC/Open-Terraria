@@ -112,9 +112,10 @@ export interface NpcSnap {
   netId: number; key: string;
   x: number; y: number; vx: number; vy: number;
   hp: number; maxHp: number; animT: number;
-  flags: number; // bit0=boss；bit1=hasAi12（刺球锚点随包）
-  /** 刺球锚点像素坐标（NPC 70 aiStyle 20；flags bit1 置位时上行按位携带、下行
-   *  帧级尾段按 code 回填——旧端无此段则字段缺省,消费端按存在性门控） */
+  flags: number; // bit0=boss
+  /** 刺球锚点像素坐标（NPC 70 aiStyle 20）——msg23【帧级尾段】条件携带（上行按
+   *  u32 netId、下行按 u16 code 关联回填,见 sendNpcSnapshot/接收 case 注）：
+   *  旧端无尾段=字段缺省 undefined,消费端按存在性门控 */
   ai1?: number; ai2?: number;
 }
 
@@ -699,8 +700,7 @@ export class ClientNet {
       }
       case Msg.SyncNPC: {
         // v4 短码格式：每条 1B eflags——bit0=含 key 全量(u32 netId+u16 codeId+str key)，
-        // bit1=boss，bit2=含刺球锚点（NPC 70 aiStyle 20 的 ai1/ai2，值走循环后帧级尾段）；
-        // 否则仅 u16 codeId（查本端 codeId→netId/key 表）。
+        // bit1=boss；否则仅 u16 codeId（查本端 codeId→netId/key 表）。
         // 未知短码：**先把本条剩余字段读完再丢弃**——continue 前不消费会让读指针错位，
         // 毒化整条连接（review C1）；自愈靠 ≤2s 全量兜底重发
         const n = r.u16();
@@ -724,18 +724,18 @@ export class ClientNet {
           const hp = r.i16(), maxHp = r.i16(), animT = r.u16();
           if (!netId) continue; // 未知短码：字段已消费，仅丢弃本条快照
           const snap: NpcSnap = { netId, key, x, y, vx, vy, hp, maxHp, animT,
-            flags: (eflags & 2 ? 1 : 0) | (eflags & 4 ? 2 : 0) };
+            flags: eflags & 2 ? 1 : 0 };
           snaps.push(snap);
           byCode.set(code, snap);
         }
-        // 刺球锚点尾段（帧级，条目循环【后】：{u16 count,[u16 code,f32 ai1,f32 ai2]×count}）。
+        // 刺球锚点尾段（帧级，条目循环【后】：{u16 aiCount,[u16 code,f32 ai1,f32 ai2]×aiCount}）。
         // 放帧尾而非条目内是旧访客兼容的关键——旧端读完 n 条即返回，帧尾残余字节永不被
         // 当作下一条 eflags 消费（条目内携带会让旧端在多条目帧上错位+NetReader 越界抛，
         // 且 handle 无 try/catch 会毒化 FrameParser）。旧 server 无尾段 → remaining=0 不读；
-        // 同帧含锚点条目时服务器恒附尾段（值按 code 归条），全量/短码两路同构
+        // 含锚点条目时服务器恒附尾段（值按 code 归条），全量/短码两路同构
         if (r.remaining >= 2) {
-          const tn = r.u16();
-          for (let i = 0; i < tn && r.remaining >= 10; i++) {
+          const aiCount = r.u16();
+          for (let i = 0; i < aiCount && r.remaining >= 10; i++) {
             const code = r.u16();
             const ai1 = r.f32(), ai2 = r.f32();
             const s = byCode.get(code);
@@ -1256,9 +1256,16 @@ export class ClientNet {
       w.i16(s.hp); w.i16(s.maxHp);
       w.u16(s.animT & 0xffff);
       w.u8(s.flags);
-      // 刺球锚点随包（flags bit1=hasAi12）——条目内条件尾段：位在条目内=读取无歧义；
-      // 旧 server 读完定长字段即整帧丢弃尾部残余（msg23 无长度校验），零影响
-      if (s.flags & 2) { w.f32(s.ai1 ?? 0); w.f32(s.ai2 ?? 0); }
+    }
+    // 刺球锚点【帧级】尾段（{u16 anchorCount,[u32 netId,f32 ai1,f32 ai2]×anchorCount}）。
+    // ★必须在条目循环【后】：旧 server 按定长条目推进且无长度校验，条目内携带会让
+    // 带锚条目后的 8 字节被当下一条 netId 消费=后续条目全部错位（垃圾条目转发或
+    // RangeError 丢整批）——旋转游标扫批下带锚条目未必是末条，不能赌（终审定谳）。
+    // 帧级残余旧端整帧丢弃=安全。有锚条目才附（无锚帧与 v4 字节全同）
+    const anchors = snaps.filter((s) => s.ai1 !== undefined && s.ai2 !== undefined);
+    if (anchors.length) {
+      w.u16(anchors.length);
+      for (const s of anchors) { w.u32(s.netId); w.f32(s.ai1!); w.f32(s.ai2!); }
     }
     this.send(w.finish());
   }

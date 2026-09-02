@@ -609,6 +609,15 @@ export class VanillaDust {
       // ---- ★R2 补档(:2656 与 6 同句 A=25 族;光色随环境——rgb=1 为既有 6 号近似口径):
       // 174/75/135/169/242/20/21/231/130-134/158/293-298/307/310(292 火柱/291 尾迹/
       // 103·172·278 尾尘曾落 default 压暗档) + 127/187(:2684 同句)
+      //  ★2026-09-02 评估定谳（红队 finding）：A=25 族「光色随环境」已由管线交付，
+      //  rgb=1 是精确项非缺光——lit 尘画在 worldLayer 内、compositeLight 之前
+      //  （Renderer.render :3530 → 合成 :3590），合成 out.rgb=世界.rgb×光.rgb（GL/2D
+      //  双路径均线性乘）对本尘加性项逐像素施加 texP×light(pixel) ≡ 原版
+      //  texP×GetAlpha(Lighting.GetColor(tile))（Main.DrawDust :39660 取光→GetAlpha
+      //  :2656 同一光照域，本仓 lightmap 与 lightAt 同源 LightingEngine.r/g/b 数组；
+      //  擦除项线性透传同式）——且逐像素比原版逐 tile 更细。此处再乘 lightAt 会与
+      //  合成双重乘光（暗处尘两次变黑），禁改。type 6 虽在 :2656 句内，DrawDust
+      //  :39662 对 6/15/59-64 强制 White 覆写（全亮桶），不经此路径。
       case 174: case 242: case 20: case 21: case 231: case 75: case 135: case 169:
       case 158: case 307: case 310: case 127: case 187:
       case 130: case 131: case 132: case 133: case 134:
@@ -716,4 +725,31 @@ export function dustPremulBake(
     erase[i + 3] = (tA * mA) / 255;
   }
   return { add, erase };
+}
+
+// ===================== dustPmCache 分代 LRU（Renderer.dustPremulPair 消费）=====================
+// 2026-09-02 红队 PLAUSIBLE finding 清偿：旧实现上限 2048 溢出【整体 clear】——连续
+// 多色 colorPass/331 贴片键周期打穿时全缓存瞬间归零,每个幸存键都要重烘一次
+// getImageData（GPU 回读）= 帧尖峰。改分代 LRU：命中重插入（Map 迭代序=插入序 →
+// 重插入即访问序）+ 超限只逐出最旧 1/4 —— 工作集渐进换血,无整清突发。纯函数导出
+// 供金标 tests/dust-premultiplied-blend.test.ts 直测策略本体。
+export const DUST_PM_CACHE_MAX = 2048;
+
+/** LRU touch：命中键移到插入序尾（热键不被分代淘汰窗口覆盖） */
+export function dustPmCacheTouch<K, V>(map: Map<K, V>, key: K): void {
+  const v = map.get(key);
+  if (v !== undefined) {
+    map.delete(key);
+    map.set(key, v);
+  }
+}
+
+/** 超 max 时淘汰最旧 1/4（当前规模的 1/4;≤max 零操作）。最旧 = Map 迭代序头部 */
+export function dustPmCacheEvict<K, V>(map: Map<K, V>, max: number = DUST_PM_CACHE_MAX): void {
+  if (map.size <= max) return;
+  let n = map.size >> 2;
+  for (const k of map.keys()) {
+    map.delete(k);
+    if (--n <= 0) break;
+  }
 }

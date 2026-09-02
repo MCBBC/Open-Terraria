@@ -97,4 +97,22 @@ describe('unembedPass(嵌入自救)', () => {
     expect(b.y).toBeLessThanOrEqual(y0);         // 只许上不许先下拽
     expect(b.y).toBeGreaterThan(y0 - 17);        // 且未被 StepDown 拽下(若误吸附 y0+10)
   });
+
+  // ★2026-09-02 向导电梯定谳（用户实报 Starter World：向导 cy 6055↔6070 永久
+  //   震荡,behavior-log 326 事件+探针 _guidewedge4/5 复现）：悬空下落中仅顶行
+  //   刷实心墙角(左缘 1px 嵌墙、中心格干净) = 瞬态假嵌入——不得抬升,交还原版
+  //   物理继续下沉。旧逻辑抬升 +16px ↔ 重力拉回 = 10t 极限环电梯。
+  it('悬空刷角假嵌入:顶行擦墙角下落不被抬升,自由坠落穿过', () => {
+    const w = new World(120, 120, 42, 'airbrush');
+    const st = w.store;
+    st.setTileSilent(51, 60, 1);                 // 单块实心墙角(仿 (3180,378) 花岗岩)
+    const b = mkBody(51 * 16 + 15, 60 * 16, 18, 40);  // 向导 18×40:左缘 1px 入 51 列,顶行=60
+    b.vy = 0.3;
+    for (let t = 0; t < 15; t++) {
+      b.vy = Math.min(b.vy + 0.3, 10);
+      moveAndCollide(b, w, 0, b.vy);
+    }
+    expect(b.y).toBeGreaterThanOrEqual(60 * 16 + 32);  // 已坠过墙角 ≥2 格(旧电梯环困在 960..977)
+    expect(b.onGround).toBe(false);                    // 悬空态不被 16px 抬升支接住
+  });
 });

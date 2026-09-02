@@ -84,17 +84,22 @@ export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
         if (ground === LIHZARD) style = rng.int(28, 30);
         if (MARBLE_WALLS.has(store.wall[store.idx(x, y)])) style = rng.int(34, 36);
         if (y > h - 200) style = rng.int(13, 15);  // Main.UnderworldLayer = maxTilesY-200
-        // PlacePot（cs:54082）：2×2 净空 + 双列下方 nactive/整砖/无坡/实心
-        if (!placePot(store, rng, x, y, POT, style)) continue;
+        // PlacePot（cs:54529）：2×2 净空 + 双列下方 nactive/整砖/无坡/实心 + remix 拒收带
+        if (!placePot(store, rng, x, y, POT, style, gs.seedFlags.remix === true)) continue;
         placed = true;
       }
     }
   }
 }
 
-/** PlacePot（1456 WorldGen.cs:54082）1:1：2×2（x..x+1, y-1..y）须净空；
- *  下方双列须 nactive && !halfBrick && slope==0 && tileSolid；成功才掷 Next(3) 变体 */
-export function placePot(store: TileStore, rng: RNG, x: number, y: number, type: number, style: number): boolean {
+/** PlacePot（1457 WorldGen.cs:54529≡1458 同号）1:1：2×2（x..x+1, y-1..y）须净空；
+ *  下方双列须 nactive && !halfBrick && slope==0 && tileSolid；成功才掷 Next(3) 变体。
+ *  ★IIIII186 remix 拒收带（cs:54532-54535）：`remix && x∈(0.48w,0.52w) && y>h-220`
+ *  → flag=false（**先于净空检查、不掷变体骰**）——JS 曾整缺此门，remix 下中央深带
+ *  多放罐且重试账错位（#71 A=16,837 主源之一;x86 侧拒后继续扫列至 h-20 烧扫描掷） */
+export function placePot(store: TileStore, rng: RNG, x: number, y: number, type: number, style: number,
+  remix = false): boolean {
+  if (remix && x > store.w * 0.48 && x < store.w * 0.52 && y > store.h - 220) return false;
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = -1; dy <= 0; dy++) {
       if (!store.inBounds(x + dx, y + dy) || store.flags[store.idx(x + dx, y + dy)]) return false;

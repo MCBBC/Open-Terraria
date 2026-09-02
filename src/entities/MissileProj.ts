@@ -1407,7 +1407,10 @@ export class StarfuryStar extends Entity {
 
   private killNow(game: GameHooks): void {
     this.dead = true;
-    game.onProjectileDeath?.(9, this.x, this.y, this.w, this.h);
+    // ★Kill 消亡面清偿批 2（2026-09-02）：补传消亡速度——Game.onProjectileDeath 9 支
+    // （Projectile.cs:77259-77318）尘 58 初速 = v×0.1、gore 16/17 初速 = v×0.05，
+    // 此前 4 参回传 oldV 缺省 0 → 两面只剩 NewDust/NewGore 内建抖动（登记清偿）
+    game.onProjectileDeath?.(9, this.x, this.y, this.w, this.h, this.vx, this.vy);
   }
 
   /** 星体绘制（Main.cs:31820-32003 星族块 type==9 支 1:1；★终零波 C 项升格——

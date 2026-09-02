@@ -660,7 +660,7 @@ import {
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
-import { VanillaDust, dustPremulBake } from '../fx/VanillaDust';
+import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible, bubbleScaleTier } from '../entities/LeashedCritter';
@@ -3726,7 +3726,12 @@ export class Renderer {
         const si = world.store.idx(mtx, mty);
         const sh2 = world.store.type[si] !== 0 ? (TILE_DEFS[world.store.type[si]]?.vanilla?.sheet ?? -1) : -1;
         if (sh2 === 55 || sh2 === 85 || sh2 === 425 || sh2 === 573) {
-          const ax = mtx - Math.floor(world.store.frameX[si] / 18);
+          // ★锚回算须走 frameX/18 % 2（vanilla Player.cs:32338-32341 num3%=2 /
+          //   :32964-32967 while(num40>1)num40-=2）：tileSign 族 2 列/件，frameX/18
+          //   = style*2+列——墓碑 frameX=style*36+dx*18（style≠0 恒 >1），漏 %2 →
+          //   锚左漂 2×style 格（Chat2 泡左漂+world.signs 锚查找落空=文字不显，
+          //   2026-09-02 用户实报；style0 恰好无漂曾掩盖）
+          const ax = mtx - (Math.floor(world.store.frameX[si] / 18) % 2);
           const ay = mty - Math.floor(world.store.frameY[si] / 18);
           const sign = world.signs.find((sg) => sg.x === ax && sg.y === ay);
           if (sign && sign.text.trim()) this.signHoverText = sign.text;
@@ -4763,7 +4768,9 @@ export class Renderer {
   private dustDyeCache: Map<string, HTMLCanvasElement> | null = null;
   /** 预乘 AlphaBlend 烘焙对缓存（Main.DrawDust spriteBatch=BlendState.AlphaBlend 预乘混合）。
    *  key=fx,fy + 乘数字节化(mR,mG,mB,mA)——alphaOf/colorPass 乘数与 XNA shader 输出同为
-   *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048 溢出清空。 */
+   *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048,溢出走分代 LRU
+   *  （dustPmCacheTouch/Evict：命中重插入+逐出最旧 1/4——2026-09-02 红队 finding 清偿,
+   *  旧整体 clear 会让多色键周期打穿时每键重烘 1×getImageData=帧尖峰）。 */
   private dustPmCache: Map<string, { add: HTMLCanvasElement; erase: HTMLCanvasElement }> | null = null;
   private dustPmBake: HTMLCanvasElement | null = null;
 
@@ -4779,7 +4786,7 @@ export class Renderer {
     const key = `${fx},${fy},${mR},${mG},${mB},${mA}`;
     this.dustPmCache ??= new Map();
     const hit = this.dustPmCache.get(key);
-    if (hit) return hit;
+    if (hit) { dustPmCacheTouch(this.dustPmCache, key); return hit; }   // LRU 访问序
     const bake = (this.dustPmBake ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const bc = bake.getContext('2d', { willReadFrequently: true })!;
     bc.clearRect(0, 0, 8, 8);
@@ -4794,7 +4801,7 @@ export class Renderer {
     const eraseIm = eraseCtx.createImageData(8, 8); eraseIm.data.set(baked.erase);
     eraseCtx.putImageData(eraseIm, 0, 0);
     const entry = { add: addC, erase: eraseC };
-    if (this.dustPmCache.size > 2048) this.dustPmCache.clear();
+    dustPmCacheEvict(this.dustPmCache);   // 分代 LRU:超 2048 逐最旧 1/4(非整体清空)
     this.dustPmCache.set(key, entry);
     return entry;
   }

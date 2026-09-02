@@ -300,40 +300,39 @@ describe('wld 导入：334 legacy 武器架持武还原', () => {
     expect(warnings.join('\n')).toContain('武器架持武帧标记损坏');
   });
 
-  it('破架链：第一击弹武器（架保留）、第二击碎架+架本体 2699 返还一次（2026-09-02 ⑥-b 翻正）', () => {
+  it('破架链：持武架一击双掉（先弹武器+整件碎+架本体 2699 一次）★七批④-c', () => {
     const { world } = loadSaveData(save);
     const drops: Array<{ key: string; n: number }> = [];
     const g = breakShell(world, drops);
     const st = world.store;
-    // 命中标记行中格（col1）——经 furnitureAnchor 归一到锚点记录
-    g.breakTile(3, 3, false);
-    expect(drops).toEqual([{ key: defKey(4), n: 1 }]);
-    expect(world.furnitureItems.find((f) => f.x === 2 && f.y === 2 && f.kind === 'weapon_rack')?.slots[0]).toBeNull();
-    expect(st.type[st.idx(2, 3)]).toBe(RACK);    // 架本体保留（两段式 pop）
-    // 第二击：空架正常破坏+架本体返还 2699（WeaponRack,ItemID.cs:6944）一次。
-    // 原版语义（亲读 ../Terarria1457）：334 不走 GetItemDrop（KillTile_GetItemDrops
-    // 共享 no-drop 组 case 334 WorldGen.cs:66406 → 共享 break）,返还走 CheckWeaponsRack
-    // 完整性支（:46796 → Item.NewItem(...,2699) :46855,TileFrameImportant case 334
-    // :86785-86788 派发）,destroyObject 旗 :46854 闭锁内层 KillTile 重入（:46798-46801
+    // 命中标记行中格（col1）——经 furnitureAnchor 归一到锚点记录。
+    // 原版语义（亲读 ../Terarria1457）：334 持武架【一击】双掉——KillTile_DropItems
+    // 对 334 只读帧掉武器【无 early return】（WorldGen.cs:64117-64165,武器
+    // Item.NewItem :64151+帧还原裸架 :64153-64156 后继续走完破坏链）,随后
+    // TileFrameImportant case 334（:86786）→ CheckWeaponsRack（:46796）→ 架体 2699
+    // Item.NewItem :46855,destroyObject 旗 :46854 闭锁内层 KillTile 重入（:46798-46801
     // 早退）= 恒一次。1.4.5.7 无物品 createTile=334（case 2699 Item.cs:26055 是
     // createTile=471）→ place_v_ 兜底不可达,由 v_334 def.drop=2699 直掉
-    // （multiTileDropKey 数字路径,见 multi-tile-drop.test.ts「legacy 武器架 334」describe）。
-    // ★差异备案：原版 334 持武架一击双掉（武器帧嵌读取 KillTile_DropItems :64122-64164
-    // 无 early return+架体 :46855 同击）;本仓与 471 共用两段式 pop 链（:64186-64195
-    // 471 early-return 同构）,物品集相同、架体多承一击——共享链不在此批动。
+    // （multiTileDropKey 数字路径）。两段式 pop 的 early-return 是 471 TE 专属
+    // （KillTile_DropItems :64186-64192 result3.DropItem()+return）——本仓已按
+    // furnitureTryBreak 的 tileType=334 特化对齐一击双掉（471 行为不动）。
     g.breakTile(3, 3, false);
     expect(drops).toEqual([
       { key: defKey(4), n: 1 },
       { key: vidKey(2699), n: 1 },
     ]);
+    expect(world.furnitureItems.find((f) => f.x === 2 && f.y === 2 && f.kind === 'weapon_rack')).toBeUndefined();
     expect(st.type[st.idx(2, 3)]).toBe(0);
   });
 
-  it('前缀格命中也能锚定（破坏 col1 → 同记录）', () => {
+  it('前缀格命中也能锚定（破坏 col1 → 同记录,一击双掉）', () => {
     const { world } = loadSaveData(save);
     const drops: Array<{ key: string; n: number }> = [];
     const g = breakShell(world, drops);
     g.breakTile(7, 3, false);   // rack B 前缀格
-    expect(drops).toEqual([{ key: defKey(3509), n: 1 }]);
+    expect(drops).toEqual([
+      { key: defKey(3509), n: 1 },
+      { key: vidKey(2699), n: 1 },
+    ]);
   });
 });

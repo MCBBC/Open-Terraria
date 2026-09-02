@@ -133,9 +133,11 @@ const cntB = new Int32Array(N).fill(-1);
       if (m && Number(m[1]) > 0) { x86 = { cnt: Number(m[1]), hash: Number(m[2]) >>> 0 }; break; }
     }
   }
+  // ★LJ 以「窗口域」打印值为准（上面 窗长Lj_main 行）;此处 Lj=主实例全程计数,非窗长——
+  //   曾误读为窗长导出假 δ=-747×40(重放 FNV 假不闭合),v4 起窗长只看 窗口域 行。
   const Lj = mainCnt - cnt0;
   const body = x86 ? x86.cnt - 1 : -1;
-  console.log(`[i181] 长度对拍: JS窗=${Lj} vs x86体=${body} δ=Lj−体=${Lj - body} ${Lj === body ? '✓流等长' : '✗'}`);
+  console.log(`[i181] 主实例全程=${Lj}(非窗长!) vs x86体=${body}`);
   console.log(`[i181] loopA总掷(JS)=cntB(20,20)−cnt0=${cntB[20 * W + 20] - cnt0} vs x86解析式243,792 → ΔloopA=${(cntB[20 * W + 20] - cnt0) - 243792}`);
   // 普适流重放校验 + 尾闭合
   const ur = new UnifiedRandom(Number(SEED));

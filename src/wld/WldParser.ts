@@ -25,6 +25,32 @@ export interface WldTileData {
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
 export interface WldNPC { spriteId: number; name: string; x: number; y: number; homeX: number; homeY: number; homeless: boolean; }
 
+/** TileEntities 段单件物品三元组（TE WriteExtraData 的 (short type, byte prefix, short stack)，
+ *  Item.prefix 为 byte——Item.cs:305） */
+export interface WldTeItem { vid: number; prefix: number; stack: number }
+
+/** TileEntities 段挂物家具条目（WorldFile.cs:3317-3327 写/:3330-3372 读；type byte =
+ *  TileEntitiesManager.RegisterAll 注册序（TileEntitiesManager.cs:26-39）：
+ *  0=训练假人 1=物品框 2=逻辑传感器 3=模特 4=武器架 5=帽架 6=食物盘 7=晶塔
+ *  8=展示罐 9=风筝桩 10=小动物桩。仅 1/3/4/5（挂物家具四类）落负载——
+ *  TE.Position 即物件左上锚（各 TE ValidTile 保证 frameY==0 且 frameX%带宽==0）；
+ *  其余类型按各自 ExtraData 布局消费跳过保持流对齐，计入 teSkipped */
+export interface WldTileEntity {
+  type: 1 | 3 | 4 | 5;
+  id: number;
+  x: number;
+  y: number;
+  /** type 4 武器架 / type 1 物品框 单槽
+   *  （TEWeaponsRack.cs:54-67 / TEItemFrame.cs:40-53 同构三元组） */
+  item?: WldTeItem | null;
+  /** type 3 模特：equip[9]+misc[1]+dyes[9]+pose
+   *  （TEDisplayDoll.cs:157-215 写/:217-278 读的持久化形状；pose=v307+，
+   *    misc 位图=v308+：bit0=misc[0] bit1=equip[8] bit2=dyes[8]） */
+  doll?: { equip: Array<WldTeItem | null>; misc: WldTeItem | null; dyes: Array<WldTeItem | null>; pose: number };
+  /** type 5 帽架：hat[2]+dye[2]（TEHatRack.cs:56-111，位图 bit0-1=hat bit2-3=dye） */
+  hat?: { hats: Array<WldTeItem | null>; dyes: Array<WldTeItem | null> };
+}
+
 export interface WldWorld {
   version: number;
   title: string;
@@ -103,6 +129,11 @@ export interface WldWorld {
   bgMushroom: number;
   bgUnderworld: number;
   bg10: number; bg11: number; bg12: number;
+  /** ★七批备案④-c（2026-09-02）：TileEntities 段（pointers[5]，v>=122 门 WF:1803-1821）
+   *  ——仅四类挂物家具（1/3/4/5）落负载；段不存在/版本旧/pointers 缺失=空数组（静默略过） */
+  tileEntities: WldTileEntity[];
+  /** TE 段中被消费跳过（非家具类）+ 未知 type 中止后放弃余段的条数 */
+  teSkipped: number;
 }
 
 export class WldParseError extends Error {}
@@ -480,6 +511,16 @@ export function parseWld(buf: Uint8Array): WldWorld {
     }
   }
 
+  // ---- TileEntities（★七批备案④-c：pointers[5] 段,v>=122 门；段不存在/pointers
+  //      缺位（第三方工具少写段）=静默略过,绝不影响前序段解析）----
+  const tileEntities: WldTileEntity[] = [];
+  let teSkipped = 0;
+  if (version >= 122 && pointers.length >= 7 && pointers[5] > 0 && pointers[6] > pointers[5]) {
+    const te = decodeTileEntities(r, version, pointers[5], pointers[6]);
+    tileEntities.push(...te.list);
+    teSkipped = te.skipped;
+  }
+
   return {
     worldId, caveBackStyle, iceBackStyle, jungleBackStyle, hellBackStyle,
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
@@ -490,9 +531,93 @@ export function parseWld(buf: Uint8Array): WldWorld {
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,
+    tileEntities, teSkipped,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,
   };
+}
+
+/** TileEntities 段解码（★七批备案④-c 2026-09-02）。
+ *  布局定谳（全部亲读 1.4.5.7 反编译源）：
+ *   - 段位=pointers[5]（SaveWorld_Version2 段序 WF:1156-1174：header/tiles/chests/
+ *     signs/npcs/TileEntities/pressurePlates/townManager/bestiary/creativePowers），
+ *     版本门= v>=122 走 LoadTileEntities（WF:1803-1821；116-121 旧档走 LoadDummies）；
+ *   - SaveTileEntities（WF:3317-3327）：i32 数量 × TileEntity.Write（TileEntity.cs:173-177：
+ *     type byte → WriteInner :188-197：ID i32（networkSend=false 恒写）+ X i16 + Y i16 +
+ *     WriteExtraData）；Load 侧 WF:3330-3345 同序读 + 同位后写覆盖（:3339-3342）+
+ *     越界/CheckValidTile 淘汰（:3349-3356）；
+ *   - TEType 序 = TileEntitiesManager.RegisterAll（TileEntitiesManager.cs:26-39），
+ *     ExtraData 逐类（写入序反向读）：
+ *      0 假人 short npc（TETrainingDummy.cs:119-127）
+ *      1 物品框 (short,byte,short)（TEItemFrame.cs:40-53）
+ *      2 逻辑传感器 byte+bool（TELogicSensor.cs:381-395，文件恒写）
+ *      3 模特 位图×2+[v307+]pose+[v308+]misc位图+三元组×N（TEDisplayDoll.cs:157-278；
+ *        v311 特例：equip[8] 移到 misc 之后读 :230-235/:271-277）
+ *      4 武器架 (short,byte,short)（TEWeaponsRack.cs:54-67）
+ *      5 帽架 位图(bit0-1=hat,bit2-3=dye)+三元组×N（TEHatRack.cs:56-111）
+ *      6 食物盘 (short,byte,short)（TEFoodPlatter.cs:41-46）
+ *      7 晶塔 无（TETeleportationPylon 无 WriteExtraData 覆写）
+ *      8 展示罐 (short,byte,short)（TEDeadCellsDisplayJar.cs:40-45）
+ *      9/10 风筝桩/小动物桩 无（TEKiteAnchor/TECritterAnchor 无覆写）
+ *  容错：未知 type 的 ExtraData 长度不可知（流无法重同步；vanilla GenerateInstance
+ *  返 null 会 NRE）→ 中止余段+计数；读越界 → 保已解析部分（本段在 npcs 之后，
+ *  失败不回波既有段）。 */
+function decodeTileEntities(r: BinaryReaderLE, version: number, start: number, end: number): { list: WldTileEntity[]; skipped: number } {
+  const list: WldTileEntity[] = [];
+  let skipped = 0;
+  try {
+    r.seek(start);
+    const total = r.i32();
+    // 单槽三元组（TEWeaponsRack/TEItemFrame/TEFoodPlatter/TEDeadCellsDisplayJar 同构）
+    const triplet = (): WldTeItem => ({ vid: r.i16(), prefix: r.byte(), stack: r.i16() });
+    const live = (it: WldTeItem): WldTeItem | null => (it.vid > 0 && it.stack > 0 ? it : null);
+    for (let i = 0; i < total; i++) {
+      if (r.pos > end) { skipped += total - i; break; }   // 脏 count 越段守卫（正常档恒不触发）
+      const teType = r.byte();
+      const teId = r.i32();
+      const tx = r.i16();
+      const ty = r.i16();
+      if (teType === 4 || teType === 1) {
+        list.push({ type: teType, id: teId, x: tx, y: ty, item: live(triplet()) });
+      } else if (teType === 3) {
+        const bEquip = r.byte();
+        const bDye = r.byte();
+        const pose = version >= 307 ? r.byte() : 0;
+        let b3 = 0;
+        let v311Tail = false;                  // v311 特例旗：equip[8] 移到 misc 之后
+        if (version >= 308) {
+          b3 = r.byte();
+          if (version === 311 && (b3 & 2)) { b3 &= ~2; v311Tail = true; }   // :231-235
+        }
+        const read9 = (lo: number, hiBit: number): Array<WldTeItem | null> => {
+          const mask = lo | (b3 & hiBit ? 256 : 0);
+          const out: Array<WldTeItem | null> = [];
+          for (let s = 0; s < 9; s++) out.push((mask >> s) & 1 ? live(triplet()) : null);
+          return out;
+        };
+        const equip = read9(bEquip, 2);        // bit1=equip[8]（v311 已清）
+        const dyes = read9(bDye, 4);           // bit2=dyes[8]
+        let misc: WldTeItem | null = null;
+        if (b3 & 1) misc = live(triplet());    // bit0=misc[0]
+        if (v311Tail) equip[8] = live(triplet());   // :271-277 尾读
+        list.push({ type: 3, id: teId, x: tx, y: ty, doll: { equip, misc, dyes, pose } });
+      } else if (teType === 5) {
+        const mask = r.byte();
+        const hats: Array<WldTeItem | null> = [];
+        for (let s = 0; s < 2; s++) hats.push((mask >> s) & 1 ? live(triplet()) : null);
+        const dyes: Array<WldTeItem | null> = [];
+        for (let s = 0; s < 2; s++) dyes.push((mask >> (s + 2)) & 1 ? live(triplet()) : null);
+        list.push({ type: 5, id: teId, x: tx, y: ty, hat: { hats, dyes } });
+      } else if (teType === 0) { r.i16(); skipped++; }                        // 假人 npc short
+      else if (teType === 2) { r.byte(); r.boolean(); skipped++; }            // 逻辑传感器
+      else if (teType === 6 || teType === 8) { triplet(); skipped++; }        // 食物盘/展示罐
+      else if (teType === 7 || teType === 9 || teType === 10) skipped++;      // 晶塔/风筝桩/小动物桩
+      else { skipped += total - i; break; }                                   // 未知 type → 余段放弃
+    }
+  } catch {
+    // 读越界（脏档/工具错写）——TE 段在 npcs 之后，保已解析部分即可（不回波既有段）
+  }
+  return { list, skipped };
 }
 
 /** tiles 段解码：列优先 + header 链 + RLE */

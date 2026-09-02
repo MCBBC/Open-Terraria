@@ -273,6 +273,31 @@ describe('挂物族：破坏链判定（WorldGen KillTile 前置特例）', () =
     rec.slots[0] = null;
     expect(furnitureTryBreak(list, 'display_doll', 0, 0).result).toBe('break');
   });
+
+  // ★七批备案④-c（2026-09-02）：legacy 334 一击双掉特化（tileType 第 5 参）。
+  //  原版：334 武器嵌帧（非 TE），KillTile_DropItems 读帧掉武器【无 early return】
+  //  （WorldGen.cs:64117-64165）→ CheckWeaponsRack :46855 架体 2699 同击；
+  //  471 两段式 pop 的 early-return（:64186-64192 result3.DropItem()+return）=TE 专属。
+  it('tileType=334（legacy 武器架）有物 → break+带出存物（一击双掉,调用方续碎架）;471 维持 pop', () => {
+    const list: FurnitureItemRecord[] = [];
+    furniturePlaceSingle(list, 'weapon_rack', 5, 5, { id: iid(VID.sword), stack: 1 }, VID.sword);
+    // 334：一击内带出武器（result='break'）——调用方落 object 路径碎架+def.drop 2699
+    const r334 = furnitureTryBreak(list, 'weapon_rack', 5, 5, TILE_BY_KEY['v_334_weapon_rack_legacy_do_not_use']!);
+    expect(r334.result).toBe('break');
+    expect(r334.item!.id).toBe(iid(VID.sword));
+    expect(list[0].slots[0]).toBeNull();          // 槽位已清,记录待破坏点移除
+    // 471：两段式 pop 不动（KillTile_DropItems :64186-64192 early-return 同构）
+    furniturePlaceSingle(list, 'weapon_rack', 10, 10, { id: iid(VID.sword), stack: 1 }, VID.sword);
+    const r471 = furnitureTryBreak(list, 'weapon_rack', 10, 10, TILE_BY_KEY['v_471_weapon_rack']!);
+    expect(r471.result).toBe('pop');
+    expect(r471.item!.id).toBe(iid(VID.sword));
+    // 不传 tileType（旧调用方/旧测试）= 维持原两段式判定,零行为漂移
+    furniturePlaceSingle(list, 'weapon_rack', 20, 20, { id: iid(VID.sword), stack: 1 }, VID.sword);
+    expect(furnitureTryBreak(list, 'weapon_rack', 20, 20).result).toBe('pop');
+    // 334 空架：break 无存物（object 路径 2699 照旧）
+    expect(furnitureTryBreak(list, 'weapon_rack', 5, 5, TILE_BY_KEY['v_334_weapon_rack_legacy_do_not_use']!))
+      .toEqual({ result: 'break', item: null });
+  });
 });
 
 describe('挂物族：存档往返（serialize furniture 段 + 稳定 id 映射）', () => {

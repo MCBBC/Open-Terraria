@@ -36,7 +36,8 @@ await p.evaluate(() => {
   if (btn) btn.click();
 });
 
-const scene = await p.evaluate(async () => {
+const STYLE = Number(process.env.SW_TOMB_STYLE ?? 0);   // ★style≠0 才暴露锚 %2 缺失
+const scene = await p.evaluate(async (style) => {
   const g = window.__swGame;
   const T = await import('/src/data/tiles.ts');
   const st = g.world.store;
@@ -46,25 +47,38 @@ const scene = await p.evaluate(async () => {
   for (let y = 10; y < g.world.h - 10; y++) { if (st.isSolid(bx + 1, y)) { sy = y; break; } }
   const top = sy - 2;
   for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-    st.setTileSilent(bx + dx, top + dy, tid, dx * 18, dy * 18);
+    st.setTileSilent(bx + dx, top + dy, tid, style * 36 + dx * 18, dy * 18);
   }
   g.world.signs.push({ x: bx, y: top, text: 'Vinlic被腰斩了，凶手是史莱姆王。\n2026年8月31日' });
   g.player.x = (bx - 3) * 16; g.player.y = (sy - 3) * 16; g.player.vx = 0; g.player.vy = 0;
   g.renderer.fullbright = true;
-  window.__tombPos = { bx, top, sy };
+  window.__tombPos = { bx, top, sy, style };
   return window.__tombPos;
-});
+}, STYLE);
 console.log('scene:', JSON.stringify(scene));
 await sleep(1500);
-// 把鼠标挪到墓碑上(屏坐标由相机算)
+// 把鼠标挪到墓碑上(屏坐标由相机算)——★悬停右列格(最坏列)非锚格
 const scr = await p.evaluate(() => {
   const g = window.__swGame;
   const cam = g.renderer?.camera ?? g.camera;
-  return { sx: Math.round((__tombPos.bx * 16 + 16 - cam.x) * (cam.zoom ?? 1) + innerWidth / 2), sy: Math.round((__tombPos.top * 16 + 16 - cam.y) * (cam.zoom ?? 1) + innerHeight / 2) };
+  return { sx: Math.round((__tombPos.bx * 16 + 24 - cam.x) * (cam.zoom ?? 1) + innerWidth / 2), sy: Math.round((__tombPos.top * 16 + 8 - cam.y) * (cam.zoom ?? 1) + innerHeight / 2) };
 });
 console.log('screen:', JSON.stringify(scr));
 await p.mouse.move(scr.sx, scr.sy);
 await sleep(1200);
+const hoverState = await p.evaluate(() => {
+  const g = window.__swGame;
+  const cam = g.renderer?.camera ?? g.camera;
+  const r = g.renderer;
+  const expX = Math.round((__tombPos.bx * 16 + 16 - cam.x) * (cam.zoom ?? 1) + innerWidth / 2);
+  return {
+    signHoverText: r.signHoverText ? r.signHoverText.slice(0, 18) : '',
+    bubble: r.signBubbleScreen,
+    bubbleExpectedX: expX,                       // 锚右缘屏 x(泡=+8)
+    drift: r.signBubbleScreen ? r.signBubbleScreen.x - expX : null,
+  };
+});
+console.log('hoverState:', JSON.stringify(hoverState));
 const log = await p.evaluate(() => window.__tombLog.slice(0, 12));
 console.log('fillText log:', JSON.stringify(log, null, 1));
 await p.screenshot({ path: '/tmp/tomb-hover.png' });

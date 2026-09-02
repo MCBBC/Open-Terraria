@@ -91,6 +91,72 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     expect(known.length / seen.size).toBeGreaterThanOrEqual(0.95);
   });
 
+  it('运行时直调面 tex 金标（extract-gore EXTRA_TEX_FAMILIES，83 id）：{w,h}=贴图 IHDR 实测', () => {
+    // 32px 回退清偿（2026-09-02 十批备案）：原 _meta.tex 只含 HitEffect 表内 id，
+    // GorePiece.newGore 的非 HitEffect 调用点（罐破/二段跳/药水 Kill/弹 Kill/BOSS
+    // 演出）全部落 Gore.cs:999 的 32px 回退盒。钉值 = 本仓 Gore_<id>.png IHDR，
+    // 已与 terraria-assets/Images/Gore_<id>.png（原版 XNB 提取）逐 id 实测零偏差。
+    // 引文：罐瓦砾 WorldGen.cs:57358-57427；火苗 NewGore :1487-1490 + Player.cs:45182；
+    // 沙暴 Player.cs:22102；心 Projectile.cs:78898；克脑 NPC.cs:32658-32661；
+    // 气泡 Player.cs:45438-45459；骨尘 Player.cs:21030/Projectile.cs:78915；
+    // 猪鲨 NPC.cs:72721-72724；毒瓶 Projectile.cs:75096；DD2 Projectile.cs:36999；
+    // 火溅 Projectile.cs:72044-72047；微光变体 NPC.cs:89207/:89209（idAlt 面）。
+    const tex = (goreJson as unknown as { _meta: { tex: Record<string, { w: number; h: number }> } })._meta.tex;
+    const want: Record<number, [number, number]> = {
+      16: [22, 24], 17: [22, 24],
+      51: [18, 16], 52: [14, 16], 53: [16, 20],
+      166: [20, 12], 167: [12, 16], 168: [12, 16], 169: [20, 14], 170: [12, 16],
+      171: [12, 18], 172: [16, 14], 173: [12, 16], 174: [12, 14],
+      197: [16, 12], 198: [12, 16], 199: [14, 18], 200: [12, 20],
+      201: [22, 16], 202: [18, 12], 203: [20, 12], 204: [14, 16],
+      217: [18, 20], 218: [16, 20], 219: [22, 20],
+      220: [38, 36], 221: [34, 36], 222: [36, 32],
+      315: [16, 30], 316: [12, 24],
+      331: [14, 14],
+      392: [40, 44], 393: [38, 44], 394: [32, 26], 395: [32, 28],
+      411: [10, 10], 412: [20, 20], 413: [32, 32], 414: [48, 48], 415: [64, 64],
+      416: [10, 10], 417: [20, 20], 418: [32, 32], 419: [48, 48], 420: [64, 64],
+      421: [10, 10], 422: [20, 20], 423: [32, 32], 424: [48, 48], 425: [64, 64],
+      426: [10, 10], 427: [20, 20], 428: [32, 32], 429: [48, 48], 430: [64, 64],
+      435: [34, 36], 436: [38, 36], 437: [36, 32],
+      619: [30, 42], 620: [34, 42], 621: [32, 38], 622: [32, 44],
+      698: [12, 14], 699: [12, 12], 700: [10, 12], 701: [14, 16],
+      702: [16, 18], 703: [16, 18],
+      704: [8, 10], 705: [10, 14],
+      1027: [22, 18], 1028: [14, 16], 1029: [16, 20], 1030: [18, 18],
+      1122: [20, 24], 1123: [14, 20], 1124: [12, 16],
+      1351: [24, 24], 1352: [38, 24],
+      1394: [10, 14], 1395: [10, 16], 1396: [16, 12], 1397: [16, 18],
+    };
+    for (const [id, [w, h]] of Object.entries(want)) {
+      expect(tex[Number(id)], `gore ${id}`).toEqual({ w, h });
+    }
+    // 直调面登记数与 _meta 账面一致（81 入 EXTRA_TEX_FAMILIES + 1351/1352 走 idAlt 面）
+    const meta = (goreJson as unknown as { _meta: { texExtraCount: number } })._meta;
+    expect(meta.texExtraCount).toBe(81);
+  });
+
+  it('1457 语义钉补（extract-gore MANUAL_1457_DELTAS）：发型师头块变体 1351/1352、独角兽 alpha 继承', () => {
+    // 提取锚保持 1456（line 域=1456 行号），1457 终值定点覆写并保证重产幂等：
+    // 1456 :89135 `IsShimmerVariant ? 1353 : 544` → 1457 :89207 `? 1351 : 544`
+    // 1456 :89139 `if (!IsShimmerVariant) NewGore(543)` → 1457 :89209 无条件
+    //   `IsShimmerVariant ? 1352 : 543`（shim 门移除、变体改 idAlt 承载）
+    for (const id of [353, 354]) {
+      const e544 = npcEntries(id).find((x) => x.id === 544);
+      const e543 = npcEntries(id).find((x) => x.id === 543);
+      expect(e544?.idAlt).toBe(1351);
+      expect(e543?.idAlt).toBe(1352);
+      expect(e543?.gates).toBeUndefined();
+    }
+    // 1456 :86351 裸 NewGore → 1457 :86422 NewGoreDirect + gore.alpha = alpha
+    const e121 = npcEntries(121)[0];
+    expect(e121.post).toContainEqual(['al', 'npc']);
+    // 微光变体消费面：idAlt 1351/1352 有贴图尺寸（表内 idAlt 亦入 tex 面）
+    const tex = (goreJson as unknown as { _meta: { tex: Record<string, unknown> } })._meta.tex;
+    expect(tex[1351]).toEqual({ w: 24, h: 24 });
+    expect(tex[1352]).toEqual({ w: 38, h: 24 });
+  });
+
   it('钉死锚点：僵尸 3 = 头 3 + 臂 4×2 + 腿 5×2（NPC.cs:88034-88039）', () => {
     const e = npcEntries(3);
     expect(e.map((x) => x.id)).toEqual([3, 4, 4, 5, 5]);
@@ -292,6 +358,30 @@ describe('② GorePiece 物理（Gore.cs 1:1）', () => {
     const p = GorePiece.newGore(4, -100, -100, 0, 0, 1)!;
     p.fixedUpdate(1, game);
     expect(p.dead).toBe(true);
+    resetGorePool();
+  });
+
+  it('直调面 tex 消费：盒 = min(w,h)*0.9*scale（Gore.cs:999-1014），不再落 32px 回退', () => {
+    resetGorePool();
+    // 罐瓦砾 51（18×16，WorldGen.cs:57358）→ floor(16*0.9)=14（回退档曾是 32）
+    const pot = new GorePiece(51, 0, 0, 1);
+    expect([pot.texW, pot.texH]).toEqual([18, 16]);
+    expect(pot.w).toBe(14);
+    expect(pot.h).toBe(14);
+    // 火苗 16（22×24）：NewGore 置 scale=0.7 → floor(22*0.9*0.7)=13
+    const fire = GorePiece.newGore(16, 0, 0, 0, 0, 1)!;
+    expect([fire.texW, fire.texH]).toEqual([22, 24]);
+    expect(fire.w).toBe(13);
+    // 毒瓶玻璃 704（8×10，Projectile.cs:75096）→ floor(8*0.9)=7
+    expect(new GorePiece(704, 0, 0, 1).w).toBe(7);
+    // 气泡 413（32×32）：与 BUBBLE_TEX 兜底档同值 → floor(32*0.9)=28
+    expect(new GorePiece(413, 0, 0, 1).w).toBe(28);
+    // 爱情药水心 331（14×14，Projectile.cs:78898）→ floor(14*0.9)=12
+    expect(new GorePiece(331, 0, 0, 1).w).toBe(12);
+    // 克脑血块 392（40×44，NPC.cs:32658）→ floor(40*0.9)=36
+    expect(new GorePiece(392, 0, 0, 1).w).toBe(36);
+    // 微光变体头块 1352（38×24，NPC.cs:89209）→ floor(24*0.9)=21
+    expect(new GorePiece(1352, 0, 0, 1).w).toBe(21);
     resetGorePool();
   });
 });

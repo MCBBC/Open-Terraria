@@ -243,3 +243,138 @@ describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
     expect(c.dusts.filter((x) => x.type === 92)).toHaveLength(10);
   });
 });
+
+// ---- ★Kill 消亡面清偿批 2（2026-09-02）金标：1097 音尘+拆弹 / 640 延迟计数 /
+//      aiStyle10 放块表全表 / Collision.HitTiles 砖屑面 ----
+describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
+  it('⑦ 1097：Item_20 + 6×d6；ai[1]==1 → 拆 8 枚同型 1097（伤/2、kb/2、ai1=2、foxL0 预置、scale 0.7）；缺省 ai1=0 恒不拆', () => {
+    const dusts: DustRec[] = [];
+    const bucket: Array<Record<string, unknown>> = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const sfx1: string[] = [];
+    (game as unknown as { playSfxFile: (n: string) => void }).playSfxFile =
+      (n: string) => { sfx1.push(n); };
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 1097, null, { grav: 0 });
+    kill(a, game);
+    expect(sfx1).toEqual(['Item_20']);
+    expect(dusts.filter((d) => d.type === 6)).toHaveLength(6);
+    expect(bucket).toHaveLength(0);                          // 缺省 ai[1]=0 → 拆弹支 dormant
+    // 拆弹档（1113 生成端注入 ai[1]=1 后即活;本测直接置镜像字段）
+    const dusts2: DustRec[] = [];
+    const bucket2: Array<Record<string, unknown>> = [];
+    const game2 = makeGame(emptyWorld(), dusts2, bucket2);
+    const b = new Arrow(400, 300, 6, 0, 30, 1, 1097, null, { grav: 0 });
+    (b as unknown as { foxAi1: number }).foxAi1 = 1;
+    kill(b, game2);
+    expect(bucket2).toHaveLength(8);
+    for (const c of bucket2) {
+      expect(c.projId).toBe(1097);                           // 同型 1097（:75787）
+      expect(c.damage).toBe(15);                             // damage/2（int 除）
+      expect(c.knockback).toBe(0.5);                         // knockBack/2
+      expect(c.foxAi1).toBe(2);                              // ai[1]=2（:75788）
+      expect(c.foxL0).toBe(1);                               // 免首拍音尘（:57515 ai[1]!=2 门）
+      expect(c.drawScale).toBe(0.7);                         // scale 钳（:57566-57568）
+      const sp = Math.hypot(c.vx as number, c.vy as number);
+      expect(sp).toBeGreaterThanOrEqual(6 - 3 - 1e-9);       // 旋转保速 + 线性盘 ±3
+      expect(sp).toBeLessThanOrEqual(6 + 3 + 1e-9);
+    }
+    const xs = new Set(bucket2.map((c) => (c.vx as number).toFixed(3)));
+    expect(xs.size).toBeGreaterThan(1);                      // ±34° 内随机旋转（:75787）
+  });
+
+  it('⑧ 640 延迟计数：639 Kill num391=life+2（+1 与同轮补偿）；消费面=整子步冻结（life/x/alpha 不动）→ 解冻后一拍追平', () => {
+    const dusts: DustRec[] = [];
+    const bucket: Array<Record<string, unknown>> = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 639, null, { grav: 0, life: 600 });
+    for (let i = 0; i < 2 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
+    const lifeAtKill = (a as unknown as { life: number }).life;
+    kill(a, game);
+    const c640 = bucket.find((e) => e.projId === 640) as unknown as { ai1Delay: number } | undefined;
+    expect(c640).toBeDefined();
+    expect(c640!.ai1Delay).toBe(lifeAtKill + 2);             // num391（:74826+:74828-74830）
+    // 消费面（Update 环 :16784-16787 同构）：EU=3（opts 显式,json 缺列已补）→ 4 子步/拍
+    const dusts2: DustRec[] = [];
+    const game2 = makeGame(emptyWorld(), dusts2);
+    const f = new Arrow(400, 300, 6, 0, 30, 1, 640, null, { grav: 0, extraUpdates: 3 });
+    (f as unknown as { ai1Delay: number }).ai1Delay = 4;
+    const life0 = (f as unknown as { life: number }).life;
+    f.fixedUpdate(1 / 60, game2);                            // 冻结拍：4 子步全 continue
+    expect((f as unknown as { life: number }).life).toBe(life0);
+    expect(f.x).toBe(400);
+    expect(f.alpha).toBe(255);                               // 渐显也冻结（α −25/子步被跳）
+    f.fixedUpdate(1 / 60, game2);                            // 解冻拍：4 子步全跑
+    expect((f as unknown as { life: number }).life).toBe(life0 - 4);
+    expect(f.x).toBeCloseTo(424, 6);                         // vx=6 × 4 子步
+    expect(f.alpha).toBe(155);                               // 255 − 25×4
+  });
+
+  it('⑨ 放块表新行：412 → tile 331 银币堆（空格）/ 格被占 → 兜底件 vi_72 ×1；40 → tile 57 黏土', () => {
+    const w = emptyWorld();
+    const silverPile = TILE_INTERNAL_BY_SHEET.get(331)!;
+    const clay = TILE_INTERNAL_BY_SHEET.get(57)!;
+    const drops: Array<[number, number, string, number]> = [];
+    const a = mkDeathGame({ world: w });
+    (a.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    (a.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
+    a.g.onProjectileDeath(412, 30 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(30, 189)).toBe(silverPile);           // 银币堆落格（:79191-79194）
+    expect(drops).toHaveLength(0);
+    const b = mkDeathGame({ world: w });
+    (b.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    (b.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
+    w.store.setTileSilent(32, 189, silverPile, 0, 0);        // 格已占
+    b.g.onProjectileDeath(412, 32 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(32, 189)).toBe(silverPile);           // 被占不变
+    expect(drops).toHaveLength(1);
+    expect(drops[0][2]).toBe('vi_72_SilverCoin');            // num18=72（ItemID.SilverCoin）
+    expect(drops[0][3]).toBe(1);                             // RequestNewItem 缺省 ×1
+    const c = mkDeathGame({ world: w });
+    (c.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    c.g.onProjectileDeath(40, 34 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(34, 189)).toBe(clay);                 // 黏土球 → 黏土（:79183-79186）
+  });
+
+  it('⑨ 109 雪球：近距（≤1440）→ tile 147 雪；过远（>MaxWorldViewSize.X×0.75）→ 不放+掉 593', () => {
+    const w = emptyWorld();
+    const snow = TILE_INTERNAL_BY_SHEET.get(147)!;
+    const drops: Array<[number, number, string, number]> = [];
+    const near = mkDeathGame({ world: w });
+    (near.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    near.g.player = { dead: false, cx: 404, cy: 3012, x: 394, y: 2991, w: 20, h: 42 };
+    near.g.onProjectileDeath(109, 25 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(25, 189)).toBe(snow);                 // 近距 ≤1440 → 放雪块（:79209-79211）
+    const far = mkDeathGame({ world: w });
+    (far.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    (far.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string, n: number) => { drops.push([x, y, key, n]); };
+    far.g.onProjectileDeath(109, 25 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(25, 189)).toBe(0);                    // 过远不放（num17=-1）
+    expect(drops).toHaveLength(1);
+    expect(drops[0][2]).toBe('vi_593_snow_block');           // num18=593（:79217-79218）
+  });
+
+  it('⑩ HitTiles 面（660 冒烟）：命中格撒 tile 色系尘 3 粒（mapColor、格心锚）；悬空消亡不撒', () => {
+    const w = emptyWorld();
+    const stone = TILE_INTERNAL_BY_SHEET.get(1);
+    expect(stone).toBeDefined();
+    w.store.setTileSilent(25, 188, stone!, 0, 0);
+    const parts: Array<[number, number, string, number]> = [];
+    const hit = mkDeathGame({ world: w });
+    (hit.g as unknown as Record<string, unknown>).spawnParticles =
+      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
+    hit.g.onProjectileDeath(660, 25 * TILE, 188 * TILE - 10, 10, 10, 0, 4, 20, {});
+    expect(parts).toHaveLength(1);                           // 1 命中格 × GetTileDustAmount(fail)=3
+    expect(parts[0][3]).toBe(3);
+    expect(parts[0][0]).toBe(25 * TILE + 8);                 // 格心锚
+    expect(parts[0][1]).toBe(188 * TILE + 8);
+    const miss = mkDeathGame({ world: w });
+    (miss.g as unknown as Record<string, unknown>).spawnParticles =
+      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
+    const n0 = parts.length;
+    miss.g.onProjectileDeath(660, 60 * TILE, 60 * TILE, 10, 10, 0, 4, 20, {});   // 空域
+    expect(parts.length).toBe(n0);
+  });
+});

@@ -1,6 +1,8 @@
 // .wld → 自有存档格式转换（导入后即可进入游戏）
 // tile/wall/item 的 id 映射基于 Terraria 1.4 的事实数据；未映射内容做可玩性降级。
 import { parseWld, WldWorld } from './WldParser';
+import type { WldTeItem, WldTileEntity } from './WldParser';
+import { furnitureSlotCount, type FurnitureKind } from '../world/FurnitureItems';
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { CHEST_MAX_ITEMS } from '../world/World';
@@ -445,6 +447,18 @@ export interface CompatReport {
 }
 export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport; seedText: string; gameMode: number }
 
+/** ★七批备案④-c（2026-09-02）：TileEntities 段挂物家具还原规格表——TE type byte
+ *  （TileEntitiesManager.RegisterAll 序,TileEntitiesManager.cs:26-39）→ 本仓 kind。
+ *  band = 各 TE ValidTile 的锚帧判据带宽（frameX%band==0 且 frameY==0）：
+ *   471/475 → 54（TEWeaponsRack.cs:36 / TEHatRack.cs:409）
+ *   395/470 → 36（TEItemFrame.cs:33 / TEDisplayDoll.cs:858） */
+const TE_KIND_SPECS: ReadonlyArray<{ te: 1 | 3 | 4 | 5; key: string; kind: FurnitureKind; band: number }> = [
+  { te: 4, key: 'v_471_weapon_rack', kind: 'weapon_rack', band: 54 },
+  { te: 1, key: 'v_395_item_frame', kind: 'item_frame', band: 36 },
+  { te: 3, key: 'v_470_mannequins', kind: 'display_doll', band: 36 },
+  { te: 5, key: 'v_475_hat_rack', kind: 'hat_rack', band: 54 },
+];
+
 /** Chest.IsLocked（Chest.cs:295-310）帧区间判定：tile21 六段锁定带 + tile467
  *  style13（沙漠锁箱）。导入侧按锚帧推导 locked 旗——QuickStacking/vanillaRecipes/
  *  Extractinator 三处把 c.locked 当门（R21-chest §5 偏差②的导入面）。 */
@@ -629,6 +643,61 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       if (x + 1 < w && type[i + 1] === RACK334) frameX[i + 1] = base + 18;
     }
     if (rackDecodeFail > 0) warnings.push(`${rackDecodeFail} 个武器架持武帧标记损坏已清除`);
+  }
+
+  // ★七批备案④-c（2026-09-02）：TileEntities 段挂物家具还原（471 武器架/395 物品框/
+  //  470 模特/475 帽架）。原版链（WorldFile.cs:3330-3372 LoadTileEntities）：读段 →
+  //  同位去重（:3339-3342 后写覆盖前者）→ InWorld/CheckValidTile 淘汰（:3349-3356）。
+  //  各 TE 的 ValidTile 保证 Position 即物件左上锚（帧锚判据见 TE_KIND_SPECS 注）。
+  //  导入侧镜像同判据（tile 映射后内部 id 一致 + frameY==0 + frameX%band==0）→
+  //  物化 furnitureSave 记录（kind 槽位模型与 serialize furniture 段同构；vid→key→
+  //  内部 id 映射同上 334 链）。槽位对表（FurnitureItems.ts 头注布局）：
+  //    模特 19 槽 = equip[9]→0..8 + misc[1]→9 + dyes[9]→10..18（TEDisplayDoll.cs:157-278）
+  //    帽架 4 槽 = hat[2]→0..1 + dye[2]→2..3（TEHatRack.cs:56-111）
+  //    框/架 1 槽 = item→0
+  //  脱节/未映射物品 → 跳过计数（原版淘汰面同源），不造幽灵物品。
+  if (wld.tileEntities.length) {
+    const teByPos = new Map<number, WldTileEntity>();
+    for (const te of wld.tileEntities) teByPos.set(te.y * w + te.x, te);   // 同位后者覆盖（WF:3339-3342）
+    const mapTeItem = (it: WldTeItem | null | undefined): { id: number; stack: number; prefix?: number } | null => {
+      if (!it || it.vid <= 0) return null;
+      const key = VANILLA_ITEM_KEY_BY_ID[it.vid];
+      const iid = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+      if (iid === undefined) {
+        bump(itm, it.vid);          // 未收录物品：与 chests/334 同口径登记（itemsSkipped）
+        return null;
+      }
+      // TE 槽位 stack 恒为放置单件（TryPlacing stack=1）；钳制防御脏档
+      return { id: iid, stack: Math.max(1, Math.min(999, it.stack)), ...(it.prefix > 0 ? { prefix: it.prefix } : {}) };
+    };
+    let teInvalid = 0;
+    for (const te of teByPos.values()) {
+      const spec = TE_KIND_SPECS.find((s) => s.te === te.type);
+      if (!spec) continue;
+      const tid = TILE_BY_KEY[spec.key];
+      const ai = te.y * w + te.x;
+      if (tid === undefined || type[ai] !== tid || frameY[ai] !== 0 || frameX[ai] % spec.band !== 0) {
+        teInvalid++;
+        continue;
+      }
+      const slots: NonNullable<SaveData['furniture']>[number]['slots'] = new Array(furnitureSlotCount(spec.kind)).fill(null);
+      const put = (i: number, it: WldTeItem | null | undefined) => {
+        const m = mapTeItem(it);
+        if (m) slots[i] = m;
+      };
+      if (te.item) put(0, te.item);
+      if (te.doll) {
+        te.doll.equip.forEach((it, i) => put(i, it));
+        put(9, te.doll.misc);
+        te.doll.dyes.forEach((it, i) => put(10 + i, it));
+      }
+      if (te.hat) {
+        te.hat.hats.forEach((it, i) => put(i, it));
+        te.hat.dyes.forEach((it, i) => put(2 + i, it));
+      }
+      if (slots.some(Boolean)) furnitureSave.push({ x: te.x, y: te.y, kind: spec.kind, slots });
+    }
+    if (teInvalid > 0) warnings.push(`${teInvalid} 个挂物家具 TE 与地形脱节已跳过`);
   }
 
   // 宝箱：转内部格式（锚点 + 战利品）。

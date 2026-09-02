@@ -156,11 +156,17 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState,
     let tries = 0;
     let x = rng.int(200, st.w - 201);
     let y = rng.int(minY, maxY - 1);
+    // ★IIIII186 remix y 覆写重掷（1457/1458 cs:17844-17847≡同号,重试支 cs:17852-17855）：
+    //   y 先按通用域掷一次——remix 下**被弃 y 是活掷**（#64/#65 判例：先掷后覆写）,
+    //   remix 再按浅带 Next((int)Main.worldSurface+25,(int)Main.rockLayer) 覆写。JS 整缺
+    //   此臂 → 每 pick 少 1 骰且 remix 选点带错（应在 ws+25..rock 浅带,JS 恒走中深带）
+    if (gs.seedFlags.remix) y = rng.int(gs.worldSurface + 25, gs.rockLevel - 1);
     let c = countTiles(st, x, y, false, true);
     while ((c.count >= 1500 || c.count < 10) && tries < 500) {
       tries++;
       x = rng.int(200, st.w - 201);
       y = rng.int(minY, maxY - 1);
+      if (gs.seedFlags.remix) y = rng.int(gs.worldSurface + 25, gs.rockLevel - 1);
       c = countTiles(st, x, y, false, true);
     }
     if (tries >= 500) continue;
@@ -170,6 +176,32 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState,
     else if (c.lava > 0) wallType = 79;                   // 岩浆腔：黑曜石背墙
     else wallType = [59, 61, 170, 171][rng.nextInt(4)];   // 石腔：洞穴墙四选
     spreadWall(st, x, y, wallType);
+  }
+  // ---- ★IIIII186 remix 第二段（1457/1458 cs:17908-17931≡同号,整段补移植）----
+  //  remixWorldGen 专属循环 w*0.04 次：y 域 Next((int)Main.rockLayer, Main.maxTilesY-350)
+  //  （深带,无通用前置掷/无重试覆写）;受理门 `num6<500 && iceCount==0 && lavaCount==0 &&
+  //  sandCount==0`（三计数=末次 countTiles 静态,cs:9503-9507 每次 countTiles 头清零,
+  //  lavaOk=true 下岩浆只累加不封顶）→ wallType=Next(2)!=0?63:2 Spread.Wall。
+  //  JS 曾整段缺失 → remix 深带墙 63/2 全缺（#67 W 差副源）。
+  if (gs.seedFlags.remix) {
+    const maxYR = st.h - 350;
+    const n3 = Math.floor(st.w * 0.04);
+    for (let j = 0; j < n3; j++) {
+      gp?.set3(j / Math.max(1, n3), 0, 0.8);   // 进度锚：原版 num5*0.66（重用主段估锚）
+      let tries = 0;
+      let x = rng.int(200, st.w - 201);
+      let y = rng.int(gs.rockLevel, maxYR - 1);
+      let c = countTiles(st, x, y, false, true);
+      while ((c.count >= 1500 || c.count < 10) && tries < 500) {
+        tries++;
+        x = rng.int(200, st.w - 201);
+        y = rng.int(gs.rockLevel, maxYR - 1);
+        c = countTiles(st, x, y, false, true);
+      }
+      if (tries < 500 && c.ice === 0 && c.lava === 0 && c.sand === 0) {
+        spreadWall(st, x, y, rng.nextInt(2) !== 0 ? 63 : 2);
+      }
+    }
   }
   // ---- 次段（cs:17920-17946）：w*0.02 次，丛林墙(64)腔刷泥墙 15（Spread.Wall2） ----
   //  生成期墙面无 crafted 屋墙（wallHouse 恒 false），cs:17940 条件等价于

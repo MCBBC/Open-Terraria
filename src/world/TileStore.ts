@@ -252,6 +252,23 @@ export class TileStore {
     }
   }
 
+  /** 原版 tile.active(false) 等价：仅失活（清 active 位+half/slope），**保留 type 字段**
+   *  ——产生幽灵格（inactive 但 type≠0）。vanilla worldgen 的 cave-carving/KillTile
+   *  多数路径走此形态而非硬清 type（Collision.WetCollision/GERunner 等裸读 type 的
+   *  消费者依赖此残型）。★2026-08-31 幽灵保域批核心原语。 */
+  deactivateTile(x: number, y: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.flags[i] = 0;                            // active(false)
+    this.half[i] = 0;                             // halfBrick(false)（KillTile 标准尾）
+    this.slope[i] = 0;                            // slope(false)
+    this.paint[i] = 0;                            // ClearBlockPaintAndCoating（Tile.cs:934-39）
+    this.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
+    // type[i] 不动 ← 幽灵格核心语义
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: 0, fx: 0, fy: 0 });
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
   setWall(x: number, y: number, wall: number) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);

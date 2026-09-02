@@ -37,7 +37,15 @@
 //   { "_meta": {...含 tex 尺寸表}, "<npcId>": [ { id|idAlt|idMin/idMax|ids, n?, vx?, vy?, velExpr?,
 //      scale?, scaleExpr?, posExpr?, expr?, ai?, gates?, post?, line } , ... ] }
 // velocity=velocity（缺省）表示继承 NPC 当前速度；NewGore 自带随机扰动（Gore.cs:1347-1348）
-// 是运行时行为不进表。tex 尺寸供运行时碰撞盒 min(w,h)*0.9*scale（Gore.cs:1000-1012）。
+// 是运行时行为不进表。tex 尺寸供运行时碰撞盒 min(w,h)*0.9*scale（1456 :1000-1012 /
+// 1457 :999-1014：num36=32 回退 → TextureAssets.Gore[type].Width()/Height() 取小）。
+//
+// 提取锚保持 Terarria1456（全表 line 域=1456 行号，金标测试钉 :84540/:84554/:83038
+// 等，不可整表换 1457——那会把 553 条 line 平移 ~+71）；1457 语义 delta 由
+// MANUAL_1457_DELTAS 定点覆写（发型师 353/354 头块微光变体重排 1351/1352 + 独角兽
+// 121 alpha 继承；1458 的 HitEffect 与 1457 逐字节一致 ：82492-:90939，无新增 delta）。
+// tex 真值面 = HitEffect 表内 id ∪ EXTRA_TEX_FAMILIES（运行时直调面：罐瓦砾 34/
+// 火苗 16-17/气泡 411-430 等【非 HitEffect 出点】——缺面曾落 32px 回退盒、停靠点偏高）。
 //
 // 用法：node tools/extract-gore.mjs [--audit]   （--audit = 只输出诊断 JSON，不落盘）
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -1527,6 +1535,40 @@ for (const [npcId, list] of Object.entries(MANUAL_PATCHES)) {
   entries.get(+npcId).push(...list);
 }
 
+// ============ 1457 语义钉补（提取锚 1456 + 1457 终值定点覆写） ============
+// 盘上 vanilla-gore.json 自 2026-08-23 基准切换起 carry 1457 语义钉补（此前为盘上
+// 手补，重产会静默回退 1456 语义并炸金标——现收编为提取器一层，保证重产幂等）。
+// 1458 的 HitEffect 与 1457 逐字节一致（:82492-:90939），无新增 delta。
+//
+// ① 发型师 353/354 头部碎块微光变体重排（1456 :89133-89139 → 1457 :89204-89209）：
+//    1456: `if (altTexture == 0) NewGore(IsShimmerVariant ? 1353 : 544)` +
+//          `if (!IsShimmerVariant) NewGore(543)`（543 带 shim 门、无变体 id）
+//    1457: `IsShimmerVariant ? 1351 : 544`（:89207）+ `IsShimmerVariant ? 1352 : 543`
+//          （:89209，无条件调用，变体改由 idAlt 承载）——金标断言门集不再含 'shim'
+//    （546/545 两对 1353/1354 两版同值，不动；line 钉 1457 调用行，1456 行见括号）
+// ② 独角兽 121 死亡血块继承 NPC 透明度（1456 :86351 裸 NewGore，无 alpha 携带 →
+//    1457 :86422 `gore2 = Gore.NewGoreDirect(...)` + `gore2.alpha = alpha`）：
+//    表现 = post 增 `al:'npc'`（GorePiece.applyPost 已实现该 op）
+function applyManual1457Deltas(entries) {
+  for (const npcId of [353, 354]) {
+    const list = entries.get(npcId);
+    if (!list) continue;
+    for (const e of list) {
+      if (e.id === 544) { e.idAlt = 1351; e.line = 89207; }             // 1456 :89135
+      else if (e.id === 543) { delete e.gates; e.idAlt = 1352; e.line = 89209; }   // 1456 :89139
+    }
+  }
+  const l121 = entries.get(121);
+  for (const e of l121 ?? []) {
+    if (e.id === 94) {
+      if (!e.post?.some((op) => op[0] === 'al')) (e.post ??= []).push(['al', 'npc']);
+      e.line = 86422;                                                   // 1456 :86351
+      e.note1457 = 'NewGoreDirect + gore.alpha = alpha（gore 继承 NPC 透明度）';
+    }
+  }
+}
+applyManual1457Deltas(entries);
+
 // ============ 屏幕锚定网格尘幕（WoF NPC.cs:88307-88327）→ 结构化 screenGrid ============
 // 残留 posExpr 的唯一来源：肉山（113）死亡屏幕级血尘扫掠。Position =
 // new Vector2(<x条带变量>, <y外层循环变量>)，两层循环的界/步依赖运行时相机态
@@ -1669,7 +1711,7 @@ for (const [npcId, list] of entries) {
   }
 }
 
-// ============ 贴图尺寸表（出现过的 gore id） ============
+// ============ 贴图尺寸表（HitEffect 表内 id ∪ 运行时直调面 EXTRA_TEX_FAMILIES） ============
 const idsSeen = new Set();
 for (const list of entries.values()) {
   for (const e of list) {
@@ -1679,10 +1721,44 @@ for (const list of entries.values()) {
     if (e.ids) for (const i of e.ids) idsSeen.add(i);
   }
 }
+// ---- 运行时直调面：GorePiece.newGore 的【非 HitEffect】调用点族（罐破/二段跳/
+//      药水 Kill/弹 Kill/BOSS 演出等）。缺 tex → GorePiece 落 32px 回退盒
+//      （Gore.cs:999 num36=32；真实贴图 min(w,h) 多在 8-64px，盒虚胖 1-4 倍、
+//      落地停靠点偏高）。尺寸 = 本仓 Gore_<id>.png IHDR，已与
+//      terraria-assets/Images/Gore_<id>.png（原版 XNB 提取）逐 id 实测 83/83 零偏差。
+//      引文行号取 1457；运行时移植点在各调用点注释（Game.smashPotInner pot-goreTier 等）。
+const texRange = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+const EXTRA_TEX_FAMILIES = [
+  { ids: texRange(51, 53), why: '罐瓦砾·普通罐 style0（WorldGen.cs:57358-57360）' },
+  { ids: texRange(166, 174), why: '罐瓦砾·草/腐化/猩红草罐 style1-3（WorldGen.cs:57363-57377）' },
+  { ids: texRange(197, 204), why: '罐瓦砾·天域罐 style4-15（WorldGen.cs:57380-57397）' },
+  { ids: texRange(217, 219), why: '罐瓦砾·金字塔罐 style25-27 Next(217,220)×2（WorldGen.cs:57407-57408）' },
+  { ids: texRange(315, 316), why: '罐瓦砾·神庙罐 style28-30 Next(315,317)×2（WorldGen.cs:57412-57413）' },
+  { ids: texRange(698, 703), why: '罐瓦砾·沙漠罐 style31-33 Next(2,5) 枚 698+Next(6)（WorldGen.cs:57420）' },
+  { ids: texRange(1122, 1124), why: '罐瓦砾·花岗/大理石/地狱墙罐 style34-36（WorldGen.cs:57425-57427）' },
+  { ids: texRange(16, 17), why: '火苗族（NewGore :1487-1490 独立支；Player.cs:45182/:45191 等直调）' },
+  { ids: texRange(220, 222), why: '沙暴瓶二段跳沙云 Next(220,223)（Player.cs:22102）' },
+  { ids: [331], why: '爱情药水 Kill 心脏碎块 ×30（Projectile.cs:78898）' },
+  { ids: texRange(392, 395), why: '克苏鲁之脑二阶段入场血块 ×4（NPC.cs:32658-32661）' },
+  { ids: texRange(411, 430), why: '气泡族（NewGore :1427-1435 尾段 411-415 +rand(4)*5 扩散四族；泡泡棒 Player.cs:45438-45459；原 GorePiece.BUBBLE_TEX 旁路转正）' },
+  { ids: texRange(435, 437), why: '骨尘族（屁瓶二段跳 Player.cs:21030-21036 Next(435,438)；恶臭药水 Projectile.cs:78915）' },
+  { ids: texRange(619, 622), why: '猪鲨冲撞水花 burst (∓10,∓15)/(±10,±15) 四角（NPC.cs:72721-72724）' },
+  { ids: texRange(704, 705), why: '毒液瓶 Kill 玻璃碎片（Projectile.cs:75096-75097）' },
+  { ids: texRange(1027, 1030), why: 'DD2 水晶喷溅 SelectRandom(1027-1030) ×20（Projectile.cs:36999）' },
+  { ids: texRange(1394, 1397), why: '弹 1085 Kill 火溅 ×4（Projectile.cs:72044-72047）' },
+];
+let texExtraCount = 0;
+for (const fam of EXTRA_TEX_FAMILIES) {
+  for (const id of fam.ids) {
+    if (!idsSeen.has(id)) { idsSeen.add(id); texExtraCount++; }
+  }
+}
 const tex = {};
+let texMissing = 0;
 for (const id of [...idsSeen].sort((a, b) => a - b)) {
   const sz = pngSize(id);
   if (sz) tex[id] = sz;
+  else texMissing++;
 }
 
 // ============ 落盘 ============
@@ -1740,9 +1816,21 @@ const out = {
       '  快照（GorePiece.setGoreScreen）求值，每网格格一枚 gore（原版另有 5 尘/格走尘系统）',
       '早退排除：`if (type == 114) {…; return;}`（:88291-88298）后的嘴部四件+尘幕网格不归 114',
       '  （守卫链不建模 return，此前误摊给 113|114 双方；仅对该调用点定点剔除，不改全局语义）',
-      'tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）',
+      'tex = gore 贴图 {w,h}（IHDR 直读）＝ GorePiece 碰撞盒真值源（Gore.cs 1456',
+      '  :1000-1012 / 1457 :999-1014：num36=min(Width,Height)×0.9×scale；缺图回退 32）。',
+      '  面 = HitEffect 表内 id（id/idAlt/idMin..idMax/ids）∪ EXTRA_TEX_FAMILIES 运行时',
+      '  直调面（罐瓦砾 51-53/166-174/197-204/217-219/315-316/698-703/1122-1124、火苗',
+      '  16-17、沙暴 220-222、心 331、克脑 392-395、气泡 411-430、骨尘 435-437、猪鲨',
+      '  619-622、毒瓶 704-705、DD2 水晶 1027-1030、1085 火溅 1394-1397）——缺面 id 曾',
+      '  落 32px 回退盒（停靠点偏高），已全量清偿；明细见 texExtraFamilies',
+      '1457 语义钉补（MANUAL_1457_DELTAS）：发型师 353/354 头块微光变体 544→1351/:89207、',
+      '  543→1352/:89209（1456 为 1353 + shim 门，:89135/:89139）；独角兽 121 post +al:npc',
+      '  （1457 :86422 NewGoreDirect + gore.alpha=alpha；1456 :86351 无）——重产幂等',
     ],
     tex,
+    texExtraCount,
+    texMissing,
+    texExtraFamilies: EXTRA_TEX_FAMILIES.map((f) => ({ ids: f.ids, why: f.why })),
   },
 };
 for (const [k, v] of [...entries.entries()].sort((a, b) => (+a[0]) - (+b[0]))) out[k] = v;
@@ -1754,7 +1842,8 @@ if (process.argv.includes('--audit')) {
     unresolvedGates: unresolvedGates.length, unresolvablePost: unresolvablePost.length,
     gated: countField((e) => (e.gates?.length ?? 0) > 0), post: countField((e) => (e.post?.length ?? 0) > 0),
     posExpr: countField((e) => !!e.posExpr), velExpr: countField((e) => !!e.velExpr),
-    texKnown: Object.keys(tex).length, texMissing: idsSeen.size - Object.keys(tex).length,
+    texKnown: Object.keys(tex).length, texMissing,
+    texExtra: texExtraCount,
     sample: { 1: out[1], 3: out[3], 491: out[491]?.slice(0, 3), 50: out[50] },
   }));
 } else {
@@ -1764,5 +1853,5 @@ if (process.argv.includes('--audit')) {
     + `${unresolvablePost.length} unresolvablePost, `
     + `posExpr ${countField((e) => !!e.posExpr)}, velExpr ${countField((e) => !!e.velExpr)}, `
     + `gated ${countField((e) => (e.gates?.length ?? 0) > 0)}, post ${countField((e) => (e.post?.length ?? 0) > 0)}, `
-    + `tex ${Object.keys(tex).length}/${idsSeen.size}`);
+    + `tex ${Object.keys(tex).length}/${idsSeen.size} (直调面补 ${texExtraCount}, 缺图 ${texMissing})`);
 }

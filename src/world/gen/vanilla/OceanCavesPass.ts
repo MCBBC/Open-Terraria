@@ -243,14 +243,23 @@ export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<
 }
 
 /** UnderwaterChests pass 的宝藏点段（cs:17348-17368）1:1：
- *  主件 NextFromList [863,186,277,187,4404]；num 自 2.0 起步进 0.1 扩窗重试
+ *  主件 NextFromList [863,186,277,187,4404]（★IIIII185：extraLiquid 六件表尾追加 268，
+ *  cs:17365-17369）；num 自 2.0 起步进 0.1 扩窗重试
  *  （<50），采样域 [x±num, y±num/2]（上界 +1 含端），越右界回折 num/2；
  *  命中液体 ≥250 且为水 → AddBuriedChest(style17, trySlope:true)。 */
 export function runUnderwaterChestsPass(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, treasures: Array<{ x: number; y: number }>,
 ): void {
   for (const t of treasures) {
-    const main = [863, 186, 277, 187, 4404][rng.int(0, 4)];        // NextFromList
+    // ★IIIII185（cs:17365-17369 = 1458 同行）：extraLiquid(waterpark) → NextFromList
+    //   六件表 {863,186,277,187,4404,268}（268=Diving Helmet 潜水头盔,追加在尾;
+    //   863=WaterWalkingBoots/186=BreathingReed/277=Trident/187=Flipper/4404=FloatingTube）。
+    //   NextFromList=
+    //   objs[Next(objs.Length)]（Utils.cs:1248），Next(5)→Next(6) 掷数不变仅映射域变。
+    //   此前整臂缺失 → waterpark 链海洋洞窟水箱主件永远五件表（且第 6 位永不中）。
+    const main = (gs.seedFlags.extraLiquid
+      ? [863, 186, 277, 187, 4404, 268]
+      : [863, 186, 277, 187, 4404])[rng.int(0, gs.seedFlags.extraLiquid ? 5 : 4)];
     let num = 2.0;
     for (;;) {
       if (num >= 50.0) break;

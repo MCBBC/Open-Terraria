@@ -10,6 +10,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { petInfoOfVid } from '../data/vanillaPets';
+import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import { VANILLA_ITEM_COLOR, blendItemColorTint } from '../data/vanillaItemColor';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
@@ -3295,14 +3296,6 @@ export class UI {
     // 背包贴热键栏；2026-09-02 再迁右下角无框坞——挂载点见 eqDock.appendChild(left)）
     left.style.cssText = 'display:flex; flex-direction:column; gap:6px; flex:none;';
     left.appendChild(loadoutRow);
-    // 竖排列构建器（原版 DrawInventory :40844-40968 语义：同 x 纵向排，label 顶部）
-    const vcol = (label: string, from: number, n: number, where: SlotWhere) => {
-      const col = el('div');
-      col.appendChild(el('div', 'sw-lbl', label));
-      for (let k = 0; k < n; k++) col.appendChild(this.makeSlotEl(from + k, where));
-      col.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
-      return col;
-    };
     // 装备页：三列 L→R = 染料 | 时装 | 装备（原版 DrawInventory :40830-40968：
     //  x=sw-186/-139/-92 单列纵向 47px 列距；配饰段相对盔甲段下移 num35=4px）。
     //  两段式竖列（盔甲段 + 4px 组距 + 配饰段）
@@ -3367,13 +3360,15 @@ export class UI {
       Lang.text('Mods.SandboxWorld.Tabs.Grapple'),
     ];
     const miscRail = el('div');
-    miscRail.style.cssText = 'display:flex; gap:10px; align-items:flex-start;';
-    const miscCol = el('div');
-    miscCol.style.cssText = 'display:flex; flex-direction:column;';
+    // ★2026-09-02 用户要求：杂项染料槽与对应杂项槽同行并排（此前染料独立成列,
+    // 行高与 misc 行高不一致 → 第 2 行起对应关系错位）
+    miscRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:flex-start;';
     MISC_LABELS.forEach((lbl, k) => {
+      const row = el('div');
+      row.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
+      row.appendChild(el('div', 'sw-lbl', lbl));
       const pair = el('div');
-      pair.style.cssText = 'display:flex; flex-direction:column;';
-      pair.appendChild(el('div', 'sw-lbl', lbl));
+      pair.style.cssText = 'display:flex; gap:6px; align-items:center;';
       const slotEl = this.makeSlotEl(k, 'misc');
       // 宠物/光源槽眼睛开关（原版 InventoryTick 图标 Main.cs:40666-40691：光标为空
       // 时点击小眼睛 → TogglePet/ToggleLight 显隐翻转——槽 0/1 专属）。
@@ -3394,10 +3389,10 @@ export class UI {
         this.paintPetEye(eye, k as 0 | 1);
       }
       pair.appendChild(slotEl);
-      miscCol.appendChild(pair);
+      pair.appendChild(this.makeSlotEl(k, 'miscDye'));   // 对应染料同排（原版同构）
+      row.appendChild(pair);
+      miscRail.appendChild(row);
     });
-    miscRail.appendChild(miscCol);
-    miscRail.appendChild(vcol(Lang.text('Mods.SandboxWorld.Tabs.Dye'), 0, 5, 'miscDye'));
     // 垃圾桶（持久槽；可交换取回）——原版 (448,258) scale0.85=44px、槽底 Back7（context 6）
     const trashWrap = el('div');
     trashWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
@@ -3523,7 +3518,28 @@ export class UI {
     // ★2026-08-27 用户要求：堆叠钮挂垃圾桶下方（原在背包网格下沿）——
     //  右列构成：弹药|钱币 → 垃圾桶 → 2×3 钮格 → 成就卡竖列
     clusterRow.append(this.housingBtn, this.bestiaryBtn, bEmote, this.itemSearchBtn);   // 2×2 图标行
-    clusterRow.appendChild(row);   // 联机/旅程钮行（display:contents,子项成第 4 行格;见 sideCol 段）
+    // 第 4 行：天气/时间控制（2026-09-02 用户要求,画布右上按钮迁入钮格变 2×4——
+    //  开背包时画布按钮隐藏（Renderer playerInventory 门）防重复;面板本体仍在
+    //  小地图下绘制。首用确认门同画布路径）
+    const mkHudPanelBtn = (label: string, title: string, kind: 'weather' | 'time'): HTMLButtonElement => {
+      const b = el('button', 'sw-btn');
+      b.title = title;
+      b.textContent = label;
+      b.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
+        + 'border:none; background:rgba(20,26,60,0.85); color:#e8e8f4;'
+        + 'font:bold 13px monospace; cursor:pointer;'
+        + 'display:flex; align-items:center; justify-content:center;';
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        const r = this.game?.renderer;
+        if (!r) return;
+        const key = kind === 'time' ? 'timePanelOpen' : 'weatherPanelOpen';
+        showJourneyQuickGate(kind, () => { r[key] = !r[key]; });
+      });
+      return b;
+    };
+    clusterRow.append(mkHudPanelBtn('⛅', '天气控制', 'weather'), mkHudPanelBtn('±', '时间控制', 'time'));
+    clusterRow.appendChild(row);   // 联机/旅程钮行（display:contents,子项成第 5 行格;见 sideCol 段）
     rightRail.appendChild(clusterRow);
     body.appendChild(right);
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户

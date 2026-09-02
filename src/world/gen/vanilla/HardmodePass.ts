@@ -98,7 +98,6 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
   let dx = rng.nextIntRange(-10, 11) * 0.1, dy = rng.nextIntRange(-10, 11) * 0.1;
   if (speedX !== 0 || speedY !== 0) { dx = speedX; dy = speedY; }
   let running = true;
-  let it182 = 0;                                       // ★IIII182 迭代计数（观测用）
   while (running) {
     let x0 = Math.trunc(vx - num4 * 0.5), x1 = Math.trunc(vx + num4 * 0.5);
     let y0 = Math.trunc(vy - num4 * 0.5), y1 = Math.trunc(vy + num4 * 0.5);
@@ -106,29 +105,11 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
     if (x1 > w) x1 = w;
     if (y0 < 0) y0 = 0;
     if (y1 > h - 5) y1 = h - 5;
-    // ★IIII182 观测钩（一次性取证,缺省零开销）：菱形刷逐访决策迹（vx/vy/j/LHS/R/受理/前态）
-    const markCascade182 = (cm: number | null, cn: number): void => {
-      (globalThis as unknown as { __swMark182?: string | undefined }).__swMark182 =
-        cm === null ? undefined : `C|${it182}|${cm},${cn}`;
-    };
-    const dec182 = (globalThis as unknown as {
-      __swDec182?: (p: { g: number; it: number; m: number; n: number; vx: number; vy: number; j: number; lhs: number; r: number; acc: boolean; pre: number; good: boolean }) => void;
-    }).__swDec182;
     for (let m = x0; m < x1; m++) {
       for (let n = y0; n < y1; n++) {
         // 菱形刷（cs:77003）：|dm|+|dn| < 带宽/2 × (1±1.5% 逐格抖动)——★F1 同款右开
         // 区间 Next(-10,11)，含 +10 端点
-        const g182 = globalThis as unknown as { __swMark182?: string };
-        g182.__swMark182 = `J|${it182}|${m}|${n}`;
-        const jj182 = rng.nextIntRange(-10, 11);
-        g182.__swMark182 = undefined;
-        const lhs182 = Math.abs(m - vx) + Math.abs(n - vy);
-        const r182 = num2 * 0.5 * (1 + jj182 * 0.015);
-        const acc182 = lhs182 < r182;
-        if (dec182) {
-          dec182({ g: good ? 1 : 2, it: it182, m, n, vx, vy, j: jj182, lhs: lhs182, r: r182, acc: acc182, pre: TILE_DEFS[st.type[st.idx(m, n)]]?.vanilla?.sheet ?? -1, good });
-        }
-        if (!acc182) continue;
+        if (Math.abs(m - vx) + Math.abs(n - vy) >= num2 * 0.5 * (1 + rng.nextIntRange(-10, 11) * 0.015)) continue;
         const ii = st.idx(m, n);
         const wl = st.wall[ii];
         const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? -1;
@@ -153,16 +134,16 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           // tile：2→109 草；1/25/203→117 珍珠岩；53/123/112/234→116 珍珠沙；
           // 661/662→60 丛林草；23/199→109；161/163/200 冰→164 粉冰；396→403、397→402；
           // flag 门：225 Hive→117、230 CrispyHoney→402（cs:76486-76488）
-          if (flag && sh === 225) { st.type[ii] = id(117); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (flag && sh === 230) { st.type[ii] = id(402); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 2) { st.type[ii] = id(109); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 661 || sh === 662) { st.type[ii] = id(60); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 23 || sh === 199) { st.type[ii] = id(109); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 396) { st.type[ii] = id(403); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 397) { st.type[ii] = id(402); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
+          if (flag && sh === 225) { st.type[ii] = id(117); genSquareTileFrame(st, rng, m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(402); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 2) { st.type[ii] = id(109); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 661 || sh === 662) { st.type[ii] = id(60); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 23 || sh === 199) { st.type[ii] = id(109); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 396) { st.type[ii] = id(403); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 397) { st.type[ii] = id(402); genSquareTileFrame(st, rng, m, n); }
         } else if (crimson) {
           // 猩红（57 :77076-77135 / 56 76541-…）：墙 63/65/66/68→81、216→218、187→221
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 81);
@@ -186,15 +167,15 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (wl === 187) st.setWall(m, n, 220);
           // tile：60/662→661；2/109→23；1/117→25；53/123/116→112；161/164→163；396→400、397→398；
           // flag 门：225 Hive→25、230 CrispyHoney→398（腐化分支同构）
-          if (flag && sh === 225) { st.type[ii] = id(25); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (flag && sh === 230) { st.type[ii] = id(398); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 60 || sh === 662) { st.type[ii] = id(661); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 2 || sh === 109) { st.type[ii] = id(23); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 1 || sh === 117) { st.type[ii] = id(25); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 161 || sh === 164) { st.type[ii] = id(163); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 396) { st.type[ii] = id(400); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
-          else if (sh === 397) { st.type[ii] = id(398); markCascade182(m, n); genSquareTileFrame(st, rng, m, n); markCascade182(null, 0); }
+          if (flag && sh === 225) { st.type[ii] = id(25); genSquareTileFrame(st, rng, m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(398); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 60 || sh === 662) { st.type[ii] = id(661); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 2 || sh === 109) { st.type[ii] = id(23); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 1 || sh === 117) { st.type[ii] = id(25); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 161 || sh === 164) { st.type[ii] = id(163); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 396) { st.type[ii] = id(400); genSquareTileFrame(st, rng, m, n); }
+          else if (sh === 397) { st.type[ii] = id(398); genSquareTileFrame(st, rng, m, n); }
         }
       }
       yield;                                             // PR-async：每刷写列一个单元
@@ -202,13 +183,10 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
     // 速度积分 + 扰动（57 :77197-77212 / 56 76669-76682）：val2.X += Next(-10,11)*0.05，
     // 钳 speedX±1（★F1：同样补 +10 端点）
     vx += dx; vy += dy;
-    (globalThis as unknown as { __swMark182?: string }).__swMark182 = `V|${it182}`;
     dx += rng.nextIntRange(-10, 11) * 0.05;
-    (globalThis as unknown as { __swMark182?: string }).__swMark182 = undefined;
     if (dx > speedX + 1) dx = speedX + 1;
     if (dx < speedX - 1) dx = speedX - 1;
     if (vx < -num2 || vy < -num2 || vx > w + num2 || vy > h + num2) running = false;
-    it182++;                                           // ★IIII182 迭代计数（观测用）
   }
 }
 

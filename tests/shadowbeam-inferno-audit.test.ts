@@ -102,8 +102,14 @@ describe('① 290 ShadowBeamHostile（aiStyle48）', () => {
     const d = new Dart(20 * 16, 40 * 16, 6, 0, 30, 290);   // 宽世界防 InWorld 内缘门截停
     const t = flyTicks(d, hooks, 10);
     expect(d.dead).toBe(true);
-    expect(t).toBe(4);                    // timeLeft300 子步÷101 ≈2.96 拍 → 头递减模型 life4
-                                          // = 3 全拍飞行(303 子步) + 第 4 拍寿终口
+    // ★290 寿命金标（2026-09-02 专项定谳）：SetDefaults :3795-3805 timeLeft=100【非终值】
+    // —— 发射点 NPC.cs:21251-21300（弹速 num100=6f）尾参 HardmodeDungeonSkeletonShot
+    // → NewProjectileModifiers.cs:5-8 直写 timeLeft=300；timeLeft-- :17307 括号计数
+    // depth2 = 子步循环（:16781,101 子步/拍）直接体 → 2 全拍+第 3 拍 98 子步处 Kill
+    // （+1 尾子步 :17132 早退,位移共 301 子步=1806px）。头递减模型取 life 4 =
+    // 3 全拍飞行 303 子步（较原版 +2 子步≈12px;life 3 少 99 子步=整拍缺飞）
+    expect(t).toBe(4);
+    expect(d.cx).toBe(20 * 16 + 2 + 3 * 101 * 6);   // 3 全拍 × 101 子步 × 6px = 1818px
     expect(dusts.filter((x) => x.type === 173).length).toBeGreaterThan(0);
     expect(broadcasts.filter((b) => b.type === 58).length).toBe(1);
     expect(sfx.filter((f) => f === 'Item_8').length).toBe(1);   // 首子步单次（:28633-28636）
@@ -223,5 +229,64 @@ describe('③ 292 InfernoHostileBlast（aiStyle50 通用支）', () => {
     const b = added.map((a) => a.e).find((e) => e instanceof InfernoHostileBlast) as InfernoHostileBlast;
     expect(b).toBeTruthy();
     expect(b.damage).toBe(57);
+  });
+});
+
+// ---------------------------------------------------------------- ④ 292 联机访客镜像
+
+// ★MP 架构判定（2026-09-02 专项）：敌弹在联机=房主权威模拟（NPC AI 房主独算）,
+// 访客端是快照傀儡（netMakeProj case 2 → netPuppet 早退）——"敌弹各端自算,访客
+// 自然 spawn 292"不成立,登记的访客缺口成立。修法=借房主消亡权威事件
+// （msg28 ProjDespawn / 180t 未 seen 超时清扫 → dead=true → Entity.compact destroy
+// 钩）在访客本地镜像重建 292（不上线,各端自算,victim-settles 同构）。
+describe('④ 292 联机访客镜像（Dart.destroy 口,2026-09-02 缺口清偿）', () => {
+  it('访客傀儡 291 消亡 → 本地镜像 292（同伤/末拍位/130×130 SetDefaults）', () => {
+    const { hooks, added } = makeGame(emptyWorld(), { playerAt: [70 * 16, 70 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 291);
+    d.netPuppet = true;                    // 访客傀儡（netMakeProj case 2 同构）
+    d.fixedUpdate(1 / 60, hooks);          // 傀儡步进（lastGame 引用刷新）
+    d.x = 50 * 16 - 6; d.y = 40 * 16 - 6;  // 快照末拍位（291 盒 12×12,傀儡心 = 50*16,40*16）
+    d.dead = true;                         // netRemoveProjPuppets/超时清扫置位
+    d.destroy();
+    const blasts = added.filter((a) => a.e instanceof InfernoHostileBlast);
+    expect(blasts.length).toBe(1);
+    expect(blasts[0].bucket).toBe('projectiles');
+    const b = blasts[0].e as InfernoHostileBlast;
+    expect(b.damage).toBe(40);             // 快照 dmg = 房主 291 终伤（与 Kill 口同源）
+    expect(b.cx).toBe(50 * 16); expect(b.cy).toBe(40 * 16);   // 末拍傀儡心
+    expect(b.w).toBe(130); expect(b.h).toBe(130);
+  });
+
+  it('幂等：destroy 重复调用 / 房主 Kill 口已生成 → 恒 1 个 292', () => {
+    // 房主路径：越点引爆（Kill 口已置 if291Mirrored）→ destroy 直拒（!netPuppet + 门）
+    const { hooks, added } = makeGame(emptyWorld(), { playerAt: [34 * 16, 40 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 291);
+    flyTicks(d, hooks, 14);
+    expect(d.dead).toBe(true);
+    expect(added.filter((a) => a.e instanceof InfernoHostileBlast).length).toBe(1);
+    d.destroy();
+    expect(added.filter((a) => a.e instanceof InfernoHostileBlast).length).toBe(1);
+    // 傀儡路径：destroy 双调 → 仍 1
+    const g2 = makeGame(emptyWorld(), { playerAt: [70 * 16, 70 * 16] });
+    const p = new Dart(30 * 16, 40 * 16, 8, 0, 40, 291);
+    p.netPuppet = true;
+    p.fixedUpdate(1 / 60, g2.hooks);
+    p.dead = true;
+    p.destroy(); p.destroy();
+    expect(g2.added.filter((a) => a.e instanceof InfernoHostileBlast).length).toBe(1);
+  });
+
+  it('非 291 / 未步进傀儡（无 lastGame）→ destroy 零生成', () => {
+    const { hooks, added } = makeGame(emptyWorld(), { playerAt: [70 * 16, 70 * 16] });
+    const other = new Dart(30 * 16, 40 * 16, 8, 0, 40, 128);
+    other.netPuppet = true;
+    other.fixedUpdate(1 / 60, hooks);
+    other.dead = true;
+    other.destroy();
+    const neverStepped = new Dart(30 * 16, 40 * 16, 8, 0, 40, 291);
+    neverStepped.netPuppet = true;
+    neverStepped.dead = true;
+    neverStepped.destroy();
+    expect(added.filter((a) => a.e instanceof InfernoHostileBlast).length).toBe(0);
   });
 });

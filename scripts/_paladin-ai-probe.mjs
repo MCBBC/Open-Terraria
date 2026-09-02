@@ -115,7 +115,7 @@ const out = await page.evaluate(async () => {
     const arrB = g.entities.enemies; arrB.splice(arrB.indexOf(e), 1);
   }
 
-  // ---- C) 距离 >700px 视线通：期望不开瞄、行走 ----
+  // ---- C) 超开瞄包络出生(784px) → 行走逼近，入包络(≈691px)转开瞄掷锤（走→瞄全动态）----
   {
     p.x = (X0 - 20) * 16; p.y = groundYpx - p.h; p.vx = 0; p.vy = 0;
     // 出生点改带内（清整区 X0±35）：X0+29 距玩家 49 tile=784px——须超出【抖动外扩

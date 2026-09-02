@@ -383,18 +383,36 @@ export function furniturePopSingle(records: FurnitureItemRecord[], kind: Furnitu
   return item;
 }
 
+/** legacy 武器架 334 内部 tile id（TileID.cs:1105 WeaponsRack；现行 471=WeaponsRack2）
+ *  ——破坏链一击双掉特化判据用 */
+const RACK334_TILE = TILE_BY_KEY['v_334_weapon_rack_legacy_do_not_use'];
+
 /**
  * 破坏判定（WorldGen.KillTile 前置特例）：
  *  单槽族有物 → 'pop'（先弹物、本次不破坏，KillTile_DropItems :63703 提前 return 语义）；
  *  模特/帽架有物 → 'blocked'（IsBreakable=false，WorldGen.cs:62540-62560
  *    CheckTileBreakability2_ShouldTileSurvive：有物整件不可破坏）；
  *  其余 → 'break'（正常破坏，调用方清格后 removeFurnitureAt）
+ * @param tileType 命中格内部 tile id（调用方可选提供）——★七批备案④-c（2026-09-02）
+ *   legacy 334 一击双掉特化判据：原版 334 的武器嵌在帧里（PlaceWeapon 帧标记,非 TE），
+ *   KillTile_DropItems 对 334 只读帧掉武器【无 early return】（WorldGen.cs:64117-64165：
+ *   :64151 Item.NewItem 掉武器 + :64153-64156 帧还原裸架后继续走完破坏链）,随后
+ *   TileFrame case 334（:86786）→ CheckWeaponsRack :46855 同击掉架体 2699——两段式
+ *   pop 的 early-return 是 471 TE 专属（:64186-64192 result3.DropItem()+return）。
+ *   故 tileType==334 时返回 'break' 并带出存物（调用方先弹武器再落 object 路径碎架+
+ *   def.drop 2699,同击完成）;471 与其余 kind 维持原判（两段式=原版同款）。
  */
 export function furnitureTryBreak(
   records: FurnitureItemRecord[], kind: FurnitureKind, ax: number, ay: number,
+  tileType?: number,
 ): { result: 'pop' | 'blocked' | 'break'; item: FurnitureSlot } {
   const rec = getFurniture(records, kind, ax, ay);
   if (!rec || !furnitureContainsItems(rec)) return { result: 'break', item: null };
+  if (tileType !== undefined && tileType === RACK334_TILE) {
+    const item = rec.slots[0];
+    rec.slots[0] = null;
+    return { result: 'break', item };
+  }
   switch (kind) {
     case 'display_doll': case 'hat_rack':
       return { result: 'blocked', item: null };

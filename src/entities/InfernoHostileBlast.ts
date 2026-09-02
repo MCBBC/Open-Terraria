@@ -37,8 +37,11 @@ export class InfernoHostileBlast extends Entity {
 
   // ★刻意不设 projId 字段：联机快照收集器按 `projId !== undefined` 归 kind1（武器族
   //  弹幕）→ 访客端会重建成回旋镖伪弹；无 projId → kind<0 → 不同步（渲染缺类），
-  //  与"未知弹幕类不同步"通道一致（Game.broadcast/快照双面）。292 的生成权在房主
-  //  端 291 Kill 链内，访客缺口登记（同 Dart 直构子弹族 129/596 的既有口径）。
+  //  与"未知弹幕类不同步"通道一致（Game.broadcast/快照双面）。292 的生成权分流：
+  //  房主/单机 = Dart.inferno291Kill（291 Kill 链内）；访客 = Dart.destroy 傀儡消亡口
+  //  镜像重建本地 292（2026-09-02 访客缺口清偿,旧"访客缺口登记"就此撤销）——本类
+  //  维持不上线、各端本地自算（hostile 盒对本地玩家 Damage_EVP,victim-settles 同构）；
+  //  下方 netPuppet 早退保留为防御位（镜像本体永不入快照,该分支实际不可达）。
   // ★minion=true 仅借 Entity 收口 CutTiles 排除门（EntityManager.update 唯一消费
   //  位）：原版 CanCutTiles（Projectile.cs:15407）只对 friendly 弹跑 CutTiles，
   //  292 为 hostile 不砍地形；本仓中央收口无 friendly 门，130×130 盒每拍上报会

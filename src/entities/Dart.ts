@@ -861,6 +861,12 @@ export class Dart extends Entity {
   /** 291 单次音门（localAI[0]==0 → Item20 :28740-28744）与锚点补偿一次性门 */
   private if291Sounded = false;
   private if291Anchor = false;
+  /** ★292 生成幂等门（2026-09-02 访客缺口清偿）：本地 Kill 口（inferno291Kill）与
+   *  访客镜像口（destroy）共用——任一口生成过 292 即置位，另一口/重复调用零生成 */
+  private if291Mirrored = false;
+  /** ★292 镜像口 game 引用：destroy() 钩由 Entity.compact 调用（无参），傀儡每拍
+   *  fixedUpdate 必经此处刷新——消亡拍引用恒新鲜 */
+  private lastGame: GameHooks | null = null;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
@@ -1000,6 +1006,7 @@ export class Dart extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    this.lastGame = game;   // ★292 镜像口：destroy 钩无 game 参,每拍刷新（傀儡必经本函数）
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     // G3 宿主绑定弹：537 观星者激光（aiStyle84）/ 573 预言者蓄能弹（aiStyle102）
@@ -1642,11 +1649,33 @@ export class Dart extends Entity {
    *  原位 NewProjectile 292（速度 0、同 damage、同 kb）——爆区实体承接持续伤害,
    *  取代旧 rocket:65 通用爆（原版 291 Kill 无爆炸尘/音,纯 spawn 转接）。死亡面 =
    *  越点引爆（:28748-28756）/寿终 timeLeft 300（HardmodeDungeonSkeletonShot,
-   *  NewProjectileModifiers.cs:5-8） */
+   *  NewProjectileModifiers.cs:5-8）。★MP：本口=房主/单机权威生成位;访客傀儡 291
+   *  不跑本链（netPuppet 早退）,由 destroy 镜像口承接——两口共用 if291Mirrored 幂等 */
   private inferno291Kill(game: GameHooks): void {
     this.dead = true;
+    this.if291Mirrored = true;
     const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
     (game as unknown as { entities: { add(e: unknown, b: string): void } })
+      .entities.add(blast, 'projectiles');
+  }
+
+  /** ★292 联机访客镜像口（2026-09-02 缺口清偿）。架构事实链：291 是房主权威弹
+   *  （NPC AI 房主独算）→ 快照 kind2|0x80（netProjBroadcast Dart 支）→ 访客傀儡
+   *  netPuppet 早退不跑 AI/不跑 inferno291Kill → 访客端无 292（房主侧 292 无 projId
+   *  走 kind<0"未知弹幕类不同步"通道,永不下发）。修法=借房主消亡权威事件镜像重建:
+   *  msg28 ProjDespawn（netRemoveProjPuppets）/ 180t 未 seen 超时清扫两路均置
+   *  dead=true → Entity.compact 的 destroy 钩（本函数）→ 本地 spawn 292。
+   *  位置=傀儡最后一拍快照跟随位（≈引爆点,快照窗内 ≤4t 位移,130×130 爆区盒覆盖）；
+   *  伤害=快照 dmg=房主 291 终伤（与 inferno291Kill 直传同源）。292 维持不上线,
+   *  各端本地镜像自算（hostile 盒对本地玩家 Damage_EVP,victim-settles 同构）。
+   *  幂等：inferno291Kill 已置 if291Mirrored（房主路径绝不双生成）；
+   *  !netPuppet 直拒（房主/单机 291 唯一生成权在 Kill 口）；180t 超时误杀窗=
+   *  快照断流退化面（位置可能滞后,登记不修——原版该弹本就 client 消亡近似） */
+  destroy(): void {
+    if (this.projId !== 291 || !this.netPuppet || this.if291Mirrored || !this.lastGame) return;
+    this.if291Mirrored = true;
+    const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
+    (this.lastGame as unknown as { entities: { add(e: unknown, b: string): void } })
       .entities.add(blast, 'projectiles');
   }
 
@@ -2176,11 +2205,22 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // ---- 史后三法师（NPC.cs:21260-21312,1457 timeLeft 覆写经 NewProjectileModifiers
   //      .HardmodeDungeonSkeletonShot = timeLeft 300,NewProjectileModifiers.cs:5-8）----
   // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 6×101≈606px/t
-  //    全屋瞬达)。★寿命换算:原版 timeLeft 在 numUpdates 子步循环内逐【子步】消耗
-  //    (AI() :16880 与 timeLeft-- :17307 同在 while(numUpdates>=0) :16780-17345 内)
-  //    → timeLeft 300 = 300 子步 ≈ 2.96 拍(101 子步/拍);本仓 life 按 tick 头递减
-  //    (fixedUpdate 先减后步) → 取 4 = 3 全拍飞行(303 子步,较原版 +3 子步≈18px,
-  //    取 life 3 会少 98 子步=整拍缺飞,两害取轻登记)。
+  //    全屋瞬达)。★寿命换算(2026-09-02 290 寿命专项定谳,推导 ≠ SetDefaults 字面):
+  //    SetDefaults :3795-3805 的 timeLeft=100【非终值】——发射点 NPC.cs:21251-21300
+  //    (283/284 弹速 num100=6f、±30px 瞄准抖动)NewProjectile 尾参
+  //    NewProjectileModifiers.HardmodeDungeonSkeletonShot → NewProjectileModifiers.cs:5-8
+  //    直写 timeLeft=300(293 同支;291 才走 :21294 特化支,同参同改 300)。
+  //    子步消耗已括号计数复核:AI() :16880 与 timeLeft-- :17307 同在
+  //    while(numUpdates>=0)(:16781,numUpdates=extraUpdates :16780)直接体(depth2)
+  //    → 每帧 1+EU=101 子步;位移 = HandleMovement :17120/:17578 每【子步】全速
+  //    TileCollision 积分(无 ÷(EU+1) 分摊,302 狙击 ×8 同理);AI_048 支 :28608-28646
+  //    无 timeLeft 补偿/重置(唯 :28610 InWorld 内缘门外 Kill);:17308 timeLeft<=0
+  //    → Kill(Kill 头 !active 门 :71756 幂等)。终值时间线:300 子步 = 2 全帧
+  //    + 第 3 帧 98 子步处 Kill + 1 尾子步(AI+位移后 :17132 !active 整 Update 早退)
+  //    → 位移共 301 子步 × 6px = 1806px ≈ 112.9 格,真实存活 ≈ 2.97 帧 ≈ 0.05s。
+  //    本仓 life 按 tick 头递减(fixedUpdate 先减后步) → 取 4 = 3 全拍飞行
+  //    (303 子步,较原版 +2 子步≈12px;取 life 3 = 202 子步,少 99 子步≈594px
+  //    =整拍缺飞,两害取轻登记)。
   //    本体恒隐:alpha=255 由 AI 每子步写(:28630-28632)+贴图官方空桩;可视面=束段尘
   //    ——【撞块反弹】(Update :18975-19018 全速反号+束铺撒+重锚)/【Kill】
   //    (:71825-71870 锚点→死亡位铺撒)两口,见 dartStep 290 支;首子步 Item8(:28633)。
@@ -2192,7 +2232,10 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    玩家心(发射拍)。AI:Item20 首拍(:28740-28744)+10×d174 尾迹/拍(:28758-28766)
   //    +越点引爆(Dot(target−Center,v)<=0 → v=0 → Kill :28748-28756——本仓锚点缺省
   //    =首子步捕玩家心,spawnAi0/1 可显式覆写);Kill(:75802-75807)=原位 spawn 292
-  //    爆区(同伤),旧 rocket:65 通用爆退役
+  //    爆区(同伤),旧 rocket:65 通用爆退役。★MP:291 为房主权威弹(NPC AI 房主独算,
+  //    快照 kind2|0x80 → 访客傀儡 netPuppet 不跑 AI/不跑 Kill 链)——292 生成权分流:
+  //    房主=Kill 口(inferno291Kill),访客=destroy 镜像口(下方 destroy 注,2026-09-02
+  //    访客缺口清偿);292 本体不上线,各端本地镜像自算
   291: { w: 12, h: 12, rot: 'none', alpha0: 255, life: 300, noTile: true, fallback: '#FF9040' },
   // 293 迷失之魂(布道者 281/282):12×12,旋转恒 0,alpha255,tileCollide=false,extraUpdates1,
   //    200px 内追踪(:AI_051 target v=norm×3,vel=(vel*100+t)/101);尘 175 ×9/更新;Item8

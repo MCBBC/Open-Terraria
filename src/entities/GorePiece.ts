@@ -59,9 +59,10 @@ const vanishAlpha = (t: number) => DISAPPEAR_ALPHA[t] ?? 1;
 /** 气泡族判定（Gore.cs:856/:1427 的 411-430 专属块——泡泡棒 1450 喷出的
  *  411-415 经 NewGore 尾段 type += rand(4)*5 可落入全部四族） */
 const isBubble = (t: number) => t >= 411 && t <= 430;
-/** 气泡族贴图尺寸（terraria-assets/Images/Gore_411-430.png 实测 10/20/32/48/64；
- *  TEX 表（_meta.tex）只含 HitEffect 提取面，该族不在其中——NewGore 尾段定位 /
- *  Update 爆裂尘计数 / 玩家与实心碰撞矩形都以贴图原尺寸为准，故独立登记） */
+/** 气泡族贴图尺寸兜底（terraria-assets/Images/Gore_411-430.png 实测 10/20/32/48/64；
+ *  该族已由 _meta.tex 运行时直调面覆盖（tools/extract-gore.mjs EXTRA_TEX_FAMILIES，
+ *  值与实测一致）——BUBBLE_TEX 保留为表缺图时的兜底。NewGore 尾段定位 / Update
+ *  爆裂尘计数 / 玩家与实心碰撞矩形都以贴图原尺寸为准 */
 const BUBBLE_TEX: Record<number, number> = {
   411: 10, 412: 20, 413: 32, 414: 48, 415: 64,
   416: 10, 417: 20, 418: 32, 419: 48, 420: 64,
@@ -326,7 +327,7 @@ export class GorePiece extends Entity {
     this.goreId = type;
     this.scale = scale;
     const tex = TEX[type];
-    // 气泡族（411-430）不在 _meta.tex 提取面内——BUBBLE_TEX 独立登记（见其注释）
+    // 气泡族（411-430）已入 _meta.tex 运行时直调面；BUBBLE_TEX 仍作缺图兜底（见其注释）
     this.texW = tex?.w ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
     this.texH = tex?.h ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
     this.x = x;

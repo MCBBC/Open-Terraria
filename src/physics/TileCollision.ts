@@ -910,6 +910,17 @@ function unembedPass(b: Body, world: World): void {
     b.embedPushed = 0;  // 横推预算同会话复位(2026-09-01 tent 收敛帽)
     return;
   }
+  // ★悬空刷角假嵌入门（2026-09-02 向导电梯定谳,用户实报 Starter World 楔死+
+  //   行为日志 326 事件+探针 _guidewedge4/5 A/B 复现）：仅【顶行】刷实心墙角
+  //  （topEmbedded,中心格干净）且身体悬空下落（!onGround && vy>0）的姿态 =
+  //  「坠落掠过墙顶/平台角」的瞬态假嵌入——真城镇 NPC 案例：向导 18×40 挤
+  //  1 格宽门洞,左缘 1px 嵌进 (3180,378) 花岗岩、脚下 379-383 全空,顶行每
+  //  10t 擦到 (3180,378)→抬升支 +16px→重力拉回,极限环 cy 6055↔6070 永久
+  //  电梯（日志 hw=1 顶墙+g=0+末尾 −14px 回弹）。原版无 unembed 等价机制,
+  //  此姿态交还原版物理：继续下沉直至被下方合法面 catch（实测落到 slope2
+  //  平台坡道→自行走脱困）。真卡顶（站台态 onGround=true,凹龛/tent 案）与
+  //  活埋（centerSolid）不走本门,照旧救援。
+  if (topEmbedded && !centerSolid && !b.onGround && b.vy > 0) return;
   const emb = (b.embedTicks ?? 0) + 1;
   b.embedTicks = emb;
   // ★topEmbedded 快速响应(2026-08-31):头顶 solid 区嵌入的 15t 延迟期 = 无限上下

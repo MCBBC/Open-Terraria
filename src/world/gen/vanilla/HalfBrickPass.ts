@@ -632,7 +632,8 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
 }
 
 /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */
-function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+/** ★IIIII187 导出（离线模拟器 tools/_iii187sim 复用；零行为变更） */
+export function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   // ★IIII66 取证钩（dormant）：SQ 事件与 rig SW_FNTLOG 的 SquareTileFrame 行对位；
   // 未注册零开销。
   (globalThis as { __swFntSq?: (x: number, y: number) => void }).__swFntSq?.(x, y);
@@ -1447,7 +1448,8 @@ function pileDropRollsKT(rng: RNG, fx: number): void {
 
 /** ★IIII66：补角支的 vanilla PlaceTile 近似（生成期 default 支）——置格(active+type+
  *  帧清零+坡/半砖清)后发 SquareTileFrame(i,j) 尾级联（与 killTile 尾同構调度）。 */
-function placeCornerBlock(st: TileStore, rng: RNG, x: number, y: number, mat: number): void {
+/** ★IIIII187 导出（离线模拟器 tools/_iii187sim 复用；零行为变更） */
+export function placeCornerBlock(st: TileStore, rng: RNG, x: number, y: number, mat: number): void {
   const i = st.idx(x, y);
   st.type[i] = mat;
   st.flags[i] = 1;

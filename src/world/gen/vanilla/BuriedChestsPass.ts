@@ -1469,13 +1469,21 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
   }
 }
 
-/** UnderwaterChests 的 9×w/4200 段（cs:17381-17453）：每下标两趟 while 各 1 箱——
+/** UnderwaterChests 的 9×w/4200 段（cs:17381-17453 = 1458 同行）：每下标两趟 while 各 1 箱——
  *  ① y∈[1, UnderworldLayer)（内层液体重掷域 [50, UnderworldLayer)）
  *  ② y∈[worldSurface, UnderworldLayer)。主件序：单次 Next(10)==0 → 863，
- *  否则计数器 186→4404→277→187（num4 每迭代无条件 ++，命中 863 也前进）。 */
+ *  否则计数器 186→4404→277→187（num4 每迭代无条件 ++，命中 863 也前进）。
+ *  ★IIIII185 三臂缺债收口：本段两臂（①②）的 extraLiquid(waterpark) 分支——
+ *  cs:17386-17388 num5×3（27 槽）+ cs:17419-17425 num4==4→268——已补；
+ *  第三臂=宝藏点段 cs:17365-17369（OceanCavesPass.runUnderwaterChestsPass 六件表）。 */
 export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w } = st;
-  const num5 = w / 4200;
+  let num5 = w / 4200;
+  // ★IIIII185（cs:17386-17388 = 1458 同行）：extraLiquid(waterpark) → num5 ×3
+  //   ⇒ 水箱总数 9×num5 三倍（4200 宽世界 9→27 槽，每槽两趟各 1 箱=54 箱）。
+  //   曾整臂缺失 → waterpark 链只放 18 箱，mile8 #62 Water_Chests 首差
+  //   (3833,253) T21>0×140（JS 缺 ~35 箱）主根因。
+  if (gs.seedFlags.extraLiquid) num5 *= 3.0;
   const count = 9 * num5;
   let num4 = 0;
   // ★SSS-CELEB（1458 cs:17395-17400）：tenth → maxValue 10→7（Lava Charm 863
@@ -1491,7 +1499,14 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
         case 1: main = 186; break;
         case 2: main = 4404; break;
         case 3: main = 277; break;
-        default: main = 187; num4 = 0; break;
+        // ★IIIII185（cs:17419-17425 = 1458 同行）：default 臂 extraLiquid 分支——
+        //   extraLiquid && num4==4 → 268（Diving Helmet 潜水头盔）且 **num4 不归零**（waterpark 循环节
+        //   186→4404→277→268→187 五拍，非 waterpark 四拍 186→4404→277→187）。
+        //   曾整臂缺失 → waterpark 链第 4 拍起主件全错 + num4 相位漂移。
+        default:
+          if (gs.seedFlags.extraLiquid && num4 === 4) { main = 268; }
+          else { main = 187; num4 = 0; }
+          break;
       }
     }
     // 两趟（cs:17424-17453）：趟1 y 首掷 [1, h-200)、重掷 [50, h-200)；

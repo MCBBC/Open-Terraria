@@ -6,8 +6,9 @@
 // One/InverseSourceAlpha;贴图经内容管线预乘,直色 PNG 先乘 texA;Draw 的 Color 入参
 // c 逐通道调制,src.rgb=texP×c.rgb 不乘 c.a、src.a=tex.a×c.a）：
 //   final = dst×(1−texA×cA) + tex.rgb×texA×cRGB   （单次 clamp）
-import { describe, it, expect } from 'vitest';
-import { dustPremulBake } from '../src/fx/VanillaDust';
+import { describe, it, expect, vi } from 'vitest';
+import { dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, DUST_PM_CACHE_MAX } from '../src/fx/VanillaDust';
+import { Renderer } from '../src/render/Renderer';
 
 /** 2×2 直色贴图：tA=255 / 半透 / 全透（形状外）/ 低α,覆盖四象限 */
 const TEX = new Uint8ClampedArray([
@@ -135,5 +136,73 @@ describe('旧直色 source-over 模型必偏离公式（语义 bug 钉死,防回
     // 而新烘焙对对同公式 ≤2（同输入同背景）
     const { add, erase } = dustPremulBake(TEX, 120, 120, 120, 120);
     expect(maxDev(compositePremulPair(dst, add, erase), xnaFormula(dst, TEX, 120, 120))).toBeLessThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dustPmCache 分代 LRU（2026-09-02 红队 PLAUSIBLE finding 清偿金标）——旧实现上限
+// 溢出【整体 clear】:连续多色 colorPass/331 贴片键周期打穿时全缓存瞬间归零,每键
+// 重烘 1×getImageData（GPU 回读）= 帧尖峰。金标钉死:溢出不清空全部/最旧先出/
+// 热键（命中重插入）不被分代窗口淘汰。
+// ---------------------------------------------------------------------------
+describe('dustPmCache 分代 LRU（溢出不清空全部/最旧先出）', () => {
+  it('dustPmCacheEvict:超限只逐出最旧 1/4,其余保留', () => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < 2100; i++) m.set(`k${i}`, i);
+    dustPmCacheEvict(m);
+    expect(m.size).toBe(2100 - (2100 >> 2));            // 1575 —— 非 0(旧 clear 归零)
+    expect(m.has('k0')).toBe(false);                    // 最旧先出
+    expect(m.has(`k${(2100 >> 2) - 1}`)).toBe(false);   // 逐出窗末（k524）
+    expect(m.has(`k${2100 >> 2}`)).toBe(true);          // 窗后首个幸存（k525）
+    expect(m.has('k2099')).toBe(true);                  // 最新档全保留
+  });
+
+  it('dustPmCacheTouch:命中重插入=访问序,热键不被分代淘汰', () => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < DUST_PM_CACHE_MAX + 1; i++) m.set(`k${i}`, i);   // 2049>2048
+    dustPmCacheTouch(m, 'k0');                          // 最旧键命中 → 移到尾
+    dustPmCacheEvict(m);                                // 逐 2049>>2=512 个
+    expect(m.size).toBe(DUST_PM_CACHE_MAX + 1 - 512);
+    expect(m.has('k0')).toBe(true);                     // 刚访问者幸存
+    expect(m.has('k1')).toBe(false);                    // 未访问旧键先出
+  });
+
+  it('≤上限零淘汰(顺序不变)', () => {
+    const m = new Map<string, number>([['a', 1], ['b', 2]]);
+    dustPmCacheEvict(m);
+    expect([...m.keys()]).toEqual(['a', 'b']);
+  });
+
+  it('dustPremulPair 接线:稳态规模有界不清空、命中同对象、最旧档被逐出后重烘', () => {
+    // node 环境无 canvas——桩 document.createElement（烘焙只走 clearRect/drawImage/
+    // getImageData/createImageData/putImageData 五口;数据面已由上方 dustPremulBake 组覆盖）
+    const px = new Uint8ClampedArray(8 * 8 * 4);
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 8, height: 8,
+        getContext: () => ({
+          clearRect: () => {}, drawImage: () => {}, putImageData: () => {},
+          getImageData: () => ({ data: px, width: 8, height: 8 }),
+          createImageData: () => ({ data: new Uint8ClampedArray(8 * 8 * 4), width: 8, height: 8 }),
+        }),
+      }),
+    });
+    try {
+      const self = { dustPmCache: null as Map<string, unknown> | null, dustPmBake: null };
+      const pairFn = (Renderer.prototype as unknown as {
+        dustPremulPair: (this: unknown, img: CanvasImageSource, fx: number, fy: number,
+          mr: number, mg: number, mb: number, ma: number) => unknown;
+      }).dustPremulPair;
+      const get = (fx: number) => pairFn.call(self, {} as CanvasImageSource, fx, 0, 0.5, 0.5, 0.5, 0.1);
+      const first = get(0);
+      expect(get(0)).toBe(first);                       // 命中=同一烘焙对(不重烘)
+      for (let i = 0; i < 2100; i++) get(i);            // 2100 独立键连续打穿
+      const size = self.dustPmCache!.size;
+      expect(size).toBeGreaterThan(0);                  // 溢出不清空全部(旧实现=0)
+      expect(size).toBeLessThanOrEqual(DUST_PM_CACHE_MAX + 2);   // 分代后稳态有界
+      expect(get(0)).not.toBe(first);                   // 最旧档已逐出 → 重烘新对象
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

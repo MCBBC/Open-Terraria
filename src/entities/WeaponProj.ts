@@ -550,8 +550,8 @@ export function meleeThrowSpeed(shootSpeed: number, attackSpeedMult: number): nu
 /** 挥掷系 shoot 出生落点核（ItemCheck_Shoot 通用尾支）：pointPosition =
  *  RotatedRelativePoint(MountedCenter)（1457 Player.cs:47588——无旋转/坐骑/睡坐
  *  = 玩家中心）→ NewProjectile 盒心落点（Projectile.cs:10878-10879
- *  position=(X−w/2, Y−h/2)）。链锤/悠悠球不在任何 sItem.type 特支 = 【无 per-weapon
- *  出生偏移】（备案所记"Center.X+9×dir、Bottom−8"经 1457/1456/1405 三版
+ *  落点（Projectile.cs:10878-10879）。链锤/悠悠球绝大多数无 per-weapon 出生偏移
+ *  （2026-08-23 备案；★2026-09-02 纠错:唯二例外 = 2611 Flairon/5526 FlaironFlail 出生前移 +1px 沿瞄准向（1457 Player.cs:47648-47657/1456 :46603-46612），当年审计只查 Projectile.cs 侧漏了 Player.cs，经 flaironSpawnNudge 接线）
  *  Player.cs/Projectile.cs 核对均无此式,2026-08-23）。e = 已构造弹体（读其
  *  SetDefaults 盒宽高）,(cx,cy) = 玩家中心;原地写回盒左上并返回。 */
 export function placeAtShootSpawn<T extends { x: number; y: number; w: number; h: number }>(
@@ -559,6 +559,28 @@ export function placeAtShootSpawn<T extends { x: number; y: number; w: number; h
   e.x = cx - e.w / 2;
   e.y = cy - e.h / 2;
   return e;
+}
+
+/** 猪龙鱼链球族出生前移受惠件（1457 Player.cs:47648-47657；1456 :46603-46612 同文）。
+ *  仅 2611 Flairon / 5526 FlaironFlail 两件在册；其余链锤（25/26/35/63/154/247/757/
+ *  947/948）与悠悠球均无 per-weapon 出生偏移。 */
+export const FLAIRON_NUDGE_VIDS = new Set([2611, 5526]);
+
+/** 2611/5526 出生前移支（1457 Player.cs:47648-47657 1:1）：
+ *  pointPosition += normalize(MouseWorld − pointPosition) = 沿瞄准单位向 **+1px**
+ *  （非 1 格 16px；:47619-47622 vector 已归一，:47653 重归一为防御性重复）。
+ *  零向量（鼠标=中心）不偏移（:47651 `!= Vector2.Zero` 门字面）。
+ *  仅改出生点、无 return——穿透 ItemCheck_Shoot 通用尾支（速度向量 num4/num5
+ *  亦自偏移后点起算 :47687-47716，故调用侧应把偏移后中心同时喂给构造与
+ *  placeAtShootSpawn）。非受惠件原样返回（供 case 'flail' 单点接线）。 */
+export function flaironSpawnNudge(
+  vid: number, cx: number, cy: number, mx: number, my: number,
+): { x: number; y: number } {
+  if (!FLAIRON_NUDGE_VIDS.has(vid)) return { x: cx, y: cy };
+  const dx = mx - cx, dy = my - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };      // :47651 Zero 门
+  const len = Math.sqrt(dx * dx + dy * dy);               // Vector2.Normalize = x/length
+  return { x: cx + dx / len, y: cy + dy / len };          // += 单位向量 = +1px
 }
 
 /** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size;
@@ -4687,8 +4709,18 @@ export class GrenadeProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    if (this.fired) { this.firedStep(game); return; }
     const st = game.world.store;
+    // ★出界杀（Projectile.cs:16793-16802：非 minion 弹中心出世界边界 →
+    //   active=false 静默消亡,无爆尘无 onExplode）——发射族（fired 火箭）fuse=3600
+    //   (60s),缺此支时出屏火箭【永生飞行+持续撒尾焰】(4 尘/t),连发 7-9 颗后
+    //   出屏老弹尘生成率逼近池容量 → 新弹尾焰被挤掉（用户实报"第 7-9 颗无尾焰",
+    //   2026-09-02 尘池 6000 扩容后仍现=池压力源非容量本身）。
+    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+      this.dead = true;
+      this.destroy();
+      return;
+    }
+    if (this.fired) { this.firedStep(game); return; }
     // ---- 液体炸弹入液即爆（AI_016 :44267：wet && {903..906} 族 → timeLeft=1 次帧爆；
     //      wet = Collision.WetCollision 投射物盒与任一液体格重叠 :10248）----
     if (LIQUID_BOMB_PROJ.has(this.projId)) {
@@ -5968,15 +6000,21 @@ export class RainCloudProj extends Entity {
     drawProj(r, cam, this, this.projId, this.rot, '#B8CCE8', a);
   }
 
-  /** ①移动云(:28353-28379):过锚逐轴清速,双轴齐停 → 亡(Kill 钩原位变降雨云) */
+  /** ①移动云(:28353-28379):直线飞行,过锚逐轴清速,双轴齐停 → 亡(Kill 钩原位变降雨云)。
+   *  ★237/243 未关 tileCollide(SetDefaults 无该行)——撞墙/撞地同走 Kill → 钩子照样
+   *  在受撞点变雨云(vanilla「云卡墙边也开始下雨」实况);管线轴零化视图先写回,
+   *  到锚判定按【碰撞后速度】读(velocity==0 即该轴完成,与原版 AI 读数序一致) */
   private aiMove(game: GameHooks): void {
-    this.x += this.vx; this.y += this.vy;
+    const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: true, dropThrough: false };
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    this.x = body.x; this.y = body.y;
+    this.vx = body.vx; this.vy = body.vy;   // TileCollision 后写:受阻轴置 0(原版同)
     const doneX = this.vx === 0
       || (this.vx < 0 && this.cx < this.anchorX) || (this.vx > 0 && this.cx > this.anchorX);
     const doneY = this.vy === 0
       || (this.vy < 0 && this.cy < this.anchorY) || (this.vy > 0 && this.cy > this.anchorY);
-    if (doneX) this.vx = 0;
-    if (doneY) this.vy = 0;
     if (doneX && doneY) {
       this.dead = true;                                    // Kill(:28373)
       // Kill 钩(:76032-76037):死亡点 Center 生成 238/244(0 速驻留)
