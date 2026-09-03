@@ -11,7 +11,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
@@ -7700,7 +7700,11 @@ export class Arrow extends Entity {
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
             SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
           dmg = res.dmg;
-          crit = res.crit;
+          // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
+          //   强制暴击掷在 tag 修正【之后】（原版序：changes.Crit.HasValue 覆写在前,
+          //   golem 掷在后仍可强制）——塔射弹全走本 tag 支（whipTagShot 置标）,掷面
+          //   与 else 支互补
+          crit = res.crit || rollGolemSentryCrit(game, this.projId, false);
         } else {
           // 暴击：基 4% + spawn 注入的系暴击/item.crit（P:2300-2304/P:25230-25232）
           // ★Notes（蓝队四轮，2026-08-31）：TryConsumingTimerCrit 并入（Projectile.cs
@@ -7711,7 +7715,12 @@ export class Arrow extends Entity {
           crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100)
             || ((game.player as unknown as
               { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
-              | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
+              | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)
+            // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
+            //   SentryShot 飞弹命中 10% 强制暴击（非哨兵弹掷恒 false,零扰面）——
+            //   此前仅 MinionProj 塔接触面掷,塔射弹（664/666/668/680/642/309/378/967/1026）
+            //   全漏
+            || rollGolemSentryCrit(game, this.projId, false);
           if (crit) dmg *= 2;
         }
         if (this.onFireHit) {

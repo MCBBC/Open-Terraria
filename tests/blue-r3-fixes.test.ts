@@ -59,7 +59,10 @@ describe('R3-16 火把神 949 命中玩家不杀弹(1457 SelfHurtPlayers 后无 
   it('命中伤害调用后紧邻代码无 this.kill(弹继续飞,无敌帧门由 Player 侧承担)', () => {
     const at = weaponSrc.indexOf('hostileProjectileDamage(40, mainDifficulty(game.world))');
     expect(at).toBeGreaterThan(0);
-    const after = weaponSrc.slice(at, at + 400);
+    // 窗 400→2400（2026-09-03）：M′-MINOR-3 注释块插入拉宽 call→R3-16 标记距离
+    // （实测 ~22 行注释 ≈1.8k 字符）;行为面不变——"无 this.kill"断言覆盖的
+    // 紧邻段（call→55 行外的 kill 全在窗口外,原版语义弹穿透续飞）不变
+    const after = weaponSrc.slice(at, at + 2400);
     expect(after).not.toContain('this.kill(game)');
     expect(after).toContain('R3-16');
   });

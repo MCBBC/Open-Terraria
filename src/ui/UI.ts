@@ -126,6 +126,7 @@ import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/
 import { assembleTooltipLines, materialIids } from './itemTooltip';
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
+import { tryItemSwapVid } from '../render/CursorItemIcon';
 import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
 import { mainDifficulty, GDL } from '../stats/ScaleStats';
 import { Lang } from '../i18n/Lang';
@@ -1261,6 +1262,21 @@ export class UI {
           && OPENABLE_BAG_VIDS.has(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''))) {
           this.tryOpenContainer(cur, i);
           return;
+        }
+        // HasItemSwap 右键换型（:1646-1653 独立门,先于装备/拆半）：canItemSwapAt 语境
+        // {0 inv/3 chest;装备栏 8/10 需过 equip 重算链未接=登记}+stack==1+光标空 →
+        // TryItemSwap(:1879 对表,CursorItemIcon.tryItemSwapVid)原地 ChangeItemType +音
+        //（AfterItemSwap :1992-2008 换入 2611/5526 族=22 'unlock'/其余 7 'pickup'）;
+        // DOM mousedown 即边沿=mouseRightRelease 语义。悬停提示面 = ItemTooltip.{Name}
+        // 的 {InputTrigger_ToggleOrOpen}(Lang.cs:160)走 staticTip 支;测试 tests/has-item-swap.test.ts
+        if (!this.heldStack && cur && cur.stack === 1 && (where === 'inv' || where === 'chest')) {
+          const sw = tryItemSwapVid(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''));
+          if (sw && invIndexOfVanilla(sw.target) > 0) {
+            cur.id = invIndexOfVanilla(sw.target);
+            this.game.sfx.play(sw.sound, 1);
+            this.refreshAll();
+            return;
+          }
         }
         if (!this.heldStack && cur && cur.stack === 1 && this.canSwapEquip(cur.id)) {
           this.swapEquipItem(cur, where, i);

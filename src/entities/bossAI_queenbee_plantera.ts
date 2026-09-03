@@ -598,6 +598,10 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
         // 两级相乘=原版口径;此前直传 22/27/31 会漏掉专家端 0.9 系数(2026-08-19 结案)
         num806 = getAttackDamageForProjectiles(num806, num806 * 0.9, e.difficulty);
         shoot(game, e.cx + num803 * 3, e.cy + num804 * 3, num803, num804, num806, num807, life, arrowOpts);
+        // 出膛音（Projectile.cs:56303-56312 ai[1]==0 首拍）:弹 275 种子 / 276 毒种
+        // → Item17（277 刺球不在 AI_001 出膛音链,无声）——发射位等价结算
+        // （弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
+        if (num807 === 275 || num807 === 276) game.playSfxWav?.('Item_17', 1, e.cx, e.cy);
       }
     }
   } else {

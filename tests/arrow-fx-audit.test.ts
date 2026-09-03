@@ -340,3 +340,81 @@ describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位
     expect(m, 'bossAI_lunar_misc.ts 弹 576 出膛位缺 Item_12 播放').toBeTruthy();
   });
 });
+
+// ===========================================================================
+// 出膛音面金标·dormant 族清偿（2026-09-03 任务一）——原版 AI_001 出膛音链
+// （Projectile.cs:56196-56340,aiStyle 1 弹 ai[1]==0 首拍）逐型核对后,发射方已实装
+// 且音缺的 9 型在发射位补播（弹先出生后补播,同 83/576 先例）：
+//   100 DeathLaser→Item_33(:56273-56277)   110 BulletSnowman→Item_11(:56211-56215)
+//   438 RayGunnerLaser→Item_12(:56221-56225) 592 MartianWalkerLaser→Item_12(:56232-56235)
+//   1073 PoisonDartShotFromSlimes→Item_17(:56284-56287) 195 PygmySpear→Item_17(:56298-56302)
+//   389 MiniRetinaLaser→Item_12(:56263-56267) 408 MiniSharkron→Item_19(:56201-56205,
+//   legacy PlaySound(4,x,y,19)=Item 系 19 号) 275/276 SeedPlantera→Item_17(:56303-56312)
+// dormant 备案（发射方在禁碰域 WeaponProj.ts:4065,不动）：248 FlowerPowPetal→Item_17
+//   (:56323-56327,发射方=FlowerPow 花粉锤弹 247 命中链, item 1259→proj 247)
+// 259/593 本就已在位（bossAI_golem golemEyeLasers×2 / bossAI_lategame ancientDoomAI）。
+// ===========================================================================
+describe('出膛音面金标·dormant 族（2026-09-03 任务一:9 型发射位补播）', () => {
+  const readSrc = (rel: string): string =>
+    readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+  it('①毁灭者段/雷眼三阶激光 100：bossAI.ts 发射位播 Item_33（共 4 口,抽 2 口锚验）', () => {
+    const src = readSrc('../src/entities/bossAI.ts');
+    // 雷眼三阶悬浮激光口（NPC.cs:26991-27005）
+    expect(src.match(
+      /getAttackDamageForProjectiles\(25, 23, e\.difficulty\), 100\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/),
+      'bossAI.ts 雷眼三阶弹 100 出膛位缺 Item_33').toBeTruthy();
+    // 毁灭者段链激光口（NPC.cs:50204-50241）
+    expect(src.match(
+      /22, 18, e\.difficulty\), 100, 300\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/),
+      'bossAI.ts 毁灭者段弹 100 出膛位缺 Item_33').toBeTruthy();
+  });
+
+  it('②机枪雪球 110：bossAI_moon_events.ts 发射位紧邻 shootE(…110) 播 Item_11', () => {
+    const src = readSrc('../src/entities/bossAI_moon_events.ts');
+    const m = src.match(
+      /shootE\(game, ox, oy, 12 \* e\.facing, 0, 25, 110\);[\s\S]{0,240}?playSfxWav\?\.\('Item_11'/);
+    expect(m, 'bossAI_moon_events.ts 弹 110 出膛位缺 Item_11 播放').toBeTruthy();
+  });
+
+  it('③骑手激光 438：bossAI_martian.ts 发射位紧邻 shootM(…438) 播 Item_12', () => {
+    const src = readSrc('../src/entities/bossAI_martian.ts');
+    const m = src.match(
+      /shootM\(game, oxp, oyp, sx, sy, 30, 438\);[\s\S]{0,520}?playSfxWav\?\.\('Item_12'/);
+    expect(m, 'bossAI_martian.ts 弹 438 出膛位缺 Item_12 播放').toBeTruthy();
+  });
+
+  it('④激光枪手 438/火星行者 592：Enemy.ts RANGED 通用支按 projId 播 Item_12', () => {
+    const src = readSrc('../src/entities/Enemy.ts');
+    const m = src.match(
+      /spawnHostileProj\(game, ox2, oy2, vx, vy, dmgF, proj\);[\s\S]{0,320}?proj === 438 \|\| proj === 592[\s\S]{0,120}?playSfxWav\?\.\('Item_12'/);
+    expect(m, 'Enemy.ts RANGED 通用支缺 438/592 → Item_12 播放').toBeTruthy();
+  });
+
+  it('⑤携物史莱姆毒镖 1073：Enemy.ts 发射位紧邻 spawnHostileProj(…1073) 播 Item_17', () => {
+    const src = readSrc('../src/entities/Enemy.ts');
+    const m = src.match(
+      /spawnHostileProj\(game, this\.cx, this\.cy, this\.facing \* 12, 0, 20, 1073\);[\s\S]{0,320}?playSfxWav\?\.\('Item_17'/);
+    expect(m, 'Enemy.ts 弹 1073 出膛位缺 Item_17 播放').toBeTruthy();
+  });
+
+  it('⑥俾格米掷矛 195/双子激光眼 389/迷你鲨鱼龙 408：MinionProj.ts MINION_SHOT_SFX 三项在表', () => {
+    const src = readSrc('../src/entities/MinionProj.ts');
+    expect(src.match(/195: \{ track: 'Item_17', vol: 0\.7 \}/),
+      'MINION_SHOT_SFX 缺 195→Item_17').toBeTruthy();
+    expect(src.match(/389: \{ track: 'Item_12', vol: 0\.7 \}/),
+      'MINION_SHOT_SFX 缺 389→Item_12').toBeTruthy();
+    expect(src.match(/408: \{ track: 'Item_19', vol: 0\.7 \}/),
+      'MINION_SHOT_SFX 缺 408→Item_19').toBeTruthy();
+    // 双消费口都在（ai62Step 口 + AI_026/aiStyle66 通用口）——漏一口=该族静音
+    expect((src.match(/MINION_SHOT_SFX\[shooter\.shot\]/g) ?? []).length >= 2,
+      'MINION_SHOT_SFX 消费口少于 2').toBeTruthy();
+  });
+
+  it('⑦普兰黛拉种子 275/276：bossAI_queenbee_plantera.ts 发射位播 Item_17（277 除外）', () => {
+    const src = readSrc('../src/entities/bossAI_queenbee_plantera.ts');
+    const m = src.match(
+      /num806, num807, life, arrowOpts\);[\s\S]{0,320}?num807 === 275 \|\| num807 === 276[\s\S]{0,120}?playSfxWav\?\.\('Item_17'/);
+    expect(m, 'bossAI_queenbee_plantera.ts 弹 275/276 出膛位缺 Item_17 播放').toBeTruthy();
+  });
+});

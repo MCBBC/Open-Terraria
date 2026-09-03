@@ -29,7 +29,7 @@ import { soundTrackFiles } from '../data/vanillaNpcs';
 // DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
 import { ParticleOrchestraType } from '../net/syncModules';
 import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
-import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
+import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCellsMushroom';
@@ -508,12 +508,22 @@ const MINION_SUMMON_SFX: Record<number, Array<{ track: string; vol: number; at: 
 
 /** 随从射弹出膛音（原版在弹幕 AI 首帧 localAI[0]==0 处 PlaySound，等效落射弹生成帧）：
  *  374 毒刺 Item_17（:52670）/ 376 小鬼火球 Item_20（:52684）/ 378 蛛卵 Item_17（:23398）/
- *  967 猎犬弹 Item_60（:24971）。408/433/614/195/389/642 原版无出膛音（AI 无 PlaySound） */
+ *  967 猎犬弹 Item_60（:24971）/ 195 矮人掷矛 Item_17（:56298-56302）/ 389 双子激光眼
+ *  Item_12（:56263-56267）/ 408 迷你鲨鱼龙 Item_19（:56201-56205 legacy PlaySound(4,x,y,19)）
+ *  ——随从本体的 AI_026/AI_062 不播,但射出弹均为 aiStyle 1,吃 Projectile.AI_001 出膛
+ *  音链 ai[1]==0 首拍（2026-09-03 dormant 族审计翻案:旧注"408/433/614/195/389/642
+ *  原版无出膛音"只核了随从 AI 本体——433/614/642 仍属实无声,408/195/389 属 aiStyle 1 有声）。
+ *  408 原版 ai[1]=num13（AI_062 :67126 传目标槽位,缺省 −1）——仅目标=0 号槽时过
+ *  ai[1]==0 门;本仓射弹无 ai1 通道恒 0 → 恒按有声面播（195 的 ai[1]=num159 对 191 族
+ *  恒 0、389 无 ai 参,两型原版本就每发必播） */
 const MINION_SHOT_SFX: Record<number, { track: string; vol: number }> = {
   374: { track: 'Item_17', vol: 0.7 },
   376: { track: 'Item_20', vol: 0.7 },
   378: { track: 'Item_17', vol: 0.7 },
   967: { track: 'Item_60', vol: 0.7 },
+  195: { track: 'Item_17', vol: 0.7 },
+  389: { track: 'Item_12', vol: 0.7 },
+  408: { track: 'Item_19', vol: 0.7 },
 };
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
@@ -3827,9 +3837,7 @@ export class MinionProj extends Entity {
         this.ownerRef());
       // 圣殿骑士背包 6176（accGolemSentryBackpack :12963-12967）：sentry/SentryShot
       // 命中 10% 强制暴击（×2,与 TagCrit 暴击同通道）
-      let golemCrit = false;
-      const gOwn = this.ownerRef();
-      if (this.sentry && gOwn?.equipStats.accGolemSentryBackpack && Math.random() < 0.1) golemCrit = true;
+      let golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 6176（:12962-12965 1:1,共享掷）
       // 击退 = 武器 kb×0.5（本作接触系数）+ minionKB 加算（GetWeaponKnockback :52477-52482：
       // 大力士甲虫/纸莎草 +2——首版聚合了 equipStats.minionKB 但漏消费，终审补接；
       // buff 段 = 醉酒 +1 :11520 / 饥饿 -0.5 / 极饿 -1 :11570/:11594，2026-08-20 饥饿链补）
@@ -4609,7 +4617,12 @@ export class MinionProj extends Entity {
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
-            en.hurt(applyBannerDamageDealt(game, en, res.dmg), 0, 0, game, 0, false, 1, true, penPctAura); // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计
+            // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计。
+            // ★6176 圣殿骑士背包（:12962-12965,2026-09-03 收口）：光环场伤=塔本体
+            //   （sentry）直伤面 → 10% 强制暴击（此前仅接触面掷,场伤面漏掷）
+            const golemCritAura = rollGolemSentryCrit(game, this.projId, true);
+            en.hurt(applyBannerDamageDealt(game, en, golemCritAura ? res.dmg * 2 : res.dmg),
+              0, 0, game, 0, golemCritAura, 1, true, penPctAura);
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
           // ★台账批 C-3472（2026-08-31）：电弧声密度对齐原版 ai[0] 循环（AI_137
@@ -4660,7 +4673,11 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
-                en.hurt(applyBannerDamageDealt(game, en, dmgOf()), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
+                // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
+                //   原版伤害面=爆炸弹 694/695/696 本体（SentryShot）→ 10% 强制暴击
+                const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);
+                en.hurt(applyBannerDamageDealt(game, en, golemCritBoom ? dmgOf() * 2 : dmgOf()),
+                  Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, golemCritBoom, 1, true);
                 applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
@@ -4838,7 +4855,11 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
-                  en.hurt(applyBannerDamageDealt(game, en, dmgOf()), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
+                  // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
+                  //   原版伤害面=爆裂弹 644 本体（SentryShot）→ 10% 强制暴击
+                  const golemCritVolley = rollGolemSentryCrit(game, ss.shot, false);
+                  en.hurt(applyBannerDamageDealt(game, en, golemCritVolley ? dmgOf() * 2 : dmgOf()),
+                    Math.sign(en.cx - px) * this.knockback, -2, game, 0, golemCritVolley, 1, true);
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }

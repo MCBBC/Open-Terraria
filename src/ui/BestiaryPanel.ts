@@ -16,10 +16,23 @@
 //     含 GetLowestBiomeGroupIndex）/ Sort_Rarity（NpcBestiaryRarityStars，npcStats 投影）
 //   - 头像背景：IBestiaryBackgroundImagePathAndColorProvider（MapBG1-42 按出没环境
 //     推导，偏好 AddTags/世界恶双路/月总特例；网格=首个带图条件，详情=末个+bgColor 着色）
+//   - 详情头像装饰叠层（2026-09-03 闭合）：IBestiaryBackgroundOverlayAndColorProvider
+//     （NPCPortraitInfoElement.cs:77-84 + UIBestiaryNPCEntryPortrait.cs:43-54）——
+//     Visuals.* 八装饰（SpawnConditionDecorativeOverlayInfoElement，MapBGOverlay2-9）
+//     按 populator AddNPCBiomeRelationships_AddDecorations_Automated(:1942-1987) 分支
+//     推导挂载 + Events.Sandstorm（MapBGOverlay1，SpawnConditionBestiaryOverlayInfoElement）；
+//     仅详情大头像绘制（网格 TryGettingBackgroundImageProvider :105-127 无叠层），
+//     偏好命中（flag2）时整批不画，DisplayPriority 升序（Sandstorm 0 < Visuals 1），
+//     与底图同一目标盒拉伸、色 = overlayColor ?? Lerp(White, portraitColor, 0.5)
+//   - 标签筛选（2026-09-03 闭合）：Filters.ByRareCreature + Filters.ByInfoElement×57
+//     （CommonTags.GetCommonInfoElementsForFilters，populator RegisterFilters :493-503），
+//     UI = 图标格弹层（UIBestiaryFilteringOptionsGrid：32² 钮/perRow 12/Icon_Tags_Shadow
+//     帧 16×5/可用性=存在已解锁命中条目/激活钮 rgb(152,175,235)、未激活
+//     InventoryDefaultColor×0.7）；EntryFilterer.FitsFilter 语义 = 激活筛选 OR 合取
+//   - 网格小图 Portrait_Front/Slot_* 前后框层与右上分页序号未画（纯装饰贴图层，
+//     与解锁态/数据无关——原 UI 保留项，非本次登记缺口）
 // 登记缺口（后续批次）：
-//   - Visuals.* 装饰叠层（MapBGOverlay1-9：Rain/Blizzard/Sun/Moon/Meteor 等）——
-//     提取数据已含 derivations 推导规则，DOM 头像暂只铺底图不叠装饰层
-//   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 群系 / 事件标签
+//   - 无
 import { upgradeToBitmap, USE_BITMAP } from '../assets/SpriteAtlas';
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
@@ -90,6 +103,40 @@ function bstTintedFrame(
   bstTintCache.set(key, c);
   return c;
 }
+
+/** 叠层着色（UIBestiaryNPCEntryPortrait :43-54：spriteBatch.Draw(tex, rect, Color)——
+ *  XNA 颜色乘算 RGB×c/255、α×c.A/255；Web 直色差同 bstTintedFrame 勘误,预乘空间
+ *  恒等单张精灵,逐像素离屏合成）。key = 贴图名|rgba（叠层仅 MapBGOverlay1-9×两色,
+ *  缓存天然有界） */
+const bstOverlayTintCache = new Map<string, HTMLCanvasElement>();
+function bstTintedOverlay(name: string, img: ImageBitmap | HTMLImageElement, rgba: number[]): HTMLCanvasElement {
+  const key = `${name}|${rgba.join(',')}`;
+  const hit = bstOverlayTintCache.get(key);
+  if (hit) return hit;
+  const w = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
+  const h = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, w); c.height = Math.max(1, h);
+  const cx = c.getContext('2d');
+  if (cx) {
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(0, 0, c.width, c.height);
+    const dd = d.data;
+    const kr = rgba[0] / 255, kg = rgba[1] / 255, kb = rgba[2] / 255, ka = (rgba[3] ?? 255) / 255;
+    for (let i = 0; i < dd.length; i += 4) {
+      if (dd[i + 3] === 0) continue;
+      dd[i] = Math.min(255, dd[i] * kr);
+      dd[i + 1] = Math.min(255, dd[i + 1] * kg);
+      dd[i + 2] = Math.min(255, dd[i + 2] * kb);
+      dd[i + 3] = Math.min(255, dd[i + 3] * ka);
+    }
+    cx.putImageData(d, 0, 0);
+  }
+  if (bstOverlayTintCache.size > 64) bstOverlayTintCache.clear();
+  bstOverlayTintCache.set(key, c);
+  return c;
+}
 import { npcValueOf } from '../drops/NpcDrops';
 import dropData from '../data/vanilla-npcdrops.json';
 import spawnData from '../data/vanilla-bestiary-spawn.json';
@@ -98,7 +145,7 @@ import { isBound } from '../core/Keybinds';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
-  bestiaryRarityStars, bestiarySortingId, isBossForBestiary,
+  bestiaryRarityStars, bestiarySortingId, isBossForBestiary, isRareSpawnForBestiary,
   type BestiaryEntryDef, type BestiaryTracker,
 } from '../data/Bestiary';
 
@@ -162,9 +209,13 @@ export interface BestiaryFilter {
   boss: boolean;
   /** Filters.ByUnlockState（BestiaryInfo.IfUnlocked）；'no' 为反向（本仓补充） */
   unlocked: 'all' | 'yes' | 'no';
+  /** 标签筛选激活集（Filters.ByRareCreature 的 'rare' + Filters.ByInfoElement 的
+   *  出没环境路径键；EntryFilterer.FitsFilter :37-56 语义 = 激活筛选【OR】合取——
+   *  命中任一激活筛选即通过，其余维度（search/kind/boss/unlocked）仍 AND） */
+  tags: string[];
 }
 
-export const DEFAULT_BESTIARY_FILTER: BestiaryFilter = { search: '', kind: 'all', boss: false, unlocked: 'all' };
+export const DEFAULT_BESTIARY_FILTER: BestiaryFilter = { search: '', kind: 'all', boss: false, unlocked: 'all', tags: [] };
 
 export interface BestiaryRow {
   entry: BestiaryEntryDef;
@@ -271,7 +322,7 @@ export function sortBestiaryRows(rows: BestiaryRow[], key: BestiarySortKey): voi
   rows.sort(cmp[key]);
 }
 
-/** 筛选（Filters.BySearch/ByUnlockState/ByBoss + 本仓 kind 维度） */
+/** 筛选（Filters.BySearch/ByUnlockState/ByBoss/ByRareCreature/ByInfoElement + 本仓 kind 维度） */
 export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): BestiaryRow[] {
   const q = f.search.trim().toLowerCase();
   return rows.filter((r) => {
@@ -279,6 +330,16 @@ export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): Best
     if (f.boss && !isBossCredit(r.entry.creditId)) return false;
     if (f.unlocked === 'yes' && r.state === UnlockState.NotKnown) return false;
     if (f.unlocked === 'no' && r.state > UnlockState.NotKnown) return false;
+    // 标签筛选（EntryFilterer.FitsFilter Terraria.DataStructures/EntryFilterer.cs:37-56：
+    // ActiveFilters 逐个 FitsFilter，任一命中即过——OR 合取；'rare'=Filters.ByRareCreature，
+    // 其余=Filters.ByInfoElement 的 `entry.Info.Contains(element)`，即出没环境注册表含该路径）
+    if (f.tags.length) {
+      const paths = SPAWN_BY_NPC[String(r.npcId)];
+      const hit = f.tags.some((t) => t === 'rare'
+        ? isRareSpawnForBestiary(r.npcId)
+        : !!paths?.includes(t));
+      if (!hit) return false;
+    }
     // BySearch：未解锁条目不提供搜索串（原版 NamePlate 隐藏）
     if (q && (r.state === UnlockState.NotKnown || !r.name.toLowerCase().includes(q))) return false;
     return true;
@@ -292,8 +353,9 @@ export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): Best
  *  kind all/enemy 与 boss 自由组合（结果集非空：全部→boss 25 条 / 敌怪→boss 25 条） */
 export function applyBestiaryChip(
   f: BestiaryFilter,
-  chip: 'kind' | 'boss' | 'unlocked' | 'unlockedNo',
+  chip: 'kind' | 'boss' | 'unlocked' | 'unlockedNo' | 'tag',
   kind?: BestiaryFilter['kind'],
+  tagKey?: string,
 ): BestiaryFilter {
   const nf: BestiaryFilter = { ...f };
   if (chip === 'kind' && kind) {
@@ -304,6 +366,10 @@ export function applyBestiaryChip(
     if (nf.boss && nf.kind !== 'all' && nf.kind !== 'enemy') nf.kind = 'enemy';
   } else if (chip === 'unlocked') {
     nf.unlocked = nf.unlocked === 'yes' ? 'all' : 'yes';
+  } else if (chip === 'tag' && tagKey) {
+    // EntryFilterer.ToggleFilter（EntryFilterer.cs:58-67）：在 AvailableFilters 中
+    // 查身份，ActiveFilters 含则移除否则加入（ToggleFilter(int) 按索引查，此处按键）
+    nf.tags = nf.tags.includes(tagKey) ? nf.tags.filter((t) => t !== tagKey) : [...nf.tags, tagKey];
   } else {
     nf.unlocked = nf.unlocked === 'no' ? 'all' : 'no';
   }
@@ -533,6 +599,15 @@ function bgProviders(npcId: number): BgProvider[] {
   return out;
 }
 
+/** 详情页大头像偏好命中（NPCPortraitInfoElement.cs:56-67 flag2）：偏好条件（AddTags，
+ *  世界恶双路按 crimson 取一）命中首个带图提供者。命中时底图锁定且**装饰叠层整批
+ *  不画**（:77 `if (!flag2 && ... GetBackgroundOverlayImage() != null)` 短路） */
+export function bestiaryPortraitPrefHit(npcId: number, crimson = false): boolean {
+  const providers = bgProviders(npcId);
+  const pref = bestiaryBgPreferencePaths(npcId, crimson);
+  return pref.length > 0 && providers.some((p) => p.path !== null && pref.includes(p.path));
+}
+
 /** 详情页大头像背景（NPCPortraitInfoElement.cs:38-81）：偏好条件（AddTags，
  *  世界恶双路按 crimson 取一）命中则锁定其贴图；否则每轮覆写 → 注册序**最后一个**
  *  带图条件。着色 = 有图提供者中最后一个声明 bgColor 者（偏好命中后仍生效） */
@@ -540,9 +615,9 @@ export function bestiaryPortraitBackground(npcId: number, crimson = false): Best
   const providers = bgProviders(npcId);
   let image: string | null = null;
   let color: [number, number, number, number] = [255, 255, 255, 255];
-  const pref = bestiaryBgPreferencePaths(npcId, crimson);
-  const prefHit = pref.length ? providers.find((p) => p.path !== null && pref.includes(p.path)) : undefined;
-  if (prefHit) image = prefHit.bg;                       // flag2：偏好锁定
+  const prefHit = bestiaryPortraitPrefHit(npcId, crimson);
+  const pref = prefHit ? bestiaryBgPreferencePaths(npcId, crimson) : [];
+  if (prefHit) image = (providers.find((p) => p.path !== null && pref.includes(p.path)) as BgProvider).bg;  // flag2：偏好锁定
   for (const p of providers) {
     if (!prefHit) image = p.bg;                          // 无偏好：末个胜出
     if (p.bgColor) color = [p.bgColor[0], p.bgColor[1], p.bgColor[2], p.bgColor[3] ?? 255];
@@ -558,6 +633,100 @@ export function bestiaryGridBackground(npcId: number, crimson = false): string |
   const pref = bestiaryBgPreferencePaths(npcId, crimson);
   const hit = pref.length ? providers.find((p) => p.path !== null && pref.includes(p.path)) : undefined;
   return (hit ?? providers[0]).bg;
+}
+
+// ============ 详情头像装饰叠层（IBestiaryBackgroundOverlayAndColorProvider 消费面） ============
+//  NPCPortraitInfoElement.cs:73-84：解锁（>NotKnown）后遍历 Info，收集 GetBackgroundOverlayImage()
+//  非 null 的叠层提供者（偏好命中 flag2 时整批跳过），OrderBy(DisplayPriority) 稳定升序；
+//  UIBestiaryNPCEntryPortrait.cs:43-54：每层与底图同一目标盒拉伸居中，色 =
+//  GetBackgroundOverlayColor() ?? Color.Lerp(Color.White, portraitColor, 0.5f)。
+
+export interface BestiaryPortraitOverlay {
+  /** 叠层贴图名（public/sprites/vanilla/MapBGOverlay*.png，原 Images/MapBGOverlay*） */
+  overlay: string;
+  /** 声明色（null = 绘制侧 Lerp(White, portraitColor, 0.5) 回退） */
+  color: [number, number, number, number] | null;
+  /** DisplayPriority（SpawnConditionBestiaryOverlayInfoElement 默认 0 / Decorative 1，
+   *  NPCPortraitInfoElement.GetSortingValueForElement :105-112） */
+  priority: number;
+}
+
+/** Visuals.* 装饰挂载推导（populator AddNPCBiomeRelationships_AddDecorations_Automated
+ *  :1942-1987 分支结构 1:1——Rain 在册时按 Snow 二分后 **continue**（不落日/月/事件月），
+ *  无 Rain 才逐条件独立追加；陨石群系 = Moon+Meteor 双挂）。
+ *  derivations 数据表（vanilla-bestiary-spawn.json）是本分支的提取投影 */
+export function bestiaryPortraitOverlays(npcId: number): BestiaryPortraitOverlay[] {
+  const paths = SPAWN_BY_NPC[String(npcId)] ?? [];
+  const has = (p: string) => paths.includes(p);
+  const out: BestiaryPortraitOverlay[] = [];
+  const push = (path: string) => {
+    const c = SPAWN_CONDITIONS[path];
+    if (c?.overlay) out.push({ overlay: c.overlay, color: (c.overlayColor as BestiaryPortraitOverlay['color']) ?? null, priority: 1 });
+  };
+  // Info 内显式叠层提供者（注册序）：SpawnConditionBestiaryOverlayInfoElement 全集 =
+  // Events.Rain/:57、Events.Blizzard/:81、Events.Sandstorm/:88——仅 Sandstorm 带
+  // MapBGOverlay1（Rain/Blizzard 无 overlayImagePath 实参 → GetBackgroundOverlayImage()
+  // ==null 不收集），DisplayPriority 默认 0
+  for (const p of paths) {
+    const c = SPAWN_CONDITIONS[p];
+    if (c?.overlay && p.startsWith('Events.')) {
+      out.push({ overlay: c.overlay, color: (c.overlayColor as BestiaryPortraitOverlay['color']) ?? null, priority: 0 });
+    }
+  }
+  // Visuals.* 装饰（SpawnConditionDecorativeOverlayInfoElement，DisplayPriority=1）
+  if (has('Events.Rain')) {
+    push(has('Biomes.Snow') ? 'Visuals.Blizzard' : 'Visuals.Rain');
+  } else {
+    if (has('Events.Eclipse')) push('Visuals.EclipseSun');
+    if (has('Times.NightTime')) push('Visuals.Moon');
+    if (has('Times.DayTime')) push('Visuals.Sun');
+    if (has('Invasions.PumpkinMoon')) push('Visuals.PumpkinMoon');
+    if (has('Invasions.FrostMoon')) push('Visuals.FrostMoon');
+    if (has('Biomes.Meteor')) { push('Visuals.Moon'); push('Visuals.Meteor'); }
+  }
+  // OrderBy(DisplayPriority) 稳定升序（ Sandstorm 0 < Visuals 1；同 priority 保注册序）
+  return out.map((o, i) => [o, i] as const)
+    .sort((a, b) => a[0].priority - b[0].priority || a[1] - b[1])
+    .map(([o]) => o);
+}
+
+// ============ 标签筛选注册表（Filters + UIBestiaryFilteringOptionsGrid） ============
+//  RegisterFilters（populator :493-503）注册序：ByUnlockState → ByBoss → ByRareCreature →
+//  CommonTags.GetCommonInfoElementsForFilters（:252-311，57 条 ByInfoElement）。
+//  ByUnlockState/ByBoss 由本仓 chip 行承载（同 Filters 语义），图标格从 ByRareCreature 起。
+
+export interface BestiaryFilterDef {
+  /** 筛选键：'rare' = Filters.ByRareCreature；其余 = 出没环境路径（Filters.ByInfoElement
+   *  的 `entry.Info.Contains(element)` 元素身份） */
+  key: string;
+  /** 悬停名/键名（FilterProviderInfoElement.GetDisplayNameKey / Filters.GetDisplayNameKey） */
+  nameKey: string;
+  /** Icon_Tags_Shadow 帧号（16×5 帧表；FilterProviderInfoElement :24-29 X=frame%16,Y=frame/16）。
+   *  -1 = ByRareCreature 专图 Icon_Rank_Light（Filters.cs:105-116 单帧星形） */
+  frame: number;
+}
+
+/** 图标格筛选全集（ByRareCreature + 57 环境标签，注册序 1:1；帧号 = 提取表 priority
+ *  字段，即 populator 各元素第 2 构造参数 filterIconFrame） */
+export const BESTIARY_FILTER_DEFS: BestiaryFilterDef[] = [
+  { key: 'rare', nameKey: 'BestiaryInfo.IsRare', frame: -1 },
+  ...(((spawnData as unknown as SpawnJson).commonFilters) as string[]).map((p) => ({
+    key: p,
+    nameKey: SPAWN_CONDITIONS[p]?.key ?? p,
+    frame: SPAWN_CONDITIONS[p]?.priority ?? 0,
+  })),
+];
+
+/** 筛选可用性（UIBestiaryFilteringOptionsGrid.GetIsFilterAvailableForEntries :183-198）：
+ *  ForcedDisplay 为 null 的筛选 = 存在【已解锁】命中条目才可用（不可用钮在原版
+ *  灰显 Icon_Tags_Shadow 帧(0,4) 且移出 ActiveFilters） */
+export function bestiaryFilterAvailable(key: string, rows: BestiaryRow[]): boolean {
+  for (const r of rows) {
+    if (r.state === UnlockState.NotKnown) continue;
+    if (key === 'rare') { if (isRareSpawnForBestiary(r.npcId)) return true; continue; }
+    if (SPAWN_BY_NPC[String(r.npcId)]?.includes(key)) return true;
+  }
+  return false;
 }
 
 // ============ DOM 面板 ============
@@ -643,6 +812,26 @@ const CSS = `
 .sw-bst-chip.active { background:#5a6ac0; color:#fff; outline:1px solid #ffd76e; }
 .sw-bst-back { flex:none; width:auto; height:26px; padding:5px 14px; font-size:12px;
   white-space:nowrap; }
+/* 标签筛选钮+计数（UIBestiaryTest.AddSortAndFilterButtons :261-283：Button_Filtering
+ *  114×28 图标钮 + 右侧 _filteringText = BestiaryInfo.Filters 计数文案） */
+.sw-bst-fbtn { flex:none; width:30px; height:26px; padding:3px; background:#3a4680;
+  border:1px solid #7d92d6; border-radius:4px; cursor:pointer; }
+.sw-bst-fbtn:hover { background:#4a5aa0; }
+.sw-bst-fbtn img { width:100%; height:100%; image-rendering:pixelated; pointer-events:none; }
+.sw-bst-ftext { flex:none; font-size:11px; color:#cfd6f2; max-width:96px; overflow:hidden;
+  white-space:nowrap; text-overflow:ellipsis; }
+/* 图标格弹层（UIBestiaryFilteringOptionsGrid：30² 图标在 32² 钮内/perRow 12/间距 2/
+ * 容器内边距 6；激活钮 SetColor(152,175,235)、未激活 InventoryDefaultColor(63,65,151)×0.7） */
+.sw-bst-fgrid { position:absolute; right:10px; top:42px; z-index:5; display:grid;
+  gap:2px; padding:6px; background:rgba(73,94,171,0.9); border:1px solid rgba(89,116,213,0.9);
+  border-radius:4px; grid-template-columns:repeat(12, 32px); }
+.sw-bst-fcell { width:32px; height:32px; padding:1px; border:none; border-radius:2px;
+  background:rgb(63,65,151); opacity:0.7; cursor:pointer; }
+.sw-bst-fcell:hover { opacity:1; }
+.sw-bst-fcell.active { background:rgb(152,175,235); opacity:1; }
+.sw-bst-fcell.dim { cursor:default; opacity:0.35; background:transparent; }
+.sw-bst-fcell img { width:30px; height:30px; object-fit:none; object-position:0 0;
+  image-rendering:pixelated; pointer-events:none; }
 .sw-bst-main { flex:1; display:flex; gap:8px; padding:0 10px; min-height:0; }
 .sw-bst-gridwrap { flex:1; min-width:0; position:relative; overflow:hidden; }
 .sw-bst-grid { display:grid; }
@@ -713,7 +902,7 @@ export class BestiaryPanel {
       this.close();
     }
   };
-  private filter: BestiaryFilter = { ...DEFAULT_BESTIARY_FILTER };
+  private filter: BestiaryFilter = { ...DEFAULT_BESTIARY_FILTER, tags: [] };
   private sortKey: BestiarySortKey = 'unlocks';
   private offset = 0;
   private perPage = 40;
@@ -751,6 +940,8 @@ export class BestiaryPanel {
         <div class="sw-bst-range">0-0 (0)</div>
         <select class="sw-bst-sel" data-sort></select>
         <div class="sw-bst-chips"></div>
+        <button class="sw-bst-fbtn" data-filter title=""><img alt="" src="sprites/vanilla-ui/UI_Bestiary_Button_Filtering.png" /></button>
+        <div class="sw-bst-ftext" data-filtertext></div>
         <input class="sw-bst-search" type="text" placeholder="${Lang.text('Mods.SandboxWorld.Bestiary.Search')}" data-search />
         <button class="sw-bst-nav sw-bst-back" data-close></button>
       </div>
@@ -771,6 +962,8 @@ export class BestiaryPanel {
     this.barEl = this.panel.querySelector('.sw-bst-bar i') as HTMLElement;
     this.searchEl = this.panel.querySelector('[data-search]') as HTMLInputElement;
     this.chipsEl = this.panel.querySelector('.sw-bst-chips')!;
+    this.filterTextEl = this.panel.querySelector('[data-filtertext]');
+    // 初始空文案（原版 _filteringText 空 StartText，首次筛选弹层开合后才 SetText）
     this.sortSel = this.panel.querySelector('[data-sort]') as HTMLSelectElement;
     this.buildSortSel();
     this.buildChips();
@@ -781,6 +974,12 @@ export class BestiaryPanel {
     });
     this.gridWrap.addEventListener('wheel', this.wheelHandler, { passive: false });
     this.searchEl.addEventListener('input', () => { this.filter.search = this.searchEl.value; this.offset = 0; this.refresh(); });
+    // 标签筛选弹层开关（UIBestiaryTest.OpenOrCloseFilteringGrid :410-420）：
+    // 点击图标钮开合；点格切换（ClickOption → ToggleFilter）；点弹层外关闭（:422-428）
+    this.panel.querySelector('[data-filter]')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFilterGrid();
+    });
     this.sortSel.addEventListener('change', () => {
       this.sortKey = (this.sortSel!.value || 'unlocks') as BestiarySortKey;
       this.offset = 0;
@@ -863,6 +1062,98 @@ export class BestiaryPanel {
         this.filter = applyBestiaryChip(f, 'unlockedNo');
         this.buildChips();
       }));
+  }
+
+  // ---- 标签筛选图标格（UIBestiaryFilteringOptionsGrid + UIBestiaryTest 弹层链）----
+
+  private filterGridEl: HTMLElement | null = null;
+  private filterTextEl: HTMLElement | null = null;
+  /** 弹层开合（UIBestiaryTest.OpenOrCloseFilteringGrid :410-420 / CloseFilteringGrid
+   *  :430-441——关闭时 UpdateAvailability + 计数文案 + FilterEntries 重筛） */
+  private toggleFilterGrid(): void {
+    if (this.filterGridEl?.isConnected) {
+      this.closeFilterGrid();
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'sw-bst-fgrid';
+    grid.addEventListener('click', (e) => e.stopPropagation());
+    this.panel.appendChild(grid);
+    this.filterGridEl = grid;
+    // 点弹层/筛选钮以外关闭（:422-428 Click_CloseFilteringGrid 语义）
+    this.filterOutside = (e) => {
+      if (!this.filterGridEl?.isConnected) return;
+      const t = e.target as Node;
+      if (this.filterGridEl.contains(t) || (e.target as HTMLElement)?.closest?.('[data-filter]')) return;
+      this.closeFilterGrid();
+    };
+    document.addEventListener('click', this.filterOutside);
+    this.buildFilterGrid();
+    UISfx.click();
+  }
+
+  private filterOutside: ((e: MouseEvent) => void) | null = null;
+
+  private closeFilterGrid(): void {
+    document.removeEventListener('click', this.filterOutside);
+    this.filterOutside = null;
+    this.filterGridEl?.remove();
+    this.filterGridEl = null;
+    this.updateFilterText();
+  }
+
+  /** UpdateAvailability（UIBestiaryFilteringOptionsGrid.cs:62-122）1:1：
+   *  每筛选钮 32²/间距 2/perRow 12（GetDisplaySettings :144-157 钉死 perRow=12）、
+   *  可用性 = 存在已解锁命中条目（GetIsFilterAvailableForEntries :183-198，不可用钮
+   *  换 Icon_Tags_Shadow 帧(0,4)×0.2 且不可点）；选中态 UpdateButtonSelections :159-171 */
+  private buildFilterGrid(): void {
+    const grid = this.filterGridEl;
+    if (!grid) return;
+    grid.replaceChildren();
+    const unlockedRows = bestiaryRows(this.flow.getTracker());
+    for (const def of BESTIARY_FILTER_DEFS) {
+      const available = bestiaryFilterAvailable(def.key, unlockedRows);
+      const active = this.filter.tags.includes(def.key);
+      const b = document.createElement('button');
+      b.className = 'sw-bst-fcell' + (active ? ' active' : '') + (available ? '' : ' dim');
+      b.title = Lang.has(def.nameKey) ? Lang.text(def.nameKey) : def.nameKey;   // ShowButtonName :186-194
+      const img = document.createElement('img');
+      img.alt = '';
+      if (!available) {
+        img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Tags_Shadow.png';
+        img.style.objectPosition = '0 -120px';   // 帧(0,4)：30×30 帧表的末行首帧，Color.White*0.2
+        img.style.opacity = '0.2';
+        b.disabled = true;
+      } else {
+        if (def.frame >= 0) {
+          img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Tags_Shadow.png';
+          // GetFilterImage（FilterProviderInfoElement :31-39）：帧 X=frame%16，Y=frame/16
+          img.style.objectPosition = `${-30 * (def.frame % 16)}px ${-30 * Math.floor(def.frame / 16)}px`;
+        } else {
+          img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Rank_Light.png';   // ByRareCreature
+        }
+        b.addEventListener('click', () => {
+          this.filter = applyBestiaryChip(this.filter, 'tag', undefined, def.key);   // ClickOption :196-203
+          this.buildFilterGrid();
+          this.offset = 0;
+          this.refresh();
+        });
+      }
+      b.appendChild(img);
+      grid.appendChild(b);
+    }
+  }
+
+  /** 计数文案（UIBestiaryTest :440 `_filteringText.SetText(_filterer.GetDisplayName())`，
+   *  EntryFilterer.GetDisplayName :91-95 = BestiaryInfo.Filters 套 {Count}） */
+  private updateFilterText(): void {
+    if (!this.filterTextEl) return;
+    this.filterTextEl.textContent = Lang.text('BestiaryInfo.Filters').replace('{Count}', String(this.filter.tags.length));
+    this.filterTextEl.title = this.filter.tags
+      .map((k) => BESTIARY_FILTER_DEFS.find((d) => d.key === k))
+      .map((d) => (d && Lang.has(d.nameKey) ? Lang.text(d.nameKey) : d?.nameKey ?? ''))
+      .filter(Boolean)
+      .join(', ');
   }
 
   /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度）。
@@ -979,7 +1270,8 @@ export class BestiaryPanel {
    *  负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）无独立贴图文件，
    *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。
    *  已解锁条目先铺 MapBG 出没环境底图（UIBestiaryEntryButton 网格 / NPCPortraitInfoElement
-   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）。
+   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）；详情档再叠装饰层
+   *  （MapBGOverlay，bestiaryPortraitOverlays 推导 + 偏好命中短路——见该函数注记）。
    *  未解锁（NotKnown）：R24 修复——只画 Icon_Locked 锁形图 ×alpha0.15
    *  （UIBestiaryEntryIcon.DrawSelf :52-70 `Color.White*0.15f`），完全不画 NPC 表；
    *  曾画黑影剪影 = 泄露轮廓（brightness0 剪影仍暴露体型/姿态）。 */
@@ -1050,17 +1342,30 @@ export class BestiaryPanel {
       cx.globalAlpha = 1;
     };
     const atlas = this.flow.atlas ?? null;
+    // 装饰叠层（仅详情档；NPCPortraitInfoElement.cs:73-84 偏好命中 flag2 短路不收集）
+    const overlays = bgMode === 'portrait' && !bestiaryPortraitPrefHit(npcId, crimson)
+      ? bestiaryPortraitOverlays(npcId)
+      : [];
+    // 无声明色回退：Color.Lerp(Color.White, portraitColor, 0.5f)（UIBestiaryNPCEntryPortrait :51）
+    const ovFallback = [
+      Math.round((255 + bg.color[0]) / 2),
+      Math.round((255 + bg.color[1]) / 2),
+      Math.round((255 + bg.color[2]) / 2),
+      Math.round((255 + (bg.color[3] ?? 255)) / 2),
+    ];
     // 统一走 bstLoadSheet 缓存(同表并发只取一次/结果回写/失败负终结;
     // 此前 loadBg 每格每次 refresh new Image 且不回写=滚轮风暴解码源)
-    const paintWithBg = (bgImg: ImageBitmap | HTMLImageElement | null) => {
+    const paintWithBg = (bgImg: ImageBitmap | HTMLImageElement | null, ovs: HTMLCanvasElement[] = []) => {
       const cx = canvas.getContext('2d');
       if (!cx) return;
       cx.imageSmoothingEnabled = false;
       cx.clearRect(0, 0, canvas.width, canvas.height);
+      let bx = 0, by = 0, bw = size, bh = size;   // 无底图 = 叠层直接拉伸满盒（同原版 ScaleToFit）
       if (bgImg) {
         const bs = Math.max(size / bgImg.width, size / bgImg.height);
-        const bw = bgImg.width * bs, bh = bgImg.height * bs;
-        cx.drawImage(bgImg, (size - bw) / 2, (size - bh) / 2, bw, bh);
+        bw = bgImg.width * bs; bh = bgImg.height * bs;
+        bx = (size - bw) / 2; by = (size - bh) / 2;
+        cx.drawImage(bgImg, bx, by, bw, bh);
         const [r, g, b, a] = bg.color;
         if (r !== 255 || g !== 255 || b !== 255) {
           cx.globalCompositeOperation = 'multiply';
@@ -1070,21 +1375,47 @@ export class BestiaryPanel {
           void a;
         }
       }
+      // 叠层：与底图同一目标盒（原版同容器 ScaleToFit 拉伸——对位关系 1:1），
+      // 色为预着色成品（bstTintedOverlay，声明色 ?? Lerp 回退）
+      for (const o of ovs) cx.drawImage(o, bx, by, bw, bh);
     };
     // 贴图源：CustomTexturePath 手绘图（Images/UI/Bestiary/NPCs/* 扁平化 basename）
     // 替换母体表（UnlockableNPCEntryIcon :74-81/:199——原样画、无帧无染色）
     const ovTex = BST_DRAW_OFFSET[String(npcId)]?.customTexture;
     const texPath = ovTex ? `vanilla/${ovTex}.png` : `vanilla/NPC_${sheetId}.png`;
-    if (bg.image) {
-      bstLoadSheet(atlas, `vanilla/${bg.image}.png`, (bgImg) => {
-        if (!canvas.isConnected || !bgImg) return;
-        paintWithBg(bgImg);
-        // NPC 表到位后叠画（晚到重绘底图再叠;统一走缓存=同表并发只解码一次）
-        bstLoadSheet(atlas, texPath, (img) => {
-          if (!img || !canvas.isConnected) return;
-          paintWithBg(bgImg); paint(img);
+    // 叠层图装载（bstLoadSheet 同缓存链；全数到齐或负终结才开画,计数器收敛）
+    const loadOverlays = (done: (ovs: HTMLCanvasElement[]) => void) => {
+      if (!overlays.length) { done([]); return; }
+      const out: HTMLCanvasElement[] = [];
+      let left = overlays.length;
+      for (const o of overlays) {
+        bstLoadSheet(atlas, `vanilla/${o.overlay}.png`, (img) => {
+          if (img) out.push(bstTintedOverlay(o.overlay, img, o.color ?? ovFallback));
+          if (--left === 0) done(out);
         });
-      });
+      }
+    };
+    if (bg.image || overlays.length) {
+      const startPaint = (bgImg: ImageBitmap | HTMLImageElement | null) => {
+        if (!canvas.isConnected) return;
+        loadOverlays((ovs) => {
+          if (!canvas.isConnected) return;
+          paintWithBg(bgImg, ovs);
+          // NPC 表到位后叠画（晚到重绘底图/叠层再叠;统一走缓存=同表并发只解码一次）
+          bstLoadSheet(atlas, texPath, (img) => {
+            if (!img || !canvas.isConnected) return;
+            paintWithBg(bgImg, ovs); paint(img);
+          });
+        });
+      };
+      if (bg.image) {
+        bstLoadSheet(atlas, `vanilla/${bg.image}.png`, (bgImg) => {
+          if (!canvas.isConnected || !bgImg) return;
+          startPaint(bgImg);
+        });
+      } else {
+        startPaint(null);   // 原版底图可缺（UIImage 仅 portraitBackgroundAsset!=null 才挂）而叠层照画
+      }
       return;
     }
     bstLoadSheet(atlas, texPath, (img) => {
@@ -1313,6 +1644,7 @@ export class BestiaryPanel {
   close() {
     window.removeEventListener('keydown', this.escHandler, true);
     this.gridWrap?.removeEventListener('wheel', this.wheelHandler);
+    this.closeFilterGrid();   // 弹层外点击监听挂 document——面板关时必须一并摘除
     if (this.roTimer) { clearTimeout(this.roTimer); this.roTimer = 0; }
     this.ro?.disconnect();
     this.ro = null;

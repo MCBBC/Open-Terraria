@@ -350,6 +350,7 @@ import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
+import { toolCursorIcon, BUCKET_VIDS, WIRE_TOOL_TILE_BOOST } from '../player/ToolCursorIcon';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
@@ -505,17 +506,21 @@ const SHOTGUN_PELLETS: Record<number, [number, number, number, number]> = {
  *  39/40/109 = 泥球/黏土球/雪球；411-414 = 金币枪落币（落地成钱币堆 tile）。
  *  109 过远档（距玩家 >MaxWorldViewSize.X×0.75=1440 → 不放+掉 593 雪块,Main.cs:758
  *  常量）与 31 ai[0]==2 免掉落档在支内特判（Kill 消亡面批 2 2026-09-02）
- *  ★31 专支定谳（2026-09-03 任务二）：传送带 421/422 本仓已实装（data/tiles.ts
- *  v_421_conveyorbeltleft / v_422_conveyor_belt_ccw + physics/Conveyor.ts 玩家/NPC/
- *  掉落物输送 + wiring/devices.ts 421↔422 换向）→ 1457 传送带重挂档 :79260-79266
- *  补进支内（type==31 → num18=169=沙块件,createTile 53）——ai[0]==2 免掉落缺省档
+ *  ★31 专支定谳（2026-09-03 任务二,同日复核改备案表述）：传送带 421/422 本仓已实装
+ *  （data/tiles.ts v_421_conveyorbeltleft / v_422_conveyor_belt_ccw + physics/Conveyor.ts
+ *  玩家/NPC/掉落物输送 + wiring/devices.ts 421↔422 换向）→ 1457 传送带重挂档 :79260-79266
+ *  对应支内专判（type==31 → num18=169=沙块件,createTile 53）——ai[0]==2 免掉落缺省档
  *  :79129-79137 钉在表行 [53,0]（本仓 31 恒蚁狮档）,重挂仅传送带档;rail 314
  *  (:79256-79259)/沙塌(:79267-79270) 无重挂。31 非 FallingBlock 承载：本仓 31 =
- *  蚁狮独占敌弹（Enemy.shootDart :6311 → Dart 载体）,落地放沙内结于 Dart.dartStep
- *  sandBall 支（传送带免放已对齐）且不路由 onProjectileDeath → 本口与 Dart 内结面
- *  无双放;本口须 onProjectileDeath(31,…) 直驱方可达（放置口归口登记） */
+ *  蚁狮独占敌弹（Enemy.shootDart :6311 → Dart 载体）,Dart 消亡全部内结
+ *  （Dart.ts 不路由 onProjectileDeath）→ 本表行 [31,[53,0]] 与 onProjectileDeath 内
+ *  31 专支【对本仓运行时不可达 = 数据备案死支,行为活口在 Dart.dartStep sandBall 支
+ *  （:1484-1512 放沙/传送带掉 vi_169_SandBlock,R8 已接）】;保留表行与专支仅防
+ *  AISTYLE10 全表提取器/对账工具把 31 漏格（结构占位,无行为,勿删勿接直驱） */
 const AISTYLE10_PLACE = new Map<number, readonly [tile: number, item: number]>([
   [31, [53, 0]], [42, [53, 0]],              // 沙球(蚁狮 ai[0]==2 免掉落)/沙球 → 沙;传送带重挂 169 走支内专判
+                                             // ★31 行=数据备案(31 走 Dart 载体,活口在 Dart.dartStep sandBall 支,
+                                             // 本口不路由 onProjectileDeath——占位防提取器漏格,见上方注)
   [56, [112, 370]], [65, [112, 0]],          // 落黑檀砂/黑檀砂球 → 黑檀砂
   [67, [116, 408]], [68, [116, 0]],          // 落珍珠砂/珍珠砂球 → 珍珠砂
   [71, [123, 424]], [39, [59, 0]],           // 落淤泥/泥球 → 淤泥 / 泥
@@ -2569,7 +2574,7 @@ export class Game implements GameHooks {
         if (pvpOn) kind |= 0x40;
       }
       else if (p instanceof RainCloudProj) {
-        // kind10 雨云家族（MP 债清偿 2026-09-03）：九元组 x/y/vx/vy/vs线格式+tag=`projId,
+        // kind10 雨云家族（MP 债清偿 2026-09-03）：九元组 x/y/vx/vy 走线格式位+tag=`projId,
         //  anchorX,anchorY`+aux=击退×100（打包单源 RainCloudProj.netTag/netAux↔fromNet）。
         //  仅施法移动云 237/243 过网——死亡变体 238/244 与雨滴 239/245 各端本地 AI 衍生
         //  （过网=双生成）。分派位必须在 projId!==undefined 通判前（云带 public projId,
@@ -28167,6 +28172,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               : MONEY_TROUGH_USE.cursorIconVid;
         }
       }
+      // 手持工具/放置物悬停图标（ItemCheck_OwnerOnlyCode :43785 内五支 1:1，置位
+      // 逻辑在 player/ToolCursorIcon.ts）。帧序同原版：LookForTileInteractions
+      // (:27632) 悬停扫描在前、ItemCheckWrapped(:28495) 手持支在后——悬停支写入的
+      // cursorItemIconID（含告示牌 ID=-1 抑制语义）不会被本支覆写，绘制端
+      // (DrawInterface_40 :45812-45814) num = ID!=0 ? ID : heldItem.type 裁决
+      this.tickHeldCursorIcon(Math.floor(wx / TILE), Math.floor(wy / TILE));
     }
     // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对（缓存键 = 原版 vid）
     const held = p.inv.slots[p.inv.selected];
@@ -28188,6 +28199,57 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ? this.housingHeadIndexOf(this.housingMode.npcKey)
         : null,
     };
+  }
+
+  /** 手持工具/放置物悬停图标置位（Player.cs ItemCheck_OwnerOnlyCode :43785 内五支 1:1，
+   *  条件转录见 player/ToolCursorIcon.ts 头注——★五支都是纯射程门、不读 tile：
+   *  手持镐/斧/锤指向射程内任意目标格（含空气/幽灵格/已致动格）亮本物品图标；
+   *  "镐匹配可挖格/斧匹配 tileAxe/锤匹配 tileHammer"是挖掘分派
+   *  ActuallyUseMiningTool :46039-46046 的条件，与图标无关（1405 :29478 / 1456 :44975
+   *  同义，勿按 wiki 口径"匹配方块"补 active() 门）。缓存更新（ItemIconCacheUpdate
+   *  :47291）只在电路/桶/挖掘/小动物四支伴随，放置两支仅置 enabled（:40040/:39917）。
+   *  Main.GamepadDisableCursorItemIcon 键鼠恒 false（Main.cs:2686-2694）不接线 */
+  private tickHeldCursorIcon(rawTx: number, rawTy: number): void {
+    const p = this.player;
+    const held = p.inv.slots[p.inv.selected];
+    if (!held) return;   // HeldItem 空手 → num=0 不画（DrawInterface_40 :45816）
+    const def = ITEM_DEFS[held.id];
+    const f = def?.tool ?? this.itemFuncTool(held.id);
+    // 三力全量（sItem.pick/axe/hammer :46043 按 >0 判）：def.tool 主力 + tool 对象/
+    // def.axePower 副斧（Hamaxe 锤+斧、Drax 镐+斧——dualToolResolve 同口径）
+    const pick = f?.type === 'pick' ? (f.power ?? 0) : (f?.pickPower ?? 0);
+    const axe = Math.max(f?.type === 'axe' ? (f.power ?? 0) : 0, f?.axePower ?? 0, def?.axePower ?? 0);
+    const hammer = f?.type === 'hammer' ? (f.power ?? 0) : (f?.hammerPower ?? 0);
+    const vid = def?.vid ?? viIdFromKey(def?.key ?? '');
+    // tileTarget 钳界（Player.cs:25593-25607 [5, maxTilesX/Y-5]）
+    const st = this.world.store;
+    const tx = Math.min(Math.max(rawTx, 5), st.w - 5);
+    const ty = Math.min(Math.max(rawTy, 5), st.h - 5);
+    // SmartCursorHelper.TileTargetDesired（:1400-1411）：连续性锁期内目标≠锁点
+    // → 仅放置块支让位（Wall/电路/工具支无此门）
+    const sc = this.smartCursor;
+    const res = toolCursorIcon({
+      pick,
+      axe,
+      hammer,
+      createTile: def?.tile != null,
+      createWall: def?.wallId != null,
+      wireTool: def?.wireTool != null,
+      bucket: vid > 0 && BUCKET_VIDS.has(vid),
+      makeNPC: vid > 0 && CRITTER_RELEASE_BY_ITEM[vid] !== undefined,
+      reachBase: this.tileReach(0),
+      tileBoost: def?.wireTool ? WIRE_TOOL_TILE_BOOST : 0,
+      blockRange: this.blockRange(),
+      actor: { x: p.x, y: p.y, w: p.w, h: p.h },
+      target: { x: tx, y: ty },
+      noBuilding: false,   // Main.noBuilding 本作无对应态（旅程"无筑造"未实装）
+      tileTargetDesired: sc.lockedContinuity == null
+        ? true
+        : (sc.showing && sc.x === tx && sc.y === ty),
+    });
+    if (!res.enabled) return;
+    p.cursorItemIconEnabled = true;
+    if (res.cacheUpdate) this.itemIconCacheUpdate(vid);
   }
 
   /** 群系快照（BiomeZones 填充;SceneMetrics + UnderworldLayer=h-200） */
@@ -32670,7 +32732,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (bs === 421 || bs === 422) {
             // ★31 专支·传送带重挂（:79260-79266）：下方 421/422 → flag2 且 type==31 时
             // num18 重挂 169——覆盖 :79133-79135 的 ai[0]==2 免掉落缺省（蚁狮球落传送带
-            // 也掉 1 件）;rail 314(:79256-79259)/沙塌(:79267-79270) 无重挂
+            // 也掉 1 件）;rail 314(:79256-79259)/沙塌(:79267-79270) 无重挂。
+            // ★备案（2026-09-03 任务二）：31 本仓=Dart 载体（蚁狮敌弹）,Dart 消亡全内结
+            // 不路由 onProjectileDeath → 本 31 专支运行时不可达=数据备案死支,行为活口在
+            // Dart.dartStep sandBall 支（放沙/传送带掉 vi_169_SandBlock,R8 已接）;
+            // 保留此支仅防提取器漏格,与 AISTYLE10_PLACE[31] 表行成对占位,勿删勿接直驱
             if (projId === 31) dropItem = 169;
             skip = true;
           } else if (bs === 314 || this.sandFallsBelow(tx, ty)) {

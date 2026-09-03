@@ -184,6 +184,26 @@ export const MINION_SHOT_PROJS: ReadonlySet<number> = new Set(
 export const SENTRY_SHOT_PROJS: ReadonlySet<number> = new Set(
   [680, 664, 666, 668, 694, 695, 696, 644, 642, 378, 379, 309, 967, 1026]);
 
+/** 圣殿骑士哨兵背包 6176 强制暴击掷（Projectile.cs:12962-12965 1:1，2026-09-03
+ *  哨兵携带批收口）：
+ *  `if (ownedBySomeone && (sentry || (type >= 0 && ProjectileID.Sets.SentryShot[type]))
+ *  && Main.player[owner].accGolemSentryBackpack && Main.rand.Next(10) == 0) crit = true;`
+ *  ——Damage_PVE 每次命中掷一遍,先于伤害结算（ whip tag 暴击修正之后,仍可强制）。
+ *  isSentry = 弹本体 sentry 位（MinionProj 塔/光环场伤直伤面）;飞弹（塔射出弹）传
+ *  projId 走 SENTRY_SHOT_PROJS 表。原版 1130 暴击豁免支（:12966-12968）紧随其后
+ *  ——本仓无 1130 伤害面,不设。 */
+export function rollGolemSentryCrit(
+  game: GameHooks,
+  projId: number,
+  isSentry: boolean,
+): boolean {
+  if (!isSentry && !SENTRY_SHOT_PROJS.has(projId)) return false;
+  const own = (game as unknown as
+    { player?: { equipStats?: { accGolemSentryBackpack?: boolean } } | null }).player;
+  if (!own?.equipStats?.accGolemSentryBackpack) return false;
+  return Math.floor(Math.random() * 10) === 0;   // Main.rand.Next(10) == 0
+}
+
 // ---- ★A-F1 OnHit 来源排除表（蓝队三批，2026-08-31） ----------------------------
 // Projectile.TryDoingOnHitEffects（Terarria1457/Terraria/Projectile.cs:15210-15220）：
 //   `switch (type) { case 221: case 227: case 614: case 729: case 908: case 977: return; }`

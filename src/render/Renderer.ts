@@ -1804,6 +1804,11 @@ export class Minimap {
    *  补上=用户实报"小地图残缺+一点点慢慢更新"）。溢出改置【全幅重传标记】,消费端
    *  整幅 texSubUpdateData 一次覆盖（含全部被丢增量）✓ 位级无漂移。 */
   needsFullUpload = false;
+  /** ★单调地图版本（PR-async 收口④）：每次 flushDirty 实际重画即 +1——消费端
+   *  （fm2dMapEnsure 2D 门）以此判定重灌。★勿用 dirtyChunks.size 当版本：
+   *  洪峰期「+N 脏区/帧 ≈ −N 消化」可使 size 连续同值 → 2D 地图冻结
+   *  （用户实报"小地图缓慢一点点更新+残缺"的第二病灶,2026-09-03）。 */
+  mapVersion = 0;
   constructor(public world: World, deferBuild = false) {
     this.w = world.w;
     this.h = world.h;
@@ -2061,6 +2066,7 @@ export class Minimap {
       this.needsFullUpload = true;
       console.log(`[mm] 洪峰溢出→置全幅重传 painted=${n} dirty剩=${this.dirtyChunks.size}`);
     }
+    if (n > 0) this.mapVersion++;                        // ★有实画才升版本(单调,无冻结窗口)
   }
 }
 
@@ -15688,16 +15694,19 @@ export class Renderer {
    *  要能进得了这张画布,否则残留空图） */
   private fm2dMapEnsure(): HTMLCanvasElement | null {
     if (!this.minimap?.image) return null;
-    const dirtyNow = this.minimap.dirtyChunks.size;
+    // ★PR-async 收口④：重灌门 = mapVersion 单调计数(勿用 dirtyChunks.size——
+    //  洪峰期「+N/−N 相抵」可使 size 连帧同值 → 2D 地图冻结 = 用户实报病灶二)
+    const ver = this.minimap.mapVersion;
     if (!this._fm2dMap) {
       this._fm2dMap = document.createElement('canvas');
       this._fm2dMap.width = this.minimap.w;
       this._fm2dMap.height = this.minimap.h;
       this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
-      this._fm2dDirtyAt = dirtyNow;
-    } else if (dirtyNow !== this._fm2dDirtyAt) {
+      this._fm2dVer = ver;
+    } else if (ver !== this._fm2dVer || this.minimap.needsFullUpload) {
       this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
-      this._fm2dDirtyAt = dirtyNow;
+      this._fm2dVer = ver;
+      this.minimap.needsFullUpload = false;
     }
     return this._fm2dMap;
   }
@@ -15765,7 +15774,7 @@ export class Renderer {
     ctx.restore();
   }
   /** 2D 兜底地图画布最近重灌时的 minimap 脏块计数（变化才重灌） */
-  private _fm2dDirtyAt = -1;
+  private _fm2dVer = -1;
   /** GL 全屏地图合成判死时刻（0=健康；中心恒黑 3 帧置位 → 60s 内 2D 兜底） */
   private _glMapBrokenAt = 0;
   /** 连续黑帧计数 + 最近一次探针结果（F5 报告消费） */

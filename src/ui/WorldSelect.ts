@@ -3,8 +3,14 @@
 //  底缘图标钮 Play/Favorite/Copy + Delete 右下 + 悬停标签。
 //  行首世界图标 = 原版 GetSeedIcon 映射 1:1（AWorldListItem.cs:186-201）：
 //  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀
-//  （HasCorruption 默认 true=每个世界必有邪恶，无中性森林图标——46 张全集恰配）；
-//  多秘密种子原版 UICyclingImage 轮播，此处取首匹配（轮播登记未接）。
+//  （HasCorruption 默认 true=每个世界必有邪恶，无中性森林图标——46 张全集恰配）。
+//  多秘密种子轮播（2026-09-03 闭合）：GetIcons（AWorldListItem.cs:129-160）命中的
+//  全部种子图标按注册序入列，UICyclingImage（UICyclingImage.cs:16 FramesPerCycle=45，
+//  60fps 每帧 ++ → 45t=750ms 换一张）定时轮换 1:1；≥2 图标且非天顶 = 左下角
+//  IconMixedSeed 混种徽标（UIWorldListItem.cs:83-93）；天顶世界不走轮播——
+//  GetIconElement :172-181 直挂 IconEverythingAnimated 7×16 帧故障动画
+//  （UpdateGlitchAnimation :14-33，帧间随机 3t、首帧后停 15-120t，4/8/12 帧边界
+//  1/3 概率换 7 变体列）。
 import { WorldStore, type WorldMeta } from '../save/WorldStore';
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
@@ -28,31 +34,54 @@ const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
 const TOUCH_LABELS = typeof matchMedia === 'function'
   && matchMedia('(hover: none) and (pointer: coarse)').matches;
 
-/** 世界图标贴图名（AWorldListItem.GetSeedIcon :186-201 1:1）：
+/** 世界图标贴图名（AWorldListItem.GetIcon :87-126 1:1）：
+ *  天顶=Everything(evilVariants:false) → drunk=CorruptionCrimson(evilVariants:false) →
+ *  FTW/NotTheBees/Anniversary/DontStarve/Remix/Traps → Skyblock(双 variant:false) →
+ *  无后缀基础图标。单值 = GetIcons 列表首项（非轮播消费方兼容口）。
  *  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀；
- *  drunk=CorruptionCrimson(evilVariants:false)、skyblock 无前后缀变体。
- *  多秘密种子原版轮播（UICyclingImage）——取 vanilla 优先序首匹配（登记未轮播） */
+ *  drunk 不含邪恶段——"CorruptionCrimson" 即完整后缀（2026-08-24 用户报 404 勘误） */
 export function worldIconName(m: WorldMeta): string {
   const f = parseSeed(m.seed).flags;
   const hard = m.hardMode ? 'Hallow' : '';
   const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
-  let seed = '';
-  let evilVariants = true;
-  if (f.drunkWorld) {
-    // 原版 GetSeedIcon("CorruptionCrimson", evilVariants:false)（AWorldListItem.cs:133）
-    // ——drunk 图标名【不含邪恶段】，"CorruptionCrimson" 即完整后缀；此前 evil 段
-    // 照拼 → UI_IconCorruptionCorruptionCrimson 404（2026-08-24 用户报）
-    seed = 'CorruptionCrimson';
-    evilVariants = false;
-  } else if (f.getGoodWorld) seed = 'FTW';
-  else if (f.notTheBees) seed = 'NotTheBees';
-  else if (f.tenthAnniversary) seed = 'Anniversary';
-  else if (f.theConstant) seed = 'DontStarve';
-  else if (f.remix) seed = 'Remix';
-  else if (f.noTraps) seed = 'Traps';
-  else if (f.skyblock) return 'UI_IconSkyblock';
-  return `UI_Icon${hard}${evilVariants ? evil : ''}${seed}`;
+  // ZenithWorld（AWorldListItem.cs:108-110 GetSeedIcon("Everything", evilVariants:false)）
+  if (f.everything) return `UI_Icon${hard}Everything`;
+  if (f.drunkWorld) return `UI_Icon${hard}CorruptionCrimson`;
+  if (f.getGoodWorld) return `UI_Icon${hard}${evil}FTW`;
+  if (f.notTheBees) return `UI_Icon${hard}${evil}NotTheBees`;
+  if (f.tenthAnniversary) return `UI_Icon${hard}${evil}Anniversary`;
+  if (f.theConstant) return `UI_Icon${hard}${evil}DontStarve`;
+  if (f.remix) return `UI_Icon${hard}${evil}Remix`;
+  if (f.noTraps) return `UI_Icon${hard}${evil}Traps`;
+  if (f.skyblock) return 'UI_IconSkyblock';
+  return `UI_Icon${hard}${evil}`;
 }
+
+/** 世界图标轮播全集（AWorldListItem.GetIcons :129-160 1:1）：命中的【全部】秘密种子
+ *  图标按注册序入列（多秘密种子世界=多图标轮播，UICyclingImage 消费）；一个都不中
+ *  = 无后缀基础图标单张。天顶世界 GetIcons 原文不特判（会得 7 张），但
+ *  GetIconElement :172-175 对 ZenithWorld 先行短路走故障动画，不进轮播——UI 侧同构 */
+export function worldIconNames(m: WorldMeta): string[] {
+  const f = parseSeed(m.seed).flags;
+  const hard = m.hardMode ? 'Hallow' : '';
+  const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
+  const out: string[] = [];
+  if (f.drunkWorld) out.push(`UI_Icon${hard}CorruptionCrimson`);        // evilVariants:false
+  if (f.getGoodWorld) out.push(`UI_Icon${hard}${evil}FTW`);
+  if (f.notTheBees) out.push(`UI_Icon${hard}${evil}NotTheBees`);
+  if (f.tenthAnniversary) out.push(`UI_Icon${hard}${evil}Anniversary`);
+  if (f.theConstant) out.push(`UI_Icon${hard}${evil}DontStarve`);
+  if (f.remix) out.push(`UI_Icon${hard}${evil}Remix`);
+  if (f.noTraps) out.push(`UI_Icon${hard}${evil}Traps`);
+  if (f.skyblock) out.push('UI_IconSkyblock');                          // 双 variant:false
+  if (out.length > 0) return out;
+  out.push(`UI_Icon${hard}${evil}`);
+  return out;
+}
+
+/** UICyclingImage 换帧周期（UICyclingImage.cs:16 FramesPerCycle=45，逐 Update 帧
+ *  ++；游戏 60fps → 45/60s = 750ms 换一张，序 = 列表序回绕） */
+export const WORLD_ICON_CYCLE_MS = 750;
 
 /** 完整种子串（WorldFileData.GetFullSeedText 1:1）：
  *  "{尺寸}.{难度+1}.{邪恶}.{秘密种子和}.{seed文本}"——原版种子按钮复制的就是它，
@@ -194,17 +223,46 @@ export class WorldSelectPanel {
 
   async reload() {
     await this.store.ensureLoaded();
+    for (const t of this.iconTimers) clearInterval(t);   // 上轮行内的轮播/故障动画定时器全清
+    this.iconTimers.clear();
     this.body.innerHTML = '';
     const list = this.store.list();
     for (const meta of list) {
       const el = document.createElement('div');
       el.className = 'sw-vitem sw-vpanel-item';
       const m = meta;
-      // 行首世界图标（60×58 原版贴图；UIWorldListItem.cs:68 GetIconElement）
-      const icon = document.createElement('img');
-      icon.className = 'sw-vitem-icon';
-      icon.src = BTN_SRC(worldIconName(m));
-      icon.alt = '';
+      // 行首世界图标（UIWorldListItem.cs:68 GetIconElement）：天顶世界 = 7×16 帧
+      // IconEverythingAnimated 故障动画（UpdateGlitchAnimation 1:1，不走轮播）；
+      // 其余 = UICyclingImage（GetIcons 列表按 45t=750ms 轮换，首张=列表[0]）
+      let icon: HTMLElement;
+      const iconNames = worldIconNames(m);
+      if (parseSeed(m.seed).flags.everything === true) {
+        icon = this.buildZenithGlitchIcon();
+      } else {
+        const img = document.createElement('img');
+        img.className = 'sw-vitem-icon';
+        img.alt = '';
+        img.src = BTN_SRC(iconNames[0]);
+        if (iconNames.length > 1) {
+          let idx = 0;
+          const timer = setInterval(() => {
+            // UICyclingImage.Update :21-33：++frames ≥45 → 复零、++index、尾回绕、SetImage
+            idx = (idx + 1) % iconNames.length;
+            img.src = BTN_SRC(iconNames[idx]);
+          }, WORLD_ICON_CYCLE_MS);
+          this.iconTimers.add(timer);
+        }
+        icon = img;
+      }
+      // 混种徽标（UIWorldListItem.cs:83-93）：GetIcons ≥2 且非天顶 → 图标左下角
+      // IconMixedSeed 22×18（HAlign 0 / VAlign 1 = 与图标盒左下角对齐）
+      if (iconNames.length >= 2 && parseSeed(m.seed).flags.everything !== true) {
+        const badge = document.createElement('img');
+        badge.className = 'sw-vitem-mixed';
+        badge.alt = '';
+        badge.src = BTN_SRC('UI_IconMixedSeed');
+        el.appendChild(badge);
+      }
       // 信息块（名称 + 规格；★图标位缺数据——见头注偏差登记；布局=行绝对分区
       //  .sw-vitem-info,与角色行同构,按钮区在底缘不再压文本）
       const info = document.createElement('div');

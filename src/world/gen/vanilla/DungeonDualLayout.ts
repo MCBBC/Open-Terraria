@@ -355,7 +355,10 @@ export interface DualLayoutCtx {
   /** tier 判定上下文（runDualDungeonLayout 装配） */
   tierCtx?: TierCtx | null;
   /** 平台候选接收（floating rocks 等 DungeonPlatformData 投影） */
-  platSink?(p: { x: number; y: number; hall: boolean; hf: number; force?: boolean; maxLen?: number }): void;
+  /** ★IIIII222：载荷补 os（OverrideStyle）/cb（canPlaceHereCallback 盒投影）——
+   *  vanilla GenerateFloatingRocksInArea includePlatform 支（DU.cs:1415-1428）。 */
+  platSink?(p: { x: number; y: number; hall: boolean; hf: number; force?: boolean; maxLen?: number;
+    os?: number; cb?: [number, number, number, number] }): void;
   /** 每地牢数据体引用（halls 写 genVars 用） */
   data?: DualDungeonData | null;
 }
@@ -1801,7 +1804,11 @@ function generateFloatingRocksInArea(
     if (includePlatform && ctx.platSink) {
       const x2 = n5 < num3 ? n5 - 5 : n5 + 5;
       const num8 = n5 < x ? 0 : (n5 < num3 ? n5 - x : x + width - n5);
-      ctx.platSink({ x: x2, y: n6, hall: false, hf: 0, force: true, maxLen: 5 + num8 });
+      // ★IIIII222：补 OverrideStyle（platformStyle>-1 时,DU.cs:1426-1428）与
+      //   canPlaceHereCallback 盒投影（DU.cs:1422闭包=本函数参数区含端 [x,x+width]×[y,y+height]）
+      ctx.platSink({ x: x2, y: n6, hall: false, hf: 0, force: true, maxLen: 5 + num8,
+        os: platformStyle > -1 ? platformStyle : undefined,
+        cb: [x, y, x + width, y + height] });
     }
     void platformStyle;
   }

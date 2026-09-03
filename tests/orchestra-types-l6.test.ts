@@ -158,7 +158,18 @@ describe('剑刃轨迹族（SwingArc/Slash/Fly 生产锚 → dispatch 消费）'
     for (const t of [ParticleOrchestraType.StardustPunch, ParticleOrchestraType.PrincessWeapon]) {
       const { g, particles, dusts } = mkGame();
       apply(g, t, 300, 300, 2, 0.5);
-      expect(particles.length).toBe(2);
+      // ★oracle 重产（2026-09-03）：sparkle 对已从 spawnParticles 承载 1:1 迁移到
+      // spawnDust-prettySparkle 通道（orchestraFx ★迁移注——彩粒 ColorTint A=0 +
+      // 白核 (255,255,255,0)、Scale=vector2（白核 ×0.6）、Rotation=π/2、TTL60、
+      // APF 双项 角向 f̂×−vector3/60+线性 −vector/60 彩 /30 白核（原版 :3427/:3436））
+      // ——两粒 type0 尘即 sparkle 对，旧 particles.length===2 断言随载体退役
+      const sparkles = dusts.filter((d) => d.type === 0);
+      expect(sparkles.length).toBe(2);
+      for (const s of sparkles) {
+        expect(s.ret.prettySparkle).toBe(true);
+        expect(s.ret.rotation).toBe(Math.PI / 2);
+        expect(s.ret.ttl).toBe(60);
+      }
       // ★F6 MINOR（2026-09-01）：PrincessWeapon 按 :3402-3408 每彩尘配一 CloneDust 白影
       // 整粒补齐 → d267 2彩+2白=4；★⑥掷序清偿（2026-09-02）：StardustPunch 同构白影补
       // （:3454-3458 与 princessWeapon 全同构,scale=源/2、color 白、零掷）→ 两型均 4

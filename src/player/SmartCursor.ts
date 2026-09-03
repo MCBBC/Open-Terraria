@@ -1,5 +1,11 @@
 // 智能光标（Smart Cursor）——原版 1.4.5.6 Terraria.GameContent/SmartCursorHelper.cs 全量移植。
 //
+// ★2026-09-03 全策略谓词对账（1457 逐点，见 hasTileAt 注释）：vanilla `tile.active()`
+// （Tile.cs:591 HasTile 位，含已致动格）与 `nactive()` 两口径已分家——active() 读取点
+// 一律 hasTileAt，nactive()/active+!inActive 点保持 activeAt。此前全步以 nactive 代读
+// active()，已致动格被当空气（漏标/锚位丢失/致动格可被当空位）。幽灵格（flags=0,
+// type≠0，生成期 active(false) 残型）两口径同为"不在场"，不受本次影响。
+//
 // 权威源码对照（行号 = Terarria1456 反编译）：
 //   - 策略链总调度 SmartCursorLookup            SmartCursorHelper.cs:61-165
 //   - 让位集判定 IsHoveringOverAnInteractableTileThatBlocksSmartCursor :183-199
@@ -196,7 +202,11 @@ interface Pt { x: number; y: number }
 
 const tileSolidType = (t: number): boolean => !!TILE_DEFS[t]?.solid;            // Main.tileSolid
 const tileSolidTopType = (t: number): boolean => !!TILE_DEFS[t]?.platform;      // Main.tileSolidTop
-const tileAxeType = (t: number): boolean => (TILE_DEFS[t]?.axe ?? -1) >= 0;     // Main.tileAxe
+/** Main.tileAxe 全表（Main.cs:7347-7362 16 条赋值，与 SmartSelect.TILE_AXE_SHEETS 同源）。
+ *  ★2026-09-03 对账翻案：曾以 def.axe>=0 代读——def.axe 是"斧力需求"画像，平台 19
+ *  等显式 axe:0 的非斧族格被误判入斧族（ForceCursor 镐支/stepAxe 扫描面失真） */
+const TILE_AXE_SHEETS_SC = new Set([5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583]);
+const tileAxeType = (t: number): boolean => TILE_AXE_SHEETS_SC.has(sheetOf(t)); // Main.tileAxe
 /** WorldGen.CanKillTile 子集（SmartCursorHelper 用法：不查镐力，只看"不可破坏"） */
 const canKillTile = (t: number): boolean => (TILE_DEFS[t]?.pick ?? -1) >= 0;
 const tileFrameImportantType = (t: number): boolean => !!TILE_DEFS[t]?.framed;  // Main.tileFrameImportant
@@ -211,12 +221,24 @@ const tileCutType = (t: number): boolean => !!TILE_DEFS[t]?.decor;              
 export function smartCursorArrowAllowed(st: TileStore, x: number, y: number, dir: Pt): boolean {
   const nx = x + dir.x, ny = y + dir.y;
   if (!st.inBounds(nx, ny)) return true;
-  if (!activeAt(st, nx, ny)) return true;
+  // Main.cs:47423 `(num2 >= 0 && !tile.active()) || …IsReplaceableBlock`——active() 口径
+  if (!hasTileAt(st, nx, ny)) return true;
   return tileCutType(st.type[st.idx(nx, ny)]);
 }
 
 const activeAt = (st: TileStore, x: number, y: number): boolean => st.isActive(x, y);
 const inActiveAt = (st: TileStore, x: number, y: number): boolean => st.isActuated(x, y);
+/** 原版 active()（Tile.cs:591 sTileHeader 0x20 位）= 纯 HasTile 位，**含已致动格**。
+ *  ★2026-09-03 全策略谓词对账：SmartCursorHelper.cs 里凡写 `tile.active()` 的读取点
+ *  （ForceCursor :2259 / MineShinies :2310 / Axe :2609 / ActuationRod :1518 / Torch :2825 /
+ *  Actuators :594 / Walls :1123-1138 / 各放置类候选与锚位 / HitWallSubstep :1336 /
+ *  EmptyTile :1364 / IsPlatform :1457 / 让位集 :197 / 箭头门 Main.cs:47423）一律走本谓词——
+ *  已致动格在原版仍是"在场格"（可被选中/可作锚/占位）。此前全步误用 activeAt(=nactive)
+ *  代读：已致动格被当空气（Ctrl 智能光标漏标/锚位丢失/可把目标放进致动格）。
+ *  vanilla 写 nactive() 或 `active() && !inActive()` 的点（StaffOfRegrowth :238 /
+ *  GrassSeeds :285 / Moss :353 / AlchemySeeds 地面 :507 / Boulders 支撑 :909 /
+ *  MineSolids 射线 :2492 / Collision.HitLine/CanHitWithCheck）才用 activeAt。 */
+const hasTileAt = (st: TileStore, x: number, y: number): boolean => st.hasTile(x, y);
 /** Main.tileNoAttach（Main.cs:7260-10258 全表，见 TILE_NO_ATTACH_SHEETS）：该方块不可作为附着锚 */
 const tileNoAttachType = (sheet: number): boolean => TILE_NO_ATTACH_SHEETS.has(sheet);
 
@@ -243,7 +265,8 @@ function solidTile2(st: TileStore, x: number, y: number): boolean {
  *  （:1364-1367）；随后逐占位实体（玩家/NPC）求交。 */
 function emptyTile(env: SmartCursorEnv, x: number, y: number, ignoreTiles = false): boolean {
   const st = env.st;
-  if (!ignoreTiles && st.inBounds(x, y) && activeAt(st, x, y)) return false;
+  // Collision.cs:1364 `Main.tile[i,j].active() && !ignoreTiles`——active() 口径（含已致动格）
+  if (!ignoreTiles && hasTileAt(st, x, y)) return false;
   const rx = x * 16, ry = y * 16;
   for (const o of env.occupants) {
     if (o.x < rx + 16 && o.x + o.w > rx && o.y < ry + 16 && o.y + o.h > ry) return false;
@@ -530,7 +553,7 @@ export class SmartCursor {
     let bx = -1, by = -1;
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
-        if (!activeAt(st, i, j)) continue;
+        if (!hasTileAt(st, i, j)) continue; // :2609 tile.active()
         const type = st.get(i, j);
         const sheet = sheetOf(type);
         if (!tileAxeType(type) || IGNORE_SMART_AXE.has(sheet)) continue; // :2604
@@ -549,7 +572,7 @@ export class SmartCursor {
             if (st.frameX[i2] === 88 && st.frameY[i2] >= 66 && st.frameY[i2] <= 110) num2--;
             if (st.frameX[i2] === 22 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2--;
           }
-          for (; activeAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet
+          for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet // :2653 active()
             && sheetOf(st.get(num2, k + 1)) === sheet
             && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
         }
@@ -565,13 +588,13 @@ export class SmartCursor {
             if (st.frameX[i2] === 36) num2--;
             if (st.frameX[i2] === 108 && st.frameY[i2] === 18) num2--;
           }
-          for (; activeAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80
+          for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80 // :2681 active()
             && sheetOf(st.get(num2, k + 1)) === 80
             && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
         }
         if (sheet === 323 || sheet === 72) {
           // :2675-2680 竹 / 棕榈干下到底
-          for (; activeAt(st, num2, k)
+          for (; hasTileAt(st, num2, k) // :2687 active()
             && ((sheetOf(st.get(num2, k)) === 323 && sheetOf(st.get(num2, k + 1)) === 323)
               || (sheetOf(st.get(num2, k)) === 72 && sheetOf(st.get(num2, k + 1)) === 72))
             && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
@@ -595,7 +618,7 @@ export class SmartCursor {
     if (!inTileBounds(x, y, reach.x0, reach.y0, reach.x1, reach.y1)) return;
     const t = st.get(x, y);
     const sheet = sheetOf(t);
-    let flag = activeAt(st, x, y) && canKillTile(t) && (!tileSolidType(t) || tileSolidTopType(t)); // :2249
+    let flag = hasTileAt(st, x, y) && canKillTile(t) && (!tileSolidType(t) || tileSolidTopType(t)); // :2259 active()
     if (flag && tileAxeType(t) && sem.axe < 1) flag = false;      // :2250-2253
     if (flag && isHammerTile(sheet) && sem.hammer < 1) flag = false; // :2254-2257
     if (flag && !isHammerTile(sheet) && !tileAxeType(t) && sem.pick < 1) flag = false; // :2258-2261
@@ -612,7 +635,7 @@ export class SmartCursor {
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
-        if (!activeAt(st, i, j)) continue;
+        if (!hasTileAt(st, i, j)) continue; // :2310 tile.active()（已致动矿仍可选）
         const sheet = sheetOf(st.get(i, j));
         if ((PICKAXE_PRIORITY_OVERRIDE[sheet] ?? 0) > 0) targets.push({ x: i, y: j }); // :2304-2312
       }
@@ -891,7 +914,10 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const w = st.wire[st.idx(i, j)];
-        if (activeAt(st, i, j) && (w & TS.WIRE_ACTUATOR) !== 0) targets.push({ x: i, y: j }); // :1508
+        // :1518 tile.active() && tile.actuator()——active() 口径：已致动格仍可被魔杖
+        // 选中（打回活体）。原版另有 ActuationRodLock 单摆向锁（Player.cs:47300-47303，
+        // 使用中锁定同态格），属交互状态机轴未移植（见报告台账）。
+        if (hasTileAt(st, i, j) && (w & TS.WIRE_ACTUATOR) !== 0) targets.push({ x: i, y: j });
       }
     }
     const point = nearestOf(targets, env.mouse);
@@ -933,8 +959,8 @@ export class SmartCursor {
         // :1335 鼠标指向该格的八方向量化
         const dir = this.getDesiredDirectionFrom({ x: env.mouse.x - (i * 16 + 8), y: env.mouse.y - (j * 16 + 8) });
         let flag = !isPlatformSheet(st, i, j); // :1336
-        // :1337-1340 该格非实心且左右已有平台 → 不作为续铺源
-        if (!flag && dir.y === 0 && activeAt(st, i, j) && !solidTile(st, i, j)
+        // :1337-1340 该格非实心且左右已有平台 → 不作为续铺源（:1347 active() 口径）
+        if (!flag && dir.y === 0 && hasTileAt(st, i, j) && !solidTile(st, i, j)
           && (isPlatformSheet(st, i - 1, j) || isPlatformSheet(st, i + 1, j))) {
           flag = false;
         }
@@ -946,7 +972,7 @@ export class SmartCursor {
           const nx = i + dir.x, ny = j + dir.y;
           if (!st.inBounds(nx, ny)) continue;
           const nt = st.get(nx, ny);
-          if ((!activeAt(st, nx, ny) || tileCutType(nt)) && this.allowedForContinuity(nx, ny, 2)) { // :1349
+          if ((!hasTileAt(st, nx, ny) || tileCutType(nt)) && this.allowedForContinuity(nx, ny, 2)) { // :1359 active()
             targets.push({ x: nx, y: ny });
             points.push({ x: dir.x, y: dir.y });
           }
@@ -1019,18 +1045,22 @@ export class SmartCursor {
       const upLeft = up && left, upRight = up && right, downLeft = down && left, downRight = down && right;
       if (upLeft || downLeft) left = false;
       if (upRight || downRight) right = false;
-      // :1197-1201 鼠标格已在轨道上 → 不动
-      const hoverSheet = sheetOf(st.get(screenX, screenY));
-      if (hoverSheet !== 314) {
+      // :1197-1211 鼠标格已在轨道上 → 不动（:1208 active() && type==314——幽灵残型
+      //  轨道/已致动轨道都算在场）
+      const hoverTrack = hasTileAt(st, screenX, screenY) && sheetOf(st.get(screenX, screenY)) === 314;
+      if (!hoverTrack) {
         const targets: Pt[] = [];
         for (let i = reach.x0; i <= reach.x1; i++) {
           for (let j = reach.y0; j <= reach.y1; j++) {
-            if (!st.inBounds(i, j) || sheetOf(st.get(i, j)) !== 314) continue;
-            const diag = (ox: number, oy: number): boolean => st.inBounds(i + ox, j + oy) && sheetOf(st.get(i + ox, j + oy)) === 314;
+            if (!st.inBounds(i, j) || !hasTileAt(st, i, j) || sheetOf(st.get(i, j)) !== 314) continue; // :1219 active()
+            const diag = (ox: number, oy: number): boolean => st.inBounds(i + ox, j + oy)
+              && hasTileAt(st, i + ox, j + oy) // :1221-1224 active()
+              && sheetOf(st.get(i + ox, j + oy)) === 314;
             const open = (x: number, y: number): boolean => {
               if (!st.inBounds(x, y)) return false;
               const t = st.get(x, y);
-              return !activeAt(st, x, y) || tileCutType(t);
+              // :1225 等 `!tile.active() || tileCut || BreakableWhenPlacing`
+              return !hasTileAt(st, x, y) || tileCutType(t) || breakableWhenPlacing(sheetOf(t));
             };
             // :1215-1238 六方向延伸（斜向带让位规则）
             if (upLeft && open(i - 1, j - 1) && !(!diag(1, 1) && diag(1, -1)) && !diag(-1, 1)) targets.push({ x: i - 1, y: j - 1 });
@@ -1041,10 +1071,10 @@ export class SmartCursor {
             if (downRight && open(i + 1, j + 1) && !(!diag(-1, -1) && diag(-1, 1)) && !diag(1, -1)) targets.push({ x: i + 1, y: j + 1 });
           }
         }
-        // :1243-1258 目标上下不可再连轨道（端点）才入选，取离鼠标最近
+        // :1243-1258 目标上下不可再连轨道（端点，:1259 active() 口径）才入选，取离鼠标最近
         const ends = targets.filter((t) => {
-          const above = st.inBounds(t.x, t.y - 1) && sheetOf(st.get(t.x, t.y - 1)) === 314;
-          const below = st.inBounds(t.x, t.y + 1) && sheetOf(st.get(t.x, t.y + 1)) === 314;
+          const above = st.inBounds(t.x, t.y - 1) && hasTileAt(st, t.x, t.y - 1) && sheetOf(st.get(t.x, t.y - 1)) === 314;
+          const below = st.inBounds(t.x, t.y + 1) && hasTileAt(st, t.x, t.y + 1) && sheetOf(st.get(t.x, t.y + 1)) === 314;
           return !above && !below;
         });
         const point = nearestOf(ends, env.mouse);
@@ -1073,16 +1103,16 @@ export class SmartCursor {
         const t = st.type[ii];
         // :1113 本格无墙且（空 / 非实心 / 平台）且与玩家视线可通
         //  （Collision.CanHitWithCheck + NotDoorStand，Collision.cs:492-589 / DelegateMethods.cs:858-869）
-        if (st.wall[ii] === 0 && (!activeAt(st, i, j) || !tileSolidType(t) || tileSolidTopType(t))
+        if (st.wall[ii] === 0 && (!hasTileAt(st, i, j) || !tileSolidType(t) || tileSolidTopType(t)) // :1123 active()
           && canHitWithCheck(st, env.actor, env.actor.w, env.actor.h,
             { x: i * 16, y: j * 16 }, 16, 16, (x, y) => notDoorStand(st, x, y))) {
           let flag = false;
-          // :1115-1131 四向有 active tile 或已有墙 → 可依附
+          // :1115-1131 四向有 active tile（active() 口径，含已致动）或已有墙 → 可依附
           for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
             const nx = i + ox, ny = j + oy;
             if (!st.inBounds(nx, ny)) continue;
             const ni = st.idx(nx, ny);
-            if (activeAt(st, nx, ny) || st.wall[ni] > 0) { flag = true; break; }
+            if (hasTileAt(st, nx, ny) || st.wall[ni] > 0) { flag = true; break; }
           }
           // :1137-1140 开门锚帧格（WorldGen.IsOpenDoorAnchorFrame）不可铺墙
           if (isOpenDoorAnchorFrame(st, i, j)) flag = false;
@@ -1104,14 +1134,15 @@ export class SmartCursor {
       // :1043-1070 草面 2 格宽、无坡无半砖、上方 2×2 无阻挡
       const a = st.inBounds(i, j + 1) ? st.get(i, j + 1) : 0;
       const b = st.inBounds(i + 1, j + 1) ? st.get(i + 1, j + 1) : 0;
-      if (!activeAt(st, i, j + 1) || !activeAt(st, i + 1, j + 1)) return false;
+      if (!hasTileAt(st, i, j + 1) || !hasTileAt(st, i + 1, j + 1)) return false; // :1054 active()
       const grassOk = (t: number): boolean => [2, 477, 109, 492].includes(sheetOf(t));
       if (!grassOk(a) || !grassOk(b)) return false;
       for (let k = i; k <= i + 1; k++) {
         for (let l = j - 1; l <= j; l++) {
           if (!st.inBounds(k, l)) return false;
           const t = st.get(k, l);
-          if (activeAt(st, k, l) && (tileSolidType(t) || !tileCutType(t))) return false;
+          // :1075 active() 口径；CanCutTile 差记台账（本仓 tileCutType 近似）
+          if (hasTileAt(st, k, l) && (tileSolidType(t) || !tileCutType(t))) return false;
         }
       }
       return true;
@@ -1190,7 +1221,7 @@ export class SmartCursor {
             const t = st.get(k, l);
             if (l === j - 1) {
               if (!solidTile(st, k, l)) flag = false;
-            } else if (activeAt(st, k, l) && (!tileCutType(t) || sheetOf(t) === 454)) {
+            } else if (hasTileAt(st, k, l) && (!tileCutType(t) || sheetOf(t) === 454)) { // :1002 active()
               flag = false;
             }
           }
@@ -1222,7 +1253,7 @@ export class SmartCursor {
         for (let l = j - 1; l <= j; l++) {
           if (!st.inBounds(k, l)) return false;
           const t = st.get(k, l);
-          if (activeAt(st, k, l) && !tileCutType(t)) return false;
+          if (hasTileAt(st, k, l) && !tileCutType(t)) return false; // :930 active()
         }
       }
       return true;
@@ -1248,7 +1279,8 @@ export class SmartCursor {
         // :2815 非水火把避液体；占位格须可替换：非 active、BreakableWhenPlacing、
         //  或可割植物（82/83 药草除外）——TileID.cs:379 表
         if (notWaterTorch && st.liquid[ii] > 0) continue;
-        if (activeAt(st, i, j) && !breakableWhenPlacing(sheetOf(t))
+        // :2825 占位格被 active 格（active() 口径，含已致动）占据且不可顶替 → 跳过
+        if (hasTileAt(st, i, j) && !breakableWhenPlacing(sheetOf(t))
           && (!tileCutType(t) || sheetOf(t) === 82 || sheetOf(t) === 83)) continue;
         // :2819-2838 17×17 内已有火把 → 排除
         let near = false;
@@ -1276,7 +1308,7 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const sheet = sheetOf(st.get(i, j));
-        if (activeAt(st, i, j) && (sheet === 2 || sheet === 109)) targets.push({ x: i, y: j });
+        if (hasTileAt(st, i, j) && (sheet === 2 || sheet === 109)) targets.push({ x: i, y: j }); // :2923 active()
       }
     }
     const point = nearestOf(targets, env.mouse);
@@ -1298,22 +1330,22 @@ export class SmartCursor {
     if (env.settings.smartBlocksEnabled
       || cs == null || !allowNormalBlockPlacement(sem) || !isSolidBlockSheet(cs)) return;
     const st = env.st;
-    // :2716-2722 鼠标格已占用/不可达 → 停用
-    if (activeAt(st, screenX, screenY)) return;
+    // :2716-2722 鼠标格已占用/不可达 → 停用（:2725 active() 口径）
+    if (hasTileAt(st, screenX, screenY)) return;
     if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
-        if (!activeAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) {
-          // :2732-2749 四邻实心（非平台）计数 ≥2
+        if (!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) { // :2740 active()
+          // :2732-2749 四邻实心（非平台）计数 ≥2（:2743-55 active() 口径）
           let n = 0;
           for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
             const nx = i + ox, ny = j + oy;
             if (!st.inBounds(nx, ny)) continue;
             const nt = st.get(nx, ny);
-            if (activeAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) n++;
+            if (hasTileAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) n++;
           }
           if (n >= 2) targets.push({ x: i, y: j });
         }
@@ -1350,22 +1382,22 @@ export class SmartCursor {
     const cs = sem.createTileSheet;
     if (cs == null || !allowNormalBlockPlacement(sem) || !isSolidBlockSheet(cs)) return;
     const st = env.st;
-    // :817-825 鼠标格已占用/不可达 → 停用
-    if (activeAt(st, screenX, screenY)) return;
+    // :817-825 鼠标格已占用/不可达 → 停用（:828 active() 口径）
+    if (hasTileAt(st, screenX, screenY)) return;
     if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
-        if (!activeAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) {
-          // :835-851 四邻任一实心（非平台）
+        if (!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) { // :843 active()
+          // :835-851 四邻任一实心（非平台，:846-58 active() 口径）
           let ok = false;
           for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
             const nx = i + ox, ny = j + oy;
             if (!st.inBounds(nx, ny)) continue;
             const nt = st.get(nx, ny);
-            if (activeAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) { ok = true; break; }
+            if (hasTileAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) { ok = true; break; }
           }
           if (ok) targets.push({ x: i, y: j });
         }
@@ -1394,7 +1426,7 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
-        const active = st.flags[k] !== 0 && st.type[k] !== 0;
+        const active = hasTileAt(st, i, j); // :691 tile.active()
         const coat = st.coat[k];
         let flag = false;
         if (active) { // :681-687
@@ -1435,7 +1467,7 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
-        if (st.flags[k] === 0 || st.type[k] === 0) continue;   // :738 tile.active()
+        if (!hasTileAt(st, i, j)) continue;                    // :738 tile.active()
         const coat = st.coat[k];
         // :738 (paintLookup!=0 && color()!=paintLookup) | (coating==1 && !fullbrightBlock)
         //      | (coating==2 && !invisibleBlock)
@@ -1470,7 +1502,7 @@ export class SmartCursor {
         if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
         const t = st.type[k];
-        const active = st.flags[k] !== 0 && t !== 0;
+        const active = hasTileAt(st, i, j); // :791 tile.active()
         const coat = st.coat[k];
         // :781 wall>0 && (!active || !tileSolid || tileSolidTop)
         //      && (paintLookup!=0 && wallColor()!=paintLookup | coating==1 && !fullbrightWall
@@ -1505,13 +1537,14 @@ export class SmartCursor {
         if (!st.inBounds(i, j) || !st.inBounds(i, j - 1) || !st.inBounds(i, j + 1)) continue;
         const t = st.get(i, j);
         const below = st.get(i, j + 1);
-        // :2055 自身/上方须空（可割植物放行），下方须实心
-        if ((activeAt(st, i, j) && !tileCutType(t))
-          || (activeAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1)))
-          || !activeAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
-        // :2059-2060 ±1/±3 内已有树苗 → 间距门
+        // :2055 自身/上方须空（active() 口径；可割植物/可顶替件放行），下方须实心
+        if ((hasTileAt(st, i, j) && !tileCutType(t) && !breakableWhenPlacing(sheetOf(t)))
+          || (hasTileAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))
+            && !breakableWhenPlacing(sheetOf(st.get(i, j - 1))))
+          || !hasTileAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue; // :2065 active()
+        // :2059-2060 ±1/±3 内已有树苗（:2069-70 active() 口径）→ 间距门
         const saplingAt = (x: number, y: number): boolean =>
-          st.inBounds(x, y) && activeAt(st, x, y) && COMMON_SAPLING.has(sheetOf(st.get(x, y)));
+          st.inBounds(x, y) && hasTileAt(st, x, y) && COMMON_SAPLING.has(sheetOf(st.get(x, y)));
         const flag = saplingAt(i - 1, j) || saplingAt(i + 1, j);
         const flag2 = flag || saplingAt(i - 2, j) || saplingAt(i + 2, j) || saplingAt(i - 3, j) || saplingAt(i + 3, j);
         const groundSheet = sheetOf(below);
@@ -1536,7 +1569,7 @@ export class SmartCursor {
       let ok = false;
       for (const l of [-1, 1]) {
         const x = p.x + l, y = p.y + 1;
-        if (!st.inBounds(x, y) || !activeAt(st, x, y)) continue;
+        if (!st.inBounds(x, y) || !hasTileAt(st, x, y)) continue; // :2113 active()
         if ([2, 23, 53, 60, 109, 112, 116, 147, 199, 234, 477, 492, 633, 661, 662].includes(sheetOf(st.get(x, y)))) ok = true;
       }
       return ok;
@@ -1561,14 +1594,17 @@ export class SmartCursor {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
         const below = st.get(i, j + 1);
-        if (!groundOk(below) || !activeAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
-        if (activeAt(st, i, j) && !tileCutType(t)) continue;
-        if (activeAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))) continue;
-        // :2179 ±3 内无树苗、无液体、5×TreeHeightMax 净空
+        // :2189 GroundTest 读裸 type（残型也过，随后 tile3.active() 把幽灵地面挡下——
+        //  同序保留）；active() 口径（含已致动格占位）
+        if (!groundOk(below) || !hasTileAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
+        if (hasTileAt(st, i, j) && !tileCutType(t) && !breakableWhenPlacing(sheetOf(t))) continue; // :2189
+        if (hasTileAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))
+          && !breakableWhenPlacing(sheetOf(st.get(i, j - 1)))) continue;
+        // :2179 ±3 内无树苗（:2189 active() 口径）、无液体、5×TreeHeightMax 净空
         let sapling = false;
         for (const dx of [-3, -2, -1, 1, 2, 3]) {
           const x = i + dx;
-          if (st.inBounds(x, j) && activeAt(st, x, j) && COMMON_SAPLING.has(sheetOf(st.get(x, j)))) sapling = true;
+          if (st.inBounds(x, j) && hasTileAt(st, x, j) && COMMON_SAPLING.has(sheetOf(st.get(x, j)))) sapling = true;
         }
         if (sapling) continue;
         if (st.liquid[st.idx(i - 1, j)] !== 0 || st.liquid[st.idx(i, j)] !== 0 || st.liquid[st.idx(i + 1, j)] !== 0) continue;
@@ -1580,7 +1616,7 @@ export class SmartCursor {
     const kept = targets.filter((p) => {
       for (const l of [-1, 1]) {
         const x = p.x + l, y = p.y + 1;
-        if (st.inBounds(x, y) && activeAt(st, x, y) && groundOk(st.get(x, y))) return true;
+        if (st.inBounds(x, y) && hasTileAt(st, x, y) && groundOk(st.get(x, y))) return true; // :2202 active()
       }
       return false;
     });
@@ -1632,8 +1668,8 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const w = st.wire[st.idx(i, j)];
-        // :584 四色任一导线 + 未装致动器 + active
-        if ((w & TS.WIRE_COLORS) !== 0 && (w & TS.WIRE_ACTUATOR) === 0 && activeAt(st, i, j)) {
+        // :594 四色任一导线 + 未装致动器 + active（active() 口径，已致动格仍可加装）
+        if ((w & TS.WIRE_COLORS) !== 0 && (w & TS.WIRE_ACTUATOR) === 0 && hasTileAt(st, i, j)) {
           targets.push({ x: i, y: j });
         }
       }
@@ -1660,7 +1696,7 @@ export class SmartCursor {
         const below = st.get(i, j + 1);
         // :496 可替换 = 非 active / BreakableWhenPlacing（TileID.cs:379）/
         //  可割植物（82/83 药草除外）/ 成熟药草可收（WorldGen.cs:66173）
-        const replaceable = !activeAt(st, i, j)
+        const replaceable = !hasTileAt(st, i, j) // :506 active()（含已致动格占位）
           || breakableWhenPlacing(sheetOf(t))
           || (tileCutType(t) && sheetOf(t) !== 82 && sheetOf(t) !== 83)
           || isHarvestableHerbWithSeed(st, i, j, env);
@@ -1699,19 +1735,21 @@ export class SmartCursor {
   ): void {
     if (sem.createTileSheet !== 380 || taken()) return;
     const st = env.st;
-    // :431-435 鼠标正悬在已有种植盆上 → 让位（原版不是"鼠标格占用即停"，只认盆本身）
-    if (st.inBounds(screenX, screenY) && activeAt(st, screenX, screenY)
+    // :431-435 鼠标正悬在已有种植盆上 → 让位（原版不是"鼠标格占用即停"，只认盆本身；
+    //  :445 active() 口径）
+    if (st.inBounds(screenX, screenY) && hasTileAt(st, screenX, screenY)
       && sheetOf(st.get(screenX, screenY)) === 380) return;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
-        if (!st.inBounds(i, j) || sheetOf(st.get(i, j)) !== 380) continue;
-        // :448-455 盆左右为空/可割/BreakableWhenPlacing → 续放
+        // :456 盆源格 active() && type==380——幽灵残型盆不作锚
+        if (!st.inBounds(i, j) || !hasTileAt(st, i, j) || sheetOf(st.get(i, j)) !== 380) continue;
+        // :448-455 盆左右为空/可割/BreakableWhenPlacing → 续放（:458/:462 active() 口径）
         for (const ox of [-1, 1]) {
           const nx = i + ox;
           if (!st.inBounds(nx, j)) continue;
           const nt = st.get(nx, j);
-          if (!activeAt(st, nx, j) || tileCutType(nt) || breakableWhenPlacing(sheetOf(nt))) {
+          if (!hasTileAt(st, nx, j) || tileCutType(nt) || breakableWhenPlacing(sheetOf(nt))) {
             targets.push({ x: nx, y: j });
           }
         }
@@ -1728,8 +1766,8 @@ export class SmartCursor {
   ): void {
     if (sem.createTileSheet !== 78 || taken()) return;
     const st = env.st;
-    // :378-386 鼠标格占用/不可达 → 停用
-    if (activeAt(st, screenX, screenY)) return;
+    // :378-386 鼠标格占用/不可达 → 停用（:389 active() 口径）
+    if (hasTileAt(st, screenX, screenY)) return;
     if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
@@ -1737,9 +1775,10 @@ export class SmartCursor {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
         const below = st.get(i, j + 1);
-        // :395 自身空/可割/BreakableWhenPlacing，下方 nactive 无坡无半砖且实心
-        if ((!activeAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t)))
-          && activeAt(st, i, j + 1) && !inActiveAt(st, i, j + 1)
+        // :395 自身空（active() 口径）/可割/BreakableWhenPlacing，下方 nactive 无坡无半砖且实心
+        if ((!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t)))
+          && activeAt(st, i, j + 1) // :405 下方 nactive()（KEEP 口径：active && !inActive）
+          && !inActiveAt(st, i, j + 1)
           && st.half[st.idx(i, j + 1)] === 0 && st.slope[st.idx(i, j + 1)] === 0
           && tileSolidType(below)) {
           targets.push({ x: i, y: j });
@@ -1794,9 +1833,9 @@ function tileRegion(p: SmartCursorActor, tb: number, st: TileStore): Region {
   };
 }
 
-/** :183-199 让位集（DisableSmartCursor / 轨道 314 且 gravDir=1） */
+/** :183-199 让位集（DisableSmartCursor / 轨道 314 且 gravDir=1）——:197 active() 口径 */
 function isHoveringOverAnInteractableTile(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  if (!hasTileAt(st, x, y)) return false;
   const sheet = sheetOf(st.get(x, y));
   if (DISABLE_SMART_CURSOR_SHEETS.has(sheet)) return true;
   if (sheet === 314) return true; // gravDir 恒 1（反重力未实装）
@@ -1810,9 +1849,10 @@ function isHammerTile(sheet: number): boolean {
   return HAMMER_TILES.has(sheet);
 }
 
-/** Step_Platforms 辅助：格上是平台族 sheet（:1445-1452） */
+/** Step_Platforms 辅助：格上是平台族 sheet（IsPlatform :1455-1462，active() 口径——
+ *  已致动平台在原版仍算平台锚） */
 function isPlatformSheet(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  if (!hasTileAt(st, x, y)) return false;
   return PLATFORMS.has(sheetOf(st.get(x, y)));
 }
 
@@ -1837,12 +1877,14 @@ function sheetToTileId(sheet: number): number | null {
   return hit >= 0 ? hit : null;
 }
 
-/** WorldGen.IsHarvestableHerbWithSeed（WorldGen.cs:66173-66196）：
+/** WorldGen.IsHarvestableHerbWithSeed（WorldGen.cs:66638-66660）：
  *  type 82 → false；type 84 → true；type 83 → IsAlchemyPlantHarvestable(style=frameX/18, y)。
+ *  ★原版是纯 type/frame 函数（无 active 位门）：:506 调用点直接传残型 type/frameX——
+ *  幽灵药草也按残型帧判收获期（曾误加 active 门导致漏判）。
  *  env.alchemy 缺省（未接世界态）时 83/84 均按不可收——等价语义 = 只认"非药草"分支，
  *  Game 侧已传入 clock/weather/groundLevel 实况，正常对局不触发该缺省。 */
 function isHarvestableHerbWithSeed(st: TileStore, x: number, y: number, env: SmartCursorEnv): boolean {
-  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  if (!st.inBounds(x, y)) return false;
   const sheet = sheetOf(st.get(x, y));
   if (sheet === 82) return false;
   if (sheet !== 83 && sheet !== 84) return false;
@@ -1869,30 +1911,34 @@ function isAlchemyPlantHarvestable(
   return false;
 }
 
-/** 八向至少一格暴露（GrassSeeds/Moss/StaffOfRegrowth 共用 :273-274） */function exposed8(st: TileStore, x: number, y: number): boolean {
+/** 八向至少一格暴露（GrassSeeds/Moss/StaffOfRegrowth 共用 :273-274/:283-284/:351-352，
+ *  `!tile.active()` 口径——已致动邻格在原版仍算"占位"不暴露） */
+function exposed8(st: TileStore, x: number, y: number): boolean {
   for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
     const nx = x + ox, ny = y + oy;
-    if (st.inBounds(nx, ny) && !activeAt(st, nx, ny)) return true;
+    if (st.inBounds(nx, ny) && !hasTileAt(st, nx, ny)) return true;
   }
   for (const [ox, oy] of [[-1, -1], [-1, 1], [1, 1], [1, -1]]) {
     const nx = x + ox, ny = y + oy;
-    if (st.inBounds(nx, ny) && !activeAt(st, nx, ny)) return true;
+    if (st.inBounds(nx, ny) && !hasTileAt(st, nx, ny)) return true;
   }
   return false;
 }
 
-/** :2867-2893 IsValidSpotForTorch（墙 → 左 → 右 → 下） */
+/** :2877-2903 IsValidSpotForTorch（墙 → 左 → 右 → 下）。
+ *  ★原版树干判定 IsTreeType 是裸 type 读（左锚 :2888 对 (x-1,y-1)/(x-1,y+1) 无 active
+ *  门，残型树干也算）——本副本仅保留越界守门，不设 active 门。锚格门为 active() 口径。 */
 function isValidSpotForTorch(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const ii = st.idx(x, y);
-  if (st.wall[ii] > 0) return true; // :2869 有墙即放
-  if (TORCH_TILES.has(sheetOf(st.type[ii]))) return false; // :2873 自身是火把
+  if (st.wall[ii] > 0) return true; // :2879 有墙即放
+  if (TORCH_TILES.has(sheetOf(st.type[ii]))) return false; // :2883 自身是火把（裸 type，同原版）
   const isTreeType = (tx: number, ty: number): boolean => {
-    if (!st.inBounds(tx, ty) || !activeAt(st, tx, ty)) return false;
+    if (!st.inBounds(tx, ty)) return false;
     return IS_A_TREE_TRUNK.has(sheetOf(st.get(tx, ty)));
   };
-  // :2877-2881 左：slope 允许（0 或奇数坡）且 实心/梁/连续三格树干
-  if (st.inBounds(x - 1, y) && activeAt(st, x - 1, y)) {
+  // :2887-2888 左：active() 口径；slope 允许（0 或奇数坡）且 实心/梁/连续三格树干
+  if (st.inBounds(x - 1, y) && hasTileAt(st, x - 1, y)) {
     const li = st.idx(x - 1, y);
     const lt = st.get(x - 1, y);
     const ls = sheetOf(lt);
@@ -1903,8 +1949,8 @@ function isValidSpotForTorch(st: TileStore, x: number, y: number): boolean {
       return true;
     }
   }
-  // :2882-2886 右：slope 允许（0 或偶数坡）
-  if (st.inBounds(x + 1, y) && activeAt(st, x + 1, y)) {
+  // :2892-2893 右：active() 口径；slope 允许（0 或偶数坡）
+  if (st.inBounds(x + 1, y) && hasTileAt(st, x + 1, y)) {
     const ri = st.idx(x + 1, y);
     const rt = st.get(x + 1, y);
     const rs = sheetOf(rt);
@@ -1915,8 +1961,8 @@ function isValidSpotForTorch(st: TileStore, x: number, y: number): boolean {
       return true;
     }
   }
-  // :2887-2891 下：slope 0 且非半砖，实心（非平台）或平台
-  if (st.inBounds(x, y + 1) && activeAt(st, x + 0, y + 1)) {
+  // :2897-2898 下：active() 口径；slope 0 且非半砖，实心（非平台）或平台
+  if (st.inBounds(x, y + 1) && hasTileAt(st, x, y + 1)) {
     const bi = st.idx(x, y + 1);
     const bt = st.get(x, y + 1);
     const bs = sheetOf(bt);
@@ -1956,14 +2002,16 @@ export function hitWallSubstepCore(st: TileStore, x: number, y: number): boolean
       }
     }
   }
-  if (activeAt(st, x, y) && flag) {
+  // :1336 `Main.tile[x,y].active() & flag`——active() 口径（已致动格仍挡墙）
+  if (hasTileAt(st, x, y) && flag) {
     let flag2 = true;
     for (let k = -1; k < 2; k++) {
       for (let l = -1; l < 2; l++) {
         if (k === 0 && l === 0) continue;
         if (!st.inBounds(x + k, y + l)) { flag2 = false; continue; } // 越界按"非实心邻"计
         const t = st.type[st.idx(x + k, y + l)];
-        if (!activeAt(st, x + k, y + l) || !tileSolidType(t) || tileSolidTopType(t)) flag2 = false;
+        // :1346 `!tile.active()` active() 口径
+        if (!hasTileAt(st, x + k, y + l) || !tileSolidType(t) || tileSolidTopType(t)) flag2 = false;
       }
     }
     if (flag2) flag = false;
@@ -2050,7 +2098,9 @@ function pickNonAltar(st: TileStore, targets: Pt[], world: (p: Pt) => { x: numbe
   for (const t of targets) {
     if (!st.inBounds(t.x, t.y)) continue;
     const i = st.idx(t.x, t.y);
-    if (activeAt(st, t.x, t.y) && st.type[i] !== 0 && sheetOf(st.type[i]) === 26) continue;
+    // :1672/:1714 `!tile.active() || tile.type != 26` → 仅剔"在场祭坛"（active() 口径；
+    //  幽灵残型祭坛原版视为可考虑目标）
+    if (hasTileAt(st, t.x, t.y) && sheetOf(st.type[i]) === 26) continue;
     const w = world(t);
     const d = dist(w.x, w.y, ref.x, ref.y);
     if (best === -1 || d < best) { best = d; point = t; }
@@ -2068,7 +2118,7 @@ function pickNonAltar(st: TileStore, targets: Pt[], world: (p: Pt) => { x: numbe
 function notDoorStand(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true; // 原版 Main.tile[x,y]==null 短路 → true
   const i = st.idx(x, y);
-  if (activeAt(st, x, y) && sheetOf(st.type[i]) === 11) {
+  if (hasTileAt(st, x, y) && sheetOf(st.type[i]) === 11) { // DelegateMethods.cs:860 active()
     const fx = st.frameX[i];
     if (fx >= 18) return fx < 54;
     return false;
@@ -2076,10 +2126,11 @@ function notDoorStand(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
-/** WorldGen.IsOpenDoorAnchorFrame（WorldGen.cs:69228-69241）：sheet 11 且 frameX%72
- *  落在锚帧（<18 或 ≥54）。Step_Walls 用它排除开门锚位格（SmartCursorHelper.cs:1137-1140）。 */
+/** WorldGen.IsOpenDoorAnchorFrame（WorldGen.cs:69697-69710）：sheet 11 且 frameX%72
+ *  落在锚帧（<18 或 ≥54），active() 口径。Step_Walls 用它排除开门锚位格
+ *  （SmartCursorHelper.cs:1142-1145）。 */
 export function isOpenDoorAnchorFrame(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  if (!hasTileAt(st, x, y)) return false;
   const i = st.idx(x, y);
   if (sheetOf(st.type[i]) !== 11) return false;
   const num = st.frameX[i] % 72;

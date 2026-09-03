@@ -298,7 +298,15 @@ interface DPlat { x: number; y: number; hall: boolean; hf: number;
   force?: boolean; pots?: number; bottles?: number; books?: number; candles?: number;
   nowb?: boolean;
   /** ★IIIII111c：PD 面 OverrideStyle（GetPlatformStyle 掷,≥0 覆盖座平台档位）。 */
-  os?: number; }
+  os?: number;
+  /** ★IIIII222：OverrideMaxLengthAllowed（DU.cs:1421 floating-rocks 平台=5+num8；
+   *  行选 span 门用,非 force 亦消费——vanilla 覆写序=默认 10/20→覆写→×scalar）。 */
+  maxLen?: number;
+  /** ★IIIII222：canPlaceHereCallback 投影（DU.cs:1422 盒谓词闭包=GenerateFloatingRocksInArea
+   *  参数区 [x,x+width]×[y,y+height] 含端）。vanilla 在扫描 while 环内**不受 forcePlacement
+   *  短路**（DU.cs:1424/:1426-1429 无 !force 前缀）⇒ force 平台的 span 亦被盒钳制;
+   *  缺失=force 平台越盒写入（本批 (336,759) 平台缺失→箱锚腿败→BIOMECHESTS +1 根因之一）。 */
+  cb?: [number, number, number, number]; }
 
 /** ★IIIII93b：单座地牢实例参数束（dgSetup 产物 → oneDungeon 消费）。
  *  对应 vanilla GenVars.dungeonGenVars[k]（genvars 面）+ DungeonData[k]（表/预计算面）
@@ -4022,6 +4030,8 @@ const snap: SnapFn = (name) => {
       //   ——房间候选（roomPlatformsDoors，platformFluff=3）扫 y±3；走廊/入口候选 ±5。
       const n3 = d.hf;
       let n4 = y < ws + 50.0 ? 20 : 10;
+      // ★IIIII222：OverrideMaxLengthAllowed 覆写（DU.cs:1411-1413 覆写序=默认→覆写→×scalar）
+      if (d.maxLen !== undefined && d.maxLen > 0) n4 = d.maxLen;
       n4 = Math.trunc(n4 * ((d.hall ? 1.0 : 1.0)));   // Hall/RoomSizeScalar=(1+1)/2=1（DungeonData.cs:88）
       for (let j = y - n3; j <= y + n3; j++) {
         let n6 = x, n7 = x;
@@ -4031,13 +4041,20 @@ const snap: SnapFn = (name) => {
           while (inW(n6, j, 0) && actAt(n6, j) === 0) {
             n6--;
             if (!inW(n6, j, 0)) break;
-            if (!force && (actAt(n6, j) !== 0 && !isDT(typAt(n6, j)) || n6 === 0)) { bad = true; break; }
+            // ★IIIII222 座面化：IsConsideredDungeonTile=tileDungeon∪本座 isDungeonTile
+            //   （DU.cs:1869-1889）——曾用静态 isDT 漏本座风格砖（st1 Cavern=38 灰砖等）
+            //   ⇒ 扫描边界误判 non-DT → 行 rej=1 → n=12 起座1 平台 53 处错位。
+            if (!force && (actAt(n6, j) !== 0 && !gfIsBkDT(typAt(n6, j)) || n6 === 0)) { bad = true; break; }
+            // ★IIIII222：canPlaceHereCallback（DU.cs:1424-1429）——不受 forcePlacement
+            //   短路、先于 num6<=10 break（vanilla 环内序）。盒=含端 [cb0..cb2]×[cb1..cb3]。
+            if (d.cb !== undefined && !(n6 >= d.cb[0] && n6 <= d.cb[2] && j >= d.cb[1] && j <= d.cb[3])) { bad = true; break; }
             if (n6 <= 10) break;
           }
           while (inW(n7, j, 0) && actAt(n7, j) === 0) {
             n7++;
             if (!inW(n7, j, 0)) break;
-            if (!force && (actAt(n7, j) !== 0 && !isDT(typAt(n7, j)) || n7 === w - 1)) { bad = true; break; }
+            if (!force && (actAt(n7, j) !== 0 && !gfIsBkDT(typAt(n7, j)) || n7 === w - 1)) { bad = true; break; }
+            if (d.cb !== undefined && !(n7 >= d.cb[0] && n7 <= d.cb[2] && j >= d.cb[1] && j <= d.cb[3])) { bad = true; break; }
             if (n7 >= w - 10) break;
           }
         }
@@ -7313,7 +7330,15 @@ const snap: SnapFn = (name) => {
         view.outer.set(Math.max(10, rmv.innerL - 8), Math.max(10, rmv.innerT - 8), Math.min(w - 10, rmv.innerR + 8), Math.min(h - 10, rmv.innerB + 8));
         rooms.push(view);
       },
-      platSink: (pl) => platData.push({ x: pl.x, y: pl.y, hall: false, hf: pl.hf || 5, force: !!pl.force }),
+      // ★IIIII222 定罪刀（三联）：①`pl.hf || 5` 曾把 GenerateFloatingRocksInArea 的
+      //   OverrideHeightFluff=0（DU.cs:1420）强转成 5 ⇒ force 平台行扫从单行 y 变
+      //   y±5，行位整体 −5 漂移——(336,759) 座1 楼梯平台因此缺位，箱右锚腿
+      //   chestLegOK 败 → 组1 第 4 试 (337,758) JS ok=0/x86 ok=1（BIOMECHESTS +1
+      //   掷残根）。②maxLen/cb 整缺：canPlaceHereCallback（DU.cs:1422 盒闭包）在
+      //   vanilla 扫描环内不受 forcePlacement 短路 ⇒ 缺它=越盒写入（x86 n=884/885
+      //   rej=1 无平台 vs JS 49 格长平台）。③os 透传（OverrideStyle 帧面）。
+      platSink: (pl) => platData.push({ x: pl.x, y: pl.y, hall: false,
+        hf: pl.hf ?? 5, force: !!pl.force, maxLen: pl.maxLen, os: pl.os, cb: pl.cb }),
       snap,
     };
     dualLayoutCtxS = dualLayoutCtx;

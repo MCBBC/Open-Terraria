@@ -12,7 +12,7 @@ import { World } from '../src/world/World';
 afterEach(() => vi.restoreAllMocks());
 
 describe('isNearFairyWindow（Player.cs:54494 距离窗谓词）', () => {
-  const vidOf = (e: { vid: number }) => e.vid;
+  const vidOf = (e: { dead?: boolean; cx: number; cy: number }) => (e as unknown as { vid: number }).vid;
 
   it('仙女 583/584/585 距离 <1920 才受理；=1920 拒（严格小于）', () => {
     const mk = (cx: number, vid = 583) => ({ dead: false, cx, cy: 0, vid });

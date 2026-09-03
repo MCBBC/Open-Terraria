@@ -125,3 +125,29 @@ export function dresserHover(
     ? { iconVid: styleIconVid, textKey: null }
     : { iconVid: null, textKey: 'LegacyDresserType.0' };
 }
+
+// ---- HasItemSwap 提示/交互面（R4 伴随项 2026-09-03;原版无 cursorItemIcon/icon 分支——
+//      悬停呈现 = ItemToolTip {InputTrigger_ToggleOrOpen}（Lang.cs:160→右键名;
+//      ItemSlot.cs:4009 手柄指令行本作无手柄不接）+ 右键换型 :1646-1653 ----
+
+/** TryItemSwap 换型对表（ItemSlot.cs:1879-1990;集 = ItemID.cs:1219 28 件）:双向对
+ *  5325↔4131/5059↔5060/4346↔5391/6190↔6195 旧世界跑酷指南±/5323↔5455/4767↔5453/
+ *  5309↔5454/2611 猪龙鱼链球↔5526;三环 5324→5329→5330→5324、5358→5360→5361→5359
+ *  →5358（5437 汇入 5358）、6168→6169→6193→6194→6168 */
+const SWAP_PAIRS: Readonly<Record<number, number>> = {
+  5325: 4131, 4131: 5325, 5059: 5060, 5060: 5059, 5324: 5329, 5329: 5330,
+  5330: 5324, 4346: 5391, 5391: 4346, 6190: 6195, 6195: 6190, 5323: 5455,
+  5455: 5323, 4767: 5453, 5453: 4767, 5309: 5454, 5454: 5309, 5358: 5360,
+  5360: 5361, 5361: 5359, 5359: 5358, 5437: 5358, 6168: 6169, 6169: 6193,
+  6193: 6194, 6194: 6168, 2611: 5526, 5526: 2611,
+};
+/** AfterItemSwap（:1992-2008）换入族 → 音 22 Unlock（'unlock'）;其余 → 7 Grab（'pickup'） */
+const SWAP_SOUND22 = new Set([5324, 5329, 5330, 4346, 5391, 5358, 5361, 5360, 5359, 2611, 5526, 6168, 6169, 6193, 6194]);
+
+/** 右键换型受理（:1646-1653）;持有侧快换表 Player.cs:31764-31877 已在 Game.updateUse。
+ *  非集内件返回 null;stack==1 与光标空门在调用侧（RightClick :1646 同序） */
+export function tryItemSwapVid(vid: number): { target: number; sound: 'unlock' | 'pickup' } | null {
+  const target = SWAP_PAIRS[vid];
+  if (!target) return null;
+  return { target, sound: SWAP_SOUND22.has(target) ? 'unlock' : 'pickup' };
+}

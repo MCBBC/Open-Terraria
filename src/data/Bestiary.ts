@@ -382,6 +382,15 @@ function npcStats(npcId: number): NpcStatsTuple {
   return NPC_STATS[String(npcId)] ?? [0, 0, 0, 0, 0, 0];
 }
 
+/** NPC.rarity 字段 ≠ 0（BestiaryEntry.Enemy :34 `if (nPC.rarity != 0)
+ *  list.Add(new RareSpawnBestiaryInfoElement(nPC.rarity))`）——Filters.ByRareCreature
+ *  （Filters.cs:89-103 `entry.Info[i] is RareSpawnBestiaryInfoElement`）的判定面。
+ *  ★≠NpcBestiaryRarityStars 星表：那表（ContentSamples.cs:1084 GetNPCBestiaryRarityStarsCount）
+ *  公式以 1 起底恒 ≥1，是 0-5 星展示值，不是挂载门 */
+export function isRareSpawnForBestiary(npcId: number): boolean {
+  return npcStats(npcId)[0] !== 0;
+}
+
 /** NPC.isLikeATownNPC（NPC.cs:6772-6781）：453 恒真，其余走 townNPC 旗 */
 export function isLikeATownNpc(npcId: number): boolean {
   return npcId === 453 || BESTIARY_TOWN_IDS.has(npcId);

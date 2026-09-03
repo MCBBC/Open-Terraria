@@ -108,7 +108,13 @@ export class FallingBlock extends Entity {
       if (tid !== undefined && !noPlace && st.inBounds(prevTx, prevTy)
         && (st.type[st.idx(prevTx, prevTy)] === 0 || (st.flags[st.idx(prevTx, prevTy)] & 1) === 0)) {
         st.setTile(prevTx, prevTy, tid, 0, 0);
-        game.playSfx?.('dig', 0.6);
+        // ★无声（2026-09-03 F5 音效录制定罪）：原版沙落回格【不播任何声音】——
+        //  aiStyle 10 Kill 落格支(:79248-79310)无 PlaySound,WorldGen.PlaceTile
+        //  (:59833-60450)全程零 PlaySound（仅 736-738 化石落块 :79102 播 Item127、
+        //  爆破族 :79384 播 Item14）。曾在此播 'dig'×0.6 且**不传坐标** → 距离衰减
+        //  永不生效,全世界任意处的落沙（远超 2500px 可闻半径）每格满响一声;
+        //  沙潮期 6-43 连发 = 用户报"听到错误的音效"主因（F5 录制 audio.sfx 环实锤:
+        //  Dig_0/1/2 无坐标全 'ok' 爆发,计数与落沙潮逐一吻合）
         // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus
         // 级联;沙坡/沙堆改变邻接后悬托仙人掌须断根——用户实报"仙人掌悬在沙坡上")
         const CAC = TILE_BY_KEY['v_80_cactus'];

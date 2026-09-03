@@ -15,11 +15,12 @@
 //     AI_053 :37996-38002 朝向回写 / AI_197 :41068-41097 朝向+rot / AI_138
 //     :70394-70411 num3=20+num2-=14 探测盒
 // 实现落点：src/entities/MinionProj.ts（heavySlingReposition + 各族携带支）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
+import { rollGolemSentryCrit } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -27,18 +28,23 @@ const W = 200, H = 120;
 interface StubEnemy {
   id: number; x: number; y: number; w: number; h: number; dead: boolean; hp: number;
   hurtLog: number[];
+  critLog: boolean[];
   readonly cx: number;
   readonly cy: number;
   hurt: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean,
     pierce?: number, fromPlayer?: boolean, ...rest: unknown[]) => boolean;
 }
 function mkEnemy(id: number, x: number, y: number, w = 16, h = 16): StubEnemy {
-  const e = { id, x, y, w, h, dead: false, hp: 10000, hurtLog: [] as number[] } as StubEnemy;
+  const e = { id, x, y, w, h, dead: false, hp: 10000, hurtLog: [] as number[], critLog: [] as boolean[] } as StubEnemy;
   Object.defineProperties(e, {
     cx: { get: () => e.x + e.w / 2 },
     cy: { get: () => e.y + e.h / 2 },
   });
-  e.hurt = (d: number) => { e.hurtLog.push(d); return false; };
+  e.hurt = (d: number, _kx: number, _ky: number, _g: unknown, _pen?: number, crit?: boolean) => {
+    e.hurtLog.push(d);
+    e.critLog.push(!!crit);
+    return false;
+  };
   return e;
 }
 
@@ -233,5 +239,56 @@ describe('② AI_130 携带支朝向回写（ai[0]==1 && ai[1]==0 :69348-69357�
     player.facing = -1;
     const s = carry(667, player, hooks);
     expect(s.facing).toBe(-1);                             // sFire=0/sCool=0 → 首拍即回写
+  });
+});
+
+// ============ ③ 6176 圣殿骑士背包强制暴击掷（Projectile.cs:12962-12965） ============
+
+describe('③ 6176 accGolemSentryBackpack：sentry/SentryShot 命中 1/10 强制暴击', () => {
+  it('挂件+掷中（mock 0.05 → Next(10)=0）→ 爆炸机关 AoE crit=true、伤 ×2', () => {
+    const { player, hooks } = makeHooks();
+    withEq(player, { accSentryBackpack: true, accGolemSentryBackpack: true });
+    const en = mkEnemy(1, player.cx - 17, player.cy + 32);
+    (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [en];
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.05);
+    const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
+    s.fixedUpdate(1 / 60, hooks);
+    rnd.mockRestore();
+    expect(en.hurtLog).toEqual([20]);                      // dmgOf=10 → crit ×2
+    expect(en.critLog).toEqual([true]);
+  });
+  it('挂件+掷未中（mock 0.95 → 9）→ 不强制（crit=false、伤原值）', () => {
+    const { player, hooks } = makeHooks();
+    withEq(player, { accSentryBackpack: true, accGolemSentryBackpack: true });
+    const en = mkEnemy(1, player.cx - 17, player.cy + 32);
+    (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [en];
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.95);
+    const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
+    s.fixedUpdate(1 / 60, hooks);
+    rnd.mockRestore();
+    expect(en.hurtLog).toEqual([10]);
+    expect(en.critLog).toEqual([false]);
+  });
+  it('未挂件 → 掷中亦不强制（:12962 accGolemSentryBackpack 门）', () => {
+    const { player, hooks } = makeHooks();
+    withEq(player, { accSentryBackpack: true });
+    const en = mkEnemy(1, player.cx - 17, player.cy + 32);
+    (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [en];
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.05);
+    const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
+    s.fixedUpdate(1 / 60, hooks);
+    rnd.mockRestore();
+    expect(en.critLog).toEqual([false]);
+  });
+  it('helper 门：非 sentry 非 SentryShot（374 MinionShot）恒 false；SentryShot 644/sentry 688 过门', () => {
+    const { player, hooks } = makeHooks();
+    withEq(player, { accGolemSentryBackpack: true });
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.05);   // 掷中相位
+    expect(rollGolemSentryCrit(hooks, 374, false)).toBe(false);   // MinionShot 不在表
+    expect(rollGolemSentryCrit(hooks, 644, false)).toBe(true);    // SentryShot
+    expect(rollGolemSentryCrit(hooks, 688, true)).toBe(true);     // 本体 sentry
+    rnd.mockRestore();
+    withEq(player, { accGolemSentryBackpack: false });            // 未挂件
+    expect(rollGolemSentryCrit(hooks, 644, false)).toBe(false);   // :12962 旗门
   });
 });

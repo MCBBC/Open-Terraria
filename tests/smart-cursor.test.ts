@@ -429,3 +429,83 @@ describe('方向箭头显示门（Main.cs:46058-46065）', () => {
     expect(smartCursorArrowAllowed(st, 0, 80, { x: -1, y: 0 })).toBe(true);
   });
 });
+
+// ===================== 2026-09-03 谓词口径对账回归 =====================
+// vanilla `tile.active()`（Tile.cs:591 HasTile 位）含已致动格；nactive() 不含。
+// 此前全步以 nactive（isActive）代读 active() → 已致动格被当空气。
+// 已致动格构造：flags=1（setTile 落位）+ wire 通道 WIRE_ACTUATED 位；
+// 幽灵格（生成期 active(false) 残型）：type 在场但 flags=0 —— 两口径同判"不在场"。
+describe('谓词口径：active()=HasTile 位 vs nactive()（对账批）', () => {
+  const actuate = (st: TileStore, x: number, y: number) => {
+    st.wire[st.idx(x, y)] |= TileStore.WIRE_ACTUATED;
+  };
+
+  it('ForceCursor：已致动平台仍被镐钉中（:2259 active()，solidTop 可挖支）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 3, ty = PYT + 1;
+    st.setTile(tx, ty, T.PLATFORM);
+    actuate(st, tx, ty);
+    expect(run(mkEnv(st, mouseAt(tx, ty), pick()))).toEqual({ x: tx, y: ty });
+  });
+
+  it('ForceCursor：未致动平台同样钉中（Main.tileAxe 表翻案——平台非斧族，镐支不再被 def.axe 挡）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 3, ty = PYT + 1;
+    st.setTile(tx, ty, T.PLATFORM);
+    expect(run(mkEnv(st, mouseAt(tx, ty), pick()))).toEqual({ x: tx, y: ty });
+  });
+
+  it('MineShinies：已致动魔力水晶（sheet 639）仍被选（:2310 active()）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 2, ty = PYT + 1;
+    st.setTile(tx, ty, TILE_BY_KEY['v_639_mana_crystal']!);
+    actuate(st, tx, ty);
+    const env = mkEnv(st, mouseAt(PT + 5, PYT - 1), pick());
+    expect(run(env)).toEqual({ x: tx, y: ty });
+  });
+
+  it('ActuationRod：已致动+已装致动器格仍可选（:1518 active()，打回活体）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 2, ty = PYT + 1;
+    st.setTile(tx, ty, T.DIRT);
+    st.wire[st.idx(tx, ty)] |= TileStore.WIRE_ACTUATOR | TileStore.WIRE_ACTUATED;
+    const rod = {
+      def: { key: 'vi_3620_probe', tile: null } as unknown as (typeof ITEM_DEFS)[number],
+      tool: null,
+    };
+    expect(run(mkEnv(st, mouseAt(tx, ty), rod))).toEqual({ x: tx, y: ty });
+  });
+
+  it('Torch：下方锚格已致动仍成立（:2897-2898 active()）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 2, ty = PYT - 1;
+    st.setTile(tx, ty + 1, T.DIRT);
+    actuate(st, tx, ty + 1);
+    expect(run(mkEnv(st, mouseAt(tx, ty), torchItem()))).toEqual({ x: tx, y: ty });
+  });
+
+  it('Walls：邻格已致动仍可作依附锚（:1126-1138 active()）', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 3, ty = PYT + 1;
+    st.setTile(tx - 1, ty, T.DIRT);
+    actuate(st, tx - 1, ty);
+    expect(run(mkEnv(st, mouseAt(tx, ty), wallItem()))).toEqual({ x: tx, y: ty });
+  });
+
+  it('幽灵格（flags=0,type≠0）两口径同判不在场：残型平台不触发 ForceCursor', () => {
+    const st = new TileStore(W, H);
+    const tx = PT + 3, ty = PYT + 1;
+    st.setTile(tx, ty, T.PLATFORM);
+    st.flags[st.idx(tx, ty)] = 0;              // 原版 active(false) 残型
+    expect(run(mkEnv(st, mouseAt(tx, ty), pick()))).toBeNull();
+  });
+
+  it('nactive KEEP 口径：MineSolids 射线穿透已致动实心块（:2492 active()&&!inActive()）', () => {
+    const st = new TileStore(W, H);
+    // 玩家与鼠标之间立一格已致动石墙——射线不被挡、其后无实心 → 无目标
+    st.setTile(PT + 2, PYT + 1, T.STONE);
+    st.wire[st.idx(PT + 2, PYT + 1)] |= TileStore.WIRE_ACTUATED;
+    const env = mkEnv(st, mouseAt(PT + 4, PYT + 1), pick());
+    expect(run(env)).toBeNull();
+  });
+});

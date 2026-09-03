@@ -646,8 +646,9 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     expect(mol!.w).toBe(14); expect(mol!.h).toBe(14);
     expect(mol!.cx).toBe(player.cx);   // ctor 收盒左上,回正后盒心=出手锚
     expect(mol!.cy).toBe(player.cy);
-    // 火云伴生（Kill :75373-75377）：spawnFires(盒心+散布) → 各 Arrow 盒心 = 传入中心
-    mol!.spawnFires(5000, 4000, 11, 2, -1);
+    // 火云伴生（Kill :75373-75377）：breakOpen 六次 spawnFires(盒心+散布) → 各 Arrow
+    //  盒心 = 传入中心（回调每次产一朵,六朵循环在 MolotovProj.breakOpen）
+    for (let i = 0; i < 6; i++) mol!.spawnFires(5000, 4000, 11, 2, -1);
     const fires = added.filter((e) => e instanceof Arrow
       && (e as Arrow).projId >= 400 && (e as Arrow).projId <= 402) as Arrow[];
     expect(fires.length).toBe(6);
@@ -674,6 +675,10 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     // 系与 Unholy Arrow 47→弹4 混记;ProjectileID.Shuriken=3,ThrowingKnife=279→弹48）
     for (const [vid, pid, w] of [[42, 3, 22], [949, 166, 14], [985, 171, 14]] as const) {
       const { player, added, updateUse } = thrownGame(vid);
+      // ★949 带 ammo=949（雪球炮弹药双职）→ Inventory.add 归入弹药槽 54-57,选中格
+      //  落空——直写选中格规避（harness 伪影;原版雪球本可驻热栏手掷）
+      (player.inv as unknown as { slots: Array<{ id: number; stack: number } | null> })
+        .slots[player.inv.selected] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]!]!, stack: 3 };
       updateUse();
       const arrows = added.filter((e) => e instanceof Arrow && (e as Arrow).projId === pid) as Arrow[];
       expect(arrows.length, `${vid} 未产出弹 ${pid}`).toBeGreaterThanOrEqual(1);
@@ -682,4 +687,64 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
       expect(arrows[0].cy).toBe(player.cy);
     }
   });
+});
+
+// #############################################################################
+// # R9 批四（2026-09-03）——投掷链 14px 前移拆除后的余量（半盒回正 + 修正量勘误）  #
+// #   #19 2590 燃烧瓶→399(MolotovProj)   无专支 → 通用尾支 :49957 盒心（14×14）   #
+// #   #20 422/423/3477→69/70/621        同上（14×14,P.cs:1490-1512）             #
+// #   #✓ 火云伴生 400-402               P.cs:75373-75377 NewProjectile(Center+散布)#
+// #       ——红蓝 F 批注勘误:原 −7,−7 按 399 盒 14×14 误算;三型原版盒各不同            #
+// #       （:4814-4833 400=14×16/401=12×14/402=6×12）→按各自盒径回正（现数据面       #
+// #       三型同记 6×12 ⇒ 等价批注修正量 −3,−6）                                  #
+// #   #22 抽查:手里剑 42/雪球 949/绳圈 985（通用投掷支批二已接,新锚复验）              #
+// # 数据面登记（本批未修）:vanilla-projectiles.json 400/401/402 三型同记 6×12,原版  #
+// #   实为嵌套 if 三档——提取器 lastMatch 吞并（同 DD2 哨兵 663/665 旧案,见          #
+// #   src/data/vanillaProjectiles.ts 头注）;接线读实体 e.w/h 取径,数据面勘正后自动   #
+// #   跟随,不阻断本批。                                                            #
+// #############################################################################
+
+describe('R9 批四数据面：弹盒尺寸（半盒偏移算术基数）', () => {
+  const CASES: Array<[number, number, number, string]> = [
+    [399, 14, 14, '#19 2590 燃烧瓶（P.cs:4803-4812）'],
+    [69, 14, 14, '#20 422 圣水（P.cs:1490-1496）'],
+    [70, 14, 14, '#20 423 邪水（P.cs:1498-1504）'],
+    [621, 14, 14, '#20 3477 血水（P.cs:1506-1512）'],
+    [3, 22, 22, '抽查 手里剑 42→弹3（ProjectileID.Shuriken,P.cs:830-836）'],
+    [166, 14, 14, '抽查 雪球 949→弹166'],
+    [171, 14, 14, '抽查 绳圈 985→弹171'],
+  ];
+  for (const [id, w, h, label] of CASES) {
+    it(`${label}：弹 ${id} SetDefaults 盒 ${w}×${h}`, () => {
+      const pd = projectileData(id);
+      expect(pd, `vanilla-projectiles.json 缺 ${id}`).toBeDefined();
+      expect(pd!.width).toBe(w);
+      expect(pd!.height).toBe(h);
+    });
+  }
+  it('火云伴生 400-402：原版三型盒各不同（P.cs:4814-4833）——接线按实体盒径取径,不钉死单值', () => {
+    // json 现状三型同记 6×12（提取器嵌套 if lastMatch 吞并,数据面债另账登记）。
+    // 故只钉存在性+批注勘误链路（批四 e2e 已断言盒心=中心,对任何盒径成立）——
+    // 若日后按 1457 终值勘正为 14×16/12×14/6×12,本测不红,接线自动跟随。
+    for (const id of [400, 401, 402]) {
+      expect(projectileData(id), `vanilla-projectiles.json 缺 ${id}`).toBeDefined();
+    }
+  });
+});
+
+describe('R9 批四接线源锁（src/core/Game.ts 三处配对）', () => {
+  const src = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
+  const WIRING: Array<[string, RegExp]> = [
+    ['#19 2590→399（mol）',
+      /new MolotovProj\(px, py,[\s\S]{0,1600}?placeAtShootSpawn\(mol, px, py\);/],
+    ['#20 422/423/3477→69/70/621（water）',
+      /new WaterSplashProj\(px, py,[\s\S]{0,800}?placeAtShootSpawn\(water, px, py\);/],
+    ['#✓ 火云伴生（fire,fx,fy 中心锚,勿再手动半盒）',
+      /new MolotovProj\(px, py,[\s\S]{0,300}?new Arrow\(fx, fy, fvx, fvy, fdmg, 0,[\s\S]{0,800}?placeAtShootSpawn\(fire, fx, fy\);/],
+  ];
+  for (const [label, re] of WIRING) {
+    it(`${label}：ctor 后接盒心回正（NewProjectile 中心语义）`, () => {
+      expect(re.test(src), `Game.ts 缺失配对：${label}`).toBe(true);
+    });
+  }
 });
