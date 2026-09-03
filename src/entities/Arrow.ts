@@ -19,6 +19,8 @@ import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision, lavaCollision } from './npcLiquid';
 
 import { LIQUID_TYPE } from '../world/TileStore';
+import { LCG32 } from '../fx/LightningGenerator';
+import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
@@ -1079,6 +1081,20 @@ export class Arrow extends Entity {
   /** aiStyle 专属计数（94 水晶风暴 ai[1] 缩径倒计时 / 95 诅咒之焰 ai[1] 重力门 /
    *  280 黄金雨 ai[0] 重力门——每弹仅一个 aiStyle，恒不复用） */
   private aiCnt = 0;
+  // ---- 22 水花权杖（aiStyle 12 type 22 支，Projectile.cs:24835-24926）专属态 ----
+  /** 22 熔岩反弹 LCG32 种子 = 原版 ai[2]：出手位 `Main.rand.Next(0, 20000)`
+   *  （Player.cs:49929-49931 ItemCheck_Shoot 通用尾支 projToShoot==22 专行）；
+   *  每次熔岩反弹 `new LCG32Random((uint)ai[2])`（Projectile.cs:24851）从同一种子
+   *  重放两掷 → 反弹向量对【单弹】恒定、跨弹随出手掷变化。发射点未注入 ai →
+   *  ctor 同分布自掷（424 流星弹/485 狱翼箭先例）。 */
+  waterStreamSeed = 0;
+  /** 22 ai[1]：0=水支（默认） / 1=熔岩反弹支（进档后恒驻——:24842/:24855）。
+   *  与水支互斥：反弹受理门要求 `velocity.Y > 0 && ai[1] == 0`（:24841）。 */
+  private waterLavaMode = 0;
+  /** 22 进档后 extraUpdates=0（:24846）的挂起旗——本仓子步循环逐迭代读
+   *  extraUpdates（原版 numUpdates 在 Update 头一次取定,当拍子步数不变）⇒
+   *  写入挂起到下一 tick 头生效（bee36EU0 同款,:27693-27695 先例）。 */
+  private waterEU0 = false;
   // ---- 大地法杖巨石 261（AI_014 type 段 :18235/:12745）专属态 ----
   /** 慢速死亡门：|v|<1.5 消亡 */
   boulder = false;
@@ -1952,6 +1968,8 @@ export class Arrow extends Entity {
     // 常量补——红队 R27 §6：曾 3600 寿命翻倍）。min 而非覆写：发射链显式传缺省
     // 3600（fireGemStaffBolts 表缺列兜底）时同样收敛到原版终值
     if (projId === 27) this.life = Math.min(this.life, 1800);
+    // 22 水花权杖熔岩反弹种子（ai[2]，见字段注——Projectile.cs:24851 消费）
+    if (projId === 22) this.waterStreamSeed = Math.floor(Math.random() * 20000);
     // 穿透表（修复1）：opts 显式优先 → SetDefaults penetrate → 缺省 1。−1 = 无限
     // （小丑箭 5(:594)/地狱火箭 41(:982)；命中侧按全局 immune 帧冷却再命中）
     this.pierce = opts?.pierce ?? pd0?.penetrate ?? 1;
@@ -2264,7 +2282,7 @@ export class Arrow extends Entity {
       case 661: case 819: case 955: return (255 - this.alpha) / 255;
       // 728 超级星星炮星：GetAlpha :80995 恒 (255,255,255,0)*Opacity 隐体
       // （:80995 支成员 9/723-726/1133 待后续批核实 vanillaProjAlpha off 档承接面）
-      case 728: return (255 - this.alpha) / 255;   // ★L 批纠:A=0 隐形错案同族(:80995 (255,255,255,0)xOpacity=加算白渐入;91/631/5 先例;728 现无出生路径 dormant,落 item 时配对)
+      case 728: return (255 - this.alpha) / 255;   // ★L 批纠:A=0 隐形错案同族(:80995 (255,255,255,0)xOpacity=加算白渐入;91/631/5 先例)。★P2 批销核:发射链已通(item 4060 SuperStarCannon,EXTRACT_PATCH['4060'] 落库,实拍出生验证)
       // ★T1（2026-09-02）：91 圣箭波——GetAlpha :81003 (200,200,200,0) 同 92 式 A=0
       //  加算灰（旧 case return 0 系"A=0 隐形"错案=源叠隐）。XNA 预乘 out=tex×(200/255)
       //  加算 → lighter + ga=200/255（配 ADDITIVE_GLOW_PROJS 入组）。charm 态同 5：
@@ -4072,6 +4090,9 @@ export class Arrow extends Entity {
     // aiStyle 36 蜂族：alpha 归零拍 extraUpdates=0（:27693-27695）——挂起到 tick 头
     // 生效（原版 numUpdates 每 tick 读取一次，当拍子步数不变）
     if (this.bee36EU0) { this.bee36EU0 = false; this.extraUpdates = 0; }
+    // 22 水花权杖熔岩反弹档 extraUpdates=0（:24846）——同 bee36EU0 挂起到 tick 头
+    //（原版 numUpdates 每 tick 读取一次,当拍子步数不变）
+    if (this.waterEU0) { this.waterEU0 = false; this.extraUpdates = 0; }
     for (let u = 0; u <= this.extraUpdates; u++) {
       // 640 ai[1] 延迟计数（Projectile.Update :16784-16787 1:1——numUpdates 子步循环
       // 顶 `type==640 && ai[1] > 0` → ai[1]-- + continue：整【子步】冻结,AI/位移/命中/
@@ -5236,15 +5257,63 @@ export class Arrow extends Entity {
       }
     } else if (this.projId === 22) {
       // ---- R27：22 水花权杖（aiStyle 12 type 22 支，Projectile.cs:24835-24926）----
-      //  num97=0.01 收缩/update 至 ≤0 Kill（≈100 个 AI update；extraUpdates=2 → ~34 帧
-      //  寿命——"短程喷泉"）；num98=0.15 重力弧线（ai[0]>3 门）；3×d172 六px 内缩盒错位
-      //  拖尾 + 1/8 小尘。弹体贴图同 27 全程隐形（alpha=255 缺省 GetAlpha）。熔岩反弹
-      //  （ai[1]=1 档 LCG32 种子链 :24839-24876）P2 登记未接——种子注入面缺
-      this.drawScale -= 0.01;
+      //  水支：num97=0.01 收缩/update 至 ≤0 Kill（≈100 个 AI update；extraUpdates=2 →
+      //  ~34 帧寿命——"短程喷泉"）；num98=0.15 重力弧线（ai[0]>3 门）；3×d172 六px
+      //  内缩盒错位拖尾 + 1/8 小尘。弹体贴图同 27 全程隐形（alpha=255 缺省 GetAlpha）。
+      //  ★熔岩反弹支（ai[1]=1 档，:24841-24876，2026-09-03 接线）：进档即
+      //  num98/=2(0.075)/num97=0（停收缩=浆中不死）/extraUpdates=0/penetrate=-1
+      //  （:24842-24847）；下落态（vy>0 且 ai[1]==0——与水支的互斥门）心格 lava()
+      //  → LCG32Random((uint)ai[2]) 两掷（:24851-24854，f32 逐算子）：
+      //    velocity.Y = NextFloat()×-4f−4f ∈(-8,-4]；velocity.X = (NextFloat()−0.5f)×5f
+      //    ∈(-2.5,2.5)；ai[1]=1 + 4×d31(vel×0.6,vy−2)（:24861-24865）+ 1/3 烟 gore
+      //  61-63(x−6,vel×0.4,vy−1)（:24866-24871）。种子 = 出手位 ai[2]
+      //  =Main.rand.Next(0,20000)（Player.cs:49929-49931,ctor 掷）→ 同弹恒向量。
+      //  浆中段（ai[1]!=0）：1/2 掷 d31 小尘（:24899-24903）+ 1/2 概率跳过水拖尾
+      //  （:24905-24907——浆里不再拉水痕）。
+      const inLavaMode = this.waterLavaMode === 1;
+      let num97 = 0.01;
+      let num98 = 0.15;
+      if (inLavaMode) {
+        num98 = f32(num98 / 2);                    // num98 /= 2f（:24844）
+        num97 = 0;                                 // 停收缩（:24845）
+        this.waterEU0 = true;                      // :24846 extraUpdates=0——挂起 tick 头生效
+        this.pierce = -1;                          // (:24847)
+      }
+      if (this.vy > 0 && !inLavaMode) {
+        // 心格 lava()（:24848-24855：(int)Center/16 双 int 整除朝零 + WorldGen.InWorld
+        // + Main.tile.lava()=液型旗位（Tile.cs:347,不查液量）——本仓 liquidType 同旗位域）
+        const cx22 = Math.fround(Math.fround(Math.fround(this.x) + Math.fround(this.w / 2)));
+        const cy22 = Math.fround(Math.fround(Math.fround(this.y) + Math.fround(this.h / 2)));
+        const tx22 = Math.trunc(Math.trunc(cx22) / 16);
+        const ty22 = Math.trunc(Math.trunc(cy22) / 16);
+        const st22 = world.store;
+        if (st22.inBounds(tx22, ty22)
+          && st22.liquidType[st22.idx(tx22, ty22)] === LIQUID_TYPE.LAVA) {
+          // LCG32Random((uint)ai[2]) 两掷：先 Y 后 X（:24852-24854 掷序敏感）
+          const rng22 = new LCG32(this.waterStreamSeed >>> 0);
+          this.vy = f32(f32(f32(rng22.nextDouble()) * -4) - 4);
+          this.vx = f32(f32(f32(rng22.nextDouble()) - 0.5) * 5);
+          this.waterLavaMode = 1;                  // ai[1] = 1f（:24855）
+          for (let i = 0; i < 4; i++) {            // 4×d31（:24861-24865）
+            const d31 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+            if (d31) { d31.vx *= 0.6; d31.vy -= 2; }
+          }
+          if (Math.floor(Math.random() * 3) === 0) {          // 1/3 烟 gore（:24866-24871）
+            const g22 = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.x, this.y, 0, 0);
+            if (g22) { g22.x -= 6; g22.vx *= 0.4; g22.vy -= 1; }
+          }
+        }
+      }
+      this.drawScale -= num97;
       if (this.drawScale <= 0) { this.killNow(game); return; }
       if (this.aiCnt > 3) {
-        this.vy += 0.15;
-        for (let i = 0; i < 3; i++) {                            // (:24896-24911)
+        this.vy += num98;
+        if (this.waterLavaMode === 1 && Math.floor(Math.random() * 2) === 0) {   // (:24899-24903)
+          const dm = game.spawnDust?.(this.cx, this.cy, 0, 0, 31, 0, 0, 100, null, 0.8);
+          if (dm) { dm.vx *= 0.1; dm.vy *= 0.1; }
+        }
+        if (this.waterLavaMode !== 0 && Math.floor(Math.random() * 2) !== 0) return;   // (:24905-24907)
+        for (let i = 0; i < 3; i++) {                            // (:24908-24921)
           const d = game.spawnDust?.(this.x + 6, this.y + 6, this.w - 12, this.h - 12,
             172, 0, 0, 100, null, 1.2, true);
           if (d) {

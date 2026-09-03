@@ -111,7 +111,9 @@ describe('配饰系统性①：equipStats.accDraw 聚合（UpdateVisibleAccessor
     expect(ad.handOn).toBe(15);   // 泰坦手套双槽（:7751-7752 handOn=15+handOff=8）
     expect(ad.waist).toBe(1);
     expect(ad.neck).toBe(2);
-    expect(ad.face).toBe(1);
+    // 223 脸=1 ∈ flower 集 → faceFlower 路由（2026-09-03 四层路由批,旧单层合并退役）
+    expect(ad.faceFlower).toBe(1);
+    expect(ad.face).toBe(0);
     expect(ad.shield).toBe(1);
     const q = new Player(0, 0, new Inventory());
     q.inv.armor[3] = { id: _iid(49), stack: 1 };

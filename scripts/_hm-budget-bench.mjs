@@ -24,17 +24,26 @@ if (!(await page.$('.sw-vsel-list .sw-vitem'))) {
 }
 await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img');
 await page.waitForFunction(() => (document.querySelector('.sw-vsel-title')?.textContent ?? '').includes('世界'), { timeout: 12000 }).catch(() => {});
+// 负载 68 下列表 fs 读慢——轮询至多 15s
+for (let i = 0; i < 30 && !(await page.$('.sw-vsel-list .sw-vitem')); i++) await sleep(500);
 await sleep(400);
+// 仍无世界 → 创建小世界(创建流程自动进世界)
+if (!(await page.$('.sw-vsel-list .sw-vitem'))) {
+  await page.click('.sw-vsel [data-act=new]');
+  await page.waitForSelector('[data-f=name]', { timeout: 10000 }); await sleep(300);
+  await page.click('[data-f=name]');
+  await page.keyboard.type('Bench' + Math.floor(Math.random() * 90 + 10));
+  await sleep(120);
+  await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-opt')][0]?.click());
+  await sleep(80);
+  await page.click('[data-act=create]');
+}
 // 选最小世界(小世界转换最快,量相对值)
 const names = await page.evaluate(() => [...document.querySelectorAll('.sw-vsel-list .sw-vitem')].map(e => e.textContent.slice(0, 14)));
 console.log('worlds:', JSON.stringify(names));
-const smallIdx = await page.evaluate(() => {
-  const its = [...document.querySelectorAll('.sw-vsel-list .sw-vitem')];
-  const i = its.findIndex(e => e.textContent.includes('小'));
-  return i >= 0 ? i : 0;
-});
+const smallIdx = await page.evaluate(() => 0);   // 任选第一个既有世界(避免负载 68 下重生成)
 await page.evaluate((i) => document.querySelectorAll('.sw-vsel-list .sw-vitem')[i]?.click(), smallIdx);
-await page.waitForFunction(() => { const g = window.__swGame; return g && g.player && g.world; }, { timeout: 400000, polling: 500 });
+await page.waitForFunction(() => { const g = window.__swGame; return g && g.player && g.world; }, { timeout: 600000, polling: 500 });
 await sleep(2000);
 // 重置 hardMode(测量用:该世界若已转换过,F2 门会跳过)
 const pre = await page.evaluate(async () => {
@@ -58,10 +67,11 @@ const r = await page.evaluate(async () => await new Promise(res => {
     frames.push(t - last); last = t;
     if (!done) {
       const f0 = performance.now();
-      if (g.worldJobs.length) { g.worldJobs[0].step(); if (g.worldJobs[0].step ?? 0) {} }
+      if (g.worldJobs.length) {
+        if (g.worldJobs[0].step()) g.worldJobs.shift();   // 与生产驱动同款:完成即 shift
+      }
       if (g.worldJobs.length === 0) done = true;
       jobMs += performance.now() - f0;
-      if (g.worldJobs.length) g.worldJobs.shift();   // 与生产驱动同款:done 则 shift
     }
     if (frames.length > 6000) { res({ frames, jobMs }); return; }
     requestAnimationFrame(tick);

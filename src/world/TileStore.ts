@@ -138,6 +138,14 @@ export class TileStore {
     return this.inBounds(x, y) && (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) !== 0;
   }
 
+  /** 原版 active()（Tile.cs:591-594 sTileHeader 0x20 位）——纯 HasTile 位，含已致动格。
+   *  ★幽灵格（flags=0,type≠0——生成期 active(false) 残型，TileCleanupPass/ShimmerPass
+   *  等按原版留型）判 false。与 isActive（=nactive()，多排致动位）区分；曾有无位可读时
+   *  以 type≠0 代之——幽灵保域批（2026-08-31）破 flags≡(type≠0) 恒等后必须读本位。 */
+  hasTile(x: number, y: number): boolean {
+    return this.inBounds(x, y) && this.flags[this.idx(x, y)] !== 0;
+  }
+
   isSolid(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false; // 世界外视为空（边缘自由）
     // ★热路径双修(2026-08-19 trace 16:12 剖析:粒子碰撞逐帧调用占主线程 42.7%,

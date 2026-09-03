@@ -7,7 +7,7 @@ import {
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { wetCollision } from './npcLiquid';
+import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   mountHorizontalCharges, grantCollisionAttackImmunity, chilletDashCharge,
   MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
@@ -31,7 +31,9 @@ import { wingStatOf } from '../data/vanillaWingStats';
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal } from '../data/vanillaAccFx';
-import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL } from '../data/vanillaAccDrawslots';
+import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL,
+  FACE_HEAD_LAYER, FACE_MASK_LAYER, FACE_FLOWER_LAYER } from '../data/vanillaAccDrawslots';
+import { plotTileLine } from '../lighting/LightingEngine';
 import { dyeEntryOf } from '../data/vanillaDyes';
 import { ARMOR_SET_BONUSES, type ArmorSetBonus } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
@@ -349,6 +351,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
+    shimmerImmune: boolean;   // Player.shimmerImmune（:15643-46 幻彩斗篷 5355 且未按住下 45t——浮液/微光 buff 双消费 :23641/:27944）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
     dontHurtCritters: boolean;   // ★E：4767/5323（RefreshMechanicalAccs :12922-12924）
     preventAllItemPickups: boolean;   // ★F3：4346（WorksInVoidBag=false 例外面）
@@ -366,11 +369,16 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
      *  UpdateItemDye :9329-9420 的 cBack/cFront/... 逐族路由,-1=无染料） */
     accDraw: {
       back: number; front: number; shield: number; shoe: number; waist: number;
-      neck: number; face: number; balloon: number; balloonFront: number;
+      neck: number; face: number;
+      /** face 四层路由余三槽（UpdateVisibleAccessory :37216-37230；face=base∪
+       *  underHair 同字段,mask/flower/head 各独立字段=同帧可并存四件） */
+      faceMask: number; faceFlower: number; faceHead: number;
+      balloon: number; balloonFront: number;
       handOn: number; handOff: number; beard: number;
       backpack: number; tail: number;
       dyeBack: number; dyeFront: number; dyeShield: number; dyeShoe: number; dyeWaist: number;
-      dyeNeck: number; dyeFace: number; dyeBalloon: number; dyeBalloonFront: number;
+      dyeNeck: number; dyeFace: number; dyeFaceMask: number; dyeFaceFlower: number; dyeFaceHead: number;
+      dyeBalloon: number; dyeBalloonFront: number;
       dyeHandOn: number; dyeHandOff: number; dyeBeard: number;
       dyeBackpack: number; dyeTail: number;
     };
@@ -691,6 +699,20 @@ export class Player extends Entity {
   inHoney = false;
   /** 微光浸入（原版 shimmerWet，Player.cs:27420-27424：Collision.shimmer 盒命中） */
   inShimmer = false;
+  /** Player.ShouldFloatInWater（:3856-3870）：canFloatInWater（甲件 4404 ∪
+   *  buff265 脚蹼药水）且未按下方向键（controlDown）；坐骑时仅坐骑 37 浮液。
+   *  消费：TryFloatingInFluid 浮力 :23641、湿态阻尼 :28061、accFlipper 湿授予
+   *  :13115、翼帧 waterFloat（Player.ts:4435 已有内联同式） */
+  get shouldFloatInWater(): boolean {
+    if (!(this.equipStats.canFloat || this.buffs.has(BuffType.FlipperPotion))) return false;
+    if (this.inputDown) return false;
+    if (this.ridingMount) return this.mount.type === 37;
+    return true;
+  }
+  /** 坐椅起身钩（TryFloatingInFluid :23646-49 isSitting → SitUp；SitUp 实现在
+   *  Game.standUp（PlayerSittingHelper.SitUp 1:1），Player 无 Game 引用 → 经钩反转。
+   *  未接线（测试/远端代理）= 只清 sitting 位） */
+  sitUpHook: (() => void) | null = null;
   /** 微光化态（buff 353，Player.cs:11381-11388）：frozen 封输入 + fallStart 重置 +
    *  受击免疫（Hurt :37591-37595 直接 0）+ 穿墙下坠（:27868 velocity×0.375 完全
    *  绕过 tile collision；:24117-24119 gravity/maxFall ×0.9）——直到落入能容纳的
@@ -889,7 +911,8 @@ export class Player extends Entity {
   accTimerCritCharge = 0;
   /** 1457 相机平移档（Player.Settings.PanControl_Keyboard :359;ButtonControlMode.cs:
    *  Hold=0/Click=1/OnAlways=2/OffAlways=3,缺省 Hold=旧行为。设置 UI 循环切换
-   *  CyclePanControl_KeyboardAndMouse :379-382 登记未接——控制台/测试可直写） */
+   *  CyclePanControl_KeyboardAndMouse :379-382——2026-09-03 设置页 UI 已接
+   *  （Settings.PanControl 行,循环序 Utils.CycleControlControl_OffOnClickHold）） */
   panControlMode = 0;
   /** Player.hasClickPanOn（:2837）——Click 档互动键（右键）切换的平移开关 */
   hasClickPanOn = false;
@@ -1024,6 +1047,12 @@ export class Player extends Entity {
   vortexStealthActive = false;
   private prevDown = false;
   private downTapT = 0;
+  /** 原版 holdDownCardinalTimer[0]（Player.cs:1387/:25260-25268）：下方向连按
+   *  计时，松开清零；≥45 → controlDownHold（Chromatic Cloak 5355 微光豁免门
+   *  :15643-46 的例外入口——按住下键 45t 主动浸微光） */
+  downHoldT = 0;
+  /** Player.controlDownHold（:25268） */
+  controlDownHold = false;
   /** BOC 受击脉冲（fixedUpdate 内消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
   /** 幻影闪避重整冷却（Player.shadowDodgeTimer，:1167 声明 / :25656-25659 每 tick
@@ -1212,6 +1241,7 @@ export class Player extends Entity {
     k += inv.extraAccessory ? 'E' : 'e';
     k += this.usedGummyWorm ? 'G' : 'g';
     k += this.panicTime > 0 ? 'P' : 'p';
+    k += this.controlDownHold ? 'D' : 'd';   // shimmerImmune（5355 && !controlDownHold :15643）的输入
     // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
     // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..accSlotMax）
     for (let i = ACC_ARMOR_START; i < inv.accSlotMax; i++) k += this.hideVisibleAccessory[i] ? 'H' : 'h';
@@ -1308,6 +1338,7 @@ export class Player extends Entity {
     let spaceGun = false;   // R27：陨石套（123/124/125,ArmorSetBonuses :436）
     let flipper = false, longInvince = false, spikedBoots = false;
     let canFloat = false;   // canFloatInWater（4404 甲件；buff265 在消费侧并集）
+    let shimmerImmune = false;   // Player.shimmerImmune（5355 幻彩斗篷 :15643-46）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
   let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
   let dontHurtCrittersAcc = false;   // ★E（4767 善待小动物指南/5323 双件——RefreshMechanicalAccsFromItemType Player.cs:12922-12924）
@@ -1367,10 +1398,12 @@ export class Player extends Entity {
     let voiceOverrideAcc = 0;   // 语音饰品 override（两轮槽扫逐槽直赋,后写覆盖前写同原版）
     const accDraw = {
       back: 0, front: 0, shield: 0, shoe: 0, waist: 0, neck: 0, face: 0,
+      faceMask: 0, faceFlower: 0, faceHead: 0,
       balloon: 0, balloonFront: 0, handOn: 0, handOff: 0, beard: 0,
       backpack: 0, tail: 0,
       dyeBack: -1, dyeFront: -1, dyeShield: -1, dyeShoe: -1, dyeWaist: -1,
-      dyeNeck: -1, dyeFace: -1, dyeBalloon: -1, dyeBalloonFront: -1,
+      dyeNeck: -1, dyeFace: -1, dyeFaceMask: -1, dyeFaceFlower: -1, dyeFaceHead: -1,
+      dyeBalloon: -1, dyeBalloonFront: -1,
       dyeHandOn: -1, dyeHandOff: -1, dyeBeard: -1, dyeBackpack: -1, dyeTail: -1,
     };
     /** 槽 → 族赋值（UpdateVisibleAccessory :36451-36520 后写覆盖语义 + back 披风
@@ -1399,11 +1432,17 @@ export class Player extends Entity {
       if (ds.shield) { accDraw.shield = ds.shield; accDraw.dyeShield = dyeVid; }
       if (ds.neck) { accDraw.neck = ds.neck; accDraw.dyeNeck = dyeVid; }
       if (ds.face) {
-        // face 四层路由（underHair 5/mask 22/flower 1,6,8,9/head 12,10,13,11——
-        // ArmorIDs.cs:2143-2150）在本仓单层身体模型下同锚同帧合并画一层;
-        // 层序差异（mask 压头盔/underHair 压发）登记未建模
-        accDraw.face = ds.face;
-        accDraw.dyeFace = dyeVid;
+        // face 四层路由（UpdateVisibleAccessory :37216-37230 逐槽分流，★1457
+        // ArmorIDs.cs:2143-2150 集合）：head 层（12/10/13/11 骷髅族）→ faceHead /
+        // mask 22 → faceMask / flower 1,6,8,9 → faceFlower / 余（base ∪ underHair 5
+        // 同字段）→ face。四字段各存该路由最后一件（逐槽后写覆盖前写），同帧可并存
+        // 至多四件；染料逐族随路由（UpdateItemDye :9774-9788 cFaceHead/cFaceMask/
+        // cFaceFlower/cFace）。头盔互斥/换档门（PlayerFrame :36252-36271）按帧在
+        // 渲染侧 resolveFaceLayers 应用（head 随狼/人鱼强改在纸娃娃装备侧）
+        if (FACE_HEAD_LAYER.has(ds.face)) { accDraw.faceHead = ds.face; accDraw.dyeFaceHead = dyeVid; }
+        else if (FACE_MASK_LAYER.has(ds.face)) { accDraw.faceMask = ds.face; accDraw.dyeFaceMask = dyeVid; }
+        else if (FACE_FLOWER_LAYER.has(ds.face)) { accDraw.faceFlower = ds.face; accDraw.dyeFaceFlower = dyeVid; }
+        else { accDraw.face = ds.face; accDraw.dyeFace = dyeVid; }
       }
       if (ds.beard) { accDraw.beard = ds.beard; accDraw.dyeBeard = dyeVid; }
       if (ds.balloon) {
@@ -1437,6 +1476,7 @@ export class Player extends Entity {
       if (AGGRO_NEG.has(accVid)) aggroAcc -= 400;
       else if (AGGRO_POS.has(accVid)) aggroAcc += 400;
       if (accVid === 4404) canFloat = true;   // 水上漂靴（ApplyEquipFunctional :12842-12846）
+      if (accVid === 5355 && !this.controlDownHold) shimmerImmune = true;   // 幻彩斗篷（:15643-46——按住下 45t 例外 = 主动浸微光）
       if (accVid === 3068) cordage = true;   // 绳索宝典（UpdateEquips :14461-14463 currentItem.type==3068 → cordage=true）
       if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
       // 天界石复合门（1457 :15531-15535 / 1458 :15529-15533 双版同值）：太阳石 899
@@ -1515,10 +1555,13 @@ export class Player extends Entity {
       //  · ammoCyclerMode 6168-6194——弹药轮换本体已接（Player.ts pickAmmoSlot +
       //    noteAmmoCycledShot :1940-1955,PickAmmo_IterateRange :54330-54389）
       //  · accTimerCrit 6170——时间蓄能暴击已接（Game.ts 近战命中 tryConsumingTimerCrit）
-      //  仍登记未接：
-      //  · accSentryBackpack 6172/6175/6176/6177——哨兵携带（SetAsSelectedSentryBackpackTarget
-      //    Projectile.cs:37818/:37998 + AI_Sentries_HeavySlingReposition :37822/:31969）
-      //    未接,旗+6176 暴击生效
+      //  · accSentryBackpack 6172/6175/6176/6177——哨兵携带全链已接（2026-09-03 批）：
+      //    拾起门 CanGetPickedUpBySentryBackpack（Projectile.cs:80532-80552）+ 续约
+      //    SetAsSelectedSentryBackpackTarget（:80554-80557,MinionProj 携带支每拍=2,
+      //    Player Update_SentryBackpack :28640-28646 递减）+ 重定位 AI_Sentries_
+      //    HeavySlingReposition（:70096-70470,MinionProj.heavySlingReposition 1:1,
+      //    per-aiStyle/per-type 落位几何）+ 各 AI 携带支朝向/旋转/探测盒差异——
+      //    6172/6175/6176/6177 仅装备面数值差异（:14612-14685）,全四件同旗
       if (accVid === 3337) shinyStone = true;                                      // 闪亮石（:14874-14876）
       else if (accVid === 3333) strongBees = true;                                 // 蜂巢背包（:15457-15459 strongBees）
       else if (accVid === 6166) { accHarpyCharm = true; critRanged += 5; }         // 鹰妖护符（:14596-14599）
@@ -2009,7 +2052,7 @@ export class Player extends Entity {
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
       strongBees,   // 蜂巢背包 3333（beeType 566 档/强蜂伤/kb——Game 1121 蜂枪分支消费）
-      jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat,
+      jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat, shimmerImmune,
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       dontHurtCritters: dontHurtCrittersAcc,   // ★E（4767/5323——小动物免伤面）
@@ -2316,6 +2359,32 @@ export class Player extends Entity {
       d.followPlayer = true;                              // customData=player
       d.noLightEmittance = true;
     }
+  }
+
+  /** 荧光体 5107 手持光（ApplyEquipFunctional case 5107 :14663-14669；经 UpdateEquips
+   *  :25830 每 tick 无条件跑——地面门只在跑速四参数 :26703-26709,光照臂无门）：
+   *  DelegateMethods.v3_1=(0.9,0.8,0.5) + 两条宽 20px 的 PlotTileLine 布光线——
+   *  ① Center→Center+velocity*6（速度前伸臂）;② Left→Right（碰撞盒横贯臂）。
+   *  CastLightOpen（DelegateMethods.cs:729-748）=开放格才布光:active 实心非 solidTop
+   *  非致动格跳过【但不截断线】（恒返 true）,界外/空 tile 返 false 截断整线 */
+  private emitMagiluminescenceLight(game: GameHooks): void {
+    if (!this.equipStats.magiluminescence || !game.addLightAt) return;
+    const store = game.world.store;
+    const emit = (tx: number, ty: number): boolean => {
+      if (tx < 0 || tx >= store.w || ty < 0 || ty >= store.h) return false;   // 界外截断(:731-735)
+      // 开放门(:738-742)：!active || inActive || solidTop || !solid 才 AddLight
+      // ——本仓 isActive=nactive(active&&!inActive) 与原版 or 门在两分支下等价
+      if (!store.isActive(tx, ty) || !store.isSolid(tx, ty)) {
+        game.addLightAt!(tx * TILE + 8, ty * TILE + 8, 0.9, 0.8, 0.5);
+      }
+      return true;
+    };
+    // PlotTileLine 几何见 plotTileLine 注（Utils.cs:2460-2487 垂直 ±10px 平行线对）。
+    // ★线 1 锚=base.Center（盒中心;MountedCenter 只出现在丢弃返回值的
+    //   ToTileCoordinates() 调用 :14665,坐骑态两者不同,勿混）
+    plotTileLine(this.x + this.w / 2, this.y + this.h / 2,
+      this.x + this.w / 2 + this.vx * 6, this.y + this.h / 2 + this.vy * 6, 20, emit);
+    plotTileLine(this.x, this.y + this.h / 2, this.x + this.w, this.y + this.h / 2, 20, emit);
   }
 
   private update1457AccBodies(game: GameHooks): void {
@@ -2718,6 +2787,11 @@ export class Player extends Entity {
     this.mountWindExposed = inAPlaceWithWind(world.store, this.x, this.y, this.w, this.h,
       world.groundLevel);
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
+    // 下方向连按计时（holdDownCardinalTimer[0] Player.cs:25260-25268）：held++/
+    // 松开清零，≥45t → controlDownHold。本帧输入已由 Game.fixedUpdate 注入，
+    // 此处推进后装备扫描（applyEquipFunctional 链）同拍消费
+    this.downHoldT = this.inputDown ? this.downHoldT + 1 : 0;
+    this.controlDownHold = this.downHoldT >= 45;
     this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
     // ---- 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023；2026-08-14 接通，
     //      原 HairDyeColor.ts §4 登记偏差销核）——抽为方法：MP 远端代理不走
@@ -3187,12 +3261,16 @@ export class Player extends Entity {
     //   居中盒同样解决旧"脚底单点采样"的水下走坡 1-2px 抖动翻转问题。
     const wasInWater = this.inWater;
     const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 原版 wet 位（任一液体）
+    const wasWetWH = this.inWater || this.inHoney;   // 原版 wet 位（水∪蜜,:1418——湿阻尼过渡门用）
     {
       const r = wetCollision(world.store, this.x, this.y, this.w, this.h);
       // :1418 wet 只认 !lava && !shimmer(蜜算 wet);岩浆里不能"游泳"
       this.inWater = r.wet && !this.inLava;
       this.inHoney = r.honey;
     }
+    // 入水过渡拍（vanilla `if (!wet)` Player.cs:27982，`wet = true`+湿阻尼
+    // :28060-28068 在其体内=仅首拍生效）——湿阻尼消费旗（运动块尾）
+    const wetEntryNow = !wasWetWH && (this.inWater || this.inHoney);
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
     // 原版两方向都出尘+SoundID 19(splash)（Player.cs:27500-27546 入 / :27595-27630 出）：
@@ -3275,7 +3353,8 @@ export class Player extends Entity {
     // 顶格越界（y<0）读 undefined !== 4 = 原版 Main.tile[负] null 短路，同语义
     const topIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 1) / TILE));
     if (this.inShimmer && world.store.liquidType[topIdx] === 4
-      && this.y / TILE < underworldLayer) this.buffs.apply(BuffType.Shimmered, 1);
+      && this.y / TILE < underworldLayer
+      && !this.equipStats.shimmerImmune) this.buffs.apply(BuffType.Shimmered, 1);   // !shimmerImmune（:27944）
     // buff 353 处理段（Player.cs:11381-11419）：buff 在 → shimmering=true + frozen
     // 封输入（下方移动积分前的 Frozen∪Shimmering 清零段消费）+ fallStart 重置（免摔伤）。
     // 注意：本 tick 内 DelBuff 后 shimmering 保留到下 tick 才复位（原版 :18168 帧首
@@ -3833,8 +3912,10 @@ export class Player extends Entity {
       // 翼飞行加速倍率（WingAirLogicTweaks :28852/:28856,乘区在 moveSpeed 链之后;
       // 坐骑支不乘——原版 WingAirLogicTweaks 门 mount.CanUseWings :26175,本仓坐骑恒禁翼）
       if (!mnt) runAcc *= wingAccMul;
-      // 荧光体 5107（:26188-26194）：地面四参数——acc×1.75/maxRun×1.15/accRun×1.15/
-      // slowdown×1.75（velocity.Y==0 门 ≈ onGround；PlotTileLine 手持光登记未接）
+      // 荧光体 5107（★1457 :26703-26709,旧注 :26188-26194 系 1456 锚）：地面四参数
+      // ——acc×1.75/maxRun×1.15/accRun×1.15/slowdown×1.75（velocity.Y==0 门 ≈
+      // onGround;手持光走 emitMagiluminescenceLight——ApplyEquipFunctional case 5107
+      // :14663-14669 无地面门）
       if (this.onGround && this.equipStats.magiluminescence) {
         runAcc *= 1.75; maxRun *= 1.15; accRun *= 1.15; runSlow *= 1.75;
       }
@@ -4081,6 +4162,14 @@ export class Player extends Entity {
       // 是蛙蹼族配饰/系统设置授予的免松键档（:14507 等）。R5-F11/F12：旧 held 门
       // （inputJump+vy>-2+8t cd）= 全员恒 autoJump 语义，已废）
       const jumpEdge = this.inputJump && !this.jumpEdgePrev;
+      // flag19 翅膀飞行中（:26987）——干/湿两支共用声明（湿态扇动支 2026-09-03 翻案落位）：
+      // 原版翅膀链（flag19 :26987 → WingMovement :22203 → WingFrame :26497）全程【无 wet
+      // 门】——水中翅膀照常工作（唯一 wet 相关 = merman 挡 WingAirLogicTweaks 横移覆盖
+      // :26688，Run 段本仓干湿同链无分叉无需补）。本仓旧版把整块锁进干燥分支 else =
+      // 水中翅膀恒死 + 湿态踩底不回满 → 翼装玩家 wingTime 干涸落水后即困死弹跳环
+      // （用户行为日志 2026-09-03 Starter World：Red's Wings+脚蹼，池底到水面仅 3 格
+      // 仍无法脱离飞起）。湿侧核心见下方湿分支 ★湿态翅膀核心段。
+      let flying = false;
     // ---- ★F2/Note① 移动相三段时序归位：HorizontalMovement 尾五分块
     //      （1457 Player.cs:20238-20320 CollideWithNPCs，随 HorizontalMovement :26889 跑）
     //      先于 JumpMovement 三踩踏循环（:20693-20801，JumpMovement :26945 头部），
@@ -4121,7 +4210,10 @@ export class Player extends Entity {
       // honeyWet → gravity 0.1/maxFall 3（跳跃参数保持干燥档——原版分支不覆写）；
       // merman → 0.3/7（跳跃参数同保持）；trident 且非岩浆 → 0.25/6 + jump 25/5.51
       // （按住 ↑ 0.1/2 浮升）；其余湿态 → 0.2/5(+0.01) + jump 30/6.01
-      const flipperOn = this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion);
+      // :13115 `if (wet && ShouldFloatInWater) accFlipper = true`——甲件 4404/脚蹼药
+      //  湿态授予脚蹼泳跃能力（wet=水∪蜜，:1418 口径；lava/shimmer 不算）
+      const flipperOn = this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion)
+        || ((this.inWater || this.inHoney) && this.shouldFloatInWater);
       let lGrav = GRAVITY * 0.5, lMaxFall = 5.01;
       let lJSpd = mJumpSpd, lJT = mJumpTicks;
       if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3; }
@@ -4168,8 +4260,70 @@ export class Player extends Entity {
           this.h -= Player.STOOL_BOOST;
         }
       }
-      this.vy += lGrav;
-      this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
+      // ---- ★湿态翅膀核心（2026-09-03 翻案）：位序按原文 :26945 JumpMovement →
+      //      :26976 回满 → :26987 flag19 → WingMovement → 下方重力+液体钳制（:27033）。
+      //      ①踩底回满 :26976-26982 `((vy==0||sliding)&&releaseJump) → wingTime=wingTimeMax`
+      //        ——releaseJump ≙ !inputJump（:21199/:21204：controlJump 帧块尾置 false、
+      //        非 controlJump 帧置 true，故此检查点两式等价；跳已发的帧 vy≠0 天然挡掉）。
+      //        旧版湿态无此回满 → wingTime 落水耗尽后永不再生 = 死锁根源。干态回满仍走
+      //        干燥分支 onGround 块（含 rocket/carpet 连带复位，本仓既有不动）。
+      //      ②flag19 扇动 :26987（wings>0 && controlJump && wingTime>0 && jump==0 && vy≠0）
+      //        + hover 档 :26991。JS 传当帧 effJumpSpd——原版 WingMovement 读 jumpSpeed
+      //        字段，湿态已被液体链覆写（:24623-24624 水档 6.01）；干态沿用
+      //        PLAYER_JUMP_SPEED+jumpSpd（下方干燥分支原值不动）。
+      //      ③帧状态机/特效：WingFrame 每 tick（:26497）+ WingAirVisuals 挂 wingFx
+      //        （:30284），waterFloat/shouldDraw 输入按 ShouldFloatInWater :3710-3722。
+      const eqWet = this.equipStats;
+      if (this.vy === 0 && !this.inputJump) {
+        this.wingTime = eqWet.wing ? eqWet.wing.time : 0;   // :26978 湿侧回满
+      }
+      const mountCanWingsW = !mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true;
+      const wingsW = eqWet.wing && mountCanWingsW ? eqWet.wing.logic : 0;   // wingsLogic=armor.wingSlot（:12584）
+      const wingsLogicW = eqWet.wing?.logic ?? 0;   // 不随坐骑清零（hover 档 :26477 用 wingsLogic）
+      flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
+        || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
+      if (flying) this.wingMovement(wingsW, this.inputDown, effJumpSpd);
+      if (wingsLogicW > 0) {
+        const glideW = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
+        this.wingFrameScratch.frame = this.wingFrame;
+        this.wingFrameScratch.counter = this.wingFrameCounter;
+        const floatW = (eqWet.canFloat || this.buffs.has(BuffType.FlipperPotion))   // canFloatInWater 两源（:12845/:9595）
+          && !this.inputDown && (!this.ridingMount || this.mount.type === 37);   // ShouldFloatInWater :3710-3722 全门
+        stepWingFrame(wingsLogicW, this.wingFrameScratch, {
+          flap: flying,
+          jump: this.jumpHold > 0,
+          vy: this.vy,
+          controlJump: this.inputJump,
+          controlLR: this.inputX !== 0,
+          hoverDown: this.inputDown, hoverUp: this.inputUp,
+          wingTime: this.wingTime,
+          glide: glideW,
+          downDash: false,          // isPerformingJump_DownDash 未建模
+          waterFloat: this.inWater && floatW,
+          shouldDraw: this.vy !== 0 && !this.ridingMount
+            && !this.grappleProjs.some((g) => g.latched)
+            && !(this.inWater && floatW),
+        });
+        this.wingFrame = this.wingFrameScratch.frame;
+        this.wingFrameCounter = this.wingFrameScratch.counter;
+        // 翅膀尘埃/音效（WingAirVisuals :30284 + WingFrame 各分支尘 + 滑翔尘 :26914+）
+        this.wingFx(game, wingsW, wingsLogicW, flying, glideW, !!this.wingFrameScratch.justSwitched);
+      }
+      // 断翅滑翔（:27015-27027 else-if 链替换常规重力，干湿同链）：wingTime 尽后按住跳
+      // = 重力/3 + 终端 lMaxFall/3——湿链 gravity 已被 :24621 覆写为液体档,滑翔在其后
+      // 再 /3（原版同序）。旧版锁干燥分支 → 水下断翅直坠 5.01（原版 1.67）
+      const glidingW = !!eqWet.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !this.inputDown;
+      if (glidingW) {
+        lGrav = GRAVITY / 3;
+        if (this.vy > lMaxFall / 3) this.vy = lMaxFall / 3;
+      }
+      // flag19 时整条重力链跳过（原版 :26545 else-if 链——WingMovement 的 0.1/0.5 档
+      // 独立驱动 vy,液体钳制同属该链 = 水下飞行不受 ±6.01/5.01 钳,升限 -jumpSpeed×1.5。
+      // 旧版曾把 +0.2 湿重力照加 → 扇动 -0.1 被净 +0.1/t 掐死,水下爬升归零）
+      if (!flying) {
+        this.vy += lGrav;
+        this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
+      }
       this.fallStartY = null;
     } else {
       // 悬停坐骑贴地档（JumpMovement :20845 落地门 = velocity.Y==0f 原版字面）：
@@ -4343,7 +4497,7 @@ export class Player extends Entity {
       // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
       // 松跳重触发（原版 :20765 松跳段独立于地面状态——rocketRelease/wingRelease）
       if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
-      let flying = false;   // flag19（空中段赋值；地面恒 false）
+      // flying（flag19）声明已上提到跳跃参数块（干/湿两支共用——湿态扇动支 2026-09-03 落位）
       if (this.onGround) {
         this.wingTime = eq.wing ? eq.wing.time : 0;   // :26169 = wingTimeMax（FlyTime）
         this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;  // :2612 + :26436（无靴恒 0）
@@ -4942,6 +5096,39 @@ export class Player extends Entity {
       moveAndCollide(this, world, this.vx, this.vy);
       this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
     }
+    // ---- 浮液物理（TryFloatingInFluid Player.cs:23639-23679，运动位积分后调用）：
+    //      ShouldFloatInWater（:3856-3870 canFloatInWater∪脚蹼药、未按下、坐骑仅 37）
+    //      且非（微光浸身而幻彩斗篷豁免缺失）→ GetWaterLine 定液面（npcLiquid 1:1）：
+    //      深处（ty-2 有液）恒上浮 −0.4 钳 −6；液面下沿 −0.4 上爬；到线钉线（钳 −3、
+    //      vy==0 置 float.Epsilon 防"落地"语义吞）。坐椅先起（SitUp :23646-49 经钩）----
+    if (this.shouldFloatInWater && !(this.inShimmer && !this.equipStats.shimmerImmune)) {
+      if (this.sitting) this.sitUpHook?.();
+      const wl = getWaterLine(world.store, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+      if (!wl.found) {
+        this.vy -= 0.4;                                     // 深水中（GetWaterLine false）恒上浮（原文 else 支无钳）
+      } else {
+        let num = this.cy;
+        if (this.ridingMount && this.mount.type === 37) num -= 6;   // :23651-52
+        const num2 = num + 8;
+        if (num2 + this.vy >= wl.line) {                    // 液面下太深 → 本拍不动
+          if (num > wl.line) {
+            this.vy -= 0.4;
+            if (this.vy < -6) this.vy = -6;
+          } else {
+            this.vy = wl.line - num2;
+            if (this.vy < -3) this.vy = -3;
+            if (this.vy === 0) this.vy = 1.4e-45;           // float.Epsilon（XNA 最小正规数）
+          }
+        }
+      }
+    }
+    // ---- 湿态阻尼（Player.cs:28060-28068，在 `if (!wet)` :27982 过渡拍体内=仅
+    //      入水首拍）：wet 且浮起源在身 → 下落对折钳 3。逐拍执行会抵消浮力
+    //      （递推不动点 −0.2=缓沉），过渡拍语义经 wetEntryNow 精确对齐 ----
+    if (wetEntryNow && this.shouldFloatInWater) {
+      this.vy = Math.fround(this.vy / 2);
+      if (this.vy > 3) this.vy = 3;
+    }
     this.bordersMovement(world);
     // StepUp 抬升检测（原版 gfxOffY）：水平移动中被抬升 ≤16px → 渲染缓动补偿
     const lifted = preY - this.y;
@@ -5159,6 +5346,9 @@ export class Player extends Entity {
     //      :28640 / Update_HarpyCharm :28648 / Update_TimerCrit :28521——原版
     //      Update :24760-24763 同段连排）----
     this.update1457AccBodies(game);
+
+    // 荧光体 5107 手持光（PlotTileLine 光照臂,2026-09-03 接——登记销核）
+    this.emitMagiluminescenceLight(game);
 
     // 落地摔伤结算（Player.cs:25495-25580：velocity.Y==0 段逐 tick——num11 整数格距
     // 两端截断(:25503)、num10=25+extraFall(+mount.ExtraFall)；结算后无条件重置

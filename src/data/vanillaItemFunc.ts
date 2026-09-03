@@ -36,8 +36,9 @@ FUNC['1227'] = { ...FUNC['1227'], useStyle: 13 };
 
 // 1457: DD2 宠物蛋族共享 case 基值 200/703 + 嵌套 case 覆写（Item.cs:34034-34047——
 // 组 3855 Gato=200/703、3856 Ghost=201/702（提取器已中）、3857 Dragon=202/701）。
-// 提取器共享组伪值面的 buffType/shoot 维（PS-STRUCT 仅 placeStyle）——3857 挂组基
-// 伪值、3855 整组基缺档（用蛋不触发 buff/不孵宠物）→ 运行时纠偏同 :1227 先例。
+// ★F-STRUCT 泛化重产（2026-09-03）：提取器嵌套 case per-id 归并已自愈——3857 表内
+// 直出 202/701（本纠偏幂等退居保险）；3855 表内仍缺档（fallthrough 组基值不入单值
+// 面,提取器只对已有条目覆写）→ 本行仍为 3855 的唯一供给方,勿删。
 // 原版消费者：Game.ts 快捷 buff/召唤路径读 itemFuncOfVid().buffType/shoot。
 FUNC['3855'] = { ...FUNC['3855'], buffType: 200, shoot: 703 };
 FUNC['3857'] = { ...FUNC['3857'], buffType: 202, shoot: 701 };
@@ -46,6 +47,9 @@ FUNC['3857'] = { ...FUNC['3857'], buffType: 202, shoot: 701 };
 // `autoReuse = false`、3069/5147 基块无 autoReuse 赋值=缺省 false;Variant==
 // StrongerVariant 支内才 true）。提取器 Variant 条件面取支内值=基态伪值——
 // 持手重复门（Game.ts :10554 autoReuse&&mouseHeld）曾让三件基态误连发。
+// ★F-STRUCT 泛化重产（2026-09-03）已自愈：1325 表内直出 0（基态显式 false）;3069/
+// 5147 表内按「基态缺省=无键」删除该键 → 本三行幂等（补 0=缺省等价）退居保险,
+// 与 vanilla-itemcombat.json 同名列口径一致（item-variants.test.ts:283 同证）。
 FUNC['1325'] = { ...FUNC['1325'], autoReuse: 0 };
 FUNC['3069'] = { ...FUNC['3069'], autoReuse: 0 };
 FUNC['5147'] = { ...FUNC['5147'], autoReuse: 0 };

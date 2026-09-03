@@ -188,6 +188,45 @@ describe('SmartSelect_GetToolStrategy（Player.cs:17472-17528 策略优先级）
     expect(ss.lookup(env)).toBe(3);             // 策略 1 只认 hammer>0 → 槽 3
     expect(ss.strategy).toBe(STRATEGY.HAMMER);
   });
+
+  // ★2026-09-03 回归（快捷挖掘误切根因）：active() 门（Player.cs:17748）= sTileHeader
+  // HasTile 位（Tile.cs:591），不是 type≠0——幽灵格（flags=0,type≠0，生成期
+  // active(false) 残型，TileCleanupPass/ShimmerPass 同款）必须按空格处理。
+  // 曾以 type≠0 代读：地下隐形残型格在射程内误出镐策略 3（"光标旁没方块却切镐"）。
+  describe('幽灵格/致动格的 active() 位门（Player.cs:17481 + Tile.cs:591）', () => {
+    it('光标下幽灵格（type 残留 flags=0）→ 不出镐策略，按空格走火把', () => {
+      const st = mkSt();
+      st.setTile(62, 41, T.DIRT);
+      st.flags[st.idx(62, 41)] = 0;             // 原版 active(false) 残型
+      const slots = mkSlots([0, torch()], [3, pick()]);
+      const ss = new SmartSelect();
+      const env = mkEnv(st, { slots, selectedItem: 0, ...mouseAt(62, 41) });
+      expect(ss.lookup(env)).toBe(0);           // 切火把，不切镐
+      expect(ss.strategy).toBe(STRATEGY.TORCH);
+    });
+
+    it('光标下幽灵格且无火把 → 无匹配保持原槽（不误切镐）', () => {
+      const st = mkSt();
+      st.setTile(62, 41, T.DIRT);
+      st.flags[st.idx(62, 41)] = 0;
+      const slots = mkSlots([0, slot(1)], [3, pick()]);   // 槽 0 空手持（vid 随意非火把）
+      const ss = new SmartSelect();
+      const env = mkEnv(st, { slots, selectedItem: 0, ...mouseAt(62, 41) });
+      expect(ss.lookup(env)).toBe(0);           // result=selectedItem 原槽
+      expect(ss.strategy).toBe(STRATEGY.TORCH);
+    });
+
+    it('已致动格（active 位在 + WIRE_ACTUATED）仍参与策略（active() 含致动格）', () => {
+      const st = mkSt();
+      st.setTile(62, 41, T.DIRT);
+      st.wire[st.idx(62, 41)] |= TileStore.WIRE_ACTUATED;
+      const slots = mkSlots([0, torch()], [3, pick()]);
+      const ss = new SmartSelect();
+      const env = mkEnv(st, { slots, selectedItem: 0, ...mouseAt(62, 41) });
+      expect(ss.lookup(env)).toBe(3);
+      expect(ss.strategy).toBe(STRATEGY.PICK);
+    });
+  });
 });
 
 describe('SmartSelectLookup 超 200px 修正（Player.cs:17297-17305）', () => {

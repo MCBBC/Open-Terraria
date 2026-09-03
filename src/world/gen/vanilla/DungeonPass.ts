@@ -4005,7 +4005,7 @@ const snap: SnapFn = (name) => {
   // Next(5)（NoWaterbolt=true 无 Next(50)）；candle: 零掷）。Default 房/廊候选
   // 概率全 0 → IsAShelf=false 链整段跳过——Legacy 种子流零变化。
   function dgPlatforms(): void {
-    for (const d of platData) {
+    for (const [pIdx222, d] of platData.entries()) {
       if (!inW(d.x, d.y, 30)) continue;
       const force = !!d.force;
       const x = d.x, y = d.y;
@@ -4041,7 +4041,11 @@ const snap: SnapFn = (name) => {
             if (n7 >= w - 10) break;
           }
         }
-        if (bad || (!force && n7 - n6 > n4)) continue;
+        if (bad || (!force && n7 - n6 > n4)) {
+          // ★IIIII222 平台写手逐行仪（x86 rig DR|PLR 同构,零掷）
+          if (i222On) mkI222W(`DR|PLR|s=${instIdx + 1}|n=${pIdx222}|j=${j}|rej=${bad ? 1 : 2}|n6=${n6}|n7=${n7}`);
+          continue;
+        }
         let ok = true;
         if (!force) {
           const a0 = Math.max(0, x - Math.trunc(n4 / 2) - 2), a1 = Math.min(w - 1, x + Math.trunc(n4 / 2) + 2);
@@ -4052,15 +4056,24 @@ const snap: SnapFn = (name) => {
               if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === PLATFORM) { ok = false; break outer3; }
             }
           }
+          if (!ok && i222On) mkI222W(`DR|PLR|s=${instIdx + 1}|n=${pIdx222}|j=${j}|rej=3|n6=${n6}|n7=${n7}`);
+          const okB222 = ok;
           if (ok) {
             for (let b = j + 3; b >= j - 5; b--) {
               if (inW(x, b, 0) && actAt(x, b) !== 0) { ok = false; break; }
             }
           }
+          if (okB222 && !ok && i222On) mkI222W(`DR|PLR|s=${instIdx + 1}|n=${pIdx222}|j=${j}|rej=4|n6=${n6}|n7=${n7}`);
         }
-        if (ok) { row = j; break; }
+        if (ok) {
+          if (i222On) mkI222W(`DR|PLA|s=${instIdx + 1}|n=${pIdx222}|j=${j}|n6=${n6}|n7=${n7}|n4=${n4}|f=${force ? 1 : 0}|hf=${n3}`);
+          row = j; break;
+        }
       }
-      if ((!force || row <= 0) && (row <= y - n3 - 5 || row >= y + n3 + 5)) continue;
+      if ((!force || row <= 0) && (row <= y - n3 - 5 || row >= y + n3 + 5)) {
+        if (i222On) mkI222W(`DR|PLW|s=${instIdx + 1}|n=${pIdx222}|x=${x}|y=${y}|hall=${d.hall ? 1 : 0}|row=-9|L=-1|R=-1`);
+        continue;
+      }
       let px = x;
       const py = row;
       let qx = x + 1;
@@ -4076,6 +4089,8 @@ const snap: SnapFn = (name) => {
         qx++;
         if (qx >= w - 10) break;
       }
+      // ★IIIII222 落写钉（与 x86 rig DR|PLW 同位同构）
+      if (i222On) mkI222W(`DR|PLW|s=${instIdx + 1}|n=${pIdx222}|x=${x}|y=${y}|hall=${d.hall ? 1 : 0}|row=${row}|L=${px}|R=${qx}`);
       // 书架链（:168-213）——num13/num15 为两侧首个 active 格（含端点）
       if ((d.pots ?? 0) > 0 || (d.bottles ?? 0) > 0 || (d.books ?? 0) > 0 || (d.candles ?? 0) > 0) {
         if (dgTW) { dgTW.shelfC = (dgTW.shelfC as number) + 1; dgTW.shelfM = ((dgTW.shelfM as number) || 0) + (qx - px); }
@@ -4179,8 +4194,50 @@ const snap: SnapFn = (name) => {
     const sh = TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1;
     return sh === 147 || sh === 161 || sh === 162 || sh === 197;
   };
+  // ★IIIII222 行走门取证门（与 x86 rig JJHook.I222* 同名同缺省）：SW_I222=1 时仅
+  //   (i,j)==(SW_I222_X,SW_I222_Y)（缺省 337,758）的 AddBuriedChest 调用发仪——
+  //   DR|BCW 逐 k 腿位（行走门谓词两侧对拍对象）+ DR|BCWDUMP 试样 81×81 窗 dump。
+  const i222On = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I222 === '1';
+  const i222X = (() => { const v = typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_I222_X : undefined; const p = v !== undefined ? parseInt(v, 10) : NaN; return Number.isNaN(p) ? 337 : p; })();
+  const i222Y = (() => { const v = typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_I222_Y : undefined; const p = v !== undefined ? parseInt(v, 10) : NaN; return Number.isNaN(p) ? 758 : p; })();
+  let i222Dumped = false;
+  const mkI222W = (ln: string): void => { (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
+  // ★IIIII222 窗 dump（行主序,索引=(y-y0)*bw+(x-x0);通道与 x86 DumpBox 同名同域——
+  //   typ=vanilla sheet 2 字节(空气 0,未知 9999)/wal 2 字节/act·half·slope·liq·inact·wire 1 字节/
+  //   lty 1 字节(减 1 还原原版 0..3——JS 侧 +1 编码)。
+  const i222DumpBox = (tag: string, x0: number, y0: number, x1: number, y1: number): void => {
+    const fsw = nodeFs();
+    const dir = typeof process !== 'undefined' ? (__swProcessEnv ?? {}).SW_GDUMP : undefined;
+    if (!fsw || !dir) return;
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1, n = bw * bh;
+    const vtyp = new Uint16Array(n), vwal = new Uint16Array(n);
+    const vact = new Uint8Array(n), vhf = new Uint8Array(n), vsl = new Uint8Array(n);
+    const vlt = new Uint8Array(n), via = new Uint8Array(n), vwr = new Uint8Array(n), vlq = new Uint8Array(n);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const o = (y - y0) * bw + (x - x0);
+        const ti = st.idx(x, y);
+        const ty = st.type[ti]!;
+        vtyp[o] = ty === 0 ? 0 : (TILE_DEFS[ty]?.vanilla?.sheet ?? 9999);
+        vwal[o] = st.wall[ti]!;
+        vact[o] = st.flags[ti]! & 1;
+        vhf[o] = st.half[ti]!;
+        vsl[o] = st.slope[ti]!;
+        vlt[o] = Math.max(0, st.liquidType[ti]! - 1);
+        via[o] = (st.wire[ti]! >>> 5) & 1;
+        vwr[o] = st.wire[ti]! & 1;
+        vlq[o] = st.liquid[ti]!;
+      }
+    }
+    const wrB = (nm: string, a: Uint8Array | Uint16Array): void => {
+      fsw.writeFileSync(`${dir}/${tag}.${nm}`, Buffer.from(a.buffer, a.byteOffset, a.byteLength));
+    };
+    wrB('typ', vtyp); wrB('act', vact); wrB('wal', vwal); wrB('liq', vlq);
+    wrB('half', vhf); wrB('slope', vsl); wrB('lty', vlt); wrB('inact', via); wrB('wire', vwr);
+  };
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
     const rsn = gcRsnOn && typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1';
+    const i222W = i222On && ix === i222X && jy === i222Y;
     if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_CHEST_TRACE) {
       const uL = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
       let fh = 0x811c9dc5;
@@ -4190,6 +4247,16 @@ const snap: SnapFn = (name) => {
       console.log(`C|${ix}|${jy}|${mainItem}|${style}|${chestTile === CHEST ? 21 : 467}|${fh.toString(16)}`);
     }
     for (let k = jy; k < h - 10; k++) {
+      // ★IIIII222 行走走廊逐 k 腿位仪（SW_I222;零掷 logging-only;x86 rig WorldGen.AddBuriedChest
+      //   同构镜像 DR|BCW）——st=本域门谓词 dgSolid（x86 侧同字段=WorldGen.SolidTile 全项版）,
+      //   裸腿 t/ac/hb/sl/ia/ts/so 由分析器两侧互检。早退步（shimmer/231/boulder）不发线,
+      //   由序列中断+窗 dump 判读,与 x86 对称。
+      if (i222W) {
+        const tiW = st.idx(ix, k);
+        const tyW = st.type[tiW]!;
+        const shW = tyW === 0 ? 0 : (TILE_DEFS[tyW]?.vanilla?.sheet ?? 9999);
+        mkI222W(`DR|BCW|k=${k}|t=${shW}|ac=${st.flags[tiW]! & 1}|hb=${st.half[tiW]!}|sl=${st.slope[tiW]!}|ia=${(st.wire[tiW]! >>> 5) & 1}|ts=${genSolidType(tyW) ? 1 : 0}|so=${DG_SOLID_TOP.has(shW) ? 1 : 0}|liq=${st.liquid[tiW]!}|lty=${Math.max(0, st.liquidType[tiW]! - 1)}|wal=${st.wall[tiW]!}|st=${dgSolid(ix, k) ? 1 : 0}`);
+      }
       // ★IIIII114b2 定罪（G 混沌·shimmer 群）：C# AddBuriedChest 扫描步首检
       //   `if (Main.tile[i, k].anyShimmer()) return false;`（WorldGen.cs:36486-36489，
       //   anyShimmer=liquid>0 且 liquidType==3）——ddual 双座地牢下沿房间整体浸没
@@ -4367,6 +4434,8 @@ const snap: SnapFn = (name) => {
         flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag11, flag12, flag13);
       // ★IIII102c：push → registerChest（Main.chest 首空槽复用,Chest.cs:584）
       registerChest(chests as SparseChestSink, { x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
+      // ★IIIII222：落箱钉（与 x86 rig DR|BCWOK 同位同构）
+      if (i222W) mkI222W(`DR|BCWOK|i=${ix}|k=${num7}|chest=${px},${py}|sty=${num9}|tile=${chestTileType === TILE_BY_KEY['chest'] ? 21 : 467}`);
       // ★IIIII188：hell 箱轮转推进（WG.cs:36600-36604 `if (flag14) { GenVars.hellChest++ ... }`）
       if (flag14 && gs.hellChestItems) gs.hellChestIdx = (gs.hellChestIdx + 1) % gs.hellChestItems.length;
       return true;
@@ -4593,6 +4662,13 @@ const snap: SnapFn = (name) => {
         // ★IIIII215 取证钩（SW_I215;x86 rig DR|BCX 同构,零掷）
         const bcGate = featAreaOK(num, num2, 1);             // CanGenerateFeatureInArea(:296)
         if (i215B) mk215B(`DR|BCX|num=${num}|num2=${num2}|ok=${bcGate ? 1 : 0}`);
+        // ★IIIII222 试样邻域 81×81 窗 dump（SW_I222;仅 (num,num2)==(i222X,i222Y) 首次命中发;
+        //   与 x86 rig DungeonUtils.GenerateDungeonBiomeChest DumpBox 同位同构）
+        if (i222On && !i222Dumped && num === i222X && num2 === i222Y) {
+          i222Dumped = true;
+          mkI222W(`DR|BCWDUMP|x0=${num - 40}|y0=${num2 - 40}|x1=${num + 40}|y1=${num2 + 40}`);
+          i222DumpBox(`js_bch_${num}_${num2}`, num - 40, num2 - 40, num + 40, num2 + 40);
+        }
         if (!bcGate) return false;
         if (spec.BiomeChestLootItemType < 0) return false;   // num3==0 早退(:317-320)
         let chestTileInternal = CHEST, chestStyleV = 2;      // 缺省 21/2(:301-302)

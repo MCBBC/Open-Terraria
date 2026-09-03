@@ -235,8 +235,11 @@ describe('★F2 弩车 AI_134 朝向三案', () => {
   });
 
   it('③携行朝向跟随（:69615-69623）：carried && ai0==1 && ai1==0 → facing 每拍 = player.direction', () => {
-    const player = stubPlayer(1);
-    player.equipStats.accSentryBackpack = true;
+    // 真实 Player：携行重定位 heavySlingReposition 读 mountedCenter/gravDir/
+    // gfxOffY/rotatedRelativePoint 全套玩家面（桩面不足）
+    const player = new Player(90 * TILE, 100 * TILE, new Inventory());
+    const merged = { ...(player.equipStats as unknown as Record<string, unknown>), accSentryBackpack: true };
+    Object.defineProperty(player, 'equipStats', { get: () => merged, configurable: true });
     const { hooks } = bHooks(bStore(), player);
     const m = mkBallista(player);
     m.carriedByBackpack = true;

@@ -208,7 +208,7 @@ describe('① ammoCycler：实耗推进 + 停火复位（:54209-54217 / Update_A
 // ================= ② sentry backpack 哨兵携带 =================
 
 describe('② sentry backpack：拾起门（CanGetPickedUpBySentryBackpack :80532-80552）', () => {
-  it('挂背包+盒相交+冷却 0 → 拾起：carriedByBackpack/续约 2/钉玩家中心/速度清零', () => {
+  it('挂背包+盒相交+冷却 0 → 拾起：carriedByBackpack/续约 2/重定位 aiStyle 130 落位/速度清零', () => {
     const { player, hooks } = makeHooks();
     withEq(player, { accSentryBackpack: true });
     const s = new MinionProj(player.cx - 8, player.cy - 8, 663, 10, 1, true, 0, false, () => player);
@@ -217,7 +217,10 @@ describe('② sentry backpack：拾起门（CanGetPickedUpBySentryBackpack :8053
     expect(s.carriedByBackpack).toBe(true);                // ai[2]=1（:37813）
     expect(player.accSentryBackpackGrabCooldown).toBe(2);  // :80556 续约
     expect(s.vx).toBe(0); expect(s.vy).toBe(0);            // :37820
-    expect(s.cx).toBe(player.cx); expect(s.cy).toBe(player.cy);   // default 支 :70261
+    // AI_Sentries_HeavySlingReposition aiStyle 130 支（:70214-70227 + default 支
+    // :70261）：Center = MountedCenter + (direction*10, gravDir*-11)（同向无 -2 修正）
+    expect(s.cx).toBe(player.cx + 10);
+    expect(s.cy).toBe(player.cy - 11);
   });
   it('未挂背包/抓取冷却占用（同时至多携带一门）不拾起', () => {
     const { player, hooks } = makeHooks();
@@ -234,7 +237,7 @@ describe('② sentry backpack：拾起门（CanGetPickedUpBySentryBackpack :8053
     tick1457(player, hooks);
     expect(player.accSentryBackpackGrabCooldown).toBe(1);  // Update_SentryBackpack :28644 递减
   });
-  it('携带中随玩家移动（无重力/无落地）——多 tick 位置钉玩家中心', () => {
+  it('携带中随玩家移动（无重力/无落地）——多 tick 位置钉玩家重定位偏移位', () => {
     const { player, hooks } = makeHooks();
     withEq(player, { accSentryBackpack: true });
     const s = new MinionProj(player.cx - 8, player.cy - 8, 663, 10, 1, true, 0, false, () => player);
@@ -242,7 +245,8 @@ describe('② sentry backpack：拾起门（CanGetPickedUpBySentryBackpack :8053
     expect(s.carriedByBackpack).toBe(true);
     player.x += 48;                                        // 玩家移动 48px
     for (let i = 0; i < 5; i++) s.fixedUpdate(1 / 60, hooks);
-    expect(s.cx).toBe(player.cx);                          // 仍背在身上
+    expect(s.cx).toBe(player.cx + 10);                     // 仍背在身上（+10*direction :70215）
+    expect(s.cy).toBe(player.cy - 11);                     // :70215 gravDir*-11
     expect(s.vy).toBe(0);                                  // :37820 velocity 恒零（无重力积累）
   });
   it('携带中卸下背包 → 哨兵当场消亡（AI_Sentries_HeavySlingReposition :70099-70103）', () => {

@@ -156,7 +156,7 @@ export interface OptionsData {
   /** 手柄右摇杆平移四档（R4-13,PlayerInputProfile.cs:59-61/:227-228——缺省
    *  OnAlways(2)?★键盘缺省 Hold(0)、手柄缺省 OnAlways;本仓单输入轴取键盘档。
    *  运行时四档已 1:1(Game.ts PanControl 段),此键管持久化——曾刷新即丢 */
-  panControlMode: number;              // 0=OffAlways/Hold 1=Hold 2=OnAlways 3=Click（PlayerInputProfile.cs 枚举序）
+  panControlMode: number;              // ButtonControlMode.cs 枚举序：0=Hold 1=Click 2=OnAlways 3=OffAlways（★旧注"0=OffAlways..."系误记;消费 Game.ts 平移四档门按此序）
   /** 设置版本号（R4-14,M57:4241 Put("LastLaunchedVersion",325)——迁移按 >= 门;
    *  本仓迁移仍字段嗅探,此键先落语义锚,后续迁移改造消费） */
   settingsVersion: number;

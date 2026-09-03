@@ -16,8 +16,8 @@
 //   WallCollision 支（type==155,:18714-18728）：ai[1]>10 → Chat 广播 Game.BallBounceResult；
 //     ai[1]=0；X 反弹 ×(-0.6)、Y 反弹 ×(-0.6) 仅 lastVy>2。
 //   Kill（Projectile.cs:79351-79354）：RequestNewItem(Center, 859) 还玩家。
-//   本仓广播通道未接 ChatHelper.BroadcastChatMessage 世界聊天面（登记近似 = recLog），
-//   踢次计数与反弹物理全量。
+//   广播已接 ChatHelper.BroadcastChatMessage 世界聊天面（game.chatBroadcast 单口：
+//   单机 ChatMonitor + 联机 channel2 系统行中继,2026-09-03 清偿退役 recLog 备案）。
 // ---------------------------------------------------------------------------
 // 橄榄球 861（FootballProj——橄榄球 4743 shoot）
 //   SetDefaults（Projectile.cs:8269-8275）：10×10 / aiStyle 2 / friendly / netImportant。
@@ -47,6 +47,7 @@ import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { Lang } from '../i18n/Lang';
 
 /** 同 AABB 相交（Rectangle.Intersects 语义：边缘相贴不算） */
 function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
@@ -176,9 +177,14 @@ export class BeachBallProj extends BallBase {
     if (this.hitWall || this.collideY) {
       // 沙滩球撞墙反跳（:18715-18728）
       if (this.bounceCount > 10) {
-        // ChatHelper.BroadcastChatMessage(Game.BallBounceResult...)（chat 面未接,
-        // recLog 备案 + 行为录制留痕）
-        game.recLog?.('ballBounceResult', { proj: 155, count: this.bounceCount });
+        // ChatHelper.BroadcastChatMessage（:18719）：NetworkText.FromKey("Game.BallBounceResult",
+        //  FromKey(弹名), ai[1]) + ChatColors.ServerMessage(255,240,20)（ChatColors.cs:13）。
+        //  {0}=Lang.GetProjectileName(155)（"Beach Ball"）、{1}=踢次数。广播单口 =
+        //  单机本地消息列（Main.NewText 形态）+ 联机 channel2 系统行中继其他端
+        game.chatBroadcast?.(
+          Lang.text('Game.BallBounceResult',
+            Lang.projectileName(this.projId) ?? `Projectile ${this.projId}`, this.bounceCount),
+          255, 240, 20);
       }
       this.bounceCount = 0;
       let nx = this.vx, ny = this.vy;

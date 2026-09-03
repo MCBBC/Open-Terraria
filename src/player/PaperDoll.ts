@@ -291,10 +291,10 @@ function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: 
 export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
-  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm },
+  opts?: { skipHair?: boolean; skipFace?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm },
 ): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
-    + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '')
+    + (opts?.skipHair ? '|nohair' : '') + (opts?.skipFace ? '|noface' : '') + (opts?.layer ? `|L${opts.layer}` : '')
     + (opts?.part ? `|P${opts.part}` : '')
     + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
     + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '')
@@ -357,7 +357,9 @@ export function compositePaperDoll(
   const wantLegs = !part || part === 'legs';
   // HIDES_HEAD 头甲（ArmorIDs.Head.Sets.HidesHead）：狼人头 38 等全脸头甲跳过 base
   // 头皮肤/眼白/瞳（DrawPlayer_21_TheFace :2577-2580 flag 门；眼睑由渲染侧同门跳过）
-  const hidesFace = HIDES_HEAD.has(equip?.head ?? 0);
+  // skipFace = faceHead 路由在身（DrawPlayer_21_Head_TheFace :2592 分支二整支替代
+  // 皮肤脸+眼白+瞳——渲染侧 faceLayerSplitPlan.skipFace 供给,2026-09-03 四层路由批）
+  const hidesFace = HIDES_HEAD.has(equip?.head ?? 0) || opts?.skipFace === true;
   // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
   if (!onlyArmor && wantHead && hairTinted && hasBackHair) {
     for (let i = 0; i < nFrames; i++) {

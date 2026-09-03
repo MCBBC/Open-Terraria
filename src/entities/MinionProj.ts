@@ -3945,6 +3945,138 @@ export class MinionProj extends Entity {
   /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
   get ownerPlayer(): Player | null { return this.ownerRef(); }
 
+  /** AI_Sentries_HeavySlingReposition（1457 Projectile.cs:70096-70470）1:1——被哨兵
+   *  背包四件（accSentryBackpack 6172 重携/6175 侦察/6176 圣殿骑士/6177 皇家卫队,
+   *  ApplyEquipFunctional :14612-14614/:14670-14677/:14678-14681/:14682-14685 全置旗）
+   *  携带中的哨兵每拍重定位。分支序照原文：
+   *    !accSentryBackpack → Kill（:70098-70102）→ 早退三支（aiStyle 123∪84
+   *    :70108-70126 / aiStyle 137 :70127-70137 / type 966 :70138-70150）→ 通用路
+   *    （scale=1 :70152 + vector=Size/2 :70157 + per-type 308/377 :70160-70182 +
+   *    flag3=1025 :70184-70206 + flag4=aiStyle134 :70207-70213 + aiStyle130
+   *    :70214-70227 + flag5=aiStyle138 :70228-70250）→ 坐骑 switch default 支
+   *    :70255-70265 → 尾 floor（:70468）。
+   *  坐骑支差异备案（系统未建,非近似）：flag = IsTransformationMount{52,54,55,56,61}
+   *  （MountID.cs:23 Wolf/Velociraptor/Rat/Bat/Pixie）——vanilla-mounts.json 无此五骑
+   *  数据 → 恒 false,flag 各加成支保留门条件照抄但不可达;mount.Type switch 特例
+   *  （55 Rat/61 Pixie/56 Bat/54 Velociraptor/52 Wolf :70255-70463）与 mount 43
+   *  pushFromOriginHack（:70252-70254）同因不可达,恒走 default 支。
+   *  flag2 = mount.AnyTrackRider（Mount.cs:558-573 Minecart∪CanRideMinecartTracks）
+   *  → 本仓等价位 = ridingCart（矿车轨道骑乘,Minecart.ts 接管）。
+   *  OffsetsPlayerHeadgear（Main.cs:530-551）行 = bodyFrame.Y/Height——帧行状态机在
+   *  渲染侧（Renderer.playerFrameRows）,实体侧无此状态;按行 0 落位（vector3.Y=
+   *  2−2=0）,行∈{7,8,9,14,15,16}（跳/落帧）才产生 −2px 差,备案。
+   *  RotatedRelativePoint 经 Player.rotatedRelativePoint（Player.cs:4209-4237 1:1,
+   *  fullRotation 恒 0 → 恒等+gfxOffY;sleeping/sitting 偏移支见该处备案）。
+   *  scale/pushFromOriginHack（:70152-70156/:70252-70254）:scale 本仓绘制端未建模
+   *  （1025 缩体支 owner.h<DefaultSize.Y=42 不可达——折叠凳态 h=68 反而更大）;
+   *  pushFromOriginHack 仅 fullRotation≠0 消费,未建模恒 0。 */
+  private heavySlingReposition(owner: Player): void {
+    if (!owner.equipStats.accSentryBackpack) { this.dead = true; return; }   // :70098-70102
+    const flag = false;                                    // IsTransformationMount（:70104）——变身坐骑未建
+    const flag2 = owner.ridingCart === true;               // AnyTrackRider（:70105）
+    const num = Math.min(21, owner.h / 2);                 // :70106（h≥42 → 恒 21）
+    const grav = owner.gravDir;
+    const mc = owner.mountedCenter;
+    const gfx = owner.gfxOffY;
+    const pdir = owner.facing < 0 ? -1 : 1;                // player.direction
+    const floorPos = (): void => { this.x = Math.floor(this.x); this.y = Math.floor(this.y); };
+    // ---- 早退支①：aiStyle 123（641 月门/643 彩虹水晶）∪ 84（642 激光随 641 携带,
+    //      Projectile.cs:31963-31970 调本函数;642 激光随行建模缺,见 SENTRY_SHOOT 注）----
+    if (this.projId === 641 || this.projId === 643) {
+      // :70110-70112 Center = MountedCenter + (0, gravDir * -(num + 20 + height/2))
+      this.x = mc.x - this.w / 2;
+      this.y = mc.y + grav * -(num + 20 + Math.trunc(this.h / 2)) - this.h / 2;
+      this.y += gfx;                                       // :70113 position.Y += gfxOffY
+      // aiStyle==84 支 position.Y += -6*gravDir（:70115-70117）——642 不在本仓哨兵集合
+      if (flag2) {                                         // :70119-70122 Bottom = RotatedRelativePoint(Bottom)
+        const b = owner.rotatedRelativePoint(this.cx, this.y + this.h);
+        this.x = b.x - this.w / 2; this.y = b.y - this.h;
+      }
+      floorPos();                                          // :70124
+      return;
+    }
+    // ---- 早退支②：aiStyle 137（688/689/690 闪电光环）(:70127-70137) ----
+    if (AURA_TOWER.has(this.projId)) {
+      this.x = mc.x - this.w / 2; this.y = mc.y - this.h / 2;   // :70129 Center = MountedCenter
+      this.y += gfx;                                       // :70130
+      if (flag2) {                                         // :70132-70135 Center = RotatedRelativePoint(Center)
+        const c = owner.rotatedRelativePoint(this.cx, this.cy);
+        this.x = c.x - this.w / 2; this.y = c.y - this.h / 2;
+      }
+      floorPos();
+      return;
+    }
+    // ---- 早退支③：type 966 猎犬（:70138-70150）----
+    if (this.projId === 966) {
+      this.x = mc.x - this.w / 2;
+      this.y = mc.y + grav * -num - this.h / 2;            // :70140-70142
+      if (grav === -1) this.y += 32;                       // :70143-70145
+      this.y += gfx;                                       // :70146
+      if (flag2) {
+        const b = owner.rotatedRelativePoint(this.cx, this.y + this.h);
+        this.x = b.x - this.w / 2; this.y = b.y - this.h;
+      }
+      floorPos();
+      return;
+    }
+    // ---- 通用路：vector2 起零、vector = Size/2（:70157-70158）----
+    let vec2X = 0, vec2Y = 0;
+    let vecX = this.w / 2, vecY = this.h / 2;
+    if (this.projId === 308 || this.projId === 377) {      // :70160-70182 per-type
+      if (this.projId === 308) {
+        if (this.facing === 1) vec2X = -14;                // :70163-70166 spriteDirection==1
+        vec2X += 10 * this.facing;                         // :70167
+        if (!flag) vec2Y += -20;                           // :70168-70170
+      } else {
+        vec2X += this.facing;                              // :70173-70174
+        if (!flag) vec2Y += -20;
+        if (grav === -1) vec2Y += 10;                      // :70177-70179
+      }
+      vecX = this.w / 2; vecY = Math.fround(this.h * 0.9); // :70171/:70180（0.9f f32 敏感）
+    }
+    if (this.projId === 1025) {                            // flag3（:70184-70206）
+      vec2X += pdir * -25; vec2Y += grav * 4;              // :70186
+      this.rot = pdir === 1 ? Math.PI / 2 : -Math.PI / 2;  // :70187
+      if (pdir === -1) vec2X += pdir * 4;                  // :70188-70190（=−4）
+      if (grav === -1) vec2Y += 4;                         // :70191-70193
+      if (flag) { this.rot = Math.PI; vec2X += pdir * 17; } // :70194-70197（变身坐骑,不可达照抄）
+      if (owner.h < 42) {                                  // :70198-70204 height < DefaultSize.Y（不可达）
+        this.rot = Math.PI;
+        vec2Y += 5;                                        //   scale=0.5 与 fullRotation 相位项未建模（见方法头）
+      }
+      // :70205 rotation += player.fullRotation——恒 0
+    }
+    if (BALLISTA_TOWER.has(this.projId)) {                 // flag4 = aiStyle 134（:70207-70213）
+      vec2X = 0; vec2Y = grav * -14;                       // :70209（赋值覆写）
+      if (flag) vec2Y += 24;                               // :70211-70212
+    }
+    if (FLAMEBURST_TOWER.has(this.projId)) {               // aiStyle 130（:70214-70227）
+      vec2X = pdir * 10; vec2Y = grav * -11;               // :70215（赋值覆写）
+      if (this.facing !== pdir) vec2X += this.facing * -2; // :70216-70219 direction != player.direction
+      vecX = this.w / 2; vecY = this.h;                    // :70220
+      if (flag) { vec2X += pdir * -14; vec2Y += 25; }      // :70222-70225
+    }
+    if (TRAP_TOWER.has(this.projId)) {                     // flag5 = aiStyle 138（:70228-70250）
+      if (!flag) {
+        vec2X = pdir * -9; vec2Y = 0;                      // :70231（赋值覆写）
+        if (pdir === -1) vec2Y += 2;                       // :70232-70234
+        if (grav === -1) vec2Y -= 2;                       // :70235-70237
+      }
+      this.rot = pdir === 1 ? Math.fround(4.712389) : Math.PI / 2;   // :70238-70240
+      if (flag) { vec2Y += 5; this.rot = 0; }              // :70241-70244
+    }
+    // ---- default 坐骑支（:70255-70265）：Center = MountedCenter + vector2 ----
+    this.x = mc.x + vec2X - this.w / 2;
+    this.y = mc.y + vec2Y - this.h / 2;
+    // :70261-70263 vector3 = OffsetsPlayerHeadgear[row] + (0,-2),position +=
+    // vector3*(0,gravDir)——行 0 基准 = (2−2)*grav = 0（帧行备案见方法头）
+    // :70264 position = RotatedRelativePoint(position + vector, addGfxOffY) - vector
+    //（恒等旋 → position + (0, gfxOffY)）;:70266-70268 if(flag) Y += gfxOffY 不可达
+    const rp = owner.rotatedRelativePoint(this.x + vecX, this.y + vecY);
+    this.x = rp.x - vecX; this.y = rp.y - vecY;
+    floorPos();                                            // :70468
+  }
+
   /** 按 id 取敌（AI_120 ai[1] 目标槽 :42198-42207 等价） */
   private enemyById(game: GameHooks, id: number): EnemyLike | null {
     if (id < 0) return null;
@@ -4159,16 +4291,18 @@ export class MinionProj extends Entity {
         this.carriedByBackpack = true;
       }
       if (this.carriedByBackpack) {
-        // AI_Sentries_HeavySlingReposition 头（:70096-70103）：!accSentryBackpack
-        // → Kill（携带中卸下背包 = 哨兵当场消亡）
-        if (!owner || !owner.equipStats.accSentryBackpack) { this.dead = true; return; }
-        owner.accSentryBackpackGrabCooldown = 2;           // :80556 续约占位
-        this.vx = 0; this.vy = 0;                          // :37820 velocity = Zero
-        // :37821 tileCollide=false + AI_Sentries_HeavySlingReposition default 支
-        //（:70259-70265）：Center = MountedCenter（+headgear 微移,本仓省略）——
+        if (!owner) { this.dead = true; return; }
+        // SetAsSelectedSentryBackpackTarget（:80554-80557）：各哨兵 AI 携带支每拍
+        // 续约抓取冷却 2 → 同时至多携带一门（先续约后重定位 = 原版块内序）
+        owner.accSentryBackpackGrabCooldown = 2;
+        this.vx = 0; this.vy = 0;                          // 携带支 velocity = Zero（:37820/:38006/:69355/:69622/:69952/:70400）
+        // AI_Sentries_HeavySlingReposition（Projectile.cs:70096-70470）1:1 重定位——
+        // 内含 !accSentryBackpack → Kill 头支（:70098-70102,携带中卸下背包=当场消亡）
+        // 与 per-aiStyle/per-type 落位几何;原版携带支同时 tileCollide=false（:37821
+        // /:69411/:69985/:70411）——本仓携带态不走 moveAndCollide 同语义
+        this.heavySlingReposition(owner);
+        if (this.dead) return;
         // 哨兵背在身上随玩家移动,各塔族开火段照常跑（原版拾起块后 AI 继续 :37824+）
-        this.x = owner.cx - this.w / 2;
-        this.y = owner.cy - this.h / 2;
       } else if (FLOATING_SENTRIES.has(this.projId)) {
         // 悬浮哨兵（R31 §C① P1）：AI_123 首行 velocity=Zero（:37726 区块,641/643）/
         // AI_197 悬浮炮台（1025）——tileCollide=false 恒悬浮于放置点,不吃重力。
@@ -4196,12 +4330,15 @@ export class MinionProj extends Entity {
         //  ②炮口火舌 d6：盒 = Center.X 起 ±w/4 宽（左向左伸）且 +dir×4 偏移、
         //  Y = bottom−(height−10)，{663|665|667}=各 1/2/3 层每层 1/5 帧、
         //  fadeIn1/scale1/vel×2。此前整段"未建模"登记消账（spawnDust/addLightAt
-        //  现有基建直映）；flag = ai[2]!=1（被背包携带态不喷）
-        if (!this.carriedByBackpack && game.spawnDust) {
+        //  现有基建直映）；★哨兵背包携带面复核（2026-09-03）：原版仅【底盆白烟】
+        //  被携带态关（flag = ai[2]!=1,:69181 门在 for 上限 `(flag ? 1 : 0)`
+        //  :69194/:69243/:69292）；炮口火舌（:69203-69212/:69252-69261/:69301-69310）
+        //  与 Lighting.AddLight（:69178-69180 等）无 ai[2] 门——携带中照喷照亮
+        if (game.spawnDust) {
           const fw = Math.floor(this.w / 4);
           const emberX = this.x + fw - (this.facing === 1 ? fw : 0);
           const emberW = this.projId === 663 ? fw * 3 : fw * 2;
-          if (Math.floor(Math.random() * 2) === 0) {
+          if (!this.carriedByBackpack && Math.floor(Math.random() * 2) === 0) {
             const dE = game.spawnDust(emberX - 2, this.y + this.h - 16 - 2,
               emberW + 4, 10, 270, -this.facing * 2, -2, 200, null, 0.4);
             if (dE) {
@@ -4229,6 +4366,15 @@ export class MinionProj extends Entity {
           const lm = this.projId === 663 ? 1 : this.projId === 665 ? 1.2 : 1.5;
           game.addLightAt?.(this.cx, this.cy, 0.4 * lm, 0.2 * lm, 0.1 * lm);
           game.addLightAt?.(this.cx, this.y + this.h - 10, 0.4 * lm, 0.2 * lm, 0.1 * lm);
+        }
+        // ★F2③ 携行态朝向回写（AI_130 携带支 :69348-69357,先于 ai[0]==1 待机臂）：
+        //   ai[2]==1（哨兵背包携行）&& ai[0]==1 && ai[1]==0 ⇒ direction=spriteDirection
+        //   =player.direction 每拍回写——随玩家转向同步塔身朝向（无目标拍亦回写,
+        //   原版选向只在索敌命中拍覆写 :69382,携带支同拍在后,序保留）。与弩车
+        //   134 同款（:69615-69623,已接）
+        if (this.carriedByBackpack && this.sFire === 0 && this.sCool <= 0) {
+          const carrier = owner ?? game.player;
+          if (carrier) this.facing = carrier.facing < 0 ? -1 : 1;
         }
         // ★F4 索敌/射击端点换 shootingSpot（2026-08-30 实体侧对账批）：AI_130 的
         //   FindTarget 全部 Distance/CanHitLine 以 vector=Bottom+(direction*6,-Δ)
@@ -4418,6 +4564,12 @@ export class MinionProj extends Entity {
           this.auraCy = centerY; // base.Center = center（:65980）
         }
         const side = this.auraSide;
+        // ★哨兵背包携带面（2026-09-03）：原版场盒 = Size(height×height) 以 base.Center
+        //   为心（Colliding :14537-14553 / 扫描 :69966-69971）——被携带时 Center 每拍被
+        //   AI_Sentries_HeavySlingReposition aiStyle 137 支（:70127-70137）钉到
+        //   MountedCenter → 场随玩家移动。落位拍锚 auraCy（localAI[0] 首拍支 :65980
+        //   base.Center = center）,携带拍锚本体 Center（=玩家心）。
+        const fieldCy = this.carriedByBackpack ? this.cy : this.auraCy;
         if (side > 0) {
           let zapped = false;         // 直伤拍标记（供 zap 声窗判定兜底,见批 C-3472 注）
           let fieldEnemy = false;     // ★台账批 C-3472：原版声扫描面（场内有敌即可,不看 LOS/冷却）
@@ -4425,23 +4577,23 @@ export class MinionProj extends Entity {
             if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
             const en = ent as EnemyLike & { dead: boolean } & import('./WhipTag').WhipTagged;
             if (en.dead) continue;
-            const ax = this.cx - side / 2, ay = this.auraCy - side / 2;
+            const ax = this.cx - side / 2, ay = fieldCy - side / 2;
             // myRect.Intersects(targetRect)（方形场盒）——vanilla 扫描的
             // Colliding(Hitbox,nPC.Hitbox) 同面（:69966-69971）
             if (en.x + en.w <= ax || en.x >= ax + side || en.y + en.h <= ay || en.y >= ay + side) continue;
             // targetRect.Distance(Center) < height/2-20（:14540，敌 AABB 到中心最近点距）
             const nx = Math.max(en.x, Math.min(en.x + en.w, this.cx));
-            const ny = Math.max(en.y, Math.min(en.y + en.h, this.auraCy));
-            if (Math.hypot(this.cx - nx, this.auraCy - ny) >= side / 2 - 20) continue;
+            const ny = Math.max(en.y, Math.min(en.y + en.h, fieldCy));
+            if (Math.hypot(this.cx - nx, fieldCy - ny) >= side / 2 - 20) continue;
             fieldEnemy = true;
             // AI_137_CanHit 视线门（Projectile.cs:71574-71614，2026-08-30 补弧线三试
             // +目标双点:15890/:15894 敌盒中心/敌盒上沿中任一通过即命中；目标格实心直接 false）。
             // ★起点基点核对（Entity.cs:86-96）：base.Top=(X+width/2, position.Y)=场盒顶沿中点，
             //   +UnitY×20 → 起点 = (Center.X, cy − 场盒半高 + 20)；本仓场盒高=auraSide、
-            //   场盒竖中心=auraCy → 起点为 (cx, auraCy − side/2 + 20)。旧实现锚在
+            //   场盒竖中心=fieldCy → 起点为 (cx, fieldCy − side/2 + 20)。旧实现锚在
             //   (cx, auraCy−20) 无 side 归属——小盒(64~160)差 ≤60px 档位级偏移，已对齐。
-            if (!lightningAuraCanHitFrom(game.world.store, this.cx, this.auraCy - side / 2 + 20, en.cx, en.cy)
-              && !lightningAuraCanHitFrom(game.world.store, this.cx, this.auraCy - side / 2 + 20, en.x + en.w / 2, en.y)) {
+            if (!lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, en.cx, en.cy)
+              && !lightningAuraCanHitFrom(game.world.store, this.cx, fieldCy - side / 2 + 20, en.x + en.w / 2, en.y)) {
               continue;
             }
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
@@ -4473,20 +4625,27 @@ export class MinionProj extends Entity {
           if (this.zapCycle >= zapPeriod) {
             this.zapCycle = 0;
             if (fieldEnemy || zapped) {
-              game.playSfxFiles(soundTrackFiles('dd2_lightning_aura_zap'), 0.5, this.cx, this.auraCy);
+              game.playSfxFiles(soundTrackFiles('dd2_lightning_aura_zap'), 0.5, this.cx, fieldCy);   // PlayTrackedSound(base.Center)（:69968）——携带态随玩家
             }
           }
         }
         return;
       }
       // 爆炸机关族（AI_138）：每 3t 探测中心上方 48px 的 144×144 盒——有敌即
-      // 原地爆炸 AoE（proj 694 等价）+ 粒子 + 冷却 90（GetExplosiveTrapCooldown）
+      // 原地爆炸 AoE（proj 694 等价）+ 粒子 + 冷却 90（GetExplosiveTrapCooldown）。
+      // ★哨兵背包携带面（2026-09-03）：AI_138 携带支（:70397-70405）num3=20、
+      //   num2=48−14=34 → 探测盒 = CenteredRectangle(Center+(0,-num2), num2*3)
+      //   （:70407）后 Inflate(num3,num3)（:70411）→ 半宽 num2*3/2+num3：常规 48*3/2
+      //   =72、携带 34*3/2+20=71（盒心 Y 也从 −48 抬到 −34）
       if (TRAP_TOWER.has(this.projId)) {
         if (--this.sCool <= 0) {
           this.sCool = 3;
-          const ecx = this.cx, ecy = this.cy - 48;
+          const trapNum2 = this.carriedByBackpack ? 48 - 14 : 48;   // :70395 num2=48、携带支 num2 -= 14（:70402）
+          const trapNum3 = this.carriedByBackpack ? 20 : 0;         // :70394 num3=0、携带支 num3 = 20（:70401）
+          const ecx = this.cx, ecy = this.cy - trapNum2;
+          const trapHalf = trapNum2 * 3 / 2 + trapNum3;
           const hit = (game.enemies() as EnemyLike[]).some((en) =>
-            !en.dead && Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2);
+            !en.dead && Math.abs(en.cx - ecx) < trapHalf + en.w / 2 && Math.abs(en.cy - ecy) < trapHalf + en.h / 2);
           if (hit) {
             this.sCool = 90;
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
@@ -4549,6 +4708,15 @@ export class MinionProj extends Entity {
             }
           }
         }
+        // ★F2③ 携行态朝向回写（AI_053 携带支 :37996-38002）：ai[2]==1 && ai[0]<=0
+        //   （射击冷却走完）⇒ direction=spriteDirection=player.direction——随玩家转向
+        //   同步（原版选向只在索敌命中段 frameCounter 过门时按目标方位覆写 :38052-38062,
+        //   携带回写每拍在前）。ai[0]==0 帧清零支（:38005-38007）——s53 帧档走 age 循环
+        //   未建模,不接
+        if (this.carriedByBackpack && this.sCool <= 0) {
+          const carrier = owner ?? game.player;
+          if (carrier) this.facing = carrier.facing < 0 ? -1 : 1;
+        }
         const tgt = this.nearestEnemy(game, 1000); // AI_053_HandleSentryNPCTargeting maxDistance=1000
         let sector = 2;
         if (tgt) {
@@ -4609,6 +4777,19 @@ export class MinionProj extends Entity {
           for (let i = 0; i < 40; i++) {
             const d = game.spawnDust?.(this.cx - 10, this.cy - 10, 20, 20, 2, 0, 0, 100);
             if (d) { d.vx *= 2; d.vy *= 2; d.noGravity = true; }
+          }
+        }
+        // ★F2③ 携行态朝向/旋转回写（AI_197 携带支 :41068-41097,先于顶格深扫）：
+        //   ai[2]==1 ⇒ spriteDirection=direction=player.direction（:41076）+ rotation
+        //   =±π/2（:41082-41084;重定位 flag3 支 :70187/:70205 同值再加 fullRotation=0）
+        //   ——藤壶哨站被背包携带时横置在玩家侧身。scale/缩体支（:41085-41090）与
+        //   ai[0]==0 HandleTileCollision（:41093-41095）本仓未建模（1025 悬浮档无
+        //   ai[0] 落位状态机;玩家盒 ≥42 缩体支不可达）
+        if (this.carriedByBackpack) {
+          const carrier = owner ?? game.player;
+          if (carrier) {
+            this.facing = carrier.facing < 0 ? -1 : 1;        // :41076
+            this.rot = this.facing === 1 ? Math.PI / 2 : -Math.PI / 2;   // :41082-41083
           }
         }
         this.sCool = Math.min(this.sCool + 1, 50);            // localAI[0]++（:41156-41158）
@@ -5245,7 +5426,7 @@ export class MinionProj extends Entity {
     const img = projFrameImg(this.projId, frame);
     // ---- ★三轮蓝队 F5①：爆炸烈焰塔 663/665/667 半帧专绘（Main.cs:34075-34086）----
     // 原版帧内是【左右两半镜像塔身】（rectangle23.Width/=2 后按 ai[2] 选半——ai[2]==1
-    // 仅哨兵背包携行态,本仓不建模 ⇒ 恒取左半,与原版默认摆位一致）；锚 = Bottom 系：
+    // 哨兵背包携行态取右半,已接,见下方 sx）；锚 = Bottom 系：
     // draw pos=BoxBottom、origin=(半宽/2, 半高−4) ⇒ 贴图底 4px 探出盒底。旧通用路径
     // 以整宽帧(74/96/92px)从盒顶左落锚=双影横排+整体偏下（放大前后视觉差最重一档）。
     if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
@@ -5254,7 +5435,10 @@ export class MinionProj extends Entity {
         const framesN = Math.max(1, frames);
         const fh = sheet.height / framesN;
         const halfW = Math.floor(sheet.width / 2);
-        const sx = 0;                                    // ai[2]==0 → 左半
+        // 帧内左右两半镜像塔身：ai[2]==0 取左半、==1（哨兵背包携行）源矩形 X 右移
+        // 半宽取右半（Main.cs:34080-34083 `rectangle23.Width /= 2; if (ai[2]==1f)
+        // rectangle23.X += rectangle23.Width;`——此前携行不建模恒取左半）
+        const sx = this.carriedByBackpack ? halfW : 0;
         const sy = Math.round(frame * fh);   // 与 projFrameImg round 语义同源
         ctx.save();
         if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);

@@ -38,14 +38,106 @@ export const BALLOON_TORSO_FRAMING = new Set([18]);
  * （Waist 命名空间 :1984），DruidicSerpentCloak 是 Front 17/Back 41 非本族 */
 export const WAIST_TORSO_FRAMING = new Set([5, 10, 12, 17]);
 
-/** Face 三层路由（UpdateItemDye :9386-9402 + DrawPlayer_22_FaceAcc :2807）：
- *  underHair（5 眼罩,画在发层之下=本仓并入 face 主层,登记偏差）/
- *  mask（22 焊工面罩）/ flower（1 大自然的恩赐,6 黑曜石玫瑰,8 丛林玫瑰,9 奥术花）/
- *  head（12/10/13/11 骷髅族）——face 槽按集合分流到 face/faceMask/faceFlower/faceHead */
+/** Face 四层路由（UpdateVisibleAccessory :37216-37230 分流 + UpdateItemDye
+ *  :9774-9788 染料随路由;DrawPlayer_22_FaceAcc :2807 / DrawPlayer_21_Head_TheFace
+ *  :2574-2650 消费）：underHair（5 眼罩,画在发层之下的头层）/ mask（22 焊工面罩）/
+ *  flower（1 大自然的恩赐,6 黑曜石玫瑰,8 丛林玫瑰,9 奥术花）/ head（12/10/13/11
+ *  骷髅族）——face 槽按集合分流到 face/faceMask/faceFlower/faceHead 四字段
+ *  （face=base∪underHair 同字段,各字段后写覆盖,同帧至多四件并存） */
 export const FACE_UNDER_HAIR = new Set([5]);
 export const FACE_MASK_LAYER = new Set([22]);
 export const FACE_FLOWER_LAYER = new Set([1, 6, 8, 9]);
 export const FACE_HEAD_LAYER = new Set([12, 10, 13, 11]);
+
+/** Face.Sets.OverrideHelmet（★1457 ArmorIDs.cs:2182={2,3,4,19};1456 :2142 同值）——
+ *  PlayerFrame :36256-36259 命中 → head=-1（头盔整件不画）+ faceHead=-1,face 本体
+ *  保留画（潜水装置/骨盔族"露脸装备压掉头盔"语义）;同集成员 ∈ PreventHairDraw
+ *  （:2180）→ 发型亦全隐（DrawPlayer_21_Head :2422 hair 支门） */
+export const FACE_OVERRIDE_HELMET = new Set([2, 3, 4, 19]);
+
+/** Head.Sets.DrawFaceMaskUnderHeadLayer（★1457 ArmorIDs.cs:20,22 头;1456 :20 同值）
+ *  ——faceMask 对这些头盔改画在头甲之下的头层（DrawPlayer_21_Head :2124-2137
+ *  flag5 支,GetFaceDrawOffset+helmetOffset 锚同前层）,且 22_FaceAcc 前层支隐没
+ *  （:2819-2821 同门） */
+export const FACE_MASK_UNDER_HEAD_LAYER = new Set([26, 51, 289, 81, 92, 106, 291, 10, 12, 178, 198, 267, 279, 160, 52, 53, 71, 55, 166, 167, 278, 203]);
+
+/** Head.Sets.PreventFaceMaskDraw（★1457 ArmorIDs.cs:24,48 头;1456 :24 同值）——
+ *  faceMask 全隐（头层/前层两支都不画） */
+export const PREVENT_FACE_MASK_DRAW = new Set([27, 20, 107, 108, 127, 162, 168, 118, 123, 164, 155, 150, 137, 186, 125, 136, 153, 154, 169, 148, 165, 151, 173, 146, 147, 175, 193, 271, 268, 260, 221, 236, 208, 209, 207, 187, 192, 188, 276, 270, 58, 77, 142, 152, 241, 210, 22, 196]);
+
+/** Head.Sets.UseAltFaceHeadDraw（★1457 ArmorIDs.cs:28 字面集合）——命中头盔戴帽时
+ *  PlayerFrame :36266-36271 把 faceHead 换 AltFaceHead 表档（头盔适配版骷髅贴图,
+ *  换档后盲眼罩 +2·dir 附加偏移门 :2603-2609 随之失效） */
+export const USE_ALT_FACE_HEAD_DRAW = new Set([3, 4, 6, 7, 9, 17, 22, 27, 28, 31, 32, 37, 38, 39, 40, 42, 43, 45, 46, 47, 48, 49, 50, 57, 58, 61, 66, 69, 70, 72, 74, 75, 76, 77, 78, 82, 83, 86, 89, 93, 98, 101, 103, 104, 105, 107, 108, 109, 110, 111, 115, 118, 120, 122, 123, 124, 127, 128, 129, 131, 132, 134, 135, 136, 137, 142, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 162, 164, 165, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 185, 186, 187, 188, 189, 192, 193, 194, 200, 201, 202, 204, 207, 208, 209, 210, 211, 213, 214, 230, 236, 237, 239, 240, 241, 251, 254, 255, 258, 260, 266, 268, 269, 270, 271, 261, 8, 12, 30, 35, 36, 73, 79, 80, 84, 85, 87, 88, 90, 91, 102, 112, 141, 160, 180, 196, 205, 257, 256, 291, 292, 283, 287]);
+
+/** Face.Sets.AltFaceHead（★1457 ArmorIDs.cs:2192;>0 才换）——head 层骷髅族在
+ *  UseAltFaceHeadDraw 头盔下的换档表 */
+export const ALT_FACE_HEAD: Record<number, number> = { 12: 17, 10: 15, 13: 18, 11: 16 };
+
+/** GetFaceHeadOffsetFromHelmet（Player.cs:4874-4889）：faceHead ∈ 骷髅族
+ *  （10-13 原档 ∪ 15-18 Alt 档）且 head ∈ 下表 → (dx,dy)·Directions
+ *  （本仓镜像空间直取表值,同 FACE_HELMET_OFFSET 口径） */
+export const FACE_HEAD_OFFSET_IDS = new Set([10, 11, 12, 13, 15, 16, 17, 18]);
+export const FACE_HEAD_HELMET_OFFSET: Record<number, [number, number]> = { 20: [0, -2], 221: [0, -2], 196: [2, 0] };
+
+/** face 四层路由解算结果（PlayerFrame :36252-36271 门应用后的逐帧终值） */
+export interface FaceLayerRoute {
+  face: number; faceMask: number; faceFlower: number; faceHead: number;
+  /** 互斥门应用后的 head（OverrideHelmet 命中 → 0 = 头盔+发型整隐） */
+  head: number;
+}
+
+/** PlayerFrame 头盔互斥/换档门一比一（Player.cs:36252-36271,渲染侧逐帧应用——
+ *  聚合侧存原始路由值,head 随狼/人鱼强改（:36175-36200 flag3 在原版同步清空四字段,
+ *  transformed 形参承载）：
+ *  ① head>0 ∧ face>0 ∧ ¬(head=287∧face=23)：OverrideHelmet → head=-1+faceHead=-1；
+ *     否则非 underHair → face=-1（mask/flower/head 三字段不清）
+ *  ② head>0 ∧ faceHead>0 ∧ UseAltFaceHeadDraw[head] → faceHead=AltFaceHead（>0 才换） */
+export function resolveFaceLayers(
+  ad: { face: number; faceMask: number; faceFlower: number; faceHead: number },
+  headIn: number, transformed = false,
+): FaceLayerRoute {
+  let head = headIn;
+  let face = transformed ? 0 : ad.face;
+  let faceHead = transformed ? 0 : ad.faceHead;
+  const faceMask = transformed ? 0 : ad.faceMask;
+  const faceFlower = transformed ? 0 : ad.faceFlower;
+  if (head > 0 && face > 0 && !(head === 287 && face === 23)) {
+    if (FACE_OVERRIDE_HELMET.has(face)) { head = 0; faceHead = 0; }
+    else if (!FACE_UNDER_HAIR.has(face)) face = 0;
+  }
+  if (head > 0 && faceHead > 0 && USE_ALT_FACE_HEAD_DRAW.has(head)) {
+    faceHead = ALT_FACE_HEAD[faceHead] || faceHead;
+  }
+  return { face, faceMask, faceFlower, faceHead, head };
+}
+
+/** 头层拆画计划（渲染侧消费）：faceHead/underHair(face)/头层面罩任一在身且非
+ *  HidesHead 头盔 → 纸娃娃拆出发层（skipHair 语义）,在 皮肤脸 → [脸饰] → 发 → 头甲
+ *  的原版序（DrawPlayer_21_Head_TheFace :2574 → hair :2422 → helmet :2143+）中插层。
+ *  skipFace = faceHead 在身 → TheFace 分支二（:2592）整支替代皮肤脸+眼（:2577 flag 门
+ *  已由 split 前置排除）;hairHidden = OverrideHelmet 命中 → PreventHairDraw 同集全隐 */
+export interface FaceLayerSplitPlan extends FaceLayerRoute {
+  split: boolean; skipFace: boolean; hairHidden: boolean;
+  /** 面罩 22 走头层支（head ∈ DrawFaceMaskUnderHeadLayer） */
+  maskUnderHead: boolean;
+}
+
+export function faceLayerSplitPlan(
+  ad: { face: number; faceMask: number; faceFlower: number; faceHead: number },
+  headIn: number, transformed = false,
+): FaceLayerSplitPlan {
+  const r = resolveFaceLayers(ad, headIn, transformed);
+  const maskUnderHead = r.faceMask > 0 && r.head > 0 && FACE_MASK_UNDER_HEAD_LAYER.has(r.head);
+  const split = r.head >= 0 && !HEAD_HIDES_HEAD.has(r.head)
+    && (r.faceHead > 0 || FACE_UNDER_HAIR.has(r.face) || maskUnderHead);
+  return {
+    ...r, split,
+    skipFace: r.faceHead > 0 && !HEAD_HIDES_HEAD.has(r.head),
+    hairHidden: r.head === 0 && headIn > 0,
+    maskUnderHead,
+  };
+}
 
 /** Shoe.Sets.MaleToFemaleID（ArmorIDs.cs:1841：25 玻璃拖鞋男 → 26 女）——
  *  UpdateVisibleAccessory :36496 `!Male` 换档;本仓无性别字段恒男档,登记 */
@@ -140,14 +232,10 @@ export const HELMET_DRAW_OFFSET: Record<number, [number, number]> = {
 
 /** Head.Sets.PreventFaceMaskDraw ∪ DrawFaceMaskUnderHeadLayer（★1457 ArmorIDs.cs:24/:20；
  *  1456 :24/:20 增量 = PreventFaceMaskDraw −102、DrawFaceMaskUnderHeadLayer +203，
- *  并集 70 元不变但成员换血）——faceMask 层头盔隐没门（PlayerDrawLayers.cs:2819-2821） */
-export const FACE_MASK_HELMET_HIDE = new Set([
-  27, 20, 107, 108, 127, 162, 168, 118, 123, 164, 155, 150, 137, 186, 125,
-  136, 153, 154, 169, 148, 165, 151, 173, 146, 147, 175, 193, 271, 268, 260, 221,
-  236, 208, 209, 207, 187, 192, 188, 276, 270, 58, 77, 142, 152, 241, 210, 22, 196,
-  26, 51, 289, 81, 92, 106, 291, 10, 12, 178, 198, 267, 279, 160, 52, 53, 71, 55,
-  166, 167, 278, 203,
-]);
+ *  并集 70 元不变但成员换血）——faceMask 层头盔隐没门（PlayerDrawLayers.cs:2819-2821）。
+ *  2026-09-03 四层路由批起由上方两分集派生（单一真源;前层门对 UNDER_HEAD_LAYER 头
+ *  改走头层拆画,见 resolveFaceLayers/faceLayerSplitPlan） */
+export const FACE_MASK_HELMET_HIDE = new Set([...PREVENT_FACE_MASK_DRAW, ...FACE_MASK_UNDER_HEAD_LAYER]);
 
 /** Head.Sets.PreventFaceFlowerDraw（ArmorIDs.cs:24）——faceFlower 层头盔隐没门
  *  （PlayerDrawLayers.cs:2836-2838） */

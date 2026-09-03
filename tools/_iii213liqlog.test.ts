@@ -117,8 +117,23 @@ const le16 = (p: string): Uint16Array => {
       writeFileSync(`${OUT}/jdump1/K.act-${rel}`, act);
       writeFileSync(`${OUT}/jdump1/K.wal-${rel}`, wal);
       writeFileSync(`${OUT}/jdump1/K.liq-${rel}`, liq);
-      writeFileSync(`${OUT}/jdump1/K.lty`, lt);
-      writeFileSync(`${OUT}/jdump1/K.inact`, ia);
+      writeFileSync(`${OUT}/jdump1/K.lty-${rel}`, lt);
+      writeFileSync(`${OUT}/jdump1/K.inact-${rel}`, ia);
+      // ★IIIII213 扩展通道：fx/fy/wire-red/pnt/cbt（与 rig 扩展同口径）
+      const fx = Buffer.alloc(n2 * 2), fy = Buffer.alloc(n2 * 2);
+      const wr = Buffer.alloc(n2), pn = Buffer.alloc(n2), cb = Buffer.alloc(n2);
+      for (let q = 0; q < n2; q++) {
+        fx[q * 2] = s.frameX[q]! & 0xff; fx[q * 2 + 1] = (s.frameX[q]! >> 8) & 0xff;
+        fy[q * 2] = s.frameY[q]! & 0xff; fy[q * 2 + 1] = (s.frameY[q]! >> 8) & 0xff;
+        wr[q] = s.wire[q]! & 1;
+        pn[q] = s.paint[q]!;
+        cb[q] = ((s.coat[q]! & 2 ? 1 : 0) | (s.coat[q]! & 4 ? 2 : 0) | (s.coat[q]! & 8 ? 4 : 0) | (s.coat[q]! & 16 ? 8 : 0));
+      }
+      writeFileSync(`${OUT}/jdump1/K.fx-${rel}`, fx);
+      writeFileSync(`${OUT}/jdump1/K.fy-${rel}`, fy);
+      writeFileSync(`${OUT}/jdump1/K.wire-${rel}`, wr);
+      writeFileSync(`${OUT}/jdump1/K.pnt-${rel}`, pn);
+      writeFileSync(`${OUT}/jdump1/K.cbt-${rel}`, cb);
       console.log(`[i213] dump at rel=${rel} nl=${nl} nb=${nb}`);
     }
     if (EFROM > 0 && rel >= EFROM && rel <= ETO) {

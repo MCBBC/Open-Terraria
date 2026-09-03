@@ -2313,10 +2313,14 @@ export class Enemy extends Entity {
           if (this.shimmeredT > 0) this.shimmeredT = 0;   // 弹体位用后清零,防逐拍重入
         }
       } else if (this.shimmerT > 0) {
-        // 离池衰减（:92484-92500）：shimmerTransparency -0.001/t（本仓 shimmerT
-        // 为其 ×100 计数 → -0.1/t，90 → 0 需 900t；justHit -0.1、buffImmune[353]
-        // -0.015 两加速项本仓无对应态不进）。曾 -1/t（快 10 倍，离池即近乎清零）
-        this.shimmerT = Math.max(0, this.shimmerT - 0.1);
+        // 离池衰减（NPC.cs:92646-62 两独立位同 tick 叠加，先 justHit 后免疫/常规档）：
+        // justHit −0.1 位（×100 计数 −10）+ buffImmune[353]（=NPCID.Sets.
+        // ShimmerImmunity，:17870 经 stats/Shimmer.isNpcShimmerImmune）−0.015 位
+        // （−1.5）else 常规 −0.001 位（−0.1）。本仓 shimmerT=transparency×100。
+        // 曾单档 −0.1（快 10 倍伪影）→ 2026-09-03 两 lanes 1:1 补齐
+        let dec = isNpcShimmerImmune(this.vanillaId ?? -1) ? 1.5 : 0.1;
+        if (this.justHit) dec += 10;
+        this.shimmerT = Math.max(0, this.shimmerT - dec);
       }
     }
     // onFire DoT（NPC.cs:92616-92630:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
@@ -3321,6 +3325,9 @@ export class Enemy extends Entity {
         if (sf.getGoodWorld) num11 -= 120;
         if (roll(num11) === 0 && player && !player.dead && this.canSeePlayer(stL, player)) {
           this.spawnHostileProj(game, this.cx, this.cy, this.facing * 12, 0, 20, 1073);
+          // 出膛音（Projectile.cs:56284-56287 ai[1]==0 首拍）:弹 1073 → Item17——
+          // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
+          game.playSfxWav?.('Item_17', 1, this.cx, this.cy);
         }
       } else if (a1 === 364 || a1 === 1104 || a1 === 365 || a1 === 1105 || a1 === 366 || a1 === 1106) {
         // ---- 金属矿史莱姆强化段（S9，NPC.cs:61107-61178 全段，2026-08-19）：
@@ -5165,6 +5172,10 @@ export class Enemy extends Entity {
             const ox2 = mx + vx * (vidR === 214 ? 2.5 : 1);
             const oy2 = my + vy * (vidR === 214 ? 2.5 : 1);
             this.spawnHostileProj(game, ox2, oy2, vx, vy, dmgF, proj);
+            // 出膛音（Projectile.cs:56221-56225 / :56232-56235 ai[1]==0 首拍）:
+            // 弹 438（382 激光枪手）→ Item12、弹 592（520 火星行者）→ Item12——
+            // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
+            if (proj === 438 || proj === 592) game.playSfxWav?.('Item_12', 1, mx, my);
           }
           // 姿态分档（cs:59991-60013）
           if (Math.abs(ty) > Math.abs(tx) * 2) this.ai2 = ty > 0 ? 1 : 5;

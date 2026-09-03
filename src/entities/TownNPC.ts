@@ -11,7 +11,7 @@ import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Do
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNpcs';
-import { isNpcTownShimmerable, findShimmerFreeSpot } from '../stats/Shimmer';
+import { isNpcTownShimmerable, isNpcShimmerImmune, findShimmerFreeSpot } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import { getAttackDamageForTownNPC, mainDifficulty } from '../stats/ScaleStats';
 // ★蓝队 F2：互殴首击 Main.DamageVar 单源（Main.cs:67097 ±15% 31 档 + 银行家舍入）
@@ -244,21 +244,28 @@ export const SHIMMER_ST_RISE = 0.89;      // 城镇转化置 0.89（:92705，Get
 export const SHIMMER_ST_DECAY_RISE = 1 / 60;  // ai[0]=25 上升态 −1/60/t（:53770）
 export const SHIMMER_ST_DECAY_HIT = 0.1;      // justHit −0.1/t（:92650）
 export const SHIMMER_ST_DECAY_IDLE = 0.001;   // buffImmune[353] else 支 −0.001/t（:92658）
+export const SHIMMER_ST_DECAY_IMMUNE = 0.015; // buffImmune[353] 免疫快档 −0.015/t（:92652-54）
 
 /** shimmerTransparency 每 tick 推进（赋值时序 NPC.cs:92631-46 浸位 + :92646-62
  *  衰减位 + AI 上升块 ：53765-76）：
  *  浸微光 +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92706-10），
- *  上升态内 shimmering 恒 false，st 走 −1/60 衰减）；非浸按 justHit/rise/常规
- *  三档衰减，下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate 微光块）。
- *  ★登记未接：原版非浸段另有 buffImmune[353] → −0.015 快档（:92652-54，与
- *  justHit 档可同 tick 叠加，顺序先 −0.1 再 −0.015）——本仓无 buffImmune 载体，
- *  缺席即恒走 else −0.001；接入需 buffImmune 位面另批 */
+ *  上升态内 shimmering 恒 false，st 走 −1/60 衰减）；非浸两独立位同 tick 叠加：
+ *  justHit −0.1 位 + buffImmune[353] −0.015 / else −0.001 位（:92650-58，先减
+ *  justHit 再走免疫/常规档），下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate
+ *  微光块）。★immune 载体 = NPCID.Sets.ShimmerImmunity（:17870，经
+ *  stats/Shimmer.isNpcShimmerImmune）——2026-09-03 登记未接清偿（旧「无载体恒走
+ *  else −0.001、justHit 档独占」单档模型退役，justHit 档现叠加常规 −0.001 伴位） */
 export function shimmerTransparencyNext(
   st: number, shimmering: boolean, justHit: boolean, rise: boolean,
+  shimmerImmune = false,
 ): number {
   if (shimmering && !rise) return Math.min(1, st + SHIMMER_ST_RAMP);
-  const rate = justHit ? SHIMMER_ST_DECAY_HIT : rise ? SHIMMER_ST_DECAY_RISE : SHIMMER_ST_DECAY_IDLE;
-  return Math.max(0, st - rate);
+  let st2 = st;
+  if (justHit) st2 -= SHIMMER_ST_DECAY_HIT;                    // :92650
+  if (rise) st2 -= SHIMMER_ST_DECAY_RISE;                      // −1/60 AI 上升块并入（运行时 rise 支由 shimmerRiseUpdate 独立推进）
+  else if (shimmerImmune) st2 -= SHIMMER_ST_DECAY_IMMUNE;      // :92652-54
+  else st2 -= SHIMMER_ST_DECAY_IDLE;                           // :92656-58
+  return Math.max(0, st2);
 }
 
 /** 消费①：本体渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent
@@ -1623,6 +1630,7 @@ export class TownNPC extends Entity {
     if (!this.shimmerRise) {
       this.shimmerTransparency = shimmerTransparencyNext(
         this.shimmerTransparency, inShimmer, justHit, false,
+        isNpcShimmerImmune(this.vanillaId ?? -1),
       );
       if (isNpcTownShimmerable(this.vanillaId) && inShimmer
         && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {

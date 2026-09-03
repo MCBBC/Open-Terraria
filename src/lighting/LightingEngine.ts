@@ -166,3 +166,56 @@ export class LightingEngine {
     return [this.r[i], this.g[i], this.b[i]];
   }
 }
+
+// ---- Utils.PlotLine / PlotTileLine 一比一(Utils.cs:2359-2415/:2460-2487;2026-09-03
+//      荧光体 5107 手持光接线引入,玩家侧消费见 Player.emitMagiluminescenceLight) ----
+
+/** Utils.PlotLine(Utils.cs:2359-2415):Bresenham 整数步进——陡线(x/y 斜率)先 Swap,
+ *  终点格【不落】(`i != x1` 前闭后开);jump=false 时斜步双落点(中途格也 plot)。
+ *  plot 返回 false 即中断并整线返回 false(调用方以此做界外/实体截断) */
+export function plotLine(x0: number, y0: number, x1: number, y1: number,
+  plot: (x: number, y: number) => boolean, jump = true): boolean {
+  if (x0 === x1 && y0 === y1) return plot(x0, y0);
+  const steep = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+  if (steep) { [x0, y0, x1, y1] = [y0, x0, y1, x1]; }
+  const num = Math.abs(x1 - x0);
+  const num2 = Math.abs(y1 - y0);
+  let num3 = Math.trunc(num / 2);
+  let num4 = y0;
+  const num5 = x0 < x1 ? 1 : -1;
+  const num6 = y0 < y1 ? 1 : -1;
+  for (let i = x0; i !== x1; i += num5) {
+    if (!plot(steep ? num4 : i, steep ? i : num4)) return false;
+    num3 -= num2;
+    if (num3 >= 0) continue;
+    num4 += num6;
+    if (!jump && !plot(steep ? num4 : i, steep ? i : num4)) return false;
+    num3 += num;
+  }
+  return true;
+}
+
+/** Utils.PlotTileLine(Utils.cs:2460-2487):宽 width(世界像素)的"粗线"——沿线方向
+ *  单位向量取垂直向量 ×(width/2) 得 ± 平行偏移(只在起点算一次,全段共用),对中线
+ *  Bresenham 逐点再画 minOffset→maxOffset 的垂直短线(jump=false)。start/end 为
+ *  世界像素坐标,格坐标换算 = Math.trunc(px/16)(Vector2.ToTileCoordinates 截断语义)。
+ *  ★零长线退化保真:start==end(velocity==0 臂)时原版 normalize=0/0=NaN →
+ *  (int)NaN = 0x80000000 不定值偏移 → 内层垂直短线落界外 → CastLightOpen 界外
+ *  返回 false 整臂无光(荧光体站定帧只剩 Left→Right 横贯臂布光,原版即此行为) */
+export function plotTileLine(sx: number, sy: number, ex: number, ey: number,
+  width: number, plot: (x: number, y: number) => boolean): boolean {
+  const half = width / 2;
+  const dx = ex - sx, dy = ey - sy;
+  const len = Math.hypot(dx, dy);
+  const ux = dx / len, uy = dy / len;       // len==0 → 0/0=NaN(与 C# float 除零同语义)
+  const px = -uy * half, py = ux * half;    // ±val3(NaN 传播)
+  const toTile = (v: number): number => (Number.isNaN(v) ? -2147483648 : Math.trunc(v / 16));
+  const mx = toTile(sx - px), my = toTile(sy - py);   // start−val3
+  const nx = toTile(sx + px), ny = toTile(sy + py);   // start+val3
+  const x0 = toTile(sx), y0 = toTile(sy);
+  const x1 = toTile(ex), y1 = toTile(ey);
+  const offMinX = mx - x0, offMinY = my - y0;
+  const offMaxX = nx - x0, offMaxY = ny - y0;
+  return plotLine(x0, y0, x1, y1, (x, y) =>
+    plotLine(x + offMinX, y + offMinY, x + offMaxX, y + offMaxY, plot, false));
+}

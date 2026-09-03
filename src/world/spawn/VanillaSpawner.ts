@@ -1050,10 +1050,11 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 1.3);
       maxSpawns = Math.floor(maxSpawns * 0.7);
     }
-    // L745-749（水蜡烛段之后、clamp 之前）：isNearFairy ×1.2 / ×0.8——跟随态仙女
-    //  在玩家 sWidth 内时刷怪更快。本仓用 Game 喂入的 fairyHelpfulActive（场上存在
-    //  ai[2]>1 的跟随仙女）近似"近旁"，距离窗未裁剪（登记近似表）
-    if (this.fairyHelpfulActive) {
+    // L745-749（水蜡烛段之后、clamp 之前）：player.isNearFairy() ×1.2 / ×0.8——任一
+    //  active 仙女（583/584/585，【无】ai[2] 条件）距玩家 Center < NPC.sWidth（=1920
+    //  常量，Player.cs:54494-54506 + NPC.cs:6791）。距离窗判定在 Game 侧每周期喂入
+    //  isNearFairy（与 AnyHelpfulFairies 的跟随态门是两个不同谓词，勿合并）
+    if (this.isNearFairy) {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
     }
@@ -3409,9 +3410,15 @@ export class VanillaSpawner {
    *  1/fireFlyMultiple 独立掷 SpawnNPC）——spawn() 单返回值只交付主只，附加以
    *  像素偏移入队，Game.trySpawnEnemy 落位段消费（消费后清空） */
   pendingCritterExtras: Array<{ npc: number; dx: number; dy: number; ax?: number; ay?: number }> = [];
-  /** NPC.AnyHelpfulFairies（:90885）：场上存在 ai[2]>1 的跟随态仙女 583/584/585
-   *  ——Game 每周期喂入（spawner 无实体桶访问） */
+  /** NPC.AnyHelpfulFairies（NPC.cs:90954-90964）：场上存在 ai[2]>1 的跟随态仙女
+   *  583/584/585——Game 每周期喂入（spawner 无实体桶访问）。消费点 =
+   *  CheckToSpawnUndergroundFairy（NPC.cs:5843，本仓 :556 checkToSpawnUndergroundFairy） */
   fairyHelpfulActive = false;
+  /** Player.isNearFairy（Player.cs:54494-54506）：任一 active 仙女 583/584/585 距玩家
+   *  Center < NPC.sWidth（NPC.cs:6791 = 常量 1920，非实际屏宽；无 ai 态条件——野生
+   *  绕圈仙女同样算）——SpawnNPC :745-749 刷怪率窗（×1.2/×0.8）消费。Game 每周期喂入
+   *  （窗口判定在 Game 侧做：spawner 无实体桶访问；isNearFairyWindow 下方共用谓词） */
+  isNearFairy = false;
   private spawnFrog(rng: RNG): Enemy | null {
     const x = this.spawnTileX * TILE + 8;
     const y = this.spawnTileY * TILE;
@@ -3626,4 +3633,29 @@ export class VanillaSpawner {
     }
     return this.spawnAnNPC(rng);
   }
+}
+
+/** Player.isNearFairy 距离窗（Player.cs:54494-54506）：任一 active 仙女（原版 type
+ *  583/584/585——本仓 vanillaId/critterVid 同域）满足
+ *  `Vector2.Distance(npc.Center, player.Center) < NPC.sWidth` 即真。
+ *  NPC.sWidth = 1920 是【常量】（NPC.cs:6791 `public static int sWidth => 1920`），
+ *  非实际屏宽；比较严格小于；无 ai[2] 条件（与 AnyHelpfulFairies :90954 的跟随态门
+ *  是两个谓词）。原版 npcsFoundForCheckActive[583..585] 前置门只是同表跳空优化，
+ *  谓词语义由本函数完整承载。Game 每周期对 enemies/critters 两桶各调一次后 OR。
+ *  vid 抽取参数化：enemies 桶读 vanillaId、critters 桶读 Game.critterVid（vanillaId
+ *  ?? def.npc）。行为锁定：tests/spawn-fairy-near-window.test.ts */
+export const FAIRY_NEAR_RADIUS = 1920;
+
+export function isNearFairyWindow(
+  entries: Iterable<{ dead?: boolean; cx: number; cy: number }>,
+  px: number, py: number,
+  vid: (e: { dead?: boolean; cx: number; cy: number }) => number,
+): boolean {
+  for (const e of entries) {
+    if (e.dead) continue;
+    const v = vid(e);
+    if (v !== 583 && v !== 584 && v !== 585) continue;
+    if (Math.hypot(e.cx - px, e.cy - py) < FAIRY_NEAR_RADIUS) return true;
+  }
+  return false;
 }

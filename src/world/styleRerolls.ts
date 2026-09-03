@@ -58,13 +58,13 @@ export const TREE_AREA_BY_GROUND_TILE: Record<number, number> = {
 export const FOREST_GROUND_VANILLA_TILES = [2, 477];
 
 /** oceanDepths(WorldGen.cs:10990-10998)：y ≤ oceanLevel 且 x < beachDistance 或
- *  x > maxTilesX−beachDistance = 深海滩。beachDistance=Main.beachDistance（世界宽
- *  相关小世界 380？——WorldGen.beachDistance 在生成器里赋值，本仓近似 maxTilesX/20
- *  与海洋生成段同量级；仅影响「沙滩上树下 reroll 归海组」一档，登记近似）
+ *  x > maxTilesX−beachDistance = 深海滩。beachDistance = WorldGen.beachDistance
+ *  = 静态常量 380（WorldGen.cs:4071 `public static readonly int beachDistance = 380`）
+ *  ——旧 maxTilesX/20 近似退役（2026-09-03 三档世界宽全偏，小世界 210 错近 45%）。
  *  oceanLevel = surface 液面 ≈ world.groundLevel（Y 帧线）。 */
 export function oceanDepths(x: number, y: number, maxTilesX: number, oceanLevel: number): boolean {
   if (y > oceanLevel) return false;
-  const beach = Math.max(80, Math.round(maxTilesX / 20)); // beachDistance 近似（登记）
+  const beach = 380;
   return x < beach || x > maxTilesX - beach;
 }
 

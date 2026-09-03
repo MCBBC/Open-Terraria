@@ -799,7 +799,7 @@ export class VanillaDust {
       case 68: case 70: return d.noGravity ? { rgb: 1, a: 0 } : { rgb: num, a: num };   // :2692-2695 noGravity 门
       case 254: case 255: return { rgb: 1, a: 0 };                              // :2516-2518 (255,255,255,0)
       case 235: return { rgb: 1, a: 0 };                                        // :2562-2564 (255,255,255,0)
-      case 258: return { rgb: 0, a: 0, rgbv: [150 / 255, 50 / 255, 50 / 255] }; // :2519-2521 (150,50,50,0) 红主加性——rgbv 实装(原版/本仓均无字面发射方,dormant 保留通道)
+      case 258: return { rgb: 0, a: 0, rgbv: [150 / 255, 50 / 255, 50 / 255] }; // :2519-2521 (150,50,50,0) 红主加性——rgbv 实装。★发射方已定谳（2026-09-03）：原版无字面 258，经【变量】生成，唯二发射面=熔岩苔藓族的破坏尘——①方块面 WorldGen.KillTile_MakeTileDust(:67217) 苔藓分支 :67609-67612（Main.tileMoss[type] 且 type==381 LavaMoss→258，TileID.cs:1199）尾段标准盒 NewDust(i*16,j*16,16,16,num)（:69699 缺省支，速 0/α0/scale1），尘量=KillTile_GetTileDustAmount(:67127) 缺省档 破坏 10/锤击 fail 3，调用环 KillTile :64223 / ReplaceTile :63084；②墙面 WorldGen.KillWall_MakeWallDust(:61844) wall==341 LavaMossBlockWall→258（:62314-62317，WallID.cs:751）尾段 NewDust(i*16,j*16,16,16,num)（:62654），量=KillWall :60886-60892 档 10/3。运行时特性行 Dust.cs:481-485（noGravity=true+scale+=0.015 渐大）。本仓两面均未按原版尘型接线（破块/破墙尘面=mapColor 粒子制，Game.breakTile :18180 族+KillWall 近似 :19365；苔族尘型 93-97/258/299/300/301/305/267 整族 dormant；发射体 v_381_lava_moss tiles.ts:201 / w341 tiles.ts:1356 已实装）——保持 dormant 保留通道，接线须整族一起（含 hitTiles 面同口径）
       case 262: case 286: case 138: case 325:                                   // :2565-2568 与 86-91 同句 !noLight 门
         if (!d.noLight) return { rgb: 1, a: 0 };
         return { rgb: num, a: num };

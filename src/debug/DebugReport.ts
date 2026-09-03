@@ -60,6 +60,11 @@ export interface DebugReportOptions {
   /** 行为录制尾段（F5 短按注入 recorder.snapshotTail(2000)）：时序因果事件日志
    *  最近 2000 条——出问题后再按 F5 也能拿到事发前的输入/方块/生死序列 */
   behaviorTail?: Array<{ t: number; k: string; d: unknown }>;
+  /** 音效录制尾段（F5 短按注入 audioRec.tail(800,200)）：sfx/bgm 分列的播放
+   *  序列时间线——错误音效排查。sfx 事件类 wav/out/syn/loop/loopX/loopF/cue
+   *  （d.f=轮换后 wav 文件名,d.o=结局码,d.n=合成兜底逻辑名）；bgm 事件类
+   *  sel/start/stop/fail/mute（d.id=MUSIC 曲目 id,d.p=前曲） */
+  audioTail?: { sfx: Array<{ t: number; k: string; d: unknown }> | null; bgm: Array<{ t: number; k: string; d: unknown }> | null } | null;
   /** 动画帧捕获轻量导出（聚合账本+异常环；快照/截图仅长按录制的 dump.tileFrames 有） */
   tileFrames?: unknown;
 }
@@ -764,6 +769,8 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     warnings: warns.slice(-50).map((w) => ({ t: w.t, msg: w.msg })),
     // 行为录制尾段（F5 短按注入；时序因果日志 = 输入/方块/生死/掉落/伤害/公告）
     behaviorTail: opts.behaviorTail ?? null,
+    // 音效录制尾段（F5 短按注入；sfx/bgm 分列播放序列——错误音效/BGM 排查时间线）
+    audioTail: opts.audioTail ?? null,
     // 动画帧捕获（被动聚合层；长按录制窗另并入 behavior dump.tileFrames 全量）
     tileFrames: opts.tileFrames ?? null,
     // 加载分段时间线（load.* performance.mark 族 + worker 检查点；2026-08-31 仪器）

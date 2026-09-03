@@ -19,7 +19,7 @@ import { TILE } from '../core/constants';
 import { blueLightningSmallLongFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileData } from '../data/vanillaProjectiles';
-import { canHit } from '../physics/LineOfSight';
+import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';
@@ -250,18 +250,36 @@ interface HitTarget {
   hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number) => boolean;
 }
 
+/** CanHitWithMeleeWeapon LOS 段单源（Projectile.cs:12420-12425）：A 段整盒
+ *  Collision.CanHit(Main.player[owner] ↔ ent) + B/C/D 手位三射线 CanHitLine——
+ *  与 Player.CanHit(Entity)（Player.cs:42857-42865）字面同式（宿主换成 owner 玩家）
+ *  ⇒ 整链复用 LineOfSight.playerCanHitEntity（int÷/f32 语义单源在彼处,勿重刻）。
+ *  world.store 缺位（测试桩/工具面）退化放行——VolcanoBlastProj 既有可选钩约定。 */
+function ownerMeleeWeaponLOS(
+  game: GameHooks,
+): (e: { x: number; y: number; w: number; h: number }) => boolean {
+  const st = ((game.world as unknown as { store?: never } | undefined)?.store)
+    ?? (game as unknown as { store?: never }).store;
+  if (!st) return () => true;
+  return (e) => playerCanHitEntity(st, game.player as never, e);
+}
+
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。
  *  cooldown<0 = 每敌一次（localNPCHitCooldown −1）；返回是否命中过。
- *  gate：ownerHitCheck 距离门（CanHitWithMeleeWeapon :12415-12417 距离段）+
- *  usesOwnerMeleeHitCD 共享命中表（Damage_PVE :12596 门 + StrikeNPC :14343 写——
- *  与玩家挥击弧共用 per-enemy 命中表，同一挥击内弧+弹不双结算）。 */
+ *  gate：ownerHitCheck 门（CanHitWithMeleeWeapon :12415 距离段 + :12420-12425
+ *  LOS 四探针段,los 由调用侧经 ownerMeleeWeaponLOS 注入;noTileCollide 目标整门
+ *  豁免——:12657 字面）+ usesOwnerMeleeHitCD 共享命中表（Damage_PVE :12596 门 +
+ *  StrikeNPC :14343 写——与玩家挥击弧共用 per-enemy 命中表，同一挥击内弧+弹不
+ *  双结算）。 */
 export function dealContacts(
   self: { x: number; y: number; w: number; h: number; cx: number; cy: number; damage: number; knockback: number; armorPen: number; critChance: number; projId: number },
   game: GameHooks,
   cd: HitCdImpl | IdStaticSharedTable,
   cooldown: number,
   onHit?: (t: HitTarget) => void,
-  gate?: { ownerCx: number; ownerCy: number; maxDist: number; sharedHits?: Set<number> },
+  gate?: { ownerCx: number; ownerCy: number; maxDist: number; sharedHits?: Set<number>;
+    /** CanHitWithMeleeWeapon LOS 段（:12420-12425）——store/玩家盒在调用侧 */
+    los?: (e: { x: number; y: number; w: number; h: number }) => boolean },
   /** Enemy.hurt pierce 形参透传（缺省 0 维持全既有调用面）：1 = maxPenetrate 单发
    *  flag3——无视免疫帧且命中不设帧（Projectile.cs:11903-11907）。叶弹 227 台账 L3
    *  清偿批同段引用（ChloroLeafCrystalProj.ts） */
@@ -294,10 +312,21 @@ export function dealContacts(
     if (jellyDontTake && !zapJelly) continue;
     if (!playerCanHitEnemy(ent, game, self.projId)) continue;
     if (gate) {
-      // ownerHitCheckDistance：Distance(ent.Center) > N → 不命中（:12416-12418）
-      if (Math.hypot(e.x + e.w / 2 - gate.ownerCx, e.y + e.h / 2 - gate.ownerCy) > gate.maxDist) continue;
-      // usesOwnerMeleeHitCD：玩家近战命中表已记该敌 → 本弹跳过（:12596 flag2=false）
-      if (gate.sharedHits?.has(e.id)) continue;
+      // ★ownerHitCheck 整门（Damage_PVE_Inner :12657 `flag4 || (!targetNPC.noTileCollide
+      //  && ownerHitCheck && !CanHitWithMeleeWeapon(targetNPC))`）——noTileCollide 目标
+      //  距离+LOS 两段【全豁免】;共享命中表门在外环（:12596）,不受此豁免
+      if ((e as unknown as { noTileCollide?: boolean }).noTileCollide === true) {
+        // usesOwnerMeleeHitCD：玩家近战命中表已记该敌 → 本弹跳过（:12596 flag2=false）
+        if (gate.sharedHits?.has(e.id)) continue;
+      } else {
+        // 距离段（CanHitWithMeleeWeapon :12417-12419）：Distance(ent.Center) > N → 不命中
+        if (Math.hypot(e.x + e.w / 2 - gate.ownerCx, e.y + e.h / 2 - gate.ownerCy) > gate.maxDist) continue;
+        // LOS 段（:12420-12425）：A 段整盒 Collision.CanHit + B/C/D 手位三射线
+        // CanHitLine——四探针任一通过即放行（Player.CanHit(Entity) :42857-65 字面同式）
+        if (gate.los && !gate.los(e)) continue;
+        // usesOwnerMeleeHitCD：玩家近战命中表已记该敌 → 本弹跳过（:12596 flag2=false）
+        if (gate.sharedHits?.has(e.id)) continue;
+      }
     }
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!cd.ready(e.id, cooldown)) continue;
@@ -462,11 +491,15 @@ export class ChloroClaymoreBlade extends Entity {
       }
     }
     // ---- 命中（usesLocalNPCImmunity + cooldown −1 :10550-10556）----
-    // ownerHitCheck + ownerHitCheckDistance=300（:10554-10555）→ 只判 300px 内目标
-    // （CanHitWithMeleeWeapon :12415 距离段；LOS 探针四支本仓登记近似——玩家本体
-    // 挥击亦无 LOS 门）；usesOwnerMeleeHitCD（:10556）→ 与玩家挥击共享命中表
+    // ownerHitCheck + ownerHitCheckDistance=300（:10554-10555）+ LOS 四探针段
+    // （CanHitWithMeleeWeapon :12415-12425——距离+LOS 双段经 dealContacts gate,
+    // noTileCollide 目标整门豁免 :12657）;usesOwnerMeleeHitCD（:10556）→ 与玩家
+    // 挥击共享命中表。★观测面注：本弹伤害盒=玩家中心 16×16（Center=RRP−velocity
+    // :42757）——敌怪须与玩家盒重叠才进结算,此时四探针几何上恒通（墙无法插入
+    // 玩家自身盒内）,LOS 段对 1126 实际不可达,接线为 1:1 保真非观测差异
     dealContacts(this, game, this.hitCd, -1, undefined,
-      { ownerCx: p.cx, ownerCy: p.cy, maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined });
+      { ownerCx: p.cx, ownerCy: p.cy, maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined,
+        los: ownerMeleeWeaponLOS(game) });
     // CutTiles（aiStyle190||191 线支 :15341-15343）：PlotTileLine(Center+v(rot−π/4)*60*scale,
     // Center+v(rot+π/4)*60*scale, width=60×scale)——★A⑤ 转正：带状全扫（cutThickTileLine）
     // 替换旧"端+中三采样窗"近似,中段草再不漏砍
@@ -708,8 +741,9 @@ export class ChloroSporeCloud extends Entity {
  *  timeLeft=5 → Update(:17308-17312) 5 拍即亡——ai[0]>20 的 Kill 是永不可达死代码
  *  （★A④ 勘误：曾按该死代码活到 21+ 拍=3 倍寿命窗）。usesLocalNPCImmunity + cooldown −1
  *  （每敌一次）;**ownerHitCheck=true（:3358）**→ Damage_PVE_Inner 走 CanHitWithMeleeWeapon
- *  :11896 门 = Distance(owner) > ownerHitCheckDistance(缺省 1000f,:306/:701) 即不结算
- *  ——隔墙/远端敌不吃大爆盒（★A④ 主缺口；LOS 四探针同 1126 登记近似只取距离段）。 */
+ *  :12415 整门 = 距离段（Distance(owner) > ownerHitCheckDistance(缺省 1000f,:306/:701)
+ *  即不结算）+ LOS 四探针段（:12420-12425,playerCanHitEntity 承载）——隔墙/远端敌
+ *  不吃大爆盒（★A④ 主缺口+LOS 补齐批;noTileCollide 目标整门豁免 :12657）。 */
 export class ChloroBladeSlam extends Entity {
   damage: number;
   knockback = 0;
@@ -731,11 +765,12 @@ export class ChloroBladeSlam extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    // ownerHitCheckDistance=1000 距离段门（CanHitWithMeleeWeapon :12416-12418;usesOwnerMeleeHitCD
-    // 未开 → 不吃玩家挥击共享表,仅独立 local 免疫）
+    // ownerHitCheck（:3358）整门 = 距离 1000 段（CanHitWithMeleeWeapon :12417-12419）
+    // + LOS 四探针段（:12420-12425,playerCanHitEntity 承载）;usesOwnerMeleeHitCD
+    // 未开 → 不吃玩家挥击共享表,仅独立 local 免疫
     const p = game.player as unknown as { cx?: number; cy?: number };
     const gate = (p && p.cx != null && p.cy != null)
-      ? { ownerCx: p.cx, ownerCy: p.cy, maxDist: 1000 } : undefined;
+      ? { ownerCx: p.cx, ownerCy: p.cy, maxDist: 1000, los: ownerMeleeWeaponLOS(game) } : undefined;
     cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（Damage() 内旁路先于结算,:12519/:15276;排除表无 1129）
     dealContacts(this, game, this.hitCd, -1, undefined, gate);
     if (this.t === 1) {
@@ -967,8 +1002,8 @@ export class StormLightning extends Entity {
   private boltColor: [number, number, number] = [1, 1, 1];
   private visualT = 0;
   /** 尸检寿命：1117=45（Spawn_StormLightning num=45;★R35 勘误:曾误用宽度 num2=12 当
-   *  寿命=闪 4 倍快——num2 是 Prepare 的 width 参）/ 1122=16（Spawn_ArcLightning num2=16,
-   *  MovementVector.Y==1 ×3 档登记未接） */
+   *  寿命=闪 4 倍快——num2 是 Prepare 的 width 参）/ 1122=16（Spawn_ArcLightning
+   *  num2=16;owner.slowMagicUse → ×3=48 档在 Kill 帧实读,见 doKill） */
   private visualTotal = 16;
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
@@ -998,7 +1033,7 @@ export class StormLightning extends Entity {
       : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
     // ★闪电之击专项 R35 再勘误：bolt 视觉余命=Prepare 的 lifeTimeTotal 参——
     //   1117=Spawn_StormLightning num=45(:1031)/1122=Spawn_ArcLightning num2=16(:1259,
-    //   MovementVector.Y==1 ×3 档登记)。曾误读宽度 num2=12 当寿命=闪 4 倍快
+    //   slowMagic ×3 档 Kill 帧实读)。曾误读宽度 num2=12 当寿命=闪 4 倍快
     this.visualTotal = projId === 1122 ? 16 : 45;   // 1091 世界落雷同 Spawn_StormLightning 档
   }
 
@@ -1267,7 +1302,19 @@ export class StormLightning extends Entity {
     }
     // ---- 编排视觉（Spawn_ArcLightning P57:1245-1345）----
     this.emitBoltFx(game, bolt);
-    // 弹本体死,bolt 视觉余命 visualTotal（1117=45/1122=16）
+    // 1122 ×3 档（Spawn_ArcLightning，ParticleOrchestrator.cs:1249-1256）：
+    //   `bool num = settings.MovementVector.Y == 1f; int num2 = 16; if (num) num2 *= 3;`
+    //   MovementVector.Y = Kill 帧 `player.slowMagicUse.ToInt()`（Projectile.cs:71915
+    //   传入编排 settings）——1457 ManaV2 空蓝慢施那一击（DoRunOutOfManaEffect
+    //   :53258-53261 置位,CheckMana :53217 入口清）bolt 余命 16→48。
+    //   （Prepare 第 5 参=lifeTimeTotal=本表;916 光斑 Fading/RandomizedFrame 两粒子
+    //   集的 SetTypeInfo(num2) 档走 emitBoltFx 定寿命近似,登记维持）
+    if (this.projId === 1122) {
+      this.visualTotal = (game.player as unknown as { slowMagicUse?: boolean } | null)?.slowMagicUse === true
+        ? 48
+        : 16;
+    }
+    // 弹本体死,bolt 视觉余命 visualTotal（1117=45/1122=16 或 slowMagic 48）
     this.visualT = this.visualTotal;
   }
 

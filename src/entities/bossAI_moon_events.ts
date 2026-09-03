@@ -968,6 +968,9 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
         && aiGlobalFiringDistanceCheck(e.cx, e.cy, player.cx, player.cy)) {
         const ox = e.cx - e.facing * 12, oy = e.cy;
         shootE(game, ox, oy, 12 * e.facing, 0, 25, 110);
+        // 出膛音（Projectile.cs:56211-56215 ai[1]==0 首拍）:弹 110 → Item11——
+        // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
+        game.playSfxWav?.('Item_11', 1, ox, oy);
       }
     }
   }

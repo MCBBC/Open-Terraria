@@ -93,6 +93,11 @@ export interface WldWorld {
   sundialCooldown: number;
   /** 拜月教石碑重生倒计时（WF:2185-2192 int32，v108+；缺省 86400=CultistRitual.delayStart） */
   cultistDelay: number;
+  /** 旗帜击杀计数（WF:1347 写/:2210 读 → BannerSystem.Load：i16 n + n×i32
+   *  killCount[banner]，banner 域 1-292、下标 0 恒 0；v≥289 再跟 claimableBanners
+   *  u16[293]——本仓不建模领取面，验读后即弃）。仅非零项落表（键=banner id，
+   *  与 World.bannerKills 同域） */
+  bannerKills: Record<number, number>;
   fastForwardTimeToDawn: boolean;
   fastForwardTimeToDusk: boolean;
   moondialCooldown: number;
@@ -297,10 +302,16 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 107) r.i32(); // invasionSizeStart
   const cultistDelay = version >= 108 ? r.i32() : 86400; // WF:2185-2192（缺省=delayStart，同 CultistRitual.cs:7）
 
-  // banners
+  // banners（WF:2210 BannerSystem.Load：i16 n + n×i32 killCount[banner]；v≥289 再
+  //  i16 m + m×u16 claimableBanners——claimable 本仓不建模，验读即弃。
+  //  击杀数下标域 = banner id 1-292（下标 0 恒 0 不落表；BannerSystem.cs:34 静态表）
+  const bannerKills: Record<number, number> = {};
   {
     const n = r.i16();
-    for (let i = 0; i < n; i++) r.i32();
+    for (let i = 0; i < n; i++) {
+      const kills = r.i32();
+      if (i > 0 && kills > 0) bannerKills[i] = kills;
+    }
     if (version >= 289) {
       const m = r.i16();
       for (let i = 0; i < m; i++) r.u16();
@@ -528,6 +539,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     isCrimson, hardMode, gameMode,
     shadowOrbCount, altarCount, savedOreTiers,
     sundialCooldown, cultistDelay, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
+    bannerKills,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,

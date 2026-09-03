@@ -18,6 +18,16 @@ interface Track {
 export class AudioSystem {
   private ac: AudioContext | null = null;
   private pool = new Map<number, Track>();
+  /** BGM 事件追踪（2026-09-03 用户需求：F5 长按录制窗记录 BGM 序列，与 SFX 分开）。
+   *  main.ts 接线（单实例归 main 所有），事件时刻经 flow?.game 解析活 Game 的
+   *  audioRec.bgm 环。事件类 k：sel=选曲切换（d.id=目标曲 MUSIC id,d.p=前曲）/
+   *  start=轨解码完成实起 / stop=轨渐熄实停 / fail=取曲失败（限时负缓存）/
+   *  mute=静音开关。选曲意图（sel）与实际出声（start/stop）分开记——
+   *  "BGM 没声/切错曲"先对账这两层 */
+  onEvent: ((k: string, d: unknown) => void) | null = null;
+  private emit(k: string, d: unknown): void {
+    if (this.onEvent) this.onEvent(k, d);
+  }
   /** 解码 PCM 常驻上限:每首 mp3 解码后 30-45MB,104 首全驻 = GB 级;
    *  保留最近 MAX_BUFFERS 首(Map 迭代序=LRU),超限淘汰最旧并重解码(可接受) */
   private static readonly MAX_BUFFERS = 3;
@@ -166,6 +176,7 @@ export class AudioSystem {
       return buf;
     } catch {
       this.markFailed(id);   // 限时负缓存（15s 窗口,见字段注释）——不再永久哨兵
+      this.emit('fail', { id });   // BGM 取曲失败（"该段没音乐"根因,15s 内重试仍拦）
       return null;
     } finally {
       this.decoding.delete(id);
@@ -206,6 +217,7 @@ export class AudioSystem {
     src.connect(gain).connect(ac.destination);
     src.start();
     this.pool.set(id, { src, gain, fade: 0 });
+    this.emit('start', { id });   // 实起（解码完成后轨真正出声的时刻）
   }
 
   /** 月总召唤倒计时音乐压制（Main.cs:11646-11664,R22 接线,Game 每帧调用）：
@@ -267,6 +279,7 @@ export class AudioSystem {
           t.fade = Math.max(target, t.fade - d);   // 主曲可闻才渐熄(:335-337)
         }
         if (t.fade === 0) {
+          this.emit('stop', { id });   // 实停（渐熄到 0 拆轨；curMusic=0 时硬停同路）
           t.src.stop();
           this.pool.delete(id);
           continue;
@@ -287,7 +300,9 @@ export class AudioSystem {
   playMusic(id: number) {
     if (this.muted) return;
     if (this.curMusic === id) return;
+    const prev = this.curMusic;
     this.curMusic = id;
+    this.emit('sel', { id, ...(prev ? { p: prev } : {}) });   // 选曲意图（id=0 即静音选择）
     if (id === 0) return;
     const ac = this.audio();
     if (!ac) return;
@@ -317,6 +332,7 @@ export class AudioSystem {
   toggleMute(): boolean {
     this.muted = !this.muted;
     if (this.muted) this.stop();
+    this.emit('mute', { on: this.muted ? 1 : 0 });
     return this.muted;
   }
 }

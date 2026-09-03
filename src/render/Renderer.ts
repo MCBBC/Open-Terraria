@@ -671,6 +671,7 @@ import {
   HEAD_HIDES_HEAD, PREVENT_BEARD_DRAW,
   shieldHaloFactor, shieldParryTransform,
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
+  resolveFaceLayers, faceLayerSplitPlan, FACE_HEAD_OFFSET_IDS, FACE_HEAD_HELMET_OFFSET,
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
@@ -2029,11 +2030,14 @@ export class Minimap {
     }
   }
 
+  private flushCalls = 0;
   flushDirty() {
     if (this.dirtyChunks.size === 0 || !this.p32) return;
     const st = this.world.store;
     const buf = this.p32;
     let n = 0;
+    if ((++this.flushCalls & 511) === 1)
+      console.log(`[mm] flush#${this.flushCalls} dirty=${this.dirtyChunks.size} rects=${this.flushedPixelRects.length} full=${this.needsFullUpload}`);
     for (const k of this.dirtyChunks) {
       if (n++ > 24) break;
       this.dirtyChunks.delete(k);
@@ -2055,6 +2059,7 @@ export class Minimap {
     if (this.flushedPixelRects.length > 128) {
       this.flushedPixelRects.length = 0;
       this.needsFullUpload = true;
+      console.log(`[mm] 洪峰溢出→置全幅重传 painted=${n} dirty剩=${this.dirtyChunks.size}`);
     }
   }
 }
@@ -11185,7 +11190,10 @@ export class Renderer {
    *  染料逐族 cXxx（UpdateItemDye :9329-9420 路由,accDraw 聚合侧已配对） */
   private drawAccFrontLayers(ctx: CanvasRenderingContext2D, p: Player,
     accRows: { body: number; legs: number }, stealthClamp: number,
-    mnt: import('../entities/Mounts').MountInstance | null, head = 0, sittingLegsVid = 0): void {
+    mnt: import('../entities/Mounts').MountInstance | null, head = 0, sittingLegsVid = 0,
+    /** 头层脸饰（faceHead/underHair/头层面罩）已由纸娃娃路径拆画——真时跳过前层
+     *  兜底（兜底精灵路径缺省 false=同锚补画,层序近似登记） */
+    headFaceHandled = false): void {
     const ad = p.equipStats.accDraw;
     if (!this.atlas) return;
     const atlas = this.atlas;
@@ -11241,28 +11249,50 @@ export class Renderer {
       const tex = atlas.ensureVImage(`vanilla/Acc_Beard_${ad.beard}.png`);
       if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeBeard, stealthClamp, p.facing);
     }
-    // 22_FaceAcc（:2801-2852）：headPosition 锚=bodyFrame 同矩形。本仓 face 单层
-    // 合并（mask/flower/head/underHair 四路由同槽后写）,头盔门按【胜出面饰】所属
-    // 族取：mask 22 → PreventFaceMaskDraw∪DrawFaceMaskUnderHeadLayer 隐没（:2819-2821）;
-    // flower 1/6/8/9 → PreventFaceFlowerDraw{92,275} 隐没（:2836-2838）;
-    // head 族 10-13 与 underHair 5 → HidesHead[head] 隐没（:2590/:2596 头层路径）。
-    // 偏移 = GetFaceDrawOffset(face)（:4352-4432 头盔条件表）+ mask/flower 层另加
-    // helmetOffset（GetHelmetDrawOffset :4439-4462 非发型档;222/272 发型依赖登记）
-    if (ad.face > 0) {
-      let faceVisible = true;
-      if (FACE_MASK_LAYER.has(ad.face)) faceVisible = !FACE_MASK_HELMET_HIDE.has(head);
-      else if (FACE_FLOWER_LAYER.has(ad.face)) faceVisible = !FACE_FLOWER_HELMET_HIDE.has(head);
-      else if (FACE_HEAD_LAYER.has(ad.face) || FACE_UNDER_HAIR.has(ad.face)) faceVisible = !HEAD_HIDES_HEAD.has(head);
-      if (faceVisible) {
-        const tex = atlas.ensureVImage(`vanilla/Acc_Face_${ad.face}.png`);
-        if (tex && tex.width > 0) {
-          const fo = FACE_HELMET_OFFSET[ad.face]?.[head] ?? FACE_DRAW_OFFSET[ad.face] ?? [0, 0];
-          const ho = FACE_MASK_LAYER.has(ad.face) || FACE_FLOWER_LAYER.has(ad.face)
-            ? (HELMET_DRAW_OFFSET[head] ?? [0, 0]) : [0, 0];
-          this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeFace, stealthClamp, p.facing,
-            fo[0] + ho[0], fo[1] + ho[1]);
-        }
+    // 22_FaceAcc（:2801-2852）+ PlayerFrame 头盔门（:36252-36271,resolveFaceLayers
+    // 逐帧解算——聚合侧四字段存原始路由,此处按 head 应用互斥/换档）。前层三支按
+    // 原版序 base face → faceMask → faceFlower：mask 22 → PreventFaceMaskDraw∪
+    // DrawFaceMaskUnderHeadLayer 隐没（:2819-2821,后者归头层拆画 faceLayerSplitPlan.
+    // maskUnderHead）;flower 1/6/8/9 → PreventFaceFlowerDraw{92,275} 隐没（:2836-2838）。
+    // head 族（faceHead）与 underHair 5 → 头层路径（TheFace :2574-2650,发层之下）——
+    // 纸娃娃路径已拆画（headFaceHandled）时此处跳过;兜底精灵路径在层尾补画（同锚
+    // 同门,层序近似登记）。偏移 = GetFaceDrawOffset(face)（:4352-4432 头盔条件表）
+    // + mask/flower 层另加 helmetOffset（GetHelmetDrawOffset :4439-4462 非发型档;
+    // 222/272 发型依赖登记）
+    const fl = resolveFaceLayers(ad, head, p.buffs.has(BuffType.Werewolf) || p.merman);
+    const faceDraw = (vid: number, dye: number, dx: number, dy: number): void => {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Face_${vid}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, dye, stealthClamp, p.facing, dx, dy);
+    };
+    // 支 1：base face（else 路由,:2809-2818——!DrawInFaceUnderHairLayer 才画）
+    if (fl.face > 0 && !FACE_UNDER_HAIR.has(fl.face)) {
+      const fo = FACE_HELMET_OFFSET[fl.face]?.[fl.head] ?? FACE_DRAW_OFFSET[fl.face] ?? [0, 0];
+      faceDraw(fl.face, ad.dyeFace, fo[0], fo[1]);
+    }
+    // 头层兜底（!headFaceHandled 时）：faceHead（GetFaceHeadOffsetFromHelmet
+    // :4874-4889）先画、underHair 5 叠其上（分支二序 :2595→:2611;盲眼罩+骷髅族
+    // +2·dir 附加偏移 :2603-2609——faceHead 已换 AltFaceHead 档时门失效）;
+    // 两支 HidesHead 门 :2590/:2596
+    if (!headFaceHandled && !HEAD_HIDES_HEAD.has(fl.head)) {
+      if (fl.faceHead > 0) {
+        const ho = FACE_HEAD_OFFSET_IDS.has(fl.faceHead) ? (FACE_HEAD_HELMET_OFFSET[fl.head] ?? [0, 0]) : [0, 0];
+        faceDraw(fl.faceHead, ad.dyeFaceHead, ho[0], ho[1]);
       }
+      if (FACE_UNDER_HAIR.has(fl.face)) {
+        faceDraw(fl.face, ad.dyeFace, fl.face === 5 && fl.faceHead >= 10 && fl.faceHead <= 13 ? 2 : 0, 0);
+      }
+    }
+    // 支 2：faceMask（:2819-2825 门 + helmetOffset 锚 :2829）
+    if (fl.faceMask > 0 && !(fl.head > 0 && FACE_MASK_HELMET_HIDE.has(fl.head))) {
+      const fo = FACE_HELMET_OFFSET[fl.faceMask]?.[fl.head] ?? [0, 0];
+      const ho = HELMET_DRAW_OFFSET[fl.head] ?? [0, 0];
+      faceDraw(fl.faceMask, ad.dyeFaceMask, fo[0] + ho[0], fo[1] + ho[1]);
+    }
+    // 支 3：faceFlower（:2836-2838 门 + helmetOffset 锚 :2851）
+    if (fl.faceFlower > 0 && !(fl.head > 0 && FACE_FLOWER_HELMET_HIDE.has(fl.head))) {
+      const fo = FACE_HELMET_OFFSET[fl.faceFlower]?.[fl.head] ?? [0, 0];
+      const ho = HELMET_DRAW_OFFSET[fl.head] ?? [0, 0];
+      faceDraw(fl.faceFlower, ad.dyeFaceFlower, fo[0] + ho[0], fo[1] + ho[1]);
     }
     // 32_FrontAcc 前后半拆层（2026-08-23 接）：BackPart（源右半 :3934-3977）先于
     // 25_Shield（LegacyPlayerRenderer.cs:229）;FrontPart（源左半 :3891-3932）走两档
@@ -12242,11 +12272,20 @@ export class Renderer {
     // 一帧只许一次复算）----
     let accDollEquip: { head: number | null; body: number | null; legs: number | null } | null = null;
     let accRows: { body: number; legs: number } = { body: 0, legs: 0 };
+    /** face 四层路由逐帧门解算（PlayerFrame :36252-36271——狼/人鱼强改 = transformed
+     *  清空四字段 :36252-36256;OverrideHelmet 命中 → 头盔/发型双隐） */
+    let facePlan: import('../data/vanillaAccDrawslots').FaceLayerSplitPlan | null = null;
     if (!mntHidden) {
       accDollEquip = p.appearance ? dollEquipFromInv(p.inv, p.appearance, mnt?.type === 54) : null;
       if (accDollEquip) {
         if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { head: 38, body: 21, legs: 20 };
         if (p.merman) accDollEquip = { head: 39, body: 22, legs: 21 };
+        facePlan = faceLayerSplitPlan(p.equipStats.accDraw, accDollEquip.head ?? 0,
+          p.buffs.has(BuffType.Werewolf) || p.merman);
+        // OverrideHelmet 露脸装备（:36256-36259 head=-1）：头盔整件不画 + 发型全隐
+        // （PreventHairDraw={2,3,4,19} 与 OverrideHelmet 同集——DrawPlayer_21_Head
+        // :2422 hair 支门）→ 纸娃娃 head 槽清空 + skipHair（hairHidden 消费）
+        if (facePlan.hairHidden) accDollEquip = { ...accDollEquip, head: null };
       }
       accRows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, accDollEquip?.legs ?? 0);
     }
@@ -12350,6 +12389,9 @@ export class Renderer {
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
     const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
+    /** 头层脸饰（faceHead/underHair/头层面罩）已由纸娃娃路径拆画——传给
+     *  drawAccFrontLayers 抑制前层兜底重画 */
+    let headFaceDrawn = false;
     // 54 迅猛龙（hideEntirePlayerExceptHelmetsAndFaceAccessories :1843-1854）：
     // 本体隐藏但头盔照画（ArmorIDs.Head.Sets.CanDrawOnVelociraptorMount 门
     // :2103-2108）。脸饰品在迅猛龙上原版仍画：face/faceMask/faceFlower 走
@@ -12410,7 +12452,11 @@ export class Renderer {
         ? petArmParams(Math.min(1, p.pettingArmPhase) as 0 | 1, p.petting.isPetSmall)
         : null;
       const petOpt = petArm ? { petArm } : {};
-      const dollOpts = { ...(dyeColor ? { skipHair: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt };
+      // 发/头甲拆层三态：发色剂（逐帧变色）∪ 头层脸饰拆画（facePlan.split——脸饰须
+      // 落在 皮肤脸→脸饰→发→头甲 的原版序中,TheFace :2574 → hair :2422 → helmet
+      // :2143+）;OverrideHelmet 命中（hairHidden）= 发整隐,拆出后不回画
+      const hairSplit = !!dyeColor || !!facePlan?.split;
+      const dollOpts = { ...(hairSplit ? { skipHair: true } : {}), ...(facePlan?.skipFace ? { skipFace: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt };
       const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
       if (doll) {
         const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
@@ -12418,17 +12464,17 @@ export class Renderer {
         // 贴底:原版玩家层恒 +4（PlayerDrawLayers :109/:203/:343 头/身/腿全层
         // `Position.Y+height−frameH+4f`——帧底透明边距一并沉入地面）
         const pad = 4;
-        if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
+        const hairCol = dyeColor ?? p.appearance.hairColor;   // 拆层回画用（无染料=原生发色）
+        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, true);
         if (stealthClamp >= 1) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
-          if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
         } else {
           // stealth 分层（PlayerDrawSet.cs:1523-1651 1:1）：皮肤/发/衣着 RGBA×s'²
           // 先画，甲层（RGB×armorMul / A×s'）后画——甲覆盖像素走甲公式、裸露像素
           // 走皮肤公式，与原版逐 DrawData color 一致
           const s2 = stF.skinMul;                      // s'²
           const skinDoll = compositePaperDoll(p.appearance, dollEquip,
-            { skipHair: !!dyeColor, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
+            { skipHair: hairSplit, skipFace: facePlan?.skipFace, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
           if (skinDoll) {
             const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
             const ga = ctx.globalAlpha;
@@ -12437,12 +12483,12 @@ export class Renderer {
             ctx.globalAlpha = ga;
           }
           // 甲层（身/腿）画在 前发+头甲 叠层之前（原版层序：躯干甲→前发→头甲）；
-          // 发色剂激活时头甲归 overlay(false) 路径（armorNoHead）。
+          // 发色剂/头层脸饰拆层时头甲归 overlay(false) 路径（armorNoHead）。
           // ★overlay(false) 内的头甲/发色发层尚未消费 stealth 乘数（发×s'²、头甲
           //   ×armorMul——原版 colorHair×s'² / colorArmorHead×s'）：发色剂+潜行同开
           //   时该叠层不衰减，集成点在 drawDollHairOverlays（发色剂会话在途）
           const armorDoll = compositePaperDoll(p.appearance, dollEquip,
-            { layer: dyeColor ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
+            { layer: hairSplit ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
               ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
@@ -12453,12 +12499,50 @@ export class Renderer {
             ctx.drawImage(fa.img, fa.sx, fa.sy, fa.sw, fa.sh, -fa.sw / 2, -fa.sh + pad, fa.sw, fa.sh);
             ctx.globalAlpha = ga2;
           }
-          if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
         }
+        // ---- 头层脸饰（DrawPlayer_21_Head_TheFace :2574-2650——发层之下的头层路径,
+        //      2026-09-03 四层路由批接入）----
+        if (facePlan?.split) {
+          if (facePlan.faceHead > 0) {
+            // 分支二（:2592-2614）：faceHead 替代皮肤脸（skipFace 已烘）+ 无眼睑
+            const tex = this.atlas?.ensureVImage(`vanilla/Acc_Face_${facePlan.faceHead}.png`);
+            if (tex && tex.width > 0) {
+              const ho = FACE_HEAD_OFFSET_IDS.has(facePlan.faceHead)
+                ? (FACE_HEAD_HELMET_OFFSET[facePlan.head] ?? [0, 0]) : [0, 0];
+              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFaceHead, stealthClamp, p.facing, ho[0], ho[1]);
+            }
+          } else {
+            // 分支三（:2617-2647）：皮肤脸（doll 已烘）→ 眼睑 → underHair
+            this.drawEyelid(ctx, p, row, pad, false);
+          }
+          if (FACE_UNDER_HAIR.has(facePlan.face)) {
+            // underHair（:2598-2613/:2633-2641）：裸锚;盲眼罩 5 + 骷髅族 faceHead
+            // （未换 Alt 档）→ +2·dir 附加偏移（:2603-2609）
+            const tex = this.atlas?.ensureVImage(`vanilla/Acc_Face_${facePlan.face}.png`);
+            if (tex && tex.width > 0) {
+              const dx = facePlan.face === 5 && facePlan.faceHead >= 10 && facePlan.faceHead <= 13 ? 2 : 0;
+              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFace, stealthClamp, p.facing, dx, 0);
+            }
+          }
+          if (facePlan.maskUnderHead) {
+            // 面罩头层支（DrawPlayer_21_Head :2124-2137 flag5）：GetFaceDrawOffset +
+            // helmetOffset 锚同前层支,画在发/头甲之下
+            const tex = this.atlas?.ensureVImage(`vanilla/Acc_Face_${facePlan.faceMask}.png`);
+            if (tex && tex.width > 0) {
+              const fo = FACE_HELMET_OFFSET[facePlan.faceMask]?.[facePlan.head] ?? [0, 0];
+              const ho = HELMET_DRAW_OFFSET[facePlan.head] ?? [0, 0];
+              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFaceMask, stealthClamp, p.facing, fo[0] + ho[0], fo[1] + ho[1]);
+            }
+          }
+          headFaceDrawn = true;
+        }
+        // 前发+头甲回画（发色剂/头层脸饰拆层时;hairHidden=发整隐不回画）
+        if (hairSplit && !facePlan?.hairHidden) this.drawDollHairOverlays(p, dollEquip, row, pad, hairCol, false);
         // ---- 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid :2640-2683：叠画于
         //      头/眼之上——眨眼/眯眼/耷拉眼/床闭眼/致盲/受击，见 Player.updateEyeState；
-        //      HidesHead 头甲（狼人 38 族）下随 base 脸一并跳过（:2577 flag 门）） ----
-        this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
+        //      HidesHead 头甲（狼人 38 族）下随 base 脸一并跳过（:2577 flag 门）；
+        //      头层脸饰拆画帧已在上段按 TheFace 支序插入） ----
+        if (!headFaceDrawn) this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
         drawn = true;
       }
     }
@@ -12529,7 +12613,7 @@ export class Renderer {
     // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
     // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
     // 详见 drawAccFrontLayers。head = 纸娃娃头盔 ArmorIDs（胡须/脸饰头盔门）
-    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0);
+    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0, headFaceDrawn);
 
     ctx.restore();
     // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
@@ -14736,8 +14820,7 @@ export class Renderer {
     const now = performance.now();
     if (now - this._lastMapFlush >= mapUpdateMinIntervalMs()) {
       this._lastMapFlush = now;
-      this.minimap.flushDirty();
-    }
+      }
     // 移动端整体缩小（右锚缩放变换：小地图+框+按钮+时间文字同尺度；
     // 桌面 uiS=1 → 与原实现逐像素一致）
     const uiS = mobileUiScale();
@@ -15380,6 +15463,7 @@ export class Renderer {
         //   ★必须在 mmTex 创建之后——texSubUpdateData 对缺失 key 静默 no-op,
         //   首帧 texFromImage 的整幅(可能滞后)由此处 p32 全量覆盖=终态正确
         if (mmTex && this.minimap.needsFullUpload && this.minimap.p32) {
+          console.log(`[mm] GL 全幅重传 ${this.minimap.w}x${this.minimap.h} (rects=${this.minimap.flushedPixelRects.length})`);
           const full = new ImageData(this.minimap.w, this.minimap.h);
           new Uint32Array(full.data.buffer).set(this.minimap.p32);
           gl.texSubUpdateData(mmKey, full, 0, 0);

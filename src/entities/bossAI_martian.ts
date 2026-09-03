@@ -469,8 +469,12 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
           if (d > 0.001) { sx = (sx / d) * 7; sy = (sy / d) * 7; }
           else { sx = 0; sy = -7; }
           shootM(game, oxp, oyp, sx, sy, 30, 438);
-          // 原版骑手 390 射弹无声(:35921-35996)——曾误挂 :36272 导弹段的
-          // Item39(该音属空巢导弹,2026-08-19 终审删)
+          // NPC 侧 AI 无 PlaySound(NPC.cs:35921-35996)——但弹 438 是 aiStyle 1,
+          // AI_001 出膛音链 ai[1]==0 首拍播 Item12(Projectile.cs:56221-56225)。
+          // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例;
+          // 曾误挂 :36272 导弹段的 Item39,该音属空巢导弹,2026-08-19 终审删;
+          // "原版无声"结论仅核了 NPC 侧,2026-09-03 dormant 族审计翻案补 Item_12）
+          game.playSfxWav?.('Item_12', 1, oxp, oyp);
         }
       }
     }

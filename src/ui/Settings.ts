@@ -72,6 +72,15 @@ const CSS = `
 .sw-kb-listening { color: #ffe8a0; outline: 1px solid #ffd76e; }
 `;
 
+/** Utils.CycleControlControl_OffOnClickHold（Utils.cs:159-176）一比一——1457 相机
+ *  平移档循环（Player.Settings.CyclePanControl_KeyboardAndMouse :379-382）：
+ *  Hold(0)→Click(1)→OnAlways(2)→OffAlways(3)→Hold（default 支归 Hold;ButtonControlMode.cs;
+ *  入参越界/NaN 钳回 Hold=Options.ts 存档卫门同语义）。纯函数供设置行与单测共用 */
+export function cyclePanControlMode(mode: number): number {
+  const m = Math.max(0, Math.min(3, Math.round(mode) || 0));
+  return (m + 1) % 4;
+}
+
 export class SettingsPanel {
   private panel: HTMLElement;
   private content: HTMLElement;
@@ -558,6 +567,25 @@ export class SettingsPanel {
           () => void options.set('doorOpeningPreference',
             d.doorOpeningPreference === 'enabled' ? 'gamepadOnly'
               : d.doorOpeningPreference === 'gamepadOnly' ? 'disabled' : 'enabled'),
+        ),
+        // 相机平移档（1457 Player.Settings.PanControl_KeyboardAndMouse :359 循环切换
+        // CyclePanControl_KeyboardAndMouse :379-382 → Utils.CycleControlControl_OffOnClickHold
+        // Utils.cs:159-176：Hold→Click→OnAlways→OffAlways→Hold;ButtonControlMode.cs
+        // Hold=0/Click=1/OnAlways=2/OffAlways=3,缺省 Hold。消费=Game 平移四档门
+        // （Main.cs:63719-63778）;原版 1457 设置 UI 未挂该行（反编译全库无调用点,
+        // 本仓落设置页补 UI 面——档位序/缺省 1:1）,点击即写实时 player.panControlMode
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.PanControl'),
+          () => String(d.panControlMode),
+          () => Lang.text(['Mods.SandboxWorld.Settings.PanControl_Hold',
+            'Mods.SandboxWorld.Settings.PanControl_Click', 'Mods.SandboxWorld.Settings.PanControl_OnAlways',
+            'Mods.SandboxWorld.Settings.PanControl_OffAlways'][Math.max(0, Math.min(3, d.panControlMode))]),
+          () => {
+            const next = cyclePanControlMode(d.panControlMode);   // OffOnClickHold 环
+            void options.set('panControlMode', next);
+            const gp = (window as unknown as { __swGame?: { player: import('../entities/Player').Player } }).__swGame;
+            if (gp) gp.player.panControlMode = next;   // 实时生效（options 拉取只在进图 :5525）
+          },
         ),
         // 全物品自动连用（:689 Main.SettingsEnabled_AutoReuseAllItems；Player.cs:24182
         // autoReuseAllWeapons——本仓挥击 canChain 门）

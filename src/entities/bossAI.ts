@@ -1407,6 +1407,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
         const vx = dx / d * spdP, vy = dy / d * spdP;
         shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
           getAttackDamageForProjectiles(25, 23, e.difficulty), 100);
+        // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33——
+        // 发射位等价结算（弹先出生后补播,同 :1236 弹 83=Item_33 先例）
+        game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
       }
     }
     if (spaz && mq && queen) {
@@ -1474,6 +1477,8 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       const vx = dx / d * 9, vy = dy / d * 9;
       shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
         getAttackDamageForProjectiles(18, 17, e.difficulty), 100);
+      // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
+      game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
     }
     e.ai2 += 1;
     if (e.ai2 >= 180) { e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
@@ -1864,6 +1869,8 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
           const d = Math.hypot(dx, dy) || 1;
           shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
             dx / d * 8 + (Math.random() - 0.5) * 4, dy / d * 8 + (Math.random() - 0.5) * 4, 25, 100);
+          // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
+          game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
         }
       }
     } else if (e.ai2 === 1 && player) {
@@ -1877,6 +1884,8 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
         const d = Math.hypot(dx, dy) || 1;
         shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
           dx / d * 10 + (Math.random() - 0.5) * 4, dy / d * 10 + (Math.random() - 0.5) * 4, 25, 100);
+        // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
+        game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
       }
     }
   }
@@ -2109,6 +2118,9 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
         //   命中玩家的难度乘区另由 projTargets.hitPlayer（Projectile.cs:13770）施加
         //   （专家 22×1→18×2=36，与原版一致）。弹型 100（:50224），timeLeft 300（:50235）
         shoot(game, ox + n8 * 5, oy + n9 * 5, n8, n9, getAttackDamageForProjectiles(22, 18, e.difficulty), 100, 300);
+        // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33——
+        // 发射位等价结算（弹先出生后补播,同 :1236 弹 83=Item_33 先例）
+        game.playSfxWav?.('Item_33', 1, ox + n8 * 5, oy + n9 * 5);
       }
     }
   }

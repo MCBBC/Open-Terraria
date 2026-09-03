@@ -20,6 +20,7 @@ export type SfxName =
   | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
   | 'explosionGrenade'  // 原版 SoundID.Item62（榴弹族闷爆：手雷 30/火箭一型 133/二型 136/三型 139，
                         //   Projectile.cs:74471-74475/:74539-74543——Kill 按弹型分支）
+  | 'hailImpact'   // 原版 SoundID.Item89（1037/1049 落地爆 Kill：Projectile.cs:75285）
   | 'rocketJet' | 'starboardJet'  // 原版 SoundID.Item13/Item24（妖精翅 4/星璇悬浮板 45 喷射音）
   | 'beeSummon'  // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
   | 'thunder'   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
@@ -122,6 +123,7 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   throw: ['Item_1'],
   explosion: ['Item_14'],
   explosionGrenade: ['Item_62'],  // 榴弹族闷爆（Kill :74471-74475/:74539-74543 弹型分支）
+  hailImpact: ['Item_89'],        // 1037/1049 落地爆（Kill :75285 SoundID.Item89）
   rocketJet: ['Item_13'],  // SoundID.Item13（妖精翅 4 飞行喷射音，WingFrame :29034）
   starboardJet: ['Item_24'], // SoundID.Item24（星璇悬浮板 45 喷射音，:29716）
   // 2026-08-13 修正：素材提取管线把 Sounds/Custom/ 拍平进 public/sounds/ 根目录，
@@ -536,6 +538,20 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
 
+  /** 音效事件追踪（2026-09-03 用户需求：F5 长按录制窗记录音效播放序列）。
+   *  静态钩覆盖本仓全部 Sfx 实例（Game.sfx + UISfx 共享单例——游戏内的对话
+   *  按钮/相机快门等菜单实例音同入账）；main.ts 接线后在事件时刻经 flow?.game
+   *  解析活 Game 的 audioRec.sfx 环——换世界/HMR 双实例不钉死旧 Game。
+   *  事件类 k：wav=触发面（含结局码 o）/out=补播实际出声/syn=合成兜底/
+   *  loop·loopX=循环轨起停/loopF=循环轨加载失败/cue=风·雨环境 cue 起停 */
+  static onEvent: ((k: string, d: unknown, tag: string) => void) | null = null;
+  /** 实例出身（''=Game.sfx 世界实例；'ui'=UISfx 菜单共享单例）——事件第 3 参透传 */
+  dbgTag = '';
+
+  private emit(k: string, d: unknown): void {
+    if (Sfx.onEvent) Sfx.onEvent(k, d, this.dbgTag);
+  }
+
   constructor() {
     sfxInstances.add(this);   // 资源包覆盖下发时的缓冲驱逐对象
   }
@@ -689,18 +705,18 @@ export class Sfx {
   setWind(level: number, gate: boolean) {
     const ctx = this.ensure(true);
     if (!ctx) return;
-    this.stepCue(this.cueLayers.wind, ctx, 'audios/music/Music_45.mp3', level, gate);
+    this.stepCue('wind', this.cueLayers.wind, ctx, 'audios/music/Music_45.mp3', level, gate);
   }
 
   /** 设置雨声强度（每帧驱动）：level = case28 公式值 num11;gate = ZoneRain && !ZoneSnow */
   setRain(level: number, gate: boolean) {
     const ctx = this.ensure(true);
     if (!ctx) return;
-    this.stepCue(this.cueLayers.rain, ctx, 'audios/music/Music_28.mp3', level, gate);
+    this.stepCue('rain', this.cueLayers.rain, ctx, 'audios/music/Music_28.mp3', level, gate);
   }
 
   /** 单层推进（LegacyAudioSystem.UpdateAmbientCueState/TowardStopping 的载体半边） */
-  private stepCue(L: CueLayer, ctx: AudioContext, file: string, level: number, gate: boolean): void {
+  private stepCue(name: 'wind' | 'rain', L: CueLayer, ctx: AudioContext, file: string, level: number, gate: boolean): void {
     if (!L.gain) {
       const g = ctx.createGain();
       g.gain.value = 0;
@@ -711,6 +727,7 @@ export class Sfx {
     if (!L.buf) return;                       // :220 !WaveBank.IsPrepared → 整机冻结
     const was = L.cue.playing;
     const v = stepAmbientCue(L.cue, level, this.ambient, gate);
+    if (was !== L.cue.playing) this.emit('cue', { c: name, on: L.cue.playing ? 1 : 0 });
     if (!was && L.cue.playing) {              // :237-239 Reuse()+Play() 从头起播
       const src = ctx.createBufferSource();
       src.buffer = L.buf;
@@ -916,8 +933,18 @@ export class Sfx {
       g.connect(ctx.destination);
     }
     src.start();
+    // 循环轨起/停事件（引信/传送门/Kobold 等跟踪循环）：走到这里缓冲必已就绪
+    // （未就绪上方已 return null 由调用方下 tick 重试）——本事件即实际起振时刻
+    const loopFile = list[0];
+    this.emit('loop', {
+      f: loopFile, v: vol,
+      ...(x != null && y != null ? { x: Math.round(x), y: Math.round(y) } : {}),
+    });
     return {
-      stop: () => { try { src.stop(); } catch { /* 已停 */ } g.disconnect(); panner?.disconnect(); },
+      stop: () => {
+        this.emit('loopX', { f: loopFile });
+        try { src.stop(); } catch { /* 已停 */ } g.disconnect(); panner?.disconnect();
+      },
       setPos: (px: number, py: number) => {
         lx = px; ly = py;
         applyAt(px, py);
@@ -988,6 +1015,7 @@ export class Sfx {
       stop: () => {
         if (st.stopped) return;
         st.stopped = true;
+        if (st.started) this.emit('loopX', { f: file });   // 实起过的轨才记停
         try { st.src?.stop(); } catch { /* 已停 */ }
         st.src?.disconnect();
         gain.disconnect();
@@ -1001,7 +1029,7 @@ export class Sfx {
     };
     void this.ensureBufferAsync(file, ctx).then((buf) => {
       if (st.stopped) return;
-      if (!buf) { st.failed = true; gain.disconnect(); return; }
+      if (!buf) { st.failed = true; gain.disconnect(); this.emit('loopF', { f: file }); return; }
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
@@ -1011,6 +1039,7 @@ export class Sfx {
       st.src = src;
       st.started = true;
       apply();
+      this.emit('loop', { f: file, v: st.vol, b: base });   // 实际起振（解码完成时刻）
     });
     return handle;
   }
@@ -1070,7 +1099,12 @@ export class Sfx {
         if (act === 'skip' && this.singlePlaying.has(file)) return;
         if (act === 'stop') this.stopSingleSlot(file);
       }
-      const fire = () => this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
+      const fire = () => {
+        // 补播实际出声事件（与触发面 'wav'/o:q 成对）：v=终值音量
+        // （衰减×FILE_CASE_VOL 已乘）——解码往返时长即触发 tick 与本事件 tick 差
+        this.emit('out', { f: file, v: Math.round(vol * 1000) / 1000 });
+        this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
+      };
       if (ctx.state === 'suspended') void ctx.resume().then(fire, fire);
       else fire();
     });
@@ -1094,32 +1128,54 @@ export class Sfx {
     // (非顺序轮换),近战挥砍嘶声 Item_1 有 2/3 概率换播 Item_18/Item_19。库层单点拦截:
     // 所有 PlaySound(2,1) 调用面(挥剑/投掷/回旋镖/链锤 UseSound…)统一轮换;后续音量/
     // 音高/槽互斥全按轮换后文件计(原版 num 重赋值后再建实例同序,PITCH/FILE 表已含 18/19)
+    // 轮换前置到本层：trace 事件必须记轮换后的真文件（"挥砍音不对"的头号候选,录制面直接可见）
     if (file === 'Item_1') {
       const roll = Math.floor(Math.random() * 3);
       if (roll === 1) file = 'Item_18';
       else if (roll === 2) file = 'Item_19';
     }
-    if (this.suppress) return false;         // 载入期静音门（见字段注释）
+    // 触发面事件（audio.sfx 通道）：一次触发一条、含结局码——出声本身由
+    // deferPlay 的 'out' 记实际出声 tick（解码延迟可判）。o 语义：
+    // ok=即时出声 / q=解码完成后补播 / sup=载入静音门 / skip=单实例在播跳过 /
+    // mut=静音或无 AudioContext / att=距离衰减归零 / fail=负缓存（合成兜底在即）
+    // ★未挂钩时零分配（dig 高频路径,载荷仅在钩存在时构造）
+    const oc = this.playWavFileCore(file, vol, x, y, pitch, replace);
+    if (Sfx.onEvent) {
+      this.emit('wav', {
+        f: file,
+        v: Math.round(vol * 1000) / 1000,
+        ...(x != null && y != null ? { x: Math.round(x), y: Math.round(y) } : {}),
+        o: oc,
+        ...(replace ? { rep: 1 } : {}),
+      });
+    }
+    return oc === 'ok' || oc === 'q';
+  }
+
+  /** 播放决策主体（playWavFile 抽壳为录制让路）：返回结局码（原 early-return
+   *  逐分支改 return 值——门序/互斥/衰减/负缓存/补播语义逐行不变） */
+  private playWavFileCore(file: string, vol: number, x: number | undefined, y: number | undefined, pitch: number | undefined, replace: boolean | undefined): 'ok' | 'q' | 'sup' | 'skip' | 'mut' | 'att' | 'fail' {
+    if (this.suppress) return 'sup';         // 载入期静音门（见字段注释）
     // 单实例互斥(R26 GAP-05 扩为三组:skip 在播跳过 / stop 先停旧实例再播 / none 自由叠响;
     // 见 slotAction 注释——case 15 Roar 维持 skip、case36 replace 豁免一切)
     if (!replace) {
       const act = Sfx.slotAction(file);
-      if (act === 'skip' && this.singlePlaying.has(file)) return false;
+      if (act === 'skip' && this.singlePlaying.has(file)) return 'skip';
       if (act === 'stop') this.stopSingleSlot(file);
     }
     const ctx = this.ensure();
-    if (!ctx) return false;
+    if (!ctx) return 'mut';
     const v = this.atten(vol, x, y);
-    if (v <= 0) return false;
+    if (v <= 0) return 'att';
     vol = v * (FILE_CASE_VOL[file] ?? 1);
     const buf = this.ensureBuffer(file);
     if (!buf) {
-      if (this.failedFresh(file)) return false;   // 负缓存窗口内→合成兜底（过期自动重载）
+      if (this.failedFresh(file)) return 'fail';   // 负缓存窗口内→合成兜底（过期自动重载）
       this.deferPlay(file, ctx, vol, x, y, pitch, replace);   // ★首播不丢
-      return true;
+      return 'q';
     }
     this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
-    return true;
+    return 'ok';
   }
 
   play(name: SfxName, vol = 1, x?: number, y?: number) {
@@ -1130,6 +1186,9 @@ export class Sfx {
     if (this.playWav(name, vol, x, y)) return;
     const ctx = this.ensure();
     if (!ctx) return;
+    // 合成兜底实际出声事件：仅 wav 面 fail/缺档才达此路径——听感是"近似音"
+    // 而非原版素材的直接证据（"音效不对"排查首选过滤器 k==='syn'）
+    this.emit('syn', { n: name });
     const t = ctx.currentTime;
     const osc = (type: OscillatorType, f0: number, f1: number, dur: number, vol: number, delay = 0) => {
       const o = ctx.createOscillator();

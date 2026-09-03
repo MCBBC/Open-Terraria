@@ -124,7 +124,12 @@ export class World {
    *  每帧 UpdateTime）。缺省 86400 = delayStart（新世界 ResetTempsToDayTime WF:1018 /
    *  v108 前旧档 WF:2188 同值）。recheck 为运行时静态位不落盘（RuntimeEvents.ts） */
   cultistDelay = 86400;
-  /** 旗帜击杀计数（BannerSystem.killCount:bannerId→数;随会话,存档登记未接） */
+  /** 旗帜击杀计数（BannerSystem.killCount：bannerId[1-292]→数；BannerSystem.cs:34
+   *  静态 int[293] 表）。随存档持久化——原版 WorldFile.cs:1347 BannerSystem.Save /
+   *  :2210 BannerSystem.Load（v≥109 段；v≥289 再跟 claimableBanners u16[293]，本仓
+   *  不建模领取面只存击杀数）；本仓落盘面 = 自有 JSON 存档 SaveData.bannerKills
+   *  （save/serialize.ts:481/:113）+.wld 导入（WldParser banner 段:300-309）。
+   *  旧档缺省 = 空表（loadSaveData 缺段守卫） */
   bannerKills: Record<number, number> = {};
   /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
    *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */

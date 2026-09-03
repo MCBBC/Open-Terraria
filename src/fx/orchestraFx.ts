@@ -990,7 +990,7 @@ export function stardustPunchFx(
   //  Color=(255,255,255,0)、Scale=vector2（白核 ×0.6）、Rotation=π/2；APF 双项
   //  （角向 f̂×−vector3/60+线性 −vector/60 彩、/30 白核 :3427/:3436）
   const mkSD = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number, apfLin: number): void => {
-    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, { prettySparkle: true });
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, true);   // prettySparkle 形参收 boolean（spawnDust 签名 Game.ts:34633）
     if (!sp) return;
     sp.prettySparkle = true; sp.ttl = 60;
     sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
@@ -1050,7 +1050,7 @@ export function princessWeaponFx(
   //  f̂×vector3 项被第二连写覆盖不存在）、TTL 池缺省 60。
   const psTint = hexToRgbArr(orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25));
   const mkPS = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number): void => {
-    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, { prettySparkle: true });
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, true);   // prettySparkle 形参收 boolean（spawnDust 签名 Game.ts:34633）
     if (!sp) return;
     sp.prettySparkle = true; sp.ttl = 60;
     sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;

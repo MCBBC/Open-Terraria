@@ -29,7 +29,7 @@ import {
   sittingHatY, SITTING_HAT_OFFSET_Y, SITTING_HAT_OFFSET_Y_DEFAULT,
   shimmerTransparencyNext, shimmerBodyAlpha, shimmerGlowAlpha,
   SHIMMER_ST_RAMP, SHIMMER_ST_TRANSFORM, SHIMMER_ST_RISE,
-  SHIMMER_ST_DECAY_RISE, SHIMMER_ST_DECAY_HIT, SHIMMER_ST_DECAY_IDLE,
+  SHIMMER_ST_DECAY_RISE, SHIMMER_ST_DECAY_HIT, SHIMMER_ST_DECAY_IDLE, SHIMMER_ST_DECAY_IMMUNE,
   SHIMMER_RISE_VELOCITY_TICK, SHIMMER_RISE_END_TICK,
   SHIMMER_RISE_PAUSE, SHIMMER_RISE_TELEPORT_DIST,
   remapClamped, isItStormingNext,
@@ -313,16 +313,21 @@ describe('shimmerTransparency（NPC.cs:92631-62/:53770——1457 锚行校准）
     expect(SHIMMER_ST_DECAY_RISE).toBeCloseTo(1 / 60, 10);
     expect(SHIMMER_ST_DECAY_HIT).toBe(0.1);
     expect(SHIMMER_ST_DECAY_IDLE).toBe(0.001);
+    expect(SHIMMER_ST_DECAY_IMMUNE).toBe(0.015);
     // 浸没 ramp
     expect(shimmerTransparencyNext(0, true, false, false)).toBeCloseTo(0.01, 10);
     expect(shimmerTransparencyNext(0.995, true, false, false)).toBe(1);      // cap
     // rise 抑制 ramp（GetShimmered 摘 buff 353 :92570-92573）
     expect(shimmerTransparencyNext(0.89, true, false, true)).toBeCloseTo(0.89 - 1 / 60, 10);
-    // 衰减三档
+    // 衰减位（:92646-62 两独立位叠加——justHit 位 + 免疫/常规档；旧单档模型退役）
     expect(shimmerTransparencyNext(0.89, false, false, true)).toBeCloseTo(0.89 - 1 / 60, 10);
-    expect(shimmerTransparencyNext(0.5, false, true, false)).toBeCloseTo(0.4, 10);
+    expect(shimmerTransparencyNext(0.5, false, true, false)).toBeCloseTo(0.399, 10);   // justHit 0.1 + 常规 0.001
     expect(shimmerTransparencyNext(0.5, false, false, false)).toBeCloseTo(0.499, 10);
+    // ★免疫快档（buffImmune[353]=ShimmerImmunity :17870 → −0.015，与 justHit 可叠加）
+    expect(shimmerTransparencyNext(0.5, false, false, false, true)).toBeCloseTo(0.485, 10);
+    expect(shimmerTransparencyNext(0.5, false, true, false, true)).toBeCloseTo(0.385, 10);
     expect(shimmerTransparencyNext(0.0005, false, false, false)).toBe(0);    // 下限 0
+    expect(shimmerTransparencyNext(0.0005, false, false, false, true)).toBe(0);
   });
 
   it('两个消费点：本体 alpha=1−st（GetAlpha :94874）+ 160 Glow ×(1−st)（:25771-25776）', () => {

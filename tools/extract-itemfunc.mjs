@@ -26,6 +26,26 @@
 //   仍走 v1 文本段首匹配（重提会引入超预期 diff,落盘闸门=placeStyle 之外零 diff）。
 //   修正面：已有条目伪值覆写 + 无条目最小新增 {placeStyle}（其余字段仍由 items.ts
 //   vanilla.json 回填链承载;placeStyle=0 的补齐项经回填门 `!== 0` 为运行时无操作）。
+// 2026-09-03 ★F-STRUCT 全字段泛化（PS-STRUCT placeStyle → 全 FIELDS 基态语义）：
+//   evalFields(text,id)=基态（Variant=null,普通世界）执行序逐 id 求值,泛化点：
+//   ①基态种子=defaultToBase(seg)（DefaultTo* 辅助族隐式值——Variant 支未命中时基态
+//     对辅助字段=辅助隐式值,不是 absent）→ 线性执行序扫描覆写;
+//   ②无条件赋值全 FIELDS 后写覆盖,autoReuse 布尔 true/false→1/0（1325 :16413 显式
+//     false 是提取事实;其余布尔仍只认 true=同 v1 FIELDS 零漂移）;
+//   ③`if (type == N)`/`N == type`/不等式/`||`析取连式按 id 判定,命中支覆写未命中走
+//     else（5012 shoot 947→948 型"本 id 恒真支"伪值由 kissing 面转正）;
+//   ④Variant 条件按基态口径求值：普通世界 ItemVariants.SelectVariant=null
+//     （ItemVariants.cs:89-108,登记面仅 25 id 全挂种子条件）⇒ `== X` 恒假/`!= X` 恒真
+//     ——544/556/557 的 `!= DisabledBossSummonVariant`（:7874/:8006/:8019）基态必采用
+//     （盲剥=boss 召唤物实机回归）;5334 `== EnabledVariant`（:42308）基态不采用
+//     （v1 回落曾把 Mechdusa 世界限定召唤面当基态）;
+//   ⑤其余不可解条件（num==N/Main.*）整支不采用只走 else（同 v1）。
+//   合并语义（对 FUNC 的 diff 规则）：已有条目 struct 有值→覆写、struct 判「基态缺省」
+//   （辅助无隐式+基路径无赋值）而 v1 有支内值→删除该键;【不新增】cur 缺的键——缺档面
+//   （fallthrough 组非末支/嵌套 case 专属段）仍由 items.ts 纠偏/vanilla.json 回填链承载;
+//   无条目仍只 placeStyle 最小新增（金标 24 行面零 diff）;placeStyle 维与旧
+//   evalPlaceStyles 金标逐 id 对拍,漂移即 process.exit(1) 拒产。
+//   ITEMFUNC_DIFF=<path> 可导出 {fixed,deleted,added} 三账本供审计。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { EXTRA_USETURN } from './extract-itemcombat.mjs';
 
@@ -301,6 +321,214 @@ function structuralPlaceStyles(src) {
 
 const SEGS = outerCaseSegments(itemSrc);
 
+// ================= ★F-STRUCT 全字段基态结构层（2026-09-03,PS-STRUCT → 全 FIELDS 泛化） =================
+
+/** 基态条件判定（Variant=null 口径）→ true=支命中 / false=走 else / undefined=不可解
+ *  （整支不采用、只走 else——同 v1 evalPlaceStyle 的非 type 比较口径）。
+ *  支持形态：type==N（含反序,与旧口径同式同 bug:+m[1]||+m[2] 对 0 失真——零漂移保留）/
+ *  type 不等式（双序）/ 顶层 ||（析取,2895 诱饵 `type == 2895 || type == 2893 ||
+ *  type == 2891`）/ 顶层 &&（合取）/ Variant 比较（基态 null ⇒ == 恒假、!= 恒真）。 */
+function evalBaseCond(cond, id) {
+  const c = cond.replace(/\s+/g, ' ').trim();
+  // 顶层布尔连词切分（括号感知;&& 优先级高,先找 ||）
+  let pd = 0, op = null, parts = [];
+  {
+    let start = 0;
+    const segs = [];
+    for (let i = 0; i < c.length; i++) {
+      const ch = c[i];
+      if (ch === '(') pd++;
+      else if (ch === ')') pd--;
+      else if (pd === 0 && (ch === '|' || ch === '&') && c[i + 1] === ch) {
+        const o = ch + ch;
+        if (op === null) op = o;
+        if (o === op) { segs.push(c.slice(start, i)); i++; start = i + 1; }
+        else { op = '||'; break; }   // 混连词：按 || 切（&& 归入子项递归）
+      }
+    }
+    if (op === '||') { segs.push(c.slice(start)); parts = segs; }
+  }
+  if (op === '||') {
+    let unknown = false;
+    for (const p of parts) {
+      const v = evalBaseCond(p, id);
+      if (v === true) return true;
+      if (v !== false) unknown = true;
+    }
+    return unknown ? undefined : false;
+  }
+  if (op === '&&') {
+    let unknown = false;
+    for (const p of parts) {
+      const v = evalBaseCond(p, id);
+      if (v === false) return false;
+      if (v !== true) unknown = true;
+    }
+    return unknown ? undefined : true;
+  }
+  let m = /^\s*(?:(?:type|currentItem\.type)\s*==\s*(\d+)|(\d+)\s*==\s*(?:type|currentItem\.type))\s*$/.exec(c);
+  if (m) return (+m[1] || +m[2]) === id;
+  m = /^\s*(?:type|currentItem\.type)\s*(<=|>=|<|>)\s*(\d+)\s*$/.exec(c);
+  if (m) { const n = +m[2]; return m[1] === '<' ? id < n : m[1] === '<=' ? id <= n : m[1] === '>' ? id > n : id >= n; }
+  m = /^\s*(\d+)\s*(<=|>=|<|>)\s*(?:type|currentItem\.type)\s*$/.exec(c);
+  if (m) { const n = +m[1]; return m[2] === '<' ? n < id : m[2] === '<=' ? n <= id : m[2] === '>' ? n > id : n >= id; }
+  if (/^\s*(?:currentItem\.)?Variant\s*==\s*ItemVariants\.\w+\s*$/.test(c)) return false;
+  if (/^\s*(?:currentItem\.)?Variant\s*!=\s*ItemVariants\.\w+\s*$/.test(c)) return true;
+  if (/^\s*ItemVariants\.\w+\s*==\s*(?:currentItem\.)?Variant\s*$/.test(c)) return false;
+  if (/^\s*ItemVariants\.\w+\s*!=\s*(?:currentItem\.)?Variant\s*$/.test(c)) return true;
+  return undefined;
+}
+
+let SCAN_SRC = null;
+/** 全字段赋值/控制头扫描器：由 FIELDS 表逐字段拼装（备选支与 v1 正则同源=零漂移;
+ *  autoReuse 单独扩 (?:true|false)）,命名字组定位字段名。 */
+function scanSource() {
+  if (SCAN_SRC === null) {
+    SCAN_SRC = '(if|switch)\\s*\\('
+      + FIELDS.map(([n, re]) => `|(?<F_${n}>${n === 'autoReuse' ? 'autoReuse = (?:true|false);' : re.source})`).join('');
+  }
+  return SCAN_SRC;
+}
+
+/** 段文本 → 该 id 的【基态】全字段终值（执行序）。
+ *  种子=defaultToBase(text)（DefaultTo* 辅助族隐式赋值打底）→ 线性扫描覆写：
+ *  无条件赋值后写覆盖;if 命中支/else 支按 evalBaseCond 递归求值后并入（后写胜）;
+ *  switch 整块跳过（嵌套 switch(type) per-id 归并是 fieldsResolveSwitch 职能）;
+ *  注释剥除（// 与 /* *\/——v1 残文层同口径,防注释伪赋值入面）。 */
+function evalFields(text, id) {
+  const clean = text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+  const f = defaultToBase(clean);
+  const re = new RegExp(scanSource(), 'g');
+  let m;
+  while ((m = re.exec(clean))) {
+    if (m[1] !== undefined) {   // 控制头
+      const isSwitch = m[1] === 'switch';
+      let j = re.lastIndex;
+      while (j < clean.length && /\s/.test(clean[j])) j++;
+      if (isSwitch) {
+        re.lastIndex = clean[j] === '{' ? skipBraced(clean, j) : skipSimple(clean, j);
+        if (re.lastIndex <= j) re.lastIndex = clean.length;
+        continue;
+      }
+      const afterHeader = scanParen(clean, re.lastIndex);
+      const cond = clean.slice(re.lastIndex, afterHeader - 1);
+      const parsed = consumeIf(clean, afterHeader);
+      if (!parsed) { re.lastIndex = afterHeader; continue; }
+      re.lastIndex = parsed.end;
+      const verdict = evalBaseCond(cond, id);
+      const branch = verdict === true ? parsed.body : parsed.elseBody;   // undefined=不可解 → 基态口径走 else
+      if (branch) Object.assign(f, evalFields(branch, id));
+      continue;
+    }
+    for (const g in m.groups) {
+      if (m.groups[g] === undefined) continue;
+      const name = g.slice(2);
+      const def = FIELDS.find(([n]) => n === name);
+      if (def[2] === 'b') f[name] = name === 'autoReuse' ? (/false/.test(m[0]) ? 0 : 1) : 1;
+      else {
+        const vm = def[1].exec(m[0]);
+        f[name] = def[2] === 'f' ? parseFloat(vm[1]) : parseInt(vm[1], 10);
+      }
+    }
+  }
+  return f;
+}
+
+/** 单个 switch(type) 的 per-id 全字段解析（close 时调用;子层已解析存 sw.fields） */
+function fieldsResolveSwitch(sw, body) {
+  sw.fields = new Map();
+  const ids = [...sw.cases.keys()].filter((k) => k !== null);
+  const stripComment = (s) => s.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+  // fallthrough 分组：连续 case 标签,中间段全空白 → 共享【末支段】为组 body
+  const groups = [];
+  let run = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const rec = sw.cases.get(id);
+    run.push(id);
+    const empty = stripComment(sliceHoles(body, rec)).trim() === '';
+    if (!empty || i === ids.length - 1) { groups.push({ members: run, bodyRec: rec }); run = []; }
+  }
+  for (const g of groups) {
+    const bodyText = sliceHoles(body, g.bodyRec);
+    for (const id of g.members) {
+      const f = evalFields(bodyText, id);
+      for (const child of g.bodyRec.nested) {
+        const cf = child.fields?.get(id);
+        if (cf) Object.assign(f, cf);   // 嵌套 switch(type) per-id 条目覆盖（执行序在后）
+      }
+      // 空对象也登记——「基态缺省」是判定结果（合并层的删键规则需要它）,
+      // 与 placeStyle 时代「无值=不登记」不同（那里无值即无事可做）
+      sw.fields.set(id, f);
+    }
+  }
+  // default: 段（key=null）——无条件/区间赋值无法按 id 归属,不解（v1 同口径整段丢弃）;
+  // 但其内嵌套 switch(type) 的 per-id 条目按 id 归并（显式 case 优先）
+  const defRec = sw.cases.get(null);
+  if (defRec) {
+    for (const child of defRec.nested) {
+      for (const [cid, cf] of child.fields ?? []) {
+        if (!sw.fields.has(cid)) sw.fields.set(cid, cf);
+      }
+    }
+  }
+}
+
+/** 结构层主入口（全字段）：SetDefaults1-5 → Map(vid → 基态全字段对象)。
+ *  扫描器与 structuralPlaceStyles 逐字节同构（孔剥/嵌套归并/最外层落总表后法覆盖前法）。 */
+function structuralFields(src) {
+  const out = new Map();
+  for (const n of [1, 2, 3, 4, 5]) {
+    const body = methodBodyOf(src, `public void SetDefaults${n}(`)
+      || methodBodyOf(src, `private void SetDefaults${n}(`)
+      || methodBodyOf(src, `void SetDefaults${n}(`);
+    if (!body) continue;
+    const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
+    const stack = [];
+    let depth = 0, m;
+    while ((m = tokRe.exec(body))) {
+      const t = m[0];
+      if (t.startsWith('switch')) {
+        stack.push({ isType: /switch\s*\(\s*(?:type|currentItem\.type)\b/.test(t), opened: false, bodyDepth: -1, tokStart: m.index, cur: null, segStart: 0, cases: new Map() });
+      } else if (t === '{') {
+        depth++;
+        const top = stack[stack.length - 1];
+        if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
+      } else if (t === '}') {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && depth === top.bodyDepth) {
+          stack.pop();
+          depth--;
+          if (top.isType) {
+            if (top.cur !== null) psRec(top).end = m.index;
+            const parent = stack[stack.length - 1];
+            if (parent && parent.isType && parent.opened) {
+              const pr = psRec(parent);
+              pr.holes.push([top.tokStart, m.index + 1]);
+              pr.nested.push(top);
+            }
+            fieldsResolveSwitch(top, body);
+            if (!stack.some((s) => s.isType && s.opened)) {
+              for (const [id, f] of top.fields) out.set(id, f);   // 最外层才落总表（后法覆盖前法=v1 同序）
+            }
+          }
+          continue;
+        }
+        depth--;
+      } else {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && top.isType) {
+          if (top.cur !== null) psRec(top).end = m.index;
+          top.cur = t === 'default:' ? null : +m[2];
+          top.segStart = m.index + t.length;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+
 // ================= ★拓扑层残文 + 同字段后写覆盖（十五批备B 收尾,2026-09-03） =================
 // 缺陷：v1 `seg.match(re)` 取首匹配——case 段内同字段【无条件】双赋值时 C# 语义=
 // 后写生效（实例：496 灵风筝 knockBack 0f→2f 双赋值、498/1989/3977 展示人偶
@@ -507,23 +735,52 @@ for (const [id, seg] of SEGS) {
   }
   if (Object.keys(f).length) FUNC[id] = f;
 }
-// ★PS-STRUCT placeStyle 条件感知修正（在 FIELDS 之后、手补丁之前——手补丁无 placeStyle
-// 键,不受影响）：①伪值覆写（已有条目 placeStyle≠结构层真值）②缺档最小新增 {placeStyle}
-// （其余字段仍由 items.ts vanilla.json 回填链承载=placeStyle 之外零 diff 闸门）
+// ★F-STRUCT 全字段基态修正（在 FIELDS 之后、手补丁之前——手补丁/食物/useTurn 链不受影响）。
+// 合并语义（对 FUNC 的 diff 规则）：
+//   · 已有条目：struct 有值 → 覆写（伪值纠偏）;struct 判「基态缺省」（辅助无隐式+基路径
+//     无赋值）而 v1 有支内值 → 删除该键（autoReuse 缺省 false=键删除等价;数值缺省=无键）;
+//     【不新增】cur 缺的键——缺档面（fallthrough 组非末支/嵌套 case 专属段）仍由 items.ts
+//     运行时纠偏 / vanilla.json 回填链承载（防超预期 diff 与未审消费面漂移）;
+//   · 无条目：仅 placeStyle 最小新增（PS-STRUCT v2 口径延续=金标 24 行面零 diff）;
+//   · 清空条目：EXTRA_USETURN 命中则保 {useTurn:1}（useTurn 通道时序不变）,否则整条回收
+//     （v1 对空段从不产条目,回收=维持「仅记非默认值」形态）;
+//   · placeStyle 金标自检：泛化层 placeStyle 映射必须与旧 evalPlaceStyle 逐 id 全等,
+//     漂移即拒产（exit 1）——①placeStyle 维零 diff 的机器闸门。
 {
-  const PS = structuralPlaceStyles(itemSrc);
-  let fix = 0, add = 0;
-  const fixed = [], added = [];
-  for (const [id, ps] of PS) {
+  const PS_OLD = structuralPlaceStyles(itemSrc);
+  const STRUCT = structuralFields(itemSrc);
+  let psDrift = 0;
+  for (const [id, ps] of PS_OLD) {
+    if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
+  }
+  for (const [id, f] of STRUCT) {
+    if (f.placeStyle !== undefined && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
+  }
+  if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
+  let fix = 0, del = 0, add = 0;
+  const fixed = [], deleted = [], added = [];
+  for (const [id, sf] of STRUCT) {
     const cur = FUNC[id];
     if (cur) {
-      if (cur.placeStyle !== ps) { fixed.push(`${id}:${cur.placeStyle}->${ps}`); cur.placeStyle = ps; fix++; }
-    } else {
-      FUNC[id] = { placeStyle: ps }; added.push(`${id}:${ps}`); add++;
+      for (const k of Object.keys(cur)) {
+        if (sf[k] !== undefined) {
+          if (cur[k] !== sf[k]) { fixed.push(`${id}.${k} ${cur[k]}->${sf[k]}`); cur[k] = sf[k]; fix++; }
+        } else {
+          deleted.push(`${id}.${k}(${cur[k]})`); delete cur[k]; del++;
+        }
+      }
+      if (!Object.keys(cur).length) {
+        if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
+        else delete FUNC[id];
+      }
+    } else if (sf.placeStyle !== undefined) {
+      FUNC[id] = { placeStyle: sf.placeStyle }; added.push(`${id}:${sf.placeStyle}`); add++;
     }
   }
-  console.error(`PS-STRUCT: 伪值纠偏 ${fix} 件 [${fixed.join(', ')}]`);
-  console.error(`PS-STRUCT: 缺档补齐 ${add} 件 [${added.join(', ')}]`);
+  console.error(`F-STRUCT: 伪值覆写 ${fix} [${fixed.join(', ')}]`);
+  console.error(`F-STRUCT: 支内伪键删除 ${del} [${deleted.join(', ')}]`);
+  console.error(`F-STRUCT: 缺档补齐 ${add} 件 [${added.join(', ')}]`);
+  if (process.env.ITEMFUNC_DIFF) writeFileSync(process.env.ITEMFUNC_DIFF, JSON.stringify({ fixed, deleted, added }, null, 1));
 }
 // 钓竿区段补丁：2290-2296 族在 case 段外的 type 区间块赋值（最近 switch 归属扫不到），
 // 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。

@@ -283,6 +283,12 @@ export interface GameHooks {
    *  尾巴）：实体侧一行式接入 `game.recLog?.('death', {...})`。缺省 undefined
    *  零开销；Game 本体实现 = recorder.log。恒安全（无窗也进环——追溯用） */
   recLog?(k: string, d: unknown): void;
+  /** ChatHelper.BroadcastChatMessage（ChatHelper.cs:47-57）世界广播单口：本地消息列
+   *  （Main.NewText → ChatMonitor 面）+ 联机 channel2 系统行中继其他端（server 侧
+   *  slot=255 无名前缀 + RGB）。消费点 = 859 沙滩球踢次公告（Projectile.cs:18719
+   *  Game.BallBounceResult + ChatColors.ServerMessage(255,240,20)）。缺省 undefined
+   *  = 静默（mock 兼容）；SimHost 实现 = simRoom.notice（serverNotice 同色） */
+  chatBroadcast?(text: string, r: number, g: number, b: number): void;
   /** 本地玩家表情气泡（EmoteBubble.MakeLocalPlayerEmote——饥饿链 146/147/148 等
    *  Player 侧触发；Game 实现 = makeLocalPlayerEmote（含联机转发/邻近 NPC 回应）） */
   playerEmote?(id: number): void;

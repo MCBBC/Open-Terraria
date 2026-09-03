@@ -12,7 +12,7 @@ const OUT = process.env.SW_I220_OUT ?? '/tmp/iii220-out';
   writeFileSync(`${OUT}/js-dmlog220.txt`, '');
   g.__swSeg = (name: unknown, detail?: unknown) => {
     const n = String(name);
-    if (/^(passStart|deadCands|deadCount|DMPICK|DMPLACE|iceCount|118TI|swordAttempts|STRY|SOK|campCount|CAMP|MINE|trapCount|MINEDONE|treeCount|MAHOG|longTrackCount|LTRK|stdTrackCount|STRK|mbEnd|lavaJ|tAtt)/.test(n)) {
+    if (/^(passStart|deadCands|deadCount|DMPICK|DMPLACE|CHEST|CAND|GATE|ADDED|iceCount|118TI|swordAttempts|STRY|SOK|campCount|CAMP|MINE|trapCount|MINEDONE|treeCount|MAHOG|longTrackCount|LTRK|stdTrackCount|STRK|mbEnd|lavaJ|tAtt)/.test(n)) {
       appendFileSync(`${OUT}/js-dmlog220.txt`, `${n} ${detail ?? ''}\n`);
     }
   };

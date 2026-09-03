@@ -5331,6 +5331,10 @@ export class GrenadeProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    if (this.dead) return;   // ★Projectile.Update :16780 `!active → return` 结构等价
+                             // （原版 Kill 后 active=false 跳过 Update；本仓实体虽被
+                             // 回收,直接泵 fixedUpdate（测试/wiring）不得重入——曾爆后
+                             // 重启嘶声循环+重复 onExplode（红蓝二轮 orphan-b2 实锤））
     const st = game.world.store;
     // ★出界杀（Projectile.cs:16793-16802：非 minion 弹中心出世界边界 →
     //   active=false 静默消亡,无爆尘无 onExplode）——发射族（fired 火箭）fuse=3600
@@ -6732,6 +6736,23 @@ export class RainCloudProj extends Entity {
       this.life = projectileData(projId)?.timeLeft ?? 300;   // timeLeft=300(:3210/:3292)
       this.hitCd = projId === 239 ? RAIN_DROP_IMMUNE_239 : RAIN_DROP_IMMUNE_245;
     }
+  }
+
+  // ---- MP spawn-kind 10 打包面（Game.netProjBroadcast kind10 支 ↔ netMakeProj case 10）----
+  /** 过网面=仅施法移动云 237/243——死亡变体 238/244 与雨滴 239/245 各端本地 AI 衍生
+   *  （过网=双生成，见 Game.netProjBroadcast kind10 支注） */
+  static mpNetSyncable(projId: number): boolean { return RAIN_CLOUD_MOVE.has(projId); }
+  /** tag=`projId,anchorX,anchorY`（锚=ai[0]/ai[1]，亚像素取整——判向门 cx<anchor 不可见差）；
+   *  aux=击退×100（i16，收端 /100 还原）。与 fromNet 互为逆 */
+  get netTag(): string {
+    return `${this.projId},${Math.round(this.anchorX)},${Math.round(this.anchorY)}`;
+  }
+  get netAux(): number { return Math.round(this.knockback * 100); }
+  /** kind10 反序列化（netMakeProj case 10 唯一入口；tag 畸形=锚 0 → 类内 `!=0` 门跳过） */
+  static fromNet(x: number, y: number, vx: number, vy: number, dmg: number, aux: number,
+    tag: string): RainCloudProj {
+    const [pid, ax, ay] = tag.split(',').map(Number);
+    return new RainCloudProj(x, y, vx, vy, dmg, aux / 100, pid || 237, ax || 0, ay || 0);
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {

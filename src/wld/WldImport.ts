@@ -814,6 +814,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前
     // 导入路直接丢弃（回退 86400 缺省）
     cultistDelay: wld.cultistDelay,
+    // 旗帜击杀计数（WF:1347/:2210 BannerSystem 段 → SaveData 顶层 bannerKills，
+    // loadSaveData 回填 world.bannerKills）——此前 WldParser 读位即弃 → 原版世界
+    // 导入后旗击杀计数清零（旗 buff 加成/达标授予丢失）。键域 = banner id，
+    // 与自有存档 SaveData.bannerKills 同域（WldParser 仅落非零项）
+    bannerKills: wld.bannerKills,
     clock: { timeOfDay, dayCount: 1,
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）
       bloodMoon: wld.bloodMoon, eclipse: wld.eclipse, moonPhase: wld.moonPhase },

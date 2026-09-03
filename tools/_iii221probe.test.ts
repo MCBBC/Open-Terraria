@@ -87,7 +87,7 @@ const REGIONS: Array<[string, number, number, number, number]> = [
     evLines.push(`HM ${l}`);
   };
   (g as { __swTrapEv?: unknown }).__swTrapEv = (kind: string, a: number, b: number, v: number) => {
-    if (evLines.length < 2_000_000) evLines.push(`TRP[${stage}] ${kind} ${a} ${b} ${v}`);
+    if (evLines.length < 2_000_000) evLines.push(`TRP[${stage}] ${kind} ${a} ${b} ${v} @${(g as { __swRollN?: number }).__swRollN ?? -1}`);
   };
 
   let worldRef: WorldView | null = null;

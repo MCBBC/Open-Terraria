@@ -6,7 +6,10 @@ let instance: Sfx | null = null;
 
 export const UISfx = {
   get sfx(): Sfx {
-    if (!instance) instance = new Sfx();
+    if (!instance) {
+      instance = new Sfx();
+      instance.dbgTag = 'ui';   // 音效录制（F5 窗）出身标记：事件类带 @ui 后缀
+    }
     return instance;
   },
   /** 原版菜单音：hover=Menu_Tick(12)、主菜单点击=Menu_Open(10)、普通 UI 点击=Menu_Tick */

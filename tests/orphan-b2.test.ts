@@ -410,7 +410,7 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     let ticks = 0;
     while (!bomb.dead && ticks < 300) { bomb.fixedUpdate(1 / 60, scene.hooks); ticks++; }
     expect(bomb.dead).toBe(true);
-    expect(ticks).toBe(180);                             // 773 不在 damage 豁免表 → 引信 180 自然走满
+    expect(ticks).toBe(178);                             // 773 不在 damage 豁免表 → 原版 AI timeLeft≤3 先 Kill 后尾减(:48030-48037)=180 引信第 178 拍爆(SW-L1 I-2 爆点前移)
     expect(hits.length).toBe(0);                         // 飞行接触零结算（爆炸伤只在 Kill 置值后走爆炸圈）
     expect(st.get(49, 154)).toBe(0);                     // 自然引信路径上隧道同样成形
   });

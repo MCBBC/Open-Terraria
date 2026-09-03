@@ -371,8 +371,11 @@ export class SmartSelect {
     // :17480 wetTile：目标格有液体（Tile.liquid > 0；本作 liquid 通道 0-255 同义）
     const wetTile = inB ? st.liquid[st.idx(tX, tY)] > 0 : false;
     const tileType = inB ? st.get(tX, tY) : 0;
-    if (tileType !== 0) {                                      // :17481 Main.tile.active()
-      // 注意：active() = HasTile（含已致动格），不是 nactive()——TileStore.isActive 不可用
+    // :17481 Main.tile.active() = sTileHeader HasTile 位（Tile.cs:591-594，含已致动格；
+    // nactive() 的 isActive 不可用）。★不可用 type≠0 代之：幽灵格（flags=0,type≠0，
+    // 生成期 active(false) 残型）地下遍布——type 代读会让隐形残型格误入镐策略 3，
+    // 表现为"光标旁没有方块却切镐"（2026-09-03 快捷挖掘误切回归，hasTile 读位）。
+    if (inB && st.hasTile(tX, tY)) {
       const type = sheetOf(tileType);
       const r = this.getAvailableToolRanges(env);              // :17479
       if ((type === 219 || type === 642) && env.inRange(tX, tY, r.extractItemRange)) {

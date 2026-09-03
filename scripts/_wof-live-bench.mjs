@@ -79,6 +79,7 @@ await page.waitForFunction(() => { const g = window.__swGame; return g && g.play
 await sleep(2000);
 
 const pre = await convCount();
+await page.evaluate(() => { (window.__swGame).mapStyle = 0; });   // ★复现用户形态:小地图隐藏(mapStyle≠1)
 console.log('PRE:', JSON.stringify(pre));
 // 传送地狱层
 await page.evaluate(() => {
@@ -141,6 +142,9 @@ const mm = await page.evaluate(async () => {
   return { wasGL, before, after: r.minimap.needsFullUpload, rects: r.minimap.flushedPixelRects.length };
 });
 console.log('MINIMAP-FULLUPLOAD:', JSON.stringify(mm));
+await sleep(400);
+await page.screenshot({ path: '/tmp/mm-after-fix.png' });
+console.log('SCREENSHOT: /tmp/mm-after-fix.png');
 
 console.log('errs:', errs.length ? JSON.stringify(errs.slice(0, 3)) : 'none');
 await b.close();

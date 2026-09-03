@@ -49,7 +49,7 @@ import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
-import { vanGenSolidType } from './GenSolid';
+import { vanGenSolidType, flipGenSolid } from './GenSolid';
 import { hfIs1457 } from './HellFortPass';
 import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
 
@@ -381,6 +381,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   segProbe('passStart');
   // Skyblock.denyAllGeneration 包裹整个 pass(cs:21787)——1.4.5.6 skyblock 种子全段跳过
   if (gs.seedFlags.skyblock) return;
+  // ★IIIII220（GFB 组合支①，1457 cs:21072-21074 ≡1458 同位）：pass 头 getGoodWorld
+  //   重置黑曜石 56 实心=true（LifeCrystals cs:16857 曾在 GFB 下置 false——本仓
+  //   LifeCrystals 翻转未接线（GenSolid 文末备案），当前 JS 56 恒 TILE_DEFS 初值
+  //   true ⇒ 本臂现状 no-op，接线只为与尾臂(本函数末 cs:21416)成对、保证未来
+  //   LifeCrystals 翻转接线后 pass 97 读窗仍与原版逐位同态）。
+  if (gs.seedFlags.getGoodWorld) flipGenSolid([56], true);
   const { w, h } = st;
   // ★结构互斥走全局 StructureMap（GenState.protectedRects）：原本 pass 局部
   //   protectedRects 近似（文件头备案的"无全局 StructureMap"已由 GenState 落地）,
@@ -616,6 +622,14 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
   segProbe('mbEnd');
+  // ★IIIII220（GFB 组合支②，1457 cs:21416-21418 ≡1458 同位）：pass 尾 getGoodWorld
+  //   把黑曜石 56 实心复位=false——原版时间线：LifeCrystals(cs:16857) 在 GFB 下先置
+  //   false → 本 pass 头(cs:21072)临时 true（pass 97 读窗=实心）→ 此处置回 false，
+  //   **后续 SettleLiquidsPart2(98)/Cactus(99)/TileCleanup(100)/Stalac(103)/
+  //   FinalCleanup(105) 等一切 SolidTile/SolidOrSlopedTile 读黑曜石按非实心裁决**。
+  //   旧 JS 缺此臂 ⇒ GFB 下 98+ 读窗实心（GenSolid 文末「特殊种子专属翻转(不接线)」
+  //   备案清偿）；普通种子/非 GFB 组合世界 getGoodWorld=false 零行为差。
+  if (gs.seedFlags.getGoodWorld) flipGenSolid([56], false);
 }
 
 /** CampsiteBiome.Place(CampsiteBiome.cs:9-116) */

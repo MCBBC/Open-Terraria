@@ -333,8 +333,10 @@ describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位
 
   it('②星旋脑线发激光 576：bossAI_lunar_misc.ts 发射位紧邻 Arrow(…576) 播 Item_12', () => {
     const src = readFileSync(new URL('../src/entities/bossAI_lunar_misc.ts', import.meta.url), 'utf8');
+    // ★R10 锚序纠:音在 Arrow 构造【后】(发射位等价结算=弹先出生后补播,与原版
+    // ai[1]==0 首拍同拍)——正则改从 Arrow(…576) 向后窗找 Item_12
     const m = src.match(
-      /0, 576, null,[\s\S]{0,260}?playSfxWav\?\.\('Item_12'/);
+      /576, null,[\s\S]{0,320}?playSfxWav\?\.\('Item_12'/);
     expect(m, 'bossAI_lunar_misc.ts 弹 576 出膛位缺 Item_12 播放').toBeTruthy();
   });
 });

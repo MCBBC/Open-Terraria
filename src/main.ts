@@ -16,6 +16,8 @@ import { parseWldToSave } from './wld/WldImport';
 (window as unknown as { __parseWld?: (b: Uint8Array) => unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
 import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
+import { Sfx } from './core/Sfx';
+import type { AudioRecExport } from './debug/AudioRecorder';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
 import { assetsDownloadIdle, initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
@@ -129,6 +131,14 @@ const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
 
 let flow: FlowHandle | undefined;
+
+// ---- 音效录制接线（2026-09-03 用户需求：F5 长按录制窗记录音频播放序列，
+//      BGM 与 SFX 分列 audioRec.sfx / audioRec.bgm 两环,见 debug/AudioRecorder）----
+// 钩子在【事件时刻】经 flow?.game 解析活 Game——换世界/HMR 双实例不钉死旧 Game。
+// Sfx.onEvent 是静态钩,覆盖 Game.sfx 与 UISfx 共享单例两实例;菜单实例（UISfx）
+// 的事件类带 @ui 后缀（对话按钮/相机快门等游戏内 UI 音可见出身）。
+Sfx.onEvent = (k, d, tag) => flow?.game?.audioRec.sfx.log(tag ? `${k}@ui` : k, d);
+audio.onEvent = (k, d) => flow?.game?.audioRec.bgm.log(k, d);
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
 
@@ -493,9 +503,11 @@ window.addEventListener('keyup', (e) => {
   if (held < F5_LONGPRESS_MS) {
     // 短按：一键调试报告（机器优先 JSON）——尾部带 behaviorTail（常开环形最近
     // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
+    // + audioTail（音效/BGM 播放序列,sfx 800 / bgm 200 条——错误音效排查时间线）
     const r = downloadDebugReport(game, {
       playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
       behaviorTail: game.recorder.snapshotTail(2000),
+      audioTail: game.audioRec?.tail(800, 200) ?? null,
       tileFrames: tileFrameCapture.exportLight(),
     });
     ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
@@ -504,14 +516,18 @@ window.addEventListener('keyup', (e) => {
   // 长按：录制窗开关。关窗 = 导出开窗以来全部事件并下载（复用 debug-report 下载机制）
   const rec = game.recorder;
   const recording = rec.toggle();
+  game.audioRec?.toggle();   // 音效/BGM 双通道窗同步开合（与主行为窗同 tick 边界）
   if (recording) {
     tileFrameCapture.start();   // 录制窗同步开：快照环/截图环/重烘账本全量
-    ui.toast('行为录制中…再长按 F5 结束并保存（含动画帧捕获）');
+    ui.toast('行为录制中…再长按 F5 结束并保存（含动画帧捕获+音效序列）');
     return;
   }
   const dump = rec.export();
   // 帧捕获全量并入录制 dump（聚合+异常环+快照+截图+重烘账本）
   (dump as unknown as { tileFrames?: unknown }).tileFrames = tileFrameCapture.exportAndStop();
+  // 音效录制两通道并入 dump.audio（sfx/bgm 各自 meta+events,见 debug/AudioRecorder）
+  const audioDump = game.audioRec?.export() ?? null;
+  if (audioDump) (dump as unknown as { tileFrames?: unknown; audio?: AudioRecExport }).audio = audioDump;
   const worldName = dump.meta.worldName.replace(/\s+/g, '_') || 'world';
   const filename = `behavior-log-${worldName}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   let triggered = false;
@@ -520,9 +536,10 @@ window.addEventListener('keyup', (e) => {
     triggered = true;
   } catch { triggered = false; }
   const tr = dump.meta.truncated ? `（风暴淘汰截断，起点已不可达）` : '';
+  const au = audioDump ? `；音频 sfx ${audioDump.sfx.meta.eventCount}/bgm ${audioDump.bgm.meta.eventCount}` : '';
   ui.toast(triggered
-    ? `行为录制已保存：${filename}（${dump.meta.eventCount} 事件）${tr}`
-    : `行为录制 ${dump.meta.eventCount} 事件${tr}（下载被拦截，可从 __swRec.export() 取）`);
+    ? `行为录制已保存：${filename}（${dump.meta.eventCount} 事件${au}）${tr}`
+    : `行为录制 ${dump.meta.eventCount} 事件${au}${tr}（下载被拦截，可从 __swRec.export() 取）`);
 });
 
 function downloadText(filename: string, text: string) {

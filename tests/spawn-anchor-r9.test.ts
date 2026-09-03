@@ -23,7 +23,8 @@ import { projectileData } from '../src/data/vanillaProjectiles';
 import { Arrow } from '../src/entities/Arrow';
 import { MagicMissileProj, FlyingKnifeProj } from '../src/entities/MissileProj';
 import { MonkSlam, MonkGhast, MonkStaffSpin, GhastlyGlaiveProj } from '../src/entities/MonkStaffFury';
-import { FlailProj, FlaironSpike, DaybreakFlare, placeAtShootSpawn } from '../src/entities/WeaponProj';
+import { FlailProj, FlaironSpike, DaybreakFlare, MolotovProj, placeAtShootSpawn } from '../src/entities/WeaponProj';
+import { WaterSplashProj } from '../src/entities/SolutionProj';
 import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -157,13 +158,12 @@ describe('R9 批一接线源锁（src/core/Game.ts 七处配对）', () => {
       expect(re.test(src), `Game.ts 缺失配对：${label}`).toBe(true);
     });
   }
-  it('批一边界（批二/三后修订）：405/248 已收编；未列支面（zap/Molotov/圣水/火云伴生）不得被顺手回正', () => {
+  it('批一边界（批四后修订）：zap 20/88 仍未列支,不得被顺手回正', () => {
     // ★R9 批二/三把 5526 链 405、248、'shot' 尾支、烟雾弹、通用投掷、410、1024、
-    //  190/491/636、mkBolt 收编（见下方批二/三 describe）。以下【仍未列支】面必须
-    //  保持直传（直传体=各支构造→add 之间不得出现 placeAtShootSpawn）：
-    //  · zap 20/88（+2/+3,批三未派单点,锚=zapA 中心）
-    //  · 燃烧瓶 MolotovProj / 圣水·邪水·血水 WaterSplashProj（批四域:锚=HOUSE +14px 前移）
-    //  · 火云伴生 400-402（Arrow(fx-7,fy-7) 修正量勘误 −3,−6=批四,勿顺手回正）
+    //  190/491/636、mkBolt 收编;批四把燃烧瓶 MolotovProj / 圣·邪·血水 WaterSplashProj /
+    //  火云伴生 400-402 收编（见下方批四 describe）。以下【仍未列支】面必须保持直传
+    //  （直传体=各支构造→add 之间不得出现 placeAtShootSpawn）：
+    //  · zap 20/88（+2/+3,未派单点,锚=zapA 中心）
     const seg = (from: RegExp, to: RegExp): string => {
       const a = src.search(from);
       expect(a, `起点缺失:${from}`).toBeGreaterThanOrEqual(0);
@@ -173,12 +173,6 @@ describe('R9 批一接线源锁（src/core/Game.ts 七处配对）', () => {
       return rest.slice(0, (m?.index ?? 0) + (m?.[0].length ?? 0));
     };
     expect(seg(/new Arrow\(zapA\.x, zapA\.y,/, /this\.entities\.add\(zap, 'projectiles'\);/))
-      .not.toContain('placeAtShootSpawn');
-    expect(seg(/new MolotovProj\(px, py,/, /this\.entities\.add\(mol, 'projectiles'\);/))
-      .not.toContain('placeAtShootSpawn');
-    expect(seg(/new WaterSplashProj\(px, py,/, /this\.entities\.add\(water, 'projectiles'\);/))
-      .not.toContain('placeAtShootSpawn');
-    expect(seg(/new Arrow\(fx - 7, fy - 7,/, /this\.entities\.add\(fire, 'projectiles'\);/))
       .not.toContain('placeAtShootSpawn');
   });
 });
@@ -640,5 +634,52 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     expect(bub!.w).toBe(14);
     expect(bub!.cx).toBe(flail!.cx);   // −7,−7 回正后盒心=当拍链球中心
     expect(bub!.cy).toBe(flail!.cy);
+  });
+
+  // ---- R9 批四（2026-09-03）：燃烧瓶/三瓶水半盒回正 + 火云伴生修正量勘误 + 通用投掷抽查 ----
+
+  it('批四 #19 燃烧瓶 2590 → 399(MolotovProj) 出生盒心 = 玩家中心（:49957 通用尾支）', () => {
+    const { player, added, updateUse } = thrownGame(2590);
+    updateUse();
+    const mol = added.find((e) => e instanceof MolotovProj) as MolotovProj | undefined;
+    expect(mol, 'updateUse 未产出 MolotovProj（2590 路由/施法门回归）').toBeDefined();
+    expect(mol!.w).toBe(14); expect(mol!.h).toBe(14);
+    expect(mol!.cx).toBe(player.cx);   // ctor 收盒左上,回正后盒心=出手锚
+    expect(mol!.cy).toBe(player.cy);
+    // 火云伴生（Kill :75373-75377）：spawnFires(盒心+散布) → 各 Arrow 盒心 = 传入中心
+    mol!.spawnFires(5000, 4000, 11, 2, -1);
+    const fires = added.filter((e) => e instanceof Arrow
+      && (e as Arrow).projId >= 400 && (e as Arrow).projId <= 402) as Arrow[];
+    expect(fires.length).toBe(6);
+    for (const f of fires) {
+      expect(f.cx).toBe(5000);         // 曾手动 −7,−7 按 399 盒 14×14 误算
+      expect(f.cy).toBe(4000);         // 现按各自盒径回正（盒心=NewProjectile 中心）
+    }
+  });
+
+  it('批四 #20 圣水 422/邪水 423/血水 3477 → 69/70/621(WaterSplashProj) 出生盒心 = 玩家中心', () => {
+    for (const vid of [422, 423, 3477]) {
+      const { player, added, updateUse } = thrownGame(vid);
+      updateUse();
+      const water = added.find((e) => e instanceof WaterSplashProj) as WaterSplashProj | undefined;
+      expect(water, `${vid} 未产出 WaterSplashProj（路由/施法门回归）`).toBeDefined();
+      expect(water!.w).toBe(14); expect(water!.h).toBe(14);
+      expect(water!.cx).toBe(player.cx);   // 曾直传 = 弹盒右下偏 (7,7)px
+      expect(water!.cy).toBe(player.cy);
+    }
+  });
+
+  it('批四 #22 抽查（新锚=玩家中心）:手里剑 42→弹3 / 雪球 949→弹166 / 绳圈 985→弹171 盒心一致', () => {
+    // 通用投掷支批二已接 placeAtShootSpawn——本批只按真 id 复验（scope 表"手里剑 47"
+    // 系与 Unholy Arrow 47→弹4 混记;ProjectileID.Shuriken=3,ThrowingKnife=279→弹48）
+    for (const [vid, pid, w] of [[42, 3, 22], [949, 166, 14], [985, 171, 14]] as const) {
+      const { player, added, updateUse } = thrownGame(vid);
+      updateUse();
+      const arrows = added.filter((e) => e instanceof Arrow && (e as Arrow).projId === pid) as Arrow[];
+      expect(arrows.length, `${vid} 未产出弹 ${pid}`).toBeGreaterThanOrEqual(1);
+      expect(arrows[0].w).toBe(w);
+      expect(arrows[0].cx).toBe(player.cx);
+      expect(arrows[0].cy).toBe(player.cy);
+    }
   });
 });

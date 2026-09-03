@@ -54,9 +54,10 @@ export interface ItemVariantStats {
   defense?: number;
   /** Item.hammer 覆写（5283 灰烬木锤 45→35） */
   hammer?: number;
-  /** 1456 真 Item.value（字段名保留历史;值经 recon-item 闸门对 1457 复核,买入单位 = sellPrice 含 ×5 尾乘）。★仅登记未接线：
-   *  本仓 vanilla-itemvalue.json 已于 2026-08-23 重定基（extract-itemrare.mjs sellPrice
-   *  ×5 修复,与本表口径一致），变体值接入不再有口径障碍 */
+  /** 1456 真 Item.value（字段名保留历史;值经 recon-item 闸门对 1457 复核,买入单位 = sellPrice 含 ×5 尾乘）。
+   *  ★死资产定性（2026-09-03 清点）：全仓零运行时消费者——运行时物品价值走
+   *  vanilla-itemvalue.json（2026-08-23 重定基,extract-itemrare.mjs sellPrice ×5 修复,
+   *  与本表口径一致）；变体值接入无口径障碍但也无消费需求,本字段保留为对账文档。 */
   value1456?: number;
 }
 

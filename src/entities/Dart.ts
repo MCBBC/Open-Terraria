@@ -61,6 +61,14 @@ export const TRAP_SHOT_STYLE: Record<string, {
   shatterDust?: boolean;
   /** 发射音（Projectile.AI 首帧 SoundID.Item14：162=Projectile.cs:21542 / 281=26830） */
   launchSfx?: string;
+  /** extraUpdates 位移倍步（1049=Projectile.cs:9949 extraUpdates=1 → 每拍 2 步）。
+   *  仅作用于积分位移；块碰撞仍为拍末中心点单查（陷阱弹既有简化模型） */
+  steps?: number;
+  /** 绘制缩放（SetDefaults scale：1049=0.8，Projectile.cs:9946——贴图 36px → 28.8px） */
+  drawScale?: number;
+  /** 淡入速率（alpha 每更新递减量：1049 alpha=254 起 AI 支 :24138 `alpha -= 10`，
+   *  extraUpdates=1 → 每拍 20）；globalAlpha = clamp(age×fadeIn/255, 0..1) */
+  fadeIn?: number;
   life?: number;
   /** 击退（★R20-F5:Wiring 各 NewProjectile 实参逐型分档——曾统一 sign(vx)*2:
    *  镖族 2(Wiring.cs:1983)/炮弹 162·爆炸兔兔 281 8(:1317/:1326)/巨石 99 10(:2010·
@@ -141,6 +149,16 @@ export const TRAP_SHOT_STYLE: Record<string, {
   // ——全隐形纯发射器；AI_153_ToiletPop（:49278-49314）ai[0]==0 → 6 尘 + 1 gore，
   // ai[0] 1..10 → 2 尘 + 1/5 gore，ai[0]>10 → Kill
   toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true, kb: 0 },
+  // 1049 霰石/冰雹（dontStarve×FTW 风暴臂 WorldGen.cs:72292 发射；SetDefaults
+  //  Projectile.cs:9940-9952）：24×24 aiStyle5 friendly+hostile trap penetrate-1
+  //  timeLeft1200 scale0.8 alpha254 extraUpdates1 tileCollide=false。AI_005（:24081 起）：
+  //  ai[1]!=0（出生 ai[1]=-1=尾参 num10 :72286/:72292）→ tileCollide=true、无重力直线；
+  //  1037/1049 支 alpha 每更新 -10 淡入（:24137-24149）、rotation=velocity.ToRotation()
+  //  −π/2（:24197-24199，贴图朝下→rotOff=-π/2）；extraUpdates=1 → 每拍位移 2 步（steps）。
+  //  Kill（:75282-75301）= hailKill 专用支（共用 blastKill 是炮弹族 Item14 音/视觉面）：
+  //  SoundID.Item89 + Resize(112,112)（blast=56 半宽）+ Damage() 纯伤害盒
+  hail: { w: 24, h: 24, color: '#E8A050', grav: 0, proj: 'vanilla/Projectile_1049.png', fw: 36, fh: 36, kb: 10,
+    life: 1200, blast: 56, rotOff: -Math.PI / 2, steps: 2, fadeIn: 20, drawScale: 0.8 },
 };
 
 /** 电路机关弹幕全族预热(2026-08-13,用户问"电路触发有没有风险"):机关弹幕全部
@@ -159,7 +177,7 @@ export function prefetchTrapProjectiles(): void {
 }
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
-export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'venomdart' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'
+export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'venomdart' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt' | 'hail'
   | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop';
 
 /** TrapShot kind → 原版 projectile id（反射门禁用：Projectile.CanBeReflected 按
@@ -167,7 +185,7 @@ export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'venomdart' | 'spear
  *  aiStyle 34/73/153 与 281 aiStyle49 不在白名单故不列） */
 const TRAP_PROJ_ID: Partial<Record<TrapShotKind, number>> = {
   dart: 98, superdart: 184, flame: 187, venomdart: 980, spear: 186, spiky: 185, boulder: 99,
-  geyser: 654, cannonball: 162, bunny: 281, snowball: 166, portalbolt: 601,
+  geyser: 654, cannonball: 162, bunny: 281, snowball: 166, portalbolt: 601, hail: 1049,
 };
 
 /** ---- 烟花尘色表（Projectile.cs Kill/AI 引用的 Dust id → 近似色）----
@@ -309,7 +327,11 @@ export class TrapShot extends Entity {
       ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
       if (st.spin) ctx.rotate(this.rot);
       else if (Math.abs(this.vx) + Math.abs(this.vy) > 0.01) ctx.rotate(Math.atan2(this.vy, this.vx) + (st.rotOff ?? 0));
-      ctx.drawImage(img, 0, 0, st.fw, st.fh, -st.fw / 2, -st.fh / 2, st.fw, st.fh);
+      // 淡入弹（1049 alpha=254 → AI 支每更新 -10 :24138,extraUpdates=1 → 每拍 -20）
+      if (st.fadeIn) ctx.globalAlpha = Math.min(1, Math.max(0.04, this.age * st.fadeIn / 255));
+      // SetDefaults scale 缩绘（1049 scale=0.8,Projectile.cs:9946——36px 贴图 → 28.8px）
+      const ds = st.drawScale ?? 1;
+      ctx.drawImage(img, 0, 0, st.fw, st.fh, -st.fw * ds / 2, -st.fh * ds / 2, st.fw * ds, st.fh * ds);
       ctx.restore();
       return;
     }
@@ -328,7 +350,8 @@ export class TrapShot extends Entity {
     }
     if (--this.life <= 0) {
       // 炮弹族 timeLeft 耗尽同样走 Kill 爆炸（Projectile.Kill 由 timeLeft 归零触发）
-      if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
+      if (this.kind === 'hail') this.hailKill(game);   // 1049 同型（1200t 到点亦爆,:75282）
+      else if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
       else this.dead = true;
       return;
     }
@@ -439,8 +462,13 @@ export class TrapShot extends Entity {
       this.vy += st.grav;
     }
     if (this.kind !== 'spiky' && this.kind !== 'boulder') {
-      this.x += this.vx;
-      this.y += this.vy;
+      // extraUpdates 位移倍步（1049 extraUpdates=1 :9949 → 2 步/拍；其余表项单步）。
+      // 步间不重查块——陷阱弹碰撞模型维持拍末中心点单查（类头注既有简化）
+      const steps = st.steps ?? 1;
+      for (let s2 = 0; s2 < steps; s2++) {
+        this.x += this.vx;
+        this.y += this.vy;
+      }
     }
     // 粒子拖尾(原版火焰陷阱/热喷泉的视觉主体是沿途粒子;每 2 tick 一次防刷屏)
     if (st.trail && (this.life & 1) === 0) {
@@ -468,6 +496,11 @@ export class TrapShot extends Entity {
         return;
       }
       // 巨石撞块已在上方针石专属分支(AI 25 AABB 分轴)处理;此处仅余非巨石族
+      // 冰雹 1049 撞块 → 专用落地爆（Kill :75282-75301：Item89 + 112×112 Damage()）
+      if (this.kind === 'hail') {
+        this.hailKill(game);
+        return;
+      }
       if (st.blast) {
         // 炮弹/兔兔炮撞块 → Kill 落点爆炸（Projectile.cs:72768-72831 / 72704-72758）
         this.blastKill(game);
@@ -485,7 +518,9 @@ export class TrapShot extends Entity {
     if (this.hostile) {
       if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
         hitPlayer(this, game, this.damage, !this.reflected); // trap 标（反射弹非陷阱）
-        if (this.kind !== 'boulder') this.dead = true;
+        // 巨石 99 / 冰雹 1049 penetrate=-1（SetDefaults）——命中玩家不碎,继续飞行
+        // （原版由 immune 窗/撞块/timeLeft 收口）;其余机关弹单发档命中即碎
+        if (this.kind !== 'boulder' && this.kind !== 'hail') this.dead = true;
         if (this.dead) return;
       }
     }
@@ -618,6 +653,33 @@ export class TrapShot extends Entity {
   private shatter(game: GameHooks): void {
     game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#F2F8FF', 10, 1, { life: 20, damp: 0.94, grav: -0.01 });
     game.playSfx('shatter', 1, this.x, this.y);
+  }
+
+  /** 冰雹 1049 落地爆（Projectile.Kill type 1037/1049 支 :75282-75301）：SoundID.Item89
+   *  + Resize(112,112)（:75295）+ Damage() 纯伤害盒——PVE 全 NPC 表（Damage_PVE :12520；
+   *  城镇 NPC 经 hostile&flag2 门 :12607 可命中）+ EVP 玩家（hostile，:14846）。
+   *  原版尘 31×6 / gore 61-63×3 / 尘 6×24+18（!wet :75302-75320）→ 引擎粒子两段近似 */
+  private hailKill(game: GameHooks): void {
+    this.dead = true;
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    game.playSfx('hailImpact', 1, cx, cy);   // SoundID.Item89（:75285）
+    game.spawnParticles(cx, cy, '#B8B0A8', 6, 1.8, { life: 22, damp: 0.95 });               // 尘 31 烟族×6
+    game.spawnParticles(cx, cy, '#EAF6FF', 24, 3, { life: 26, damp: 0.94, grav: -0.02 });   // 尘 6 水花×24
+    const r = 56;                            // Resize(112,112) 半宽（:75295）
+    this.blastDamage(game, cx, cy, r);       // PVE（playerCanHitEnemy 门=Damage_PVE_Inner 同构）
+    // EVP（Damage_EVP :14846——hostile 弹伤玩家；trap=true 陷阱源语义；盒=112×112。
+    //  projId 附随实参（hitPlayer 内 SkipDamage_EVP 查表读）——字面量超型收窄绕过
+    //  形参无 projId 槽的形检,运行时字段仍在）
+    hitPlayer({ x: cx - r, y: cy - r, w: r * 2, h: r * 2, projId: 1049 } as { x: number; y: number; w: number; h: number },
+      game, this.damage, true);
+    // 城镇 NPC（Damage_PVE hostile&flag2 门 :12607——1049 hostile=true 故可命中）
+    for (const n of game.npcs?.() ?? []) {
+      const t = n as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks) => void };
+      if (t.dead) continue;
+      if (!(cx - r < t.x + t.w && cx + r > t.x && cy - r < t.y + t.h && cy + r > t.y)) continue;
+      t.hurt(this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE.hail.kb ?? 2), 0, game);
+    }
   }
 
   /** 落点爆炸（Projectile.Kill：type162=Projectile.cs:72768-72831 / type281=72704-72758）：

@@ -156,6 +156,9 @@ export const enum Msg {
                        //    新端发→旧 server 白名单剥条/旧 client switch 落空 = 该弹不显影，
                        //    零崩溃零误伤；旧端发→新端结算面按 projId===856 真值归一，见
                        //    Game.netPuppetProjContact isTune 支）；
+                       //    10=RainCloudProj 移动云（2026-09-03 增量通道：tag=`projId,anchorX,
+                       //    anchorY`、aux=击退×100——仅 237/243 过网，238/244/239/245 各端本地
+                       //    AI 衍生勿过网防双生成；降级矩阵同 9=switch 落空该弹不显影零崩溃）
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
                        //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP；
                        //    bit6(0x40)=pvp——v7 玩家 PvP 弹：pvpAllowed 房内 hostile 玩家的
