@@ -25,7 +25,7 @@ import { ConfettiBurstProj } from './meleeOnHitProjs';
 import type { Player } from './Player';
 import { projSprite } from './Arrow';
 import { wetCollisionProbe } from './MinionProj';
-import { meleeThirdOf } from '../player/SwingPathMath';
+import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
 import { tintedTex } from '../render/StringLine';

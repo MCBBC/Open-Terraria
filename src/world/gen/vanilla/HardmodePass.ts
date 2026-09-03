@@ -394,10 +394,15 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
   }
   // ---- 洞穴墙回填（cs:31944-31986）：25×(w/4200) 片（dualDungeons/remix 不豁免）----
   seg177('IIII177 ALT-IN');
+  // ★IIIII216 取证桩（SW_HM_ALT_STATS=1；缺省零开销）：回填段 attempt/成功/退减计数
+  const altStats = ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.SW_HM_ALT_STATS === '1')
+    ? { a: 0, s: 0, c: 0, floods: 0, log: [] as string[] }
+    : null;
   let budget = Math.trunc(25 * (w / 4200));
   let attempts = 0;
   while (budget > 0) {
     if (++attempts % 15000 === 0) budget--;              // 原版放弃退减（防死循环）
+    if (altStats) { altStats.a++; if (attempts % 15000 === 0) altStats.c++; }
     // RandomWorldPoint(top,right,bottom,left)（cs:27374-27382）/ 三元下界（cs:31961）
     // ★F6 双态下界：ws>100 → top=ws−100；否则 top=20。合并式 max(20, ws−100) 会把
     // ws∈(100,120) 的窗口（top∈(0,20)）错误压回 20。
@@ -414,15 +419,22 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
     if (st.flags[ii] && wallId !== 0 && !st.flags[st.idx(px, py - 1)]) {
       // ShapeFloodFill(1000)（泛洪种子=上格 point.Y−1，cs:31979）
       const flood = shapeFloodFillOnlyWalls(st, px, py - 1);
+      if (altStats) altStats.floods++;
       if (flood.cells.size > 50 && flood.complete) {
         // OuterOutline(origin=(x,y))（cs:31982）——★F5 相对坐标回放下移一行
         paintBackfillOutline(st, flood.cells, wallId);
+        if (altStats) altStats.log.push(`${attempts}: ${px},${py} w${wallId} n${flood.cells.size}`);
         budget--;
+        if (altStats) altStats.s++;
       }
     }
     yield;                                               // PR-async：每 attempt 一个单元
   }
   seg177('IIII177 ALT-OUT');
+  if (altStats) {
+    console.log(`[IIIII216 ALT] attempts=${altStats.a} successes=${altStats.s} c15000=${altStats.c} ` +
+      `floods=${altStats.floods} budgetLeft=${budget} samples=${JSON.stringify(altStats.log)}`);
+  }
   seg177('IIII177 HM-OUT');
 }
 

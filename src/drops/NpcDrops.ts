@@ -137,6 +137,9 @@ export interface NpcDropCtx {
   /** Main.dontStarveWorld（"the constant"）；DontStarveIsUp/IsNotUp 条件
    *  （Conditions.cs:1484-1511——录音道具 5089-5097 族） */
   dontStarveWorld?: boolean;
+  /** Main.remixWorld（remix 种子）；RemixSeed 四变体条件数据源（Conditions.cs:1282-1412，
+   *  2026-09-03 R3-B2 接线）。缺省 false = 非 remix（旧调用方零变化） */
+  remixWorld?: boolean;
   /** Main.tenthAnniversaryWorld（celebrationmk10）；TenthAnniversaryIsUp/IsNotUp 条件 */
   tenthAnniversaryWorld?: boolean;
   /** WorldGen.Skyblock.lowTiles（动态普查旗）；SkyblockIsUp 条件（Conditions.cs:1516-1532）
@@ -202,15 +205,16 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'LegacyHack_IsABoss': return ctx.boss;
     case 'Easymode': return !ctx.hardMode;
     case 'IsHardmode': return ctx.hardMode;
-    case 'NotRemixSeedHardmode': return ctx.hardMode;
-    case 'RemixSeedHardmode': return false;
-    // Conditions.cs:1370-1394 / :1318-1342：!remixWorld && !hardMode / remixWorld && !hardMode。
-    // remix 秘密种子未实装（remixWorld 恒 false）→ 前者退化为 !hardMode（同 NotRemixSeedHardmode
-    // 的退化约定），后者恒 false。曾双双落 default → 冰模仿怪 629 肉前池链整支失效
-    case 'NotRemixSeedEasymode': return !ctx.hardMode;
-    case 'RemixSeedEasymode': return false;
-    case 'RemixSeed': return false;
-    case 'NotRemixSeed': return true;
+    // ---- remix 条件族（Conditions.cs:1282-1412 全六类 1:1；2026-09-03 红蓝对抗
+    //  R3-B2 接线：曾以"remixWorld 恒 false"降级约定整体钉死,但 remix 种子已可产
+    //  （WorldCreation 'Seed_Remix'）——remix+困难非专家杀猪鲨掉 BubbleGun 而非
+    //  AquaScepter、袋 3330 remix 支死。ctx.remixWorld 缺省 false=旧调用方零变化）
+    case 'NotRemixSeedHardmode': return !ctx.remixWorld && ctx.hardMode;   // :1396-1412
+    case 'RemixSeedHardmode': return !!ctx.remixWorld && ctx.hardMode;     // :1344-1368
+    case 'NotRemixSeedEasymode': return !ctx.remixWorld && !ctx.hardMode;  // :1370-1394
+    case 'RemixSeedEasymode': return !!ctx.remixWorld && !ctx.hardMode;    // :1318-1342
+    case 'RemixSeed': return !!ctx.remixWorld;                              // :1282-1295
+    case 'NotRemixSeed': return !ctx.remixWorld;
     case 'NeverTrue': return false;
     case 'NotFromStatue': return !ctx.statueSpawned; // Conditions.NotFromStatue
     case 'IsBloodMoonAndNotFromStatue': return !!ex?.bloodMoon && !ctx.statueSpawned;

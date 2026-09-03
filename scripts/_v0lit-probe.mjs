@@ -118,19 +118,50 @@ const out = await page.evaluate(async () => {
     ck('(p1) 受累·动画族(LivingRainbow) v0=暗光 ≠ v0=白（v0 路径实活）',
       sLV.dark && sLV.white && sLV.dark.h !== sLV.white.h,
       `dark=${sLV.dark?.h} white=${sLV.white?.h}`);
-    // Phase 的 v0 敏感支随 uTime 相位开合（扫描 Δ=214 为跨场景 max）——存在性量化：
-    // 扫 8 个时间相位，任一相位 dark≠white 即证 v0 路径在噪声族实活
-    const phaseSweep = [];
-    for (let k = 0; k < 8; k++) {
-      performance.now = () => frozen + k * 700;   // 换相位（桶随之滚动→真重烘）
-      const d = sig(bake(phase, dark)), w = sig(bake(phase, white));
-      phaseSweep.push({ k, diff: d?.h !== w?.h, ms: k * 0.7 });
+    // ★v0 敏感性依内容域而异（2026-09-03 定谳）：ArmorPhase 的敏感支只在饱和
+    // 内容上触发（合成渐变 Δ=246，真翅膀近白面 0——见 p1b/p5），LivingRainbow
+    // 在真翅膀面上即敏感。p1b 用合成饱和内容证【页面实况 v0 管线活性】，
+    // 真内容的相位窗由 p5 信息性记录。
+    const gcv = document.createElement('canvas'); gcv.width = 64; gcv.height = 64;
+    const gctx = gcv.getContext('2d', { willReadFrequently: true });
+    const gid = gctx.createImageData(64, 64);
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const i = (y * 64 + x) * 4;
+      gid.data[i] = ((x * 37 + y * 17) ^ (x * 11)) & 255;
+      gid.data[i + 1] = (x * 29 + y * 53) & 255;
+      gid.data[i + 2] = ((x * 5 - y * 13) + 256) & 255;
+      gid.data[i + 3] = 255;
     }
+    gctx.putImageData(gid, 0, 0);
+    performance.now = () => 3600000 + 3700;   // uTime=3.7 固定相位
+    const gA = gctx.getImageData(0, 0, 64, 64);
+    renderer.applyDyeLitToImageData(gA.data, 64, 64, phase, dark, undefined);
+    const gB = gctx.getImageData(0, 0, 64, 64);
+    const gC = gctx.getImageData(0, 0, 64, 64);
+    renderer.applyDyeLitToImageData(gC.data, 64, 64, phase, white, undefined);
+    let gmax = 0;
+    for (let i = 0; i < gA.data.length; i += 4) for (let k = 0; k < 3; k++) gmax = Math.max(gmax, Math.abs(gA.data[i + k] - gC.data[i + k]));
     performance.now = () => frozen;
-    R.dbg.phaseSweep = phaseSweep;
-    const anyDiff = phaseSweep.some((s) => s.diff);
-    ck('(p1b) 受累·噪声族(Phase) 扫 8 相位任一 v0=暗光 ≠ v0=白', anyDiff,
-      `敏感相位 ${phaseSweep.filter((s) => s.diff).length}/8`);
+    R.dbg.phaseGradientMaxDelta = gmax;
+    // 直呼解释器层对照（绕开 vanillaDyes/renderer）——分层定位 v0 断点
+    const sm2 = await import('/src/fx/SM2Effect.ts');
+    const pass2 = sm2.getPass('ArmorPhase');
+    const sigI = (d) => { let h = 0; for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0; return h; };
+    performance.now = () => 3600000 + 3700;
+    const dA = new Uint8ClampedArray(gid.data);
+    sm2.runPassOnImageData(pass2, dA, 64, 64, gA ? phase.uniforms : null, [], undefined, dark);
+    const dB = new Uint8ClampedArray(gid.data);
+    sm2.runPassOnImageData(pass2, dB, 64, 64, phase.uniforms, [], undefined, white);
+    performance.now = () => frozen;
+    let imax = 0;
+    for (let i = 0; i < dA.length; i += 4) for (let k = 0; k < 3; k++) imax = Math.max(imax, Math.abs(dA[i + k] - dB[i + k]));
+    R.dbg.directRunPass = {
+      arity: sm2.runPassOnImageData.length,
+      isMid: (await import('/src/data/vanillaDyes.ts')).isV0MidTech('ArmorPhase'),
+      maxDelta: imax,
+    };
+    ck('(p1b) 受累·噪声族(Phase) 饱和内容 v0=暗 ≠ v0=白（页面实况管线活性）',
+      gmax > 0 || imax > 0, `dye层maxΔ=${gmax} 直呼maxΔ=${imax} arity=${sm2.runPassOnImageData.length} isMid=${R.dbg.directRunPass.isMid}`);
     ck('(p2) 受累·动画族 v0=白 ≡ 不传 v0（亮处零变化）',
       sLV.white && sLV.none && sLV.white.h === sLV.none.h,
       `white=${sLV.white?.h} none=${sLV.none?.h}`);
@@ -145,6 +176,31 @@ const out = await page.evaluate(async () => {
     bake(living, dark);
     const ms = realNow() - t0;
     ck('(p4) 二次同参烘焙 ≤1ms（缓存命中）', ms <= 1, `ms=${ms.toFixed(2)}`);
+
+    // ---- (p5) 隔离：绕过 wingTexSource 缓存，直呼染料层（真切片+固定 uTime）----
+    const grab = () => {
+      const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(sheetImg, 0, 0, sw, sh, 0, 0, sw, sh);
+      return cx.getImageData(0, 0, sw, sh);
+    };
+    const sigData = (d) => { let h = 0; for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0; return h; };
+    const rect = { sx: 0, sy: 0, sheetW: sheetImg.width, sheetH: sheetImg.height };
+    const iso = {};
+    performance.now = () => 3600000 + 3700;   // uTime=3.7（与二分测试同相位）
+    const ia = grab(); renderer.applyDyeToImageData(ia.data, sw, sh, phase, rect);
+    const ib = grab(); renderer.applyDyeLitToImageData(ib.data, sw, sh, phase, dark, rect);
+    const ic = grab(); renderer.applyDyeLitToImageData(ic.data, sw, sh, phase, white, rect);
+    let maxd = 0;
+    for (let i = 0; i < ia.data.length; i += 4) for (let k = 0; k < 3; k++) maxd = Math.max(maxd, Math.abs(ia.data[i + k] - ib.data[i + k]));
+    iso.maxDeltaOldVsLitDark = maxd;
+    iso.litDarkVsLitWhite = sigData(ib.data) !== sigData(ic.data);
+    iso.litWhiteVsOld = sigData(ic.data) === sigData(ia.data);
+    R.dbg.iso = iso;
+    // 信息性（非断言）：Phase 在真翅膀内容上当前相位窗的 v0 偏差量——0 = 该
+    // pass 在此内容域 v0 不敏感（名单成员属保护性冗余，内容/域变化时自动生效）
+    console.log(`INFO: Phase 真翅膀面 uTime=3.7 旧链vs v0=暗 maxΔ=${maxd}（信息性）`);
+    ck('(p5) 隔离·v0=白 ≡ 旧链（亮处零变化,直呼层）', iso.litWhiteVsOld, `sig 相等=${iso.litWhiteVsOld}`);
   } finally {
     performance.now = realNow;
   }

@@ -306,28 +306,38 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   const flag4 = e.ai0 > 9;                                  // flag4 :49150(expert 狂暴段 10-13)
   const flag5 = e.ai3 < (flag3 ? 3 : 5) * 2;                // flag5 :49151-49152
 
-  // 伤害/防御修正(:49153-49167 + 狂暴 :49239-49245)——每 tick 从基值派生
-  if (flag4) { e.def.damage = Math.round(b.dmg * 1.1); e.def.defense = 0; }
-  else if (flag3) { e.def.damage = Math.round(b.dmg * 1.2); e.def.defense = Math.round(b.def * 0.8); }
+  // 伤害/防御修正(1457 :49305-49319,1456 :49153-49167 + 狂暴 1457 :49390-49398)——每 tick
+  // 从基值派生。★expert num=1.2 第二乘区(:49298)(红蓝对抗 R2-F1 补:曾整表缺失,
+  // expert 大师档接触伤低 17%;Math.round vs 原版 (int) 截断在全参数域逐值相等——
+  // f32 积恰落在整数上沿)
+  const expert = mainExpertMode(game.world);
+  const dmgTier = expert ? 1.2 : 1;
+  if (flag4) { e.def.damage = Math.round(b.dmg * 1.1 * dmgTier); e.def.defense = 0; }
+  else if (flag3) { e.def.damage = Math.round(b.dmg * 1.2 * dmgTier); e.def.defense = Math.round(b.def * 0.8); }
   else { e.def.damage = b.dmg; e.def.defense = b.def; }
   if (enraged) { e.def.damage = b.dmg * 2; e.def.defense = b.def * 2; }
 
-  // 悬浮/冲撞参数(:49168-49201;expert 档注释)
-  let hoverT = DUKE.hoverT, hoverAcc = DUKE.hoverAcc, hoverSpd = DUKE.hoverSpd;
-  if (flag4) { hoverAcc = 0.7; hoverSpd = 12; hoverT = 30; }            // :49171-49176
-  else if (flag3 && flag5) { hoverAcc = 0.5; hoverSpd = 8; hoverT = 20; } // :49177-49182
-  else if (flag5 && !flag3 && !flag4) hoverT = 30;                       // :49183-49186
-  let chargeT = DUKE.chargeT, chargeSpd = DUKE.chargeSpd;
-  if (flag4) { chargeT = 25; chargeSpd = 27; }                           // :49189-49193(expert 同档)
-  if (enraged) { hoverT = 10; chargeSpd += 6; }                          // :49239-49245
+  // 悬浮/冲撞参数(1457 :49320-49353,1456 :49168-49201)——expert 档全表(R2-F1 补)
+  let hoverT = expert ? 40 : 60, hoverAcc = expert ? 0.55 : 0.45, hoverSpd = expert ? 8.5 : 7.5;
+  if (flag4) { hoverAcc = 0.7; hoverSpd = 12; hoverT = 30; }            // :49325-49329
+  else if (flag3 && flag5) {                                            // :49330-49335
+    hoverAcc = expert ? 0.6 : 0.5; hoverSpd = expert ? 10 : 8; hoverT = expert ? 40 : 20;
+  } else if (flag5 && !flag3 && !flag4) hoverT = 30;                     // :49336-49339
+  let chargeT = expert ? 28 : 30, chargeSpd = expert ? 17 : 16;          // :49340-49342
+  if (flag4) { chargeT = 25; chargeSpd = 27; }                           // :49343-49346
+  else if (flag5 && flag3) { chargeT = expert ? 27 : 30; if (expert) chargeSpd = 21; }  // :49347-49353
+  if (enraged) { hoverT = 10; chargeSpd += 6; }                          // :49390-49398 flag6 块(在档位之后加算)
 
   // 玩家死/远离 5600px(:49218-49237):减速升空离场(原版另 EncourageDespawn(10);
   // 本工程 Boss 不参与 despawn 块,故仅保留升空)。原版此处无回血逻辑。
   if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     e.vy -= 0.4;
-    e.encourageDespawn(10); // :49234 急升逃离 + EncourageDespawn(10)
+    e.encourageDespawn(10); // :49376-49389 急升逃离 + EncourageDespawn(10)
     e.ai0 = e.ai0 > 4 ? 5 : 0;
     e.ai2 = 0;
+    // ★本支早退跳过尾句 dontTakeDamage=!flag7——原版本支【不 return】落到 :50278
+    // (flag7 恒 true→每拍 false),逃离期即刻可受击(红蓝对抗 R2-F5 补,曾残留无敌)
+    e.dontTakeDamage = false;
     e.x += e.vx; e.y += e.vy;
     dukeFindFrame(e); // FindFrame 在 AI 之后仍逐 tick 执行(原版 UpdateNPC 时序)
     return;
@@ -408,7 +418,9 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
         const bub = spawnPart(game, e, 371);
         if (bub) {
           bub.x = e.cx + (ddx / dd) * ((e.w + 20) / 2) - bub.w / 2;
-          bub.y = e.cy + (ddy / dd) * ((e.w + 20) / 2) + 45 - bub.h / 2;
+          // NewNPC(X,Y) 是 Bottom 锚(NPC.cs:81600 center=Y−h/2)——曾按中心语义写
+          // −h/2 → 泡泡整体低 h/2=18px(红蓝对抗 R2-F4 校正)
+          bub.y = e.cy + (ddy / dd) * ((e.w + 20) / 2) + 45 - bub.h;
         }
         // :49612 每吐一颗播 PlaySound(4,…,19)=NPC_Killed_19(case4=死音库)
         game.playSfxWav?.('NPC_Killed_19', 1, e.cx, e.cy);
@@ -470,7 +482,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
           bub.bInit = true; bub.ai0 = 0; bub.ai1 = 0;          // 预置初速,跳过自初始化
           bub.ai3 = (80 + Math.random() * 41) / 100;            // :49751 随机 scale
           bub.x = e.cx + (e.vx / vlen) * ((e.w + 20) / 2) - bub.w / 2;
-          bub.y = e.cy + (e.vy / vlen) * ((e.w + 20) / 2) + 45 - bub.h / 2;
+          bub.y = e.cy + (e.vy / vlen) * ((e.w + 20) / 2) + 45 - bub.h;   // Bottom 锚(同上,R2-F4)
           const ang = Math.atan2(e.vy / vlen, e.vx / vlen) + (Math.PI / 2) * st.dir;
           bub.vx = Math.cos(ang) * DUKE.spinBubbleSpd;
           bub.vy = Math.sin(ang) * DUKE.spinBubbleSpd;
@@ -491,7 +503,8 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
     case 8: dukeSharknado(e, game, player, st, true); break;           // :49865-49885
     case 9: { // expert 二段狂暴变身(:49886-49931;经典不可达,保留供 expert 接线)
       invuln = true;
-      if (e.ai2 < DUKE.p2T - 90) e.spawnAlpha = clamp(e.spawnAlpha + (inSolid(game, e) ? 15 : -15), 0, 255);
+      // 嵌块半隐钳 [0,150](1457 :50043-50058;曾 255=全隐,红蓝对抗 R2-F3 校正)
+      if (e.ai2 < DUKE.p2T - 90) e.spawnAlpha = clamp(e.spawnAlpha + (inSolid(game, e) ? 15 : -15), 0, 150);
       else e.spawnAlpha = Math.min(255, e.spawnAlpha + 4);
       e.vx *= 0.98;
       e.vy = lerp(e.vy, 0, 0.02);
@@ -834,7 +847,9 @@ export class DukeSharknadoTornado extends Entity {
         const shark = spawnPart(game, this.src, this.big ? 373 : 372);
         if (shark) {
           shark.x = this.cx - shark.w / 2;
-          shark.y = this.topY - shark.h / 2;
+          // NewNPC Bottom 锚(NPC.cs:81600,Projectile.cs:29986 center4)=中心 topY−h/2
+          // ——曾按中心语义写 −h/2 → 鲨中心低 12px(红蓝对抗 R1-F4,sP/sC≡num511 亲推证)
+          shark.y = this.topY - shark.h;
           shark.vx = this.vx; shark.vy = this.vy; // Main.npc.velocity = 弹体速度
           shark.bInit = false;                    // 由 sharkronAI 按 ai2/ai3 初始化
           shark.ai2 = this.big ? this.w : 0;      // 373 横游幅宽(:28382)
@@ -923,10 +938,11 @@ export class DukeSharknadoTornado extends Entity {
 }
 
 // ---------------------------------------------------------------------------
-// 鲨鱼 NPC aiStyle 71(NPC 372 Sharkron / 373,NPC.cs:35196-35328)
+// 鲨鱼 NPC aiStyle 71(NPC 372 Sharkron / 373,1457 NPC.cs:35284-35405 / 1456 :35196-35328)
 // ---------------------------------------------------------------------------
 // ai0=0:ai3 升速垂直蓄力 90t(dontTakeDamage;373 另带 ai2 幅宽余弦横游+渐显);
 // 期满 ai0=1 → 16 速直扑玩家;ai0=1:渐显(−60/t)、撞实心块即死、60t 后恢复重力。
+// ★行号约定:下文注释 ≰:35328 者为 1456 系锚,1457 真位 ≈ +88(红蓝对抗 F5 登记全块)。
 export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): void {
   if (!e.bInit) {
     e.bInit = true;
@@ -982,10 +998,11 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
         e.vx = (dx / d) * 16;
         e.vy = (dy / d) * 16;
         e.facing = dx < 0 ? -1 : 1;
-        // ★flip 接管（2026-09-02,Renderer 373 镜像批）:原版 :35311-35315 rotation=
-        //  velocity.ToRotation() 裸值,朝向翻转由 spriteDirection flip 承担——曾以
-        //  +(facing<0?π:0) 旋转补偿等效(无 flip 渲染时代),flip 落地后双重=回翻错误
-        e.spin = Math.atan2(e.vy, e.vx);
+        // ★rotation 与 flip 并存（红蓝对抗 R1-F1/B1-D1 三方实锤,2026-09-03 校正）:
+        //  原版(1457 :35344-35348)spriteDirection=direction **且** rotation=ToRotation()
+        //  +π·[direction==−1]——flip 只补镜像不补 180°,曾误判"裸值+flip"致向左扑咬
+        //  整条 180° 错向(贴图原生朝左,左扑应 rot≈2π≡0 正立)。本仓 facing≡direction。
+        e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
       }
     }
   } else {
@@ -1008,8 +1025,9 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
         return;
       }
     }
-    if (e.ai1 >= 60) e.applyGravity(game); // :35307-35309 恢复重力(共享 UpdateNPC_UpdateGravity)
-    e.spin = Math.atan2(e.vy, e.vx); // :35311-35315 裸值(朝向翻转由 Renderer 373 flip 承担,同上)
+    if (e.ai1 >= 60) e.applyGravity(game); // :35395-35398 恢复重力(共享 UpdateNPC_UpdateGravity)
+    // :35399-35403 rotation=ToRotation()+π·[direction==−1](与 flip 并存,同上——R1-F1)
+    e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
   }
   e.x += e.vx;
   e.y += e.vy;

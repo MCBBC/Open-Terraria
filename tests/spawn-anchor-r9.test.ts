@@ -613,11 +613,9 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     const smokes = added.filter((e) => e instanceof Arrow && (e as Arrow).projId === 196) as Arrow[];
     expect(smokes.length).toBe(1);
     // 分支角度口径：atan2(mouseY−画布高/2, mouseX−画布宽/2)（该分支字面,与 useCombatWeapon 不同）
-    const ang = Math.atan2(200 - 300, 640 - 400);
-    const px = player.cx + Math.cos(ang) * 14;
-    const py = player.cy - 4 + Math.sin(ang) * 14;
-    expect(smokes[0].cx).toBe(px);
-    expect(smokes[0].cy).toBe(py);
+    // ★2026-09-03 锚拆除:原版出生=玩家中心(无前移),断言同步
+    expect(smokes[0].cx).toBe(player.cx);
+    expect(smokes[0].cy).toBe(player.cy);
   });
 
   it('#22 通用投掷 4765 三地球仪 → 868 出生盒心 = 出手锚（18×18 曾偏 (9,9)）', () => {
@@ -625,12 +623,9 @@ describe('R9 批二/三 thrown 链与伴生端到端', () => {
     updateUse();
     const globes = added.filter((e) => e instanceof Arrow && (e as Arrow).projId === 868) as Arrow[];
     expect(globes.length).toBe(1);
-    const ang = Math.atan2(200 - 300, 640 - 400);
-    const px = player.cx + Math.cos(ang) * 14;
-    const py = player.cy - 4 + Math.sin(ang) * 14;
-    expect(globes[0].w).toBe(18);
-    expect(globes[0].cx).toBe(px);
-    expect(globes[0].cy).toBe(py);
+    // ★2026-09-03 锚拆除:出生=玩家中心
+    expect(globes[0].cx).toBe(player.cx);
+    expect(globes[0].cy).toBe(player.cy);
   });
 
   it('批三 5526 FlaironFlail 链 → spawnProj(405) 出生盒心 = 链球 Center（Projectile.cs:44908）', () => {

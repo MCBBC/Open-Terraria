@@ -639,7 +639,7 @@ function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, 
   return false;
 }
 
-/** WorldGen.CanKillTile 全量（WorldGen.cs:62249-62358；钻头智能光标/坡面平滑共用）。
+/** WorldGen.CanKillTile 全量（WorldGen.cs:62716-62832；钻头智能光标/坡面平滑共用）。
  *  1:1 覆盖：越界/未激活/自身墙 350 → false；上方异种树干（分支/树顶帧豁免 + frameY<198）、
  *  棕榈 323 枝帧、宝箱/祭坛族承载位（21/26/72/77/88/467/488）、梳妆台 80 两侧帧 → false；
  *  追加四子项（:62316-62356）：巨石上方容器保护、上锁门、传送器 235 上方 3 格扫描、

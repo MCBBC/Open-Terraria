@@ -312,8 +312,7 @@ export function dealContacts(
     //  现状=整靶跳过,伤害面与原版同值,仅缺接触族反噬电击——鞭 IsAWhip 属接触族）
     if (zapJelly && jellyDontTake) {
       const zapAi = projectileData(self.projId)?.aiStyle;
-      if ((zapAi !== undefined && JELLY_ZAP_AI_STYLES.has(zapAi))
-        || JELLY_ZAP_PROJ_IDS.has(self.projId)) {
+      if (jellyZapProjectile(self.projId, zapAi)) {
         game.takeDamageFromJellyfish?.(ent);
       }
       continue;

@@ -16,6 +16,7 @@ import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { VAN_TILE_CUT, VAN_TILE_FRAME_IMPORTANT } from './VanillaTileFlags';   // ★IIIII215：原版 FI/CUT 真表
 import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII161：campfire PlaceTile 尾 SquareTileFrame 级联
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 import { mayanTrap } from './TemplePass';
@@ -3581,13 +3582,14 @@ const snap: SnapFn = (name) => {
   const canSupportSpike = (x: number, y: number): boolean => {
     if (actAt(x, y) === 0) return false;
     const t = typAt(x, y);
-    const d = TILE_DEFS[t];
-    const sheet = d?.vanilla?.sheet ?? -1;
+    const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
     // ★IIIII211 定罪刀②（DGS:241-247）：原版拒 Main.tileFrameImportant[type]∨
-    //   Main.tileCut[type]【并集】——旧 DG_FRAMED_NOT_CUT=framed∧¬decor 只拒交集,
-    //   framed∧decor（火把族）与 ¬framed∧decor 可作刺支承=JS 多刺→n5 提前饱和→
-    //   attempt 少→SPIKES 段 −170 掷（座1 实测）；再并座面裂纹集（上面）。
-    if (sheet >= 0 && (d.framed || d.decor)) return false;
+    //   Main.tileCut[type]【并集】。
+    // ★IIIII215 二刀（DGS:237 真表化）：消费改 VAN_TILE_FRAME_IMPORTANT∨VAN_TILE_CUT
+    //   （1457 Main.cs 终态提取）——曾以 d.framed||d.decor 代真表，而 TILE_DEFS.framed
+    //   是「多格框架物体」建模旗：平台 19（frame:'style' 单格族）等未置 framed:true ⇒
+    //   平台支承误受理（(981,727) 实证 x86 拒/JS 收）→ SPIKES 段值流二段分叉。
+    if (sheet >= 0 && (VAN_TILE_FRAME_IMPORTANT.has(sheet) || VAN_TILE_CUT.has(sheet))) return false;
     if (spkCracked211?.has(sheet)) return false;
     return true;
   };
@@ -8333,6 +8335,36 @@ const snap: SnapFn = (name) => {
           dgPillar(x + num, bottom + num3, 7, true, false, bottom - y, false, true, er.brick, sp, true, false);
         }
       } else {                                                   // 基类支（DungeonRoom.cs:61-125）
+        // ★IIIII215 定谳刀：GenShape 房 Doughnut 内环填砖（GenShapeDungeonRoom.cs:53-64
+        //   GenerateEarlyDungeonFeaturesInRoom override）——此前整缺 ⇒ st4(腐化,t25) 等 doughnut
+        //   房内环空洞残缺。语义：InnerBounds.Center 为心、InnerShape 半径整除半(Max(1,hr/2),
+        //   Max(1,vr/2)) 的 CircleRoom 填充域，动作链 ClearTile(Tile.cs:125 ClearSlope+inactive+
+        //   inActive=false，type/color/帧保留)→SetTile(本房 BrickTileType,setSelfFrames:false,
+        //   setNeighborFrames:false,clearTile:false ⇒ 裸 type+active 写)→SetTilePaint(0=null 不写)。
+        //   零主流掷（WorldUtils.Gen 形状枚举+Actions 全直写）。实证=SPIKES attempt174 (957,560)
+        //   a 0↔1 首差（x86 t25 活带 13 格 x[950,962]@cy560 与 hrF=6/vrF=7 椭圆逐格吻合）→
+        //   值流自此漂移 → WALLVARIANTS blob 37k 墙差 → LIGHTS +22,250 等十四段全链投影。
+        if (er.shape === 3 && er.brick >= 0) {
+          const hrF = Math.max(1, Math.trunc(er.hr / 2));
+          const vrF = Math.max(1, Math.trunc(er.vr / 2));
+          const brickT = TILE_INTERNAL_BY_SHEET.get(er.brick) ?? -1;
+          const paintD = er.opt > -1 ? er.opt : er.bPaint;      // Override>−1?Override:TilePaintColor
+          for (let dyF = -vrF; dyF <= vrF; dyF++) {
+            const yyF = er.cy + dyF;
+            if (!st.inBounds(er.cx, yyF)) continue;
+            const ratioF = (hrF / vrF) * dyF;                   // (double)hr/vr*(i−origin.Y)
+            const dxF = Math.min(hrF, Math.trunc(Math.sqrt((hrF + 1) * (hrF + 1) - ratioF * ratioF)));
+            for (let xxF = er.cx - dxF; xxF <= er.cx + dxF; xxF++) {
+              if (!st.inBounds(xxF, yyF)) continue;
+              const tiF = st.idx(xxF, yyF);
+              st.slope[tiF] = 0; st.half[tiF] = 0;              // ClearTile: ClearSlope
+              st.wire[tiF] &= ~32;                              // inActive(false)（inactive 位=wire:5）
+              st.type[tiF] = brickT;                            // SetTile: type=brick
+              st.flags[tiF] |= 1;                               // SetTile: active(true)（ClearTile 的 inactive 被覆写,净=活）
+              if (paintD > 0) st.paint[tiF] = paintD;           // SetTilePaint: paintID!=0 才写
+            }
+          }
+        }
         const ur = new UnifiedRandom(er.seed);
         const _n3 = ur.nextInt(3);
         w9(`base|rm=${_w9i - 1}|n3=${_n3}|st=${er.st}`);

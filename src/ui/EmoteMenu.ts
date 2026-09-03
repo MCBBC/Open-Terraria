@@ -83,7 +83,7 @@ export function emotesBosses(f: EmoteGateFlags): number[] {
   if (f['downed_222']) list.push(42);                             // downedQueenBee
   if (f['downed_35'] || f['downedSkeletron']) list.push(43);      // downedBoss3（骷髅王）
   if (f['hardMode']) list.push(44);                               // Main.hardMode（WoF）
-  if (f['downed_641']) list.push(144);                            // downedQueenSlime
+  if (f['downed_657']) list.push(144);                           // downedQueenSlime（★曾误写 641=永锁,红蓝对抗 R3-C3 校正;解析侧写 downed_657）
   if (f['downed_134']) list.push(45);                             // downedMechBoss1（毁灭者）
   if (f['downed_127']) list.push(46);                             // downedMechBoss3（铁骷髅王）
   if (f['downed_125'] || f['downed_126']) list.push(47);          // downedMechBoss2（双子）

@@ -187,7 +187,9 @@ describe('R21-3 箱子数据模型 40 槽', () => {
 const WLD = join(__dirname, '..', 'Starter_World Master.wld');
 
 describe.skipIf(!existsSync(WLD))('R21-3 wld 导入端到端', () => {
-  it('导入后箱锚帧与原版 .wld 一致（style 不清零），锁箱带 locked 旗', async () => {
+  // ★合跑超时清账：三段惰性 import(WldImport/WldParser/SaveFile) + 全图解析落盘,
+  // 单跑 ~9s（npc-drops 同族"惰性 import 冷加载被缺省 5s 误杀"案型）——只放配额
+  it('导入后箱锚帧与原版 .wld 一致（style 不清零），锁箱带 locked 旗', { timeout: 60_000 }, async () => {
     const { parseWldToSave } = await import('../src/wld/WldImport');
     const { parseWld } = await import('../src/wld/WldParser');
     const buf = new Uint8Array(readFileSync(WLD));

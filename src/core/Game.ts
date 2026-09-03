@@ -772,6 +772,33 @@ const TILE_NO_FAIL_SHEETS = new Set([
   373, 374, 375, 382, 384, 461, 481, 482, 483, 484, 485, 518, 519, 528, 529, 530, 549,
   624, 636, 637, 638, 654, 655, 656, 666, 697, 700, 701, 705, 709,
 ]);
+// KillTile_GetTileDustAmount（WorldGen.cs:67119-67207）分型档——hitTilesFx 撞块尘量。
+// 原版签名 (bool fail, Tile tileCache);Collision.HitTiles 走 KillTile(fail:true,
+// effectOnly:true)（Collision.cs:3116）→ 尘量恒取 fail=true 档（:64212-64216）。
+// 逐档提取:!fail 档仅注释备查。fail=true 下 231 幼虫(6:3)/481-483 裂纹砖(3)/
+// 苔族 534/536/539/625/627(5:3) 均塌缩到缺省 3,不入表。
+// ★R8 勘误:任务面"宝石族"实为原版表内 巨石+合成站+滴淌/灯器 零尘族——宝石
+// (63-68/169-171 等)不在本表,走缺省 3。
+const KILL_TILE_DUST: Record<number, number> = {
+  654: 0,                                  // TNTBarrel
+  630: 0, 631: 0,                          // StinkbugHousingBlocker / Echo 变体
+  125: 0, 138: 0, 172: 0, 287: 0,          // CrystalBall / Boulder / Sinks / AmmoBox
+  300: 0, 301: 0, 302: 0, 303: 0, 304: 0, 305: 0, 306: 0, 307: 0, 308: 0,  // 合成站族
+  354: 0, 355: 0,                          // BewitchingTable / AlchemyTable
+  373: 0, 374: 0, 375: 0, 376: 0,          // Water/Lava/HoneyDrip / FishingCrate
+  461: 0, 484: 0, 499: 0,                  // SandDrip / RollingCactus / LesionStation
+  564: 0, 565: 0, 593: 0, 594: 0, 617: 0,  // PlasmaLamp / FogMachine / Volcano×2 / MasterTrophyBase
+  664: 0, 665: 0, 699: 0, 709: 0,          // BouncyBoulder / LifeCrystalBoulder / DeadCellsPotionStation / ShimmerDrip
+  711: 0, 712: 0, 713: 0, 714: 0, 715: 0, 716: 0,  // Boulder 族 Rainbow/Poulder/Lava/Spider/Ghoulder/Pet
+  541: 1,                                  // EchoBlock
+  549: 2,                                  // Seaweed
+};
+/** KillTile_GetTileDustAmount(fail=true) 档值（WorldGen.cs:67119-67207;184 帧档
+ *  :67196-67205 frameX/22≥5→5 与 fail 无关;缺省 fail 档 3 :67123-67128） */
+export function killTileHitDustAmount(sheet: number, frameX: number): number {
+  if (sheet === 184) return Math.floor(frameX / 22) >= 5 ? 5 : 3;   // LongMoss
+  return KILL_TILE_DUST[sheet] ?? 3;
+}
 // tileAxe（Main.cs:7347-7364）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
 // ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
 const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
@@ -13132,8 +13159,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
       // 投掷（shuriken 等 shoot>0）面向鼠标同款 :46578
       this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
-      const px = this.player.cx + Math.cos(ang) * 14;
-      const py = this.player.cy - 4 + Math.sin(ang) * 14;
+      // ★2026-09-03 拆除 +14/y−4 锚(原版 pointPosition=RotatedRelativePoint(
+      //  MountedCenter)=玩家中心,无偏移)——完成 08-21 ranged 链同类拆除(06f4d091,
+      //  用户报"贴脸无伤害"定谳:前移使弹出生在敌盒后方);此锚系 08-09 移植早期
+      //  弓/魔法链朴素近似的投掷链存活变体,非刻意决策
+      const px = this.player.cx;
+      const py = this.player.cy;
       // 粉末族（净化粉 66 / 邪恶粉 67 / 猩红粉 2886）：proj 10/11/463 是 aiStyle 6
       // 粉末云（64×64 无碰撞盒、180 tick、无重力），不是 aiStyle 2 抛物投掷物——
       // 必须先于下方 Arrow 分流，否则退化成"可回收的投掷刀"（GAP 补齐）。
@@ -13350,6 +13381,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           masterMode: mainMasterMode(this.world),
           crimson: this.world.crimson,
           extraAccessory: this.player.inv.extraAccessory,
+          // ★remix/十周年投影（TryGettingDevArmor 十周年 1/8 Player.cs:7909-7912、
+          //  3330 case5 remix 支 AquaScepter——红蓝对抗 R3-B2:曾漏传=两分支死）
+          remixWorld: !!this.world.seedFlags?.remix,
+          tenthAnniversary: !!this.world.seedFlags?.tenthAnniversary,
           hasItem: (id) => { const iid = invIndexOfVanilla(id); return iid >= 0 && this.player.inv.countOf(iid) > 0; },
         });
         this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -14056,6 +14091,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           : cw.shoot === 1086 || cw.shoot === 1087 ? 140
             : cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 64
               : cw.shoot === 30 || cw.shoot === 397 || cw.shoot === 517 || cw.shoot === 588 ? 64
+                : cw.shoot === 681 ? 40   // PrepareBombToBlow case 681 Resize(80,80)（Projectile.cs:47662-47666,红队 I-5）
                 : isFluidDirt ? 24 : 11;
         // 爆炸尾段载荷（Projectile.Kill :74007-74244）：903-906 液体放置/吸收、
         // 910/911 泥土 flood-fill；旧爆炸族无载荷（undefined）
@@ -17817,7 +17853,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // 地牢裂砖族（481-483）：连锁崩塌 + Debris 弹片 + 专属音；无物品掉落
-    // （KillTile :63837-63895 段，见 breakCrackedBrick——GetItemDrops 无 481-483
+    // （KillTile :64302-64360 段，见 breakCrackedBrick——GetItemDrops 无 481-483
     // 赋值项）。须在 object 锚点/通用 1×1 路径前拦（通用路径 drop:null 同样无掉落，
     // 但会走错的音效/粒子链）
     if (isCrackedSheet(def.vanilla?.sheet)) {
@@ -23729,7 +23765,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   // ================= 战斗 =================
 
-  /** 地牢裂砖族破坏链（KillTile :63837-63895 段 1:1）：
+  /** 地牢裂砖族破坏链（KillTile :64302-64360 段 1:1）：
    *  ① 掉落：**无**——原版 KillTile_GetItemDrops（:64012 dropItem=0 起步，481-483
    *    落 :65970-66148 的无赋值 break 块）碎裂不掉任何物品。★:67003 的
    *    481→275 / 482→276 / 483→277 是 KillTile_MakeTileDust（:66744）的
@@ -32362,9 +32398,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  与 tile 矩形求交（半砖 y+8/h 8 :31069-31075）;命中格 = active ∧非致动 ∧
    *  （solid ∨ solidTop∧frameY==0——isSolid∪isPlatform 同语义,isPlatform 内建
    *  frameY==0 家具族门）。尘面 = WorldGen.KillTile(fail:true, effectOnly:true)
-   *  （WorldGen.cs:64212-64219——GetTileDustAmount(fail:true) 缺省 3 × MakeTile
-   *  Dust,只撒尘不毁块）→ 本仓沿 tryMine 每击先例 spawnParticles(mapColor) 3 粒
-   *  近似（tile 色系尘,无独立贴图尘池）;原版无音（KillTile_PlaySounds 只在
+   *  （WorldGen.cs:64212-64219——GetTileDustAmount(fail:true) 分型档 × MakeTile
+   *  Dust,只撒尘不毁块）→ 尘量按 killTileHitDustAmount 分型表（654/630/631=
+   *  0、541=1、549=2、巨石·合成站·滴淌族=0、184 长苔帧档、其余缺省 3;
+   *  tile 色系尘,无独立贴图尘池）;原版无音（KillTile_PlaySounds 只在
    *  !effectOnly 时播,:64062 门） */
   hitTilesFx(x: number, y: number, w: number, h: number, vx: number, vy: number): void {
     const st = this.world.store;
@@ -32380,8 +32417,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!st.isActive(i, j)) continue;
         // 平台族 solidTop 需 frameY==0（Collision.cs:3095 tileSolidTop∧frame 首行;
         // 非木样式平台 frameY=材质行≠0 原版不撒——TileStore.isPlatform 无视 frameY,
-        // 此处补帧门）。KillTile_GetTileDustAmount 分型档(654/630/631=0/541=1/549=2/
-        // 宝石族)仍缺省 3 近似(头注登记)
+        // 此处补帧门）
         const plat = !st.isSolid(i, j) && st.isPlatform(i, j) && st.frameY[st.idx(i, j)] === 0;
         if (!st.isSolid(i, j) && !plat) continue;   // tileSolid ∨ solidTop∧top
         const ti = st.idx(i, j);
@@ -32392,7 +32428,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const hn = half ? 8 : TILE;
         // 交叠判定（:31083-31087）：vector 盒 [px,px+w)×[py,py+h) vs tile 矩形
         if (!(px + w >= i * TILE && px <= i * TILE + TILE && py + h >= ty0 && py <= ty0 + hn)) continue;
-        this.spawnParticles(i * TILE + 8, j * TILE + 8, def.mapColor, 3, 1.2);
+        const amt = killTileHitDustAmount(def.vanilla?.sheet ?? -1, st.frameX[ti]);
+        if (amt <= 0) continue;                            // 654/630/631+巨石·合成站族=0 尘(:67129-67133/:67148-67185)
+        this.spawnParticles(i * TILE + 8, j * TILE + 8, def.mapColor, amt, 1.2);
       }
     }
   }
@@ -32501,7 +32539,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.achievements.mechaMayhemKill(id, active);
         }
       } else {
-        this.achievements.notifyNPCKilled(killAchId);
+        // EoW 13/14/15 原版仅 npc.boss 才通知（NPC.cs:80652-80658 case 13/14/15
+        // `if (boss)`;boss 位 = DropEoWLoot 无其它段存活的末段旗,本仓 killBossFlag
+        // 同语义 Enemy.ts:13446）——曾无条件通知 = 拆链杀中段也推进 WORM_FODDER/
+        // SLAYER_OF_WORLDS（红蓝对抗 R3-A2 补）
+        const eowLastSegment = !(id >= 13 && id <= 15) || enemy.killBossFlag === true;
+        if (eowLastSegment) this.achievements.notifyNPCKilled(killAchId);
         if (id === 127 || id === 134) this.achievements.mechaMayhemKill(id, active);
       }
     }

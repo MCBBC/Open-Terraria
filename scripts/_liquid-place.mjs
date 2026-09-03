@@ -365,8 +365,10 @@ const out = await page.evaluate(async () => {
           for (let y = CEIL + 1; y <= F - 1; y++) st.setLiquid(c3, y, 0, LIQUID_TYPE.NONE);
           st.setLiquid(c3, F - 1, 255, LIQUID_TYPE.LAVA);   // 仅足迹底格岩浆
           await shot(obsIdx, c3, F - 2, [c3 + 1, F - 1]);   // 点击=中格（干）,锚=c3 的 1×3=F-3..F-1
+          const dbgCells = [];
+          for (let y = F - 4; y <= F; y++) dbgCells.push({ y, t: st.get(c3, y), liq: st.liquid[st.idx(c3, y)] });
           check('⑫黑曜石门1458 点干格+足迹底格岩浆=放成（per-style :2245-2247）', hasDoorIn(c3),
-            `col=${c3}`);
+            `col=${c3} dbg=${JSON.stringify(dbgCells)}`);
           // 复原岩浆箱（后续 dry 回归与统计用）
           for (let y = CEIL + 1; y <= F - 1; y++) st.setLiquid(c3, y, 255, LIQUID_TYPE.LAVA);
           if (hasDoorIn(c3)) for (let y = CEIL; y <= F; y++) if (st.get(c3, y) === TIDS.door) st.setTile(c3, y, 0, 0, 0);

@@ -308,7 +308,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   }
   // ★R16-7②：fastForwardTimeToDawn 门 = 128（WF57:2211-2215 `version < 128 return`），非 140
   if (version >= 128) fastForwardTimeToDawn = r.boolean(); // WF:2203
-  if (r.boolean()) flags.downedFishron = true;                                             // 猪龙鱼公爵
+  if (r.boolean()) { flags.downedFishron = true; flags['downed_370'] = true; }             // 猪龙鱼公爵（★双键:消费端 EmoteMenu/TownNPC 读 downed_370,曾只落驼峰键=.wld 导入域表情 50/城镇自卫档丢失,红蓝对抗 R3-C3）
   if (version >= 131) {                                                                    // martians/cultist/moonlord
     if (r.boolean()) flags.downedMartians = true;
     if (r.boolean()) flags.downed_439 = true;                                              // downedAncientCultist 拜月教邪教徒

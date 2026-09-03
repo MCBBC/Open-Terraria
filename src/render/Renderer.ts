@@ -6412,19 +6412,28 @@ export class Renderer {
           if (e.facing > 0) ctx.scale(-1, 1);
         }
         // ★373 鲨鱼龙（红队 P′ "dormant"结论反转：dukeFishronAI/sharkronAI 已实装
-        //  bossAI_duke_moonlord.ts,MinionProj:3005 亦有交互）。原版 :35340
-        //  spriteDirection=direction + rotation=velocity.ToRotation() 裸值复合——
-        //  本仓 sharkronAI:986 曾以 spin+(facing<0?π:0) 补偿等效（无 flip 渲染时代）,
-        //  加 flip 后该补偿=双重镜像 → spin 公式同步剥 π 补偿（sharkronAI 段）,
-        //  翻转交由本 flip。370/372 同表登记（370 本体贴图近对称观感差异未显）。
+        //  bossAI_duke_moonlord.ts,MinionProj:3005 亦有交互）。原版(1457 :35340-35348)
+        //  spriteDirection=direction **且** rotation=ToRotation()+π·[direction==−1]
+        //  ——flip 与 π 并存（flip 只补镜像不补 180°）,AI 侧 spin 已恢复 π 项
+        //  （曾误判"裸值+flip"=向左扑咬 180° 错向,红蓝对抗 R1-F1/B1-D1 校正）。
         //  ★批4（2026-09-03）：AI_071 的 direction 与 spriteDirection 是两个字段——
-        //  蓄力段(ai0=0) 373 摆头向按 cos 符号写 spriteDirection（:35219-35221）、
-        //  372 恒字段缺省 -1 不翻,起扑后 spriteDirection=direction（:35254）。
+        //  蓄力段(ai0=0) 373 摆头向按 cos 符号写 spriteDirection（:35307-35310）、
+        //  372 恒字段缺省 -1 不翻,起扑后 spriteDirection=direction（:35340）。
         //  故 flip 源按相位分流：蓄力读 sharkronSdir,起扑读 facing（曾全程读
         //  facing=蓄力期朝向恒镜像+无摆头,2026-09-03 校正）。
         if (idR === 373 || idR === 372) {
           const sharkFace = e.ai0 === 0 ? e.sharkronSdir : e.facing;
           if (sharkFace > 0) ctx.scale(-1, 1);
+        }
+        // ★370 猪鲨本体 flip（红蓝对抗 B1-E10 实锤,2026-09-03 补）：贴图原生朝右
+        //  （NPC_370.png 目验 眼/獠牙在右,非"近对称"）,原版 hover spriteDirection=
+        //  -direction（:49525/:49618 一带）+ 通用 flip 门 sdir==1（Main.cs:23358）。
+        //  AI 侧 spin 伺服本就按"flip 存在"的原版式写（st.spr=+1 → target+π,e.facing
+        //  ≡ spriteDirection）——曾缺 flip 位=玩家居左时头尾反向（鱼腹朝上）。
+        //  370 ∈ ROTATION_NPC → 通用 facing 镜像被 rotationDriven 排除,此处补
+        //  flip（rotate 后内层 scale,与 113/128/372 同矩阵序）。
+        if (idR === 370) {
+          if (e.facing > 0) ctx.scale(-1, 1);
         }
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -9670,9 +9679,12 @@ export class Renderer {
     if (chain) {
       let px = e.cx, py = e.cy;
       let running = true;
-      let guard = 0;
-      while (running && guard++ < 200) {
+      // 终止性与原版 while(flag7) 同构：有限 dist 每迭代沿锚向恰减 12px →
+      // ⌈dist/12⌉ 次内必达 <20 收尾段（无上限=原版 1:1,最终清零撤计数 guard）；
+      // 唯一病理态=非有限坐标（原版该态 NaN 死循环绘制无输出,此处防御性 break）
+      while (running) {
         const dist = Math.hypot(dx, dy);
+        if (!Number.isFinite(dist)) break;
         if (dist <= 0) break;                          // 球叠锚：链退化（原版 NaN 位置绘制无输出=等价）
         let seg = 12;                                  // :23096
         if (dist < 20) { seg = Math.floor(dist) - 20 + 12; running = false; }   // :23098-23101 尾段（C# (int) 向零截断）

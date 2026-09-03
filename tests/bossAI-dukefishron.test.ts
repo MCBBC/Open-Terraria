@@ -158,7 +158,7 @@ describe('AI_069 猪鲨状态机', () => {
     expect(e.def.defense).toBe(40);              // flag3 ×0.8
   });
 
-  it('expert flag2（血≤15%）→ 二段变身(9) 180t → 狂暴段(10) def=0/dmg×1.1', () => {
+  it('expert flag2（血≤15%）→ 二段变身(9) 180t → 狂暴段(10) def=0/dmg×1.1×1.2', () => {
     const { hooks } = makeHooks(makeWorld(1), { x: 20, y: 55 });   // difficulty=1 expert
     const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
     pastSpawn(e, hooks);
@@ -166,14 +166,33 @@ describe('AI_069 猪鲨状态机', () => {
     tickDuke(e, hooks, 30 + 180);                // 变身 → 二阶段悬浮
     expect(e.ai0).toBe(5);
     e.hp = e.maxHp * 0.15;                       // flag2 血线(:49300)
-    tickDuke(e, hooks, 20);                      // 二阶段悬浮(hoverT=20)
+    tickDuke(e, hooks, 40);                      // 二阶段悬浮(expert flag3&&flag5 档 hoverT=40)
     expect(e.ai0).toBe(9);                       // :49908-49910 flag2 → num33=4 → 9
     tickDuke(e, hooks, 1);                       // 态 9 首拍置 invuln(尾句赋值)
     expect(e.dontTakeDamage).toBe(true);
-    tickDuke(e, hooks, 180);                     // 二段变身(:49886-49931)
+    tickDuke(e, hooks, 180);                     // 二段变身(:50036-50082)
     expect(e.ai0).toBe(10);                      // 狂暴段悬浮
-    expect(e.def.defense).toBe(0);               // flag4 def=0(:49153-49155)
-    expect(e.def.damage).toBe(110);              // flag4 ×1.1
+    expect(e.def.defense).toBe(0);               // flag4 def=0(:49305-49319)
+    // flag4 ×1.1 × expert num 1.2(:49298)——测试世界未绑 ScaleStats → 基值=经典 100
+    // （真实专家流程 defDamage=200 → 264;此处验证的是 AI 乘区逻辑本身）
+    expect(e.def.damage).toBe(132);
+  });
+
+  it('expert 档参数表：悬浮 40t/charge 28·17、flag3&&flag5 档 40·0.6·10(:49320-49353)', () => {
+    const { hooks } = makeHooks(makeWorld(1), { x: 20, y: 55 });
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    pastSpawn(e, hooks);
+    e.hp = e.maxHp * 0.5;
+    tickDuke(e, hooks, 40);                      // expert 一阶段悬浮 = 40t
+    expect(e.ai0).toBe(4);                       // 半血 → 变身
+    // 二阶段 charge 参数:flag5&&flag3 → chargeT=27/chargeSpd=21
+    tickDuke(e, hooks, 180);
+    expect(e.ai0).toBe(5);
+    tickDuke(e, hooks, 40);                      // 二阶段悬浮 40t
+    expect(e.ai0).toBe(6);                       // 冲撞
+    expect(Math.abs(Math.hypot(e.vx, e.vy) - 21)).toBeLessThan(0.01);
+    tickDuke(e, hooks, 27);                      // expert flag5&&flag3 chargeT=27
+    expect(e.ai0).toBe(5);                       // 回悬浮
   });
 
   it('狂暴界（太空/地下/离海洋带）伤害防御 ×2', () => {
@@ -197,17 +216,53 @@ describe('AI_069 猪鲨状态机', () => {
 });
 
 describe('AI_071 鲨鱼龙卷 372/373', () => {
-  it('蓄力 90t → 16 速扑咬,扑咬窗解除无敌', () => {
+  it('蓄力 90t → 16 速扑咬,扑咬窗解除无敌;右扑 rotation=atan2 裸值(无 π)', () => {
     const { hooks } = makeHooks(makeWorld(), { x: 30, y: 55 });
     const e = Enemy.fromVanilla(372, 20 * TILE, 52 * TILE)!;
     tickShark(e, hooks, 1);
     expect(e.ai0).toBe(0);
     expect(e.dontTakeDamage).toBe(true);         // 蓄力段无敌(:35211)
     tickShark(e, hooks, 90);
-    expect(e.ai0).toBe(1);                       // :35242 蓄力期满
+    expect(e.ai0).toBe(1);                       // :35330 蓄力期满
     const spd = Math.hypot(e.vx, e.vy);
-    expect(Math.abs(spd - 16)).toBeLessThan(0.01);   // :35255 ×16
-    expect(e.dontTakeDamage).toBe(false);        // :35381 起扑生效拍解除
+    expect(Math.abs(spd - 16)).toBeLessThan(0.01);   // :35343 ×16
+    expect(e.dontTakeDamage).toBe(false);        // 起扑生效拍解除
+    expect(e.facing).toBe(1);                    // 玩家在右侧 → direction=1
+    expect(Math.abs(e.spin - Math.atan2(e.vy, e.vx))).toBeLessThan(1e-9);  // :35344 无 π
+  });
+
+  it('左扑 rotation=atan2+π(与 flip 并存——红蓝对抗 R1-F1 回归钉)', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 12, y: 55 });    // 玩家在鲨左侧
+    const e = Enemy.fromVanilla(372, 20 * TILE, 52 * TILE)!;
+    tickShark(e, hooks, 90);
+    expect(e.ai0).toBe(1);
+    expect(e.facing).toBe(-1);                   // direction=−1
+    const want = Math.atan2(e.vy, e.vx) + Math.PI;   // :35344-35348
+    expect(Math.abs(e.spin - want)).toBeLessThan(1e-9);
+  });
+
+  it('被困蓄势窗维持无敌(ai1=0 不进起扑支),离块首拍恢复+起扑状态推进', () => {
+    const w = makeWorld();
+    const { hooks } = makeHooks(w, { x: 40, y: 55 });
+    const e = Enemy.fromVanilla(372, 30 * TILE, 52 * TILE)!;
+    w.store.setTile(30, 52, 1);
+    tickShark(e, hooks, 90);
+    expect(e.ai0).toBe(1);
+    expect(e.ai1).toBe(0);                       // 转换拍困块探针 → 0(:35332-35335)
+    expect(e.dontTakeDamage).toBe(true);         // 未进 ai1>=1 支=无敌维持
+    w.store.setTile(30, 52, 0);                  // 离块
+    tickShark(e, hooks, 1);
+    expect(e.ai1).toBe(2);                       // 困块解除置 1 后 ai1>=1 支同拍 ++(:35374-35382 原版同构)
+    expect(e.dontTakeDamage).toBe(false);        // 起扑生效拍解除
+  });
+
+  it('起扑 60t 后恢复重力(ai1>=60 → noGravity=false)', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 60, y: 52 });
+    const e = Enemy.fromVanilla(372, 30 * TILE, 52 * TILE)!;
+    e.bInit = true; e.ai0 = 1; e.ai1 = 59; e.vx = 0; e.vy = 0;
+    e.facing = 1; e.spawnAlpha = 0;
+    tickShark(e, hooks, 2);
+    expect(e.vy).toBeGreaterThan(0);             // ai1 过 60 → applyGravity
   });
 
   it('撞实心块即死（DeathSound 后消散）', () => {

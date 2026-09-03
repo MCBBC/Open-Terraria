@@ -390,7 +390,12 @@ export function drawStripTrail(
         const ph = p * set.ssd[0] + set.ssd[1];
         const sfrac = (ph % 1 + 1) % 1;                        // frc（cmp 分支对 Repeat 无感）
         const dim = 1 - ph * ssdInvW;                          // ★锯齿链（活）
-        const across = uN;                                     // t0.y/t0.z
+        // across = t0.y/t0.z。★极性（2026-09-03 原文复核 VertexStrip.cs:153-204）：
+        // v1=pos+(rot−π/2)向×半宽（XNA y-down 屏幕系的【视觉上侧】）→ TexCoord=(p,d,d)
+        // = across 1；v2=下侧 → (p,0,d) = across 0。CPU 光栅 bestU=sign(ddx·−ey+ddy·ex)
+        // 在视觉【下】侧为正 → uN→1，恰与原版反相 → 取 1−uN（s1 噪声贴图上下不对称
+        // 时翻转可见;Extra_189 sym=0.828 实测）。GL verts 路径 A=+dxC=上=1 本就同原版。
+        const across = 1 - uN;
         const gate = sampleAt(s1im, sfrac, across);            // s1（Repeat 寻址）
         const blade = sampleAt(s0im, sfrac, across);           // s0 全幅扇形贴图（截面+4 波纹本体）
         const edgeRaw = (gate - wEnv) * 2;
@@ -419,7 +424,8 @@ export function drawStripTrail(
       //  execPixel 的 t0x/t0y 形参只覆写 tex[0]/[1]，T[2] 由预写 tex[2] 传入
       //  （codegen 生成体 instr#2 `1/T[2]` 与 VM bindFile case 3 同读 tex 数组）。
       //  输出 oC0 已 UNORM sat——XNA (One,One) 加算 → 'lighter' 直加。★alpha 写
-      //  255（premul 陷阱同 tech 分支注,probe4 实证）。
+      //  255（premul 陷阱同 tech 分支注,probe4 实证）。★across=1−uN（极性同
+      //  tech 分支注：原版上侧=across 1,CPU bestU 反相）。
       if (sm2f) {
         const pairs = spec.expectedPairs ?? n;
         const p = pairs > 1 ? Math.min(1, bestV * (n - 1) / (pairs - 1)) : 0;
@@ -428,7 +434,7 @@ export function drawStripTrail(
         sm2f.tex[3] = 0;
         sm2f.v0[0] = cr; sm2f.v0[1] = cg; sm2f.v0[2] = cb; sm2f.v0[3] = ca;
         const res = sm2f.pass.execPixel(sm2f.c, sm2f.regs, sm2f.tex, sm2f.v0, sm2f.o,
-          p, uN * d, sm2f.smp);
+          p, (1 - uN) * d, sm2f.smp);
         if (res) {
           fd[o] = res[0] * 255;
           fd[o + 1] = res[1] * 255;

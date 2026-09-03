@@ -318,6 +318,7 @@ const out = await page.evaluate(async () => {
 
   // ---- 372/373 镜像回归素材：dash 左/右截图（Node 侧拍屏）----
   const sharkMod = await import('/src/entities/bossAI_duke_moonlord.ts');
+  const dukeFishronAI = sharkMod.dukeFishronAI;
   window.__sharkSetup = (side) => {
     const s = EnemyMod.Enemy.fromVanilla(372, g.player.cx + side * 160, (g.world.groundLevel - 6) * TILE);
     if (!s) return null;
@@ -325,6 +326,8 @@ const out = await page.evaluate(async () => {
     for (let i = 0; i < 92; i++) sharkMod.sharkronAI(s, g, g.player);   // 蓄力 90t → 起扑
     return { id: s.id, spin: s.spin, vx: s.vx };
   };
+  window.__enemyMod = EnemyMod;
+  window.__dukeTick = (d) => { dukeFishronAI(d, g, g.player); };
   window.__sharkWobble = () => {
     const s = EnemyMod.Enemy.fromVanilla(373, g.player.cx + 120, (g.world.groundLevel - 6) * TILE);
     if (!s) return null;
@@ -371,6 +374,26 @@ if (!out?.fatal) {
     const wobble = await page.evaluate(() => window.__sharkWobble());
     out.checks.push([wobble && wobble.includes(-1) && wobble.includes(1) ? '✓' : '✗',
       '373 蓄力摆头 sdir 双值翻转（批4 修复回归）', (wobble ?? []).join(',')]);
+    // ---- 370 本体 flip + 鲨左扑证据（红蓝对抗 B1-E10/R1-F1 回归素材）----
+    const dukeFace = await page.evaluate(() => {
+      const g = window.__swGame;
+      const EnemyMod2 = window.__enemyMod;
+      const d = EnemyMod2.Enemy.fromVanilla(370, g.player.cx - 260, g.player.cy - 60);
+      if (!d) return null;
+      g.entities.add(d, 'enemies');
+      d.bInit = true; d.ai0 = 0; d.ai2 = 0; d.ai1 = 300;   // 直置悬浮态(玩家居左 → spr=+1 → flip)
+      for (let i = 0; i < 30; i++) window.__dukeTick(d);
+      return { facing: d.facing, spin: +d.spin.toFixed(3) };
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    await page.screenshot({ path: SHOT + '/duke-player-left.png' });
+    await page.evaluate(() => {
+      const g = window.__swGame;
+      const d = g.entities.enemies.find((e) => e.vanillaId === 370);
+      if (d) d.dead = true;
+    });
+    out.checks.push([dukeFace && dukeFace.facing > 0 ? '✓' : '✗',
+      '370 玩家居左 facing=spr=+1（Renderer flip 证据帧）', JSON.stringify(dukeFace)]);
   } catch (e) {
     out.checks.push(['✗', '截图段异常', String(e).slice(0, 200)]);
   }

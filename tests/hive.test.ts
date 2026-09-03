@@ -98,7 +98,9 @@ describe('幼虫破坏（KillTile case 231）', () => {
 });
 
 describe('蜜蜂 AI（AI_005 210/211 分支）', () => {
-  it('向玩家追击、速度档 5（含暖机 ±6 限速）', async () => {
+  // ★合跑超时清账：惰性 import(Enemy) 冷加载 + 600t 物理 tick 演化,单跑 ~1.7s;
+  // 合跑 worker 争用下 await import 阶段会被拉长越过缺省 5s cap（同 fake-fish 案）
+  it('向玩家追击、速度档 5（含暖机 ±6 限速）', { timeout: 30_000 }, async () => {
     const { TILE } = await import('../src/core/constants');
     const { Enemy } = await import('../src/entities/Enemy');
     const w = new World(120, 120, 7, 'bee');

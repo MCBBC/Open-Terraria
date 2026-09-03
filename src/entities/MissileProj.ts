@@ -1043,7 +1043,11 @@ export class MagicMissileProj extends Entity {
     if (N < 2) return;
     const flame = this.projId === 34;
     const t2d = flame ? lerpValue(0, 6, this.redT) : 0;   // transitToDark（FlameLashDrawer.cs:14）
-    const byte = (v: number): number => Math.round(v);     // XNA Color 通道 byte 化
+    // XNA Color byte 化两语义（2026-09-03 复核钉死）：Color.Lerp → float ctor =
+    // round；Color.op_Multiply(Color,float) = (byte) cast = 【向零截断】——两路
+    // 不得混用（旧 byte() 单 helper=round 曾把乘法档也 round,fade=1 时 A/8 差 1）
+    const rnd = (v: number): number => Math.round(v);
+    const trn = (v: number): number => Math.max(0, Math.min(255, Math.trunc(v)));
     const trailPts: TrailPt[] = [];
     for (let i = 0; i < N; i++) {
       const p = i / (N - 1);                    // progressOnStrip（0 头=最新 → 1 尾）
@@ -1051,20 +1055,25 @@ export class MagicMissileProj extends Entity {
       let rC: number, gC: number, bC: number, aC: number, hwC: number;
       if (flame) {
         const lv = lerpValue(-0.1 * t2d, 0.7 - 0.2 * t2d, p);            // StripColors :26
-        const ig = byte(lerp(255, 165, t2d * 0.5)), ib = byte(lerp(255, 0, t2d * 0.5));
-        rC = 255;                               // Lerp(Lerp(W,O,·),Red,·).R ≡ 255
-        gC = byte(lerp(ig, 0, lv));
-        bC = byte(lerp(ib, 0, lv));
-        aC = byte(255 * fade / 8);              // result.A /= 8（FlameLashDrawer.cs:29）
+        // Color.Lerp(Color.Lerp(W,O,t2d·0.5), Red, lv)：内层/外层各 round 一次
+        const ig = rnd(lerp(255, 165, t2d * 0.5)), ib = rnd(lerp(255, 0, t2d * 0.5));
+        const og = rnd(lerp(ig, 0, lv)), ob = rnd(lerp(ib, 0, lv));     // 外层 Lerp(·,Red,lv)：R 恒 255
+        // × fade = op_Multiply (byte) 截断（:27 尾乘）——★复核批补：曾整段丢
+        //  fade 因子（带尾 rgb 不衰减,只有 alpha 单边淡出）
+        rC = trn(255 * fade);
+        gC = trn(og * fade);
+        bC = trn(ob * fade);
+        aC = trn(trn(255 * fade) / 8);          // result.A /= 8（byte 整除,:29）
         let wv = lerpValue(0, 0.06 + t2d * 0.01, p);                     // StripWidth :34
         wv = 1 - (1 - wv) * (1 - wv);                                    // :35
         hwC = lerp(24 + t2d * 16, 8, p) * wv;                            // :36 半宽
       } else {
         const k = lerpValue(0, 0.7, p);                                  // StripColors :25
-        rC = byte(lerp(255, 238, k) * fade);    // Lerp(W,Violet,k)×fade
-        gC = byte(lerp(255, 130, k) * fade);
-        bC = byte(lerp(255, 238, k) * fade);
-        aC = byte(255 * fade / 2);              // result.A /= 2（MagicMissileDrawer.cs:27）
+        const vr = rnd(lerp(255, 238, k)), vg = rnd(lerp(255, 130, k)), vb = rnd(lerp(255, 238, k));
+        rC = trn(vr * fade);                    // Lerp(W,Violet,k)×fade（截断）
+        gC = trn(vg * fade);
+        bC = trn(vb * fade);
+        aC = trn(trn(255 * fade) / 2);          // result.A /= 2（byte 整除,:27）
         hwC = lerp(26, 32, lerpValue(0, 0.2, p)) * lerpValue(0, 0.07, p);  // :32 半宽
       }
       trailPts.push({ x: pts[i].x, y: pts[i].y, hw: hwC,

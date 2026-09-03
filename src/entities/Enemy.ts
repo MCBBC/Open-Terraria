@@ -5364,7 +5364,7 @@ export class Enemy extends Entity {
           const u = num146 || 1;
           // ★N 批:出膛音 Item_33（AI_001 首拍 ai[1]==0 :56195-56199,发射位等价结算
           // 与 shootBolt462 先例同构;Eyezor 251 同款 :59335-59378 本位即此处）
-          this.playSfxWav?.('Item_33', 1, this.cx, this.cy);
+          game.playSfxWav?.('Item_33', 1, this.cx, this.cy);
           this.shootDart(game, mx + (num144 / u) * num143 * 3, my + (num145 / u) * num143 * 3,
             num144, num145, num143, 30, 83);                             // :59373 proj 83 伤 30
           this.ai2 = 0;                                                  // :59374
@@ -13563,6 +13563,9 @@ export class Enemy extends Entity {
           noAltarsInWorld: game.worldNoAltars?.() ?? false,
           // ★IIIII61 秘种子掉落条件族数据源（Conditions.cs:1448-1566 + SpecialSeedFeatures）
           dontStarveWorld: !!w.seedFlags?.theConstant,
+          // Main.remixWorld（RemixSeed 四变体条件,Conditions.cs:1282-1412——2026-09-03
+          // R3-B2 接线:曾恒 false 降级=remix 世界猪鲨掉错武器/袋 remix 支死）
+          remixWorld: !!w.seedFlags?.remix,
           tenthAnniversaryWorld: !!w.seedFlags?.tenthAnniversary,
           skyblockLowTiles: !!w.skyblockLowTiles,
           // SpecialSeedFeatures.ShouldDropExtraGel（十周年×醉酒×非 remix×非蜜蜂）

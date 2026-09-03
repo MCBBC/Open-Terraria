@@ -45,9 +45,12 @@ export function crackedChainKill(
     if (!st.inBounds(nx, ny)) continue;
     const t = st.get(nx, ny);
     if (t === 0) continue;
+    // 掷签先于裂砖判定（WorldGen.cs:64326-64344 `tile3.active() && genRand.Next(num16)==0
+    // && type∈{481..483}`——非裂砖活跃邻格也消耗一次掷签，红队 J-1：曾先查 sheet 再掷
+    // =非裂砖邻格零掷，改变同拍后续随机消费序）
+    if ((rng() * den | 0) !== 0) continue;        // genRand.Next(den) == 0
     const sh = TILE_DEFS[t]?.vanilla?.sheet;
     if (!isCrackedSheet(sh)) continue;
-    if ((rng() * den | 0) !== 0) continue;        // genRand.Next(den) == 0
     st.setTile(nx, ny, 0);                         // KillTile(noItem)——清格在此，掉落门在调用方
     killed.push([nx, ny, sh!]);
     crackedChainKill(st, nx, ny, rng, killed);     // 链式（原版 KillTile 递归同构）

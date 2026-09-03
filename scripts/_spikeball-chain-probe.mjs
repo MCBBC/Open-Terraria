@@ -49,10 +49,11 @@ const out = await page.evaluate(async () => {
   g.entities.add(ball, 'enemies');
   ball.hp = ball.maxHp;
   await new Promise((r) => setTimeout(r, 600));
-  // 盒=round(34×1.5)=51（scale 1.5）→ 中心偏移 25.5；锚 y 中心+25.5+8=+33.5
-  res.anchor = { ai1: +ball.ai1.toFixed(1), ai2: +ball.ai2.toFixed(1), expectX: +(sx + 25.5).toFixed(1), expectY: +(sy + 25.5 + 33.5).toFixed(1) };
+  // fromVanilla 把 (sx,sy) 当【盒中心】（e.x = x − w/2, e.y = y − h/2）→ 盒 51×51
+  // 实际顶 = (sx−25.5, sy−25.5)；锚 = AI 帧首 +h/2+8(=33.5) 下移后的中心 = (sx, sy+33.5)
+  res.anchor = { ai1: +ball.ai1.toFixed(1), ai2: +ball.ai2.toFixed(1), expectX: +sx.toFixed(1), expectY: +(sy + 33.5).toFixed(1) };
   // 容差 12px：钉住 +h/2+8 偏移回归（丢偏移=差 33.5>12 必炸;格单位回归差 15 倍必炸）
-  res.anchor.unitOk = Math.abs(ball.ai1 - (sx + 25.5)) < 12 && Math.abs(ball.ai2 - (sy + 25.5 + 33.5)) < 12;
+  res.anchor.unitOk = Math.abs(ball.ai1 - sx) < 12 && Math.abs(ball.ai2 - (sy + 33.5)) < 12;
   const dist = (e) => Math.hypot(e.ai1 - e.cx, e.ai2 - e.cy).toFixed(0);
   res.dists = [];
   for (let i = 0; i < 14; i++) {
