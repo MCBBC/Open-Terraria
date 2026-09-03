@@ -1260,6 +1260,128 @@ const CUT_IGNORE_NATURE = internalIdsOfVanSheets([
 ]);
 // TileID.cs:307 bonusCutTiles = {233}
 const BONUS_CUT_TILES = internalIdsOfVanSheets([233]);
+// ===================== 方块交换 style 族 verdict（2026-09-03 清偿批①） =====================
+// 原版 PlaceThing_ValidTileForReplacement（Player.cs:40232-40351,1457）的
+// 平台/火把/篝火/箱/柜【族目标】面 1:1 移植——原版族段是整函数的早退支，命中族目标
+// 时 verdict 完全由「前置否决门 :40242-40268 → 族段 :40270-40316 → 回落尾段
+// :40318-40350」决定。旧仓近似（tryPlace 内逐 style 除法表,锚 :39299-39349）三向
+// 失真：①无同型门——非同族放置物误放行（尘换 style≠0 的箱/篝火、炬换平台）；
+// ②无液面门——淹没炬/篝火的换型不受 WaterPlacement 拘束；③族段 true 的同型不同
+// style 换被通用链"同型不换"跳过饿死（落到占用格放置链=零动作）。非族目标仍走
+// tryPlace 既有通用门（swapOk,本批不重排）。
+// 数据表（TileID.cs 1457）: :243 Platforms={19,427,435-439}（19 木平台/427 队红/
+// 435-439 队绿蓝黄粉白）、:405 Torches={4}、:407 Campfires={215}、:315 BasicChest=
+// {21,467}（467=Containers2）、:319 BasicDresser={88}；ItemID.cs:1158
+// SortingPriorityRopes={85,965,2996,3077,3078}（绳类物品不做方块交换）;
+// :18 Conversion.Grass={2,23,199,109,477,492}; TileID.cs:217 IgnoresTileReplacement
+// DropCheckWhenBeingPlaced={158,30}; Main.tileMoss（Main.cs:7146-7186 全 11 件）
+// =PlantRules.MOSS_CONVERT_SHEETS 同集。
+const BLOCK_SWAP_DOESNT_PLACE_SHEETS = new Set<number>([2, 60, 70, 109, 199, 23, 661, 662, 633]);
+const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
+const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
+const PLATFORMS_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439]);
+const BASIC_CHEST_SHEETS = new Set<number>([21, 467]);
+const ROPE_ITEM_VIDS = new Set<number>([85, 965, 2996, 3077, 3078]);
+const CONVERSION_GRASS_SHEETS = new Set<number>([2, 23, 199, 109, 477, 492]);
+const IGNORES_REPLACEMENT_DROP_CHECK_SHEETS = new Set<number>([158, 30]);
+/** ReplaceTile_IsValidSolid（WorldGen.cs:63243-63252）：tileSolid && !tileSolidTop
+ *  && (tileRope ? true : !tileFrameImportant)。本仓 TileDef.solid=参与碰撞域
+ *  （≈tileSolid&&!solidTop）、.platform 排平台、.rope=Main.tileRope 代理；
+ *  frameImportant 用 VAN_TILE_FRAME_IMPORTANT 真表——TileDef.framed 是"多格框架"
+ *  建模旗（平台 19 等单格 style 帧族未置）,不同域勿替代（VanillaTileFlags.ts 头注定谳） */
+function replaceTileIsValidSolid(sheet: number): boolean {
+  const d = TILE_DEFS[TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1];
+  if (!d) return false;
+  if (!(d.solid && !d.platform)) return false;
+  return d.rope ? true : !VAN_TILE_FRAME_IMPORTANT.has(sheet);
+}
+export interface FamilySwapCtx {
+  targetSheet: number; placedSheet: number; style: number;
+  targetFrameX: number; targetFrameY: number; targetLiquid: number;
+  placedItemId: number;              // SortingPriorityRopes 判据（HeldItem.type 域）
+  targetDropIsPlacedItem: boolean;   // KillTile_GetItemDrops(dropItem)==HeldItem.type
+  playerOverlapsTargetTile: boolean; // CheckPlatformSolidityForBlockSwap 的 Hitbox.Intersects
+  getGoodWorld: boolean;
+}
+/** 族目标 verdict（行号对照：Player.cs 1457）。只对 BLOCK_SWAP_FAMILY_TARGET_SHEETS
+ *  内目标调用；true/false 即定谳（false 须压掉通用门——族段命中即整函数早退） */
+export function validTileForReplacementFamilies(ctx: FamilySwapCtx): boolean {
+  const ts = ctx.targetSheet, ps = ctx.placedSheet, style = ctx.style;
+  // :40242-40244 SortingPriorityRopes[HeldItem.type] != -1 → false
+  if (ROPE_ITEM_VIDS.has(ctx.placedItemId)) return false;
+  // :40245-40247 Main.tileMoss[type]（放置物为苔）→ false
+  if (MOSS_CONVERT_SHEETS.has(ps)) return false;
+  // :40248-40250 DoesntPlaceWithTileReplacement[type] → false
+  if (BLOCK_SWAP_DOESNT_PLACE_SHEETS.has(ps)) return false;
+  // :40252-40254 DoesntGetReplacedWithTileReplacement[tile.type] → false
+  if (BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS.has(ts)) return false;
+  // :40256-40259 CheckSpecificValidtyCaseForBlockSwap（:40376-40398）：仅当目标
+  // Falling 或目标∈{546 Grate,557 GrateClosed} 才可能拒——族目标二者皆非 → 恒通过
+  // :40261-40264 CheckPlatformSolidityForBlockSwap（:40363-40374）：平台/380 目标
+  // +非平台非 380 放置物+玩家盒相交 → false
+  if ((PLATFORMS_SHEETS.has(ts) || ts === 380) && !PLATFORMS_SHEETS.has(ps) && ps !== 380
+    && ctx.playerOverlapsTargetTile) return false;
+  // :40266-40268 Main.tileCut[tile.type] → false（族 tile 均不在 tileCut 表,恒过）
+  if (TILE_CUT_VANILLA.has(ts)) return false;
+  // :40270-40272 Platforms[tile.type] && tile.type==type → frameY != style*18
+  if (PLATFORMS_SHEETS.has(ts) && ts === ps) return ctx.targetFrameY !== style * 18;
+  // :40274-40290 Torches[tile.type]
+  if (ts === 4) {
+    if (ctx.targetLiquid > 0) {
+      // :40277-40280 放置物为炬（type==4）且 style∉{8,11,17}（水炬三式）→ false
+      if (ps === 4 && style !== 8 && style !== 11 && style !== 17) return false;
+      // :40281-40284 GetTileData(type,style).WaterPlacement != Allowed → false
+      // （liquidSpecOf=TileObjectData 液体两维提取,子样式档回落基档=GetTileData 语义）
+      const spec = liquidSpecOf(ps);
+      if (spec && (spec.liqStyles?.[String(style)] ?? spec.liq).water !== 'allowed') return false;
+    }
+    // :40286-40288 tile.type==type → frameY != style*22
+    if (ts === ps) return ctx.targetFrameY !== style * 22;
+  }
+  // :40292-40301 Campfires[tile.type]（无炬式豁免,液面门只查 WaterPlacement）
+  if (ts === 215) {
+    if (ctx.targetLiquid > 0) {
+      const spec = liquidSpecOf(ps);
+      if (spec && (spec.liqStyles?.[String(style)] ?? spec.liq).water !== 'allowed') return false;
+    }
+    if (ts === ps) return Math.floor(ctx.targetFrameX / 54) !== style;
+  }
+  // :40303-40309 BasicChest[tile.type] && BasicChest[type]：同 style → tile.type!=type
+  // （异型同 style 可换,如 21↔467）,异 style → true（同型异 style 换的判定主体）
+  if (BASIC_CHEST_SHEETS.has(ts) && BASIC_CHEST_SHEETS.has(ps)) {
+    return Math.floor(ctx.targetFrameX / 36) === style ? ts !== ps : true;
+  }
+  // :40311-40316 BasicDresser 同式（frameX/54）
+  if (ts === 88 && ps === 88) {
+    return Math.floor(ctx.targetFrameX / 54) === style ? ts !== ps : true;
+  }
+  // ---- :40318-40350 通用尾段（族段各支 tile.type==type 皆未命中的回落面）----
+  // :40318-40324 tileRope[tile.type]：族 tile 全非绳 → flag 恒 false,不建模
+  // :40326-40328 !flag && tileFrameImportant[type] && !Platforms[type] → false
+  if (VAN_TILE_FRAME_IMPORTANT.has(ps) && !PLATFORMS_SHEETS.has(ps)) return false;
+  // :40330-40332 tile.type==type → false
+  if (ts === ps) return false;
+  // :40334-40336 tile.type==230（CrispyHoneyBlock）&& Main.getGoodWorld → false
+  if (ts === 230 && ctx.getGoodWorld) return false;
+  // :40338-40344 !IgnoresTileReplacementDropCheckWhenBeingPlaced[type]（{158,30}）
+  //   && dropItem==HeldItem.type → false
+  if (!IGNORES_REPLACEMENT_DROP_CHECK_SHEETS.has(ps) && ctx.targetDropIsPlacedItem) return false;
+  // :40346-40348 WouldTileReplacementWork（WorldGen.cs:63209-63242）：放置物/目标至少
+  //   同属一有效族（双实心/双炬/双篝火/双平台/双箱/双柜）或 flag4（两侧皆"实心或平台"）
+  //   才放行。绳邻特例（:63221-63237）需目标为绳——族目标恒不触发；Chest.IsLocked
+  //   （:63239 flag5 末项）仅双箱时可及——双箱已在 :40303 早退,族目标域内不可达
+  //   （注释级豁免,非近似）。
+  if (CONVERSION_GRASS_SHEETS.has(ps) || ps === 633) return false;   // :63216-63218
+  const fSolid = !replaceTileIsValidSolid(ps) || !replaceTileIsValidSolid(ts);
+  const fTorch = !(ps === 4) || !(ts === 4);                // IsValidTorch=Torches 表（:63255）
+  const fCamp = !(ps === 215) || !(ts === 215);             // IsValidCampfire（:63259）
+  const fPlat = !PLATFORMS_SHEETS.has(ps) || !PLATFORMS_SHEETS.has(ts);
+  const f4 = (!replaceTileIsValidSolid(ps) && !PLATFORMS_SHEETS.has(ps))
+    || (!replaceTileIsValidSolid(ts) && !PLATFORMS_SHEETS.has(ts));
+  const fChest = !BASIC_CHEST_SHEETS.has(ps) || !BASIC_CHEST_SHEETS.has(ts);
+  const fDresser = !(ps === 88) || !(ts === 88);            // IsValidDresser（:63271）
+  return !(fPlat && fTorch && fCamp && fSolid && f4 && fChest && fDresser);
+}
 /** Chest.CanDestroyChest（Chest.cs:590-606）：锚格记录含非空物品（id>0 且 stack>0）
  *  → false（不可毁）。world.chests 登记锚=物件左上格（放置链 :13404 注），梳妆台 88
  *  共用同表。破坏门（breakTile→shouldTileSurviveAt）与钻头链（killTileCtx）同源 */
@@ -19974,8 +20096,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (targetType !== 0) {
         const placeVid = viIdFromKey(itemDef.key);
         const tdef = TILE_DEFS[targetType];
-        const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
-        const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
+        // ★2026-09-03：表单源化至模块层 BLOCK_SWAP_DOESNT_*（族 verdict 共用同表,值不变）
+        const NO_SWAP_PLACE = BLOCK_SWAP_DOESNT_PLACE_SHEETS;
+        const NO_SWAP_TARGET = BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS;
         const tsheet = tdef?.vanilla?.sheet ?? -1;
         // ★NO_SWAP_PLACE 原表口径 = DoesntPlace 的 createTile（tile sheet）——
         //  曾误拿物品 vid 比对：草种子族（62/59…）从没被排除，指向实心块时先敲掉
@@ -19996,35 +20119,49 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let swapOk = !NO_SWAP_PLACE.has(placeTileSheet) && !NO_SWAP_TARGET.has(tsheet)
           && !(tdef?.decor ?? false) && !tdef?.framed && solidish
           && !placeFramedNoPlatform;
-        // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
-        // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
-        let styleSwap = false;
-        if (!swapOk) {
+        // ---- style 族交换分支（2026-09-03 清偿批①：1:1 重写自 PlaceThing_ValidTile
+        //  ForReplacement 的平台/火把/篝火/箱/柜族段——1457 Player.cs:40270-40316 +
+        //  前置否决门 :40242-40268 + 回落尾段 :40318-40350,函数见本文件模块层
+        //  validTileForReplacementFamilies）。族目标 verdict【完全】由族段决定
+        //  （原版族段是整函数早退支）：false 也压掉通用门——平台目标曾因 solidish
+        //  `||sheet===19` 逃过 framed 门,炬换平台误放行。style 取实例覆盖后的
+        //  有效值（=HeldItem.placeStyle 域,与 :20112 实例覆盖同口径）;UsingBiomeTorches
+        //  置放面本仓未建（Torch.ts:114 登记）→ 用实际写入的 placeStyle 比较。----
+        let styleVerdict: boolean | null = null;
+        {
           const ts = tdef?.vanilla?.sheet ?? -1;
-          if (ts === 19 && placeVid >= 0) {
-            // 平台(:39299-39301):frameY/18 != placeStyle → 换
-            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 18) !== (itemDef.placeStyle ?? 0);
-          } else if (ts === 4 && placeVid >= 0) {
-            // 火把(:39308-39321):frameY/22 != placeStyle → 换
-            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 22) !== (itemDef.placeStyle ?? 0);
-          } else if (ts === 215 && placeVid >= 0) {
-            // 篝火(:39324-39335):frameX/54 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
-          } else if (tdef?.vanilla?.sheet === 21 && placeVid >= 0) {
-            // 箱(:39337-39344):frameX/36 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 36) !== (itemDef.placeStyle ?? 0);
-          } else if (tdef?.vanilla?.sheet === 88 && placeVid >= 0) {
-            // 柜(:39346-39349):frameX/54 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
+          if (BLOCK_SWAP_FAMILY_TARGET_SHEETS.has(ts)) {
+            const ti = st.idx(tx, ty);
+            const heldInst0 = this.player.inv.heldItem();
+            styleVerdict = validTileForReplacementFamilies({
+              targetSheet: ts,
+              placedSheet: placeTileSheet,
+              style: heldInst0?.placeStyle !== undefined ? heldInst0.placeStyle : (itemDef.placeStyle ?? 0),
+              targetFrameX: st.frameX[ti] ?? 0, targetFrameY: st.frameY[ti] ?? 0,
+              targetLiquid: st.liquid[ti] ?? 0,
+              placedItemId: placeVid,
+              targetDropIsPlacedItem: tdef?.drop === itemDef.key,
+              // CheckPlatformSolidityForBlockSwap :40367-40372——Rectangle(tileX*16,
+              // tileY*16,16,16) ∩ Hitbox（XNA Intersects=严格不等,贴边不算）
+              playerOverlapsTargetTile: this.player.x < (tx + 1) * TILE
+                && this.player.x + this.player.w > tx * TILE
+                && this.player.y < (ty + 1) * TILE
+                && this.player.y + this.player.h > ty * TILE,
+              getGoodWorld: !!this.world.seedFlags?.getGoodWorld,
+            });
+            swapOk = styleVerdict;
           }
         }
-        if (styleSwap) { swapOk = true; }
         if (swapOk) {
           // ★R3-18（W57:62825 IsTileReplaceable;Player.cs:40182 消费,先于镐门）:
           //  wall350 保护墙/上邻仙人掌·倒木/树干·棕榈异型替换拒
           if (!isTileReplaceable(st, tx, ty)) return;
           const tileIdHere = TILE_BY_KEY[itemDef.tile!];
-          if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
+          // ★族段同型换放行（2026-09-03 清偿批①）：原版族段对同型不同 style 明式
+          //  return true（:40270-40316 各支早退,不经 :40330 同型拒/掉落物门）——通用段
+          //  同型恒拒（:40330-40332）,故"同型跳过"只限通用路径;族 verdict=true 时
+          //  同型照走 IsTileReplaceable+镐门+破坏+重放（炬换炬/平台换平台 style 转换）
+          if ((tileIdHere !== targetType && tdef?.drop !== itemDef.key) || styleVerdict === true) {
             // ★原版两道镐门(Player.cs:39186-39232 PlaceThing_TryReplacingTiles,
             //   复审 2026-08-21 用户质疑"替换替代镐子"实锤缺门):
             //   ① GetBestPickaxe()==null(背包 50 格无镐)→ return false——无镐不能替换

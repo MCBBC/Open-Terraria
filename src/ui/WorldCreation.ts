@@ -225,34 +225,50 @@ export class WorldCreationPanel {
     this.refreshSeedIcon();
   }
 
-  /** 多层预览图（UIWorldCreationPreview.cs 1:1：元素 84×84，
+  /** 多层预览图（UIWorldCreationPreview.cs DrawSelf :71-132 1:1：元素 84×84，
    *  边框 (0,0)、内容层 (4,4)——76×76 恰好嵌在 84 边框的 4px 边内。
-   *  曾把 120×120 画布按原尺寸画 → 内容层只有 76²、边框 84²，图小框大） */
+   *  曾把 120×120 画布按原尺寸画 → 内容层只有 76²、边框 84²，图小框大）。
+   *  ★2026-09-03 补缺：背景层 PreviewDifficulty*1（:76-91 Normal1[0/3]/Expert1[1]/
+   *  Master1[2]，大师背景=黑日食图——曾整层漏移植"缺太阳"）+ 压暗 tint：专家/大师下
+   *  Size/Evil/Bunny 三层乘 Color.DarkGray(0.5)（:85/:89 color=DarkGray），大师兔子
+   *  层再 ×1.2=0.6（:125 color*1.2f）。canvas 以 brightness(n) 滤镜逐层等价乘色。 */
   private previewImgs = new Map<string, ImageBitmap | HTMLImageElement>();
   private drawPreview() {
     const ctx = this.previewCtx;
     ctx.clearRect(0, 0, 84, 84);
-    const content = [
+    const diff = this.sel.diff;
+    const bgKey = ['UI_WorldCreation_PreviewDifficultyNormal1',
+      'UI_WorldCreation_PreviewDifficultyExpert1',
+      'UI_WorldCreation_PreviewDifficultyMaster1',
+      'UI_WorldCreation_PreviewDifficultyNormal1'][diff];
+    const tint = (diff === 1 || diff === 2) ? 0.5 : 1;    // Color.DarkGray
+    const bunnyTint = diff === 2 ? 0.6 : tint;            // DarkGray * 1.2f
+    const content: Array<[string, number]> = [
+      [bgKey, 1],
       ['UI_WorldCreation_PreviewSizeSmall', 'UI_WorldCreation_PreviewSizeMedium', 'UI_WorldCreation_PreviewSizeLarge'][this.sel.size],
-      // 此前误写 UI_WWorldCreation_*(双 W)→ 四个难度层 404,预览缺难度层像"错位"
-      ['UI_WorldCreation_PreviewDifficultyNormal2', 'UI_WorldCreation_PreviewDifficultyExpert2', 'UI_WorldCreation_PreviewDifficultyMaster2', 'UI_WorldCreation_PreviewDifficultyCreative2'][this.sel.diff],
       // 同 :200 双 W typo 漏修分支(2026-08-13 枚举 review 实锤)——邪恶层曾 404
       ['UI_WorldCreation_PreviewEvilRandom', 'UI_WorldCreation_PreviewEvilCorruption', 'UI_WorldCreation_PreviewEvilCrimson'][this.sel.evil],
+      // 此前误写 UI_WWorldCreation_*(双 W)→ 四个难度层 404,预览缺难度层像"错位"
+      ['UI_WorldCreation_PreviewDifficultyNormal2', 'UI_WorldCreation_PreviewDifficultyExpert2', 'UI_WorldCreation_PreviewDifficultyMaster2', 'UI_WorldCreation_PreviewDifficultyCreative2'][diff],
     ];
     const border = 'UI_WorldCreation_PreviewBorder';
     // 贴图缓存 + 全层重画（onload 乱序到达也不串层）
     const draw = () => {
       ctx.clearRect(0, 0, 84, 84);
-      for (const key of content) {
+      for (const [key, t] of content) {
         const im = this.previewImgs.get(key);
         const ime = im as unknown as HTMLImageElement | undefined;
-        if (ime?.complete && ime.width) ctx.drawImage(ime, 4, 4);
+        if (ime?.complete && ime.width) {
+          if (t !== 1) ctx.filter = `brightness(${t})`;  // XNA color tint = 逐通道乘
+          ctx.drawImage(ime, 4, 4);
+          ctx.filter = 'none';
+        }
       }
       const b = this.previewImgs.get(border);
       const be = b as unknown as HTMLImageElement | undefined;
       if (be?.complete && be.width) ctx.drawImage(be, 0, 0);
     };
-    for (const key of [...content, border]) {
+    for (const key of [...content.map(([k]) => k), border]) {
       if (this.previewImgs.has(key)) continue;
       const im = new Image();
       im.onload = () => draw();

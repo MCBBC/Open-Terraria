@@ -56,10 +56,30 @@ const out = await page.evaluate(async () => {
     }
     return { lit, litPct: +(lit / total * 100).toFixed(1), bright, cornerA: corner };
   };
-  const draw = (npcId, mode) => new Promise(async (res) => {
+  const draw = (npcId, mode, log) => new Promise(async (res) => {
     const c = mk(96, 96);
     c.style.cssText = 'position:fixed;left:-999px;top:-999px;';
     document.body.appendChild(c);   // drawPortrait 的 isConnected 守卫要求挂载
+    if (log) {
+      const calls = [];
+      const orig = c.getContext.bind(c);
+      c.getContext = function (type, opts) {
+        const ctx = orig(type, opts);
+        if (ctx && !ctx.__wrapped) {
+          for (const m of ['drawImage', 'clearRect', 'fillRect']) {
+            const f = ctx[m].bind(ctx);
+            ctx[m] = (...a) => {
+              calls.push(m + '(' + a.map((x) => typeof x === 'number' ? +x.toFixed(1)
+                : (x && x.src ? String(x.src).split('/').pop() : (x && x.width != null ? `${x.width}x${x.height}` : x))).join(',') + ')');
+              return f(...a);
+            };
+          }
+          ctx.__wrapped = true;
+        }
+        return ctx;
+      };
+      c.__calls = calls;
+    }
     panel.drawPortrait(c, npcId, mode, true);
     let last = stats(c);
     for (let i = 0; i < 40; i++) {
@@ -68,12 +88,12 @@ const out = await page.evaluate(async () => {
       if (last.lit > 0 && i > 6) break;
     }
     c.remove();
-    res(last);
+    res(log ? { stats: last, calls: c.__calls } : last);
   });
-  const zombieP = await draw(3, 'portrait');
-  const zombieG = await draw(3, 'grid');
-  const jungleP = await draw(52, 'portrait');   // pref 命中 → 无叠层
-  const sandP = await draw(541, 'portrait');    // 沙暴叠层（白）MapBGOverlay1
+  const zombieP = await draw(3, 'portrait', true);
+  const zombieG = await draw(3, 'grid', false);
+  const jungleP = await draw(52, 'portrait', false);   // pref 命中 → 无叠层
+  const sandP = await draw(541, 'portrait', false);    // 沙暴叠层（白）MapBGOverlay1
 
   // ---- B. 筛选格 ----
   const rows = bestiaryRows(g.world.bestiary);
