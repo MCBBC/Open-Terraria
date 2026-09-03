@@ -1079,12 +1079,19 @@ export class MagicMissileProj extends Entity {
       trailPts.push({ x: pts[i].x, y: pts[i].y, hw: hwC,
         r: rC / 255, g: gC / 255, b: bC / 255, a: aC / 255 });
     }
-    drawStripTrail(ctx, renderer, {
+    // ★2026-09-03 黑椭圆止血：条带拖尾改入全亮队列（renderer.flushTrailShade 在
+    //  compositeLight 后直绘主画布 'lighter' 加算——原 worldCanvas 直绘经保 α 的
+    //  source-over 回填=次暗像素替换背景落黑块）;mock（探针/测试）无队列方法时
+    //  回退直绘保持既有验证链
+    const spec: TrailSpec = {
       set: flame ? 'FlameLash' : 'MagicMissile',
       pts: trailPts,
       opacity: flame ? lerp(4, 8, t2d) : 2,     // UseOpacity（FlameLashDrawer.cs:17 / :16）
       time: this.globalT,                        // GlobalTimeWrappedHourly（秒,%3600）
-    });
+    };
+    const q = (renderer as unknown as { queueTrailShade?: (s: TrailSpec) => void }).queueTrailShade;
+    if (typeof q === 'function') q.call(renderer, spec);
+    else drawStripTrail(ctx, renderer, spec);
   }
 }
 

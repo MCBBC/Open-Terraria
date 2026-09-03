@@ -90,7 +90,7 @@ export const SLOT_VANILLA_PASSES: Readonly<Record<string, readonly string[]>> = 
 import type { TileStore } from '../TileStore';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World, worldSizeFor, type WorldSize } from '../World';
-import { randomEpitaph } from '../../i18n/RandomText';   // 墓园 pass 碑文（WorldGen.cs:25161）
+import { Lang } from '../../i18n/Lang';   // ★IIIII214 墓园碑文 IndexedFromCategory（cs:25161 掷流面见 spawnGraveyardBiome）
 
 /** 尺寸档 → 原版 maxTilesX/Y（UIWorldCreation 三档 ↔ WorldGen.cs:11163 的 W/H 表）。
  *  尺寸敏感分支索引：RandomizeTreeStyle(:8082)/RandomizeCaveBackgrounds(:8157)
@@ -2054,6 +2054,9 @@ export function spawnGraveyardBiome(
     // cs:25132-25133：Next(-40, 41)（含 +40）
     let num3 = X + rng.int(-num, num);
     let num4 = Y + rng.int(-num, num);
+    // ★IIIII214 休眠探针（照 __swPotCap/__i54Ctx 先例,logging-only 零掷零写）：
+    //   墓园逐候选观测（对拳 x86 rig SW_GRVLOG 同格式）
+    try { (globalThis as { __swGrvCand?: (k: number, x: number, y: number, X: number, Y: number) => void }).__swGrvCand?.(k, num3, num4, X, Y); } catch { /* probe */ }
     // cs:25134-25136：InWorld(num3,num4,50) 且目标格须空气
     if (num3 < 50 || num4 < 50 || num3 >= store.w - 50 || num4 >= store.h - 50) continue;
     if (store.flags[store.idx(num3, num4)]) continue;
@@ -2111,12 +2114,14 @@ export function spawnGraveyardBiome(
     }
     // Sign.ReadSign/TextSign（cs:25158-25162）：ReadSign 按 frameX/Y 归一到对象【左上】格
     // （Sign.cs:26-30 num%=2 / num2%=2 回退），Tombstone.ts 的 {x, y=top} 同口径。
-    // ★IIIII214：TextSign 碑文 = Language.RandomFromCategory("Epitaph", genRand)
-    //   （cs:25161）→ LanguageManager.RandomFromCategory 内 `(random??Main.rand).Next(47)`
-    //   **耗主流 1 掷**；曾走 Math.random 零耗 → 每座成功立碑掷流少 1。此处以生成流
-    //   nextDouble 供给等价 `floor(sample*count)` 选位（zh-Hans/x86 同 47 键）。
+    // ★IIIII214：碑文选位 = Language.RandomFromCategory("Epitaph", genRand)（cs:25161）
+    //   → LanguageManager.RandomFromCategory `(random??Main.rand).Next(value.Count)` ——
+    //   **无条件耗生成主流 1 掷**（x86 Epitaph 类别恒存在,47 键;曾走 Math.random 且
+    //   测试环境 l10n 包未加载时零耗 → 每座成功立碑掷流差 1）。此处显式掷 Next(47),
+    //   文案经 IndexedFromCategory 同索引取（LanguageManager.cs:431 对称位）。
+    const epitaphIndex = rng.int(0, 46);
     if (!world.signs.some((s) => s.x === num3 && s.y === num4 - 1)) {
-      world.signs.push({ x: num3, y: num4 - 1, text: randomEpitaph(() => rng.nextDouble()) });
+      world.signs.push({ x: num3, y: num4 - 1, text: Lang.indexedFromCategory('Epitaph', epitaphIndex) ?? '' });
     }
   }
 }

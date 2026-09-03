@@ -116,7 +116,11 @@ function sm2Atlas(s0v: number, s1v: number, s2v: number, s2pattern?: [number, nu
     if (!path) return null;
     if (!cache.has(path)) {
       if (path.includes('Extra_191') || path.includes('Extra_192')) cache.set(path, mkConstImg(s0v));
-      else if (path.includes('Extra_189') || path.includes('Extra_194')) cache.set(path, s1grad ? mkGradImg(50, 220) : mkConstImg(s1v));
+      else if (path.includes('Extra_189') || path.includes('Extra_194')
+        || path.includes('Extra_195')) cache.set(path, s1grad ? mkGradImg(50, 220) : mkConstImg(s1v));
+      // ★Extra_195 一并进梯度档：极性/接线测走 LightDisc set（s0=s1=Extra_195）
+      //  ——FlameLash 189 已被前序 it 的 extraData imgCache 缓存成常值（跨 it 污染）,
+      //  必须用全新鲜 path 域
       else if (path.includes('Extra_190') || path.includes('Extra_193')) cache.set(path, s2pattern ? mkPatternImg(s2pattern[0], s2pattern[1]) : mkConstImg(s2v));
       else cache.set(path, mkConstImg(s2v));   // 其余（RainbowRod/LightDisc 域）同 s2 常值（活性测试不被 path 域差异污染）
     }
@@ -267,7 +271,9 @@ describe('TrailShader obj55 极性/接线/写域闸门（红队 F1/F5 2026-09-03
     // (rot−π/2) 向,rot=指向邻新点=−π/2·? ——左移 rot=π → widthDir=(π/2)向=(0,1)=下
     // → across=1 在【下】侧。CPU uN：上侧 ddy<0、ex>0 → bestU=ddy·ex<0 → uN→0
     // ⇒ across=uN 下侧→1。梯度 LUT（top=50/bottom=220,v=1=底=亮）⇒ 下侧亮。
-    const buf = runTrail('FlameLash', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
+    // ★LightDisc set（s0=s1=Extra_195 双梯度叠加,差更显著;sm2=-2.8 相位滚动对
+    //  v 向梯度无感,u 相位 time 固定）
+    const buf = runTrail('LightDisc', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
     expect(buf).not.toBeNull();
     const bw = buf!.width;
     const d = buf!.data;
@@ -282,7 +288,7 @@ describe('TrailShader obj55 极性/接线/写域闸门（红队 F1/F5 2026-09-03
   });
 
   it('tex[2] 接线活性：s1 梯度 LUT 下带内输出垂直非均匀（across 进采样,断链→NaN 吸收恒值判红）', () => {
-    const buf = runTrail('FlameLash', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
+    const buf = runTrail('LightDisc', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
     const bw = buf!.width;
     const d = buf!.data;
     // 同列（pxi=20）跨行采样值集合≥3 档（v 梯度连续覆盖;若 tex[2] 断链,

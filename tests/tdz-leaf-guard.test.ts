@@ -14,11 +14,17 @@ const SRC = resolve(__dirname, '../src');
 const read = (p: string) => readFileSync(resolve(SRC, p), 'utf8');
 
 describe('items.ts TDZ 断环守护', () => {
-  it('叶子模块零 import（musicBoxStyles / wiringToolBits）', () => {
-    for (const f of ['data/musicBoxStyles.ts', 'data/wiringToolBits.ts']) {
+  it('叶子模块零运行时 import（musicBoxStyles / wiringToolBits / dungeonFramedSheets / mountData）', () => {
+    for (const f of ['data/musicBoxStyles.ts', 'data/wiringToolBits.ts',
+      'world/gen/vanilla/dungeonFramedSheets.ts', 'data/mountData.ts']) {
       const src = read(f);
-      expect(src.match(/^import\s/m)?.[0]).toBeUndefined();
-      expect(src.match(/from\s+['"]\./)?.[0]).toBeUndefined();
+      // 只禁【运行时】import——`import type` 擦除后零边,不构成 TDZ 面
+      const runtimeImports = (src.match(/^(?!\s*\/\/)import\s(?!type)/m) ?? [])
+        .concat((src.match(/from\s+['"]\./g) ?? []).filter((_, i) => true));
+      // 精确判定:逐行找非 type 的相对导入
+      const bad = src.split('\n').filter((ln) => /^import\s/.test(ln) && !/^import\stype/.test(ln));
+      expect(bad, f + ' 有运行时 import: ' + bad.join(' | ')).toEqual([]);
+      void runtimeImports;
     }
   });
 
@@ -26,6 +32,15 @@ describe('items.ts TDZ 断环守护', () => {
     const src = read('data/items.ts');
     expect(src.includes("from '../world/wiring/devices'")).toBe(false);
     expect(src.includes("from '../world/Wiring'")).toBe(false);
+  });
+
+  it('NTB 不直连 DungeonPass（R4-F5a 断边持久）/ Minecart 的 MOUNT_DATA 来自叶子（R4-F5b）', () => {
+    const ntb = read('world/gen/vanilla/NotTheBeesPass.ts');
+    expect(ntb.includes("from './DungeonPass'")).toBe(false);
+    const mc = read('entities/Minecart.ts');
+    expect(mc.includes('MOUNT_DATA')).toBe(true);
+    expect(mc.includes("from '../data/mountData'") || mc.includes('MOUNT_DATA,')).toBe(true);
+    expect(mc.includes("MOUNT_DATA } from '../entities/Mounts'")).toBe(false);
   });
 
   it('items.ts 顶层经叶子解析音乐盒表与工具位（消费面存活）', async () => {

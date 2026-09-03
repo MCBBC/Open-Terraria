@@ -17437,6 +17437,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  + GetTileCutIgnoreList（4049 无 Regrowth 支,唯 dontHurtNature 配饰 Nature 表） */
   private mowCutTiles(rx: number, ry: number, rw: number, rh: number): void {
     const st = this.world.store;
+    // GetTileCutIgnorance（Player.cs:45003-45014）：nature 表仅在 dontHurtNature
+    // （配饰 5309/5323）时生效——曾恒常忽略=无配饰推割草机过丛林植物/蜂巢/TNT 桶
+    // 永不切割（红队 K-1，2026-09-03 修；惯例同近战 :25008-25011 natureGuard 后置覆盖）
+    const accIds = accessoryVanillaIds(this.player);
+    const natureGuard = accIds.includes(5309) || accIds.includes(5323);
     for (let ty = Math.floor(ry / TILE); ty <= Math.floor((ry + rh - 1) / TILE); ty++) {
       for (let tx = Math.floor(rx / TILE); tx <= Math.floor((rx + rw - 1) / TILE); tx++) {
         const tk = tx * 100000 + ty;
@@ -17446,7 +17451,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (t === POT_TILE) {
           this.swingTileCutSet.add(tk);
           this.smashPot(tx, ty);
-        } else if ((TILE_CUT.has(t) || BONUS_CUT_TILES.has(t)) && !CUT_IGNORE_NATURE.has(t)) {
+        } else if ((TILE_CUT.has(t) || BONUS_CUT_TILES.has(t))
+          && !(natureGuard && CUT_IGNORE_NATURE.has(t))) {
           this.swingTileCutSet.add(tk);
           this.breakTile(tx, ty);
         }

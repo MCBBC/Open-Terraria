@@ -73,65 +73,15 @@ const DOOR_CLOSED_IDS = idsWithSheets(10);
 /** 祭坛 77——CheckTileBreakability 的非困难模式保护（WorldGen.cs:62494-62495） */
 const ALTAR_IDS = idsWithSheets(77);
 
-// ---- 数据表类型（vanilla-mounts.json 提取产物） ----
-// ★滚轴鞋 RollerSkateMovement 已实装（Player.cs:28736-28778,1456 :28037-28062）：
-// 无输入阻尼带 mountRollerSkateStep（Mounts.ts 块尾导出）+ Player.Run 挂点。
-// 1457 两改已按终值落地：减速带 num2 = accRunSpeed−1f（:28743,随装备缩放非旧
-// 字面 6.5f）+ 空中门 flag2 = vy==0|||vx|≤originalRunSpeed(3f,:28752)。
-export interface MountData {
-  buff: number;
-  /** 变身坐骑（52/54-56/61）与滚轴鞋（57-60）原版未设 = 0 */
-  heightBoost?: number;
-  flightTimeMax?: number;
-  fatigueMax?: number;
-  fallDamage?: number;
-  extraFall?: number;
-  runSpeed: number;
-  dashSpeed?: number;
-  swimSpeed?: number;
-  acceleration: number;
-  jumpHeight: number;
-  jumpSpeed: number;
-  usesHover?: boolean;
-  constantJump?: boolean;
-  blockExtraJumps?: boolean;
-  abilityChargeMax?: number;
-  abilityDuration?: number;
-  abilityCooldown?: number;
-  walkingGraceTimeMax?: number;
-  totalFrames: number;
-  playerYOffsets?: number[];
-  xOffset?: number;
-  yOffset?: number;
-  playerHeadOffset?: number;
-  bodyFrame?: number;
-  spawnDust?: number;
-  Minecart?: boolean;
-  CanRideMinecartTracks?: boolean;
-  CanUseWings?: boolean;
-  emitsLight?: boolean;
-  lightColor?: number[];
-  standingFrameStart?: number; standingFrameCount?: number; standingFrameDelay?: number;
-  runningFrameStart?: number; runningFrameCount?: number; runningFrameDelay?: number;
-  flyingFrameStart?: number; flyingFrameCount?: number; flyingFrameDelay?: number;
-  inAirFrameStart?: number; inAirFrameCount?: number; inAirFrameDelay?: number;
-  idleFrameStart?: number; idleFrameCount?: number; idleFrameDelay?: number;
-  idleFrameLoop?: boolean;
-  swimFrameStart?: number; swimFrameCount?: number; swimFrameDelay?: number;
-  dashingFrameStart?: number; dashingFrameCount?: number; dashingFrameDelay?: number;
-  backTexture?: string; frontTexture?: string;
-  backTextureExtra?: string; frontTextureExtra?: string;
-  backTextureGlow?: string; frontTextureGlow?: string;
-  /** Mount.Draw drawType 3 发光层（:5534 frontTextureExtraGlow——钻头二极管
-   *  DrillMount[5]→Mount_Glow_DrillDiode；提取器 slot 表曾漏此键，钻头 8 已手补） */
-  frontTextureExtraGlow?: string;
-}
+// ★2026-09-03 MountData 接口与 MOUNT_DATA 表体抽出至 data/mountData.ts（叶子模块,
+// TDZ 断环——Minecart 顶层面读 MOUNT_DATA 而本模块 import 子树回流 Minecart,红蓝
+// 对抗 R4-F5b）。此处 re-export 兼容全部既有消费方。
+import { MOUNT_DATA, type MountData } from '../data/mountData';
+export { MOUNT_DATA, type MountData };
 
 export const MOUNT_COUNT: number = mountJson.count;
 /** id → 内部名（MountID.cs const 表） */
 export const MOUNT_NAMES: Record<string, string> = mountJson.names;
-/** id → 数据（Mount.cs Initialize() 提取） */
-export const MOUNT_DATA: Record<string, MountData> = mountJson.mounts;
 /** MountID.Sets 能力位（CreateBoolSet/CreateIntSet 展开） */
 export const MOUNT_SETS: Record<string, boolean[]> = mountJson.sets;
 /** 召唤物品 id → 坐骑 id（Item.cs SetDefaults `mountType = N` / DefaultToMinecart） */

@@ -676,6 +676,8 @@ import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
+import type { TrailSpec } from '../fx/TrailShader';
+import { drawStripTrail } from '../fx/TrailShader';
 import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible, bubbleScaleTier } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
@@ -2288,6 +2290,8 @@ export class Renderer {
   moonLordShake: { t: number; x: number; y: number } | null = null;
   /** 眼球伞云盖染料×光照烘焙缓存（key = 染料vid:帧:光照RGB；>96 项整清防膨胀） */
   private readonly eyebrellaDyeCache = new Map<string, HTMLImageElement | HTMLCanvasElement | ImageBitmap>();
+  /** 眼球伞云盖合成后逃逸队列（A4 终版 2026-09-03；drawPlayer 收集、flushEyebrellaCloud 消费） */
+  private eyebrellaQueue: Array<{ wx: number; wy: number; num2: number; src: HTMLImageElement | HTMLCanvasElement | ImageBitmap; cw: number; ch: number }> = [];
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
@@ -2861,6 +2865,7 @@ export class Renderer {
     if (this.gpuDegraded) return;
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
+    this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
     this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
     for (const e of entities) {
       if (e instanceof Bobber && !e.dead) {
@@ -3430,26 +3435,8 @@ export class Renderer {
         }
       }
     }
-    // GL 拖尾合成（天顶剑/女皇剑条带层：ZenithSword.draw 期间已绘入 glfx 画布，
-    // 此处单次 drawImage 回主链——层级=实体之后、表情气泡之前；设备像素直绘）
-    {
-      const gx = this.glfx;
-      const _noComp = (() => { try { return new URLSearchParams(location.search).has('nocomposite'); } catch { return false; } })();
-      if (gx && gx.trailDirty && !gx.unavailable && !_noComp) {
-        const c2 = this.ctx;
-        if (c2) {
-          c2.save();
-          c2.setTransform(1, 0, 0, 1, 0, 0);
-          // ★'lighter' 加算合成（2026-09-02）：层内已按 XNA Additive 累积条带贡献
-          //   （预乘 out.rgb×out.a），主链直加=原版"只增亮零压暗"；source-over 会把
-          //   条带 alpha 当覆盖度吞掉背景（月牙底座发闷）。
-          c2.globalCompositeOperation = 'lighter';
-          c2.drawImage(gx.canvas, 0, 0);
-          c2.restore();
-        }
-        gx.trailDirty = false;
-      }
-    }
+    // GL 拖尾上屏段已挪 flushTrailShade（2026-09-03 黑椭圆止血——与 CPU 条带同在
+    // compositeLight 之后直绘主画布,脱离光照乘+source-over 替换面）
     // 表情气泡（原版 EmoteBubble：实体层之上；本段在世界变换内，世界坐标绘制）
     {
       const eb = this.emoteSheet();
@@ -3714,10 +3701,18 @@ export class Renderer {
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
+    // 7e''. 眼球伞云盖（A4 终版：min(头顶光照,170) 一次性施加的合成后逃逸；
+    //      drawPlayer 收集、此处消费；在翼后=原版 38 层>9 层）
+    this.flushEyebrellaCloud(cam, z);
 
     // 7e'. 1034 星辰鞭线体全亮（flag3 :36747-36749 color2=color 免逐段取光——
     //      固定色 (0,61,153,12) 不受光照合成;WhipProj 收集、此处 worldToScreen 直画）
     this.flushWhipFullbright(cam, z);
+
+    // 7f. 条带拖尾全亮（2026-09-03 黑椭圆止血：原版 Drawer 全程不取光=fullbright，
+    //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
+    //     MissileProj 实体段收集）
+    this.flushTrailShade(cam, z, viewW, viewH);
 
     // 7a-bis. 图格网格（DrawInterface_6_TileGridOption Main.cs:45634-45671 1:1）：
     // 开关=Main.MouseShowBuildingGrid（IngameOptions.cs:745）；智能光标激活时不画；
@@ -10751,6 +10746,15 @@ export class Renderer {
     tex: CanvasImageSource & { width: number; height: number };
     color: [number, number, number, number];
   }> = [];
+  /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
+   *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
+   *  后被 source-over 回主画布=**替换**而非加算（次暗像素 (13,5,3,255) 落近黑椭圆,
+   *  Extra_201/噪声贴图大片暗 texel 必现）。挪到 compositeLight 之后直绘主画布：
+   *  opaque 底 + 'lighter' ⇒ alpha 通道无意义、rgb 加成即全部语义（次暗加≈0 不再
+   *  替换）=原版 Drawer 语义（全程无 Lighting.GetColor=fullbright,亮处光≈1 观感
+   *  不变、暗处拖尾由压暗修正为发光）。收集=queueTrailShade（Arrow/MissileProj
+   *  实体段推）、消费=flushTrailShade（7e' 星辰鞭后）。 */
+  private trailShadeQueue: TrailSpec[] = [];
 
   /** 终极棱镜晶体(633)延迟绘制队列:drawLayer=7 弹体在原版走【玩家绘制层组】
    *  (PlayerDrawLayers.cs:3154 DrawPlayer_27_HeldItem 记 projectileDrawPosition →
@@ -10797,6 +10801,45 @@ export class Renderer {
     ctx.restore();
     ctx.globalAlpha = 1;
     this.whipFullbrightQueue.length = 0;
+  }
+
+  /** 条带拖尾收集（实体段 Arrow/MissileProj 调用——主循环 flushTrailShade 消费） */
+  queueTrailShade(spec: TrailSpec): void {
+    this.trailShadeQueue.push(spec);
+  }
+
+  /** ★条带拖尾全亮 flush（2026-09-03 黑椭圆止血/F2 正修,字段注）：
+   *  compositeLight 之后直绘【主画布】——相机系同 7d' 段公式（rounded cam 消抖）。
+   *  GL 条带层（obj58 tech 路径渲入 glfx.canvas）上屏段一并挪此：渲染发生在
+   *  drawStripTrail 内（flush 循环中）、上屏紧随循环后=同 flush 时序闭环
+   *  （原实体段 :3441 上屏点已删——挪后 GL/CPU 两 face 同步脱离光照乘+source-over）。 */
+  private flushTrailShade(cam: Camera, z: number, viewW: number, viewH: number): void {
+    if (!this.trailShadeQueue.length) return;
+    const queue = this.trailShadeQueue;
+    this.trailShadeQueue = [];
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    ctx.save();
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+    ctx.scale(z, z);
+    ctx.translate(-camRX, -camRY);
+    for (const spec of queue) {
+      try { drawStripTrail(ctx, this, spec); } catch { /* 单条带失败不拖垮帧 */ }
+    }
+    ctx.restore();
+    // GL 条带层上屏（'lighter' 加算——层内已按 XNA Additive 累积,主链直加;黑 texel
+    // rgb=0 加 0 无害,opaque 主画布 alpha 抬升无观感）
+    const gx = this.glfx;
+    if (gx && gx.trailDirty && !gx.unavailable) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(gx.canvas, 0, 0);
+      ctx.restore();
+      gx.trailDirty = false;
+    }
   }
 
   private flushWingGlow(cam: Camera, z: number): void {
@@ -10870,6 +10913,32 @@ export class Renderer {
     }
     ctx.restore();
     this.wingGlowQueue.length = 0;
+  }
+
+  /** 眼球伞云盖合成后冲刷（A4 终版 2026-09-03：v0=min(头顶光照,170) 已烘焙进
+   *  缓存 canvas，此处屏空间直绘——世界锚点经 worldToScreen，±3px 绕行拷贝
+   *  local ×z。三拷贝共享烘焙；绕行 RGB×0.65 仅 globalAlpha 近似（既有登记）。 */
+  private flushEyebrellaCloud(cam: Camera, z: number): void {
+    if (!this.eyebrellaQueue.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of this.eyebrellaQueue) {
+      const [sx, sy] = cam.worldToScreen(e.wx, e.wy);
+      const w = e.cw * z, h = e.ch * z;
+      const drawCopy = (ox: number, oy: number, mul: number) => {
+        ctx.save();
+        ctx.globalAlpha = (100 / 255) * mul;
+        ctx.drawImage(e.src as CanvasImageSource,
+          sx + (ox * z) - w / 2, sy + (oy * z) - h / 2, w, h);
+        ctx.restore();
+      };
+      drawCopy(-3 * Math.cos(e.num2 * Math.PI * 2), -3 * Math.sin(e.num2 * Math.PI * 2), 0.65);
+      drawCopy(3 * Math.cos(e.num2 * Math.PI * 2), 3 * Math.sin(e.num2 * Math.PI * 2), 0.65);
+      drawCopy(0, 0, 1);
+    }
+    ctx.restore();
+    this.eyebrellaQueue.length = 0;
   }
 
   /** ReflectiveArmorShaderData.Apply 1:1（uLightSource：4 点 GetSubLight 梯度 →
@@ -12531,22 +12600,28 @@ export class Renderer {
     //      Projectile_238 竖 6 帧条、frame = miscCounter%18/6；pos = MountedCenter −
     //      (0,h/2)+(0,−70)；两枚 ±3px 绕行拷贝（miscCounter%50/50×2π×±1）×0.65 +
     //      主体一枚；原版色 = min(头顶光照,170) 各通道 + A100；shader=cHead（头盔染料）
-    //      ★2026-09-03 双重光照实锤修正：本站画在 worldCanvas（compositeLight 全屏
-    //      乘光覆盖），缓存烘焙内的 lightAt fill 与全屏乘光叠加 = light² 二次压暗
-    //      （原版只应用一次）——fill 撤销，光照交全屏 pass（5772 doctrine 同款）。
-    //      登记近似：原版 min(通道,170) 亮度帽在全屏乘光架构下不可表达（强光下
-    //      本仓云盖比原版亮），与全部预合成精灵同口径。染料走白烘旧链（预合成面
-    //      禁 v0 化，见 applyDyeLitToImageData 注），受累 tech 暗处偏差归 A1 族登记。 ----
+    //      ★2026-09-03 A4 终版：转【合成后逃逸队列】（flushEyebrellaCloud）——worldCanvas
+    //      版曾 fill×全屏乘光 = light² 双重压暗；纯撤 fill 又丢原版 min(,170) 亮度帽
+    //      （白天比原版亮 50%）。现烘焙 v0=min(头顶光照,170) 一次性施加（帽精确），
+    //      cHead 染料受累 tech 走 v0=光（本站 A1 族偏差一并消除）；非受累/无染料走
+    //      fill（尾乘族等价）。登记偏差：队列在合成后 = 盖过 over-player 弹幕
+    //      （mainGlow 翼同款类）；绕行拷贝 RGB×0.65 仅 alpha 近似（共享烘焙，既有）----
     if (p.eyebrellaCloud && !p.dead && this.atlas) {
       const cloud = this.atlas.ensureVImage('vanilla/Projectile_238.png');
       if (cloud && cloud.width > 0) {
         const frameY = Math.trunc(p.miscCounter % 18 / 6);
         const fh = Math.floor(cloud.height / 6);
-        // cHead 染料（dye[0]）—— 离屏逐 (染料,帧) 组合缓存（光照维度已撤，
-        // 缓存输出与光照无关，由全屏乘光运行时施加）
+        // 头顶光照采样（Top+(0,−30)）→ min(通道,170)（:4162-4175）——16 级量化入键
+        const ltx = Math.floor((p.x + p.w / 2) / TILE), lty = Math.floor((p.y - 30) / TILE);
+        const lc = this.lighting ? this.lighting.lightAt(ltx, lty) : [255, 255, 255];
+        const cap = this.fullbright ? 255 : 170;    // 开灯恒白（与 betsy 同守卫）
+        const q = (v: number) => Math.round((Math.min(cap, v ?? 255) / 255) * 15) / 15;
+        const lq: [number, number, number] = [q(lc[0]), q(lc[1]), q(lc[2])];
         const headDye = p.inv.dye[0];
         const dyeVid = headDye ? viIdFromKey(ITEM_DEFS[headDye.id]?.key ?? '') ?? -1 : -1;
-        const key = `e:${dyeVid}:${frameY}`;
+        const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
+        const litDye = emu !== null && isV0MidTech(emu.tech);   // 合成后站点,v0 化合法
+        const key = `e:${dyeVid}:${frameY}:${lq.map((v) => Math.round(v * 255)).join('.')}`;
         let src = this.eyebrellaDyeCache.get(key);
         if (!src) {
           const cv = document.createElement('canvas');
@@ -12554,30 +12629,38 @@ export class Renderer {
           const c2 = cv.getContext('2d', { willReadFrequently: true });
           if (c2) {
             c2.drawImage(cloud, 0, frameY * fh, cloud.width, fh, 0, 0, cloud.width, fh);
-            const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
             if (emu) {
               const id = c2.getImageData(0, 0, cv.width, cv.height);
               emu.uniforms.uDirection = p.facing;
-              this.applyDyeToImageData(id.data, cv.width, cv.height, emu);
+              if (litDye) {
+                this.applyDyeLitToImageData(id.data, cv.width, cv.height, emu, lq);
+              } else {
+                this.applyDyeToImageData(id.data, cv.width, cv.height, emu);
+              }
               c2.putImageData(id, 0, 0);
+            }
+            if (!litDye) {
+              // 无染料/非受累：v0=min(光照,170) 以乘色 fill 施加（destination-in 复原 alpha）
+              c2.globalCompositeOperation = 'multiply';
+              c2.fillStyle = `rgb(${Math.round(lq[0] * 255)},${Math.round(lq[1] * 255)},${Math.round(lq[2] * 255)})`;
+              c2.fillRect(0, 0, cv.width, cv.height);
+              c2.globalCompositeOperation = 'destination-in';
+              c2.drawImage(cloud, 0, frameY * fh, cloud.width, fh, 0, 0, cloud.width, fh);
+              c2.globalCompositeOperation = 'source-over';
             }
             src = cv;
           } else src = cloud;
-          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 容量闸（染料×帧空间小,常态不触）
+          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 容量闸（染料×帧×光照16级）
           this.eyebrellaDyeCache.set(key, src);
         }
         const vx = p.cx, vy = p.y + p.h / 2 - p.h * 0.5 - 70;   // MountedCenter − h/2 + (0,−70)
         const num2 = (p.miscCounter % 50) / 50;
-        const drawCopy = (ox: number, oy: number, mul: number) => {
-          ctx.save();
-          ctx.globalAlpha = (100 / 255) * mul;
-          ctx.drawImage(src as CanvasImageSource,
-            vx + ox - cloud.width / 2, vy + oy - fh / 2, cloud.width, fh);
-          ctx.restore();
-        };
-        drawCopy(-3 * Math.cos(num2 * Math.PI * 2), -3 * Math.sin(num2 * Math.PI * 2), 0.65);
-        drawCopy(3 * Math.cos(num2 * Math.PI * 2), 3 * Math.sin(num2 * Math.PI * 2), 0.65);
-        drawCopy(0, 0, 1);
+        // 合成后逃逸：光照已烘焙进 src（一次性），直绘会再吃全屏乘光=light² 复发
+        this.eyebrellaQueue.push({
+          wx: vx, wy: vy, num2,
+          src: src as HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+          cw: cloud.width, ch: fh,
+        });
       }
     }
     // ---- 坐骑身前层（Mount.Draw frontTexture：玩家本体之后绘制）----

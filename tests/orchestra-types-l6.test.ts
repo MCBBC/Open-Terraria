@@ -484,6 +484,16 @@ describe('生产者接线结构断言（module8 上行/clientOnly 直驱按原 n
     expect(has('src/stats/SnapStrike.ts', 'snapStrikeDust(game, kind, t.cx, t.cy, msX);')).toBe(true);
     expect(has('src/stats/SnapStrike.ts', 'const num = Math.min(0.12, mvX / 256);')).toBe(true);
     expect(has('src/stats/SnapStrike.ts', '0.3 + 1.4 * rand()')).toBe(false);
+    // ★W-A1（2026-09-03）：本/远端统一"producer 传原值/消费端按原文换算"——环带收端
+    //   预除 256 退役（曾与本地传原值分叉;kind0 钳(X/256,.12)/kind2 num=1f 常量两式
+    //   已下沉 orchestraFx 内按原文逐 kind 消费）
+    expect(has('src/core/Game.ts',
+      'snappingStoneRingFx(this, kind, s.posX, s.posY, s.moveX, Math.max(0, s.moveY | 0));')).toBe(true);
+    expect(has('src/core/Game.ts', 's.moveX / 256')).toBe(false);
+    expect(has('src/fx/orchestraFx.ts', 'const ms = Math.min(0.12, mvX / 256);')).toBe(true);
+    // ★W-A2：受击者拍=完整 Spawn_ 本地面（音+环带+尘,Projectile.cs:14431-37 clientOnly:false）
+    expect(has('src/stats/SnapStrike.ts',
+      'snappingStoneRingFx(game, kind, ctx.victimBox.cx, ctx.victimBox.cy, vh, 0);')).toBe(true);
   });
   it('★F5 Next(a,b) 上界开区间 off-by-one 三站（Next(-20,40)=60 值/Next(-5,5)=10 值）', () => {
     expect(has('src/entities/Arrow.ts', 'Math.floor(Math.random() * 60) - 20')).toBe(true);

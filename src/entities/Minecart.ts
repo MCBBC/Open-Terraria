@@ -22,9 +22,10 @@ import { minecartNpcRampage } from './MountCombat';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import {
-  MOUNT_DATA, canKillTileAt, checkTileBreakabilityAt, shouldTileSurviveAt,
+  canKillTileAt, checkTileBreakabilityAt, shouldTileSurviveAt,
   type KillTileCtx, type MountData,
 } from './Mounts';
+import { MOUNT_DATA } from '../data/mountData';   // ★叶子直读（红蓝对抗 R4-F5b TDZ 断环,顶层 CART_MOUNT_TEXTURES 块消费）
 import { canHitLine } from '../physics/LineOfSight';
 import { applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';

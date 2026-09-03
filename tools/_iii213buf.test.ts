@@ -23,11 +23,11 @@ it('iii213 buffer/chk/skp diff', () => {
       console.log(`  集合差: only-x86=${onlyK.length} [${onlyK.slice(0, 8).join(' ')}] only-js=${onlyJ.length} [${onlyJ.slice(0, 8).join(' ')}]`);
     }
     // chk/skp 位图
-    const kc = readFileSync(`${OUT}/x86-iter1/K.chk`), jc = readFileSync(`${OUT}/jdump1/K.chk-${anchor}`);
+    const kc = readFileSync(`${OUT}/x86-iter1/K.chk-${anchor}`), jc = readFileSync(`${OUT}/jdump1/K.chk-${anchor}`);
     let dChk = 0; const chkCells: string[] = [];
     for (let i = 0; i < W * H; i++) if (kc[i] !== jc[i]) { dChk++; if (chkCells.length < 12) chkCells.push(`(${i % W},${(i / W) | 0})k${kc[i]}/j${jc[i]}`); }
     console.log(`  checking bit diff=${dChk} ${chkCells.join(' ')}`);
-    const ks = readFileSync(`${OUT}/x86-iter1/K.skp`), jsn = readFileSync(`${OUT}/jdump1/K.skp-${anchor}`);
+    const ks = readFileSync(`${OUT}/x86-iter1/K.skp-${anchor}`), jsn = readFileSync(`${OUT}/jdump1/K.skp-${anchor}`);
     let dSkp = 0; const skpCells: string[] = [];
     for (let i = 0; i < W * H; i++) if (ks[i] !== jsn[i]) { dSkp++; if (skpCells.length < 8) skpCells.push(`(${i % W},${(i / W) | 0})k${ks[i]}/j${jsn[i]}`); }
     console.log(`  skip bit diff=${dSkp} ${skpCells.join(' ')}`);

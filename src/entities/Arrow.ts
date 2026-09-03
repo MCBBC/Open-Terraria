@@ -2629,8 +2629,10 @@ export class Arrow extends Entity {
       if ((isGemBolt(this.projId) || this.projId === 1120) && this.gemTrail.length >= 4) {
         const cols = GEM_TRAIL_COLORS[this.projId] ?? GEM_TRAIL_COLORS[121];
         const intensity = this.projId === 123 ? 3 : 2;
-        drawStripTrail(ctx, r, {
-          set: 'RainbowRod',
+        // ★2026-09-03 黑椭圆止血：拖尾入全亮队列（flushTrailShade 合成后直绘主画布
+        //  'lighter'）;mock 无队列方法回退直绘（探针/测试链保持）
+        const spec = {
+          set: 'RainbowRod' as const,
           pts: buildPts(this.gemTrail, 9, (v) => v < 0.45 ? lerpC(cols[2], cols[1], v / 0.45)
             : lerpC(cols[1], cols[0], (v - 0.45) / 0.55)),
           // ★红队 F3（2026-09-03）：SM2 face 的 uOpacity=独立乘子（instr#16 mul c0），
@@ -2638,7 +2640,10 @@ export class Arrow extends Entity {
           //  废弃近似公式的亮度校准，字节码面下恒 2× 偏暗
           opacity: intensity,
           time: nowS,
-        });
+        };
+        const q = (r as unknown as { queueTrailShade?: (sp: typeof spec) => void }).queueTrailShade;
+        if (typeof q === 'function') q.call(r, spec);
+        else drawStripTrail(ctx, r, spec);
       } else if (this.stripTrailPts.length >= 4 &&
         (this.projId === 34 || this.projId === 16 || this.projId === 106)) {
         // 顶点色=vanilla 各 Drawer.StripColors（pv: 0=头新→1=尾旧）
@@ -2658,12 +2663,15 @@ export class Arrow extends Entity {
         //  原值（106 旧 1 系近似档归位;106 实际出生走 Boomerang、本支准死代码）。34 原版
         //  =Lerp(4,8,t2d)（FlameLashDrawer.cs:17）——本支无 redT 通道,维持 2（死分支）
         const op = 2;
-        drawStripTrail(ctx, r, {
-          set: this.projId === 34 ? 'FlameLash' : this.projId === 106 ? 'LightDisc' : 'MagicMissile',
+        const spec2 = {
+          set: (this.projId === 34 ? 'FlameLash' : this.projId === 106 ? 'LightDisc' : 'MagicMissile') as 'FlameLash' | 'LightDisc' | 'MagicMissile',
           pts: buildPts(this.stripTrailPts, hw, colFn),
           opacity: op,
           time: nowS,
-        });
+        };
+        const q2 = (r as unknown as { queueTrailShade?: (sp: typeof spec2) => void }).queueTrailShade;
+        if (typeof q2 === 'function') q2.call(r, spec2);
+        else drawStripTrail(ctx, r, spec2);
       }
     }
     // ---- aiStyle 24 书族十份 oldPos 渐隐拖尾（Main.cs:35251 94/:35299 1114——

@@ -320,6 +320,12 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
     if (it.createTile != null) vanillaSheets.add(it.createTile);
   }
   for (const [, sheet] of CAGE_ITEM_SHEET) vanillaSheets.add(sheet);
+  // ★legacy 摆件 128/269（2026-09-03 十五批备B 收尾）：extract-itemfunc 后写语义修正后，
+  // 498/1989 case 体内 createTile 死码首赋值（128→470 :7317+7320 / 269→470 :21287+21290）
+  // 不再入库，而原版破坏 legacy 摆件照返 CheckMan→498（:46976）/CheckWoman→1989
+  // （:47102）——运行时 vanillaPlaceableTileKeys 已显式补列（items.ts 同批），本独立
+  // oracle 同源补列保持对拍同口径（与上方 '模特 legacy 128/女模特 legacy 269' 用例闭环）
+  for (const sheet of [128, 269]) vanillaSheets.add(sheet);
 
   const multiDropNull = TILE_DEFS.filter((d): d is NonNullable<(typeof TILE_DEFS)[number]> =>
     !!d && d.key.startsWith('v_') && d.vanilla?.sheet !== undefined && d.drop === null

@@ -583,7 +583,7 @@ const DELEGATE_EXPANSION = {
   2781: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
   2786: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
   3466: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
-  2209: { healMana: 400 },
+  // 2209 已退役（自然产出 healMana=400,见上方退役注）——留空位防序号误读
 };
 for (const [id, expansion] of Object.entries(DELEGATE_EXPANSION)) {
   // 委托语义：基底字段打底、本 case 显式字段覆盖——现有条目（如六锯钻的 {shoot:N}）

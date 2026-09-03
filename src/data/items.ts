@@ -1967,6 +1967,15 @@ export function vanillaPlaceableTileKeys(): ReadonlySet<string> {
       if (it.createTile != null) add(it.createTile);
     }
     for (const [, sheet] of CAGE_ITEM_SHEET) add(sheet);
+    // ★legacy 摆件 128/269（2026-09-03 十五批备B 收尾）：extract-itemfunc 后写语义修正
+    //  后，498/1989 case 体内 createTile 死码首赋值（128→470 :7317+7320 / 269→470
+    //  :21287+21290；3977 269→475 :35353+35356）不再入库——这两 sheet 在 1458 无终态
+    //  placer（1.4.4 模特改版），
+    //  仅旧存档导入面存在；原版破坏返还 CheckMan→498（:46976）/CheckWoman→1989
+    //  （:47102），本仓 place_v_128/269 legacy 金标（tests/multi-tile-drop.test.ts
+    //  '告示牌 55/模特 legacy 128/女模特 legacy 269'）依赖本集成员资格，显式补列
+    //  （同 CAGE_ITEM_SHEET 先例）
+    for (const sheet of [128, 269]) add(sheet);
     _vanillaPlaceableTiles = s;
   }
   return _vanillaPlaceableTiles;
