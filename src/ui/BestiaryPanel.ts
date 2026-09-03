@@ -1309,7 +1309,9 @@ export class BestiaryPanel {
       const cx = canvas.getContext('2d');
       if (!cx || !iw) return;
       cx.imageSmoothingEnabled = false;
-      cx.clearRect(0, 0, canvas.width, canvas.height);
+      // ★不在此 clear（2026-09-03 探针实锤）：此 clearRect 会把 paintWithBg 刚铺的
+      //   底图/装饰叠层在 NPC 表晚到重画时整层抹掉——grid/portrait 双档底图恒失。
+      //   清底职责归 paintWithBg（合成链起点）；无底图路径在调用侧显式清。
       // 原版图鉴（UnlockableNPCEntryIcon → DrawNPCDirect）按 NPC 原生帧尺寸×scale
       // 直接画、不放大填框（僵尸帧 36×56 就是比绿史莱姆 40×48×0.9 高；巨怪靠
       // NPCBestiaryDrawOffset 表逐个调）。只缩不放：超画布才等比缩（防溢出）
@@ -1419,7 +1421,10 @@ export class BestiaryPanel {
       return;
     }
     bstLoadSheet(atlas, texPath, (img) => {
-      if (img) paint(img);
+      if (!img) return;
+      const cx = canvas.getContext('2d');
+      if (cx) { cx.imageSmoothingEnabled = false; cx.clearRect(0, 0, canvas.width, canvas.height); }
+      paint(img);
     });
   }
 

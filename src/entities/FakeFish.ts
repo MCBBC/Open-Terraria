@@ -597,13 +597,14 @@ export interface LakeSparkle {
 
 const sparkles: LakeSparkle[] = [];
 
-/** FadingParticle（Spawn_LakeSparkle :1336-1353）包络 1:1：寿命 50..140t、加速 =
+/** FadingParticle（Spawn_LakeSparkle :1336-1353）包络 1:1（export 供测试直测,
+ *  生产侧仅 spawnFakeFishInWater 调用）：寿命 50..140t、加速 =
  *  MovementVector/60/寿命、白星随机亮度（ColorTint=(255,255,255,0)×NextFloat,
  *  α=0 纯加法档）、FadeIn/Out 各 45%、自旋 NextFloatDirection×2π/32×|move|/32 钳。
  *  ★2026-09-03 包络逐值对齐（登记④清偿）：①自旋幅值 NextFloatDirection 均匀
  *  [−1,1)（旧 sign 抽签恒满幅 2π/32=系统性偏快）;②掷序 = life→亮度→rot→rotVel→
  *  scale（:1342→:1347→:1350→:1351→:1353 原文序,旧 baseAlpha 末掷 = 掷流错位）。 */
-function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number): void {
+export function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number): void {
   const life = 50 + 90 * randFloat();         // SetTypeInfo(num=50+90×rand)（:1342）
   const baseAlpha = randFloat();              // ColorTint=(255,255,255,0)×NextFloat（:1347）
   const rot = randFloat() * Math.PI * 2;      // Rotation（:1350）

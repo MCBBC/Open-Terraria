@@ -19,6 +19,17 @@ for (let i = 0; i < 90; i++) {
   if (await p.evaluate(() => !!window.__swGame).catch(() => false)) break;
 }
 await p.evaluate(async () => { await window.__swGame.newWorld('12345', 4200, 1200, () => {}); });
+// 关掉首访欢迎弹窗(若有)
+for (let i = 0; i < 10; i++) {
+  const gone = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')];
+    const ok = btns.find(b => /我已知晓|已知晓|OK|知道了/.test(b.textContent || ''));
+    if (ok) { ok.click(); return false; }
+    return !document.querySelector('button');
+  }).catch(() => true);
+  if (gone) break;
+  await new Promise(r => setTimeout(r, 400));
+}
 for (let i = 0; i < 240; i++) {
   await new Promise(r => setTimeout(r, 1000));
   if (await p.evaluate(() => window.__swGame?.world?.store?.liquid?.length > 0

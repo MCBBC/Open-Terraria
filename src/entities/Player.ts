@@ -1825,10 +1825,10 @@ export class Player extends Entity {
     if (mech.autoPaint) autoPaint = true;
     // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
     if (this.panicTime > 0) move += 1.0;   // PanicSpeedBoost（:25034 满档 +1.0=+100%;旧 +0.5 是 1.4.0 旧值,2026-08-13 修）
-    // moveMult 只含 moveSpeed 加成（原版 accRunSpeed 不随 moveSpeed 缩放——靴族
-    // 冲刺走【慢爬坡段】到 6/6.75,旧折算 runSpeed/3-1 把 sprint 当移速乘区致
-    // Flurry 装备即 +1.0 移速上限,2026-08-13 拆除;accRunSpeed 单独经 equipStats）
-    const moveMult = 1 + move;
+    // （moveMult 的终值折算迁至聚合尾部——下方 sumFx/SUMMON_GEAR 主属性面、
+    //   DD2_PIECE_FX 甲件 moveSpeed、套装 sb.move 三处 += 都在原折算点之后,
+    //   曾被 1831 旧折算吞掉 = 忍者套 +20%/诡异腿 +20%/DD2 胸腿 moveSpeed 全失效,
+    //   2026-09-03 DD2 主属性批接线时由 1834 诡异护腿用例当场暴露）
     // 多段跳按原版消费优先序排列（JumpMovement :20875-20922 else-if 链）：
     // 坐骑族 Basilisk>WallOfFleshGoat>Santank>Unicorn 在前（:20875-20893）,瓶族
     // Sandstorm>Blizzard>Fart>Sail>Cloud（:20899-20922,Cloud 兜底）。
@@ -2058,6 +2058,13 @@ export class Player extends Entity {
       wing = null;
       rocketBoots = 0;
     }
+    // moveMult 终值折算（原 acc 为 1831 位置,在 sumFx/DD2_PIECE_FX/sb.move 三处
+    // += 之前 = 吞掉其后全部来源——原版 moveSpeed 是单累计字段,Update :26205
+    // maxRunSpeed *= moveSpeed 在一切装备来源之后）。语义注：只含 moveSpeed 加成
+    // （accRunSpeed 不随 moveSpeed 缩放——靴族冲刺走【慢爬坡段】到 6/6.75,旧折算
+    // runSpeed/3-1 把 sprint 当移速乘区致 Flurry 装备即 +1.0 移速上限,2026-08-13
+    // 拆除;accRunSpeed 单独经 equipStats）
+    const moveMult = 1 + move;
     return {
       def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
       dmgMelee, dmgRanged, dmgMagic,   // 箭袋 arrowDmg 移入 arrowStack（仅箭吃，:3820）

@@ -208,6 +208,7 @@ import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitForNpc, portraitUrl, type DialoguePortraitPayload } from '../data/npcPortraits';
 import { oreRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
+import { VAN_TILE_FRAME_IMPORTANT } from '../world/gen/vanilla/VanillaTileFlags';
 import type { GenState } from '../world/gen/vanilla/GenState';
 import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlayerEmote } from '../render/EmoteBubble';
 // M3 聊天命令系统（Terraria.Chat.Commands 全目录）+ Boss 伤害统计（/boss伤害）
@@ -463,6 +464,7 @@ import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
+import { fadingParticles } from '../fx/FadingParticles';
 import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJob, hardmodeRepairJob, type HardmodeJob } from '../world/gen/vanilla/HardmodePass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
@@ -8332,14 +8334,14 @@ export class Game implements GameHooks {
             const bst = w.store;
             const bx = (Math.floor(Math.random() * (bst.w - 50)) + 100) * TILE;
             const by = Math.floor(Math.random() * Math.floor(bst.h * 0.05)) * TILE;
-            // !Collision.SolidCollision(position,32,32)：盒 [x-16,y-16,x+16,y+16] 无实心
-            let clear = true;
-            for (let tx = Math.floor((bx - 16) / TILE); clear && tx <= Math.floor((bx + 15.999) / TILE); tx++) {
-              for (let ty = Math.floor((by - 16) / TILE); ty <= Math.floor((by + 15.999) / TILE); ty++) {
-                if (bst.inBounds(tx, ty) && bst.isSolid(tx, ty)) { clear = false; break; }
-              }
-            }
-            if (clear) {
+            // !Collision.SolidCollision(position,32,32)（:72236）：position = NewProjectile
+            // 出生位（左上锚）——盒 = [bx,by,bx+32,by+32)。★2026-09-03 对齐批：曾手写
+            // [bx-16,bx+16) 中心化盒=差一格象限（SolidCollision 首参是盒左上非中心,
+            // Collision.cs:2713-2746）；本行换用冰雹臂同款精确盒（WeatherRenderer.
+            // solidCollisionBox——tileSolid&&!solidTop、半砖下缩 8、已致动豁免、世界钳制
+            // 与 (-1,+2) 外沿扫描全 1:1）。此改会平移既有陷阱落点分布一格（落点密度
+            // 语义不变,仅象限对齐原版）
+            if (!solidCollisionBox(bst, bx, by, 32, 32)) {
               const wind = Math.max(-16, Math.min(16, w.weather.windSpeedCurrent * 16));
               this.entities.add(new TrapShot(bx, by, wind, 8, 70, 'boulder'), 'projectiles');
             }
@@ -9185,54 +9187,9 @@ export class Game implements GameHooks {
     for (let di = 0; di < this.dmgNumbers.length; di++) {
       const d = this.dmgNumbers[di];
       if (d.label) {
-        // ---- PopupText.Update（PopupText.cs:651-748）1:1（1458 同文）----
-        // alpha 呼吸（:659-669 ±0.01 钳 0.7-1.0）
-        d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.01;
-        if (d.alpha <= 0.7) { d.alpha = 0.7; d.alphaDir = 1; }
-        if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
-        // 抗重叠推离（:683-703）：文本命中盒（Measure×scale,高×0.8）相交且自身
-        // 在上（y 小 / 同 y 槽序在前）→ 双方寿命 = activeTime + 15×num（num =
-        // numActive 全场活跃数钳 3，:688-691——非相交对计数！UpdateItemText :760
-        // 先算 numActive 再逐个 Update）
-        const m0 = combatMeasure(d.label, false);
-        const hw = m0.w * (d.scale ?? 1), hh = m0.h * 0.8 * (d.scale ?? 1);
-        let overlapped = false;
-        for (let oi = 0; oi < this.dmgNumbers.length; oi++) {
-          const o = this.dmgNumbers[oi];
-          if (o === d || !o.label) continue;
-          const mo = combatMeasure(o.label, false);
-          const ow = mo.w * (o.scale ?? 1), oh = mo.h * 0.8 * (o.scale ?? 1);
-          if (d.x + hw / 2 <= o.x - ow / 2 || d.x - hw / 2 >= o.x + ow / 2) continue;
-          if (d.y + hh / 2 <= o.y - oh / 2 || d.y - hh / 2 >= o.y + oh / 2) continue;
-          if (d.y < o.y || (d.y === o.y && di < oi)) {
-            overlapped = true;
-            const ext = 60 + 15 * Math.min(labelActiveCount, 3);
-            o.life = ext;
-            d.life = ext;
-          }
-        }
-        // 运动分链（:705-714）：无重叠 0.86 衰减（scale 达标再 ×0.4 急停）；
-        // 有重叠且仍在上升 → 额外 -0.2 上推分离
-        if (!overlapped) {
-          d.vy *= 0.86;
-          if ((d.scale ?? 1) === 1) d.vy *= 0.4;
-        } else if (d.vy > -6) {
-          d.vy -= 0.2;
-        } else {
-          d.vy *= 0.86;
-        }
-        d.vx = (d.vx ?? 0) * 0.93;
-        d.x += d.vx ?? 0;
-        d.y += d.vy;
-        // 寿命（:715-731）：≤0 进收缩期 scale -0.03/t，<0.1 消亡；>0 生长 +0.1 至 1
-        d.life--;
-        if (d.life <= 0) {
-          d.scale = (d.scale ?? 1) - 0.03;
-          if ((d.scale ?? 1) >= 0.1) this.dmgNumbers[wn++] = d;
-        } else {
-          d.scale = Math.min(1, (d.scale ?? 1) + 0.1);
-          this.dmgNumbers[wn++] = d;
-        }
+        // ---- PopupText.Update label 支（:651-748）1:1——本体抽为模块级纯函数
+        // popupLabelStep（文件尾,tests/popup-antioverlap.test.ts 直测）----
+        if (popupLabelStep(d, this.dmgNumbers, di, labelActiveCount)) this.dmgNumbers[wn++] = d;
         continue;
       }
       d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.05;
@@ -17681,8 +17638,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 永不切割（红队 K-1，2026-09-03 修；惯例同近战 :25008-25011 natureGuard 后置覆盖）
     const accIds = accessoryVanillaIds(this.player);
     const natureGuard = accIds.includes(5309) || accIds.includes(5323);
-    for (let ty = Math.floor(ry / TILE); ty <= Math.floor((ry + rh - 1) / TILE); ty++) {
-      for (let tx = Math.floor(rx / TILE); tx <= Math.floor((rx + rw - 1) / TILE); tx++) {
+    // 扫描域=ItemCheck_CutTiles 同式（:45021-45024,右/下各 +1 格外沿——2026-09-03
+    // 对齐批补齐,近战挥击循环同改）
+    for (let ty = Math.floor(ry / TILE); ty <= Math.floor((ry + rh) / TILE); ty++) {
+      for (let tx = Math.floor(rx / TILE); tx <= Math.floor((rx + rw) / TILE); tx++) {
         const tk = tx * 100000 + ty;
         if (this.swingTileCutSet.has(tk)) continue;
         const t = st.get(tx, ty);
@@ -25450,8 +25409,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Regrowth 支——原式 if(!fromTrap&&dontHurtNature) result=Ignore…，次序照抄
       const shouldIgnore = natureGuard ? CUT_IGNORE_NATURE
         : regrowthStaff ? CUT_IGNORE_REGROWTH : null;   // shouldIgnore=TileCutIgnore.None
-      for (let ty = Math.floor(mHY / TILE); ty <= Math.floor((mHY + mHH - 1) / TILE); ty++) {
-        for (let tx = Math.floor(mHX / TILE); tx <= Math.floor((mHX + mHW - 1) / TILE); tx++) {
+      // 扫描域（:45021-45024）：minX=X/16、maxX=(X+W)/16+1（exclusive）——右/下各多
+      // 含一格外沿（弹侧 CutTilesAt :15454 同款 +1,ProjCutTiles 已 1:1;★2026-09-03
+      // 补齐:曾用 (X+W-1)/16 严格内沿=少砍一格,金网/近战共此式）
+      for (let ty = Math.floor(mHY / TILE); ty <= Math.floor((mHY + mHH) / TILE); ty++) {
+        for (let tx = Math.floor(mHX / TILE); tx <= Math.floor((mHX + mHW) / TILE); tx++) {
           const tk = tx * 100000 + ty;
           if (this.swingTileCutSet.has(tk)) continue;
           const t = this.world.store.get(tx, ty);
@@ -25537,7 +25499,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));
       }
     }
-    if (isNet) return;   // 网不砍草不打怪（金/防火网的 cutExtraTiles 登记近似省略）
+    // ★网早退=1:1（2026-09-03 定谳,旧注"cutExtraTiles 登记近似省略"失实退役）：
+    //  三网 SetDefaults 全程无 damage 写面（Item.cs:21306/29542/39481——1991/3183/
+    //  4821 均 damage=0）→ 原版 `if (sItem.damage > 0)` 段（CutTiles 普通支+MeleeHit
+    //  NPCs+PVP+Hammush :43990-44008）对网恒不运行;砍切已由上方独立支承担（金/防火
+    //  网 :43984-43989 cutExtraTiles:true,早于 damage 门——与"只砍不打"差分一致）。
+    //  故此处早退=跳过城镇 NPC/敌怪两命中循环,不砍任何已砍之面。
+    if (isNet) return;
     // 城镇 NPC:巫毒窄门(原版 ApplyItemToNPC/Damage_PVE_Inner :11970-11972——
     // 向导 22 需装备向导巫毒娃娃 267、裁缝师 54 需裁缝娃 1307,其余免疫玩家近战);
     // 同一挥击只中一次(swingHitSet 按 Entity.id 去重)。★任务②：城镇 NPC 同在
@@ -25765,7 +25733,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ---- ★R2-07(e) Keybrand 671（:44680-82 → NPC.KeyBrandStrike NPC.cs:81998-82012）：
       //      命中编排 = RequestParticleSpawn(clientOnly:false, Keybrand,
       //      PositionInWorld=Hitbox.ClosestPointInRect(bestSwordSpot),invoker=plr :82005）
-      //      ——L5 长尾批接线:keybrandFx + module8 上行;Player.cs:35153 滑行面登记未接。
+      //      ——L5 长尾批接线:keybrandFx + module8 上行。
+      //      ★"Player.cs:35153 滑行面"清偿定谳（2026-09-03 亲读复核）：35153 =
+      //      Player.TryBouncingBlocks（:35102-35180,1457）内 `if (flag2)` 死支——
+      //      `bool flag2 = false`（:35106）声明后全函数【无任何置位句】（仅 :35134
+      //      读判）,Keybrand 编排支（:35135-35158,clientOnly:true 本地 Keybrand 尘）
+      //      构造性不可达;Terarria1458 Player.cs:35100-35178 同构同判（1458 增量面
+      //      未复活该支）——非"击杀敌怪后的玩家滑行位移"（KeyBrandStrike 全文无
+      //      玩家速度/位移写面,vanilla 无此机制）。故不接=1:1（接了才是发明行为）,
+      //      tests/keybrand-bounce-deadbranch.test.ts 对 1457/1458 双基线钉死该判,
+      //      未来基线若复活 flag2 置位即爆红提示补接。
       //      ★并行冲突注：此站若与同文件其它批编辑交错,以 224xx 行号锚位重放为准
       if (swingVid === 671) {
         const tK = e.hp / e.maxHp;
@@ -34833,8 +34810,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  不同名各自独立飘字（20 槽上限，满员替换 position.Y 最小者 = FindNextItem
    *  TextSlot :770-784）。颜色 = 稀有度（PrepareEffects :370-380 GetPopupRarity
    *  Color Item.cs:633-696；vi_ 物品查 vanilla-itemrare.json，同 UI.ts 惯例）。
-   *  登记近似：①抗重叠推离（Update :683-703 命中盒互推+寿命延长）未移植——同帧
-   *  拾取多种物品可能短暂重叠；②文本样式/运动阻尼沿用仓内 13px 描边白系。 */
+   *  登记近似：②文本样式/运动阻尼沿用仓内 13px 描边白系（①抗重叠推离
+   *  PopupText.Update :678-704 已在 dmgNumbers 飘字池消费段 1:1 入位——命中盒
+   *  （Measure×scale、高×0.8）相交且自身在上（y 小/同 y 槽序在前）→ 双方
+   *  lifeTime = activeTime(60) + 15×min(numActive,3) 重钉 + 上推速度链（!flag
+   *  0.86 衰减、flag>−6 逐拍 −0.2）,tests/popup-antioverlap.test.ts 锁定）。 */
   showPickupLabel(itemKey: string, picked = 1, prefix?: number) {
     // Main.showItemText（IngameOptions.cs:705 → PopupText.NewText 族 PopupText.cs:120）：
     // 关 = 拾取名飘字整链不触发
@@ -38983,4 +38963,62 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (Math.abs(p.vx) > 0.3 && p.onGround) p.animTime += Math.abs(p.vx);
     else p.animTime = 0;
   }
+}
+
+/** PopupText.Update 的物品名（label）支（PopupText.cs:651-748 1:1,1458 同文）——
+ *  dmgNumbers 飘字池消费段抽出的纯函数（tests/popup-antioverlap.test.ts 直测;
+ *  Game.update 主循环逐 label 调用,压缩写回 wn 留在调用侧）。形参：
+ *   d = 自身飘字（label 字段在位）;pool = 全池引用（互推扫描需全池）;
+ *   di = 自身池序（whoAmI 等价）;labelActiveCount = numActive 帧首快照
+ *   （UpdateItemText :760-773——先计数后逐个 Update,非相交对计数）。
+ *  返回 false = 本拍消亡（life≤0 且 scale<0.1）,调用侧不再写回压缩槽。 */
+export function popupLabelStep(
+  d: DamageNumber, pool: DamageNumber[], di: number, labelActiveCount: number,
+): boolean {
+  // alpha 呼吸（:659-669 ±0.01 钳 0.7-1.0）
+  d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.01;
+  if (d.alpha <= 0.7) { d.alpha = 0.7; d.alphaDir = 1; }
+  if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
+  // 抗重叠推离（:678-704）：文本命中盒（Measure×scale,高×0.8）相交且自身
+  // 在上（y 小 / 同 y 槽序在前）→ 双方寿命 = activeTime + 15×num（num =
+  // numActive 全场活跃数钳 3，:688-691——非相交对计数！UpdateItemText :760
+  // 先算 numActive 再逐个 Update）
+  const m0 = combatMeasure(d.label!, false);
+  const hw = m0.w * (d.scale ?? 1), hh = m0.h * 0.8 * (d.scale ?? 1);
+  let overlapped = false;
+  for (let oi = 0; oi < pool.length; oi++) {
+    const o = pool[oi];
+    if (o === d || !o.label) continue;
+    const mo = combatMeasure(o.label, false);
+    const ow = mo.w * (o.scale ?? 1), oh = mo.h * 0.8 * (o.scale ?? 1);
+    if (d.x + hw / 2 <= o.x - ow / 2 || d.x - hw / 2 >= o.x + ow / 2) continue;
+    if (d.y + hh / 2 <= o.y - oh / 2 || d.y - hh / 2 >= o.y + oh / 2) continue;
+    if (d.y < o.y || (d.y === o.y && di < oi)) {
+      overlapped = true;
+      const ext = 60 + 15 * Math.min(labelActiveCount, 3);
+      o.life = ext;
+      d.life = ext;
+    }
+  }
+  // 运动分链（:705-714）：无重叠 0.86 衰减（scale 达标再 ×0.4 急停）；
+  // 有重叠且仍在上升 → 额外 -0.2 上推分离
+  if (!overlapped) {
+    d.vy *= 0.86;
+    if ((d.scale ?? 1) === 1) d.vy *= 0.4;
+  } else if (d.vy > -6) {
+    d.vy -= 0.2;
+  } else {
+    d.vy *= 0.86;
+  }
+  d.vx = (d.vx ?? 0) * 0.93;
+  d.x += d.vx ?? 0;
+  d.y += d.vy;
+  // 寿命（:715-731）：≤0 进收缩期 scale -0.03/t，<0.1 消亡；>0 生长 +0.1 至 1
+  d.life--;
+  if (d.life <= 0) {
+    d.scale = (d.scale ?? 1) - 0.03;
+    return (d.scale ?? 1) >= 0.1;
+  }
+  d.scale = Math.min(1, (d.scale ?? 1) + 0.1);
+  return true;
 }

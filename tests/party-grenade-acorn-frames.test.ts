@@ -3,7 +3,9 @@
 // UseSound Item1/anim20/noUseGraphic/noMelee/value sellPrice(0,0,0,50)=250/dmg30/kb6/
 // rare2/ranged）；弹 588 SetDefaults（P.cs:6378-6385 14×14/aiStyle16/penetrate-1）；
 // PrepareBombToBlow :47658-47661 {30,397,517,588} 只 Resize(128²)+kb8=伤保物品伤 30；
-// 引信 180（NewProjectile :10971 缺省表无 588）；Kill_ExplodeTiles :79027 裂砖专破；
+// 引信 180（NewProjectile per-Type 表显式行 P.cs:11051-11054 `if (Type == 588)
+// timeLeft = 180`,SW-R3 2026-09-03 F-8 勘误——旧注"缺省表无 588"系把 :10971 缺省档
+// 与 :11045-11074 per-Type 表混读;值恰等缺省,行为无差）；Kill_ExplodeTiles :79027 裂砖专破；
 // Kill 视觉专支 :80190-80259。销售渠道=NPC 208 派对女孩（NPCInteractions.cs:505
 // Shop(208,13)→Chest.cs case 13 :2321-2323）唯一门=玩家背包已有 3548（HasItem）。
 // 1088：projFrames[1088]=2（Main.cs:8594）+帧支 P.cs:48058-48063 首拍一次性 rand(2)
@@ -33,7 +35,7 @@ describe('SW-P1 3548 Happy Grenade→弹 588 链', () => {
     const src = readFileSync('src/core/Game.ts', 'utf8');
     expect(src).toContain(': cw.shoot === 588 ? cw.damage');            // dmg 原式透传（:47658-47661 组不写 damage）
     expect(src).toContain('cw.shoot === 588 ? 64');                     // hurtBox=64（Resize 128² 半宽）
-    expect(Game.EXPLODE_FUSE[588]).toBeUndefined();                     // 表外回落 180（:10971）
+    expect(Game.EXPLODE_FUSE[588]).toBe(180);                           // SW-R3 2026-09-03（F-8）：per-Type 表显式行 :11051-11054
     expect(Game.EXPLODE_RADIUS[588]).toBeUndefined();                   // Kill_ExplodeTiles 闸门表外（:79027）
     expect(Game.EXPLODE_CRACKED_PROJ.has(588)).toBe(true);              // 裂砖专破 {30,397,517,588}
     expect(BOMB_DAMAGE_KEEP_16.has(588)).toBe(true);                    // damage=0 清零豁免（:48044）

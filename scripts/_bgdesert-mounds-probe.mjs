@@ -14,7 +14,13 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await page.evaluate(() => { try { localStorage.clear(); } catch { /* ignore */ } });
+await page.evaluate(async () => {
+  try {
+    localStorage.clear();
+    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
+    for (const d of dbs) indexedDB.deleteDatabase(d.name);
+  } catch { /* ignore */ }
+});
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 1500));
 await page.mouse.click(8, 8);
@@ -22,7 +28,10 @@ for (let i = 0; i < 6 && !(await page.$('.sw-vsel')); i++) {
   await page.click('[data-act=sp]').catch(() => {});
   await page.waitForSelector('.sw-vsel', { timeout: 8000 }).catch(() => {});
 }
-if (!(await page.$('.sw-vsel'))) throw new Error('世界/角色面板未出现');
+if (!(await page.$('.sw-vsel'))) {
+  await page.screenshot({ path: `${OUT}/probe-boot-fail.png` });
+  throw new Error('世界/角色面板未出现(见 probe-boot-fail.png)');
+}
 // 建角色(若无)
 if (!(await page.$('.sw-char-row input[type=text]'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -42,6 +51,17 @@ await page.keyboard.type(SEED);
 await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-opt')][0]?.click());
 await page.click('[data-act=create]');
 console.log('世界生成中…');
+// 关欢迎弹窗(若出现)
+for (let i = 0; i < 10; i++) {
+  const gone = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')];
+    const b = btns.find((x) => /我已知晓|已知晓/.test(x.textContent ?? ''));
+    if (b) { b.click(); return true; }
+    return false;
+  }).catch(() => false);
+  if (gone) break;
+  await new Promise((r) => setTimeout(r, 1000));
+}
 await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 420000, polling: 1000 });
 // 手动 fixedUpdate 步进驱动生成应用(headless rAF 可能被节流),直到 running 且沙柱成形
 let loc = null;
@@ -50,6 +70,7 @@ for (let t = 0; t < 400 && !loc; t++) {
     const g = window.__swGame;
     if (!g?.world) return;
     for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1 / 60); } catch { break; } }
+    try { g.player.hp = g.player.maxHp; if (g.entities?.enemies) g.entities.enemies.length = 0; } catch { /* */ }
   }).catch(() => {});
   loc = await page.evaluate(() => {
     const g = window.__swGame;
@@ -57,21 +78,25 @@ for (let t = 0; t < 400 && !loc; t++) {
     const st = g.world.store;
     const w = st.w, h = st.h;
     const ty = st.type;
+    const keys = window.__swTiles ?? {};
+    const SAND = keys['v_53_sand_block'] ?? keys['sand'] ?? 53;
     let best = -1, bestN = -1;
     for (let x = 60; x < w - 60; x += 4) {
       let n = 0;
-      for (let y = 60; y < (g.world.groundLevel | 0) + 80 && y < h; y++) if (ty[x + y * w] === 53) n++;
+      for (let y = 60; y < (g.world.groundLevel | 0) + 80 && y < h; y++) if (ty[x + y * w] === SAND) n++;
       if (n > bestN) { bestN = n; best = x; }
     }
-    if (bestN < 120) return { bestN, running: !!g.running, done: false };
-    let gy = 0; while (gy < h - 10 && !st.isSolid(best, gy)) gy++;
-    g.player.x = best * 16 + 8; g.player.y = (gy - 6) * 16;
+    if (bestN < 60) return { bestN, sandId: SAND, running: !!g.running, done: false };
+    // 直接落用户原相机位:tile x2537,从 y250 向下找落点(避开顶部悬土)
+    const px = 2537;
+    let py = 250; while (py < h - 10 && !st.isSolid(px, py)) py++;
+    g.player.x = px * 16 + 8; g.player.y = (py - 6) * 16;
     g.player.vx = 0; g.player.vy = 0;
-    if (g.world.clock) g.world.clock.timeOfDay = 0.5;
-    return { x: best, gy, bestN, groundLevel: g.world.groundLevel, treeX: g.world.treeX ?? null, running: !!g.running, done: true };
+    if (g.world) g.world.timeOfDay = 0.5;
+    return { x: px, gy: py, bestN, groundLevel: g.world.groundLevel, treeX: g.world.treeX ?? null, running: !!g.running, done: true };
   });
   if (loc && !loc.done) {
-    if (t % 20 === 0) console.log(`poll ${t}: bestSand=${loc.bestN} running=${loc.running}`);
+    if (t % 20 === 0) console.log(`poll ${t}: bestSand=${loc.bestN} sandId=${loc.sandId} running=${loc.running}`);
     loc = null;
   }
 }
@@ -98,9 +123,31 @@ const state = await page.evaluate(() => {
 });
 console.log('bg状态:', JSON.stringify(state));
 const canvasRect = await page.evaluate(() => {
-  const c = document.querySelector('canvas');
+  const c = document.querySelectorAll('canvas')[1];
   const r = c.getBoundingClientRect();
   return { x: r.x, y: r.y, w: r.width, h: r.height };
+});
+// 关欢迎弹窗(进世界后才弹出)
+for (let i = 0; i < 8; i++) {
+  const gone = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /我已知晓/.test(x.textContent ?? ''));
+    if (b) { b.click(); return true; }
+    return false;
+  }).catch(() => false);
+  if (gone) break;
+  await new Promise((r) => setTimeout(r, 500));
+}
+// 定稿传送+白天+清敌(截图前最终态)
+await page.evaluate(() => {
+  const g = window.__swGame;
+  const st = g.world.store;
+  let py = 250; while (py < st.h - 10 && !st.isSolid(2537, py)) py++;
+  g.player.x = 2537 * 16 + 8; g.player.y = (py - 6) * 16;
+  g.player.vx = 0; g.player.vy = 0;
+  g.player.hp = g.player.maxHp;
+  if (g.entities?.enemies) g.entities.enemies.length = 0;
+  if (g.world) { g.world.timeOfDay = 0.5; }
+  for (let i = 0; i < 90; i++) { try { g.fixedUpdate(1 / 60); } catch { break; } }
 });
 const shot = async (name) => {
   await page.screenshot({ path: `${OUT}/${name}.png`, clip: { x: canvasRect.x, y: canvasRect.y, width: canvasRect.w, height: canvasRect.h } });

@@ -47,8 +47,9 @@ describe('SW-R3 F-2+M-4：hurtBox16 = PrepareBombToBlow Resize 全表（P.cs:476
   });
   it('F-5：108 链爆/电路触发 hurtBox=130、164 地雷=64（SetDefaults 盒）', () => {
     expect(gameSrc).toMatch(/explodeAt\(ex, ey, 500, 10, true, 130, 0, 108\)/);
-    expect(gameSrc).toMatch(/ctx\.explode\(x, y, 500, 10, true, 130, 108\)/);
-    expect(gameSrc).toMatch(/ctx\.explode\(x, y, 250, 0, false, 64, 164\)/);
+    const devices = readFileSync(new URL('../src/world/wiring/devices.ts', import.meta.url), 'utf8');
+    expect(devices).toMatch(/ctx\.explode\(x, y, 500, 10, true, 130, 108\)/);
+    expect(devices).toMatch(/ctx\.explode\(x, y, 250, 0, false, 64, 164\)/);
   });
   it('F-8：NewProjectile per-Type 表有 588→180（P.cs:11051-11054）', () => {
     expect(Game.EXPLODE_FUSE[588]).toBe(180);

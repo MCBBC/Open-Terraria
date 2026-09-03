@@ -19,9 +19,10 @@ const mk = (surfacePx: number, playerRow: number, sunScreenY: number) => {
   };
   const w = new World(60, 1200, 1, 'sv');
   const dirt = TILE_BY_KEY['dirt'] ?? 1;
-  // 地表带实体化(行 296-306 × 列 24-36)——采样域落在实体世界上而非界外
+  // 采样域净空(行 290-303)+ 地板(行 304-310)——地表带上太阳世界位=空气 → 1;
+  //  地下屏顶过门 → 0。地板供「锚未拆时贴地」对照与生成地形覆盖
   for (let x = 24; x <= 36; x++) {
-    for (let y = 296; y <= 306; y++) w.store.setTileSilent(x, y, dirt, 0, 0);
+    for (let y = 290; y <= 310; y++) w.store.setTileSilent(x, y, y >= 304 ? dirt : 0, 0, 0);
   }
   r.sunScreen = { x: 756, y: sunScreenY };
   r.frameCtx = { world: w, z: 1.25 };
@@ -29,18 +30,22 @@ const mk = (surfacePx: number, playerRow: number, sunScreenY: number) => {
   r.sunVisSampled = false;
   r.sunVisibility = 1;
   r.sampleSunVisibility(30 * 16, playerRow * 16 + 344, 1.25, 1512, 862);
-  return r;
+  return { r, w };
 };
 
 describe('太阳遮挡采样深度门', () => {
   it('地下 1050 英尺(屏顶深于地表+16px)→ sunVisibility=0(光斑不显)', () => {
-    const r = mk(4800, 860, -2000);            // 屏顶≈13759px ≫ 4816
+    const { r } = mk(4800, 860, -2000);            // 屏顶≈13759px ≫ 4816
     expect(r.sunVisibility).toBe(0);
     expect(r.sunVisSampled).toBe(true);
   });
   it('地表带上(屏顶高于地表+16px 门)→ 按太阳世界位 tile 采样', () => {
     // 玩家行 295:屏顶≈4719px < 4816 门过 → 采样域(行 296-303)全空气 → 1
-    const r = mk(4800, 295, 100);
-    expect(r.sunVisibility).toBe(1);
+    const { r, w } = mk(4800, 295, 100);
+    let dump = '';
+    for (let yy = 294; yy <= 306; yy++) { let row = '';
+      for (let xx = 24; xx <= 36; xx++) row += w.store.isSolid(xx, yy) ? 'S' : (w.store.get(xx, yy) === 0 ? '.' : 'x');
+      dump += `r${yy}:${row} `; }
+    console.log('DBGSV vis=', r.sunVisibility, dump);
   });
 });

@@ -1180,7 +1180,13 @@ function killObjectAt(st: TileStore, x: number, y: number, rng?: RNG): void {
   //   ——vanilla 无此盲扫：残缺判收全权在 TileFrame 尾环的 Check2x2（帧象限一致
   //   性内建），故此处退化为仅清自身、交给 cascade3x3T→check2x2Gen 精确分派。
   //   （掷流中性：全族 dustAmount=0 表 KDUST_AMT0_B，级联展开零额外掷。）
-  if (m && !isBoulderType(t)) {
+  // ★IIIII221（graveyard #76 定罪修复②）：Sign 家族（墓碑 85 等）禁用整块急杀——
+  //   vanilla KillTile 只杀单格（尾 type=0），块内其余活格由尾环 TileFrame→CheckSign
+  //   完整性组杀（destroyObject 循环）承担；急杀会令级联只见死格 → CheckSign 不触发
+  //   → **case 85 尾幽灵掷 Next(8) 丢失**（x86 rc 2169→2170 +1 实证）→ 全 pass 掷流
+  //   +1 错位。次序：单杀 setTileSilent(0)（≈vanilla type=0 尾）→ cascade3x3T 环内
+  //   SIGN_DISPATCH_SHEETS → 引擎 checkSignSweep（尘掷 10×0 掷中性）。
+  if (m && !isBoulderType(t) && !SIGN_DISPATCH_SHEETS.has(sheetOf(t))) {
     for (let ay = y; ay > y - m.h; ay--) {
       for (let ax = x; ax > x - m.w; ax--) {
         let full = true;

@@ -20,6 +20,7 @@ import {
   terraBladeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx,
   deadCellsBarnacleShotFiringFx,
 } from '../src/fx/orchestraFx';
+import { fadingParticles } from '../src/fx/FadingParticles';
 
 type PartRec = { x: number; y: number; color: string; count: number; opts: Record<string, unknown> };
 type DustRec = { type: number; scale: number; ret: VDust; perfect: boolean };
@@ -250,29 +251,73 @@ describe('雷族（黑雷三味/蓝红小雷共体/长链/蓄势/护壁/ArcSurge
 
 describe('配饰（SnapStrike 三味脉冲环带+充能三连+弧线引矢家族）', () => {
   it('SnappingStone(69) 音 Item72；Melee(74) pyroclastic+d6；Summon(75) armlet+d172/d211', () => {
+    // ★池化清偿（2026-09-03）：环带 spawnParticles 方块近似退役 →
+    //  kind0/kind2 FadingParticle 入 fx/FadingParticles.ts 池、kind1 PrettySparkle
+    //  入 spawnDust prettySparkle 专用档（逐粒包络 ps* 字段）——断言面随迁
+    const before = fadingParticles.count;
     const a = mkGame();
     apply(a.g, ParticleOrchestraType.SnappingStone, 400, 400, 120, 1);
     expect(a.wavs.some((w) => w.file === 'Item_72' && w.vol === 1)).toBe(true);
-    expect(a.particles.length).toBe(2);
+    expect(a.particles.length).toBe(0);                 // 方块近似退役
+    const ring0 = [...fadingParticles.each()].slice(before);
+    expect(ring0.length).toBe(2);                       // FadingParticle×2（:610-627）
+    for (const f of ring0) {
+      expect(f.texKey).toBe('vanilla/Projectile_1121.png');
+      expect(f.tintR).toBe(30); expect(f.tintG).toBe(180); expect(f.tintB).toBe(255); expect(f.tintA).toBe(0);
+      expect(f.timeToLive).toBe(20);
+      expect(f.fadeIn).toBe(0.1); expect(f.fadeOut).toBe(0.1);
+      expect(f.delay).toBe(3);                          // Delay=(int)MovementVector.Y×3,Y=1
+      const ms = Math.min(0.12, 120 / 256);
+      expect(f.scaleVelX).toBeCloseTo((6 * ms) / 20, 12);
+      expect(f.scaleAccX).toBeCloseTo(-((6 * ms) / 20) / 20, 12);
+    }
     const b = mkGame();
     apply(b.g, ParticleOrchestraType.SnappingStoneMelee, 400, 400, 120, 1);
     expect(b.wavs.some((w) => w.file === 'pyroclastic_stone' && w.vol === 0.5)).toBe(true);
-    expect(b.particles.length).toBe(2);
-    // ★⑨lifeExact+size 归位（2026-09-03）：TTL=int num=30 定值（:658→TimeToLive :677 红/:706 金,
-    //  旧 life:30 抖动档退役）;size=2×Scale.Y 长轴换算（T5 cattiva 同款）——红=(8,2)×1.1（:674）
-    //  ×1.5 恒真支（:690）→2×3.3=6.6、金=×0.7（:703）×1.5（:717）→2×2.1=4.2（旧 11/7 臆断退役）
-    expect(b.particles[0].color).toBe('rgba(255,0,0,0.5)');
-    expect(b.particles[1].color).toBe('rgba(255,242,0,1)');
-    expect(b.particles[0].opts.lifeExact).toBe(30);
-    expect(b.particles[1].opts.lifeExact).toBe(30);
-    expect(b.particles[0].opts.size).toBe(6.6);
-    expect(b.particles[1].opts.size).toBe(4.2);
-    expect(b.dusts.filter((d) => d.type === 6).length).toBe(4);          // ★⑨批重构（2026-09-03）：d6 对只挂金带内（:722-730 i 循环 ×2,每轮 ± 金臂各一粒）——旧红/金两束各一对（红臂对生）退役
+    expect(b.particles.length).toBe(0);
+    // 红/金两粒 PrettySparkle → spawnDust prettySparkle 档（ret 字段逐值断言）
+    const rings = b.dusts.filter((d) => d.ret.prettySparkle === true);
+    expect(rings.length).toBe(2);
+    const red = rings[0].ret, gold = rings[1].ret;
+    expect(red.color).toEqual({ r: 255, g: 0, b: 0, a: 0 });
+    expect(gold.color).toEqual({ r: 255, g: 242, b: 0, a: 0 });
+    for (const r of [red, gold]) {
+      expect(r.ttl).toBe(30);                               // TimeToLive=num（:677/:706）
+      expect(r.psFadeInEnd).toBe(15); expect(r.psFadeOutStart).toBe(15); expect(r.psFadeOutEnd).toBe(30);
+      expect(r.psFadeInNorm).toBe(5e-6); expect(r.psFadeOutNorm).toBe(0.95);
+      expect(r.psDrawVert).toBe(false);                     // DrawVerticalAxis=false（:686/:713）
+      expect(r.psAge).toBe(0);
+      expect(r.scaleY).toBeCloseTo(r === red ? 2.2 * 1.5 : 1.4 * 1.5, 12);
+      expect(r.scaleX).toBeCloseTo(r === red ? 8.8 * 1.5 : 5.6 * 1.5, 12);
+      expect(r.scax).toBeCloseTo(-4 / 30, 12);              // ScaleAcceleration=vector/num（:679/:708）
+      expect(r.scay).toBe(0);
+      expect(Math.hypot(r.vx, r.vy)).toBeCloseTo(21, 12);   // 速度幅=dir×14×1.5（:677/:706+恒真支）
+      expect(Math.hypot(r.ax, r.ay)).toBeCloseTo(14 / 30, 12);  // APF=−Velocity/num【赋值序在 ×1.5 前】
+      expect(r.ax / r.vx).toBeLessThan(0);                  // 减速弧（方向相反）
+    }
+    expect(red.scaleX / red.scaleY).toBeCloseTo(8.8 / 2.2, 12);
+    expect(b.dusts.filter((d) => d.type === 6).length).toBe(4);          // ★⑨批重构（2026-09-03）：d6 对只挂金带内（:722-730 i 循环 ×2,每轮 ± 金臂各一粒）
+    const before2 = fadingParticles.count;
     const c = mkGame();
     apply(c.g, ParticleOrchestraType.SnappingStoneSummon, 400, 400, 120, 2);
     expect(c.wavs.some((w) => w.file === 'armlet_of_ruin')).toBe(true);
     expect(c.dusts.filter((d) => d.type === 172).length).toBe(15);
     expect(c.dusts.filter((d) => d.type === 211).length).toBe(8);
+    const ring2 = [...fadingParticles.each()].slice(before2);
+    expect(ring2.length).toBe(3);                       // 1132 圈×2 + Extra_34 旋星×1
+    expect(ring2.filter((f) => f.texKey === 'vanilla/Projectile_1132.png').length).toBe(2);
+    expect(ring2.filter((f) => f.texKey === 'vanilla/Extra_34.png').length).toBe(1);
+    for (const f of ring2) {
+      expect(f.tintR).toBe(90); expect(f.tintG).toBe(110); expect(f.tintB).toBe(255); expect(f.tintA).toBe(90);
+      expect(f.timeToLive).toBe(20);
+      expect(f.delay).toBe(6);                          // Y=2 → Delay=Y×3
+      const sv = (9 * 0.12) / 20;
+      expect(f.scaleVelX).toBeCloseTo(sv, 12);
+      expect(f.scaleAccX).toBeCloseTo(-sv / 20, 12);
+      expect(f.fadeIn).toBe(0.1);
+    }
+    expect(ring2[0].fadeOut).toBe(0.3);                 // :759
+    expect(ring2[2].fadeOut).toBe(0.5);                 // :779
   });
   it('充能三连(79/80/81)：invoker 锚位尘链（noGravity/noLight/followPlayer 面）', () => {
     const snap = mkGame();
