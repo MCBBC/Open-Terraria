@@ -63,6 +63,25 @@ FUNC['2295'] = { ...FUNC['2295'], shoot: 365 };
 FUNC['2296'] = { ...FUNC['2296'], shoot: 366 };
 FUNC['2422'] = { ...FUNC['2422'], shoot: 382 };
 
+// SW-E1 2026-09-03：Power Bomb 5594 / Sticky Power Bomb 5595——Item.cs:44024-44028
+// `DefaultToBomb(1086+(type-5594), 6f)`（DefaultToBomb 本体 :47771-47783）共享算式
+// 提取器不解析 → 本表/combat 表双缺=死物品。功能画像推导终值：shoot 1086/1087、
+// useStyle 1、useTime=useAnimation 40、consumable、noMelee（本接口无 shootSpeed/
+// useAnimation/noUseGraphic 键——战斗面完整值在 vanillaItemCombat.ts EXTRACT_PATCH
+// '5594'/'5595'）；爆炸伤 200/击退 9 由弹侧 PrepareBombToBlow（P.cs:47652-47657）
+// 承载，物品面 damage/knockBack 缺省 0=原版同态。消费面=itemTooltip 分类行/
+// MobileControls 持械门（Game 投掷分流走 combatWeapon 不经本表,与炸弹 166 同构）。
+FUNC['5594'] = { shoot: 1086, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
+FUNC['5595'] = { shoot: 1087, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
+
+// SW-K1 2026-09-03：割草机 4049（Item.cs:35615-35618 → DefaultToLawnMower
+// :48532-48541 形参赋值提取器不解析 → json 缺键）。useStyle 11 = MowTheLawn
+// （ItemUseStyleID.cs:27——1457 bodyFrame 行档 Player.cs:36624-36639,与 useStyle 8
+// GolfPlay 是两档,仓内 Renderer.useStyleBodyRow case 11 行 4/3/2 即本档,仅注释
+// 名互换）;holdStyle 1 = 静持也渲染（Renderer 静持门读 itemFunc.holdStyle）;
+// useTime/autoReuse 战斗面权威在 vanillaItemCombat.ts EXTRACT_PATCH '4049'。
+FUNC['4049'] = { useStyle: 11, holdStyle: 1 };
+
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);

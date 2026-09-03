@@ -50,6 +50,33 @@ export function __setTfCellProbe(fn: ((sheet: number, x: number, y: number, fx: 
   __tfCellProbe = fn;
 }
 
+/** IIII190 探针:killTileLane 入口逐杀钩(JJHook KLOG 同格式镜像;undefined 零开销)。
+ *  签名 (draws, x, y, sheet, fx, fy)——draws=当前掷计数钩(由仪器注入,缺省 0)。 */
+let __trackKillProbe: ((draws: number, x: number, y: number, sheet: number, fx: number, fy: number) => void) | undefined;
+let __trackKillDraws: (() => number) | undefined;
+export function __setTrackKillProbe(fn: ((draws: number, x: number, y: number, sheet: number, fx: number, fy: number) => void) | undefined, draws?: () => number): void {
+  __trackKillProbe = fn;
+  __trackKillDraws = draws;
+}
+
+/** ★IIIII209 探针:findPath 终态历史转储钩（x86 rig TH/TPFP 行同格式对拍;undefined 零开销）。
+ *  tag: 'TPFS'（FindSuitableOrigin 失败,参数=调整后 origin）/ 'TPFP FAIL'|'TPFP OK'（len,dir）。 */
+export interface TrackHistCell { x: number; y: number; slope: number; mode: number }
+let __trackHistProbe: ((tag: string, hist: TrackHistCell[], len: number, dir: number, ox: number, oy: number) => void) | undefined;
+export function __setTrackHistProbe(fn: ((tag: string, hist: TrackHistCell[], len: number, dir: number, ox: number, oy: number) => void) | undefined): void {
+  __trackHistProbe = fn;
+}
+
+/** ★IIIII209 探针:placePath 逐列累计掷数钩（x86 rig P1/P2 行同口径=环起点起累计;undefined 零开销） */
+let __trackColProbe: ((loop: number, k: number, x: number, y: number, ph: number, rc: number) => void) | undefined;
+export function __setTrackColProbe(fn: ((loop: number, k: number, x: number, y: number, ph: number, rc: number) => void) | undefined): void {
+  __trackColProbe = fn;
+}
+let __trackDraws: (() => number) | undefined;
+export function __setTrackDraws(fn: (() => number) | undefined): void {
+  __trackDraws = fn;
+}
+
 // ============================================================
 // Tile.SmoothSlope 链(cs:822-888 + CanPoundTile cs:81434-81479 +
 // CanKillTile cs:62249-62402)——FFFFF 批 1:1 补齐
@@ -150,7 +177,22 @@ function makeTileDustRoll(rng: RNG, sheet: number, fx: number): void {
   switch (sheet) {
     case 2: case 477: case 27: case 243: case 244: case 204: case 478:
     case 641: case 370: case 171:
+    // ★IIIII209 补族（cs:69461-69522 if 链逐字;REMIX #97 定罪=661 缺掷致 track2
+    //   placePath 少掷 31/列,轨域全错位）：23/24/661 腐化草族、58/76/77/684 神圣草族、
+    //   37/32 草族、25/31/696 泥族(31/696 fx≥36 免掷)、109/492、34/42（与
+    //   FinalCleanupPass 副本对齐）
+    case 23: case 24: case 661:
+    case 58: case 76: case 77: case 684:
+    case 37: case 32:
+    case 25: case 109: case 492:
+    case 34: case 42:
       rng.nextInt(2);
+      return;
+    case 31: case 696:                       // cs:69519 (31||696)&&fx≥36 → 免掷
+      if (fx < 36) rng.nextInt(2);
+      return;
+    case 35:                                 // cs:68831 fx<36 短路与掷同支
+      if (fx < 36) rng.nextInt(2);
       return;
     case 26: case 695:
       if (fx < 54) rng.nextInt(2);
@@ -168,13 +210,20 @@ function makeTileDustRoll(rng: RNG, sheet: number, fx: number): void {
     case 238:
       rng.nextInt(3);
       return;
+    case 231:                                // cs:69225 num=153 后恒掷 Next(3)
+      rng.nextInt(3);
+      return;
     case 385:
       rng.nextIntRange(68, 71);
       return;
+    // ★III122 档位（cs:68839-68871）：<72 零掷 / <108 Next(3) / <144 Next(2) / else Next(4)
+    // ——曾用旧错档(<72 Next(3)),与 FinalCleanupPass 副本不一致
     case 254:
-      if (fx < 72) rng.nextInt(3);
-      else if (fx < 108) rng.nextInt(2);
-      else rng.nextInt(4);
+      if (fx >= 72) {
+        if (fx < 108) rng.nextInt(3);
+        else if (fx < 144) rng.nextInt(2);
+        else rng.nextInt(4);
+      }
       return;
     default:
       if (FURNITURE_DUST.has(sheet)) rng.nextInt(3);
@@ -303,7 +352,11 @@ export class TrackGenerator {
     const origin = this.findSuitableOrigin(originX, originY);
     if (!origin) return false;
     this.createTrackStart(origin.x, origin.y);
-    if (!this.findPath(minLength, maxLength)) return false;
+    if (!this.findPath(minLength, maxLength)) {
+      __trackHistProbe?.('TPFP FAIL', this.hist, this.len, this.xDir, origin.x, origin.y);
+      return false;
+    }
+    __trackHistProbe?.('TPFP OK', this.hist, this.len, this.xDir, origin.x, origin.y);
     this.placePath(rng);
     return true;
   }
@@ -314,12 +367,19 @@ export class TrackGenerator {
     let state = this.stateAt(x, y);
     while (state !== OBSTRUCTED) {
       y++;
-      if (state === INVALID) return null;
+      if (state === INVALID) {
+        __trackHistProbe?.('TPFS', [], 0, 0, x, y);   // ★IIIII209:x86 rig 同 tag(调整后 origin)
+        return null;
+      }
       if (y >= this.st.h - 1) return null; // 安全护栏(原版越界由 Main.tile null 吸收)
       state = this.stateAt(x, y);
     }
     y--;
-    return this.stateAt(x, y) === AVAILABLE ? { x, y } : null;
+    if (this.stateAt(x, y) !== AVAILABLE) {
+      __trackHistProbe?.('TPFS', [], 0, 0, x, y);   // ★IIIII209:退格后非 Available(x86 rig TPFS 同位)
+      return null;
+    }
+    return { x, y };
   }
 
   /** CreateTrackStart(cs:164-172) */
@@ -464,6 +524,7 @@ export class TrackGenerator {
   private placePath(rng: RNG): void {
     const st = this.st;
     const pressure = new Uint8Array(this.len);
+    const p1d0 = __trackDraws?.() ?? 0;   // ★IIIII209:累计掷基线(x86 P1 同口径)
     // 第一遍:清轨巷(cs:85-116)
     for (let i = 0; i < this.len; i++) {
       if (rng.int(0, 6) === 0) this.playerHeight = rng.int(5, 8);   // Next(7) / Next(5,9)
@@ -480,8 +541,10 @@ export class TrackGenerator {
         // KillTile(noItem)——379 泡泡豁免(cs:111-114)
         if (!BUBBLE.has(st.type[idx])) this.killTileLane(rng, th.x, th.y - j);
       }
+      __trackColProbe?.(1, i, th.x, th.y, this.playerHeight, (__trackDraws?.() ?? 0) - p1d0);
     }
     // 第二遍:铺轨 + 帧链(cs:117-161)
+    const p2d0 = __trackDraws?.() ?? 0;   // ★IIIII209:累计掷基线(x86 P2 同口径)
     for (let k = 0; k < this.len; k++) {
       if (rng.int(0, 6) === 0) this.playerHeight = rng.int(5, 8);
       __trackStepProbe?.(2, k, this.hist[k]!.x, this.hist[k]!.y, this.playerHeight);
@@ -501,9 +564,13 @@ export class TrackGenerator {
       if (pressure[k] && k > 0
         && this.hist[k - 1].y === th.y && this.hist[k + 1].y === th.y) {
         // ClearEverything(cs:135):type/wall/liquid/headers/帧全清(墙漆随墙清)
+        //   ★IIIII210：bTileHeader3=0 含涂层四位全擦（Tile.cs:112-123）——漏擦则
+        //   泡泡方块（379 全方格 fullbrightBlock）内铺轨保留亮位 → DoExtraLiquidFinish
+        //   fullbright 支误清轨周岩浆/误杀滴头（waterpark #105 Y2>0/A,T 残差源）
         st.setWallSilent(th.x, th.y, 0);
         st.liquid[idx] = 0; st.liquidType[idx] = 0;
         st.wire[idx] = 0; st.half[idx] = 0; st.slope[idx] = 0; st.paint[idx] = 0;
+        st.coat[idx] = 0;
         // PlaceTile(314, forced, style 1)(cs:136)= Minecart.PlaceTrack:
         // active/type=314/frameY=-1/frameX=_firstPressureFrame(=20)+ 尾部
         // SquareTileFrame 九宫(cs:60297;TruncatesWalls[314]=false 无墙帧,零掷)
@@ -511,8 +578,10 @@ export class TrackGenerator {
         this.squareTileFrame314(rng, th.x, th.y);
       } else {
         // ResetToType(314)(cs:140):liquid=0、headers=32(线/致动/坡/半砖清、墙保留)、帧 0/0
+        //   ★IIIII210：bTileHeader3=0 同擦涂层四位（Tile.cs:251-261 ResetToType）——同上
         st.liquid[idx] = 0; st.liquidType[idx] = 0;
         st.wire[idx] = 0; st.half[idx] = 0; st.slope[idx] = 0; st.paint[idx] = 0;
+        st.coat[idx] = 0;
         st.setTileSilent(th.x, th.y, TRACK_TILE, 0, 0);
       }
       st.wire[idx] = wireBits;             // 四色线精确还原,致动位不还原(cs:142-145)
@@ -526,6 +595,7 @@ export class TrackGenerator {
           this.wuTileFrame(rng, th.x, th.y - m);
         }
       }
+      if (k > 0) __trackColProbe?.(2, k, th.x, th.y, this.playerHeight, (__trackDraws?.() ?? 0) - p2d0);
     }
   }
 
@@ -536,6 +606,7 @@ export class TrackGenerator {
     const st = this.st;
     if (!st.inBounds(x, y)) return;
     const i = st.idx(x, y);
+    __trackKillProbe?.(__trackKillDraws?.() ?? 0, x, y, SHEET_OF[st.type[i]!] ?? -1, st.frameX[i]!, st.frameY[i]!);
     if (!st.flags[i]) return;
     const sheet = SHEET_OF[st.type[i]!];
     if (sheet < 0) return;
@@ -618,6 +689,15 @@ export class TrackGenerator {
         if (this.blockedChestAnchors.has((x - dx) * 16384 + (y - Math.trunc(fyv / 18)))) return;
       }
     }
+    // ★IIIII199（2026-09-03）：蛛网落罐判定掷（rig 1457 cs:64619≡1458 同位——
+    //   `if (tile.type == 51 && tile.wall == 62 && genRand.Next(4) != 0) noItem = true;`）。
+    //   生成期 noItem 虽恒 true,但 **该掷照耗**（结果只门掉落,掷位在 ShouldTileSurvive
+    //   之后、击杀写之前）。FinalCleanupPass 头注曾以「本扫 KillTile 目标族均不命中」
+    //   跳过本掷——该枚举对 FinalCleanup 大循环成立,对轨巷 killTileLane 不成立：
+    //   蛛网洞/蛛石墙(62)域的轨巷清扫恒可杀活蛛网（tooeasy #097 轨道首 attempt
+    //   x2090 巷 (2090,635) t51 wall62 实证）,缺掷=±1 掷位漂移→轨巷 ph 重掷位
+    //   重排→杀带分歧（#097 T 簇 30 格真凶域,帧维+杀流双仪定谳）。
+    if (sheet === 51 && st.wall[i] === 62) rng.int(0, 3);
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
   }

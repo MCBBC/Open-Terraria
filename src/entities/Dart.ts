@@ -127,9 +127,12 @@ export const TRAP_SHOT_STYLE: Record<string, {
     projs: ['vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
       'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png'],
     fw: 14, fh: 14, rotOff: Math.PI / 2 },
-  // 419-422 烟花喷泉（SetDefaults Projectile.cs:4679-4686）：4×4 aiStyle73 friendly timeLeft3600（默认值），
-  // 锚点 tile 338 消失即 Kill（AI :29369-29377）；每 tick 2 粒火花 × 60 秒
-  fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 3600, kb: 0,
+  // 419-422 烟花喷泉：4×4 aiStyle73 friendly——★SetDefaults【无】timeLeft 行（默认 3600），
+  // 终值 = NewProjectile 内联 per-Type 表钳 600（Projectile.cs:11035-11050；发射点
+  // Player.cs:32619 传 whoAmI=本地玩家 → Owner==Main.myPlayer 表生效）——喷 10 秒
+  // 非 60 秒（发射点覆写审计批 2026-09-03；SetDefaults≠终值，见 Arrow.ts 寿命处注）。
+  // 锚点 tile 338 消失即 Kill（AI :29369-29377）
+  fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 600, kb: 0,
     projs: ['vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
       'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png'],
     fw: 8, fh: 8 },
@@ -510,6 +513,8 @@ export class TrapShot extends Entity {
       const trapProjId = TRAP_PROJ_ID[this.kind];
       const kb = st.kb ?? 2;   // ★R20-F5:逐型击退（Wiring 各 NewProjectile 实参）
       for (const ent of game.enemies()) {
+        // ★dontTakeDamage 目标排除（:12600 同款——拒收命中不得耗穿透/免工件窗/snapStrike，最终清零补）
+        if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
         if (e.dead || !overlaps(e)) continue;
@@ -862,8 +867,12 @@ export class Dart extends Entity {
   private if291Sounded = false;
   private if291Anchor = false;
   /** ★292 生成幂等门（2026-09-02 访客缺口清偿）：本地 Kill 口（inferno291Kill）与
-   *  访客镜像口（destroy）共用——任一口生成过 292 即置位，另一口/重复调用零生成 */
+   *  访客镜像口（destroy）共用——任一口生成过 292 即置位，另一口/重复调用零生成。
+   *  ★2026-09-03 同构族扩面：303/75（ifRocketMirrored，rocketKill 双口共用）与
+   *  596（if596Mirrored，curse596Kill 双口共用）同约定 */
   private if291Mirrored = false;
+  private ifRocketMirrored = false;
+  private if596Mirrored = false;
   /** ★292 镜像口 game 引用：destroy() 钩由 Entity.compact 调用（无参），傀儡每拍
    *  fixedUpdate 必经此处刷新——消亡拍引用恒新鲜 */
   private lastGame: GameHooks | null = null;
@@ -1477,6 +1486,7 @@ export class Dart extends Entity {
           const below = sst.inBounds(prevTx, prevTy + 1) ? sst.get(prevTx, prevTy + 1) : 0;
           const below2 = sst.inBounds(prevTx, prevTy + 2) ? sst.get(prevTx, prevTy + 2) : 0;
           let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
+          const onConveyor = below === T_CONV_L || below === T_CONV_R;   // ★R8 F1:传送带来因单列
           if (!noPlace && below === 0) noPlace = true;
           else if (!noPlace && below2 === 0 && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;
           else if (!noPlace && below === T_STALAC) noPlace = true;
@@ -1484,6 +1494,10 @@ export class Dart extends Entity {
             && sst.get(prevTx, prevTy) === 0) {
             sst.setTile(prevTx, prevTy, T_SAND);
           }
+          // ★R8 F1(:79260-79266 传送带重挂档):蚁狮沙球落传送带(421/422)→不放沙但
+          // 掉 num18=169 沙块件×1(此前纯消失=掉件面整缺;Game AISTYLE10_PLACE[31] 专支
+          // 不路由 onProjectileDeath 为死代码,活口在此直驱)
+          if (onConveyor) game.spawnDrop?.(this.cx, this.cy, 'vi_169_SandBlock', 1);
         }
         this.dead = true; return;
       }
@@ -1553,9 +1567,18 @@ export class Dart extends Entity {
     }
   }
 
-  /** 303 骷髅火箭 Kill（Projectile.Kill :74533 组:128×128 伤害盒 + 22 盒烟尘/火/Gore +
+  /** 303 骷髅火箭 Kill（Projectile.Kill :79827 组:128×128 伤害盒 + 22 盒烟尘/火/Gore +
    *  SoundID.Item14;不炸地形——不在 ExplodeTiles 表 cs:75262）。
-   *  75 HappyBomb 同组(:80070-80122):爆炸伤 60/kb8(rocketDmg 覆写) */
+   *  75 HappyBomb 同组(:80070-80123):Kill 内自带 Resize(128,128)+damage=60/kb8+Damage
+   *  (:80116-80123)。★R7 清偿（2026-09-03）：AoE 判定面真吃 128 盒——原版伤害链 =
+   *  AI_016 hostile∧timeLeft≤3 先 Resize(128,128) Center 对齐（:48017-48025）→ 同拍
+   *  Kill（:48030-48037）→ Kill 内 aiStyle16 组 PrepareBombToBlow+Damage()（:71782-
+   *  71792;PrepareBombToBlow :47629-47711 的 128 表 :47686-47690 只收 133-138/338/339/
+   *  930 不含 303 → 303 盒径来自 AI 预扩）。曾外层 128 门 + 内层 hitPlayer 仍按未扩
+   *  14×14 弹盒 projOverlap → 盒缘命中（AoE 面）实不落。修法 = 改写 self 盒再进
+   *  hitPlayer（curse596Kill :1594 同款模式）→ immune 门/DamageVar/banner/cold/难度×2
+   *  全链在 128 盒上跑；SP Kill 口（寿终/撞块/接触/proxKill）与 MP destroy 镜像口
+   *  共用本函数 → 两面同修 */
   private rocketKill(game: GameHooks): void {
     this.dead = true;
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
@@ -1564,12 +1587,10 @@ export class Dart extends Entity {
     game.spawnParticles(cx, cy, '#9A9A9A', 30, 2, { life: 40, damp: 0.96 });          // 尘 31 ×1.4
     game.spawnParticles(cx, cy, '#FF9A3C', 20, 5, { life: 30, damp: 0.94, grav: -0.06 }); // 火 6 ×7/×3
     game.spawnParticles(cx, cy, '#D8D8D0', 8, 3, { life: 50, damp: 0.95, size: 3 });  // Gore 61-63 四向
-    // 伤害盒（:44525 timeLeft≤3 时 Resize(128,128)——纯伤害,与地形无关）
-    const box = { x: cx - 64, y: cy - 64, w: 128, h: 128 };
-    const p = game.player;
-    if (!p.dead && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
-      hitPlayer(this, game, st?.rocketDmg ?? this.damage);
-    }
+    // 伤害盒 = Resize(128,128) Center 对齐（:48017-48025 position±width/2 手写式）,
+    // 消费口 = Kill 内 Damage()（:71792;75 显式段 :80116-80123 同盒径）
+    this.x = cx - 64; this.y = cy - 64; this.w = 128; this.h = 128;
+    hitPlayer(this, game, st?.rocketDmg ?? this.damage);
   }
 
   /** ★2026-09-01 批四（T1/H1）：596 沙漠幽焰 Kill 段（Projectile.cs:73762-73794）——
@@ -1659,24 +1680,44 @@ export class Dart extends Entity {
       .entities.add(blast, 'projectiles');
   }
 
-  /** ★292 联机访客镜像口（2026-09-02 缺口清偿）。架构事实链：291 是房主权威弹
-   *  （NPC AI 房主独算）→ 快照 kind2|0x80（netProjBroadcast Dart 支）→ 访客傀儡
-   *  netPuppet 早退不跑 AI/不跑 inferno291Kill → 访客端无 292（房主侧 292 无 projId
-   *  走 kind<0"未知弹幕类不同步"通道,永不下发）。修法=借房主消亡权威事件镜像重建:
-   *  msg28 ProjDespawn（netRemoveProjPuppets）/ 180t 未 seen 超时清扫两路均置
-   *  dead=true → Entity.compact 的 destroy 钩（本函数）→ 本地 spawn 292。
-   *  位置=傀儡最后一拍快照跟随位（≈引爆点,快照窗内 ≤4t 位移,130×130 爆区盒覆盖）；
-   *  伤害=快照 dmg=房主 291 终伤（与 inferno291Kill 直传同源）。292 维持不上线,
-   *  各端本地镜像自算（hostile 盒对本地玩家 Damage_EVP,victim-settles 同构）。
-   *  幂等：inferno291Kill 已置 if291Mirrored（房主路径绝不双生成）；
-   *  !netPuppet 直拒（房主/单机 291 唯一生成权在 Kill 口）；180t 超时误杀窗=
-   *  快照断流退化面（位置可能滞后,登记不修——原版该弹本就 client 消亡近似） */
+  /** ★292 联机访客镜像口（2026-09-02 缺口清偿；★2026-09-03 同构族扩面 303/75/596）。
+   *  架构事实链：敌弹是房主权威弹（NPC AI 房主独算）→ 快照 kind2|0x80（netProjBroadcast
+   *  Dart 支）→ 访客傀儡 netPuppet 早退不跑 AI/不跑 Kill 链 → 访客端无消亡衍生面
+   *  （292 爆区/火箭爆/596 寿终爆——房主侧衍生弹 292 无 projId 走 kind<0"未知弹幕类
+   *  不同步"通道,永不下发）。修法=借房主消亡权威事件镜像重建：msg28 ProjDespawn
+   *  （netRemoveProjPuppets）/ 180t 未 seen 超时清扫两路均置 dead=true →
+   *  Entity.compact 的 destroy 钩（本函数）→ 本地复放 Kill 面。同构族清单
+   *  （Dart 载体全 Kill 面 2026-09-03 系统扫定谳——带【对玩家伤害】的仅此四型）：
+   *   · 291 → 原位 spawn 292 爆区（Projectile.Kill :75802-75807）
+   *   · 303/75 → rocketKill 爆炸盒 128×128（:79827 组 133-138/303 支 / :80070+75 支,
+   *     75 爆炸伤 60 走 rocketDmg 覆写 :80116-80122）
+   *   · 596 → curse596Kill 盒 60×60 伤 30/22（:73762-73794,伤害按本地难度重算非快照）
+   *  位置=傀儡最后一拍快照跟随位（≈引爆点,快照窗内 ≤4t 位移;128/130 盒覆盖余量）；
+   *  伤害=快照 dmg=房主终伤（与本地 Kill 口同源;596 例外见 curse596Kill）。
+   *  衍生面各端本地镜像自算（hostile 盒对本地玩家 hitPlayer,victim-settles 同构;
+   *  位置差/接触+爆双响由 player.iframes 去重对齐原版 immune 门）。
+   *  幂等：本地 Kill 口已置对应镜像旗（房主路径绝不双生成）；!netPuppet 直拒
+   *  （房主/单机唯一生成权在 Kill 口）；180t 超时误杀窗=快照断流退化面（位置可能
+   *  滞后,登记不修——原版该弹本就 client 消亡近似） */
   destroy(): void {
-    if (this.projId !== 291 || !this.netPuppet || this.if291Mirrored || !this.lastGame) return;
-    this.if291Mirrored = true;
-    const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
-    (this.lastGame as unknown as { entities: { add(e: unknown, b: string): void } })
-      .entities.add(blast, 'projectiles');
+    if (!this.netPuppet || !this.lastGame) return;
+    const g = this.lastGame;
+    if (this.projId === 291 && !this.if291Mirrored) {
+      this.if291Mirrored = true;
+      const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
+      (g as unknown as { entities: { add(e: unknown, b: string): void } })
+        .entities.add(blast, 'projectiles');
+      return;
+    }
+    if ((this.projId === 303 || this.projId === 75) && !this.ifRocketMirrored) {
+      this.ifRocketMirrored = true;
+      this.rocketKill(g);            // 爆炸盒+尘音（Kill :79827 组/75 :80070 组复放）
+      return;
+    }
+    if (this.projId === 596 && !this.if596Mirrored) {
+      this.if596Mirrored = true;
+      this.curse596Kill(g);          // 寿终爆盒 60×60（:73762-73794 复放）
+    }
   }
 
   /** 无表项通用弹（projId=0 历史路径）:直线+撞块消亡 */

@@ -8,6 +8,7 @@
 //      → accWatch=3,Player.cs:12593）/瀑布族 8 帧动画（Main.cs:18743-18793）/陶罐顶部
 //      杂草 + 南瓜株成长（UpdateWorld :72376-72390）
 import { describe, expect, it, vi } from 'vitest';
+import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
@@ -907,7 +908,9 @@ describe('checkFurnitureSupport（⚠️2 失撑样式掉落 + ⚠️3 巨石/�
     expect(w.store.get(10, 10)).toBe(0);      // 整件清
     expect(w.store.get(11, 11)).toBe(0);
     expect(drops).toEqual([]);                // 无物品返还
-    expect(blasts).toEqual([[10, 10, 400, 10, 1002]]);   // 桶中心 (168,168)
+    // ★SW-J1 2026-09-03：radius 10→0/destroyTiles=false——1002 不在 Kill_ExplodeTiles
+    // 闸门表（P.cs:79027-79030）,:79064 为死代码 = 原版 1002 Kill 不炸地形
+    expect(blasts).toEqual([[10, 10, 400, 0, 1002]]);   // 桶中心 (168,168)
   });
 });
 
@@ -983,7 +986,7 @@ describe('陶罐顶部杂草 + 南瓜株成长（⚠️3,UpdateWorld :72376-7239
     const w = new World(40, 40, 7, 'pot');
     const evo = evoOf(w);
     w.store.setTileSilent(10, 20, SID(78), 0, 0);
-    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.4);   // <0.5 命中 1/2 掷
+    const rand = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.4);   // <0.5 命中 1/2 掷
     (evo as unknown as { overgroundTile: (i: number, j: number, wallDist: number) => void }).overgroundTile(10, 20, 0);
     rand.mockRestore();
     expect(w.store.get(10, 19)).toBe(SID(3));      // 杂草长在罐顶
@@ -994,7 +997,7 @@ describe('陶罐顶部杂草 + 南瓜株成长（⚠️3,UpdateWorld :72376-7239
     const evo = evoOf(w);
     w.store.setTileSilent(10, 20, SID(78), 0, 0);
     w.store.setTileSilent(10, 19, SID(3), 0, 0);   // 已有杂草
-    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.4);
+    const rand = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.4);
     (evo as unknown as { overgroundTile: (i: number, j: number, wallDist: number) => void }).overgroundTile(10, 20, 0);
     rand.mockRestore();
     expect(w.store.get(10, 19)).toBe(SID(3));      // 仍是原杂草（不叠加）

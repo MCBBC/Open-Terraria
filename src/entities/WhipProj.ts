@@ -17,7 +17,7 @@
 // 此前误用鞭贴图整条切片近似。光照色一律原色直画（实体层画在全屏光照合成前 =
 // 合成自动乘光,StringLine 渔线段链既有口径）。
 import { Entity } from './Entity';
-import { applyProjStatus, applyBuffTicks, applyMeleeImbue } from './projStatus';
+import { applyProjStatus, applyBuffTicks, applyMeleeImbue, debuffWriteAllowed } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
@@ -86,13 +86,19 @@ const remap = (value: number, from1: number, to1: number, from2: number, to2: nu
  *  玩家数/链电粒子全删,ApplyEelWhipDoT 成死代码）；849 黑收成 Dark Harvest →
  *  310/240 = markedByScytheWhip 仅视觉粒子（:92188,无数值效果）——不落本仓字段 */
 export function applyWhipDebuffs(projId: number, enemy: Record<string, number>): void {
-  if (projId === 913) enemy.onFire3T = Math.max(enemy.onFire3T ?? 0, 4);        // AddBuff(323,240)
-  else if (projId === 912) enemy.frostburn2T = Math.max(enemy.frostburn2T ?? 0, 4); // AddBuff(324,240)
-  else if (projId === 914 && Math.random() < 0.2) enemy.poisonT = Math.max(enemy.poisonT ?? 0, 3); // 1/5 AddBuff(20,180)
+  // ★ImmuneToAll 直写闸（2026-09-03,projStatus.debuffWriteAllowed）：原版各分支经
+  //  NPC.AddBuff 过 buffImmune 门（NPC.cs:90968）——68 守卫/72 火轮/134-136 机械蠕虫
+  //  等 37 键 ImmuneToAll 名单此前照写。闸在掷后零掷耗（914 的 1/5 掷在闸前=掷流
+  //  不变）;362 是鞭 tag 本体（WHIP_NPC_DEBUFF{310,362}）→ 仅 +Whips 档（68/72/392…）
+  //  免疫,非鞭档放行——逐 buff 谓词自持该差异。dontTakeDamage 环头门（tryHit 循环
+  //  :501-503）已排靶,此处为 AddBuff 闸位补全（双保险）
+  if (projId === 913 && debuffWriteAllowed(enemy, 323)) enemy.onFire3T = Math.max(enemy.onFire3T ?? 0, 4);        // AddBuff(323,240)
+  else if (projId === 912 && debuffWriteAllowed(enemy, 324)) enemy.frostburn2T = Math.max(enemy.frostburn2T ?? 0, 4); // AddBuff(324,240)
+  else if (projId === 914 && Math.random() < 0.2 && debuffWriteAllowed(enemy, 20)) enemy.poisonT = Math.max(enemy.poisonT ?? 0, 3); // 1/5 AddBuff(20,180)
   // 1457 重做（NPC.cs:92781-92784）：电鳗鞭 1033 → 362 markedByEelWhip = DOT 表平铺
   //  Add(100,50)=50 HP/s（链式缩放/标记玩家数前置/链电粒子全删，ApplyEelWhipDoT 成
   //  死代码）——1456 的"标记无 DoT 语义"登记作废，落 eelWhipT（Enemy DOTTally 段消费）
-  else if (projId === 1033) enemy.eelWhipT = Math.max(enemy.eelWhipT ?? 0, 4);  // AddBuff(362,240)
+  else if (projId === 1033 && debuffWriteAllowed(enemy, 362)) enemy.eelWhipT = Math.max(enemy.eelWhipT ?? 0, 4);  // AddBuff(362,240)
   // 849→310：markedByScytheWhip 仅视觉粒子（:92188 BlackLightningSmall,无数值效果,
   //  两版 Next(3) 均不变）——本仓无粒子管线,不写字段（登记）
 }
@@ -500,13 +506,25 @@ export class WhipProj extends Entity {
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
         //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）
-        if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+        // ★ZappingJellyfish 豁免（:12600 与 dontTakeDamage 并列,最终清零补）——鞭=
+        //   IsAWhip 恒接触反噬资格,放行到下方水母块
+        const jellyVid = (ent as unknown as { vanillaId?: number }).vanillaId;
+        const zapJelly = jellyVid !== undefined && jellyVid > 0 && ZAPPING_JELLYFISH.has(jellyVid);
+        const jellyDontTake = (ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        if (jellyDontTake && !zapJelly) continue;
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean } & import('./WhipTag').WhipTagged;
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
+        // ★水母块（Damage_PVE_Inner :12676-12688 1:1,免疫窗后同位）：充能态水母
+        //  不受伤——鞭=IsAWhip 恒接触反噬资格 → TakeDamageFromJellyfish 电玩家 →
+        //  `if (dontTakeDamage) return` 拦本次伤害（最终清零补,GAP 销账）
+        if (zapJelly && jellyDontTake) {
+          game.takeDamageFromJellyfish?.(ent);
+          continue;
+        }
         this.hitSet.add(e.id);
         // ★F2 浸剂命中环（Projectile.cs:13687-96 门 `ownedBySomeone&&(melee||IsAWhip)`
         //  ——鞭 SetDefaults 全走 DefaultToWhip【无 melee 类旗】(:8145/:8668/:9739+,

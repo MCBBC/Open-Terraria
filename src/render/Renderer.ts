@@ -604,6 +604,20 @@ export function prettyStarSparkle(
   stroke(draw, rotation, v2x * 0.6, v2y * 0.6, aDraw);
 }
 
+/** PrettySparkle 臂几何（纯函数,tests/dust-premultiplied-blend.test.ts 直测）——
+ *  XNA 拉伸=贴图尺寸×scale（PrettySparkleParticle.cs:72-73,Extra_98=72×72）：
+ *  vector=(0.3,2)×num×Scale → 水平臂（hx,hy）、vector2=(0.3,1)×num×Scale → 垂直臂
+ *  （vx,vy）——两臂都乘【整个】Vector2 Scale,逐轴取值。
+ *  消费位 = Renderer.drawSparkleArms（VDust 双轴通道 scaleX/scaleY 尘）。 */
+export function sparkleArmGeometry(
+  sx: number, sy: number, num: number, tex = 72,
+): { hx: number; hy: number; vx: number; vy: number } {
+  return {
+    hx: 0.3 * sx * num * tex, hy: 2 * sy * num * tex,
+    vx: 0.3 * sx * num * tex, vy: 1 * sy * num * tex,
+  };
+}
+
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -647,7 +661,7 @@ import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
 import { mlElipseVec, mlSlotDecode, ML_HAND_ATTACKS, ML_HEAD_ATTACKS } from '../entities/bossAI_duke_moonlord';
 import { ML_EYE_ATTACKS } from '../entities/bossAI_lunar_misc';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
-import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
+import { dyeApplyOf, applyDyePass, applyDyePassLit, isV0MidTech, type DyeApply } from '../data/vanillaDyes';
 import {
   BALLOON_TORSO_FRAMING, WAIST_TORSO_FRAMING, SHOE_ROLLER_SKATE, FACE_DRAW_OFFSET, OFFSETS_PLAYER_OFFHAND,
   BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL, MOUNT_BACKPACK_OK, BACK_IS_ACAPE,
@@ -660,7 +674,7 @@ import {
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
-import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict } from '../fx/VanillaDust';
+import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible, bubbleScaleTier } from '../entities/LeashedCritter';
@@ -4865,19 +4879,31 @@ export class Renderer {
         continue;
       }
       const [px, py] = cam.worldToScreen(d.x, d.y);
-      const { rgb, a } = VanillaDust.alphaOf(d);
+      // ★双轴通道消费位（2026-09-03 VDust 双轴基建）：带 scaleX/scaleY 的尘
+      //  （PrettySparkle 编排粒子族）画旋转双臂星芒（PrettySparkleParticle.Draw
+      //  :61-94 逐值,见 drawSparkleArms）——不走 Dust.png 帧/拖影/染料/colorPass
+      //  各档（编排池粒子无此四面）
+      const axis = dustAxisScale(d);
+      if (axis.dual) {
+        this.drawSparkleArms(d, px, py, axis.sx, axis.sy);
+        continue;
+      }
+      const { rgb, a, rgbv } = VanillaDust.alphaOf(d);
+      // ★N 批:rgbv 三通道（183 (50,0,0)/255 纯红、258 (150,50,50)/255——GetAlpha
+      // 字面彩色档);标量档 rgbv=undefined → 三通道全取标量,零回归
+      const mR = rgbv ? rgbv[0] : rgb, mG = rgbv ? rgbv[1] : rgb, mB = rgbv ? rgbv[2] : rgb;
       if (a <= 0.004 && !d.color) {
         // A=0 加性族（182/206/230/58/110-114/311-313：GetAlpha 恒 (255,255,255,0)
         // 型、不读尘 α）——XNA 预乘 AlphaBlend 纯加法（α=0 惯用法，非"纯光照尘
         // 不可见"）；canvas 等价 = RGB×rgb、α 通道保留贴图羽化、'lighter' 叠画
-        if (rgb <= 0.004) continue;
+        if (Math.max(mR, mG, mB) <= 0.004) continue;
         c1.clearRect(0, 0, 8, 8);
         c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
         const ida = c1.getImageData(0, 0, 8, 8);
         for (let i = 0; i < ida.data.length; i += 4) {
-          ida.data[i] = ida.data[i] * rgb;
-          ida.data[i + 1] = ida.data[i + 1] * rgb;
-          ida.data[i + 2] = ida.data[i + 2] * rgb;
+          ida.data[i] = ida.data[i] * mR;
+          ida.data[i + 1] = ida.data[i + 1] * mG;
+          ida.data[i + 2] = ida.data[i + 2] * mB;
         }
         c1.putImageData(ida, 0, 0);
         ctx.save();
@@ -5030,6 +5056,65 @@ export class Renderer {
       }
     }
     ctx.restore();
+  }
+
+  /** PrettySparkleParticle.Draw（PrettySparkleParticle.cs:61-94）1:1 臂几何（几何式
+   *  抽出为模块级纯函数 sparkleArmGeometry 供单测直测）——VDust
+   *  双轴通道（scaleX/scaleY 任一在位,fx/VanillaDust.ts 接口注）的唯一消费位。
+   *  原版逐值（Scale=Vector2、Rotation=float,两臂都乘【整个】Vector2 Scale）：
+   *    num     = GetLerpValue(0,FadeInEnd,t)×GetLerpValue(FadeOutEnd,FadeOutStart,t)
+   *              （:70-71 寿命包络）——本池无 TTL 载体,通道折算进 alpha 域：
+   *              num=(255−alpha)/255（alpha=0 通道缺省 → num=1 全臂;产尘方按需动画）
+   *    vector  = (0.3,2)×num×Scale  → 水平臂,旋转 π/2+Rotation（:72/:80）
+   *    vector2 = (0.3,1)×num×Scale  → 垂直臂,旋转 0+Rotation（:73/:84）
+   *    第二层同臂几何 ×0.6（:88/:92）。
+   *  色（XNA 预乘 AlphaBlend）：color2 = ColorTint×Opacity×0.5×num（:66/:74,原版
+   *  各编排站 ColorTint.A=0 → 纯加色;ColorTint=d.color,池缺省 Transparent=无 tint
+   *  臂不画）；color3 = White×Opacity×0.9×0.5×num（:63/:69 白核;A=(int)(255·Op·0.9)/2/2
+   *  非零——erase 项 ≤0.22·texA·num 不建模,纯加色近似登记）。
+   *  ★臂形近似（登记）：XNA 拉伸=贴图尺寸×scale（Extra_98=72×72 星芒羽化贴图）,
+   *  本仓以 fillRect 实心矩形近似臂形（任务批定案"两笔 fillRect 近似臂形状,臂几何
+   *  逐值"）;贴片升级路径 = sparkleTintedTex 染色缓存+隔离式 stroke（prettyStarSparkle
+   *  同款）,待消费站接线批按缓存压力定夺。★尺寸口径：与本 pass 尘精灵同约定
+   *  （8×8 帧直画,不乘 cam.zoom）→ 臂像素 = 72×scale。★Opacity 档：本池无独立
+   *  Opacity 载体,产尘方折进 color/alpha（登记）。 */
+  private drawSparkleArms(d: import('../fx/VanillaDust').VDust,
+    px: number, py: number, sx: number, sy: number): void {
+    const ctx = this.ctx;
+    // ★prettySparkle 档包络（PrettySparkleParticle.cs:53-77 1:1）：t=拍数、
+    //  num = GetLerpValue(0,FadeInEnd=20,t)×(1−GetLerpValue(FadeOutStart=30,
+    //  FadeOutEnd=45,t))——通用档 num=(255−alpha)/255 与缺省 TTL=60 时两者
+    //  数值同式（255−α ≡ 拍数包络,因 α 驱动站 α≡t 的老约定），prettySparkle
+    //  档 TTL 精确+双向独立,水平/垂直双臂四笔照旧
+    const envT = 60 - (d.ttl ?? 60);
+    const lvPS = (a: number, b: number): number =>
+      Math.max(0, Math.min(1, d.prettySparkle ? (envT - a) / (b - a) : (255 - d.alpha) / 255));
+    const num = d.prettySparkle
+      ? Math.max(0, Math.min(1, lvPS(0, 20) * (1 - lvPS(30, 45))))
+      : Math.max(0, Math.min(1, (255 - d.alpha) / 255));
+    if (num <= 0) return;
+    const g = sparkleArmGeometry(sx, sy, num);
+    const rot = d.rotation;
+    const c = d.color;
+    const tint = c ? `rgb(${c.r},${c.g},${c.b})` : null;   // ColorTint（A=0 纯加色档）
+    const tintA = 0.5 * num;                               // color2 = ColorTint×Opacity×0.5×num
+    const coreA = 0.45 * num;                              // color3 = White×0.9×0.5×num
+    const arm = (rotArm: number, len: number, style: string | null, alpha: number, wMul: number, hMul: number): void => {
+      if (!style || alpha <= 0.004) return;
+      const w = Math.max(1, g.hx * wMul), h = Math.max(1, len * hMul);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, alpha);
+      ctx.translate(px, py);
+      ctx.rotate(rotArm);
+      ctx.fillStyle = style;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+    };
+    arm(Math.PI / 2 + rot, g.hy, tint, tintA, 1, 1);       // :80 水平臂×ColorTint
+    arm(rot, g.vy, tint, tintA, 1, 1);                     // :84 垂直臂×ColorTint
+    arm(Math.PI / 2 + rot, g.hy, '#FFFFFF', coreA, 0.6, 0.6);   // :88 白核 ×0.6
+    arm(rot, g.vy, '#FFFFFF', coreA, 0.6, 0.6);            // :92 白核 ×0.6
   }
 
   // ===================== FlameParticle（山羊坐骑 47 火焰本体层）=====================
@@ -6325,6 +6410,21 @@ export class Renderer {
         //  =四臂贴图左右朝向恒镜像错误（pre-existing 债,与三件套同机制同批清偿）。
         if (idR >= 128 && idR <= 131) {
           if (e.facing > 0) ctx.scale(-1, 1);
+        }
+        // ★373 鲨鱼龙（红队 P′ "dormant"结论反转：dukeFishronAI/sharkronAI 已实装
+        //  bossAI_duke_moonlord.ts,MinionProj:3005 亦有交互）。原版 :35340
+        //  spriteDirection=direction + rotation=velocity.ToRotation() 裸值复合——
+        //  本仓 sharkronAI:986 曾以 spin+(facing<0?π:0) 补偿等效（无 flip 渲染时代）,
+        //  加 flip 后该补偿=双重镜像 → spin 公式同步剥 π 补偿（sharkronAI 段）,
+        //  翻转交由本 flip。370/372 同表登记（370 本体贴图近对称观感差异未显）。
+        //  ★批4（2026-09-03）：AI_071 的 direction 与 spriteDirection 是两个字段——
+        //  蓄力段(ai0=0) 373 摆头向按 cos 符号写 spriteDirection（:35219-35221）、
+        //  372 恒字段缺省 -1 不翻,起扑后 spriteDirection=direction（:35254）。
+        //  故 flip 源按相位分流：蓄力读 sharkronSdir,起扑读 facing（曾全程读
+        //  facing=蓄力期朝向恒镜像+无摆头,2026-09-03 校正）。
+        if (idR === 373 || idR === 372) {
+          const sharkFace = e.ai0 === 0 ? e.sharkronSdir : e.facing;
+          if (sharkFace > 0) ctx.scale(-1, 1);
         }
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -10862,6 +10962,26 @@ export class Renderer {
     applyDyePass(data, w, h, dye, extra, rect);
   }
 
+  /** v0 化染料应用（2026-09-03 v0 化批，仅【合成后】染料站可用）。
+   *  受累 36 tech（vanillaDyes.V0_MID_PASSES，fx-sm2-v0-commute 经验定谳）：把
+   *  顶点色 v0=vertexColor 喂进 pass（0..1 UNORM），光照不再染后乘——返回 true
+   *  表示光已被消费，调用方【必须跳过】染后光乘；非受累 tech 返回 false 且零
+   *  写入，调用方照常走 applyDyeToImageData 旧链（白烘，输出逐位不变）。
+   *  ★架构前提：调用点必须在 compositeLight 全屏乘光【之外】（wingGlowQueue 族）。
+   *  预合成面（玩家本体/尘埃/NPC）喂 v0=光后仍被全屏乘光再乘 = light² 二次压暗
+   *  （观感回归）——该面修复须逐站逃逸队列，暂维持旧链（偏差登记于 SM2Effect
+   *  头注 2026-09-03 段）。 */
+  private applyDyeLitToImageData(data: Uint8ClampedArray, w: number, h: number,
+    dye: DyeApply, vertexColor: [number, number, number],
+    rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): boolean {
+    const u = dye.uniforms;
+    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    u.uSourceRect = rect ? [rect.sx, rect.sy, w, h] : [0, 0, w, h];
+    u.uImageSize0 = rect ? [rect.sheetW, rect.sheetH] : [w, h];
+    const extra = dye.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
+    return applyDyePassLit(data, w, h, dye, vertexColor, extra, rect);
+  }
+
   /** 配饰身上贴图·背包/尾巴子层（1456 未建模细项批 2026-08-23：back 槽三路由中的
    *  DrawInBackpackLayer/DrawInTailLayer 两族拆画）。层序 = DrawPlayer_08_Backpacks
    *  （PlayerDrawLayers.cs:479-488）→ 08_1_Tails（:568-587）→【翅膀 09】——
@@ -11131,18 +11251,23 @@ export class Renderer {
   }
 
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
-   *  调用方按整幅居中绘制（sw/sh 尺寸） */
+   *  调用方按整幅居中绘制（sw/sh 尺寸）。v0Light = 顶点色光（0..1，调用方负责
+   *  量化，键随值分裂）——仅受累 36 tech（isV0MidTech）消费，喂 v0 烘并【不再】
+   *  染后乘光；非受累/未传 = 旧链逐位不变（★仅限合成后调用方传入，预合成面
+   *  禁传——见 applyDyeLitToImageData 注）。 */
   /** ★R33 回归轮：翅膀染料烘焙缓存（时间桶 LRU）——ArmorPhase 单帧 SM2 烘焙实测
    *  232ms（184×56,最重 pass 3216B 逐像素解释器），wingTexSource 每帧重烘=4fps
    *  卡顿（用户终验实报）。桶 200ms=染料动画 ~5fps（微光闪灼语义可接受）；
-   *  键=dyeVid|tint|切片|桶；上限 48 条 + 2s 修剪防膨胀。 */
+   *  键=dyeVid|tint|切片|桶(|v0Light)；上限 48 条 + 2s 修剪防膨胀。 */
   private wingBakeCache = new Map<string, HTMLCanvasElement>();
   private wingBakeCachePruneAt = 0;
   private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
-    dye: DyeApply | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
+    dye: DyeApply | null, tint: [number, number, number] | null,
+    v0Light?: [number, number, number]): HTMLCanvasElement | null {
     if (!dye && !tint) return null;
+    const litDye = dye !== null && v0Light !== undefined && isV0MidTech(dye.tech);
     const bucket = Math.floor(performance.now() / 200);
-    const cacheKey = `${dye ? dye.vid : 't'}|${tint ? tint.join(',') : ''}|${sx},${sy},${sw}x${sh}|${bucket}`;
+    const cacheKey = `${dye ? dye.vid : 't'}|${tint ? tint.join(',') : ''}|${sx},${sy},${sw}x${sh}|${bucket}${litDye ? `|${v0Light!.map((v) => Math.round(v * 255)).join('.')}` : ''}`;
     const cached = this.wingBakeCache.get(cacheKey);
     if (cached) return cached;
     if (performance.now() - this.wingBakeCachePruneAt > 2000) {
@@ -11158,9 +11283,12 @@ export class Renderer {
     sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
     if (dye || tint) {
       const id = sctx.getImageData(0, 0, sw, sh);
-      if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
-        { sx, sy, sheetW: img instanceof HTMLImageElement ? img.width : img.width,
-          sheetH: img instanceof HTMLImageElement ? img.height : img.height });
+      if (dye) {
+        const dyeRect = { sx, sy, sheetW: img instanceof HTMLImageElement ? img.width : img.width,
+          sheetH: img instanceof HTMLImageElement ? img.height : img.height };
+        if (litDye) this.applyDyeLitToImageData(id.data, sw, sh, dye, v0Light!, dyeRect);
+        else this.applyDyeToImageData(id.data, sw, sh, dye, dyeRect);
+      }
       if (tint) {
         for (let i = 0; i < id.data.length; i += 4) {
           id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
@@ -11239,6 +11367,18 @@ export class Renderer {
     const cyc = p.vy === 0 ? 3 : 4;
     const mcn = p.miscCounter / 300;   // miscCounterNormalized :3241
     const fw = img.width, fh14 = Math.floor(img.height / 14);
+    // ★v0 化批（2026-09-03）：原版 betsy 叠画 color=colorArmorBody2（:854-896）
+    // = 光照色进 v0；本站为合成后逃逸层（无全屏乘光）——受累 36 tech 喂 v0=光，
+    // 补上此前全亮的染料面。量化 16 级/通道（键分裂与重烘频折中）；开灯恒白
+    // （fullbright 下其余元素不受光，染料亦不暗化=观感一致）。
+    const v0Light = dye && isV0MidTech(dye.tech)
+      ? (this.fullbright ? [1, 1, 1] as [number, number, number]
+        : (() => {
+            const lc = this.lighting?.lightAt(Math.floor(p.cx / 16), Math.floor(p.cy / 16)) ?? [255, 255, 255];
+            const q = (v: number) => Math.round((v / 255) * 15) / 15;
+            return [q(lc[0]), q(lc[1]), q(lc[2])] as [number, number, number];
+          })())
+      : undefined;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (let k = k0; k < k1; k++) {
@@ -11251,7 +11391,7 @@ export class Renderer {
       const py = wy + p.vy * -1.5 * (num10 / cyc);
       ctx.globalAlpha = (100 / 255) * settled;
       if (dye) {
-        const bs = this.wingTexSource(img, 0, k * fh14, fw - 2, fh14 - 2, dye, null);
+        const bs = this.wingTexSource(img, 0, k * fh14, fw - 2, fh14 - 2, dye, null, v0Light);
         if (bs) { ctx.drawImage(bs, px - (fw - 2) / 2, py - (fh14 - 2) / 2); continue; }
       }
       ctx.drawImage(img, 0, k * fh14, fw - 2, fh14 - 2,
@@ -11409,13 +11549,24 @@ export class Renderer {
           0.5 * ((lc[1] / 255) * armor[1]) + 0.5,
           0.5 * ((lc[2] / 255) * armor[2]) + 0.5,
         ];
-        const sc = this.tintSliceRGB(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, tint, 1);
+        // ★v0 化批（2026-09-03）：受累 36 tech 时本站从「tint 预乘→白烘」改为
+        //   原版序「素切片→v0=tint 烘」——原版 DrawData color=Lerp(colorArmorBody,
+        //   White,0.5) 即 v0 本体（:713-722），tint 预乘会把光照喂进 s0 采样面
+        //   （v0 中段非线性消费下 两序不等，见 fx-sm2-v0-commute）。非受累 tech
+        //   两序逐位等价（尾乘族），维持旧链零变化。
+        const litDye = dye !== null && isV0MidTech(dye.tech);
+        const sc = this.tintSliceRGB(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, litDye ? [1, 1, 1] : tint, 1);
         if (sc) {
           if (dye) {
             const c38 = sc.getContext('2d', { willReadFrequently: true })!;
             const id38 = c38.getImageData(0, 0, s.sw - 2, s.sh - 2);
-            this.applyDyeToImageData(id38.data, s.sw - 2, s.sh - 2, dye,
-              { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
+            if (litDye) {
+              this.applyDyeLitToImageData(id38.data, s.sw - 2, s.sh - 2, dye, tint,
+                { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
+            } else {
+              this.applyDyeToImageData(id38.data, s.sw - 2, s.sh - 2, dye,
+                { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
+            }
             c38.putImageData(id38, 0, 0);
           }
           ctx.save();

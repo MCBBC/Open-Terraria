@@ -64,6 +64,24 @@ export function killsNeededForBanner(itemId: number): number {
 }
 
 /**
+ * ★bannerStyleOf（⑤巡检 2026-09-03 十三批）：旗种 id（BannerSystem 域 1-292）→
+ * tile 91 帧 style 域的逆写。SceneMetrics.cs:419-441 正变换 = S−21（首带）+ 每带
+ * +111、S≥311 再 −1、S≥312 再 −1 —— 逆写即 S = banner+21，落进被抽掉的 311/312
+ * 两格时再 +1 跳过（311/312 是原版独立非敌旗档 5497 PinkBanner/5498，
+ * vanillaStyleDrops.BANNERS 同域）。缺它：旗 290/291（item 5651/5672）写进
+ * 311/312 空档 = 无旗 buff + 破坏掉错物 + 空帧；旗 292（5673）落 313 = 被解码成
+ * 290。原版旗物品 Item.placeStyle 即 style 直域（Item.cs:19231
+ * `placeStyle = 22 + type - 1615` 等），本仓 kill-drop 实例位载旗种 id
+ * （Game.spawnDrop 第 7 参），放置点经本函数换算（bannerStyleDomain）。
+ */
+export function bannerStyleOf(banner: number): number {
+  let s = banner + 21;
+  if (s >= 311) s++;
+  if (s >= 312) s++;
+  return s;
+}
+
+/**
  * 击杀记账（BannerSystem.AddNPCKillBy :193-216 语义简化版——原版 claimable+UI 领取,
  * 本仓达标即返 true 由调用方公告+掉旗）。返回 true = 恰跨过整数倍门槛（应授予一面旗）。
  */

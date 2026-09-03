@@ -446,7 +446,7 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     expect(h.projectiles[0].damage).toBe(40);
   });
 
-  it('F20 drop 区间：投骨骷髅 449 射程 200 内开瞄（:59723-59726 区间下坠补偿）', () => {
+  it('F20 drop 区间：投骨骷髅 449 射程 200 内开瞄（:60238-60247 区间下坠补偿;★R5 锚纠 1456 位）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 44, y: FLOOR - 3 });   // ~64px（<200 射程）
     h.player.useTime = 30;             // idle 门（cs:60037 stealth==0 && itemAnimation==0）

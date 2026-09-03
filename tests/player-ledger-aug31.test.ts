@@ -271,3 +271,47 @@ describe('⑩a FindPulley !controlJump 门（:26320——Space 只手不进绳�
     expect(grabbed).toBe(true);
   });
 });
+
+// =====================================================================
+// ★F4④/V7 Beheaded 段 !frozen 真实映射（DoDeadCellsBeheadedParticles Player.cs
+//   :24494 门串,2026-09-03）：frozen 状态位 = buff47 Frozen(:10143) ∪ buff353
+//   Shimmer(:11874-75) 双源——旧写 frozen≈shimmering 登记映射漏 47 源。
+// =====================================================================
+describe('★F4④ deadCellsBeheadedStep !frozen 双源门（:24494）', () => {
+  function beheadedGame(): { p: Player; game: GameHooks; fired: () => number } {
+    const p = new Player(60 * TILE, 60 * TILE, new Inventory());
+    Object.defineProperty(p, 'headArmorSlot', { get: () => 282 });   // head==282（枭首者头 5457）
+    let n = 0;
+    const game = makeGame(flatWorld(), {
+      broadcastParticleOrchestra: (type: number) => { if (type === 40) n++; },   // DeadCellsBeheadedEffect
+      spawnParticles: () => {},
+    });
+    return { p, game, fired: () => n };
+  }
+
+  it('裸装 282 头：残影发射（门全开对照）', () => {
+    const { p, game, fired } = beheadedGame();
+    p.deadCellsBeheadedStep(game);
+    expect(fired()).toBe(1);
+  });
+
+  it('buff47 Frozen 在身：!frozen 命中 → 不发射（旧 shimmering≈frozen 映射漏源案）', () => {
+    const { p, game, fired } = beheadedGame();
+    (p.buffs as unknown as { apply(t: BuffType, s: number): void }).apply(BuffType.Frozen, 60);
+    p.deadCellsBeheadedStep(game);
+    expect(fired()).toBe(0);
+  });
+
+  it('buff353 微光在身（shimmering=true）与 Stoned：同为门内不发射', () => {
+    const a = beheadedGame();
+    // shimmering 是 buff353 逐帧处理段的置位态（Player.ts:3284;原版 :11874-75）——
+    // 单测不走整帧管线,直接钉状态位（等价「buff 在身当拍」）
+    a.p.shimmering = true;
+    a.p.deadCellsBeheadedStep(a.game);
+    expect(a.fired()).toBe(0);
+    const b = beheadedGame();
+    (b.p.buffs as unknown as { apply(t: BuffType, s: number): void }).apply(BuffType.Stoned, 60);
+    b.p.deadCellsBeheadedStep(b.game);
+    expect(b.fired()).toBe(0);
+  });
+});

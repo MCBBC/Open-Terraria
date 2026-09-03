@@ -24,6 +24,7 @@ import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
+import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
 import { projSprite } from './Arrow';
@@ -235,6 +236,12 @@ function playerDeadMansSweater(game: GameHooks): boolean {
 /** 死囚毛衣本仓 item id（vi_5007 → 内部 id;注册缺失时 NaN → 消费恒 false） */
 const DEAD_MANS_SWEATER_ID = ITEM_BY_KEY['vi_5007_dead_man_s_sweater'] ?? NaN;
 
+/** 充能水母接触反噬弹幕族（Damage_PVE_Inner :12682：aiStyle 19/161/75/140 ||
+ *  ProjectileID.Sets.IsAWhip || AllowsContactDamageFromJellyfish——ProjectileID.cs:39
+ *  = {972,982,984,997,1043}）。IsAWhip 面不在本函数域（鞭走 WhipProj 自有命中环） */
+// 接触反噬资格判定共享化（JELLY_ZAP_AI_STYLES/PROJ_IDS/谓词移居 SwingPathMath——
+// ZAPPING_JELLYFISH 同表;曾本地私有=Arrow/WhipProj 复用会造 Arrow⇄proj1457 环）
+
 /** 敌怪最小命中面（Enemy/TownNPC 共用形状） */
 interface HitTarget {
   x: number; y: number; w: number; h: number;
@@ -272,10 +279,19 @@ export function dealContacts(
     if (!e || e.dead) continue;
     // ★dontTakeDamage 目标排除（Projectile.cs:12600 目标选择门——dontTakeDamage 连
     // Damage_PVE_Inner 都不进：StatusNPC/on-hit/TryConsumingTimerCrit 全不可达；
-    // ZappingJellyfish 例外集本仓暂无成员,登记）。曾缺=70/72 浸剂/DoT 把 hp 打穿 0
-    // 进永不死亡僵尸态（评审 C 定谳 2026-09-02 补;勿并入 playerCanHitEnemy/immortal
-    // ——488 训练假人靠 iframes=2 重打,键 immortal 是 2026-08-25 已知回归案）
-    if ((e as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+    // ★ZappingJellyfish 例外（2026-09-03 定谳）：集={63,64,103,242}（NPCID.cs:4460
+    //  BlueJellyfish/PinkJellyfish/GreenJellyfish/BloodJelly；本仓 SwingPathMath
+    //  .ZAPPING_JELLYFISH 同表）原版外环门与 dontTakeDamage 并列豁免——本仓 AI_018
+    //  潜伏态（Enemy.jellyfishAI :8653,专家+水中 ai1==1 充能段）确实置 dontTakeDamage
+    //  =true,旧注"例外集本仓暂无成员"不实。豁免的净效果见 cd.ready 后水母块（充能态
+    //  仍不受伤,原版内层 :12683 二次拦截;外环豁免只开接触反噬电击口）。曾缺=70/72
+    //  浸剂/DoT 把 hp 打穿 0 进永不死亡僵尸态（评审 C 定谳 2026-09-02 补;勿并入
+    //  playerCanHitEnemy/immortal——488 训练假人靠 iframes=2 重打,键 immortal 是
+    //  2026-08-25 已知回归案）
+    const jellyVid = e.vanillaId;
+    const zapJelly = jellyVid !== undefined && jellyVid > 0 && ZAPPING_JELLYFISH.has(jellyVid);
+    const jellyDontTake = (e as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+    if (jellyDontTake && !zapJelly) continue;
     if (!playerCanHitEnemy(ent, game, self.projId)) continue;
     if (gate) {
       // ownerHitCheckDistance：Distance(ent.Center) > N → 不命中（:12416-12418）
@@ -285,6 +301,23 @@ export function dealContacts(
     }
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!cd.ready(e.id, cooldown)) continue;
+    // ★水母块（Damage_PVE_Inner :12676-12688 内层 1:1）：充能态（dontTakeDamage）水母
+    //  不受伤——外环 :12600 豁免只做两件事：①接触族弹幕（aiStyle 19/161/75/140 ||
+    //  IsAWhip || AllowsContactDamageFromJellyfish{972,982,984,997,1043}）命中 →
+    //  TakeDamageFromJellyfish 电玩家（近战 Player.cs:44620 / 弹幕 :12682 共用同一
+    //  方法,本仓 Game.takeDamageFromJellyfish 单源）;②随后 `if (dontTakeDamage)
+    //  return` 拦掉本次伤害。非充能水母（zapJelly && !jellyDontTake）不进本块,照常
+    //  受伤。原版 immune 窗门（:12650）先于水母块 ⇒ 本块置 cd.ready 后同拍。
+    //  GAP 登记：同款外环门+水母块在 Arrow 主命中环 / WhipProj.tryHit 环未接（两环
+    //  现状=整靶跳过,伤害面与原版同值,仅缺接触族反噬电击——鞭 IsAWhip 属接触族）
+    if (zapJelly && jellyDontTake) {
+      const zapAi = projectileData(self.projId)?.aiStyle;
+      if ((zapAi !== undefined && JELLY_ZAP_AI_STYLES.has(zapAi))
+        || JELLY_ZAP_PROJ_IDS.has(self.projId)) {
+        game.takeDamageFromJellyfish?.(ent);
+      }
+      continue;
+    }
     // ★F11：蓄能暴击强制面（TryConsumingTimerCrit，Damage_PVE :12928 同位）
     const crit = Math.random() < self.critChance
       || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);

@@ -9,7 +9,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
-import type { GenState } from './GenState';
+import { wgSpawnNpc, type GenState } from './GenState';   // ★IIIII194 值引入（老头 wg 实体落地）
 import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
@@ -1738,7 +1738,29 @@ const snap: SnapFn = (name) => {
     //   （num2 *= -1，作用于墙簇垛口侧/台阶方向/门洞内半边全部下游）。
     if (gs.seedFlags.drunkWorld || gs.seedFlags.getGoodWorld) num2 *= -1;
     entBounds.set(Math.trunc(cx), Math.trunc(cy), Math.trunc(cx), Math.trunc(cy));
-    entExists = true;    const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
+    entExists = true;
+    // ★IIIII211：入口分段窗仪（SW_I211WW 门,零掷）——楔区 x[620,700)y[275,340) 状态
+    //   逐段 emit,定位 (41,7,alive) 楔格写入段（x86 该域=stage-2 清空后的 (38,7,dead) 残迹）。
+    const wwOn = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I211WW === '1';
+    const ww = (tag: string): void => {
+      if (!wwOn) return;
+      const i211w = (globalThis as unknown as { __swI211?: (line: string) => void }).__swI211;
+      if (!i211w) return;
+      const cnt: Record<string, number> = {};
+      for (let x = 620; x < 700; x++) {
+        for (let y = 275; y < 340; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          const k = `t${TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1}w${st.wall[ti]}a${st.flags[ti] & 1}`;
+          cnt[k] = (cnt[k] ?? 0) + 1;
+        }
+      }
+      const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        .map(([k, v]) => `${k}:${v}`).join('|');
+      i211w(`I211|WW|${tag}|${top}`);
+    };
+    ww('start');
+    const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
       for (let x = x0; x < x1; x++) {
         for (let y = y0; y < y1; y++) {
           if (!st.inBounds(x, y)) continue;
@@ -1771,6 +1793,7 @@ const snap: SnapFn = (name) => {
     if (dgEntProbe) console.log(`DGE i=${i} j=${j} cx=${cx.toFixed(1)} cy=${cy.toFixed(1)} s1x=${s1x} s1y=${s1y} s2x=${s2x} s2y=${s2y} n3=${n3} n4=${n4} n5=${n5} n6=${n6}`);
     entBounds.upd(n3, n5, n4, n6);
     solidBox(n3, n5, n4, n6, true);
+    ww('mass');
     // 垛口（左/右）
     {
       const a0 = clampX(n3);
@@ -1786,6 +1809,7 @@ const snap: SnapFn = (name) => {
       entBounds.upd(c0, d0, c1, n5);
       fillIfNotDW(c0, d0, c1, n5);
     }
+    ww('battress');
     // 顶齿（周期 num15 刷 num15 跳）
     {
       const n15 = 2 + hrn(4);
@@ -1805,9 +1829,19 @@ const snap: SnapFn = (name) => {
         if (n17 >= n15) { x += n15; n17 = 0; }
       }
     }
-    // 下延到 worldSurface（cs:215-251：TileIsInStyle 判定 + 潜在带跳过）
+    ww('teeth');
+    // 下延到 worldSurface（非 dual）/dual=砖承 cutoff（cs:243-251：num21=Main.worldSurface，
+    //   data.Type==DualDungeon → num21=GetDualDungeonBrickSupportCutoffY(data)=
+    //   outerPotentialDungeonBounds.Top−(DungeonEntranceIsUnderground?5:10)（SPF.cs:65-75
+    //   underground=drunk∨noSurface）；TileIsInStyle 判定 + InAnyPotentialDungeonBounds(x,y−5)
+    //   潜在带跳过（JS potContains=本座 pb,两座 pb 恒异侧不相交=行为等价,备案）。
+    // ★IIIII206：dual 支整缺（曾恒 worldSurface）⇒ 入口阶梯楔 y∈[ws,cutoff) 侧翼
+    //   brick/wall 带整缺（座1 实测 ~5.2k 格,x557-776/y296-336）→ SPIKES 起掷流错位
+    //   放大（座1 后段净 +27,101）→ 座2 入口房 Next(20) 变值 → 座2 布局整体重洗（#33 根因链）。
+    const dgeUg = !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface;   // SPF.DungeonEntranceIsUnderground
+    const dgeFill21 = isDualWorld ? potT - (dgeUg ? 5 : 10) : ws;
     for (let x = n3; x < n4; x++) {
-      for (let y = n5; y < ws; y++) {
+      for (let y = n5; y < dgeFill21; y++) {
         if (!st.inBounds(x, y)) continue;
         const ti = st.idx(x, y);
         st.liquid[ti] = 0;
@@ -1821,6 +1855,7 @@ const snap: SnapFn = (name) => {
         } else if (f2 && x > n3 && x < n4 - 1) st.wall[ti] = wall;
       }
     }
+    ww('fill21');
     // 0.5 框塔内厅
     {
       const a0 = clampX(Math.trunc(cx - s1x * 0.5));
@@ -1836,6 +1871,7 @@ const snap: SnapFn = (name) => {
         }
       }
     }
+    ww('halfbox');
     // 门厅平台候选（:269-303）
     // ★Z 批修复 2：vanilla :270-275 的 0.5 框把 num5/num6 重赋为 ±S1Y*0.5，:277
     //   num27=num6 取的是该 0.5 框底（=zero.Y+S1Y*0.5≈入口 j），非首段城堡盒的
@@ -1875,9 +1911,15 @@ const snap: SnapFn = (name) => {
         if (f4) { st.wall[ti] = 0; chTile(ti, brick, false); }
       }
     }
+    ww('sec2');
     entBounds.upd(n3, n5, n4, Math.trunc(ws));
+    // ★IIIII206：第二段下延 dual 支（cs:398-414：num31=Main.worldSurface；
+    //   data.Type==DualDungeon → num31=CurrentDungeonData.genVars.outerPotentialDungeonBounds.Top
+    //   **−5 直取**（不经 GetDualDungeonBrickSupportCutoffY,无 underground 再分叉）；
+    //   Bounds.UpdateBounds 末参仍恒 (int)Main.worldSurface（:396）——仅填充环界变。
+    const dgeFill31 = isDualWorld ? potT - 5 : ws;
     for (let x = n3; x < n4; x++) {
-      for (let y = n6; y < ws; y++) {
+      for (let y = n6; y < dgeFill31; y++) {
         if (!st.inBounds(x, y)) continue;
         const ti = st.idx(x, y);
         st.liquid[ti] = 0;
@@ -1891,6 +1933,7 @@ const snap: SnapFn = (name) => {
         } else if (f6 && x > n3 && x < n4 - 1) st.wall[ti] = wall;
       }
     }
+    ww('fill31');
     // 第二段垛口+顶齿
     const m7 = clampX(Math.trunc(cx - sx2 * 0.5));
     let m8 = m7;
@@ -1920,6 +1963,7 @@ const snap: SnapFn = (name) => {
         if (n17 >= n15b) { x += n15b; n17 = 0; }
       }
     }
+    ww('sec2bt');
     // 0.6 框清墙（cs:465-483：normal 世界必跑；★IIIII21——drunk=入口地下，
     //   `!dungeonEntranceIsUnderground && !dungeonEntranceIsBuried` 门（cs:540）
     //   恒假 → 0.6 收窄+清墙段整跳。noSurface 秘种子同支（组合域登记不接线）。
@@ -1969,6 +2013,12 @@ const snap: SnapFn = (name) => {
       //   NPC 落地必耗 1 颗主流掷；老头 id37 不在 46/62 换型表,值弃置。曾缺失 →
       //   入口段 −1 主掷、此后 pass32 骰流整体错位一位（x86 H97|oldman0→1 420→421 实证）。
       if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
+      // ★IIIII194：SetOldManSpawnAndSpawnOldManIfDefaultDungeon(generating:true) 后段
+      //   （DungeonUtils.cs:1664-1672，CurrentDungeon==0 ⇔ instIdx===0）——老头实体落地：
+      //   NewNPC(37) @ Bottom(dungeonX*16+8, dungeonY*16) → 左上 (X−9, Y−40)（18×40）。
+      //   生成期无 AI 更新（x86 rig 逐 pass 普查位置恒定）；EmptyTile 实体支消费者=
+      //   SurfaceDecorPasses 1b bubble 写环（#75 三格残差裁决实证 /tmp/iii194-out）。
+      if (instIdx === 0) wgSpawnNpc(gs, 37, dungeonX * 16 + 8, dungeonY * 16, 18, 40);
       // ★IIIII21（cs:582-585）：drunk 死生命树座——x=generatingDungeonPositionX、
       //   y=(int)Main.worldSurface、attachmentY=generatingDungeonPositionY；
       //   generateRoots=true。掷骰走主流 rng。HasATree=drunk&&!NoDungeonGuardian
@@ -1986,7 +2036,9 @@ const snap: SnapFn = (name) => {
     if (!(gs.seedFlags.drunkWorld)) {
       const sti = num2 === 1 ? clampX(Math.trunc(cx + sx2 * 0.5)) : clampX(Math.trunc(cx - sx2 * 0.5));
       const stj = clampY(Math.trunc(cy + sy2 * 0.5));
-      const stdep = ((gs.seedFlags.drunkWorld ? potT - 5 : potT - 10)) - stj + 5;
+      // ★IIIII206：cutoff 的 underground 臂=drunk∨noSurface（SPF.cs:65-75）——曾只认
+      //   drunk,noSurface 世界台阶深度差 5（GetDualDungeonBrickSupportCutoffY 消费点同族）。
+      const stdep = ((dgeUg ? potT - 5 : potT - 10)) - stj + 5;
       dgStairs(sti, stj, num2, stdep);
     }    // 条纹窗墙（PlaceWall：墙==0 才写）
     {
@@ -2033,6 +2085,7 @@ const snap: SnapFn = (name) => {
       // 勿在此掷 rn(3)——1/3 主题门掷骰属 dungeonD 门特征段（DungeonGlobalDoors.cs:47-50，见下方 doorData 落放处）。
       dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
     }
+    ww('end');
   }
 
   // ============ LegacyEntranceDungeonHall precalc 支（:23-380，UsePrecalculatedEntrance=true）============
@@ -2589,8 +2642,12 @@ const snap: SnapFn = (name) => {
     //   （GetDualDungeonBrickSupportCutoffY(data)-num7）本链不涉，登记待接线。
     const entUnderground = !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface;
     const entBuried = !!gs.seedFlags.surfaceIsDesert && !entUnderground;
-    const n5 = entUnderground ? (50 - 10 + 5) : 100;
     const n7 = j - 30;                            // 塔基线（num7=j-num6, num6=30）
+    // ★IIIII206：dual 支接线（TowerDungeonEntrance.cs:97-103：if(Type==DualDungeon)
+    //   num5=GetDualDungeonBrickSupportCutoffY(data)-num7; else if(underground)
+    //   num5=num17-m+5=45——原 JS 只接 underground 支,dual 支登记待接线）。
+    const n5 = isDualWorld ? (potT - (entUnderground ? 5 : 10) - n7)
+      : (entUnderground ? (50 - 10 + 5) : 100);
     // ★PPPPP（2026-08-22）n16 勘误：原版 num16 = num8+num11+num15 = 30+20+40 = **90**
     //   （TowerDungeonEntrance.cs:66-70）。JS/oracle 曾同抄 95（双源同错——顶柱/顶檐
     //   整体高 5 格,篝火 y 156≠161 实证）；四链种子恰无 Tower 入口故未暴露,CONST 链
@@ -2808,6 +2865,8 @@ const snap: SnapFn = (name) => {
     dungeonX = i; dungeonY = n7;
     // ★IIIII98b2：FTW NewNPC 头 Next(3) 主流掷镜像（同 legacy 锚注释；Tower :492）
     if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
+    // ★IIIII194：老头实体落地（同 legacy 锚注；Tower 入口 DungeonUtils.cs:1664-1672）
+    if (instIdx === 0) wgSpawnNpc(gs, 37, dungeonX * 16 + 8, dungeonY * 16, 18, 40);
     // ★IIIII21（cs:493-495）：drunk 死生命树——x=i、y=(int)worldSurface、
     //   attachmentY=num7-num16+8、generateRoots=false。
     // ★IIIII84 刀①取证钩（WVLOG 门控零开销）：树前/树后主流样本序数（x86 侧对照=
@@ -2856,8 +2915,14 @@ const snap: SnapFn = (name) => {
         st.slope[ti] = 0; st.half[ti] = 0;
       }
     }
-    const n2 = 5, n3 = 35, n4 = 40, n5 = 100;
+    const n2 = 5, n3 = 35, n4 = 40;
     const n7 = j - 30;                             // 基线（num6=30，cs:81）
+    // ★IIIII206：cs:85-91 if(Type==DualDungeon){num5=GetDualDungeonBrickSupportCutoffY(data)
+    //   -num7} else if(underground){num5=num8-m+5=45}——dual/underground 两支整缺（曾恒 100；
+    //   旧备案「特典支不接线」清偿）。n7 提前定义仅为取值依赖,声明序与掷流无关。
+    const dgeUgD = !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface;
+    const n5 = isDualWorld ? (potT - (dgeUgD ? 5 : 10) - n7)
+      : (dgeUgD ? 45 : 100);
     const num18 = n7 + 1;                          // cs:239
     // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4；
     // ★IIIII21：drunk 入口地下 → 门恒假 → 整段跳过；★IIIII112（cs:95）：门原文=
@@ -3119,6 +3184,8 @@ const snap: SnapFn = (name) => {
     dungeonX = i; dungeonY = n7;
     // ★IIIII98b2：FTW NewNPC 头 Next(3) 主流掷镜像（同 legacy 锚注释；Dome :472）
     if (instIdx === 0 && gs.seedFlags.getGoodWorld) rn(3);
+    // ★IIIII194：老头实体落地（同 legacy 锚注；Dome 入口 DungeonUtils.cs:1664-1672）
+    if (instIdx === 0) wgSpawnNpc(gs, 37, dungeonX * 16 + 8, dungeonY * 16, 18, 40);
     // ★IIIII21（cs:473-475）：drunk 死生命树——x=i、y=(int)worldSurface、
     //   attachmentY=num7-num3+5、generateRoots=false（穹顶座无根）。
     if (gs.seedFlags.drunkWorld) {
@@ -3167,7 +3234,20 @@ const snap: SnapFn = (name) => {
           if (n - q >= 0 && m >= 0 && m < w) st.liquid[(n - q) * w + m] = 0;
         if (!stairsCanPlace(m, n)) continue;
         const ti = st.idx(m, n);
-        const fl = wallAt(m, n) === wall;                  // WallIsInStyle（Default 单样式=BrickWallType）
+        // ★IIIII211 定罪刀（DU.cs:1289-1298 二段查）：flag 先查 dungeonStyle.WallIsInStyle，
+        //   失败再【遍历本座 dungeonGenerationStyles 全员】WallIsInStyle（=BrickWallType
+        //   相等,cs:131-150 默认参）。dual 座=四族墙 {349,3,64,7}——曾只查 Default(7) ⇒
+        //   蛇厅幽灵格(38,349,dead) 走 else 支被激活成 (41,7,alive) 250+36 格（座1 楔区
+        //   x641-660/y281-336 实测）,PD 写面 296 格残差→SPIKES −170→掷流错位→座2 布局
+        //   重洗（#33 根因链首环）。单样式世界 gfStyles=[]/仅 Default ⇒ 循环恒 no-op
+        //   （掷流/写面零扰动）。
+        let wv211 = wallAt(m, n);
+        let fl = wv211 === wall;                           // dungeonStyle.WallIsInStyle
+        if (!fl) {
+          for (const s211 of gfStyles) {
+            if (wv211 === s211.BrickWallType) { fl = true; break; }
+          }
+        }
         if (fl) {
           if (actAt(m, n) !== 0) chTile(ti, brick, false); // 原版仅 active 格改 type（幽灵保 type）
           st.wall[ti] = wall;
@@ -3484,12 +3564,31 @@ const snap: SnapFn = (name) => {
   }
 
   // ============ DungeonGlobalSpikes（:900-1105）============
+  // ★IIIII211：座面裂纹砖集（Spikes_CanSupportSpike 消费 DU.IsConsideredCrackedDungeonTile
+  //   =genVars.isCrackedBrick【本座】=Sets.CrackedBricks{481,482,483} 基表+本座 styles
+  //   (∪SubStyles,DC.cs:150-163) 的 BrickCrackedTileType；PitTrapTileType 入 isPitTrapTile
+  //   不入本集）。dgSpikes 入口按 gfStyles 重建；非 dual gfStyles=[] ⇒ 集=基表=旧径。
+  let spkCracked211: Set<number> | null = null;
+  const buildSpkCracked211 = (): void => {
+    const s = new Set<number>([481, 482, 483]);
+    const addOf = (st0: import('./DungeonStyles1457').DungeonStyleData): void => {
+      s.add(st0.BrickCrackedTileType);
+      for (const sb of st0.SubStyles ?? []) addOf(sb);
+    };
+    for (const st0 of gfStyles) addOf(st0);
+    spkCracked211 = s;
+  };
   const canSupportSpike = (x: number, y: number): boolean => {
     if (actAt(x, y) === 0) return false;
     const t = typAt(x, y);
-    const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
-    if (DG_FRAMED_NOT_CUT.has(sheet)) return false;
-    if (sheet === 481 || sheet === 482 || sheet === 483) return false;
+    const d = TILE_DEFS[t];
+    const sheet = d?.vanilla?.sheet ?? -1;
+    // ★IIIII211 定罪刀②（DGS:241-247）：原版拒 Main.tileFrameImportant[type]∨
+    //   Main.tileCut[type]【并集】——旧 DG_FRAMED_NOT_CUT=framed∧¬decor 只拒交集,
+    //   framed∧decor（火把族）与 ¬framed∧decor 可作刺支承=JS 多刺→n5 提前饱和→
+    //   attempt 少→SPIKES 段 −170 掷（座1 实测）；再并座面裂纹集（上面）。
+    if (sheet >= 0 && (d.framed || d.decor)) return false;
+    if (spkCracked211?.has(sheet)) return false;
     return true;
   };
   // ★IIIII109b：sType/sFlag=dual 支扩展（cs :77 type=232 木刺、:88-92 flag 门=三段带
@@ -3576,6 +3675,11 @@ const snap: SnapFn = (name) => {
     return n11;
   }
   function dgSpikes(): void {
+    buildSpkCracked211();                     // ★IIIII211：座面裂纹集按座重建（零掷）
+    // ★IIIII215 逐 attempt 仪（SW_I215=1;零掷,__swI113 未挂载=零开销;x86 rig DR|SPK/SPKW 同构）：
+    //   SPK=逐 attempt 采样位(x,y,w=墙,g=座墙门,a=活性) / SPKW=门内走查后(hx,hy=走后位,d=向,ok=受理)
+    const i215S = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I215;
+    const mk215S = (ln: string): void => { (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
     const num = wallVariants[0];
     // ★IIIII50（DungeonGlobalSpikes.cs:33-36）：getGoodWorldGen → 刺配额 num7×3。
     //   该 feature 每轮至少 2 掷×num7，漏接即本 pass 后半（墙变体扫描/下层房群）
@@ -3623,6 +3727,7 @@ const snap: SnapFn = (name) => {
             spkFlag = false;
           }
         }
+        if (i215S) mk215S(`DR|SPK|r=${round}|n3=${n3}|x=${x}|y=${y}|w=${walHere}|g=${gateOk ? 1 : 0}|a=${actAt(x, y) !== 0 ? 1 : 0}`);
         if (gateOk && actAt(x, y) === 0) {
           const d = rn(2) === 0 ? -1 : 1;
           const oy = y;                                   // num13：原始采样点（第二段起点基准）
@@ -3650,6 +3755,7 @@ const snap: SnapFn = (name) => {
             okD2 = hit && inW(wx - d, wy - 1, 0) && actAt(wx - d, wy - 1) === 0;
             okE = hit && inW(wx - d, wy + 1, 0) && actAt(wx - d, wy + 1) === 0;
           }
+          if (i215S) mk215S(`DR|SPKW|r=${round}|hx=${wx}|hy=${wy}|d=${d}|ok=${(hit && okA && okB && okC && okD2 && okE) ? 1 : 0}`);
           if (okA && okB && okC && okD2 && okE) {
             n5++;
             let n11 = ri(5, 12);
@@ -3996,7 +4102,12 @@ const snap: SnapFn = (name) => {
             dgDungeonPot(m, py - 1);                          // style=Next(10,13)+PlacePot(28)
           } else if ((d.bottles ?? 0) > 0 && rd() < (d.bottles ?? 0)) {
             placeOnTableD(m, py - 1, TILE_BY_KEY['v_13_placed_bottles']!);
-            if (typAt(m, py - 1) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);   // type==13 后 Next(2)
+            // ★IIIII204：DungeonUtils.GenerateDungeonPotionBottle（DU:392-404）——type==13
+            //   后 Next(2)==0→frameX=18 否则 36。旧码掷已耗而值被丢弃=恒帧 0（瓶版帧债
+            //   ×30，DGP 平台架活格视觉真差；书族 FFFF 批同病已补，瓶族漏）。
+            if (typAt(m, py - 1) === TILE_BY_KEY['v_13_placed_bottles']) {
+              st.frameX[st.idx(m, py - 1)] = rn(2) === 0 ? 18 : 36;   // type==13 后 Next(2)
+            }
           } else if ((d.books ?? 0) > 0 && rd() < (d.books ?? 0)) {
             // ★FFFF 批（2026-08-18）：NoWaterbolt=false（Dome 下对平台）走
             //   GenerateDungeonBook 默认支（DU:432-435）——Next(50) 掷在参数位
@@ -4829,14 +4940,16 @@ const snap: SnapFn = (name) => {
                 st.frameY[st.idx(x, y)] = 18 * shelfStyle;
                 if (flag3) {
                   placeOnTableD(x, y - 1, BOOKS);   // ★平台19 ∈ tileTable
-                  // GenerateDungeonBook（DungeonUtils.cs:437-446）：Next(50) 水书掷 +
-                  // 深度门 (ws+rock)/2 + ★1456 typo 检查 Main.tile[placeY, placeY].type==50
-                  // （X/Y 互换读对角格—— DungeonGlobalPlatforms.cs:206 唯一调用链，
-                  // 实战对角格几乎恒非书 → 帧恒不落；1405 同处是正确的 [i2, j2-1]。
-                  // RNG 序两版亦反（1456 先掷 50 后掷 5；本仓 5→50 已冻结金标，保留）
+                  // ★IIIII204 勘误：本块是 DungeonGlobalBookshelves（DGB:131-138）的镜像，
+                  //   不是 DGP/DungeonUtils.GenerateDungeonBook 链——原版 DGB 检查的就是
+                  //   【刚放的书格】Main.tile[num5, num6-1].type == 50（1456/1457/1458 三版
+                  //   逐字同，无 typo）；typo 版 Main.tile[placeY,placeY] 只存在于
+                  //   DungeonUtils.GenerateDungeonBook（DGP:214 唯一调用方，本文件 :4025
+                  //   的 DGP 镜像已按 typo 照抄）。旧码错把 typo 语义带进 DGB 镜像 →
+                  //   对角格几乎恒非书 → 水书帧 90 恒不落（g 链活格 T50 帧债 ×5）。
                   if (rn(50) === 0 && y > (ws + rock) / 2.0
-                    && inW(y, y, 0) && typAt(y, y) === BOOKS) {
-                    st.frameX[st.idx(x, y - 1)] = 90;   // frameX = 90 水书伪装帧
+                    && inW(x, y - 1, 0) && typAt(x, y - 1) === BOOKS) {
+                    st.frameX[st.idx(x, y - 1)] = 90;   // frameX = 90 水书伪装帧（DGB:135-137）
                   }
                 }
                 x += n7;
@@ -4859,7 +4972,11 @@ const snap: SnapFn = (name) => {
                 const bkPlaced = placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_placed_bottles']!);
                 if (gfStyles.length > 0 && bkMinWC.v > 0 && bkPlaced
                   && inW(x, y, 0) && typAt(x, y) === WATER_CANDLE) bkMinWC.v--;   // cs:184-186
-                if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);
+                // ★IIIII204：DungeonGlobalBookshelves（DGB:177-190 两臂同构 DU:397-403）——
+                //   type==13 后 Next(2)==0→frameX=18 否则 36。旧码掷已耗而值被丢弃=恒帧 0。
+                if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_placed_bottles']) {
+                  st.frameX[st.idx(x, y)] = rn(2) === 0 ? 18 : 36;
+                }
               }
             }
           }
@@ -7258,12 +7375,19 @@ const snap: SnapFn = (name) => {
     if (TT) TT.climb1 = dgMainRolls;
     dgpMark("climb1");
     dgpMark("preent");
+    // ★IIIII211：climb→entrance 间检查点（SW_I211CHAIN 仪 WANT 命名 'dungeonClimb'）——
+    //   楔区 (41,7,alive) 写入者二分（climb/插入房 vs 入口结构）。
+    snap('dungeonClimb');
   }
   // MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1 转录）；
   // Dome=DomeDungeonEntrance（FFFF 批 2026-08-18 1:1 转录——XX 批备案的"Legacy 近似
   // 体"已退役；AAAA 批的 Dome 锚补丁同步本体化进 dgDomeEntrance 尾部）。
   // GetEntranceSettings 的 1 颗废弃掷在两支同位（settings.RandomSeed=Next() 后被
   // preSettings.RandomSeed 覆写）——tower/dome 支先 raw() 再传 entSeed。
+  if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I211 === '1') {
+    ((globalThis as unknown as { __swI211?: (line: string) => void }).__swI211
+      ?? ((l: string) => { void l; }))(`I211|ENT|i${instIdx + 1}|kind=${entKind}|pos=${posX},${posY}|pre=${precalcOK ? 1 : 0}`);
+  }
   if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
   else if (entKind === 1) { raw(); dgDomeEntrance(posX, posY, entSeed); }
   else dgEntrance(raw(), entSeed);
@@ -7387,6 +7511,10 @@ const snap: SnapFn = (name) => {
   //   旧径两态；此前 JS 仅旧径分支发行 ⇒ dual 链 EARLY 窗无行、+190 差只能借
   //   PDH_o↔SPIKES_i 未标记窗间接测得，无法归因到臂）。
   mk179F('EARLY', 'i');
+  // ★IIIII192 观测（零掷）：EARLY 入态特征登记处对拍（x86 EAR|FEATS 同位）——
+  //   pits=已登记 PitTrap 成功盒 / winBoxes=窗盒 / dropBoxes=DropTrap 盒。
+  mk179R(`EAR|FEATS|n=${pits.length + winBoxes.length + dropBoxes.length}|pits=${pits.length}|win=${winBoxes.length}|drop=${dropBoxes.length}`
+    + winBoxes.map((b2, k2) => `|W${k2}:${b2.L},${b2.T},${b2.R},${b2.B}`).join(''));
   if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DG_GC === '1') {
     console.log(`GC-S7GATE styles=${gfStyles.length} pbg=${_gfSeatProgBounds === null ? 'null' : _gfSeatProgBounds.length} featRooms=${gfFeatRooms.length} flag=${i138EarlyGate() ? '1' : '0'}`);
   }
@@ -7399,6 +7527,30 @@ const snap: SnapFn = (name) => {
     const shOfAt = (x2: number, y2: number): number => TILE_DEFS[typAt(x2, y2)]?.vanilla?.sheet ?? -1;
     const dwSh = (v: number): boolean => v > 0 && _gfSeatDWSet.has(v);
     const dtSh = (v: number): boolean => v > 0 && _gfSeatDTSet.has(v);       // IsConsideredDungeonTile
+    // ★IIIII200：座面判定集 dump（x86 JJHook.DumpSeatSets 同位镜像,SW_I200 门,零掷）——
+    //   SET|i<seat>|s<n>bt=..bw=..|DT=..|DW=..——坑井受理谓词差直检面。
+    const i200On = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I200 === '1';
+    if (i200On) {
+      const dtSet200 = _gfSeatDTSet ?? new Set<number>();
+      const dwSet200 = _gfSeatDWSet ?? new Set<number>();
+      mk179R(`SET|i${instIdx + 1}|${gfStyles.map((s0) => `s${s0.Style}bt=${s0.BrickTileType}bw=${s0.BrickWallType}`).join('|')}`
+        + `|DT=${[...dtSet200].join(',')}|DW=${[...dwSet200].join(',')}`);
+    }
+    // ★IIIII211：per-room style 归桶仪（SW_I211 门,零掷）——S4 建桶前逐房 emit
+    //   （房序/st/bio/inner bb/outer bb），对 x86 S4 st=n 计数 + RB 全集做归桶差定谳。
+    if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I211 === '1') {
+      const i211 = (globalThis as unknown as { __swI211?: (line: string) => void }).__swI211;
+      if (i211) {
+        i211(`I211|SEAT|i${instIdx + 1}|rooms=${gfFeatRooms.length}|styles=${gfStyles.map((s0) => s0.Style).join(',')}`);
+        gfFeatRooms.forEach((rr, ri211) => {
+          i211(`I211|DICT|i${instIdx + 1}|r=${ri211}|st=${rr.st}|bio=${rr.bio ? 1 : 0}`
+            + `|L=${rr.L}|T=${rr.T}|R=${rr.R}|B=${rr.B}|oL=${rr.oL}|oT=${rr.oT}|oR=${rr.oR}|oB=${rr.oB}`);
+        });
+        const bySt211: Record<number, number> = {};
+        for (const rr of gfFeatRooms) bySt211[rr.st] = (bySt211[rr.st] ?? 0) + 1;
+        i211(`I211|SUM|i${instIdx + 1}|` + Object.keys(bySt211).map(Number).sort((a, b) => a - b).map((k) => `st${k}=${bySt211[k]}`).join('|'));
+      }
+    }
     // TileID.Sets.Falling / CrackedBricks / Boulders（1458 TileID.cs :195/:183/:395）
     const E137_FALLING = new Set<number>([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
     const E137_BOULDERS = new Set<number>([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
@@ -7534,6 +7686,8 @@ const snap: SnapFn = (name) => {
       }
     };
     /** DungeonPitTrap.PitTrap 的 Type==DualDungeon(flag=true) 支（cs:42-403）。 */
+    let pitGate = '';                                     // ★IIIII192 观测：末次拒绝门（零掷）
+    let i200PitSeq = 0;                                   // ★IIIII200：坑井仪序号（x86 JJHook.PitBegin 同位,EARLY 每座恰一）
     const dualPitTrap = (
       i: number, j: number, widthA: number, heightA: number,
       edgeW: number, edgeH: number, topD: number, flooded: boolean,
@@ -7550,7 +7704,7 @@ const snap: SnapFn = (name) => {
       const flagCrack = pitSheet === 481 || pitSheet === 482 || pitSheet === 483;
       const uw = h - 200;
       let num = j, num2 = j;
-      if (widthA < 1 || heightA < 1) return false;
+      if (widthA < 1 || heightA < 1) { pitGate = 'wlt1'; return false; }   // ★IIIII200 门标
       let num3 = heightA;
       if (flooded) {                                        // cs:63-70 Flooded 收深扩延（300 cap）
         for (;;) {
@@ -7561,29 +7715,32 @@ const snap: SnapFn = (name) => {
       }
       const num6 = widthA + edgeW;
       const num7 = num3 + edgeH;
-      if (!inW(i, num, Math.max(num6, num7))) return false;
-      if (!dwSh(wallAt(i, num))) return false;              // IsConsideredDungeonWall(per-seat 合并面)
+      // ★IIIII200：x86 PG() 门标链镜像（DungeonPitTrap.cs:45-190 每拒支同名）——
+      //   观测面（S4G/S4T 行 g=）与 x86 逐门可 diff;label 写仅赋值零掷。
+      pitGate = 'start';
+      if (!inW(i, num, Math.max(num6, num7))) { pitGate = 'inw'; return false; }
+      if (!dwSh(wallAt(i, num))) { pitGate = 'wall'; return false; }        // IsConsideredDungeonWall(per-seat 合并面)
       if (instIdx >= 0) {                                   // outerPotentialDungeonBounds 门（dual 必走）
         const pbk = dualDungeonState.potentialBounds[instIdx];
-        if (!pbk || !(i >= pbk.l && i < pbk.r && num >= pbk.t && num < pbk.b)) return false;
+        if (!pbk || !(i >= pbk.l && i < pbk.r && num >= pbk.t && num < pbk.b)) { pitGate = 'pot'; return false; }
       }
-      if (actAt(i, num) !== 0) return false;
+      if (actAt(i, num) !== 0) { pitGate = 'act'; return false; }
       for (let k = num; k < h; k++) {
-        if (k > uw) return false;
+        if (k > uw) { pitGate = 'uw1'; return false; }
         if (actAt(i, k) !== 0 && dgSpreadSolid(i, k)) {
-          if (typAt(i, k) === SPIKE) return false;
+          if (typAt(i, k) === SPIKE) { pitGate = 'sp48'; return false; }
           num = k; num2 = k;
           break;
         }
       }
-      if (!(dwSh(wallAt(i - widthA, num)) && dwSh(wallAt(i + widthA, num)))) return false;
+      if (!(dwSh(wallAt(i - widthA, num)) && dwSh(wallAt(i + widthA, num)))) { pitGate = 'side'; return false; }
       for (let l2 = i - num6; l2 <= i + num6; l2++) {       // cs:110-127 双座族全箱自检
         for (let m2 = num; m2 < num + num7 + 2; m2++) {
           if (!st.inBounds(l2, m2)) continue;
           const ti2 = st.idx(l2, m2);
           const sh2 = TILE_DEFS[st.type[ti2]]?.vanilla?.sheet ?? -1;
-          if ((st.flags[ti2] & 1) && sh2 !== brickSheet) return false;
-          if (st.wall[ti2] !== styleObj.BrickWallType) return false;
+          if ((st.flags[ti2] & 1) && sh2 !== brickSheet) { pitGate = 'brick'; return false; }
+          if (st.wall[ti2] !== styleObj.BrickWallType) { pitGate = 'wall2'; return false; }
         }
       }
       for (let n = num; n < num + 30; n++) {                // cs:128-147 净空头扫
@@ -7593,7 +7750,7 @@ const snap: SnapFn = (name) => {
         }
         if (clean) { num = n; break; }
       }
-      if (num + num7 >= uw) return false;
+      if (num + num7 >= uw) { pitGate = 'uw2'; return false; }
       const heights: number[] = [];                         // cs:152-166 heights 数组
       for (let c = i - num6; c <= i + num6; c++) {
         let m11 = num;
@@ -7606,9 +7763,40 @@ const snap: SnapFn = (name) => {
       }
       const hit = new DBnd(w, h);
       hit.set(i - num6, num2, i + num6, num + num7);
-      for (let px = hit.L; px < hit.R; px++) {              // CanGenerateFeatureInArea=hitbox 半开盒
-        for (let py = hit.T; py < hit.B; py++) {
-          if (!featOK(px, py, 0)) return false;
+      // ★IIIII200：坑井受理态逐格仪（x86 JJHook.PitDump 同构镜像,SW_I200 门,零掷）——
+      //   PT| 行=坑井内部量（x86 同字段）+ __swI168BB('pt<k>')=区域快照（同 DumpBox 5B/格格式）。
+      if (i200On) {
+        i200PitSeq++;
+        mk179R(`PT|k=${i200PitSeq}|i=${i}|j=${j}|w=${widthA}|h3=${num3}|n6=${num6}|n7=${num7}`
+          + `|num=${num}|num2=${num2}|hb=${hit.L},${hit.T},${hit.R},${hit.B}`
+          + `|bt=${brickSheet}|bw=${styleObj.BrickWallType}`);
+        (globalThis as { __swI168BB?: (tag: string, l: number, t: number, r: number, b: number) => void })
+          .__swI168BB?.(`i${instIdx + 1}pt${i200PitSeq}`, i - num6 - 4, num2 - 4, i + num6 + 5,
+            num + num7 + 6 > num2 + 40 ? num + num7 + 6 : num2 + 40);
+      }
+      // ★IIIII200 定谳：C# DungeonData.CanGenerateFeatureInArea 的逐格环是
+      //   `i <= hitbox.Right; j <= hitbox.Bottom`（DungeonData.cs:111-113）——XNA
+      //   Rectangle.Right=Left+Width/Bottom=Top+Height 是【排他界】但环用 **≤** ⇒ 实扫
+      //   域=[Left..Right]×[Top..Bottom] **含末行末列**（比 SetBounds 原值域多一行列）。
+      //   JS 旧版半开盒 [L,R)×[T,B) 漏扫末行末列 ⇒ 坑盒 Bottom 恰=邻房 OuterBounds.Top
+      //   时 x86 拒（room:k,坑盒伸进邻房）而 JS 受理——S4 st=8 attempt19 实锤
+      //   （x86 PT k=46 hb=628,734,664,748 扫到 y=748∈r73[748,802) 拒;JS 漏 y=748 受理,
+      //   三段梯 att 24 vs 20 的真根）。修=≤ 环（DropTrap cs:196 域 JS 已是 ≤ 环正确,勿动）。
+      for (let px = hit.L; px <= hit.R; px++) {             // CanGenerateFeatureInArea=含 Right/Bottom（cs:111）
+        for (let py = hit.T; py <= hit.B; py++) {
+          if (!featOK(px, py, 0)) { pitGate = 'area'; return false; }
+          // ★IIIII192：DungeonData.CanGenerateFeatureAt 尾部 **per-room 门**（DungeonRoom.cs:40-51
+          //  经 CanGenerateFeatureInArea→CanGenerateFeatureAt 逐格调用的收尾支）——命中已生成房
+          //  OuterBounds 的格：ConnectedRoom≠本房 → 拒（坑盒伸进邻房即整盒拒）；=本房 →
+          //  StyleData 门（Shimmer11/LivingWood13/14/Beehive9/Temple10 拒 PitTrap——已由
+          //  pick 侧 styleHook 等效执行,此处不重复）。旧版整缺 ⇒ JS 坑盒跨房仍受理
+          //  （x86 S4 st=8 att=24 vs JS 20 的实锤签名）。
+          for (const rm of gfFeatRooms) {
+            if (!rm.gen) continue;
+            const ol = rm.oL, ot = rm.oT, or2 = rm.oR, ob = rm.oB;
+            if (ol === undefined || ot === undefined || or2 === undefined || ob === undefined) continue;
+            if (px >= ol && px < or2 && py >= ot && py < ob && rm !== roomOuter) { pitGate = 'room:' + gfFeatRooms.indexOf(rm); return false; }
+          }
         }
       }
       for (let c12 = i - num6; c12 <= i + num6; c12++) {    // ConnectedRoom 外框补拒门 cs:175-192
@@ -7646,7 +7834,12 @@ const snap: SnapFn = (name) => {
           if (!st.inBounds(c, yy)) continue;
           const ti2 = st.idx(c, yy);
           let f6 = false;
-          if (flooded && yy <= num2 + topD) {
+          // ★IIIII200 定谳：顶带 pit-trap 瓷砖重铸门=C# `flag && num23 <= num2+TopDensity`
+          //  （DungeonPitTrap.cs:269，flag=dual 恒真）——与 Flooded **无关**！JS 旧版误加
+          //  `flooded &&` ⇒ 非洪水坑顶带缺 pit-trap 瓷砖（cavern=123）且下游 135 板线
+          //  链（PlaceTile(…135…7) 需上方邻格= pit-trap 瓷砖）整链不产——pt10p 区域
+          //  397 格差（x86 123/135 vs JS 48/清）实锤。修=去 flooded 条件。
+          if (yy <= num2 + topD) {
             f6 = false;
             if (st.flags[ti2] & 1) chTile(ti2, pitI, false);
             st.liquidType[ti2] = 0; st.liquid[ti2] = 0;
@@ -7709,6 +7902,13 @@ const snap: SnapFn = (name) => {
         }
       }
       pits.push(hit);                                       // dungeonFeatures 登记（featOK veto 面）
+      // ★IIIII200：受理成功后的写面终态（pt<k>p——与 pt<k> 入态同域对拍=本坑写迹）
+      if (i200On) {
+        mk179R(`PTP|k=${i200PitSeq}|i=${i}|j=${j}|num=${num}|num2=${num2}|hb=${hit.L},${hit.T},${hit.R},${hit.B}`);
+        (globalThis as { __swI168BB?: (tag: string, l: number, t: number, r: number, b: number) => void })
+          .__swI168BB?.(`i${instIdx + 1}pt${i200PitSeq}p`, i - num6 - 4, num2 - 4, i + num6 + 5,
+            num + num7 + 6 > num2 + 40 ? num + num7 + 6 : num2 + 40);
+      }
       return true;
     };
     // —— 计数表（cs:29-75）——
@@ -7727,7 +7927,7 @@ const snap: SnapFn = (name) => {
       let nCount = nAlt;
       let guard = 1000;
       let s1att = 0, s1hit = 0, s1ok = 0;   // ★IIIII192 观测（零掷）
-      mk179R(`EAR|S1|st=${stlS1.Style}|i`);
+      mk179R(`EAR|S1|st=${stlS1.Style}|i|bb=${bbS1.L},${bbS1.T},${bbS1.R},${bbS1.B}`);
       while (nCount > 0) {
         guard--;
         if (guard <= 0) break;
@@ -7781,12 +7981,23 @@ const snap: SnapFn = (name) => {
       }
     }
     // ======== S4：dual per-room PitTrap（cs:174-303）========
+    // ★IIIII192：C# dictionary 语义（EarlyDual.cs:127-141 建 dict[style]；S4 的
+    //   `list4 = dictionary[style]` 是**引用**且逐 attempt Remove（cs:178 无 ToList），
+    //   S5-S7 的 `dictionary[style].ToList()` 快照在 S4 **之后** ⇒ 起始名单=S4 消费后
+    //   余量（x86 实锤：seat0 S7 n=7 vs 旧 JS 20；S4 st=1 att=13 → 20−13=7）。
+    //   修=建共享 per-style 数组，S4 原地 splice；S5-S7 快照取修后余量并按 cs 固定
+    //   序 3→2→1 分派（旧版按 gfStyles 迭代序,与 cs 块序可分歧）。
+    const dictByStyle = new Map<number, typeof gfFeatRooms>();
+    for (const rr of gfFeatRooms) {
+      const arr = dictByStyle.get(rr.st);
+      if (arr) arr.push(rr); else dictByStyle.set(rr.st, [rr]);
+    }
     for (let k4 = 0; k4 < gfStyles.length; k4++) {
       const stlS4 = gfStyles[k4]!;
-      const list4 = gfFeatRooms.filter((rr) => rr.st === stlS4.Style).slice();
+      const list4 = dictByStyle.get(stlS4.Style);
       let n15 = nPitPerStyle;                               // num6（世界规模档）
       let n16 = wszE === 1 ? 4 : wszE === 2 ? 6 : 2;        // Flooded 配额（cs:192-197）
-      if (list4.length === 0) continue;
+      if (!list4 || list4.length === 0) continue;
       let s4att = 0, s4ok = 0, s4f2 = 0;                    // ★IIIII192 观测（零掷）
       mk179R(`EAR|S4|st=${stlS4.Style}|i|n=${list4.length}`);
       while (list4.length > 0 && n15 > 0) {
@@ -7828,22 +8039,26 @@ const snap: SnapFn = (name) => {
           : false;
         let stage = 0;
         if (!pitTry(wid, hgt)) {
+          mk179R(`EAR|S4G|st=${stlS4.Style}|s=1|g=${pitGate}`);       // ★IIIII192 观测（零掷）
           hgt = Math.max(10, Math.trunc(Math.fround(ih * 0.5)));      // 第二段收窄（cs:243）
           if (!pitTry(wid, hgt)) {
+            mk179R(`EAR|S4G|st=${stlS4.Style}|s=2|g=${pitGate}`);
             wid = Math.trunc(Math.fround(Math.trunc(iw / 2) * 0.75));  // 第三段（cs:271,W/2 先整除）
             stage = pitTry(wid, hgt) ? 3 : 0;
+            if (stage === 0) mk179R(`EAR|S4G|st=${stlS4.Style}|s=3|g=${pitGate}`);
           } else { stage = 2; }
         } else { stage = 1; }
         if (stage > 0) s4ok++;
-        mk179R(`EAR|S4T|st=${stlS4.Style}|rs=${pick.st}|f2=${flag2 ? 1 : 0}|w=${wid}|h=${hgt}|sg=${stage}`);
+        mk179R(`EAR|S4T|st=${stlS4.Style}|rs=${pick.st}|f2=${flag2 ? 1 : 0}|w=${wid}|h=${hgt}|sg=${stage}|g=${stage > 0 ? 'ok' : pitGate}`);
         list4.splice(list4.indexOf(pick), 1);
       }
       mk179R(`EAR|S4|st=${stlS4.Style}|o|att=${s4att}|ok=${s4ok}|f2=${s4f2}|rem=${n15}`);
     }
     // ======== S5/S6/S7：DropTrap 字典三臂（cs:304-412）========
+    //   ★IIIII192：快照=dictByStyle（S4 消费后余量）.slice()；分派序=cs 固定块序 3→2→1。
     const dropArm = (roomStyleKey: number, styObj: import('./DungeonStyles1457').DungeonStyleData,
       budget: number, kindPick: 'random' | 'Slush' | 'Silt'): void => {
-      const listX = gfFeatRooms.filter((rr) => rr.st === roomStyleKey).slice();
+      const listX = (dictByStyle.get(roomStyleKey) ?? []).slice();
       let datt = 0, dtile = 0, dkind = 0, dok = 0;          // ★IIIII192 观测（零掷）
       const armName = roomStyleKey === 3 ? 'S5' : roomStyleKey === 2 ? 'S6' : 'S7';
       mk179R(`EAR|${armName}|st=${roomStyleKey}|i|n=${listX.length}|bud=${budget}`);
@@ -7880,11 +8095,10 @@ const snap: SnapFn = (name) => {
       }
       mk179R(`EAR|${armName}|st=${roomStyleKey}|o|att=${datt}|tile=${dtile}|kind=${dkind}|ok=${dok}|rem=${budget}`);
     };
-    for (const s0 of gfStyles) {
-      if (s0.Style === 3) dropArm(3, s0, nDesert, 'random');
-      if (s0.Style === 2) dropArm(2, s0, nSnow, 'Slush');
-      if (s0.Style === 1) dropArm(1, s0, nCav, 'Silt');
-    }
+    // ★IIIII192：cs:304/:352/:386 三块固定序 dict[3]→dict[2]→dict[1]（与 gfStyles 迭代序解耦）
+    for (const s0 of gfStyles) if (s0.Style === 3) dropArm(3, s0, nDesert, 'random');
+    for (const s0 of gfStyles) if (s0.Style === 2) dropArm(2, s0, nSnow, 'Slush');
+    for (const s0 of gfStyles) if (s0.Style === 1) dropArm(1, s0, nCav, 'Silt');
     // （后续 cs:420-589 五臂 TileClump、cs:588-591 GenerateEarlyDungeonFeaturesInRoom/
     //   Biome 祭坛尾/dual 早退由 IIII106b 五臂块与 §⑥ 第 4 刀分别承接——次序同 cs）
   }

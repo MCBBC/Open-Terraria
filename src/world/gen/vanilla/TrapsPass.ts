@@ -1416,12 +1416,25 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (st.wall[wi] === 87) return false;
   if (st.wall[wi] === 350) return false;
   const lava = st.liquid[wi] > 0 && st.liquidType[wi] === 2;          // cs:8923
-  // type 随机（cs:8942-8955 普通（非 remix）分支）
-  if (type === -1 && rng.int(0, 19) === 0) type = 2;
-  else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
-  else if (type === -1) type = rng.int(0, 1);
-  // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗）
-  if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
+  // type 随机（cs:8929-8940 remix 分支 / cs:8942-8957 普通（非 remix）分支）。
+  // ★IIIII196（2026-09-03）REMIX #76 定罪修复：**remix 分支整缺**——1457/1458 cs:8929-8940
+  //   （1456 cs:8927 同形）：Main.remixWorld 时热喷泉条件=(double)num < Main.rockLayer - 30.0
+  //   且 Next(3)!=0（2/3 概率）；非 remix=num > GenVars.lavaLine + 30 且 Next(6)!=0（5/6）。
+  //   JS 曾恒走非 remix 支 → remix 链 #76 陷阱 type 分布全异 → 掷流自首支起整体漂移
+  //   （T0>443×208 JS 多放喷泉/T1>59×193+T25>1 巨石 6×6 转石域错位/T397>53…沙穴错位）。
+  //   短路序照抄：rockLayer 条件假时 Next(3) 不耗（直落 Next(2)）。
+  //   remix 分支**无** tenth+noTraps 强制巨石尾掷（cs:8957-8961 在 else 内）。
+  if (nf.remix) {
+    if (type === -1 && rng.int(0, 19) === 0) type = 2;
+    else if (type === -1 && py < gs.rockLevel - 30 && rng.int(0, 2) !== 0) type = 3;
+    else if (type === -1) type = rng.int(0, 1);
+  } else {
+    if (type === -1 && rng.int(0, 19) === 0) type = 2;
+    else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
+    else if (type === -1) type = rng.int(0, 1);
+    // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗；remix 分支无此掷）
+    if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
+  }
   trapEv('T', 0, py, type);
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
@@ -1727,7 +1740,13 @@ function placeHeadMirrorT(st: TileStore, x: number, y: number, tag?: number): vo
   const i = st.idx(x, y);
   if (!st.flags[i]) {
     tntProbe(`P${tag ?? 0} ${x} ${y} ghost h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]} c`);
-    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;                   // Clear(Tile|TilePaint|Slope)
+    // ★IIIII212：补全 Clear(Tile|TilePaint|Slope) 全语义（Tile.cs:746-760）——
+    //   Tile 分支除 active=false 外还清 **type=0 + frameX=0 + frameY=0**（残值 type
+    //   归零），TilePaint 分支 = ClearBlockPaintAndCoating（块漆+涂层双清）。曾只清
+    //   half/slope/paint ⇒ ghost 锚残值 type 存活，下游 rawSheetAt（cs:18989 等
+    //   不查 active 的直读族）命中判定与 vanilla 分叉（Piles 域写面债源之一）。
+    st.type[i] = 0; st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
+    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; st.coat[i] = 0;    // Clear(Tile|TilePaint|Slope)
     return;
   }
   // ★IIII29 定罪修复③（notraps #76 Hf10 家族 / 半砖清除债）：vanilla 头重排支
@@ -2020,8 +2039,17 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     tntSeq = 0;
     for (let k = 0; k < tntTries; k++) {
       const x = rng.int(50, st.w - 51);                               // Next(50, w-50)
+      // ★IIIII212（2026-09-03）GFB #76①②③ 定罪修复：remix y 上界整除序——vanilla
+      //   `genRand.Next((int)worldSurface, (int)((double)(h-350)+rockLayer) / 2)` 的
+      //   (int) cast 先于 /2（C# 整除 1685/2=842）＝Next(361,842) 值域 [361,841]；
+      //   JS 曾把 842 当 rng.int 闭区间上界＝Next(361,843) 多采一格。半数 attempt
+      //   采样 y 高 1：锚格 active 时 JS 锚=采样格−1（命中半砖活锚 → placeHeadMirrorT
+      //   reset 清 H=②族 4 格）vs vanilla 锚=采样格−2（ghost 支不清 H）；vanilla 侧
+      //   反向（锚=半砖格 → reset 清 H=③族 3 格）vs JS 锚=其上格（reset h0 无痕）。
+      //   受理 barrel 位亦随锚移位（①族 2 桶 JS 多置）。放置/拒收两态掷数同（掷流
+      //   中性：TNT 相位恒 2 掷/attempt），唯写面变——修后与金标 8 通道对齐。
       const y = nf.remix
-        ? rng.int(Math.floor(gs.worldSurface), Math.floor((st.h - 350 + gs.rockLevel) / 2))
+        ? rng.int(Math.floor(gs.worldSurface), Math.floor((st.h - 350 + gs.rockLevel) / 2) - 1)
         : rng.int(Math.floor(gs.rockLevel), st.h - 201);              // Next(rock, h-200)
       placeTNTBarrel(st, x, y, rng);
     }

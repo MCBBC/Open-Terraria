@@ -14,8 +14,11 @@
 //   usesLocalNPCImmunity，timeLeft=MaxUpdates 算式与 MaxUpdates 别名亦不解析——重跑
 //   提取器会抹，须按此重放；金标闸门 item-stats-golden ROLLBACK_1456 已钉 478）：
 //   478  penetrate=2（P.cs:5263；1457 改 3，现提取器已出对值）
-//   639  extraUpdates=2 / timeLeft=90 / localNPCHitCooldown=-1（:6594-6610 MaxUpdates=2、
-//        timeLeft=MaxUpdates*45、usesLocalNPCImmunity 永久局部免疫）
+//   639  extraUpdates=1 / timeLeft=90 / localNPCHitCooldown=-1（:6883 MaxUpdates=2→
+//        setter extraUpdates=value-1=1;timeLeft=MaxUpdates*45;usesLocalNPCImmunity）
+//        ★R6:旧"=2"系 MaxUpdates 别名未折算(off-by-one),json 已同步 1
+//   640  extraUpdates=2（MaxUpdates=3 :6898）/ localNPCHitCooldown=-1（★R6 补登,提取器盲区同族）
+//   680  localNPCHitCooldown=-1（★R6 补登）
 //   932  localNPCHitCooldown=60（:8570-8572）
 //   309  localNPCHitCooldown=10（历史手补，Arrow localImmune 消费）
 //   ---- 1457 新弹 1112-1135 缺失列（2026-08-23 本批；行号=Terarria1457 P.cs）----

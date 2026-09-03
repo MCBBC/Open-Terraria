@@ -622,9 +622,21 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         }
       }
     } else {
-      // 主件(cs:36911-36975)：num25=Next(7) 先掷恒消耗（种子对齐），再掷 906/997 门
+      // 主件(cs:36911-36975)：num25=Next(7) 先掷恒消耗（种子对齐），再掷 906/997 门。
+      // ★IIIII193 定罪修复（cs:37263-37282 = 1458 :37271-37290）两处 GFB 形缺失：
+      //   ①flag24 remix 形整缺——remix 时 vanilla `flag24 = num7 > worldSurface &&
+      //   num7 < rockLayer`（非 remix 才是 > lavaLine），JS 恒用非 remix 形；
+      //   ②906 门 maxValue 十周年档整缺——vanilla `maxValue=20; if (tenth) 15`，
+      //   JS 恒 Next(20)。GFB(remix+tenth) 实证：house1 箱 num25=0、906 门骰值
+      //   0.0615 → vanilla Next(15)=0 命中主件 906（Prefix ×2），JS Next(20)=1 未中
+      //   → 改走 num25 主件 49+Prefix ×2 → 头部 +2 骰、尾段杂物表 HIT 面全变
+      //   （箱块 27 vs 21）。
       const num25 = rng.int(0, 6);
-      if (rng.int(0, 19) === 0 && gy > gs.lavaLine) { push(906); prefixRolls(rng, 906); }
+      const flag24 = gs.seedFlags.remix
+        ? (gy > gs.worldSurface && gy < gs.rockLevel)
+        : gy > gs.lavaLine;
+      const maxValue906 = gs.seedFlags.tenthAnniversary ? 15 : 20;
+      if (rng.int(0, maxValue906 - 1) === 0 && flag24) { push(906); prefixRolls(rng, 906); }
       else if (rng.int(0, 14) === 0) push(997);
       else {
         if (num25 === 6) { push(930); push(931, rng.nextInt(26) + 25); }   // cs:36977 Next(26)+25
@@ -805,7 +817,23 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
   switch (sheet) {
     case 2: case 477: case 27: case 243: case 244: case 204: case 478:
     case 641: case 370: case 171:
+    // ★IIIII209 补族（cs:69461-69522 if 链逐字,与 TrackPass/FinalCleanup 副本同步；
+    //   纯新增档,存量绿链未触即零扰动）
+    case 23: case 24: case 661:
+    case 58: case 76: case 77: case 684:
+    case 37: case 32:
+    case 25: case 109: case 492:
+    case 34: case 42:
       rng.nextInt(2);
+      return;
+    case 31: case 696:                       // cs:69519 (31||696)&&fx≥36 → 免掷
+      if (fx < 36) rng.nextInt(2);
+      return;
+    case 35:                                 // cs:68831 fx<36 短路与掷同支
+      if (fx < 36) rng.nextInt(2);
+      return;
+    case 231:                                // cs:69225 num=153 后恒掷 Next(3)
+      rng.nextInt(3);
       return;
     case 26: case 695:
       if (fx < 54) rng.nextInt(2);
@@ -826,10 +854,13 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
     case 385:
       rng.nextIntRange(68, 71);
       return;
+    // ★III122 档位（cs:68839-68871）：<72 零掷 / <108 Next(3) / <144 Next(2) / else Next(4)
     case 254:
-      if (fx < 72) rng.nextInt(3);
-      else if (fx < 108) rng.nextInt(2);
-      else rng.nextInt(4);
+      if (fx >= 72) {
+        if (fx < 108) rng.nextInt(3);
+        else if (fx < 144) rng.nextInt(2);
+        else rng.nextInt(4);
+      }
       return;
     default:
       if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
@@ -1112,10 +1143,21 @@ function placeBuriedChestInner(
     }
     __abRow(`R|${i}|${gy}|${gy}|${style ?? -1}|${mainId}|${sheetOf(tile)}|${argStyle ?? -1}|0|0|${tBelow >= 0 ? sheetOf(tBelow) : -1}|${wsG}|${xbG}|${rockG}|${scanG}`);
   }
-  if ((tile === CHEST2 && argStyle === 10) || inUd) {
+  // ★IIIII205（2026-09-03）补 cs:36404 第二析取 ((21&&42)&flag16) + cs:36409-36413
+  //   42/21 还原臂——188 转换沙漠屋（ChestStyle=42/UsesContainers2=false，
+  //   HouseBuilder.cs:325-326）的箱在 remix×getGood（flag16）世界走本门：vanilla 先
+  //   改写 467/10 再整支还原 42/21。JS 旧门缺该析取与还原臂 ⇒ 188 屋箱（21/42）
+  //   只能经 inUd 第三析取进门、进门后被钉死 467/10（x86=21/42）。两臂掷面同构
+  //   （池掷+FTW 骰各 1）故掷窗仪不可见，唯 mile8 8 通道 T21>467×8（2 箱×2×2，
+  //   (1555,644)/(1755,799)）显形；x86 真值 059 dump 直读 J16 屋 wall72+梁124
+  //   （188 束）= 转换态实证。
+  const flag16Desert = !!gs.seedFlags.remix && !!gs.seedFlags.getGoodWorld;   // cs:36396
+  const flag19Desert = tile === CHEST;                                        // cs:36399（门前原 tile）
+  if ((tile === CHEST2 && argStyle === 10) || (flag16Desert && flag19Desert && argStyle === 42) || inUd) {
     tile = CHEST2;
     style = 10;
     flags.desert = true;
+    if (flag16Desert && argStyle === 42 && flag19Desert) { style = 42; tile = CHEST; }   // cs:36409-36413 还原
     // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
     // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
     const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
@@ -1180,9 +1222,40 @@ function placeBuriedChestInner(
   //   （cs:36543-36545，命中主件改 52）——★IIIII99e：神龛常春藤箱 style10 在 FTW
   //   世界逐箱耗此骰；曾缺 ⇒ 神龛箱列流相移（ftw #61 首差 (1051,428) 足迹列错位,
   //   行扫全同 ⇒ 唯 jitter 上游骰流偏移可解释）。C# 位在冰门后、地狱门前。
-  if (tile === CHEST && (argStyle === 10 || mainId === 211 || mainId === 212 || mainId === 213 || mainId === 753)) {
-    style = 10;
-    if (ftwChestDie() === 0) ftwTake52();
+  //   ★IIIII197（2026-09-03）补两支 flag18(ntb×tenth) 臂（cs:36470-36491 原文）——
+  //   ①(chestTileType==467 && chestStyle==11)&flag18：562/563 转换丛林屋箱恒达；
+  //   ②(chestStyle==29)&flag19&flag18：229 转换丛林屋箱恒达。臂内 num9=10/tile21
+  //   被 flag18 还原臂（cs:36484-36490）立即覆回（29/21、11/467）=掷面净 no-op；
+  //   活面=①旗本体 flag4=true（cs:36471——★IIIII205 补,见下 flags.ivy）+②块尾
+  //   Next(45) 恒掷（num=15,十周年×3）。JS 旧门缺两支 ⇒ GFB 丛林转换屋
+  //   每次 AddBuriedChest 少 1 骰（**失败尝试亦掷**）——序19 屋（563 转换）实证
+  //   ch Δ4（3 败×1+成×1）→ bt 锐石级联 Δ5 → 全屋 Δ9、序20 起 attempts 重洗。
+  //   （(chestStyle==8||29)&&dualDungeons 支照 IIII193 判例恒休眠不移植。）
+  {
+    const flag18 = !!gs.seedFlags.notTheBees && !!gs.seedFlags.tenthAnniversary;
+    const flag19 = tile === CHEST;
+    const f4 = tile === CHEST && (argStyle === 10 || (flag18 && argStyle === 29)
+      || mainId === 211 || mainId === 212 || mainId === 213 || mainId === 753)
+      || (flag18 && tile === CHEST2 && argStyle === 11);
+    if (f4) {
+      // ★IIIII205（2026-09-03）loot 旗 flag4 本体补移植（cs:36471 `flag4 = true;`）——
+      //   IIII197 只补了块尾 FTW 骰（cs:36543-36545），漏了旗本身：flags.ivy 全文件
+      //   此前 0 处赋值（仅 96 行声明+600/719/730 消费）⇒ 洞穴档 loot flag4 段
+      //   （3360/3361/4426/5525,cs:36864-36881）与尾段 2204/753 两门（cs:37800-37807）
+      //   全部短路。序19 屋（563 转换丛林屋 467/11×flag18）值级重放定谳：x86 成箱
+      //   loot 23 掷 = flag4 段 2（Next(10)×2 双 miss）+ 普通尾 18 + 尾段 flag4 门 2
+      //   （Next(4) miss/Next(50) HIT→753）+ voice 1；JS 19 掷（缺上 4 门）。金档
+      //   竞争假设回放只能到 21 掷,结构性排除。
+      flags.ivy = true;
+      style = 10;                          // cs:36478-36480 !GeneratingDungeon → num9=10/tile→21
+      if (!(flag18 && argStyle === 11 && !flag19)) tile = CHEST;
+      if (flag18) {
+        if (argStyle === 29 && flag19) style = 29;            // cs:36484-36487 还原 29/21
+        else if (argStyle === 11 && !flag19) { style = 11; tile = CHEST2; } // cs:36488-36490 还原 11/467
+        // (29 & !flag19) 臂无还原 → 维持 num9=10/tile21（vanilla 原语义）
+      }
+      if (ftwChestDie() === 0) ftwTake52();  // cs:36543-36545 块尾恒掷（唯一活面）
+    }
   }
   // ---- 地狱门（1457 cs:36496）：tile21 && (style4 显式 || 深层无主件) → num9=4 +
   //   地狱武器序。★同门置 flag13（消费点 = 尾段 2195 蜥蜴炉恒给 + 日耀碑 1/5 门）。

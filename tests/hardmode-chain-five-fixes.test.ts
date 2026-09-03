@@ -73,7 +73,7 @@ describe('WorldEvolution worldUpdateRate（Main.cs:6290 + GetWorldUpdateRate）'
   function sampleCount(rate: number | undefined): number {
     const evo = rateWorld(rate) as unknown as EvoSpy;
     const spy = vi.spyOn(evo, 'overgroundTile').mockImplementation(() => {});
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0);
     try { evo.update(); } finally { rnd.mockRestore(); }
     const n = spy.mock.calls.length;
     spy.mockRestore();
@@ -257,5 +257,58 @@ describe('Convert case 5/6/7/10/12/13 补全（cs:55391/55437/55474/55749/55892/
     expect(sheetAt(st, 11, 10)).toBe(203);
     expect(sheetAt(st, 12, 10)).toBe(21);   // 宝箱原样
     expect(st.wall[st.idx(12, 10)]).toBe(3); // 墙照转（满转无墙豁免）
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ①b 锁矿首掷极性（Game.altarOreTierPick,WorldGen.cs:49385-49392/:49419-49426/
+//   :49451-49458）+ 矿脉条数 ceil（Game.altarVeinCount,:49473 `(double)k < num3`）
+//   ——2026-09-03 对齐批：此前 ===0→base 反极性 / Math.floor 恒少 1 条
+// ---------------------------------------------------------------------------
+describe('锁矿首掷极性（SavedOreTiers,WorldGen.cs:49385-49392 同构直译）', () => {
+  const rngReturning = (v: number) => ({ int: () => v }) as unknown as RNG;
+
+  it('掷 0 → 替代矿(alt)：107→221 / 108→222 / 111→223（反极性旧码给 base）', () => {
+    expect(Game.altarOreTierPick(rngReturning(0), 107, 221)).toBe(221);
+    expect(Game.altarOreTierPick(rngReturning(0), 108, 222)).toBe(222);
+    expect(Game.altarOreTierPick(rngReturning(0), 111, 223)).toBe(223);
+  });
+
+  it('掷 1 → 常规矿(base)：107/108/111', () => {
+    expect(Game.altarOreTierPick(rngReturning(1), 107, 221)).toBe(107);
+    expect(Game.altarOreTierPick(rngReturning(1), 108, 222)).toBe(108);
+    expect(Game.altarOreTierPick(rngReturning(1), 111, 223)).toBe(111);
+  });
+
+  it('真流只耗一掷：帮手消费后与裸 Next(2) 流同相（无隐藏额外掷）', () => {
+    const a = new RNG(20260903);
+    const b = new RNG(20260903);
+    const first = a.int(0, 1);                       // 裸流首掷
+    expect(Game.altarOreTierPick(b, 107, 221)).toBe(first === 0 ? 221 : 107);
+    expect(a.int(0, 1)).toBe(b.int(0, 1));           // 次掷仍同相
+  });
+});
+
+describe('祭坛矿脉条数 ceil 语义（WorldGen.cs:49473 `for (k=0; (double)k < num3; k++)`）', () => {
+  /** 原版循环直译计数：k 从 0 起满足 k < x 的条数 */
+  const vanillaCount = (x: number) => { let k = 0; while (k < 4096 && k < x) k++; return k; };
+  /** 我方消费式：cap=altarVeinCount(x) 后 `for (k=0; k<cap; k++)` 实跑条数 */
+  const oursCount = (x: number) => {
+    const cap = Game.altarVeinCount(x);
+    let n = 0;
+    for (let k = 0; k < cap; k++) n++;
+    return n;
+  };
+
+  it('veins=3.0 → 3 条（ceil(3.0)=3,整数档与 floor 无差）', () => {
+    expect(Game.altarVeinCount(3.0)).toBe(3);
+  });
+  it('veins=3.5 → 4 条（floor 给 3 恒少 1 条）', () => {
+    expect(Game.altarVeinCount(3.5)).toBe(4);
+  });
+  it('与原版循环逐点等价（x ∈ [-1, 8] 步长 0.25 全枚举）', () => {
+    for (let x = -1; x <= 8.0001; x += 0.25) {
+      expect(oursCount(x)).toBe(vanillaCount(x));
+    }
   });
 });

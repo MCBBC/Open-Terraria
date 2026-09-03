@@ -986,14 +986,20 @@ export function stardustPunchFx(
   // ★accel 接线（2026-09-02 收尾）：原版双项双档——角向 f̂×−(vector3/60)（vector3=amp
   //  =0.1×vector2）+ 线性 −vector/60（彩 :3427）/−vector/30（白核 :3436）；f̂=(cos,sin)(ang)
   const fHatX = Math.cos(ang), fHatY = Math.sin(ang);
-  game.spawnParticles?.(px, py, orchestraHslCss((0.6 + rng() * 0.05) % 1, 1, 0.4 + rng() * 0.25),
-    1, Math.hypot(vxp, vyp), { lifeExact: 60, grav: 0, vx: vxp, vy: vyp,
-      ax: -(fHatX * amp) / 60 - (moveX * mf) / 60, ay: -(fHatY * amp) / 60 - (moveY * mf) / 60,
-      size: 2 * scale });
-  game.spawnParticles?.(px, py, 'rgba(255,255,255,0.8)', 1, Math.hypot(vxp, vyp),
-    { lifeExact: 30, grav: 0, vx: vxp, vy: vyp,
-      ax: -(fHatX * amp) / 60 - (moveX * mf) / 30, ay: -(fHatY * amp) / 60 - (moveY * mf) / 30,
-      size: 1.2 * scale });   // Scale=vector2×0.6 白影同速；Accel 线性项 30 档（:3436）
+  // ★1:1 迁移（2026-09-03）：同 princess——彩粒 ColorTint=hsl(...) A=0、白核
+  //  Color=(255,255,255,0)、Scale=vector2（白核 ×0.6）、Rotation=π/2；APF 双项
+  //  （角向 f̂×−vector3/60+线性 −vector/60 彩、/30 白核 :3427/:3436）
+  const mkSD = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number, apfLin: number): void => {
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, { prettySparkle: true });
+    if (!sp) return;
+    sp.prettySparkle = true; sp.ttl = 60;
+    sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
+    sp.rotation = Math.PI / 2;
+    sp.ax = -(fHatX * amp) / 60 - (moveX * mf) / apfLin;
+    sp.ay = -(fHatY * amp) / 60 - (moveY * mf) / apfLin;
+  };
+  mkSD(hexToRgbArr(orchestraHslCss((0.6 + rng() * 0.05) % 1, 1, 0.4 + rng() * 0.25)), 1, 60);
+  mkSD({ r: 255, g: 255, b: 255, a: 0 }, 0.6, 30);   // Scale=vector2×0.6 白影同速；Accel 线性项 30 档（:3436）
   for (let i = 0; i < 2; i++) {
     // ★C2（F6）：circ(2,2) 单掷共享 + move 因子 (0.5+0.5r)×1.4 单掷乘整向量
     //  （:3437-3444 曾 circ 逐分量双掷且 moveY 丢因子）
@@ -1030,17 +1036,29 @@ export function princessWeaponFx(
   const pre = 0.6 + rng() * 0.35;                        // vector 因子（:3363，pre-0.66 量——Accel 消费此量）
   const mf = pre * 0.66;                                 // :3374 终值覆写
   const scale = rng() * 0.4 + 0.2;                        // vector2 ∈[0.2,0.6]（:3364）
-  rng();                                                 // 死掷（原版 :3365 f=num+NextFloat×τ,同上死代码链）
-  const vxp = moveX * mf, vyp = moveY * mf;
+  const fAng = rng() * Math.PI * 2;                      // f（:3365=活值！Velocity 角向,曾误标死掷）
+  const amp = 0.1 * scale;                               // vector3=0.1×vector2（:3366）
+  const vxp = moveX * mf + Math.cos(fAng) * amp;
+  const vyp = moveY * mf + Math.sin(fAng) * amp;
   const off = circ(rng, 8);                               // ★C2：NextVector2Circular(8,8)（:3367）单掷共享
   const px = x + off.x * scale, py = y + off.y * scale;
   // ★accel 接线（2026-09-02 收尾）：原版 :3376 AccelerationPerFrame=−vector/60（pre-0.66 量）
-  game.spawnParticles?.(px, py, orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25),
-    1, Math.hypot(vxp, vyp), { lifeExact: 60, grav: 0, vx: vxp, vy: vyp,
-      ax: -(moveX * pre) / 60, ay: -(moveY * pre) / 60, size: 2 * scale });
-  game.spawnParticles?.(px, py, 'rgba(255,255,255,0.8)', 1, Math.hypot(vxp, vyp),
-    { lifeExact: 60, grav: 0, vx: vxp, vy: vyp,
-      ax: -(moveX * pre) / 60, ay: -(moveY * pre) / 60, size: 1.2 * scale });
+  // ★1:1 迁移（2026-09-03）：spawnParticles 单标量方块近似退役 → spawnDust
+  //  prettySparkle 专用档（update 早退=APF+TTL;drawSparkleArms 双轴星芒承载）——
+  //  原版彩粒 ColorTint=hsl(...) A=0、白核 Color=(255,255,255,0)、Scale=vector2
+  //  （白核 ×0.6）、Rotation=π/2、APF=−vector/60（:3376-3390 连写覆写后有效式,
+  //  f̂×vector3 项被第二连写覆盖不存在）、TTL 池缺省 60。
+  const psTint = hexToRgbArr(orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25));
+  const mkPS = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number): void => {
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, { prettySparkle: true });
+    if (!sp) return;
+    sp.prettySparkle = true; sp.ttl = 60;
+    sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
+    sp.rotation = Math.PI / 2;
+    sp.ax = -(moveX * pre) / 60; sp.ay = -(moveY * pre) / 60;
+  };
+  mkPS(psTint, 1);
+  mkPS({ r: 255, g: 255, b: 255, a: 0 }, 0.6);
   for (let i = 0; i < 2; i++) {
     // ★C2（F6）+MINOR：velocity 终值=MovementVector 覆写（:3406）+CloneDust 白影整粒
     //  补（:3402-3408 每彩尘配一白影：scale=源/2、fadeIn=源×0.75、color 白、零掷）

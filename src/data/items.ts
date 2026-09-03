@@ -999,7 +999,7 @@ void 0;
 
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
 import vanillaItemMeta from '../../public/sprites/vanilla.json';
-import { MUSIC_BOX_ITEM_BY_STYLE } from '../world/wiring/devices';
+import { MUSIC_BOX_ITEM_BY_STYLE } from './musicBoxStyles';   // ★叶子模块(2026-09-03 TDZ 断环,原 wiring/devices)
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
 item({ key: 'vi_103_nightmare_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 65 } }); // ←vi_103_NightmarePickaxe 独有字段搬移(批次A)
@@ -1146,7 +1146,7 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
   [4920, 'v_597_pylons', 6], [4921, 'v_597_pylons', 7], [4951, 'v_597_pylons', 8],
   [5652, 'v_597_pylons', 9], [5653, 'v_597_pylons', 10],
   // 门 10（style 列带 = PlaceDoor 54*(style/36)+54*(style%36)）
-  ...([3129, 3130].map((vid) => [vid, 'door_closed', 33] as const)),
+  ...([3129].map((vid) => [vid, 'door_closed', 33] as const)),   // 3130=35 由 itemfunc 直落（3131=34 见下方 doorPs3131 强制纠偏）
   ...([[4155, 39], [4176, 40], [4197, 41], [4218, 42], [4307, 43], [4415, 44], [4576, 45],
     [5158, 46], [5179, 47], [5200, 48], [5558, 49], [5611, 50], [5699, 51], [5722, 52],
     [5747, 53], [5765, 54], [5786, 55], [5807, 56], [5828, 57], [5867, 58], [5907, 59],
@@ -1162,7 +1162,7 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
   // 同②晶塔的双参 helper 盲区：itemfunc 无条目（提取器不解析 DefaultToPlaceableTile），
   // tile 已由 createTile 双源回填（vanilla.json meta createTile 695/696 一致），此处补
   // style：0=恶魔祭坛/暗影珠档 1=猩红档。帧偏移 = style*fw*18 → 695:54 / 696:36，
-  // 与 Game.breakTile 复刻件破坏分支猩红谓词（:16998 frameX>=36 / :17013 >=54）同口径。
+  // 与 Game.breakTile 复刻件破坏分支猩红谓词（696 frameX>=36 / 695 frameX>=54）同口径。
   // 配方侧 vanilla-recipes.json 5467-5470 已在册（Recipe.cs:14689-14709）。SW-C1 2026-09-03。
   [5467, 'v_695_replica_demon_altar', 0], [5468, 'v_695_replica_demon_altar', 1],
   [5469, 'v_696_replica_shadow_orb', 0], [5470, 'v_696_replica_shadow_orb', 1],
@@ -1173,6 +1173,68 @@ for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
   if (!d) continue;
   if (d.tile === undefined && tk !== undefined) d.tile = tk;
   if (!d.placeStyle) d.placeStyle = ps;
+}
+// ★sharedGroupPlaceStylePs（F1 十三批,2026-09-03；由 doorPs3131 单件纠偏块扩表）：
+//  提取器「共享 case 组」伪值 + 缺档两类缺陷全量纠偏——vanilla-itemfunc.json 对
+//  多支共享 case 段的逐支 placeStyle 只落【组首支】值（如 Item.cs:29246-29268
+//  3126/3127/3128 三支全挂 3126 的 25），组内非首支物品 placeStyle 全错；
+//  if/else 覆写形态（:25729-25736 / :34203-34210）则整组无条目=缺档（2641/3866/3867）。
+//  真值逐条亲读 1457 Item.cs 核实（行号见行尾注）；**无条件赋值**——伪值已占位,
+//  falsy/undefined 门无效；执行序备案：下方 itemfunc 回填循环（:1851-1853）与本块
+//  之间无其他 placeStyle 写面,且回填门是 `d.placeStyle === undefined`（只补缺）,
+//  本表先写终值 ⇒ 回填不覆写,纠偏最终生效（金标 tests/place-backfill.test.ts 钉值）。
+const SHARED_GROUP_PLACE_STYLE_1457: ReadonlyArray<readonly [number, number]> = [
+  // 花岗岩家具族（时钟104/门10/梳妆台88/浴缸93/灯笼42/钢琴87/平台19/书架172/
+  // 抽水马桶89/桌14/工作台18）
+  [3128, 26],   // Granite Clock :29267-29268（组首支 3126 的伪值 25）
+  [3131, 34],   // Granite Door :29292-29293（原 doorPs3131 并入）
+  [3134, 26],   // Granite Dresser :29318-29319（伪值 25）
+  [3137, 29],   // Granite Bathtub :29344-29345（伪值 28）
+  [3140, 35],   // Granite Lantern :29369-29370（伪值 34）
+  [3143, 28],   // Granite Piano :29396-29397（伪值 27）
+  [3146, 28],   // Granite Platform :29421-29422（伪值 27）
+  [3149, 30],   // Granite Bookshelf :29447-29448（伪值 29）
+  [3152, 31],   // Granite Toilet :29473-29474（伪值 30）
+  [3155, 33],   // Granite Table :29499-29500（伪值 32）
+  [3158, 29],   // Granite Work Bench :29525-29526（伪值 28）
+  // 大理石家具族（烛台90/梳妆台79/浴缸101/钢琴100/门33/椅15/桌34/箱21）
+  [3161, 29],   // Marble Candelabra :29055-29056（伪值 28）
+  [3164, 29],   // Marble Dresser :29084-29085（伪值 28）
+  [3167, 30],   // Marble Bathtub :29110-29111（伪值 29）
+  [3170, 29],   // Marble Piano :29136-29137（伪值 28）
+  [3173, 28],   // Marble Door :29163-29164（伪值 27）
+  [3176, 34],   // Marble Chair :29189-29190（伪值 33）
+  [3179, 35],   // Marble Table :29215-29216（伪值 34）
+  [3181, 51],   // Marble Chest :29238-29239（伪值 49）
+  // 南瓜灯/黑曜石灯 42（if/else 形态：2641 无 itemfunc 条目=缺档,2642 挂 2641 伪值 31）
+  [2641, 31],   // Pumpkin Lantern :25729-25732
+  [2642, 32],   // Obsidian Lantern :25733-25735
+  // 远古军团战利品奖杯 240（default 60 + if 覆写：3866/3867 无条目=缺档,3868 挂 default 伪值 60）
+  [3866, 61],   // Betsy Trophy :34204-34207
+  [3867, 60],   // Dark Mage Trophy :34203（default 直落,无覆写支）
+  [3868, 62],   // Ogre Trophy :34208-34211
+];
+for (const [vid, ps] of SHARED_GROUP_PLACE_STYLE_1457) {
+  const kSg = VANILLA_ITEM_KEY_BY_ID[vid];
+  const dSg = kSg !== undefined ? ITEM_DEFS[byKey[kSg]] : undefined;
+  if (dSg) dSg.placeStyle = ps;
+}
+// ★bannerStyleClassPs（⑤巡检，2026-09-03 十三批）：tile 91 旗族类级 placeStyle
+//  回填（style 域 = vanillaStyleDrops.BANNERS 逆表 BANNER_STYLE_BY_VID）。原版旗
+//  物品 Item.placeStyle 即 tile 91 style 直域（装饰旗 Item.cs:5334/:5347/:5360/
+//  :5373=0-3、NPC 旗段 :19231 `placeStyle = 22 + type - 1615`、:27543
+//  `109 + type - 2897` 等）。两类缺口：① NPC 旗段（1615-1701/2897-2994/3390-3452/
+//  3593-3594/3789-3793/3837-3846/4541-4546/4687-4688/4965-4977）共享算式段 itemfunc
+//  提取盲区 → 曾 undefined；② 装饰旗 337（原版 placeStyle=0）被上方 itemfunc
+//  回填门 `!== 0` 跳过 → 曾 undefined。回收链（破坏→掉旗→再放置,无实例位）依赖
+//  类级值落对帧；kill-drop 实例位是旗种 id 域,由 Game 放置点 bannerStyleOf 逆写
+//  （bannerStyleDomain 标记），两域分流并存。
+for (let i = 0; i < ITEM_DEFS.length; i++) {
+  const m = /^vi_(\d+)_/.exec(ITEM_DEFS[i].key);
+  if (!m) continue;
+  const st91 = BANNER_STYLE_BY_VID[Number(m[1])];
+  if (st91 === undefined || ITEM_DEFS[i].placeStyle !== undefined) continue;
+  ITEM_DEFS[i].placeStyle = st91;
 }
 void 0;
 
@@ -1285,7 +1347,7 @@ item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', value: 100, 
 // ★2026-08-13 补登记:此前本段是空壳注释——运行时链(Game.ts:5313 使用派发/:15326
 //  显示导线/:1842 R 键切模式/UseWiringTools 全分支)只等这张表,整族曾为死路径
 // (手持扳手无任何效果)。语义对照 Player.cs:30289-30444 ItemCheck_UseWiringTools。
-import { TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR } from '../world/Wiring';
+import { TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR } from './wiringToolBits';   // ★叶子模块(2026-09-03 TDZ 断环,原 world/Wiring)
 const WIRE_TOOL_TABLE: ReadonlyArray<readonly [number, NonNullable<ItemDef['wireTool']>]> = [
   [509, { place: TOOL_RED }],
   [850, { place: TOOL_BLUE }],
@@ -1799,6 +1861,7 @@ item({ key: 'vi_5651_banner_b290', name: '', maxStack: 99, value: 1 }); // 敌�
 // 双注册都刷,仅填 undefined(手写字段优先)。1040 条 createTile 全部可解析(753 sheet)。
 import { itemFuncOfVid } from './vanillaItemFunc';
 import { TILE_KEY_BY_SHEET } from './tiles';
+import { BANNER_STYLE_BY_VID } from './vanillaStyleDrops';   // ★bannerStyleClassPs（⑤巡检）
 {
   let filled = 0;
   for (let i = 0; i < ITEM_DEFS.length; i++) {

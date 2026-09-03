@@ -338,7 +338,7 @@ export class MonkSlam extends Entity {
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number) {
     super();
-    this.x = x; this.y = y;                          // NewProjectile 左上角直传（:70579）
+    this.x = x; this.y = y;                          // ★入参=NewProjectile【中心】语义（:70578 直传 vector3+(dir×−15,−60),:10878-10879 position=X−w/2——旧注「左上角直传」系误读,已勘;调用侧 Game.ts spin.spawnSlam 以 placeAtShootSpawn 回正盒左上）
     this.vx = vx; this.vy = vy;
     this.vxSign = Math.sign(vx) || 1;
     this.damage = damage;

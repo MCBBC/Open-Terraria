@@ -221,4 +221,16 @@ describe('雨云/猩红魔杖云弹家族（aiStyle 45）', () => {
     expect(dusts[0].type).toBe(154);                           // 239 → 154(:75966)
     expect(dusts[0].y).toBeCloseTo(drop.y + drop.h - 2, 6);    // 盒=(x, y+h-2, 2, 2)
   });
+
+  it('⑤ 锚=0 门跳过(:28355 num333/334 != 0 双门):单轴 0 → 过锚臂全不跑(原版同门)'
+    + '——R5 登记钉:移动云无 timeLeft 兜底亡(锚=光标 ≤~1000px/16px/t ≪3600t,'
+    + '唯 0.0 浮点测度零,负锚走比较臂照停)', () => {
+    const { hooks } = mkHooks();
+    // anchorX=0(门跳过),anchorY 非 0:若误删 `!==0` 双门,vx>0&&cx>0 立即旗 X、
+    // vy==0 立即旗 Y → 当拍 Kill → 本测即红
+    const c = new RainCloudProj(480, 480, 4, 0, 30, 0, 237, 0, 480);
+    for (let t = 0; t < 60; t++) c.fixedUpdate(1 / 60, hooks);
+    expect(c.dead).toBe(false);
+    expect(c.vx).toBe(4);                                      // 门内才有清速臂
+  });
 });

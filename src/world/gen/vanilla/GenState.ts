@@ -211,6 +211,39 @@ export interface GenState {
    *  坐标系：x0/y0 含、x1/y1 **不含**（对齐 C# Rectangle 的 X/Y/Width/Height 语义，
    *  Rectangle.Right = X+Width 为开区间,Intersects 亦按此比较）。 */
   protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number; pad: number }>;
+  /** ★IIIII194 生成期 NPC 实体表（Collision.EmptyTile 的 NPC 扫描支，Collision.cs:1377-1384）
+   *  ——世界生成期 NewNPC 落地且无 AI 更新的活体（x86 rig 实证：老头 pass32 起位置恒定
+   *  到终局）。坐标=像素左上（C# Entity.position）+宽高；EmptyTile 判定格矩形
+   *  (x*16,y*16,16,16) 与之 AABB 相交即拒置（Rectangle.Intersects 开区间语义）。
+   *  落地点：DungeonPass 三入口 SetOldManSpawnAndSpawnOldManIfDefaultDungeon(generating:true)
+   *  （DungeonUtils.cs:1664-1672，type 37）/ StarterNPCsPass（:19855-20059 各臂）。 */
+  wgNpcs: Array<{ type: number; x: number; y: number; w: number; h: number }>;
+}
+
+/** ★IIIII194 生成期 NPC 落地（NPC.NewNPC 生成期 1:1 镜像）——NPC.cs:81596
+ *  `nPC.Bottom = new Vector2(X, Y)`：Bottom=底中点 → position（左上像素）=
+ *  (X − width/2f, Y − height)（Entity.cs:128-131，float 除）。生成期 NPC 无 AI
+ *  更新（x86 rig 逐 pass 普查位置恒定）→ 矩形落地后终身不变。
+ *  width/height=SetDefaults(type)（镇民人形族 17/20/22/37/38/124/178/208/228/441/
+ *  573/633 全 18×40——NPC.cs SetDefaults 逐 type 实证）。零掷骰。 */
+export function wgSpawnNpc(
+  gs: GenState, type: number, bottomX: number, bottomY: number, w: number, h: number,
+): void {
+  gs.wgNpcs.push({ type, x: bottomX - w / 2, y: bottomY - h, w, h });
+}
+
+/** ★IIIII194 Collision.EmptyTile 生成期实体支（Collision.cs:1361-1390）：格矩形
+ *  (x*16, y*16, 16, 16) 与任一活体 AABB 相交 → 拒置。Rectangle.Intersects 开区间
+ *  语义（贴边不相交）。玩家支恒空——dedServ myPlayer=255 不在 k<255 扫描域、
+ *  client 生成期无活玩家（x86 rig 普查 plr=0 全程实证）。 */
+export function wgNpcBlocksEmptyTile(gs: GenState, x: number, y: number): boolean {
+  if (gs.wgNpcs.length === 0) return false;
+  const px0 = x * 16;
+  const py0 = y * 16;
+  for (const n of gs.wgNpcs) {
+    if (n.x < px0 + 16 && px0 < n.x + n.w && n.y < py0 + 16 && py0 < n.y + n.h) return true;
+  }
+  return false;
 }
 
 /** TileID.Sets.GeneralPlacementTiles 黑名单（TileID.cs:311，CreateBoolSet(true, …)：
@@ -315,5 +348,6 @@ export function newGenState(w: number, h: number): GenState {
     oasisX: [], oasisY: [], oasisW: [], numOasis: 0,           // Oasis pass（cs:16327）登记
     genW: w, genH: h,                                           // StructureMap 越界判定（StructureMap.cs:28）
     protectedRects: [],                                         // GenVars.structures._protectedStructures
+    wgNpcs: [],                                                 // ★IIIII194 生成期 NPC 实体表（EmptyTile NPC 支）
   };
 }

@@ -22,9 +22,9 @@
 //    恒 no-op，维持单格杀；529/530 邻接重帧为存量近似（稀有、零掷骰）备案不改。
 //  - 秘密种子分支：extraLiquid 的 bubble 团块臂已移植（★IIIII189，见 1b 节）；
 //    其余（notTheBees / frozen）仍不触发。
-import { TileStore } from '../../TileStore';
+import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
-import type { GenState } from './GenState';
+import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
 import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
@@ -49,6 +49,18 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET[i] = s;
 }
+/** Tile.CopyPaintAndCoating / BlockColorAndCoating+UseBlockColors 同构
+ *  （Tile.cs:869-906：color + invisibleBlock/fullbrightBlock 两位方块涂层）。
+ *  ★IIIII201（2026-09-03）：植物落位继承底格涂层的 vanilla 语义（PlaceCatTail
+ *  cs:59225 CopyPaintAndCoating(下格)／PlaceUnderwaterPlant cs:59014-59024
+ *  BlockColorAndCoating+UseBlockColors(底格)／PlaceBamboo cs:58922 同式）——曾整族
+ *  缺 copy → extraLiquid 泡泡方块（cs:1788-1794 全方格 fullbrightBlock(true)）内
+ *  落位的植株丢亮涂层 → DoExtraLiquidFinish fullbright 支（cs:1852-1860）不触发
+ *  → waterpark #105 残量 L=41（香蒲/睡莲/52/185/165 格内液体 vanilla 清而 JS 留）。 */
+const copyPaintAndCoating201 = (st: TileStore, from: number, to: number): void => {
+  st.paint[to] = st.paint[from];
+  st.coat[to] = (st.coat[to] & ~TileStore.COAT_BLOCK_MASK) | (st.coat[from] & TileStore.COAT_BLOCK_MASK);
+};
 /** sheet 0（泥土/空格）特判：空格 type=0 恰好也是 dirt 的 sheet——与原版 type==0 语义一致 */
 const sheetAt = (st: TileStore, x: number, y: number): number => {
   if (!st.inBounds(x, y)) return -1;
@@ -167,6 +179,59 @@ const solidAllowBottomSlope = (st: TileStore, x: number, y: number): boolean => 
   const sl = st.slope[i];
   return !(sl === 1 || sl === 2) && !st.half[i];
 };
+/** PlatformProperTopFrame（cs:70684-70697）：平台 frameX/18 列号 ∈[0,7]∪[12,16]∪[25,26]
+ *  （FinalCleanupPass:400/GemPasses:162 同式；PlatformFrameWidth()=_data[19].
+ *  CoordinateFullWidth=18，Tiles_19.png 486px=27 帧×18px 实证）。 */
+const platformProperTopFrame198 = (fx: number): boolean => {
+  const n = Math.floor(fx / 18);
+  return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+};
+/** TileID.Sets.Platforms（TileID.cs:243）= {19,427,435-439}（sheet 域） */
+const PLATFORMS_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** WorldGen.SolidTile2(int,int)（cs:71023-71034）**生成期** 1:1——tileSolid 读生成期表
+ *  （genSolidType）而非 TILE_DEFS.solid 静态初值。★IIIII198（2026-09-03）waterpark
+ *  #84 定罪修复：泡沫块 379 静态表 Main.cs:9607 true、仅 DoUpdateInWorld_Inner
+ *  （Main.cs:17935/17971）运行窗内翻 false——生成期 SpawnPoint 尾（cs:19749）还原
+ *  true 后直至 TileCleanup 头（cs:21704）恒实心，DyePlants（cs:20126）窗口内
+ *  extraLiquid 泡沫柱可作蛋的 2×2 地面列（waterpark 金标 (3403,566) 蛋左列地面
+ *  (3402,567)=379 实证）；TILE_DEFS.solid=false（运行时碰撞语义）曾致 JS 拒蛋 →
+ *  内循环掷位漂移 → 蛋 5/6 双双错位（#84 T752>0×8/T0>752×8 主根因）。
+ *  条件串 1:1：active && tileSolid && ((Platforms[type] && (half||topSlope)) ||
+ *  slope==0) && !half && !inActive；inActive 生成期恒 0 不查（本文件惯例）；
+ *  tile==null→true 的越界防御=JS inBounds false（catch→false 等价）。
+ *  ★Piles/FallenLogs 窗口的 placeSmallPile/place3x2 仍走静态 solidTile2——JS
+ *  GenSolid 缺 SmoothWorld 尾（cs:16708-09）/Piles 头尾（cs:18926/19609-10）翻转
+ *  接线，192 在该窗口 override=true ≠ vanilla false，切共享谓词会反向造叶面小堆
+ *  分歧（GenSolid.ts 时间线「备案」债）——本变体只供 DyePlants 窗口（啮龙蛋 752
+ *  的 Place2x2 地面列门）消费。 */
+function genSolidTile2(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  if (!genSolidType(t)) return false;
+  const sl = st.slope[i];
+  const topSlope = sl === 1 || sl === 2;
+  const platform = PLATFORMS_SHEETS.has(SHEET[t] ?? -1);
+  if (!((platform && (st.half[i] === 1 || topSlope)) || sl === 0)) return false;
+  return st.half[i] !== 1;
+}
+/** WorldGen.SolidTileAllowBottomSlope（cs:70704-70716）**生成期** 1:1——tileSolid 读
+ *  生成期表（★IIIII198 同上 379 断）;tileSolidTop 以 d.platform 近似（本文件
+ *  solidAllowBottomSlope 同判例+GemPasses OOOO 注「tileSolidTop 不翻表 d.platform
+ *  照用」）;顶坡平台豁免=PlatformProperTopFrame（cs:70711）。供 DyePlants 窗口
+ *  蛋 752/荧光郁金香 656 的 HasValidGround*BelowSpot 家族门消费（cs:45734/73148）。 */
+function genSolidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                                 // 原版 !InWorld → return true
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  if (!(genSolidType(t) || TILE_DEFS[t]?.platform)) return false;      // tileSolid || tileSolidTop
+  const sl = st.slope[i];
+  const topSlope = sl === 1 || sl === 2;
+  if (topSlope && !(PLATFORMS_SHEETS.has(SHEET[t] ?? -1) && platformProperTopFrame198(st.frameX[i]))) return false;
+  return st.half[i] !== 1;
+}
 const topSlope = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const s = st.slope[st.idx(x, y)];
@@ -1082,7 +1147,14 @@ export function runExtraLiquidAddBubbleBlocks(st: TileStore, rng: RNG, gs: GenSt
       for (let n19 = num13 - num14; n19 <= num13 + num14; n19++) {
         const i = st.idx(n18, n19);
         if (n18 === num12 - num14 || n18 === num12 + num14 || n19 === num13 - num14 || n19 === num13 + num14) {
-          if ((st.flags[i] & 1) === 0) placeBubble189(st, rng, n18, n19);
+          // ★IIIII194：!active 门之外还有 Collision.EmptyTile 实体支（Collision.cs:1377-
+          //   1384，PlaceTile 头 cs:59864 `forced||EmptyTile||...` 首席可达拒置路径）——
+          //   生成期活体=老头（DungeonPass 落地，见 DungeonPass ★IIIII194 注）。
+          //   x86 ET/PE/PT 探针实证：#75 (3459,299..301) EmptyTile res=0（老头 bbox
+          //   (55327,4792,18,40) 恰交该三格）→ PlaceTile ret=0（/tmp/iii194-out）。
+          if ((st.flags[i] & 1) === 0 && !wgNpcBlocksEmptyTile(gs, n18, n19)) {
+            placeBubble189(st, rng, n18, n19);
+          }
           st.slope[i] = 0;
           st.half[i] = 0;
         }
@@ -1102,6 +1174,78 @@ export function runExtraLiquidAddBubbleBlocks(st: TileStore, rng: RNG, gs: GenSt
 }
 
 // ============================================================
+// 1c. ★IIIII194 SecretSeed.DoExtraLiquidFinish（WorldGen.cs:1836-1876，1458 同面逐字
+//     ——Terarria1458/Terraria/WorldGen.cs 同名函数体 diff 零差）——extraLiquid
+//     finalize 端点（cs:595-598：surfaceIsDesert Finish 之后、surfaceIsInSpace 之前）。
+//     原版调用位=FinalCleanup pass 体内 cs:22666 SecretSeed.FinalizeSecretSeeds()
+//     → 本仓 finalizeSecretSeedDoEnds 同位挂载（SecretSeedDoEndsPass.ts ★IIIII194 注）。
+//     三段：①cs:1842-1845 [225] 临时实心括弧 + Liquid.QuickWater(-2)（verbose=-2
+//     只关进度显示，沉降行为≡缺省重载；JS 走 1b 同款 quickWaterBracketed189，
+//     内部再含 QuickWater 自带 tilesIgnoreWater=[379]+巨石+[546] 括弧——Liquid.cs:117
+//     tilesIgnoreWater=SetBoulderSolidity(!ignoreSolids)+tileSolid[546] 同式）
+//     ②cs:1847-1860 全图 x 外 y 内：518 LilyPad → SquareTileFrame(i,j)（resetFrame
+//     =true 缺省；TileFrame case 518 → KillTile 门（liquid==0∨满液上实心∨上邻湿）/
+//     CheckLilyPad 重帧，KillTile 尘掷走 pass 流）；fullbrightBlock 格 liquid=0+去位
+//     +373 WaterDrip/374 LavaDrip/375 HoneyDrip/709 ShimmerDrip 去活（保持 type 原值
+//     ——active(false) 只清 active 位，vanilla Tile.cs active(bool) 同式）
+//     ③cs:1861-1870 j≥Main.UnderworldLayer（Main.cs:2886 => maxTilesY-200）：
+//     liquid>0 → lava(true)（liquidType 位强置 Lava，液量不动）；56 Obsidian/
+//     230 CrispyHoneyBlock/659 ShimmerBlock 去活。
+// ============================================================
+
+/** DoExtraLiquidFinish 主体（cs:1836-1876） */
+export function doExtraLiquidFinish(st: TileStore, rng: RNG, gs: GenState): void {
+  const w = st.w, h = st.h;
+  if (gs.seedFlags.skyblock) return;                          // cs:1838-1841 skyblockWorldGen 早退
+  const flag225 = HIVE_IDS_189.length > 0 ? genSolidType(HIVE_IDS_189[0]!) : false;
+  flipGenSolid([225], true);                                  // cs:1842-1843 [225] 临时实心括弧（开）
+  // cs:1844 Liquid.QuickWater(-2)——一次性 LiquidSim（1b 头同款接线，级联骰入本 pass 流）
+  const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
+  sim.isGeneratingOrLoadingWorld = true;
+  sim.generatingWorld = true;
+  sim.passRand = (max) => rng.nextInt(max);                   // ★IIIII100d：KillTile 级联掷入 pass 流
+  sim.passRng = rng;
+  sim.genWaterLine = gs.waterLine;                            // Liquid.cs:177-190 落水越线→岩浆
+  if (gs.seedFlags.remix) {
+    sim.remixWaterRule = true;
+    sim.remixLavaLine = gs.lavaLine;
+    sim.remixRockLevel = gs.rockLevel;
+    sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+  }
+  sim.remixWorldGen = !!gs.seedFlags.remix;
+  sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
+  if (gs.shimmerX > 0) sim.shimmerCenter = { x: gs.shimmerX, y: gs.shimmerY };
+  sim.applyGenSolidOverrides(snapshotGenSolid());             // solidNP ← 当前面板（含 225=true）
+  quickWaterBracketed189(sim);
+  flipGenSolid([225], flag225);                               // cs:1845 [225] 复原
+  sim.dispose();
+  // cs:1847-1875 主循环：x 外层/y 内层全图；每格内序=vanilla 逐句（SquareTileFrame
+  // 级联后重读本格四通道——C# 侧 Main.tile[i,j] 亦逐句重取）
+  const underworld = h - 200;                                 // Main.UnderworldLayer
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < h; j++) {
+      const idx = st.idx(i, j);
+      if (SHEET[st.type[idx]] === 518) genSquareTileFrame(st, rng, i, j);   // cs:1849-1851
+      if ((st.coat[idx] & TileStore.COAT_FULLBRIGHT_BLOCK) !== 0) {         // cs:1852
+        st.liquid[idx] = 0;                                                 // cs:1854 清液
+        st.setCoatSilent(i, j, TileStore.COAT_FULLBRIGHT_BLOCK, 0);         // cs:1855 去位
+        const shD = SHEET[st.type[idx]];
+        if (shD === 375 || shD === 373 || shD === 374 || shD === 709) {     // cs:1856-1860
+          st.flags[idx] &= ~1;                                              // active(false)
+        }
+      }
+      if (j >= underworld) {                                                // cs:1861-1870
+        if (st.liquid[idx] > 0) st.liquidType[idx] = LIQUID_TYPE.LAVA;      // lava(true)
+        const shU = SHEET[st.type[idx]];
+        if (shU === 56 || shU === 230 || shU === 659) {
+          st.flags[idx] &= ~1;                                              // active(false)
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
 // 2. FallenLogsAndWaterFeatures（cs:18625，倒木段——水景段=上方 runExtraLiquidAddBubbleBlocks）
 // ============================================================
 
@@ -1109,7 +1253,10 @@ export function runExtraLiquidAddBubbleBlocks(st: TileStore, rng: RNG, gs: GenSt
 export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
   let num = (w / 2100) | 0;
-  num += rng.int(-1, 1);                                               // Next(-1,2)
+  // ★IIIII195（cs:18655-18656≡1458 同行）：remix 覆写臂 `num+Next(0,2)`（非 remix Next(-1,2)）——
+  //   掷耗同为 1 但值域异（raw%3→{-1,0,1} vs raw%2→{0,1}）；remix 少 -1 档
+  //   （4200 宽：remix num∈{2,3}，曾漏 → JS Next(-1,2) 掷出 -1 时 num=1 整少一次机会）
+  num += gs.seedFlags.remix ? rng.int(0, 1) : rng.int(-1, 1);
   for (let i = 0; i < num; i++) {
     const x0 = gs.beachDistance + 20;
     let budget = 30000;
@@ -1118,16 +1265,29 @@ export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
       budget--;
       let x = rng.int(x0, w - x0 - 1);                                  // Next(x0, w-x0)
       let j = rng.int(10, gs.worldSurface - 1);                         // Next(10, (int)worldSurface)
+      // ★IIIII195（cs:18672-18677≡1458 同行）：remix 覆写臂 `j=Next(remixSurfaceLayerLow,
+      //   remixSurfaceLayerHigh)`——**被弃 y 是活掷**（#64/#65/#67/#73 判例同族：
+      //   覆写前的初掷照常消耗），remix 每 attempt 双掷；曾整缺 → JS 单掷且 j 域
+      //   锚在 sky/地表带（10..worldSurface-1）永不落 remix 深带草岸=零受理全白掷。
+      if (gs.seedFlags.remix) {
+        j = rng.int(gs.remixSurfaceLayerLow, gs.remixSurfaceLayerHigh - 1);
+      }
       const relaxed = budget < relaxAt;
       if (budget > relaxAt / 2) {
         while (x > w * 0.4 && x < w * 0.6) x = rng.int(x0, w - x0 - 1);
       }
       if (!activeAt(st, x, j) && st.inBounds(x, j) && st.wall[st.idx(x, j)] === 0) {
         let ok = true;
-        for (; !activeAt(st, x, j) && st.inBounds(x, j) && st.wall[st.idx(x, j)] === 0 && j <= gs.worldSurface; j++) {
+        // ★IIIII195（cs:18692-18701≡1458 同行）：下落循环上界 remix=remixSurfaceLayerHigh /
+        //   非 remix=worldSurface（双支互斥）
+        const jBound = gs.seedFlags.remix ? gs.remixSurfaceLayerHigh : gs.worldSurface;
+        for (; !activeAt(st, x, j) && st.inBounds(x, j) && st.wall[st.idx(x, j)] === 0 && j <= jBound; j++) {
           // 下落至首个活性格（cs:18682）
         }
-        if (j > gs.worldSurface - 10) {
+        // ★IIIII195（cs:18704-18706≡1458 同行）：`j > worldSurface-10.0 && !remixWorldGen`——
+        //   remix **豁免**此拒置门（remix 深带 808± 远大于 worldSurface-10,若漏豁免
+        //   则 remix 全受理面被误杀）；非 remix 语义零变。
+        if (j > gs.worldSurface - 10 && !gs.seedFlags.remix) {
           ok = false;
         } else if (!relaxed) {
           // 50×50 群系回避（cs:18692-18728）：云 189/沙 53/地牢砖/腐化/猩红
@@ -1291,8 +1451,11 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
   if (!activeAt(st, i, j) || i < 95 || i > w - 95 || j < 95 || j > h - 95) return;
   const rad = 90;
   const aboveFree = !activeAt(st, i, j - 1) || DYE_PLANT_ABOVE.has(sheetAt(st, i, j - 1));
-  // ---- 表层段（cs:71310-71389）----
-  if (j < gs.worldSurface && aboveFree) {
+  const remixD = !!gs.seedFlags.remix;
+  // ---- 表层段（1457 cs:71834-71837 `((double)j < Main.worldSurface || remixWorldGen) &&
+  //  aboveFree`）★IIIII196（2026-09-03）REMIX #84 定罪修复：**remix 豁免臂整缺**——
+  //  remix 世界染料植物表层段（草/丛林草/湿沙/仙人掌株型）全高域受理，非 remix 仅 j<ws。
+  if ((j < gs.worldSurface || remixD) && aboveFree) {
     if (dyeNearby(st, i, j, rad)) return;
     const t = sheetAt(st, i, j);
     if (t === 2 || t === 109) {
@@ -1315,8 +1478,9 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
       if (clear) placeDye(st, rng, i, j - 1, 6);
     }
   }
-  // ---- 段位门（cs:71390）：表层或地狱层直接返回 ----
-  if (j < gs.worldSurface || j >= h - 200) return;                      // UnderworldLayer = h-200
+  // ---- 段位门（1457 cs:71906 `(!(j >= ws) && !remixWorldGen) || j >= UnderworldLayer
+  //  → return`）：★IIIII196 remix 不因 j<ws 截停（remix 全域连跑地下段）；地狱层恒截。
+  if ((j < gs.worldSurface && !remixD) || j >= h - 200) return;         // UnderworldLayer = h-200
   // ---- 地下段（cs:71394-71447）----
   if (aboveFree) {
     if (dyeNearby(st, i, j, rad)) return;
@@ -1350,7 +1514,6 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
 
 /** GrowGlowTulips（cs:45628）+ TryGrowingGlowTulip（cs:73171）+ NoNearbyGlowTulips（cs:73196）1:1 */
 function growGlowTulips(st: TileStore, rng: RNG, gs: GenState): void {
-  void gs;
   const w = st.w, h = st.h;
   const worldSize = w <= 4200 ? 0 : w <= 6400 ? 1 : 2;                 // GetWorldSize（cs:6518）
   const n2 = 100, n3 = 300;
@@ -1362,7 +1525,9 @@ function growGlowTulips(st: TileStore, rng: RNG, gs: GenState): void {
     if (budget <= 0) break;
     const pickLeft = placed >= ((target / 2) | 0) && (budget <= 7500 || rng.int(0, 1) !== 0);
     const i = pickLeft ? rng.int(w - n3, w - n2 - 1) : rng.int(n2, n3 - 1);
-    const j = rng.int(gs.worldSurface, h - 201);                        // Next(ws, h-200)
+    // ★IIIII196（2026-09-03）REMIX #84 定罪修复：j 域 remix 支整缺（1457 cs:46041）：
+    //  remix=Next(ws, maxY-350)（假地表带上界 h-350 截停）非 remix=Next(ws, maxY-200)。
+    const j = gs.seedFlags.remix ? rng.int(gs.worldSurface, h - 351) : rng.int(gs.worldSurface, h - 201);
     if (tryGrowGlowTulip(st, rng, i, j)) placed++;
   }
 }
@@ -1375,7 +1540,9 @@ function glowTulipGround(st: TileStore, x: number, y: number): boolean {
   const okType = t === 0 || t === 70 || t === 633 || t === 59 || t === 225
     || CONV_GRASS.has(t) || t === 1 || t === 25 || t === 117 || t === 203 || TILE_MOSS.has(t);
   if (!okType) return false;
-  return solidAllowBottomSlope(st, x, y + 1);
+  // ★IIIII198：SolidTileAllowBottomSlope 生成期 1:1（tileSolid 读 genSolidType——
+  //   生成期实心族 379 泡沫块等；cs:45734/73148 家族门共用本函数）
+  return genSolidAllowBottomSlope(st, x, y + 1);
 }
 
 function tryGrowGlowTulip(st: TileStore, rng: RNG, i: number, j: number): boolean {
@@ -1428,7 +1595,9 @@ function placeChilletEggs(st: TileStore, rng: RNG, gs: GenState): void {
     budget--;
     if (budget <= 0) break;
     const i = rng.int(100, w - 101);
-    const j = rng.int(Math.floor(gs.rockLevel), h - 201);               // Next(rockLayer, h-200)
+    // ★IIIII196（2026-09-03）REMIX #84 定罪修复：j 域 remix 支整缺（1457 cs:46068）：
+    //  remix=Next(rockLayer, maxY-350) 非 remix=Next(rockLayer, maxY-200)。
+    const j = gs.seedFlags.remix ? rng.int(Math.floor(gs.rockLevel), h - 351) : rng.int(Math.floor(gs.rockLevel), h - 201);
     if (tryPlaceChilletEgg(st, rng, i, j)) placed++;
   }
 }
@@ -1455,12 +1624,15 @@ const PLACE2X2_TABLE = new Set([
 ]);
 
 /** Place2x2 default 列地面门（cs:51513-51521）：nactive() && (SolidTile2 || tileTable)。
- *  inActive 生成期恒 0 不查；越界 GetTileSafely→空 tile→!nactive→false */
+ *  inActive 生成期恒 0 不查；越界 GetTileSafely→空 tile→!nactive→false。
+ *  ★IIIII198：SolidTile2 换生成期 1:1 genSolidTile2（tileSolid 读 genSolidType——
+ *  泡沫块 379 生成期实心，extraLiquid 泡沫柱可作蛋列地面；SolidTile2 本体读可变
+ *  Main.tileSolid，静态读=运行期语义错窗）。 */
 function place2x2GroundOk(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
-  return solidTile2(st, x, y) || PLACE2X2_TABLE.has(SHEET[st.type[i]] ?? -1);
+  return genSolidTile2(st, x, y) || PLACE2X2_TABLE.has(SHEET[st.type[i]] ?? -1);
 }
 
 function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): boolean {
@@ -1680,12 +1852,24 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const grassWalls = new Set([68, 65, 66, 63]);
   for (let i = 5; i < w - 5; i++) {
     // ---- ① 普通藤 52 / 花藤 382（草面/树叶下，地表以上）（cs:20346-20387）----
+    // ★IIIII196（2026-09-03）REMIX #89 定罪修复（1457 cs:20362-20364/20381-20383，1458 同号）：
+    //  ①j 域 remix 支整缺——remix num2=maxTilesY-200（藤蔓全高域生长）非 remix=worldSurface；
+    //  ②remix 1/5 花藤臂整缺——`if (remixWorldGen && genRand.Next(5) == 0) type = 382;`
+    //  （掷照耗,位于墙门之后 Next(5)<3 长度掷之前）。
     let pending = 0;
     let type = VINE;
-    const surfLimit = gs.worldSurface;
+    const remixV = !!gs.seedFlags.remix;
+    const surfLimit = remixV ? h - 200 : gs.worldSurface;
     for (let j = 0; j < surfLimit; j++) {
       if (pending > 0 && !activeAt(st, i, j)) {
         putVine(st, i, j, type);
+        // ★IIIII210（2026-09-03）：vanilla cs:20378 `CopyPaintAndCoating(Main.tile[i, j - 1])`
+        //   ——藤 52/382 落格自【上格】继承 color+invisibleBlock/fullbrightBlock
+        //   （Tile.cs:869-873；全 pass 仅此一支带拷贝，62/528/636/205/638 均无）。
+        //   缺拷贝 → extraLiquid 泡泡方块锚（379 带亮位）下垂的藤链丢涂层 →
+        //   DoExtraLiquidFinish fullbright 支（cs:1852）不触发 → #105 残 L/lt=Y0>1×19
+        //   （(3397,251..257)/(3319,278..279) t52 实证）。六类藤其余支原版无拷贝不改。
+        if (j > 0) copyPaintAndCoating201(st, st.idx(i, j - 1), st.idx(i, j));
         pending--;
       } else {
         pending = 0;
@@ -1698,6 +1882,7 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
         const wallHere = st.inBounds(i, j) ? st.wall[st.idx(i, j)] : 0;
         const wallBelow = st.inBounds(i, j + 1) ? st.wall[st.idx(i, j + 1)] : 0;
         if (grassWalls.has(wallHere) || grassWalls.has(wallBelow)) type = VINE_FLOWER;
+        if (remixV && rng.int(0, 4) === 0) type = VINE_FLOWER;          // remix 1/5 花藤（cs:20381）
         if (rng.int(0, 4) < 3) pending = rng.int(1, 9);                 // Next(5)/Next(1,10)
       }
     }
@@ -1859,29 +2044,32 @@ const DIRT = TILE_BY_KEY['dirt']!;
 export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
   const flCap = (globalThis as { __swFlCap?: (m: number, n: number, tag: string) => void }).__swFlCap;
   const w = st.w, h = st.h;
-  const spots = Math.floor(w * 0.004);
-  for (let i = 0; i < spots; i++) {
-    let cx = rng.int(100, w - 101);
-    const rx = rng.int(15, 29);                                        // Next(15,30)
-    const ry = rng.int(15, 29);
-    // 列下扫：首个活性格（cs:20673-20682），命中后若 logX>=0 跳倒木锚
-    for (let l = ry; l < gs.worldSurface - ry - 1; l++) {
-      if (!activeAt(st, cx, l)) continue;
-      if (gs.logX >= 0) {
-        cx = gs.logX;
-        l = gs.logY;
-        gs.logX = -1;
-      }
-      const num7 = FLOWER_LIST[rng.int(0, 7)];                          // Next(8)
-      for (let m = cx - rx; m < cx + rx; m++) {
-        for (let n = l - ry; n < l + ry; n++) {
+  // ★IIIII196（2026-09-03）REMIX #90 定罪修复：remix 分支整缺（1457 cs:20614-20671，
+  //  1458 同号）：次数 ×6（(int)(w*0.004)=16 → 96）、半径重掷 Next(15,45)×2（先照常
+  //  掷 Next(15,30)×2 再覆写）、锚 y=Next(rockLayer,maxY-350) 假地表带**箱式**撒花
+  //  （非 remix=列下扫首个活性格）、logX/logY 倒木锚同款消费（在 num5 掷后）、
+  //  花式 NextFromList(21,24,...,42)=FLOWER_LIST 同池（1 掷,等价 Next(8)）。
+  //  内层格处理两支共表（remix 头门/重帧/KillTile/PlaceTile(3) 103c 链逐字同）。
+  let spots = Math.floor(w * 0.004);
+  const remixF = !!gs.seedFlags.remix;
+  if (remixF) spots *= 6;
+  const boxScan = (bx: number, by: number, brx: number, bry: number, num7: number): void => {
+      for (let m = bx - brx; m < bx + brx; m++) {
+        for (let n = by - bry; n < by + bry; n++) {
           if (!inWorld(st, m, n, 5)) continue;
           const t4 = st.idx(m, n);
           const t5 = st.idx(m, n + 1);
           const t6 = st.idx(m, n + 2);
           const s4 = SHEET[st.type[t4]];
-          // 倒木/实心格跳过（cs:20693）
-          if ((st.flags[t4] && s4 === 488) || (st.flags[t4] && TILE_DEFS[st.type[t4]]?.solid)) continue;
+          // 倒木/实心格跳过（cs:20693）——★IIIII198（2026-09-03）#90 定罪修复：
+          //   Main.tileSolid 读**生成期面板**（genSolidType）非静态 TILE_DEFS.solid。
+          //   Flowers 窗口（cs:20592，SpawnPoint 尾后/TileCleanup 头前）泡沫块 379
+          //   生成期实心（与 #84 蛋列同根因族）——waterpark 金标 (3771,255) 实证：
+          //   x86 泡沫格跳过保泡，JS 静态 false 误入 kill+place 链吞泡植草 → 内箱
+          //   骰移位（T73>3×12/T3>73×8 全箱 73/3 对调 + S0>2×3）→ 后续迭代
+          //   cx/rx/ry/num7 全移位（3212-3227,269-277 第二箱漂移）。
+          //   484 巨石同臂反向翻正（vanilla 窗口内非实心→不跳过，JS 静态 true 曾误跳）。
+          if ((st.flags[t4] && s4 === 488) || (st.flags[t4] && genSolidType(st.type[t4]))) continue;
           if (st.flags[t4] && s4 === 3) {
             // 既有草丛重帧：2/3 升级为高草 73（cs:20695-20701）
             st.frameX[t4] = (num7 + rng.int(0, 2)) * 18;                // Next(3)
@@ -1952,6 +2140,35 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
           }
         }
       }
+  };
+  for (let i = 0; i < spots; i++) {
+    let cx = rng.int(100, w - 101);
+    const rx0 = rng.int(15, 29);                                       // Next(15,30)（remix 后续重掷仍先照掷）
+    const ry0 = rng.int(15, 29);
+    if (remixF) {
+      const rx = rng.int(15, 44);                                      // Next(15,45) 重掷（cs:20621）
+      const ry = rng.int(15, 44);                                      // Next(15,45)（cs:20623）
+      let cy = rng.int(Math.floor(gs.rockLevel), h - 351);             // Next(rockLayer, maxY-350)（cs:20624）
+      if (gs.logX >= 0) {
+        cx = gs.logX;
+        cy = gs.logY;
+        gs.logX = -1;
+      }
+      const num7 = FLOWER_LIST[rng.int(0, 7)];                         // NextFromList（cs:20628）
+      boxScan(cx, cy, rx, ry, num7);
+      continue;
+    }
+    // 列下扫：首个活性格（cs:20673-20682），命中后若 logX>=0 跳倒木锚
+    const rx = rx0, ry = ry0;
+    for (let l = ry; l < gs.worldSurface - ry - 1; l++) {
+      if (!activeAt(st, cx, l)) continue;
+      if (gs.logX >= 0) {
+        cx = gs.logX;
+        l = gs.logY;
+        gs.logX = -1;
+      }
+      const num7 = FLOWER_LIST[rng.int(0, 7)];                          // Next(8)
+      boxScan(cx, l, rx, ry, num7);
       break;                                                            // 每个锚点只做一圈
     }
   }
@@ -2156,6 +2373,9 @@ function placeBamboo(st: TileStore, rng: RNG, gs: GenState, x: number, y: number
     st.setTileSilent(x, y, BAMBOO, 0, 0);
     st.half[k] = 0;
     st.slope[k] = 0;
+    // ★IIIII201：PlaceBamboo cs:58921-58930——底格 BlockColorAndCoating → 竹
+    //   UseBlockColors（color+涂层两位继承）
+    copyPaintAndCoating201(st, g, k);
     squareTileFrame(st, rng, x, y);
     return true;
   }
@@ -2197,10 +2417,13 @@ function placeLilyPad(st: TileStore, rng: RNG, x: number, y: number): boolean {
   }
   if (cnt > 3) return false;
   // 水深 3..12，且下扫途中遇香蒲拒绝（cs:59149-59165）
+  // ★IIIII201：tileSolid 腿曾读静态 TILE_DEFS.solid——vanilla 读可变 Main.tileSolid，
+  //   379 泡泡块在 TileCleanup 尾(1457 cs:22128)还原 true 后**停在泡泡格**（ground=379
+  //   →风格表 num5<0→拒绝）；静态 false 则扫穿泡泡找泥多放。waterpark 首差 (3611,231)。
   let l = n;
   for (; st.inBounds(x, l) && l < h - 50; l++) {
     const kl = st.idx(x, l);
-    if (st.flags[kl] && TILE_DEFS[st.type[kl]]?.solid && !TILE_DEFS[st.type[kl]]?.platform) break;
+    if (st.flags[kl] && genSolidType(st.type[kl]) && !TILE_DEFS[st.type[kl]]?.platform) break;
     if (st.flags[kl] && SHEET[st.type[kl]] === 519) return false;
   }
   if (l - n > 12 || l - n < 3) return false;
@@ -2224,6 +2447,9 @@ function placeLilyPad(st: TileStore, rng: RNG, x: number, y: number): boolean {
   st.setTileSilent(x, n, LILY_PAD, fx, fy);
   st.half[ka] = 0;
   st.slope[ka] = 0;
+  // ★IIIII201：vanilla cs:59634 `color = Main.tile[x, l].color(); → color(color)`
+  //   ——睡莲继承底格**漆色**（涂层位不在此拷，走格上保留语义）
+  st.paint[ka] = st.paint[st.idx(x, l)];
   wpEv('LYO', x, n, `fy${fy}`);
   // ★IIII30 定罪①：vanilla PlaceLilyPad 成功尾必调 SquareTileFrame(x,num)
   //   （1457 cs:59640，放置写序内联级联）——旧移植漏调，睡莲放置后邻域帧/
@@ -2238,11 +2464,11 @@ function checkCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   if (!st.inBounds(x, j)) return;
   let num = j;
   let flag = false;
-  // 下扫实心底（cs:58773-58788）
+  // 下扫实心底（cs:58773-58788）——★IIIII201 tileSolid 腿改生成期表（同 placeLilyPad 注）
   let num2 = num;
   for (; st.inBounds(x, num2) && num2 < h - 50; num2++) {
     const k = st.idx(x, num2);
-    if (st.flags[k] && TILE_DEFS[st.type[k]]?.solid && !TILE_DEFS[st.type[k]]?.platform) break;
+    if (st.flags[k] && genSolidType(st.type[k]) && !TILE_DEFS[st.type[k]]?.platform) break;
     if (st.flags[k] && SHEET[st.type[k]] !== 519) flag = true;
     if (!st.flags[k]) break;
   }
@@ -2337,11 +2563,11 @@ function placeCatTail(st: TileStore, rng: RNG, gs: GenState, x: number, j: numbe
     }
   }
   if (cols > 3) return [-1, -1];
-  // 下扫实心底（cs:58690-58697），途中遇非蘑菇植物拒绝
+  // 下扫实心底（cs:58690-58697），途中遇非蘑菇植物拒绝——★IIIII201 tileSolid 腿改生成期表
   let l = n;
   for (; st.inBounds(x, l) && l < h - 50; l++) {
     const kl = st.idx(x, l);
-    if (st.flags[kl] && TILE_DEFS[st.type[kl]]?.solid && !TILE_DEFS[st.type[kl]]?.platform) break;
+    if (st.flags[kl] && genSolidType(st.type[kl]) && !TILE_DEFS[st.type[kl]]?.platform) break;
     if (st.flags[kl] && SHEET[st.type[kl]] !== 71) return [-1, -1];
   }
   if (l - n > 7) return [-1, -1];                                       // catTailDistance - 1
@@ -2364,6 +2590,9 @@ function placeCatTail(st: TileStore, rng: RNG, gs: GenState, x: number, j: numbe
   st.setTileSilent(x, n, CATTAIL, 0, style);
   st.half[st.idx(x, n)] = 0;
   st.slope[st.idx(x, n)] = 0;
+  // ★IIIII201：vanilla cs:59225 `CopyPaintAndCoating(Main.tile[x, num + 1])`——香蒲
+  //   继承底格（下格）漆+涂层两位；曾整缺 → 泡泡方块内落位的香蒲丢亮涂层。
+  copyPaintAndCoating201(st, st.idx(x, n + 1), st.idx(x, n));
   wpEv('PCO', x, n);
   squareTileFrame(st, rng, x, n);
   return [x, n];
@@ -2378,7 +2607,8 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   let i = n;
   for (; st.inBounds(x, i) && i < h - 50; i++) {
     const k = st.idx(x, i);
-    if (st.flags[k] && TILE_DEFS[st.type[k]]?.solid && !TILE_DEFS[st.type[k]]?.platform) break;
+    // ★IIIII201 tileSolid 腿改生成期表（同 placeLilyPad 注，vanilla cs:59472 可变表读）
+    if (st.flags[k] && genSolidType(st.type[k]) && !TILE_DEFS[st.type[k]]?.platform) break;
   }
   n = i - 1;
   while (st.inBounds(x, n) && st.flags[st.idx(x, n)] && SHEET[st.type[st.idx(x, n)]] === 519) n--;
@@ -2395,6 +2625,12 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
     st.setTileSilent(x, n - 1, CATTAIL, fx, st.frameY[kn]);
     st.half[above] = 0;
     st.slope[above] = 0;
+    // ★IIIII210（2026-09-03）：GrowCatTail 芽链涂层继承——vanilla 三支（cs:59501/
+    //   59518/59536/59547 帧改写臂）新芽段逐支 `CopyPaintAndCoating(Main.tile[x, num])`
+    //   （自下段继承 color+invisibleBlock/fullbrightBlock）。缺继承 → 泡泡锚上
+    //   生长的香蒲上段丢亮位 → Finish fullbright 支不触发 → #105 (1162-1163,240..242)
+    //   t519 残 L=51/255（vanilla 清而 JS 留）。
+    copyPaintAndCoating201(st, kn, above);
   };
   if (st.frameX[kn] === 0) {
     st.frameX[kn] = 18;
@@ -2535,6 +2771,9 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
       const gb = st.idx(x, y);
       st.slope[gb] = 0;
       st.half[gb] = 0;
+      // ★IIIII201：PlaceUnderwaterPlant cs:59014-59024——底格 BlockColorAndCoating
+      //   → 植株 UseBlockColors（color+涂层两位一起继承）
+      copyPaintAndCoating201(st, gb, st.idx(x, y - 1));
       st.setTileSilent(x, y - 1, SEAWEED, 0, 0);
       const kk = st.idx(x, y - 1);
       st.half[kk] = 0;
@@ -2558,7 +2797,9 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
 /** LilypadsCattailsBambooAndSeaweed pass（cs:22131-22194）1:1 */
 export function runLilypadsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
-  const surfLimit = gs.worldSurface;
+  // ★IIIII196（2026-09-03）REMIX #102 定罪修复：扫描 j 域 remix 支整缺（1457
+  //  cs:22169-22172）——remix num=maxTilesY-200（全域水植扫描）非 remix=worldSurface。
+  const surfLimit = gs.seedFlags.remix ? h - 200 : gs.worldSurface;
   for (let i = 20; i < w - 20; i++) {
     for (let j = 1; j < surfLimit; j++) {
       if (rng.int(0, 4) !== 0) continue;                                // Next(5) 恒掷
@@ -2729,7 +2970,11 @@ function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: n
   const below = SHEET[st.type[bi]];
   if (below !== 60 && below !== 226) return;
   const temple = below === 226;
-  const deep = y > gs.rockLevel;                                          // remix 恒 false
+  // ★IIIII196（2026-09-03）REMIX #87 修复（1457 cs:60081 `flag2 = (double)j > Main.rockLayer
+  //  || Main.remixWorld || remixWorldGen`，1458 同号）：remix 世界 flag2 恒真（非蜥蜴砖）——
+  //  旧注释「remix 恒 false」系误读：flag2 只控 144/162 高株帧赋值（`& flag2` 非短路,
+  //  掷数不变、成果异）。remix 假地表带丛林草因此长高株。
+  const deep = y > gs.rockLevel || !!gs.seedFlags.remix;
   const deepOk = temple ? false : deep;
   if (rng.int(0, 15) === 0 && y > gs.worldSurface && !temple) {           // Next(16) → 孢子 69
     st.setTileSilent(x, y, JUNGLE_SPORES, 0, 0);
@@ -2875,7 +3120,12 @@ export function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number,
   // ★IIII191 cs:54100-54102 `if ((double)y > Main.worldSurface - 1.0 && !Main.remixWorld) return;`
   //   ——原注「remix 恒假」有误：remix 恰是豁免臂（SpreadingGrass remix 臂④在深带放置,
   //   若无豁免则整臂向日葵全拒=Next(20) 白掷）。非 remix 语义零变。
-  if (y > gs.worldSurface - 1 && !gs.seedFlags.remix) return;
+  //   ★IIIII208（#73 定罪）：本早退在 PlaceSunflower **体内**——case 27 体尾
+  //   SquareTileFrame（cs:60643-60645）无条件级联仍须跑（见下方 ★IIIII208 总注）。
+  if (y > gs.worldSurface - 1 && !gs.seedFlags.remix) {
+    squareTileFrame(st, rng, x, y);
+    return;
+  }
   const air = (cx: number, cy: number): boolean => {
     if (!st.inBounds(cx, cy)) return true;
     const i = st.idx(cx, cy);
@@ -2891,7 +3141,19 @@ export function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number,
     if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0
       || (SHEET[st.type[gi]] !== 2 && SHEET[st.type[gi]] !== 109)) flag = false;
   }
-  if (!flag) return;
+  // ★IIIII208（#73 单格残差定罪）：净空败退路径——vanilla case 27 体尾
+  //   SquareTileFrame(i,j)（cs:60643-60645）**无条件**，失败也跑。GFB 实证：
+  //   (1154,839) 臂④ Next(20) 命中→净空败退→尾环 TileFrame(1153,839) 对
+  //   非活性幽灵蜂巢(225,slope2)走 TileFrame 头清位支（cs:82078-82082
+  //   half/slope/块漆归零）→ x86 slope 2→0；JS 曾整支跳过 ⇒ 幽灵坡面残留
+  //   （mile8 #73 S0>2×1 唯一格）。生成期环内合并族帧号 Next(3) 被
+  //   !generatingWorld 门跳过（cs:82659）→ 掷流中性（win73 双侧
+  //   13,856,271/13,856,272 实证）；PlaceTile 头部早退（OOB/液体）不级联——
+  //   那两支在 vanilla 走不到 case 体。
+  if (!flag) {
+    squareTileFrame(st, rng, x, y);
+    return;
+  }
   const styleTop = rng.int(0, 2);        // num（cs:53677）——上两行共用
   for (let k = 0; k < 2; k++) {
     for (let l = -3; l < 1; l++) {
@@ -2902,6 +3164,11 @@ export function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number,
       }
     }
   }
+  // 成功路径：case 体尾 1 次 + PlaceTile 通用尾（cs:60746-60752，锚格已 active）
+  // 再 1 次——与 vanilla 双级联同构（旧注「恒 no-op 未移植」只对成功路径成立,
+  // 失败路径的幽灵清位面不可省——本批定谳）。
+  squareTileFrame(st, rng, x, y);
+  if (st.flags[st.idx(x, y)]) squareTileFrame(st, rng, x, y);
 }
 
 /** SunflowersPart2 主体：w*0.002 次带状扫描。每次：中心列 Next(w)，带宽

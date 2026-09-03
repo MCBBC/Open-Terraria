@@ -15,16 +15,16 @@
 // 单机移植:NetMessage/SendData 一律跳过(原版联机同步,无操作)。
 import { TileStore } from './TileStore';
 import { TILE_DEFS } from '../data/tiles';
+import { canKillTileAt, type KillTileCtx } from '../entities/Mounts';
 
 /** 器件分发表(P3 devices.ts 提供):返回 true 表示已处理该 case */
 export type DeviceHandler = (w: Wiring, sheet: number, x: number, y: number) => boolean;
 
-/** 多色工具模式位(WiresUI.Settings.MultiToolMode) */
-export const TOOL_RED = 1;
-export const TOOL_GREEN = 2;
-export const TOOL_BLUE = 4;
-export const TOOL_YELLOW = 8;
-export const TOOL_ACTUATOR = 16;
+// ★2026-09-03 五常量抽出至 data/wiringToolBits.ts（叶子模块,TDZ 断环——items.ts
+//  顶层 WIRED_TOOLS 读这组常量而本模块 import 子树回流 items,冷启动序炸 boot）。
+import { TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR } from '../data/wiringToolBits';
+/** 多色工具模式位(WiresUI.Settings.MultiToolMode)——叶子模块 re-export 兼容 */
+export { TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR };
 export const TOOL_CUTTER = 32;
 
 const MAX_PUMP = 20;   // Wiring.cs:34(MaxPump=20,填充上限 19)
@@ -34,8 +34,6 @@ const MAX_MECH = 1000; // Wiring.cs:41(MaxMech=1000,注册上限 999)
  *  旧表只列宝箱族/祭坛（21/88/467/237），漏音乐盒 26/花盆 77/垃圾桶 470/475/
  *  茶壶 597/饼干 441/望远镜 468。★R20-I6:devices.ts case 130 同表消费（导出） */
 export const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
-/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 树干承载检查用 */
-const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 
 export class Wiring {
   readonly st: TileStore;
@@ -49,6 +47,18 @@ export class Wiring {
    *  R8-51:压板/测重板/感应器接触触发此前静音;Game 接 sfx.play('tink') */
   /** 世世纪杀花已击败(同上) */
   planteraDowned = false;
+  /** SW-K1 2026-09-03:WorldGen.CanKillTile 全式的运行期上下文提供者。原版致动缩入
+   *  （Wiring.cs:3227 DeActive）与拨杆 130（:1428）调的是【全函数】CanKillTile(i,j)
+   *  （WorldGen.cs:62716-62810,含 Boulders+CheckBoulderChest/IsLockedDoor/case 235
+   *  传送器/Chest.CanDestroyChest 四支）——本仓曾只挂上邻保护子件(结构子集,头注
+   *  自登记),现整段退役、委托 entities/Mounts.canKillTileAt（与 Game.canKillTile
+   *  钻头链同一权威实现）。hardMode(Main.hardMode)与 world.chests 锚格表
+   *  （Chest.CanDestroyChest）由 Game 装配期注入 closure 每调用现读(困难模式中途
+   *  触发/箱子增删不失步);null(测试/未装配)落 canKillTileAt 缺省口径=非困难+容器恒可毁。
+   *  ★登记(既有权威层 nuance,非本批引入):canKillTileAt 的 active 判据是
+   *  TileStore.isActive(nactive,已致动格=false),原版 CanKillTile 用 tile.active()
+   *  ——已致动格压在判格上方的罕见态二者有差,SW-G1 批口径如此,随权威层统一处理 */
+  killTileCtxProvider: (() => KillTileCtx) | null = null;
 
   running = false;                                  // :23
   blockPlayerTeleportationForOneIteration = false;  // :22(测重板抑制传送)
@@ -635,7 +645,7 @@ export class Wiring {
   }
 
   /** 缩入（Wiring.cs:3222-3251 DeActive 1:1）：蜥蜴砖地表限制 + 不可缩 tile 表 +
-   *  上方 PreventsActuationUnder / CanKillTile 结构检查 */
+   *  上方 PreventsActuationUnder / CanKillTile（:3227 全函数,SW-K1 起委托全式）检查 */
   private deActive(i: number, j: number): void {
     const st = this.st;
     if (!st.inBounds(i, j)) return;
@@ -668,39 +678,15 @@ export class Wiring {
     // = 自造行为,摘除。
   }
 
-  /** WorldGen.CanKillTile 结构子集（WorldGen.cs:62249-62358，致动缩入门用）：
-   *  未激活/魔法冰墙 350 → false；上方是异种树干/宝箱族/棕榈/雕像承载位 → false。
-   *  Boulders+CheckBoulderChest/IsLockedDoor/Chest.CanDestroyChest（容器战利品）
-   *  依赖容器内容与门锁系统，未接入——恒按"可杀"处理（注释登记） */
-  /** WorldGen.CanKillTile 结构子集——★R20-I6 起 devices.ts case 130 亦消费（公开） */
+  /** WorldGen.CanKillTile 全函数门（1457 WorldGen.cs:62716-62810 委托）。
+   *  ★R20-I6 起 devices.ts case 130 亦消费（公开）;SW-K1 2026-09-03 前为本文件内
+   *  的上邻保护结构子集——原版两处调用（Wiring.cs:1428 拨杆 130/:3227 DeActive）
+   *  调的都是全函数，子集缺 Boulders+CheckBoulderChest/IsLockedDoor/case 235/
+   *  Chest.CanDestroyChest 四支 → 致动缩入/拨杆可打穿"巨石压箱/锁门/传送器上有物/
+   *  非空箱"的保护，与挖掘面（Game.canKillTile）双轨。现整段委托
+   *  entities/Mounts.canKillTileAt 同一权威实现，上下文经 killTileCtxProvider 注入 */
   canKillTile(i: number, j: number): boolean {
-    const st = this.st;
-    if (!st.inBounds(i, j)) return false;
-    const t = this.p2i(i, j);
-    if (!st.flags[t]) return false;
-    if (st.wall[t] === 350) return false;
-    const mySheet = this.sheetAt(i, j);
-    if (j >= 1) {
-      const a = this.p2i(i, j - 1);
-      if (st.flags[a]) {
-        const above = this.sheetAt(i, j - 1);
-        if (above !== mySheet) {
-          // IsATreeTrunk{5,72,583-589,596,616,634}：上方异种树干段不可缩（分支/树顶帧豁免）
-          if (IS_A_TREE_TRUNK.has(above)) {
-            const fx = st.frameX[a], fy = st.frameY[a];
-            const branchExempt = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110);
-            if (!branchExempt && fy < 198) return false;
-          }
-          // 棕榈 323：左右枝帧不可缩
-          if (above === 323 && (st.frameX[a] === 66 || st.frameX[a] === 220)) return false;
-          // 宝箱/梳妆台/雕像承载位（62290-62305）
-          if (above === 21 || above === 26 || above === 72 || above === 77 || above === 88 || above === 467 || above === 488) return false;
-          if (above === 80 && st.frameX[a] / 18 <= 1) return false;
-          if (above === 80 && st.frameX[a] / 18 >= 4 && st.frameX[a] / 18 <= 5) return false;
-        }
-      }
-    }
-    return true;
+    return canKillTileAt(this.st, i, j, this.killTileCtxProvider?.() ?? undefined);
   }
 
   private reActive(i: number, j: number): void {

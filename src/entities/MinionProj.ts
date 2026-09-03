@@ -604,9 +604,15 @@ export function getChaseResults(
 /** Collision.WetCollision（1458 Collision.cs:1575-1650）盒级 1:1 折算：
  *  内探针 = 盒中心 min(10,W)×min(⌊H/2⌋,H) 小盒；扫 盒左列−1..右下+2 外扩窗，
  *  液格水面 Y += (256−液量)/32×2（水面段高同步截短）；坡面格带上格带液同判湿。
- *  台账批⑥：旧实现仅中心单格 liquid>0——顶缘浸水浅滩漏判/半浸早判两向漂移 */
+ *  台账批⑥：旧实现仅中心单格 liquid>0——顶缘浸水浅滩漏判/半浸早判两向漂移
+ *  ★V1（NB-D 遗留收口 2026-09-03）：坡面支补 tile.active() 在场门——原文
+ *  `else if (!Main.tile[i,j].active() || …slope()==0 || j<=0 || …) continue;`
+ *  （Collision.cs:1632-1634,active() 纯在场位）旧写裸 slope>0 靠"slope 只随活性
+ *  写入"的写侧不变量成立,formally 收口为显式 type 入参：投影口径 = 纯在场
+ *  `type!==0`（与 npcLiquid.wetCollision L1 勘误同款——本仓 isActive 是 nactive()
+ *  口径会漏致动斜坡,禁用）；调用面全量传 TileStore（含 type 通道），零调用侧改写 */
 export function wetCollisionProbe(
-  st: { w: number; h: number; liquid: Uint8Array; slope: Uint8Array; idx(x: number, y: number): number },
+  st: { w: number; h: number; liquid: Uint8Array; slope: Uint8Array; type: Uint16Array; idx(x: number, y: number): number },
   x: number, y: number, width: number, height: number,
 ): boolean {
   const cxs = x + width / 2, cys = y + height / 2;
@@ -630,7 +636,7 @@ export function wetCollisionProbe(
         const top = j * 16 + drop;
         const segH = 16 - Math.trunc(drop);
         if (bx + pw > i * 16 && bx < i * 16 + 16 && by + ph > top && by < top + segH) return true;
-      } else if (st.slope[idx] > 0 && j > 0) {
+      } else if (st.type[idx] !== 0 && st.slope[idx] > 0 && j > 0) {   // :1632 active() 在场门（V1）
         if (st.liquid[st.idx(i, j - 1)] > 0 && bx + pw > i * 16 && bx < i * 16 + 16
           && by + ph > j * 16 && by < j * 16 + 16) return true;
       }
@@ -4370,7 +4376,11 @@ export class MinionProj extends Entity {
             this.facing = this.rot > Math.PI / 2 || this.rot < -Math.PI / 2 ? -1 : 1;
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               // 680 弩箭：AI_001 默认档（0.1@15 缓坠）——重力缺省走规格链（2026-08-14 对账）
-              Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680, null),
+              // ★穿透终值：SetDefaults penetrate=4，NewProjectile 内联覆写
+              //   `Type==680 && player.setSquireT2 → penetrate=7`（Projectile.cs:11083-11086）
+              //   = 侍从 T2 套装「弩车可穿透」——发射点覆写审计批（2026-09-03）补
+              Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680, null,
+                setf134.squireT2 ? { pierce: 7 } : undefined),
                 { whipTagShot: true }),
               'projectiles');
           }

@@ -67,6 +67,7 @@ import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { initializeHardMode } from './HardmodePass';
 import { genKillTile, genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { genSquareWallFrame } from './DesertPass';                       // ★IIIII87 Convert 墙写尾级联掷骰镜像
+import { doExtraLiquidFinish } from './SurfaceDecorPasses';             // ★IIIII194 cs:595-598 extraLiquid Finish（实现体 1c 节）
 import { sheetId } from './TileCleanupPass';
 import { tileRunner } from './TileRunner';
 // ★IIIII106：四涂装/涂层族全图端点（FinalSeedCleanupPass 结构先行件，本次接线）
@@ -1725,11 +1726,21 @@ const WIF_CHEST_MAX_ITEMS = 40;
  *  ① 宝箱冻结箱物变换：Next(2)==0 且 item[1].stack≠0 的箱，把第 2..39 槽里
  *     第一个空槽 SetDefaults(1869 Present)（stack=1 默认态）。50% 掷先于空判短路
  *     （`genRand.Next(2)!=0 || stack==0` 左支必掷）——Next(2) 是本端点唯一骰源。
- *  ② endlessChristmas 组合臂（cs:2205-2221）：老头 22 → Santa 142 homeless 异位替换
- *     ——town NPC 实体域（starterTownNpcs 注册表在 finalize 后段组装,gen 期无
- *     Main.npc 实体可寻），见函数尾注记，冬天单旗标链不含 endlessChristmas、零消费。 */
+ *  ② endlessChristmas 组合臂（cs:2205-2221）：向导 22 → Santa 142 homeless 异位替换
+ *     （NPCID.Guide=22「老头」；NewNPC(142)@spawnTile → homeTileX/Y=spawnTile →
+ *     direction=1 → homeless=true → position=向导.position → 向导 active=false）。
+ *     ★V4（2026-09-03）登记位承接：本仓生成器无 Main.npc 实体域（起始镇民 =
+ *     starterTownNpcs 记录在 Game.afterWorldLoad 消费）→ 投影到记录/旗标域：
+ *      · 十周年播种记录含向导记录 → 记录【就地改键】santa_claus（异位替换语义；
+ *        142 名字掷 = getNewNPCName switch default ""（NPC.cs:7352 `_ => ""`）且
+ *        TownNPCProfiles 无 142 档 ⇒ 零骰、GivenName 终态空串=显示名 Santa Claus）；
+ *      · 无记录世界（普通种子向导兜底本就零记录早退 = IIIIII6 登记债 / else 链
+ *        换人域）→ 置 world.flags.santaReplacedGuide，消费端（Game starter 段）
+ *        压制向导兜底出生并按原版落位直接实例化 Santa（homeless/direction=1）。
+ *     零掷骰零 tile 面——普通种子（旗关）双早退零行为不变。 */
 export function doWorldIsFrozenFinish(store: TileStore, rng: RNG, gs: GenState,
-  chests: ReadonlyArray<Array<{ id: number; stack: number } | null>>): void {
+  chests: ReadonlyArray<Array<{ id: number; stack: number } | null>>,
+  world: World): void {
   const presentVid = VANILLA_ITEM_KEY_BY_ID[1869];
   void store;
   for (const ch of chests) {                                         // cs:2185-2204
@@ -1744,9 +1755,20 @@ export function doWorldIsFrozenFinish(store: TileStore, rng: RNG, gs: GenState,
       }
     }
   }
-  // ② endlessChristmas 老头→Santa 臂：组合域（vampire/endlessChristmas 另案车道），
-  //   登记未承接位；冬单旗标世界 endlessChristmas 关 ⇒ 原样零行为零掷（同 skyblock 早退）。
-  if (!!gs.seedFlags.skyblock) return;                               // cs:2205 门镜像占位
+  // ② endlessChristmas 向导→Santa 臂（cs:2205-2221）。★位置注：原文本端点在
+  //   FinalizeSecretSeeds 内 randomSpawn(:655)【之后】——randomSpawn 组合世界里
+  //   Santa 的 homeTile=重掷后 spawn；本仓 randomSpawn 重掷被上提到 finalize()=管线末
+  //   （IIIII41-T3①），故 Santa 的 homeTile/落位一律不在本端点钉值,交给消费端
+  //   读终态 world.spawnX/Y（向导 position 则记录域自带,与此无关）。
+  if (gs.seedFlags.skyblock || !gs.seedFlags.endlessChristmas) return;   // cs:2205 原式门
+  world.flags.santaReplacedGuide = true;                 // 消费端压制向导兜底 + Santa 直生旗
+  const guideRec = world.starterTownNpcs?.find((r) => r.key === 'guide');
+  if (guideRec) {                                        // 十周年播种记录域（就地异位替换）
+    guideRec.key = 'santa_claus';
+    guideRec.givenName = '';                             // 142 无名字掷（getNewNPCName default ""）
+    guideRec.dir = 1;                                    // :2212 direction = 1
+    delete guideRec.variationIndex;                      // 142 无变体档
+  }
 }
 
 // ============================================================
@@ -1758,8 +1780,12 @@ export function finalizeSecretSeedDoEnds(
   const F = gs.seedFlags;
   // ★IIIII106 cs:591-594：surfaceIsDesert Finish 端点（本函数首端点）
   if (F.surfaceIsDesert) doSurfaceIsDesertFinish(store, rng, gs);
-  // extraLiquid Finish（cs:595-598，waterpark 批域登记）；actuallyNoTraps(:603)
-  // 与 noSurface(:639) 仍属未承接位——保持原版序占位（★IIIII110 承接 worldIsFrozen Do :615）
+  // ★IIIII194 cs:595-598：extraLiquid Finish 端点（waterpark 主刀）——DoExtraLiquidFinish
+  //   （WorldGen.cs:1836-1876，实现体=SurfaceDecorPasses.ts 1c 节 doExtraLiquidFinish）。
+  //   掷流走本 pass 流（旗关零掷零写→普通种子零扰动）；位于 surfaceIsInSpace(:599) 之前。
+  if (F.extraLiquid) doExtraLiquidFinish(store, rng, gs);
+  // actuallyNoTraps(:603) 与 noSurface(:639) 仍属未承接位——保持原版序占位
+  //（★IIIII110 承接 worldIsFrozen Do :615）
   if (F.surfaceIsInSpace) doSurfaceIsInSpace(store, gs);
   if (F.surfaceIsMushrooms) {
     if (!F.noSurface) doSurfaceIsMushroomsCore(store, rng, gs);         // cs:607-614 ×2 怪癖照录
@@ -1793,7 +1819,7 @@ export function finalizeSecretSeedDoEnds(
   //   teamBasedSpawns(:675) 之前；本仓 teamBasedSpawns 面在 ExtraSpawnsRoyale 槽自持。
   if (F.worldIsFrozen) {
     doWorldIsFrozenFinish(store, rng, gs,
-      world.chests as unknown as ReadonlyArray<Array<{ id: number; stack: number } | null>>);
+      world.chests as unknown as ReadonlyArray<Array<{ id: number; stack: number } | null>>, world);
   }
   // ★IIIII41-T3②：arachnophobia 运行时面首点（cs:688-691 `NPC.savedStylist = true`，
   //   原 if 链 teamBasedSpawns 之后、FinalSeedCleanup(:694) 之前；无掷骰序约束）。

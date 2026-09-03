@@ -21,6 +21,12 @@
 //   Fog/Loki;非染料 3:WaterDistortionObject/HorizonClouds(两者走手写 JS 镜像,
 //   不经本解释器)/Aurora(自研光栅化逐像素 v0,不受此限)）。逐帧带 v0 烘焙需
 //   逐像素重跑 SM2=架构级改动,登记为已知偏差;亮处 v0≡白时等价故地表难察觉。
+//   ★2026-09-03 v0 化首批：runPassOnImageData 增 v0Rgb 注入口(缺省恒白零变化),
+//   名单由 tests/fx-sm2-v0-commute.test.ts 经验定谳(白烘×光乘 vs v0=光烘 逐字节
+//   对比,VM+codegen 双引擎)取代头注抄写。修复面=【合成后】染料站
+//   (compositeLight 全屏乘光不覆盖的 wingGlowQueue 族:extra38/betsy——预合成面
+//   玩家/尘埃/NPC 侧喂 v0=光会被全屏乘光二次压暗(light²),须逐站逃逸队列,
+//   见 Renderer.applyDyeLitToImageData 注);非受累 tech 走旧链逐位不变。
 import fxJson from '../data/fxPixelShader.json';
 import { sat, type Sm2PxGenFn } from './sm2Runtime';
 import { GEN_MAP } from './gen/genIndex.gen';
@@ -494,11 +500,15 @@ export const passNames = (): string[] => [...PASS_MAP.keys()];
  * 对 ImageData 整体执行 pass（染料烘焙主入口）。
  * uImageSize0/uSourceRect 未设置时按整图 (w,h)/(0,0,w,h) 补齐。
  * @param extraSamplers s1/s2 采样器（s0=本 ImageData 拷贝）
+ * @param v0Rgb 可选 v0 顶点色 RGB（UNORM 0..1；alpha 恒 1=原版 DrawData 光照色语义）。
+ *              缺省恒白=历史行为逐位不变。受累 13 tech（fx-sm2-v0-commute 定谳名单）
+ *              经此把光照喂进 v0 中段消费位（尾乘族喂 v0=光 ≡ 白烘×光乘，等价无害）。
  */
 export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   w: number, h: number, uniforms: SM2Uniforms,
   extraSamplers: Array<SM2Sampler | SM2SamplerOut | undefined> = [],
-  t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
+  t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number },
+  v0Rgb?: readonly [number, number, number]): void {
   const u = { ...uniforms };
   if (t0Rect) {
     // t0Rect 在场时三值必须同源（表尺寸/子矩形/UV 映射），强制对齐防调用方漂移
@@ -512,7 +522,8 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   const regs = new Float64Array(32 * 4);
   const tex = new Float64Array(8 * 4);
   const v0 = new Float64Array(8);                  // v0/v1（v1 空闲）
-  v0[0] = v0[1] = v0[2] = v0[3] = 1;
+  if (v0Rgb) { v0[0] = v0Rgb[0]; v0[1] = v0Rgb[1]; v0[2] = v0Rgb[2]; v0[3] = 1; }
+  else v0[0] = v0[1] = v0[2] = v0[3] = 1;
   const o = new Float64Array(4);
   const srcData = new Uint8ClampedArray(data);           // s0 采样源（防读写交叠）
   // s0 = 被染贴图。vanilla 中它是【整表纹理】、t0 是全表 UV；本仓烘焙图只有切片

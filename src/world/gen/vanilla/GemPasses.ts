@@ -10,8 +10,7 @@
 //   （地下 j∈[ws,h-20) 空格 1/5 → 上下邻石族清坡+PlaceTight；地表 k∈[5,ws)
 //   冰上/沙上下 1/5 → PlaceTight），同列随后宝石树段（RNG 序：树掷在钟乳石掷之前）
 import type { RNG } from '../../../core/rng';
-import type { TileStore } from '../../TileStore';
-import { LIQUID_TYPE } from '../../TileStore';
+import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII210 TileStore.COAT_BLOCK_MASK（钟乳石涂层继承）
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
@@ -50,6 +49,13 @@ function placeUncheckedInitial(st: TileStore, x: number, y: number, preferSmall:
     const i = st.idx(xx, yy);
     return st.flags[i] ? SHEET[st.type[i]] : -1;
   };
+  // ★IIIII210（2026-09-03）：PlaceUncheckedStalactite 涂层继承——vanilla 每支写格尾
+  //   `CopyPaintAndCoating(other)`（cs:38735 起 31 处；Tile.cs:869-873 color+
+  //   invisibleBlock/fullbrightBlock 两轴），**上锚族 other=Main.tile[x,y-1]**、
+  //   **下锚族 other2=Main.tile[x,y+1]**（cs:38906）。缺拷贝 → 泡泡块（379 带亮位）
+  //   锚上落位的钟乳石丢亮涂层 → DoExtraLiquidFinish fullbright 支（cs:1852）不触发
+  //   → waterpark #105 t165 残 L=Y0>0×12（vanilla 清液而 JS 留）。
+  let anchorY = y - 1;   // 上锚族（other=tile[x, y-1]）
   const put = (xx: number, yy: number, fx: number, fy: number): void => {
     if (!st.inBounds(xx, yy)) return;
     const i = st.idx(xx, yy);
@@ -58,6 +64,11 @@ function placeUncheckedInitial(st: TileStore, x: number, y: number, preferSmall:
     //   （s22222 #103 H0>1×1 @(2012,610) / const #103 H0>1×2 @(3209,417) 实锤）。
     st.type[i] = STALACTITE_TILE; st.flags[i] = 1; st.slope[i] = 0; st.half[i] = 0;
     st.frameX[i] = fx; st.frameY[i] = fy;
+    if (st.inBounds(xx, anchorY)) {
+      const ai = st.idx(xx, anchorY);
+      st.paint[i] = st.paint[ai];
+      st.coat[i] = (st.coat[i] & ~TileStore.COAT_BLOCK_MASK) | (st.coat[ai] & TileStore.COAT_BLOCK_MASK);
+    }
   };
   if (solidTileAt(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
     const above = sheetOf(x, y - 1);
@@ -85,6 +96,7 @@ function placeUncheckedInitial(st: TileStore, x: number, y: number, preferSmall:
     return;
   }
   if (!solidTileAt(st, x, y + 1) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y - 1)]) return;
+  anchorY = y + 1;   // 下锚族（other2=tile[x, y+1]，vanilla cs:38906）
   const below = sheetOf(x, y + 1);
   if (below === 1 || TILE_MOSS.has(below) || below === 117 || below === 25 || below === 203) {
     if (preferSmall) put(x, y, 54 + variation * 18, 90);
@@ -453,7 +465,13 @@ export function runExposedGemsIcePass(st: TileStore, rng: RNG, gs: GenState): vo
   // 目标格自身为冰块（147/161/162/224）→ 先掷 4 个 Next(1,4) 窗口再掷 Next(12) style
   // （cs:20855-20859 掷序），周边不对称窗口的空气格放晶簇
   for (let i = 0; i < st.w * 0.25; i++) {
-    const y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
+    // ★IIIII196（2026-09-03）REMIX #92 定罪修复：y 域 remix 支整缺（1457 cs:20851，
+    //  1458 同号）`(!remix) ? Next((int)(ws+rock)/2, lavaLine) : Next((int)ws, maxY-300)`
+    //  ——remix 冰晶簇全假地表带（ws..h-300）受理。x 掷仍无条件（snowMinX/MaxX 未填带
+    //  读默认,两侧同构）。
+    const y = gs.seedFlags.remix
+      ? rng.nextIntRange(Math.floor(gs.worldSurface), st.h - 300)
+      : rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
     if (y < 0 || y >= st.h) continue;
     const minX = gs.snowMinX?.[y] ?? gs.snowOriginLeft;
     const maxX = gs.snowMaxX?.[y] ?? gs.snowOriginRight;

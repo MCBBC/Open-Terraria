@@ -290,3 +290,95 @@ describe('④ 292 联机访客镜像（Dart.destroy 口,2026-09-02 缺口清偿�
     expect(added.filter((a) => a.e instanceof InfernoHostileBlast).length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------- ⑤ 同构族扩面 303/75/596 访客镜像
+// ★2026-09-03 MP 访客"消亡衍生"系统扫定谳（292 同构族）：Dart 载体全 Kill 面里带
+// 【对玩家伤害】的仅 291(→292)/303/75/596 四型——303/75 rocketKill（Kill :79827 组
+// 133-138/303 支 + :80070 组 75 支 rocketDmg 60）与 596 curse596Kill（:73762-73794,
+// 盒 60×60 伤 30/22 按本地难度重算）同为房主权威弹 → 访客傀儡 netPuppet 早退不跑
+// Kill 链 → destroy 镜像口复放（口径同 ④）。
+describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,2026-09-03）', () => {
+  it('访客傀儡 303 消亡 → rocketKill 复放：Item14 + 尘焰 + 命中面 + 幂等', () => {
+    const { hooks, sfx, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
+    d.netPuppet = true;
+    d.fixedUpdate(1 / 60, hooks);          // lastGame 刷新（傀儡步进同 ④）
+    d.x = 50 * 16 - 7; d.y = 40 * 16 - 7;  // 末拍位（盒 14×14,傀儡心 = 50*16,40*16）
+    d.dead = true;
+    d.destroy();
+    expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);   // Kill 组爆音（:79827 组）
+    expect(damageCalls.length).toBe(1);                          // 玩家与傀儡盒重叠 → 命中面
+    expect(damageCalls[0].dmg).toBeGreaterThanOrEqual(68);       // ★R7 F5 钉 rocketDmg 60 带宽(DamageVar/难度乘区)
+    expect(damageCalls[0].dmg).toBeLessThanOrEqual(92);
+    d.destroy();                                                  // 幂等：重复 destroy 零二爆
+    expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);
+    expect(damageCalls.length).toBe(1);
+  });
+
+  it('★R7 清偿：AoE 128 盒真判定——盒缘命中（弹盒 14×14 外）仍吃伤、盒外不吃（AI :48017-48025 预扩 + Kill 内 Damage :71792）', () => {
+    // 弹心 (800,640) → 128 盒 x∈[736,864)。玩家右缘 740 = 盒缘内 4px、距 14×14 弹盒
+    // x∈[793,807) 外 53px——曾外层 128 门过、内层 hitPlayer 按弹盒 projOverlap 判=不落
+    const edge = makeGame(emptyWorld(), { playerAt: [730, 40 * 16] });
+    const d1 = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
+    d1.netPuppet = true;
+    d1.fixedUpdate(1 / 60, edge.hooks);
+    d1.x = 50 * 16 - 7; d1.y = 40 * 16 - 7;   // 心 = (50*16, 40*16)
+    d1.dead = true;
+    d1.destroy();
+    expect(edge.damageCalls.length).toBe(1);                     // AoE 面真受理
+    expect(edge.damageCalls[0].dmg).toBeGreaterThanOrEqual(68);  // 40 ×2 ±15%（同 ⑤ 口径）
+    expect(edge.damageCalls[0].dmg).toBeLessThanOrEqual(92);
+    // 盒外负控：玩家右缘 730 < 盒左缘 736 → 零伤害
+    const out = makeGame(emptyWorld(), { playerAt: [720, 40 * 16] });
+    const d2 = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
+    d2.netPuppet = true;
+    d2.fixedUpdate(1 / 60, out.hooks);
+    d2.x = 50 * 16 - 7; d2.y = 40 * 16 - 7;
+    d2.dead = true;
+    d2.destroy();
+    expect(out.damageCalls.length).toBe(0);
+  });
+
+  it('访客傀儡 75 → rocketDmg 60 覆写爆（:80116-80122）', () => {
+    const { hooks, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 80, 75);
+    d.netPuppet = true;
+    d.fixedUpdate(1 / 60, hooks);
+    d.x = 50 * 16 - 11; d.y = 40 * 16 - 11;   // 75 盒 22×22
+    d.dead = true;
+    d.destroy();
+    expect(damageCalls.length).toBe(1);
+    // 飞行伤 80 被覆写为爆炸伤 60（rocketDmg :80116-80122）→ hitPlayer 全链
+    // （DamageVar ±15% × 敌弹 ×2 :14912-14917）→ 102..138（非专家世界）
+    expect(damageCalls[0].dmg).toBeLessThanOrEqual(138);
+    expect(damageCalls[0].dmg).toBeGreaterThanOrEqual(102);
+  });
+
+  it('访客傀儡 596 → curse596Kill 复放：盒 60×60 重算伤 30（非快照 dmg）+ 幂等', () => {
+    const { hooks, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16 + 20, 40 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 999, 596);   // 快照 dmg=999（noPlayerHit 飞行档脏值）
+    d.netPuppet = true;
+    d.fixedUpdate(1 / 60, hooks);
+    d.x = 50 * 16 - 4; d.y = 40 * 16 - 4;   // 末拍位 → 盒重置 60×60 心 = 50*16,40*16
+    d.dead = true;
+    d.destroy();
+    expect(damageCalls.length).toBe(1);
+    // :73766-73771 非专家重算 30（快照 999 不入结算面）→ hitPlayer 全链 ×2 ±15% → 51..69
+    expect(damageCalls[0].dmg).toBeLessThanOrEqual(69);
+    expect(damageCalls[0].dmg).toBeGreaterThanOrEqual(51);
+    d.destroy();
+    expect(damageCalls.length).toBe(1);      // 幂等
+  });
+
+  it('房主路径 rocketKill 已跑 → destroy 直拒（!netPuppet 门）不双爆', () => {
+    const w = emptyWorld();
+    w.store.setTileSilent(44, 40, 1, 0, 0);  // 单格墙（弹心必采样 → 撞块口 rocketKill）
+    const { hooks, sfx } = makeGame(w, { playerAt: [10 * 16, 10 * 16] });
+    const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
+    flyTicks(d, hooks, 40);                  // 本地弹（非傀儡）撞块 → rocketKill（480→704 边 ≈28t）
+    expect(d.dead).toBe(true);
+    expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);
+    d.destroy();
+    expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);   // 仍 1
+  });
+});

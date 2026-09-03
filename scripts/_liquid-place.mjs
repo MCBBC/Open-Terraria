@@ -20,6 +20,23 @@
 //     =岩浆 only 门）：daybloom(82 style0) 满岩浆拒/不耗种；火焰花(style5 :4777-4778)
 //     满岩浆+灰烬地基放成；daybloom 满水+草地基放成（原版水中可植,CheckAlch :46371
 //     不杀水格——legacy 门不设水维）
+//   ⑩legacy 岩浆门（★备1 liqGateLegacy 端到端,Player.cs:40058 头门 + IsBlockedByLava
+//     :41809-41824 全量定谳）：石块/泥土（tileSolid 短路 :41815-41817）满岩浆拒/满水放
+//     （legacy 门岩浆 only=EmptyTile 语义）；平台 19（tileSolid[19]=true Main.cs:8032）
+//     满岩浆拒/满水放；蛛网 150→tile51（legacy 无 TileObjectData → 静态 LiquidPlace
+//     回落 TileObjectData.cs:5045-5062,tileLavaDeath[51] → 拒）
+//   ⑪alch 岩浆熟转换（★备5 alchBloom,CheckAlch case 5 WorldGen.cs:46446-46474）：
+//     83 col5 满岩浆(>16) → 84；84 岩浆≤16 → 83；82 不转换
+//   ⑫门层1（★备3 liqGateDoor·层1,Player.cs:40058 tileSolid[10]=true Main.cs:8027）：
+//     黑曜石门点岩浆格=恒拒（tileSolid 短路比逐格门严一格）；点干格+底格岩浆=放成
+//     （per-style 19 LavaPlacement=Allowed TileObjectData.cs:2245-2247 逐格门域）
+//   ⑬绳索液体门（★ropeLavaGate 十四批）：下延遇岩浆截断（CheckRopeUsability
+//     Player.cs:41835 同位同语义）；点岩浆格拒（liqGateLegacy 静态回落
+//     tileLavaDeath[213] Main.cs:8292）+不耗品；满水格放成+液体保留（tileWaterDeath[213]
+//     全表未置 Main.cs:8200-8206/:8448/:9643/:9647=绳水共存）；干地下延回归
+//   ⑭液体零写入终态（★十四批备A 清偿=原版最终态）：固体件植满水格液体【驻留】不灭
+//     不迁（⑭a 同步即断）+放置后挖块→邻液回流（⑭b,TileFrame→AddWater :82621）；
+//     非固体保留面=①b 工作台占格液体
 // 运行：SW_ORIGIN=http://localhost:52xx node tools/run-diag.mjs scripts/_liquid-place.mjs
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
@@ -102,6 +119,14 @@ const out = await page.evaluate(async () => {
     g.player.useTime = 0;
     g['tryPlace'].call(g, cx, cy, items.ITEM_DEFS[itemIdx]);
   };
+  // 同步版（无 40ms 等待）：⑬a 场地凹槽会被液体模拟在等待期回灌,须即设即放
+  const shotNow = (itemIdx, cx, cy, standAt) => {
+    holdItem(itemIdx);
+    const [sx, sy] = standAt ?? [cx, cy];
+    stand(sx, sy);
+    g.player.useTime = 0;
+    g['tryPlace'].call(g, cx, cy, items.ITEM_DEFS[itemIdx]);
+  };
 
   // ---- ①翻正代表件：满水放成（基样式缺省 WaterPlacement=Allowed）----
   // ★站位纪律：玩家不能站在目标占位矩形内（M-4 实体重叠门,与原版
@@ -118,6 +143,20 @@ const out = await page.evaluate(async () => {
     await shot(itemOf.workbench, WT.xa + 1, F - 1);
     check('①工作台(18)满水中放成（翻正）', findTileIn(TIDS.workbench, WT.xa, WT.xb, CEIL, F) !== null,
       `item=${items.ITEM_DEFS[itemOf.workbench].key}`);
+    // ★dispSolidGate（十四批）非固体保留面：工作台植入后占格液体保留（原版放置链
+    //  全程不动液体,PlaceTile WorldGen.cs:59499-59501 只清 Tile|TilePaint|Slope）
+    if (findTileIn(TIDS.workbench, WT.xa, WT.xb, CEIL, F) !== null) {
+      const wbCells = [];
+      for (let x = WT.xa; x <= WT.xb; x++) for (let y = CEIL; y <= F; y++)
+        if (st.inBounds(x, y) && st.get(x, y) === TIDS.workbench) wbCells.push([x, y]);
+      const wbWet = wbCells.filter(([x, y]) => st.liquid[st.idx(x, y)] > 0).length;
+      const wbDef = tiles.TILE_DEFS[TIDS.workbench];
+      const rowMap = [];
+      for (let x = WT.xa; x <= WT.xb; x++) rowMap.push(`${x}:${st.get(x, F - 1)}/${st.liquid[st.idx(x, F - 1)]}`);
+      check('①b 工作台占格液体保留（dispSolidGate 非固体不挤,Liquid.cs:1171-1173 驻留）',
+        wbCells.length > 0 && wbWet === wbCells.length,
+        `cells=${wbCells.length} wet=${wbWet} solid=${wbDef?.solid} plat=${wbDef?.platform} rowF-1=[${rowMap.join(' ')}]`);
+    }
   } else check('①工作台放水（缺放置物品→跳过端到端）', true, 'no item');
 
   if (itemOf.chest >= 0) {
@@ -312,9 +351,26 @@ const out = await page.evaluate(async () => {
     if (obsIdx >= 0) {
       const c2 = colFree(LT_.xa, LT_.xb);
       if (c2 >= 0) {
+        // ★⑫（备3 层1）：点岩浆格 → tileSolid[10] 短路（:40058→:41815-41817,
+        //  Main.cs:8027）恒拒——比逐格两维门严一格,黑曜石 19 Allowed 也轮不到
+        const beforeL1 = inv.slots[selIdx].stack;
         await shot(obsIdx, c2, CEIL + 1, [c2 + 1, F - 1]);
-        check('⑧黑曜石门1458(placeStyle=19)满岩浆放成（:2245-2247）', hasDoorIn(c2),
-          `col=${c2} ps=${items.ITEM_DEFS[obsIdx].placeStyle}`);
+        const consumedL1 = inv.slots[selIdx].stack < beforeL1;
+        check('⑫黑曜石门1458 点岩浆格=拒（tileSolid[10] 短路 :41815,比逐格门宽一格）',
+          !hasDoorIn(c2) && !consumedL1, `col=${c2} consumed=${consumedL1}`);
+        // per-style 允许域复验：点击【干格】+ 足迹内另一格岩浆 → 层1 不拦,
+        // 逐格门 style19 lava=Allowed（TileObjectData.cs:2245-2247）放成
+        const c3 = colFree(LT_.xa, LT_.xb);
+        if (c3 >= 0) {
+          for (let y = CEIL + 1; y <= F - 1; y++) st.setLiquid(c3, y, 0, LIQUID_TYPE.NONE);
+          st.setLiquid(c3, F - 1, 255, LIQUID_TYPE.LAVA);   // 仅足迹底格岩浆
+          await shot(obsIdx, c3, F - 2, [c3 + 1, F - 1]);   // 点击=中格（干）,锚=c3 的 1×3=F-3..F-1
+          check('⑫黑曜石门1458 点干格+足迹底格岩浆=放成（per-style :2245-2247）', hasDoorIn(c3),
+            `col=${c3}`);
+          // 复原岩浆箱（后续 dry 回归与统计用）
+          for (let y = CEIL + 1; y <= F - 1; y++) st.setLiquid(c3, y, 255, LIQUID_TYPE.LAVA);
+          if (hasDoorIn(c3)) for (let y = CEIL; y <= F; y++) if (st.get(c3, y) === TIDS.door) st.setTile(c3, y, 0, 0, 0);
+        } else check('⑫黑曜石门干格点击（无全空列 → 跳过）', true, 'no free col');
       } else check('⑧黑曜石门岩浆放（无全空列 → 跳过）', true, 'no free col');
     } else check('⑧黑曜石门岩浆放（vi_1458_obsidian_door 缺在册物品）', true, 'no item');
   }
@@ -351,14 +407,22 @@ const out = await page.evaluate(async () => {
           herbAt(c, F - 1) === null && !consumed, `col=${c} consumed=${consumed}`);
       } else check('⑨a daybloom 岩浆拒（无全空列 → 跳过）', true, 'no free col');
     } else check('⑨a daybloom 岩浆拒（缺种子物品）', true, 'no item');
-    // ⑨b 火焰花 style5 满岩浆+灰烬地基放成（liqStyles[5].lava=allowed :4777-4778）
+    // ⑨b 火焰花 style5 满岩浆+灰烬地基放成（liqStyles[5].lava=allowed :4777-4778）。
+    //  ★新账清偿（dispSolidGate,十四批）：此前写循环无差别挤液 → 植入后本格岩浆=0,
+    //  放置级联 CheckAlch case5 观察不到岩浆,熟转 83→84 不在放置级联触发（原版植入后
+    //  本格保有岩浆,CheckAlch 当场转 84——WorldGen.cs:46455-46464）。现非固体件不挤
+    //  → 本格岩浆保留,断言升级为：植入后【当场转 84 col5】+ 本格岩浆保留（liq>0）。
     if (seedFire >= 0) {
       const c = colFree(LT_.xa, LT_.xb);
       if (c >= 0) {
         if (ASH >= 0) st.setTile(c, F, ASH, 0, 0);   // CheckAlch case5 地基列（Game.ts ALCH_GROUND_RUNTIME[5]）
         await shot(seedFire, c, F - 1);
-        check('⑨b 火焰花(82 style5) 满岩浆+灰烬地基放成（:4777-4778）', herbAt(c, F - 1) === 5,
-          `col=${c} got=${herbAt(c, F - 1)}`);
+        const HERB83T = st.get(c, F - 1);
+        const fxCol = st.inBounds(c, F - 1) ? Math.trunc(st.frameX[st.idx(c, F - 1)] / 18) : -1;
+        const liqAfter = st.inBounds(c, F - 1) ? st.liquid[st.idx(c, F - 1)] : -1;
+        check('⑨b 火焰花(83 style5) 满岩浆+灰烬地基放成→当场转 84（CheckAlch :46455-46464;dispSolidGate 岩浆保留）',
+          HERB83T === idOfSheet(84) && fxCol === 5 && liqAfter > 0,
+          `col=${c} tile=${HERB83T} colIdx=${fxCol} liq=${liqAfter}`);
       } else check('⑨b 火焰花岩浆放（无全空列 → 跳过）', true, 'no free col');
     } else check('⑨b 火焰花岩浆放（缺种子物品）', true, 'no item');
     // ⑨c daybloom 满水+草地基放成（legacy 门【岩浆 only】,水/蜜/微光不设门;
@@ -372,6 +436,249 @@ const out = await page.evaluate(async () => {
           `col=${c} got=${herbAt(c, F - 1)}`);
       } else check('⑨c daybloom 水放（无全空列 → 跳过）', true, 'no free col');
     }
+  }
+
+  // ---- ⑩legacy 岩浆门（★备1 liqGateLegacy 端到端）----
+  //  石块/泥土=legacy 实心件（无 TileObjectData）: tileSolid 短路 → 满岩浆拒、
+  //  满水放（IsBlockedByLava 岩浆 only=原版 EmptyTile 语义）。平台 19:
+  //  tileSolid[19]=true（Main.cs:8032）同短路（tileLavaDeath[19]=true Main.cs:8226）。
+  //  蛛网 150→tile51: legacy 非固体且无 TileObjectData → 静态 LiquidPlace 回落
+  //  （TileObjectData.cs:5045-5062）tileLavaDeath[51]=true → 拒；水维不可达=放。
+  {
+    const colFreeAll = (xa, xb) => {
+      for (let x = xa; x <= xb; x++) {
+        let ok = true;
+        for (let y = CEIL + 1; y <= F - 1 && ok; y++) if (st.isActive(x, y)) ok = false;
+        if (ok) return x;
+      }
+      return -1;
+    };
+    const stoneIdx = items.ITEM_DEFS.findIndex((it) => it?.key === 'stone_block' || it?.key === 'vi_3_stone_block');
+    const dirtIdx = items.ITEM_DEFS.findIndex((it) => it?.key === 'dirt_block' || it?.key === 'vi_0_dirt_block');
+    const platIdx = items.ITEM_DEFS.findIndex((it) => it?.tile === 'platform' || it?.key === 'platform');
+    const webIdx = items.ITEM_DEFS.findIndex((it) => it?.key === 'vi_150_Cobweb');
+    const STONE_T = idOfSheet(1);
+    const at = (tid, x, y) => st.inBounds(x, y) && st.get(x, y) === tid;
+    // ⑩a 石块 满岩浆拒 + 不耗
+    const blockIdx = stoneIdx >= 0 ? stoneIdx : dirtIdx;
+    if (blockIdx >= 0) {
+      const c = colFreeAll(LT_.xa, LT_.xb);
+      if (c >= 0) {
+        const before = inv.slots[selIdx].stack;
+        await shot(blockIdx, c, F - 1, [c + 2 >= LT_.xb ? c - 2 : c + 2, F - 1]);   // 站位出足迹（M-4 实体重叠门,固体件）
+        const consumed = inv.slots[selIdx].stack < before;
+        check('⑩a 石块(legacy 实心) 满岩浆拒（tileSolid 短路 :41815-41817）+ 不耗品',
+          !at(STONE_T, c, F - 1) && !consumed, `item=${items.ITEM_DEFS[blockIdx].key} consumed=${consumed}`);
+      } else check('⑩a 石块岩浆拒（无全空列 → 跳过）', true, 'no free col');
+    } else check('⑩a 石块（缺物品 → 跳过端到端）', true, 'no item');
+    // ⑩b 石块 满水放（legacy 门岩浆 only）
+    if (blockIdx >= 0) {
+      const c = colFreeAll(WT.xa, WT.xb);
+      if (c >= 0) {
+        await shot(blockIdx, c, F - 1, [c + 2 >= WT.xb ? c - 2 : c + 2, F - 1]);   // 站位出足迹
+        check('⑩b 石块(legacy 实心) 满水放（岩浆 only 门,EmptyTile 语义 :40058）', at(STONE_T, c, F - 1),
+          `col=${c} got=${st.get(c, F - 1)}`);
+        if (at(STONE_T, c, F - 1)) st.setTile(c, F - 1, 0, 0, 0);
+      } else check('⑩b 石块水放（无全空列 → 跳过）', true, 'no free col');
+    }
+    // ⑩c 平台 19：满岩浆拒（tileSolid[19]=true 短路）/ 满水放
+    if (platIdx >= 0) {
+      const pc = colFreeAll(LT_.xa, LT_.xb);
+      if (pc >= 0) {
+        await shot(platIdx, pc, F - 1);
+        check('⑩c 平台(19) 满岩浆拒（tileSolid[19]=true Main.cs:8032 短路）', !at(idOfSheet(19), pc, F - 1),
+          `col=${pc} got=${st.get(pc, F - 1)}`);
+      } else check('⑩c 平台岩浆拒（无全空列 → 跳过）', true, 'no free col');
+      const pc2 = colFreeAll(WT.xa, WT.xb);
+      if (pc2 >= 0) {
+        await shot(platIdx, pc2, F - 1);
+        check('⑩c 平台(19) 满水放（:40058 无水维;CanPlace water=Allowed）', at(idOfSheet(19), pc2, F - 1),
+          `col=${pc2} got=${st.get(pc2, F - 1)}`);
+        if (at(idOfSheet(19), pc2, F - 1)) st.setTile(pc2, F - 1, 0, 0, 0);
+      } else check('⑩c 平台水放（无全空列 → 跳过）', true, 'no free col');
+    } else check('⑩c 平台（缺物品 → 跳过端到端）', true, 'no item');
+    // ⑩d 蛛网 150→51：静态回落 tileLavaDeath[51] → 岩浆拒；水放（岩浆 only 门）
+    if (webIdx >= 0) {
+      const wc = colFreeAll(LT_.xa, LT_.xb);
+      const WEB = idOfSheet(51);
+      if (wc >= 0) {
+        await shot(webIdx, wc, F - 1);
+        check('⑩d 蛛网(150→tile51 legacy) 满岩浆拒（静态 LiquidPlace 回落 :5045-5062,tileLavaDeath[51]）',
+          !at(WEB, wc, F - 1), `col=${wc} got=${st.get(wc, F - 1)}`);
+      } else check('⑩d 蛛网岩浆拒（无全空列 → 跳过）', true, 'no free col');
+      const wc2 = colFreeAll(WT.xa, WT.xb);
+      if (wc2 >= 0) {
+        await shot(webIdx, wc2, F - 1);
+        check('⑩d 蛛网(51) 满水放（IsBlockedByLava 岩浆 only,静态回落水支不可达）', at(WEB, wc2, F - 1),
+          `col=${wc2} got=${st.get(wc2, F - 1)}`);
+        if (at(WEB, wc2, F - 1)) st.setTile(wc2, F - 1, 0, 0, 0);
+      } else check('⑩d 蛛网水放（无全空列 → 跳过）', true, 'no free col');
+    } else check('⑩d 蛛网（vi_150_Cobweb 缺物品 → 跳过端到端）', true, 'no item');
+  }
+
+  // ---- ⑪alch 岩浆熟转换（★备5 alchBloom,CheckAlch case 5 WorldGen.cs:46446-46474）----
+  {
+    const colFreeAll = (xa, xb) => {
+      for (let x = xa; x <= xb; x++) {
+        let ok = true;
+        for (let y = CEIL + 1; y <= F - 1 && ok; y++) if (st.isActive(x, y)) ok = false;
+        if (ok) return x;
+      }
+      return -1;
+    };
+    const seedFire2 = items.ITEM_DEFS.findIndex((it) => it?.key === 'vi_312_fireblossom_seeds');
+    const HERB83 = idOfSheet(83), HERB84 = idOfSheet(84), ASH2 = idOfSheet(57);
+    const dec = g['checkDecorSupport']?.bind(g);
+    if (seedFire2 >= 0 && typeof dec === 'function') {
+      const c = colFreeAll(LT_.xa, LT_.xb);
+      if (c >= 0) {
+        // ★真阳性序列（挤出面备案→十四批已清偿）：干灰烬地植入 → 直注岩浆 255
+        //   （模拟自然流淌）→ 复跑 CheckAlch（=DelWater :46323 同入口）→ 断言转换。
+        //   植入为干地（无液体可挤），直注路径与 dispSolidGate 无交——保留直注口径。
+        if (ASH2 >= 0) st.setTile(c, F, ASH2, 0, 0);
+        await shot(seedFire2, c, F - 1);   // 干地植入（col5 熟株 83）
+        st.setLiquid(c, F - 1, 255, LIQUID_TYPE.LAVA);
+        const def83 = tiles.TILE_DEFS[HERB83];
+        dec(c, F - 1, def83, 83, 'alch');
+        const is84 = st.get(c, F - 1) === HERB84 && Math.trunc(st.frameX[st.idx(c, F - 1)] / 18) === 5;
+        check('⑪a 83 col5 + 岩浆255(>16) → 84 col5（MatureHerbs→BloomingHerbs :46457-46464）',
+          is84, `got tile=${st.get(c, F - 1)} fx=${st.frameX[st.idx(c, F - 1)]}`);
+        // 岩浆抽干至 ≤16 → 复跑 CheckAlch → 84 退回 83（:46466-46473）
+        st.setLiquid(c, F - 1, 10, LIQUID_TYPE.LAVA);
+        const def84 = tiles.TILE_DEFS[HERB84];
+        dec(c, F - 1, def84, 84, 'alch');
+        const back83 = st.get(c, F - 1) === HERB83 && Math.trunc(st.frameX[st.idx(c, F - 1)] / 18) === 5;
+        check('⑪b 84 col5 岩浆≤16 → 83 col5（退回熟 :46466-46473）', back83,
+          `got tile=${st.get(c, F - 1)} fx=${st.frameX[st.idx(c, F - 1)]}`);
+        // 82（未熟）不转换（:46451 break）：直写 82 col5 于满岩浆再复跑
+        const HERB82 = idOfSheet(82);
+        if (HERB82 >= 0) {
+          st.setTile(c, F - 1, HERB82, 5 * 18, 0);
+          st.setLiquid(c, F - 1, 255, LIQUID_TYPE.LAVA);
+          const def82 = tiles.TILE_DEFS[HERB82];
+          dec(c, F - 1, def82, 82, 'alch');
+          check('⑪c 82 col5 满岩浆不转换不杀（:46451 break;case5 无枯杀支）',
+            st.get(c, F - 1) === HERB82, `got=${st.get(c, F - 1)}`);
+        }
+        // 复原
+        if (st.get(c, F - 1) !== 0) st.setTile(c, F - 1, 0, 0, 0);
+        st.setLiquid(c, F - 1, 255, LIQUID_TYPE.LAVA);
+      } else check('⑪（无全空列 → 跳过）', true, 'no free col');
+    } else check('⑪（缺种子/checkDecorSupport → 跳过）', true, 'skip');
+  }
+
+  // ---- ⑬绳索 965 液体门（★ropeLavaGate 十四批端到端）----
+  //  定谳：tileLavaDeath[213]=true（Main.cs:8292）;水维 tileWaterDeath[213] 全表未置
+  //  （Main.cs:8200-8206/:8448/:9643/:9647）→ 岩浆拒/水放。粒度=下延遇岩浆截断
+  //  （CheckRopeUsability Player.cs:41835 `(flag || !…lava())` 同位同语义）;水格绳水
+  //  共存（setTile 不动液体,PlaceTile WorldGen.cs:59501-59506 排除表无 213）。
+  {
+    const ropeIdx = items.ITEM_DEFS.findIndex((it) => it?.key === 'vi_965_rope');
+    const ROPE_T = tiles.TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 213);
+    const at2 = (tid, x, y) => st.inBounds(x, y) && st.get(x, y) === tid;
+    if (ropeIdx >= 0 && ROPE_T >= 0) {
+      const colFree2 = (xa, xb) => {
+        for (let x = xa; x <= xb; x++) {
+          let ok = true;
+          for (let y = CEIL + 1; y <= F - 1 && ok; y++) if (st.isActive(x, y)) ok = false;
+          if (ok) return x;
+        }
+        return -1;
+      };
+      // ⑬a 干格点击+下延伸入岩浆 → 截断（岩浆格无绳,干格有绳）。
+      //  场地：箱内整柱皆岩浆 → 人工把顶格(CEIL+1)清成干格,点击它,下延撞岩浆。
+      const cA = colFree2(LT_.xa, LT_.xb);
+      if (cA >= 0) {
+        st.setLiquid(cA, CEIL + 1, 0, LIQUID_TYPE.NONE);   // 顶格清干=点击位
+        shotNow(ropeIdx, cA, CEIL + 1, [cA, CEIL - 2]);    // 即设即放（防模拟回灌）,站箱顶外
+        const ropeAbove = at2(ROPE_T, cA, CEIL + 1) ? 1 : 0;
+        check('⑬a 绳索下延遇岩浆截断（ropeLavaGate）：干段有绳且岩浆格无绳',
+          ropeAbove === 1 && !at2(ROPE_T, cA, CEIL + 2) && !at2(ROPE_T, cA, F - 1),
+          `col=${cA} ropeAbove=${ropeAbove} lavaCellRope=${at2(ROPE_T, cA, CEIL + 2)}/${at2(ROPE_T, cA, F - 1)}`);
+        // 清理+复原整柱岩浆
+        for (let y = CEIL + 1; y <= F - 1; y++) { if (at2(ROPE_T, cA, y)) st.setTile(cA, y, 0, 0, 0); st.setLiquid(cA, y, 255, LIQUID_TYPE.LAVA); }
+      } else check('⑬a（无全空列 → 跳过）', true, 'no free col');
+      // ⑬b 直接点岩浆格 → liqGateLegacy 静态回落拒（tileLavaDeath[213]）+ 不耗品
+      const cB = colFree2(LT_.xa, LT_.xb);
+      if (cB >= 0) {
+        const before = inv.slots[selIdx].stack;
+        await shot(ropeIdx, cB, F - 1);
+        const consumed = inv.slots[selIdx].stack < before;
+        check('⑬b 绳索点岩浆格=拒（liqGateLegacy 静态 LiquidPlace 回落 :5045-5062）+ 不耗品',
+          !at2(ROPE_T, cB, F - 1) && !consumed, `col=${cB} consumed=${consumed}`);
+      } else check('⑬b（无全空列 → 跳过）', true, 'no free col');
+      // ⑬c 满水格放绳 → 放成且水保留（绳水共存=原版语义）
+      const cC = colFree2(WT.xa, WT.xb);
+      if (cC >= 0) {
+        await shot(ropeIdx, cC, F - 1);
+        const wet = st.inBounds(cC, F - 1) ? st.liquid[st.idx(cC, F - 1)] : -1;
+        check('⑬c 绳索满水格放成+液体保留（tileWaterDeath[213] 未置;setTile 不动液体）',
+          at2(ROPE_T, cC, F - 1) && wet === 255, `col=${cC} wet=${wet}`);
+        if (at2(ROPE_T, cC, F - 1)) st.setTile(cC, F - 1, 0, 0, 0);
+      } else check('⑬c（无全空列 → 跳过）', true, 'no free col');
+      // ⑬d 干地下延回归（干地放行不变）：干地台列（保留 F 行地板石）清上空,
+      // 点击 F-2 → 下延 F-2/F-1 两格（F 地板石=活动格截断）
+      const dryCol = LT_.xb + 4;
+      if (st.inBounds(dryCol, F - 1)) {
+        for (let y = CEIL; y <= F - 1; y++) { if (st.isActive(dryCol, y)) st.setTile(dryCol, y, 0, 0, 0); st.setLiquid(dryCol, y, 0, LIQUID_TYPE.NONE); }
+        await shot(ropeIdx, dryCol, F - 2);
+        const n = [F - 2, F - 1].filter((y) => at2(ROPE_T, dryCol, y)).length;
+        check('⑬d 绳索干地下延回归（2 格放成,干地放行不变）', n === 2, `placed=${n}`);
+        for (let y = CEIL; y <= F - 1; y++) if (at2(ROPE_T, dryCol, y)) st.setTile(dryCol, y, 0, 0, 0);
+      } else check('⑬d（界外 → 跳过）', true, 'oob');
+    } else check('⑬绳索（vi_965_rope 缺物品/tile → 跳过端到端）', true, 'no item');
+  }
+
+  // ---- ⑭液体零写入终态（★十四批备A 清偿=原版最终态,固体/非固体一致）----
+  //  原版定谳：放置写面不动液体（PlaceTile WorldGen.cs:59966 只清 Tile|TilePaint|
+  //  Slope;TileObject.cs:100-106 只写 active/frame/type）→ 固体件植入满水格后液体
+  //  数据【驻留本格】。⑭a=放置终态（同步即断：旧挤液代码在同帧清本格/转邻格,
+  //  本断言即鉴别器）。⑭b=放置后挖块→邻液回流（KillTile 尾 SquareTileFrame→
+  //  TileFrame→AddWater WorldGen.cs:82621-82624 唤醒驻留液入列;隔离场地里唯一
+  //  水源=本格驻留液,挖除后水必铺开=唤醒+流动实证;密封场 x∈[cL-1,+7] 行
+  //  CEIL+1..F-1,守恒窗=同域）。场地自足,不依赖水箱。
+  {
+    const stoneIdx2 = items.ITEM_DEFS.findIndex((it) => it?.key === 'stone_block' || it?.key === 'vi_3_stone_block');
+    const STONE_T2 = idOfSheet(1);
+    const at14 = (tid, x, y) => st.inBounds(x, y) && st.get(x, y) === tid;
+    const cL = LT_.xb + 3, cW = LT_.xb + 4, cN = LT_.xb + 5, cN2 = LT_.xb + 6;
+    const cSealL = LT_.xb + 2, cSealR = LT_.xb + 7;   // 密封壁（左借岩浆箱壁 +1 外一列,右临时补墙）
+    const sumStrip = () => { let s = 0; for (let x = cSealL; x <= cSealR; x++) for (let y = CEIL; y <= F - 1; y++) s += st.liquid[st.idx(x, y)]; return s; };
+    if (stoneIdx2 >= 0 && st.inBounds(cSealR, F)) {
+      // 场地：仅放置格 (cW,F-1) 注满水,其余全干（隔离——回流观测不被大水体摊平淹没）
+      for (let x = cSealL; x <= cSealR; x++) for (let y = CEIL; y <= F - 1; y++) {
+        if (st.isActive(x, y)) st.setTile(x, y, 0, 0, 0);
+        st.setLiquid(x, y, 0, LIQUID_TYPE.NONE);
+      }
+      for (let y = CEIL; y <= F; y++) st.setTile(cSealR, y, STONE_T2, 0, 0);   // 右密封壁（含 F 行防沿台沿落水）
+      st.setLiquid(cW, F - 1, 255, LIQUID_TYPE.WATER);
+      shotNow(stoneIdx2, cW, F - 1, [cN, F - 1]);   // 同步放置（防模拟先行流动）
+      const cellLiq = st.liquid[st.idx(cW, F - 1)];
+      const nextLiq = st.liquid[st.idx(cN, F - 1)];
+      const sumAfterPlace = sumStrip();
+      check('⑭a 固体件(石块)植满水格 → 本格液体驻留255+邻格零转移（放置写面不动液体,WorldGen.cs:59966）',
+        at14(STONE_T2, cW, F - 1) && cellLiq === 255 && nextLiq === 0 && sumAfterPlace === 255,
+        `cell=${cellLiq} next=${nextLiq} sum=${sumAfterPlace}`);
+      // ⑭b 放置后挖块 → 邻液回流（原版行为锚,WorldGen.cs:82621-82624）
+      if (at14(STONE_T2, cW, F - 1)) {
+        g.breakTile(cW, F - 1, true);   // KillTile 全语义（清格面不动液体→setTile 监听 3×3 addWater）
+        await new Promise((r) => setTimeout(r, 1200));
+        const afterCell = st.liquid[st.idx(cW, F - 1)];
+        const afterN = st.liquid[st.idx(cN, F - 1)];
+        const afterL = st.liquid[st.idx(cL, F - 1)];
+        const afterSum = sumStrip();
+        const air = !st.isActive(cW, F - 1);
+        check('⑭b 挖块后驻留液唤醒回流：本格空且水离格铺开+总量守恒（TileFrame→AddWater :82621）',
+          air && afterCell < 250 && afterCell > 0 && afterSum >= 247 && (afterN > 0 || afterL > 0),
+          `air=${air} cell=${afterCell} N=${afterN} L=${afterL} sum=${afterSum}`);
+      }
+      // 复原干地台（⑥dry 依赖干地）+拆右密封壁
+      for (let x = cSealL; x <= cSealR; x++) for (let y = CEIL; y <= F; y++) {
+        if (st.isActive(x, y)) st.setTile(x, y, 0, 0, 0);
+        st.setLiquid(x, y, 0, LIQUID_TYPE.NONE);
+      }
+      for (let x = cSealL; x <= cN2; x++) st.setTile(x, F, STONE_T2, 0, 0);   // 干地台地板复原（含 cSealL=原地板域,右密封壁位不还原）
+    } else check('⑭（缺物品/界外 → 跳过端到端）', true, 'skip');
   }
 
   // ---- ⑥dry 回归 ----

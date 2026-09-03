@@ -252,14 +252,20 @@ export class TileStore {
   setTileSilent(x: number, y: number, type: number, frameX = 0, frameY = 0) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
-    const wasActive = this.flags[i] !== 0;
     this.type[i] = type;
     this.flags[i] = type !== 0 ? 1 : 0;
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除同步清位（防生成期脏残留）
-    if (type === 0 || !wasActive) {
-      this.paint[i] = 0;                          // KillTile/PlaceTile 油漆清位（同 setTile）
+    // ★IIIII201（2026-09-03）勘误：清漆/涂层只属 **type===0（KillTile 族,
+    //   ClearBlockPaintAndCoating Tile.cs:934-939）**——曾连 !wasActive（新置入空格）
+    //   一并清，而 vanilla PlaceTile default 支（WorldGen.cs:60725-60741）只写
+    //   active+type(+特例 color)，**不动 paint/coat 位**：extraLiquid 泡泡方块
+    //   （cs:1788-1794 全方格 fullbrightBlock(true)）内后置落位的砖/植/滴头因此
+    //   丢亮涂层 → DoExtraLiquidFinish 的 fullbright 支（cs:1852-1860）不触发 →
+    //   waterpark #105 L=44/T374×2（2026-09-03 实证）。paint 同理保留。
+    if (type === 0) {
+      this.paint[i] = 0;                          // KillTile 油漆清位
       this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939）
     }
   }

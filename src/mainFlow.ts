@@ -809,7 +809,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number; rules?: Partial<import('./net/protocol').RoomRules> } = {}): Promise<{ code: string; hostToken: string; gmToken?: string; error?: string }> {
     try {
       if (!game) return { error: 'no game', code: '', hostToken: '' };
-      game.finishHardmodeJob();   // ★PR-async：房主侧世界快照先收口 job（须在 null 门后——
+      game.finishWorldJobs();   // ★PR-async：房主侧世界快照先收口 job（须在 null 门后——
                                   // 曾在门前行,tsc 18047+无游戏实例时裸崩,2026-09-02 收遗留修）
       const { saveGame } = await import('./save/SaveFile');
       await worldStore.ensureLoaded();
@@ -1218,7 +1218,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function doSave(silent = false) {
     if (!game) return;
-    game.finishHardmodeJob();   // ★PR-async：job 半程存档=重读档永久丢转化——先 drain 完再序列化
+    game.finishWorldJobs();   // ★PR-async：job 半程存档=重读档永久丢转化——先 drain 完再序列化
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
     // ★槽位元数据必须调用帧快照:quitToMenu 在 doSave 返回后【同步】置空

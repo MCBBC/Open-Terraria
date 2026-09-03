@@ -2325,6 +2325,8 @@ export class UI {
     const masterShown = inv.gateMaster || hasAt(9, 9);
     if (els.equip[0]) els.equip[0].style.display = heartShown ? '' : 'none';
     if (els.equip[1]) els.equip[1].style.display = masterShown ? '' : 'none';
+    if (els.dye[0]) els.dye[0].style.display = heartShown ? '' : 'none';
+    if (els.dye[1]) els.dye[1].style.display = masterShown ? '' : 'none';
     if (els.vanity[0]) els.vanity[0].style.display = heartShown ? '' : 'none';
     if (els.vanity[1]) els.vanity[1].style.display = masterShown ? '' : 'none';
   }
@@ -3309,8 +3311,9 @@ export class UI {
     // 背包贴热键栏；2026-09-02 再迁右下角无框坞——挂载点见 eqDock.appendChild(left)）
     left.style.cssText = 'display:flex; flex-direction:column; gap:6px; flex:none;';
     left.appendChild(loadoutRow);
-    // 装备页：三列 L→R = 染料 | 时装 | 装备（原版 DrawInventory :40830-40968：
-    //  x=sw-186/-139/-92 单列纵向 47px 列距；配饰段相对盔甲段下移 num35=4px）。
+    // 装备页：三列 L→R = 时装 | 装备 | 染料（2026-09-02 用户要求；原版序=染料 |
+    //  时装 | 装备,DrawInventory :42164/:42205/:42233 x=sw-64-28 / -47 / -47×2,
+    //  列距 47px；配饰段相对盔甲段下移 num35=4px）。
     //  两段式竖列（盔甲段 + 4px 组距 + 配饰段）
     const vcol2 = (label: string, a: number, na: number, b: number, nb: number, where: SlotWhere, eyes = false) => {
       const col = el('div');
@@ -3331,23 +3334,29 @@ export class UI {
     this.accEyeEls.clear();   // 面板重建（重进世界）时旧眼钮引用作废
     const eqPage = el('div');
     eqPage.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
-    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 5, 'dye'));            // 染料 dye[0-2]+[3-7]（追加格 dye[8]/[9] 按解锁显隐,见 extras 段——与装备/时装列逐行对应）
+    // 列序 L→R = 时装 | 装备 | 染料（2026-09-02 用户要求：染料挪到装备列右侧——
+    //  染料↔装备按行索引配对,相邻更直观。原版序为 染料|时装|装备,此为用户定策偏离）
     eqPage.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
     const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
     eqPage.appendChild(equipCol);
+    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 5, 'dye'));            // 染料 dye[0-2]+[3-7]（追加格 dye[8]/[9] 按解锁显隐,见 extras 段——与装备/时装列逐行对应）
     // 恶魔之心(armor[8]/dye[8])+大师(dye[9] 无独立时装...armor[9]) 追加槽——
     // 建面板即建、refreshEquipExtras 按解锁/占格显隐（Player.cs:4279 Shown 判定：
     // 解锁【或】格内有物；经典世界专家旗存物也显示但不生效=cs:18402 效果门在
     // Inventory.accSlotMax）。时装列 18/19 同步追加（无眼钮——眼只挂功能段 3-9）
     const equipExtras: HTMLElement[] = [];
     const vanityExtras: HTMLElement[] = [];
+    const dyeExtras: HTMLElement[] = [];
     {
       // ★追加槽必须接在【槽位容器】尾部(vcol2 的 col.children[1])——
       //  firstElementChild 是列标签 div,曾 append 进标签 ⇒ 恶魔之心/大师槽
       //  插到列最前面(2026-08-28 用户报),应在尾部配饰之后追加
       const equipWrap = equipCol.children[1] as HTMLElement | null;
-      const vanityCol = eqPage.children[1] as HTMLElement | null;
+      // 列序 2026-09-02 调整后 eqPage children：[0]=时装 [1]=装备 [2]=染料
+      const vanityCol = eqPage.children[0] as HTMLElement | null;
       const vanityWrap = vanityCol?.children[1] as HTMLElement | null;
+      const dyeCol = eqPage.children[2] as HTMLElement | null;
+      const dyeWrap = dyeCol?.children[1] as HTMLElement | null;
       for (let k = 0; k < 2; k++) {
         const es = this.makeSlotEl(8 + k, 'armor');
         this.attachVisibilityEye(es, 8 + k);
@@ -3355,13 +3364,21 @@ export class UI {
         es.style.display = 'none';
         equipWrap?.appendChild(es);
         equipExtras.push(es);
+        // 染料列追加格 dye[8]/dye[9]（恶魔染料/大师染料）——与装备追加格同行同门
+        // 显隐（2026-09-02 用户问"染料列为何 10 格"定谳：此前染料列固定渲染 10 格、
+        // 装备/时装列追加格按解锁显隐 → 未解锁时行数不齐=对应关系错位）
+        const ds = this.makeSlotEl(8 + k, 'dye');
+        if (k === 0) ds.style.marginTop = '4px';
+        ds.style.display = 'none';
+        dyeWrap?.appendChild(ds);
+        dyeExtras.push(ds);
         const vs = this.makeSlotEl(18 + k, 'armor');
         if (k === 0) vs.style.marginTop = '4px';
         vs.style.display = 'none';
         vanityWrap?.appendChild(vs);
         vanityExtras.push(vs);
       }
-      this.equipExtraSlots = { equip: equipExtras, vanity: vanityExtras };
+      this.equipExtraSlots = { equip: equipExtras, vanity: vanityExtras, dye: dyeExtras };
     }
     left.appendChild(eqPage);
     // 杂项（常驻右缘列，原杂项页 2026-08-27 并入）：miscEquips[5]（宠物/光源/矿车/

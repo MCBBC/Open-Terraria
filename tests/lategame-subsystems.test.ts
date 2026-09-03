@@ -1,6 +1,7 @@
 // 后期批子系统探针：LanternNight 灯笼夜 / MoonLeech 145 / 490 仪式圈 / Obstructed 163 /
 // 史后仆从 658/659 凝胶弹 / 空水格睡莲香蒲（1.4.5.6 对照 Terarria1456）。
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { RNG } from '../src/core/rng';
 import { LanternNight, type LanternCtx } from '../src/world/LanternNight';
 import { BuffState, BuffType, BUFF_DEFS } from '../src/stats/Buffs';
 import { MoonLeechProj } from '../src/entities/bossAI_duke_moonlord';
@@ -273,7 +274,7 @@ describe('WorldEvolution 空水格睡莲/香蒲', () => {
 
   it('空水格 1/600 → 睡莲 518（cs:72237-72242）', () => {
     const { st, y, evo } = evoWorld();
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0);   // 必中小概率门
+    const spy = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0);   // 必中小概率门
     try {
       (evo as unknown as EvoLike).overgroundTile(30, y, 3);
     } finally {
@@ -285,7 +286,7 @@ describe('WorldEvolution 空水格睡莲/香蒲', () => {
   it('首掷未中 → 香蒲 519（else-if 第二档 :72243-72248）', () => {
     const { st, y, evo } = evoWorld();
     let calls = 0;
-    const spy = vi.spyOn(Math, 'random').mockImplementation(() => (calls++ === 0 ? 0.99 : 0));
+    const spy = vi.spyOn(RNG.prototype, 'next').mockImplementation(() => (calls++ === 0 ? 0.99 : 0));
     try {
       (evo as unknown as EvoLike).overgroundTile(30, y, 3);
     } finally {

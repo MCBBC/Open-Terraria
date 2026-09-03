@@ -11,6 +11,17 @@
 //   墙蔓延（SpreadGrassWalls :74958 / SpreadDesertWalls :75073）→ Convert 墙半区（:55113）
 //   SpreadGrass 运行时版（:75210）：普通草仅地表（j<worldSurface 且 dirt==0）、邪恶草不受限、
 //   3×3 封死不转、邻岩浆不转、上方向日葵(27)挡邪恶草、草→草走 Convert tiles-only
+//   依存物拆除级联（W2/NB-F 2026-09-03）：kill/改型写后 SquareTileFrame 3×3 派发面——
+//   PlantCheck/CheckAlch/CheckVines/长苔藓 case184/睡莲 CheckLilyPad（详见级联段头注）
+// RNG 源（NB-F 定谳 2026-09-03）：原版 UpdateWorld 全部采样/掷骰在 Main.Update 的
+//   `using (Main.SwapRandom("UpdateWorldGen"))` 作用域内跑（Main.cs:17985-17988）——
+//   SwapRandom（Main.cs:3300-3312）按 key 惰性 `new UnifiedRandom(ActiveWorldFileData.Seed)`
+//   建命名流并存 _rngs 表，**跨 tick 持续不重置**（UpdateWorld_WorldGenAndInvasion 每 tick
+//   换入同一条世界种子流）。本仓等价 = 构造时 `new RNG(world.seed)` 专用实例、
+//   每 tick update() 续流不重置；106 处 Math.random() 活流偏差全部改走 this.rng()
+//   （[0,1) 双精度直换，掷位/概率式 1:1）。Convert 链（溶液/净化粉经 convertArea 进来）
+//   在原版走 "UpdateProjectiles"/"UpdateItems" 等别的命名流——同为世界种子持久流、
+//   单机观测面等价，本仓并入本流消费（流域归属注记，非行为近似）。
 // 近似项（原版依赖系统缺失，注释标明）：
 //   - Collision.CanHitLine（GrowMoreVines 的加权计数）→ 仅计数不判视线
 //   - PlayerLOS（球茎/蜂巢/蚁狮幼虫隐藏性）→ 玩家距离 >50 格视为不可见
@@ -21,6 +32,7 @@
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
 import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { RNG } from '../../core/rng';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
 import { flowerGroundOk, plantBadMatch, plantNewType, PLANT_CHECK_SHEETS,
   PLANT_CONVERT_KEY } from './PlantRules';
@@ -132,13 +144,27 @@ export interface EvolutionHost {
    *  CreativePowers.cs:1550；WorldGen.UpdateWorld :71515-71519
    *  AllowedToSpreadInfections = !Enabled）。缺省 false = 允许蔓延 */
   journeyStopBiomeSpread?: boolean;
+  /** 世界种子（NB-F：蔓延专用持久流 = 原版 Main.SwapRandom("UpdateWorldGen") 的
+   *  `new UnifiedRandom(ActiveWorldFileData.Seed)`，Main.cs:3300-3312——跨 tick
+   *  持续、每 tick 不重置）。缺省 0 = 离线测试兜底（同样确定性）。 */
+  seed?: number;
 }
 
 export class WorldEvolution {
   private hardMode = false;
   private allowedToSpread = true;
+  /** 蔓延专用 RNG 流（世界种子）。★与全局不共享、逐 tick 续流（原版 _rngs
+   *  命名流语义——UpdateWorld_WorldGenAndInvasion 每 tick 换入同一条流）。 */
+  private readonly spreadRng: RNG;
 
-  constructor(private host: EvolutionHost) {}
+  constructor(private host: EvolutionHost) {
+    this.spreadRng = new RNG(host.seed ?? 0);
+  }
+
+  /** 消费蔓延流一个 [0,1) 样本（≡ 原版 genRand.NextDouble()；Math.random 的 1:1 替位） */
+  private rng(): number {
+    return this.spreadRng.next();
+  }
 
   /** 每 tick 调用（Game.fixedUpdate）。原版 UpdateWorld 采样骨架（cs:71507-71639） */
   update(): void {
@@ -159,17 +185,17 @@ export class WorldEvolution {
     if (this.host.raining) surfaceN *= 1.5;
     const num7 = 151 + (151 * 2.8 - 151) * Math.min(1, Math.max(0, w / 4200 - 1));
     for (let n = 0; n < surfaceN; n++) {
-      if (Math.random() * (num7 * 100) < 1) this.plantAlch();
-      const i = 10 + Math.floor(Math.random() * (w - 20));
-      const j = 10 + Math.floor(Math.random() * (Math.floor(this.host.worldSurface) - 1 - 10));
+      if (this.rng() * (num7 * 100) < 1) this.plantAlch();
+      const i = 10 + Math.floor(this.rng() * (w - 20));
+      const j = 10 + Math.floor(this.rng() * (Math.floor(this.host.worldSurface) - 1 - 10));
       if (j < 10) continue;
       this.overgroundTile(i, j, wallDist);
     }
     // 地下采样（cs:71624-71633）
     const underN = w * h * 1.5e-5 * rate;
     for (let n = 0; n < underN; n++) {
-      const i = 10 + Math.floor(Math.random() * (w - 20));
-      const j = Math.floor(this.host.worldSurface) - 1 + Math.floor(Math.random() * (h - 20 - (Math.floor(this.host.worldSurface) - 1)));
+      const i = 10 + Math.floor(this.rng() * (w - 20));
+      const j = Math.floor(this.host.worldSurface) - 1 + Math.floor(this.rng() * (h - 20 - (Math.floor(this.host.worldSurface) - 1)));
       if (j < 10 || j >= h - 20) continue;
       this.undergroundTile(i, j, wallDist);
     }
@@ -196,9 +222,22 @@ export class WorldEvolution {
   }
   private setType(x: number, y: number, type: number): void {
     const st = this.host.store;
-    if (st.inBounds(x, y)) st.setTile(x, y, type);
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    const before = st.type[i];
+    st.setTile(x, y, type);
+    // ★W2 级联：改型=锚定语义变化（苔→邪石、草→荆棘…）→ 原版
+    //   Convert_ActuallyConvertTile（cs:56800）写型后 SquareTileFrame(x,y) 同款
+    if (before !== type) this.frameDependents(x, y);
   }
-  private kill(x: number, y: number): void { this.setType(x, y, 0); }
+  private kill(x: number, y: number): void {
+    const st = this.host.store;
+    if (!st.inBounds(x, y) || st.type[st.idx(x, y)] === 0) return;
+    st.setTile(x, y, 0);
+    // ★W2 级联：原版 KillTile 尾 SquareTileFrame(i,j)（cs:64432）→ 3×3 TileFrame
+    //   派发 Check 族——锚定物被移除后依存物连锁拆除
+    this.frameDependents(x, y);
+  }
   /** WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0 */
   private solidTile(x: number, y: number): boolean {
     const st = this.host.store;
@@ -214,6 +253,261 @@ export class WorldEvolution {
     if (!p) return false;
     return Math.abs(p.x - x) < 50 && Math.abs(p.y - y) < 40;
   }
+
+  // ================= 依存物拆除级联（★W2/NB-F 2026-09-03） =================
+  //  原版链：KillTile 尾 SquareTileFrame(i,j)（cs:64432）/ Convert_ActuallyConvertTile
+  //  尾 SquareTileFrame(x,y)（cs:56800）→ SquareTileFrame :81462 对 3×3（x 外层列优先）
+  //  逐格 TileFrame → TileFrameImportant/Check 族按型派发：锚定物（草/苔/水）被移除或
+  //  改型后，依存物连锁拆除——上方植物 PlantCheck（:81818）/ 药草 CheckAlch（:46371）/
+  //  下方垂藤 CheckVines（:86137，TileFrame :82652 IsVine 派发）/ 四邻长苔藓
+  //  TileFrameImportant case 184（:86428，锚表 GetTileMossColor :82492）/ 水面睡莲
+  //  case 518 → CheckLilyPad（:59694）。NB-F x86 3000tick 窗口实证：184 塌落 ×24 /
+  //  518 拆除 ×5，本域此前零级联。Game 侧 checkDecorSquareFrame 是同一派发面的
+  //  DECOR 子集（双端幂等：对空格/已判合格格均 no-op，重复派发无行为差）。
+  //  实现注：工作队列+预算帽（vanilla 无帽；杀空格幂等，帽只防病态存档藤柱爆栈），
+  //  级联内部走 killFlat 不重入 frameDependents——传播由队列显式续接（=原版
+  //  KillTile→SquareTileFrame→TileFrame 的递归面，展开为显式队列）。
+
+  /** 无级联写空（KillTile 的 type 面：setTile(0) 已含 half/slope/漆清位）。
+   *  @returns 是否真的发生了击杀 */
+  private killFlat(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.type[i] === 0) return false;
+    st.setTile(x, y, 0);
+    return true;
+  }
+
+  /** 锚定物变更后派发 3×3 依存物复检（含中心格）。 */
+  private frameDependents(cx: number, cy: number): void {
+    const st = this.host.store;
+    if (!st.inBounds(cx, cy)) return;
+    const q: number[] = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (st.inBounds(cx + dx, cy + dy)) q.push(cx + dx, cy + dy);
+      }
+    }
+    let head = 0;
+    let budget = 4096;                                   // 病态链护栏（级联杀≤4096 格）
+    while (head < q.length && budget-- > 0) {
+      const x = q[head++], y = q[head++];
+      if (this.killDependentAt(x, y)) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (st.inBounds(x + dx, y + dy)) q.push(x + dx, y + dy);
+          }
+        }
+      }
+    }
+  }
+
+  /** 单格依存物复检（TileFrame 派发面子集；vanilla 活性门=各 Check 自带）。
+   *  @returns 本格是否被杀（级联继续扩散） */
+  private killDependentAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y) || !this.active(x, y)) return false;
+    const sh = sheetOf(this.typeAt(x, y));
+    if (sh === 703) return this.plantCheckAt(x, y);          // 丛林垂藤（PlantCheck 特支）
+    if (PLANT_CHECK_SHEETS.includes(sh)) return this.plantCheckAt(x, y);
+    if (TILE_ALCH.has(sh)) return this.alchCheckAt(x, y);    // CheckAlch {82,83,84}
+    if (IS_VINE.has(sh)) return this.vineCheckAt(x, y);      // CheckVines IsVine 全族
+    if (sh === 184) return this.mossCheckAt(x, y);           // 长苔藓 case 184
+    if (sh === 518) return this.checkLilyPad(x, y);          // 睡莲 case 518
+    return false;
+  }
+
+  /** WorldGen.SolidTileAllowBottomSlope（cs:70698）：active+非致动+非半砖+
+   *  (solid||solidTop)+坡 ∈ {0,3,4}（顶坡 1/2 不算地基）。wire bit5=已致动
+   *  （TileStore.WIRE_ACTUATED，类型态 import 不引值——字面量 32 同源） */
+  private solidTileAllowBottomSlope(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.flags[i] || st.half[i] || (st.wire[i] & 32) !== 0) return false;
+    const d = TILE_DEFS[st.type[i]];
+    if (!d || (!d.solid && !d.platform)) return false;
+    const sl = st.slope[i];
+    return sl === 0 || sl === 3 || sl === 4;
+  }
+
+  /** PlantCheck（cs:81818）：下格地基失配 → TryGetNewType 换型（腐化过境变型，原版
+   *  不杀）/ 无法变型即杀。703 特支（cs:81847-81853）：下方须 SolidTileAllowBottomSlope。 */
+  private plantCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const sheet = sheetOf(this.typeAt(x, y));
+    // PlantCheck down 判据（cs:81838-81844）：下格 nactive+非半砖+slope==0 才认地基
+    let down = -1;
+    if (y + 1 < st.h) {
+      const bi2 = st.idx(x, y + 1);
+      if (st.isActive(x, y + 1) && !st.half[bi2] && st.slope[bi2] === 0) {
+        down = sheetOf(st.type[bi2]);
+      }
+    }
+    if (sheet === 703) {
+      if (!this.solidTileAllowBottomSlope(x, y + 1)) return this.killFlat(x, y);
+      return false;
+    }
+    if (!plantBadMatch(down, sheet)) return false;
+    const r = plantNewType(sheet, down, st.frameX[st.idx(x, y)]);
+    if (r.type !== sheet) {
+      const key = PLANT_CONVERT_KEY[r.type];
+      const nid = key ? TILE_BY_KEY[key] : undefined;
+      if (nid !== undefined) {
+        st.setTile(x, y, nid, r.spore ? (r.type === 201 ? 270 : 144) : r.fx, st.frameY[st.idx(x, y)]);
+        return false;
+      }
+    }
+    return this.killFlat(x, y);
+  }
+
+  /** CheckAlch（cs:46371）锚定面：下格 nactive 失效/半砖/类型表失配/自身岩浆 → 杀。
+   *  ★style5（火冠花）岩浆豁免（cs:46451-46468 case5 无岩浆杀支，其浸泡 83⇄84 翻面
+   *  属生长态机 GrowAlch 域，不在此重复）。 */
+  private alchCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const style = Math.floor(st.frameX[i] / 18);
+    let bad = !st.isActive(x, y + 1) || st.half[st.idx(x, y + 1)] !== 0;
+    if (!bad) {
+      const ground = sheetOf(st.type[st.idx(x, y + 1)]);
+      const ok = (g: number[]): boolean => g.includes(ground);
+      switch (style) {
+        case 0: bad = !ok([109, 2, 477, 492, 78, 380]); break;
+        case 1: bad = !ok([60, 78, 380]); break;
+        case 2: bad = !ok([0, 59, 78, 380]); break;
+        case 3: bad = !ok([661, 662, 199, 203, 23, 25, 78, 380]); break;
+        case 4: bad = !ok([53, 78, 380, 116]); break;
+        case 5: bad = !ok([57, 633, 78, 380]); break;
+        case 6: bad = !ok([78, 380, 147, 161, 163, 164, 200]); break;
+        default: bad = true; break;
+      }
+    }
+    if (!bad && style !== 5 && st.liquid[i] > 0 && st.liquidType[i] === 2) bad = true;   // 岩浆浸泡
+    if (bad) return this.killFlat(x, y);
+    return false;
+  }
+
+  /** CheckVines（cs:86137）：上格同型续接 ∨ 锚定草族；跨群系锚 → 改型（藤随草变）；
+   *  无锚 → 杀。锚表/改型表逐支照抄（含 192 棕榈挂普通藤、384 丛林叶挂丛林藤）。 */
+  private vineCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const sheet = sheetOf(st.type[i]);
+    // 上格 nactive+非底坡 才认锚（cs:86142-86146）
+    let num = -1;
+    if (y - 1 >= 0 && st.isActive(x, y - 1)) {
+      const ai = st.idx(x, y - 1);
+      const sl = st.slope[ai];
+      if (sl !== 3 && sl !== 4) num = sheetOf(st.type[ai]);
+    }
+    if (num === sheet) return false;
+    // 改型面（cs:86155-86181，末支优先——源序覆盖）
+    let num6 = 0;
+    if (num === 633 || num === 638) num6 = 638;
+    if (num === 70 || num === 528) num6 = 528;
+    if (num === 109 || num === 115 || num === 492) num6 = 115;
+    if (num === 60 || num === 226 || num === 62) num6 = 62;
+    if (num === 23 || num === 636 || num === 661) num6 = 636;
+    if (num === 199 || num === 205 || num === 662) num6 = 205;
+    if ((num === 2 || num === 52 || num === 477) && sheet !== 382) num6 = 52;
+    if (num === 382) num6 = 382;
+    if (num6 !== 0 && num6 !== sheet) {
+      st.setTile(x, y, S(num6), st.frameX[i], st.frameY[i]);   // 原版 tileCache.type 直改（帧原样）
+      return false;
+    }
+    // 杀面（cs:86183-86225）
+    let die = num === -1;
+    if ((sheet === 52 || sheet === 382) && num !== 2 && num !== 477 && num !== 192) die = true;
+    if (sheet === 62 && num !== 60 && num !== 384 && num !== 226) die = true;
+    if (sheet === 115 && num !== 109 && num !== 492) die = true;
+    if (sheet === 528 && num !== 70) die = true;
+    if (sheet === 636 && num !== 23 && num !== 661) die = true;
+    if (sheet === 205 && num !== 199 && num !== 662) die = true;
+    if (sheet === 638 && num !== 633) die = true;
+    if (die) return this.killFlat(x, y);
+    return false;
+  }
+
+  /** GetTileMossColor（cs:82492）!= -1 判定：苔藓族 ∪ 苔砖族都是长苔藓合法锚 */
+  private hasMossColor(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.flags[i]) return false;
+    const sh = sheetOf(st.type[i]);
+    return TILE_MOSS.has(sh) || TILE_MOSS_BRICK.has(sh);
+  }
+
+  /** TileFrameImportant case 184（cs:86428-86472）：四邻须苔藓色（各向带坡/半砖门），
+   *  全失 → KillTile。苔块被邪恶蔓延转成邪石（Convert case1/2/4 tileMoss 支）后的
+   *  塌落由此承接（NB-F ×24 残差的根因面）。 */
+  private mossCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const slopeAt = (xx: number, yy: number): number =>
+      st.inBounds(xx, yy) ? st.slope[st.idx(xx, yy)] : 0;
+    const act = (xx: number, yy: number): boolean =>
+      st.inBounds(xx, yy) && st.flags[st.idx(xx, yy)] !== 0;
+    const isBottomSlope = (sl: number): boolean => sl === 3 || sl === 4;
+    const isTopSlope = (sl: number): boolean => sl === 1 || sl === 2;
+    // 上：active+非底坡（cs:86431）；下：active+非半砖+非顶坡（:86434）；左右：active
+    const above = act(x, y - 1) && !isBottomSlope(slopeAt(x, y - 1));
+    const below = act(x, y + 1) && st.half[st.idx(x, y + 1)] === 0 && !isTopSlope(slopeAt(x, y + 1));
+    const left = act(x - 1, y);
+    const right = act(x + 1, y);
+    const ok = (above && this.hasMossColor(x, y - 1)) || (below && this.hasMossColor(x, y + 1))
+      || (left && this.hasMossColor(x - 1, y)) || (right && this.hasMossColor(x + 1, y));
+    if (!ok) return this.killFlat(x, y);
+    return false;
+  }
+
+  /** CheckLilyPad（cs:59694）：非水型杀；按塘底重锚 frameY；水位涨落 → 上浮/下沉
+   *  （裸数组直写不清液，cs:59741-59767）；下方非实体残件 → 杀（:59782-59790）。
+   *  本仓直写走 setTileSilent+渲染补标（花苞同款：带水格写非实体件绕开液体监听）。 */
+  private checkLilyPad(x: number, y: number): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const lty = st.liquidType[i];
+    if (lty === 2 || lty === 3) return this.killFlat(x, y);   // 岩浆/蜂蜜（liquidType()!=0）
+    // 向下找塘底（cs:59699-59710：!active||!solid||solidTop 期间下扫，maxY-50 界）
+    let num = y;
+    while (num < st.h - 50) {
+      const gi = st.idx(x, num);
+      const gd = TILE_DEFS[st.type[gi]];
+      if (st.flags[gi] && gd?.solid && !gd.platform) break;
+      num++;
+    }
+    const ground = sheetOf(this.typeAt(x, num));
+    const num2 = ground === 2 || ground === 477 ? 0
+      : ground === 109 || ground === 116 ? 18
+      : ground === 60 ? 36 : -1;
+    if (num2 < 0) return this.killFlat(x, y);
+    if (st.frameY[i] !== num2) st.setTile(x, y, st.type[i], st.frameX[i], num2);
+    const aboveWet = y - 1 >= 0 && st.liquid[st.idx(x, y - 1)] > 0 && !st.flags[st.idx(x, y - 1)];
+    if (aboveWet) {
+      // 上浮（cs:59741-59757）：水面上涨 → 垫上移一行
+      st.setTileSilent(x, y - 1, S(518), st.frameX[i], num2);
+      st.setTileSilent(x, y, 0);
+      this.host.afterSilentTileWrite?.(x - 1, y - 2, x + 1, y + 1);
+      return false;
+    }
+    if (st.liquid[i] !== 0) return false;
+    // 下方格活性门=原版 active()（非 nactive——cs:59761/:59782 两支都读 active）
+    const belowActive = st.inBounds(x, y + 1) && st.flags[st.idx(x, y + 1)] !== 0;
+    if (!belowActive) {
+      // 下沉（cs:59761-59779）：水位退 → 垫下移一行
+      st.setTileSilent(x, y + 1, S(518), st.frameX[i], num2);
+      st.setTileSilent(x, y, 0);
+      this.host.afterSilentTileWrite?.(x - 1, y, x + 1, y + 2);
+      return false;
+    }
+    const bd = TILE_DEFS[st.type[st.idx(x, y + 1)]];
+    // 下方残件（active 且非平台且非实心实底）→ 杀（cs:59782-59790）
+    if (bd && !bd.platform && (!bd.solid || bd.platform)) return this.killFlat(x, y);
+    return false;
+  }
+
   private mechAny(): boolean {
     const f = this.host.flags;
     return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
@@ -254,27 +548,10 @@ export class WorldEvolution {
     for (let i = 0; i < n; i++) {
       if (!st.flags[i]) continue;
       const sheet = sheetOf(st.type[i]);
-      if (!PLANT_CHECK_SHEETS.includes(sheet)) continue;
+      // PlantCheck 派发族 + 703 特支（与 killDependentAt 同一 single-source：plantCheckAt）
+      if (!PLANT_CHECK_SHEETS.includes(sheet) && sheet !== 703) continue;
       const x = i % w, y = Math.floor(i / w);
-      // PlantCheck down 判据（cs:81838-81844）：下格 nactive+非半砖+slope==0 才认地基
-      let down = -1;
-      if (y + 1 < st.h) {
-        const bi2 = st.idx(x, y + 1);
-        if (st.flags[bi2] && !st.half[bi2] && st.slope[bi2] === 0) {
-          down = sheetOf(st.type[bi2]);
-        }
-      }
-      if (!plantBadMatch(down, sheet)) continue;
-      const r = plantNewType(sheet, down, st.frameX[i]);
-      if (r.type !== sheet) {
-        const key = PLANT_CONVERT_KEY[r.type];
-        const nid = key ? TILE_BY_KEY[key] : undefined;
-        if (nid !== undefined) {
-          st.setTile(x, y, nid, r.spore ? (r.type === 201 ? 270 : 144) : r.fx, st.frameY[i]);
-          continue;
-        }
-      }
-      st.setTile(x, y, 0);
+      this.plantCheckAt(x, y);
     }
   }
 
@@ -284,7 +561,7 @@ export class WorldEvolution {
     if (!st.inBounds(x, y) || this.active(x, y)) return false;
     const t = S(sheet);
     if (!t) return false;
-    st.setTile(x, y, t, (style + (variants > 1 ? Math.floor(Math.random() * variants) : 0)) * 18, 0);
+    st.setTile(x, y, t, (style + (variants > 1 ? Math.floor(this.rng() * variants) : 0)) * 18, 0);
     return true;
   }
   /** 放置 w×h 整件（帧 dx*18, dy*18；区域全空才放）。styleX=样式基偏移（X 轴，
@@ -322,8 +599,8 @@ export class WorldEvolution {
       const forceBulb = tries < 500;                     // cs:74197 允许泥 59+计分档
       const allowInactive = tries < 200;                 // cs:74198
       tries--;
-      let px = x0 + Math.floor(Math.random() * (x1 - x0));
-      let py = yTop + Math.floor(Math.random() * (yBot - yTop));
+      let px = x0 + Math.floor(this.rng() * (x1 - x0));
+      let py = yTop + Math.floor(this.rng() * (yBot - yTop));
       // 逐点向上走（≤500 步,cs:74206-74230）：flag2 时非活动格也算；命中 60/59 停
       let foundSheet = -1;
       let steps = 500;
@@ -434,13 +711,13 @@ export class WorldEvolution {
         let num5 = 3000 - Math.floor(Math.abs(this.host.windSpeedCurrent) * 1250);
         if (this.host.raining) num5 -= Math.floor(1250 * this.host.maxRaining);
         if (num5 < 300) num5 = 300;
-        if (Math.random() * num5 < 1) {
+        if (this.rng() * num5 < 1) {
           let k = j;
           while (k < this.host.worldSurface + 10 && !this.active(i, k) && k - j < 15) k++;
           if (this.active(i, k) && sheetOf(this.typeAt(i, k)) === 53) {
             k--;
             if (this.typeAt(i, k) === S(324)) return;
-            const need = 2 + Math.floor(Math.random() * 3);
+            const need = 2 + Math.floor(this.rng() * 3);
             let cnt = 0;
             for (let l = i - 10; l <= i + 10; l++) for (let m = k - 10; m <= k + 10; m++) {
               const s = sheetOf(this.typeAt(l, m));
@@ -449,18 +726,32 @@ export class WorldEvolution {
             if (cnt < need && this.solidTile(i, k + 1)) {
               // 贝壳/珊瑚锚面门（PlaceTile num==81 支 :59922-59934：下方 active+solid
               // +非半砖+slope==0；324 珊瑚同经 PlaceTile 口）——坡沙上不再放
-              if (Math.random() < 0.5 && this.liquidAt(i, k) >= 230) this.place1(i, k, 81, 0, 5);
+              if (this.rng() < 0.5 && this.liquidAt(i, k) >= 230) this.place1(i, k, 81, 0, 5);
               else this.place1(i, k, 324, 0, 8);
             }
           }
         }
       }
     }
+    // 睡莲采样品维护（cs:72734-72748）：干涸/半埋/上格实体浸水 → 拆除，否则 CheckLilyPad
+    // （原版 518/519 采中即走本支——liquid>32 与 nactive 两段是其 else-if 尾，故 return；
+    //  NB-F ×5 拆除残差的根因面。519 香蒲 CheckCatTail/GrowCatTail 列维护未接=既有口径）
+    if (act && sheetOf(t) === 518) {
+      const own = this.liquidAt(i, j);
+      if (own === 0
+        || (Math.floor(own / 16) >= 9 && this.solidTile(i, j - 1))
+        || (this.liquidAt(i, j - 1) > 0 && this.active(i, j - 1))) {
+        this.kill(i, j);
+      } else {
+        this.checkLilyPad(i, j);
+      }
+      return;
+    }
     // 空水格睡莲/香蒲（cs:72237-72248，else-if 互斥各 1/600）：须在下方 !act 早退
     // 之前判——原版液体分支（liquid>32）先于 nactive 段，空水格走本支而非刷怪段
     if (!act && this.liquidAt(i, j) > 32) {
-      if (Math.random() < 1 / 600) this.place1(i, j, 518);
-      else if (Math.random() < 1 / 600) this.place1(i, j, 519);
+      if (this.rng() < 1 / 600) this.place1(i, j, 518);
+      else if (this.rng() < 1 / 600) this.place1(i, j, 519);
     }
     if (!act) {
       // 蛛网再生（cs:72534-72536：墙 62 + 无液体 → GrowWeb）
@@ -469,18 +760,18 @@ export class WorldEvolution {
     }
     // hardUpdateWorld（困难模式邪恶/神圣/水晶/叶绿）+ 染料植物
     this.hardUpdateWorld(i, j);
-    if (Math.random() < 1 / 3000) this.plantDye(i, j, false);
-    else if (this.hardMode && (i < st.w * 0.4 || i > st.w * 0.6) && Math.random() < 1 / 15000) this.plantDye(i, j, true);
+    if (this.rng() < 1 / 3000) this.plantDye(i, j, false);
+    else if (this.hardMode && (i < st.w * 0.4 || i > st.w * 0.6) && this.rng() < 1 / 15000) this.plantDye(i, j, true);
 
     const sheet = sheetOf(t);
     if (sheet === 80) { // 仙人掌
-      if (Math.random() < 1 / 15) this.growCactus(i, j);
+      if (this.rng() < 1 / 15) this.growCactus(i, j);
     } else if (CONV_SAND.has(sheet)) {
       // 沙族（cs:72275-72309）：海洋贝壳补充 / 内陆仙人掌（绿洲/海藻系统未接）
       if (!this.active(i, minJ)) {
         const oceanBand = i < 200 || i > st.w - 200;
         if (oceanBand) {
-          if (Math.random() < 1 / 500) {
+          if (this.rng() < 1 / 500) {
             let cnt = 0;
             for (let n = i - 7; n <= i + 7; n++) for (let m = minJ - 7; m <= minJ + 7; m++) {
               if (this.active(n, m) && sheetOf(this.typeAt(n, m)) === 81) cnt++;
@@ -491,13 +782,13 @@ export class WorldEvolution {
               this.place1(i, minJ, 81, 0, 5);
             }
           }
-        } else if (i > 380 + 20 && i < st.w - 380 - 20 && Math.random() < 1 / 300) {
+        } else if (i > 380 + 20 && i < st.w - 380 - 20 && this.rng() < 1 / 300) {
           this.growCactus(i, j);
         }
       }
     } else if (SNOW_FAMILY.has(sheet)) {
       // 雪原/冰：1/10 悬挂钟乳石（cs:72310-72351 PlaceTight）
-      if (Math.random() < 1 / 10 && !this.active(i, j + 1) && !this.active(i, j + 2)) {
+      if (this.rng() < 1 / 10 && !this.active(i, j + 1) && !this.active(i, j + 2)) {
         let cnt = 0;
         for (let x = i - 3; x < i + 4; x++) for (let y = j; y <= j + 3; y++) {
           if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 165) cnt++;
@@ -507,25 +798,25 @@ export class WorldEvolution {
     } else if (sheet === 254) {
       // 南瓜株成长（⚠️3 2026-08-22 批，cs:72376-72380）：Next((frameX+10)/10)==0 →
       // GrowPumpkin（:52522——stage=fx/36 逐档 1/1·1/4·1/8·1/11,stage≥4 停）
-      if (Math.random() < 1 / Math.max(1, Math.floor((st.frameX[this.at(i, j)] + 10) / 10))) {
+      if (this.rng() < 1 / Math.max(1, Math.floor((st.frameX[this.at(i, j)] + 10) / 10))) {
         this.growPumpkin(i, j);
       }
     } else if (sheet === 78 || sheet === 380 || sheet === 579) {
       // 陶罐 78/花盆箱 380/石魔像头 579 顶部随机杂草（⚠️3,cs:72381-72390）：
       // 上格空 + genRand.Next(2)==0 → PlaceTile(3)（杂草 frameX=Next(5)*18,cs:59700-59704）
-      if (!this.active(i, j - 1) && Math.random() < 0.5) this.place1(i, j - 1, 3, 0, 5);
+      if (!this.active(i, j - 1) && this.rng() < 0.5) this.place1(i, j - 1, 3, 0, 5);
     } else if (SPREAD_OVERGROUND.has(sheet)) {
       this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
-      if ((sheet === 32 || sheet === 352) && Math.random() < 1 / 3) {
+      if ((sheet === 32 || sheet === 352) && this.rng() < 1 / 3) {
         this.growSpike(i, j, sheet, sheet === 32 ? 23 : 199);
       }
     } else if (TILE_MOSS.has(sheet) || TILE_MOSS_BRICK.has(sheet)) {
       this.mossUpdate(i, j, minI, maxI, minJ, maxJ);
-    } else if (sheet === 3 && Math.random() < 1 / 20) {
+    } else if (sheet === 3 && this.rng() < 1 / 20) {
       // 杂草 → 花（cs:72465-72476；帧 144=蘑菇位除外）
       const fx = st.frameX[this.at(i, j)];
       if (fx !== 144) this.setType(i, j, S(73));
-    } else if (sheet === 110 && Math.random() < 1 / 20) {
+    } else if (sheet === 110 && this.rng() < 1 / 20) {
       // 神圣杂草 → 花
       const fx = st.frameX[this.at(i, j)];
       if (fx < 144) this.setType(i, j, S(113));
@@ -543,15 +834,15 @@ export class WorldEvolution {
     const t2 = this.typeAt(i, j);
     const s2 = sheetOf(t2);
     // 61 丛林矮草 1/3 → 74 高草（神庙砖上方不长，cs:72591）
-    if (s2 === 61 && Math.random() < 1 / 3 && sheetOf(this.typeAt(i, j + 1)) !== 226
+    if (s2 === 61 && this.rng() < 1 / 3 && sheetOf(this.typeAt(i, j + 1)) !== 226
       && st.frameX[this.at(i, j)] < 144) {
-      if (Math.random() < 1 / 4) st.setTile(i, j, t2, 162 + Math.floor(Math.random() * 8) * 18, st.frameY[this.at(i, j)]);
+      if (this.rng() < 1 / 4) st.setTile(i, j, t2, 162 + Math.floor(this.rng() * 8) * 18, st.frameY[this.at(i, j)]);
       this.setType(i, j, S(74));
       return;
     }
     // 普通藤（cs:72537-72589）：草 2/藤 52/花藤 382（墙 68/65/66/63 → 花藤）。
     // 原版 num24 归一为 1（cs:72551-72554）——挂靠草存在即长
-    if (s2 === 2 || s2 === 52 || s2 === 382 || (s2 === 192 && Math.random() < 1 / 10)) {
+    if (s2 === 2 || s2 === 52 || s2 === 382 || (s2 === 192 && this.rng() < 1 / 10)) {
       if (this.growMoreVines(i, j) && !this.active(i, j + 1) && !this.isLava(i, j + 1)) {
         let vine = 52;
         if (s2 !== 52) {
@@ -596,7 +887,7 @@ export class WorldEvolution {
       default: return;
     }
     if (!this.growMoreVines(i, j)) return;
-    if (Math.random() >= 1 / maxV) return;
+    if (this.rng() >= 1 / maxV) return;
     if (this.active(i, j + 1) || this.isLava(i, j + 1)) return;
     // 向上 10 格内找挂靠草（原版扫描任一途经格 bottomSlope 即中断——cs:72602-72792
     // 各族同构；曾仅判 type 漏坡底中断=下缘削坡草上垂藤，全族审查补齐）
@@ -636,21 +927,21 @@ export class WorldEvolution {
     const sheet = sheetOf(t);
     if (TILE_ALCH.has(sheet)) { this.growAlch(i, j); return; }
     this.hardUpdateWorld(i, j);
-    if (Math.random() < 1 / 2500) this.plantDye(i, j, false);
-    else if (this.hardMode && Math.random() < 1 / 10000) this.plantDye(i, j, true);
+    if (this.rng() < 1 / 2500) this.plantDye(i, j, false);
+    else if (this.hardMode && this.rng() < 1 / 10000) this.plantDye(i, j, true);
     // ---- 原版 else-if 链（cs:73305-73788）：60 走 GrassGrowth 被消费，
     //      丛林藤(62)/蜂巢由既有藤 tile 驱动生长 ----
     if (SPREAD_UNDERGROUND.has(sheet)) {
       this.grassGrowth(i, j, minI, maxI, minJ, maxJ, true);
-      if ((sheet === 32 || sheet === 352) && Math.random() < 1 / 3) {
+      if ((sheet === 32 || sheet === 352) && this.rng() < 1 / 3) {
         this.growSpike(i, j, sheet, sheet === 32 ? 23 : 199);
       }
-    } else if (sheet === 61 && Math.random() < 1 / 3 && sheetOf(this.typeAt(i, j + 1)) !== 226
+    } else if (sheet === 61 && this.rng() < 1 / 3 && sheetOf(this.typeAt(i, j + 1)) !== 226
       && st.frameX[this.at(i, j)] < 144) {
       // 61 → 74 高草（cs:73336-73352）
-      if (Math.random() < 1 / 4) st.setTile(i, j, t, 162 + Math.floor(Math.random() * 8) * 18, st.frameY[this.at(i, j)]);
+      if (this.rng() < 1 / 4) st.setTile(i, j, t, 162 + Math.floor(this.rng() * 8) * 18, st.frameY[this.at(i, j)]);
       this.setType(i, j, S(74));
-    } else if ((sheet === 60 || sheet === 62) && Math.random() < 1 / 5 && this.growMoreVines(i, j)) {
+    } else if ((sheet === 60 || sheet === 62) && this.rng() < 1 / 5 && this.growMoreVines(i, j)) {
       // 丛林藤延长（62 驱动，cs:73355-73393）
       if (!this.active(i, j + 1) && !this.isLava(i, j + 1) && this.hasSupportMulti(i, j, [60])) {
         this.setType(i, j + 1, S(62));
@@ -658,13 +949,13 @@ export class WorldEvolution {
     } else if ((sheet === 633 || sheet === 638) && this.growMoreVines(i, j)) {
       // 灰烬藤（cs:73403-73430）
       const maxV = sheet === 638 ? 7 : 70;
-      if (Math.random() < 1 / maxV && !this.active(i, j + 1) && !this.isLava(i, j + 1)
+      if (this.rng() < 1 / maxV && !this.active(i, j + 1) && !this.isLava(i, j + 1)
         && this.hasSupportMulti(i, j, [633])) this.setType(i, j + 1, S(638));
-    } else if ((sheet === 60 || sheet === 62) && Math.random() < 1 / 80 && !this.playerLOS(i, j)) {
+    } else if ((sheet === 60 || sheet === 62) && this.rng() < 1 / 80 && !this.playerLOS(i, j)) {
       // 蜂巢再生（444 2×2，cs:73541-73605）：62 藤位锚定，主体行 = j（替换藤位，
       // 原版 num15 = j for 62）；60 驱动则为 j+1
       this.placeJungleBlock2x2(i, j, 444, sheet === 62 ? j : j + 1);
-    } else if (sheet === 396 && Math.random() < 1 / 80 && !this.playerLOS(i, j)) {
+    } else if (sheet === 396 && this.rng() < 1 / 80 && !this.playerLOS(i, j)) {
       // 蚁狮幼虫（485/稀有 751，cs:73608-73693）：PlaceTile(i, j-1, num24, style)——
       // 两 id 均 Style2x2（TileObjectData.cs:3504-3511 / 3997-4011），主体占 j-2..j-1 两行
       // （锚 Origin=(0,1) 底行坐沙面）；485 变体 StyleHorizontal+WrapLimit4 →
@@ -672,18 +963,18 @@ export class WorldEvolution {
       // 双列整平底门（原版 Style2x2 走 PlaceTile→TileObject 锚校验：底行两列
       // 均须 active+solid+非半砖+slope0——沙岩坡缘不再挂幼虫堆；底行=j 本排）
       if (this.solidTile(i, j) && this.solidTile(i + 1, j)) {
-        if (Math.random() < 1 / 100) { this.placeBlock(i, j - 2, 751, 2, 2); }
+        if (this.rng() < 1 / 100) { this.placeBlock(i, j - 2, 751, 2, 2); }
         else {
           let clear = true;
           for (let d = -1; d >= -3; d--) { if (this.active(i, j + d)) { clear = false; break; } }
-          if (clear) this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(Math.random() * 4) * 36);
+          if (clear) this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(this.rng() * 4) * 36);
         }
       }
     } else if (sheet === 69) {
       this.growSpike(i, j, 69, 60);
     } else if (SNOW_FAMILY.has(sheet)) {
       // 冰雪钟乳石再生（cs:73704-73751）
-      if (Math.random() < 1 / 10 && !this.active(i, j + 1) && !this.active(i, j + 2)) {
+      if (this.rng() < 1 / 10 && !this.active(i, j + 1) && !this.active(i, j + 2)) {
         let cnt = 0;
         for (let x = i - 3; x < i + 4; x++) for (let y = j; y <= j + 3; y++) {
           if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 165) cnt++;
@@ -696,13 +987,13 @@ export class WorldEvolution {
       // 地下藤族延长（cs:73433-73502）：70/528 蘑菇藤、661/636 腐化藤、662/205 猩红藤
       if (sheet === 70 || sheet === 528) {
         const maxV = sheet === 528 ? 7 : 70;
-        if (this.growMoreVines(i, j) && Math.random() < 1 / maxV
+        if (this.growMoreVines(i, j) && this.rng() < 1 / maxV
           && !this.active(i, j + 1) && !this.isLava(i, j + 1)
           && this.hasSupportMulti(i, j, [70])) this.setType(i, j + 1, S(528));
       } else {
         const corrupt = sheet === 661 || sheet === 636;
         const maxV = (sheet === 636 || sheet === 205) ? 7 : 70;
-        if (this.growMoreVines(i, j) && Math.random() < 1 / maxV
+        if (this.growMoreVines(i, j) && this.rng() < 1 / maxV
           && !this.active(i, j + 1) && !this.isLava(i, j + 1)
           && this.hasSupportMulti(i, j, corrupt ? [661] : [662])) {
           this.setType(i, j + 1, S(corrupt ? 636 : 205));
@@ -775,7 +1066,7 @@ export class WorldEvolution {
         case 633: toDirt = 57; plant = 637; plantChance = 2; break;
         case 226: plant = 61; plantChance = 10; toDirt = -1; break;
       }
-      if (plant !== -1 && !this.active(i, minJ) && Math.random() < 1 / plantChance) {
+      if (plant !== -1 && !this.active(i, minJ) && this.rng() < 1 / plantChance) {
         // 地下顶植物同受 PlaceTile→IsFit 锚门（原版 PlaceTile 唯一口,谱系/坡面一致拒绝）
         if (!(sheet === 226 && this.tooManyJunglePlants(i, minJ)) && this.fitTopPlant(i, minJ, plant)) {
           this.place1(i, minJ, plant, 0, plant === 61 ? 8 : 1);
@@ -783,9 +1074,9 @@ export class WorldEvolution {
       }
       // 丛林草花苞专段（cs:74480-74558 地下第二个 switch 的 case 60;两个【独立 if】
       // ——238 检查无论成败继续 236 检查,非 else-if 串行）
-      if (sheet === 60 && !this.active(i, minJ) && Math.random() < 1 / 25
+      if (sheet === 60 && !this.active(i, minJ) && this.rng() < 1 / 25
         && this.liquidAt(i, minJ) === 0) {
-        if (this.hardMode && this.mechAll() && Math.random() < 1 / 60) {
+        if (this.hardMode && this.mechAll() && this.rng() < 1 / 60) {
           // 世花球茎 238（cs:74486-74512:mechBoss1∧2∧3 全灭 + 1/60 + 150 格内无 238）
           let has = false;
           for (let x = i - 150; x < i + 150 && !has; x += 2) for (let y = j - 150; y < j + 150; y += 2) {
@@ -796,7 +1087,7 @@ export class WorldEvolution {
         const expert = (this.host.difficulty ?? 0) >= 1;
         const lifeDoor = expert ? 30 : 40;   // expert 1/30 / 其余 1/40（cs:74514）
         const lifeRange = expert ? 50 : 60;  // expert 60-10（cs:74524-74528）
-        if (this.hardMode && this.mechAny() && Math.random() < 1 / lifeDoor) {
+        if (this.hardMode && this.mechAny() && this.rng() < 1 / lifeDoor) {
           // 生命果 236（cs:74514-74538:mechAny + 距离内无 236）
           let has = false;
           for (let x = i - lifeRange; x < i + lifeRange && !has; x += 2) for (let y = j - lifeRange; y < j + lifeRange; y += 2) {
@@ -824,10 +1115,10 @@ export class WorldEvolution {
         // 顶植物（cs:74599-74626）：2→3(1/12) 23/661→24 199/662→201 109→110（均 1/10）
         if (!this.active(i, minJ) && this.liquidAt(i, minJ) === 0) {
           let plant = -1;
-          if (sheet === 2 && Math.random() < 1 / 12) plant = 3;
-          else if ((sheet === 23 || sheet === 661) && Math.random() < 1 / 10) plant = 24;
-          else if ((sheet === 199 || sheet === 662) && Math.random() < 1 / 10) plant = 201;
-          else if (sheet === 109 && Math.random() < 1 / 10) plant = 110;
+          if (sheet === 2 && this.rng() < 1 / 12) plant = 3;
+          else if ((sheet === 23 || sheet === 661) && this.rng() < 1 / 10) plant = 24;
+          else if ((sheet === 199 || sheet === 662) && this.rng() < 1 / 10) plant = 201;
+          else if (sheet === 109 && this.rng() < 1 / 10) plant = 110;
           if (plant !== -1 && this.fitTopPlant(i, minJ, plant)) this.place1(i, minJ, plant, 0, plant === 3 ? 7 : 1);
         }
         // 类型归一（cs:74629-74657）：32→23 352→199 477→2 492→109；邪恶对 23/661、199/662
@@ -877,7 +1168,7 @@ export class WorldEvolution {
       }
       case 70: {
         // 蘑菇草（cs:74765-74818）：顶蘑菇草植物 71（1/10）+ 蘑菇树（未接）+ 泥→70
-        if (!this.active(i, minJ) && Math.random() < 1 / 10 && this.fitTopPlant(i, minJ, 71)) this.place1(i, minJ, 71, 0, 1);
+        if (!this.active(i, minJ) && this.rng() < 1 / 10 && this.fitTopPlant(i, minJ, 71)) this.place1(i, minJ, 71, 0, 1);
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;
           if (sheetOf(this.typeAt(k, l)) === 59) this.spreadGrass(k, l, 59, 70);
@@ -886,17 +1177,17 @@ export class WorldEvolution {
       }
       case 60: {
         // 丛林草（cs:74821-74886）：顶 61（1/7）+ 世花球茎 238 + 生命果 236 + 丛林植物 233 + 泥→60
-        if (!this.active(i, minJ) && Math.random() < 1 / 7 && this.fitTopPlant(i, minJ, 61)) {
+        if (!this.active(i, minJ) && this.rng() < 1 / 7 && this.fitTopPlant(i, minJ, 61)) {
           this.place1(i, minJ, 61, 0, 8);
-        } else if (Math.random() < 1 / 500 && (!this.active(i, minJ)
+        } else if (this.rng() < 1 / 500 && (!this.active(i, minJ)
           || [61, 74, 69].includes(sheetOf(this.typeAt(i, minJ))))) {
           void 0; // 蘑菇树再生（TryGrowingTreeByType(5)）——树系统运行时接口未接
-        } else if (Math.random() < 1 / 25 && this.liquidAt(i, minJ) === 0
+        } else if (this.rng() < 1 / 25 && this.liquidAt(i, minJ) === 0
           && this.fitTopPlant(i, minJ, 233)) {
           // 丛林植物 233（cs:74837-74856 地表段 style rand(8)——花苞 238/生命果 236
           // 属【地下半区】case 60（cs:74480-74558,flag 作用域 :74429 证实）,2026-08-13
           // 自地表误植段移除——此前地下丛林永不长花苞,世花链只靠首杀保底单株）
-          this.place1(i, minJ, 233, Math.floor(Math.random() * 8), 1);
+          this.place1(i, minJ, 233, Math.floor(this.rng() * 8), 1);
         }
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;
@@ -906,7 +1197,7 @@ export class WorldEvolution {
       }
       case 226: {
         // 神庙砖顶 61（1/7，密度门，cs:74880-74899）
-        if (!this.active(i, minJ) && Math.random() < 1 / 7 && !this.tooManyJunglePlants(i, minJ)
+        if (!this.active(i, minJ) && this.rng() < 1 / 7 && !this.tooManyJunglePlants(i, minJ)
           && this.fitTopPlant(i, minJ, 61)) {
           this.place1(i, minJ, 61, 0, 8);
         }
@@ -914,7 +1205,7 @@ export class WorldEvolution {
       }
       case 633: {
         // 灰烬草（cs:74902-74928）：顶 637（1/10）+ 灰烬→633
-        if (!this.active(i, minJ) && Math.random() < 1 / 10 && this.fitTopPlant(i, minJ, 637)) this.place1(i, minJ, 637, 0, 4);
+        if (!this.active(i, minJ) && this.rng() < 1 / 10 && this.fitTopPlant(i, minJ, 637)) this.place1(i, minJ, 637, 0, 4);
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;
           if (sheetOf(this.typeAt(k, l)) === 57) this.spreadGrass(k, l, 57, 633);
@@ -1195,7 +1486,7 @@ export class WorldEvolution {
         if (walls) {
           if (wall === 69 || wall === 70 || wall === 81) {
             // 邪恶/神圣草墙 → 地表原版草墙族（9/10 → 63，1/10 → 65；地下 64）
-            convWall(j < this.host.worldSurface ? (Math.random() * 10 < 9 ? 63 : 65) : 64);
+            convWall(j < this.host.worldSurface ? (this.rng() * 10 < 9 ? 63 : 65) : 64);
           } else if (wall === 262) convWall(61);   // 化石裂纹墙归自然（cs:55606-55617）
           else if (wall === 274) convWall(185);
           else if (wall === 292) convWall(204);
@@ -1215,8 +1506,8 @@ export class WorldEvolution {
               // 无种子契约（世界生成 genRand 不进运行时），行为等价保持不改——
               // 2026-08-21 复审 P3④ 登记项）
               const h = st.h;
-              if (j < this.host.worldSurface + 4 + Math.floor(Math.random() * 3)
-                || j > (h + this.host.rockLevel) / 2 - 3 + Math.floor(Math.random() * 3)) convWall(15);
+              if (j < this.host.worldSurface + 4 + Math.floor(this.rng() * 3)
+                || j > (h + this.host.rockLevel) / 2 - 3 + Math.floor(this.rng() * 3)) convWall(15);
               else convWall(64);
             }
             else if (WALL_CONV_HARD_SAND.has(wall) && wall !== 216) convWall(216);
@@ -1255,7 +1546,7 @@ export class WorldEvolution {
           if (WALL_CONV_STONE.has(wall) && wall !== 349 && !fossil) convWall(349);
           else if (wall === 69 || wall === 70 || wall === 81) {
             // 腐化/猩红/神圣草墙 → 地表原版草墙族（9/10 → 63，1/10 → 65；地下 64）
-            convWall(j < this.host.worldSurface ? (Math.random() * 10 < 9 ? 63 : 65) : 64);
+            convWall(j < this.host.worldSurface ? (this.rng() * 10 < 9 ? 63 : 65) : 64);
           } else if (wall === 262) convWall(61);
           else if (wall === 274) convWall(185);
           else if (WALL_CONV_DIRT.has(wall) && wall !== 2) convWall(2);
@@ -1430,26 +1721,26 @@ export class WorldEvolution {
     if (!st.inBounds(i, j) || !this.active(i, j)) return;
     const sheet = sheetOf(this.typeAt(i, j));
     // 水晶碎块生长（cs:69668-69709）：珍珠石/珍珠沙/神圣冰/神圣硬化沙岩 族 + 岩层下 + 1/5
-    if (CAN_GROW_SHARDS.has(sheet) && j > this.host.rockLevel && Math.random() < 1 / 5) {
+    if (CAN_GROW_SHARDS.has(sheet) && j > this.host.rockLevel && this.rng() < 1 / 5) {
       const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-      const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+      const [dx, dy] = dirs[Math.floor(this.rng() * 4)];
       if (!this.active(i + dx, j + dy)) {
         let cnt = 0;
         for (let k = i - 6; k <= i + 6; k++) for (let l = j - 6; l <= j + 6; l++) {
           if (this.active(k, l) && sheetOf(this.typeAt(k, l)) === 129) cnt++;
         }
         if (cnt < 2) {
-          const rare = Math.random() < 1 / 50;
-          this.place1(i + dx, j + dy, 129, rare ? 18 + Math.floor(Math.random() * 6) : Math.floor(Math.random() * 18));
+          const rare = this.rng() < 1 / 50;
+          this.place1(i + dx, j + dy, 129, rare ? 18 + Math.floor(this.rng() * 6) : Math.floor(this.rng() * 18));
         }
       }
     }
     // 叶绿生长（cs:69712-69731）：深处丛林草 1/300 → 周围 10 格泥块(59) → 叶绿
     //（原版目标严格 ==59,曾误含丛林草 60 直转矿）
     if (j > (this.host.worldSurface + this.host.rockLevel) / 2) {
-      if (sheet === 60 && Math.random() < 1 / 300) {
-        const x = i + Math.floor(Math.random() * 21) - 10;
-        const y = j + Math.floor(Math.random() * 21) - 10;
+      if (sheet === 60 && this.rng() < 1 / 300) {
+        const x = i + Math.floor(this.rng() * 21) - 10;
+        const y = j + Math.floor(this.rng() * 21) - 10;
         const s2 = sheetOf(this.typeAt(x, y));
         if (this.active(x, y) && s2 === 59
           && (!this.active(x, y - 1) || ![5, 236, 702, 238].includes(sheetOf(this.typeAt(x, y - 1))))
@@ -1464,8 +1755,8 @@ export class WorldEvolution {
       //  叶绿只被消耗（挖/退化）永不增殖,长期世界存量单调递减。退化臂（Convert 9,
       //  ±6 随机格单次,Main.rand 流）原样保留。
       if (sheet === 211 || sheet === 346) {
-        if (Math.random() >= 1 / 3) {                    // genRand.Next(3) != 0
-          const d = Math.floor(Math.random() * 4);       // genRand.Next(4)
+        if (this.rng() >= 1 / 3) {                    // genRand.Next(3) != 0
+          const d = Math.floor(this.rng() * 4);       // genRand.Next(4)
           const nx = i + (d === 0 ? 1 : d === 1 ? -1 : 0);
           const ny = j + (d === 2 ? 1 : d === 3 ? -1 : 0);
           const s2 = sheetOf(this.typeAt(nx, ny));
@@ -1476,13 +1767,13 @@ export class WorldEvolution {
             this.convert(nx, ny, 8);
           }
         }
-        const x = i + Math.floor(Math.random() * 13) - 6;
-        const y = j + Math.floor(Math.random() * 13) - 6;
+        const x = i + Math.floor(this.rng() * 13) - 6;
+        const y = j + Math.floor(this.rng() * 13) - 6;
         if (this.active(x, y)) this.convert(x, y, 9);
       }
     }
     // 世花已死则邪恶不再蔓延（cs:69757-69759）
-    if ((this.host.flags['downed_262'] && Math.random() < 1 / 2) || !this.allowedToSpread) return;
+    if ((this.host.flags['downed_262'] && this.rng() < 1 / 2) || !this.allowedToSpread) return;
     // 邪恶草蔓延（cs:69761-69806 腐化 / :69808-69895 猩红 / :69897-69955 神圣 同构）
     if (SPREADS_CORRUPTION.has(sheet)) this.evilSpread(i, j, 1);
     else if (SPREADS_CRIMSON.has(sheet)) this.evilSpread(i, j, 4);
@@ -1503,8 +1794,8 @@ export class WorldEvolution {
     let again = true;
     while (again) {
       again = false;
-      const x = i + Math.floor(Math.random() * 7) - 3;
-      const y = j + Math.floor(Math.random() * 7) - 3;
+      const x = i + Math.floor(this.rng() * 7) - 3;
+      const y = j + Math.floor(this.rng() * 7) - 3;
       if (!st.inBounds(x, y)) continue;
       // nearbyChlorophyte → 防御退化（cs:69768-69770；ChlorophyteDefense 非 remix 无操作）。
       // ★R12-10（2026-08-24）：补 1-2 矿**概率防御臂**（cs:70068-70082）——count>0 时
@@ -1518,7 +1809,7 @@ export class WorldEvolution {
           const s = sheetOf(this.typeAt(k, l));
           if (this.active(k, l) && (s === 211 || s === 346)) chlor++;
         }
-        if (chlor >= 3 || (chlor > 0 && Math.random() < (chlor + 1) / 5)) return;
+        if (chlor >= 3 || (chlor > 0 && this.rng() < (chlor + 1) / 5)) return;
       }
       // 向日葵 2 格内（CountNearBlocksTypes(x,y,2,cap1,27)）→ 中止本次
       let sunflower = false;
@@ -1530,7 +1821,7 @@ export class WorldEvolution {
       const convertible = this.active(x, y)
         && (ALLOW[convType].includes(s) || TILE_MOSS.has(s));
       if (convertible) {
-        if (Math.random() < 1 / 2) again = true;
+        if (this.rng() < 1 / 2) again = true;
         this.convert(x, y, convType, true, false);
       }
     }
@@ -1562,8 +1853,8 @@ export class WorldEvolution {
     else if (WALL_SPREADS_CORRUPTION.has(wall) || (sheet >= 0 && SPREADS_CORRUPTION.has(sheet))) conv = 1;
     else if (WALL_SPREADS_HALLOW.has(wall) || (sheet >= 0 && SPREADS_HALLOW.has(sheet))) conv = 2;
     if (conv === -1) return;
-    const x = i + Math.floor(Math.random() * 5) - 2;
-    const y = j + Math.floor(Math.random() * 5) - 2;
+    const x = i + Math.floor(this.rng() * 5) - 2;
+    const y = j + Math.floor(this.rng() * 5) - 2;
     if (!st.inBounds(x, y)) return;
     const tw = st.wall[this.at(x, y)];
     // 腐化/猩红：目标墙须为草墙族 63-68（cs:74975）；神圣：63/65/66/68（cs:75027）
@@ -1592,8 +1883,8 @@ export class WorldEvolution {
     else if (WALL_SPREADS_HALLOW.has(wall) || SPREADS_HALLOW.has(sheet)) conv = 2;
     else if (WALL_SPREADS_CRIMSON.has(wall) || SPREADS_CRIMSON.has(sheet)) conv = 4;
     if (conv === -1) return;
-    const x = i + Math.floor(Math.random() * 5) - 2;
-    const y = j + Math.floor(Math.random() * 5) - 2;
+    const x = i + Math.floor(this.rng() * 5) - 2;
+    const y = j + Math.floor(this.rng() * 5) - 2;
     if (!st.inBounds(x, y)) return;
     // 目标须为纯沙墙族（cs:75112-75120）
     if (!WALL_CONV_PURE_SAND.has(st.wall[this.at(x, y)])) return;
@@ -1608,7 +1899,7 @@ export class WorldEvolution {
   // ================= 苔藓（Overground/UndergroundTile 同段 cs:72400-72462） =================
 
   private mossUpdate(i: number, j: number, minI: number, maxI: number, minJ: number, maxJ: number): void {
-    if (Math.random() >= 0.5) return;
+    if (this.rng() >= 0.5) return;
     const st = this.host.store;
     const self = sheetOf(this.typeAt(i, j));
     for (let k = minI; k < maxI; k++) {
@@ -1623,9 +1914,9 @@ export class WorldEvolution {
       }
     }
     // 藓堆 184（cs:72447-72462）：1/6 随机相邻空格
-    if (Math.random() < 1 / 6) {
+    if (this.rng() < 1 / 6) {
       const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-      const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
+      const [dx, dy] = dirs[Math.floor(this.rng() * 4)];
       if (!this.active(i + dx, j + dy)) this.place1(i + dx, j + dy, 184, 0, 3);
     }
   }
@@ -1646,13 +1937,13 @@ export class WorldEvolution {
 
   private plantAlch(): void {
     const st = this.host.store;
-    const x = 20 + Math.floor(Math.random() * (st.w - 40));
+    const x = 20 + Math.floor(this.rng() * (st.w - 40));
     // 深度分布（cs:45917-45921）：1/40 深层、9/10 地表下、1/10 全域
     let y: number;
-    const r = Math.random();
-    if (r < 1 / 40) y = Math.floor((this.host.rockLevel + st.h) / 2) + Math.floor(Math.random() * (st.h - 20 - Math.floor((this.host.rockLevel + st.h) / 2)));
-    else if (r < 1 / 40 + 9 / 10) y = Math.floor(this.host.worldSurface) + Math.floor(Math.random() * (st.h - 20 - Math.floor(this.host.worldSurface)));
-    else y = 20 + Math.floor(Math.random() * (st.h - 40));
+    const r = this.rng();
+    if (r < 1 / 40) y = Math.floor((this.host.rockLevel + st.h) / 2) + Math.floor(this.rng() * (st.h - 20 - Math.floor((this.host.rockLevel + st.h) / 2)));
+    else if (r < 1 / 40 + 9 / 10) y = Math.floor(this.host.worldSurface) + Math.floor(this.rng() * (st.h - 20 - Math.floor(this.host.worldSurface)));
+    else y = 20 + Math.floor(this.rng() * (st.h - 40));
     if (y >= st.h - 20) return;
     // 向下找首个实心
     let k = y;
@@ -1703,30 +1994,30 @@ export class WorldEvolution {
       const bloom = (herb === 0 && this.host.isDay) || (herb === 1 && !this.host.isDay)
         || (herb === 2) || (herb === 3) || (herb === 4 && this.host.raining)
         || (herb === 5) || (herb === 6 && y > this.host.worldSurface);
-      if (bloom && Math.random() < 1 / 50) {
+      if (bloom && this.rng() < 1 / 50) {
         // 帧内已有花位的直接成花（帧 0/18/72/36/90 各条件段）；否则走 83
         st.setTile(x, y, S(84), fx, 0);
-      } else if (Math.random() < 1 / 50) {
+      } else if (this.rng() < 1 / 50) {
         st.setTile(x, y, S(83), fx, 0);
       }
       return;
     }
     if (sheet === 83) {
       // 成熟 ⇌ 开花（cs:45870-45897）：帧 36 的 1/3 权重摆动
-      if (fx === 36 && Math.random() < 2 / 3) {
-        if (Math.random() < 1 / 2) st.setTile(x, y, S(84), fx, 0);
-      } else if (fx === 108 && Math.random() < 1 / 30) {
+      if (fx === 36 && this.rng() < 2 / 3) {
+        if (this.rng() < 1 / 2) st.setTile(x, y, S(84), fx, 0);
+      } else if (fx === 108 && this.rng() < 1 / 30) {
         st.setTile(x, y, S(84), fx, 0);
       } else {
         // 满足开花条件 → 1/50 转 84（cs:45809 同构，成熟态沿用）
         const herb2 = herb;
         const bloom = (herb2 === 0 && this.host.isDay) || (herb2 === 1 && !this.host.isDay)
           || (herb2 === 4 && this.host.raining) || (herb2 === 6 && y > this.host.worldSurface);
-        if (bloom && Math.random() < 1 / 50) st.setTile(x, y, S(84), fx, 0);
+        if (bloom && this.rng() < 1 / 50) st.setTile(x, y, S(84), fx, 0);
       }
       return;
     }
-    if (sheet === 84 && fx === 36 && Math.random() < 1 / 2) {
+    if (sheet === 84 && fx === 36 && this.rng() < 1 / 2) {
       // 开花 → 成熟回落（cs:45874-45885 else-if 链）
       st.setTile(x, y, S(83), fx, 0);
     }
@@ -1821,7 +2112,7 @@ export class WorldEvolution {
     for (let m = tx - 2; m <= tx + 2; m++) for (let n = ty - (11 - height); n <= ty + height; n++) {
       if (this.active(m, n) && sheetOf(this.typeAt(m, n)) === 80) cnt++;
     }
-    if (cnt >= 11 + Math.floor(Math.random() * 2)) return;
+    if (cnt >= 11 + Math.floor(this.rng() * 2)) return;
     tx = i; ty = j;
     if (lean === 0) {
       if (height === 0) {
@@ -1831,10 +2122,10 @@ export class WorldEvolution {
       // 分支判定（cs:56748-56783）：1/3 左/右/直上
       const sideClear = (d: number) => !this.active(i + d, j) && !this.active(i + 2 * d, j + 1)
         && !this.active(i + d, j - 1) && !this.active(i + d, j + 1) && !this.active(i + 2 * d, j);
-      const roll = Math.floor(Math.random() * 3);
+      const roll = Math.floor(this.rng() * 3);
       if (roll === 0 && sideClear(-1)) { st.setTile(i - 1, j, S(80), 0, 0); return; }
       if (roll === 1 && sideClear(1)) { st.setTile(i + 1, j, S(80), 0, 0); return; }
-      if (height < 2 + Math.floor(Math.random() * 6) && !this.active(i - 1, j - 1) && !this.active(i + 1, j - 1) && !this.active(i, j - 1)) {
+      if (height < 2 + Math.floor(this.rng() * 6) && !this.active(i - 1, j - 1) && !this.active(i + 1, j - 1) && !this.active(i, j - 1)) {
         st.setTile(i, j - 1, S(80), 0, 0);
       }
       return;
@@ -1892,7 +2183,7 @@ export class WorldEvolution {
     if (landSheet === 23) pair = 661;
     else if (landSheet === 199) pair = 662;
     let tx = i, ty = j;
-    const dir = Math.floor(Math.random() * 4);
+    const dir = Math.floor(this.rng() * 4);
     if (dir === 0) ty--; else if (dir === 1) ty++; else if (dir === 2) tx--; else tx++;
     if (this.active(tx, ty)) return;
     // 菱形域锚检查（cs:45563-45579）：有 land/pair 草且其上挂着同类 spike
@@ -1917,7 +2208,7 @@ export class WorldEvolution {
     if (this.typeAt(x, y) === S(231)) return;
     // SolidTile(x, y-1) + 上下空
     if (!this.solidTile(x, y - 1) || this.active(x, y) || this.active(x, y + 1)) return;
-    const variation = Math.floor(Math.random() * 3);
+    const variation = Math.floor(this.rng() * 3);
     const t = S(165);
     if (!t) return;
     // 冰族专属列（GetDesiredStalagtiteStyle :38800-38808）：147/161→0、163→594、
@@ -1931,8 +2222,8 @@ export class WorldEvolution {
 
   /** GrowWeb（cs:74141-74175）：1/10 + ±2-3 内有实心 → 放蛛网 51 */
   private growWeb(i: number, j: number): void {
-    if (Math.random() >= 1 / 10) return;
-    const r = 2 + Math.floor(Math.random() * 2);
+    if (this.rng() >= 1 / 10) return;
+    const r = 2 + Math.floor(this.rng() * 2);
     let solid = false;
     for (let k = i - r; k <= i + r && !solid; k++) for (let l = j - r; l <= j + r; l++) {
       if (this.solidTile(k, l)) { solid = true; break; }
@@ -1963,14 +2254,14 @@ export class WorldEvolution {
         const aboveLiq = this.liquidAt(i, j - 1);
         const liqType = st.liquidType[this.at(i, j - 1)];
         if (aboveLiq > 0 && (liqType === 2 || liqType === 3)) return;
-        this.place1(i, j - 1, 227, 8 + Math.floor(Math.random() * 4));
+        this.place1(i, j - 1, 227, 8 + Math.floor(this.rng() * 4));
       }
       return;
     }
     if (ground === 2 || ground === 109) {
-      this.place1(i, j - 1, 227, Math.random() < 1 / 4 ? 4 : 3);
+      this.place1(i, j - 1, 227, this.rng() < 1 / 4 ? 4 : 3);
     } else if (ground === 60) {
-      this.place1(i, j - 1, 227, Math.random() < 1 / 2 ? 2 : 4);
+      this.place1(i, j - 1, 227, this.rng() < 1 / 2 ? 2 : 4);
     } else if (ground === 53 && this.liquidAt(i, j - 1) === 255 && this.liquidAt(i, j - 2) === 255) {
       this.place1(i, j - 1, 227, 2);
     }

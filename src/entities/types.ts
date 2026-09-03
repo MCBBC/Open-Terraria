@@ -108,6 +108,10 @@ export interface GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown,
     contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
     opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number;
+  /** ★充能电水母反噬单口（Player.TakeDamageFromJellyfish :44607-44613）——近战
+   *  （ProcessHitAgainstNPC :44620）与弹幕（Damage_PVE_Inner :12682 ZappingJellyfish
+   *  块）两口共用同一方法；proj1457.dealContacts 水母块消费 */
+  takeDamageFromJellyfish?(e: unknown): void;
   /** ★F2 死亡结算单点（deaths 计数/掉落/硬核消亡——damagePlayer 致死分支与
    *  直扣 hp 致死站共用的幂等管线；Game 实现 settlePlayerDeath） */
   settlePlayerDeath?(pvp: boolean): void;
@@ -317,7 +321,7 @@ export interface GameHooks {
     x: number, y: number, w: number, h: number, type: number,
     speedX?: number, speedY?: number, alpha?: number,
     color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
-    noGravity?: boolean, perfect?: boolean,
+    noGravity?: boolean, perfect?: boolean, prettySparkle?: boolean,
   ): import('../fx/VanillaDust').VDust | null;
   /** 鼠马车挖掘链的镐力门（MinecartDiggerHelper.HasPickPower :163-170 ←
    *  Player.HasEnoughPickPowerToHurtTile Player.cs:52964-52979）：背包最佳镐

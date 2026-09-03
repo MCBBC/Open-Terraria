@@ -86,7 +86,9 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
   //  inextp 双指针,num2=inext+21 环 55）。rng.seedArray 共享引用直读直写,inext 走
   //  生成器局部（跨 yield 存活,列 yield/返回前回写）;每格省一次方法调用+区间包装,
   //  值序/消费序与 rng.nextIntRange(-10,11) 位级一致（hardmode-async-matrix 锁）。
-  const sa = (rng as unknown as { seedArray: Int32Array }).seedArray;
+  // ★rng 是 RNG 包装类(内部 ur=UnifiedRandom)——seedArray/inext 必须经 .vanilla 取
+  const ur = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+  const sa = ur.seedArray;
   const ROLL_HOOK = (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll;
   // ★F2'（2026-09-02 review 回滚外提）：hive 扫描回归本函数内部逐 runner 新鲜扫描
   //  （原版 cs:77013 在 GERunner 体内）——外提版在"runner1 带内转化 225 使计数跌破
@@ -112,7 +114,23 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
   let dx = rng.nextIntRange(-10, 11) * 0.1, dy = rng.nextIntRange(-10, 11) * 0.1;
   if (speedX !== 0 || speedY !== 0) { dx = speedX; dy = speedY; }
   let running = true;
-  let inextLoc = (rng as unknown as { inext: number }).inext;   // ★捕获必须在 V 带掷骰之后(否则重放错位)
+  let inextLoc = ur.inext;   // ★捕获必须在 V 带掷骰之后(否则重放错位)
+  // ★IIIII216（2026-09-03）：GERunner 转化支尾级联 SquareTileFrame(m,n)——1458 原文
+  //  good 十支(77036/77041/77046/77051/77056/77061/77066/77071/77076/77081)、crimson
+  //  九支(77101-77141)、corrupt 九支(77161-77201)每支 type 写后必调；墙支无。NB-A3
+  //  头注宣称接线但调用从未落盘（半重构签名）——基线 g2 L3=36,839 首差
+  //  T(2384,102) x24/j3=PlantCheck 按新地基重挂种、T(2396,101) x186/j187=Pile 重挂,
+  //  均为级联【写面】缺（inext 同步正确 ⇒ 掷流仍逐位全等,写序列缺段）。
+  //  inext 纪律：本生成器热循环内联 InternalSample（inextLoc 局部化、跨 yield 存活）,
+  //  级联内掷走 RNG 门面（写 ur.inext 同一实例）——调用前回写、调用后读回,
+  //  级联掷落入 V 带菱形抖动之间的原版位次。 HM 期 generatingWorld=true ⇒
+  //  TileFrameCosmetic 不走,级联掷=TileFrameImportant 分派/ KillTile 尘掷,与 x86 rig
+  //  （HardmodeProbeHook 执行点=GenerateWorld 尾,generatingWorld 仍 true）同口径。
+  const cascade = (mm: number, nn: number): void => {
+    ur.inext = inextLoc;
+    genSquareTileFrame(st, rng, mm, nn);
+    inextLoc = ur.inext;
+  };
   while (running) {
     let x0 = Math.trunc(vx - num4 * 0.5), x1 = Math.trunc(vx + num4 * 0.5);
     let y0 = Math.trunc(vy - num4 * 0.5), y1 = Math.trunc(vy + num4 * 0.5);
@@ -131,16 +149,19 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
         smp += (smp >> 31) & 0x7fffffff;
         sa[iN] = smp;
         inextLoc = iN;
-        ROLL_HOOK?.(smp, rng);
+        ROLL_HOOK?.(smp, ur);
         if (Math.abs(m - vx) + Math.abs(n - vy) >= num2 * 0.5 * (1 + (Math.trunc(smp * 4.656612875245797e-10 * 21) - 10) * 0.015)) continue;
         const ii = st.idx(m, n);
         const wl = st.wall[ii];
         const sh = SHEET_LUT[st.type[ii]];
-        // ★NB-A 级联（2026-09-02，36,288 格差异的单一根因）：原版每支 type 写后紧跟
-        //  SquareTileFrame(m,n)（57 :77011/:77014/:77017/…逐支内联；本体 cs:81462）——
+        // ★NB-A/IIIII216 级联（2026-09-03 定谳）：原版每支 type 写后紧跟
+        //  SquareTileFrame(m,n)（1458 cs:77033-77202 逐支内联；本体 cs:81470）——
         //  3×3 邻域 TileFrame 重框（苔藓/植被邻格改型）+ 失支撑格 KillTile。墙写四支
-        //  原版无任何帧调用，故墙侧不接级联。genSquareTileFrame 本域零掷骰（x86 hm 段
-        //  22,475,354 样本与本文件旧版逐位全等=级联掷零，NB-A 已证）。
+        //  原版无任何帧调用，故墙侧不接级联。★掷面澄清：HM 期 generatingWorld=true
+        //  ⇒ TileFrameCosmetic 不走 ⇒ 实心格级联零掷（x86 hm 段 22,475,354 样本逐位
+        //  全等的真因），NB-A3 备注的"掷差致 dx 漂移"表述作废——36,288/36,839 残差是
+        //  级联【写面】缺（PlantCheck 重挂种/Pile 重挂/失支撑 KillTile），非掷差。
+        //  本批（IIIII216）每支尾 cascade() 才是级联首次真正落盘（NB-A3 时调用缺失）。
         // ★IIII177（2026-09-02）：type 写改**纯 type 直写**（原版 `Main.tile[m,n].type = X`
         //  不置 active/不清帧/漆/涂层——cs:77009-77202 逐支裸赋值）——旧 st.setTile 会把
         //  非活性幽灵格**激活**（flags=1）并清漆/涂层，x86 转化格活性位原样保留：
@@ -157,16 +178,17 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           // tile：2→109 草；1/25/203→117 珍珠岩；53/123/112/234→116 珍珠沙；
           // 661/662→60 丛林草；23/199→109；161/163/200 冰→164 粉冰；396→403、397→402；
           // flag 门：225 Hive→117、230 CrispyHoney→402（cs:76486-76488）
-          if (flag && sh === 225) { st.type[ii] = id(117); }
-          else if (flag && sh === 230) { st.type[ii] = id(402); }
-          else if (sh === 2) { st.type[ii] = id(109); }
-          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117); }
-          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116); }
-          else if (sh === 661 || sh === 662) { st.type[ii] = id(60); }
-          else if (sh === 23 || sh === 199) { st.type[ii] = id(109); }
-          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164); }
-          else if (sh === 396) { st.type[ii] = id(403); }
-          else if (sh === 397) { st.type[ii] = id(402); }
+          // ★IIIII216：每支尾 SquareTileFrame(m,n)（1458 cs:77033-77082 逐支内联）
+          if (flag && sh === 225) { st.type[ii] = id(117); cascade(m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(402); cascade(m, n); }
+          else if (sh === 2) { st.type[ii] = id(109); cascade(m, n); }
+          else if (sh === 1 || sh === 25 || sh === 203) { st.type[ii] = id(117); cascade(m, n); }
+          else if (sh === 53 || sh === 123 || sh === 112 || sh === 234) { st.type[ii] = id(116); cascade(m, n); }
+          else if (sh === 661 || sh === 662) { st.type[ii] = id(60); cascade(m, n); }
+          else if (sh === 23 || sh === 199) { st.type[ii] = id(109); cascade(m, n); }
+          else if (sh === 161 || sh === 163 || sh === 200) { st.type[ii] = id(164); cascade(m, n); }
+          else if (sh === 396) { st.type[ii] = id(403); cascade(m, n); }
+          else if (sh === 397) { st.type[ii] = id(402); cascade(m, n); }
         } else if (crimson) {
           // 猩红（57 :77076-77135 / 56 76541-…）：墙 63/65/66/68→81、216→218、187→221
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 81);
@@ -174,15 +196,16 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (wl === 187) st.setWall(m, n, 221);
           // tile：60/661→662；2/109→199；1/117→203；53/123/116→234；161/164→200；396→401、397→399；
           // flag 门：225 Hive→203、230 CrispyHoney→399（cs:76550-76557）
-          if (flag && sh === 225) { st.type[ii] = id(203); }
-          else if (flag && sh === 230) { st.type[ii] = id(399); }
-          else if (sh === 60 || sh === 661) { st.type[ii] = id(662); }
-          else if (sh === 2 || sh === 109) { st.type[ii] = id(199); }
-          else if (sh === 1 || sh === 117) { st.type[ii] = id(203); }
-          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(234); }
-          else if (sh === 161 || sh === 164) { st.type[ii] = id(200); }
-          else if (sh === 396) { st.type[ii] = id(401); }
-          else if (sh === 397) { st.type[ii] = id(399); }
+          // ★IIIII216：每支尾 SquareTileFrame(m,n)（1458 cs:77098-77142 逐支内联）
+          if (flag && sh === 225) { st.type[ii] = id(203); cascade(m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(399); cascade(m, n); }
+          else if (sh === 60 || sh === 661) { st.type[ii] = id(662); cascade(m, n); }
+          else if (sh === 2 || sh === 109) { st.type[ii] = id(199); cascade(m, n); }
+          else if (sh === 1 || sh === 117) { st.type[ii] = id(203); cascade(m, n); }
+          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(234); cascade(m, n); }
+          else if (sh === 161 || sh === 164) { st.type[ii] = id(200); cascade(m, n); }
+          else if (sh === 396) { st.type[ii] = id(401); cascade(m, n); }
+          else if (sh === 397) { st.type[ii] = id(399); cascade(m, n); }
         } else {
           // 腐化（57 :77136-77195 / 56 76605-…）：墙 63/65/66/68→69、216→217、187→220
           if (wl === 63 || wl === 65 || wl === 66 || wl === 68) st.setWall(m, n, 69);
@@ -190,18 +213,19 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
           else if (wl === 187) st.setWall(m, n, 220);
           // tile：60/662→661；2/109→23；1/117→25；53/123/116→112；161/164→163；396→400、397→398；
           // flag 门：225 Hive→25、230 CrispyHoney→398（腐化分支同构）
-          if (flag && sh === 225) { st.type[ii] = id(25); }
-          else if (flag && sh === 230) { st.type[ii] = id(398); }
-          else if (sh === 60 || sh === 662) { st.type[ii] = id(661); }
-          else if (sh === 2 || sh === 109) { st.type[ii] = id(23); }
-          else if (sh === 1 || sh === 117) { st.type[ii] = id(25); }
-          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112); }
-          else if (sh === 161 || sh === 164) { st.type[ii] = id(163); }
-          else if (sh === 396) { st.type[ii] = id(400); }
-          else if (sh === 397) { st.type[ii] = id(398); }
+          // ★IIIII216：每支尾 SquareTileFrame(m,n)（1458 cs:77158-77202 逐支内联）
+          if (flag && sh === 225) { st.type[ii] = id(25); cascade(m, n); }
+          else if (flag && sh === 230) { st.type[ii] = id(398); cascade(m, n); }
+          else if (sh === 60 || sh === 662) { st.type[ii] = id(661); cascade(m, n); }
+          else if (sh === 2 || sh === 109) { st.type[ii] = id(23); cascade(m, n); }
+          else if (sh === 1 || sh === 117) { st.type[ii] = id(25); cascade(m, n); }
+          else if (sh === 53 || sh === 123 || sh === 116) { st.type[ii] = id(112); cascade(m, n); }
+          else if (sh === 161 || sh === 164) { st.type[ii] = id(163); cascade(m, n); }
+          else if (sh === 396) { st.type[ii] = id(400); cascade(m, n); }
+          else if (sh === 397) { st.type[ii] = id(398); cascade(m, n); }
         }
       }
-      (rng as unknown as { inext: number }).inext = inextLoc;   // yield 边界回写(代价 1 写)
+      ur.inext = inextLoc;                                     // yield 边界回写(代价 1 写)
       yield;                                             // PR-async：每刷写列一个单元
     }
     // 速度积分 + 扰动（57 :77197-77212 / 56 76669-76682）：val2.X += Next(-10,11)*0.05，
@@ -214,13 +238,13 @@ function* geRunnerGen(st: TileStore, rng: RNG, i: number, j: number, speedX: num
     sV += (sV >> 31) & 0x7fffffff;
     sa[sI] = sV;
     inextLoc = sI;
-    ROLL_HOOK?.(sV, rng);
+    ROLL_HOOK?.(sV, ur);
     dx += (Math.trunc(sV * 4.656612875245797e-10 * 21) - 10) * 0.05;
     if (dx > speedX + 1) dx = speedX + 1;
     if (dx < speedX - 1) dx = speedX - 1;
     if (vx < -num2 || vy < -num2 || vx > w + num2 || vy > h + num2) running = false;
   }
-  (rng as unknown as { inext: number }).inext = inextLoc;      // 收尾回写(backfill/后续消费面接续)
+  ur.inext = inextLoc;                                         // 收尾回写(backfill/后续消费面接续)
 }
 
 /** 洞穴墙回填 OnlyWalls 白名单（cs:31979 原文列表照抄：0/54-59/61/185/212-215/2/196-199/
@@ -447,17 +471,35 @@ export function startHardmode(world: World): { wasHard: boolean } {
   return { wasHard };
 }
 
+/** 读档自愈网（PR-async 收口②）：hardMode=true 而 hardModeConverted 缺 ⇒ 半成品
+ *  转换态泄漏到存档（防御未来一切回归）——推 force 转换 job 重跑幂等映射收敛。 */
+export function hardmodeRepairJob(world: World): { step(): boolean } {
+  const it = startHardmodeStepsGen(world, !!world.flags.hardMode, false, true);
+  let done = false;
+  return {
+    step(): boolean {
+      if (done) return true;
+      const r = it.next();
+      if (r.done) { done = true; return true; }
+      return false;
+    },
+  };
+}
+
 /** 组合步进流：conversion → (dualDungeons 首翻) Dungeon 档剥漆。
  *  includeDualClear=false = 既有 sync startHardmode 契约（Game 的 WOF 链显式调用
  *  onGameEventClearedForDualDungeons 的位置保持原序）。 */
 function* startHardmodeStepsGen(world: World, wasHard: boolean,
-  includeDualClear: boolean): Generator<void, void, void> {
-  if (!wasHard) {
+  includeDualClear: boolean, force = false): Generator<void, void, void> {
+  if (!wasHard || force) {
     yield* initializeHardModeGen(world, new RNG(world.seed));
     if (includeDualClear && world.seedFlags?.dualDungeons) {
       yield* clearUnbreakableWallsWithPaintUpToGen(world, DUAL_DUNGEON_WALL_TIERS.Dungeon);
     }
   }
+  // ★转换完成标记（PR-async 收口②）：落盘随 flags 持久化——读档自愈网消费
+  //  （hardMode=true 而本标记缺 ⇒ 半成品转换态,推 repair job 重跑幂等转换）
+  (world.flags as Record<string, boolean>).hardModeConverted = true;
 }
 
 /** 肉山死亡异步 job（PR-async 主入口）：Game 击杀流即刻拿 wasHard（公告/旗标/灯笼夜
@@ -537,30 +579,50 @@ export function clearUnbreakableWallsWithPaintUpTo(world: World, tierColor: numb
 /** OnGameEventClearedForTheFirstTime 尾段双地牢分支（NPC.cs:79607-79650）。挂点=
  *  Game 各首胜链在 LanternNight.onGameEventCleared 之后同门调用（肉山 :7155 区、
  *  boss 链 :7165 区）；事件 0-5/7/9/10/12/20-23 在原版 switch 里空转或无 case → 零行为。 */
-export function onGameEventClearedForDualDungeons(world: World, gameEventId: number): void {
-  if (!world.seedFlags?.dualDungeons) return;
+/** 事件 id → 剥漆档位（NPC.cs:79607-79650 switch 单源；0-5/7/9/10/12/20-23 原版
+ *  空转或无 case → null=零行为）。 */
+export function dualDungeonTierOf(gameEventId: number): number | null {
   switch (gameEventId) {
     case 11:
     case 13:
-      clearUnbreakableWallsWithPaintUpTo(world, DUAL_DUNGEON_WALL_TIERS.EarlyGame);
-      break;
+      return DUAL_DUNGEON_WALL_TIERS.EarlyGame;
     case 14:
-      clearUnbreakableWallsWithPaintUpTo(world, DUAL_DUNGEON_WALL_TIERS.EvilBoss);
-      break;
+      return DUAL_DUNGEON_WALL_TIERS.EvilBoss;
     case 8:
-      clearUnbreakableWallsWithPaintUpTo(world, DUAL_DUNGEON_WALL_TIERS.JungleBoss);
-      break;
+      return DUAL_DUNGEON_WALL_TIERS.JungleBoss;
     case 15:
     case 19:
-      clearUnbreakableWallsWithPaintUpTo(world, DUAL_DUNGEON_WALL_TIERS.Dungeon);
-      break;
+      return DUAL_DUNGEON_WALL_TIERS.Dungeon;
     case 16:
     case 17:
     case 18:
     case 24:
-      clearUnbreakableWallsWithPaintUpTo(world, DUAL_DUNGEON_WALL_TIERS.Hallow);
-      break;
+      return DUAL_DUNGEON_WALL_TIERS.Hallow;
     default:
-      break;
+      return null;
   }
+}
+
+export function onGameEventClearedForDualDungeons(world: World, gameEventId: number): void {
+  if (!world.seedFlags?.dualDungeons) return;
+  const tier = dualDungeonTierOf(gameEventId);
+  if (tier !== null) clearUnbreakableWallsWithPaintUpTo(world, tier);
+}
+
+/** ★PR-async 收口①：其余 boss 事件剥漆的 job 工厂——与肉山转换 job 同队列分步驱动。
+ *  非双地牢/无档位事件 → null（原版空转零行为,调用方跳过入队）。 */
+export function clearUnbreakableWallsJob(world: World, gameEventId: number): { step(): boolean } | null {
+  if (!world.seedFlags?.dualDungeons) return null;
+  const tier = dualDungeonTierOf(gameEventId);
+  if (tier === null) return null;
+  const it = clearUnbreakableWallsWithPaintUpToGen(world, tier);
+  let done = false;
+  return {
+    step(): boolean {
+      if (done) return true;
+      const r = it.next();
+      if (r.done) { done = true; return true; }
+      return false;
+    },
+  };
 }

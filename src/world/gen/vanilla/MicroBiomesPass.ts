@@ -148,7 +148,11 @@ const ICE_SKIP = idsByVanillaSheet(21, 467, 226, 237);
 /** TileID.Sets.Boulders(TileID.cs:195) */
 const BOULDER_TILES = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 /** Main.tileDungeon(Main.cs:7941-7944) */
-const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677);
+// ★IIIII196（2026-09-03）REMIX #97 尾段定罪修复：本地表漏 678/679（Main.cs:8131-8136
+//  tileDungeon={41,43,44,677,678,679}；同文件族 FinalCleanupPass:3646/MossPass:35/
+//  MountCavesPass:193 皆六项）——placeLavaTrap 地牢砖拒门（cs:8699）漏拒蓝/粉石板
+//  → JS 多受理 → 岩浆陷阱段尝试数不足（掷流尾差 -9,279 实锤）。
+const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
 /** DeadMansChestBiome 第三区禁置(12/665/639,DeadMansChestBiome.cs:275) */
 const BOULDER_FORBID = idsByVanillaSheet(12, 665, 639);
 
@@ -513,7 +517,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     //   （TerrainPass.cs:232 = 游走值 num4，≠ Main.rockLayer :211-213 的 571）。
     //   曾误用 gs.rockLevel（=Main.rockLayer）→ 矿爆点 Y 域整体偏移 48 格（span
     //   对拍 van Next(523,1000) vs js Next(571,1000) 定罪）
-    const oy = rng.int(Math.floor(gs.genRockLayer), h - 201);
+    // ★IIIII196（2026-09-03）REMIX #97 定罪修复（1457 cs:21258-21262）：remix 时
+    //   top2=(int)Main.worldSurface、bottom=(int)GenVars.rockLayer —— y=Next(ws,
+    //   maxY-genRockLayer)（假地表带上段），非 remix=y=Next(genRockLayer, h-200)。
+    const oy = gs.seedFlags.remix
+      ? rng.int(Math.floor(gs.worldSurface), h - Math.floor(gs.genRockLayer) - 1)
+      : rng.int(Math.floor(gs.genRockLayer), h - 201);
     segProbe('MINEPRE');
     // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）
     const d0m = mbDraws();
@@ -1895,14 +1904,19 @@ export class DeadMansChestBiome {
     st.frameY[idx] = 0;
     st.slope[idx] = 0;
     st.half[idx] = 0;
-    // cs:532 WorldGen.TileFrame(x, y, resetFrame:true)——137 无 frame 分派（零掷），
-    // 但经 tileFrameGen 全分派以对齐未来 Check* 级联语义（UUUU）
+    // cs:532 WorldGen.TileFrame(x, y, resetFrame:true)——137 帧分派与级联经
+    // tileFrameGen 全分派对齐（UUUU）
     // ★IIII27：原版实际帧的是【锚点格】(d.x,d.y)=(扫描起点 px,py)而非陷阱格
     //   （cs:120-121 调用传 dartTrapPlacementSpot.x/.y = position.X/Y = 锚点；
-    //   t 才是陷阱格 tile 引用）。本仓旧实现帧 trapX/trapY 与原版差一格——
-    //   对 467 箱锚点无掷差异，但语义 1:1 归正时顺带钉死。
+    //   t 才是陷阱格 tile 引用）。
+    // ★IIIII199（2026-09-03）帧维对拍仪定谳落刀：归正为帧锚点格。原版语义=
+    //   DeadMansChestBiome.cs:522-532（1457）`WorldGen.TileFrame(position.X,
+    //   position.Y, resetFrame:true)`——锚点多为 411 箱（frameImportant→重帧幂等
+    //   零掷）或普通格（生成期 TileFrame 零掷）,而陷阱格 137 的帧由上文直写恒
+    //   18/0 不应被重帧。本仓旧实现帧 trapX/trapY 与原版差一格（对 467 箱锚点
+    //   无掷差异,帧维对拍下为可显影偏差）。
     mbProbe('DRT', () => `trapCell=${d.trapX},${d.trapY} anchor=${d.x},${d.y} dir=${d.directionX} push=${d.xPush}`);
-    genTileFrame(st, this.rng, d.trapX, d.trapY);
+    genTileFrame(st, this.rng, d.x, d.y);
     this.placeWireLine({ x: d.x, y: d.y, dirX: d.directionX, dirY: 0, steps: d.xPush });
   }
 
@@ -1924,7 +1938,17 @@ export class DeadMansChestBiome {
         if (!st.inBounds(i, j)) continue;
         const idx = st.idx(i, j);
         if (j < b.y - requiredHeight + 2) {
-          st.setTileSilent(i, j, 0);                       // ClearTile
+          // ★IIIII190：Tile.ClearTile()(Tile.cs:125-131)=ClearSlope+active(false)+
+          //   inActive(false)——**type/帧/墙/液/漆全保留**(幽灵格语义)。曾
+          //   setTileSilent(x,y,0) 连 type 带帧全清 ⇒ 下游 CheckStalactite/
+          //   CheckPot 的 `type(num)==type(j)` 门在清过的格上读到 0 恒拒杀
+          //   (原版读 stale type 放行 no-op KillTile→尾 SQ 级联 184 苔藓 Next(3)
+          //   照掷) ⇒ 掷流错位级联轨道 ph 重排 → tooeasy #097 A=30/T=25/Sl=28
+          //   (T1>0×16 石未杀簇 (2049-2086,638-649) KLOG 对拍实证)。
+          st.flags[idx] = 0;          // active(active: false)
+          st.slope[idx] = 0;          // ClearSlope: slope(0)
+          st.half[idx] = 0;           // ClearSlope: halfBrick(false)
+          st.wire[idx] &= ~32;        // inActive(inActive: false)（生成期恒假,照抄）
         } else if (j <= b.y) {
           // ★cs:549-566 do-while：TileFrame(resetFrame:true) 至少一跑，格被帧杀
           //   （如 184 苔藓无邻 → 杀）则补 bestType 复位再跑一次后 break。UUUU：
@@ -1947,7 +1971,11 @@ export class DeadMansChestBiome {
           // ★III12：Main.tileSolid[tile.type] 直读（DeadMansChestBiome.cs:578）→ mbTileSolidGen
           if (mbTileSolidGen(st.type[idx]!)) st.wire[idx] |= WIRE_ACTUATOR;
         } else {
-          st.setTileSilent(i, j, 0);                       // ClearTile
+          // ★IIIII190：同上——Tile.ClearTile() 幽灵语义（保 type/帧），勿全清
+          st.flags[idx] = 0;
+          st.slope[idx] = 0;
+          st.half[idx] = 0;
+          st.wire[idx] &= ~32;
         }
       }
     }

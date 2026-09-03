@@ -366,6 +366,8 @@ export class TrueNightsEdgeSlash extends Entity {
     if (this.damage > 0) {
       const reach = 85 * this.scaleCur;
       for (const ent of game.enemies()) {
+        // ★dontTakeDamage 目标排除（:12600 同款,终审补——同首环）
+        if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;

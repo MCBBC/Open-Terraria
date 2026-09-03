@@ -7,6 +7,7 @@
 //    534 落位 sprites/vanilla；589 是 62×624 十三帧表（vanilla-npcs.json 缺登记，
 //    显式帧高切片——vnpc 懒加载 frames=1 会把整条画出）
 import { describe, it, expect, vi } from 'vitest';
+import { RNG } from '../src/core/rng';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { World } from '../src/world/World';
@@ -59,7 +60,7 @@ describe('Convert case 11 净化（WorldGen.cs:55792-55902）', () => {
   it('墙：腐化草墙 69（地表）→ 原版草墙 63/65 档；石族墙 → 349', () => {
     const above = evoAt(true);
     above.st.setWallSilent(4, above.j, 69);
-    const spy1 = vi.spyOn(Math, 'random').mockReturnValue(0); // 9/10 档 → 63
+    const spy1 = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0); // 9/10 档 → 63
     above.evo.convert(4, above.j, 11);
     spy1.mockRestore();
     expect(above.st.wall[above.st.idx(4, above.j)]).toBe(63);

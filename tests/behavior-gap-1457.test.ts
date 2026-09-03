@@ -255,7 +255,7 @@ describe('1133 星斗篷 override 链（:38738-38753 顺序赋值后者覆盖）
     expect(seg).toContain('starDmg *= 3');
     expect(seg).toContain('starDmg *= 2');
     expect(seg).toContain('k < 3');
-    expect(seg).toContain('star.projType');              // 1133 经同一出口下发
+    expect(seg).toContain("{ star: { targetY: sy } }");  // ★R6:锚迁移——starY 通道批后 1133 走 {star:{targetY}} 注入,断言镜像注入面
     expect(seg).toContain('starCloakStarInfo(accVids');
   });
 });

@@ -5,6 +5,9 @@
 // 范围说明：本引擎双通道扩表——① **精植**：按"消费方已用到的 type"逐型移植
 // （翅膀尘埃 13 型：6/31/43/55/58/76/86/182/217/229/240/261/264；拴绳批 5 型：
 // 43/15/267/278/6；钻头坐骑 230——见各 case 行号），逐型带源码行号；
+//   2026-09-03 双轴/1135 批追加：水尘族 NewDust :232-237 + UpdateDust :1904-1946
+//   独立段（33 缺省水型=1135 KrakenWave 尾尘;52/266/98-105/123/288/308 随单段源支
+//   同移植）+ PrettySparkle 双轴通道（scaleX/scaleY,接口注）;
 // ② **家族补全**（2026-09-01 起）：整段家族一次到位，含当前 0 发射方的型，
 // 防将来启用时静默缺光/缺 alpha——首批 EoC/肉山尘族 110-114/311-313（Dust.cs
 // 链 A 独占链接 :1564-1635 + GetAlpha :2583-2586，均无 noLight/noLightEmittance 门）；
@@ -49,6 +52,16 @@ export interface VDust {
   vx: number; vy: number;
   type: number;
   scale: number;
+  /** ★双轴通道（2026-09-03 VDust 双轴基建）：原版 PrettySparkleParticle 的
+   *  Vector2 Scale 逐轴档（PrettySparkleParticle.cs:72-73 两臂都乘【整个】
+   *  Vector2 Scale——长度轴吃 Scale.Y×2/×1、宽度轴吃 Scale.X×0.3）。任一在位
+   *  = 双臂星芒绘制面（Renderer.drawVanillaDustPass 消费位,Extra_98 几何逐值;
+   *  rotation 字段即原版 Rotation,本接口既有字段缺省 0）。缺省（双双 undefined）
+   *  = 既有单标量 scale 渲染,路径逐字节等价。update 老化链对两轴同步作用
+   *  （update 内 ★双轴同步——本拍 scale 合成比逐轴同乘）。池复用安全：
+   *  spawn() 归位 undefined；CloneDust 随源尘复制（clone()）。 */
+  scaleX?: number;
+  scaleY?: number;
   alpha: number;
   /** 生长目标（0<值<100 时逐 tick +0.03 至超越转 0；0 = 直接衰落） */
   fadeIn: number;
@@ -73,6 +86,17 @@ export interface VDust {
   /** 染料 vid（-1 无；GetSecondaryShader(cShoe/cWings) 等价——渲染端跑
    *  SM2 染料字节码（63 pass 全技术，含彩虹/反射/凝胶等动态族）） */
   dyeVid: number;
+  /** ★APF 通道（2026-09-03 最后基建缺口清偿）：原版 PrettySparkleParticle/
+   *  ABasicParticle 的 AccelerationPerFrame（速度逐 tick 线性加速）——orchestraFx
+   *  princess/stardust 等 PrettySparkle 站迁移消费（-vector/TTL 减速弧）。
+   *  池复用归零（spawn 归零段同步）。 */
+  ax?: number;
+  ay?: number;
+  /** ★PrettySparkle 专用档（2026-09-03）：update 早退仅 APF+TTL（原版
+   *  PrettySparkleParticle.Update = AccelerationPerFrame + TimeToLive 定值消亡,
+   *  无 Dust 链 A/B/老化/重力）——orchestraFx PrettySparkle 站 1:1 迁移载体。 */
+  prettySparkle?: boolean;
+  ttl?: number;
 }
 
 /** 尘池容量 = 原版 Main.dust[6000]（Main.cs :734 dust = new Dust[6000]）。
@@ -151,7 +175,7 @@ export class VanillaDust {
    *    NewDust 结果——原版 Perfect 不覆写它们，调用侧可像原文那样后置赋值。 */
   spawn(x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0, color: DustColor | null = null, scale = 1,
-    opts?: { perfect?: boolean }): VDust | null {
+    opts?: { perfect?: boolean; prettySparkle?: boolean }): VDust | null {
     // 屏外裁剪需要视口信息——由 Game 侧 update 先暂存；spawn 时跳过（池小、
     // 视口裁剪在 update/draw 双重兜底），此处仅密度池满兜底
     let d: VDust | null = null;
@@ -191,6 +215,13 @@ export class VanillaDust {
     d.followEnt = null;
     d.attractTo = null;
     d.dyeVid = -1;
+    // ★双轴通道池复用归位（缺省 = 单标量 scale 渲染,见接口注）
+    d.scaleX = undefined;
+    d.scaleY = undefined;
+    d.ax = undefined;
+    d.ay = undefined;
+    d.prettySparkle = undefined;
+    d.ttl = undefined;
     // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
     if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
       || type === 242 || type === 75 || type === 169 || type === 29 || (type >= 59 && type <= 65)
@@ -200,6 +231,15 @@ export class VanillaDust {
       d.vx *= 0.3;
       d.scale *= 0.7;
     }
+    // :232-237 水尘族（33=缺省水型 dustWater :419/52/266/98-105——1135 KrakenWave
+    //  尾尘 33 批接入,单段源支全成员随支移植）：alpha=170 + velocity×0.5/Y++。
+    //  NewDustPerfect 的 velocity 覆写消解速度面,alpha=170 在覆写面之外=入池即
+    //  (255−170)/255 亮度（Projectile.cs:37554 KrakenWave 调用不传 Alpha）。
+    if (type === 33 || type === 52 || type === 266 || (type >= 98 && type <= 105)) {
+      d.alpha = 170;
+      d.vx *= 0.5;
+      d.vy += 1;
+    }
     // :52-63 NewDustPerfect：dust.position = Position；Velocity.HasValue →
     // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）
     if (opts?.perfect) {
@@ -207,6 +247,14 @@ export class VanillaDust {
       d.y = y;
       d.vx = speedX;
       d.vy = speedY;
+    }
+    // ★PrettySparkle 专用档（orchestraFx 编排星芒迁移,update 早退=APF+TTL）：
+    //  scaleX/scaleY=双轴 Scale、ttl=TimeToLive 定值、rotation 由调用侧赋
+    if (opts?.prettySparkle) {
+      d.prettySparkle = true;
+      d.ttl = 60;
+      d.scaleX = d.scale;
+      d.scaleY = d.scale;
     }
     return d;
   }
@@ -235,6 +283,10 @@ export class VanillaDust {
     c.followOnce = rf.followOnce;
     c.followEnt = rf.followEnt;
     c.attractTo = rf.attractTo;
+    // ★双轴通道随源尘复制（原版 CloneDust 只复制 Dust.cs 字段表 :273-286——
+    //  scale 为单标量;本仓扩展字段缺省 undefined 不入面,双轴源尘克隆保各向异性）
+    c.scaleX = rf.scaleX;
+    c.scaleY = rf.scaleY;
     return c;
   }
 
@@ -248,13 +300,27 @@ export class VanillaDust {
     playerDx = 0, playerDy = 0,
     lightAt: ((tx: number, ty: number) => [number, number, number]) | null = null,
     solidBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null,
-    player: { cx: number; cy: number; vy: number } | null = null): void {
+    player: { cx: number; cy: number; vy: number } | null = null,
+    wetBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null): void {
     this.lights.length = 0;
     for (const d of this.pool) {
       if (!d.active) continue;
+      // ★双轴通道拍首快照（本拍 scale 合成效应向两轴同步的基准——见 ★双轴同步）
+      const scale0 = d.scale;
+      // ★PrettySparkle 专用档（:59-77 Draw / Update=APF+TTL，2026-09-03 迁移批）：
+      //  仅 APF 加速+TTL 定值消亡，跳过 Dust 全部链 A/B/老化/重力——orchestraFx
+      //  PrettySparkle 站迁移载体（ princess/stardust 双轴星芒,drawSparkleArms 承载）
+      if (d.prettySparkle) {
+        d.x += d.vx; d.y += d.vy;
+        if (d.ttl !== undefined && --d.ttl <= 0) d.active = false;
+        continue;
+      }
       // :445 scale>10 兜底
       if (d.scale > 10) { d.active = false; continue; }
       // :469 position += velocity
+      // ★APF 通道（原版 ABasicParticle.Update :57-67 先加速后位移同序）：
+      if (d.ax !== undefined) d.vx += d.ax;
+      if (d.ay !== undefined) d.vy += d.ay;
       d.x += d.vx; d.y += d.vy;
       // :598-602 鸟粪尘（329,独立 if 段,在 883 链之前）：Collision.SolidCollision
       // (position,4,4) 命中实心 → scale ×0.8（4×4 盒跨至多 2×2 格,四角判定）
@@ -507,6 +573,35 @@ export class VanillaDust {
       // :1895-1897 血尘 5/273 悬浮档（noGravity 时额外收缩——本引擎产 5 号恒重力档
       // （NewDust noGravity 恒 false），门随源码保留防未来悬浮产尘漏缩）
       if ((d.type === 5 || d.type === 273) && d.noGravity) d.scale -= 0.04;
+      // :1904-1946 水尘族独立段（308/33/52/266/98-105/123/288——重力链接之后、
+      // 通用旋转之前;1135 KrakenWave 尾尘 33 批接入,其余成员随单段源支同移植）：
+      // 静止档（vx==0:SolidCollision(position,2,2) 入实心 scale=0 + rotation+0.5 +
+      // scale−0.01）+ 湿碰档（WetCollision(position,4,4):alpha+20/scale−0.1;
+      // wetBoxAt 探针缺省 null=不湿——Game 注入位待批,登记）+ 通用 alpha+2/
+      // scale−0.005/alpha>255 归零 + vy>4 钳 + noGravity 档（rotation±0.2/scale
+      // +0.03/vx×1.05/vy+0.15）
+      if (d.type === 33 || d.type === 52 || d.type === 266 || (d.type >= 98 && d.type <= 105)
+        || d.type === 123 || d.type === 288 || d.type === 308) {
+        if (d.vx === 0) {                                     // :1906-1913
+          if (solidBoxAt && solidBoxAt(d.x, d.y, 2, 2)) d.scale = 0;
+          d.rotation += 0.5;
+          d.scale -= 0.01;
+        }
+        if (wetBoxAt && wetBoxAt(d.x, d.y, 4, 4)) {           // :1914-1917
+          d.alpha += 20;
+          d.scale -= 0.1;
+        }
+        d.alpha += 2;                                         // :1918
+        d.scale -= 0.005;                                     // :1919
+        if (d.alpha > 255) d.scale = 0;                       // :1920-1922
+        if (d.vy > 4) d.vy = 4;                               // :1923-1924
+        if (d.noGravity) {                                    // :1925-1946
+          if (d.vx < 0) d.rotation -= 0.2; else d.rotation += 0.2;
+          d.scale += 0.03;
+          d.vx *= 1.05;
+          d.vy += 0.15;
+        }
+      }
       // :2144-2146 通用旋转
       if (d.type !== 79 && d.type !== 268 && d.type !== 304) {
         d.rotation += d.vx * 0.5;
@@ -600,6 +695,17 @@ export class VanillaDust {
         default:
           break;
       }
+      // ★双轴同步（2026-09-03 VDust 双轴基建）：带 scaleX/scaleY 的尘（PrettySparkle
+      //  Vector2 Scale 通道,接口注）——本拍全部老化效应对 scale 的合成比
+      //  r = scale/scale0 逐轴同乘：链 A 专档/fadeIn 生长/链 B/实心收缩的加减乘各档
+      //  以同一相对量作用两轴,X:Y 各向异性比全链守恒（加性档在原版单标量语义下本就
+      //  双轴等量,比值式是其在双轴域的守恒推广）。scale0<=0 的退化拍比值无定义→跳过
+      //  （登记：通道产尘方禁 scale=0 起步,缺省 spawn 抖动 ±0.2 恒 >0 不触）。
+      if ((d.scaleX !== undefined || d.scaleY !== undefined) && scale0 > 0 && d.scale !== scale0) {
+        const r = d.scale / scale0;
+        if (d.scaleX !== undefined) d.scaleX *= r;
+        if (d.scaleY !== undefined) d.scaleY *= r;
+      }
       // :2387 屏底清除
       if (d.y > screenY + screenH) { d.active = false; continue; }
       // :2432-2436 缩没清除（dCount 五档密度缩放不建模——池小永不触发）
@@ -615,8 +721,13 @@ export class VanillaDust {
     }
   }
 
-  /** GetAlpha（:2469-2772 消费型精植）：返回乘数 [rgb, alpha]（0-1） */
-  static alphaOf(d: VDust): { rgb: number; a: number } {
+  /** GetAlpha（:2469-2772 消费型精植）：返回乘数 [rgb, alpha]（0-1）。
+   *  ★2026-09-03 逐通道乘数 rgbv（183/258 红主档实装）：GetAlpha 返回非白 RGB 的
+   *  A=0 加性尘,标量 rgb 表达不了三通道比——rgbv?: [r,g,b]（0-1,XNA Color 字面
+   *  /255）优先于 rgb 消费（Renderer A=0 加性位逐通道乘,id.data 本就逐通道）;
+   *  未设 rgbv 的既有标量档消费面零改动。曾评 union {rgb:number|[r,g,b]} 整型
+   *  方案弃:wing-visuals.test `.rgb` toBeCloseTo 断言类型泄漏 → tsc 红(域外文件) */
+  static alphaOf(d: VDust): { rgb: number; a: number; rgbv?: [number, number, number] } {
     const num = (255 - d.alpha) / 255;
     switch (d.type) {
       case 261: return { rgb: 230 / 255, a: 115 / 255 };                       // :2521
@@ -668,7 +779,7 @@ export class VanillaDust {
       case 181: return { rgb: 200 / 255, a: 0 };                                // :2596-2598 (200,200,200,0)
       case 163: case 205: return { rgb: 250 / 255, a: 0 };                      // :2605-2607 (250,250,250,0)
       case 180: case 175: return { rgb: 200 / 255, a: 0 };                      // :2612-2618 (200,200,200,0)
-      case 183: return { rgb: 0, a: 0 };                                        // :2619-2621 (50,0,0,0)——红通道非白，rgb≈0 弃本体（备案）
+      case 183: return { rgb: 0, a: 0, rgbv: [50 / 255, 0, 0] };                // :2619-2621 (50,0,0,0) 纯红加性——rgbv 逐通道实装(HealProj 305 尾迹×3/子步活发射方)
       case 160: case 162: case 164: case 173:                                   // :2627-2630 (250×scale,…,0)
         return { rgb: Math.min(1, (250 * d.scale) / 255), a: 0 };
       case 92: case 106: case 107: return { rgb: 1, a: 0 };                     // :2631-2633 (255,255,255,0)
@@ -676,7 +787,7 @@ export class VanillaDust {
       case 68: case 70: return d.noGravity ? { rgb: 1, a: 0 } : { rgb: num, a: num };   // :2692-2695 noGravity 门
       case 254: case 255: return { rgb: 1, a: 0 };                              // :2516-2518 (255,255,255,0)
       case 235: return { rgb: 1, a: 0 };                                        // :2562-2564 (255,255,255,0)
-      case 258: return { rgb: 0, a: 0 };                                        // :2519-2521 (150,50,50,0)——彩色非白，本体弃（备案）
+      case 258: return { rgb: 0, a: 0, rgbv: [150 / 255, 50 / 255, 50 / 255] }; // :2519-2521 (150,50,50,0) 红主加性——rgbv 实装(原版/本仓均无字面发射方,dormant 保留通道)
       case 262: case 286: case 138: case 325:                                   // :2565-2568 与 86-91 同句 !noLight 门
         if (!d.noLight) return { rgb: 1, a: 0 };
         return { rgb: num, a: num };
@@ -700,10 +811,23 @@ export class VanillaDust {
   }
 }
 
+/** ★双轴通道读数（Renderer.drawVanillaDustPass 双臂消费位）：带 scaleX/scaleY
+ *  的尘按 PrettySparkle 的 Vector2 Scale 逐轴取值（PrettySparkleParticle.cs:72-73），
+ *  缺省逐轴回落单标量 scale（既有单标量尘渲染零改动）。dual = 是否入双臂绘制面。 */
+export function dustAxisScale(
+  d: Pick<VDust, 'scale' | 'scaleX' | 'scaleY'>,
+): { sx: number; sy: number; dual: boolean } {
+  const dual = d.scaleX !== undefined || d.scaleY !== undefined;
+  return { sx: d.scaleX ?? d.scale, sy: d.scaleY ?? d.scale, dual };
+}
+
 function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
   // 331 自发光族（DrawDust :39670 色不取光:白心 Color.White+GetAlpha(color) 贴片）→
   // 与 6/15/59-64 同入全亮桶（光照合成后绘制）
-  const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331;
+  // ★双轴通道（PrettySparkle 编排粒子族）：原版画在 ParticleSystem_World_OverPlayers
+  // （光照合成之后的独立加色层,不受 tile 光照）→ 恒入全亮桶
+  const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331
+    || d.scaleX !== undefined || d.scaleY !== undefined;
   return wantFb === fb;
 }
 

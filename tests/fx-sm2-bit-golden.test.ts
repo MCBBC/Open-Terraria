@@ -182,6 +182,28 @@ function captureStack(pass: SM2Pass, scene: Scene): string {
   return f1.hex();
 }
 
+/** v0≠白 全栈捕获（2026-09-03 v0 化批）：dim 光色经 runPassOnImageData v0Rgb
+ *  入口——锁 v0 注入写路径/量化链回归（direct 层 v0 变体已存在，见 captureDirect
+ *  v0Variants）。光色取暗洞蓝灰（受累族偏差最敏感域）。 */
+const STACK_LIT_V0: [number, number, number] = [0.3, 0.35, 0.42];
+function captureStackLit(pass: SM2Pass, scene: Scene): string {
+  const data = new Uint8ClampedArray(W * H * 4);
+  const sheet = srcBytes(scene.rect ? scene.rect.sheetW : W, scene.rect ? scene.rect.sheetH : H);
+  if (scene.rect) {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const si = ((scene.rect.sy + y) * scene.rect.sheetW + scene.rect.sx + x) * 4;
+      const di = (y * W + x) * 4;
+      data[di] = sheet[si]; data[di + 1] = sheet[si + 1]; data[di + 2] = sheet[si + 2]; data[di + 3] = sheet[si + 3];
+    }
+  } else data.set(sheet);
+  const uni = defaultUniforms();
+  scene.uni(uni);
+  runPassOnImageData(pass, data, W, H, uni, [], scene.rect, STACK_LIT_V0);
+  const f = fnv();
+  for (const b of data) f.feedByte(b);
+  return f.hex();
+}
+
 describe('SM2 位级金标快照网', () => {
   const fp = hostFingerprint();
 
@@ -205,7 +227,7 @@ describe('SM2 位级金标快照网', () => {
     const mismatches: string[] = [];
     for (const name of passes) {
       const pass = getPass(name)!;
-      const rec = (fixture.passes as Record<string, Record<string, { direct: string; stack: string; kill: string }>>)[name];
+      const rec = (fixture.passes as Record<string, Record<string, { direct: string; stack: string; stackLit: string; kill: string }>>)[name];
       for (const sc of SCENES) {
         const u = defaultUniforms();
         sc.uni(u);
@@ -217,6 +239,9 @@ describe('SM2 位级金标快照网', () => {
         }
         const gotStack = captureStack(pass, sc);
         if (exp.stack !== gotStack) mismatches.push(`${name}/${sc.id} stack ${exp.stack.slice(0, 10)}…→${gotStack.slice(0, 10)}…`);
+        if (exp.stackLit === undefined) { mismatches.push(`${name}/${sc.id}: 固件缺 stackLit 家族`); continue; }
+        const gotStackLit = captureStackLit(pass, sc);
+        if (exp.stackLit !== gotStackLit) mismatches.push(`${name}/${sc.id} stackLit ${exp.stackLit.slice(0, 10)}…→${gotStackLit.slice(0, 10)}…`);
       }
     }
     if (mismatches.length) {
@@ -231,7 +256,7 @@ describe('SM2 位级金标快照网', () => {
 
   it('重生成通道(SM2_GOLDEN_REWRITE=1)', () => {
     if (!process.env.SM2_GOLDEN_REWRITE) { expect(true).toBe(true); return; }
-    const passes: Record<string, Record<string, { direct: string; stack: string; kill: string }>> = {};
+    const passes: Record<string, Record<string, { direct: string; stack: string; stackLit: string; kill: string }>> = {};
     for (const name of passNames()) {
       const pass = getPass(name)!;
       passes[name] = {};
@@ -239,7 +264,7 @@ describe('SM2 位级金标快照网', () => {
         const u = defaultUniforms();
         sc.uni(u);
         const got = captureDirect(pass, u, sc);
-        passes[name][sc.id] = { direct: got.hash, stack: captureStack(pass, sc), kill: got.kill };
+        passes[name][sc.id] = { direct: got.hash, stack: captureStack(pass, sc), stackLit: captureStackLit(pass, sc), kill: got.kill };
       }
     }
     fs.mkdirSync(path.dirname(FIXTURE), { recursive: true });

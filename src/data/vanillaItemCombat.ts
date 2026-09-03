@@ -94,6 +94,16 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //   补 combatWeapon `consumable && noMelee` 爆炸物门派发等价门 → aiStyle16 归
   //   grenade 族（B2 波 2026-08-30；近战面 damage 缺省 0+noUseGraphic,语义等价）----
   '4423': { noMelee: true },
+  // ---- SW-E1 2026-09-03：Power Bomb 5594 / Sticky Power Bomb 5595（Item.cs case
+  //   5594/5595 :44024-44028，1457 原文）——`DefaultToBomb(1086+(type-5594), 6f)`
+  //   共享算式提取器整块不解析（json 只落了 noUseGraphic 残键）→ 死物品。DefaultToBomb
+  //   （:47771-47783）推导终值：useStyle1/shootSpeed6/shoot=1086|1087/8×28/consumable/
+  //   UseSound Item1/useAnim=useTime40/noUseGraphic/noMelee；damage/knockBack 缺省 0
+  //   （爆炸伤/击退在 PrepareBombToBlow P.cs:47652-47657 补 200/9）；SetShopValues
+  //   LightRed4+sell 2s（rare4 已在 vanilla-itemrare.json）。弹 1086/1087 aiStyle16
+  //   （vanilla-projectiles.json 已有）→ consumable+noMelee 门归 grenade 族 ----
+  '5594': { shoot: 1086, shootSpeed: 6, useTime: 40, useAnimation: 40, consumable: true, noMelee: true, noUseGraphic: true },
+  '5595': { shoot: 1087, shootSpeed: 6, useTime: 40, useAnimation: 40, consumable: true, noMelee: true, noUseGraphic: true },
   // （5334 奥库瑞姆剃刀 consumable/useTime 45 已移出本表——Item.cs:42279-42285
   //   在 `Variant == EnabledVariant` 条件块内，仅 mechdusa 世界生效；现由
   //   vanillaItemVariants.ts ITEM_VARIANT_STATS[5334] 变体层提供）
@@ -110,6 +120,15 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '5392': { shoot: 870, ammo: 780, consumable: true },
   '5393': { shoot: 871, ammo: 780, consumable: true },
   '5394': { shoot: 872, ammo: 780, consumable: true },
+  // ---- 割草机 4049（Item.cs:35615-35618 → DefaultToLawnMower :48532-48541 辅助
+  //   方法形参赋值,提取器不解析 → 整件缺键=死物品）。DefaultToLawnMower(20,20)：
+  //   width20/height20/holdStyle1/useStyle11(MowTheLawn,ItemUseStyleID.cs:27)/
+  //   useAnimation30/useTime10/UseSound Item23/autoReuse true——
+  //   useTime/useAnimation/autoReuse 入本表;useStyle/holdStyle 在 vanillaItemFunc
+  //   FUNC['4049']（heldUseStyle/bodyFrame 行/静持持位消费面）;width/height 本表无列。
+  //   SW-K1 2026-09-03 消费面=ItemCheck_UseLawnMower(Player.cs:47373)+MowTheLawn
+  //   (:20447),autoReuse 键兼驱动 updateSwingHits 归零保活 ----
+  '4049': { useTime: 10, useAnimation: 30, autoReuse: true },
   // ---- ★弹药伤害 4 错补丁已撤（2026-08-23 基准切换 1457）：曾以 1456 为准钉
   //   546→12/988→7/1350→15/3011→7,现 json 的 1457 终值（15/9/10/10）即权威,
   //   补丁层删除（Item.cs 1457 实测行号:546 case:7897 damage=:7899/988 case:12740
@@ -131,6 +150,10 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //     speed8/autoReuse/40×40+SetWeaponValues(150,10,10)→damage150/kb10/crit10）
   //   6173 ArcSurge（:47556-47564 DefaultToStaff(1122,8,18,18)+useTime=6 直写+
   //     SetWeaponValues(180,4)→damage180/kb4+Item15+noUseGraphic）----
+  //   ★6152/6173 的 useAnimation 行是 multishot 满蓝发数的数据面（json 缺行时
+  //     cw.useAnimation 回退 useTime → sprayCyclePlan(U,U)=null → maxShots 恒 1;
+  //     慢施窗 slowMagicWindowGrow 同吃本列）——行为锁 tests/slow-magic-window
+  //     「6152/6173 满蓝 multishot」10/3 两例（2026-09-03 逐字段复核=1457 终值）----
   '6152': { shoot: 1114, useAnimation: 40, useTime: 4, shootSpeed: 6, mana: 5, damage: 8, knockBack: 3, noMelee: true, magic: true, autoReuse: true },
   '6153': { shoot: 1115, useAnimation: 24, useTime: 24, shootSpeed: 4, mana: 10, damage: 11, knockBack: 2, crit: 11, noMelee: true, magic: true },
   '6154': { shoot: 1116, useAnimation: 42, useTime: 42, shootSpeed: 5, mana: 20, damage: 20, knockBack: 3.5, noMelee: true, magic: true, autoReuse: true },
@@ -215,7 +238,7 @@ export type CombatWeapon =
   | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
   | { kind: 'whip'; shoot: number; damage: number; knockback: number; useTime: number; shootSpeed: number; itemId: number }
   | {
-      kind: 'boomerang' | 'spear' | 'anchored' | 'yoyo' | 'flail' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
+      kind: 'boomerang' | 'spear' | 'anchored' | 'yoyo' | 'flail' | 'flairon' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
       shoot: number;
       damage: number;
       knockback: number;
@@ -318,6 +341,15 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
         ...base };
     }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
+    // ★R4 猪龙鱼链球 2611（弹 404 = aiStyle 69 掷球回收族,1457 Projectile.cs:30730-30829
+    //   AI_069 全库唯一成员——flail 门旁加支,与 AI_FLAIL(15) 互斥天然分流）：noMelee 挡掉
+    //   melee 门曾落 'shot' 兜底 = 通用直线弹（无回收三段/无伴生泡泡/无链条/出生半盒偏
+    //   (13,13)）。kind 'flairon' → Game 专支（FlaironHeadProj 全状态机 + FlaironSpike
+    //   伴生 + drawChain37 链）。与 5526 FlaironFlail（shoot 1058 aiStyle15 经典链锤,
+    //   kind 'flail'）是同物右键互换两形态（Player.cs:31864-31868,互换未移植登记）。
+    //   autoReuse/useAnimation 随行（'shot' 兜底同批纪律 2026-08-24——2611 autoReuse=true）
+    if (ai === 69) return { kind: 'flairon', shoot, ...base,
+      autoReuse: !!c.autoReuse, useAnimation: c.useAnimation ?? base.useTime };
     // ★天顶剑族（4956 Zenith / 5669 真铜短剑：melee+noMelee+shoot、投射物
     //   aiStyle 182 FinalFractal）：原版 useStyle 1 挥击动画 + noUseGraphic，
     //   本体 noMelee——全部伤害在 933/1100 剑弹上（Item.cs:39974-39992）。

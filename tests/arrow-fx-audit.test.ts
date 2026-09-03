@@ -12,6 +12,7 @@
 // 附：1097 火绒狐火球（:57513-57573）出生尘爆一次性 + scale −0.01/子步 <0.3 自爆
 //     （71 子步,EU=1 → ≈36 帧,先于 timeLeft=300）
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
 import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
@@ -313,5 +314,27 @@ describe('斗篷星 alpha 渐减金标（2026-09-03）', () => {
     expect(b.starAlpha).toBe(255);
     flyFrames(b, game, 1);
     expect(b.starAlpha).toBe(225);                      // 255−15×2（150 钳未触及）
+  });
+});
+
+// ===========================================================================
+// 出膛音面金标（2026-09-03,AI_001 出膛音链 83/576 清偿）——原版 ai[1]==0 首拍:
+// 弹 83 = SoundID.Item33（Projectile.cs:56195-56199）、弹 576 = SoundID.Item12
+// （:56443-56447）。本仓两弹走 Arrow 直飞桶无 ai[1] 态,于发射点等价结算（同
+// 462/259 先例,bossAI.ts shootBolt462 / bossAI_golem.ts golemEyeLasers）
+// ===========================================================================
+describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位）', () => {
+  it('①雷眼/机械眼激光 83：bossAI.ts 发射位紧邻 shoot(…83) 播 Item_33', () => {
+    const src = readFileSync(new URL('../src/entities/bossAI.ts', import.meta.url), 'utf8');
+    const m = src.match(
+      /getAttackDamageForProjectiles\(20, 19, e\.difficulty\), 83\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/);
+    expect(m, 'bossAI.ts 弹 83 出膛位缺 Item_33 播放').toBeTruthy();
+  });
+
+  it('②星旋脑线发激光 576：bossAI_lunar_misc.ts 发射位紧邻 Arrow(…576) 播 Item_12', () => {
+    const src = readFileSync(new URL('../src/entities/bossAI_lunar_misc.ts', import.meta.url), 'utf8');
+    const m = src.match(
+      /0, 576, null,[\s\S]{0,260}?playSfxWav\?\.\('Item_12'/);
+    expect(m, 'bossAI_lunar_misc.ts 弹 576 出膛位缺 Item_12 播放').toBeTruthy();
   });
 });

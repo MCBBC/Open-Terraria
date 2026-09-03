@@ -190,23 +190,11 @@ export function fountainColorOf(frameX: number, frameY: number): number {
  *  录音入口：装备在配饰槽时按当前 BGM 变身（Player.cs:15053） */
 export const MUSIC_BOX_EMPTY_VID = 576;
 
-/** 音乐盒 style → 录得物品 vid 全表 101 条（WorldGen.cs:43138-43366
- *  GetItemDrop_MusicBoxes 1:1；与 Item.cs SetDefaults DefaultToMusicBox(placeStyle)
- *  调用点互为逆表）。
- *  style 0-12 → 562+style；13-27 → 1596+style-13；28 起为离散表；越界兜底 576（空盒） */
-export const MUSIC_BOX_ITEM_BY_STYLE: readonly number[] = [
-  562, 563, 564, 565, 566, 567, 568, 569, 570, 571,
-  572, 573, 574, 1596, 1597, 1598, 1599, 1600, 1601, 1602,
-  1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1963, 1964,
-  1965, 2742, 3044, 3235, 3236, 3237, 3370, 3371, 3796, 3869,
-  4082, 4078, 4079, 4077, 4080, 4081, 4237, 4356, 4357, 4358,
-  4421, 4606, 4979, 4985, 4990, 4991, 4992, 5006, 5014, 5015,
-  5016, 5017, 5018, 5019, 5020, 5021, 5022, 5023, 5024, 5025,
-  5026, 5027, 5028, 5029, 5030, 5031, 5032, 5033, 5034, 5035,
-  5036, 5037, 5038, 5039, 5040, 5044, 5112, 5362, 5578, 5538,
-  5579, 5580, 5539, 5581, 5582, 5637, 5638, 5639, 6144, 6145,
-  6146,
-];
+// ★2026-09-03 表体抽出至 data/musicBoxStyles.ts（叶子模块,TDZ 断环——items.ts
+//  顶层面读本表而本模块 import 子树回流 items,tiles/Wiring 链序先于本表执行时
+//  冷启动炸 boot）。此处导入+re-export 兼容既有消费方。 */
+import { MUSIC_BOX_ITEM_BY_STYLE } from '../../data/musicBoxStyles';
+export { MUSIC_BOX_ITEM_BY_STYLE };
 
 /** MusicID.Sets.CanBeRecorded（MusicID.cs:9）：全集可录，仅 {0,28,45,102} 除外 */
 const MUSIC_NOT_RECORDABLE = new Set([0, 28, 45, 102]);

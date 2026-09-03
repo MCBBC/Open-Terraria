@@ -7,6 +7,7 @@
 //   三瓶水 Kill        Projectile.cs:75011-75058 + :75610-75625
 //   PickAmmo 溶液加法  Player.cs:52645-52647；消耗门 :52739（5134 三分免）/:52815
 import { describe, it, expect, vi } from 'vitest';
+import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
 import { WorldEvolution, type EvolutionHost } from '../src/world/evolution/WorldEvolution';
 import type { TileStore } from '../src/world/TileStore';
@@ -57,7 +58,7 @@ function projWorld() {
 // ---------------------------------------------------------------------------
 describe('Convert case 0 墙链（cs:55517-55652）', () => {
   it('邪恶/神圣草墙 69/70/81：地表 9/10 → 63、地下 → 64（cs:55523-55532）', () => {
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0);
     try {
       const { st, evo } = evoWorld();
       st.setWallSilent(10, 10, 69);   // 地表（10 < worldSurface 20）
@@ -75,7 +76,7 @@ describe('Convert case 0 墙链（cs:55517-55652）', () => {
     } finally { rnd.mockRestore(); }
   });
   it('地表 1/10 → 65（cs:55528-55530）', () => {
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.95);
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.95);
     try {
       const { st, evo } = evoWorld();
       st.setWallSilent(10, 10, 69);
@@ -108,7 +109,7 @@ describe('Convert case 0 墙链（cs:55517-55652）', () => {
     });
   });
   it('蘑菇墙 80 深度带：地表带 → 土墙 15、中段 → 草墙 64、深岩下 → 15（cs:55638-55652）', () => {
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);   // Next(3)=0
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0);   // Next(3)=0
     try {
       const { st, evo } = evoWorld();
       // 60 高/rockLevel 40：(60+40)/2-3+0 = 47；地表带 j < 20+4 = 24

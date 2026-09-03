@@ -199,6 +199,32 @@ export function applyBuffTicks(enemy: StatusEnemy, buff: number, ticks: number):
   }
 }
 
+/** ★ImmuneToAll 直写闸（2026-09-03 清偿）：原版玩家→敌怪 debuff 的唯一闸口 =
+ *  NPC.AddBuff（NPC.cs:90968 buffImmune 即 return + NPCID.Sets.DebuffImmunitySets
+ *  ——37 键 ImmuneToAll 名单（68 守卫/72 火轮/82/134-136 机械蠕虫/139/253/288 地牢
+ *  之魂/330/384/392-395/422/439-440/454-459/491-493/507/517/549/583-585/662/686-687/
+ *  690,见 vanillaNpcImmunity.ts 头注）对非鞭 debuff 全免疫）。applyBuffTicks 已接
+ *  该闸,但部分【状态字段直写】点绕闸照写——直写点改经本谓词门：
+ *  `!dontTakeDamage && 每个 buffId 都 !npcImmuneTo(vanillaId,buffId)`。
+ *  buffId ↔ 字段映射以 SUPPORTED 实表为准：24=onFireT / 20=poisonT / 39=cursedT /
+ *  44=frostburnT / 323=onFire3T / 324=frostburn2T / 203=betsysCurseT / 362=eelWhipT。
+ *  debuffImmuneOverride 运行时豁免位与 applyBuffTicks 同序同语义（1457 AI_001 熔岩
+ *  史莱姆 :61312-61316 对 70/397/395/20 置 false——override===false 优先于静态表）。
+ *  ★零随机消耗：原版闸口在 AddBuff 内 = 掷骰【后】,本仓沿用同拍——直写点的掷骰
+ *  照常消耗,闸只拦写字段 ⇒ 掷流计数不变（勿移到掷前）。per-buff 判定：同敌可免
+ *  24 而不免 323,多 buff 直写群须逐 buff 传参,勿一次传全集取交集 */
+export function debuffWriteAllowed(enemy: unknown, ...buffIds: number[]): boolean {
+  if ((enemy as { dontTakeDamage?: boolean }).dontTakeDamage === true) return false;
+  const vId = (enemy as { vanillaId?: number }).vanillaId;
+  if (vId === undefined || vId <= 0) return true;   // 非原版敌怪无免疫表（npcImmuneTo 恒假）
+  const override = (enemy as { debuffImmuneOverride?: Map<number, boolean> }).debuffImmuneOverride;
+  for (const b of buffIds) {
+    if (override?.get(b) === false) continue;       // 运行时豁免：跳过静态免疫表
+    if (npcImmuneTo(vId, b)) return false;
+  }
+  return true;
+}
+
 /** 武器浸剂对【投射物近战族】的命中施加（StatusNPC:10559-10583 开头段:
  *  (melee||whip) && meleeEnchant>0 → 按药剂施加。近战挥砍侧同表在
  *  Game.ts 挥击结算内,此函数供 WeaponProj 四族(链球/悠悠球/长矛/回旋镖)共用)。
@@ -213,6 +239,10 @@ export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
   if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!frostBurn) return;
   const sec = 5 + Math.floor(Math.random() * 10); // 60×Next(5,15)t——XNA Next(min,max) 含头不含尾=[5,14]秒
+  // ★ImmuneToAll 直写闸（2026-09-03）：AddBuff(324,…) 门（NPC.cs:90968,Arrow 主环
+  //  applyFrostBurn :93712 挂点即本函数调用位）——37 键名单对 324 全免疫曾照写。
+  //  闸在掷后（零掷耗）;三挂点（挥砍/近战四族/远程箭）共用本函数,门接在此单源
+  if (!debuffWriteAllowed(enemy, 324)) return;
   if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
 }
 
@@ -226,12 +256,14 @@ export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): vo
   // 机关体不吃任何玩家侧状态/DoT。曾缺=DoT 通道 hp 沉负僵尸态,评审 C 定谳 2026-09-02 补）
   if ((enemy as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) return;
   if (!magmaStone) return;
+  // ★OnFire3(323) 免疫闸（:90968 AddBuff 同款——掷链保持原序消耗,仅拒写,最终清零补）
+  const ok = debuffWriteAllowed(enemy, 323);
   if (Math.random() < 1 / 7) {
-    if (6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
+    if (ok && 6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
   } else if (Math.random() < 1 / 3) {
-    if (2 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 2;
+    if (ok && 2 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 2;
   } else {
-    if (1 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 1;
+    if (ok && 1 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 1;
   }
 }
 
@@ -245,7 +277,8 @@ export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): v
   if (!magmaStone) return;
   const r = Math.random();
   const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 2;   // ★R3 F2:否则档 120t=2s(Player.cs:6551-6562),曾误 1s
-  if (sec > (enemy.onFire3T ?? 0)) enemy.onFire3T = sec;
+  // ★OnFire3(323) 免疫闸（掷后拒,最终清零补）
+  if (debuffWriteAllowed(enemy, 323) && sec > (enemy.onFire3T ?? 0)) enemy.onFire3T = sec;
 }
 
 /** 近战挥砍命中 → 持械武器专属 debuff（Player.StatusToNPC :6139-6249 的 type 分支；
@@ -305,17 +338,22 @@ export function applyMeleeImbue(
   const max = (field: string, v: number): void => {
     if (v > (enemy[field] ?? 0)) enemy[field] = v;
   };
+  // ★逐分支免疫闸（原版每支=独立 AddBuff→:90968 buffImmune 逐一判——Venom70/PotentAcid395/
+  //  CursedInferno39/OnFire24/Midas72/Ichor69/Confused31/Poisoned20,BuffID.cs 实表核实;
+  //  曾只闸 dontTakeDamage,ImmuneToAll 37 键名 NPC 经浸剂照吃 debuff,最终清零补。
+  //  时长掷保持在闸前=原版"掷后 AddBuff 拒"同拍,RNG 消耗不变）
   if (has(BuffType.ImbueVenom)) {
-    max('venomT', 5 + Math.random() * 5);
+    const v = 5 + Math.random() * 5;
+    if (debuffWriteAllowed(enemy, 70)) max('venomT', v);
     // 1457 StatusNPC :11201-11204：毒液浸剂命中伴发 AddBuff(395 PotentAcid, 60t=1s)
-    max('potentAcidT', 1);
+    if (debuffWriteAllowed(enemy, 395)) max('potentAcidT', 1);
   }
-  if (has(BuffType.ImbueCursed)) max('cursedT', 3 + Math.random() * 4);
-  if (has(BuffType.ImbueFire)) max('onFireT', 3 + Math.random() * 4);
-  if (has(BuffType.ImbueGold)) max('midasT', 2);
-  if (has(BuffType.ImbueIchor)) max('ichorT', 10 + Math.random() * 10);
-  if (has(BuffType.ImbueNano)) max('confusedT', 1 + Math.random() * 3);
-  if (has(BuffType.ImbuePoison)) max('poisonT', 5 + Math.random() * 5);
+  if (has(BuffType.ImbueCursed)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(enemy, 39)) max('cursedT', v); }
+  if (has(BuffType.ImbueFire)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(enemy, 24)) max('onFireT', v); }
+  if (has(BuffType.ImbueGold) && debuffWriteAllowed(enemy, 72)) max('midasT', 2);
+  if (has(BuffType.ImbueIchor)) { const v = 10 + Math.random() * 10; if (debuffWriteAllowed(enemy, 69)) max('ichorT', v); }
+  if (has(BuffType.ImbueNano)) { const v = 1 + Math.random() * 3; if (debuffWriteAllowed(enemy, 31)) max('confusedT', v); }
+  if (has(BuffType.ImbuePoison)) { const v = 5 + Math.random() * 5; if (debuffWriteAllowed(enemy, 20)) max('poisonT', v); }
   if (has(BuffType.ImbueParty)) partyFx?.();
 }
 

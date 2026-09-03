@@ -56,6 +56,8 @@ import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 import { growTree } from './TreePass';
 // ★IIIII106：sandy britches 表层沙漠化核心（cs:2363 第二半；调用位 :22343）
 import { convertWithSize, doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';   // ★IIIII107b 净化菱形 Convert(j,i,0,3)
+// ★IIIII203：FinishRemixWorld 1:1 全段（1457 cs:26617-26991；GG 之后接线，见 runFinalCleanupPass 尾）
+import { runFinishRemixWorld } from './FinishRemixWorldPass';
 
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
 
@@ -95,10 +97,16 @@ const WATER_DRIP = sid(373);
 const DEMON_ALTAR = sid(26);
 const TRAP_137 = sid(137);
 
-/** Main.tileSolid[t](含 ① 的 484=false 覆写) */
+/** Main.tileSolid[t](含 ① 的 484=false 覆写)——★IIIII201（2026-09-03）改读**生成期
+ *  覆写表**（genSolidType=可变 Main.tileSolid 等价）：曾裸读 TILE_DEFS.solid——
+ *  vanilla FinalCleanup 时点 tileSolid[379]=true（TileCleanup 尾 cs:22128 还原、
+ *  DoExtraLiquidFinish QuickWater 头 cs:119 再置 true），泡泡格按实心计 →
+ *  ③ 悬空落体柱（53→397/123→1）与 FinalSeedCleanup 的 SolidTile3 门都把
+ *  「下格=泡泡」判实心而跳过；静态 false 则判非实心 → 误转（waterpark #105
+ *  T123>1×5/T53>397×2 残量实证，如 (216,820)/(216,821)）。 */
 function tileSolidT(t: number): boolean {
   if (t === ROLLING_CACTUS) return false; // ① 覆写(cs:22305)
-  return !!TILE_DEFS[t]?.solid;
+  return genSolidType(t);
 }
 
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0 */
@@ -559,11 +567,27 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
   switch (sheet) {
     case 2: case 477: case 27: case 243: case 244: case 204: case 478:
     case 641: case 370: case 171:
+    // ★IIIII209 补族（cs:69461-69522 if 链逐字,与 TrackPass 副本同步）：23/24/661
+    //   腐化草族、58/76/77/684 神圣草族、37/32 草族、25 泥族、109/492——
+    //   REMIX #97 轨域 661 缺掷定罪同源（纯新增档,存量绿链未触即零扰动）
+    case 23: case 24: case 661:
+    case 58: case 76: case 77: case 684:
+    case 37: case 32:
+    case 25: case 109: case 492:
       r.nextInt(2);
       return;
     // YYYYY：cs:67069 `(type==34||type==42) && genRand.Next(2)==0`——吊灯/棺木尘掷
     case 34: case 42:
       r.nextInt(2);
+      return;
+    case 31: case 696:                       // cs:69519 (31||696)&&fx≥36 → 免掷
+      if (fx < 36) r.nextInt(2);
+      return;
+    case 35:                                 // cs:68831 fx<36 短路与掷同支
+      if (fx < 36) r.nextInt(2);
+      return;
+    case 231:                                // cs:69225 num=153 后恒掷 Next(3)
+      r.nextInt(3);
       return;
     case 26: case 695:
       if (fx < 54) r.nextInt(2);
@@ -608,6 +632,12 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   __swFnt39('KT', x, y);   // IIII100e2：K 分解镜像（rig KillTile 入口 KT 同位）
+  // IIII190 探针：引擎侧 KillTile 入口逐杀钩（与 TrackPass.__trackKillProbe 同表，
+  // 合成与 x86 JJHook KLOG 同口径的全域击杀台账；无钩零开销）
+  try {
+    const g = globalThis as unknown as { __swKill190?: (draws: number, x: number, y: number, sheet: number, fx: number, fy: number) => void };
+    g.__swKill190?.(0, x, y, SWEEP_SHEET[st.type[i]] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0);
+  } catch { /* noop */ }
   // IIII68b：KillTile 入口时序探针（x86 KTPRE 同位；无钩零开销）
   try {
     const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;
@@ -639,6 +669,13 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap?.(x, y, sheet);
   const dust = killTileDustAmount(sheet, fx);
   for (let k = 0; k < dust; k++) makeTileDustRoll(ctx, sheet, fx);
+  // ★IIIII199（2026-09-03）：蛛网落罐判定掷（rig 1457 cs:64619≡1458 同位——
+  //   `type == 51 && tile.wall == 62 && genRand.Next(4) != 0 → noItem`）。生成期
+  //   noItem 恒 true 但掷照耗（ShouldTileSurvive 之后、击杀写之前）。头注旧备案
+  //   「本扫目标族均不命中」只对 FinalCleanup 大循环直接目标成立,本引擎为全域
+  //   级联复用（Check*/沉降/巷杀级联可达 51+wall62）,与 TrackPass.killTileLane
+  //   同批补臂（平行副本纪律：KillTile 三镜像逐份 diff）。
+  if (ctx.rng && sheet === 51 && st.wall[i] === 62) ctx.rng.int(0, 3);
   st.setTileSilent(x, y, 0);          // active=false+half=false+type=0（帧 -1 不可表达）
   squareTileFrame(st, ctx, x, y);
 }
@@ -705,6 +742,14 @@ export function genKillTile(st: TileStore, rng: RNG, x: number, y: number): void
 export function genTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
   tileFrameGen(st, ctx, x, y, true);
+}
+
+/** ★IIIII203：WorldGen.CheckLilyPad(x,y)（1457 cs:59694）生成期入口——FinishRemixWorld
+ *  尾扫（cs:27021-27029 全图裸 type==518 → CheckLilyPad）消费。
+ *  零行为新增：仅包装私有 checkLilyPadSweep（CheckLilyPad 1:1 实现体）。 */
+export function genCheckLilyPad(st: TileStore, rng: RNG, x: number, y: number): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  checkLilyPadSweep(st, ctx, x, y);
 }
 
 /** ★IIII162 纯导出：WorldGen.TileFrame(i, j)（resetFrame=false 缺省）单格生成期入口
@@ -3216,7 +3261,7 @@ function fillWallHolesInArea(st: TileStore, gs: GenState): void {
 export function runFinalCleanupPass(
   st: TileStore, gs: GenState, rng?: RNG,
   opts?: { frameSparse?: boolean; stats?: ZzzStats; chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
-    beforeShimmer?: () => void },
+    beforeShimmer?: () => void; spawnX?: number; spawnY?: number },
 ): void {
   const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: !!opts?.frameSparse, stats: opts?.stats ?? __zzzLastStats };
   // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
@@ -3374,8 +3419,12 @@ export function runFinalCleanupPass(
         }
       }
 
-      // ⑨ 314 矿轨上下清液(cs:22479-22491:上 15 格 + 下 1 格;extraLiquid 种子门不适用)
-      if (st.flags[t] && type === TRACK) {
+      // ⑨ 314 矿轨上下清液(1456 cs:22479-22491 / 1457 cs:22519-22532:上 15 格 + 下 1 格)
+      //   ★IIIII201（2026-09-03）勘误：vanilla cs:22519 门是
+      //   `active && type==314 && !SecretSeed.extraLiquid.Enabled`——**extraLiquid
+      //   (waterpark) 世界整支跳过**（矿轨上下液保留）。曾注「种子门不适用」漏接线 →
+      //   waterpark #105 L/Lt=Y2>0×3350+Y1>0×2697（vanilla 保留的轨周液 JS 清空）。
+      if (st.flags[t] && type === TRACK && !gs.seedFlags.extraLiquid) {
         for (let y2 = j; j - y2 < 15; y2--) { // j, j-1 … j-14
           if (y2 >= 0) st.liquid[st.idx(i, y2)] = 0;
         }
@@ -3494,6 +3543,18 @@ export function runFinalCleanupPass(
   //    Next(10)×N)与写面(Ash→熔岩/Dirt→23 系)双双缺失 → #105 尾段大族差。
   if (gs.seedFlags.getGoodWorld && !gs.seedFlags.skyblock && rng) {
     runFinishGetGoodWorld(st, rng, gs, opts?.chests);
+  }
+
+  // ── FinishRemixWorld（1457 cs:22645 调用位：GG 之后、vampire/FinalizeSecretSeeds/
+  //    ShimmerCleanUp 之前；实现体 vanilla/FinishRemixWorldPass.ts）──
+  //    ★IIIII203 主刀：1457≡1458≡1456 三源逐行全同（不套 hfIs1457 门）。八链 =
+  //    云转化(num 最深云行)/全图大环(每格恒掷 Next(3)+Next(19,22)≈954 万掷 +
+  //    Convert 单格连墙转化)/QuickWater/出生腔清液 while/AddTrees(undergroundOnly)
+  //    第二实例(头两颗 NextDouble 被弃恒掷)/地牢涂装/地狱沙帧重排/睡莲尾扫。
+  //    掷流位次敏感——勿移动调用位（其后 beforeShimmer 内 FinalizeSecretSeeds/
+  //    ShimmerCleanUp r90 块的掷位全由本位次锚定）。
+  if (gs.seedFlags.remix && rng) {
+    runFinishRemixWorld(st, rng, gs, opts?.spawnX ?? 0, opts?.spawnY ?? 0);
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──

@@ -49,7 +49,7 @@ const res = await page.evaluate(async () => {
     return origNewGore(type, x, y, vx, vy, scale, perfect);
   };
   const origSfx = g.sfx.play.bind(g.sfx);
-  g.sfx.play = (key, ...a) => { timeline.push({ kind: 'sfx', key }); return origSfx(key, ...a); };
+  g.sfx.play = (key, ...a) => { timeline.push({ kind: 'sfx', key, x: a[1], y: a[2] }); return origSfx(key, ...a); };
   const origLoot = g.potLoot.bind(g);
   g.potLoot = (...a) => { timeline.push({ kind: 'loot' }); return origLoot(...a); };
 
@@ -88,11 +88,12 @@ const res = await page.evaluate(async () => {
     }
     g.smashPot(PX + 1, by - 1);                    // 命中格=右下（非锚 ax=PX,ay=by-2）
     const gore = timeline.filter((e) => e.kind === 'gore');
-    const sfxKeys = timeline.filter((e) => e.kind === 'sfx').map((e) => e.key);
+    const sfxEv = timeline.filter((e) => e.kind === 'sfx');
+    const sfxKeys = sfxEv.map((e) => e.key);
     const kinds = timeline.map((e) => e.kind);
     const residue = [0, 1].flatMap((dx) => [0, 1].map((dy) => st.get(PX + dx, by - 2 + dy)));
     for (let dx = 0; dx < 2; dx++) for (let dy = -2; dy <= 0; dy++) st.setTile(PX + dx, by + dy, 0);
-    return { gore, sfxKeys, kinds, residue, hitX: PX + 1, hitY: by - 1 };
+    return { gore, sfxKeys, sfxPos: sfxEv.map((e) => ({ x: e.x, y: e.y })), kinds, residue, hitX: PX + 1, hitY: by - 1 };
 
   };
 
@@ -122,11 +123,14 @@ const res = await page.evaluate(async () => {
     }
     const posOk = r.gore.every((e) => e.x === r.hitX * 16 && e.y === r.hitY * 16);
     const sfxOk = r.sfxKeys.length > 0 && r.sfxKeys[0] === sfxExpect(style);
+    // ★potSfxPos（④,十三批）：音效位置=命中格左上角 (i*16,j*16)（:57335/:57339/:57343
+    //  三档同式,i/j=CheckPot 入参）——曾用锚格中心 (ax*16+16, ay*16+16)
+    const sfxPosOk = r.sfxPos.length > 0 && r.sfxPos[0].x === r.hitX * 16 && r.sfxPos[0].y === r.hitY * 16;
     const orderOk = r.kinds.length >= 2 && r.kinds[0] === 'sfx'
       && r.kinds.slice(1, 1 + r.gore.length).every((k) => k === 'gore')
       && r.kinds[r.kinds.length - 1] === 'loot';
     const cleanOk = r.residue.every((v) => v === 0);
-    out.cases.push({ style, fx, goreOk: ok, posOk, sfxOk, orderOk, cleanOk, ...detail, sfxGot: r.sfxKeys[0] });
+    out.cases.push({ style, fx, goreOk: ok, posOk, sfxOk, sfxPosOk, sfxPos: r.sfxPos[0], hitX: r.hitX, hitY: r.hitY, orderOk, cleanOk, ...detail, sfxGot: r.sfxKeys[0] });
   }
 
   // ---- 素材链：Gore_51 懒载可得（首取触发加载 → 等待 → 再取 width>0）----
@@ -191,11 +195,11 @@ await browser.close();
 
 let fail = 0;
 for (const c of res.cases) {
-  const ok = c.goreOk && c.posOk && c.sfxOk && c.orderOk && c.cleanOk;
+  const ok = c.goreOk && c.posOk && c.sfxOk && c.sfxPosOk && c.orderOk && c.cleanOk;
   if (!ok) fail++;
   console.log(`style ${String(c.style).padStart(2)} fx${String(c.fx).padStart(3)}  gore=${JSON.stringify(c.got)}`
     + `  [gore${c.goreOk ? '✓' : '✗(' + JSON.stringify(c.want) + ')'} pos${c.posOk ? '✓' : '✗'}`
-    + ` sfx${c.sfxOk ? '✓' : '✗(' + c.sfxGot + ')'} order${c.orderOk ? '✓' : '✗:' + JSON.stringify(c.orderOk)}`
+    + ` sfx${c.sfxOk ? '✓' : '✗(' + c.sfxGot + ')'} sfxPos${c.sfxPosOk ? '✓' : '✗(' + JSON.stringify(c.sfxPos) + ' want(' + c.hitX * 16 + ',' + c.hitY * 16 + ')'} order${c.orderOk ? '✓' : '✗:' + JSON.stringify(c.orderOk)}`
     + ` clean${c.cleanOk ? '✓' : '✗'}]`);
 }
 console.log(`asset Gore_51.png: ${JSON.stringify(res.asset)}`);

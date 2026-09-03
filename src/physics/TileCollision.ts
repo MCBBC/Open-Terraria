@@ -49,6 +49,9 @@ export interface Body {
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
    *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
   liqFactor?: number;
+  /** 湿身态（NPC.wet 碰撞盒触液）。unembedPass 对 wet 体整段跳过——水中嵌入由
+   *  原版浮力/水物理接管（AI_001 wet 段 cs:61877/62080），兜底踢入水中=非原版扰动 */
+  wet?: boolean;
   /** 连续中心格嵌入 tick 计数（unembedPass 延迟门用；脱出/未嵌入即复位） */
   embedTicks?: number;
   /** 本嵌入会话（embedTicks 未清零期）topEmbedded 横推已消耗预算 px
@@ -875,6 +878,14 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
 
 const EMBED_DELAY_TICKS = 15;
 function unembedPass(b: Body, world: World): void {
+  // ★湿身体整段跳过（2026-09-03 复核）：兜底抬升/横推是本仓自愈发明,原版无等价
+  //  机制；水中嵌入体由原版水物理接管——AI_001 wet 浮力段（cs:62080-62128,water
+  //  探针盒 10×h/2）+ 嵌入体上升不拦（TileCollision cs:2455 `vector3.Y >= tileBottom`
+  //  门=旧位在格下才拦,已嵌入=穿透,原版同款）。湿体抬升踢（史莱姆水囊案实测
+  //  600t 内 1 次 +16px,非主 bounce 源）属水中非原版扰动,兜底让位于原版。
+  //  干侧救援（凹龛/tent/活埋）不受影响。主 bounce 源=slopeCollide 贴合
+  //  （vanilla 同款,另案定谳）。
+  if (b.wet) return;
   const st = world.store;
   const cx = Math.floor((b.x + b.w / 2) / TILE);
   const cy = Math.floor((b.y + b.h / 2) / TILE);

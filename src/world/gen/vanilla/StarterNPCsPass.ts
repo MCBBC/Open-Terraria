@@ -46,6 +46,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { World } from '../../World';
+import { wgSpawnNpc, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体面登记
 import { genSolidType } from './GenSolid';
 
 /** 存入 world.starterTownNpcs 的单条记录（消费端 Game.afterWorldLoad 新世界分支实例化） */
@@ -214,9 +215,17 @@ function pushStarter(
  * 维持零掷骰零记录早退（NPC 命名掷的 ROLL 也一并消失——与原版普通种子 run 该 pass
  * 的 NewNPC(22) 分支【有】名字掷不同,该差额由 Game.ts 承接域的历史口径吸收,头注④）。
  */
-export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World }): void {
-  const { store, rng, world } = ctx;
+export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World; gs?: GenState }): void {
+  const { store, rng, world, gs } = ctx;
   const f = world.seedFlags ?? {};
+  // ★IIIII194：生成期 NPC 实体登记（Collision.EmptyTile 的 NPC 支世界面）——与
+  //   IIII20 的 starter 记录口径分立（零掷零记录不触碰）。原版本 pass 每 NewNPC
+  //   落地一枚活体（镇民人形族 18×40），x86 rig 普查 pass80 起 npc=2 实证
+  //   （waterpark：N1=t22 (33559,4520) ⇔ Bottom(spawnTileX*16, spawnTileY*16)=(33568,4560)，
+  //   spawn=(2098,285)）。Bottom 语义（NPC.cs:81596）→ 矩形 (X−9, Y−40, 18, 40)。
+  const wgReg = (t: number, bottomX: number, bottomY: number): void => {
+    if (gs) wgSpawnNpc(gs, t, bottomX, bottomY, 18, 40);
+  };
   // cs:19852 外门 tenthAnniversary。skyblock 组合按 cs:19892 `if (!skyblockWorldGen)`
   // 门语义整段跳过。
   // ★IIIII20（换人支收齐）：非十周年 else 链 cs:19986-20059 全支落地。原版是一棵
@@ -244,6 +253,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   //    → 终名=第二掷落池名（DryadNames 不含 "Lilith" 覆写语义——那是十周年内嵌臂专属）。
   if (!f.tenthAnniversary && f.infectedSeed) {
     const givenName = rollStarterName(rng, 20);
+    wgReg(20, sx * 16, sy * 16);                        // ★IIIII194 cs:19987 NewNPC(20)
     if (f.remix) world.flags.savedTaxCollector = true;
     world.starterTownNpcs = [{
       key: 'dryad', givenName,
@@ -258,6 +268,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   //    双掷、第二掷=终名（"Lilith" 即该池第 21 位——池表见 NPC_NAME_POOLS 注）。
   if (!f.tenthAnniversary && f.vampireSeed && !f.infectedSeed) {
     const givenName = rollStarterName(rng, 633);
+    wgReg(633, sx * 16, sy * 16);                       // ★IIIII194 cs:20000 NewNPC(633)
     world.starterTownNpcs = [{
       key: 'zoologist', givenName,
       x: sx * 16 + 8, y: (sy - 2) * 16, anchor: [sx, sy], dir: 1,
@@ -270,6 +281,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   //    出生点值由 SpawnPoint 域决定,本 pass 只忠实引用）。
   if (!f.tenthAnniversary && f.remix && !f.vampireSeed && !f.infectedSeed) {
     const givenName = rollStarterName(rng, 441);
+    wgReg(441, sx * 16, sy * 16);                       // ★IIIII194 cs:20009 NewNPC(441)
     world.flags.savedTaxCollector = true;
     world.starterTownNpcs = [{
       key: 'tax_collector', givenName,
@@ -282,6 +294,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   if (!f.tenthAnniversary && f.drunkWorld && f.theConstant
     && !f.remix && !f.vampireSeed && !f.infectedSeed) {
     // drunk×dontStarve → 机械师 124（cs:20016-20025）
+    wgReg(124, sx * 16, sy * 16);         // ★IIIII194 cs:20018 NewNPC(124)
     rng.nextInt(NAME_ROLL_WIDTH[124]!);   // getNewNPCName(124)——结果保留（运行期近似 ''）
     rng.nextInt(NAME_ROLL_WIDTH[124]!);   // GetNameForVariant 重掷（Legacy 恒 0）
     world.flags.savedMech = true;         // NPC.savedMech（cs:20023）
@@ -298,6 +311,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   if (!f.tenthAnniversary && f.notTheBees && !f.theConstant
     && !f.remix && !f.vampireSeed && !f.infectedSeed) {
     const givenName = rollStarterName(rng, 17);
+    wgReg(17, sx * 16, sy * 16);                        // ★IIIII194 cs:20027 NewNPC(17)
     world.flags.unlockedMerchantSpawn = true;
     world.starterTownNpcs = [{
       key: 'merchant', givenName,
@@ -310,6 +324,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   if (!f.tenthAnniversary && f.getGoodWorld && !f.remix && !f.vampireSeed
     && !f.infectedSeed && !(f.drunkWorld && f.theConstant) && !(f.notTheBees && !f.theConstant)) {
     const givenName = rollStarterName(rng, 38);
+    wgReg(38, sx * 16, sy * 16);                        // ★IIIII194 cs:20037 NewNPC(38)
     world.flags.unlockedDemolitionistSpawn = true;
     world.starterTownNpcs = [{
       key: 'demolitionist', givenName,
@@ -323,6 +338,7 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   if (!f.tenthAnniversary && f.drunkWorld && !f.getGoodWorld && !f.notTheBees && !f.theConstant
     && !f.remix && !f.vampireSeed && !f.infectedSeed) {
     // 裸 drunk → 派对女孩 208（cs:20045-20054）
+    wgReg(208, sx * 16, sy * 16);         // ★IIIII194 cs:20046 NewNPC(208)
     rng.nextInt(NAME_ROLL_WIDTH[208]!);
     rng.nextInt(NAME_ROLL_WIDTH[208]!);
     world.flags.unlockedPartyGirlSpawn = true;   // NPC.unlockedPartyGirlSpawn（cs:20050）
@@ -334,8 +350,12 @@ export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World 
   }
   // ── 最终 else（cs:20052-20058 向导兜底）：未被以上任一臂受理的形态 → 零掷骰零记录
   //    早退（Game.ts 历史口径承接域;①-⑦ 各臂都提前 return,走到的只有兜底集合）。
-
-  if (!f.tenthAnniversary) return;
+  //    ★IIIII194：兜底臂的 NewNPC(22) 实体面照原版登记（零掷零记录；x86 普查实证
+  //    普通种子 pass80 起向导即在场——EmptyTile 消费域需要该矩形）。
+  if (!f.tenthAnniversary) {
+    wgReg(22, sx * 16, sy * 16);          // ★IIIII194 cs:20052 NewNPC(22) 兜底臂
+    return;
+  }
   const starters: StarterTownNpc[] = [];
 
   // ---- 首 NPC 三臂（★IIIII20 补齐 :19855-19888 的 worldIsInfected/remix 两臂）----

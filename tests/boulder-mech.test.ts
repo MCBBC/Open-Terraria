@@ -140,7 +140,7 @@ describe('BoulderMech（Check2x2 移植）', () => {
     const st = mkStore();
     const f = fixture(st);
     f.put4(484);
-    const spyConvert = vi.fn(() => {});
+    const spyConvert = vi.fn((_ax: number, _ay: number, _sheet: number) => {});
     const killed: Array<[number, number]> = [];
     checkBoulderFamily(st as unknown as Parameters<typeof checkBoulderFamily>[0], 6, 6, {
       sheetOfInternal: (id) => id,

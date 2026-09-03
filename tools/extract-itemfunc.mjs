@@ -15,10 +15,22 @@
 // 2026-08-25 DefaultTo 武器族展开（1458 Item.cs）：MagicWeapon/RangedWeapon/Bow/
 //   Staff/Spear/ThrownWeapon——此前只认显式赋值,这些辅助函数族的 case（整块 615x）
 //   全部漏提 → heldUseStyle 回退 useStyle 1（冰川之牙斜挥穿胸,用户实报）。
+// 2026-09-03 ★PS-STRUCT placeStyle 条件感知结构层（F1 工具自愈,蓝队定谳）：
+//   v1 collectCaseSegments 对「多支共享 case 段（fallthrough 组）」只有【组末支】拿到
+//   body 段——①嵌套 switch(type) 组：末支段卷进整个内层 switch → 字段首匹配吃到
+//   组锚值（花岗岩 11/大理石 8 家具 + 2642 黑曜石灯 + 3868 奖杯 = 伪值）;②if/else
+//   覆写组：非末支段=空白 → 整组缺档（2641/3866/3867）。运行时已由 items.ts
+//   SHARED_GROUP_PLACE_STYLE_1457（24 行）无条件纠偏,本批让工具自愈：
+//   structuralPlaceStyles() 重建 C# 执行序（fallthrough 组共享 body + 嵌套 switch 孔剥
+//   + per-id 归并 + if(type==N)/else 条件感知）,只解 placeStyle 一个字段——其余字段
+//   仍走 v1 文本段首匹配（重提会引入超预期 diff,落盘闸门=placeStyle 之外零 diff）。
+//   修正面：已有条目伪值覆写 + 无条目最小新增 {placeStyle}（其余字段仍由 items.ts
+//   vanilla.json 回填链承载;placeStyle=0 的补齐项经回填门 `!== 0` 为运行时无操作）。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { EXTRA_USETURN } from './extract-itemcombat.mjs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const OUT = process.env.ITEMFUNC_OUT ?? `${ROOT}/game/src/data/vanilla-itemfunc.json`;
 const itemSrc = readFileSync(`${ROOT}/Terarria1458/Terraria/Item.cs`, 'utf8');
 
 function methodBodyOf(src, name) {
@@ -71,6 +83,190 @@ function outerCaseSegments(src) {
       || methodBodyOf(src, `private void SetDefaults${n}(`)
       || methodBodyOf(src, `void SetDefaults${n}(`);
     if (body) collectCaseSegments(body, out);
+  }
+  return out;
+}
+
+// ================= ★PS-STRUCT placeStyle 条件感知结构层（2026-09-03） =================
+// 只服务 placeStyle 字段；其余字段走 v1 collectCaseSegments 文本段首匹配（零漂移）。
+
+/** 剥掉段内嵌套 switch(type) 块（holes=[start,end) 记于所属 case 段）后的文本 */
+function sliceHoles(body, rec) {
+  if (!rec.holes.length) return body.slice(rec.start, rec.end);
+  let out = '', pos = rec.start;
+  for (const [hs, he] of rec.holes) {
+    if (hs < pos || he > rec.end) continue;   // 孔不属于本段（理论不可达,防御）
+    out += body.slice(pos, hs);
+    pos = he;
+  }
+  return out + body.slice(pos, rec.end);
+}
+
+/** 消费一个语句：{…} 块或到分号的裸语句 → 返回结束下标（exclusive） */
+function stmtEnd(text, i) {
+  if (text[i] === '{') {
+    let d = 0;
+    for (; i < text.length; i++) {
+      if (text[i] === '{') d++;
+      else if (text[i] === '}') { d--; if (d === 0) return i + 1; }
+    }
+    return text.length;
+  }
+  const semi = text.indexOf(';', i);
+  return semi < 0 ? text.length : semi + 1;
+}
+
+/** 解析 if (type == N) <stmt> [else <stmt>] → { body, elseBody, end }
+ *  body/elseBody 为【源文本】（else-if 链整段交给递归） */
+function consumeIf(text, afterHeader) {
+  let i = afterHeader;
+  while (/\s/.test(text[i] ?? '')) i++;
+  if (i >= text.length) return null;
+  const bodyStart = text[i] === '{' ? i + 1 : i;
+  const bodyEnd = stmtEnd(text, i);
+  const body = text[i] === '{' ? text.slice(bodyStart, bodyEnd - 1) : text.slice(i, bodyEnd);
+  let j = bodyEnd;
+  while (/\s/.test(text[j] ?? '')) j++;
+  let elseBody, end = bodyEnd;
+  if (text.startsWith('else', j)) {
+    let k = j + 4;
+    while (/\s/.test(text[k] ?? '')) k++;
+    if (text[k] === '{') {
+      const eEnd = stmtEnd(text, k);
+      elseBody = text.slice(k + 1, eEnd - 1);
+      end = eEnd;
+    } else {
+      // else if … / else 裸语句：整段源文本递归
+      const eEnd = text[k] === 'i' ? consumeIf(text, text.indexOf(')', k) + 1).end : stmtEnd(text, k);
+      elseBody = text.slice(k, eEnd);
+      end = eEnd;
+    }
+  }
+  return { body, elseBody, end };
+}
+
+/** 段文本 → 该 id 的 placeStyle 终值。
+ *  顺序单位扫描（C# 执行序）：无条件赋值【首个】生效（=v1 首匹配语义）;
+ *  if (type == N) 命中支（含 else 支）覆写——含反序形态 `if (N == type)`
+ *  （Item.cs:33139-33147 防御锻造炉 3743-3745 三连 if）。算式（20 + type - 2637
+ *  等）不解（与 v1 同口径,交 items.ts vanilla.json 回填链）。 */
+function evalPlaceStyle(text, id) {
+  let ps;
+  const re = /if\s*\(\s*(?:(?:type|currentItem\.type)\s*==\s*(\d+)|(\d+)\s*==\s*(?:type|currentItem\.type))\s*\)|placeStyle\s*=\s*(\d+)\s*;/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m[3] !== undefined) { if (ps === undefined) ps = +m[3]; continue; }
+    const n = +m[1] || +m[2];
+    const parsed = consumeIf(text, re.lastIndex);
+    if (!parsed) continue;
+    re.lastIndex = parsed.end;   // 绝对下标（consumeIf 以同一 text 计位）
+    const branch = n === id ? parsed.body : parsed.elseBody;
+    if (branch !== undefined) {
+      const v = evalPlaceStyle(branch, id);
+      if (v !== undefined) ps = v;   // 条件命中覆写（C# 后写胜）
+    }
+  }
+  return ps;
+}
+
+function psRec(sw) {
+  let r = sw.cases.get(sw.cur);
+  if (!r) { r = { start: sw.segStart, end: 0, holes: [], nested: [] }; sw.cases.set(sw.cur, r); }
+  return r;
+}
+
+/** 单个 switch(type) 的 per-id placeStyle 解析（close 时调用;子层已解析存 sw.ps） */
+function psResolveSwitch(sw, body) {
+  sw.ps = new Map();
+  const ids = [...sw.cases.keys()].filter((k) => k !== null);
+  const stripComment = (s) => s.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+  // fallthrough 分组：连续 case 标签,中间段全空白 → 共享【末支段】为组 body
+  const groups = [];
+  let run = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const rec = sw.cases.get(id);
+    run.push(id);
+    const empty = stripComment(sliceHoles(body, rec)).trim() === '';
+    if (!empty || i === ids.length - 1) { groups.push({ members: run, bodyRec: rec }); run = []; }
+  }
+  for (const g of groups) {
+    const bodyText = sliceHoles(body, g.bodyRec);
+    for (const id of g.members) {
+      let ps = evalPlaceStyle(bodyText, id);
+      for (const child of g.bodyRec.nested) {
+        const cps = child.ps?.get(id);
+        if (cps !== undefined) ps = cps;   // 嵌套 switch(type) per-id 条目覆盖（执行序在后）
+      }
+      if (ps !== undefined) sw.ps.set(id, ps);
+    }
+  }
+  // default: 段（key=null）——无条件/区间赋值无法按 id 归属,不解（v1 同口径整段丢弃,
+  // 零漂移）;但其内嵌套 switch(type) 的 per-id 条目按 id 归并（显式 case 优先）
+  const defRec = sw.cases.get(null);
+  if (defRec) {
+    for (const child of defRec.nested) {
+      for (const [cid, cps] of child.ps ?? []) {
+        if (!sw.ps.has(cid)) sw.ps.set(cid, cps);
+      }
+    }
+  }
+}
+
+/** 结构层主入口：SetDefaults1-5 → Map(vid → placeStyle 终值) */
+function structuralPlaceStyles(src) {
+  const out = new Map();
+  for (const n of [1, 2, 3, 4, 5]) {
+    const body = methodBodyOf(src, `public void SetDefaults${n}(`)
+      || methodBodyOf(src, `private void SetDefaults${n}(`)
+      || methodBodyOf(src, `void SetDefaults${n}(`);
+    if (!body) continue;
+    const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
+    const stack = [];
+    let depth = 0, m;
+    while ((m = tokRe.exec(body))) {
+      const t = m[0];
+      if (t.startsWith('switch')) {
+        stack.push({ isType: /switch\s*\(\s*(?:type|currentItem\.type)\b/.test(t), opened: false, bodyDepth: -1, tokStart: m.index, cur: null, segStart: 0, cases: new Map() });
+      } else if (t === '{') {
+        depth++;
+        const top = stack[stack.length - 1];
+        if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
+      } else if (t === '}') {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && depth === top.bodyDepth) {
+          stack.pop();
+          depth--;
+          if (top.isType) {
+            if (top.cur !== null) psRec(top).end = m.index;
+            const parent = stack[stack.length - 1];
+            if (parent && parent.isType && parent.opened) {
+              // ①嵌套 switch(type) 闭合：孔登记 + 子层归并（"保护内层条目"的承载点——
+              //   子层 per-id 终值经 parent 解析时归并,不再被 parent 段首匹配冲掉）。
+              //   parent.cur === null = default: 段（Item.cs:22374 巨型 default 支内
+              //   兄弟嵌套 switch 逐 id 分派,2641-2647 区即此形态）——同样登记,
+              //   归并在 psResolveSwitch 的 default 支处理。
+              const pr = psRec(parent);
+              pr.holes.push([top.tokStart, m.index + 1]);
+              pr.nested.push(top);
+            }
+            psResolveSwitch(top, body);
+            if (!stack.some((s) => s.isType && s.opened)) {
+              for (const [id, ps] of top.ps) out.set(id, ps);   // 最外层才落总表（后法覆盖前法=v1 同序）
+            }
+          }
+          continue;
+        }
+        depth--;
+      } else {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && top.isType) {
+          if (top.cur !== null) psRec(top).end = m.index;
+          top.cur = t === 'default:' ? null : +m[2];
+          top.segStart = m.index + t.length;
+        }
+      }
+    }
   }
   return out;
 }
@@ -149,6 +345,24 @@ for (const [id, seg] of SEGS) {
     f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
   }
   if (Object.keys(f).length) FUNC[id] = f;
+}
+// ★PS-STRUCT placeStyle 条件感知修正（在 FIELDS 之后、手补丁之前——手补丁无 placeStyle
+// 键,不受影响）：①伪值覆写（已有条目 placeStyle≠结构层真值）②缺档最小新增 {placeStyle}
+// （其余字段仍由 items.ts vanilla.json 回填链承载=placeStyle 之外零 diff 闸门）
+{
+  const PS = structuralPlaceStyles(itemSrc);
+  let fix = 0, add = 0;
+  const fixed = [], added = [];
+  for (const [id, ps] of PS) {
+    const cur = FUNC[id];
+    if (cur) {
+      if (cur.placeStyle !== ps) { fixed.push(`${id}:${cur.placeStyle}->${ps}`); cur.placeStyle = ps; fix++; }
+    } else {
+      FUNC[id] = { placeStyle: ps }; added.push(`${id}:${ps}`); add++;
+    }
+  }
+  console.error(`PS-STRUCT: 伪值纠偏 ${fix} 件 [${fixed.join(', ')}]`);
+  console.error(`PS-STRUCT: 缺档补齐 ${add} 件 [${added.join(', ')}]`);
 }
 // 钓竿区段补丁：2290-2296 族在 case 段外的 type 区间块赋值（最近 switch 归属扫不到），
 // 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。
@@ -265,7 +479,7 @@ for (const [id, expansion] of Object.entries(DELEGATE_EXPANSION)) {
   }
   console.error(`useTurn=1: ${n} 件（EXTRA_USETURN 全量 ${EXTRA_USETURN.size}）`);
 }
-writeFileSync(`${ROOT}/game/src/data/vanilla-itemfunc.json`, JSON.stringify(FUNC));
+writeFileSync(OUT, JSON.stringify(FUNC));
 console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);
 const stats = {};
 for (const f of Object.values(FUNC)) {

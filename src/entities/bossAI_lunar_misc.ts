@@ -2181,6 +2181,9 @@ export class LunarOrb extends Entity {
             (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(
               new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576, null,
                 { grav: 0, life: 600, pierce: 1, hostile: true }), 'projectiles');
+            // 弹 576 出生音:Projectile.cs:56443-56447 ai[1]==0 首拍 SoundID.Item12——
+            // 本仓 576 走 Arrow 直飞桶无 ai[1] 态,于发射点等价结算(同 462/259 先例)
+            game.playSfxWav?.('Item_12', 1, this.cx, this.cy);
           }
           this.ai0 = 0;
         }

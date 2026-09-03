@@ -1861,6 +1861,13 @@ export class Enemy extends Entity {
    *  翻面沿【已旋转的局部 X 轴】施加，与通用 facing 镜像（未旋转轴）不同源）。
    *  默认 -1 = 不翻（与原版 spriteDirection 缺省一致） */
   snailSdir = -1;
+  /** 鲨龙卷 372/373 spriteDirection（AI_071 :35196-35315）：AI direction 与
+   *  spriteDirection 是**两个字段**——蓄力段(ai0=0) 373 摆头向按 cos 符号写
+   *  spriteDirection（:35219-35221），372 全程不写（恒字段缺省 -1）；起扑段
+   *  TargetClosest 后 spriteDirection=direction（:35254）随 facing。缺省 -1 =
+   *  不翻（Entity 字段缺省 :6522，NewNPC 不复位）。渲染层 372/373 flip 消费
+   *  （蓄力段读本字段，起扑后读 facing） */
+  sharkronSdir = -1;
   inWater = false;       // 入水检测（溅落声用）
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
@@ -5349,10 +5356,15 @@ export class Enemy extends Entity {
         let num144 = player.cx - mx + (Math.floor(Math.random() * 81) - 40);   // 1456:59358 / 1457:59558
         let num145 = player.cy - my + (Math.floor(Math.random() * 30) - 30); // :59359/:59361 −30..−1
         const num146 = Math.hypot(num144, num145);                       // :59362
-        if (num146 < 700) {                                              // :59363-59364 距离门
+        // ★R8 F2:1456 伪影门删除——1457(:59562-59566)无 <700 距离门(远距由
+        // flag14=AI_GlobalFiringDistanceCheck 承担,链内已接 :5349);原版归一化后直射
+        if (true) {
           const num143 = 15;                                             // :59355 弹速
           // 出生点沿弹向 +vel×3（:59371-59372）
           const u = num146 || 1;
+          // ★N 批:出膛音 Item_33（AI_001 首拍 ai[1]==0 :56195-56199,发射位等价结算
+          // 与 shootBolt462 先例同构;Eyezor 251 同款 :59335-59378 本位即此处）
+          this.playSfxWav?.('Item_33', 1, this.cx, this.cy);
           this.shootDart(game, mx + (num144 / u) * num143 * 3, my + (num145 / u) * num143 * 3,
             num144, num145, num143, 30, 83);                             // :59373 proj 83 伤 30
           this.ai2 = 0;                                                  // :59374

@@ -185,7 +185,14 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   // ★IIIII118：柱顶树对拍仪（SW_I158_PDC 门控,零掷）——镜像 x86 rig GTR-IN/H/OK（cs:30056 GrowTree）。
   if (I158GTR()) console.log(`GTR-IN i=${i} j=${index1} y=${y} iw=${ignoreWalls ? 1 : 0}`);
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
-  if (!ignoreWalls && !ntb && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
+  // ★IIIII196（2026-09-03）REMIX #82 定罪修复：墙门缺 remix 地下豁免臂——
+  //  1457 cs:30061 `((Main.remixWorld && (double)j > Main.worldSurface) || notTheBeesWorld
+  //  || wall==0) | flag`（1458 同号；| 为非短路位或,无副作用,与 || 等价）：remix 世界
+  //  假地表带(j>ws)树基座**免墙检**（0..1 族/土墙后有草即种）。JS 曾只走 TREE_WALLS
+  //  → remix 地下树 x86 有 JS 无（T5>0×744@#82）→ 掷流相位漂移双向扩散（T0>5×693）。
+  if (!ignoreWalls && !ntb
+    && !(!!gs.seedFlags?.remix && index1 > gs.worldSurface)
+    && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
   const fitSide = (dx: number) => {
     if (!st.inBounds(i + dx, index1)) return false;
     const si = st.idx(i + dx, index1);

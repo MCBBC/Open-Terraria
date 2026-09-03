@@ -271,3 +271,67 @@ describe('高门自动开几何门（TryOpenDoor :172-192 行为锁）', () => {
     expect(st.get(30, 40)).toBe(T388);
   });
 });
+
+// ★2026-09-03 R6/R7（红蓝台账尾差,DoorOpeningHelper.TryCloseDoor :189-213 行为锁）：
+//  R6 贴边带=Rectangle.Intersect(:200)+「Width>0||Height>0」(:201-204)——单轴零宽
+//  接触(贴边)交 0×n 矩形仍算 StillInDoorArea 不关;曾用严格 AABB(<)把贴边帧判为
+//  已离开=提前关门。
+//  R7 失败档=非 StillInDoorArea 一律自 _ongoingOpenDoors 移除(:281-288):
+//  FailedToCloseDoor(结构残缺/闭足印被堵)=放弃跟踪不重试;DoorIsInvalidated(门被拆)
+//  同;曾对 shiftTallGate null 保持跟踪=重试语义,与原版不符。
+describe('高门自动关 R6 贴边带 + R7 失败放弃跟踪（TryCloseDoor :189-213）', () => {
+  const mkOpenGate = () => {
+    const w = new World(60, 120, 1, 'tg4');
+    const st = w.store;
+    const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
+    const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; sfx: { play(n: string): void };
+      input: { rightDown: boolean; downAction(a: string): boolean };
+      openTallGates: Map<number, number>; tickCount: number; tallGateVelWindow: number;
+      player: unknown; updateTallGateAuto(): void;
+    };
+    g.world = w;
+    const played: string[] = [];
+    g.sfx = { play: (n: string) => played.push(n) };
+    g.input = { rightDown: false, downAction: () => false };
+    g.openTallGates = new Map();
+    g.tickCount = 0;
+    g.tallGateVelWindow = 0;                     // 壳不跑字段初始化,手动补
+    // 直接布开门态 389 五行(锚 30,40)并登记跟踪——不经开路径,免输入桩耦合
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T389, 0, TALL_GATE_ROW_FY[dy]);
+    g.openTallGates.set(st.idx(30, 40), 0);
+    const player = { x: 0, y: 0, w: 20, h: 42, vx: 0, dead: false };
+    g.player = player;
+    return { g, st, player, T388, T389, anchorIdx: st.idx(30, 40), played };
+  };
+
+  it('R6 贴边:玩家右缘=门区左缘(479)零宽接触不关;再远 1px 才关', () => {
+    const { g, st, player, T388, T389, anchorIdx, played } = mkOpenGate();
+    player.x = 479 - player.w;              // 盒 459..479:右缘贴门区左缘(门区 479..497)
+    player.y = 44 * 16;                     // 盒 704..746 与门区 640..720 正重叠(另一轴正宽)
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T389);      // 贴边=仍算在门区 → 不关
+    expect(g.openTallGates.has(anchorIdx)).toBe(true);
+    player.x -= 1;                          // 右缘 478 < 479 → 双轴分离 → 关
+    g.updateTallGateAuto();
+    expect(st.get(30, 40)).toBe(T388);
+    expect(g.openTallGates.has(anchorIdx)).toBe(false);   // ClosedDoor 移除跟踪
+    expect(played.length).toBe(1);          // 关门音 1 次(失败档不播,ShiftTallGate :52213 前置)
+  });
+
+  it('R7 失败档:结构残缺 shiftTallGate null → 放弃跟踪不重试;门被拆(DoorIsInvalidated)同', () => {
+    const { g, st, T389, anchorIdx, played } = mkOpenGate();
+    const STONE = idOfSheet(1);
+    st.setTileSilent(30, 42, STONE, 0, 0);  // 中行换石 → ValidateTileSquare 失败(:52201)
+    g.updateTallGateAuto();                 // 玩家在 (0,0) 远离门区
+    expect(g.openTallGates.has(anchorIdx)).toBe(false);   // FailedToCloseDoor → 放弃(曾重试)
+    expect(st.get(30, 40)).toBe(T389);      // 残门保持开门态未强行关成(原版同)
+    // DoorIsInvalidated:锚格被拆 → 同样移除跟踪
+    st.setTileSilent(30, 40, 0, 0, 0);
+    g.openTallGates.set(anchorIdx, 0);
+    g.updateTallGateAuto();
+    expect(g.openTallGates.has(anchorIdx)).toBe(false);
+    expect(played.length).toBe(0);          // 两次皆失败档,无开关音
+  });
+});

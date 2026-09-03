@@ -1,4 +1,19 @@
-# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01/02，挂账清零+双轮红蓝对抗+出生锚/肉山镜像收官）
+# 全弹域 GetAlpha/α 账本/AI 动态面 审计台账（2026-09-01/03，遗留清零+三轮红蓝对抗+StarSparkle 基建终局）
+
+> **★S/T 残余+StarSparkle 基建收官（2026-09-03）**：蓝队 U（S/T 中断残余合并）——
+> ①**VDust 双轴基建落地**：scaleX/scaleY 可选接口+老化比值守恒（X:Y 各向异性比全链守恒）+`drawSparkleArms` 双臂渲染（PrettySparkleParticle.cs:61-94 逐值：水平臂 (0.3,2)·num·Scale/垂直臂 π/2 (0.3,1)/双层 ×0.6/color2=ColorTint×Op×0.5×num 纯加色/color3=White×Op×0.9×0.5×num）+全亮桶路由+4 单测锚；缺省回落路径逐字节等价。
+> ②**KrakenWave 1135 尘尾 1:1**：8×NewDustPerfect（Next(3)==0?302:33）逐值直译+掷序全对齐（掷账池满哑元拍也对齐=★F-13 纪律）+**水尘族扩表**（NewDust :232-237 33/52/266/98-105 alpha=170+vel×0.5 + UpdateDust :1904-1946 独立段）+wetBoxAt 注入待批（1 行）。
+> ③**XENO 445-451 摘除**（逐枚对 ：30609 残像门名单复核——445/446/447/450/451 确不在门内且无加算/白光叠画专属绘制位；保留组 437/439/442 逐枚核有据）。
+> ④**wing-visuals 测试私有字段访问类型违规修复**（池扩容遍历暴露的既有违规）。
+> **Duke Fishron 立项报告**已出：`game/.claude/duke-fishron-completion-brief.md`——**AI 本体已实装**（dukeFishronAI/sharkronAI/dukeBubbleAI 挂 case 69/71+残影+缩放+随从交互+372/373 镜像本轮已修），遗留=生成链（蠕虫饵 3191 海洋垂钓）/掉落（:79797）/成就音乐四批，交其它会话。
+> **登记项**：orchestraFx princess/stardust 站迁移被 VDust APF（ax/ay）通道阻断——**APF 通道为本池最后基建缺口**（处方已注：迁 spawnDust 双轴面 scale=vector2/rotation=π/2/fadeIn=0/noGravity+drawSparkleArms）。
+> **终态：24 套件 528+209 全绿+全触碰文件 tsc 零错**。
+
+> **★遗留清零终局（2026-09-03）**：蓝队 J″(导弹拖尾 12 项+KILL_BURST 参数表 79/16/34)/K′(91 圣箭定谳+夜星十周年/critter trap 复权/音量 1.0/SKIP 注 50 条)/L″(orchestra 对抗复捞 14 笔:arcSurge 音档 Item_203 CRITICAL/BL 色域炸 255 倍/townSlime 谓词/Elder 常量色)/M″(949 DamageVar+luck/白化 k 分档/lastDamageCause 受理门)/N(垂直向上贴图定谳=原版本相+用户拍板居中 +2)/O(投射物双队列分层 PROJ_DRAW_OVER_PLAYERS)/P(肉山三件套镜像)/P′(复捞泰坦四臂 128-131 同机制漏镜像)——**三轮对抗累计 ~40 findings 全清偿**。
+> **出生锚四向定谳**（用户四向实测+探针 `_rocket-spawn-anchor-probe`）：①火箭支漏 placeAtShootSpawn（发射族整支,08-14 重构引入,08-31 定案验证只走投掷路径未覆盖）→弹盒偏(+7,+7);②projH/2 上抬撤销（"枪画位装反时代"补丁,枪画位修正后成残余 7px）;③垂直向上贴图居中+2（用户拍板非原版偏离,探针真值定谳——目测 7/14/7 三轮往返教训=**补偿量以探针数字定**）。
+> **尘池 6000+出界杀**：尘池 512（maxDustToDraw 绘制分档误当池容,原版池=6000）连发实测 504/512+nullDrops=170;出屏火箭缺 :16793 出界杀=永生撒尘挤占池（"第 7-9 颗无尾焰"真根因）。双刀后 665/6000+零丢弃。
+> **数据面事故**：vanilla-projectiles.json 496 丢 extraUpdates=2（MaxUpdates=3 换算,01:18 写回抹除早前 --fix 成果）——官方 --fix 通道回填+/tmp/recon-item/ 备份。
+> **终态：22 套件 481/481 绿+全触碰文件 tsc 零错**。
 
 > **★出生锚+肉山镜像收官（2026-09-03，用户四向实测驱动）**：
 > ①**火箭支漏 placeAtShootSpawn**（发射族整支,08-14 fired 重构引入）——锚点中心当左上角=弹盒偏(+7,+7)+projH/2 抬升丢失;补回正一行。
@@ -171,3 +186,55 @@
 | 备3 | 黑曜石门岩浆放置的目标格残余差 | 原版门置放受【两道】岩浆门：CanPlace 逐格 LiquidPlace（TileObject.cs:342,style 19/48 黑曜石放行）**且** IsBlockedByLava 目标格 tileSolid 短路（tileSolid[10]=true,Main.cs:8027）→ 点击格含岩浆时即便黑曜石门也拒（点干格+邻格岩浆才可植）。本仓 liqGateDoor 只移植 CanPlace 逐格门（门双锚分支无"点击格"独立判据）→ 黑曜石门点击岩浆格可放=比原版宽一格的残余差;随备1 全域门一起收 | Player.cs:41809-41824/Main.cs:8027/TileObject.cs:342 |
 | 备4 | 19/427 记录无消费面（完备性产出） | 平台 19/团队平台 427 家族头不声明 W/H/Origin/锚=原版数据形态（_baseObject 终态 1×1 无锚,SetupBaseObject :1779-1781;非解析缺陷）→ recon-tileobj.mjs 已建模 Initialize 头部 `newTile=new TileObjectData(_baseObject)`（:2125,首个 addTile 调用前限定,方法体内 :2006/:2013 不重复建模）,unparsed 386→0,liqStyles 61→64 条。★UsesCustomCanPlace=false（:2134/:2147）→ 原版 CustomPlace(:5017-5038) 不受理=legacy 置放,本仓平台同 legacy:记录当前零消费（anchorRec 只在 w>1‖h>1 走 chooseAnchor + M-4 名单门,19 均不命中）,供未来 legacy 域引用+金标完备 | TileObjectData.cs:2125/:2128-2140/:2147-2149 |
 | 备5 | CheckAlch 83↔84 岩浆开花转换（沿用旧登记） | 火焰花 style5 岩浆量>16 → 成熟83↔开花84 互转（:46451-46471）,本仓 'alch' case 已豁免 case5 岩浆杀但转换略（Game.ts 备注在案）——本次 liqGateHerb 放行 style5 入岩浆后,该转换债由本备案承接 | WorldGen.cs:46451-46471 |
+
+## §13 十三批：登记项五件清偿（2026-09-03——§10 备1/备3/备5 清偿 + ⑤ placeStyle 巡检 + ④ potSfxPos）
+
+**清偿对账**：§10 备1 → liqGateLegacy（Game.ts :19227 区,标记 `liqGateLegacy`）；
+§10 备3 → 门层1 点击格 tileSolid 短路（Game.ts 门双锚分支,标记 `liqGateDoor·层1`）；
+§10 备5 → CheckAlch case5 83↔84 岩浆熟转换（Game.ts 'alch' case,标记 `alchBloom`）。
+回归：五探针（_pile-place/_decor-sweep/_decor-place/_liquid-place 47/47/_pot-gore ALL PASS
++ 新 `_style-audit` 13/13）全 PASS；vitest 21 文件 382 测试全绿（gore/wld-tileentity/
+decor-support/pot-tile-anchor/tallgate/multi-tile-drop/wld-weapon-rack/style-drop-restore/
+cage/place-backfill/assorted-gate/door 六件套/furniture-items/system-coverage/coin-portal-pot）；
+tsc 本域零输出。
+
+### §13.1 定谳与接线（原版行号）
+| 项 | 定谳（1457 全量亲读） | 接线 |
+|---|---|---|
+| IsBlockedByLava 唯一消费位 | `PlaceThing_Tiles_IsBlockedByLava`（Player.cs:41809-41824）全仓**唯一**消费位 = PlaceThing_Tiles 头门 :40058 `!tile.active() && !IsBlockedByLava(...)` 臂——对**全体物品**生效（非 legacy 专属）、只判**点击目标格**、只在目标格非 active 时；语义=岩浆时 tileSolid 短路（:41815-41817）→ 非固体走 CheckLiquidPlacement（TileObjectData.cs:5040-5043）=GetTileData?.LiquidPlace(:1853-1907 per-style) ?? 静态 LiquidPlace(:5045-5062)=岩浆拒 iff tileLavaDeath[type]（水支在本消费位不可达）。legacy 尾段 AssortedThings（:41356-41470）无液体门 | liqGateLegacy 挂 anchorRec 声明后、清格前：固体件（def.solid‖def.platform,平台 19 tileSolid=true Main.cs:8032）岩浆拒；非固体 liquidSpecOf per-style → 无记录回落 LAVA_DEATH_SHEETS（LiquidSim 同源表,本批导出）；豁免={10,11 门,4 火把,82/83/84 药草,227 染料,多格 anchorRec} |
+| 门层1 | tileSolid[10]=true（Main.cs:8027 关态门"实心"）→ :40058 短路先于 CanPlace → 点岩浆格放关态门恒拒（黑曜石 19/48 Allowed 轮不到,TileObjectData.cs:2245-2247）；tileSolid[11]=false（:8030）→ 开态门无短路 | 门双锚分支候选循环前：sheet10 + 点击格非 active + 岩浆 → return（标记 liqGateDoor·层1）；探针 ⑫ 两断言 |
+| CheckAlch case5 | 转换支 :46446-46474（type==82‖!anyLava‖netMode==1 break :46451；liquid>16 且 83→84 :46455-46464；≤16 且 84→83 :46466-46473；只写 type :46459/:46468） | 'alch' case col5+岩浆分支补齐（alchBloom）；探针 ⑪a/b/c |
+| potSfxPos | CheckPot 音效三档同式 (i*16,j*16)=命中格左上角（:57335/:57339/:57343）——gore 同位（:57358）先前已对 | smashPotInner sfx.play 定位 ax+16 中心 → x*TILE,y*TILE（标记 potSfxPos;_pot-gore 新 sfxPos 断言全绿） |
+
+### §13.2 ⑤ placeStyle 巡检结论（literal 32 条+计算族全查）
+零差：药草种子 7 条 placeStyle（Item.cs:5076-5141/:23745）、轨道 2492/2739（:24206/:26157）、
+人体模型 498→470+0（:7317-7318 二次赋值终态）、女模 1989→470+2（:21293）、帽架 3977→475
+（:35359）、鼠笼 4376→533+0（:37266）、宝石种 4851-4857→590+0..6（:39600-39626）、
+音乐盒 101 曲全表（DefaultToMusicBox :48646-48647;直赋 :8057-8093+算式 :19098 `13+type-1596`/
+:29824 `33+type-3235`,diff=0）、喷泉 10 色（:11874/:11889/:12245-12315+4417→207+9 :37445/
+4922→207+8 :39885）、感应器 7 件（:32542-32555 `type-3613`/:33032-33046 `type-3726+3`）、
+晶塔 11 型（DefaultToPlaceableTile(597,N) 全表）、门 30 件 39-68（:41274 区全表）、
+异奇株 3385-3388→227+8..11（:30976-30977）、复刻祭坛 5467-5470（:43137/:43141/:43145/:43149）、
+蝶族 1994-2001（:21341 `placeStyle=1+type-1994`）、群系火把 16 件（DefaultToTorch :48471-48478
+`placeStyle=tileStyleToPlace`;4383-4388→16-21 :37299 区/5293→22 :42024/5353→23 :42481/彩炬
+427-433→1-7 :6359 区）。
+**修正（本批落地）**：
+- 旗 91 编码域（新账→已修）：原版旗物品 Item.placeStyle = tile 91 **style 直域**
+  （装饰旗 :5334/:5347/:5360/:5373=0-3;NPC 旗段 :19231 `22+type-1615`、:27543 `109+type-2897`
+  等;解码 SceneMetrics.cs:419-441 S−21+带×111、S≥311/≥312 各 −1）。本仓旧 framedCellFrame
+  91 支无条件 +21 → 装饰旗/破坏回收旗全体抬 21 列;且 kill-drop 实例位（旗种 id 域）缺 311/312
+  跳档 → 旗 290/291（item 5651/5672）写进非敌旗档=无 buff+掉错物、旗 292（5673）落 313 被解码成
+  290。修=BANNERS 逆表类级回填（vanillaStyleDrops.BANNER_STYLE_BY_VID+items.ts
+  bannerStyleClassPs）+ Game 放置点 bannerStyleOf 逆写（Banners.ts 新导出）+ framedCellFrame
+  91 支改 style 域恒等（标记 bannerStyleDomain）。
+- 花岗岩门 3131 placeStyle 33→34 强制纠偏（vanilla-itemfunc 3131=33 系提取器共享 case 组伪值,
+  Item.cs:29272-29294 组内 3129→33/3130→35/3131→34;标记 doorPs3131）。
+
+### §13.3 新账（只登记,勿当新红）
+| 项 | 说明 | 引注 |
+|---|---|---|
+| 新备A | 非固体件放置液体挤出：本仓写循环"水被方块挤出"不分固体度 → 非固体件（火焰花种子/蛛网等）植入液体格后本格液量=0；原版本格保有液体（tile 与液体共存,火焰花岩浆熟开的前提）。后果=植入级联 CheckAlch 观察不到岩浆,83→84 熟转只在自然流淌（DelWater→CheckAlch :46323 路径）触发——转换本体已修（alchBloom）,挤出面留账 | Game.ts 写循环挤出段/WorldGen.cs:46323/:46446-46474 |
+| 新备B | 绳索分支绕过 :40058 岩浆门：vi_965 绳索在 tryPlace 走 RopeCoil 早退支（列向多格直铺）,不经 liqGateLegacy——原版绳 213 ∈ tileLavaDeath → IsBlockedByLava 恒拒（点击格） | Player.cs:40058/:41809-41824/LiquidSim.LAVA_DEATH_SHEETS(213) |
+| 新备C | vanilla-itemfunc 提取器共享 case 组"组末位继承组首支"伪值：已核 3131→34（已修）,3134→26/3137→29/3146→28/3179→35/3181→51/3128→26/2642→32/3868→61(双赋值待核 :3868 区)——梳妆台 88/吊灯 93/平台 19/床 34/箱 21/缸 104 大理石·花岗·沙岩变体档错列;修法=同 doorPs3131 强制纠偏表（数据面批） | Item.cs:29272-29294/:3126 区各共享组/vanilla-itemfunc.json 逐条 |
+| 新备D | 药草种子 tile 82 vs 83：原版种子植 ImmatureHerbs 82（Item.cs:5075-5141/:23744-23745）,本仓 items.ts:508-514 植 v_83_herbs_mature（运行时 GrowAlch 生长未移植,83=可收档;SmartCursor.ts:1645 注「门取两档并集以兼容数据现状」在案）。若移植生长须同步把种子 tile 改回 82 | Item.cs:5068-5141/:23744/SmartCursor.ts:1645 |
+| 新备E | 1×1 anchorRec 件水维：validateAnchors 仅 anchorCovered(多格) 跑,1×1 ObjectData 件的 CanPlace 水维本仓不设——扫描 tile-anchors.json 1×1 water notAllowed 集={3,4,24,61,71,73,74,82,83,84,110,113,201,227,579,637,700,701,703},其中在册可放置物品只火把 4（专用分支已门）,余为植物/染料（legacy 路由或专用路由）→ 现状非真空,但若未来 1×1 ObjectData 新增水禁件须补 validateAnchors 直调 | TileObjectData.cs:1853-1907/TileObject.cs:342 |

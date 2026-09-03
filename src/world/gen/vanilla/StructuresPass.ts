@@ -1446,7 +1446,11 @@ function plantAlch(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
   const num = rng.int(20, w - 21);                        // Next(20, maxTilesX-20)
   let y: number;
-  if (rng.int(0, 39) === 0) y = rng.int(Math.floor((gs.rockLevel + h) / 2), h - 21);
+  // ★IIIII196（2026-09-03）REMIX #83 定罪修复：y 采样域 remix 支整缺（1457 cs:46302，
+  //  1458 同号）：remixWorld ? Next(20, maxY-20)（单掷全高域）: Next(40)==0 ? … : …
+  //  （1/40 + 1/10 两道前置掷）。JS 曾恒走非 remix 支 → remix 链草药全带错位+掷耗差。
+  if (gs.seedFlags.remix) y = rng.int(20, h - 21);
+  else if (rng.int(0, 39) === 0) y = rng.int(Math.floor((gs.rockLevel + h) / 2), h - 21);
   else if (rng.int(0, 9) !== 0) y = rng.int(Math.floor(gs.worldSurface), h - 21);
   else y = rng.int(20, h - 21);
   while (y < h - 20 && !(st.inBounds(num, y) && st.flags[st.idx(num, y)])) y++;
@@ -1479,7 +1483,11 @@ function plantAlch(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** AlchemyHerbs pass（cs:20109）：w×1.7 次 PlantAlch */
 export function runAlchemyHerbsPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.floor(st.w * 1.7);
+  // ★IIIII196（2026-09-03）REMIX #83 定罪修复：remix 次数 ×5 整缺（1457 cs:20114-20117
+  //  `num = w*1.7; if (remixWorldGen) num *= 5.0;`，1458 同号）——remix 全域炼金草药
+  //  种植量 5 倍。4200 档 7140→35700 次（4200*1.7=7140 double 恰可表示,×5=35700 无舍入差）。
+  let count = st.w * 1.7;
+  if (gs.seedFlags.remix) count *= 5.0;
   for (let i = 0; i < count; i++) plantAlch(st, rng, gs);
 }
 
@@ -1955,7 +1963,10 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
   try { g0.__swCcCap?.(gs, st); } catch { /* probe */ }
   if (gs.seedFlags.skyblock) return;
   const w = st.w;
-  const num = 8;                             // cs:21120（remixWorldGen=2 不触发）
+  // ★IIIII196（2026-09-03）REMIX #99 定罪修复（1457 cs:21496-21499，1458 同号）：
+  //   中段列受理门 maxValue：remix num=2（1/2 列受理）非 remix=8（1/8）——
+  //   曾恒 8 ⇒ remix 中段整列欠扫（掷流欠 ~150 万）。
+  const num = gs.seedFlags.remix ? 2 : 8;    // cs:21120+21494 remixWorldGen→2
   const num7 = 380;                          // cs:21127
   segProbe77(`CC H rc=${rc77()}`);
   segProbe77(`CC OS rc=${rc77()}`);
@@ -1986,7 +1997,9 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
     }
   }
   segProbe77(`CC OD rc=${rc77()}`);
-  const yTop = gs.worldSurface - 1;          // cs:21198：num13 = worldSurface - 1
+  // ★IIIII196（2026-09-03）：扫描上界 remix 支（1457 cs:21575-21578）——remix num13=
+  //   maxTilesY-50（全图下扫到地狱边界）非 remix=worldSurface-1。
+  const yTop = gs.seedFlags.remix ? st.h - 50 : gs.worldSurface - 1;
   for (let n = 0; n < 3; n++) {
     let x0: number, x1: number, flag: boolean, maxValue: number;
     if (n === 0) { x0 = 5; x1 = num7; flag = false; maxValue = maxL; }
@@ -2015,11 +2028,36 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
         if (st.flags[ai] || st.wall[ai] !== 0) continue;              // cs:21213-21216
         segProbe77(`CC ANCH ${x},${y} l2=${st.liquid[st.idx(x, y - 2)]} rc=${rc77()}`);
         if (flag) {
-          // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
-          //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
-          if (!waterBoxPalmCheck(st, rng, x, y, gs)) {
-            segProbe77(`CC PLANT ${x},${y} rc=${rc77()}`);
-            plantCactus(st, rng, x, y, gs);
+          if (gs.seedFlags.remix) {
+            // ★IIIII196（2026-09-03）REMIX #99 中段分叉（1457 cs:21588-21633）：
+            //   remix: y>worldSurface → 实心+下两格皆 53 沙才棕榈(323)+Next(3)==0
+            //   且上空 → PlantCactus；y≤worldSurface → 水盒支（sum/255>25 整除 →
+            //   Next(4)==0 棕榈，否则 PlantCactus；x86 remix 分支盒循环无 InWorld
+            //   守卫——中段 x∈[400,W-400)±50、y<h-50±25 恒在界内,JS 加守卫等价）。
+            //   非 remix: 恒走水盒支。
+            if (y > gs.worldSurface) {
+              const b1 = st.idx(x, y + 1), b2 = st.idx(x, y + 2);
+              const shB1 = TILE_INTERNAL_BY_SHEET.get(53)!;
+              if (vanGenSolidType(st.type[ti]) && st.flags[b1] && st.type[b1] === shB1
+                && st.flags[b2] && st.type[b2] === shB1) {
+                segProbe77(`CC RPALM ${x},${y} rc=${rc77()}`);
+                growPalmTree(st, rng, x, y, gs);
+                if (!st.flags[st.idx(x, y - 1)] && rng.int(0, 2) === 0) {
+                  segProbe77(`CC RCACT ${x},${y} rc=${rc77()}`);
+                  plantCactus(st, rng, x, y, gs);
+                }
+              }
+            } else if (!waterBoxPalmCheck(st, rng, x, y, gs)) {
+              segProbe77(`CC PLANT ${x},${y} rc=${rc77()}`);
+              plantCactus(st, rng, x, y, gs);
+            }
+          } else {
+            // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
+            //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
+            if (!waterBoxPalmCheck(st, rng, x, y, gs)) {
+              segProbe77(`CC PLANT ${x},${y} rc=${rc77()}`);
+              plantCactus(st, rng, x, y, gs);
+            }
           }
         } else {
           // ---- 两端海滩段：珊瑚 81 / 贝壳 324（cs:21283-21299）----

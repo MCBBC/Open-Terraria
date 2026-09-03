@@ -127,9 +127,14 @@ const PLACE_ROW_FY: Record<number, readonly number[]> = {
 };
 export function framedCellFrame(sheet: number, fw: number, style: number, dx: number, dy: number): [number, number] {
   if (sheet === 91) {
-    let row = 0;
-    while (row < 3 && (style + 21 - 111 * row) * 18 >= 1998) row++;
-    return [Math.max(0, (style + 21 - 111 * row) * 18), row * 54 + dy * 18];
+    // ★bannerStyleDomain（⑤巡检，2026-09-03 十三批）：style 入参 = tile 91 帧列
+    //  【style 域】直值（类级 placeStyle=原版 Item.placeStyle 直域 Item.cs:19231 等；
+    //  kill-drop 实例位的旗种 id 域已在 Game 放置点经 Banners.bannerStyleOf 逆写
+    //  +21/跳 311/312）——此处只做 111 列/带换行（= furnitureStyleBase case 91 同式，
+    //  与 SceneMetrics.cs:419-441 解码、wld 导入帧、BANNERS 掉落表同域）。
+    //  旧实现在此无条件 +21：装饰旗 337-340/789-791/845-847/1451-1469（类级
+    //  placeStyle 0-16=style 直域）与破坏回收旗再放置全部被抬高 21 列=错帧+错掉落。
+    return [(style % 111) * 18, Math.floor(style / 111) * 54 + dy * 18];
   }
   const [bx, by] = furnitureStyleBase(sheet, style, fw);
   const rows = PLACE_ROW_FY[sheet];

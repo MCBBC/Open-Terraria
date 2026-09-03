@@ -298,7 +298,7 @@ describe('烟花喷泉弹体 419-422（SetDefaults Projectile.cs:4679-4686 + AI_
     placeFountainTile(w, 30, 40);
     const p = new TrapShot(30 * 16 + 8, 40 * 16 + 2, 0, 0, 0, 'fireworkFountain', 0, [30, 40]);
     expect(p.w).toBe(4); // SetDefaults :4681
-    expect(p.life).toBe(3600); // 默认 timeLeft（SetDefaults 未覆写）
+    expect(p.life).toBe(600); // ★I 批:NewProjectile 内联表 :11035-11050 四连 timeLeft=600(SetDefaults 未覆写=复位 3600 后被覆写)
     for (let t = 0; t < 5; t++) p.fixedUpdate(1, game);
     expect(bursts).toHaveLength(5); // 每 tick 2 粒（:29386 num627<2）
     expect(bursts.every((b) => b.count === 2)).toBe(true);

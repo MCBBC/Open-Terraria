@@ -206,3 +206,98 @@ describe('dustPmCache 分代 LRU（溢出不清空全部/最旧先出）', () =>
     }
   });
 });
+
+// ===================== VDust 双轴通道（2026-09-03 双轴基建批）=====================
+// PrettySparkleParticle.Draw（PrettySparkleParticle.cs:61-94）臂几何/老化同步/全亮
+// 桶路由三面闸门——Renderer.drawSparkleArms 消费位（drawVanillaDustPass ★双轴通道）。
+describe('VDust 双轴通道（scaleX/scaleY 缺省回落 + 老化同步 + 全亮桶路由）', () => {
+  it('sparkleArmGeometry：两臂都乘整个 Vector2 Scale（逐轴,num,tex 逐值）', async () => {
+    const { sparkleArmGeometry } = await import('../src/render/Renderer');
+    // :72 vector=(0.3,2)×num×Scale / :73 vector2=(0.3,1)×num×Scale;Extra_98=72²
+    expect(sparkleArmGeometry(0.5, 0.4, 1)).toEqual({
+      hx: 0.3 * 0.5 * 1 * 72, hy: 2 * 0.4 * 1 * 72,
+      vx: 0.3 * 0.5 * 1 * 72, vy: 1 * 0.4 * 1 * 72,
+    });
+    // num 包络（通道 alpha 域:num=(255−alpha)/255）与 tex 基尺两参
+    expect(sparkleArmGeometry(1, 1, 0.5, 128)).toEqual({
+      hx: 0.3 * 0.5 * 128, hy: 2 * 0.5 * 128, vx: 0.3 * 0.5 * 128, vy: 0.5 * 128,
+    });
+  });
+
+  it('dustAxisScale：缺省逐轴回落单标量 scale（dual=false）,任一在位（dual=true）', async () => {
+    const { dustAxisScale } = await import('../src/fx/VanillaDust');
+    expect(dustAxisScale({ scale: 1.3, scaleX: undefined, scaleY: undefined }))
+      .toEqual({ sx: 1.3, sy: 1.3, dual: false });
+    expect(dustAxisScale({ scale: 1.3, scaleX: 0.5, scaleY: 2 }))
+      .toEqual({ sx: 0.5, sy: 2, dual: true });
+    expect(dustAxisScale({ scale: 1.3, scaleX: 0.5, scaleY: undefined }))
+      .toEqual({ sx: 0.5, sy: 1.3, dual: true });
+  });
+
+  it('update 老化链对两轴同步（合成比逐轴同乘,X:Y 各向异性比守恒）;缺省尘字段零触碰', async () => {
+    const { VanillaDust } = await import('../src/fx/VanillaDust');
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 1, 1, 267, 0, 0, 0, null, 0.5)!;   // 267=链 A scale+0.02
+    d.scaleX = 0.4; d.scaleY = 0.8;
+    d.noGravity = true;                                          // 链 B 兜底 scale−0.04
+    const s0 = d.scale;                                          // 拍首快照（spawn 抖动后基值）
+    vd.update(0, 0, 800, 600);
+    const r = d.scale / s0;                                      // 本拍合成比（+0.02−0.01−0.04）
+    expect(d.scaleX).toBeCloseTo(0.4 * r, 10);
+    expect(d.scaleY).toBeCloseTo(0.8 * r, 10);
+    expect(d.scaleY / (d.scaleX as number)).toBeCloseTo(2, 10);  // 各向异性比守恒
+    // 缺省尘：字段保持 undefined = 单标量渲染路径逐字节等价
+    const d2 = vd.spawn(0, 0, 1, 1, 267, 0, 0, 0, null, 0.5)!;
+    vd.update(0, 0, 800, 600);
+    expect(d2.scaleX).toBeUndefined();
+    expect(d2.scaleY).toBeUndefined();
+  });
+
+  it('each()：双轴尘恒入全亮桶（编排粒子不受 tile 光照）,同型缺省尘路由不变', async () => {
+    const { VanillaDust } = await import('../src/fx/VanillaDust');
+    const vd = new VanillaDust();
+    const dual = vd.spawn(0, 0, 1, 1, 267, 0, 0, 0, null, 0.5)!;
+    dual.scaleX = 1; dual.scaleY = 1;
+    const plain = vd.spawn(0, 0, 1, 1, 267, 0, 0, 0, null, 0.5)!;
+    const fb = new Set([...vd.each(true)]);
+    const lit = new Set([...vd.each(false)]);
+    expect(fb.has(dual)).toBe(true);      // 双轴 → 全亮桶（光照合成后独立加色层）
+    expect(lit.has(dual)).toBe(false);
+    expect(lit.has(plain)).toBe(true);    // 同型缺省尘 → lit 桶（既有路由不变）
+    expect(fb.has(plain)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// A=0 加性族逐通道乘数 rgbv 金标（2026-09-03）——GetAlpha 非白 RGB 档:
+//   183 = (50,0,0,0)  纯红加性（:2619-2621;活发射方 = HealProj 305 尾迹 ×3/子步）
+//   258 = (150,50,50,0) 红主加性（:2519-2521;原版/本仓均无字面发射方,dormant）
+// alphaOf 标量 rgb 表达不了通道比 → rgbv?: [r,g,b]（XNA Color 字面/255）;
+// 消费位 = Renderer.drawVanillaDustPass A=0 加性 s1 ImageData 逐通道乘
+// （id.data 本就逐通道,只换乘数来源;标量档归一 [s,s,s] 语义零改动）。
+// ===========================================================================
+describe('A=0 加性族逐通道乘数 rgbv 金标（2026-09-03）', () => {
+  it('alphaOf:183 纯红 [50,0,0]/255、258 红主 [150,50,50]/255;标量档返回形零改动', async () => {
+    const { VanillaDust } = await import('../src/fx/VanillaDust');
+    const dust = (type: number, scale = 1) => ({ type, alpha: 0, scale } as never);
+    expect(VanillaDust.alphaOf(dust(183)))
+      .toEqual({ rgb: 0, a: 0, rgbv: [50 / 255, 0, 0] });
+    expect(VanillaDust.alphaOf(dust(258)))
+      .toEqual({ rgb: 0, a: 0, rgbv: [150 / 255, 50 / 255, 50 / 255] });
+    // 标量档回归:未设 rgbv 的既有返回精确形不变（防 rgbv 泄漏进标量档）
+    expect(VanillaDust.alphaOf(dust(206))).toEqual({ rgb: 1, a: 0 });
+    expect(VanillaDust.alphaOf(dust(110))).toEqual({ rgb: 200 / 255, a: 0 });
+  });
+
+  it('逐通道乘数值金标:texel×rgbv = XNA 加法项 tex.rgb×cRGB（G/B 压零=纯红）', () => {
+    const m = [50 / 255, 0, 0];                    // alphaOf(183).rgbv
+    const texel = [200, 100, 50, 255];             // 尘帧任一不透明 texel
+    expect(texel[0] * m[0]).toBeCloseTo(200 * 50 / 255, 6);
+    expect(texel[1] * m[1]).toBe(0);               // G 通道压零
+    expect(texel[2] * m[2]).toBe(0);               // B 通道压零
+    const m2 = [150 / 255, 50 / 255, 50 / 255];    // alphaOf(258).rgbv
+    expect(texel[0] * m2[0]).toBeCloseTo(200 * 150 / 255, 6);
+    expect(texel[1] * m2[1]).toBeCloseTo(100 * 50 / 255, 6);
+    expect(texel[2] * m2[2]).toBeCloseTo(50 * 50 / 255, 6);
+  });
+});

@@ -49,6 +49,7 @@
 import type { GameHooks } from '../entities/types';
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
+import { debuffWriteAllowed } from '../entities/projStatus';
 import { canBeChasedBy, pyroclastProjectileGate, snappingStoneProjectileGate } from '../entities/projTargets';
 import type { ProjClass } from '../entities/projTargets';
 import { canHit } from '../physics/LineOfSight';
@@ -194,7 +195,10 @@ export function trySnapStrike(
     (pulse as { projClass?: ProjClass }).projClass = strikeClass ?? undefined;   // ★F3 :14414-14418
     pulse.critChance = Math.min(1, strikeCritPct / 100);   // 负值原样穿过=不暴击（1132 档）
     add(pulse);
-    if (kind === 1) t.onFire3T = Math.max(t.onFire3T ?? 0, 3);     // AddBuff(323,180)=3s（:14399）
+    // ★ImmuneToAll 直写闸（2026-09-03,projStatus.debuffWriteAllowed）：AddBuff(323,180)
+    //  过 NPC.AddBuff buffImmune 门（NPC.cs:90968）——68 守卫/72 火轮/392-395 等 37 键
+    //  ImmuneToAll 名单对 323 全免疫,曾绕闸照写。脉冲目标（t）无掷骰,闸前置=等价
+    if (kind === 1 && debuffWriteAllowed(t, 323)) t.onFire3T = Math.max(t.onFire3T ?? 0, 3);     // AddBuff(323,180)=3s（:14399）
     // ★1457 编排器环带段（Spawn_SnappingStone{,Melee,Summon} :593/:649/:734——L5 长尾批
     //  收编:FadingParticle/PrettySparkle 环带+三味音 Item72/PyroclasticStone/ArmletOfRuin;
     //  原版载荷 = PositionInWorld=lerp(盒内随机点,Center,.6)、MovementVector=(num11×num12,
@@ -237,7 +241,8 @@ export function trySnapStrike(
   if (kind === 1) {                             // victim.AddBuff(323,180)=3s（:14444 受击者本体）
     const vic = (game.enemies() as unknown as SnapStrikeTarget[])
       .find((t) => t?.id === victimId && !t.dead);
-    if (vic) vic.onFire3T = Math.max(vic.onFire3T ?? 0, 3);
+    // 受击者本体同款 AddBuff(323,180)（:14444）——ImmuneToAll 直写闸同上（无掷骰,闸前置）
+    if (vic && debuffWriteAllowed(vic, 323)) vic.onFire3T = Math.max(vic.onFire3T ?? 0, 3);
   }
   // ★B2②（2026-08-31）命中尾三音效接线：三连 PlaySound 是本函数【尾节拍】——扫描/
   //   加伤/上 buff 之后按 kind 分支各发一声（Projectile.cs:14453-14463）：拍击石

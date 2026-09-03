@@ -95,6 +95,12 @@ function mkDeathGame(enemies: Array<Record<string, unknown>> = []) {
   };
   g.playSfxFiles = (names: string[]) => { sfx.push(...names); };
   g.sfx = { play: () => {} };
+  // ★R7 F1:hitTilesFx 全量化批后 BULLET_KILL_SFX 支会调 this.hitTilesFx → 需 world
+  g.world = { store: {
+    inBounds: () => false, idx: () => 0, flags: [0], type: [0],
+    isActive: () => false, isSolid: () => false, isPlatform: () => false,
+    half: [0], slope: [0], get: () => 0,
+  } };
   g.spawnDust = (x: number, y: number, ww: number, hh: number, type: number,
     sx = 0, sy = 0, alpha = 0, c = null, scale = 1, noGravity = false) => {
     const d: DustRec = { type, vx: sx, vy: sy, scale, noGravity, x, y, alpha };

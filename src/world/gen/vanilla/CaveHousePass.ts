@@ -1321,16 +1321,25 @@ function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, d
   // ① 396→396→397(DesertHouseBuilder.cs:31):Dither(0.8)+Blotches(2,0.2)+
   //   OnlyTiles(396)+SetTileKeepWall(396)+Dither(0.5)+SetTileKeepWall(397)
   //   ——第一段写 396 是原版字面(视觉 no-op),但第二道 Dither 的掷骰位置在此
+  //   ★IIIII197（2026-09-03）两处字面量违例定罪（GFB #59 首差屋=序16 desert 188
+  //   转换屋,ar-roll#191 实锤）：vanilla SetTileKeepWall(396) 是**字面 396**、
+  //   链②③ OnlyTiles(397,396) 是**字面对**(DesertHouseBuilder.cs:31-33)——JS 旧写
+  //   def.tile(=188 转换屋) ⇒ 转换屋链①把 188 写回 188(原版写 396)+链②③门集
+  //   [397,188] 比 [397,396] 宽 ⇒ 钟乳石 placeTight 38 vs 6、ar 全桶漂移(blotchND
+  //   +24/blotchN+24/dither2+4/arWall+50/stalac+32),全屋 +134 骰 → 后续 attempt
+  //   采样全偏 → #59 丛林屋族 pairs(T575×475/T62×369/T60×311)+JS 蜂蜜 Y0>3×360
+  //   (x86 屋腔清液体 JS 没清的级联影)。非转换屋(def.tile==396)两侧恒等,故
+  //   序6/7/15 全等而序16 首爆。仅 remix+getGood 世界的 188 束可达(GFB/FTW×remix)。
   genRect(st, rng, [
     { k: 'dither', p: 0.8 }, B2(0.2), { k: 'onlyTiles', types: [def.tile] },
-    { k: 'setTileKeepWall', tile: def.tile },
+    { k: 'setTileKeepWall', tile: SC396 },
     { k: 'dither', p: 0.5 }, { k: 'setTileKeepWall', tile: HARDSAND397 },
   ], r.x, r.y, r.w, r.h);
   // ② 顶/底行钟乳石(DesertHouseBuilder.cs:32-33,曾整体缺失 C5):
   //   Dither(0.5)+OnlyTiles(397,396)+Offset(0,1)+ActionStalagtite
   for (const rowY of [r.y, r.y + r.h - 1]) {
     genRect(st, rng, [
-      { k: 'dither', p: 0.5 }, { k: 'onlyTiles', types: [HARDSAND397, def.tile] },
+      { k: 'dither', p: 0.5 }, { k: 'onlyTiles', types: [HARDSAND397, SC396] },
       { k: 'offset', dx: 0, dy: 1 }, { k: 'stalagtite' },
     ], r.x + 1, rowY, r.w - 2, 1);
   }
@@ -1933,25 +1942,70 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
         //   {145 糖果块/wall29, 146 绿糖果块/wall30}；④(remix+getGood)沙漠屋 {188}。
         //   list>0 再掷 Next(list.Count) 定型。普通/冬链走不到的组合支零添加零掷
         //   （①②④旗关时纯条件短路）。
-        const spList: Array<[number, number]> = [];      // [tileSheet, wallSheet]
+        // ★IIIII193 定罪修复（HouseBuilder.cs:262-351 = 1458 :270-359 每分支逐行同构）：
+        //   各 special 分支不只换 tile/wall——vanilla case 562/563/229/188/193/197 整束
+        //   改写 BeamType/PlatformStyle/DoorStyle/TableStyle/UsesTables2/WorkbenchStyle/
+        //   PianoStyle/BookcaseStyle/ChairStyle/**ChestStyle**/UsesContainers2。
+        //   旧实现只赋 tile+wall ⇒ GFB 史莱姆屋(193)箱型仍 wood 缺省 1（vanilla=34）：
+        //   ①noTraps 地下金箱换轴门(noTraps&&style==1)JS 多掷 1 骰（x86 style34 短路）
+        //   ②箱旗推导/战利品支全错 → 首座 special 屋宝箱骰面偏移（GFB #59 尾段 6 骰/箱
+        //   实锤：JS 窗 70,725 vs x86 99,298 中 house1 箱块 27 vs 21）。145/146 只换
+        //   Wall+Beam（cs:344-351），beam 同 ice 缺省 574 无须改。
+        interface SpBundle { t: number; w: number; beam?: number; platform?: number; door?: number;
+          table?: number; tables2?: boolean; workbench?: number; piano?: number; bookcase?: number;
+          chestStyle?: number; chestTile2?: boolean }
+        const spList: SpBundle[] = [];
         if (theme === 'jungle' && !!gs.seedFlags?.notTheBees && !!gs.seedFlags?.tenthAnniversary)
-          spList.push([562, 312], [563, 313], [229, 86]);            // cs:233-238
+          spList.push({ t: 562, w: 312, beam: 575, platform: 44, door: 45, table: 8, tables2: true,
+            workbench: 40, piano: 39, bookcase: 40, chestStyle: 11, chestTile2: true },
+          { t: 563, w: 313, beam: 575, platform: 44, door: 45, table: 8, tables2: true,
+            workbench: 40, piano: 39, bookcase: 40, chestStyle: 11, chestTile2: true },
+          { t: 229, w: 86, beam: 575, platform: 24, door: 22, table: 19,
+            workbench: 19, piano: 9, bookcase: 9, chestStyle: 29 });            // cs:233-238/:241-263
         if ((theme === 'wood' || theme === 'ice') && !!gs.seedFlags?.drunkWorld && !!gs.seedFlags?.tenthAnniversary)
-          spList.push(theme === 'ice' ? [197, 76] : [193, 76]);      // cs:239-249
+          spList.push(theme === 'ice'
+            ? { t: 197, w: 76, beam: 574, platform: 20, door: 31, table: 29,
+              workbench: 8, piano: 24, bookcase: 26, chestStyle: 34 }
+            : { t: 193, w: 76, beam: 124, platform: 20, door: 31, table: 29,
+              workbench: 8, piano: 24, bookcase: 26, chestStyle: 34 });         // cs:239-249/:265-287
         if (theme === 'ice' && !!gs.seedFlags?.worldIsFrozen && rng.nextInt(3) === 0)
-          spList.push([145, 29], [146, 30]);                         // cs:250-254 ★winter 主支
+          spList.push({ t: 145, w: 29, beam: 574 }, { t: 146, w: 30, beam: 574 }); // cs:250-254/:289-295 ★winter 主支
         if (theme === 'desert' && !!gs.seedFlags?.remix && !!gs.seedFlags?.getGoodWorld)
-          spList.push([188, 72]);                                    // cs:255-258
+          spList.push({ t: 188, w: 72, beam: 124, platform: 25, door: 4, table: 30,
+            workbench: 5, piano: 17, bookcase: 6, chestStyle: 42 });            // cs:255-258/:297-319
         if (spList.length > 0) {
-          const pick = spList[rng.nextInt(spList.length)];           // cs:259-261
-          const spT = sheetTile(pick[0]);
-          if (spT >= 0) { def.tile = spT; def.wall = pick[1]; }      // BeamType=574 为 ice 缺省态同值（IceHouseBuilder.cs:15）
+          const pick = spList[rng.nextInt(spList.length)];           // cs:259-261/:321-323
+          const spT = sheetTile(pick.t);
+          if (spT >= 0) {
+            def.tile = spT; def.wall = pick.w;
+            if (pick.beam !== undefined) {
+              const beamKey = ({ 124: 'v_124_wooden_beam', 574: 'v_574_boreal_beam', 575: 'v_575_rich_mahogany_beam' } as Record<number, string>)[pick.beam];
+              const b = beamKey ? TILE_BY_KEY[beamKey] : undefined;
+              if (b) def.beam = b;
+            }
+            if (pick.platform !== undefined) def.platformStyle = pick.platform;
+            if (pick.door !== undefined) def.door = pick.door;
+            if (pick.table !== undefined) def.table = pick.table;
+            def.tables2 = !!pick.tables2;
+            if (pick.workbench !== undefined) def.workbench = pick.workbench;
+            if (pick.piano !== undefined) def.piano = pick.piano;
+            if (pick.bookcase !== undefined) def.bookcase = pick.bookcase;
+            if (pick.chestStyle !== undefined) def.chestStyle = pick.chestStyle;
+            def.chestTile2 = !!pick.chestTile2;
+          }
         }
       }
       // PotentiallyConvertToRainbowBrick（ctor 第 2 掷；WoodHouseBuilder 专属）——
-      //   独立方法，不受 SeedHouse 早退影响（vanilla 原位可达）
-      if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
-        if (rng.nextIntRange(0, 2) === 0) {
+      //   独立方法，不受 SeedHouse 早退影响（vanilla 原位可达）。
+      //   ★IIIII193 定罪修复（HouseBuilder.cs:106-122 = 1458 同号）：两分支【都掷】
+      //   ——getGood 臂 Next(7)==0、非 getGood 臂 Next(2)==0；旧实现 !getGoodWorld
+      //   门把 getGood 臂整支跳过（不掷）→ GFB/FTW×tenth 每木屋少 1 骰，首个木屋
+      //   ctor（骰位 4267-4269）起全 pass 流错位。GFB #59 定域实录：x86 taglog
+      //   roll#4269=PotentiallyConvertToRainbowBrick，JS 同位已跳到 wallFrameReset
+      //   （CaveHousePass:651）→ JS 窗 81,599 vs x86 99,298（Δ−17,699，严格前缀）。
+      //   每木屋恒 1 骰债与下游重洗级联合计构成 #59 全部 15k tile 差。
+      if (theme === 'wood' && gs.seedFlags?.tenthAnniversary) {
+        if (gs.seedFlags.getGoodWorld ? rng.nextInt(7) === 0 : rng.nextIntRange(0, 2) === 0) {
           const rb = sheetTile(160);
           if (rb >= 0) { def.tile = rb; def.wall = 44; }
         }

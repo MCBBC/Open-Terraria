@@ -395,7 +395,7 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     expect(st.get(53, 170)).toBe(scene.stone);
   });
 
-  it('接触敌怪钳引信（aiStyle16 Damage 门 P.cs:13153）→ 提前爆并照常开挖（vanilla 提前爆唯一入口）', () => {
+  it('接触敌怪零伤零钳引信（SW-I1 2026-09-03 翻案：:48046 每 tick damage=0 → Damage_PVE :12576 damage<=0 早退——:13153 钳门只在 Kill 爆炸结算可达）→ 引信自然耗尽照常开挖', () => {
     const scene = scarabScene();
     const { g, st } = scene;
     const hits: number[] = [];
@@ -410,9 +410,9 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     let ticks = 0;
     while (!bomb.dead && ticks < 300) { bomb.fixedUpdate(1 / 60, scene.hooks); ticks++; }
     expect(bomb.dead).toBe(true);
-    expect(ticks).toBeLessThanOrEqual(8);                // fuse 钳 3 → 数拍内爆（远早于 180t）
-    expect(hits.length).toBeGreaterThanOrEqual(1);       // 接触结算（爆炸结算落在免疫帧外则追加）
-    expect(st.get(49, 154)).toBe(0);                     // 提前爆路径上隧道同样成形
+    expect(ticks).toBe(180);                             // 773 不在 damage 豁免表 → 引信 180 自然走满
+    expect(hits.length).toBe(0);                         // 飞行接触零结算（爆炸伤只在 Kill 置值后走爆炸圈）
+    expect(st.get(49, 154)).toBe(0);                     // 自然引信路径上隧道同样成形
   });
 
   it('对照断言：嵌墙无敌场不提前爆——AI_016 仅粘附扫描，无"无路即爆"分支（vanilla 真值钉）', () => {

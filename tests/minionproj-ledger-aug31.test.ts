@@ -317,6 +317,17 @@ describe('台账批⑥ WetCollision 盒级湿判（Collision.cs:1575-1650）', (
     expect(wetCollisionProbe(st, 26, surface - 18, 16, 16)).toBe(false);
     expect(wetCollisionProbe(st, 26, surface - 8, 16, 16)).toBe(true);
   });
+  it('★V1 坡面支 active() 在场门（Collision.cs:1632）：斜坡格在场+上格带液才湿;幽灵斜坡不判湿', () => {
+    const st = new TileStore(4, 6);
+    st.setTile(1, 3, 1);                        // 泥土格（在场）
+    st.setSlope(1, 3, 2);                       // 斜坡（右下坡）
+    st.setLiquid(1, 2, 255, 0);                 // 上格满水
+    // 探针盒与格 (1,3) 整格相交（Center 24..,probe x∈[21,31]）
+    expect(wetCollisionProbe(st, 26, 54, 16, 16)).toBe(true);    // 在场斜坡 + 上格液 → 湿
+    st.setTileSilent(1, 3, 0);                  // 幽灵斜坡（type=0 非 active()）
+    st.slope[st.idx(1, 3)] = 2;                 // setTileSilent 清坡——手摆回裸 slope 位
+    expect(wetCollisionProbe(st, 26, 54, 16, 16)).toBe(false);   // !active() → continue（:1632）
+  });
 });
 
 describe('台账批⑦⑧ CanHit 四试视线门（Projectile.cs:12415/:12428）', () => {

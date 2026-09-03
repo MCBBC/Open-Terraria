@@ -13,8 +13,8 @@ import { World } from '../src/world/World';
 import { projGravSpec } from '../src/data/vanillaItemCombat';
 import type { GameHooks } from '../src/entities/types';
 
-const AI_MAX = 0.39269908120686464;      // π/8(Player.cs:47993 RotatedByRandom)
-const SPAWN_MAX = 0.19634954084936207;   // π/16(:47996)
+const AI_MAX = 0.39269909262657166;      // 反编译字面量(Player.cs:47993 RotatedByRandom 实参)
+const SPAWN_MAX = 0.19634954631328583;   // :47996(★R1 对齐,曾用 π/8·π/16 截断值)
 const SPEED = 6;                          // Item.cs:27958 shootSpeed=6f
 // 原版撞面快照速度(★用例内禁随机扰动:桩 Math.random=0.5 ⇒ 双掷角恒 0,
 // 出膛速度/ai 载荷均=基向量,断言取整定值)

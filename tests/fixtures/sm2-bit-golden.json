@@ -10,61 +10,73 @@
    "S01-white": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9e0024e4c54fc98f",
     "stack": "931a3a50ca7a12f5",
+    "stackLit": "9927780001165ed3",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    }
   },
@@ -72,61 +84,73 @@
    "S01-white": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "30c3918267bb943f",
     "stack": "2590af3457808025",
+    "stackLit": "defc5d3c8bd1b4a5",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "b4617d4b70b8093f",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "7fe7c5f2b17ba365",
     "kill": "-"
    }
   },
@@ -134,61 +158,73 @@
    "S01-white": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "12b8abada6b34c2e",
     "stack": "ec8a2a5153c82687",
+    "stackLit": "0d91b93fbf65c8a6",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "4f35496bb5650eb0",
     "stack": "60ca6c0dc89e22f5",
+    "stackLit": "576b65e34a9008a9",
     "kill": "-"
    }
   },
@@ -196,61 +232,73 @@
    "S01-white": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "3ba91d72674e8b8f",
     "stack": "dc122d4c26333acd",
+    "stackLit": "2b3afa54cb6fee73",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "d4a7675e993dfb0b",
     "stack": "b4e489dddea9e639",
+    "stackLit": "6d39daa105c91a94",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "d12d652139f40bb5",
     "stack": "91793578f38a0835",
+    "stackLit": "92d0837553fd8af8",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    }
   },
@@ -258,61 +306,73 @@
    "S01-white": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "85ace3ea1b504340",
     "stack": "3a3b9974bea5b8cd",
+    "stackLit": "9ddfdd1cfd528b41",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "dfe2bc6672605b90",
     "stack": "ff3afd347dd0bf15",
+    "stackLit": "e8933f329b4aac93",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "2476c1fc5c9dccda",
     "stack": "7782672688e9eaa2",
+    "stackLit": "9ae65e6be8e778ec",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    }
   },
@@ -320,61 +380,73 @@
    "S01-white": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "af58c52627c45535",
     "stack": "7efacf95f3b516ba",
+    "stackLit": "67492a45a25a3903",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "14489bf286c52aed",
     "stack": "80fde9893a3c1ea9",
+    "stackLit": "0e0a7b346e7e582a",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "87b854c717b8d356",
     "stack": "43db9af461a09ff5",
+    "stackLit": "bda6b90a884515fd",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    }
   },
@@ -382,61 +454,73 @@
    "S01-white": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "b43db3dc1a2511ad",
     "stack": "ead4b4126cac6023",
+    "stackLit": "86c7a9478221e51a",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "f53f17cde5317868",
     "stack": "2182b37357e77e27",
+    "stackLit": "30dbf90eb28d048c",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "67f3e6be4505ce25",
     "stack": "23ce912fdc20957a",
+    "stackLit": "cd61889f1f32135b",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "e9c37aafb2d5260e",
     "stack": "a6333e5bc86a0d54",
+    "stackLit": "7eea8871eedc5c01",
     "kill": "-"
    }
   },
@@ -444,61 +528,73 @@
    "S01-white": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4920de8f3b48f4b4",
     "stack": "667b04fea587d18e",
+    "stackLit": "657ceaa04f7659dc",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "3210f867cb31e434",
     "stack": "d932f725db4d56fe",
+    "stackLit": "6d5415f586256b8a",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "b3d63797a6b82d3b",
     "stack": "3b83ee76ff160a12",
+    "stackLit": "27d9a9e62c5fbc23",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    }
   },
@@ -506,61 +602,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "8b1fe961638df5f9",
+    "stackLit": "9314f6bfecec230c",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "f4e8a051a4b063b1",
+    "stackLit": "6d39daa105c91a94",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "91793578f38a0835",
+    "stackLit": "92d0837553fd8af8",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "a6e552f3032995ea",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "c0f55bb88f647666",
+    "stackLit": "b0d5ab7b8f55addb",
     "kill": "-"
    }
   },
@@ -568,61 +676,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "3242826f9d18e073",
+    "stackLit": "e54b468f38c9b553",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "6e52db0f5759a0b4",
+    "stackLit": "800aab93a7123838",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "7782672688e9eaa2",
+    "stackLit": "9ae65e6be8e778ec",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "37a289cef587cd85",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "f9a1ed80d49a554b",
+    "stackLit": "655331e13540ff2e",
     "kill": "-"
    }
   },
@@ -630,61 +750,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "b82f386941f5c58a",
+    "stackLit": "23392b4a9bed8605",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "aa9d1345a25abb02",
+    "stackLit": "a7af1ed74172b2d7",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "7b6e4cd1f0930428",
+    "stackLit": "3f1f42e21b2a3886",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "6565f482a3d636c8",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "4f9863adb5dc8cfb",
+    "stackLit": "196732a06a4b8870",
     "kill": "-"
    }
   },
@@ -692,61 +824,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "86e85300a727029e",
+    "stackLit": "bcfc03da8145c31b",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "88aeaeeade210a74",
+    "stackLit": "e41723934e41d27b",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "5e3043f0d9a7ee96",
+    "stackLit": "6dc69aba2e42fa46",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "04a19f897e27bd80",
     "stack": "39c61fb6c14bc8a7",
+    "stackLit": "1b33a61f6bef210e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "1d94ae9e8839538b",
+    "stackLit": "d0986a9a7d32cf8d",
     "kill": "-"
    }
   },
@@ -754,61 +898,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "d5785cf00ba358ea",
+    "stackLit": "31431a39cbc4020b",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "fc896b5818bbce59",
     "stack": "dea8e2ac2c8a13af",
+    "stackLit": "117441905242bf1e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "177a81fdd8ca66b7",
+    "stackLit": "769aa89a751828e3",
     "kill": "-"
    }
   },
@@ -816,61 +972,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "de42a3b936666cba",
+    "stackLit": "d4b11725783f4db2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "cfba4e2d3089bf16",
+    "stackLit": "8d05ef6e24abb7ba",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "3fab6713e3173c11",
+    "stackLit": "de5103f6889073f6",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "f7cef872dfbdfda2",
+    "stackLit": "24acf3425849ac8c",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "c7088c0953fb1f3b",
+    "stackLit": "f321b8d5fa0c0145",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "e68d3e99f49678c9",
+    "stackLit": "dd9b3f2b5afe9d85",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "3fab6713e3173c11",
+    "stackLit": "de5103f6889073f6",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "3fab6713e3173c11",
+    "stackLit": "de5103f6889073f6",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "df0630209b5db137",
+    "stackLit": "2f852762f94352d2",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "3fab6713e3173c11",
+    "stackLit": "de5103f6889073f6",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "72b35b24a690c364",
     "stack": "ece33a0905370d8c",
+    "stackLit": "1ce21557f033b182",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "3fab6713e3173c11",
+    "stackLit": "de5103f6889073f6",
     "kill": "-"
    }
   },
@@ -878,61 +1046,73 @@
    "S01-white": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "bfc1d2aad0a91899",
     "stack": "88c43c3b98658c55",
+    "stackLit": "39820c345c6f9cbe",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "4f24231cbf619c54",
     "stack": "e21afdc2ccb69dfd",
+    "stackLit": "51a928ac30c23670",
     "kill": "-"
    }
   },
@@ -940,61 +1120,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "4ba16691505da0fc",
+    "stackLit": "4ba16691505da0fc",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "219b4f22590d39a8",
+    "stackLit": "219b4f22590d39a8",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "82834e0ec5b03e30",
+    "stackLit": "82834e0ec5b03e30",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "174a4cb20a7c7578",
+    "stackLit": "174a4cb20a7c7578",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "813848167f53b08f",
+    "stackLit": "813848167f53b08f",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "febed59646440c4f",
+    "stackLit": "febed59646440c4f",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "82834e0ec5b03e30",
+    "stackLit": "82834e0ec5b03e30",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "82834e0ec5b03e30",
+    "stackLit": "82834e0ec5b03e30",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "f8336372b177ee77",
+    "stackLit": "f8336372b177ee77",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "82834e0ec5b03e30",
+    "stackLit": "82834e0ec5b03e30",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "22a2e596185da8c9",
     "stack": "3a985d34754a5e68",
+    "stackLit": "3a985d34754a5e68",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "82834e0ec5b03e30",
+    "stackLit": "82834e0ec5b03e30",
     "kill": "-"
    }
   },
@@ -1002,61 +1194,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "103bc0a9ddc5a637",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "07531a87829384d7",
+    "stackLit": "7ee74639dcff3def",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "1b02ae77cb43a3db",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "e355e5f1b681209f",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "40c3046a6a160464",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "f62bb06283e5467b",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "1b02ae77cb43a3db",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "e83d0d4c69cc192f",
+    "stackLit": "40052e02dc526e65",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "3b83ee76ff160a12",
+    "stackLit": "a1c941100609873c",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "1b02ae77cb43a3db",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "31c8582b8224c82f",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "62996d3a4f2fbec6",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "1b02ae77cb43a3db",
     "kill": "-"
    }
   },
@@ -1064,61 +1268,73 @@
    "S01-white": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "12f88b38b814c697",
     "stack": "85a4326c52f0a45c",
+    "stackLit": "1f84df17d9e7b166",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "f4be00d87401a00d",
     "stack": "30128ff5a660af50",
+    "stackLit": "c46a539bfcbc5193",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "c67ba1aac162065b",
     "stack": "2590af3457808025",
+    "stackLit": "8c115cee8d2df6a5",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "4a198d73ca5e7b5b",
     "stack": "fbc42845d9ed7ec5",
+    "stackLit": "07f7738d748c6345",
     "kill": "-"
    }
   },
@@ -1126,61 +1342,73 @@
    "S01-white": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "74dafb1a7735440f",
     "stack": "280ab6585b55db60",
+    "stackLit": "2df93343aaf92988",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "2092e522b9f3e711",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "8a1483cd44aa2c8f",
     "stack": "ae1b77a5ad9f23b4",
+    "stackLit": "b32670cbff2e5434",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "8958e4fd26b54c82",
     "stack": "24db7644fcb20210",
+    "stackLit": "d488f639daf587e3",
     "kill": "-"
    }
   },
@@ -1188,61 +1416,73 @@
    "S01-white": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "592b48dfed94d1f5",
     "stack": "c3a298305d35e158",
+    "stackLit": "e1ddf75c350cbe85",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "8bfbfcfb4624ae55",
     "stack": "b39821e7f6e076d6",
+    "stackLit": "3c4de4efdb896ea7",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "22709bbfd5dea5f4",
     "stack": "8fd34b03ad7d94d4",
+    "stackLit": "13d25ec2b5388e2d",
     "kill": "-"
    }
   },
@@ -1250,61 +1490,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "82f5d0ff112919d9",
+    "stackLit": "eebb0e3961ff3d94",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "64705ec0dd63a20d",
+    "stackLit": "7fcac8264bb7be3b",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "a9c1bb5f2771c674",
+    "stackLit": "698d46f90f5a31cb",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d1bf861238fa2df7",
+    "stackLit": "2213d39dae2a5cd9",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "e301e82c79c77c7f",
+    "stackLit": "50e240fc2c25de0e",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "43a83ce4db40f632",
+    "stackLit": "d6c7518fa76c50c4",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "a9c1bb5f2771c674",
+    "stackLit": "698d46f90f5a31cb",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "a9c1bb5f2771c674",
+    "stackLit": "698d46f90f5a31cb",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "7d758c83fd24b382",
+    "stackLit": "b0d2967328a2260e",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "166658cba74a1451",
+    "stackLit": "efce43e3996ffc2b",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "30bc133a33f8026c",
     "stack": "1eb1ba0e3bcb75cc",
+    "stackLit": "68f19ef9bf2b189e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "a9c1bb5f2771c674",
+    "stackLit": "698d46f90f5a31cb",
     "kill": "-"
    }
   },
@@ -1312,61 +1564,73 @@
    "S01-white": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "6a89e0306fcb0e88",
     "stack": "2ca939b6abc0ad14",
+    "stackLit": "ea4e8936b5ce5403",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "b16580f5627954f8",
     "stack": "2d9099e70ebee9df",
+    "stackLit": "2ae8c8d60c1297c0",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "1dcb1376d2d543cb",
     "stack": "6924fda315f1b7e9",
+    "stackLit": "2f88e6ffa1e0e7db",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "dd126097a2db6a98",
     "stack": "364ce3104b67ca5f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "dd126097a2db6a98",
     "stack": "144d04ca3a8d944f",
+    "stackLit": "1132f2007d039101",
     "kill": "-"
    }
   },
@@ -1374,61 +1638,73 @@
    "S01-white": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "754407335a592544",
     "stack": "d1323ab55f10dee9",
+    "stackLit": "0f87b262989cec0a",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "ccece4a5ab3e42b5",
     "stack": "4439ec923691abb7",
+    "stackLit": "5006e38e418e1303",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "b3863d9b9e0ea258",
     "stack": "14c863f1dd18a101",
+    "stackLit": "53da4cacb0b98851",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9e0024e4c54fc98f",
     "stack": "931a3a50ca7a12f5",
+    "stackLit": "9927780001165ed3",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    }
   },
@@ -1436,61 +1712,73 @@
    "S01-white": {
     "direct": "59f611472b7a4110",
     "stack": "def89d9bd01dd3b2",
+    "stackLit": "87841c0e70b502eb",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "b53047327927649f",
     "stack": "ddd34306c200959c",
+    "stackLit": "b908a109f0f7f396",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "59f611472b7a4110",
     "stack": "6a12d54ef146775e",
+    "stackLit": "6c396b68c900d2d0",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "59f611472b7a4110",
     "stack": "33905d732c5934e4",
+    "stackLit": "9c273b275ca4d534",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "59f611472b7a4110",
     "stack": "f4c5082893c62c41",
+    "stackLit": "429f89705fec71db",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "59f611472b7a4110",
     "stack": "6a12d54ef146775e",
+    "stackLit": "6c396b68c900d2d0",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "59f611472b7a4110",
     "stack": "6a12d54ef146775e",
+    "stackLit": "6c396b68c900d2d0",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "59f611472b7a4110",
     "stack": "3a8d046249f39057",
+    "stackLit": "ce0f4bf725ab01e3",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "528632e9d327ad67",
     "stack": "9fa2f4170249a528",
+    "stackLit": "d9829a8b8f73edf4",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "59f611472b7a4110",
     "stack": "8384fb789e1da0ab",
+    "stackLit": "3419f32514bc1d4f",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "59f611472b7a4110",
     "stack": "4c9b81493494d019",
+    "stackLit": "7003b1ffe80142cd",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "59f611472b7a4110",
     "stack": "6a12d54ef146775e",
+    "stackLit": "6c396b68c900d2d0",
     "kill": "-"
    }
   },
@@ -1498,61 +1786,73 @@
    "S01-white": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "46865deff1bb1c32",
     "stack": "f3a738564c0a2cd3",
+    "stackLit": "f3a738564c0a2cd3",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "23861ab063a26c9b",
     "stack": "73a8adad6e8032e0",
+    "stackLit": "73a8adad6e8032e0",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "c8454724dca6cfa3",
     "stack": "71e13bb89de1968c",
+    "stackLit": "71e13bb89de1968c",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "3682c8911228793d",
     "stack": "83cfdf7dcdfd983e",
+    "stackLit": "83cfdf7dcdfd983e",
     "kill": "-"
    }
   },
@@ -1560,61 +1860,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "10dcb04ba70e47cb",
+    "stackLit": "aee45e7054d126b4",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "92bc5b547a777e3c",
+    "stackLit": "fddd45a9deecdbbc",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "b419c35f7897e0a4",
+    "stackLit": "7260cd057c68b296",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "c4adcc9a0134fc36",
+    "stackLit": "0184887d009f0eaa",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "d7a29f9b7e9dbbb3",
+    "stackLit": "e7cc4544426b21e4",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "fdd80d062c9e8af7",
+    "stackLit": "b46959cde800774b",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "b419c35f7897e0a4",
+    "stackLit": "7260cd057c68b296",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "39ccbcb52e7043c8",
+    "stackLit": "01eeabcee97c573b",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "5a11b1182a8abe86",
+    "stackLit": "030543e3aa8efb68",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "b419c35f7897e0a4",
+    "stackLit": "7260cd057c68b296",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "01bb005ede924e35",
     "stack": "4fbef2b68b3b4d56",
+    "stackLit": "271c1c440a912e53",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "b419c35f7897e0a4",
+    "stackLit": "7260cd057c68b296",
     "kill": "-"
    }
   },
@@ -1622,61 +1934,73 @@
    "S01-white": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "b7f8eaa12de7a347",
     "stack": "ffcfc29379a3b309",
+    "stackLit": "be8503e5525d8dc5",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "b04c6807d059ce5f",
     "stack": "d6cebce257cca1af",
+    "stackLit": "6bb9c0c8e77f2fb2",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "3f9aeb9ce936e4ed",
     "stack": "02bfd67a9683b1be",
+    "stackLit": "67e0f145c5c66ca2",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "39a1769bd74099c3",
     "stack": "3e60355fdb87e3b0",
+    "stackLit": "11bd39f442b10d66",
     "kill": "-"
    }
   },
@@ -1684,61 +2008,73 @@
    "S01-white": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "57ce2d72b78a4e6b",
     "stack": "fa10785bc4e9d312",
+    "stackLit": "fa10785bc4e9d312",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "fd2f1ee0a9de5137",
     "stack": "c58e121a25395d6e",
+    "stackLit": "c58e121a25395d6e",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "e161efcf9594f00d",
     "stack": "bbf02312a43fdab6",
+    "stackLit": "bbf02312a43fdab6",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "ffb8ebd194ddd517",
     "stack": "ff006f4b44b8ca05",
+    "stackLit": "ff006f4b44b8ca05",
     "kill": "-"
    }
   },
@@ -1746,61 +2082,73 @@
    "S01-white": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9183465c318a259f",
     "stack": "4d1c5175d96762f5",
+    "stackLit": "da7ef8639a3fe32a",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "7f3e2fcfc4900035",
+    "stackLit": "82910527ab1fcba9",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "7d1f8d2112d9f57e",
     "stack": "2166e0957c3a4a68",
+    "stackLit": "e0e173b6cb90d265",
     "kill": "-"
    }
   },
@@ -1808,61 +2156,73 @@
    "S01-white": {
     "direct": "89137c6130ae2ef2",
     "stack": "1f07058496ad57a7",
+    "stackLit": "48b6d9efe8bf30d2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4e05c328d0efca65",
     "stack": "ebbdb63f70a6356d",
+    "stackLit": "7a0a8cc2cdf99587",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "89137c6130ae2ef2",
     "stack": "1ea1068dd2d55335",
+    "stackLit": "21d7c4eed2ffd974",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "89137c6130ae2ef2",
     "stack": "9471407fc92d8027",
+    "stackLit": "4e841b3efc4a0c9f",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "89137c6130ae2ef2",
     "stack": "d8fdb2443364739b",
+    "stackLit": "b69d461d588b4309",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "89137c6130ae2ef2",
     "stack": "bbe9a2079a096d50",
+    "stackLit": "2e9c1f31e8bc747f",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "89137c6130ae2ef2",
     "stack": "1ea1068dd2d55335",
+    "stackLit": "21d7c4eed2ffd974",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "22d51a50f87e548b",
     "stack": "7724d39c64d558b4",
+    "stackLit": "3ee893dcd756f162",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "27d7b8e77edb9e52",
     "stack": "a81fb25f36b0b292",
+    "stackLit": "64b9b378b1860268",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "89137c6130ae2ef2",
     "stack": "1ea1068dd2d55335",
+    "stackLit": "21d7c4eed2ffd974",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "8bab2d99dea732a2",
     "stack": "e512e38eccc7ceba",
+    "stackLit": "129e2b782994a4de",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "89137c6130ae2ef2",
     "stack": "1ea1068dd2d55335",
+    "stackLit": "21d7c4eed2ffd974",
     "kill": "-"
    }
   },
@@ -1870,61 +2230,73 @@
    "S01-white": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "80c05d4fbfa2e376",
     "stack": "9fbfc86de45d6fec",
+    "stackLit": "6492c56704fc27cd",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "645ff1d177a7d3f2",
     "stack": "f1daa28f2a54478d",
+    "stackLit": "48763f9d27a358b0",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "b3d63797a6b82d3b",
     "stack": "3b83ee76ff160a12",
+    "stackLit": "27d9a9e62c5fbc23",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "7b9be979c28d8d2c",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    }
   },
@@ -1932,61 +2304,73 @@
    "S01-white": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4920de8f3b48f4b4",
     "stack": "667b04fea587d18e",
+    "stackLit": "657ceaa04f7659dc",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "3210f867cb31e434",
     "stack": "d932f725db4d56fe",
+    "stackLit": "6d5415f586256b8a",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "b3d63797a6b82d3b",
     "stack": "3b83ee76ff160a12",
+    "stackLit": "27d9a9e62c5fbc23",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "5075a26e2e8bf72d",
+    "stackLit": "ff7cb44bb372159d",
     "kill": "-"
    }
   },
@@ -1994,61 +2378,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "2c9b58d50d32d41a",
+    "stackLit": "d24c2ac0540daab3",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "f7ddae8b7e4cff96",
+    "stackLit": "2a7376d52257f46a",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "7f971c2e75528093",
+    "stackLit": "8c171b071aeda8ff",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "968167fb58eb915e",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "8a3ba99e63d53fc5",
+    "stackLit": "00d9b520a151b3f4",
     "kill": "-"
    }
   },
@@ -2056,61 +2452,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "a132b3d2002ffa28",
+    "stackLit": "b04facc07be6f2fe",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "0f910d8e1c4633d3",
+    "stackLit": "88f28a08c255c305",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "08464a268de12fb8",
+    "stackLit": "c8b9f018a287de13",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "5ea6aac270fcbc83",
+    "stackLit": "1e7c490854416083",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "9076a4854707c819",
+    "stackLit": "822fedde5ac14202",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "3a743fd2167e2511",
+    "stackLit": "c71a5e8549c64dad",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "08464a268de12fb8",
+    "stackLit": "c8b9f018a287de13",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "08464a268de12fb8",
+    "stackLit": "c8b9f018a287de13",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "649dd3f5d2195795",
+    "stackLit": "1aaa1d59affc6730",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "08464a268de12fb8",
+    "stackLit": "c8b9f018a287de13",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "82dd707047044ae1",
     "stack": "b8a63adb07f51229",
+    "stackLit": "b1989ad4e7972bce",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "08464a268de12fb8",
+    "stackLit": "c8b9f018a287de13",
     "kill": "-"
    }
   },
@@ -2118,61 +2526,73 @@
    "S01-white": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "f524acffd64efcef",
     "stack": "3e5599745b5d0d56",
+    "stackLit": "a5ce4c0502434edc",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "164d38be9340dd5f",
     "stack": "83871e6c0f1274ca",
+    "stackLit": "7e0ca4342fc908cd",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "a2ecc195cbdd24ba",
     "stack": "ba9a37a3aa4b52d4",
+    "stackLit": "603c8f673f2ec8a4",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    }
   },
@@ -2180,61 +2600,73 @@
    "S01-white": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "f524acffd64efcef",
     "stack": "3e5599745b5d0d56",
+    "stackLit": "a5ce4c0502434edc",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "164d38be9340dd5f",
     "stack": "83871e6c0f1274ca",
+    "stackLit": "7e0ca4342fc908cd",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "a2ecc195cbdd24ba",
     "stack": "ba9a37a3aa4b52d4",
+    "stackLit": "603c8f673f2ec8a4",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "85103b80c929e97b",
     "stack": "68480ef174282c91",
+    "stackLit": "dd5c3b722764889b",
     "kill": "-"
    }
   },
@@ -2242,61 +2674,73 @@
    "S01-white": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "6e5cee61224d96df",
     "stack": "2ca7113463592c28",
+    "stackLit": "4db0df72b5bb6c42",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "f7f411bdb970455b",
     "stack": "da29a8c24ab62e94",
+    "stackLit": "36b5a72870fe6968",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "1fe5072fd9dbc51e",
     "stack": "f9a1a7ed8ea26523",
+    "stackLit": "45e0a4ee62d23eef",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "801512f2ad9905d4",
     "stack": "58044a57b6892deb",
+    "stackLit": "619e3e09d82b432d",
     "kill": "-"
    }
   },
@@ -2304,61 +2748,73 @@
    "S01-white": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "924dd39b693b2973",
     "stack": "0773f85696ab3a68",
+    "stackLit": "b4cce007b1b30ccb",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "bbb2294b98fe7dce",
     "stack": "30b844c1057f4016",
+    "stackLit": "f8bbad7409320bd0",
     "kill": "-"
    }
   },
@@ -2366,61 +2822,73 @@
    "S01-white": {
     "direct": "0ea60d7d28654d47",
     "stack": "c524cec377b5a44b",
+    "stackLit": "5596aace038d86cb",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "0ea60d7d28654d47",
     "stack": "ee6db4b89c152094",
+    "stackLit": "5e84a72da5e4a340",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "0ea60d7d28654d47",
     "stack": "93bf04b679996a1a",
+    "stackLit": "80f3438bf280a62e",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "0ea60d7d28654d47",
     "stack": "a07ca5c768a2510d",
+    "stackLit": "ffda426a83bad974",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "0ea60d7d28654d47",
     "stack": "12869da4bc36befe",
+    "stackLit": "a6363642232a6103",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "0ea60d7d28654d47",
     "stack": "ae5a0fbb8c30ea2f",
+    "stackLit": "d99a387ab0ae3d9d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "0ea60d7d28654d47",
     "stack": "93bf04b679996a1a",
+    "stackLit": "80f3438bf280a62e",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "0ea60d7d28654d47",
     "stack": "93bf04b679996a1a",
+    "stackLit": "80f3438bf280a62e",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "dee04968afff188e",
     "stack": "c722ca225db8cdd3",
+    "stackLit": "9ae95c87941e0bdd",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "0ea60d7d28654d47",
     "stack": "93bf04b679996a1a",
+    "stackLit": "80f3438bf280a62e",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "0ea60d7d28654d47",
     "stack": "c92bc46b189bddb4",
+    "stackLit": "a61b13ea1d611039",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "0ea60d7d28654d47",
     "stack": "93bf04b679996a1a",
+    "stackLit": "80f3438bf280a62e",
     "kill": "-"
    }
   },
@@ -2428,61 +2896,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "289fe0dd574c2604",
+    "stackLit": "32683b4cbe299d1b",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "7a15adfc172815ff",
+    "stackLit": "d4659fd86281dfd6",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "4a02887a1fc3824e",
+    "stackLit": "e5acfc5062353911",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "c65f5d9a68c667dc",
+    "stackLit": "e6b991209b5ef533",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "ebddf448e1b48334",
+    "stackLit": "ef2ddabae07924ce",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "38e81469ee578a37",
+    "stackLit": "80850fa8f2f5ffa2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "4a02887a1fc3824e",
+    "stackLit": "e5acfc5062353911",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "4a02887a1fc3824e",
+    "stackLit": "e5acfc5062353911",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "f23fdc6af297e82f",
+    "stackLit": "f8c02201c1269d4c",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "4a02887a1fc3824e",
+    "stackLit": "e5acfc5062353911",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "bda273e50ba2f2a0",
     "stack": "44b08f1fdcc2f374",
+    "stackLit": "596bdfa957a47d85",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "4a02887a1fc3824e",
+    "stackLit": "e5acfc5062353911",
     "kill": "-"
    }
   },
@@ -2490,61 +2970,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "296905e7166a909f",
+    "stackLit": "5ef7e4aaeac82d53",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "d92e9e49d387be7a",
+    "stackLit": "e84887ba54b8b85f",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "43db9af461a09ff5",
+    "stackLit": "bda6b90a884515fd",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "8e510b65c0382669",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "51b7c6813e7a7c1d",
+    "stackLit": "f8293d3f7f5fac8d",
     "kill": "-"
    }
   },
@@ -2552,61 +3044,73 @@
    "S01-white": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "95eb463d29d4da2a",
     "stack": "b64cd64f08abdf28",
+    "stackLit": "d4b23cea7b521edd",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "185ce49739d89242",
     "stack": "5dd54266c89c8dd2",
+    "stackLit": "47579a65a7b69203",
     "kill": "-"
    }
   },
@@ -2614,61 +3118,73 @@
    "S01-white": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "01bb005ede924e35",
     "stack": "15b7c9a0e66973eb",
+    "stackLit": "f3fc614a6841a451",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "01bb005ede924e35",
     "stack": "0daab874def3799e",
+    "stackLit": "901f236ab6b54fd5",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "eacb986ae6866035",
     "stack": "a0cb8ff5be2ee75e",
+    "stackLit": "092639e62fef6c81",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "59776cd2398368f6",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "01bb005ede924e35",
     "stack": "e855b6d8cd036893",
+    "stackLit": "a453111a4cdeb129",
     "kill": "-"
    }
   },
@@ -2676,61 +3192,73 @@
    "S01-white": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "2266c178f344b051",
     "stack": "5ec6eeb53e3f9f52",
+    "stackLit": "8a2b67424a14ab96",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "309192e8d8805c73",
     "stack": "c98c2a3692e97354",
+    "stackLit": "3a911eeebba25b4b",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "b3d63797a6b82d3b",
     "stack": "3b83ee76ff160a12",
+    "stackLit": "27d9a9e62c5fbc23",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "4b0b89f9006a88d8",
     "stack": "3051c8d5c3bd0260",
+    "stackLit": "5ce3dbdf42e40969",
     "kill": "-"
    }
   },
@@ -2738,61 +3266,73 @@
    "S01-white": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "cc208ffe95b9c8c0",
+    "stackLit": "cb568577b67e3922",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4920de8f3b48f4b4",
     "stack": "2ff8fad8e759424f",
+    "stackLit": "2bd140210bff5413",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "3e3a41cf92de25d5",
+    "stackLit": "37c930730a3a9c18",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "648036eb810a6cb8",
+    "stackLit": "57f589604484b7c7",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "895d04da38bd1b08",
+    "stackLit": "8c0b4b07ae90c9f2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "affbb0e5225d0ab4",
+    "stackLit": "dc779f4a840e901e",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "3e3a41cf92de25d5",
+    "stackLit": "37c930730a3a9c18",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "3210f867cb31e434",
     "stack": "66333805b8a77a67",
+    "stackLit": "f0cb72e47922568c",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "b3d63797a6b82d3b",
     "stack": "a75bdc73359da2df",
+    "stackLit": "af824215408798f4",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "3e3a41cf92de25d5",
+    "stackLit": "37c930730a3a9c18",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "3276876c331dc86d",
     "stack": "2aafea512486043a",
+    "stackLit": "cb6dfb7acc6a1458",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "f9ae4cdb8a6f7fea",
     "stack": "3e3a41cf92de25d5",
+    "stackLit": "37c930730a3a9c18",
     "kill": "-"
    }
   },
@@ -2800,61 +3340,73 @@
    "S01-white": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "ebbbbd90abd58b37",
+    "stackLit": "2c781a9973f201ba",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "691e9513d734fb14",
+    "stackLit": "3548d78d79c037ef",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "b8070f2562d981f3",
+    "stackLit": "7f32e5a9feb0e292",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "65924b1b7dc96113",
+    "stackLit": "109430c7a0a4d904",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "74114c8718ce01d1",
+    "stackLit": "9eb82649569bf24b",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "b8070f2562d981f3",
+    "stackLit": "7f32e5a9feb0e292",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "b8070f2562d981f3",
+    "stackLit": "7f32e5a9feb0e292",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "1a2d650a65077951",
+    "stackLit": "c12f0020f3845b0f",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "6fb7156cb39c8d1a",
     "stack": "38098e77ddfa7dd9",
+    "stackLit": "f0870f98e57d6891",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "f2ffe24b19df1e14",
+    "stackLit": "f69361df7f18c56a",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "b020da25d3292bdc",
     "stack": "c00d46b85a1e9082",
+    "stackLit": "d38698d96e381d23",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "4aa7d7a99dbcb2e6",
     "stack": "b8070f2562d981f3",
+    "stackLit": "7f32e5a9feb0e292",
     "kill": "-"
    }
   },
@@ -2862,61 +3414,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "6003d7e1d17c6e3d",
+    "stackLit": "ffc639de6008ceec",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "76f07e0f85155188",
+    "stackLit": "e86f85fa8382f10d",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "90f3478ee2164719",
+    "stackLit": "819f68bfd1db9a83",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "a7645c25da32a7a5",
+    "stackLit": "a228f280ffa721de",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "33f8dcbe7eeabe41",
+    "stackLit": "3bd7143a4753c264",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "62492baadc4cc581",
+    "stackLit": "905a2c619039f3b0",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "90f3478ee2164719",
+    "stackLit": "819f68bfd1db9a83",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "c171b55d0c00fac1",
+    "stackLit": "473b1eac0ebf1d7d",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "ec5b27aec435d945",
+    "stackLit": "8f88412233453233",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "90f3478ee2164719",
+    "stackLit": "819f68bfd1db9a83",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "90f3478ee2164719",
+    "stackLit": "819f68bfd1db9a83",
     "kill": "-"
    }
   },
@@ -2924,61 +3488,73 @@
    "S01-white": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9f7a14015f39b49d",
     "stack": "d950644ac92ad935",
+    "stackLit": "d950644ac92ad935",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "c96ae975eddca3ae",
     "stack": "d54cd1d5b3decd14",
+    "stackLit": "d54cd1d5b3decd14",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "9f7a14015f39b49d",
     "stack": "37d99e5d88af2bac",
+    "stackLit": "37d99e5d88af2bac",
     "kill": "-"
    }
   },
@@ -2986,61 +3562,73 @@
    "S01-white": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "046dcbd19f0e71b1",
     "stack": "fd8a07cc26061579",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "d8221b88c70c09d5",
     "stack": "229964f3585346e1",
+    "stackLit": "8641b6a49a42bf7b",
     "kill": "-"
    }
   },
@@ -3048,61 +3636,73 @@
    "S01-white": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "14c70e2671881291",
     "stack": "d219fe4d821f6d25",
+    "stackLit": "d219fe4d821f6d25",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    }
   },
@@ -3110,61 +3710,73 @@
    "S01-white": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "825f476ff3eadd99",
     "stack": "fc4335a353c412e5",
+    "stackLit": "512483cf438912d5",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "87832779c98e5d1a",
     "stack": "bbe6dcd898befb88",
+    "stackLit": "a76efb2324603790",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "14c70e2671881291",
     "stack": "d219fe4d821f6d25",
+    "stackLit": "d219fe4d821f6d25",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "f340bc76061df391",
     "stack": "7fc8a27d16ccdd25",
+    "stackLit": "7fc8a27d16ccdd25",
     "kill": "-"
    }
   },
@@ -3172,61 +3784,73 @@
    "S01-white": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "704e08ed18b9da45",
     "stack": "5ed18dcbc20e01dc",
+    "stackLit": "1af9f7538a4eaecd",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "e4ce85175d1b58b0",
     "stack": "6ff1765526994d06",
+    "stackLit": "f3cfa10fe5e61ad2",
     "kill": "-"
    }
   },
@@ -3234,61 +3858,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3296,61 +3932,73 @@
    "S01-white": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "7ce4e0cd3a5de6cd",
     "stack": "6430b1db3c00bc27",
+    "stackLit": "6430b1db3c00bc27",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "73bedd9ea6a9a825",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "cdfb5393eab170b9",
     "stack": "9ec2773f98760149",
+    "stackLit": "9ec2773f98760149",
     "kill": "-"
    }
   },
@@ -3358,61 +4006,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3420,61 +4080,73 @@
    "S01-white": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "30a9a79744584851",
     "stack": "a4f93577a9e44c25",
+    "stackLit": "13fef1a2c8c9e325",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9e0024e4c54fc98f",
     "stack": "931a3a50ca7a12f5",
+    "stackLit": "9927780001165ed3",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    }
   },
@@ -3482,61 +4154,73 @@
    "S01-white": {
     "direct": "26a8c88b3693bbda",
     "stack": "9ff606e3cb89443f",
+    "stackLit": "af617ab52218c3cc",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "26a8c88b3693bbda",
     "stack": "f210201e063af406",
+    "stackLit": "38b970c3c0d9919a",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "26a8c88b3693bbda",
     "stack": "962c0d2414258671",
+    "stackLit": "2ac0c7430a585fb7",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "26a8c88b3693bbda",
     "stack": "f84e9565475b5c99",
+    "stackLit": "56364ef018e0674f",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "26a8c88b3693bbda",
     "stack": "3028476201ac620d",
+    "stackLit": "3cb834cea9b8888f",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "26a8c88b3693bbda",
     "stack": "306b5f39c4d2ea7c",
+    "stackLit": "6bb3947d13840cc9",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "26a8c88b3693bbda",
     "stack": "962c0d2414258671",
+    "stackLit": "2ac0c7430a585fb7",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "26a8c88b3693bbda",
     "stack": "962c0d2414258671",
+    "stackLit": "2ac0c7430a585fb7",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "6ef5fbea1c140dbb",
     "stack": "193ae2adf1522e88",
+    "stackLit": "4f71cf8cafcc4ebf",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "26a8c88b3693bbda",
     "stack": "962c0d2414258671",
+    "stackLit": "2ac0c7430a585fb7",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "26a8c88b3693bbda",
     "stack": "9f53bb523839a08b",
+    "stackLit": "fadd2778bf23ce2b",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "26a8c88b3693bbda",
     "stack": "962c0d2414258671",
+    "stackLit": "2ac0c7430a585fb7",
     "kill": "-"
    }
   },
@@ -3544,61 +4228,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "9b2694c65524ce3e",
     "stack": "a4797fcadbd641b6",
+    "stackLit": "19f4dc09bce8256e",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3606,61 +4302,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "fc0d65ad8d9f693e",
+    "stackLit": "b5233f6a603b0446",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3668,61 +4376,73 @@
    "S01-white": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "46958f2cfdbf91d9",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3730,61 +4450,73 @@
    "S01-white": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "45db94d2aadfecd5",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    }
   },
@@ -3792,61 +4524,73 @@
    "S01-white": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "9e0024e4c54fc98f",
     "stack": "931a3a50ca7a12f5",
+    "stackLit": "9927780001165ed3",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "9f707abc077de6ee",
     "stack": "cded3f6d4ed1f7b5",
+    "stackLit": "5849d52c3eba33d2",
     "kill": "-"
    }
   },
@@ -3854,61 +4598,73 @@
    "S01-white": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S02-gradient": {
     "direct": "edd8f3d4bc95d2b5",
     "stack": "578a4b359d608395",
+    "stackLit": "578a4b359d608395",
     "kill": "-"
    },
    "S03-t0": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S04-t0927": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S05-negfold": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S06-bigtime": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S07-spatial": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S08-sat-eps": {
     "direct": "3ae174bc5329f87d",
     "stack": "d80ac658736bb725",
+    "stackLit": "d80ac658736bb725",
     "kill": "-"
    },
    "S09-rect": {
     "direct": "8b0d3c6306a667a5",
     "stack": "ac3deee29689bd25",
+    "stackLit": "ac3deee29689bd25",
     "kill": "-"
    },
    "S10-direction": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S11-size0-explicit": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    },
    "S12-lightsource": {
     "direct": "6a122558798127a5",
     "stack": "4b852eec5e393585",
+    "stackLit": "4b852eec5e393585",
     "kill": "-"
    }
   }

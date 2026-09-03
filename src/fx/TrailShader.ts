@@ -28,6 +28,7 @@
 // ★性能批（同日）：主循环原为 O(bbox像素×段数)，天顶挥击十余剑 bbox 600² 而描边覆盖
 // ~5% —— 自适应半分辨率光栅 + 段扫掠矩形粗格预筛（无假阴性；被覆盖像素数学不变）。
 import type { Renderer } from '../render/Renderer';
+import { defaultUniforms, getPass, sampleImageInto, type SM2Pass, type SM2SamplerOut } from './SM2Effect';
 
 export interface TrailPt {
   x: number; y: number;          // 世界坐标（ctx 已在相机系）
@@ -42,15 +43,70 @@ type ExtraSet = {
   /** true = FinalFractalVertex 技术 obj58 字节码像素语义（Zenith/女皇剑族） */
   tech: boolean;
   ssd: readonly [number, number, number, number];
+  /** ★2026-09-03 SM2 字节码档：走 obj55 "MagicMissile" pass（SM2Effect 解释器/
+   *  codegen 逐像素执行）。值 = Drawer.UseSaturation 钉值（FlameLashDrawer.cs:16
+   *  =-2f；MagicMissileDrawer.cs:15/RainbowRodDrawer.cs:15/LightDiscDrawer.cs:15
+   *  =-2.8f）——uSaturation 经 D3DX preshader 与 uTime 合成 s2 噪声层滚动相位
+   *  （preshader syms=[uSaturation,uTime] 写回 c1.x,主 shader `add r0,T0.x,C[4]`
+   *  消费）,不是颜色饱和度。undefined = 沿旧兜底近似公式。 */
+  sm2?: number;
 };
-const EXTRA_SETS: Record<string, ExtraSet> = {
-  MagicMissile: { imgs: ['vanilla/Extra_192.png', 'vanilla/Extra_194.png', 'vanilla/Extra_193.png'], tech: false, ssd: [4, 0, 0, 4] },
-  FlameLash: { imgs: ['vanilla/Extra_191.png', 'vanilla/Extra_189.png', 'vanilla/Extra_190.png'], tech: false, ssd: [4, 0, 0, 4] },
-  RainbowRod: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_197.png', 'vanilla/Extra_196.png'], tech: false, ssd: [4, 0, 0, 4] },
-  LightDisc: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_195.png', 'vanilla/Extra_252.png'], tech: false, ssd: [4, 0, 0, 4] },
+export const EXTRA_SETS: Record<string, ExtraSet> = {
+  MagicMissile: { imgs: ['vanilla/Extra_192.png', 'vanilla/Extra_194.png', 'vanilla/Extra_193.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2.8 },
+  FlameLash: { imgs: ['vanilla/Extra_191.png', 'vanilla/Extra_189.png', 'vanilla/Extra_190.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2 },
+  RainbowRod: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_197.png', 'vanilla/Extra_196.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2.8 },
+  LightDisc: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_195.png', 'vanilla/Extra_252.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2.8 },
   FinalFractal: { imgs: ['vanilla/Extra_201.png', 'vanilla/Extra_193.png', null], tech: true, ssd: [4, 0, 0, 4] },
   EmpressBlade: { imgs: ['vanilla/Extra_209.png', 'vanilla/Extra_210.png', null], tech: true, ssd: [4, 0, 0, 4] },
 };
+
+// ---------- obj55 "MagicMissile" pass（SM2 字节码）帧级执行上下文 ----------
+// 四个 Misc 拖尾技术（MagicMissile/FlameLash/RainbowRod/LightDisc）在 DyeInitializer
+// （Terarria1458/Terraria.Initializers/DyeInitializer.cs:461-484）全部指向同一
+// pixelShaderRef 技术 "MagicMissile"（obj55,23 tokens/17 实指令/3 texld）——只换
+// 三张噪声贴图。codegen 产物 px_MagicMissile.gen.ts 已在位（SM2_CODEGEN 缺省开）。
+let mmPassCache: SM2Pass | null | undefined;   // undefined=尚未取
+function magicMissilePass(): SM2Pass | null {
+  if (mmPassCache === undefined) mmPassCache = getPass('MagicMissile');
+  return mmPassCache;
+}
+
+/** LinearWrap 采样器（MiscShaderData.cs:110 SamplerState.LinearWrap——Misc 族
+ *  uImage0/1/2 全走 wrap;染料 s0 的 LinearClamp 与此不同源）。双线性滤波由
+ *  SM2Effect.sampleImageInto 承担（与染料侧同实现,不另造滤波器）。 */
+function wrapSampler(im: ImgData | null): SM2SamplerOut {
+  return (u: number, v: number, out: Float64Array): void => {
+    if (!im) { out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 1; return; }
+    sampleImageInto(im.data, im.w, im.h, u, v, true, out);
+  };
+}
+
+interface SM2FrameCtx {
+  pass: SM2Pass;
+  c: Float64Array; regs: Float64Array; tex: Float64Array;
+  v0: Float64Array; o: Float64Array;
+  smp: Array<SM2SamplerOut | undefined>;
+}
+/** 帧级准备：setupConstants 一次（uOpacity/uSaturation/uTime 常量化+preshader 求值）。
+ *  三张噪声贴图任一未就位 → null（调用侧回退兜底近似,首帧懒加载自愈）。 */
+function sm2FrameCtx(set: ExtraSet, opacity: number, timeSec: number,
+  s0im: ImgData | null, s1im: ImgData | null, s2im: ImgData | null): SM2FrameCtx | null {
+  const pass = magicMissilePass();
+  if (!pass || !s0im || !s1im || !s2im) return null;
+  const u = defaultUniforms();
+  u.uOpacity = opacity;
+  u.uSaturation = set.sm2 ?? 1;
+  u.uTime = timeSec;                       // Main.GlobalTimeWrappedHourly（秒,%3600）
+  return {
+    pass,
+    c: pass.setupConstants(u),
+    regs: new Float64Array(128),           // r0..r31
+    tex: new Float64Array(32),             // t0..（T[0]=p,T[1]=across×d,T[2]=d 由像素级写）
+    v0: new Float64Array(8),
+    o: new Float64Array(4),
+    smp: [wrapSampler(s0im), wrapSampler(s1im), wrapSampler(s2im), undefined],
+  };
+}
 
 interface ImgData { data: Uint8ClampedArray; w: number; h: number }
 const imgCache = new Map<string, ImgData | null>();
@@ -171,6 +227,11 @@ export function drawStripTrail(
   const set = EXTRA_SETS[spec.set] ?? EXTRA_SETS.MagicMissile;
   const s0im = extraData(atlas, set.imgs[0], performance.now());
   const s1im = extraData(atlas, set.imgs[1], performance.now());
+  const s2im = set.imgs[2] ? extraData(atlas, set.imgs[2], performance.now()) : null;
+  // obj55 SM2 字节码帧级上下文（贴图未就位=首帧懒加载窗 → null,走兜底近似回退）
+  const sm2f = set.sm2 !== undefined
+    ? sm2FrameCtx(set, spec.opacity, spec.time, s0im, s1im, s2im)
+    : null;
 
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, maxHw = 4;
   for (const q of pts) {
@@ -338,15 +399,48 @@ export function drawStripTrail(
         if (aOut <= 0.004) continue;
         // out.rgb = blade×vColor×lane(dim,edge,1)（含 obj58 第 16 指令 edge 标量广播）；
         // XNA 设备混合贡献 = out.rgb 全量直加（(One,One) 语义，见 GLSpriteLayer TRAIL_FS
-        // 注）→ 'lighter' 直加不预乘；alpha 写 0（'lighter' 会加 a，勿动主画布 alpha）
+        // 注）→ 'lighter' 直加不预乘。★alpha 写 255（2026-09-03 premul 陷阱定罪：
+        // 旧 a=0 被真实 canvas 的 premul 内部表示吞光——putImageData 后 rgb'=rgb×a/255=0，
+        // drawImage('lighter') 加 0 = CPU 退化路径整条带不可见;实机探针 probe4 实证
+        // a=0→[0,0,0]/a=255→[200,0,100]。rgb 全额通过须 a=255;dst.a+=255 的主画布
+        // alpha 抬升无观感面——主画布每帧 opaque 底）
         fd[o] = blade * cr * edge * dim * 255;
         fd[o + 1] = blade * cg * edge * edge * 255;
         fd[o + 2] = blade * cb * edge * 255;
-        fd[o + 3] = 0;
+        fd[o + 3] = 255;
         continue;
       }
 
-      // ---- 兜底近似（MagicMissile 族，迁移前口径不变）----
+      // ---- obj55 "MagicMissile" pass SM2 字节码逐像素执行（2026-09-03）----
+      //  t0 = XNA VertexStrip 顶点 CustomData 流的像素插值：A 侧 (p, d, d)、B 侧
+      //  (0, 0, d)（GL verts 路径同构,见上方 tech 分支 verts 布局）→
+      //  T[0]=p、T[1]=across×d、T[2]=d。p 方向：pts[0]=最新（strip.unshift 压栈序
+      //  与 XNA oldPos[0] 同），分母=expectedPairs−1（VertexStrip :55-63 语义）。
+      //  execPixel 的 t0x/t0y 形参只覆写 tex[0]/[1]，T[2] 由预写 tex[2] 传入
+      //  （codegen 生成体 instr#2 `1/T[2]` 与 VM bindFile case 3 同读 tex 数组）。
+      //  输出 oC0 已 UNORM sat——XNA (One,One) 加算 → 'lighter' 直加。★alpha 写
+      //  255（premul 陷阱同 tech 分支注,probe4 实证）。
+      if (sm2f) {
+        const pairs = spec.expectedPairs ?? n;
+        const p = pairs > 1 ? Math.min(1, bestV * (n - 1) / (pairs - 1)) : 0;
+        const d = hw * 2;
+        sm2f.tex[2] = d;
+        sm2f.tex[3] = 0;
+        sm2f.v0[0] = cr; sm2f.v0[1] = cg; sm2f.v0[2] = cb; sm2f.v0[3] = ca;
+        const res = sm2f.pass.execPixel(sm2f.c, sm2f.regs, sm2f.tex, sm2f.v0, sm2f.o,
+          p, uN * d, sm2f.smp);
+        if (res) {
+          fd[o] = res[0] * 255;
+          fd[o + 1] = res[1] * 255;
+          fd[o + 2] = res[2] * 255;
+          fd[o + 3] = 255;
+        }
+        continue;
+      }
+
+      // ---- 兜底近似（obj55 字节码/三贴图未就位时的回退,首帧懒加载后自愈）----
+      //  ★alpha 同 premul 陷阱修（rgb 已含全部折算,旧 a=ca*k 是第二次折算:
+      //  premul 内部 rgb'=rgb×a/255 → 实际加成被多乘一次 ca*k/255=偏暗）
       const uvU = uN + scrollT, uvV = bestV * 0.5 + scrollT * 0.7;
       const gate = sampleAt(s1im, uvU, uvV);
       const base = sampleAt(s0im, uvV, uvU * 0.5 + scrollT * 0.4);
@@ -355,7 +449,7 @@ export function drawStripTrail(
       fd[o] = Math.min(255, base * 255 * cr * k * spec.opacity);
       fd[o + 1] = Math.min(255, base * 255 * cg * k * spec.opacity);
       fd[o + 2] = Math.min(255, base * 255 * cb * k * spec.opacity);
-      fd[o + 3] = Math.min(255, 255 * ca * k);
+      fd[o + 3] = 255;
     }
   }
   scx.putImageData(frame, 0, 0);

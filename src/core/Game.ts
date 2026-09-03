@@ -161,7 +161,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
-import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
+import { recordBannerKill, bannerOfNpc, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
@@ -322,7 +322,7 @@ const IMPORTED_TREE_TYPES = new Set<number>(
     .map((k) => TILE_BY_KEY[k])
     .filter((v): v is number => v !== undefined),
 );
-import { LiquidSim } from '../world/liquid/LiquidSim';
+import { LiquidSim, LAVA_DEATH_SHEETS } from '../world/liquid/LiquidSim';
 import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
@@ -394,7 +394,7 @@ import { VolcanoBlastProj } from '../entities/VolcanoBlastProj';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, boomerangBlockedByOwned, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, FertilizerCloud, FERTILIZER_PROJ_BY_ITEM, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, flaironSpawnNudge, type CounterweightCtx, type CounterweightPlayView, CrystalSerpentProj, rollCrystalSerpentVelocity } from '../entities/WeaponProj';
+import { Boomerang, boomerangBlockedByOwned, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, FlaironHeadProj, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, FertilizerCloud, FERTILIZER_PROJ_BY_ITEM, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, flaironSpawnNudge, type CounterweightCtx, type CounterweightPlayView, CrystalSerpentProj, rollCrystalSerpentVelocity } from '../entities/WeaponProj';
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
 import { TitaniumStormShard,
   ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
@@ -448,17 +448,19 @@ import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
-import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt } from '../entities/Mounts';
+import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt, shouldTileSurviveAt, canKillTileAt, type KillTileCtx, MOUNT_SETS } from '../entities/Mounts';
+import { MOUNT_DASH6_TYPES } from '../entities/MountCombat';   // R8② dash6 坐骑注入门(DoorOpeningHelper velocity-alone 窗)
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine, playerCanHitEntity } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
+import { DirtBallProj } from '../entities/DirtBallProj';   // SW-K1 2026-09-03：Dirt Rod 弹 17
 import { MagicProj } from '../entities/MagicProj';
 import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
-import { createBrickBoxForWallOfFlesh, onGameEventClearedForDualDungeons, startHardmodeJob, type HardmodeJob } from '../world/gen/vanilla/HardmodePass';
+import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJob, hardmodeRepairJob, type HardmodeJob } from '../world/gen/vanilla/HardmodePass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
 
@@ -490,18 +492,28 @@ const SHOTGUN_PELLETS: Record<number, [number, number, number, number]> = {
   679: [6, 6, 0.05, 40],
 };
 
-// ★R29 子弹消亡火花音族表 BULLET_KILL_SFX 落在 entities/Arrow.ts（Kill :77624-77625
-// 列表——Arrow 实心块路径消费 HitTiles 近似尘,本文件 onProjectileDeath 消费 Item_10 音）
+// ★R29 子弹消亡火花音族表 BULLET_KILL_SFX 落在 entities/Arrow.ts（Kill :77649-77653
+// 列表——本文件 onProjectileDeath 消费 Item_10 音 + hitTilesFx 砖屑尘真值（批 3 全量化,
+// 消亡原因矩阵:Kill 单口三因均撒）;Arrow 实心块路径 4×d7 近似尘为禁碰域残留,撞块路径暂双面）
 
 /** Projectile.Kill_ExplodeTiles aiStyle 10 放块全表（Projectile.cs:79143-79200 逐型
  *  提取：[放置 tile sheet num17, 兜底件 item id num18]——放置失败/格被占且 num18>0
- *  时 RequestNewItem ×1）。42/65/68/354 = 沙枪四弹药（原接）；31/56/67/71/179/241/
+ *  时 RequestNewItem ×1）。42/65/68/354 = 沙枪四弹药（原接）；56/67/71/179/241/
  *  1081/812 = 落块族（本仓由 FallingBlock 实体承载、不经本口 = dormant 备案）；
  *  39/40/109 = 泥球/黏土球/雪球；411-414 = 金币枪落币（落地成钱币堆 tile）。
  *  109 过远档（距玩家 >MaxWorldViewSize.X×0.75=1440 → 不放+掉 593 雪块,Main.cs:758
- *  常量）与 31 ai[0]==2 免掉落档在支内特判（Kill 消亡面批 2 2026-09-02） */
+ *  常量）与 31 ai[0]==2 免掉落档在支内特判（Kill 消亡面批 2 2026-09-02）
+ *  ★31 专支定谳（2026-09-03 任务二）：传送带 421/422 本仓已实装（data/tiles.ts
+ *  v_421_conveyorbeltleft / v_422_conveyor_belt_ccw + physics/Conveyor.ts 玩家/NPC/
+ *  掉落物输送 + wiring/devices.ts 421↔422 换向）→ 1457 传送带重挂档 :79260-79266
+ *  补进支内（type==31 → num18=169=沙块件,createTile 53）——ai[0]==2 免掉落缺省档
+ *  :79129-79137 钉在表行 [53,0]（本仓 31 恒蚁狮档）,重挂仅传送带档;rail 314
+ *  (:79256-79259)/沙塌(:79267-79270) 无重挂。31 非 FallingBlock 承载：本仓 31 =
+ *  蚁狮独占敌弹（Enemy.shootDart :6311 → Dart 载体）,落地放沙内结于 Dart.dartStep
+ *  sandBall 支（传送带免放已对齐）且不路由 onProjectileDeath → 本口与 Dart 内结面
+ *  无双放;本口须 onProjectileDeath(31,…) 直驱方可达（放置口归口登记） */
 const AISTYLE10_PLACE = new Map<number, readonly [tile: number, item: number]>([
-  [31, [53, 169]], [42, [53, 0]],            // 落沙/沙球 → 沙（兜底沙块 169）
+  [31, [53, 0]], [42, [53, 0]],              // 沙球(蚁狮 ai[0]==2 免掉落)/沙球 → 沙;传送带重挂 169 走支内专判
   [56, [112, 370]], [65, [112, 0]],          // 落黑檀砂/黑檀砂球 → 黑檀砂
   [67, [116, 408]], [68, [116, 0]],          // 落珍珠砂/珍珠砂球 → 珍珠砂
   [71, [123, 424]], [39, [59, 0]],           // 落淤泥/泥球 → 淤泥 / 泥
@@ -760,7 +772,7 @@ const TILE_NO_FAIL_SHEETS = new Set([
   373, 374, 375, 382, 384, 461, 481, 482, 483, 484, 485, 518, 519, 528, 529, 530, 549,
   624, 636, 637, 638, 654, 655, 656, 666, 697, 700, 701, 705, 709,
 ]);
-// tileAxe（Main.cs:7157-7172）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
+// tileAxe（Main.cs:7347-7364）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
 // ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
 const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
 // tileHammer（Main.cs:7343-7346 全表仅四件，全树再无他处写）：恶魔祭坛 26/复刻祭坛
@@ -771,9 +783,10 @@ const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 5
 export const TILE_HAMMER_SHEETS = new Set([26, 695, 31, 696]);
 // Sets.Clouds（TileID.cs:197 Factory.CreateBoolSet）：云块族——镐伤 ×2 分档（GetPickaxeDamage:54552）
 export const TILE_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
-// tileRope（Main.cs:9452-9460 全表）：绳/链/彩带族——镐=100 一击（GetPickaxeDamage:54624；
-// 504 神秘蛇绳另由 PickTile:54401 早退归零）
-export const TILE_ROPE_SHEETS = new Set([213, 214, 353, 365, 366, 449, 450, 451]);
+// tileRope（Main.cs:9452-9460 全表九件）：绳/链/彩带族——镐=100 一击（GetPickaxeDamage:54624）；
+// 504 神秘蛇绳在表内但 PickTile:54401 对其先早退（手持镐到不了 =100 支），
+// tileHitDamage 内有 dmg=0 特例承接该语义
+export const TILE_ROPE_SHEETS = new Set([213, 214, 353, 365, 366, 504, 449, 450, 451]);
 // 土壤族二倍速（GetPickaxeDamage:54616 `num += pickPower`）：{0土,40泥,53沙,57灰,
 // 59淤泥,123淤,224雪泥,147雪,397硬沙}——铜镐挖土 2 击非 3 击
 export const SOFT_DIG_SHEETS = new Set([0, 40, 53, 57, 59, 123, 224, 147, 397]);
@@ -794,6 +807,39 @@ const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
 // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366 的 createTile 表）——
 // 放置与 hasSupport 共用（书/水蜡/瓶等下方须 tileTable 桌面）
 const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
+// SW-D1 2026-09-03 镐打草族 transform-on-kill：KillTile fail 路径【原格转化表】
+// （WorldGen.cs:64228-64247，1457 原文逐 id 抄录；判定族与 Player.cs:54695
+// DoesPickTargetTransformOnKill 完全同集）——镐击未破（fail:true）时草/苔族原格
+// 变基底块（不掉落不清格，wiki Grasses「草会吃掉镐的第一击」即此）。键=源 sheet，
+// 值=目标 sheet（0=Dirt/57=Ash/59=Mud/1=Stone/38=GrayBrick，TileID.cs:437/551/555/439/513）
+export const PICK_TRANSFORM_ON_FAIL_SHEETS: ReadonlyMap<number, number> = new Map([
+  // :64228-64231 草族六件→泥土（Grass/CorruptGrass/HallowedGrass/CrimsonGrass/GolfGrass/GolfGrassHallowed）
+  [2, 0], [23, 0], [109, 0], [199, 0], [477, 0], [492, 0],
+  // :64232-64235 灰烬草 AshGrass→灰烬
+  [633, 57],
+  // :64236-64239 丛林草/腐化丛林草/猩红丛林草/蘑菇草→淤泥
+  [60, 59], [661, 59], [662, 59], [70, 59],
+  // :64240-64243 Main.tileMoss 全 11 件（Main.cs:7146-7186）→石块
+  [179, 1], [180, 1], [181, 1], [182, 1], [183, 1], [381, 1], [534, 1], [536, 1], [539, 1], [625, 1], [627, 1],
+  // :64244-64247 TileID.Sets.tileMossBrick 全 11 件（TileID.cs:309）→灰砖
+  [512, 38], [513, 38], [514, 38], [515, 38], [516, 38], [517, 38], [535, 38], [537, 38], [540, 38], [626, 38], [628, 38],
+]);
+/** DoesPickTargetTransformOnKill（Player.cs:54693-54700）：模拟积累
+ *  （AddDamage(bufferIndex,damage,updateAmount:false)=已积累+本次 :54695）达 100
+ *  且 tile 在可转化族 → 该击 damage=0（防真破，走 fail 支转化） */
+export function doesPickTransformOnKill(sheet: number, bufferedDamage: number, damage: number): boolean {
+  return bufferedDamage + damage >= 100 && PICK_TRANSFORM_ON_FAIL_SHEETS.has(sheet);
+}
+/** 转化表查询：源 sheet → 目标 sheet（-1=不在转化族） */
+export function pickTransformTargetSheet(sheet: number): number {
+  return PICK_TRANSFORM_ON_FAIL_SHEETS.get(sheet) ?? -1;
+}
+/** 转化目标 sheet → 内部 tile id（TILE_INTERNAL_BY_SHEET 首个同 sheet def；
+ *  sheet 0 首个=dirt 非 pixel_block，-1=未注册） */
+export function pickTransformTargetTileId(sheet: number): number {
+  const t = PICK_TRANSFORM_ON_FAIL_SHEETS.get(sheet);
+  return t === undefined ? -1 : (TILE_INTERNAL_BY_SHEET.get(t) ?? -1);
+}
 // ===================== D-1 decor 失撑链（原版 TileFrameImportant :85703 Check* 族） =====================
 // 原版 decor 支撑亡杀全走 TileFrame 分派的 Check* 族（TileFrameImportant :85703 起）；
 // 本表按 vanilla sheet 记支撑语义种类，未列入的 decor（藤 52/62/382/528/636/638=checkVineAt、
@@ -1120,6 +1166,16 @@ export const TILE_CUT = new Set<number>(
 const TILE_BREAK_WHEN_PLACING = internalIdsOfVanSheets([
   324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624,
 ]);
+/** ★F4（十三批,2026-09-03）放置占用豁免单源（CanPlace TileObject.cs:357）：
+ *  tileCut ∪ TileID.Sets.BreakableWhenPlacing 的活动格不阻挡放置（TileObject.Place
+ *  :84-86 写入前 KillTile 清除）；特例 484 滚石仙人掌/654 TNT桶虽属 tileCut,
+ *  CanPlace :357 显式排除仍阻挡。消费面三处共此一式——门双锚候选占用判定
+ *  （tryPlace 门支）/火把占用门/通用放置清格相；validateAnchors
+ *  （TileAnchorValidator.ts:169-176）sheet 域同式互证（该文件本批不触）。 */
+function placeObstructionClearable(typeId: number, sheet: number): boolean {
+  return (TILE_CUT.has(typeId) && sheet !== 484 && sheet !== 654)
+    || TILE_BREAK_WHEN_PLACING.has(typeId);
+}
 /** ★M-4（2026-09-02 九批）PlaceThing_Tiles_BlockPlacementIfOverPlayers 实体门名单
  *  （Player.cs:41753-41789,switch 各档）：{138,664,711-716,484}=32×32px /
  *  {235}=48×16px / {476}=16×16px / {387}=32×16px。表驱动 ObjectData 件唯一的实体
@@ -1175,6 +1231,40 @@ export function chestDestroyableAt(chests: readonly ChestData[], cx: number, cy:
   const c = chests.find((cc) => cc.x === cx && cc.y === cy);
   if (!c) return true;   // 无登记 = 可毁（Chest.cs:594-597）
   return !c.items.some((it) => it != null && it.id > 0 && it.stack > 0);
+}
+
+// ---- SW-K1 2026-09-03：CanKillTile 消费面三件（Wiring 全式 / 割草机 4049 / Dirt Rod 114）----
+// 纯函数层（TileStore 演算可测；Game 私有方法只做尘/音/实体接线）
+
+/** WorldGen.CanKillTile(i, j, SpecialKillTileContext.MowingTheGrass)（WorldGen.cs
+ *  :3974-3977 枚举 + :62693-62704 包装）：context==MowingTheGrass 且格型 ∈
+ *  {2 草, 109 神圣草} → 恒 true（【先于】全函数体的早返——草上压箱也照割），
+ *  其余落全函数 canKillTileAt。★活格门：context 包装只查 tile==null 与 type，
+ *  不查 active——幽灵格（flags=0 残型）原版会"空转换+喷尘"，本仓按幽灵保域口径
+ *  以 isActive 短路（不可割不喷尘），差量=幽灵格 3 粒尘，无可见行为 */
+export function canKillTileMowingAt(
+  st: import('../world/TileStore').TileStore, x: number, y: number, ctx?: KillTileCtx,
+): boolean {
+  if (st.inBounds(x, y) && st.isActive(x, y)) {
+    const sheet = TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet;
+    if (sheet === 2 || sheet === 109) return true;
+  }
+  return canKillTileAt(st, x, y, ctx);
+}
+
+/** Player.MowGrassTile 的转换目标（Player.cs:20522-20532 switch(tile.type)）：
+ *  2 草 → 477 修剪草（GolfGrass）/ 109 神圣草 → 492 神圣修剪草（GolfGrassHallowed）；
+ *  其余 0 = 不动。★1.4.4+ 起割草目标是高尔夫草两型（TileID.cs:1391/:1421） */
+export function mowedSheetOf(sheet: number): number {
+  return sheet === 2 ? 477 : sheet === 109 ? 492 : 0;
+}
+
+/** Dirt Rod 可抓取格型（Player.cs:53167-53185 ItemCheck_IsValidDirtRodTarget）：
+ *  0 泥土 / 2 草 / 23 腐化草 / 109 神圣草 / 199 猩红草 / 477 修剪草 / 492 神圣修剪草
+ *  ——default 恒 false（石头/树/人工块全部拒抓）。sheet 口径经 TILE_DEFS 映射 */
+export const DIRT_ROD_TARGET_SHEETS: ReadonlySet<number> = new Set([0, 2, 23, 109, 199, 477, 492]);
+export function isDirtRodTargetSheet(sheet: number): boolean {
+  return DIRT_ROD_TARGET_SHEETS.has(sheet);
 }
 
 /** 多格 object 破坏的基础掉落键（breakTile object 分支用；帧带覆写 139/207/50/703
@@ -1344,6 +1434,37 @@ export function sprayCyclePlan(
 ): { shots: number; window: number } | null {
   if (!(animDur > 0) || !(useTime > 0) || useTime >= animDur) return null;
   return { shots: Math.floor((animDur - 1) / useTime) + 1, window: animDur };
+}
+/** ★F-03（第二轮红蓝 F-03,ManaV2 空蓝慢施窗）slowMagic 慢施挥击窗增量（纯函数,
+ *  tests/slow-magic-window 直测）：原版 ApplyItemAnimation slowMagic 支
+ *  SetItemAnimation(useAnimation, 2.5)（Player.cs:4463-4468,DebugOptions.ManaV2 &&
+ *  sItem.mana > 0 && slowMagicUse）→ itemAnimationMax = (int)(A0×2.5)【(int) 截断,
+ *  base>0 下限 1】;取整式与 GetSlowMagicUseTime（:47425-47432 Math.floor 同族）一致。
+ *  本仓 useSwing 已并的 +num 补间帧（ApplyItemAnimation 尾 itemAnimation += num,
+ *  :4470-4472）/reuseDelay 后摇帧在乘区【外】,原位保留 → 增量只乘 vanilla
+ *  useAnimation 本体 = ⌊A0×2.5⌋ − A0。anim0 缺数据面（6152/6173 useAnimation 提取
+ *  缺口,见 slowMagicSprayPlan 注）或 slow=false → 0（正常施法窗零改动）。 */
+export function slowMagicWindowGrow(anim0: number | undefined, slow: boolean): number {
+  if (!slow || !(anim0 && anim0 > 0)) return 0;
+  return Math.max(1, Math.floor(anim0 * Player.SLOW_MAGIC_MULTIPLIER)) - anim0;
+}
+/** ★F-03 慢施那一击的「窗内续发计划」（纯函数,tests/slow-magic-window 直测）：
+ *  原版两面缩放——①挥击窗 ×2.5（SetItemAnimation(useAnimation,2.5) :4463-4468,
+ *  见 slowMagicWindowGrow）②itemTime ⌊U0×2.5⌋（ApplyItemTime(sItem,2.5)
+ *  :47594-47601 ≡ Player.getSlowMagicUseTime）。发数式 = 1+⌊(A_eff−1)/U_eff⌋
+ *  （flag4 :43871-43903,首发相位 = itemAnimationMax−1）——慢施 A_eff =
+ *  拉伸窗(windowDur) − 1 − rd（rd 系本仓「后摇并入动画尾」模型,不占 vanilla
+ *  动画面;3053: 53−1−0=52,U_eff=17 → 4 发;窗不拉伸时 22/17 只挤得下 2 发=F-03 根因）。
+ *  slow=false 或 anim0 缺数据面 → 透传既有裸值对（R26/R27 发数公式本体,正常施法
+ *  零改动;6152/6173 vanilla-itemcombat 缺 useAnimation 行,慢施分叉旁路=登记债） */
+export function slowMagicSprayPlan(
+  slow: boolean,
+  normalAnim: number, normalUseTime: number,
+  anim0: number | undefined, windowDur: number, reuseDelay: number,
+): { shots: number; window: number } | null {
+  if (!slow || !(anim0 && anim0 > 0)) return sprayCyclePlan(normalAnim, normalUseTime);
+  const uEff = Math.max(1, Math.floor(normalUseTime * Player.SLOW_MAGIC_MULTIPLIER));
+  return sprayCyclePlan(Math.max(1, windowDur - 1 - reuseDelay), uEff);
 }
 /** 迷你核弹弹体（Kill :74246-74263 八型共段 Resize(50,50)→伤害盒半宽 25；
  *  音效 794/797=Item62 炮声、余 Item14——:74247-74251） */
@@ -1994,18 +2115,26 @@ export class Game implements GameHooks {
   private forceHalloweenForToday = false;
   private forceXMasForToday = false;
   private tickCount = 0;
-  /** 肉山死亡困难模式转换分步 job（PR-async）：updateWorld 每 tick ≤5ms 预算步进(60fps 帧≈8ms/120Hz≈7ms,均在线内),
-   *  完成置 null。step()=true 即全部瓦片工作完成。 */
-  private hardmodeJob: HardmodeJob | null = null;
+  /** 世界变换分步 job FIFO（PR-async 收口①）：肉山转换 job / 双地牢剥漆 job 同队列,
+   *  updateWorld 每 tick ≤12ms 预算按序消化(用户裁定:时长优先,转换期帧率 ~40-55fps
+   *  可接受),完成 shift。step()=true 即该 job 完成。 */
+  private worldJobs: Array<HardmodeJob | { step(): boolean }> = [];
   /** ★PR-async 落盘前快收口：job 进行中存档会把 hardMode=true+半成品转化写盘，
    *  重读档 F2 门（hardMode && !force → return）使剩余转换永久丢失——故所有
    *  序列化路径（doSave/createRoom）先同步 drain 剩余单元（≤秒级一次,等价原版
    *  同 tick 冻结语义）。 */
-  finishHardmodeJob(): void {
-    if (!this.hardmodeJob) return;
-    let done = false;
-    do { done = this.hardmodeJob.step(); } while (!done);
-    this.hardmodeJob = null;
+  finishWorldJobs(): void {
+    if (!this.worldJobs.length) return;
+    for (const job of this.worldJobs) {
+      try {
+        let done = false;
+        do { done = job.step(); } while (!done);
+      } catch (e) {
+        // 转换/剥漆异常 ⇒ 半程状态如实落盘(优于阻塞存档);登记即可
+        console.error('[worldjobs] job aborted:', e);
+      }
+    }
+    this.worldJobs.length = 0;
   }
   /** ★IIIII61 The Constant 黑暗伤害系统（DontStarveDarknessDamageDealer.cs 全文 1:1：
    *  Player.Update :24550 本地玩家 && Main.dontStarveWorld 消费；光采样=玩家中心格
@@ -5135,6 +5264,13 @@ export class Game implements GameHooks {
     this.wiring.hitSwitchSound = (hx, hy) => this.sfx.play('tink', 1, hx * TILE, hy * TILE);
     // NPC.downedPlantBoss（Wiring 蜥蜴砖致动/神庙传送器限制解除门，Wiring.cs:3216/:1554）
     this.wiring.planteraDowned = !!w.flags['downed_262'];
+    // SW-K1 2026-09-03：Wiring.canKillTile 全式上下文（Wiring.cs:1428/:3227 调
+    // WorldGen.CanKillTile 全函数）——hardMode/chests closure 每调用现读，
+    // 与挖掘面 Game.canKillTile 同参（chestDestroyableAt 锚格表同源）
+    this.wiring.killTileCtxProvider = () => ({
+      hardMode: !!w.flags.hardMode,
+      chestDestroyable: (cx: number, cy: number) => chestDestroyableAt(this.world.chests, cx, cy),
+    });
     attachDevices(this.wiring, this.makeDeviceCtx());
     this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
@@ -5150,6 +5286,7 @@ export class Game implements GameHooks {
     // 世界运行时演化（WorldGen.UpdateWorld 1:1）：草蔓延/藤蔓/药草/邪恶神圣扩散等
     this.evolution = new WorldEvolution({
       store: w.store,
+      seed: w.seed,             // NB-F：蔓延专用持久流（Main.SwapRandom("UpdateWorldGen") 语义）
       worldSurface: w.groundLevel,
       rockLevel: w.rockLevel,
       dungeonX: w.dungeonX, difficulty: w.difficulty ?? 0,
@@ -5527,7 +5664,28 @@ export class Game implements GameHooks {
         : 'guide';
       // ★IIIIIII6：十周年世界的向导已含在播种名单 → 跳过默认向导生成
       // （与 savedNpcs 分支的 some(key===starterKey) 门同语义）
-      if (!seededKeys.has(starterNpcKey)
+      // ★V4（WorldGen.cs:2205-2221 DoWorldIsFrozenFinish Santa 臂,2026-09-03）：
+      //   endlessChristmas∧worldIsFrozen 组合世界在生成终结面把【向导 22】异位替换成
+      //   Santa 142（NewNPC(142)@spawnTile → homeTileX/Y=spawnTile → direction=1 →
+      //   homeless=true → position=向导位 → 向导 active=false）。向导 homeless 无房
+      //   不进 respawn 链 ⇒ 从世界中永久消失。本仓生成器无 NPC 实体域 → 生成侧置
+      //   flags.santaReplacedGuide（+ 十周年播种记录就地改键 santa_claus,见
+      //   SecretSeedDoEndsPass.doWorldIsFrozenFinish）,本处消费：
+      //   ①Santa 只在全场无 Santa（读档世界已随镇民段还原）时补生——位置 = 向导兜底
+      //     出生位（spawnX*16+8,(spawnY−2)*16）、facing=1、homeless（不设 home,游走锚
+      //     首落地承接;出生位即 spawn = 原版 homeTile=spawn 同域）;
+      //   ②向导兜底出生压制（guideReplaced 时走不到 else 支）——新世界/读档同门。
+      //   位置注：原文本臂在 FinalizeSecretSeeds randomSpawn(:655) 之后 ⇒ homeTile=
+      //   重掷后 spawn;本仓此处读 world.spawnX/Y 终态,时序天然一致。
+      const santaTookGuide = !!this.world.flags.santaReplacedGuide;
+      const guideReplaced = santaTookGuide && starterNpcKey === 'guide';
+      if (santaTookGuide && !seededKeys.has('santa_claus')
+        && !this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'santa_claus' && !n.dead)) {
+        const santa = new TownNPC('santa_claus', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16);
+        santa.facing = 1;                                  // :2212 direction = 1
+        this.entities.add(santa, 'npcs');
+      }
+      if (!guideReplaced && !seededKeys.has(starterNpcKey)
         && !this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === starterNpcKey && !n.dead)) {
         this.entities.add(new TownNPC(starterNpcKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
@@ -5585,6 +5743,13 @@ export class Game implements GameHooks {
     this.achOnWorldEnter();
     (window as unknown as { __swResearch?: unknown }).__swResearch = this.research;
     this.cb.onInventoryChanged();
+    // ---- ★PR-async 收口②：读档自愈网（单点挂 loadWorld 尾=覆盖全部四条载入路径）----
+    //  hardMode=true 而 hardModeConverted 缺 ⇒ 半成品转换态泄漏到存档（防御未来
+    //  一切回归/硬杀窗口）——推 force 转换 job 重跑幂等映射收敛（已完整世界重跑
+    //  =同流幂等 no-op 为主）。
+    if (this.world.flags.hardMode && !this.world.flags.hardModeConverted) {
+      this.worldJobs.push(hardmodeRepairJob(this.world));
+    }
   }
 
   /** 沙滩睡渔夫（NPC 376）放置。原版由 SpawnNPC 掷出（NPC.cs:1705-1728 海洋水域 /
@@ -7582,8 +7747,10 @@ export class Game implements GameHooks {
             //   同步触发（本块内），tile 面（V 带/remix/回填/Dungeon 档剥漆）由
             //   updateWorld 每帧 ≤2.5ms 预算步进。已知偏差登记：瓦片转化在 ~1-3s 内
             //   渐进完成（原版同 tick 全量+冻结），终态逐位一致（hardmode-async 测试锁）。
+            // ★重入护栏：活跃 job 存在时绝不覆盖(覆盖引用=剩余转换静默丢失);
+            //  重复杀肉山的新 job 本身是 no-op(wasHard=true),wasHard 语义照常取用
             const job: HardmodeJob = startHardmodeJob(w);
-            this.hardmodeJob = job;
+            this.worldJobs.push(job);
             const { wasHard } = job;
             this.recLog('world', { ev: 'hardmode', on: w.flags.hardMode });   // 行为录制：困难模式置位（肉山首杀）
             // drunk/FTW 边缘（NPC.cs:80287-80290）：三机械旗全齐（机械 Boss 先于
@@ -7599,8 +7766,8 @@ export class Game implements GameHooks {
               // OnGameEventClearedForTheFirstTime 尾段（NPC.cs:79607-79650）：双地牢
               // 世界按事件档批剥墙漆——肉山 19 → Dungeon 档；同在 !eventFlag 首翻门内
               // （重复杀 WOF 不重触发，NPC.cs:80306 的 eventFlag 语义）
-              // ★PR-async：此全图剥漆扫描已并入 hardmodeJob（Dungeon 档,首翻门同源），
-              //   此处不再同步跑（其余 boss 事件仍走同步 onGameEventClearedForDualDungeons）
+              // ★PR-async：此全图剥漆扫描已并入 worldJobs 队列（Dungeon 档,首翻门同源），
+              //   此处不再同步跑（其余 boss 事件剥漆同批入队,见 PR-async 收口①）
             }
             this.newText(Lang.misc(15), 50, 255, 130);
             this.achievements.notifyProgressionEvent(9);
@@ -7615,7 +7782,9 @@ export class Game implements GameHooks {
               LanternNight.onGameEventCleared(ev);
               // 同函数尾段双地牢分支（NPC.cs:79607-79650）：boss 映射可达集
               // 8/11/13/14/15/16-18/24 有墙漆档行为，其余 id 原版 switch 空转零行为
-              onGameEventClearedForDualDungeons(w, ev);
+              // ★PR-async 收口①：25-40ms 全图剥漆扫描入队分步(单帧尖刺消除)
+              const dcJob = clearUnbreakableWallsJob(w, ev);
+              if (dcJob) this.worldJobs.push(dcJob);
             }
             // 三王全灭 → 保底世花球茎（NPC.cs:79578-79585 case 16/17/18 →
             // OnGameEventClearedForTheFirstTime 首杀翻转门内 →
@@ -8745,11 +8914,20 @@ export class Game implements GameHooks {
     //      终态与同步版逐位一致（hardmode-async 测试锁）,瓦片渐进呈现为登记偏差。
     //      ★位于 evolution.update() 之前——原版同 tick 序=死亡(实体段)→转换→
     //      UpdateWorld 蔓延采样,首 tick 采样即见已转化瓦片 ----
-    if (this.hardmodeJob) {
-      const hmT0 = performance.now();
-      let hmDone = false;
-      do { hmDone = this.hardmodeJob.step(); } while (!hmDone && performance.now() - hmT0 < 5);
-      if (hmDone) this.hardmodeJob = null;
+    // ---- 世界变换分步驱动（PR-async 收口①）：≤12ms/tick 预算按 FIFO 消化;
+    //      单 job 异常 fail-open(shift 丢弃,半程状态保留) ----
+    if (this.worldJobs.length) {
+      const wjT0 = performance.now();
+      try {
+        do { if (this.worldJobs[0].step()) this.worldJobs.shift(); }
+        while (this.worldJobs.length && performance.now() - wjT0 < 12);
+      } catch (e) {
+        // ★防御：generator 中途异常若放任,job 残留 ⇒ 逐帧重掷异常风暴(比原版
+        //   一次性同步失败更糟)。fail-open=丢弃 job 保留半程转化,世界可玩;
+        //   转换内容是幂等映射表,重进世界也不会再触发(F2 门)——如实登记即可。
+        console.error('[worldjobs] job aborted:', e);
+        this.worldJobs.shift();
+      }
     }
     this.evolution.update();
     this.torchGod.update();
@@ -9895,6 +10073,12 @@ export class Game implements GameHooks {
    *  本字段非 null 时 updateUse 首拍拦截,Performer/TryMovingNPC 语义） */
   housingMode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null = null;
 
+  /** Player.channel 全局旗（SW-K1 2026-09-03,Dirt Rod 泥球跟鼠标消费;本仓仅 114
+   *  一处置位——StartChanneling(sItem) Player.cs:52311,清端在 updateUse 头
+   *  `!controlUseItem → channel=false`（:43136-43158））。DirtBallProj 经 provider
+   *  读它决定跟鼠标/坠落（AI_010 :58921-58956 channel && ai[0]==0 支） */
+  private _dirtRodChannel = false;
+
   /** 按住鼠标期间的朝向跟随（原版 useTurn 家族语义的持续档；判据基座 =
    *  ItemCheck_Shoot :47614 Dot 门的逐 tick 形态——按住期间光标跨过中心即翻面,
    *  非"仅起手一次"。例外 = 非转向武器(近战大剑族 useTurn=false)挥动动画窗内
@@ -9940,6 +10124,9 @@ export class Game implements GameHooks {
     // pendingItemReuse 复位（ItemCheck :42921 函数头 `pendingItemReuse = false`）：
     // 该旗只在「归零拍 → 本函数下一拍」窗口为真（updateSwingHits 归零拍写真）
     this.player.pendingItemReuse = false;
+    // SW-K1 2026-09-03：channel 全局旗清端（ItemCheck :43136-43158 `flag5=controlUseItem;
+    // if (!flag5) channel = false`）——Dirt Rod 泥球跟鼠标的断链源（松手即落）
+    if (!inp.mouseHeld) this._dirtRodChannel = false;
     this.tryFaceHeldAim();
     // 住房光标激活（mouseNPC 持续态,Main.cs:44664-44688）：左键点世界 = 查询/
     // 分配并吞点击；右键/开背包取消由 UI 侧处理（清 housingMode + Sound 12）
@@ -10186,6 +10373,19 @@ export class Game implements GameHooks {
         && this.swapParkourBookVisual(viIdFromKey(heldDef.key))) {
         this.input.rightDown = false;
       }
+      // 猪龙鱼之翼 2611↔5526 右键互换（R4 伴随项 2026-09-03；Player.cs:31864-31868
+      // 快换表 case 2611→5526 / case 5526→2611——tile 交互分派之后 = 原版
+      // !tileInteractionHappened 语义,右键悬箱/祭坛/NPC 优先交互不换型）。
+      // 门同 6190 先例：右键边沿（2611/5526 不在 ItemsThatAllowRepeatedRightClick
+      // ItemID.cs:66）+ !mouseHeld（:31765 releaseUseItem&&!controlUseItem :43160 同源
+      // ——按住左键使用中不换型）+ useTime===0（itemTime/itemAnimation 归零 :31772——
+      //  2611 球在场 pinUse 钉持 :30739、5526 自旋期 channel 钉持,互换均不可达）。
+      // 成功吞边沿（:31874 Main.mouseRightRelease=false）防 tile 互动二次消费
+      if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
+        && heldDef && (viIdFromKey(heldDef.key) === 2611 || viIdFromKey(heldDef.key) === 5526)
+        && this.swapFlaironForm(viIdFromKey(heldDef.key))) {
+        this.input.rightDown = false;
+      }
       // 传送门枪右键（form 1 蓝门；Player.cs:48053-48057 altFunctionUse==2 → ai1=1）。
       // 挂在 tile 交互分派之后 = 原版 :31070 !tileInteractionHappened 语义——
       // 右键悬门/箱/祭坛时优先交互不射门（前面分支消费过 rightDown 则跳过）
@@ -10290,6 +10490,14 @@ export class Game implements GameHooks {
     if (this.smartCursor.showing) {
       tx = this.smartCursor.x;
       ty = this.smartCursor.y;
+    }
+
+    // SW-K1 2026-09-03：割草机 4049 瞄准割草（Player.cs:47373 ItemCheck_UseLawnMower,
+    // :43909 OwnerOnlyCode 逐 tick 调用——挂 OwnerOnlyCode 面,不受下方 mouseDown
+    // 边沿早退门影响：按住期 mouseHeld 电平驱动）。4049 无其他消费面,处理后返回
+    if (heldDef && viIdFromKey(heldDef.key) === 4049 && !inp.rightDown && !this.annotateMode) {
+      this.updateLawnMowerUse(heldDef, tx, ty);
+      return;
     }
 
     // ★autoReuse 按住连发（2026-08-24 用户实报太阳花法杖"只能单发"）：mouseDown 是
@@ -11148,6 +11356,7 @@ export class Game implements GameHooks {
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang' && cw?.kind !== 'anchored'
+      && cw?.kind !== 'flairon'   // 2611 掷球形态同族投射物即本体（R4,避免 :11292 useStyle5 姿势支抢注册）
       && !(cw?.kind === 'spear' && projectileData(cw.shoot)?.aiStyle === 19)) {
       // aim 朝鼠标角——useStyle 13(短剑突刺持位)/5 静持需方向化(Renderer case 13)
       // 捕获小动物释放（ItemCheck_ReleaseCritter :43377-43396 + NPC.ReleaseNPC
@@ -11393,6 +11602,20 @@ export class Game implements GameHooks {
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.cb.onInventoryChanged();
       this.player.useTime = 17;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 114) {
+      // ---- SW-K1 2026-09-03：Dirt Rod 114（泥土棒）使用链 ----
+      // Player.cs:43137 use-start 门（controlUseItem && releaseUseItem=非 autoReuse
+      // fresh click && itemAnimation==0 && useStyle!=0）→ TryStartUse：
+      //   ① CheckCanUse_Inner :52940-52947 shoot==17 支：光标格须 IsValidDirtRodTarget
+      //      （:53167 活格 ∈ {0,2,23,109,199,477,492}）且 WorldGen.CanKillTile（全函数）
+      //      ——任一不过整支拒绝（无动画/无音/无冷却）；② CheckCanUse_KillDirtBlock
+      //      :52972-52992：KillTile(noItem:true) 光标格,格已清才放行；③ StartActualUse
+      //      （useAnimation 20 + UseSound Item_8 + StartChanneling）→ :43906
+      //      flag4=itemAnimation>0 && ItemTimeIsZero → ItemCheck_Shoot 逐拍首拍即射
+      //      弹 17（DirtBall，aiStyle10 泥球：channel 期跟鼠标,松手坠地铺泥/掉泥块）。
+      // useTime=useAnimation=20（vanilla-itemcombat.json "114"），无消耗无魔力。
+      // ★射程：原版 shoot==17 支【无】IsInTileInteractionRange 门——全屏可抓。
+      this.useDirtRod(heldDef, rawTx, rawTy);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
       && FUN_USE_VIDS.has(viIdFromKey(heldDef.key) ?? -1)) {
       // ---- §4 乐器 + §5 趣味使用族（纯函数层 src/items/FunItems.ts，行号锚在其内）----
@@ -12091,7 +12314,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                     const rk = new Celeb2Rocket(pid2, variant, s.x, s.y, s.vx, s.vy,
                       dmg2, kb2, fo.bonusAi1,
                       (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
-                        edmg, er2, er2 > 0, 11, this.player.equipStats.armorPen + (ps?.arpen ?? 0), pid2));
+                        edmg, er2, er2 > 0, 11, this.player.equipStats.armorPen + (ps?.arpen ?? 0), pid2,
+                        ex, ey));   // SW-F1 2026-09-03 真像素爆心直穿（716/718=center 系,k=0）
                     rk.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0)) / 100;   // 阈值=小数(Celeb2Rocket roll 直用;曾传百分点=恒暴击)
                     rk.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
                     this.entities.add(rk, 'projectiles');
@@ -12271,7 +12495,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // 专属处理,天然=1458 修后行为（备案防回改）
               if (projId === 1088) { this.acornSeedDeath(ex, ey, evx ?? 0, evy ?? 0); return; }
               this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
-                hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId);
+                hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId,
+                ex, ey);   // SW-F1 2026-09-03 真像素爆心直穿（aiStyle16 弹心,半盒偏移按型内表）
               // 液体火箭载荷（Kill :74051-74244 同 903-906 四分发）
               const payload16 = Game.BOMB_PAYLOAD[projId];
               if (payload16) {
@@ -12983,6 +13208,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(ang) * (c?.shootSpeed ?? 6), Math.sin(ang) * (c?.shootSpeed ?? 6),
             dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), 196,
             null, { grav: 0.2, life: 600, pierce: -1, bounce: true });   // penetrate −1 = SetDefaults :2825-2831 面值
+          // ★R9 批二（2026-09-03）：投掷族穿透 ItemCheck_Shoot 通用尾支 :49957
+          //  NewProjectile(pointPosition)（盒心,:10878-10879）——196 盒 16×16,ctor 收
+          //  盒左上,曾直传 = 弹盒右下偏 (8,8)px（px/py=HOUSE 前移+14/y−4 锚,批四登记不动）
+          placeAtShootSpawn(smk, px, py);
           smk.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
           this.entities.add(smk, 'projectiles');
           this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -13013,6 +13242,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 注,P.cs 各弹 Kill 无 Item.NewItem 段）；同 beenade dropKey=null 先例
           THROWN_NO_RECOVERY_VIDS.has(vid) ? null : heldDef.key,
           { pierce: pen, grav: 0.4, gravDelay: 20, drag: 0.97, maxFall: 32, tumble: true, tumblePoseLock: THROWN_POSE_LOCK.has(tc.shoot) });
+        // ★R9 批二（2026-09-03）：投掷族穿透 ItemCheck_Shoot 通用尾支 :49957
+        //  NewProjectile(pointPosition)（盒心,:10878-10879）——ctor 收盒左上,曾直传 =
+        //  弹盒右下偏 (w/2,h/2)（大件=本批目标档:手里剑 47/48 18×18=+9px、三地球仪
+        //  868/869/996 18×18；小件随单点收口:投刀 4×4/雪球·绳圈·药水族 14×14=+7px）
+        //（px/py=HOUSE 前移+14/y−4 锚,批四登记不动,只回正「锚点→弹盒」这一步）
+        placeAtShootSpawn(thrownArrow, px, py);
         thrownArrow.frostEligible = true; // 投掷并入 melee(:93712 门含 melee)
         thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
         thrownArrow.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
@@ -13668,7 +13903,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （见 :12957 批注）;'ranged' 弹药链 ax/ay 本就中心精确(Player.cs:10989 注)。
     //  per-item 显式出生偏移（{281,986}/{3007}/{517}/{3827}/proj9·12·728）
     //  在各自实体链已有对应支或随族未实装;{2611,5526} 已实装(flail 链
-    //  flaironSpawnNudge;2611 因 kind 'shot' 路由暂不可达,待其专链复用同 helper),
+    //  flaironSpawnNudge;2611 随 R4 kind 'flairon' 专支 case 'flairon' 同 helper 接线),
     // >0→1 否则 −1；全 itemAnimation 每 useTime tick 重评。723/3611 豁免（:46563））。
     // ★纯近战阔剑不在此列——挥砍期间方向锁定（:19546-19556 useTurn 门）
     this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
@@ -13684,6 +13919,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const ps = this.heldPrefixStat();
     const dmgKind = cwIn.kind === 'magic' ? 'magic'
       : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail'
+        || cwIn.kind === 'flairon'   // 2611 melee=true（Item.cs:25534）→ melee 乘区,R4（曾随 'shot' 兜底同款 melee 判定）
         || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee)
         // 锚定族按物品伤害类分流（Item.cs 各 case）：23 鱼叉 ranged=true → ranged 乘区,
         // 1297/1314/1325 melee=true → melee
@@ -13781,11 +14017,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     switch (cw.kind) {
       case 'grenade': {
-        // AI_016 引信 timeLeft 1:1（SetDefaults :10348-10372）：炸弹 28=180 / 炸药棍
-        // 29=300 / 手雷 30=180——曾误写 150/135（引信时长与原版不符的根源）
-        // 引信 1:1（SetDefaults :10348-10408）：炸药棍族 {29,470,637}=300,余 180
-        const fuse = cw.shoot === 470 || cw.shoot === 637 || cw.shoot === 29 ? 300 : 180;
-        // 爆炸伤害（PrepareBombToBlow :44134-44145）：炸弹族 {28,37,516}=100 /
+        // 引信终值 = NewProjectile 内联 per-Type 表（Projectile.cs:10971/:10987/:10991）——
+        // 【不是】SetDefaults（炸弹族 SetDefaults 无 timeLeft 行）；炸药棍族
+        // {29,470,637}=300（:10991）/ 超级炸弹 {1086,1087}=300（:10987，SW-E1 2026-09-03
+        // 接线）,余 aiStyle16 炸弹 180（:10971）——曾误写 150/135（引信时长与
+        // 原版不符的根源）。NPC 侧 HappyBomb 75 同表 180 后被发射点钉 300（NPC.cs:60413）,
+        // 走 Enemy.shoot() 默认 life=300 承载。SetDefaults≠终值,见 Arrow.ts 寿命处注
+        const fuse = Game.EXPLODE_FUSE[cw.shoot] ?? 180;
+        // 爆炸伤害（PrepareBombToBlow :44134-44145）：炸弹族 {28,37,516,519}=100 /
         // 炸药棍族 {29,470,637}=250；手雷族 {30,397,517} 用物品伤害（不低于 60）；
         // 液体/土制炸弹族 {903-906,910,911}=100（:44188-44196 damage=100 显式赋值）
         const isFluidDirt = (cw.shoot >= 903 && cw.shoot <= 906) || cw.shoot === 910 || cw.shoot === 911;
@@ -13793,23 +14032,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   `type==773 → Resize(48,96); damage=100; knockBack=8`——物品 damage 面
         //   缺省 0,jump 到 max(0,60) 会错成手雷档
         const isScarab = cw.shoot === 773;
-        const dmg = cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 ? 100
+        // SW-H1 2026-09-03：519 炸弹鱼入炸弹档（P.cs:47634-47638 1457 `type == 28 ||
+        //   type == 37 || type == 516 || type == 519 → Resize(128,128); damage=100;
+        //   knockBack=8`——曾漏 519 → 落 max(item.damage=0,60)=60,爆炸伤虚低 40）
+        const dmg = cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 100
           : cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 250
             : isFluidDirt ? 100
               : isScarab ? 100
-                : Math.max(cw.damage, 60);
+                // SW-E1 2026-09-03：超级炸弹档（P.cs:47652-47657 Resize(280,280);
+                // damage=200; knockBack=9）
+                : cw.shoot === 1086 || cw.shoot === 1087 ? 200
+                  : Math.max(cw.damage, 60);
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)与液体/土制炸弹族均不在 ExplodeTiles 判定表内
         // =不破坏地形**（后者的"地形效果"走爆炸尾段的液体/泥土 flood-fill 载荷）
         const er = Game.EXPLODE_RADIUS[cw.shoot] ?? 0;
         // 实体伤害盒(PrepareBombToBlow Projectile.cs:44125-44220,非 Kill 还原图):
         // 炸弹族 128×128 盒半宽 64 / 炸药棍族 250×250 半宽 125 / 手雷 22×22 半宽 11 /
-        // 液体/土制炸弹族 48×48 半宽 24（:44195-44196）
+        // 液体/土制炸弹族 48×48 半宽 24（:44195-44196）/ 超级炸弹 280×280 半宽 140
+        // （:47652-47656,SW-E1 2026-09-03 补）
         // ——与地形破坏半径【无关】;旧值 11/100 致炸弹 AoE 几乎炸不到实体(2026-08-13 修)
         const hurtBox = cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 125
-          : cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 64
-            : cw.shoot === 30 || cw.shoot === 397 || cw.shoot === 517 || cw.shoot === 588 ? 64
-              : isFluidDirt ? 24 : 11;
+          : cw.shoot === 1086 || cw.shoot === 1087 ? 140
+            : cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 64
+              : cw.shoot === 30 || cw.shoot === 397 || cw.shoot === 517 || cw.shoot === 588 ? 64
+                : isFluidDirt ? 24 : 11;
         // 爆炸尾段载荷（Projectile.Kill :74007-74244）：903-906 液体放置/吸收、
         // 910/911 泥土 flood-fill；旧爆炸族无载荷（undefined）
         const payload = Game.BOMB_PAYLOAD[cw.shoot];
@@ -13825,11 +14072,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 773 不走圆盘 explodeAt：Kill 尾段专支（P.cs:79951-80058）沿
             // GetScarabBombDigDirectionSnap8 远离玩家侧挖 3 宽直隧道
             if (isScarab) { this.scarabBombExplode(ex, ey, edmg); return; }
-            this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot);
+            // SW-F1 2026-09-03：真像素爆心直穿（:79068 center2=position=弹心−Kill 终态半盒,
+            // 半盒按型查 explosionCompareHalfBoxPx;1086/1087=Center 系 k=0）
+            this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot, ex, ey);
             if (payload) {
               const painted = Game.spreadBombPayload(this.world.store, payload,
                 Math.floor(ex / TILE), Math.floor(ey / TILE));
               if (painted > 0) this.sfxAt('splash', ex, ey); // delegate 成功格尘/音近似（:74063-74100 族）
+            }
+            // SW-J1 2026-09-03：手雷族裂砖专破（Kill_ExplodeTiles :79001-79033 →
+            //  ExplodeCrackedTiles :80505-80525）——爆心=base.Center（弹心像素直穿,
+            //  无 Kill 终态半盒偏移）,r4 严格开圆只破 CrackedBricks 481-483,普通
+            //  地形不破（er=0 已承载）。破坏面=breakCrackedBrick（KillTile 481-483
+            //  分支全语义：连锁崩塌+Debris 弹片+无掉落）。原版序=实体伤/视觉
+            //  （Kill_Bombs_DoUsualKillCode）先、Kill_ExplodeTiles 后 → 置 explodeAt 后
+            if (Game.EXPLODE_CRACKED_PROJ.has(cw.shoot)) {
+              const cst = this.world.store;
+              for (const [gx, gy] of Game.explodeDiscTiles(ex, ey, 4, cst.w, cst.h)) {
+                if (isCrackedAt(cst, gx, gy)) this.breakCrackedBrick(gx, gy);
+              }
             }
           });
         placeAtShootSpawn(thrownBomb, this.player.cx, this.player.cy); // 盒心=玩家中心(:47603/:10878——构造器收左上角坐标)
@@ -14155,25 +14416,73 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         flailP.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
           const dmg = Math.max(1, Math.round(sDmg));
           if (sProj === 405) {
-            this.entities.add(new FlaironSpike(sx, sy, svx, svy, dmg, sKb), 'projectiles');
+            // ★R9 批三（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:44908 1058
+            //  链伴生 405 直传 base.Center + :10878-10879）——FlaironSpike ctor 收盒左上,
+            //  曾直传链球 Center = 泡盒右下偏 (7,7)px（2611 'flairon' 支已 −7,−7 同式清偿）
+            this.entities.add(new FlaironSpike(sx - 7, sy - 7, svx, svy, dmg, sKb), 'projectiles');
             return;
           }
           if (sProj === 928) {
             const bub = new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
               { grav: 0.3, life: 250, pierce: 2, bounce: true });
             bub.w = 34; bub.h = 34; // SetDefaults width/height=34(:8509)
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:44723/:44736
+            //  直传 base.Center + :10878-10879）——回调 (sx,sy) 即链球 Center,Arrow ctor
+            //  收盒左上,曾直传 = 气泡盒右下偏 (17,17)px（★同链 405/248 支已随 R9 批二/三清偿）
+            placeAtShootSpawn(bub, sx, sy);
             this.entities.add(bub, 'projectiles');
             return;
           }
           // 248 在 flag3 豁免表（:53106）→ 原版无重力直线（此前 0.3 抛物线未对齐）
-          this.entities.add(new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
-            { grav: projGravity(sProj), life: 1200 }), 'projectiles');
+          const bud = new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
+            { grav: projGravity(sProj), life: 1200 });
+          // ★R9 批二（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:44952/:45208
+          //  直传 base.Center/position+w/2+h/2 + :10878-10879）——248 盒 18×18,Arrow
+          //  ctor 收盒左上,曾直传 = 弹盒右下偏 (9,9)px
+          placeAtShootSpawn(bud, sx, sy);
+          this.entities.add(bud, 'projectiles');
         };
         flailP.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw'); // UseSound=SoundID.Item1(Item.cs case 220)
         this.input.mouseDown = false; // 本击只负责掷出,旋转/掷出由 channel 回调判定
+        break;
+      }
+      case 'flairon': {
+        // 2611 猪龙鱼链球 → 弹 404（aiStyle 69 掷球回收,AI_069 内联 1457 Projectile.cs
+        // :30730-30829;全库唯一成员）：掷出直线球→超 400px 回收(速 20)→超 600 加速(40)
+        // →超 1500 或回手 Kill;每 4t 伴生泡泡 405(FlaironSpike 已 1:1 实装,勿另造)。
+        // 与 5526(shoot 1058 经典链锤,case 'flail')是同物右键互换两形态（Player.cs
+        // :31864-31868——互换未移植,2611 为玩家侧唯一形态,本支即正主路由）
+        // 出生点 = 通用尾支 pointPosition(玩家中心,:47603) + 2611 前移支 +1px（:47648-47657）
+        const headSpawn = flaironSpawnNudge(critVid, this.player.cx, this.player.cy, mwx0, mwy0);
+        // 初速 = shootSpeed/meleeSpeed（:47466-47471,404 不在 NoMeleeSpeedVelocityScaling
+        // 表 ProjectileID.cs:429）;向量自【偏移后出生点】重瞄（:47687-47716 num4/num5）
+        const headSpd = meleeThrowSpeed(cw.shootSpeed, this.player.attackSpeedMult);
+        const hdx = mwx0 - headSpawn.x, hdy = mwy0 - headSpawn.y;
+        const hdl = Math.hypot(hdx, hdy);
+        const head = new FlaironHeadProj(headSpawn.x, headSpawn.y,
+          hdl > 0 ? hdx / hdl * headSpd : this.player.facing * headSpd,   // :47701-47710 零向量回退 facing
+          hdl > 0 ? hdy / hdl * headSpd : 0,
+          cw.damage, cw.knockback);
+        placeAtShootSpawn(head, headSpawn.x, headSpawn.y);   // 盒心=偏移后 pointPosition（:47655+:10878-10879）
+        head.critChance = critTotal;
+        head.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
+        head.pinUse = () => this.refreshChannelItem();   // SetDummyItemTime(10)（:30739→Player.cs:4417-4426）——单实例门唯一承载
+        head.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
+          if (sProj !== 405) return;   // 404 只伴生泡泡
+          // NewProjectile 传位=盒心（:10878-10879）,FlaironSpike ctor 收盒左上 → −7,−7 回正
+          //（R4×R9 交点:2611 支伴生 405 直接盒心出生;5526 链的 405 支已随 R9 批三同式清偿）
+          const bub = new FlaironSpike(sx - 7, sy - 7, svx, svy,
+            Math.max(1, Math.round(sDmg)), sKb);
+          bub.critChance = critTotal;   // GetWeaponCrit 合并值（5526 链未接=登记面,本支先行）
+          this.entities.add(bub, 'projectiles');
+        };
+        this.entities.add(head, 'projectiles');
+        this.player.useTime = cw.useTime;   // ApplyItemTime（:47601,useTime 20）——球 AI 次 tick 起钉持 10
+        this.playUseSound(critVid, 'throw');   // UseSound=Item_1（Item.cs:25531,itemUseSound 表数据驱动）
+        this.input.mouseDown = false;
         break;
       }
       case 'yoyo': {
@@ -14292,6 +14601,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.mana = 0;             // :53243/:53254 statMana = 0
           this.player.slowMagicUse = true;  // DoRunOutOfManaEffect :53258-53261
         }
+        // ★F-03（第二轮红蓝 F-03,ManaV2 空蓝慢施窗）：slowMagic 生效的那一击,挥击窗
+        // （=原版 itemAnimationMax,useSwing 头支已起）同步 ×2.5——SetItemAnimation
+        // (useAnimation, 2.5)（Player.cs:4463-4468,(int) 截断,增量式见
+        // slowMagicWindowGrow;+num 补间帧/后摇帧原位保留）。U 侧各支已由
+        // getSlowMagicUseTime 缩放（ApplyItemTime(sItem,2.5) :47594-47601）——窗不拉伸
+        // 时 ⌊U0×2.5⌋ 在 dur=A0+1 内挤不下续发（3053: 22/17 → 实发 2 发;原版窗
+        // ⌊21×2.5⌋+1=53 → 4 发）=F-03 根因。正常蓝量施法 slowMagicUse=false
+        //（:53217 入口清;只空蓝照放支置位）→ 增量 0 = 正常施法窗/节拍零改动;
+        // cw.mana>0 门 = 原版 sItem.mana > 0 同式（:4463）;anim0 取数据面
+        // useAnimation（6152/6173 提取缺口 → 旁路,见 slowMagicSprayPlan 注）
+        const smGrow = slowMagicWindowGrow(itemCombat(critVid)?.useAnimation, this.player.slowMagicUse);
+        if (smGrow > 0 && this.swing && (cw.mana ?? 0) > 0) {
+          this.swing.t += smGrow;
+          this.swing.dur += smGrow;
+        }
         const pd = projectileData(cw.shoot);
         // ---- ★R29 蜂枪 1121 多发 volley（Player.cs:48781-48805,R28 魔法域移交件）：
         //      n=Next(1,4)=1..3 + Next(6)==0 +1 + Next(6)==0 +1 +（strongBees &&
@@ -14408,6 +14732,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // useSwing 窗（sw.dur）已含该 +1 帧（15128 批注「U=A 时窗 35」同源）→
           // A = sw.dur−1；无窗（理论不可达,头支必起窗）兜 itemCombat.useAnimation。
           const sfA = Math.max(1, (swSf?.dur ?? ((itemCombat(critVid)?.useAnimation ?? 21) + 1)) - 1);
+          // ★F-03：慢施那一击续发节拍 U_eff=⌊U0×2.5⌋（ApplyItemTime(sItem,2.5)
+          // :47594-47601 ≡ getSlowMagicUseTime;窗已由付款点 slowMagicWindowGrow 拉伸）
+          const sfU = this.player.slowMagicUse
+            ? this.player.getSlowMagicUseTime(cw.useTime)
+            : cw.useTime;
           const fireArrow3053 = (k: number, midSwing: boolean): void => {
             // 续发重瞄当前光标（ItemCheck_Shoot 每发重读 Main.MouseWorld;
             // :47681-47707 num4/num5 = mouse − pointPosition 起算 → 基准点=出手锚）
@@ -14417,8 +14746,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               : { x: mzX, y: mzY };
             const sfAng = Math.atan2(sfy - sfAnchor.y, sfx - sfAnchor.x);
             // ①flag3（:47959-47964 itemAnimation <= sItem.useTime + 1）：窗末发精确弹
-            //   （原版相位 21/14/7,门 8 → 仅 k=2 命中;单发窗 U≥A 时恒散布=原版同）
-            const sfPhase = sfA - k * cw.useTime;
+            //   （正常相位 21/14/7,门 8 → 仅 k=2 命中;单发窗 U≥A 时恒散布=原版同）
+            //   ★F-03：慢施相位随窗拉伸（窗 53/U_eff 17 → 52/35/18/1）;门仍比对
+            //   sItem.useTime【字段原值】7+1（原版 item 字段不吃 slowMagic）→ 慢施
+            //   仅末发 k=3（相位 1≤8）精确,第 3 发（相位 18>8）仍散布
+            const sfPhase = sfA - k * sfU;
             const sfFlag3 = sfPhase <= cw.useTime + 1;
             // ②速度域（:47965-47975）：探针矢=归一瞄准×4;散布发叠加随机单位矢
             //   Next(-100,101)² 归一（角偏上限 atan(1/√15)≈14.48°,w=−1/4 最劣切片;
@@ -14446,30 +14778,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const sfArrow = new Arrow(sfAnchor.x, sfAnchor.y, sfVx, sfVy,
               cw.damage, cw.knockback, 496, null,
               { grav: 0,                                  // aiStyle91 无重力段（:33097-33148）
-                life: 15,                                 // 原版寿命=缩径亡:localAI 0→0.95
-                                                          //（:33106-33113,44 AI 子步/MaxUpdates
-                                                          // 3≈15t）——AI 支落地后由缩径判亡接管
                 pierce: projectileData(496)?.penetrate ?? 3,
-                extraUpdates: 2 });                       // MaxUpdates=3 ≡ extraUpdates+1
+                extraUpdates: 2,                          // MaxUpdates=3 ≡ extraUpdates+1
                                                           //（Projectile.cs:556-565 别名式）
+                ai0: sfAi0, ai1: sfAi1 });                // 摆动参真传（Arrow.ts 496 AI 支消费）
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Player.cs:47985 直传
+            //  pointPosition + Projectile.cs:10878-10879 position=X−w/2）——Arrow ctor
+            //  收盒左上,曾直传中心 = 弹盒右下偏 (20,20)px
+            placeAtShootSpawn(sfArrow, sfAnchor.x, sfAnchor.y);
             sfArrow.frostEligible = false;                // magic=true 弹（Projectile.cs:5701）
             sfArrow.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);      // GetWeaponCrit(:42531 族)
             sfArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
-            // ★待接面（aiStyle91 弹体 AI,Projectile.cs:33097-33148——本支已把参数按
-            //  原版掷序算好,Arrow 侧支落地即插）：
-            //  - v += ai0×1.5 / v += ai1×1.5 每子步（:33118-33119）;ai0/ai1 ×1.05/子步
-            //  - 速度帽 16（:33120-33122）
-            //  - 缩径：scale=1−localAI[0]、width=height=20×scale、Center 不动
-            //   （:33101-33104）;localAI<0.1 时 +0.01 否则 +0.025/子步;≥0.95 Kill
-            //  - 撞块（HandleMovement :18822-18843）：轴速度被截且 |v|<1 → 反射,
-            //   否则 Kill（慢弹弹墙/快弹碎墙语义）
-            //  - 命中敌：影焰 buff 153 Next(240,480)t（:11473-11476）;实际 NPC 判定盒
-            //   10×10（GetCollisionParams :20072-20074,SetDefaults 40×40 仅贴图面）
-            //  - 消费值：ai0=sfAi0（X 加速）/ai1=sfAi1（Y 加速）——ArrowOpts 现仅 ai0
-            //   槽且被 88 激光支占用语义（Arrow.ts ArrowOpts.ai0）,勿挪用;接 ai1 时
-            //   同步补 opts.ai1 + ctor 挂账。本支先按原版掷流出值（占位 void 压 lint）
-            void sfAi0; void sfAi1;
+            // ★R2 已接面（2026-09-03）：aiStyle91 弹体 AI 全量落地 Arrow.ts 496 支——
+            //  摆动 v+=ai×1.5、ai×1.05/子步、帽 16（:33118-33124）;缩径 scale=1−localAI、
+            //  盒 width=height=20×scale Center 锚定、≥0.95 Kill（:33101-33113,
+            //  45 子步=真寿命——上方 life:15 占位已撤,timeLeft 走 SetDefaults 缺省
+            //  3600（:526,496 无覆写行）恒不先亡）;影焰尘 27（:33125-33147）;撞块
+            //  反射/碎裂（HandleMovement :18822-18843,本仓单点碰撞按主轴近似）。
+            //  命中敌：影焰 buff 153 Next(240,480)t 走 applyProjStatus 表驱动
+            //  （vanilla-projstatus.json"496" 恒 1 掷,Arrow 命中环通用接装）;NPC 命中盒
+            //  =AI 缩径盒 20×scale（Damage_GetHitbox :15037 读 width/height——
+            //  GetCollisionParams :20072 的 10×10 是【撞块】盒,本仓撞块=中心点单点
+            //  判定同口径;SetDefaults 40×40 仅贴图面）。ai0/ai1 经 opts 真传
+            //  （ai1 为本批新增槽;ai0 既有槽——88 激光支消费在其 projId 门内零影响）。
             this.entities.add(sfArrow, 'projectiles');
           };
           const animDurSf = swSf?.dur ?? (sfA + 1);
@@ -14478,15 +14810,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (swSf && animDurSf > cw.useTime && cw.useTime > 0) {
             // 一挥 3 发（R26/R27 泛化通道消费面 Game.ts:23374-23385：每越 useTime
             // 边界调 fire();射数 = 1+⌊(A−1)/U⌋,21/7 → 3）;蓝已由 case 头每窗一扣
+            // ★F-03：慢施那一击发数按缩放对（窗 53−1 / U_eff 17）→ 4 发,与原版
+            // SetItemAnimation(useAnimation,2.5) 窗拉伸后逐拍同构（正常对透传不变）
             const burstSf = { n: 1 };                     // 窗内 0 基序号（:47959 相位映射）
             swSf.multishot = {
               useTime: this.player.getSlowMagicUseTime(cw.useTime),
               fired: 1,
-              maxShots: sprayCyclePlan(itemCombat(critVid)?.useAnimation ?? animDurSf,
-                cw.useTime)?.shots ?? 1,
+              maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
+                itemCombat(critVid)?.useAnimation ?? animDurSf, cw.useTime,
+                itemCombat(critVid)?.useAnimation, animDurSf, reuseDelayOf(critVid))?.shots ?? 1,
               fire: () => { burstSf.n++; fireArrow3053(burstSf.n - 1, true); },
             };
-            this.player.useTime = this.player.getSlowMagicUseTime(animDurSf);  // 窗冷却
+            // ★F-03：窗已拉伸（付款点）→ 窗冷却 = 拉伸窗本身（53）;旧式
+            // getSlowMagicUseTime(animDurSf) 会把 53 再乘成 132 = 双重缩放
+            this.player.useTime = this.player.slowMagicUse
+              ? animDurSf
+              : this.player.getSlowMagicUseTime(animDurSf);
           } else {
             this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           }
@@ -14520,6 +14859,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bub = new Arrow(mzX, mzY,
               Math.cos(mzAng) * cw.shootSpeed + bjx, Math.sin(mzAng) * cw.shootSpeed + bjy,
               cw.damage, cw.knockback, 410, null, { grav: 0, life: 100, pierce: 1 });
+            // ★R9 批二（2026-09-03）：NewProjectile 传位=盒心（Player.cs:48879-48887 2623
+            //  专支三泡【同点】NewProjectile(pointPosition) + :10878-10879 position=X−w/2）
+            //  ——Arrow ctor 收盒左上,曾直传锚点 = 泡盒右下偏 (7,7)px（散布在速度不在出生点）
+            placeAtShootSpawn(bub, mzX, mzY);
             bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bub.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             bub.frostEligible = false;                    // magic 弹不吃冰霜引擎
@@ -14571,10 +14914,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             sw937.multishot = {
               useTime: this.player.getSlowMagicUseTime(cw.useTime),
               fired: 1,
-              maxShots: sprayCyclePlan(cw.useAnimation ?? animDur937, cw.useTime)?.shots ?? 1,   // 1+⌊11/4⌋=3
+              // ★F-03：慢施那一击按缩放对（拉伸窗−1−rd / ⌊U0×2.5⌋）计发数
+              //（正常 12/4 → 3 不变;rd=18 天界碎裂见 REUSE_DELAY_TICKS 非字面补录）
+              maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
+                cw.useAnimation ?? animDur937, cw.useTime,
+                itemCombat(critVid)?.useAnimation, animDur937, reuseDelayOf(critVid))?.shots ?? 1,   // 1+⌊11/4⌋=3
               fire: () => { mid937 = true; fireFracture(); mid937 = false; },
             };
-            this.player.useTime = this.player.getSlowMagicUseTime(animDur937);
+            // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）
+            this.player.useTime = this.player.slowMagicUse
+              ? animDur937
+              : this.player.getSlowMagicUseTime(animDur937);
           } else {
             this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           }
@@ -14591,6 +14941,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const fireCard = (cvx: number, cvy: number, spin: number): void => {
             const card = new Arrow(mzX, mzY, cvx, cvy, cw.damage, cw.knockback, cardVid, null,
               { grav: 0, pierce: 1 });
+            // ★R9 批二（2026-09-03）：NewProjectile 传位=盒心（Player.cs:49704-49760
+            //  killingCardFireType 四相位全部 NewProjectile(pointPosition) + :10878-10879）
+            //  ——Arrow ctor 收盒左上,曾直传锚点 = 牌盒右下偏 (8,8)px
+            placeAtShootSpawn(card, mzX, mzY);
             card.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             card.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             card.frostEligible = false;
@@ -14673,14 +15027,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             sw6152.multishot = {
               useTime: this.player.getSlowMagicUseTime(cw.useTime),
               fired: 1,
-              maxShots: sprayCyclePlan(cw.useAnimation ?? animDur6152, cw.useTime)?.shots ?? 1,
+              // ★F-03：慢施那一击按缩放对计发数（正常对透传不变;6152 数据面缺
+              // useAnimation 行 → 慢施分叉旁路=slowMagicSprayPlan 登记债）
+              maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
+                cw.useAnimation ?? animDur6152, cw.useTime,
+                itemCombat(critVid)?.useAnimation, animDur6152, reuseDelayOf(critVid))?.shots ?? 1,
               fire: () => { midSwing6152 = true; fireBloom6152(); midSwing6152 = false; },
               gate: (): boolean => {
                 const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 0;
                 return !(swDur > 0 && swT < swDur - winTail6152);
               },
             };
-            this.player.useTime = this.player.getSlowMagicUseTime(animDur6152);
+            // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）
+            this.player.useTime = this.player.slowMagicUse
+              ? animDur6152
+              : this.player.getSlowMagicUseTime(animDur6152);
           } else {
             this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           }
@@ -14851,10 +15212,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             sw6173.multishot = {
               useTime: this.player.getSlowMagicUseTime(cw.useTime),
               fired: 1,
-              maxShots: sprayCyclePlan(cw.useAnimation ?? animDur6173, cw.useTime)?.shots ?? 1,
+              // ★F-03：慢施那一击按缩放对计发数（正常对透传不变;6173 数据面缺
+              // useAnimation 行 → 慢施分叉旁路=slowMagicSprayPlan 登记债）
+              maxShots: slowMagicSprayPlan(this.player.slowMagicUse,
+                cw.useAnimation ?? animDur6173, cw.useTime,
+                itemCombat(critVid)?.useAnimation, animDur6173, reuseDelayOf(critVid))?.shots ?? 1,
               fire: fireArcSurge6173,
             };
-            this.player.useTime = this.player.getSlowMagicUseTime(animDur6173);
+            // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）
+            this.player.useTime = this.player.slowMagicUse
+              ? animDur6173
+              : this.player.getSlowMagicUseTime(animDur6173);
           } else {
             this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           }
@@ -15039,6 +15407,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               cw.damage, cw.knockback, 711, null,
               { grav: gs711.grav, gravDelay: gs711.delay, grav2: gs711.grav2, grav2At: gs711.grav2At,
                 dragAlways: gs711.drag, life: 600, pierce: 3 });
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Player.cs:49280 直传
+            //  pointPosition[可+40px 探针] + :10878-10879）——曾直传 = 弹盒右下偏 (15,15)px
+            placeAtShootSpawn(bolt, muzzleX, muzzleY);
             bolt.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -15060,7 +15431,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 异星法杖 2750 → 424 异星探针(Player.cs:48121-48153):探针自玩家上空随机天降点
         // 生成(spawnX = centerX + rand(0,400)×-dir + (mouseX-player.x) 再与中心折半
         // ±200;spawnY = MountedCenter.Y-600),速度=天降点→光标 归一×shootSpeed×0.75,
-        // 弹型 = projToShoot + rand.Next(3)(424/425/426 三型),ai[2]=0.5+rand×0.3
+        // 弹型 = projToShoot + rand.Next(3)(424/425/426 三型),ai[1]=0.5+rand×0.3(→scale
+        //  AI_001 :58019;★R3 翻案钉:Player.cs:48153=11 参调用,ai0=0f/ai1=0.5+rand×0.3,
+        //  ai2 缺省 0 → AI_001_Features 位标全 0,无随机凤凰位)
         if (cw.shoot === 424) {
           const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
           const dir2750 = this.player.facing >= 0 ? 1 : -1;
@@ -15122,6 +15495,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback, 261, null,
             { grav: 0.3, bounce: true, life: pd?.timeLeft ?? 3600, pierce: 6 });
+          // ★R9 批一（2026-09-03）：1296 无 Player.cs 专支 → 通用尾支 NewProjectile
+          //  (pointPosition)（:49957 + :10878-10879 盒心语义）——曾直传 = 巨石盒
+          //  右下偏 (16,17)px（261 盒 32×34）
+          placeAtShootSpawn(b261, mzX, mzY);
           b261.frostEligible = false;   // magic 弹
           b261.critBonus = this.player.critChance('magic')
             + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
@@ -15242,6 +15619,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 spawnMissile(sx, sy, (mwx - sx) / dl * cw.shootSpeed, (mwy - sy) / dl * cw.shootSpeed);
               },
             });
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（113/218/495 无专支 →
+            //  通用尾支 :49957 直传 pointPosition + :10878-10879）——MagicMissileProj
+            //  ctor 收盒左上,曾直传中心 = 弹盒右下偏 (16,16)px（16/34/79 盒 32×32;
+            //  fireExtra 杖头锚为 2026-08-26 拍板备案不动,只回正盒）
+            placeAtShootSpawn(m, mx, my);
             m.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
             m.critChance = critTotal;
             m.nebulaCb = () => {
@@ -15285,6 +15667,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  A=35 U=34 shots=2 实测定罪)。spray 族 937/6152/6173 同批统一
         const animDur27 = cw.useAnimation ?? this.swing?.dur ?? 0;
         const spray27 = sprayCyclePlan(animDur27, cw.useTime);
+        // ★R3-F1（2026-09-03）：multishot 注册体提升到局部——下方尾支 useSwing
+        //  （2026-08-31「useSwing 补漏」批）会重起 this.swing 丢弃本处注册
+        //  （第二轮 F-03 邻接缺陷移交本批,见 :15610 处回挂）
+        let ms27: { useTime: number; fired: number; maxShots: number; fire: () => void;
+          gate?: () => boolean } | null = null;
         if (spray27 && this.swing) {
           const fireAgain27 = (): void => {
             const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -15297,10 +15684,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 尾停发窗 gate：动画末 useTime×N 静默（Player.cs:43820-43852 同式族）——
           // 与 case 'magic' 头部的 dispatch 时门同一式,按【实时】swing 相位判
           const winTail = TAIL_SILENCE_WIN[critVid];
-          this.swing.multishot = {
+          this.swing.multishot = ms27 = {
             useTime: this.player.getSlowMagicUseTime(cw.useTime),
             fired: 1,
-            maxShots: spray27.shots,
+            // ★F-03：慢施那一击按缩放对计发数（swing.dur 已由付款点拉伸 →
+            // A_eff=dur−1−rd;正常对透传 spray27 原值,R26 冻结面零改动）
+            maxShots: slowMagicSprayPlan(this.player.slowMagicUse, animDur27, cw.useTime,
+              itemCombat(critVid)?.useAnimation, this.swing.dur, reuseDelayOf(critVid))?.shots
+              ?? spray27.shots,
             fire: fireAgain27,
             ...(winTail !== undefined ? {
               gate: (): boolean => {
@@ -15331,6 +15722,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  magic 武器走不到）。逐帧跟手(updateSwingHits 顶部)从此帧的 swing.aim 起步
         this.useSwing(def, ang, ps?.spd ?? 1);
         if (spray27 && this.swing) {
+          // ★R3-F1 回挂（第二轮 F-03 邻接缺陷移交本批）：尾支 useSwing 重起
+          //  this.swing 会丢弃 :15561 注册的 multishot（探针 1336 满蓝 swing 无
+          //  multishot 字段=黄金雨整族一窗一发,与 R26 探针 spawnTicks=[0,6,12,18]
+          //  相悖）→ 原样回挂（fire/gate 闭包读实时相位/光标语义不变;maxShots 已按
+          //  拉伸窗算好,慢施时 swing.dur 由下方 growTail 补拉回同一窗值）。慢施面
+          //  同理——slowMagicSprayPlan 的缩放对只有挂上才被 updateSwingHits 消费
+          if (ms27) this.swing.multishot = ms27;
           // 周期窗冷却覆盖（fireGemStaffBolts 内置的 per-shot 冷却被抬到整窗）：
           // mana 下次扣减要等 itemAnimation 归零（:43072 门）→ 一动画窗一扣
           const winScaled27 = this.player.getSlowMagicUseTime(animDur27);
@@ -15338,10 +15736,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.player.useTime = animDur27;
           } else {
             // V1 动画窗 ×2.5：swing 同步延展（持物施法姿势跟随 itemAnimationMax 延长）
+            // ★F-03 修：上方尾支 useSwing 重起窗会【重置】付款点已做的拉伸 → 在此按
+            // 同 delta 补拉（增量式见 slowMagicWindowGrow:+num 补间帧/后摇帧原位保留）。
+            // 旧 gate `swing.dur === animDur27` 因 dur 恒含 +num 补间帧（useSwing
+            // style5+autoReuse 特例）恒假 = 整段延展死代码（探针 1336 修前 dur 恒 19）
             this.player.useTime = winScaled27;
-            if (this.swing.dur === animDur27) {
-              this.swing.t += winScaled27 - animDur27;
-              this.swing.dur = winScaled27;
+            const growTail = slowMagicWindowGrow(itemCombat(critVid)?.useAnimation, true);
+            if (growTail > 0 && this.swing.dur >= animDur27) {
+              this.swing.t += growTail;
+              this.swing.dur += growTail;
             }
           }
         }
@@ -15376,6 +15779,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               Math.sin(ang) * cw.shootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
               cw.damage, cw.knockback, PIRANHA_PROJ, null,
               { grav: 0, life: PIRANHA_LIFE, piranha: pgCtl });   // timeLeft 通用默认 3600（:526）
+            // ★R9 批二（2026-09-03）：NewProjectile 传位=盒心（Player.cs:48847-48866 1156
+            //  专支 3−alive 补满 NewProjectile(pointPosition) + :10878-10879）——190 盒
+            //  22×22,Arrow ctor 收盒左上,曾直传 = 弹盒右下偏 (11,11)px
+            placeAtShootSpawn(pg, this.player.cx, this.player.cy);
             pg.pShootSpeed = cw.shootSpeed;                        // 精确 shootSpeed（14）供补弹
             pg.critChance = critTotal;
             pg.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -15428,6 +15835,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 && !fkOwner.dead,
               aimCb: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             });
+          // ★R9 批二（2026-09-03）：3030 无专支 → ItemCheck_Shoot 通用尾支 :49957
+          //  NewProjectile(pointPosition)（盒心,:10878-10879）——491 盒 26×26,ctor 收
+          //  盒左上,曾直传 = 弹盒右下偏 (13,13)px
+          placeAtShootSpawn(knife, this.player.cx, this.player.cy);
           knife.critChance = critTotal;
           knife.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           this.entities.add(knife, 'projectiles');
@@ -15444,6 +15855,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const flare = new DaybreakFlare(this.player.cx, this.player.cy,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback);
+          // ★R9 批二（2026-09-03）：通用尾支 :49957 NewProjectile(pointPosition)（盒心,
+          //  :10878-10879）——636 盒 16×16,ctor 收盒左上,曾直传 = 弹盒右下偏 (8,8)px
+          //（3543 的 pointPosition.Y=height/3 锚点偏移 :47635 属锚面登记,本批不动）
+          placeAtShootSpawn(flare, this.player.cx, this.player.cy);
           flare.critChance = critTotal;
           flare.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           this.entities.add(flare, 'projectiles');
@@ -15501,6 +15916,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           spin.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           spin.spawnSlam = (sx, sy, svx, svy, slamDmg) => {
             const slam = new MonkSlam(sx, sy, svx, svy, slamDmg);
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:70578 直传
+            //  vector3+(dir×−15,−60) + :10878-10879 position=X−w/2;MonkSlam ctor 注
+            //  「左上角直传」系对 NewProjectile 中心语义误读）——75×200 大盒曾右下偏
+            //  (37.5,100)px,爆箱正面整段错位
+            placeAtShootSpawn(slam, sx, sy);
             slam.critChance = critTotal + 0.25;                 // bonusCritChance=25（:70582）
             slam.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             this.entities.add(slam, 'projectiles');
@@ -15528,6 +15948,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           glaive.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           glaive.spawnGhast = (gx, gy, gvx, gvy, gdmg) => {
             const ghast = new MonkGhast(gx, gy, gvx, gvy, gdmg);
+            // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:15254-15257
+            //  直传 targetCenter+(−num×120,0) + :10878-10879）——40×40 盒曾右下偏 (20,20)px
+            placeAtShootSpawn(ghast, gx, gy);
             ghast.critChance = critTotal;
             ghast.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             this.entities.add(ghast, 'projectiles');
@@ -15574,6 +15997,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,
             dragAlways: gsS.drag, life: pd?.timeLeft ?? 3600,
             pierce: HOMING_FAMILY_PIERCE.has(cw.shoot) ? (pd?.penetrate ?? 1) : 1 });
+        // ★R9 批二（2026-09-03）：兜底件全部穿透 ItemCheck_Shoot 通用尾支 :49957
+        //  NewProjectile(pointPosition)（盒心,:10878-10879）——Arrow ctor 收盒左上,
+        //  曾直传 = 弹盒右下偏 (w/2,h/2) 随件（404/405 走 'flairon'/'flail' 专支不经
+        //  此路,无重复清偿面）
+        placeAtShootSpawn(shotArrow, shotTip.x, shotTip.y);
         shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
         shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
@@ -15733,7 +16161,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 工具类型与 tile 族匹配门（原版 Player.cs:45039-45045 三元组：镐分支
    *  `pick > 0 && !tileAxe && !tileHammer`、斧分支 `axe > 0 && tileAxe`——
    *  不匹配则整个 strike 段跳过，无击打音/尘/积累。tileAxe 表权威 =
-   *  TILE_AXE_SHEETS（Main.cs:7157-7172），本地 d.axe 标志混有平台/草等
+   *  TILE_AXE_SHEETS（Main.cs:7347-7364），本地 d.axe 标志混有平台/草等
    *  非 tileAxe 件（曾误据 d.axe<0 拒镐挖平台）。
    *  镐力门槛【不在此】：原版门槛在 GetPickaxeDamage 的 damage 计算里归零，
    *  每击仍走 KillTile(fail:true) → 播击打音+尘（WorldGen.cs:63600）。
@@ -15745,8 +16173,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const d = TILE_DEFS[type];
     if (!d) return false;
     const sheet = d.vanilla?.sheet ?? -1;
-    if (toolType === 'pick') return d.pick >= 0 && !TILE_AXE_SHEETS.has(sheet)
-      && (drillMount || !TILE_HAMMER_SHEETS.has(sheet));  // tileHammer 族镐不入；drill=PickTile 直调豁免
+    if (toolType === 'pick') return d.pick >= 0 && (drillMount
+      || (!TILE_AXE_SHEETS.has(sheet) && !TILE_HAMMER_SHEETS.has(sheet)));
+    // ★drillMount 豁免双族（Mount.cs:3115 PickTile 直调无分派门——GetPickaxeDamage
+    // :54545 也无 tileAxe 门 → DCU 可锯树/可钻珠祭坛；红队 F2 实锤：曾只豁免
+    // tileHammer 致钻头坐骑对树族零积累）。手持镐/斧仍被双族拦截（tileHammer 无动作
+    // /tileAxe 走斧支）。镐打斧族的伤害语义在 tileHitDamage 斧支内补（=GetPickaxeDamage 全伤）。
     if (toolType === 'axe') return TILE_AXE_SHEETS.has(sheet);
     return false;
   }
@@ -16020,17 +16452,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!opts?.drill && !this.inTileRange(tx, ty)) { this.mining = null; return; }
     const type = this.world.store.get(tx, ty);
     // 恶魔/猩红祭坛（同一 tile 26，样式=frameX/54：0 恶魔 1 猩红——TEdit Altars 双帧，
-    // 同一分支两族通吃）。原版锤支累积制（Player.cs:45032-45068
+    // 同一分支两族通吃）。原版锤支累积制（Player.cs:46033-46089
     // ItemCheck_UseMiningTools_ActuallyUseMiningTool tileHammer 分支）：
     //   每挥击周期 num2 += 锤力 → HitTile 累积 ≥100 才 KillTile(case 26 → SmashAltar)，
     //   未达阈值 KillTile(fail:true) 仅播每击音——神锤(锤力80)须两击。
-    //   - 反噬门（:45058）：锤力 <80 或 !hardMode → num2=0 + Hurt(ByOther(4),
+    //   - 反噬门（:46056）：锤力 <80 或 !hardMode → num2=0 + Hurt(ByOther(4),
     //     statLife/2, -direction)——【当前生命】一半，C# 整除地板（曾误用 maxHp/2）；
-    //   - 冷却 = ApplyItemTime(sItem) 裸 useTime（:45085；max(val,1) 下限 :4226）——
+    //   - 冷却 = ApplyItemTime(sItem) 裸 useTime（:46087；max(val,1) 下限 :4226）——
     //     pickSpeed 药水链只进镐支（:44950/:45163 itemTime=useTime*pickSpeed），不乘锤支；
-    //   - CanKillTile 门（WorldGen.cs:62270-62304 全式 = tileAboveProtected）：上邻为
-    //     异类可支撑物(树干族帧细分/棕榈/仙人掌列条件/宝箱21/祭坛26/草72/77/88/467/488)
-    //     时拒拆 num2=0（无进度无反噬）
+    //   - CanKillTile 门（WorldGen.cs:62693-62716+ 全式，SW-G1 2026-09-03 = canKillTile
+    //     委托）：上邻为异类可支撑物(树干族帧细分/棕榈/仙人掌列条件/宝箱21/祭坛26/
+    //     草72/77/88/467/488)时拒拆 num2=0（无进度无反噬）；另含 wall350/Boulders
+    //     +CheckBoulderChest/锁门/箱内容分支
     if (type === TILE_BY_KEY['v_26_altars']) {
       if (toolType !== 'hammer') {
         // 钻头坐骑直调通道（Mount.cs:3101-3116）：type==26 且非困难 → flag2=false +
@@ -16045,7 +16478,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.mining = null;
           return;
         }
-        const totalD = this.hitTiles.addDamage(tx, ty, this.tileAboveProtected(tx, ty) ? 0
+        // SW-G1 2026-09-03：CanKillTile 全式门（:54474 `if (!WorldGen.CanKillTile) damage=0`，
+        // 1457 :62716-62810 全函数 = canKillTile 委托，非仅上邻保护子件）
+        const totalD = this.hitTiles.addDamage(tx, ty, this.canKillTile(tx, ty) ? 0
           : (this.world.seedFlags?.getGoodWorld ? power * 2 : power)); // CanKillTile(:54474)+FTW ×2(:54482)
         this.hardnessCache = 100;
         this.mining = { x: tx, y: ty, progress: totalD };
@@ -16068,9 +16503,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.lastMineHitTick = this.tickCount;
       let num2 = power;
-      // CanKillTile 上邻支撑门全式（WorldGen.cs:62270-62304）= 复用镐支同款
-      // tileAboveProtected（树干/棕榈/仙人掌帧细分 + PROTECTED_ABOVE_SHEETS 在内）
-      if (this.tileAboveProtected(tx, ty)) num2 = 0;
+      // CanKillTile 门（Player.cs:46058 `if (!WorldGen.CanKillTile) num2=0`）——
+      // SW-G1 2026-09-03 改消费全函数 canKillTile（1457 :62716-62810 全式，含
+      // wall350/Boulders+CheckBoulderChest/锁门/箱内容，非仅上邻保护子件）
+      if (this.canKillTile(tx, ty)) num2 = 0;
       if (power < 80 || !this.world.flags.hardMode) {
         num2 = 0;
         const p = this.player;
@@ -16121,7 +16557,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         this.lastMineHitTick = this.tickCount;
         let num2 = power;
-        if (this.tileAboveProtected(tx, ty)) num2 = 0;              // CanKillTile 门（:46058）
+        if (this.canKillTile(tx, ty)) num2 = 0;              // CanKillTile 全式门（:46058，SW-G1 2026-09-03）
         const total = this.hitTiles.addDamage(tx, ty, num2);        // AddDamage(num,num2)（:46068）
         this.hardnessCache = 100;
         this.mining = { x: tx, y: ty, progress: total };
@@ -16385,15 +16821,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.lastMineHitTick = this.tickCount;
     const d = TILE_DEFS[type];
     const sheet = d?.vanilla?.sheet ?? -1;
-    const dmg = this.tileHitDamage(tx, ty, type, toolType, power);
+    // SW-D1 2026-09-03：镐支=PickTile(:54405) 语义 respectTransformingTiles:true（斧/锤支
+    // 不经 DetermineDamage=无转化门）——草/苔族攒满阈值那一击 dmg=0 落下方 fail 支转化
+    const dmg = this.tileHitDamage(tx, ty, type, toolType, power, toolType === 'pick');
     const total = this.hitTiles.addDamage(tx, ty, dmg);
     this.hardnessCache = 100;
     this.mining = { x: tx, y: ty, progress: total }; // 裂缝显示 = 积累进度
     // ★每击击打音（原版每击 KillTile(fail:true) → KillTile_PlaySounds，
     // WorldGen.cs:63600——无论破坏与否、damage 是否为 0 都播；分档同
-    // killTileBreakSound 四档近似）。砍树即此来的"咚咚"声（树干落 dig 档）
-    this.killTileBreakSound(type, tx, ty);
-    this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
+    // killTileBreakSound 四档近似）。砍树即此来的"咚咚"声（树干落 dig 档）。
+    // 例外=504 神秘蛇绳：PickTile :54400-54402 在 DetermineDamage/KillTile 之前
+    // return → 无音无尘无积累（蓝队 F6：曾 dmg=0 但音尘照播）
+    if (sheet !== 504) {
+      this.killTileBreakSound(type, tx, ty);
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
+    }
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
       const heldVid = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
@@ -16412,11 +16854,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (regrow) this.placeAcornSapling(tx, ty);
       // 破坏完成音不再在此分档——统一走 breakTile 内 KillTile_PlaySounds 四档
       //（WorldGen.cs:66483-66631，见 killTileBreakSound；爆炸/液体冲毁路径同源）
-    } else if (toolType === 'axe' && TREE_SHAKEABLE_SHEETS.has(sheet)) {
-      // 未砍倒的斧击 → WorldGen.KillTile fail 分支（WorldGen.cs:63759）→ ShakeTree(:63169)。
-      // 门 = IsShakeable（TileID.cs:163，仙人掌 80/倒木 488/假人 704 在 tileAxe 但不摇）；
-      // 原版此路径要求 sItem.axe>0（Player.cs:45104），dual.type==='axe' 已含此语义
-      this.tryShakeTree(tx, ty);
+    } else {
+      // SW-D1 2026-09-03 KillTile fail 路径转化（WorldGen.cs:64222-64250）：镐击未破
+      // （fail:true）时草/苔族【原格转化】为基底块——不掉落不清格（:64249 return 在
+      // 掉落段前）、积累缓冲不清（原版 fail 支无 ClearMiningCacheAt）。转化族全为
+      // 镐可达 tile（toolMatchesTile 分派面），斧/锤 fail 击不触表=与原版同构
+      this.killTileFailTransform(tx, ty, sheet);
+      if (toolType === 'axe' && TREE_SHAKEABLE_SHEETS.has(sheet)) {
+        // 未砍倒的斧击 → WorldGen.KillTile fail 分支（WorldGen.cs:63759）→ ShakeTree(:63169)。
+        // 门 = IsShakeable（TileID.cs:163，仙人掌 80/倒木 488/假人 704 在 tileAxe 但不摇）；
+        // 原版此路径要求 sItem.axe>0（Player.cs:45104），dual.type==='axe' 已含此语义
+        this.tryShakeTree(tx, ty);
+      }
     }
     if (dmg !== 0) this.pruneHitTiles();                  // Player.cs:45150/:52902 if(damage!=0) Prune
   }
@@ -16427,7 +16876,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  纠偏/25+203 门 65 平值+infectedSeed/地牢砖 X 中带豁免/墓碑 FTW ÷4/云族 ×2/
    *  化石 +5/绳族·猩红草 100/504 归零/FTW pick×2·斧×1.3）。返回本次该格伤害（0=不可伤） */
   private tileHitDamage(tx: number, ty: number, type: number,
-    toolType: 'pick' | 'axe' | 'hammer', power: number): number {
+    toolType: 'pick' | 'axe' | 'hammer', power: number,
+    respectTransformingTiles = false): number {
     const d = TILE_DEFS[type];
     const sheet = d?.vanilla?.sheet ?? -1;
     let dmg: number;
@@ -16438,10 +16888,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // tileNoFail（Main.cs:7138-10198 表）：一次挥击直接破坏（原版 num2=100）
       dmg = 100;
     } else if (TILE_AXE_SHEETS.has(sheet)) {
-      // 斧族 tile（树/仙人掌/棕榈/宝石树等，Main.cs:7157-7172 tileAxe 表）：
-      // 仅斧有效（原版 pick 分支被 tileAxe 排除——镐不能砍树）；
-      // 伤害 = int(斧力×1.2)（仙人掌 80 ×3 再 ×1.2，Player.cs:45098-45100）
-      dmg = toolType === 'axe' ? Math.floor((sheet === 80 ? power * 3 : power) * 1.2) : 0;
+      // 斧族 tile（树/仙人掌/棕榈/宝石树等，tileAxe 表 Main.cs:7347-7364）：
+      // 手斧 = int(斧力×1.2)（仙人掌 80 ×3 再 ×1.2，Player.cs:46095-46098）；
+      // 镐打斧族仅 PickTile 直调通道可达（钻头坐骑 Mount.cs:3115/挖地龟
+      // Projectile.cs:39479——GetPickaxeDamage:54545 无 tileAxe 门=全伤,DCU 可锯树），
+      // 手持镐被 toolMatchesTile 双族拦截到不了这里；锤 = 无动作（:46076 斧支 sItem.axe>0 门）
+      dmg = toolType === 'axe' ? Math.floor((sheet === 80 ? power * 3 : power) * 1.2)
+        : toolType === 'pick' ? power : 0;
     } else if (toolType === 'pick') {
       // 镐族：伤害 = 镐力，分档除数（GetPickaxeDamage:54552 三元链 1:1）——除数只列
       // 226（237 神庙祭坛不在链内=全伤，曾误并 226 档致 Picksaw 两击变一击半）；
@@ -16499,11 +16952,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (sheet === 504) dmg = 0;
       // ★SW-A1(2026-09-03) GetPickaxeDamage 尾段命中转移/锁定帧特例补遗（Player.cs:54628-54689）：
       // ① tile 128 Mannequin/269 Womannequin（:54628-54641）【格在本仓不可达=不移植，仅备案】。
-      //    原版：frameX==18||54（右列裸架；帧编码=100×挂物数+36×style+18×列,CheckMan/
-      //    CheckWoman :47001-47008 同式剥系）→ x-- 后 hitTile.UpdatePosition(hitBufferIndex,
-      //    x,y) 把本击伤害缓冲改址到左列格（跨列共享池）；随后 frameX>=100（挂甲标记,
-      //    ItemCheck_TryPlacingWearablesOnMannequins :53345+ 写）→ num=0+Main.blockMouse=true
-      //    （:44357 单帧吞点击）。不移植依据：TILE_DEFS 虽有 legacy 槽
+      //    原版：frameX==18||54（右列裸架；帧编码=100×挂物数+36×style+18×列,PlaceMan/
+      //    PlaceWoman（WorldGen.cs:46704/:46750）同式帧编码）→ x-- 后 hitTile.UpdatePosition
+      //    (hitBufferIndex,x,y) 把本击伤害缓冲改址到左列格（跨列共享池）；随后 frameX>=100
+      //    （挂甲标记,ItemCheck_TryPlacingWearablesOnMannequins :53345+ 写）→ num=0+
+      //    Main.blockMouse=true（写点 :54637/:54688,单帧吞点击）。不移植依据：TILE_DEFS 虽有 legacy 槽
       //    （v_128_mannequin_legacy/v_269_womannequin_legacy,tiles.ts:553/590）但三条进入通道
       //    全断——(a)放置：1.4.5.7 无物品 createTile=128/269（Item.cs:7310-7321 case 498
       //    createTile 128→470 终值 placeStyle 0;:21280 case 1989 269→470 placeStyle 2;
@@ -16511,29 +16964,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //    可达（WorldGen.cs:60383-60391）=同上无调用方;(c).wld 导入：WldParser.ts:144
       //    version<210 一律拒收且 1.4+ 世界模特恒为 470（style 0/1 帧带）→ 两 id 永不被
       //    命中,写死即死代码。
-      // ② tile 334 legacy 武器架（:54642-54689）【可达（WldImport 老世界导入）→只移植锁定帧】。
-      //    y 命中转移（:54644-54655 frameY==0→y++/frameY==36→y-- 后 hitTile.UpdatePosition
-      //    改址到同行中行格=三行共享池,池在中行同列）不移植：本仓 hitTiles（HitTile.ts 键值
-      //    Map）无 UpdatePosition/改址 API 且积累点在调用方（tryMine addDamage(tx,ty) 后
-      //    >=100 才 kill）——tileHitDamage 只返回标量,方法体内等价实现（迁池/对邻格结算）
-      //    会令 >=100 判定读不到转移后的池（顶/底行永远攒不满 100）。行为差仅限跨行混打
-      //    须单行攒满 100;同格连打时序与原版全同（整架仍经 TileFrame case 334→
-      //    CheckWeaponsRack :46796 整件塌）。
-      //    锁定帧（:54656-54688）=可移植：本格 frameX>=5000（PlaceWeapon 持武标记
-      //    5000+100+itemType/10000+prefix,二行带 20000/25000 :54789-54798）,或裸格按
-      //    num3=floor(frameX/18)%3 左移锚格（col0;frameX 按列编码,与原版 y 转移后读锚格
-      //    同值）后锚格 frameX>=5000（原版 while 剥 5000 计 num4,num4!=0→flag2——
-      //    frameX>=5000 蕴含 num4>=1,flag2≡flag）→ num=0:持武架不可挖,须先取枪。
+      // ② tile 334 legacy 武器架（:54642-54689）【可达（WldImport 老世界导入）→移植锁定帧】。
+      //    y 命中转移的【伤害池】半边（:54644-54655 hitTile.UpdatePosition 改址到中行格=
+      //    三行共享池）不移植：本仓 hitTiles（HitTile.ts 键值 Map）无改址 API 且积累点在
+      //    调用方（tryMine addDamage(tx,ty) 后 >=100 才 kill）——tileHitDamage 只返回标量,
+      //    方法体内迁池会令 >=100 判定读不到转移后的池。行为差仅限跨行混打须单行攒满。
+      //    y 转移的【锁帧判定】半边已移植（下方 ry 收敛）——PlaceWeapon（Player.cs:54721-54785,
+      //    归一 frameY/18==1 后帧写 :54780-54781）只把 5000 系标记写中行两格,顶/底行裸帧
+      //    <5000,不收敛则顶/底行可挖持武架（红队 F1/蓝队 F2 实锤,2026-09-03 修）。
+      //    整架仍经 TileFrame case 334→CheckWeaponsRack :46796 整件塌。
+      //    锁定帧（:54656-54688）：先 y 收敛到中行（顶 frameY==0→y++/底 frameY==36→y--）,
+      //    本格 frameX>=5000（PlaceWeapon 持武标记 5000+100+itemType/10000+prefix,
+      //    二行带 20000/25000,帧写 Player.cs:54780-54781）,或裸格按
+      //    num3=floor(frameX/18)%3 左移锚格（col0）后锚格 frameX>=5000（原版 while 剥
+      //    5000 计 num4,num4!=0→flag2——frameX>=5000 蕴含 num4>=1,flag2≡flag）→
+      //    num=0:持武架不可挖,须先取枪。
       //    可达面：334 经 WldImport sheetFallback copyFrame 逐字入世界（RACK334 解码
       //    WldImport.ts:586+ 还原裸架,但七批④前旧存档/杂波帧可残留 5000 系标记——
       //    wallhang stripRackFx（m-4 批）同款容忍）→ 本仓无 334 写入面,
       //    标记帧唯此两源。Main.blockMouse 本仓无对应输入旗标,不移植,仅 dmg=0。
       if (sheet === 334) {
         const wr = this.world.store;
-        const rackFx = wr.frameX[wr.idx(tx, ty)];
+        let ry = ty;                               // :54644-54655 y 收敛到中行（锁帧判定半边）
+        const fy0 = wr.frameY[wr.idx(tx, ty)];
+        if (fy0 === 0) ry = ty + 1;
+        else if (fy0 === 36) ry = ty - 1;
+        const rackFx = wr.inBounds(tx, ry) ? wr.frameX[wr.idx(tx, ry)] : 0;
         const n3 = Math.floor(rackFx / 18) % 3;   // :54661-54662 列内偏移
         const lockFx = rackFx >= 5000 ? rackFx    // :54657 本格带标记
-          : (tx - n3 >= 0 ? wr.frameX[wr.idx(tx - n3, ty)] : 0);   // :54663-54668 锚格（越界=无锁）
+          : (tx - n3 >= 0 && wr.inBounds(tx - n3, ry)
+            ? wr.frameX[wr.idx(tx - n3, ry)] : 0); // :54663-54668 锚格（越界=无锁）
         if (lockFx >= 5000) dmg = 0;              // :54679-54688 num=0
       }
     } else {
@@ -16544,18 +17004,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 等价物）：镐力不足 → damage=0（每击仍播击打音+尘，不积累——原版 num2=0
     // 也走 KillTile(fail:true) → PlaySounds，Player.cs:45148）
     if (toolType === 'pick' && dmg > 0 && power < d.pick) dmg = 0;
-    // CanKillTile 保护门（Player.cs:45045/:45108 `if (!WorldGen.CanKillTile) num2=0`）：
-    // 上方保护族（干/棕榈干基/箱柜/蘑菇树/倒木/仙人掌底帽）→ 伤害归零不可挖
-    if (dmg > 0 && this.tileAboveProtected(tx, ty)) dmg = 0;
-    // CanKillTile case 10（1457 :62781-62788 ≡ 1456 :62321-62328）：IsLockedDoor
-    // （神庙锁门,world/Door.ts isLockedDoor 同款 frameY∈[594,646] 且 fx<54 关闭态）
-    // → blockDamaged=true + return false → 伤害归零不可拆（Player.cs:46058 锤/
-    // :46104 斧/:54474 PickTile `if (!WorldGen.CanKillTile) num2=0`——每击仍播
-    // KillTile(fail:true) 击打音,永不积累;开锁后 frameY 移出锁段即恢复可拆）
-    if (dmg > 0 && isLockedDoor(this.world.store, tx, ty)) dmg = 0;
+    // SW-G1 2026-09-03 CanKillTile 全函数门（1457 :62716-62810；Player.cs:46058 锤/
+    // :46104 斧/:46108/:54474 PickTile `if (!WorldGen.CanKillTile) num2=0`）：此前仅
+    // 上邻保护子件（tileAboveProtected）+ 锁门单挂两门，缺 wall350 / Boulders+
+    // CheckBoulderChest（巨石上邻两格容器/锁门/非困难 77，WorldGen.cs:49216）/
+    // case 235 传送器上方 3 格扫描 / case 21·467·88 CanDestroyChest 非空拒毁。
+    // 归零面 = 伤害 0 不积累，每击仍播 KillTile(fail:true) 击打音（与原版 num2=0 同）；
+    // 锁门分支（frameY∈[594,646] 且 fx<54，原 case 10 blockDamaged）已并入全式。
+    if (dmg > 0 && !this.canKillTile(tx, ty)) dmg = 0;
     // FTW（getGoodWorld）击伤放大：pick ×2（PickTile_DetermineDamage :54480-54482
     // `if (Main.getGoodWorld) damage *= 2`——在 CanKillTile 归零之后，0 乘仍 0）/ 斧
-    // ×1.3（ActuallyUseMiningTool 斧支 :45096-45100 `(int)(num2*1.3)`）——hammer 支无
+    // ×1.3（ActuallyUseMiningTool 斧支 :46096-46098 `(int)(num2*1.3)`）——hammer 支无
     // 放大（tileHammer 分派不经此处）。钻头坐骑/挖地龟同走 PickTile 族=一并放大
     if (dmg > 0 && toolType !== 'hammer') {
       const sfFtw = this.world.seedFlags ?? {};
@@ -16564,7 +17023,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         else dmg = Math.floor(dmg * 1.3);
       }
     }
+    // SW-D1 2026-09-03 DetermineDamage 尾段转化门（Player.cs:54482-54485）：respectTransformingTiles
+    // （=PickTile :54405 实参 true，手持镐/钻头坐骑/挖地龟·捣蛋猫真实击全走此）且模拟积累
+    // （getDamage=已积累 + 本次 dmg ≥ 100，AddDamage(updateAmount:false) :54695）且为可转化族
+    // → 该击 damage=0：不积累不破坏，落 tryMine fail 支把 tile 转化为泥土/淤泥/石/灰砖/灰烬
+    if (respectTransformingTiles && toolType === 'pick'
+      && doesPickTransformOnKill(sheet, this.hitTiles.getDamage(tx, ty), dmg)) dmg = 0;
     return dmg;
+  }
+
+  /** SW-D1 2026-09-03 KillTile fail 路径原格转化（WorldGen.cs:64222-64250）：镐击未破
+   *  （fail:true）时草/苔族变基底块——不掉落、不清格、不播破坏链（:64249 return 在
+   *  掉落段/DropItems 前）。写格 = setTile（breakTile 同原语：netReporter 上报 +
+   *  onTileChanged 级联 = 尾 SquareTileFrame(i,j) :64248 等价链，ChunkCache 订阅自标脏）。
+   *  帧 0/0：目标全为 blend/auto 绘制期虚拟化块（同 worldgen 裸写惯例）；油漆/半砖/坡面
+   *  active→active 存活（setTile 清油漆仅对 type==0/非 active 生效，原版 fail 支亦不清）。
+   *  积累缓冲不清（原版 fail 支无 ClearMiningCacheAt，HitObject :5157 按坐标复用槽位
+   *  = 转化后泥土/石继承旧积累，与原版同）。目标未注册内部 id（TILE_INTERNAL_BY_SHEET
+   *  -1）→ 跳过不写 */
+  private killTileFailTransform(tx: number, ty: number, sheet: number): void {
+    const nid = pickTransformTargetTileId(sheet);
+    if (nid < 0) return;
+    this.world.store.setTile(tx, ty, nid, 0, 0);
   }
 
   /** GameHooks.petPickTile——Player.PickTile（:54398-54447）帕鲁钻地龟通道
@@ -16582,20 +17062,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!st.inBounds(tx, ty)) return false;
     const type = st.get(tx, ty);
     if (type === 0) return false;                     // 原版 PickTile 对空气格 num2=0
-    let dmg = this.tileHitDamage(tx, ty, type, 'pick', pickPower);
+    const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+    // 探测支 = AI_204 直调 DetermineDamage(false)（Projectile.cs:39475/:39492，无转化门，
+    // 仅供 num10 计数/离场裁决）——返回值保持此口径（原版真实击里 PickTile 内部才是 true）
+    const probe = this.tileHitDamage(tx, ty, type, 'pick', pickPower);
+    if (probe <= 0) return false;
+    // SW-D1 2026-09-03 真实击 = PickTile(:54398) 内 DetermineDamage(respectTransformingTiles:
+    //  true :54405) → 转化门（草/苔族攒满阈值那一击 dmg=0）→ 比例钳（:54407-54411，门在钳前）
+    let dmg = probe;
+    if (doesPickTransformOnKill(sheet, this.hitTiles.getDamage(tx, ty), dmg)) dmg = 0;
     if (dmg > 0) {
       // dealDamageAsIfBaseNumberIs 比例钳（Player.cs:54407-54411）
       dmg = Math.min(dmg, Math.trunc(capDamage * (dmg / pickPower)));
     }
-    if (dmg <= 0) return false;
     const total = this.hitTiles.addDamage(tx, ty, dmg);
     this.killTileBreakSound(type, tx, ty);
     this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
       this.breakTile(tx, ty, true);
+    } else {
+      // SW-D1：PickTile else 支 KillTile(fail:true)（:54442-54447）→ fail 路径转化表
+      this.killTileFailTransform(tx, ty, sheet);
     }
-    this.pruneHitTiles();                           // Player.cs:52902 PickTile 尾 Prune（dmg>0 已由上门保证）
+    if (dmg !== 0) this.pruneHitTiles();            // Player.cs:52902 PickTile 尾 if(damage!=0) Prune
     return true;
   }
 
@@ -16650,7 +17140,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const radius = vid === 75 ? 0 : (Game.EXPLODE_RADIUS[28] ?? 0);
         const p = new GrenadeProj(px, py, vx, 0, dmg, 180, vid,
           (ex, ey, ed) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
-            radius, radius > 0, 64, this.player.equipStats.armorPen, vid));
+            radius, radius > 0, 64, this.player.equipStats.armorPen, vid,
+            ex, ey));   // SW-F1 2026-09-03 真像素爆心直穿（摇树弹 28,k=11 半盒）
         this.entities.add(p, 'projectiles');
       },
       // 弹 655 蜂巢（AI_025 :17856-17867 落地反弹/撞墙裂 + Kill :72110-72155
@@ -16732,7 +17223,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  不可砸型集 {10 祭坛/48 箱/137 陷阱/232/380/387/388/476/484} ∪ Boulders
    *  {138,484,664,665,711-716} → false；上方格 ForbidsSloping（:81480+
    *  {21,26,77,88,235,237,441,467,468,470,475,488,597}）→ false；
-   *  其余落 CanKillTile（本仓 = tileAboveProtected 上方保护门等价）。 */
+   *  其余落 CanKillTile（SW-G1 2026-09-03 = canKillTile 全式,原版尾 :82001）。 */
   private canPoundTile(x: number, y: number): boolean {
     const st = this.world.store;
     if (!st.inBounds(x, y)) return false;
@@ -16744,7 +17235,215 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const aboveSheet = y > 0 && st.get(x, y - 1) !== 0
       ? TILE_DEFS[st.get(x, y - 1)]?.vanilla?.sheet ?? -1 : -1;
     if (FORBIDS_SLOPING.has(aboveSheet)) return false;
-    return !this.tileAboveProtected(x, y);            // CanKillTile 上方保护等价
+    return this.canKillTile(x, y);   // SW-G1 2026-09-03：原版尾=CanKillTile(x,y)（:82001）全式
+  }
+
+  /** WorldGen.CanKillTile 全函数门（1457 :62716-62810；挖掘面统一消费点）。
+   *  SW-G1 2026-09-03：此前挖掘面只挂上邻保护子件（tileAboveProtected）+ 锁门单挂，
+   *  缺 wall350（魔法冰墙,仅外工具导入图可达）/ Boulders+CheckBoulderChest（:49216——
+   *  2×2 巨石锚点反推同 BoulderMech.cs:48824 公式,查上邻两格 IsAContainer/IsLockedDoor/
+   *  非困难 77/PreventsTileRemovalIfOnTopOfIt→blockDamaged）/ case 235 传送器上方
+   *  3 格扫描 / case 21·467·88 Chest.CanDestroyChest 非空拒毁。委托
+   *  entities/Mounts.ts canKillTileAt（钻头智能光标链同源 1:1 全式移植）,
+   *  ctx 与钻头链（updateDrillMountUse killTileCtx）同参：hardMode + world.chests
+   *  锚格表（chestDestroyableAt——原版 _chestsByCoords 同锚=物件左上格）。
+   *  blockDamaged 出参差异不可观测（全消费方只读返回值）；
+   *  tileAboveProtected 保留为本函数子件（breakTile 头 CheckTileBreakability==2 门
+   *  仍单独消费,非挖掘语义勿并）。 */
+  private canKillTile(x: number, y: number): boolean {
+    return canKillTileAt(this.world.store, x, y, {
+      hardMode: !!this.world.flags.hardMode,
+      chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
+    });
+  }
+
+  // ================= SW-K1 2026-09-03：割草机 4049（Player.cs:20447/:20522/:47373） =================
+
+  /** Player.MowGrassTile（Player.cs:20522-20546）——world 像素点 (px,py) 处割草：
+   *  ① 门 = CanKillTile(point, MowingTheGrass)（canKillTileMowingAt：草/神圣草恒过,
+   *     其余走全函数）；② 转换 2→477 / 109→492（mowedSheetOf,非草格 num=0 不动）；
+   *  ③ 尘 = KillTile_GetTileDustAmount(fail:true)=default 档 3 粒 × KillTile_MakeTileDust
+   *     （:68885 草/修剪草 Next(2)?2:0、:68960 神圣族 Next(2)?47:0）；④ tile.type 直写
+   *     （帧保留——477/492 与草同 auto-blend 帧制,原版同不改帧）。netMode==1 的
+     *     SendTileSquare 单机无操作。返回是否发生了转换（测试面） */
+  mowGrassTile(px: number, py: number): boolean {
+    const st = this.world.store;
+    const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+    if (!st.inBounds(tx, ty)) return false;
+    if (!this.canKillTileMowing(tx, ty)) return false;
+    const i = st.idx(tx, ty);
+    const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+    const target = mowedSheetOf(sheet);
+    if (target === 0) return false;
+    // 尘（:20533-20539 循环 num2=GetTileDustAmount(fail:true)=default 3）
+    for (let k = 0; k < 3; k++) this.mowGrassTileDust(tx, ty, sheet);
+    const newId = TILE_INTERNAL_BY_SHEET.get(target);
+    if (newId === undefined) return false;
+    st.setTile(tx, ty, newId, st.frameX[i], st.frameY[i]);
+    this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+    return true;
+  }
+
+  /** KillTile_MakeTileDust 的草族映射（WorldGen.cs:68885-68890 / :68960-68963）：
+   *  草 2/修剪草 477 → Next(2) ? 2 : 0；神圣草 109/492 → Next(2) ? 47 : 0。
+   *  NewDust(i*16, j*16, 16, 16, num)（:67xxx 尾段标准盒） */
+  private mowGrassTileDust(tx: number, ty: number, sheet: number): void {
+    const dustId = (sheet === 2 || sheet === 477) ? (Math.random() < 0.5 ? 2 : 0)
+      : (Math.random() < 0.5 ? 47 : 0);
+    this.spawnDust(tx * TILE, ty * TILE, TILE, TILE, dustId);
+  }
+
+  /** CanKillTile(context) 门（包装本函数 canKillTile 同参 ctx；见 canKillTileMowingAt） */
+  private canKillTileMowing(x: number, y: number): boolean {
+    return canKillTileMowingAt(this.world.store, x, y, {
+      hardMode: !!this.world.flags.hardMode,
+      chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
+    });
+  }
+
+  /** ItemCheck_UseLawnMower（Player.cs:47373-47379）——瞄准割草逐 tick 面：
+   *  门 = vid 4049 && IsInTileInteractionRange(tileTarget, Simple, tileBoost(0)+blockRange)
+   *  && itemAnimation>0 && ItemTimeIsZero && controlUseItem →
+   *  MowGrassTile(tileTarget.ToWorldCoordinates()) + ApplyItemTime(useTime=10)。
+   *  autoReuse 起手/续周期（ItemCheck_AutoReuseLogic :53523 releaseUseItem 强制 →
+   *  StartActualUse 音）在本仓 = mouseHeld 电平 + swing 归零拍(t≤1 保活帧)重启 */
+  private updateLawnMowerUse(heldDef: (typeof ITEM_DEFS)[number], tx: number, ty: number): void {
+    const p = this.player;
+    const inp = this.input;
+    // 起手/autoReuse 重启（:43080 use-start 门 + :53523 autoReuse）——非按住期不起手
+    if (inp.mouseHeld && (!this.swing || this.swing.t <= 1) && p.useTime === 0) {
+      this.useSwing(heldDef);
+      this.playUseSound(4049, 'throw');      // UseSound=Item23（Item.cs:48538 DefaultToLawnMower）
+    }
+    // 逐 tick 瞄准割草（:47375 门——itemAnimation>0 由 swing 在途表达）
+    if (this.swing && this.swing.t > 0 && p.useTime === 0 && inp.mouseHeld
+      && this.inTileRange(tx, ty, this.blockRange())) {
+      this.mowGrassTile(tx * TILE, ty * TILE);
+      p.useTime = 10;                        // ApplyItemTime（useTime 10,Item.cs:48539）
+    }
+  }
+
+  /** Player.MowTheLawn（Player.cs:20447-20520,调用点 :20322 HorizontalMovement 尾）——
+   *  行走割草逐 tick 面（updateSwingHits 内调,无鼠标门=松手中途动画仍走完,原版同）：
+   *  门 = miscCounter%2==0 && velocity.Y==0（着地）&& grappling[0]==-1 && itemAnimation≥1
+   *  && 坐骑非 DontHoldItems{55,56,61}；割点 = MountedCenter + (direction*38, BaseHeight/2+4)
+   *  （mount 54 Velociraptor 再 +4*dir）;割不进（非实心）再割脚下 1 格（:20516-20518）。
+   *  尘 31（草屑）+ 切割盒 CutTiles(cutExtraTiles:true) + 敌怪碰撞伤（CollideWithNPCs） */
+  private mowTheLawnTick(): void {
+    const p = this.player;
+    const swing = this.swing;
+    const st = this.world.store;
+    if (!swing || swing.t <= 0) return;
+    if (p.miscCounter % 2 !== 0 || p.vy !== 0 || p.grappling[0]) return;
+    if (p.ridingMount && (MOUNT_SETS.DontHoldItems?.[p.mount.type] ?? false)) return;
+    const dir = p.facing;
+    // MountedCenter（:20456）+ (dir*38, BaseHeight/2+4)*gravDir（BaseHeight=42→+25）
+    const mc = p.mountedCenter;
+    let mx = mc.x + dir * 38, my = mc.y + 25;
+    if (p.ridingMount && p.mount.type === 54) mx += 4 * dir;   // :20461-20463
+    // 草屑尘（:20469-20478）：动画进度三角波 tri 在 value(mx-16dir,my-4)/value2(mx-6dir,my-4)
+    //   间 lerp（y 两端等值恒 my-4）→ 位置 -4 → d31 α127 scale0.9、vy>0 反弹、速度 ×0.25
+    const num = 1 - swing.t / swing.dur;
+    const w = num * 2;
+    const tri = w < 1 ? 1 - w : w - 1;
+    const lx = (mx - dir * 16) + ((mx - dir * 6) - (mx - dir * 16)) * tri - 4;
+    const d = this.spawnDust(lx, my - 8, 0, 0, 31, 0, -0.25, 127, null, 0.9, true);
+    if (d) { if (d.vy > 0) d.vy *= -1; d.vx *= 0.25; d.vy *= 0.25; }
+    // 切割盒（:20490 CenteredRectangle(8×20) X -= dir*10 → CutTiles cutExtraTiles:true）
+    const rx = Math.trunc(mx - dir * 10) - 4, ry = Math.trunc(my) - 10;
+    this.mowCutTiles(rx, ry, 8, 20);
+    this.mowGrassTile(mx, my);
+    // 割点格非实心 → 再割其下一格（:20516-20518 SolidTile 门）
+    const stx = Math.floor(mx / TILE), sty = Math.floor(my / TILE);
+    if (!st.inBounds(stx, sty) || !st.isSolid(stx, sty)) this.mowGrassTile(mx, my + TILE);
+    // 敌怪碰撞（:20482-20487 走行盒 CollideWithNPCs(8 伤/2 击退/12 免疫/6 玩家免疫)）：
+    //   myRect = 未移位盒 Height-4/Y+2 = (mx-4, my-8, 8, 16)
+    if (p.vx * dir > 0 || p.vy > 0) this.mowCollideWithNPCs(Math.trunc(mx) - 4, Math.trunc(my) - 8, 8, 16, dir);
+  }
+
+  /** CutTiles（Player.ItemCheck_CutTiles :44002 调用链 Projectile.CutTiles 语义）
+   *  矩形版：tileCut 表 + bonusCutTiles{233}（cutExtraTiles:true 支——金网同款）
+   *  + GetTileCutIgnoreList（4049 无 Regrowth 支,唯 dontHurtNature 配饰 Nature 表） */
+  private mowCutTiles(rx: number, ry: number, rw: number, rh: number): void {
+    const st = this.world.store;
+    for (let ty = Math.floor(ry / TILE); ty <= Math.floor((ry + rh - 1) / TILE); ty++) {
+      for (let tx = Math.floor(rx / TILE); tx <= Math.floor((rx + rw - 1) / TILE); tx++) {
+        const tk = tx * 100000 + ty;
+        if (this.swingTileCutSet.has(tk)) continue;
+        const t = st.get(tx, ty);
+        if (t === 0) continue;
+        if (t === POT_TILE) {
+          this.swingTileCutSet.add(tk);
+          this.smashPot(tx, ty);
+        } else if ((TILE_CUT.has(t) || BONUS_CUT_TILES.has(t)) && !CUT_IGNORE_NATURE.has(t)) {
+          this.swingTileCutSet.add(tk);
+          this.breakTile(tx, ty);
+        }
+      }
+    }
+  }
+
+  /** Player.CollideWithNPCs（Player.cs:20549-20589）矩形版：Main.npc 扫描（friendly
+   *  全排除=只打敌怪）→ 盒相交 && (noTileCollide || CanHit 视线) → ApplyDamageToNPC
+   *  (8,2,dir,crit:false,sourceItemId 4049) + immune=12 + GiveImmuneTimeForCollisionAttack(6)
+   *  ——单次调用只受理第一个目标（break） */
+  private mowCollideWithNPCs(rx: number, ry: number, rw: number, rh: number, dir: number): void {
+    const p = this.player;
+    for (const ent of this.entities.enemies) {
+      const e = ent as import('../entities/Enemy').Enemy;
+      if (!e || e.dead || e.dontTakeDamage) continue;
+      if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
+      // CanNPCBeHitByPlayerOrPlayerProjectile + Collision.CanHit(position,w,h, npc.position,w,h)
+      if (!e.noTileCollide && !canHit(this.world.store, p.x, p.y, p.w, p.h, e.x, e.y, e.w, e.h)) continue;
+      // 击退向 = velocity.X 符号（:20573-20579 num2—— MowTheLawn 走行时 vx 即行进向）
+      const kdir = p.vx < 0 ? -1 : p.vx > 0 ? 1 : dir;
+      e.hurt(8, kdir * 2, 0, this);              // ApplyDamageToNPC（Damage 8/Knockback 2）
+      e.iframes = 12;                            // nPC.immune[whoAmI] = 12（:20584）
+      if (p.iframes < 6) p.iframes = 6;          // GiveImmuneTimeForCollisionAttack(6) 主体窗
+      break;                                     // 单次调用只受理第一个目标（:20588）
+    }
+  }
+
+  // ================= SW-K1 2026-09-03：Dirt Rod 114（Player.cs:52940/:52972/:53167） =================
+
+  /** Dirt Rod 使用链（ItemCheck_TryStartUse :53090-53112 → StartActualUse →
+   *  ItemCheck_Shoot 弹 17）。tx/ty = 光标格（vanilla screenTargetTile,本仓无反重力）。
+   *  全链：① fresh-click + 动画归零门（:43080/:43156 releaseUseItem——非 autoReuse）
+   *  ② IsValidDirtRodTarget（:53167 活格 ∈ DIRT_ROD_TARGET_SHEETS）③ CanKillTile 全函数
+   *  （:52946）④ KillTile(noItem:true)（:52975,格未清=保护族兜底拒发）⑤ StartActualUse
+   *  （useAnimation 20 + UseSound Item_8）+ ItemCheck_Shoot 首拍即射（itemTime 20 起
+   *  拍清零,ItemCheck_Shoot :47601 ApplyItemTime）+ ChangeDir（:47614 Dot 门=faceCursor）
+   *  + StartChanneling(:52311 → _dirtRodChannel 全局旗,松手/换手清=channel 语义)。
+   *  ★射程：shoot==17 支无 IsInTileInteractionRange 门（全屏可抓）——勿加。 */
+  private useDirtRod(heldDef: (typeof ITEM_DEFS)[number], tx: number, ty: number): void {
+    const p = this.player;
+    const inp = this.input;
+    const st = this.world.store;
+    if (!inp.mouseDown || this._prevMouseDown) return;    // 非 autoReuse fresh click
+    if ((this.swing && this.swing.t > 1) || p.useTime > 0) return;   // itemAnimation==0 门
+    // ② IsValidDirtRodTarget（:53167-53185:活格 + switch type∈{0,2,23,109,199,477,492}）
+    if (!st.inBounds(tx, ty) || !st.isActive(tx, ty)) return;
+    const sheet = TILE_DEFS[st.type[st.idx(tx, ty)]]?.vanilla?.sheet ?? -1;
+    if (!isDirtRodTargetSheet(sheet)) return;
+    // ③ CanKillTile 全函数（:52946-52947——保护格不可抓）
+    if (!this.canKillTile(tx, ty)) return;
+    // ④ ItemCheck_CheckCanUse_KillDirtBlock（:52972-52992）:KillTile(noItem:true) →
+    //    格已清才放行（fail 支 return false = 整支拒绝,但破坏已发生=原版同）
+    this.breakTile(tx, ty, false, true);
+    if (st.isActive(tx, ty)) return;
+    // ⑤ StartActualUse + 首拍 ItemCheck_Shoot
+    this.useSwing(heldDef);                                // useStyle 1 / useAnimation 20
+    this.playUseSound(114, 'throw');                       // UseSound=Item_8（Item.cs:2750）
+    p.useTime = 20;                                        // ApplyItemTime（useTime 20,:47601）
+    this.faceCursor(tx, ty);                               // ItemCheck_Shoot ChangeDir Dot 门
+    this._dirtRodChannel = true;                           // StartChanneling(sItem)（:52311）
+    // shootSpeed 缺省 0（Item.cs case 114 无该行）——channel 期首拍即被跟鼠标式覆写
+    this.entities.add(new DirtBallProj(p.cx, p.cy - 4, 0, 0,
+      () => {
+        if (!this._dirtRodChannel || !inp.mouseHeld || p.dead) return null;
+        const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        return { x: wx, y: wy };
+      }, VI(2)), 'projectiles');
   }
 
   /** CanKillTile tile-above 保护族（CanKillTile :62276-62315 挖掘门 +
@@ -17095,7 +17794,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(ax695 + dx, ay695 + dy, 0);
       const key695 = VANILLA_ITEM_KEY_BY_ID[crimson695 ? 5468 : 5467];
       if (key695) this.spawnDrop(ax695 * TILE + 24, ay695 * TILE + 8, key695, 1, 0, -2);
-      this.killTileBreakSound(type, x, y);
+      // 音分档（KillTile_PlaySounds :67045-67047：(26||695) && frameX>=54 → PlaySound(4)）
+      if (crimson695) this.sfx.playWavFile('NPC_Killed_1', 1, x * TILE + 24, y * TILE + 16);
+      else this.killTileBreakSound(type, x, y);
       return;
     }
     // 瓦罐：统一走 smashPot（帧解码 2×2 整罐清 + loot,★B-1 见 smashPotInner 注）。
@@ -18819,9 +19520,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const inner = (!TILE_CUT.has(t) || sh === 484 || sh === 711)
         && !(sh >= 373 && sh <= 375) && sh !== 461 && sh !== 709;
       if (!(inner ? (sh >= 0 && TILE_BREAK_WHEN_PLACING.has(t)) : true)) return false;
-      // IsBlockedByLava（:41809-41824）：227 非实心 + tileLavaDeath[227]=true
-      // （Main.cs:8302）→ CheckLiquidPlacement 恒否 ⇒ 目标格岩浆拒置
-      if (st.liquid[i0] > 0 && st.liquidType[i0] === LIQUID_TYPE.LAVA) return false;
+      // ★F2（十三批,2026-09-03 臂位倒置纠偏）：IsBlockedByLava 是原式第一臂
+      //  `!tile.active() && !IsBlockedByLava(...)` 的专属门（Player.cs:40058）——
+      //  只约束【非活性】目标格;活性格走 IsReplaceableBlock 臂（不看液体）。
+      //  岩浆门原写在 targetActive 支内=双向倒置（非活性岩浆格漏放 + 活性格过拒）,
+      //  现移至 !targetActive 支。IsBlockedByLava（:41809-41824）：227 非实心 +
+      //  tileLavaDeath[227]=true（Main.cs:8302）→ CheckLiquidPlacement 恒否 ⇒ 拒置
+    } else if (st.liquid[i0] > 0 && st.liquidType[i0] === LIQUID_TYPE.LAVA) {
+      return false;
     }
     // PlaceDye 环境门预读（界外邻格=vanilla null 早退 ⇒ 恒失败,与 PlantRules 约定一致）
     if (!st.inBounds(tx, ty + 1) || !st.inBounds(tx, ty - 1)) return false;
@@ -19097,6 +19803,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.inTileRange(tx, ty, this.blockRange())) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
+    // ★bannerStyleDomain（⑤巡检，2026-09-03 十三批）：旗 91 的实例 placeStyle 载的是
+    //  【旗种 id】（BannerSystem 域 1-292，击杀掉落 :31786 spawnDrop 第 7 参注入），
+    //  而 tile 91 帧列消费的是原版【style】域（SceneMetrics.cs:419-441 解码
+    //  S-21=旗 id；Item.cs:19231 `placeStyle = 22 + type - 1615` 同域）——在此逆写
+    //  S = bannerStyleOf(banner)（+21，311/312 两列被非敌旗档 5497/5498 占用须跳过）。
+    //  类级 placeStyle（装饰旗 337-340 等与破坏回收旗，items.ts 类级回填）本就是
+    //  style 域，不转换；实例位缺省时直接落类级值 = 原版直域语义。
+    if (def?.vanilla?.sheet === 91 && heldInst?.placeStyle !== undefined) {
+      itemDef = { ...itemDef, placeStyle: bannerStyleOf(heldInst.placeStyle) };
+    }
     // liqGateHerb（★M-3c）：药草 legacy 置放路径岩浆门。定谳（亲读 1457）：种子物品
     //  createTile=82 被 CustomCanPlace 显式排除（Player.cs:40083 `tileToCreate != 82`）
     //  → 走 legacy 链,其液体门不在 TileObject.CanPlace/LiquidPlace,而在
@@ -19149,6 +19865,45 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if ((def.w ?? 1) !== sp.w || (def.h ?? 1) !== sp.h) return null;
       return sp;
     })();
+    // liqGateLegacy（★备1，2026-09-03 十三批）：legacy/1×1 置放路径【目标格】液体门。
+    //  定谳（1457 全量亲读）：PlaceThing_Tiles_IsBlockedByLava（Player.cs:41809-41824）
+    //  全仓【唯一】消费位 = PlaceThing_Tiles 头门 :40058 的 `!tile.active() &&
+    //  !IsBlockedByLava(...)` 臂——该门对【全体物品】生效（非 legacy 专属），只判
+    //  【点击目标格】且仅在目标格非 active 时（active 格走 IsReplaceableBlock 臂,
+    //  岩浆不再设门）。语义（:41811-41822）：目标格 liquid>0 且 lava →
+    //  ① Main.tileSolid[createTile] 短路恒拒（:41815-41817）——注意 tileSolid[19]=true
+    //    （Main.cs:8032,平台亦"实心"）而 tileSolid[4]=false（Main.cs:8005 火炬非实心）;
+    //  ② 非固体 → TileObjectData.CheckLiquidPlacement（TileObjectData.cs:5040-5043）
+    //    = GetTileData(type,style)?.LiquidPlace(:1853-1907 per-style 档,本仓
+    //    liquidSpecOf) ?? 静态 LiquidPlace(:5045-5062)——无 TileObjectData 的 legacy 件
+    //    岩浆拒 iff Main.tileLavaDeath[type]（本仓同源表 LAVA_DEATH_SHEETS；
+    //    水/蜜/微光支在本消费位不可达:IsBlockedByLava 只在 lava 时才调它）。
+    //  legacy 尾段 AssortedThings（Player.cs:41356-41470）与 PlaceTile 全程无液体门
+    //  → 此门即 legacy 件唯一液体门。本仓覆盖面：anchorRec null 的 legacy 件
+    //  （土/石/平台等）与 1×1 anchorRec 件（validateAnchors 仅 anchorCovered=多格
+    //  才跑,1×1 原缺门）；多格 anchorRec 件由 validateAnchors 逐格两维门承担（勿重复）；
+    //  门 10/11（专用双锚分支）、药草 82-84（liqGateHerb 上块同语义）、火把 4（专用
+    //  分支自带液体门,且水炬 8/11/17 LavaPlacement=Allowed TileObjectData.cs:4612-4613）、
+    //  染料 227（tryDyePlantPlace 专用路由）各自有门=豁免。tileSolid 代理用
+    //  def.solid||def.platform（平台 19 本仓 solid=false 而 tileSolid=true）。
+    {
+      const shL = def?.vanilla?.sheet ?? -1;
+      const iL = st.idx(tx, ty);
+      const multiAnchor = anchorRec !== null && (anchorRec.w > 1 || anchorRec.h > 1);
+      const gated = shL !== 10 && shL !== 11 && shL !== 82 && shL !== 83 && shL !== 84
+        && shL !== 4 && shL !== 227 && !multiAnchor;
+      if (gated && !st.isActive(tx, ty) && st.inBounds(tx, ty)
+        && st.liquid[iL] > 0 && st.liquidType[iL] === LIQUID_TYPE.LAVA) {
+        if (def.solid || def.platform) return;   // tileSolid 短路（:41815-41817,含平台 19）
+        const specL = liquidSpecOf(shL);
+        if (specL) {
+          const liqL = specL.liqStyles?.[String(itemDef.placeStyle ?? 0)] ?? specL.liq;
+          if (!liquidCellOk(st, tx, ty, liqL)) return;   // per-style LiquidPlace（:1853-1907）
+        } else if (LAVA_DEATH_SHEETS.has(shL)) {
+          return;   // 无 TileObjectData → 静态 LiquidPlace（:5045-5062）tileLavaDeath 拒
+        }            // 非死亡表 legacy 件放行（岩浆里可放=原版静态回落语义）
+      }
+    }
     if (anchorRec && anchorRec.w > 1 || anchorRec && anchorRec.h > 1) {
       // stylePlumb（M-3b）：placeStyle → TileObjectData style → validateAnchors 子样式
       // 液体档（heldInst 实例级覆盖已在 :18666 合并进 itemDef）
@@ -19164,6 +19919,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const sheet = def.vanilla?.sheet ?? -1;
       const bw = def.w ?? 1, bh = def.h ?? 1;
       if (sheet === 10 || sheet === 11) {
+        // liqGateDoor·层1（★备3，2026-09-03 十三批定谳）：原版 :40058 头门对门同样
+        //  生效——tileSolid[10]=true（Main.cs:8027 关态门"实心"）→ IsBlockedByLava
+        //  的 tileSolid 短路（:41815-41817）在【点击格】先行拒置，per-style
+        //  LiquidPlace（黑曜石 19/48 LavaPlacement=Allowed TileObjectData.cs:2245-2247）
+        //  轮不到它 → 点岩浆格放关态门=恒拒（比逐格门严一格）；开态门 tileSolid[11]
+        //  =false（Main.cs:8030）→ CheckLiquidPlacement per-style 即逐格门同款,
+        //  下方 1×3 全格循环已含点击格=无需另设。仅 !tile.active() 臂（active 格走
+        //  IsReplaceableBlock 臂不过此门,Player.cs:40058）。
+        if (sheet === 10 && !st.isActive(tx, ty) && st.inBounds(tx, ty)
+          && st.liquid[st.idx(tx, ty)] > 0
+          && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.LAVA) return;
         // 门：候选锚 = 点击格解释为中格/顶格/底格，取首个"净空+锚定"达标者
         // ★门双锚全满足制（TileObjectData addTile(10)：AnchorTop+AnchorBottom
         //  SolidTile×1；TileObject.CanPlace 尾 num4==1f 全满足才可放——平地裸放
@@ -19205,7 +19971,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         for (const cy of cands) {
           let free = true;
           for (let dy2 = 0; dy2 < bh; dy2++) {
-            if (st.isActive(tx, cy + dy2)) { free = false; break; }
+            // ★F4（十三批,2026-09-03）：占用判定与通用清格相/validateAnchors 同口径
+            // （CanPlace TileObject.cs:357 tileCut∪BreakableWhenPlacing 活动格不阻挡,
+            // 484/654 显式排除仍阻挡）——曾严格空格 = 门洞底格高草（tileCut）静默无
+            // 动作,原版 CanPlace 放行 + Place 清格相清除。豁免【只】进本占用判定,
+            // 不进 topAnchorOK/botAnchorOK（tileCut 格不可作锚,实心/平台判据不动）;
+            // 清格复用下游通用放置清格循环（勿在此重复清）,支撑校验先于清格不变式保持
+            if (st.isActive(tx, cy + dy2) && !placeObstructionClearable(
+              st.get(tx, cy + dy2), TILE_DEFS[st.get(tx, cy + dy2)]?.vanilla?.sheet ?? -1,
+            )) { free = false; break; }
           }
           if (!free) continue;
           if (!this.hasSupport(tx, cy, bw, bh, true, false)) continue;
@@ -19274,11 +20048,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
     // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
+    // ★ropeLavaGate（2026-09-03 十四批）：下延逐格岩浆拒置（遇岩浆截断）。
+    //  定谳（1457 亲读）：tileLavaDeath[213]=true（Main.cs:8292）+ PlaceThing 头门
+    //  （Player.cs:40058 → IsBlockedByLava :41809-41824）——tile 213 全仓无 TileObjectData
+    //  （TileObjectData.cs 唯一 213 命中=Beam AnchorAlternateTiles :2481）→ 静态
+    //  LiquidPlace 回落（TileObjectData.cs:5045-5063,:5056 岩浆→tileLavaDeath 拒）=
+    //  点击格岩浆本就不可置（liqGateLegacy :19525 已拦）;本分支此前绕过的是【下延段】
+    //  ——干格点击向下伸进岩浆格照写。粒度=遇岩浆【break 截断,不写该格】：原版续放
+    //  retarget 门 CheckRopeUsability（Player.cs:41826-41858,:41835
+    //  `(flag || !Main.tile[num4, num3 + 1].lava())`,flag=createTile==214 蛛丝绳）
+    //  同样在岩浆前止步 → 绳列永不伸入岩浆（岩浆格绳若经绳圈弹 PlaceTile 链写入,
+    //  亦被液体面死亡检查清算——Liquid.cs:1199-1216 CheckLavaDeath→KillTile）。
+    //  水格放行：tileWaterDeath[213] 全表未置（Main.cs:8200-8206/:8448/:9643/:9647
+    //  仅 215/4/51/697/93/98/552/405/646/372）→ 绳水中共存=原版语义（PlaceTile 液体
+    //  门排除表 WorldGen.cs:59501-59506 无 213;写入不清液体,setTile 同口径）。
     if (viIdFromKey(itemDef.key) === 965) {
       const ropeTile = TILE_BY_KEY['v_213_rope']!;
       let placed = 0;
       for (let y = ty; y < ty + 10; y++) {
         if (!st.inBounds(tx, y) || st.isActive(tx, y)) break;
+        if (st.liquid[st.idx(tx, y)] > 0 && st.liquidType[st.idx(tx, y)] === LIQUID_TYPE.LAVA) break;   // ropeLavaGate
         st.setTile(tx, y, ropeTile, 0, 0);
         placed++;
       }
@@ -19304,8 +20093,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let hasObstacle = false;
       if (st.isActive(tx, ty)) {
         const wtT = st.get(tx, ty);
-        const shT = TILE_DEFS[wtT]?.vanilla?.sheet ?? -1;
-        if (!(TILE_CUT.has(wtT) && shT !== 484 && shT !== 654) && !TILE_BREAK_WHEN_PLACING.has(wtT)) return;
+        if (!placeObstructionClearable(wtT, TILE_DEFS[wtT]?.vanilla?.sheet ?? -1)) return;
         hasObstacle = true;
       }
       const frame = torchAnchorFrame(st, tx, ty);
@@ -19409,8 +20197,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  此扫越出原版杀伤半径（藤链/蛛网被多杀），2026-09-01 撤除
           //  （仪具 scripts/_pile-place.mjs 含 webSurvivor/weedOrphan 回归）。
           const wt = st.get(px, py);
-          const shWt = TILE_DEFS[wt]?.vanilla?.sheet ?? -1;
-          if (!(TILE_CUT.has(wt) && shWt !== 484 && shWt !== 654) && !TILE_BREAK_WHEN_PLACING.has(wt)) return;
+          if (!placeObstructionClearable(wt, TILE_DEFS[wt]?.vanilla?.sheet ?? -1)) return;
           this.breakTile(px, py, true);
         }
       }
@@ -19470,28 +20257,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           } else {
             st.setTile(px, py, tileId, dx2, dy2);
           }
-          // 水被方块挤出：水量转移到相邻可容纳的格子（上/左/右），
-          // 而不是被方块吞掉消失。封闭无处可去时才消失
-          const pi = st.idx(px, py);
-          const liq = st.liquid[pi];
-          if (liq > 0) {
-            const ltype = st.liquidType[pi];
-            st.setLiquid(px, py, 0, 0);
-            let remaining = liq;
-            for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0]] as const) {
-              if (remaining <= 0) break;
-              const nx = px + ox, ny = py + oy;
-              if (!st.inBounds(nx, ny)) continue;
-              const nd = TILE_DEFS[st.type[st.idx(nx, ny)]];
-              if (nd && nd.solid) continue;
-              const ni = st.idx(nx, ny);
-              const cap = 255 - st.liquid[ni];
-              if (cap <= 0) continue;
-              const t = Math.min(remaining, cap);
-              st.setLiquid(nx, ny, st.liquid[ni] + t, ltype || st.liquidType[ni] || 1);
-              remaining -= t;
-            }
-          }
+          // ★液体零写入（2026-09-03 十四批备A 清偿=原版最终态）：放置写面【全程不动
+          //  液体】——PlaceTile 只 Clear(Tile|TilePaint|Slope)（WorldGen.cs:59966）,
+          //  TileObject.Place 只写 active/frame/type（TileObject.cs:100-106）。固体件
+          //  植入液格后液体数据【驻留本格】（旧「水被方块挤出/转移相邻」系本仓自创
+          //  守恒口径,2026-09-03 整体移除,固体/非固体一致;此前非固体面已由
+          //  dispSolidGate 批放开）。驻留面由液体域承载=原版同构,证据链：
+          //  ①在列液体 → LiquidSim.update blocksLiquid→kill=999（Liquid.cs:459-465
+          //  kill :463）→ 出列清扫 DelWater（Liquid.cs:1119-1128）——DelWater 对
+          //  amt≥20 固体格【只出列不清量】（Liquid.cs:1481-1610 三分支均被固体格
+          //  短路）,量留格内;本仓 delWater 1:1（LiquidSim.ts:1502-1560）。
+          //  ②沉降液体不在列=静驻（原版同态）。
+          //  ③AddWater 固体守卫（Liquid.cs:1173 tileSolid&&!tileSolidTop→不入列,
+          //  本仓 :755-758 同谓词）防固体格被唤醒回流。
+          //  ④拆除时 setTile(0) → LiquidSim onTileChanged 3×3 addWater（=原版
+          //  KillTile 尾 SquareTileFrame→TileFrame→AddWater,WorldGen.cs:82621-82624）
+          //  唤醒回流=逐 tick 流入,非瞬满。
+          //  ⑤渲染：实心格液体不绘（LiquidRenderer.cs:255 HasVisibleLiquid&&
+          //  (!IsSolid||IsHalfBrick),本仓 VanillaLiquidRenderer.ts:473 同谓词）。
+          //  探针锚：scripts/_liquid-place.mjs ⑭a 驻留/⑭b 挖块回流。
         }
       }
     } finally {
@@ -21978,18 +22762,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** 爆炸不可炸 tile 表（Projectile.CanExploteTile cs:75764 1:1）：
+  /** 爆炸不可炸 tile 表（Projectile.CanExplodeTile cs:80383 1:1）：
    *  地牢砖族 tileDungeon{41,43,44,677-679}(Main.cs:7941) + 基础宝箱 BasicChest{21,467}
    *  (TileID.cs:315) + switch 黑名单{26 祭坛,88 柜子,121/122 史莱姆块?,150 蛛网? ,
    *  211 血月砖?,226 蜥蜴砖,237 蜥蜴祭坛,248-250 尖刺?,346/470/475/504 陷阱族,685/686} */
   private static readonly EXPLODE_NEVER = new Set([41, 43, 44, 677, 678, 679, 21, 467,
     26, 88, 121, 122, 150, 211, 226, 237, 248, 249, 250, 346, 470, 475, 504, 685, 686]);
-  /** 困难模式矿石（仅 SuperBomb 1086/SuperStickyBomb 1087 可炸——1.4.5 新弹未引入
-   *  恒 false；★scarab 773 原版即不带此旗:80067）。六件全表（CanExplodeTile :80411
+  /** 困难模式矿石：仅 SuperBomb 1086/SuperStickyBomb 1087 爆炸可炸（弹源=物品
+   *  5594/5595 Power Bomb/Sticky Power Bomb，Item.cs:44024-44028 DefaultToBomb 共享
+   *  算式；★SW-E1 2026-09-03 两弹已接线=本表首个消费点,explodeAt 按弹型 1086/1087
+   *  传旗——原 Kill 局部旗 :79052-79055）；★scarab
+   *  773 原版即不带此旗(:80067)。六件全表（CanExplodeTile :80413-80419
    *  case 107/108/111/221/222/223）——review 补 222 山铜（altar 映射 mythril alt,
    *  见 smashAltar TIER_ORES），曾漏致炸弹可炸 222 独苗 */
   private static readonly EXPLODE_HM_ORE = new Set([107, 108, 111, 221, 222, 223]);
-  /** 爆炸半径表（Projectile.cs:75262）：炸弹族=4、炸药棍族=7、放置炸药 108=10；
+  /** 爆炸半径表（Projectile.Kill_ExplodeTiles cs:78995-79065）：炸弹族=4、炸药棍族=7、放置炸药 108=10；
    *  表外（手雷 30 等）= 不破坏地形（Kill 判定表 :75260 之外） */
   static readonly EXPLODE_RADIUS: Record<number, number> = {
     28: 4, 37: 4, 516: 4, 519: 4, 29: 7, 470: 7, 637: 7, 108: 10,
@@ -22000,16 +22787,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     142: 5, 143: 5, 144: 5, 341: 5, 718: 5,
     716: 3, 780: 3, 781: 3, 782: 3, 804: 3, 783: 3, 863: 3,
     796: 7, 797: 7, 798: 7, 809: 7,
-    // 1086/1087 SuperBomb/SuperStickyBomb r9+可炸困难矿——1.4.5 新弹本仓未引入（备案）；
+    // SW-E1 2026-09-03：超级炸弹族 r9（Kill :79052-79055 `num6=9; explodeHardmodeOres
+    // =true`）——1.4.5 件 5594/5595 已接线（grenade 分派→explodeAt 传 HM 旗）,"未引入"
+    // 备案注作废;困矿旗消费点=canExplodeTile EXPLODE_HM_ORE（:80413-80419）
+    1086: 9, 1087: 9,
     // SW-B1 收口定谳（102 Prime 炸弹=有弹无爆,备案）：弹体已实现——Prime 炮臂
     // bossAI.ts:1829/:1841 经 shoot()→Arrow(hostile,dmg 0,grav 0 直飞) 发射(=原版
     // NPC.cs:28844/:28924 NewProjectile(102,伤 0);贴图加算面 Arrow.ts:523/:2732);但原版
     // aiStyle16 弹道(P.cs:1898-1905 22×22 重力+引信)与 Kill 爆(ExplodeTiles 闸门
     // P.cs:79027 `102&&getGoodWorld&&!tenthAnniversaryWorld`,r4=:79031-79034)未建模,
-    // 且本表在 Arrow 载体路径零消费(消费面仅 GrenadeProj 发射器支:12237/Celeb2Rocket:
-    // 12062/玩家武器:13785/弹 28:16573)→裸加 102:4=死数据。实装时 Kill 爆走 explodeAt:
+    // 且本表在 Arrow 载体路径零消费(消费面仅 GrenadeProj 发射器支/Celeb2Rocket/
+    // 玩家武器支/摇树弹 28 四处,行号随漂移不钉)→裸加 102:4=死数据。实装时 Kill 爆走 explodeAt:
     // FTW(`!!world.seedFlags?.getGoodWorld && !world.seedFlags?.tenthAnniversary`)半径 4
     // 毁地形(canExplodeTile 直传 getGoodWorld),非 FTW 保持不毁地形。
+  };
+  // SW-J1 2026-09-03：手雷族裂砖专破表（Kill_ExplodeTiles :79001-79033 →
+  //  ExplodeCrackedTiles :80505-80525）——30 手雷/397 粘性手雷/517（item 3116）/
+  //  588（item 3548）Kill 时以 **base.Center** 为爆心（非 Kill 终态 position,
+  //  halfBox=0）、r4 开圆逐格 KillTile,只杀 TileID.Sets.CrackedBricks（481-483）、
+  //  普通地形不破（ExplodeTiles 闸门表 :79027-79030 无手雷族,EXPLODE_RADIUS 表外
+  //  =er0 已承载）。本仓裂砖破坏面=breakCrackedBrick（KillTile 481-483 分支全语义）
+  static readonly EXPLODE_CRACKED_PROJ = new Set([30, 397, 517, 588]);
+  /** 投掷炸弹引信终值表（NewProjectile 内联 per-Type 表 Projectile.cs:10971/:10987/
+   *  :10991——【不是】SetDefaults,炸弹族 SetDefaults 无 timeLeft 行）：炸药棍族
+   *  {29,470,637}=300（:10991）、超级炸弹 {1086,1087}=300（:10987,SW-E1 2026-09-03
+   *  接线）、余 aiStyle16 投掷炸弹 180（:10971,含 28/37/516/519/30/397/517）。
+   *  表外键回落 180（原版缺省 timeLeft=180）。SW-E1 由 grenade 分派内联三元
+   *  提表=回归测试可达面 */
+  static readonly EXPLODE_FUSE: Record<number, number> = {
+    29: 300, 470: 300, 637: 300, 1086: 300, 1087: 300,
   };
   /** 液体/土制炸弹爆炸载荷（Projectile.Kill :74007-74244 → Kill_DirtAndFluid-
    *  Projectiles_RunDelegateMethodPushUpForHalfBricks :67221-67239 的 size+delegate 对）：
@@ -22040,15 +22846,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** CanExploteTile 纯函数版（测试用）：规则见 explodeAt 注释 */
   static canExplodeTile(
     st: World['store'], x: number, y: number, hardMode: boolean, golemDown: boolean, lavaLine: number,
-    getGoodWorld = false,
+    getGoodWorld = false, explodeHardmodeOres = false,
   ): boolean {
     const t = st.get(x, y);
     const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
     if (Game.EXPLODE_NEVER.has(sheet)) return false;
     const ii = st.idx(x, y);
     if (st.wall[ii] === 350) return false;
-    if (getGoodWorld && (sheet === 48 || sheet === 232)) return false;   // 尖刺/木尖刺 FTW 免爆(:80443-80446)
-    if (Game.EXPLODE_HM_ORE.has(sheet)) return false;
+    if (getGoodWorld && (sheet === 48 || sheet === 232)) return false;   // 尖刺/木尖刺 FTW 免爆(:80433-80439)
+    if (Game.EXPLODE_HM_ORE.has(sheet) && !explodeHardmodeOres) return false; // SuperBomb 1086/1087 旗（:80413-80419;SW-E1 2026-09-03 起由 explodeAt 按弹型消费）
     if ((sheet === 37 || sheet === 58) && !hardMode) return false;
     if (sheet === 77 && !hardMode && y >= lavaLine) return false;
     if (sheet === 137 && !golemDown) {
@@ -22056,6 +22862,46 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (row >= 1 && row <= 4) return false; // 神庙门行（:75805 (uint)(num-1)<=3）
     }
     return true;
+  }
+
+  // SW-F1 2026-09-03：爆炸圆几何纯函数（ExplodeTiles :80454-80503 / ShouldWallExplode
+  // :80358-80375 / ExplodeCrackedTiles :80505-80525 三处同式）——★compareSpot=像素爆心
+  // （弹盒左上角 position 或 Center,见 explosionCompareHalfBoxPx）,距离对【格原点】取：
+  // `|(i - px/16)|` → sqrt(dx²+dy²) < radius **严格开圆**（:80461-80463,恰等于 radius 的
+  // 边界格被排除）;循环界=(int) 截断（JS Math.trunc,负值向零——min 侧随后被 0 钳掉,
+  // 结果与 floor+clamp 同）±radius 含端（:79073-79096 num9-12,上界钳 maxTilesX=越界格
+  // null 跳过,此处同钳、消费方 inBounds 兜底）。坐标 ≤2^24/16 时 C# float 与 JS double
+  // 逐位同判（dx/dy 均为 1/16 格点,平方和距边界 r² ≥ 1/256 >> float32 ULP）。
+  static explodeDiscTiles(
+    px: number, py: number, radius: number, maxTilesX = 1e9, maxTilesY = 1e9,
+  ): Array<[number, number]> {
+    const minI = Math.max(0, Math.trunc(px / TILE - radius));
+    const maxI = Math.min(maxTilesX, Math.trunc(px / TILE + radius));
+    const minJ = Math.max(0, Math.trunc(py / TILE - radius));
+    const maxJ = Math.min(maxTilesY, Math.trunc(py / TILE + radius));
+    const out: Array<[number, number]> = [];
+    for (let i = minI; i <= maxI; i++) {
+      for (let j = minJ; j <= maxJ; j++) {
+        const a = Math.abs(i - px / TILE), b = Math.abs(j - py / TILE);
+        if (Math.sqrt(a * a + b * b) < radius) out.push([i, j]);
+      }
+    }
+    return out;
+  }
+  /** 爆心锚偏移（px）：Kill_ExplodeTiles :79068-79072 `center2 = position`（弹盒左上角）,
+   *  仅 716/718/773/1086/1087 用 base.Center。该调用在 Kill 尾段——此前
+   *  Kill_Bombs_DoUsualKillCode 已把弹盒 Resize 到终态（Resize 保中心 →
+   *  position = Center - 终态半边）：22 盒（:80070-80073 炸弹族/:79827-79842 火箭I-II
+   *  /:79719/:79759）→ 11;10 盒（:80178-80188 炸药棍/108/TNT桶 1002、:79881-79948
+   *  火箭III-IV 尘盒 80 后回 10、:79630-79717 迷你核弹）→ 5。表外回落 11（投掷炸弹
+   *  /火箭I-II 终态众数）。★实体伤害盒另一码事：Damage/PVE 恒 Center 系盒（Resize
+   *  保中心）→ explodeAt 的伤害锚仍用弹心像素,不随此偏移。 */
+  private static readonly EXPLODE_HALF_BOX_10 = new Set([29, 470, 637, 108, 1002,
+    139, 140, 141, 142, 143, 144, 340, 341, 793, 794, 795, 796, 797, 798, 808, 809]);
+  static explosionCompareHalfBoxPx(projId: number): number {
+    if (projId === 716 || projId === 718 || projId === 773 || projId === 1086 || projId === 1087) return 0;
+    if (Game.EXPLODE_HALF_BOX_10.has(projId)) return 5;
+    return 11;
   }
 
   /** 液体/土制炸弹爆炸载荷 1:1（Projectile.Kill :74007-74244 →
@@ -22158,8 +23004,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** hurtBox:实体伤害盒半宽(Projectile.Kill 各族 Resize 盒的半边)。
    *  原版与地形破坏半径【无关】:炸弹/手雷族(:74885)Resize(22,22)=11px;
-   *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆) */
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0) {
+   *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆)。
+   *  SW-F1 2026-09-03：comparePx/comparePy=弹体真像素爆心（GrenadeProj onExplode 回调
+   *  的弹心 ex/ey 直穿,不再 floor 成格）——地形圆几何 1:1 见 explodeDiscTiles 注
+   *  （亚格圆心+严格开圆+trunc 循环界）;缺省回落整格中心（tx*16+8=原版
+   *  Wiring.cs:2042/WorldGen.cs:49178 电路/链爆/TNT 桶弹 108/1002 的出生弹心,
+   *  纯格调用点兼容旧行）。实体伤害/尘/音锚恒用弹心像素（原版 Resize 保中心）。 */
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0, comparePx?: number, comparePy?: number) {
     // 行为录制：爆炸汇总一条（盘内逐格破坏走 breakTile 各自记录，此处锚定
     // 风暴起点/半径——DebugReport 侧按 t 邻近聚合即可还原爆炸半径）
     this.recLog('bomb', { x: tx, y: ty, r: radius, dmg: damage, destroyTiles, projId });
@@ -22167,47 +23018,49 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
     const golemDown = !!this.world.flags['downed_245'];
+    // SW-E1 2026-09-03：困矿旗（Kill :79052-79055 局部 `explodeHardmodeOres=true`
+    // 仅 1086/1087 两型）——CanExplodeTile :80413-80419 case 107/108/111/221/222/223
+    // 消费。这是该旗在本仓的首个消费点（此前形参恒缺省 false）
+    const explodeHardmodeOres = projId === 1086 || projId === 1087;
     const canExplode = (x: number, y: number): boolean =>
       Game.canExplodeTile(st, x, y, hardMode, golemDown, this.world.lavaLine,
-        !!this.world.seedFlags?.getGoodWorld);
+        !!this.world.seedFlags?.getGoodWorld, explodeHardmodeOres);
+    // SW-F1 2026-09-03：弹心像素（缺省=格中心）→ 地形圆 compareSpot = position =
+    // 弹心 − Kill 终态半盒（:79068-79072,偏移表见 explosionCompareHalfBoxPx）
+    const cx = comparePx ?? tx * TILE + 8, cy = comparePy ?? ty * TILE + 8;
+    const halfK = Game.explosionCompareHalfBoxPx(projId);
+    const disc = R > 0 ? Game.explodeDiscTiles(cx - halfK, cy - halfK, R, st.w, st.h) : [];
     // 半径内被炸的格：多格 framed 物体按整件清除（锚点邻域扫描，同 breakTile 语义），
     // 防半件残留可重复破坏；炸药(141/142)收集后链式引爆（原版连爆语义，上限 32 防递归）
     const chain: Array<[number, number]> = [];
     if (destroyTiles && R > 0) {
-      // ShouldWallExplode(:75739)：盘内任一格无墙 → 墙也可炸
+      // ShouldWallExplode(:79095→:80358-80375)：同 compareSpot/同循环界/同开圆,
+      // 盘内任一格无墙 → 墙也可炸
       let wallSplode = false;
-      for (let dx = -R; dx <= R && !wallSplode; dx++) {
-        for (let dy = -R; dy <= R; dy++) {
-          if (dx * dx + dy * dy > R * R) continue;
-          const x = tx + dx, y = ty + dy;
-          if (st.inBounds(x, y) && st.wall[st.idx(x, y)] === 0) { wallSplode = true; break; }
-        }
+      for (const [x, y] of disc) {
+        if (!st.inBounds(x, y)) continue;
+        if (st.wall[st.idx(x, y)] === 0) { wallSplode = true; break; }
       }
-      for (let dx = -R; dx <= R; dx++) {
-        for (let dy = -R; dy <= R; dy++) {
-          if (dx * dx + dy * dy > R * R) continue;
-          const x = tx + dx, y = ty + dy;
-          if (!st.inBounds(x, y)) continue;
-          const t = st.get(x, y);
-          if (t !== 0) {
-            if (!canExplode(x, y)) continue;
-            if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
-            this.breakTile(x, y); // KillTile 全语义（掉落/树/罐/幼虫/蜂巢…）
-          }
-          if (wallSplode) {
-            // 每 destroyed 格 3×3 清墙（:75852-75867，墙≠350）
-            for (let wx = x - 1; wx <= x + 1; wx++) {
-              for (let wy = y - 1; wy <= y + 1; wy++) {
-                if (!st.inBounds(wx, wy)) continue;
-                const wi = st.idx(wx, wy);
-                if (st.wall[wi] > 0 && st.wall[wi] !== 350) st.setWallSilent(wx, wy, 0);
-              }
+      for (const [x, y] of disc) {
+        if (!st.inBounds(x, y)) continue;
+        const t = st.get(x, y);
+        if (t !== 0) {
+          if (!canExplode(x, y)) continue;
+          if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
+          this.breakTile(x, y); // KillTile 全语义（掉落/树/罐/幼虫/蜂巢…）
+        }
+        if (wallSplode) {
+          // 每 destroyed 格 3×3 清墙（:75852-75867，墙≠350）
+          for (let wx = x - 1; wx <= x + 1; wx++) {
+            for (let wy = y - 1; wy <= y + 1; wy++) {
+              if (!st.inBounds(wx, wy)) continue;
+              const wi = st.idx(wx, wy);
+              if (st.wall[wi] > 0 && st.wall[wi] !== 350) st.setWallSilent(wx, wy, 0);
             }
           }
         }
       }
     }
-    const cx = tx * TILE + 8, cy = ty * TILE + 8;
     // 原版语义 = Resize(hurtBox×2) 盒与实体 Hitbox 相交(中心距 < hurtBox+半宽)。
     // ★曾用 R*TILE+16 距离圆:炸弹 80px(原版 11px,近 4 格外的怪也被炸)——半径混用
     const hb = hurtBox ?? R * TILE;
@@ -22219,6 +23072,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
         let hurt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
+        // SW-J1 2026-09-03：TNT 桶 1002 对 NPC 半伤（Damage_PVE_Inner :12971
+        //  `if (type == 1002) dmg /= 2`——DamageVar 后/旗乘区前;C# int/=2 正数截断）
+        if (projId === 1002) hurt = Math.floor(hurt / 2);
         // ★F1：Damage_PVE_Inner 面（爆炸 Resize 盒二次结算同走 Damage 链）→ 攻端旗乘区
         hurt = applyBannerDamageDealt(this, en, hurt);
         en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen, false, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
@@ -22236,7 +23092,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (c.dead || !c.hurt) continue;
       if (Math.abs((c.cx ?? cx) - cx) < hb + (cent.w >> 1)
         && Math.abs((c.cy ?? cy) - cy) < hb + (cent.h >> 1)) {
-        const churt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
+        const churt0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
+        const churt = projId === 1002 ? Math.floor(churt0 / 2) : churt0;   // SW-J1 2026-09-03:1002 对 NPC 半伤（:12971,小动物同在 Damage_PVE 全表）
         // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成;音/飘值=单点)
         c.hurt(churt, cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
       }
@@ -22304,14 +23161,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   压暗且零发光,黑暗洞穴爆炸近黑(2026-08-19 用户报"没火光")。烟 31/gore
     //   61-64 亦换 VanillaDust/GorePiece 引擎(fadeIn 老化/收缩族物理 1:1)
     // 小族(:74881-74884 统一 Resize(22,22)):28/30/37/75/102/164/397/516/517/519/773
-    // 大族(:74943-74962):29(Kill 改 200 盒)/108(自身 260 盒)/470/637/1002(自身 10 盒)
-    //   /1086/1087(Kill 改 240 盒)——★链式引爆走 108 属大族(曾漏)
+    // 大族(:74943-74962):29(Kill 改 200 盒)/108(自身 260 盒)/470/637/1002(自身 260 盒,
+    //   SW-J1 2026-09-03 勘误:尘/gore 段在 :80125 支内先跑,末尾 10×10 resize(:80178-
+    //   80188)在其后 → 1002 尘盒半宽=130 非 5,与 108 同)/1086/1087(Kill 改 240 盒)
+    //   ——★链式引爆走 108 属大族(曾漏)
     const big = projId === 29 || projId === 108 || projId === 470 || projId === 637
       || projId === 1002 || projId === 1086 || projId === 1087;
     const vd = this.vanillaDust;
     if (vd) {
       const B = projId === 29 ? 100 : (projId === 1086 || projId === 1087) ? 120
-        : projId === 108 ? 130 : big ? 5 : 11;   // 生成盒半宽(按型 Resize/自身盒)
+        : projId === 108 || projId === 1002 ? 130 : big ? 5 : 11;   // 生成盒半宽(按型 Resize/自身盒)
       const bx = cx - B, by = cy - B, bs = B * 2;
       const nSmoke = big ? 50 : 20;
       for (let i = 0; i < nSmoke; i++) {
@@ -23019,8 +23878,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   style 7-9（丛林罐）→ PlaySound(6)=Grass.wav（仓内既有键 'chop' 同文件）、
     //   style 16-24（腐化/猩红罐）→ PlaySound(4)=NPC_Killed_1-3（既有键 'killed'）、
     //   其余 → 13=Shatter（缺省档,含 10-15/25+）。★⑦音效分档;gore 分档见下段
+    //   ★potSfxPos（④,2026-09-03 十三批）：位置=【命中格左上角】(i*16,j*16)
+    //   （:57335/:57339/:57343 三档同式,i/j=CheckPot 入参=本函数 x/y）——
+    //   曾用锚格中心 (ax*16+16, ay*16+16),声像/衰减定位偏差一格
     this.sfx.play(style >= 7 && style <= 9 ? 'chop'
-      : style >= 16 && style <= 24 ? 'killed' : 'shatter', 1, ax * TILE + 16, ay * TILE + 16);
+      : style >= 16 && style <= 24 ? 'killed' : 'shatter', 1, x * TILE, y * TILE);
     // ★pot-goreTier（2026-09-02 十批）：CheckPot per-style 瓦砾 Gore 分档 1:1 清偿
     //   （WorldGen.cs:57358-57431 整段亲读）。语义要点：
     //   · 生成【整件一次】——段在 2×2 KillTile 杀环（:57347-57356）之后、
@@ -23520,6 +24382,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const b = new Arrow(bx, by, vx, vy, gdmg, gkb, vid, null,
         { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
           dragAlways: gsM.drag, life, pierce: pen, gem: gemFlags, gemPhase: phase });
+      // ★R9 批三（2026-09-03）：NewProjectile 传位=盒心——宝石支 Player.cs:49779-49904
+      //  （ArPenSpread 环偏 :49807-49809 叠在 pointPosition 上仍原点直传）、非宝石魔法
+      //  穿透通用尾支 :49957 + :10878-10879。Arrow ctor 收盒左上,曾直传 = 珠盒右下偏
+      //  (w/2,h/2)——单点收口百件级未列名魔法武器（宝石珠 121-126/597 10×10=+5、
+      //  水矢 27 16×16=+8、水晶风暴 94 8×8、恶魔镰 42 10×10、彩虹杖/珊瑚杖…全族）
+      placeAtShootSpawn(b, bx, by);
       b.armorPen = arpen;
       b.critBonus = critBonus;
       // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
@@ -23733,6 +24601,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.swing.tentacleSpikes = sv0 === 5094;                  // _spawnTentacleSpikes
       this.swing.bloodButchererSpawns = sv0 === 795;             // _spawnBloodButcherer
       this.swing.muramasaCut = sv0 === 155;                      // _spawnMuramasaCut
+    }
+    // SW-K1 2026-09-03：割草机行走割草（Player.cs:20322-20325 HorizontalMovement 尾
+    // MowTheLawn——itemAnimation≥1 门即挥击在途;本函数每逻辑帧运行且无输入早退,
+    // 松手后余下动画照割,与原版"动画独立走完"同拍）
+    if (this.swing.t > 0 && viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '') === 4049) {
+      this.mowTheLawnTick();
     }
     this.swing.t--;
     if (this.swing.t <= 0) {
@@ -24920,7 +25794,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** ★近战任务A TakeDamageFromJellyfish 直移植（Player.cs:44607-44613 /
    *  1456 :43585-43591）：Hurt(PlayerDeathReason.ByNPC(npcIndex),
    *  (int)((double)nPC.damage * 1.3), -direction) + SetMeleeHitCooldown +
-   *  ApplyAttackCooldown。要点：
+   *  ApplyAttackCooldown。原版两口共用（近战 :44620 / 弹幕 Damage_PVE_Inner
+   *  :12682 ZappingJellyfish 块——后者 2026-09-03 接经 GameHooks,public 化）：
+   *  弹幕侧连近战冷却面一起写=原版同方法语义。要点：
    *  · 伤值 = 当前敌怪伤害 ×1.3 后 C# (int) 强转【截断】——无 Main.DamageVar
    *    ±15% 方差（普通近战命中侧 :44654 才走 DamageVar）:任务书给的 round 口径
    *    与反编译不符,以反编译为准（15×1.3=19.5 → 原版 19,round 则 20）;
@@ -24932,7 +25808,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *    swing.t）；ApplyAttackCooldown()=attackCD=max(1,(int)(itemAnimationMax×0.33))
    *    （本仓 swing.dur）。玩家无敌帧语义仍由 Player.damage 内部 iframes 承担
    *    （原版同位），这两层是其外的近战专属限频面 */
-  private takeDamageFromJellyfish(e: Enemy): void {
+  takeDamageFromJellyfish(e: Enemy): void {
     const p = this.player;
     this.damagePlayer(Math.max(1, Math.trunc((e.def?.damage ?? 0) * 1.3)),
       p.cx + p.facing * 8, p.cy, e);
@@ -30708,9 +31584,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    // 子弹撞块/消亡火花音族（Kill :77624-77625 列表——Collision.HitTiles+Item10；
-    // HitTiles 尘在 Arrow 实心块路径近似）。1458 列表含 389（红队清单漏记）
+    // 子弹撞块/消亡火花音族（Kill :77649-77653 列表——Collision.HitTiles+Item10；
+    // 1458 列表含 389（红队清单漏记））。★消亡原因矩阵（2026-09-03 全量核）：该支在
+    // Projectile.Kill() 体内（:71752-78993 单口），Kill 由撞块（各 aiStyle AI）/寿命尽
+    // （Update :17307-17311 timeLeft-- → Kill）/命中敌 penetrate 耗尽（Damage_* 置
+    // pen=0 → Update :17312-17314 pen==0 → Kill）全路径到达 → HitTiles 三因均撒；
+    // 尘面按几何门（position+velocity 扫盒 vs 实心/平台顶格）——悬空到期自然无尘。
+    // hitTilesFx 真值全量化（批 3，660/712/638/477/479 同案）;Arrow 实心块路径的
+    // 4×d7 近似尘已退役（★R7 F2:"暂双面"终态撤销,单口真值）
     if (BULLET_KILL_SFX.has(projId)) {
+      this.hitTilesFx(x, y, w, h, oldVx, oldVy);               //（:77650,velocity=消亡速同口径）
       this.playSfxFiles(['Item_10'], 1, x + w / 2, y + h / 2);
     }
     // ---- R27：魔法武器 I 族 Kill 音/尘分档（Projectile.Kill 单口语）----
@@ -31404,9 +32287,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           dropItem = 593;
         }
       }
-      const dropKey = dropItem > 0 ? VANILLA_ITEM_KEY_BY_ID[dropItem] : undefined;
       // 109 格已占/过远 else 支掉件锚 = Center（:79301-79303）;其余 else-if = Center+(0,-2)
-      const drop = (py: number) => { if (dropKey) this.spawnDrop(cx, py, dropKey); };
+      // dropItem 取现值——31 传送带重挂在下方 skip 判定处后写（惰性取键,余型不改=行为等价）
+      const drop = (py: number) => {
+        if (dropItem > 0) {
+          const dropKey = VANILLA_ITEM_KEY_BY_ID[dropItem];
+          if (dropKey) this.spawnDrop(cx, py, dropKey);
+        }
+      };
       if (placeSheet >= 0 && st.inBounds(tx, ty)) {
         if (projId === 1081 && !st.isSolid(tx, ty + 1)) {
           // 1081 落泥沿边侧移（:79220-79227——正下非实心 → 左/右下实心且侧格空的格移一格）
@@ -31419,7 +32307,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let skip = false;                                    // flag2（沙会塌落,不放置仍掉件）
         if (st.inBounds(tx, ty + 1) && st.flags[st.idx(tx, ty + 1)]) {
           const bs = TILE_DEFS[st.type[st.idx(tx, ty + 1)]]?.vanilla?.sheet;
-          if (bs === 314 || bs === 421 || bs === 422 || this.sandFallsBelow(tx, ty)) skip = true;
+          if (bs === 421 || bs === 422) {
+            // ★31 专支·传送带重挂（:79260-79266）：下方 421/422 → flag2 且 type==31 时
+            // num18 重挂 169——覆盖 :79133-79135 的 ai[0]==2 免掉落缺省（蚁狮球落传送带
+            // 也掉 1 件）;rail 314(:79256-79259)/沙塌(:79267-79270) 无重挂
+            if (projId === 31) dropItem = 169;
+            skip = true;
+          } else if (bs === 314 || this.sandFallsBelow(tx, ty)) {
+            skip = true;
+          }
         }
         if (st.isActive(tx, ty)) {
           drop(cy);                                          // 格已占 → outer else 锚 Center（:79301-79303）
@@ -31482,7 +32378,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (let i = i0; i < i1; i++) {
       for (let j = j0; j < j1; j++) {
         if (!st.isActive(i, j)) continue;
-        if (!st.isSolid(i, j) && !st.isPlatform(i, j)) continue;   // tileSolid ∨ solidTop∧top
+        // 平台族 solidTop 需 frameY==0（Collision.cs:3095 tileSolidTop∧frame 首行;
+        // 非木样式平台 frameY=材质行≠0 原版不撒——TileStore.isPlatform 无视 frameY,
+        // 此处补帧门）。KillTile_GetTileDustAmount 分型档(654/630/631=0/541=1/549=2/
+        // 宝石族)仍缺省 3 近似(头注登记)
+        const plat = !st.isSolid(i, j) && st.isPlatform(i, j) && st.frameY[st.idx(i, j)] === 0;
+        if (!st.isSolid(i, j) && !plat) continue;   // tileSolid ∨ solidTop∧top
         const ti = st.idx(i, j);
         const def = TILE_DEFS[st.type[ti]];
         if (!def?.mapColor) continue;
@@ -31589,14 +32490,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const id = enemy.vanillaId;
       const active = (this.entities.enemies as Enemy[])
         .filter((e) => !e.dead && e.vanillaId != null).map((e) => e.vanillaId!);
+      // ★vanillaNetId 0=无变体（非 nullish）——`??` 对 0 失效会让所有 npcKilled 类
+      // 成就收不到通知（FISH_OUT_OF_WATER 370/OBSESSIVE_DEVOTION 439/STAR_DESTROYER
+      // 族,2026-09-03 猪鲨探针实锤）。归一惯例同 :3099/:13482（!==0 ? netId : id）。
+      const killAchId = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : id;
       if (id === 125 || id === 126) {
         const otherAlive = active.includes(id === 125 ? 126 : 125);
         if (!otherAlive) {
-          this.achievements.notifyNPCKilled(enemy.vanillaNetId ?? id);
+          this.achievements.notifyNPCKilled(killAchId);
           this.achievements.mechaMayhemKill(id, active);
         }
       } else {
-        this.achievements.notifyNPCKilled(enemy.vanillaNetId ?? id);
+        this.achievements.notifyNPCKilled(killAchId);
         if (id === 127 || id === 134) this.achievements.mechaMayhemKill(id, active);
       }
     }
@@ -32217,6 +33122,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!slot) return false;
     slot.id = defIdxTarget;                               // ChangeItemType：id 换/堆叠不动
     this.sfx.play('pickup');                              // :31872 legacy PlaySound(7)=Grab
+    this.cb.onInventoryChanged();
+    return true;
+  }
+
+  /** 猪龙鱼之翼 2611↔5526 右键互换（R4 伴随项 2026-09-03；Player.cs:31864-31868
+   *  ItemCheck_ManageRightClickFeatures 快换表支：case 2611→num=5526 /
+   *  case 5526→num=2611,type 缺省 7=legacy Grab 音；:31871-31876
+   *  releaseUseTile=false + mouseRightRelease=false + ChangeItemType(num)）。
+   *  同 swapVoidBagVisual/swapParkourBookVisual 仓内形态：仅换 def id（ChangeItemType
+   *  Item.cs:47841-47850 stack/prefix/favorited 不动）、PlaySound(7)→'pickup'、
+   *  非 UseSound 族不占使用冷却。两型 IsConsideredSameItemAsType（Item.cs:47925-47931）
+   *  视同一件；SetDefaults 全等,唯一差异 shoot 404↔1058 + channel（2611 掷球回收 /
+   *  5526 经典链锤）→ 换型即换射击形态（Game case 'flairon'/case 'flail' 天然分流）。
+   *  ★使用态衔接面：门（updateUse 右键交互块 useTime===0 + !mouseHeld）保证只在
+   *  非使用帧可达——2611 球在场 SetDummyItemTime(10) 钉持（:30739→:4417-4426,
+   *  pinUse→refreshChannelItem）不可换、5526 自旋期 mouseHeld 持按不可换；
+   *  已掷出的 1058 球独立在飞（FlailProj channel 只在 st0 消费,换手不回收）。
+   *  2611/5526 不在 ItemsThatAllowRepeatedRightClick（ItemID.cs:66 仅 3384/3858/3852）
+   *  → 边沿触发。 */
+  private swapFlaironForm(heldVid: number): boolean {
+    const target = heldVid === 2611 ? 5526 : heldVid === 5526 ? 2611 : -1;
+    if (target < 0) return false;
+    const inv = this.player.inv;
+    const defIdxTarget = invIndexOfVanilla(target);
+    if (defIdxTarget < 0) return false;
+    const slot = inv.slots[inv.selected];
+    if (!slot) return false;
+    slot.id = defIdxTarget;                               // ChangeItemType：id 换/堆叠不动
+    this.sfx.play('pickup');                              // :31875 legacy PlaySound(7)=Grab
     this.cb.onInventoryChanged();
     return true;
   }
@@ -33427,13 +34361,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0,
     color: { r: number; g: number; b: number; a: number } | null = null,
-    scale = 1, noGravity = false, perfect = false,
+    scale = 1, noGravity = false, perfect = false, prettySparkle = false,
   ): import('../fx/VanillaDust').VDust | null {
     // vanillaDust 缺省（测试 Object.create 桩/池未实例化）→ 契约"缺省=静默丢弃"
     if (!this.vanillaDust) return null;
     const d = this.vanillaDust.spawn(x, y, w, h, type, speedX, speedY, alpha,
       color as import('../fx/VanillaDust').DustColor | null, scale,
-      perfect ? { perfect: true } : undefined);
+      perfect || prettySparkle
+        ? { perfect: perfect || undefined, prettySparkle: prettySparkle || undefined }
+        : undefined);
     if (d && noGravity) d.noGravity = true;
     return d ?? null;
   }
@@ -33621,8 +34557,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** ★2026-09-01 编排器 tile-ambient 族发射位（TileDrawing.DrawTiles_EmitParticles
    *  Tier3 四支,clientOnly:true 各端本地直生,零广播）：与 Tier1/2 尘表（上方规则
    *  循环）同扫节拍（每 3 tick ×3 概率折算）。此前"tile-ambient 未建"登记消账：
-   *   · PooFly（:6983-6990）便砖 666/712：liquid≤0、上格非 ActiveAndWalkable、
-   *     Next(100)==0 → pooFlyFx@(x×16+8, y×16−8)；
+   *   · PooFly（:6983-6990）便砖 666/712：liquid≤0、j−1>0（★V6 补,世界顶缘门）、
+   *     上格非 ActiveAndWalkable、Next(100)==0 → pooFlyFx@(x×16+8, y×16−8)；
    *   · RainbowBoulder3（:6992-6999）虹砖 711 frameX==0&&frameY==0、Next(45)==0 →
    *     rainbowBoulderFx(3)@(x×16+16, y×16+16)；
    *   · RainbowBoulder2（:7000-7007）同门 Next(3)!=0（=2/3/visit×3 窗折算=恒发,F1①）
@@ -33649,8 +34585,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (st.type[i] === 0) continue;
         const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
         const liquidHere = st.liquid[i] > 0;
-        if ((sheet === 666 || sheet === 712) && !liquidHere && Math.random() < 3 / 100
-          && !walkableAbove(x, y)) {
+        if ((sheet === 666 || sheet === 712) && !liquidHere && y - 1 > 0
+          && Math.random() < 3 / 100 && !walkableAbove(x, y)) {
+          // ★V6（TileDrawing.cs:6978）：原文门串含 `j - 1 > 0` 世界顶缘门——第 0/1 行
+          //   便砖不产飞虫（上格探柱 j−1 须落在世界内非顶缘行）;本仓曾以 inBounds(x,y-1)
+          //   承接上格门 ⇒ j=1 行可发（j-1=0 越门）,现按原文补 j-1>0（置于掷前=同序）。
           pooFlyFx(this, x * TILE + 8, y * TILE - 8);
         }
         if (sheet === 711) {
@@ -33682,6 +34621,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   // 玩家 hitbox 与关闭高门(388)矩形 (16×96) 相交且垂直容纳 → 自动 ShiftTallGate 开门；
   // 离开门区（矩形外扩 1px）→ 自动关闭。仅玩家（NPC/敌怪不触发——原版同）。
   private openTallGates = new Map<number, number>(); // 锚点 idx → 开门时刻（tick）
+  /** R8② velocity-alone 窗剩余帧（DoorOpeningHelper._timeWeCanOpenDoorsUsingVelocityAlone :232） */
+  private tallGateVelWindow = 0;
   private updateTallGateAuto() {
     const st = this.world.store;
     const p = this.player;
@@ -33695,8 +34636,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  弹开;持方向键贴门/被击退滑入仍照常开)。关门扫(离开检测)原版即分立方法
     //  LookForDoorsToClose,不受此门。
     const autoOpenAllowed = this.input.downAction('Left') || this.input.downAction('Right') || p.vx !== 0;
+    // ★R8① 偏好档（红蓝台账）：原版 PreferenceSettings 缺省=EnabledForEverything
+    //  (DoorOpeningHelper.cs:216) → ShouldTryOpeningDoors 恒 true(:252-260)，本仓无
+    //  偏好开关即「全开」缺省档等价；CyclePreferences 三态循环(Disabled↔Everything↔
+    //  GamepadOnly :262-276)无设置 UI 对应物，登记差异不移植。
+    // ★R8② velocity-alone 窗（红蓝台账）：Player.cs:21555 在 DashMovement 内 dash>0
+    //  每帧注入 num17*3（dash2=30 其余 20 → 90/60 帧窗；dash6 终帧 30 单帧微差登记），
+    //  dash>0 含就绪/冷却态（dash=dashType 粘滞 :21214-21218）→ 本仓对应事件钩=
+    //  equipStats.dash 装备聚合 + dash6 坐骑(:21208-21210 MOUNT_DASH6_TYPES)，按原式
+    //  接线并逐帧递减(:246-249)。窗的消费点=开检盒/扫描盒 X 前移 num3
+    //  （GetPlayerInfoForOpeningDoor :325-330 无输入且窗尽 → 速度贡献清零）；
+    //  入口门(:302-305) vx≠0 照常过（窗不参与，与站定门锁一致）。
+    //  GetAutoDoorVelocityContribution(:24534-24539) 滚轮坐骑 |vx|<3→3 钳未建模，登记微差。
+    const eqDash = p.equipStats?.dash ?? 0;   // 测试桩玩家无 equipStats/mount → 视为无 dash
+    const dash6Mount = p.mount?.active === true && MOUNT_DASH6_TYPES.has(p.mount.type);
+    if (eqDash !== 0 || dash6Mount) this.tallGateVelWindow = (eqDash === 2 ? 30 : 20) * 3;   // :21555
+    else if (this.tallGateVelWindow > 0) this.tallGateVelWindow--;                          // :246-249
     if (autoOpenAllowed) {
-      const tx0 = Math.floor((p.x - 2) / TILE), tx1 = Math.floor((p.x + p.w + 2) / TILE);
+      // num3 前移(:330-339)：value=输入±1+速度贡献；num3=sign·ceil(|value|)
+      const inputDir = (this.input.downAction('Right') ? 1 : 0) - (this.input.downAction('Left') ? 1 : 0);
+      const velContrib = (inputDir === 0 && !(this.tallGateVelWindow > 0)) ? 0 : p.vx;   // :325-329
+      const value = inputDir + velContrib;
+      const num3 = Math.sign(value) * Math.ceil(Math.abs(value));
+      const sbL = Math.min(p.x, p.x + num3) - 2, sbR = Math.max(p.x + p.w, p.x + p.w + num3) + 2;
+      const tx0 = Math.floor(sbL / TILE), tx1 = Math.floor(sbR / TILE);
       const ty0 = Math.floor((p.y - 2) / TILE), ty1 = Math.floor((p.y + p.h + 2) / TILE);
       for (let x = tx0; x <= tx1; x++) {
         for (let y = ty0; y <= ty1; y++) {
@@ -33710,7 +34673,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const anchorY = y - tallGateRowOf(st.frameY[st.idx(x, y)]);   // ProvideInfo :158 行归一
           const gateL = x * TILE, rectTop = anchorY * TILE, rectH = 6 * TILE;
           const hbTop = p.y + 1, hbBottom = p.y + p.h - 1;
-          const intersects = p.x < gateL + TILE && p.x + p.w > gateL
+          const hbLeft = p.x + num3;                        // :332 hitbox.X += num3（R8②）
+          const intersects = hbLeft < gateL + TILE && hbLeft + p.w > gateL
             && hbTop < rectTop + rectH && hbBottom > rectTop;
           const contained = hbTop >= rectTop && hbBottom <= rectTop + rectH;
           if (!intersects || !contained) continue;
@@ -33719,14 +34683,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // 已开门离开检测：门矩形（外扩 1px）与玩家 hitbox 不相交 → 关
+    // 已开门离开检测（LookForDoorsToClose :278-289 + TallGate.TryCloseDoor :189-213）：
+    // 门区=闭足印 (X*16-1,Y*16,18,80)（:198 Inflate(1,0)）。
+    // ★R6 贴边带（红蓝台账）：判定=Rectangle.Intersect(:200)+「Width>0||Height>0」
+    // (:201-204)——两轴取 max/min，right<left||bottom<top 才 Empty；单轴零宽接触
+    // (贴边)交 0×n 矩形仍算 StillInDoorArea 不关。曾用严格 AABB(<)把贴边帧判为
+    // 已离开=提前关门。
+    // ★R7 失败档（红蓝台账）：TryCloseDoor 非 StillInDoorArea 一律自 _ongoingOpenDoors
+    // 移除(:281-288)——ClosedDoor=关成；DoorIsInvalidated=门被拆/换型(:193-196)；
+    // FailedToCloseDoor=结构残缺(ValidateTileSquare WorldGen.cs:52201)或闭足印被活体
+    // 堵(:52208-52212 EmptyTile ignoreTiles=true 只查玩家/NPC 占位——本仓 shiftTallGate
+    // 未建模该臂，登记差异)→ 全部放弃跟踪不重试。曾对 null 保持跟踪=重试语义。
     for (const ai of Array.from(this.openTallGates.keys())) {
       const ax = ai % st.w, ay = Math.floor(ai / st.w);
-      if (st.get(ax, ay) !== OPEN) { this.openTallGates.delete(ai); continue; }
-      const rect = { x: ax * TILE - 1, y: ay * TILE, w: TILE + 2, h: 5 * TILE };
-      const overlap = p.x < rect.x + rect.w && p.x + p.w > rect.x && p.y < rect.y + rect.h && p.y + p.h > rect.y;
-      if (!overlap) {
-        if (shiftTallGate(st, ax, ay, true, (n: string) => this.sfx.play(n as SfxName))) this.openTallGates.delete(ai);
+      if (st.get(ax, ay) !== OPEN) { this.openTallGates.delete(ai); continue; }   // DoorIsInvalidated
+      const ixL = Math.max(ax * TILE - 1, p.x);
+      const ixR = Math.min((ax + 1) * TILE + 1, p.x + p.w);
+      const ixT = Math.max(ay * TILE, p.y);
+      const ixB = Math.min((ay + 5) * TILE, p.y + p.h);
+      const inDoorArea = ixR >= ixL && ixB >= ixT && (ixR > ixL || ixB > ixT);   // R6: 单轴零宽仍算在门区
+      if (!inDoorArea) {
+        shiftTallGate(st, ax, ay, true, (n: string) => this.sfx.play(n as SfxName));
+        this.openTallGates.delete(ai);   // R7: ClosedDoor/FailedToCloseDoor 皆移除跟踪
       }
     }
   }
@@ -34105,8 +35083,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'alch': {
-        // CheckAlch（:45981）：下格 nactive+非半砖；列=frameX/18 查地基表（列外恒活）；
-        // 本格岩浆枯杀（case 5 雪族阶段豁免 :46062-46065）。83↔84 岩浆熟转换略（备案）
+        // CheckAlch（WorldGen.cs:46371-46491）：下格 nactive+非半砖初始门
+        //（:46382-46388,成立时整 switch 跳过）；列=frameX/18 查地基表（:46390,列外
+        // 恒活）;本格岩浆枯杀（case 0-4/6 各支 :46401/:46411/:46421/:46431/:46441/
+        // :46480-46483）。case 5 火焰花（col 5,:46446-46474）岩浆不杀而转换：地基
+        // 失配【只置 flag】（:46447-46450）→ 转换支照跑——type==82（未熟）||!anyLava()
+        // ||netMode==1 → break（:46451-46454,转换只对 83/84）;liquid>16 且 83 → 84
+        //（:46455-46464,熟→ bloom 熟开）,liquid≤16 且 84 → 83（:46466-46473 退回熟）。
+        // 只写 type 不动帧（:46459/:46468）;netMode==2 SendTileSquare（联机面,本仓
+        // 权威端单演）。杀在【最后】按转换后 type 统一裁决（:46487-46490
+        // if(flag) KillTile）——★F3（十三批,2026-09-03）原实现 bad→killDecorTile→
+        // return 先于转换块 = 错配类按未转换 type 杀（掉落发散:83 浸>16 岩浆+坏基,
+        // 原版转 84 再杀恒掉种子,本仓无种子;反向同理）；掉落面（killTileCutDrop
+        // 药草支）零改动。frameY=0 复位（:46391）对 82-84 恒 no-op（三 sheet 帧恒 0）。
         const bi = st.idx(x, y + 1);
         let bad = !st.inBounds(x, y + 1) || !st.isActive(x, y + 1) || !!st.half[bi];
         const col = Math.trunc(st.frameX[i] / 18);
@@ -34117,8 +35106,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (!g.has(TILE_DEFS[st.type[bi]]?.vanilla?.sheet ?? -1)) bad = true;
             if (isLava && col !== 5) bad = true;
           }
+          // 岩浆熟转换（★alchBloom,CheckAlch case 5 :46446-46474 补齐——原"83↔84
+          // 岩浆熟转换略（备案）"清偿）：仅 col5 + 本格岩浆 + 已熟档参与;地基失配
+          // flag【不】短路转换（原版转换支在置 flag 后照跑）,初始门经 !bad 挡整个
+          // switch（:46392 if(!flag) 语义保持）
+          if (col === 5 && isLava) {
+            const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+            const mature = TILE_BY_KEY['v_83_herbs_mature'];
+            const bloom = TILE_BY_KEY['v_84_herbs_bloom'];
+            const amt = st.liquid[i] ?? 0;
+            if (amt > 16 && st.type[i] === mature) {
+              st.setTile(x, y, bloom, st.frameX[i], st.frameY[i]);   // :46459
+              this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+            } else if (amt <= 16 && st.type[i] === bloom) {
+              st.setTile(x, y, mature, st.frameX[i], st.frameY[i]); // :46468
+              this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+            }   // 82（未熟）与其余档不转换（:46451 break）
+          }
         }
-        if (bad) this.killDecorTile(x, y);
+        if (bad) {
+          this.killDecorTile(x, y);
+        }
         return;
       }
       case 'sunflower': {
@@ -35223,10 +36231,17 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   }
 
   /** TNT 桶 654 爆炸（❌1,Check2x2 case 654 :48771-48772：桶中心 num2*16+8/num6*16+8
-   *  生成弹 1002 基伤 400）。1002 SetDefaults（Projectile.cs:9240-9249）260×260 盒
-   *  （=伤害盒半宽 130）/hostile=true（玩家侧 Damage_EVP 全额 400;NPC 侧
-   *  Damage_PVE_Inner :12170 减半——仓内 explodeAt 统一按基伤结算,玩家侧=hostile 弹
-   *  对称）/ExplodeTiles 半径 10（Projectile.cs:75297-75299）。殉爆防重入：爆炸波及
+   *  生成弹 1002 基伤 400）。1002 SetDefaults（Projectile.cs:9525-9536）260×260 盒
+   *  （=伤害盒半宽 130）/hostile=true（玩家侧 SelfHurtPlayers 全额 400 自然伤,
+   *  FixedSelfDamageForPlayers 无 1002 条目;NPC 侧减半面=Damage_PVE_Inner :12971,
+   *  SW-J1 起由 explodeAt 按弹型承载）。★SW-J1 2026-09-03 地形面定谳（F 代理发现复核成立）：Kill_ExplodeTiles
+   *  （:78995）闸门表（:79027-79030）**不含 1002** → :79064 `if (type == 1002) num6
+   *  = 10` 为死代码（1456 :75297 同构,历史残留）= 原版 1002 Kill **不炸地形**；
+   *  aiStyle 16 主循环 AI_016_Bombs（:47763-48120）对 1002 亦无 KillTile 支,
+   *  地形破坏唯一入口即该闸门表 → 本调用 r10/destroyTiles 曾误依死代码行,已去
+   *  （radius=0/destroyTiles=false;殉爆仍成立=CanExplodeTile :80383 对 654 无黑
+   *  名单支,他弹爆炸破桶格 → KillTile case 654 链发 1002）。NPC 侧减半面改由
+   *  explodeAt 按弹型承载（:12971,SW-J1）。殉爆防重入：爆炸波及
    *  他桶经 breakTile 再触发 → 入队延后到本爆结算后（等价原版 destroyObject 旗
    *  :48567/:48800 + 1002 timeLeft=2 跨 tick 串行,防同帧递归栈深） */
   private _tntBlasting = false;
@@ -35237,10 +36252,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (this._tntBlasting) { pending.push([ax, ay]); return; }
     this._tntBlasting = true;
     try {
-      this.explodeAt(ax, ay, 400, 10, true, 130, 0, 1002);
+      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
       while (pending.length) {
         const [px, py] = pending.shift()!;
-        this.explodeAt(px, py, 400, 10, true, 130, 0, 1002);
+        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002);   // SW-J1 同上
       }
     } finally {
       this._tntBlasting = false;

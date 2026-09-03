@@ -637,7 +637,7 @@ describe('VanillaDust：拴绳批逐型分支（43/15/267/278/6）', () => {
     // 池满 → null（★R2 #4 密度门批：直填 pool 置 active——spawn 高水位会被
     // dCount 密度门随机拒,「填满」意图无法经 spawn 达成）
     const full = new VanillaDust();
-    for (const c of full.pool) { c.active = true; }
+    for (const c of (full as unknown as { pool: Array<{ active: boolean }> }).pool) { c.active = true; }
     const src = full.spawn(0, 0, 5, 5, 267);
     expect(src).toBeNull();
     const any = [...full.each(false)][0];

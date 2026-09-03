@@ -45,6 +45,8 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // 不成立：拆掉本地直调 = 单机/发送端自身失明。维持"生产端双发（本地直生+
 // broadcast 上行）、两面对同一收编本体"的原版等价形态。
 import { rainbowRodHitFx } from '../fx/orchestraFx';
+import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
+import type { Renderer } from '../render/Renderer';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { VDust } from '../fx/VanillaDust';
@@ -904,7 +906,8 @@ export class MagicMissileProj extends Entity {
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
   }
 
-  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
+    atlas?: NonNullable<import('../render/Renderer').Renderer['atlas']> | null }): void {
     const ctx = r.ctx;
     if (!ctx) return;
     const speed = Math.hypot(this.vx, this.vy);
@@ -950,7 +953,11 @@ export class MagicMissileProj extends Entity {
     // ---- 34/16 着色器火带（★MINOR-1：本体【之前】绘——原版 DrawProj 在
     //      Main.cs:28615-28622 由 FlameLashDrawer/MagicMissileDrawer 先绘带,
     //      本体在其后 DrawProjDirect 通用段;旧序=带压本体,倒置）----
-    if (this.projId === 34 || this.projId === 16) this.drawShaderTrail(ctx);
+    if (this.projId === 34 || this.projId === 16) {
+      // SM2 字节码像素面（drawStripTrail）需要 atlas——r 实参=Renderer 本体
+      // （Renderer.ts 实体分发 draw(this, cam)），鸭子签名收窄后透传
+      this.drawShaderTrail(ctx, r as unknown as Renderer);
+    }
     // ---- 16/34 旋转族（Main.cs:33192 族段 + :33192-33236 各型覆写）----
     const img = this.projId === 34 ? projFrameImg(34, this.frame) : projSprite(this.projId);
     if (img) {
@@ -1020,77 +1027,55 @@ export class MagicMissileProj extends Entity {
     }
   }
 
-  /** 34/16 着色器火带拖尾（T1 清偿 2026-09-02——红队 E′ 定罪:原版由 Drawer 绘宽带
-   *  火焰,本仓此前只画旋转本体、拖尾整缺）。canvas 逐值近似:
-   *  · 顶点带 = strip（TrailingMode 3,30 槽）逐段四边形（VertexStrip.AddVertexPair
-   *    pos±(rot−π/2)·宽 的等价物,法线取段向;原版 mode 3 平滑后 oldRot[i]=指向邻新
-   *    点方向≈段向,P.cs:17249-17251）;
-   *  · 色/宽曲线逐值转录 FlameLashDrawer.cs:24-37 / MagicMissileDrawer.cs:23-33
-   *    （XNA 色值:White 255,255,255 / Orange 255,165,0 / Red 255,0,0 / Violet
-   *    238,130,238;StripWidth 返回【半宽】→ ×2 为全带宽）;
-   *  · fx 着色器面（noise 抖动/负饱和度）无 canvas 等价,alpha 映射 = 顶点色 A/255 ×
-   *    UseOpacity/8（34: A/8=0.125×Lerp(4,8,t2d)→0.5+0.5·t2d;16: A/2=0.498×2≈1）;
-   *    合成 lighter（本仓 79 拖尾同约定）。netPuppet 不跑 stripRecord → 无带（同
-   *    79 拖尾既有限制）。 */
-  private drawShaderTrail(ctx: CanvasRenderingContext2D): void {
+  /** 34/16 着色器火带拖尾（T1 清偿 2026-09-02;★2026-09-03 SM2 字节码化——像素面从
+   *  四边形 fill 近似迁 drawStripTrail 的 obj55 "MagicMissile" pass 逐像素执行
+   *  （FlameLash/MagicMissile 两技术同 pass,只差三张噪声贴图 + UseSaturation 钉值,
+   *  由 TrailShader.EXTRA_SETS 按 set 携带）。顶点带 = strip（TrailingMode 3,30 槽,
+   *  [0]=最新与 XNA oldPos[0] 同序）;顶点色/宽 = StripColors/StripWidth 逐值转录,
+   *  通道按 XNA Color 语义逐段 byte 化（Lerp/乘法后 round）;uOpacity 回归原版独立
+   *  通道（FlameLashDrawer.cs:17 Lerp(4,8,t2d) / MagicMissileDrawer.cs:16 =2）——
+   *  顶点 A 不再把 opacity 折算（A/=8 → fade/8、A/=2 → fade/2,StripColors 原值）;
+   *  uTime = globalT（GlobalTimeWrappedHourly 同口径,秒）。netPuppet 不跑
+   *  stripRecord → 无带（同 79 拖尾既有限制）。 */
+  private drawShaderTrail(ctx: CanvasRenderingContext2D, renderer: Renderer): void {
     const pts = this.strip;
     const N = pts.length;
     if (N < 2) return;
     const flame = this.projId === 34;
     const t2d = flame ? lerpValue(0, 6, this.redT) : 0;   // transitToDark（FlameLashDrawer.cs:14）
-    // 逐点横法线：中心差分（端点取自身段向;重合点沿用前点）
-    const nx = new Array<number>(N), ny = new Array<number>(N);
+    const byte = (v: number): number => Math.round(v);     // XNA Color 通道 byte 化
+    const trailPts: TrailPt[] = [];
     for (let i = 0; i < N; i++) {
-      const a = pts[i > 0 ? i - 1 : 0], b = pts[i < N - 1 ? i + 1 : N - 1];
-      const dx = a.x - b.x, dy = a.y - b.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 0) { nx[i] = -dy / d; ny[i] = dx / d; }
-      else { nx[i] = i > 0 ? nx[i - 1] : 0; ny[i] = i > 0 ? ny[i - 1] : 0; }
-    }
-    // 逐点 StripWidth（×2 全宽）与 StripColors（fade = 尾淡出因子,两 Drawer 共有）
-    const W = new Array<number>(N), R = new Array<number>(N), G = new Array<number>(N),
-      B = new Array<number>(N), A = new Array<number>(N);
-    for (let i = 0; i < N; i++) {
-      const p = i / (N - 1);                    // progressOnStrip（0 头 → 1 尾）
-      const fade = 1 - lerpValue(0, 0.98, p);
+      const p = i / (N - 1);                    // progressOnStrip（0 头=最新 → 1 尾）
+      const fade = 1 - lerpValue(0, 0.98, p);   // 尾淡出因子（两 Drawer 共有）
+      let rC: number, gC: number, bC: number, aC: number, hwC: number;
       if (flame) {
-        const lv = lerpValue(-0.1 * t2d, 0.7 - 0.2 * t2d, p);           // StripColors :26
-        const ig = lerp(255, 165, t2d * 0.5), ib = lerp(255, 0, t2d * 0.5);
-        R[i] = 255 * fade;                     // Lerp(Lerp(W,O,·),Red,·).R ≡ 255
-        G[i] = lerp(ig, 0, lv) * fade;
-        B[i] = lerp(ib, 0, lv) * fade;
-        A[i] = fade * (0.5 + 0.5 * t2d);
-        let wv = lerpValue(0, 0.06 + t2d * 0.01, p);                    // StripWidth :34
-        wv = 1 - (1 - wv) * (1 - wv);                                   // :35
-        W[i] = lerp(24 + t2d * 16, 8, p) * wv * 2;                      // :36 ×2=全宽
+        const lv = lerpValue(-0.1 * t2d, 0.7 - 0.2 * t2d, p);            // StripColors :26
+        const ig = byte(lerp(255, 165, t2d * 0.5)), ib = byte(lerp(255, 0, t2d * 0.5));
+        rC = 255;                               // Lerp(Lerp(W,O,·),Red,·).R ≡ 255
+        gC = byte(lerp(ig, 0, lv));
+        bC = byte(lerp(ib, 0, lv));
+        aC = byte(255 * fade / 8);              // result.A /= 8（FlameLashDrawer.cs:29）
+        let wv = lerpValue(0, 0.06 + t2d * 0.01, p);                     // StripWidth :34
+        wv = 1 - (1 - wv) * (1 - wv);                                    // :35
+        hwC = lerp(24 + t2d * 16, 8, p) * wv;                            // :36 半宽
       } else {
-        const k = lerpValue(0, 0.7, p);                                 // StripColors :25
-        R[i] = lerp(255, 238, k) * fade;
-        G[i] = lerp(255, 130, k) * fade;
-        B[i] = lerp(255, 238, k) * fade;
-        A[i] = fade;
-        W[i] = lerp(26, 32, lerpValue(0, 0.2, p)) * lerpValue(0, 0.07, p) * 2;  // :32
+        const k = lerpValue(0, 0.7, p);                                  // StripColors :25
+        rC = byte(lerp(255, 238, k) * fade);    // Lerp(W,Violet,k)×fade
+        gC = byte(lerp(255, 130, k) * fade);
+        bC = byte(lerp(255, 238, k) * fade);
+        aC = byte(255 * fade / 2);              // result.A /= 2（MagicMissileDrawer.cs:27）
+        hwC = lerp(26, 32, lerpValue(0, 0.2, p)) * lerpValue(0, 0.07, p);  // :32 半宽
       }
+      trailPts.push({ x: pts[i].x, y: pts[i].y, hw: hwC,
+        r: rC / 255, g: gC / 255, b: bC / 255, a: aC / 255 });
     }
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < N - 1; i++) {
-      const a = Math.min(1, (A[i] + A[i + 1]) / 2);
-      if (a <= 0.01 || (W[i] < 0.5 && W[i + 1] < 0.5)) continue;
-      const p0 = pts[i], p1 = pts[i + 1];
-      const r = Math.round((R[i] + R[i + 1]) / 2);
-      const g = Math.round((G[i] + G[i + 1]) / 2);
-      const b = Math.round((B[i] + B[i + 1]) / 2);
-      ctx.fillStyle = `rgba(${r},${g},${b},${a.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.moveTo(p0.x + nx[i] * W[i] / 2, p0.y + ny[i] * W[i] / 2);
-      ctx.lineTo(p1.x + nx[i + 1] * W[i + 1] / 2, p1.y + ny[i + 1] * W[i + 1] / 2);
-      ctx.lineTo(p1.x - nx[i + 1] * W[i + 1] / 2, p1.y - ny[i + 1] * W[i + 1] / 2);
-      ctx.lineTo(p0.x - nx[i] * W[i] / 2, p0.y - ny[i] * W[i] / 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.restore();
+    drawStripTrail(ctx, renderer, {
+      set: flame ? 'FlameLash' : 'MagicMissile',
+      pts: trailPts,
+      opacity: flame ? lerp(4, 8, t2d) : 2,     // UseOpacity（FlameLashDrawer.cs:17 / :16）
+      time: this.globalT,                        // GlobalTimeWrappedHourly（秒,%3600）
+    });
   }
 }
 

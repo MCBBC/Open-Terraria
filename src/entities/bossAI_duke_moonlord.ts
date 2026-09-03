@@ -211,14 +211,17 @@ function dukePick1(e: Enemy, enraged: boolean): number {
   if (e.hp <= e.maxHp * 0.5) next = 4;       // :49499 半血变身
   return next;
 }
-/** 二阶段悬浮结束的下一招(:49736-49809) */
-function dukePick2(e: Enemy, enraged: boolean): number {
+/** 二阶段悬浮结束的下一招(:49736-49809)。flag2 = expertMode && life≤15%
+ *  （:49300）→ num33=4（:49908-49910）→ ai0=9 二段狂暴变身—— expert 大师档
+ *  血线触发三段形态(10-13 隐身悬浮/冲撞/瞬移爆冲)。★曾整支漏写=expert 下
+ *  ai0=9 永不可达、10-13 全段死码(2026-09-03 批4 补) */
+function dukePick2(e: Enemy, enraged: boolean, flag2: boolean): number {
   const a3 = Math.floor(e.ai3);
   let next = 0;
   if (a3 >= 0 && a3 <= 5) next = 1;          // 冲撞(6)
   else if (a3 === 6) { e.ai3 = 1; next = 2; } // 旋转泡泡冲刺(7)
   else if (a3 === 7) { e.ai3 = 0; next = 3; } // 鲨鱼龙卷(8)
-  // flag2(expert hp≤15%):next=4 → ai0=9(:49756-49759)——经典模式不可达,代码保留见 dukeState9
+  if (flag2) next = 4;                       // :49908-49910 expert 15% 血 → 9
   if (enraged && next === 2) next = 3;       // :49760
   return next;
 }
@@ -431,7 +434,9 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       dukeHover(e, player, hoverAcc, hoverSpd, 300, st);
       e.ai2 += 1;
       if (e.ai2 >= hoverT) {
-        const next = dukePick2(e, enraged);
+        // flag2(:49300)：expert(大师也算,Main.expertMode)且血 ≤15%——三段狂暴变身门
+        const flag2 = mainExpertMode(game.world) && e.hp <= e.maxHp * 0.15;
+        const next = dukePick2(e, enraged, flag2);
         if (next === 1) dukeCharge(e, player, chargeSpd, 6, st);
         else if (next === 2) { // 旋转泡泡冲刺起手(:49782-49797):20 速直冲
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
@@ -927,6 +932,7 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     e.bInit = true;
     e.ai0 = 0; e.ai1 = 0;
     e.spawnAlpha = 255; e.alphaFade = false; // 渐显由本 AI 按 :35228/:35267 驱动
+    e.sharkronSdir = -1;                     // :6522 字段缺省 -1(NewNPC 不复位)
   }
   // :35200-35205 玩家失效 → TargetClosest(faceTarget:false)+direction=1 重瞄,
   // AI 照常运转(原版对尸位坐标继续扑,不消散——曾 dead=true 即散 = 存续断裂,
@@ -940,12 +946,27 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     // ★台账①:升空蓄力段真旗标(:35300 每 tick 置位)——iframes 近似被单发弹绕过。
     // 原版无"每拍清旗"(dash 支内自行解除),受阻蓄势窗持续无敌
     e.dontTakeDamage = true;
-    e.vx = 0;
+    // :35211-35212 蓄力段只写 velocity.Y=ai[3];velocity.X 不动(继承龙卷弹初速——
+    // 静旋龙卷出生速度 (0,0),曾画蛇添足清零=语义漂移,2026-09-03 批4 校正)
     e.vy = e.ai3;               // velocity.Y = ai[3](:35212)
     if (e.vanillaId === 373) {
       e.spawnAlpha = Math.max(0, e.spawnAlpha - 6); // :35228 渐显
-      // :35222-35227 贴图倾斜 rotation = vy·spriteDirection·0.1(钳 ±0.2)
-      e.spin = clamp(e.vy * -e.facing * 0.1, -0.2, 0.2);
+      // :35213-35227 蓄力段横游+摆头(373 专有)。原版序:ai[1]++(:35210)→ 摆头
+      // 余弦两次读 l1(增前/增后):x += [f(l1)−f(l1−1)]·(−direction),f=cos(π/30·l1)
+      // −0.5 乘 ai2 幅宽;|cos−0.5|>0.25 时 spriteDirection 按 cos 符号重写
+      // (cos≥0.5→−1 / 否则 1);rotation = vy·spriteDirection·0.1 钳 ±0.2——
+      // ★direction(AI 字段,本仓 facing)与 spriteDirection(渲染字段,本仓
+      // sharkronSdir)是两个字段:摆头只写后者,横游乘子恒用前者(2026-09-03 批4:
+      // 曾用 -facing 代位 spriteDirection=摆头翻转与倾斜耦合错误)
+      const kk = Math.PI / 30;
+      const l1 = e.ai1 + 1;                      // 本 tick 的 l1 终值(:35210 先 ++)
+      const cos = Math.cos(kk * l1) - 0.5;       // :35216-35218 增后读数
+      if (e.ai2 > 0) {
+        const prev = (Math.cos(kk * (l1 - 1)) - 0.5) * e.ai2;
+        e.x += (cos * e.ai2 - prev) * -e.facing;  // :35214-35219 位移差(−direction)
+      }
+      if (Math.abs(cos) > 0.25) e.sharkronSdir = cos >= 0 ? -1 : 1;  // :35219-35221
+      e.spin = clamp(e.vy * e.sharkronSdir * 0.1, -0.2, 0.2);        // :35222-35227
     }
     e.ai1 += 1;
     if (e.ai1 >= RISE_T) {
@@ -961,13 +982,18 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
         e.vx = (dx / d) * 16;
         e.vy = (dy / d) * 16;
         e.facing = dx < 0 ? -1 : 1;
-        e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
+        // ★flip 接管（2026-09-02,Renderer 373 镜像批）:原版 :35311-35315 rotation=
+        //  velocity.ToRotation() 裸值,朝向翻转由 spriteDirection flip 承担——曾以
+        //  +(facing<0?π:0) 旋转补偿等效(无 flip 渲染时代),flip 落地后双重=回翻错误
+        e.spin = Math.atan2(e.vy, e.vx);
       }
     }
   } else {
     // ai0 === 1(:35264-35316)
     if (e.ai1 < 1 && !inSolid(game, e)) e.ai1 = 1;
-    if (inSolid(game, e)) e.spawnAlpha = Math.min(150, e.spawnAlpha + 15); // :35280-35284
+    // :35280-35284 入实心块渐显:alpha −= 15、钳 [150,…]——曾写 min(150,+15) 极性反
+    // (255 直接跳 150,原版 255→240→…→150 七拍渐显,2026-09-03 批4 校正)
+    if (inSolid(game, e)) e.spawnAlpha = Math.max(150, e.spawnAlpha - 15);
     if (e.ai1 >= 1) {
       e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35378 渐显
       // :35381 起扑生效拍解除无敌(1458 `dontTakeDamage = false;`)——蓄势窗
@@ -983,13 +1009,7 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
       }
     }
     if (e.ai1 >= 60) e.applyGravity(game); // :35307-35309 恢复重力(共享 UpdateNPC_UpdateGravity)
-    e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0); // :35311-35315
-  }
-  // 373 蓄力段横游(:35213-35221):x += (cos(π/30·l1) − 0.5)·ai2·(−direction) 位移差
-  if (e.ai0 === 0 && e.vanillaId === 373 && e.ai2 > 0) {
-    const f = (t: number) => (Math.cos((Math.PI / 30) * t) - 0.5) * e.ai2;
-    const prev = f(e.ai1 - 1), cur = f(e.ai1);
-    e.x += (cur - prev) * -e.facing;
+    e.spin = Math.atan2(e.vy, e.vx); // :35311-35315 裸值(朝向翻转由 Renderer 373 flip 承担,同上)
   }
   e.x += e.vx;
   e.y += e.vy;

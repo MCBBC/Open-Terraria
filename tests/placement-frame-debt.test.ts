@@ -244,8 +244,11 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 �
     expect(drops).toEqual([]);                     // 无物品返还（KillTile :66114 no-drop）
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(11, 11)).toBe(0);           // 整件清（2×2 锚点算法）
-    // 桶中心 (10*16+8, 10*16+8) 1002 等效爆炸恰一次：基伤 400/ExplodeTiles 半径 10
-    expect(blasts).toEqual([[10, 10, 400, 10, 1002]]);
+    // 桶中心 (10*16+8, 10*16+8) 1002 等效爆炸恰一次：基伤 400;
+    // ★SW-J1 2026-09-03 定谳：radius 10→0/destroyTiles=true→false——Kill_ExplodeTiles
+    // 闸门表（P.cs:79027-79030）不含 1002,:79064 `type==1002→num6=10` 是死代码
+    // （1456 :75297 同构）=原版 1002 Kill 不炸地形（曾误依死代码行 r10 破地形）
+    expect(blasts).toEqual([[10, 10, 400, 0, 1002]]);
   });
 
   it('殉爆：两桶相邻挖一 → 另桶经爆炸波及 breakTile 入队,本爆结算后再爆（❌1 防重入门=destroyObject 旗等价）', () => {

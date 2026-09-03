@@ -89,14 +89,18 @@ const LABEL2DUMP = new Map<string, number>([
     cur = { label: lab, cnt: 0, hash: 2166136261 >>> 0, over: false };
     if (VALS.has(lab)) { cur.vals = []; cur.tags = []; }
     wins.push(cur);
+    const ret = oReseed.call(this, s);
     // 主实例=reseed 所在的 RNG 实例（ctx.rng——每个原版 pass 头重播它；
-    //  DungeonDualLayout 等自建 UnifiedRandom 副本与 x86 SW_MAINROLL 同位排除）
+    //  DungeonDualLayout 等自建 UnifiedRandom 副本与 x86 SW_MAINROLL 同位排除）。
+    // ★必须在 oReseed 之后取 vanilla——reseed 会换掉内部 UnifiedRandom 对象。
     mainVan = (this as { vanilla?: unknown })?.vanilla;
-    return oReseed.call(this, s);
+    return ret;
   };
   (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v, inst) => {
     if (inst !== mainVan) return;
     cur.cnt++;
+    rollN++;
+    (globalThis as { __swRollN?: number }).__swRollN = rollN;
     cur.hash = (Math.imul(cur.hash ^ (v >>> 0), 16777619)) >>> 0;
     if (cur.vals) {
       if (cur.vals.length < VALCAP) {
@@ -114,6 +118,20 @@ const LABEL2DUMP = new Map<string, number>([
       } else cur.over = true;
     }
   };
+  // ★IIIII193 逐屋阶段账（__swHouseStage/__swHouseRooms——CaveHousePass dormant 钩激活）
+  let rollN = 0;
+  const stages: string[] = [];
+  const roomsLog: string[] = [];
+  (globalThis as { __swHouseStage?: (tag: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage =
+    (tag, a, b, c, d) => { stages.push(`${tag}|${a}|${b}|${c}|${d}`); };
+  (globalThis as { __swHouseRooms?: (ox: number, oy: number, rooms: string) => void }).__swHouseRooms =
+    (ox, oy, rooms) => { roomsLog.push(`${ox}|${oy}|${rooms}`); };
+  // ★IIIII197：AB 调用级探针（dormant 钩激活；ab 事件带调用时 __swRollN 快照）
+  const abLog: string[] = [];
+  if (process.env.SW_I197_AB === '1') {
+    (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv =
+      (p, i, j, x) => { if (p === 'ab') abLog.push(`ab|${i}|${j}|${x}`); };
+  }
 
   const t0 = Date.now();
   try {
@@ -160,4 +178,8 @@ const LABEL2DUMP = new Map<string, number>([
     console.log(`[i193] window ${w.label} → js-win${pass}.txt vals=${w.vals.length}${w.over ? ' (CAP OVER)' : ''}`);
   }
   writeFileSync(`${OUT}/js-windows193.json`, JSON.stringify(wins.map((w) => ({ label: w.label, cnt: w.cnt, hash: w.hash }))));
+  writeFileSync(`${OUT}/js-house-stages.txt`, stages.join('\n'));
+  writeFileSync(`${OUT}/js-house-rooms.txt`, roomsLog.join('\n'));
+  if (process.env.SW_I197_AB === '1') writeFileSync(`${OUT}/js-ab59.txt`, abLog.join('\n'));
+  console.log(`[i193] house stages=${stages.length} rooms=${roomsLog.length} ab=${abLog.length}`);
 }, 1_200_000);

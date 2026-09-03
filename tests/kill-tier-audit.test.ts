@@ -13,10 +13,11 @@
 //      fadeIn1.5/noGravity/色 (255,255,255,0)×0.3=XNA (76,76,76,0) 纯加算）+ 3×gore 1008
 //   ⑥ 119/359/118（:76868-76886）：Item27 + d92×20（119/359）/×10（118）
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
-import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
-import { Arrow } from '../src/entities/Arrow';
+import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
+import { Arrow, BULLET_KILL_SFX } from '../src/entities/Arrow';
 import { GorePiece } from '../src/entities/GorePiece';
 import { Game } from '../src/core/Game';
 import type { GameHooks } from '../src/entities/types';
@@ -356,6 +357,39 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     expect(drops[0][2]).toBe('vi_593_SnowBlock');           // num18=593（:79217-79218）
   });
 
+  it('★31 专支（2026-09-03）：传送带在下 → 免放且重挂 num18=169 掉沙块件 ×1（:79260-79266）；rail/被占免掉落、常规落地放沙', () => {
+    const w = emptyWorld();
+    const conv = TILE_INTERNAL_BY_SHEET.get(421)!;
+    const sand = TILE_INTERNAL_BY_SHEET.get(53)!;
+    const rail = TILE_INTERNAL_BY_SHEET.get(314)!;
+    const drops: Array<[number, number, string, number]> = [];
+    const c = mkDeathGame({ world: w });
+    (c.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    (c.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string, n = 1) => { drops.push([x, y, key, n]); };
+    // ① 传送带 421 在下：flag2 免放 + num18 重挂 169（覆盖 ai[0]==2 免掉落缺省 :79133-79135）
+    w.store.setTileSilent(30, 190, conv, 0, 0);
+    c.g.onProjectileDeath(31, 30 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(30, 189)).toBe(0);                    // 免放（flag2 :79265）
+    expect(drops).toHaveLength(1);
+    expect(drops[0][2]).toBe('vi_169_SandBlock');            // 重挂 169（createTile=53 沙块件）
+    expect(drops[0][3]).toBe(1);                             // RequestNewItem 缺省 ×1
+    // ② rail 314 在下：免放且不掉（:79256-79259 无重挂,num18 恒 0 = 纯消失）
+    w.store.setTileSilent(32, 190, rail, 0, 0);
+    c.g.onProjectileDeath(31, 32 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(32, 189)).toBe(0);
+    expect(drops).toHaveLength(1);                           // 仍 1 = 零掉落
+    // ③ 格被占：outer else（num18=0）→ 不掉（:79301-79303）
+    w.store.setTileSilent(34, 189, sand, 0, 0);
+    c.g.onProjectileDeath(31, 34 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(34, 189)).toBe(sand);
+    expect(drops).toHaveLength(1);
+    // ④ 常规落地（实心在下）：放沙 53（:79129-79132 num17=53）
+    c.g.onProjectileDeath(31, 36 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
+    expect(w.store.get(36, 189)).toBe(sand);
+    expect(drops).toHaveLength(1);
+  });
+
   it('⑩ HitTiles 面（660 冒烟）：命中格撒 tile 色系尘 3 粒（mapColor、格心锚）；悬空消亡不撒', () => {
     const w = emptyWorld();
     const stone = TILE_INTERNAL_BY_SHEET.get(1);
@@ -376,5 +410,110 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const n0 = parts.length;
     miss.g.onProjectileDeath(660, 60 * TILE, 60 * TILE, 10, 10, 0, 4, 20, {});   // 空域
     expect(parts.length).toBe(n0);
+  });
+});
+
+// ---- ★Kill 消亡面批 3（2026-09-03）：24 型通用 HitTiles 砖屑档全量化 + 消亡原因矩阵 ----
+// 矩阵定谳（原版核）：Projectile.Kill :77649-77653 = Collision.HitTiles(position,velocity,
+// width,height) + SoundEngine.Item10，位于 Kill() 体内（:71752-78993 单口，24 型在 Kill
+// 内无更早分支吞并、仅 :71764 !active/:72087 两处早退均不涉 24 型）。Kill 到达路径：
+//   · 撞块——各 aiStyle AI（AI_001 速度反转即 Kill 等）
+//   · 寿命尽——Update :17307-17311 timeLeft-- → <=0 → Kill()
+//   · 命中敌 penetrate 耗尽——Damage_*（Update :17184 调）置 pen=0 → Update
+//     :17312-17314 pen==0 → Kill()
+// 三因同达 Kill 单口 ⇒ 砖屑面【与消亡原因无关】，尘量只受几何门支配（position+velocity
+// 扫盒 vs 实心/平台顶格，悬空到期自然零尘）。357 脉冲矢的 d206 是 AI 飞行段拖尾
+// （P.cs:57733-57748），与本砖屑面两回事；207 信号弹/357 均在 24 型档内。
+const VANILLA_HIT_TILES_24 = [14, 20, 88, 36, 83, 84, 389, 104, 279, 100, 110, 180,
+  207, 357, 242, 302, 257, 259, 285, 287, 576, 577, 876, 968];
+
+describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因矩阵金标 2026-09-03）', () => {
+  it('⑪ 14 步枪弹贴石格：spawnParticles 3 粒×命中格（格心锚/石 mapColor）+ Item_10 ×1（音面不重复）', () => {
+    const w = emptyWorld();
+    const stone = TILE_INTERNAL_BY_SHEET.get(1);
+    expect(stone).toBeDefined();
+    w.store.setTileSilent(25, 100, stone!, 0, 0);
+    const parts: Array<[number, number, string, number]> = [];
+    const hit = mkDeathGame({ world: w });
+    (hit.g as unknown as Record<string, unknown>).spawnParticles =
+      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
+    hit.g.onProjectileDeath(14, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
+    expect(parts).toHaveLength(1);                          // 1 命中格 × GetTileDustAmount(fail)=3
+    expect(parts[0][3]).toBe(3);
+    expect(parts[0][0]).toBe(25 * TILE + 8);                 // 格心锚
+    expect(parts[0][1]).toBe(100 * TILE + 8);
+    expect(parts[0][2]).toBe(TILE_DEFS[stone!].mapColor);    // 砖屑色=tile mapColor
+    expect(hit.sfx.filter((s) => s === 'Item_10')).toHaveLength(1);
+  });
+
+  it('⑫ 24 型全表单口：每一型 OPD 贴格均撒 3 粒砖屑+Item_10（无分型缺漏）;283（非档）零面', () => {
+    const missing: number[] = [];
+    const badSfx: number[] = [];
+    for (const id of VANILLA_HIT_TILES_24) {
+      const w = emptyWorld();
+      w.store.setTileSilent(25, 100, TILE_INTERNAL_BY_SHEET.get(1)!, 0, 0);
+      const parts: Array<[number, number, string, number]> = [];
+      const d = mkDeathGame({ world: w });
+      (d.g as unknown as Record<string, unknown>).spawnParticles =
+        (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
+      d.g.onProjectileDeath(id, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
+      if (parts.length !== 1 || parts[0][3] !== 3) missing.push(id);
+      if (d.sfx.filter((s) => s === 'Item_10').length !== 1) badSfx.push(id);
+    }
+    expect(missing).toEqual([]);                             // 24 型无一缺面
+    expect(badSfx).toEqual([]);                              // 音面不重复
+    // 非档对照：283 的 Kill 面在 Arrow.killNow（Game.onProjectileDeath 无分档,批①已钉）
+    const ctl = mkDeathGame({ world: emptyWorld() });
+    (ctl.g as unknown as Record<string, unknown>).spawnParticles = () => {};
+    ctl.g.onProjectileDeath(283, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 10, {});
+    expect(ctl.sfx.filter((s) => s === 'Item_10')).toHaveLength(0);
+  });
+
+  it('⑬ 寿命尽也撒（行为级）：14 弹 life=1 空中到期 → killNow→OPD 单口 Item_10 ×1;空域扫盒零砖屑（尘量几何门）', () => {
+    const dusts: DustRec[] = [];
+    const sfx13: string[] = [];
+    const parts: Array<unknown[]> = [];
+    const game = makeGame(emptyWorld(), dusts);
+    (game as unknown as { playSfxFiles: (n: string[]) => void }).playSfxFiles =
+      (names: string[]) => { sfx13.push(...names); };
+    (game as unknown as Record<string, unknown>).spawnParticles =
+      (...a: unknown[]) => { parts.push(a); };
+    // makeGame 桩的 onProjectileDeath 本体是 no-op——绑真方法（Arrow.killNow 尾单口→真 OPD；
+    // hitTilesFx 同为 Game.prototype 方法须一并绑,尘面世界/粒子源均取桩上的真 World 与 spy）
+    (game as unknown as Record<string, unknown>).onProjectileDeath =
+      (Game.prototype.onProjectileDeath as (...a: unknown[]) => void).bind(game);
+    (game as unknown as Record<string, unknown>).hitTilesFx =
+      (Game.prototype.hitTilesFx as (...a: unknown[]) => void).bind(game);
+    const a = new Arrow(400, 300, 0, 0, 10, 1, 14, null, { grav: 0, life: 1 });
+    for (let k = 0; k < 4 && !a.dead; k++) a.fixedUpdate(1 / 60, game);
+    expect(a.dead).toBe(true);
+    expect(sfx13.filter((s) => s === 'Item_10')).toHaveLength(1);   // 到期口达 Kill 单口
+    expect(parts).toHaveLength(0);                                  // 空域无实心格 → 几何门零尘
+  });
+
+  it('⑭ 源锚（矩阵钉）：face 与音同支无死因门 + killNow 尾无条件 OPD（三因同口）+ 表=24 型原版全表', () => {
+    const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    const blk = gameSrc.match(/if \(BULLET_KILL_SFX\.has\(projId\)\) \{([\s\S]*?)\n    \}/);
+    expect(blk).not.toBeNull();
+    expect(blk![1]).toContain('this.hitTilesFx(x, y, w, h, oldVx, oldVy)');
+    expect(blk![1]).toContain("this.playSfxFiles(['Item_10']");
+    const arrowSrc = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
+    expect(arrowSrc).toContain('game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy,');
+    expect([...BULLET_KILL_SFX].sort((x, y) => x - y))
+      .toEqual([...VANILLA_HIT_TILES_24].sort((x, y) => x - y));
+  });
+
+  it('⑮ 357 脉冲矢 Kill 面=HitTiles 砖屑（砖色 particles）非 d206 尾尘（d206 属 AI 飞行拖尾 :57733-57748）', () => {
+    const w = emptyWorld();
+    w.store.setTileSilent(25, 100, TILE_INTERNAL_BY_SHEET.get(1)!, 0, 0);
+    const parts: Array<[number, number, string, number]> = [];
+    const d = mkDeathGame({ world: w });
+    (d.g as unknown as Record<string, unknown>).spawnParticles =
+      (x: number, y: number, color: string, n: number) => { parts.push([x, y, color, n]); };
+    d.g.onProjectileDeath(357, 25 * TILE, 100 * TILE - 10, 8, 8, 0, 4, 20, {});
+    expect(parts).toHaveLength(1);
+    expect(parts[0][3]).toBe(3);
+    expect(d.dusts.filter((x) => x.type === 206)).toHaveLength(0);   // Kill 口不撒拖尾尘
+    expect(d.sfx.filter((s) => s === 'Item_10')).toHaveLength(1);
   });
 });

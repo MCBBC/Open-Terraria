@@ -234,3 +234,119 @@ describe('★F3③ ignoreWater 数据面真值（1457 终值 270 型）', () => 
     expect(projectileData(704)?.ignoreWater).toBe(true);   // 同族对照：704 载体真有门
   });
 });
+
+// =====================================================================
+// ★V3 溅花/湿计数段（Projectile.cs:16935-17102,producer 站=湿缓存刷新位 2026-09-03）
+//   + type34 火鞭浆穿支（:16933-16936）+ wetCount 出水冷却窗
+// =====================================================================
+describe('★V3 溅花/湿计数段（:16935-17102）逐值', () => {
+  /** 尘/音捕获宿主（spawnDust 返回可变尘对象,字段覆写可断言） */
+  function mkSplash(store: TileStore, projId: number, x: number, y: number) {
+    const dusts: Array<{ type: number; x: number; y: number; sw: number; sh: number; d: { vx: number; vy: number; scale: number; alpha: number; noGravity: boolean; color: unknown } }> = [];
+    const sounds: Array<{ file: string; vol: number; pitch: number }> = [];
+    const a = new Arrow(x, y, 0, 0, 12, 1, projId, null, { grav: 0 });
+    a.w = 10; a.h = 10;
+    const g = {
+      ...hooks(store),
+      spawnDust: (sx: number, sy: number, sw: number, sh: number, type: number) => {
+        const d = { vx: 1, vy: 1, scale: 1, alpha: 0, noGravity: false, color: null as unknown };
+        dusts.push({ type, x: sx, y: sy, sw, sh, d });
+        return d;
+      },
+      playSfxWav: (file: string, vol: number, _x?: number, _y?: number, pitch?: number) => {
+        sounds.push({ file, vol, pitch: pitch ?? 0 });
+        return true;
+      },
+    } as unknown as GameHooks;
+    const tick = (n: number) => { for (let i = 0; i < n && !a.dead; i++) a.fixedUpdate(1 / 60, g); };
+    // 溅花尘 = 溅花专用盒 (w+12,24)；同 tick 的 AI 尾尘通用段（2 型 d6 等,盒=w×h）一并
+    // 入池,断言前按盒尺寸隔离（原版同拍多尘源,逐值断言须分流）
+    const splash = () => dusts.filter((e) => e.sw === 22 && e.sh === 24);
+    return { a, dusts, splash, sounds, tick };
+  }
+
+  const waterCol = (liquidType: number) => {
+    const st = new TileStore(60, 160);
+    st.liquid[st.idx(20, 40)] = LIQ; st.liquidType[st.idx(20, 40)] = liquidType;
+    return st;
+  };
+
+  it('入水溅花：干区出生→渡入水列 → d33×10、盒 (x−6,y+h/2−8,w+12,24)、Splash_1×1', () => {
+    const S = mkSplash(waterCol(1), 2, 309, 637);   // 出生干区（探针 [309,319] 与列 20 无交）
+    S.tick(1);
+    expect(S.splash().length).toBe(0);                 // 干拍零溅花
+    S.a.x = 322;                                    // 渡入水列（探针 [322,332] ⊂ [320,336]）
+    S.tick(1);
+    expect(S.splash().length).toBe(10);                // :16950-16958 ×10
+    expect(S.splash().every((e) => e.type === 33)).toBe(true);   // dustWater() 缺省档（waterStyle 0）
+    expect(S.splash()[0].x).toBe(316);                 // 322−6
+    expect(S.splash()[0].y).toBe(634);                 // 637+5−8（入水各支含 −8）
+    expect(S.splash().every((e) => e.d.vy === -3 && e.d.vx === 2.5)).toBe(true);  // vy−4/vx×2.5
+    expect(S.splash().every((e) => e.d.scale === 1.3 && e.d.alpha === 100 && e.d.noGravity)).toBe(true);
+    expect(S.sounds.map((x) => ({ file: x.file, vol: x.vol })))
+      .toEqual([{ file: 'Splash_1', vol: 1 }]);          // 循环外 ×1（Style 缺省 1）
+    expect(S.sounds[0].pitch >= -0.1 && S.sounds[0].pitch <= 0.1).toBe(true); // Next(−10,11)×0.01
+  });
+
+  it('出水溅花：wetCount=10 冷却窗 + 水【水】支盒无 −8（:17059）+ 窗内再入水不重溅', () => {
+    const S = mkSplash(waterCol(1), 2, 309, 637);
+    S.tick(1);
+    S.a.x = 322; S.tick(1);                         // 入水（溅一次）
+    S.a.x = 500; S.a.y = 300;                       // 完全离液
+    S.tick(1);
+    expect(S.splash().length).toBe(20);                // 出水再 ×10
+    expect(S.splash()[10].y).toBe(305);                // 300+5（【水】支无 −8,唯一例外）
+    // :16984 wetCount=10 置位后同湿段尾 :17109-17112 即减 1（原版同拍 10→9）
+    expect((S.a as unknown as { wetCount: number }).wetCount).toBe(9);
+    S.a.x = 322; S.a.y = 637;                       // 窗内立即再入水
+    S.tick(1);
+    expect(S.splash().length).toBe(20);                // wetCount≠0 → 不重溅（:16936）
+    expect((S.a as unknown as { wetCount: number }).wetCount).toBe(8);    // :17109-17112 每子步 −1
+  });
+
+  it('岩浆档：浆中粘滞弹出的是岩浆花 d35（:17047 else 支,非四液）', () => {
+    const st = waterCol(2);                          // 岩浆列 20
+    st.liquid[st.idx(22, 40)] = LIQ; st.liquidType[st.idx(22, 40)] = 1;
+    const S = mkSplash(st, 2, 322, 637);            // 出生即在浆里（预置 wet+lavaWet）
+    S.tick(1);
+    expect(S.splash().length).toBe(0);                 // 湿拍 !wet 门假 → 无入水溅花
+    S.a.x = 500; S.a.y = 300;                       // 离液
+    S.tick(1);
+    expect(S.splash().length).toBe(10);
+    expect(S.splash().every((e) => e.type === 35)).toBe(true);   // lavaWet 粘滞 → 岩浆档
+    expect(S.splash().every((e) => e.d.vy === -0.5)).toBe(true); // vy−1.5
+  });
+
+  it('微光档：d308 六掷三色 + Splash_4/5 音量 0.75 循环内播但同拍去重=各 1 次', () => {
+    const S = mkSplash(waterCol(4), 2, 309, 637);
+    S.tick(1);
+    S.a.x = 322; S.tick(1);                         // 入微光
+    expect(S.splash().length).toBe(10);
+    expect(S.splash().every((e) => e.type === 308)).toBe(true);
+    expect(S.splash().every((e) => e.d.alpha === 0 && e.d.noGravity)).toBe(true); // 微光支无 α100
+    const palette = [[255, 255, 210], [190, 245, 255], [255, 150, 255], [190, 175, 255]];
+    expect(S.splash().every((e) => {
+      const c = e.d.color as { r: number; g: number; b: number; a: number };
+      return palette.some(([r, g, b]) => c.r === r && c.g === g && c.b === b && c.a === 255);
+    })).toBe(true);
+    expect(S.sounds).toHaveLength(1);               // case19 未停 break 同拍去重（:874-878）
+    expect(S.sounds[0].file).toBe('Splash_4');
+    expect(S.sounds[0].vol).toBe(0.75);             // style4/5 ×0.75（:893-896）
+    expect(S.sounds[0].pitch >= -0.2 && S.sounds[0].pitch <= 0).toBe(true);   // Next(−20,1)×0.01
+    S.a.x = 500; S.a.y = 300; S.tick(1);            // 出水 → Splash_5
+    expect(S.sounds).toHaveLength(2);
+    expect(S.sounds[1].file).toBe('Splash_5');
+  });
+
+  it('type34 火鞭浆穿支（:16933-16936）：lavaWet 不粘滞、当拍湿旗全清 → 浆里浆外零溅花', () => {
+    const S = mkSplash(waterCol(2), 34, 322, 637);  // 出生即在浆里
+    S.tick(1);
+    expect(S.splash().length).toBe(0);                 // flag2/wet 被 34 支清零 → 无入水溅花
+    expect((S.a as unknown as { lavaWet: boolean }).lavaWet).toBe(false);
+    expect((S.a as unknown as { wet: boolean }).wet).toBe(false);
+    S.a.x = 500; S.a.y = 300;                       // 离浆
+    S.tick(1);
+    expect(S.splash().length).toBe(0);                 // wet 已是 false → 不走出水支
+    expect((S.a as unknown as { wetCount: number }).wetCount).toBe(0);
+  });
+});

@@ -556,6 +556,9 @@ export class DualDungeonData {
   lastDungeonHall: V2 = v2(0, 0);
   outerPotential: DBoundsFull;
   gv: DungeonGenVars1457;
+  /** ★IIIII206：SpecialSeedFeatures.DungeonEntranceIsUnderground（drunk∨noSurface）——
+   *  dualBrickSupportCutoffY 的 Top−5/Top−10 分臂消费（runDualDungeonLayout 装配）。 */
+  ug = false;
   genPosX = 0;
   genPosY = 0;
   maxTilesX: number;
@@ -690,9 +693,10 @@ function floodedCountOf(inner: DBoundsFull, shape: ShapeData, ox: number, oy: nu
   return n;
 }
 
-/** GetDualDungeonBrickSupportCutoffY（DU:1634-1642）；underground 特典支不接（登记）。 */
+/** GetDualDungeonBrickSupportCutoffY（DU:1634-1642）；★IIIII206：underground 臂接线
+ *  （DungeonEntranceIsUnderground=drunk∨noSurface → Top−5，SPF.cs:65-75）。 */
 function dualBrickSupportCutoffY(data: DualDungeonData): number {
-  return data.outerPotential.T - 10;
+  return data.outerPotential.T - (data.ug ? 5 : 10);
 }
 
 // —— Regular room（RegularDungeonRoom.cs 全量）——
@@ -3390,18 +3394,38 @@ class DualProvider {
     return room;
   }
 
-  /** CalculateDungeonBounds（:577-603）。 */
-  private calculateDungeonBounds(hallList: DHallBase[]): void {
+  /** CalculateDungeonBounds（:577-603）。
+   *  ★IIIII192 定谳两刀：①C# 调用面=「CalculateDungeonBounds(data, list.Concat({starting}),
+   *  halls)」（DualDungeonLayoutProvider.cs:469）——并集域=**常规房(list)+起始房+厅**，
+   *  **不含**入口房与 Biome 房；②C# DungeonBounds 首元素语义——UpdateBounds(bounds) 在
+   *  Width==0||Height==0（初值 0,0,0,0）时走 **SetBounds(首元素原值)**，后续才 min/max
+   *  （DungeonBounds.cs:294-304）——本仓旧版 DBoundsFull(10,10,10,10) 基准并集 ⇒ L 基线
+   *  10 vs C# 首房 Left ⇒ progBounds W/H 全错 → S1 标枪/CLUMP/LATE/TRAPS 等所有
+   *  progBounds 消费窗同 roll 值落不同坐标（x86 S1 hit=59/ok=18 vs JS 43/11、rc 恒等的
+   *  实锤签名）。 */
+  private calculateDungeonBounds(hallList: DHallBase[], roomList?: DRoomBase[]): void {
     const data = this.data;
-    const rooms = [...data.rooms];
+    const rooms = roomList ?? [...data.rooms];
     const count = data.gv.dungeonGenerationStyles.length;
     data.outerProgressionBounds = [];
     for (let i = 0; i < count; i++) {
+      let first = true;
+      let L = 0, T = 0, R = 0, B = 0;
+      const upd = (l: number, t: number, r: number, b: number): void => {
+        if (first) { L = l; T = t; R = r; B = b; first = false; return; }
+        if (l < L) L = l;
+        if (r > R) R = r;
+        if (t < T) T = t;
+        if (b > B) B = b;
+      };
+      for (const rm of rooms) upd(rm.outer.L, rm.outer.T, rm.outer.R, rm.outer.B);
+      for (const hl of hallList) upd(hl.bounds.L, hl.bounds.T, hl.bounds.R, hl.bounds.B);
+      if (T < data.outerPotential.T) T = data.outerPotential.T;
+      if (B > data.outerPotential.B) B = data.outerPotential.B;
+      if (R <= L) R = L + 1;
+      if (B <= T) B = T + 1;
       const bb = new DBoundsFull(this.ctx.w, this.ctx.h);
-      for (const rm of rooms) bb.updBox(rm.outer.L, rm.outer.T, rm.outer.R, rm.outer.B);
-      for (const hl of hallList) bb.updBox(hl.bounds.L, hl.bounds.T, hl.bounds.R, hl.bounds.B);
-      if (bb.T < data.outerPotential.T) bb.T = data.outerPotential.T;
-      if (bb.B > data.outerPotential.B) bb.B = data.outerPotential.B;
+      bb.L = L; bb.T = T; bb.R = R; bb.B = B;
       bb.calc();
       data.outerProgressionBounds.push(bb);
     }
@@ -3644,7 +3668,12 @@ class DualProvider {
     }
     drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|mr=${drlMr()}|rc=${drlRc()}`);
     ctx.snap('dualHalls');
-    this.calculateDungeonBounds(data.halls);
+    // ★IIIII192：并集域=C# list(常规房,CSR 就地替换后)+starting+ **calculator 局部 halls**
+    //   （DualDungeonLayoutProvider.cs:469 实参面——**不含**入口房/biome 房，且**不含**
+   //   data.halls 里的入口 stairwell 厅：其 Bounds 按竖井全域展开(:118 SetBounds 起点退化盒
+   //   +GenerateHallway :211-214 !Processed 展开)会把并集 Top 拉到竖井顶——x86 实锤
+   //   progBounds T=371(=常规房 r9 顶) vs 旧 JS T=347(竖井顶被 outerPotential 钳制值)）。
+    this.calculateDungeonBounds(halls, [...regularRooms, startingRoom]);
     drlMark(`DR|S|i${iN}|BND rc=${drlRc()}`);
     // —— 房间 GenerateRoom 循环 + PreHallways 特征 ——
     // ★IIIII168：bbox 快照钩（dormant,零掷;__swI168BB 未挂载=零开销）——与 x86 rig
@@ -3944,6 +3973,7 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     Math.max(10, Math.min(ctx.w - 10, Math.trunc(pbSrc.r))), Math.max(10, Math.min(ctx.h - 10, Math.trunc(pbSrc.b))));
   else outerPot.set(Math.trunc(ctx.w * 0.05), Math.trunc((ctx.ws + 10) / ctx.h * ctx.h), Math.trunc(ctx.w * 0.45), ctx.h - 200);
   const data = new DualDungeonData(ctx.w, ctx.h, outerPot, gv);
+  data.ug = !!ctx.gs.seedFlags.drunkWorld || !!ctx.gs.seedFlags.noSurface;   // ★IIIII206
   _dataRefValue = data;
   ctx.tierCtx = _tierGlobal;
   ctx.data = data;

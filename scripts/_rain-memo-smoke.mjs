@@ -83,6 +83,34 @@ const stats = await page.evaluate(async () => await new Promise(res => {
 stats.sort((a, b) => a - b);
 console.log(`rAF n=${stats.length} p50=${stats[300].toFixed(1)}ms p90=${stats[540].toFixed(1)}ms p99=${stats[594].toFixed(1)}ms max=${stats[595].toFixed(1)}ms`);
 
+// ---- ★PR#2 memo 位级不变量断言(F1 热修的自动化验证) ----
+const memoCheck = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const wr = g.renderer ?? g.render;
+  const fx = wr?.weatherFx ?? null;
+  if (!fx) return { skip: 'no weatherFx' };
+  const proto = Object.getPrototypeOf(fx);
+  if (typeof proto.bakeMemoized !== 'function') return { skip: 'no bakeMemoized' };
+  const { tintedFlake } = await import('/src/render/WeatherRenderer.ts');
+  const dTex = new Image(); dTex.src = 'sprites/vanilla/Dust.png';
+  await new Promise(r => { dTex.onload = r; dTex.onerror = r; });
+  const bake = (k, r, g2, b2) => proto.bakeMemoized.call(fx, k, () => tintedFlake(dTex, r, g2, b2, 0));
+  const px = (c) => { if (!c) return 'null'; const x = c.getContext('2d'); const d = x.getImageData(0, 0, c.width, c.height).data;
+    let h = ''; for (let i = 0; i < d.length; i += 4) h += ((d[i] << 16) | (d[i+1] << 8) | d[i+2]).toString(36) + ','; return h; };
+  const A1 = bake('probe|A', 0.9, 0.3, 0.2);
+  const B  = bake('probe|B', 0.1, 0.8, 0.6);
+  // ①命中不重烘:gen 抛错也不该被调
+  let rebaked = false;
+  const A2 = bake('probe|A', () => { rebaked = true; return null; });
+  // ②跨 key 烘焙后,A 的自有克隆不受 scratch 覆写影响(F1 热修不变量)
+  const A_fresh = tintedFlake(dTex, 0.9, 0.3, 0.2, 0);   // 直接重烘参照
+  const okHit = (A2 === A1) && !rebaked;
+  const okClone = px(A1) === px(A_fresh);
+  const okDiff = px(A1) !== px(B);
+  return { okHit, okClone, okDiff, note: (okHit && okClone && okDiff) ? 'INVARIANTS HOLD' : 'INVARIANT VIOLATION' };
+});
+console.log('memo-invariants:', JSON.stringify(memoCheck));
+
 const poolInfo = await page.evaluate(() => {
   const g = window.__swGame;
   const wr = g.renderer ?? g.render;

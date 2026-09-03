@@ -8,7 +8,7 @@ import { it } from 'vitest';
 import { openSync, writeSync, closeSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG } from '../src/core/rng';
-import { __setTrackStepProbe } from '../src/world/gen/vanilla/TrackPass';
+import { __setTrackStepProbe, __setTrackKillProbe } from '../src/world/gen/vanilla/TrackPass';
 
 const RUN = process.env.SW_I190WIN === '1';
 const OUT = process.env.SW_I190_OUT ?? '/tmp/iii190-out';
@@ -51,12 +51,31 @@ for (const f of (process.env.SW_I190_FLAGS ?? 'startInHardmode').split(',').filt
     if (buf.length >= 500_000) flush();
   };
   g.__swMbDraws = () => ln;
+  // IIII190：TF/TI 事件迹（与 x86 JJHook FntLog 同词表；rc=窗口 ln）
+  (g as unknown as { __swFntProbeI39?: unknown }).__swFntProbeI39 = {
+    emit: (l: string) => {
+      if (!winOn) return;
+      buf.push(`F|${l}`);
+      if (buf.length >= 500_000) flush();
+    },
+    rc: () => ln,
+  };
 
   __setTrackStepProbe((loop, k, x, y, ph) => {
     if (!winOn) return;
     buf.push(`MARK|TRK${loop}#${k}@${x},${y}ph${ph}|ln=${ln}`);
     if (buf.length >= 500_000) flush();
   });
+  __setTrackKillProbe((draws, x, y, sheet, fx, fy) => {
+    if (!winOn) return;
+    buf.push(`KILL|${draws}|${x} ${y} ${sheet} ${fx} ${fy}`);
+    if (buf.length >= 500_000) flush();
+  }, () => ln);
+  g.__swKill190 = (_draws, x, y, sheet, fx, fy) => {
+    if (!winOn) return;
+    buf.push(`KILL2|${ln}|${x} ${y} ${sheet} ${fx} ${fy}`);
+    if (buf.length >= 500_000) flush();
+  };
 
   RNGp.reseed = function (this: unknown, s: number) {
     if (armNext && !winOn) {
@@ -87,9 +106,12 @@ for (const f of (process.env.SW_I190_FLAGS ?? 'startInHardmode').split(',').filt
   } finally {
     RNGp.reseed = oReseed;
     __setTrackStepProbe(undefined);
+    __setTrackKillProbe(undefined);
+    delete g.__swKill190;
     delete g.__swOnRoll;
     delete g.__swSeg;
     delete g.__swMbDraws;
+    delete (g as unknown as { __swFntProbeI39?: unknown }).__swFntProbeI39;
     flush();
     closeSync(fd);
   }

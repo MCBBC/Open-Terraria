@@ -1235,6 +1235,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           ly = ly / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
           shoot(game, e.cx + lx * 15, e.cy + ly * 15, lx, ly,
             getAttackDamageForProjectiles(20, 19, e.difficulty), 83);
+          // 弹 83 出生音:Projectile.cs:56195-56199 ai[1]==0 首拍 SoundID.Item33——
+          // 本仓 83 走 Arrow 直飞桶无 ai[1] 态,于发射点等价结算(同 462/259 先例)
+          game.playSfxWav?.('Item_33', 1, e.cx + lx * 15, e.cy + ly * 15);
         }
       }
     } else if (e.ai1 === 1) {

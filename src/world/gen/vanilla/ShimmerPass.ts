@@ -418,6 +418,12 @@ function killStalactiteTile(
 ): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // IIII190 探针：CheckStalactite 杀支（vanilla=KillTile，x86 KLOG 有账）镜像补记
+  //   ——置于 !active 早退**之前**（JJHook KillProbe 同位，no-op 调用也记账）
+  try {
+    const g = globalThis as unknown as { __swKill190?: (draws: number, x: number, y: number, sheet: number, fx: number, fy: number) => void };
+    g.__swKill190?.(0, x, y, st.flags[i] ? 165 : 0, st.frameX[i] ?? 0, st.frameY[i] ?? 0);
+  } catch { /* noop */ }
   if (!st.flags[i]) return;
   d59({ e: 'kill', x, y });
   st.flags[i] = 0; st.half[i] = 0;

@@ -6,6 +6,7 @@
 // SW 缺陷：演化放置端 place1 无门=粘滞非法生成（写入监听只查上方格,新放植株
 // 自身永不被复检）；读档/导入期遗留件无收口。修：fitTopPlant 门+sanitizePlants。
 import { describe, it, expect, vi } from 'vitest';
+import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { WorldEvolution, type EvolutionHost } from '../src/world/evolution/WorldEvolution';
@@ -65,7 +66,7 @@ describe('fitTopPlant（IsFitToPlaceFlowerIn :58714 + PlaceTile 61/71 内联支�
 describe('创建路径整合（overgroundTile 经 fitTopPlant 门）', () => {
   const rnd0 = () => 0;
   function sampleTop(st: TileStore, evo: WorldEvolution) {
-    const rnd = vi.spyOn(Math, 'random').mockImplementation(rnd0);
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockImplementation(rnd0);
     try { (evo as unknown as { overgroundTile(i: number, j: number, wallDist: number): void }).overgroundTile(20, 20, 1); } finally { rnd.mockRestore(); }
     return typeAt(st, 20, 19);
   }
@@ -88,7 +89,7 @@ describe('growCactus 支撑形态双态门（cs:57060-57061，2026-08-26 案③�
     });
   }
   const grow = (evo: WorldEvolution, rndVal = 0.01) => {
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(rndVal);
+    const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(rndVal);
     try { (evo as unknown as { growCactus(i: number, j: number): void }).growCactus(20, 20); } finally { rnd.mockRestore(); }
   };
   it('S1 坡沙上不生长（用户案③根因：运行时语境拒绝坡面基格）', () => {
@@ -118,7 +119,7 @@ describe('全族审查补齐（2026-08-26 全面 review）', () => {
     for (const [sl, want] of [[3, 0], [4, 0], [1, VINE636], [2, VINE636], [0, VINE636]] as const) {
       const { st, evo } = mkWorld((s) => s.setTile(20, 20, CORRUPT));
       if (sl) st.setSlope(20, 20, sl);
-      const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);  // 1/maxV=1/60 必过
+      const rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.01);  // 1/maxV=1/60 必过
       try { (evo as unknown as { vineFamily(i: number, j: number, s2: number): void }).vineFamily(20, 20, 23); } finally { rnd.mockRestore(); }
       expect(typeAt(st, 20, 21)).toBe(want);
     }
@@ -133,11 +134,11 @@ describe('全族审查补齐（2026-08-26 全面 review）', () => {
   it('蘑菇草地表顶 71 经门：平整长出、坡面不长（overgroundTile 整合）', () => {
     const MUSHGRASS = sid(70), TOP71 = sid(71);
     const flat = mkWorld((s) => s.setTile(20, 20, MUSHGRASS));
-    let rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    let rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.01);
     try { (flat.evo as unknown as { overgroundTile(i: number, j: number, w: number): void }).overgroundTile(20, 20, 1); } finally { rnd.mockRestore(); }
     expect(typeAt(flat.st, 20, 19)).toBe(TOP71);
     const slope = mkWorld((s) => { s.setTile(20, 20, MUSHGRASS); s.setSlope(20, 20, 1); });
-    rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    rnd = vi.spyOn(RNG.prototype, 'next').mockReturnValue(0.01);
     try { (slope.evo as unknown as { overgroundTile(i: number, j: number, w: number): void }).overgroundTile(20, 20, 1); } finally { rnd.mockRestore(); }
     expect(typeAt(slope.st, 20, 19)).toBe(0);
   });

@@ -1755,6 +1755,10 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
   //   本钩子内 portalGun 与 finalSeedCleanup 之间。
   runFinalCleanupPass(store, ctxGs[0]!, rng, {
     chests: world.chests as never,
+    // ★IIIII203：Main.spawnTileX/Y（SpawnPoint pass 出口值）——FinishRemixWorld
+    //   ④ 出生列复检（cs:26908-26912 `tile[spawnX, spawnY-num7].liquid>0`）消费
+    spawnX: world.spawnX,
+    spawnY: world.spawnY,
     beforeShimmer: () => {
           // ★IIIII16（2026-08-28）：FinalizeSecretSeeds 终结面九旗标子集，按 cs:589-663
           //   原 if 链序——surfaceIsInSpace(:599) → surfaceIsMushrooms(:607-614 含 !noSurface
@@ -1886,7 +1890,8 @@ function vanillaGrassWall({ store, rng }: GenCtx) {
 // RunPass 每 pass 头重播种子（WorldGenerator.cs:497）故不外溢下游 pass——starterNpcsPass
 // 内部注有逐行锚点
 function starterNpcsSlot(ctx: GenCtx) {
-  starterNpcsPass({ store: ctx.store, rng: ctx.rng, world: ctx.world });
+  // ★IIIII194：gs 透传——EmptyTile 实体面（wgNpcs）登记域
+  starterNpcsPass({ store: ctx.store, rng: ctx.rng, world: ctx.world, gs: ctxGs[0]! });
 }
 
 // 海滩装饰：贝壳堆 + 海藻（原版 ShellPiles pass + GrowCheckSeaweed）

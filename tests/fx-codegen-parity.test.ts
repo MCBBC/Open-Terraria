@@ -73,7 +73,9 @@ describe('fx-codegen-parity：codegen ↔ VM 位级差分门', () => {
       expect(pass).toBeTruthy();
       for (const sc of SCENES) {
         const { seed, uni } = mkRun(sc);
-        // A. 直连逐像素
+        // A. 直连逐像素（v0 双变体：恒白=历史域；dim 光色=v0 化批新增域）
+        const V0_VARS: Array<[number, number, number]> = [[1, 1, 1], [0.3, 0.35, 0.42]];
+        for (const v0rgb of V0_VARS) {
         for (let cell = 0; cell < W * H; cell++) {
           const x = cell % W, y = (cell / W) | 0;
           const tx = sc.rect ? (sc.rect.sx + x + 0.5) / sc.rect.sheetW : (x + 0.5) / W;
@@ -82,11 +84,11 @@ describe('fx-codegen-parity：codegen ↔ VM 位级差分门', () => {
           const samplers = buildSamplers(seed);
           setSm2CodegenEnabled(false);
           const regsA = new Float64Array(32 * 4), texA = new Float64Array(8 * 4), vA = new Float64Array(8), oA = new Float64Array(4);
-          vA[0] = vA[1] = vA[2] = vA[3] = 1;
+          vA[0] = v0rgb[0]; vA[1] = v0rgb[1]; vA[2] = v0rgb[2]; vA[3] = 1;
           const vm = pass.execPixel(c, regsA, texA, vA, oA, tx, ty, samplers);
           setSm2CodegenEnabled(true);
           const regsB = new Float64Array(32 * 4), texB = new Float64Array(8 * 4), vB = new Float64Array(8), oB = new Float64Array(4);
-          vB[0] = vB[1] = vB[2] = vB[3] = 1;
+          vB[0] = v0rgb[0]; vB[1] = v0rgb[1]; vB[2] = v0rgb[2]; vB[3] = 1;
           const gen = pass.execPixel(c, regsB, texB, vB, oB, tx, ty, samplers);
           if ((vm === null) !== (gen === null)) { failures++; continue; }
           if (vm && gen) for (let k = 0; k < 4; k++) {
@@ -94,20 +96,23 @@ describe('fx-codegen-parity：codegen ↔ VM 位级差分门', () => {
             const sameClass = (Number.isNaN(a) && Number.isNaN(b));
             if (!sameClass && !Object.is(a, b)) {
               failures++;
-              if (failures <= 12) console.error(`DIFF ${name}/${sc.id} (${x},${y}) ch${k}: VM=${a} GEN=${b}`);
+              if (failures <= 12) console.error(`DIFF ${name}/${sc.id} v0=${v0rgb} (${x},${y}) ch${k}: VM=${a} GEN=${b}`);
             }
           }
         }
-        // B. 全栈 uint8
-        setSm2CodegenEnabled(false);
-        const dVM = new Uint8ClampedArray(seed);
-        runPassOnImageData(pass, dVM, W, H, uni, [], sc.rect);
-        setSm2CodegenEnabled(true);
-        const dGen = new Uint8ClampedArray(seed);
-        runPassOnImageData(pass, dGen, W, H, uni, [], sc.rect);
-        for (let i = 0; i < dVM.length; i++) if (dVM[i] !== dGen[i]) {
-          failures++;
-          if (failures <= 12) console.error(`STACK-DIFF ${name}/${sc.id} byte#${i}: VM=${dVM[i]} GEN=${dGen[i]}`);
+        }
+        // B. 全栈 uint8（v0 双变体同上）
+        for (const v0rgb of V0_VARS) {
+          setSm2CodegenEnabled(false);
+          const dVM = new Uint8ClampedArray(seed);
+          runPassOnImageData(pass, dVM, W, H, uni, [], sc.rect, v0rgb);
+          setSm2CodegenEnabled(true);
+          const dGen = new Uint8ClampedArray(seed);
+          runPassOnImageData(pass, dGen, W, H, uni, [], sc.rect, v0rgb);
+          for (let i = 0; i < dVM.length; i++) if (dVM[i] !== dGen[i]) {
+            failures++;
+            if (failures <= 12) console.error(`STACK-DIFF ${name}/${sc.id} v0=${v0rgb} byte#${i}: VM=${dVM[i]} GEN=${dGen[i]}`);
+          }
         }
       }
     }

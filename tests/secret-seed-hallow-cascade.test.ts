@@ -16,7 +16,7 @@ import { RNG } from '../src/core/rng';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import {
-  convertHallowCell, doHallowOnSurface,
+  convertHallowCell, doHallowOnSurface, doWorldIsFrozenFinish,
 } from '../src/world/gen/vanilla/SecretSeedDoEndsPass';
 import { initializeHardMode } from '../src/world/gen/vanilla/HardmodePass';
 
@@ -272,5 +272,52 @@ describe('★RV-R4 行程随机性形状（cs:1969 条件重估语义，SecretSe
     const gs = { seedFlags: { noSurface: true }, worldSurface: 300, rockLevel: rl } as never;
     const { rolls } = countRolls(() => doHallowOnSurface(st, new RNG(606), gs));
     expect(rolls).toBe(referenceConditionRolls(w, Math.floor(rl), 606)); // 镜像逐位
+  });
+});
+
+// =====================================================================
+// ★V4 Santa 臂（WorldGen.cs:2205-2221 DoWorldIsFrozenFinish endlessChristmas 组合支,
+//   2026-09-03）：向导 22 → Santa 142 homeless 异位替换——生成器无 NPC 实体域 →
+//   投影到 flags.santaReplacedGuide + 十周年播种记录就地改键（零掷骰）。
+// =====================================================================
+describe('★V4 DoWorldIsFrozenFinish Santa 臂（cs:2205-2221）', () => {
+  const mkWorld = (starterTownNpcs?: Array<{ key: string; givenName: string; x: number; y: number; anchor: [number, number]; dir: -1 | 1; variationIndex?: number }>) =>
+    ({ flags: {}, starterTownNpcs }) as never as import('../src/world/World').World;
+  const GS = (f: Record<string, boolean>) => ({ seedFlags: f }) as never;
+  const rngAlwaysZero = () => ({ nextInt: () => 0 }) as never as RNG;
+  const chests = () => [[{ id: 1, stack: 1 }, null, null]] as never;
+
+  it('门：skyblock / 非 endlessChristmas 双早退——零旗标零记录零掷（普通种子零扰动）', () => {
+    for (const f of [{ skyblock: true, endlessChristmas: true }, { skyblock: false, endlessChristmas: false }]) {
+      const w = mkWorld([{ key: 'guide', givenName: 'Andrew', x: 0, y: 0, anchor: [1, 1], dir: 1 }]);
+      doWorldIsFrozenFinish({} as never, rngAlwaysZero(), GS(f), chests(), w);
+      expect((w as unknown as { flags: Record<string, boolean> }).flags.santaReplacedGuide).toBeUndefined();
+      expect(w.starterTownNpcs![0].key).toBe('guide');
+    }
+  });
+
+  it("endlessChristmas：记录域就地异位替换 guide→santa_claus（givenName 空串/dir=1/无变体）+ 旗置位", () => {
+    const w = mkWorld([
+      { key: 'guide', givenName: 'Andrew', x: 100, y: 200, anchor: [6, 7], dir: 1 },
+      { key: 'steampunker', givenName: 'Whitney', x: 130, y: 200, anchor: [8, 7], dir: -1 },
+    ]);
+    doWorldIsFrozenFinish({} as never, rngAlwaysZero(), GS({ skyblock: false, endlessChristmas: true }), chests(), w);
+    expect((w as unknown as { flags: Record<string, boolean> }).flags.santaReplacedGuide).toBe(true);
+    expect(w.starterTownNpcs![0].key).toBe('santa_claus');
+    expect(w.starterTownNpcs![0].givenName).toBe('');       // 142 名字掷 = getNewNPCName default ""
+    expect(w.starterTownNpcs![0].dir).toBe(1);              // :2212 direction = 1
+    expect(w.starterTownNpcs![0].variationIndex).toBeUndefined();
+    expect(w.starterTownNpcs![0].x).toBe(100);              // position = 向导位（异位替换原位）
+    expect(w.starterTownNpcs![1].key).toBe('steampunker');  // 其余播种席不动
+  });
+
+  it('无记录世界：仅置旗（消费端压制向导兜底+直生 Santa）,记录域零写;骰耗 = 箱 Next(2) 唯一', () => {
+    const w = mkWorld(undefined);
+    const { value, rolls } = countRolls(() =>
+      doWorldIsFrozenFinish({} as never, new RNG(12345) as never, GS({ skyblock: false, endlessChristmas: true }), chests(), w));
+    void value;
+    expect((w as unknown as { flags: Record<string, boolean> }).flags.santaReplacedGuide).toBe(true);
+    expect(w.starterTownNpcs).toBeUndefined();
+    expect(rolls).toBe(1);                                  // 单箱 Next(2)=Santa 臂零骰（NewNPC(142) 无名字掷）
   });
 });

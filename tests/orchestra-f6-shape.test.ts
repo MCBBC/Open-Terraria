@@ -214,7 +214,10 @@ describe('★F6 收尾批结构锚（M3/M4/M5/M6 站）', () => {
     for (let i = 0; i < N; i++) {
       const h = mkH();
       stardustPunchFx(asG(h), 0, 0, 0, 0, rng);
-      for (const p of h.particles) {
+      // ★迁移后 sparkle 走 spawnDust prettySparkle 档（type 0+scaleX/scaleY）——
+      //  d267（type 267）的自有 circ(2,2) 速度与 sparkle 振幅域不同,按 type 分流
+      for (const p of h.dusts) {
+        if (p.type !== 0) continue;
         const amp = Math.hypot(Number(p.vx), Number(p.vy));   // move=0 → 速度=dir×0.1·scale
         n++; sum += amp;
         if (amp < 0.04 - 1e-9 || amp > 0.08 + 1e-9) out++;

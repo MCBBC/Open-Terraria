@@ -5311,8 +5311,14 @@ export class Player extends Entity {
   deadCellsBeheadedStep(game: GameHooks): void {
     // ★F4③（2026-09-01）补 !stoned 门——仓内有真实石化态（BuffType.Stoned=156,
     // :3619 lastStoned 过渡同源）非"不可达态",原版门串 :24494 含 !stoned && !frozen
+    // ★F4④/V7（2026-09-03）frozen 真实映射落地——原版 `!frozen` 是 Player.frozen
+    //   状态位（每帧 :18767 复位、buff 循环内 :10143 buff47 Frozen / :11874-11875
+    //   buff353 Shimmer 双源置位）。旧写 frozen≈shimmering 登记映射只覆盖 353 源,
+    //   47 源（冰冻枪/冰雪敌人/寒冰buff）漏门 ⇒ 戴 282 头被冻结时仍喷残影。本仓
+    //   BuffType.Frozen=63 ↔ vanilla 47（Buffs.ts:520）,双源口径与 projTargets
+    //   frozen 探针（frozen: has(63)||shimmering）同式对齐。
     if (this.dead || this.isGhostPhase(game.world) || this.shimmering
-      || this.buffs.has(BuffType.Stoned)) return;   // dead/ghost/frozen(shimmering)/stoned 门
+      || this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned)) return;   // !frozen 双源 + !stoned
     if (this.headArmorSlot !== 282) return;                    // head == 282（枭首者头部 5457）
     if (this.sitting || this.sleeping) return;                 // !sitting.isSitting && !sleeping.isSleeping
     if (this.mount.active && !!MOUNT_SETS.PlayerIsHidden?.[this.mount.type]) return;   // PlayerIsHidden 门

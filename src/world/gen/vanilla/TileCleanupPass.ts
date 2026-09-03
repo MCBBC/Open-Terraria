@@ -6,7 +6,8 @@
 //     runTileCleanupPass(store, rng, gs);
 //
 // 12 个子项处置(审计裁决「补」):
-//   ① tileSolid[379]=false 临时覆写(cs:21329)——本 pass 全程生效,⑫ 末尾还原(cs:21750)
+//   ① tileSolid[379]=false 临时覆写(1456 cs:21329/1457 cs:21704)——本 pass 全程生效,
+//      ⑫ 末尾还原(1456 cs:21750/1457 cs:22128)
 //   ② 全图清坡(cs:21333-21343):非 SaveSlopes 类型一律 ClearSlope
 //      (= slope(0)+halfBrick(false) 双清,Tile.cs:158-163)
 //   ③ 坡接半砖修复(cs:21344-21353):坡面格朝半砖格一侧 → slope=0+halfBrick
@@ -96,25 +97,34 @@ const PLATFORM_99 = new Set([19, 427, 435, 436, 437, 438, 439]);
  *  Main.tileSolid 拷贝——之后生成期的一切 tileSolid 翻转（含本 pass 头的 379=false）
  *  都不再影响它。曾用 genSolidType 叠加（379 等生成期翻非实心族被误清坡 →
  *  solidTile 门连锁放行 → #99 T0>373 滴水石笋族 + S1/S2 残坡双症状）。
- *  379 静态初值即 false（数据表同），静态读法对本种子零差——但语义必须静态。 */
+ *  ★IIIII201（2026-09-03）再勘误：379 静态初值是 **true**（1456 Main.cs:9378 /
+ *  1457 Main.cs:9607；曾误记 false——DoUpdateInWorld 的翻 false 是运行窗行为,
+ *  静态构造在此之前）,故 SaveSlopes[379]=true,②清坡须保 379 带坡格（见下）。 */
 function isSaveSlope(t: number): boolean {
-  // ★IIII 补：仓库 TILE_DEFS.solid 与原版 pristine Main.tileSolid 有三族差——
+  // ★IIII 补：仓库 TILE_DEFS.solid 与原版 pristine Main.tileSolid 有四族差——
   // ⑴ 平台族 sheet{19,239,380,427,435-439}（原版 tileSolid=true、仓库碰撞语义
   //    solid=false；残坡 S1/S2×154 全是 t19 平台带坡被误清,实测定型）；
   // ⑵ 192 活树叶（Main.cs:10167 初值 true,仓库预翻 false）；
-  // ⑶ 481-483 裂砖（Main.cs:7865 初值 true,仓库预翻 false）。
-  // TileID 静态构造远早于生成期翻转 → SaveSlopes 读 pristine 初值。
+  // ⑶ 481-483 裂砖（Main.cs:7865 初值 true,仓库预翻 false）；
+  // ⑷ ★IIIII201（2026-09-03）379 泡泡块（1456 Main.cs:9378 / 1457 Main.cs:9607
+  //    静态初值 true,仓库 solid=false=运行时碰撞语义）——TileID.cs:429-432 静态
+  //    构造 SaveSlopes=tileSolid∪NonSolidSaveSlopes 在任何生成期翻转之前,故
+  //    SaveSlopes[379]=true,②清坡须保 379 带坡格。waterpark 实证：全世界恰 6 格
+  //    活性 379 带坡(915,488)-(3340,1001),误清= mile8 #100 Sl=6 残量
+  //    (S1>0×3/S2>0×1/S3>0×1/S4>0×1),并经 SolidTile(slope==0) 门级联
+  //    #102 水生植物 56/#103 Stalac 208/#105 终清 6269。
   const sh = SHEET_OF[t] ?? -1;
   const pristineSolid = !!TILE_DEFS[t]?.solid
     || sh === 19 || sh === 239 || sh === 380 || sh === 427
     || (sh >= 435 && sh <= 439)
-    || sh === 192 || sh === 481 || sh === 482 || sh === 483;
+    || sh === 192 || sh === 481 || sh === 482 || sh === 483
+    || sh === 379;
   return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:1456 42370 / 1457 70682):active && tileSolid && !tileSolidTop
  *  && !halfBrick && slope==0 && !inActive。
- *  tileSolid 走 GenSolid（① 的 379 覆写 = pass 头 cs:21331 翻转）;tileSolidTop
+ *  tileSolid 走 GenSolid（① 的 379 覆写 = pass 头 1456 cs:21331/1457 cs:21704 翻转）;tileSolidTop
  *  近似为 platform(与 HalfBrickPass 同口径)。
  *  ★QQQB 定罪（2026-08-26，s22222 链 #100 滴水石笋 28 格）：曾漏 **!inActive()**——
  *  被致动(inActive 位=wire bit5)的锚格在原版不算实心，⑤ 门应跳过该空格（仅耗
@@ -197,9 +207,9 @@ export function runTileCleanupPass(
   chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
   gp?: import('../GenProgress').GenProgress,
 ): void {
-  // ★① pass 头 tileSolid 翻转（cs:21331 `Main.tileSolid[379] = false`）：泡泡块非实心
-  //   ——原 solidTile/isSaveSlope 内的 BUBBLE 特判已并入 GenSolid（genSolidType）。
-  //   pass 尾 ⑫ 还原 true（cs:21750,见函数尾）。
+  // ★① pass 头 tileSolid 翻转（1456 cs:21331 / 1457 cs:21704 `Main.tileSolid[379] = false`）：
+  //   泡泡块非实心——原 solidTile/isSaveSlope 内的 BUBBLE 特判已并入 GenSolid
+  //   （genSolidType）。pass 尾 ⑫ 还原 true（1456 cs:21750 / 1457 cs:22128,见函数尾）。
   flipGenSolid([379], false);
   const { w, h } = st;
 
@@ -240,6 +250,12 @@ export function runTileCleanupPass(
       }
 
       // ⑤ 滴水石笋(cs:21358-21435):空格+无液+上方实心才进
+      //   ★IIIII201：落位写侧改直写（type/frameX/frameY/active 四件,照 cs:21393-21397
+      //   原文字段集）——曾走 setTileSilent,其 PlaceTile 式 ClearBlockPaintAndCoating
+      //   （Tile.cs:934-939 同构位）把格上**生成期涂层位**抹掉：waterpark 泡泡方块
+      //   （cs:1788-1794 全方格 fullbrightBlock(true)）内落位的滴头失去亮涂层 →
+      //   DoExtraLiquidFinish 的 fullbright 支（cs:1852-1860,type∈{375,373,374,709}
+      //   →active(false) 留 ghost）不触发 → mile8 #105 T0>373×244/T0>374×196。
       if (!st.flags[i] && st.liquid[i] === 0 && rng.int(0, 2) !== 0 && solidTile(st, k, l - 1)) {
         // 上扫(cs:21360-21411):l-2 起向上 num(15-20) 格,液体>=128
         let num = rng.int(15, 20); // Next(15,21)
@@ -250,7 +266,7 @@ export function runTileCleanupPass(
             if (rng.int(0, maxValue - 1) <= 1) { // Next(maxValue)
               let drip = dripFor(st.liquidType[up]);
               if (st.wall[i] === BEE_WALL) drip = DRIP_HONEY; // cs:21404
-              st.setTileSilent(k, l, drip, 0, 0);
+              st.type[i] = drip; st.frameX[i] = 0; st.frameY[i] = 0; st.flags[i] = 1;
               break;
             }
           }
@@ -263,7 +279,7 @@ export function runTileCleanupPass(
             if (st.liquid[dn] >= 200 && st.liquidType[dn] !== LIQUID_TYPE.SHIMMER) {
               const dist = m - l;
               if (rng.int(0, dist * 3 - 1) <= 1) { // Next(dist*3)
-                st.setTileSilent(k, l, dripFor(st.liquidType[dn]), 0, 0);
+                st.type[i] = dripFor(st.liquidType[dn]); st.frameX[i] = 0; st.frameY[i] = 0; st.flags[i] = 1;
                 break;
               }
             }
@@ -273,7 +289,7 @@ export function runTileCleanupPass(
         if (!st.flags[i] && rng.int(0, 3) === 0) { // Next(4)
           const above = st.idx(k, l - 1);
           if (CONV_SANDSTONE.has(st.type[above]) || CONV_HARDENED_SAND.has(st.type[above])) {
-            st.setTileSilent(k, l, SAND_PILE, 0, 0);
+            st.type[i] = SAND_PILE; st.frameX[i] = 0; st.frameY[i] = 0; st.flags[i] = 1;
           }
         }
       }
@@ -282,10 +298,22 @@ export function runTileCleanupPass(
       if (st.wall[i] === 13 || st.wall[i] === 14) {
         st.liquid[i] = 0; // 原版只清液量,liquidType 位保留
       }
-      // ⑥ 墙 87(cs:21441-21458):extraLiquid 特殊种子分支未实装(SeedFlags 无该旗标),
-      //    恒走普通世界分支 = 液体清零
+      // ⑥ 墙 87(1456 cs:21441-21458 / 1457 cs:21814-21829)——★IIIII201（2026-09-03）
+      //    extraLiquid(waterpark) 分支补接线：曾整臂缺失恒走普通世界清零支。
+      //    vanilla extraLiquid 窗口内：liquid>0 → liquidType(0)=清水**液量保留**
+      //    （Tile.cs:218-236 清 lava/honey 位）+ 裸 type 374/709/375→373（对非活性
+      //    ghost 同样生效）；否则清零。waterpark 定罪：神庙(墙87=LihzahrdBrickUnsafe)
+      //    4062 格水(全是 lty=0)被 JS 清空而 vanilla 保留 → mile8 #100 L/Lt=Y1>0×4062；
+      //    且池底正下方实心锚(226×173 等)的 ⑤ 上扫读液分歧 → 掷流自神庙列错位 →
+      //    滴头族 T373/374/375 位移 1054 格同源（首差 (1418,248) 上窗 y243 水 255）。
       if (st.wall[i] === 87) {
-        st.liquid[i] = 0;
+        if (gs.seedFlags.extraLiquid) {
+          if (st.liquid[i] > 0) st.liquidType[i] = LIQUID_TYPE.WATER; // liquidType(0)，液量保留
+          const sh87 = SHEET_OF[st.type[i]!] ?? -1;
+          if (sh87 === 374 || sh87 === 709 || sh87 === 375) st.type[i] = sheetId(373);
+        } else {
+          st.liquid[i] = 0;
+        }
       }
 
       // ⑦ 137/162 击杀族（cs:21461-21478——★IIII 批补：非纯帧,含 activity 写）
@@ -490,6 +518,6 @@ export function runTileCleanupPass(
     }
   }
 
-  // ⑫ tileSolid[379] 还原 true(cs:21750)——GenSolid 统一还原（① 的 pass 头翻转配对）
+  // ⑫ tileSolid[379] 还原 true(1456 cs:21750 / 1457 cs:22128)——GenSolid 统一还原（① 的 pass 头翻转配对）
   flipGenSolid([379], true);
 }

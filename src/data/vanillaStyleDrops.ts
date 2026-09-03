@@ -338,6 +338,16 @@ const BANNERS: T = [
   5673,   // style 315 :46568-46570（5673）
 ];
 
+/** ★bannerStyleClassPs（⑤巡检，2026-09-03 十三批）：BANNERS 逆表（vid → tile 91
+ *  style 域）。原版旗物品 Item.placeStyle = style 直域（装饰旗 Item.cs:5334/:5347/
+ *  :5360/:5373 =0-3、NPC 旗段 :19231 `placeStyle = 22 + type - 1615`、:27543
+ *  `109 + type - 2897` 等;GetItemDrop_Banners :46564-46655 帧检掉落同域）——
+ *  供 items.ts 类级 placeStyle 回填（NPC 旗段共享算式 itemfunc 提取盲区 +
+ *  placeStyle 0 被回填门跳过的装饰旗 337）。 */
+export const BANNER_STYLE_BY_VID: Readonly<Record<number, number>> = Object.freeze(
+  Object.fromEntries(BANNERS.map((vid, style) => [vid, style])),
+);
+
 
 /** 墓碑 85——CheckSign case 85（WorldGen.cs:43737-43744）：0→321 / 1-5→1173+st-1 /
  *  6-10→3229+st-6;style=fx/36（:43626-43631 num12）。KillTile 85 在共享 no-drop 表

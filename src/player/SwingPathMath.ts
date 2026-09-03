@@ -29,6 +29,17 @@ export interface Rect { x: number; y: number; w: number; h: number }
  *  dontTakeDamage=true（专家 ai[1]==1 潜伏态），被玩家近战挥中反噬玩家。 */
 export const ZAPPING_JELLYFISH = new Set<number>([63, 64, 103, 242]);
 
+/** 充能水母接触反噬弹幕资格（Projectile.Damage_PVE_Inner :12682：aiStyle 19/161/75/140
+ *  || ProjectileID.Sets.IsAWhip || AllowsContactDamageFromJellyfish——ProjectileID.cs:39
+ *  = {972,982,984,997,1043}）。IsAWhip 面由 WhipProj 全类自证免查。供弹幕/近战/鞭
+ *  各命中环同构复用（最终清零补——曾仅 proj1457 私有） */
+export const JELLY_ZAP_AI_STYLES = new Set<number>([19, 161, 75, 140]);
+export const JELLY_ZAP_PROJ_IDS = new Set<number>([972, 982, 984, 997, 1043]);
+export function jellyZapProjectile(projId: number, aiStyle?: number): boolean {
+  return (aiStyle !== undefined && JELLY_ZAP_AI_STYLES.has(aiStyle))
+    || JELLY_ZAP_PROJ_IDS.has(projId);
+}
+
 /**
  * RotatedRelativePoint 直移植（Player.cs:4209-4240）：
  *   anchor = base.Bottom + (0,gfxOffY)

@@ -376,7 +376,11 @@ describe('出入液沿触发', () => {
 // ==================== Bobber 集成（生成门经真实 fishingCheck 链路）====================
 
 describe('Bobber.fishingCheck 生成门集成', () => {
-  it('浮标渔情周期触发 SpawnFakeFishInWater：咬钩出现时池内必有装饰鱼;声呐联动不炸', async () => {
+  // ★合跑超时修复：本用例经真实 fishingCheck 链路跑 ≤8300 tick 演化（Player/Bobber
+  //  全物理 + wetCollision 扫描），单跑 ~2s;合跑时 worker 承载其他文件的世界生成
+  //  负载会放大 10-20×（ cavewalls/gen-loot-passes 合跑实测 27-80s）→ 超 vitest
+  //  默认 5s cap。只放资源配额不改断言：30s（与 mount-combat 同款档位）。
+  it('浮标渔情周期触发 SpawnFakeFishInWater：咬钩出现时池内必有装饰鱼;声呐联动不炸', { timeout: 30_000 }, async () => {
     const { Player } = await import('../src/entities/Player');
     const { Inventory } = await import('../src/items/Inventory');
     const { Bobber } = await import('../src/entities/Bobber');
