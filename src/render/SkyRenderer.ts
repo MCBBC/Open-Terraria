@@ -3673,6 +3673,16 @@ export class SkyRenderer {
     const sun = this.sunScreen;
     const world = this.frameCtx?.world;
     if (!sun || !world) { this.sunVisSampled = false; return; }
+    // ★2026-09-03 地下遮挡门(与天空层绘制门 Main.cs:61492 同条件):屏顶低于
+    //  地表线+16 → 天空层整帧被跳过,上一帧渲染目标在太阳屏位处=地下背景/实心格
+    //  (不透明) → 原版遮挡纹理 alpha 满 → 光斑衰减到 0。曾按太阳【世界坐标】采样
+    //  tile(地表线上=空气)→ 地下遮挡恒 0 = "1050 英尺深仍见落日光晕"(用户实报)。
+    const screenTopWorld = camY - viewH / 2 / z;
+    if (screenTopWorld >= (this.fx.surfaceY + 16)) {
+      this.sunVisibility = 0;
+      this.sunVisSampled = true;
+      return;
+    }
     const half = 64 / z;
     const wx = camX + (sun.x - viewW / 2) / z;
     const wy = camY + (sun.y - viewH / 2) / z;

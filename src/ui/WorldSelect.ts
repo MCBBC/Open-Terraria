@@ -246,9 +246,9 @@ export class WorldSelectPanel {
 
   /** 天顶世界行首图标（AWorldListItem.GetIconElement :172-180 + UpdateGlitchAnimation
    *  :14-33 1:1）：IconEverythingAnimated 7 列变体×16 帧，60fps 逐 Update 帧计数——
-   *  当前帧 0 时停 15-120t（Main.rand.Next(15,121)），其余帧 3t 换帧（Next(3,4)）；
-   *  落到 4/8/12 帧时 1/3 概率（Next(3)==0）换随机变体列（Next(7)）。DOM = 62×60
-   *  canvas 按帧位 blit + 60Hz 定时器（游戏帧时钟等价）。 */
+   *  当前帧 0 时每帧重掷 15-120 阈值，其余帧恒 3t 换帧；落到 4/8/12 帧时 1/3 概率
+   *  （Next(3)==0）换随机变体列（Next(7)）。DOM = 62×60 canvas 按帧位 blit +
+   *  60Hz 定时器（游戏帧时钟等价）。 */
   private buildZenithGlitchIcon(): HTMLElement {
     const cv = document.createElement('canvas');
     cv.width = 62; cv.height = 60;
@@ -265,8 +265,10 @@ export class WorldSelectPanel {
       if (!ready || !cx || !this.panel.isConnected) return;
       let min = 3, max = 3;
       if (frame === 0) { min = 15; max = 120; }
-      // Main.rand.Next(min, max+1) → [min, max] 闭区间
-      if (++counter >= min + Math.floor(Math.random() * (max - min + 1))) {
+      // 阈值【每帧重掷】（Main.rand.Next(min, max+1) 在比较式内联求值 → [min,max]
+      // 闭区间；非每轮固定阈值——分布形状 1:1）
+      const threshold = min + Math.floor(Math.random() * (max - min + 1));
+      if (++counter >= threshold) {
         counter = 0;
         frame = (frame + 1) % 16;
         if ((frame === 4 || frame === 8 || frame === 12) && Math.floor(Math.random() * 3) === 0) {

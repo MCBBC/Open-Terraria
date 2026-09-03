@@ -186,6 +186,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
   const effEvil = cfg.evil !== undefined && cfg.evil !== -1 ? cfg.evil : (copied ? copied.evil : cfg.evil);
   const { width, height } = effSize !== undefined ? SIZE_DIMS[effSize] : cfg;
   const world = new World(width, height, seed, cfg.name ?? '新世界');
+  // ★IIIII221：引擎 CheckSign 状态复位 + 签字牌存档钩（graveyard #76 幽灵掷主刀；
+  //   vanilla Sign.KillSign 的 JS 存档面=world.signs 同步移除）
+  engineResetSignState(world.signs);
   // 旗标解析：cfg.seedFlags 直注优先（S0-1 解耦），次选 dotted 配方位，缺省回退 seedText 派生。
   // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转等）
   world.seedFlags = cfg.seedFlags ?? copied?.flags ?? parseSeedChain(effSeedText).flags;
@@ -571,6 +574,7 @@ import { flipGenSolid, resetGenSolid, snapshotGenSolid, vanGenSolidType, vanSoli
 // ★IIII191：SpreadingGrass remix 臂⑥ QuickWater(-2) 一次性实例（runExtraLiquidAddBubbleBlocks 同款接线）
 import { LiquidSim } from '../liquid/LiquidSim';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
+import { engineResetSignState } from './vanilla/FinalCleanupPass';   // ★IIIII221 CheckSign 引擎状态/签字牌钩
 import { parseSeedChain, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';

@@ -31,8 +31,10 @@
 // 本地烘焙 multiply+destination-in,半载图拒烘防平色矩形毒缓存）;②glowmask 叠画
 // （Draw :499-502）未接（渔获鱼族几乎无 glowmask）;③sonar 四向环复制（:493-496）
 // 两档 sonarColor 的 alpha 恒 0（new Color(...,0),:120）→ XNA AlphaBlend 下不可见
-// 死视觉,可观测的声呐反馈 = 本体向白 lerp（:489-491）,已移植;④LakeSparkle 用
-// vanilla/Star_0.png 直绘近似 FadingParticle 包络。
+// 死视觉,可观测的声呐反馈 = 本体向白 lerp（:489-491）,已移植;④LakeSparkle 直绘
+// ★2026-09-03 清偿：vanilla/Star_0.png = TextureAssets.Star[0] 原贴图（:1341
+// SetBasicInfo 同源）+ 包络/尺寸逐值（原生 12×12×Scale、FadeIn/Out 45%、
+// NextFloatDirection 自旋、掷序对齐）→ 直绘即原版 Draw 语义,登记退役。
 import { TILE } from '../core/constants';
 import { LIQUID_TYPE } from '../world/TileStore';
 import type { TileStore } from '../world/TileStore';
@@ -583,7 +585,7 @@ interface FakeFishGameProbe extends FakeFishHost {
   renderer?: { waterStyle?: number };
 }
 
-// ==================== 湖面星闪（Spawn_LakeSparkle :1336-1353 近似）====================
+// ==================== 湖面星闪（Spawn_LakeSparkle :1336-1353 1:1,2026-09-03 清偿）====================
 
 export interface LakeSparkle {
   x: number; y: number; vx: number; vy: number;
@@ -595,10 +597,19 @@ export interface LakeSparkle {
 
 const sparkles: LakeSparkle[] = [];
 
-/** FadingParticle.SetBasicInfo/SetTypeInfo 包络近似：寿命 50..140t、加速 =
- *  MovementVector/60/寿命、白星随机透明度、FadeIn/Out 各 45%、自旋 ±2π/32×|move|钳 */
+/** FadingParticle（Spawn_LakeSparkle :1336-1353）包络 1:1：寿命 50..140t、加速 =
+ *  MovementVector/60/寿命、白星随机亮度（ColorTint=(255,255,255,0)×NextFloat,
+ *  α=0 纯加法档）、FadeIn/Out 各 45%、自旋 NextFloatDirection×2π/32×|move|/32 钳。
+ *  ★2026-09-03 包络逐值对齐（登记④清偿）：①自旋幅值 NextFloatDirection 均匀
+ *  [−1,1)（旧 sign 抽签恒满幅 2π/32=系统性偏快）;②掷序 = life→亮度→rot→rotVel→
+ *  scale（:1342→:1347→:1350→:1351→:1353 原文序,旧 baseAlpha 末掷 = 掷流错位）。 */
 function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number): void {
-  const life = 50 + 90 * randFloat();         // SetTypeInfo(num=50+90×rand)
+  const life = 50 + 90 * randFloat();         // SetTypeInfo(num=50+90×rand)（:1342）
+  const baseAlpha = randFloat();              // ColorTint=(255,255,255,0)×NextFloat（:1347）
+  const rot = randFloat() * Math.PI * 2;      // Rotation（:1350）
+  const rotVel = (randFloat() * 2 - 1) * (Math.PI * 2 / 32      // RotationVelocity（:1351-1352
+    * Math.max(0, Math.min(1, Math.hypot(moveX, moveY) / 32))); //   NextFloatDirection×钳）
+  const scale = 0.5 + 0.5 * randFloat();      // Scale=One×(0.5+0.5×rand)（:1353）
   sparkles.push({
     x: px, y: py, vx: 0, vy: 0,
     // Velocity=Zero（SetBasicInfo :1343 第三参）+AccelerationPerFrame=(move/60)/num
@@ -608,11 +619,10 @@ function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number):
     axPerT: moveX / 60 / life, ayPerT: moveY / 60 / life,
     age: 0,
     life,
-    rot: randFloat() * Math.PI * 2,
-    rotVel: (randFloat() < 0.5 ? -1 : 1) * (Math.PI * 2 / 32)
-      * Math.max(0, Math.min(1, Math.hypot(moveX, moveY) / 32)),
-    scale: 0.5 + 0.5 * randFloat(),
-    baseAlpha: randFloat(),
+    rot,
+    rotVel,
+    scale,
+    baseAlpha,
   });
 }
 
@@ -883,7 +893,10 @@ export function drawFakeFishSchool(r: {
   if (!ctx || !atlas) return;
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  // ---- LakeSparkle 层（Star_0 加性自旋闪烁,FadingParticle 包络近似）----
+  // ---- LakeSparkle 层（Star_0 加性自旋闪烁,FadingParticle.Draw :62-69 1:1——
+  //      ★2026-09-03 登记④清偿：贴图 = 原生尺寸×Scale（SetBasicInfo origin=
+  //      frame.Size/2 中心锚,Scale ∈ [0.5,1];旧 22px 臆断基退役——盘上
+  //      vanilla/Star_0.png 实测 12×12,XNA Draw 不缩放贴图）----
   if (sparkles.length) {
     const starImg = atlas.ensureVImage('vanilla/Star_0.png');
     if (starImg && (starImg as { width: number }).width > 0) {
@@ -893,7 +906,7 @@ export function drawFakeFishSchool(r: {
         const env = remap(t, 0, 0.45, 0, 1) * remap(t, 0.45, 1, 1, 0);   // FadeIn/Out 45%
         if (env <= 0) continue;
         ctx.globalAlpha = env * s.baseAlpha;
-        const size = 22 * s.scale;                                       // Star_0 原生约 22px
+        const size = (starImg as { width: number }).width * s.scale;      // 贴图原尺 × Scale
         ctx.save();
         ctx.translate(s.x, s.y);
         ctx.rotate(s.rot);

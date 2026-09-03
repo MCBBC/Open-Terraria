@@ -49,6 +49,10 @@ interface OwnerRef {
   cx: number; cy: number; facing: number; dead: boolean;
   /** 玩家速度（动态提速门 :57540/:59145 消费） */
   vx?: number; vy?: number;
+  /** 玩家四方向键电平（Game 输入合成段逐帧喂入——Wisp 211/ShadowOrb 18 的
+   *  控制键偏移消费面:Projectile.cs:60779-60790/:24736-24745）。缺省
+   *  undefined = 输入态不可知,偏移不生效（原版 control*=false 同观感）。 */
+  inputLeft?: boolean; inputRight?: boolean; inputUp?: boolean; inputDown?: boolean;
 }
 
 interface PetAiEntry {
@@ -451,6 +455,18 @@ export class PetFollower extends Entity {
     const hoverY = e.hoverY ?? F.hoverY ?? -60;
     let tx = p.cx + hoverX * p.facing;
     let ty = p.cy + hoverY;
+    // ★Wisp(211) 控制键偏移（AI_026 211 专属支 :60779-60790,登记缺口①清偿
+    //  2026-09-03）：controlLeft → 目标 −120 / controlRight → +120（if/else if 链,
+    //  同按左优先）;controlDown → +120,else controlUp → −120（缺省 hoverY −60
+    //  即原版 else 支的无条件 num65 −= 60,表值已含）。偏移在距离计算前施于
+    //  目标点 = 原版施于 num64/num65 同构（远距瞬移/追击档同吃）
+    if (this.projId === 211 && (p.inputLeft !== undefined || p.inputUp !== undefined
+      || p.inputRight !== undefined || p.inputDown !== undefined)) {
+      if (p.inputLeft) tx -= 120;
+      else if (p.inputRight) tx += 120;
+      if (p.inputDown) ty += 120;
+      else if (p.inputUp) ty -= 120;
+    }
     if (e.jitter) {  // 每帧重掷目标点（:56495-56497 rand(-10,21)）
       tx += Math.random() * (e.jitter * 2 + 1) - e.jitter;
       ty += Math.random() * (e.jitter * 2 + 1) - e.jitter;
@@ -533,12 +549,21 @@ export class PetFollower extends Entity {
 
     // aiStyle 11（:22752-22804）：绕玩家保持 holdDist，速度恒定直取
     if (e.holdDist !== undefined) {
-      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      // ★ShadowOrb(18) 控制键档（:24736-24745,登记缺口①清偿 2026-09-03）：
+      //  controlUp → 目标 = (玩家中心X−6, 玩家头顶上 40px)、controlDown →
+      //  (玩家中心X−6, 玩家脚底下 40px),两档皆保持距 num87 70→4（num84−=6 只在
+      //  两键支内）;无键 = 玩家中心 + holdDist 70 不变
+      const orbUp = this.projId === 18 && p.inputUp === true;
+      const orbDown = this.projId === 18 && p.inputDown === true;
+      const orbHold = orbUp || orbDown ? 4 : e.holdDist;
+      const tx = orbUp || orbDown ? p.cx - 6 : p.cx;
+      const ty = orbUp ? p.y - 40 : orbDown ? p.y + p.h + 40 : p.cy;
+      const dx = tx - this.cx, dy = ty - this.cy;
       const d = Math.hypot(dx, dy);
       if (d > teleport) {
         this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
         this.vx = 0; this.vy = 0;
-      } else if (d > e.holdDist) {
+      } else if (d > orbHold) {
         const k = (e.speed ?? 3) / (d || 1);
         this.vx = dx * k; this.vy = dy * k;
         this.x += this.vx; this.y += this.vy;
@@ -1149,8 +1174,11 @@ export class PetFollower extends Entity {
 
   // =============== 回退：旧统一肩后悬停近似（表外 proj id 用） ===============
   // 登记缺口（残留的近似项；★终零波批已大面积销核）：
-  //  ① Wisp(211)/ShadowOrb(18) 的控制键偏移（controlUp/Down ±40、controlLeft/Right
-  //    ±120）——ownerRef 无输入态，未建模；
+  //  ① ★2026-09-03 清偿：Wisp(211)/ShadowOrb(18) 的控制键偏移已 1:1 入位
+  //    （Wisp 211 = AI_026 专属支 :60779-60790,Left/Right ±120、Down +120/Up −120,
+  //    缺省 hoverY −60 已含;ShadowOrb 18 = aiStyle 11 :24736-24745,Up/Down
+  //    目标 = 玩家头顶上/脚底下 40px + 中心X−6 + 保持距 70→4）。输入态 =
+  //    OwnerRef 四方向键电平（Game 输入合成段喂入,Player.inputLeft/Right/Up/Down）。
   //  ② ★终清波批销核面：764 alpha 脉冲/Y 波/d292 微光尘（upbeatStarTick）、1050 斧仙
   //    砍树专支（axeFairyAI+dropFairyWood）、1090 归位飞行 ShimmerBlock 编排粒子
   //    （groundAI flying 段）已 1:1 入位。653 同伴方块彩蛋本体在 MinionProj.

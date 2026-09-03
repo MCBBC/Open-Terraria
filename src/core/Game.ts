@@ -6173,6 +6173,7 @@ export class Game implements GameHooks {
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
     flameParticles.clear(); // 山羊火焰 FlameParticle 同理不跨世界残留
+    fadingParticles.clear(); // 编排器 FadingParticle 池（拍击石系环带）同理不跨世界残留
     clearFakeFish();        // FakeFish 装饰鱼群同理不跨世界残留（寿命 ≤420t,防泄漏）
     // 月总震屏滤镜解除（倒计时中退世界 → 菜单不留红色脉冲）
     this.renderer.moonLordShake = null;
@@ -6797,12 +6798,18 @@ export class Game implements GameHooks {
       player.inputJump = false;
       player.inputDown = false;
       player.inputUp = false;
+      player.inputLeft = false;
+      player.inputRight = false;
     } else {
       // M5：移动/跳经键位表（Up/Down/Left/Right/Jump action；默认=WASD+方向键+Space）
       player.inputX = (inp.downAction('Left') ? -1 : 0) + (inp.downAction('Right') ? 1 : 0);
       player.inputJump = inp.downAction('Jump') || inp.downAction('Up');
       player.inputDown = inp.downAction('Down');
       player.inputUp = inp.downAction('Up');
+      // 独立左/右电平（Wisp 211 控制键偏移消费面,Projectile.cs:60779-60782
+      //  if(controlLeft)/else if(controlRight) 同按左优先——inputX 合值丢双按信息）
+      player.inputLeft = inp.downAction('Left');
+      player.inputRight = inp.downAction('Right');
     }
     // controlTorch（TriggersSet.cs:794）：火把键电平——与智能选取同源绑定
     // （updateSmartSelect 同式）；消费=AFK 计数门六键之一（Player.cs:25692）
@@ -6944,6 +6951,10 @@ export class Game implements GameHooks {
     // ParticleSystem_World_BehindPlayers——山羊坐骑 47 火焰本体；
     // spawn 在 Player.goatFlames 回调，绘制在 Renderer.drawFlameParticles）
     flameParticles.update();
+    // 编排器 FadingParticle 步进（ParticleSystem_World_OverPlayers.Update Main.cs:4003
+    // 同位——拍击石系 Spawn_SnappingStone/SnappingStoneSummon 环带；
+    // spawn 在 orchestraFx.snappingStoneRingFx,绘制在 Renderer.drawFadingParticles 7d 层）
+    fadingParticles.update();
     // FakeFish 装饰鱼群步进（FakeFishParticle.Update——原版同挂
     // ParticleSystem_World_BehindPlayers,Main.cs:4004;生成门在 Bobber.fishingCheck,
     // 绘制在 Renderer 实体层 drawFlameParticles 同带）
@@ -9082,17 +9093,18 @@ export class Game implements GameHooks {
     //      终态与同步版逐位一致（hardmode-async 测试锁）,瓦片渐进呈现为登记偏差。
     //      ★位于 evolution.update() 之前——原版同 tick 序=死亡(实体段)→转换→
     //      UpdateWorld 蔓延采样,首 tick 采样即见已转化瓦片 ----
-    // ---- 世界变换分步驱动（PR-async 收口①）：≤20ms/tick 预算按 FIFO 消化
-    //      (用户裁定 2026-09-03:时长优先——肉山转换 ~1.5s@40fps 优于 ~3s@60fps 微卡);
+    // ---- 世界变换分步驱动（PR-async 终版,用户裁定 2026-09-03:期间确保 60fps,
+    //      完成后自动存档）——预算 8ms:帧 ≈ 8(job)+ ~5(游戏逻辑)+渲染 ≈ 14-15ms
+    //      < 16.7 ⇒ 转换期全程 ≥60fps;墙钟 ≈ 3-4s(渐进蔓延=设计的可视反馈);
     //      单 job 异常 fail-open(shift 丢弃,半程状态保留) ----
     if (this.worldJobs.length) {
       const wjT0 = performance.now();
       let completed = false;
       try {
         do { if (this.worldJobs[0].step()) { this.worldJobs.shift(); completed = true; } }
-        while (this.worldJobs.length && performance.now() - wjT0 < 20);
+        while (this.worldJobs.length && performance.now() - wjT0 < 8);
         if (completed)
-          console.log(`[worldjobs] 世界变换全部完成:本帧 job 段 ${(performance.now() - wjT0).toFixed(0)}ms(累计墙钟见入队后逐帧)`);
+          console.log(`[worldjobs] 世界变换全部完成:累计 job 段见逐帧日志,自动存档触发`);
       } catch (e) {
         // ★防御：generator 中途异常若放任,job 残留 ⇒ 逐帧重掷异常风暴(比原版
         //   一次性同步失败更糟)。fail-open=丢弃 job 保留半程转化,世界可玩;
@@ -9100,6 +9112,9 @@ export class Game implements GameHooks {
         console.error('[worldjobs] job aborted:', e);
         this.worldJobs.shift();
       }
+      // ★转换完成 → 自动存档（用户裁定）：cb.onAutoSave = 流程层 doSave(true)
+      //  (静默档,同原版 DoUpdate_AutoSave 语义)——此刻世界已是完整转化态
+      if (completed) this.cb.onAutoSave?.();
     }
     this.evolution.update();
     this.torchGod.update();
@@ -12686,7 +12701,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  半宽 40——那是 :79892-79897 的视觉盒,在 Damage() 之后才 Resize,非伤盒）。
           //  ★备案（SW-R3 2026-09-03 清偿，见 Game.PREPARE_BOMB_HURT_BOX 全表）：本表
           //  旧 11/25 档系尘盒半宽,整表对账后退役,统一走 PrepareBombToBlow Resize 表。
-          const hurtBox16 = Game.PREPARE_BOMB_HURT_BOX[projId]
+          const hurtBox16 = PREPARE_BOMB_HURT_BOX[projId]
             ?? (projId === 809 ? 7 : 11);   // SW-R3 2026-09-03（M-4）：809 不在 PrepareBombToBlow
           //  任何分支（:47684-47688 字面 `808 || 808` 重复,无 809——1456 :44180 同文,
           //  真原版本相非提取伪影）→ 伤盒=SetDefaults 14×14（P.cs:7941-7952 档）半宽 7。

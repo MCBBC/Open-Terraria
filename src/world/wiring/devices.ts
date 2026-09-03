@@ -711,7 +711,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       st.setTile(x, y, 0);
       // SW-R3 2026-09-03（F-5 同径）：伤盒=108 SetDefaults 260×260（P.cs:1960-1968）
       // 半宽 130;与 Game.explodeAt 链爆位同口径（旧 undefined→R*TILE=160 混用地形半径）
-      ctx.explode(x, y, 500, 10, 130, 108);  // 归因=Projectile 108 Explosives
+      ctx.explode(x, y, 500, 10, true, 130, 108);  // 归因=Projectile 108 Explosives
       return true;
     case 149: // 节日彩灯 frameX ±54(:1244-1250)
       flipCell(w, x, y, 54);

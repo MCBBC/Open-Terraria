@@ -509,7 +509,12 @@ export const enum ParticleOrchestraType {
                             //   deadCellsBeheadedStep 逐帧发射（ MountedTop+8×gravDir+
                             //   Remap(|vx|,0,3,0,-4)×gravDir 载荷）+deadCellsBeheadedHeadFx
                             //   (FadingPlayerShader 贴图池无登记=暖色光点近似,结构逐值)+
-                            //   广播补远端;fullRotation 旋位/骑乘速度旋转两支登记未建模）
+                            //   广播补远端。★旋位支清偿（2026-09-03）：fullRotation≠0 →
+                            //   载荷位绕 position+fullRotationOrigin 旋（:24497-24503,
+                            //   playerFullRotationOf 与渲染层同源）——旋后值烘入 module8
+                            //   载荷坐标（格式 21B 不变）= 远端复放自动同位。骑乘速度旋转
+                            //   支（:24504-24506）登记保留：AnyTrackRider ∩ fullRotation
+                            //   写面 = ∅（1457 构造性死支,消费面不存在））
   DeadCellsBarrelExplosion = 42,      // 木桶爆（P.cs:78567-78572 Kill 1023 支 clientOnly:true。
                             //   ★2026-09-01 由 Arrow.barrel1023Burst 内联青色近似升格：
                             //   deadCellsBarrelExplosionFx 忠实本体（4 层 Extra[269] 环

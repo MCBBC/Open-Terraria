@@ -582,6 +582,8 @@ const CHECK2X2_SHEETS = new Set([132, 138, 142, 143, 288, 289, 290, 291, 292, 29
  *  → CheckTree/CheckPalmTree/CheckTreeWithSettings）——邻格树帧检真分派（见
  *  cascade3x3T 树族支）。fw/fh=1（无 MULTI_DEFS 成员），与 CHECK1X1/2X2/CHEST 无交。 */
 const TREE_DISPATCH_SHEETS = new Set([5, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** ★IIIII221：Sign 家族（TileFrameImportant case 55/85/395/425/510/511/573 → CheckSign） */
+const SIGN_DISPATCH_SHEETS = new Set([55, 85, 395, 425, 510, 511, 573]);
 /** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+） */
 const CHEST_SHEETS = new Set([21, 467]);
 /** Main.tileTable（Main.cs:6828+ 全 75 项，= tileSolidTop ∖ {16,134,239}） */

@@ -897,6 +897,34 @@ export function bodyRotationFor(type: number, vx: number, vy: number, facing: nu
   return -Math.PI / 16 * v * facing + Math.PI / 16 * v2;
 }
 
+/** player.fullRotation 读值 + fullRotationOrigin（Player 侧非渲染消费位：
+ *  DoDeadCellsBeheadedParticles :24497-24503 枭首者头部载荷旋位）。与渲染层
+ *  playerMountRotation（Renderer.ts）同源同式——fullRotation 写面 = bodyRotationFor
+ *  （Hover 尾段 :3468-3521,UFO 7/钻头 8/扫帚 23）;origin = SetMount Size/2
+ *  （Mount.cs:6268-6271）或扫帚 Hover 每帧 (w/2,h)（:3520）。本仓玩家盒恒 42 高,
+ *  mounted 盒中心按 42+heightBoost 换算（渲染层同式）。返回 null = 无旋位。 */
+export function playerFullRotationOf(
+  p: { x: number; y: number; w: number; h: number },
+  m: MountInstance,
+): { angle: number; pivotX: number; pivotY: number } | null {
+  if (!m.active || m.fullRotation === 0 || (m.type !== 7 && m.type !== 8 && m.type !== 23)) return null;
+  const mh = 42 + (m.heightBoost || 0);
+  return {
+    angle: m.fullRotation,
+    pivotX: p.x + p.w / 2,
+    pivotY: m.type === 23 ? p.y + p.h : p.y + p.h - mh / 2,
+  };
+}
+
+/** Vector2.RotatedBy(rotation, center)（Vector2.cs）1:1——绕 center 旋 rotation。
+ *  center 缺省 Zero = 纯向量旋转（DoDeadCellsBeheadedParticles :24504-24506
+ *  骑乘速度旋转支写法）。纯函数供测试锁定。 */
+export function rotatedBy(x: number, y: number, rot: number, cx = 0, cy = 0): { x: number; y: number } {
+  const dx = x - cx, dy = y - cy;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
+}
+
 /** Scutlix 索敌目标的实体视图（NPC.CanBeChasedBy 过滤后的候选，Player 侧组装） */
 export interface ScutlixTarget { x: number; y: number; w: number; h: number }
 

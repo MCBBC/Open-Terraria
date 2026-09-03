@@ -14,6 +14,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.evaluate(() => { try { localStorage.clear(); } catch { /* ignore */ } });
+await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 1500));
 await page.mouse.click(8, 8);
 for (let i = 0; i < 6 && !(await page.$('.sw-vsel')); i++) {
@@ -41,10 +43,14 @@ await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-op
 await page.click('[data-act=create]');
 console.log('世界生成中…');
 await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 420000, polling: 1000 });
-// 轮询等沙漠生成(地表附近沙柱 >120 才算成形,防半生成世界误扫)
+// 手动 fixedUpdate 步进驱动生成应用(headless rAF 可能被节流),直到 running 且沙柱成形
 let loc = null;
-for (let t = 0; t < 280 && !loc; t++) {
-  await new Promise((r) => setTimeout(r, 1500));
+for (let t = 0; t < 400 && !loc; t++) {
+  await page.evaluate(() => {
+    const g = window.__swGame;
+    if (!g?.world) return;
+    for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1 / 60); } catch { break; } }
+  }).catch(() => {});
   loc = await page.evaluate(() => {
     const g = window.__swGame;
     if (!g?.world?.store) return null;
@@ -57,15 +63,25 @@ for (let t = 0; t < 280 && !loc; t++) {
       for (let y = 60; y < (g.world.groundLevel | 0) + 80 && y < h; y++) if (ty[x + y * w] === 53) n++;
       if (n > bestN) { bestN = n; best = x; }
     }
-    if (bestN < 120) return null;
+    if (bestN < 120) return { bestN, running: !!g.running, done: false };
     let gy = 0; while (gy < h - 10 && !st.isSolid(best, gy)) gy++;
     g.player.x = best * 16 + 8; g.player.y = (gy - 6) * 16;
     g.player.vx = 0; g.player.vy = 0;
     if (g.world.clock) g.world.clock.timeOfDay = 0.5;
-    return { x: best, gy, bestN, groundLevel: g.world.groundLevel, treeX: g.world.treeX ?? null };
+    return { x: best, gy, bestN, groundLevel: g.world.groundLevel, treeX: g.world.treeX ?? null, running: !!g.running, done: true };
   });
+  if (loc && !loc.done) {
+    if (t % 20 === 0) console.log(`poll ${t}: bestSand=${loc.bestN} running=${loc.running}`);
+    loc = null;
+  }
 }
-if (!loc) throw new Error('等待 7 分钟仍未见沙漠(半生成?)');
+if (!loc) throw new Error('等待超时仍未见沙漠(半生成?)');
+console.log('沙漠就位:', JSON.stringify(loc));
+// 再步进 2s 让游戏态稳定(bg 过渡/贴图加载)
+await page.evaluate(() => {
+  const g = window.__swGame;
+  for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1 / 60); } catch { break; } }
+});
 console.log('沙漠列:', JSON.stringify(loc));
 // 等背景过渡(bgDelay 30 帧 + alpha 0.05/帧爬满)+贴图预热
 for (let i = 0; i < 240; i++) await new Promise((r) => setTimeout(r, 16.7));

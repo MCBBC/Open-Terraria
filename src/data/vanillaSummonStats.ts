@@ -1,9 +1,11 @@
 // 召唤师专属数值链（原版 Player.ApplyEquipFunctional 按装备 type 的 if-chain 1:1 抄录；
 // 原版该循环覆盖 armor[0-9]——盔甲三件+配饰同判，本表由 Player.equipStats 对两类槽位各扫一遍）。
 // vanilla-accfx.json 提取器未覆盖 maxMinions/minionDamage/whipRange 模式 → 独立表补齐。
-// 行号：Player.cs:13405-13459（散件）、12847-12863（禁戒）、13180-13184（神圣兜帽）、
-// 13235-13239（绿藻）、13391-13404（Flinx/蜂）、13426-13437（Tiki）、13438-13447（蜘蛛）、
-// 13448-13459（星尘）、13513-13528（诡异）、14766-14781（配饰四件）
+// 行号（★1457 GrantArmorBenefits/ApplyEquipFunctional 实读，2026-09-03 重锚）：
+// 13231-13332（DD2 头盔散件）、13368-13384（禁戒）、13702-13706（神圣兜帽）、
+// 13757-13761（绿藻召唤头）、13913-13917（Flinx）、13918-13931（蜂）、13932-13943（黑曜）、
+// 13948-13959（Tiki）、13960-13969（蜘蛛）、13970-13981（星尘）、14035-14050（诡异）、
+// 14480-14483+13103-13107（OOA 配饰四件 dd2Accessory 写/消费）、14766-14781（配饰四件）
 export interface SummonFx {
   slot?: number;      // maxMinions += N
   sentry?: number;    // maxTurrets += N

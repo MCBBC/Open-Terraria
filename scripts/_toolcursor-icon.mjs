@@ -39,31 +39,37 @@ const out = await page.evaluate(async () => {
     const [sx, sy] = g.camera.worldToScreen(tx * 16 + 8, ty * 16 + 8);
     g.input.mouseX = sx; g.input.mouseY = sy;
   };
-  const idle = (n) => { for (let i = 0; i < n; i++) g.fixedUpdate(1 / 60); };
+  // 逐 tick 重瞄:相机平滑跟随传送后的玩家,同一屏点会漂出射程(实机鼠标即世界点)
+  const idle = (n, tx, ty) => {
+    for (let i = 0; i < n; i++) {
+      if (tx != null) aim(tx, ty);
+      g.fixedUpdate(1 / 60);
+    }
+  };
 
   put(3509);                                   // 铜镐
   const near = { x: px + 4, y: py + 1 };       // 射程内石格
   const far = { x: px + 16, y: py + 1 };       // 射程外
-  aim(near.x, near.y); idle(3);
+  idle(6, near.x, near.y);                     // 先稳住相机(落地+跟随收敛)
   const inRange = {
     enabled: g.player.cursorItemIconEnabled,
     heldVid: g.renderer.cursorIconCtx.heldVid,
     cacheVid: g.renderer.cursorIconCtx.cacheVid,
     cacheTime: g.itemIconCache.time,
   };
-  aim(far.x, far.y); idle(3);
+  idle(3, far.x, far.y);
   const outRange = { enabled: g.player.cursorItemIconEnabled, cacheTime: g.itemIconCache.time };
 
-  aim(near.x, near.y); idle(2);
+  idle(2, near.x, near.y);
   put(24);                                     // 木剑（非工具）
-  aim(near.x, near.y); idle(3);
+  idle(3, near.x, near.y);
   const sword = { enabled: g.player.cursorItemIconEnabled };
 
   put(8);                                      // 火把（createTile）
-  aim(near.x, near.y); idle(3);
+  idle(3, near.x, near.y);
   const torch = { enabled: g.player.cursorItemIconEnabled, heldVid: g.renderer.cursorIconCtx.heldVid };
   put(3509);
-  aim(near.x, near.y); idle(3);
+  idle(3, near.x, near.y);
 
   // ---- 绘制管线直调（DrawInterface_40 尾段）----
   const mk = () => { const c = document.createElement('canvas'); c.width = 96; c.height = 96; return c; };

@@ -839,6 +839,185 @@ if (frameImportantDispatch(st, ctx, x, y, sheet, reset)) return;
   }
 }
 
+// ---- ★IIIII221（2026-09-03）：CheckSign（cs:43944-44161）生成期 1:1 移植 ----
+// graveyard 链 #76 Traps 残差定罪根因：墓碑(85)属 Sign 家族 {55,85,395,425,510,511,573}
+// （TileFrameImportant case 55/85/395/425/510/511/573 → CheckSign），CheckSign 完整性
+// 破坏支（destroyObject=true 整组杀）的 case 85 尾**恒耗 1 掷**：
+//   `int num13 = 8; if (Difficulty>=Master) 2 else if (>=Expert) 4;`
+//   `if (num13 > 0 && genRand.Next(num13) == 0 && NPC.CountNPCS(316) < 2) SpawnOnPlayer(316)`
+//   ——砸墓碑 1/8 刷幽灵(316)（graveyard 种子标识机制）；生成期 Main.Difficulty=0
+//   ⇒ num13=8，netMode!=1 恒真，**Next(8) 无条件消耗**（CountNPCS 门在后）。
+// x86 rig rc 实证：pass76 墓碑格 (755,501) KillTile→级联 CheckSign 组杀，rc
+//   2169→2170 恰 +1 掷（BKI t85→BKI t0 之间），JS 此前整缺 ⇒ 掷流 +1 错位 →
+//   #76 巨石变体双翻(716>664/138>716) + 受理面双不对称（x86 独占巨石 (437,785)，
+//   JS 独占飞镖 (2667,689)）全 cascade。Item.NewItem 掉落在生成期被
+//   isGeneratingOrLoadingWorld 早退（Item.cs:49662 return 0）零掷。
+// 签字牌存档位：Sign.KillSign(num7,num8)（vanilla 移除 Main.sign 锚）——JS 经
+//   engineSignStore 模块钩（WorldGen.ts 启动期注入 world.signs 引用）同步移除。
+
+const SIGN_TYPES = new Set([55, 85, 395, 425, 510, 511, 573]);
+
+/** 生成期幽灵(316)存活计数（vanilla NPC.CountNPCS(316)——Main.npc 全局数组跨
+ *  pass 持续；生成期无 Update、只进不出）。每局 generateWorld 头部清零。 */
+let signGhostCount = 0;
+/** world.signs 引用钩（KillSign 同步移除；null=无存档面,仅掷账） */
+let engineSignStore: Array<{ x: number; y: number; text: string }> | null = null;
+
+/** ★IIIII221：每局生成期状态复位（WorldGen.ts 启动期调用） */
+export function engineResetSignState(signs: Array<{ x: number; y: number; text: string }> | null): void {
+  signGhostCount = 0;
+  engineSignStore = signs;
+}
+
+const div18 = (v: number): number => Math.trunc(v / 18);
+
+function topEdgeAttach(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                       // vanilla tile==null → true
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !(genSolidType(st.type[i]) || d.platform)) return false;
+  const sl = st.slope[i];
+  if ((sl === 1 || sl === 2) && !(PLATFORMS.has(SWEEP_SHEET[st.type[i]]) && platformProperTop(st.frameX[i]!))) return false;
+  if (st.half[i]) return false;
+  if ((st.wire[i] & 32) !== 0) return false;                 // inActive
+  return true;
+}
+
+function bottomEdgeAttach(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !genSolidType(st.type[i]) || d.platform) return false;
+  const sl = st.slope[i];
+  if (sl === 3 || sl === 4) return false;                    // bottomSlope
+  if ((st.wire[i] & 32) !== 0) return false;
+  if (NO_ATTACH.has(SWEEP_SHEET[st.type[i]])) return false;
+  return true;
+}
+
+function rightEdgeAttach(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !genSolidType(st.type[i]) || d.platform) return false;
+  if (st.slope[i] === 4 || st.slope[i] === 2) return false;  // rightSlope
+  if (st.half[i]) return false;
+  if ((st.wire[i] & 32) !== 0) return false;
+  if (NO_ATTACH.has(SWEEP_SHEET[st.type[i]])) return false;
+  return true;
+}
+
+function leftEdgeAttach(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !genSolidType(st.type[i]) || d.platform) return false;
+  if (st.slope[i] === 3 || st.slope[i] === 1) return false;  // leftSlope
+  if (st.half[i]) return false;
+  if ((st.wire[i] & 32) !== 0) return false;
+  if (NO_ATTACH.has(SWEEP_SHEET[st.type[i]])) return false;
+  return true;
+}
+
+/** WorldGen.CheckSign（cs:43944-44161）1:1。sheet∈SIGN_TYPES。 */
+function checkSignSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                   // cs:43947
+  if (x - 2 < 0 || x + 3 > st.w || y - 2 < 0 || y + 3 > st.h) return;   // cs:43951
+  // 帧锚反解（cs:43967-43979）：锚=(x - frameX/18%2, y - frameY/18%2)；
+  // num9/num10=锚帧/18/2（样式块原点）；num12=样式序（frameX/18 按 2 递减计数）。
+  const fx = st.frameX[st.idx(x, y)]!, fy = st.frameY[st.idx(x, y)]!;
+  let num5 = ((div18(fx) % 2) + 2) % 2;                            // C# %2 对负商保号（fx>=0 域内无差）
+  let num6 = ((div18(fy) % 2) + 2) % 2;
+  const num7 = x - num5, num8 = y - num6;
+  const ai = st.idx(num7, num8);
+  const num9a = Math.trunc(div18(st.frameX[ai]!) / 2);
+  const num10 = Math.trunc(div18(st.frameY[ai]!) / 2);
+  let num11 = div18(fx);
+  let num12 = 0;
+  while (num11 > 1) { num11 -= 2; num12++; }
+  // 2×2 完整性（cs:43987-44008）：任一格失活/异型/帧不符 → flag
+  let flag = false;
+  let col = 0;
+  for (let k = num7; k < num7 + 2 && !flag; k++, col++) {
+    let row = 0;
+    for (let l = num8; l < num8 + 2; l++, row++) {
+      const ii = st.idx(k, l);
+      if (!st.flags[ii] || SWEEP_SHEET[st.type[ii]] !== sheet) { flag = true; break; }
+      if (div18(st.frameX[ii]!) !== col + num9a * 2 || div18(st.frameY[ii]!) !== row + num10 * 2) { flag = true; break; }
+    }
+  }
+  let num9 = num9a;
+  if (!flag) {
+    if (sheet === 85) {
+      // cs:44015-44021：双底格 SolidTileAllowBottomSlope → 取样式 num9=num12，否则毁
+      if (solidAllowBottom(st, num7, num8 + 2) && solidAllowBottom(st, num7 + 1, num8 + 2)) {
+        num9 = num12;
+      } else {
+        flag = true;
+      }
+    } else {
+      // cs:44022-44051：55/395/425/510/511/573 四向附属门（num12=当前附着向）
+      let attached = 0;
+      if (num12 === 0) attached = (topEdgeAttach(st, num7, num8 + 2) && topEdgeAttach(st, num7 + 1, num8 + 2)) ? 1 : 0;
+      else if (num12 === 1) attached = (bottomEdgeAttach(st, num7, num8 - 1) && bottomEdgeAttach(st, num7 + 1, num8 - 1)) ? 1 : 0;
+      else if (num12 === 2) attached = (rightEdgeAttach(st, num7 - 1, num8) && rightEdgeAttach(st, num7 - 1, num8 + 1)) ? 1 : 0;
+      else if (num12 === 3) attached = (leftEdgeAttach(st, num7 + 2, num8) && leftEdgeAttach(st, num7 + 2, num8 + 1)) ? 1 : 0;
+      else if (num12 === 4) {
+        const w1 = st.wall[st.idx(num7, num8)]!, w2 = st.wall[st.idx(num7 + 1, num8)]!;
+        const w3 = st.wall[st.idx(num7, num8 + 1)]!, w4 = st.wall[st.idx(num7 + 1, num8 + 1)]!;
+        attached = (w1 > 0 && w2 > 0 && w3 > 0 && w4 > 0) ? 1 : 0;
+      }
+      if (attached === 0) {
+        if (topEdgeAttach(st, num7, num8 + 2) && topEdgeAttach(st, num7 + 1, num8 + 2)) num9 = 0;
+        else if (bottomEdgeAttach(st, num7, num8 - 1) && bottomEdgeAttach(st, num7 + 1, num8 - 1)) num9 = 1;
+        else if (rightEdgeAttach(st, num7 - 1, num8) && rightEdgeAttach(st, num7 - 1, num8 + 1)) num9 = 2;
+        else if (leftEdgeAttach(st, num7 + 2, num8) && leftEdgeAttach(st, num7 + 2, num8 + 1)) num9 = 3;
+        else if (st.wall[st.idx(num7, num8)]! > 0 && st.wall[st.idx(num7 + 1, num8)]! > 0
+          && st.wall[st.idx(num7, num8 + 1)]! > 0 && st.wall[st.idx(num7 + 1, num8 + 1)]! > 0) num9 = 4;
+        else flag = true;
+      }
+    }
+  }
+  if (flag) {
+    // cs:44111-44124：destroyObject=true 整组杀（type 相符格）+ Sign.KillSign
+    ctx.destroyObject = true;
+    for (let m = num7; m < num7 + 2; m++) {
+      for (let n = num8; n < num8 + 2; n++) {
+        if (SWEEP_SHEET[st.type[st.idx(m, n)]] === sheet) killTileGen(st, ctx, m, n);
+      }
+    }
+    if (engineSignStore) {
+      const si = engineSignStore.findIndex((s) => s.x === num7 && s.y === num8);
+      if (si >= 0) engineSignStore.splice(si, 1);
+    }
+    // cs:44126-44161 switch(type)：掉落 Item.NewItem 生成期零掷（isGeneratingOrLoadingWorld
+    //   早退 Item.cs:49662）；case 85 尾**恒耗掷**（砸墓碑 1/8 幽灵门）：
+    //   num13=8（生成期 Main.Difficulty=0；Master=2/Expert=4 非生成期域）→ Next(8)。
+    if (sheet === 85) {
+      if (ctx.rng) {
+        if (ctx.rng.int(0, 7) === 0 && signGhostCount < 2) signGhostCount++;
+      }
+    }
+    ctx.destroyObject = false;
+    return;
+  }
+  // cs:44162-44173：完整块重帧（frameX=36*num9+18*col, frameY=18*row+num10*36）
+  const num14 = 36 * num9;
+  for (let num15 = 0; num15 < 2; num15++) {
+    for (let num16 = 0; num16 < 2; num16++) {
+      const ii = st.idx(num7 + num15, num8 + num16);
+      st.flags[ii] = 1;
+      st.type[ii] = st.type[st.idx(x, y)]!;
+      st.frameX[ii] = (num14 + 18 * num15) as never;
+      st.frameY[ii] = (18 * num16 + num10 * 36) as never;
+    }
+  }
+}
+
 /** TileFrameImportant 分派（cs:85703+）——返回 true=已处理（含 no-op 族） */
 function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number, reset = false): boolean {
   __swFnt39('TI', x, y, String(sheet));
@@ -856,6 +1035,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     || sheet === 411 || sheet === 752 || sheet === 751 || sheet === 654   // IIII33：Check2x2 自读帧族同列（138 同款）
     || sheet === 5 || sheet === 596 || sheet === 616
     || sheet === 34 || sheet === 27
+    || SIGN_TYPES.has(sheet)   // IIII221：Sign 家族自读帧族同列（完整性校验读 2×2 帧）
     || sheet === 254   // IIII103c：Check2x2Style 自读帧族同列（sparse 免疫，27/34 同款）
     || C3X2_TYPES.has(sheet)
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
@@ -964,6 +1144,12 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
       check1x2Sweep(st, ctx, x, y, sheet); return true;
     case 12: case 31: case 639: case 696:
       checkOrbSweep(st, ctx, x, y, sheet); return true;
+    // ★IIIII221：Sign 家族（cs:86943-44 case 55/85/395/425/510/511/573 → CheckSign
+    //   cs:43944）——graveyard 链 #76 定罪主刀（墓碑 85 组杀 case-85 尾幽灵掷
+    //   Next(8) 恒耗，见 checkSignSweep 头注）。
+    case 55: case 85: case 395: case 425: case 510: case 511: case 573:
+      checkSignSweep(st, ctx, x, y, sheet);
+      return true;
     case 324:
       if (!solidAllowBottom(st, x, y + 1) || invalidForPiles(st, x, y + 1)) killTileGen(st, ctx, x, y);
       return true;

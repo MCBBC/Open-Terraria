@@ -130,6 +130,7 @@ import { playDeathVoice, voiceSlotOfItem, type VoiceState } from '../player/Play
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot,
   SantankShellProj, mountRollerSkateStep, MOUNT_DATA, MOUNT_SETS,
+  playerFullRotationOf, rotatedBy,
 } from './Mounts';
 import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
@@ -5515,10 +5516,18 @@ export class Player extends Entity {
    *  Player.cs:24491-24510 1:1）：门 = !dead && !ghost && !stoned && !frozen &&
    *  head==282 && !sitting && !sleeping && (坐骑不隐藏玩家)。载荷：
    *  PositionInWorld = MountedTop + (0, 8×gravDir + gfxOffY + Remap(|vx|,0,3,0,−4)×
-   *  gravDir)（fullRotation 旋位/骑乘速度旋转两支本仓 fullRotation 未建模,登记）；
-   *  MovementVector = velocity。原版 RequestParticleSpawn(clientOnly:true)（各端
-   *  对全部玩家本地生成）→ 本仓只模拟本地玩家 → 本地直生 + 广播补远端（34 型偏差
-   *  口径）。消费本体 = fx/orchestraFx.deadCellsBeheadedHeadFx。 */
+   *  gravDir);MovementVector = velocity。原版 RequestParticleSpawn(clientOnly:true)
+   *  （各端对全部玩家本地生成）→ 本仓只模拟本地玩家 → 本地直生 + 广播补远端
+   *  （34 型偏差口径）。消费本体 = fx/orchestraFx.deadCellsBeheadedHeadFx。
+   *  ★旋位支清偿（2026-09-03）：fullRotation≠0 → 载荷位绕 position+fullRotation
+   *  Origin 旋（:24497-24503 vector.RotatedBy(fullRotation, pivot)——UFO 7/钻头 8/
+   *  扫帚 23 倾斜机身,playerFullRotationOf 与渲染层 playerMountRotation 同源）,
+   *  旋后值直入 module8 载荷 = 远端复放自动同位（载荷格式不变,旋转由 producer
+   *  烘入坐标）。骑乘速度旋转支（:24504-24506 vector2.RotatedBy(fullRotation,Zero),
+   *  门 = fullRotation≠0 ∧ mount.Active ∧ mount.AnyTrackRider）登记保留：1457 全表
+   *  AnyTrackRider（Minecart ∪ CanRideMinecartTracks,Mount.cs:558-573）与 fullRotation
+   *  写面（{7,8,23,43,49,55,UseAbility}）交集 = ∅（构造性证明, vanilla 亦死支）——
+   *  本仓 MOUNT_DATA 同构,消费面不存在。 */
   deadCellsBeheadedStep(game: GameHooks): void {
     // ★F4③（2026-09-01）补 !stoned 门——仓内有真实石化态（BuffType.Stoned=156,
     // :3619 lastStoned 过渡同源）非"不可达态",原版门串 :24494 含 !stoned && !frozen
@@ -5533,11 +5542,20 @@ export class Player extends Entity {
     if (this.headArmorSlot !== 282) return;                    // head == 282（枭首者头部 5457）
     if (this.sitting || this.sleeping) return;                 // !sitting.isSitting && !sleeping.isSleeping
     if (this.mount.active && !!MOUNT_SETS.PlayerIsHidden?.[this.mount.type]) return;   // PlayerIsHidden 门
-    const topY = this.y + 8 * this.gravDir
+    let px = this.cx, py = this.y + 8 * this.gravDir
       + Math.max(0, Math.min(1, (Math.abs(this.vx) - 0) / 3)) * -4 * this.gravDir;   // Remap(|vx|,0,3,0,-4)
-    deadCellsBeheadedHeadFx(game, this.cx, topY, this.vx, this.vy);
+    // ★旋位支（:24497-24503）：if (fullRotation != 0) vector = vector.RotatedBy(
+    //   fullRotation, position + fullRotationOrigin)——pivot/角度与渲染层同源
+    const fr = playerFullRotationOf(this, this.mount);
+    if (fr) {
+      const rp = rotatedBy(px, py, fr.angle, fr.pivotX, fr.pivotY);
+      px = rp.x; py = rp.y;
+      // :24504-24506 骑乘速度旋转支——AnyTrackRider∩fullRotation 写面 = ∅（见
+      // 方法头构造性证明）,不建模（登记保留）
+    }
+    deadCellsBeheadedHeadFx(game, px, py, this.vx, this.vy);
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBeheadedEffect,
-      this.cx, topY, this.vx, this.vy);
+      px, py, this.vx, this.vy);
   }
 
   /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢
@@ -6007,6 +6025,12 @@ export class Player extends Entity {
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
+  /** 独立左/右键电平（Game 输入合成段与 inputX 同源喂入）——inputX = 右−左
+   *  合值丢"双按"信息,Wisp 211 控制键偏移按原版 if(controlLeft)/else if(
+   *  controlRight) 序消费（Projectile.cs:60779-60782,同按左优先）→ 宠物 AI
+   *  OwnerRef 经此读原键面。 spectator 冻结段同归零（Game 侧） */
+  inputLeft = false;
+  inputRight = false;
   /** Player.maxRunSpeed（常规跑速上限 stat，:25695 base 3 × moveSpeed 乘区；
    *  水中/蜂蜜等场景折扣不在此列——矿车撞击速比等按 stat 口径消费）。
    *  1457: moveSpeed 乘区含 strongestMoveSpeedDebuff（Update :26205 maxRunSpeed *=
