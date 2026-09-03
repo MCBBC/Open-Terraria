@@ -38,6 +38,7 @@ import type { GameHooks } from './types';
 import { TILE } from '../core/constants';
 import { applyBuffTicks } from './projStatus';
 import { BuffType } from '../stats/Buffs';
+import { isNpcShimmerImmune } from '../stats/Shimmer';
 
 interface GlobSpec {
   buffId: 103 | 353;
@@ -144,6 +145,33 @@ export class GlobProj extends Entity {
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         applyBuffTicks(e as unknown as { [field: string]: number | undefined },
           this.spec.buff, this.spec.durTicks);
+        hitNpc = true;
+      }
+      // ★[MAJOR-F4]（红队 R1 2026-09-03）补城镇 NPC 面：原版 Main.npc 单数组含城镇,
+      // :29444-61 扫描不分敌我（仅 active/dontTakeDamage/lifeMax<=1 剔除）——微光枪
+      // 1042 对城镇 NPC AddBuff(353,100) 与浸液同一 buff lane（TownNPC.shimmerBuffT
+      // tick 载体,AddBuff max 合并 :91035 + buffImmune[353]=ShimmerImmunity 门
+      // :17870/:91036-38）。本仓实体分桶（enemies/npcs）→ 并扫。dontTakeDamage 门
+      // 的上升态承接位 = TownNPC.shimmerRising（TownNPC.hurt :1311-22 注）。buff 103
+      // 无城镇载体（TownNPC.wet 由液体面驱动,wetT 仅 Enemy 侧承载——命中仍计
+      // hitNpc 进 Kill 面,GAP 登记）
+      for (const ent of game.npcs?.() ?? []) {
+        const t = ent as unknown as {
+          x: number; y: number; w: number; h: number; dead?: boolean;
+          dontTakeDamage?: boolean; shimmerRising?: boolean; maxHp?: number;
+          vanillaId?: number; shimmerBuffT?: number;
+        };
+        if (!t || t.dead || t.dontTakeDamage || t.shimmerRising) continue;
+        if (t.maxHp !== undefined && t.maxHp <= 1) continue;
+        if (!(this.x < t.x + t.w && this.x + this.w > t.x && this.y < t.y + t.h && this.y + this.h > t.y)) continue;
+        if (this.spec.buff === 353 && t.shimmerBuffT !== undefined) {
+          // AddBuff(353, durTicks=100)（:29456-58）：max 合并（:91041-48 已有时长
+          // ≥新值即拒）+ buffImmune[353] 门（=NPCID.Sets.ShimmerImmunity）
+          if (!(t.vanillaId !== undefined && isNpcShimmerImmune(t.vanillaId))
+            && this.spec.durTicks > t.shimmerBuffT) {
+            t.shimmerBuffT = this.spec.durTicks;
+          }
+        }
         hitNpc = true;
       }
       if (hitNpc) { this.killBurst(game); this.dead = true; return; }

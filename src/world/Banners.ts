@@ -1,7 +1,7 @@
 // 旗帜系统（Terraria.GameContent/BannerSystem.cs + ItemID.Sets 1:1）
 // 数据 = tools/extract-banners.mjs 提取（NPCtoBanner 447 怪 / BannerToItem 特例+级联区间 /
-// KillsToBanner 门槛表,默认 50）。击杀计数→达标公告+授予;屏内旗 tile 91 解码→
-// bannerId→npc 集（buff 乘区在 Game/Enemy 消费）。
+// BannerToNPC 规范代表表 / KillsToBanner 门槛表,默认 50）。击杀计数→达标公告+授予;
+// 屏内旗 tile 91 解码→bannerId→npc 集（buff 乘区在 Game/Enemy 消费）。
 import bannersJson from '../data/vanilla-banners.json';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
@@ -10,6 +10,7 @@ const D = bannersJson as unknown as {
   npcToBanner: Record<string, number>;
   bannerToItem: Record<string, number>;
   bannerRanges: Array<{ gt: boolean; min: number; base: number; off: number }>;
+  bannerToNpc: Record<string, number>;
   killsToBanner: Record<string, number>;
 };
 
@@ -63,6 +64,35 @@ export function killsNeededForBanner(itemId: number): number {
   return D.killsToBanner[String(itemId)] ?? D.killsToBanner[itemId] ?? D.killsToBanner['*'] ?? 50;
 }
 
+/** BannerToNPC（BannerSystem.cs:1156 switch，旗种 → 规范代表 NPC id；1..292 提取面
+ *  280 项,表外 12 旗 90/94/119/131/151/155/159/181/182/183/194/200 = 原版 `_ => 0`
+ *  兜底且 NPCtoBanner 侧无任何 NPC 映射（不可达））。同旗多 NPC（蓝史莱姆
+ *  74/297/298 → 旗 8）公告/tooltip 一律取规范代表名——不能用 npcToBanner 反查的
+ *  最小 npc id 顶替（机制不同：原版公告名 = BannerSystem.AddNPCKillBy :249-255
+ *  `Lang.GetNPCName(BannerToNPC(num))`）。 */
+export function bannerToNpcOf(banner: number): number {
+  return D.bannerToNpc[String(banner)] ?? D.bannerToNpc[banner] ?? 0;
+}
+
+/**
+ * NPC.ExcludedFromDeathTally（NPC.cs:80610-80625）死亡记账排除面：
+ *   - NPCID.Sets.ProjectileNPC（NPCID.cs:4805）11 类：25/30/665/33/112/666/261/265/371/516/519
+ *   - NPCID.Sets.PositiveNPCTypesExcludedFromDeathTally（NPCID.cs:4869）7 类：
+ *     121/384/478/479/410/472/378
+ * 原版 CountKillForBannersAndDropThem（NPC.cs:80627-80637）整门在其内——这 18 类即便
+ * vanilla-banners.json 有映射也【不计旗数/不掉旗】（Boss/弹幕型/特殊 NPC 杀数只进
+ * NPC.kills 计数行,不进 BannerSystem.killCount）。负 netID 分支（:80612-80618
+ * netID==-5/-1 排除）本仓不建模——vanillaNetId 域恒非负。1456:4799/:4861 = 1457 逐值相同。
+ */
+const EXCLUDED_FROM_DEATH_TALLY = new Set([
+  25, 30, 665, 33, 112, 666, 261, 265, 371, 516, 519,   // NPCID.Sets.ProjectileNPC :4805
+  121, 384, 478, 479, 410, 472, 378,                    // PositiveNPCTypesExcludedFromDeathTally :4869
+]);
+
+export function excludedFromDeathTally(npcId: number): boolean {
+  return EXCLUDED_FROM_DEATH_TALLY.has(npcId);
+}
+
 /**
  * ★bannerStyleOf（⑤巡检 2026-09-03 十三批）：旗种 id（BannerSystem 域 1-292）→
  * tile 91 帧 style 域的逆写。SceneMetrics.cs:419-441 正变换 = S−21（首带）+ 每带
@@ -84,10 +114,15 @@ export function bannerStyleOf(banner: number): number {
 /**
  * 击杀记账（BannerSystem.AddNPCKillBy :193-216 语义简化版——原版 claimable+UI 领取,
  * 本仓达标即返 true 由调用方公告+掉旗）。返回 true = 恰跨过整数倍门槛（应授予一面旗）。
+ * ★ExcludedFromDeathTally 门（NPC.cs:80627 `if (!ExcludedFromDeathTally())`——
+ *   ProjectileNPC 11 类 + PositiveNPCTypesExcludedFromDeathTally 7 类不计数）：
+ *   前置于计数本体,排除类连 killCount 递增都不发生（原版 AddNPCKillBy 整体不达）。
+ *   GetWereThereAnyInteractions 交互门在调用侧（NPC.cs:79652-79661 包整段,Game.ts）。
  */
 export function recordBannerKill(kills: Record<number, number>, npcId: number): boolean {
   const banner = bannerOfNpc(npcId);
   if (banner <= 0) return false;
+  if (excludedFromDeathTally(npcId)) return false;
   kills[banner] = (kills[banner] ?? 0) + 1;
   const itemId = bannerItemId(banner);
   const need = killsNeededForBanner(itemId);

@@ -32,7 +32,7 @@ import { drownCollision } from '../stats/TouchDamage';
 // ★2026-08-31 治理批 B1：危险扫描候选记录门（NPC.cs:54042 flag19 = CanBeChasedBy）
 import { canBeChasedBy } from './projTargets';
 import { projSprite } from './Arrow';
-import { updateNpcLiquid } from './npcLiquid';
+import { updateNpcLiquid, wetCollision } from './npcLiquid';
 import { spawnEmote } from '../render/EmoteBubble';
 import {
   TOWN_ATTACK_TIME, TOWN_ATTACK_CHANCE, TOWN_ATTACK_TYPE, TOWN_DANGER_RANGE,
@@ -238,23 +238,31 @@ export function shootingFrameOffset(vanillaId: number, aimY: number): number {
 // ===================== shimmerTransparency（NPC.cs:6112，0..1）=====================
 // ★锚行校准（1457）：UpdateNPC_BuffApplyVFX 内赋值区 = :92631-62（非 :92469 系——
 // 那是 UpdateNPC 尾段沾液尘/松露人 case 的行带）；上升态 −1/60 = AI_007 :53770。
-export const SHIMMER_ST_RAMP = 0.01;      // 浸微光 +0.01/t（:92636）
+export const SHIMMER_ST_RAMP = 0.01;      // shimmering（buff 353 在身）+0.01/t（:92634-36）
 export const SHIMMER_ST_TRANSFORM = 0.9;  // >0.9 触发 GetShimmered（:92637-39）
 export const SHIMMER_ST_RISE = 0.89;      // 城镇转化置 0.89（:92705，GetShimmered 支）
 export const SHIMMER_ST_DECAY_RISE = 1 / 60;  // ai[0]=25 上升态 −1/60/t（:53770）
 export const SHIMMER_ST_DECAY_HIT = 0.1;      // justHit −0.1/t（:92650）
 export const SHIMMER_ST_DECAY_IDLE = 0.001;   // buffImmune[353] else 支 −0.001/t（:92658）
 export const SHIMMER_ST_DECAY_IMMUNE = 0.015; // buffImmune[353] 免疫快档 −0.015/t（:92652-54）
+export const SHIMMER_BUFF_TICKS = 100;        // buff 353 施加时长（AddBuff(353,100) :94214/:29457）
+export const SHIMMER_BUFF_REAPPLY_LOW = 10;   // TryAddingRepeatedBuff lowThresholdUndeathToAllowBuff（:94211）
 
 /** shimmerTransparency 每 tick 推进（赋值时序 NPC.cs:92631-46 浸位 + :92646-62
  *  衰减位 + AI 上升块 ：53765-76）：
- *  浸微光 +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92706-10），
+ *  shimmering（=buff 353 在身，UpdateNPC_BuffSetFlags 扫 buffType==353 → 置位
+ *  :93255-93264；施加源 = 浸液 TryAddingRepeatedBuff(:94211-18，调用点 :94446-56)
+ *  与微光枪弹 1042 命中 AddBuff(353,100)（AI_060 :29456-29458）——【非】液体直读）
+ *  +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92706-10），
  *  上升态内 shimmering 恒 false，st 走 −1/60 衰减）；非浸两独立位同 tick 叠加：
  *  justHit −0.1 位 + buffImmune[353] −0.015 / else −0.001 位（:92650-58，先减
  *  justHit 再走免疫/常规档），下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate
  *  微光块）。★immune 载体 = NPCID.Sets.ShimmerImmunity（:17870，经
  *  stats/Shimmer.isNpcShimmerImmune）——2026-09-03 登记未接清偿（旧「无载体恒走
- *  else −0.001、justHit 档独占」单档模型退役，justHit 档现叠加常规 −0.001 伴位） */
+ *  else −0.001、justHit 档独占」单档模型退役，justHit 档现叠加常规 −0.001 伴位）。
+ *  ★[MAJOR-F4]（红队 R1 2026-09-03）：第二参语义钉死为「buff 353 在身」——
+ *  ramp【不要求浸在池中】（:92634 只读 shimmering 位），出池后 buff 余量期 ramp
+ *  照常推进；旧「中心格液体直读」采样源在调用方退役 */
 export function shimmerTransparencyNext(
   st: number, shimmering: boolean, justHit: boolean, rise: boolean,
   shimmerImmune = false,
@@ -1014,6 +1022,18 @@ export class TownNPC extends Entity {
    *  消费：Renderer 本体 alpha=1−st（GetAlpha :94874）+ 160 Glow ×(1−st)
    *  （Main.cs:25771-25776）——微光转化渐显/渐隐的唯一驱动字段 */
   shimmerTransparency = 0;
+  /** buff 353 Shimmered 剩余 tick（buffType/buffTime 单槽近似——同 tipsyT/dryadWardT 先例）。
+   *  >0 ⇔ shimmering 状态位（UpdateNPC_BuffSetFlags 扫 buffType==353 → shimmering=true,
+   *  :93255-93264；免疫者 DelBuff——本仓写入面已带 isNpcShimmerImmune 门）。
+   *  写入面①浸液 TryAddingRepeatedBuff(353,100)（:94211-18，调用点 :94446-56
+   *  `if (Collision.shimmer)`——非免疫且(无 buff ∨ buffTime≤10) → AddBuff(353,100)，
+   *  浸池持续续期、出池余量 10-100t 自然衰减；②微光枪弹 1042 命中 AddBuff(353,100)
+   *  （AI_060 :29456-29458，GlobProj 消费——AddBuff max 合并 :91035）。
+   *  衰减 = UpdateNPC_BuffSetFlags 1/t（buffTime[i]-- :93101）。
+   *  ramp lane 只读本位（shimmerTransparencyNext 的 shimmering 入参）——
+   *  [MAJOR-F4] 修复（红队 R1 2026-09-03）：旧「中心格液体直读」探针退役。
+   *  转化入上升态清零（GetShimmered :92706-10 DelBuff(353)）。 */
+  shimmerBuffT = 0;
   /** 微光上升态旗标（原版 ai[0]==25，NPC.cs:53737-53820：落点传送 → ai[1]≥30
    *  起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 → st 归零后翻转变体 + 到场粒子 +
    *  成就 43；态内 dontTakeDamage——推进见 shimmerRiseUpdate） */
@@ -1611,33 +1631,45 @@ export class TownNPC extends Entity {
     }
 
     // ---- 城镇微光转化链 1:1（★1457 锚行校准：GetShimmered :92668/:92695-92711
-    //      + AI_007 ai[0]==25 块 :53737-53820）。触发：浸微光 st +0.01/t（:92636），
+    //      + AI_007 ai[0]==25 块 :53737-53820）。ramp lane = shimmering（buff 353
+    //      在身，UpdateNPC_BuffSetFlags :93255-64）——st +0.01/t（:92634-36），
     //      >0.9 → GetShimmered（:92637-39，约 91t 渐隐非即刻）；城镇分支置 st=0.89
     //      并进 ai[0]=25 上升态（ai[0..3] 清零 ：92700-03、st=0.89 :92705、摘 buff 353
-    //      :92706-10——城镇 buff 系统未建，无载体）。
+    //      :92706-10 → 本仓 shimmerBuffT=0）。
     //      上升态 = 落点传送 → ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 →
     //      st 归零后翻转微光变体 + 到场粒子 + 成就 43（推进见 shimmerRiseUpdate）。
     //      变体贴图走 townSheet getter（已接），对话差分未接（GAP）。
-    //      注：原版 UpdateNPC_BuffApplyVFX（衰减位 :92646-62）上升态外仍每 tick −0.001 共衰减，
-    //      本仓并入 −1/60 单档（既有 shimmerTransparencyNext 模型，纯函数测试锁定）----
+    //      注①：原版 UpdateNPC_BuffApplyVFX（衰减位 :92646-62）上升态外仍每 tick −0.001 共衰减，
+    //      本仓并入 −1/60 单档（既有 shimmerTransparencyNext 模型，纯函数测试锁定）。
+    //      注②：[MAJOR-F4]（红队 R1 2026-09-03）：ramp 采样源从「中心格液体直读」改为
+    //      「buff 353 在身」——buff 由共享 WetCollision（npcLiquid.wetCollision，与
+    //      Enemy.ts:2307 写 shimmerWet 同款）浸液面经 TryAddingRepeatedBuff 续期
+    //      （写入面见下方液体段 :2209 与 bound 分支），出池后余量 ≤100t 内 ramp 照常
+    //      推进（原版 :92634 只读 shimmering 位，【不要求浸在池中】）。旧中心格探针
+    //      （liquid[si]>30 && liquidType==4）= 单格采样，浸盒 10×h/2 其余三面触液
+    //      （池缘站位/部分浸没）全部丢判 → 退役 ----
     const st0 = world.store;
     const si = st0.idx(
       Math.max(0, Math.min(st0.w - 1, Math.floor(this.cx / TILE))),
       Math.max(0, Math.min(st0.h - 1, Math.floor(this.cy / TILE))),
     );
-    const inShimmer = st0.liquid[si] > 30 && st0.liquidType[si] === 4;
+    // buffTime 逐拍衰减（UpdateNPC_BuffSetFlags lowerBuffTime :93101）——
+    // 衰减后 >0 即本拍 shimmering（同方法 :93255-64 扫 buffType==353 置位）
+    if (this.shimmerBuffT > 0) this.shimmerBuffT--;
+    const shimmering = this.shimmerBuffT > 0;
     // 上升态内 st 由 shimmerRiseUpdate 独占推进（ai[1]<30 期间原样保持 0.89）
     if (!this.shimmerRise) {
       this.shimmerTransparency = shimmerTransparencyNext(
-        this.shimmerTransparency, inShimmer, justHit, false,
+        this.shimmerTransparency, shimmering, justHit, false,
         isNpcShimmerImmune(this.vanillaId ?? -1),
       );
-      if (isNpcTownShimmerable(this.vanillaId) && inShimmer
+      if (isNpcTownShimmerable(this.vanillaId) && shimmering
         && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {
         this.shimmerRise = true;                    // ai[0]=25（GetShimmered :92700）
         this.shimmerRiseT = 0;                      // ai[1]=0（:92701）
         this.shimmerRisePause = 0;                  // ai[2]=0（:92702）
         this.shimmerTransparency = SHIMMER_ST_RISE; // :92705
+        this.shimmerBuffT = 0;                      // GetShimmered 摘 buff 353（:92706-10）
       }
     }
     if (this.shimmerRise && this.shimmerRiseUpdate(world, game, st0.liquid[si] > 0)) {
@@ -1681,6 +1713,10 @@ export class TownNPC extends Entity {
       this.vx = 0;
       this.vy = Math.min(this.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);
+      // [MAJOR-F4]：bound 早退跳过下方液体段（:2209）——原版 UpdateCollision 对
+      // bound NPC 照跑（NPC.Update 不分家）；旧中心格探针在链块内,浸判未随早退
+      // 丢失,改 buff 载体后须在此补施,防被缚者微光渐隐回归
+      this.shimmerBuffTryAddRepeated(world);
       return;
     }
 
@@ -2207,10 +2243,32 @@ export class TownNPC extends Entity {
     //      一致：AI 与重力/碰撞读上一 tick 的 wet（本块最后跑，更新下 tick 值）。
     //      湿身重力档（:91940-91956：水 0.2/蜜 0.1/微光 0.15）由 grav 提前消费 ----
     updateNpcLiquid(this, game, world.store);
+    // ---- buff 353 浸液续期（[MAJOR-F4]：TryAddingRepeatedBuff NPC.cs:94211-18，
+    //      调用点 :94446-56 `if (Collision.shimmer) { shimmerWet = true;
+    //      if (Main.netMode != 1) TryAddingRepeatedBuff(353, 100); }`）——瞬时
+    //      WetCollision 面（非 sticky shimmerWet：原版续期门是当拍 Collision.shimmer
+    //      静态位，shimmer→水连续湿态时不续期）。序位 = 移动/碰撞后（UpdateCollision
+    //      :91607 在 UpdateNPC 尾，同原版）；下拍 UpdateNPC_BuffSetFlags（:93101
+    //      衰减 + :93255 shimmering 位）供上方 ramp lane 消费 ----
+    this.shimmerBuffTryAddRepeated(world);
 
     // ---- 原版 FindFrame 城镇分支（NPC.cs:70172-70262，UpdateNPC :91565 调）----
     this.updateWalkFrame(game);
 
+  }
+
+  /** TryAddingRepeatedBuff(353,100)（NPC.cs:94211-94218）1:1：非免疫且
+   *  （无 buff ∨ buffTime≤lowThresholdUndeathToAllowBuff=10）→ AddBuff(353,100)
+   *  （:91035 免疫即拒/max 合并）。浸液判定 = 共享 wetCollision（Collision.cs
+   *  :1575-1656 全量：中心 min(10,w)×min(h/2,h) 居中盒 + 液面收缩 + 坡上液体——
+   *  与 Enemy 侧同款，Enemy.ts:2307 写 shimmerWet 面）的【瞬时】shimmer 位
+   *  （调用点 :94446-56 读当拍 Collision.shimmer）。两调用点：主路径液体段尾 /
+   *  bound 早退分支（原版 UpdateCollision 不分家）。rise 态整段早退于两调用点
+   *  之前——上升态内不施加（原版入态即落点传送出池，WetCollision 恒假，等价） */
+  private shimmerBuffTryAddRepeated(world: import('../world/World').World): void {
+    if (isNpcShimmerImmune(this.vanillaId ?? -1)) return;   // buffImmune[353]（:17870）
+    if (!wetCollision(world.store, this.x, this.y, this.w, this.h).shimmer) return;
+    if (this.shimmerBuffT <= SHIMMER_BUFF_REAPPLY_LOW) this.shimmerBuffT = SHIMMER_BUFF_TICKS;
   }
 
   /** 游走双态 + 拴绳（AI_007 NPC.cs:54032-54288）1:1。sitFlag（雨/夜/食/史莱姆雨/

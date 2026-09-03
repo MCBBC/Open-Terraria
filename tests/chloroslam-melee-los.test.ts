@@ -71,15 +71,30 @@ function tickN(s: ChloroBladeSlam, g: GameHooks, n: number): void {
 }
 
 describe('① 1129 ChloroBladeSlam ownerHitCheck 整门（距离+LOS,noTileCollide 豁免）', () => {
-  it('距离段：爆盒内敌 > 1000px（ownerHitCheckDistance 缺省 :306/:701）→ 不结算（:12417-12419）', () => {
-    // 爆盒 (720,100) 128×96 → x 656..784 / y 52..148；敌 (712,92) 盒内；
-    // 玩家中心 (800,1440) → 敌中心 (720,100) 距离 ≈1342 > 1000（空场无遮挡）
+  it('距离段基准=弹体 Center（:12417-12419）：爆盒内敌距玩家 1342px 仍结算——', () => {
+    // ★R2-F1+F10 重产（2026-09-03）：原版 Distance(ent.Center) 基准=【弹体自身】Center
+    // （1129 盒心=砸地位;Projectile.cs:42781 1126 同式锚）——曾按玩家中心锚判此例
+    // 不结算,错位。本几何：弹 (720,100) 128×96 → x 656..784 / y 52..148；敌 (712,92)
+    // 盒内、距弹心 hypot(8,8)≈11 < 1000 → 距离段过；玩家 (800,1440) 距敌 1342px
+    // 只影响 LOS 段探针起点（空场四探针恒通）→ 结算恰一次
     const e = mkEnemy(1, 712, 92);
     const s = new ChloroBladeSlam(720, 100, 128, 96, 95);
     const g = makeHooks([e]);
     tickN(s, g, 5);                                              // timeLeft=5 走完整寿命
-    expect(e.hurtLog.length).toBe(0);                            // 仅距离段即拒
+    expect(e.hurtLog.length).toBe(1);                            // 弹心近敌照结算
     expect(s.dead).toBe(true);                                   // 盒照常 5 拍亡（:3353）
+  });
+
+  it('距离段：敌距【弹心】> 1000px（ownerHitCheckDistance 缺省 :306/:701）→ 不结算', () => {
+    // 判别例（旧玩家锚下此敌距玩家仅 10px 会误结算）：巨盒 (720,100) 2400×2800
+    // → x −480..1920 / y −1300..1500 敌 (800,1420) 盒内贴玩家（中心 (810,1440)）；
+    // 弹心距敌 hypot(90,1340)≈1343 > 1000 → 距离段即拒（AABB 相交但进不了结算）
+    const e = mkEnemy(1, 800, 1420);
+    const s = new ChloroBladeSlam(720, 100, 2400, 2800, 95);
+    const g = makeHooks([e]);
+    tickN(s, g, 5);
+    expect(e.hurtLog.length).toBe(0);
+    expect(s.dead).toBe(true);
   });
 
   it('LOS 段：爆盒内敌 ≤1000px 但玩家↔敌间整列实心墙 → 四探针全断 → 不结算（:12420-12425）', () => {

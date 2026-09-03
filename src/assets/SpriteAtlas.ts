@@ -208,7 +208,14 @@ export class SpriteAtlas {
         // 浏览器托管可驱逐 = 零持久面,与 vimages 350 张同形态)。烘焙源只在
         // chunk 重烘时被 drawImage,转换无感;竞态守卫:仍是同一张才替换
         if (typeof createImageBitmap === 'function') {
-          createImageBitmap(hc).then((b) => {
+          // ★预乘位图（2026-09-03 边缘暗晕定谳）：WebGL 规范对 ImageBitmap 源
+          //  **忽略 UNPACK_PREMULTIPLY_ALPHA_WEBGL**，位图自身 premultiplyAlpha
+          //  标志才生效——默认不预乘 → GLSpriteLayer 预乘着色器(`c.rgb*a` +
+          //  ONE/ONE_MINUS_SRC_ALPHA)把直 alpha 数据再乘一次 α = 边缘双重变暗
+          //  （3.4× 沙暴背景撕裂带上呈 3px 暗晕，用户实报"蓝色 stroke"）。
+          //  位图预乘后与 atlas canvas 路径(UNPACK 对 canvas 源生效)语义一致；
+          //  2D drawImage 消费方合成结果不变（规范等价）
+          createImageBitmap(hc, { premultiplyAlpha: 'premultiply' }).then((b) => {
             if (this.images.get(f) === hc) this.images.set(f, b);
           }).catch(() => { /* 保持 canvas,形态等价 */ });
         }
@@ -1296,7 +1303,9 @@ function tryBitmapUpgrade(
 ): void {
   let fellBack = false;
   const attemptOnce = (n: number): void => {
-    createImageBitmap(img).then((b) => {
+    // ★预乘位图：ImageBitmap 源忽略 UNPACK_PREMULTIPLY(见 loadAtlasFile 同注)——
+    //  不预乘则 GL 预乘管线对直 alpha 数据双重变暗(沙漠背景暗晕根因)
+    createImageBitmap(img, { premultiplyAlpha: 'premultiply' }).then((b) => {
       if (n > 0) console.log(`[bitmap重试成功] ${label}(第 ${n} 次)`);
       onReady(b);
     }, () => {

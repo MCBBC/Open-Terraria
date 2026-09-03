@@ -898,15 +898,28 @@ export function bodyRotationFor(type: number, vx: number, vy: number, facing: nu
 }
 
 /** player.fullRotation 读值 + fullRotationOrigin（Player 侧非渲染消费位：
- *  DoDeadCellsBeheadedParticles :24497-24503 枭首者头部载荷旋位）。与渲染层
- *  playerMountRotation（Renderer.ts）同源同式——fullRotation 写面 = bodyRotationFor
- *  （Hover 尾段 :3468-3521,UFO 7/钻头 8/扫帚 23）;origin = SetMount Size/2
- *  （Mount.cs:6268-6271）或扫帚 Hover 每帧 (w/2,h)（:3520）。本仓玩家盒恒 42 高,
- *  mounted 盒中心按 42+heightBoost 换算（渲染层同式）。返回 null = 无旋位。 */
+ *  DoDeadCellsBeheadedParticles :24497-24500 枭首者头部载荷旋位）。与渲染层
+ *  playerMountRotation（Renderer.ts）同源同式——fullRotation 写面两支：
+ *  ①矿车轨面：Minecart.TrackRotation（Player.cs:28325 `ref fullRotation`=atan2 坡度、
+ *    :28326 origin=(w/2,h)——本仓镜像 = Minecart.rotation,onTrack 写/脱轨归零
+ *    （Minecart.ts:446-455）,cart.h = 42+heightBoost = 原版 mounted 盒高）;
+ *  ②坐骑 Hover 机身倾斜（Mount.cs:3519-3568,1456 :3468-3521——UFO 7/钻头 8/扫帚 23;
+ *    origin = SetMount 7/8 (w/2,h/2)（:6346）或扫帚 Hover 每帧 (w/2,h)（:3568））。
+ *  43 pogo 旋（:3748-3761）/49 熔岩鲨 vy 倾斜（:3732-3745）/55 爬墙旋（:3015-3018）
+ *  写面本仓未建模 → 恒 0（登记建模边界,不发明近似）。本仓玩家盒恒 42 高,mounted
+ *  盒中心按 42+heightBoost 换算（渲染层同式）;矿车支 pivotY = p.y+cart.h（玩家位被
+ *  锁车盒顶 Minecart.ts:530-531 → vanilla position+(w/2,h) 直形）。cart = Player.cart
+ *  结构视图（本模块禁 import Minecart——TDZ 断环,见文件头 :77）。返回 null = 无旋位。 */
 export function playerFullRotationOf(
   p: { x: number; y: number; w: number; h: number },
   m: MountInstance,
+  cart?: { rotation: number; h: number } | null,
 ): { angle: number; pivotX: number; pivotY: number } | null {
+  if (cart && cart.rotation !== 0) {
+    // 矿车轨面支（Player.cs:28325-28326）：fullRotation=TrackRotation atan2、
+    // fullRotationOrigin=(width/2,height) → pivot = position+(w/2, cart.h)
+    return { angle: cart.rotation, pivotX: p.x + p.w / 2, pivotY: p.y + cart.h };
+  }
   if (!m.active || m.fullRotation === 0 || (m.type !== 7 && m.type !== 8 && m.type !== 23)) return null;
   const mh = 42 + (m.heightBoost || 0);
   return {

@@ -351,7 +351,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
-    canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
+    canFloat: boolean;   // canFloatInWater（字段 :2711——仅两源：甲件 4404 水上漂靴 :13364-67 ∪ buff265 Flamingo 坐骑 :9982-86；脚蹼药 109 只授 ignoreWater+accFlipper 不置此位 :10257-59、flipper 饰品亦不授——旧注":9592 脚蹼药水"系 1456 期 ignoreWater 面错锚，R1-F1 勘误 2026-09-03）
     shimmerImmune: boolean;   // Player.shimmerImmune（:15643-46 幻彩斗篷 5355 且未按住下 45t——浮液/微光 buff 双消费 :23641/:27944）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
     dontHurtCritters: boolean;   // ★E：4767/5323（RefreshMechanicalAccs :12922-12924）
@@ -700,14 +700,21 @@ export class Player extends Entity {
   inHoney = false;
   /** 微光浸入（原版 shimmerWet，Player.cs:27420-27424：Collision.shimmer 盒命中） */
   inShimmer = false;
-  /** Player.ShouldFloatInWater（:3856-3870）：canFloatInWater（甲件 4404 ∪
-   *  buff265 脚蹼药水）且未按下方向键（controlDown）；坐骑时仅坐骑 37 浮液。
+  /** Player.ShouldFloatInWater（:3856-3870）：canFloatInWater 且未按下方向键
+   *  （controlDown）；坐骑时仅坐骑 37 浮液。canFloatInWater 源全源码仅两处
+   *  （红队 R1-F1 勘误 2026-09-03）：甲件 4404 Floating Tube（ApplyEquipFunctional
+   *  :13364-67）∪ buff 265 Flamingo（UpdateBuffs 坐骑支 :9982-86）；【脚蹼药 buff 109
+   *  只授 ignoreWater+accFlipper（:10257-59）不置 canFloatInWater】。buff265 =
+   *  Mount 37 的坐骑 buff（Mount.cs:1801-03 mounts[37].buff=265），本仓坐骑 buff
+   *  不入 BuffState（Mounts.ts 承运注释）→ 以在骑坐骑 37 等价表达——真值表同原版：
+   *  仅 4404 而骑他坐骑=假（坐骑支短路）、骑 37=真、均无=假。
    *  消费：TryFloatingInFluid 浮力 :23641、湿态阻尼 :28061、accFlipper 湿授予
-   *  :13115、翼帧 waterFloat（Player.ts:4435 已有内联同式） */
+   *  :13115、翼帧 waterFloat（WingFrame :30456/:30724/:30732）、
+   *  ShouldDrawWingsThatAreAlwaysAnimated :30971 */
   get shouldFloatInWater(): boolean {
-    if (!(this.equipStats.canFloat || this.buffs.has(BuffType.FlipperPotion))) return false;
-    if (this.inputDown) return false;
-    if (this.ridingMount) return this.mount.type === 37;
+    const canFloatInWater = this.equipStats.canFloat || (this.ridingMount && this.mount.type === 37);
+    if (!canFloatInWater || this.inputDown) return false;   // :3860 canFloatInWater && !controlDown
+    if (this.ridingMount) return this.mount.type === 37;    // :3862-65 mount.Active → Type==37
     return true;
   }
   /** 坐椅起身钩（TryFloatingInFluid :23646-49 isSitting → SitUp；SitUp 实现在
@@ -721,6 +728,36 @@ export class Player extends Entity {
   shimmering = false;
   /** 微光滞留 tick（TryToShimmerUnstuck :28378：钳 0-7200，shimmering +1/否则 -10） */
   timeShimmering = 0;
+  /** ShimmerUnstuckHelper 最小建模（ShimmerUnstuckHelper.cs:5-58；红队 R1-F6 2026-09-03）：
+   *  TimeLeftUnstuck/IndefiniteProtectionActive 两裸位承载（原版 struct 字段）。
+   *  ShouldUnstuck :11-21 消费于 AddBuff(353) 三因子门（Player.cs:27944）；StartUnstuck
+   *  :47-51（indefinite+120t）由 ShimmerUnstuck 无位支 :29107-29110 调；Update :23-45
+   *  （Player.cs:25843 每 tick：脱微光清 indefinite+倒计时,归零广播 ShimmerTownNPC）；
+   *  Clear :53-58（UpdateDead :17041）。近不可达路径（findShimmerFreeSpot 三层兜底后
+   *  仍无位）——按判定条件最小建模 */
+  shimmerUnstuckTimeLeft = 0;
+  shimmerUnstuckIndefinite = false;
+  /** ShouldUnstuck getter（ShimmerUnstuckHelper.cs:11-21 字面） */
+  get shimmerUnstuckShouldUnstuck(): boolean {
+    return this.shimmerUnstuckIndefinite || this.shimmerUnstuckTimeLeft > 0;
+  }
+  /** Update（ShimmerUnstuckHelper.cs:23-45 字面，Player.cs:25843 每 tick 调） */
+  private shimmerUnstuckHelperUpdate(game: GameHooks): void {
+    const dry = !this.shimmering && !this.inShimmer;   // flag = !shimmering && !shimmerWet（:26）
+    if (dry) this.shimmerUnstuckIndefinite = false;
+    if (this.shimmerUnstuckTimeLeft > 0 && !dry) this.startShimmerUnstuckHelper();
+    if (!this.shimmerUnstuckIndefinite && this.shimmerUnstuckTimeLeft > 0) {
+      this.shimmerUnstuckTimeLeft--;
+      if (this.shimmerUnstuckTimeLeft === 0) {
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.y + this.h);   // :37-43 player.Bottom
+      }
+    }
+  }
+  /** StartUnstuck（ShimmerUnstuckHelper.cs:47-51 字面） */
+  private startShimmerUnstuckHelper(): void {
+    this.shimmerUnstuckIndefinite = true;
+    this.shimmerUnstuckTimeLeft = 120;
+  }
   /** 微光化半透明（Player.cs:18147-18162 shimmerTransparency：shimmering +0.015/t
    *  钳 0.8；解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 Sound 19 style 3）。
    *  渲染侧 globalAlpha = 1 - 值（GetAlpha :53253 三通道乘 (1-t) 近似） */
@@ -3289,17 +3326,25 @@ export class Player extends Entity {
     //   满高计 :1635-1654 分支——旧手写盒缺该支，坡面涉水判定偏浅）。
     //   居中盒同样解决旧"脚底单点采样"的水下走坡 1-2px 抖动翻转问题。
     const wasInWater = this.inWater;
-    const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 原版 wet 位（任一液体）
-    const wasWetWH = this.inWater || this.inHoney;   // 原版 wet 位（水∪蜜,:1418——湿阻尼过渡门用）
+    const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 出水截跳消费位（下方 :3370 处原口径，不动）
+    // 原版 wet 位 = WetCollision 原始返回：Collision.cs:1608 `liquid > 0` 对任意液体
+    // 成立（岩浆/微光/蜜都是液体,无排除项）、:1627 首中即返——wet 含岩浆+微光
+    // （铁证：Player.cs:28049-28056 岩浆溅花尘 35 与 :28060 `wet = true` 同体）。
+    // 旧注"wet 只认 !lava && !shimmer(:1418)"系把 DrownCollision（呼吸口,
+    // Collision.cs:1418 `!tile.lava() && !tile.shimmer()`）当 wet 位——勘误退役
+    // （红队 R1-F5/F10 2026-09-03）。inWater 是本仓"去岩浆"窄化位,honey/shimmer
+    // 桶与 wetCollision 返回同源同盒 → 四桶并集 ≙ 原版 wet
+    const wasWetAll = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+    let wetNow = false;
     {
       const r = wetCollision(world.store, this.x, this.y, this.w, this.h);
-      // :1418 wet 只认 !lava && !shimmer(蜜算 wet);岩浆里不能"游泳"
-      this.inWater = r.wet && !this.inLava;
+      this.inWater = r.wet && !this.inLava;   // inWater = 原版 inWater 窄化位（岩浆里不能"游泳"）
       this.inHoney = r.honey;
+      wetNow = r.wet;                          // 原版 num86（Player.cs:27938）
     }
-    // 入水过渡拍（vanilla `if (!wet)` Player.cs:27982，`wet = true`+湿阻尼
-    // :28060-28068 在其体内=仅首拍生效）——湿阻尼消费旗（运动块尾）
-    const wetEntryNow = !wasWetWH && (this.inWater || this.inHoney);
+    // 入水过渡拍（vanilla `if (num86) { if (!wet) { wet = true; … } }` Player.cs:27959/
+    // :27982/:28060——wet 位任意液体）——湿阻尼消费旗（运动块尾 :5259）
+    const wetEntryNow = !wasWetAll && wetNow;
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
     // 原版两方向都出尘+SoundID 19(splash)（Player.cs:27500-27546 入 / :27595-27630 出）：
@@ -3374,9 +3419,11 @@ export class Player extends Entity {
     //      （水/蜜/岩浆同支）→ wet ≙ inWater∪inLava∪inHoney。踩踏循环 A 的
     //      wetSlime==0 门消费此值（MountCombat.mountJumpStomps）----
     tickSlimeWetState(this);
-    // 微光浸入（Player.cs:27420-27434）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
-    // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内不授予
-    // （:27430 采样处即有 position.Y/16 < UnderworldLayer 门）
+    this.shimmerUnstuckHelperUpdate(game);   // ShimmerUnstuckHelper.Update :23-45（Player.cs:25843 每 tick,先于 AddBuff(353) 门）
+    // 微光浸入（Player.cs:27938-27953）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
+    // shimmerImmune = 5355 幻彩斗篷在身且未按住下（:15643-46,已实装 equipStats 段）
+    // ——旧注"恒 false（来源未移植）"退役（R1 勘误 2026-09-03）；地狱层内不授予
+    // （:27948 采样处即有 position.Y/16 < UnderworldLayer 门）
     // Main.UnderworldLayer = maxTilesY-200（Main.cs:2863 恒 h-200，SceneMetrics.ts 同源）——
     // 非 world.lavaLine（本仓岩浆线 ≈(rockLayer+h)/2 生成参数，比 h-200 浅 ~170 格，
     // 误用会提前关闭地狱层门）
@@ -3392,9 +3439,12 @@ export class Player extends Entity {
     // （同句 liquid>=0 恒真），浅浸即授予。
     // 顶格越界（y<0）读 undefined !== 4 = 原版 Main.tile[负] null 短路，同语义
     const topIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 1) / TILE));
+    // 三因子门（:27944 `whoAmI == Main.myPlayer && !shimmerImmune &&
+    // !shimmerUnstuckHelper.ShouldUnstuck`）+ 内采样（:27948 顶格 shimmer 旗标）
     if (this.inShimmer && world.store.liquidType[topIdx] === 4
       && this.y / TILE < underworldLayer
-      && !this.equipStats.shimmerImmune) this.buffs.apply(BuffType.Shimmered, 1);   // !shimmerImmune（:27944）
+      && !this.equipStats.shimmerImmune
+      && !this.shimmerUnstuckShouldUnstuck) this.buffs.apply(BuffType.Shimmered, 1);
     // buff 353 处理段（Player.cs:11381-11419）：buff 在 → shimmering=true + frozen
     // 封输入（下方移动积分前的 Frozen∪Shimmering 清零段消费）+ fallStart 重置（免摔伤）。
     // 注意：本 tick 内 DelBuff 后 shimmering 保留到下 tick 才复位（原版 :18168 帧首
@@ -3656,6 +3706,9 @@ export class Player extends Entity {
       this.buffs.remove(BuffType.ManaSickness);
       this.manaHeat = 1;
       this.slowMagicUse = false;
+      // ShimmerUnstuckHelper.Clear()（UpdateDead :17041——脱困保护随死亡清零）
+      this.shimmerUnstuckIndefinite = false;
+      this.shimmerUnstuckTimeLeft = 0;
       return;
     }
     // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行——
@@ -4236,8 +4289,16 @@ export class Player extends Entity {
     //  水中起跳的完整链；旧近似只认 vy==0/脚蹼，出水跳全靠踩底）。该旗与 flipperJump
     // （flag2&flag3 的仓内形）并列进下方湿段起跳门。
     const justClearedWetSlime = consumeWetSlimeOnJumpControl(this);
+    // 原版 wet 位（红队 R1-F5/F10 2026-09-03）：Collision.WetCollision 对任意液体成立
+    // （Collision.cs:1608 `liquid > 0` 无 lava/shimmer 排除、:1627 首中即返）——wet 含
+    // 岩浆+微光+蜜。本仓 inWater 是"去岩浆"窄化位、inLava/inHoney/inShimmer 是分桶位
+    // （honey/shimmer 桶与 wetCollision 返回同源同盒）→ 四桶并集 ≙ wet。旧注
+    // "wet=水∪蜜(:1418)"系把 DrownCollision（呼吸口,Collision.cs:1418 !lava&&!shimmer）
+    // 当 wet 位——勘误退役。消费：flipperOn 湿授予（:13115-18）、翼帧 waterFloat
+    // （WingFrame :30456/:30724/:30732）、ShouldDrawWingsThatAreAlwaysAnimated :30971
+    const wetVanilla = this.inWater || this.inLava || this.inHoney || this.inShimmer;
     // 跳跃 / 游泳
-    // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
+    // 游泳族坐骑（海龟 131/猪鲨崽 168/熔岩鲨 305：坐骑 buff 的 ignoreWater，Player.cs:9972-9999——旧注 :9592-9608 系 1456 期锚）
     // 浸水走干燥分支——水下不降速（Run 段本就无水因子；位移层 liqFactor 由积分段
     // ridingMountSwimFree 门豁免）、正常重力与跳跃（+5 高/+2.5 速
     // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
@@ -4247,11 +4308,13 @@ export class Player extends Entity {
       // honeyWet → gravity 0.1/maxFall 3（跳跃参数保持干燥档——原版分支不覆写）；
       // merman → 0.3/7（跳跃参数同保持）；trident 且非岩浆 → 0.25/6 + jump 25/5.51
       // （按住 ↑ 0.1/2 浮升）；其余湿态 → 0.2/5(+0.01) + jump 30/6.01
-      // :13115 `if (wet && ShouldFloatInWater) accFlipper = true`——甲件 4404/脚蹼药
-      //  湿态授予脚蹼泳跃能力（wet=水∪蜜，:1418 口径；lava/shimmer 不算）
+      // :13115-18 `if (wet && ShouldFloatInWater) accFlipper = true`——4404/buff265
+      //  （canFloat 源）湿态授予脚蹼泳跃能力；equipStats.flipper=accFlipper 饰品源、
+      //  脚蹼药 109 亦直接授 accFlipper（:10257-59）——两臂各按原版源承运；
+      //  wet = 任意液体含岩浆/微光（Collision.cs:1608/:1627，见上方 wetVanilla 注）
       const flipperOn = this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion)
-        || ((this.inWater || this.inHoney) && this.shouldFloatInWater)
-        || this.merman;   // :25779 变身授 accFlipper（2026-09-03 备案清偿②）
+        || (wetVanilla && this.shouldFloatInWater)
+        || this.merman;   // :25779-25781 变身授 accFlipper（2026-09-03 备案清偿②）
       let lGrav = GRAVITY * 0.5, lMaxFall = 5.01;
       let lJSpd = mJumpSpd, lJT = mJumpTicks;
       if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3; }
@@ -4330,8 +4393,10 @@ export class Player extends Entity {
         const glideW = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
         this.wingFrameScratch.frame = this.wingFrame;
         this.wingFrameScratch.counter = this.wingFrameCounter;
-        const floatW = (eqWet.canFloat || this.buffs.has(BuffType.FlipperPotion))   // canFloatInWater 两源（:12845/:9595）
-          && !this.inputDown && (!this.ridingMount || this.mount.type === 37);   // ShouldFloatInWater :3710-3722 全门
+        // waterFloat/shouldDraw 门 = wet && ShouldFloatInWater（WingFrame :30456/
+        // :30724/:30732 + ShouldDrawWingsThatAreAlwaysAnimated :30971）——浮源判统一
+        // 走 shouldFloatInWater getter（canFloatInWater 两源 :13364-67/:9982-86；脚蹼药
+        // 109 不置 canFloatInWater :10257-59——R1-F1 勘误,旧内联手写式退役）
         stepWingFrame(wingsLogicW, this.wingFrameScratch, {
           flap: flying,
           jump: this.jumpHold > 0,
@@ -4342,10 +4407,10 @@ export class Player extends Entity {
           wingTime: this.wingTime,
           glide: glideW,
           downDash: false,          // isPerformingJump_DownDash 未建模
-          waterFloat: this.inWater && floatW,
+          waterFloat: wetVanilla && this.shouldFloatInWater,
           shouldDraw: this.vy !== 0 && !this.ridingMount
             && !this.grappleProjs.some((g) => g.latched)
-            && !(this.inWater && floatW),
+            && !(wetVanilla && this.shouldFloatInWater),
         });
         this.wingFrame = this.wingFrameScratch.frame;
         this.wingFrameCounter = this.wingFrameScratch.counter;
@@ -4679,14 +4744,11 @@ export class Player extends Entity {
           wingTime: this.wingTime,
           glide,
           downDash: false,          // isPerformingJump_DownDash 未建模
-          waterFloat: this.inWater
-            && (eq.canFloat || this.buffs.has(BuffType.FlipperPotion))   // canFloatInWater 两源（:12845/:9595）
-            && !this.inputDown && (!this.ridingMount || this.mount.type === 37),   // ShouldFloatInWater :3710-3722 全门
-          // ShouldDrawWingsThatAreAlwaysAnimated :30271（坐骑恒禁翼 → !ridingMount）
+          waterFloat: wetVanilla && this.shouldFloatInWater,   // WingFrame :30456/:30724/:30732 wet && ShouldFloatInWater
+          // ShouldDrawWingsThatAreAlwaysAnimated :30969-30980（坐骑恒禁翼 → !ridingMount）
           shouldDraw: this.vy !== 0 && !this.ridingMount
             && !this.grappleProjs.some((g) => g.latched)
-            && !(this.inWater && ((eq.canFloat || this.buffs.has(BuffType.FlipperPotion))
-              && !this.inputDown && (!this.ridingMount || this.mount.type === 37))),   // ShouldFloatInWater :3710-3722
+            && !(wetVanilla && this.shouldFloatInWater),
         });
         this.wingFrame = this.wingFrameScratch.frame;
         this.wingFrameCounter = this.wingFrameScratch.counter;
@@ -5190,11 +5252,12 @@ export class Player extends Entity {
     // ---- 水中位移减速（Player.cs:27858-27888 湿态碰撞选档 + WetCollision :23157-23172：
     //      velocity 原值进碰撞、位移 ×factor——水中 vx 照常加速到 3，只是每 tick 只走
     //      一半路程。经 moveAndCollide 的 liqFactor 入口（NPC MoveWhileWet 同机制）。
-    //      选档：shimmerWet→0.375(num111) > honeyWet&&!ignoreWater→0.25 >
-    //      wet&&!merman&&!ignoreWater&&!trident→0.5（岩浆同 0.5，num109/num110）>
-    //      其余 DryCollision=1。ignoreWater = 游泳族坐骑(:9585-9604) ∪ 脚蹼药 109
-    //      (:9852) ∪ 星旋强化翼 wingSlot26(:14906-14908)；trident=手持三叉戟 277
-    //      (:12487-12490)。shimmering 穿墙分支不走 moveAndCollide，不消费此值。----
+    //      选档：shimmerWet→0.375(num113 :28381) > honeyWet&&!ignoreWater→0.25 >
+    //      wet&&!merman&&!ignoreWater&&!trident→0.5（岩浆同 0.5，num111/num112
+    //      :28378-79；R1 勘误 2026-09-03,旧注"num111/num109-110"系 1456 期锚）>
+    //      其余 DryCollision=1。ignoreWater = 游泳族坐骑(:9972-9999) ∪ 脚蹼药 109
+    //      (:10257-59) ∪ 星旋强化翼 wingSlot26(:15570-72)；trident=手持三叉戟 277
+    //      (:12992)。shimmering 穿墙分支不走 moveAndCollide，不消费此值。----
     {
       const ignoreWater = this.ridingMountSwimFree
         || this.buffs.has(BuffType.FlipperPotion)
@@ -5228,7 +5291,7 @@ export class Player extends Entity {
       this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
     }
     // ---- 浮液物理（TryFloatingInFluid Player.cs:23639-23679，运动位积分后调用）：
-    //      ShouldFloatInWater（:3856-3870 canFloatInWater∪脚蹼药、未按下、坐骑仅 37）
+    //      ShouldFloatInWater（:3856-3870 canFloatInWater=4404∪buff265、未按下、坐骑仅 37）
     //      且非（微光浸身而幻彩斗篷豁免缺失）→ GetWaterLine 定液面（npcLiquid 1:1）：
     //      深处（ty-2 有液）恒上浮 −0.4 钳 −6；液面下沿 −0.4 上爬；到线钉线（钳 −3、
     //      vy==0 置 float.Epsilon 防"落地"语义吞）。坐椅先起（SitUp :23646-49 经钩）----
@@ -5625,18 +5688,38 @@ export class Player extends Entity {
    *  Player.cs:24491-24510 1:1）：门 = !dead && !ghost && !stoned && !frozen &&
    *  head==282 && !sitting && !sleeping && (坐骑不隐藏玩家)。载荷：
    *  PositionInWorld = MountedTop + (0, 8×gravDir + gfxOffY + Remap(|vx|,0,3,0,−4)×
-   *  gravDir);MovementVector = velocity。原版 RequestParticleSpawn(clientOnly:true)
-   *  （各端对全部玩家本地生成）→ 本仓只模拟本地玩家 → 本地直生 + 广播补远端
-   *  （34 型偏差口径）。消费本体 = fx/orchestraFx.deadCellsBeheadedHeadFx。
+   *  gravDir);MovementVector = velocity（骑乘轨道支旋后,见下）。原版
+   *  RequestParticleSpawn(clientOnly:true)（各端对全部玩家本地生成）→ 本仓只模拟
+   *  本地玩家 → 本地直生 + 广播补远端（34 型偏差口径）。消费本体 =
+   *  fx/orchestraFx.deadCellsBeheadedHeadFx。
    *  ★旋位支清偿（2026-09-03）：fullRotation≠0 → 载荷位绕 position+fullRotation
-   *  Origin 旋（:24497-24503 vector.RotatedBy(fullRotation, pivot)——UFO 7/钻头 8/
-   *  扫帚 23 倾斜机身,playerFullRotationOf 与渲染层 playerMountRotation 同源）,
-   *  旋后值直入 module8 载荷 = 远端复放自动同位（载荷格式不变,旋转由 producer
-   *  烘入坐标）。骑乘速度旋转支（:24504-24506 vector2.RotatedBy(fullRotation,Zero),
-   *  门 = fullRotation≠0 ∧ mount.Active ∧ mount.AnyTrackRider）登记保留：1457 全表
-   *  AnyTrackRider（Minecart ∪ CanRideMinecartTracks,Mount.cs:558-573）与 fullRotation
-   *  写面（{7,8,23,43,49,55,UseAbility}）交集 = ∅（构造性证明, vanilla 亦死支）——
-   *  本仓 MOUNT_DATA 同构,消费面不存在。 */
+   *  Origin 旋（:24497-24500 vector.RotatedBy(fullRotation, pivot)——矿车轨面
+   *  TrackRotation（:28325-28326 origin=(w/2,h)）∪ UFO 7/钻头 8/扫帚 23 倾斜机身
+   *  （Hover Mount.cs:3519-3568）,playerFullRotationOf 与渲染层同源）,旋后值直入
+   *  module8 载荷 = 远端复放自动同位（载荷格式不变,旋转由 producer 烘入坐标）。
+   *  ★R3 复核翻案（2026-09-03）：骑乘速度旋转支（:24501-24504 vector2.RotatedBy(
+   *  fullRotation, Zero)）此前登记"AnyTrackRider∩fullRotation 写面=∅ 死支保留"
+   *  有误——:28325 Minecart.TrackRotation 在 bitsByte[0]（onTrack）直接 ref 写玩家
+   *  fullRotation,而矿车族 MountData.Minecart=true ⇒ AnyTrackRider（Mount.cs:558-573
+   *  Minecart ∪ CanRideMinecartTracks）恒真,交集非空。本仓接线：门 = fullRotation≠0
+   *  ∧（ridingCart ‖ mount.Active ∧ MOUNT_DATA.CanRideMinecartTracks）——57-60 滚轴
+   *  冰鞋 CanRideMinecartTracks=true 但本仓无轨道骑乘物理 → fullRotation 恒 0,该支
+   *  不可达（登记建模边界,非新偏离）。
+   *  ★载荷纵项清偿（2026-09-03,红队R3②③）：gfxOffY 聚合 = this.gfxOffY（滑轮
+   *  :19837/:19854/:19871/:26440 + 衰减 :28216-28238）+ stepRenderY（StepUp/Down
+   *  :28267-28278 `ref gfxOffY` 的本仓登记等价系统,Player.ts 台阶检测注释锚）+
+   *  cart.gfxOffY（:28325 TrackRotation 返回值——三态互斥,和 = 原版单字段现值）;
+   *  MountedTop（:3333-3346）gravDir=−1 走 Bottom−HOC 分支（曾漏 → FTW 倒挂锚差
+   *  整盒高）。HOC = HeightOffsetHitboxCenter（:3237-3248）= mount.Active ?
+   *  PlayerOffsetHitbox（Mount.cs:427-436 = −PlayerOffset + heightBoost）: 0
+   *  （折叠凳支 HeightBoost−VisualYOffset=26−26=0,本仓 stoolInUse 盒已含 +26 →
+   *  同式自消）。坐标换算与 mountedCenter 同约定：坐骑态 vanilla pos.Y ≡ this.y−boost
+   *  （SetMount :6335-6344 盒高 42+boost、底锚 preserved）、Bottom ≡ this.y+this.h;
+   *  矿车态玩家被锁车盒顶（Minecart.ts:530-531）→ vanilla pos.Y ≡ this.y、
+   *  Bottom ≡ this.y+cart.h（cart.h = 42+heightBoost = 原版 mounted 盒高）;
+   *  矿车 bob = playerYOffsets（SetAsMinecart Mount.cs:2770-2776 填 8−vOff+pOff →
+   *  默认 8;51/53 传 (−10,−8) → 10（:1102/:1110）——json 提取器缺该数组,硬补同
+   *  anchorPlayerOffset 口径）,boost = cart.h−42（SetAsMinecart :2766 heightBoost=10）。 */
   deadCellsBeheadedStep(game: GameHooks): void {
     // ★F4③（2026-09-01）补 !stoned 门——仓内有真实石化态（BuffType.Stoned=156,
     // :3619 lastStoned 过渡同源）非"不可达态",原版门串 :24494 含 !stoned && !frozen
@@ -5651,20 +5734,42 @@ export class Player extends Entity {
     if (this.headArmorSlot !== 282) return;                    // head == 282（枭首者头部 5457）
     if (this.sitting || this.sleeping) return;                 // !sitting.isSitting && !sleeping.isSleeping
     if (this.mount.active && !!MOUNT_SETS.PlayerIsHidden?.[this.mount.type]) return;   // PlayerIsHidden 门
-    let px = this.cx, py = this.y + 8 * this.gravDir
+    const cart = this.ridingCart ? this.cart : null;
+    // ---- MountedTop（Player.cs:3333-3346）：x = position.X+w/2;y = pos+HOC
+    //      （gravDir=1）/ Bottom−HOC（gravDir=−1）。HOC = −bob+boost
+    //      （Mount.cs:435 −PlayerOffset+heightBoost;未骑乘/折叠凳=0,见方法头）
+    const bob = cart
+      ? (cart.mountId === 51 || cart.mountId === 53 ? 10 : 8)  // SetAsMinecart playerYOffsets（:2770-2776）
+      : this.anchorPlayerOffset;                               // Mount.PlayerOffset（:411-425）
+    const boost = cart ? cart.h - 42                           // SetAsMinecart heightBoost=10（:2766）
+      : (this.mount.active ? this.mount.heightBoost : 0);      // MountData.heightBoost
+    const hoc = boost - bob;                                   // HeightOffsetHitboxCenter（:3237-3248→Mount.cs:435）
+    const posVY = cart ? this.y : this.y - boost;              // vanilla position.Y（换算见方法头）
+    const bottomY = cart ? this.y + cart.h : this.y + this.h;  // vanilla Bottom.Y
+    let px = this.cx;
+    let py = (this.gravDir === 1 ? posVY + hoc : bottomY - hoc)                              // MountedTop.Y
+      + 8 * this.gravDir + this.gfxOffY + this.stepRenderY + (cart ? cart.gfxOffY : 0)       // :24496 gfxOffY 聚合
       + Math.max(0, Math.min(1, (Math.abs(this.vx) - 0) / 3)) * -4 * this.gravDir;   // Remap(|vx|,0,3,0,-4)
-    // ★旋位支（:24497-24503）：if (fullRotation != 0) vector = vector.RotatedBy(
-    //   fullRotation, position + fullRotationOrigin)——pivot/角度与渲染层同源
-    const fr = playerFullRotationOf(this, this.mount);
+    // ★旋位支（:24497-24500）：if (fullRotation != 0) vector = vector.RotatedBy(
+    //   fullRotation, position + fullRotationOrigin)——矿车轨面（:28326 (w/2,h)）∪
+    //   Hover 机身倾斜,playerFullRotationOf 单源
+    const fr = playerFullRotationOf(this, this.mount, cart);
     if (fr) {
       const rp = rotatedBy(px, py, fr.angle, fr.pivotX, fr.pivotY);
       px = rp.x; py = rp.y;
-      // :24504-24506 骑乘速度旋转支——AnyTrackRider∩fullRotation 写面 = ∅（见
-      // 方法头构造性证明）,不建模（登记保留）
     }
-    deadCellsBeheadedHeadFx(game, px, py, this.vx, this.vy);
+    // ★:24501-24504 骑乘速度旋转支（R3 复核翻案,见方法头）：MovementVector 绕
+    //   Zero 旋同一 fullRotation——门 = fullRotation≠0（fr 非 null）∧ mount.Active
+    //   ∧ AnyTrackRider（矿车族恒真;非矿车读 CanRideMinecartTracks）
+    let mvx = this.vx, mvy = this.vy;
+    if (fr && (cart || (this.mount.active
+      && !!MOUNT_DATA[String(this.mount.type)]?.CanRideMinecartTracks))) {
+      const rv = rotatedBy(mvx, mvy, fr.angle);                // pivot = Vector2.Zero
+      mvx = rv.x; mvy = rv.y;
+    }
+    deadCellsBeheadedHeadFx(game, px, py, mvx, mvy);
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBeheadedEffect,
-      px, py, this.vx, this.vy);
+      px, py, mvx, mvy);
   }
 
   /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢
@@ -7687,7 +7792,20 @@ export class Player extends Entity {
       st, Math.floor(this.cx / TILE), Math.floor(this.y / TILE),
       world.spawnX, world.spawnY,
     );
-    if (!spot) return;
+    if (!spot) {
+      // 原版无位支（Player.cs:29105-29116）：不传送、不解除 shimmering——仍浸微光则
+      // StartUnstuck（indefinite+120t 保护,ShimmerUnstuckHelper.cs:47-51；:29107-29110）
+      // + ClearBuff(353)（:29111）+ ShimmerTownNPC 广播（:29112-15,Bottom）。效果 =
+      // 微光化态解除、实体化原地，且下一 tick 起 AddBuff(353) 被 ShouldUnstuck 门
+      // 拦 120t（:27944 三因子）；红队 R1-F6 2026-09-03（旧实现直接 return 无支）
+      const wr = wetCollision(world.store, this.x, this.y, this.w, this.h);
+      if (wr.wet && wr.shimmer) {   // :29107 Collision.WetCollision(...) && Collision.shimmer
+        this.startShimmerUnstuckHelper();
+      }
+      this.buffs.remove(BuffType.Shimmered);   // :29111 ClearBuff(353)
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.y + this.h);
+      return;
+    }
     const p = shimmerTeleportPos(spot, this.w, this.h);
     this.environmentBuffImmunityTimer = 4;        // Teleport :37701（环境 buff 免疫窗）
     this.x = p.x;

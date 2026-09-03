@@ -11,6 +11,11 @@
 //    （:92637-39）、转化置 0.89（:92705）、上升态 −1/60（:53770）、justHit −0.1
 //    （:92650）、常规 −0.001（:92658）；消费 = GetAlpha :94874（本体）+
 //    Main.cs:25771-25776（160 Glow）
+//  - ★[MAJOR-F4]（红队 R1 2026-09-03）：ramp lane 采样源 = shimmering（buff 353
+//    在身，:93255-64）——非液体直读。施加面 = 浸液 TryAddingRepeatedBuff(353,100)
+//    （:94211-18，调用点 :94446-56 共享 WetCollision 瞬时面）+ 弹 1042 命中
+//    （AI_060 :29456-58）；衰减 1/t（:93101），出池续挂 ≤100t；转化入上升态摘 buff
+//    （:92706-10）。测试 oracle 已按新机制重产（ramp 起于第 2 拍、出池尾期续推）
 //  - 坐姿落盘：WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883-2930 **无 ai[]**
 //    ——ai[0]==5/ai[1] 坐姿态不随存档持久，读档站立、夜间 AI 自然重坐
 //  - ai[0]==25 上升态 :53737-53820：落点传送 :53752-55/:56130-49、ai[1]≥30 起
@@ -29,12 +34,14 @@ import {
   sittingHatY, SITTING_HAT_OFFSET_Y, SITTING_HAT_OFFSET_Y_DEFAULT,
   shimmerTransparencyNext, shimmerBodyAlpha, shimmerGlowAlpha,
   SHIMMER_ST_RAMP, SHIMMER_ST_TRANSFORM, SHIMMER_ST_RISE,
+  SHIMMER_BUFF_TICKS,
   SHIMMER_ST_DECAY_RISE, SHIMMER_ST_DECAY_HIT, SHIMMER_ST_DECAY_IDLE, SHIMMER_ST_DECAY_IMMUNE,
   SHIMMER_RISE_VELOCITY_TICK, SHIMMER_RISE_END_TICK,
   SHIMMER_RISE_PAUSE, SHIMMER_RISE_TELEPORT_DIST,
   remapClamped, isItStormingNext,
 } from '../src/entities/TownNPC';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { GlobProj } from '../src/entities/GlobProj';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 
 const CHAIR = TILE_BY_KEY['chair']!;            // sheet 15
@@ -306,18 +313,19 @@ describe('帽 Y 修正链（Main.cs:26965-26987 num6）', () => {
 });
 
 describe('shimmerTransparency（NPC.cs:92631-62/:53770——1457 锚行校准）', () => {
-  it('推进纯函数：浸没 +0.01 cap 1；rise/justHit/常规三档衰减', () => {
+  it('推进纯函数：shimmering（buff 353 在身）+0.01 cap 1；rise/justHit/常规三档衰减', () => {
     expect(SHIMMER_ST_RAMP).toBe(0.01);
     expect(SHIMMER_ST_TRANSFORM).toBe(0.9);
     expect(SHIMMER_ST_RISE).toBe(0.89);
+    expect(SHIMMER_BUFF_TICKS).toBe(100);   // AddBuff(353,100)（:94214/:29457）
     expect(SHIMMER_ST_DECAY_RISE).toBeCloseTo(1 / 60, 10);
     expect(SHIMMER_ST_DECAY_HIT).toBe(0.1);
     expect(SHIMMER_ST_DECAY_IDLE).toBe(0.001);
     expect(SHIMMER_ST_DECAY_IMMUNE).toBe(0.015);
-    // 浸没 ramp
+    // shimmering（buff 353 在身）ramp——[MAJOR-F4] 后采样源 = buff 位,非液体直读
     expect(shimmerTransparencyNext(0, true, false, false)).toBeCloseTo(0.01, 10);
     expect(shimmerTransparencyNext(0.995, true, false, false)).toBe(1);      // cap
-    // rise 抑制 ramp（GetShimmered 摘 buff 353 :92570-92573）
+    // rise 抑制 ramp（GetShimmered 摘 buff 353 :92706-10）
     expect(shimmerTransparencyNext(0.89, true, false, true)).toBeCloseTo(0.89 - 1 / 60, 10);
     // 衰减位（:92646-62 两独立位叠加——justHit 位 + 免疫/常规档；旧单档模型退役）
     expect(shimmerTransparencyNext(0.89, false, false, true)).toBeCloseTo(0.89 - 1 / 60, 10);
@@ -339,19 +347,28 @@ describe('shimmerTransparency（NPC.cs:92631-62/:53770——1457 锚行校准）
     expect(shimmerGlowAlpha(0.5, 1)).toBeCloseTo(0, 10);   // 全透明
   });
 
-  it('端到端：浸微光 ~91t 渐隐 → 转化（置 0.89 进上升态，非即刻标记变体）', () => {
+  it('端到端：浸微光 → buff353 lane ~91t 渐隐 → 转化（置 0.89 进上升态，非即刻标记变体）', () => {
     const world = new World(200, 200, 100, 'shimmer-test');
     for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, FLOOR, DIRT);
     const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
     npc.stationary = true;   // 无 home + stationary：站定不游走
     const { game } = makeGame(world, { npcs: [npc] });
-    // 中心格微光（TownNPC 以中心格判浸没）
+    // 中心池 1 格 255 深（[MAJOR-F4] 后浸入 lane = 共享 WetCollision → buff 353 载体）
     world.store.setLiquid(100, 98, 255, 4);
-    // 渐变期（~91t 才到 >0.9，非即刻转化——原版 :92637-39）
-    for (let t = 0; t < 60; t++) npc.fixedUpdate(1 / 60, game);
+    // 第 1 拍：ramp 未启动——buff 在液体段尾施加（TryAddingRepeatedBuff :94211-18，
+    // 调用点 :94446-56；序位同原版 UpdateNPC 先于 UpdateCollision :91607），下拍
+    // UpdateNPC_BuffSetFlags（:93101 衰减 + :93255 置 shimmering）方进 ramp
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerBuffT).toBe(SHIMMER_BUFF_TICKS);   // 首施 AddBuff(353,100)
+    // 渐变期（~91t 才到 >0.9，非即刻转化——原版 :92637-39；ramp 自第 2 拍起）
+    for (let t = 1; t < 60; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.shimmered).toBe(false);
     expect(npc.shimmerRising).toBe(false);
-    expect(npc.shimmerTransparency).toBeCloseTo(0.6, 5);
+    expect(npc.shimmerTransparency).toBeCloseTo(0.59, 5);   // 第 2..60 拍 59 次 +0.01
+    // 浸池续期振荡（TryAddingRepeatedBuff ≤10 重施 :94211-18）——本场景转化帧恰逢
+    // counter=10，重施臂未及触发即被入上升态摘除
+    expect(npc.shimmerBuffT).toBeGreaterThan(10);
+    expect(npc.shimmerBuffT).toBeLessThanOrEqual(SHIMMER_BUFF_TICKS);
     // 转化帧：只进 ai[0]=25 上升态 + st=0.89（GetShimmered :92700-05），变体未翻转
     let tick = -1;
     for (let t = 60; t < 300 && tick < 0; t++) {
@@ -359,10 +376,12 @@ describe('shimmerTransparency（NPC.cs:92631-62/:53770——1457 锚行校准）
       if (npc.shimmerRising) tick = t;
     }
     // 0.9/0.01 = 90 次 +0.01（浮点累积 0.9000000000000001 > 0.9，恰第 90 次过线）
+    // → ramp 起于第 2 拍 ⇒ 转化在第 91 拍
     expect(tick).toBeGreaterThanOrEqual(85);
     expect(tick).toBeLessThanOrEqual(95);
     expect(npc.shimmerTransparency).toBe(0.89);
     expect(npc.shimmered).toBe(false);
+    expect(npc.shimmerBuffT).toBe(0);   // GetShimmered 摘 buff 353（:92706-10 DelBuff）
     // 落点传送（:53609）：位置移出微光列（FindSpotWithoutShimmer 近似）
     expect(Math.abs(npc.x - (spotCenter(100) - 10))).toBeGreaterThan(0);
     // ai[1]<30 期间 st 原样保持（衰减门 :53621）——转化帧已 ai[1]=0→1，再推 28t 到 29
@@ -412,7 +431,8 @@ describe('ai[0]=25 微光上升态演出（NPC.cs:53737-53820）', () => {
 
   it('转化帧无即刻粒子/音效（GetShimmered :92561-92573 纯态切换）', () => {
     const { npc, game, fx } = shimmerScene();
-    for (let t = 0; t < 90 && !npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game);
+    // [MAJOR-F4] 后 ramp 起于第 2 拍（buff 液体段尾施加）→ 转化第 91 拍,窗放宽
+    for (let t = 0; t < 120 && !npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.shimmerRising).toBe(true);
     expect(fx.bursts).toBe(0);        // dust 309 门在 ai[1]<30 时钳恒假（:53644 Remap）
     expect(fx.particles).toBe(0);
@@ -471,6 +491,72 @@ describe('ai[0]=25 微光上升态演出（NPC.cs:53737-53820）', () => {
     expect(npc.shimmerTransparency).toBeLessThanOrEqual(1e-9);
     expect(npc.shimmered).toBe(false);          // 翻转回原形态（townNpcVariationIndex 0）
     expect(fx.achievements).toEqual([43]);      // 43 仅在变体→1 时通知（:53667-9）
+  });
+});
+
+describe('[MAJOR-F4] 浸入 lane（buff 353 载体 + 共享 WetCollision，红队 R1 2026-09-03）', () => {
+  /** 地面 + 池 1 格（100,98 255 深微光）——F4 场景同源 */
+  function shimmerF4World() {
+    const world = new World(200, 200, 100, 'shimmer-f4');
+    for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, FLOOR, DIRT);
+    world.store.setLiquid(100, 98, 255, 4);
+    return world;
+  }
+
+  it('池缘站位：中心格干、浸盒 10×h/2 侧缘触液 → 照样授 buff + ramp（旧中心格探针丢判面）', () => {
+    const world = shimmerF4World();
+    // x=1607（guide w=18）：cx=1616 → 中心格恰跨入 101 列（干），浸盒左缘
+    // [cx−5, cx+5]=[1611,1621] 仍与 100 列液格 [1600,1616] 相交——旧单格探针恒假
+    const npc = new TownNPC('guide', 101 * 16 + 1 - 10, FLOOR * 16);
+    npc.stationary = true;
+    const { game } = makeGame(world, { npcs: [npc] });
+    expect(Math.floor(npc.cx / 16)).toBe(101);            // 中心格干（旧探针恒 false 的病灶面）
+    for (let t = 0; t < 5; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerBuffT).toBeGreaterThan(0);          // WetCollision 共享盒 → buff 353
+    expect(npc.shimmerTransparency).toBeCloseTo(0.04, 5); // 第 2..5 拍 4 次 ramp
+  });
+
+  it('出池尾期：离池后 buff 续挂、ramp 继续推进直至转化（原版 :92634 只读 shimmering 位，不要求浸在池中）', () => {
+    const world = shimmerF4World();
+    const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
+    npc.stationary = true;
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 30; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerTransparency).toBeCloseTo(0.29, 5); // 第 2..30 拍 29 次 ramp
+    // 移出池（同层干地，140 列）
+    npc.x = spotCenter(140) - 10;
+    npc.y = FLOOR * 16 - npc.h;
+    npc.vx = 0; npc.vy = 0;
+    for (let t = 0; t < 20; t++) npc.fixedUpdate(1 / 60, game);
+    // ramp 继续推进（buff 余量期 = 出池时 counter 71 → 20 拍后 51）——旧液体直读
+    // 采样在此段只会衰减，不再 +0.01
+    expect(npc.shimmerTransparency).toBeCloseTo(0.49, 5);
+    expect(npc.shimmerBuffT).toBeGreaterThan(0);
+    // 续推至 >0.9 → 转化（出池也能转化）——渐隐期全程不在池列
+    let stayedDry = true;
+    for (let t = 0; t < 200 && !npc.shimmerRising; t++) {
+      npc.fixedUpdate(1 / 60, game);
+      if (Math.floor(npc.cx / 16) === 100) stayedDry = false;
+    }
+    expect(npc.shimmerRising).toBe(true);
+    expect(stayedDry).toBe(true);
+  });
+
+  it('微光枪弹 1042 命中城镇 NPC → 同一 buff lane（AI_060 :29456-58 AddBuff(353,100) + Kill）', () => {
+    const world = shimmerF4World();
+    const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
+    npc.stationary = true;
+    const { game } = makeGame(world, { npcs: [npc] });
+    // 出生居中于城镇 NPC（构造 y=y−h/2 居中）；aiRate=1 → 首扫第 5 拍（gate ai0>3）
+    const glob = new GlobProj(1042, npc.cx - 9, npc.cy - 9, 0, 0, 1);
+    let ticks = 0;
+    while (!glob.dead && ticks < 20 && npc.shimmerBuffT === 0) {
+      glob.fixedUpdate(1 / 60, game);
+      ticks++;
+    }
+    expect(glob.dead).toBe(true);                  // 重叠施 buff 即 Kill（:29459）
+    expect(npc.shimmerBuffT).toBe(SHIMMER_BUFF_TICKS);   // AddBuff(353,100) tick 载体
+    void world;
   });
 });
 

@@ -279,8 +279,12 @@ describe('配饰（SnapStrike 三味脉冲环带+充能三连+弧线引矢家族
     const rings = b.dusts.filter((d) => d.ret.prettySparkle === true);
     expect(rings.length).toBe(2);
     const red = rings[0].ret, gold = rings[1].ret;
-    expect(red.color).toEqual({ r: 255, g: 0, b: 0, a: 0 });
-    expect(gold.color).toEqual({ r: 255, g: 242, b: 0, a: 0 });
+    // ★R3 ③（2026-09-03）oracle 重产：ColorTint A=原版字节量化值（红 .5f→127/:665、
+    //  金 1f→255/:666）——A 进 color2.A dst 衰减公式（PrettySparkleParticle.cs:66-67）
+    expect(red.color).toEqual({ r: 255, g: 0, b: 0, a: 127 });
+    expect(gold.color).toEqual({ r: 255, g: 242, b: 0, a: 255 });
+    expect(red.psAdditive).toBe(0.35);                     // AdditiveAmount 红粒独写（:681）
+    expect(gold.psAdditive).toBeUndefined();               // 金循环 :698-721 无写入=缺省 1f
     for (const r of [red, gold]) {
       expect(r.ttl).toBe(30);                               // TimeToLive=num（:677/:706）
       expect(r.psFadeInEnd).toBe(15); expect(r.psFadeOutStart).toBe(15); expect(r.psFadeOutEnd).toBe(30);

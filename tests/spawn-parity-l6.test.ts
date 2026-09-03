@@ -330,6 +330,29 @@ describe('L6 spawn parity（仙女近旁刷怪率 GetSpawnRate:745）', () => {
   });
 });
 
+describe('L6 spawn parity（clamp → getGoodWorld 次序 GetSpawnRate:750-761）', () => {
+  /** 洞穴层 + 战斗药水 + 水蜡烛夹具（FTW）：pre-clamp rate=⌊600×0.4⌋=240 → ×0.6(近旁
+   *  <20%)=144 → ×0.7(地下中点,:592-604)=100 → ×0.5(战斗)=50 → ×0.75(水蜡烛)=37<60、
+   *  max=⌊5×1.9⌋=9 → ×2(战斗)=18 → ×1.5(水蜡烛)=27>15——两道 clamp 边界同时压线。
+   *  原版次序 :750-757 clamp(60/15) → :758-761 getGood ×0.8/×1.2 → {48,18}；
+   *  旧次序（getGood 先、clamp 后）→ 37×0.8=29→60、27×1.2=32→15 = 双双回夹错值 */
+  function ftwCaveRate(): { spawnRate: number; maxSpawns: number } {
+    const w = new World(400, 800, 42, 'ftw-order');
+    w.groundLevel = 60;
+    w.rockLevel = 120;
+    w.seedFlags.getGoodWorld = true;        // FTW 种子（seedFlags 面,WorldGen.getGoodWorld）
+    const sp = new VanillaSpawner(w);
+    (sp as unknown as { rateRng: () => number }).rateRng = () => 0.99;   // 友好掷/厄运轮不触发
+    // playerY=4000px：> rockLevel×16+1200=3120（洞穴层 ×0.4/×1.9）且 < (800-200)×16=9600（非地狱）
+    return sp.getSpawnRate(4000, 0, true /*水蜡烛 ×0.75/×1.5*/, 1200, 100 * 16,
+      false, false, false, true /*战斗药水 ×0.5/×2*/);
+  }
+
+  it('FTW 交叉态：clamp 后 getGood → rate=⌊60×0.8⌋=48 / max=⌊15×1.2⌋=18（可越出 clamp 档）', () => {
+    expect(ftwCaveRate()).toEqual({ spawnRate: 48, maxSpawns: 18 });
+  });
+});
+
 describe('L6 spawn parity（Palworld 双宠池 NPC.cs:4374-4389）', () => {  it('HasItem 强制档：持 5663 无 5664 → 池命中恒 696；无道具时 695 可现', () => {
     const f = grassWorld();
     const warm = runBatch(f.w, f.sp, 520, { hour: 12, attempts: 3000 });

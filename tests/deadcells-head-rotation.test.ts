@@ -1,10 +1,15 @@
 // 枭首者头部残影载荷旋位回归（DoDeadCellsBeheadedParticles Player.cs:24491-24510
-// 旋位支清偿,2026-09-03）：
-//   fullRotation≠0 → 载荷位 = 基位绕 position+fullRotationOrigin 旋（:24497-24503
-//   vector.RotatedBy(fullRotation, pivot)）——UFO 7/钻头 8/扫帚 23 倾斜机身；
-//   旋后值直入 module8 载荷（broadcastParticleOrchestra 载荷坐标即旋后值）。
-//   骑乘速度旋转支（:24504-24506）= AnyTrackRider∩fullRotation 写面 ∅ 构造性死支,
-//   不建模（登记保留）。
+// 旋位支清偿,2026-09-03;同日 R3 复核批扩矿车轨面支+速度旋支接线）：
+//   fullRotation≠0 → 载荷位 = 基位绕 position+fullRotationOrigin 旋（:24497-24500
+//   vector.RotatedBy(fullRotation, pivot)）——矿车轨面 TrackRotation（:28325-28326
+//   origin=(w/2,h)）∪ UFO 7/钻头 8/扫帚 23 倾斜机身；旋后值直入 module8 载荷
+//   （broadcastParticleOrchestra 载荷坐标即旋后值）。
+//   骑乘速度旋转支（:24501-24504 vector2.RotatedBy(fullRotation, Zero)）——E3 曾登记
+//   "AnyTrackRider∩fullRotation 写面=∅ 死支保留",R3 复核推翻（:28325 ref 写玩家
+//   fullRotation ∧ 矿车族 AnyTrackRider 恒真,交集非空）→ 已按同一 fullRotation 源
+//   接线；非轨道坐骑（UFO 等）门假不旋。
+//   载荷纵项（红队R3②③）：gfxOffY 聚合（gfxOffY+stepRenderY+cart.gfxOffY）与
+//   MountedTop（:3333-3346,gravDir=−1 走 Bottom−HOC 分支）。
 import { describe, it, expect } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -79,8 +84,8 @@ describe('playerFullRotationOf / rotatedBy（Mounts.ts 纯函数）', () => {
   });
 });
 
-describe('deadCellsBeheadedStep 旋位支（:24497-24503）', () => {
-  it('fullRotation≠0：载荷位绕 pivot 旋（vx/vy 直穿——速度旋支死支不建模）', () => {
+describe('deadCellsBeheadedStep 旋位支（:24497-24500）', () => {
+  it('fullRotation≠0：载荷位绕 pivot 旋（速度旋支门假——UFO 非 AnyTrackRider,vx/vy 原值直穿）', () => {
     const { g, payloads } = hooksWithCapture();
     const p = mkPlayer(g);
     p.mount.active = true;
@@ -96,7 +101,7 @@ describe('deadCellsBeheadedStep 旋位支（:24497-24503）', () => {
     expect(payloads[0].type).toBe(ParticleOrchestraType.DeadCellsBeheadedEffect);
     expect(payloads[0].x).toBeCloseTo(want.x, 9);
     expect(payloads[0].y).toBeCloseTo(want.y, 9);
-    expect(payloads[0].moveX).toBe(2);                    // MovementVector = velocity 原值
+    expect(payloads[0].moveX).toBe(2);                    // MovementVector = velocity 原值（门假:UFO∉AnyTrackRider :24501-24504）
     expect(payloads[0].moveY).toBe(p.vy);
   });
 
@@ -118,5 +123,79 @@ describe('deadCellsBeheadedStep 旋位支（:24497-24503）', () => {
     p.deadCellsBeheadedStep(g);
     expect(payloads.length).toBe(1);
     expect(payloads[0].y).toBeCloseTo(p.y + 8, 9);
+  });
+});
+
+describe('矿车轨面旋位支（Player.cs:28325-28326,R3 复核翻案接线）', () => {
+  const mkCart = (p: Player, over: Partial<{ rotation: number; h: number; gfxOffY: number; mountId: number }> = {}): void => {
+    p.ridingCart = true;
+    p.cart = { mountId: 6, h: 52, rotation: 0, gfxOffY: 0, ...over } as never;
+  };
+
+  it('playerFullRotationOf 矿车支：angle=cart.rotation、pivot=position+(w/2,cart.h)（:28326 origin=(w/2,h),cart.h=42+boost=原版 mounted 盒高）', () => {
+    const { g } = hooksWithCapture();
+    const p = mkPlayer(g);
+    mkCart(p, { rotation: 0.4 });
+    const fr = playerFullRotationOf(p, p.mount, p.cart)!;
+    expect(fr.angle).toBe(0.4);
+    expect(fr.pivotX).toBeCloseTo(p.cx, 12);
+    expect(fr.pivotY).toBeCloseTo(p.y + 52, 12);
+    expect(playerFullRotationOf(p, p.mount, { rotation: 0, h: 52 })).toBeNull();   // 平轨 atan2=0 → 无旋位
+  });
+
+  it('载荷位：MountedTop(矿车 HOC=boost−bob=10−8=+2)+8+cart.gfxOffY 绕车盒底心旋;速度绕 Zero 旋（:24501-24504）', () => {
+    const { g, payloads } = hooksWithCapture();
+    const p = mkPlayer(g);
+    mkCart(p, { rotation: 0.4, gfxOffY: 2 });
+    p.vx = 2; p.vy = -1;
+    const baseX = p.cx;
+    const baseY = p.y + 2 + 8 + 2 + Math.max(0, Math.min(1, 2 / 3)) * -4;   // topY=y+HOC、+8×gravDir、+cart.gfxOffY、Remap(|vx|)×gravDir
+    const fr = playerFullRotationOf(p, p.mount, p.cart)!;
+    const want = rotatedBy(baseX, baseY, fr.angle, fr.pivotX, fr.pivotY);
+    const wantV = rotatedBy(2, -1, fr.angle);             // pivot = Vector2.Zero
+    p.deadCellsBeheadedStep(g);
+    expect(payloads.length).toBe(1);
+    expect(payloads[0].x).toBeCloseTo(want.x, 9);
+    expect(payloads[0].y).toBeCloseTo(want.y, 9);
+    expect(payloads[0].moveX).toBeCloseTo(wantV.x, 9);    // 速度旋支接线（原值≠旋后值）
+    expect(payloads[0].moveY).toBeCloseTo(wantV.y, 9);
+  });
+
+  it('矿车 51/53：bob=10（SetAsMinecart (−10,−8)→10,Mount.cs:1102/:1110）→ HOC=0、基位 = y+8（rotation=0 无旋位）', () => {
+    const { g, payloads } = hooksWithCapture();
+    const p = mkPlayer(g);
+    mkCart(p, { mountId: 51 });
+    p.deadCellsBeheadedStep(g);
+    expect(payloads[0].y).toBeCloseTo(p.y + 8, 9);
+  });
+});
+
+describe('载荷纵项（红队R3②③）', () => {
+  it('gfxOffY 聚合 = this.gfxOffY + stepRenderY（未骑乘：滑轮 :19837 + StepUp :28267 本仓等价系统）', () => {
+    const { g, payloads } = hooksWithCapture();
+    const p = mkPlayer(g);
+    (p as unknown as { gfxOffY: number }).gfxOffY = 5;
+    (p as unknown as { stepRenderY: number }).stepRenderY = 3;
+    p.deadCellsBeheadedStep(g);
+    expect(payloads[0].y).toBeCloseTo(p.y + 8 + 5 + 3, 9);
+  });
+
+  it('gravDir=−1（FTW 倒挂）：MountedTop 走 Bottom−HOC 分支 → 基位 = y+h−8（旧实现 y−8 = 锚差整盒高）', () => {
+    const { g, payloads } = hooksWithCapture();
+    const p = mkPlayer(g);
+    p.gravDir = -1;
+    p.deadCellsBeheadedStep(g);
+    expect(payloads[0].y).toBeCloseTo(p.y + p.h - 8, 9);
+  });
+
+  it('gravDir=−1 + 坐骑：Bottom−HOC,HOC=boost−bob（兔 0:boost=20、bob=pyo[0]=30 → HOC=−10）', () => {
+    const { g, payloads } = hooksWithCapture();
+    const p = mkPlayer(g);
+    p.gravDir = -1;
+    p.mount.active = true;
+    p.mount.type = 0;                                     // 兔：json pyo[0]=30、heightBoost=20（在档,无提取缺口）
+    p.mount.fullRotation = 0;
+    p.deadCellsBeheadedStep(g);
+    expect(payloads[0].y).toBeCloseTo(p.y + p.h - (20 - 30) - 8, 9);   // (y+h)−HOC+8×gravDir
   });
 });

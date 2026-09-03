@@ -313,13 +313,15 @@ export function parseWld(buf: Uint8Array): WldWorld {
 
   // banners（WF:2210 BannerSystem.Load：i16 n + n×i32 killCount[banner]；v≥289 再
   //  i16 m + m×u16 claimableBanners——claimable 本仓不建模，验读即弃。
-  //  击杀数下标域 = banner id 1-292（下标 0 恒 0 不落表；BannerSystem.cs:34 静态表）
+  //  击杀数下标域 = banner id 1-292（下标 0 恒 0 不落表；BannerSystem.cs:34 静态表）。
+  //  ★存表上限 i<293（BannerSystem.cs:194 `if (i < killCount.Length)`，MaxBannerTypes=293
+  //  :124/:126）——段头 n 可大于 293（第三方/旧工具产物），越界下标只消费流位不落表
   const bannerKills: Record<number, number> = {};
   {
     const n = r.i16();
     for (let i = 0; i < n; i++) {
       const kills = r.i32();
-      if (i > 0 && kills > 0) bannerKills[i] = kills;
+      if (i > 0 && i < 293 && kills > 0) bannerKills[i] = kills;
     }
     if (version >= 289) {
       const m = r.i16();

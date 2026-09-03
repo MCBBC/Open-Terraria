@@ -879,7 +879,9 @@ export class VanillaSpawner {
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed 均已实现（:581-642）；
    *  隐身（buff 10，药水 297）×1.2/×0.8 已接（:611-615）；渔夫套 ×1.3/×0.7 已接（:627-630）。
-   *  仙女 isNearFairy 倍率未实现（:653-656，依赖仙女随从实体），登记。
+   *  仙女 isNearFairy 倍率已接（:745-749，×1.2/×0.8——本文件下方 isNearFairy 注入位，
+   *  2026-09-03 清偿;旧"未实现"登记过期删除）。clamp（:750-757）先于 getGoodWorld
+   *  （:758-761）——次序颠倒曾使 FTW 终值被 clamp 回夹（rate 60/max 15,原版可 48/18）。
    *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
@@ -1058,14 +1060,17 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
     }
-    // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
-    // L758-762：getGoodWorld（FTW 种子）rate×0.8 / max×1.2——此前缺失
+    // L750-757：clamp 先行——下限 spawnRate≥defaultSpawnRate×0.1（=600×0.1=60）、
+    //  上限 maxSpawns≤defaultMaxSpawns×3（=5×3=15）
+    if (spawnRate < 60) spawnRate = 60;
+    if (maxSpawns > 15) maxSpawns = 15;
+    // L758-761：getGoodWorld（FTW 种子）rate×0.8 / max×1.2——在 clamp【之后】
+    //  （原版 :750 clamp → :758 getGood 次序;曾乘臂在前被 clamp 回夹成 60/15,
+    //  FTW 终值可越出 clamp 档:rate 60→48、max 15→18）
     if (w.seedFlags?.getGoodWorld) {
       spawnRate = Math.floor(spawnRate * 0.8);
       maxSpawns = Math.floor(maxSpawns * 1.2);
     }
-    if (spawnRate < 60) spawnRate = 60;
-    if (maxSpawns > 15) maxSpawns = 15;
     // L671-678（clamp 与 getGood 之后、地牢 rate=10 之前）：旅程刷怪率滑杆——
     // SpawnRateSliderPerPlayerPower.GetRemappedSliderValueFor（CreativePowers.cs:1612-1619
     // 0.1×~10×）。value<1 → spawnRate 变大（更慢出怪）/ maxSpawns 变小；>1 反之。

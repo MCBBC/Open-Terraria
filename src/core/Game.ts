@@ -26,6 +26,7 @@ import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
+import { canCutTile } from '../world/CanCutTile';
 import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY, tallGateRowOf } from '../world/Door';
@@ -161,7 +162,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
-import { recordBannerKill, bannerOfNpc, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
+import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
@@ -8598,39 +8599,45 @@ export class Game implements GameHooks {
     //      GlobalTimeWrappedHourly=实时运行秒%3600（Main.cs:17014 XNA GameTime 墙钟，
     //      非游戏内时间）→ 仅实时秒%80 ∈ [45,80) 落石；Next(3)==0（dontStarve 5）→
     //      随机点 !SolidCollision(32,32) → 弹 99（1/50→1013，netImportant 变体单机
-    //      无差）伤 70 kb10；_isRainingBoulders 记账，窗口关闭沿 → 成就 34
-    //      ITS_SHALING_OUTSIDE（:72235-72239）。dontStarve×FTW 冰雹 1049 臂
-    //      （:72272-72295）见下方独立块——不在巨石窗口 flag 内（原版两臂并列）
+    //      无差）伤 70 kb10。dontStarve×FTW 冰雹 1049 臂（:72272-72295）见下方独立块
+    //      ——不在巨石窗口 flag 内（原版两臂并列）
+    //      ★两旗分离（WorldGen.cs:72224-72240）：条件旗 num（种子+风暴）与窗口旗
+    //      flag（num 初值,窗口关闭只清 flag :72230-72233）是两个变量——
+    //      `_isRainingBoulders` 记账的是【条件旗】（:72239 `_isRainingBoulders = num`），
+    //      成就 34 关闭沿判据 = `!num && _isRainingBoulders`（:72235-72238,风暴中窗口
+    //      关闭不发——曾把窗口旗记进 _isRainingBoulders = 风暴中每 35s 误发一次）；
+    //      窗口旗只门生成（:72241 if (flag)）
     {
       const sf = w.seedFlags;
-      if (sf?.drunkWorld && sf?.getGoodWorld && !sf?.remix && w.weather.storming) {
+      // 条件旗 num = drunk+getGood+!remix+IsItStorming（:72224）
+      const cond = !!(sf?.drunkWorld && sf?.getGoodWorld && !sf?.remix && w.weather.storming);
+      // 窗口旗 flag = num 初值,:72225-72233 `(int)GlobalTimeWrappedHourly % 80 < 45 → false`
+      let spawnWindow = cond;
+      if (spawnWindow) {
         const wrappedHourly = (performance.now() / 1000) % 3600;
-        const raining = Math.floor(wrappedHourly) % 80 >= 45;
-        if (!raining && this._isRainingBoulders) this.achievements.notifyProgressionEvent(34);
-        this._isRainingBoulders = raining;
-        if (raining) {
-          const maxValue = sf.theConstant ? 5 : 3;
-          if (Math.random() < 1 / maxValue) {          // Next(maxValue)==0
-            const bst = w.store;
-            const bx = (Math.floor(Math.random() * (bst.w - 50)) + 100) * TILE;
-            const by = Math.floor(Math.random() * Math.floor(bst.h * 0.05)) * TILE;
-            // !Collision.SolidCollision(position,32,32)（:72236）：position = NewProjectile
-            // 出生位（左上锚）——盒 = [bx,by,bx+32,by+32)。★2026-09-03 对齐批：曾手写
-            // [bx-16,bx+16) 中心化盒=差一格象限（SolidCollision 首参是盒左上非中心,
-            // Collision.cs:2713-2746）；本行换用冰雹臂同款精确盒（WeatherRenderer.
-            // solidCollisionBox——tileSolid&&!solidTop、半砖下缩 8、已致动豁免、世界钳制
-            // 与 (-1,+2) 外沿扫描全 1:1）。此改会平移既有陷阱落点分布一格（落点密度
-            // 语义不变,仅象限对齐原版）
-            if (!solidCollisionBox(bst, bx, by, 32, 32)) {
-              const wind = Math.max(-16, Math.min(16, w.weather.windSpeedCurrent * 16));
-              this.entities.add(new TrapShot(bx, by, wind, 8, 70, 'boulder'), 'projectiles');
-            }
+        if (Math.floor(wrappedHourly) % 80 < 45) spawnWindow = false;
+      }
+      // :72235-72239 逐字：关闭沿 notify 幂等（沿后 _isRainingBoulders=false 不再重发）
+      if (!cond && this._isRainingBoulders) this.achievements.notifyProgressionEvent(34);
+      this._isRainingBoulders = cond;
+      if (spawnWindow) {
+        const maxValue = sf?.theConstant ? 5 : 3;
+        if (Math.random() < 1 / maxValue) {          // Next(maxValue)==0
+          const bst = w.store;
+          const bx = (Math.floor(Math.random() * (bst.w - 50)) + 100) * TILE;
+          const by = Math.floor(Math.random() * Math.floor(bst.h * 0.05)) * TILE;
+          // !Collision.SolidCollision(position,32,32)（:72236）：position = NewProjectile
+          // 出生位（左上锚）——盒 = [bx,by,bx+32,by+32)。★2026-09-03 对齐批：曾手写
+          // [bx-16,bx+16) 中心化盒=差一格象限（SolidCollision 首参是盒左上非中心,
+          // Collision.cs:2713-2746）；本行换用冰雹臂同款精确盒（WeatherRenderer.
+          // solidCollisionBox——tileSolid&&!solidTop、半砖下缩 8、已致动豁免、世界钳制
+          // 与 (-1,+2) 外沿扫描全 1:1）。此改会平移既有陷阱落点分布一格（落点密度
+          // 语义不变,仅象限对齐原版）
+          if (!solidCollisionBox(bst, bx, by, 32, 32)) {
+            const wind = Math.max(-16, Math.min(16, w.weather.windSpeedCurrent * 16));
+            this.entities.add(new TrapShot(bx, by, wind, 8, 70, 'boulder'), 'projectiles');
           }
         }
-      } else if (this._isRainingBoulders) {
-        // 风暴/种子条件消失（:72226 `!num && _isRainingBoulders`）→ 成就边沿
-        this._isRainingBoulders = false;
-        this.achievements.notifyProgressionEvent(34);
       }
     }
     // ---- dontStarve×FTW 霰石/冰雹（SpawnFallingObjects 独立臂 :72272-72295）：原版
@@ -9784,19 +9791,19 @@ export class Game implements GameHooks {
     else this.sfx.play('drink');
   }
 
-  // ================= QuickHeal / QuickMana / QuickBuff（Player.cs:5268/:5364/:5442）=================
-  /** QuickBuff_FindFoodPriority（Player.cs:5648-5656）：26→1 / 206→2 / 207→3 */
+  // ================= QuickHeal / QuickMana / QuickBuff（1457 Player.cs:5493/:5590/:5760）=================
+  /** QuickBuff_FindFoodPriority（1457 Player.cs:5959-5968）：26→1 / 206→2 / 207→3 */
   private static readonly QUICK_BUFF_FOOD_PRIO: Record<number, number> = { 26: 1, 206: 2, 207: 3 };
   /** Main.meleeBuff 表（Main.cs:8888-8895）：八把武器浸剂互斥（QuickBuff_ShouldBother） */
   private static readonly QUICK_MELEE_BUFF_VANILLA = new Set([71, 73, 74, 75, 76, 77, 78, 79]);
   // 默认键 H/J/B（PlayerInput.cs:1901-1903——★QuickMana 是 J 非 M）；keydownHandlers
   // 注入（事件天然边沿）。原版语义：瞬扣（ItemCheck_TryStartUse 只做 ItemTimeIsZero
   // 门不播使用动画）+ UseSound + ApplyPotionDelay + ApplyLifeAndOrMana + buff 授予 +
-  // stack--。虚空袋 bank4 路径已接（2026-08-18：QuickHeal :5325-5332 / QuickMana
-  // :5405-5413 / QuickBuff 食物 :5629-5646 与药水 :5508-5527 四处同式——useVoidBag
+  // stack--。虚空袋 bank4 路径已接（2026-08-18：QuickHeal :5550-5556 / QuickMana
+  // :5630-5640 / QuickBuff 食物 :5941-5956 与药水 :5794-5834 四处同式——useVoidBag
   // 门 + p.banks[3] 40 槽；存钱罐 bank/保险箱 bank2/熔炉 bank3 原版快用链【不搜】，
   // 无对应路径不登记）；CanConsumeConsumableItem 的硬核不消耗档未接（QuickHeal
-  // :5300 中核掉钱链已由死亡惩罚批承载，此取最小实现）
+  // :5527 中核掉钱链已由死亡惩罚批承载，此取最小实现）
 
   /** 配装热键切换（Loadout1/2/3 = F1/F2/F3，PlayerInput.cs:1923-1925）。
    *  TrySwitchingLoadout + SoundID 12 menuTick（背包按钮同款，Main.cs:41395-41431）；
@@ -9870,9 +9877,9 @@ export class Game implements GameHooks {
       if (!s || s.stack <= 0) return;
       const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      if (!f?.potion || !(f.healLife! > 0)) return;                       // :5319
+      if (!f?.potion || !(f.healLife! > 0)) return;                       // :5562
       let num = f.healLife! - lifeDiff;
-      if (vid === 227 && num < 0) { num += 30; if (num > 0) num = 0; }    // :5322-5327
+      if (vid === 227 && num < 0) { num += 30; if (num > 0) num = 0; }    // :5567-5574
       if (bestDiff < 0) { if (num > bestDiff) { bestArr = arr; bestSlot = i; bestDiff = num; } }
       else if (num < bestDiff && num >= 0) { bestArr = arr; bestSlot = i; bestDiff = num; }
     };
@@ -10084,17 +10091,17 @@ export class Game implements GameHooks {
         if (bt2 !== undefined) {
           p.buffs.apply(bt2, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
         }
-        if (f.consumable) {                                              // :5545-5548
+        if (f.consumable) {                                              // :5850-5855
           if (arr === p.inv.slots) p.inv.removeAt(i, 1);
           else { s.stack -= 1; if (s.stack <= 0) arr[i] = null; }
         }
         soundVid = vid;
-        if (buffsFull()) break;   // 链内满槽即断（:5799/:5811 after UseItemForBuff）
+        if (buffsFull()) break;   // 链内满槽即断（:5808/:5829 after UseItemForBuff）
       }
     };
     if (p.buffs.active.size < 44) tryBuffs(p.inv.slots);   // :5794 if (CountBuffs() != maxBuffs)
-    if (p.buffs.active.size < 44 && this.useVoidBag() && p.banks[3]) tryBuffs(p.banks[3]);   // :5806
-    if (soundVid >= 0) this.foodUseSound(soundVid);                       // :5530 只播一次
+    if (p.buffs.active.size < 44 && this.useVoidBag() && p.banks[3]) tryBuffs(p.banks[3]);   // :5815
+    if (soundVid >= 0) this.foodUseSound(soundVid);                       // :5836-5839 只播一次
     this.cb.onInventoryChanged();
   }
 
@@ -18041,6 +18048,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (this.swingTileCutSet.has(tk)) continue;
         const t = st.get(tx, ty);
         if (t === 0) continue;
+        // ★R2-F5（2026-09-03）：WorldGen.CanCutTile 门（WorldGen.cs:88111-24 单源
+        //  world/CanCutTile.ts;此处上下文=AttackMelee,消费位 Player.cs:45032）——
+        //  wall 350 / 下格∈{78 陶盆,380,579 石傀儡头} / 未熟南瓜(254 frameX<144) 拒切。
+        //  陶盆支同吃此门：原版 78 亦在 tileCut 表,CanCutTile 是同一 continue 条件的
+        //  末项,覆盖循环体全部 Kill 面（叠罐近战不可破/罐上香草不割=原版本相）
+        if (!canCutTile(st, tx, ty, 'AttackMelee')) continue;
         if (t === POT_TILE) {
           this.swingTileCutSet.add(tk);
           this.smashPot(tx, ty);
@@ -20427,11 +20440,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               placedItemId: placeVid,
               targetDropIsPlacedItem: tdef?.drop === itemDef.key,
               // CheckPlatformSolidityForBlockSwap :40363-40374——Rectangle(tileX*16,
-              // tileY*16,16,16) ∩ Hitbox（XNA Intersects=严格不等,贴边不算）
-              playerOverlapsTargetTile: this.player.x < (tx + 1) * TILE
-                && this.player.x + this.player.w > tx * TILE
-                && this.player.y < (ty + 1) * TILE
-                && this.player.y + this.player.h > ty * TILE,
+              // tileY*16,16,16) ∩ Hitbox（XNA Intersects=严格不等,贴边不算）。
+              // ★R2-F4（2026-09-03）：Hitbox=Rectangle((int)position.X,(int)position.Y,
+              // w,h)（Entity.cs:171-77 get）——左上角先截断再严格相交（浮点 x/y 的小数
+              // 段直接丢,非 floor 也非 round;(int) 朝零截断,负半轴语义由 intRect
+              // :25723 同款惯例承载）。曾用浮点 x/y 直比=左/上边缘贴格时多判相交
+              playerOverlapsTargetTile: Math.trunc(this.player.x) < (tx + 1) * TILE
+                && Math.trunc(this.player.x) + this.player.w > tx * TILE
+                && Math.trunc(this.player.y) < (ty + 1) * TILE
+                && Math.trunc(this.player.y) + this.player.h > ty * TILE,
               getGoodWorld: !!this.world.seedFlags?.getGoodWorld,
             });
             swapOk = styleVerdict;
@@ -22813,8 +22830,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private worldHousingScan = 0;
   /** 本夜天幕流星已掷(_canShowMeteorFall 位;入夜重置) */
   private _skyMeteorShown = false;
-  /** FTW 巨石雨记账旗（WorldGen._isRainingBoulders :72235——风暴臂窗口状态，
-   *  关闭沿触发成就 34 ITS_SHALING_OUTSIDE） */
+  /** FTW 巨石雨记账旗（WorldGen._isRainingBoulders :72226/:72239——记账的是
+   *  【条件旗】num=drunk+getGood+!remix+IsItStorming,非落石窗口旗；窗口旗只门
+   *  生成（:72241 if (flag)）,成就 34 关闭沿判据 = !num && 本旗（:72235-72238）） */
   private _isRainingBoulders = false;
   /** 陨石坠落旗标（WorldGen.spawnMeteor :4156——入夜 roll/EoW 击杀置位，夜半消费；
    *  WorldFile :1301/:2098 持久化 → 挂 world.flags 随存档走） */
@@ -24751,9 +24769,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 弹幕移动扫掠盒内裂砖切碎（Projectile.HandleMovement :16630-16655 等价：
    *  移动前后包围盒内 CrackedBricks 逐格 KillTile——CanCutTile AttackProjectile
-   *  上下文（:87573）：墙 350 / 正下 78·380·579 豁免，其余可切）。DebrisProj 豁免
-   *  （自身弹片不碎砖，其连锁走 Kill 段 :75347）。快照长度迭代——链上追加的
-   *  弹片不参与本轮扫掠。 */
+   *  上下文（WorldGen.cs:88111-24 单源 world/CanCutTile.ts,Projectile.cs:15395 同
+   *  上下文消费）：墙 350 / 正下 78·380·579 豁免，254 未熟南瓜拒，其余可切）。
+   *  DebrisProj 豁免（自身弹片不碎砖，其连锁走 Kill 段 :75347）。快照长度迭代——
+   *  链上追加的弹片不参与本轮扫掠。 */
   private crushCrackedBricksSweptByProjectiles(): void {
     const st = this.world.store;
     const projs = this.entities.projectiles;
@@ -24769,14 +24788,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let x = x0; x <= x1; x++) {
         for (let y = y0; y <= y1; y++) {
           if (!isCrackedAt(st, x, y)) continue;
-          if (st.wall[st.idx(x, y)] === 350) continue;          // CanCutTile 墙 350 门
-          if (st.inBounds(x, y + 1)) {
-            const below = st.get(x, y + 1);
-            if (below !== 0) {
-              const bs = TILE_DEFS[below]?.vanilla?.sheet;
-              if (bs === 78 || bs === 380 || bs === 579) continue;  // 下方种植族不切
-            }
-          }
+          // ★R2-F5（2026-09-03）单源化：内联近似（墙 350 + 下格 78/380/579,缺
+          //  254 南瓜支/下格世界外恒真）退役,统一走 WorldGen.CanCutTile 谓词
+          //  （WorldGen.cs:88111-24,AttackProjectile 上下文=Projectile.cs:15395 同款）
+          if (!canCutTile(st, x, y, 'AttackProjectile')) continue;
           this.breakTile(x, y, false, true);   // KillTile(noItem) → breakCrackedBrick（连锁无掉落，DropBait 同门不掷）
         }
       }
@@ -25884,7 +25899,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const beeType = strong && Math.random() < 0.5 ? 566 : 181;
         const [smx, smy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
         const bd = Math.hypot(smx - p.cx, smy - p.cy) || 1;
-        const bee = new Arrow(mHX + mHW / 2, mHY + mHH / 2,   // :42953-42954 判定盒中心
+        // ★R2-F7（2026-09-03）：原版出生点 = itemRectangle.X + itemRectangle.Width/2、
+        // Y + Height/2（Player.cs:43976）——Width/2 是 C# int 整除（Rectangle int 字段,
+        // X 已整,余下仅除半截断）。曾用浮点除=奇宽盒差 1px
+        const bee = new Arrow(mHX + Math.trunc(mHW / 2), mHY + Math.trunc(mHH / 2),   // :43976 判定盒中心（int 整除）
           (smx - p.cx) / bd * 6, (smy - p.cy) / bd * 6,   // DirectionTo(MouseWorld)*6
           // 强蜂 566 伤 = beeDamage(5)=5+Next(1,4)=6..8（:12021 Next(1,4)=1..3;
           // ★RV2 勘误：曾写 5+Next(4)=5..8 低端差 1）
@@ -25939,6 +25957,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const tk = tx * 100000 + ty;
           if (this.swingTileCutSet.has(tk)) continue;
           const t = this.world.store.get(tx, ty);
+          // ★R2-F5（2026-09-03）：WorldGen.CanCutTile 门（WorldGen.cs:88111-24 单源
+          //  world/CanCutTile.ts;此处上下文=AttackMelee,消费位 Player.cs:45032 continue
+          //  条件末项）——wall 350 / 下格∈{78,380,579} / 未熟南瓜(254 frameX<144) 拒切;
+          //  陶盆支同吃（78∈tileCut,同一 continue 覆盖循环体全部 Kill 面）
+          if (!canCutTile(this.world.store, tx, ty, 'AttackMelee')) continue;
           if (t === POT_TILE) {
             this.swingTileCutSet.add(tk);
             this.smashPot(tx, ty);
@@ -26271,8 +26294,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let lv = (tK - 1) / (0.1 - 1);
         lv = Math.min(1, Math.max(0, lv));
         chainDmg = Math.trunc(chainDmg * (1 + lv));
-        const kbX = Math.min(Math.max(p.cx, e.x), e.x + e.w);
-        const kbY = Math.min(Math.max(p.cy, e.y), e.y + e.h);
+        // ★R2-F8（2026-09-03）：参考点 = itemRectangle.Center（Player.cs:44692
+        //  `KeyBrandStrike(whoAmI, damage, itemRectangle.Center.ToVector2())`）——
+        //  Rectangle.Center = X + Width/2、Y + Height/2（FNA XNA Rectangle int 字段
+        //  整除,框架件树外）;随后 NPC.KeyBrandStrike :82000-82004
+        //  `Hitbox.ClosestPointInRect(bestSwordSpot)`（Utils.cs:1653-1670 逐轴钳入
+        //  敌盒 [Left,Right]×[Top,Bottom]）。曾用玩家中心 p.cx/p.cy 代参考点=编排
+        //  落点偏移（钳制结果随玩家站位漂移,原版只随挥击盒走）
+        const kbX = Math.min(Math.max(mHX + Math.trunc(mHW / 2), e.x), e.x + e.w);
+        const kbY = Math.min(Math.max(mHY + Math.trunc(mHH / 2), e.y), e.y + e.h);
         keybrandFx(this, kbX, kbY);
         this.broadcastParticleOrchestra(ParticleOrchestraType.Keybrand, kbX, kbY);
       }
@@ -26493,7 +26523,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bKb = bIsStrong ? 0.5 : 0;
             const bvx = Math.fround((p.facing * 2 + (Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
             const bvy = Math.fround(((Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
-            const bee = new Arrow(mHX + mHW / 2, mHY + mHH / 2, bvx, bvy,
+            // ★R2-F7（2026-09-03）：出生点 int 整除（Player.cs:44872 —— X+Width/2）
+            const bee = new Arrow(mHX + Math.trunc(mHW / 2), mHY + Math.trunc(mHH / 2), bvx, bvy,
               Math.trunc(bDmg), bKb, bType, null, {});
             // ★Z-F1 翻案回注（2026-08-31 蓝队三批）：蜂王 PvE 面 :44872-73 spawn 位
             // `.melee = true` 显式覆写 → 运行时近战类别通道恢复（crit 近战池掷/
@@ -26775,7 +26806,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bKb = bIsStrong ? 0.5 : 0;
             const bvx = Math.fround((p.facing * 2 + (Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
             const bvy = Math.fround(((Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
-            const bee = new Arrow(mHX + mHW / 2, mHY + mHH / 2, bvx, bvy,
+            // ★R2-F7（2026-09-03）：出生点 int 整除（Player.cs:44478 —— X+Width/2）
+            const bee = new Arrow(mHX + Math.trunc(mHW / 2), mHY + Math.trunc(mHH / 2), bvx, bvy,
               Math.trunc(bDmg), bKb, bType, null, {});
             // 原版 spawn 位显式 melee=true（:44479）→ 类别/暴击面与 PvE 站一致
             bee.projClass = 'melee';
@@ -27376,7 +27408,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }) || this.entities.critters.some((n) => {
       const c = n as Enemy;
       const cn = this.critterVid(c);
-      return !c.dead && cn >= 583 && cn <= 585;
+      // ai[2]>1 门补齐（NPC.cs:90954-90964：原版单数组 `active && type 583/584/585 &&
+      // ai[2]>1f` 同一谓词无桶差分；本仓分桶扫描=并集）。倒木/夜刷野仙经
+      // fairyCtx().spawnFairy（:30466 区）入桶 ai2=0（绕圈态）→ 不关门；跟随态
+      // ai2=2（VanillaSpawner 地下仙女链 :2451 出手即置）。enemies 臂登记：本仓
+      // 仙女生成路径（spawnFairy/地下链）恒入 critters 桶，enemies 桶无仙女生成点
+      // ——保留为谓词并集冗余（联机同步/导入侧直入 enemies 时仍被覆盖）
+      return !c.dead && cn >= 583 && cn <= 585 && c.ai2 > 1;
     });
     // Player.isNearFairy（Player.cs:54494-54506）：任一 active 仙女 583/584/585 距玩家
     // Center < NPC.sWidth（=1920 常量，NPC.cs:6791；无 ai 态条件）——SpawnNPC :745-749
@@ -29924,13 +29962,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const isDay = w.clock.isDay;
     let bonus = 0;
     if (p.buffs.has(BuffType.Tipsy)) bonus += 5;     // :41542-41545
-    // :41546 `canFloatInWater && wet`——canFloatInWater=装备 4404 水行靴族(:12845)或
-    // 药水 buff 265(:9595)每帧重扫；wet=WetCollision 只认水/蜂蜜(排岩浆/微光)。
+    // :41546 `canFloatInWater && wet`——canFloatInWater=4404 Floating Tube(:13364-67)
+    // ∪ buff265 火烈鸟坐骑 buff(:9982-86，本仓以骑 37 等价表达)；Flipper 药 109 只授
+    // ignoreWater+accFlipper(:10257-59) 不入 canFloat 源（R1-F1 2026-09-03 勘误）；
+    // wet=WetCollision 任意液体（Collision.cs:1608 含岩浆/微光）
     // 坐椅钓鱼 +5（:41549-41551 sitting.TryGetSittingBlock——2026-08-15 坐椅系统落地接通）
-    // R14-E11：canFloatInWater 两源（4404 甲件 :13366 ∪ buff265 脚蹼药水 :9984）
-    // 且 wet（水/蜜,WetCollision 语义）——曾用 waterWalk/WaterWalking 族（错物品族）
-    if ((p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
-      && (p.inWater || p.inHoney)) bonus += 5;
+    // R14-E11：两源且 wet——曾用 waterWalk/WaterWalking 族（错物品族）
+    if ((p.equipStats.canFloat || (p.ridingMount && p.mount.type === 37))
+      && (p.inWater || p.inHoney || p.inLava || p.inShimmer)) bonus += 5;
     if (p.sitting) {
       const scx = Math.floor(p.cx / TILE), scy = Math.floor((p.y + p.h - 2) / TILE);
       if (getSittingTargetInfo(w.store, scx, scy, p.facing)) bonus += 5;
@@ -33731,19 +33770,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (enemy && enemy.vanillaId != null) {
       // 计数器行"最近击杀"(Player.lastCreatureHit :2458;写入点 Player.cs:20175/:43750)
       this.player.lastCreatureHit = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId;
-      const grant = recordBannerKill(this.world.bannerKills, enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
-      if (grant) {
-        const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
-        const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
-        // 公告文案对齐原版 BannerSystem.AddNPCKillBy（BannerSystem.cs:249-255）：
-        // Game.EnemiesDefeatedAnnouncement「已打败第{0}个{1}！」（黄色 250,250,0 同源；
-        // 计数 = killCount[banner]；曾用自造键 Toast.BannerReady「XX 的旗帜已就绪」
-        // ——原版无此文案）
-        this.newText(Lang.text('Game.EnemiesDefeatedAnnouncement',
-          this.world.bannerKills[banner] ?? 0, name ?? ''), 250, 250, 0);
-        const _bannerItemVid = bannerItemId(banner);
-        const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
-        this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);
+      // ★GetWereThereAnyInteractions 门（NPC.cs:80640-80647；消费点 :79652-79661
+      // `if (GetWereThereAnyInteractions()) { bestiary…; CountKillForBannersAndDropThem(); }`
+      // ——雕像产怪等无玩家交互死亡不计旗）。本体 = AnyInteractions（:79535-79551
+      // playerInteraction 位）→ 本仓信号源 = Enemy.playerInteracted（hurt fromPlayer
+      // 置位,持久；与上方成就面 NotifyNPCKilled 门 R3-A3 同一信号,复用非新近似；
+      // realLife>=0 转体分支 :80642-80644 不建模——转体态旗杀经原 NPC 承载）。
+      // MP per-slot 位与 lastInteraction/FindClosestPlayer credit 归属登记未建模。
+      // ExcludedFromDeathTally 18 类门在 recordBannerKill 内部（Banners.ts,NPCID.cs
+      // :4805/:4869）
+      if (enemy.playerInteracted === true) {
+        const grant = recordBannerKill(this.world.bannerKills, enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+        if (grant) {
+          const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+          // 规范名 = BannerToNPC(banner)（BannerSystem.cs:249-255 `Lang.GetNPCName(
+          // BannerToNPC(num))`）——同旗多 NPC（蓝史莱姆 74/297/298 → 旗 8）统一
+          // "Blue Slime",非被杀变体名（曾取被杀 id 名=变体旗达标公告错名）
+          const name = Lang.npcName(bannerToNpcOf(banner));
+          const count = this.world.bannerKills[banner] ?? 0;
+          // 公告键分档（BannerSystem.cs:245-255）：credit plr∈[0,255) →
+          // Game.EnemiesDefeatedByAnnouncement「{0}打败了第{1}个{2}！」（含玩家名）
+          // 否则 Game.EnemiesDefeatedAnnouncement「已打败第{0}个{1}！」——单机 plr=0
+          // 恒走 By 档（本仓记账无 per-slot credit 玩家,plr 恒=本地 0,单人=原版同值;
+          // MP credit 归属登记）。黄色 250,250,0 同源；计数 = killCount[banner]；
+          // 曾用自造键 Toast.BannerReady「XX 的旗帜已就绪」——原版无此文案
+          const plr = 0;
+          const text = plr >= 0 && plr < 255
+            ? Lang.text('Game.EnemiesDefeatedByAnnouncement', this.playerName(), count, name ?? '')
+            : Lang.text('Game.EnemiesDefeatedAnnouncement', count, name ?? '');
+          this.newText(text, 250, 250, 0);
+          const _bannerItemVid = bannerItemId(banner);
+          const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
+          this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);
+        }
       }
     }
     // 笨笨气球史莱姆 686 爆裂解救（NPC.cs:82525-82555 CheckDead case 686）：

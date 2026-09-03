@@ -95,14 +95,16 @@ describe('扫描窗 active 等价门（:687-691,红队R3②）', () => {
 
 describe('运动分链（:705-714）', () => {
   it('重叠：>−6 逐拍 −0.2 上推；−6 恰好落 ×0.86 支', () => {
+    // 几何按红队R3① 新度量（13px sans-serif：node 兜底行高 14.95,半高 a(scale.5)=2.99
+    // / b(1)=5.98）→ 相交窗 dy<8.97,取 dy4;旧例 dy10 是 Combat_Text 位图盒 24 的残迹
     const a = mk('A', 100, 100, { vy: -5, scale: 0.5 });
-    const b = mk('B', 100, 110);           // dy10 < 盒高 24 → 相交
+    const b = mk('B', 100, 104);           // dy4 < 8.97 → 相交
     popupLabelStep(a, [a, b], 0, 2);
     expect(a.vy).toBeCloseTo(-5.2, 12);
     const c = mk('A', 100, 100, { vy: -6, scale: 0.5 });
-    const e = mk('B', 100, 110);
+    const e = mk('B', 100, 104);
     popupLabelStep(c, [c, e], 0, 2);
-    expect(c.vy).toBeCloseTo(-6 * 0.86, 12);   // −6 > −6 假 → else 支
+    expect(c.vy).toBeCloseTo(-6 * 0.86, 12);   // flag 真 ∧ −6 > −6 假 → else ×0.86 支
   });
 
   it('无重叠：×0.86（scale==targetScale(1) 再 ×0.4 急停）；vx ×0.93', () => {

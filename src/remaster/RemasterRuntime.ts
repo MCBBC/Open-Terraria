@@ -59,7 +59,9 @@ export async function decodeSheet(blob: Blob): Promise<ImageBitmap | HTMLImageEl
     });
     if (!SpriteAtlas.USE_BITMAP) return img;
     try {
-      return await createImageBitmap(img);
+      // ★预乘位图：ImageBitmap 源忽略 UNPACK_PREMULTIPLY(SpriteAtlas.ts 同注)——
+      //  GL 预乘管线需位图自身预乘,否则 vimages 软边双重变暗
+      return await createImageBitmap(img, { premultiplyAlpha: 'premultiply' });
     } catch {
       return img;   // GPU 压力窗失败:退 Image(可绘制,仅无自持像素)
     }

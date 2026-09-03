@@ -30,7 +30,13 @@ export interface ProjImmuneFace {
 }
 
 export const PROJ_IMMUNE_FACES: Readonly<Record<number, ProjImmuneFace>> = {
-     22: { usesLocal: true },  // branch :1042; writes :1055; cd=12
+     // 22 水花权杖【本表不登记】（R2-F3 勘误 2026-09-03）：usesLocalNPCImmunity=true
+     // + localNPCHitCooldown=12 整段包在 `if (Main.remixWorld)` 支内
+     // （Projectile.cs:1052-1057,branch :1042;writes :1055-1056）——条件档非静态面,
+     //  曾按无条件抓取=非 remix 世界也走局部档（命中尾写 0 清全局窗）,原版非 remix
+     //  缺省面 = 末档写 10t 全局窗（penetrate=5）。运行时 remix 臂在 Arrow.ts
+     //  fixedUpdate 头补 localImmune=12（world.seedFlags.remix 载体）,命中环由此
+     //  显参 localFace=true（桥层显参恒权威）⇒ remix 档不缺、非 remix 档归位
      23: { usesLocal: true },  // branch :1059; writes :1068; cd=12
      34: { usesLocal: true },  // branch :1164; writes :1173; cd=12
      36: { usesLocal: true },  // branch :1184; writes :1197; cd=7

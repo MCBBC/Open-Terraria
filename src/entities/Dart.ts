@@ -154,7 +154,8 @@ export const TRAP_SHOT_STYLE: Record<string, {
   //  timeLeft1200 scale0.8 alpha254 extraUpdates1 tileCollide=false。AI_005（:24081 起）：
   //  ai[1]!=0（出生 ai[1]=-1=尾参 num10 :72286/:72292）→ tileCollide=true、无重力直线；
   //  1037/1049 支 alpha 每更新 -10 淡入（:24137-24149）、rotation=velocity.ToRotation()
-  //  −π/2（:24197-24199，贴图朝下→rotOff=-π/2）；extraUpdates=1 → 每拍位移 2 步（steps）。
+  //  −π/2（:24197-24199，贴图朝下→rotOff=-π/2）；extraUpdates=1 → 每拍位移 2 步（steps）、
+  //  timeLeft 每拍也减 2（Projectile.cs:16780-81/:17307 子步环）→ 实寿命 1200/2=600 拍。
   //  Kill（:75282-75301）= hailKill 专用支（共用 blastKill 是炮弹族 Item14 音/视觉面）：
   //  SoundID.Item89 + Resize(112,112)（blast=56 半宽）+ Damage() 纯伤害盒
   hail: { w: 24, h: 24, color: '#E8A050', grav: 0, proj: 'vanilla/Projectile_1049.png', fw: 36, fh: 36, kb: 10,
@@ -348,9 +349,16 @@ export class TrapShot extends Entity {
       this.fireworkUpdate(game);
       return;
     }
-    if (--this.life <= 0) {
+    // timeLeft-- 原版在 extraUpdates 子步环内逐次执行（Projectile.cs:16780-16781
+    // `numUpdates = extraUpdates; while (numUpdates >= 0)` → :17307 `timeLeft--;`
+    // :17308-17311 timeLeft<=0 → Kill）——即每拍递减 (extraUpdates+1) 次。1049
+    // extraUpdates=1（:9949）→ 每拍减 2,SetDefaults timeLeft=1200（:9948）实寿命
+    // 600 拍（曾按每拍 1 次=寿命翻倍）。本仓 steps = 位移步数 = extraUpdates+1,
+    // 递减次数与之同源;仅 hail 表项 steps=2,其余缺省 1 行为不变。
+    this.life -= TRAP_SHOT_STYLE[this.kind].steps ?? 1;
+    if (this.life <= 0) {
       // 炮弹族 timeLeft 耗尽同样走 Kill 爆炸（Projectile.Kill 由 timeLeft 归零触发）
-      if (this.kind === 'hail') this.hailKill(game);   // 1049 同型（1200t 到点亦爆,:75282）
+      if (this.kind === 'hail') this.hailKill(game);   // 1049 同型（600 拍到点亦爆,:75282）
       else if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
       else this.dead = true;
       return;

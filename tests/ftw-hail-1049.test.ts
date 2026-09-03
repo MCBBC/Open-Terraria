@@ -96,12 +96,17 @@ describe('冰雹弹 1049（TrapShot hail）', () => {
     expect(hurtCalls[0]!.kx).toBe(0);                     // vx=0 → sign×10=0
   });
 
-  it('timeout 1200t 亦走落地爆（Kill 由 timeLeft 归零触发,同型）;命中玩家不碎（penetrate=-1）', () => {
+  it('寿命=600 拍（timeLeft1200 在 extraUpdates 子步环内每拍 -2,Projectile.cs:16780-81/:17307）;命中玩家不碎（penetrate=-1）', () => {
     const w = emptyWorld();
     const { game } = makeGame(w);
     const b = new TrapShot(60 * TILE, 20 * TILE, 1, 8, 70, 'hail');
-    for (let t = 0; t < 1200 && !b.dead; t++) b.fixedUpdate(1 / 60, game);
-    expect(b.dead).toBe(true);
+    // 逐拍计数：第 599 拍末 timeLeft=2 仍存活；第 600 拍 -2 → 0 → Kill 落地爆
+    // （timeLeft-- 每 extraUpdates+1=2 次/拍 :16780-16781 + :17307-17313）
+    for (let t = 0; t < 599 && !b.dead; t++) b.fixedUpdate(1 / 60, game);
+    expect(b.dead).toBe(false);                           // 1200 − 2×599 = 2 > 0
+    expect(b.life).toBe(2);
+    b.fixedUpdate(1 / 60, game);
+    expect(b.dead).toBe(true);                            // 恰 600 拍归零（原版机制等价）
     expect(game.playSfx).toHaveBeenCalledWith('hailImpact', 1, expect.any(Number), expect.any(Number));
 
     // 命中玩家：弹体存续（穿透面,与巨石同档）

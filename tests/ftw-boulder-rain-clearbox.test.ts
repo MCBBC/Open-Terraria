@@ -88,3 +88,21 @@ describe('Game.ts 巨石臂源级接线（清偿批④）', () => {
     expect(body).toContain('Position.Y + (float)Height > vector.Y');
   });
 });
+
+describe('巨石成就 34 边沿=条件旗（WorldGen.cs:72224-72240 两旗分离,R4-F6）', () => {
+  const gamePath = resolve(process.cwd(), 'src/core/Game.ts');
+
+  it('_isRainingBoulders 记账【条件旗】num；窗口旗独立门生成；关闭沿判据 !num && 旗', () => {
+    if (!existsSync(gamePath)) throw new Error(`源缺失: ${gamePath}`);
+    const src = readFileSync(gamePath, 'utf8');
+    // 条件旗 num = drunk+getGood+!remix+IsItStorming（:72224）
+    const condAt = src.indexOf('const cond = !!(sf?.drunkWorld && sf?.getGoodWorld && !sf?.remix && w.weather.storming)');
+    expect(condAt).toBeGreaterThan(-1);
+    const seg = src.slice(condAt, condAt + 1800);
+    expect(seg).toContain('let spawnWindow = cond');                    // 窗口旗 flag=num 初值,:72225-33 只清 flag
+    expect(seg).toContain('if (!cond && this._isRainingBoulders)');     // :72235-72238 关闭沿判据
+    expect(seg).toContain('this._isRainingBoulders = cond;');           // :72239 记条件旗
+    // 旧形态（窗口旗记账 = 风暴中窗口关闭沿误发成就 34）必须退役
+    expect(seg).not.toContain('this._isRainingBoulders = raining');
+  });
+});

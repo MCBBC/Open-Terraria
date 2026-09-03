@@ -7,6 +7,9 @@
 //      液面下沿支 −0.4 钳 −6；到线钉线（钳 −3，vy==0 置 float.Epsilon）
 //   ④ wet && ShouldFloatInWater → accFlipper 湿授予（:13115）——脚蹼泳跃能力
 //   ⑤ 湿态阻尼（:28061-28067）：wet 且浮源在身 → vy/=2 钳 3
+//   ⑥ canFloatInWater 仅两源（R1-F1 勘误 2026-09-03）：甲件 4404 Floating Tube
+//      （:13364-67）∪ buff 265 Flamingo 坐骑（:9982-86）；脚蹼药 109 只授
+//      ignoreWater+accFlipper（:10257-59）【不授浮液】——浮液用例改 4404 驱动
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
@@ -101,10 +104,10 @@ describe('幻彩斗篷 5355 微光豁免（Player.cs:15643-46 / :27944）', () =
 // ③ ④ ⑤ 浮液物理
 // ============================================================
 describe('TryFloatingInFluid（Player.cs:23639-23679）+ 湿阻尼（:28061）+ accFlipper（:13115）', () => {
-  it('脚蹼药水（buff 265）深水中恒上浮（else 支 −0.4 无钳），无浮源对照组下沉', () => {
+  it('水上漂靴 4404（canFloatInWater :13364-67）深水中恒上浮（else 支 −0.4 无钳），无浮源对照组下沉', () => {
     const w = mkPoolWorld(LIQUID_TYPE.WATER);
     const p = new Player(40 * TILE, 90 * TILE, new Inventory());
-    p.buffs.apply(BuffType.FlipperPotion, 600);
+    p.inv.armor[3] = { id: iid(4404), stack: 1 };          // Floating Tube：canFloat 两源之一
     const hooks = mkHooks(w, p);
     for (let t = 0; t < 90; t++) p.fixedUpdate(1 / 60, hooks);
     expect(p.inWater).toBe(true);
@@ -120,7 +123,7 @@ describe('TryFloatingInFluid（Player.cs:23639-23679）+ 湿阻尼（:28061）+ 
   it('到液面钉线：vy 收敛到 |vy|≤3 且不被"落地"清零（float.Epsilon 档）', () => {
     const w = mkPoolWorld(LIQUID_TYPE.WATER);
     const p = new Player(40 * TILE, 90 * TILE, new Inventory());
-    p.buffs.apply(BuffType.FlipperPotion, 600);
+    p.inv.armor[3] = { id: iid(4404), stack: 1 };
     const hooks = mkHooks(w, p);
     for (let t = 0; t < 300; t++) p.fixedUpdate(1 / 60, hooks);
     expect(p.vy).toBeLessThanOrEqual(3.001);
@@ -137,5 +140,31 @@ describe('TryFloatingInFluid（Player.cs:23639-23679）+ 湿阻尼（:28061）+ 
     expect(p.inWater).toBe(true);
     const getter = (p as unknown as { shouldFloatInWater: boolean }).shouldFloatInWater;
     expect(getter).toBe(true);
+  });
+
+  // 反证锁（R1-F1 2026-09-03）：脚蹼药 vanilla buff 109 = ignoreWater + accFlipper
+  // （Player.cs:10257-59），【不置 canFloatInWater】——不得再驱动浮液
+  it('脚蹼药水（vanilla buff 109）不授浮液（:10257-59），只授 ignoreWater+泳跃', () => {
+    const w = mkPoolWorld(LIQUID_TYPE.WATER);
+    const p = new Player(40 * TILE, 90 * TILE, new Inventory());
+    p.buffs.apply(BuffType.FlipperPotion, 600);
+    const hooks = mkHooks(w, p);
+    for (let t = 0; t < 90; t++) p.fixedUpdate(1 / 60, hooks);
+    expect(p.inWater).toBe(true);
+    expect((p as unknown as { shouldFloatInWater: boolean }).shouldFloatInWater).toBe(false);
+    expect(p.vy).toBeGreaterThan(0);                       // 照常下沉（无浮液）
+    expect(p.liqFactor).toBe(1);                           // ignoreWater：水中位移不折半（对照组 0.5）
+    const p2 = new Player(40 * TILE, 90 * TILE, new Inventory());
+    const hooks2 = mkHooks(w, p2);
+    for (let t = 0; t < 5; t++) p2.fixedUpdate(1 / 60, hooks2);
+    expect(p2.liqFactor).toBeCloseTo(0.5, 5);
+    // 泳跃仍在：jumpEdge 拍 flipperJump（flag2&&flag3 :20407）放行水中起跳 → swimTime=30
+    p.inputJump = true;
+    p.fixedUpdate(1 / 60, hooks);
+    expect(p.swimTime).toBeGreaterThan(0);
+    // 无药对照组：同拍边沿不起跳（vy>0 且无脚蹼/踩底门）→ swimTime 恒 0
+    p2.inputJump = true;
+    p2.fixedUpdate(1 / 60, hooks2);
+    expect(p2.swimTime).toBe(0);
   });
 });

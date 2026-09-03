@@ -3742,9 +3742,9 @@ export class Renderer {
 
     // 7d''. FadingParticle 层（ParticleSystem_World_OverPlayers,Main.cs:63208——
     //     DrawPlayers_AfterProjectiles :63204 之后的玩家上层;fullbright=true 全亮
-    //     加色,FadingParticle.Draw :62-69 逐值——拍击石系 Spawn_SnappingStone /
+    //     加色,FadingParticle.Draw :57-66 逐值——拍击石系 Spawn_SnappingStone /
     //     Spawn_SnappingStoneSummon 环带,见 fx/FadingParticles.ts）
-    this.drawFadingParticles(cam);
+    this.drawFadingParticles(cam, player);
 
     // 7d'. 飞灵 677 自发光多层渲染（DrawNPCDirect_Faeling :26306-26368 不走
     //      GetAlpha——自发光色不受 tile 光照，须在光照合成后绘制。此前画在
@@ -5176,7 +5176,20 @@ export class Renderer {
       const ttl0 = (d.ttl ?? 60) + age;                  // TimeToLive 初值
       const tN = ttl0 > 0 ? (age / ttl0) * 60 : 60;      // :70 t=_timeSinceSpawn/TTL×60
       const t01 = ttl0 > 0 ? age / ttl0 : 1;             // :54 归一比
-      const lv = (a: number, b: number): number => Math.max(0, Math.min(1, (tN - a) / (b - a)));
+      // ★R3 ⑥（2026-09-03）：补 from==to 分支——Utils.GetLerpValue（Utils.cs:315-341,
+      //  clamped:true）原文 if(from<to){t<from→0;t>to→1} else {t<to→1;t>from→0} 落
+      //  (t−from)/(to−from)。旧式 (tN−a)/(b−a) 纯除在 from==to 时 t<from 侧给 0
+      //  （应 1）、t==from 给 NaN——包络端点档（如 psFadeOutEnd==psFadeOutStart）判废
+      const lv = (a: number, b: number): number => {
+        if (a < b) {
+          if (tN < a) return 0;
+          if (tN > b) return 1;
+        } else {
+          if (tN < b) return 1;
+          if (tN > a) return 0;
+        }
+        return (tN - a) / (b - a);
+      };
       num = Math.max(0, Math.min(1,
         lv(0, d.psFadeInEnd ?? 20) * lv(d.psFadeOutEnd ?? 45, d.psFadeOutStart ?? 30)));
       op = Math.max(0, Math.min(1,
@@ -5191,21 +5204,36 @@ export class Renderer {
     const tint = c ? `rgb(${c.r},${c.g},${c.b})` : null;   // ColorTint（A=0 纯加色档）
     const tintA = 0.5 * op * num;                          // color2 = ColorTint×Opacity×0.5×num
     const coreA = 0.45 * op * num;                         // color3 = White×0.9×0.5×num×num
-    const arm = (rotArm: number, len: number, style: string | null, alpha: number, wMul: number, hMul: number): void => {
+    // ★R3 ③（2026-09-03）：color2.A dst 衰减项（PrettySparkleParticle.cs:67——
+    //  color2.A = ColorTint.A×Op×0.5×(1−AdditiveAmount);本层 AlphaBlend Main.cs:63205
+    //  下 A 只进 dst 因子 → 'destination-out' erase。fillRect 实心域=既登记臂形近似
+    //  同域（texA≈1）;rgb 加色贡献与 A 无关。逐站：红 0.498×0.5×0.65≈0.16×Op×num、
+    //  金 additive=缺省 1f → 0、公主/星尘 ColorTint.A=0 → 0。白核 color3.A 项维持
+    //  既登记"不建模"（≤0.22·texA·num）不动。
+    const additive = d.psAdditive ?? 1;
+    const eraseA = c ? (c.a / 255) * 0.5 * op * num * (1 - additive) : 0;
+    const arm = (rotArm: number, len: number, style: string | null, alpha: number, wMul: number, hMul: number,
+      erase = 0): void => {
       if (!style || alpha <= 0.004) return;
       const w = Math.max(1, g.hx * wMul), h = Math.max(1, len * hMul);
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.min(1, alpha);
       ctx.translate(px, py);
       ctx.rotate(rotArm);
+      if (erase > 0.004) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = Math.min(1, erase);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, alpha);
       ctx.fillStyle = style;
       ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.restore();
     };
     const vert = d.psDrawVert !== false;                   // DrawVerticalAxis（:26 缺省 true）
-    if (vert) arm(rot, g.vy, tint, tintA, 1, 1);           // :84 垂直臂×ColorTint
-    arm(Math.PI / 2 + rot, g.hy, tint, tintA, 1, 1);       // :80 水平臂×ColorTint
+    if (vert) arm(rot, g.vy, tint, tintA, 1, 1, eraseA);           // :84 垂直臂×ColorTint
+    arm(Math.PI / 2 + rot, g.hy, tint, tintA, 1, 1, eraseA);       // :80 水平臂×ColorTint
     if (vert) arm(rot, g.vy, '#FFFFFF', coreA, 0.6, 0.6);  // :92 白核 ×0.6
     arm(Math.PI / 2 + rot, g.hy, '#FFFFFF', coreA, 0.6, 0.6);   // :88 白核 ×0.6
   }
@@ -5231,16 +5259,23 @@ export class Renderer {
    *  applyDyeToImageData 预染缓存，与 cWings 翅膀染料 wingTexSource 同款路径） +
    *  原两 pass 不变。dye 由调用点从 player.inv.miscDyes[3] 取（Player.cs:9300
    *  cMount = miscDyes[3].dye——坐骑染料槽下标 3，非 4）。 */
-  /** FadingParticle.Draw（FadingParticle.cs:62-69）1:1——ParticleSystem_World_
+  /** FadingParticle.Draw（FadingParticle.cs:57-66）1:1——ParticleSystem_World_
    *  OverPlayers 层（屏幕空间 cam 变换,与全亮 dust pass 同段）。逐份：
+   *  position = AnchorPosition+LocalPosition,followPlayerIndex!=-1 时 += player[
+   *  followPlayerIndex].MountedCenter（:59-63——本仓传 player,取 cx/cy 中心等价）;
    *  color = ColorTint × GetLerpValue(0,FadeInNorm,t/TTL) × GetLerpValue(1,
-   *  FadeOutNorm,t/TTL)（fullbright,不乘光照）;贴图原尺 × Scale 中心锚 + Rotation。
+   *  FadeOutNorm,t/TTL)（:64——fullbright=false 时 ColorTint.MultiplyRGB(
+   *  Lighting.GetColor(LocalPosition.ToTileCoordinates())) 乘位置光照,lightAt 同源）;
+   *  贴图原尺 × Scale 中心锚 + Rotation。
    *  XNA 预乘 AlphaBlend 的 canvas 等价（α=0 纯加法惯用法 + erase 精确补 A>0 档）：
    *   · tintA ≤ 0 → 'lighter' 画 tint 预染副本（rgb×tint 烘焙,alpha 保留）×env；
    *   · tintA > 0 → 先 'destination-out' 原贴图 ×(tintA/255×env)（dst ×=
    *     (1−texA·tintA·env),精确补出预乘 dst 衰减项）再 'lighter' 加色。
-   *  Delay 段不画（原版 Draw 无 Delay 门但 Scale=Vector2.Zero 起步零可见面,双保险）。 */
-  private drawFadingParticles(cam: Camera): void {
+   *  Delay 段不画（原版 Draw 无 Delay 门但 Scale=Vector2.Zero 起步零可见面,双保险）。
+   *  ★R3 ⑤c（2026-09-03）：followPlayerIndex/fullbright 光照乘两承载接入（现行两站
+   *  SetTypeInfo 缺省 fullbright=true、不写 followPlayerIndex=零行为,为 :919 系站
+   *  （Spawn_PaladinsShieldHit :921 followPlayerIndex=num 等）预留）。 */
+  private drawFadingParticles(cam: Camera, player?: Player): void {
     const atlas = this.atlas;
     if (!atlas) return;
     let any = false;
@@ -5279,9 +5314,20 @@ export class Renderer {
       const t01 = f.timeSinceSpawn / f.timeToLive;
       const env = fadingAlphaFactor(t01, f.fadeIn, f.fadeOut);
       if (env <= 0.004) continue;
-      const tinted = tintedOf(f.texKey, f.tintR, f.tintG, f.tintB);
+      // ★R3 ⑤c：fullbright=false → ColorTint.MultiplyRGB(Lighting.GetColor(...))
+      //  （FadingParticle.cs:64）——lightAt 0-255 域 /255 归一乘（RGB 通道,A 不乘）
+      let tr = f.tintR, tg = f.tintG, tb = f.tintB;
+      if (!f.fullbright) {
+        const lt = this.lighting?.lightAt(Math.floor(f.x / 16), Math.floor(f.y / 16))
+          ?? [255, 255, 255];
+        tr = (tr * lt[0]) / 255; tg = (tg * lt[1]) / 255; tb = (tb * lt[2]) / 255;
+      }
+      const tinted = tintedOf(f.texKey, Math.round(tr), Math.round(tg), Math.round(tb));
       if (!tinted) continue;
-      const [px, py] = cam.worldToScreen(f.x, f.y);
+      // ★R3 ⑤c：followPlayerIndex != -1 → position += player.MountedCenter
+      //  （FadingParticle.cs:60-63;本仓 MountedCenter≈中心 cx/cy,Game.ts:12821 同口径）
+      const ride = f.followPlayerIndex !== -1 && player;
+      const [px, py] = cam.worldToScreen(ride ? f.x + player.cx : f.x, ride ? f.y + player.cy : f.y);
       ctx.save();
       ctx.translate(px, py);
       if (f.rot) ctx.rotate(f.rot);
@@ -10852,8 +10898,8 @@ export class Renderer {
       body = latched.y < p.y ? 2 : latched.y > p.y + p.h ? 4 : 3;     // :36061-36096
       if (p.gravDir === -1 && body !== 3) body = body === 2 ? 4 : 2;
     }
-    else if (p.inWater && !p.inputDown && (p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
-      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3710-3722——canFloatInWater 仅 4404 甲件∪buff265,flipper 饰品不授予）
+    else if (p.inWater && !p.inputDown && (p.equipStats.canFloat || (p.ridingMount && p.mount.type === 37))
+      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3856-68——canFloatInWater=4404 甲件(:13364-67)∪buff265 火烈鸟坐骑(:9982-86,本仓以骑 37 等价表达)；Flipper 药 109 只授 ignoreWater+accFlipper(:10257-59) 不入 canFloat 源——R1-F1 2026-09-03 同根残留清偿）
     else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36102-36119
     else if (p.vy !== 0) {
       if (p.eocDash > 0) body = 6;
@@ -12489,8 +12535,8 @@ export class Renderer {
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
           || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
-            && !(p.inWater && ((p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
-              && !p.inputDown && (!p.ridingMount || p.mount.type === 37))));   // ShouldFloatInWater :3710-3722
+            && !(p.inWater && ((p.equipStats.canFloat || (p.ridingMount && p.mount.type === 37))
+              && !p.inputDown && (!p.ridingMount || p.mount.type === 37))));   // ShouldFloatInWater :3856-68（canFloat 两源=4404∪buff265 火烈鸟；Flipper 药不入源——R1-F1 同根残留）
         if (alwaysOk) {
           const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
           // 47/49 锚点按身体帧行（OffsetsPlayerHeadgear；行复算与下方纸娃娃同规则）

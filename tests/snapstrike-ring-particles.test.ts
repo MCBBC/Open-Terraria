@@ -40,12 +40,16 @@ function mkGame() {
 beforeEach(() => fadingParticles.clear());
 
 describe('FadingParticle 池（ABasicParticle/FadingParticle.Update 1:1）', () => {
-  it('spawn 缺省 = FetchFromPool 复位面（fadeIn 0/fadeOut 1/白 tint α0/静止）', () => {
+  it('spawn 缺省 = FetchFromPool 复位面（fadeIn 0/fadeOut 1/白 tint α255/静止/ followPlayer -1/fullbright）', () => {
     const f = fadingParticles.spawn({ x: 10, y: 20, timeToLive: 5, texKey: 'vanilla/Extra_34.png' })!;
     expect(f.vx).toBe(0); expect(f.vy).toBe(0);
     expect(f.fadeIn).toBe(0); expect(f.fadeOut).toBe(1);
     expect(f.scaleX).toBe(1); expect(f.scaleY).toBe(1);
-    expect(f.tintA).toBe(0);
+    // ★R3 ⑤b（2026-09-03）oracle 重产：缺省 ColorTint = Color.White（FadingParticle.cs:29
+    //  A=255;旧 α0 系臆造缺省）——显式传 tint 的两站（拍击石 A=0/臂镗 A=90）不受影响
+    expect(f.tintA).toBe(255);
+    expect(f.followPlayerIndex).toBe(-1);      // FadingParticle.cs:22/:32 池缺省
+    expect(f.fullbright).toBe(true);           // :20 池字段缺省
     expect(f.delay).toBe(0);
   });
 
@@ -135,8 +139,14 @@ describe('kind1 焰爆石环带（Spawn_SnappingStoneMelee :649-732）', () => {
     const spd = 14 * 1.5;                      // 基幅 14 ×恒真支 1.5
     const posOff = 14 * 30 * 0.15 + spd * 4;   // 63 + 84 = 147
     const red = rings[0].ret, gold = rings[1].ret;
-    expect(red.color).toEqual({ r: 255, g: 0, b: 0, a: 0 });          // :665 Color(1,0,0,.5)
-    expect(gold.color).toEqual({ r: 255, g: 242, b: 0, a: 0 });       // :666 Color(1,0.95,0,1)
+    // ★R3 ③（2026-09-03）oracle 重产：ColorTint A 进 color2.A dst 衰减公式
+    //  （PrettySparkleParticle.cs:66-67）——红 Color(1,0,0,.5f)→A 字节量化 127（.5×255
+    //  截断）、additive=0.35（:681）;金 Color(1,.95,0,1)→A=255、循环 :698-721 无
+    //  AdditiveAmount 写入=池缺省 1f（PrettySparkleParticle.cs:20/:43）→ color2.A=0
+    expect(red.color).toEqual({ r: 255, g: 0, b: 0, a: 127 });        // :665 Color(1,0,0,.5)
+    expect(gold.color).toEqual({ r: 255, g: 242, b: 0, a: 255 });     // :666 Color(1,0.95,0,1)
+    expect(red.psAdditive).toBe(0.35);                                // :681 AdditiveAmount（红粒独写）
+    expect(gold.psAdditive).toBeUndefined();                          // 金缺省 1f 不写
     for (const [r, sx1, sy1] of [[red, 8.8, 2.2], [gold, 5.6, 1.4]] as const) {
       expect(r.x).toBeCloseTo(400 - Math.cos(a0) * posOff, 9);        // 位偏 147
       expect(r.y).toBeCloseTo(400 - Math.sin(a0) * posOff, 9);
@@ -256,8 +266,9 @@ describe('VanillaDust prettySparkle 专用档 update（APF 补积分+Scale 二�
     expect(d.psDrawVert).toBeUndefined();
     expect(d.scax).toBeUndefined();
     expect(d.ttl).toBe(60);                    // prettySparkle 缺省 TTL
-    const s0 = d.scale;                        // NewDust 链含 ±0.2 抖（Perfect 只覆写位/速）
-    expect(d.scaleX).toBe(s0); expect(d.scaleY).toBe(s0);   // 双轴 = 池抖后 scale
+    const s0 = d.scale;                        // ★R3 ④：ps 载体零掷直写——scale=Scale 形参精确
+    expect(s0).toBe(0.5);                      //  （无 NewDust ±0.2 比例抖,PrettySparkle 不入 Dust 池）
+    expect(d.scaleX).toBe(s0); expect(d.scaleY).toBe(s0);   // 双轴 = 精确 Scale
     vd.update(0, 0, 1e9, 1e9);
     expect(d.psAge).toBe(1);
     expect(d.scaleX).toBe(s0); expect(d.scaleY).toBe(s0);   // 无动力学 → 不动

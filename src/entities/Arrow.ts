@@ -4018,6 +4018,13 @@ export class Arrow extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    // ★R2-F3（2026-09-03）：22 水花权杖 remix 支（SetDefaults :1052-1057
+    //  `if (Main.remixWorld) { usesLocalNPCImmunity = true; localNPCHitCooldown = 12; }`）
+    //  ——条件档数据列不可静态求值（148 armorPenetration=20 同款登记先例）,ctor 的
+    //  数据驱动 localImmune 无从携带世界态 → 在 tick 头按 world.seedFlags.remix 补齐
+    //  （命中环在本 tick AI/移动之后,首拍命中不落时序差;非 remix 世界无此旗,ctor
+    //  数据列缺 22 档 → localImmune 保持 0=全局 immune 窗,同原版缺省）。幂等重写无副作用
+    if (this.projId === 22 && game.world.seedFlags?.remix) this.localImmune = 12;
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     // ★L2 出生预置（NX3 遗留2 清偿,NewProjectile :10887-10893 1:1）：
