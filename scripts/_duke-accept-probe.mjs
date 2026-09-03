@@ -230,7 +230,9 @@ const out = await page.evaluate(async () => {
   ok('boss 槽=Duke', g.boss === duke, g.boss?.vanillaId);
   // SpawnBoss 段置 15000,但屏内 CheckActive 每 tick 重置 750(原版 activeTime 语义)——
   // 探针读到的是重置后值,断言「存活且被 Boss 槽接管」即可
-  ok('boss despawnTimer 存活（SpawnOnPlayer 段置位后被屏内重置收敛）', duke.despawnTimer > 0, duke.despawnTimer);
+  // SpawnBoss 段置 15000,屏内 CheckActive 重置 activeTime(750)/离屏逐拍减——读值
+  // 相对读点时序漂 ±1,断言存活窗即可(R5-F7 收敛:曾 >0 恒真,750 钉死过脆)
+  ok('boss despawnTimer 处存活窗 [740,15000]', duke.despawnTimer >= 740 && duke.despawnTimer <= 15000, duke.despawnTimer);
   const wormAfter = g.player.inv.slots[3]?.stack ?? 0;
   ok('鱼饵已消耗（必耗支 :53163）', wormAfter === wormBefore - 1, [wormBefore, wormAfter]);
   ok('音乐映射 370→58', musicMod.bossMusicFor(370) === 58, musicMod.bossMusicFor(370));
@@ -277,21 +279,23 @@ const out = await page.evaluate(async () => {
   const dropsOf = () => (g.entities.drops ?? []).map((d) => d.itemId);
   const dropVids = () => dropsOf().map((id) => { try { return vanillaIdOfItem(id); } catch { return id; } });
   const poolVids = [5526, 2624, 2622, 2621, 5478, 3291, 2623];
+  const beforeVids = new Set(dropsOf());
   let killed = false;
   for (let i = 0; i < 6 && !killed; i++) {
     duke.hurt(999999, 0, 0, g);
     await ticksFast(4);
-    killed = duke.dead || !((g.entities.enemies).some((e) => e.vanillaId === 370 && !e.dead));
+    killed = duke.dead === true;   // 严格 dead 位(R5-F7:bossFled 析取会放水)
   }
   await ticksFast(10);
-  ok('Duke 已死亡（经典档）', killed, duke.hp);
+  ok('Duke 已死亡（经典档,严格 dead 位）', killed, duke.hp);
+  const newVids = dropVids().filter((v) => !beforeVids.has(v));
+  ok('击杀新增掉落非空（差集口径,R5-F11 环境掉落防污染）', newVids.length > 0, JSON.stringify(newVids));
   ok('downed_370 存档旗', g.world.flags['downed_370'] === true, g.world.flags['downed_370']);
   ok('成就 FISH_OUT_OF_WATER', g.achievements.isCompleted('FISH_OUT_OF_WATER'));
-  const vids1 = dropVids();
-  ok('经典池武器必掉一支（oneOf 7 件）', poolVids.some((v) => vids1.includes(v)), JSON.stringify(vids1));
-  ok('强效治疗药水 499 掉落', vids1.includes(499), JSON.stringify(vids1));
-  ok('心 58 掉落', vids1.includes(58));
-  ok('钱币掉落（value=250000）', vids1.some((v) => [71, 72, 73, 74].includes(v)), JSON.stringify(vids1));
+  ok('经典池武器必掉一支（oneOf 7 件,差集口径）', poolVids.some((v) => newVids.includes(v)), JSON.stringify(newVids));
+  ok('强效治疗药水 499 掉落', newVids.includes(499), JSON.stringify(newVids));
+  ok('心 58 掉落', newVids.includes(58));
+  ok('钱币掉落（value=250000）', newVids.some((v) => [71, 72, 73, 74].includes(v)), JSON.stringify(newVids));
 
   // ---- 专家档第二杀 → 宝袋 3330 ----
   g.world.difficulty = 1;
@@ -378,10 +382,10 @@ if (!out?.fatal) {
     const dukeFace = await page.evaluate(() => {
       const g = window.__swGame;
       const EnemyMod2 = window.__enemyMod;
-      const d = EnemyMod2.Enemy.fromVanilla(370, g.player.cx - 260, g.player.cy - 60);
+      const d = EnemyMod2.Enemy.fromVanilla(370, g.player.cx + 260, g.player.cy - 60);
       if (!d) return null;
       g.entities.add(d, 'enemies');
-      d.bInit = true; d.ai0 = 0; d.ai2 = 0; d.ai1 = 300;   // 直置悬浮态(玩家居左 → spr=+1 → flip)
+      d.bInit = true; d.ai0 = 0; d.ai2 = 0; d.ai1 = 300;   // 直置悬浮态:玩家居 Duke 左 → direction=-1 → spr=-dir=+1 → flip
       for (let i = 0; i < 30; i++) window.__dukeTick(d);
       return { facing: d.facing, spin: +d.spin.toFixed(3) };
     });

@@ -2576,6 +2576,26 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number,
   if (num10 - num9 < minGap) return false;
   st.slope[floorIdx] = 0;
   st.half[floorIdx] = 0;
+  // ★IIIII217（2026-09-03）PlaceTile 头前置清（cs:59965-59968）：目标格 inactive 时
+  //   Clear(Tile|TilePaint|Slope)——type/帧/半砖/坡归零 + TilePaint 分派
+  //   ClearBlockPaintAndCoating（Tile.cs:906-911，块漆+涂层方块侧两位）。wall/liquid/
+  //   wiring/actuator 不在 mask 保留。waterpark #105 残格 (3380,845) 定罪：
+  //   placeLavaTrap 压板 PlaceTile(135, forced, style7) 打在幽灵泥格（type1 inactive）
+  //   上，x86 清 fullbright 位（.cbt 096=04→097=00 实证）而 JS 盈余 → Finish
+  //   doExtraLiquidFinish fullbright 支清岩浆（cs:1854 liquid=0 → L=1/Lt=1 残差）。
+  //   前置清后 setTileSilent 覆写 type/帧——涂层/漆两位为唯一净可见差。
+  if (st.inBounds(x, num10)) {
+    const pi = st.idx(x, num10);
+    if (!st.flags[pi]) {
+      st.type[pi] = 0;
+      st.frameX[pi] = 0;
+      st.frameY[pi] = 0;
+      st.half[pi] = 0;
+      st.slope[pi] = 0;
+      st.paint[pi] = 0;
+      st.coat[pi] &= ~TileStore.COAT_BLOCK_MASK;
+    }
+  }
   // PlaceTile(x, num10, 135, style 7)(cs:8720)——style 在 frameY(126)。
   // FFFFF 补 PlaceTile 尾 SquareTileFrame(i,j)(cs:60282):九宫邻格 184 苔藓
   // 'a 3' 掷(#101 尾段掷流 4 掷差定罪;174 竖井石门板邻域实际掷点)

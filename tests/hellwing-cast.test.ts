@@ -8,7 +8,7 @@
 // ★红绿约定:[现状绿] = 当前 src 即过;[B1 后绿]/[B2 后绿] = 需先落
 //   3019-branch.ts §B1(三角分布)/§B2(Kill 尘)——即闸门,不落 diff 必红。
 import { describe, it, expect } from 'vitest';
-import { Arrow } from '../src/entities/Arrow';
+import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { projGravSpec } from '../src/data/vanillaItemCombat';
 import type { GameHooks } from '../src/entities/types';
@@ -173,4 +173,50 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
         restore();
       }
     });
+});
+
+// ==================== 登记项③（2026-09-03,B3）：485 GetAlpha 78.4% 不透明 ====================
+// 权威：Projectile.cs:80962-80965（1457）`if (type == 485 || type == 502)
+// return new Color(255, 255, 255, 200)`——A=200/255≈78.4% 恒定档（不读 alpha 字段,
+// 无 fade 面）。本仓承载 = vanillaProjAlpha.ts PROJ_ALPHA_MOD[485] fixed(255,255,255,200)
+// → Arrow.drawTableAlpha ga=200/255（rgb 全白 → 无滤镜）,drawGlobalAlpha/drawXenoFilter
+// 均 null → 桌表生效。原登记"我方 draw 不透明 100%"系 GetAlpha 面接线前陈账——本例钉死。
+class FakeCanvasHw {
+  width = 0; height = 0;
+  getContext() {
+    return { drawImage() {}, imageSmoothingEnabled: false };
+  }
+}
+// node 环境无 canvas:485 系 5 帧竖条贴图（vanilla-projframes 485=5）,本体 drawImage
+// 走 projFrameImg 帧切片（document.createElement）→ 桩之（minion-orientation 同款）
+(globalThis as { document?: unknown }).document = {
+  createElement: (): FakeCanvasHw => new FakeCanvasHw(),
+};
+
+describe('485 狱翼蝠 GetAlpha (255,255,255,200) → 本体 78.4% 不透明（B3/登记项③）', () => {
+  it('draw 本体 drawImage globalAlpha=200/255（PROJ_ALPHA_MOD[485] fixed 档,常规合成非加算）', () => {
+    setProjSpriteOverride(485, { width: 24, height: 120 } as unknown as HTMLImageElement); // 5 帧 × 24px
+    const dusts: DustRec[] = [];
+    const game = makeGame(openWorld(), dusts);
+    const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+    a.fixedUpdate(1 / 60, game);                       // 推进 1 拍（hwFrame 帧链/age=1）
+    const calls: Array<{ ga: number; gco: string }> = [];
+    let ga = 1;
+    let gco = 'source-over';
+    const ctx = {
+      save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
+      beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+      set globalAlpha(v: number) { ga = v; },
+      get globalAlpha() { return ga; },
+      set globalCompositeOperation(v: string) { gco = v; },
+      get globalCompositeOperation() { return gco; },
+      filter: 'none',
+      imageSmoothingEnabled: false,
+      drawImage: () => { calls.push({ ga, gco }); },
+    } as unknown as CanvasRenderingContext2D;
+    a.draw({ ctx, mainPlayer: undefined } as never, undefined as never);
+    expect(calls.length).toBeGreaterThanOrEqual(1);    // 本体走帧切片 drawImage 路径
+    expect(calls.every((c) => Math.abs(c.ga - 200 / 255) < 1e-9)).toBe(true);   // 78.4%
+    expect(calls.every((c) => c.gco === 'source-over')).toBe(true);   // 不在加算组
+  });
 });

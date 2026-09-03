@@ -4,7 +4,8 @@
 // 砖（石巨人）。探针全部对照 vanilla-recipes.json + Terarria1456 源码手工核出。
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  canShimmerItem, decraftOutcome, isItemDecraftableAndUnlocked, isRecipeIndexDecraftLocked,
+  canShimmerItem, decraftOutcome, decraftRand3, isItemDecraftableAndUnlocked,
+  isRecipeIndexDecraftLocked,
   groupDecraftItemId, makeNpcOfItem,
 } from '../src/stats/Shimmer';
 import itemValueJson from '../src/data/vanilla-itemvalue.json';
@@ -309,5 +310,59 @@ describe('makeNPC 放生 / 4986 彩虹史莱姆 / 560 史莱姆雨（WorldItem.c
     expect(w.weather.slimeRain).toBe(true);    // Main.StartSlimeRain（:1844）
     expect(d.stack).toBe(1);                   // :1845 stack--
     expect(d.shimmered).toBe(true);            // :1852 剩余 stack 微光化
+  });
+});
+
+// ============ ★NB-G（2026-09-03）炼金蒸发 rand3 种子注入 ============
+// 原版 rand3 = Main.rand.Next(3)（WorldItem.cs:1904-1911 逐单位 1/3 蒸发）。
+// 曾缺注入 → decraftOutcome 缺省参落 Math.random()（同种子两跑逐位不同,NB-G 唯一
+// 硬阻塞）。修 = decraftRand3：WorldEvolution 同型（host.seed → RNG 专用实例、
+// 同世界内跨调用续流不重置、世界实例更换即换新流）。
+describe('★NB-G 炼金蒸发种子流（decraftRand3：同种子两跑逐位相同）', () => {
+  const drain = (world: { seed?: number }, n: number): number[] => {
+    const r = decraftRand3(world);
+    return Array.from({ length: n }, () => r());
+  };
+
+  it('同 seed 两个世界实例 → 样本流逐位相同；不同 seed → 分歧', () => {
+    const a = drain({ seed: 12345 }, 64);
+    const b = drain({ seed: 12345 }, 64);
+    expect(b).toEqual(a);                                   // 逐位相同（硬断言）
+    expect(a.every((v) => v === 0 || v === 1 || v === 2)).toBe(true);   // Next(3) 值域
+    const c = drain({ seed: 54321 }, 64);
+    expect(c).not.toEqual(a);                               // 换种子换流
+  });
+
+  it('同世界跨调用续流不重置（WorldEvolution 同型）：重复取口续接而非重回段首', () => {
+    const w = { seed: 777 };
+    const r1 = decraftRand3(w);
+    const first = [r1(), r1(), r1()];                       // 预耗 3 样本
+    const r2 = decraftRand3(w);                             // 同世界重复取口 = 同一条流
+    const next = [r2(), r2(), r2()];
+    const full = drain({ seed: 777 }, 6);                   // 新世界实例 = 整流重放
+    expect(first).toEqual(full.slice(0, 3));
+    expect(next).toEqual(full.slice(3, 6));                 // 续流档（重置档会重回 0..2 位）
+  });
+
+  it('ItemDrop 端到端：战斗药水入微光池，同种子两世界蒸发面逐位一致（曾 Math.random 不可复现）', () => {
+    const run = (): Array<[string, number]> => {
+      const w = shimmerWorld();
+      const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+      const spawned: Spawned[] = [];
+      const key = VANILLA_ITEM_KEY_BY_ID[300];              // 战斗药水（炼金配方）
+      expect(key).toBeDefined();
+      const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key!], 10);
+      for (let i = 0; i < 400 && !d.dead; i++) d.fixedUpdate(1, hooks(w, p, spawned));
+      expect(d.dead).toBe(true);
+      return spawned.map((s) => [s.key, s.count] as [string, number]);
+    };
+    const a = run();
+    const b = run();
+    expect(a.length).toBeGreaterThan(0);
+    expect(b).toEqual(a);                                   // 同种子两跑逐位相同
+    // 蒸发面存在性：10 组×3 材料×10 单位=300 掷,全无蒸发概率 (2/3)^300≈0——
+    // 返还总量 < 满额 300 即炼金蒸发通道真实生效（非恒等直返）
+    const total = a.reduce((s, [, n]) => s + n, 0);
+    expect(total).toBeLessThan(300);
   });
 });

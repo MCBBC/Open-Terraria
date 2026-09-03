@@ -12,6 +12,7 @@ import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { LIQUID_TYPE } from '../src/world/TileStore';
+import { repairTallGateFramesInStore } from '../src/world/tallgateFrameRepair';
 import { GorePiece } from '../src/entities/GorePiece';
 
 const keyOf = (k: string) => {
@@ -724,6 +725,43 @@ describe('D-1f 树基/侏儒/吊顶/圣诞树/碎砾 2×2/传送器/堆', () => 
     g.checkFurnitureSupport(10, 11);
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(10, 11)).toBe(0);
+  });
+
+  it('567 侏儒帧比对（:54418-54420 fy0/20 判据）：异帧判坏整清;迁移器归一后存活;顶行失回落杀派发行', () => {
+    const w = new World(40, 40, 7, 'decor-support-gnome-frame');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const GN = idOfSheet(567), STONE = idOfSheet(1);
+    // 正常态顶格派发（fy0,frameX 不入判据 :54416 弃式）地基在 → 活
+    w.store.setTileSilent(10, 12, STONE, 0, 0);
+    w.store.setTileSilent(10, 10, GN, 0, 0);
+    w.store.setTileSilent(10, 11, GN, 0, 20);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(GN);
+    expect(w.store.get(10, 11)).toBe(GN);
+    // 旧自放 18px 底帧（tallgateFrameRepair 迁移前档态）:底格派发 → 帧对判坏 →
+    // 整件清+掉落（原版同判 :54419 frameY2==20 不成立）
+    w.store.setTileSilent(12, 12, STONE, 0, 0);
+    w.store.setTileSilent(12, 10, GN, 0, 0);
+    w.store.setTileSilent(12, 11, GN, 0, 18);
+    g.checkFurnitureSupport(12, 11);
+    expect(w.store.get(12, 10)).toBe(0);
+    expect(w.store.get(12, 11)).toBe(0);
+    expect(drops.some((d) => d.key === 'place_v_567_garden_gnome')).toBe(true);
+    // 迁移面归一（repairTallGateFramesInStore 18→20）后同布局存活 = 迁移+帧检闭环
+    w.store.setTileSilent(14, 12, STONE, 0, 0);
+    w.store.setTileSilent(14, 10, GN, 0, 0);
+    w.store.setTileSilent(14, 11, GN, 0, 18);
+    expect(repairTallGateFramesInStore(w.store)).toBe(1);
+    g.checkFurnitureSupport(14, 11);
+    expect(w.store.get(14, 10)).toBe(GN);
+    expect(w.store.get(14, 11)).toBe(GN);
+    // 顶行已失(air):底格派发回落杀自身不留孤儿（原版杀集 {num2,num2+1}∩同型
+    // 恒含派发行 :54428-54432）
+    w.store.setTileSilent(16, 12, STONE, 0, 0);
+    w.store.setTileSilent(16, 11, GN, 0, 20);
+    g.checkFurnitureSupport(16, 11);
+    expect(w.store.get(16, 11)).toBe(0);
   });
 
   it('591 吊盆顶锚：天花在活,挖天花 → 塌（Check2xX 吊挂支 :38464——曾走家具底行支=反向）', () => {

@@ -9275,6 +9275,26 @@ export class Game implements GameHooks {
     this.player.facing = (tx * TILE + 8) >= this.player.cx ? 1 : -1;
   }
 
+  /** ★F-7（ManaV2 空蓝慢施·挥击姿势窗补拉,2026-09-03 登记项②）：原版
+   *  ApplyItemAnimation slowMagic 支 SetItemAnimation(useAnimation, 2.5)
+   *  （Player.cs:4463-4468,DebugOptions.ManaV2 && sItem.mana > 0 && slowMagicUse）
+   *  对【所有】施魔件生效——与是否连射（useTime<useAnimation）无关、与 useStyle
+   *  无关（近战乘区支/放置支先截走的除外）。本仓 case 'magic' 付款点 smGrow
+   *  （:14645 附近）先做了拉伸,但其后各 useSwing 重起窗调用点会把窗重置回
+   *  裸 useAnimation(+num)——spray27 通用支已有 growTail 回拉（F-03 面）,本口
+   *  覆盖其余三处重置位：非 spray 通用尾支 / 1121 蜂枪 / 1155 黄蜂枪专支重播。
+   *  仅 slowMagicUse 置位那一击生效（正常蓝量 :53217 入口清 → 增量 0 零改动;
+   *  该旗在本 dispatch 域只被空蓝照放支置位,置位本身蕴含 sItem.mana>0,故不再
+   *  重复 mana 门）。增量式 = slowMagicWindowGrow（(int) 截断;+num 补间帧/
+   *  reuseDelay 后摇帧原位保留,只乘 vanilla useAnimation 本体）。 */
+  private regrowSlowMagicSwing(critVid: number): void {
+    const grow = slowMagicWindowGrow(itemCombat(critVid)?.useAnimation, this.player.slowMagicUse);
+    if (grow > 0 && this.swing) {
+      this.swing.t += grow;
+      this.swing.dur += grow;
+    }
+  }
+
   /** 复用冷却收口（R26 GAP-07）：base=词缀后 useTime。reuseDelay 表件的总周期 =
    *  max(useTime, 动画窗[已含后摇])——原版 TryStartUse 门 `itemAnimation==0`
    *  (:43072)+动画归零后的 ApplyReuseDelay 阻塞段（:52992-52995/:53475-53480）；
@@ -14712,6 +14732,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.useTime = this.player.getSlowMagicUseTime(this.cycleCooldown(critVid, cw.useTime));
           this.player.onManaItemUsed();
           this.useSwing(def, angB, ps?.spd ?? 1);
+          // ★F-7：本支 useSwing 重播会重置付款点拉伸 → 补拉（原版 ApplyItemAnimation
+          //  slowMagic 支对 mana>0 施魔件一律生效;1121 U=A=12 → 窗 13 → 31 = ⌊12×2.5⌋+num1）
+          this.regrowSlowMagicSwing(critVid);
           this.input.mouseDown = false;
           break;
         }
@@ -14758,6 +14781,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //   1155 magic=true 弹同吃该窗（此前漏接 = 蜂枪连发期白嫖回蓝）
           this.player.onManaItemUsed();
           this.useSwing(def, angW, ps?.spd ?? 1);
+          // ★F-7：同 1121——重播重置付款点拉伸 → 补拉（1155 U=A=18 → 窗 19 → 46
+          //  = ⌊18×2.5⌋+num1）
+          this.regrowSlowMagicSwing(critVid);
           this.input.mouseDown = false;
           break;
         }
@@ -15783,6 +15809,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               this.swing.dur += growTail;
             }
           }
+        } else {
+          // ★F-7（2026-09-03 登记项②,ManaV2 空蓝慢施·非 spray 面）：spray27=null
+          //  （useTime≥useAnimation 的单击族,如 272 恶魔镰刀 20/20）——尾支 useSwing
+          //  重起窗同样【重置】付款点 smGrow 已做的拉伸,而原版 SetItemAnimation
+          //  (useAnimation,2.5)（Player.cs:4463-4468）对非连射施魔件一样生效。
+          //  此前本域慢施时 U 侧 ⌊U0×2.5⌋ 拉长、姿势窗却仍是裸 A0 → 收杖提前 60%。
+          //  补拉式同 growTail（仅 slowMagicUse 置位那一击;正常蓝量增量 0 零改动;
+          //  spray 支已自拉,勿双重）。
+          this.regrowSlowMagicSwing(critVid);
         }
         break;
       }
@@ -17419,10 +17454,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** Player.CollideWithNPCs（Player.cs:20549-20589）矩形版：Main.npc 扫描（friendly
-   *  全排除=只打敌怪）→ 盒相交 && (noTileCollide || CanHit 视线) → ApplyDamageToNPC
-   *  (8,2,dir,crit:false,sourceItemId 4049) + immune=12 + GiveImmuneTimeForCollisionAttack(6)
-   *  ——单次调用只受理第一个目标（break） */
+  /** Player.CollideWithNPCs（Player.cs:20536-20577,SW-L1 2026-09-03 F12 注释对码）
+   *  矩形版：敌怪桶扫描（friendly/小动物/immune 窗排除由桶与 hurt-iframes 面天然
+   *  承担,此处不显式复筛）→ 调用方传入 mow 矩形盒与敌怪盒 AABB 相交测试 →
+   *  noTileCollide 直通,否则盒级 canHit（玩家盒 p.x/y/w/h vs 敌怪盒,e.hurt 走
+   *  击退 2/伤 8）→ e.iframes=12（NPCImmuneTime）+ 玩家 GiveImmuneTimeForCollision
+   *  Attack(6)（PlayerImmuneTime）——单次调用只受理第一个目标（break）。
+   *  ★原版另带 sourceItemId 4049 与 CanNPCBeHitByPlayerOrPlayerProjectile 前置门,
+   *  本仓窄面无此参（hitSource 不参与本路径结算面） */
   private mowCollideWithNPCs(rx: number, ry: number, rw: number, rh: number, dir: number): void {
     const p = this.player;
     for (const ent of this.entities.enemies) {
@@ -23107,12 +23146,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!playerCanHitEnemy(en, this, projId)) continue;
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
-        let hurt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
-        // SW-J1 2026-09-03：TNT 桶 1002 对 NPC 半伤（Damage_PVE_Inner :12971
-        //  `if (type == 1002) dmg /= 2`——DamageVar 后/旗乘区前;C# int/=2 正数截断）
-        if (projId === 1002) hurt = Math.floor(hurt / 2);
-        // ★F1：Damage_PVE_Inner 面（爆炸 Resize 盒二次结算同走 Damage 链）→ 攻端旗乘区
-        hurt = applyBannerDamageDealt(this, en, hurt);
+        // SW-L1 2026-09-03 F11 乘区序对齐原版 Damage_PVE_Inner：旗乘区
+        //  TotalDamageMultiplier(:12956,作用于 num15 基伤) → DamageVar(:12970 ±15%)
+        //  → 1002 半伤(:12971-12973)。曾 DamageVar→半伤→旗乘区,序反（组合差 ≤1）
+        let hurt = applyBannerDamageDealt(this, en, damage);   // ★F1 旗乘区（Damage 面）
+        hurt = Math.max(1, Math.round(hurt * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
+        // SW-J1 2026-09-03：TNT 桶 1002 对 NPC 半伤（Damage_PVE_Inner :12971-12973
+        //  `if (type == 1002) dmg /= 2`——DamageVar 后;C# int/=2 正数截断）
         en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen, false, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
         // 冰霜盔甲×爆炸（StatusNPC :11524-11527 `(melee||ranged) && frostBurn →
         // AddBuff(324, 60×Next(5,15))`）：爆炸结算同走 Damage→StrikeNPC→StatusNPC
@@ -26182,13 +26222,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       || type === ParticleOrchestraType.SnappingStoneMelee
       || type === ParticleOrchestraType.SnappingStoneSummon) {
       // Spawn_SnappingStone{,Melee,Summon}——环带+三味音（snappingStoneRingFx）+ Dust 段
-      //（snapStrikeDust,SnapStrike 同源导出）双面复放;motionScale=moveX/256 钳 .12。
-      // ★F3（2026-09-01）：尘段也按载荷直用——X 已含出弹端单掷（Projectile.cs:14429-31
+      //（snapStrikeDust,SnapStrike 同源导出）双面复放。
+      // ★F3（2026-09-01）：尘段按载荷直用——X 已含出弹端单掷（Projectile.cs:14429-31
       // num11×num12 / 受击者拍 :14434-36 num11 裸值）,收端禁再掷/再除（曾 |X|/2 后
       // 尘段复掷 num12 = 二次掷+幅减半,本地/远端尘速分裂）
+      // ★W-A1（2026-09-03）：环带也按载荷【原值】直入（曾预除 256 = 收端专用第二口径,
+      // 与本地 producer 传原值分叉;kind0/kind2 的 X/256、num=1f 换算式已下沉到
+      // snappingStoneRingFx 内按原文逐 kind 消费）——本/远端同式,与尘段共吃同一原值
       const kind = (type === ParticleOrchestraType.SnappingStone ? 0
         : type === ParticleOrchestraType.SnappingStoneMelee ? 1 : 2) as 0 | 1 | 2;
-      snappingStoneRingFx(this, kind, s.posX, s.posY, s.moveX / 256, Math.max(0, s.moveY | 0));
+      snappingStoneRingFx(this, kind, s.posX, s.posY, s.moveX, Math.max(0, s.moveY | 0));
       snapStrikeDust(this, kind, s.posX, s.posY, s.moveX);
     } else if (type === ParticleOrchestraType.SnappingStoneRecharge
       || type === ParticleOrchestraType.PyroclasticStoneRecharge
@@ -32530,7 +32573,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         .filter((e) => !e.dead && e.vanillaId != null).map((e) => e.vanillaId!);
       // ★vanillaNetId 0=无变体（非 nullish）——`??` 对 0 失效会让所有 npcKilled 类
       // 成就收不到通知（FISH_OUT_OF_WATER 370/OBSESSIVE_DEVOTION 439/STAR_DESTROYER
-      // 族,2026-09-03 猪鲨探针实锤）。归一惯例同 :3099/:13482（!==0 ? netId : id）。
+      // 族,2026-09-03 猪鲨探针实锤）。归一惯例同 Enemy.ts:3099/:13486（!==0 ? netId : id）。
       const killAchId = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : id;
       if (id === 125 || id === 126) {
         const otherAlive = active.includes(id === 125 ? 126 : 125);
@@ -35851,12 +35894,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'gnome': {
-        // CheckGnome（:54400）：1×2（fy0 顶格|20 底格定顶）+下方
-        // SolidTileAllowBottomSlope/平台（:54424-54426）
+        // CheckGnome（:54400）：1×2 完整性【含帧比对】+下方 SolidTileAllowBottomSlope/
+        // 平台（:54424-54426）。★帧比对收紧（2026-09-03 §9 备5 余项）:54418-54420
+        // `tileSafely.frameY == 0 && tileSafely2.frameY == 20 && 两格 type==567`——
+        // 行帧=heights{18,18}+pad2（TileObjectData.cs:4222-4224 addTile(567)）→ 顶 0/
+        // 底 20（PLACE_ROW_FY[567]=[0,20] FurnitureStyle;旧自放 18px 底帧由
+        // tallgateFrameRepair 迁移归一,异帧态=损坏判坏,原版同判）。顶格归一
+        // （:54410-54414 frameY>0 → 上移一行）与帧对联动:顶格派发 frameY=0 须验底格
+        // 20、底格派发 frameY=20 须验顶格 0——两格无条件都验。
+        // ★frameX【不】入完整性判据::54416 `_ = tileSafely.frameX / 28` 为弃式死码
+        // （StyleHorizontal :4224 风格码残迹,计算后即弃,无比对）——勿照抄进判据。
         const top = st.frameY[i] === 0 ? y : y - 1;
         if (!st.isActive(x, top) || st.get(x, top + 1) !== st.type[i]
+          || st.frameY[st.idx(x, top)] !== 0 || st.frameY[st.idx(x, top + 1)] !== 20
           || !(this.solidAllowBottomSlopeAt(x, top + 2)
-            || !!TILE_DEFS[st.get(x, top + 2)]?.platform)) this.killDecorTile(x, Math.max(0, top));
+            || !!TILE_DEFS[st.get(x, top + 2)]?.platform)) {
+          // 杀锚=top,经 breakTile object 支整件清;但原版杀集={num2,num2+1}∩同型
+          // （:54428-54432 双 KillTile）恒含派发行——顶格已失(air)时杀 air 空跳会
+          // 留派发行孤儿,回落杀派发格（breakTile object 支对该格自锚整清）
+          this.killDecorTile(x, st.isActive(x, top) ? top : y);
+        }
         return;
       }
       case 'treebase': {

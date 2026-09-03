@@ -298,8 +298,8 @@ describe('④ 292 联机访客镜像（Dart.destroy 口,2026-09-02 缺口清偿�
 // 盒 60×60 伤 30/22 按本地难度重算）同为房主权威弹 → 访客傀儡 netPuppet 早退不跑
 // Kill 链 → destroy 镜像口复放（口径同 ④）。
 describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,2026-09-03）', () => {
-  it('访客傀儡 303 消亡 → rocketKill 复放：Item14 + 尘焰 + 命中面 + 幂等', () => {
-    const { hooks, sfx, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
+  it('访客傀儡 303 消亡 → rocketKill 复放：Item14 + 火尘两批 40 + 命中面 + 幂等', () => {
+    const { hooks, dusts, sfx, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
     const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
     d.netPuppet = true;
     d.fixedUpdate(1 / 60, hooks);          // lastGame 刷新（傀儡步进同 ④）
@@ -307,6 +307,15 @@ describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,202
     d.dead = true;
     d.destroy();
     expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);   // Kill 组爆音（:79827 组）
+    // ★R8 M3（2026-09-03）火尘两批 40 粒（:79848-79855 单环交错,按 scale 档分账）：
+    //  批1 20×d6(α100,scale3.5,noGravity,×7) / 批2 20×d6(α100,scale1.5,重力开,×3)
+    const d6 = dusts.filter((x) => x.type === 6);
+    const hi = d6.filter((x) => Math.abs(x.scale - 3.5) < 1e-9);
+    const lo = d6.filter((x) => Math.abs(x.scale - 1.5) < 1e-9);
+    expect(hi).toHaveLength(20);
+    expect(lo).toHaveLength(20);
+    expect(hi.every((x) => x.alpha === 100 && x.noGravity)).toBe(true);
+    expect(lo.every((x) => x.alpha === 100 && !x.noGravity)).toBe(true);
     expect(damageCalls.length).toBe(1);                          // 玩家与傀儡盒重叠 → 命中面
     expect(damageCalls[0].dmg).toBeGreaterThanOrEqual(68);       // ★R7 F5 钉 rocketDmg 60 带宽(DamageVar/难度乘区)
     expect(damageCalls[0].dmg).toBeLessThanOrEqual(92);
@@ -339,14 +348,23 @@ describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,202
     expect(out.damageCalls.length).toBe(0);
   });
 
-  it('访客傀儡 75 → rocketDmg 60 覆写爆（:80116-80122）', () => {
-    const { hooks, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
+  it('访客傀儡 75 → rocketDmg 60 覆写爆（:80116-80122）+ 火尘 20 粒两批（:80070 组独立档）', () => {
+    const { hooks, dusts, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
     const d = new Dart(30 * 16, 40 * 16, 8, 0, 80, 75);
     d.netPuppet = true;
     d.fixedUpdate(1 / 60, hooks);
     d.x = 50 * 16 - 11; d.y = 40 * 16 - 11;   // 75 盒 22×22
     d.dead = true;
     d.destroy();
+    // ★R8 M3：75 属 :80070 组（非 :79827 组）——10×d6(α100,scale2.5,noGravity,×5)
+    //  + 10×d6(α100,scale1.5,重力开,×3) 共 20 火粒（:80084-80091,烟 d31 亦 20 非 30）
+    const d6 = dusts.filter((x) => x.type === 6);
+    const hi75 = d6.filter((x) => Math.abs(x.scale - 2.5) < 1e-9);
+    const lo75 = d6.filter((x) => Math.abs(x.scale - 1.5) < 1e-9);
+    expect(hi75).toHaveLength(10);
+    expect(lo75).toHaveLength(10);
+    expect(hi75.every((x) => x.alpha === 100 && x.noGravity)).toBe(true);
+    expect(lo75.every((x) => x.alpha === 100 && !x.noGravity)).toBe(true);
     expect(damageCalls.length).toBe(1);
     // 飞行伤 80 被覆写为爆炸伤 60（rocketDmg :80116-80122）→ hitPlayer 全链
     // （DamageVar ±15% × 敌弹 ×2 :14912-14917）→ 102..138（非专家世界）

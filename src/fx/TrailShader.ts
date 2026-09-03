@@ -88,16 +88,23 @@ interface SM2FrameCtx {
   smp: Array<SM2SamplerOut | undefined>;
 }
 /** 帧级准备：setupConstants 一次（uOpacity/uSaturation/uTime 常量化+preshader 求值）。
- *  三张噪声贴图任一未就位 → null（调用侧回退兜底近似,首帧懒加载自愈）。 */
+ *  三张噪声贴图任一未就位 → null（调用侧回退兜底近似,首帧懒加载自愈）。
+ *  ★同帧单槽缓存（红队 F4）：key=(set|opacity|time)——同帧多条带（连发 8 弹）
+ *  参数全同 → 命中共享一份 regs/tex/v0/o/smp（省 ~9KB/弹·帧 分配+n normCache
+ *  重建）；跨帧 time 变 → miss 自然换血，无需显式清。单槽够用：不同 set 同帧
+ *  并存时逐个挤兑重建（多 set 混发场景少，重建成本一次性）。 */
+let sm2CtxCache: { key: string; ctx: SM2FrameCtx } | null = null;
 function sm2FrameCtx(set: ExtraSet, opacity: number, timeSec: number,
   s0im: ImgData | null, s1im: ImgData | null, s2im: ImgData | null): SM2FrameCtx | null {
   const pass = magicMissilePass();
   if (!pass || !s0im || !s1im || !s2im) return null;
+  const key = `${pass.name}|${set.imgs[0]}|${opacity}|${timeSec}`;
+  if (sm2CtxCache && sm2CtxCache.key === key) return sm2CtxCache.ctx;
   const u = defaultUniforms();
   u.uOpacity = opacity;
   u.uSaturation = set.sm2 ?? 1;
   u.uTime = timeSec;                       // Main.GlobalTimeWrappedHourly（秒,%3600）
-  return {
+  const ctx: SM2FrameCtx = {
     pass,
     c: pass.setupConstants(u),
     regs: new Float64Array(128),           // r0..r31
@@ -106,6 +113,8 @@ function sm2FrameCtx(set: ExtraSet, opacity: number, timeSec: number,
     o: new Float64Array(4),
     smp: [wrapSampler(s0im), wrapSampler(s1im), wrapSampler(s2im), undefined],
   };
+  sm2CtxCache = { key, ctx };
+  return ctx;
 }
 
 interface ImgData { data: Uint8ClampedArray; w: number; h: number }
@@ -390,12 +399,14 @@ export function drawStripTrail(
         const ph = p * set.ssd[0] + set.ssd[1];
         const sfrac = (ph % 1 + 1) % 1;                        // frc（cmp 分支对 Repeat 无感）
         const dim = 1 - ph * ssdInvW;                          // ★锯齿链（活）
-        // across = t0.y/t0.z。★极性（2026-09-03 原文复核 VertexStrip.cs:153-204）：
-        // v1=pos+(rot−π/2)向×半宽（XNA y-down 屏幕系的【视觉上侧】）→ TexCoord=(p,d,d)
-        // = across 1；v2=下侧 → (p,0,d) = across 0。CPU 光栅 bestU=sign(ddx·−ey+ddy·ex)
-        // 在视觉【下】侧为正 → uN→1，恰与原版反相 → 取 1−uN（s1 噪声贴图上下不对称
-        // 时翻转可见;Extra_189 sym=0.828 实测）。GL verts 路径 A=+dxC=上=1 本就同原版。
-        const across = 1 - uN;
+        // across = t0.y/t0.z = uN（★2026-09-03 红队 F1 复核回退：曾热修 1−uN 判反）。
+        // 极性推导钉死：CPU 光栅段向量 e=pts[i+1]−pts[i]，而 pts[0]=最新 ⇒ e 恒为
+        // 【尾向】——右移弹 e=(−1,0)，上侧像素 ddy<0 → bestU=ddy·ex=(−)×(−)>0 →
+        // uN→1=【上侧】；原版 VertexStrip.cs:158/193-204 v1=pos+(rot−π/2)·hw=
+        // (0,−1)·hw=上侧、TexCoord=(p,d,d)=across 1 ⇒ uN 恰=原版 across，无需翻转
+        // （旧注"bestU 下侧为正"系把 e 当头向的符号错）。GL verts 路径 rot 派生自
+        // 同一尾向邻点 → +dxC=下侧=镜像——obj58 GL 镜像是既有存量（登记观察）。
+        const across = uN;
         const gate = sampleAt(s1im, sfrac, across);            // s1（Repeat 寻址）
         const blade = sampleAt(s0im, sfrac, across);           // s0 全幅扇形贴图（截面+4 波纹本体）
         const edgeRaw = (gate - wEnv) * 2;
@@ -407,11 +418,17 @@ export function drawStripTrail(
         // 注）→ 'lighter' 直加不预乘。★alpha 写 255（2026-09-03 premul 陷阱定罪：
         // 旧 a=0 被真实 canvas 的 premul 内部表示吞光——putImageData 后 rgb'=rgb×a/255=0，
         // drawImage('lighter') 加 0 = CPU 退化路径整条带不可见;实机探针 probe4 实证
-        // a=0→[0,0,0]/a=255→[200,0,100]。rgb 全额通过须 a=255;dst.a+=255 的主画布
-        // alpha 抬升无观感面——主画布每帧 opaque 底）
-        fd[o] = blade * cr * edge * dim * 255;
-        fd[o + 1] = blade * cg * edge * edge * 255;
-        fd[o + 2] = blade * cb * edge * 255;
+        // a=0→[0,0,0]/a=255→[200,0,100]）。★rgb 门（同日用户实报"天顶剑拖尾变黑
+        // 不透明"）：Extra_201 贴图【大片黑 texel】（仅底左角亮扇形），blade=0 的像素
+        // rgb 全 0——加算贡献恒 0 但 a=255 会在非 opaque 合成面上落不透明黑块；
+        // dim<0（锯齿链负值 UNORM clamp 0）同理。rgb≤0 一律不写。
+        const rO = blade * cr * edge * dim;
+        const gO = blade * cg * edge * edge;
+        const bO = blade * cb * edge;
+        if (Math.max(rO, gO, bO) <= 0.004) continue;
+        fd[o] = rO * 255;
+        fd[o + 1] = gO * 255;
+        fd[o + 2] = bO * 255;
         fd[o + 3] = 255;
         continue;
       }
@@ -424,8 +441,8 @@ export function drawStripTrail(
       //  execPixel 的 t0x/t0y 形参只覆写 tex[0]/[1]，T[2] 由预写 tex[2] 传入
       //  （codegen 生成体 instr#2 `1/T[2]` 与 VM bindFile case 3 同读 tex 数组）。
       //  输出 oC0 已 UNORM sat——XNA (One,One) 加算 → 'lighter' 直加。★alpha 写
-      //  255（premul 陷阱同 tech 分支注,probe4 实证）。★across=1−uN（极性同
-      //  tech 分支注：原版上侧=across 1,CPU bestU 反相）。
+      //  255（premul 陷阱同 tech 分支注,probe4 实证）。★across=uN（极性同 tech
+      //  分支注：pts[0]=最新 ⇒ 段向量=尾向 ⇒ bestU 上侧为正 = 原版 A 侧,红队 F1 回退）。
       if (sm2f) {
         const pairs = spec.expectedPairs ?? n;
         const p = pairs > 1 ? Math.min(1, bestV * (n - 1) / (pairs - 1)) : 0;
@@ -434,8 +451,10 @@ export function drawStripTrail(
         sm2f.tex[3] = 0;
         sm2f.v0[0] = cr; sm2f.v0[1] = cg; sm2f.v0[2] = cb; sm2f.v0[3] = ca;
         const res = sm2f.pass.execPixel(sm2f.c, sm2f.regs, sm2f.tex, sm2f.v0, sm2f.o,
-          p, (1 - uN) * d, sm2f.smp);
-        if (res) {
+          p, uN * d, sm2f.smp);
+        // ★rgb 门（同 obj58 CPU 分支注）：UNORM 输出 rgb 全 0（s0 黑 texel/gate=0/
+        //  edge=0）不写——加算贡献恒 0,a=255 只会在非 opaque 面落黑块
+        if (res && Math.max(res[0], res[1], res[2]) > 0.004) {
           fd[o] = res[0] * 255;
           fd[o + 1] = res[1] * 255;
           fd[o + 2] = res[2] * 255;

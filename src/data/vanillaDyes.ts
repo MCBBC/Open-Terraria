@@ -8,7 +8,7 @@
 // 梯度对齐 ReflectiveArmorShaderData.Apply。
 import dyeJson from './vanilla-dyes.json';
 import fxShaderJson from './fxPixelShader.json';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2Pass, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 
 export interface DyeEntry {
   tech: string;
@@ -136,6 +136,20 @@ export function dyeCount(): number {
   return Object.keys(TABLE).length;
 }
 
+/** S1 消费族的采样器/uImageSize1 装配（R33 C1 语义，applyDyePass/applyDyePassLit
+ *  共享单一出口——噪声覆写规则若再变只改这里）。 */
+function resolveDyeExtra(pass: SM2Pass, apply: DyeApply,
+  extraSamplers: Array<SM2SamplerOut | undefined>, noiseOverride?: SM2SamplerOut): Array<SM2SamplerOut | undefined> {
+  if (!S1_PASSES.has(pass.name)) return extraSamplers;
+  if (pass.name === 'ArmorHallowBoss') {
+    apply.uniforms.uImageSize1 = [256, 256];   // Extra_156 同为 256²（噪声尺寸 rcp 消费面）
+    return extraSamplers;
+  }
+  const nz = noiseOverride ?? noiseSampler();
+  apply.uniforms.uImageSize1 = [NOISE_SIZE, NOISE_SIZE];
+  return [nz, ...extraSamplers.slice(1)];
+}
+
 /**
  * 对 ImageData 执行染料 pass（原地）。extraSamplers 供 s1/s2（见 needsImage1）。
  * ★R33 C1：noise 族染料（s1 pass 但非 HallowBoss）的 s1 一律覆写——就绪用真
@@ -151,16 +165,7 @@ export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
   noiseOverride?: SM2SamplerOut): boolean {
   const pass = getPass(apply.tech);
   if (!pass) return false;
-  let extra = extraSamplers;
-  if (S1_PASSES.has(pass.name)) {
-    if (pass.name === 'ArmorHallowBoss') {
-      apply.uniforms.uImageSize1 = [256, 256];   // Extra_156 同为 256²（噪声尺寸 rcp 消费面）
-    } else {
-      const nz = noiseOverride ?? noiseSampler();
-      extra = [nz, ...extraSamplers.slice(1)];
-      apply.uniforms.uImageSize1 = [NOISE_SIZE, NOISE_SIZE];
-    }
-  }
+  const extra = resolveDyeExtra(pass, apply, extraSamplers, noiseOverride);
   runPassOnImageData(pass, data, w, h, apply.uniforms, extra, t0Rect);
   return true;
 }
@@ -200,9 +205,24 @@ export const V0_MID_PASSES: ReadonlySet<string> = new Set([
   'WaterDistortionObject', 'WaterProcessor',
 ]);
 
-/** tech 是否 v0 中段消费族（消费端分流判据；名单本体见上注） */
+/**
+ * 染料运行时域 v0 惰性集——扫描受累但在【染料运行时域】对 v0 完全零响应的
+ * tech（2026-09-03 实测：染料表 uniforms × 8 uTime × 渐变/翼面内容 × ±uLightSource
+ * 共 32 域点，输出字节恒等，tests/fx-sm2-v0-responsive.test.ts 锁定）。此语义 =
+ * shader 在该域【无视 v0】（疑似自发光族——原版输出不受光照，当前「白烘×合成
+ * 光乘」本身即登记偏差；但 v0 化会丢掉站点光乘=更暗，方向反了）。故本集成员
+ * 【维持旧链】，待原版参照（1458 rig 原生 oC0 金标）复核后再定自发光修正。
+ * 非染料 pass（FinalFractal/HorizonClouds/MouseItem/WaterProcessor 同测惰性）
+ * 不入本集——不经染料分流门，归各自站点。
+ */
+export const V0_INERT_IN_DYE_DOMAIN: ReadonlySet<string> = new Set([
+  'ArmorLivingOcean', 'ArmorPhase', 'ArmorTwilight',
+]);
+
+/** tech 是否应走 v0 化染料路径（消费端唯一分流判据）：
+ * 扫描受累 ∧ 非染料域惰性。名单本体与惰性证据见上两注。 */
 export function isV0MidTech(tech: string): boolean {
-  return V0_MID_PASSES.has(tech);
+  return V0_MID_PASSES.has(tech) && !V0_INERT_IN_DYE_DOMAIN.has(tech);
 }
 
 /**
@@ -221,17 +241,8 @@ export function applyDyePassLit(data: Uint8ClampedArray, w: number, h: number,
   t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number },
   noiseOverride?: SM2SamplerOut): boolean {
   const pass = getPass(apply.tech);
-  if (!pass || !V0_MID_PASSES.has(pass.name)) return false;
-  let extra = extraSamplers;
-  if (S1_PASSES.has(pass.name)) {
-    if (pass.name === 'ArmorHallowBoss') {
-      apply.uniforms.uImageSize1 = [256, 256];
-    } else {
-      const nz = noiseOverride ?? noiseSampler();
-      extra = [nz, ...extraSamplers.slice(1)];
-      apply.uniforms.uImageSize1 = [NOISE_SIZE, NOISE_SIZE];
-    }
-  }
+  if (!pass || !isV0MidTech(pass.name)) return false;   // 分流门单一出口（消费端同判据）
+  const extra = resolveDyeExtra(pass, apply, extraSamplers, noiseOverride);
   runPassOnImageData(pass, data, w, h, apply.uniforms, extra, t0Rect, v0Rgb);
   return true;
 }

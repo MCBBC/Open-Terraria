@@ -1584,8 +1584,28 @@ export class Dart extends Entity {
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     const cx = this.cx, cy = this.cy;
     game.playSfxFiles(['Item_14'], 1, cx, cy);
-    game.spawnParticles(cx, cy, '#9A9A9A', 30, 2, { life: 40, damp: 0.96 });          // 尘 31 ×1.4
-    game.spawnParticles(cx, cy, '#FF9A3C', 20, 5, { life: 30, damp: 0.94, grav: -0.06 }); // 火 6 ×7/×3
+    // ★R8 M3（2026-09-03）火尘两批补齐 + 尘面按组拆分（★任务单"303/75 共用 Kill 组"
+    //  与反编译不符——75 不在 :79827 组,另落 :80070 组,逐参按原文修）：
+    //  · 303 组（:79827 type∈{133-138,303,338,339,930}）：盒 22×22（:79837-79842 手写
+    //    position±width/2）+ 30×d31(α100,scale1.5,×1.4 :79843-79847) + 单环内两批火尘
+    //    共 40 粒（:79848-79855,同环交错出生）：20×d6(0,0,α100,scale3.5,noGravity,×7)
+    //    + 20×d6(0,0,α100,scale1.5,重力开,×3)
+    //  · 75 组（:80070 type∈{28,30,37,75,102,164,397,516,517,519}）：Resize(22,22)
+    //    + 20×d31(:80079-80083) + 10×d6(α100,scale2.5,noGravity,×5)+10×d6(α100,
+    //    scale1.5,×3) 共 20 火粒(:80084-80091)——曾共用"30 烟+20 火"泛色近似,第二批整缺
+    const is75Group = this.projId === 75;
+    game.spawnParticles(cx, cy, '#9A9A9A', is75Group ? 20 : 30, 2, { life: 40, damp: 0.96 }); // d31 ×1.4
+    for (let n = 0; n < (is75Group ? 10 : 20); n++) {
+      // 火 6：NewDust 初速 (0,0)（纯内建抖动）→ 后置 noGravity/×7(×5) 与第二粒 ×3，
+      // 池内烟雾族特例(d6 vy 重掷/vx×0.3/scale×0.7)与原版 Dust.cs 同构,先于本乘区
+      const f1 = game.spawnDust?.(cx - 11, cy - 11, 22, 22, 6, 0, 0, 100, null, is75Group ? 2.5 : 3.5);
+      if (f1) {
+        f1.noGravity = true;
+        f1.vx *= is75Group ? 5 : 7; f1.vy *= is75Group ? 5 : 7;
+      }
+      const f2 = game.spawnDust?.(cx - 11, cy - 11, 22, 22, 6, 0, 0, 100, null, 1.5);
+      if (f2) { f2.vx *= 3; f2.vy *= 3; }
+    }
     game.spawnParticles(cx, cy, '#D8D8D0', 8, 3, { life: 50, damp: 0.95, size: 3 });  // Gore 61-63 四向
     // 伤害盒 = Resize(128,128) Center 对齐（:48017-48025 position±width/2 手写式）,
     // 消费口 = Kill 内 Damage()（:71792;75 显式段 :80116-80123 同盒径）

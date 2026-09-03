@@ -5,7 +5,8 @@
 // ★几何口径：Arrow ctor 判定盒取 SetDefaults 40×40（vanilla-projectiles.json）→
 //   出生 Center = 顶左 + 20;首子步 AI_091 即把盒改写为 20×scale 并 Center 锚定。
 import { describe, it, expect } from 'vitest';
-import { Arrow } from '../src/entities/Arrow';
+import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
+import { projectileData } from '../src/data/vanillaProjectiles';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { Player } from '../src/entities/Player';
@@ -75,7 +76,9 @@ describe('496 暗影炎弓箭 aiStyle 91（Projectile.cs:33097-33148）', () => 
     expect(p.magic).toBe(true);            // :5700
     expect(p.extraUpdates).toBe(2);        // MaxUpdates=3 ≡ extraUpdates+1（:5702 提取器并表）
     // ★登记缺口（recon 双闸门外禁直改 json）：1457 终值 alpha=255/usesLocalNPCImmunity/
-    // localNPCHitCooldown=-1 三键仍缺——免疫面由通用缺省支等价承载（Arrow.ts 496 支头注）
+    // localNPCHitCooldown=-1 三键在【json 提取面】仍缺（本哨兵锁 raw json 形态）——
+    // 2026-09-03 登记项①已由 vanillaProjectiles.ts DATA_PATCH['496'] 注入消费面
+    // （合并面断言见下方「登记项①」describe;免疫行为等价锁 = ⑥b）
     expect(p.alpha).toBeUndefined();
     expect(p.usesLocalNPCImmunity).toBeUndefined();
     expect(p.localNPCHitCooldown).toBeUndefined();
@@ -277,5 +280,80 @@ describe('496 暗影炎弓箭 aiStyle 91（Projectile.cs:33097-33148）', () => 
     expect(sk.hostileAi0).toBeCloseTo(0.05, 10);        // 台账同值（88 门内才消费）
     sf.fixedUpdate(1 / 60, hooks);
     expect(sk.extraUpdates).toBe(2);                    // ← 零影响核心断言
+  });
+});
+
+// ==================== 登记项①（2026-09-03）：496 数据面 DATA_PATCH 三键 + α=255 隐身面 ====================
+// 权威：Projectile.cs:5694-5705（SetDefaults 终值 alpha=255/:5695、usesLocalNPCImmunity/
+// :5703、localNPCHitCooldown=-1/:5704）。GetAlpha 无 496 专属支 → 缺省路径 :81507-81521
+// num14=(255−alpha)/255=0 → 精灵本体【恒隐】,可见面=AI 影焰尘 27 拖尾（本文件 ③ 已锁）。
+// json 直改被 recon 双闸门外禁令锁定 → 三键唯一入口 = vanillaProjectiles.ts DATA_PATCH。
+/** 录制型 ctx（arrow-fx-audit 同款）：只在 drawImage 快照 globalAlpha/gco（node 无 canvas） */
+function makeDrawCtx496() {
+  const calls: Array<{ ga: number; gco: string }> = [];
+  let ga = 1;
+  let gco = 'source-over';
+  const ctx = {
+    save: () => {}, restore: () => {}, translate: () => {}, rotate: () => {}, scale: () => {},
+    beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => {},
+    set globalAlpha(v: number) { ga = v; },
+    get globalAlpha() { return ga; },
+    set globalCompositeOperation(v: string) { gco = v; },
+    get globalCompositeOperation() { return gco; },
+    filter: 'none',
+    imageSmoothingEnabled: false,
+    drawImage: () => { calls.push({ ga, gco }); },
+  } as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
+}
+
+describe('496 数据面 DATA_PATCH 三键 + α=255 贴图隐身（登记项①）', () => {
+  it('【合并面】projectileData(496) 三键=1457 终值；raw json 三列仍缺（哨兵面不变）', () => {
+    const d = projectileData(496);
+    expect(d).not.toBeNull();
+    expect(d!.alpha).toBe(255);                       // :5695
+    expect(d!.usesLocalNPCImmunity).toBe(true);       // :5703
+    expect(d!.localNPCHitCooldown).toBe(-1);          // :5704
+    expect(d!.extraUpdates).toBe(2);                  // MaxUpdates=3 并表面不变
+    expect(d!.penetrate).toBe(3);                     // :5701
+    expect((projJson as Record<string, Record<string, unknown>>)['496'].alpha).toBeUndefined();
+    expect((projJson as Record<string, Record<string, unknown>>)['496'].localNPCHitCooldown)
+      .toBeUndefined();
+  });
+
+  it('【α 运行时面】ctor alpha=255（PROJ_ALPHA0[496],GetAlpha 缺省路径读 α 的起点）', () => {
+    const { hooks } = mkHooks();
+    const a = mkArrow(500, 500, 4, 0);
+    expect(a.alpha).toBe(255);
+    void hooks;
+  });
+
+  it('【免疫面·接线后零变】ctor localImmune=-1 不吃 >0 门 → hitSet 永久同敌免（≡ vanilla -1）', () => {
+    const e = mkEnemy(4903, 34 * 16, 30 * 16 + 23);
+    const { hooks } = mkHooks([e]);
+    const a = mkArrow(500, 500, 4, 0);
+    expect((a as unknown as { localImmune: number }).localImmune).toBe(-1);   // ctor 数据列接线
+    for (let t = 0; t < 44 && !a.dead; t++) a.fixedUpdate(1 / 60, hooks);
+    expect(e.hits.length).toBe(1);                    // 与 ⑥b 修前同值（行为零变锁）
+  });
+
+  it('【draw 面】精灵本体 ga=0 恒隐（本体不画）+ 影焰尘 27 拖尾照常（拖尾照画）', () => {
+    const { hooks } = mkHooks();
+    const dusts: Array<{ type: number }> = [];
+    (hooks as unknown as { spawnDust: unknown }).spawnDust =
+      (_x: number, _y: number, _w: number, _h: number, type: number) => {
+        const d = { type };
+        dusts.push(d);
+        return d;
+      };
+    setProjSpriteOverride(496, { width: 40, height: 40 } as unknown as HTMLImageElement);
+    const a = mkArrow(500, 500, 4, 0);
+    for (let t = 0; t < 3; t++) a.fixedUpdate(1 / 60, hooks);   // 缩径期 → 影焰尘持续
+    expect(dusts.filter((d) => d.type === 27).length).toBeGreaterThan(0);   // 拖尾照画
+    const { ctx, calls } = makeDrawCtx496();
+    a.draw({ ctx, mainPlayer: undefined } as never, undefined as never);
+    expect(calls.length).toBeGreaterThanOrEqual(1);   // 本体确走 drawImage 路径（非缺图兜底）
+    expect(calls.every((c) => c.ga === 0)).toBe(true);          // (255−255)/255 = 0 恒隐
+    expect(calls.every((c) => c.gco === 'source-over')).toBe(true);   // 非加算组（常规合成）
   });
 });

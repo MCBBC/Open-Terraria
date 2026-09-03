@@ -2072,19 +2072,27 @@ export function lakeSparkleFx(
 /**
  * 拍击石系三味 Spawn_ 环带段（:593/:649/:734）——SnapStrike 尘链外补 FadingParticle/
  * PrettySparkle 环带与三味音（Item72 vol1/PyroclasticStone vol.5/ArmletOfRuin vol.5）:
- * kind0 Stone：2× 圈起（motionScale=min(X/256,.12)、Delay=Y×3 无延迟通道登记）;
+ * kind0 Stone：2× 圈起（Delay=Y×3 无延迟通道登记）;
  * kind1 Melee：红/金两向 sparkles（bolt 相位 ±0.05τ）+ d6 成对微尘;
  * kind2 Summon：proj1132 圈起×2+d172×15/d211×8 圆阵（1/6 重力回落 scale×.25）。
+ * ★W-A1（2026-09-03 本/远端口径统一）：形参 = 编排载荷 MovementVector.X【原值】——
+ *   与 snapStrikeDust 同一口径（禁收端预除 256）。三种消费式逐一对原文：
+ *   kind0 num = 钳(X/256, ≤.12)（:602/:606-608）→ 圈起 size=6×num（:619 (6,6)×num/20）;
+ *   kind1 X 丢弃（:657 `_ = MovementVector.X/256f` 裸弃,sparkle/尘均不消费）;
+ *   kind2 num = 1f 字面常量（:743,与载荷无关）→ 钳后恒 .12（:747-749）→ 圈起
+ *   size=9×.12（:763/:780 (9,9)×num/20）、d172/d211 scale=max(.75,2×(10×num))（:791/:804）。
+ *   曾错：本地传原值却按 min(.12,X) 直钳（小目标环带过肥）/收端预除 256 再钳（kind2
+ *   欠尺,kind2 原文本不吃载荷）——双端现统一"producer 传原值/消费端按原文换算"。
  */
 export function snappingStoneRingFx(
-  game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, motionScale: number, delayTicks = 0, rng: Rng = Math.random,
+  game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, mvX: number, delayTicks = 0, rng: Rng = Math.random,
 ): void {
   if (kind === 0) {
-    const ms = Math.min(0.12, motionScale);
+    const ms = Math.min(0.12, mvX / 256);                  // :602 + :606-608
     game.playSfxWav?.('Item_72', 1, x, y);
     for (let i = 0; i < 2; i++) {
       game.spawnParticles?.(x, y, 'rgba(30,180,255,0)', 1, 0,
-        { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 6 * ms });
+        { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 6 * ms });   // :619
     }
     void delayTicks;        // ★L5 节拍核对（:625 Delay=(int)MovementVector.Y×3t,Y=出弹序号
                             //   +1 :14429/受击者拍 Y=0 :14433——载荷双面已按原文钉齐
@@ -2147,16 +2155,17 @@ export function snappingStoneRingFx(
     return;
   }
   game.playSfxWav?.('armlet_of_ruin', 0.5, x, y);
+  const numSummon = 0.12;                     // :743 num=1f 字面常量（载荷无关）→ 钳 :747-749 恒 .12
   for (let i = 0; i < 2; i++) {
     game.spawnParticles?.(x, y, 'rgba(90,110,255,0.35)', 1, 0,
-      { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 9 * Math.min(0.12, motionScale) });
+      { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 9 * numSummon });   // :763/:780
   }
   for (const [type, n] of [[172, 15], [211, 8]] as Array<[number, number]>) {   // :788-813
     for (let k = 0; k < n; k++) {
       const sp = circ(rng, 10);                          // Circular(10,10)（:792/:805）
       const g6 = rng() < 1 / 6;                          // :795/:808 Next(6)==0 ★F-13 先掷后写（原版池满哑元照样掷）
       const d = game.spawnDust?.(x, y, 1, 1, type, sp.x, sp.y, 0, null,
-        Math.max(0.75, 20 * Math.min(0.12, motionScale)));
+        Math.max(0.75, 2 * (10 * numSummon)));           // :793/:806 max(.75, 2×num4),num4=10×num（:791/:804）
       if (!d) continue;
       d.noGravity = true;
       if (g6) { d.noGravity = false; d.scale *= 0.25; }

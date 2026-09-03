@@ -1493,6 +1493,12 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 仙灵三色 583-585（FindFrame case 583-585，cs:70617-70630）：4t 一帧全循环
   // （曾落 6t 兜底=拍翅慢 1.5×,2026-09-02 用户实报神圣精灵动画不对）
   if (id === 583 || id === 584 || id === 585) return Math.floor(t / 4) % frames;
+  // 毁灭者体节 135（FindFrame case 135，NPC.cs:74229-74237）：ai[2]==0 → 亮帧 0 /
+  // 非 0 → 灭帧 1。★1457 全文无体节 ai[2] 写入点（AI_037 仅 :50453 读取，:51034 为
+  // 探针 139 自用）→ 原版实际恒亮帧 0（灭帧分支不可达预留）；本仓 destroyerAI 同样
+  // 不写 ai2 → 恒帧 0。此前落入通用 6t 全帧循环 = 亮/灭两帧间闪跳（用户实报）。
+  // 头 134/尾 136 frames=1，任何循环都恒帧 0，无需分支。
+  if (id === 135) return e.ai2 === 0 ? 0 : Math.min(1, frames - 1);
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -8088,6 +8094,11 @@ export class Renderer {
    *  Extra_180/179 渐变噪声（wrap 采样）。失败（解释器/资产未就绪）返回 null,
    *  调用方回退素绘。 */
   private qsNoisePix: Record<string, { w: number; h: number; data: Uint8ClampedArray }> = {};
+  /** ★B1（2026-09-03）：洗染 cell 200ms 时间桶缓存——swirl 是 uTime 动画,桶 200ms
+   *  ≈5fps(微光动画语义可接受,wingBakeCache 同款);键=idx|桶,容量闸 16+2s 修剪。
+   *  QueenSlime pass 经 fx-sm2-v0-commute 实测 Δ=1 可交换,输出仅依赖(uTime,切片)。 */
+  private qsWashCache = new Map<string, HTMLCanvasElement>();
+  private qsWashPruneAt = 0;
   private queenSlimeWashedCell(
     e: Enemy, img: ImageBitmap | HTMLImageElement,
     g: { cellW: number; cellH: number; perRow?: number; inflateY?: number },
@@ -8102,6 +8113,14 @@ export class Renderer {
     sy = Math.max(0, Math.min(sy, img.height - 1));
     sw = Math.max(1, Math.min(sw, img.width - sx));
     sh = Math.max(1, Math.min(sh, img.height - sy));
+    const qsBucket = Math.floor(performance.now() / 200);
+    const qsKey = `${idx}|${qsBucket}`;
+    const qsCached = this.qsWashCache.get(qsKey);
+    if (qsCached) return qsCached;
+    if (performance.now() - this.qsWashPruneAt > 2000) {
+      this.qsWashPruneAt = performance.now();
+      while (this.qsWashCache.size >= 16) this.qsWashCache.delete(this.qsWashCache.keys().next().value as string);
+    }
     try {
       const pass = getPass('QueenSlime');
       if (!pass) return null;
@@ -8139,9 +8158,10 @@ export class Renderer {
       u.uColor = [1, 1, 1]; u.uOpacity = 1; u.uSaturation = 1;
       runPassOnImageData(pass, im.data, sw, sh, u, [s1, s2]);
       c0.putImageData(im, 0, 0);
+      this.qsWashCache.set(qsKey, cv0);
       return cv0;
     } catch {
-      return null;                                          // 回退素绘
+      return null;                                          // 回退素绘（失败不缓存,次帧重试）
     }
   }
 
@@ -10280,15 +10300,25 @@ export class Renderer {
   /** ★批III尾窗：RainbowTownSlime pass 逐帧烘焙（Main.cs:25780）。输入=本体帧切片，
    *  t0Rect=帧在 NPC 表内的位置（uSourceRect/uImageSize0 语义=SpriteBatch 子矩形）；
    *  uTime=GlobalTimeWrappedHourly（preshader 内 ×0.16 相位）。失败（pass 缺失/画布
-   *  不可用）返回 null = 回退平贴。 */
-  private rainbowSlimeScratch: HTMLCanvasElement | null = null;
+   *  不可用）返回 null = 回退平贴。
+   *  ★B1 同款（2026-09-03）：200ms 时间桶缓存（相位动画 ≈5fps 语义可接受）——
+   *  此前单 scratch 每帧重跑 SM2（彩虹微光史莱姆常驻时逐帧全 cell pass）。 */
+  private rainbowSlimeCache = new Map<string, HTMLCanvasElement>();
+  private rainbowSlimePruneAt = 0;
   private bakeRainbowSlimeFrame(r: DrawRect, pass: NonNullable<ReturnType<typeof getPass>>): HTMLCanvasElement | null {
     if (typeof document === 'undefined') return null;
-    const cv = this.rainbowSlimeScratch ??= document.createElement('canvas');
-    if (cv.width !== r.sw || cv.height !== r.sh) { cv.width = r.sw; cv.height = r.sh; }
+    const bucket = Math.floor(performance.now() / 200);
+    const key = `${r.sx},${r.sy},${r.sw}x${r.sh}|${bucket}`;
+    const cached = this.rainbowSlimeCache.get(key);
+    if (cached) return cached;
+    if (performance.now() - this.rainbowSlimePruneAt > 2000) {
+      this.rainbowSlimePruneAt = performance.now();
+      while (this.rainbowSlimeCache.size >= 8) this.rainbowSlimeCache.delete(this.rainbowSlimeCache.keys().next().value as string);
+    }
+    const cv = document.createElement('canvas');
+    cv.width = r.sw; cv.height = r.sh;
     const cx = cv.getContext('2d', { willReadFrequently: true });
     if (!cx) return null;
-    cx.clearRect(0, 0, r.sw, r.sh);
     cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
     const id = cx.getImageData(0, 0, r.sw, r.sh);
     const u = defaultUniforms();
@@ -10298,6 +10328,7 @@ export class Renderer {
     runPassOnImageData(pass, id.data, r.sw, r.sh, u, [],
       { sx: r.sx, sy: r.sy, sheetW: r.img.width, sheetH: r.img.height });
     cx.putImageData(id, 0, 0);
+    this.rainbowSlimeCache.set(key, cv);
     return cv;
   }
 
@@ -11391,6 +11422,18 @@ export class Renderer {
             return [q(lc[0]), q(lc[1]), q(lc[2])] as [number, number, number];
           })())
       : undefined;
+    // ★A5（2026-09-03）：非受累染料也补光——原版 betsy 叠画 color=colorArmorBody
+    // （lit），旧链素绘全亮与受累 tech（v0=光已正确变暗）同站不一致。尾乘族
+    // 「染后乘光」≡「光进 v0」（fx-sm2-v0-commute 交换侧），走 wingTexSource 既有
+    // tint 参数（染后乘）。量化同 16 级；开灯恒白（与 v0 路径同守卫）。
+    const tintLight = dye && !isV0MidTech(dye.tech)
+      ? (this.fullbright ? [1, 1, 1] as [number, number, number]
+        : (() => {
+            const lc = this.lighting?.lightAt(Math.floor(p.cx / 16), Math.floor(p.cy / 16)) ?? [255, 255, 255];
+            const q = (v: number) => Math.round((v / 255) * 15) / 15;
+            return [q(lc[0]), q(lc[1]), q(lc[2])] as [number, number, number];
+          })())
+      : null;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (let k = k0; k < k1; k++) {
@@ -11403,7 +11446,7 @@ export class Renderer {
       const py = wy + p.vy * -1.5 * (num10 / cyc);
       ctx.globalAlpha = (100 / 255) * settled;
       if (dye) {
-        const bs = this.wingTexSource(img, 0, k * fh14, fw - 2, fh14 - 2, dye, null, v0Light);
+        const bs = this.wingTexSource(img, 0, k * fh14, fw - 2, fh14 - 2, dye, tintLight, v0Light);
         if (bs) { ctx.drawImage(bs, px - (fw - 2) / 2, py - (fh14 - 2) / 2); continue; }
       }
       ctx.drawImage(img, 0, k * fh14, fw - 2, fh14 - 2,
@@ -12487,20 +12530,23 @@ export class Renderer {
     // ---- 眼球伞云盖（DrawPlayer_38_EyebrellaCloud PlayerDrawLayers.cs:4139-4186）：
     //      Projectile_238 竖 6 帧条、frame = miscCounter%18/6；pos = MountedCenter −
     //      (0,h/2)+(0,−70)；两枚 ±3px 绕行拷贝（miscCounter%50/50×2π×±1）×0.65 +
-    //      主体一枚；色 = min(头顶光照,170) 各通道 + A100；shader=cHead（头盔染料） ----
+    //      主体一枚；原版色 = min(头顶光照,170) 各通道 + A100；shader=cHead（头盔染料）
+    //      ★2026-09-03 双重光照实锤修正：本站画在 worldCanvas（compositeLight 全屏
+    //      乘光覆盖），缓存烘焙内的 lightAt fill 与全屏乘光叠加 = light² 二次压暗
+    //      （原版只应用一次）——fill 撤销，光照交全屏 pass（5772 doctrine 同款）。
+    //      登记近似：原版 min(通道,170) 亮度帽在全屏乘光架构下不可表达（强光下
+    //      本仓云盖比原版亮），与全部预合成精灵同口径。染料走白烘旧链（预合成面
+    //      禁 v0 化，见 applyDyeLitToImageData 注），受累 tech 暗处偏差归 A1 族登记。 ----
     if (p.eyebrellaCloud && !p.dead && this.atlas) {
       const cloud = this.atlas.ensureVImage('vanilla/Projectile_238.png');
       if (cloud && cloud.width > 0) {
         const frameY = Math.trunc(p.miscCounter % 18 / 6);
         const fh = Math.floor(cloud.height / 6);
-        // 头顶光照采样（Top+(0,−30)）→ min(通道,170)（:4162-4175）
-        const ltx = Math.floor((p.x + p.w / 2) / TILE), lty = Math.floor((p.y - 30) / TILE);
-        const lc = this.lighting ? this.lighting.lightAt(ltx, lty) : [255, 255, 255];
-        const cr = Math.min(170, lc[0] ?? 255), cg = Math.min(170, lc[1] ?? 255), cb2 = Math.min(170, lc[2] ?? 255);
-        // cHead 染料（dye[0]）+ 光照乘色 —— 离屏逐 (染料,帧,色) 组合缓存
+        // cHead 染料（dye[0]）—— 离屏逐 (染料,帧) 组合缓存（光照维度已撤，
+        // 缓存输出与光照无关，由全屏乘光运行时施加）
         const headDye = p.inv.dye[0];
         const dyeVid = headDye ? viIdFromKey(ITEM_DEFS[headDye.id]?.key ?? '') ?? -1 : -1;
-        const key = `e:${dyeVid}:${frameY}:${cr}:${cg}:${cb2}`;
+        const key = `e:${dyeVid}:${frameY}`;
         let src = this.eyebrellaDyeCache.get(key);
         if (!src) {
           const cv = document.createElement('canvas');
@@ -12515,15 +12561,9 @@ export class Renderer {
               this.applyDyeToImageData(id.data, cv.width, cv.height, emu);
               c2.putImageData(id, 0, 0);
             }
-            // 光照乘色（Color(r,g,b) 调制）：multiply 后 destination-in 复原 alpha
-            c2.globalCompositeOperation = 'multiply';
-            c2.fillStyle = `rgb(${cr},${cg},${cb2})`;
-            c2.fillRect(0, 0, cv.width, cv.height);
-            c2.globalCompositeOperation = 'destination-in';
-            c2.drawImage(cloud, 0, frameY * fh, cloud.width, fh, 0, 0, cloud.width, fh);
             src = cv;
           } else src = cloud;
-          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 光照维度防膨胀
+          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 容量闸（染料×帧空间小,常态不触）
           this.eyebrellaDyeCache.set(key, src);
         }
         const vx = p.cx, vy = p.y + p.h / 2 - p.h * 0.5 - 70;   // MountedCenter − h/2 + (0,−70)

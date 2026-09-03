@@ -90,15 +90,33 @@ function mkPatternImg(a: number, b: number): FakeCanvas {
   return cv;
 }
 
+/** v 向梯度 LUT（2×2：row0=top 值、row1=bottom 值——v=1=图底=bot；双线性下
+ *  采样值随 v 线性过渡）。极性决定性测用：across=v 直接进 s1 采样。 */
+function mkGradImg(top: number, bot: number): FakeCanvas {
+  const dom = globalThis as unknown as { document: { createElement(t: string): FakeCanvas } };
+  const cv = dom.document.createElement('canvas');
+  cv.width = 2; cv.height = 2;
+  const cx2 = cv.getContext('2d')!;
+  const im = cx2.createImageData(2, 2);
+  for (let x = 0; x < 2; x++) {
+    im.data[x * 4] = top; im.data[x * 4 + 1] = top; im.data[x * 4 + 2] = top; im.data[x * 4 + 3] = 255;
+    const o = (x + 2) * 4;
+    im.data[o] = bot; im.data[o + 1] = bot; im.data[o + 2] = bot; im.data[o + 3] = 255;
+  }
+  cx2.putImageData(im);
+  return cv;
+}
+
 /** fake atlas：Extra_191=s0 常值、Extra_189=s1 常值、Extra_190=s2（const2===undefined
  *  时也常值;否则棋盘）、Extra_195/196/197=RainbowRod 三件套（棋盘 s2） */
-function sm2Atlas(s0v: number, s1v: number, s2v: number, s2pattern?: [number, number]): never {
+function sm2Atlas(s0v: number, s1v: number, s2v: number, s2pattern?: [number, number],
+  s1grad?: boolean): never {
   const cache = new Map<string, FakeCanvas>();
   const get = (path: string): FakeCanvas | null => {
     if (!path) return null;
     if (!cache.has(path)) {
       if (path.includes('Extra_191') || path.includes('Extra_192')) cache.set(path, mkConstImg(s0v));
-      else if (path.includes('Extra_189') || path.includes('Extra_194')) cache.set(path, mkConstImg(s1v));
+      else if (path.includes('Extra_189') || path.includes('Extra_194')) cache.set(path, s1grad ? mkGradImg(50, 220) : mkConstImg(s1v));
       else if (path.includes('Extra_190') || path.includes('Extra_193')) cache.set(path, s2pattern ? mkPatternImg(s2pattern[0], s2pattern[1]) : mkConstImg(s2v));
       else cache.set(path, mkConstImg(s2v));   // 其余（RainbowRod/LightDisc 域）同 s2 常值（活性测试不被 path 域差异污染）
     }
@@ -222,7 +240,7 @@ describe('TrailShader obj55 "MagicMissile" pass SM2 字节码像素面', () => {
     expect(diff).toBeGreaterThan(4);
   });
 
-  it('v0 乘法链：顶点 a=0 → 输出全零（instr#15 逐通道消费 v0）', () => {
+  it('顶点 a=0 → 输出全零（★锁 CPU ca<=0.004 门,TrailShader.ts:309——instr#15 仅 alpha lane 消费 V[3],v0.a 不进 rgb;原版输出 alpha 面由 rgb 门/加算语义吸收）', () => {
     const dom = globalThis as unknown as { document: { createElement(t: string): FakeCanvas } };
     const target = dom.document.createElement('canvas');
     target.width = 128; target.height = 64;
@@ -238,5 +256,57 @@ describe('TrailShader obj55 "MagicMissile" pass SM2 字节码像素面', () => {
       if (d[i] > 0 || d[i + 1] > 0 || d[i + 2] > 0) lit++;
     }
     expect(lit).toBe(0);
+  });
+});
+
+describe('TrailShader obj55 极性/接线/写域闸门（红队 F1/F5 2026-09-03）', () => {
+  beforeAll(() => installFakeDom());
+
+  it('across 极性决定性测：s1 v 向梯度 LUT 下【带上暗、带下亮】（左移带,红队 F1 回退锚）', () => {
+    // 几何：pts x 递增 = pts[0](x=10) 最新在左 = 弹向左飞、尾向 +x。原版 A 侧 =
+    // (rot−π/2) 向,rot=指向邻新点=−π/2·? ——左移 rot=π → widthDir=(π/2)向=(0,1)=下
+    // → across=1 在【下】侧。CPU uN：上侧 ddy<0、ex>0 → bestU=ddy·ex<0 → uN→0
+    // ⇒ across=uN 下侧→1。梯度 LUT（top=50/bottom=220,v=1=底=亮）⇒ 下侧亮。
+    const buf = runTrail('FlameLash', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
+    expect(buf).not.toBeNull();
+    const bw = buf!.width;
+    const d = buf!.data;
+    // 列 pxi=20（带内、edge=1 前段）；行 pyi=5（wy=26.5 上）vs pyi=17（wy=38.5 下）
+    const rowAvg = (pyi: number): number => {
+      let sum = 0;
+      for (let px = 16; px <= 24; px++) sum += d[(pyi * bw + px) * 4];
+      return sum / 9;
+    };
+    const up = rowAvg(5), down = rowAvg(17);
+    expect(down).toBeGreaterThan(up + 20);   // 下侧（across→1=v=1=亮）显著亮于上侧
+  });
+
+  it('tex[2] 接线活性：s1 梯度 LUT 下带内输出垂直非均匀（across 进采样,断链→NaN 吸收恒值判红）', () => {
+    const buf = runTrail('FlameLash', 2, 1.25, sm2Atlas(204, 153, 230, undefined, true));
+    const bw = buf!.width;
+    const d = buf!.data;
+    // 同列（pxi=20）跨行采样值集合≥3 档（v 梯度连续覆盖;若 tex[2] 断链,
+    // across=T[1]/NaN=NaN → sampler 吸收至 texel(0,0)=恒 50 → 全列同值）
+    const vals = new Set<number>();
+    for (let pyi = 4; pyi <= 18; pyi++) {
+      const v = d[(pyi * bw + 20) * 4];
+      if (v > 0) vals.add(v);
+    }
+    expect(vals.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('带外像素不写（a=0）——premul 黑 texel 修复的写域面（红队 F5-1）', () => {
+    const buf = runTrail('FlameLash', 2, 1.25, sm2Atlas(204, 153, 230));
+    const d = buf!.data;
+    // scratch 左上角（bbox 角,带 hw=8 外）与右下角恒带外
+    expect(d[3]).toBe(0);
+    const bw = buf!.width, bh = buf!.height;
+    expect(d[((bh - 1) * bw + (bw - 1)) * 4 + 3]).toBe(0);
+    // 全图统计：a>0 的像素必有 rgb>0（黑 texel 零写入）
+    let badBlack = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 0 && d[i] + d[i + 1] + d[i + 2] === 0) badBlack++;
+    }
+    expect(badBlack).toBe(0);
   });
 });

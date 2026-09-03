@@ -145,21 +145,49 @@ function consumeIf(text, afterHeader) {
   return { body, elseBody, end };
 }
 
+/** 括号感知条件扫描：i 指向 '(' 后首字符 → 返回配对 ')' 之后下标（串感知） */
+function scanParen(text, i) {
+  const n = text.length;
+  let pd = 1;
+  for (; i < n; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") { const q = ch; i++; while (i < n && text[i] !== q) { if (text[i] === '\\') i++; i++; } continue; }
+    if (ch === '(') pd++;
+    else if (ch === ')') { pd--; if (pd === 0) return i + 1; }
+  }
+  return n;
+}
+
 /** 段文本 → 该 id 的 placeStyle 终值。
- *  顺序单位扫描（C# 执行序）：无条件赋值【首个】生效（=v1 首匹配语义）;
- *  if (type == N) 命中支（含 else 支）覆写——含反序形态 `if (N == type)`
- *  （Item.cs:33139-33147 防御锻造炉 3743-3745 三连 if）。算式（20 + type - 2637
- *  等）不解（与 v1 同口径,交 items.ts vanilla.json 回填链）。 */
+ *  顺序单位扫描（C# 执行序）：无条件赋值【后写覆盖】（★十五批备B 收尾,2026-09-03
+ *  改——原"首个生效=v1 首匹配"与 C# 顺序语义反,共享体 placeStyle 双赋值或 if 支后
+ *  再有无条件赋值时后写才是终值;线性扫描每次赋值事件都覆写 ps 即执行序）。
+ *  条件面感知（★本批扩）：`if (type == N)`/反序 `if (N == type)`（Item.cs:33139-33147
+ *  防御锻造炉 3743-3745 三连 if）命中支覆写、未命中走 else 支（else-if 链递归同规）;
+ *  【非】type 比较条件（Variant 变体支/区间支）按未命中处理——只走 else 支（基态
+ *  画像口径,Variant 支体不入单值面）+整支消耗;switch 块整块跳过（per-id 归并是
+ *  psResolveSwitch 孔剥层职能）。算式（20 + type - 2637 等）不解（与 v1 同口径,
+ *  交 items.ts vanilla.json 回填链）。 */
 function evalPlaceStyle(text, id) {
   let ps;
-  const re = /if\s*\(\s*(?:(?:type|currentItem\.type)\s*==\s*(\d+)|(\d+)\s*==\s*(?:type|currentItem\.type))\s*\)|placeStyle\s*=\s*(\d+)\s*;/g;
+  const re = /(if|switch)\s*\(|placeStyle\s*=\s*(\d+)\s*;/g;
   let m;
   while ((m = re.exec(text))) {
-    if (m[3] !== undefined) { if (ps === undefined) ps = +m[3]; continue; }
-    const n = +m[1] || +m[2];
-    const parsed = consumeIf(text, re.lastIndex);
+    if (m[2] !== undefined) { ps = +m[2]; continue; }   // ★后写覆盖（原 if (ps===undefined) 首写钉死）
+    if (m[1] === 'switch') {
+      let j = re.lastIndex;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      re.lastIndex = text[j] === '{' ? skipBraced(text, j) : skipSimple(text, j);
+      if (re.lastIndex <= j) re.lastIndex = text.length;   // skipBraced 失配防御
+      continue;
+    }
+    const afterHeader = scanParen(text, re.lastIndex);
+    const cond = text.slice(re.lastIndex, afterHeader - 1);
+    const cm = /^\s*(?:(?:type|currentItem\.type)\s*==\s*(\d+)|(\d+)\s*==\s*(?:type|currentItem\.type))\s*$/.exec(cond);
+    const parsed = consumeIf(text, afterHeader);
     if (!parsed) continue;
     re.lastIndex = parsed.end;   // 绝对下标（consumeIf 以同一 text 计位）
+    const n = cm ? (+cm[1] || +cm[2]) : -1;   // 非 type 比较（Variant/区间）=未命中
     const branch = n === id ? parsed.body : parsed.elseBody;
     if (branch !== undefined) {
       const v = evalPlaceStyle(branch, id);
@@ -273,6 +301,139 @@ function structuralPlaceStyles(src) {
 
 const SEGS = outerCaseSegments(itemSrc);
 
+// ================= ★拓扑层残文 + 同字段后写覆盖（十五批备B 收尾,2026-09-03） =================
+// 缺陷：v1 `seg.match(re)` 取首匹配——case 段内同字段【无条件】双赋值时 C# 语义=
+// 后写生效（实例：496 灵风筝 knockBack 0f→2f 双赋值、498/1989/3977 展示人偶
+// createTile 128/269→470/475 后写=1.4 改版终值,items.ts:926-931 曾备案"只抓首值"
+// 帽架放成女模特的根因;2209 超级魔药 healMana 300→400 实为 1456→1458 版值变更,
+// 见 DELEGATE_EXPANSION 退役注）。
+// ★盲取"全段最后命中"是错的：SetDefaults 段内还有【条件面】——①`if (Variant ==
+// ItemVariants.WeakerVariant) { damage = 14; }`（112/157/517/683/725/1314/1319/
+// 1325/2623/3069 等变体支,基态=拓扑层值,变体值不入单值画像面）;②嵌套 switch(type)
+// 他 id 支（3292/3834/3857——本 id 终值在嵌套 case 内,per-id 归并是 PS-STRUCT
+// 结构层职能,本文本层不碰）。故后写扫描只对【拓扑层残文】（剥全部 {} 块 + 无括号
+// 控制语句体后的裸语句面）做——残文里只剩无条件赋值,线性扫取最后命中=执行序终值。
+// 边界：只覆盖同一 case 段（同一工作对象）的无条件赋值序——跨对象继承链
+// （DefaultTo* 基座/CopyFrom/委托展开/SetFoodDefaults 合并）语义不变（各链仍
+// "基底打底→后段覆写",与本语义同向）。
+
+/** 字符串/注释感知的块级消耗：i 指向 '{' → 返回配对 '}' 之后下标；失败返回 -1 */
+function skipBraced(text, i) {
+  const n = text.length;
+  let d = 0;
+  for (; i < n; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const q = ch; i++;
+      while (i < n && text[i] !== q) { if (text[i] === '\\') i++; i++; }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; i--; continue; }
+    if (ch === '/' && text[i + 1] === '*') { const e = text.indexOf('*/', i + 2); i = e < 0 ? n : e + 1; continue; }
+    if (ch === '{') d++;
+    else if (ch === '}') { d--; if (d === 0) return i + 1; }
+  }
+  return -1;
+}
+
+/** 段文本 → 拓扑层残文：剥全部 {} 块（含嵌套 switch/条件支体）与无括号
+ *  if/else/for/while/foreach/switch/do 的头+单语句体,字符串/注释感知。
+ *  残文=该 case 段的【无条件裸语句面】（含 goto case/return 等无害残迹）。 */
+function topStatementText(text) {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  const KW = /^(foreach|while|switch|else|if|for|do)\b/;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; continue; }
+    if (ch === '/' && text[i + 1] === '*') { const e = text.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue; }
+    if (ch === '"' || ch === "'") {
+      const q = ch; i++;
+      while (i < n && text[i] !== q) { if (text[i] === '\\') i++; i++; }
+      i++; out += ' ';
+      continue;
+    }
+    if (ch === '{') { i = skipBraced(text, i); if (i < 0) break; out += ' '; continue; }
+    if (depth0Kw(text, i)) {
+      const m = KW.exec(text.slice(i, i + 9));
+      if (m) {
+        let j = i + m[1].length;
+        while (j < n && /\s/.test(text[j])) j++;
+        if (text[j] === '(') {
+          // 跳过头括号（串感知配对）
+          let pd = 0;
+          for (; j < n; j++) {
+            const c2 = text[j];
+            if (c2 === '"' || c2 === "'") { const q = c2; j++; while (j < n && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; }
+            if (c2 === '(') pd++;
+            else if (c2 === ')') { pd--; if (pd === 0) { j++; break; } }
+          }
+          i = j;
+          // 头后：{ 块 → 块剥;裸语句 → 单语句剥（括号感知到 ';'）
+          while (i < n && /\s/.test(text[i])) i++;
+          if (text[i] === '{') { i = skipBraced(text, i); if (i < 0) break; out += ' '; continue; }
+          i = skipSimple(text, i);
+          out += ' ';
+          continue;
+        }
+        // 无头型（do {…} / else {…} / else 裸语句）：落回主循环逐字符处理
+        //（'{' 块剥/下个关键词再判）;此处只防 else-if 链重复计词——i 原位前进 1
+        out += text[i]; i++;
+        continue;
+      }
+    }
+    out += ch; i++;
+  }
+  return out;
+}
+
+/** 括号感知的单语句消耗：到 pd==0 的 ';'（含）止 */
+function skipSimple(text, i) {
+  const n = text.length;
+  let pd = 0;
+  for (; i < n; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") { const q = ch; i++; while (i < n && text[i] !== q) { if (text[i] === '\\') i++; i++; } continue; }
+    if (ch === '(') pd++;
+    else if (ch === ')') pd--;
+    else if (ch === ';' && pd === 0) return i + 1;
+  }
+  return i;
+}
+
+/** i 是否处于词首（左邻非词字符）——防 useTurn 内 "for" 等子串误判 */
+function depth0Kw(text, i) {
+  if (i > 0 && /\w/.test(text[i - 1])) return false;
+  return /^(foreach|while|switch|else|if|for|do)\b/.test(text.slice(i, i + 9));
+}
+
+const RESIDUE_CACHE = new Map();
+function segResidue(seg) {
+  let r = RESIDUE_CACHE.get(seg);
+  if (r === undefined) { r = topStatementText(seg); RESIDUE_CACHE.set(seg, r); }
+  return r;
+}
+
+/** 同字段多次【无条件】赋值=后写生效：对拓扑层残文全局扫取【最后】命中。
+ *  ★残文无命中 → 回落 v1 整段首匹配：条件面（Variant 变体支/嵌套 switch 他 id 支）
+ *  的提取结果与本批前【逐字节相同】（旧口径原样保留）——本批只改"拓扑层出现
+ *  同字段多次无条件赋值"这一类的取值（首→后写）,其余一概不动（零超界 diff 闸门）：
+ *  · 544/556/557/5334 的 useStyle=4/consumable=1 在 `if (Variant != Disabled…) {…}`
+ *    内（对基态恒真）——盲剥会整键丢失（boss 召唤物不再 consumable=实机回归）,
+ *    回落面保住旧值;
+ *  · 3292 妙语悠悠球 damage/shoot/knockBack 旧值系嵌套 switch case 3278 首匹配伪值,
+ *    真值在嵌套 case 3292 内——文本层不碰（同 PS-STRUCT 前的 placeStyle 旧账,
+ *    per-id 归并属结构层后续扩展,本批登记不动）。 */
+function lastFieldMatch(seg, re) {
+  const residue = segResidue(seg);
+  const gre = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  let m, last = null;
+  while ((m = gre.exec(residue))) last = m;
+  if (last) return last;
+  return seg.match(re);
+}
+
 // 字段正则表：[输出名, 正则, 类型]
 const FIELDS = [
   ['melee', /melee = true;/, 'b'],
@@ -340,7 +501,7 @@ function defaultToBase(seg) {
 for (const [id, seg] of SEGS) {
   const f = defaultToBase(seg);
   for (const [name, re, type] of FIELDS) {
-    const m = seg.match(re);
+    const m = lastFieldMatch(seg, re);   // ★后写生效（首匹配→末匹配,见 lastFieldMatch 注）
     if (!m) continue;
     f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
   }
@@ -401,8 +562,11 @@ for (const [id, patch] of Object.entries({
 //  · 月主挥砍斧/锤/镐（:26566/:26583/:26588 + :31032/:31049/:31054）：
 //    2777·2782·3462←2772（axe27/dmg100/kb6/autoReuse）/ 2780·2785·3465←2775
 //    （hammer100/dmg110/kb7/useTurn）/ 2781·2786·3466←2776（pick225/dmg80/kb5.5/useTurn）
-//  · 2209 超级治疗药水 healMana=400 为提交态历史手补（脚本直提 300——case 1933 段
-//    healLife/healMana 双赋值取首匹配），随批固化防重跑回退。
+//  · 2209 超级魔药 healMana=400 手补【已退役】（2026-09-03 十五批备B 收尾）：提取器
+//    源面切 1458 后 case 2209 段自然产出 healMana=400（Terarria1458 Item.cs:22349）,
+//    手补为纯 no-op——历史"300"系 1456 值（Terarria1456 Item.cs:22323 `healMana =
+//    300;`）,当年"case 1933 段 healLife/healMana 双赋值首匹配"归因系误诊（实为
+//    1456→1458 版值变更）。退役已验：去补重产与在库 json 逐字节一致。
 const DELEGATE_EXPANSION = {
   2778: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 429 },
   2783: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 431 },
@@ -456,9 +620,10 @@ for (const [id, expansion] of Object.entries(DELEGATE_EXPANSION)) {
     }
     if (!Object.keys(f).length) continue;
     // case 段内显式赋值（仅 useStyle 允许覆盖解析值；其余字段并集）
+    // ★后写生效同主线（lastFieldMatch 注）——SetFoodDefaults case 段同字段双赋值
     for (const [name, re, type] of FIELDS) {
       if (f[name] !== undefined && name !== 'useStyle') continue;
-      const m = seg.match(re);
+      const m = lastFieldMatch(seg, re);
       if (!m) continue;
       f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
     }

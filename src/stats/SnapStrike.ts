@@ -36,7 +36,10 @@
 //  ★1457 编排器对齐（2026-08-23）：命中尘 = Spawn_SnappingStone{,Melee,Summon}
 //  （ParticleOrchestrator.cs:593-812）Dust 段 1:1 入 vanillaDust 池（见
 //  snapStrikeDust）。受击者自身脉冲（Projectile.cs:14432-
-//  14437 victim.Center,num11=盒径/2 钳 100）已补（R4-33,蓝队）——victimBox 经 ctx 传。
+//  14437 victim.Center,X=盒径/2 裸值无钳）已补（R4-33,蓝队）——victimBox 经 ctx 传;
+//  ★W-A2（2026-09-03）：受击者拍补齐【完整 Spawn_ 面】本地段（音+环带+尘,原版
+//  RequestParticleSpawn(clientOnly:false)=本地直生+上行,ParticleOrchestrator.cs:52-64）,
+//  曾本地只生尘段=本端失明失声而远端全须全尾。
 //  ★B2②（2026-08-31）：命中尾 Item30/Item20/Item43 三连 PlaySound（Projectile.cs
 //  :14453-14463 尾节拍,kind 分支各一声,零目标也播）已接线于 trySnapStrike 尾——
 //  原「三音效同批登记未接」状态退役。节拍面澄清：尾三连是【每次触发一声】的原版
@@ -221,8 +224,15 @@ export function trySnapStrike(
   }
   // R4-33（Projectile.cs:14432-14437）：受击者自身也发一次脉冲——载荷 X = 盒对角
   // Length()/2 裸值【无钳无 num12 掷】（:14434-36），尘段同值直用（★F3,与广播共 vh）
+  // ★W-A2（2026-09-03）：受击者拍是【完整 Spawn_ 面】——RequestParticleSpawn(
+  //   clientOnly:false) :14431-14437 = 本地 SpawnParticlesDirect + netMode==1 上行
+  //   （ParticleOrchestrator.cs:52-64）,Spawn_ 本体 = 音+环带+尘三段全跑。曾本地只生
+  //   尘段（环带/音缺）→ 本端受击者位失明失声、远端却全须全尾（module8 复放跑全段）
+  //   的本/远端不对称;现本地补 snappingStoneRingFx（音+环带,序同 Spawn_ 音在先）,
+  //   广播面保持一处——远端经 module8 跑同款全段,双端终态一致（与逐弹拍同构）
   if (ctx?.victimBox) {
     const vh = Math.hypot(ctx.victimBox.w, ctx.victimBox.h) / 2;
+    snappingStoneRingFx(game, kind, ctx.victimBox.cx, ctx.victimBox.cy, vh, 0);
     snapStrikeDust(game, kind, ctx.victimBox.cx, ctx.victimBox.cy, vh);
     // R4-33 自脉冲面同款广播（★2026-09-01 载荷对齐原文 :14431-14437：X=盒对角
     //   Length()/2 原值【无钳无掷】、Y=0=零延迟拍——曾错传 ×(0.3+1.4r) 掷幅 +

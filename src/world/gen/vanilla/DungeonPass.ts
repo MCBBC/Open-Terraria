@@ -3809,11 +3809,14 @@ const snap: SnapFn = (name) => {
       for (let x = n5; x <= n6; x++) {
         let flag = true;
         let y = d.y;
+        // ★IIIII215：列搜索上下沿 DungeonTile 门座面化（DU.IsConsideredDungeonTile=
+        //   tileDungeon∪本座 isDungeonTile 合并集）——曾用静态 isDT ⇒ st4 腐化砖(25)/
+        //   shimmer(667) 等本座风格砖门柱全拒（x86 收 249/JS 全拒实证）→ DOORS 段 −355。
         while (y > 10 && actAt(x, y) === 0) y--;
-        if (!isDT(typAt(x, y))) flag = false;
+        if (!gfIsBkDT(typAt(x, y))) flag = false;
         n9 = y;
         for (y = d.y; actAt(x, y) === 0; y++) { if (!st.inBounds(x, y + 1)) break; }
-        if (!isDT(typAt(x, y))) flag = false;
+        if (!gfIsBkDT(typAt(x, y))) flag = false;
         n10 = y;
         if (n10 - n9 < 3) continue;
         if (!d.skipOther) {
@@ -3863,7 +3866,7 @@ const snap: SnapFn = (name) => {
       n16--;
       let n20 = n17 - 3;
       while (n20 > 0 && actAt(n16, n20) === 0) n20--;
-      let f3 = n17 - n20 < n17 - n18 + 5 && isDT(typAt(n16, n20));
+      let f3 = n17 - n20 < n17 - n18 + 5 && gfIsBkDT(typAt(n16, n20));   // ★IIIII215 座面化
       if (d.clear || f3) {
         for (let y = n17 - 4 - ri(0, 2); y > n20; y--) {
           if (f3) chTile(st.idx(n16, y), dBrick, false);
@@ -3879,7 +3882,7 @@ const snap: SnapFn = (name) => {
       n16 += 2;
       n20 = n17 - 3;
       while (n20 > 0 && actAt(n16, n20) === 0) n20--;
-      f3 = n17 - n20 < n17 - n18 + 5 && isDT(typAt(n16, n20));
+      f3 = n17 - n20 < n17 - n18 + 5 && gfIsBkDT(typAt(n16, n20));   // ★IIIII215 座面化
       if (d.clear || f3) {
         for (let y = n17 - 4 - ri(0, 2); y > n20; y--) {
           if (f3) chTile(st.idx(n16, y), dBrick, false);
@@ -4599,9 +4602,12 @@ const snap: SnapFn = (name) => {
       const tryRoom = (bnd: { L: number; T: number; R: number; B: number }, stId: number): boolean => {
         const spec = STYLE_LIGHTCHEST_TABLES[stId];
         if (spec === undefined) return false;
-        const cY = Math.trunc((bnd.T + bnd.B) / 2);          // Rectangle.Center.Y（正域=floor）
+        // ★IIIII215：Lerp 域统一 8 参重载（DU.cs:300-302 (int)Lerp(minX,maxX,NextDouble())×2）
+        //  ——bnd 即 (minX,minY,maxX,maxY)（InnerBounds 形=T=Center.Y 预折；Legacy 形=对称盒）。
+        //  曾 InnerBounds 形硬编码 cY 中垂 Lerp ⇒ Legacy 房（EndPosition±(int)(Strength×0.4f)）
+        //  采样域错 → BIOMECHESTS +1 掷 → 值流四段分叉。
         const num = Math.trunc(bnd.L + (bnd.R - bnd.L) * rd());
-        const num2 = Math.trunc(cY + (bnd.B - cY) * rd());
+        const num2 = Math.trunc(bnd.T + (bnd.B - bnd.T) * rd());
         if (!featAreaOK(num, num2, 1)) return false;         // CanGenerateFeatureInArea(:296)
         if (spec.BiomeChestLootItemType < 0) return false;   // num3==0 早退(:317-320)
         let chestTileInternal = CHEST, chestStyleV = 2;      // 缺省 21/2(:301-302)
@@ -5980,8 +5986,7 @@ const snap: SnapFn = (name) => {
     if (!(st.flags[ti] & 1)) return false;
     if ((st.wire[ti] >>> 5) & 1) return false;
     const sheet = TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
-    const def = TILE_DEFS[st.type[ti]];
-    if (!def || !(genSolidType(st.type[ti]) || def.vanilla?.solidTop === true)) return false;
+    if (!(genSolidType(st.type[ti]) || DG_SOLID_TOP.has(sheet))) return false;   // ★vanilla tileSolid||tileSolidTop（cs:70706-70730）；solidTop 语义=本文件 DG_SOLID_TOP 集合
     const slope = st.slope[ti];
     if ((slope === 1 || slope === 2)) {                 // topSlope → 平台 properTopFrame 例外
       if (!_GF_PLATS.has(sheet) || st.half[ti] === 0) return false;
@@ -7527,8 +7532,8 @@ const snap: SnapFn = (name) => {
     }
     const insSh = (sheetId: number): number => TILE_INTERNAL_BY_SHEET.get(sheetId) ?? -1;
     const shOfAt = (x2: number, y2: number): number => TILE_DEFS[typAt(x2, y2)]?.vanilla?.sheet ?? -1;
-    const dwSh = (v: number): boolean => v > 0 && _gfSeatDWSet.has(v);
-    const dtSh = (v: number): boolean => v > 0 && _gfSeatDTSet.has(v);       // IsConsideredDungeonTile
+    const dwSh = (v: number): boolean => v > 0 && (_gfSeatDWSet !== null ? _gfSeatDWSet.has(v) : DG_DUNGEON_WALLS.has(v));   // ★null 回退=基表（同 :6359 语义）
+    const dtSh = (v: number): boolean => v > 0 && (_gfSeatDTSet !== null ? _gfSeatDTSet.has(v) : isDT(v));       // IsConsideredDungeonTile（null 回退=基表，同 gfIsBkDT 语义）
     // ★IIIII200：座面判定集 dump（x86 JJHook.DumpSeatSets 同位镜像,SW_I200 门,零掷）——
     //   SET|i<seat>|s<n>bt=..bw=..|DT=..|DW=..——坑井受理谓词差直检面。
     const i200On = typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I200 === '1';

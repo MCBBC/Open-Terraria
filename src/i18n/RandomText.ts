@@ -139,7 +139,11 @@ export function createDeathText(playerName: string, cause: DeathCause, worldName
 
 /** 随机墓志铭（唯一消费端 = 墓园生成 pass：SpawnGraveyardBiome 每放一座墓碑写一条，
  *  仅秘密种子触发——(The Constant && (drunk||FTW) && !十周年) || graveyardBloodmoonStart，
- *  WorldGen.cs:18117-18120；普通世界墓碑碑文走死亡文本（Player.DropTombstone→aiStyle17）） */
-export function randomEpitaph(): string {
-  return Lang.randomFrom('Epitaph');
+ *  WorldGen.cs:18117-18120；普通世界墓碑碑文走死亡文本（Player.DropTombstone→aiStyle17））
+ *  ★IIIII214：x86 侧 `Language.RandomFromCategory("Epitaph", genRand)`（cs:25161）经
+ *  LanguageManager.RandomFromCategory `(random??Main.rand).Next(value.Count)` **耗世界
+ *  生成主流 1 掷**——本函数须以生成流 sample 供 rng 回调（等价 `floor(sample*count)`
+ *  选位,x86 同式），缺省 Math.random 仅剩文案语义、掷流面零对齐（每成功立碑差 1 掷）。 */
+export function randomEpitaph(rng?: () => number): string {
+  return Lang.randomFromCategory('Epitaph', rng) ?? '';
 }

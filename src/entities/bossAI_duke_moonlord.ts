@@ -248,7 +248,12 @@ function dukeHover(e: Enemy, player: Player, acc: number, spd: number, sideOff: 
   e.vx = accelTo(e.vx, (dx / d) * spd, acc);
   e.vy = accelTo(e.vy, (dy / d) * spd, acc);
   const s = Math.sign(player.cx - e.cx) || st.dir;
-  if (e.ai2 === 0 && s !== st.dir) e.spin += Math.PI;
+  // 态10 悬浮翻面支清残影（:50107-50111 活码;态0/5 悬浮无此支——曾整段缺=翻面拖影,
+  // 红蓝对抗 R5-F13⑤ 补;case12 侧翻支同款在原版是 ai2==0 恒假死码,不补）
+  if (e.ai2 === 0 && s !== st.dir) {
+    e.spin += Math.PI;
+    if (e.ai0 === 10) e.clearTrailHistory();
+  }
   st.dir = s;
   if (st.spr !== -st.dir) e.spin += Math.PI;
   st.spr = -st.dir;

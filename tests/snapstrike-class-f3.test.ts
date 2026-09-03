@@ -207,3 +207,48 @@ describe('★F3 尘段载荷直用（禁二次掷）', () => {
     expectVel(a, 11.313708498984761);
   });
 });
+
+// ============ ★W-A2（2026-09-03）受击者自脉冲=完整 Spawn_ 本地面 ============
+// 原版 Projectile.cs:14431-14437 受击者拍 = RequestParticleSpawn(clientOnly:false)
+// （ParticleOrchestrator.cs:52-64 本地 SpawnParticlesDirect + netMode==1 上行）→
+// Spawn_ 全段（音+环带+尘）在本端照跑;曾本地只生尘段（音/环带缺,远端 module8 却
+// 全段复放）= 本/远端不对称。零目标形态下受击者拍是唯一 Spawn_ 面,便于单拍取证。
+describe('★W-A2 受击者拍完整 Spawn_ 本地面（音+环带+尘三段齐）', () => {
+  it('kind0 零目标：环带 2 圈起（size=6×钳(vh/256) 原值直入）+Item_72+尘 20+单次广播', () => {
+    const parts: Array<{ x: number; y: number; opts: { size?: number } }> = [];
+    const wavs: Array<{ file: string }> = [];
+    const made: unknown[] = [];
+    const broadcasts: number[] = [];
+    const player = new Player(60 * 16, 90 * 16, new Inventory());
+    player.inv.armor[3] = { id: iid(6167), stack: 1 };            // 拍击石 kind0
+    const dustPool = {
+      spawn: (_x: number, _y: number, _w: number, _h: number, type: number,
+        vx = 0, vy = 0) => {
+        const d = { type, vx: vx || 1, vy: vy || 1, scale: 0, fadeIn: 9,
+          noGravity: false, noLight: false, noLightEmittance: false };
+        made.push(d);
+        return d;
+      },
+    };
+    const hooks = {
+      world: { store: new TileStore(200, 120) } as never,
+      player,
+      enemies: () => [] as unknown[],                             // 零目标 → 无逐弹拍
+      critters: () => [],
+      spawnParticles: (x: number, y: number, _c: string, _n: number, _s?: number,
+        opts: { size?: number } = {}) => { void x; void y; parts.push({ x, y, opts }); },
+      playSfxWav: (file: string) => { wavs.push({ file }); },
+      vanillaDust: dustPool,
+      broadcastParticleOrchestra: (type: number) => { broadcasts.push(type); },
+    } as unknown as GameHooks;
+    const vh = Math.hypot(16, 24) / 2;                            // 盒对角/2 裸值(:14433)
+    trySnapStrike(hooks, player, 0, 960, 1440, 999,
+      { victimBox: { w: 16, h: 24, cx: 960, cy: 1440 } });
+    expect(parts).toHaveLength(2);                                // Spawn_SnappingStone 环带 ×2
+    expect(parts[0].opts.size).toBeCloseTo(6 * Math.min(0.12, vh / 256), 12);  // 原值流(非预饱和)
+    expect(wavs.some((w) => w.file === 'Item_72')).toBe(true);    // 受击者拍同播三味音
+    expect(made).toHaveLength(20);                                // 尘段全量(同拍)
+    expect(broadcasts).toHaveLength(1);                           // 上行面保持一处(不双播)
+    // 零目标 → 无逐弹拍(逐弹拍在目标循环内);尾节拍音仍无条件(★B2②,非本断言面)
+  });
+});

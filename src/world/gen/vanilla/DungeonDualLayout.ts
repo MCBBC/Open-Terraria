@@ -2540,11 +2540,16 @@ class DLegacyHall extends DHallBase {
     data.genPosY = Math.trunc(val.y);
     this.startPosition = v2(startOv.x, startOv.y);
     this.endPosition = v2(val.x, val.y);
-    // ★IIIII111c：C# LegacyDungeonHall.cs:679/:870 —— startDirection 局部变量恒 zero
-    //  且从未重赋、EndDirection=zero ⇒ 两端 Y=0（PD 走廊分派两端均门支）。
-    //  JS 曾以 zeroDir(=nv 副本,变量名误导)充零——PD 掷位/写入面双偏差。
-    this.startDirection = v2(0, 0);
-    this.endDirection = v2(0, 0);
+    // ★IIIII215 翻案（LegacyDungeonHall.cs:679/:870-871）：111c 曾读「startDirection 局部
+    //  恒 zero 且从未重赋」——实为反编译命名陷阱：:203 `zero` 是【行走方向局部】（:270/
+    //  :449/:472/:530 行进中持续改写），:679 `startDirection = zero` 是【循环内末次迭代的
+    //  方向快照】、:871 `EndDirection = zero` 是同一 walk 方向的终态 ⇒ **StartDirection=
+    //  EndDirection=终态行走方向**（非零！）。实证=x86 PDC-H 在 Legacy 厅两端 dy=
+    //  0.0770163494545329（=斜切段 (±1,±0.2·hallSlantVariantScalar) 归一化）逐值吻合、
+    //  全 821 走廊点 x86 零 dy=0。曾置 (0,0) ⇒ |0|≤0.1 全落门支 ⇒ 走廊门 +90（140 vs 50）
+    //  → DOORS 段 +180 → 值流三段分叉（LIGHTS/BOOKSHELVES/FURNITURE 等下游放大）。
+    this.startDirection = v2(nv.x, nv.y);
+    this.endDirection = v2(nv.x, nv.y);
     this.strengthVal = num4;
     this.stepsVal = stepsVal;
     data.lastDungeonHall = lastHallCapture;       // C# LastHall=lastHall（原值回存）
@@ -4076,11 +4081,23 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   for (const rm of data.rooms) {
     const key = rm.settings.style.Style;
     const cell = chestPlan[key] ??= { biome: null as null | { L: number; T: number; R: number; B: number }, rooms: [] };
+    // ★IIIII215：盒=(minX,minY,maxX,maxY) 原始 Lerp 域（DU.cs:296/300-302 两重载归一）：
+    //  · 基类/Biome 房（DungeonRoom.Try:264-267 InnerBounds 形）：T=Center.Y=(Top+Bottom)/2。
+    //  · Legacy 房（LegacyDungeonRoom.Try:91-96 覆写）：EndPosition±(int)((float)Strength×0.4f)
+    //    对称盒——曾全桶统一 InnerBounds ⇒ Lerp 采样域错 → BIOMECHESTS 段 +1 掷 → 值流四段分叉。
+    const cY = Math.trunc((rm.inner.T + rm.inner.B) / 2);
     if (rm instanceof DBiomeRoomBase) {
-      cell.biome = { L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B };
+      cell.biome = { L: rm.inner.L, T: cY, R: rm.inner.R, B: rm.inner.B };
       continue;
     }
-    cell.rooms.push({ L: rm.inner.L, T: rm.inner.T, R: rm.inner.R, B: rm.inner.B });
+    if (rm instanceof DLegacyRoom) {
+      const strV = Math.max(1, Math.trunc(rm.strengthVal));
+      const n40 = Math.trunc(Math.fround(Math.fround(strV) * Math.fround(0.4)));
+      const exI = Math.trunc(rm.endPosV.x), eyI = Math.trunc(rm.endPosV.y);
+      cell.rooms.push({ L: exI - n40, T: eyI - n40, R: exI + n40, B: eyI + n40 });
+      continue;
+    }
+    cell.rooms.push({ L: rm.inner.L, T: cY, R: rm.inner.R, B: rm.inner.B });
   }
   const scalar = Math.max(1.0, data.rooms.length / 20.0);   // DC.cs:381 双精度
   // ★IIIII109b：窗台平台 item→DerivedPlacementDetails.tileStyle（Item.cs SetDefaults 逐项

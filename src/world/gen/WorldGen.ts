@@ -567,7 +567,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
 import { densify as densifyChests } from './ChestRegistry';   // ★IIII102c 出口稠密化
-import { flipGenSolid, resetGenSolid, snapshotGenSolid, vanSolidOrSloped } from './vanilla/GenSolid';
+import { flipGenSolid, resetGenSolid, snapshotGenSolid, vanGenSolidType, vanSolidOrSloped } from './vanilla/GenSolid';
 // ★IIII191：SpreadingGrass remix 臂⑥ QuickWater(-2) 一次性实例（runExtraLiquidAddBubbleBlocks 同款接线）
 import { LiquidSim } from '../liquid/LiquidSim';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
@@ -1990,7 +1990,11 @@ function tileRunnerHell(st: World['store'], rng: RNG, gs: GenState, i: number, j
 // 5000 次尝试放 2×2 墓碑 + 写 Epitaph 碑文（cs:25161——RandomText.ts 数据的唯一消费端）。
 const GY_EXCLUDE_SHEETS = new Set([
   25, 203, 53, 191, 383, 226, 225, 367, 368, 57, 70, 189,   // cs:25124 字面 id
-  41, 43, 44, 481, 482, 483,                                 // tileDungeon[] 全表
+  41, 43, 44, 677, 678, 679,                                 // tileDungeon[] 全表（1457 Main.cs:8131-8136）
+  // ★IIIII214 勘误：曾写 {481,482,483}（与 Pots pass 的字面 type 判定混淆）——原版
+  //   tileDungeon[] 实为 {41,43,44,677,678,679}（1457≡1458）。本 seed 482 全图 5706 格
+  //   （y459..904 恰地下墓园带）——曾致 81×81 扫描误拒整处墓园（本轮 rig 对拳实证惰性：
+  //   本链无箱体命中 482,但语义仍须归位）。
 ]);
 
 /** IsTileNearby（cs:8828-8850）：type!=235 时步长 1 的方形邻域扫描 */
@@ -2071,7 +2075,12 @@ export function spawnGraveyardBiome(
     let supported = true;
     for (const dx of [0, 1]) {
       const gi = store.idx(num3 + dx, num4 + 1);
-      if (!store.flags[gi] || !TILE_DEFS[store.type[gi]]?.solid) { supported = false; break; }
+      // ★IIIII214 主刀：支撑判定须读**生成期 tileSolid**（x86 `Main.tileSolid[type]`，
+      //  cs:25149-25151）——曾读裸 TILE_DEFS.solid（运行期碰撞语义），绕过 solidOverrides
+      //  覆写表：神庙陈设/洞穴墙头翻 `flipGenSolid([162],false)`（薄冰 162 非实心，
+      //  1457 WorldGen.cs:17853≡1458）后 x86 拒收薄冰地面候选而 JS 仍受理 → 墓碑多放
+      //  （grv 链 429 vs x86 396）+ 掷流错位级联全链（rig 门探针 g6=0 实证）。
+      if (!store.flags[gi] || !vanGenSolidType(store.type[gi])) { supported = false; break; }
     }
     if (!supported) continue;
     // cs:25152-25155：支撑格清坡面/半砖
@@ -2082,7 +2091,12 @@ export function spawnGraveyardBiome(
     }
     // PlaceTile(num3, num4, 85, style=Next(6))（cs:25156）。tile 85 的 TileObject 锚 =
     // 【底行左格】（同 Projectile aiStyle17 的落点语义——Tombstone.ts 注释 :23689）：
-    // 对象占 num4-1..num4 两行，支撑在 num4+1。净空不足（CanPlace false）则跳过且不立碑
+    // 对象占 num4-1..num4 两行，支撑在 num4+1。净空不足（Place2x2Horizontal false）则
+    // 跳过且不立碑。
+    // ★IIIII214：`genRand.Next(6)` 是 **调用点实参**，C# 先于 PlaceTile 体无条件求值——
+    //   净空败仍耗 1 掷（cs:25156）。曾置于净空检查之后=败路零掷 → 掷流相对 x86 前移
+    //   （rig 逐候选日志：同候选 x86 拒收耗 2 掷 / JS 放置耗 4 掷后错一位级联）。
+    const style = rng.int(0, 5);
     let clear = true;
     for (let dy = -1; dy <= 0 && clear; dy++) {
       for (let dx = 0; dx <= 1; dx++) {
@@ -2090,16 +2104,19 @@ export function spawnGraveyardBiome(
       }
     }
     if (!clear) continue;
-    const style = rng.int(0, 5);
     for (let dy = 0; dy < 2; dy++) {
       for (let dx = 0; dx < 2; dx++) {
         store.setTileSilent(num3 + dx, num4 - 1 + dy, TOMB, style * 36 + dx * 18, dy * 18);
       }
     }
     // Sign.ReadSign/TextSign（cs:25158-25162）：ReadSign 按 frameX/Y 归一到对象【左上】格
-    // （Sign.cs:26-30 num%=2 / num2%=2 回退），Tombstone.ts 的 {x, y=top} 同口径
+    // （Sign.cs:26-30 num%=2 / num2%=2 回退），Tombstone.ts 的 {x, y=top} 同口径。
+    // ★IIIII214：TextSign 碑文 = Language.RandomFromCategory("Epitaph", genRand)
+    //   （cs:25161）→ LanguageManager.RandomFromCategory 内 `(random??Main.rand).Next(47)`
+    //   **耗主流 1 掷**；曾走 Math.random 零耗 → 每座成功立碑掷流少 1。此处以生成流
+    //   nextDouble 供给等价 `floor(sample*count)` 选位（zh-Hans/x86 同 47 键）。
     if (!world.signs.some((s) => s.x === num3 && s.y === num4 - 1)) {
-      world.signs.push({ x: num3, y: num4 - 1, text: randomEpitaph() });
+      world.signs.push({ x: num3, y: num4 - 1, text: randomEpitaph(() => rng.nextDouble()) });
     }
   }
 }

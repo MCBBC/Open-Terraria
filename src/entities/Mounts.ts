@@ -445,6 +445,9 @@ export interface DrillStore {
   /** framed 帧位（树干分支/棕榈承载豁免判定用；缺省按 0 处理） */
   frameX?: ArrayLike<number>;
   frameY?: ArrayLike<number>;
+  /** SW-L1 2026-09-03 F10：裸 active 位（bit0;TileStore.flags 同布局）——
+   *  CanKillTile 用 tile.active() 不含致动位。缺省回落 isActive（测试桩兼容） */
+  flags?: ArrayLike<number>;
   inBounds(x: number, y: number): boolean;
   idx(x: number, y: number): number;
   isActive(x: number, y: number): boolean;
@@ -645,16 +648,29 @@ function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, 
  *  追加四子项（:62316-62356）：巨石上方容器保护、上锁门、传送器 235 上方 3 格扫描、
  *  容器内容非空（CanDestroyChest）。
  *  ★不查 pick 力——原版该判定与镐力无关（光束会锁树/装饰，挖掘实效仍走 PickTile 主链）。
+ *  ★active 判据=裸 active 位（本格 :62729/上格 :62735/传送器扫格 :62798,SW-L1
+ *  2026-09-03 F10——曾用 isActive(nactive) 误拦已致动格,原版 tile.active() 不含
+ *  致动位,致动块仍可被钻头杀）。
  *  ★原版另带 out blockDamaged（巨石/锁门/235 三分支置 true）——本 API 无该出参且
  *  全部消费方只读返回值，四子项均以 false 收敛，出参差异不可观测 */
+/** 裸 active 位（原版 tile.active(),Tile.cs:591-593 header 0x20 位——不含 0x40
+ *  致动位）。SW-L1 2026-09-03 F10：CanKillTile 三处判格全用裸 active
+ *  （本格 :62729/上格 :62735/传送器扫格 :62798）——已致动格仍可被钻头杀。
+ *  曾用 isActive(nactive) 误拦致动格。TileStore.flags bit0=active;测试桩缺
+ *  flags 时回落 isActive（桩的 isActive 本就是 type!=0 裸口径） */
+function tileActiveBare(st: DrillStore, x: number, y: number): boolean {
+  if (st.flags) return st.flags[st.idx(x, y)] !== 0;
+  return st.isActive(x, y);
+}
+
 export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx): boolean {
-  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  if (!st.inBounds(x, y) || !tileActiveBare(st, x, y)) return false;    // !tile.active()（:62729）
   const i = st.idx(x, y);
   if (st.wall[i] === 350) return false;
   const mine = st.type[i];
   if (y >= 1 && st.inBounds(x, y - 1)) {
     const a = st.idx(x, y - 1);
-    if (st.isActive(x, y - 1)) {
+    if (tileActiveBare(st, x, y - 1)) {                                 // tile2.active()（:62735）
       const above = st.type[a];
       if (above !== mine) {
         // IsATreeTrunk：分支（frameX 66 行 0-44 / 88 行 66-110）与树顶（frameY≥198）豁免
@@ -693,12 +709,12 @@ export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTi
   }
   // ---- 上锁门（:62323-62330 case 10）----
   if (isLockedDoorAt(st, x, y)) return false;
-  // ---- 传送器 235（:62331-62344）：锚点列起上方 3 格扫描 ----
+  // ---- 传送器 235（:62788-62800 case 235）：锚点列起上方 3 格扫描（裸 active）----
   if (TELEPORTER_IDS.has(mine)) {
     const baseX = x - Math.trunc(((st.frameX?.[i] ?? 0) % 54) / 18);
     for (let k = 0; k < 3; k++) {
       const bx = baseX + k;
-      if (st.inBounds(bx, y - 1) && st.isActive(bx, y - 1)
+      if (st.inBounds(bx, y - 1) && tileActiveBare(st, bx, y - 1)   // tile3.active()（:62798）
         && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) return false;
     }
   }

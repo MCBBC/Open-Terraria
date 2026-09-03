@@ -351,7 +351,14 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     const ui = st.idx(ux, uy);
     const ut = st.type[ui];
     // TileFrame 失活格清 half/slope/块漆（cs:82077-82082，零掷零杀）
-    if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; st.paint[ui] = 0; continue; }
+    // ★IIIII217（2026-09-03）涂层方块侧补清（Tile.cs:906-911 ClearBlockPaintAndCoating
+    //   = color(0)+fullbrightBlock(false)+invisibleBlock(false)）——本文件本地级联
+    //   cascade3x3T 曾漏 coat 位（IIIII111c 只补了 FinalCleanupPass.tileFrameGen
+    //   主副本=平行副本陷阱；WetCollision 三副本同族第三犯）。waterpark #105 残格
+    //   (2103,818) 定罪：placeTrap case0 飞镖 PlaceTile(137) 尾 SquareTileFrame 3×3
+    //   对非活性幽灵格走本支，x86 清 fullbright 位（.cbt 075=04→076=00 实证）而 JS
+    //   盈余 → Finish doExtraLiquidFinish fullbright 支误杀 t374 滴头（A=2/T=2）。
+    if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; st.paint[ui] = 0; st.coat[ui] &= ~TileStore.COAT_BLOCK_MASK; continue; }
     // ★IIII111 环分派取证钩（缺省零开销；与 x86 TRLOG SQF 行同构对拍用）
     (globalThis as { __swSqfF?: (x: number, y: number, t: number) => void }).__swSqfF?.(ux, uy, ut);
     const sh = sheetOf(ut);

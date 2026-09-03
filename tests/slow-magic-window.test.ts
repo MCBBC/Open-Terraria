@@ -285,3 +285,93 @@ describe('6152/6173 满蓝 multishot（EXTRACT_PATCH useAnimation 数据面闸�
     expect(player.useTime).toBe(19);
   });
 });
+
+// ==================== F-7（登记项②,2026-09-03）：非 spray 魔法（U≥A 族）慢施挥击姿势窗拉伸 ====================
+// 原版 ApplyItemAnimation slowMagic 支 SetItemAnimation(useAnimation, 2.5)（Player.cs:
+// :4463-4468,DebugOptions.ManaV2 && sItem.mana > 0 && slowMagicUse）对【所有】施魔件生效
+// ——与是否连射（useTime<useAnimation）、与 useStyle 无关（近战乘区/放置支先截走者除外）。
+// 修前缺口：付款点 smGrow 拉伸被「尾支 useSwing 补漏」（2026-08-31 批,Case 尾重起窗）重置,
+// spray27 的 growTail 回拉只覆盖 useTime<useAnimation 连射族 → U≥A 单击族慢施姿势窗仍是
+// 裸 A0（提前 60% 收杖）。修面 = Game.regrowSlowMagicSwing 补拉口，覆盖三处重置位：
+// 非 spray 通用尾支 / 1121 蜂枪 / 1155 黄蜂枪专支重播（1244 云杖走专支不重播=付款点拉伸
+// 自存,一并锁作对照）。取整式全组与 vanilla (int) 截断 + num 补间帧（useStyle5+autoReuse+
+// reuseDelay==0+U≤A+shoot>0 → +1）逐式对照。
+describe('非 spray 魔法慢施挥击姿势窗拉伸（F-7,U≥A 族三重置位）', () => {
+  it('272 恶魔镰刀（U=A=20,us5,generic 尾支）：空蓝窗 20 → 50 = ⌊20×2.5⌋（num0）;满蓝 20 不变', () => {
+    expect(itemCombat(272)?.useTime).toBe(20);
+    expect(itemCombat(272)?.useAnimation).toBe(20);
+    const { g, player } = magicGame(272, { mana: 2 });
+    fireCombatWeapon(g, 272);
+    expect(player.slowMagicUse).toBe(true);
+    const sw = g.swing as { t: number; dur: number; multishot?: unknown };
+    expect(sw.dur).toBe(50);                           // ⌊20×2.5⌋（autoReuse 缺 → num0）
+    expect(sw.t).toBe(50);                             // 起手即满相（新窗）
+    expect(sw.multishot).toBeUndefined();              // U≥A → sprayCyclePlan null（无窗内续发）
+    expect(player.useTime).toBe(50);                   // U 侧 ⌊20×2.5⌋（既有面,双面同步）
+    // 满蓝回归锁：窗/U 逐字段恒等修前值
+    const g2p = magicGame(272, { mana: 100 });
+    fireCombatWeapon(g2p.g, 272);
+    expect(g2p.player.slowMagicUse).toBe(false);
+    expect(g2p.player.mana).toBe(86);                  // 100−14
+    const sw2 = g2p.g.swing as { t: number; dur: number };
+    expect(sw2.dur).toBe(20);
+    expect(sw2.t).toBe(20);
+    expect(g2p.player.useTime).toBe(20);
+  });
+
+  it('1244 雨云杖（U=A=22,us1,云 237 专支不重播 useSwing）：空蓝窗 22 → 55 = ⌊22×2.5⌋;满蓝 22 不变', () => {
+    expect(itemCombat(1244)?.useTime).toBe(22);
+    expect(itemCombat(1244)?.useAnimation).toBe(22);
+    const { g, player } = magicGame(1244, { mana: 2 });
+    fireCombatWeapon(g, 1244);
+    expect(player.slowMagicUse).toBe(true);
+    const sw = g.swing as { t: number; dur: number };
+    expect(sw.dur).toBe(55);                           // 付款点拉伸在专支存续（无重播重置）
+    expect(sw.t).toBe(55);
+    expect(player.useTime).toBe(55);                   // U 侧 ⌊22×2.5⌋
+    const g2p = magicGame(1244, { mana: 100 });
+    fireCombatWeapon(g2p.g, 1244);
+    expect(g2p.player.mana).toBe(70);                  // 100−30
+    expect((g2p.g.swing as { dur: number }).dur).toBe(22);
+    expect(g2p.player.useTime).toBe(22);
+  });
+
+  it('1121 蜂枪（U=A=12,us5+autoReuse,volley 专支重播 useSwing）：空蓝窗 13 → 31 = ⌊12×2.5⌋+num1', () => {
+    expect(itemCombat(1121)?.useTime).toBe(12);
+    expect(itemCombat(1121)?.useAnimation).toBe(12);
+    const { g, player } = magicGame(1121, { mana: 2 });
+    fireCombatWeapon(g, 1121);
+    expect(player.slowMagicUse).toBe(true);
+    const sw = g.swing as { t: number; dur: number };
+    expect(sw.dur).toBe(31);                           // 30+num1（:4469-4472 itemAnimationMax+=num）
+    expect(sw.t).toBe(31);
+    expect(player.useTime).toBe(30);                   // U 侧 ⌊12×2.5⌋（volley 收口既有面）
+    const g2p = magicGame(1121, { mana: 100 });
+    fireCombatWeapon(g2p.g, 1121);
+    expect((g2p.g.swing as { dur: number }).dur).toBe(13);   // 12+num1（不拉伸）
+  });
+
+  it('1155 黄蜂枪（U=A=18,us5+autoReuse,volley 专支重播 useSwing）：空蓝窗 19 → 46 = ⌊18×2.5⌋+num1', () => {
+    expect(itemCombat(1155)?.useTime).toBe(18);
+    expect(itemCombat(1155)?.useAnimation).toBe(18);
+    const { g, player } = magicGame(1155, { mana: 2 });
+    fireCombatWeapon(g, 1155);
+    expect(player.slowMagicUse).toBe(true);
+    const sw = g.swing as { t: number; dur: number };
+    expect(sw.dur).toBe(46);                           // 45+num1
+    expect(sw.t).toBe(46);
+    expect(player.useTime).toBe(45);                   // U 侧 ⌊18×2.5⌋
+    const g2p = magicGame(1155, { mana: 100 });
+    fireCombatWeapon(g2p.g, 1155);
+    expect((g2p.g.swing as { dur: number }).dur).toBe(19);   // 18+num1（不拉伸）
+  });
+
+  it('【反证钉】regrow 补拉口无效化 → 272 空蓝窗回落裸 20（修前形态,载重证明）', () => {
+    const { g } = magicGame(272, { mana: 2 });
+    (g as unknown as { regrowSlowMagicSwing: () => void }).regrowSlowMagicSwing = () => {};
+    fireCombatWeapon(g, 272);
+    const sw = g.swing as { dur: number };
+    expect(sw.dur).toBe(20);                 // 付款点拉伸被尾支 useSwing 重置后的修前形态
+    expect(sw.dur).not.toBe(50);
+  });
+});

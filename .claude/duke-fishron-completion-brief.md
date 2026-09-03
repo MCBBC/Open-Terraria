@@ -80,3 +80,44 @@
    →专家杀（袋 3330）→374 贴近钻地 375→373 摆头 sdir 双值→dash 左右截图
    /tmp/duke-accept/。
 4. 372/373 镜像双向回归通过（实拍+前轮修复未回退）。
+
+---
+
+## 红蓝对抗 review 终章（2026-09-03，5 红 + 2 蓝，主线逐条对反编译定谳）
+
+### 定谳总表（子代理产出全部经主线 spot-check）
+
+**实锤清偿（本轮全部落地,回归全绿）**：
+| # | 发现 | 来源 | 修复 |
+|---|---|---|---|
+| 1 | 起扑段 spin 缺 `+π·[direction==−1]`（:35344-35348 与 flip **并存**,曾误判"裸值+flip"→左扑 180° 错向/贴图倒挂） | R1-F1+B1-D1+R5-F1 三方一致,主线亲读原文再证 | sharkronAI 两处恢复 π 项;Renderer/AI 错误注释改正 |
+| 2 | **370 本体 flip 位整缺**（贴图原生朝右目验,原版 sdir=-direction+flip 门;玩家居左头尾反向鱼腹朝上） | B1-E10 越界发现,主线亲验贴图+伺服公式 | Renderer 补 `idR===370 flip(facing>0)`——AI spin 本就按 flip 存在的原版式写,零 AI 改动 |
+| 3 | expert 参数面整表缺失（num=1.2 第二乘区/hover 40·0.55·8.5/charge 28·17/两 expert 子档） | R2-F1+B1-E9+R5-F2 | dukeFishronAI 参数块全表接入(flag2 门已通,经典/专家双档) |
+| 4 | 态9 前半 alpha 钳 255→应 150（:50043-50058） | R2-F3 | 一行 |
+| 5 | 泡泡/出鲨出生点 Bottom 锚语义（NewNPC center=Y−h/2,曾中心语义低 18/12px） | R2-F4+R1-F4（出鲨 sP/sC≡num511 主线亲推证） | 泡泡×2+出鲨共 3 处 |
+| 6 | despawn 早退跳过尾句 dontTakeDamage（逃离期残留无敌） | R2-F5 | 一行 |
+| 7 | EoW 13/14/15 成就缺 boss 门（杀中段也推进 WORM_FODDER/SLAYER_OF_WORLDS） | R3-A2+B2 双证,主线亲读 :80652-80658 | `killBossFlag` 门（同块 vanillaNetId 修法旁） |
+| 8 | **remix 掉落条件族恒 false 断裂**（remix 种子已可产,前提过期→remix+困难杀猪鲨掉 BubbleGun 非 AquaScepter、袋 3330 remix 支死、十周年 devArmor 1/8 退化 1/16） | R3-B2 | evalCond 四变体接 ctx.remixWorld + Enemy 注入 + 袋调用点补传 remixWorld/tenthAnniversary |
+| 9 | .wld 导入 downedFishron 只落驼峰键（表情 50/城镇自卫档丢失）+ EmoteMenu 史莱姆女皇误读 downed_641（永锁） | R3-C3 | Parser 双键+EmoteMenu 键正 657 |
+| 10 | 态10 悬浮翻面支缺 oldPos 清零（残影跨图拖尾;case12 同款支系 ai2==0 恒假死码,原版本相即拖尾,**不补**） | R5-F13⑤,主线亲裁活/死支 | Enemy.clearTrailHistory()+dukeHover 态10 门 |
+
+**驳回（伪影,勿改）**：
+- B1-D2"转换拍 else 支同拍串联"——if/else 每拍互斥,B1 模拟伪影（主线读 :35330-35355 结构再证）。
+- R5-F13⑤"瞬移 oldPos 清零缺失"——原版 case12 清零支 ai2==0 恒假死码,原版本相即拖尾。
+
+**登记账（存量/越界/低危,未在本轮清偿）**：
+- R1-F2：371/372/373 死亡演出缺（vanilla-gore.json 无 371-373 键,75 尘+4 尸块两死路同缺,存量）。
+- R1-F6/B1-E11①：inSolid 不裁 halfBrick 顶 8px/inActive 格（共享助手,存量）。
+- R2-F6/R5-F13-5：chaseable=false 态10/12 相位暂关未接（召唤物可锁隐身猪鲨,引擎级备案）。
+- R3-A3/A4：playerInteraction 门缺（环境杀计成就）/MP msg23 不携 vanillaNetId（存量,MP 域）。
+- R3-B3/B4：extraValue 并入时机/药水心与掉落求值序（低危）。
+- R3-C4：钓鱼召 Duke 无 boss 槽在位守卫（槽模型结构限制,连杀/双 boss 场景记账丢失,自愈=重杀）。
+- R4-F5a/F5b：**两颗存量同型 TDZ 地雷**——NotTheBeesPass↔DungeonPass（**距炸 1 个求值步,中危**,DG_FRAMED_ALL 抽叶子即除）/Minecart↔Mounts（低危）；F7 结构备案：49 节点大环仍在,顶层读环内绑定即复死,惯例=抽叶子通道。
+- R5-F13：覆盖缺口清单（帧机/态7-13 全行为/AI_070 整支/音乐运行时/出生尘环 18vs36 粒近似/1456 行号锚全文）。
+- 测试环境登记：vitest 对泡泡锚点几何恒 +w/2 漂移（独立 vite-node 实证逐位 0 差,vitest 断言放宽至半径带,探针=真机权威）。
+
+### 探针/测试终态
+- `scripts/_duke-accept-probe.mjs` **27/27**（新增：370 flip 证据帧/严格 dead 位/掉落差集口径/局部强断言）。
+- `tests/bossAI-dukefishron.test.ts` **21/21**（新增：左扑 π/困块无敌窗/重力恢复/expert 参数表/狂暴换招跳拍/泡泡锚点带/弹初速/双实例基值/死门先行）。
+- 新增 `tests/tdz-leaf-guard.test.ts`（叶子零 import/items 断边不回焊/经叶子消费面存活三钉）+ `tests/achievements.test.ts` 0 哨兵钉（notifyNPCKilled(0) 永不完成任何成就）。
+- 回归面 18 文件 **313/313**；tsc 触碰文件零错（Enemy.ts:5367 一错系并行会话在途）。

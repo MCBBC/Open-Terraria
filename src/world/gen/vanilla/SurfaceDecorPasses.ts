@@ -13,6 +13,9 @@
 //  - PlaceTile 后置 SquareTileFrame 的邻格重帧链只移植本组放置的类型
 //    （184 苔藓芽帧 / 571 CheckBamboo / 519 CheckCatTail / 549 CheckUnderwaterPlant）；
 //    CheckDye/CheckLog/PlantCheck/CheckLilyPad 因放置门已保证支撑，恒为 no-op，未移植。
+//    ★IIIII218 勘误：Flowers 花圃放置尾 SquareTileFrame（cs:60281 通用成功尾）已补
+//    ——「恒 no-op」近似在邻格多格物（蜂巢 2×2 CheckSuper 顶锚败整组杀）上被证伪，
+//    见 runFlowersPass boxScan 尾注；CheckDye/CheckLog/CheckLilyPad 本格侧仍维持。
 //  - KillTile 生成期语义（active=false + type=0，保留液体）经 setTileSilent(0) 达成；
 //    原版还把 frameX/frameY 置 -1（本仓库 Uint16 无法存 -1，帧对渲染/对账均无影响）。
 //  - ★GGGG 2026-08-18：Flowers 击杀位改走 killTileTree（KillTile 尾部 SquareTileFrame →
@@ -2110,26 +2113,49 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
               const s5Live = SHEET[st.type[t5]];
               const fitBelow = s5Live === 2 || s5Live === 78 || s5Live === 380
                 || s5Live === 477 || s5Live === 579;
-              if (st.liquid[kk] === 0
-                && st.flags[t5] && st.slope[t5] === 0 && !st.half[t5]
-                && fitBelow) {
-                if (s5Live === 78 || s5Live === 380 || s5Live === 579) {
-                  flCap?.(m, n, `fitJ s5=${s5Live}`);
-                  let v = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-                    20, 21, 24, 27, 30, 33, 36, 39, 42][rng.int(0, 21)];  // NextFromList×22（cs:60028）
-                  if (v >= 21) v += rng.int(0, 2);                        // switch 高档位 += Next(3)（cs:60030-41）
-                  st.setTileSilent(m, n, PLANT_SHORT, v * 18, 0);
-                  placed = true;
-                } else if (WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
-                  flCap?.(m, n, `fit s5=${s5Live} wk=${st.wall[kk]}`);
-                  let fx: number;
-                  if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
-                  else if (rng.int(0, 34) === 0 || (st.wall[kk] >= 63 && st.wall[kk] <= 70)) {
-                    fx = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20][rng.int(0, 13)] * 18;
-                  } else fx = rng.int(0, 5) * 18;                         // 草丛 6 变体
-                  st.setTileSilent(m, n, PLANT_SHORT, fx, 0);
-                  placed = true;
+              // ★IIIII218（2026-09-03）GFB #90 定罪修复：PlaceTile(3) 本体语义补齐——
+              //   ① 液体门独立（cs:59948-59963 num=3 黑名单支早退，早退即无前置清/无尾奏）；
+              //   ② 非活性目标前置清 Clear(Tile|TilePaint|Slope)（cs:59499-59501/Tile.cs:746-760：
+              //      type=0+frame 0+块漆+涂层块侧+slope/half——G2 090 dump (3582,820) 实证
+              //      幽灵 7→0、frx/fry 65535→0，JS 曾保留残值=Gh 通道噪声源）；
+              //   ③ 活性目标头重排支（cs:59971 ResetsHalfBrickPlacementAttempt[3]=表外缺省
+              //      true + 既有类型非 framed → half/帧清；IIII29 语义同构）；
+              //   ④ 通用成功尾 SquareTileFrame(i,j)（cs:60281-60286 `if (tile.active()) …`）
+              //      ——本批 #90 主刀：蜂巢 2×2 @(3582,818) 顶锚 (3583,817)=藤 62 非
+              //      SolidTile → SquareTileFrame(放置邻格) → TileFrame case 444 →
+              //      CheckSuper 判废整组 KillTile（vanilla 090 dump 4 格 444→0 实证），
+              //      JS 静默放置不级联 → 蜂巢残留=mile8 #90 A=4/T=4（T0>444×4）。
+              //      文件头注「PlantCheck 恒 no-op」近似在邻格多格物上被证伪——级联对象
+              //      是**邻格**多格物而非放置格自身。蜂窝簇 3×3 内无 184/571/519/549/80
+              //      掷型 → 本格零掷（掷流中性实证：修后 mile8 #91-#96 连带恒绿）。
+              if (st.liquid[kk] === 0) {
+                if (!st.flags[kk]) {
+                  st.type[kk] = 0; st.frameX[kk] = 0 as never; st.frameY[kk] = 0 as never;
+                  st.paint[kk] = 0; st.coat[kk] &= ~TileStore.COAT_BLOCK_MASK;
+                  st.slope[kk] = 0; st.half[kk] = 0;                    // Clear(Tile|TilePaint|Slope)
+                } else if (!TILE_DEFS[st.type[kk]]?.framed) {
+                  st.half[kk] = 0; st.frameX[kk] = 0 as never; st.frameY[kk] = 0 as never;
                 }
+                if (st.flags[t5] && st.slope[t5] === 0 && !st.half[t5] && fitBelow) {
+                  if (s5Live === 78 || s5Live === 380 || s5Live === 579) {
+                    flCap?.(m, n, `fitJ s5=${s5Live}`);
+                    let v = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                      20, 21, 24, 27, 30, 33, 36, 39, 42][rng.int(0, 21)];  // NextFromList×22（cs:60028）
+                    if (v >= 21) v += rng.int(0, 2);                        // switch 高档位 += Next(3)（cs:60030-41）
+                    st.setTileSilent(m, n, PLANT_SHORT, v * 18, 0);
+                    placed = true;
+                  } else if (WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
+                    flCap?.(m, n, `fit s5=${s5Live} wk=${st.wall[kk]}`);
+                    let fx: number;
+                    if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
+                    else if (rng.int(0, 34) === 0 || (st.wall[kk] >= 63 && st.wall[kk] <= 70)) {
+                      fx = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20][rng.int(0, 13)] * 18;
+                    } else fx = rng.int(0, 5) * 18;                         // 草丛 6 变体
+                    st.setTileSilent(m, n, PLANT_SHORT, fx, 0);
+                    placed = true;
+                  }
+                }
+                if (st.flags[kk] & 1) genSquareTileFrame(st, rng, m, n);    // ④ 成功尾（放置成/拒但目标活性）
               }
               if (placed && st.flags[kk] && SHEET[st.type[kk]] === 3) {
                 st.frameX[kk] = (num7 + rng.int(0, 2)) * 18;            // 花圃重帧（cs:20720）
@@ -2882,6 +2908,13 @@ function placeTilePreambleClear(st: TileStore, x: number, y: number): void {
   st.half[i] = 0;
   st.slope[i] = 0;
   st.paint[i] = 0;
+  // ★IIIII217（2026-09-03）涂层方块侧补清：vanilla Clear(TilePaint) 分派
+  //   ClearBlockPaintAndCoating（Tile.cs:906-911）= color(0)+fullbrightBlock(false)
+  //   +invisibleBlock(false)——paint 曾清而 coat 两位漏清（平行副本同族）。
+  //   waterpark #105 残格 (942,888) 定罪：pass87 蘑菇/丛林植 PlaceTile(61) 头前置清
+  //   打在非活性幽灵泥格（type59）上，x86 清 fullbright 位（.cbt 086=04→087=00 实证）
+  //   而 JS 盈余 → Finish doExtraLiquidFinish fullbright 支误杀 t374 滴头（A=2/T=2）。
+  st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
 }
 
 /** PlaceTile 的 num∈{3,24,201,637} 分支（cs:59533-59654）1:1。

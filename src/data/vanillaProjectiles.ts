@@ -21,6 +21,9 @@
 //   680  localNPCHitCooldown=-1（★R6 补登）
 //   932  localNPCHitCooldown=60（:8570-8572）
 //   309  localNPCHitCooldown=10（历史手补，Arrow localImmune 消费）
+//   496  alpha=255 / usesLocalNPCImmunity / localNPCHitCooldown=-1（1457 P.cs:5695/
+//        :5703-5704；2026-09-03 登记项①——三键经下方 DATA_PATCH 层注入,json 直改被
+//        recon 双闸门外禁令锁定;运行时 α 面=Arrow.ts PROJ_ALPHA0[496]）
 //   ---- 1457 新弹 1112-1135 缺失列（2026-08-23 本批；行号=Terarria1457 P.cs）----
 //   提取器三类盲区：①usesLocalNPCImmunity+localNPCHitCooldown（NUM_FIELDS 无后者）
 //   ②usesIDStaticNPCImmunity+idStaticNPCHitCooldown（接口新增列）③`width = (height = 16);`
@@ -49,6 +52,13 @@ export interface ProjectileData {
   scale?: number;
   /** 每帧额外子步（SetDefaults，249 款非 0；总步数 = 1+extraUpdates——子弹 14=1、高速弹 207=2） */
   extraUpdates?: number;
+  /** 原版 Projectile.alpha SetDefaults 初值（496=255 :5695——提取器未建此列,json 全表
+   *  0 键,运行时消费面=Arrow.ts PROJ_ALPHA0 逐型表,本列数据面存档对账用） */
+  alpha?: number;
+  /** 1457: 局部 NPC 无敌旗（usesLocalNPCImmunity=true,SetDefaults 逐型直写——与
+   *  localNPCHitCooldown 成对,分离两键是原版字段形;本仓命中环按 localNPCHitCooldown
+   *  单列消费,本旗数据面存档） */
+  usesLocalNPCImmunity?: boolean;
   /** 弹幕自带穿甲（Projectile.cs:260 armorPenetration；SetDefaults 逐型直写，
    *  25 款非 0——StrikeNPC :12068 num3 = 玩家 GetArmorPenetration(melee) + 本值，
    *  再入 NPC.checkArmorPenetration :81913 池（+ichor15/broken20/betsy40）。
@@ -82,12 +92,28 @@ export interface ProjectileData {
   ignoreWater?: boolean;
 }
 
-const TABLE = projJson as unknown as Record<string, ProjectileData>;
+// ★2026-09-03：TABLE 改为【浅拷贝】承载（原实现 `TABLE = projJson` 直引用——
+//   DATA_PATCH 合并时 `TABLE[k] = {...}` 会替换 json 模块对象上的同键条目,把补丁值
+//   泄回 raw json 视图,tests/496-wobble 的 raw-json 缺口哨兵（断言 json 三列 undefined）
+//   被打爆）。拷贝后合并只写 TABLE,json 模块对象全程零改。
+const TABLE: Record<string, ProjectileData> = { ...projJson } as Record<string, ProjectileData>;
 
-// ---- ★DATA_PATCH 已清空（2026-08-23 基准切换 1457）：曾以 1456 为准钉 478 诅咒镖
-// penetrate 3→2（Projectile.cs 1456 :5264）,现 1457 :5531 `penetrate = 3` 为权威,
-// json 载 3 即正确,补丁撤除（审计 2026-08-22 §弹药 ⚠️3 的"多穿 1"结论随基准反转）
-const DATA_PATCH: Record<string, Partial<ProjectileData>> = {};
+// ---- ★DATA_PATCH（1457 终值对齐层；json 直改被 recon 双闸门外禁令锁定,增量走此层）----
+// 曾以 1456 为准钉 478 诅咒镖 penetrate 3→2（1456 P.cs :5264）,1457 切换时撤除——
+// 1457 :5531 `penetrate = 3` 为权威,json 载 3 即正确。
+// ★2026-09-03 复活：496 暗影炎箭三键（登记项①,Projectile.cs:5694-5705 SetDefaults 终值）
+//   alpha=255 / usesLocalNPCImmunity=true / localNPCHitCooldown=-1——提取器三类盲区
+//   （头注①②）× 1456 提取器重跑踩踏面,三键至今未入 json。消费面：
+//   · localNPCHitCooldown=-1 → Arrow ctor localImmune（命中环 `localImmune > 0` 门
+//     不吃 -1 → 落 hitSet 永久同敌免支 ≡ 原版 -1「localNPCImmunity 恒不衰减」语义,
+//     tests/496-wobble ⑥b 行为等价锁）;
+//   · alpha=255 → Arrow PROJ_ALPHA0[496]（运行时 α 面,draw 通用兜底 (255−α)/255=0
+//     = 精灵本体恒隐,可见面=AI 影焰尘 27）;本列 alpha 为数据面存档（运行时消费在
+//     Arrow.ts PROJ_ALPHA0,与 631/661 等"提取器盲区键"同模式）
+const DATA_PATCH: Record<string, Partial<ProjectileData>> = {
+  // 496 暗影炎箭（暗影炎弓 3053 载荷;1457 P.cs:5694-5705）
+  '496': { alpha: 255, usesLocalNPCImmunity: true, localNPCHitCooldown: -1 },
+};
 for (const k of Object.keys(DATA_PATCH)) {
   TABLE[k] = { ...TABLE[k], ...DATA_PATCH[k] };
 }

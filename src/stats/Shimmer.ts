@@ -44,6 +44,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { RNG } from '../core/rng';
 
 type Json = typeof shimmerJson;
 const ITEM_TRANSFORM = (shimmerJson as Json).itemTransformTo as Record<string, number>;
@@ -204,6 +205,27 @@ export interface DecraftOutcome {
   consumed: number;
   /** ≥2 材料 → 掉落物按序号抛撒（requiredItem[1].stack > 0，:1882） */
   spread: boolean;
+}
+
+// ---- NB-G 种子注入（2026-09-03）：炼金蒸发 rand3 专用世界种子流 ----
+
+let decraftRng: RNG | null = null;
+let decraftRngWorld: object | null = null;
+
+/** 炼金蒸发 rand3 消费口（Main.rand.Next(3) 的仓内替位）。★WorldEvolution 同型
+ *  （evolution/WorldEvolution.ts:161 `new RNG(host.seed ?? 0)` 专用实例、跨 tick 续流
+ *  不重置）：以【世界实例身份 + 种子】为键的模块级专用流——世界加载/换档（World
+ *  对象更换）即重建新流,同世界内逐次 decraft 续流不重置（原版 Main.rand 全局演进
+ *  语义的种子化投影）。缺省 seed 0 = 离线测试兜底（同样确定性）。
+ *  同 seed 两跑逐位相同（tests/decraft.test.ts「同种子两跑」锚）——曾缺注入落
+ *  Math.random()（炼金蒸发不可复现,NB-G 唯一硬阻塞）。 */
+export function decraftRand3(world?: { seed?: number } | null): () => number {
+  if (!decraftRng || decraftRngWorld !== (world ?? null)) {
+    decraftRngWorld = world ?? null;
+    decraftRng = new RNG(world?.seed ?? 0);
+  }
+  const rng = decraftRng;
+  return () => Math.floor(rng.next() * 3);
 }
 
 /** decraft 返还计算（WorldItem.GetShimmered :1879-1934 纯函数化）：

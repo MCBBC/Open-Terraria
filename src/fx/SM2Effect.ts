@@ -27,6 +27,14 @@
 //   (compositeLight 全屏乘光不覆盖的 wingGlowQueue 族:extra38/betsy——预合成面
 //   玩家/尘埃/NPC 侧喂 v0=光会被全屏乘光二次压暗(light²),须逐站逃逸队列,
 //   见 Renderer.applyDyeLitToImageData 注);非受累 tech 走旧链逐位不变。
+//   ★A1 架构定谳(2026-09-03):主翼 lit 族等预合成面【无单站修法】——翼在身体后,
+//   逃逸队列会把翼画到身体上(层序破坏,恒可见>暗处色相偏差);完全正修=全玩家
+//   逐层 v0 光照迁移(原版每 DrawData 单点 GetColor,本仓=全屏乘光近似)——架构级,
+//   登记不动。A3 归因:WaterProcessor/WaterDistortionObject/HorizonClouds=JS/GL
+//   镜像(解释器不入运行时,vColor 按 v0 语义喂,无债);MouseItem=未接线;
+//   ForceField/RainbowTownSlime=预合成 A1 族。A2:LivingOcean/Phase/Twilight 惰性
+//   (v0 化会丢光变暗方向反,见 vanillaDyes.V0_INERT_IN_DYE_DOMAIN 注),自发光修正
+//   挂 1458 rig 原生金标。
 import fxJson from '../data/fxPixelShader.json';
 import { sat, type Sm2PxGenFn } from './sm2Runtime';
 import { GEN_MAP } from './gen/genIndex.gen';
@@ -522,7 +530,8 @@ export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   const regs = new Float64Array(32 * 4);
   const tex = new Float64Array(8 * 4);
   const v0 = new Float64Array(8);                  // v0/v1（v1 空闲）
-  if (v0Rgb) { v0[0] = v0Rgb[0]; v0[1] = v0Rgb[1]; v0[2] = v0Rgb[2]; v0[3] = 1; }
+  // v0=UNORM 顶点色（硬件属性域恒 0..1）——入参钳制防调用方漂移（sat 含 NaN 透传语义）
+  if (v0Rgb) { v0[0] = sat(v0Rgb[0]); v0[1] = sat(v0Rgb[1]); v0[2] = sat(v0Rgb[2]); v0[3] = 1; }
   else v0[0] = v0[1] = v0[2] = v0[3] = 1;
   const o = new Float64Array(4);
   const srcData = new Uint8ClampedArray(data);           // s0 采样源（防读写交叠）

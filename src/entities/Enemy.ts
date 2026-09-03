@@ -526,6 +526,16 @@ export class Enemy extends Entity {
   private histHead = 0;   // 最新条目下标
   private histCount = 0;  // 已填条数（<10 时拖尾按实际深度截断）
 
+  /** 原版 oldPos[l]=Vector2.Zero 整环清零（NPC.cs:50107-50111 猪鲨态10悬浮翻面支——
+   *  防翻面瞬间残影跨图拖尾;case12 瞬移侧翻支 :50233 同款但 ai2==0 门恒假=死码,
+   *  原版本相即拖尾,勿补）。只清位置不清 oldRot,与原版一致;histCount=0=拖尾按
+   *  实际深度截断（等价于原版画在 (0,0) 屏外的不可见语义） */
+  clearTrailHistory(): void {
+    this.histX.fill(0);
+    this.histY.fill(0);
+    this.histCount = 0;
+  }
+
   /** fixedUpdate 尾部推入当前快照（位置=左上角，旋转=visAngle≈npc.rotation） */
   private pushHistory(): void {
     this.histHead = (this.histHead + 1) % Enemy.HIST_N;
@@ -1776,6 +1786,10 @@ export class Enemy extends Entity {
   preCollideVy = 0;
   /** 471 哥布林术士 defDefense 基线快照（NPC.cs:56891/:56920 飞行态 ×1.1 / 地面复原） */
   warlockDefBase?: number;
+  /** 417 SolarSroller 态 6 伤害/防御覆写基线（原版 defDamage/defDefense = ScaleStats
+   *  【后】快照 NPC.cs:18197——首入态 6 捕获、态 0 复位消费；直接读写 def.* 会逐 tick
+   *  复利。AI_039 417 逐值批 2026-09-03） */
+  srollerDefBase?: { dmg: number; def: number };
   /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true / :8423 SetDefaults 复位）。
    *  FTW 世界 245-248 石巨人族置 false（getGoodAdjustments :17945/:17950/:17955，
    *  249 不置）。原版门控消费两处：GetNPCColorTintedByBuffs 染色（:92026，经
@@ -6424,8 +6438,16 @@ export class Enemy extends Entity {
    *  3 旋冲：首帧定速 有视线10/无视线6（496/497 ×0.75；瞄准 Y 加 |dx|*0.2、无视线强制
    *    vy=-10），飞行中与玩家 X 重叠 → vx×0.8 停升，否则 vy-=0.22 持续上旋，≥90t → 4；
    *  4 下落：vx×0.96，落地 → 5；
-   *  5 复位：vx=0，+1/t(×0.5) ≥30 → 回 0；wet 直接回 3；
-   *  6 Sroller 日耀滚动（16/10 定速、≥1200t 或 ai[2]==0 → 5）星柱未引入仅骨架 */
+   *  5 复位：vx=0，+1/t(×0.5) ≥30 → 回 0；wet 直接回 3；417 底边锚定复原 52 高；
+   *  6 Sroller 日耀滚动（NPC.cs:29699-29832 全量,2026-09-03 骨架→逐值定版）：
+   *    每 tick damage=lerp(defDmg×1.8,×1.4)/defense=defDef×2/kbResist=0（:29700-03）；
+   *    2/3 尘 aura（:29704-12）；ai[1]++ 后 ai[3] 尘爆子计数 1..10 循环（:29717-53，
+   *    ==1 大爆 32×[尘6×2 档]+4 gore、每 tick 5×尘31、≥10 归零——接触专盒窗
+   *    ai[3]∈(0,4) 100² ×1.35 = MeleeCollisionData 417 支驱动源）；首 tick 定速冲撞
+   *    CanHit 16/无 10（:29774-806,aim 偏置 |dx|×0.2 directionY>0 归 0、无视线 vy=−12）；
+   *    玩家 X 重叠 vx×0.9/vy<0→+0.2、ai[2]==0∨ai[1]≥1200 → 5（:29808-14）；
+   *    撞块反弹 0.9（Collision_MoveSolarSroller :93879-96,ai[2]−−/ai[3]=1/X 反弹转向）；
+   *    wet 上浮助推 + rotation+=clamp(vx/10×dir,±π/10)（:29828-32）。 */
   private tortoiseAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     // npc.rotation 默认 0（visAngle 类字段默认 π 是 EoC 语境）
@@ -6446,6 +6468,17 @@ export class Enemy extends Entity {
     if (this.ai0 === 0 || this.ai0 > 5) {
       // ---- 待机/接近 ----
       if (this.ai0 === 0) {
+        if (sroller) {
+          // 态 0 每 tick 属性复位（:29464-29466 damage=defDamage / defense=defDefense /
+          // knockBackResist=GetKnockbackMultiplier_ScaledByDifficulty(0.3)）——态 6 覆写
+          // 的解除点；仅 417 落位（陆龟族 def 从未被本 AI 覆写；态 3 的 defDamage×2
+          // 伤害强化 :29556-29558 属陆龟域,未移植不在本批,登记见测试头注）
+          if (this.srollerDefBase) {
+            this.def.damage = this.srollerDefBase.dmg;
+            this.def.defense = this.srollerDefBase.def;
+          }
+          this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.3, this.difficulty || 1);
+        }
         if (los && dist > 200) this.ai1 += t496 ? 2 : 4;
         if (dist > 600 && (los || dy > 200)) this.ai1 += t496 ? 4 : 10;
         if (inW) this.ai1 = 1000;
@@ -6463,18 +6496,97 @@ export class Enemy extends Entity {
         gravityStep();
         return;
       }
-      // ---- Sroller 6 态骨架 ----
-      if (this.ai1 === 0) {
-        const spd = los ? 16 : 10;
-        if (player && los) {
-          const d = Math.hypot(dx, dy) || 1;
-          this.vx = (dx / d) * spd; this.vy = (dy / d) * spd;
-        } else { this.vy = -12; this.vx = this.facing * spd * 0.5; }
-        this.ai2 = 2 + Math.floor(Math.random() * 3);
+      // ---- Sroller 6 态滚动（NPC.cs:29699-29832 全量逐值,2026-09-03 骨架→定版；
+      //      星柱未引入前 417 仅测试/指令域可达,行为面按原文落位）----
+      // ①每 tick 属性覆写（:29700-29703）：damage = GetAttackDamage_LerpBetweenFinalValues(
+      //   defDamage×1.8, defDamage×1.4)（=Utils.Remap Classic→Expert 截断,NPC.cs:7074-7076;
+      //   defDamage 为 ScaleStats 【后】快照 :18197——srollerDefBase 防复利）、
+      //   defense = defDefense×2、knockBackResist = 0
+      if (this.def === (ENEMY_DEFS[this.key] ?? PLACEHOLDER_DEF)) this.def = { ...this.def };
+      if (!this.srollerDefBase) {
+        this.srollerDefBase = { dmg: this.def.damage ?? 0, def: this.def.defense ?? 0 };
       }
+      const diff = this.difficulty || 1;
+      this.def.damage = Math.trunc(remap(diff, GDL.CLASSIC, GDL.EXPERT,
+        this.srollerDefBase.dmg * 1.8, this.srollerDefBase.dmg * 1.4));
+      this.def.defense = this.srollerDefBase.def * 2;
+      this.kbResistOverride = 0;
+      // ②尘 aura（:29704-29712）：2/3 概率,尘 6 @Center±30 盒 60²、初速 v×0.5、
+      //   noGravity、fadeIn=1、速度×0.2
+      if (Math.random() * 3 < 2) {
+        const da = game.spawnDust?.(this.cx - 30, this.cy - 30, 60, 60, 6,
+          this.vx * 0.5, this.vy * 0.5, 90, null, 1.5, true);
+        if (da) { da.vx *= 0.2; da.vy *= 0.2; da.fadeIn = 1; }
+      }
+      // ③ai[1]++（:29713）
       this.ai1 += 1;
-      gravityStep();
-      if (this.ai2 === 0 || this.ai1 >= 1200) { this.ai0 = 5; this.ai1 = 0; }
+      // ④ai[3] 尘爆子计数（:29717-29753）——置 1 在撞块（见⑧）;1..10 循环：
+      //   ==1 大爆（32×[尘 6 scale2.5 速×3 + 尘 6 scale1.5 速×2] + 4 gore 61-64）、
+      //   每 tick 5×尘 31 速×NextFloat、≥10 归零。★接触专盒窗 = ai[3]∈(0,4)
+      //   （CenteredRectangle(Center,100²) ×1.35——MeleeCollisionData.ts 417 支
+      //   :96161-96167,GMC 求解器已接,本批补 ai3 驱动侧 = 分支可达前提）
+      if (this.ai3 > 0) {
+        if (this.ai3 === 1) {
+          const bx = this.cx - 50, by = this.cy - 50;
+          for (let k = 0; k < 32; k++) {
+            const d1 = game.spawnDust?.(bx, by, 100, 100, 6, 0, 0, 100, null, 2.5, true);
+            if (d1) { d1.vx *= 3; d1.vy *= 3; }
+            const d2 = game.spawnDust?.(bx, by, 100, 100, 6, 0, 0, 100, null, 1.5, true);
+            if (d2) { d2.vx *= 2; d2.vy *= 2; }
+          }
+          // gore 61-64（日耀碎屑）无 gore 通道 → 橙粒近似（C 类观感登记,原版 4 片
+          // vel×0.3 + ±0.5 抖动）
+          game.spawnParticles?.(this.cx, this.cy, '#FF7A1E', 4, 3, { life: 30, damp: 0.94, grav: 6 });
+        }
+        for (let k = 0; k < 5; k++) {
+          const d3 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+          if (d3) { const f = Math.random(); d3.vx *= f; d3.vy *= f; }   // NextFloat
+        }
+        this.ai3 += 1;
+        if (this.ai3 >= 10) this.ai3 = 0;
+      }
+      // ⑤首 tick 定速冲撞（:29774-29806）：TargetClosest（:29775 通用中心比规则
+      //   :78544-78552）→ CanHit 16/无 10;aim 偏置 num631=|dx|×0.2（directionY>0 归 0）、
+      //   num632=playerTop−cy−num631 归一×速;无视线 vy 强制 −12（:29803-29805）
+      if (this.ai1 === 1) {
+        if (player && !player.dead) {
+          this.facing = dx > 0 ? 1 : -1;
+          this.dirY = dy < 0 ? -1 : 1;
+        }
+        const spd = los ? 16 : 10;
+        const num631 = this.dirY > 0 ? 0 : Math.abs(dx) * 0.2;
+        const num632 = (player ? player.y - this.cy : 0) - num631;
+        const dd = Math.hypot(dx, num632) || 1;
+        this.vx = (dx / dd) * spd;
+        this.vy = los ? (num632 / dd) * spd : -12;
+      } else {
+        // ⑥玩家 X 重叠阻尼（:29808-29814）：vx×0.9、vy<0→+0.2;ai[2]==0 ∨ ai[1]≥1200 → 5
+        if (player && this.x + this.w > player.x && this.x < player.x + player.w
+          && this.y < player.y + player.h) {
+          this.vx *= 0.9;
+          if (this.vy < 0) this.vy += 0.2;
+        }
+        if (this.ai2 === 0 || this.ai1 >= 1200) { this.ai1 = 0; this.ai0 = 5; }
+      }
+      // ⑦wet 上浮助推（:29828-29830）+ 旋转（:29831-29832 rotation += clamp(
+      //   velocity.X/10×direction, ±π/10)）
+      if (inW && this.dirY < 0) this.vy -= 0.3;
+      this.visAngle += Math.max(-Math.PI / 10, Math.min(Math.PI / 10, this.vx / 10 * this.facing));
+      // ⑧Collision_MoveSolarSroller（NPC.cs:93879-93896）：态 6 撞块 → ai[2]−−、
+      //   ai[3]=1（尘爆子计数点火/接触专盒窗开启）;预算 ai[2]>0 时速度 ×0.9 镜面反弹、
+      //   X 反弹伴随 direction 翻转。ai0===6 守卫 = 原文本句首门（同 tick 内 ⑥ 已切
+      //   态 5 则不再结算反弹）
+      this.applyGravity(game);
+      const ovx = this.vx, ovy = this.vy;
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.ai0 === 6 && (this.vx !== ovx || this.vy !== ovy)) {
+        this.ai2 -= 1;
+        this.ai3 = 1;
+        if (this.ai2 > 0) {
+          if (this.vx !== ovx) { this.vx = -ovx * 0.9; this.facing = -this.facing; }
+          if (this.vy !== ovy) { this.vy = -ovy * 0.9; }
+        }
+      }
       return;
     }
     if (this.ai0 === 1) {
@@ -6486,6 +6598,17 @@ export class Enemy extends Entity {
         this.ai0 = sroller ? 6 : 3;
         this.ai1 = 0;
         this.ai2 = 0;
+        if (sroller) {
+          // （NPC.cs:29613-29622）TargetClosest（通用中心比规则 :78544-78552）→
+          // 罐装高度 52→32（position.Y±height 底边锚定换算）、ai[0]=6、
+          // ai[2]=Next(2,5) 撞块弹跳预算（态 6 ⑧消费）
+          if (player && !player.dead) {
+            this.facing = dx > 0 ? 1 : -1;
+            this.dirY = dy < 0 ? -1 : 1;
+          }
+          this.y += this.h; this.h = 32; this.y -= this.h;
+          this.ai2 = 2 + Math.floor(Math.random() * 3);
+        }
       }
       return;
     }
@@ -6534,6 +6657,10 @@ export class Enemy extends Entity {
       return;
     }
     // ---- 5 复位 ----
+    if (sroller) {
+      // （NPC.cs:29813-29816）罐装高度复原 32→52（底边锚定;h 已 52 时逐 tick 无操作）
+      this.y += this.h; this.h = 52; this.y -= this.h;
+    }
     this.vx = 0;
     this.ai1 += t496 ? 0.5 : 1;
     gravityStep();

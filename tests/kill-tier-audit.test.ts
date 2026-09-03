@@ -18,6 +18,7 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { Arrow, BULLET_KILL_SFX } from '../src/entities/Arrow';
+import { Dart } from '../src/entities/Dart';
 import { GorePiece } from '../src/entities/GorePiece';
 import { Game } from '../src/core/Game';
 import type { GameHooks } from '../src/entities/types';
@@ -515,5 +516,85 @@ describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因�
     expect(parts[0][3]).toBe(3);
     expect(d.dusts.filter((x) => x.type === 206)).toHaveLength(0);   // Kill 口不撒拖尾尘
     expect(d.sfx.filter((s) => s === 'Item_10')).toHaveLength(1);
+  });
+});
+
+// ---- ★31 Dart 端活口金标（2026-09-03 R8 活口）：蚁狮沙球 31 的落档/掉件面在
+//      Dart.sandBall 撞块支【直驱】（Game AISTYLE10_PLACE[31] 专支不路由
+//      onProjectileDeath=死代码,⑨ 测的是那一面;本批钉活口三档）：
+//   ① 传送带 421 在下 → 免放（flag2 :79265-79266）+ num18 重挂 169 → 掉
+//      vi_169_SandBlock ×1（覆盖 ai[0]==2 免掉落缺省 :79133-79135）
+//   ② 悬空 below==0 → 零掉落零放沙 = 纯消失（ai[0]==2 → num18=0,PlaceTile 亦免）
+//   ③ 营规实心在下 → 放沙 53 无掉落（num17=53 :79131 + PlaceTile :79276）
+// 桩仿 mkDeathGame/makeGame（真 World + spawnDrop 捕集）,弹走 Dart.fixedUpdate 实车。
+interface DropRec { x: number; y: number; key: string; n: number; }
+
+function dartSandGame(w: World) {
+  const drops: DropRec[] = [];
+  const g = {
+    world: w,
+    player: { dead: false, x: -1000, y: -1000, w: 20, h: 42, cx: -990, cy: -979 },
+    enemies: () => [], critters: () => [], npcs: () => [],
+    playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
+    spawnParticles: () => {}, spawnBurst: () => {},
+    addDamageNumber: () => {}, damagePlayer: (): number => 0,
+    notifyInventoryChanged: () => {}, onEnemyKilled: () => {},
+    spawnEnemy: () => {}, cutTile: () => {}, addLightAt: () => {},
+    breakTile: () => {},
+    spawnDrop: (x: number, y: number, key: string, n = 1) => {
+      drops.push({ x, y, key, n });
+      return null;
+    },
+    entities: { nextId: 1, add: () => {} },
+  } as unknown as GameHooks;
+  return { g, drops };
+}
+
+describe('★31 Dart 端活口金标（2026-09-03 R8:蚁狮沙球落档/掉件三档,sandBall 支直驱）', () => {
+  const run = (d: Dart, g: GameHooks, cap = 60) => {
+    for (let i = 0; i < cap && !d.dead; i++) d.fixedUpdate(1 / 60, g);
+    expect(d.dead).toBe(true);
+  };
+
+  it('① 传送带 421 在下 → 掉 vi_169_SandBlock ×1 且不放沙（:79260-79266 flag2+重挂 num18=169）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const conv = TILE_INTERNAL_BY_SHEET.get(421)!;
+    st.setTileSilent(30, 100, conv, 0, 0);                    // 传送带悬空摆（本仓 id 域）
+    const { g, drops } = dartSandGame(w);
+    const d = new Dart(30 * TILE + 3, 100 * TILE - 20, 0, 2, 10, 31);
+    d.hostile = true;                                        // 蚁狮敌版（ai[0]=2 档）
+    run(d, g);
+    expect(drops).toHaveLength(1);
+    expect(drops[0].key).toBe('vi_169_SandBlock');            // 重挂 num18=169（createTile=53 沙块件）
+    expect(drops[0].n).toBe(1);                              // RequestNewItem 缺省 ×1
+    expect(st.get(30, 99)).toBe(0);                          // 免放（flag2 :79265-79266）
+    expect(st.get(30, 100)).toBe(conv);                      // 传送带原样
+  });
+
+  it('② 悬空（below==0,水平撞入浮空块）→ 零掉落零放沙=纯消失（:79133-79135 num18=0）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const stone = TILE_INTERNAL_BY_SHEET.get(1)!;
+    st.setTileSilent(40, 100, stone, 0, 0);                  // 浮空单块（下方全空）
+    const { g, drops } = dartSandGame(w);
+    const d = new Dart(40 * TILE - 26, 100 * TILE + 3, 6, 0, 10, 31);
+    d.hostile = true;
+    run(d, g);
+    expect(drops).toHaveLength(0);                           // num18=0 → 连物品都不掉
+    expect(st.get(40, 100)).toBe(stone);                     // 浮块原样
+    expect(st.get(39, 100)).toBe(0);                         // 不放沙
+    expect(st.get(39, 101)).toBe(0);                         // below==0 维持（未改下格）
+  });
+
+  it('③ 营规沙地（实心在下）→ 放沙 53 无掉落（num17=53 :79131 + PlaceTile :79276）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const { g, drops } = dartSandGame(w);
+    const d = new Dart(50 * TILE + 3, 190 * TILE - 20, 0, 2, 10, 31);
+    d.hostile = true;
+    run(d, g);
+    expect(drops).toHaveLength(0);                           // 常规落地不掉件
+    expect(st.get(50, 189)).toBe(TILE_INTERNAL_BY_SHEET.get(53));   // 放置格=上一帧中心格,沙=原版 53 域
   });
 });

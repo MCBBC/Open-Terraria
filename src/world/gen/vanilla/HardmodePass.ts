@@ -419,7 +419,43 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
     if (st.flags[ii] && wallId !== 0 && !st.flags[st.idx(px, py - 1)]) {
       // ShapeFloodFill(1000)（泛洪种子=上格 point.Y−1，cs:31979）
       const flood = shapeFloodFillOnlyWalls(st, px, py - 1);
-      if (altStats) altStats.floods++;
+      if (altStats) {
+        altStats.floods++;
+        // ★IIIII216 取证：x86 ShapeFloodFill.Perform+Chain(IsNotSolid,OnlyWalls,Output)
+        //   字面对照器（同世界态双跑）——成败/n 差异即引擎实现差
+        const q2: Array<[number, number]> = [[px, py - 1]];
+        const hash2 = new Set<number>();
+        let num2 = 1000;
+        while (q2.length > 0 && num2 > 0) {
+          const [qx2, qy2] = q2.shift()!;
+          const k2 = qy2 * w + qx2;
+          if (!hash2.has(k2)) {
+            const i2 = st.idx(qx2, qy2);
+            const act2 = st.flags[i2] !== 0;
+            const notSolid = !act2 || !vanSolidOrSloped(st, qx2, qy2);
+            if (notSolid && BACKFILL_WALLS.has(st.wall[i2])) {
+              hash2.add(k2);
+              num2--;
+              if (qx2 + 1 < w - 1) q2.push([qx2 + 1, qy2]);
+              if (qx2 - 1 >= 1) q2.push([qx2 - 1, qy2]);
+              if (qy2 + 1 < h - 1) q2.push([qx2, qy2 + 1]);
+              if (qy2 - 1 >= 1) q2.push([qx2, qy2 - 1]);
+            }
+          }
+        }
+        let comp2 = true;
+        while (q2.length > 0) {
+          const [rx2, ry2] = q2.shift()!;
+          if (!hash2.has(ry2 * w + rx2)) { comp2 = false; break; }
+        }
+        const x86Ok = hash2.size > 50 && comp2;
+        const jsOk = flood.cells.size > 50 && flood.complete;
+        if (hash2.size !== flood.cells.size || comp2 !== flood.complete) {
+          altStats.log.push(`DIFF@${attempts}: ${px},${py} x86 n${hash2.size}/c${comp2} vs js n${flood.cells.size}/c${flood.complete}`);
+        } else if (x86Ok !== jsOk) {
+          altStats.log.push(`GATEDIFF@${attempts}: ${px},${py} n${flood.cells.size}`);
+        }
+      }
       if (flood.cells.size > 50 && flood.complete) {
         // OuterOutline(origin=(x,y))（cs:31982）——★F5 相对坐标回放下移一行
         paintBackfillOutline(st, flood.cells, wallId);

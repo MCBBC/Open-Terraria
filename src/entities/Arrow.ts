@@ -777,7 +777,11 @@ const PROJ_ALPHA0: Record<number, number> = {
   //  376 随从鬼火/:4602-4614 α=255——AI_001 :56524-56551 全程无 α 减段（α 恒 255）,
   //   GetAlpha 缺省路径 :81507 读 α → 弹体原版即全隐,可见面全在 d6 尘羽
   //   （本仓此前 α≡0 = 弹体贴图恒满显,违原版）
-  265: 255, 355: 255, 376: 255, 660: 255, 712: 255,
+  //  496 暗影炎箭/:5695 α=255（AI_091 全程无 α 写支,GetAlpha 无 496 专属支 → 缺省
+  //   路径 :81507 读 α）→ 弹体贴图【恒隐】（同 376 案;此前 α≡0 = 精灵恒满显,违原版
+  //   ——可见面只有 AI 影焰尘 27 拖尾,496 AI 支已接）。usesLocalNPCImmunity/
+  //   localNPCHitCooldown=-1 数据面 = vanillaProjectiles.ts DATA_PATCH（登记项①）
+  265: 255, 355: 255, 376: 255, 660: 255, 712: 255, 496: 255,
 };
 
 /** AI_001 顶层 per-type fade 恒率表（★2026-09-01 批五收官批；表驱动单支替代按率
@@ -2629,7 +2633,10 @@ export class Arrow extends Entity {
           set: 'RainbowRod',
           pts: buildPts(this.gemTrail, 9, (v) => v < 0.45 ? lerpC(cols[2], cols[1], v / 0.45)
             : lerpC(cols[1], cols[0], (v - 0.45) / 0.55)),
-          opacity: intensity * 0.5,
+          // ★红队 F3（2026-09-03）：SM2 face 的 uOpacity=独立乘子（instr#16 mul c0），
+          //  原版值 = GemStaffShotDrawer.cs:23 UseOpacity(intensity)——旧 ×0.5 是给
+          //  废弃近似公式的亮度校准，字节码面下恒 2× 偏暗
+          opacity: intensity,
           time: nowS,
         });
       } else if (this.stripTrailPts.length >= 4 &&
@@ -2647,7 +2654,10 @@ export class Arrow extends Entity {
               return [48 / 255 * k / 0.5, 63 / 255 * k / 0.5, 150 / 255 * k / 0.5];
             };
         const hw = this.projId === 34 ? 18 : this.projId === 16 ? 15 : 10;
-        const op = this.projId === 106 ? 1 : 2;
+        // ★红队 F3：op=2 = MagicMissileDrawer.cs:16/LightDiscDrawer.cs:16 UseOpacity(2f)
+        //  原值（106 旧 1 系近似档归位;106 实际出生走 Boomerang、本支准死代码）。34 原版
+        //  =Lerp(4,8,t2d)（FlameLashDrawer.cs:17）——本支无 redT 通道,维持 2（死分支）
+        const op = 2;
         drawStripTrail(ctx, r, {
           set: this.projId === 34 ? 'FlameLash' : this.projId === 106 ? 'LightDisc' : 'MagicMissile',
           pts: buildPts(this.stripTrailPts, hw, colFn),
@@ -4661,8 +4671,12 @@ export class Arrow extends Entity {
     } else if (this.projId === 728) {
       // ---- ★R29 超级星星炮星 728（aiStyle151 AI_151_SuperStar :22338-22376）----
       // alpha−=10 钳 100 半透 + Item_9 循环音同档 + 自旋 ×0.005（PROJ_SPIN）+
-      // 2 臂各 1/8 d228 星尘（v×0.25,scale1.3,noGravity,+RotatedBy(±π/8)×0.2）+
+      // 2 臂各 1/8 d228 星尘（NewDustDirect 初速 (0,0)=纯内建抖动 :22361,后置
+      // scale1.3/noGravity/×0.25 只乘抖动 +RotatedBy(±π/8)×0.2 :22362-22365）+
       // 屏内 1/6 gore16/17
+      // ★红队 P3（2026-09-03）：曾传 vx×0.25 作 SpeedX 再被后置 ×0.25 →
+      //   多出 proj_v×0.0625×0.3 轴向漂移（视觉);按原文 SpeedX/Y=0 直传——728
+      //   现 dormant 无出生路径,零行为风险
       this.alpha = Math.max(100, this.alpha - 10);
       if (--this.starSndCd <= 0) {
         this.starSndCd = 20 + Math.floor(Math.random() * 40);
@@ -4673,7 +4687,7 @@ export class Arrow extends Entity {
           const ra728 = (Math.PI / 8) * (1 - 2 * i);
           const c728 = Math.cos(ra728), s728 = Math.sin(ra728);
           const d728 = game.spawnDust?.(this.x, this.y, this.w, this.h, 228,
-            this.vx * 0.25, this.vy * 0.25, 127, null, 1.3, true);
+            0, 0, 127, null, 1.3, true);
           if (d728) {
             d728.vx *= 0.25; d728.vy *= 0.25;
             d728.vx += (this.vx * c728 - this.vy * s728) * 0.2;
@@ -7034,16 +7048,19 @@ export class Arrow extends Entity {
     //        α100,scale1.1) 后置:pos=(pos+Center)/2、noGravity、v×0.1−v弹×
     //        (1.3−scale)、fadeIn=100+owner、scale+=scale×0.75）（:33125-33147,
     //        owner 单机恒 0）
-    //      ④数据面缺口登记:vanilla-projectiles.json 496 缺 1457 终值 alpha=255/
-    //        usesLocalNPCImmunity/localNPCHitCooldown=-1（recon 双闸门流程外禁直改
-    //        json;extraUpdates=2 已由 1457 提取器并表,与 Game 3053 支 opts 显式传 2
-    //        同值互证）——免疫面由通用缺省支等价承载（vanilla localNPCHitCooldown=-1
-    //        = 命中即 localNPCImmunity=-1 恒不衰减 :14175-14178/:17380 ↔ 本仓 hitSet
-    //        永久同敌免 + flag3=maxPenetrate==1&&!usesLocal...（:12635,496 恒假）→
-    //        immune[owner] 门两版同开）;alpha 仅 draw 面（GetAlpha 无 496 专属支,
-    //        本批不接）。NPC 命中盒=本缩径盒 20×scale（Damage_GetHitbox :15037 读
-    //        width/height——GetCollisionParams :20072 的 10×10 是【撞块】盒,本仓
-    //        撞块=中心点单点判定同口径;SetDefaults 40×40 仅贴图面）。
+    //      ④数据面（2026-09-03 登记项①补齐）：vanilla-projectiles.json 496 三键缺口
+    //        alpha=255/usesLocalNPCImmunity/localNPCHitCooldown=-1（recon 双闸门流程外
+    //        禁直改 json;extraUpdates=2 已由 1457 提取器并表,与 Game 3053 支 opts 显式
+    //        传 2 同值互证）已由 vanillaProjectiles.ts DATA_PATCH['496'] 注入——
+    //        localNPCHitCooldown=-1 → ctor localImmune,命中环 `localImmune > 0` 门
+    //        不吃负值 → 落 hitSet 永久同敌免支 ≡ vanilla -1「localNPCImmunity=-1 恒
+    //        不衰减 :14175-14178/:17380」语义（行为零变,tests/496-wobble ⑥b 守）;
+    //        alpha=255 运行时面 = PROJ_ALPHA0[496]（本批补键）→ draw 通用兜底
+    //        (255−255)/255=0 = 精灵本体恒隐（GetAlpha 无 496 专属支,缺省路径 :81507
+    //        读 α;可见面=本支 ③ 影焰尘 27 拖尾）。NPC 命中盒=本缩径盒 20×scale
+    //        （Damage_GetHitbox :15037 读 width/height——GetCollisionParams :20072
+    //        的 10×10 是【撞块】盒,本仓撞块=中心点单点判定同口径;SetDefaults 40×40
+    //        仅贴图面）。
     //      ⑤半像素注:width/height 为奇数拍 (int)(w/2) 整除使 Center 每子步 +0.5px
     //        漂移（position=Center−trunc(w/2) 而 Center=pos+w/2）——vanilla 同源
     //        逐字（:33104-33105 C# int 除）,非本仓近似

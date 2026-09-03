@@ -8,7 +8,7 @@
 //  P6/P7 角落修正（瀑布侧/内角填充）
 //  绘制：water_N 表（48×1360：3 列变体 × 80px 动画带）按四壁裁源矩形 + 偏移贴图
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
-import type { TileStore } from '../world/TileStore';
+import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
 import { texId, texReady } from './texId';
@@ -21,6 +21,17 @@ const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微�
 // 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜 / 4 微光）→ 原版 LiquidType（0/1/2/3）
 function toVanillaType(t: number): number {
   return t === 2 ? 1 : t === 3 ? 2 : t === 4 ? 3 : 0;
+}
+
+/** LiquidCache.IsSolid（LiquidRenderer.cs:198 → WorldGen.SolidOrSlopedTile :70515-70537）
+ *  纯谓词，P1 两处扫描（needsPrep 首扫/复用失效重扫）共用的单源：
+ *  active(flags≠0) ∧ !inActive(致动位清零,WorldGen.cs:70534 IL_004c `return !tile.inActive()`)
+ *  ∧ tileSolid（defs 层 d.solid 已折 tileSolid∧!tileSolidTop——平台/家具 defs solid:false；
+ *  slope 不在原文谓词内,函数名系历史遗留）。
+ *  ★W-A4（2026-09-03）：补致动门——致动格原版不算实心,液体贴其表面按空格成形,
+ *  曾漏门 = 致动墙仍压住邻格液面/拖尾形态。 */
+export function liquidCacheIsSolid(flags: number, wire: number, solid: boolean | undefined): boolean {
+  return flags !== 0 && (wire & TileStore.WIRE_ACTUATED) === 0 && solid === true;
 }
 function waterSheet(vt: number, waterStyle = 0): string {
   if (vt === 1) return 'vanilla/Misc_water_1.png';   // 岩浆
@@ -372,8 +383,10 @@ export function drawVanillaLiquids(
       // WorldGen.SolidOrSlopedTile（LiquidRenderer.cs:198）的 tile.active() 门——
       // 幽灵格（flags=0,type≠0,x86 对齐残型）不算实心,否则其"化石层"会压住
       // 邻格液面形态。halfBrick 支无 active 门（vanilla :197 裸读）保持原样
-      const d = TILE_DEFS[st.type[si]];
-      isSolidA[i] = st.flags[si] !== 0 && !!d && d.solid ? 1 : 0;
+      // ★W-A4（2026-09-03）：谓词单源化至 liquidCacheIsSolid（补 !inActive 致动门,
+      //  WorldGen.cs:70534 IL_004c `return !tile.inActive()`）
+      isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],
+        TILE_DEFS[st.type[si]]?.solid) ? 1 : 0;
     }
   }
   }   // P1 结束
@@ -395,8 +408,10 @@ export function drawVanillaLiquids(
       // WorldGen.SolidOrSlopedTile（LiquidRenderer.cs:198）的 tile.active() 门——
       // 幽灵格（flags=0,type≠0,x86 对齐残型）不算实心,否则其"化石层"会压住
       // 邻格液面形态。halfBrick 支无 active 门（vanilla :197 裸读）保持原样
-      const d = TILE_DEFS[st.type[si]];
-      isSolidA[i] = st.flags[si] !== 0 && !!d && d.solid ? 1 : 0;
+      // ★W-A4（2026-09-03）：同 P1 首扫,谓词单源 liquidCacheIsSolid（本段是
+      //  同帧复用失效时的全量重扫副本）
+      isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],
+        TILE_DEFS[st.type[si]]?.solid) ? 1 : 0;
     }
   }
   // 液体包围盒(P1 扫描产出,内区坐标):P2-P7 裁剪用。+1 余量覆盖夹心格邻域

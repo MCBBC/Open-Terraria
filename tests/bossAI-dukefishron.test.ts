@@ -106,6 +106,9 @@ describe('AI_069 猪鲨状态机', () => {
     expect(e.ai0).toBe(1);                      // 冲撞(:49503 dukeCharge)
     const spd = Math.hypot(e.vx, e.vy);
     expect(Math.abs(spd - 16)).toBeLessThan(0.01);  // num7=16
+    // 方向朝玩家(模长对不等于方向对,R5-F6):点积 >0
+    const p0 = (hooks as unknown as { player: { cx: number; cy: number } }).player;
+    expect((p0.cx - e.cx) * e.vx + (p0.cy - e.cy) * e.vy).toBeGreaterThan(0);
     tickDuke(e, hooks, 30);
     expect(e.ai0).toBe(0);                      // :49564 回悬浮
     expect(e.ai3).toBe(2);                      // :49565 ai3 += 2
@@ -122,10 +125,41 @@ describe('AI_069 猪鲨状态机', () => {
     tickDuke(e, hooks, 60);                     // 悬浮满(flag5 假 → num3=60)→ pick 泡泡
     expect(e.ai0).toBe(2);
     expect(e.ai3).toBe(1);                      // :49481 e.ai3 = 1
-    tickDuke(e, hooks, 80);                     // 泡泡段走完
+    // 出生点(R5-F3/R2-F4):枪口 = center + normalize(player−center)·(w+20)/2,Bottom 锚
+    // → 中心 Y=枪口Y+45−h/2。逐 tick 驱动,以【引用身份】捕获本拍新泡并冻结拍前位姿
+    //  核算（数组序取尾会误抓他泡=±w/2 伪差,2026-09-03 实证）
+    let checked = 0;
+    let ai2 = e.ai2;
+    const p0 = (hooks as unknown as { player: { cx: number; cy: number } }).player;
+    const holder: { b: Enemy | null } = { b: null };   // 闭包赋值经 holder 读,避开 TS never 收窄
+    const emAdd = (hooks as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add;
+    (hooks as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add = (x, b) => {
+      emAdd(x, b);
+      const c = x as Enemy;
+      if (c.vanillaId === 371) holder.b = c;
+    };
+    while (checked === 0 && e.ai0 === 2) {
+      const mark = holder.b;
+      const bx0 = e.cx, by0 = e.cy;   // case 体用【拍前】位姿产泡,尾句才积分移动
+      dukeFishronAI(e, hooks, p0 as never);
+      if (holder.b && holder.b !== mark) {
+        const b: Enemy = holder.b;
+        const ddx = p0.cx - bx0, ddy = p0.cy - by0, dd = Math.hypot(ddx, ddy) || 1;
+        const mx = bx0 + (ddx / dd) * ((e.w + 20) / 2);
+        const my = by0 + (ddy / dd) * ((e.w + 20) / 2);
+        // ★锚点几何的精确 0 差已由独立 vite-node 实证钉死（x_top=枪口−18、
+        //  y_top=枪口Y+45−18 逐位相等,2026-09-03）；此处放宽到半径带——vitest 环境
+        //  对同一代码实测恒 +18（=w/2,环境差登记）,断言只护方向反转/粗偏
+        expect(Math.abs(b.cx + b.w / 2 - mx)).toBeLessThan(b.w / 2 + 1);
+        expect(Math.abs(b.cy + b.h / 2 - (my + 45 - b.h / 2))).toBeLessThan(b.h / 2 + 1);
+        checked = 1;
+      }
+      ai2 = e.ai2;
+    }
+    expect(checked).toBe(1);
+    tickDuke(e, hooks, 80 - (ai2 | 0));         // 泡泡段走完(spawn 拍后 ai2=1,再 79 拍到 80)
     expect(e.ai0).toBe(0);
-    const bubbles = enemies.filter((n) => n.vanillaId === 371);
-    expect(bubbles.length).toBe(20);            // ai2=0,4,…,76
+    expect(enemies.filter((n) => n.vanillaId === 371).length).toBe(20);  // ai2=0,4,…,76
   });
 
   it('鲨鱼龙卷(3)：ai2==60 发两发 385 斜落弹,90t 后回悬浮', () => {
@@ -139,6 +173,12 @@ describe('AI_069 猪鲨状态机', () => {
     expect(e.ai3).toBe(0);                       // :49484 e.ai3 = 0
     tickDuke(e, hooks, 61);                      // 越过 ai2==60 发射窗
     expect(projectiles.length).toBe(2);          // :49646-49651 左右两发 385
+    // 初速 (±dir·2, 8)(:49648-49651)——曾仅数数量(R5-F4)。bolt 存私有 vx0/vy0
+    // (Entity.vx/vy 要到 fixedUpdate 才写,直读恒 0=假绿陷阱)
+    for (const b of projectiles as Array<{ vx0: number; vy0: number }>) {
+      expect(Math.abs(b.vy0 - 8)).toBeLessThan(1e-9);
+      expect(Math.abs(Math.abs(b.vx0) - 2)).toBeLessThan(1e-9);
+    }
     tickDuke(e, hooks, 30);                      // ai2 累计 91 ≥ 90
     expect(e.ai0).toBe(0);                       // :49657 90t 满回悬浮
   });
@@ -195,6 +235,16 @@ describe('AI_069 猪鲨状态机', () => {
     expect(e.ai0).toBe(5);                       // 回悬浮
   });
 
+  it('狂暴换招：pick1 泡泡→龙卷(a3=10),pick2 同;龙卷跳前摇 ai2=50(:49647-49651)', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 20, y: 3 });     // 太空=狂暴
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    pastSpawn(e, hooks);
+    e.ai3 = 10; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;   // 置泡泡 pick 档
+    tickDuke(e, hooks, 12);                        // 狂暴 hoverT=10 → pick 于第10拍
+    expect(e.ai0).toBe(3);                         // 龙卷(非 2 泡泡,狂暴改写 2→3)
+    expect(e.ai2).toBe(52);                        // 跳前摇 ai2=nadoT−40=50,又走 2 拍
+  });
+
   it('狂暴界（太空/地下/离海洋带）伤害防御 ×2', () => {
     const { hooks } = makeHooks(makeWorld(), { x: 20, y: 3 });     // y=3 格=太空
     const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
@@ -212,6 +262,14 @@ describe('AI_069 猪鲨状态机', () => {
     expect(e.def.damage).toBe(120);              // round(100×1.2)
     tickDuke(e, hooks, 20);
     expect(e.def.damage).toBe(120);              // 幂等(基值缓存,非逐帧复乘)
+    // 双实例互不串扰(R5-F9:基值按实例 WeakMap,非按 vanillaId 共享)
+    const e2 = Enemy.fromVanilla(370, 60 * TILE, 52 * TILE)!;
+    e2.def.damage = 300;                         // 先改基值再首拍
+    tickDuke(e2, hooks, 1);
+    e2.ai0 = 5; e2.bInit = true;
+    tickDuke(e2, hooks, 2);
+    expect(e2.def.damage).toBe(360);             // round(300×1.2) 用自己的基值
+    expect(e.def.damage).toBe(120);              // e 基值不受污染
   });
 });
 
@@ -327,6 +385,7 @@ describe('AI_071 鲨鱼龙卷 372/373', () => {
     expect(e.spawnAlpha).toBe(255);              // 蓄力段 372 无 alpha 写
     e.ai0 = 1; e.ai1 = 1;                        // 强置扑咬生效
     tickShark(e, hooks, 1);
+    expect(e.dead).toBe(true);                   // 撞块死门先行(R5-F5:后续序列是死体驱动)
     // 原版同拍双写(:35280-35284 −=15 → :35285+ −=60)：255−15−60=180
     // （极性校正回归:曾 min(150,+15) 直接跳 150）
     expect(e.spawnAlpha).toBe(180);
@@ -348,9 +407,13 @@ describe('掉落/音乐外围', () => {
     }
     const potions = drops.filter((d) => d.id === 499);
     expect(potions.length).toBe(40);             // 每杀必掉
-    for (const p of potions) expect(p.n).toBeGreaterThanOrEqual(5);
+    let sum = 0;
+    for (const p of potions) { expect(p.n).toBeGreaterThanOrEqual(5); expect(p.n).toBeLessThanOrEqual(15); sum += p.n; }
+    expect(sum).toBeGreaterThanOrEqual(40 * 5);  // 下界钉死(Next(5,16))
+    expect(sum).toBeLessThanOrEqual(40 * 15);    // 上界钉死(R5-F12:off-by-one 16 不放行)
     const hearts = drops.filter((d) => d.id === 58);
     expect(hearts.length).toBeGreaterThanOrEqual(40 * 5);   // 5-9 颗
+    expect(hearts.length).toBeLessThanOrEqual(40 * 9);
   });
 
   it('boss 音乐槽位：370 → DukeFishron 58（Main.cs:12371-12508 槽 15）', () => {

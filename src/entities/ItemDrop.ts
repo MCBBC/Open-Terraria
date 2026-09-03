@@ -10,7 +10,7 @@ import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
 import { getDropScanCtx, grabRangeBonusFor } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
-  decraftOutcome, isItemDecraftableAndUnlocked,
+  decraftOutcome, decraftRand3, isItemDecraftableAndUnlocked,
   internalIdOfVanilla, vanillaIdOfItem,
   makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
@@ -598,7 +598,10 @@ export class ItemDrop extends Entity {
     if (!isItemDecraftableAndUnlocked(vid, this.stack, crimsonWorld, downedBoss3, downedGolemBoss)) {
       return false;
     }
-    const outcome = decraftOutcome(vid, this.stack, crimsonWorld);
+    // ★NB-G 种子注入（2026-09-03）：rand3 走世界种子专用流（decraftRand3,Shimmer.ts
+    //  WorldEvolution 同型=host.seed→RNG 专用实例续流）——曾缺注入落 Math.random()
+    //  缺省参（炼金 1/3 蒸发不可复现,NB-G 唯一硬阻塞）
+    const outcome = decraftOutcome(vid, this.stack, crimsonWorld, decraftRand3(game.world));
     if (!outcome) return false;   // 空垛不回退：炼金全蒸发时原版照扣 stack（:1879-1933）
     outcome.piles.forEach((p, k) => {
       const key = VANILLA_ITEM_KEY_BY_ID[p.vid];

@@ -55,9 +55,10 @@ export class Wiring {
    *  钻头链同一权威实现）。hardMode(Main.hardMode)与 world.chests 锚格表
    *  （Chest.CanDestroyChest）由 Game 装配期注入 closure 每调用现读(困难模式中途
    *  触发/箱子增删不失步);null(测试/未装配)落 canKillTileAt 缺省口径=非困难+容器恒可毁。
-   *  ★登记(既有权威层 nuance,非本批引入):canKillTileAt 的 active 判据是
-   *  TileStore.isActive(nactive,已致动格=false),原版 CanKillTile 用 tile.active()
-   *  ——已致动格压在判格上方的罕见态二者有差,SW-G1 批口径如此,随权威层统一处理 */
+   *  ★登记(SW-L1 2026-09-03 F10 已统一):canKillTileAt 的 active 判据改为裸
+   *  active 位(原版 CanKillTile :62729/:62735/:62798 tile.active(),不含致动位,
+   *  已致动格仍可杀)——SW-G1 批曾以 TileStore.isActive(nactive) 登记 nuance 待
+   *  统一,本批按权威层口径收口 */
   killTileCtxProvider: (() => KillTileCtx) | null = null;
 
   running = false;                                  // :23

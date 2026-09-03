@@ -204,3 +204,18 @@ describe('Achievements 引擎语义', () => {
     expect(a.isCompleted('MECHA_MAYHEM')).toBe(true); // 已完成（成就粘性）
   });
 });
+
+  // ★0 哨兵钉（2026-09-03 红蓝对抗 B2）：vanillaNetId 缺省 0 非 nullish——Game 调用点
+  // 归一 `!==0 ? netId : id` 前曾把 0 直送 notify → 全部 npcKilled 成就死。本钉保证
+  // 0 永不完成任何成就（0 非合法 NPC id 条件），归一逻辑回归时在此爆红。
+  it('notifyNPCKilled(0) 不得完成任何 npcKilled 成就（0=缺省哨兵非合法 id）', () => {
+    const a = new Achievements(null);
+    a.notifyNPCKilled(0);
+    for (const def of ACH_DEFS) {
+      if (def.conditions.some((c) => c.kind === 'npcKilled')) {
+        expect(a.isCompleted(def.name)).toBe(false);
+      }
+    }
+    a.notifyNPCKilled(370);   // 归一后的真 id 通路照常
+    expect(a.isCompleted('FISH_OUT_OF_WATER')).toBe(true);
+  });

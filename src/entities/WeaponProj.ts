@@ -131,7 +131,8 @@ export function projDrawOffsetFor(projId: number, dirX: number, boxH: number,
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
 function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false, centerAnchor = false, scale = 1,
   // SW-I1 2026-09-03：帧通道（Main.cs:34923 projFrames>1 通支）——source=(0,帧高×frame,
-  // 贴图宽,帧高)、dest 高=帧高保纵横、origin/锚点公式不变。frames=Main.projFrames[id]。
+  // 贴图宽,帧高−1)（SW-L1 2026-09-03 I-4：:35047 Rectangle num482−1 底行 shave）、
+  // dest 高=帧高−1 保纵横、origin/锚点公式不变。frames=Main.projFrames[id]。
   frame = -1, frames = 0): void {
   // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
@@ -182,13 +183,16 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
   if (hasImg) {
-    // SW-I1 2026-09-03：帧支（Main.cs:34925-34929 num481=贴图宽/num482=贴图高÷
-    // projFrames/y25=帧高×frame;通支 draw :35002 source=(0,y25,num481,num482)、
-    // origin=(num153,h/2+num151)——dest 高由整贴图纵横比改为帧高纵横比,锚点不动）
+    // SW-I1 2026-09-03：帧支（Main.cs:34942-34944 num481=贴图宽/num482=贴图高÷
+    // projFrames/y25=帧高×frame;通支 draw :35047 source=Rectangle(x15,y25,num481,
+    // num482−1)、origin=(num153,h/2+num151)——dest 高由整贴图纵横比改为帧高纵横比,
+    // 锚点不动。SW-L1 2026-09-03 I-4：源高补 −1 shave（曾用满帧高 fh——519/773 底行
+    // 多渗 1px;:35002 衬色子支才用满 num482 且先 return,非通支））
     if (frames > 1 && frame >= 0) {
       const fh = img!.height / frames;
-      ctx.drawImage(img!, 0, fh * frame, W, fh,
-        -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (fh / W));
+      const sh = fh - 1;                        // Main.cs:35047 num482 - 1
+      ctx.drawImage(img!, 0, fh * frame, W, sh,
+        -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (sh / W));
     } else {
       ctx.drawImage(img!, -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (img!.height / img!.width));
     }
@@ -4707,6 +4711,9 @@ export function bombFishFrameTick(st: { fuseAge: number; counter: number; frame:
 /** SW-I1 2026-09-03：519 炸弹鱼帧数（Main.cs:8619 `projFrames[519] = 4`——贴图
  *  38×152 竖条 4 帧,帧 38×38 与 24×24 碰撞盒解耦） */
 const BOMB_FISH_FRAMES = 4;
+/** SW-L1 2026-09-03 F2：773 甲虫炸弹帧数（Main.cs:8777 `projFrames[773] = 4`——
+ *  贴图 22×168 竖条 4 帧 42px,与 22×22 碰撞盒解耦） */
+const BEETLE_BOMB_FRAMES = 4;
 
 /** 液体炸弹族（903 水/904 岩浆/905 蜂蜜/906 干燥）：入液即爆
  *  （AI_016 :44267 wet && 族列表 → timeLeft=1 次帧爆） */
@@ -4761,6 +4768,12 @@ export class GrenadeProj extends Entity {
   private bombFishAge = 0;
   private bombFishCounter = 0;
   bombFishFrame = 0;
+  /** SW-L1 2026-09-03 F2：773 甲虫炸弹帧态（frameCounter/frame 对应;贴附拍
+   *  ++frameCounter≥3 → frame++ 回绕 4,P.cs:47944-47949——与 519 的
+   *  bombFishFrameTick 双规则并存,帧数 Main.cs:8777 projFrames[773]=4,贴图
+   *  22×168 竖条 4 帧 42px。渲染侧 drawProj 帧参消费） */
+  frame773 = 0;
+  private frame773Counter = 0;
   dead = false;
   /** 引信嘶声循环句柄（AI_016 :44276-44281 PlayTrackedLoopedSound；Kill :67373 Stop） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
@@ -4847,7 +4860,10 @@ export class GrenadeProj extends Entity {
   private armedAlpha = 0;
 
   /** SW-H1 2026-09-03：引信烟尘（AI_016 :48048-48055——1086/1087 专属）。
-   *  节拍 = 每 tick 恰 1 粒（无计数器/概率门;timeLeft≤3 先行 Kill → 末 3t 不出尘）。
+   *  节拍 = 每 tick 恰 1 粒（无计数器/概率门;timeLeft≤3 先行 Kill → 末 3t 不出尘
+   *  ——SW-L1 2026-09-03 F4 落实:爆点前移（--fuse≤2 判,原版 :48031-48035 AI Kill
+   *  序）后尘段在 fuse≤3 拍不可达,头注语义自此成立;曾 --fuse<=0 爆点在尘段后,
+   *  末 3 拍仍出尘）。
    *  几何/参数推导见 fuseSmoke307Of 纯函数（回归测试锚）。dust 307 =
    *  NewDust(Center,6,6,307,velocity.X,velocity.Y,100,default(Color),1.6) 后
    *  position=vector3 / noGravity / velocity=velocity+vector4——终速整体覆写吃掉
@@ -4907,9 +4923,10 @@ export class GrenadeProj extends Entity {
     this.fuseSmokeGeneral(game);
   }
 
-  /** SW-I1 2026-09-03：AI_016 重力门步进（:48332 ai[0]++ → :48377 门）。返回
-   *  门是否已开（=本拍有重力,供普通路落地摩擦 :48380-48385 同门化）。开门拍起
-   *  vy+=0.2；落地（vy==0&&vx≠0）另 vx×0.97、炸药棍族再 ×0.99、|vx|<0.01 归零；
+  /** SW-I1 2026-09-03：AI_016 重力门步进（:48332 ai[0]++ → :48377 门）。开门拍起
+   *  vy+=0.2；落地（vy==0&&vx≠0）另 vx×0.97、炸药棍族再 ×0.99、|vx|<0.01 归零
+   *  ——★此处是原版唯一摩擦点（:48377-48385 在门支内;碰撞响应 :19855-19868 无
+   *  摩擦,SW-L1 I-1 已删落地支复乘）。返回值（门是否已开）现无消费面,保留兼容;
    *  911 速度钳 ±8（:48393-48396）。★vy 的 16 封顶=本仓既有近似（原版无此钳,
    *  备案勿当原版语义）。 */
   private bombGravityStep(): boolean {
@@ -4982,10 +4999,23 @@ export class GrenadeProj extends Entity {
         }
       }
     }
+    // SW-L1 2026-09-03 I-2：爆点前移对齐原版——AI 头 timeLeft<=3 → Kill（P.cs
+    //   :48031-48035,先于尘段/重力/位移）→ Update 尾 timeLeft--（:17307）。本仓
+    //   倒数在 AI 位（--fuse 后判）:post-dec ≤ 2 ≡ 原版 pre-tail-dec ≤ 3（180 引信
+    //   =第 178 拍爆;曾 --fuse<=0 =第 180 拍,+2）。接触钳 3 的拍 dec 不爆、次拍
+    //   2≤2 爆 = 原版 Damage(:17184) 钳后次拍 AI Kill（接触段已移至本判后）
+    if (--this.fuse <= 2) {
+      this.dead = true;
+      this.destroy();
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
+      return;
+    }
     // 接触引爆（Damage_PVE_Inner :12330-12340 碰 NPC → timeLeft 钳 3；发射族
     // friendly 不炸玩家）。★Damage() 每 tick 跑（Update :15738）→ 遍历 Main.npc
     // 全表 = enemies+critters 两桶（碰小动物同样钳引信+弹体盒结算伤害——小动物
     // 一击死）。曾只扫 enemies 桶（2026-08-21 补 critters）
+    // SW-L1 2026-09-03 I-2：本段移至爆点判后（原版 Damage :17184 晚于 AI 的
+    //   timeLeft<=3 Kill 判 :48031——曾判前钳 3 + 旧爆点同拍再倒数,拍位错 2）
     if (this.fuse > 3) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
@@ -5024,12 +5054,6 @@ export class GrenadeProj extends Entity {
           }
         }
       }
-    }
-    if (--this.fuse <= 0) {
-      this.dead = true;
-      this.destroy();
-      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
-      return;
     }
     // ---- 家族行为（发射支通用 ai[0] += 1 :44836——榴弹 15u 重力门/追踪 ramp 都吃它）----
     this.firedAi0 += 1;
@@ -5185,8 +5209,15 @@ export class GrenadeProj extends Entity {
     const firedA = this.fired ? 1 - Math.max(this.stickPending ? 255 : this.armedAlpha, 0) / 255 : 1;
     // SW-I1 2026-09-03：519 帧通道（projFrames[519]=4,Main.cs:8619——贴图 38×152
     //   竖条 4 帧,曾整条直绘=4 帧叠画成 152px 长条）
+    // SW-L1 2026-09-03 F2：773 甲虫炸弹并入帧通道（projFrames[773]=4,Main.cs:8777;
+    //   贴图 22×168 竖条 4 帧——帧态来自贴附支自有 counter 规则 :47944-47949,非
+    //   519 的 bombFishFrameTick,两规则并存）
+    const drawFrame = this.projId === 519 ? this.bombFishFrame
+      : this.projId === 773 ? this.frame773 : -1;
+    const drawFrames = this.projId === 519 ? BOMB_FISH_FRAMES
+      : this.projId === 773 ? BEETLE_BOMB_FRAMES : 0;
     drawProj(r, cam, this, this.projId, this.rot, '#408040', firedA, -1, false, false, 1,
-      this.projId === 519 ? this.bombFishFrame : -1, this.projId === 519 ? BOMB_FISH_FRAMES : 0);
+      drawFrame, drawFrames);
   }
 
   /** 死亡清理：停引信嘶声（Kill :67373-67377 GetActiveSound?.Stop()） */
@@ -5252,6 +5283,17 @@ export class GrenadeProj extends Entity {
     //   伤双重结算+穿体提前引爆。豁免表内型（手雷 30/397/517/588 等=投掷武器,
     //   接触伤=爆炸伤同源物品伤）照旧。fuse>3 门=引信≤3 的拍弹体已在 AI 内
     //   Kill（:48034）,Damage 不再跑。
+    // SW-L1 2026-09-03 I-2：爆点前移对齐原版（同发射支）——AI 头 timeLeft<=3 →
+    //   Kill（P.cs :48031-48035,先于尘段/重力/位移）→ Update 尾 timeLeft--
+    //   （:17307）。post-dec ≤ 2 ≡ 原版 pre-tail-dec ≤ 3（180 引信=第 178 拍爆;
+    //   曾 --fuse<=0=第 180 拍,+2）。接触段已移至本判后（原版 Damage :17184 晚于
+    //   AI Kill 判——钳 3 的拍不爆、次拍爆 = 原版同拍）
+    if (--this.fuse <= 2) {
+      this.dead = true;
+      this.destroy();
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
+      return;
+    }
     if (BOMB_DAMAGE_KEEP_16.has(this.projId) && this.fuse > 3) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
@@ -5289,13 +5331,6 @@ export class GrenadeProj extends Entity {
           }
         }
       }
-    }
-    // ---- 引信倒数 → 爆（PrepareBombToBlow 在 timeLeft≤3 置 alpha=255 隐形本体，此处直接爆）----
-    if (--this.fuse <= 0) {
-      this.dead = true;
-      this.destroy();
-      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
-      return;
     }
     // 旋转 = 滚动（AI_016 :48399-48405：519 专属 ×0.06 / 余族 ×0.1——519 曾共用 0.1）
     this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
@@ -5408,6 +5443,15 @@ export class GrenadeProj extends Entity {
               }
             }
           }
+          // SW-L1 2026-09-03 F2：773 帧推进（P.cs:47944-47949——贴附块尘段后,
+          //   ++frameCounter≥3 → frameCounter=0、++frame 回绕 4（Main.cs:8777
+          //   projFrames[773]=4）。与 519 的 bombFishFrameTick 双规则并存;仅贴附拍
+          //   推进=原文本相（块在 if (flag && type==773) 支内,flag=粘性扫描命中））
+          if (++this.frame773Counter >= 3) {
+            this.frame773Counter = 0;
+            this.frame773++;
+            if (this.frame773 >= 4) this.frame773 = 0;
+          }
         }
         // 911 推出（P.cs:47860-47888）：弹心所在格实心 → 沿（块心−弹心）反向退 4px。
         // ★取证对拍:WorldGen.SolidOrSlopedTile(W.cs:70515)=active+tileSolid+非solidTop+
@@ -5450,7 +5494,9 @@ export class GrenadeProj extends Entity {
     // SW-I1 2026-09-03：重力门（:48332 ai[0]++ → :48377）——炸弹族 ai[0]>5、
     //   手雷族 >10 前零重力（出手直飞）;门值/摩擦/911 钳在 bombGravityStep。
     //   655 蜂巢（AI_025）无门恒重力（函数返 null 分支）
-    const gravOn = this.bombGravityStep();
+    //   SW-L1 2026-09-03 I-1：摩擦【只在】此步进内（原版唯一摩擦点 :48377-48385），
+    //   下方落地支不再复乘——返回值（门是否已开）无消费面,不再接
+    this.bombGravityStep();
     const lastVx = this.vx, lastVy = this.vy;
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
@@ -5475,7 +5521,11 @@ export class GrenadeProj extends Entity {
       this.vx = body.vx;
     }
     // 落地反弹/贴地滚动（:18351-18357 + :44888-44895）：
-    // lastVy>0.7 → vy = lastVy × -0.4（炸药棍族 ×0.8）；否则贴地 vy=0 + 滚动摩擦
+    // lastVy>0.7 → vy = lastVy × -0.4（炸药棍族 ×0.8）；否则贴地 vy=0
+    // ★SW-L1 2026-09-03 I-1：此处【无摩擦】——原版唯一摩擦点在 AI 重力门支
+    //   （:48377-48385 vy==0&&vx!=0 → ×0.97/炸药棍 ×0.99,已在 bombGravityStep），
+    //   碰撞响应支（:19855-19868）只反不磨。曾在此再乘一次 → 休止拍 0.97²（炸药棍
+    //   0.97²·0.99²）双重叠加,滚行距离近半（红队二轮 I-1 实锤）
     if (body.hitHead) {
       this.vy = 0;    // 撞顶停止上浮
     } else if (body.onGround) {
@@ -5484,12 +5534,6 @@ export class GrenadeProj extends Entity {
         if (DYN_PROJ.has(this.projId)) this.vy *= 0.8;
       } else {
         this.vy = 0;
-        // SW-I1 2026-09-03：滚行摩擦随重力门开（:48380-48385 在门支内——门未开拍
-        //   原版零摩擦零重力,曾门未开也摩擦）
-        if (gravOn) {
-          this.vx *= DYN_PROJ.has(this.projId) ? 0.97 * 0.99 : 0.97;
-          if (Math.abs(this.vx) < 0.01) this.vx = 0;
-        }
       }
     } else {
       this.vy = body.vy;
@@ -6034,6 +6078,22 @@ export class TorchGodHelperProj extends Entity {
  * = 300t/5s 后消亡，目标失效同灭）。Daybreak(189) 层数 = 场上附着数（NPC.cs
  * :92807-92830 num8×100 HP/s，零层兜底 1），上限 8/敌（KillOldestJavelin
  * :13019-13030/:13995-14020，_javelinsMax8）。
+ *
+ * ★AI_113_TargetSticker 蓄力（附着）支全族账（1457 亲读 Projectile.cs:41289-41660，
+ * 2026-09-03 Solar 移植批复核）——【哪些弹进此支】：命中结算 :13244-13250
+ * `if (aiStyle == 113 && ai[0] < 2f) { ai[0]=1; ai[1]=victimIndex; velocity=
+ * (victim.Center−Center)×0.75 }`，受理集 = aiStyle 113 全族六型：
+ * 598 BoneJavelin / 614 StardustCellMinionShot / 636 Daybreak / 971 TentacleSpike /
+ * 975 BloodButcherer / 1024 DeadCellsKillingDeckCard（ProjectileID.cs 逐名核对）。
+ * 附着寿命 per-id num11（:41400-41415）：636=5×MaxUpdates(2)=10 → 60×10=600 AI 次
+ * （本弹 2 EU/t ⇒ 300t/5s）；971/975=9×MaxUpdates；1024=5×MaxUpdates；598/614 走
+ * 缺省 15。分支内动态置位（:41396-41399）`ignoreWater=true; tileCollide=false;`
+ * ——vanillaProjectiles.ts 数据面唯一动态例外（附着态不改弹体质地,数据列静止）；
+ * 本仓附着相零位移零湿缓存 ⇒ 两置位语义天然成立,无需实体字段。
+ * 分相差异：614 飞行相即追踪 ai[1] 目标（:41321-41351 CanBeChasedBy 拒门即自灭）
+ * 非 45 拍缓坠族；1024 专属 ai[0]==2 回手相（:41578-41607,flag3 → Kill 改写
+ * ai[0]=2+ResetLocalNPCHit
+ * Immunity+Damage()）——636 两支均不可达。目标受理门 :41488 active∧!dontTakeDamage。
  */
 const STUCK_FLARES = new Map<number, DaybreakFlare[]>();
 
@@ -6276,10 +6336,13 @@ export class DaybreakFlare extends Entity {
     }
   }
 
+  /** 附着目标受理门（AI_113_TargetSticker :41488 else 支 1457 行号）：目标 active
+   *  （dead 反义）∧ !dontTakeDamage 才跟随——dontTakeDamage 翻位（克脑一阶/石巨人
+   *  缩头等免伤态）即 flag→Kill（弹随目标免伤消亡,与 active 失效同语义） */
   private findTarget(game: GameHooks): unknown | null {
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { id: number; dead: boolean };
-      if (!e.dead && e.id === this.ai1) return ent;
+      const e = ent as unknown as { id: number; dead: boolean; dontTakeDamage?: boolean };
+      if (!e.dead && e.dontTakeDamage !== true && e.id === this.ai1) return ent;
     }
     return null;
   }

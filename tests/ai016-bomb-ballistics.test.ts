@@ -57,7 +57,10 @@ describe('SW-I1 AI_016 投掷弹道四件', () => {
       return { hurt, fuse: p.fuse };
     };
     expect(mk(28)).toEqual({ hurt: [], fuse: 179 });
-    expect(mk(30)).toEqual({ hurt: [100], fuse: 2 });   // 钳 3 后本拍倒数 → 2
+    // SW-L1 2026-09-03 I-2：爆点判前移（--fuse≤2 ≡ 原版 AI timeLeft≤3 先于尾减）,
+    //   接触段随之移至爆点判后——首拍 180→179（不爆）→ 接触钳 3,终值=3;
+    //   次拍 --fuse→2≤2 爆 = 原版 Damage 钳后次拍 AI Kill 同拍
+    expect(mk(30)).toEqual({ hurt: [100], fuse: 3 });
   });
   it('引信烟尘（:48285-48322）：50%/t 双尘齐出、引信尖差 6.6px、排除表+num30 分型', () => {
     expect([30, 397, 517, 519, 588, 681, 779, 783, 862, 863, 1086, 655].map((t) => bombFuseSmokeTypeOf(t, 33)))
