@@ -24,8 +24,9 @@
 //   Resize(48,48) knockBack=8 → 48×48 伤盒（半宽 24,旧 hurtBox16 表 11 档不适用,
 //   裂片走本实体回调自管）;地形闸门 :79027 表含 783/863 → r3（:79052 组）、
 //   779/862 不在表 = 不毁地形（Game.EXPLODE_RADIUS 783:3/863:3 已有）。
-//   Kill 视觉 :79719-79783（Item62+尘 31×15/228×10/226×3+gore 61-64）由 explodeAt
-//   通用爆炸近似承载（本仓爆炸视觉单口径,备案）。
+//   Kill 视觉 :79719-79783（Item62+尘 31×15/228×10/226×3+gore 61-64）——
+//   SW-R3 2026-09-03（Q-4）起由 Game.explodeAt 裂片专支逐参承载（旧"通用爆炸
+//   近似/视觉单口径"备案退役;母弹专支 :79753-79800 同批）。
 import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
@@ -87,6 +88,10 @@ export class ClusterFragmentProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // SW-R3 2026-09-03（蓝队 L-6）：dead 守卫——Entities.update 对 dead 实体仍泵
+    // fixedUpdate（compact 在桶尾），直泵重入面（父弹 Kill 裂解回调内再进
+    // updateSwing 通道等）与 GrenadeProj SW-L1 守卫同式
+    if (this.dead) return;
     const st = game.world.store;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
       this.dead = true;                // 出界静默消亡（P.cs:16793-16802）
@@ -154,11 +159,13 @@ export class ClusterFragmentProj extends Entity {
         this.vx *= 0.97;
         if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
       }
-      this.vy = Math.min(this.vy + 0.2, 16);
+      this.vy += 0.2;   // SW-R3 2026-09-03（F-6①）：SW-N1 定谳——AI_016 :48394 恒
+                        // +0.2 无终端钳（仅 911 有 Clamp :48396-48399）,去钳
     }
     // 位移+撞块（aiStyle16 通用反弹 ×−0.4——与 GrenadeProj firedStep 同式;
     // 裂片不在 FIRED_STICK 撞块 vel=0 表）
     const lastVx = this.vx, lastVy = this.vy;
+    const bodyY0 = this.y;   // SW-R3 2026-09-03（F-6②）：本拍积分前 y（残差=实际位移）
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
@@ -171,7 +178,10 @@ export class ClusterFragmentProj extends Entity {
     if (body.hitWall) this.vx = lastVx * -0.4;
     if (body.collideY || body.onGround || body.hitHead) {
       if (lastVy > 0.7) this.vy = lastVy * -0.4;
-      else this.vy = 0;
+      // SW-R3 2026-09-03（F-6②）：软着陆保留钳速残差（=本拍实际 Y 位移）——
+      // GrenadeProj SW-N1 ③ 同款:TileCollision 只回钳速度,响应支 lastVy≤0.7
+      // 不写 vy → 残差存活到下拍;旧 `vy=0` 吞残差 → 下拍 vy==0 摩擦门提前 1 拍
+      else this.vy = this.y - bodyY0;
     }
     // CutTiles（CanCutTiles:friendly&&damage>0 → 草/藤切割,同 GrenadeProj 单格心）
     game.cutTile(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));

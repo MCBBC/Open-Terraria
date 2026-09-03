@@ -677,6 +677,7 @@ import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
+import { fadingParticles, fadingAlphaFactor } from '../fx/FadingParticles';
 import type { TrailSpec } from '../fx/TrailShader';
 import { drawStripTrail } from '../fx/TrailShader';
 import { MapPingStore } from '../net/syncModules';
@@ -3696,6 +3697,12 @@ export class Renderer {
     //     合成后直画 = GetColor(White) 等价）
     this.drawVanillaDustPass(true, cam, player);
 
+    // 7d''. FadingParticle 层（ParticleSystem_World_OverPlayers,Main.cs:63208——
+    //     DrawPlayers_AfterProjectiles :63204 之后的玩家上层;fullbright=true 全亮
+    //     加色,FadingParticle.Draw :62-69 逐值——拍击石系 Spawn_SnappingStone /
+    //     Spawn_SnappingStoneSummon 环带,见 fx/FadingParticles.ts）
+    this.drawFadingParticles(cam);
+
     // 7d'. 飞灵 677 自发光多层渲染（DrawNPCDirect_Faeling :26306-26368 不走
     //      GetAlpha——自发光色不受 tile 光照，须在光照合成后绘制。此前画在
     //      实体层被光照覆层压暗 → 暗洞穴发光不可见，用户实报 2026-08-21）
@@ -5097,29 +5104,43 @@ export class Renderer {
    *  本仓以 fillRect 实心矩形近似臂形（任务批定案"两笔 fillRect 近似臂形状,臂几何
    *  逐值"）;贴片升级路径 = sparkleTintedTex 染色缓存+隔离式 stroke（prettyStarSparkle
    *  同款）,待消费站接线批按缓存压力定夺。★尺寸口径：与本 pass 尘精灵同约定
-   *  （8×8 帧直画,不乘 cam.zoom）→ 臂像素 = 72×scale。★Opacity 档：本池无独立
-   *  Opacity 载体,产尘方折进 color/alpha（登记）。 */
+   *  （8×8 帧直画,不乘 cam.zoom）→ 臂像素 = 72×scale。★Opacity 档（2026-09-03
+   *  补齐）：psFadeInNorm/psFadeOutNorm 逐粒 Opacity 包络（PrettySparkleParticle
+   *  .Update :54-56 GetLerpValue(0,FadeInNormalizedTime,t/TTL)×GetLerpValue(1,
+   *  FadeOutNormalizedTime,t/TTL)）——undefined = FetchFromPool 缺省 0.05/0.9;
+   *  包络 t（:70 t=_timeSinceSpawn/TimeToLive×60）由 psAge/（ttl+psAge）×60 精确,
+   *  取代旧"envT=60−ttl"（等价于 TTL=60 特例）。★DrawVerticalAxis：psDrawVert
+   *  false 只画水平臂（:86/:713 拍击石 kind1 双臂）。 */
   private drawSparkleArms(d: import('../fx/VanillaDust').VDust,
     px: number, py: number, sx: number, sy: number): void {
     const ctx = this.ctx;
-    // ★prettySparkle 档包络（PrettySparkleParticle.cs:53-77 1:1）：t=拍数、
-    //  num = GetLerpValue(0,FadeInEnd=20,t)×(1−GetLerpValue(FadeOutStart=30,
-    //  FadeOutEnd=45,t))——通用档 num=(255−alpha)/255 与缺省 TTL=60 时两者
-    //  数值同式（255−α ≡ 拍数包络,因 α 驱动站 α≡t 的老约定），prettySparkle
-    //  档 TTL 精确+双向独立,水平/垂直双臂四笔照旧
-    const envT = 60 - (d.ttl ?? 60);
-    const lvPS = (a: number, b: number): number =>
-      Math.max(0, Math.min(1, d.prettySparkle ? (envT - a) / (b - a) : (255 - d.alpha) / 255));
-    const num = d.prettySparkle
-      ? Math.max(0, Math.min(1, lvPS(0, 20) * (1 - lvPS(30, 45))))
-      : Math.max(0, Math.min(1, (255 - d.alpha) / 255));
+    // ★prettySparkle 档包络（PrettySparkleParticle.cs:53-77 1:1）：t=拍数（归一 ×60）、
+    //  num = GetLerpValue(0,FadeInEnd,t)×GetLerpValue(FadeOutEnd,FadeOutStart,t)、
+    //  Opacity = GetLerpValue(0,FadeInNorm,t01)×GetLerpValue(1,FadeOutNorm,t01)
+    //  ——逐粒参数（psFadeInEnd 等）undefined 时落 FetchFromPool 缺省 20/30/45、
+    //  0.05/0.9；通用档（非 prettySparkle 双轴尘）num=(255−alpha)/255 不变
+    let num: number;
+    let op = 1;
+    if (d.prettySparkle) {
+      const age = d.psAge ?? 0;
+      const ttl0 = (d.ttl ?? 60) + age;                  // TimeToLive 初值
+      const tN = ttl0 > 0 ? (age / ttl0) * 60 : 60;      // :70 t=_timeSinceSpawn/TTL×60
+      const t01 = ttl0 > 0 ? age / ttl0 : 1;             // :54 归一比
+      const lv = (a: number, b: number): number => Math.max(0, Math.min(1, (tN - a) / (b - a)));
+      num = Math.max(0, Math.min(1,
+        lv(0, d.psFadeInEnd ?? 20) * lv(d.psFadeOutEnd ?? 45, d.psFadeOutStart ?? 30)));
+      op = Math.max(0, Math.min(1,
+        lv(0, d.psFadeInNorm ?? 0.05) * lv(1, d.psFadeOutNorm ?? 0.9)));
+    } else {
+      num = Math.max(0, Math.min(1, (255 - d.alpha) / 255));
+    }
     if (num <= 0) return;
     const g = sparkleArmGeometry(sx, sy, num);
     const rot = d.rotation;
     const c = d.color;
     const tint = c ? `rgb(${c.r},${c.g},${c.b})` : null;   // ColorTint（A=0 纯加色档）
-    const tintA = 0.5 * num;                               // color2 = ColorTint×Opacity×0.5×num
-    const coreA = 0.45 * num;                              // color3 = White×0.9×0.5×num
+    const tintA = 0.5 * op * num;                          // color2 = ColorTint×Opacity×0.5×num
+    const coreA = 0.45 * op * num;                         // color3 = White×0.9×0.5×num×num
     const arm = (rotArm: number, len: number, style: string | null, alpha: number, wMul: number, hMul: number): void => {
       if (!style || alpha <= 0.004) return;
       const w = Math.max(1, g.hx * wMul), h = Math.max(1, len * hMul);
@@ -5132,10 +5153,11 @@ export class Renderer {
       ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.restore();
     };
+    const vert = d.psDrawVert !== false;                   // DrawVerticalAxis（:26 缺省 true）
+    if (vert) arm(rot, g.vy, tint, tintA, 1, 1);           // :84 垂直臂×ColorTint
     arm(Math.PI / 2 + rot, g.hy, tint, tintA, 1, 1);       // :80 水平臂×ColorTint
-    arm(rot, g.vy, tint, tintA, 1, 1);                     // :84 垂直臂×ColorTint
+    if (vert) arm(rot, g.vy, '#FFFFFF', coreA, 0.6, 0.6);  // :92 白核 ×0.6
     arm(Math.PI / 2 + rot, g.hy, '#FFFFFF', coreA, 0.6, 0.6);   // :88 白核 ×0.6
-    arm(rot, g.vy, '#FFFFFF', coreA, 0.6, 0.6);            // :92 白核 ×0.6
   }
 
   // ===================== FlameParticle（山羊坐骑 47 火焰本体层）=====================
@@ -5159,6 +5181,80 @@ export class Renderer {
    *  applyDyeToImageData 预染缓存，与 cWings 翅膀染料 wingTexSource 同款路径） +
    *  原两 pass 不变。dye 由调用点从 player.inv.miscDyes[3] 取（Player.cs:9300
    *  cMount = miscDyes[3].dye——坐骑染料槽下标 3，非 4）。 */
+  /** FadingParticle.Draw（FadingParticle.cs:62-69）1:1——ParticleSystem_World_
+   *  OverPlayers 层（屏幕空间 cam 变换,与全亮 dust pass 同段）。逐份：
+   *  color = ColorTint × GetLerpValue(0,FadeInNorm,t/TTL) × GetLerpValue(1,
+   *  FadeOutNorm,t/TTL)（fullbright,不乘光照）;贴图原尺 × Scale 中心锚 + Rotation。
+   *  XNA 预乘 AlphaBlend 的 canvas 等价（α=0 纯加法惯用法 + erase 精确补 A>0 档）：
+   *   · tintA ≤ 0 → 'lighter' 画 tint 预染副本（rgb×tint 烘焙,alpha 保留）×env；
+   *   · tintA > 0 → 先 'destination-out' 原贴图 ×(tintA/255×env)（dst ×=
+   *     (1−texA·tintA·env),精确补出预乘 dst 衰减项）再 'lighter' 加色。
+   *  Delay 段不画（原版 Draw 无 Delay 门但 Scale=Vector2.Zero 起步零可见面,双保险）。 */
+  private drawFadingParticles(cam: Camera): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    let any = false;
+    for (const f of fadingParticles.each()) { any = true; break; }
+    if (!any) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    /** tint 预染烘焙缓存（multiply+destination-in,flameDyeCache 同式;
+     *  key = texKey|r|g|b——rgb 相同的环带站共享一份） */
+    const tintedOf = (texKey: string, r: number, g: number, b: number): HTMLCanvasElement | null => {
+      const img = atlas.ensureVImage(texKey);
+      if (!img || (img as { width: number }).width <= 0) return null;
+      const key = `${texKey}|${r}|${g}|${b}`;
+      const hit = this.fadingTintCache.get(key);
+      if (hit) return hit;
+      if (typeof document === 'undefined') return null;
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const cc = c.getContext('2d', { willReadFrequently: true });
+      if (!cc) return null;
+      cc.imageSmoothingEnabled = false;
+      cc.drawImage(img, 0, 0);
+      cc.globalCompositeOperation = 'multiply';
+      cc.fillStyle = `rgb(${r},${g},${b})`;
+      cc.fillRect(0, 0, c.width, c.height);
+      cc.globalCompositeOperation = 'destination-in';
+      cc.drawImage(img, 0, 0);
+      this.fadingTintCache.set(key, c);
+      if (this.fadingTintCache.size > 64) this.fadingTintCache.clear();
+      return c;
+    };
+    for (const f of fadingParticles.each()) {
+      if (f.delay > 0) continue;
+      const t01 = f.timeSinceSpawn / f.timeToLive;
+      const env = fadingAlphaFactor(t01, f.fadeIn, f.fadeOut);
+      if (env <= 0.004) continue;
+      const tinted = tintedOf(f.texKey, f.tintR, f.tintG, f.tintB);
+      if (!tinted) continue;
+      const [px, py] = cam.worldToScreen(f.x, f.y);
+      ctx.save();
+      ctx.translate(px, py);
+      if (f.rot) ctx.rotate(f.rot);
+      if (f.scaleX !== 1 || f.scaleY !== 1) ctx.scale(f.scaleX, f.scaleY);
+      if (f.tintA > 0) {
+        // 预乘 dst 衰减项（erase）——原贴图 alpha × tintA/255 × env
+        const raw = atlas.ensureVImage(f.texKey);
+        if (raw && (raw as { width: number }).width > 0) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = Math.min(1, (f.tintA / 255) * env);
+          ctx.drawImage(raw as CanvasImageSource, -tinted.width / 2, -tinted.height / 2);
+        }
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, env);
+      ctx.drawImage(tinted, -tinted.width / 2, -tinted.height / 2);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private fadingTintCache = new Map<string, HTMLCanvasElement>();
+
   private drawFlameParticles(dye: DyeApply | null): void {
     const atlas = this.atlas;
     if (!atlas) return;

@@ -147,6 +147,14 @@ export interface OptionsData {
   /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——Web 语义=切 tab
    *  (visibilitychange hidden) 暂停、回来自动恢复 */
   autoPause: boolean;
+  /** 失焦播放（Main.SettingPlayWhenUnfocused，Main.cs:268 默认 false；config.json
+   *  键 "PlayWhenUnfocused"，Main.cs:4301/:4444 持久化）。原版消费面（FocusHelper.cs）：
+   *  AllowAudioUnfocused :23 → AllowMusic :79 失焦取本开关；UpdateFocus :140
+   *  `wantsToPause = (!IsSelectedApplication && netMode==0) & !本开关`。设置行
+   *  IngameOptions.cs:637-647（Gameplay 段，紧随 autoPause），文案键
+   *  UI.PlayWhenUnfocusedOn/Off（On=开"失焦播放"→暂停文案"关"，反向是原版原文）。
+   *  本仓消费=Sfx 失焦音频闸（开关开=失焦继续出声；游戏暂停面=autoPause 行职责） */
+  playWhenUnfocused: boolean;
   /** 快速堆叠模式（Player.Settings.StackToChestsPreferredMode，Player.cs:337；
    *  config.json 键 "StackToChestsPreferredMode"（Main.cs:4244/4576 持久化），默认 Quick）。
    *  背包侧"堆叠至附近宝箱"按钮行为：quick=只堆箱内已有类型 / smart=相似物品按
@@ -246,6 +254,7 @@ export class OptionsStore {
     autoSave: true,                         // Main.cs:1196
     autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
     autoPause: false,                       // Main.cs:1280
+    playWhenUnfocused: false,               // Main.cs:268（失焦全静=原版默认）
     quickStackMode: 'quick',                // Player.Settings.StackToChestsPreferredMode（QuickStackToNearbyChests）
     panControlMode: 0,                      // Hold（PlayerInputProfile.cs:59 键盘缺省）
     settingsVersion: 325,                   // LastLaunchedVersion（M57:4241）
@@ -367,6 +376,8 @@ export class OptionsStore {
       if (typeof this.data.builderAutoPaintDisabled !== 'boolean') this.data.builderAutoPaintDisabled = false;
       // LoadoutShare 首用提示（R4-14 清偿）：坏值回默认「显示」
       if (typeof this.data.showLoadoutShareHint !== 'boolean') this.data.showLoadoutShareHint = true;
+      // 失焦播放（Main.cs:268 默认 false=失焦全静；坏值回原版默认）
+      if (typeof this.data.playWhenUnfocused !== 'boolean') this.data.playWhenUnfocused = false;
       // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----
       if (typeof this.data.touchButtonAlpha !== 'number'
         || !Number.isFinite(this.data.touchButtonAlpha)) this.data.touchButtonAlpha = 0.82;

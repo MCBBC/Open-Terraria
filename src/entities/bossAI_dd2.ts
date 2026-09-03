@@ -3120,7 +3120,8 @@ export class DD2GoblinBomb extends Entity {
         this.vx *= 0.97;
         if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
       }
-      this.vy = Math.min(this.vy + 0.2, 16);
+      this.vy += 0.2;   // SW-R3 2026-09-03：SW-N1 同案——:48394 恒 +0.2 无终端钳
+                        // （仅 911 有 Clamp :48396-48399）;钳 16 为旧近似,随 F-9 顺手清偿
     }
     let nx = this.x + this.vx, ny = this.y + this.vy;
     const solidAtP = (px: number, py: number): boolean => {
@@ -3149,8 +3150,38 @@ export class DD2GoblinBomb extends Entity {
     this.destroy();
     game.onProjectileDeath?.(681, this.x, this.y, this.w, this.h);
     game.playSfx('explosion', 1, this.cx, this.cy);
-    game.spawnParticles(this.cx, this.cy, '#FFD24A', 14, 4, { life: 30, grav: -0.05 });
-    game.spawnParticles(this.cx, this.cy, '#FF9A3C', 10, 3, { life: 40 });
+    // SW-R3 2026-09-03（F-9）：Kill :73136-73216 原版尘引擎逐参（替换 spawnParticles
+    //  合成粒——旧 14+10 粒画在光照合成前被压暗,且无 fadeIn/gore 面）：
+    //  先盒 80² 收心 → Resize(22,22) 视觉盒（:73137-73144,盒左上角=Center−(11,11)）：
+    //   · 尘 31×10 scale1.5 alpha100 vel×1.4（:73147-73151）
+    //   · 尘 6×10 scale1.5 alpha100 noGravity fadeIn2 vel×1.4（:73152-73157）
+    //   · 尘 6×10 scale2.5 alpha100 noGravity vel×5（:73158-73163）
+    //   · 尘 6×10 scale1.5 alpha100 vel×3（:73164-73169）——计 40 粒
+    //   · gore 61-63 ×4 恒出（:73170-73196）：vel×0.4 后四向对角 ±1（原序 ++/−+/+−/−−）
+    //  音=DD2_GoblinBomb（:73139）——本仓 'explosion' 通道承载（F-9 仅视觉,音面不动）
+    {
+      const vd = game.vanillaDust;
+      if (vd) {
+        const vx0 = this.cx - 11, vy0 = this.cy - 11, bs = 22;
+        for (let i = 0; i < 10; i++) {
+          const d1 = vd.spawn(vx0, vy0, bs, bs, 31, 0, 0, 100, null, 1.5);
+          if (d1) { d1.vx *= 1.4; d1.vy *= 1.4; }
+          const d2 = vd.spawn(vx0, vy0, bs, bs, 6, 0, 0, 100, null, 1.5);
+          if (d2) { d2.noGravity = true; d2.fadeIn = 2; d2.vx *= 1.4; d2.vy *= 1.4; }
+        }
+        for (let i = 0; i < 10; i++) {
+          const d1 = vd.spawn(vx0, vy0, bs, bs, 6, 0, 0, 100, null, 2.5);
+          if (d1) { d1.noGravity = true; d1.vx *= 5; d1.vy *= 5; }
+          const d2 = vd.spawn(vx0, vy0, bs, bs, 6, 0, 0, 100, null, 1.5);
+          if (d2) { d2.vx *= 3; d2.vy *= 3; }
+        }
+      }
+      for (let gi = 0; gi < 4; gi++) {
+        const sgnX = gi % 2 === 0 ? 1 : -1, sgnY = gi < 2 ? 1 : -1;   // (+,+) (−,+) (+,−) (−,−)
+        const g = GorePiece.newGore(61 + (Math.random() * 3 | 0), this.cx - 11, this.cy - 11, 0, 0, 1);
+        if (g) { g.vx = g.vx * 0.4 + sgnX; g.vy = g.vy * 0.4 + sgnY; }
+      }
+    }
     const bx = this.cx - 40, by = this.cy - 40;   // 80×80（:68689-68695）
     // ★victim-settles：爆盒命中恒本地玩家（damagePlayer 只结算本地血）
     const pl = game.player;

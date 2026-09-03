@@ -1095,7 +1095,7 @@ export class BestiaryPanel {
   private filterOutside: ((e: MouseEvent) => void) | null = null;
 
   private closeFilterGrid(): void {
-    document.removeEventListener('click', this.filterOutside);
+    if (this.filterOutside) document.removeEventListener('click', this.filterOutside);
     this.filterOutside = null;
     this.filterGridEl?.remove();
     this.filterGridEl = null;

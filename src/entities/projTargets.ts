@@ -252,6 +252,22 @@ export function applyBannerDamageDealt(
   return Math.trunc(dmg * bannerDamageDealtSample(bItem, mainDifficulty(world)));
 }
 
+/** SW-R3 2026-09-03（蓝队 M-1 位次翻案）：banner 乘区【采样值】出口（不含截断）——
+ *  原式 :13388-13390 `dmg = (int)((float)dmg * effect.DamageDealt.Sample(Main.Difficulty))`
+ *  的 int 截断发生在链内 1002/trap 两次减伤【后】,故乘区值与截断必须分离
+ *  （applyBannerDamageDealt 保持自截断,继续服务旧位次消费面:近战 :22610/
+ *  scarabBombExplode 等 DV→banner 相邻无减伤夹层的面）。返回 1 = 不乘。 */
+export function bannerDamageDealtMultOf(game: GameHooks, target: unknown): number {
+  const vid = (target as { vanillaId?: number | null } | null | undefined)?.vanillaId;
+  if (!vid || vid <= 0) return 1;
+  const g = game as unknown as { bannerNpcActive?: (id: number) => boolean };
+  if (!g.bannerNpcActive?.(vid)) return 1;
+  const bItem = bannerItemId(bannerOfNpc(vid));
+  if (!(bItem > 0)) return 1;
+  const world = (game as unknown as { world?: Parameters<typeof mainDifficulty>[0] }).world;
+  return bannerDamageDealtSample(bItem, mainDifficulty(world));
+}
+
 // ---- ★α-H4 OnHit 域出口谓词（HittableForOnHitRewards 统一收口） ----------------
 // 原版 NPC.cs:91152 `!(CountsAsACritter(target) || target.immortal)`——OnHit 奖励域
 // （蝙蝠棒吸血 BatBat_TryLifeLeeching :44544-51、火之大剑火山窗消耗 Volcano
@@ -880,18 +896,25 @@ export function countsAsCritterOf(e: unknown, fromCritterBucket: boolean): boole
   return fromCritterBucket || t?.def?.critter === true;
 }
 
-/** CanNPCBeHitByPlayerOrPlayerProjectile 玩家实体面完整形（projectile=null 支 →
- *  flag=dontHurtCritters；projectile.trap→false 与弹幕 minions/sentry 支由各弹类
- *  调用端按 projectile!=null 分支另算，不入本出口）。返回 false = 该实体对本玩家
- *  【不可命中】。 */
+/** CanNPCBeHitByPlayerOrPlayerProjectile 完整形（Player.cs:20673-20689）。
+ *  玩家实体面（projectile=null）：flag=dontHurtCritters。弹幕面（SW-R3 2026-09-03
+ *  蓝队 M-3 扩展,proj 传 {projId,trap,minion?,sentry?}）：flag=dontHurtCritters ∪
+ *  (minion|MinionShot[projId]|sentry|SentryShot[projId])（:20675,爆炸族非仆从/哨塔
+ *  = 不进或）；随后 trap 弹复位可打（:20677-20678）。敌对小动物复权与
+ *  CountsAsCritter∧flag 拒收两面共享。返回 false = 该实体对本玩家【不可命中】。 */
 export function playerProjectileCanHitNpcGate(
   game: { player?: unknown },
   e: unknown,
   fromCritterBucket = false,
+  proj?: { projId?: number; trap?: boolean; minion?: boolean; sentry?: boolean },
 ): boolean {
   const eq = (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)
     ?.equipStats;
-  let flag = eq?.dontHurtCritters === true;              // （:20675 玩家面）
+  let flag = eq?.dontHurtCritters === true              // （:20675 玩家面）
+    || (!!proj && (proj.minion === true || proj.sentry === true
+      || (proj.projId !== undefined
+        && (MINION_SHOT_PROJS.has(proj.projId) || SENTRY_SHOT_PROJS.has(proj.projId)))));
+  if (proj?.trap === true) flag = false;                 // （:20677-20678 trap 复位）
   if (isCritterThatIsHostileToPlayers(e)) flag = false;   // （:20679 敌对生物复权）
   if (countsAsCritterOf(e, fromCritterBucket) && flag) return false;   //（:20683 拒收）
   return true;

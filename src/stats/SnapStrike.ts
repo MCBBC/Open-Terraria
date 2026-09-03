@@ -303,24 +303,26 @@ export function projectileSnapStrikeBonus(
 }
 
 /**
- * ★1457 拍击石系命中尘（ParticleOrchestrator.cs 三 Spawn 的 Dust 段 1:1；
- *  编排器粒子类型 FadingParticle/PrettySparkle 本仓无池,环带视觉登记未接）：
+ * ★1457 拍击石系命中尘（Spawn_SnappingStone :628-647 的 Dust 段 1:1；
+ *  ★2026-09-03 环带池化清偿：本函数收缩为 kind0 专用尘段——kind1/kind2 的尘段
+ *  随 Spawn_ 完整面归 snappingStoneRingFx（d6 对/d172/d211,含 NewDustPerfect
+ *  通道与 ×14 幅值）,此处旧副本系 L5 批前的残臂（kind1 幅值漏 ×14+非 Perfect 通道
+ *  撞烟雾族重掷）,且与环带函数双端双份并跑 = 尘量 ×2 超原版,整批退役）：
  *  mvX 形参 = 编排载荷 MovementVector.X 原值【已含出弹端 num12 单掷】,禁在尘段
  *  复掷/再除（★F3 2026-09-01,Projectile.cs:14429-31 num11×num12/受击者拍 :14434-36
  *  num11 裸值——本地/远端/环带三面共吃同一 X,消费式唯一 = num=钳(X/256,≤0.12)）：
- *  kind0 拍击石（:593-646）num=钳(MovementVector.X/256,≤0.12)——20 颗 2/3→226
+ *  kind0 拍击石（:628-647）num=钳(MovementVector.X/256,≤0.12)——20 颗 2/3→226
  *  否则 15,velocity×64num,noGravity,scale1,fadeIn 1.5→0,noLight;226 再 ×0.5 速、
- *  1/6 恢复重力再 ×0.5 速、noLightEmittance;
- *  kind1 焰爆石（:649-732）4 颗 6 沿 ±bolt 向 ±0.025·2π·rand 旋转 ×NextFloat 速,
- *  noGravity scale1.4（bolt 基角 = NextFloatDirection×2π×0.05 + π/4·(1|2)）;
- *  kind2 毁灭臂镗（:734-812）15 颗 172 + 8 颗 211,Circular(10,10) 速,
- *  scale=max(0.75,20num),noGravity,1/6 重力 + scale×0.25
+ *  1/6 恢复重力再 ×0.5 速、noLightEmittance。
+ *  环带（FadingParticle/PrettySparkle）与 kind1/kind2 尘段见 fx/orchestraFx.ts
+ *  snappingStoneRingFx + fx/FadingParticles.ts（2026-09-03 池化接入）。
  */
 export function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, mvX: number): void {
+  if (kind !== 0) return;                       // kind1/kind2 尘段在环带函数（见上注）
   const pool = game.vanillaDust;
   if (!pool) return;
   const rand = Math.random;
-  if (kind === 0) {
+  {
     const num = Math.min(0.12, mvX / 256);   // :600-605（X 原值直入——num11 钳 100 已在出弹端 :14430-31）
     for (let j = 0; j < 20; j++) {
       const chloro = Math.floor(rand() * 3) !== 0;                 // Next(3)!=0 → 226
@@ -341,37 +343,6 @@ export function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: n
           d.vy *= 0.5;
         }
         d.noLightEmittance = true;
-      }
-    }
-    return;
-  }
-  if (kind === 1) {
-    const base = (rand() * 2 - 1) * Math.PI * 2 * 0.05;            // :665 num4
-    for (let n = 1; n < 2; n++) {                                  // :668 num5 单值 1
-      const dir = Math.PI / 4 + Math.PI / 4 * n + base;            // vector3 角
-      for (let i = 0; i < 2; i++) {                                // :722-731 双向各 2 颗
-        for (const s of [1, -1]) {
-          const a = dir * s + (rand() * 2 - 1) * Math.PI * 2 * 0.025;
-          const d = pool.spawn(x, y, 0, 0, 6, Math.cos(a) * rand(), Math.sin(a) * rand());
-          if (!d) continue;
-          d.noGravity = true;
-          d.scale = 1.4;
-        }
-      }
-    }
-    return;
-  }
-  // kind2：num = 1→钳 0.12（:738/:743-745 反编译字面）→ scale = max(0.75, 2.4)
-  for (const [count, type] of [[15, 172], [8, 211]] as const) {    // :779-812
-    for (let k = 0; k < count; k++) {
-      const d = pool.spawn(x, y, 0, 0, type,
-        (rand() * 2 - 1) * 10, (rand() * 2 - 1) * 10);             // NextVector2Circular(10,10)
-      if (!d) continue;
-      d.scale = Math.max(0.75, 20 * 0.12);
-      d.noGravity = true;
-      if (Math.floor(rand() * 6) === 0) {
-        d.noGravity = false;
-        d.scale *= 0.25;
       }
     }
   }

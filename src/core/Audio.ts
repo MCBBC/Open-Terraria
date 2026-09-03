@@ -5,6 +5,7 @@
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
 import { Sfx } from './Sfx';
+import { options } from './Options';
 import { swTrace } from '../net/AssetCache';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
@@ -150,8 +151,9 @@ export class AudioSystem {
       Sfx.registerAudioContext(this.ac);
     }
     // ★失焦闸配合：隐藏期间禁止自动 resume（手势恢复走 resumeNow/armUnlock,均由
-    //  用户输入触发、隐藏态不可达）。node 单测无 document → 视为可见
-    const pageHidden = typeof document !== 'undefined' && document.hidden;
+    //  用户输入触发、隐藏态不可达）。playWhenUnfocused 开=失焦继续播放,隐藏不拦
+    //  resume（FocusHelper.AllowMusic :79 直通同构）。node 单测无 document → 视为可见
+    const pageHidden = typeof document !== 'undefined' && document.hidden && !options.data.playWhenUnfocused;
     if (this.ac.state === 'suspended' && !pageHidden) {
       this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
     }

@@ -443,22 +443,28 @@ export interface SlopeStore extends DrillStore {
 /** 运行期 WorldGen.CanPoundTile（WorldGen.cs:81434-81482）子集：类型黑名单 +
  *  Boulders + 上格 ForbidsSloping + CanKillTile（:81480）。生成期专属的 190/30
  *  追加（isGeneratingOrLoadingWorld 门）运行期不适用；solid/solidTop 门由
- *  smoothSlopeAt 的 SolidOrSlopedTile 承担（原版 SmoothSlope :832 同序） */
+ *  smoothSlopeAt 的 SolidOrSlopedTile 承担（原版 SmoothSlope :832 同序）。
+ *  SW-R3 2026-09-03（蓝队 L-2）：①删自格 active 门——原版 CanPoundTile
+ *  （:81972-82020）无自格 active 检查（仅 null 守卫+类型 switch,存活性与
+ *  CanKillTile :62729 裸 active 收口一致）;②上格 :82014 `tile.active()` 裸位。
+ *  曾用 isActive(nactive)=自格误拦已致动格 */
 function canPoundTileAt(st: SlopeStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  if (!st.inBounds(x, y)) return false;
   const t = st.type[st.idx(x, y)];
   if (POUND_BLACKLIST_IDS.has(t) || BOULDER_IDS.has(t)) return false;
   if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
-    if (st.isActive(x, y - 1) && FORBIDS_SLOPING_IDS.has(st.type[up])) return false;
+    if (tileActiveBare(st, x, y - 1) && FORBIDS_SLOPING_IDS.has(st.type[up])) return false;
   }
   return canKillTileAt(st, x, y);
 }
 
 /** 运行期 WorldGen.SolidOrSlopedTile（:70046）：active && tileSolid && !tileSolidTop
- *  ——tileSolid 走运行期 TILE_DEFS.solid 表（区别于生成期 GenSolid 翻转表） */
+ *  ——tileSolid 走运行期 TILE_DEFS.solid 表（区别于生成期 GenSolid 翻转表）。
+ *  SW-R3 2026-09-03（蓝队 L-2）：原版 :70515-70519 `tile.active()` 裸位（不含
+ *  致动位）→ 改 tileActiveBare;曾用 isActive(nactive) 误判已致动格非实心 */
 function solidOrSlopedTileAt(st: SlopeStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  if (!st.inBounds(x, y) || !tileActiveBare(st, x, y)) return false;
   const d = TILE_DEFS[st.type[st.idx(x, y)]];
   return !!d && d.solid && !d.platform;
 }
@@ -607,9 +613,11 @@ function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, 
  *  致动位）。SW-L1 2026-09-03 F10：CanKillTile 三处判格全用裸 active
  *  （本格 :62729/上格 :62735/传送器扫格 :62798）——已致动格仍可被钻头杀。
  *  曾用 isActive(nactive) 误拦致动格。TileStore.flags bit0=active;测试桩缺
- *  flags 时回落 isActive（桩的 isActive 本就是 type!=0 裸口径） */
+ *  flags 时回落 isActive（桩的 isActive 本就是 type!=0 裸口径）。
+ *  SW-R3 2026-09-03（F-7c）：判位改 `(flags & 1) !== 0`——TileStore.flags
+ *  bit0=active、bit1=framedDecor 预留位,`!==0` 会把预留位误读成 active */
 function tileActiveBare(st: DrillStore, x: number, y: number): boolean {
-  if (st.flags) return st.flags[st.idx(x, y)] !== 0;
+  if (st.flags) return (st.flags[st.idx(x, y)] & 1) !== 0;
   return st.isActive(x, y);
 }
 
@@ -691,11 +699,14 @@ export function checkTileBreakabilityAt(st: DrillStore, x: number, y: number, ct
   const i = st.idx(x, y);
   const mine = st.type[i];
   if (y >= 1 && y <= st.h - 1) {                                    // :62410 边界带
-    if (st.inBounds(x, y + 1) && st.isActive(x, y + 1)
+    // SW-R3 2026-09-03（F-7a）：下邻/上邻/传送器扫格三处改裸 active（原版
+    //  CheckTileBreakability :62898 tile3.active() / :62909 tile2.active() /
+    //  :62956 tile4.active() 均不含致动位;曾用 isActive(nactive) 误拦已致动格）
+    if (st.inBounds(x, y + 1) && tileActiveBare(st, x, y + 1)
       && isLockedDoorAt(st, x, y + 1)) return 2;                    // :62422-62425 下方锁门
     const d = TILE_DEFS[mine];
     if (!d || !(d.solid || d.platform)) return 0;                   // :62426-62429 !tileSolid&&!tileSolidTop
-    if (st.isActive(x, y - 1)) {
+    if (tileActiveBare(st, x, y - 1)) {
       const a = st.idx(x, y - 1);
       const above = st.type[a];
       const flag = CONTAINER_IDS.has(mine);                         // IsAContainer(tile)
@@ -732,7 +743,7 @@ export function checkTileBreakabilityAt(st: DrillStore, x: number, y: number, ct
       const baseX = x - Math.trunc(((st.frameX?.[i] ?? 0) % 54) / 18);
       for (let k = 0; k < 3; k++) {
         const bx = baseX + k;
-        if (st.inBounds(bx, y - 1) && st.isActive(bx, y - 1)
+        if (st.inBounds(bx, y - 1) && tileActiveBare(st, bx, y - 1)
           && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) return 2;
       }
     }

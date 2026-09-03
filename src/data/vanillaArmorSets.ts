@@ -15,6 +15,12 @@ export interface ArmorSetBonus {
   critRanged?: number;
   critMagic?: number;
   noKnockback?: boolean;
+  /** lifeRegen += N（原版 :19383-19407 120 单位/tick 累计 1HP → N/2 HP/s;
+   *  Player.ts DD2_PIECE_FX 环消费 → equipStats.hpPerSec） */
+  lifeRegen?: number;
+  /** manaCost -= X（【加算】折扣池——原版 Player.manaCost 单浮点逐项减,
+   *  消费端 (1-manaCostOff)×manaCostMul;manaCostMul 乘区键保留给丛林套旧档） */
+  manaCostOff?: number;
   titaniumStorm?: boolean;   // 钛金全套 on-hit（ArmorSetBonuses.cs:222-225 Titanium→onHitTitaniumStorm）
   ashWood?: boolean;         // ★Notes④ 灰烬木全套（1456 Player.cs:15772-15775 赋位;
                              // 1457 消费位 :27885/:27904——remix 岩浆档 145+半减/OnFire−210/
@@ -176,23 +182,28 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
     { onHitDodge: true }),
 };
 
-// ---- DD2 盔甲散件主属性（Player.cs:12709-12810 胸/腿件——头盔哨兵位已由 SUMMON_GEAR 承载,
-// 此处补齐魔伤/近战暴/远程暴/魔耗/移速等此前缺失的字段,2026-08-13） ----
+// ---- DD2 盔甲散件主属性（GrantArmorBenefits case 3798-3882 :13236-13342 逐件实读,
+//      2026-08-13 建表;2026-09-03 对账批——①补齐 3801 近战伤+0.15/:13250、3804 远程伤
+//      +0.2/:13276、3807 近战伤+0.2/:13263、3872 lifeRegen+8/:13291、3878 远程伤+0.25/
+//      :13320 ②3878 侍从旧衬衫旧 SUMMON_GEAR 条目退役收编至此（同值 dmgMinion 曾在
+//      盔甲扫描位双记 +0.25×2）③3875 魔耗改原版加算池 manaCostOff 0.15（:13306
+//      manaCost -= 0.15f;旧 manaCostMul 0.85 乘区与 3797 并戴时 0.9×0.85=0.765 ≠
+//      原版 1−0.1−0.15=0.75）。头盔面走 vanillaSummonStats.SUMMON_GEAR 扩展字段 ----
 export const DD2_PIECE_FX: Record<number, Partial<ArmorSetBonus>> = {
-  3798: { dmgMagic: 0.1, dmgMinion: 0.2 },
-  3799: { dmgMinion: 0.1, critMagic: 20, move: 0.2 },
-  3801: { dmgMinion: 0.15 },
-  3802: { dmgMinion: 0.15, critMelee: 15, move: 0.15 },
-  3804: { dmgMinion: 0.2 },
-  3805: { dmgMinion: 0.1, move: 0.2 },
-  3807: { dmgMinion: 0.2 },
-  3808: { dmgMinion: 0.1, critMelee: 15, move: 0.2 },
-  3872: { dmgMinion: 0.3 },
-  3873: { dmgMinion: 0.2, critMelee: 20, move: 0.2 },
-  3875: { dmgMinion: 0.25, dmgMagic: 0.1, manaCostMul: 0.85 },
-  3876: { dmgMinion: 0.2, critMagic: 25, move: 0.2 },
-  3878: { dmgMinion: 0.25, ammoCost80: true },
-  3879: { dmgMinion: 0.25, critRanged: 10, move: 0.2 },
-  3881: { meleeSpd: 0.2, critMelee: 5, dmgMinion: 0.2 },
-  3882: { dmgMinion: 0.2, critMelee: 20, move: 0.3 },
+  3798: { dmgMagic: 0.1, dmgMinion: 0.2 },                      // :13236 magic+0.1/minion+0.2
+  3799: { dmgMinion: 0.1, critMagic: 20, move: 0.2 },           // :13240
+  3801: { dmgMelee: 0.15, dmgMinion: 0.15 },                    // :13249 melee+0.15/minion+0.15
+  3802: { dmgMinion: 0.15, critMelee: 15, move: 0.15 },         // :13253
+  3804: { dmgRanged: 0.2, dmgMinion: 0.2 },                     // :13275 ranged+0.2/minion+0.2（省弹 1/10 走 ARMOR_AMMO_SAVE_VID）
+  3805: { dmgMinion: 0.1, move: 0.2 },                          // :13280
+  3807: { dmgMelee: 0.2, dmgMinion: 0.2 },                      // :13262 melee+0.2/minion+0.2
+  3808: { dmgMinion: 0.1, critMelee: 15, move: 0.2 },           // :13266
+  3872: { dmgMinion: 0.3, lifeRegen: 8 },                       // :13289 minion+0.3/lifeRegen+8=4HP/s
+  3873: { dmgMinion: 0.2, critMelee: 20, move: 0.2 },           // :13293
+  3875: { dmgMinion: 0.25, dmgMagic: 0.1, manaCostOff: 0.15 },  // :13303（manaCost−0.15 加算）
+  3876: { dmgMinion: 0.2, critMagic: 25, move: 0.2 },           // :13308
+  3878: { dmgMinion: 0.25, dmgRanged: 0.25, ammoCost80: true }, // :13318 minion+0.25/ranged+0.25/ammoCost80（旧 SUMMON_GEAR 条目已并）
+  3879: { dmgMinion: 0.25, critRanged: 10, move: 0.2 },         // :13323
+  3881: { meleeSpd: 0.2, critMelee: 5, dmgMinion: 0.2 },        // :13333
+  3882: { dmgMinion: 0.2, critMelee: 20, move: 0.3 },           // :13338
 };

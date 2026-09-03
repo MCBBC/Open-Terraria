@@ -410,10 +410,13 @@ describe('⑤ 橡实种弹 1088：重力弧 + 撞块种树', () => {
 // ---------------------------------------------------------------------------
 // ⑥ 迷你核弹伤害盒 + ⑦ 坠落星消耗
 // ---------------------------------------------------------------------------
-describe('⑥ 迷你核弹伤害盒（Kill :74246-74263 Resize(50,50)）', () => {
-  it('hurtBox16 八型给 25（曾恒 11=22×22 盒）', () => {
-    expect(gameSrc).toContain('MINI_NUKE_16');
-    expect(gameSrc).toMatch(/MINI_NUKE_16\.has\(projId\) \? 25/);
+describe('⑥ 迷你核弹伤害盒（SW-R3 2026-09-03 M-4 重锚:PrepareBombToBlow :47684-47688 Resize(250,250)）', () => {
+  it('伤盒=PrepareBombToBlow 半宽 125（旧 25 系 Kill :79630 尘盒 50/2 混用）;809 不在分支→7', () => {
+    expect(Game.PREPARE_BOMB_HURT_BOX[793]).toBe(125);
+    expect(Game.PREPARE_BOMB_HURT_BOX[796]).toBe(125);
+    expect(Game.PREPARE_BOMB_HURT_BOX[808]).toBe(125);
+    expect(Game.PREPARE_BOMB_HURT_BOX[809]).toBeUndefined();   // 原文字面 `808 || 808` 无 809
+    expect(gameSrc).toContain('PREPARE_BOMB_HURT_BOX');
   });
 
   it('音效分档：794/797 = Item62 炮声（:74247-74251），余型 Item14', () => {

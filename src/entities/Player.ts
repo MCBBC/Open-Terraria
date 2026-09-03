@@ -1856,6 +1856,18 @@ export class Player extends Entity {
       if (fx.dmg) minionDmg += fx.dmg;
       if (fx.kb) minionKB += fx.kb;
       if (fx.whipRange) whipRange += fx.whipRange;
+      // ---- 主属性面（SummonFx 扩展字段,2026-09-03 接线退役"登记未接"——DD2 头盔
+      //  散件/禁戒/诡异的主属性 GrantArmorBenefits case 实读值;聚合语义同 accfx 链:
+      //  伤/速/移速加算、暴击加算、耗魔走【加算】manaCostOff 池、lifeRegen 走
+      //  hpPerSec=life/2（原版 120 单位/tick→N/2 HP/s :19383-19407））----
+      if (fx.manaCostOff) manaCostOffAcc += fx.manaCostOff;
+      if (fx.lifeRegen) life += fx.lifeRegen;
+      if (fx.dmgMagic) dmgMagic += fx.dmgMagic;
+      if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
+      if (fx.critRanged) critRanged += fx.critRanged;
+      if (fx.meleeSpeed) meleeSpeed += fx.meleeSpeed;
+      if (fx.move) move += fx.move;
+      if (fx.mana) mana += fx.mana;
       // 1457 鞭 tag 栈族（:13068-13083 if-chain 数值段）
       if (fx.tagDur) tagEffectDuration += fx.tagDur;
       if (fx.maxTag) maxTagEffects += fx.maxTag;
@@ -1897,7 +1909,9 @@ export class Player extends Entity {
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(effArmor(i));   // R4-19
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
-    // DD2 盔甲散件主属性（DD2_PIECE_FX——Player.cs:12709-12810 胸/腿件逐件扫描,2026-08-13）
+    // DD2 盔甲散件主属性（DD2_PIECE_FX——GrantArmorBenefits case 3798-3882 :13236-13342
+    //  胸/腿件逐件扫描;2026-08-13 建,2026-09-03 对账批补 dmgMelee/dmgRanged/lifeRegen/
+    //  manaCostOff 四通道——3801/3807 近战伤、3804/3878 远程伤、3872 再生、3875 耗魔加算）
     for (let _i = 0; _i < 3; _i++) {
       const _fx = DD2_PIECE_FX[hVid + bVid + lVid]; void _fx;
       break;
@@ -1906,6 +1920,8 @@ export class Player extends Entity {
     for (const _v of dd2Vids) {
       const _d = DD2_PIECE_FX[_v];
       if (!_d) continue;
+      if (_d.dmgMelee) dmgMelee += _d.dmgMelee;
+      if (_d.dmgRanged) dmgRanged += _d.dmgRanged;
       if (_d.dmgMagic) dmgMagic += _d.dmgMagic;
       if (_d.dmgMinion) minionDmg += _d.dmgMinion;
       if (_d.critMagic) critMagic += _d.critMagic;
@@ -1913,6 +1929,8 @@ export class Player extends Entity {
       if (_d.critRanged) critRanged += _d.critRanged;
       if (_d.move) move += _d.move;
       if (_d.meleeSpd) meleeSpeed += _d.meleeSpd;
+      if (_d.lifeRegen) life += _d.lifeRegen;             // N/2 HP/s（:19383-19407 120 单位/tick 语义,同 accfx life）
+      if (_d.manaCostOff) manaCostOffAcc += _d.manaCostOff;   // 【加算】折扣池（:13306 manaCost -= 0.15f）
       if (_d.manaCostMul) setManaCostMul *= _d.manaCostMul;
       if (_d.ammoCost80) ammoSaveCost80 = true;
       if (_d.huntressAmmoCost90) ammoSaveHuntress = true;
@@ -1923,8 +1941,11 @@ export class Player extends Entity {
     //  （:13224）；蘑菇矿胸 1549 → ammoCost80=1/5（:13289，accfx 已标 ammoSave 同值）；
     //  水晶忍者胸 4983 → huntressAmmoCost90=1/10（:13206）；女猎手护甲 3804 →
     //  huntressAmmoCost90=1/10（:12754）；女猎手旧衬衫 3878 → ammoCost80=1/5（:12797）。
-    //  ★2758/3804 的 accfx dmg/crit 主属性走 vanilla-accfx（配饰循环不含盔甲三件，
-    //  由 DD2_PIECE_FX/本表承载——已核对原版数值一致）----
+    //  ★accfx 盔甲死键备案（2026-09-03 对账）：vanilla-accfx.json 收录若干甲件主属性行
+    //  （2758 dmgRanged0.12/critRanged12、1001-1003 叶绿、2199-2202 甲虫、551-553/4896-4901
+    //  神圣、4982-4984 日曜…），但 accfx 消费环只扫配饰槽 3+（accFxOfInternal 两调用位
+    //  =配饰循环+divingHelm 专查），盔甲三件面从未消费=死键；3804 远程伤+0.2 已由
+    //  DD2_PIECE_FX（:13275 实读）承载，其余甲件死键属"armorStat 大批"后续批次 ----
     // ★1457 叶绿素套水晶叶三修（OnHit :6986-7036,1456 :6615-6640）——叶绿素套
     //  SetBonus 的水晶叶追踪弹（226 剑气→227 花瓣）三处门：①目标须 CanBeChasedBy
     //  （:6991-6996,1456 无）②226 弹 !active 即跳过（:7000,1456 无 active 检）③

@@ -101,8 +101,11 @@ export function dirtBallDepositTile(
   const i = st.inBounds(tx, ty) ? st.idx(tx, ty) : -1;
   const occupied = !(i >= 0 && (st.type[i] === 0 || (st.flags[i] & 1) === 0));
   let blocked = false;
+  // SW-R3 2026-09-03（蓝队 L-4）：下格门改裸 active——原版 :79250 `tile.active()`
+  // 不含致动位（与 BlockBelowMakesSandFall :87879 的 nactive 判不同函数不同门,
+  // 各自照抄勿混;曾用 isActive(nactive) 误拦已致动轨道/沙下格）
   if (!occupied && ty < st.h - 2 && st.inBounds(tx, ty + 1)
-    && st.isActive(tx, ty + 1)) {
+    && st.hasTile(tx, ty + 1)) {
     const bs = TILE_DEFS[st.type[st.idx(tx, ty + 1)]]?.vanilla?.sheet;
     if (bs === 314 || bs === 421 || bs === 422) blocked = true;
     else if (blockBelowMakesSandFallAt(st, tx, ty)) blocked = true;

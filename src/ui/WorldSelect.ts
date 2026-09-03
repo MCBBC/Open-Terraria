@@ -125,15 +125,38 @@ function copyFallback(text: string): void {
   ta.remove();
 }
 
+/** 天顶帧图 7×16 帧（IconEverythingAnimated 434×960 → 62×60/帧，UIWorldListItem
+ *  _worldIcon 原生贴图尺寸挂载）；同 UI_Bestiary 徽标的小型附加样式（CharSelect
+ *  ensureStyle 之外本面板自有的两条例则，幂等注入） */
+const WSEL_CSS = `
+.sw-vitem-zenith { position:absolute; left:12px; top:50%; transform:translateY(-50%);
+  width:62px; height:60px; image-rendering:pixelated; pointer-events:none; }
+.sw-vitem-mixed { position:absolute; left:12px; top:calc(50% + 11px);
+  width:22px; height:18px; image-rendering:pixelated; pointer-events:none; }
+`;
+let wselStyled = false;
+function ensureWorldSelectStyle(): void {
+  if (wselStyled || typeof document === 'undefined') return;
+  wselStyled = true;
+  const style = document.createElement('style');
+  style.id = 'sw-vsel-extra-style';
+  style.textContent = WSEL_CSS;
+  document.head.appendChild(style);
+}
+
 export class WorldSelectPanel {
   private panel: HTMLElement;
   private body: HTMLElement;
   private closed = false;
   private fileInput: HTMLInputElement;
   private importBusy = false;
+  /** 行内动画定时器（轮播 setInterval / 天顶故障动画 60Hz）——reload 重建与 close
+   *  时全清（行 DOM 随 innerHTML='' 丢弃,孤儿 interval 会一直改写死 img.src） */
+  private iconTimers = new Set<ReturnType<typeof setInterval>>();
 
   constructor(parent: HTMLElement, private store: WorldStore, private flow: WorldSelectFlow) {
     ensureStyle();
+    ensureWorldSelectStyle();
     this.panel = document.createElement('div');
     this.panel.className = 'sw-vsel';
     this.panel.innerHTML = `
@@ -219,6 +242,45 @@ export class WorldSelectPanel {
     // （曾查整个 panel：多行恒中第一行,hover 其它行文字串进首行,2026-08-26 用户报）
     const el = from.closest('.sw-vitem')?.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
     if (el) el.textContent = text;
+  }
+
+  /** 天顶世界行首图标（AWorldListItem.GetIconElement :172-180 + UpdateGlitchAnimation
+   *  :14-33 1:1）：IconEverythingAnimated 7 列变体×16 帧，60fps 逐 Update 帧计数——
+   *  当前帧 0 时停 15-120t（Main.rand.Next(15,121)），其余帧 3t 换帧（Next(3,4)）；
+   *  落到 4/8/12 帧时 1/3 概率（Next(3)==0）换随机变体列（Next(7)）。DOM = 62×60
+   *  canvas 按帧位 blit + 60Hz 定时器（游戏帧时钟等价）。 */
+  private buildZenithGlitchIcon(): HTMLElement {
+    const cv = document.createElement('canvas');
+    cv.width = 62; cv.height = 60;
+    cv.className = 'sw-vitem-zenith';
+    const cx = cv.getContext('2d');
+    const img = new Image();
+    img.src = BTN_SRC('UI_IconEverythingAnimated');
+    let ready = false;
+    img.onload = () => { ready = true; };
+    let variation = 0;   // _glitchVariation
+    let frame = 0;       // _glitchFrame
+    let counter = 0;     // _glitchFrameCounter
+    const tick = () => {
+      if (!ready || !cx || !this.panel.isConnected) return;
+      let min = 3, max = 3;
+      if (frame === 0) { min = 15; max = 120; }
+      // Main.rand.Next(min, max+1) → [min, max] 闭区间
+      if (++counter >= min + Math.floor(Math.random() * (max - min + 1))) {
+        counter = 0;
+        frame = (frame + 1) % 16;
+        if ((frame === 4 || frame === 8 || frame === 12) && Math.floor(Math.random() * 3) === 0) {
+          variation = Math.floor(Math.random() * 7);
+        }
+      }
+      cx.imageSmoothingEnabled = false;
+      cx.clearRect(0, 0, cv.width, cv.height);
+      // SetFrame(7, 16, _glitchVariation, _glitchFrame)（:32-33）
+      cx.drawImage(img, variation * 62, frame * 60, 62, 60, 0, 0, 62, 60);
+    };
+    const timer = setInterval(tick, 1000 / 60);
+    this.iconTimers.add(timer);
+    return cv;
   }
 
   async reload() {
@@ -343,6 +405,8 @@ export class WorldSelectPanel {
     //   （DOM z-20 在 VUI 画布之上）；本行双击也会并发跑两次 loadWorldFlow。
     if (this.closed) return;
     this.closed = true;
+    for (const t of this.iconTimers) clearInterval(t);   // 轮播/故障动画定时器随面板销毁
+    this.iconTimers.clear();
     this.unsubLang?.();
     this.panel.remove();
     fn?.();

@@ -97,6 +97,26 @@ export interface VDust {
    *  无 Dust 链 A/B/老化/重力）——orchestraFx PrettySparkle 站 1:1 迁移载体。 */
   prettySparkle?: boolean;
   ttl?: number;
+  /** ★PrettySparkle 逐粒包络扩展（2026-09-03 拍击石 kind1 焰爆石环带接入）：
+   *  PrettySparkleParticle 的 FadeInEnd/FadeOutStart/FadeOutEnd（Draw :68-69 臂长
+   *  包络,帧×60/TTL 归一格）、FadeInNormalizedTime/FadeOutNormalizedTime（:22-23
+   *  Opacity 包络,归一比）与 DrawVerticalAxis（:26 双臂开关）。undefined =
+   *  FetchFromPool 缺省（20/30/45、0.05/0.9、true）——既有 princess/stardust 站
+   *  零改动（原版不写即缺省）。拍击石站 = 15/15/30、5E-06/0.95、false。 */
+  psFadeInEnd?: number;
+  psFadeOutStart?: number;
+  psFadeOutEnd?: number;
+  psFadeInNorm?: number;
+  psFadeOutNorm?: number;
+  psDrawVert?: boolean;
+  /** _timeSinceSpawn（PrettySparkleParticle.Update :54 逐拍 +1——包络 t 源；
+   *  TimeToLive 初值 = 当前 ttl + psAge） */
+  psAge?: number;
+  /** ★ABasicParticle Scale 二次链（:47-49 ScaleVelocity += ScaleAcceleration;
+   *  Scale += ScaleVelocity）——拍击石 kind1 ScaleAcceleration = (−4,0)/num
+   *  （ParticleOrchestrator.cs:679/:708）。undefined = 无动力学（既有站缺省）。 */
+  scvx?: number; scvy?: number;
+  scax?: number; scay?: number;
 }
 
 /** 尘池容量 = 原版 Main.dust[6000]（Main.cs :734 dust = new Dust[6000]）。
@@ -231,6 +251,16 @@ export class VanillaDust {
     d.ay = undefined;
     d.prettySparkle = undefined;
     d.ttl = undefined;
+    // ★PrettySparkle 逐粒包络扩展池复用归位（缺省 = FetchFromPool 默认包络）
+    d.psFadeInEnd = undefined;
+    d.psFadeOutStart = undefined;
+    d.psFadeOutEnd = undefined;
+    d.psFadeInNorm = undefined;
+    d.psFadeOutNorm = undefined;
+    d.psDrawVert = undefined;
+    d.psAge = undefined;
+    d.scvx = undefined; d.scvy = undefined;
+    d.scax = undefined; d.scay = undefined;
     // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
     if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
       || type === 242 || type === 75 || type === 169 || type === 29 || (type >= 59 && type <= 65)
@@ -318,11 +348,23 @@ export class VanillaDust {
       activeN++;
       // ★双轴通道拍首快照（本拍 scale 合成效应向两轴同步的基准——见 ★双轴同步）
       const scale0 = d.scale;
-      // ★PrettySparkle 专用档（:59-77 Draw / Update=APF+TTL，2026-09-03 迁移批）：
-      //  仅 APF 加速+TTL 定值消亡，跳过 Dust 全部链 A/B/老化/重力——orchestraFx
-      //  PrettySparkle 站迁移载体（ princess/stardust 双轴星芒,drawSparkleArms 承载）
+      // ★PrettySparkle 专用档（:53-59 Update=APF+Scale 二次链+TTL，2026-09-03 迁移批）：
+      //  跳过 Dust 全部链 A/B/老化/重力——orchestraFx PrettySparkle 站迁移载体
+      //  （ princess/stardust/拍击石 kind1 双轴星芒,drawSparkleArms 承载）。
+      //  ★2026-09-03 修：补 AccelerationPerFrame 积分（ABasicParticle.Update :40-41
+      //  Velocity += APF → LocalPosition += Velocity—— princess/stardust 的 ax/ay
+      //  减速弧此前未生效 = 缺陷,原版加速链在位）+ Scale 二次链（:47-49）+ psAge。
       if (d.prettySparkle) {
+        if (d.ax !== undefined) d.vx += d.ax;
+        if (d.ay !== undefined) d.vy += d.ay;
         d.x += d.vx; d.y += d.vy;
+        if (d.scvx !== undefined || d.scvy !== undefined || d.scax !== undefined || d.scay !== undefined) {
+          d.scvx = (d.scvx ?? 0) + (d.scax ?? 0);
+          d.scvy = (d.scvy ?? 0) + (d.scay ?? 0);
+          d.scaleX = (d.scaleX ?? d.scale) + d.scvx;
+          d.scaleY = (d.scaleY ?? d.scale) + d.scvy;
+        }
+        d.psAge = (d.psAge ?? 0) + 1;
         if (d.ttl !== undefined && --d.ttl <= 0) d.active = false;
         continue;
       }

@@ -10,6 +10,8 @@
 // 把补播窗提前到进世界前。定向预热仍用 preloadFiles（如 Boss 召唤前取咆哮声）。
 // hit 敌人受击 / hurt 玩家受击 / pickup 拾取 / dig 挖掘 / place 放置 / drink 饮用 / chop 砍树 / splash 落水
 // + killed 怪物死亡 / zombie 僵尸环境声 / roar Boss咆哮 / coin 拾币 / door_open door_close / tink 敲石 / shatter 玻璃破碎 / drown 溺水
+import { options } from './Options';
+
 export type SfxName =
   | 'hit' | 'hurt' | 'pickup' | 'dig' | 'place' | 'drink' | 'chop' | 'splash'
   | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
@@ -803,8 +805,9 @@ export class Sfx {
   //  + SoundEngine.StopAmbientSounds();AllowMusic(FocusHelper.cs:85-91)=失焦时取
   //  Main.SettingPlayWhenUnfocused(Main.cs:268 默认 false)=失焦全静、后台播放是主动
   //  开关。Web 同构 = 全部 AudioContext suspend/resume(XACT Pause/Resume 与 WebAudio
-  //  suspend 同为「冻结+原地续播」)。★PlayWhenUnfocused 设置项登记未接(最小形态,
-  //  后台听歌需求落地时补 Options+Settings+l10n)。
+  //  suspend 同为「冻结+原地续播」)。★设置项已接(2026-09-03):Options.playWhenUnfocused
+  //  (默认 false=失焦全静)+Settings 行(IngameOptions.cs:637-647 同位)——开关开=闸不落
+  //  (AllowAudioUnfocused :23 直通 true,等价 PauseAll 不触发)。
   private static ctxRegistry = new Set<AudioContext>();
   private static visHooked = false;
 
@@ -825,9 +828,13 @@ export class Sfx {
   }
 
   /** 失焦闸总开关：hidden=true 全部挂起(等价 PauseAll),false 续播(ResumeAll)。
+   *  ★消费 Main.SettingPlayWhenUnfocused(Options.playWhenUnfocused,默认 false):
+   *  开关开=失焦继续播放(FocusHelper.AllowAudioUnfocused :23 → AllowMusic :79 直通),
+   *  闸整体不落——suspend/resume 两向都不动,保后台听歌。
    *  resume 被拒(iOS 低电量模式/无手势历史)时挂下一次 pointerdown 重试——
    *  AudioSystem.armUnlock 手势兜底同款 */
   static setAudioSuspension(hidden: boolean): void {
+    if (hidden && options.data.playWhenUnfocused) return;
     for (const c of Sfx.liveCtxs()) {
       if (hidden) {
         if (c.state === 'running') void c.suspend().catch(() => {});
@@ -857,10 +864,10 @@ export class Sfx {
       Sfx.registerAudioContext(this.ctx);
       Sfx.hookVisibilityOnce();
     }
-    // ★失焦闸配合：隐藏期间禁止自动 resume(否则网络回调等触发的 ensure 会拆闸)
-    // ★失焦闸配合：隐藏期间禁止自动 resume(否则隐藏期任何 ensure 调用拆闸);
+    // ★失焦闸配合：隐藏期间禁止自动 resume(否则网络回调等触发的 ensure 会拆闸);
+    //   playWhenUnfocused 开=失焦继续播放,隐藏不拦 resume(AllowMusic 直通同构);
     //   node 单测无 document → 视为可见
-    const pageHidden = typeof document !== 'undefined' && document.hidden;
+    const pageHidden = typeof document !== 'undefined' && document.hidden && !options.data.playWhenUnfocused;
     if (this.ctx.state === 'suspended' && !pageHidden) this.ctx.resume().catch(() => {});
     this.warmup();
     return this.ctx;

@@ -10,6 +10,19 @@ export interface SummonFx {
   dmg?: number;       // minionDamage += X（加算乘区）
   kb?: number;        // minionKB += N
   whipRange?: number; // whipRangeMultiplier += X
+  // ---- 主属性面（2026-09-03 接线,退役旧注"armorStat 大批,登记未接"——数值全部
+  //  GrantArmorBenefits case 实读（Terraria/Player.cs 1457）,聚合语义与 accfx 链同名同式：
+  //  耗魔=【加算】折扣池（原版 Player.manaCost 单浮点逐项 -=,消费端 (1-manaCostOff)×manaCostMul,
+  //  禁用乘区——乘 0.9×0.85=0.765 ≠ 原版加算 1-0.1-0.15=0.75）；
+  //  lifeRegen 走原版 120 单位/tick 累计 1HP 语义（:19383-19407 → N/2 HP/s,equipStats.hpPerSec）----
+  manaCostOff?: number;  // manaCost -= X（3797 :13233 / 3875 :13306）
+  lifeRegen?: number;    // lifeRegen += N（3800 :13247 / 3872 :13291）
+  dmgMagic?: number;     // magicDamage += X（3797 :13234 / 3776 :13370 / 3778 :13382 / 3874 :13300 / 3875 :13305）
+  dmgMelee?: number;     // meleeDamage += X（3871 :13286 / 3880 :13331 / 3801 :13250 / 3807 :13263）
+  critRanged?: number;   // rangedCrit += N（3803 :13273 / 3877 :13316）
+  meleeSpeed?: number;   // meleeSpeed += X（3806 :13260）
+  move?: number;         // moveSpeed += X（1834 :14047）
+  mana?: number;         // statManaMax2 += N（3777 :13375 / 3778 :13381）
   /** 1457 鞭 tag 栈族（ApplyEquipFunctional :13068-13083）：
    *  tagEffectDuration += N（SilverBracer 6156 系 +2 → tag/proc/buff 时长 ×3） */
   tagDur?: number;
@@ -32,7 +45,9 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   1864: { slot: 1, dmg: 0.15, kb: 2 },  // 纸莎草圣甲虫
   2998: { dmg: 0.15 },                  // 召唤师徽章（:14891-14894 minionDamage += 0.15——审计 P0 漏件）
   3809: { dd2: true },              // 学徒围巾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
-  3878: { dmg: 0.25 },                   // 忍者大师装备（:12799 minionDamage+25%+ammoCost80）
+  // （3878 侍从旧衬衫 T3 胸件旧条目 {dmg:0.25} 已退役：它是胸甲非配饰,同值曾与
+  //  vanillaArmorSets.DD2_PIECE_FX[3878].dmgMinion 在盔甲扫描位双记（+0.25×2）,
+  //  全量（含 dmgRanged 0.25 :13320/ammoCost80）收编到 DD2_PIECE_FX 单源）
   3810: { dd2: true },              // 侍从盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
   3811: { dd2: true },              // 女猎手扣盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
   3812: { dd2: true },              // 武僧腰带（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
@@ -58,28 +73,32 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   6183: { tagDur: 2, maxTag: 1 },                 // 白银之盾 = 6156+免击退+火焰块（Player 侧）
   6186: { snakeBand: true },                      // 德鲁伊蛇斗篷 = 6157+星星斗篷（:14726-14729,星斗篷旗 Player 侧）
 
-  // ---- DD2 头盔散件（ApplyEquipFunctional :12709-12810:头盔 maxTurrets;2026-08-13 补——
-  // 旧缺 8 件致哨兵上限卡 ~3。T1 头 3797/3800/3803/3806 各 +1;T3 头 3871/3874/3877/3880
-  // 各 +2;T3 头另带 minionDamage（3871 +0.1/3874 +0.15/3877 +0.1/3880 +0.2）。
-  // ★世代勘误:3797-3808=T2 族（T1 无头盔散件 maxTurrets）
-  // 主属性（manaCost/魔伤/再生/暴击/攻速等）走 armorStat 大批,登记未接 ----
-  3797: { sentry: 1 },                 // 学徒帽 T2（:12711 +1;manaCost-0.1/魔伤+0.1）
-  3800: { sentry: 1 },                 // 侍从头盔 T2（:12721 +1;lifeRegen+4）
-  3803: { sentry: 1 },                 // 女猎手头巾 T2（:12740 +1;远程暴+10）
-  3806: { sentry: 1 },                 // 武僧头带 T2（:12732 +1;近战速+0.2）
-  3871: { sentry: 2, dmg: 0.10 },      // 学徒战斗帽 T3（:12763 +2;近战/召唤伤+0.1）
-  3874: { sentry: 2, dmg: 0.15 },      // 侍从巨盔 T3（:12770 +2）
-  3877: { sentry: 2, dmg: 0.10 },      // 女猎手服 T3（:12786 +2;远程暴+10）
-  3880: { sentry: 2, dmg: 0.20 },      // 武僧束发 T3（:12807 +2;近战伤+0.2）  // 盔甲散件
-  2361: { slot: 1, dmg: 0.04 },         // 蜂头饰
-  2362: { slot: 1, dmg: 0.04 },         // 蜂胸甲
-  2363: { dmg: 0.05 },                  // 蜂护胫（无槽）
-  2370: { slot: 1, dmg: 0.05 },         // 蜘蛛面具
-  2371: { slot: 1, dmg: 0.05 },         // 蜘蛛胸甲
-  2372: { slot: 1, dmg: 0.06 },         // 蜘蛛护胫
-  3266: { dmg: 0.08 },                  // 黑曜头
-  3267: { slot: 1 },                    // 黑曜衫
-  3268: { dmg: 0.08 },                  // 黑曜裤
+  // ---- DD2 头盔散件（GrantArmorBenefits case 3797-3880 :13231-13332 实读,2026-09-03
+  //  主属性接线,旧注"主属性走 armorStat 大批,登记未接"退役。哨兵位 2026-08-13 补——
+  //  旧缺 8 件致哨兵上限卡 ~3。T2 头 3797/3800/3803/3806 各 maxTurrets++;T3 头
+  //  3871/3874/3877/3880 各 maxTurrets += 2;T3 头另带 minionDamage（3871 +0.1/
+  //  3874 +0.15/3877 +0.1/3880 +0.2）。主属性面走上方扩展字段,sumFx（Player.ts
+  //  盔甲三件+配饰两扫）消费。
+  //  ★世代勘误:3797-3808=T2 族（T1 无头盔散件 maxTurrets）;套键 = itemstats hs——
+  //  3871 hs210='210|204|152' squireT3 ⇒ 3871=侍从巨盔、3874 hs211=学徒战斗帽
+  //  （旧注两名互换已正,与原版伤系自洽:侍从近战/学徒魔法）----
+  3797: { sentry: 1, manaCostOff: 0.1, dmgMagic: 0.1 },   // 学徒帽 T2（:13231 maxTurrets++/manaCost−0.1/magicDamage+0.1）
+  3800: { sentry: 1, lifeRegen: 4 },                       // 侍从头盔 T2（:13245 maxTurrets++/lifeRegen+4=2HP/s）
+  3803: { sentry: 1, critRanged: 10 },                     // 女猎手头巾 T2（:13271 maxTurrets++/rangedCrit+10）
+  3806: { sentry: 1, meleeSpeed: 0.2 },                    // 武僧头带 T2（:13258 maxTurrets++/meleeSpeed+0.2）
+  3871: { sentry: 2, dmg: 0.10, dmgMelee: 0.10 },          // 侍从巨盔 T3（:13284 maxTurrets+=2/meleeDamage+0.1/minionDamage+0.1——近战与召唤同值）
+  3874: { sentry: 2, dmg: 0.15, dmgMagic: 0.15 },          // 学徒战斗帽 T3（:13298 maxTurrets+=2/magicDamage+0.15/minionDamage+0.15）
+  3877: { sentry: 2, dmg: 0.10, critRanged: 10 },          // 女猎手服 T3（:13313 maxTurrets+=2/minionDamage+0.1/rangedCrit+10）
+  3880: { sentry: 2, dmg: 0.20, dmgMelee: 0.20 },          // 武僧束发 T3（:13328 maxTurrets+=2/minionDamage+0.2/meleeDamage+0.2）
+  2361: { slot: 1, dmg: 0.04 },         // 蜂头饰（:13918 maxMinions++/minionDamage+0.04——原版仅召唤面,核实无散件主属性）
+  2362: { slot: 1, dmg: 0.04 },         // 蜂胸甲（:13923 同上）
+  2363: { dmg: 0.05 },                  // 蜂护胫（无槽;:13928 minionDamage+0.05 仅召唤面）
+  2370: { slot: 1, dmg: 0.05 },         // 蜘蛛面具（:13960 maxMinions++/minionDamage+0.05 仅召唤面）
+  2371: { slot: 1, dmg: 0.05 },         // 蜘蛛胸甲（:13960 同上）
+  2372: { slot: 1, dmg: 0.06 },         // 蜘蛛护胫（:13965 maxMinions++/minionDamage+0.06 仅召唤面）
+  3266: { dmg: 0.08 },                  // 黑曜头（:13932 minionDamage+0.08 仅召唤面）
+  3267: { slot: 1 },                    // 黑曜衫（:13936 maxMinions++ 仅此一项）
+  3268: { dmg: 0.08 },                  // 黑曜裤（:13940 minionDamage+0.08 仅召唤面）
   3381: { slot: 1, sentry: 1, dmg: 0.22 },            // 星尘头盔（同加两链！）
   3382: { slot: 2, dmg: 0.22, whipRange: 0.15 },      // 星尘胸甲
   3383: { slot: 2, dmg: 0.22, whipRange: 0.15 },      // 星尘护腿
@@ -88,10 +107,10 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   1161: { slot: 1, dmg: 0.10 },         // 提基裤
   1832: { slot: 1, dmg: 0.11 },         // 诡异头盔
   1833: { slot: 2, dmg: 0.11 },         // 诡异胸甲
-  1834: { slot: 1, dmg: 0.11 },         // 诡异护腿
-  3776: { dmg: 0.15 },                  // 禁戒面具（另 magicDmg——accfx 主链管）
-  3777: { slot: 1, dmg: 0.10 },         // 禁戒长袍
-  3778: { slot: 1 },                    // 禁戒裤
+  1834: { slot: 1, dmg: 0.11, move: 0.2 },  // 诡异护腿（:14045 moveSpeed+0.2——accfx '1834' 同值条目为盔甲面死键,由本表承载）
+  3776: { dmg: 0.15, dmgMagic: 0.15 },  // 禁戒面具（:13368 magicDamage+0.15——旧注"accfx 主链管"系死链:accfx 消费环只扫配饰槽 3+,盔甲面由本表扩展字段承载）
+  3777: { slot: 1, dmg: 0.10, mana: 40 },     // 禁戒长袍（:13373 statManaMax2+40）
+  3778: { slot: 1, mana: 40, dmgMagic: 0.10 }, // 禁戒裤（:13379 statManaMax2+40/magicDamage+0.1）
   4873: { slot: 1, dmg: 0.10 },         // 神圣兜帽
   4899: { slot: 1, dmg: 0.10 },         // 神圣面具(远古)
   5524: { slot: 1, dmg: 0.16 },         // 绿藻头饰

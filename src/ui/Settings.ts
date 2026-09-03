@@ -539,6 +539,16 @@ export class SettingsPanel {
           () => Lang.menu(d.autoPause ? 69 : 70),
           () => void options.set('autoPause', !d.autoPause),
         ),
+        // 失焦播放（:637-647 Main.SettingPlayWhenUnfocused 默认 false=失焦全静；
+        // 消费 FocusHelper.cs:23/:79/:140 → 本仓 Sfx 失焦音频闸。行序紧随 autoPause
+        // 与原版 Gameplay 段一致。文案键 UI.PlayWhenUnfocusedOn/Off 为原版官译——
+        // 键名 On/Off 与行内"暂停：开/关"文案反向是原版原文（On=失焦播放,即暂停关））
+        this.modeRow(
+          Lang.text('UI.PlayWhenUnfocusedOn').replace(/[:：].*$/, ''),
+          () => String(d.playWhenUnfocused),
+          () => Lang.text(d.playWhenUnfocused ? 'UI.PlayWhenUnfocusedOn' : 'UI.PlayWhenUnfocusedOff'),
+          () => void options.set('playWhenUnfocused', !d.playWhenUnfocused),
+        ),
         // 显示说明书按钮（说明书勾"不再显示"后在此重开；manualHidden 落盘）
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.ShowManual'),

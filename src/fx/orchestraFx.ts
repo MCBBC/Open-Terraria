@@ -116,6 +116,7 @@
 // 粒子色彩：Main.hslToRgb(h,s,l) css 近似——伪彩虹族（RainbowRodHit 等）直接消费。
 import type { GameHooks } from '../entities/types';
 import { playHurtVoice } from '../player/PlayerVoice';
+import { fadingParticles } from './FadingParticles';
 
 /** 测试/生成共用 rng 形参缺省 */
 type Rng = () => number;
@@ -2072,9 +2073,15 @@ export function lakeSparkleFx(
 /**
  * 拍击石系三味 Spawn_ 环带段（:593/:649/:734）——SnapStrike 尘链外补 FadingParticle/
  * PrettySparkle 环带与三味音（Item72 vol1/PyroclasticStone vol.5/ArmletOfRuin vol.5）:
- * kind0 Stone：2× 圈起（Delay=Y×3 无延迟通道登记）;
- * kind1 Melee：红/金两向 sparkles（bolt 相位 ±0.05τ）+ d6 成对微尘;
- * kind2 Summon：proj1132 圈起×2+d172×15/d211×8 圆阵（1/6 重力回落 scale×.25）。
+ * kind0 Stone：FadingParticle×2（Projectile_1121 蓝圈,Delay=Y×3,fadingParticles 池）;
+ * kind1 Melee：PrettySparkle×2 红/金（prettySparkle 专用档+逐粒包络 ps*,DrawVerticalAxis
+ *   =false 只画水平臂）+ d6 成对微尘;
+ * kind2 Summon：FadingProjectile_1132 圈起×2 + Extra_34 旋星×1（fadingParticles 池,
+ *   Delay=Y×3）+ d172×15/d211×8 圆阵（1/6 重力回落 scale×.25）。
+ * ★池化清偿（2026-09-03）：旧 spawnParticles 方块近似退役——FadingParticle 走
+ *   fx/FadingParticles.ts 真池（ABasicParticle/FadingParticle.Update 1:1+贴图/包络
+ *   逐值）,PrettySparkle 走 VanillaDust prettySparkle 档（psFadeInEnd/psDrawVert/
+ *   scax 等逐粒包络扩展,缺省=FetchFromPool 默认,princess/stardust 零改动）。
  * ★W-A1（2026-09-03 本/远端口径统一）：形参 = 编排载荷 MovementVector.X【原值】——
  *   与 snapStrikeDust 同一口径（禁收端预除 256）。三种消费式逐一对原文：
  *   kind0 num = 钳(X/256, ≤.12)（:602/:606-608）→ 圈起 size=6×num（:619 (6,6)×num/20）;
@@ -2090,13 +2097,24 @@ export function snappingStoneRingFx(
   if (kind === 0) {
     const ms = Math.min(0.12, mvX / 256);                  // :602 + :606-608
     game.playSfxWav?.('Item_72', 1, x, y);
+    // ★环带 1:1（2026-09-03 池化清偿）：FadingParticle×2（:610-627）——
+    //  贴图 = Projectile[1121]（:595 LoadProjectile）、ColorTint (30,180,255,0)
+    //  （:612 纯加法档）、SetBasicInfo(·,null,Zero,Zero)（:614 静止起步）、
+    //  SetTypeInfo(20)（:615 TTL）、FadeIn/OutNormalizedTime 0.1/0.1（:617-618）、
+    //  Scale=Zero → ScaleVelocity=(6,6)×num/20（:619）→ ScaleAcceleration=−sv/20
+    //  （:620 圈起先胀后缩）、LocalPosition=载荷位、Delay=(int)MovementVector.Y×3
+    //  （:625——Y=出弹序号+1 :14429/受击者拍 Y=0 :14433,延迟出圈节拍）
     for (let i = 0; i < 2; i++) {
-      game.spawnParticles?.(x, y, 'rgba(30,180,255,0)', 1, 0,
-        { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 6 * ms });   // :619
+      fadingParticles.spawn({
+        x, y,
+        timeToLive: 20, fadeIn: 0.1, fadeOut: 0.1,
+        scaleVelX: (6 * ms) / 20, scaleVelY: (6 * ms) / 20,
+        scaleAccX: -((6 * ms) / 20) / 20, scaleAccY: -((6 * ms) / 20) / 20,
+        tint: [30, 180, 255, 0],
+        texKey: 'vanilla/Projectile_1121.png',
+        delay: delayTicks * 3,
+      });
     }
-    void delayTicks;        // ★L5 节拍核对（:625 Delay=(int)MovementVector.Y×3t,Y=出弹序号
-                            //   +1 :14429/受击者拍 Y=0 :14433——载荷双面已按原文钉齐
-                            //   SnapStrike.ts;本池 spawnParticles 无延迟通道,视觉零延迟登记）
     return;
   }
   if (kind === 1) {
@@ -2113,24 +2131,35 @@ export function snappingStoneRingFx(
     //  单掷共享）。旧金臂 π/4+π/2=3π/4 的 45° 分叉系自造
     const a0 = Math.PI / 4 + Math.PI / 4 + boltPhase;
     const posOff = num2 * 30 * 0.15 + spd * 4;             // 基支 63（:683/:711）+恒真支 84（:692/:719）
-    // 红 sparkle（num5 循环 :667-695,单次）——★MINOR（L′ 对抗批）：红臂色=原版 :665
-    //  Color(1f,0f,0f,0.5f)（旧 (255,40,20) 臆造偏色已正）
-    // ★⑨lifeExact 清偿（2026-09-03）：TTL=int num=30 定值（:658 → TimeToLive=num
-    //  :677 红/:706 金）——旧 life:30 抖动档实得 30×(0.6+0.4r)∈[18,30] 系统性偏短
-    // ★★size 归位（2026-09-03 本批）：旧 11/7=1.1/0.7×10 臆断基退役。换算式
-    //  （本仓 size 语义=世界 px 方块边长,Renderer 画 fillRect(size,size)）：
-    //  PrettySparkleParticle.Draw（PrettySparkleParticle.cs:59-77）只画水平臂
-    //  （:686/:713 DrawVerticalAxis=false）,臂 scale=(0.3,2)×Scale → 长轴=2×Scale.Y
-    //  （T5 cattiva 同款换算,Extra[98] 纹理基尺并档登记债）→
-    //    红 = 2×Scale.Y = 2×(2×1.1)×1.5 = 6.6（Scale=(8,2)×1.1 :674,×1.5 恒真支 :690）
-    //    金 = 2×Scale.Y = 2×(2×0.7)×1.5 = 4.2（×0.7 :703,×1.5 恒真支 :717）
-    game.spawnParticles?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff,
-      'rgba(255,0,0,0.5)', 1, spd,
-      { lifeExact: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: 6.6 });
-    // 金 sparkle（num6 循环 :696-731,单次;色 :666 Color(1f,0.95f,0f,1f)）
-    game.spawnParticles?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff,
-      'rgba(255,242,0,1)', 1, spd,
-      { lifeExact: 30, vx: Math.cos(a0) * spd, vy: Math.sin(a0) * spd, damp: 0.97, size: 4.2 });
+    // ★环带 1:1（2026-09-03 池化清偿）：PrettySparkle×2 → spawnDust prettySparkle
+    //  专用档（Renderer.drawSparkleArms 双轴星芒承载,逐粒包络 ps* 字段）——
+    //  红（num5 循环 :667-695）/金（num6 循环 :696-731）逐值：
+    //   TTL=int num=30 定值（:658 → :677/:706）;FadeIn/OutEnd=15/15、FadeOutEnd=30
+    //  （:675-676/:704-705 num/2、num）;FadeIn/OutNormalizedTime=5E-06/0.95
+    //  （:675/:676——Opacity 档,前 1 拍全亮、末 5% 淡出）;Scale=(8,2)×1.1|0.7 再 ×1.5
+    //  恒真支（:674/:703+ :690/:717）;ScaleAcceleration=vector/num=(−4,0)/30（:679/:708）;
+    //  Rotation=vector3.ToRotation()=a0（:672/:701）;Velocity=dir×14 →×1.5=dir×21
+    //  （:677/:706+ :690/:717）;AccelerationPerFrame=−Velocity/num【APF 赋值序在 ×1.5
+    //  之前】=−dir×14/30（:681-684/:710-712）;DrawVerticalAxis=false 只画水平臂
+    //  （:686/:713）;LocalPosition=位−dir×147（基支+恒真支）;AdditiveAmount=0.35
+    //  （:678/:707——只调 ColorTint.A 的 dst 衰减项,纯加色档不可观测,登记既有）。
+    //  色：红 Color(1f,0f,0f,0.5f)（:665）/金 Color(1f,0.95f,0f,1f)（:666）→ rgb 直入。
+    const mkRing = (r: number, g: number, b: number, sxMul: number, syMul: number): void => {
+      const sp = game.spawnDust?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff, 0, 0, 0,
+        Math.cos(a0) * spd, Math.sin(a0) * spd, 0, { r, g, b, a: 0 }, 1, true, true, true);
+      if (!sp) return;
+      sp.prettySparkle = true;
+      sp.ttl = 30; sp.psAge = 0;
+      sp.scaleX = sxMul * 1.5; sp.scaleY = syMul * 1.5;
+      sp.scax = -4 / 30; sp.scay = 0;
+      sp.rotation = a0;
+      sp.ax = -(Math.cos(a0) * num2) / 30; sp.ay = -(Math.sin(a0) * num2) / 30;
+      sp.psFadeInEnd = 15; sp.psFadeOutStart = 15; sp.psFadeOutEnd = 30;
+      sp.psFadeInNorm = 5e-6; sp.psFadeOutNorm = 0.95;
+      sp.psDrawVert = false;
+    };
+    mkRing(255, 0, 0, 8.8, 2.2);           // 红（:665/:674）
+    mkRing(255, 242, 0, 5.6, 1.4);         // 金（:666 0.95×255=242.25 → 242/:703）
     // d6 成对微尘【只挂金带内】（:722-730 i 循环 ×2,每轮 ± 金臂各一粒 NewDustPerfect;
     //  旧挂在红/金两色循环内=红臂也对生一对,方向标签错但数值恰同（T3 后红金同角）——
     //  本批按原版嵌套重构,掷数/掷序不变：每轮 正臂 ja→spd2 → 负臂 ja→spd2（:724 正臂
@@ -2156,10 +2185,35 @@ export function snappingStoneRingFx(
   }
   game.playSfxWav?.('armlet_of_ruin', 0.5, x, y);
   const numSummon = 0.12;                     // :743 num=1f 字面常量（载荷无关）→ 钳 :747-749 恒 .12
+  // ★环带 1:1（2026-09-03 池化清偿）：FadingParticle 段（:752-787）——
+  //  双圈×2 = Projectile[1132]（:754 LoadProjectile）、ColorTint (90,110,255,90)
+  //  （:750 colorTint 覆写 :753/:755 两连写死值,A>0=预乘半透档）、SetTypeInfo(20)、
+  //  FadeIn/OutNormalizedTime 0.1/0.3（:758-759）、ScaleVelocity=(9,9)×num/20 →
+  //  ScaleAcceleration=−sv/20（:761-762）、Delay=Y×3（:766）;
+  //  旋星×1 = Extra[34]（:757 TextureAssets.Extra[34]）、FadeIn/Out 0.1/0.5（:778-779）、
+  //  RotationVelocity=NextFloatDirection×τ×0.33/60（:784）、Rotation=NextFloat×τ（:785）。
   for (let i = 0; i < 2; i++) {
-    game.spawnParticles?.(x, y, 'rgba(90,110,255,0.35)', 1, 0,
-      { life: 20, vx: 0, vy: 0, damp: 1, grav: 0, size: 9 * numSummon });   // :763/:780
+    fadingParticles.spawn({
+      x, y,
+      timeToLive: 20, fadeIn: 0.1, fadeOut: 0.3,
+      scaleVelX: (9 * numSummon) / 20, scaleVelY: (9 * numSummon) / 20,
+      scaleAccX: -((9 * numSummon) / 20) / 20, scaleAccY: -((9 * numSummon) / 20) / 20,
+      tint: [90, 110, 255, 90],
+      texKey: 'vanilla/Projectile_1132.png',
+      delay: delayTicks * 3,
+    });
   }
+  fadingParticles.spawn({
+    x, y,
+    timeToLive: 20, fadeIn: 0.1, fadeOut: 0.5,
+    scaleVelX: (9 * numSummon) / 20, scaleVelY: (9 * numSummon) / 20,
+    scaleAccX: -((9 * numSummon) / 20) / 20, scaleAccY: -((9 * numSummon) / 20) / 20,
+    tint: [90, 110, 255, 90],
+    texKey: 'vanilla/Extra_34.png',
+    delay: delayTicks * 3,
+    rotVel: (rng() * 2 - 1) * Math.PI * 2 * 0.33 / 60,   // :784 NextFloatDirection
+    rot: rng() * Math.PI * 2,                            // :785 NextFloat
+  });
   for (const [type, n] of [[172, 15], [211, 8]] as Array<[number, number]>) {   // :788-813
     for (let k = 0; k < n; k++) {
       const sp = circ(rng, 10);                          // Circular(10,10)（:792/:805）
