@@ -2108,6 +2108,7 @@ export function snappingStoneRingFx(
       fadingParticles.spawn({
         x, y,
         timeToLive: 20, fadeIn: 0.1, fadeOut: 0.1,
+        scale: 0,                                          // Scale=Vector2.Zero（:618 圈起自零成长）
         scaleVelX: (6 * ms) / 20, scaleVelY: (6 * ms) / 20,
         scaleAccX: -((6 * ms) / 20) / 20, scaleAccY: -((6 * ms) / 20) / 20,
         tint: [30, 180, 255, 0],
@@ -2196,6 +2197,7 @@ export function snappingStoneRingFx(
     fadingParticles.spawn({
       x, y,
       timeToLive: 20, fadeIn: 0.1, fadeOut: 0.3,
+      scale: 0,                                            // :760 Scale=Zero
       scaleVelX: (9 * numSummon) / 20, scaleVelY: (9 * numSummon) / 20,
       scaleAccX: -((9 * numSummon) / 20) / 20, scaleAccY: -((9 * numSummon) / 20) / 20,
       tint: [90, 110, 255, 90],
@@ -2206,6 +2208,7 @@ export function snappingStoneRingFx(
   fadingParticles.spawn({
     x, y,
     timeToLive: 20, fadeIn: 0.1, fadeOut: 0.5,
+    scale: 0,                                              // :777 Scale=Zero
     scaleVelX: (9 * numSummon) / 20, scaleVelY: (9 * numSummon) / 20,
     scaleAccX: -((9 * numSummon) / 20) / 20, scaleAccY: -((9 * numSummon) / 20) / 20,
     tint: [90, 110, 255, 90],

@@ -405,6 +405,8 @@ export enum BuffType {
   // UpdateJumpHeight)。Ogre AI 批落地敌侧后经通用 StatusPlayer 链自动上人。
   Dazed = 322,                 // 眩晕(160)：美杜莎之首 PvP 命中族
   OgreSpit = 323,              // 分泌物(197)：DD2 巨魔喷吐团 Death 近身施加(:74093)
+  Merfolk = 324,               // 人鱼(34)：纯指示 buff——Player.AddBuff(34,2) 每帧续钉
+                               //   （:25780），效果面全在 merman 字段（呼吸/物理/accFlipper）
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -483,6 +485,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Builder]: { vanillaBuff: 107, descKey: 'Mods.SandboxWorld.Buff.Builder.Desc', fallbackName: '建筑工' },
   [BuffType.Heartreach]: { vanillaBuff: 105, descKey: 'Mods.SandboxWorld.Buff.Heartreach.Desc', fallbackName: '拾心' },
   [BuffType.FlipperPotion]: { vanillaBuff: 109, descKey: 'Mods.SandboxWorld.Buff.FlipperPotion.Desc', fallbackName: '脚蹼' },
+  [BuffType.Merfolk]: { vanillaBuff: 34, descKey: 'Mods.SandboxWorld.Buff.Merfolk.Desc', fallbackName: '人鱼' },
   [BuffType.Titan]: { vanillaBuff: 108, descKey: 'Mods.SandboxWorld.Buff.Titan.Desc', fallbackName: '泰坦' },
   [BuffType.AmmoReservation]: { vanillaBuff: 112, descKey: 'Mods.SandboxWorld.Buff.AmmoReservation.Desc', fallbackName: '弹药储备' },
   [BuffType.Lifeforce]: { vanillaBuff: 113, descKey: 'Mods.SandboxWorld.Buff.Lifeforce.Desc', fallbackName: '生命力' },

@@ -10,7 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   mountHorizontalCharges, grantCollisionAttackImmunity, chilletDashCharge,
-  MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
+  isConsideredASlimeMount, MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
 import { playerHurtFloatColor } from '../fx/CombatTextColors';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldownBuckets';
@@ -1936,12 +1936,12 @@ export class Player extends Entity {
       if (_d.ammoCost80) ammoSaveCost80 = true;
       if (_d.huntressAmmoCost90) ammoSaveHuntress = true;
     }
-    // ---- 盔甲单件省弹门（Player.cs ApplyEquipFunctional armorPiece.type if-chain +
-    //      :12709 switch 逐件 1:1——提取器 accfx 表漏标 2758/1002 档位键，此处手读直表）：
-    //  星旋胸 2758 → ammoCost75=1/4（:13484）；叶绿头 1002 → chloroAmmoCost80=1/5
-    //  （:13224）；蘑菇矿胸 1549 → ammoCost80=1/5（:13289，accfx 已标 ammoSave 同值）；
-    //  水晶忍者胸 4983 → huntressAmmoCost90=1/10（:13206）；女猎手护甲 3804 →
-    //  huntressAmmoCost90=1/10（:12754）；女猎手旧衬衫 3878 → ammoCost80=1/5（:12797）。
+    // ---- 盔甲单件省弹门（Player.cs GrantArmorBenefits if-chain + :13226 switch 逐件
+    //      1:1——提取器 accfx 表漏标 2758/1002 档位键，此处手读直表；行号 1457 重锚）：
+    //  星旋胸 2758 → ammoCost75=1/4（:14008）；叶绿头 1002 → chloroAmmoCost80=1/5
+    //  （:13749）；蘑菇矿胸 1549 → ammoCost80=1/5（:13815，accfx 已标 ammoSave 同值）；
+    //  水晶忍者胸 4983 → huntressAmmoCost90=1/10（:13734）；女猎手护甲 3804 →
+    //  huntressAmmoCost90=1/10（:13278）；女猎手 T3 胸 3878 → ammoCost80=1/5（:13321）。
     //  ★accfx 盔甲死键备案（2026-09-03 对账）：vanilla-accfx.json 收录若干甲件主属性行
     //  （2758 dmgRanged0.12/critRanged12、1001-1003 叶绿、2199-2202 甲虫、551-553/4896-4901
     //  神圣、4982-4984 日曜…），但 accfx 消费环只扫配饰槽 3+（accFxOfInternal 两调用位
@@ -3352,6 +3352,17 @@ export class Player extends Entity {
     this.inHoney = liquidCollision(world.store, this.cx - honeyW / 2, (this.y + this.h / 2) - honeyH / 2,
       honeyW, honeyH, 3);
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
+    // ★人鱼化（Player.cs:25774-25785，2026-09-03 备案清偿②）：accMerman 装备 +
+    // wet(任意液体,inWater 已含蜜) && !lavaWet && 非史莱姆坐骑 → merman=true +
+    // accFlipper=true（湿跳门 flipperOn 消费 :25779）+ AddBuff(34,2) 每帧续钉
+    // （2t=1/30s 亚 50ms 不落盘，toSave 既有口径）;else merman=false（终态每帧
+    // 由此块裁定——原版 :23426 呼吸段的早置位会被此处 else 覆写）。
+    // wings=0（:25778）为视觉字段，flag19 用 wingsLogic 不清 → **人鱼形态翅膀
+    // 照常可飞**（本仓无人鱼形体渲染，翼保持显示；旧"变身清翼禁飞"系误读）。
+    // 旧版把置位挂在呼吸段（仅头部浸水触发，窄于原版 body-wet）且湿跳门漏 accFlipper
+    this.merman = this.equipStats.merman && this.inWater && !this.inLava
+      && !(this.ridingMount && isConsideredASlimeMount(this.mount.type));
+    if (this.merman) this.buffs.apply(BuffType.Merfolk, 2 / 60);
     // ★附带① 出水截跳标记（Player.cs:28074 消费段的进入门 = `else if (wet)`，即
     //   wet 翻转 false 的这一帧）：wet ≙ inWater∪inLava∪inHoney（三桶并集同 :28195
     //   注释口径）。标记在跳跃段尾消费（clip 对本帧新起跳同样生效——原版 Update 内
@@ -3566,12 +3577,9 @@ export class Player extends Entity {
     if (this.shimmering) drown = false;  // :22950-22952 微光化不淹
     // mount.Type==4 海龟坐骑免淹（:22953）——坐骑系统已实装，接线
     if (this.ridingMount && this.mount.type === 4) drown = false;
-    if (this.equipStats.merman) {        // :22957-22964 accMerman：水中不耗气并人鱼化
-      if (drown) this.merman = true;
-      drown = false;
-    } else {
-      this.merman = false;
-    }
+    if (this.equipStats.merman) drown = false;   // :23426-23431 accMerman→flag=false：装备即免淹
+    // （merman 置位已移液态相位段 = 原版 :25774-25785 终态裁定块；此处旧置位
+    //  按 :23428 早置位会被终态块 else 覆写，属冗余两写，2026-09-03 收敛单点）
     if (drown) {
       this.breathCD++;
       if (this.breathCD >= this.breathCDMax) {
@@ -4242,11 +4250,12 @@ export class Player extends Entity {
       // :13115 `if (wet && ShouldFloatInWater) accFlipper = true`——甲件 4404/脚蹼药
       //  湿态授予脚蹼泳跃能力（wet=水∪蜜，:1418 口径；lava/shimmer 不算）
       const flipperOn = this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion)
-        || ((this.inWater || this.inHoney) && this.shouldFloatInWater);
+        || ((this.inWater || this.inHoney) && this.shouldFloatInWater)
+        || this.merman;   // :25779 变身授 accFlipper（2026-09-03 备案清偿②）
       let lGrav = GRAVITY * 0.5, lMaxFall = 5.01;
       let lJSpd = mJumpSpd, lJT = mJumpTicks;
       if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3; }
-      else if (this.equipStats.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7; }
+      else if (this.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7; }   // :24602 原文读 merman 变身态（非装备位）
       else if (trident && !this.inLava) {
         lGrav = GRAVITY * 0.625; lMaxFall = 6; lJSpd = 5.51; lJT = 25;
         if (this.inputUp) { lGrav = GRAVITY * 0.25; lMaxFall = 2; }
@@ -4290,25 +4299,30 @@ export class Player extends Entity {
         }
       }
       // ---- ★湿态翅膀核心（2026-09-03 翻案）：位序按原文 :26945 JumpMovement →
-      //      :26976 回满 → :26987 flag19 → WingMovement → 下方重力+液体钳制（:27033）。
-      //      ①踩底回满 :26976-26982 `((vy==0||sliding)&&releaseJump) → wingTime=wingTimeMax`
-      //        ——releaseJump ≙ !inputJump（:21199/:21204：controlJump 帧块尾置 false、
-      //        非 controlJump 帧置 true，故此检查点两式等价；跳已发的帧 vy≠0 天然挡掉）。
-      //        旧版湿态无此回满 → wingTime 落水耗尽后永不再生 = 死锁根源。干态回满仍走
-      //        干燥分支 onGround 块（含 rocket/carpet 连带复位，本仓既有不动）。
+      //      canRocket :26973 → :26987 flag19 → WingMovement → WingFrame →
+      //      火箭合并 :27024 → 火箭靴 :27069 → 推力 :27126 → 悬浮 :27083 →
+      //      重力+液体钳制（:27156 else-if 链）。
+      //      ①回满/清零已并入跳跃段尾公共段（★回满/清零公共段 = :26947-26982 原文位序
+      //        JumpMovement 尾，不分干湿——旧版湿侧缺失/干地 onGround 近似均退役）。
       //      ②flag19 扇动 :26987（wings>0 && controlJump && wingTime>0 && jump==0 && vy≠0）
       //        + hover 档 :26991。JS 传当帧 effJumpSpd——原版 WingMovement 读 jumpSpeed
       //        字段，湿态已被液体链覆写（:24623-24624 水档 6.01）；干态沿用
       //        PLAYER_JUMP_SPEED+jumpSpd（下方干燥分支原值不动）。
       //      ③帧状态机/特效：WingFrame 每 tick（:26497）+ WingAirVisuals 挂 wingFx
       //        （:30284），waterFloat/shouldDraw 输入按 ShouldFloatInWater :3710-3722。
+      //      ④火箭靴/飞毯/悬浮湿态镜像（2026-09-03 备案清偿①）：原版全链无 wet 门——
+      //        湿态 JS/lGrav 用液体档。悬浮带 CanUseWingAbilities 的 !merman 门
+      //        （:27606）；canRocket/rocketRelease 锁与干支同构。飞毯原版位在
+      //        CarpetMovement :26969（canRocket 之前）——随干支既有后置位（已登记）。
       const eqWet = this.equipStats;
-      if (this.vy === 0 && !this.inputJump) {
-        this.wingTime = eqWet.wing ? eqWet.wing.time : 0;   // :26978 湿侧回满
-      }
       const mountCanWingsW = !mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true;
       const wingsW = eqWet.wing && mountCanWingsW ? eqWet.wing.logic : 0;   // wingsLogic=armor.wingSlot（:12584）
-      const wingsLogicW = eqWet.wing?.logic ?? 0;   // 不随坐骑清零（hover 档 :26477 用 wingsLogic）
+      // wingsLogic 骑【禁翼族】坐骑清零（:26833-26835 `if (!mount.CanUseWings)
+      // { wings=0; wingsLogic=0; }`，1456 :26319 同在）——flag19 hover 档 :26991
+      // 消费清零后值；旧注"不随坐骑清零"系误读，2026-09-03 矫正
+      const wingsLogicW = eqWet.wing && mountCanWingsW ? eqWet.wing.logic : 0;
+      if (!this.inputJump) this.rocketRelease = true;   // :21204 松跳锁（与干支同构）
+      if (this.vy > -effJumpSpd && this.vy !== 0) this.canRocket = true;   // :26973 canRocket 门（湿档 jumpSpeed）
       flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
         || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
       if (flying) this.wingMovement(wingsW, this.inputDown, effJumpSpd);
@@ -4338,18 +4352,69 @@ export class Player extends Entity {
         // 翅膀尘埃/音效（WingAirVisuals :30284 + WingFrame 各分支尘 + 滑翔尘 :26914+）
         this.wingFx(game, wingsW, wingsLogicW, flying, glideW, !!this.wingFrameScratch.justSwitched);
       }
+      // 翅膀+火箭靴动态合并（:27024-27036）：湿态同链（rocketTime 有余 → ×6 并入
+      // wingTime，上限 = wingTimeMax + 本次转换量，rocketTime 清零）
+      if (wingsW > 0 && eqWet.rocketBoots > 0 && this.vy !== 0 && this.rocketTime > 0) {
+        const add = this.rocketTime * 6;
+        this.wingTime += add;
+        const cap = (eqWet.wing ? eqWet.wing.time : 0) + add;
+        if (this.wingTime > cap) this.wingTime = cap;
+        this.rocketTime = 0;
+      }
+      // 火箭靴（:27069）：翅膀不可用（无翅或时间尽）才接管——湿态同链无 wet 门
+      if (!flying && !mnt2 && (this.wingTime <= 0 || wingsW === 0) && eqWet.rocketBoots > 0
+        && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
+        if (this.rocketTime > 0) {
+          this.rocketTime--;
+          this.rocketDelay = 10;    // 推力脉冲段（:27074）
+          if (this.rocketDelay2 <= 0) this.rocketDelay2 = eqWet.rocketBoots === 1 ? 30 : 15;
+        } else {
+          this.canRocket = false;
+        }
+      }
+      if (this.rocketDelay2 > 0) this.rocketDelay2--;
+      if (this.rocketDelay > 0) {
+        // 推力脉冲速度模型（:27126-27153，与翅膀同构 0.1/0.5/1.5 档）：湿态 JS=液体档；
+        // 推力期整链让位（下方重力段 rocketDelay 互斥）
+        this.rocketDelay--;
+        this.vy -= 0.1;
+        if (this.vy > 0) this.vy -= 0.5;
+        else if (this.vy > -effJumpSpd * 0.5) this.vy -= 0.1;
+        if (this.vy < -effJumpSpd * 1.5) this.vy = -effJumpSpd * 1.5;
+        this.fallStartY = null;
+      } else if (!flying) {
+        // 飞毯（CarpetMovement :26969）：条件=无多段跳余量/jumpHold 空/vy≠0/
+        // 火箭靴未在用/翅膀时间尽；湿态重力=液体档 lGrav（原版写 gravity 字段）
+        if (eqWet.carpet && !mnt2 && this.extraJumps.length === 0 && this.jumpHold === 0
+          && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
+          if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
+          if (this.carpetTime > 0 && this.inputJump) {
+            this.carpetTime--;
+            this.fallStartY = null;
+            this.vy = -(lGrav + 1e-6);   // 微升抵消随后重力 → 净缓降（湿档）
+          }
+        }
+      }
+      // 悬浮缓降（:27083-27102）：hover 族 + ↓+跳 + wingTime>0 → vy×0.9（45=0.8）；
+      // CanUseWingAbilities = !merman（:27606——湿态人鱼挡悬浮）
+      if (eqWet.wing?.hover && this.inputDown && this.inputJump && this.wingTime > 0 && !this.merman) {
+        this.vy *= wingsW === 45 ? 0.8 : 0.9;
+        if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
+      }
       // 断翅滑翔（:27015-27027 else-if 链替换常规重力，干湿同链）：wingTime 尽后按住跳
       // = 重力/3 + 终端 lMaxFall/3——湿链 gravity 已被 :24621 覆写为液体档,滑翔在其后
       // 再 /3（原版同序）。旧版锁干燥分支 → 水下断翅直坠 5.01（原版 1.67）
-      const glidingW = !!eqWet.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !this.inputDown;
+      const glidingW = !!eqWet.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !this.inputDown
+        && this.rocketDelay === 0;
       if (glidingW) {
         lGrav = GRAVITY / 3;
         if (this.vy > lMaxFall / 3) this.vy = lMaxFall / 3;
       }
-      // flag19 时整条重力链跳过（原版 :26545 else-if 链——WingMovement 的 0.1/0.5 档
-      // 独立驱动 vy,液体钳制同属该链 = 水下飞行不受 ±6.01/5.01 钳,升限 -jumpSpeed×1.5。
+      // flag19/火箭推力期整条重力链跳过（原版 :27156 else-if 链：rocketDelay>0 → 推力
+      // 独占挂起滑翔/重力；!flag19 → 滑翔/飞毯/重力——WingMovement 的 0.1/0.5 档独立
+      // 驱动 vy,液体钳制同属该链 = 水下飞行不受 ±6.01/5.01 钳,升限 -jumpSpeed×1.5。
       // 旧版曾把 +0.2 湿重力照加 → 扇动 -0.1 被净 +0.1/t 掐死,水下爬升归零）
-      if (!flying) {
+      if (!flying && this.rocketDelay === 0) {
         this.vy += lGrav;
         this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
       }
@@ -4520,16 +4585,15 @@ export class Player extends Entity {
       // 与 Renderer.ts 翼门同表（vanilla-mounts.json 仅 57-60 带键）
       const mountCanWings2 = !mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true;
       const wings = eq.wing && mountCanWings2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
-      const wingsLogic = eq.wing?.logic ?? 0;  // 不随坐骑清零（flag19 hover 档 :26477 用 wingsLogic）
+      const wingsLogic = eq.wing && mountCanWings2 ? eq.wing.logic : 0;  // 骑禁翼族清零（:26833-26835，2026-09-03 矫正旧"不清"误读）
       const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
       const JS = PLAYER_JUMP_SPEED + this.equipStats.jumpSpd;   // jumpSpeed（含 jumpSpeedBoost）
-      // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
+      // 落地重置（原版 :26173 地面块——wingTime/rocketTime 回满已并入跳跃段尾
+      // ★回满/清零公共段 = :26947-26982 原文位序；此处保留 rocket/carpet 连带复位）
       // 松跳重触发（原版 :20765 松跳段独立于地面状态——rocketRelease/wingRelease）
       if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
       // flying（flag19）声明已上提到跳跃参数块（干/湿两支共用——湿态扇动支 2026-09-03 落位）
       if (this.onGround) {
-        this.wingTime = eq.wing ? eq.wing.time : 0;   // :26169 = wingTimeMax（FlyTime）
-        this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;  // :2612 + :26436（无靴恒 0）
         this.rocketDelay = 0;
         this.canRocket = false;
         this.rocketRelease = false;
@@ -4538,8 +4602,8 @@ export class Player extends Entity {
       } else {
         // canRocket 门（:26487）：vy > -jumpSpeed 且 vy≠0
         if (this.vy > -JS && this.vy !== 0) this.canRocket = true;
-        // vy==0 恢复 rocketTime（:26540：velocity.Y==0 即回满，含撞顶悬停等非落地场景）
-        if (this.vy === 0) this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;
+        // rocketTime 回满（:27060-27063 vy==0||sliding||(autoJump&&justJumped)——含
+        // 撞顶悬停/贴墙滑/autoJump 起跳帧，已并入下方公共段（原 vy==0 单臂近似退役）
         // flag19 = 翅膀飞行中（:26469-26483：wings>0 && controlJump && wingTime>0 &&
         //   jump==0 && vy≠0；hover 档固定集 {22,28,30,32,29,33,35,37,45} + ↓+跳 :26477）
         flying =
@@ -4914,8 +4978,10 @@ export class Player extends Entity {
         // JumpMovement 外门（releaseJump 边沿、无 vx 反踢项），单路权归一。
       }
       // 翅膀滑翔（:27015-27027）：wingTime 尽后按住跳 = 重力/3 + 终端 maxFallSpeed/3
-      // （!hoverDown）——原版此段在 else-if 链替换常规重力，此处以等价条件并入
-      const gliding = !!eq.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !hoverDown;
+      // （!hoverDown）——原版此段在 else-if 链替换常规重力，此处以等价条件并入；
+      // rocketDelay>0 时链被推力独占（:27156 else-if 互斥）→ 滑翔不参与
+      const gliding = !!eq.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !hoverDown
+        && this.rocketDelay === 0;
       // 羽落 buff（slowFall,:21369）：重力 /3,fallStart 每帧重置 → 免坠伤
       let grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
       if (gliding) {
@@ -4928,7 +4994,7 @@ export class Player extends Entity {
         grav = 0;
         this.fallStartY = null;
       }
-      // 翅膀扇动中（flag19）：原版重力走 :26545 火箭靴 if 的【else-if 链】
+      // 翅膀扇动中（flag19）：原版重力走 :27156 火箭靴 if 的【else-if 链】
       // （!flag19 → 滑翔 → 飞毯 → 常规重力 :27033）——flag19 时整链跳过 = 飞行期
       // 不加重力（WingMovement 的 0.1/0.5 档独立驱动 vy）。曾无条件 +GRAVITY，
       // 扇动 −0.1 被重力 +0.3 盖成净 +0.2/tick → 爬升被掐死在跳跃高度附近
@@ -4936,6 +5002,12 @@ export class Player extends Entity {
       if (flying) {
         grav = 0;
         this.fallStartY = null;
+      }
+      // 火箭靴推力脉冲期整链让位（原版 :27156 `if (rocketDelay > 0) {推力} else if
+      // (!flag19) {…重力}` else-if 互斥——2026-09-03 备案清偿①补漏：曾漏此互斥，
+      // 推力 −0.1/−0.6 被重力 +0.4 盖成净上浮/下坠畸变）
+      if (this.rocketDelay > 0) {
+        grav = 0;
       }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
       this.vy = gd === 1
@@ -4962,7 +5034,7 @@ export class Player extends Entity {
         if (this.inputJump) {
           this.vy = -effJumpSpd * gd;
           if ((this.inWater || this.inLava) && !this.ridingMountSwimFree
-            && this.equipStats.merman && !this.ridingCart) {
+            && this.merman && !this.ridingCart) {   // :20832 原文读 merman 变身态
             if (this.swimTime <= 10) this.swimTime = 30;
           }
         }
@@ -4980,6 +5052,30 @@ export class Player extends Entity {
     // 2026-08-15 审计）。坐骑飞行族（悬停/飞行）vy 独占 tick 让位
     if (!this.inputJump && !mountFlight
       && (this.gravDir === 1 ? this.vy < 0 : this.vy > 0)) this.vy += 0.01 * this.gravDir;
+
+    // ---- ★回满/清零公共段（2026-09-03 备案清偿③；原版 :26947-26953 + :27060-27063 +
+    //      :26976-26982 = JumpMovement 尾、Wallslide 前的公共路径，不分干湿）----
+    //   ①清零：无翼 → wingTime=0（:26948）；无靴 → rocketTime=0（:26951）——旧版缺，
+    //     空中卸翼留僵尸 wingTime 会错封飞毯门（:22025 gate wingTime==0）
+    //   ②rocketTime 回满 :27060-27063 `(vy==0||sliding||(autoJump&&justJumped))`
+    //     ——sliding ≙ wallCling（仓内承载位；湿态贴墙滑未实装=登记）、
+    //     justJumped ≙ jumpStartedThisTick（起跳帧标记）
+    //   ③wingTime 回满 :26976-26982 `(((vy==0||sliding)&&releaseJump)||(autoJump&&justJumped))`
+    //     ——releaseJump ≙ !inputJump（:21199/:21204 controlJump 帧块尾 false/其余 true）。
+    //     旧版分叉：干地 onGround 无条件回满（按住跳也回，宽于原版）+ 水行鞋面回满 +
+    //     湿态无回满 → 水里踩底/悬空 vy==0（撞顶）不回满 = 2026-09-03"有翅膀困死水中"
+    //     死锁根因之一。mount.ResetFlightTime(:26981) 由 upkeep(onGround||vy==0) 承担
+    //     （触发位点差已登记）
+    if (((this.equipStats.wing && (!mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true))
+      ? this.equipStats.wing.logic : 0) === 0) this.wingTime = 0;   // :26948 wingsLogic==0（骑禁翼族同清 :26835）
+    if (this.equipStats.rocketBoots === 0) this.rocketTime = 0;
+    const autoJumpC = this.ridingMount ? this.mount.autoJump : eqJ.autoJump;
+    if (this.vy === 0 || this.wallCling || (autoJumpC && jumpStartedThisTick)) {
+      this.rocketTime = this.equipStats.rocketBoots > 0 ? 7 : 0;
+    }
+    if (((this.vy === 0 || this.wallCling) && !this.inputJump) || (autoJumpC && jumpStartedThisTick)) {
+      this.wingTime = this.equipStats.wing ? this.equipStats.wing.time : 0;
+    }
 
     // ---- 黏滞 tile（Collision.StickyTiles + Player.cs:22650-22740 1:1）----
     // 蛛网(51)：泡在网里 X/Y 双重阻尼、禁跳、不计摔伤、挣扎随机会撕破网（掉蛛丝）；

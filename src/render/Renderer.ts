@@ -2332,8 +2332,8 @@ export class Renderer {
   cursorIconCtx: {
     heldVid: number; uiHeld: boolean; cacheTime: number; cacheVid: number;
     npcHover: boolean; biomeTorch: number | null; biomeCampfire: number | null;
-    paintAmmoVid: number; housingHead: number | null;
-  } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null };
+    paintAmmoVid: number; housingHead: number | null; cursorScale: number;
+  } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null, cursorScale: 1 };
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
   /** #1 背景层 GL 逃生门 ?bggl=0(实例共用 this.glfx;初始化失败自动回退;
@@ -13882,21 +13882,29 @@ export class Renderer {
         const push = 10 + p.cursorItemIconPush;
         const icon = this.atlasIcon(this.itemInternalOfVid(t));
         if (icon) {
+          // cursorScale（Main.cs:53294 = cursorAlpha×0.3+0.8,0.98..1.1 呼吸）:
+          // 原版 :45848-45850 中心锚 = mouse+(10+push)+GetDrawHitbox×scale×0.5、
+          // DrawItemIcon 以帧中心为 origin 按 cursorScale 画——hitbox=frame
+          // （本仓不建 item.scale,登记）时等价顶左 = mouse+(10+push)、
+          // 尺寸 = 帧×cursorScale（此前恒 1:1 = 丢呼吸档,2026-09-03 对齐）
+          const S = c.cursorScale;
+          const dw = icon.sw * S;
+          const dh = icon.sh * S;
           ctx.save();
-          if (p.cursorItemIconReversed) { ctx.translate(this._mouseX + push + icon.sw / 2, 0); ctx.scale(-1, 1); ctx.translate(-(this._mouseX + push + icon.sw / 2), 0); }
+          if (p.cursorItemIconReversed) { ctx.translate(this._mouseX + push + dw / 2, 0); ctx.scale(-1, 1); ctx.translate(-(this._mouseX + push + dw / 2), 0); }
           ctx.globalAlpha = 1;
           // 恒全亮:原版 GetItemLight(:44519)以 outInTheWorld=false 默认参调用,
           // 不采样世界光照(ItemSlot.cs:3458 只处理迪斯科/脉冲/精华特殊物品),
           // currentColor 恒 White → 图标不乘暗。曾误读为"乘光标格光照"并
           // source-atop 叠黑——该合成作用于整张画布,暗处变纯黑方块(2026-08-18 报)
           ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
-            this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
+            this._mouseX + push, this._mouseY + push, dw, dh);
           // GetItemLight 特殊物品改色（ItemSlot.cs:3475-3507,2026-08-19 补齐）:
           // 迪斯科族 → Main.Disco 色循环;ItemIconPulse 族 → essScale 脉冲;
           // 精华 58/184/4143 → essScale×0.25+0.75。essScale∈0.7-1.0 恒≤1 →
           // 全部为"乘暗/乘色",三步离屏 tint(multiply+destination-in 恢复 alpha)
           const clk = this.lighting?.clock;
-          const iconDst = { x: this._mouseX + push, y: this._mouseY + push, w: icon.sw, h: icon.sh };
+          const iconDst = { x: this._mouseX + push, y: this._mouseY + push, w: dw, h: dh };
           if (clk) {
             let tint: readonly [number, number, number] | null = null;
             if (CURSOR_DISCO_ITEMS.has(t)) tint = [clk.discoR, clk.discoG, clk.discoB];

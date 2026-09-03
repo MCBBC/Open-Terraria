@@ -81,8 +81,9 @@ describe('FadingParticle 池（ABasicParticle/FadingParticle.Update 1:1）', () 
     expect(fadingAlphaFactor(0.1, 0.1, 0.1)).toBe(1);
     expect(fadingAlphaFactor(0.55, 0.1, 0.1)).toBeCloseTo(0.5, 12);
     expect(fadingAlphaFactor(1, 0.1, 0.1)).toBeCloseTo(0, 12);
-    // 反向段（fadeOut=0.45 → t01≤0.45 恒 1）：
-    expect(fadingAlphaFactor(0.2, 0.45, 0.45)).toBe(1);
+    // 反向段（fadeOut=0.45 → t01≤0.45 恒 1）；t01=0.2 仍在 fadeIn 段 = 0.2/0.45
+    expect(fadingAlphaFactor(0.45, 0.45, 0.45)).toBe(1);
+    expect(fadingAlphaFactor(0.2, 0.45, 0.45)).toBeCloseTo(0.2 / 0.45, 12);
   });
 });
 
@@ -207,12 +208,10 @@ describe('snapStrikeDust 收缩（kind1/kind2 残臂退役——环带函数为�
     snapStrikeDust(g1, 2, 0, 0, 120);
     expect(d1.length).toBe(0);
     const { g: g0, dusts: d0 } = mkGame();
-    (g0 as { vanillaDust: unknown }).vanillaDust = {
-      spawn: () => null,   // 池满桩——只数调用意图
-    };
-    // kind0 直发 20 次 spawn 请求（池满哑元照样掷,原版同）
     let calls = 0;
-    (g0 as { vanillaDust: { spawn: () => unknown } }).vanillaDust.spawn = () => { calls++; return null; };
+    (g0 as unknown as { vanillaDust: unknown }).vanillaDust = {
+      spawn: () => { calls++; return null; },   // 池满桩——只数调用意图
+    };
     snapStrikeDust(g0, 0, 0, 0, 120);
     expect(calls).toBe(20);
     expect(d0.length).toBe(0);
@@ -257,8 +256,10 @@ describe('VanillaDust prettySparkle 专用档 update（APF 补积分+Scale 二�
     expect(d.psDrawVert).toBeUndefined();
     expect(d.scax).toBeUndefined();
     expect(d.ttl).toBe(60);                    // prettySparkle 缺省 TTL
+    const s0 = d.scale;                        // NewDust 链含 ±0.2 抖（Perfect 只覆写位/速）
+    expect(d.scaleX).toBe(s0); expect(d.scaleY).toBe(s0);   // 双轴 = 池抖后 scale
     vd.update(0, 0, 1e9, 1e9);
     expect(d.psAge).toBe(1);
-    expect(d.scaleX).toBe(0.5); expect(d.scaleY).toBe(0.5);   // 无动力学 → 不动
+    expect(d.scaleX).toBe(s0); expect(d.scaleY).toBe(s0);   // 无动力学 → 不动
   });
 });

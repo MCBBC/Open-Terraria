@@ -47,9 +47,10 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   1864: { slot: 1, dmg: 0.15, kb: 2 },  // 纸莎草圣甲虫
   2998: { dmg: 0.15 },                  // 召唤师徽章（:14891-14894 minionDamage += 0.15——审计 P0 漏件）
   3809: { dd2: true },              // 学徒围巾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:14480/:13103——旧每件累加+4/+40%）
-  // （3878 侍从旧衬衫 T3 胸件旧条目 {dmg:0.25} 已退役：它是胸甲非配饰,同值曾与
-  //  vanillaArmorSets.DD2_PIECE_FX[3878].dmgMinion 在盔甲扫描位双记（+0.25×2）,
-  //  全量（含 dmgRanged 0.25 :13320/ammoCost80）收编到 DD2_PIECE_FX 单源）
+  // （3878 女猎手 T3 胸件旧条目 {dmg:0.25} 已退役——件属 HuntressTier3=3877/3878/3879
+  //  （ArmorSetBonuses.cs:481）,胸甲非配饰;同值曾与 vanillaArmorSets.DD2_PIECE_FX[3878]
+  //  .dmgMinion 在盔甲扫描位双记（+0.25×2）,全量（含 dmgRanged 0.25 :13320/ammoCost80）
+  //  收编到 DD2_PIECE_FX 单源）
   3810: { dd2: true },              // 侍从盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:14480/:13103——旧每件累加+4/+40%）
   3811: { dd2: true },              // 女猎手扣盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:14480/:13103——旧每件累加+4/+40%）
   3812: { dd2: true },              // 武僧腰带（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:14480/:13103——旧每件累加+4/+40%）

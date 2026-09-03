@@ -165,7 +165,7 @@ describe('DD2 胸/腿件主属性（DD2_PIECE_FX 对账批：补近战/远程伤
     expect(s.manaCostMul).toBe(1);
   });
 
-  it('3878 侍从旧衬衫 T3：minionDmg 恰 +0.25（双记回归锁）+ rangedDamage+0.25（:13318-13322）', () => {
+  it('3878 女猎手 T3 胸件：minionDmg 恰 +0.25（双记回归锁）+ rangedDamage+0.25（:13318-13322）', () => {
     expect(SUMMON_GEAR[3878]).toBeUndefined();  // 旧 SUMMON_GEAR 条目退役（曾与 DD2_PIECE_FX 同值双记 → +0.5）
     expect(DD2_PIECE_FX[3878]).toMatchObject({ dmgMinion: 0.25, dmgRanged: 0.25, ammoCost80: true });
     const s = withPiece(3878);

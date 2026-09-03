@@ -68,6 +68,18 @@ const out = await page.evaluate(async () => {
   put(8);                                      // 火把（createTile）
   idle(3, near.x, near.y);
   const torch = { enabled: g.player.cursorItemIconEnabled, heldVid: g.renderer.cursorIconCtx.heldVid };
+
+  // 鱼饵支（:42938-42945）：竿 2289 + 弹药位 55 放饵 1992 → ID=饵 vid、push 6
+  put(2289);
+  const baitKey = items.VANILLA_ITEM_KEY_BY_ID[1992];
+  g.player.inv.slots[55] = { id: items.ITEM_BY_KEY[baitKey], stack: 3 };
+  idle(3, near.x, near.y);
+  const baitIcon = {
+    enabled: g.player.cursorItemIconEnabled,
+    id: g.player.cursorItemIconID,
+    push: g.player.cursorItemIconPush,
+  };
+  g.player.inv.slots[55] = null;
   put(3509);
   idle(3, near.x, near.y);
 
@@ -92,16 +104,21 @@ const out = await page.evaluate(async () => {
   r.drawCursorItemIcon(cOff.getContext('2d'), p);
   const iconOff = count(cOff);
   p.cursorItemIconEnabled = prev.enabled; r.cursorIconCtx.cacheTime = prev.cacheTime;
-  return { inRange, outRange, sword, torch, iconOn, iconOff };
+  const scaleNow = r.cursorIconCtx.cursorScale;
+  return { inRange, outRange, sword, torch, baitIcon, iconOn, iconOff, scaleNow };
 });
 
 console.log('[probe] 镐指射程内 =', JSON.stringify(out.inRange));
 console.log('[probe] 镐指射程外 =', JSON.stringify(out.outRange));
 console.log('[probe] 木剑(非工具) =', JSON.stringify(out.sword));
 console.log('[probe] 火把(createTile) =', JSON.stringify(out.torch));
+console.log('[probe] 竿+饵(鱼饵支) =', JSON.stringify(out.baitIcon));
+console.log('[probe] cursorScale 呼吸值 =', out.scaleNow.toFixed(3));
 console.log('[probe] 绘制像素: 亮态 alpha>0 像素 =', out.iconOn, '/ 灭态 =', out.iconOff);
 const ok = out.inRange.enabled && out.inRange.heldVid === 3509 && out.inRange.cacheVid === 3509
   && !out.outRange.enabled && !out.sword.enabled && out.torch.enabled
+  && out.baitIcon.enabled && out.baitIcon.id === 1992 && out.baitIcon.push === 6
+  && out.scaleNow >= 0.97 && out.scaleNow <= 1.11
   && out.iconOn > 30 && out.iconOff === 0;
 console.log(ok ? '[probe] PASS' : '[probe] FAIL');
 await browser.close();

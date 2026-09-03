@@ -150,7 +150,7 @@ const out = await page.evaluate(async () => {
   return {
     probe,
     A: { zombieP, zombieG, jungleP, sandP, rainDiff, rainLit,
-      bgPresent: zombieP.cornerA > 200 },
+      bgPresent: zombieP.stats.cornerA > 200 },
     B: { total: btns.length, dimBtns, active0: activeBtns, titles,
       afterSurface, ftext, gridGone, afterRare, rows: rows.length },
   };

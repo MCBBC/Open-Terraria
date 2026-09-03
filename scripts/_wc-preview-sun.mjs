@@ -11,7 +11,7 @@ page.on('pageerror', (e) => console.error('PAGEERROR:', e.message));
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
 const shots = await page.evaluate(async () => {
-  const mod = await import('/src/ui/WorldCreation.ts');
+  const mod = await import('/src/ui/WorldCreation.ts?t=' + Date.now());
   const root = document.createElement('div');
   document.body.appendChild(root);
   new mod.WorldCreationPanel(root, { onCreate() {}, onCancel() {} });

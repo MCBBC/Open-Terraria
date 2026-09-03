@@ -39,7 +39,7 @@ export interface ArmorSetBonus {
   fireWalk?: boolean;
   frostBurn?: boolean;     // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
   ammoCost80?: boolean;
-  huntressAmmoCost90?: boolean;  // 省弹 1/10（:12754 case 3804 女猎手护甲——件门在
+  huntressAmmoCost90?: boolean;  // 省弹 1/10（:13278 case 3804 女猎手护甲——件门在
                                   // Player.ts ARMOR_AMMO_SAVE_VID 表承载，此键为表回填预留）
   manaCostMul?: number;      // manaCost -=（折扣）
   onHitRegen?: boolean;      // 帕拉钯全套（ArmorSetBonuses.cs:217-220 Palladium→onHitRegen;
@@ -185,7 +185,8 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
 // ---- DD2 盔甲散件主属性（GrantArmorBenefits case 3798-3882 :13236-13342 逐件实读,
 //      2026-08-13 建表;2026-09-03 对账批——①补齐 3801 近战伤+0.15/:13250、3804 远程伤
 //      +0.2/:13276、3807 近战伤+0.2/:13263、3872 lifeRegen+8/:13291、3878 远程伤+0.25/
-//      :13320 ②3878 侍从旧衬衫旧 SUMMON_GEAR 条目退役收编至此（同值 dmgMinion 曾在
+//      :13320 ②3878 女猎手 T3 胸件旧 SUMMON_GEAR 条目退役收编至此（件属 HuntressTier3
+//      =3877/3878/3879,ArmorSetBonuses.cs:481;同值 dmgMinion 曾在
 //      盔甲扫描位双记 +0.25×2）③3875 魔耗改原版加算池 manaCostOff 0.15（:13306
 //      manaCost -= 0.15f;旧 manaCostMul 0.85 乘区与 3797 并戴时 0.9×0.85=0.765 ≠
 //      原版 1−0.1−0.15=0.75）。头盔面走 vanillaSummonStats.SUMMON_GEAR 扩展字段 ----

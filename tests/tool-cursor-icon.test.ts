@@ -19,7 +19,8 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/item
 import { sheetOf } from '../src/player/SmartCursor';
 import {
   toolCursorIcon, BUCKET_VIDS, WIRE_TOOL_TILE_BOOST, WIRE_TOOL_VIDS,
-  type ToolCursorIconEnv,
+  TILE_BOOST_BY_VID, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION,
+  type ToolCursorIconEnv, type ToolSlotSem,
 } from '../src/player/ToolCursorIcon';
 import { resolveCursorIconId } from '../src/render/CursorItemIcon';
 
@@ -28,6 +29,11 @@ const px = 100 * 16, py = 95 * 16;               // 玩家盒左上（position�
 const ACTOR = { x: px, y: py, w: 20, h: 42 };
 const REACH = { x: 5, y: 3 };                    // GetRanges Simple 档（钳 20 后底数，不含 TB）
 const IN = { x: 104, y: 95 } as const;           // 射程内目标格
+/** 结果速记（iconVid/push 仅鱼饵/溶液两支非零） */
+const R = (enabled: boolean, cacheUpdate: boolean, iconVid = 0, push = 0) =>
+  ({ enabled, cacheUpdate, iconVid, push });
+const slot = (vid: number, o: { stack?: number; bait?: number; ammo?: number }): ToolSlotSem =>
+  ({ vid, stack: o.stack ?? 1, bait: o.bait ?? 0, ammo: o.ammo ?? 0 });
 const OUT_X = { x: 113, y: 95 } as const;        // X 超界（HX=106）
 const OUT_Y = { x: 104, y: 104 } as const;       // Y 超界（HY=100）
 
@@ -111,11 +117,11 @@ describe('镐/斧/锤：射程内即亮，图标 = 手持工具物品 id（:4597
 
 describe('射程门（IsInTileInteractionRange :32264 + GetTileRegion）', () => {
   it('射程外（X 超 HX=106）→ 无图标', () => {
-    expect(toolCursorIcon(mkEnv({ pick: 35, target: OUT_X }))).toEqual({ enabled: false, cacheUpdate: false });
+    expect(toolCursorIcon(mkEnv({ pick: 35, target: OUT_X }))).toEqual(R(false, false));
   });
 
   it('射程外（Y 超 HY=100）→ 无图标', () => {
-    expect(toolCursorIcon(mkEnv({ pick: 35, target: OUT_Y }))).toEqual({ enabled: false, cacheUpdate: false });
+    expect(toolCursorIcon(mkEnv({ pick: 35, target: OUT_Y }))).toEqual(R(false, false));
   });
 
   it('矩形判定含端点：HX=106 / HY=100 上的格仍亮', () => {
@@ -143,7 +149,7 @@ describe('射程门（IsInTileInteractionRange :32264 + GetTileRegion）', () =>
 
 describe('放置物（火把/绳/平台/墙——PlaceThing_Tiles :40033-40040 / Walls :39908-39919）', () => {
   it('手持火把（createTile）射程内 → 亮图标、不进缓存（:40040 仅置 enabled）', () => {
-    expect(toolCursorIcon(mkEnv({ createTile: true }))).toEqual({ enabled: true, cacheUpdate: false });
+    expect(toolCursorIcon(mkEnv({ createTile: true }))).toEqual(R(true, false));
     expect(vid(TORCH_VID) != null).toBe(true);
   });
 
@@ -153,7 +159,7 @@ describe('放置物（火把/绳/平台/墙——PlaceThing_Tiles :40033-40040 /
   });
 
   it('TileTargetDesired（SmartCursorHelper.cs:1400-1411）：连续性锁期内目标≠锁点 → 放置块让位', () => {
-    expect(toolCursorIcon(mkEnv({ createTile: true, tileTargetDesired: false }))).toEqual({ enabled: false, cacheUpdate: false });
+    expect(toolCursorIcon(mkEnv({ createTile: true, tileTargetDesired: false }))).toEqual(R(false, false));
     // 工具支无此门：镐在锁期内仍亮
     expect(toolCursorIcon(mkEnv({ pick: 35, tileTargetDesired: false })).enabled).toBe(true);
   });
@@ -164,19 +170,19 @@ describe('其余三支（电路 :47152-47166 / 桶 :46708-46718 / 小动物 :439
     expect(WIRE_TOOL_VIDS.has(WRENCH_VID)).toBe(true);
     expect(WIRE_TOOL_TILE_BOOST).toBe(20);
     expect(toolCursorIcon(mkEnv({ wireTool: true, tileBoost: 20, target: { x: 113, y: 95 } })))
-      .toEqual({ enabled: true, cacheUpdate: true });
+      .toEqual(R(true, true));
     // 若漏传 20（按工具档 0 计）→ 同格不亮（锁死 TB 分档）
     expect(toolCursorIcon(mkEnv({ wireTool: true, target: { x: 113, y: 95 } })).enabled).toBe(false);
   });
 
   it('桶族亮 + 进缓存；noBuilding 门（:46710）关图标', () => {
     expect(BUCKET_VIDS.has(BUCKET_VID)).toBe(true);
-    expect(toolCursorIcon(mkEnv({ bucket: true }))).toEqual({ enabled: true, cacheUpdate: true });
+    expect(toolCursorIcon(mkEnv({ bucket: true }))).toEqual(R(true, true));
     expect(toolCursorIcon(mkEnv({ bucket: true, noBuilding: true })).enabled).toBe(false);
   });
 
   it('makeNPC 小动物族亮 + 进缓存（:43951-43956，无 noBuilding 门）', () => {
-    expect(toolCursorIcon(mkEnv({ makeNPC: true, noBuilding: true }))).toEqual({ enabled: true, cacheUpdate: true });
+    expect(toolCursorIcon(mkEnv({ makeNPC: true, noBuilding: true }))).toEqual(R(true, true));
   });
 });
 
@@ -184,7 +190,7 @@ describe('手持非工具 / noBuilding（挖掘支 :45987-45990）', () => {
   it('手持木剑（无三力、无 createTile/Wall）射程内 → 无图标', () => {
     const def = vid(SWORD_VID);
     expect(def?.tool?.type ?? 'sword').toBe('sword');   // 语义对照：非镐/斧/锤
-    expect(toolCursorIcon(mkEnv())).toEqual({ enabled: false, cacheUpdate: false });
+    expect(toolCursorIcon(mkEnv())).toEqual(R(false, false));
   });
 
   it('noBuilding 只关挖掘/桶两支，电路/放置/小动物支不受影响（原版门的位置）', () => {
@@ -195,6 +201,92 @@ describe('手持非工具 / noBuilding（挖掘支 :45987-45990）', () => {
   });
 
   it('多支同中按或累积（镐 + createTile 双语义不互斥）', () => {
-    expect(toolCursorIcon(mkEnv({ pick: 35, createTile: true }))).toEqual({ enabled: true, cacheUpdate: true });
+    expect(toolCursorIcon(mkEnv({ pick: 35, createTile: true }))).toEqual(R(true, true));
+  });
+});
+
+describe('tileBoost 逐物品表（Item.cs SetDefaults 全表 → TILE_BOOST_BY_VID）', () => {
+  it('电路族 20 改由统一表出；铜系 -1；钻头族 ++/-- 相消；DCU 11', () => {
+    expect(WIRE_TOOL_VIDS.size).toBe(8);
+    for (const w of WIRE_TOOL_VIDS) expect(tileBoostOfVid(w)).toBe(WIRE_TOOL_TILE_BOOST);
+    expect(tileBoostOfVid(3509)).toBe(-1);   // 铜镐 :31395（射程比无加成工具少 1 格,原版刻意）
+    expect(tileBoostOfVid(3506)).toBe(-1);   // 铜斧 :31436
+    expect(tileBoostOfVid(196)).toBe(-1);    // 木锤 :3806
+    expect(tileBoostOfVid(1262)).toBe(0);    // :15673 ++ → 尾修 :48902 -- → 0
+    expect(tileBoostOfVid(1231)).toBe(0);    // :15231 ++ → 钻头族尾修 -1
+    expect(tileBoostOfVid(2773)).toBe(2);    // :26506 += 3 → 锯族尾修 -1
+    expect(tileBoostOfVid(2774)).toBe(3);    // :26545 += 4 → 钻族尾修 -1
+    expect(tileBoostOfVid(2798)).toBe(11);   // DCU :26740
+    expect(tileBoostOfVid(3525)).toBe(4);    // The Axe :31251
+    expect(tileBoostOfVid(4820)).toBe(2);    // 无底岩浆桶 :39479
+    expect(tileBoostOfVid(5304)).toBe(3);    // :42095
+    expect(tileBoostOfVid(99999)).toBe(0);   // 未列出 = 0
+    expect(Object.keys(TILE_BOOST_BY_VID).length).toBeGreaterThan(40);
+  });
+
+  it('铜镐 tileBoost=-1 使射程收缩一格（:45986 → GetTileRegion TB 加在钳后）', () => {
+    // HX(0)=106 / HX(-1)=105：无 TB 时 (106,95) 在射程内,铜镐时出界
+    expect(toolCursorIcon(mkEnv({ pick: 35, target: { x: 106, y: 95 } })).enabled).toBe(true);
+    expect(toolCursorIcon(mkEnv({ pick: 35, tileBoost: -1, target: { x: 106, y: 95 } })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ pick: 35, tileBoost: -1, target: { x: 105, y: 95 } })).enabled).toBe(true);
+  });
+
+  it('电路支 TB = tileBoost(表) + blockRange（:47154 口径）', () => {
+    // HX(TB=20) = 101+5+20 = 126；blockRange 1 → 127
+    expect(toolCursorIcon(mkEnv({ wireTool: true, tileBoost: 20, target: { x: 126, y: 95 } })).enabled).toBe(true);
+    expect(toolCursorIcon(mkEnv({ wireTool: true, tileBoost: 20, target: { x: 127, y: 95 } })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ wireTool: true, tileBoost: 20, blockRange: 1, target: { x: 127, y: 95 } })).enabled).toBe(true);
+  });
+});
+
+describe('鱼饵支（:42938-42945 + Fishing_GetBait :42578-42599）', () => {
+  it('持竿 + 弹药位有饵 → 图标=饵 id、push 6、不进缓存', () => {
+    const res = toolCursorIcon(mkEnv({
+      fishingPole: 5,
+      hoverEnabled: false,
+      heldStack: 1,
+      slotSem: (() => { const a: (ToolSlotSem | null)[] = new Array(58).fill(null); a[55] = slot(2015, { bait: 15 }); return a; })(),
+    }));
+    expect(res).toEqual(R(true, false, 2015, 6));
+  });
+
+  it('扫描序：弹药位 54-58 优先于背包 0-50（Fishing_GetBait 1:1）', () => {
+    const a: (ToolSlotSem | null)[] = new Array(58).fill(null);
+    a[56] = slot(2003, { bait: 5 });     // 弹药位
+    a[3] = slot(2019, { bait: 50 });     // 背包（更早槽位但后扫）
+    expect(toolCursorIcon(mkEnv({ fishingPole: 5, slotSem: a })).iconVid).toBe(2003);
+  });
+
+  it('让位门 !cursorItemIconEnabled（悬停支已置位 → 不覆写）+ 无饵/空手不亮', () => {
+    const a: (ToolSlotSem | null)[] = new Array(58).fill(null);
+    a[0] = slot(2015, { bait: 15 });
+    expect(toolCursorIcon(mkEnv({ fishingPole: 5, hoverEnabled: true, slotSem: a })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ fishingPole: 5, slotSem: a, heldStack: 1 })).enabled).toBe(true);
+    // 无饵（slotSem 空窗）
+    expect(toolCursorIcon(mkEnv({ fishingPole: 5 })).enabled).toBe(false);
+    // stack 门（:42939 item.stack > 0）
+    expect(toolCursorIcon(mkEnv({ fishingPole: 5, heldStack: 0, slotSem: a })).enabled).toBe(false);
+  });
+});
+
+describe('溶液支（:42946-42970 环境改造枪 779/Terraformer 5134）', () => {
+  it('持 779 + 溶液在弹药位 → 图标=溶液 id、push 10、不进缓存', () => {
+    const a: (ToolSlotSem | null)[] = new Array(58).fill(null);
+    a[54] = slot(780, { stack: 9, ammo: AMMO_ID_SOLUTION });
+    expect(toolCursorIcon(mkEnv({
+      clentaminator: true,
+      useAmmo: AMMO_ID_SOLUTION,
+      slotSem: a,
+    }))).toEqual(R(true, false, 780, 10));
+  });
+
+  it('useAmmo 不匹配 / 背包位次序 / 溶液族表', () => {
+    const a: (ToolSlotSem | null)[] = new Array(58).fill(null);
+    a[54] = slot(1, { ammo: 40 });                       // 箭（ammo 40 ≠ 780）
+    a[2] = slot(782, { ammo: AMMO_ID_SOLUTION });        // 背包位溶液
+    expect(toolCursorIcon(mkEnv({ clentaminator: true, useAmmo: AMMO_ID_SOLUTION, slotSem: a })).iconVid).toBe(782);
+    expect(SOLUTION_AMMO_ITEMS.has(784)).toBe(true);
+    expect(SOLUTION_AMMO_ITEMS.has(1015)).toBe(true);    // DefaultToSolution :42774-42780
+    expect(BUCKET_VIDS.size).toBe(12);                   // 桶族全 12 vid 已实装（Game.useBucket :23962）
   });
 });

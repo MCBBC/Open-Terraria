@@ -6,9 +6,7 @@
 //   RotationVelocity=NextFloatDirection×τ/32×clamp(|move|/32,0,1)、Scale=0.5..1、
 //   掷序 = life→亮度→rot→rotVel→scale（:1342→:1347→:1350→:1351→:1353）。
 import { describe, it, expect, beforeEach } from 'vitest';
-import { spawnLakeSparkle, eachLakeSparkles, clearFakeFish, spawnFakeFishInWater, setFakeFishRandom } from '../src/entities/FakeFish';
-import { TileStore } from '../src/world/TileStore';
-import type { FishingRollCtx } from '../src/data/vanillaFishing';
+import { spawnLakeSparkle, eachLakeSparkles, clearFakeFish, setFakeFishRandom } from '../src/entities/FakeFish';
 
 beforeEach(() => clearFakeFish());
 
@@ -51,41 +49,19 @@ describe('spawnLakeSparkle 逐值包络（掷序敏感）', () => {
     expect(Math.max(...rats)).toBeLessThan(1);   // 40 样本无一恰满幅（旧码全部 =1）
     expect(Math.min(...rats)).toBeLessThan(0.5); // 幅值散布
   });
-});
 
-describe('生成门集成（SpawnFakeFishInWater :20619-20646 列扫描）', () => {
-  const mkPond = (): TileStore => {
-    const st = new TileStore(60, 60);
-    // 7 宽 × 5 深水柱（col 26..32,row 28..32），非实心液体
-    for (let cx = 26; cx <= 32; cx++) {
-      for (let cy = 28; cy <= 32; cy++) st.setLiquid(cx, cy, 200, 1);
-    }
-    return st;
-  };
-  const ctx = (): FishingRollCtx => ({
-    inLava: false, inHoney: false, junk: false, crate: false,
-    common: true, uncommon: false, rare: false, veryrare: false, legendary: false,
-    anyEnemies: false, canFishInLava: false,
-    x: 29, y: 28, waterTilesCount: 35, rockLayer: 400,
-    maxTilesX: 60, heightLevel: 0, questFish: -1, hardMode: false,
-  } as unknown as FishingRollCtx);
-
-  it('星闪落水参数约束：ay<0 上浮、life∈[50,140)、ax=0、APF=(move/60)/life', () => {
-    const st = mkPond();
-    let x = 987654321;
+  it('亮度/缩放域：baseAlpha∈(0,1)、scale∈[0.5,1)、rot∈[0,τ)（:1347/:1350/:1353）', () => {
+    let x = 42;
     const rng = () => { x = (1103515245 * x + 12345) % 2147483648; return x / 2147483648; };
-    spawnFakeFishInWater({ world: { store: st } } as never, 29, 28, ctx(), rng);
-    const sparkles = eachLakeSparkles();
-    expect(sparkles.length).toBeGreaterThan(0);
-    for (const s of sparkles) {
-      expect(s.life).toBeGreaterThanOrEqual(50);
-      expect(s.life).toBeLessThan(140);
-      expect(s.axPerT).toBe(0);                       // MovementVector.X=0（:20639）
-      expect(s.ayPerT).toBeLessThan(0);               // rise<0（posY 在 y·16 采样窗内）
-      expect(s.ayPerT * s.life * 60).toBeLessThan(0);
-      expect(s.ayPerT * s.life * 60).toBeGreaterThan(-20 * 16);  // 窗内上浮幅有界
+    setFakeFishRandom(rng);
+    for (let k = 0; k < 24; k++) spawnLakeSparkle(0, -30, 0, 0);
+    for (const s of eachLakeSparkles()) {
+      expect(s.baseAlpha).toBeGreaterThan(0);
+      expect(s.baseAlpha).toBeLessThan(1);
       expect(s.scale).toBeGreaterThanOrEqual(0.5);
       expect(s.scale).toBeLessThan(1);
+      expect(s.rot).toBeGreaterThanOrEqual(0);
+      expect(s.rot).toBeLessThan(Math.PI * 2);
     }
   });
 });

@@ -18,13 +18,13 @@ const w0 = (t: string): number => combatMeasure(t, false).w;
 
 describe('抗重叠互推（PopupText.cs:678-704）', () => {
   it('相交且自身在上 → 双方 life 重钉 = 60+15×min(numActive,3)（步进者再 −1）', () => {
-    const a = mk('土块', 100, 100);                       // 上者
+    const a = mk('土块', 100, 100, { vy: -3 });            // 上者（vy −3 ∈ >−6 门内）
     const b = mk('石头', 100 + w0('土块') / 2, 108);       // 下者（盒高 24 → dy8 相交）
     const pool = [a, b];
     expect(popupLabelStep(a, pool, 0, 2)).toBe(true);
     expect(a.life).toBe(60 + 15 * 2 - 1);                 // :702-703 重钉 + :716 同拍 --
     expect(b.life).toBe(60 + 15 * 2);                     // 仅被扫描延长,未步进
-    expect(a.vy).toBeCloseTo(-7.2, 12);                   // flag → >−6 门内 −0.2
+    expect(a.vy).toBeCloseTo(-3.2, 12);                   // flag → >−6 门内 −0.2
   });
 
   it('numActive 钳 3：5 条在场 → 延长档 60+45−1（非相交对计数,UpdateItemText :760 先计数）', () => {
@@ -38,7 +38,7 @@ describe('抗重叠互推（PopupText.cs:678-704）', () => {
 
   it('仅上者触发：下者视角无 (y<o.y || 同 y 且序在前) → 不延长、走 !flag 衰减', () => {
     const top = mk('A', 100, 100);
-    const bot = mk('B', 100, 103);
+    const bot = mk('B', 100, 103, { scale: 0.5 });   // scale<targetScale → 无 ×0.4 急停
     const pool = [top, bot];
     popupLabelStep(bot, pool, 1, 2);
     expect(bot.life).toBe(60 - 1);         // 未延长,仅 tail --
@@ -46,15 +46,16 @@ describe('抗重叠互推（PopupText.cs:678-704）', () => {
     expect(bot.vy).toBeCloseTo(-7 * 0.86, 12);
   });
 
-  it('同 y 平局：槽序在前者触发（whoAmI < i,:694）', () => {
+  it('同 y 平局：槽序在前者触发（whoAmI < i,:694）——延长对双写（:702-703 同拍双赋值）', () => {
     const first = mk('A', 100, 100);
     const second = mk('BBBB', 104, 100);   // 横向相交（dx4 < (8+32)/2=20）
     const pool = [first, second];
-    popupLabelStep(first, pool, 0, 2);     // whoAmI=0 < 1 → 触发
-    expect(first.life).toBe(60 + 15 * 2 - 1);
-    popupLabelStep(second, pool, 1, 2);    // whoAmI=1 → 不触发
-    expect(second.life).toBe(60 - 1);
-    expect(first.life).toBe(60 + 15 * 2 - 2);   // 本拍扫描不再延长,仅 --
+    popupLabelStep(first, pool, 0, 2);     // whoAmI=0 < 1 → 触发：双方 life = 90
+    expect(first.life).toBe(60 + 15 * 2 - 1);   // 自身再 tail --
+    expect(second.life).toBe(60 + 15 * 2);      // 对方被同拍重钉
+    popupLabelStep(second, pool, 1, 2);    // whoAmI=1 → 不触发,走 life--
+    expect(second.life).toBe(60 + 15 * 2 - 1);
+    expect(first.life).toBe(60 + 15 * 2 - 1);   // 未被 second 步进（-- 只作用于自身）
   });
 
   it('不相交（横向分离）→ 不延长', () => {
@@ -69,12 +70,11 @@ describe('抗重叠互推（PopupText.cs:678-704）', () => {
 
 describe('运动分链（:705-714）', () => {
   it('重叠：>−6 逐拍 −0.2 上推；−6 恰好落 ×0.86 支', () => {
-    const a = mk('A', 100, 100, { vy: -5 });
-    const b = mk('B', 100, 130);           // dy30 —— 静止基线；a 上浮后仍相交窗内
+    const a = mk('A', 100, 100, { vy: -5, scale: 0.5 });
+    const b = mk('B', 100, 110);           // dy10 < 盒高 24 → 相交
     popupLabelStep(a, [a, b], 0, 2);
     expect(a.vy).toBeCloseTo(-5.2, 12);
-    // a.y = 100−5.2 = 94.8,b 130 → dy=35.2 ≥ 24 出盒!重摆基线再测边界
-    const c = mk('A', 100, 100, { vy: -6 });
+    const c = mk('A', 100, 100, { vy: -6, scale: 0.5 });
     const e = mk('B', 100, 110);
     popupLabelStep(c, [c, e], 0, 2);
     expect(c.vy).toBeCloseTo(-6 * 0.86, 12);   // −6 > −6 假 → else 支
@@ -103,7 +103,8 @@ describe('寿命与收缩（:715-731）', () => {
     expect(popupLabelStep(d, pool, 0, 1)).toBe(true);   // life 1→0 收缩期 0.17
     expect(d.scale).toBeCloseTo(0.17, 12);
     expect(popupLabelStep(d, pool, 0, 1)).toBe(true);   // 0.14
-    expect(popupLabelStep(d, pool, 0, 1)).toBe(false);  // 0.11→0.08 <0.1 消亡
+    expect(popupLabelStep(d, pool, 0, 1)).toBe(true);   // 0.11
+    expect(popupLabelStep(d, pool, 0, 1)).toBe(false);  // 0.08 <0.1 消亡
     expect(d.scale).toBeLessThan(0.1);
   });
 

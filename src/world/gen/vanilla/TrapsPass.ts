@@ -374,6 +374,15 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     //   走 FinalCleanup 引擎 1:1 TileFrame（resetFrame=false 邻格语义，YYYYY 批
     //   s22222 #97 树坍塌 118 杀实证）；树族 dust=0（KDUST 表）掷中性。
     if (rng && !i13Legacy() && TREE_DISPATCH_SHEETS.has(sh)) { genTileFrameNeighbor(st, rng, ux, uy); continue; }
+    // ★IIIII221（graveyard #76 定罪修复）：Sign 家族 {55,85,395,425,510,511,573} 真分派
+    //   （TileFrameImportant case 55/85/... → CheckSign cs:43944）——墓碑(85) 2×2 完整
+    //   性组杀 + **case 85 尾幽灵掷 Next(8) 恒耗**（砸墓碑 1/8 刷幽灵 316；x86 rig
+    //   rc 2169→2170 +1 掷实证,栈=CheckSign←TileFrameImportant←KillTile←placeTrap）。
+    //   曾落 MULTI_DEFS 兜底（任意列悬空即塌近似）⇒ 掷流无 +1 → 本 pass 自此 +1
+    //   错位（#76 巨石变体双翻 716>664/138>716 + 受理双不对称全 cascade）。
+    //   实现体=引擎 checkSignSweep（FinalCleanupPass）。★同文件双编辑勿用两次
+    //   write——本行曾因旧串二次覆写自灭（教训在案）。
+    if (rng && !i13Legacy() && SIGN_DISPATCH_SHEETS.has(sh)) { genTileFrameNeighbor(st, rng, ux, uy); continue; }
     if (sh === 185) { checkPileTrap(st, ux, uy); continue; }
     // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），

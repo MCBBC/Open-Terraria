@@ -175,13 +175,18 @@ describe('箱族（:40303-40309 BasicChest={21,467}）', () => {
     }))).toBe(true);
   });
 
-  it('跨型同 style（21↔467）→ true（tile.type!=type 支）', () => {
+  it('跨型：同 style → true（tile.type!=type 支）；异 style → 无条件 true', () => {
+    // 同 style 跨型：frameX/36==style → return tile.type!=type = true
     expect(validTileForReplacementFamilies(ctx({
       targetSheet: 21, placedSheet: 467, style: 0, targetFrameX: 0,
     }))).toBe(true);
     expect(validTileForReplacementFamilies(ctx({
       targetSheet: 467, placedSheet: 21, style: 2, targetFrameX: 2 * 36,
-    }))).toBe(false);
+    }))).toBe(true);
+    // 异 style 跨型：frameX/36!=style → return true
+    expect(validTileForReplacementFamilies(ctx({
+      targetSheet: 467, placedSheet: 21, style: 0, targetFrameX: 2 * 36,
+    }))).toBe(true);
   });
 
   it('非箱放置物 → false（尘换箱旧近似误放行,现按 :40326/:63209 尾段拒）', () => {

@@ -12,6 +12,7 @@ import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY } from '../src/data/items';
+import { BuffType } from '../src/stats/Buffs';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 
@@ -100,6 +101,53 @@ describe('水中翅膀可脱离（wet×wing 翻案 2026-09-03）', () => {
     }
     const rise = (120 * TILE - minY) / TILE;   // 相对池底(y=120 行顶面)升幅
     expect(rise).toBeGreaterThan(24);          // 远超无翅射程——翅膀水下接管驱动爬升
+    p.inputJump = false;
+  });
+
+  it('清零段：无翼（或骑禁翼坐骑）→ wingTime 每 tick 归零（:26948 wingsLogic==0）', () => {
+    const { p, hooks } = makePlayer();
+    sinkToBottom(p, hooks);
+    p.inv.armor[3] = null;                     // 空中卸翼场景等价：无翼态
+    p.wingTime = 50;                           // 旧版残留僵尸值会错封飞毯门
+    p.fixedUpdate(1 / 60, hooks);
+    expect(p.wingTime).toBe(0);
+  });
+
+  it('湿态火箭靴：无翼+火箭靴水下按住跳 → 推力脉冲接力爬升（:27069 无 wet 门）', () => {
+    const { p, hooks } = makePlayer();
+    const rocketId = Number(Object.entries(ITEM_BY_KEY).find(([, v]) => v === 128)?.[0]);
+    p.inv.armor[3] = null;
+    p.inv.armor[4] = { id: rocketId, stack: 1 };   // Rocket Boots（vanillaAccFx 128 → 档1）
+    sinkToBottom(p, hooks);
+    expect(p.equipStats.rocketBoots).toBe(1);
+    const y0 = p.y;
+    p.inputJump = true;
+    let minY = Infinity;
+    for (let t = 0; t < 300; t++) {
+      p.fixedUpdate(1 / 60, hooks);
+      minY = Math.min(minY, p.y);
+    }
+    // 踩底回满 rocketTime（公共段 :27060）→ 水跳 sustain 尽后 canRocket 门
+    // （vy > -6.01）放行 → 推力脉冲接力；旧版湿态整块缺失 = 只剩水跳弹跳
+    expect((y0 - minY) / TILE).toBeGreaterThan(25);
+    p.inputJump = false;
+  });
+
+  it('人鱼化：贝壳装备 + 浸水 → merman + Merfolk buff + 水中半途可起跳（:25774-25785）', () => {
+    const { p, hooks } = makePlayer();
+    const shellId = Number(Object.entries(ITEM_BY_KEY).find(([, v]) => v === 497)?.[0]);
+    p.inv.armor[3] = { id: shellId, stack: 1 };    // Neptune's Shell（fx.merman 贝壳族）
+    p.inputJump = false;
+    for (let i = 0; i < 120; i++) p.fixedUpdate(1 / 60, hooks);   // 沉入水中（不触底）
+    expect(p.inWater).toBe(true);
+    expect(p.merman).toBe(true);                   // 人鱼化（旧版仅头部浸水才置位）
+    expect(p.buffs.has(BuffType.Merfolk)).toBe(true);
+    // 踩水悬停（vy>0 下沉中）按跳边沿 → accFlipper 湿跳门放行（:25779 flag2&flag3）
+    expect(p.vy).toBeGreaterThan(0);
+    p.inputJump = true;
+    p.fixedUpdate(1 / 60, hooks);
+    expect(p.vy).toBeLessThan(0);                  // 半途起跳翻升
+    expect(p.swimTime).toBe(30);                   // :20419-20422 脚蹼起跳置 swimTime
     p.inputJump = false;
   });
 });

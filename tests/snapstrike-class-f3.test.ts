@@ -13,6 +13,7 @@ import { TileStore } from '../src/world/TileStore';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { trySnapStrike, snapStrikeDust } from '../src/stats/SnapStrike';
+import { fadingParticles } from '../src/fx/FadingParticles';
 import { BuffType } from '../src/stats/Buffs';
 import type { ProjClass } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
@@ -214,8 +215,8 @@ describe('★F3 尘段载荷直用（禁二次掷）', () => {
 // Spawn_ 全段（音+环带+尘）在本端照跑;曾本地只生尘段（音/环带缺,远端 module8 却
 // 全段复放）= 本/远端不对称。零目标形态下受击者拍是唯一 Spawn_ 面,便于单拍取证。
 describe('★W-A2 受击者拍完整 Spawn_ 本地面（音+环带+尘三段齐）', () => {
-  it('kind0 零目标：环带 2 圈起（size=6×钳(vh/256) 原值直入）+Item_72+尘 20+单次广播', () => {
-    const parts: Array<{ x: number; y: number; opts: { size?: number } }> = [];
+  it('kind0 零目标：环带 2 FadingParticle（TTL20/圈起二次链/Delay=0）+Item_72+尘 20+单次广播', () => {
+    const before = fadingParticles.count;
     const wavs: Array<{ file: string }> = [];
     const made: unknown[] = [];
     const broadcasts: number[] = [];
@@ -235,8 +236,6 @@ describe('★W-A2 受击者拍完整 Spawn_ 本地面（音+环带+尘三段齐�
       player,
       enemies: () => [] as unknown[],                             // 零目标 → 无逐弹拍
       critters: () => [],
-      spawnParticles: (x: number, y: number, _c: string, _n: number, _s?: number,
-        opts: { size?: number } = {}) => { void x; void y; parts.push({ x, y, opts }); },
       playSfxWav: (file: string) => { wavs.push({ file }); },
       vanillaDust: dustPool,
       broadcastParticleOrchestra: (type: number) => { broadcasts.push(type); },
@@ -244,8 +243,16 @@ describe('★W-A2 受击者拍完整 Spawn_ 本地面（音+环带+尘三段齐�
     const vh = Math.hypot(16, 24) / 2;                            // 盒对角/2 裸值(:14433)
     trySnapStrike(hooks, player, 0, 960, 1440, 999,
       { victimBox: { w: 16, h: 24, cx: 960, cy: 1440 } });
-    expect(parts).toHaveLength(2);                                // Spawn_SnappingStone 环带 ×2
-    expect(parts[0].opts.size).toBeCloseTo(6 * Math.min(0.12, vh / 256), 12);  // 原值流(非预饱和)
+    // ★池化清偿（2026-09-03）：环带 = FadingParticle×2（Projectile_1121,受击者拍
+    //   Y=0 → Delay=0;圈起二次链吃 ms=钳(vh/256,≤.12) 原值流）
+    const ring = [...fadingParticles.each()].slice(before);
+    expect(ring).toHaveLength(2);                                 // Spawn_SnappingStone 环带 ×2
+    for (const f of ring) {
+      expect(f.texKey).toBe('vanilla/Projectile_1121.png');
+      expect(f.timeToLive).toBe(20);
+      expect(f.delay).toBe(0);                                    // 受击者拍 Y=0 :14433
+      expect(f.scaleVelX).toBeCloseTo((6 * Math.min(0.12, vh / 256)) / 20, 12);
+    }
     expect(wavs.some((w) => w.file === 'Item_72')).toBe(true);    // 受击者拍同播三味音
     expect(made).toHaveLength(20);                                // 尘段全量(同拍)
     expect(broadcasts).toHaveLength(1);                           // 上行面保持一处(不双播)

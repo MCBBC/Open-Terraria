@@ -96,6 +96,7 @@ export class FadingParticles {
   spawn(cfg: {
     x: number; y: number;
     vx?: number; vy?: number;
+    ax?: number; ay?: number;
     rot?: number; rotVel?: number;
     scale?: number; scaleX?: number; scaleY?: number;
     scaleVelX?: number; scaleVelY?: number;
@@ -115,7 +116,7 @@ export class FadingParticles {
     slot.active = true;
     slot.x = cfg.x; slot.y = cfg.y;
     slot.vx = cfg.vx ?? 0; slot.vy = cfg.vy ?? 0;       // SetBasicInfo 初速（编排站恒 Zero）
-    slot.ax = 0; slot.ay = 0;                            // AccelerationPerPool 缺省 0
+    slot.ax = cfg.ax ?? 0; slot.ay = cfg.ay ?? 0;        // AccelerationPerFrame（编排站缺省 0）
     slot.rot = cfg.rot ?? 0;
     slot.rotVel = cfg.rotVel ?? 0;
     const sx = cfg.scaleX ?? cfg.scale ?? 1;
