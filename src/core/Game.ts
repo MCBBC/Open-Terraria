@@ -252,12 +252,11 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
 import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/WaterWaves';
-import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld } from '../render/Renderer';
+import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, type InvItem } from '../items/Inventory';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
-import { combatMeasure } from '../render/CombatTextFont';
 
 /** 物品稀有度表（vanilla-itemrare.json：vid → rare；同 UI.ts/Bobber.ts 惯例） */
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
@@ -2560,6 +2559,10 @@ export class Game implements GameHooks {
   // 弹药
   particles: Particle[] = [];
   dmgNumbers: DamageNumber[] = [];
+  /** PopupText.numActive 上一帧写回终值快照（UpdateItemText :760-772:num 在循环内
+   *  逐个 ++、循环结束才写回 → 帧内 Update 读到的是上一帧写回终值 = 上一帧帧首
+   *  活跃数,含上一帧内死去的条目;红队R3③帧窗修正——快照在 update 尾写回、次帧头消费） */
+  private popupNumActivePrev = 0;
   /** 原版 Dust 池（翅膀尘埃批引入；DrawDust 语义见 Renderer.drawVanillaDust） */
   readonly vanillaDust = new VanillaDust();
 
@@ -4717,8 +4720,15 @@ export class Game implements GameHooks {
     // 怪物专属声效随首次受击懒加载
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
-    // 自动暂停（Main.autoPause → Web visibilitychange 语义；destroy 摘除防钉死旧 Game）
+    // 失焦暂停两源监听（①②：visibilitychange ∪ window blur/focus；destroy 摘除
+    // 防钉死旧 Game）。暂停消费面=playWhenUnfocused 非 autoPause（红队 R3-E2 ②）
     document.addEventListener('visibilitychange', this.onVisibilityChange);
+    window.addEventListener('blur', this.onWindowBlur);
+    window.addEventListener('focus', this.onWindowFocus);
+    // MP 失焦豁免探针（④）：原版 PauseSounds/UpdateFocus 的 netMode==0 门
+    // （FocusHelper.cs:97-107/:139-141）——联机失焦 sfx 不停、游戏不暂停；
+    // destroy 摘除防闭包钉死旧 Game
+    Sfx.mpProbe = () => !!this.net?.active;
     // ---- 行为录制接线（长按 F5 录制窗；详见 debug/BehaviorRecorder 头注）----
     // tick/世界元信息源（构造期闭包读运行时字段，换世界自动跟随）
     // 音效录制双通道（audioRec.sfx/bgm）与主行为环共用同一 tick/世界闭包
@@ -5388,7 +5398,21 @@ export class Game implements GameHooks {
     // 7200-14400t 起始冷却，进世界不立即说话）。sinks 用闭包动态解析 this.player
     setLucySinks({
       popup: (text, x, y, vx, vy) => {
-        this.dmgNumbers.push({ x, y, vx, vy, value: 0, crit: false, color: '#D46E71', label: text, life: 420, scale: 1, alpha: 1 });
+        // PopupText.NewText(AdvancedPopupRequest)（LucyAxeMessage.SpawnPopupText
+        // :157-168 → NewText :118-147,1458 同文）：420t、ResetText scale=0
+        // （:99-116/:109——出生 0,Update :740-747 逐拍 +0.1×TargetScale 十帧生长入;
+        //   旧满幅出生 = 首拍即吃 ×0.4 急停 + 绕过槽路可超 20 条）。槽 =
+        //   FindNextItemTextSlot（NewText :128 → :508-532:满 20 逐 position.Y 最小者,
+        //   与物品拾取支同款——★先逐出后写入,新弹窗自身不可成为逐出受害者）
+        let labelCount = 0, topIdx = -1, topY = Infinity;
+        for (let i = 0; i < this.dmgNumbers.length; i++) {
+          const o = this.dmgNumbers[i];
+          if (!o.label) continue;
+          labelCount++;
+          if (o.y < topY) { topY = o.y; topIdx = i; }
+        }
+        if (labelCount >= 20 && topIdx >= 0) this.dmgNumbers.splice(topIdx, 1);
+        this.dmgNumbers.push({ x, y, vx, vy, value: 0, crit: false, color: '#D46E71', label: text, life: 420, scale: 0, alpha: 1 });
       },
       talk: (x, y) => this.playSfxFiles(soundTrackFiles('lucyaxe_talk'), 0.4, x, y),
       emote: () => spawnEmote(this.player, 149, undefined, { isPlayer: true }),   // MakeLocalPlayerEmote(149)：Player 锚 OnBubbleChange 门
@@ -6386,6 +6410,9 @@ export class Game implements GameHooks {
     // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
     // 累积数百 MB 显存 → contextlost/contextrestored 风暴卡死(2026-08-10 trace)
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('blur', this.onWindowBlur);
+    window.removeEventListener('focus', this.onWindowFocus);
+    Sfx.mpProbe = null;   // 失焦闸 MP 豁免探针随实例摘除（构造期接线）
     this.input.destroy();
     this.chunks?.dispose();
     this.renderer.dispose();
@@ -6483,6 +6510,7 @@ export class Game implements GameHooks {
     } else {
       this._autoSaveAt = 0;
     }
+    this.applyAutoPauseUI();   // autoPause"开界面暂停"逐帧重算（CanPauseGame 同构,②）
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
@@ -6537,19 +6565,67 @@ export class Game implements GameHooks {
   private _autoSaveAt = 0;
   /** 帧冻结取证节流锚（frame() 内 >100ms 停顿落行为环，1s 一条防刷环） */
   private _lastStallLogAt = 0;
-  /** 自动暂停（Main.autoPause）Web 语义：切 tab(hidden) 暂停——标记"本次暂停是
-   *  失焦所致"，回来(visible) 仅当我们暂停的才自动恢复（手动暂停不被误唤醒） */
+  /** 失焦暂停（红队 R3-E2 ②重锚 2026-09-03）：原版 wantsToPause =
+   *  (!IsSelectedApplication && netMode==0) & !Main.SettingPlayWhenUnfocused
+   *  （FocusHelper.cs UpdateFocus :139-141 → Main.cs:17305-17313 gamePaused=true）。
+   *  消费面是 SettingPlayWhenUnfocused（Options.playWhenUnfocused）【非 autoPause】——
+   *  开关=false（默认）失焦即游戏暂停+全静（音频闸另一监听同步落,Main.cs:11193-11202）；
+   *  开关=true 失焦不暂停游戏（sfx 停+环境音归零、仅音乐继续,Sfx 分类别闸）。
+   *  MP（this.net?.active ↔ netMode==1）豁免（:141 的 netMode==0 门）。
+   *  autoPause 是另一独立开关="开界面暂停"（CanPauseGame Main.cs:17493-17508 逐帧
+   *  重算,applyAutoPauseUI），与本开关互不耦合。两源合并（①）：visibilitychange
+   *  (tab 隐藏) ∪ window blur(可见但未激活——点另一应用/第二屏,原版 IsActive 语义,
+   *  曾漏此源照常跑)；_autoPausedByFocus 标记"本次暂停是失焦所致",双源恢复后仅
+   *  自动续我们暂停的（手动/autoPause 暂停不被误唤醒,Web 便利语义） */
   private _autoPausedByFocus = false;
+  private _visHidden = false;
+  private _winBlurred = false;
   private onVisibilityChange = () => {
-    if (!options.data.autoPause || !this.world) return;
-    if (document.hidden && !this.paused) {
-      this.paused = true;
-      this._autoPausedByFocus = true;
-    } else if (!document.hidden && this.paused && this._autoPausedByFocus) {
-      this.paused = false;
-      this._autoPausedByFocus = false;
-    }
+    this._visHidden = document.hidden;
+    this.applyFocusPause();
   };
+  private onWindowBlur = () => {
+    this._winBlurred = true;
+    this.applyFocusPause();
+  };
+  private onWindowFocus = () => {
+    this._winBlurred = false;
+    this.applyFocusPause();
+  };
+  private applyFocusPause(): void {
+    if (!(this._visHidden || this._winBlurred)) {
+      // 双源恢复：仅解除"失焦所致"的暂停（手动/开界面暂停不误唤醒）
+      if (this.paused && this._autoPausedByFocus) {
+        this.paused = false;
+        this._autoPausedByFocus = false;
+      }
+      return;
+    }
+    if (options.data.playWhenUnfocused) return;   // 开关开=失焦不暂停游戏（②）
+    if (this.net?.active) return;                 // MP 豁免（netMode==0 门,FocusHelper.cs:141）
+    if (!this.world || this.paused) return;
+    this.paused = true;
+    this._autoPausedByFocus = true;
+  }
+  /** autoPause 独立语义="开界面暂停"（CanPauseGame Main.cs:17493-17508 逐帧重算 →
+   *  :17372-17376 gamePaused）：背包面板打开即暂停、关面板即恢复——原版是逐帧态
+   *  非事件开关,故挂 frame() 每帧。本仓 playerInventory 等价态 = __swUI.inventoryOpen
+   *  （renderer.playerInventory 同源,Main.playerInventory 语义）。sign 臂
+   *  （LocalPlayer.sign>=0 :17502）本仓牌对话框无 Game 侧可读态,登记未接；MP 豁免
+   *  （:17496 netMode==0 门）。与失焦暂停（applyFocusPause,消费 playWhenUnfocused）
+   *  互不耦合（红队 R3-E2 ②交叉态修正） */
+  private _uiPausedByAutoPause = false;
+  private applyAutoPauseUI(): void {
+    const gate = options.data.autoPause && !!this.world && !this.net?.active
+      && ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false);
+    if (gate && !this.paused) {
+      this.paused = true;
+      this._uiPausedByAutoPause = true;
+    } else if (!gate && this.paused && this._uiPausedByAutoPause) {
+      this.paused = false;
+      this._uiPausedByAutoPause = false;
+    }
+  }
 
   // ================= 固定步逻辑 =================
 
@@ -9394,9 +9470,14 @@ export class Game implements GameHooks {
     //  旧 0.5/t+0.8 封顶是 monospace 时代自造近似,位图字体对齐时一并归位）→
     //  寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
     let wn = 0;
-    // numActive（UpdateItemText :760-773）：本场活跃 label 数（帧首快照）
-    let labelActiveCount = 0;
-    for (const d of this.dmgNumbers) if (d.label) labelActiveCount++;
+    // numActive（UpdateItemText :760-772）：num 在循环内逐个 ++、循环结束才写回 →
+    // 本帧 Update 读到的是【上一帧写回终值】= 上一帧帧首活跃数（含上一帧内死去
+    // 的条目——红队R3③帧窗修正:旧"本帧帧首幸存者"快照少算死者,重钉档位偏小）。
+    // 快照语义 = 帧尾写回本帧帧首计数、次帧头消费（与原版循环后写回时序等价）
+    const labelActiveCount = this.popupNumActivePrev;
+    let labelActiveNow = 0;
+    for (const d of this.dmgNumbers) if (d.label) labelActiveNow++;
+    this.popupNumActivePrev = labelActiveNow;
     for (let di = 0; di < this.dmgNumbers.length; di++) {
       const d = this.dmgNumbers[di];
       if (d.label) {
@@ -9767,14 +9848,20 @@ export class Game implements GameHooks {
     return false;
   }
 
-  /** QuickHeal（Player.cs:5268-5306）：背包找最佳治疗药水即刻喝下。
-   *  选药（QuickHeal_GetItemToUse :5310-5335）：healLife 与缺口差最小（过量最小）；
-   *  227 恢复药水差为负时 +30 再钳 0（:5322-5327——可溢出 30 点的宽容档）；
+  /** QuickHeal（1457 Player.cs:5493-5539）：背包找最佳治疗药水即刻喝下。
+   *  选药（QuickHeal_GetItemToUse :5541-5558 + TryChoosingItem :5560-5588）：
+   *  healLife 与缺口差最小（过量最小）；
+   *  227 恢复药水差为负时 +30 再钳 0（:5567-5574——可溢出 30 点的宽容档）；
    *  bestDifference 语义：初始 -maxHp，负域取最大（欠得最少），非负域取最小（溢得最少）；
-   *  主背包 58 格后追加 bank4（useVoidBag 门，:5325-5332） */
+   *  主背包 58 格后追加 bank4（useVoidBag 门，:5550-5556） */
   private quickHeal(): void {
     const p = this.player;
-    if (!p || p.dead || p.hp >= p.maxHp || p.buffs.healBlocked) return;   // :5270
+    // 入口门（QuickHeal 1457 Player.cs:5495）：pendingInventoryActions（无载体不登记）
+    // || cursed（buff 23 → cursed=true :11819-11823,复位 :18804）|| CCed（frozen||
+    // webbed||stoned，CCed 属性 :3361-3372;本仓 Player.cced 同款）|| dead ||
+    // statLife == statLifeMax2 || potionDelay > 0（healBlocked）。F2 修复：此前缺
+    // cursed/CCed 两门——诅咒/硬控中可快喝
+    if (!p || p.buffs.has(BuffType.Cursed) || p.cced || p.dead || p.hp >= p.maxHp || p.buffs.healBlocked) return;   // :5495
     const lifeDiff = p.maxHp - p.hp;
     type SlotArr = Array<{ id: number; stack: number } | null>;
     let bestArr: SlotArr | null = null, bestSlot = -1, bestDiff = -p.maxHp;
@@ -9797,12 +9884,16 @@ export class Game implements GameHooks {
     this.quickConsume(bestArr, bestSlot);   // 喝下：音效+药水病+回复+buff+消耗（共用链）
   }
 
-  /** QuickMana（Player.cs:5364-5416）：首个魔力恢复物（healMana>0；药水病中跳过
-   *  potion 类——:5399 `potionDelay == 0 || !potion` 门）；主背包后追加 bank4
-   *  （useVoidBag 门，:5405-5413） */
+  /** QuickMana（1457 Player.cs:5590-5612）：首个魔力恢复物（healMana>0；药水病中跳过
+   *  potion 类——GetItemToUse :5625/:5634 `potionDelay == 0 || !potion` 门）；主背包后
+   *  追加 bank4（useVoidBag 门，:5630-5640） */
   private quickMana(): void {
     const p = this.player;
-    if (!p || p.dead || p.mana >= p.maxMana) return;                      // :5369
+    // 入口门（QuickMana 1457 Player.cs:5592）：pendingInventoryActions（无载体不登记）
+    // || cursed（buff 23 → cursed=true :11819-11823,复位 :18804）|| CCed（:3361-3372）
+    // || dead || (!ManaV2 && statMana == statManaMax2) || manaPotionDelay > 0。F2 修复：
+    // 此前缺 cursed/CCed 两门——诅咒/硬控中可快喝蓝
+    if (!p || p.buffs.has(BuffType.Cursed) || p.cced || p.dead || p.mana >= p.maxMana) return;   // :5592
     const tryUse = (arr: Array<{ id: number; stack: number } | null>): boolean => {
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
@@ -9810,7 +9901,7 @@ export class Game implements GameHooks {
         const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
         const f = vid >= 0 ? itemFuncOfVid(vid) : null;
         if (!f || !(f.healMana! > 0)) continue;
-        if (p.buffs.healBlocked && f.potion) continue;                    // :5399
+        if (p.buffs.healBlocked && f.potion) continue;                    // :5625/:5634
         this.quickConsume(arr, i);
         return true;
       }
@@ -9820,8 +9911,9 @@ export class Game implements GameHooks {
     if (this.useVoidBag() && p.banks[3]) tryUse(p.banks[3]);
   }
 
-  /** 光宠/宠物 buff 分类（QuickBuff_ShouldBotherUsingThisBuff :5684-5695 消费
-   *  Main.lightPet/vanityPet 布尔表成员集；vanillaPets 提取表 vid→{buff,light}
+  /** 光宠/宠物 buff 分类（QuickBuff_ShouldUseItem :5885-5888 无条件跳过 + 应
+   *  QuickBuff_ShouldBotherUsingThisBuff :5996-6009 同类互斥,消费 Main.lightPet/
+   *  vanityPet 布尔表成员集；vanillaPets 提取表 vid→{buff,light}
    *  反查成 buff 集——light=true 入光宠集，false 入宠物集；非宠物 buff 两集皆无）。
    *  懒建一次（62 件全表扫 vid 1..5700） */
   private static _petBuffLight: Set<number> | null = null;
@@ -9840,15 +9932,51 @@ export class Game implements GameHooks {
     return { light: Game._petBuffLight, vanity: Game._petBuffVanity! };
   }
 
+  /** QuickBuff_PickBestFoodItem 决策核（1457 Player.cs:5912-5957 纯函数抽取——
+   *  tests/quickbuff-r1-gates.test.ts 锁定 F3）。
+   *  actives=现役 buff 槽的食物档集（QuickBuff_FindFoodPriority :5959-5968，
+   *  26/206/207→1/2/3 其余 0——本仓调用点只收三种 WellFed；非食物档 0 只会把
+   *  下限从 0 抬到 1，对档 >=1 的食物受理面等价）；cands=候选 {prio,time} 依槽序
+   *  （主背包 :5928-5938 → 虚空袋 :5941-5956，序保持即等价）。
+   *  现役扫描 :5916-5923 `if (num <= num2) num = num2 + 1` → 受理下限 = 现役最高
+   *  档 + 1（无现役食物 num 恒 0 全放行）；受理 :5933/:5948 `num3 > 0 &&
+   *  num3 >= num && (item == null || item.buffTime < item2.buffTime || num3 > num)`
+   *  ——首次受理前 num=下限，受理后 num=选中档（同档比 buffTime 长者胜，更高档
+   *  恒胜，即使 buffTime 更短）。返回胜者下标，-1 无胜者 */
+  private static quickBuffPickFood(
+    actives: number[], cands: Array<{ prio: number; time: number }>): number {
+    let num = 0;
+    for (const num2 of actives) { if (num <= num2) num = num2 + 1; }        // :5921-5923
+    let best = -1;
+    for (let j = 0; j < cands.length; j++) {
+      const cand = cands[j];
+      if (!cand) continue;
+      const num3 = cand.prio;
+      const cur = best >= 0 ? cands[best] : undefined;
+      if (num3 > 0 && num3 >= num
+        && (!cur || cur.time < cand.time || num3 > num)) {                  // :5933/:5948
+        best = j;
+        num = num3;
+      }
+    }
+    return best;
+  }
+
   /** QuickBuff（1457 Player.cs:5760-5840）：先吃最优食物（缺档/更优档），再依次使用所有
    *  值得用的增益药水（主背包 58 格 + bank4 虚空袋档）。
-   *  ★CountBuffs()==maxBuffs(44) 槽上限门（:5769-5771 入口 + 链内 :5794/:5799/
-   *  :5806/:5811 满槽即断）已接（2026-09-03 清偿，见体内 buffsFull 注）；
-   *  光宠/宠物同类互斥已接（:5684-5695，petBuffKinds 反查表）；603 收藏版宠物
-   *  门（:5574 runningCollectorsEdition）无载体，登记 */
+   *  ★CountBuffs()==maxBuffs(44) 槽上限门（:5767-5769 入口 + 链内 :5794/:5808/
+   *  :5815/:5829 满槽即断）已接（2026-09-03 清偿，见体内 buffsFull 注）；
+   *  光宠/宠物跳过已接（ShouldUseItem :5885-5888 无条件 + ShouldBother :5996-6009
+   *  同类互斥，petBuffKinds 反查表）；603 收藏版宠物
+   *  门（:5889-5891 runningCollectorsEdition）无载体，登记 */
   private quickBuff(): void {
     const p = this.player;
-    if (!p || p.dead) return;                                             // :5448
+    // 入口门（QuickBuff 1457 Player.cs:5762）：pendingInventoryActions（无载体不登记）
+    // || cursed（buff 23 → cursed=true :11819-11823,复位 :18804）|| CCed（frozen||
+    // webbed||stoned，CCed 属性 :3361-3372;本仓 Player.cced 同款）|| dead ||
+    // spectating >= 0（观战分支在下方 :16942-16947 虫洞药水拦截承接）。F2 修复：
+    // 此前缺 cursed/CCed 两门——诅咒/硬控中可快用增益
+    if (!p || p.buffs.has(BuffType.Cursed) || p.cced || p.dead) return;    // :5762
     // ---- 虫洞药水拦截（HandleSpectatingControls Player.cs:16942-16947：
     //      观战中按 QuickBuff 且 CanWormholeToSpectating（:17002-17009 =
     //      !dead && 观战目标有效 && 同队 team>0）→ UnityTeleport + TakeUnityPotion，
@@ -9871,45 +9999,53 @@ export class Game implements GameHooks {
       }
     }
     let soundVid = -1;
-    // ★槽上限门（QuickBuff Player.cs:5769-5771 入口 `if (CountBuffs() == maxBuffs)
+    // ★槽上限门（QuickBuff Player.cs:5767-5769 入口 `if (CountBuffs() == maxBuffs)
     //  return`——Player.maxBuffs=44（:1491 静态常量,1457 值）。本仓 buffs 为 Map,
     //  旧态可超 44 → 用 >= 收敛。2026-09-03 登记偏离清偿——此前增益药水可无限上。
-    //  链内断点：主背包循环前 :5794 + 每件消费后 :5799、虚空袋循环前 :5806 +
-    //  每件消费后 :5811（下方 tryBuffs/调用点同步） ----
+    //  链内断点：主背包循环前 :5794 + 每件消费后 :5808、虚空袋循环前 :5815 +
+    //  每件消费后 :5829（下方 tryBuffs/调用点同步） ----
     const buffsFull = (): boolean => p.buffs.active.size >= 44;
     if (buffsFull()) return;
-    // ---- QuickBuff_PickBestFoodItem（:5474-5646）：26/206/207 优先级 1/2/3 ----
-    let curPrio = 0;
+    // ---- QuickBuff_PickBestFoodItem（1457 Player.cs:5912-5957）：26/206/207 优先级
+    //      1/2/3（FindFoodPriority :5959-5968）。F3 修复：受理下限 = 现役最高档+1
+    //      （:5916-5923 现役扫描 `if (num <= num2) num = num2 + 1` → 候选受理
+    //      :5933/:5948 `num3 >= num` = 必须严格高于现役最高档——现役档 2 在身只吃
+    //      档 3，同档不重食；同档比 buffTime 长者胜）。决策核抽
+    //      Game.quickBuffPickFood（纯函数,tests/quickbuff-r1-gates.test.ts 锁定）----
+    const actives: number[] = [];
     for (const bt of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
-      if (p.buffs.has(bt)) { curPrio = Math.max(curPrio, Game.QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]); }
+      if (p.buffs.has(bt)) actives.push(Game.QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]);
     }
-    let foodArr: Array<{ id: number; stack: number } | null> | null = null;
-    let foodSlot = -1, foodPrio = curPrio, foodTime = -1;
+    const cands: Array<{ prio: number; time: number }> = [];
+    const candRef: Array<{ arr: Array<{ id: number; stack: number } | null>; i: number }> = [];
     const considerFood = (arr: Array<{ id: number; stack: number } | null>, i: number): void => {
       const s = arr[i];
       if (!s || s.stack <= 0) return;
       const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
       const prio = f?.buffType ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
-      if (prio > 0 && prio >= foodPrio && (foodSlot < 0 || (f!.buffTime ?? 0) > foodTime || prio > foodPrio)) {
-        foodArr = arr; foodSlot = i; foodPrio = prio; foodTime = f!.buffTime ?? 0;   // :5618-5624
+      if (prio > 0) {   // 档 0 = 非食物：受理门 num3 > 0（:5933/:5948）恒拒，不入流
+        cands.push({ prio, time: f!.buffTime ?? 0 });
+        candRef.push({ arr, i });
       }
     };
     for (let i = 0; i < 58; i++) considerFood(p.inv.slots, i);
     if (this.useVoidBag() && p.banks[3]) {
-      for (let j = 0; j < p.banks[3].length; j++) considerFood(p.banks[3], j);       // :5629-5646
+      for (let j = 0; j < p.banks[3].length; j++) considerFood(p.banks[3], j);       // :5941-5956
     }
-    if (foodSlot >= 0 && foodArr) { soundVid = this.quickConsume(foodArr, foodSlot); }
-    // ---- 增益药水链（:5496-5527：QuickBuff_ShouldUseItem 逐件；主背包 → bank4）----
+    const foodWin = Game.quickBuffPickFood(actives, cands);
+    if (foodWin >= 0 && candRef[foodWin]) { soundVid = this.quickConsume(candRef[foodWin].arr, candRef[foodWin].i); }
+    // ---- 增益药水链（QuickBuff 链 :5794-5834 / QuickBuff_ShouldUseItem :5860-5910
+    //      逐件；主背包 → bank4）----
     const tryBuffs = (arr: Array<{ id: number; stack: number } | null>): void => {
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
         if (!s || s.stack <= 0) continue;
         const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
         const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-        if (!f || !(f.buffType! > 0) || f.summon) continue;               // :5545-5547
+        if (!f || !(f.buffType! > 0) || f.summon) continue;               // :5862-5866
         let btype = f.buffType!;
-        // QuickBuff_ShouldBotherUsingThisBuff（:5660-5697）
+        // QuickBuff_ShouldBotherUsingThisBuff（:5970-6011）
         let bother = true;
         const isFed = Game.QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
         for (const [bt] of p.buffs.active) {
@@ -9928,14 +10064,19 @@ export class Game implements GameHooks {
           const pk = Game.petBuffKinds();
           if (pk.light.has(btype) || pk.vanity.has(btype)) bother = false;
         }
-        // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件。
-        // 1457: 扣魔同时 ApplyManaRegenerationDelay()（QuickBuff_ShouldUseItem
-        // :5875-5888 `manaRegenDelay = (int)maxRegenDelay` 改调）——回蓝 buff 期钳 20
+        // mana>0 且值得用 → 扣魔（QuickBuff_ShouldUseItem 1457 :5873-5883）；魔不够
+        // 则跳过本件。★F11 修复：门与扣均 (int)((float)item.mana * manaCost)
+        // （:5875/:5878——f32 乘后 int 截断），此前全额扣未乘魔耗系数。manaCost=
+        // 玩家魔耗折扣系数（Player.cs:1859 默认 1f，饰品/盔甲逐项减法池）——本仓
+        // 同源等价式 = (1-equipStats.manaCostOff)×equipStats.manaCostMul（与
+        // GetManaCostToPay 消费面 :10870/:14005/:15075 同源）；扣魔同时
+        // ApplyManaRegenerationDelay()（:5877）——回蓝 buff 期钳 20
         if (bother && (f.mana ?? 0) > 0) {
-          if (p.mana >= f.mana!) { p.mana -= f.mana!; p.applyManaRegenerationDelay(); } else bother = false;
+          const cost = Math.trunc(f.mana! * (1 - p.equipStats.manaCostOff) * p.equipStats.manaCostMul);   // :5875/:5878
+          if (p.mana >= cost) { p.mana -= cost; p.applyManaRegenerationDelay(); } else bother = false;
         }
         if (!bother) continue;
-        if (btype === 27) {                                              // :5566-5575 三选一
+        if (btype === 27) {                                              // :5893-5905 三选一
           const r = Math.floor(Math.random() * 3);
           btype = r === 0 ? 27 : r === 1 ? 101 : 102;
         }
@@ -39433,8 +39574,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
  *  dmgNumbers 飘字池消费段抽出的纯函数（tests/popup-antioverlap.test.ts 直测;
  *  Game.update 主循环逐 label 调用,压缩写回 wn 留在调用侧）。形参：
  *   d = 自身飘字（label 字段在位）;pool = 全池引用（互推扫描需全池）;
- *   di = 自身池序（whoAmI 等价）;labelActiveCount = numActive 帧首快照
- *   （UpdateItemText :760-773——先计数后逐个 Update,非相交对计数）。
+ *   di = 自身池序（whoAmI 等价）;labelActiveCount = numActive 上一帧写回终值
+ *   （UpdateItemText :760-772——num 循环内计数、循环后写回 → 帧内读到上一帧
+ *   终值,含上一帧内死者;快照由调用侧帧尾写回/次帧头消费,见 Game.update 注）。
  *  返回 false = 本拍消亡（life≤0 且 scale<0.1）,调用侧不再写回压缩槽。 */
 export function popupLabelStep(
   d: DamageNumber, pool: DamageNumber[], di: number, labelActiveCount: number,
@@ -39443,17 +39585,22 @@ export function popupLabelStep(
   d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.01;
   if (d.alpha <= 0.7) { d.alpha = 0.7; d.alphaDir = 1; }
   if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
-  // 抗重叠推离（:678-704）：文本命中盒（Measure×scale,高×0.8）相交且自身
-  // 在上（y 小 / 同 y 槽序在前）→ 双方寿命 = activeTime + 15×num（num =
-  // numActive 全场活跃数钳 3，:688-691——非相交对计数！UpdateItemText :760
-  // 先算 numActive 再逐个 Update）
-  const m0 = combatMeasure(d.label!, false);
+  // 抗重叠推离（:678-704）：文本命中盒（GetTextHitbox :751-758 = MouseText.Measure
+  // String×scale、高×0.8——度量源 = 实绘 13px sans-serif,Renderer.popupLabelMeasure
+  // 同源,红队R3①）相交且自身在上（y 小 / 同 y 槽序在前,:694）→ 双方寿命 =
+  // activeTime + 15×num（num = numActive 钳 3,:697-703）
+  const m0 = popupLabelMeasure(d.label!);
   const hw = m0.w * (d.scale ?? 1), hh = m0.h * 0.8 * (d.scale ?? 1);
   let overlapped = false;
   for (let oi = 0; oi < pool.length; oi++) {
     const o = pool[oi];
     if (o === d || !o.label) continue;
-    const mo = combatMeasure(o.label, false);
+    // active 等价门（:687-691 `!popupText.active → continue`,红队R3②）：
+    // 本拍先步进且消亡的条目在写回压缩侧不清槽（原位留尸）——存活判据与消亡
+    // 分支（life≤0 且 scale<0.1）同一表达式,尸体当拍即从扫描窗剔除（帧首池内
+    // 皆幸存者,不会误剔未步进条目）
+    if (o.life <= 0 && (o.scale ?? 1) < 0.1) continue;
+    const mo = popupLabelMeasure(o.label);
     const ow = mo.w * (o.scale ?? 1), oh = mo.h * 0.8 * (o.scale ?? 1);
     if (d.x + hw / 2 <= o.x - ow / 2 || d.x - hw / 2 >= o.x + ow / 2) continue;
     if (d.y + hh / 2 <= o.y - oh / 2 || d.y - hh / 2 >= o.y + oh / 2) continue;

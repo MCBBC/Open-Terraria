@@ -741,7 +741,10 @@ export class Sfx {
       try { L.src.stop(); } catch { /* 已停 */ }
       L.src = null;
     }
-    if (v !== null) this.setGainNow(L.gain.gain, v);
+    // 失焦环境归零（QuietAmbientSounds FocusHelper.cs:109）：MP 豁免时 ctx 在跑，
+    // 靠本因子把环境 cue 静音；状态机照走（原版只乘音量不停车）。
+    // ★勿把因子喂进 stepAmbientCue 的 ambient 参——0 会走 sys===0 Immediate 停支
+    if (v !== null) this.setGainNow(L.gain.gain, v * this.ambientQuiet());
   }
 
   /** 波 bank 后台取齐（失败静默：buf 恒 null = 冻结无声，雨/风均为可选层） */
@@ -800,22 +803,42 @@ export class Sfx {
     return Math.max(-1, Math.min(1, (x - this.lx) / Sfx.PAN_HALF_VIEW));
   }
 
-  // ---- 失焦音频闸（★缺口补齐 2026-08-25,最小对齐形态）----
-  //  原版 UpdateAudio 头部(Main.cs:11193-11202):allowMusic=false → audioSystem.PauseAll()
-  //  + SoundEngine.StopAmbientSounds();AllowMusic(FocusHelper.cs:85-91)=失焦时取
-  //  Main.SettingPlayWhenUnfocused(Main.cs:268 默认 false)=失焦全静、后台播放是主动
-  //  开关。Web 同构 = 全部 AudioContext suspend/resume(XACT Pause/Resume 与 WebAudio
-  //  suspend 同为「冻结+原地续播」)。★设置项已接(2026-09-03):Options.playWhenUnfocused
-  //  (默认 false=失焦全静)+Settings 行(IngameOptions.cs:637-647 同位)——开关开=闸不落
-  //  (AllowAudioUnfocused :23 直通 true,等价 PauseAll 不触发)。
-  private static ctxRegistry = new Set<AudioContext>();
-  private static visHooked = false;
+  // ---- 失焦音频闸（红队 R3-E2 ①③④ 重构 2026-09-03；初版 2026-08-25 最小形态）----
+  //  原版三分闸（UpdateAudio 头部 Main.cs:11193-11202：allowMusic=false →
+  //  audioSystem.PauseAll() + SoundEngine.StopAmbientSounds()）：
+  //  · 音乐 AllowMusic(FocusHelper.cs:85-95)=失焦取 Main.SettingPlayWhenUnfocused
+  //    (Main.cs:268 默认 false)——后台放行仅音乐、主动开关；
+  //  · 音效 PauseSounds(:97-107)=!GameplayActive && netMode==0 即暂停（SoundEngine.cs
+  //    :54-63 PauseAll/ResumeAll）——【与开关无关】：单机失焦 sfx 恒停、联机豁免；
+  //  · 环境音 QuietAmbientSounds(:109)=失焦恒归零（LegacySoundPlayer.cs:422）。
+  //  Web 同构 = 按 ctx 类别分闸（本仓 sfx/BGM 分 ctx）：'music'=BGM 唯一 ctx
+  //  （Audio.ts 登记）、'sfx'=其余（ambient 循环层/风·雨环境 cue 全在 sfx ctx 上，
+  //  suspend 即静音）；suspend/resume 与 XACT Pause/Resume 同为「冻结+原地续播」。
+  private static ctxRegistry = new Map<AudioContext, 'sfx' | 'music'>();
+  /** 失焦两源（①）：visibilitychange=tab 隐藏；window blur=可见但未激活（点另一
+   *  应用/第二屏——原版 Main.instance.IsActive 的 Web 等价态，曾漏此源照常出声） */
+  private static visHidden = false;
+  private static winBlurred = false;
+  /** 两源合并（①：任一"未激活"即停，focus+visible 双恢复才续）——原版
+   *  UpdateFocus 逐帧轮询 IsActive（FocusHelper.cs:139），Web 事件面无轮询，
+   *  两事件各置一源后按并集取态 */
+  static isAppInactive(): boolean {
+    return Sfx.visHidden || Sfx.winBlurred;
+  }
+  /** MP（netMode==1）失焦豁免探针（④）：原版暂停/停声两门都带 netMode==0 条件
+   *  （FocusHelper.cs:97-107 PauseSounds / :139-141 UpdateFocus）——联机失焦游戏
+   *  照跑、sfx 不停。Game 构造期接线（可读 net 态 `() => !!this.net?.active`，
+   *  ClientNet.active），destroy 摘除；null=未接（单机语义） */
+  static mpProbe: (() => boolean) | null = null;
 
-  /** 各 AudioContext 创建点登记(Sfx.ensure / AudioSystem.audio)。短命实例(Game 级
-   *  sfx)销毁时必须 releaseAudioContext 摘除,防死 ctx 被 Set 钉死(HMR 双实例/
-   *  连续读档内存教训);长命实例(BGM/菜单)随 app 存活无需摘 */
-  static registerAudioContext(c: AudioContext): void {
-    Sfx.ctxRegistry.add(c);
+  /** 各 AudioContext 创建点登记(Sfx.ensure / AudioSystem.audio)。kind 分闸类别
+   *  （③）。★闸监听挂首个 ctx 登记处（幂等，④）——boot 期 BGM ctx 先于任何
+   *  Sfx 播放建立时闸也在位（旧实现 ensure 侧接线存在无闸窗口）。
+   *  短命实例(Game 级 sfx)销毁时必须 releaseAudioContext 摘除,防死 ctx 被表钉死
+   *  (HMR 双实例/连续读档内存教训);长命实例(BGM/菜单)随 app 存活无需摘 */
+  static registerAudioContext(c: AudioContext, kind: 'sfx' | 'music' = 'sfx'): void {
+    Sfx.ctxRegistry.set(c, kind);
+    Sfx.hookAudioGateOnce();
   }
 
   /** 销毁时从失焦闸注册表摘除（Game.destroy 调用） */
@@ -823,20 +846,18 @@ export class Sfx {
     if (this.ctx) Sfx.ctxRegistry.delete(this.ctx);
   }
 
-  private static liveCtxs(): AudioContext[] {
-    return [...Sfx.ctxRegistry];
-  }
-
-  /** 失焦闸总开关：hidden=true 全部挂起(等价 PauseAll),false 续播(ResumeAll)。
-   *  ★消费 Main.SettingPlayWhenUnfocused(Options.playWhenUnfocused,默认 false):
-   *  开关开=失焦继续播放(FocusHelper.AllowAudioUnfocused :23 → AllowMusic :79 直通),
-   *  闸整体不落——suspend/resume 两向都不动,保后台听歌。
-   *  resume 被拒(iOS 低电量模式/无手势历史)时挂下一次 pointerdown 重试——
-   *  AudioSystem.armUnlock 手势兜底同款 */
-  static setAudioSuspension(hidden: boolean): void {
-    if (hidden && options.data.playWhenUnfocused) return;
-    for (const c of Sfx.liveCtxs()) {
-      if (hidden) {
+  /** 失焦闸总开关：inactive=true 落闸,false 续播(ResumeAll)。分类别（③）：
+   *  'music' ctx 仅开关关时挂起（AllowMusic :85-95 失焦放行仅音乐——开关开=后台听歌）；
+   *  'sfx' ctx 恒挂起（PauseSounds :97-107 与开关无关）,MP 豁免（mpProbe,④）；
+   *  ambient 层在 sfx ctx 上随 suspend 静音,MP 豁免时由 ambientQuiet() 归零
+   *  （QuietAmbientSounds :109 无 netMode 门）。resume 被拒(iOS 低电量模式/无手势
+   *  历史)时挂下一次 pointerdown 重试——AudioSystem.armUnlock 手势兜底同款 */
+  static setAudioSuspension(inactive: boolean): void {
+    const musicContinue = options.data.playWhenUnfocused;   // AllowAudioUnfocused :23
+    for (const [c, kind] of Sfx.ctxRegistry) {
+      if (inactive) {
+        if (kind === 'music' && musicContinue) continue;
+        if (kind === 'sfx' && (Sfx.mpProbe?.() ?? false)) continue;
         if (c.state === 'running') void c.suspend().catch(() => {});
       } else if (c.state === 'suspended') {
         void c.resume().catch(() => {
@@ -845,14 +866,35 @@ export class Sfx {
       }
     }
   }
-  /** 页面级监听只挂一次(多实例/HMR 重跑防重);首个 ctx 创建时接线。
+  /** 页面级监听只挂一次(多实例/HMR 重跑防重);首个 ctx 登记处接线（④）。
+   *  ★①两源合并:visibilitychange(tab 隐藏)∪window blur(可见但未激活)——blur 独立
+   *  于 visibilitychange 触发（点另一应用窗口=可见但失焦,曾漏=照常出声根因①）；
+   *  恢复按 isAppInactive() 合并态重判（一源未清不清闸）。
    *  ★node 单测环境无 document——守卫跳过(失焦闸纯浏览器行为) */
-  private static hookVisibilityOnce(): void {
-    if (Sfx.visHooked || typeof document === 'undefined') return;
-    Sfx.visHooked = true;
+  private static audioGateHooked = false;
+  private static hookAudioGateOnce(): void {
+    if (Sfx.audioGateHooked || typeof document === 'undefined' || typeof window === 'undefined') return;
+    Sfx.audioGateHooked = true;
     document.addEventListener('visibilitychange', () => {
-      Sfx.setAudioSuspension(document.hidden);
+      Sfx.visHidden = document.hidden;
+      Sfx.setAudioSuspension(Sfx.isAppInactive());
     });
+    window.addEventListener('blur', () => {
+      Sfx.winBlurred = true;
+      Sfx.setAudioSuspension(Sfx.isAppInactive());
+    });
+    window.addEventListener('focus', () => {
+      Sfx.winBlurred = false;
+      Sfx.setAudioSuspension(Sfx.isAppInactive());
+    });
+  }
+
+  /** 失焦环境静音因子（QuietAmbientSounds FocusHelper.cs:109 → LegacySoundPlayer.cs
+   *  :422 `num2 *= ambientVolume × (Quiet?0:1)`，无 netMode 门）：未激活=0。
+   *  单机下 sfx ctx 已 suspend（因子冗余但同语义）；MP 豁免下 ctx 仍在跑，
+   *  ambient 轨靠本因子归零（一次性 ambient 族与环境循环层两处消费） */
+  private ambientQuiet(): number {
+    return Sfx.isAppInactive() ? 0 : 1;
   }
 
   private ensure(silent = false): AudioContext | null {
@@ -862,13 +904,12 @@ export class Sfx {
       if (!AC) return null;
       this.ctx = new AC();
       Sfx.registerAudioContext(this.ctx);
-      Sfx.hookVisibilityOnce();
     }
-    // ★失焦闸配合：隐藏期间禁止自动 resume(否则网络回调等触发的 ensure 会拆闸);
-    //   playWhenUnfocused 开=失焦继续播放,隐藏不拦 resume(AllowMusic 直通同构);
-    //   node 单测无 document → 视为可见
-    const pageHidden = typeof document !== 'undefined' && document.hidden && !options.data.playWhenUnfocused;
-    if (this.ctx.state === 'suspended' && !pageHidden) this.ctx.resume().catch(() => {});
+    // ★失焦闸配合（①③）：未激活期间禁止自动 resume(否则网络回调等触发的 ensure
+    //   会拆闸)。sfx ctx 单机恒停（PauseSounds 与开关无关）、MP 豁免;BGM ctx 的
+    //   放行面在 Audio.audio()（AllowMusic :85-95 取开关）。node 单测无事件源=可见
+    const gateBlocked = Sfx.isAppInactive() && !(Sfx.mpProbe?.() ?? false);
+    if (this.ctx.state === 'suspended' && !gateBlocked) this.ctx.resume().catch(() => {});
     this.warmup();
     return this.ctx;
   }
@@ -1015,7 +1056,8 @@ export class Sfx {
     };
     const apply = () => {
       // 循环轨同款音轨分派（ActiveSound.cs:150-153 SoundType.Ambient → ambientVolume）
-      const target = Math.min(1, st.vol * st.base * trackVolumeFor(file, this.ambient, this.master));
+      // ×失焦环境静音因子（QuietAmbientSounds :109；MP 豁免时环境循环轨归零）
+      const target = Math.min(1, st.vol * st.base * trackVolumeFor(file, this.ambient * this.ambientQuiet(), this.master));
       gain.gain.setTargetAtTime(target, ctx.currentTime, 0.2);
     };
     const handle: SfxLoop = {
@@ -1079,7 +1121,9 @@ export class Sfx {
     src.buffer = buf;
     src.playbackRate.value = pitchRateFor(file, pitch);
     const g = ctx.createGain();
-    g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
+    // ×失焦环境静音因子（QuietAmbientSounds :109 → LegacySoundPlayer.cs:422 同位——
+    //   走 ambient 轨的一次性环境族在失焦 MP 期归零；非 ambient 轨吃 master 不受影响）
+    g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient * this.ambientQuiet(), this.master));
     src.connect(g);
     connectPan(ctx, g, pan);
     src.start();

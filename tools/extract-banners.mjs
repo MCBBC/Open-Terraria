@@ -1,7 +1,11 @@
-// 提取 BannerSystem 映射(NPCtoBanner switch / BannerToItem 特例+级联区间 / KillsToBanner)
+// 提取 BannerSystem 映射(NPCtoBanner switch / BannerToItem 特例+级联区间 /
+// BannerToNPC 规范代表 / KillsToBanner)
+// ★2026-09-03：基准 1456 → 1457（CLAUDE.md 1457 权威；NPCtoBanner/BannerToItem/
+// BannerToNPC/KillsToBanner 四面 1456↔1457 逐值相同——1457 仅动 claimable/net 面）,
+// BannerToNPC 为本批新增（旗达标公告规范名 Game.ts 消费,BannerSystem.cs:249-255）。
 import { readFileSync, writeFileSync } from 'fs';
-const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.GameContent/BannerSystem.cs', 'utf8');
-const itemSrc = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.ID/ItemID.cs', 'utf8');
+const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.GameContent/BannerSystem.cs', 'utf8');
+const itemSrc = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ID/ItemID.cs', 'utf8');
 
 // 1) NPCtoBanner:switch fall-through 组 → npcId: bannerId
 const npcToBanner = {};
@@ -38,7 +42,19 @@ const bannerRanges = [];
   }
 }
 
-// 3) KillsToBanner:CreateIntSet(默认, k,v,...)
+// 3) BannerToNPC:旗种 → 规范代表 NPC id（BannerSystem.cs:1156 switch,1..292 全表 +
+//  `_ => 0` 兜底）。同旗多 NPC（如蓝史莱姆 74/297/298 同旗 8）原版公告/tooltip 一律
+//  取此规范 id 的名字——不能用 npcToBanner 反查的最小 npc id 顶替（机制不同）。
+const bannerToNpc = {};
+{
+  const start = src.indexOf('public static int BannerToNPC');
+  const body = src.slice(start, src.indexOf('public static', start + 40));
+  let m;
+  const re = /(\d+) => (\d+)/g;
+  while ((m = re.exec(body))) bannerToNpc[+m[1]] = +m[2];
+}
+
+// 4) KillsToBanner:CreateIntSet(默认, k,v,...)
 const killsToBanner = {};
 {
   const m = itemSrc.match(/KillsToBanner = Factory\.CreateIntSet\(([^)]*)\)/);
@@ -48,8 +64,9 @@ const killsToBanner = {};
 }
 
 writeFileSync('/Users/vinlic/Project/GLM/SandboxWorld/game/src/data/vanilla-banners.json',
-  JSON.stringify({ npcToBanner, bannerToItem, bannerRanges, killsToBanner }, null, 1));
+  JSON.stringify({ npcToBanner, bannerToItem, bannerRanges, bannerToNpc, killsToBanner }, null, 1));
 console.log('npcToBanner:', Object.keys(npcToBanner).length,
   '| 特例:', Object.keys(bannerToItem).length,
   '| 区间:', bannerRanges.length,
+  '| bannerToNpc:', Object.keys(bannerToNpc).length,
   '| kills 特例:', Object.keys(killsToBanner).length - 1);

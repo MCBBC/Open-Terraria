@@ -1120,6 +1120,15 @@ export class BestiaryPanel {
       const img = document.createElement('img');
       img.alt = '';
       if (!available) {
+        // UpdateAvailability 不可用臂（UIBestiaryFilteringOptionsGrid.cs:119-121）：
+        // `_filterer.ActiveFilters.Remove(bestiaryEntryFilter)`——失效筛选即从激活集
+        // 除名（红队R3⑦:曾仅置 disabled,激活 tag 幽灵残留 → 重筛恒吃死集）
+        if (this.filter.tags.includes(def.key)) {
+          this.filter = { ...this.filter, tags: this.filter.tags.filter((t) => t !== def.key) };
+          this.updateFilterText();
+          this.offset = 0;
+          this.refresh();
+        }
         img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Tags_Shadow.png';
         img.style.objectPosition = '0 -120px';   // 帧(0,4)：30×30 帧表的末行首帧，Color.White*0.2
         img.style.opacity = '0.2';
@@ -1412,7 +1421,10 @@ export class BestiaryPanel {
       };
       if (bg.image) {
         bstLoadSheet(atlas, `vanilla/${bg.image}.png`, (bgImg) => {
-          if (!canvas.isConnected || !bgImg) return;
+          if (!canvas.isConnected) return;
+          // 缺底图仍画叠层+NPC（红队R3⑦:原版底图 asset 可缺——UIBestiaryNPCEntry
+          // Portrait 构造 :26-35 `if (portraitBackgroundAsset != null)` 才挂底图,
+          // 叠层/NPC icon 不依赖底图;曾 !bgImg 早退 = 404 整格空白且 NPC 不画）
           startPaint(bgImg);
         });
       } else {

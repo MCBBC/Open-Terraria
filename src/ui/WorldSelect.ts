@@ -87,8 +87,8 @@ export const WORLD_ICON_CYCLE_MS = 750;
  *  "{尺寸}.{难度+1}.{邪恶}.{秘密种子和}.{seed文本}"——原版种子按钮复制的就是它，
  *  粘贴进世界创建即可复现同参数世界（WorldGen.cs:11095 TryApplyingCopiedSeed）。
  *  尺寸 1/2/3 = 4200×1200/6400×1800/8400×2400；邪恶 1 腐化 2 猩红；
- *  种子和 = drunk1/bees2/ftw4/anniv8/dontstarve16/remix32/notraps64/skyblock256
- *  （WorldFileData.GetSerializedSeedsSum；zenith 128 未接） */
+ *  种子和 = drunk1/bees2/ftw4/anniv8/dontstarve16/remix32/notraps64/zenith128/
+ *  skyblock256（WorldFileData.GetSerializedSeedsSum :170-210,天顶位 = :201-204） */
 export function fullSeedText(m: WorldMeta): string {
   const size = m.w === 4200 && m.h === 1200 ? 1 : m.w === 6400 && m.h === 1800 ? 2 : m.w === 8400 && m.h === 2400 ? 3 : 0;
   const evilNum = m.evil === 0 ? 1 : m.evil === 1 ? 2 : 0;
@@ -101,6 +101,7 @@ export function fullSeedText(m: WorldMeta): string {
   if (f.theConstant) sum += 16;
   if (f.remix) sum += 32;
   if (f.noTraps) sum += 64;
+  if (f.everything) sum += 128;             // ZenithWorld（WorldFileData.cs:201-204）
   if (f.skyblock) sum += 256;
   return `${size}.${m.difficulty + 1}.${evilNum}.${sum}.${m.seed}`;
 }
@@ -262,7 +263,12 @@ export class WorldSelectPanel {
     let frame = 0;       // _glitchFrame
     let counter = 0;     // _glitchFrameCounter
     const tick = () => {
-      if (!ready || !cx || !this.panel.isConnected) return;
+      // 天顶 60Hz 同门（红队R3⑥）：关闭/已拆离即自清（原仅静默 no-op,句柄悬空）
+      if (!ready || !cx || this.closed || !this.panel.isConnected) {
+        clearInterval(timer);
+        this.iconTimers.delete(timer);
+        return;
+      }
       let min = 3, max = 3;
       if (frame === 0) { min = 15; max = 120; }
       // 阈值【每帧重掷】（Main.rand.Next(min, max+1) 在比较式内联求值 → [min,max]
@@ -280,13 +286,18 @@ export class WorldSelectPanel {
       // SetFrame(7, 16, _glitchVariation, _glitchFrame)（:32-33）
       cx.drawImage(img, variation * 62, frame * 60, 62, 60, 0, 0, 62, 60);
     };
-    const timer = setInterval(tick, 1000 / 60);
+    const timer: ReturnType<typeof setInterval> = setInterval(tick, 1000 / 60);
     this.iconTimers.add(timer);
     return cv;
   }
 
   async reload() {
     await this.store.ensureLoaded();
+    // close/reload 竞态门（红队R3⑥）：close 可能在 ensureLoaded 的 await 窗内先行
+    // 置 closed + 清定时器 + 拆面板——恢复后若无此门,下方会为已脱离 DOM 的 body
+    // 重建行并新建 interval（无人再清的孤儿,永久改写死 img.src）。检查点之后到
+    // 函数尾为同步段（无 await）,close 不可能再插入——一道门即封死
+    if (this.closed) return;
     for (const t of this.iconTimers) clearInterval(t);   // 上轮行内的轮播/故障动画定时器全清
     this.iconTimers.clear();
     this.body.innerHTML = '';
@@ -309,7 +320,14 @@ export class WorldSelectPanel {
         img.src = BTN_SRC(iconNames[0]);
         if (iconNames.length > 1) {
           let idx = 0;
-          const timer = setInterval(() => {
+          const timer: ReturnType<typeof setInterval> = setInterval(() => {
+            // 竞态自愈门（红队R3⑥）：行已随 close/下轮 reload 拆离 → 自清,
+            // 不留孤儿 interval 永久改写脱离 DOM 的 img.src
+            if (this.closed || !img.isConnected) {
+              clearInterval(timer);
+              this.iconTimers.delete(timer);
+              return;
+            }
             // UICyclingImage.Update :21-33：++frames ≥45 → 复零、++index、尾回绕、SetImage
             idx = (idx + 1) % iconNames.length;
             img.src = BTN_SRC(iconNames[idx]);

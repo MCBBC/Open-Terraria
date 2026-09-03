@@ -53,6 +53,11 @@ interface OwnerRef {
    *  控制键偏移消费面:Projectile.cs:60779-60790/:24736-24745）。缺省
    *  undefined = 输入态不可知,偏移不生效（原版 control*=false 同观感）。 */
   inputLeft?: boolean; inputRight?: boolean; inputUp?: boolean; inputDown?: boolean;
+  /** 坐骑面（Wisp 211 脱离门飞行坐骑支 :60813 原文 `player3.mount.Active &&
+   *  player3.mount.CanFly(player3)`,红队 F8 补支）——属主 Player 直挂其
+   *  MountInstance（active/canFly 与 Mount.cs:2817-2859 对齐;canFly 形参由属主
+   *  实体充任,同 Player.ts:4555 `mnt2.canFly(this)`）。缺省 undefined = 无坐骑。 */
+  mount?: { active: boolean; canFly(p: unknown): boolean };
 }
 
 interface PetAiEntry {
@@ -455,17 +460,19 @@ export class PetFollower extends Entity {
     const hoverY = e.hoverY ?? F.hoverY ?? -60;
     let tx = p.cx + hoverX * p.facing;
     let ty = p.cy + hoverY;
-    // ★Wisp(211) 控制键偏移（AI_026 211 专属支 :60779-60790,登记缺口①清偿
-    //  2026-09-03）：controlLeft → 目标 −120 / controlRight → +120（if/else if 链,
-    //  同按左优先）;controlDown → +120,else controlUp → −120（缺省 hoverY −60
-    //  即原版 else 支的无条件 num65 −= 60,表值已含）。偏移在距离计算前施于
-    //  目标点 = 原版施于 num64/num65 同构（远距瞬移/追击档同吃）
+    // ★Wisp(211) 控制键偏移（AI_026 211 专属支 :60779-60801,登记缺口①清偿
+    //  2026-09-03；down 档红队 F7 修正）：controlLeft → 目标 −120 / controlRight →
+    //  +120（if/else if 链,同按左优先,:60782-60788）;纵轴按原文 if/else 结构——
+    //  down 支仅 +120【无 −60】（:60790-60793）,else 支 = 无条件 −60（:60800,基线
+    //  hoverY 即该项）+ up −120（:60796-60798）→ 净偏移 up −180 / 无键 −60 /
+    //  down +120。偏移在距离计算前施于目标点 = 原版施于 num64/num65 同构
+    // （远距瞬移/追击档同吃）
     if (this.projId === 211 && (p.inputLeft !== undefined || p.inputUp !== undefined
       || p.inputRight !== undefined || p.inputDown !== undefined)) {
       if (p.inputLeft) tx -= 120;
       else if (p.inputRight) tx += 120;
-      if (p.inputDown) ty += 120;
-      else if (p.inputUp) ty -= 120;
+      if (p.inputDown) ty = p.cy + 120;   // down 支字面 +120,不含 else 支无条件 −60（:60790-60793）
+      else if (p.inputUp) ty -= 120;      // else 支:基线 hoverY(−60) + up −120（:60794-60801）
     }
     if (e.jitter) {  // 每帧重掷目标点（:56495-56497 rand(-10,21)）
       tx += Math.random() * (e.jitter * 2 + 1) - e.jitter;
@@ -486,21 +493,25 @@ export class PetFollower extends Entity {
     const brake = e.brake ?? F.brake ?? 50;
     const mode = e.brakeMode ?? 'damp';
     let acc: number;
-    // ★ Wisp(211) 远距追击档（:56867-56925）：localAI[0] 闩——>200 置位；追击中
-    //  恒速 12 直取（<12 直接取位移）；脱离门 = 距 <10 且玩家近乎静止(|v|<12) 且
-    //  玩家着地/飞行坐骑。此前只建模近档 → 玩家跑远 Wisp 明显滞后
+    // ★ Wisp(211) 远距追击档（AI_026 211 专属支 :60774-60827;红队 F8 纠锚——旧
+    //  :56867-56925 系 AI_001 无关段）：localAI[0] 闩——>200 置位（:60864-60866）；
+    //  追击中恒速 12 直取（<12 直接取位移;num63 :60818 重赋 12 只作追击速度）；
+    //  脱离门 = 距 <10（:60810）且玩家近乎静止(|v|<num63=5f,:60777 赋值) 且
+    //  （velocity.Y==0 或（mount.Active && mount.CanFly）,:60813——飞行坐骑也算
+    //  可脱离）。此前只建模近档 → 玩家跑远 Wisp 明显滞后
     if (this.projId === 211) {
       const pSpeed = Math.abs(p.vx ?? 0) + Math.abs(p.vy ?? 0);
+      const mountFly = !!(p.mount?.active && p.mount.canFly(p));   // :60813 mount.Active && mount.CanFly
       if (!this.wispFar && d > 200) this.wispFar = true;
       if (this.wispFar) {
-        if (d < 10 && pSpeed < 12 && ((p.vy ?? 0) === 0)) this.wispFar = false;
+        if (d < 10 && pSpeed < 5 && ((p.vy ?? 0) === 0 || mountFly)) this.wispFar = false;
         else {
           const k = d < 12 ? 1 : 12 / (d || 1);
           this.vx = dx * k; this.vy = dy * k;
           this.x += this.vx; this.y += this.vy;
           if (this.vx > 0.5) this.dir = -1;
           else if (this.vx < -0.5) this.dir = 1;
-          return;   // 追击段独立收尾（原版分支 return :56921）
+          return;   // 追击段独立收尾（原版 localAI[0]==1 支 return :60862）
         }
       }
     }

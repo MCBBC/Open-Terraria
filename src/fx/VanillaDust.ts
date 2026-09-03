@@ -112,6 +112,13 @@ export interface VDust {
   /** _timeSinceSpawn（PrettySparkleParticle.Update :54 逐拍 +1——包络 t 源；
    *  TimeToLive 初值 = 当前 ttl + psAge） */
   psAge?: number;
+  /** ★AdditiveAmount 通道（2026-09-03 R3 ③清偿）：原版 PrettySparkleParticle.
+   *  AdditiveAmount（PrettySparkleParticle.cs:20 池缺省 1f;FetchFromPool :43 复位 1f）
+   *  ——Draw :67 `color2.A = color2.A×(1−AdditiveAmount)` 的 dst 衰减项驱动
+   *  （Renderer.drawSparkleArms erase 消费位）。站点值：拍击石 kind1 红=0.35
+   *  （ParticleOrchestrator.cs:681）；金（:698-721 无写入）/公主/星尘 = 池缺省 1f
+   *  （→ color2.A=0,tint 臂无 dst 衰减,纯加色）。undefined = 缺省 1f。 */
+  psAdditive?: number;
   /** ★ABasicParticle Scale 二次链（:47-49 ScaleVelocity += ScaleAcceleration;
    *  Scale += ScaleVelocity）——拍击石 kind1 ScaleAcceleration = (−4,0)/num
    *  （ParticleOrchestrator.cs:679/:708）。undefined = 无动力学（既有站缺省）。 */
@@ -195,7 +202,16 @@ export class VanillaDust {
    *  · 烟雾族特例（216-222 型表 242/75/169 等）的 vy 重掷与 vx×0.3 被覆写消解，
    *    定向速度向量原样入池（调用侧全责定义速率域）；
    *  · 其余字段（scale 含 ×0.7 烟雾衰减、alpha/color/frame/fadeIn 等）保持
-   *    NewDust 结果——原版 Perfect 不覆写它们，调用侧可像原文那样后置赋值。 */
+   *    NewDust 结果——原版 Perfect 不覆写它们，调用侧可像原文那样后置赋值。
+   *
+   *  opts.prettySparkle = PrettySparkle 编排粒子载体通道（R3 ④清偿 2026-09-03）：
+   *  原版 PrettySparkle【不入 Dust 池】——_poolPrettySparkle.RequestParticle() 零掷
+   *  零门（ParticlePool.cs:32-51 只扫空位/扩 List,无 dCount 门无 rand 掷）。由此本
+   *  分支直取槽位绕密度门 + 绕 NewDust 全部内部随机掷（位抖/速抖/帧 fy 掷/比例抖
+   *  四掷全免,掷流口径备案:本分支 0 掷）——位置/速度 = NewDustPerfect 覆写面同值
+   *  （LocalPosition/Velocity 精确,ParticleOrchestrator.cs:3374/:3377/:3425/:3430）、
+   *  scale = Scale 形参精确（无 ±0.2 抖）。烟雾/水尘族特例同属 NewDust 链,一并跳过
+   *  （prettySparkle 载体 type=0 恒不触,守卫为语义显式化）。 */
   spawn(x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0, color: DustColor | null = null, scale = 1,
     opts?: { perfect?: boolean; prettySparkle?: boolean }): VDust | null {
@@ -208,6 +224,7 @@ export class VanillaDust {
       if (!c.active) { slot = (this.cursor + i) % POOL; d = c; this.cursor = (slot + 1) % POOL; break; }
     }
     if (!d) return null;
+    const ps = opts?.prettySparkle === true;
     // ★R2 #4:原版 dCount 概率密度门（Dust.cs:122-151,无环形覆盖——CloneDust 池满
     // 返回 null 契约保持）:池压五档渐进拒绝（>90% 3/4 / >80% 2/3 / >70% 1/2 /
     // >60% 1/4 / >50% 1/5;≤50% 不拒）——292 爆区 25/t 的自节流通道,不饿死他人
@@ -217,25 +234,41 @@ export class VanillaDust {
     //  之所以等价真负载,靠的是槽搜索【从 0 头扫】（Dust.cs:106 for i=0…;第一个空槽
     //  i≈活跃前缀数）——本仓环形游标优化破坏了该等价。修=frac 改用 update 每帧全池
     //  遍历顺带重数的 activeCount（真负载,一帧滞后无感）,游标只服务空槽定位。
-    const frac = this.activeCount / POOL;
-    const r = Math.random();
-    if ((frac > 0.9 && r >= 0.25) || (frac > 0.8 && r >= 1 / 3) ||
-        (frac > 0.7 && r < 0.5) || (frac > 0.6 && r < 0.25) ||
-        (frac > 0.5 && r < 0.2)) return null;
+    //  ★R3 ④（2026-09-03）：prettySparkle 载体绕门（原版不入 Dust 池,零掷零门
+    //  ParticlePool.cs:32-51）——Math.random 也不消费（直取槽位）
+    if (!ps) {
+      const frac = this.activeCount / POOL;
+      const r = Math.random();
+      if ((frac > 0.9 && r >= 0.25) || (frac > 0.8 && r >= 1 / 3) ||
+          (frac > 0.7 && r < 0.5) || (frac > 0.6 && r < 0.25) ||
+          (frac > 0.5 && r < 0.2)) return null;
+    }
     const w2 = Math.max(5, w), h2 = Math.max(5, h);
     d.active = true;
     d.type = type;
     d.noGravity = false;
     d.color = color;
     d.alpha = alpha;
-    d.x = x + (Math.random() * (w2 - 4) | 0) + 4;
-    d.y = y + (Math.random() * (h2 - 4) | 0) + 4;
-    d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 + speedX;
-    d.vy = ((Math.random() * 41 | 0) - 20) * 0.1 + speedY;
-    const f = dustFrameOf(type);
-    d.fx = f.fx; d.fy = f.fy;
+    if (ps) {
+      // ★PrettySparkle 载体零掷直写（R3 ①/④,2026-09-03）：NewDust 四掷全免——
+      //  位/速 = Perfect 覆写面同值（原版 LocalPosition/Velocity 精确直装,
+      //  ParticleOrchestrator.cs:3374-3377 princess/:3425-3430 stardust/:672-684 kind1）、
+      //  scale = Scale 形参精确、Dust.png 帧零掷钉值（双轴尘渲染走 drawSparkleArms
+      //  Extra_98,fx/fy 无消费面——drawVanillaDustPass axis.dual 早退）
+      d.x = x; d.y = y;
+      d.vx = speedX; d.vy = speedY;
+      d.fx = 10 * type; d.fy = 0;
+      d.scale = scale;
+    } else {
+      d.x = x + (Math.random() * (w2 - 4) | 0) + 4;
+      d.y = y + (Math.random() * (h2 - 4) | 0) + 4;
+      d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 + speedX;
+      d.vy = ((Math.random() * 41 | 0) - 20) * 0.1 + speedY;
+      const f = dustFrameOf(type);
+      d.fx = f.fx; d.fy = f.fy;
+      d.scale = (1 + ((Math.random() * 41 | 0) - 20) * 0.01) * scale;
+    }
     d.rotation = 0;
-    d.scale = (1 + ((Math.random() * 41 | 0) - 20) * 0.01) * scale;
     d.noLight = false;
     d.fadeIn = 0;
     d.noLightEmittance = false;
@@ -259,13 +292,15 @@ export class VanillaDust {
     d.psFadeOutNorm = undefined;
     d.psDrawVert = undefined;
     d.psAge = undefined;
+    d.psAdditive = undefined;
     d.scvx = undefined; d.scvy = undefined;
     d.scax = undefined; d.scay = undefined;
-    // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
-    if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
+    // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）——
+    //  prettySparkle 载体不进 NewDust 链,特例随链跳过（见 spawn 头注 ps 分支）
+    if (!ps && (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
       || type === 242 || type === 75 || type === 169 || type === 29 || (type >= 59 && type <= 65)
       || type === 158 || (type >= 293 && type <= 298) || type === 302 || type === 307 || type === 310
-      || type === 127 || type === 187) {   // ★R2' F3::232-235 同句 127/187 补(vx×0.3/scale×0.7)
+      || type === 127 || type === 187)) {   // ★R2' F3::232-235 同句 127/187 补(vx×0.3/scale×0.7)
       d.vy = ((Math.random() * 16 | 0) - 10) * 0.1;
       d.vx *= 0.3;
       d.scale *= 0.7;
@@ -274,13 +309,14 @@ export class VanillaDust {
     //  尾尘 33 批接入,单段源支全成员随支移植）：alpha=170 + velocity×0.5/Y++。
     //  NewDustPerfect 的 velocity 覆写消解速度面,alpha=170 在覆写面之外=入池即
     //  (255−170)/255 亮度（Projectile.cs:37554 KrakenWave 调用不传 Alpha）。
-    if (type === 33 || type === 52 || type === 266 || (type >= 98 && type <= 105)) {
+    if (!ps && (type === 33 || type === 52 || type === 266 || (type >= 98 && type <= 105))) {
       d.alpha = 170;
       d.vx *= 0.5;
       d.vy += 1;
     }
     // :52-63 NewDustPerfect：dust.position = Position；Velocity.HasValue →
-    // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）
+    // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）。
+    //  ps 分支已零掷直写同值,此处对 ps 为恒真冗余（无掷,仅语义对齐）
     if (opts?.perfect) {
       d.x = x;
       d.y = y;

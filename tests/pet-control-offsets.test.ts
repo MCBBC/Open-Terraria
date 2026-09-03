@@ -1,7 +1,8 @@
 // 宠物控制键偏移回归（PetFollower 登记缺口①清偿,2026-09-03）：
-//   Wisp 211（AI_026 专属支 Projectile.cs:60779-60790）：controlLeft→目标 −120 /
-//   controlRight→+120（if/else if,同按左优先）；controlDown→+120 / controlUp→−120
-//   （缺省 hoverY −60 已含 = 原版 else 支无条件 num65−=60）。
+//   Wisp 211（AI_026 专属支 Projectile.cs:60779-60801）：controlLeft→目标 −120 /
+//   controlRight→+120（if/else if,同按左优先）；纵轴按原文 if/else 结构——down 支
+//   仅 +120【无 −60】（:60790-60793）,else 支 = 无条件 −60（:60800,基线 hoverY 即
+//   该项）+ up −120（:60796-60798）→ 净偏移 up −180 / 无键 −60 / down +120。
 //   ShadowOrb 18（aiStyle 11 :24736-24745）：controlUp→目标=(中心X−6, 顶上 40)、
 //   controlDown→(中心X−6, 底下 40)，两档保持距 num87 70→4、num84−=6。
 import { describe, it, expect } from 'vitest';
@@ -21,7 +22,7 @@ const mkOwner = (over: Partial<Owner> = {}): Owner => ({
   facing: 1, dead: false, vx: 0, vy: 0, ...over,
 });
 
-describe('Wisp 211 控制键偏移（AI_026 :60779-60790）', () => {
+describe('Wisp 211 控制键偏移（AI_026 :60779-60801）', () => {
   /** 收敛点断言：fly 趋近档稳态 = 目标点（hoverX 0/hoverY −60 + 控制键偏移）。
    *  200t 足够从 400px 外收敛进 brake 贴合（211 无 jitter/bob,flyAccel 缺省档） */
   const settle = (owner: Owner, startX: number, startY: number, ticks = 200): PetFollower => {
@@ -31,7 +32,7 @@ describe('Wisp 211 控制键偏移（AI_026 :60779-60790）', () => {
   };
   const near = (a: number, b: number): number => Math.abs(a - b);
 
-  it('controlLeft/Right → 收敛点 X = 玩家中心 ∓120（±120,:60779-60782）', () => {
+  it('controlLeft/Right → 收敛点 X = 玩家中心 ∓120（±120,:60782-60788）', () => {
     const none = mkOwner();
     const left = mkOwner({ inputLeft: true, inputRight: false, inputUp: false, inputDown: false });
     const right = mkOwner({ inputLeft: false, inputRight: true, inputUp: false, inputDown: false });
@@ -44,14 +45,14 @@ describe('Wisp 211 控制键偏移（AI_026 :60779-60790）', () => {
     expect(near(p2.cx, right.cx + 120)).toBeLessThan(1.5); // Right +120
   });
 
-  it('controlUp/Down → 收敛点 Y = 中心−60∓120（缺省 −60 已含 Up/Down ±120,:60784-60790）', () => {
+  it('controlUp/Down → 收敛点 Y = −180 / −60 / +120（down 支无 −60,else 支 −60+up −120,:60790-60801）', () => {
     const none = mkOwner();
     const up = mkOwner({ inputUp: true, inputDown: false, inputLeft: false, inputRight: false });
     const down = mkOwner({ inputDown: true, inputUp: false, inputLeft: false, inputRight: false });
     const start = [none.cx + 300, none.cy - 160];
     expect(near(settle(none, start[0], start[1]).cy, none.cy - 60)).toBeLessThan(1.5);
     expect(near(settle(up, start[0], start[1]).cy, up.cy - 60 - 120)).toBeLessThan(1.5);
-    expect(near(settle(down, start[0], start[1]).cy, down.cy - 60 + 120)).toBeLessThan(1.5);
+    expect(near(settle(down, start[0], start[1]).cy, down.cy + 120)).toBeLessThan(1.5);   // down 支仅 +120（:60792）,无 −60（红队 F7）
   });
 
   it('同按左+右 → 左优先（原版 if(controlLeft)/else if(controlRight) 序）', () => {

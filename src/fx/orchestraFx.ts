@@ -991,7 +991,12 @@ export function stardustPunchFx(
   //  Color=(255,255,255,0)、Scale=vector2（白核 ×0.6）、Rotation=π/2；APF 双项
   //  （角向 f̂×−vector3/60+线性 −vector/60 彩、/30 白核 :3427/:3436）
   const mkSD = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number, apfLin: number): void => {
-    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, true);   // prettySparkle 形参收 boolean（spawnDust 签名 Game.ts:34633）
+    // ★R3 ①（2026-09-03）：perfect=true——原版 PrettySparkle 不入 Dust 池,
+    //  LocalPosition/Velocity 精确直装（stardust Velocity=f̂×vector3+vector :3426 彩/
+    //  :3435 白核、LocalPosition=PositionInWorld+vector4 :3430/:3438）→ 消解 NewDust
+    //  的 +4/+4 位偏与 ±2 速抖（prettySparkle 载体分支另已零掷直写,perfect 位为
+    //  语义对齐）。prettySparkle 形参收 boolean（spawnDust 签名 Game.ts spawnDust 方法）
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, true, true);
     if (!sp) return;
     sp.prettySparkle = true; sp.ttl = 60;
     sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
@@ -1051,7 +1056,12 @@ export function princessWeaponFx(
   //  f̂×vector3 项被第二连写覆盖不存在）、TTL 池缺省 60。
   const psTint = hexToRgbArr(orchestraHslCss((0.92 + rng() * 0.02) % 1, 1, 0.4 + rng() * 0.25));
   const mkPS = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number): void => {
-    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, false, true);   // prettySparkle 形参收 boolean（spawnDust 签名 Game.ts:34633）
+    // ★R3 ①（2026-09-03）：perfect=true——原版 PrettySparkle 不入 Dust 池,
+    //  LocalPosition/Velocity 精确直装（princess Velocity=vector×0.66 终值 :3374 彩/
+    //  :3385 白核、LocalPosition=PositionInWorld+vector4 :3377/:3387）→ 消解 NewDust
+    //  的 +4/+4 位偏与 ±2 速抖（prettySparkle 载体分支另已零掷直写,perfect 位为
+    //  语义对齐）。prettySparkle 形参收 boolean（spawnDust 签名 Game.ts spawnDust 方法）
+    const sp = game.spawnDust?.(px, py, 0, 0, 0, vxp, vyp, 0, tint, scale * szMul, true, true, true);
     if (!sp) return;
     sp.prettySparkle = true; sp.ttl = 60;
     sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
@@ -2142,12 +2152,21 @@ export function snappingStoneRingFx(
     //  Rotation=vector3.ToRotation()=a0（:672/:701）;Velocity=dir×14 →×1.5=dir×21
     //  （:677/:706+ :690/:717）;AccelerationPerFrame=−Velocity/num【APF 赋值序在 ×1.5
     //  之前】=−dir×14/30（:681-684/:710-712）;DrawVerticalAxis=false 只画水平臂
-    //  （:686/:713）;LocalPosition=位−dir×147（基支+恒真支）;AdditiveAmount=0.35
-    //  （:678/:707——只调 ColorTint.A 的 dst 衰减项,纯加色档不可观测,登记既有）。
-    //  色：红 Color(1f,0f,0f,0.5f)（:665）/金 Color(1f,0.95f,0f,1f)（:666）→ rgb 直入。
-    const mkRing = (r: number, g: number, b: number, sxMul: number, syMul: number): void => {
+    //  （:686/:713）;LocalPosition=位−dir×147（基支+恒真支）。
+    //  ★R3 ③（2026-09-03 锚校正+dst 衰减清偿）：AdditiveAmount=0.35 只写【红粒】
+    //  （:681——旧注 ":678/:707" 锚错,:678/:707 是两粒各自的 FadeOutEnd;金粒循环
+    //  :698-721【无】AdditiveAmount 写入 = 池缺省 1f,PrettySparkleParticle.cs:20/:43）。
+    //  PrettySparkleParticle.cs:66-67 color2.A = ColorTint.A×Op×0.5×(1−AdditiveAmount)
+    //  → 红 A=0.5:0.498×0.5×0.65≈0.16×Op×num（AlphaBlend Main.cs:63205 下=A 只进
+    //  dst 因子的 erase 项,Renderer.drawSparkleArms psAdditive 通道承载）;金 A=1.0 且
+    //  additive=缺省 1f → color2.A=0 纯加色无 dst 衰减（旧注"纯加色档不可观测,登记
+    //  既有"对金成立、对红不成立）。
+    //  色：红 Color(1f,0f,0f,0.5f)（:665→A 字节量化 127）/金 Color(1f,0.95f,0f,1f)
+    //  （:666→A=255）→ rgb 直入、A 进 psAdditive erase 面与 color2.A 公式。
+    const mkRing = (r: number, g: number, b: number, a: number, sxMul: number, syMul: number,
+      additive?: number): void => {
       const sp = game.spawnDust?.(x - Math.cos(a0) * posOff, y - Math.sin(a0) * posOff, 0, 0, 0,
-        Math.cos(a0) * spd, Math.sin(a0) * spd, 0, { r, g, b, a: 0 }, 1, true, true, true);
+        Math.cos(a0) * spd, Math.sin(a0) * spd, 0, { r, g, b, a }, 1, true, true, true);
       if (!sp) return;
       sp.prettySparkle = true;
       sp.ttl = 30; sp.psAge = 0;
@@ -2158,9 +2177,10 @@ export function snappingStoneRingFx(
       sp.psFadeInEnd = 15; sp.psFadeOutStart = 15; sp.psFadeOutEnd = 30;
       sp.psFadeInNorm = 5e-6; sp.psFadeOutNorm = 0.95;
       sp.psDrawVert = false;
+      if (additive !== undefined) sp.psAdditive = additive;   // 红=0.35（:681）;金缺省 1f 不写
     };
-    mkRing(255, 0, 0, 8.8, 2.2);           // 红（:665/:674）
-    mkRing(255, 242, 0, 5.6, 1.4);         // 金（:666 0.95×255=242.25 → 242/:703）
+    mkRing(255, 0, 0, 127, 8.8, 2.2, 0.35);  // 红（:665 Color(1,0,0,.5)→A=127 + :681 additive）
+    mkRing(255, 242, 0, 255, 5.6, 1.4);      // 金（:666 Color(1,.95,0,1)→A=255,0.95×255=242.25→242/:703）
     // d6 成对微尘【只挂金带内】（:722-730 i 循环 ×2,每轮 ± 金臂各一粒 NewDustPerfect;
     //  旧挂在红/金两色循环内=红臂也对生一对,方向标签错但数值恰同（T3 后红金同角）——
     //  本批按原版嵌套重构,掷数/掷序不变：每轮 正臂 ja→spd2 → 负臂 ja→spd2（:724 正臂
@@ -2222,7 +2242,10 @@ export function snappingStoneRingFx(
       const sp = circ(rng, 10);                          // Circular(10,10)（:792/:805）
       const g6 = rng() < 1 / 6;                          // :795/:808 Next(6)==0 ★F-13 先掷后写（原版池满哑元照样掷）
       const d = game.spawnDust?.(x, y, 1, 1, type, sp.x, sp.y, 0, null,
-        Math.max(0.75, 2 * (10 * numSummon)));           // :793/:806 max(.75, 2×num4),num4=10×num（:791/:804）
+        Math.max(0.75, 2 * (10 * numSummon)),            // :793/:806 max(.75, 2×num4),num4=10×num（:791/:804）
+        false, true);   // ★R3 ②（2026-09-03）：perfect=true——原版 NewDustPerfect（:792/:805,
+                         //  Dust.cs:54-63 位速精确覆写=圆阵值原样入池,消解 +4/+4 位偏/±2 速抖;
+                         //  kind1 d6 :2176 先例同通道对齐）;noGravity 由 :795-799 档后置写
       if (!d) continue;
       d.noGravity = true;
       if (g6) { d.noGravity = false; d.scale *= 0.25; }

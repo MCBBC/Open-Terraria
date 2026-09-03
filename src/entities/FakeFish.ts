@@ -601,20 +601,24 @@ const sparkles: LakeSparkle[] = [];
  *  生产侧仅 spawnFakeFishInWater 调用）：寿命 50..140t、加速 =
  *  MovementVector/60/寿命、白星随机亮度（ColorTint=(255,255,255,0)×NextFloat,
  *  α=0 纯加法档）、FadeIn/Out 各 45%、自旋 NextFloatDirection×2π/32×|move|/32 钳。
- *  ★2026-09-03 包络逐值对齐（登记④清偿）：①自旋幅值 NextFloatDirection 均匀
- *  [−1,1)（旧 sign 抽签恒满幅 2π/32=系统性偏快）;②掷序 = life→亮度→rot→rotVel→
- *  scale（:1342→:1347→:1350→:1351→:1353 原文序,旧 baseAlpha 末掷 = 掷流错位）。 */
+ *  ★2026-09-03 包络逐值对齐（登记④清偿）：自旋幅值 NextFloatDirection 均匀
+ *  [−1,1)（旧 sign 抽签恒满幅 2π/32=系统性偏快）。
+ *  ★2026-09-03 掷序逐值对齐（红队R3⑤清偿）：每星闪 6 掷,序 = 死掷→life→亮度→
+ *  rot→rotVel→scale（:1339→:1342→:1345→:1348→:1349→:1351 原文序）——:1339
+ *  `Vector2 vector = UnitY×(−0.1−0.4×NextFloat)` 是即被 :1340 无条件覆写的死赋值,
+ *  但掷流消耗真实存在（旧码漏掷 = 每星闪 5 掷,life 起全字段掷流错位一位）。 */
 export function spawnLakeSparkle(moveX: number, moveY: number, px: number, py: number): void {
+  randFloat();                                // :1339 死掷（值即被 :1340 覆写,掷流消耗真实——须补）
   const life = 50 + 90 * randFloat();         // SetTypeInfo(num=50+90×rand)（:1342）
-  const baseAlpha = randFloat();              // ColorTint=(255,255,255,0)×NextFloat（:1347）
-  const rot = randFloat() * Math.PI * 2;      // Rotation（:1350）
-  const rotVel = (randFloat() * 2 - 1) * (Math.PI * 2 / 32      // RotationVelocity（:1351-1352
-    * Math.max(0, Math.min(1, Math.hypot(moveX, moveY) / 32))); //   NextFloatDirection×钳）
-  const scale = 0.5 + 0.5 * randFloat();      // Scale=One×(0.5+0.5×rand)（:1353）
+  const baseAlpha = randFloat();              // ColorTint=(255,255,255,0)×NextFloat（:1345）
+  const rot = randFloat() * Math.PI * 2;      // Rotation（:1348）
+  const rotVel = (randFloat() * 2 - 1) * (Math.PI * 2 / 32      // RotationVelocity（:1349
+    * Math.max(0, Math.min(1, Math.hypot(moveX, moveY) / 32))); //   ×τ/32 → :1350 NextFloatDirection×钳）
+  const scale = 0.5 + 0.5 * randFloat();      // Scale=One×(0.5+0.5×rand)（:1351）
   sparkles.push({
     x: px, y: py, vx: 0, vy: 0,
-    // Velocity=Zero（SetBasicInfo :1343 第三参）+AccelerationPerFrame=(move/60)/num
-    //（:1339 vector=MovementVector/60 → :1346 vector/num）——两段除法缺一不可
+    // Velocity=Zero（SetBasicInfo :1338 第三参）+AccelerationPerFrame=(move/60)/num
+    //（:1340 vector=MovementVector/60 → :1344 vector/num）——两段除法缺一不可
     //（★F2 2026-09-01 补第二段 /life：旧码少除=终速×life 的"火箭出水面"形；
     //  真形 = 静止起步匀加速,寿命末终速恰为 move/60,位移 = move×life/120）
     axPerT: moveX / 60 / life, ayPerT: moveY / 60 / life,
@@ -718,11 +722,14 @@ export function spawnFakeFishInWater(
       if (depth < num5) continue;                     // :20632-20634 浅于 3 格列不出
       const loY = num3 * 16 + 4;                      // :20637 Y 采样窗 [20, depth·16+12]
       const hiY = depth * 16 + 16 - num3 * 16 - 4 + 1;
-      // ---- LakeSparkle 1/5 列（:20635-20646）----
+      // ---- LakeSparkle 1/5 列（:20634-20642）----
       if (next(5) === 0) {
-        const posY = y * 16 + nextRange(loY, hiY);
-        const rise = (y * 16 - posY) * randFloat();   // :20639-20641 上浮分量
-        spawnLakeSparkle(0, rise, i * 16 + nextRange(4, 13), posY);
+        // 掷序 1:1（红队R3⑤:C# 实参表先行求值——X 掷 :20634 前半 → Y 掷 :20634
+        // 后半 → rise 掷 :20636;旧码 Y→rise→X = 三掷错排）
+        const posX = i * 16 + nextRange(4, 13);        // :20634 前半（X 先掷）
+        const posY = y * 16 + nextRange(loY, hiY);     // :20634 后半（Y 次掷）
+        const rise = (y * 16 - posY) * randFloat();    // :20635-20636 上浮分量（末掷）
+        spawnLakeSparkle(0, rise, posX, posY);
       }
       if (next(10) !== 0) continue;                   // :20647-20649 1/10 列出鱼
       let posX = i * 16 + nextRange(4, 13);

@@ -144,16 +144,21 @@ export interface OptionsData {
   autoSave: boolean;
   /** 自动保存间隔（分钟；原版恒 10 分钟不可调，此处为任务要求的 Web 便利扩展档） */
   autoSaveIntervalMin: number;
-  /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——Web 语义=切 tab
-   *  (visibilitychange hidden) 暂停、回来自动恢复 */
+  /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——原版语义="开界面暂停"
+   *  （CanPauseGame Main.cs:17493-17508：开背包/牌等界面时逐帧 gamePaused），
+   *  非失焦暂停；失焦面归 SettingPlayWhenUnfocused（红队 R3-E2 ②正锚，两者互不
+   *  耦合）。本仓消费=Game.applyAutoPauseUI（__swUI.inventoryOpen 逐帧重算） */
   autoPause: boolean;
   /** 失焦播放（Main.SettingPlayWhenUnfocused，Main.cs:268 默认 false；config.json
    *  键 "PlayWhenUnfocused"，Main.cs:4301/:4444 持久化）。原版消费面（FocusHelper.cs）：
-   *  AllowAudioUnfocused :23 → AllowMusic :79 失焦取本开关；UpdateFocus :140
-   *  `wantsToPause = (!IsSelectedApplication && netMode==0) & !本开关`。设置行
+   *  AllowAudioUnfocused :23 → AllowMusic :85-95 失焦取本开关；UpdateFocus :139-141
+   *  `wantsToPause = (!IsSelectedApplication && netMode==0) & !本开关`——【游戏暂停】
+   *  也由本开关直驱：false=失焦暂停+全静；true=失焦不暂停,sfx 停（PauseSounds
+   *  :97-107）+环境音归零（:109）,仅音乐继续（:85-95）。设置行
    *  IngameOptions.cs:637-647（Gameplay 段，紧随 autoPause），文案键
    *  UI.PlayWhenUnfocusedOn/Off（On=开"失焦播放"→暂停文案"关"，反向是原版原文）。
-   *  本仓消费=Sfx 失焦音频闸（开关开=失焦继续出声；游戏暂停面=autoPause 行职责） */
+   *  本仓消费=Game.applyFocusPause（失焦游戏暂停）+Sfx 失焦音频闸（分类别：music
+   *  开关放行 / sfx 恒停 / ambient 归零） */
   playWhenUnfocused: boolean;
   /** 快速堆叠模式（Player.Settings.StackToChestsPreferredMode，Player.cs:337；
    *  config.json 键 "StackToChestsPreferredMode"（Main.cs:4244/4576 持久化），默认 Quick）。
@@ -376,7 +381,7 @@ export class OptionsStore {
       if (typeof this.data.builderAutoPaintDisabled !== 'boolean') this.data.builderAutoPaintDisabled = false;
       // LoadoutShare 首用提示（R4-14 清偿）：坏值回默认「显示」
       if (typeof this.data.showLoadoutShareHint !== 'boolean') this.data.showLoadoutShareHint = true;
-      // 失焦播放（Main.cs:268 默认 false=失焦全静；坏值回原版默认）
+      // 失焦播放（Main.cs:268 默认 false=失焦暂停+全静；坏值回原版默认）
       if (typeof this.data.playWhenUnfocused !== 'boolean') this.data.playWhenUnfocused = false;
       // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----
       if (typeof this.data.touchButtonAlpha !== 'number'

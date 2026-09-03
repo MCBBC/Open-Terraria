@@ -539,10 +539,12 @@ export class SettingsPanel {
           () => Lang.menu(d.autoPause ? 69 : 70),
           () => void options.set('autoPause', !d.autoPause),
         ),
-        // 失焦播放（:637-647 Main.SettingPlayWhenUnfocused 默认 false=失焦全静；
-        // 消费 FocusHelper.cs:23/:79/:140 → 本仓 Sfx 失焦音频闸。行序紧随 autoPause
-        // 与原版 Gameplay 段一致。文案键 UI.PlayWhenUnfocusedOn/Off 为原版官译——
-        // 键名 On/Off 与行内"暂停：开/关"文案反向是原版原文（On=失焦播放,即暂停关））
+        // 失焦播放（:637-647 Main.SettingPlayWhenUnfocused 默认 false=失焦暂停+全静；
+        // 消费 FocusHelper.cs:23/:85-95/:139-141 → 本仓 Game.applyFocusPause（失焦
+        // 游戏暂停）+ Sfx 失焦音频闸（music 开关放行/sfx 恒停/ambient 归零分类别）。
+        // 行序紧随 autoPause 与原版 Gameplay 段一致。文案键 UI.PlayWhenUnfocusedOn/Off
+        // 为原版官译——键名 On/Off 与行内"暂停：开/关"文案反向是原版原文
+        // （On=失焦播放,即暂停关））
         this.modeRow(
           Lang.text('UI.PlayWhenUnfocusedOn').replace(/[:：].*$/, ''),
           () => String(d.playWhenUnfocused),

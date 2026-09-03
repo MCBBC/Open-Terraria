@@ -147,14 +147,17 @@ export class AudioSystem {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AC) return null;
       this.ac = new AC();
-      // 失焦音频闸登记（Sfx.setAudioSuspension 统一 suspend/resume,Main.cs:11193-11202 同构）
-      Sfx.registerAudioContext(this.ac);
+      // 失焦音频闸登记（'music' 类别=AllowMusic :85-95 放行面;Sfx.setAudioSuspension
+      // 统一 suspend/resume,Main.cs:11193-11202 同构）
+      Sfx.registerAudioContext(this.ac, 'music');
     }
-    // ★失焦闸配合：隐藏期间禁止自动 resume（手势恢复走 resumeNow/armUnlock,均由
-    //  用户输入触发、隐藏态不可达）。playWhenUnfocused 开=失焦继续播放,隐藏不拦
-    //  resume（FocusHelper.AllowMusic :79 直通同构）。node 单测无 document → 视为可见
-    const pageHidden = typeof document !== 'undefined' && document.hidden && !options.data.playWhenUnfocused;
-    if (this.ac.state === 'suspended' && !pageHidden) {
+    // ★失焦闸配合：未激活期间禁止自动 resume（手势恢复走 resumeNow/armUnlock,均由
+    //  用户输入触发、未激活态不可达）。BGM 放行面=AllowMusic :85-95 取开关——
+    //  playWhenUnfocused 开=失焦音乐继续不拦 resume;关=失焦连 BGM 全停(PauseAll)。
+    //  两源合并态 Sfx.isAppInactive()（visibilitychange ∪ window blur,红队 R3-E2 ①）。
+    //  node 单测无事件源 → 视为可见
+    const gateBlocked = Sfx.isAppInactive() && !options.data.playWhenUnfocused;
+    if (this.ac.state === 'suspended' && !gateBlocked) {
       this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
     }
     return this.ac;

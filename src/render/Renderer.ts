@@ -1738,6 +1738,48 @@ export function deerclopsNextFrame(
   return idx;
 }
 
+// ==================== 拾取飘字命中盒度量（PopupText.GetTextHitbox :751-758）====================
+// 原版 = FontAssets.MouseText.MeasureString(displayText)×scale、Y×0.8。本仓 label 类
+// 实绘字体 = 13px sans-serif（drawDmgNumbers label 支,下方 POPUP_LABEL_FONT_PX 单一
+// 事实源）——命中盒度量必须与实绘同源（红队R3①:曾用 Combat_Text 位图度量,未知
+// 字形 8px/字、盒高 24,与可见文本盒错位 → 互推判定偏移）。XNA MeasureString 返回
+// 未缩放布局盒(高 = LineSpacing,与内容无关) → 本仓同构:基准 13px 度量缓存,×scale
+// 与 Y×0.8 留在消费侧（Game.popupLabelStep）。
+
+/** 拾取飘字实绘字号（label 支 draw 与命中盒度量共用） */
+export const POPUP_LABEL_FONT_PX = 13;
+
+/** 实绘字体串（Math.max(1,round(px)) 与 label 支旧行为逐值一致） */
+export const popupLabelFont = (px: number): string =>
+  `${Math.max(1, Math.round(px))}px sans-serif`;
+
+const popupMeasureCtx: CanvasRenderingContext2D | null = typeof document !== 'undefined'
+  ? document.createElement('canvas').getContext('2d') : null;
+const popupLabelMeasureCache = new Map<string, { w: number; h: number }>();
+
+/** 13px sans-serif 文本盒度量（GetTextHitbox 度量源;w = measureText 宽,h = 行盒
+ *  [XNA LineSpacing 同构,fontBoundingBox 探针,与内容无关]。node/无 canvas 环境
+ *  走定宽表兜底——仅供测试环境,生产路径恒 canvas 度量） */
+export function popupLabelMeasure(text: string): { w: number; h: number } {
+  const hit = popupLabelMeasureCache.get(text);
+  if (hit) return hit;
+  let m: { w: number; h: number };
+  if (popupMeasureCtx && typeof popupMeasureCtx.measureText === 'function') {
+    popupMeasureCtx.font = popupLabelFont(POPUP_LABEL_FONT_PX);
+    const probe = popupMeasureCtx.measureText('Mg');
+    const fh = (probe.fontBoundingBoxAscent ?? probe.actualBoundingBoxAscent)
+      + (probe.fontBoundingBoxDescent ?? probe.actualBoundingBoxDescent);
+    m = { w: popupMeasureCtx.measureText(text).width, h: fh > 0 ? fh : POPUP_LABEL_FONT_PX * 1.15 };
+  } else {
+    let w = 0;
+    for (const ch of text) w += ch.charCodeAt(0) > 0xff ? POPUP_LABEL_FONT_PX : 7;
+    m = { w, h: POPUP_LABEL_FONT_PX * 1.15 };
+  }
+  if (popupLabelMeasureCache.size > 512) popupLabelMeasureCache.clear();
+  popupLabelMeasureCache.set(text, m);
+  return m;
+}
+
 /** 飘字。数字类 1:1 CombatText.cs（spawn: NewText:59-121 / update: Update:131-206）:
  *  vy 普通恒 -7/t、暴击 -14/t、dot -4/t;life 60/120/40;scale 从 0 每 t+0.1 长到 1
  *  （dot +0.5 封顶 0.8）;alpha 0.6~1 闪烁;寿命归零后 scale 收缩至 0.1 消亡。
@@ -3845,7 +3887,7 @@ export class Renderer {
       if (d.label) {
         const sc = d.scale ?? 1;
         ctx.globalAlpha = d.alpha ?? 1;
-        ctx.font = `${Math.max(1, Math.round(13 * sc))}px sans-serif`;
+        ctx.font = popupLabelFont(POPUP_LABEL_FONT_PX * sc);   // 13px sans-serif（命中盒度量同源,见 popupLabelMeasure 注）
         ctx.strokeStyle = 'rgba(0,0,0,0.75)';
         ctx.lineWidth = 3;
         ctx.strokeText(d.label, sx, sy);
@@ -5097,9 +5139,16 @@ export class Renderer {
    *    vector  = (0.3,2)×num×Scale  → 水平臂,旋转 π/2+Rotation（:72/:80）
    *    vector2 = (0.3,1)×num×Scale  → 垂直臂,旋转 0+Rotation（:73/:84）
    *    第二层同臂几何 ×0.6（:88/:92）。
-   *  色（XNA 预乘 AlphaBlend）：color2 = ColorTint×Opacity×0.5×num（:66/:74,原版
-   *  各编排站 ColorTint.A=0 → 纯加色;ColorTint=d.color,池缺省 Transparent=无 tint
-   *  臂不画）；color3 = White×Opacity×0.9×0.5×num（:63/:69 白核;A=(int)(255·Op·0.9)/2/2
+   *  色（XNA 预乘 AlphaBlend）：color2 = ColorTint×Opacity×0.5×num（:66/:74）+
+   *  ★dst 衰减项（R3 ③清偿 2026-09-03）：color2.A = ColorTint.A×Op×0.5×(1−
+   *  AdditiveAmount)（:67;AdditiveAmount=d.psAdditive,池缺省 1f PrettySparkleParticle
+   *  .cs:20/:43）——本层 BlendState.AlphaBlend（Main.cs:63205）下 A 只进 dst 因子
+   *  = 'destination-out' erase 项（fillRect 实心域=既登记臂形近似同域,texA≈1）;
+   *  rgb 加色贡献与 A 无关,两 pass 精确。逐站：红臂 0.498×0.5×0.65≈0.16×Op×num
+   *  （kind1 :681 additive=0.35）/金臂 additive=缺省 1f → A=0 无衰减（ParticleOrchestrator
+   *  .cs:698-721 无写入）/公主·星尘 ColorTint.A=0 → 0。原版各编排站 ColorTint.A=0 →
+   *  纯加色;ColorTint=d.color,池缺省 Transparent=无 tint 臂不画）；
+   *  color3 = White×Opacity×0.9×0.5×num（:63/:69 白核;A=(int)(255·Op·0.9)/2/2
    *  非零——erase 项 ≤0.22·texA·num 不建模,纯加色近似登记）。
    *  ★臂形近似（登记）：XNA 拉伸=贴图尺寸×scale（Extra_98=72×72 星芒羽化贴图）,
    *  本仓以 fillRect 实心矩形近似臂形（任务批定案"两笔 fillRect 近似臂形状,臂几何

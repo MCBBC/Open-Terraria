@@ -4649,7 +4649,10 @@ export class MinionProj extends Entity {
       // ★哨兵背包携带面（2026-09-03）：AI_138 携带支（:70397-70405）num3=20、
       //   num2=48−14=34 → 探测盒 = CenteredRectangle(Center+(0,-num2), num2*3)
       //   （:70407）后 Inflate(num3,num3)（:70411）→ 半宽 num2*3/2+num3：常规 48*3/2
-      //   =72、携带 34*3/2+20=71（盒心 Y 也从 −48 抬到 −34）
+      //   =72、携带 34*3/2+20=71（盒心 Y 也从 −48 抬到 −34）。探测循环带
+      //   nPC.CanBeChasedBy(this) 门（:70430,NPC.cs:91141 索敌面,红队 F12 补）——
+      //   不可瞄准目标（小动物 lifeMax≤5 / dontTakeDamage / CHASE_EXCLUDED_VIDS
+      //   如训练假人 488）不触发爆炸机关（复用 projTargets.canBeChasedBy）
       if (TRAP_TOWER.has(this.projId)) {
         if (--this.sCool <= 0) {
           this.sCool = 3;
@@ -4658,7 +4661,8 @@ export class MinionProj extends Entity {
           const ecx = this.cx, ecy = this.cy - trapNum2;
           const trapHalf = trapNum2 * 3 / 2 + trapNum3;
           const hit = (game.enemies() as EnemyLike[]).some((en) =>
-            !en.dead && Math.abs(en.cx - ecx) < trapHalf + en.w / 2 && Math.abs(en.cy - ecy) < trapHalf + en.h / 2);
+            canBeChasedBy(en) && Math.abs(en.cx - ecx) < trapHalf + en.w / 2
+            && Math.abs(en.cy - ecy) < trapHalf + en.h / 2);
           if (hit) {
             this.sCool = 90;
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
