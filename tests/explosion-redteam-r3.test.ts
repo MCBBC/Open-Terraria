@@ -46,7 +46,7 @@ describe('SW-R3 F-2+M-4：hurtBox16 = PrepareBombToBlow Resize 全表（P.cs:476
     expect(gameSrc).toMatch(/cw\.shoot === 681 \? 40/);
   });
   it('F-5：108 链爆/电路触发 hurtBox=130、164 地雷=64（SetDefaults 盒）', () => {
-    expect(gameSrc).toMatch(/explodeAt\(ex, ey, 500, 10, true, 130, 0, 108\)/);
+    expect(gameSrc).toMatch(/explodeAt\(ex, ey, 500, 10, true, 130, 0, 108, undefined, undefined, 0\)/); // SW-S1 击退标量 kb=0(108 SetDefaults 无 knockBack)
     const devices = readFileSync(new URL('../src/world/wiring/devices.ts', import.meta.url), 'utf8');
     expect(devices).toMatch(/ctx\.explode\(x, y, 500, 10, true, 130, 108\)/);
     expect(devices).toMatch(/ctx\.explode\(x, y, 250, 0, false, 64, 164\)/);

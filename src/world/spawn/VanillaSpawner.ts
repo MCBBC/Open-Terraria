@@ -3402,10 +3402,14 @@ export class VanillaSpawner {
     return this.activeIds.has(id) ? 1 : 0;
   }
 
-  /** SpawnFrog（NPC.cs:5521-5535 1:1）：!unlockedSlimeYellowSpawn && RollLuck(30) 且
-   *  场上无 687 → 神秘青蛙 687（Enemy 直出——vanilla-npcs.json/NPC_687.png 在位，
-   *  aiStyle 7 行走族 AI 走 townCritterWalkAI；旧 pendingCritterKey→Critter 侧信道
-   *  已退役）；RollLuck(400) → 金蛙 445；else 蛙 361。 */
+  /** SpawnFrog（NPC.cs:5521-5535 1456 / 1457 :5621-5637 1:1）：!unlockedSlimeYellowSpawn
+   *  && RollLuck(30) 且场上无 687 → 神秘青蛙 687（Enemy 直出——vanilla-npcs.json/
+   *  NPC_687.png 在位，aiStyle 7 行走族 AI 走 townCritterWalkAI；旧
+   *  pendingCritterKey→Critter 侧信道已退役）；RollLuck(goldCritterChance=400,
+   *  NPC.cs:6054) → 金蛙 445；else 蛙 361。★幸运消费面七类⑤（2026-09-03）：金蛙掷
+   *  曾 `rng.next()<1/400` 均匀近似——原版 RollLuck 三态（正运 ≈1.39/400、负运
+   *  ≈0.69/400、0 基线 1/400 逐位等价），luck=playerLuck（SetSpawnFlags NPC.cs:370
+   *  spawn 周期玩家 luck,非事件位置最近玩家——与文件其余 rollLuck 消费同口径） */
   /** 萤火虫成群附加队列（原版 :2327-2344/:4419-4433/:5767-5782 主只后四向各
    *  1/fireFlyMultiple 独立掷 SpawnNPC）——spawn() 单返回值只交付主只，附加以
    *  像素偏移入队，Game.trySpawnEnemy 落位段消费（消费后清空） */
@@ -3428,7 +3432,7 @@ export class VanillaSpawner {
       && !this.activeIds.has(687)) {
       return this.spawnNPC(x, y, 687, rng);
     }
-    if (rng.next() < 1 / 400) return this.spawnNPC(x, y, 445, rng);
+    if (rollLuck(this.playerLuck, 400, () => rng.next()) === 0) return this.spawnNPC(x, y, 445, rng);
     return this.spawnNPC(x, y, 361, rng);
   }
 

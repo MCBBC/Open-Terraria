@@ -644,6 +644,11 @@ export class BiomeBackground {
       this.hellBack = bg.hell;
       this.mushroomStyle = bg.mushroom;
       this.underworldStyle = bg.underworld;
+      // ★2026-09-03：desert/ocean 同口径（WF:1330-1331 随 .wld 头落盘）——导入档
+      //  不再按 seed 派生重掷（样式4=248/249/250 沙暴巨丘档随档保真）。本仓自建
+      //  世界无此字段 → 走上方 seedPick 派生，行为零变化
+      if (typeof bg.desert === 'number') this.desertStyle = bg.desert;
+      if (typeof bg.ocean === 'number') this.oceanStyle = bg.ocean;
     }
   }
 

@@ -5054,10 +5054,15 @@ const snap: SnapFn = (name) => {
                 // flag2 门（cs:148-196）：true → Next(4) 选 13/49；false → 直放 13（少 1 掷）。
                 //   ★IIIII105b：dual 座 minimumWaterCandles>0 ⇒ num12 强制 49（cs:169-171）；
                 //   bookMinWC 特性内自持（Bookshelves.cs:33-42 非 Furniture 共享 ref）。
+                //   ★IIIII224：cs:170 `int num12=((genRand.Next(4)==0)?1:0); if(num4>0) num12=1;`
+                //   ——Next(4) 在 num4 检查【之前】恒掷（ternary 先求值）；dual 座 num4=GetWorldSize
+                //   switch(1→10) 恒>0 ⇒ JS 曾在 bkMinWC.v>0 时跳掷 rn(4)=每烛位 −1 掷，座1 Books
+                //   相净 −115 掷 ⇒ 座2 全域掷位级联（PDC 序/PLW 行差/#33 腐化草首差）。
                 let n12v: number;
                 if (flag2) {
-                  if (gfStyles.length > 0 && bkMinWC.v > 0) n12v = 49;
-                  else n12v = rn(4) === 0 ? 49 : 13;
+                  const d4 = rn(4);   // ★224：恒掷（非 dual bkMinWC.v=-1 走原判,零扰动）
+                  i158Log(`BATT-D4 s=${instIdx + 1} d4=${d4} wc=${bkMinWC.v} mr=${dgMainRolls}`);
+                  n12v = (gfStyles.length > 0 && bkMinWC.v > 0) ? 49 : (d4 === 0 ? 49 : 13);
                 } else n12v = 13;
                 // v_13_placed_bottles（sheet 13）——曾误写 'v_13_bottles'（不存在的键）：
                 // undefined 被 Uint16Array 吞成 type 0，且下行 frameX 掷骰恒不触发（流欠耗）。

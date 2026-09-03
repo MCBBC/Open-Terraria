@@ -134,6 +134,11 @@ export interface WldWorld {
   bgMushroom: number;
   bgUnderworld: number;
   bg10: number; bg11: number; bg12: number;
+  /** ★2026-09-03：header bg 字节组第 7/8 位（WF:1330-1331 treeBG1..oceanBG 八连的后两档，
+   *  此前整组按 8×u8 丢弃）——desertBG 决定沙漠背景三层组（样式4=248/249/250），
+   *  oceanBG=海洋单层贴图变体。曾读位即弃 → 导入档沙漠/海洋背景回退 seed 派生重掷 */
+  desertBG: number;
+  oceanBG: number;
   /** ★七批备案④-c（2026-09-02）：TileEntities 段（pointers[5]，v>=122 门 WF:1803-1821）
    *  ——仅四类挂物家具（1/3/4/5）落负载；段不存在/版本旧/pointers 缺失=空数组（静默略过） */
   tileEntities: WldTileEntity[];
@@ -286,7 +291,11 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
   // WF:1315-1317 SavedOreTiers 三档锁定选种（int32×3）——原版 .wld 权威导入
   const savedOreTiers = { cobalt: r.i32(), mythril: r.i32(), adamantite: r.i32() };
-  for (let i = 0; i < 8; i++) r.u8(); // bg styles
+  // WF:1325-1331 bg 字节八连：treeBG1/corruptBG/jungleBG/snowBG/hallowBG/crimsonBG/
+  // desertBG/oceanBG——末两档此前整组丢弃（见接口注），现按位读出
+  r.u8(); r.u8(); r.u8(); r.u8(); r.u8(); r.u8(); // treeBG1..crimsonBG（treeStyle 等消费方在 header 另段）
+  const desertBG = r.u8(); // WF:1330 沙漠背景样式（setBG case 6 值域 0-4/51-53）
+  const oceanBG = r.u8();  // WF:1331 海洋背景贴图变体（setBG case 7 值域 0-7）
   const cloudBGActive = r.i32(); const numClouds = r.i16(); const windSpeedTarget = r.f32(); // clouds/wind
   // angler
   {
@@ -542,7 +551,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     bannerKills,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
-    bgMushroom, bgUnderworld, bg10, bg11, bg12,
+    bgMushroom, bgUnderworld, bg10, bg11, bg12, desertBG, oceanBG,
     tileEntities, teSkipped,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,

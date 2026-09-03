@@ -5045,18 +5045,11 @@ export class Player extends Entity {
       }
     }
     if (this.swimTime > 0) this.swimTime--;   // PlayerFrame :35307-35312
-    }
-    // 松键上升衰减（原版语义 1:1，:22435-22446）：原版无"跳高截断"——松键仅在
-    // 下一个 tick 使 vy += 0.01（几乎不衰减，小跳靠 platform 段耗尽前的松键时间差
-    // 实现不了，原版跳高基本固定）；曾自制 vy>2→vy=2 狠掐上升（手感大偏，
-    // 2026-08-15 审计）。坐骑飞行族（悬停/飞行）vy 独占 tick 让位
-    if (!this.inputJump && !mountFlight
-      && (this.gravDir === 1 ? this.vy < 0 : this.vy > 0)) this.vy += 0.01 * this.gravDir;
 
     // ---- ★回满/清零公共段（2026-09-03 备案清偿③；原版 :26947-26953 + :27060-27063 +
     //      :26976-26982 = JumpMovement 尾、Wallslide 前的公共路径，不分干湿）----
-    //   ①清零：无翼 → wingTime=0（:26948）；无靴 → rocketTime=0（:26951）——旧版缺，
-    //     空中卸翼留僵尸 wingTime 会错封飞毯门（:22025 gate wingTime==0）
+    //   ①清零：无翼/骑禁翼族 → wingTime=0（:26948 wingsLogic==0，:26833-26835 骑乘清）；
+    //     无靴 → rocketTime=0（:26951）——旧版缺，空中卸翼留僵尸 wingTime 会错封飞毯门
     //   ②rocketTime 回满 :27060-27063 `(vy==0||sliding||(autoJump&&justJumped))`
     //     ——sliding ≙ wallCling（仓内承载位；湿态贴墙滑未实装=登记）、
     //     justJumped ≙ jumpStartedThisTick（起跳帧标记）
@@ -5065,17 +5058,30 @@ export class Player extends Entity {
     //     旧版分叉：干地 onGround 无条件回满（按住跳也回，宽于原版）+ 水行鞋面回满 +
     //     湿态无回满 → 水里踩底/悬空 vy==0（撞顶）不回满 = 2026-09-03"有翅膀困死水中"
     //     死锁根因之一。mount.ResetFlightTime(:26981) 由 upkeep(onGround||vy==0) 承担
-    //     （触发位点差已登记）
-    if (((this.equipStats.wing && (!mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true))
-      ? this.equipStats.wing.logic : 0) === 0) this.wingTime = 0;   // :26948 wingsLogic==0（骑禁翼族同清 :26835）
+    //     （触发位点差已登记）。
+    //     ★原文 vy==0 在本仓时序下 ≙ onGround：原版重力链在回满【之后】跑
+    //     （:27156 else-if 尾），站立帧到回满点 vy=碰撞清零值 0；本仓湿/干重力在
+    //     分支内【先】跑 → 站立帧 vy=+grav≠0。onGround（上帧碰撞置位）恰承载同一
+    //     "贴地/踩底"语义；悬停坐骑 vy==0 例经 ①清零归零（骑乘恒禁翼/无靴）不成差。
+    const wingsLogicC = (this.equipStats.wing && (!mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true))
+      ? this.equipStats.wing.logic : 0;
+    if (wingsLogicC === 0) this.wingTime = 0;
     if (this.equipStats.rocketBoots === 0) this.rocketTime = 0;
     const autoJumpC = this.ridingMount ? this.mount.autoJump : eqJ.autoJump;
-    if (this.vy === 0 || this.wallCling || (autoJumpC && jumpStartedThisTick)) {
+    if (this.onGround || this.wallCling || (autoJumpC && jumpStartedThisTick)) {
       this.rocketTime = this.equipStats.rocketBoots > 0 ? 7 : 0;
     }
-    if (((this.vy === 0 || this.wallCling) && !this.inputJump) || (autoJumpC && jumpStartedThisTick)) {
+    if (((this.onGround || this.wallCling) && !this.inputJump) || (autoJumpC && jumpStartedThisTick)) {
       this.wingTime = this.equipStats.wing ? this.equipStats.wing.time : 0;
     }
+    }
+    // 松键上升衰减（原版语义 1:1，:22435-22446）：原版无"跳高截断"——松键仅在
+    // 下一个 tick 使 vy += 0.01（几乎不衰减，小跳靠 platform 段耗尽前的松键时间差
+    // 实现不了，原版跳高基本固定）；曾自制 vy>2→vy=2 狠掐上升（手感大偏，
+    // 2026-08-15 审计）。坐骑飞行族（悬停/飞行）vy 独占 tick 让位
+    if (!this.inputJump && !mountFlight
+      && (this.gravDir === 1 ? this.vy < 0 : this.vy > 0)) this.vy += 0.01 * this.gravDir;
+
 
     // ---- 黏滞 tile（Collision.StickyTiles + Player.cs:22650-22740 1:1）----
     // 蛛网(51)：泡在网里 X/Y 双重阻尼、禁跳、不计摔伤、挣扎随机会撕破网（掉蛛丝）；

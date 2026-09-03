@@ -95,7 +95,7 @@ import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, starvedEver } from '../render/GLStats';
-import { TileStore, LIQUID_TYPE } from '../world/TileStore';
+import { TileStore, LIQUID_TYPE, TileStore as TS } from '../world/TileStore';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { repairTallGateFramesInStore } from '../world/tallgateFrameRepair';
 import { repairChimneyCaps } from '../world/ChimneyCapRepair';
@@ -193,7 +193,7 @@ import { SkyblockRuntime } from '../world/SkyblockRuntime';
 import { DUNGEON_WALL_IDS, scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 // ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
 import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
-import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
+import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
@@ -350,10 +350,10 @@ import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybin
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
-import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
-import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION } from '../player/ToolCursorIcon';
+import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings } from '../player/SmartCursor';
+import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION, WIRE_TOOL_VIDS } from '../player/ToolCursorIcon';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
-import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
+import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, TORCH_ITEMS, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
@@ -3231,6 +3231,32 @@ export class Game implements GameHooks {
       });
     }
     return out;
+  }
+
+  /** Player.FindClosest + GetClosestRollLuck 的 luck 面（Player.cs:4934-4953/:18352-18355）。
+   *  ★幸运消费面七类 ctx 多人语义（2026-09-03）：世界位置事件掷卡族（罐钱币传送门
+   *  WorldGen.cs:57654、饵金变体 :66885/:66903、坠星定向 :72410）原版都取【事件位置】
+   *  最近存活玩家的 luck——曼哈顿中心距（position+width/2）、active && !dead、严格 <
+   *  取先扫描槽；全死/无存活 → 首个 active 槽回退（本地）。离线 = 本地玩家（net 不活跃
+   *  无远端位）。击杀结算域的同语义已居 Enemy.ts closest 扫描（lootPlayers 表,13640 注
+   *  同源），本方法服务非击杀世界事件；候选序 = [本地, …远端]（与 lootPlayers 表同构,
+   *  槽序 tie 破缺近似登记）。远端位换算 = 碰撞盒左上 +10/+21（同 lootPlayers 表） */
+  closestPlayerLuckAt(x: number, y: number): number {
+    const net = this.net;
+    if (!net?.active) return this.player.luck;
+    let bd = -1;
+    let luck = this.player.luck;   // FindClosest 回退槽 = 首个 active（此处=本地）
+    const consider = (cx: number, cy: number, dead: boolean, lk: number): void => {
+      if (dead) return;
+      const d = Math.abs(cx - x) + Math.abs(cy - y);
+      if (bd < 0 || d < bd) { bd = d; luck = lk; }
+    };
+    consider(this.player.cx, this.player.cy, this.player.dead, this.player.luck);
+    for (const [, rp] of net.players) {
+      if (!rp.active) continue;
+      consider(rp.x + 10, rp.y + 21, rp.dead, rp.luck);
+    }
+    return luck;
   }
 
   /** MP：他人掉落被本端部分拾取后的余量上报（GameHooks.puppetDropResidue 实现；
@@ -8557,18 +8583,27 @@ export class Game implements GameHooks {
         }
       }
     }
-    // ---- 夜间坠星（SpawnFallingObjects :71861-71898：每 tick 概率
-    //      p = 10×(w/4200)×boost/8000 = w×boost/3,360,000；运气定向 RollLuck(15)==0
-    //      → 玩家±640px——单机用 luck 字段近似）----
+    // ---- 夜间坠星（SpawnFallingObjects :71861-71898 1456 / 1457 :72395-72432：每 tick 概率
+    //      p = 10×(w/4200)×boost/8000 = w×boost/3,360,000）----
     if (!w.clock.isDay && this.starfallBoost > 0) {
       const p = (w.store.w * this.starfallBoost) / 3360000;
       if (Math.random() < p) {
         const st = w.store;
         let sx = (Math.floor(Math.random() * (st.w - 50)) + 100) * TILE;
         const sy = Math.floor(Math.random() * Math.floor(st.h * 0.05)) * TILE;
-        // 运气定向（玩家在地表以上 + 幸运命中）
-        const homing = !player.dead && player.y < w.groundLevel * TILE && Math.random() < Math.max(0, player.luck) * 0.0667;
-        if (homing) sx = player.cx + Math.floor(Math.random() * 1281) - 640;
+        // 运气定向（★幸运消费面七类④,2026-09-03 接线——旧 `rand<luck×1/15` 近似退役：
+        // luck=0 漏基线 1/15、负运恒 0、正运低估 1.5×。真实语义 :72405-72417：
+        // 坠点最近存活玩家（FindClosest(position5,1,1)）luck → 非 remix RollLuck(15)/
+        // remix RollBadLuck(15)（:72410 原式——定谳:此线是坠星定向非药草种子,药草
+        // 采收 1457 无 luck）==0 且玩家 position.Y<worldSurface×16 且非挂机
+        // （afkCounter<AFKTimeNeededForNoLuckyStars=10800,Player.cs:973）→ 落点 X 改
+        // 玩家 position.X ± num30（num30=Next(1,640) 两掷;旧 uniform ±640 同退役）。
+        // starfallHoming 纯函数体在 Luck.ts（Luck.RollLuck/RollBadLuck 1:1）
+        const homingOffset = starfallHoming(this.closestPlayerLuckAt(sx, sy), !!w.seedFlags?.remix,
+          Math.random, player.y < w.groundLevel * TILE,
+          player.afkCounter < AFK_TIME_NO_LUCKY_STARS);
+        const homing = homingOffset !== null;
+        if (homing) sx = player.x + homingOffset;   // 原版 position.X（左上,非 Center）
         if (FallingStar.canSpawnAt(st, sx, sy)) {
           let vx = Math.floor(Math.random() * 201) - 100;
           let vy = Math.floor(Math.random() * 200) + 100;
@@ -10350,6 +10385,9 @@ export class Game implements GameHooks {
     // controlTorch（TriggersSet.cs:794）。Input.down 自带 uiBlocking 门 = 原版
     // 键盘 UI 模式/mouseInterface 让位（TriggersSet.cs:782-784）的等价；
     // 全屏地图打开时输入归地图（对应原版 MapFullscreen 输入模式无 SmartSelect 触发）
+    // ★红蓝对抗 A-F6 台账：`!fullMap.open` 为原版没有的额外让位门（TriggersSet.cs:792-794
+    //  唯一门 = mouseInterface；全屏地图是否置 mouseInterface 未考）。分歧方向 = 原版可能在
+    //  地图下仍换装（不可见无感），本仓吞掉——保留本门（防地图态误换），如需严格对齐再移除。
     const controlTorch = inp.downAction('SmartSelect') && !this.renderer.fullMap.open;
     const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     const canvas = this.renderer.canvas;
@@ -10371,21 +10409,31 @@ export class Game implements GameHooks {
       },
       slots: this.smartSelectSlots(),
       selectedItem: p.inv.selected,
-      // IsInTileInteractionRange（Player.cs:31548，Simple 档 tileRangeX=5/tileRangeY=3 + TB）
+      // IsInTileInteractionRange（Player.cs:31548，Simple 档 = Player.tileRangeX/Y + TB）。
+      // ★红蓝对抗 A-F2 反证存照：Simple.GetRanges 读的是 per-player tileRangeX/Y——
+      // 原版该字段有配件/道具/旅程写点（equippedAnyTileRangeAcc +3/+2 :13140-13143、
+      // 持 1923 工具箱 +1 :15068-15072、旅程远置 ×2+8 :18938-18944，每帧复位 5/3
+      // :18931-18932），与 tileReach(0) 同构，非"纯 5/3"。
       inRange: (tx, ty, tb) => this.inTileRange(tx, ty, tb),
     };
     // SelectedItemState（Player.cs:383-517）宿主：换选/还原由 SmartSelect 代管
     // SelectedItemState.Hotbar（:391）= 最近一次 0-9 快捷栏选择（Select :437-439 item<10 时记）；
-    // 本作数字键直写 inv.selected，故在此跟随记录
-    if (p.inv.selected <= 9) this.smartSelectHotbar = p.inv.selected;
+    // 本作数字键直写 inv.selected，故在此跟随记录。★红蓝对抗 A-F5：行为覆盖期
+    // （smartSelect.slot≥0，OverrideSelection 改写 selected）不得写 Hotbar——原版
+    // OverrideSelection 从不写 :391，否则耗尽回退落进覆盖槽而非热栏原槽。
+    if (p.inv.selected <= 9 && this.smartSelect.slot < 0) this.smartSelectHotbar = p.inv.selected;
     const host: SmartSelectHost = {
       selected: p.inv.selected,
       hotbar: this.smartSelectHotbar,
-      canChangeImmediately: this.usingOrReusingItem() ? false : p.useTime === 0,
       // CanChangeSelectedItemImmediately（1458 Player.cs:415-421）：!UsingOrReusingItem
       // && ItemTimeIsZero——本作 swing = itemAnimation、player.useTime = itemTime；
       // pendingItemReuse（autoReuse 动画归零拍旗）与 channel/reuseDelay 语义见
-      // usingOrReusingItem 注（终零波 补档,旧"pendingItemReuse 未实装"登记销核）
+      // usingOrReusingItem 注（终零波 补档,旧"pendingItemReuse 未实装"登记销核）。
+      // ★红蓝对抗 A-F4：UsingOrReusingItem 含 channel 臂（Player.cs:4052-4060）——
+      // 本仓 channel 态 = _dirtRodChannel（Dirt Rod 泥球引导,StartChanneling :52311），
+      // 引导中动画间隙帧不得换选
+      canChangeImmediately: (this.usingOrReusingItem() || this._dirtRodChannel)
+        ? false : p.useTime === 0,
       isSlotEmpty: (i) => !p.inv.slots[i],
       onSelectionChanged: () => this.cb.onInventoryChanged(),
     };
@@ -10414,6 +10462,10 @@ export class Game implements GameHooks {
         def?.tool ? { type: def.tool.type as 'pick' | 'axe' | 'hammer', power: def.tool.power ?? 0 } : null,
         buf === EMPTY_SLOT ? undefined : buf,
       );
+      // GetAvailableToolRanges（Player.cs:17797-17831）射程 TB = inventory[i].tileBoost
+      // （红蓝对抗 A-F1：曾恒 0——铜镐 3509/铜斧 3506/铜锤 3505/木锤 196 = -1、
+      // The Axe 1305/+1、激光钻头 2798/+11 六类在池，±(5+tb)/±(3+tb) 盒随首件伸缩）
+      this._smartSelectSlots[i].tileBoost = tileBoostOfVid(viIdFromKey(def?.key ?? '') ?? 0);
     }
     return this._smartSelectSlots;
   }
@@ -12862,7 +12914,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (projId === 1088) { this.acornSeedDeath(ex, ey, evx ?? 0, evy ?? 0); return; }
               this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
                 hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId,
-                ex, ey, Game.PREPARE_BOMB_KB[projId]);
+                ex, ey, PREPARE_BOMB_KB[projId]);
               // SW-F1 2026-09-03 真像素爆心直穿（aiStyle16 弹心,半盒偏移按型内表）;
               // SW-S1 2026-09-04 kb=PrepareBombToBlow :47629-47720 各支 knockBack
               // （1088 上行早退不经此参——Kill :71784 排除出爆炸支,表亦无 1088 档=undefined→旧冲量面）
@@ -12896,7 +12948,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                       // 位,不吃武器穿甲）;crit=父弹发射玩家面板（ClusterFragmentProj.critChance）
                       // SW-S1 2026-09-04：kb=PrepareBombToBlow :47674-47678（779/783/862/863）knockBack 8
                       this.explodeAt(Math.floor(fx / TILE), Math.floor(fy / TILE), fdmg,
-                        fragR, fragR > 0, 24, 0, fragId, fx, fy, Game.PREPARE_BOMB_KB[fragId]);
+                        fragR, fragR > 0, 24, 0, fragId, fx, fy, PREPARE_BOMB_KB[fragId]);
                     });
                   frag.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
                   this.entities.add(frag, 'projectiles');
@@ -14516,7 +14568,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // SW-F1 2026-09-03：真像素爆心直穿（:79068 center2=position=弹心−Kill 终态半盒,
             // 半盒按型查 explosionCompareHalfBoxPx;1086/1087=Center 系 k=0）
             this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot, ex, ey,
-              Game.PREPARE_BOMB_KB[cw.shoot]);   // SW-S1 2026-09-04：kb=PrepareBombToBlow :47629-47720 各支（28 族 8/29 族 10/手雷族 8/1086 族 9/湿炸弹族 12…）
+              PREPARE_BOMB_KB[cw.shoot]);   // SW-S1 2026-09-04：kb=PrepareBombToBlow :47629-47720 各支（28 族 8/29 族 10/手雷族 8/1086 族 9/湿炸弹族 12…）
             if (payload) {
               const painted = Game.spreadBombPayload(this.world.store, payload,
                 Math.floor(ex / TILE), Math.floor(ey / TILE));
@@ -17607,7 +17659,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           (ex, ey, ed) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
             radius, radius > 0, 64, this.player.equipStats.armorPen, vid,
             ex, ey,
-            vid === 75 ? 8 : Game.PREPARE_BOMB_KB[vid]));
+            vid === 75 ? 8 : PREPARE_BOMB_KB[vid]));
         // SW-F1 2026-09-03 真像素爆心直穿（摇树弹 28,k=11 半盒）;
         // SW-S1 2026-09-04 kb：28=PrepareBombToBlow :47634-47638 knockBack 8;
         // 75=Kill 专支 :80116-80123 `Resize(128,128); damage=60; knockBack=8f`（不入 PrepareBombToBlow 表）
@@ -18176,7 +18228,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       e.vx = Math.floor(Math.random() * 26) * 0.1 * -dir;
       e.vy = -(21 + Math.floor(Math.random() * 29)) * 0.1;   // Next(-50,-21)×0.1
     };
-    const r = dropBaitRoll(sheet, fx, fy, fb, Math.random);
+    // 金变体掷（★幸运消费面七类②,2026-09-03）：GetClosestRollLuck(i,j,400)==0
+    // （WorldGen.cs:66885 worm/:66903 grasshopper）——luck=破坏点最近存活玩家
+    // （closestPlayerLuckAt,x/y=命中格左上 px）；墓地旗喂 wormGraveyard（606 覆写
+    // → 金掷短路不掷,:66881-66887）。旧 `rand<1/400` 均匀近似退役
+    const r = dropBaitRoll(sheet, fx, fy, fb, Math.random,
+      this.closestPlayerLuckAt(x * TILE, y * TILE), !!this.scene?.zoneGraveyard);
     // 幸运四叶草 5574（KillTile_DropBait :66337-66340）：成熟药草株(tile 73,fx<108)
     // 1/1000——与虫族掷骰相互独立（原版顺序独立 if），无 CountNPCS 上限门
     if (dropCloverRoll(sheet, fx, Math.random)) {
@@ -23185,7 +23242,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // SetDefaults 盒半宽;缺省 undefined → explodeAt 内 R*TILE 旧行为）
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, hurtBox?: number, projId?: number) =>
         this.explodeAt(tx, ty, damage, radius, destroyTiles, hurtBox, 0, projId ?? 108,
-          undefined, undefined, Game.PREPARE_BOMB_KB[projId ?? 108] ?? 0),
+          undefined, undefined, PREPARE_BOMB_KB[projId ?? 108] ?? 0),
         // SW-S1 2026-09-04：电路/器件爆炸 kb——108/164 SetDefaults 无 knockBack 行
         // （:1955-1968/:2528-2539,缺省 :95=0f）且不入 PrepareBombToBlow 表 → 原版击退 0
         // （表内弹型经器件通道触发时仍取表值）;未列型 ?? 0 同口径
@@ -24007,10 +24064,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *     （:80051-80058，tileHitDamage 阈值门 = 本仓 canExplodeTile 选段同 explodeAt）
    *     ——首步贴弹心、步距 16px;wallSplode 先扫全部步盒任一无墙格置位
    *     （ShouldWallExplode 同义,见 explodeAt 同式注）后逐爆清墙。
-   *  实体伤害一轮：敌怪（Damage_PVE 单点 hurt）/小动物/巫毒娃娃窄门城镇 NPC/
-   *  本地玩家 SelfHurtPlayers（FixedSelfDamageForPlayers 无 773 条目 → 自然伤,
-   *  无 DifficultyVar 前乘区）;爆炸音 Item14。尘/gore 走 vanillaDust 池近似,Kill
-   *  镜头尘型 59/31 组合按 :79965-80045 密度取样 */
+   *  实体伤害一轮：敌怪（Damage_PVE 单点 hurt,DV→banner→EoW /5 全链）/小动物/巫毒
+   *  娃娃窄门城镇 NPC（DV+banner 全链）/本地玩家 SelfHurtPlayers（FixedSelfDamage
+   *  ForPlayers 无 773 条目 → 自然伤入 DamageVar(-luck) ±15%）;爆炸音 Item14。
+   *  尘/gore 走 vanillaDust 池近似,Kill 镜头尘型 59/31 组合按 :79965-80045 密度取样 */
   private scarabBombExplode(exPx: number, exPy: number, damage: number): void {
     const st = this.world.store;
     const hardMode = !!this.world.flags.hardMode;
@@ -24076,7 +24133,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.hurt && inBox(en.cx, en.cy, en.w, en.h)) {
         const dmgVar0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
         const dmgVar = applyBannerDamageDealt(this, en, dmgVar0);   // ★F1 旗乘区（Damage 面）
-        en.hurt(dmgVar, (Math.sign(en.cx - exPx) || 1) * 8, 0, this, pen, false, 0, true);   // kb=8（P.cs:47644）
+        // SW-S1 2026-09-04（清偿①）：补 expert EoW 虫段 /5 尾臂——:13394 条件行含 773
+        //  （EXPERT_EOW_FIFTH_PROJS 既有）,位次=banner(:13388-13390)之后 :13392-13398;
+        //  773 非 trap 且 ≠1002 → 两次减伤臂不适用,banner 与 /5 间无夹层
+        const eowFifth = this.world.isExpert && (en.vanillaId ?? 0) >= 13 && (en.vanillaId ?? 0) <= 15
+          ? Math.trunc(dmgVar / 5) : dmgVar;
+        en.hurt(eowFifth, (Math.sign(en.cx - exPx) || 1) * 8, 0, this, pen, false, 0, true);   // kb=8（P.cs:47644）
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
       }
     }
@@ -24084,7 +24146,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const c = cent as Enemy;
       if (c.dead || !c.hurt) continue;
       if (inBox(c.cx, c.cy, c.w, c.h)) {
-        c.hurt(Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100))),
+        // SW-S1 2026-09-04（清偿①）：小动物同走 Damage_PVE_Inner 一条链（:11869 全表
+        //  遍历）——补旗乘区 + EoW /5 臂（结构位：critter 无旗档/非虫段型 → 恒原值）
+        const cdmg0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
+        const cdmg = applyBannerDamageDealt(this, c, cdmg0);
+        c.hurt(this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
+          ? Math.trunc(cdmg / 5) : cdmg,
           Math.sign(c.cx - exPx) || 1, 0, this, pen);
       }
     }
@@ -24094,13 +24161,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const eq = this.player.equipStats;
       const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
       if (!doll) continue;                                    // Damage_PVE_Inner 城镇窄门
-      if (inBox(tn.cx, tn.cy, tn.w, tn.h)) tn.hurt(damage, Math.sign(tn.cx - exPx) * 2 || 1, 0, this);
+      // SW-S1 2026-09-04（清偿①⑤同构）：巫毒窄门 friendly victim 亦走全链
+      //  （explodeFriendlyVictimDamage=DV(luck 正向)→旗乘区）;kb=8（P.cs:47644
+      //  PrepareBombToBlow knockBack——旧 ×2 档为占位）
+      if (inBox(tn.cx, tn.cy, tn.w, tn.h)) {
+        tn.hurt(this.explodeFriendlyVictimDamage(damage, tn), (Math.sign(tn.cx - exPx) * 8) || 1, 0, this);
+      }
     }
     // SelfHurtPlayers（:15104-15152）：FixedSelfDamageForPlayers 表无 773 → 自然伤害
     if (inBox(p.cx, p.cy, p.w, p.h)) {
       p.lastDamageCause = { kind: 'projectile', name: Lang.projectileName(773) ?? 'Explosives' };
+      // SW-S1 2026-09-04（清偿①）：±15% 方差接入——:15123 `Main.DamageVar(value,
+      //  0f - localPlayer.luck)`【luck 取负：厄运(负 luck)→-luck>0 重掷取 min=伤更大,
+      //  与 NPC 面 :12959 的正 luck 方向相反】,单源 damageVarRoll（31 档+ToEven+重掷）
       // ★FR2-F：同上走统一漏斗（msg117/飘字/voice 单点）
-      this.damagePlayer(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, exPx, exPy);
+      this.damagePlayer(damageVarRoll(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, -p.luck), exPx, exPy);
     }
     if (this.net?.active) {
       for (const rpEnt of this.remotePlayerProxies) {
@@ -24728,15 +24803,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const w = this.world;
     const underworldY = w.store.h - 200; // UnderworldLayer ≈ maxTilesY-200
     const flag = y < w.rockLevel;         // 原版 flag：j < rockLayer（地表+泥土层）
-    // ★钱币传送门大奖（WorldGen.cs:57186-57194，先于 1/45 药水掷）：
+    // ★钱币传送门大奖（WorldGen.cs:57186-57194 1456 / 1457 :57649-57661，先于 1/45 药水掷）：
     // range = 500/((num+1)/2)，num 为过 (n*2+1)/3 变换值（:57163）——
     // 金字塔罐 25-27→125（wiki 1/125 即此）、普通罐→500；
     // 最近玩家 RollLuck(range)==0 → 弹 518 CoinPortal（i*16+16 中心、v=(0,-12)）并短路。
+    // ★幸运消费面七类②伴生（2026-09-03）：luck 改取【罐位置】最近存活玩家
+    // （GetClosestRollLuck(i,j,range) :57654——旧读本地玩家,离线同值;MP 破罐事件
+    // 在结算端跑,近罐远端位经 closestPlayerLuckAt 计入）。
     // isGeneratingOrLoadingWorld 门（:57187）：载入期 player 未建→跳过（原版直接 return）。
     {
       const plr = this.player;
       const numT = (potCoinMul(style, w.flags.hardMode) * 2 + 1) / 3;
-      if (plr && rollLuck(plr.luck, Math.floor(500 / ((numT + 1) / 2))) === 0) {
+      if (plr && rollLuck(this.closestPlayerLuckAt(x * TILE, y * TILE),
+        Math.floor(500 / ((numT + 1) / 2))) === 0) {
         this.entities.add(new CoinPortalProj(x * TILE + 16, y * TILE + 16), 'projectiles');
         return;
       }
@@ -28576,7 +28655,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.cursorItemIconText = '';
     p.cursorItemIconReversed = false;
     const inp = this.input;
-    if (!inp.uiBlocking && !p.dead) {
+    // 帧序门（红蓝对抗 C-F8 重构）：原版 LookForTileInteractions(:32160-32163) 仅
+    // netMode/mapFullscreen/BestiaryUI 早退——无 dead/mouseInterface 门（置位照跑、
+    // mouseInterface 只压 Draw 端 :45794）。本仓 uiBlocking/draw 侧压制见 Renderer
+    // drawCursorItemIcon 头门;本仓无 Bestiary 面板态不接线
+    if (!this.renderer?.fullMap?.open) {
       const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
       this.tileInteractionsMouseOver(Math.floor(wx / TILE), Math.floor(wy / TILE), p);
       // 帕鲁坐骑抚摸悬停图标（Mount.TryPettingMount :6155-6175,由 Mount.Draw 挂 =
@@ -28642,6 +28725,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // cursorScale（Main.cs:53294 = cursorAlpha×0.3+0.8,alpha 0.6..1 呼吸 :53277-53286）
       // ——物品图标与箭头光标/心/星共用的单相位（FlickerClock.cursorAlpha 每帧步进）
       cursorScale: this.lighting?.clock.cursorScale ?? 1,
+      // mouseInterface 门在 Draw 端（红蓝对抗 C-F8：置位侧照跑,UI 悬停只压绘制）
+      uiBlocking: inp.uiBlocking,
     };
   }
 
@@ -28680,7 +28765,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       hammer,
       createTile: def?.tile != null,
       createWall: def?.wallId != null,
-      wireTool: def?.wireTool != null,
+      // ★红蓝对抗 C-F7：电路线门=字面八件（Player.cs:47154），曾用 def.wireTool 判
+      // 连带命中 3611 宏伟蓝图（原版无其图标置位点）——改查 WIRE_TOOL_VIDS
+      wireTool: vid > 0 && WIRE_TOOL_VIDS.has(vid),
       bucket: vid > 0 && BUCKET_VIDS.has(vid),
       makeNPC: vid > 0 && CRITTER_RELEASE_BY_ITEM[vid] !== undefined,
       reachBase: this.tileReach(0),
@@ -28703,6 +28790,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       heldStack: held.stack,
       hoverEnabled: this._hoverIconEnabled,   // 悬停扫描后的 enabled 快照（本支前）
       slotSem: this.toolSlotSem(),
+      // 油漆四支/兔炮支/铲支（红蓝对抗 C-F4/C-F6）：目标格 tile 语境现读 +
+      // 手持 vid/火把族/铲 4711
+      vid,
+      isTorch: vid > 0 && TORCH_ITEMS.has(vid),
+      shovel: vid === 4711,
+      targetTile: (() => {
+        if (!st.inBounds(tx, ty)) return undefined;
+        const ti = st.idx(tx, ty);
+        const coat = st.coat[ti];
+        return {
+          active: st.hasTile(tx, ty),
+          sheet: sheetOf(st.type[ti]),
+          frameX: st.frameX[ti],
+          wall: st.wall[ti],
+          // TryScraping :42194-42201 `color()>0 ∪ invisibleBlock ∪ fullbrightBlock`
+          // （块侧）/墙侧同构——本仓 coat 位族 + paint 通道并集
+          painted: st.paint[ti] > 0 || (coat & (TS.COAT_FULLBRIGHT_BLOCK | TS.COAT_INVISIBLE_BLOCK)) !== 0,
+          paintedWall: st.paintWall[ti] > 0 || (coat & (TS.COAT_FULLBRIGHT_WALL | TS.COAT_INVISIBLE_WALL)) !== 0,
+        };
+      })(),
     });
     if (!res.enabled) return;
     p.cursorItemIconEnabled = true;
@@ -31002,6 +31109,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         case 'downedFrost': return !!f['downedFrost'];
         case 'downedMartians': return !!f['downedMartians'];
         case 'downed_398': return !!f['downed_398'];
+        // ★幸运消费面七类①伴生（2026-09-03 复合门补齐）：画作池 2865-2867/3596/5243
+        // 的复合条件串此前落 default=false → 困难模式五幅画永不入店（GetPainting
+        // Chest.cs:841-849/:837/:873 均为 hardMode&&downed 复合,提取器逐串转录）。
+        // 3596/5243 = downedMoonlord（→ downed_398 同名映射,与上方单键 case 同口径）
+        case 'hardMode&&downedMartians': return !!f.hardMode && !!f.downedMartians;
+        case 'hardMode&&downed_398': return !!f.hardMode && !!f['downed_398'];
         // 4347 门 = downedDeerclops||downedSlimeKing||downedBoss1/2/3||downedQueenBee||hardMode
         case 'anyBossKill': return !!(f['downed_668'] || f['downed_50'] || f['downed_4']
           || f['downed_13'] || f['downed_266'] || f['downed_35'] || f['downed_222'] || f.hardMode);

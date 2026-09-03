@@ -255,6 +255,9 @@ const PLACEMENT_BLOCKED = idsByVanillaSheet(
 /** KillTile 豁免格(cs:111 `type != 379`)与压板探测(cs:107 `type == 135`) */
 const BUBBLE = idsByVanillaSheet(379);
 const PLATE = idsByVanillaSheet(135);
+/** ★IIIII223：KillTile 尾冰族灌水臂成员（=HalfBrickPass.ICE_WATER_TAIL 同表：
+ *  TileID.Sets.Ices{161,200,163,164}∪{147 Snow,224 PurpleIce},cs:64418-64419） */
+const LANE_ICE_WATER_TAIL = idsByVanillaSheet(147, 224, 161, 200, 163, 164);
 /** WorldGen.shimmerSafetyDistance = 150(cs:4104);轨道用其半宽盒判断(cs:442) */
 const SHIMMER_SAFETY = 150;
 
@@ -698,6 +701,37 @@ export class TrackGenerator {
     //   x2090 巷 (2090,635) t51 wall62 实证）,缺掷=±1 掷位漂移→轨巷 ph 重掷位
     //   重排→杀带分歧（#097 T 簇 30 格真凶域,帧维+杀流双仪定谳）。
     if (sheet === 51 && st.wall[i] === 62) rng.int(0, 3);
+    // ★IIIII223（2026-09-03）：KillTile 尾液体灌入族三臂（1457 cs:64405-64420 ≡1458
+    //   同位；=HalfBrickPass.killTile 主副本/FinalCleanupPass 巷外副本同源——**四副本
+    //   纪律**：本巷内副本曾整缺，IIII187 只补了 FinalCleanup 大循环副本）。
+    //   原版序：51/62 掷（上）→ tile.active(false)+frameX/Y=-1（cs:64398-64403）→
+    //   三臂互斥 else-if（读 tile.type,型清零前）→ type=0 → SquareTileFrame。JS 侧
+    //   setTileSilent 即 deactivate+清型,故三臂置其前、squareFrameTrack 前与主副本同构。
+    //   ①58 狱石 于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128（无掷；文件头
+    //     「轨道巷不可达」旧备案撤銷——1:1 补全,长轨锚窗可达 h-230 邻域）
+    //   ②230 脆蜂蜜块 && Main.getGoodWorld → Next(2)==0 灌岩浆 128。短路序
+    //     type==230 && getGoodWorld 先于 Next ⇒ **每个 230 击杀无条件占 1 流位**
+    //     （掷值只决定灌否）。GFB getGoodWorld=true 全程活性——轨巷穿脆蜂蜜块即触发
+    //     （XCVII 移交刀②；vanilla 侧 83 格 230>air+LAVA 128 家族即本臂写面）。
+    //   ③冰族 LANE_ICE_WATER_TAIL && getGoodWorld && remixWorld && !drunkWorld →
+    //     Next(2)==0 灌水 64——GFB drunkWorld=true ⇒ 第三腿恒假（掷不消耗）,remix 链
+    //     无 getGoodWorld 同惰性;按原文补全防未来种子组合（与主副本同注）。
+    //   灌液体写在 setTileSilent 之前（liquid 通道不经 setTileSilent,主副本同法）。
+    if (sheet === 58 && y > st.h - 200) {
+      st.liquid[i] = 128;
+      st.liquidType[i] = 2;
+    } else if (sheet === 230 && !!this.gs.seedFlags.getGoodWorld) {
+      if (rng.nextInt(2) === 0) {
+        st.liquid[i] = 128;
+        st.liquidType[i] = 2;
+      }
+    } else if (LANE_ICE_WATER_TAIL.has(sheet) && !!this.gs.seedFlags.getGoodWorld
+      && !!this.gs.seedFlags.remix && !this.gs.seedFlags.drunkWorld) {
+      if (rng.nextInt(2) === 0) {
+        st.liquid[i] = 64;
+        st.liquidType[i] = 1;
+      }
+    }
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
   }

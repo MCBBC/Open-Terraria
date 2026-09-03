@@ -4,7 +4,9 @@
 // （Tile.cs:591 HasTile 位，含已致动格）与 `nactive()` 两口径已分家——active() 读取点
 // 一律 hasTileAt，nactive()/active+!inActive 点保持 activeAt。此前全步以 nactive 代读
 // active()，已致动格被当空气（漏标/锚位丢失/致动格可被当空位）。幽灵格（flags=0,
-// type≠0，生成期 active(false) 残型）两口径同为"不在场"，不受本次影响。
+// type≠0，生成期 active(false) 残型）在 active()/nactive() 两口径下同为"不在场"——
+// ★但裸 type 读的消费者（EmptyTileCheck :31759 先 active() 后 type、Torch 17×17 去重
+// :2837 裸 type）须逐点对原版口径，不适用此句（红蓝对抗 F1 修正 emptyTileCheck）。
 //
 // 权威源码对照（行号 = Terarria1456 反编译）：
 //   - 策略链总调度 SmartCursorLookup            SmartCursorHelper.cs:61-165
@@ -51,6 +53,14 @@ const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);
 
 /** TileID.cs:243 Platforms（平台族 = tileSolidTop） */
 const PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+
+/** Main.tileTable 全表（Main.cs:7018-7100 77 条赋值——桌面/工作台/家具承重族；
+ *  Step_Boulders :917 支撑谓词消费，红蓝对抗 F4 收编） */
+const TILE_TABLE_SHEETS = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392,
+  393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558,
+  559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632,
+  640, 643, 644, 645, 710]);
 
 /** TileID.cs:401 Torches（tile 级：只有 4） */
 const TORCH_TILES = new Set([4]);
@@ -223,7 +233,16 @@ export function smartCursorArrowAllowed(st: TileStore, x: number, y: number, dir
   if (!st.inBounds(nx, ny)) return true;
   // Main.cs:47423 `(num2 >= 0 && !tile.active()) || …IsReplaceableBlock`——active() 口径
   if (!hasTileAt(st, nx, ny)) return true;
-  return tileCutType(st.type[st.idx(nx, ny)]);
+  const type = st.type[st.idx(nx, ny)];
+  const sheet = sheetOf(type);
+  // PlaceThing_IsReplaceableBlock（Player.cs:40066-40074）：
+  // (!tileCut || 484 || 711) && 非 drip 族 {373-375,461,709} → BreakableWhenPlacing；否则 true。
+  // 曾仅 tileCut 口径（比原版窄——BWP 族树苗 20 原版画箭头我方不画；红蓝对抗 F2）。
+  if ((!tileCutType(type) || sheet === 484 || sheet === 711)
+    && sheet !== 373 && sheet !== 374 && sheet !== 375 && sheet !== 461 && sheet !== 709) {
+    return breakableWhenPlacing(sheet);
+  }
+  return true;
 }
 
 const activeAt = (st: TileStore, x: number, y: number): boolean => st.isActive(x, y);
@@ -274,13 +293,31 @@ function emptyTile(env: SmartCursorEnv, x: number, y: number, ignoreTiles = fals
   return true;
 }
 
-/** WorldGen.EmptyTileCheck：矩形内全部为空，或恰为 ignoreType 的树苗 */
+/** WorldGen.EmptyTileCheck（WorldGen.cs:31735-31822）1:1：矩形逐格——
+ *  ① :31759-31763 `!tile.active() → continue`（★幽灵残型格 flags=0,type≠0 = 空，
+ *  曾以裸 type 读当占位——红蓝对抗 F1 证伪批头注"幽灵格不受影响"断言）；
+ *  ② :31762-31781 ignoreID switch：-1→占位即 false；11/71→仅同类放行；
+ *  ③ ignoreID ∈ CommonSapling（20/590/595/615，:31753-31757 flag）时非同种格按
+ *  :31783-31817 植物豁免表放行；④ 其余（含 ignoreType 同族树苗落穿）视为空。 */
+const EMPTYTILECHECK_PLANTS = new Set([3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84,
+  110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655]);
 function emptyTileCheck(st: TileStore, x1: number, x2: number, y1: number, y2: number, ignoreType: number): boolean {
+  const flag = COMMON_SAPLING.has(ignoreType);          // :31753-31757
   for (let x = x1; x <= x2; x++) {
     for (let y = y1; y <= y2; y++) {
-      if (!st.inBounds(x, y)) return false;
-      const i = st.idx(x, y);
-      if (st.type[i] !== 0 && sheetOf(st.type[i]) !== ignoreType) return false;
+      if (!st.inBounds(x, y)) return false;             // :31750 越界 false
+      if (!hasTileAt(st, x, y)) continue;               // :31759 active()
+      const sheet = sheetOf(st.type[st.idx(x, y)]);
+      if (ignoreType === -1) return false;              // :31764-31766
+      if (ignoreType === 11 || ignoreType === 71) {     // :31767-31781
+        if (sheet !== ignoreType) return false;
+        continue;
+      }
+      if (flag && !COMMON_SAPLING.has(sheet)) {         // :31783-31785
+        if (!EMPTYTILECHECK_PLANTS.has(sheet)) return false;
+        continue;
+      }
+      // 落穿（ignoreType 同族树苗在场/非特判 id）= 视为空
     }
   }
   return true;
@@ -640,11 +677,10 @@ export class SmartCursor {
         if ((PICKAXE_PRIORITY_OVERRIDE[sheet] ?? 0) > 0) targets.push({ x: i, y: j }); // :2304-2312
       }
     }
-    // :2315-2327（反编译此处 _targets2 为空集——保留最高优先级过滤语义：本表全为 1，无过滤）
-    let maxPri = 0;
-    for (const t of targets) maxPri = Math.max(maxPri, PICKAXE_PRIORITY_OVERRIDE[sheetOf(st.get(t.x, t.y))] ?? 0);
-    const filtered = targets.filter((t) => (PICKAXE_PRIORITY_OVERRIDE[sheetOf(st.get(t.x, t.y))] ?? 0) >= maxPri);
-    const point = nearestOf(filtered, env.mouse);
+    // :2325-2337 原版 `_targets2` 为空集、foreach 空集 = 死代码【不过滤】——全部
+    //  priority>0 目标都保留（红蓝对抗 F5：曾按 ≥maxPri 自造过滤，现表全 1 时恒等价、
+    //  表内出现非 1 优先级即错删低优目标，按原版删过滤）
+    const point = nearestOf(targets, env.mouse);
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
       set(point.x, point.y); // :2341-2345
     }
@@ -724,8 +760,9 @@ export class SmartCursor {
       if (r.col.x !== item2.x || r.col.y !== item2.y) targets.push(r.col);
       const t = st.get(r.col.x, r.col.y);
       if (!inActiveAt(st, r.col.x, r.col.y) && activeAt(st, r.col.x, r.col.y)
-        && tileSolidType(t) && !tileSolidTopType(t)) {
-        targets.push(r.col); // :2482-2485
+        && tileSolidType(t) && !tileSolidTopType(t)
+        && !grappleTargets.some((p) => p.x === r.col.x && p.y === r.col.y)) {
+        targets.push(r.col); // :2492-2495（尾臂 !grappleTargets.Contains(col)——红蓝对抗 F3 补）
       }
       pi++;
       endpoints.shift();
@@ -1241,13 +1278,17 @@ export class SmartCursor {
     const cs = sem.createTileSheet;
     if (cs == null || !BOULDERS.has(cs) || taken()) return;
     pumpkinOrBoulderScan(env, reach, set, (st, i, j) => {
-      // :898-925 下方两格 nactive 无坡无半砖、可承重、上方 2×2 无阻挡
+      // :898-925 下方两格 nactive 无坡无半砖、可承重（tileSolid ∪ tileTable 全表
+      //  Main.cs:7018-7100 77 条——曾以"TILE_DEFS 已注册"近似=任何件都承重）、
+      //  非 tileNoAttach（:921）；上方 2×2 无阻挡。
+      //  台账：:941-949 另有 255 玩家 Hitbox∩32×32 净空检查未移植（需 env 玩家盒列表）。
       for (const ox of [0, 1]) {
         const bx = i + ox, by = j + 1;
         if (!st.inBounds(bx, by) || !activeAt(st, bx, by)) return false;
         const t = st.get(bx, by);
+        const sh = sheetOf(t);
         if (st.slope[st.idx(bx, by)] > 0 || st.half[st.idx(bx, by)] > 0) return false;
-        if (!tileSolidType(t) && !TILE_DEFS[t]) return false;
+        if ((!tileSolidType(t) && !TILE_TABLE_SHEETS.has(sh)) || tileNoAttachType(sh)) return false; // :917/:921
       }
       for (let k = i; k <= i + 1; k++) {
         for (let l = j - 1; l <= j; l++) {

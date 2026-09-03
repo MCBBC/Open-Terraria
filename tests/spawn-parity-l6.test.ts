@@ -310,17 +310,22 @@ describe('L6 spawn parity（骷髅商影烛门 NPC.cs:5007-5010）', () => {
 });
 
 describe('L6 spawn parity（仙女近旁刷怪率 GetSpawnRate:745）', () => {
-  it('fairyHelpfulActive → rate×1.2 / max×0.8（中性值下精确断言）', () => {
+  it('isNearFairy（距离窗 1920 内仙女）→ rate×1.2 / max×0.8；fairyHelpfulActive 不再驱动窗（2026-09-03 双谓词解耦）', () => {
     const { w, sp } = grassWorld();
     (sp as unknown as { rateRng: () => number }).rateRng = () => 0.75;
     const args = [100 * 16, 0, false, 800, 100 * 16] as const;
-    sp.getSpawnRate(...args);
-    sp.fairyHelpfulActive = true;
+    // 窗内仙女（Player.isNearFairy Player.cs:54494-54506：Distance < NPC.sWidth=1920px）
+    sp.isNearFairy = true;
     const withFairy = sp.getSpawnRate(...args);
-    sp.fairyHelpfulActive = false;
+    sp.isNearFairy = false;
     const base = sp.getSpawnRate(...args);
     expect(withFairy.spawnRate).toBe(Math.floor(base.spawnRate * 1.2));
     expect(withFairy.maxSpawns).toBe(Math.floor(base.maxSpawns * 0.8));
+    // 旧字段不再驱动刷怪率窗（跟随时仙女链关窗门 AnyHelpfulFairies 是另一谓词）
+    sp.fairyHelpfulActive = true;
+    const withHelpful = sp.getSpawnRate(...args);
+    expect(withHelpful.spawnRate).toBe(base.spawnRate);
+    expect(withHelpful.maxSpawns).toBe(base.maxSpawns);
     void w;
   });
 });

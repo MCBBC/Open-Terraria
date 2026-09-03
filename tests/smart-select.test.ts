@@ -465,3 +465,26 @@ describe('wetCollision（Collision.cs:1575-1656）', () => {
     expect(wetCollision(mkCase(false, true), X, Y, 22, 28)).toBe(false);
   });
 });
+
+// ===================== 红蓝对抗批(A 路 findings 修复)回归 =====================
+describe('GetAvailableToolRanges 射程 TB = 首件工具 tileBoost（红蓝对抗 A-F1）', () => {
+  it('铜镐 tileBoost=-1 → 盒 x=4：5 格外指向泥块不出镐策略（原版落空走火把）', () => {
+    const st = mkSt();
+    st.setTile(66, 40, T.DIRT);
+    const slots = mkSlots([0, torch()], [3, { ...pick(), tileBoost: -1 }]);
+    const ss = new SmartSelect();
+    const env = mkEnv(st, { slots, selectedItem: 0, ...mouseAt(66, 40) });
+    expect(ss.lookup(env)).toBe(0);            // 出盒 → 策略 0 火把,不切镐
+    expect(ss.strategy).toBe(STRATEGY.TORCH);
+  });
+
+  it('对照 tileBoost=0 → 盒 x=5：同格出镐策略 3', () => {
+    const st = mkSt();
+    st.setTile(66, 40, T.DIRT);
+    const slots = mkSlots([0, torch()], [3, pick()]);
+    const ss = new SmartSelect();
+    const env = mkEnv(st, { slots, selectedItem: 0, ...mouseAt(66, 40) });
+    expect(ss.lookup(env)).toBe(3);
+    expect(ss.strategy).toBe(STRATEGY.PICK);
+  });
+});

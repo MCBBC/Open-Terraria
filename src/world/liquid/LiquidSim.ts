@@ -170,6 +170,8 @@ export class LiquidSim {
   static r30Sink: ((x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void) | null = null;
   /** ★IIIII213：回灌决策观测槽（仪具注入；生产 null 零开销）——(k, x, y, accepted, amt, nl) */
   static drainSink: ((k: number, x: number, y: number, accepted: boolean, amt: number, nl: number) => void) | null = null;
+  /** ★IIIII213：下灌观测槽（仪具注入；生产 null 零开销）——(x, y, n, src, dst) */
+  static pourSink: ((x: number, y: number, n: number, src: number, dst: number) => void) | null = null;
   /** WWWWWWW 批：盒内逐 Update 分支签名迹（与 rig SW_TRKBOX 同位标；生产 null 关闭零开销） */
   static trkProbe: ((iter: number, x: number, y: number, sig: number, amtA: number, ltyA: number, kill: number, delay: number, pre: { amt: number; lty: number }) => void) | null = null;
   static trkBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
@@ -1017,9 +1019,7 @@ export class LiquidSim {
     {
       const bi = this.idx(x, y + 1);
       const belowAmt = st.liquid[bi];
-      // ★IIIII213：vanilla cs:569 通行谓词=(!nactive||!solid||solidTop)——nactive 含
-      // checking 半边 ⇒ 列表成员(checking=1)恒可通行；blocksLiquid 缺该半边
-      const belowBlocks = y + 1 >= h ? true : !this.passableLq(x, y + 1);
+      const belowBlocks = y + 1 >= h ? true : this.blocksLiquid(x, y + 1);
       // ★G2#98：下灌门逐语句取 tile5.liquidType() 现场值（Liquid.cs:568 等）；
       //   Lava/Honey/ShimmerCheck 归零把本格改成水型位后，零转移的 pour 支照样
       //   进入并无条件 addWater(x,y+1)+skip 双标+左右唤醒（g 链 it131 wrap 带
@@ -1035,6 +1035,7 @@ export class LiquidSim {
         if (!flag) st.liquid[i5] -= t;
         st.liquid[bi] += t;
         st.liquidType[bi] = myTypeLive;
+        LiquidSim.pourSink?.(x, y, t, st.liquid[i5], st.liquid[bi]);
         this.addWater(x, y + 1);
         this.skip[bi] = 1;
         this.skip[i5] = 1;
@@ -1072,15 +1073,14 @@ export class LiquidSim {
     const lq = st.liquid[il], rq = st.liquid[ir];
     // flag1 左可流 / flag2 右可流 / flag3 左 2 格延伸 / flag4 右 2 格延伸
     let f1 = true, f2 = true, f3 = true, f4 = true;
-    // ★IIIII213：vanilla cs:606-644 同 nactive 通行谓词族（checking=1 的邻格恒不阻塞）
-    if (!this.passableLq(x - 1, y)) f1 = false;
+    if (this.blocksLiquid(x - 1, y)) f1 = false;
     else if (lq > 0 && st.liquidType[il] !== myType) f1 = false;
-    else if (!this.passableLq(x - 2, y)) f3 = false;
+    else if (this.blocksLiquid(x - 2, y)) f3 = false;
     else if (st.liquid[im2] === 0) f3 = false;
     else if (st.liquidType[im2] !== myType) f3 = false;
-    if (!this.passableLq(x + 1, y)) f2 = false;
+    if (this.blocksLiquid(x + 1, y)) f2 = false;
     else if (rq > 0 && st.liquidType[ir] !== myType) f2 = false;
-    else if (!this.passableLq(x + 2, y)) f4 = false;
+    else if (this.blocksLiquid(x + 2, y)) f4 = false;
     else if (st.liquid[ip2] === 0) f4 = false;
     else if (st.liquidType[ip2] !== myType) f4 = false;
     let num1 = 0;
@@ -1091,10 +1091,10 @@ export class LiquidSim {
       if (f3 && f4) {
         // ±3 延伸判定（Liquid.cs:436-449）
         let f5 = true, f6 = true;
-        if (!this.passableLq(x - 3, y)) f5 = false;
+        if (this.blocksLiquid(x - 3, y)) f5 = false;
         else if (st.liquid[im3] === 0) f5 = false;
         else if (st.liquidType[im3] !== myType) f5 = false;
-        if (!this.passableLq(x + 3, y)) f6 = false;
+        if (this.blocksLiquid(x + 3, y)) f6 = false;
         else if (st.liquid[ip3] === 0) f6 = false;
         else if (st.liquidType[ip3] !== myType) f6 = false;
         if (f5 && f6) {
@@ -1507,22 +1507,6 @@ export class LiquidSim {
 
   // ================= DelWater（Liquid.cs:1117-1213） =================
 
-  /** ★IIIII213：DelWater 域的 vanilla 通行谓词（cs:1512/1517/1532/1536 字面）
-   *  `!X.nactive() || !Main.tileSolid[X.type] || Main.tileSolidTop[X.type]`
-   *  ——nactive()=active∧!checkingLiquid ⇒ **checking=1（在列表/在缓冲）的格恒可通行**，
-   *  与 blocksLiquid（无 checking 半边）在此域语义不同：沉降轮内被扫格/列表邻格
-   *  带 checking=1，vanilla 视为可通行而 blocksLiquid 按实心墙处理。
-   *  （blocksLiquid 的 inActive 半边在本谓词不存在——vanilla 此处字面无该位；
-   *  gen 期无致动格=等价。） */
-  private passableLq(x: number, y: number): boolean {
-    const st = this.world.store;
-    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
-    const i = this.idx(x, y);
-    if (!st.flags[i]) return true;                       // !active()
-    if (this.checking[i]) return true;                   // !nactive() 的 checking 半边
-    return this.solidNP[st.type[i]] !== 1;               // !solid || solidTop
-  }
-
   private delWater(l: number) {
     const st = this.world.store;
     const e = this.liquids[l];
@@ -1536,18 +1520,14 @@ export class LiquidSim {
       if (st.liquid[il] < 2) st.liquid[il] = 0; else this.addWater(x - 1, y);
       if (st.liquid[ir] < 2) st.liquid[ir] = 0; else this.addWater(x + 1, y);
     } else if (amt < 20) {
-      // 水膜抹除：邻格更低或下方不满（Liquid.cs:1138-1142）——★IIIII213 通行谓词
-      // 换 passableLq（nactive 语义：checking=1 的邻格恒可通行）
+      // 水膜抹除：邻格更低或下方不满（Liquid.cs:1138-1142）
       const lq = st.liquid[il], rq = st.liquid[ir], dq = st.liquid[id];
-      if ((lq < amt && this.passableLq(x - 1, y)) ||
-          (rq < amt && this.passableLq(x + 1, y)) ||
-          (dq < 255 && this.passableLq(x, y + 1))) {
+      if ((lq < amt && !this.blocksLiquid(x - 1, y)) ||
+          (rq < amt && !this.blocksLiquid(x + 1, y)) ||
+          (dq < 255 && !this.blocksLiquid(x, y + 1))) {
         st.liquid[i5] = 0;
       }
-    } else if (st.liquid[id] < 255 && this.passableLq(x, y + 1) && !this.stuck && this.passableLq(x, y)) {
-      // ★IIIII213：self 项 passableLq(x,y)——被扫格恒 checking=1 ⇒ vanilla 字面恒真
-      // （nactive()=active∧!checking 对列表成员恒 false）；旧 blocksLiquid 对
-      // 水-在-实心-格（remix #98 (3419,857) 族）误判阻塞 ⇒ 误出列（vanilla 留列）。
+    } else if (st.liquid[id] < 255 && !this.blocksLiquid(x, y + 1) && !this.stuck && !this.blocksLiquid(x, y)) {
       e.kill = 0; // 下方未满：留在列表继续流（Liquid.cs:1143-1147）
       return;
     }
@@ -1556,8 +1536,8 @@ export class LiquidSim {
       st.liquidType[i5] = 1; // ★G2#98：vanilla DelWater 尾 `tile4.liquidType(0)` 同为水型位回写（Liquid.cs:1576）
     } else {
       const rq = st.liquid[ir], lq = st.liquid[il];
-      if (rq > 0 && rq < 250 && this.passableLq(x + 1, y) && st.liquid[i5] !== rq) this.addWater(x + 1, y);
-      if (lq > 0 && lq < 250 && this.passableLq(x - 1, y) && st.liquid[i5] !== lq) this.addWater(x - 1, y);
+      if (rq > 0 && rq < 250 && !this.blocksLiquid(x + 1, y) && st.liquid[i5] !== rq) this.addWater(x + 1, y);
+      if (lq > 0 && lq < 250 && !this.blocksLiquid(x - 1, y) && st.liquid[i5] !== lq) this.addWater(x - 1, y);
       if (st.liquidType[i5] === 2) {
         this.lavaCheck(x, y);
         // 岩浆 3×3 烧除（1456 DelWater L1557-1587）：草族(2/23/109/199/477/492)→空气；

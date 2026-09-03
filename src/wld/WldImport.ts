@@ -809,6 +809,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         ice: wld.iceBackStyle, jungle: wld.jungleBackStyle, hell: wld.hellBackStyle,
         mushroom: wld.bgMushroom, underworld: wld.bgUnderworld,
         bg10: wld.bg10, bg11: wld.bg11, bg12: wld.bg12,
+        desert: wld.desertBG, ocean: wld.oceanBG,
       },
     },
     // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前

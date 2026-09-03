@@ -292,10 +292,10 @@ describe('配饰（SnapStrike 三味脉冲环带+充能三连+弧线引矢家族
       expect(r.scax).toBeCloseTo(-4 / 30, 12);              // ScaleAcceleration=vector/num（:679/:708）
       expect(r.scay).toBe(0);
       expect(Math.hypot(r.vx, r.vy)).toBeCloseTo(21, 12);   // 速度幅=dir×14×1.5（:677/:706+恒真支）
-      expect(Math.hypot(r.ax, r.ay)).toBeCloseTo(14 / 30, 12);  // APF=−Velocity/num【赋值序在 ×1.5 前】
-      expect(r.ax / r.vx).toBeLessThan(0);                  // 减速弧（方向相反）
+      expect(Math.hypot(r.ax!, r.ay!)).toBeCloseTo(14 / 30, 12);  // APF=−Velocity/num【赋值序在 ×1.5 前】
+      expect(r.ax! / r.vx).toBeLessThan(0);                 // 减速弧（方向相反）
     }
-    expect(red.scaleX / red.scaleY).toBeCloseTo(8.8 / 2.2, 12);
+    expect(red.scaleX! / red.scaleY!).toBeCloseTo(8.8 / 2.2, 12);
     expect(b.dusts.filter((d) => d.type === 6).length).toBe(4);          // ★⑨批重构（2026-09-03）：d6 对只挂金带内（:722-730 i 循环 ×2,每轮 ± 金臂各一粒）
     const before2 = fadingParticles.count;
     const c = mkGame();

@@ -1567,6 +1567,14 @@ function vanillaLifeCrystals({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenySome(gs.seedFlags)) return;                // ★IIIII44 cs:16864
+  // ★IIIII223（2026-09-03）：getGood 雪块 56 非实心翻转（1457 cs:16871-16872
+  //   ≡1458 同位，原位=errorWorld 支后、NotTheBees 支前）：`if (getGoodWorldGen)
+  //   Main.tileSolid[56] = false;`——GFB 时间线 LifeCrystals false→MicroBiomes 头
+  //   true（cs:21072,IIIII220 已接）→尾 false（cs:21420,已接）；本臂接线后三段闭环。
+  //   pass 97 之前读窗（Statues/BuriedChests/SurfaceChests/JungleShrines/WaterChests/
+  //   SpiderCaves…）雪块按非实心裁决;普通种子 getGood=false 零行为差。曾缺=
+  //   GenSolid 文末「特殊种子专属翻转(不接线)」备案末笔清偿。
+  if (gs.seedFlags.getGoodWorld) flipGenSolid([56], false);
   // ★UUUUUU：NotTheBees() 槽头（LifeCrystals cs:16861——errorWorld/getGood 门后首掷位）
   if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
   runLifeCrystalsPass(store, rng, gs);

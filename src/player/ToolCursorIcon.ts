@@ -70,7 +70,9 @@ export const AMMO_ID_SOLUTION = 780;
 export const TILE_BOOST_BY_VID: Readonly<Record<number, number>> = {
   85: 3,             // case 85 :2399（createTile 214 地雷，+= 3）
   196: -1,           // 木锤 :3806
-  509: 20, 510: 20, 849: 20, 850: 20, 851: 20,   // 电路族 :7444/:7457/:11349(:11326 case 849 同支)/:11362
+  509: 20, 510: 20, 850: 20, 851: 20,   // 电线钳/蓝扳手/绿扳手 :7444/:7457/:11349/:11362
+                     // ★849 致动器 :11326-11339 自有函数体【无 tileBoost】=0——曾误读
+                     // :11326 为落穿 850 支落 20（红蓝对抗 C-F1,已逐行核实 case 体到 break）
   965: 3,            // :12522
   1230: 1, 1231: 0, 1232: 0, 1233: 1, 1234: 1,   // :15211-15287 各 ++；1231/1232 属钻头族尾修 -1
   1262: 0,           // :15673 ++ → 尾修 :48902 明列 type==1262 再 -- → 0
@@ -79,7 +81,9 @@ export const TILE_BOOST_BY_VID: Readonly<Record<number, number>> = {
   1506: 3, 1507: 3, 1521: 3,   // :18411/:18430/:18606
   2176: -1,          // :22212
   2340: 5, 2492: 2, 2739: 2,   // 矿车轨道 :23515/:24211/:26162
-  2772: 4, 2773: 2, 2774: 3, 2775: 4, 2776: 4,   // :26485-26564；2773/2774 属锯/钻族尾修 -1
+  2772: 4, 2773: 3, 2774: 2, 2775: 4, 2776: 4,   // :26485-26564；★2773(锯,IsChainsaw)
+                     // += 4(:26506)→尾修-1=3、2774(钻,IsDrill)+= 3(:26527)→-1=2——曾互换
+                     // （红蓝对抗 C-F2）
   2798: 11,          // 钻头控制装置 DCU :26740
   2996: 3,           // :27575
   3032: 2,           // 超吸海绵 :28084
@@ -90,7 +94,8 @@ export const TILE_BOOST_BY_VID: Readonly<Record<number, number>> = {
   3738: 3,           // :33117
   4820: 2, 4872: 2,  // 无底岩浆桶/岩浆海绵 :39479/:39674
   5302: 2, 5303: 2, 5304: 3,   // :42071/:42083/:42095
-  5321: 3, 5322: 3, 5323: 3, 5324: 3, 5329: 3, 5330: 3,   // :42258 共用 label（落穿 case 5326 体无 tileBoost）
+  5324: 3, 5329: 3, 5330: 3,   // :42252-42259 三连 label 共用体；★5321/5322/5323 自有体
+                     // （:42231/:42238/:42248）无 tileBoost=0——曾误落 3（红蓝对抗 C-F3）
   5364: 2,           // :42563
   5464: 3, 5481: 3,  // :43119/:43197
   // 尾段钻头/链锯修（:48902-48914）后为 -1 的成员（IsDrill {388,1231,385,386,2779,
@@ -185,6 +190,20 @@ export interface ToolCursorIconEnv {
   hoverEnabled?: boolean;
   /** 背包槽语义窗 0-57（54-58 弹药位；Game 侧复用缓冲逐 tick 重填） */
   slotSem?: SlotSemArray;
+  /** 手持物原版 id（油漆四支/兔炮支按 vid 分派,红蓝对抗 C-F4） */
+  vid?: number;
+  /** 手持火把族（ItemID.Sets.Torches——兔炮支 :42112 门;Game 侧查表传入） */
+  isTorch?: boolean;
+  /** 铲 4711（:45974-45979 specialToolUsageSettings.IsAValidTool=true,无
+   *  UsageCondition → 挖掘图标支=纯射程门;红蓝对抗 C-F6） */
+  shovel?: boolean;
+  /** 目标格 tile 语境（油漆四支/兔炮支的 tile 条件门;Game 侧从 TileStore 目标格现读）。
+   *  painted/paintedWall = 逐支 `color()>0 ∪ invisibleBlock/ fullbrightBlock`（含涂层位）
+   *  的并集预算；sheet/frameX 供 LongMoss 184 与大炮 209 frameX/72<3 */
+  targetTile?: {
+    active: boolean; sheet: number; frameX: number; wall: number;
+    painted: boolean; paintedWall: boolean;
+  };
 }
 
 export interface ToolCursorIconResult {
@@ -261,10 +280,11 @@ export function toolCursorIcon(env: ToolCursorIconEnv): ToolCursorIconResult {
     enabled = true; cacheUpdate = true;
   }
   // ItemCheck_UseMiningTools（:45971-46011）：
-  //   :45982-45985 非工具早退 / :45986 IsTargetTileInItemRange / :45987-45990 noBuilding
+  //   :45974-45982 非工具早退（铲 4711 = IsAValidTool 也放行,红蓝对抗 C-F6）/
+  //   :45986 IsTargetTileInItemRange / :45987-45990 noBuilding
   //   / :46003-46006 !flag 早退 / :46007-46011 置位+缓存（GamepadDisableCursorItemIcon
   //   键鼠恒 false，Main.cs:2686-2694，不接线）
-  if (env.pick > 0 || env.axe > 0 || env.hammer > 0) {
+  if (env.pick > 0 || env.axe > 0 || env.hammer > 0 || env.shovel === true) {
     let flag = hitTool();
     if (noBuilding) flag = false;
     if (flag) {
@@ -272,16 +292,40 @@ export function toolCursorIcon(env: ToolCursorIconEnv): ToolCursorIconResult {
     }
   }
   // PlaceThing_Tiles（:40033-40040，TileTargetDesired 门 :40035）/
-  // PlaceThing_Walls（:39908-39919）
-  if (env.createTile && desired && hitPlace()) {
+  // PlaceThing_Walls（:39908-39919）——调用点 :39904-39907
+  // `if (!noBuilding) { PlaceThing_Tiles; PlaceThing_Walls; }` 整支封死
+  //（红蓝对抗 C-F5：曾无门且测试把反相钉成"正确"）
+  if (env.createTile && desired && !noBuilding && hitPlace()) {
     enabled = true;
   }
-  if (env.createWall && hitPlace()) {
+  if (env.createWall && !noBuilding && hitPlace()) {
     enabled = true;
   }
   // makeNPC 小动物释放族（:43951-43956）
   if (env.makeNPC && hitTool()) {
     enabled = true; cacheUpdate = true;
+  }
+  // 油漆四支 + 兔炮支（红蓝对抗 C-F4 补齐,渲染层油漆子图标因此由死代码转活）：
+  //   Paintbrush :42230-42240（1071/1543 + 射程 + tile.active()）/
+  //   PaintRoller :42212-42222（1072/1544 + 射程 + tile.wall>0）/
+  //   PaintScraper :42129-42146（IsPaintScraper + 射程;TryScraping :42194-42201
+  //   `(wall>0&&墙彩) ∨ (active&&块彩)`、LongMoss :42143-42149 type==184）/
+  //   CannonBall :42112-42126（火把 + 大炮 209 frameX/72<3）。TB=tileBoost+blockRange;
+  //   四支均不进缓存（缓存归面:Player.cs 全文仅 4 处 CacheUpdate,无油漆/兔炮）
+  const tt = env.targetTile;
+  if (tt) {
+    const hitPaint = inTileBounds(env.actor, env.reachBase.x + env.tileBoost + env.blockRange,
+      env.reachBase.y + env.tileBoost + env.blockRange, env.target);
+    if (hitPaint) {
+      const vid = env.vid ?? 0;
+      if ((vid === 1071 || vid === 1543) && tt.active) enabled = true;
+      if ((vid === 1072 || vid === 1544) && tt.wall > 0) enabled = true;
+      if ((vid === 1100 || vid === 1545)
+        && ((tt.wall > 0 && tt.paintedWall) || (tt.active && tt.painted))) enabled = true;
+      if ((vid === 1100 || vid === 1545) && tt.active && tt.sheet === 184) enabled = true;
+      if (env.isTorch === true && tt.active && tt.sheet === 209
+        && Math.floor(tt.frameX / 72) < 3) enabled = true;
+    }
   }
   return { enabled, cacheUpdate, iconVid, push };
 }

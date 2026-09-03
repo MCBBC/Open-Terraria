@@ -509,3 +509,55 @@ describe('谓词口径：active()=HasTile 位 vs nactive()（对账批）', () =
     expect(run(env)).toBeNull();
   });
 });
+
+// ===================== 红蓝对抗批(B 路 findings 修复)回归 =====================
+describe('EmptyTileCheck 1:1（WorldGen.cs:31735-31822，红蓝对抗 F1）', () => {
+  const acorn = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[27]]], tool: null });
+  /** 橡实候选布景：坑位 (103,94)，下方 (102..104,95) 草地（:2106-2135 keep 过滤要求
+   *  下方邻列同类地面），净空箱 = (101..105, 81..94) */
+  function acornStage(st: TileStore, boxTile: number | null) {
+    st.setTile(102, 95, T.GRASS);
+    st.setTile(103, 95, T.GRASS);
+    st.setTile(104, 95, T.GRASS);
+    if (boxTile != null) st.setTile(102, 90, boxTile);
+  }
+  const runAcorn = (st: TileStore) => {
+    const sc = new SmartCursor();
+    sc.wanted = true;
+    sc.lookup(mkEnv(st, mouseAt(103, 94), acorn()));
+    return sc;
+  };
+
+  it('净空箱内幽灵残型格 = 空（:31759 !active()→continue），候选不再被吞', () => {
+    const st = new TileStore(W, H);
+    acornStage(st, T.STONE);
+    st.flags[st.idx(102, 90)] = 0;               // 原版 active(false) 残型
+    const sc = runAcorn(st);
+    expect(sc.showing).toBe(true);               // 曾被幽灵格当占位吞掉
+    expect(sc.x).toBe(103); expect(sc.y).toBe(94);
+  });
+
+  it('净空箱内普通植物（草丛 sheet3）放行（:31783 植物豁免表，ignoreID=20 树苗族）', () => {
+    const st = new TileStore(W, H);
+    acornStage(st, TILE_BY_KEY['tallgrass']!);   // sheet 3 ∈ 豁免表
+    expect(runAcorn(st).showing).toBe(true);
+  });
+
+  it('净空箱内实心块仍拒绝（门不虚开）', () => {
+    const st = new TileStore(W, H);
+    acornStage(st, T.STONE);                     // 实心在场
+    expect(runAcorn(st).showing).toBe(false);
+  });
+});
+
+describe('方向箭头显示门 = 全式 IsReplaceableBlock（Player.cs:40066-40074，红蓝对抗 F2）', () => {
+  it('tileCut 件照画；树苗（sheet20，tileCut ∩ 原版 Replaceable 落穿支）照画；实心不画', () => {
+    const st = new TileStore(W, H);
+    st.setTile(110, 100, TILE_BY_KEY['tallgrass']!);   // tileCut → 落穿 return true
+    expect(smartCursorArrowAllowed(st, 109, 100, { x: 1, y: 0 })).toBe(true);
+    st.setTile(110, 103, TILE_BY_KEY['acorn_sapling']!); // sheet 20 树苗
+    expect(smartCursorArrowAllowed(st, 109, 103, { x: 1, y: 0 })).toBe(true);
+    st.setTile(110, 106, T.STONE);                     // 实心非可替换 → BWP(石)=false
+    expect(smartCursorArrowAllowed(st, 109, 106, { x: 1, y: 0 })).toBe(false);
+  });
+});

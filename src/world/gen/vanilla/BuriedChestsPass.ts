@@ -1193,6 +1193,15 @@ function placeBuriedChestInner(
     //   曾漏（loot/掷流全对但帧写 style1）→ #101 DeadMans 金箱 style 过滤错位
     //   （(1546,552) 等四箱金标 sty11 vs 本仓 sty1 实证）。
     if (tile === CHEST) style = 11;
+    // ★IIIII223（2026-09-03）：flag17 保号臂（1457 cs:36452-36454 ≡1458 同位）——
+    //   `if (flag17 && chestTileType == 21 && chestStyle == 34) num9 = 34;`
+    //   flag17=drunkWorld∧tenthAnniversaryWorld（cs:36397）。转换屋（HouseBuilder
+    //   drunk+tenth 支 case193/197 ChestStyle=34）箱锚若落在冰系（197/147/161/162）
+    //   上，本析取支会把 num9 覆写成 11，vanilla 靠本臂保回 34。纯帧/簿记臂零掷
+    //   （与 loot 池无关）——GFB 9293480 九座转换屋中 8 座锚 tile=321 不触冰析取
+    //   （旧 JS 巧合同值），(2484,764) 锚=197 触发 → 金标 fx=1224(34) vs JS 396(11)
+    //   实证（golden 096_Larva.frx 直读，无需 rig）。
+    if (!!gs.seedFlags.drunkWorld && !!gs.seedFlags.tenthAnniversary && tile === CHEST && argStyle === 34) style = 34;
     if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
       // ★1457 对齐档 2（2026-08-23）：基准回 ../Terarria1457/ ——主件池 cs:36456

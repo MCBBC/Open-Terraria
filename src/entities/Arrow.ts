@@ -7712,7 +7712,7 @@ export class Arrow extends Entity {
           //  蓄能暴击 6170 满蓄/负窗 → 强制 crit。脉冲弹 1121/1131/1132 出射后同样
           //  在本环结算 ⇒ 注入面即此处；与 WeaponProj.hitEnemies :303 先例同式）。
           //  仓内已有先例：VolcanoBlastProj/MountCombat/meleeOnHitProjs(977/524)。
-          crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100)
+          crit = Math.random() < (this.critChance ?? (4 + this.critBonus) / 100)
             || ((game.player as unknown as
               { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
               | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)

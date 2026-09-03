@@ -2333,7 +2333,8 @@ export class Renderer {
     heldVid: number; uiHeld: boolean; cacheTime: number; cacheVid: number;
     npcHover: boolean; biomeTorch: number | null; biomeCampfire: number | null;
     paintAmmoVid: number; housingHead: number | null; cursorScale: number;
-  } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null, cursorScale: 1 };
+    uiBlocking: boolean;
+  } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null, cursorScale: 1, uiBlocking: false };
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
   /** #1 背景层 GL 逃生门 ?bggl=0(实例共用 this.glfx;初始化失败自动回退;
@@ -13851,8 +13852,10 @@ export class Renderer {
   ): void {
     void player;
     const c = this.cursorIconCtx;
-    // 门：悬 NPC / 手持 UI 拖拽物(MouseDisplayItem)→ 住房头像也一并取消(:44628)
-    if (c.npcHover || c.uiHeld) return;
+    // 门：悬 NPC / 手持 UI 拖拽物(MouseDisplayItem)→ 住房头像也一并取消(:44628)。
+    // ★红蓝对抗 C-F8：mouseInterface 门在 Draw 端（:45794）——置位侧照跑（缓存余辉
+    //  照刷新），UI 面板悬停时只压绘制不压数据
+    if (c.npcHover || c.uiHeld || c.uiBlocking) return;
     if (!this.atlas) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -13874,10 +13877,12 @@ export class Renderer {
     else if (c.biomeCampfire !== null && num === 966) num = c.biomeCampfire;
     if (p.cursorItemIconID !== 0) num = p.cursorItemIconID;
     const flag = p.cursorItemIconEnabled && num !== 0;           // 悬停/使用支
-    const flag2 = c.cacheTime > 0 && !c.uiHeld;                   // 余辉支
+    const flag2 = c.cacheTime > 0 && !c.uiHeld;                   // 余辉支（:45816-45821 只看 mouseItem）
     if (flag || flag2) {
-      // 余辉支未悬停时用缓存 id（:44505-44507 Swap 语义）
-      const t = flag ? num : c.cacheVid;
+      // ★红蓝对抗 C-F9②：余辉支原版画 num（:45812-45814 先定格=当前手持/悬停 id,
+      // 含群系火把覆写;:45816-45821 flag2 只换"画不画"不换"画什么"）——曾用缓存
+      // id,群系火把覆写态下余辉退回基础火把
+      const t = num !== 0 ? num : c.cacheVid;
       if (t > 0) {
         const push = 10 + p.cursorItemIconPush;
         const icon = this.atlasIcon(this.itemInternalOfVid(t));

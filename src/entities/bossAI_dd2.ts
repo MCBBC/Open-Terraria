@@ -3149,7 +3149,12 @@ export class DD2GoblinBomb extends Entity {
     this.dead = true;
     this.destroy();
     game.onProjectileDeath?.(681, this.x, this.y, this.w, this.h);
-    game.playSfx('explosion', 1, this.cx, this.cy);
+    // SW-S1 2026-09-04（清偿②）：Kill :73139 音 = SoundID.DD2_GoblinBomb——
+    //  SoundID.cs:840 `new LegacySoundStyle(2, 14).WithVolume(0.5f)` = 与 Item14
+    //  （:442 `new LegacySoundStyle(2, 14)`）【同一 legacy 银行 cue 14】,差异仅在
+    //  音量 0.5（无独立 xnb/wav 素材,863 wav 全集亦无 dd2_goblinbomb 条目）→
+    //  本仓 'explosion' 通道（Item_14.wav）即正确音源,补 0.5 音量即 1:1
+    game.playSfx('explosion', 0.5, this.cx, this.cy);
     // SW-R3 2026-09-03（F-9）：Kill :73136-73216 原版尘引擎逐参（替换 spawnParticles
     //  合成粒——旧 14+10 粒画在光照合成前被压暗,且无 fadeIn/gore 面）：
     //  先盒 80² 收心 → Resize(22,22) 视觉盒（:73137-73144,盒左上角=Center−(11,11)）：

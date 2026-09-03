@@ -34,8 +34,8 @@ import type { ItemDef } from '../data/items';
 
 // ===================== 原版 ItemID.Sets 集合 =====================
 
-/** ItemID.cs:1192 Torches（CreateBoolSet 24 项） */
-const TORCH_ITEMS: ReadonlySet<number> = new Set([8, 427, 3004, 523, 433, 429, 974, 1333, 1245, 3114,
+/** ItemID.cs:1192 Torches（CreateBoolSet 24 项）——导出供 Game 侧 ToolCursorIcon 兔炮支 */
+export const TORCH_ITEMS: ReadonlySet<number> = new Set([8, 427, 3004, 523, 433, 429, 974, 1333, 1245, 3114,
   430, 3045, 428, 2274, 431, 432, 4383, 4384, 4385, 4386, 4387, 4388, 5293, 5353]);
 
 /** ItemID.cs:1194 WaterTorches（水中不熄：诅咒 523 / 脓血 1333 / 珊瑚 4384） */
@@ -99,7 +99,10 @@ export interface SmartSelectSlot {
   ammo: number;
   /** Item.useAmmo（0 = AmmoID.None） */
   useAmmo: number;
-  /** Item.tileBoost（Player.cs:17537-17560 取第一件对应工具的 reach 加成） */
+  /** Item.tileBoost（Player.cs:17537-17560 取第一件对应工具的 reach 加成）。
+   *  ★红蓝对抗 A-F1：真值来自 Item.cs 全量赋值表（ToolCursorIcon.TILE_BOOST_BY_VID，
+   *  Game.smartSelectSlots 装填）——曾恒 0，而铜镐/铜斧/铜锤/木锤=-1、The Axe=+1、
+   *  激光钻头=+11 均在六类池内，±(5+tb)/±(3+tb) 策略盒随之伸缩 */
   tileBoost: number;
 }
 
@@ -234,7 +237,7 @@ export function wetCollision(st: TileStore, x: number, y: number, w: number, h: 
         //   本仓 isActive 实为 nactive()（active && !inActuated），曾致接线致动
         //   斜坡漏判湿——与 npcLiquid/WeaponProj.inLiquid 三副本同步改纯在场
         //   type!==0（SC 线禁令解除，本副本属同函数族 WetCollision 移植体）。
-if (st.type[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
+if (st.flags[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue; // :1632 !tile.active()——flags bit0（红蓝对抗 A-F3：曾用 type≠0 代读,幽灵+坡+上液误判湿）
         const above = st.idx(i, j - 1);
         if (st.liquid[above] <= 0) continue;
         if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > j * 16 && vy < j * 16 + 16) {
@@ -336,9 +339,13 @@ export class SmartSelect {
   /**
    * SmartSelect_GetAvailableToolRanges 1:1（Player.cs:17530-17562）。
    * 每类工具取背包 0-49 中第一件的 tileBoost；没有该类工具 = -10（负 reach → 永不可达，
-   * 即"没带镐就不会出镐策略"的门）。原版全物品中 tileBoost≠0 的仅 195/196/-1、509/510/+20、
-   * 1305/+1、3505-3510/-1、5329/5330/+3（Item.cs:3787/:7425/:16116/:31370-31411/:42229），
-   * 均不属于六类 → 本作槽画像 tileBoost 恒 0，行为与原版一致。
+   * 即"没带镐就不会出镐策略"的门）。
+   * ★红蓝对抗 A-F1 勘误（2026-09-03）：旧注"tileBoost≠0 仅 195/196/509/510/1305/
+   * 3505-3510/5329/5330,均不属于六类"为双重事实错误——列表漏 7 组（2798/+11、
+   * 850/851/+20、2340/+5、2492/2739/+2、3612/3620/3625/+20、5464/5481/+3、1129 等），
+   * 且 196（木锤 -1）/3505/3506/3509（铜三件 -1）/1305（The Axe +1）/2798（激光钻头
+   * +11）全在六类池内 → 槽画像现取真值（ToolCursorIcon.TILE_BOOST_BY_VID 全表，
+   * Game.smartSelectSlots 装填），策略盒 ±(5+tb)/±(3+tb) 随首件伸缩。
    */
   private getAvailableToolRanges(env: SmartSelectEnv): {
     pickRange: number; axeRange: number; hammerRange: number;

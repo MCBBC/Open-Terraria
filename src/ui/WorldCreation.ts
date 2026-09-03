@@ -230,8 +230,10 @@ export class WorldCreationPanel {
    *  曾把 120×120 画布按原尺寸画 → 内容层只有 76²、边框 84²，图小框大）。
    *  ★2026-09-03 补缺：背景层 PreviewDifficulty*1（:76-91 Normal1[0/3]/Expert1[1]/
    *  Master1[2]，大师背景=黑日食图——曾整层漏移植"缺太阳"）+ 压暗 tint：专家/大师下
-   *  Size/Evil/Bunny 三层乘 Color.DarkGray(0.5)（:85/:89 color=DarkGray），大师兔子
-   *  层再 ×1.2=0.6（:125 color*1.2f）。canvas 以 brightness(n) 滤镜逐层等价乘色。 */
+   *  Size/Evil/Bunny 三层乘 Color.DarkGray（:85/:89；XNA 命名色=169/255,见下），
+   *  大师兔子层再 ×1.2f=202/255（:125）。canvas 以 brightness(n) 滤镜逐层等价乘色。
+   *  已知微账：draw() 闭包按调用快照捕获 tint——跨难度切换时迟到 onload 会以旧 tint
+   *  重画一帧级时长（下次选择即纠正,低危不追）。 */
   private previewImgs = new Map<string, ImageBitmap | HTMLImageElement>();
   private drawPreview() {
     const ctx = this.previewCtx;
@@ -241,8 +243,11 @@ export class WorldCreationPanel {
       'UI_WorldCreation_PreviewDifficultyExpert1',
       'UI_WorldCreation_PreviewDifficultyMaster1',
       'UI_WorldCreation_PreviewDifficultyNormal1'][diff];
-    const tint = (diff === 1 || diff === 2) ? 0.5 : 1;    // Color.DarkGray
-    const bunnyTint = diff === 2 ? 0.6 : tint;            // DarkGray * 1.2f
+    // XNA Color.DarkGray = (169,169,169,255)（W3C 系命名色,≠0.5!——红蓝对抗 C-F10：
+    // 曾按 0.5 写,专家/大师三层比原版暗 ~24%）；*1.2f 逐通道乘后 (byte) 截断
+    // → 202/255。canvas brightness(×) 逐通道线性乘同构（Filter Effects sRGB,不动 alpha）
+    const tint = (diff === 1 || diff === 2) ? 169 / 255 : 1;          // Color.DarkGray
+    const bunnyTint = diff === 2 ? 202 / 255 : tint;                  // DarkGray * 1.2f
     // ★元素必须是 [key, tint] 元组——曾写成裸字符串数组,解构把 'UI_...' 拆成
     //  key='U' → 三层全部查空,预览只剩背景层(2026-09-03 用户实证"层被覆盖")
     const content: Array<[string, number]> = [

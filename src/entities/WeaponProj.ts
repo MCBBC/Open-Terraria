@@ -4167,7 +4167,9 @@ export class FlailProj extends Entity {
           //   （Tile.cs active()=HasTile，无 inActive 检查）⇒ 致动斜坡同样判湿；
           //   旧 isActive=nactive() 口径漏判——与 npcLiquid/SmartSelect 三副本
           //   同步改纯在场 type!==0。
-          if (ty <= 0 || st.type[idx] === 0 || st.slope[idx] === 0) continue;
+          //   ★红蓝对抗 A-F3（2026-09-03）：幽灵保域后 type!==0 亦非纯在场位——
+          //   残型格 flags=0,type≠0 须判干，三副本同步改读 flags bit0（=active() 位本体）。
+          if (ty <= 0 || st.flags[idx] === 0 || st.slope[idx] === 0) continue;
           const upIdx = st.idx(tx, ty - 1);
           if (st.liquid[upIdx] <= 0) continue;
           if (type !== undefined && st.liquidType[upIdx] !== type) continue;

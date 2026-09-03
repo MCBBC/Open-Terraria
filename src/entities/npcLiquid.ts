@@ -77,7 +77,10 @@ export function wetCollision(
         //   本仓 isActive 是 nactive()（active && !inActive）口径，曾致致动斜坡
         //   漏判湿——三副本（npcLiquid/SmartSelect/WeaponProj.inLiquid）同步改
         //   纯在场 type!==0；DrownCollision 豁免行同位同步核正（stats/TouchDamage）。
-        if (st.type[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
+        //   ★红蓝对抗 A-F3（2026-09-03）：幽灵保域后 type!==0 亦非纯在场位——
+        //   残型格 flags=0,type≠0（wld 导入/生成期 active(false)）须判干，改读
+        //   flags bit0（=原版 active() 位本体）。三副本同步。
+        if (st.flags[idx] === 0 || st.slope[idx] === 0 || j <= 0) continue;
         const above = st.idx(i, j - 1);
         if (st.liquid[above] <= 0) continue;
         if (vx + num > i * TS && vx < i * TS + TS && vy + num2 > j * TS && vy < j * TS + TS) {

@@ -45,18 +45,20 @@ const rig = await p.evaluate(() => {
   const X0 = sx + 6;
   for (let x = X0 - 4; x <= X0 + 30; x++)
     for (let y = RY - 5; y <= RY + 5; y++) st.setTile(x, y, 0);
-  const mk = (key, tile, shape, lt, off) => {
+  const mk = (key, tile, shape, lt, off, clearWall) => {
     const x = X0 + off * 3, y = RY;
     st.setTile(x, y, tile);
+    if (clearWall) st.wall[st.idx(x, y)] = 0;
     if (shape === 'hf') st.setHalfBrick(x, y, true); else st.setSlope(x, y, shape === 's1' ? 1 : 2);
     const sides = off === 0 || off === 1 ? [[-1, 0], [1, 0], [0, -1]] : [[1, 0]];
     for (const [dx, dy] of sides) { const j = st.idx(x + dx, y + dy); st.liquid[j] = 255; st.liquidType[j] = lt; }
-    return { key, x, y, lt };
+    return { key, x, y, lt, wall: st.wall[st.idx(x, y)] };
   };
   const cells = [
-    mk('hf-LRU-lava', 1, 'hf', 2, 0),
-    mk('hf-R-water', 1, 'hf', 1, 1),
-    mk('s1-R-lava', 1, 's1', 2, 2),
+    mk('hf-LRU-lava-有墙', 1, 'hf', 2, 0, false),
+    mk('hf-LRU-lava-无墙', 1, 'hf', 2, 1, true),
+    mk('hf-LRU-water-无墙', 1, 'hf', 1, 2, true),
+    mk('s1-R-lava-无墙', 1, 's1', 2, 3, true),
   ];
   g.liquid.updateLiquid = () => {};
   const pl = g.player;
@@ -65,6 +67,7 @@ const rig = await p.evaluate(() => {
   return { X0, RY, gl: w.groundLevel, cells };
 });
 console.log('rig:', JSON.stringify(rig));
+await p.bringToFront();
 await new Promise(r => setTimeout(r, 2000));
 
 // 挂计数器:统计一帧内 Liquid_*/Misc_water_* 源的 drawImage,记录目标矩形

@@ -196,7 +196,9 @@ describe('手持非工具 / noBuilding（挖掘支 :45987-45990）', () => {
   it('noBuilding 只关挖掘/桶两支，电路/放置/小动物支不受影响（原版门的位置）', () => {
     expect(toolCursorIcon(mkEnv({ pick: 35, noBuilding: true })).enabled).toBe(false);
     expect(toolCursorIcon(mkEnv({ wireTool: true, noBuilding: true })).enabled).toBe(true);
-    expect(toolCursorIcon(mkEnv({ createWall: true, noBuilding: true })).enabled).toBe(true);
+    // 红蓝对抗 C-F5：放置两支经调用点 :39904-39907 `if (!noBuilding)` 整支封死（曾钉反相）
+    expect(toolCursorIcon(mkEnv({ createWall: true, noBuilding: true })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ createTile: true, noBuilding: true })).enabled).toBe(false);
     expect(toolCursorIcon(mkEnv({ makeNPC: true, noBuilding: true })).enabled).toBe(true);
   });
 
@@ -208,14 +210,18 @@ describe('手持非工具 / noBuilding（挖掘支 :45987-45990）', () => {
 describe('tileBoost 逐物品表（Item.cs SetDefaults 全表 → TILE_BOOST_BY_VID）', () => {
   it('电路族 20 改由统一表出；铜系 -1；钻头族 ++/-- 相消；DCU 11', () => {
     expect(WIRE_TOOL_VIDS.size).toBe(8);
-    for (const w of WIRE_TOOL_VIDS) expect(tileBoostOfVid(w)).toBe(WIRE_TOOL_TILE_BOOST);
+    // 红蓝对抗 C-F1：849 致动器 :11326-11339 自有体无 tileBoost=0,其余七件 20
+    for (const w of WIRE_TOOL_VIDS) {
+      expect(tileBoostOfVid(w)).toBe(w === 849 ? 0 : WIRE_TOOL_TILE_BOOST);
+    }
+    expect(tileBoostOfVid(849)).toBe(0);
     expect(tileBoostOfVid(3509)).toBe(-1);   // 铜镐 :31395（射程比无加成工具少 1 格,原版刻意）
     expect(tileBoostOfVid(3506)).toBe(-1);   // 铜斧 :31436
     expect(tileBoostOfVid(196)).toBe(-1);    // 木锤 :3806
     expect(tileBoostOfVid(1262)).toBe(0);    // :15673 ++ → 尾修 :48902 -- → 0
     expect(tileBoostOfVid(1231)).toBe(0);    // :15231 ++ → 钻头族尾修 -1
-    expect(tileBoostOfVid(2773)).toBe(2);    // :26506 += 3 → 锯族尾修 -1
-    expect(tileBoostOfVid(2774)).toBe(3);    // :26545 += 4 → 钻族尾修 -1
+    expect(tileBoostOfVid(2773)).toBe(3);    // :26506 += 4(锯,IsChainsaw)→ 尾修 -1
+    expect(tileBoostOfVid(2774)).toBe(2);    // :26527 += 3(钻,IsDrill)→ 尾修 -1
     expect(tileBoostOfVid(2798)).toBe(11);   // DCU :26740
     expect(tileBoostOfVid(3525)).toBe(4);    // The Axe :31251
     expect(tileBoostOfVid(4820)).toBe(2);    // 无底岩浆桶 :39479
@@ -288,5 +294,48 @@ describe('溶液支（:42946-42970 环境改造枪 779/Terraformer 5134）', () 
     expect(SOLUTION_AMMO_ITEMS.has(784)).toBe(true);
     expect(SOLUTION_AMMO_ITEMS.has(1015)).toBe(true);    // DefaultToSolution :42774-42780
     expect(BUCKET_VIDS.size).toBe(12);                   // 桶族全 12 vid 已实装（Game.useBucket :23962）
+  });
+});
+
+// ===================== 红蓝对抗批(C 路 findings 修复)回归 =====================
+describe('油漆四支 + 兔炮支（红蓝对抗 C-F4,PlaceThing_Paint* :42112-42240）', () => {
+  const tt = (over: Partial<Parameters<typeof toolCursorIcon>[0]['targetTile']> = {}) => ({
+    active: true, sheet: 0, frameX: 0, wall: 0, painted: false, paintedWall: false, ...over,
+  });
+
+  it('Paintbrush :42230-42240：1071/1543 + 射程内 + 目标格 active → 亮(不进缓存)', () => {
+    expect(toolCursorIcon(mkEnv({ vid: 1071, targetTile: tt({ active: true }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 1071, targetTile: tt({ active: false }) })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ vid: 1072, targetTile: tt({ active: true }) })).enabled).toBe(false);
+  });
+
+  it('PaintRoller :42212-42222：1072/1544 + 目标格 wall>0 → 亮', () => {
+    expect(toolCursorIcon(mkEnv({ vid: 1072, targetTile: tt({ wall: 4 }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 1072, targetTile: tt({ wall: 0 }) })).enabled).toBe(false);
+  });
+
+  it('PaintScraper :42129-42146：TryScraping(墙彩/块彩)与 LongMoss(184) 双臂', () => {
+    expect(toolCursorIcon(mkEnv({ vid: 1100, targetTile: tt({ painted: true }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 1100, targetTile: tt({ wall: 2, paintedWall: true }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 1545, targetTile: tt({ sheet: 184 }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 1100, targetTile: tt() })).enabled).toBe(false);
+  });
+
+  it('CannonBall :42112-42126：火把 + 大炮 209(frameX/72<3) → 亮;样式≥3/非大炮不亮', () => {
+    expect(toolCursorIcon(mkEnv({ vid: 8, isTorch: true, targetTile: tt({ sheet: 209, frameX: 0 }) }))).toEqual(R(true, false));
+    expect(toolCursorIcon(mkEnv({ vid: 8, isTorch: true, targetTile: tt({ sheet: 209, frameX: 216 }) })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ vid: 8, isTorch: true, targetTile: tt({ sheet: 2 }) })).enabled).toBe(false);
+    expect(toolCursorIcon(mkEnv({ vid: 27, isTorch: false, targetTile: tt({ sheet: 209 }) })).enabled).toBe(false);
+  });
+
+  it('油漆支目标格出射程不亮（TB=tileBoost+blockRange 几何）', () => {
+    expect(toolCursorIcon(mkEnv({ vid: 1071, tileBoost: 0, targetTile: tt({ active: true }), target: { x: 130, y: 95 } })).enabled).toBe(false);
+  });
+});
+
+describe('铲 4711 与电路线门收紧（红蓝对抗 C-F6/C-F7）', () => {
+  it('4711 铲：三力全 0 也亮挖掘图标（:45974-45979 IsAValidTool）', () => {
+    expect(toolCursorIcon(mkEnv({ shovel: true }))).toEqual(R(true, true));
+    expect(toolCursorIcon(mkEnv({})).enabled).toBe(false);
   });
 });

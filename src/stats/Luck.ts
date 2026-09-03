@@ -91,6 +91,34 @@ export function rollOnlyBadLuckExtreme(luck: number, range: number, rand: () => 
   return -1;
 }
 
+/** Player.AFKTimeNeededForNoLuckyStars（Player.cs:973）——挂机玩家不接坠星定向 */
+export const AFK_TIME_NO_LUCKY_STARS = 10800;
+
+/**
+ * 坠星运气定向（WorldGen.SpawnFallingObjects :72405-72417；1456 :71869-71881 纯函数化）。
+ * ★幸运消费面七类④定谳（2026-09-03）：该线【不是】药草种子缩放——1457 药草采收
+ * （KillTile_DropItems case 83/84 :66194-66214）全程无 luck（staffOfRegrowthBonus +
+ * IsHarvestableHerbWithSeed 两掷而已）；:72410 `range = remix ? RollBadLuck : RollLuck`
+ * 的真实消费体是坠星落点定向（"lucky stars"，常量名 AFKTimeNeededForNoLuckyStars 同源）。
+ * 语义：range=15；取【坠点最近存活玩家】luck（FindClosest(position5)——Game 侧
+ * closestPlayerLuckAt 注入）；非 remix RollLuck / remix RollBadLuck（:72410 原式），
+ * ==0 且玩家 position.Y < worldSurface×16 且非挂机（afkCounter<10800）→ 落点 X 改
+ * 玩家 position.X ± num30（num30=Next(1,640) 先掷半径、再掷偏移 Next(-num30,num30+1)
+ * 两掷）并记 ai[1]=该玩家（AI_148 :54055 定向翻向消费）。
+ * 返回 null = 不定向（照原随机落点）；number = 玩家 position.X 的 X 偏移 px。
+ * 概率面（ luck=+1 / 0 / −1 ）：P(roll==0) = 0.1002 / 0.0667 / 0.0473——旧仓实现
+ * `rand < luck×1/15` 在 luck=0 时漏基线 1/15、负运恒 0、正运低估 1.5×，已退役。
+ */
+export function starfallHoming(
+  luck: number, remixWorld: boolean, rand: () => number,
+  playerAboveSurface: boolean, afkOk: boolean,
+): number | null {
+  const range = remixWorld ? rollBadLuck(luck, 15, rand) : rollLuck(luck, 15, rand);
+  if (range !== 0 || !playerAboveSurface || !afkOk) return null;
+  const num30 = 1 + Math.floor(rand() * 639);                    // Next(1,640) = [1,639]
+  return Math.floor(rand() * (2 * num30 + 1)) - num30;           // Next(-num30, num30+1)
+}
+
 // ============ 聚合态（仿 BuffState：环境因子 Game 侧写入，value 幂等聚合） ============
 
 /** 瓢虫时序常量（NPC.cs:6643/:6645 ladyBugGoodLuckTime/BadLuckTime，tick） */

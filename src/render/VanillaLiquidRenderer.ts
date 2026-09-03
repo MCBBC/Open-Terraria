@@ -791,49 +791,60 @@ export function drawVanillaLiquids(
   //   盖出"边界盖在斜方块上层"（用户实报）。且背景份不透明 1.0 已定终色——相邻
   //   水体=不透明背景层+前景 0.6 叠加，同色叠同色无色变，单份背景层即与水体
   //   终色一致，无需第二份。
+  // ★斜面表按邻液类型选（2026-09-03 用户实报"岩浆的斜坡方块透明区域没做浸润渲染
+  //   露馅,水不会,参考水的做法在岩浆也做"）：旧实现恒用群系水色表
+  //   LiquidSlope_${waterStyle}——浸润带缺席的坡面格（如下方浅液 Dq≤240、slope4/3
+  //   边角门等,增强无这些门）会被盖成【水色】浸润 = 岩浆岸露馅。改按【开放侧最高
+  //   液位邻格】的液体类型选表,与浸润带 num10 选择同语义(:3940-3965 严格大于,
+  //   L→R→U→D 序)：岩浆→LiquidSlope_1、蜂蜜→11、微光→14、水→群系水色
+  //   （liquidSlopeSheet 同名映射,平/斜两表共用一套文件）。
   if (isBackground) {
-    const slopeTex = getSlopeTex(waterStyle);
-    if (slopeTex && slopeTex.width > 0) {
-      for (let lx = PAD; lx < pw - PAD; lx++) {
-        const x = px0 + lx;
-        for (let ly = PAD; ly < ph - PAD; ly++) {
-          const y = py0 + ly;
-          if (x < 0 || y < 0 || x >= st.w || y >= st.h) continue;   // st.idx 直读守卫
-          const i = at(lx, ly);
-          if (!isSolidA[i] || hasLiquidA[i]) continue;
-          // ★st.slope 是 store 下标——此处 i 是局部 padding 网格下标(at(lx,ly)),
-          //   直喂会错位读数 → slope 恒落在 1-4 之外 → 整块静默跳过(2026-08-21
-          //   用户三轮"仍然失效"的最终根因;前两轮修的是 groundLevel 门与贴图加载)
-          const slope = st.slope[st.idx(x, y)];
-          if (slope < 1 || slope > 4) continue;
-          // ★液面裁剪(2026-08-21 用户标注"氙奇葩"(242,231) slope2 壳堆×61%水位):
-          //   整格三角会把水画到液面之上(水爬坡)。原版浸润带按液位算液面下沉
-          //   num6=⌊(256-液位)/32⌋×2(TileDrawing.cs:4096),斜面表与平面带共用同一
-          //   源矩形(:4539 Y 复用 liquidSize)→ 只画液面以下的行,水线在切口内
-          //   保持水平、与邻格水面齐平。液位取坡面【开放侧】邻格最高值——固体背侧
-          //   的邻水不计(:3967-4028 slope 门同语义),否则水沿背侧斜边凭空出现
-          const liqAt = (dx: number, dy: number): number => {
-            const nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h) return 0;
-            return st.liquid[st.idx(nx, ny)];
-          };
-          const openLq = Math.max(
-            slope === 1 || slope === 3 ? 0 : liqAt(-1, 0),
-            slope === 2 || slope === 4 ? 0 : liqAt(1, 0),
-            slope === 3 || slope === 4 ? 0 : liqAt(0, -1),
-            slope === 1 || slope === 2 ? 0 : liqAt(0, 1),
-          );
-          if (openLq <= 0) continue;
-          const num6 = Math.floor((256 - openLq) / 32) * 2;
-          const sh = 16 - num6;
-          if (sh <= 0) continue;
-          const sx = 18 * (slope - 1);
-          ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
-          ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6, 16, sh);
-        }
+    const slopeTexForType = (vt: number): HTMLImageElement | null =>
+      getSlopeTex(vt === 2 ? 1 : vt === 3 ? 11 : vt === 4 ? 14 : waterStyle);
+    for (let lx = PAD; lx < pw - PAD; lx++) {
+      const x = px0 + lx;
+      for (let ly = PAD; ly < ph - PAD; ly++) {
+        const y = py0 + ly;
+        if (x < 0 || y < 0 || x >= st.w || y >= st.h) continue;   // st.idx 直读守卫
+        const i = at(lx, ly);
+        if (!isSolidA[i] || hasLiquidA[i]) continue;
+        // ★st.slope 是 store 下标——此处 i 是局部 padding 网格下标(at(lx,ly)),
+        //   直喂会错位读数 → slope 恒落在 1-4 之外 → 整块静默跳过(2026-08-21
+        //   用户三轮"仍然失效"的最终根因;前两轮修的是 groundLevel 门与贴图加载)
+        const slope = st.slope[st.idx(x, y)];
+        if (slope < 1 || slope > 4) continue;
+        // ★液面裁剪(2026-08-21 用户标注"氙奇葩"(242,231) slope2 壳堆×61%水位):
+        //   整格三角会把水画到液面之上(水爬坡)。原版浸润带按液位算液面下沉
+        //   num6=⌊(256-液位)/32⌋×2(TileDrawing.cs:4096),斜面表与平面带共用同一
+        //   源矩形(:4539 Y 复用 liquidSize)→ 只画液面以下的行,水线在切口内
+        //   保持水平、与邻格水面齐平。液位取坡面【开放侧】邻格最高值——固体背侧
+        //   的邻水不计(:3967-4028 slope 门同语义),否则水沿背侧斜边凭空出现
+        const liqAt = (dx: number, dy: number): { amt: number; vt: number } | null => {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h) return null;
+          const ni = st.idx(nx, ny);
+          return { amt: st.liquid[ni], vt: st.liquidType[ni] || 1 };
+        };
+        let openLq = 0, openVt = 1;
+        const take = (c: { amt: number; vt: number } | null): void => {
+          if (c && c.amt > openLq) { openLq = c.amt; openVt = c.vt; }   // 严格大于=L,R,U,D 序平手取先(同浸润带)
+        };
+        take(slope === 1 || slope === 3 ? null : liqAt(-1, 0));
+        take(slope === 2 || slope === 4 ? null : liqAt(1, 0));
+        take(slope === 3 || slope === 4 ? null : liqAt(0, -1));
+        take(slope === 1 || slope === 2 ? null : liqAt(0, 1));
+        if (openLq <= 0) continue;
+        const slopeTex = slopeTexForType(openVt);
+        if (!slopeTex || slopeTex.width <= 0) continue;   // 懒加载未就绪跳帧,下帧自愈
+        const num6 = Math.floor((256 - openLq) / 32) * 2;
+        const sh = 16 - num6;
+        if (sh <= 0) continue;
+        const sx = 18 * (slope - 1);
+        ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
+        ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6, 16, sh);
       }
-      ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = 1;
   }
 
   // ---- 浸润 pass：DrawTile_LiquidBehindTile(TileDrawing.cs:3859-4193) ----

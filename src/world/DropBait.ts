@@ -1,14 +1,27 @@
-// KillTile_DropBait 掷骰核心（WorldGen.cs:66304-66480 纯函数化）：
+// KillTile_DropBait 掷骰核心（WorldGen.cs:66304-66480 纯函数化；1457 行号漂移
+// 至 :66784-66944——分母/帧带结构零变化，金掷与四叶草支见下）：
 // 分母表 + 帧带门 + 花靴 ×10000 + 金掷/序贯族型选择。出生姿势/上限计数在
 // Game.killTileDropBait（实体侧）。幸运四叶草 5574 掷（:66337-66340，独立 if）
 // 单独成 dropCloverRoll——虫族早退结构（单产物）之外可与之同年同击双中。
+// ★幸运消费面七类②（2026-09-03）：金变体掷原为 `rand<1/400` 均匀近似——原版是
+// Player.GetClosestRollLuck(i, j, goldCritterChance)==0f（WorldGen.cs:66885 worm
+// /:66903 grasshopper；NPC.cs:6054 goldCritterChance=400）= Luck.RollLuck 三态掷
+// （正运内掷收窄 [N/2,N) → 命中率 ≈1.39/N、负运扩张 [N,2N) → ≈0.69/N）。luck=0
+// 时 rollLuck≡Next(400)==0 ≡ rand<1/400（旧行为逐位等价，单测种子流零变化）。
+// worm 墓地档：num7 先被 606 覆写、金掷门 `num7 == 357 && …` 短路 = 墓地【不掷】
+// （:66881-66887）——wormGraveyard 参承载短路序（先判再掷，掷流计数同原版）。
+import { rollLuck } from '../stats/Luck';
 export type BaitKind = 'worm' | 'hop' | 'grub' | 'lava';
 
 /** 掷一次产出；null = 无（tile 不在表内 / 帧带不命中 / 概率未中）。
  *  rand = [0,1) 掷源；flowerBoots = 装备且 frameX>=108（自长植株门）
- *  ——62/233/185-187 族原版无花靴门。 */
+ *  ——62/233/185-187 族原版无花靴门。
+ *  luck = 破坏点最近存活玩家 luck（GetClosestRollLuck 语义，Game 侧
+ *  closestPlayerLuckAt 注入；缺省 0 = 单掷基线）；wormGraveyard = 破坏点最近玩家
+ *  ZoneGraveyard（worm 606 覆写 → 金掷短路不掷）。 */
 export function dropBaitRoll(
   sheet: number, fx: number, fy: number, flowerBoots: boolean, rand: () => number,
+  luck = 0, wormGraveyard = false,
 ): { kind: BaitKind; gold: boolean; grubType?: 485 | 486 | 487; lavaType?: 653 | 654; wormType?: 357 | 448 | 606 } | null {
   let wormDenom = -1, hopDenom = -1, grubDenom = -1, lavaDenom = -1;
   if (sheet === 3) { wormDenom = 400; hopDenom = 100; if (flowerBoots) { wormDenom *= 10000; hopDenom *= 10000; } }
@@ -25,9 +38,13 @@ export function dropBaitRoll(
   } else if (sheet === 187) {
     if ((fx >= 756 && fx <= 916) || fx <= 322) wormDenom = 6;
   } else return null;
-  const gold = () => rand() < 1 / 400;   // goldCritterChance=400（luck 掷近似）
-  if (wormDenom > 0 && rand() < 1 / wormDenom) return { kind: 'worm', gold: gold() };
-  if (hopDenom > 0 && rand() < 1 / hopDenom) return { kind: 'hop', gold: gold() };
+  // 金变体掷：GetClosestRollLuck(i,j,400)==0（Luck.RollLuck 三态）；墓地 worm 短路
+  // 在掷【之前】（原版 && 序，掷流计数一致）。grub（485-487）/lava（653/654）两族
+  // 原版无金掷（:66914-66937 直选变体）。
+  const gold = (worm: boolean): boolean =>
+    !(worm && wormGraveyard) && rollLuck(luck, 400, rand) === 0;
+  if (wormDenom > 0 && rand() < 1 / wormDenom) return { kind: 'worm', gold: gold(true) };
+  if (hopDenom > 0 && rand() < 1 / hopDenom) return { kind: 'hop', gold: gold(false) };
   if (grubDenom > 0 && rand() < 1 / Math.floor(grubDenom * 1.25)) {   // :66452 ×1.25
     // 序贯两掷（:66455-66461）：Next(4)==0→486，独立 Next(12)==0→487 覆写
     let grubType: 485 | 486 | 487 = 485;
