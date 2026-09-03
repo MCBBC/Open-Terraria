@@ -2642,7 +2642,9 @@ export class TownNPC extends Entity {
       if (st.inBounds(fx, fy)) {
         const ti = st.idx(fx, fy);
         const tid = st.type[ti];
-        if (tid !== 0 && TILE_DEFS[tid]?.vanilla
+        // NPC.cs:55972-55974 `!tileSafely7.nactive() || !InteractableByNPCs[type] → false`
+        // ——nactive 门读 isActive（红蓝对抗 F11：曾用 type≠0 代读，幽灵家具残型误触发驻足看）
+        if (tid !== 0 && st.isActive(fx, fy) && TILE_DEFS[tid]?.vanilla
           && INTERACTABLE_BY_NPC_TILES.has(tid)) {
           this.social = { kind: 9, t: 40 + Math.floor(rnd() * 90), other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
           this.vx = 0;                                      // :55831 velocity=0
@@ -2754,7 +2756,11 @@ export class TownNPC extends Entity {
       for (let j = y0; j <= y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const tid = st.type[st.idx(i, j)];
-        if (tid !== 0 && AVOIDED_BY_NPC_TILES.has(tid)) return false;
+        // DelegateMethods.cs:913-915 字面 `!active() || !AvoidedByNPCs[type] → true`
+        // （幽灵格=无避让）——active() 位本体读 hasTile（红蓝对抗 F12：曾用 type≠0
+        // 代读，幽灵火把/尖刺残型误判避让块 → NPC 永不驻足）
+        if (tid !== 0 && !st.hasTile(i, j)) continue;
+        if (AVOIDED_BY_NPC_TILES.has(tid)) return false;
       }
     }
     return true;

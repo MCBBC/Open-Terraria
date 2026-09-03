@@ -371,13 +371,21 @@ export class SpriteAtlas {
    *  preloadUiFiles 同族漏网);改 10s 过期重试,暖缓存到位即自愈 */
   private _uiFailed = new Map<string, number>();
   private static readonly UI_FAIL_TTL = 10_000;
+  /** 失败负缓存截止时刻(值=until)。★404 分档(2026-08-27 手机实测"每次进世界
+   *  Player_4_0/1/2 三连 404"):清单含逻辑全集键而磁盘无文件(变体 4 无独立
+   *  head 通道,设计上回退 Player_0)=确定性不存在 → 10 分钟长负缓存;
+   *  网络错/5xx → 10s 短负缓存(瞬态尽快重试)。HEAD 探测分档。 */
+  private _uiFailUntil = new Map<string, number>();
+  private static readonly UI_FAIL_TTL_404 = 600_000;
   private ensureUiImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.uiimages.get(file);
     if (hit) return hit;
     const fail = this._uiFailed.get(file);
     if (fail !== undefined) {
-      if (Date.now() - fail < SpriteAtlas.UI_FAIL_TTL) return null;
+      const until = this._uiFailUntil.get(file) ?? fail + SpriteAtlas.UI_FAIL_TTL;
+      if (Date.now() < until) return null;
       this._uiFailed.delete(file);
+      this._uiFailUntil.delete(file);
     }
     if (this._uiPending.has(file)) return null;
     this._uiPending.add(file);
@@ -388,6 +396,7 @@ export class SpriteAtlas {
         this.uiimages.set(file, store);
         this._uiPending.delete(file);
         this._uiFailed.delete(file);
+        this._uiFailUntil.delete(file);
         this.flushUiWaiters(file, true);   // 唤醒 waitUi 等待者(2026-08-25)
       };
       if (!SpriteAtlas.USE_BITMAP) land(im);
@@ -396,7 +405,12 @@ export class SpriteAtlas {
     im.onerror = () => {
       this._uiPending.delete(file);
       this._uiFailed.set(file, Date.now());
+      // 先短 TTL 占位,HEAD 探测后 404(确定性缺失)升级长 TTL——止住每 10s 重发
+      this._uiFailUntil.set(file, Date.now() + SpriteAtlas.UI_FAIL_TTL);
       this.flushUiWaiters(file, false);
+      void fetch(im.src, { method: 'HEAD' }).then((r) => {
+        if (r.status === 404) this._uiFailUntil.set(file, Date.now() + SpriteAtlas.UI_FAIL_TTL_404);
+      }).catch(() => { /* 探测失败维持短 TTL */ });
     };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
@@ -418,7 +432,12 @@ export class SpriteAtlas {
     this.ensureUiImage(file);
     if (this.uiimages.get(file)) return Promise.resolve(true);
     const fail = this._uiFailed.get(file);
-    if (fail !== undefined && Date.now() - fail < SpriteAtlas.UI_FAIL_TTL) return Promise.resolve(false);
+    if (fail !== undefined) {
+      const until = this._uiFailUntil.get(file) ?? fail + SpriteAtlas.UI_FAIL_TTL;
+      if (Date.now() < until) return Promise.resolve(false);
+      this._uiFailed.delete(file);
+      this._uiFailUntil.delete(file);
+    }
     return new Promise((resolve) => {
       const ws = this._uiWaiters.get(file) ?? [];
       ws.push((ok) => resolve(ok));

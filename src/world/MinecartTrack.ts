@@ -264,8 +264,11 @@ export function drawBouncyBumper(frameID: number): boolean {
 // ============================================================================
 export function nearbyMask(st: TileStore, i: number, j: number): number {
   let mask = 0;
+  // ★RD-F6（2026-09-04）锚①：六邻轨道位掩码 type 裸读（Minecart.cs:1174-1202
+  //  `Main.tile[…]!=null && type == 314`，无 active 门）——幽灵轨道残型照样计入
+  //  连接掩码（null 判=本仓 inBounds）。行车带门 isTrackCell（nactive）不在此列。
   const at = (x: number, y: number): boolean =>
-    st.inBounds(x, y) && !!(st.flags[st.idx(x, y)] & 1) && st.type[st.idx(x, y)] === TRACK_TILE;
+    st.inBounds(x, y) && st.type[st.idx(x, y)] === TRACK_TILE;
   if (at(i - 1, j - 1)) mask++;
   if (at(i - 1, j)) mask += 2;
   if (at(i - 1, j + 1)) mask += 4;
@@ -530,24 +533,31 @@ export function magnetPosition(x: number, y: number, width: number, height: numb
   };
 }
 
-/** OnTrack（Minecart.cs:1249-1259）：磁石位所在格是否轨道 */
+/** OnTrack（Minecart.cs:1249-1259）：磁石位所在格是否轨道。
+ *  ★RD-F6（2026-09-04）锚②：`Main.tile[num,num2] == null → false; type == 314`——
+ *  type 裸读无 active 门（幽灵轨道残型照认=null 判外的唯一门） */
 export function onTrack(st: TileStore, x: number, y: number, width: number, height: number): boolean {
   const m = magnetPosition(x, y, width, height);
   const tx = Math.trunc(m.x / 16), ty = Math.trunc(m.y / 16);
   if (!st.inBounds(tx, ty)) return false;
   const i = st.idx(tx, ty);
-  return st.type[i] === TRACK_TILE && !!(st.flags[i] & 1);
+  return st.type[i] === TRACK_TILE;
 }
 
-/** GetOnTrack（Minecart.cs:1204-1247）：右键/R 上轨——吸附到最近有效子段的轨面坐标 */
+/** GetOnTrack（Minecart.cs:1204-1247）：右键/R 上轨——吸附到最近有效子段的轨面坐标。
+ *  ★RD-F6（2026-09-04）锚③：`if (tile.type != 314) return false`——type 裸读无
+ *  active 门（幽灵轨道残型同可吸附）；行车带判定 isTrackCell（nactive,行车带门）
+ *  属另一语义面,不在此复用。帧界防御：_tileHeight[36] 原版越界即炸,残型脏帧按
+ *  无效处理（与旧行为同,只是不再连带 nactive 门） */
 export function getOnTrack(
   st: TileStore, tileX: number, tileY: number,
   x: number, y: number, width: number, height: number,
 ): { x: number; y: number } | null {
   if (!st.inBounds(tileX, tileY)) return null;
   const ti = st.idx(tileX, tileY);
-  if (st.type[ti] !== TRACK_TILE || !isTrackCell(st, ti)) return null;
+  if (st.type[ti] !== TRACK_TILE) return null;
   const frame = frontTrack(st, ti);
+  if (frame < 0 || frame >= TRACK_FRAMES) return null;
   const m = magnetPosition(x, y, width, height);
   const num = Math.trunc(Math.trunc(m.x) % 16 / 2);
   let num3 = 0, num2 = -1;

@@ -39,7 +39,7 @@ function pyrStream(rng?: { ur: { seedArray: Int32Array; inext: number } }): stri
 }
 let pyrRngCache: unknown = null;
 import { solidTile as _solidTileHB } from './HalfBrickPass';
-import { flipGenSolid, vanGenSolidType } from './GenSolid';
+import { flipGenSolid, vanGenSolidType, vanSolidOrSloped } from './GenSolid';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 const STAR_CLOUD = TILE_BY_KEY['v_718_star_cloud']!;   // ★IIIII113 eFI 岛主材质备选（cs:79215）
@@ -2038,7 +2038,16 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
             if (y > gs.worldSurface) {
               const b1 = st.idx(x, y + 1), b2 = st.idx(x, y + 2);
               const shB1 = TILE_INTERNAL_BY_SHEET.get(53)!;
-              if (vanGenSolidType(st.type[ti]) && st.flags[b1] && st.type[b1] === shB1
+              // ★IIIII107（2026-09-04）定罪修复：受理门用原版 SolidTile(i,j) 六件套
+              //   （1458 cs:70650-70665：active && tileSolid && !tileSolidTop &&
+              //   !halfBrick && slope==0 && !inActive）——旧 vanGenSolidType 只查
+              //   tileSolid 一件，斜坡/半砖沙锚被 JS 误受理（原版拒之门外且【零掷骰】
+              //   跳过）⇒ Next(3) 起多掷，全 pass 掷流错位。首分叉列实证 x=1348：
+              //   锚 (1348,670) 沙 53 斜坡 2，vanilla 零写零掷，JS RPALM+RCACT 烧
+              //   掷+插仙人掌（A=1909/T=1975 主根）。vanSolidOrSloped=SolidTile 去
+              //   半砖/坡件（GenSolid.ts 既有导出），此处补 half/slope 两件即六件套。
+              if (vanSolidOrSloped(st, x, y) && st.half[ti] === 0 && st.slope[ti] === 0
+                && st.flags[b1] && st.type[b1] === shB1
                 && st.flags[b2] && st.type[b2] === shB1) {
                 segProbe77(`CC RPALM ${x},${y} rc=${rc77()}`);
                 growPalmTree(st, rng, x, y, gs);

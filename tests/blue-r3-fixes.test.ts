@@ -70,7 +70,9 @@ describe('R3-16 火把神 949 命中玩家不杀弹(1457 SelfHurtPlayers 后无 
 
 describe('R3-12 FTW 巨石雨(SpawnFallingObjects 风暴臂)', () => {
   it('实时秒窗 %80∈[45,80) + _isRainingBoulders 记账 + 成就 34 边沿', () => {
-    expect(gameSrc).toContain('% 80 >= 45');                       // GlobalTimeWrappedHourly 窗
+    // 窗口锚 2026-09-03 重锚：B5 两旗分离（R4-F6）把窗改写为早退式
+    // `if (… % 80 < 45) spawnWindow = false`（与 `%80>=45` 为雨窗同域断言）
+    expect(gameSrc).toContain('% 80 < 45');
     expect(gameSrc).toContain('_isRainingBoulders');
     expect(gameSrc).toContain('notifyProgressionEvent(34)');       // ITS_SHALING_OUTSIDE
     expect(gameSrc).toContain("new TrapShot(bx, by, wind, 8, 70, 'boulder')");

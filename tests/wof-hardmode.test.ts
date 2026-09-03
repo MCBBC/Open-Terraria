@@ -213,7 +213,7 @@ describe('★F5 外描边落点=泛洪格下移一行（GenAction 相对坐标 +
     }
     const flood = shapeFloodFillOnlyWalls(st, 5, 5, 1000);
     expect(flood.complete).toBe(true);
-    paintBackfillOutline(st, flood.cells, 196);
+    paintBackfillOutline(st, new RNG(1), flood.cells, 196);
 
     // 外描边 ∪ 中心，逐中心 Chebyshev 半径1 膨胀后整体 +1 行（手算期望集）
     const expected = new Set<number>();

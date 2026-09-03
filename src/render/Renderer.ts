@@ -1873,6 +1873,21 @@ export class Minimap {
     this.flushedPixelRects.length = 0;
   }
 
+  /** 回声涂层双门（单源：colorFor 增量路径 / fillBand 全量带共用，勿复制第二份）。
+   *  invisibleBlock 格按空气（MapHelper.cs Terraria.Map/GetTileType
+   *  `baseType = 0; return`）、invisibleWall 墙不上图（GetWallType else-if 链
+   *  `!invisibleWall()` 门，液体优先级仍高于墙）；showInvisibleBlocks
+   *  （Main.cs:58912-58917 ShouldShowInvisibleBlocksAndWalls=回声腔/幽灵护目镜）总豁免。 */
+  private coatHiddenBlock(i: number): boolean {
+    const st = this.world.store;
+    return (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks;
+  }
+
+  private coatHiddenWall(i: number): boolean {
+    const st = this.world.store;
+    return (st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks;
+  }
+
   colorFor(x: number, y: number): string | null {
     const st = this.world.store;
     const i = st.idx(x, y);
@@ -1891,8 +1906,8 @@ export class Minimap {
       return rgb;
     };
     // 回声涂层块（invisibleBlock）：小地图按空气处理（MapHelper.GetTileType
-    // :1922-1930 `baseType = 0; return`）——隐形房间不上地图（显示态豁免）
-    const coatInvisBlock = (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks;
+    // `baseType = 0; return`）——隐形房间不上地图（显示态豁免）；判定单源 coatHiddenBlock
+    const coatInvisBlock = this.coatHiddenBlock(i);
     if (st.flags[i] && st.type[i] !== 0 && !coatInvisBlock) {
       // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y——与 redrawAll 的
       // PIXEL_ART_TILE 分支同公式。增量路径（flushDirty→colorFor）此前漏掉此分支，
@@ -1913,9 +1928,9 @@ export class Minimap {
       const lt = st.liquidType[i];
       return hex(vanillaLiquidColor(lt >= 1 && lt <= 4 ? lt - 1 : 0));
     }
-    // 回声涂层墙（invisibleWall）：小地图不显示（MapHelper.GetWallType :1978/:1988
-    // `!tileCache.invisibleWall()` 门）
-    if (st.wall[i] !== 0 && !((st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks)) {
+    // 回声涂层墙（invisibleWall）：小地图不显示（MapHelper.GetWallType
+    // `!tileCache.invisibleWall()` 门）；判定单源 coatHiddenWall
+    if (st.wall[i] !== 0 && !this.coatHiddenWall(i)) {
       const vc = vanillaWallMapColor(st.wall[i]);
       if (vc) return hex(paintWall(vc));
       const mc = WALL_DEFS[st.wall[i]]?.mapColor;
@@ -2047,7 +2062,9 @@ export class Minimap {
       for (let x = 0; x < world.w; x++) {
         const i = rowOff + x;
         const t = type[i];
-        if (t !== 0 && flags[i] !== 0) {
+        // 回声涂层格（invisibleBlock）按空气（MapHelper.GetTileType baseType=0）
+        // ——落穿到液体/墙/背景支，与增量路径 colorFor 同款门（coatHiddenBlock 单源）
+        if (t !== 0 && flags[i] !== 0 && !this.coatHiddenBlock(i)) {
           if (t === PIXEL_ART_TILE) {
             const r = frameX[i] >> 8, g = frameX[i] & 255, b = frameY[i];
             buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
@@ -2065,7 +2082,9 @@ export class Minimap {
           continue;
         }
         const wl = wall[i];
-        if (wl !== 0) {
+        // 回声涂层墙不上图（MapHelper.GetWallType !invisibleWall() 门）→ 落背景，
+        // 与增量路径 colorFor 同款门（coatHiddenWall 单源）
+        if (wl !== 0 && !this.coatHiddenWall(i)) {
           let c = lut.walls[wl] ?? lut.walls[0];
           if (paintWall[i] > 0 && !MAP_WALL_NO_PAINT.has(wl)) {
             c = mapPaintPacked(c, paintWall[i], true);
@@ -4604,8 +4623,12 @@ export class Renderer {
           // 行 Y = 色行*18;分线盒/像素盒额外行偏移(Main.cs:43596-43616)
           let rowY = c * 18;
           const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
-          if (sh === 424) rowY += 72 + Math.floor(st.frameX[i] / 18) * 72;
-          else if (sh === 445) rowY += 72;
+          // 424/445 特型行偏移在原版包于 tile.active() 内（Main.cs:59158-59179）——
+          // 幽灵残型格（flags=0,type≠0）不取偏移行
+          if (st.flags[i] !== 0) {
+            if (sh === 424) rowY += 72 + Math.floor(st.frameX[i] / 18) * 72;
+            else if (sh === 445) rowY += 72;
+          }
           // 连接掩码(Main.cs:43621-43640):上+18 右+36 下+72 左+144
           let mask = 0;
           if (has(tx, ty - 1, bit)) mask += 18;

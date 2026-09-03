@@ -183,7 +183,9 @@ export class LiquidSim {
   static settleBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
   /** ★IIIII70b：SettleWaterAt 全量事件流（S=入场携带/L=落点写回，与 x86 rig
    *  SW_SETLLOG 同格式同序——首分叉逐行对拍用；生产恒 null 零开销） */
-  static settleEv: ((kind: 'S' | 'L', tag: string) => void) | null = null;
+  /** IIII70b 沉降事件流：S=起点 O=外层迭代 F=填充循环 M/P=定点微观测 L=落点
+   *  （IIII100d 补 O 档；种类枚举=本文件全部 settleEv 调用位实测） */
+  static settleEv: ((kind: 'S' | 'O' | 'F' | 'M' | 'P' | 'L', tag: string) => void) | null = null;
   // ★IIIII84 刀②：UpdateLiquid 尾盒迹回调（SW_LIQBOX 对照；缺省 null 零开销）
   static liqBoxSink: ((st: unknown) => void) | null = null;
   /** 微观测辅助（仪具注入：trOn+trX/trY 指定观测 origin；trSeq 步进计数） */
@@ -753,12 +755,16 @@ export class LiquidSim {
     if (x >= st.w - 5 || y >= st.h - 5 || x < 5 || y < 5) return;
     const i = this.idx(x, y);
     if (this.checking[i] || st.liquid[i] === 0) return;
+    // ★t 声明在函数级(2026-09-03 线上实锤 ReferenceError: t is not defined →
+    //  帧循环停机):尾部冲毁链(L1196-1211)块外引用 t,而声明曾留在 flags 块内
+    //  =块作用域泄漏——游戏内草蔓延 spreadGrass→setType→addWater 即炸,生成期
+    //  同链同炸。读取到此使用之间无任何 type 写入,提升声明语义不变。
+    const t = st.type[i];
     if (st.flags[i]) {
       // Liquid.cs:1172：nactive() && tileSolid && type!=546 && !tileSolidTop——
       // ★IIIII70b 补 !inActive 半边（致动格恒可入列,原版同字面）
       // ★IIIII227:tileSolid[0]=true（Main.cs:7995）——act=1 type=0 残型格同走实心门
       // 不可入列;旧 `t !== 0` 守卫系「空气非实心」误读,撤销（REMIX #98 定谳）
-      const t = st.type[i];
       if ((t === 0 || this.solidNP[t] === 1) && t !== this.id546 && !(st.wire[i] >>> 5 & 1)) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
@@ -1820,8 +1826,9 @@ export class LiquidSim {
     let liquid = st.liquid[oi];
     LiquidSim.settleEv?.('S', `${originX}|${originY}|${liquid}|${type}`);
     // ★IIIII70b 定点状态转储：指定 origin 调用前抓 129×129 邻域 13 通道（py 复刻器输入）
-    if (globalThis.__sw76OrigSnap !== undefined && globalThis.__sw76OrigSnap === originX * st.h + originY && globalThis.__sw76Grab instanceof Function) {
-      globalThis.__sw76Grab(originX, originY);
+    const g76 = globalThis as { __sw76OrigSnap?: number; __sw76Grab?: (x: number, y: number) => void };
+    if (g76.__sw76OrigSnap !== undefined && g76.__sw76OrigSnap === originX * st.h + originY && g76.__sw76Grab instanceof Function) {
+      g76.__sw76Grab(originX, originY);
     }
     st.liquid[oi] = 0;
     let flag1 = true;

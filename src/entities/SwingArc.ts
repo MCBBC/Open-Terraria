@@ -18,6 +18,7 @@ import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
@@ -812,8 +813,11 @@ export class ZenithSword extends Entity {
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!this.bladeHits(e.x, e.y, e.w, e.h)) continue;
       const crit = Math.random() < this.critChance;
-      // Main.DamageVar ±15% 浮动（同挥击侧公式）
-      const dmg = Math.max(1, Math.round(this.damage * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      // Main.DamageVar ±15% 浮动——★SW-T1 2026-09-04：单源 damageVarRoll（31 档离散
+      //  +float32 域+ToEven+luck 重掷;原连续因子内联式退役）。消费面=933 终弹命中 →
+      //  Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)` luck 正向。
+      //  crit ×2 维持仓内调用侧预倍（Enemy.hurt :13264 备案的既有位次,并行会话领走）
+      const dmg = Math.max(1, damageVarRoll(this.damage * (crit ? 2 : 1), game.player?.luck ?? 0));
       // ★F3 接线（蓝队四轮）④：天顶剑终弹 933（数据面 melee）——双支同序；加伤随暴击并入
       const snapBonusZenith = projectileSnapStrikeBonus(game,
         { projId: 933 }, (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,

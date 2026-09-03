@@ -1023,7 +1023,10 @@ export class PetFollower extends Entity {
         const sheetOf = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
         while (!hit && k > 0 && st.inBounds(px, ty0)) {
           const t = st.type[st.idx(px, ty0)];
-          if (t !== 0) {                                  // tile.active() 门
+          // 1457 Projectile.cs:71285 `if (tile.active())`——active() 位本体读 hasTile
+          // （红蓝对抗 F7：曾用 type≠0 代读，幽灵树残型被误砍 → 幽灵树掉木材；
+          //   下游 dropFairyWood 同根 type 读只随此门可达，自动封闭）
+          if (st.hasTile(px, ty0)) {
             if (TREE_SHAKEABLE_SHEETS.has(sheetOf(t))) { hit = true; break; }
             if (st.isSolid(px, ty0)) break;               // SolidTile 非树截停（不置 flag3）
           }

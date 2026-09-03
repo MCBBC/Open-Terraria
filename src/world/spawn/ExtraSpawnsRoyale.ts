@@ -129,7 +129,10 @@ function iterateDownToFloor(
     if (!st.inBounds(x, i)) continue;
     const idx = st.idx(x, i);
     const tid = st.type[idx];
-    if (tid === 0 || (st.wire[idx] & TileStore.WIRE_ACTUATED) !== 0) continue;  // !nactive
+    // ★RD-F7（同域顺带）：首门=tile.active()（ExtraSpawnPointManager.cs:405）——幽灵
+    //  残型（flags=0,type≠0）非地板。致动位跳过为既有口径（登记：原版 active() 含
+    //  已致动格,此处致动格不承地板=非幽灵域偏差,另批处理,本批不动）
+    if (!st.hasTile(x, i) || (st.wire[idx] & TileStore.WIRE_ACTUATED) !== 0) continue;
     // vanilla: active && (extraLiquid||liquid<=0) && tileSolid[type] && !remix 195/474 排除
     if ((extraLiquid || st.liquid[idx] <= 0) && TileStore.SOLID_LUT[tid] === 1) return i;
   }
@@ -192,15 +195,18 @@ export function isAreaValidSpawnLite(st: TileStore, floorX: number, floorY: numb
       if (!st.inBounds(i, j)) continue;
       const idx = st.idx(i, j);
       const tid = st.type[idx];
-      const actuated = (st.wire[idx] & TileStore.WIRE_ACTUATED) !== 0;
-      if (actuated) continue;                          // vanilla Main.tile==null 同态跳过
       if (j === floorY - 1) {
-        // 底邻格伤害判定（Collision.CanTileHurt :38266）+ 135 门
+        // 底邻格伤害判定（Collision.CanTileHurt :38266）+ 135 门。
+        // ★RD-F7：门=tile2.active()（Player.cs:38252）——曾以 get()≠0（type 裸读）
+        //  代 active 位,幽灵残型底邻误拒
         const below = st.get(i, j + 1);
         const bs = sheetOf(below);
-        if (below !== 0 && (bs === 135 || HURT_TILE_SHEETS.has(bs))) return false;
+        if (st.hasTile(i, j + 1) && (bs === 135 || HURT_TILE_SHEETS.has(bs))) return false;
       }
-      if (tid !== 0) {
+      // ★RD-F7：主门=tile.nactive()（Player.cs:38247）——幽灵残型（flags=0,type≠0）
+      //  与已致动格同跳 135/实心面（SolidCollision 语义=isActive 系）;曾以 tid≠0+
+      //  致动位拆判,幽灵格 135/实心面直通误拒
+      if (st.isActive(i, j)) {
         if (sheetOf(tid) === 135) return false;
         // SolidCollision 主门（tileSolid && !tileSolidTop ≈ SOLID_LUT 且非平台）
         if (TileStore.SOLID_LUT[tid] === 1 && !TILE_DEFS[tid]?.platform) return false;
@@ -270,7 +276,10 @@ function specializedFloorOk(
   st: TileStore, x: number, y: number, settings: ExtraSpawnSettings,
   acceptedPoints: readonly ExtraSpawnPoint[], sep: number,
 ): boolean {
-  const leftActive = st.get(x - 1, y) !== 0, rightActive = st.get(x + 1, y) !== 0;
+  // ★RD-F7：左右邻门=leftTile.active()/rightTile.active()（ExtraSpawnPointManager.cs
+  //  :236/:240 `if (leftTile.active() && (…bad 类型表…))` 带门式）——曾以 get()≠0
+  //  （type 裸读）代 active 位,幽灵残型邻格误拒;中格 tile.type 仍裸读（原版无门）
+  const leftActive = st.hasTile(x - 1, y), rightActive = st.hasTile(x + 1, y);
   const lt = sheetOf(st.get(x - 1, y)), rt = sheetOf(st.get(x + 1, y)), tt = sheetOf(st.get(x, y));
   const badFloor = (t: number): boolean =>
     t === 135 || t === 48 || t === 232 || t === 750 || BOULDER_SHEETS.has(t);
@@ -354,7 +363,10 @@ function boxClearFail(st: TileStore, px: number, py: number): boolean {
       if (x < 0 || yy < 0 || x >= st.w || yy >= st.h) continue;
       const idx = st.idx(x, yy);
       const tid = st.type[idx];
-      if (tid === 0 || (st.wire[idx] & TileStore.WIRE_ACTUATED) !== 0) continue;
+      // ★RD-F7：主门=Collision.SolidCollision（Utils.cs:548 调用;Collision.cs:2725
+      //  `!inActive() && active() && tileSolid && !tileSolidTop`）——isActive 系语义,
+      //  幽灵残型=空（曾以 tid≠0+致动位拆判,幽灵格直通挡盒）
+      if (!st.isActive(x, yy)) continue;
       if (dy === 0) return true;                        // 底行即足底挡盒（含实心/台面）
       if (TILE_DEFS[tid]?.solid) return true;           // 盒身实心阻挡
     }
@@ -364,9 +376,10 @@ function boxClearFail(st: TileStore, px: number, py: number): boolean {
 function isLandedFloor(st: TileStore, px: number, fy: number): boolean {
   if (!st.inBounds(px, fy)) return false;
   const idx = st.idx(px, fy);
-  const tid = st.type[idx];
-  if (tid === 0 || (st.wire[idx] & TileStore.WIRE_ACTUATED) !== 0) return false;
-  return TileStore.SOLID_LUT[tid] === 1;
+  // ★RD-F7：落地锚=tile2.active() && !tile2.inActive() && tileSolid（Utils.cs:560）
+  //  ——isActive 系语义,幽灵残型不承落地锚（曾以 tid≠0+致动位拆判,幽灵格误承）
+  if (!st.isActive(px, fy)) return false;
+  return TileStore.SOLID_LUT[st.type[idx]] === 1;
 }
 function hurtLiquidWallBad(st: TileStore, px: number, py: number, settings: ExtraSpawnSettings): boolean {
   for (let dx = -1; dx <= 0; dx++) {

@@ -4057,8 +4057,10 @@ export class Enemy extends Entity {
   private dummyAI(game: GameHooks) {
     const st = game.world.store;
     const [ax, ay] = this.dummyAnchor ?? [-1, -1];
-    // 锚 tile 378 消失 → 失活（cs:40886-40889）
-    if (ax < 0 || !st.inBounds(ax, ay) || st.type[st.idx(ax, ay)] !== DUMMY_TILE_ID) {
+    // 锚 tile 378 消失 → 失活（1457 NPC.cs:39221-39223 `(!active() || type != 378)`——
+    //   active() 位本体读 hasTile。红蓝对抗 F5：曾漏该门只查 type，幽灵残型 378 锚误判存活）
+    if (ax < 0 || !st.inBounds(ax, ay)
+      || !st.hasTile(ax, ay) || st.type[st.idx(ax, ay)] !== DUMMY_TILE_ID) {
       this.dead = true;
       return;
     }
@@ -7147,9 +7149,11 @@ export class Enemy extends Entity {
       this.ai0 = Math.floor(this.cx / TILE);
       this.ai1 = Math.floor(this.cy / TILE);
     }
-    // 锚点格失活 → 死亡(原版 :22608-22620)
+    // 锚点格失活 → 死亡（1457 NPC.cs:22729-22734 `if (!Main.tile[ai0,ai1].active())
+    //   { life=-1; HitEffect(); active=false; return; }`——active() 位本体读 hasTile。
+    //   红蓝对抗 F4：曾用 type===0 代读 active 位，幽灵残型锚（flags=0,type≠0）漏判存活）
     if (this.ai0 < 0 || this.ai1 < 0 || !st.inBounds(this.ai0, this.ai1)
-      || st.type[st.idx(this.ai0, this.ai1)] === 0) {
+      || !st.hasTile(this.ai0, this.ai1)) {
       this.dead = true;
       return;
     }
@@ -12203,7 +12207,9 @@ export class Enemy extends Entity {
           // :21109 玩家窗（num95=0）：仅 (sx==ptx && sy==pty) 排除；自身窗（num94=6）
           if (sx === ptx && sy === pty) continue;
           if (Math.abs(sy - mty) <= 6 && Math.abs(sx - mtx) <= 6) continue;
-          if (!st.inBounds(sx, sy) || st.get(sx, sy) !== 0) continue;
+          // :21216 占用判定 = !nactive()（nactive 门读 isActive）——红蓝对抗 F13：
+          //   曾用 type≠0 代读，幽灵残型格被误排（原版幽灵=合法落点）
+          if (!st.inBounds(sx, sy) || st.isActive(sx, sy)) continue;
           if (st.liquid[st.idx(sx, sy)] > 0 && st.liquidType[st.idx(sx, sy)] === 2) continue;
           let ok = true;
           for (let dx2 = -2; dx2 <= 2 && ok; dx2++) {
@@ -12246,7 +12252,9 @@ export class Enemy extends Entity {
         for (let sy = Math.max(0, mty - 20); sy < Math.min(st.h, mty + 10); sy++) {
           for (let sx = Math.max(0, mtx - 10); sx < Math.min(st.w, mtx + 10); sx++) {
             const t = st.get(sx, sy);
-            if (t && TILE_DEFS[t]?.vanilla?.sheet === 50) books.push([sx, sy]);
+            // :62972 `!tile.active() || tile.type != 50 → continue`——active() 位本体读
+            // hasTile（红蓝对抗 F14：曾用 truthy type 代读，幽灵书残型误当书锚）
+            if (st.hasTile(sx, sy) && TILE_DEFS[t]?.vanilla?.sheet === 50) books.push([sx, sy]);
           }
         }
         if (books.length > 0) {
@@ -13056,7 +13064,7 @@ export class Enemy extends Entity {
             if (Math.abs(my - pty) <= 8 && Math.abs(mx - ptx) <= 8) continue;   // :41381 玩家 8 格禁圈
             if (Math.abs(my - tty) <= 3 && Math.abs(mx - ttx) <= 3) continue;   // :41381 塔 3 格禁圈
             if (!st.inBounds(mx, my)) continue;
-            if (st.get(mx, my) !== 0) continue;               // :41384 !nactive()（须空格）
+            if (st.isActive(mx, my)) continue;                // :41384 !nactive()（须空格）——nactive 门读 isActive（红蓝对抗 F13：曾用 type≠0 代读,幽灵格误排落点）
             if (st.liquid[st.idx(mx, my)] > 0 && st.liquidType[st.idx(mx, my)] === 2) continue;   // :41386 lava
             let solid5 = false;                               // :41387 SolidTiles 5×5（任一实心即弃）
             for (let sx = mx - 2; sx <= mx + 2 && !solid5; sx++) {

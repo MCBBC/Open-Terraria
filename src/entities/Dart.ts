@@ -760,10 +760,13 @@ export class TrapShot extends Entity {
       return;
     }
     if (this.kind === 'fireworkFountain') {
-      // 锚点 tile 必须仍是 338（AI_073 :29371-29377，否则 Kill）
+      // 锚点 tile 必须仍是 338（AI_073 1457 Projectile.cs:30982-30986
+      //   `tile3 == null || !tile3.active() || tile3.type != 338 → Kill`——active()
+      //   位本体读 hasTile。红蓝对抗 F6：曾只查 type，幽灵残型 338 锚误判存活不 Kill）
       const T338 = TILE_BY_KEY['v_338_fireworkfountain'] ?? -1;
       const st = game.world.store;
-      if (!st.inBounds(this.ax, this.ay) || st.type[st.idx(this.ax, this.ay)] !== T338) {
+      if (!st.inBounds(this.ax, this.ay)
+        || !st.hasTile(this.ax, this.ay) || st.type[st.idx(this.ax, this.ay)] !== T338) {
         this.dead = true;
         return;
       }
@@ -1386,6 +1389,11 @@ export class Dart extends Entity {
       for (let bx = Math.floor(this.x / TILE); bx <= Math.floor((this.x + this.w - 0.01) / TILE); bx++) {
         for (let by = Math.floor(this.y / TILE); by <= Math.floor((this.y + this.h - 0.01) / TILE); by++) {
           if (!sst.inBounds(bx, by)) continue;
+          // ★幽灵保域（2026-09-04 F3a）：碎晶首门 = 原版 :59031-59033
+          //  `if (tile == null || !tile.active()) continue;`（KillTile :64041 头门
+          //  同语义再兜一层）——DirtBallProj:189/Arrow:5034 两载体同款已修,
+          //  此处补 Dart 载体漏网：幽灵晶簇（flags=0,type≠0）不碎不掉落
+          if (!sst.hasTile(bx, by)) continue;
           if (SHATTER_SET.has(sst.get(bx, by))) game.breakTile?.(bx, by);
         }
       }
@@ -1558,11 +1566,19 @@ export class Dart extends Entity {
           const below2 = sst.inBounds(prevTx, prevTy + 2) ? sst.get(prevTx, prevTy + 2) : 0;
           let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
           const onConveyor = below === T_CONV_L || below === T_CONV_R;   // ★R8 F1:传送带来因单列
-          if (!noPlace && below === 0) noPlace = true;
-          else if (!noPlace && below2 === 0 && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;
+          // ★幽灵保域（2026-09-04 F3b）：支撑判定 = BlockBelowMakesSandFall 三支的
+          //  nactive 门（WorldGen.cs:87880/:87884/:87888;nactive=active&&!致动
+          //  =TileStore.isActive,DirtBallProj blockBelowMakesSandFallAt:70-76 同口径
+          //  逐支照抄——裸 type≠0 代读漏幽灵/致动两态）——幽灵格=未激活=下方空
+          //  →不放,防放置即再落（FallingBlock.ts:95-105 同族口径）
+          if (!noPlace && !sst.isActive(prevTx, prevTy + 1)) noPlace = true;
+          else if (!noPlace && !sst.isActive(prevTx, prevTy + 2) && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;
           else if (!noPlace && below === T_STALAC) noPlace = true;
+          // ★幽灵保域（2026-09-04 F3b）：放置占位门 = :79246
+          //  `!Main.tile[num15,num16].active()`（hasTile=纯 active 位）——
+          //  幽灵格（flags=0,type≠0）视为空可落格,沙覆盖残型直铺
           if (T_SAND !== undefined && !noPlace && sst.inBounds(prevTx, prevTy)
-            && sst.get(prevTx, prevTy) === 0) {
+            && !sst.hasTile(prevTx, prevTy)) {
             sst.setTile(prevTx, prevTy, T_SAND);
           }
           // ★R8 F1(:79260-79266 传送带重挂档):蚁狮沙球落传送带(421/422)→不放沙但

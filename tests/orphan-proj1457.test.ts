@@ -275,9 +275,9 @@ describe('L2 ChloroSporeCloud 尾孢子零伤 / ×3 加速老化 / 型级 IDStat
 // ================= A④ 1129 大爆盒 ownerHitCheck + timeLeft=5 =================
 
 describe('A④ ChloroBladeSlam(SetDefaults :3346-3360 + AI_209 :70705)', () => {
-  it('ownerHitCheckDistance=1000 门：owner 超距 (>1000px) 时盒内重叠敌零结算;拉近后恢复(:11896/:12416)', () => {
+  it('ownerHitCheckDistance=1000 门：距离段锚=弹体 Center(R2-F1 2026-09-03 勘误)——盒内敌距弹心恒 <1000,owner 超距只经 LOS 段(:12415-25);LOS 清通则照结算', () => {
     const { world } = mkWorld();
-    // 盒锚 (200,420) 128×96：敌心 (240,434) 在盒内
+    // 盒锚 (200,420) 128×96：敌心 (240,434) 在盒内 → 距弹心 (264,468) ≈42px
     const runCase = (ownerCx: number): number => {
       const e = mkEnemy(1, 240, 434);
       const g = mkHooks([e], world, { cx: ownerCx, cy: 430 });
@@ -285,8 +285,10 @@ describe('A④ ChloroBladeSlam(SetDefaults :3346-3360 + AI_209 :70705)', () => {
       for (let i = 0; i < 8; i++) s.fixedUpdate(1 / 60, g);
       return e.hurtLog.length;
     };
-    expect(runCase(1560)).toBe(0);        // 距 owner ≈1320 >1000 → CanHitWithMeleeWeapon 拒
-    expect(runCase(230)).toBe(1);         // 邻近恢复命中
+    // 空 world 无墙 → owner↔ent 四射线全通 → 照结算（距离段不再看 owner——
+    // 旧锚把本例钉成 0 是玩家中心语义的陈旧金标；判别例=chloroslam 套的巨盒贴玩家拒例）
+    expect(runCase(1560)).toBe(1);
+    expect(runCase(230)).toBe(1);         // 邻近照常命中
   });
   it('timeLeft=5 → 第 5 拍末即亡（ai[0]>20 为永不可达死代码,寿命曾虚置 21+ 拍）', () => {
     const { world } = mkWorld();

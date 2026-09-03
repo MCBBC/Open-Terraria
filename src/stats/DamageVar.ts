@@ -12,7 +12,8 @@
  *  ① 离散档 —— rand.Next(-15,16) ∈ [-15,15] 共 31 档整数乘区，非连续均匀；
  *  ② 银行家舍入 —— C# Math.Round 默认 MidpointRounding.ToEven：x.5 取偶数
  *    （2.5→2、3.5→4）。JS Math.round 是 half-up（2.5→3），中点档位差一档；
- *  ③ luck 重掷取极值 —— luck>0 时以 |luck| 概率重掷取 max、luck<0 取 min。
+ *  ③ luck 重掷取极值 —— luck>0 时以 |luck| 概率重掷取 max、luck<0 取 min；
+ *  ④ float32 域（★SW-T1 2026-09-04 补）——原版乘链逐级 float32 舍入，见 tiered。
  *
  * 调用点全景（旧实现三处形态全部收编于此）：
  *  · stats/ScaleStats.damageVar——委托到本模块（敌弹 EVP/爆炸/荆棘等既有消费面）；
@@ -32,11 +33,18 @@ export function toEvenRound(x: number): number {
   return fl % 2 === 0 ? fl : fl + 1;
 }
 
-/** 单次 ±15% 离散档乘积（float32 语义近似：C# 乘法走 float，JS double 差值
- *  远小于档间量化粒度，按双精度直算；不做 fround 以免破坏既有掷流测试基线）。 */
+/** 单次 ±15% 离散档乘积——★SW-T1 2026-09-04：float32 逐级精确化（推翻旧"double
+ *  直算、不做 fround"近似）。原版全式在 float32 域：`dmg * (1f + (float)tier * 0.01f)`
+ *  （Main.cs:67102），每级一次向偶舍入；double 直算在 ~0.31% 的 (base,tier) 组合
+ *  （如 50×+9 档：原版 54、double 55）越中点差 ±1，违反"反编译唯一标杆"。
+ *  精确性论证：tier(int,≤5bit)×f32(0.01) 双精度内精确 → fround=正确舍入的 float32
+ *  乘积；1+x（x∈[0.85,1.15] float32）双精度内精确 → fround=C# float 加法；
+ *  两 float32 之积 ≤48bit 双精度内精确 → fround=C# float 乘法；Math.Round 收
+ *  float 加宽 double（无损）后 ToEven。 */
 function tiered(base: number, rnd: () => number): number {
   const tier = Math.floor(rnd() * 31) - 15;      // rand.Next(-15,16)
-  return base * (1 + tier * 0.01);
+  const factor = Math.fround(1 + Math.fround(tier * Math.fround(0.01)));
+  return Math.fround(Math.fround(base) * factor);
 }
 
 /** Main.DamageVar 完整体。rnd 可注入确定性随机源（单测/对拍）。 */

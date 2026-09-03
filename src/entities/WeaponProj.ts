@@ -5005,10 +5005,13 @@ export class GrenadeProj extends Entity {
     this.ai0 += 1;
     const gate = bombGravityGateOf(this.projId);
     if (gate === null) {                       // 655 蜂巢（AI_025）：无门恒重力
-      // ★655 钳是原版本相（aiStyle25 :26679-26686 `velocity.Y>16f→16f` 先于重力加),
-      //   勿随 AI_016 去钳一并移除;增量 0.2 vs 原版 0.3（:26740-26742 else 支)为
-      //   既有近似,不在本批范围（SW-N1 备案）。
-      this.vy = Math.min(this.vy + 0.2, 16);
+      // ★655 钳是原版本相（aiStyle25 :26684-26687 `if (velocity.Y > 16f) velocity.Y = 16f`
+      //   先于重力加),勿随 AI_016 去钳一并移除。
+      // SW-W1 2026-09-04：增量 0.2→0.3（:26738-26741 else 支逐字,SW-N1 备案清偿）
+      //   ——序对齐原文「先钳后加」:终端速度=每拍钳 16 再 +0.3=16.3,非旧
+      //   「先加后钳」的恒 16（0.3 也已由 sw-w1 微物理回归钉面）。
+      if (this.vy > 16) this.vy = 16;
+      this.vy += 0.3;
       return true;
     }
     if (this.ai0 <= gate) return false;        // 门未开：出手直飞 N tick 零重力
@@ -5457,8 +5460,11 @@ export class GrenadeProj extends Entity {
         }
       }
     }
-    // 旋转 = 滚动（AI_016 :48399-48405：519 专属 ×0.06 / 余族 ×0.1——519 曾共用 0.1）
-    this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
+    // SW-W1 2026-09-04：滚转自此处迁至重力门【后】（原版 :48400-48407 位,AI_016
+    //   函数尾）——旧位在粘性扫描（:47821）前,两宗时序差:滚行拍读摩擦（:48382
+    //   ×0.97）前的 vx 快 ~3%;贴附拍 scan 已清 vx（:47871）原版增量恰 0 而旧位
+    //   仍吃扫描前 vx 多一次增量。粘性路/普通路各自 bombGravityStep 后重挂（同
+    //   SW-W1 标记）;655=AI_025 走 ×0.06 专支（普通路重力门前,原位序不同）。
     // ---- 粘性族（AI_016 :44325-44390）：tileCollide=false 不碰块反弹；
     //      盒外扩 ±1..+2 格扫实心（跳过平台），4px 内缩重叠 → velocity=(0,-0.2) 贴附 ----
     if (STICKY_PROJ.has(this.projId)) {
@@ -5604,6 +5610,11 @@ export class GrenadeProj extends Entity {
       //   贴附拍 scan 置 vy=−0.2 → 门开拍 +0.2 净 0 悬停;门未开拍保持 −0.2 上漂
       //   =原文本相）
       this.bombGravityStep();
+      // SW-W1 2026-09-04：AI_016 尾段滚转（:48400-48407,粘性路）——门【后】:
+      //   贴附拍 scan 置 vx=0 → 增量恰 0;滚行/飞行拍读门后 vx（门未开拍原版
+      //   rotation 同样恒跑,故置 bombGravityStep 早退之外）。STICKY_PROJ 全员
+      //   AI_016 滚转档（134/303/338-341/776-810/930 atan2 族不入粘性集）。
+      this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
       this.x += this.vx;
       this.y += this.vy;
       if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
@@ -5616,12 +5627,20 @@ export class GrenadeProj extends Entity {
     // SW-H1 2026-09-03：引信烟尘（:48048-48055/:48285-48322 在 AI 段重力门
     //   （:48377）之前取速度——普通路径（1086 非 STICKY 落此）插在门步进前=原版同序）
     this.fuseSmoke(game);
+    // SW-W1 2026-09-04：655 蜂巢 AI_025 滚转（:26679-26682 `if (type != 1055)
+    //   rotation += velocity.X * 0.06f`,位=墙推支后/clamp+重力前——与 AI_016 的
+    //   门后位相反）——曾混入 AI_016 通支读 ×0.1（系数错+位序错,见上方迁址注）。
+    if (this.projId === 655) this.rot += this.vx * 0.06;
     // SW-I1 2026-09-03：重力门（:48332 ai[0]++ → :48377）——炸弹族 ai[0]>5、
     //   手雷族 >10 前零重力（出手直飞）;门值/摩擦/911 钳在 bombGravityStep。
     //   655 蜂巢（AI_025）无门恒重力（函数返 null 分支）
     //   SW-L1 2026-09-03 I-1：摩擦【只在】此步进内（原版唯一摩擦点 :48377-48385），
     //   下方落地支不再复乘——返回值（门是否已开）无消费面,不再接
     this.bombGravityStep();
+    // SW-W1 2026-09-04：AI_016 尾段滚转（:48400-48407,普通路）——重力门【后】,
+    //   滚行拍吃 ×0.97 后 vx（:48382 摩擦→:48406 滚转）;519 专属 ×0.06（:48402）。
+    //   655=AI_025 不入此支（上方 ×0.06 专支）。
+    if (this.projId !== 655) this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
     const body = {
@@ -5631,11 +5650,19 @@ export class GrenadeProj extends Entity {
       stepUp: false, dropThrough: false, stepDownGate: 'gravity' as const,
     };
     moveAndCollide(body, game.world, this.vx, this.vy);
-    // 655 蜂巢专属（:17856-17867）：落地 vy>5 → 反弹×0.2（无摩擦档）；撞墙即裂
+    // 655 蜂巢专属（:19379-19391,旧注 :17856 系 Update 位移段误标）：Y 反弹门
+    //   `velocity.Y != lastVelocity.Y && lastVelocity.Y > 5f` → HitTiles+音 0+
+    //   vy=lastVy×-0.2（只弹不杀）;X 变化（撞墙）→ Kill 裂蜂。
+    //   SW-W1 2026-09-04 两修:① Y 钳未达反弹门时原版不写 vy=TileCollision 终值
+    //   （钳速残差存活,与 SW-N1 软着陆/AI_016 通支同构）——旧软着陆支 vy=0、顶撞
+    //   支整缺（vy 保持反弹负值 → 贴顶悬挂数拍）,均改残差回写 body.y-bodyY0
+    //   （ε 间隙效应由贴面吸附吸收,论证见下方 hitHead 支）;② 软着陆支旧 early-
+    //   return 跳过 hitWall 判 → 落地同拍蹭墙漏 Kill,归并后序对齐原文（先 Y 后 X）。
     if (this.projId === 655) {
       if (body.onGround && lastVy > 5) this.vy = -lastVy * 0.2;
-      else if (body.onGround) { this.vy = 0; this.x = body.x; this.y = body.y; return; }
-      else { this.x = body.x; this.y = body.y; }
+      else if (body.hitHead || body.onGround) this.vy = body.y - bodyY0;
+      this.x = body.x;
+      this.y = body.y;
       if (body.hitWall) this.killBeehive(game, lastVx, lastVy);
       return;
     }
@@ -5663,8 +5690,18 @@ export class GrenadeProj extends Entity {
     //   再下拍起休止态每拍恰一次 ×0.97）。旧 `vy=0` 强制吞残差 → 摩擦提前 1 拍
     //   （本 debt 相位差本体）。残差=0（休止稳态/贴面出生）时两版同值。
     if (body.hitHead) {
-      this.vy = 0;    // 撞顶停止上浮（原版钳残差+:2447 ε0.01——瞬态差 1 拍摩擦相位,
-    } else if (body.onGround) {   //  稳态等价;备案见报告,勿在此加 ε 破坏贴面稳态）
+      // SW-W1 2026-09-04：撞顶残差回写（=本拍位移,负值）——原版 TileCollision 撞顶
+      //   返「到贴面距+ε0.01」（Collision.cs:2451 gravDir==1 支）,残差存活到下拍:
+      //   下拍 AI 门 vy≠0 无摩擦、贴面复读归零 → 摩擦第 3 拍起（vanilla 相位）。
+      //   旧 vy=0 → 次拍门假 vy==0 摩擦提前 1 拍（SW-N1 备案复核翻案）。
+      //   ★ε 本体仍不字面接入,且理由升级:本仓 moveAndCollide 贴面吸附
+      //   （physics/TileCollision.ts:307 b.y=bestTop 零间隙+b.vy=0）已把 ε 的
+      //   间隙效应结构化吸收——原版 ε 造 0.01px 间隙恰是为了让下拍复读返回
+      //   恰 0（-(0.01)+0.01=0,vanilla 摩擦第 3 拍恢复）,本仓贴面起拍位移恒 0
+      //   同值;若在此字面 +0.01,下拍残差=0+0.01≠0 → 门恒假,飞行期摩擦整段
+      //   缺失直到下次落地（破坏相位,非 1 拍瞬态）。位置差 ≤0.01px 无消费面。
+      this.vy = body.y - bodyY0;
+    } else if (body.onGround) {
       if (lastVy > 0.7 && this.projId !== 102) {
         this.vy = lastVy * -0.4;
         if (this.projId === 29) this.vy *= 0.8;

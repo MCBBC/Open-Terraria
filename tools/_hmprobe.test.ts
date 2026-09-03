@@ -412,6 +412,7 @@ function meteorVanillaMirror(
   const hmLog: number[] = [];
   g.__swOnRoll = (value: number) => {
     hmLog.push(value);
+    (g as { __swRollCount?: number }).__swRollCount = hmLog.length; // ★IIIII216b: ALT 桩 p 行流位置
   };
   // ★NB-A2：段界掷数表（IIII177 的 __swSeg 标记位记录 hmLog 长度）→ phases.txt
   const segMarks: string[] = [];

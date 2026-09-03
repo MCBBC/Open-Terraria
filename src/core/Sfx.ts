@@ -873,7 +873,9 @@ export class Sfx {
    *  ★node 单测环境无 document——守卫跳过(失焦闸纯浏览器行为) */
   private static audioGateHooked = false;
   private static hookAudioGateOnce(): void {
-    if (Sfx.audioGateHooked || typeof document === 'undefined' || typeof window === 'undefined') return;
+    // window 只探可调用面——测试桩可能给局部 window 对象（无 addEventListener）
+    if (Sfx.audioGateHooked || typeof document === 'undefined'
+      || typeof window?.addEventListener !== 'function') return;
     Sfx.audioGateHooked = true;
     document.addEventListener('visibilitychange', () => {
       Sfx.visHidden = document.hidden;

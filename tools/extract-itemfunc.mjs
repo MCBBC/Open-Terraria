@@ -46,8 +46,24 @@
 //   无条目仍只 placeStyle 最小新增（金标 24 行面零 diff）;placeStyle 维与旧
 //   evalPlaceStyles 金标逐 id 对拍,漂移即 process.exit(1) 拒产。
 //   ITEMFUNC_DIFF=<path> 可导出 {fixed,deleted,added} 三账本供审计。
+// 2026-09-04 ★SW-V1 DefaultTo* 全族参数化展开（共享算式盲区根治）：
+//   defaultToBase 六武器族 → 21 helper 全族（PlaceableTile 双参/Bomb/Solution/Whip/
+//   Kite/Vanitypet/CapturedCritter/Torch/MusicBox/Banner/Monolith/SeaShell/GolfBall/
+//   GolfClub/LawnMower/Guitar/QuestFish/VoiceOverrideAccessory）+ 实参升级
+//   （(ushort) 显式转换/`type` 线性算式 `1086+(type-5594)`/AmmoID.X 枚举——后者复用
+//   combat 提取器 AMMO_ID 权威表,新增 export）。四批手工回填面转由解析直出：
+//   items.ts PLACE_STYLE_BACKFILL_1458 helper 行/EXTRACT_PATCH 重叠字段/vanillaItemFunc
+//   FUNC['5594']['5595']['4049']——金标逐字段对拍全一致（含 musicBoxStyles 逆表 101/
+//   101、vanilla-whips.json 18/18）。合并层扩：v1 无条目且 HELPER_SEED 命中（fallthrough
+//   组非末支等形态）→ 整条按基态结构值落表（旧口径只 placeStyle 单键最小新增）;
+//   种子布尔取消 cancelFalseBooleans（段内无条件 `X=false;` 尾随种子→删键,last-wins
+//   保 5526/2611 型 false→true 双赋值;1325 型变体支伪值仍走合并层 1→0 记录）。
+//   金标修正面（重产生效时）:4058/4381 useAmmo 1→40（旧 Bow 分支硬编码 1 系笔误,
+//   AmmoID.Arrow=40）+4682/4702 ranged 键删除（C# 显式 false,与 combat json 同值）。
 import { readFileSync, writeFileSync } from 'node:fs';
-import { EXTRA_USETURN } from './extract-itemcombat.mjs';
+// SW-V1 2026-09-04: 增 AMMO_ID——DefaultTo* 参数化展开需解 AmmoID.X 枚举实参
+// （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
+import { EXTRA_USETURN, AMMO_ID } from './extract-itemcombat.mjs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const OUT = process.env.ITEMFUNC_OUT ?? `${ROOT}/game/src/data/vanilla-itemfunc.json`;
@@ -397,7 +413,7 @@ function scanSource() {
  *  注释剥除（// 与 /* *\/——v1 残文层同口径,防注释伪赋值入面）。 */
 function evalFields(text, id) {
   const clean = text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-  const f = defaultToBase(clean);
+  const f = defaultToBase(clean, id);   // SW-V1 2026-09-04: 种子随 id 解算式实参
   const re = new RegExp(scanSource(), 'g');
   let m;
   while ((m = re.exec(clean))) {
@@ -452,6 +468,9 @@ function fieldsResolveSwitch(sw, body) {
   for (const g of groups) {
     const bodyText = sliceHoles(body, g.bodyRec);
     for (const id of g.members) {
+      // SW-V1 2026-09-04: helper 种子登记（合并层"helper 种子 id 整条落表"判据——
+      // fallthrough 组非末支等 v1 段归属扫不到的 DefaultTo* 调用形态）
+      if (Object.keys(defaultToBase(bodyText, id)).length) HELPER_SEED.add(id);
       const f = evalFields(bodyText, id);
       for (const child of g.bodyRec.nested) {
         const cf = child.fields?.get(id);
@@ -700,34 +719,339 @@ const FIELDS = [
 ];
 
 const FUNC = {};
-/** DefaultTo 武器族基座（1458 Item.cs :48016/:48025/:48425-48470）：case 段内的
- *  辅助调用 → 基础字段（case 显式赋值随后在 FIELDS pass 覆盖——显式=终值）。
+// SW-V1 2026-09-04: DefaultTo* 种子 id 集（fieldsResolveSwitch 填充）——合并层对
+// 「v1 无条目」的 id 按基态结构值整条落表（旧口径只 placeStyle 最小新增）。
+const HELPER_SEED = new Set();
+// ================= ★SW-V1 2026-09-04 DefaultTo* 全族参数化展开（盲区根治批） =================
+// 此前 defaultToBase 只认武器族六 helper 且实参只认数字字面——Item.cs 的共享算式
+// helper（PlaceableTile 双参/Bomb/Solution/Whip/Kite/Vanitypet/CapturedCritter/
+// Torch/MusicBox/Banner/Monolith/SeaShell/GolfBall/GolfClub/LawnMower/Guitar/
+// QuestFish/VoiceOverrideAccessory）整族漏提,四批内容靠手工回填表承载
+// （items.ts PLACE_STYLE_BACKFILL_1458 / vanillaItemCombat.ts EXTRACT_PATCH /
+//   vanillaItemFunc.ts FUNC 手补）。展开语义逐条亲读 1457 Item.cs helper 函数体
+// （:47754-48660;1458 同位逐字节同文已 diff 确认）,金标=手工回填表逐字段对拍。
+//
+// 只记 FUNC 域字段（FIELDS 列 + 既有 noUseGraphic 惯例）;不在 FUNC 域的
+// width/height/useTime/useAnimation/shootSpeed/UseSound/value/rare/mountType/
+// headSlot/bodySlot/legSlot/accessory/vanity/flame/noWet/makeNPC/tileBoost
+// 仍不在本表面（combat/items 各自权威面承载）。
+
+/** 括号感知顶层逗号分割（helper 实参串 → 实参文本数组） */
+function splitArgs(text) {
+  const out = [];
+  let d = 0, cur = '';
+  for (const ch of text) {
+    if (ch === '(') d++;
+    else if (ch === ')') d--;
+    if (ch === ',' && d === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim() !== '') out.push(cur);
+  return out;
+}
+
+/** helper 实参求值：剥显式转换 (ushort)/(short)/(sbyte)/(uint)/(int)、剥 float 后缀 f、
+ *  `type` 线性算式按当前 id 求值（Item.cs 共享算式仅 数字/+/－/括号 与 type,如
+ *  `1086 + (type - 5594)`(:44027)/`type - 4367 + 766`(:37245)）;形参名/具名参数/
+ *  AmmoID 枚举等不可解 → undefined。 */
+function evalHelperArg(expr, id) {
+  if (expr === undefined) return undefined;
+  let s = expr.replace(/\(\s*(?:ushort|short|sbyte|uint|int)\s*\)/g, '').replace(/\s+/g, '');
+  if (/^[-+]?\d+$/.test(s)) return parseInt(s, 10);
+  if (/^[-+]?\d+\.\d+f$/.test(s) || /^[-+]?\d+f$/.test(s) || /^[-+]?\d+\.\d+$/.test(s)) return parseFloat(s);
+  if (!/\btype\b/.test(s)) return undefined;
+  if (!/^[\d()+-]+$/.test(s.replace(/\btype\b/g, ''))) return undefined;
+  return Function(`"use strict";return (${s.replace(/\btype\b/g, String(id))});`)();
+}
+
+/** ammo 形参：数字/算式 或 AmmoID.X 枚举（AMMO_ID 权威表,缺项 -1 兜底同 combat 提取器） */
+function evalAmmoArg(expr, id) {
+  if (expr === undefined) return undefined;
+  const em = /AmmoID\.(\w+)/.exec(expr);
+  if (em) return AMMO_ID[em[1]] ?? -1;
+  return evalHelperArg(expr, id);
+}
+
+/** 段内首个 `DefaultTo<name>( … )` 调用的实参串（括号配对,非首 `)` 截断）。
+ *  同名 helper 在同一 case 段重复调用不存在（全源审计）;text 须已剥注释
+ *  （defaultToBase 入口统一 strip,evalFields 传入的 clean 已剥）。 */
+function callOf(text, name) {
+  const re = new RegExp(`\\bDefaultTo${name}\\s*\\(`, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    let d = 1, j = m.index + m[0].length;
+    for (; j < text.length; j++) {
+      const ch = text[j];
+      if (ch === '(') d++;
+      else if (ch === ')') { d--; if (d === 0) break; }
+    }
+    return text.slice(m.index + m[0].length, j);
+  }
+  return undefined;
+}
+
+/** 布尔实参（hasAutoReuse: true 具名/位置 true）→ 1;false/缺席 → undefined（缺省） */
+function boolArg(expr) {
+  return expr !== undefined && /\btrue\b/.test(expr) ? 1 : undefined;
+}
+
+/** SW-V1: 种子布尔取消——case 段拓扑层残文（无条件语句面,剥条件块,同
+ *  lastFieldMatch 口径）里该字段【最后一次】显式布尔赋值为 false 时,取消
+ *  DefaultTo* 种子的 true。只作用于种子（helper 隐式值）,不动 FIELDS 显式面——
+ *  5526/2611 型 `autoReuse = false;…autoReuse = true;` 双赋值由 last-wins 保留
+ *  true（与 combat 提取器同口径）;1325 型「变体支内 true(v1 段回落伪值)+基态显式
+ *  false」不经此处（无种子）,由 F-STRUCT 合并层 1→0 记录（显式 false=提取事实）。
+ *  实证面（1457 Item.cs）:4682/4702 回力镖 ranged=false(:38561/:38650)、
+ *  5324/5329/5330 掘块权杖 consumable=false(:42257)、5481 复刻祭坛 consumable=
+ *  false(:43196)、5629 星星炮 ranged=false(:44242)、case(:35612) autoReuse=false、
+ *  case(:43121) useTurn=false。false 在条件块内的不取消（残文已剥块,基态口径）。 */
+const BASE_BOOLEANS = ['melee', 'ranged', 'magic', 'summon', 'noMelee', 'consumable', 'autoReuse',
+  'channel', 'torch', 'potion', 'notAmmo', 'useTurn'];
+function cancelFalseBooleans(f, text) {
+  if (!text) return;
+  const residue = segResidue(text);
+  for (const k of BASE_BOOLEANS) {
+    if (f[k] === undefined) continue;
+    const re = new RegExp(`(?:^|[^\\w.])${k} = (true|false);`, 'g');
+    let m, last = null;
+    while ((m = re.exec(residue))) last = m[1];
+    if (last === 'false') delete f[k];
+  }
+}
+
+/** DefaultTo* 全族基座（case 段内辅助调用 → 基础字段;case 显式赋值随后在
+ *  FIELDS pass 覆盖——显式=终值,种子先行=「先 DefaultTo* 后覆盖」源序常态）。
+ *  武器族六分支语义与旧版逐字段等价,仅扩实参面（AmmoID 枚举/线性算式）:
  *  · MagicWeapon(p,t,v[,autoReuse]) → useStyle5/magic/noMelee/shoot
  *  · RangedWeapon(p,ammo,t,v[,autoReuse]) → useStyle5/ranged/noMelee/shoot/useAmmo
- *  · Bow(t,v[,autoReuse]) = RangedWeapon(1,Arrow=1,…)（case 可覆写 shoot）
- *  · Staff(p,v,t,mana) = MagicWeapon(…,autoReuse:true)+mana（case 显式 mana 覆盖）
- *  · Spear(p,v,t) → useStyle5/melee+noMelee+noUseGraphic/shoot（投矛即弹体）
- *  · ThrownWeapon(p,t,v[,autoReuse]) → useStyle1/ranged/noMelee/consumable/shoot */
-function defaultToBase(seg) {
+ *  · Bow(t,v[,autoReuse]) = RangedWeapon(1,Arrow=40,…)（★旧版 useAmmo 硬编码 1
+ *    系笔误——1457 Item.cs:48427 `DefaultToRangedWeapon(1, AmmoID.Arrow,…)`,
+ *    AmmoID.Arrow=40;金标 vanillaItemCombat EXTRACT_PATCH '4058'/'4381' useAmmo 40）
+ *  · Staff(p,v,t,mana) = MagicWeapon(…,autoReuse:true)+mana（:48016 委托链）
+ *  · Spear(p,v,t) → useStyle5/melee+noMelee+noUseGraphic/shoot
+ *  · ThrownWeapon(p,t,v[,autoReuse]) → useStyle1/ranged/noMelee/consumable/shoot
+ *  新增族（helper 体逐行抄,行号=1457）:
+ *  · PlaceableTile(tile[,style=0]) :48494-48509 → createTile/placeStyle/useStyle1/
+ *    useTurn1/autoReuse/consumable（长手写已存量条目 :35986 case 4783 同值互证）
+ *  · PlaceableWall(wall) :48405-48416 → createWall/useStyle1/useTurn1/autoReuse/consumable
+ *  · Bomb(proj,speed) :47771-47783 → useStyle1/shoot/consumable/noMelee/noUseGraphic
+ *  · Solution(pid) :47800-47810 → shoot=pid-145/ammo=AmmoID.Solution=780/consumable
+ *  · Whip(p,dmg,kb,spd[,anim]) :47811-47827 → useStyle1/damage/knockBack/shoot/
+ *    noMelee/summon + 显式 autoReuse=false→0（体首行 :47813;1325 显式 false=提取事实同款）
+ *  · Kite(p) :47829-47840 = ThrownWeapon(p,15,8f) 后取反 consumable/ranged(:47834-47835)
+ *    +noUseGraphic/createTile 723 → shoot/useStyle1/noMelee/noUseGraphic/createTile
+ *  · Vanitypet(p,buff) :47937-47950 → damage0/useStyle1/noMelee/buffType/shoot
+ *  · CapturedCritter(npc) :48001-48014 → useStyle1/useTurn1/autoReuse/consumable/
+ *    createTile724/noUseGraphic
+ *  · Torch(style[,allowWater]) :48471-48487 → holdStyle1/autoReuse/consumable/
+ *    createTile4/placeStyle/useStyle1/useTurn1
+ *  · MusicBox(style) :48638-48652 → createTile139/placeStyle/useStyle1/useTurn1/
+ *    autoReuse/consumable
+ *  · Banner([style=0]) :47754-47760 = PlaceableTile(91,style)+width/height
+ *  · Monolith(tile[,style=0]) :47762-47769 = PlaceableTile(tile,style)
+ *  · SeaShell() :47967-47999 → createTile324/useStyle1/autoReuse/consumable +
+ *    嵌套 switch(type) 逐 id placeStyle(:47975-47996;default 支只赋 value)
+ *  · GolfBall(p) :35445-35460 → shoot/useStyle1/noMelee/noUseGraphic
+ *  · GolfClub(w,h) :48518-48530 → channel/useStyle8/holdStyle4/shoot722/noMelee
+ *  · LawnMower(w,h) :48532-48541 → useStyle11/holdStyle1/autoReuse
+ *  · Guitar() :48628-48636 → autoReuse/holdStyle5/useStyle12
+ *  · QuestFish() :27652-27657 → questItem
+ *  · VoiceOverrideAccessory(id) :47786-47798 → useStyle4
+ *  无 FUNC 域字段不展开（全族清单收口）:Minecart(:48398 mountType)/Headgear(:48594
+ *  headSlot)/Body(:48601 bodySlot)/Legs(:48608 legSlot)/Accessory(:48615 accessory)/
+ *  InfoAccessory(:48622 accessory+hasVanityEffects)。Food/HealingPotion 走
+ *  SetFoodDefaults 专道(:851 区块)不在此层。 */
+const STRIP_CACHE = new Map();
+function stripCommentsCached(text) {
+  let r = STRIP_CACHE.get(text);
+  if (r === undefined) {
+    r = text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+    if (STRIP_CACHE.size < 4096) STRIP_CACHE.set(text, r);
+  }
+  return r;
+}
+
+function defaultToBase(seg, id) {
   const f = {};
-  const auto = (m) => (m[0].includes('true') ? 1 : undefined);
+  // 注释只剥一次（20+ callOf 复用同一净文本;RESIDUE_CACHE 同思路防重剥）
+  const segClean = stripCommentsCached(seg);
   let m;
-  m = seg.match(/DefaultToMagicWeapon\(\s*(-?\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
-  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.magic = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
-  m = seg.match(/DefaultToRangedWeapon\(\s*(-?\d+)\s*,\s*(\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
-  if (m) { f.shoot = +m[1]; f.useAmmo = +m[2]; f.useStyle = 5; f.ranged = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
-  m = seg.match(/DefaultToBow\(\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
-  if (m) { f.shoot = 1; f.useAmmo = 1; f.useStyle = 5; f.ranged = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
-  m = seg.match(/DefaultToStaff\(\s*(-?\d+)\s*,\s*[\d.]+f?\s*,\s*\d+\s*,\s*(\d+)\s*\)/);
-  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.magic = 1; f.noMelee = 1; f.autoReuse = 1; f.mana = +m[2]; }
-  m = seg.match(/DefaultToSpear\(\s*(-?\d+)\s*,\s*[\d.]+f?\s*,\s*\d+\s*\)/);
-  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.melee = 1; f.noMelee = 1; f.noUseGraphic = 1; }
-  m = seg.match(/DefaultToThrownWeapon\(\s*(-?\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
-  if (m) { f.shoot = +m[1]; f.useStyle = 1; f.ranged = 1; f.noMelee = 1; f.consumable = 1; const a = auto(m); if (a) f.autoReuse = a; }
+  // —— 武器族（既有;SW-V1 扩实参面） ——
+  if ((m = callOf(segClean, 'MagicWeapon')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) {
+      f.shoot = proj; f.useStyle = 5; f.magic = 1; f.noMelee = 1;
+      const au = boolArg(a[3]); if (au) f.autoReuse = au;
+    }
+  }
+  if ((m = callOf(segClean, 'RangedWeapon')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id), ammo = evalAmmoArg(a[1], id);
+    if (proj !== undefined && ammo !== undefined) {
+      f.shoot = proj; f.useAmmo = ammo; f.useStyle = 5; f.ranged = 1; f.noMelee = 1;
+      const au = boolArg(a[4]); if (au) f.autoReuse = au;
+    }
+  }
+  if ((m = callOf(segClean, 'Bow')) !== undefined) {
+    const a = splitArgs(m);
+    if (evalHelperArg(a[0], id) !== undefined) {
+      f.shoot = 1; f.useAmmo = AMMO_ID.Arrow ?? 40; f.useStyle = 5; f.ranged = 1; f.noMelee = 1;
+      const au = boolArg(a[2]); if (au) f.autoReuse = au;
+    }
+  }
+  if ((m = callOf(segClean, 'Staff')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id), mana = evalHelperArg(a[3], id);
+    if (proj !== undefined && mana !== undefined) {
+      f.shoot = proj; f.useStyle = 5; f.magic = 1; f.noMelee = 1; f.autoReuse = 1; f.mana = mana;
+    }
+  }
+  if ((m = callOf(segClean, 'Spear')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) { f.shoot = proj; f.useStyle = 5; f.melee = 1; f.noMelee = 1; f.noUseGraphic = 1; }
+  }
+  if ((m = callOf(segClean, 'ThrownWeapon')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) {
+      f.shoot = proj; f.useStyle = 1; f.ranged = 1; f.noMelee = 1; f.consumable = 1;
+      const au = boolArg(a[3]); if (au) f.autoReuse = au;
+    }
+  }
+  // —— SW-V1 2026-09-04 新增族 ——
+  if ((m = callOf(segClean, 'PlaceableTile')) !== undefined) {
+    const a = splitArgs(m);
+    const tile = evalHelperArg(a[0], id);
+    if (tile !== undefined) {
+      const st = a.length > 1 ? evalHelperArg(a[1], id) : 0;
+      if (st !== undefined) {
+        f.createTile = tile; f.placeStyle = st;
+        f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1;
+      }
+    }
+  }
+  if ((m = callOf(segClean, 'PlaceableWall')) !== undefined) {
+    const a = splitArgs(m);
+    const wall = evalHelperArg(a[0], id);
+    if (wall !== undefined) {
+      f.createWall = wall; f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Bomb')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) {
+      f.useStyle = 1; f.shoot = proj; f.consumable = 1; f.noMelee = 1; f.noUseGraphic = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Solution')) !== undefined) {
+    const a = splitArgs(m);
+    const pid = evalHelperArg(a[0], id);
+    if (pid !== undefined) {
+      f.shoot = pid - 145; f.ammo = AMMO_ID.Solution ?? 780; f.consumable = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Whip')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) {
+      f.useStyle = 1; f.autoReuse = 0;
+      const dmg = evalHelperArg(a[1], id); if (dmg !== undefined) f.damage = dmg;
+      const kb = evalHelperArg(a[2], id); if (kb !== undefined) f.knockBack = kb;
+      f.shoot = proj; f.noMelee = 1; f.summon = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Kite')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) {
+      f.shoot = proj; f.useStyle = 1; f.noMelee = 1; f.noUseGraphic = 1; f.createTile = 723;
+    }
+  }
+  if ((m = callOf(segClean, 'Vanitypet')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id), buff = evalHelperArg(a[1], id);
+    if (proj !== undefined && buff !== undefined) {
+      f.damage = 0; f.useStyle = 1; f.noMelee = 1; f.buffType = buff; f.shoot = proj;
+    }
+  }
+  if ((m = callOf(segClean, 'CapturedCritter')) !== undefined) {
+    const a = splitArgs(m);
+    if (evalHelperArg(a[0], id) !== undefined) {
+      f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1; f.createTile = 724; f.noUseGraphic = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Torch')) !== undefined) {
+    const a = splitArgs(m);
+    const st = evalHelperArg(a[0], id);
+    if (st !== undefined) {
+      f.holdStyle = 1; f.autoReuse = 1; f.consumable = 1; f.createTile = 4; f.placeStyle = st;
+      f.useStyle = 1; f.useTurn = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'MusicBox')) !== undefined) {
+    const a = splitArgs(m);
+    const st = evalHelperArg(a[0], id);
+    if (st !== undefined) {
+      f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1; f.createTile = 139; f.placeStyle = st;
+    }
+  }
+  if ((m = callOf(segClean, 'Banner')) !== undefined) {
+    const a = splitArgs(m);
+    const st = a.length ? evalHelperArg(a[0], id) : 0;
+    if (st !== undefined) {
+      f.createTile = 91; f.placeStyle = st; f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'Monolith')) !== undefined) {
+    const a = splitArgs(m);
+    const tile = evalHelperArg(a[0], id);
+    if (tile !== undefined) {
+      const st = a.length > 1 ? evalHelperArg(a[1], id) : 0;
+      if (st !== undefined) {
+        f.createTile = tile; f.placeStyle = st; f.useStyle = 1; f.useTurn = 1; f.autoReuse = 1; f.consumable = 1;
+      }
+    }
+  }
+  if (callOf(segClean, 'SeaShell') !== undefined) {
+    // 嵌套 switch(type) 逐 id placeStyle（helper 体 :47975-47996;default 支不赋 placeStyle）
+    const PS = { 4071: 12, 4072: 6, 4073: 9, 2626: 3 };
+    f.useStyle = 1; f.autoReuse = 1; f.consumable = 1; f.createTile = 324;
+    if (PS[id] !== undefined) f.placeStyle = PS[id];
+  }
+  if ((m = callOf(segClean, 'GolfBall')) !== undefined) {
+    const a = splitArgs(m);
+    const proj = evalHelperArg(a[0], id);
+    if (proj !== undefined) { f.shoot = proj; f.useStyle = 1; f.noMelee = 1; f.noUseGraphic = 1; }
+  }
+  if ((m = callOf(segClean, 'GolfClub')) !== undefined) {
+    const a = splitArgs(m);
+    if (evalHelperArg(a[0], id) !== undefined) {
+      f.channel = 1; f.useStyle = 8; f.holdStyle = 4; f.shoot = 722; f.noMelee = 1;
+    }
+  }
+  if ((m = callOf(segClean, 'LawnMower')) !== undefined) {
+    const a = splitArgs(m);
+    if (evalHelperArg(a[0], id) !== undefined) {
+      f.useStyle = 11; f.holdStyle = 1; f.autoReuse = 1;
+    }
+  }
+  if (callOf(segClean, 'Guitar') !== undefined) {
+    f.autoReuse = 1; f.holdStyle = 5; f.useStyle = 12;
+  }
+  if (callOf(segClean, 'QuestFish') !== undefined) {
+    f.questItem = 1;
+  }
+  if (callOf(segClean, 'VoiceOverrideAccessory') !== undefined) {
+    f.useStyle = 4;
+  }
+  cancelFalseBooleans(f, segClean);   // SW-V1: 种子布尔被段内无条件 false 尾随→取消（见函数注）
   return f;
 }
 for (const [id, seg] of SEGS) {
-  const f = defaultToBase(seg);
+  const f = defaultToBase(seg, id);   // SW-V1 2026-09-04: 种子随 id 解算式实参（种子布尔取消在 defaultToBase 尾）
   for (const [name, re, type] of FIELDS) {
     const m = lastFieldMatch(seg, re);   // ★后写生效（首匹配→末匹配,见 lastFieldMatch 注）
     if (!m) continue;
@@ -754,7 +1078,10 @@ for (const [id, seg] of SEGS) {
     if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
   }
   for (const [id, f] of STRUCT) {
-    if (f.placeStyle !== undefined && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
+    // SW-V1 2026-09-04: DefaultTo* 种子 placeStyle 不在 PS_OLD 面（helper 形参赋值
+    // 是本批新解析面）——helper 种子 id 豁免"PS_OLD 缺值"比对;PS_OLD 有值时仍由
+    // 上一循环全等把关（显式赋值覆写种子的 id 两法同值,不会走到豁免）。
+    if (f.placeStyle !== undefined && !HELPER_SEED.has(Number(id)) && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
   }
   if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
   let fix = 0, del = 0, add = 0;
@@ -773,6 +1100,12 @@ for (const [id, seg] of SEGS) {
         if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
         else delete FUNC[id];
       }
+    } else if (HELPER_SEED.has(Number(id))) {
+      // SW-V1 2026-09-04: DefaultTo* 种子 id（fallthrough 组非末支等形态）——整条按
+      // 基态结构值落表,与组末支的 v1 条目同口径（不再是 placeStyle 单键最小新增）。
+      // 金标=vanillaItemFunc FUNC['5594']/['5595'] 与 EXTRACT_PATCH 重叠字段逐字段对拍。
+      FUNC[id] = { ...sf };
+      added.push(`${id}:${JSON.stringify(sf)}`); add++;
     } else if (sf.placeStyle !== undefined) {
       FUNC[id] = { placeStyle: sf.placeStyle }; added.push(`${id}:${sf.placeStyle}`); add++;
     }

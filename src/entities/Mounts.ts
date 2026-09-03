@@ -27,6 +27,7 @@ import { TILE } from '../core/constants';
 import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHitLine } from '../physics/LineOfSight';
+import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
 // ★终清波批：930 圣坦爆散 gore 段（GorePiece.newGore 通道,旧"无 API 不接"退役）
 import { GorePiece } from './GorePiece';
 import type { GameHooks } from './types';
@@ -2364,8 +2365,11 @@ export class SantankShellProj extends TownShot {
           pierce?: number, fromPlayer?: boolean) => boolean };
       if (e.dead) continue;
       if (box.x >= e.x + e.w || box.x + box.w <= e.x || box.y >= e.y + e.h || box.y + box.h <= e.y) continue;
-      // DamageVar ±15%（Main.DamageVar :15090 ±15% 浮动惯例）
-      const dmg = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+      // DamageVar ±15%——★SW-T1 2026-09-04：单源 damageVarRoll（31 档离散+float32 域
+      //  +ToEven+luck 重掷;原连续因子内联式退役）。消费面=爆散 NPC 面走 PrepareBombToBlow
+      //  后标准 Damage() → Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)`
+      //  【luck 正向】（圣坦炮弹=玩家施放,owner=本地玩家）
+      const dmg = Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0));
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.x + e.w / 2 - this.cx) * 8, 0, game, 0, false, 0, true); // kb=8(PrepareBombToBlow :47683)
     }
     // SelfHurtPlayers（Kill→friendly&&owner==myPlayer 分支 :71788-71795）：重盒相交伤主人
@@ -2373,7 +2377,9 @@ export class SantankShellProj extends TownShot {
     if (p && !p.dead && !(p as unknown as { immune?: boolean }).immune
       && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
       p.lastDamageCause = { kind: 'projectile', name: 'Santank Cannon' };
-      p.damage(Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100))),
+      // ★SW-T1：自伤面=SelfHurtPlayers :15122 `Main.DamageVar(value, 0f - localPlayer.luck)`
+      //  【luck 取负:厄运→重掷取 min 伤更大】——与 NPC 面 :12970 正向相反,两 face 勿混
+      p.damage(Math.max(1, damageVarRoll(this.damage, -p.luck)),
         Math.sign(p.cx - this.cx) || 1, 0, game as never);
     }
     game.playSfxFile?.('Item_14', 0.9, this.cx, this.cy);
@@ -2462,7 +2468,9 @@ export class SantankShellProj extends TownShot {
             pierce?: number, fromPlayer?: boolean) => boolean };
         if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
         if ((this.hitCd.get(e.id) ?? 0) > 0) continue;
-        const dmg = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+        // ★SW-T1：飞行命中面=Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)`
+        //  【luck 正向】,DV 在旗乘区（applyBannerDamageDealt）前——原版同序
+        const dmg = Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0));
         e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);
         this.hitCd.set(e.id, 10);
       }

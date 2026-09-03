@@ -704,6 +704,7 @@ function multiVineSize(sheet: number): { sx: number; sy: number } {
     case 91: return { sx: 1, sy: 3 };
     case 465: case 591: case 592: return { sx: 2, sy: 3 };
     case 42: case 270: case 271: case 572: case 581: case 660: return { sx: 1, sy: 2 };
+    case 698: return { sx: 1, sy: 1 }; // 尺寸表 :9048-9050（原缺→default 2×2 误吞；698 锚判 fx%18&&fy===0 本就是 1×1 语义）
     default: return { sx: 2, sy: 2 }; // 95/126/444
   }
 }
@@ -759,6 +760,31 @@ function multiVineVariant(sheet: number, fx: number, fy: number): MultiVineVaria
   return v;
 }
 
+/** IsBelowANonHammeredPlatform（WorldGen.cs:38682-38693 1:1）：y<1 或上格出界
+ *  （原版 Main.tile 越界=null）→ false；上格须 active（TileStore.hasTile=flags bit0
+ *  ——幽灵平台残型不偏移）∧ Platform 集 ∧ 非半砖 ∧ 坡 0（NonHammered=被锤成
+ *  坡/半砖态的平台不算）。 */
+function isBelowNonHammeredPlatform(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y - 1)) return false;
+  const ai = st.idx(x, y - 1);
+  return st.hasTile(x, y - 1) && TILE_DEFS[st.type[ai]]?.platform === true
+    && !st.half[ai] && st.slope[ai] === 0;
+}
+
+/** DrawMultiTileVinesInWind 平台 lift 门（TileDrawing.cs:9430 三元 1:1）：
+ *  非 465/591/592 支要求 sizeX==1——2 宽以上摇摆件（34 吊灯 3 宽/454 4 宽/
+ *  95/126/444 2 宽）在平台下【永不】偏移；465/591/592 双列支要求锚点列与右邻列
+ *  上方【都】是平台。sizeX=multiVineSize（=原版 DrawMultiTileVines 尺寸表
+ *  :9014-9052）。导出供行为锁定测试。 */
+export function multiVinePlatformLift(
+  st: TileStore, sheet: number, sizeX: number, x: number, y: number,
+): boolean {
+  if (sheet === 465 || sheet === 591 || sheet === 592) {
+    return isBelowNonHammeredPlatform(st, x, y) && isBelowNonHammeredPlatform(st, x + 1, y);
+  }
+  return sizeX === 1 && isBelowNonHammeredPlatform(st, x, y);
+}
+
 /** DrawMultiTileVinesInWind（:9407-9700）：吊挂植物绕顶部中心摆，下部摆幅大。
  *  ★2026-08-31：尾部每格火焰循环（:9782-9794）随本体变换补画——吊灯 34/灯笼 42
  *  全 style 在原版都有火（GetTileFlameData 数据表直达），此前整层漏火
@@ -779,17 +805,14 @@ function drawMultiVine(
   wc += highestWindGridPushComplex(ax, ay, sy, 60, 1.26, 3, true);
   const windy = inAPlaceWithWind(st, ax, ay, sx, sy, ENV.worldSurface, ENV.remix);
   if (!windy) wc -= base;
-  // 锚点=顶部中心（+(-2)）；平台下方吊挂再上移 8（IsBelowANonHammeredPlatform :38315：
-  // 上方 Platform 族 + 非半砖 + 坡 0）。offX(698 的 -10) 同时作用于 dest——
+  // 锚点=顶部中心（+(-2)）；平台下方吊挂再上移 8（multiVinePlatformLift：锚
+  // TileDrawing.cs:9430 三元 + WorldGen.cs:38682-38693——active 门/sizeX==1 支/
+  // 465/591/592 双列支，见函数注释）。offX(698 的 -10) 同时作用于 dest——
   // 原版 offSet 进 vector 与 vector3 相消只留 origin 侧、dest=vector3+offSet+(0,offY)
   let pivotX = ax * TILE + sx * TILE * 0.5 + offX;
   let pivotY = ay * TILE - 2;
   if (flag2) pivotY += 16; // :9533-9536
-  if (ax > 0) {
-    const ai = st.idx(ax, ay - 1);
-    const above = TILE_DEFS[st.type[ai]];
-    if (above?.platform && !st.half[ai] && st.slope[ai] === 0) pivotY -= 8;
-  }
+  if (multiVinePlatformLift(st, rec.sheet, sx, ax, ay)) pivotY -= 8;
   const ROT = -0.15 * num2Mul; // num2（0.15 后 *= -1，变体可再缩放）
   const seedBox = { s: 0n };   // 组共享火苗种子 num6（惰性首格结转，TileFlames 块注释）
   for (let j = 0; j < sy; j++) {
@@ -1036,4 +1059,4 @@ export function drawWindSwayTiles(
 }
 
 /** 测试辅助：暴露内部状态 */
-export const _windSwayInternals = { counters, windGrid, getWindCycle, windGridPush, inAPlaceWithWind, SWAY_REC, multiVineVariant };
+export const _windSwayInternals = { counters, windGrid, getWindCycle, windGridPush, inAPlaceWithWind, SWAY_REC, multiVineVariant, multiVineSize };

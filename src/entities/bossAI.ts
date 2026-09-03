@@ -10,6 +10,7 @@ import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
+import { BombSkeletronPrimeProj } from './BombSkeletronPrimeProj';
 import { markMechQueen, registerMechQueen, mechQueenUp, getMechQueen, getMechQueenCenter } from './mechQueen';
 import { GorePiece } from './GorePiece';
 import { getEnemyCtor } from './enemyCtorRegistry';
@@ -1828,13 +1829,19 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
         xWindow(200, 160, 0.2, 8);
       }
       e.spin = Math.atan2(ay - e.cy, ax - e.cx) + Math.PI / 2;
-      // 反向激光 102(原版伤害 0 = 纯视觉威慑)每 140t
-      // 头旋冲时 localAI[0]+2 = 射速×3(:28661)——周期 ÷3
+      // SW-U1 2026-09-04：炮弹 102（vanilla 名 BombSkeletronPrime,ProjectileID.cs:656;
+      //  旧注"反向激光/伤 0 纯视觉威慑"退役——伤 0 只对在飞接触段成立（AI_016 :48048
+      //  每拍 damage=0 → Damage_EVP :14851 早退）,Kill 爆 PrepareBombToBlow :47688-93
+      //  置 damage=40/128² 盒 = 对玩家真伤）——SW-B1"有弹无爆"清偿,Arrow 直飞载体
+      //  退役,改挂 BombSkeletronPrimeProj（aiStyle16 重力/反弹/引信/Kill 爆全链）。
+      //  速 12/散布 ±0.4/出手位 = 既有炮臂几何（NPC.cs:28843-28857 localAI[0]>140t）;
+      //  头旋冲时 localAI[0]+2 = 射速×3(:28661)——周期 ÷3
       if (e.aiT % Math.round(140 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
         const dx = -(ax - e.cx), dy = -(ay - e.cy);
         const d = Math.hypot(dx, dy) || 1;
-        shoot(game, e.cx + dx / d * 4, e.cy + dy / d * 4,
-          dx / d * 12 + (Math.random() - 0.5) * 0.8, dy / d * 12 + (Math.random() - 0.5) * 0.8, 0, 102);
+        (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
+          .entities.add(new BombSkeletronPrimeProj(e.cx + dx / d * 4, e.cy + dy / d * 4,
+            dx / d * 12 + (Math.random() - 0.5) * 0.8, dy / d * 12 + (Math.random() - 0.5) * 0.8), 'projectiles');
       }
     } else if (e.ai2 === 1 && player) {
       e.ai3 += 1;
@@ -1842,11 +1849,14 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 悬停:头 X / 玩家上方 80(6 速,0.04 X/0.08 Y,0.9 阻尼)
       seekSteer2(e, head.cx, player.cy - 80, 6, 0.04, 0.08);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
+      // SW-U1 2026-09-04：同上挂 102 专属实体（速 10/40t,NPC.cs:28895-28927
+      //  localAI[0]>40t,num568=10/num570=102/num569 伤 0）
       if (e.aiT % Math.round(40 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
-        shoot(game, e.cx + dx / d * 4, e.cy + dy / d * 4,
-          dx / d * 10 + (Math.random() - 0.5) * 0.8, dy / d * 10 + (Math.random() - 0.5) * 0.8, 0, 102);
+        (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
+          .entities.add(new BombSkeletronPrimeProj(e.cx + dx / d * 4, e.cy + dy / d * 4,
+            dx / d * 10 + (Math.random() - 0.5) * 0.8, dy / d * 10 + (Math.random() - 0.5) * 0.8), 'projectiles');
       }
     }
   } else if (style === 36) {

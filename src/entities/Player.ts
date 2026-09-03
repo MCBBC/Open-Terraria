@@ -5790,7 +5790,9 @@ export class Player extends Entity {
         const tx = Math.floor(px / 16);
         if (!st.inBounds(tx, feetY)) continue;
         const t = st.get(tx, feetY);
-        if (t === 0) continue;
+        // SolidTileAllowBottomSlope active 门（WorldGen.cs:70712）——hasTile 位本体
+        // （红蓝对抗 F10：曾用 type≠0 代读，幽灵残型地面误判"站普通地面"不触发）
+        if (t === 0 || !st.hasTile(tx, feetY)) continue;
         const d = TILE_DEFS[t];
         // SolidTileAllowBottomSlope && !CrackedBricks（:23060）→ 站普通地面不触发
         if (d?.solid && !d.platform && !isCrackedSheet(d.vanilla?.sheet)) { flag = false; break; }
@@ -5803,7 +5805,9 @@ export class Player extends Entity {
     const solidTopAt = (x: number, y: number): boolean => {  // WorldGen.SolidTile
       if (!st.inBounds(x, y)) return false;
       const t = st.get(x, y);
-      if (t === 0) return false;
+      // SolidTile active 门（WorldGen.cs:70652）——hasTile 位本体（红蓝对抗 F10：
+      //   曾用 type≠0 代读，幽灵残型顶盖误判实心顶 → 裂砖不碎）
+      if (t === 0 || !st.hasTile(x, y)) return false;
       const d = TILE_DEFS[t];
       return !!d?.solid && !d.platform;
     };
@@ -8139,9 +8143,11 @@ export class Player extends Entity {
       if (st.inBounds(tx, ty)) {
         const i = st.idx(tx, ty);
         const dj = TILE_DEFS[st.type[i]];
-        // WorldGen.SolidTile3 = active && !inActive && tileSolid && !tileSolidTop
-        // + tile.liquid <= 0（:13912-13916）
-        const solid3 = st.type[i] !== 0 && (st.wire[i] & 32) === 0   // TileStore.WIRE_ACTUATED
+        // WorldGen.SolidTile3 = nactive() && tileSolid && !tileSolidTop
+        // （WorldGen.cs:71010-71014）+ tile.liquid <= 0（Player.cs:14432）——
+        // nactive 门读 isActive（红蓝对抗 F9：曾用 type≠0 代读 active 位，
+        // 幽灵残型头顶格误判实心 → 眼球伞不落雨）
+        const solid3 = st.isActive(tx, ty)
           && !!dj?.solid && !dj?.platform;
         if (!solid3 && st.liquid[i] <= 0) {
           game.spawnRainForced?.(vx, vy, (world.weather?.windSpeedCurrent ?? 0) * 3, 9);

@@ -52,6 +52,7 @@ import { checkTileBreakability } from './HalfBrickPass';
 import { hfIs1457 } from './HellFortPass';
 // ★UUUUUU（2026-08-23）：notTheBees 终转化（调用位 cs:22602-22605——⑭ 之后）
 import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
+import { VI_ID } from '../../../data/itemKeys';
 // ★SSS-CELEB（2026-08-27）：FinishTenthAnniversaryWorld 全家（1458 cs:24502-24554）
 import { growTree } from './TreePass';
 // ★IIIII106：sandy britches 表层沙漠化核心（cs:2363 第二半；调用位 :22343）
@@ -3982,8 +3983,9 @@ function convertSkyIslandsTenth(st: TileStore, rng: RNG, gs: GenState): void {
           const sha = SWEEP_SHEET[st.type[ta]];
           if (sha === 3 || sha === 110 || sha === 24) {
             const downNow = SWEEP_SHEET[st.type[t2]];
-            let ntype = sha;
-            if (downNow === 109 || downNow === 492) ntype = (sha === 73 ? 113 : 110);
+            // ★本支 sha 已被上方守卫窄化为 3|110|24——73→113 的重映射走下方 else 支，
+            //   此处原三元 `sha===73?113:110` 为不可达死路（TS 字面窄化实锤）
+            if (downNow === 109 || downNow === 492) ntype = 110;
             st.type[ta] = sid(ntype);
           } else if (sha === 73) {
             st.type[ta] = sid(113);
@@ -4326,16 +4328,27 @@ export function runFinishGetGoodWorld(
   }
   // ⑩ 宝箱 678 注入（cs:26236-26258）：至多前 8000 箱，chest==null 即 break；
   //    Next(10)!=0 或 item[1].stack==0 → continue（**掷照耗**）；首个空槽写 678。
+  //    ★IIII225b 扫描界勘误：vanilla `num4 < chest.maxItems`（Chest.cs:58
+  //    DefaultMaxItems=40，cs:26249-26254）——曾写 `s < ch.items.length`：本仓
+  //    紧凑 items 表无洞 ⇒ 恒扫不到空槽 → 678 注入**整批静默失写**（掷照耗=
+  //    掷流无债；写面债：金标 ivy 箱 (1974,671) 678 实证 JS 全缺）。紧凑模型
+  //    首空槽=表尾 len（1..len-1 全占,deadMans 5007 splice 后仍紧凑）,越界
+  //    下标赋值即追加,与 vanilla 槽扫描逐位同构。
   if (chests) {
+    // ★IIII225b 第二勘误：原字面 `{ id: 678 }` 是**原版 vid**直写——本仓 sink 存
+    //    内部 id（VI_ID(678)=218,FinishDrunkGenPass MOON_LEGS_678 同源）。原注入
+    //    因扫描界 bug 恒不触发故潜伏；扫描界修复后即显形（审计 i678 实证）。
+    const moonLegs = VI_ID(678);
     for (let c = 0; c < 8000; c++) {
       const ch = chests[c];
       if (!ch) break;
       if (rng.nextIntRange(0, 10) !== 0) continue;
       const slot1 = ch.items[1];
       if (!slot1 || slot1.stack === 0) continue;
-      for (let s = 1; s < ch.items.length; s++) {
+      if (moonLegs <= 0) continue;
+      for (let s = 1; s < 40; s++) {
         const it = ch.items[s];
-        if (!it || it.stack === 0) { ch.items[s] = { id: 678, stack: 1 }; break; }
+        if (!it || it.stack === 0) { ch.items[s] = { id: moonLegs, stack: 1 }; break; }
       }
     }
   }

@@ -618,11 +618,15 @@ export function getChaseResults(
  *  ★V1（NB-D 遗留收口 2026-09-03）：坡面支补 tile.active() 在场门——原文
  *  `else if (!Main.tile[i,j].active() || …slope()==0 || j<=0 || …) continue;`
  *  （Collision.cs:1632-1634,active() 纯在场位）旧写裸 slope>0 靠"slope 只随活性
- *  写入"的写侧不变量成立,formally 收口为显式 type 入参：投影口径 = 纯在场
- *  `type!==0`（与 npcLiquid.wetCollision L1 勘误同款——本仓 isActive 是 nactive()
- *  口径会漏致动斜坡,禁用）；调用面全量传 TileStore（含 type 通道），零调用侧改写 */
+ *  写入"的写侧不变量成立,formally 收口为显式在场门：与 npcLiquid.wetCollision
+ *  L1 勘误同款——本仓 isActive 是 nactive() 口径会漏致动斜坡,禁用。
+ *  ★红蓝对抗 F8（2026-09-04）：幽灵保域后 type!==0 亦非纯在场位——残型格
+ *  flags=0,type≠0（wld 导入/生成期 active(false) 留型）须判干,改读 flags bit0
+ *  （=active() 位本体;四副本之 MinionProj 漏网,先例 npcLiquid/SmartSelect/
+ *  WeaponProj 三副本 2026-09-03 A-F3 已改）；调用面全量传 TileStore（含
+ *  type/flags 通道），零调用侧改写 */
 export function wetCollisionProbe(
-  st: { w: number; h: number; liquid: Uint8Array; slope: Uint8Array; type: Uint16Array; idx(x: number, y: number): number },
+  st: { w: number; h: number; liquid: Uint8Array; slope: Uint8Array; type: Uint16Array; flags: Uint8Array; idx(x: number, y: number): number },
   x: number, y: number, width: number, height: number,
 ): boolean {
   const cxs = x + width / 2, cys = y + height / 2;
@@ -646,7 +650,7 @@ export function wetCollisionProbe(
         const top = j * 16 + drop;
         const segH = 16 - Math.trunc(drop);
         if (bx + pw > i * 16 && bx < i * 16 + 16 && by + ph > top && by < top + segH) return true;
-      } else if (st.type[idx] !== 0 && st.slope[idx] > 0 && j > 0) {   // :1632 active() 在场门（V1）
+      } else if (st.flags[idx] !== 0 && st.slope[idx] > 0 && j > 0) {   // :1632 !tile.active()——flags bit0（V1+F8：曾用 type≠0 代读,幽灵残型坡+上液误判湿）
         if (st.liquid[st.idx(i, j - 1)] > 0 && bx + pw > i * 16 && bx < i * 16 + 16
           && by + ph > j * 16 && by < j * 16 + 16) return true;
       }

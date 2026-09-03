@@ -8,25 +8,30 @@ import { bannerOfNpc, bannerItemId } from '../src/world/Banners';
 // SW-M1 2026-09-03 回归;★SW-R3 2026-09-03（蓝队 M-1 位次翻案）重构——banner 乘区
 // 从「调用侧先乘后喂」改为链内【两次减伤后】消费采样值（Projectile.Damage_PVE_Inner
 // :12970→:12972→:12979→:13388-13390→:13392-13398 原文序）。bannerApplied 入参
-// 结构性抓不到位次（先乘后喂怎么喂都是同一值）,改为链外喂裸伤/DV 因子/banner 采样,
+// 结构性抓不到位次（先乘后喂怎么喂都是同一值）,改为链外喂裸伤/banner 采样,
 // 断言终值对原式手算锚。旧「F11 收口序（banner 先于 DV）」被蓝队全空间枚举定量推翻:
 // B=2.5 档最大偏差=2（B=2.5/D=3/V=1.08/trap→原版 2、旧序 4）,见首测。
+// ★SW-T1 2026-09-04（DV 重基线）：链内 DV 步换单源 damageVarRoll（31 档离散+float32
+// 域+ToEven+luck 重掷）,入参 damageVar 因子退役改 luck——确定性钉值改注入「固定档
+// rnd」（tier→rnd=(tier+15.5)/31,floor(rnd×31)-15 恰回该档）;旧钉面因子 1.08/1.15/1
+// 本就落在 31 档格上,期望值逐案不变。位次（SW-R3 M-1 原版序）未动。
+const tierRnd = (tier: number) => () => (tier + 15.5) / 31;
 const chain = (o: Partial<Parameters<typeof Game.explodeNpcDamageChain>[0]>) =>
-  Game.explodeNpcDamageChain({ projId: 0, npcType: 0, damage: 100, damageVar: 1, bannerMult: 1, expertMode: false, ...o });
+  Game.explodeNpcDamageChain({ projId: 0, npcType: 0, damage: 100, luck: 0, bannerMult: 1, expertMode: false, rnd: tierRnd(0), ...o });
 
 describe('SW-M1/R3 爆炸伤害结算链乘区序（Damage_PVE_Inner）', () => {
   it('★Blue 反例：B=2.5/D=3/V=1.08/trap → 原版 2（旧序 4,位次差=2）', () => {
-    // round(3×1.08)=3 → trap 半伤 trunc(3/2)=1 → banner trunc(1×2.5)=2
-    expect(chain({ damage: 3, damageVar: 1.08, bannerMult: 2.5, projId: 108, npcType: 551 })).toBe(2);
+    // DV(+8 档)=round(3×1.08)=3 → trap 半伤 trunc(3/2)=1 → banner trunc(1×2.5)=2
+    expect(chain({ damage: 3, rnd: tierRnd(8), bannerMult: 2.5, projId: 108, npcType: 551 })).toBe(2);
     // 对照：banner 先乘（旧序）= round(3×2.5=7.5→8)×1.08→round(8.64)=9→trunc/2=4
     expect(2).not.toBe(4);
   });
   it('乘区序①：DamageVar 先于 1002 半伤（:12970→:12972;反向=3）', () => {
-    expect(chain({ damage: 7, damageVar: 1.15, projId: 1002 })).toBe(4);   // round(8.05)=8→/2
-    expect(chain({ damage: 7, damageVar: 1.15, projId: 30 })).toBe(8);     // 无半伤对照
+    expect(chain({ damage: 7, rnd: tierRnd(15), projId: 1002 })).toBe(4);   // round(8.05)=8→/2
+    expect(chain({ damage: 7, rnd: tierRnd(15), projId: 30 })).toBe(8);     // 无半伤对照
   });
   it('乘区序②：DamageVar 先于 expert EoW /5（:12970→:13394;反向=2）', () => {
-    expect(chain({ damage: 13, damageVar: 1.15, projId: 28, npcType: 14, expertMode: true })).toBe(3);
+    expect(chain({ damage: 13, rnd: tierRnd(15), projId: 28, npcType: 14, expertMode: true })).toBe(3);
   });
   it('乘区序③：banner 在两次减伤【后】(:13386)——1002×banner 与 trap×banner 双向验', () => {
     // DV(100×1)=100 → 1002 半伤 50 → banner ×1.5 → trunc(75)=75（banner 先=81.25→81 差 6）

@@ -234,6 +234,13 @@ export interface GameHooks {
    *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
    *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */
   applyPowder?(projId: number, x: number, y: number, w: number, h: number): void;
+  /** SW-U1 2026-09-04：Skeletron Prime 炮弹 102（BombSkeletronPrime）Kill 爆专用转发
+   *  （Projectile.Kill_Bombs_DoUsualKillCode :80070-80115 通支视觉 + Kill_ExplodeTiles
+   *  :79027-79035 FTW 闸门地形爆）。px/py = 弹心像素（vanilla 地形爆心 center2 =
+   *  position = 弹心−11,经 explosionCompareHalfBoxPx(102)=11 落位）;radius/destroyTiles
+   *  由弹侧 FTW 四象限门（primeBombTerrainRadius）传入;实体段在实现内中性化
+   *  （hostile 弹对 NPC 零伤/SelfHurtPlayers 不跑——玩家伤走弹侧 hitPlayer） */
+  explodePrimeBomb102?(tx: number, ty: number, px: number, py: number, radius: number, destroyTiles: boolean): void;
   /** 吸血链（Projectile.vampireHeal/ghostHeal）：返回实际回复 HP（0 = 未生效） */
   applyLifeSteal?(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic?: boolean): number;
   /** 投射物显示名（Lang.GetProjectileName cs:444——死亡归因 DeathSource.Projectile 用） */

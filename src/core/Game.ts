@@ -3518,7 +3518,9 @@ export class Game implements GameHooks {
     // （:13974,weaponId 携投射物型）
     if (flags & 0x80) {
       const projType = weaponId;
-      const rolled = Math.max(1, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100)));
+      // ★SW-T1 2026-09-04：DV 单源——SelfHurtPlayers :15122 `Main.DamageVar(value,
+      //  0f - localPlayer.luck)`（被炸端=本地玩家,luck 取负:厄运→重掷取 min 伤更大）
+      const rolled = Math.max(1, damageVarRoll(dmg, -p.luck));
       p.lastDamageCause = { kind: 'projectile', name: Lang.projectileName(projType) ?? 'Explosives' };
       const pvpHit = projType !== 108 && projType !== 1002;
       // ★走 damagePlayer 而非直调 p.damage：死亡结算块（pvpDeath 计数/不掉钱/复活
@@ -10781,7 +10783,10 @@ export class Game implements GameHooks {
     //（Player.cs:32806-32812：右键轨道格 → LaunchMinecartHook——与手持物品无关，
     //  用"最佳矿车"（装备槽 > 手持 > 背包）；矿车是坐骑召唤物，不消耗）
     const type = this.world.store.get(tx, ty);
-    if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0) {
+    // 原版 active() 门（Player.cs:6125/:6152 LaunchMinecartHook 族与 :32233 均为
+    // `tile.active() && tile.type == 314`）——幽灵残型轨道不上车
+    if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0
+      && this.world.store.hasTile(tx, ty)) {
       // 无矿车族物品也上车（默认木质车 13，Player.cs:22401）
       if (this.mountMinecartAt(tx, ty, this.bestCartMount())) this.input.rightDown = false;
       return;
@@ -18047,7 +18052,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const tk = tx * 100000 + ty;
         if (this.swingTileCutSet.has(tk)) continue;
         const t = st.get(tx, ty);
-        if (t === 0) continue;
+        // ★幽灵格门（2026-09-03）：原版 CutTiles 族以 active() 为首门（ItemCheck_CutTiles
+        //  :45027 `tile.active()`）——残型（幽灵草等）不可割不出掉落（放置域同款洞,
+        //  用户实报"放木材掉铁矿"的同族清扫）
+        if (t === 0 || !st.hasTile(tx, ty)) continue;
         // ★R2-F5（2026-09-03）：WorldGen.CanCutTile 门（WorldGen.cs:88111-24 单源
         //  world/CanCutTile.ts;此处上下文=AttackMelee,消费位 Player.cs:45032）——
         //  wall 350 / 下格∈{78 陶盆,380,579 石傀儡头} / 未熟南瓜(254 frameX<144) 拒切。
@@ -18412,6 +18420,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     const type = st.get(x, y);
     if (type === 0) return;
+    // ★F2 2026-09-04（红队 RB 实体域·结构根因）：KillTile 头门 = WorldGen.cs:64041
+    //  `if (!tile.active()) return;`——全游戏唯一破坏原语的首门。幽灵格（flags=0,
+    //  type≠0,生成期 active(false) 残型）在此 no-op：此后一切调用方（爆炸/砍切/
+    //  破坏/挖矿/液体冲毁）对幽灵格自动零操作,与原版逐字等价（原版无"故意破坏
+    //  幽灵格"概念,调用面已核无此语义——DirtBallProj:189/Arrow:5034/Minecart:892
+    //  等自带 active 首门的调用方不受影响）。hasTile=active() 纯 bit0
+    //  （TileStore:141-147,含已致动格——原文即裸 active(),非 nactive）
+    if (!st.hasTile(x, y)) return;
     // CheckTileBreakability==2 早退（KillTile :63579-63582）：上方保护族 → 不破坏
     // （爆炸/液体冲毁同门；成就计数亦不应触发，故在 byPlayer 段之前）
     if (this.tileAboveProtected(x, y)) return;
@@ -20153,6 +20169,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (this.player.useTime > 0) return false;
     const target = st.get(tx, ty);
     if (target === 0) return false;                    // 空格：nactive() 门恒假（:41379）
+    // nactive() 门（Player.cs:41379-82 `tile.nactive() && (tile.type == 1 || tile.type == 38)`）
+    // ——幽灵残型石零动作不扣弹药
+    if (!st.isActive(tx, ty)) return false;
     const tsheet = TILE_DEFS[target]?.vanilla?.sheet ?? -1;
     if (!mossPlaceOk(gsheet, tsheet)) return false;    // 非 nactive 石/灰砖 = 原版整链终点
     const outSheet = tsheet === 38 ? (MOSS_TO_BRICK_SHEET[gsheet] ?? gsheet) : gsheet;
@@ -20325,8 +20344,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (wandTile === undefined) return;
       if (st.get(tx, ty) !== 0) return;
       // 落地锚（单件装饰族多 1×1；碎块族亦 1×1 帧 style 帧）：下方须桌面/实心支撑
+      //（桌面臂格 nactive() 门=WorldGen.cs:45747；isSolid 臂自带 active() 首门）
       const belowOk = st.inBounds(tx, ty + 1)
-        && (st.isSolid(tx, ty + 1) || TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1));
+        && (st.isSolid(tx, ty + 1) || (st.isActive(tx, ty + 1)
+          && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1)));
       if (!belowOk) return;
       st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
       this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
@@ -20389,7 +20410,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  Player.cs:40232-40360 全段移植,见下方族分支注）。
     if (itemDef.tile) {
       const targetType = st.get(tx, ty);
-      if (targetType !== 0) {
+      // ★幽灵格门（2026-09-03 用户实报"放木材掉铁矿"）：替换链入口原版读
+      //  Main.tile[i,j].active()（flags bit0）——幽灵保域批后本仓 256.7 万格
+      //  active=0 且 type≠0，残型（如铁矿）经裸 st.get≠0 直通"先破坏旧块（完整
+      //  掉落链）"→ 放木材挖出铁矿。vanilla 语义：active()=false 的格视为空位，
+      //  直接走下方正常放置（setTile 静默覆写残型，无破坏无掉落）。取 plain
+      //  active 位（含已致动格——原版 active() 不含 inActive 修正，与改前
+      //  已致动格行为一致）。
+      if (targetType !== 0 && st.flags[st.idx(tx, ty)] !== 0) {
         const placeVid = viIdFromKey(itemDef.key);
         const tdef = TILE_DEFS[targetType];
         // ★2026-09-03：表单源化至模块层 BLOCK_SWAP_DOESNT_*（族 verdict 共用同表,值不变）
@@ -20660,6 +20688,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const slopeAt = (sx: number, sy: number) => st.inBounds(sx, sy) ? st.slope[st.idx(sx, sy)] : 0;
         const topAnchorOK = (sx: number, sy: number) => {
           if (!st.inBounds(sx, sy)) return false;
+          // 锚格外层 nactive() 门（TileObject.cs:386/:455 `if (tileSafely.nactive())`——
+          // SolidTile 判据本体 active()（WorldGen.cs:70650），CanPlace 外层先 nactive()
+          // 短路 → 等价 isActive；幽灵残型格不作锚）
+          if (!st.isActive(sx, sy)) return false;
           const b = TILE_DEFS[st.get(sx, sy)];
           if (!b) return false;
           const sl = slopeAt(sx, sy);
@@ -20668,6 +20700,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         };
         const botAnchorOK = (sx: number, sy: number) => {
           if (!st.inBounds(sx, sy)) return false;
+          // 同上 nactive() 门（TileObject.cs:386/:455）
+          if (!st.isActive(sx, sy)) return false;
           const b = TILE_DEFS[st.get(sx, sy)];
           if (!b) return false;
           const sl = slopeAt(sx, sy);
@@ -20729,10 +20763,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (def.vanilla?.sheet === 15) {
       const ch = def.h ?? 1;
       const gy = ty + ch;                                 // 底行下一格
-      const belowDef = st.inBounds(tx, gy) ? TILE_DEFS[st.get(tx, gy)] : null;
+      // 锚格外层 nactive() 门（TileObject.cs:386/:455——椅 Style1x2 AnchorBottom
+      // SolidTile|SolidWithTop|SolidSide 逐格 nactive() 短路；幽灵残型格不作锚）
+      const belowDef = st.inBounds(tx, gy) && st.isActive(tx, gy) ? TILE_DEFS[st.get(tx, gy)] : null;
       const belowOK = !!belowDef && (belowDef.solid || belowDef.platform);
       const sideOK = [tx - 1, tx + 1].some((sx) => {
-        if (!st.inBounds(sx, gy - 1)) return false;
+        if (!st.inBounds(sx, gy - 1) || !st.isActive(sx, gy - 1)) return false;
         // SolidSide 原版字面 = blockType 4/5（坡砖 3/4）的实心侧缘,非整砖
         const sl = st.slope[st.idx(sx, gy - 1)];
         return sl === 3 || sl === 4;
@@ -20855,7 +20891,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
     //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
     if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
-      const below = st.inBounds(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
+      // 下方桌面格 nactive() 门（WorldGen.cs:45747）
+      const below = st.inBounds(tx, ty + 1) && st.isActive(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
       const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
       if (!TILE_TABLE_SHEETS.has(belowSheet)) return;
     }
@@ -21276,7 +21313,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (let dx = 0; dx < w; dx++) {
       const bx = x + dx, by = y + h, bi = st.idx(bx, by);
       const solid2 = st.isSolid(bx, by) && st.slope[bi] === 0 && !st.half[bi];
-      const tableBelow = onTable
+      // 桌面支撑格 nactive() 门（WorldGen.cs:45747 `Main.tile[x,y+1].nactive() &&
+      // Main.tileTable[...]`——幽灵残型桌面不作支撑）
+      const tableBelow = onTable && st.isActive(bx, by)
         && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(bx, by)]?.vanilla?.sheet ?? -1);
       if (!solid2 && !tableBelow) { bottomAll = false; break; }
     }
@@ -21609,6 +21648,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // :31495 调用不带 TB；此前整个 interactAt 无距离检查，隔全图右键可开储物/设床）
     if (!this.inTileRange(tx, ty)) { this.input.rightDown = false; return; }
     const type = st.get(tx, ty);
+    // 原版 active() 首门（Player.cs:32270-32281 TileInteractionsCheck：`if (Main.tile[myX,
+    // myY].active())` 才进 MouseOver/Use——active() 为假即整体不进交互链，与原版逐字
+    // 等价：幽灵残型格（active(false) 留型）与纯空格零操作）
+    if (!st.hasTile(tx, ty)) return;
     // 原版 tile sheet（八音盒/喷泉/天塔柱/派对柱右键分支用）
     const sh = this.wiring?.sheetOf(tx, ty) ?? -1;
     // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
@@ -23646,7 +23689,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  critter 与普通 NPC 同在 Damage_PVE 遍历 :11869 → Damage_PVE_Inner 一条链）。
    *  乘区序逐一对原文（banner 位次按原文 :13386 在两次减伤【后】,蓝队全空间枚举
    *  B=2.5 档最大偏差=2（B=2.5/D=3/V=1.08/trap→原版 2,旧序 JS 4）推翻旧"F11 收口序"）：
-   *   ① Main.DamageVar :12970 ±15%（因子由调用侧传;链内 int 化 round）
+   *   ① Main.DamageVar :12970——★SW-T1 2026-09-04：DV 掷入单源 damageVarRoll
+   *      （31 档离散+float32 域+ToEven+luck 重掷取极值;F-3 备案的连续因子内联式
+   *      `1+(Math.random()*30-15)/100`+half-up 退役）。luck=owner 玩家 luck
+   *      （原版 :12970 `Main.DamageVar(num15, Main.player[owner].luck)`,玩家施爆
+   *      恒 ownedBySomeone=真支）;rnd 可注入确定性随机（测试/对拍）
    *   ② 1002 半伤 :12972-12973 `dmg /= 2`（C# int 正数截断）
    *   ③ trap×旧日军团半伤 :12979-12981 `trap && BelongsToInvasionOldOnesArmy → /=2`
    *      （判据=受击 NPC vanillaId 落 NPCID.Sets 表,与 DD2 事件是否进行中无关）
@@ -23654,19 +23701,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *      `dmg = (int)((float)dmg * effect.DamageDealt.Sample(Main.Difficulty))`,
    *      浮点乘后 int 截断;调用侧只传【采样值】（bannerDamageDealtMultOf,不含截断）
    *   ⑤ expert EoW 虫段 /5 :13392-13398（条件行 :13394）（20 弹型表 × npc 13-15）
-   *  ★F-3 备案（红队 R3 自评"不修"）：①的 DV 乘区走调用侧内联式
-   *  `1+(Math.random()*30-15)/100`+Math.round(half-up),对原版 DamageVar 的
-   *  31 档离散+ToEven 舍入有 ±1 域内残差（单源 damageVarRoll 已在
-   *  stats/DamageVar.ts,但切换会牵 m1/ammo-remainder 两测的掷流钉面）——
-   *  备案不修,待 DV 掷流重基线批统一收口 */
+   *  位次（SW-R3 M-1 原版序）不动——本批只换 ① 的 DV 实现面 */
   static explodeNpcDamageChain(inp: {
     projId: number; npcType: number;
     damage: number;             // 旗乘区前裸伤（弹伤原始值）
-    damageVar: number;          // ① 因子（1±0.15,调用侧 Math.random）
+    luck: number;               // ① owner 玩家 luck（原版正向:重掷取 max）
     bannerMult: number;         // ④ 采样值（bannerDamageDealtMultOf 输出,恒 ≥ 精度内 1）
     expertMode: boolean;
+    rnd?: () => number;         // ① 确定性随机注入（缺省 Math.random）
   }): number {
-    let dmg = Math.max(1, Math.round(inp.damage * inp.damageVar));          // :12970
+    let dmg = Math.max(1, damageVarRoll(inp.damage, inp.luck, inp.rnd));    // :12970（SW-T1 单源）
     if (inp.projId === 1002) dmg = Math.trunc(dmg / 2);                     // :12972-12973
     if (Game.EXPLODE_TRAP_PROJS.has(inp.projId) && OLD_ONES_ARMY.has(inp.npcType)) {
       dmg = Math.trunc(dmg / 2);                                            // :12979-12981
@@ -23836,7 +23880,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (const [x, y] of disc) {
         if (!st.inBounds(x, y)) continue;
         const t = st.get(x, y);
-        if (t !== 0) {
+        // ★F1 2026-09-04（红队 RB 实体域）：原版门序 = ExplodeTiles
+        //  Projectile.cs:80467-80474——`tile != null && tile.active()` 在
+        //  CanExplodeTile 之【前】,active 才进 KillTile（:64041 头门再兜一层,
+        //  双门按原版落）。幽灵格（flags=0,type≠0）跳过破坏支、径落 wallSplode
+        //  支 = 原版 flag 缺省 true 的墙爆语义
+        if (t !== 0 && st.hasTile(x, y)) {
           if (!canExplode(x, y)) continue;
           if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
           this.breakTile(x, y); // KillTile 全语义（掉落/树/罐/幼虫/蜂巢…）
@@ -23872,7 +23921,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const bannerMult = bannerDamageDealtMultOf(this, en);
         const hurt = Game.explodeNpcDamageChain({
           projId, npcType: en.vanillaId ?? 0, damage,
-          damageVar: 1 + (Math.random() * 30 - 15) / 100,   // Main.DamageVar ±15%
+          luck: this.player.luck,   // ★SW-T1:DV 单源链内掷——:12970 owner luck 正向（重掷取 max）
           bannerMult,
           expertMode: this.world.isExpert,
         });
@@ -23906,7 +23955,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const cbannerMult = bannerDamageDealtMultOf(this, c);
         const churt = Game.explodeNpcDamageChain({
           projId, npcType: c.vanillaId ?? 0, damage,
-          damageVar: 1 + (Math.random() * 30 - 15) / 100,   // Main.DamageVar ±15%
+          luck: this.player.luck,   // ★SW-T1:同链单源 DV（:12970 owner luck 正向）
           bannerMult: cbannerMult,
           expertMode: this.world.isExpert,
         });   // 1002 半伤原式（SW-J1）并入链（:12971,截断同 floor）
@@ -24209,6 +24258,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** SW-U1 2026-09-04：Skeletron Prime 炮弹 102（BombSkeletronPrime）Kill 爆专用转发
+   *  （Projectile.Kill_Bombs_DoUsualKillCode :80070-80115 通支视觉 + Kill_ExplodeTiles
+   *  :79027-79035 闸门地形爆）。专用入口两点原因：
+   *  ① comparePx/py=弹心像素——vanilla 地形爆心 center2 = position = 弹心−11
+   *     （:79072 `Vector2 center2 = position`,102 不在 Center 系表 :79076-79079,
+   *     经 explosionCompareHalfBoxPx(102)=11 缺省档落位）,不接受格心回退；
+   *  ② damage=0 + hurtBox=-1e9 = explodeAt 四实体段（敌怪/小动物/城镇/玩家自伤）
+   *     全中性化——hostile 弹原版 Damage() 对 NPC 零伤（Damage_PVE_Inner :12628
+   *     friendly 门,hostile 仅穿 friendly&&!dontTakeDamageFromHostiles 城镇 NPC
+   *     半边,本 face 无该半边→零伤侧保守）且 SelfHurtPlayers 不跑（Kill :71786-71789
+   *     `flag4 = friendly && !npcProj && !RocketsSkip…`,102 hostile 恒假）——玩家伤
+   *     由弹侧 hitPlayer（Damage_EVP 全链,PrepareBombToBlow :47688-47693 128² 盒×
+   *     damage 40）承载,禁止本 face 的 SelfHurtPlayers 面对玩家双结算。
+   *  radius/destroyTiles = 弹侧 FTW 四象限门（BombSkeletronPrimeProj.
+   *  primeBombTerrainRadius）传入;kb=0（无实体段可消费）。 */
+  explodePrimeBomb102(tx: number, ty: number, px: number, py: number, radius: number, destroyTiles: boolean): void {
+    this.explodeAt(tx, ty, 0, radius, destroyTiles, -1e9, 0, 102, px, py, 0);
+  }
+
   /** 甲虫炸弹（4423→proj773）Kill 隧道爆破（2026-08-30 孤儿武器 B2 波）。
    *  引信/接触提前爆由 GrenadeProj 常规路承载；此处只承接 Kill 尾段专支
    *  （Projectile.cs:79951-80058，1458 同锚）与 PrepareBombToBlow 特例盒结算：
@@ -24290,7 +24358,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const en = ent as Enemy;
       if (!playerCanHitEnemy(en, this, 773)) continue;
       if (en.hurt && inBox(en.cx, en.cy, en.w, en.h)) {
-        const dmgVar0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
+        const dmgVar0 = Math.max(1, damageVarRoll(damage, this.player.luck));   // ★SW-T1:DV 单源——:12970 owner luck 正向（原连续因子内联式退役）
         const dmgVar = applyBannerDamageDealt(this, en, dmgVar0);   // ★F1 旗乘区（Damage 面）
         // SW-S1 2026-09-04（清偿①）：补 expert EoW 虫段 /5 尾臂——:13394 条件行含 773
         //  （EXPERT_EOW_FIFTH_PROJS 既有）,位次=banner(:13388-13390)之后 :13392-13398;
@@ -24307,7 +24375,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (inBox(c.cx, c.cy, c.w, c.h)) {
         // SW-S1 2026-09-04（清偿①）：小动物同走 Damage_PVE_Inner 一条链（:11869 全表
         //  遍历）——补旗乘区 + EoW /5 臂（结构位：critter 无旗档/非虫段型 → 恒原值）
-        const cdmg0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
+        const cdmg0 = Math.max(1, damageVarRoll(damage, this.player.luck));   // ★SW-T1:DV 单源（:12970 owner luck 正向,同敌怪支）
         const cdmg = applyBannerDamageDealt(this, c, cdmg0);
         c.hurt(this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
           ? Math.trunc(cdmg / 5) : cdmg,
@@ -25957,6 +26025,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const tk = tx * 100000 + ty;
           if (this.swingTileCutSet.has(tk)) continue;
           const t = this.world.store.get(tx, ty);
+          // ★幽灵格门（2026-09-03）：同 mowCutTiles——active() 首门（:45027），
+          //  挥击不割幽灵残型（放置域同款洞清扫）
+          if (t === 0 || !this.world.store.hasTile(tx, ty)) continue;
           // ★R2-F5（2026-09-03）：WorldGen.CanCutTile 门（WorldGen.cs:88111-24 单源
           //  world/CanCutTile.ts;此处上下文=AttackMelee,消费位 Player.cs:45032 continue
           //  条件末项）——wall 350 / 下格∈{78,380,579} / 未熟南瓜(254 frameX<144) 拒切;
@@ -26095,7 +26166,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const swBase = isStickOfDoom ? 1
         : ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
           * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
-      let swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
+      // ★SW-T1 2026-09-04：DV 单源——Player.cs:44698 `int num3 = Main.DamageVar(damage,
+      //  luck)`（ProcessHitAgainstNPC 共用行,敌怪支 :26326 已接;luck 正向）。FlyMeal
+      //  ×2 与 Nano ×1.05 仍在掷【后】乘入（:44700-44708/:44760-44764 原位次不动）
+      let swDmg = Math.max(1, damageVarRoll(swBase, this.player.luck));
       // 1457: FlyMeal 打 likeATownNPC ×2、type 18（护士,Nurse——17=商人 Merchant/
       // 22=向导 Guide;批 1 注释误标"商人",review D6 勘误）再 ×2 = ×4（:44700-44708）。
       // armorPenetrationPercent=1f 未接——待 GB 侧 TownNPC.hurt 扩参后接线（见下锚）
@@ -31869,6 +31943,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     if (!st.inBounds(x, y)) return;
     const t = st.get(x, y);
+    // ★幽灵格门（2026-09-03）：原版 Collision.CutTiles（:15454 循环）首门 active()
+    //  ——弹体砍切不割幽灵残型（放置域同款洞清扫）
+    if (t === 0 || !st.hasTile(x, y)) return;
     if (t === POT_TILE) this.smashPot(x, y);
     else if (TILE_CUT.has(t)) {
       if (t === TILE_BY_KEY['v_83_herbs_mature'] || t === TILE_BY_KEY['v_84_herbs_bloom']) {
@@ -35224,6 +35301,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let x = plan.x0; x < plan.x1; x++) {
         for (let y = plan.underY0; y < plan.underY1; y++) {
           if (st.get(x, y) !== GEM_SAP) continue;
+          if (!st.hasTile(x, y)) continue;           // ★RD-F5：active() 门（AttemptToGrowTreeFromSapling 头 cs:73395-73397——幽灵苗不长树不清格）
           if (y <= this.world.groundLevel) continue; // 必须 underground（原版硬门）
           if (Math.random() >= gemP) continue;       // 原版每帧采样概率折算（见函数头）
           const ii = st.idx(x, y);
@@ -35265,6 +35343,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let y = plan.overY0; y < plan.overY1; y++) {
         const t = st.get(x, y);
         if (t !== T.SAPLING && t !== SAK && t !== WIL) continue;
+        if (!st.hasTile(x, y)) continue;     // ★RD-F5：active() 门（cs:73395-73397——幽灵苗不长树不清格）
         const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
         const p = sheet === 20 ? sapP : vanityP;
         if (Math.random() >= p) continue;    // 地表采样率折算（见函数头，:71550/:72467-72481）
@@ -35281,6 +35360,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (let x = plan.x0; x < plan.x1; x++) {
       for (let y = plan.underY0; y < plan.underY1; y++) {
         if (st.get(x, y) !== T.SAPLING) continue;
+        if (!st.hasTile(x, y)) continue;     // ★RD-F5：active() 门（cs:73395-73397——幽灵苗不长树不清格）
         if (Math.floor(st.frameX[st.idx(x, y)] / 54) !== 10) continue;
         if (Math.random() >= underSapP) continue;
         if (growAshTree(st, new RNG((Math.random() * 1e9) | 0), x, y)) {
@@ -35296,6 +35376,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let y = plan.underY0; y < plan.underY1; y++) {
         const t = st.get(x, y);
         if (t !== SAK && t !== WIL) continue;
+        if (!st.hasTile(x, y)) continue;     // ★RD-F5：active() 门（cs:73395-73397——幽灵苗不长树不清格）
         if (Math.random() >= underSapP) continue;
         const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
         if (tryGrow(x, y, sheet, st.frameX[st.idx(x, y)])) {

@@ -275,7 +275,10 @@ const HELPER_EFFECTS = scanHelperEffects();
 const NUM_FIELDS = ['damage', 'knockBack', 'useTime', 'useAnimation', 'shoot', 'useAmmo', 'shootSpeed', 'ammo', 'maxStack', 'crit', 'scale', 'mana'];
 // AmmoID.* 枚举引用（AmmoID.cs:112-146 全表——曾缺 9 项致 Flare/Snowball/StyngerBolt/
 // CandyCorn/JackOLantern/Stake/NailFriendly/FallenStar/Acorn 全落 -1 假数据，2026-08-15 补全）
-const AMMO_ID = {
+// SW-V1 2026-09-04: 改导出——extract-itemfunc.mjs 的 DefaultTo* 参数化展开复用同一
+// 枚举权威（DefaultToRangedWeapon 第二参 AmmoID.X / DefaultToSolution 的
+// AmmoID.Solution;此前 func 提取器不解枚举实参,4060/5629/4703 类整条漏提）。
+export const AMMO_ID = {
   None: 0, Gel: 23, Arrow: 40, Coin: 71, FallenStar: 75, Bullet: 97, Sand: 169,
   Dart: 283, Rocket: 771, Solution: 780, Flare: 931, Snowball: 949, StyngerBolt: 1261,
   CandyCorn: 1783, JackOLantern: 1785, Stake: 1836, NailFriendly: 3108, Acorn: 27,

@@ -17,6 +17,7 @@ function hooks(npcs: TownNPC[], killGuide = false, killClothier = false): GameHo
   return {
     world: new World(40, 40, 20, 'gate'),
     player: { dead: false, equipStats: { killGuide, killClothier } },
+    _bannerNpcs: new Set<number>(),   // SW-S1 巫毒→旗乘区接线消费 bannerNpcActive（Game 私有字段桩）
     npcs: () => npcs,
     enemies: () => [], critters: () => [],
     entities: { nextId: 1, add: () => {} },
@@ -83,6 +84,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     };
     g.world = new World(40, 40, 20, 'boom');
     g.entities = { enemies: [], npcs, critters: [] };   // critters 桶 2026-08-21 并入爆炸扫描
+    (g as unknown as { _bannerNpcs: Set<number> })._bannerNpcs = new Set();   // SW-S1 巫毒→旗乘区接线消费 bannerNpcActive
     g.spawnParticles = () => {};
     g.addDamageNumber = () => {};   // 真方法碰未初始化 dmgNumbers → 'push' of undefined
     g.playSfxFiles = () => {};

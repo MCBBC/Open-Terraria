@@ -40,9 +40,11 @@ const CHAINS: Record<string, ChainCfg> = {
   fishmox:   { name: 'fishmox',   seed: '771003',     evil: 0,  flags: { noInfection: true }, g2: C('golden-fishmox') },
   // ★IIIII99e：FTW 链五点接入（G2=IIIII90b 迁址权威 ~/GoldenChains/golden-ftw）
   ftw:       { name: 'ftw',       seed: '1671560105', evil: 0,  flags: { getGoodWorld: true }, g2: C('golden-ftw') },
-  // ★IIIII104：pumpkin/jagged 五点接入（G2 同 IIII89/i80 桶；配方=m8all.sh/jagged 章）
-  pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: { halloweenGen: true }, g2: '/tmp/iii84-out/x86-i78-pumpkin' },
-  jagged:    { name: 'jagged',    seed: '771005',     evil: 0,  flags: { digExtraHoles: true }, g2: '/tmp/iii80-out/x86-jagged' },
+  // ★IIIII104：pumpkin/jagged 五点接入（配方=m8all.sh/jagged 章）
+  // ★IIIII227：G2 迁居真身 ~/GoldenChains（runbook L60-61:原 /tmp/iii84-out、/tmp/iii80-out
+  //   仅 symlink 已灭，照 IIII97b 桶收养前例改直引 HOME 真身）
+  pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: { halloweenGen: true }, g2: C('x86-i78-pumpkin') },
+  jagged:    { name: 'jagged',    seed: '771005',     evil: 0,  flags: { digExtraHoles: true }, g2: C('x86-jagged') },
   // ★IIIII111c（2026-09-02）：涂装族五点接入（G2=IIII132 涂装桶 /tmp/iii132-out/paint；
   //  五点不含 pnt/pwal/cbt 三通道——漆/涂层全域对拍以 mile8 _iii81m8 SW_I81_PAINT=1 为准，
   //  invisibleplane/negativeinfinity 已 106 行满绿收官，xrayvision 同）

@@ -19,6 +19,10 @@ export function isCrackedAt(st: World['store'], x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const t = st.get(x, y);
   if (t === 0) return false;
+  // ★幽灵格门（2026-09-03）：原版 Kill_ExplodeTiles 族（:80505-25）首门 active()
+  //  ——幽灵残型裂砖不连锁崩塌（本仓 41 号裂砖幽灵 7 万格,爆炸扫面裸读会把
+  //  隐形残型炸出弹片;放置域同款洞清扫）
+  if (!st.hasTile(x, y)) return false;
   return isCrackedSheet(TILE_DEFS[t]?.vanilla?.sheet);
 }
 

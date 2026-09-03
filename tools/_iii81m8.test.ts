@@ -293,7 +293,10 @@ function cmp(tag: string, idx: number, st: {
     const va = c.a[i]!, ja = st.flags[i]! & 1;
     if (va !== ja) { r.dA++; mark(i); if (r.samples.length < 8) r.samples.push(`A(${i % W},${(i / W) | 0}) v${va} j${ja}`); }
     const vt = va ? c.t[i]! : 0;
-    const jt = ja ? (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999) : 0;
+    // ★IIIII227:type=0 残型格（act=1,type=0,vanilla 烧除 cs:1554 裸 type 写产物）照 0
+    //   记——SHEET[0]=-1 曾把它打成 9999 假差（同 344 行 ghost 通道判例:哨兵伪影非内容债;
+    //   REMIX #98 定谳后 JS 侧首现此态,11 格全假差实证=res-settle2 终态逐格核对）
+    const jt = ja ? (st.type[i]! === 0 ? 0 : (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999)) : 0;
     if (vt !== jt) {
       r.dT++; mark(i);
       const k = `T${vt}>${jt}`;

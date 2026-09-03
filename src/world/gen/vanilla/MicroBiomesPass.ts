@@ -561,7 +561,9 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     }
   }
 
-  segProbe('mbTrack');
+  // ★IIII226B 休眠探针：轨段起点全态直递（store/rng/gs；__swSeg 未挂载时零开销、
+  //   零掷零写，同 __swI87Cap/__swGrvCand 先例）——IIII226b 轨段离线重放仪数据源。
+  segProbe('mbTrack', { st, rng, gs, chests });
   // ---- 5. TrackGenerator(cs:22014-22091)----
   gp?.set(0.68);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trackGen = new TrackGenerator(st, gs, chests);

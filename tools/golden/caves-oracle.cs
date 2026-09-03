@@ -15584,7 +15584,10 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                         //   （cs:1557/1562——3×3 帧扫把上方依附植物经 PlantCheck 锚亡杀链
                         //   收割；级联走 Fc 引擎全分派，与 JS squareTileFrameGen 同源）
                         //   ★LLLLLL：改经 LsSquareTileFrameGen（+旗帜前置扫，JS 同构）
-                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; LsSquareTileFrameGen(nx, ny); }
+                        // ★IIIII227:反编译 cs:1552-1554 为裸 type 写——active/half/slope 全保留
+                        //   （REMIX #98 金标 098 (3419,858) typ=0/act=1/slope=1 实证）。旧清 act
+                        //   系移植误读（与 vanilla tileSolid[0]=true 消费面相悖）。
+                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; LsSquareTileFrameGen(nx, ny); }
                         else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; LsSquareTileFrameGen(nx, ny); }
                     }
             }

@@ -297,22 +297,53 @@ export function shapeFloodFillOnlyWalls(
   return { cells, complete: true };
 }
 
+/** ★IIIII216b：Main.wallLargeFrames 成员表（Main.cs:9889-9905 区全量 grep）——命中者
+ *  Framing.WallFrame 走查表支（wallFrameNumber 查表）**零掷**；表外才走 resetFrame 掷骰支。 */
+const WALL_LARGE_FRAMES = new Set([146, 147, 167, 179, 185, 224, 274, 323, 324, 325, 326, 327, 328, 329, 330, 354, 355, 358, 359, 362, 363, 366]);
+
+/** OuterOutline POINT_OFFSETS 8 邻序（ModShapes.cs:22-27，useDiagonals=true 语义序 1:1） */
+const RING8_OFFSETS: ReadonlyArray<readonly [number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
 /** ModShapes.OuterOutline(useDiagonals:true, useInterior:true)+Actions.PlaceWall
  *  （cs:31982）。★F5 落点行基定案：泛洪收集的是**相对坐标**（GenAction.UnitApply 以
  *  origin=(x,y−1) 记 OutputData.Add(x−origin.X,y−origin.Y)，GenAction.cs:15-17），外描边
  *  再以 origin=(x,y) 回放每个 datum 及其 8 邻环（ModShapes.cs OuterOutline.Perform:47-65）
- *  ⇒ 全部铺墙落点相对泛洪腔体整体**下移一行**（中心与环一致平移）。旧实现按泛洪原坐标
- *  直绘 = 整片墙高一行。wallId 为群系家族随机支 188-203 之一（cs:31965-31975 掷）。 */
-export function paintBackfillOutline(st: TileStore, cells: Set<number>, wallId: number): void {
+ *  ⇒ 全部铺墙落点相对泛洪腔体整体**下移一行**（中心与环一致平移）。wallId 为群系家族
+ *  随机支 188-203 之一（cs:31965-31975 掷）。
+ *  ★IIIII216b 定罪补刀（HM L3 残 3,825 单斑根因）：Actions.PlaceWall（Actions.cs:537-548）
+ *  每次调用尾随 WorldGen.SquareWallFrame(self)+邻 4 组（SquareWallFrame 每组 9×
+ *  Framing.WallFrame，其中**仅组中心带 resetFrame:true**，Framing.cs:389-395）——组中心
+ *  每次消耗 genRand.Next(0,3) 1 掷（wall==21 再 Next(2) 1 掷；wallLargeFrames 查表支/
+ *  WallFrame 头守卫界外/ wall==0 提前返回均零掷）。旧实现 setWall 直写零掷 ⇒ 每漆格
+ *  缺 5 掷量级、全批缺 4.5 万掷 ⇒ 后续 attempt 采样点序错位（x86 22 斑 vs JS 22+1 幽灵斑）。
+ *  本补刀 1:1 复刻：OuterOutline 迭代序（datum 内=interior 先行+非 shape 邻环）+每 PlaceWall
+ *  的 5 组中心掷骰消费（读墙=落墙后现场态，含前序 application 已漆邻格）。 */
+export function paintBackfillOutline(st: TileStore, rng: RNG, cells: Set<number>, wallId: number): void {
+  const w = st.w;
+  // SquareWallFrame 的 5 个 resetFrame:true 组中心偏移（cs:81501-81512：self,+x,−x,−y,+y）
+  const GROUPS: ReadonlyArray<readonly [number, number]> = [[0, 0], [1, 0], [-1, 0], [0, -1], [0, 1]];
+  /** Framing.WallFrame(center, resetFrame:true) 掷骰消费（Framing.cs:327-331 头守卫+389-395） */
+  const squareWallFrameRolls = (gx: number, gy: number): void => {
+    if (gx <= 0 || gy <= 0 || gx >= w - 1 || gy >= st.h - 1) return;   // 头守卫：界外零掷
+    const wall = st.wall[st.idx(gx, gy)]!;
+    if (wall === 0) return;                                            // wall==0 提前返回零掷
+    if (WALL_LARGE_FRAMES.has(wall)) return;                           // 查表支零掷
+    rng.nextIntRange(0, 3);                                            // Next(0,3) 帧号支 1 掷（值不入 dump）
+    if (wall === 21) rng.nextIntRange(0, 2);                           // cs:391 wall21 追加 Next(2)
+  };
+  const paint = (wx: number, wy: number): void => {
+    if (!st.inBounds(wx, wy)) return;
+    st.setWall(wx, wy, wallId);
+    for (const [gx, gy] of GROUPS) squareWallFrameRolls(wx + gx, wy + gy);
+  };
   for (const ci of cells) {
-    const cx = ci % st.w;
-    const cy = Math.trunc(ci / st.w) + 1;                // ★F5：origin 换行（相对→绝对）
-    const paint = (wx: number, wy: number): void => {
-      if (st.inBounds(wx, wy)) st.setWall(wx, wy, wallId);
-    };
-    paint(cx + 1, cy); paint(cx - 1, cy); paint(cx, cy + 1); paint(cx, cy - 1);
-    paint(cx + 1, cy + 1); paint(cx + 1, cy - 1); paint(cx - 1, cy + 1); paint(cx - 1, cy - 1);
-    paint(cx, cy);
+    const cx = ci % w;
+    const cy = Math.trunc(ci / w) + 1;                   // ★F5：origin 换行（相对→绝对）
+    paint(cx, cy);                                       // useInterior：datum 本体先行
+    for (const [ox, oy] of RING8_OFFSETS) {
+      // 邻环资格=vanilla _data.Contains(datum+offset)（泛洪相对域）——绝对域同构判定
+      if (!cells.has((cy - 1 + oy) * w + (cx + ox))) paint(cx + ox, cy + oy);
+    }
   }
 }
 
@@ -412,6 +443,11 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
     if (!st.inBounds(px, py)) continue;
     const ii = st.idx(px, py);
     const sh = SHEET_LUT[st.type[ii]];
+    if (altStats) {
+      // ★IIIII216b p 行：attempt 点态+流位置（与 x86 SW_ALT: p 行同构对齐）
+      const rollCount = (globalThis as { __swRollCount?: number }).__swRollCount ?? -1;
+      altStats.log.push(`P ${attempts}: ${px},${py} t${sh < 0 ? 9999 : sh} a${st.flags[ii] ? 1 : 0} u${st.flags[st.idx(px, py - 1)] ? 1 : 0} r${rollCount}`);
+    }
     let wallId = 0;
     if (SET_CRIMSON.has(sh)) wallId = 192 + rng.nextInt(4);       // 猩红墙 192-195
     else if (SET_CORRUPT.has(sh)) wallId = 188 + rng.nextInt(4);  // 腐化墙 188-191
@@ -459,7 +495,7 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
       }
       if (flood.cells.size > 50 && flood.complete) {
         // OuterOutline(origin=(x,y))（cs:31982）——★F5 相对坐标回放下移一行
-        paintBackfillOutline(st, flood.cells, wallId);
+        paintBackfillOutline(st, rng, flood.cells, wallId);
         if (altStats) altStats.log.push(`${attempts}: ${px},${py} w${wallId} n${flood.cells.size}`);
         budget--;
         if (altStats) altStats.s++;

@@ -216,4 +216,11 @@ type E = { x: number; y: number; kill: number; delay: number };
   writeFileSync(`${OUT}/dw-js.txt`, lines.join('\n') + '\n');
   console.log(`dw lines=${lines.length}`);
   console.log(lines.filter(l => !l.startsWith('W ')).slice(0, 80).join('\n'));
+  // ★终态残差格侦探:11 格 (3482,851)(3482,852)(3483,852)(3422,857)(3418,858)(3419,858)(3422,858)(2262,863)(2263,863)(2264,863)(2601,870)
+  const { TILE_DEFS } = await import('../src/data/tiles');
+  for (const [x, y] of [[3419, 858], [3418, 858], [3422, 857], [3422, 858], [3482, 851], [2262, 863], [2601, 870]]) {
+    const i = y * st.w + x;
+    const t = st.type[i]!;
+    console.log(`END (${x},${y}) type=${t} flags=${st.flags[i]} name=${TILE_DEFS[t]?.name ?? '?'} sheet=${TILE_DEFS[t]?.vanilla?.sheet ?? -1} liq=${st.liquid[i]} lty=${st.liquidType[i]} slope=${st.slope[i]}`);
+  }
 }, 600_000);
