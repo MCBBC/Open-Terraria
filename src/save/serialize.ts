@@ -259,10 +259,12 @@ export interface BgStylesSave {
   mushroom: number;          // setBG(8)（v>194）
   underworld: number;        // setBG(9)（v>=215）
   bg10: number; bg11: number; bg12: number;    // setBG(10-12)（v>195）
-  /** ★2026-09-03：header bg 字节八连末两档（WF:1330-1331）——desert=沙漠背景样式
-   *  （setBG(6) 样式4=248/249/250）、ocean=海洋单层贴图变体（setBG(7) 0-7）。
+  /** ★2026-09-03：header bg 字节组全量（WF:1325-1331）——forest=四区森林背景样式
+   *  （treeBG1-4）、desert=沙漠背景样式（setBG(6) 样式4=248/249/250）、ocean=海洋
+   *  单层贴图变体（setBG(7) 0-7）、corrupt/snow/hallow/crimson=侵染背景样式档。
    *  仅 .wld 导入档携带；本仓自建世界缺省 → BiomeBackground.seedFor 走 seed 派生 */
-  desert?: number; ocean?: number;
+  forest?: number[]; desert?: number; ocean?: number;
+  corrupt?: number; snow?: number; hallow?: number; crimson?: number;
 }
 
 export interface SaveMeta {

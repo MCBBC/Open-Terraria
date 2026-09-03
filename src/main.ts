@@ -23,7 +23,7 @@ import { VUI } from './vui/VUI';
 import { assetsDownloadIdle, initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
 import { prefetchWorldGenWorker } from './workers/WorldGenClient';
 import { prefetchSaveWorker } from './workers/SaveClient';
-import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
+import { holdForAssetsReady, mountAssetBadge, warnAssetPipelineDown } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
 import { Lang } from './i18n/Lang';
@@ -806,6 +806,13 @@ kvHas('sandboxworld.quicksave').then(async () => {
   flow.showTitle(true);        // 菜单+角标文字幕后就位（音乐/预载调用幂等）；★true=
                                // 背景冻结——揭幕前零 tick 零绘制(2026-08-27 用户报:
                                // 过渡图阶段时间空转+加载密集期背后全屏渲染抢算力)
+  // ★管线未启用不再静默(2026-09-03 用户要求"SW 没起来弹窗警告+可复制诊断"):
+  //   PROD 下 SW 注册失败/激活超时/环境不支持时弹窗(reason/重试/复制诊断/
+  //   仍要进入)——prune 发布形态下这种会话 vanilla 全家族贴图必然 404。
+  //   调试旗 ?swfail 模拟该链路(dev 亦可触发)。?nosw=显式关闭,不打扰。
+  if ((import.meta.env.PROD || bootParams0.has('swfail')) && !bootParams0.has('nosw')) {
+    warnAssetPipelineDown();
+  }
   warmAllAssets();
   // ★2026-08-27 用户定案:过渡图阶段必须 zip 全量落盘;渐隐(revealBehind)与
   //   "加载完成"门统一等 hold 放行——菜单揭幕时永不缺图。时序尽(10.3s)而

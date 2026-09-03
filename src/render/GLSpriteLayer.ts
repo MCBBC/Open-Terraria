@@ -59,8 +59,12 @@ in vec2 vUv;
 out vec4 outColor;
 void main() {
   vec4 c = texture(uTex, vUv);
-  float a = c.a * uAlpha;
-  outColor = vec4(c.rgb * uTint * a, a);             // 预乘输出
+  // ★2026-09-03 边缘暗晕定谳：rgb 不得再乘 c.a——线性插值下边缘 c.rgb 已含 α
+  //  (t×色)，再乘 c.a = t² 双重变暗（3.4× 沙暴背景撕裂带呈暗蓝描边，用户实报；
+  //  剖面三通道实测与 t² 模型全中）。预乘混合(ONE/ONE_MINUS_SRC_ALPHA)要求
+  //  rgb=预乘值：纹理经 UNPACK_PREMULTIPLY/位图预乘上传后 c.rgb 已是预乘态，
+  //  此处只乘层透明度 uAlpha（XNA SpriteBatch Color×scale 同语义）
+  outColor = vec4(c.rgb * uTint * uAlpha, c.a * uAlpha);
 }`;
 
 // ---- HorizonClouds 像素着色器（Terraria 1.4.5.6 PixelShader.cso obj62 逐指令 1:1；

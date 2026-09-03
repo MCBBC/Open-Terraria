@@ -441,12 +441,18 @@ function scheduleManifestRetry(): void {
 }
 
 let initInFlight: Promise<void> | null = null;
-/** 单例包装(2026-08-27 ★双发竞态根修):main 与 primeBootAssets 各调一次,
- *  原 enabled 守卫要等首次跑完才翻真——manifest await 窗口(~105ms)内第二次
- *  进入 ⇒ manifest 双拉 ⇒ composeVersion 对【已 composed 的 version】再 compose
- *  = 版本叠哈希漂移(G→r403ge)⇒ SW 切名、暖存整批"失踪"、菜单贴图全空
- *  (用户 PC trace 06:07:21 实锤:两行 manifest ok + ver 叠变)。并发调用复用
- *  同一 Promise。 */
+/** 管线未启用原因(2026-09-03 用户要求"SW 没起来弹窗警告而非静默失败"):
+ *  doInitAssetCache 每个 early-return 出口落一笔;''=无失败(enabled/预期关闭)。
+ *  transient=值得重试(注册失败/激活超时);env 类(无 SW API/http)重试无意义。 */
+let pipelineDown = '';
+let pipelineDownTransient = false;
+/** SW 页面级监听已绑定(retryAssetCacheInit 重入时防重复注册→消息双跑) */
+let swListenersBound = false;
+function notePipelineDown(reason: string, transient: boolean): void {
+  pipelineDown = reason;
+  pipelineDownTransient = transient;
+  swTrace(`管线未启用: ${reason}`);
+}
 /** 环境性关断判定(与 doInitAssetCache 的门严格同式):dev 默认关(!PROD,除非 ?sw
  *  强制)/?nosw/非安全上下文/无 caches API。★资源徽标在关断环境下无意义——
  *  无 SW 即无下载管线,骨架会永久滞留(2026-08-28 用户报 npm run dev 徽标永挂) */
@@ -466,12 +472,29 @@ export function initAssetCache(): Promise<void> {
 }
 
 async function doInitAssetCache(): Promise<void> {
-  if (state.enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+  if (state.enabled) { pipelineDown = ''; return; }
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
+    notePipelineDown('浏览器不支持 ServiceWorker(API 缺失:WebView/内核过旧)', false);
+    return;
+  }
   const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
   const force = q.has('sw');
-  if (q.has('nosw')) return;
-  if (!force && !import.meta.env.PROD) return;               // dev 默认关(探针/HMR 零干扰)
-  if (typeof isSecureContext !== 'undefined' && !isSecureContext) return; // 纯 http 非 localhost 降级
+  // ★调试旗 ?swfail=1(2026-09-03 用户要求):模拟"SW 不可用"走完整失败链路
+  //  (管线原因落账+启动弹窗+诊断复制),dev 也可触发(置于 PROD 门之前)。
+  if (q.has('swfail')) {
+    notePipelineDown('调试旗 ?swfail 模拟:SW 管线不可用', true);
+    return;
+  }
+  if (q.has('nosw')) { pipelineDown = ''; return; }          // 显式关闭=用户意图,不算失败
+  if (!force && !import.meta.env.PROD) { pipelineDown = ''; return; }  // dev 默认关(探针/HMR 零干扰)
+  if (typeof isSecureContext !== 'undefined' && !isSecureContext) {
+    notePipelineDown('非安全上下文(HTTP)——浏览器禁用 ServiceWorker', false);
+    return; // 纯 http 非 localhost 降级
+  }
+  if (typeof caches === 'undefined') {
+    notePipelineDown('无 CacheStorage API(隐私模式/站点存储被禁)', false);
+    return;
+  }
   try {
     state.version = assetVersion();
     // zip manifest 拉取(3s 超时;路径不匹配 ASSET_RE → SW 天然放行不缓存;
@@ -509,19 +532,39 @@ async function doInitAssetCache(): Promise<void> {
     const swQ = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
     const swFile = swQ.has('twasw') ? 'sw-twa.js' : 'sw.js';
     let reg: ServiceWorkerRegistration | null = null;
+    let regErr = '';
     for (let a = 0; a < 3 && !reg; a++) {
       try {
         reg = await navigator.serviceWorker.register(swFile, { updateViaCache: 'none' });
-      } catch { await new Promise((r) => setTimeout(r, 1000 * (a + 1))); }
+      } catch (e) {
+        regErr = String(e instanceof Error ? e.message : e).slice(0, 120);
+        swTrace(`register 试${a + 1} 失败: ${regErr}`);
+        await new Promise((r) => setTimeout(r, 1000 * (a + 1)));
+      }
     }
-    if (!reg) return;
-    await Promise.race([
-      navigator.serviceWorker.ready,
+    if (!reg) {
+      // ★404 也是这里(部署缺 sw-twa.js/sw.js 时 register 抛 NotFoundError)
+      notePipelineDown(`SW 注册连续 3 次失败(${swFile}): ${regErr || '未知错误'}`, true);
+      return;
+    }
+    const readyRace = await Promise.race([
+      navigator.serviceWorker.ready.then(() => 'ok' as const),
       new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 10_000)),
     ]);
+    if (readyRace === 'timeout') {
+      notePipelineDown('SW 已注册但 10s 未激活(ready 竞速超时)', true);
+      // 不 return:继续走下方 controller 检查——ready 慢不代表最终不激活,
+      // controller 到位仍可正常启用(原行为保留,仅补告警原因)
+    }
     const sw = navigator.serviceWorker.controller ?? reg.active ?? null;
-    if (!sw) return;
+    if (!sw) {
+      notePipelineDown(readyRace === 'timeout'
+        ? 'SW 激活超时且未取得页面控制权(controller/active 均空)'
+        : 'SW 未取得页面控制权(controller/active 均空)', true);
+      return;
+    }
     state.enabled = true;
+    pipelineDown = '';   // 翻真即清失败原因(弹窗判定以 enabled 为准)
     // ★首访主壳补登记(2026-08-25):首次加载早于 SW 控制权(claim 传播有竞态),
     //   主 chunk 未经 SW 缓存 → 第二次访问仍回源一次。此处直写版本缓存
     //   (http 缓存吸收重复字节);dev 下 import.meta.url 为 /src/*.ts,
@@ -544,9 +587,14 @@ async function doInitAssetCache(): Promise<void> {
     // (localStorage 锚定失效的极端情况[崩溃丢盘]下缓存照样安全)。
     if (zipPlan) sw.postMessage({ type: 'gc', version: state.version });
     postToSw({ type: 'status' });
-    navigator.serviceWorker.addEventListener('message', onSwMessage);
-    // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // ★监听只绑一次(2026-09-03 retryAssetCacheInit 重入保护):重试成功会二进
+    //   doInitAssetCache,重复 addEventListener 会让 onSwMessage 双跑(legacy
+    //   块失败计数 chunkFailedAcc += 会翻倍)。controllerchange/online 同理。
+    if (!swListenersBound) {
+      swListenersBound = true;
+      navigator.serviceWorker.addEventListener('message', onSwMessage);
+      // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
       postToSw({ type: 'status' });
       // ★首访竞态(2026-08-24 OSS 部署实锤,本地 dist-release 复现):SW activate 的
       //   clients.claim() 触发的换控事件可能【晚于】zip 暖缓存启动落地——此处盲目
@@ -559,24 +607,25 @@ async function doInitAssetCache(): Promise<void> {
         return;
       }
       state.warming = false;
-    });
-    startWatchdog();
-    // ★持久化存储申请(2026-08-27 手机实测"每次刷新全量重下"):移动浏览器
-    //  (尤其国产壳)对非持久化站点的 Cache API 驱逐极激进,暖存可被整批清空。
-    //  persist() 把站点标记为长期存储(best-effort,可能弹权限/静默拒绝);
-    //  拒绝也不影响功能,驱逐后由 have-set 对账增量补下兜底。
-    try {
-      const st = navigator.storage as { persist?: () => Promise<boolean>; estimate?: () => Promise<StorageEstimate> };
-      void st?.persist?.()?.then((granted) => {
-        if (granted) console.log('[assets] 持久化存储已授予');
-      }).catch(() => { /* */ });
-    } catch { /* 老浏览器 */ }
-    // ★网络恢复即补拉(2026-08-27):WiFi↔蜂窝切换/断网恢复的 online 事件,
-    //   失败终态立即重扫(不等 15s 迟滞)
-    addEventListener('online', () => {
-      swTrace('online 事件');
-      if (state.enabled && state.failed > 0 && !state.warming) scheduleZipAutoRetry(true);
-    });
+      });
+      startWatchdog();
+      // ★持久化存储申请(2026-08-27 手机实测"每次刷新全量重下"):移动浏览器
+      //  (尤其国产壳)对非持久化站点的 Cache API 驱逐极激进,暖存可被整批清空。
+      //  persist() 把站点标记为长期存储(best-effort,可能弹权限/静默拒绝);
+      //  拒绝也不影响功能,驱逐后由 have-set 对账增量补下兜底。
+      try {
+        const st = navigator.storage as { persist?: () => Promise<boolean>; estimate?: () => Promise<StorageEstimate> };
+        void st?.persist?.()?.then((granted) => {
+          if (granted) console.log('[assets] 持久化存储已授予');
+        }).catch(() => { /* */ });
+      } catch { /* 老浏览器 */ }
+      // ★网络恢复即补拉(2026-08-27):WiFi↔蜂窝切换/断网恢复的 online 事件,
+      //   失败终态立即重扫(不等 15s 迟滞)
+      addEventListener('online', () => {
+        swTrace('online 事件');
+        if (state.enabled && state.failed > 0 && !state.warming) scheduleZipAutoRetry(true);
+      });
+    }   // ★swListenersBound 绑一次块收口(重试重入保护)
     // ★showTitle 的 warmAllAssets 可能抢在 manifest 拉取前到达(enabled=false
     //   被 return 吞掉,之后再无人补调 → 永久 idle;此处自补一脚)
     // ★force 对账(2026-08-26):status 回报的 done 口径含壳/散件噪声,缓存总数
@@ -586,7 +635,87 @@ async function doInitAssetCache(): Promise<void> {
     // ★manifest 失败会话不 warm(2026-08-27):zipPlan=null 时 legacy 逐文件在
     //   prune 形态下注定全 404(熔断兜底前也白烧请求),且本会话缓存只读保命。
     if (zipPlan) warmAllAssets(true);
-  } catch { /* 注册失败(老浏览器/隐私模式)→ 降级现状,零影响 */ }
+  } catch (e) {
+    // 注册失败(老浏览器/隐私模式)→ 降级现状;原因落账供弹窗/诊断(行为不变)
+    notePipelineDown(`初始化异常: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`, true);
+  }
+}
+
+// ---- 管线失败可见化(2026-09-03 用户要求"SW 没起来弹窗警告+可复制诊断") ----
+
+export interface AssetPipelineFailure { down: boolean; reason: string; transient: boolean; }
+
+/** 管线失败态(initAssetCache await 完成后查询)。down=true ⇒ prune 发布形态下
+ *  本会话 vanilla 全家族贴图必然 404,UI 层应弹窗告知而非静默放行进世界。 */
+export function assetPipelineFailure(): AssetPipelineFailure {
+  return { down: !state.enabled && pipelineDown !== '', reason: pipelineDown, transient: pipelineDownTransient };
+}
+
+/** 弹窗"重试"入口:重跑 initAssetCache 单例(注册失败/激活超时多为瞬态——
+ *  弱网/首次安装慢/部署刚换 sw 文件)。返回重试后是否 enabled。 */
+export async function retryAssetCacheInit(): Promise<boolean> {
+  initInFlight = null;
+  pipelineDown = '';
+  await initAssetCache();
+  return state.enabled;
+}
+
+const DIAG_MB = (b: number): string => `${(b / 1048576).toFixed(1)}MB`;
+
+/** 全量诊断报告(弹窗"复制诊断信息"/logo×5 诊断面板共用):环境+失败原因+
+ *  资产状态账+SW 注册态+CacheStorage 清点+存储配额+完成旗,尾接 swTrace 300 条。
+ *  全程可选 API try/catch——诊断器自身在任何残缺环境都不能抛。 */
+export async function buildAssetDiagReport(): Promise<string> {
+  const L: string[] = [];
+  const line = (s: string): void => { L.push(s); };
+  line('[SandboxWorld 资产管线诊断]');
+  try {
+    line(`时间: ${new Date().toISOString()}`);
+    line(`页面: ${location.href}`);
+    line(`UA: ${navigator.userAgent}`);
+    line(`语言: ${navigator.language}  平台: ${(navigator as { platform?: string }).platform ?? '?'}`);
+    line(`安全上下文: ${(typeof isSecureContext !== 'undefined' ? isSecureContext : '?')}  协议: ${location.protocol}  线程并发: ${navigator.hardwareConcurrency ?? '?'}`);
+  } catch { /* 环境 API 缺失逐段跳过 */ }
+  const st = assetCacheState();
+  const fail = assetPipelineFailure();
+  line(`管线: ${st.enabled ? '已启用' : `未启用${fail.reason ? `(原因: ${fail.reason})` : ''}`}`);
+  line(`状态账: version=${st.version} done=${st.done}/${st.total} failed=${st.failed} phase=${st.phase} warming=${st.warming} calibrated=${st.calibrated} 字节=${DIAG_MB(st.bytesDone)}/${DIAG_MB(st.bytesTotal)} 补拉轮=${zipAutoRetries}/5`);
+  try {
+    const swm = navigator.serviceWorker;
+    line(`SW: ${swm ? (swm.controller ? '已控制页面' : '已注册,无 controller') : 'API 不可用'}`);
+    const regs = await swm.getRegistrations();
+    line(`SW 注册: ${regs.length ? regs.map((r) => `${r.scope}${r.active ? ' [active]' : r.installing ? ' [installing]' : r.waiting ? ' [waiting]' : ''}`).join(' ; ') : '无'}`);
+  } catch { line('SW 注册: 查询异常/API 缺失'); }
+  try {
+    if (typeof caches !== 'undefined') {
+      const names = await caches.keys();
+      const parts: string[] = [];
+      for (const n of names) {
+        if (!n.startsWith('sw-assets-v')) { parts.push(n); continue; }
+        try {
+          const cnt = (await (await caches.open(n)).keys()).length;
+          parts.push(`${n}(${cnt}条)`);
+        } catch { parts.push(n); }
+      }
+      line(`CacheStorage: ${parts.join(' , ') || '无'}`);
+    } else line('CacheStorage: API 不可用');
+  } catch { line('CacheStorage: 查询异常'); }
+  try {
+    const sto = navigator.storage;
+    const est = await sto?.estimate?.();
+    let persisted = '';
+    try { persisted = sto?.persisted ? `  persisted=${await sto.persisted()}` : ''; } catch { /* */ }
+    if (est) line(`存储: 已用 ${DIAG_MB(est.usage ?? 0)}/配额 ${est.quota != null ? DIAG_MB(est.quota) : '?'}${persisted}`);
+  } catch { /* */ }
+  try {
+    const flag = localStorage.getItem(COMPLETE_FLAG + state.version);
+    const hash = localStorage.getItem(CONTENT_HASH_KEY);
+    line(`本地旗: 完成旗@${state.version}=${flag ? '在' : '无'}  contentHash=${hash ? hash.slice(0, 8) : '无'}`);
+  } catch { line('本地旗: localStorage 不可用'); }
+  line('');
+  line('—— swTrace 最近 300 条 ——');
+  for (const t of readSwTrace()) L.push(t);
+  return L.join('\n');
 }
 
 function onSwMessage(e: MessageEvent): void {

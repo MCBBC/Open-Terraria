@@ -48,7 +48,6 @@ const ANCHORS: Record<string, string> = {
     if (typeof s === 'number') SHEET[i] = s;
   }
   const rows: string[] = [];
-  let lastTyp: Uint16Array | null = null;
 
   try {
     await generateWorld({
@@ -61,26 +60,62 @@ const ANCHORS: Record<string, string> = {
           type: Uint16Array; flags: Uint8Array; wall: Uint16Array;
           liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array; wire: Uint8Array;
         };
-        const typ = new Uint16Array(N);
-        for (let i = 0; i < N; i++) typ[i] = SHEET[st.type[i]!]!;
-        try { writeFileSync(`${OUT}/b_${anchor}.typ`, Buffer.from(typ.buffer, typ.byteOffset, typ.byteLength)); } catch { /* ignore */ }
-        lastTyp = typ;
-        // 与 G2 直接逐格比(G2 typ=vanilla 型号;air=0)
-        const f = `${process.env.HOME}/GoldenChains/golden-grvfix/${anchor}.typ`;
-        let buf: Buffer;
-        try { buf = readFileSync(f); } catch { rows.push(`${anchor} G2-MISSING`); return; }
-        const g2 = new Uint16Array(buf.buffer, buf.byteOffset, N);
-        let a = 0, t = 0, sw = 0;
-        let first = -1;
+        // 八通道逐格比(G2 侧 vanilla 型号空间;JS 9999 哨兵→0)
+        const jtyp = new Uint16Array(N);
+        const jwal = new Uint16Array(N);
+        const jact = new Uint8Array(N), jliq = new Uint8Array(N), jlty = new Uint8Array(N);
+        const jhalf = new Uint8Array(N), jslope = new Uint8Array(N), jinact = new Uint8Array(N);
         for (let i = 0; i < N; i++) {
-          const gv = g2[i]!, jv = typ[i]!;
-          if (gv === jv) continue;
-          if (jv === 0) { a++; }
-          else if (gv === 0) { t++; }
-          else sw++;
-          if (first < 0) first = i;
+          jtyp[i] = SHEET[st.type[i]!]!;
+          jwal[i] = st.wall[i]!;
+          jact[i] = st.flags[i]! & 1;
+          jliq[i] = st.liquid[i]!;
+          jlty[i] = st.liquid[i]! > 0 ? (st.liquidType[i]! > 0 ? st.liquidType[i]! - 1 : 0) : 0;
+          jhalf[i] = st.half[i]!;
+          jslope[i] = st.slope[i]!;
+          jinact[i] = (st.wire[i]! >>> 5) & 1;
         }
-        rows.push(`${anchor} A=${a} T=${t} SWAP=${sw} first=(${first % W},${(first / W) | 0})`);
+        try {
+          writeFileSync(`${OUT}/b_${anchor}.typ`, Buffer.from(jtyp.buffer, jtyp.byteOffset, jtyp.byteLength));
+          writeFileSync(`${OUT}/b_${anchor}.lty`, Buffer.from(jlty.buffer, jlty.byteOffset, jlty.byteLength));
+          writeFileSync(`${OUT}/b_${anchor}.liq`, Buffer.from(jliq.buffer, jliq.byteOffset, jliq.byteLength));
+          writeFileSync(`${OUT}/b_${anchor}.act`, Buffer.from(jact.buffer, jact.byteOffset, jact.byteLength));
+          writeFileSync(`${OUT}/b_${anchor}.wal`, Buffer.from(jwal.buffer, jwal.byteOffset, jwal.byteLength));
+        } catch { /* ignore */ }
+        const cmp16 = (js: Uint16Array, g2f: string) => {
+          let buf2: Buffer;
+          try { buf2 = readFileSync(g2f); } catch { return `${g2f}:G2MISS`; }
+          const g2 = new Uint16Array(buf2.buffer, buf2.byteOffset, N);
+          let d = 0, first = -1;
+          for (let i = 0; i < N; i++) {
+            const gv = g2[i]!, jv = js[i] === 9999 ? 0 : js[i]!;
+            if (gv !== jv) { d++; if (first < 0) first = i; }
+          }
+          return `${d}${first >= 0 ? `@(${first % W},${(first / W) | 0})` : ''}`;
+        };
+        const cmp8 = (js: Uint8Array, g2f: string) => {
+          let buf2: Buffer;
+          try { buf2 = readFileSync(g2f); } catch { return `${g2f}:G2MISS`; }
+          const g2 = new Uint8Array(buf2.buffer, buf2.byteOffset, N);
+          let d = 0, first = -1;
+          for (let i = 0; i < N; i++) {
+            if (g2[i] !== js[i]) { d++; if (first < 0) first = i; }
+          }
+          return `${d}${first >= 0 ? `@(${first % W},${(first / W) | 0})` : ''}`;
+        };
+        const gdir = `${process.env.HOME}/GoldenChains/golden-grvfix`;
+        const gf = (ext: string) => gdir + '/' + anchor + '.' + ext;
+        const line = [anchor,
+          'typ:' + cmp16(jtyp, gf('typ')),
+          'wal:' + cmp16(jwal, gf('wal')),
+          'act:' + cmp8(jact, gf('act')),
+          'liq:' + cmp8(jliq, gf('liq')),
+          'lty:' + cmp8(jlty, gf('lty')),
+          'half:' + cmp8(jhalf, gf('half')),
+          'slope:' + cmp8(jslope, gf('slope')),
+          'act2:' + cmp8(jinact, gf('inact')),
+        ].join(' ');
+        rows.push(line);
       },
     });
   } finally {

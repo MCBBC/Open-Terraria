@@ -5,7 +5,7 @@
 // 规格=UIGenProgressBar.ts 常量);面板底=Inventory_Back13 九宫格乘色
 // ((33,15,91)×0.685,与 UI.ts 原版像素面板同源);全程方角/硬边框/像素字体,
 // 无圆角无渐变。
-import { assetCacheState, assetCacheEnvOff, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, onAssetProgress, readSwTrace, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
+import { assetCacheState, assetCacheEnvOff, assetPipelineFailure, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, buildAssetDiagReport, onAssetProgress, readSwTrace, retryAssetCacheInit, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
 import { Lang } from '../i18n/Lang';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
@@ -124,6 +124,34 @@ const CSS = `
   background: #0a0e1e; color: #cfe0ff; border: 1px solid #33406e;
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.45;
 }
+/* 管线未启用警告弹窗(2026-09-03;同 gate/panel 像素风,z 在详情面板之上/诊断面板之下) */
+.sw-asset-pipe {
+  position: fixed; inset: 0; z-index: 10012; display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 14, 0.86);
+}
+.sw-asset-pipe .panel {
+  width: min(560px, 92vw); text-align: center; color: #e8ecf8;
+  background-color: #241a4e; background-size: 100% 100%; image-rendering: pixelated;
+  border: 2px solid #7d92d6; box-shadow: 0 0 0 2px #0a0e1e, 0 10px 32px rgba(0, 0, 0, 0.7);
+  padding: 22px 26px 18px;
+  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
+}
+.sw-asset-pipe .reason {
+  margin: 12px auto 0; max-width: 100%; padding: 8px 10px; text-align: left;
+  background: #0a0e1e; border: 1px solid #33406e; color: #ffd76e;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5;
+  word-break: break-all; white-space: pre-wrap;
+}
+.sw-asset-pipe .btnrow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+.sw-asset-pipe button {
+  background: #3a2a5a; color: #fff; border: 2px solid #7d92d6;
+  box-shadow: 0 0 0 2px #0a0e1e; padding: 8px 20px; cursor: pointer;
+  font-family: inherit; font-size: 14px;
+}
+.sw-asset-pipe button:hover { background: #4a3a7a; }
+.sw-asset-pipe button:disabled { opacity: 0.55; cursor: wait; }
+.sw-asset-pipe .hint { font-size: 11px; color: #9fb0e0; margin-top: 12px;
+  text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000; }
 `;
 
 let styleEl: HTMLStyleElement | null = null;
@@ -306,6 +334,87 @@ export function unmountAssetBadge(): void {
   badgeEl?.remove(); badgeEl = null;
   badgeFading = false;
   closeAssetPanel();   // 徽标淡出后详情面板一并收起
+}
+
+// ---- 管线未启用警告弹窗(2026-09-03 用户要求"弹窗警告而不是静默失败") ----
+// 背景:prune 发布形态下 sprites/vanilla 全家族只在 SW 分片缓存里,SW 没起来
+// (注册失败/激活超时/WebView 无 API/http)的会话以前会静默放行进世界=只有
+// 角色 UI 完好、其余全缺的"黑图世界"(线上实锤,部分用户)。弹窗给三条出路:
+// 复制诊断(支持回贴给开发者)/重试注册(瞬态失败多数可自愈)/仍要进入(本会话
+// 不再打扰)。文案硬编码中文(同单人门槛面板先例,诊断工具不走 l10n)。
+
+let pipeEl: HTMLElement | null = null;
+let pipeAck = false;   // "仍要进入"已确认——本会话不再重复弹
+
+/** 管线未启用警告。initAssetCache await 完成后调用;enabled 正常时是 no-op。 */
+export function warnAssetPipelineDown(): void {
+  if (typeof document === 'undefined' || pipeEl || pipeAck) return;
+  const fail = assetPipelineFailure();
+  if (!fail.down) return;
+  // 骨架徽标在管线 down 时永不翻真——摘掉,由本弹窗接管示警(避免双 UI)
+  if (badgeEl && badgePending) {
+    badgeEl.remove(); badgeEl = null; badgePending = false;
+  }
+  ensureStyle();
+  pipeEl = document.createElement('div');
+  pipeEl.className = 'sw-asset-pipe';
+  pipeEl.innerHTML = `
+    <div class="panel">
+      <div class="sw-asset-title" style="font-size:16px;letter-spacing:2px;">⚠ 资源管线未能启动</div>
+      <div class="sw-asset-note" style="margin-top:12px;">浏览器资源缓存服务(SW)未就绪,贴图资源无法下载——<br>进入世界后会大面积缺图(仅角色/UI 正常)。建议先重试或反馈诊断信息。</div>
+      <div class="reason"></div>
+      <div class="btnrow">
+        <button data-a="copy">复制诊断信息</button>
+        ${fail.transient ? '<button data-a="retry">重试</button>' : ''}
+        <button data-a="go">仍要进入</button>
+      </div>
+      <div class="hint">诊断信息 = 环境/失败原因/缓存清点/最近 300 条资源日志(不含存档与个人信息)</div>
+    </div>`;
+  document.body.appendChild(pipeEl);
+  ensurePanelBg(pipeEl.querySelector('.panel') as HTMLElement);
+  (pipeEl.querySelector('.reason') as HTMLElement).textContent = fail.reason || '未知原因(详情见诊断信息)';
+  const close = (): void => { pipeEl?.remove(); pipeEl = null; };
+  pipeEl.querySelector('[data-a=copy]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget as HTMLElement;
+    btn.setAttribute('disabled', '');
+    try {
+      const report = await buildAssetDiagReport();
+      try {
+        await navigator.clipboard.writeText(report);
+        btn.textContent = '已复制 ✓';
+      } catch {
+        // 剪贴板 API 不可用(http/权限):回退打开诊断面板手动全选复制
+        openAssetDiagPanel();
+        btn.textContent = '已打开诊断面板';
+      }
+    } catch { btn.textContent = '组装诊断失败'; }
+    btn.removeAttribute('disabled');
+    setTimeout(() => { btn.textContent = '复制诊断信息'; }, 1800);
+  });
+  pipeEl.querySelector('[data-a=retry]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget as HTMLElement;
+    btn.setAttribute('disabled', '');
+    btn.textContent = '重试中…';
+    swTrace('管线警告弹窗:用户点击重试');
+    const ok = await retryAssetCacheInit();
+    if (ok) {
+      swTrace('管线警告弹窗:重试成功');
+      close();
+      mountAssetBadge();   // 徽标骨架已摘,重挂走正常进度订阅
+    } else {
+      btn.textContent = '仍失败';
+      btn.removeAttribute('disabled');
+      // 失败原因可能已更新——刷新弹窗内的 reason 行
+      const r = pipeEl?.querySelector('.reason') as HTMLElement | null;
+      if (r) r.textContent = assetPipelineFailure().reason || r.textContent || '';
+      setTimeout(() => { btn.textContent = '重试'; }, 1800);
+    }
+  });
+  pipeEl.querySelector('[data-a=go]')?.addEventListener('click', () => {
+    pipeAck = true;
+    swTrace('管线警告弹窗:用户选择仍要进入');
+    close();
+  });
 }
 
 // ---- 下载详情面板(点击徽标开/关;2026-08-19) ----
@@ -537,6 +646,13 @@ export function openAssetDiagPanel(): void {
   const ta = el.querySelector('textarea') as HTMLTextAreaElement;
   ta.value = readSwTrace().join('\n') || '(空)';
   ta.scrollTop = ta.scrollHeight;
+  // 异步补全量诊断报告(2026-09-03):环境/失败原因/缓存清点/存储配额 +
+  // swTrace 尾段——缓存清点 keys() 要 1-2s,先出 trace 再原地替换
+  void buildAssetDiagReport().then((rep) => {
+    if (!ta.isConnected) return;
+    ta.value = rep;
+    ta.scrollTop = ta.scrollHeight;
+  });
   (el.querySelector('[data-a=close]') as HTMLElement).addEventListener('click', () => el.remove());
   (el.querySelector('[data-a=copy]') as HTMLElement).addEventListener('click', async () => {
     ta.select();

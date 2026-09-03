@@ -68,7 +68,9 @@ for (const f of files) {
     const bg = save.header?.bgStyles ?? {};
     const d = bg.desert, o = bg.ocean;
     const tag = d === 4 ? ' ★★样式4★★' : '';
-    console.log(`${f}  「${save.header?.name}」 ${save.header?.w}×${save.header?.h} desertBG=${d}(${STYLES[d] ?? '?'}) oceanBG=${o} spawn=(${save.header?.spawnX},${save.header?.spawnY})${tag}`);
+    const bg2 = bg;
+    const forest = Array.isArray(bg2.forest) ? bg2.forest.join('/') : '?';
+    console.log(`${f}  「${save.header?.name}」 desertBG=${d}(${STYLES[d] ?? '?'}) ocean=${o} forest=[${forest}] corrupt=${bg2.corrupt} snow=${bg2.snow} hallow=${bg2.hallow} crimson=${bg2.crimson}${tag}`);
     if (d === 4) {
       found.push({ f, save });
       const gl = Math.round(save.header.groundLevel ?? 300);

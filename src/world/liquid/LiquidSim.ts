@@ -727,7 +727,9 @@ export class LiquidSim {
     const i = this.idx(x, y);
     if (!st.flags[i]) return false;                    // active 位
     if ((st.wire[i] >>> 5) & 1) return false;          // !inActive()（Tile.cs:608-611 bit6）
-    return this.solidNP[st.type[i]] === 1;
+    const t = st.type[i];
+    if (t === 0) return true; // ★IIIII227:Main.cs:7995 `tileSolid[0] = true`(tileSolidTop[0] 缺省 false)——act=1 type=0 残型格对液体不可通行(vanilla 谓词 nactive∧tileSolid[0]∧!solidTop[0];REMIX #98 DelWater 早退支定谳锚)
+    return this.solidNP[t] === 1;
   }
 
   /** WorldGen.SolidTile 语义（1456 WorldGen.cs:70155-70176）：实心 && !solidTop &&
@@ -751,11 +753,13 @@ export class LiquidSim {
     if (x >= st.w - 5 || y >= st.h - 5 || x < 5 || y < 5) return;
     const i = this.idx(x, y);
     if (this.checking[i] || st.liquid[i] === 0) return;
-    const t = st.type[i];
-    if (t !== 0 && st.flags[i]) {
+    if (st.flags[i]) {
       // Liquid.cs:1172：nactive() && tileSolid && type!=546 && !tileSolidTop——
       // ★IIIII70b 补 !inActive 半边（致动格恒可入列,原版同字面）
-      if (this.solidNP[t] === 1 && t !== this.id546 && !(st.wire[i] >>> 5 & 1)) return;
+      // ★IIIII227:tileSolid[0]=true（Main.cs:7995）——act=1 type=0 残型格同走实心门
+      // 不可入列;旧 `t !== 0` 守卫系「空气非实心」误读,撤销（REMIX #98 定谳）
+      const t = st.type[i];
+      if ((t === 0 || this.solidNP[t] === 1) && t !== this.id546 && !(st.wire[i] >>> 5 & 1)) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
       // LiquidBuffer.AddBuffer（cs:840-843 → LiquidBuffer.cs:12-19）：尾接 +
@@ -1553,7 +1557,11 @@ export class LiquidSim {
             if (!(st.flags[ni] & 1) || st.type[ni] === 0) continue;
             const t = st.type[ni];
             if (this.lavaBurnAirIds.has(t)) {
-              st.setTile(nx, ny, 0);
+              // ★IIIII227:vanilla cs:1552-1554 是裸 type 写(`tile5.type = 0`)——active/
+              //  half/slope/paint 全保留(烧后残型格 act=1、type=0、slope 原值;金标 #98
+              //  (3419,858) typ=0/act=1/slope=1 实证)。setTile 会连清 act+half+slope+
+              //  paint 三面差,曾使 DelWater 早退支下格腿误判可通行(见 blocksLiquid ★IIIII227)
+              st.type[ni] = 0;
               // cs:1557/1562：每次转化尾随 SquareTileFrame(i,j)——3×3 帧扫把上方
               // 依附植物（61 丛草植物等）经 PlantCheck 锚亡杀链收割（XXXXX 批：
               // (3580,895) 三格 vanilla 杀 JS 漏=此级联缺失；PlantCheck 杀零掷，

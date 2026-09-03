@@ -15,7 +15,7 @@ import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
-import { TILE_INTERNAL_BY_SHEET, TILE_BY_KEY } from '../src/data/tiles';
+import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -33,8 +33,9 @@ const CLAY_POT = TILE_INTERNAL_BY_SHEET.get(78)!;    // 陶盆（CanCutTile 下�
 const PUMPKIN = TILE_INTERNAL_BY_SHEET.get(254)!;    // 南瓜（254 frameX 门本体）
 
 /** updateSwingHits 直驱桩（net-cutextratiles swingGame 同构,敌怪/小动物/NPC 全空——
- *  本测只锁砍切面）。判定盒缺省几何（16×16 贴图 head 段 ×2 扩展）扫描域 ≈
- *  列 50..52 × 行 90..91（右缘压半格:X+W=840 ≡8 (mod 16)）→ band 46..56×87..94 覆盖 */
+ *  本测只锁砍切面）。判定盒缺省几何（玩家 (800,1440) 朝右,t=20/25 head 段,16×16 贴图
+ *  head 扩展）⇒ itemRectangle=(789,1428,32,22)（X+W=821≡5 mod 16 右缘压半格）,
+ *  扫描域 = 列 49..51 × 行 89..90 → band 46..56×87..94 覆盖 */
 function swingGame(heldVid: number) {
   const world = new World(120, 120, 30, 'cancutile-gate');
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
@@ -81,32 +82,32 @@ const wasCut = (cut: Array<[number, number]>, x: number, y: number) =>
 describe('① WorldGen.CanCutTile 门（近战挥击砍切循环,AttackMelee :45032）', () => {
   it('陶盆上的香草不割（下格 78 门,WorldGen.cs:88113）——盆旁对照香草照割', () => {
     const { g, st, cut } = swingGame(3013);
-    st.setTileSilent(50, 90, HERB);          // 陶盆上的香草
+    st.setTileSilent(50, 90, HERB);          // 陶盆上的香草（扫描域内）
     st.setTileSilent(50, 91, CLAY_POT);      // 基座（非 tileCut,自身不会被砍切循环受理）
-    st.setTileSilent(52, 90, HERB);          // 对照：无基座香草（下格草）
+    st.setTileSilent(51, 89, HERB);          // 对照：无基座香草（下格=预铺草,域内）
     run(g);
     expect(wasCut(cut, 50, 90)).toBe(false); // 下格=陶盆 → CanCutTile false → 不割
-    expect(wasCut(cut, 52, 90)).toBe(true);  // 同物无基座 → 照割（门非一刀切）
+    expect(wasCut(cut, 51, 89)).toBe(true);  // 同物无基座 → 照割（门非一刀切）
   });
 
   it('wall 350（双地牢标记墙）拒割（WorldGen.cs:88113）——无墙对照照割', () => {
     const { g, st, cut } = swingGame(3013);
-    st.setTileSilent(50, 90, GRASS_TUFT);
-    st.wall[st.idx(50, 90)] = 350;           // 原版 wall id 直存（TileStore.ts:25）
-    st.setTileSilent(52, 90, GRASS_TUFT);    // 对照：同格无 350 墙
+    st.setTileSilent(50, 89, GRASS_TUFT);
+    st.wall[st.idx(50, 89)] = 350;           // 原版 wall id 直存（TileStore.ts:25）
+    st.setTileSilent(51, 89, GRASS_TUFT);    // 对照：同排无 350 墙
     run(g);
-    expect(wasCut(cut, 50, 90)).toBe(false);
-    expect(wasCut(cut, 52, 90)).toBe(true);
+    expect(wasCut(cut, 50, 89)).toBe(false);
+    expect(wasCut(cut, 51, 89)).toBe(true);
   });
 
   it('未熟南瓜(254 frameX<144)不割、成熟南瓜(frameX≥144)可割（WorldGen.cs:88117-88120）', () => {
     const { g, st, cut } = swingGame(3013);
     st.setTileSilent(50, 90, PUMPKIN);
     st.frameX[st.idx(50, 90)] = 18;          // 末熟段（GrowPumpkin 每阶 +36;144 起成熟）
-    st.setTileSilent(52, 90, PUMPKIN);
-    st.frameX[st.idx(52, 90)] = 144;         // 成熟段（掉落带 ≥144 同阈值）
+    st.setTileSilent(51, 90, PUMPKIN);
+    st.frameX[st.idx(51, 90)] = 144;         // 成熟段（掉落带 ≥144 同阈值）
     run(g);
     expect(wasCut(cut, 50, 90)).toBe(false); // frameX 18 < 144 → 门拒
-    expect(wasCut(cut, 52, 90)).toBe(true);  // frameX 144 ≥ 144 → 门放行
+    expect(wasCut(cut, 51, 90)).toBe(true);  // frameX 144 ≥ 144 → 门放行
   });
 });

@@ -649,6 +649,15 @@ export class BiomeBackground {
       //  世界无此字段 → 走上方 seedPick 派生，行为零变化
       if (typeof bg.desert === 'number') this.desertStyle = bg.desert;
       if (typeof bg.ocean === 'number') this.oceanStyle = bg.ocean;
+      // ★同批：森林四区 + 侵染四档（WF:1325-1329 treeBG1-4/corrupt/snow/hallow/
+      //  crimson）——原版背景样式是"启动掷骰、创世界时随档保存"（RandomizeBackgrounds
+      //  仅在 Main.LoadContent/菜单调用，世界生成不掷），种子不决定背景 → 导入档
+      //  必须随档保真才与原版档观感一致
+      if (Array.isArray(bg.forest) && bg.forest.length === 4) this.forestStyles = [...bg.forest];
+      if (typeof bg.corrupt === 'number') this.corruptStyle = bg.corrupt;
+      if (typeof bg.snow === 'number') this.snowStyle = bg.snow;
+      if (typeof bg.hallow === 'number') this.hallowStyle = bg.hallow;
+      if (typeof bg.crimson === 'number') this.crimsonStyle = bg.crimson;
     }
   }
 

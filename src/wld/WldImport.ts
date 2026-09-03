@@ -810,6 +810,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         mushroom: wld.bgMushroom, underworld: wld.bgUnderworld,
         bg10: wld.bg10, bg11: wld.bg11, bg12: wld.bg12,
         desert: wld.desertBG, ocean: wld.oceanBG,
+        // ★原版加载语义（WF:2316-2318）：四区森林背景全部用 treeBG1（setBG(10/11/12)
+        //  都塞 treeBG1）——treeBG2-4 存档字节为遗留零值,不映射
+        forest: [wld.treeBG1, wld.treeBG1, wld.treeBG1, wld.treeBG1],
+        corrupt: wld.corruptBG, snow: wld.snowBG, hallow: wld.hallowBG, crimson: wld.crimsonBG,
       },
     },
     // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前

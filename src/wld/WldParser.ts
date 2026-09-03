@@ -134,9 +134,19 @@ export interface WldWorld {
   bgMushroom: number;
   bgUnderworld: number;
   bg10: number; bg11: number; bg12: number;
-  /** ★2026-09-03：header bg 字节组第 7/8 位（WF:1330-1331 treeBG1..oceanBG 八连的后两档，
-   *  此前整组按 8×u8 丢弃）——desertBG 决定沙漠背景三层组（样式4=248/249/250），
-   *  oceanBG=海洋单层贴图变体。曾读位即弃 → 导入档沙漠/海洋背景回退 seed 派生重掷 */
+  /** ★2026-09-03：header bg 字节组（WF:1325-1331 treeBG1..oceanBG 八连，此前整组按
+   *  8×u8 丢弃）——treeBG1-4=四区森林背景样式（样式4=248/249/250 沙暴巨丘等）、
+   *  corrupt/jungle/snow/hallow/crimson=各侵染背景样式档、ocean=海洋单层贴图变体。
+   *  曾读位即弃 → 导入档全套背景回退 seed 派生重掷（导入世界观感与原版档不一致） */
+  treeBG1: number;
+  treeBG2: number;
+  treeBG3: number;
+  treeBG4: number;
+  corruptBG: number;
+  jungleBG: number;
+  snowBG: number;
+  hallowBG: number;
+  crimsonBG: number;
   desertBG: number;
   oceanBG: number;
   /** ★七批备案④-c（2026-09-02）：TileEntities 段（pointers[5]，v>=122 门 WF:1803-1821）
@@ -292,8 +302,14 @@ export function parseWld(buf: Uint8Array): WldWorld {
   // WF:1315-1317 SavedOreTiers 三档锁定选种（int32×3）——原版 .wld 权威导入
   const savedOreTiers = { cobalt: r.i32(), mythril: r.i32(), adamantite: r.i32() };
   // WF:1325-1331 bg 字节八连：treeBG1/corruptBG/jungleBG/snowBG/hallowBG/crimsonBG/
-  // desertBG/oceanBG——末两档此前整组丢弃（见接口注），现按位读出
-  r.u8(); r.u8(); r.u8(); r.u8(); r.u8(); r.u8(); // treeBG1..crimsonBG（treeStyle 等消费方在 header 另段）
+  // desertBG/oceanBG——此前整组按 8×u8 丢弃（见接口注），现按位全量读出
+  // （treeBG2/3/4 不在本组——WF:1383-1385 在 DD2/蘑菇/地狱段之后另存,见上方读点）
+  const treeBG1 = r.u8();  // WF:1325 一区森林背景样式（setBG(0) 值域 0-13/31/51/71-73）
+  const corruptBG = r.u8(); // WF:1326 腐化背景样式（setBG(1)，猩红世界=猩红同款）
+  const jungleBG = r.u8(); // WF:1327 丛林背景样式（setBG(2) 0-6）
+  const snowBG = r.u8();   // WF:1328 雪原背景样式（setBG(3) 0-8/21-42）
+  const hallowBG = r.u8(); // WF:1329 神圣背景样式（setBG(4) 0-5）
+  const crimsonBG = r.u8(); // WF:1330 猩红背景样式（setBG(5) 0-6）
   const desertBG = r.u8(); // WF:1330 沙漠背景样式（setBG case 6 值域 0-4/51-53）
   const oceanBG = r.u8();  // WF:1331 海洋背景贴图变体（setBG case 7 值域 0-7）
   const cloudBGActive = r.i32(); const numClouds = r.i16(); const windSpeedTarget = r.f32(); // clouds/wind
@@ -374,6 +390,10 @@ export function parseWld(buf: Uint8Array): WldWorld {
   // ★R16-7⑤：bg10-12 门 = `version > 195`（WF57:2309 严格大于）,非 >= 195
   let bg10 = 0, bg11 = 0, bg12 = 0;
   if (version > 195) { bg10 = r.u8(); bg11 = r.u8(); bg12 = r.u8(); }
+  // ★2026-09-03：二/三/四区森林背景样式（WF:1383-1385 DD2Event.Save 后三字节,
+  //  v>=204 门——combat book 位即紧跟其后;与 WF:1325 treeBG1 分处两段）
+  let treeBG2 = 0, treeBG3 = 0, treeBG4 = 0;
+  if (version >= 204) { treeBG2 = r.u8(); treeBG3 = r.u8(); treeBG4 = r.u8(); }
   if (version >= 204 && r.boolean()) flags.combatBook = true;                              // combat book
   if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }                  // 灯笼夜四件套（运行时态,不落 flags）
   if (version >= 211) {
@@ -553,7 +573,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
     bannerKills,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
-    bgMushroom, bgUnderworld, bg10, bg11, bg12, desertBG, oceanBG,
+    bgMushroom, bgUnderworld, bg10, bg11, bg12,
+    treeBG1, treeBG2, treeBG3, treeBG4, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,
     tileEntities, teSkipped,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,

@@ -14,13 +14,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await page.evaluate(async () => {
-  try {
-    localStorage.clear();
-    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
-    for (const d of dbs) indexedDB.deleteDatabase(d.name);
-  } catch { /* ignore */ }
-});
+// 保留 IDB(角色/世界复用,避免每次建角);只清 localStorage 菜单态
+await page.evaluate(() => { try { localStorage.clear(); } catch { /* ignore */ } });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 1500));
 await page.mouse.click(8, 8);
@@ -32,20 +27,39 @@ if (!(await page.$('.sw-vsel'))) {
   await page.screenshot({ path: `${OUT}/probe-boot-fail.png` });
   throw new Error('世界/角色面板未出现(见 probe-boot-fail.png)');
 }
-// 建角色(若无)
-if (!(await page.$('.sw-char-row input[type=text]'))) {
+// 建角色(仅当列表为空;有角色直接选)
+if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
   await page.waitForSelector('.sw-char-row input[type=text]', { timeout: 10000 });
   await page.click('.sw-char-row input[type=text]');
   await page.keyboard.type('bgprobe');
   await page.click('[data-act=create]');
-  await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 15000 });
+  await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 20000 }).catch(() => {});
 }
-await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img').catch(() => {});
+for (let i = 0; i < 3; i++) {
+  if (!(await page.$('.sw-vsel .sw-vitem'))) break;
+  try { await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img'); break; }
+  catch { await new Promise((r) => setTimeout(r, 800)); }
+}
 await new Promise((r) => setTimeout(r, 600));
-// 建世界(小尺寸+指定 seed)
-await page.click('.sw-vsel [data-act=new]').catch(() => {});
-await page.waitForSelector('[data-f=seed]', { timeout: 10000 });
+// 建世界(小尺寸+指定 seed)——面板撕节点/弹层遮挡容错:重试点击+失败截图
+let seedForm = false;
+for (let i = 0; i < 3 && !seedForm; i++) {
+  await page.click('.sw-vsel [data-act=new]').catch(() => {});
+  seedForm = await page.waitForSelector('[data-f=seed]', { timeout: 8000 }).then(() => true).catch(() => false);
+  if (!seedForm) {
+    // 可能弹了确认层/欢迎层,先关再重试
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => /我已知晓|确定|是/.test(x.textContent ?? ''));
+      b?.click();
+    }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+if (!seedForm) {
+  await page.screenshot({ path: `${OUT}/probe-seedform-fail.png` });
+  throw new Error('世界创建表单未出现(见 probe-seedform-fail.png)');
+}
 await page.click('[data-f=seed]');
 await page.keyboard.type(SEED);
 await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-opt')][0]?.click());

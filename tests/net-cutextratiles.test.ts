@@ -146,9 +146,9 @@ describe('防火网 4821（cutExtraTiles 同支）+ 对照近战', () => {
 // `maxX = (itemRectangle.X + itemRectangle.Width) / 16 + 1` + 循环 `i < maxX` ⇒
 // 外沿列 (X+W)/16【含】,再外一列【不含】）。上方用例全靠 band 铺满吸收 ±1 漂移,
 // 本例钉判定盒右缘压半格的几何：桩几何（玩家 (800,1440) 朝右、挥击 t=20/25 head 段、
-// 缺省 16×16 贴图 head 扩展 ×2/X 退 ⌊16×1.2⌋=19、intRect :25868）⇒
-// itemRectangle = (789,1444,32,22) —— X+W=821 ≡ 5 (mod 16) 右缘压半格,
-// 扫描域 = 列 ⌊789/16⌋=49..⌊821/16⌋=51 × 行 ⌊1444/16⌋=90..⌊1466/16⌋=91。
+// 缺省 16×16 贴图 head 扩展）⇒ itemRectangle = (789,1428,32,22)（与上方 band 注
+// 「列 49-51 × 行 89-90」同源）—— X+W=821 ≡ 5 (mod 16) 右缘压半格,
+// 扫描域 = 列 ⌊789/16⌋=49..⌊821/16⌋=51 × 行 ⌊1428/16⌋=89..⌊1450/16⌋=90。
 describe('扫描域 +1 外沿（窄边回归锁,:45023-45026）', () => {
   it('右缘压半格（X+W 不落 16 倍数）→ 砍到 (X+W)/16=51 外沿列,52 不越界', () => {
     const { g, world, cut } = swingGame(3183, { tiles: false });
@@ -161,8 +161,8 @@ describe('扫描域 +1 外沿（窄边回归锁,:45023-45026）', () => {
     const rows = new Set(cut.map(([, y]) => y));
     expect(Math.min(...cols)).toBe(49);          // ⌊X/16⌋ 内沿
     expect(Math.max(...cols)).toBe(51);          // ⌊(X+W)/16⌋ 外沿列（+1 对齐行为）
-    expect(Math.min(...rows)).toBe(90);
-    expect(Math.max(...rows)).toBe(91);          // 下缘外沿行（(Y+H)/16 含）
-    expect(cut.every(([x, y]) => x >= 49 && x <= 51 && y >= 90 && y <= 91)).toBe(true);
+    expect(Math.min(...rows)).toBe(89);
+    expect(Math.max(...rows)).toBe(90);          // 下缘外沿行（(Y+H)/16 含）
+    expect(cut.every(([x, y]) => x >= 49 && x <= 51 && y >= 89 && y <= 90)).toBe(true);
   });
 });
