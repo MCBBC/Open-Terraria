@@ -1798,6 +1798,11 @@ export class Minimap {
   /** 本帧 flushDirty 实际重画的像素区 [px,py,w,h](GL 地图纹理 texSubImage2D
    *  增量上传消费,消费方清空;上限=flushDirty 每帧 24 chunk) */
   flushedPixelRects: Array<[number, number, number, number]> = [];
+  /** ★PR-async 收口③（2026-09-03）：rect 溢出不再 splice 丢弃（丢弃=GL 纹理永久
+   *  残缺——肉山转换洪峰 288+ chunk-rect 挤爆 128 上限,M 图打开时只剩尾部 128 个
+   *  补上=用户实报"小地图残缺+一点点慢慢更新"）。溢出改置【全幅重传标记】,消费端
+   *  整幅 texSubUpdateData 一次覆盖（含全部被丢增量）✓ 位级无漂移。 */
+  needsFullUpload = false;
   constructor(public world: World, deferBuild = false) {
     this.w = world.w;
     this.h = world.h;
@@ -2046,7 +2051,11 @@ export class Minimap {
         }
       }
     }
-    if (this.flushedPixelRects.length > 128) this.flushedPixelRects.splice(0, this.flushedPixelRects.length - 128);
+    // ★溢出→全幅重传标记（原 splice 丢最老矩形=纹理永久残缺,见字段注）
+    if (this.flushedPixelRects.length > 128) {
+      this.flushedPixelRects.length = 0;
+      this.needsFullUpload = true;
+    }
   }
 }
 
@@ -15366,6 +15375,17 @@ export class Renderer {
         // (smoothing 与 2D 同款:zoom≥1 线性、<1 最近邻)
         const mmKey = `mm:${this.minimap.uid}`;
         const mmTex = this.minimap.image ? gl.texFromImage(mmKey, this.minimap.image, false, true) : null;  // noMip
+        // ★全幅重传标记消费：从 p32 全量 texSubUpdateData（增量矩形在被 128 上限
+        //   丢弃的场景下,整幅覆盖=位级正确的收敛路径;一次性 ~20MB 上传,收尾单帧）。
+        //   ★必须在 mmTex 创建之后——texSubUpdateData 对缺失 key 静默 no-op,
+        //   首帧 texFromImage 的整幅(可能滞后)由此处 p32 全量覆盖=终态正确
+        if (mmTex && this.minimap.needsFullUpload && this.minimap.p32) {
+          const full = new ImageData(this.minimap.w, this.minimap.h);
+          new Uint32Array(full.data.buffer).set(this.minimap.p32);
+          gl.texSubUpdateData(mmKey, full, 0, 0);
+          this.minimap.needsFullUpload = false;
+          this.minimap.flushedPixelRects.length = 0;
+        }
         if (mmTex && this.minimap.image) {
           for (const [px, py, pw, ph] of this.minimap.flushedPixelRects) {
             const region = new ImageData(pw, ph);

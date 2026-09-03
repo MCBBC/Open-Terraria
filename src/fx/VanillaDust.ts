@@ -869,10 +869,18 @@ export function dustPremulBake(
   const erase = new Uint8ClampedArray(tex.length);
   for (let i = 0; i < tex.length; i += 4) {
     const tA = tex[i + 3];
-    add[i] = (tex[i] * tA * mR) / 65025;
-    add[i + 1] = (tex[i + 1] * tA * mG) / 65025;
-    add[i + 2] = (tex[i + 2] * tA * mB) / 65025;
-    add[i + 3] = 255;
+    const aR = (tex[i] * tA * mR) / 65025;
+    const aG = (tex[i + 1] * tA * mG) / 65025;
+    const aB = (tex[i + 2] * tA * mB) / 65025;
+    add[i] = aR; add[i + 1] = aG; add[i + 2] = aB;
+    // ★2026-09-03 黑方块定谳（用户实报"叶尘/尾焰尘变黑色实心方块"）：add.A 曾恒 255
+    //  ——rgb=0 的 texel（帧透明角/叶尘黑晕圈）经 'lighter' 把 worldLayer 透明区
+    //  抬成 a=255 黑 → 合成 source-over 替换天空=黑方块（十字帧角被抬=方块化；
+    //  与拖尾 premul 陷阱同根：rgb=0 加算贡献恒 0,a 抬升纯害）。修=有 rgb 值的
+    //  texel a=255（'lighter' rgb 加成在预乘域=a=255 全额通过）、rgb=0 的 a=0。
+    //  ★判据读【量化后】rgb（Uint8ClampedArray 自 round）——float 判据会漏
+    //  "暗 texel×低 m → 量化归 0"档（哨兵 1954 违例即此,如 147×255×0.608→0.35）。
+    add[i + 3] = add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0;
     erase[i + 3] = (tA * mA) / 255;
   }
   return { add, erase };

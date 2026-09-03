@@ -78,7 +78,9 @@ describe('dustPremulBake 烘焙面（Renderer 预乘对数据源）', () => {
       for (let ch = 0; ch < 3; ch++) {
         expect(Math.abs(add[i + ch] - Math.round((TEX[i + ch] * tA * 120) / 65025))).toBeLessThanOrEqual(1);
       }
-      expect(add[i + 3]).toBe(255);                                              // 全额加法载体
+      // ★2026-09-03 黑方块定谳：a=rgb>0?255:0——rgb=0 的 texel 不抬 alpha
+      //  （恒 255 曾把帧透明角/黑晕圈抬成不透明黑='lighter' 后 worldLayer 落黑块）
+      expect(add[i + 3]).toBe(add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0);
       expect(Math.abs(erase[i + 3] - Math.round((tA * 120) / 255))).toBeLessThanOrEqual(1);
       expect(erase[i]).toBe(0); expect(erase[i + 1]).toBe(0); expect(erase[i + 2]).toBe(0);
     }
@@ -91,7 +93,7 @@ describe('dustPremulBake 烘焙面（Renderer 预乘对数据源）', () => {
       expect(Math.abs(add[i] - Math.round((TEX[i] * tA * 250) / 65025))).toBeLessThanOrEqual(1);
       expect(Math.abs(add[i + 1] - Math.round((TEX[i + 1] * tA * 120) / 65025))).toBeLessThanOrEqual(1);
       expect(Math.abs(add[i + 2] - Math.round((TEX[i + 2] * tA * 40) / 65025))).toBeLessThanOrEqual(1);
-      expect(Math.abs(add[i + 3] - 255)).toBeLessThanOrEqual(0);
+      expect(add[i + 3]).toBe(add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0);
     }
   });
 });

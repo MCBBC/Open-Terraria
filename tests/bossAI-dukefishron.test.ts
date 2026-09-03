@@ -6,7 +6,7 @@
 //   /泡泡弹 371 生成节拍/掉落药水面/音乐槽位。
 //   ★悬浮时长口径：num3 基值 60,但 flag5&&!flag3&&flag4 档覆写 30（:49183-49186,
 //     一阶段 ai3<10 时=30t/二阶段 flag3&&flag5=20t/其余回 60t）——曾按基值 60 驱动。
-// 参照：NPC.cs:49143-50127(AI_069) / :35196-35328(AI_071) / :80345-80370(药水心)
+// 参照：1457 NPC.cs :49295-50279(AI_069) / :35284-35405(AI_071) / :80323 药水心（1456 :49143-50127 / :35196-35328 / :80345）
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
@@ -515,11 +515,11 @@ describe('登记账补齐批（2026-09-03 六波）', () => {
     dukeBubbleAI(b, hooks, p0 as never);
     dukeBubbleAI(b, hooks, p0 as never);
     expect(b.dead).toBe(true);                     // ai1 3→0 消散
-    // 超时自爆:远离玩家 → ai0=0,ai1 累计 150 转引信
+    // 超时自爆:player=null 隔离漂移 homing(漂移 20px/t 下 60 拍即贴脸引爆,测不到
+    // 超时支)——ai1 纯累计 150 转引信
     const b2 = Enemy.fromVanilla(371, 40 * TILE, 50 * TILE)!;
-    p0.cx = 100 * TILE; p0.cy = 30 * TILE;         // 拉远
-    for (let i = 0; i < 150; i++) dukeBubbleAI(b2, hooks, p0 as never);
+    for (let i = 0; i < 150; i++) dukeBubbleAI(b2, hooks, null as never);
     expect(b2.ai0).toBe(1);                        // :35167-35175 超时转引信
-    void w0;
+    expect(b2.dead).toBe(false);
   });
 });

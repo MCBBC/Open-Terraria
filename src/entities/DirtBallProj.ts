@@ -29,6 +29,23 @@
 // 出生:ItemCheck_Shoot :47605 RotatedRelativePoint(MountedCenter) ≈ 玩家中心
 // (fireSlimeGun 等仓内同口径 cx/cy-4);channel 目标与断链由 Game 侧 provider 注入
 // (player.channel 全局旗语义——StartChanneling(114) 置位,:43158 !controlUseItem 清)。
+//
+// SW-N1 2026-09-03 备案（SW-L1 备案 4「出生即嵌实心」定谳,不修码）:
+//   原版 TileCollision(Collision.cs:2299-2460)【嵌入不可见】——四 face 分支
+//   (:2397 down/:2418 左/:2436 右/:2451 up)全部要求旧位盒【完全】在格一侧
+//   (vector3 对比 vector4),旧位已重叠的格四支全不触发 → 弹嵌入时不 Kill,
+//   下沉至盒底首次跨入【新】实心行才回钳+Kill(通用 else `position+=velocity;
+//   Kill()` :19964),或从薄架下缘穿出永不 Kill。kill 位=钳后贴面位,嵌入深处
+//   案中心格仍落嵌入行 → 原版同走 num18 掉落支(:79298)。
+//   本仓 kill 判=「中心格实心」→ 释放拍即 Kill(嵌入态),锚 prev==current →
+//   掉落支。差异面精确量化:①Kill 拍提前(原版下沉 3-8 拍后才 Kill);②掉落锚
+//   差 <16px 且通常同行(常见案两版同走掉落支);③真翻转仅两边缘案——薄架
+//   (1 格厚悬空泥)穿出(原版永不 Kill 本仓即掉)与地面边缘钳出邻空格(原版铺
+//   本仓掉)。可达性:出生嵌=落沙/淤泥置入玩家格(FallingBlock.ts 无玩家占位
+//   门)且葬窗内用泥杖,罕见;channel 入地释放=常规操作。不修原因:忠实修须
+//   「嵌入不可见下沉模拟」或换盒级管线,两者均改 Kill 拍/尘计数/锚 → 破坏
+//   F1/F7 钉面(dirtball-embed-blast 闸门);常见案行为等价,边缘案罕见,留备案
+//   待该闸门重基线批一并清偿。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';

@@ -2382,6 +2382,17 @@ function projDmgOf(e: Enemy, normal: number, expert: number): number {
   return Math.round(normal + (expert - normal) * t);
 }
 
+/** SW-Q1 2026-09-03：681 专支尾焰尘锚点纯函数（AI_016 :48324-48330 逐参）。
+ *  position = Center + (6×sign(vx), −h/2−6).RotBy(rot)×1.1（炸弹尾焰位,随滚转
+ *  自转）;scale = 1+Next(5)×0.1（scaleStep=Next(5) 掷值,调用方掷）。每 tick 恰
+ *  1 粒尘 6（681 被 :48285 通支排除表挡下后落到专属支,无概率门）。 */
+export function goblinBombTrailDustAnchor(cx: number, cy: number, vx: number, rot: number,
+  halfH: number, scaleStep: number): { x: number; y: number; scale: number } {
+  const a = 6 * Math.sign(vx), b = -halfH - 6;
+  const cs = Math.cos(rot), sn = Math.sin(rot);
+  return { x: cx + (a * cs - b * sn) * 1.1, y: cy + (a * sn + b * cs) * 1.1, scale: 1 + scaleStep * 0.1 };
+}
+
 /** AI_107 族参数（cs:63415-63475 默认档 → 各 case 覆写;行号逐项标注） */
 interface Walker107P {
   scream: string | null;        // style + num22：每 tick 1/num22 概率嘶叫（:64494）
@@ -3083,19 +3094,19 @@ export class DD2GoblinBomb extends Entity {
       else this.fuseSnd.setPos(this.cx, this.cy);
     }
     if (--this.fuse <= 2) { this.explode(game); return; }
-    // 专支尘（AI_016 :48324-48330 逐参 1:1）：每 tick 恰 1 粒尘 6（681 被通支
-    //   :48285 排除表挡下后落到本支,无概率门）——NewDustDirect(position,w,h,6,
-    //   0,0,100) 后 scale=1+Next(5)×0.1 绝对赋值 / noGravity / position 整体覆写
-    //   = Center + (6×sign(vx), −h/2−6).RotBy(rot)×1.1（炸弹尾焰位,随滚转自转）
+    // 专支尘（AI_016 :48324-48330 逐参 1:1,锚点/尺度纯函数见
+    //   goblinBombTrailDustAnchor）：每 tick 恰 1 粒尘 6（681 被通支 :48285 排除
+    //   表挡下后落到本支,无概率门）——NewDustDirect(position,w,h,6,0,0,100) 后
+    //   scale 绝对赋值 / noGravity / position 整体覆写
     {
       const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 1);
       if (d) {
-        d.scale = 1 + Math.floor(Math.random() * 5) * 0.1;
+        const a = goblinBombTrailDustAnchor(this.cx, this.cy, this.vx, this.rot, this.h / 2,
+          Math.floor(Math.random() * 5));
+        d.scale = a.scale;
         d.noGravity = true;
-        const a = 6 * Math.sign(this.vx), b = -this.h / 2 - 6;
-        const cs = Math.cos(this.rot), sn = Math.sin(this.rot);
-        d.x = this.cx + (a * cs - b * sn) * 1.1;
-        d.y = this.cy + (a * sn + b * cs) * 1.1;
+        d.x = a.x;
+        d.y = a.y;
       }
     }
     this.rot += this.vx * 0.1;             // 滚动（AI_016 :48404——681 不在滚转排除表）

@@ -129,5 +129,18 @@ const r = await page.evaluate(async () => await new Promise(res => {
 const during = r.frames.slice(-36).sort((a, b) => a - b);
 console.log(`WALL ≈ ${((r.doneAt - tKill.t0) / 1000).toFixed(2)}s  转化后瓦片=${r.convAfter}  convertedFlag=${r.convFlag}`);
 console.log(`转换期帧 ms: p50=${during[Math.floor(during.length/2)].toFixed(1)} max=${during[during.length-1].toFixed(1)} (n=${during.length})`);
+// ---- ★小地图全幅重传断言(收口③验证):转换洪峰后 needsFullUpload 必为 true,
+//      开 M 图消费后必须清零(GL 纹理残缺修复的自动化证明) ----
+const mm = await page.evaluate(async () => {
+  const g = window.__swGame; const r = g.renderer;
+  const wasGL = !!r.glfx && !r.glfx.unavailable;
+  const before = r.minimap?.needsFullUpload;
+  if (!wasGL || !r.fullMap) return { wasGL, before, skip: 'no-GL-or-fullMap' };
+  r.fullMap.open = true;
+  await new Promise(res => { let n = 0; function t() { if (++n > 14) return res(1); requestAnimationFrame(t); } requestAnimationFrame(t); });
+  return { wasGL, before, after: r.minimap.needsFullUpload, rects: r.minimap.flushedPixelRects.length };
+});
+console.log('MINIMAP-FULLUPLOAD:', JSON.stringify(mm));
+
 console.log('errs:', errs.length ? JSON.stringify(errs.slice(0, 3)) : 'none');
 await b.close();

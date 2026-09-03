@@ -121,3 +121,20 @@
 - `tests/bossAI-dukefishron.test.ts` **21/21**（新增：左扑 π/困块无敌窗/重力恢复/expert 参数表/狂暴换招跳拍/泡泡锚点带/弹初速/双实例基值/死门先行）。
 - 新增 `tests/tdz-leaf-guard.test.ts`（叶子零 import/items 断边不回焊/经叶子消费面存活三钉）+ `tests/achievements.test.ts` 0 哨兵钉（notifyNPCKilled(0) 永不完成任何成就）。
 - 回归面 18 文件 **313/313**；tsc 触碰文件零错（Enemy.ts:5367 一错系并行会话在途）。
+
+---
+
+## 登记账全量补齐（2026-09-03 六波，全部主线亲证后落刀）
+
+| 波 | 项 | 落法 |
+|---|---|---|
+| 1 | TDZ 地雷 ×2（R4-F5a/F5b） | `DG_FRAMED_ALL`→`world/gen/vanilla/dungeonFramedSheets.ts`、`MOUNT_DATA`+MountData 接口→`data/mountData.ts`（双叶子零依赖,原模块 re-export 兼容;NTB/Minecart 改叶子直读）。守护测试扩到 4 叶+2 断边钉 |
+| 2 | Duke AI 角落 | **chaseable 相位暂关**（R2-F6：canBeChasedBy 加 ai0∈{10,12,13} 门,:50086/:50173/:50203 亲证）;**inSolid halfBrick 子矩形**（R1-F6::2739-2745 下半 8px）;出生尘环 36 粒椭圆环 1:1（:49507-49528,曾 18 粒泛向）;case12 多余粒子删（B1-E11③）;龙卷 resize round→(int) 截断（B1-E11②）;:309 死 flag/死支/:346 陈旧注释/头注 1457 双锚（R2-F7/E-8） |
+| 3 | 死亡演出（R1-F2,**其 gore 表缺项断言经亲证驳回**——json 370/372/373 完整且逐值对,真缺口=尘） | 370 死亡 150×d5/372-373 75×d5 中心盒（vel/2 预折）+受击 ceil(dmg/lifeMax×100)×d5 精确族（鸟族/WoF 先例扩展,通用近似排除）;371 爆裂升精确 60 粒 d212 蓝环（hsl 逐粒色+半径 25·scale 吸附+前 30 随机幅/后 30 径向 4.5-9,noGravity,走全参 spawnDust 通道） |
+| 4 | 掉落/成就链 | **A3 playerInteraction 门**（AchievementsHelper.cs:202-207;本仓 playerInteracted 位原已存在只差消费,岩浆/陷阱杀不再计成就）;**B3 extraValue** 改 rollCoins 尾参（:80497 乘区/luck 后拆币前,曾并入基数被乘区放大）;**B4 结算序**（主线亲读 NPCLoot :79643 线性序=items→money→DropHeals→commonLifeMana→bossPotions——R3-B4"potions 先于 items"表述亦不准,R14-A11① 注释误锚一并正） |
+| 5 | 覆盖缺口（R5-F13） | 新增 5 测：chaseable 四态门/帧机双窗（60-80·70-75 与 120-160·130-155,ai0 时序在 tick 前置）/态7（20 速起手+首拍甩泡+旋转积分+120t 回相）/态8（克苏弹一发+回相）/AI_070（贴近引信 4t+扩盒+无敌+null 玩家隔离漂移的超时自爆） |
+| 6 | 钓鱼槽守卫（R3-C4） | reelBobber 召 Duke 前查槽位（在位 boss 未死未逃→BossActive toast+断线,**有意偏差登记**:原版无槽允许跨 boss 并行;单槽记账防被顶 boss 记账丢失,与物品召唤惯例同款） |
+
+**保留登记（未清,理由）**：MP msg23 vanillaNetId（协议版本敏感,跨 MP 会话协同再动）;归一 helper 六处消重（纯风格,共享热文件折腾风险>收益）;渔情行 bite 帧采样（信息层逐拍清,单 tick 瞬态,机制已由 truffleBite 证明）;vitest 泡泡锚点 +w/2 环境漂移（环境事实,真机探针为权威）。
+
+**登记账批终态**：duke 套件 26/26、守护 4/4、回归面 18 文件 **319/319**、实机探针 **27/27**、tsc 触碰面零错。

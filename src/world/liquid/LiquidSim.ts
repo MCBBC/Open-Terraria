@@ -168,6 +168,8 @@ export class LiquidSim {
   r30Trace?: (x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void;
   /** UUU 批：模块级 R30 触点槽——settle 内部新建 sim 实例也能被探针捕获 */
   static r30Sink: ((x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void) | null = null;
+  /** ★IIIII213：回灌决策观测槽（仪具注入；生产 null 零开销）——(k, x, y, accepted, amt, nl) */
+  static drainSink: ((k: number, x: number, y: number, accepted: boolean, amt: number, nl: number) => void) | null = null;
   /** WWWWWWW 批：盒内逐 Update 分支签名迹（与 rig SW_TRKBOX 同位标；生产 null 关闭零开销） */
   static trkProbe: ((iter: number, x: number, y: number, sig: number, amtA: number, ltyA: number, kill: number, delay: number, pre: { amt: number; lty: number }) => void) | null = null;
   static trkBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
@@ -892,7 +894,10 @@ export class LiquidSim {
           const bx = this.bufX[0];
           const by = this.bufY[0];
           this.checking[this.idx(bx, by)] = 0;
+          const nl0 = this.numLiquid;
           this.addWater(bx, by);
+          // ★IIIII213 回灌决策观测钩（生产恒 null 零开销；与 rig SW_LIQDRAIN 同格式）
+          LiquidSim.drainSink?.(k, bx, by, this.numLiquid > nl0, st.liquid[this.idx(bx, by)], this.numLiquid);
           // DelBuffer(0)（LiquidBuffer.cs:24-29）：swap-remove——在 AddWater 之后
           //（cs:1144-1147 顺序；重入队的同格被尾元素换回头位）
           this.bufCount--;

@@ -4976,8 +4976,8 @@ export class GrenadeProj extends Entity {
 
   /** SW-P1 2026-09-03：1088 橡实种弹帧支（AI_016 尘段 else-if 链 1088 档
    *  P.cs:48058-48063——原版在 Kill 判 else 内每拍跑,frameCounter==0 门使之
-   *  只在首 AI 拍生效;此处粘性/发射两路对齐同序调用）。投掷支调用点位于
-   *  519 帧支旁（同段位）;1088 本仓仅发射支可达。 */
+   *  只在首 AI 拍生效;粘性/发射两路均置于爆点判后=原文 Kill 判 else 位）。
+   *  1088 本仓仅发射支可达。 */
   private acornSeedFrame(): void {
     if (this.projId !== 1088) return;
     const r = acornSeedFrameInit(this.frame1088Counter, Math.floor(Math.random() * 2));
@@ -4989,12 +4989,20 @@ export class GrenadeProj extends Entity {
    *  vy+=0.2；落地（vy==0&&vx≠0）另 vx×0.97、炸药棍族再 ×0.99、|vx|<0.01 归零
    *  ——★此处是原版唯一摩擦点（:48377-48385 在门支内;碰撞响应 :19855-19868 无
    *  摩擦,SW-L1 I-1 已删落地支复乘）。返回值（门是否已开）现无消费面,保留兼容;
-   *  911 速度钳 ±8（:48393-48396）。★vy 的 16 封顶=本仓既有近似（原版无此钳,
-   *  备案勿当原版语义）。 */
+   *  911 速度钳 ±8（:48393-48396）。
+   *  SW-N1 2026-09-03：vy 终端钳 16 移除——:48332-48430 全段自查,原版门支恒
+   *  `velocity.Y += 0.2f` 无钳;Update 内 AI(:16880)→HandleMovement(:17120) 之间
+   *  也无全局终速钳（唯一风阻 X 钳 :16885 且风控门）。旧 16 封顶=本仓近似,
+   *  高抛长弧末速被削（180t 引信理论峰值 vy≈36,原版同值）。★连带面：反弹阈值
+   *  lastVy>0.7 语义不变（lastVy 取门后值,原版 lastVelocity 亦 AI 后捕获
+   *  :17696）;655 分支钳保留=原版 aiStyle25 自带（:26679-26686,与 AI_016 无关）。 */
   private bombGravityStep(): boolean {
     this.ai0 += 1;
     const gate = bombGravityGateOf(this.projId);
     if (gate === null) {                       // 655 蜂巢（AI_025）：无门恒重力
+      // ★655 钳是原版本相（aiStyle25 :26679-26686 `velocity.Y>16f→16f` 先于重力加),
+      //   勿随 AI_016 去钳一并移除;增量 0.2 vs 原版 0.3（:26740-26742 else 支)为
+      //   既有近似,不在本批范围（SW-N1 备案）。
       this.vy = Math.min(this.vy + 0.2, 16);
       return true;
     }
@@ -5004,7 +5012,7 @@ export class GrenadeProj extends Entity {
       if (DYN_PROJ.has(this.projId)) this.vx *= 0.99;
       if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
     }
-    this.vy = Math.min(this.vy + 0.2, 16);
+    this.vy += 0.2;                            // SW-N1：:48394 逐字（16 钳移除）
     if (this.projId === 911) {
       this.vx = Math.max(-8, Math.min(8, this.vx));
       this.vy = Math.max(-8, Math.min(8, this.vy));
@@ -5186,7 +5194,9 @@ export class GrenadeProj extends Entity {
       if (Math.random() < 0.5 && !inBodyBox(this.cx, this.cy)) game.spawnParticles(this.cx, this.cy, '#B8B8A8', 1, 1.2, { life: 18 });  // 尾尘 31（:44745-44748）
       if (this.firedAi0 > 15) {                                           // 15u 后重力 + 落地摩擦（:44870-44879）
         if (this.vy === 0 && this.vx !== 0) this.vx *= 0.95;
-        this.vy = Math.min(this.vy + 0.2, 16);
+        // SW-N1 2026-09-03：16 钳移除——发射支尾链无钳（:48371-48379 逐字
+        //   `if (velocity.Y == 0f) velocity.X *= 0.95f; velocity.Y += 0.2f;`）
+        this.vy += 0.2;
       }
     }
     if (GrenadeProj.FIRED_ARC.has(this.projId) && this.firedAi0 > (bombGravityGateOf(this.projId) ?? 10)) {
@@ -5200,7 +5210,9 @@ export class GrenadeProj extends Entity {
     }
     if (GrenadeProj.FIRED_MINE.has(this.projId)) {
       // 恒重力 + 减速布防（:44857-44868）：vy+=0.2、v×0.97、|v|<0.1 归零
-      this.vy = Math.min(this.vy + 0.2, 16);
+      // SW-N1 2026-09-03：16 钳移除——:48364-48370 逐字无钳（该支收敛 vy≈6.47,
+      //   钳移除不改变Mine弹道,纯精确化）
+      this.vy += 0.2;
       this.vx *= 0.97; this.vy *= 0.97;
       if (Math.abs(this.vx) < 0.1) this.vx = 0;
       if (Math.abs(this.vy) < 0.1) this.vy = 0;
@@ -5218,6 +5230,7 @@ export class GrenadeProj extends Entity {
     // 分毫不变(stick 待爆/×−0.4 反弹/lastVy>0.7 门槛/1088 橡实种植)。火箭"像素方块
     // 地形脚下必爆"(2026-08-23 用户报)这类出生盒重叠病灶由管线嵌入自愈一并终结。
     const lastVx = this.vx, lastVy = this.vy;
+    const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
@@ -5252,7 +5265,12 @@ export class GrenadeProj extends Entity {
       } else if (lastVy > 0.7) {
         this.vy = lastVy * -0.4;
       } else {
-        this.vy = 0;
+        // SW-N1 2026-09-03：软着陆保留钳速残差（=本拍实际位移）——原版
+        //   TileCollision 只回钳速度、响应支（:19877-19886）lastVy≤0.7 不写 vy →
+        //   残差存活到下拍 → 下拍 AI vy==0 门假（settle 拍无摩擦,与投掷支同相）。
+        //   旧 `vy=0` 吞残差 → 摩擦提前 1 拍。贴墙待爆支（FIRED_STICK）原版
+        //   `velocity *= 0`（:19888-19891）恒零,不在本支。
+        this.vy = this.y - bodyY0;
       }
     }
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
@@ -5348,6 +5366,12 @@ export class GrenadeProj extends Entity {
     // SW-I1 2026-09-03：519 炸弹鱼帧动画（P.cs:47951-47970——粘性扫描后/Kill 判定
     //   前,每 tick 恒跑;引信末端 15t 双速）。帧态经 drawProj 帧参消费
     //   （Main.cs:34923 projFrames>1 通支,贴图 38×152 竖条 4 帧）。
+    // SW-N1 2026-09-03 定谳：SW-L1 备案「原版帧段在 else 支内、爆拍跳过」前提
+    //   【证伪】——:47951 `if (type == 519)` 在 AI_016_Bombs 函数体深度 1（括号
+    //   深度实测),位 Kill 判（:48030-48037 `else if (timeLeft <= 3) Kill()`）
+    //   【之前】→ 爆拍照跑;else 支内是尘段/damage=0（:48039-48330）,帧段不在内。
+    //   本仓调用点（爆点判 `--fuse<=2` 之前）已是原版位——帧驱动【不移】,以
+    //   tests/sw-n1-ai016-timing 钉「爆拍帧推进含入」防回退。
     if (this.projId === 519) {
       const fs = bombFishFrameTick(
         { fuseAge: this.bombFishAge, counter: this.bombFishCounter, frame: this.bombFishFrame });
@@ -5355,9 +5379,6 @@ export class GrenadeProj extends Entity {
       this.bombFishCounter = fs.counter;
       this.bombFishFrame = fs.frame;
     }
-    // SW-P1 2026-09-03：1088 帧支（同段位对齐——P.cs:48058 与 519 帧支 :47951 同在
-    //   Kill 判 else 链;投掷支本仓无 1088 发生源,支挂此处=结构对齐原文 else-if 链）
-    this.acornSeedFrame();
     // ---- 接触引爆（Projectile.Damage :12330-12340 仅碰 NPC；玩家不引爆）----
     // ★原版 BombsHurtPlayers(:13944-13959) 对玩家【只伤害不置 timeLeft】——曾把
     //   玩家也当引爆条件:炸弹出生点在玩家盒内 → 首帧 fuse=3 → 0.05s 即爆
@@ -5383,6 +5404,12 @@ export class GrenadeProj extends Entity {
       this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
       return;
     }
+    // SW-P1 2026-09-03：1088 帧支（P.cs:48058-48063——【在】Kill 判（:48030-48037）
+    //   的 else 链内（与 519 帧支 :47951 在 Kill 判之前的深度 1 位不同,见 SW-N1
+    //   定谳注）→ 爆拍不跑帧支,故置于爆点判后;1088 首拍一次性选帧规则见
+    //   acornSeedFrameInit。投掷支本仓无 1088 发生源（5629 弹弓走发射支）,支挂
+    //   此处=原文位结构对齐）
+    this.acornSeedFrame();
     if (BOMB_DAMAGE_KEEP_16.has(this.projId) && this.fuse > 3) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
@@ -5587,6 +5614,7 @@ export class GrenadeProj extends Entity {
     //   下方落地支不再复乘——返回值（门是否已开）无消费面,不再接
     this.bombGravityStep();
     const lastVx = this.vx, lastVy = this.vy;
+    const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
@@ -5602,27 +5630,37 @@ export class GrenadeProj extends Entity {
       if (body.hitWall) this.killBeehive(game, lastVx, lastVy);
       return;
     }
-    // 碰墙反弹（:18344-18350）：vx = lastVx × -0.4（炸药棍族再 ×0.8）
+    // 碰墙反弹（:19870-19876）：vx = lastVx × -0.4；
+    // SW-N1 2026-09-03：×0.8 衰减族收窄——原版仅 type 29（:19872-19875;1456
+    //   :18351-18356 同),470/637 无此档（旧 DYN_PROJ 整族 ×0.8=近似）。470
+    //   tileCollide=false（:5448-5456）不进本支;637 tileCollide=true 原版不衰减
     if (body.hitWall) {
       this.vx = lastVx * -0.4;
-      if (DYN_PROJ.has(this.projId)) this.vx *= 0.8;
+      if (this.projId === 29) this.vx *= 0.8;
     } else {
       this.vx = body.vx;
     }
-    // 落地反弹/贴地滚动（:18351-18357 + :44888-44895）：
-    // lastVy>0.7 → vy = lastVy × -0.4（炸药棍族 ×0.8）；否则贴地 vy=0
+    // 落地反弹/贴地滚动（:19877-19886 + :44888-44895）：
+    // lastVy>0.7（且 type≠102）→ vy = lastVy × -0.4（仅 29 再 ×0.8）；
     // ★SW-L1 2026-09-03 I-1：此处【无摩擦】——原版唯一摩擦点在 AI 重力门支
     //   （:48377-48385 vy==0&&vx!=0 → ×0.97/炸药棍 ×0.99,已在 bombGravityStep），
     //   碰撞响应支（:19855-19868）只反不磨。曾在此再乘一次 → 休止拍 0.97²（炸药棍
     //   0.97²·0.99²）双重叠加,滚行距离近半（红队二轮 I-1 实锤）
+    // SW-N1 2026-09-03：① Y 反弹补 type≠102 排除（:19878 逐字;102 走专属实体,
+    //   本支纯守面）;② ×0.8 收窄至 29（同上,X 支注）;③ 软着陆（lastVy≤0.7）保留
+    //   钳速残差 = body.y−bodyY0（本拍实际位移）：原版 TileCollision 只回钳速度
+    //   （:2306-2452 返回值即新速度,不写位）,响应支 lastVy≤0.7 不写 vy → 残差
+    //   存活到下拍 → 下拍 AI vy==0 门【假】（settle 拍无摩擦,摩擦序列晚 1 拍启动,
+    //   再下拍起休止态每拍恰一次 ×0.97）。旧 `vy=0` 强制吞残差 → 摩擦提前 1 拍
+    //   （本 debt 相位差本体）。残差=0（休止稳态/贴面出生）时两版同值。
     if (body.hitHead) {
-      this.vy = 0;    // 撞顶停止上浮
-    } else if (body.onGround) {
-      if (lastVy > 0.7) {
+      this.vy = 0;    // 撞顶停止上浮（原版钳残差+:2447 ε0.01——瞬态差 1 拍摩擦相位,
+    } else if (body.onGround) {   //  稳态等价;备案见报告,勿在此加 ε 破坏贴面稳态）
+      if (lastVy > 0.7 && this.projId !== 102) {
         this.vy = lastVy * -0.4;
-        if (DYN_PROJ.has(this.projId)) this.vy *= 0.8;
+        if (this.projId === 29) this.vy *= 0.8;
       } else {
-        this.vy = 0;
+        this.vy = body.y - bodyY0;
       }
     } else {
       this.vy = body.vy;

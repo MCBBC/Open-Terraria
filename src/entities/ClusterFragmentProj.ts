@@ -42,6 +42,18 @@ export const CLUSTER_FRAGMENT_OF: Record<number, number> = {
   803: 862, 804: 863,
 };
 
+/** SW-Q1：专支尾尘 spawn 规格纯函数（AI_016 :48265-48276 逐参）。两掷独立可同拍
+ *  双出——Next(25)==0 → 尘 228、Next(5)==0 → 尘 31（调用方按原序掷）;spawn 速
+ *  = −v/10（原版 NewDust 后 `velocity *= 0f` 整体覆写 → 终速恒 0,调用方归零）、
+ *  scale 绝对 1.3、alpha 100、noGravity。 */
+export function fragmentTrailDustSpecs(vx: number, vy: number, hit228: boolean, hit31: boolean):
+  Array<{ type: number; svx: number; svy: number; scale: number }> {
+  const out: Array<{ type: number; svx: number; svy: number; scale: number }> = [];
+  if (hit228) out.push({ type: 228, svx: -vx / 10, svy: -vy / 10, scale: 1.3 });
+  if (hit31) out.push({ type: 31, svx: -vx / 10, svy: -vy / 10, scale: 1.3 });
+  return out;
+}
+
 /** 裂片贴图帧数（Main.cs:8587-8590 projFrames[779/783/862/863]=4） */
 const FRAGMENT_FRAMES = 4;
 
@@ -124,15 +136,11 @@ export class ClusterFragmentProj extends Entity {
       return;
     }
     // ---- 专支尘（P.cs:48265-48276 逐参;两掷独立,可同拍双出）----
-    if (Math.random() < 1 / 25) {                        // Main.rand.Next(25)==0
-      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 228,
-        -this.vx / 10, -this.vy / 10, 100, null, 1.3, true);
-      if (d) { d.vx = 0; d.vy = 0; d.scale = 1.3; }      // velocity×0 + scale 绝对 1.3（:48271-48273）
-    }
-    if (Math.random() < 1 / 5) {                         // 独立一掷 Main.rand.Next(5)==0
-      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31,
-        -this.vx / 10, -this.vy / 10, 100, null, 1.3, true);
-      if (d) { d.vx = 0; d.vy = 0; d.scale = 1.3; }
+    for (const spec of fragmentTrailDustSpecs(this.vx, this.vy,
+      Math.random() < 1 / 25, Math.random() < 1 / 5)) {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, spec.type,
+        spec.svx, spec.svy, 100, null, spec.scale, true);
+      if (d) { d.noGravity = true; d.vx = 0; d.vy = 0; d.scale = spec.scale; }   // :48270-48273 逐字
     }
     // 帧初始化（:48277-48286）：首拍 frame=Next(4) 后 frameCounter 钉 1 不再改
     if (this.frameCounter === 0) {

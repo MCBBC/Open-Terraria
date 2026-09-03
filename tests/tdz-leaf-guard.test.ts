@@ -18,13 +18,9 @@ describe('items.ts TDZ 断环守护', () => {
     for (const f of ['data/musicBoxStyles.ts', 'data/wiringToolBits.ts',
       'world/gen/vanilla/dungeonFramedSheets.ts', 'data/mountData.ts']) {
       const src = read(f);
-      // 只禁【运行时】import——`import type` 擦除后零边,不构成 TDZ 面
-      const runtimeImports = (src.match(/^(?!\s*\/\/)import\s(?!type)/m) ?? [])
-        .concat((src.match(/from\s+['"]\./g) ?? []).filter((_, i) => true));
       // 精确判定:逐行找非 type 的相对导入——'.json' 导入无模块图面,属叶子安全
       const bad = src.split('\n').filter((ln) => /^import\s/.test(ln) && !/^import\stype/.test(ln) && !/\.json';\s*$/.test(ln));
       expect(bad, f + ' 有运行时 import: ' + bad.join(' | ')).toEqual([]);
-      void runtimeImports;
     }
   });
 

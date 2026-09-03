@@ -8948,7 +8948,7 @@ export class Game implements GameHooks {
       const wjT0 = performance.now();
       try {
         do { if (this.worldJobs[0].step()) this.worldJobs.shift(); }
-        while (this.worldJobs.length && performance.now() - wjT0 < 12);
+        while (this.worldJobs.length && performance.now() - wjT0 < 20);
       } catch (e) {
         // ★防御：generator 中途异常若放任,job 残留 ⇒ 逐帧重掷异常风暴(比原版
         //   一次性同步失败更糟)。fail-open=丢弃 job 保留半程转化,世界可玩;
@@ -37090,6 +37090,15 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (caught === -1) {
       // 松露虫咬钩收竿（PullBobber :51563-51576 → SpawnOnPlayer case 370 :81335-81353）：
       // Duke 落在浮标 Center 下方 100px + HasAwoken 公告
+      // ★槽位守卫（红蓝对抗 R3-C4,有意偏差登记）：原版无 boss 槽、允许跨 boss 并行
+      // 召出；本仓单槽记账（downed 旗/灯笼夜/击败公告全挂 this.boss 死亡驱动）——
+      // 已有 boss 在场时钓起 Duke 会顶掉槽位=被顶 boss 死亡记账全丢。与物品召唤
+      // 路径（spawnBossOnPlayer 的 BossActive 拦截）同款惯例收口
+      if (this.boss && !this.boss.dead && !this.boss.bossFled) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+        bobber.dead = true;
+        return;
+      }
       const duke = Enemy.fromVanilla(370, bobber.cx, bobber.cy + 100);
       if (duke) {
         duke.x = bobber.cx - duke.w / 2;

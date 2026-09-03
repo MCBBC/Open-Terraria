@@ -168,7 +168,7 @@ export interface NpcLiquidHost {
   x: number; y: number; w: number; h: number; vx: number; vy: number;
   cx: number; cy: number;
   vanillaId: number | null;
-  vanilla: { aiStyle: number; noGravity?: boolean } | null;
+  vanilla: { aiStyle: number; noGravity?: boolean; friendly?: boolean } | null;
   ai0: number;
   ai1?: number;
   wet: boolean;
@@ -256,8 +256,16 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     // 0 进永不死亡的僵尸态（评审 C 定谳 2026-09-02 补）
     if (!lavaImmune && !b.dontTakeDamage && b.lavaCd <= 0) {
       b.lavaCd = 30;                                      // immune[255] = 30（:94527）
-      b.onFireT = Math.max(b.onFireT, 7);                 // AddBuff(24, 420)
-      b.hurt(50, 0, 0, game);                             // StrikeNPCNoInteraction(50)
+      // ★remix 分支（:94529-94537）：Main.remixWorld && !friendly → 只上火
+      //   AddBuff(24,180)=3s、**不打 50 直伤**；常规 = AddBuff(24,420)=7s +
+      //   StrikeNPCNoInteraction(50)。The Hungry 115/116 无 lavaImmune=会烧
+      //   （SetDefaults :10406-10426 无此位——wiki"唯一不禁 On Fire 的地狱敌怪"）
+      if (game.world.seedFlags?.remix && !b.vanilla?.friendly) {
+        b.onFireT = Math.max(b.onFireT, 3);               // AddBuff(24, 180)
+      } else {
+        b.onFireT = Math.max(b.onFireT, 7);               // AddBuff(24, 420)
+        b.hurt(50, 0, 0, game);                           // StrikeNPCNoInteraction(50)
+      }
       game.spawnParticles(b.cx, b.cy, '#FF9A3C', 10, 1.6, { life: 30, grav: -0.05 });
     }
   }

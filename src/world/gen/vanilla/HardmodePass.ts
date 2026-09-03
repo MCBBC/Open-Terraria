@@ -421,6 +421,7 @@ export function* initializeHardModeGen(world: World, rng: RNG): Generator<void, 
       const flood = shapeFloodFillOnlyWalls(st, px, py - 1);
       if (altStats) {
         altStats.floods++;
+        altStats.log.push(`F ${attempts}: ${px},${py} n${flood.cells.size} c${flood.complete}`);
         // ★IIIII216 取证：x86 ShapeFloodFill.Perform+Chain(IsNotSolid,OnlyWalls,Output)
         //   字面对照器（同世界态双跑）——成败/n 差异即引擎实现差
         const q2: Array<[number, number]> = [[px, py - 1]];
