@@ -45,7 +45,7 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // 不成立：拆掉本地直调 = 单机/发送端自身失明。维持"生产端双发（本地直生+
 // broadcast 上行）、两面对同一收编本体"的原版等价形态。
 import { rainbowRodHitFx } from '../fx/orchestraFx';
-import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
+import { drawStripTrail, type TrailPt, type TrailSpec } from '../fx/TrailShader';
 import type { Renderer } from '../render/Renderer';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';

@@ -11,7 +11,8 @@ import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
-import { dukeFishronAI, sharkronAI } from '../src/entities/bossAI_duke_moonlord';
+import { dukeFishronAI, sharkronAI, dukeBubbleAI } from '../src/entities/bossAI_duke_moonlord';
+import { canBeChasedBy } from '../src/entities/projTargets';
 import { rollBossPotionsAndHearts } from '../src/drops/NpcDrops';
 import { BOSS_MUSIC, MUSIC_SLOT, bossMusicFor } from '../src/data/Music';
 import type { RNG } from '../src/core/rng';
@@ -420,5 +421,105 @@ describe('掉落/音乐外围', () => {
     expect(BOSS_MUSIC[370]).toBe(58);
     expect(MUSIC_SLOT[370]).toBe(15);
     expect(bossMusicFor(370)).toBe(58);
+  });
+});
+
+describe('登记账补齐批（2026-09-03 六波）', () => {
+  it('chaseable 相位暂关：态10/12/13 随从不可索敌,悬浮态可（R2-F6）', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 20, y: 55 });
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    e.ai0 = 0;
+    expect(canBeChasedBy(e)).toBe(true);          // 悬浮可索敌
+    e.ai0 = 10;
+    expect(canBeChasedBy(e)).toBe(false);         // 隐身悬浮(:50086)
+    e.ai0 = 11;
+    expect(canBeChasedBy(e)).toBe(true);          // 冲撞段复真(:50173)
+    e.ai0 = 12;
+    expect(canBeChasedBy(e)).toBe(false);         // 瞬移(:50203)
+    e.ai0 = 13;
+    expect(canBeChasedBy(e)).toBe(false);         // 旋转冲刺继承假
+    void hooks;
+  });
+
+  it('帧机 dukeFindFrame：龙卷窗 60-80 张口(70-75 帧7)/变身窗 120-160(130-155 帧7)', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 20, y: 55 });
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    e.bInit = true;
+    e.ai0 = 3; e.ai1 = 0; e.ai2 = 55; e.customFrameIdx = 0; e.npcFrameT = 0;
+    tickDuke(e, hooks, 1);                        // ai2=56 ∈ (60?) 否 — 56<60 游动
+    expect(e.customFrameIdx).toBeLessThan(6);     // 游动帶
+    e.ai2 = 60; e.customFrameIdx = 0; e.npcFrameT = 0;
+    tickDuke(e, hooks, 1);                        // ai2=61 ∈ [60,80] 张口窗 → 帧 6
+    expect(e.customFrameIdx).toBe(6);
+    e.ai2 = 71; e.customFrameIdx = 0; e.npcFrameT = 0;
+    tickDuke(e, hooks, 1);                        // ai2=72 ∈ (70,75) → 帧 7
+    expect(e.customFrameIdx).toBe(7);
+    e.ai0 = 4;                                    // 变身态窗 120-160 判定需 tick 时 ai0=4
+    e.ai2 = 120; e.customFrameIdx = 0; e.npcFrameT = 0;
+    tickDuke(e, hooks, 1);                        // ai2=121 ∈ [120,160] 变身张口 → 帧 6
+    expect(e.customFrameIdx).toBe(6);
+    e.ai2 = 131; e.customFrameIdx = 0; e.npcFrameT = 0;
+    tickDuke(e, hooks, 1);                        // ai2=132 ∈ (130,155) → 帧 7
+    expect(e.customFrameIdx).toBe(7);
+  });
+
+  it('态7 旋转泡泡冲刺：20 速起手/每 4t 甩泡/速度与身体同步旋转', () => {
+    const { hooks, enemies } = makeHooks(makeWorld(), { x: 40, y: 55 });
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    pastSpawn(e, hooks);
+    // 直置二阶段冲撞态起手（dukeCharge toState=7 需经 case5 pick2 next=2）
+    e.ai0 = 5; e.ai1 = 0; e.ai2 = 0; e.ai3 = 6;   // a3=6 → pick2 next=2 → 态7
+    tickDuke(e, hooks, 60);                        // 二阶段悬浮(a3=6:flag5=6<6 假 → 基值 60t)
+    expect(e.ai0).toBe(7);
+    const spd = Math.hypot(e.vx, e.vy);
+    expect(Math.abs(spd - 20)).toBeLessThan(0.01); // spinDashSpd=20
+    const v0x = e.vx, v0y = e.vy;
+    const pre = enemies.filter((n) => n.vanillaId === 371).length;
+    tickDuke(e, hooks, 1);                         // ai2=0 → 0%4===0 首拍即甩(同 case 2)
+    expect(enemies.filter((n) => n.vanillaId === 371).length).toBe(pre + 1);
+    tickDuke(e, hooks, 2);                         // ai2=1,2 → 2%4!==0 不甩
+    expect(enemies.filter((n) => n.vanillaId === 371).length).toBe(pre + 1);
+    // 旋转积分:速度向量被旋转（模长守恒,方向变）
+    const spd1 = Math.hypot(e.vx, e.vy);
+    expect(Math.abs(spd1 - 20)).toBeLessThan(0.1);
+    expect(e.vx !== v0x || e.vy !== v0y).toBe(true);
+    tickDuke(e, hooks, 120);                       // spinT=120 满回悬浮
+    expect(e.ai0).toBe(5);
+  });
+
+  it('态8 大龙卷：克苏弹一发(0,0)/90t 回二阶段悬浮', () => {
+    const { hooks, projectiles } = makeHooks(makeWorld(), { x: 20, y: 55 });
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    pastSpawn(e, hooks);
+    e.ai0 = 8; e.ai1 = 0; e.ai2 = 0;
+    tickDuke(e, hooks, 61);                        // 越过 ai2==60 发射窗
+    expect(projectiles.length).toBe(1);            // 克苏弹一发(大)
+    const bolt = projectiles[0] as { constructor: { name: string }; big?: boolean };
+    expect(bolt.constructor.name).toBe('DukeSharknadoBolt');
+    tickDuke(e, hooks, 30);
+    expect(e.ai0).toBe(5);                         // 90t 满回二阶段悬浮
+  });
+
+  it('AI_070 爆裂泡泡：贴近爆裂引信4t/扩盒100/超时150t自爆/引信期无敌', () => {
+    const { hooks } = makeHooks(makeWorld(), { x: 40, y: 55 });
+    const p0 = (hooks as unknown as { player: { cx: number; cy: number; w: number; h: number } }).player;
+    const b = Enemy.fromVanilla(371, 40 * TILE, 52 * TILE)!;   // 52 格:距玩家中心 ~19px < pad 窗
+    // 贴脸 → 引信
+    dukeBubbleAI(b, hooks, p0 as never);
+    expect(b.ai0).toBe(1);                         // 贴近爆裂(pad=40+w/2)
+    expect(b.ai1).toBe(3);                         // 置位与首拍递减同拍(4→3)
+    expect(b.w).toBe(100);                         // 扩盒 100×100(:35187-35193)
+    expect(b.dontTakeDamage).toBe(true);           // 爆裂态无敌
+    // 引信余 3 拍归零消散
+    dukeBubbleAI(b, hooks, p0 as never);
+    dukeBubbleAI(b, hooks, p0 as never);
+    dukeBubbleAI(b, hooks, p0 as never);
+    expect(b.dead).toBe(true);                     // ai1 3→0 消散
+    // 超时自爆:远离玩家 → ai0=0,ai1 累计 150 转引信
+    const b2 = Enemy.fromVanilla(371, 40 * TILE, 50 * TILE)!;
+    p0.cx = 100 * TILE; p0.cy = 30 * TILE;         // 拉远
+    for (let i = 0; i < 150; i++) dukeBubbleAI(b2, hooks, p0 as never);
+    expect(b2.ai0).toBe(1);                        // :35167-35175 超时转引信
+    void w0;
   });
 });

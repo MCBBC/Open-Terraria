@@ -7,10 +7,11 @@
 // ③ 292 InfernoHostileBlast（SetDefaults :3817-3826 + AI :28782-28823）：
 //    25×d174/拍（中心±10 出生,3..8 归一外发,scale1.5）+ 541 拍存续（ai0>540→Kill :28792-28800）
 //    + 接触伤害（Damage_EVP immune 门重判,命中不消亡）+ Item74 单次
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
 import { Dart } from '../src/entities/Dart';
+import { GorePiece } from '../src/entities/GorePiece';
 import { InfernoHostileBlast } from '../src/entities/InfernoHostileBlast';
 import { BuffType, buffTypeByVanilla } from '../src/stats/Buffs';
 
@@ -298,13 +299,18 @@ describe('④ 292 联机访客镜像（Dart.destroy 口,2026-09-02 缺口清偿�
 // 盒 60×60 伤 30/22 按本地难度重算）同为房主权威弹 → 访客傀儡 netPuppet 早退不跑
 // Kill 链 → destroy 镜像口复放（口径同 ④）。
 describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,2026-09-03）', () => {
-  it('访客傀儡 303 消亡 → rocketKill 复放：Item14 + 火尘两批 40 + 命中面 + 幂等', () => {
+  it('访客傀儡 303 消亡 → rocketKill 复放：Item14 + 烟 30×d31 + gore 8 两轮 + 火尘两批 40 + 命中面 + 幂等', () => {
     const { hooks, dusts, sfx, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
     const d = new Dart(30 * 16, 40 * 16, 8, 0, 40, 303);
     d.netPuppet = true;
     d.fixedUpdate(1 / 60, hooks);          // lastGame 刷新（傀儡步进同 ④）
     d.x = 50 * 16 - 7; d.y = 40 * 16 - 7;  // 末拍位（盒 14×14,傀儡心 = 50*16,40*16）
     d.dead = true;
+    // ★R9（2026-09-03）烟/gore 真通道金标：newGore 换 stub 种子 (2,2)——×mult 与
+    //  ±1 两乘区在返回对象上可分离分账（真实内建扰动 vy-=Next(10,31)×0.1/
+    //  vx+=Next(-20,21)×0.1 为随机量,不入断言;id/出生位/初速经 mock.calls 钉）
+    const goreSpy = vi.spyOn(GorePiece, 'newGore')
+      .mockImplementation((() => ({ vx: 2, vy: 2 })) as unknown as typeof GorePiece.newGore);
     d.destroy();
     expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);   // Kill 组爆音（:79827 组）
     // ★R8 M3（2026-09-03）火尘两批 40 粒（:79848-79855 单环交错,按 scale 档分账）：
@@ -316,12 +322,32 @@ describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,202
     expect(lo).toHaveLength(20);
     expect(hi.every((x) => x.alpha === 100 && x.noGravity)).toBe(true);
     expect(lo.every((x) => x.alpha === 100 && !x.noGravity)).toBe(true);
+    // ★R9 烟 30×d31（:79843-79847）：NewDust(22×22 盒,0,0,α100,default,1.5)→×1.4
+    const d31 = dusts.filter((x) => x.type === 31);
+    expect(d31).toHaveLength(30);
+    expect(d31.every((x) => x.alpha === 100 && Math.abs(x.scale - 1.5) < 1e-9
+      && !x.noGravity)).toBe(true);
+    // ★R9 gore 两轮 8 片（:79856-79879）：Next(61,64)∈{61,62,63} 烟团、出生位 =
+    //  22×22 盒左上（50*16-11,40*16-11）、初速 default(Vector2)=(0,0)
+    const goreCalls = goreSpy.mock.calls;
+    const goreStubs = goreSpy.mock.results.map((r) => r.value as { vx: number; vy: number });
+    expect(goreCalls).toHaveLength(8);
+    expect(goreCalls.every(([id]) => id >= 61 && id <= 63)).toBe(true);
+    expect(goreCalls.every(([, gx, gy, gvx, gvy]) => gx === 50 * 16 - 11
+      && gy === 40 * 16 - 11 && gvx === 0 && gvy === 0)).toBe(true);
+    // 前 4 片 ×0.4 / 后 4 片 ×0.8（stub 2×mult 后 ±1 四向对角各一,序同原文）
+    const diag = (arr: Array<{ vx: number; vy: number }>, m: number) =>
+      new Set(arr.map((g) => `${Math.sign(g.vx - 2 * m)},${Math.sign(g.vy - 2 * m)}`));
+    expect(diag(goreStubs.slice(0, 4), 0.4)).toEqual(new Set(['1,1', '-1,1', '1,-1', '-1,-1']));
+    expect(diag(goreStubs.slice(4), 0.8)).toEqual(new Set(['1,1', '-1,1', '1,-1', '-1,-1']));
     expect(damageCalls.length).toBe(1);                          // 玩家与傀儡盒重叠 → 命中面
     expect(damageCalls[0].dmg).toBeGreaterThanOrEqual(68);       // ★R7 F5 钉 rocketDmg 60 带宽(DamageVar/难度乘区)
     expect(damageCalls[0].dmg).toBeLessThanOrEqual(92);
     d.destroy();                                                  // 幂等：重复 destroy 零二爆
     expect(sfx.filter((f) => f === 'Item_14').length).toBe(1);
     expect(damageCalls.length).toBe(1);
+    expect(goreSpy.mock.calls).toHaveLength(8);                   // 幂等：gore 亦零二爆
+    goreSpy.mockRestore();
   });
 
   it('★R7 清偿：AoE 128 盒真判定——盒缘命中（弹盒 14×14 外）仍吃伤、盒外不吃（AI :48017-48025 预扩 + Kill 内 Damage :71792）', () => {
@@ -348,13 +374,16 @@ describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,202
     expect(out.damageCalls.length).toBe(0);
   });
 
-  it('访客傀儡 75 → rocketDmg 60 覆写爆（:80116-80122）+ 火尘 20 粒两批（:80070 组独立档）', () => {
+  it('访客傀儡 75 → rocketDmg 60 覆写爆（:80116-80122）+ 烟 20×d31 + gore 4 单轮 + 火尘 20 粒两批（:80070 组独立档）', () => {
     const { hooks, dusts, damageCalls } = makeGame(emptyWorld(), { playerAt: [50 * 16, 40 * 16] });
     const d = new Dart(30 * 16, 40 * 16, 8, 0, 80, 75);
     d.netPuppet = true;
     d.fixedUpdate(1 / 60, hooks);
     d.x = 50 * 16 - 11; d.y = 40 * 16 - 11;   // 75 盒 22×22
     d.dead = true;
+    // ★R9 stub 同 303 用例（种子 (2,2),×0.4 与 ±1 可分离分账）
+    const goreSpy = vi.spyOn(GorePiece, 'newGore')
+      .mockImplementation((() => ({ vx: 2, vy: 2 })) as unknown as typeof GorePiece.newGore);
     d.destroy();
     // ★R8 M3：75 属 :80070 组（非 :79827 组）——10×d6(α100,scale2.5,noGravity,×5)
     //  + 10×d6(α100,scale1.5,重力开,×3) 共 20 火粒（:80084-80091,烟 d31 亦 20 非 30）
@@ -365,6 +394,22 @@ describe('⑤ rocket/596 Kill 面访客镜像（Dart.destroy 同构族扩面,202
     expect(lo75).toHaveLength(10);
     expect(hi75.every((x) => x.alpha === 100 && x.noGravity)).toBe(true);
     expect(lo75.every((x) => x.alpha === 100 && !x.noGravity)).toBe(true);
+    // ★R9 烟 20×d31（:80079-80083,参数同 303 组仅粒数差）+ gore 单轮 4 片
+    //  （:80092-80107 仅 ×0.4 一轮,无 303 组 ×0.8 第二轮）
+    const d31b = dusts.filter((x) => x.type === 31);
+    expect(d31b).toHaveLength(20);
+    expect(d31b.every((x) => x.alpha === 100 && Math.abs(x.scale - 1.5) < 1e-9
+      && !x.noGravity)).toBe(true);
+    const goreCalls75 = goreSpy.mock.calls;
+    const goreStubs75 = goreSpy.mock.results.map((r) => r.value as { vx: number; vy: number });
+    expect(goreCalls75).toHaveLength(4);
+    expect(goreCalls75.every(([id]) => id >= 61 && id <= 63)).toBe(true);
+    expect(goreCalls75.every(([, gx, gy, gvx, gvy]) => gx === 50 * 16 - 11
+      && gy === 40 * 16 - 11 && gvx === 0 && gvy === 0)).toBe(true);
+    expect(new Set(goreStubs75.map((g) =>
+      `${Math.sign(g.vx - 0.8)},${Math.sign(g.vy - 0.8)}`)))
+      .toEqual(new Set(['1,1', '-1,1', '1,-1', '-1,-1']));   // 2×0.4±1 四向对角
+    goreSpy.mockRestore();
     expect(damageCalls.length).toBe(1);
     // 飞行伤 80 被覆写为爆炸伤 60（rocketDmg :80116-80122）→ hitPlayer 全链
     // （DamageVar ±15% × 敌弹 ×2 :14912-14917）→ 102..138（非专家世界）

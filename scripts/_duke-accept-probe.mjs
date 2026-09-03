@@ -282,7 +282,9 @@ const out = await page.evaluate(async () => {
   const beforeVids = new Set(dropsOf());
   let killed = false;
   for (let i = 0; i < 6 && !killed; i++) {
-    duke.hurt(999999, 0, 0, g);
+    // fromPlayer=true（第8参）：A3 playerInteraction 门（AchievementsHelper.cs:202）
+    // 后,非交互杀不再推进 npcKilled 成就——探针须模拟真实玩家击杀
+    duke.hurt(999999, 0, 0, g, 0, false, 0, true);
     await ticksFast(4);
     killed = duke.dead === true;   // 严格 dead 位(R5-F7:bossFled 析取会放水)
   }
@@ -307,7 +309,7 @@ const out = await page.evaluate(async () => {
     await ticksFast(80);   // 走完 75t 出生段（invuln=true 期间 hurt 全被吸收,2026-09-03 实测）
     let killed2 = false;
     for (let i = 0; i < 6 && !killed2; i++) {
-      duke2.hurt(999999, 0, 0, g);
+      duke2.hurt(999999, 0, 0, g, 0, false, 0, true);   // fromPlayer=true(同上 A3 门)
       await ticksFast(4);
       killed2 = duke2.dead;
     }

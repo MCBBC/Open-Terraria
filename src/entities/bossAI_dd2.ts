@@ -3036,10 +3036,12 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
 }
 
 // ---------------------------------------------------------------------------
-// 681 哥布林炸弹（ProjectileID.cs:1722;SetDefaults :6984-6991 aiStyle 16/14²/
-//   hostile/penetrate -1）。AI_016 引信族物理同 WeaponProj.GrenadeProj（重力 0.2、
-//   撞墙 ×-0.4 反弹、落地摩擦 0.97、接触熔断 3t）;Kill :68638-68696 = 80² 伤害盒
-//   + DD2_GoblinBomb 音 + 尘爆。敌对弹:爆盒伤玩家与永恒水晶 548。
+// 681 哥布林炸弹（ProjectileID.cs:1722;SetDefaults 1457 :7265-7273 aiStyle 16/
+//   14×14/hostile/penetrate -1/ranged;引信 600=:11071 NewProjectile 后置表,SW-Q1）。
+//   AI_016 引信族物理同 WeaponProj.GrenadeProj（重力门 5 拍 + 0.2、撞墙 ×-0.4 反弹、
+//   落地摩擦 0.97、接触熔断 3t）;专支尾焰尘 6 每 tick（:48324-48330,SW-Q1）;
+//   Kill :73136-73216 = 80² 伤害盒 + DD2_GoblinBomb 音 + 尘爆（旧注 :68638-68696
+//   系 1456 行号）。敌对弹:爆盒伤玩家与永恒水晶 548。
 // ---------------------------------------------------------------------------
 export class DD2GoblinBomb extends Entity {
   w = 14; h = 14;
@@ -3050,12 +3052,19 @@ export class DD2GoblinBomb extends Entity {
   private fuse: number;
   private rot = 0;
   private cxPx = 0; private cyPx = 0;
+  /** SW-Q1 2026-09-03：ai[0]（AI_016 :48332 每 tick +1）——重力门节拍轴 */
+  private ai0 = 0;
+  /** 引信嘶声循环句柄（:47780 PlayTrackedLoopedSound;Kill Stop——同 GrenadeProj） */
+  private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
   constructor(x: number, y: number, vx: number, vy: number, dmg: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.vx = vx; this.vy = vy;
     this.damage = dmg;
-    this.fuse = 180;                       // timeLeft 缺省 180（aiStyle 16 无显式覆写）
+    // SW-Q1 2026-09-03：引信终值 600——NewProjectile 后置表（P.cs:11071-11074
+    //   `if (Type == 681) timeLeft = 600`）,非 aiStyle16 缺省 180（旧注误,炸药师
+    //   投弹手 42t 循环出手,600 引信=落地后长时间待爆的原版节奏）
+    this.fuse = 600;
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
     const st = game.world.store;
@@ -3065,9 +3074,43 @@ export class DD2GoblinBomb extends Entity {
     if (pl && !pl.dead
       && this.x < pl.x + pl.w && this.x + this.w > pl.x
       && this.y < pl.y + pl.h && this.y + this.h > pl.y && this.fuse > 3) this.fuse = 3;
-    if (--this.fuse <= 0) { this.explode(game); return; }
-    this.rot += this.vx * 0.1;             // 滚动（AI_016 :44909-44915）
-    this.vy = Math.min(this.vy + 0.2, 16);
+    // SW-Q1 2026-09-03：爆点对齐原版 AI 头 timeLeft≤3 Kill（P.cs:48034）→ Update 尾
+    //   dec（:17307）——post-dec ≤2 ≡ pre-dec ≤3（与 GrenadeProj SW-L1 同式;旧
+    //   `<=0` 在接触钳 3 后多滚 2 拍才爆）。引信嘶声循环（AI_016 :47780
+    //   IsABombWithFuse[681]=true,timeLeft>1;ProjectileID.cs:277 集）
+    if (this.fuse > 1) {
+      if (!this.fuseSnd) this.fuseSnd = game.startTrackedLoop?.('bombFuse', 0.2, this.cx, this.cy) ?? null;
+      else this.fuseSnd.setPos(this.cx, this.cy);
+    }
+    if (--this.fuse <= 2) { this.explode(game); return; }
+    // 专支尘（AI_016 :48324-48330 逐参 1:1）：每 tick 恰 1 粒尘 6（681 被通支
+    //   :48285 排除表挡下后落到本支,无概率门）——NewDustDirect(position,w,h,6,
+    //   0,0,100) 后 scale=1+Next(5)×0.1 绝对赋值 / noGravity / position 整体覆写
+    //   = Center + (6×sign(vx), −h/2−6).RotBy(rot)×1.1（炸弹尾焰位,随滚转自转）
+    {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 1);
+      if (d) {
+        d.scale = 1 + Math.floor(Math.random() * 5) * 0.1;
+        d.noGravity = true;
+        const a = 6 * Math.sign(this.vx), b = -this.h / 2 - 6;
+        const cs = Math.cos(this.rot), sn = Math.sin(this.rot);
+        d.x = this.cx + (a * cs - b * sn) * 1.1;
+        d.y = this.cy + (a * sn + b * cs) * 1.1;
+      }
+    }
+    this.rot += this.vx * 0.1;             // 滚动（AI_016 :48404——681 不在滚转排除表）
+    // 重力门（:48377 双析取支）：681 列第一析取支名单（ai[0]>10）但第二析取支
+    //   排除表漏列 → OR 语义下 ai[0]>5 实际开门（WeaponProj.bombGravityGateOf 同
+    //   判,按反编译逐字保留勿"修"）;开门拍起 vy+0.2,落地帧（vy==0&&vx≠0）另
+    //   vx×0.97、|vx|<0.01 归零（:48379-48385 唯一摩擦点,自旧落地支迁来防双乘）
+    this.ai0 += 1;
+    if (this.ai0 > 5) {
+      if (this.vy === 0 && this.vx !== 0) {
+        this.vx *= 0.97;
+        if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
+      }
+      this.vy = Math.min(this.vy + 0.2, 16);
+    }
     let nx = this.x + this.vx, ny = this.y + this.vy;
     const solidAtP = (px: number, py: number): boolean => {
       const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
@@ -3079,15 +3122,20 @@ export class DD2GoblinBomb extends Entity {
     }
     if (solidAtP(nx + this.w / 2, ny + this.h - 1)) {
       if (this.vy > 0.7) this.vy *= -0.4;  // 落地反弹（:18351-18357）
-      else { this.vy = 0; this.vx *= 0.97; }
+      else this.vy = 0;                    // 落地驻停（摩擦已迁重力门支——SW-Q1,防双乘）
       ny = this.y;
     }
     this.x = nx; this.y = ny;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;
   }
+  destroy(): void {
+    this.fuseSnd?.stop();                  // Kill :67373-67377 GetActiveSound?.Stop()
+    this.fuseSnd = null;
+  }
   /** Kill :68638-68696：80² 爆盒 + 尘爆 + 音效 */
   private explode(game: GameHooks): void {
     this.dead = true;
+    this.destroy();
     game.onProjectileDeath?.(681, this.x, this.y, this.w, this.h);
     game.playSfx('explosion', 1, this.cx, this.cy);
     game.spawnParticles(this.cx, this.cy, '#FFD24A', 14, 4, { life: 30, grav: -0.05 });

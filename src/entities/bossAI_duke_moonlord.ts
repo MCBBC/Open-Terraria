@@ -1,12 +1,13 @@
 // Boss AI 1:1 移植(二):猪鲨鱼龙 AI_069(NPC 370)与月亮领主 aiStyle 77/78/79(NPC 398 核心 / 397 手 / 396 头)。
-// 源码:Terarria1456(1.4.5.6)NPC.cs ——
-//   猪鲨 AI_069_DukeFishron        :49143-50127
-//   月总核心 aiStyle 77(398)      :36774-37198
-//   月总手   aiStyle 78(397)      :37199-37711
-//   月总头   aiStyle 79(396)      :37712-38128
+// 源码(1456=Terarria1456 / 1457=Terarria1457 NPC.cs;下文注释 ≤:50127 者为 1456 系锚,
+// 1457 真位:AI_069 块 +152(:49295-50279)、AI_071 块 +88(:35284-35405),红蓝对抗 E-8 登记) ——
+//   猪鲨 AI_069_DukeFishron        1456 :49143-50127 / 1457 :49295-50279
+//   月总核心 aiStyle 77(398)      1456 :36774-37198(1457 :36926 起,+152 族)
+//   月总手   aiStyle 78(397)      1456 :37199-37711
+//   月总头   aiStyle 79(396)      1456 :37712-38128
 //   攻击时间表 MoonLordAttacksArray :6830-6946 / MoonLordAttacksArray2 :6948-6987
 //   死亡转换 checkDead             :78841-78867(396/397 血尽→ai0=-2 闭眼残肢+召真眼;398 血尽→ai0=2 死亡演出)
-//   鲨鱼 NPC aiStyle 71(372/373)  :35196-35328(升空蓄力 90t→16 速扑咬,撞墙即死)
+//   鲨鱼 NPC aiStyle 71(372/373)  1456 :35196-35328 / 1457 :35284-35405(升空蓄力 90t→16 速扑咬,撞墙即死)
 // 弹体(原版 Projectile.cs 1:1,本文件内实现为投射桶实体):
 //   龙卷水弹 385 aiStyle 65        :28402-28482(小:斜落/大:追踪玩家 50px 引爆)+ Kill 落龙卷 :70714-70778
 //   鲨鱼龙卷 384/386 aiStyle 64    :28287-28398(逐段向上生长,周期 NewNPC 372/373 出鲨)
@@ -131,14 +132,23 @@ const coreOf = (e: Enemy): CoreX => {
 /** 实心块内判定(原版 Collision.SolidCollision(position,width,height) 全盒 any 等价件):
  *  扫描矩形覆盖到的【全部】tile 列行,任一实心即真——曾按中心格单点近似,
  *  半砖/边缘骑线时猪鲨隐身渐变与鲨龙蓄力/起扑窗判定集体漏检(台账④,
- *  与 bossAI_dd2 solidBody 同款修法;对应 dd2 文件内五点采样版)。 */
+ *  与 bossAI_dd2 solidBody 同款修法;对应 dd2 文件内五点采样版)。
+ *  ★halfBrick 子矩形(:2739-2745 vector.Y+=8/num2−8——下半 8px 才算实心)与
+ *  平台/已致动格排除(st.isSolid 内建 active/actuated 门+平台 solid:false)=
+ *  红蓝对抗 R1-F6 补,曾整格算实心=半砖上缘/平台误判隐身渐变与撞块死 */
 const inSolid = (game: GameHooks, e: { x: number; y: number; w: number; h: number }): boolean => {
   const st = game.world.store;
   const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 0.001) / TILE);
   const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 0.001) / TILE);
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
+      if (st.half[st.idx(tx, ty)]) {   // halfBrick:仅与下半 8px 子矩形相交才算
+        const ry = ty * TILE + 8;
+        if (e.y + e.h > ry && e.y < ry + 8) return true;
+      } else {
+        return true;
+      }
     }
   }
   return false;
@@ -306,8 +316,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (!e.bInit) { e.bInit = true; e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; e.spawnAlpha = 255; } // :49247-49257
   const b = baseOf(e);
   const enraged = player ? dukeEnraged(game, player) : false;
-  const flag = e.hp <= e.maxHp * 0.5;                       // flag  :49147 二阶段
-  const flag3 = e.ai0 > 4;                                  // flag3 :49149(二阶段状态 5-13)
+  const flag3 = e.ai0 > 4;                                  // flag3 :49301(二阶段状态 5-13)
   const flag4 = e.ai0 > 9;                                  // flag4 :49150(expert 狂暴段 10-13)
   const flag5 = e.ai3 < (flag3 ? 3 : 5) * 2;                // flag5 :49151-49152
 
@@ -333,8 +342,10 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   else if (flag5 && flag3) { chargeT = expert ? 27 : 30; if (expert) chargeSpd = 21; }  // :49347-49353
   if (enraged) { hoverT = 10; chargeSpd += 6; }                          // :49390-49398 flag6 块(在档位之后加算)
 
-  // 玩家死/远离 5600px(:49218-49237):减速升空离场(原版另 EncourageDespawn(10);
-  // 本工程 Boss 不参与 despawn 块,故仅保留升空)。原版此处无回血逻辑。
+  // 玩家死/远离 5600px(1457 :49376-49389,1456 :49218-49237):减速升空离场+
+  // EncourageDespawn(10)+ai0 归位+ai2=0;原版本支【不 return】,续走旋转伺服/状态机
+  // 尾句(:50278 dontTakeDamage=!flag7)——本仓早退,故补 dontTakeDamage=false 等价
+  // (R2-F5)。原版此处无回血逻辑。
   if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     e.vy -= 0.4;
     e.encourageDespawn(10); // :49376-49389 急升逃离 + EncourageDespawn(10)
@@ -377,11 +388,23 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       st.dir = s; st.spr = -s;
       if (e.ai2 > 20) {
         e.vy = -2;
-        e.spawnAlpha = clamp(e.spawnAlpha - 5 + (inSolid(game, e) ? 15 : 0), 0, 150); // :49375-49391
-      } else if (e.spawnAlpha < 255) e.spawnAlpha = 255;
-      if (e.ai2 === DUKE.nadoT - 30) { // :49392 出生尘环
-        game.spawnParticles(e.cx, e.cy, '#8FD8FF', 18, 2.4, { life: 40 });
-        game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49404 PlaySound(29,…,20) 满响(曾借 roar 0.8)
+        e.spawnAlpha = clamp(e.spawnAlpha - 5 + (inSolid(game, e) ? 15 : 0), 0, 150); // :49517-49533
+      }
+      // (原版本支无 else 复位支——spawnAlpha 初值 255 使 else 恒不可达,R2-F7 清)
+      if (e.ai2 === DUKE.nadoT - 30) { // :49507-49528 出生尘环(1456 :49392)
+        // 36 粒 d172 椭圆环:pos = Center + [Normalize(v)·(w/2,h)·0.375].RotatedBy(
+        // (i−17)·2π/36),速度 = 径向外 3(R5-F13-9 补:曾 18 粒泛用泛向近似)
+        const n = 36;
+        const nv = Math.hypot(e.vx, e.vy) || 1;
+        for (let i = 0; i < n; i++) {
+          const ang = (i - (n / 2 - 1)) * (Math.PI * 2) / n;
+          const bx = (e.vx / nv) * (e.w / 2) * 0.375, by = (e.vy / nv) * e.h * 0.375;
+          const rx = bx * Math.cos(ang) - by * Math.sin(ang), ry = bx * Math.sin(ang) + by * Math.cos(ang);
+          const ol = Math.hypot(rx, ry) || 1;
+          game.spawnParticles(rx + e.cx, ry + e.cy, '#8FD8FF', 1, 3,
+            { life: 100, grav: 0, size: 1.4, vx: (rx / ol) * 3, vy: (ry / ol) * 3 });
+        }
+        game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49529 PlaySound(29,…,20) 满响(曾借 roar 0.8)
       }
       e.ai2 += 1;
       if (e.ai2 >= DUKE.spawnT) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; }
@@ -557,7 +580,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
           if (st.spr !== -s) e.spin += Math.PI;
           st.spr = -s;
         }
-        game.spawnParticles(e.cx, e.cy, '#8FD8FF', 14, 2.4, { life: 30 });
+        // 原版瞬移拍无尘(B1-E11③:曾多 14 粒蓝尘,2026-09-03 登记-校正)
         game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :50064 PlaySound(29,…,20)(曾借 roar 0.6)
       }
       e.ai2 += 1;
@@ -825,8 +848,9 @@ export class DukeSharknadoTornado extends Entity {
   }
   private resize(): void {
     const s = this.scaleOf(this.ai1);
-    this.w = Math.round(150 * s);        // SetDefaults 150×42 × scale
-    this.h = Math.round(42 * s);
+    // (int) 截断(B1-E11②:原版 width=(int)(num509·scale)——曾 Math.round=ai1=16 档差 1px)
+    this.w = Math.floor(150 * s);        // SetDefaults 150×42 × scale
+    this.h = Math.floor(42 * s);
     this.x = this.cx - this.w / 2;
     this.y = this.topY - this.h / 2;
   }
@@ -1064,10 +1088,32 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   // PrepareForDeathAnimation(life=lifeMax/dontTakeDamage=true)。原版时序=
   // StrikeNPC 扣血之后、本 tick NPC.Update 内的 AI 段之前跑转换,故与 justHit 并存。
   // 致命拍尘环 = StrikeNPC 371 支(:85190-85211)60 粒 d212 蓝环(hslToRgb(.4±.2,.9,.5)
-  // lerp 白 .3,径向 45..91/10),本仓粒子近似(#5AA6D8 色带)。命中破裂音在
-  // Enemy.hurt 的每次 Strike 面(:85185 PlaySound(4,…,3))承担,此处不重播。
+  // lerp 白 .3,径向 45..91/10)——2026-09-03 登记账 R1-F2 升精确:60 粒 d212,
+  // 位置吸附半径 25·scale 环,速度=前 30 粒随机幅/后 30 粒径向 4.5..9,noGravity
+  // scale 0.7。命中破裂音在 Enemy.hurt 的每次 Strike 面(:85185 PlaySound(4,…,3))
+  // 承担,此处不重播。
   if (e.hp <= 0) {
     e.ai0 = 1; e.ai1 = 4;
+    const r371 = 25 * (e.vanillaScale || 1);
+    for (let i = 0; i < 60; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const px = e.cx + Math.cos(ang) * r371, py = e.cy + Math.sin(ang) * r371;
+      const spd = i < 30 ? Math.random() * 4 : (45 + Math.random() * 46) / 10;
+      const h = 0.4 + Math.random() * 0.2;
+      const c = 0.9, x = h * 6, sec = Math.floor(x) % 6, f = x - Math.floor(x);
+      const p1 = c * (1 - Math.abs(sec % 2 - 1)), mn = 0.05;
+      let r0 = 0, g0 = 0, b0 = 0;
+      if (sec === 0) { r0 = c; g0 = p1; } else if (sec === 1) { r0 = p1; g0 = c; }
+      else if (sec === 2) { g0 = c; b0 = p1; } else if (sec === 3) { g0 = p1; b0 = c; }
+      else if (sec === 4) { r0 = p1; b0 = c; } else { r0 = c; b0 = p1; }
+      const col = {
+        r: Math.round((r0 + mn + (1 - (r0 + mn)) * 0.3) * 255),
+        g: Math.round((g0 + mn + (1 - (g0 + mn)) * 0.3) * 255),
+        b: Math.round((b0 + mn + (1 - (b0 + mn)) * 0.3) * 255), a: 255,
+      };
+      game.spawnDust?.(px - 2, py - 2, 4, 4, 212, Math.cos(ang) * spd, Math.sin(ang) * spd,
+        100, col, 0.7, true);   // noGravity=1（原版 dust61.noGravity=true）
+    }
     e.hp = e.maxHp;
     e.dontTakeDamage = true;
     game.spawnParticles(e.cx, e.cy, '#5AA6D8', 24, 5.5, { life: 26, damp: 0.92 });

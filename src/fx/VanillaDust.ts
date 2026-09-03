@@ -147,6 +147,9 @@ export function dustFrameOf(type: number): { fx: number; fy: number } {
 export class VanillaDust {
   private pool: VDust[] = [];
   private cursor = 0;
+  /** 活跃尘计数（update 每帧全池遍历顺带重数——密度门 frac 的真负载源,见 spawn 门注）。
+   *  首帧前=0（门低分位恒不触发=首帧批 spawn 零拒绝,与原版低负载行为同）。 */
+  private activeCount = 0;
   /** update 期收集的光照（Game 每帧推 LightingEngine 后清空） */
   lights: Array<{ x: number; y: number; r: number; g: number; b: number }> = [];
 
@@ -188,7 +191,13 @@ export class VanillaDust {
     // ★R2 #4:原版 dCount 概率密度门（Dust.cs:122-151,无环形覆盖——CloneDust 池满
     // 返回 null 契约保持）:池压五档渐进拒绝（>90% 3/4 / >80% 2/3 / >70% 1/2 /
     // >60% 1/4 / >50% 1/5;≤50% 不拒）——292 爆区 25/t 的自节流通道,不饿死他人
-    const frac = slot / POOL;
+    // ★2026-09-03 复发定谳（用户实报"7-9 发无尾焰复发+时有时无"）：曾 frac=slot/POOL
+    //  （空槽【下标】分位）——512 池时等价真负载（游标快绕）;6000 池后游标漂进高分位
+    //  后要 3000 次 spawn 才回绕 → 密度门把低负载误判高压力 → 概率拒新尘。原版的门
+    //  之所以等价真负载,靠的是槽搜索【从 0 头扫】（Dust.cs:106 for i=0…;第一个空槽
+    //  i≈活跃前缀数）——本仓环形游标优化破坏了该等价。修=frac 改用 update 每帧全池
+    //  遍历顺带重数的 activeCount（真负载,一帧滞后无感）,游标只服务空槽定位。
+    const frac = this.activeCount / POOL;
     const r = Math.random();
     if ((frac > 0.9 && r >= 0.25) || (frac > 0.8 && r >= 1 / 3) ||
         (frac > 0.7 && r < 0.5) || (frac > 0.6 && r < 0.25) ||
@@ -303,8 +312,10 @@ export class VanillaDust {
     player: { cx: number; cy: number; vy: number } | null = null,
     wetBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null): void {
     this.lights.length = 0;
+    let activeN = 0;
     for (const d of this.pool) {
       if (!d.active) continue;
+      activeN++;
       // ★双轴通道拍首快照（本拍 scale 合成效应向两轴同步的基准——见 ★双轴同步）
       const scale0 = d.scale;
       // ★PrettySparkle 专用档（:59-77 Draw / Update=APF+TTL，2026-09-03 迁移批）：
@@ -711,6 +722,7 @@ export class VanillaDust {
       // :2432-2436 缩没清除（dCount 五档密度缩放不建模——池小永不触发）
       if (d.scale < 0.1) d.active = false;
     }
+    this.activeCount = activeN;   // 密度门真负载（update 全池遍历顺带重数,见 spawn 门注）
   }
 
   /** 活动尘迭代（绘制用；fullbright=true 只取亮色族 {6,15,59-64}，false 取其余） */

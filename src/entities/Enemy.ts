@@ -13352,6 +13352,14 @@ export class Enemy extends Entity {
       const n = Math.ceil((dmg / this.maxHp) * 100);
       for (let k = 0; k < n; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hd, -1);
     }
+    // 猪鲨族受击尘（HitEffect life>0 段,与鸟族块同公式）：370/372/373 =
+    // ceil(防后伤/lifeMax×100) 簇 5 号尘 SpeedX=hitDirection/SpeedY=-1
+    // （1457 NPC.cs:85164-85169/85178 前段;1456 :85077 起）。2026-09-03 登记账 R1-F2
+    if ((this.vanillaId === 370 || this.vanillaId === 372 || this.vanillaId === 373) && this.hp > 0) {
+      const hdD = Math.sign(kbx) || 1;
+      const nD = Math.ceil((dmg / this.maxHp) * 100);
+      for (let k = 0; k < nD; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdD, -1);
+    }
     // WoF 家族受击尘（HitEffect life>0 段，与鸟族块同构）：血肉墙
     // WallOfFlesh 113 / WallOfFleshEye 114 = 20 簇 5 号血尘 SpeedX=hitDirection /
     // SpeedY=-1（1457 NPC.cs:88353-88355；1456 :88281-88283）；TheHungry 115 /
@@ -13377,12 +13385,16 @@ export class Enemy extends Entity {
     }
     // 毁灭者身段受击出探针（HitEffect :90265-90281：135 身段存活受击时,ai[2]==0
     // （本段未出过探针）掷 1/25（Mechdusa 合体态 1/50）→ 置 ai[2]=1 并于段底中心
-    // 生成探针 139——每身段至多一只）
+    // 生成探针 139——每身段至多一只。★底锚换算：原版 NewNPC(X,Y) 为 Bottom 锚
+    // （:81521 nPC.Bottom=(X,Y)）→ 探针底=节底;本仓 fromVanilla 中心锚 → Y 补
+    // +h/2(139.h=20 → -10 修正前旧码低 10px)。ai[2]=1 由 FindFrame case 135
+    // （:74229 灭帧）与 destroyerSegmentLight 灯熄门消费——帧分支见 Renderer
+    // vanillaFrameIdx（2026-09-03 接上:此前帧选择未跟随 ai2=亮灭闪根因）。
     if (this.vanillaId === 135 && this.hp > 0 && this.ai2 === 0) {
       const max = mechQueenUp() ? 50 : 25;
       if (Math.floor(Math.random() * max) === 0) {
         this.ai2 = 1;
-        const probe = Enemy.fromVanilla(139, this.cx, this.y + this.h);
+        const probe = Enemy.fromVanilla(139, this.cx, this.y + this.h - 10);
         if (probe) addEnemy(game, probe);
       }
     }
@@ -13797,21 +13809,27 @@ export class Enemy extends Entity {
             return e !== this && !e.dead
               && e.vanillaId === (this.vanillaId === 125 ? 126 : 125);
           });
-        // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts,boss 门 :80322）——
-        // R14-A11①：原版在 DoDeathEvents(:79669) 内、先于 NPCLoot_DropMoney(:79712);
-        // 曾排在钱币+心星后=同击杀 RNG 消费序不同（对拍漂）。EoW 中间段
-        // killBossFlag=false 不出（仅最后一段）
-        if (this.killBossFlag && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
+        // ★结算序对齐（红蓝对抗 R3-B4 校正,1457 NPCLoot :79643 实测线性序：
+        // BeforeLoot → DropItems(:79668,上方 resolveDrops) → DoDeathEvents(:79669)内
+        // 线性执行 money(:79712) → DropHeals(:79714) → DropCommonLifeAndMana(:79916)
+        // → DropBossPotionsAndHearts(:80323)。R14-A11① 曾以" potions 先于 money"
+        // 重排——:80323 > :79712 实为【后】,本序回归原版线性位）
         // 钱币（规则未清零 value 时走 NPCLoot_DropMoney 管线）
-        // R14-A3：extraValue（怪吸收钱累计）并入钱币基数（NPC.cs:80497 `num += extraValue`,
-        // 六级乘区/血月掷之后、拆币之前）
-        const value = res.zeroValue || twinSuppressed ? 0 : ctx.value + this.extraValue;
+        // R14-A3：extraValue（怪吸收钱累计）改经 rollCoins 尾参并入（:80497 乘区/
+        // luck 双掷之后、拆币之前——曾并入基数被六级乘区放大,R3-B3 校正）
+        const value = res.zeroValue || twinSuppressed ? 0 : ctx.value;
+        const extraV = this.extraValue;
         this.extraValue = 0;
-        if (value > 0) for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon, this.midasT > 0)) spawn(c.id, c.n);
-        // 心/星（NPCLoot_DropCommonLifeAndMana）
-        for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
-        // 按 type 额外心（NPCLoot_DropHeals :79913-80010,钱币后调用）——R14-A4
+        if (value > 0 || extraV > 0) {
+          for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon, this.midasT > 0, extraV)) spawn(c.id, c.n);
+        }
+        // 按 type 额外心（NPCLoot_DropHeals :79714,钱币后调用）——R14-A4
         for (const h of rollTypeHearts(ctx)) spawn(h.id, h.n);
+        // 心/星（NPCLoot_DropCommonLifeAndMana :79916 调用点）
+        for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
+        // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts :80323,boss 门 :80322）——
+        // EoW 中间段 killBossFlag=false 不出（仅最后一段）
+        if (this.killBossFlag && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
         }
       } else {
         for (const d of this.def.drops) {
@@ -13912,7 +13930,19 @@ export class Enemy extends Entity {
       const birdExactDust = this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301;
       const wofExactDust = wofDeadVid === 113 || wofDeadVid === 114
         || wofDeadVid === 115 || wofDeadVid === 116;
-      if (!birdExactDust && !wofExactDust) {
+      // 猪鲨族死亡尘（HitEffect life<=0 段,1457 NPC.cs:85170-85184）：370=150 簇
+      // d5 全盒 2·dir/−2；372/373=75 簇 d5 中心±25 盒(50×50) 2·dir/−2 后 vel/=2
+      // （预折 half 速度）。2026-09-03 登记账 R1-F2
+      const dukeExactDust = this.vanillaId === 370 || this.vanillaId === 372 || this.vanillaId === 373;
+      if (dukeExactDust) {
+        const hdDk = Math.sign(kbx) || 1;
+        if (this.vanillaId === 370) {
+          for (let k = 0; k < 150; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hdDk, -2);
+        } else {
+          for (let k = 0; k < 75; k++) game.dust?.spawn(this.cx - 25, this.cy - 25, 50, 50, 5, hdDk, -1);
+        }
+      }
+      if (!birdExactDust && !wofExactDust && !dukeExactDust) {
         game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
@@ -13922,7 +13952,8 @@ export class Enemy extends Entity {
     // 受击：少量碎屑零散溅落（不大面积）——鸟族 61/252/301 已有原版精确血尘
     // （hurt 首段 HitEffect 块），不再叠通用近似；WoF 家族 113-116 同理
     if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301
-      && wofVid !== 113 && wofVid !== 114 && wofVid !== 115 && wofVid !== 116) {
+      && wofVid !== 113 && wofVid !== 114 && wofVid !== 115 && wofVid !== 116
+      && this.vanillaId !== 370 && this.vanillaId !== 372 && this.vanillaId !== 373) {
       game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
     }
     return false;

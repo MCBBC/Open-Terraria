@@ -947,9 +947,14 @@ export class ZenithSword extends Entity {
         }
         if (ptsFS.length >= 2) {
           try {
-            drawStripTrail(ctx, r as unknown as Parameters<typeof drawStripTrail>[1],
-              { set: 'FinalFractal' as never, pts: ptsFS, opacity: 1, expectedPairs: 60,
-                time: performance.now() / 1000, zigzag: 0.5 });
+            const spec = { set: 'FinalFractal' as never, pts: ptsFS, opacity: 1, expectedPairs: 60,
+              time: performance.now() / 1000, zigzag: 0.5 };
+            // ★2026-09-03 黑椭圆止血：入全亮队列（flushTrailShade 合成后直绘主画布/
+            // GL 上屏同 flush 时序——GL 层渲入仍发生在 drawStripTrail 内,队列化只改
+            // 执行时机）;mock 无队列方法回退直绘
+            const rr = r as unknown as Parameters<typeof drawStripTrail>[1] & { queueTrailShade?: (sp: typeof spec) => void };
+            if (typeof rr.queueTrailShade === 'function') rr.queueTrailShade(spec);
+            else drawStripTrail(ctx, rr, spec);
           } catch { /* atlas 未就绪静默 */ }
         }
       }

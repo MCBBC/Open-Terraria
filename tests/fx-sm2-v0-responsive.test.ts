@@ -1,8 +1,9 @@
 // 染料运行时域 v0 响应性全量核证（2026-09-03，extra38/betsy 改组安全前提）。
 // 对 V0_MID_PASSES 中染料表可达的 tech，在【染料运行时域】（染料表 uniforms ×
 // 8 uTime × 渐变/翼面内容 × ±uLightSource = 32 域点）实测「v0=暗 vs v0=白」输出：
-//   全零响应 → shader 在该域无视 v0（疑似自发光族）→ 入 V0_INERT_IN_DYE_DOMAIN，
-//   维持旧链（v0 化会丢站点光乘=更暗，方向反了）。
+//   全零响应 → shader 结构性无视 v0（自发光族，另经 3200 域点/tech 扩域复核）
+//   → 入 V0_INERT_IN_DYE_DOMAIN 登记；isV0MidTech 不排除它们（v0=no-op，路由
+//   作用=跳过站点光乘=自发光修正，A2 终版）。
 // 本测试爆红 = 域响应性漂移（解释器/染料表变更）——先归因再改 V0_INERT，勿静默。
 import { describe, it, expect } from 'vitest';
 import { applyDyePassLit, dyeApplyOf, V0_MID_PASSES, V0_INERT_IN_DYE_DOMAIN } from '../src/data/vanillaDyes';
@@ -78,10 +79,11 @@ describe('fx-sm2-v0-responsive：染料域 v0 响应性 ↔ V0_INERT_IN_DYE_DOMA
       }
     }
     expect(inert.sort(), '响应性漂移（Δ 表见上）').toEqual([...V0_INERT_IN_DYE_DOMAIN].sort());
-    // isV0MidTech = 受累 ∧ 非惰性（分流判据单门）
+    // isV0MidTech = 受累全集（含惰性——惰性成员 v0 为 no-op，路由作用=跳过站点
+    // 光乘=自发光修正，2026-09-03 A2 终版；若未来扩域发现敏感域，此处爆红回滚）
     for (const t of V0_MID_PASSES) {
-      expect(isV0(t)).toBe(!V0_INERT_IN_DYE_DOMAIN.has(t));
+      expect(isV0(t), `${t} 应路由 v0 化`).toBe(true);
     }
-    function isV0(t: string): boolean { return V0_MID_PASSES.has(t) && !V0_INERT_IN_DYE_DOMAIN.has(t); }
+    function isV0(t: string): boolean { return V0_MID_PASSES.has(t); }
   });
 });

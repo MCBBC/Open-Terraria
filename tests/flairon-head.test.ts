@@ -13,6 +13,10 @@
 //   ⑧player.dead → Kill（:30734-30738）;朝向三件套（:30733/:30742-30753）
 //   ⑨链条绘制不抛（Main.cs:29501 的 404/1058 同支 → drawChain37Link 共享件）
 //   ⑩分类器：2611 → kind 'flairon'（vanillaItemCombat ai===69 门）
+//   ⑪④泡泡穿甲家族继承（ApplyStatsFromSource EntitySource_Parent P.cs:11141 出生载体,
+//     命中链 :12852 GetArmorPenetration(melee) 玩家近战项 → :13686 checkArmorPenetration）
+//   ⑫⑥撞块尘真值单口 hitTilesFx（Collision.cs:3076-3113 HitTiles 逐格 KillTile(fail:true)
+//     块色尘,:19663）+ Kill 面静默定谳（type==404 无 Kill 支 :71752-78995 → 消亡无尘无音）
 // 运行：cd game && npx vitest run tests/flairon-head.test.ts
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
@@ -396,5 +400,83 @@ describe('404 分类器（vanillaItemCombat ai===69 → kind flairon）', () => 
 
   it('5526 仍走 flail（互换两形态按 aiStyle 天然分流,互不干扰）', () => {
     expect(combatWeapon({ key: 'vi_5526_FlaironFlail', vid: 5526 })?.kind).toBe('flail');
+  });
+});
+
+describe('④ 泡泡穿甲家族继承（ApplyStatsFromSource EntitySource_Parent P.cs:11141）', () => {
+  it('①泡泡继承父弹穿甲（出生载体 ctor 消费即清零,不泄漏他路构造）', () => {
+    const { hooks, player } = makeHooks();
+    const made: FlaironSpike[] = [];
+    const b = ballRightOf(player, 100, 4);
+    b.armorPen = 7;                              // Game 侧折入态（equipStats.armorPen+meleeArmorPen 等价位）
+    b.spawnProj = (x, y, vx, vy, id, dmg, kb) => {
+      if (id !== 405) return;
+      made.push(new FlaironSpike(x - 7, y - 7, vx, vy, Math.max(1, Math.round(dmg)), kb));
+    };
+    run(b, hooks, 4);                            // 首枚第 4 拍
+    expect(made.length).toBe(1);
+    expect(made[0].armorPen).toBe(7);            // :30794 NewProjectile(EntitySource_Parent) 继承等价
+    const stray = new FlaironSpike(0, 0, 0, 0, 1, 1);
+    expect(stray.armorPen).toBe(0);              // 载体已清——未设位直接构造 = 原版字段缺省 0
+  });
+
+  it('②405 命中链带穿甲（hitEnemies pen → hurt 穿甲参,:12852/:13686 同位）', () => {
+    const { hooks, player, enemies } = makeHooks();
+    const pens: number[] = [];
+    enemies.push({
+      id: 1, x: player.cx + 50, y: player.cy - 20, w: 24, h: 40, dead: false,
+      vx: 0, vy: 0, hp: 100,
+      hurt: (_d: number, _kx: number, _ky: number, _g: GameHooks, pen?: number) => {
+        pens.push(pen ?? -1);
+        return true;
+      },
+    } as never);
+    const s = new FlaironSpike(player.cx + 43, player.cy - 7, 3, 0, 66, 2);
+    s.armorPen = 5;                              // 泡泡继承值（①已锁出生窗来源）
+    run(s, hooks, 3);
+    expect(pens.length).toBe(1);                 // penetrate=1 一击即 Kill（MAJOR-2 同口径）
+    expect(pens[0]).toBe(5);                     // 旧码硬 0 = 泡泡不掉防
+  });
+});
+
+describe('⑥ 撞块尘真值单口 + Kill 面静默（type==404 无 Kill 支,P.cs:71752-78995）', () => {
+  it('①撞块走 hitTilesFx 单口（:19663 HitTiles;真值在位则合成近似档不撒）+ dig 一响（:19686）', () => {
+    const { hooks, player, sfx, particles, store } = makeHooks();
+    const fx: Array<{ x: number; y: number; w: number; h: number; vx: number; vy: number }> = [];
+    (hooks as unknown as { hitTilesFx?: unknown }).hitTilesFx =
+      (x: number, y: number, w: number, h: number, vx: number, vy: number) => fx.push({ x, y, w, h, vx, vy });
+    for (let y = 60; y < 100; y++) store.setTile(56, y, 1);
+    const b = ballRightOf(player, 20);
+    let hitTick = -1;
+    const boxAtHit = { x: 0, y: 0 };
+    for (let i = 0; i < 20 && hitTick < 0; i++) {
+      b.fixedUpdate(1 / 60, hooks);
+      if (b.aiState === 1) { hitTick = i; boxAtHit.x = b.x; boxAtHit.y = b.y; }
+    }
+    expect(hitTick).toBeGreaterThanOrEqual(0);
+    expect(fx.length).toBe(1);                             // 一次撞块一次 HitTiles
+    expect(fx[0].w).toBe(26); expect(fx[0].h).toBe(26);    // 弹盒原样（width/height :4850-4851）
+    expect(fx[0].x).toBe(boxAtHit.x); expect(fx[0].y).toBe(boxAtHit.y);
+    expect(fx[0].vx).toBe(0); expect(fx[0].vy).toBe(0);    // 受阻轴已清零向量（TileCollision :17705 先行）
+    expect(particles.length).toBe(0);                      // 真 value 单口在位 → 3×#A09080 合成档退役
+    expect(sfx.filter((s) => s === 'dig').length).toBe(1); // :19686 无尘照播（无条件）
+    run(b, hooks, 6);                                      // 回收段穿墙不二次撞块
+    expect(fx.length).toBe(1);
+  });
+
+  it('②消亡面无尘无音（超 1500 Kill / 寿命尽——原版 Kill 无 404 支,:76031 邻支是 237 唤 238）', () => {
+    const { hooks, player, sfx, particles } = makeHooks();
+    const fx: unknown[] = [];
+    (hooks as unknown as { hitTilesFx?: unknown }).hitTilesFx = () => { fx.push(1); };
+    const far = ballRightOf(player, 1510);
+    run(far, hooks, 2);
+    expect(far.dead).toBe(true);                 // :30761-30765
+    const aged = ballRightOf(player, 60);
+    aged.life = 1;
+    run(aged, hooks, 2);
+    expect(aged.dead).toBe(true);                // timeLeft 尽（SetDefaults :526 缺省档本仓 life）
+    expect(fx.length).toBe(0);                   // 无 HitTiles
+    expect(particles.length).toBe(0);            // 无合成尘
+    expect(sfx.filter((s) => s === 'dig').length).toBe(0);   // 无 SoundID 0
   });
 });

@@ -21,6 +21,7 @@ import { applyProjStatus } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { noteVanillaProjImmune } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
+import { GorePiece } from './GorePiece';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -1592,9 +1593,21 @@ export class Dart extends Entity {
     //    + 20×d6(0,0,α100,scale1.5,重力开,×3)
     //  · 75 组（:80070 type∈{28,30,37,75,102,164,397,516,517,519}）：Resize(22,22)
     //    + 20×d31(:80079-80083) + 10×d6(α100,scale2.5,noGravity,×5)+10×d6(α100,
-    //    scale1.5,×3) 共 20 火粒(:80084-80091)——曾共用"30 烟+20 火"泛色近似,第二批整缺
+    //    scale1.5,×3) 共 20 火粒(:80084-80091) + 4×gore 单轮 ×0.4(:80092-80107)
+    //  ★R9（2026-09-03）烟/gore 切真通道（O 批"泛色近似 30/20 粒 spawnParticles
+    //  '#9A9A9A' + gore 8 粒泛色 '#D8D8D0'"清偿）：
+    //  · d31 烟 = spawnDust 真尘 NewDust(position,22,22,31,0,0,100,default(Color),1.5)
+    //    → 后置覆写仅 velocity×=1.4 一项(:79846/80082;两组同参,粒数 30/20 差)
+    //  · gore = GorePiece.newGore(Main.rand.Next(61,64)=61-63 烟团) 初速 default(Vector2)
+    //    ——NewGore 内建扰动 vy-=Next(10,31)×0.1/vx+=Next(-20,21)×0.1 走 newGore 非
+    //    perfect 缺省路径(Gore.cs:1346-1348)→ velocity×=0.4(303 第二轮 0.8)→ X±1/Y±1
+    //    四向对角序 (++)(--,++)(++ ,--)(--,(:79863-79878/80092-80107);出生位 = 22×22
+    //    盒左上(:79837-79842 手写式;:80073 Resize 保心 P.cs:22556-22562 同位)
     const is75Group = this.projId === 75;
-    game.spawnParticles(cx, cy, '#9A9A9A', is75Group ? 20 : 30, 2, { life: 40, damp: 0.96 }); // d31 ×1.4
+    for (let n = 0; n < (is75Group ? 20 : 30); n++) {                       // :79843-79847 / :80079-80083
+      const s = game.spawnDust?.(cx - 11, cy - 11, 22, 22, 31, 0, 0, 100, null, 1.5);
+      if (s) { s.vx *= 1.4; s.vy *= 1.4; }
+    }
     for (let n = 0; n < (is75Group ? 10 : 20); n++) {
       // 火 6：NewDust 初速 (0,0)（纯内建抖动）→ 后置 noGravity/×7(×5) 与第二粒 ×3，
       // 池内烟雾族特例(d6 vy 重掷/vx×0.3/scale×0.7)与原版 Dust.cs 同构,先于本乘区
@@ -1606,7 +1619,19 @@ export class Dart extends Entity {
       const f2 = game.spawnDust?.(cx - 11, cy - 11, 22, 22, 6, 0, 0, 100, null, 1.5);
       if (f2) { f2.vx *= 3; f2.vy *= 3; }
     }
-    game.spawnParticles(cx, cy, '#D8D8D0', 8, 3, { life: 50, damp: 0.95, size: 3 });  // Gore 61-63 四向
+    // gore 61-63 烟团：303 两轮（×0.4 / ×0.8 各 4 向共 8 片）,75 单轮（×0.4 共 4 片）;
+    // 四向对角序 (++)(--,++)(++ ,--)(--,:79863-79878 / :80092-80107)
+    const goreDirs: ReadonlyArray<readonly [number, number]> = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+    for (const gMult of (is75Group ? [0.4] : [0.4, 0.8])) {
+      for (const [sx, sy] of goreDirs) {
+        const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3),   // Main.rand.Next(61,64)
+          cx - 11, cy - 11, 0, 0);            // default(Vector2) 初速;内建扰动在非 perfect 支
+        if (g) {
+          g.vx *= gMult; g.vy *= gMult;       // velocity *= 0.4f / 0.8f
+          g.vx += sx; g.vy += sy;             // velocity.X++/-- ; velocity.Y++/--
+        }
+      }
+    }
     // 伤害盒 = Resize(128,128) Center 对齐（:48017-48025 position±width/2 手写式）,
     // 消费口 = Kill 内 Damage()（:71792;75 显式段 :80116-80123 同盒径）
     this.x = cx - 64; this.y = cy - 64; this.w = 128; this.h = 128;

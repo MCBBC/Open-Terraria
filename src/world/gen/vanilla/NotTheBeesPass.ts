@@ -24,7 +24,7 @@ import { grassSpreadState } from './MushroomPass';
 import { NOT_CLEARABLE } from './TileRunner';
 import { growTree, growVanityTree } from './TreePass';
 import { placePlantTile } from './SurfaceDecorPasses';
-import { DG_FRAMED_ALL as _DG_FRAMED_ALL } from './DungeonPass';
+import { DG_FRAMED_ALL as _DG_FRAMED_ALL } from './dungeonFramedSheets';   // ★叶子直读（红蓝对抗 R4-F5a TDZ 断环,顶层 FI_SHEET 消费）
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {

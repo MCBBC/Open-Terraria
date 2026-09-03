@@ -254,7 +254,14 @@ export function drawStripTrail(
   if (bw <= 0 || bh <= 0 || bw > 2048 || bh > 2048) return false;
 
   // ---- 性能：自适应半分辨率 + 覆盖格预筛 ----
-  const rs = bw * bh > 50000 ? 0.5 : 1;
+  // 自适应半分辨率（性能档）：★2026-09-03 阈值 50000→150000——用户实报"飞行中
+  // 挥天顶剑拖尾呈波纹锯齿"（站定=圆滑弧）：飞行时 trail 被玩家位移补偿拉长,
+  // bbox 恒超旧阈 → 半分辨率上采样=边缘几何锯齿。SM2 codegen 直线代码 ~0.5µs/px,
+  // 15 万 px 全分辨率 ≈ 7ms 可承受;超大带仍降半防帧炸。?trailres=1 强制全分辨率。
+  const rs = (() => {
+    try { if (new URLSearchParams(location.search).get('trailres') === '1') return 1; } catch { /* 非浏览器 */ }
+    return bw * bh > 150000 ? 0.5 : 1;
+  })();
   const rw = Math.max(1, Math.round(bw * rs));
   const rh = Math.max(1, Math.round(bh * rs));
 

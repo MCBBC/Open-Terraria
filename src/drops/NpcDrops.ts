@@ -705,7 +705,8 @@ export function resolveDrops(ctx: NpcDropCtx): NpcDropOutcome {
 }
 
 // ============ 钱币管线（NPCLoot_DropMoney :80412 1:1） ============
-export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
+export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false,
+  extraValue = 0): ResolvedDrop[] {
   // :80414-80417：|luck| 概率掷两轮；:80477-80487 第一轮存底，第二轮 luck>0 取大 /
   // luck<0 取小（幸运取极值——曾两个分支都是单掷，重掷门形同虚设）
   const luck = ctx.luck ?? 0;
@@ -715,6 +716,9 @@ export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, mi
     const second = coinAmountOnce(value, ctx, bloodMoon, midas);
     num = luck > 0 ? Math.max(num, second) : Math.min(num, second);
   }
+  // :80497 num += extraValue 在乘区/luck 双掷【之后】、拆币之前——曾由调用方并入
+  // 基数 value=被六级乘区放大（红蓝对抗 R3-B3 校正,怪吸钱 extraValue 不吃乘区）
+  num += extraValue;
   return splitCoins(num, ctx.rng);
 }
 /** 单轮金额（:80422-80459 的乘子链，抽签顺序照抄：midas 在基线掷之前） */

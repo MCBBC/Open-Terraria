@@ -10814,7 +10814,12 @@ export class Renderer {
    *  drawStripTrail 内（flush 循环中）、上屏紧随循环后=同 flush 时序闭环
    *  （原实体段 :3441 上屏点已删——挪后 GL/CPU 两 face 同步脱离光照乘+source-over）。 */
   private flushTrailShade(cam: Camera, z: number, viewW: number, viewH: number): void {
-    if (!this.trailShadeQueue.length) return;
+    // ★空队列不早退：GL 条带层（天顶剑等 tech 路径渲入 glfx.canvas）的上屏也在此——
+    //  只看队列会让无队列帧的 GL 月牙整条消失（2026-09-03 用户实报"月牙没了"）
+    const hasQ = this.trailShadeQueue.length > 0;
+    const gxC = this.glfx;
+    const hasGL = !!(gxC && gxC.trailDirty && !gxC.unavailable);
+    if (!hasQ && !hasGL) return;
     const queue = this.trailShadeQueue;
     this.trailShadeQueue = [];
     const ctx = this.ctx;

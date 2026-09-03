@@ -4079,6 +4079,8 @@ export class FlailProj extends Entity {
           const base = Math.atan2(dyp / dp, dxp / dp);
           const ang = base + (Math.random() - 0.5) * Math.PI / 2;
           const spd = (4.5 + Math.random() * 2);
+          flaironSpikePenPending = this.armorPen;        // ④ 泡泡继承父弹穿甲（:44908 同链
+          //   EntitySource_Parent → ApplyStatsFromSource :11141;Game 侧折入态见载体注）
           this.spawnProj(this.x + this.w / 2, this.y + this.h / 2,
             Math.cos(ang) * spd, Math.sin(ang) * spd, 405, this.damage,
             this.st === 0 ? this.knockback * 0.5 : this.knockback);
@@ -4290,6 +4292,18 @@ export class FlailProj extends Entity {
  *  ★T3 清偿（2026-09-02,原"登记不修"升格）:杀尘/音基准位改用碰撞后心 this.cx/cy
  *  （原版 Kill 自接触响应段 :18443 调用,position 已被 TileCollision 夹贴墙;
  *   旧帧首 cx0/cy0 差半格~一格）——详见 fixedUpdate Kill 块内注 */
+/** ④ 泡泡穿甲出生载体（Projectile.armorPenetration 家族继承的引擎承载,2026-09-03 定谳）：
+ *  原版两出射位(:30794 404/:44908 1058)均 NewProjectile(GetProjectileSource_FromThis(),…)
+ *  = EntitySource_Parent → ApplyStatsFromSource(NewProjectile :10894 直调)继承父弹
+ *  armorPenetration（P.cs:11141 `armorPenetration += entity.armorPenetration`）;父弹自
+ *  item 2611/5526 的 EntitySource_ItemUse 继承(:11130),而两件 SetDefaults 均无
+ *  armorPenetration 写（Item.cs:25519-25535）→ 弹体字段终值 0,真穿透来源 = 命中段
+ *  :12852 `GetArmorPenetration(melee) + armorPenetration` 的玩家近战项（Player.cs:4350-4357,
+ *  405 melee=true :4863 同吃）→ 405【有】穿甲可接（非证伪项）。本仓把该玩家项折入弹体
+ *  armorPen 字段（Game 侧注入 404/1058）;405 实体经 Game.spawnProj 回调构造（签名无
+ *  穿甲位）→ 出射前置位/ctor 消费清零（同步窗恒正确;未设位直接构造=缺省 0=原版弹体
+ *  字段缺省）。命中链 = hitEnemies pen → Enemy.hurt checkArmorPenetration（:13684-13686） */
+let flaironSpikePenPending = 0;
 export class FlaironSpike extends Entity {
   w = 14; h = 14;
   damage: number;
@@ -4297,6 +4311,9 @@ export class FlaironSpike extends Entity {
   projId = 405;
   critChance = 0.04;
   meleeProj = true;
+  /** ④ 穿甲（ctor 消费 flaironSpikePenPending 出生窗——机制见其注;原版字段终值 0,
+   *  本仓承载 :12852 玩家近战项的折入态） */
+  armorPen = 0;
   private ai0: number;   // -10 起步(1058 传参语义)
   private ai1: number;   // scale
   private alpha = 255;
@@ -4311,6 +4328,8 @@ export class FlaironSpike extends Entity {
     this.vx = vx; this.vy = vy;
     this.damage = damage;
     this.knockback = knockback;
+    this.armorPen = flaironSpikePenPending;   // ④ 出生窗消费即清零（防陈值泄漏他路构造）
+    flaironSpikePenPending = 0;
     this.ai0 = -10;
     this.ai1 = (80 + Math.random() * 41) / 100; // Next(80,121)/100
   }
@@ -4406,7 +4425,8 @@ export class FlaironSpike extends Entity {
     // penetrate-- → 0（keepIterating=false）→ Update :17312 `if (penetrate == 0) Kill()`
     // 同拍消亡——旧码命中后继续飞 = 无限穿透。onHit 回调记账后走既有爆尘出口
     let hitAny = false;
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, 0, () => { hitAny = true; });
+    // ④ pen = armorPen（:12852 num6 命中段合并玩家近战项——旧码硬 0 = 泡泡不掉防）
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen, () => { hitAny = true; });
     if (hitAny) { this.killExplode(game); return; }
   }
 
@@ -4563,6 +4583,8 @@ export class FlaironHeadProj extends Entity {
       bx *= bs; by *= bs;
       const ra = (Math.random() - 0.5) * (Math.PI / 2);  // RotatedBy(±45° 扇形)（:30793,1.5707963…）
       const cs = Math.cos(ra), sn = Math.sin(ra);
+      flaironSpikePenPending = this.armorPen;            // ④ 泡泡继承父弹穿甲（NewProjectile
+      //   EntitySource_Parent → ApplyStatsFromSource :11141 的引擎承载,回调侧 ctor 消费）
       this.spawnProj(this.cx, this.cy, bx * cs - by * sn, bx * sn + by * cs, 405,
         this.damage, this.knockback);
     }
@@ -4584,9 +4606,20 @@ export class FlaironHeadProj extends Entity {
       if (body.hitWall || body.collideY || body.onGround || body.hitHead) {
         // :19661-19686 else 支：Collision.HitTiles + :19676-19684 ai[0]=1【不反射】
         // （反射门 aiStyle==3||109,69 不在——曾按回旋镖式反弹即错）+ :19686 SoundID 0。
-        // 尘/音取 AnchoredProj 481 同族档（:19652-19664 默认档近似,FlailProj.hitTileFx 同式）
-        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-        game.playSfx('dig', 1, this.cx, this.cy);
+        // ⑥ 尘面精确化（2026-09-03）：:19663 HitTiles(position,velocity,width,height) =
+        // 逐格 KillTile(fail:true,effectOnly:true) 块色尘（Collision.cs:3076-3113 外扩窗/
+        // vector=position+velocity;尘量=GetTileDustAmount(fail:true) 分型档）——旧固定 3 粒
+        // #A09080 弹心近似退役,真值单口 = Game.hitTilesFx（Collision.cs 1:1 几何,箭族 OPD
+        // 同件;实参向量已受阻清零=原版 TileCollision :17705 先行同口径）。缺省宿主退旧合成
+        // 档（测试 mock 兼容）。★Kill 面定谳：type==404 全文仅 :4849 SetDefaults,Kill
+        // （:71752-78995）无 404 支 → 寿命尽/超 1500/回手消亡原版无尘无音,本仓各
+        // this.dead=true 出口静默即 1:1（近旁 :76031 type==237 是腐蚀球唤 238,非本族）
+        const host = game as unknown as {
+          hitTilesFx?: (x: number, y: number, w: number, h: number, vx: number, vy: number) => void;
+        };
+        if (host.hitTilesFx) host.hitTilesFx(this.x, this.y, this.w, this.h, this.vx, this.vy);
+        else game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+        game.playSfx('dig', 1, this.cx, this.cy);   // :19686 SoundID 0 一响（原版无尘照播,无条件）
         this.st = 1;
       }
     } else {
@@ -4714,6 +4747,18 @@ const BOMB_FISH_FRAMES = 4;
 /** SW-L1 2026-09-03 F2：773 甲虫炸弹帧数（Main.cs:8777 `projFrames[773] = 4`——
  *  贴图 22×168 竖条 4 帧 42px,与 22×22 碰撞盒解耦） */
 const BEETLE_BOMB_FRAMES = 4;
+/** SW-P1 2026-09-03：1088 橡实种弹帧初始化纯函数（P.cs:48058-48063 逐字——首 AI 拍
+ *  frameCounter==0 → frameCounter=1、frame=Main.rand.Next(2);此后 counter 恒 ≥1 =
+ *  【一次性随机选帧、无逐帧推进】）。roll = Main.rand.Next(2) 注入值（0/1）。
+ *  projFrames[1088]=2（Main.cs:8594;贴图 Projectile_1088.png 18×42 竖条 2 帧 21px,
+ *  与 20×20 碰撞盒解耦——盘上实测）。counter≠0 返 frame=-1 = 不覆写现帧。
+ *  ★Kill 路径（acornSeedDeath,J 批）与飞行绘制路径分开:本函数只服务绘制帧态。 */
+export function acornSeedFrameInit(counter: number, roll: number): { counter: number; frame: number } {
+  if (counter !== 0) return { counter, frame: -1 };
+  return { counter: 1, frame: roll === 1 ? 1 : 0 };
+}
+/** SW-P1 2026-09-03：1088 帧数（Main.cs:8594 `projFrames[1088] = 2`） */
+const ACORN_SEED_FRAMES = 2;
 
 /** 液体炸弹族（903 水/904 岩浆/905 蜂蜜/906 干燥）：入液即爆
  *  （AI_016 :44267 wet && 族列表 → timeLeft=1 次帧爆） */
@@ -4774,6 +4819,12 @@ export class GrenadeProj extends Entity {
    *  22×168 竖条 4 帧 42px。渲染侧 drawProj 帧参消费） */
   frame773 = 0;
   private frame773Counter = 0;
+  /** SW-P1 2026-09-03：1088 橡实种弹帧态（frameCounter/frame 对应,P.cs:48058-48063
+   *  首拍一次性 Main.rand.Next(2) 选帧,无逐帧推进;acornSeedFrameInit 纯函数驱动,
+   *  帧数 Main.cs:8594 projFrames[1088]=2。渲染侧 drawProj 帧参消费——曾整条
+   *  18×42 直绘 = 2 帧叠画成 42px 长条（同 519 旧 bug 形态）） */
+  frame1088 = 0;
+  private frame1088Counter = 0;
   dead = false;
   /** 引信嘶声循环句柄（AI_016 :44276-44281 PlayTrackedLoopedSound；Kill :67373 Stop） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
@@ -4923,6 +4974,17 @@ export class GrenadeProj extends Entity {
     this.fuseSmokeGeneral(game);
   }
 
+  /** SW-P1 2026-09-03：1088 橡实种弹帧支（AI_016 尘段 else-if 链 1088 档
+   *  P.cs:48058-48063——原版在 Kill 判 else 内每拍跑,frameCounter==0 门使之
+   *  只在首 AI 拍生效;此处粘性/发射两路对齐同序调用）。投掷支调用点位于
+   *  519 帧支旁（同段位）;1088 本仓仅发射支可达。 */
+  private acornSeedFrame(): void {
+    if (this.projId !== 1088) return;
+    const r = acornSeedFrameInit(this.frame1088Counter, Math.floor(Math.random() * 2));
+    this.frame1088Counter = r.counter;
+    if (r.frame >= 0) this.frame1088 = r.frame;
+  }
+
   /** SW-I1 2026-09-03：AI_016 重力门步进（:48332 ai[0]++ → :48377 门）。开门拍起
    *  vy+=0.2；落地（vy==0&&vx≠0）另 vx×0.97、炸药棍族再 ×0.99、|vx|<0.01 归零
    *  ——★此处是原版唯一摩擦点（:48377-48385 在门支内;碰撞响应 :19855-19868 无
@@ -4965,6 +5027,9 @@ export class GrenadeProj extends Entity {
       // SW-H1 2026-09-03：519 炸弹鱼 24×24（P.cs:5891-5897 SetDefaults 独立档——
       // 非炸弹族 22 盒,曾误落缺省 14）
       projId === 519 ? 24 :
+      // SW-P1 2026-09-03：1088 橡实种弹 20×20（P.cs:10147-10153 SetDefaults 独立档
+      // width=height=20——vanilla-projectiles.json '1088' 同值;曾误落缺省 14）
+      projId === 1088 ? 20 :
       BOMB_PROJ.has(projId) || LIQUID_BOMB_PROJ.has(projId) || projId === 910 || projId === 911
       || projId === 773
       // SW-E1 2026-09-03：超级炸弹 22×22（P.cs:10135-10145 SetDefaults——1086 普通
@@ -5010,6 +5075,20 @@ export class GrenadeProj extends Entity {
       this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
       return;
     }
+    // SW-P1 2026-09-03：1088 静止即 Kill（P.cs:48030 `owner==Main.myPlayer &&
+    //   type == 1088 && (timeLeft <= 3 || velocity.Length() <= 0.01f) → Kill()`——
+    //   timeLeft 臂已由上方 fuse 承载,此为 velocity 析取臂）。发射支原版序=
+    //   Kill 判先于帧支/重力/位移 → 置于 fuse 判后。Kill → onExplode →
+    //   Game.acornSeedDeath（种植/掉落,J 批专属早退支,非爆炸）——曾缺=橡实弹
+    //   滚行静止后悬停至 3600t 兜底引信才结算。本仓 1088 仅发射源 5629 弹弓,
+    //   投掷支（fired=false）不可达,不另加
+    if (this.projId === 1088 && Math.hypot(this.vx, this.vy) <= 0.01) {
+      this.dead = true;
+      this.destroy();
+      this.onExplode(this.cx, this.cy, this.damage, this.vx, this.vy);
+      return;
+    }
+    this.acornSeedFrame();
     // 接触引爆（Damage_PVE_Inner :12330-12340 碰 NPC → timeLeft 钳 3；发射族
     // friendly 不炸玩家）。★Damage() 每 tick 跑（Update :15738）→ 遍历 Main.npc
     // 全表 = enemies+critters 两桶（碰小动物同样钳引信+弹体盒结算伤害——小动物
@@ -5212,10 +5291,17 @@ export class GrenadeProj extends Entity {
     // SW-L1 2026-09-03 F2：773 甲虫炸弹并入帧通道（projFrames[773]=4,Main.cs:8777;
     //   贴图 22×168 竖条 4 帧——帧态来自贴附支自有 counter 规则 :47944-47949,非
     //   519 的 bombFishFrameTick,两规则并存）
+    // SW-P1 2026-09-03：1088 橡实种弹并入帧通道（projFrames[1088]=2,Main.cs:8594;
+    //   贴图 Projectile_1088.png 18×42 竖条 2 帧 21px——帧态=首 AI 拍一次性
+    //   Main.rand.Next(2) 选帧（P.cs:48058-48063）,无逐帧推进。曾整条直绘=
+    //   2 帧叠画成 42px 长条（同 519 旧 bug 形态）。588 不入本通道:projFrames
+    //   表无 588 行,贴图 14×20 单帧竖幅走通支整幅直绘=原版本相）
     const drawFrame = this.projId === 519 ? this.bombFishFrame
-      : this.projId === 773 ? this.frame773 : -1;
+      : this.projId === 773 ? this.frame773
+      : this.projId === 1088 ? this.frame1088 : -1;
     const drawFrames = this.projId === 519 ? BOMB_FISH_FRAMES
-      : this.projId === 773 ? BEETLE_BOMB_FRAMES : 0;
+      : this.projId === 773 ? BEETLE_BOMB_FRAMES
+      : this.projId === 1088 ? ACORN_SEED_FRAMES : 0;
     drawProj(r, cam, this, this.projId, this.rot, '#408040', firedA, -1, false, false, 1,
       drawFrame, drawFrames);
   }
@@ -5269,6 +5355,9 @@ export class GrenadeProj extends Entity {
       this.bombFishCounter = fs.counter;
       this.bombFishFrame = fs.frame;
     }
+    // SW-P1 2026-09-03：1088 帧支（同段位对齐——P.cs:48058 与 519 帧支 :47951 同在
+    //   Kill 判 else 链;投掷支本仓无 1088 发生源,支挂此处=结构对齐原文 else-if 链）
+    this.acornSeedFrame();
     // ---- 接触引爆（Projectile.Damage :12330-12340 仅碰 NPC；玩家不引爆）----
     // ★原版 BombsHurtPlayers(:13944-13959) 对玩家【只伤害不置 timeLeft】——曾把
     //   玩家也当引爆条件:炸弹出生点在玩家盒内 → 首帧 fuse=3 → 0.05s 即爆

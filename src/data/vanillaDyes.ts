@@ -206,12 +206,16 @@ export const V0_MID_PASSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 染料运行时域 v0 惰性集——扫描受累但在【染料运行时域】对 v0 完全零响应的
- * tech（2026-09-03 实测：染料表 uniforms × 8 uTime × 渐变/翼面内容 × ±uLightSource
- * 共 32 域点，输出字节恒等，tests/fx-sm2-v0-responsive.test.ts 锁定）。此语义 =
- * shader 在该域【无视 v0】（疑似自发光族——原版输出不受光照，当前「白烘×合成
- * 光乘」本身即登记偏差；但 v0 化会丢掉站点光乘=更暗，方向反了）。故本集成员
- * 【维持旧链】，待原版参照（1458 rig 原生 oC0 金标）复核后再定自发光修正。
+ * 染料运行时域 v0 惰性集（自发光族登记）——扫描受累但在【染料运行时域】对 v0
+ * 完全零响应的 tech。2026-09-03 两轮实测：①32 域点（染料表 uniforms × 8 uTime ×
+ * 渐变/翼面 × ±uLightSource）；②扩域 3200 域点/tech（×5 内容 × ±uSourceRect ×
+ * ±uDrawPosition × ±uDirection × 4 档 uSaturation × 10 档 uTime）——输出字节
+ * 恒等，**结构性无视 v0**（tests/fx-sm2-v0-responsive.test.ts 锁定）。语义 =
+ * 自发光 shader（原版 v0=光照是唯一进光通道，无视即原版不受光，当前「合成乘光」
+ * 本身即偏差）。★路由处置（A2 终版）：isV0MidTech 不再排除本集——对惰性 pass
+ * v0 是 no-op，v0 路由的真实作用 = **跳过站点光乘** = 自发光修正（合成后站点
+ * 生效；预合成面受 A1 架构账约束仍被全屏乘光，登记）。1458 rig 原生 oC0 金标
+ * 就绪后复核（若发现敏感域→回滚本路由并重开惰性排除）。
  * 非染料 pass（FinalFractal/HorizonClouds/MouseItem/WaterProcessor 同测惰性）
  * 不入本集——不经染料分流门，归各自站点。
  */
@@ -219,10 +223,10 @@ export const V0_INERT_IN_DYE_DOMAIN: ReadonlySet<string> = new Set([
   'ArmorLivingOcean', 'ArmorPhase', 'ArmorTwilight',
 ]);
 
-/** tech 是否应走 v0 化染料路径（消费端唯一分流判据）：
- * 扫描受累 ∧ 非染料域惰性。名单本体与惰性证据见上两注。 */
+/** tech 是否应走 v0 化染料路径（消费端唯一分流判据）：扫描受累全集（含惰性——
+ * 惰性成员 v0 为 no-op，路由作用=跳过站点光乘=自发光修正，见上注）。 */
 export function isV0MidTech(tech: string): boolean {
-  return V0_MID_PASSES.has(tech) && !V0_INERT_IN_DYE_DOMAIN.has(tech);
+  return V0_MID_PASSES.has(tech);
 }
 
 /**

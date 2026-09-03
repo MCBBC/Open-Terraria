@@ -194,7 +194,7 @@ import { DUNGEON_WALL_IDS, scanScene, EMPTY_SCENE, scanBiomeLightCounts, type Sc
 // ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
 import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL } from '../stats/ScaleStats';
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
@@ -425,6 +425,7 @@ import { chumOnPreUpdateAll } from '../entities/chumBucket';
 import { FlintChargeProj, FlintWaveProj, FlintSpikeProj, emitFlintSpikes } from '../entities/DeadCellsFlint';
 import { NebulaBlazeBolt, LunarFlareStar } from '../entities/LunarNebula';
 import { Celeb2Muzzle, Celeb2Rocket } from '../entities/Celeb2';
+import { ClusterFragmentProj, CLUSTER_FRAGMENT_OF } from '../entities/ClusterFragmentProj';   // SW-Q1 2026-09-03 集束裂片
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
@@ -12525,10 +12526,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //      此前误当 Arrow 打（无引信无爆炸直线飞）2026-08-14 修复 ----
         if (projectileData(projId)?.aiStyle === 16) {
           const er16 = Game.EXPLODE_RADIUS[projId] ?? 0;
-          // 实体伤害盒 = Kill 尘爆盒半宽（tier1/2 22×22 / tier3-4 80×80，:74484/:74545；
-          // 迷你核弹 793-798/808/809 = Resize(50,50)（:74255）→ 半宽 25——曾恒 11
-          // = 伤害盒 22×22（2026-08-22 补 B 批修，Item.cs:37631-37651 五发射器 Specific 表）
-          const hurtBox16 = (projId >= 139 && projId <= 144) || projId === 340 || projId === 341 ? 40
+          // 实体伤害盒 = PrepareBombToBlow Resize 盒半宽（Kill :71784-71795 先
+          //  PrepareBombToBlow 再 SelfHurtPlayers/Damage——Damage_GetHitbox :15037 即
+          //  Resize 后盒;Resize 保中心 → 半宽即本仓 hurtBox）。火箭 III/IV 族
+          //  139-144/340/341 = Resize(200,200)（:47712-47717）→ 半宽 100
+          //  （SW-M1 2026-09-03 清偿③:曾用 Kill_Bombs_DoUsualKillCode 尘盒 80×80
+          //  半宽 40——那是 :79892-79897 的视觉盒,在 Damage() 之后才 Resize,非伤盒）。
+          //  ★备案（未动）：手雷/炸弹族 PrepareBombToBlow=128×128 → 64、迷你核弹
+          //  793-798/808/809=250×250 → 125、炸药棍 29/470/637=250×250 → 125、
+          //  超级炸弹 1086/1087=280×280 → 140——本表 11/25 档仍系尘盒半宽,同一类
+          //  偏差,留待整表对账批次（F 代理面报告仅 III/IV 档入账）。
+          const hurtBox16 = (projId >= 139 && projId <= 144) || projId === 340 || projId === 341 ? 100
             : MINI_NUKE_16.has(projId) ? 25 : 11;
           const rocket = new GrenadeProj(ax, ay,
             Math.cos(ang) * speed, Math.sin(ang) * speed,
@@ -12550,6 +12558,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 const painted = Game.spreadBombPayload(this.world.store, payload16,
                   Math.floor(ex / TILE), Math.floor(ey / TILE));
                 if (painted > 0) this.sfxAt('splash', ex, ey);
+              }
+              // SW-Q1 2026-09-03：集束弹药 Kill 裂解（Projectile.cs:79799-79823,
+              //  Kill_Bombs_DoUsualKillCode 内 owner==Main.myPlayer 支）：776/777/778→779、
+              //  780/781/782→783、803→862、804→863,每爆 6 片——基角 NextFloat×2π、
+              //  环速 4+NextFloat×2、vy−1（Vector2.UnitY×−1）;伤=damage/2（C# 整除
+              //  截断）、kb=0;弹 timeLeft=60（P.cs:11055/11059/:11063 NewProjectile
+              //  后置表）−Next(30) → 31..60（:79822）。爆炸盒 PrepareBombToBlow
+              //  :47674-47678 Resize(48,48)=半宽 24;地形 783/863 r3、779/862 不在
+              //  ExplodeTiles 闸门表（:79027）=不毁——半径走既有 EXPLODE_RADIUS 表
+              if (CLUSTER_FRAGMENT_OF[projId] !== undefined) {
+                const fragId = CLUSTER_FRAGMENT_OF[projId];
+                const fragR = Game.EXPLODE_RADIUS[fragId] ?? 0;
+                const fragBase = Math.random() * Math.PI * 2;
+                for (let fi = 0; fi < 6; fi++) {
+                  const fa = fragBase + (fi / 6) * Math.PI * 2;
+                  const fs = 4 + Math.random() * 2;
+                  const frag = new ClusterFragmentProj(ex, ey,
+                    Math.cos(fa) * fs, Math.sin(fa) * fs - 1,
+                    Math.trunc(edmg / 2), fragId, 31 + Math.floor(Math.random() * 30),
+                    (fx, fy, fdmg) => {
+                      // pen=0：裂片经 NewProjectile 生成（:79821 七参重载无 armorPen
+                      // 位,不吃武器穿甲）;crit=父弹发射玩家面板（ClusterFragmentProj.critChance）
+                      this.explodeAt(Math.floor(fx / TILE), Math.floor(fy / TILE), fdmg,
+                        fragR, fragR > 0, 24, 0, fragId, fx, fy);
+                    });
+                  frag.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
+                  this.entities.add(frag, 'projectiles');
+                }
               }
             });
           // 撞块种树检查（AI_016 撞块响应段 :18342-18346：CanAcornPlant → Kill）
@@ -14097,7 +14133,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 // SW-E1 2026-09-03：超级炸弹档（P.cs:47652-47657 Resize(280,280);
                 // damage=200; knockBack=9）
                 : cw.shoot === 1086 || cw.shoot === 1087 ? 200
-                  : Math.max(cw.damage, 60);
+                  // SW-P1 2026-09-03：588 Happy Grenade（派对女孩手雷,item 3548）用
+                  // 物品伤 30——PrepareBombToBlow（P.cs:47658-47661）{30,397,517,588}
+                  // 组只 Resize(128,128)+knockBack=8,【不】写 damage;P.cs:48044 每
+                  // tick damage=0 清零豁免表含 588 → Kill 时 damage=物品伤 30（1457
+                  // Item.cs:32006-32021 case 3548 damage=30）。曾落 max(item,60)=60
+                  // 虚高 2 倍——「不低于 60」系本仓防御性下限（非原版语义）,对
+                  // 30/397/517 恰为 no-op（item 168/2586 damage 60、3116 damage 65
+                  // 全 ≥60）,唯 588 触发假值,故单列原式透传
+                  : cw.shoot === 588 ? cw.damage
+                    : Math.max(cw.damage, 60);
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)与液体/土制炸弹族均不在 ExplodeTiles 判定表内
         // =不破坏地形**（后者的"地形效果"走爆炸尾段的液体/泥土 flood-fill 载荷）
@@ -22985,6 +23030,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return 11;
   }
 
+  // SW-M1 2026-09-03（清偿②）：expert EoW 虫段 /5 的 20 弹型表（Projectile.cs:13392-13398,条件行 :13394
+  //  逐项照抄,顺序保持原文）——`Main.expertMode && 表含弹型 && targetNPC.type 13-15 →
+  //  dmg /= 5`。181/183/281/566 等 4 型不走本 face（explodeAt 无投掷点）,全表收录=1:1。
+  static readonly EXPERT_EOW_FIFTH_PROJS = new Set([30, 397, 517, 28, 37, 516, 29, 470, 637,
+    1086, 1087, 108, 281, 588, 519, 773, 183, 181, 566, 1002]);
+  /** SW-M1 2026-09-03（清偿②）：`Projectile.trap=true`（SetDefaults :1966/:9536）∩ 本 face
+   *  爆炸圈 = {108 电路炸药, 1002 TNT 桶}；其余 trap 成员（12/98/99 族/184-188/654/655/
+   *  980/1005/1007/1048/1049/1073/1078/1091）不经 explodeAt 结算。 */
+  static readonly EXPLODE_TRAP_PROJS = new Set([108, 1002]);
+  /** SW-M1 2026-09-03（清偿①②）：爆炸对 NPC/小动物伤害结算链纯函数（测试钉序;
+   *  explodeAt 敌怪支/小动物支共用——原版 critter 与普通 NPC 同在 Damage_PVE 遍历
+   *  :11869 → Damage_PVE_Inner 一条链,无独立小动物段）。乘区序逐一对原文：
+   *   ① 旗乘区 :13388-13390 GetBannerBuffEffect→DamageDealt.Sample（本仓
+   *      applyBannerDamageDealt；调用侧钉在 DamageVar 前 = SW-L1 F11 收口序）
+   *   ② Main.DamageVar :12970 ±15%（因子由调用侧传,保持既有内联式;①后值 ≥1）
+   *   ③ 1002 半伤 :12972-12973 `dmg /= 2`（C# int 正数截断）
+   *   ④ trap×旧日军团半伤 :12979-12981 `trap && BelongsToInvasionOldOnesArmy → /=2`
+   *      （判据=受击 NPC vanillaId 落 NPCID.Sets 表,与 DD2 事件是否进行中无关）
+   *   ⑤ expert EoW 虫段 /5 :13392-13398（条件行 :13394）（20 弹型表 × npc 13-15）
+   *  ③④⑤均为正数整除截断,彼此次序不影响复合值;对原式的唯一偏差=①位次（≤1）。 */
+  static explodeNpcDamageChain(inp: {
+    projId: number; npcType: number;
+    bannerApplied: number;      // ① 后值（applyBannerDamageDealt 输出）
+    damageVar: number;          // ② 因子（1±0.15,调用侧 Math.random）
+    expertMode: boolean;
+  }): number {
+    let dmg = Math.max(1, Math.round(inp.bannerApplied * inp.damageVar));   // :12970
+    if (inp.projId === 1002) dmg = Math.trunc(dmg / 2);                     // :12972-12973
+    if (Game.EXPLODE_TRAP_PROJS.has(inp.projId) && OLD_ONES_ARMY.has(inp.npcType)) {
+      dmg = Math.trunc(dmg / 2);                                            // :12979-12981
+    }
+    if (inp.expertMode && Game.EXPERT_EOW_FIFTH_PROJS.has(inp.projId)
+      && inp.npcType >= 13 && inp.npcType <= 15) {
+      dmg = Math.trunc(dmg / 5);                                            // :13394/:13396
+    }
+    return dmg;
+  }
+
   /** 液体/土制炸弹爆炸载荷 1:1（Projectile.Kill :74007-74244 →
    *  Kill_DirtAndFluidProjectiles_RunDelegateMethodPushUpForHalfBricks :67221-67239 +
    *  Utils.FloodFillTile :2516-2559 + DelegateMethods.SpreadWater/Lava/Honey/Dry/Dirt）：
@@ -23152,13 +23235,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!playerCanHitEnemy(en, this, projId)) continue;
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
-        // SW-L1 2026-09-03 F11 乘区序对齐原版 Damage_PVE_Inner：旗乘区
-        //  TotalDamageMultiplier(:12956,作用于 num15 基伤) → DamageVar(:12970 ±15%)
-        //  → 1002 半伤(:12971-12973)。曾 DamageVar→半伤→旗乘区,序反（组合差 ≤1）
-        let hurt = applyBannerDamageDealt(this, en, damage);   // ★F1 旗乘区（Damage 面）
-        hurt = Math.max(1, Math.round(hurt * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
-        // SW-J1 2026-09-03：TNT 桶 1002 对 NPC 半伤（Damage_PVE_Inner :12971-12973
-        //  `if (type == 1002) dmg /= 2`——DamageVar 后;C# int/=2 正数截断）
+        // SW-L1 2026-09-03 F11 乘区序对齐原版 Damage_PVE_Inner：旗乘区 → DamageVar
+        //  (:12970 ±15%) → 1002 半伤(:12972-12973)。曾 DamageVar→半伤→旗乘区,序反
+        //  （组合差 ≤1）。★旗乘区锚点勘误（SW-M1 2026-09-03）：本仓实现对应
+        //  :13388-13390 GetBannerBuffEffect→DamageDealt.Sample（Player.cs:20643）,
+        //  非旧注所写 :12956 TotalDamageMultiplier（那是鞭 tag 乘区,仅
+        //  AddProjectileTagDamage 支生效）;位次维持 F11 收口序不重排。
+        const banner = applyBannerDamageDealt(this, en, damage);   // ★F1 旗乘区（Damage 面）
+        // SW-M1 2026-09-03（清偿②）：结算链抽纯函数 explodeNpcDamageChain——1002 半伤
+        //  此前只有注释没代码（SW-J1 悬空）,本批补上;新增 trap×旧日军团半伤(:12975)
+        //  与 expert EoW 虫段 13-15 /5(:13394),序见该函数注。
+        const hurt = Game.explodeNpcDamageChain({
+          projId, npcType: en.vanillaId ?? 0, bannerApplied: banner,
+          damageVar: 1 + (Math.random() * 30 - 15) / 100,   // Main.DamageVar ±15%
+          expertMode: this.world.isExpert,
+        });
         en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen, false, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
         // 冰霜盔甲×爆炸（StatusNPC :11524-11527 `(melee||ranged) && frostBurn →
         // AddBuff(324, 60×Next(5,15))`）：爆炸结算同走 Damage→StrikeNPC→StatusNPC
@@ -23174,8 +23265,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (c.dead || !c.hurt) continue;
       if (Math.abs((c.cx ?? cx) - cx) < hb + (cent.w >> 1)
         && Math.abs((c.cy ?? cy) - cy) < hb + (cent.h >> 1)) {
-        const churt0 = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
-        const churt = projId === 1002 ? Math.floor(churt0 / 2) : churt0;   // SW-J1 2026-09-03:1002 对 NPC 半伤（:12971,小动物同在 Damage_PVE 全表）
+        // SW-M1 2026-09-03（清偿①）：小动物补旗乘区——原版 Damage_PVE 遍历 Main.npc
+        //  全表（:11869）,critter 与敌怪同走 Damage_PVE_Inner 一条链,旗乘区
+        //  （:13388-13390）/DamageVar/1002 半伤/trap 半伤全同吃;此前缺旗乘区。
+        const cbanner = applyBannerDamageDealt(this, c, damage);   // ★旗乘区（小动物同吃）
+        const churt = Game.explodeNpcDamageChain({
+          projId, npcType: c.vanillaId ?? 0, bannerApplied: cbanner,
+          damageVar: 1 + (Math.random() * 30 - 15) / 100,   // Main.DamageVar ±15%
+          expertMode: this.world.isExpert,
+        });   // 1002 半伤原式（SW-J1）并入链（:12971,截断同 floor）
         // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成;音/飘值=单点)
         c.hurt(churt, cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
       }
@@ -23250,7 +23348,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const big = projId === 29 || projId === 108 || projId === 470 || projId === 637
       || projId === 1002 || projId === 1086 || projId === 1087;
     const vd = this.vanillaDust;
-    if (vd) {
+    // SW-P1 2026-09-03：588 Happy Grenade（派对女孩手雷）Kill 专属视觉支
+    //  （Kill_Bombs_DoUsualKillCode P.cs:80190-80259,1458 同锚）——原版 Kill 分派
+    //  中 588 独占支,【不】走通用烟 31/火 6/gore 61-63 段;音=Item14（下方音支
+    //  default 'explosion' 已承载）:
+    //   · 视觉盒 Resize(22,22) 盒心=Kill 前弹心（:80194-80197 position=Center/盒
+    //     22/Center=position 三式净效=盒左上角 Center−(11,11)）;
+    //   · 尘 219+Next(5)（彩带族,链 B 专档）×8：vel×1.4、fadeIn=1、noGravity
+    //     （:80198-80203;NewDust 缺省 alpha=0/scale=1）;
+    //   · 尘 139+Next(4) ×15 对（:80204-80211）：首粒 scale1.6/noGravity/vel×5、
+    //     次粒 scale1.9/有重力/vel×3（各粒独立掷型）;
+    //   · gore 276+Next(7)（彩纸屑 276-282）四向各 50% 独立掷：vel×0.4 后对角
+    //     ±1（原版序 ++/−+/+−/−−,scale 缺省 1——与 28/29 的 scale1.5 gore 61-63 不同支）
+    //     （:80212-80241）。
+    //   调用序=Damage() 之后、Kill_ExplodeTiles（裂砖专破,SW-J1 手雷族裂砖段）之前
+    //   ——本支在 explodeAt 尾部=伤害结算后,投掷回调尾的裂砖支在其后,序对齐。
+    if (projId === 588) {
+      const bx = cx - 11, by = cy - 11, bs = 22;
+      if (vd) {
+        for (let i = 0; i < 8; i++) {
+          const d = vd.spawn(bx, by, bs, bs, 219 + (Math.random() * 5 | 0), 0, 0, 0, null, 1);
+          if (d) { d.vx *= 1.4; d.vy *= 1.4; d.fadeIn = 1; d.noGravity = true; }
+        }
+        for (let i = 0; i < 15; i++) {
+          const d1 = vd.spawn(bx, by, bs, bs, 139 + (Math.random() * 4 | 0), 0, 0, 0, null, 1.6);
+          if (d1) { d1.noGravity = true; d1.vx *= 5; d1.vy *= 5; }
+          const d2 = vd.spawn(bx, by, bs, bs, 139 + (Math.random() * 4 | 0), 0, 0, 0, null, 1.9);
+          if (d2) { d2.vx *= 3; d2.vy *= 3; }
+        }
+      }
+      for (let gi = 0; gi < 4; gi++) {
+        if (Math.random() >= 0.5) continue;
+        const g = GorePiece.newGore(276 + (Math.random() * 7 | 0), bx, by, 0, 0, 1);
+        if (g) {
+          g.vx = g.vx * 0.4 + (gi % 2 === 0 ? 1 : -1);
+          g.vy = g.vy * 0.4 + (gi < 2 ? 1 : -1);
+        }
+      }
+    } else if (vd) {
       const B = projId === 29 ? 100 : (projId === 1086 || projId === 1087) ? 120
         : projId === 108 || projId === 1002 ? 130 : big ? 5 : 11;   // 生成盒半宽(按型 Resize/自身盒)
       const bx = cx - B, by = cy - B, bs = B * 2;
@@ -23268,7 +23403,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     const nGore = big ? 8 : 4;
-    for (let gi = 0; gi < nGore; gi++) {
+    // SW-P1 2026-09-03：gore 61-63 通支对 588 关闭（专属支 276-282 已在上支承载）
+    for (let gi = 0; gi < (projId === 588 ? 0 : nGore); gi++) {
       const sgnX = gi % 2 === 0 ? 1 : -1, sgnY = gi < 2 || gi >= 6 ? 1 : -1;   // 对角四向(大族 ×2 轮)
       const gx = big ? cx - 24 : cx - 11, gy = big ? cy - 24 : cy - 11;
       const g = GorePiece.newGore(61 + (Math.random() * 3 | 0), gx, gy, 0, 0, big ? 1.5 : 1);
@@ -32581,10 +32717,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 成就收不到通知（FISH_OUT_OF_WATER 370/OBSESSIVE_DEVOTION 439/STAR_DESTROYER
       // 族,2026-09-03 猪鲨探针实锤）。归一惯例同 Enemy.ts:3099/:13486（!==0 ? netId : id）。
       const killAchId = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : id;
+      // ★playerInteraction 门（红蓝对抗 R3-A3 补,AchievementsHelper.cs:202-207：
+      // NotifyNPCKilled 前 `npc.playerInteraction[Main.myPlayer]`）——本仓位=
+      // Enemy.playerInteracted（hurt fromPlayer 置位,持久）。曾缺门=岩浆/陷阱/
+      // 环境杀也计 npcKilled 成就。MP per-slot 位登记（applyNetInteraction 承载,
+      // 单人=本地位等价）
+      const interacted = enemy.playerInteracted === true;
       if (id === 125 || id === 126) {
         const otherAlive = active.includes(id === 125 ? 126 : 125);
         if (!otherAlive) {
-          this.achievements.notifyNPCKilled(killAchId);
+          if (interacted) this.achievements.notifyNPCKilled(killAchId);
           this.achievements.mechaMayhemKill(id, active);
         }
       } else {
@@ -32593,7 +32735,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 同语义 Enemy.ts:13446）——曾无条件通知 = 拆链杀中段也推进 WORM_FODDER/
         // SLAYER_OF_WORLDS（红蓝对抗 R3-A2 补）
         const eowLastSegment = !(id >= 13 && id <= 15) || enemy.killBossFlag === true;
-        if (eowLastSegment) this.achievements.notifyNPCKilled(killAchId);
+        if (eowLastSegment && interacted) this.achievements.notifyNPCKilled(killAchId);
         if (id === 127 || id === 134) this.achievements.mechaMayhemKill(id, active);
       }
     }

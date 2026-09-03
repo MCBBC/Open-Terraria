@@ -32,9 +32,9 @@
 //   逐层 v0 光照迁移(原版每 DrawData 单点 GetColor,本仓=全屏乘光近似)——架构级,
 //   登记不动。A3 归因:WaterProcessor/WaterDistortionObject/HorizonClouds=JS/GL
 //   镜像(解释器不入运行时,vColor 按 v0 语义喂,无债);MouseItem=未接线;
-//   ForceField/RainbowTownSlime=预合成 A1 族。A2:LivingOcean/Phase/Twilight 惰性
-//   (v0 化会丢光变暗方向反,见 vanillaDyes.V0_INERT_IN_DYE_DOMAIN 注),自发光修正
-//   挂 1458 rig 原生金标。
+//   ForceField/RainbowTownSlime=预合成 A1 族。A2 终版:LivingOcean/Phase/Twilight
+//   3200 域点/tech 结构性无视 v0(自发光族)——isV0MidTech 不再排除,v0 路由对它们
+//   =跳光乘=自发光修正(vanillaDyes.V0_INERT_IN_DYE_DOMAIN 注),1458 rig 金标待复核。
 import fxJson from '../data/fxPixelShader.json';
 import { sat, type Sm2PxGenFn } from './sm2Runtime';
 import { GEN_MAP } from './gen/genIndex.gen';

@@ -370,6 +370,15 @@ export function canBeChasedBy(e: unknown): boolean {
   if (t.dontTakeDamage) return false;                    // !dontTakeDamage（克脑一阶 266/伪装 690/起飞飞碟 395 等）
   const vid = t.vanillaId;
   if (vid !== undefined && vid !== null && CHASE_EXCLUDED_VIDS.has(vid)) return false;
+  // 运行期相位暂关（红蓝对抗 R2-F6 补）：AI_069 猪鲨 npc.chaseable 字段（:6268 缺省
+  // true）——态10 头置假(:50086)/态11 头复真(:50173)/态12 头置假(:50203),态13 继承
+  // 假 ⇒ 假窗 {10,12,13}。隐身悬浮/瞬移期随从不可索敌（Projectile.cs:36283 消费;
+  // 原版逐 tick ResetEffects 复真+AI 重写=按 ai0 门等价）。曾静态表外零运行时门=
+  // 隐身猪鲨被随从锁定
+  if (vid === 370) {
+    const a0 = (e as { ai0?: number }).ai0;
+    if (a0 === 10 || a0 === 12 || a0 === 13) return false;
+  }
   return !t.def?.friendly;
 }
 

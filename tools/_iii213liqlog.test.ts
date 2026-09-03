@@ -113,10 +113,10 @@ const le16 = (p: string): Uint16Array => {
       mkdirSync(`${OUT}/jdump1`, { recursive: true });
       writeFileSync(`${OUT}/jdump1/K.chk-${rel}`, Buffer.from(sim['checking' as never] as unknown as Uint8Array));
       writeFileSync(`${OUT}/jdump1/K.skp-${rel}`, Buffer.from(sim['skip' as never] as unknown as Uint8Array));
-      writeFileSync(`${OUT}/jdump1/K.typ`, typ);
-      writeFileSync(`${OUT}/jdump1/K.act`, act);
-      writeFileSync(`${OUT}/jdump1/K.wal`, wal);
-      writeFileSync(`${OUT}/jdump1/K.liq`, liq);
+      writeFileSync(`${OUT}/jdump1/K.typ-${rel}`, typ);
+      writeFileSync(`${OUT}/jdump1/K.act-${rel}`, act);
+      writeFileSync(`${OUT}/jdump1/K.wal-${rel}`, wal);
+      writeFileSync(`${OUT}/jdump1/K.liq-${rel}`, liq);
       writeFileSync(`${OUT}/jdump1/K.lty`, lt);
       writeFileSync(`${OUT}/jdump1/K.inact`, ia);
       console.log(`[i213] dump at rel=${rel} nl=${nl} nb=${nb}`);

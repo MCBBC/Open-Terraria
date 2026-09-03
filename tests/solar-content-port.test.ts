@@ -45,7 +45,7 @@ function enemyStub(x: number, y: number, w = 200, h = 200, vid = 15, id = 55): H
       this.hurts.push({ dmg, kbx });
       return true;
     },
-  } as HurtSpy;
+  } as unknown as HurtSpy;
   st.cx = x + w / 2;
   st.cy = y + h / 2;
   return st;
