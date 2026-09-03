@@ -94,6 +94,26 @@ const out = await page.evaluate(async () => {
   const zombieG = await draw(3, 'grid', false);
   const jungleP = await draw(52, 'portrait', false);   // pref 命中 → 无叠层
   const sandP = await draw(541, 'portrait', false);    // 沙暴叠层（白）MapBGOverlay1
+  // 差分对照：NPC 3（夜空 MapBG1×(35,40,40) 暗染；月亮叠层在方形画布 cover 裁切外）
+  // vs NPC 223（同底图同染色 + 雨叠层 MapBGOverlay2 全幅雨丝——裁切内存活）。
+  // 左上角区（避开 NPC 本体）逐像素 diff>8 计数 = 雨叠层可见性
+  const raw = (npcId) => new Promise(async (res) => {
+    const c = mk(96, 96);
+    c.style.cssText = 'position:fixed;left:-999px;top:-999px;';
+    document.body.appendChild(c);
+    panel.drawPortrait(c, npcId, 'portrait', true);
+    for (let i = 0; i < 30; i++) { await new Promise((r) => setTimeout(r, 100)); if (i > 8) break; }
+    const img = c.getContext('2d').getImageData(0, 0, 96, 96);
+    c.remove();
+    res(img.data);
+  });
+  const A = await raw(3), B = await raw(223);
+  let rainDiff = 0, rainLit = 0;
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 40; x++) {   // 左上角区（无 NPC）
+    const i = (y * 96 + x) * 4;
+    if (Math.abs(A[i] - B[i]) > 8 || Math.abs(A[i + 1] - B[i + 1]) > 8) rainDiff++;
+    if (B[i] > 120 && B[i + 3] > 200) rainLit++;   // 雨丝亮条（灰 200）在暗夜空上
+  }
 
   // ---- B. 筛选格 ----
   const rows = bestiaryRows(g.world.bestiary);
@@ -129,8 +149,7 @@ const out = await page.evaluate(async () => {
   bestiaryGating.unlockAll = false;
   return {
     probe,
-    A: { zombieP, zombieG, jungleP, sandP,
-      overlayAddsBright: zombieP.bright > zombieG.bright,
+    A: { zombieP, zombieG, jungleP, sandP, rainDiff, rainLit,
       bgPresent: zombieP.cornerA > 200 },
     B: { total: btns.length, dimBtns, active0: activeBtns, titles,
       afterSurface, ftext, gridGone, afterRare, rows: rows.length },

@@ -34,7 +34,7 @@ for (let i = 0; i < 10; i++) {
   await new Promise((r) => setTimeout(r, 500));
 }
 for (let t = 0; t < 400; t++) {
-  await page.evaluate(() => { const g = window.__swGame; if (g?.world) for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1/60); } catch { break; } } }).catch(()=>{});
+  await page.evaluate(() => { const g = window.__swGame; if (g?.world) { for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1/60); } catch { break; } } try { g.player.hp = g.player.maxHp; if (g.entities?.enemies) g.entities.enemies.length = 0; } catch {} } }).catch(()=>{});
   const ok = await page.evaluate(() => {
     const g = window.__swGame; if (!g?.world?.store) return false;
     const st = g.world.store, w = st.w, h = st.h, ty = st.type;
@@ -49,8 +49,16 @@ for (let t = 0; t < 400; t++) {
   });
   if (ok) break;
 }
-await page.evaluate(() => { const g = window.__swGame; for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1/60); } catch { break; } } });
+await page.evaluate(() => { const g = window.__swGame; for (let i = 0; i < 120; i++) { try { g.fixedUpdate(1/60); } catch { break; } } try { g.player.hp = g.player.maxHp; if (g.entities?.enemies) g.entities.enemies.length = 0; } catch {} });
 await new Promise((r) => setTimeout(r, 500));
+// 确保 bgStyle 已落沙漠
+for (let i = 0; i < 40; i++) {
+  const st = await page.evaluate(() => { const g = window.__swGame; const bg = g.renderer.biomeBg;
+    if (bg.bgStyle !== 2) { g.world.timeOfDay = 0.5; let py = 250; const st2 = g.world.store; while (py < st2.h - 10 && !st2.isSolid(2537, py)) py++; g.player.x = 2537*16+8; g.player.y = (py-6)*16; g.player.hp = g.player.maxHp; if (g.entities?.enemies) g.entities.enemies.length = 0; }
+    return bg.bgStyle; });
+  if (st === 2) break;
+  await new Promise((r) => setTimeout(r, 400));
+}
 // 挂钩录一帧:bitmap→tex 映射 + 拦截 biomeBg.draw 的 blit 实例(2D/GL 通吃)
 const calls = await page.evaluate(async () => {
   const g = window.__swGame;

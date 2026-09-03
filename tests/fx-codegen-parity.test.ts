@@ -5,7 +5,9 @@
 //   ② texkill 路径 null ⇔ null；
 //   ③ runPassOnImageData 全栈 Uint8 逐字节恒等(两种引擎独立跑同一输入)。
 // 差异样本 dump：pass/场景/像素/通道 + 双侧十六进制位型。
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
+// 本机多会话常态高负载(load 80+):默认 5s testTimeout 把 63 pass 差分门打成伪红——显式放宽
+vi.setConfig({ testTimeout: 600000 });
 import {
   defaultUniforms, getPass, passNames, runPassOnImageData, setSm2CodegenEnabled,
   type SM2Uniforms,

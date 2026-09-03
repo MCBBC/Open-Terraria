@@ -7,7 +7,9 @@
 //   ④dualDungeons   —— 条带禁用（bandsEnabled=false:只跑回填）+ Dungeon 档剥漆
 //   ⑤skyblock       —— skyblockLowTiles（geRunner 零掷骰早退,回填照跑）
 // 每场景:同步 drain 世界 vs job 逐步世界,type/wall/paintWall/liquid 全数组逐位相等。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// 本机多会话常态高负载(load 80+):默认 5s testTimeout 把全分支对拍打成伪红——显式放宽
+vi.setConfig({ testTimeout: 600000 });
 import { World } from '../src/world/World';
 import {
   createBrickBoxForWallOfFlesh, startHardmode, startHardmodeJob,

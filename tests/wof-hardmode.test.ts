@@ -2,7 +2,9 @@
 // GERunner/initializeHardMode + NPC.cs CreateBrickBoxForWallOfFlesh + 击杀序）
 // ★2026-09-01 F 批新增：F3 泛洪尾判据（ShapeFloodFill.cs 弹出丢弃 visited）/ F5 外描边
 // origin=(x,y) 落点下移一行 / F7 双地牢事件尾段批剥墙漆（NPC.cs:79607-79650）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// 本机多会话常态高负载(load 80+):默认 5s testTimeout 把整世界重测试打成伪红——显式放宽
+vi.setConfig({ testTimeout: 600000 });
 import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';

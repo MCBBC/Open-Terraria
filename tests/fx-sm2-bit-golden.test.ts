@@ -14,7 +14,9 @@
 //
 // 重生成：SM2_GOLDEN_REWRITE=1 npx vitest run tests/fx-sm2-bit-golden.test.ts
 // （重生成必须走人工审阅流程——diff 固件后确认差异面在预期集合内再提交）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// 本机多会话常态高负载(load 80+):默认 5s testTimeout 把 63×12 金标网打成伪红——显式放宽
+vi.setConfig({ testTimeout: 600000 });
 import * as fs from 'node:fs';
 import path from 'node:path';
 import {
