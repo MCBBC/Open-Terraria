@@ -248,7 +248,16 @@ function createRoomsBigAbandonedHouses(st: TileStore, gs: GenState, rng: RNG, ox
     rooms.push(findRoomBig(st, rng, last.x + (last.w >> 1), last.y + 1, last));
     last = rooms[rooms.length - 1]!;
   }
-  for (const r of rooms) r.y += 3;                              // cs:78-82
+  // ★IIIII110b 定罪收官（builder 分相掷耗单窗反演 → 房矩形 RM 台账对拍）：
+  //   vanilla HouseUtils.cs:78-82 的 `Rectangle rectangle2 = list[j]; rectangle2.Y += 3;`
+  //   是【Rectangle 结构体值拷贝】上改动——list 本体不变＝**整段 no-op**（x86 RM 台账
+  //   实证 36 屋全部 room.Y 无 +3）。JS 曾按反编译字面移植成引用变动 r.y += 3
+  //   ⇒ 每屋全房 +3 → 房体/箱位/楼梯/装饰整塔下移 3 行（house4 起房矩形错位、
+  //   chest AB y 632→635 实证）→ 掷流虽同值但写面全错（#59 起 46067 格级联）。
+  //   修＝删除该行（原版语义＝Y 原样）。
+  // ★IIIII110b instrument：大屋房矩形台账（与 x86 rig RM 行同構；未挂零开销）
+  (globalThis as { __swRoomEv?: (row: string) => void }).__swRoomEv?.(
+    `RM|${ox},${oy}|${last.x},${last.y},${last.w},${last.h}|${rooms.length}${rooms.map((r) => `|${r.x},${r.y},${r.w},${r.h}`).join('')}`);
   // ★HouseBuilder ctor 的 Top 升序重排（HouseBuilder.cs:73-74）：原版自底向上构造序
   //   被 ctor 翻成【顶房在前】——楼梯相邻对/支撑梁"后房在下"/宝箱级联 Rooms[0]=顶房
   //   全依赖该序。塔层 Top 严格互异（每层上移 ≥1 行）,稳定排序无并列歧义。
@@ -745,7 +754,17 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       if (s.frame) houseFrameDispatch(st, rng, x, y, 'setTile');
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearTile':
-      st.setTileSilent(x, y, 0);
+      // ★IIIII108c：同 ER 腔清——Actions.ClearTile→Tile.ClearTile()（Tile.cs:125=1458 同号）
+      //   幽灵保域（type/帧/漆/墙/液全保留,仅 slope/half/active/inActive 清）,≠KillTile
+      //   硬清（cs:64430）——木屋③ OnlyTiles(30,321,158) 剥壳残型（WoodHouseBuilder.cs:37）
+      //   与各主题 AgeRoom 剥块由此入账本
+      if (st.inBounds(x, y)) {
+        const icl = st.idx(x, y);
+        st.flags[icl] = 0;                          // active(false)
+        st.half[icl] = 0;                           // halfBrick(false)
+        st.slope[icl] = 0;                          // slope(0)
+        st.wire[icl] &= ~TileStore.WIRE_ACTUATED;   // inActive(false)
+      }
       // ★ClearTile(frameNeighbors:true)（木屋③专属路径）→ 四邻 WorldGen.TileFrame →
       //   TileFrameImportant → Check3x2/Check2xX/CheckChand… 重验支承：支承行任一格
       //   （或吊灯顶锚）已失实 → destroyObject+KillTile 整件（Check3x2 cs KillTile 段）
@@ -2072,7 +2091,19 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       }
       for (let x = r.x + 1; x < r.x + r.w - 1; x++) {
         for (let y = r.y + 1; y < r.y + r.h - 1; y++) {
-          st.setTileSilent(x, y, 0);
+          // ★IIIII108c：Actions.ClearTile(frameNeighbors:true)（HouseBuilder.cs:417=1458
+          //   同号）→ WorldUtils.ClearTile（WorldUtils.cs:55）→ Tile.ClearTile()（Tile.cs:125）
+          //   =ClearSlope()+active(false)+inActive(false)——type/wall/liquid/frameX/frameY/
+          //   paint/coat 全保留（≠setTileSilent(0) 的 KillTile 族硬清语义,KillTile type=0
+          //   在 cs:64430）→ 房内腔留主题块幽灵残型（x86 059 ghost 账本 A 族
+          //   321/396/158/146/357/30/369 共 3,438 格主源;门洞同款语义 IIIIIIII 已先修）
+          if (st.inBounds(x, y)) {
+            const ciC = st.idx(x, y);
+            st.flags[ciC] = 0;                        // active(false)
+            st.half[ciC] = 0;                         // halfBrick(false)（ClearSlope）
+            st.slope[ciC] = 0;                        // slope(0)（ClearSlope）
+            st.wire[ciC] &= ~TileStore.WIRE_ACTUATED; // inActive(false)
+          }
           erFrameDispatch(x, y, 'clearTile');     // ClearTile(frameNeighbors:true)
           // Gen(Chain(ClearTile(true), PlaceWall(WallType)))——PlaceWall 逐格墙重帧掷
           // （尾批 2-C：PlaceEmptyRooms 每房 ~3 掷/内腔格，房屋链欠掷主根因）

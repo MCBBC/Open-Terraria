@@ -32,6 +32,7 @@ const OUT = process.env.SW142_MOUT ?? '/tmp/iii142-out/manors-js';
     if (pendingAnchor && !captureInst) { captureInst = inst; pendingAnchor = false; }
     if (!captureInst || inst !== captureInst) return;
     genCount++;
+    g.__swRollN = genCount;                                 // CaveHousePass/__rn 与 __abCnt 消费
     if (capturing) vals.push(v | 0);
   };
   g.__swHouseEv = (phase: string, x: number, y: number) => {
@@ -46,6 +47,17 @@ const OUT = process.env.SW142_MOUT ?? '/tmp/iii142-out/manors-js';
   (g as { __swPcEv?: (row: string) => void }).__swPcEv = (row: string) => {
     pcRows.push(`${row}|${genCount}`);
   };
+  (g as { __swAbCnt?: (t: string, c: number) => void }).__swAbCnt = (t: string, c: number) => {
+    pcRows.push(`AB|${t}|${c}`);
+  };
+  const rmRows: string[] = [];
+  (g as { __swRoomEv?: (row: string) => void }).__swRoomEv = (row: string) => {
+    rmRows.push(`${row}|${genCount}`);
+  };
+  (g as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv =
+    (p2: string, i2: number, j2: number, x2?: number) => {
+      pcRows.push(`CE|${p2}|${i2},${j2}|${x2 ?? ''}|${genCount}`);
+    };
   try {
     await generateWorld({
       width: 4200, height: 1200, seedText: SEED, evil: 0,
@@ -57,6 +69,7 @@ const OUT = process.env.SW142_MOUT ?? '/tmp/iii142-out/manors-js';
   writeFileSync(OUT + '-houses.txt', hRows.join('\n') + '\n');
   writeFileSync(OUT + '-stages.txt', sRows.join('\n') + '\n');
   writeFileSync(OUT + '-pc.txt', pcRows.join('\n') + '\n');
+  writeFileSync(OUT + '-rooms.txt', rmRows.join('\n') + '\n');
   writeFileSync(OUT + '-rolls.txt', vals.map((v, i) => `R|${i + 1}|${v}`).join('\n') + '\n');
   const ok = hRows.filter((h) => h.includes('|1|pl')).length;
   console.log(`JS manors attempts=${hRows.length} accepts=${ok} rollsInWindow=${vals.length}`);

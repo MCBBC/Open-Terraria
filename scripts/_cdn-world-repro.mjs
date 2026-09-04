@@ -16,8 +16,12 @@ const cdp = await page.target().createCDPSession();
 await cdp.send('Network.enable');
 await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });   // = Disable cache
 
-let zips = 0;
-page.on('response', (r) => { if (/\/assets-zip\/p\d+-/.test(r.request().url())) zips++; });
+let zips = 0, notFound = 0;
+page.on('response', (r) => {
+  const u = r.request().url();
+  if (/\/assets-zip\/p\d+-/.test(u)) zips++;
+  if (r.status() === 404) notFound++;
+});
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 100)); });
 
@@ -31,9 +35,11 @@ for (let t = 5; t <= 90; t += 5) {
     const keys = await caches.keys();
     const per = [];
     for (const k of keys) { try { per.push([k, (await (await caches.open(k)).keys()).length]); } catch { per.push([k, -1]); } }
-    return st ? { phase: st.phase, done: st.done, total: st.total, warming: st.warming,
-      failed: st.failed, enabled: st.enabled, caches: per }
-      : { noHandle: true, caches: per };
+    const badge = document.querySelector('.sw-asset-badge .txt')?.textContent ?? null;
+    return st ? { badge, phase: st.phase, done: st.done, total: st.total, warming: st.warming,
+      failed: st.failed, enabled: st.enabled, storageDown: st.storageUnavailable,
+      pipeDown: st.pipelineDown ?? null, pipeTransient: st.pipelineDownTransient ?? null, caches: per }
+      : { noHandle: true, badge, caches: per };
   });
   console.log(`t=${t}s zips=${zips}`, JSON.stringify(s));
 }

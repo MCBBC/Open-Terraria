@@ -608,6 +608,36 @@ describe('X1 终扫四项对齐（Pigronata/PumpkinSeeds/Boulders/2492 压力轨
     expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem(), { worldSurface: 102 }))).toEqual({ x: 105, y: 100 });
   });
 
+  it('②b PumpkinSeeds 净空 = WorldGen.CanCutTile（:1075→WorldGen.cs:88111-24）三类实差（M24-F6）', () => {
+    // (a) 下格 78 陶盆（:88113 下格 type∈{78,380,579} 拒切）：上格草丛（decor 可割）
+    //     旧 decor 近似放行,CanCutTile 因下邻 78 拒 → 无候选
+    const stA = new TileStore(W, H);
+    stA.setTile(105, 101, T.GRASS);
+    stA.setTile(106, 101, T.GRASS);
+    stA.setTile(105, 100, TILE_BY_KEY['clay_pot']!);   // 上格草丛的下邻 = 78
+    stA.setTile(105, 99, TILE_BY_KEY['tallgrass']!);   // 净空上格可割件（非实心）
+    expect(run(mkEnv(stA, mouseAt(105, 100), pumpkinItem()))).toBeNull();
+
+    // (b) 回声墙 350（:88113 wall!=350 拒切）：可割件带墙 350 → 拒;无墙对照放行
+    const stB = new TileStore(W, H);
+    stB.setTile(105, 101, T.GRASS);
+    stB.setTile(106, 101, T.GRASS);
+    stB.setTile(105, 100, TILE_BY_KEY['tallgrass']!);
+    expect(run(mkEnv(stB, mouseAt(105, 100), pumpkinItem()))).toEqual({ x: 105, y: 100 });
+    stB.wall[stB.idx(105, 100)] = 350;
+    expect(run(mkEnv(stB, mouseAt(105, 100), pumpkinItem()))).toBeNull();
+
+    // (c) 未熟南瓜 254 frameX<144（:88117-20）拒;成熟（≥144）放行——254 不在 decor 表,
+    //     旧近似连成熟南瓜一并拒（实差在成熟侧）
+    const stC = new TileStore(W, H);
+    stC.setTile(105, 101, T.GRASS);
+    stC.setTile(106, 101, T.GRASS);
+    stC.setTile(105, 100, TILE_BY_KEY['v_254_pumpkin_plant']!);
+    expect(run(mkEnv(stC, mouseAt(105, 100), pumpkinItem()))).toBeNull();        // 未熟 frameX=0
+    stC.setTile(105, 100, TILE_BY_KEY['v_254_pumpkin_plant']!, 144);
+    expect(run(mkEnv(stC, mouseAt(105, 100), pumpkinItem()))).toEqual({ x: 105, y: 100 }); // 成熟放行
+  });
+
   it('③ Boulders：玩家命中盒内不出候选；敌怪/NPC 占位不拒（:936-949 只查玩家）', () => {
     // 场景 A：候选 (100,97) 的 32×32 净空区 (1600,1536,32,32) 与 actor 玩家盒 (1600,1520,20,42) 相交
     const st = new TileStore(W, H);
@@ -626,6 +656,19 @@ describe('X1 终扫四项对齐（Pigronata/PumpkinSeeds/Boulders/2492 压力轨
     expect(run(mkEnv(st2, mouseAt(105, 98), boulderItem(), { occupants: [npc] }))).toEqual({ x: 105, y: 98 });
     // 同一盒按玩家口径传入（players）→ 拒（碰撞式 = XNA Rectangle.Intersects）
     expect(run(mkEnv(st2, mouseAt(105, 98), boulderItem(), { players: [npc] }))).toBeNull();
+  });
+
+  it('③b 联机 env.players（Game 侧传全玩家表）：第二玩家盒入净空区 → 拒;盒外存活玩家不拒（M24-F5）', () => {
+    const st = new TileStore(W, H);
+    st.setTile(105, 99, T.STONE);
+    st.setTile(106, 99, T.STONE);
+    // 候选 (105,98) 净空区 (1680,1552,32,32) = 格 (105..106, 97..98);本地玩家盒在 (1600,1520) 不相交
+    const blocker = { x: 105 * 16, y: 98 * 16 - 16, w: 20, h: 42 };   // 第二玩家盒盖住净空左上格
+    const far = { x: 150 * 16, y: 90 * 16, w: 20, h: 42 };
+    // Game 侧形态 = [本地, …active&&!dead 远端]：blocker 在列 → 拒
+    expect(run(mkEnv(st, mouseAt(105, 98), boulderItem(), { players: [mkActor(), far, blocker] }))).toBeNull();
+    // blocker 不在列（未连入/死亡被过滤）→ 候选照出
+    expect(run(mkEnv(st, mouseAt(105, 98), boulderItem(), { players: [mkActor(), far] }))).toEqual({ x: 105, y: 98 });
   });
 
   it('④ 2492 压力轨道独立段：无方向量化左右续格；主段不吃 2492（:1277-1331）', () => {

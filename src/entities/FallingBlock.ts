@@ -1,6 +1,11 @@
-// 下落沙族(原版 Projectile 31/56/67/71/179/241 SandBallFalling 系,aiStyle 10 = AI_010):
-// 沙族图块失去下方支撑 → 转为下落投射物:重力 0.3/tick 坠落并旋转,
-// 命中实体造成 10 伤害(penetrate = -1,同敌冷却;friendly+hostile 双向——砸怪也砸玩家),
+// 下落沙族(原版 Projectile 31/56/67/71/179/241/411-414/812 SandBallFalling 系,
+// aiStyle 10 = AI_010):
+// 沙族图块失去下方支撑 → 转为下落投射物:初速 0.41、重力 0.41/tick、rot+0.1、
+// vy 封顶 10(Projectile.cs:58999-59002 重力/:59075-59082 旋转+封顶,初速=
+// SpawnFallingBlockProjectile WorldGen.cs:87355 NewProjectile 0.41+ai[0]=1 →
+// 首拍 0.82),
+// 命中实体按 GetSandfallProjData 档结算伤害(缺省 10,钱币堆 330-333 档 dmg=0;
+// penetrate = -1,同敌冷却;friendly+hostile 双向——砸怪也砸玩家),
 // 落到实心格上变回原 tile。见 Game.checkFallingSand(触发侧)。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
@@ -70,13 +75,28 @@ export class FallingBlock extends Entity {
   /** 同敌冷却 tick(原版穿透弹 per-NPC 免疫帧语义) */
   private hitCd = new Map<number, number>();
   life = 3600;
-  static readonly DAMAGE = 10; // 原版 SandBallFalling damage = 10
-  static readonly GRAV = 0.3;  // aiStyle 2/10 通用重力
+  static readonly DAMAGE = 10; // GetSandfallProjData 缺省档（WorldGen.cs:87798 dmg=10）
+  static readonly GRAV = 0.41; // AI_010 :58999-59002 ai[0]==1 → vy += 0.41/tick（B-2）
+  /** vy 封顶（Projectile.cs:59075-59082 非 736-738 支恒达 else：vy>10 → 10） */
+  static readonly VY_CAP = 10;
+  /** 出生初速（SpawnFallingBlockProjectile WorldGen.cs:87355 NewProjectile 0f,0.41f
+   *  + :87358 ai[0]=1f → 首拍 AI_010 再 +0.41 = 0.82;B-2 对齐） */
+  static readonly SPAWN_VY = 0.41;
+  /** GetSandfallProjData（WorldGen.cs:87797-87837）零伤档：钱币堆 330-333 → 弹
+   *  411-414 dmg=0（:87824-87831,B-3）——砸实体不结算伤害（shell 堆 495→812 仍 10） */
+  private static readonly ZERO_DMG_SHEETS = new Set([330, 331, 332, 333]);
+  /** 本块弹的 NewProjectile damage 参数（GetSandfallProjData 按型档,缺省 10） */
+  readonly dmg: number;
 
   constructor(x: number, y: number, tileKey: string) {
     super();
     this.x = x; this.y = y;
     this.tileKey = tileKey;
+    const tid0 = TILE_BY_KEY[tileKey];
+    const sheet0 = tid0 !== undefined ? TILE_DEFS[tid0]?.vanilla?.sheet : undefined;
+    this.dmg = sheet0 !== undefined && FallingBlock.ZERO_DMG_SHEETS.has(sheet0)
+      ? 0 : FallingBlock.DAMAGE;
+    this.vy = FallingBlock.SPAWN_VY;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -86,10 +106,10 @@ export class FallingBlock extends Entity {
     // 上一帧中心格（落地放置格,见下方落地段注释）
     const prevTx = Math.floor((this.x + this.w / 2) / TILE);
     const prevTy = Math.floor((this.y + this.h / 2) / TILE);
-    this.vy = Math.min(this.vy + FallingBlock.GRAV, 16);
+    this.vy = Math.min(this.vy + FallingBlock.GRAV, FallingBlock.VY_CAP);
     this.x += this.vx;
     this.y += this.vy;
-    this.rot += 0.25;
+    this.rot += 0.1;                                   // :59077（非 736-738 支恒达 else）
     // 冷却推进
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
@@ -104,11 +124,11 @@ export class FallingBlock extends Entity {
     const p = game.player;
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;
-      // Damage_EVP：SandBallFalling 基础 10（P31 hostile 弹），命中再过乘区×2
-      game.damagePlayer(hostileProjectileDamage(FallingBlock.DAMAGE, mainDifficulty(game.world)) * 2, this.cx, this.cy);
+      // Damage_EVP：GetSandfallProjData 档伤害（缺省 10=P31 hostile 弹），命中再过乘区×2
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     // 敌人 + 小动物 + 城镇 NPC(friendly 方向;原版巨石碾压 NPC,hurt iframes 兜连击)
-    hitTownNpcs(this, game, FallingBlock.DAMAGE, Math.sign(this.vx) * 2);
+    hitTownNpcs(this, game, this.dmg, Math.sign(this.vx) * 2);
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
@@ -117,21 +137,25 @@ export class FallingBlock extends Entity {
       const cd = this.hitCd.get(e.id) ?? 0;
       if (cd > 0) continue;
       this.hitCd.set(e.id, 20);
-      e.hurt(FallingBlock.DAMAGE, 0, 0, game);
+      e.hurt(this.dmg, 0, 0, game);
     }
     if (hitCritters(this, game)) { /* 小动物被砸即死,块继续坠 */ }
 
     // ---- 落地:变回 tile(原版 Projectile.Kill aiStyle==10 :79117-79310 等价)----
     // ★终审④（2026-09-04）落点几何对齐+被占/flag2 掉件面 1:1。死亡格=TileCollision
     //  钳位后弹心格（Projectile.cs:79120-79121 (int)((position.Y+height/2)/16)）。
-    //  直落弹（SpawnFallingBlockProjectile vx=0/vy≤10 :59078-59081）钳位几何
-    //  （Collision.cs:2299-2460）：全实心/平台/家具顶/底坡3-4=盒底钳到面顶
+    //  直落弹（SpawnFallingBlockProjectile vx=0、初速 0.41、vy 封顶 10 :87355/:59078-59081）
+    //  钳位几何（Collision.cs:2299-2460）：全实心/平台/家具顶/底坡3-4=盒底钳到面顶
     //  （:2388-2404;底坡无 flag2 豁免:2361-2371）→ 钳位中心=面顶-5 → 死亡格=面格
-    //  上一格=上一帧中心格（恒等）;顶坡1-2 flag2 豁免竖钳（:2372-2383）→ 先被
-    //  AI_010 :59044-59052 SlopeTile 拍平+position.Y-=16 → 等效钳在拍平方格顶
-    //  （同上一格）;半砖=碰撞盒折半（:2350-2354 vector4.Y+=8）→ 钳位中心=面顶+3
-    //  ∈面格内 → 死亡格=半砖格本身（:79243 半砖上移支 velocity.Y 已被 TileCollision
-    //  清 0=死支,R2' F2 同谳）→ 格 active 走 outer else :79298-79301。
+    //  上一格=上一帧中心格（恒等）。★恒等论证锚（B-2 重推演 2026-09-04）=单拍位移
+    //  <格宽 16px：vy 封顶 10（:59078-59081,本仓 VY_CAP=10）<16 ⇒ 上一帧中心格至多
+    //  高出现帧中心格 1 格,而落地判定=中心格入面即死 ⇒ 上一帧中心必在死亡面上一格
+    //  ——旧 GRAV0.3/cap16 时代"cap16 恰好=一格下限"的论证由 cap10<16 收紧为更稳
+    //  同格恒等（恒等式对 [0,16) 内一切 vy 成立,与重力系数无关）;顶坡1-2 flag2 豁免
+    //  竖钳（:2372-2383）→ 先被 AI_010 :59044-59052 SlopeTile 拍平+position.Y-=16 →
+    //  等效钳在拍平方格顶（同上一格）;半砖=碰撞盒折半（:2350-2354 vector4.Y+=8）→
+    //  钳位中心=面顶+3 ∈面格内 → 死亡格=半砖格本身（:79243 半砖上移支 velocity.Y
+    //  已被 TileCollision 清 0=死支,R2' F2 同谳）→ 格 active 走 outer else :79298-79301。
     //  掉件面：被占=RequestNewItem(Center)（:79298-79301）;flag2/放置失败=
     //  Center+(0,-2)（:79293-79296）;flag2=:79250-79272 死亡格下方 active 且
     //  （rail 314 ∥ 传送带 421/422 ∥ BlockBelowMakesSandFall→blockBelowMakesSandFall）。

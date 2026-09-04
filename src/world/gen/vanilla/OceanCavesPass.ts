@@ -210,10 +210,20 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
 
 /** OceanCaves pass(cs:15228):地牢侧海洋 1/3 概率一条;返回宝藏点集(UnderwaterChests 消费) */
 export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<{ x: number; y: number }> {
+  // ★IIIII108d（planetoids 新前沿 #37 收官）：cs:15243 **外门三因子**整缺——
+  //   `!Skyblock.denyAllGeneration && !SecretSeed.roundLandmasses.Enabled &&
+  //   !SecretSeed.noSurface.Enabled` 全过才进体;denyAll 已由 WorldGen 调用位
+  //   sbDenyAll 门（cs:15242 同行）,roundLandmasses/noSurface 世界=整 pass **零掷零写**
+  //   （与 Next(3) 内门不同,外门在所有掷骰之前）。定罪：mile8 planetoids 0..36 绿后
+  //   #37 首差 (95,292)：JS 独跑整条海洋洞=水 36,504 格(Li=255,Y0>1)+SAND/HARDSAND
+  //   壳层 ~2.1 万格(T0>53×7273/T1>53×5808/T0>397×2071/T1>397×1515/T1>0×2016/
+  //   T53>0×1577)。CXIX §③ 曾把 cs:15242 误归「薄冰族」消费点漏检此门,本批勘误。
+  //   （宝藏点空表语义正确：vanilla 无洞 ⇒ UnderwaterChests 无点可消费。）
   // 一次性探针钩（同 WebsPass 模式）：OceanCaves 入口快照（债时间线用）
   const g0 = globalThis as { __swOcCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swOcCap?.(gs, st); } catch { /* probe */ }
   const treasures: Array<{ x: number; y: number }> = [];
+  if (gs.seedFlags.roundLandmasses || gs.seedFlags.noSurface) return treasures;
   const { w } = st;
   for (const side of [0, 1] as const) {
     // 左海洋仅当地牢在左(dungeonSide < Right)、右海洋仅当在右(cs:15243)

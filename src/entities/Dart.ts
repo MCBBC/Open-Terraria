@@ -1568,8 +1568,8 @@ export class Dart extends Entity {
           const onConveyor = below === T_CONV_L || below === T_CONV_R;   // ★R8 F1:传送带来因单列
           // ★幽灵保域（2026-09-04 F3b）：支撑判定 = BlockBelowMakesSandFall 三支的
           //  nactive 门（WorldGen.cs:87880/:87884/:87888;nactive=active&&!致动
-          //  =TileStore.isActive,DirtBallProj blockBelowMakesSandFallAt:70-76 同口径
-          //  逐支照抄——裸 type≠0 代读漏幽灵/致动两态）——幽灵格=未激活=下方空
+          //  =TileStore.isActive,FallingBlock.blockBelowMakesSandFall（★M13 A-2 单源）
+          //  同口径逐支照抄——裸 type≠0 代读漏幽灵/致动两态）——幽灵格=未激活=下方空
           //  →不放,防放置即再落（FallingBlock.ts:95-105 同族口径）
           if (!noPlace && !sst.isActive(prevTx, prevTy + 1)) noPlace = true;
           else if (!noPlace && !sst.isActive(prevTx, prevTy + 2) && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;

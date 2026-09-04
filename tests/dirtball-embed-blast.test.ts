@@ -14,7 +14,9 @@
 // row 40 → Kill,爆心=第 2 拍积分前位 y=639.41（row 39 空气格）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
-import { DirtBallProj, blockBelowMakesSandFallAt } from '../src/entities/DirtBallProj';
+import { DirtBallProj } from '../src/entities/DirtBallProj';
+import { blockBelowMakesSandFall } from '../src/entities/FallingBlock';   // ★M13 A-2 单源化：BBMSF 实现迁 FallingBlock
+const blockBelowMakesSandFallAt = blockBelowMakesSandFall;               // 旧名别名（本文件断言不改）
 import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
 

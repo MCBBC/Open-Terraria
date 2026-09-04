@@ -41,6 +41,13 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET[i] = s;
 }
+// sheet→internal 规范反映射（first-wins；TILE_INTERNAL_BY_SHEET 是 last-wins，
+// 会被同名 sheet 的变体/伪装箱条目覆写，round-trip 不闭合 ⇒ x86base hydrate 禁用）
+const SHEET2INTERNAL = new Map<number, number>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = SHEET[i]!;
+  if (s >= 0 && !SHEET2INTERNAL.has(s)) SHEET2INTERNAL.set(s, i);
+}
 const CHANS = ['flags', 'type', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire', 'paint', 'paintWall', 'coat'] as const;
 function serializeStore(st: TileStore, dir: string): void {
   const hdr: Record<string, number> = { w: st.w, h: st.h };
@@ -177,7 +184,8 @@ const le16 = (p: string): Uint16Array => {
     for (let i = 0; i < N; i++) {
       st.flags[i] = bA8[i]! ? (st.flags[i] | 1) : (st.flags[i] & ~1);
       const sh = bA8[i]! ? bT8[i]! : 0;
-      const tI = sh === 0 ? 0 : TILE_INTERNAL_BY_SHEET.get(sh);
+      // ★x86 dump 里活性格 sheet 0 = Dirt（空气只以 act=0 表达）——禁把 sheet0 当 air
+      const tI = SHEET2INTERNAL.get(sh);
       if (sh !== 0 && tI === undefined) throw new Error(`sheet ${sh} no internal mapping @${i % W},${(i / W) | 0}`);
       st.type[i] = tI ?? 0;
       st.wall[i] = bW8[i]!;

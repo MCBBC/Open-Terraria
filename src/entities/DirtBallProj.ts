@@ -51,31 +51,20 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
+import { blockBelowMakesSandFall } from './FallingBlock';
 import { TileStore } from '../world/TileStore';
 import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../data/tiles';
 
 /** 泥土块物品 vid（num18=2,:79237 缺省——type 17 不在 421/422/109 等覆写表内） */
 export const DIRT_BALL_DROP_VID = 2;
 
-/** WorldGen.BlockBelowMakesSandFall（WorldGen.cs:87868-87893）1:1：
- *  j>=maxTilesY-1 → false;下格 null → false;下格 !nactive → true;
- *  下格 active 且再下格 !nactive 且(下格 !active || 非实心) → true;
- *  下格 active 且 type==165(钟乳石) → true。i,j = 落点格(查其【下】格)。
- *  ★nactive = active && !inActive（Tile.cs:591-606/:242-248,0x20 位+非 0x40 致动位;
- *  本仓 TileStore.isActive 同口径——SW-L1 2026-09-03 F8:曾用裸 active 位漏致动格,
- *  已致动沙上清水/装饰误判"下方空"→ 误拦铺设） */
-export function blockBelowMakesSandFallAt(st: TileStore, i: number, j: number): boolean {
-  if (j >= st.h - 1) return false;
-  if (!st.inBounds(i, j + 1)) return false;
-  if (!st.isActive(i, j + 1)) return true;                      // !tile.nactive() → true（:87879-87882）
-  const below2Inactive = !st.inBounds(i, j + 2) || !st.isActive(i, j + 2);
-  if (below2Inactive) {
-    const d = TILE_DEFS[st.type[st.idx(i, j + 1)]];
-    if (!d || !d.solid) return true;                            // !tileSolid[type]
-  }
-  if (TILE_DEFS[st.type[st.idx(i, j + 1)]]?.vanilla?.sheet === 165) return true;
-  return false;
-}
+/** ★M13 A-2/B-1（2026-09-04）单源化：BlockBelowMakesSandFall（WorldGen.cs:87868-87893）
+ *  实现迁至 FallingBlock.blockBelowMakesSandFall（tileSolidOf=def.solid∪tileSolid∩
+ *  tileSolidTop 九件套{19,239,380,427,435-439},WorldGen.cs:87884-87 逐字）——旧内联版
+ *  arm2 用 `!d.solid` 朴素代理,平台 19 等 tileSolid 真值件被误判"下方撑不住"→
+ *  flag2 误拦铺设。本函数（三副本之三）与 Game.sandFallsBelow 均改调单源,
+ *  liqGateLegacy 朴素代理不在此列（判据点不同,红队已核净,勿动）。 */
+
 
 export interface DirtBallDeposit {
   tx: number; ty: number;
@@ -87,14 +76,21 @@ export interface DirtBallDeposit {
 
 /** Kill_Bombs_DoUsualKillCode 的落点格计算(:79120-79271,aiStyle10 共用段):
  *  centerX/centerY = 弹中心像素;vx/vy = 撞格时速度(半砖上推判向用)。C# int
- *  整除 = Math.trunc(负坐标同截断语义)。 */
+ *  整除 = Math.trunc(负坐标同截断语义)。
+ *  `death`（★M13 A-1,2026-09-04）：碰撞 Kill 时已知的 TileCollision 钳位死亡格
+ *  （AshBallProj 半砖落面特支传参）——显式给定时直接采用并【跳过半砖上推】：
+ *  该上推支(:79243-79246)读 velocity.Y>0,而碰撞 Kill 路径 velocity.Y 已被
+ *  TileCollision 清 0=死支（R2' F2 同谳,FallingBlock surfHalf 同款）;上一拍
+ *  未嵌入锚（F1）路径不带 death,上推支保持原样。 */
 export function dirtBallDepositTile(
   st: TileStore, centerX: number, centerY: number, vx: number, vy: number,
+  death?: { tx: number; ty: number },
 ): DirtBallDeposit {
-  let tx = Math.trunc(centerX / 16);
-  let ty = Math.trunc(centerY / 16);
-  // :79244-79247 半砖上推（nactive+halfBrick+vy>0+|vy|>|vx| → 上一行）
-  if (st.inBounds(tx, ty) && st.isActive(tx, ty) && st.half[st.idx(tx, ty)] !== 0
+  let tx = death ? death.tx : Math.trunc(centerX / 16);
+  let ty = death ? death.ty : Math.trunc(centerY / 16);
+  // :79244-79247 半砖上推（nactive+halfBrick+vy>0+|vy|>|vx| → 上一行）——
+  // death 显式给定（碰撞 Kill 钳位死亡格）时跳过,见上注
+  if (!death && st.inBounds(tx, ty) && st.isActive(tx, ty) && st.half[st.idx(tx, ty)] !== 0
     && vy > 0 && Math.abs(vy) > Math.abs(vx)) ty--;
   // :79248 `!tile.active()` → 空格判定;幽灵格(flags=0,残型)按空处理(与
   // FallingBlock :106-109 幽灵保域口径同)
@@ -108,7 +104,7 @@ export function dirtBallDepositTile(
     && st.hasTile(tx, ty + 1)) {
     const bs = TILE_DEFS[st.type[st.idx(tx, ty + 1)]]?.vanilla?.sheet;
     if (bs === 314 || bs === 421 || bs === 422) blocked = true;
-    else if (blockBelowMakesSandFallAt(st, tx, ty)) blocked = true;
+    else if (blockBelowMakesSandFall(st, tx, ty)) blocked = true;
   }
   return { tx, ty, occupied, blocked };
 }

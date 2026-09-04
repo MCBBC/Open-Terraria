@@ -7005,18 +7005,23 @@ const snap: SnapFn = (name) => {
         paEmit101(`MARK|pat|${x},${y}`);
       }
       if ((typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_DGPA_TRACE)) console.log(`S ${x} ${y}`);
+      // ★IIIII110b 走廊端点诊断（SW_DGPA_WALK=1；零掷零写只读）
+      const WTR = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_DGPA_WALK;
+      const wtr = (s2: string): void => { if (WTR) console.log(`W i=${i} ${s2}`); };
       for (let t = 0; t < 2; t++) {
         let n9 = x, n10 = x;
         while (n9 > 20 && actAt(n9, y) === 0 && gfIsDW(wallAt(n9, y))) n9--;   // ★IIIII179 座面化
         n9++;
         while (n10 < w - 20 && actAt(n10, y) === 0 && gfIsDW(wallAt(n10, y))) n10++;
         n10--;
+        wtr(`t${t} row y=${y} x0=${x} L=${n9} R=${n10} cx=${Math.trunc((n9 + n10) / 2)} bl=(${n9 - 1},${y})a${actAt(n9 - 1, y)}w${wallAt(n9 - 1, y)} br=(${n10 + 1},${y})a${actAt(n10 + 1, y)}w${wallAt(n10 + 1, y)}`);
         x = Math.trunc((n9 + n10) / 2);
         let n11 = y, n12 = y;
         while (n11 > 20 && actAt(x, n11) === 0 && gfIsDW(wallAt(x, n11))) n11--;
         n11++;
         while (n12 < h - 20 && actAt(x, n12) === 0 && gfIsDW(wallAt(x, n12))) n12++;
         n12--;
+        wtr(`t${t} col x=${x} T=${n11} B=${n12} cy=${Math.trunc((n11 + n12) / 2)} bt=(${x},${n11 - 1})a${actAt(x, n11 - 1)}w${wallAt(x, n11 - 1)} bb=(${x},${n12 + 1})a${actAt(x, n12 + 1)}w${wallAt(x, n12 + 1)}`);
         y = Math.trunc((n11 + n12) / 2);
       }
       let n9 = x, n10 = x;
@@ -7024,11 +7029,13 @@ const snap: SnapFn = (name) => {
       n9++;
       while (n10 < w - 20 && actAt(n10, y) === 0 && actAt(n10, y - 1) === 0 && actAt(n10, y + 1) === 0) n10++;
       n10--;
+      wtr(`F row y=${y} L=${n9} R=${n10} cx=${Math.trunc((n9 + n10) / 2)} bl=(${n9 - 1},${y})a${actAt(n9 - 1, y)}/${actAt(n9 - 1, y - 1)}/${actAt(n9 - 1, y + 1)} br=(${n10 + 1},${y})a${actAt(n10 + 1, y)}/${actAt(n10 + 1, y - 1)}/${actAt(n10 + 1, y + 1)}`);
       let n11 = y, n12 = y;
       while (n11 > 20 && actAt(x, n11) === 0 && actAt(x - 1, n11) === 0 && actAt(x + 1, n11) === 0) n11--;
       n11++;
       while (n12 < h - 20 && actAt(x, n12) === 0 && actAt(x - 1, n12) === 0 && actAt(x + 1, n12) === 0) n12++;
       n12--;
+      wtr(`F col x=${x} T=${n11} B=${n12} cy=${Math.trunc((n11 + n12) / 2)} bt=(${x},${n11 - 1})a${actAt(x, n11 - 1)}/${actAt(x - 1, n11 - 1)}/${actAt(x + 1, n11 - 1)} bb=(${x},${n12 + 1})a${actAt(x, n12 + 1)}/${actAt(x - 1, n12 + 1)}/${actAt(x + 1, n12 + 1)}`);
       x = Math.trunc((n9 + n10) / 2);
       y = Math.trunc((n11 + n12) / 2);
       const n13 = n10 - n9, n14 = n12 - n11;

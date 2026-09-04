@@ -373,6 +373,14 @@ export class SpriteAtlas {
    *  ★键必须带 .png 后缀(uiFiles 键全部带)——裸键恒 null 且连请求都不发;
    *  每键 warn 一次(F5 报告 warn 环自动留痕;全屏地图 MapBG/Map 键失配由此类
    *  bug 实锤,2026-08-13) */
+  /** 清单键存在查询(零请求零副作用):调用方拼变体通道等“试探性”预载清单前
+   *  过滤——清单=构建期磁盘真相,键不存在则文件必然不存在(2026-09-04
+   *  Player_11_0/1/2/4/6/8 族:原版变体 11 仅带 5 个差异通道,预载无条件 add
+   *  全 14 通道=每会话固定 6 个 404/键)。 */
+  uiFileExists(name: string): boolean {
+    return name in this.uiFiles;
+  }
+
   vui(name: string): DrawRect | null {
     const path = this.uiFiles[name];
     if (!path) {

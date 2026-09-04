@@ -3,7 +3,8 @@
 //      （655=PlanteraThorns 非蛾蛋;门=NPC.AnyNPCs(262),NPCID.cs:11595 Plantera=262;
 //        底承集=腐化草 23 ∨ 猩红草 199,TileID.cs:483/:835）
 //   ② growCactus 头门 nactive 化 —— cs:57059 原版字面 `!tile.nactive()`
-//   ③ 地表 233 兜底 3×2 化（PlaceJunglePlant + Next(12) 重试）—— cs:75295-75308
+//   ③ 地表 233 兜底 3×2 化（PlaceJunglePlant + Next(12) 重试）—— cs:75375-75390
+//      （★F7 勘误,曾误锚 cs:75295-75308=猩红 SpreadGrass flag7 段）
 //   ④ remix 花藤掷（cs:73108-73111）+ 藤块 Next(1) 掷位归位（cs:73087-73090,
 //      UnifiedRandom.Next(maxValue) 恒走 Sample()）+ 水晶碎块/叶绿 remix 深度带
 //      （cs:70137/:70180）
@@ -39,6 +40,7 @@ function makeEvo(st: TileStore, over: Partial<EvolutionHost> = {}): WorldEvoluti
 
 type Priv = {
   overgroundTile(i: number, j: number, wallDist: number): void;
+  undergroundTile(i: number, j: number, wallDist: number): void;
   grassGrowth(i: number, j: number, a: number, b: number, c: number, d: number, under: boolean): void;
   growCactus(i: number, j: number): void;
   hardUpdateWorld(i: number, j: number): void;
@@ -139,6 +141,30 @@ describe('①b 邪恶地树苗清除（cs:72721-72729,底承 腐化草23/猩红�
   });
 });
 
+// ★F1（2026-09-04 蓝队 M24 补遗）：UndergroundTile 首个独立 if（cs:73830-73837,
+// 位次在药草支 cs:73838-73839 之前）——地表支（cs:72630-72636,①a 已钉）的孪生。
+describe('①c 地下 655 荆棘清除（cs:73830-73837,AnyNPCs(262) 门,alch 链之前）', () => {
+  it('地下荆棘 + 无世花 → 采样即清除（零掷,同地表支）', () => {
+    const st = wideWorld();
+    st.setTileSilent(400, 40, S(655));
+    const evo = priv(makeEvo(st));
+    const cnt = scriptRng(evo, [0.9, 0.9]);            // 槽位哨兵:有掷即计数
+    evo.undergroundTile(400, 40, 3);
+    expect(cnt.calls()).toBe(0);                       // 清除无掷骰,后链 !isActive 早退
+    expect(st.flags[st.idx(400, 40)]).toBe(0);         // ★地下荆棘被收走
+  });
+
+  it('anyPlantera()=true（花在野）→ 地下荆棘保留', () => {
+    const st = wideWorld();
+    st.setTileSilent(400, 40, S(655));
+    const evo = priv(makeEvo(st, { anyPlantera: () => true }));
+    scriptRng(evo, [0.9]);                             // 哨兵:1/2500 染料掷落空,全链确定性
+    evo.undergroundTile(400, 40, 3);
+    expect(st.flags[st.idx(400, 40)]).toBe(1);
+    expect(st.type[st.idx(400, 40)]).toBe(S(655));
+  });
+});
+
 describe('② growCactus 头门 nactive 化（cs:57059）', () => {
   it('已致动仙人掌：头门早退,零掷不长', () => {
     const st = wideWorld();
@@ -160,7 +186,7 @@ describe('② growCactus 头门 nactive 化（cs:57059）', () => {
   });
 });
 
-describe('③ 地表 233 兜底 3×2 化（cs:75295-75308,PlaceJunglePlant+Next(12) 重试）', () => {
+describe('③ 地表 233 兜底 3×2 化（cs:75375-75390,PlaceJunglePlant+Next(12) 重试）', () => {
   function jungleSurface(thirdCol: number): TileStore {
     const st = wideWorld();
     st.setTileSilent(400, 41, S(60));                  // 采样丛林草（minJ=40）
@@ -254,7 +280,9 @@ describe('④b 水晶碎块 remix 深度带放宽（cs:70137）', () => {
       rockLevel: 500, remixWorld: true, flags: { hardMode: true },
       journeyStopBiomeSpread: true,                    // 隔离邪恶蔓延臂的掷骰
     }), true);
-    const cntR = scriptRng(evoR, [0.0, 0.0, 0.9, 0.5]); // 1/5 过;Next(4)=向左;rare 1/50 落空;Next(18)
+    // ★F4 掷序（cs:70160-63）：Next(18) 在 Next(50) 之前——脚本 0.5 落在 Next(18)
+    //  （style 9 → fx 162）,0.9 落在 Next(50)（落空）。旧序下同脚本会得 fx=16*18。
+    const cntR = scriptRng(evoR, [0.0, 0.0, 0.5, 0.9]); // 1/5 过;Next(4)=向左;Next(18)=9;rare 1/50 落空
     evoR.hardUpdateWorld(400, 40);
     expect(cntR.calls()).toBe(4);
     expect(stR.type[stR.idx(399, 40)]).toBe(S(129));   // ★岩层之上落碎块
@@ -270,6 +298,58 @@ describe('④b 水晶碎块 remix 深度带放宽（cs:70137）', () => {
     expect(cntN.calls()).toBe(0);                      // 非 remix：带先拒,Next(5) 不消费
     expect(stN.type[stN.idx(399, 40)]).toBe(0);
   });
+});
+
+// ★F4（2026-09-04 蓝队 M24 补遗）水晶 style 掷序（cs:70160-63）：先 Next(18),后
+//  Next(50)==0 条件才掷 Next(6)——稀有 3 掷/普通 2 掷不变,序变（旧码先 50 后 18）。
+describe('④d 水晶 style 掷序（cs:70160-63,先 18 后 50 条件 6）', () => {
+  const mkShardEvo = (st: TileStore) => priv(makeEvo(st, {
+    rockLevel: 500, remixWorld: true, flags: { hardMode: true }, journeyStopBiomeSpread: true,
+  }), true);
+  it('rare 档：Next(18)+Next(50)+Next(6) 三掷 → style=18+Next(6)（fx≥324）', () => {
+    const st = wideWorld();
+    st.setTileSilent(400, 40, S(117));
+    const evo = mkShardEvo(st);
+    const cnt = scriptRng(evo, [0.0, 0.0, 0.0, 0.0, 0.0]); // 1/5 过;Next(4)=左;18=0;50=0(rare);6=0
+    evo.hardUpdateWorld(400, 40);
+    expect(cnt.calls()).toBe(5);                       // ★rare 三掷在 1/5+方向之后
+    expect(st.type[st.idx(399, 40)]).toBe(S(129));
+    expect(st.frameX[st.idx(399, 40)]).toBe(18 * 18);  // ★style 18 → fx=324（18..23 rare 档）
+  });
+
+  it('普通档：Next(18)+Next(50) 两掷,Next(6) 不消费', () => {
+    const st = wideWorld();
+    st.setTileSilent(400, 40, S(117));
+    const evo = mkShardEvo(st);
+    const cnt = scriptRng(evo, [0.0, 0.0, 0.5, 0.9]);  // 1/5 过;Next(4)=左;Next(18)=9;Next(50) 落空
+    evo.hardUpdateWorld(400, 40);
+    expect(cnt.calls()).toBe(4);
+    expect(st.frameX[st.idx(399, 40)]).toBe(9 * 18);
+  });
+});
+
+// ★F3（2026-09-04 蓝队 M24 补遗）方向表 vanilla 化（cs:70141-51 default 支
+//  `num3=(num!=0)?1:-1`——num∈{2,3} 恒 ≠0 → dy 恒 +1,原版永不向上）。
+describe('④e 水晶碎块方向表（cs:70141-51,L/R/D/D,无向上支）', () => {
+  const cases: Array<[number, number, number]> = [
+    [0, 399, 40],   // 左
+    [1, 401, 40],   // 右
+    [2, 400, 41],   // 下（default 支 num=2≠0 → dy=+1）
+    [3, 400, 41],   // 下（default 支 num=3≠0 → dy=+1）
+  ];
+  for (const [d, ex, ey] of cases) {
+    it(`Next(4)=${d} → (${ex},${ey})`, () => {
+      const st = wideWorld();
+      st.setTileSilent(400, 40, S(117));
+      const evo = priv(makeEvo(st, {
+        rockLevel: 500, remixWorld: true, flags: { hardMode: true }, journeyStopBiomeSpread: true,
+      }), true);
+      const cnt = scriptRng(evo, [0.0, d / 4, 0.5, 0.9]); // 1/5 过;Next(4)=d;Next(18)=9;1/50 落空
+      evo.hardUpdateWorld(400, 40);
+      expect(cnt.calls()).toBe(4);
+      expect(st.type[st.idx(ex, ey)]).toBe(S(129));      // d=2/3 皆向下=原版（旧表 d=2 会向上）
+    });
+  }
 });
 
 describe('④c 叶绿 remix 深度带放宽（cs:70180,中带上移含两臂）', () => {

@@ -32,10 +32,11 @@
 //     灰烬格要么消失，永不掉物品
 //   · 落点/爆心锚用上一 tick 未嵌入位（prevX/prevY,SW-L1 F1 同口径——本仓无盒级
 //     碰撞管线,kill 判定=中心格实心,直接用现位必 occupied;见 DirtBallProj 头注）。
-//     ★平台面备案：40 在 ProjectileID.Sets.FallingBlockDoesNotFallThroughPlatforms
-//     （ProjectileID.cs:295）→ 原版 flag6=false 落在平台上;本仓 kill 判据 isSolid
-//     （平台 tileSolidTop 非 solid）→ 穿台继续坠,与 DirtBallProj（弹 17 同表同判据）
-//     家族口径一致,随该闸门重基线批一并清偿
+//     ★平台/家具顶（★M13 A-1/A-4 2026-09-04 清偿）：40 ∈
+//     ProjectileID.Sets.FallingBlockDoesNotFallThroughPlatforms（ProjectileID.cs:295）
+//     → flag6=false=TileCollision 不透平台（Projectile.cs:17653-17655）→ kill 判据
+//     改 isSolid||isPlatform（FallingBlock 同族几何）,平台上/家具顶照接;半砖落面
+//     =死亡格半砖格本身→occupied→Vanish（FallingBlock surfHalf 特支同款）
 // 联机：不入 msg27 kind 表（netMakeProj 无档,同 DirtBallProj/RollingBoulder 惯例）——
 // 房主侧连锁毁格+弹侧 PlaceTile 经 TileStore setTile 的 listeners/netReporter 通道
 // 自然同步（脏区/联机格操作均走该口）,弹体本身对访客不可见（视觉面缺口,备案）。
@@ -118,11 +119,23 @@ export class AshBallProj extends Entity {
           }
         }
       }
-      // tileCollide:中心格实心 → Kill（爆心=上一 tick 未嵌入位,F1）
+      // tileCollide:落面 → Kill（爆心=上一 tick 未嵌入位,F1）。落面判据对齐 FallingBlock
+      // 同族几何（★M13 A-1/A-4,2026-09-04）：isSolid||isPlatform——平台/家具顶
+      // （tileSolidTop 底行 frameY==0）照接（Collision.cs:2330-2333 flag 门;40 ∈
+      // FallingBlockDoesNotFallThroughPlatforms → flag6=false=落平台,
+      // Projectile.cs:17653-17655,原"穿台继续坠"备案就此清偿）
       const cx = Math.floor((this.x + this.w / 2) / 16);
       const cy = Math.floor((this.y + this.h / 2) / 16);
-      if (st.inBounds(cx, cy) && st.isSolid(cx, cy)) {
-        this.kill(game, this.prevX + this.w / 2, this.prevY + this.h / 2);
+      if (st.inBounds(cx, cy) && (st.isSolid(cx, cy) || st.isPlatform(cx, cy))) {
+        // 半砖特支（FallingBlock surfHalf 同款）：盒底钳到半砖面顶（Collision.cs
+        // :2350-2354 vector4.Y+=8）→ 钳位中心=面顶+3 ∈半砖格 → 死亡格=半砖格本身
+        // (:79120-79121);:79243 上推支 velocity.Y 已被 TileCollision 清 0=死支
+        // （R2' F2 同谳）→ num16 停在半砖格=active → outer else :79298 → type 40
+        // num18=0 → 不铺不掉=Vanish。爆心锚改钳位中心（x 不动,y=面顶+8−h/2）
+        const surfHalf = st.half[st.idx(cx, cy)] !== 0;
+        const bx = surfHalf ? this.x + this.w / 2 : this.prevX + this.w / 2;
+        const by = surfHalf ? cy * 16 + 8 - this.h / 2 : this.prevY + this.h / 2;
+        this.kill(game, bx, by, surfHalf ? { tx: cx, ty: cy } : undefined);
         return;
       }
     }
@@ -157,8 +170,9 @@ export class AshBallProj extends Entity {
   }
 
   /** Kill → 音尘（:77878-77886）+ aiStyle10 铺设段（:79107-79311,num17=57/num18=0）。
-   *  bx/by = 爆心（弹中心像素,F1 回退锚） */
-  private kill(game: GameHooks, bx: number, by: number): void {
+   *  bx/by = 爆心（弹中心像素,F1 回退锚;半砖落面=钳位中心）;death = 已知钳位死亡格
+   *  （半砖特支直传,跳过 dirtBallDepositTile 的半砖上推死支——见该函数注） */
+  private kill(game: GameHooks, bx: number, by: number, death?: { tx: number; ty: number }): void {
     this.dead = true;
     const st = game.world.store;
     game.playSfx('dig', 1, bx, by);                        // PlaySound(0)（:77879）
@@ -168,7 +182,7 @@ export class AshBallProj extends Entity {
     }
     // 铺设段：落点=爆心中心格（num15/num16 :79108-79109）,半砖上推+flag2 门已封装在
     // dirtBallDepositTile（aiStyle10 通用段 1:1）。type 40 num18=0：被占/被拦均无掉落
-    const dep = dirtBallDepositTile(st, bx, by, this.vx, this.vy);
+    const dep = dirtBallDepositTile(st, bx, by, this.vx, this.vy, death);
     if (!dep.occupied && !dep.blocked && this.ashTileId > 0 && st.inBounds(dep.tx, dep.ty)) {
       st.setTile(dep.tx, dep.ty, this.ashTileId, 0, 0);    // PlaceTile(57,forced:true)（:79276）
       // 下方半砖/坡面复原（SlopeTile :79280-79287）

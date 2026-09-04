@@ -178,4 +178,46 @@ describe('FallingBlock', () => {
     // 2026-08-21 缺口类清偿：Damage_EVP（Projectile.cs:13770-13781）难度乘区×通用×2
     expect(dmg).toEqual([FallingBlock.DAMAGE * 2]);
   });
+
+  // ★M13 B-2（2026-09-04）常量对齐 AI_010：重力 0.41（Projectile.cs:58999-59002
+  //  ai[0]==1 支）、vy 封顶 10（:59075-59082 非 736-738 支）、rot+0.1（:59077）、
+  //  出生初速 0.41（SpawnFallingBlockProjectile WorldGen.cs:87355 NewProjectile 0f,
+  //  0.41f + :87358 ai[0]=1f → 首拍 AI_010 再 +0.41=0.82）。旧值 0.3/cap16/rot0.25
+  //  系 aiStyle 2 通用重力近似。★死亡格恒等式（本文件例 1-7 落点断言即其重产）：
+  //  单拍位移 <格宽 16px ⇒ 上一帧中心格至多高出现帧中心格 1 格 ⇒ 落地放置格=死亡面
+  //  上一格恒等（cap10<16 收紧,对 [0,16) 一切 vy 成立,与重力系数无关）。
+  it('B-2 常量:初速 0.41→首拍 0.82、重力 0.41、vy 封顶 10、rot+0.1', () => {
+    expect(FallingBlock.GRAV).toBe(0.41);
+    expect(FallingBlock.VY_CAP).toBe(10);
+    expect(FallingBlock.SPAWN_VY).toBe(0.41);
+    expect(FallingBlock.DAMAGE).toBe(10);            // GetSandfallProjData 缺省档 :87798
+    const { game, world } = makeGame();
+    clearCol(world, 32, 0, 31);                      // 全空列:不落地,量测速度序列
+    const fb = new FallingBlock(32 * 16 + 3, 2 * 16 + 3, 'sand');
+    expect(fb.vy).toBe(0.41);                        // :87355 出生初速
+    const vys: number[] = [];
+    const rots: number[] = [];
+    for (let i = 0; i < 40 && !fb.dead; i++) {
+      fb.fixedUpdate(1 / 60, game);
+      vys.push(fb.vy);
+      rots.push(fb.rot);
+    }
+    expect(vys[0]).toBeCloseTo(0.82, 5);             // 首拍 0.41+0.41（ai[0]=1 预置同款）
+    expect(vys[1]).toBeCloseTo(1.23, 5);             // 0.82+0.41
+    expect(vys[2]).toBeCloseTo(1.64, 5);
+    expect(Math.max(...vys)).toBe(10);               // :59078-59081 封顶 10（旧 16）
+    expect(rots[0]).toBeCloseTo(0.1, 5);             // :59077 rot+=0.1（旧 0.25）
+  });
+
+  it('B-2 落地几何恒等（cap10<16）:直落弹死亡格=上一帧中心格,放置在死亡面上一格', () => {
+    // 高速段（封顶 10）坠落 20 格后落地面:放置格=死亡面上一格（例 1/2 的长距版）
+    const { game, world } = makeGame();
+    clearCol(world, 34, 0, 30);
+    world.store.setTile(34, 31, TILE_BY_KEY['stone']!, 0, 0);
+    const fb = new FallingBlock(34 * 16 + 3, 1 * 16 + 3, 'sand');
+    for (let i = 0; i < 300 && !fb.dead; i++) fb.fixedUpdate(1 / 60, game);
+    expect(fb.dead).toBe(true);
+    expect(world.store.get(34, 30)).toBe(TILE_BY_KEY['sand']!);   // 死亡面(31)上一格
+    expect(world.store.get(34, 31)).toBe(TILE_BY_KEY['stone']!);
+  });
 });

@@ -206,6 +206,9 @@ export interface AssetCacheState {
    *  失败(隐私模式禁用/损坏/策略)——资源走网络直载(每次启动需下载 364MB),
    *  UI 须显式提示而非静默劣化。 */
   storageUnavailable?: boolean;
+  /** ★管线未启用原因(notePipelineDown 落账;非空=SW 管线关闭,含降级环境说明) */
+  pipelineDown?: string;
+  pipelineDownTransient?: boolean;
   version: string;
   total: number;
   done: number;
@@ -245,7 +248,7 @@ const progressCbs = new Set<(s: AssetCacheState) => void>();
 export function assetCacheState(): AssetCacheState {
   // done 钳制:files 批与 done 消息异步交错时内部计数可能超 total(straggler 批),
   // 对外(UI 百分比/门槛)恒 ≤ total
-  return { ...state, done: Math.min(state.done, state.total) };
+  return { ...state, done: Math.min(state.done, state.total), pipelineDown, pipelineDownTransient };
 }
 
 export function onAssetProgress(cb: (s: AssetCacheState) => void): () => void {

@@ -8,7 +8,9 @@ import { chestDestroyableAt, canKillTileMowingAt, mowedSheetOf, isDirtRodTargetS
 import { Wiring } from '../src/world/Wiring';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
-import { dirtBallDepositTile, blockBelowMakesSandFallAt } from '../src/entities/DirtBallProj';
+import { dirtBallDepositTile } from '../src/entities/DirtBallProj';
+import { blockBelowMakesSandFall } from '../src/entities/FallingBlock';   // ★M13 A-2 单源化：BBMSF 实现迁 FallingBlock
+const blockBelowMakesSandFallAt = blockBelowMakesSandFall;               // 旧名别名（本文件断言不改）
 import type { ChestData } from '../src/world/World';
 
 const S = (sh: number) => TILE_INTERNAL_BY_SHEET.get(sh)!;

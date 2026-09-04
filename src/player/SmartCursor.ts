@@ -25,6 +25,7 @@ import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/t
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
+import { canCutTile } from '../world/CanCutTile';
 
 // ===================== 原版 TileID.Sets / ItemID.Sets 集合（TileID.cs / ItemID.cs 行号注释） =====================
 
@@ -1235,8 +1236,12 @@ export class SmartCursor {
         for (let l = j - 1; l <= j; l++) {
           if (!st.inBounds(k, l)) return false;
           const t = st.get(k, l);
-          // :1075 active() 口径；CanCutTile 差记台账（本仓 tileCutType 近似）
-          if (hasTileAt(st, k, l) && (tileSolidType(t) || !tileCutType(t))) return false;
+          // :1075 active() 口径 + `!WorldGen.CanCutTile(k, l, TileCuttingContext.TilePlacement)`
+          //  （WorldGen.cs:88111-24 单源,下格存在 && wall!=350 && 下格 type∉{78,380,579}
+          //  && (type!=254||frameX>=144)）。★F6（2026-09-04 蓝队 M24 补遗）：曾以
+          //  tileCutType（Main.tileCut decor 表）近似——差记台账撤销：78/380/579 下邻、
+          //  回声墙 350、未熟南瓜三域实差全数收编。
+          if (hasTileAt(st, k, l) && (tileSolidType(t) || !canCutTile(st, k, l, 'TilePlacement'))) return false;
         }
       }
       return true;

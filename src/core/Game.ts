@@ -893,6 +893,14 @@ export const KILLTAIL_ICE_LIQUID_SHEETS: ReadonlySet<number> = new Set([147, 224
 export const ASH_CHAIN_NEIGHBOR_DELTAS: ReadonlyArray<readonly [number, number]> =
   [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
 export const ASH_TILE_INTERNAL_ID: number = TILE_INTERNAL_BY_SHEET.get(57) ?? -1;
+// ★A-3 护栏（2026-09-04）：灰烬连锁 KillTile→KillTile 纯递归（原版 WorldGen.cs
+//  :64251-64301 无任何深度/计数语义）。JS 侧宽 N 悬空灰烬檐=DFS 深度 N,而
+//  breakTile 栈帧远大于 CLR 同名帧 → V8 先于原版爆 RangeError。护栏上限取
+//  【原版不可达的大数】（单条连锁 1 万格悬空灰烬不存在）——到达即停止连锁重入,
+//  【不改变原版语义,仅防 JS 栈与 CLR 的栈深差异】（模块级计数=同步递归深度,
+//  进出配平自归零,不依赖 Game 实例构造）。
+export const ASH_CHAIN_RECURSION_GUARD = 10000;
+let ashChainRecursionDepth = 0;
 // ===================== D-1 decor 失撑链（原版 TileFrameImportant :85703 Check* 族） =====================
 // 原版 decor 支撑亡杀全走 TileFrame 分派的 Check* 族（TileFrameImportant :85703 起）；
 // 本表按 vanilla sheet 记支撑语义种类，未列入的 decor（藤 52/62/382/528/636/638=checkVineAt、
@@ -1755,12 +1763,12 @@ export const PREPARE_BOMB_HURT_BOX: Readonly<Record<number, number>> = (() => {
  *  2026-09-04 起=kbDir 弹体朝向 :13652 `num40 = direction`,见 explosionKbDir 注,
  *  旧"爆心→受击体 X 向"径向近似退役）。表外弹口径：
  *  · 108/164/1002：PrepareBombToBlow 无分支 + SetDefaults 无 knockBack 行
- *    （:1955-1968/:9525-9539/:2528-2539,缺省 :95 `knockBack = 0f`）→ 原版击退 0；
- *    ★SW-AC1 2026-09-04 勘误备案：上注漏算 NewProjectile 生成参——Wiring.cs:2042
- *    （108）/ :3093（164）/ WorldGen.cs:49178（1002）均传 knockBack=10f,经
- *    Projectile.NewProjectile :10885 `projectile.knockBack = KnockBack` 覆写缺省
- *    0 → 原版电路/链爆/地雷/TNT 桶爆 NPC 击退=10 非 0。本仓暂维持 kb=0（金标
- *    tests/explosion-redteam-r3.test.ts:49 钉源码,改值须连金标重审）,遗留债；
+ *    （:1955-1968/:9525-9539/:2528-2539,缺省 :95 `knockBack = 0f`）→ ★SW-AC1 勘误：
+ *    上注漏算 NewProjectile 生成参——Wiring.cs:2042（108）/ :3093（164）/
+ *    WorldGen.cs:49178（1002）均传 knockBack=10f,经 Projectile.NewProjectile
+ *    :10885 `projectile.knockBack = KnockBack` 覆写缺省 0 → 原版电路/链爆/地雷/
+ *    TNT 桶爆 NPC 击退=10 非 0。SW-AD1 2026-09-04：PREPARE_BOMB_KB 补
+ *    {108,164,1002}→10 本批落地,源码金标 r3:49 正则同步；
  *  · 715-718（Celeb2 烟花弹）：同样不入表,Kill 直调 Damage() 不改 kb（:75034-75049）
  *    → 击退 = 发射时武器 kb,由调用点穿 kb2。 */
 export const PREPARE_BOMB_KB: Readonly<Record<number, number>> = (() => {
@@ -5098,11 +5106,16 @@ export class Game implements GameHooks {
     const hair = app?.hair ?? 0;
     const files = new Set<string>();
     for (const s of [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]) {
-      files.add(`vanilla-ui/Player_${variant}_${s}.png`);
-      if (variant !== 0) files.add(`vanilla-ui/Player_0_${s}.png`); // 女体缺通道男体回退
+      // ★清单键过滤(2026-09-04):原版变体仅带差异通道(11 号只有 3/5/7/9/10),
+      //  无条件 add 全 14 通道=缺失通道必 404(每会话固定噪声)。回退链(渲染层
+      //  ?? Player_0)不变,此处只预载清单里真实存在的键。
+      if (a.uiFileExists(`Player_${variant}_${s}.png`)) files.add(`vanilla-ui/Player_${variant}_${s}.png`);
+      else if (a.uiFileExists(`Player_0_${s}.png`)) files.add(`vanilla-ui/Player_0_${s}.png`);
+      if (variant !== 0 && a.uiFileExists(`Player_0_${s}.png`)) files.add(`vanilla-ui/Player_0_${s}.png`);
     }
-    files.add(`vanilla-ui/Player_Hair_${hair + 1}.png`);
-    files.add(`vanilla-ui/Player_HairAlt_${hair + 1}.png`);
+    for (const hf of [`Player_Hair_${hair + 1}.png`, `Player_HairAlt_${hair + 1}.png`]) {
+      if (a.uiFileExists(hf)) files.add(`vanilla-ui/${hf}`);
+    }
     await a.preloadUiFiles(files);
   }
 
@@ -5136,11 +5149,14 @@ export class Game implements GameHooks {
     const hair = app?.hair ?? 0;
     const playerFiles = new Set<string>();
     for (const s of [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]) {
-      playerFiles.add(`vanilla-ui/Player_${variant}_${s}.png`);
-      if (variant !== 0) playerFiles.add(`vanilla-ui/Player_0_${s}.png`); // 女体缺通道男体回退
+      // ★清单键过滤(同 ensureAppearanceFiles 注):缺失通道不进预载清单
+      if (a.uiFileExists(`Player_${variant}_${s}.png`)) playerFiles.add(`vanilla-ui/Player_${variant}_${s}.png`);
+      else if (a.uiFileExists(`Player_0_${s}.png`)) playerFiles.add(`vanilla-ui/Player_0_${s}.png`);
+      if (variant !== 0 && a.uiFileExists(`Player_0_${s}.png`)) playerFiles.add(`vanilla-ui/Player_0_${s}.png`);
     }
-    playerFiles.add(`vanilla-ui/Player_Hair_${hair + 1}.png`);
-    playerFiles.add(`vanilla-ui/Player_HairAlt_${hair + 1}.png`); // 帽子发型头盔(小图,直接备上)
+    for (const hf of [`Player_Hair_${hair + 1}.png`, `Player_HairAlt_${hair + 1}.png`]) {
+      if (a.uiFileExists(hf)) playerFiles.add(`vanilla-ui/${hf}`);
+    } // 帽子发型头盔(小图,直接备上)
     await a.preloadUiFiles(playerFiles);
     // 仅当前装备的 Armor 表;换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
     const armorFiles = new Set<string>();
@@ -10603,6 +10619,17 @@ export class Game implements GameHooks {
       tileBoost: tb,
       wireToolMode: this.wireToolMode,
       occupants,
+      // ★F5（2026-09-04 蓝队 M24 补遗）：Step_Boulders :936-949 玩家命中盒净空消费面
+      //  （SmartCursorHelper.cs:941-948 遍历 Main.player[0..254] 取 active && !dead）——
+      //  env.players = 全玩家命中盒。单人=自己；联机追加远端存活玩家（rp.x/y=碰撞盒
+      //  左上,原版身材 20×42——lootPlayers 表 :3296「+10/+21→中心」同源换算）。
+      players: [
+        { x: p.x, y: p.y, w: p.w, h: p.h },
+        ...(this.net?.active
+          ? [...this.net.players.values()].filter((q) => q.active && !q.dead)
+              .map((q) => ({ x: q.x, y: q.y, w: 20, h: 42 }))
+          : []),
+      ],
       controlUseItem: !!inp.mouseDown,
       // 油漆 lookup（SmartCursorHelper.cs:167-181 TryFindingPaintInplayerInventory：
       // 仅手持刷/滚（1071/1543/1072/1544）才查 FindPaintOrCoating；刮刀不查）
@@ -19149,16 +19176,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  =中心格仍 active——因此【正上方】灰烬的 !SolidTile(中心) 恒假不塌（向上的整列
     //  崩塌由后续破坏重扫承担）,插入点在 setTile(0) 之前=保持同序（删后插=链扫到已清
     //  中心=向上的行为面翻车）。
-    if (def.vanilla?.sheet === 57 && !!this.world.seedFlags?.getGoodWorld) {
-      for (let l = 0; l < ASH_CHAIN_NEIGHBOR_DELTAS.length; l++) {
-        const nx = x + ASH_CHAIN_NEIGHBOR_DELTAS[l][0], ny = y + ASH_CHAIN_NEIGHBOR_DELTAS[l][1];
-        if (!st.inBounds(nx, ny)) continue;                                  // 原版越界邻=无格
-        if (!st.hasTile(nx, ny)) continue;                                   // tile2.active()
-        if (Math.floor(Math.random() * 2) !== 0) continue;                   // genRand.Next(2)==0
-        if (st.type[st.idx(nx, ny)] !== ASH_TILE_INTERNAL_ID) continue;      // tile2.type==57
-        if (this.solidTileStrictAt(nx, ny + 1)) continue;                    // !SolidTile(nx,ny+1)
-        this.breakTile(nx, ny, false, true);                                 // KillTile(...,noItem:true)
-        this.entities.add(new AshBallProj(nx * TILE + 8, ny * TILE + 8, 0, 0.41, 15), 'projectiles');
+    if (def.vanilla?.sheet === 57 && !!this.world.seedFlags?.getGoodWorld
+      && ashChainRecursionDepth < ASH_CHAIN_RECURSION_GUARD) {
+      // ★A-3 护栏（2026-09-04）：递归深度帽=ASH_CHAIN_RECURSION_GUARD（原版不可达,
+      // 见常量注）——【护栏不改变原版语义,仅防 JS 栈差异】,try/finally 保证异常
+      // 路径计数配平;到达上限=跳过连锁重入（本格仍照常清格 :64430）
+      ashChainRecursionDepth++;
+      try {
+        for (let l = 0; l < ASH_CHAIN_NEIGHBOR_DELTAS.length; l++) {
+          const nx = x + ASH_CHAIN_NEIGHBOR_DELTAS[l][0], ny = y + ASH_CHAIN_NEIGHBOR_DELTAS[l][1];
+          if (!st.inBounds(nx, ny)) continue;                                  // 原版越界邻=无格
+          if (!st.hasTile(nx, ny)) continue;                                   // tile2.active()
+          if (Math.floor(Math.random() * 2) !== 0) continue;                   // genRand.Next(2)==0
+          if (st.type[st.idx(nx, ny)] !== ASH_TILE_INTERNAL_ID) continue;      // tile2.type==57
+          if (this.solidTileStrictAt(nx, ny + 1)) continue;                    // !SolidTile(nx,ny+1)
+          this.breakTile(nx, ny, false, true);                                 // KillTile(...,noItem:true)
+          this.entities.add(new AshBallProj(nx * TILE + 8, ny * TILE + 8, 0, 0.41, 15), 'projectiles');
+        }
+      } finally {
+        ashChainRecursionDepth--;
       }
     }
     st.setTile(x, y, 0);
@@ -20798,11 +20834,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  anchorBottom 含 AlternateTile（:4749）恒 null → 液体档走 liquidSpecOf 直读。
     //  法杖补种（:45209 TryReplantingHerbs→PlaceAlch）与生成期不经理——原版同
     //  （PlaceTile 拒置表 :59945-59963 无 82）。
+    //  ★M13 B-4（2026-09-04）补 active 臂：岩浆门挂在 :40058 的 `!tile.active() &&
+    //  !IsBlockedByLava(...)` 半边——只对【非活性】点击格设门;活性格走
+    //  IsReplaceableBlock 臂（岩浆不设门）。曾无条件查岩浆 → 活性目标格（致动/
+    //  BreakableWhenPlacing 族+岩浆）被误拒。门位谓词=裸 active()（hasTile,含致动格）。
     {
       const shHerb = def?.vanilla?.sheet ?? -1;
       if (shHerb === 82 || shHerb === 83 || shHerb === 84) {
         const spec = liquidSpecOf(shHerb);
-        if (spec && st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0
+        if (spec && st.inBounds(tx, ty) && !st.hasTile(tx, ty)
+          && st.liquid[st.idx(tx, ty)] > 0
           && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.LAVA) {
           const liq = spec.liqStyles?.[String(itemDef.placeStyle ?? 0)] ?? spec.liq;
           if (!liquidCellOk(st, tx, ty, liq)) return;
@@ -23701,16 +23742,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           1 /* SW-AC1 2026-09-04：kbDir=+1——电路/器件爆炸弹出生恒零速
               * （Wiring.cs:2042 108/:3093 164 零速 NewProjectile）→ Entity.direction
               * 缺省 1 + 自动面 else 档同值,原版全 victim 击退方向恒 +1 */),
-        // SW-S1 2026-09-04：电路/器件爆炸 kb——108/164 SetDefaults 无 knockBack 行
-        // （:1955-1968/:2528-2539,缺省 :95=0f）且不入 PrepareBombToBlow 表 → 原版击退 0
-        // （表内弹型经器件通道触发时仍取表值）;未列型 ?? 0 同口径
-        // ★SW-AC1 2026-09-04 勘误备案：上注漏算 NewProjectile 生成参——Wiring.cs:2042
-        // （108,damage500）/ :3093（164,damage250）第 7 实参 knockBack=10f,经
-        // Projectile.NewProjectile :10885 `projectile.knockBack = KnockBack` 覆写
-        // 缺省 0（PrepareBombToBlow :47629-47720 确无 108/164 分支不改写）→ 原版
-        // 电路爆 NPC 击退=10 非 0。本仓暂维持 kb=0（SW-S1 决定被
-        // tests/explosion-redteam-r3.test.ts:49 源码金标钉死,改值须连金标重审）
-        // ——记为遗留债,不在本方向批次擅动
+        // SW-S1 2026-09-04：电路/器件爆炸 kb 走表（PREPARE_BOMB_KB[projId]——
+        // ★SW-AD1 2026-09-04：表补 {108,164,1002}→10,NewProjectile 生成参
+        // knockBack=10f（Wiring.cs:2042/:3093 第 7 实参,经 Projectile.cs:10885
+        // `projectile.knockBack = KnockBack` 赋值——SetDefaults 缺行≠无 kb,
+        // SW-S1/AC1 两代"击退 0"备案均系漏算生成参,本批以表值落地）
+        // 未列型 ?? 0 同口径
       extractinatorPull: (ax: number, ay: number, blockType: number) =>
         this.extractinatorPullImpl(ax, ay, blockType),
       dropItemStack: (vid: number, stack: number, px: number, py: number) =>
@@ -28705,9 +28742,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private dialogNpc: TownNPC | null = null;
 
   // ---- 下落沙族(原版 SandBallFalling 系,AI_010) ----
-  /** 会下落的 tile(原版 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/123 淤泥/224 雪泥) */
+  /** 会下落的 tile（TileID.Sets.Falling,TileID.cs:395 = 53 沙/234 猩红沙/112 黑檀沙/
+   *  116 珍珠沙/224 雪泥/123 淤泥/330-333 钱币堆/495 贝壳堆,全 11 件——★M13 B-3
+   *  2026-09-04 补齐:此前 6/11,钱币堆/贝壳堆是"掉件表有、触发集无"的死数据） */
   private static readonly FALLING_TILES = new Set<number>(
-    ['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block', 'silt', 'v_224_slush_block']
+    ['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block', 'silt', 'v_224_slush_block',
+      'v_330_copper_coin_pile', 'v_331_silver_coin_pile', 'v_332_gold_coin_pile', 'v_333_platinum_coin_pile',
+      'v_495_shell_pile_block']
       .map((k) => TILE_BY_KEY[k])
       .filter((v): v is number => v !== undefined),
   );
@@ -34121,14 +34162,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** BlockBelowMakesSandFall（WorldGen.cs:87330-87350 1:1）：放置点下方会让
-   *  沙塌落（下格空 / 下下格空且下格非实心 / 下格为 165 洞穴装饰） */
+  /** BlockBelowMakesSandFall（WorldGen.cs:87868-87893）——★M13 A-2（2026-09-04）
+   *  单源代理：实现=blockBelowMakesSandFall@FallingBlock.ts（tileSolidOf=def.solid∪
+   *  tileSolid∩tileSolidTop 九件套{19,239,380,427,435-439},:87884-87 逐字）。旧内联版
+   *  arm2 用 `!st.isSolid(tx,ty+1)` 朴素代理——平台 19 tileSolid=true 而本仓
+   *  def.solid=false → 平台上的落沙弹被误判"下方撑不住"→ flag2 拒铺掉件;单源后
+   *  平台=正牌支撑 → flag2 假 → 正常铺上（falling-sand.test.ts 平台例同门）。
+   *  消费位=AISTYLE10_PLACE 通用铺设支 flag2（Projectile.Kill :79267-79270
+   *  WorldGen.BlockBelowMakesSandFall(num15,num16)）。liqGateLegacy 朴素代理不在
+   *  单源面（判据点不同,勿动）。 */
   private sandFallsBelow(tx: number, ty: number): boolean {
-    const st = this.world.store;
-    if (!st.inBounds(tx, ty + 1)) return false;
-    if (!st.isActive(tx, ty + 1)) return true;
-    if (st.inBounds(tx, ty + 2) && !st.isActive(tx, ty + 2) && !st.isSolid(tx, ty + 1)) return true;
-    return TILE_DEFS[st.type[st.idx(tx, ty + 1)]]?.vanilla?.sheet === 165;
+    return blockBelowMakesSandFall(this.world.store, tx, ty);
   }
 
   /** 吸血链（Projectile.vampireHeal :11439-11448 / ghostHeal :11404-11437 1:1）：
@@ -38011,16 +38055,17 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (this._tntBlasting) { pending.push([ax, ay]); return; }
     this._tntBlasting = true;
     try {
-      // SW-S1 2026-09-04：kb=0——1002 SetDefaults 无 knockBack 行（:9525-9539,缺省
-      // :95=0f）,PrepareBombToBlow 亦无分支 → 原版 NPC 受桶爆零击退
+      // SW-S1 2026-09-04：1002 SetDefaults 无 knockBack 行（:9525-9539,缺省
+      // :95=0f）,PrepareBombToBlow 亦无分支——但 kb 真值来自 NewProjectile 生成参
       // SW-AC1 2026-09-04：kbDir=+1——桶爆弹 1002 出生零速（WorldGen.cs:49178
-      //  `NewProjectile(...,num2*16+8,num6*16+8,0f,0f,1002,...)`）→ 弹体朝向恒 +1
+      //  `NewProjectile(...,num2*16+8,num6*16+8,0f,0f,1002,400,10f,...)`）→ 弹体朝向恒 +1
       //  （Entity.direction 缺省 1=自动面 else 档）,全 victim 击退同向;
-      //  kb 仍 0（SW-S1 决定维持,勘误备案见电路 hook 注——原版出生参 knockBack=10f）
-      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002, undefined, undefined, 0, 1);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
+      // SW-AD1 2026-09-04：kb=10（生成参 knockBack=10f,WorldGen.cs:49179+Projectile.cs:
+      //  10885 赋值链——SW-S1"击退 0"系漏算生成参,红蓝四轮 AC1 定谳后本批落地）
+      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002, undefined, undefined, 10, 1);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
       while (pending.length) {
         const [px, py] = pending.shift()!;
-        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002, undefined, undefined, 0, 1);   // SW-J1 同上;SW-AC1 kbDir 同上
+        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002, undefined, undefined, 10, 1);   // SW-J1 同上;SW-AC1 kbDir 同上
       }
     } finally {
       this._tntBlasting = false;

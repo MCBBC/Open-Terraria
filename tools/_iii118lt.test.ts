@@ -194,9 +194,22 @@ const le16 = (p: string): Uint16Array => {
     Object.defineProperty(rp, 'vanilla', { value: { ...van, next: () => { rcBox.n++; return on(); } }, configurable: true });
   }
   (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc = rcBox;
+  // IIII108d（planetoids #42）：raw inner-sample 值流落盘（SW_I118_ROLLVAL=path）
+  // ——x86 rollval.txt 同构（ordinal|value），与 pass 头 reseed 对齐后逐位对拍。
+  const ROLLVAL_PATH = process.env.SW_I118_ROLLVAL ?? '';
+  const rollLines: string[] | null = ROLLVAL_PATH ? [] : null;
+  const gR = globalThis as unknown as { __swOnRoll?: (v: number, inst?: object) => void };
+  const oOnRoll = gR.__swOnRoll;
+  if (rollLines) {
+    gR.__swOnRoll = (v) => { rollLines.push(`${rollLines.length + 1}|${v}`); if (oOnRoll) oOnRoll.call(gR, v); };
+  }
   const t0 = Date.now();
-  runLivingTreesPass(st, rng, gs, [] as never);
-  console.log(`runLivingTreesPass ${Date.now() - t0}ms rolls=${rcBox.n}`);
+  try {
+    runLivingTreesPass(st, rng, gs, [] as never);
+  } finally {
+    if (rollLines) { gR.__swOnRoll = oOnRoll; writeFileSync(ROLLVAL_PATH, rollLines.join('\n') + '\n'); }
+  }
+  console.log(`runLivingTreesPass ${Date.now() - t0}ms rolls=${rcBox.n}${rollLines ? ` rollval->${ROLLVAL_PATH} (${rollLines.length})` : ''}`);
   if (process.env.SW_I118_SAVE === '1') {
     const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;
     const bufOf = (v: Uint8Array | Uint16Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength);

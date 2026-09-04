@@ -29,8 +29,9 @@ describe('SW-S1 ④爆炸击退标量（PrepareBombToBlow :47629-47720 各支 kn
     expect([1086, 1087].map((i) => PREPARE_BOMB_KB[i])).toEqual([9, 9]);
     expect([785, 788, 791, 800, 903, 910, 911, 794, 777, 803].map((i) => PREPARE_BOMB_KB[i])).toEqual(Array(10).fill(12));
     expect([139, 144, 340, 341].map((i) => PREPARE_BOMB_KB[i])).toEqual([10, 10, 10, 10]);
-    expect(PREPARE_BOMB_KB[108]).toBeUndefined();  // SetDefaults 无 knockBack 行 → 原版 0
-    expect(PREPARE_BOMB_KB[1002]).toBeUndefined();
+    expect(PREPARE_BOMB_KB[108]).toBe(10);   // SW-AD1 重审：NewProjectile 生成参 knockBack=10f（Wiring.cs:2044;SetDefaults 缺行≠无 kb）
+    expect(PREPARE_BOMB_KB[164]).toBe(10);   // Wiring.cs:3095
+    expect(PREPARE_BOMB_KB[1002]).toBe(10);  // WorldGen.cs:49179（TNT 桶）
     expect(PREPARE_BOMB_KB[715]).toBeUndefined();  // Celeb2 烟花弹 Kill 直调 Damage() → 武器 kb
   });
   it('传链：真实 explodeAt kb 传值 → hurt(kbx=方向×kb, kby=0) 武器路径;未传 → 旧像素向量面', () => {

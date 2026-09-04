@@ -1058,6 +1058,11 @@ export class WorldEvolution {
     // ★终审 A 收口（2026-09-04）：原版药草支是 else-if 链首支（cs:73838），其后的
     //  墙蔓延段（cs:74430-35）与 !nactive 尾门对【包括药草在内】的所有采样格执行
     //  ——曾提前 return 吞掉药草样本的墙蔓延（行为差+流位差 0-2 掷）
+    // ★①F1（2026-09-04 蓝队 M24 补遗）：地下 655 荆棘清除（cs:73830-73837
+    //  UndergroundTile 首个独立 if,位次在药草支 cs:73838-73839 之前）——地表支
+    //  （cs:72630-72636）的孪生：场上无存活世纪之花（NPC.AnyNPCs(262)）→ KillTile
+    //  （无掷骰）。FTW 荆棘在花死后由地下采样同样收走（此前整缺）。
+    if (sheet === 655 && !this.host.anyPlantera?.()) this.kill(i, j);
     if (TILE_ALCH.has(sheet)) { this.growAlch(i, j); } else if (!st.isActive(i, j)) {
       if (st.wall[this.at(i, j)] === 62 && this.liquidAt(i, j) === 0) this.growWeb(i, j);
     } else {
@@ -1374,7 +1379,9 @@ export class WorldEvolution {
           || [61, 74, 69].includes(sheetOf(this.typeAt(i, minJ))))) {
           void 0; // 蘑菇树再生（TryGrowingTreeByType(5)）——树系统运行时接口未接
         } else if (this.rng() < 1 / 25 && this.liquidAt(i, minJ) === 0) {
-          // ★③ 丛林植物 233 兜底 3×2 化（cs:75295-75308 地表段）：PlaceJunglePlant 3×2
+          // ★③ 丛林植物 233 兜底 3×2 化（cs:75375-75390 地表 case 60 段：
+          //  else-if :75375/PlaceJunglePlant :75377/重试 :75387——★F7 勘误,曾误锚
+          //  cs:75295-75308 那是猩红 SpreadGrass flag7 段）：PlaceJunglePlant 3×2
           //  株（styleX=Next(8)）,失手（锚格裸 type 复读≠233=原版字面）→ Next(12)
           //  styleY=1 的 2×2 档重试——此前 place1+fitTopPlant 1×1 近似整支替换。
           //  花苞 238/生命果 236 属【地下半区】case 60（cs:74480-74558,flag 作用域
@@ -1928,7 +1935,10 @@ export class WorldEvolution {
     // ★④ remix 深度带放宽（cs:70137 `((double)j > Main.rockLayer || Main.remixWorld)`）——
     //  remix 世界岩层之上也长水晶碎块（骰位不变：带过不过都在 Next(5) 之前）
     if (CAN_GROW_SHARDS.has(sheet) && (j > this.host.rockLevel || !!this.host.remixWorld) && this.rng() < 1 / 5) {
-      const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      // ★F3（2026-09-04 蓝队 M24 补遗）方向表 vanilla 化（cs:70141-51）：Next(4) 后
+      //  case 0→左 / case 1→右 / default→`num3=(num!=0)?1:-1`——num∈{2,3} 恒 ≠0,
+      //  故 dy 恒 +1（向下）,原版【永不向上】。此前 [0,-1] 上向支系自创。
+      const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, 1], [0, 1]];
       const [dx, dy] = dirs[Math.floor(this.rng() * 4)];
       if (!this.active(i + dx, j + dy)) {
         let cnt = 0;
@@ -1936,8 +1946,12 @@ export class WorldEvolution {
           if (this.active(k, l) && sheetOf(this.typeAt(k, l)) === 129) cnt++;
         }
         if (cnt < 2) {
-          const rare = this.rng() < 1 / 50;
-          this.place1(i + dx, j + dy, 129, rare ? 18 + Math.floor(this.rng() * 6) : Math.floor(this.rng() * 18));
+          // ★F4（2026-09-04 蓝队 M24 补遗）掷序对齐（cs:70160-63）：先 style=Next(18),
+          //  再 Next(50)==0 条件才掷 Next(6)（rare 3 掷/普通 2 掷不变,序变——此前
+          //  先 Next(50) 后 Next(18),流位差同掷数异序）。
+          let style = Math.floor(this.rng() * 18);
+          if (this.rng() < 1 / 50) style = 18 + Math.floor(this.rng() * 6);
+          this.place1(i + dx, j + dy, 129, style);
         }
       }
     }

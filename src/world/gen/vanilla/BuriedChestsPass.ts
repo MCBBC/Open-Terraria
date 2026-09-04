@@ -1030,6 +1030,11 @@ function placeBuriedChestInner(
   if (gy >= st.h - 10) { __abGate?.('nofloor', i, gy); return false; }
   if (!solidDrop(i, gy)) { __abGate?.('nosolidstop', i, gy); return false; }
   __abGate?.('land', i, gy);
+  const __abCnt = (tag: string): void => {
+    (globalThis as { __swAbCnt?: (t: string, c: number) => void }).__swAbCnt?.(tag,
+      (globalThis as { __swRollN?: number }).__swRollN ?? -1);
+  };
+  __abCnt('land');
   // trySlope 失败回填（cs:37567-37575：仅压平过的格才恢复）
   const restoreSlopes = (): void => {
     if (slopeL > -1) st.slope[st.idx(i - 1, gy)] = slopeL;
@@ -1064,6 +1069,29 @@ function placeBuriedChestInner(
     style = num9;
     // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）
     if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && num9 === 0))) flags.wooden = true;
+  }
+  // ★IIIII108c2（1458 cs:36371-36405）：errorWorld 箱样式洗牌臂——「I am error」彩蛋
+  //   本体：tile21 箱掷 Next(2)==0 → num9∈{1,11,12,13,15}→6 / num9==0→5；再
+  //   Next(3)==0 → num11=Next(52)（while 18..27 重掷）→ num9=num11。反编译源把
+  //   num11 块平铺在主径（UUUU 实证其 IL 真身在 errorWorld 分支内、普通种子恒跳）
+  //   ⇒ 此前按反编译移植时本臂整缺，普通种子零路径、iamerror 链金字塔宝箱首骰
+  //   即漂（后续 num26 堆/罐列全流相移 → #040 A=29866 主源）。
+  //   ★位序：num9/num10 初始化之后、沙漠门（cs:36408）之前；下游 sky12/water17/
+  //   mush32/temple16/dungeon/noTraps1 诸门全读洗牌后 num9（cs:36523-36591 实证），
+  //   与 ARG chestStyle 门（沙漠/冰/地狱）分读——JS argStyle/style 双轨已同构。
+  if (gs.seedFlags.errorWorld && tile === CHEST) {
+    if (rng.int(0, 1) === 0) {
+      let num11 = -1;
+      if (style === 1 || style === 11 || style === 12 || style === 13 || style === 15) num11 = 6;
+      else if (style === 0) num11 = 5;
+      if (num11 > -1) {
+        if (rng.int(0, 2) === 0) {
+          num11 = rng.int(0, 51);
+          while (num11 >= 18 && num11 <= 27) num11 = rng.int(0, 51);
+        }
+        style = num11;
+      }
+    }
   }
   // ★IIIII99e：AddBuriedChest 内七处 `getGoodWorldGen && genRand.Next(num)==0 → num10=52`
   //   FTW 专用骰（cs:36477 沙漠 / 36517 冰箱 / 36543 地牢flag4 / 36554 地狱 /
@@ -1444,7 +1472,11 @@ function placeBuriedChestInner(
   }
   // 战利品:四深度分支完整表(此前仅主件+火把/药水,体感稀缺主因之一)
   const __lend = (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv;
+  (globalThis as { __swAbCnt?: (t: string, c: number) => void }).__swAbCnt?.('loot0',
+    (globalThis as { __swRollN?: number }).__swRollN ?? -1);
   const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h, chestStyle: style }, mainId);
+  (globalThis as { __swAbCnt?: (t: string, c: number) => void }).__swAbCnt?.('loot1',
+    (globalThis as { __swRollN?: number }).__swRollN ?? -1);
   __lend?.('lend', i, gy, (globalThis as { __swRollN?: number }).__swRollN ?? -1); // ★IIIII98：loot 段耗骰尾戳
   // ★IIII102c：push → registerChest（Chest.CreateChest(cs:584)=FindEmptyChest 首空槽
   // 复用+同位重占拒建;-1=已占用,现网 NNOC 门下不可达,保险按追加同义处理）

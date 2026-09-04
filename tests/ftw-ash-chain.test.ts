@@ -18,7 +18,7 @@ import '../src/net/AssetCache';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { AshBallProj } from '../src/entities/AshBallProj';   // 先于 Game（SpriteAtlas/AssetCache 循环对 import 序敏感,ammo-remainder 同序）
-import { Game } from '../src/core/Game';
+import { Game, ASH_CHAIN_RECURSION_GUARD } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import type { GameHooks } from '../src/entities/types';
@@ -143,6 +143,30 @@ describe('FTW 灰烬连锁（WorldGen.cs:64251-64301）', () => {
     expect(st.hasTile(9, 10)).toBe(true);
     expect(projs.length).toBe(0);
   });
+
+  // ★A-3 护栏（2026-09-04）：原版 :64251-64301 纯递归无深度语义;护栏上限=原版不可达
+  //  大数（单链 1 万格悬空灰烬不存在）,仅防 V8 栈深先于 CLR 爆 RangeError。
+  //  行为面由上面两例锁死（护栏<10000 时计数远离上限=零扰动）;>10000 深的行为学
+  //  fixture 在语义上不可构造（灰烬连锁的 W/E 重入是原版固有语义,确定性深链
+  //  fixture 必然引入非原版限流）,故护栏本体只钉常量值。
+  it('A-3:重入护栏常量=10000（原版不可达,仅防 JS 栈差异不改语义）', () => {
+    expect(ASH_CHAIN_RECURSION_GUARD).toBe(10000);
+  });
+
+  it('A-3:护栏在位时正常连锁行为零扰动（W+NW 两级深链,计数远离上限）', () => {
+    const w = mkWorld({ getGoodWorld: true });
+    const st = w.store;
+    st.setTileSilent(10, 10, ASH);
+    st.setTileSilent(9, 10, ASH);
+    st.setTileSilent(9, 9, ASH);
+    st.setTileSilent(10, 11, STONE);
+    const projs: unknown[] = [];
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    shell(w, [], projs).breakTile(10, 10);
+    expect(st.hasTile(9, 10)).toBe(false);
+    expect(st.hasTile(9, 9)).toBe(false);
+    expect(projs.length).toBe(2);                  // 深度 2 << 10000 → 全程放行
+  });
 });
 
 // ===================== 灰烬崩塌弹 40 实体（AI_010 type 40 通道） =====================
@@ -215,5 +239,43 @@ describe('灰烬崩塌弹 40（Projectile.cs:1229-1237+58809-59083+79107-79311�
     expect(dropCalls).toBe(0);                           // num18=0 → 无掉落
     // 全列无灰烬补回
     for (let y = 85; y < 95; y++) expect(store.type[store.idx(10, y)]).not.toBe(ASH_ID);
+  });
+
+  // ★M13 A-1（2026-09-04）半砖落面：TileCollision 碰撞盒折半（Collision.cs:2350-2354
+  //  vector4.Y+=8）→ 钳位中心=面顶+3 ∈半砖格 → 死亡格=半砖格本身（:79120-79121）;
+  //  :79243 半砖上推支 velocity.Y 已被 TileCollision 清 0=死支（R2' F2 同谳）→
+  //  格 active 走 outer else :79298 → type 40 num18=0 → 不铺不掉=Vanish。
+  //  旧行为（F1 锚=上一拍位=半砖上一格）会在半砖上方悬空补一格灰烬。
+  it('半砖落面:死亡格=半砖格本身 → occupied → Vanish（不铺不掉,:79243 死支/:79298）', () => {
+    const store = new TileStore(40, 260);
+    for (let x = 0; x < 40; x++) store.setTileSilent(x, 100, STONE);
+    store.half[store.idx(10, 100)] = 1;            // 半砖石面（碰撞面=格顶+8）
+    const { hooks, sfx, dropCalls } = mkEntityHooks(store);
+    const p = new AshBallProj(10 * 16 + 8, 90 * 16 + 8, 0, 0.41, 15);
+    stepUntil(p, hooks);
+    expect(p.dead).toBe(true);
+    expect(sfx).toContain('dig');                  // Kill 音尘恒有（:77878-77886）
+    expect(store.type[store.idx(10, 100)]).toBe(STONE);   // 半砖原样
+    expect(store.half[store.idx(10, 100)]).toBe(1);
+    expect(dropCalls).toBe(0);                     // num18=0
+    for (let y = 90; y <= 99; y++) expect(store.type[store.idx(10, y)]).toBe(0);  // 半砖上方不补灰烬
+  });
+
+  // ★M13 A-4（2026-09-04）家具顶落面：tileSolidTop 底行（frameY==0）照接
+  //  （Collision.cs:2330-2333 flag 门;40 ∈ FallingBlockDoesNotFallThroughPlatforms
+  //  → Projectile.cs:17653-17655 flag6=false=不透平台/家具顶）→ 死亡格=家具上一格
+  //  （钳位中心=面顶−5）→ flag2：BBMSF(上一格) 的 arm2 看家具 tileSolid=false——
+  //  家具落地（再下一格 nactive）→ arm2 假 → 正常在台上补回灰烬。
+  it('家具顶落面:工作台（落地）照接 → 台上一格补回灰烬（isSolid||isPlatform 同族几何）', () => {
+    const store = new TileStore(40, 260);
+    const BENCH = TILE_INTERNAL_BY_SHEET.get(18)!;          // sheet 18 工作台（tileSolid=false）
+    store.setTileSilent(10, 100, BENCH);
+    store.setTileSilent(10, 101, STONE);                    // 台下承重（BBMSF arm2 假）
+    const { hooks } = mkEntityHooks(store);
+    const p = new AshBallProj(10 * 16 + 8, 90 * 16 + 8, 0, 0.41, 15);
+    stepUntil(p, hooks);
+    expect(p.dead).toBe(true);                     // 被家具顶接住（不再穿台）
+    expect(store.type[store.idx(10, 100)]).toBe(BENCH);
+    expect(store.type[store.idx(10, 99)]).toBe(ASH_ID);     // 台上一格补回灰烬
   });
 });

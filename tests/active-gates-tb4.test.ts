@@ -14,8 +14,9 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { ITEM_DEFS } from '../src/data/items';
-import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { LiquidSim } from '../src/world/liquid/LiquidSim';
+import { FallingBlock } from '../src/entities/FallingBlock';
 
 const DIRT_T = TILE_BY_KEY['dirt']!;
 const STONE_T = TILE_BY_KEY['stone']!;
@@ -203,5 +204,122 @@ describe('③ passableLq 定谳钉：nactive=active∧!inActive,与 checkingLiqu
     st.setLiquid(21, 10, 200, 1);
     (sim as unknown as { waterCheckInner(): void }).waterCheckInner.call(sim);
     expect(st.liquid[st.idx(21, 10)]).toBe(0);      // 对照:非致动实心格含水 → 首分支清零
+  });
+});
+
+// ===================== ★M13 批（2026-09-04）：A-2 BBMSF 单源 / B-3 触发集 / B-4 药草 active 臂 =====================
+
+/** 空窗世界（清出 8..30 行,排除生成残留） */
+function worldCleared(seed: number): World {
+  const w = new World(40, 40, seed, 'tb4-m13');
+  const st = w.store;
+  for (let x = 2; x < 38; x++) for (let y = 8; y <= 30; y++) st.setTile(x, y, 0, 0, 0);
+  return w;
+}
+
+describe('④ A-2 BBMSF 单源：平台=tileSolid 支撑 → AISTYLE10_PLACE flag2 假 → 铺上', () => {
+  // 消费位=Projectile.Kill :79267-79270 WorldGen.BlockBelowMakesSandFall(num15,num16)
+  // （Game.sandFallsBelow → FallingBlock.blockBelowMakesSandFall,tileSolidOf=def.solid
+  // ∪tileSolid∩tileSolidTop 九件套）。旧内联版 arm2 `!st.isSolid(下方)` 对平台恒真
+  // → flag2 误拦 → 不铺。
+  it('落黑檀砂弹 56 死亡格正下=平台 → 平台上铺黑檀砂、不掉兜底件 370', () => {
+    const w = worldCleared(23);
+    const st = w.store;
+    st.setTile(10, 13, TILE_BY_KEY['platform']!, 0, 0);
+    const drops: Array<[string, number, number]> = [];
+    deathShell(w, drops).onProjectileDeath(56, 10 * 16 + 3, 12 * 16 + 3, 10, 10, 0, 0);
+    expect(st.type[st.idx(10, 12)]).toBe(TILE_INTERNAL_BY_SHEET.get(112)!);   // 平台上铺上
+    expect(st.type[st.idx(10, 13)]).toBe(TILE_BY_KEY['platform']!);           // 平台原样
+    expect(drops).toEqual([]);                      // flag2 假 → 不掉 370
+  });
+
+  it('对照:死亡格正下=悬空工作台（tileSolid=false 且再下格空）→ arm2 真 → flag2 拒铺掉 370', () => {
+    const w = worldCleared(23);
+    const st = w.store;
+    st.setTileSilent(10, 13, TILE_BY_KEY['workbench']!, 0, 0);
+    const drops: Array<[string, number, number]> = [];
+    deathShell(w, drops).onProjectileDeath(56, 10 * 16 + 3, 12 * 16 + 3, 10, 10, 0, 0);
+    expect(st.type[st.idx(10, 12)]).toBe(0);        // 不铺（arm2 家具支真值=原版语义）
+    expect(drops.length).toBe(1);
+    expect(drops[0][0]).toMatch(/^vi_370_/);        // Center+(0,-2) 兜底件（:79293-79296）
+  });
+});
+
+describe('⑤ B-3 FALLING_TILES 触发集补齐（TileID.cs:395 全 11 件）+钱币堆零伤档', () => {
+  const FALLING_SHEETS = [53, 112, 116, 123, 224, 234, 330, 331, 332, 333, 495];
+
+  it('触发集含 330-333 钱币堆/495 贝壳堆（此前 6/11=掉件表有、触发集无的死数据）', () => {
+    const FT = (Game as unknown as { FALLING_TILES: Set<number> }).FALLING_TILES;
+    expect(FT.size).toBe(11);
+    for (const sh of FALLING_SHEETS) {
+      expect(FT.has(TILE_INTERNAL_BY_SHEET.get(sh)!), `sheet ${sh}`).toBe(true);
+    }
+  });
+
+  it('drainSandQueue:钱币堆失支撑 → 转 FallingBlock 且 dmg=0（GetSandfallProjData :87824-87831）;贝壳堆 dmg=10', () => {
+    const w = worldCleared(29);
+    const st = w.store;
+    const projs: unknown[] = [];
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    g.world = w;
+    g.entities = { add: (e: unknown) => { projs.push(e); }, projectiles: [] };
+    const dq = g as unknown as { sandQueue: Array<[number, number]>; drainSandQueue(): void };
+    st.setTileSilent(10, 20, TILE_INTERNAL_BY_SHEET.get(330)!);   // 铜币堆
+    st.setTileSilent(12, 20, TILE_INTERNAL_BY_SHEET.get(495)!);   // 贝壳堆
+    dq.sandQueue = [[10, 20], [12, 20]];
+    dq.drainSandQueue();
+    expect(st.hasTile(10, 20)).toBe(false);         // 触发集命中 → 格转换
+    expect(st.hasTile(12, 20)).toBe(false);
+    expect(projs.length).toBe(2);
+    expect((projs[0] as FallingBlock).dmg).toBe(0); // 钱币堆 → 弹 411-414 dmg=0
+    expect((projs[1] as FallingBlock).dmg).toBe(10);  // 贝壳堆 812 → 缺省档
+  });
+});
+
+describe('⑥ B-4 liqGateHerb 补 active 臂（Player.cs:40058 只对非活性格设岩浆门）', () => {
+  // 载体=火焰花种子 vi_312（tile v_83_herbs_mature,placeStyle 5=岩浆 Allowed 档——
+  // TileObjectData.cs:4777-4780 liqStyles[5].lava=allowed;基座=灰烬 57（PlaceAlch
+  // style5 白名单 {57,633,78,380}）→ 放置后 CheckAlch col5 岩浆支存活（>16 岩浆熟
+  // 转换 83→84）。判据载体须避开"放上去就被 CheckAlch 杀"的基座失配干扰。
+  const SEED_FIRE_V = 312;
+  const SEED_DAY_V = 307;   // vi_307_daybloom_seeds（placeStyle 0,岩浆 NotAllowed 档）
+
+  it('活性目标格（小石堆+岩浆）→ 走 IsReplaceableBlock 臂 → 岩浆门不生效,火焰花植上', () => {
+    const w = worldPlace();
+    const st = w.store;
+    const ASH_T = TILE_INTERNAL_BY_SHEET.get(57)!;
+    st.setTileSilent(8, 21, ASH_T, 0, 0);           // 灰烬基座（col5 白名单）
+    st.setTileSilent(8, 20, TILE_BY_KEY['v_185_small_decos']!, 0, 0);
+    st.setActuated(8, 20, true);                    // active()=true（裸 active 位不排致动）
+    st.setLiquid(8, 20, 255, 2);                    // 岩浆
+    const drops: Array<[string, number]> = [];
+    placeShell(w, drops, SEED_FIRE_V).tryPlace(8, 20, defOf(SEED_FIRE_V));
+    // 植上且 CheckAlch col5 岩浆熟转换 83→84（liquid 255>16）
+    expect(st.type[st.idx(8, 20)]).toBe(TILE_INTERNAL_BY_SHEET.get(84)!);
+    expect(st.flags[st.idx(8, 20)]).not.toBe(0);
+  });
+
+  it('对照:非活性岩浆空格 + style0 种子 → 岩浆门生效（LavaPlacement=NotAllowed）拒植', () => {
+    const w = worldPlace();
+    const st = w.store;
+    st.setTile(8, 20, 0, 0, 0);
+    st.setLiquid(8, 20, 255, 2);
+    const drops: Array<[string, number]> = [];
+    placeShell(w, drops, SEED_DAY_V).tryPlace(8, 20, defOf(SEED_DAY_V));
+    expect(st.type[st.idx(8, 20)]).toBe(0);         // 岩浆门拦（:41815-41817 域）
+    expect(st.flags[st.idx(8, 20)]).toBe(0);
+  });
+
+  it('★B-4 判别:活性岩浆格（小石堆）+ style0 种子 → 门不生效（曾无条件查岩浆=误拒,石堆原样）', () => {
+    const w = worldPlace();
+    const st = w.store;
+    st.setTileSilent(8, 20, TILE_BY_KEY['v_185_small_decos']!, 0, 0);
+    st.setActuated(8, 20, true);
+    st.setLiquid(8, 20, 255, 2);
+    const drops: Array<[string, number]> = [];
+    placeShell(w, drops, SEED_DAY_V).tryPlace(8, 20, defOf(SEED_DAY_V));
+    // 门放行 → IsReplaceableBlock 臂照走：石堆（BreakableWhenPlacing）被清格
+    //（AssortedThings :41653-41660 flag8 alch 支）——pre-fix 在此无条件 return=石堆原样
+    expect(st.hasTile(8, 20)).toBe(false);
   });
 });
