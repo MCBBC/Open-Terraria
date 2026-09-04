@@ -119,6 +119,12 @@ const OUT = process.env.I130_OUT ?? '/tmp/iii130-out';
           writeFileSync(`${OUT}/ledger99.txt`, ledger.join('\n') + '\n');
           console.log(`[iii130] captured: rcBase=${rcBase} rcEnd=${rollCount} rolls=${rolls.length} writes=${writes.length / 6} ledger=${ledger.length}`);
         }
+        // ★IIIII107 mile8 滚动取证：#100 瓦片清理 / #105 终清理 槽末快照
+        if (pn === '瓦片清理') snap('c');
+        if (pn === '终清理') {
+          snap('e');
+          console.log('[iii130] slot-end snapshots: c(瓦片清理) e(终清理) written');
+        }
       },
     });
   } finally {

@@ -1,4 +1,4 @@
-// 原版 pass "FinalCleanup"(1456 WorldGen.cs:22304-22670)1:1 移植。
+﻿// 原版 pass "FinalCleanup"(1456 WorldGen.cs:22304-22670)1:1 移植。
 //
 // ── 建议接入位(协调者接线用) ──
 //   原版注册序 cs:22304(BrokenTrapCleanup cs:22283 之后,是 105 pass 的最后一个
@@ -59,6 +59,10 @@ import { growTree } from './TreePass';
 import { convertWithSize, doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';   // ★IIIII107b 净化菱形 Convert(j,i,0,3)
 // ★IIIII203：FinishRemixWorld 1:1 全段（1457 cs:26617-26991；GG 之后接线，见 runFinalCleanupPass 尾）
 import { runFinishRemixWorld } from './FinishRemixWorldPass';
+// ★IIIII101e：FinishDrunkGen（1458 cs:26501-26611）调用位归位——从 WorldGen.ts 尾部
+//   （runFinalCleanupPass 返回之后）迁回本 pass 体原版位（cs:22630：Tenth 之后、
+//   NTB/GG/Remix 之前）。单 Finish* 车道相对序不变；zenith 七依赖下为掷流位次主根。
+import { runFinishDrunkGenPass } from './FinishDrunkGenPass';
 
 const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
 
@@ -622,6 +626,13 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
         else r.nextInt(4);
       }
       return;
+    // ★IIIII101d（cs:69707-69713 尾支）：314 轨块尘=每粒 3 掷（NewDust 实参
+    //   Next(-2,3)×2 + fadeIn Next(0,51)）——与 TrackPass/BuriedChests 副本同步。
+    case 314:
+      r.int(-2, 2);
+      r.int(-2, 2);
+      r.int(0, 50);
+      return;
     default:
       if (FURNITURE_DUST.has(sheet)) r.nextInt(3);
   }
@@ -683,15 +694,28 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
 /** SquareTileFrame（cs:80924）：九宫列主序，中心 resetFrame=true（178 掷门，永不中） */
 function squareTileFrame(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   __swFnt39('SQ', x, y);
-  tileFrameGen(st, ctx, x - 1, y - 1, false);
-  tileFrameGen(st, ctx, x - 1, y, false);
-  tileFrameGen(st, ctx, x - 1, y + 1, false);
-  tileFrameGen(st, ctx, x, y - 1, false);
-  tileFrameGen(st, ctx, x, y, true);
-  tileFrameGen(st, ctx, x, y + 1, false);
-  tileFrameGen(st, ctx, x + 1, y - 1, false);
-  tileFrameGen(st, ctx, x + 1, y, false);
-  tileFrameGen(st, ctx, x + 1, y + 1, false);
+  // ★IIIII110b instrument：九宫逐格掷耗取证（与 x86 rig SW_SQFLOG 同構；未挂零开销）
+  const sqfTrace = (globalThis as { __swSqfCell?: (k: number, l: number, t: number, before: number, after: number) => void }).__swSqfCell;
+  let rc = 0;
+  const grc = globalThis as { __swRollCount?: { get(): number } };
+  const countOf = (): number => grc.__swRollCount?.get() ?? 0;
+  const cell = (k: number, l: number, reset: boolean): void => {
+    if (!sqfTrace) { tileFrameGen(st, ctx, k, l, reset); return; }
+    const before = countOf();
+    const t = st.inBounds(k, l) && st.flags[st.idx(k, l)] ? st.type[st.idx(k, l)]! : -1;
+    tileFrameGen(st, ctx, k, l, reset);
+    sqfTrace(k, l, t, before, countOf());
+  };
+  void rc;
+  cell(x - 1, y - 1, false);
+  cell(x - 1, y, false);
+  cell(x - 1, y + 1, false);
+  cell(x, y - 1, false);
+  cell(x, y, true);
+  cell(x, y + 1, false);
+  cell(x + 1, y - 1, false);
+  cell(x + 1, y, false);
+  cell(x + 1, y + 1, false);
 }
 /** PPPP：跨 pass 复用的生成期帧链（WorldUtils 侧 frameNeighbors 支的 1:1 入口）。
  *  vanilla 用 Actions.SetTile（setSelfFrames+setNeighborFrames 默认真）与
@@ -863,11 +887,96 @@ const SIGN_TYPES = new Set([55, 85, 395, 425, 510, 511, 573]);
 let signGhostCount = 0;
 /** world.signs 引用钩（KillSign 同步移除；null=无存档面,仅掷账） */
 let engineSignStore: Array<{ x: number; y: number; text: string }> | null = null;
+/** ★IIIII101d：Main.wallHouse 全表钩（SurfaceDecorPasses.WALL_HOUSE；WorldGen.ts 启动期
+ *  注入——本模块被 SurfaceDecorPasses 反向 import，直接 import 成环故走注册制，
+ *  同 engineSignStore 先例）。null=未注册（wallHouse 支恒 false；spawnArea 天空域
+ *  wall 恒 0，本支生成期天然不可达，注册只为结构完备）。 */
+let wallHouseTable: Set<number> | null = null;
 
 /** ★IIIII221：每局生成期状态复位（WorldGen.ts 启动期调用） */
 export function engineResetSignState(signs: Array<{ x: number; y: number; text: string }> | null): void {
   signGhostCount = 0;
   engineSignStore = signs;
+}
+
+/** ★IIIII101d：wallHouse 全表注册（WorldGen.ts 启动期调用，同上先例） */
+export function engineRegisterWallHouse(t: Set<number> | null): void {
+  wallHouseTable = t;
+}
+
+/** ★IIIII101d（2026-09-04）：NPC.SpawnOnPlayer(cs:81296) 生成期域 1:1——CheckSign case 85
+ *  幽灵门(316)的落点搜索环。x86 rig 掷栈实证（/tmp/iii129-out/x86-rollstack.txt）：
+ *  `KillTile→SquareTileFrame→TileFrame(case85)→CheckSign→NPC.SpawnOnPlayer` **x12,000 掷**
+ *  在 graveyard 链 LTRK#1 巷 (712,436) 与 LTRK#2 巷内两处——JS 旧码只 signGhostCount++
+ *  不搜索 ⇒ 每次门中少 12,000 掷 ⇒ LTRK#1 place 尾起全流错位（#97 轨段 25,351 掷差主根）。
+ *  vanilla（NPC.cs:81399-81445）：num12=500/num13=50，npcType 316/82 → **200/30**、num14=100；
+ *  Spawner.GetSpawnArea(NPC.cs:932)：sWidth/16=120→(int)(120×0.7)=84、sHeight/16=67→(int)(67×0.7)=46
+ *  → spawnArea=WorldUtils.ClampToWorld(Centered(playerTile,(168,92)))、safeArea=Centered(playerTile,(124,68))。
+ *  生成期专用服 autogen 无 active player（Player.FindClosest 回落 0）且 Main.player[0]
+ *  未落位 position=(0,0) ⇒ spawnArea=[0,84)×[0,46)=**纯天空**；每对 (m,n) 恒掷 2 次
+ *  （Next(Left,Right)/Next(Top,Bottom)，参只解释值不改流位），天空格 nactive&&solid
+ *  恒假 ⇒ 向下扫描永不立旗 ⇒ 200×30 对恒穷尽 = **12,000 掷恒定、flag 恒假、不出怪**。
+ *  成功路径（本域不触达,其他域结构完备）按同构 tile 判定走 SpawnBoss→NewNPC——
+ *  生成期无 tile 写面,仅 Main.npc 常驻 ⇒ signGhostCount++（CountNPCS 门随动）。
+ *  netMode==1 早退 / case 245·262 特判 / npcType==50 CanHit 支 / skyblock lowTiles
+ *  flag3 支 / Journey 掷率支均生成期恒不触达（按 cs 位置逐条注明）。 */
+function spawnOnPlayerGhost(st: TileStore, rng: RNG, npcType: number): void {
+  let num12 = 500, num13 = 50;
+  if (npcType === 316 || npcType === 82) { num12 = 200; num13 = 30; }   // cs:81400-81402
+  const num14 = num12 >> 1;
+  // GetSpawnArea 生成期常数（spawnArea 钳制后 [0,84)x[0,46)；safeArea Centered(0,0) 不钳制）
+  const areaL = 0, areaR = 84, areaT = 0, areaB = 46;
+  const safeL = -62, safeR = 62, safeT = -34, safeB = 34;
+  const nactiveSolid = (x: number, y: number): boolean => {
+    const i = st.idx(x, y);
+    return (st.flags[i] & 1) === 1 && (st.wire[i] & 32) === 0 && tileSolidT(SWEEP_SHEET[st.type[i]] ?? -1);
+  };
+  let flag = false, num10 = 0, num11 = 0;
+  for (let m = 0; m < num12; m++) {
+    const flag2 = m === num12 - 1;
+    const flag3 = false;   // cs:81412 WorldGen.Skyblock.lowTiles——非 skyblock 世界恒 false
+    for (let n = 0; n < num13; n++) {
+      const num15 = rng.int(areaL, areaR - 1);   // Main.rand.Next(spawnArea.Left, spawnArea.Right)
+      const num16 = rng.int(areaT, areaB - 1);   // Main.rand.Next(spawnArea.Top, spawnArea.Bottom)
+      const i1 = st.idx(num15, num16);
+      // cs:81416-81418：(nactive&&solid) || (wallHouse[wall]&&m<num12-1) || (npcType==50&&...) → continue
+      const wallHouse = st.wall[i1] !== 0 && m < num12 - 1 && (wallHouseTable?.has(st.wall[i1]) === true);
+      if (nactiveSolid(num15, num16) || wallHouse) continue;
+      for (let num17 = num16; num17 < areaB; num17++) {
+        // cs:81420-81428：(flag3||(nactive&&solid)) && (flag2 || !safeArea.Contains(num15,num16))
+        const safe = num15 >= safeL && num15 < safeR && num16 >= safeT && num16 < safeB;
+        if ((flag3 || nactiveSolid(num15, num17)) && (flag2 || !safe)) {
+          num10 = num15; num11 = num17;
+          flag = true;
+          break;
+        }
+      }
+      // cs:81429-81434 npcType==50 的 CanHit 支——316 不触达（不移植）
+      if (flag && !flag2 && !hasTileSpawnSpace(st, num10, num11)) flag = false;   // cs:81435
+      if (flag) break;
+    }
+    // cs:81438-81440：CheckNotSpawningOnScreen——生成期无 active player 恒 true（inert）
+    if ((!flag || flag2 || true) && flag) break;
+  }
+  if (flag) {
+    // SpawnBoss→NewNPC(316)：生成期无 tile 写面，仅 Main.npc 常驻（CountNPCS 门随动）
+    signGhostCount++;
+  }
+}
+
+/** Spawner.HasTileSpawnSpace(NPC.cs:5406)+CanSpawnInTiles/CanSpawnInTile(:5430) */
+function hasTileSpawnSpace(st: TileStore, x: number, y: number): boolean {
+  // spawnSpaceX=2/spawnSpaceY=3（NPC.cs:146/148）→ rect=(x-1, y-3, 2, 3)
+  const rectL = x - 1, rectT = y - 3;
+  for (let i = rectL; i < rectL + 2; i++) {
+    for (let j = rectT; j < rectT + 3; j++) {
+      if (i < 0 || i >= st.w || j < 0 || j >= st.h) return false;   // WorldGen.InWorld(rect) 门
+      const i2 = st.idx(i, j);
+      if ((st.flags[i2] & 1) === 1 && (st.wire[i2] & 32) === 0 && tileSolidT(SWEEP_SHEET[st.type[i2]] ?? -1)) return false;
+      if (st.liquid[i2] > 0 && st.liquidType[i2] === LIQUID_TYPE.LAVA) return false;   // anyLava()
+    }
+  }
+  return true;
 }
 
 const div18 = (v: number): number => Math.trunc(v / 18);
@@ -998,9 +1107,14 @@ function checkSignSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, shee
     // cs:44126-44161 switch(type)：掉落 Item.NewItem 生成期零掷（isGeneratingOrLoadingWorld
     //   早退 Item.cs:49662）；case 85 尾**恒耗掷**（砸墓碑 1/8 幽灵门）：
     //   num13=8（生成期 Main.Difficulty=0；Master=2/Expert=4 非生成期域）→ Next(8)。
+    //   ★IIIII101d：门中且 CountNPCS(316)<2 时 vanilla 还走 NPC.SpawnOnPlayer(316)
+    //   （NPC.cs:81296）的 200×30×2=12,000 掷落点搜索环（x86 rig 掷栈 x12,000 实证,
+    //    graveyard LTRK 巷内两处）——旧 JS 只计数不搜索=每次门中少 12,000 掷。
     if (sheet === 85) {
       if (ctx.rng) {
-        if (ctx.rng.int(0, 7) === 0 && signGhostCount < 2) signGhostCount++;
+        if (ctx.rng.int(0, 7) === 0 && signGhostCount < 2) {
+          spawnOnPlayerGhost(st, ctx.rng, 316);   // ★IIIII101d（成功才 signGhostCount++）
+        }
       }
     }
     ctx.destroyObject = false;
@@ -1073,6 +1187,10 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     case 518: checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
+    // ★IIIII101e（GFB zenith #105 定罪主根⑥）：case 530 → CheckOasisPlant
+    //   （cs:86770 派发 / 48034 实现）——FC 大循环曾缺路由 ⇒ 绿洲植物块
+    //   （3×2=6 格，基座任一格 53→397 硬化砂后 !Conversion.Sand）永不校验击杀。
+    case 530: checkOasisPlantSweep(st, ctx, x, y); return true;
     case 571: checkBambooSweep(st, ctx, x, y); return true;
     case 72: frame72Sweep(st, ctx, x, y); return true;
     case 184: frame184Sweep(st, ctx, x, y); return true;
@@ -2021,11 +2139,64 @@ function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   ctx.destroyObject = false;
 }
 
+/** CheckOasisPlant（cs:48034）★IIIII101e（GFB zenith #105 定罪主根⑥）：
+ *  3×2 块原点反解（frameY%36→行、frameX/18→列组）+ 6 格帧型校验 + 基座行
+ *  SolidTile∧Conversion.Sand 校验（53→397 硬化砂后 !Conversion.Sand ⇒ 失格）
+ *  失败 → destroyObject 窗内整块 KillTile（530 尘=0 掷，roll-neutral）+
+ *  尾 (num3-1..num3+3)×(num-1..num+2) 5×4 TileFrame 重扫。FC 大循环曾缺
+ *  case 530 路由 ⇒ zenith 绿洲植物块永不校验（#105 残差 T0>530×6 格）。 */
+function checkOasisPlantSweep(st: TileStore, ctx: SweepCtx, i: number, j: number): void {
+  if (ctx.destroyObject) return;
+  const k0 = st.idx(i, j);
+  let num = j;
+  const num2 = st.frameY[k0]! % 36;
+  num += Math.trunc(num2 / 18) * -1;
+  let num3 = Math.trunc(st.frameX[k0]! / 18);
+  let num4 = 0;
+  while (num3 > 2) { num3 -= 3; num4++; }
+  num3 = i - num3;
+  const num5 = num4 * 54;
+  let flag = false;
+  for (let k = num3; k < num3 + 3; k++) {
+    for (let l = num; l < num + 2; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const t = st.idx(k, l);
+      if (!st.flags[t] || st.type[t] !== OASIS_PLANT
+        || st.frameX[t] !== (k - num3) * 18 + num5 || st.frameY[t] !== (l - num) * 18) flag = true;
+    }
+    if (!st.inBounds(k, num + 2)) { flag = true; continue; }
+    const tb = st.idx(k, num + 2);
+    if (!st.flags[tb] || genSolidType(st.type[tb]) === false || st.half[tb] !== 0 || st.slope[tb] !== 0
+      || (st.wire[tb] & 32) !== 0 || !SAND_CONV_IDS_FC.has(st.type[tb])) flag = true;
+  }
+  if (!flag) return;
+  ctx.destroyObject = true;
+  for (let m = num3; m < num3 + 3; m++) {
+    for (let n = num; n < num + 2; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const t = st.idx(m, n);
+      if (st.flags[t] && st.type[t] === OASIS_PLANT) killTileGen(st, ctx, m, n);
+    }
+  }
+  ctx.destroyObject = false;
+  for (let num6 = num3 - 1; num6 < num3 + 4; num6++) {
+    for (let num7 = num - 1; num7 < num + 3; num7++) {
+      tileFrameGen(st, ctx, num6, num7, false);
+    }
+  }
+}
+
+/** Conversion.Sand（TileID.Sets.Conversion.Sand={53,112,116,234}）——绿洲植物基座族 */
+const SAND_CONV_IDS_FC = idsByVanillaSheet(53, 112, 116, 234);
+const OASIS_PLANT = sid(530);
+
 /** case 184（cs:85888-85952）：★num20 无条件掷 → 四向首个苔藓邻格定色定向 */
 function frame184Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
   if (ctx.stats) ctx.stats.mossVisited++;
   __swFnt39('TR184', x, y);
+  // ★IIIII101e 定点示波（与 rig TSEG|m184 同位）
+  if ((x === 632 && y === 686) || (x === 633 && y === 688)) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('m184', x + ',' + y); } catch { /* probe */ } }
   const num20 = roll3(ctx) * 18;                                 // 先掷（cs:85916）
   const side = (dx: number, dy: number): number => {
     if (!st.inBounds(x + dx, y + dy)) return -1;
@@ -3539,8 +3710,16 @@ export function runFinalCleanupPass(
         }
       }
 
-      // ④ 墙 187/216 液体 → 满岩浆(cs:22387-22392;remix/dualDungeons 种子门不适用)
-      if ((st.wall[t] === 187 || st.wall[t] === 216) && st.liquid[t] > 0) {
+      // ④ 墙 187/216 液体 → 满岩浆(1458 cs:22438-22442)
+      //   ★IIIII107（2026-09-04）定罪修复：原版带种子门 `&& !remixWorldGen &&
+      //   !Main.dualDungeonsSeed`（1458 cs:22438）——旧注「种子门不适用」系漏植
+      //   （且 22387 行号曾误植）。REMIX 世界蜥蜴砖墙(187)水袋（(1644..1656,708..711)
+      //   池,38 格）被误灌满岩浆 ⇒ mile8 #105 L=38/Lt=38 残量。实证：x86 #105 写面
+      //   32,460 格中本池区 0 格（vanilla remix 下本臂整跳过，池水原样保留）；
+      //   堆栈取证（tools/_iii130pool.test.ts Proxy 通道）锁定写面=本臂
+      //   liquid 1→2/229→255 @ FinalCleanupPass.ts:3634。
+      if ((st.wall[t] === 187 || st.wall[t] === 216) && st.liquid[t] > 0
+        && !gs.seedFlags.remix && !gs.seedFlags.dualDungeons) {
         st.liquid[t] = 255;
         st.liquidType[t] = LIQUID_TYPE.LAVA;
       }
@@ -3654,6 +3833,9 @@ export function runFinalCleanupPass(
     }
   }
 
+  // ★IIIII101e 段标（掷流位次仪；__swSeg 无钩零开销）
+  try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-LOOP-END'); } catch { /* probe */ }
+
   // ⑭ Dirtiest Block（cs:22546-22587）：num17 = GetWorldSize() switch
   //    （1=>6, 2=>9, _=>3；tenthAnniversary ×5 种子门不适用）；num19=3000 次预算。
   //    每迭代 Next(50,w-50)+Next(50,h-200)（上界独占）；active 且 type∈Dirt 集
@@ -3695,13 +3877,18 @@ export function runFinalCleanupPass(
     }
   }
 
+  // ★IIIII101e 段标：⑭ DirtiestBlock 尾（掷流位次仪）
+  try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-668-END'); } catch { /* probe */ }
+
   // ── FinishNoTraps（cs:22622-22625 调用位：⑭ 之后、ShimmerCleanUp 之前）──
   //    ★SSSSSS-NOTRAPS 批新增（实现体在 FinishNoTrapsPass.ts）：noTrapsWorldGen
   //    专属 Finish 子段（生命水晶巨石化/雕像·死箱接驳/炸药埋点/残箱退金箱/
   //    Gas Trap 塞箱）。掷流位次敏感（ShimmerCleanUp r90 块每格 2×NextDouble
   //    在其后）——勿移动调用位。
   if (gs.seedFlags.noTraps && opts?.chests && rng) {
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-NT-A'); } catch { /* probe */ }
     runFinishNoTraps(st, rng, gs, opts.chests);
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-NT-Z'); } catch { /* probe */ }
   }
 
   // ── FinishTenthAnniversaryWorld（1458 cs:22637-22640 调用位：NoTraps 之后、
@@ -3709,6 +3896,19 @@ export function runFinalCleanupPass(
   //    ★SSS-CELEB 批新增：ConvertSkyIslands(2) 神圣化 + 六族 Paint + 巨石 138→665。
   if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
     runFinishTenthAnniversaryWorld(st, rng, gs, opts?.chests);
+  }
+
+  // ── FinishDrunkGen（1458 cs:22628-22631 调用位：Tenth 之后、NTB/GG/Remix 之前）──
+  // ★IIIII101e 归位（GFB #105 定罪主根①）：曾挂在 runFinalCleanupPass 返回之后
+  //  （WorldGen.ts finalCleanupPass 内、finalGenMergeScan 之前）——单 Finish* 车道
+  //  （drunk 纯链）相对序不变仍绿；zenith 七依赖下 Drunk 的全图地牢砖逐列掷色
+  //  （每 41/43/44 砖 1..3 掷，数万掷级）+宝箱双掷整段落到 NTB/GG/Remix 之后 ⇒
+  //  三支掷流全错位；且 FinishGetGoodWorld 的 paint==14 扫描读不到 Drunk 涂装
+  //  （cs:26099 跨函数交互：Drunk 链②写 paint → GG 链②读 paint 早停）。
+  if (gs.seedFlags.drunkWorld && rng) {
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-DK-A'); } catch { /* probe */ }
+    runFinishDrunkGenPass(st, rng, gs, opts?.chests as never);
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-DK-Z'); } catch { /* probe */ }
   }
 
   // ── NotTheBees + FinishNotTheBees（cs:22602-22605 调用位：⑭ 之后、
@@ -3729,7 +3929,9 @@ export function runFinalCleanupPass(
   //    掷流(初始 Next(13,25)+列扫描地牢砖色选+全图 Ash Next(15)+箱 678 注入
   //    Next(10)×N)与写面(Ash→熔岩/Dirt→23 系)双双缺失 → #105 尾段大族差。
   if (gs.seedFlags.getGoodWorld && !gs.seedFlags.skyblock && rng) {
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-GG-A'); } catch { /* probe */ }
     runFinishGetGoodWorld(st, rng, gs, opts?.chests);
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-GG-Z'); } catch { /* probe */ }
   }
 
   // ── FinishRemixWorld（1457 cs:22645 调用位：GG 之后、vampire/FinalizeSecretSeeds/
@@ -3741,7 +3943,9 @@ export function runFinalCleanupPass(
   //    掷流位次敏感——勿移动调用位（其后 beforeShimmer 内 FinalizeSecretSeeds/
   //    ShimmerCleanUp r90 块的掷位全由本位次锚定）。
   if (gs.seedFlags.remix && rng) {
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-RX-A'); } catch { /* probe */ }
     runFinishRemixWorld(st, rng, gs, opts?.spawnX ?? 0, opts?.spawnY ?? 0);
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FC-RX-Z'); } catch { /* probe */ }
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
@@ -3786,6 +3990,10 @@ export function runFinalCleanupPass(
         }
       }
     }
+    // ★IIIII101e 段标（与 rig TSEG|scSRW 同位）+ 单元态快照
+    try {
+      (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('scSRW', cellProbe(st));
+    } catch { /* probe */ }
     // r<120 环带（cs:34762-34790）：★盒=X±120×Y±120（num5/num6 均用 num=120，
     //   num2=90 只作第二半径阈；曾误读成 Y±90——339 处 moss→石漏转的根因）
     for (let yy = SY - 120; yy <= SY + 120; yy++) {
@@ -3824,6 +4032,15 @@ export function runFinalCleanupPass(
         }
       }
     }
+    // ★IIIII101e 段标（与 rig TSEG|scBox 同位；payload=盒界）
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('scBox', [SX - 120, SX + 120, SY - 120, SY + 120].join('|') + cellProbe(st)); } catch { /* probe */ }
+    // ★IIIII101e（GFB zenith #105 定罪主根⑤）：Liquid.tilesIgnoreWater(ignoreSolids:true)
+    //   （cs:35149 → SetBoulderSolidity(false) cs:11026-47 + tileSolid[546]=false，
+    //   Liquid.cs:69-73）——池补液+Shimmerator 窗内**巨石族非实心**，SolidTile 放行
+    //   ⇒ 洪泛进入含水巨石格、Shimminate 杀 tileCut 巨石（711）并整池转微光；
+    //   窗尾 tilesIgnoreWater(false)（cs:35192）还原。JS 曾缺此窗 ⇒ 巨石保持实心
+    //   ⇒ 洪泛拒入 ⇒ 含水体残留 → 终扫 merge 生成 659（#105 残差 15 格）。
+    flipGenSolid([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 546], false);
     // 微光池补液（cs:34802-34820）：自中心逐行下探，活性格封边
     let bx = SX, by = SY, b = 127;
     let guard = 0;
@@ -3845,6 +4062,8 @@ export function runFinalCleanupPass(
       b = 255;
       if (!st.inBounds(bx, by) || st.flags[st.idx(bx, by)] || ++guard > st.h) break;
     }
+    // ★IIIII101e 段标（与 rig TSEG|scPool 同位：池补液+tenth 巨化带后）
+    try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('scPool', cellProbe(st)); } catch { /* probe */ }
     // ★SSS-CELEB（1458 cs:35171-35195）：tenth 巨化带——X±170 × Y+40..h-430 内
     //   373/374/375→709（滴虫→异晶块），墙 86 豁免；非微光/蜂蜜液体 → Shimmerator
     //   洪泛转微光（RECON-CELEB「微光池 x±170 巨化」）。
@@ -3864,6 +4083,9 @@ export function runFinalCleanupPass(
         }
       }
     }
+    // ★IIIII101e：窗尾还原 tilesIgnoreWater(false)（cs:35192 → SetBoulderSolidity(true)
+    //   + tileSolid[546]=true）——巨石/546 实心回位，其后树击杀循环与终扫按常态。
+    flipGenSolid([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 546], true);
     // 全图微光淹没树击杀（cs:34833-34843）
     for (let xx = 10; xx < st.w - 10; xx++) {
       for (let yy = 10; yy < st.h - 10; yy++) {
@@ -3884,7 +4106,7 @@ export function runFinalCleanupPass(
 // 未移植 → 其后的 PaintTrees/PaintMushrooms 颜色带掷骰位次相对 vanilla 有位移
 // （仅涂色色相分布差，无格子几何差；备案=SSS-CELEB 遗留#1）。
 
-const CRACKED_BRICKS = idsByVanillaSheet(48, 487);
+const CRACKED_BRICKS = idsByVanillaSheet(481, 482, 483);   // ★IIIII101e 勘误：TileID.cs:183 CrackedBricks={481,482,483}，旧值(48,487)=Spikes+PicnicTable 转写错（paint 域）
 const TILE_DUNGEON_FC = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
 const RAINBOW_BASE = 13;                       // GetRainbowPaintIDForPosition 基色
 const rainbowPaintIdAt = (x: number, y: number): number => (x % 44 + y % 44) % 11 + RAINBOW_BASE;
@@ -3893,56 +4115,80 @@ const rainbowPaintIdWiggly = (x: number, y: number): number => {
   return (wx % 44) % 11 + RAINBOW_BASE;
 };
 
-/** FinishTenthAnniversaryWorld（1458 cs:24508-24553）：纯 celeb 路径
- *  （remix/gg/drunk/ntb/dontStarve 组合域支不移植，各自线另案）。 */
+/** FinishTenthAnniversaryWorld（1458 cs:24508-24553）。
+ *  ★IIIII101e 补齐组合域门（GFB zenith #105 定罪主根②——原「纯 celeb 路径」整块
+ *  无条件跑，zenith 七依赖下三块全部越权）：
+ *  ①第一块总门 cs:24510-24512 `(remix || (!ntb && !dontStarve)) && !remix`——zenith
+ *    (remix=true) 整块跳过（ConvertSkyIslands 神圣化+growTree、六族 Paint 全不跑）；
+ *  ②巨石 138→665 环 cs:24530-24544 门 `!getGoodWorldGen`——zenith 跳过；
+ *  ③ImproveAllChestContents cs:24552-24554 门 `!getGoodWorldGen`——zenith 跳过。
+ *  onlyShimmerOceanWorldsGeneration=派生旗（Main.cs:2771 getter：drunk&&tenth&&!remix
+ *  &&!everything），按 seedFlags 同式求值；SecretSeed.noSurface 直接读旗。 */
 function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
   // IIII67：x86 tenth-tail 段账镜像（同名 MARK 行）
   const __mbD2 = (): number => ((globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws?.() ?? 0);
   void __mbD2;
   const sp = (nm: string): void => { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.(nm); } catch { /* noop */ } };
+  const sf = gs.seedFlags;
+  const onlyShimmerOceanGen = !!sf.drunkWorld && !!sf.tenthAnniversary && !sf.remix && !sf.everything;   // Main.cs:2771
   sp('FTW-A');
-  sp('CSI-A');
-  convertSkyIslandsTenth(st, rng, gs);          // ConvertSkyIslands(2, growTrees:true)
-  sp('CSI-Z');
-  paintTheDungeonTenth(st, gs, 24, 24);
-  sp('P-Dungeon');
-  paintTheLivingTreesTenth(st, gs, 12, 12);
-  sp('P-LivingTrees');
-  paintTheTempleTenth(st, gs, 10, 5);
-  sp('P-Temple');
-  paintTheCloudsTenth(st, gs, 12, 12);
-  sp('P-Clouds');
-  paintTheSandTenth(st, rng, gs, 7, 7);
-  sp('P-Sand');
-  paintThePyramidsTenth(st, gs, 12, 12);
-  sp('P-Pyramids');
+  // ★IIIII101e：cs:24510-24512 第一块总门（zenith/remix 车道整块跳过）
+  if ((sf.remix || (!sf.notTheBees && !sf.theConstant)) && !sf.remix) {
+    sp('CSI-A');
+    if (!sf.getGoodWorld && !sf.drunkWorld) {    // cs:24513-24517
+      convertSkyIslandsTenth(st, rng, gs);       // ConvertSkyIslands(2, growTrees:true)
+    }
+    sp('CSI-Z');
+    paintTheDungeonTenth(st, gs, 24, 24);
+    sp('P-Dungeon');
+    if (!onlyShimmerOceanGen && !sf.noSurface) {  // cs:24519-24523
+      paintTheLivingTreesTenth(st, gs, 12, 12);
+    }
+    sp('P-LivingTrees');
+    paintTheTempleTenth(st, gs, 10, 5);
+    sp('P-Temple');
+    if (!onlyShimmerOceanGen) {                   // cs:24526-24529
+      paintTheCloudsTenth(st, gs, 12, 12);
+    }
+    sp('P-Clouds');
+    paintTheSandTenth(st, rng, gs, 7, 7);
+    sp('P-Sand');
+    if (!onlyShimmerOceanGen) {                   // cs:24530-24533
+      paintThePyramidsTenth(st, gs, 12, 12);
+    }
+    sp('P-Pyramids');
+  }
   // —— 巨石 138→665 生命水晶巨石（cs:24530-24544）：全图扫 [50,w-50)×[50,h-50)，
   //    Next(4) **每格无条件消耗**（&&链首项），命中锚格(frameX/Y==0 → JS 用
-  //    左/上同型邻格不存在判定)才改写 2×2。
-  const b138s = sid(138), b665s2 = sid(665);
-  for (let i = 50; i < st.w - 50; i++) {
-    for (let j = 50; j < st.h - 50; j++) {
-      if (rng.int(0, 3) !== 0) continue;
-      const t = st.idx(i, j);
-      const sh = SWEEP_SHEET[st.type[t]];
-      if (!st.flags[t] || sh !== 138) continue;
-      // 锚格近似：vanilla frameX==0 && frameY==0（JS 生成期无帧通道）
-      const anchor = !(i > 0 && SWEEP_SHEET[st.type[st.idx(i - 1, j)]] === 138)
-        && !(j > 0 && SWEEP_SHEET[st.type[st.idx(i, j - 1)]] === 138);
-      if (!anchor) continue;
-      st.type[t] = b665s2;
-      if (j + 1 < st.h) st.type[st.idx(i, j + 1)] = b665s2;
-      if (i + 1 < st.w) st.type[st.idx(i + 1, j)] = b665s2;
-      if (i + 1 < st.w && j + 1 < st.h) st.type[st.idx(i + 1, j + 1)] = b665s2;
+  //    左/上同型邻格不存在判定)才改写 2×2。★IIIII101e：门 `!getGoodWorldGen`
+  //    （cs:24529）——zenith/FTW 车道整环跳过（曾无条件跑=GFB #105 T138>665×112）。
+  if (!sf.getGoodWorld) {
+    const b138s = sid(138), b665s2 = sid(665);
+    for (let i = 50; i < st.w - 50; i++) {
+      for (let j = 50; j < st.h - 50; j++) {
+        if (rng.int(0, 3) !== 0) continue;
+        const t = st.idx(i, j);
+        const sh = SWEEP_SHEET[st.type[t]];
+        if (!st.flags[t] || sh !== 138) continue;
+        // 锚格近似：vanilla frameX==0 && frameY==0（JS 生成期无帧通道）
+        const anchor = !(i > 0 && SWEEP_SHEET[st.type[st.idx(i - 1, j)]] === 138)
+          && !(j > 0 && SWEEP_SHEET[st.type[st.idx(i, j - 1)]] === 138);
+        if (!anchor) continue;
+        st.type[t] = b665s2;
+        if (j + 1 < st.h) st.type[st.idx(i, j + 1)] = b665s2;
+        if (i + 1 < st.w) st.type[st.idx(i + 1, j)] = b665s2;
+        if (i + 1 < st.w && j + 1 < st.h) st.type[st.idx(i + 1, j + 1)] = b665s2;
+      }
     }
+    sp('MOSS-END');
+    void b138s;
+    // ★EEEEE 批（1458 cs:24552-24554）：ImproveAllChestContents——巨石扫之后、
+    //  Finish 子段最后一步（掷流位次在此，勿前移）。实现体 TenthAnniversaryImprove.ts。
+    //  ★IIIII101e：与巨石环同门 `!getGoodWorldGen`（cs:24547）。
+    sp('IMPROVE-A');
+    improveAllChestContents(chests, rng);
+    sp('IMPROVE-Z');
   }
-  sp('MOSS-END');
-  void b138s;
-  // ★EEEEE 批（1458 cs:24552-24554）：ImproveAllChestContents——巨石扫之后、
-  //  Finish 子段最后一步（掷流位次在此，勿前移）。实现体 TenthAnniversaryImprove.ts。
-  sp('IMPROVE-A');
-  improveAllChestContents(chests, rng);
-  sp('IMPROVE-Z');
 }
 
 /** ConvertSkyIslands(2, growTrees:true)（1458 cs:24947-24986）。
@@ -3985,7 +4231,9 @@ function convertSkyIslandsTenth(st: TileStore, rng: RNG, gs: GenState): void {
             const downNow = SWEEP_SHEET[st.type[t2]];
             // ★本支 sha 已被上方守卫窄化为 3|110|24——73→113 的重映射走下方 else 支，
             //   此处原三元 `sha===73?113:110` 为不可达死路（TS 字面窄化实锤）
-            if (downNow === 109 || downNow === 492) ntype = 110;
+            // ★IIIII101d 顺手修复：本支原编辑漏 ntype 声明（ReferenceError 炸 tenth
+            //   管线,celeb spot rc=1）——按上文窄化语义 109/492→110 恒真,补常量声明。
+            const ntype = 110;
             st.type[ta] = sid(ntype);
           } else if (sha === 73) {
             st.type[ta] = sid(113);
@@ -4116,11 +4364,16 @@ function sheetAt2Safe(st: TileStore, x: number, y: number): number {
  *  列内命中 5/323/596/616 即 color(b)；列扫完 `flag&&!flag2` 时 b++ 循环 1..12。
  *  ★掷流位置依赖 ImproveAllChestContents（未移植）→ 相对 vanilla 有位差（备案）。 */
 function paintTheTreesTenth(st: TileStore, rng: RNG, _gs: GenState): void {
+  // ★IIIII101e：remix 域扫描下界 num=worldSurface（cs:24658-24661 `int num=20;
+  //  if (remixWorldGen) num=(int)Main.worldSurface;`）——zenith 曾按 20 全高扫,
+  //  天空域树旗/列色推进全错位（b 推进=Next(1,3) 掷流位次漂移）。
+  let num = 20;
+  if (_gs.seedFlags.remix) num = Math.trunc(_gs.worldSurface);
   let b = rng.int(1, 12);                      // Next(1,13)
   let flag = false;
   for (let i = 20; i < st.w - 20; i++) {
     let flag2 = false;
-    for (let j = 20; j < st.h - 20; j++) {
+    for (let j = num; j < st.h - 20; j++) {
       const i2 = st.idx(i, j);
       if (!st.flags[i2]) continue;
       const sh = SWEEP_SHEET[st.type[i2]];
@@ -4140,22 +4393,49 @@ function paintTheTreesTenth(st: TileStore, rng: RNG, _gs: GenState): void {
 
 /** PaintTheMushrooms（1458 cs:24555-24621）：蘑菇草族 {70,578,190,71,528,519fy90}
  *  全图扫 Next(1,13) 起点 + 每列消耗计数 num3（==0 时 b+=Next(1,3) 回卷）；
- *  wall 80/74 同步。remix 支组合域不移植。 */
-function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
-  const num = st.h - 20;
+ *  wall 80/74 同步。★IIIII101e 补 remix 支（cs:24560-24583）：b 恒 2、主扫上界
+ *  num=h-500、前置掷 Next(5,31)/[Next(2)→Next(5,16)]、 underworld 带
+ *  [h-450,h-20) 列条纹预涂（i%num2==0 时 b++，**无 num3 副作用**），随后主循环
+ *  起点色照掷 Next(1,13) 覆写——zenith（remix）曾整支缺失 ⇒ 掷流+扫域双偏差。 */
+function paintTheMushroomsTenth(st: TileStore, rng: RNG, gs: GenState): void {
+  let num = st.h - 20;
   const MUSH_SHEETS = new Set([70, 578, 190, 71, 528]);
-  let b = rng.int(1, 12);
+  let b = rng.int(1, 12);                      // Next(1,13)
+  if (gs.seedFlags.remix) {                    // cs:24560-24583 remix 预支
+    b = 2;
+    num = st.h - 500;
+    let num2 = rng.int(5, 30);                 // Next(5,31)
+    if (rng.int(0, 1) === 0) num2 = rng.int(5, 15);   // Next(2)==0 → Next(5,16)
+    for (let i = 20; i < st.w - 20; i++) {
+      if (i % num2 === 0) { b++; if (b > 12) b = 1; }
+      for (let j = st.h - 450; j < st.h - 20; j++) {
+        if (j < 0 || j >= st.h) continue;
+        const i3 = st.idx(i, j);
+        // vanilla wall 80/74 判定不套 active 门（cs:24577-24582）——inactive 格照判
+        if (st.flags[i3]) {
+          const sh3 = SWEEP_SHEET[st.type[i3]];
+          if (MUSH_SHEETS.has(sh3) || (sh3 === 519 && st.frameY[i3] === 90)) st.paint[i3] = b & 31;
+        }
+        if (st.wall[i3] === 80 || st.wall[i3] === 74) st.paintWall[i3] = b & 31;
+      }
+    }
+  }
+  b = rng.int(1, 12);                          // 主循环起点色照掷（remix 域第二次）
   let num3 = 0;
   for (let k = 20; k < st.w - 20; k++) {
     for (let l = 20; l < num; l++) {
       const i2 = st.idx(k, l);
-      if (!st.flags[i2]) continue;
-      const sh = SWEEP_SHEET[st.type[i2]];
       // ★IIIII67：原版对 519 巨菇要求 frameY==90（cs:24566）——生成期帧通道在！
       //  曾按「无帧通道」近似全量匹配 ⇒ 列段 num3=10 复位点偏移、Next(1,3) 掷数差。
-      if (MUSH_SHEETS.has(sh) || (sh === 519 && st.frameY[i2] === 90)) {
-        st.paint[i2] = b & 31;
-        num3 = 10;
+      // ★IIIII101e：wall 80/74 判定不套 active 门（cs:24590-24599 原文两 if 并列）
+      //  ——inactive 格照判且 num3=10 副作用照记（num3 驱动 Next(1,3) 掷位，
+      //  旧 active-continue 曾吞 inactive 墙格的掷位推进）。
+      if (st.flags[i2]) {
+        const sh = SWEEP_SHEET[st.type[i2]];
+        if (MUSH_SHEETS.has(sh) || (sh === 519 && st.frameY[i2] === 90)) {
+          st.paint[i2] = b & 31;
+          num3 = 10;
+        }
       }
       if (st.wall[i2] === 80 || st.wall[i2] === 74) {
         st.paintWall[i2] = b & 31;
@@ -4169,6 +4449,18 @@ function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
       if (b > 12) b = 1;
     }
   }
+}
+
+/** ★IIIII101e 单元态快照（探针；残差定位用） */
+function cellProbe(st: TileStore): string {
+  const pts: Array<[number, number]> = [[3846, 764], [3846, 765], [3847, 764]];
+  let sb = '';
+  for (const [px, py] of pts) {
+    if (!st.inBounds(px, py)) { sb += `|${px},${py}:oob`; continue; }
+    const i = st.idx(px, py);
+    sb += `|${px},${py}:${st.type[i]}/${st.flags[i] ? 1 : 0}/${st.liquid[i]}/${st.liquidType[i]}`;
+  }
+  return sb;
 }
 
 /** Shimmerator（1458 cs:35487-35528：洪泛收集 + Shimminate）。
@@ -4196,7 +4488,12 @@ function shimmeratorTenth(
     const i = key;
     try { const g = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
       if (g.__swShimTargets?.has(x + ',' + y)) g.__swSeg?.('TVISIT ' + x + ',' + y + ' n=' + num); } catch { /* noop */ }
-    const solidVan = !!st.flags[i] && !!TILE_DEFS[st.type[i]]?.solid
+    // ★IIIII101e（GFB zenith #105 定罪主根④）：SolidTile 的 tileSolid 必须读
+    //   **生成期覆写表**（genSolidType）——曾读静态 TILE_DEFS.solid：zenith 下
+    //   tileSolid[56]=false（GG 门 MicroBiomes 尾）/tileSolid[379]=true（QuickWater
+    //   头再置）等覆写未生效 ⇒ 洪泛受理集漂移、连片水池洪泛撞 3500 帽放弃
+    //   Shimminate（vanilla 恰 <帽 转微光）⇒ 微光池 15 格写差。
+    const solidVan = !!st.flags[i] && genSolidType(st.type[i])
       && !PC_SOLID_TOP_F10.has(SWEEP_SHEET[st.type[i]])
       && st.half[i] === 0 && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
     const liquidOk = !solidVan && st.liquidType[i] !== LIQUID_TYPE.SHIMMER && st.liquid[i]! > 0;
@@ -4240,7 +4537,7 @@ function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
 // Ash Next(15) ④箱循环 Next(10)×N——位次敏感，勿移动。
 const CLOUD_SHEETS_FGG = new Set([189, 196, 460, 717, 718, 719]);   // TileID.Sets.Clouds
 const DUNGEON_BRICKS_FGG = new Set([41, 43, 44, 677, 678, 679]);    // Main.tileDungeon
-const CRACKED_FGG = new Set([48, 487]);                             // CrackedBricks
+const CRACKED_FGG = new Set([481, 482, 483]);                       // ★IIIII101e 勘误：CrackedBricks={481,482,483}（TileID.cs:183），旧值(48,487)系转写错（paint 域）
 const KILL_ABOVE_FGG = new Set([3, 73, 27, 596, 616, 82, 83, 186, 187, 185, 227]);
 
 export function runFinishGetGoodWorld(

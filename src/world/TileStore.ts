@@ -227,6 +227,13 @@ export class TileStore {
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除清半砖/坡面
+    // ★终审 B①（2026-09-04）：KillTile 尾 WorldGen.cs:64431 `tile.type = 0;
+    //  tile.inActive(inActive: false);`——破坏清格时复位致动位（wire 色位/致动器
+    //  挂件位照原版保留,仅清 inActive）。曾缺此清位 → 已致动格被破坏后重铺新块
+    //  继承 WIRE_ACTUATED=生而隐形（原版不存在此态;放置门改裸 active() 后,
+    //  豁免件清格路径经此口复位）。生成期 type=0 写入同口径（原版生成写全新 Tile,
+    //  inActive 恒 false）。
+    if (type === 0) this.wire[i] &= ~TileStore.WIRE_ACTUATED;
     // 油漆随方块清除/铺块重置：
     //   KillTile（WorldGen.cs:63933-63939）active(false)+halfBrick(false)+ClearBlockPaintAndCoating；
     //   PlaceTile（WorldGen.cs:59499-59501）!active() 时 Clear(Tile|TilePaint|Slope)。
@@ -265,6 +272,8 @@ export class TileStore {
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除同步清位（防生成期脏残留）
+    // ★终审 B①（2026-09-04）：同 setTile——KillTile 尾 :64431 复位 inActive
+    if (type === 0) this.wire[i] &= ~TileStore.WIRE_ACTUATED;
     // ★IIIII201（2026-09-03）勘误：清漆/涂层只属 **type===0（KillTile 族,
     //   ClearBlockPaintAndCoating Tile.cs:934-939）**——曾连 !wasActive（新置入空格）
     //   一并清，而 vanilla PlaceTile default 支（WorldGen.cs:60725-60741）只写

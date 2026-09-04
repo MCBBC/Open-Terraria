@@ -241,6 +241,9 @@ export interface GameHooks {
    *  由弹侧 FTW 四象限门（primeBombTerrainRadius）传入;实体段在实现内中性化
    *  （hostile 弹对 NPC 零伤/SelfHurtPlayers 不跑——玩家伤走弹侧 hitPlayer） */
   explodePrimeBomb102?(tx: number, ty: number, px: number, py: number, radius: number, destroyTiles: boolean): void;
+  /** SW-X1 2026-09-04：Collision.HitTiles 转发（Game.hitTilesFx 实现——KillTile(fail:true)
+   *  分型砖屑尘;655 蜂巢落地反弹同拍面 Projectile.cs:19382 消费） */
+  hitTilesFx?(x: number, y: number, w: number, h: number, vx: number, vy: number): void;
   /** 吸血链（Projectile.vampireHeal/ghostHeal）：返回实际回复 HP（0 = 未生效） */
   applyLifeSteal?(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic?: boolean): number;
   /** 投射物显示名（Lang.GetProjectileName cs:444——死亡归因 DeathSource.Projectile 用） */

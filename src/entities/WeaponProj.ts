@@ -4832,11 +4832,15 @@ export class GrenadeProj extends Entity {
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
   /** 911 首贴标记（原版 localAI[0]，:44364/:44372） */
   private stuckOnce = false;
-  /** 655 摇树蜂巢（AI_025 :17856-17867）：落地 vy>5 反弹×0.2（且只弹不杀）；
-   *  水平撞墙即 Kill → 裂 2+Next(3)³ 蜂（Kill :72110-72155）；wet Kill 落
-   *  蜂王浆 1124×Next(2,6)（:72124-72128）。裂蜂回调由 Game 注入（出怪上限门
-   *  GetAvailableAmountOfNPCsToSpawnUpToSlot 在 Game 侧） */
+  /** 655 摇树蜂巢（AI_025 :19379-19391 落地反弹/撞墙裂——旧注 :17856 系 Update
+   *  位移段误标,SW-W1 已勘误）：落地 vy>5 反弹×0.2（且只弹不杀）;水平撞墙/入水
+   *  即 Kill → wet 落蜂巢块 1124×Next(2,6)（:76626-76628）/干裂 2+Next(3)³ 蜂
+   *  （Kill :76611-76660——旧注 :72110-72155 系他支误锚）。裂蜂回调由 Game 注入
+   *  （出怪上限门 GetAvailableAmountOfNPCsToSpawnUpToSlot 在 Game 侧） */
   onBeehiveKill?: (wet: boolean, px: number, py: number, vx: number, vy: number) => void;
+  /** SW-X1 2026-09-04（L-1②）：本拍 AI_025 wet 真值（WetCollision 任一液体,
+   *  :26752 入水 Kill 门与 Kill wet 分支共用;曾硬编码 false=水中也裂蜂） */
+  private wet655 = false;
 
   // ---- 发射器弹药族（AI_016 else 发射支 :44542-44911，2026-08-14 对账新增）----
   /** fired = 发射族（无 PrepareBombToBlow 投掷臂路径；无重力直线/加速/追踪） */
@@ -4901,14 +4905,18 @@ export class GrenadeProj extends Entity {
   /** 发射支 ai[0]（追踪 ramp 用） */
   private firedAi0 = 0;
 
-  /** 655 蜂巢落地/撞墙 Kill（:72110-72155）：音 4 + 尘 147×30 + 裂蜂回调
-   *  （数量/出怪上限门在 Game 侧）。引信耗尽走 onExplode 不入此路。 */
+  /** 655 蜂巢落地/撞墙/入水 Kill（:76611-76660）：音 4 = legacy NPCKilled
+   *  （SoundID.cs:30,:76613,仓键 'killed',Game.breakHive 同款）+ 尘 147×30
+   *  （Next(2)==0 → scale×1.4,视觉近似 #B8D878 粒）+ 回调（wet → 蜂巢块
+   *  1124×Next(2,6) :76626-76628;干 → 裂 2+Next(3)³ 蜂,数量/出怪上限门在
+   *  Game 侧）。引信耗尽走 onExplode 不入此路。 */
   private killBeehive(game: GameHooks, lastVx: number, lastVy: number): void {
     if (this.dead) return;
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+    game.playSfx?.('killed', 1, this.cx, this.cy);          // :76613 PlaySound(4, position)
     game.spawnParticles(this.cx, this.cy, '#B8D878', 30, 1.8, { life: 20 });
-    this.onBeehiveKill?.(false, this.cx, this.cy, lastVx * 1.9, lastVy * 1.9);
+    this.onBeehiveKill?.(this.wet655, this.cx, this.cy, lastVx * 1.9, lastVy * 1.9);
   }
   /** 火箭贴墙待爆标记（vel=0 后停物理） */
   private stickPending = false;
@@ -5011,6 +5019,15 @@ export class GrenadeProj extends Entity {
       //   ——序对齐原文「先钳后加」:终端速度=每拍钳 16 再 +0.3=16.3,非旧
       //   「先加后钳」的恒 16（0.3 也已由 sw-w1 微物理回归钉面）。
       if (this.vy > 16) this.vy = 16;
+      // SW-X1 2026-09-04（L-1①）：X 自加速（:26694-26710 第三析取支 `else if
+      //   (velocity.Y <= 6f)`——1055/1021 专属支之后,655 落此）:vx 朝原方向
+      //   ±0.05,开区间门 |vx|<7（原文字面 `> 0f && < 7f`）;门读钳后 vy
+      //   （vanilla 序 = 钳 16 :26684 → 自加速 :26694 → 重力 +0.3 :26738）。
+      //   bombGravityGateOf 仅 655 返 null → 本支即 655 独占。
+      if (this.vy <= 6) {
+        if (this.vx > 0 && this.vx < 7) this.vx += 0.05;
+        if (this.vx < 0 && this.vx > -7) this.vx -= 0.05;
+      }
       this.vy += 0.3;
       return true;
     }
@@ -5641,6 +5658,15 @@ export class GrenadeProj extends Entity {
     //   滚行拍吃 ×0.97 后 vx（:48382 摩擦→:48406 滚转）;519 专属 ×0.06（:48402）。
     //   655=AI_025 不入此支（上方 ×0.06 专支）。
     if (this.projId !== 655) this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
+    // SW-X1 2026-09-04（L-1②）：AI_025 入水 Kill（:26752-26760 `if (AnyWet &&
+    //   netMode != 1) { ... else if (wet && type == 655) Kill(); }`,位 = 重力段后/
+    //   位移前;单机 netMode 0 恒过门,AnyWet∧wet ≡ wet）。wet = WetCollision 真值
+    //   （任一液体含岩浆/蜂蜜,Projectile.cs:16902/:16906 赋值）——Kill wet 分支落
+    //   蜂巢块 1124×Next(2,6)（:76626-76628）,干侧裂蜂。曾整缺 → 水中蜂巢不裂。
+    if (this.projId === 655) {
+      this.wet655 = wetCollision(game.world.store, this.x, this.y, this.w, this.h).wet;
+      if (this.wet655) { this.killBeehive(game, this.vx, this.vy); return; }
+    }
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
     const body = {
@@ -5659,7 +5685,14 @@ export class GrenadeProj extends Entity {
     //   （ε 间隙效应由贴面吸附吸收,论证见下方 hitHead 支）;② 软着陆支旧 early-
     //   return 跳过 hitWall 判 → 落地同拍蹭墙漏 Kill,归并后序对齐原文（先 Y 后 X）。
     if (this.projId === 655) {
-      if (body.onGround && lastVy > 5) this.vy = -lastVy * 0.2;
+      if (body.onGround && lastVy > 5) {
+        // SW-X1 2026-09-04（L-1③）：反弹同拍 Collision.HitTiles + 音 0（:19382-19385,
+        //  vanilla 序 = HitTiles/音先于 vy 覆写,velocity = 覆写前值;音 0 = legacy Dig
+        //  家族 → 'dig'）——曾缺 = 反弹无砖屑无声。
+        game.hitTilesFx?.(body.x, body.y, this.w, this.h, this.vx, this.vy);
+        game.playSfx?.('dig', 1, body.x + this.w / 2, body.y + this.h / 2);
+        this.vy = -lastVy * 0.2;
+      }
       else if (body.hitHead || body.onGround) this.vy = body.y - bodyY0;
       this.x = body.x;
       this.y = body.y;

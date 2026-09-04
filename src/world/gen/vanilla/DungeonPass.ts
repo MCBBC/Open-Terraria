@@ -1369,7 +1369,15 @@ const snap: SnapFn = (name) => {
     let num3 = 35 + hrn(45);                                    // (int)(35*hallStepScalar)+Next(45)
     const dangerous = hrd() <= 0.166;                            // CrackedBrickChance（DungeonHallSettings.cs:15）
     if (s.forceX) { num3 += 20; lastHallX = 0; lastHallY = 0; }
-    else if (hrn(5) === 0) { nnum *= 2; num3 = Math.trunc(num3 / 2); }
+    else {
+      if (hrn(5) === 0) { nnum *= 2; num3 = Math.trunc(num3 / 2); }
+      // ★IIIII107c：errorWorld 双臂（LegacyDungeonHall.cs:225-234）——Next(5) 块后
+      //   两颗条件 Next(2)：50% 强度(nnum)翻倍、50% 步数(num3)翻倍。C# `flag && Next(2)==0`
+      //   短路 ⇒ 旗关零掷（非 error 链流位零变化）；iamerror 链 mile8 #032 首差根因
+      //   （x86 走廊多耗 331 样本=每走廊 +2 掷 & 步数/宽度翻倍 → 粉砖海+冰带爬伸）。
+      if (gs.seedFlags.errorWorld && hrn(2) === 0) nnum *= 2;
+      if (gs.seedFlags.errorWorld && hrn(2) === 0) num3 *= 2;
+    }
     const steps0 = num3;
     const num4 = nnum;
     const num5 = 0.5;                                           // hallInteriorToExteriorRatio
@@ -1449,7 +1457,10 @@ const snap: SnapFn = (name) => {
       }
       if (lastHallX !== z2x || lastHallY !== z2y) done = true;
     }
-    const n13 = w * 0.25, n14 = w * 0.75;
+    // ★IIIII107c：errorWorld 横向折返带收窄（LegacyDungeonHall.cs:513-517）——
+    //   num13/num14 从 *0.25/*0.75 收到 *0.4/*0.6（float 乘后回 double 与 JS double 同值,
+    //   4200×0.4f/0.6f 均精确落 1680/2520）。零掷。
+    const n13 = w * (gs.seedFlags.errorWorld ? 0.4 : 0.25), n14 = w * (gs.seedFlags.errorWorld ? 0.6 : 0.75);
     // ★IIIII70 REMIX（1457 LegacyDungeonHall.cs:518-523）：remix 下 flag13 的下压阈值
     //   从 rockLayer+100 换成 Main.worldSurface+100——remix「反向体」里世界 content
     //   域浅表化（worldSurface=337/rockLevel=769 @ seed 1138154190），未接此支时走廊

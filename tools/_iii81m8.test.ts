@@ -426,7 +426,16 @@ function labelOf(file: string, line: number): string {
     try {
       await generateWorld({
         width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
-        seedFlags: Object.keys(M8_FLAGS).length > 0 ? M8_FLAGS : undefined,
+        // ★IIIII110b（2026-09-04）pumpkin 链定谳配套：SW_I81_PINFLAGS=1 = S0-1 直注语义
+        //   ——恒传 M8_FLAGS（可为空 {}）作 cfg.seedFlags，压掉 WorldGen.ts 的
+        //   parseSeedChain(effSeedText) 文本秘种子路由回退。背景：i78 家族真值桶
+        //   （rig BCrypt 文本路由不可达,IIIII163 定谳）对 'pumpkinseason|20260904'
+        //   产**无旗**世界（x86 全 110 dump 254=0 实证,active 指纹≡ctl171）;JS 侧
+        //   缺省回退会把 halloweenGen 从种子文本路由出来 → 与桶配方漂移（CXV c12345
+        //   EVIL 漂移同判例）→ #86 起 20 行伪红。SW_I81_PINFLAGS=1 + 不给
+        //   SW_I81_FLAGS = 无旗直注 = mile8 106 槽满绿复现（/tmp/iii140-out）。
+        seedFlags: process.env.SW_I81_PINFLAGS === '1' ? M8_FLAGS
+          : (Object.keys(M8_FLAGS).length > 0 ? M8_FLAGS : undefined),
         // ★IIIIII8：onWorldPartial 第三参=passes[i].name → 槽名实到校验。任何未来
         // 管线增删/搬移槽位在这里立即报「名实不符」(曾因 II6 插「起始镇民」静默错位
         // 烧出四链 #81 T27>0 全线伪红)。默认响亮告警不阻断；SW_M8_STRICT_NAMES=1

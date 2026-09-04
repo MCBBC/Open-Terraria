@@ -59,7 +59,7 @@ const DOC_SRC = `  if (isDoc) {
         if (res && res.ok) cache.put(req, res.clone());
         return res;
       } catch (err) {
-        const hit = await cache.match(req);
+        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
         if (hit) return hit;
         throw err;
       }

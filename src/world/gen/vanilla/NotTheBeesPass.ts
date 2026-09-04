@@ -167,6 +167,8 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
   const remixNum2 = remix ? h - 180 : num2;
 
   for (let i = 5; i < w - 5; i++) {
+    // ★IIIII101e 段标（列级掷位仪,与 rig TSEG|ntbC 同位同口径;无钩零开销）
+    if (i % 50 === 7) { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('ntbC', String(i)); } catch { /* probe */ } }
     for (let j = 5; j < h - 180; j++) {
       const idx = st.idx(i, j);
       // flag（cs:25289）：oceanDepths 短路 → Next(3)×1 → 左界短路 → Next(3)×2
@@ -620,7 +622,11 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
   }
   // 主扫（cs:25587-25830）
   for (let m = 25; m < w - 25; m++) {
+    // ★IIIII101e 段标（列级掷位仪,与 rig TSEG|fntbC 同位同口径）
+    if (m % 50 === 27) { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('fntbC', String(m)); } catch { /* probe */ } }
     for (let n = 25; n < h - 25; n++) {
+      // ★IIIII101e 行级掷位仪（定位窗 m∈[628,676]；与 rig TSEG|fnTR 同位）
+      if (m >= 628 && m <= 676) { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('fnTR', m + '|' + n); } catch { /* probe */ } }
       const idx = st.idx(m, n);
       const num8 = st.flags[idx] ? sheetOf(st.type[idx]!) : -1;
       if (getGood && !tenth && num8 === 76) st.type[idx] = CRISPY_HONEY;
@@ -633,6 +639,11 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       if ((dstarve || noTraps) && !tenth && num8 === 48) st.type[idx] = TILE_BY_KEY['v_232_wooden_spike']!;
       if (num8 === 571) { fntbTagSafe('T571', m, n); genTileFrame(st, rng, m, n); }   // 竹重帧
       const num9 = remix ? 10 : 20;
+      // ★IIIII101e 定点示波（与 rig TSEG|fntbA..D 同位；m==633,n==687 无钩零开销）
+      if (m === 633 && n === 687) {
+        const pr = (t: string) => { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.(t, String(n)); } catch { /* probe */ } };
+        pr('fntbA');
+      }
       // 腐化丛林草 25 → 661（cs:25599-25625）
       if (num8 === 25 || (remix && num8 === 23 && n < ws)) {
         for (let a = m - num9; a <= m + num9; a++) {
@@ -676,6 +687,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         }
       }
       // SpreadGrass 熔岩线分界（cs:25665-25671）
+      if (m === 633 && n === 687) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('fntbB', String(n)); } catch { /* probe */ } }
       // ★IIII24：原版 SpreadGrass 尾 SquareTileFrame 是**全引擎** TileFrame×9 派发
       //   （cs:75288→SquareTileFrame→tileFrameImportant 全表+CheckVines/苔藓184掷）
       // ——旧版走 Spread.ts 的 scoped 副本（仅 185/186/187/26）静默漏掉：
@@ -700,6 +712,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       const num15 = Math.trunc(ws) + rng.int(-2, 2) + 35;
       if (dbg) fntbTagSafe('A3', m, n);
       const num16 = Math.trunc((num14 + num15) / 2);
+      if (m === 633 && n === 687) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('fntbC2', String(n)); } catch { /* probe */ } }
       if (dbg) fntbTagSafe('B4pre', m, n);
       if (n > num15 && n <= num14) {
         if (m < bd + 200 - 20 - rng.int(-2, 2) || m > w - bd - 200 + 20 + rng.int(-2, 2)) {
@@ -734,6 +747,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         }
       }
       // 幼虫播种（cs:25732-25752）
+      if (m === 633 && n === 687) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('fntbD', String(n)); } catch { /* probe */ } }
       if (dbg) fntbTagSafe('C5pre', m, n);
       if (n <= num || m <= 350 || m >= w - 350
         || (st.liquid[idx]! !== 0 && st.liquidType[idx] !== LIQUID_TYPE.HONEY)
@@ -742,7 +756,13 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       }
       if (dbg) fntbTagSafe('C5mid', m, n);
       if (dstarve || remix) {
-        if (rng.int(0, 599) === 0) placeLarva(st, rng, m, n);
+        // ★IIIII101e 定点示波 E/F（与 rig fntbE/fntbF 同位）
+        const __l6 = rng.int(0, 599) === 0;
+        if (m === 633 && n === 687) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('fntbE', String(n)); } catch { /* probe */ } }
+        if (__l6) {
+          placeLarva(st, rng, m, n);
+          if (m === 633 && n === 687) { try { (globalThis as unknown as { __swSeg?: (nm: string, d?: unknown) => void }).__swSeg?.('fntbF', String(n)); } catch { /* probe */ } }
+        }
       } else if (noTraps) {
         if (rng.int(0, 149) === 0) placeLarva(st, rng, m, n);
       } else if (rng.int(0, 224) === 0) {
@@ -803,7 +823,7 @@ const RESETS_HALF_ATTEMPT_231 = true;
  *  （A=3716/T=7606），导出表后逐格同效。 */
 const FI_SHEET = _DG_FRAMED_ALL;
 
-function placeLarva(st: TileStore, rng: RNG, x: number, y: number): void {
+function placeLarva(st: TileStore, rng: RNG, x: number, y: number): boolean {
   let ok = true;
   if (!st.inBounds(x, y)) ok = false;
   if (ok) {
@@ -853,6 +873,18 @@ function placeLarva(st: TileStore, rng: RNG, x: number, y: number): void {
   }
   // ★无条件尾奏（成功与失败都走；与 PlaceTile 分派支连发结构一致）
   genSquareTileFrame(st, rng, x, y);
+  // ★IIIII101e（GFB zenith #105 定罪主根③）：PlaceTile 多格分派支（case 231 →
+  //   Place3x3 + SquareTileFrame）**不 return**，直落公共尾
+  //   `if (tile.active()) { …; SquareTileFrame(i, j); result = true; }`
+  //   ——vanilla 对 231 恒跑**两遍** SquareTileFrame（rig fntbE/F 实证：扫窗含
+  //   case 184 苔藓无条件掷族时 2 掷 vs JS 旧码 1 掷 ⇒ NTB 相位 −1 起全流错位）。
+  //   TruncatesWalls={54,328,459,748} 不含 231 → 无 SquareWallFrame 臂。
+  let result = false;
+  if (st.flags[st.idx(x, y)]) {
+    genSquareTileFrame(st, rng, x, y);
+    result = true;
+  }
+  return result;
 }
 
 /** SpiderWallRemover（getGood 支；纯 NTB 不可达，占位实现） */

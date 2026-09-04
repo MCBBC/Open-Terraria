@@ -2377,8 +2377,9 @@ export class SantankShellProj extends TownShot {
     if (p && !p.dead && !(p as unknown as { immune?: boolean }).immune
       && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
       p.lastDamageCause = { kind: 'projectile', name: 'Santank Cannon' };
-      // ★SW-T1：自伤面=SelfHurtPlayers :15122 `Main.DamageVar(value, 0f - localPlayer.luck)`
+      // ★SW-T1：自伤面=SelfHurtPlayers :15118 `Main.DamageVar(value, 0f - localPlayer.luck)`
       //  【luck 取负:厄运→重掷取 min 伤更大】——与 NPC 面 :12970 正向相反,两 face 勿混
+      //  （SW-X1 2026-09-04 引注勘误,曾 :15122）
       p.damage(Math.max(1, damageVarRoll(this.damage, -p.luck)),
         Math.sign(p.cx - this.cx) || 1, 0, game as never);
     }

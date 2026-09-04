@@ -23,7 +23,9 @@ afterEach(() => { vi.restoreAllMocks(); });
 // ============================================================
 // ★F9 stats/DamageVar 单源
 // ============================================================
-describe('F9 DamageVar 单源（Main.cs:67097-67124 三要素）', () => {
+// SW-AB1 2026-09-04 引注校准:旧题止行 "67124" = DamageVar 函数收括号,三要素域实止于
+// :67123 `return (int)Math.Round(num)`（函数体首实义行 = :67103,:67102 = NoDamageVar 支收括号）。
+describe('F9 DamageVar 单源（Main.cs:67097-67123 三要素）', () => {
   it('ToEven 银行家舍入中点档', () => {
     expect(toEvenRound(2.5)).toBe(2);
     expect(toEvenRound(3.5)).toBe(4);

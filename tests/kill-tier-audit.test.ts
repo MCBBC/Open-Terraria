@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { Arrow, BULLET_KILL_SFX } from '../src/entities/Arrow';
 import { Dart } from '../src/entities/Dart';
 import { GorePiece } from '../src/entities/GorePiece';
@@ -596,5 +597,93 @@ describe('★31 Dart 端活口金标（2026-09-03 R8:蚁狮沙球落档/掉件�
     run(d, g);
     expect(drops).toHaveLength(0);                           // 常规落地不掉件
     expect(st.get(50, 189)).toBe(TILE_INTERNAL_BY_SHEET.get(53));   // 放置格=上一帧中心格,沙=原版 53 域
+  });
+
+  // ★终审 B④（2026-09-04）：flag2 掉件面 = Projectile.cs:79290-99。itemType 照原文
+  //  num18 表（:79131-79140）：31→169,ai[0]==2f（蚁狮敌吐=本仓唯一生成位）→ 0。
+  //  ⇒ 轨道 314/沙塌支 num18=0 不掉件（=原版蚁狮版纯消失,非掉件面缺——判定面已按
+  //  原式接 spawnDrop 通道）；传送带支 :79263-79265 无条件重挂 169 → 掉 ×1,锚
+  //  Center+(0,-2)（:79297）。
+  it('④a 轨道 314 在下（横撞墙,弹心在轨上方）→ flag2 免放+num18=0 零掉落（:79256-59/:79296-98）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const wall = TILE_INTERNAL_BY_SHEET.get(1)!;
+    const rail = TILE_INTERNAL_BY_SHEET.get(314)!;
+    st.setTileSilent(40, 100, wall, 0, 0);                   // 障碍墙（弹心撞入格）
+    st.setTileSilent(39, 101, rail, 0, 0);                   // 轨道在弹心格正下
+    const { g, drops } = dartSandGame(w);
+    const d = new Dart(40 * TILE - 26, 100 * TILE + 3, 6, 0, 10, 31);
+    d.hostile = true;
+    run(d, g);
+    expect(drops).toHaveLength(0);                           // ai[0]=2 → num18=0 不掉（原文）
+    expect(st.get(39, 100)).toBe(0);                         // flag2 免放
+    expect(st.get(39, 101)).toBe(rail);                      // 轨道原样
+    expect(st.get(40, 100)).toBe(wall);                      // 墙原样
+  });
+
+  it('④b 传送带重挂掉件锚 = Center+(0,-2)（:79297,曾用 Center 少 -2px）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const conv = TILE_INTERNAL_BY_SHEET.get(421)!;
+    st.setTileSilent(30, 100, conv, 0, 0);
+    const { g, drops } = dartSandGame(w);
+    const d = new Dart(30 * TILE + 3, 100 * TILE - 20, 0, 2, 10, 31);
+    d.hostile = true;
+    run(d, g);
+    expect(drops).toHaveLength(1);
+    expect(drops[0].key).toBe('vi_169_SandBlock');
+    expect(drops[0].x).toBe(d.cx);                           // Center.X
+    expect(drops[0].y).toBe(d.cy - 2);                       // Center.Y-2（:79297）
+  });
+});
+
+// ★终审 B②/B③（2026-09-04）致动域占用门（裸 active() 非 nactive()）：
+//   ② AISTYLE10_PLACE 落点占用门（Projectile.cs:79246 `!tile.active()` 不成立即
+//     outer else-if :79300-79304 num18>0 → 掉件）——已致动落点=占用,原版掉件；
+//     曾用 isActive=nactive() → 致动落点被当空位直铺。
+//   ③ 80 冰弹 KillTile 门（:26022 `tile.active() && type==127`）——已致动冰照常拆。
+describe('★终审 B②/B③ 致动域占用门（沙球落点 / 80 冰弹）', () => {
+  it('② 已致动落点 + 56 淤泥弹（num18=370）→ 掉件于 Center、格不被直铺', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const stone = TILE_INTERNAL_BY_SHEET.get(1)!;
+    st.setTileSilent(30, 100, stone, 0, 0);
+    st.setActuated(30, 100, true);                           // 已致动（active=1,inActive=1）
+    const dg = mkDeathGame({ world: w });
+    const drops: Array<{ x: number; y: number; key: string; n: number }> = [];
+    (dg.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string, n = 1) => { drops.push({ x, y, key, n }); return null; };
+    dg.g.onProjectileDeath(56, 30 * TILE, 100 * TILE, 8, 8, 0, 0, 10, {});
+    expect(drops).toHaveLength(1);                           // 占用 → outer else-if 掉件
+    expect(drops[0].key).toBe(VANILLA_ITEM_KEY_BY_ID[370]);  // num18=370（:79154-79156 表）
+    expect(drops[0].x).toBe(30 * TILE + 4);                  // Center
+    expect(drops[0].y).toBe(100 * TILE + 4);
+    expect(st.get(30, 100)).toBe(stone);                     // 格不被直铺（占用=拒）
+    expect(st.isActuated(30, 100)).toBe(true);               // 隐形态原样（未覆写）
+    expect(dg.sfx).toEqual([]);                              // 该支无音效（原版掉件静默）
+  });
+
+  it('② 对照：空落点 + 56 → 正常铺放淤泥 112、零掉落（place 支未受门影响）', () => {
+    const w = emptyWorld();
+    const st = w.store;
+    const dg = mkDeathGame({ world: w });
+    (dg.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
+    const drops: unknown[] = [];
+    (dg.g as unknown as Record<string, unknown>).spawnDrop =
+      (x: number, y: number, key: string) => { drops.push({ x, y, key }); return null; };
+    dg.g.onProjectileDeath(56, 30 * TILE, 100 * TILE, 8, 8, 0, 0, 10, {});
+    expect(drops).toHaveLength(0);
+    expect(st.get(30, 100)).toBe(TILE_INTERNAL_BY_SHEET.get(112));   // 淤泥铺放
+  });
+
+  it('③ 已致动冰 127 弹心格 → 照常 KillTile（:26022 裸 active()）', () => {
+    const w = emptyWorld();
+    const ice = TILE_INTERNAL_BY_SHEET.get(127)!;
+    w.store.setTileSilent(25, 18, ice, 0, 0);
+    w.store.setActuated(25, 18, true);
+    const dg = mkDeathGame({ world: w });
+    dg.g.onProjectileDeath(80, 25 * TILE, 18 * TILE, 16, 16, 0, 0, 10, {});
+    expect(dg.brokenTiles).toEqual([[25, 18]]);              // 致动冰照拆（曾 isActive 门漏）
+    expect(w.store.hasTile(25, 18)).toBe(true);              // breakTile 为录制桩未清格（面锁即足）
   });
 });

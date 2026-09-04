@@ -173,15 +173,15 @@ const le16 = (p: string): Uint16Array => {
   }));
   // ★基座自检：hydrate 后先对上一层 dump(041=Dirt_Rock_Wall_Runner) 八通道计数（非零=基座错）
   {
-    const pre41 = `${G2}/058_${DUMPNAME.get(58)}`;
-    const a58 = readFileSync(`${pre41}.act`), t58 = le16(`${pre41}.typ`), w58 = le16(`${pre41}.wal`);
+    const pre41 = `${G2}/060_${DUMPNAME.get(60)}`;
+    const a60 = readFileSync(`${pre41}.act`), t60 = le16(`${pre41}.typ`), w60 = le16(`${pre41}.wal`);
     let dA = 0, dT = 0, dW = 0;
     for (let i2 = 0; i2 < N; i2++) {
-      if (a58[i2] !== (st.flags[i2]! & 1)) dA++;
-      else if (a58[i2] && t58[i2] !== (SHEET[st.type[i2]!] >= 0 ? SHEET[st.type[i2]!] : 9999)) dT++;
-      else if (w58[i2] !== st.wall[i2]) dW++;
+      if (a60[i2] !== (st.flags[i2]! & 1)) dA++;
+      else if (a60[i2] && t60[i2] !== (SHEET[st.type[i2]!] >= 0 ? SHEET[st.type[i2]!] : 9999)) dT++;
+      else if (w60[i2] !== st.wall[i2]) dW++;
     }
-    console.log(`[base selfcheck vs #058] dAct=${dA} dTyp=${dT} dWal=${dW}`);
+    console.log(`[base selfcheck vs #060] dAct=${dA} dTyp=${dT} dWal=${dW}`);
   }
   // 掷数计镜（与 JS 内 SW_DG_LTMARK MARK 行的 rc= 同源）
   const rcBox = { n: 0 };

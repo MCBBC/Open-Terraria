@@ -164,11 +164,15 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       // 占位格阻挡判定（CanPlace TileObject.cs:357）：tileCut ∪ BreakableWhenPlacing
       // 均不阻挡（写入前 TileObject.Place :84-86 KillTile 清除）；特例 484/654 虽属
       // tileCut 仍阻挡。★石堆族 185 曾漏入例外面——小石子挡家具须镐挖(用户实报)。
+      // ★终审 B①（2026-09-04）：门读裸 active()（=hasTile,含已致动格）——原版
+      //  CanPlace :357 占用面为 tile.active() 非 nactive(),已致动格=占用拒绝放置
+      //  （曾用 isActive=nactive() → 致动格被当空位;豁免件清格侧 KillTile 尾
+      //  WorldGen.cs:64431 复位 inActive,setTile(0) 已同步清 WIRE_ACTUATED）。
       {
         const shOc = defAt(st, x, y)?.vanilla?.sheet ?? -1;
         const clearable = (shOc !== -1 && shOc !== 484 && shOc !== 654
           && TILE_CUT_SHEETS.has(shOc)) || BREAKABLE_WHEN_PLACING_SHEETS.has(shOc);
-        if (st.isActive(x, y) && !clearable) return false;
+        if (st.hasTile(x, y) && !clearable) return false;
       }
       // ★M-3 液体放置两维门（vanilla TileObjectData.LiquidPlace 全支，TileObjectData.cs
       //  :1853-1907；CanPlace 逐格消费 TileObject.cs:342 → :361 flag3 并入拒放）：

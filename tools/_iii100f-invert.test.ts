@@ -242,7 +242,7 @@ const ARRAYS = ['type', 'flags', 'frameX', 'frameY', 'wall', 'liquid', 'liquidTy
   };
 
   const lines: string[] = [];
-  lines.push(`iii100f v2 invert A0=${S.a0} seed97=${S.seed97} stateIdentical=${stateIdentical}`);
+  lines.push(`iii100f v2 invert A0=${S.a0} seed97=${S.seed97} stateIdentical=${stateIdentical} REAL_WS=${S.gs.worldSurface} REAL_LAVAline=${(S.gs as unknown as { lavaLine: number }).lavaLine}`);
   lines.push(`scan A ∈ [${AMIN}..${AMAX}] golden=${G2}/097_Micro_Biomes`);
   lines.push(`golden lanes: ${laneBoxesGold}`);
   lines.push('mile8 实况基线: A=10085 T=11184 W=2 L=242 Hf=139 Sl=1473 Lt=242 Ia=0（JS LTRK count1/ok1, STRK count7）');

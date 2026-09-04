@@ -4,7 +4,7 @@ import { Game, PREPARE_BOMB_KB, LIQUID_ROCKET_II_IDS, LIQUID_ROCKET_II_DUST } fr
 import { damageVarRoll } from '../src/stats/DamageVar';
 
 // SW-S1 2026-09-04 爆炸面散账三回归：④击退标量传链（PrepareBombToBlow :47629-47720）/
-// ①SelfHurtPlayers DamageVar -luck 方向（Projectile.cs:15123）/ ③液体火箭 II 型 Kill
+// ①SelfHurtPlayers DamageVar -luck 方向（Projectile.cs:15118）/ ③液体火箭 II 型 Kill
 // 尘分型（Kill :79469-79627 四族支——785 水/788 熔岩/791 蜂蜜/800 干）。
 
 const mkGame = (world: World) => {
@@ -48,12 +48,12 @@ describe('SW-S1 ④爆炸击退标量（PrepareBombToBlow :47629-47720 各支 kn
   });
 });
 
-describe('SW-S1 ①DamageVar -luck 方向（SelfHurtPlayers :15123 `DamageVar(value, 0f-luck)`）', () => {
+describe('SW-S1 ①DamageVar -luck 方向（SelfHurtPlayers :15118 `DamageVar(value, 0f-luck)`）', () => {
   it('luck 取负→重掷取 min（厄运=伤更大）;正向 luck→取 max——同掷序两向对偶', () => {
     const seq = [0.04, 0.5, 0.99];   // tier(0.04)=−14→86 / 门掷 / tier(0.99)=+15→115
     const mk = () => { let i = 0; return () => seq[i++] ?? 0.5; };
     expect(damageVarRoll(100, -1, mk())).toBe(86);   // min(86,115)——self-hurt 面实参 (-p.luck)
-    expect(damageVarRoll(100, 1, mk())).toBe(115);   // max(86,115)——NPC 面 :12959 正 luck 对偶
+    expect(damageVarRoll(100, 1, mk())).toBe(115);   // max(86,115)——NPC 面 :12970 正 luck 对偶
     expect(damageVarRoll(100, 0, mk())).toBe(86);    // luck=0 无重掷
   });
 });

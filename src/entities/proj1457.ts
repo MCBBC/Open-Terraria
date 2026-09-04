@@ -362,7 +362,7 @@ export function dealContacts(
     const crit = Math.random() < self.critChance
       || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
     // ★F1（2026-08-31 蓝队三批）：Damage_PVE :13388 攻端旗乘区 + ★F9 DamageVar 单源
-    //   （原版序：DamageVar(:12959) → …→ banner(:13388) → armorPen 弹侧 :13679 在
+    //   （原版序：DamageVar(:12970;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12959) → …→ banner(:13388) → armorPen 弹侧 :13679 在
     //   banner 后 ⇒ 不吃旗乘——armorPen 独立参传，此处序一致）。
     //   crit 翻倍沿用仓内调用侧预倍惯例（与 Enemy.hurt 内 (int)Math.Max(1,×2)
     //   截断式同值）。

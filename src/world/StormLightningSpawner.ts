@@ -143,12 +143,15 @@ function spawnStormLightningNearPlayer(
 }
 
 /** IsLightningAttractor（:72539-72547）：nactive &&（GetsCheckedForLeaves 族 ||
- *  AttractsStormLightning）——叶检族（树冠）整株引雷。本仓叶表未建模,按吸雷集直判。 */
-function isLightningAttractor(game: GameHooks, x: number, y: number): boolean {
+ *  AttractsStormLightning）——叶检族（树冠）整株引雷。本仓叶表未建模,按吸雷集直判。
+ *  ★X2-F5(2026-09-04):门改 nactive()（WorldGen.cs:72538-47 `if (tile.nactive())`
+ *  = active+非致动）——双重偏差一次收口:幽灵吸雷块（flags=0 残型）与已致动缩入态
+ *  都不得引落天雷（旧 `type===0` 裸读两者皆漏）。导出仅测试消费面 */
+export function isLightningAttractor(game: GameHooks, x: number, y: number): boolean {
   const st = game.world.store;
   if (!st.inBounds(x, y)) return false;
   const ti = st.idx(x, y);
-  if (st.type[ti] === 0) return false;
+  if (!st.isActive(x, y)) return false;
   return attractsInternal().has(st.type[ti]);
 }
 

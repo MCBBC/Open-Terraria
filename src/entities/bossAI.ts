@@ -1834,14 +1834,24 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       //  每拍 damage=0 → Damage_EVP :14851 早退）,Kill 爆 PrepareBombToBlow :47688-93
       //  置 damage=40/128² 盒 = 对玩家真伤）——SW-B1"有弹无爆"清偿,Arrow 直飞载体
       //  退役,改挂 BombSkeletronPrimeProj（aiStyle16 重力/反弹/引信/Kill 爆全链）。
-      //  速 12/散布 ±0.4/出手位 = 既有炮臂几何（NPC.cs:28843-28857 localAI[0]>140t）;
-      //  头旋冲时 localAI[0]+2 = 射速×3(:28661)——周期 ÷3
-      if (e.aiT % Math.round(140 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
+      // SW-X1 2026-09-04（M-1/L-4①②③）：周期 = 原版 localAI[0] 计数终态——悬停支
+      //  :28838-28841 `localAI[0]++; if (>140f)` = 141t/发（++ 后判 off-by-one,曾 140）;
+      //  头旋冲（head.ai1!=0）支 :28722 `localAI[0] += 2f` 与计数 ++ 同拍 = +3/t →
+      //  47t/发（141=47×3;旧"÷3"一阶近似值恰同 47,注 :28661 系误锚——★红队 M-1
+      //  "两分支无旋冲加成"结论漏扫 :28722,悬停支旋冲加成为原版本相,保留）。
+      //  散布 :28852-28853 = 81 档离散 Next(-40,41)×0.01（±0.40;曾连续 (rnd-0.5)×0.8）;
+      //  出膛位 :28854-28855 = center + velocity×4（散布并入后终速 ×4,速 12 级 ≈48px,
+      //  曾 4px 沿基准向）。L-4③：102 不带 ownerNpcId（projTargets.ts:550 "发射者
+      //  追踪未建模"备案）→ Prime 旗减伤（projTargets :553 有 ownerNpcId 才吃）
+      //  不触发,维持备案。
+      if (e.aiT % (head.ai1 !== 0 ? 47 : 141) === 0) {
         const dx = -(ax - e.cx), dy = -(ay - e.cy);
         const d = Math.hypot(dx, dy) || 1;
+        const sx = (Math.floor(Math.random() * 81) - 40) * 0.01;   // Next(-40,41)×0.01
+        const sy = (Math.floor(Math.random() * 81) - 40) * 0.01;
+        const vx = dx / d * 12 + sx, vy = dy / d * 12 + sy;
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-          .entities.add(new BombSkeletronPrimeProj(e.cx + dx / d * 4, e.cy + dy / d * 4,
-            dx / d * 12 + (Math.random() - 0.5) * 0.8, dy / d * 12 + (Math.random() - 0.5) * 0.8), 'projectiles');
+          .entities.add(new BombSkeletronPrimeProj(e.cx + vx * 4, e.cy + vy * 4, vx, vy), 'projectiles');
       }
     } else if (e.ai2 === 1 && player) {
       e.ai3 += 1;
@@ -1849,14 +1859,19 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 悬停:头 X / 玩家上方 80(6 速,0.04 X/0.08 Y,0.9 阻尼)
       seekSteer2(e, head.cx, player.cy - 80, 6, 0.04, 0.08);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-      // SW-U1 2026-09-04：同上挂 102 专属实体（速 10/40t,NPC.cs:28895-28927
-      //  localAI[0]>40t,num568=10/num570=102/num569 伤 0）
-      if (e.aiT % Math.round(40 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
+      // SW-X1 2026-09-04（M-1/L-4①②）：直冲支 :28918-28921 `localAI[0]++;
+      //  if (>40f)` = 41t/发（++ 后判,曾 40;★本支 vanilla 无 localAI 旋冲加成——
+      //  28701-28936 全支仅 :28918 一处 ++,旧"÷3"分支系误挂该支,删）。
+      //  散布/出膛位同悬停支（:28922-28926 Next(-40,41)×0.01 / center+velocity×4,
+      //  num568=10/num570=102/num569 伤 0）。
+      if (e.aiT % 41 === 0) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
+        const sx = (Math.floor(Math.random() * 81) - 40) * 0.01;
+        const sy = (Math.floor(Math.random() * 81) - 40) * 0.01;
+        const vx = dx / d * 10 + sx, vy = dy / d * 10 + sy;
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-          .entities.add(new BombSkeletronPrimeProj(e.cx + dx / d * 4, e.cy + dy / d * 4,
-            dx / d * 10 + (Math.random() - 0.5) * 0.8, dy / d * 10 + (Math.random() - 0.5) * 0.8), 'projectiles');
+          .entities.add(new BombSkeletronPrimeProj(e.cx + vx * 4, e.cy + vy * 4, vx, vy), 'projectiles');
       }
     }
   } else if (style === 36) {
@@ -1873,12 +1888,19 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       if (player) {
         e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-        // 头旋冲时 localAI[0]+3 = 射速×4(:28897)
-        if (e.aiT % Math.round(200 / (head.ai1 !== 0 ? 4 : 1)) === 0) {
+        // SW-Z1 2026-09-04：拍序改纯函数——attached 201t（:29074-29075 >200f 先加后判）、
+        // 头旋支悬停 +=3(:28958)→+4/t=⌈201/4⌉=51t;旧 round(200/4)=50/200 双偏一拍
+        if (e.aiT % laserArmShotInterval(head.ai1 !== 0, false) === 0) {
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
           const d = Math.hypot(dx, dy) || 1;
-          shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
-            dx / d * 8 + (Math.random() - 0.5) * 4, dy / d * 8 + (Math.random() - 0.5) * 4, 25, 100);
+          // SW-AA1 2026-09-04（F-2）：出膛位/散布对齐原文（:29080-29091）——速度 num575=8f
+          //  → velocity=单位×8,先加散布 Next(-40,41)×0.05（81 档离散,±2/轴）再取出生位
+          //  center+velocity×8（:29086-29087,≈64px 级;旧 unit×8≈8px+连续 (rnd-0.5)×4
+          //  双 diverge）。散布加在出生位【前】=偏移吃散布后速度,序照抄。
+          const sx = (Math.floor(Math.random() * 81) - 40) * 0.05;
+          const sy = (Math.floor(Math.random() * 81) - 40) * 0.05;
+          const vx = dx / d * 8 + sx, vy = dy / d * 8 + sy;
+          shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100);
           // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
           game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
         }
@@ -1889,11 +1911,18 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 悬停玩家左侧 350/上方 20(7 速,0.1/0.03,0.9 阻尼)
       seekSteer2(e, player.cx - 350, player.cy - 20, 7, 0.1, 0.03);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-      if (e.aiT % Math.round(80 / (head.ai1 !== 0 ? 4 : 1)) === 0) {
+      // SW-Z1 2026-09-04：detached 81t（:29153-29154 >80f）——原版 detached 支无悬停
+      //  加成（+=3 只在 attached 头旋支）,旧 80 且误套 /4 双重 diverge
+      if (e.aiT % laserArmShotInterval(head.ai1 !== 0, true) === 0) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
-        shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
-          dx / d * 10 + (Math.random() - 0.5) * 4, dy / d * 10 + (Math.random() - 0.5) * 4, 25, 100);
+        // SW-AA1 2026-09-04（F-2）：同上对齐 detached 支（:29159-29170）——速度
+        //  num582=10f → velocity=单位×10+散布 Next(-40,41)×0.05,出生位
+        //  center+velocity×8（:29165-29166 出膛位系数恒 8,与速度 10 无关,勿改 4/10）。
+        const sx = (Math.floor(Math.random() * 81) - 40) * 0.05;
+        const sy = (Math.floor(Math.random() * 81) - 40) * 0.05;
+        const vx = dx / d * 10 + sx, vy = dy / d * 10 + sy;
+        shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100);
         // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
         game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
       }
@@ -1922,6 +1951,21 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
   if (e.vx < tx) { if (e.vx < 0) e.vx *= 0.9; e.vx += accX; }
   if (e.vy > ty) { if (e.vy > 0) e.vy *= 0.9; e.vy -= accY; }
   if (e.vy < ty) { if (e.vy < 0) e.vy *= 0.9; e.vy += accY; }
+}
+
+/** SW-Z1 2026-09-04：激光臂（NPC 131,aiStyle 36）射速拍序纯函数——off-by-one 清偿
+ *  （红队四轮 U1-γ 同族;本仓旧值 200/50/80 全系偏一拍）:
+ *   · attached（ai[2]==0||3）: 共享段 `localAI[0]++; if (localAI[0] > 200f)`
+ *     （NPC.cs:29074-29075）——先加后判,计数 1..201 首中 201 → 201t/发;
+ *   · attached×头旋支（head.ai[1]!=0）: 悬停支 `localAI[0] += 3f`（:28958）与共享 ++
+ *     叠加 = +4/t → 4k>200 首中 k=51 = ⌈201/4⌉ → 51t/发（round(201/4)=50 错档:
+ *     50.25 应进 51;旧 round(200/4)=50 双重偏一）;
+ *   · detached（ai[2]==1）: `localAI[0]++; if (> 80f)`（:29153-29154）→ 81t/发,
+ *     ★无旋加成——悬停 +=3 只挂 attached 头旋支,detached 支不消费 spinning
+ *     （炮臂 aiStyle35 悬停加成是 :28722 `+= 2f`→⌈141/3⌉=47,两臂结构勿混）。 */
+export function laserArmShotInterval(spinning: boolean, detached: boolean): number {
+  if (detached) return 81;
+  return spinning ? 51 : 201;
 }
 
 /** AI_037 毁灭者 134-136(NPC.cs:50129-50624):头穿地飞行——

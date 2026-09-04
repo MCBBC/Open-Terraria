@@ -561,3 +561,94 @@ describe('方向箭头显示门 = 全式 IsReplaceableBlock（Player.cs:40066-40
     expect(smartCursorArrowAllowed(st, 109, 106, { x: 1, y: 0 })).toBe(false);
   });
 });
+
+// ===================== X1 终扫四项对齐（2026-09-04 蓝队修复批） =====================
+// 注：本测 actor 在 (100,95)，tileBoost=0 → 可达区 = x∈[95,106] / y∈[92,100]
+// （TileReachCheckSettings GetRanges：tileRangeX=5 / tileRangeY=3，Player.cs:2475/2477），
+// 全部候选/轨道格均布在该区内。
+
+const pigronataItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['place_v_454_pigronata']], tool: null });
+const pumpkinItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['place_v_254_pumpkin_plant']], tool: null });
+const boulderItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['place_v_138_boulder']], tool: null });
+const plainTrackItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['place_v_314_minecart_track']], tool: null });
+const boosterTrackItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['vi_2739_BoosterTrack']], tool: null });
+const pressureTrackItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['vi_2492_PressureTrack']], tool: null });
+
+describe('X1 终扫四项对齐（Pigronata/PumpkinSeeds/Boulders/2492 压力轨道）', () => {
+  it('① Pigronata 地表截断：j > worldSurface-2 不出候选（SmartCursorHelper.cs:987）', () => {
+    const st = new TileStore(W, H);
+    // 顶棚 A（y=93，x=92..99）→ 候选行 j=94（i 95..98）；顶棚 B（y=98，x=100..103）→ 候选行 j=99（i 102..103）
+    for (let x = 92; x <= 99; x++) st.setTile(x, 93, T.DIRT);
+    for (let x = 100; x <= 103; x++) st.setTile(x, 98, T.DIRT);
+    // 未传 worldSurface（缺省 Infinity）= 不截断：最近候选 (102,99)
+    expect(run(mkEnv(st, mouseAt(102, 99), pigronataItem()))).toEqual({ x: 102, y: 99 });
+    expect(run(mkEnv(st, mouseAt(102, 99), pigronataItem(), { worldSurface: 104 }))).toEqual({ x: 102, y: 99 });
+    // surface=96：允许 j ≤ 94 → j=99 行整列截断，最近合法候选落到棚 A 下 (98,94)
+    expect(run(mkEnv(st, mouseAt(102, 99), pigronataItem(), { worldSurface: 96 }))).toEqual({ x: 98, y: 94 });
+    // surface=92：允许 j ≤ 90 —— 可达区内两行候选全在地表下 → 不出候选
+    expect(run(mkEnv(st, mouseAt(102, 99), pigronataItem(), { worldSurface: 92 }))).toBeNull();
+  });
+
+  it('② PumpkinSeeds：地面格 slope/halfBrick 拒（:1058）+ worldSurface 截断（:1049）', () => {
+    const st = new TileStore(W, H);
+    st.setTile(105, 101, T.GRASS);
+    st.setTile(106, 101, T.GRASS);
+    // 对照：平草面 → 唯一候选 (105,100)
+    expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem()))).toEqual({ x: 105, y: 100 });
+    // 右地面格带坡 → 拒（:1058 tile2.slope() > 0）
+    st.setSlope(106, 101, 1);
+    expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem()))).toBeNull();
+    st.setSlope(106, 101, 0);
+    // 左地面格半砖 → 拒（:1058 tile.halfBrick()）
+    st.setHalfBrick(105, 101, true);
+    expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem()))).toBeNull();
+    st.setHalfBrick(105, 101, false);
+    // 地表截断：surface=100 → 允许 j ≤ 98，(105,100) 不可选；surface=102 放行
+    expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem(), { worldSurface: 100 }))).toBeNull();
+    expect(run(mkEnv(st, mouseAt(105, 100), pumpkinItem(), { worldSurface: 102 }))).toEqual({ x: 105, y: 100 });
+  });
+
+  it('③ Boulders：玩家命中盒内不出候选；敌怪/NPC 占位不拒（:936-949 只查玩家）', () => {
+    // 场景 A：候选 (100,97) 的 32×32 净空区 (1600,1536,32,32) 与 actor 玩家盒 (1600,1520,20,42) 相交
+    const st = new TileStore(W, H);
+    st.setTile(100, 98, T.STONE);
+    st.setTile(101, 98, T.STONE);
+    // 缺省 players 回退 [actor] → 相交 → 拒
+    expect(run(mkEnv(st, mouseAt(100, 97), boulderItem()))).toBeNull();
+    // 显式空玩家列表 → 不拒（净空来源 = players 列表本身）
+    expect(run(mkEnv(st, mouseAt(100, 97), boulderItem(), { players: [] }))).toEqual({ x: 100, y: 97 });
+    // 场景 B：候选 (105,98) 净空区 x 向与玩家盒错开；敌怪盒占住净空区也不拒（原版只遍历 Main.player[0..254]）
+    const st2 = new TileStore(W, H);
+    st2.setTile(105, 99, T.STONE);
+    st2.setTile(106, 99, T.STONE);
+    expect(run(mkEnv(st2, mouseAt(105, 98), boulderItem()))).toEqual({ x: 105, y: 98 });
+    const npc = { x: 105 * 16, y: 98 * 16 - 16, w: 16, h: 16 };   // 覆盖候选净空区左上格 (105,97)
+    expect(run(mkEnv(st2, mouseAt(105, 98), boulderItem(), { occupants: [npc] }))).toEqual({ x: 105, y: 98 });
+    // 同一盒按玩家口径传入（players）→ 拒（碰撞式 = XNA Rectangle.Intersects）
+    expect(run(mkEnv(st2, mouseAt(105, 98), boulderItem(), { players: [npc] }))).toBeNull();
+  });
+
+  it('④ 2492 压力轨道独立段：无方向量化左右续格；主段不吃 2492（:1277-1331）', () => {
+    const track = TILE_BY_KEY['v_314_minecart_track']!;
+    const mk = () => {
+      const st = new TileStore(W, H);
+      st.setTile(100, 95, track);
+      st.setTile(101, 95, track);
+      st.setTile(102, 95, track);
+      return st;
+    };
+    // 鼠标在轨道行上方 → 方向量化 = 纯向上，主段六臂全不发；压力轨道段无视方向
+    // → 已有轨道左右端点 (99,95)/(103,95) 入选，取离鼠标最近 (99,95)
+    expect(run(mkEnv(mk(), mouseAt(99, 93), pressureTrackItem()))).toEqual({ x: 99, y: 95 });
+    // 主段物品（2739 / 无 vid 的 place_v_314_*）同场景仍被方向量化挡住 → 无候选
+    expect(run(mkEnv(mk(), mouseAt(99, 93), boosterTrackItem()))).toBeNull();
+    expect(run(mkEnv(mk(), mouseAt(99, 93), plainTrackItem()))).toBeNull();
+    // 主段物品横向鼠标仍走主段续格（拆分不误伤 2340/2739 主段）
+    expect(run(mkEnv(mk(), mouseAt(90, 97), boosterTrackItem()))).toEqual({ x: 99, y: 95 });
+    // 端点门（:1310）：候选上下有轨道即剔——(99,94) 挡掉其正下方候选 (99,95)，
+    //  最近落点跳到 (98,94)（其上下皆无轨道）
+    const st2 = mk();
+    st2.setTile(99, 94, track);
+    expect(run(mkEnv(st2, mouseAt(99, 93), pressureTrackItem()))).toEqual({ x: 98, y: 94 });
+  });
+});

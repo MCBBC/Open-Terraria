@@ -492,7 +492,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   let placed = 0, tries = 0;
   segProbe('campCount', campCount);
   while (placed < campCount) {
-    if (++tries > 1000) break;
+    // ★IIIII100g（cs:21916-21918 1:1）：vanilla `num4 = 1000; num4--; if (num4 <= 0) break;`
+    //   先减后判⇒实掷尝试恰 999 次;旧 `++tries > 1000` 多跑第 1000 次（GFB 未触达,
+    //   纯 future-correctness;mine 同款在 GFB 实爆,+995 掷定罪见下）。
+    if (++tries >= 1000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // RandomWorldPoint(top,right,bottom,left)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
     segProbe('CAMPPRE');
@@ -517,7 +520,14 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   placed = 0; tries = 0;
   segProbe('trapCount', trapCount);
   while (placed < trapCount) {
-    if (++tries > 3000) break;
+    // ★IIIII100g（cs:21954-21956 1:1）：vanilla `num4 = 3000; num4--; if (num4 <= 0) break;`
+    //   先减后判⇒实掷尝试恰 2999 次;旧 `++tries > 3000` 多跑第 3000 次＝+995 掷。
+    //   GFB #97 段内 1,082(实 994)多掷真源：x86 同代 rig(SW_EVIL=0+SW_PASSCHAIN+
+    //   TSEG 钩,/tmp/iii100g-out/rig-gfb2)MINEPRE 逐位对拍——前 2999 位与 JS 逐位
+    //   恒等(含深失败链 1005 掷),唯一分歧=JS 多出的 #3000 次尝试(2+993=995 掷)⇒
+    //   mbTree 流位 +995→treeCount 读 11(vanilla 9)→mahogany 全窗相位漂移
+    //   497 尝试→mbTrack 错位→轨段 LTRK 2v1 改道。campsite 同款一并 1:1。
+    if (++tries >= 3000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
     // XXXX：cs:21964 top2=(int)GenVars.rockLayer —— GenVars.rockLayer 是独立字段
     //   （TerrainPass.cs:232 = 游走值 num4，≠ Main.rockLayer :211-213 的 571）。
@@ -1764,12 +1774,17 @@ export class DeadMansChestBiome {
       && st.flags[st.idx(x, y + 1)] && st.flags[st.idx(x + 1, y + 1)]) fail = 'gateC';
     if (fail === '') {
       ringD:
+      // ★IIIII106c（2026-09-04）：外环拒收表修正——原版只拒「容器/12/665/639」四类
+      //   （DeadMansChestBiome.cs:281，外环 268-289 行），不看 CanBeClearedDuringGeneration
+      //   集（该集 {396..44,481-483,226,237} 只进 gateA 内盒 cs:250-259）。旧 JS 多拒
+      //   LIHARD(226)/LIHARD_ALTAR(237) ⇒ 丛林神庙边金箱（sparkle 771004 (679,708)）的
+      //   巨石 spot (681,700) 被误拒 → en=0 → 候选少 1 → 全 pass 掷流漂移（#97 残差根因）。
+      //   1456↔1457↔1458 此段逐字同（spawnOnPlayerGhost 邻域备案同源）。
       for (let m = x - 2; m <= x + 3; m++) {
         for (let n = y - 6; n <= y - 1; n++) {
           if (!st.inBounds(m, n)) continue;
           const idx = st.idx(m, n);
-          if (st.flags[idx] && (isContainer(st.type[idx]) || BOULDER_FORBID.has(st.type[idx])
-            || st.type[idx] === LIHARD || st.type[idx] === LIHARD_ALTAR)) {
+          if (st.flags[idx] && (isContainer(st.type[idx]) || BOULDER_FORBID.has(st.type[idx]))) {
             fail = `gateD(${m},${n},t${mbSheetOf(st.type[idx])})`; break ringD;
           }
         }

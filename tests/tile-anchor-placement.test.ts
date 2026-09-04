@@ -394,4 +394,28 @@ describe('E. M-3c 消费接线（门 10/11 岩浆门 liqGateDoor + 药草 legacy
     expect(validateAnchors(st, 10, 11, wb, 14)).toBe(true);
     expect(liquidCellOk(st as never, 10, 11, wb.liqStyles!['14'])).toBe(true);
   });
+
+  // ★终审 B①（2026-09-04）：占位格阻挡判定读裸 active()（=hasTile,含已致动格）——
+  //  原版 CanPlace TileObject.cs:357 `tileSafely.active() && …` 非 nactive()：
+  //  已致动格=占用,原版拒绝放置进致动格。曾用 isActive=nactive() → 已致动格被当
+  //  空位（放行后 setTile 不清 WIRE_ACTUATED=新块继承隐形态,原版无此态）。
+  it('★B① 致动域：已致动格=占用拒放（hasTile 非 nactive）；tileCut 豁免照常放行', () => {
+    const st = mkStore();
+    layFloor(st, 6, 22, 12);
+    const torch = anchorSpecOf(4)!;                 // 1×1 火把：占位格=火把格本体
+    const stone = TILE_BY_KEY['stone']!;
+    const tallgrass = TILE_BY_KEY['tallgrass']!;    // sheet 3 ∈ TILE_CUT_SHEETS（豁免面）
+    // 对照：普通活性占位格 → 拒
+    st.setTile(10, 11, stone);
+    expect(validateAnchors(st, 10, 11, torch)).toBe(false);
+    // 核心：已致动 stone（active=1,inActive=1）→ 原版仍拒（active() 裸位）
+    st.setActuated(10, 11, true);
+    expect(st.hasTile(10, 11)).toBe(true);
+    expect(st.isActive(10, 11)).toBe(false);        // nactive=false（若门误用此读则放行）
+    expect(validateAnchors(st, 10, 11, torch)).toBe(false);   // 裸 active() → 拒
+    // 豁免面：tileCut 格即便已致动仍不阻挡（CanPlace :357 tileCut 支在 active() 门内放行）
+    st.setTileSilent(12, 11, tallgrass, 0, 0);
+    st.setActuated(12, 11, true);
+    expect(validateAnchors(st, 12, 11, torch)).toBe(true);
+  });
 });

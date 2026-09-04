@@ -637,6 +637,7 @@ export function openAssetDiagPanel(): void {
     <div class="diag-wrap">
       <div class="diag-bar">
         <span>资产诊断 · 最近 300 条(跨刷新持久)</span>
+        <button data-a="audit">深度体检</button>
         <button data-a="copy">复制全部</button>
         <button data-a="close">关闭</button>
       </div>
@@ -654,6 +655,61 @@ export function openAssetDiagPanel(): void {
     ta.scrollTop = ta.scrollHeight;
   });
   (el.querySelector('[data-a=close]') as HTMLElement).addEventListener('click', () => el.remove());
+  (el.querySelector('[data-a=audit]') as HTMLElement).addEventListener('click', async () => {
+    const st = assetCacheState();
+    const name = 'sw-assets-v' + st.version;
+    const c = await caches.open(name);
+    const all = await c.keys();
+    let ok = 0, nomatch = 0, html = 0, empty = 0, doc = 0;
+    const bad: string[] = [];
+    const prog = (i: number) => {
+      ta.value = `深度体检 ${name} ${i + 1}/${all.length}\n\nok=${ok} NOMATCH=${nomatch} HTML毒=${html} 空体=${empty} 文档(设计内)=${doc}\n${bad.join('\n')}`;
+      ta.scrollTop = 0;
+    };
+    for (let i = 0; i < all.length; i++) {
+      const r = all[i];
+      const p = new URL(r.url).pathname;
+      try {
+        const res = await c.match(r);
+        if (!res) { nomatch++; if (bad.length < 300) bad.push(`NOMATCH ${p}`); }
+        else {
+          // 文档类(/、index.html、.html)是 SW 文档分支的设计内缓存(离线回退
+          // 入口,fetch handler 主动 put)——不计 HTML 毒(2026-09-04 误报修正:
+          // 首份体检曾把健康的 / 条目报成"HTML毒 1"误导排查)
+          if (p === '/' || p.endsWith('.html')) { doc++; continue; }
+          const ct = res.headers.get('content-type') || '';
+          const blob = await res.blob();
+          if (/html/i.test(ct)) { html++; if (bad.length < 300) bad.push(`HTML毒 ${p}`); }
+          else if (blob.size === 0) { empty++; if (bad.length < 300) bad.push(`空体 ${p}`); }
+          else ok++;
+        }
+      } catch (e) { nomatch++; if (bad.length < 300) bad.push(`ERR ${p} ${String(e).slice(0, 40)}`); }
+      if (i % 400 === 0 || i === all.length - 1) prog(i);
+    }
+    // 重点抽查(用户报障三样本+空格族)——★三模式 match 对照(2026-09-04):
+    //  「体检 keys 原对象命中、页面请求 miss」的 Vary/头匹配差异在此定案
+    const spot: string[] = [];
+    for (const n of ['sprites/vanilla/Projectile_29.png', 'sprites/vanilla/Gore_61.png',
+      'sprites/vanilla/SplashScreens_Splash_6_2.png', 'sprites/vanilla/Backgrounds_Underworld 0.png',
+      'sprites/vanilla/Cloud_0.png']) {
+      const u = 'https://sandbox.vinlic.com/' + n;
+      const mStr = await c.match(u).then((r) => (r ? `${r.status}` : 'MISS')).catch(() => 'ERR');
+      const mIgn = await c.match(u, { ignoreVary: true }).then((r) => (r ? `${r.status}` : 'MISS')).catch(() => 'ERR');
+      let mReq = 'KEYS无';
+      let vary = '(条目无)';
+      for (const r of await c.keys()) {
+        if (r.url !== u) continue;
+        mReq = await c.match(r).then((x) => (x ? `${x.status}` : 'MISS')).catch(() => 'ERR');
+        const res0 = await c.match(r);
+        if (res0) vary = res0.headers.get('vary') || '(无Vary头)';
+        break;
+      }
+      spot.push(`${n}\n    字符串match=${mStr} | ignVary=${mIgn} | keys原对象=${mReq} | vary=${vary}`);
+    }
+    ta.value = `深度体检完成 ${name}\n总=${all.length} ok=${ok} NOMATCH=${nomatch} HTML毒=${html} 空体=${empty} 文档(设计内)=${doc}\n` +
+      `抽查:\n${spot.join('\n')}\n\n坏条目清单(≤300):\n${bad.join('\n')}\n\n—— 以下为 trace ——\n${readSwTrace().join('\n')}`;
+    ta.scrollTop = 0;
+  });
   (el.querySelector('[data-a=copy]') as HTMLElement).addEventListener('click', async () => {
     ta.select();
     try {

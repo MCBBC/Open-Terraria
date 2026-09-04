@@ -350,7 +350,7 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     (g as any).scarabBombExplode(ex, ey, 100);
     let hits = playerRecords.filter((r) => r.kind === 'damage');
     expect(hits).toHaveLength(1);
-    // SW-S1 ①：SelfHurtPlayers :15123 DamageVar(value, -luck) ±15% 方差（原版自伤非定值）
+    // SW-S1 ①：SelfHurtPlayers :15118 DamageVar(value, -luck) ±15% 方差（原版自伤非定值）
     expect(hits[0]!.v.d).toBeGreaterThanOrEqual(85);
     expect(hits[0]!.v.d).toBeLessThanOrEqual(115);
     expect(st.get(50, 153)).toBe(0);                     // 隧道掘进照常发生

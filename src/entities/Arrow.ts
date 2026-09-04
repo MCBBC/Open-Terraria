@@ -75,20 +75,31 @@ export function projSprite(projId: number): ImageBitmap | HTMLImageElement | nul
   if (spritePending.has(projId)) return null;
   spritePending.add(projId);
   const im = new Image();
+  // SW-AA1 2026-09-04：land 提升到 projSprite 作用域——并行会话 onerror 重试块
+  // （retry.onload→land(retry)）跨闭包引用 onload 局部 const=TS2304+运行时
+  // ReferenceError（FakeFish 处置范例：最小修复保其重试特性）。语义恒等：
+  // land 只闭包 projId。
+  const land = (x: ImageBitmap | HTMLImageElement) => { if (!spriteCache.has(projId)) spriteCache.set(projId, x); };
   im.onload = () => {
     spritePending.delete(projId);
     spriteFailTtl.delete(projId);
     // has 门(双重):setProjSpriteOverride(素材包)可能已在飞行期间同步写入——
     // 晚到的原版图/bitmap 不得覆盖包注入图。非 bitmap 环境(node 测试/逃生门)
     // 直接落 Image——upgradeToBitmap 在 USE_BITMAP=false 时两个回调都不调
-    const land = (x: ImageBitmap | HTMLImageElement) => { if (!spriteCache.has(projId)) spriteCache.set(projId, x); };
     if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
     upgradeToBitmap(im, land, () => land(im));   // bitmap 失败退 Image
   };
   im.onerror = () => {
     spritePending.delete(projId);
-    spriteFailTtl.set(projId, performance.now());
-    void evictSwCacheEntry(`vanilla/Projectile_${projId}.png`);
+    // ★瞬态失败不立即驱逐(2026-09-04 线上实锤"Tiles_123/NPC_357 命中即删"=
+    //  驱逐了完好条目):重试一次,成功=缓存完好(不驱逐);再失败才驱逐(真坏)
+    const retry = new Image();
+    retry.onload = () => { land(retry); };
+    retry.onerror = () => {
+      spriteFailTtl.set(projId, performance.now());
+      void evictSwCacheEntry(`vanilla/Projectile_${projId}.png`);
+    };
+    retry.src = im.src;
   };
   im.src = `sprites/vanilla/Projectile_${projId}.png`;
   // 同步装载替身(node 测试的 src setter 即触发 onload)当次调用即可用;

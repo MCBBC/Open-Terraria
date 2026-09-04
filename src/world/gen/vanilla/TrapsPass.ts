@@ -397,7 +397,20 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
     //   （notraps #76 四站实证：(742,697)/(887,750)+(893,749)/(3610,760) 全部
     //   tbl1(sol0) 地基；k1622/k6673 双写双自杀遗迹即此）。补空派发表后，
     //   X/J 两端 TNT 受理面在本域首次全等。
-    if (!i13Legacy() && TILEFRAME_NO_CHECK.has(sh)) continue;
+    // ★IIIII110b（pglun #76 定罪收官）：上表【并非】"零完整性检查"——vanilla
+    //   TileFrameImportant 的 case 751/752/713-716/172/360/505/521-527/543/568-570/
+    //   580/598/620/652/654 空支只 break【switch C】（cs:86978-86980），控制流随后
+    //   落到 switch B default 尾的 `goto case 132;`（cs:87216）→ **Check2x2(i,j,type)**
+    //   （cs:87234）。IIII29 曾把"空 case"读成"无检查"直返（在桶格自身被 frame 场景
+    //   恰与 vanilla 同果），但 PlaceSandTrap 清场 KillTile→SquareTileFrame→TileFrame
+    //   的【邻格锚横扫】路径下，x86 以 Check2x2 完整性清算整块（SW_KILLWATCH 栈实证：
+    //   KillTile(2620,387)←Check2x2←TileFrameImportant←TileFrame←SquareTileFrame←
+    //   KillTile←PlaceSandTrap，金字塔 TNT 桶 2×2 即此被毁）→ JS 桶存留 4 格
+    //   （T0>751）+ 掷流位移 30 行级联。现按原文补路由：同族并入 check2x2Gen 精确分派
+    //   （支撑谓词含 TILE_TABLE/巨石支/destroyObject 抑制,与 cs:48819-48988 1:1）。
+    //   IIII29 受理面四案（桌基 TNT 桶）不受扰——Check2x2 支撑门 tileSolid||tileTable
+    //   对桌基桶照常放行。
+    if (!i13Legacy() && TILEFRAME_NO_CHECK.has(sh)) { check2x2Gen(st, ux, uy, rng); continue; }
     if (!multiFallback || !MULTI_DEFS.has(ut)) continue;
     (globalThis as { __swCascW?: (m: string) => void }).__swCascW?.(`${ux},${uy} sh${sh}`);   // ★IIII29 级联分派观察钩
     // 找含 (ux,uy) 的完整块锚
@@ -1057,15 +1070,18 @@ function check2x2Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
   let num2 = -Math.trunc(st.frameX[i]! / 18);
   if (num2 < -1) { num2 += 2; num = 36; }
   num2 += x;
-  const num5 = Math.trunc(st.frameY[i]! / 36);
-  const num6 = y - Math.trunc((st.frameY[i]! % 36) / 18);
+  // ★IIIII110b 勘误：num3 帧行高按 vanilla ((type==172)?38:36)（cs:48832）——曾恒 36，
+  //   172（灯笼）38px 带会被错锚（本批 NO_CHECK 族并入本分派后 172 进入可达面）。
+  const num3 = sheetOf(t) === 172 ? 38 : 36;
+  const num5 = Math.trunc(st.frameY[i]! / num3);
+  const num6 = y - Math.trunc((st.frameY[i]! % num3) / 18);
   let flag = false;
   for (let k = num2; k <= num2 + 1; k++) {
     for (let l = num6; l <= num6 + 1; l++) {
       const ki = st.idx(k, l);
       if (!st.inBounds(k, l) || !st.flags[ki] || st.type[ki] !== t
         || st.frameX[ki] !== (k - num2) * 18 + num
-        || st.frameY[ki] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
+        || st.frameY[ki] !== (l - num6) * 18 + num5 * num3) { flag = true; break; }
     }
     if (!boulder) {
       const si = st.idx(k, num6 + 2);

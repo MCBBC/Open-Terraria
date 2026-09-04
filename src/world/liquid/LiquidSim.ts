@@ -277,6 +277,11 @@ export class LiquidSim {
   passRng: RNG | null = null;
   /** 泥块（lava 3×3 烧除 60/70/661/662 → 59 的写入目标，cs:1562） */
   private readonly mudId: number;
+  /** ★IIIII100g：泥土（lava 3×3 烧除草族 → vanilla `type = 0` 的写入目标，cs:1552-1554）。
+   *  vanilla TileID 0=泥土——烧后残型格 typ=0 是「活性泥土」非空气；JS 空气=内部 id 0
+   *  （无 sheet 映射），曾照抄写 0 ⇒ 13 格「活性空气」(GFB #98 T0>9999 定罪,
+   *  /tmp/iii100g-out/p98-census2)——sheet 反查写内部泥土 id,世界/渲染/对拍三面归真。 */
+  private readonly dirtId: number;
   /** 交互落块音效（WorldGen.PlayLiquidChangeSound Liquid.cs:1379）：Game 注入；
    *  参数 = (x, y, thisLiquidType, mergeType)（本仓库液体编码 1水/2岩浆/3蜂蜜/4微光） */
   liquidChangeSound: ((x: number, y: number, thisType: number, mergeType: number) => void) | null = null;
@@ -635,6 +640,7 @@ export class LiquidSim {
     this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
     this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
     this.mudId = TILE_BY_KEY['mud'];
+    this.dirtId = TILE_BY_KEY['dirt'];
     // tileObsidianKill = lavaDeath ∪ 附加 − {88}（Main.cs:8214-8220，88=梳妆台显式豁免）
     const okKill = bySheet(OBSIDIAN_KILL_EXTRA_SHEETS);
     for (const id of this.lavaDeathIds) okKill.add(id);
@@ -1567,7 +1573,7 @@ export class LiquidSim {
               //  half/slope/paint 全保留(烧后残型格 act=1、type=0、slope 原值;金标 #98
               //  (3419,858) typ=0/act=1/slope=1 实证)。setTile 会连清 act+half+slope+
               //  paint 三面差,曾使 DelWater 早退支下格腿误判可通行(见 blocksLiquid ★IIIII227)
-              st.type[ni] = 0;
+              st.type[ni] = this.dirtId;   // ★IIIII100g：vanilla type=0=泥土(非空气),见字段注
               // cs:1557/1562：每次转化尾随 SquareTileFrame(i,j)——3×3 帧扫把上方
               // 依附植物（61 丛草植物等）经 PlantCheck 锚亡杀链收割（XXXXX 批：
               // (3580,895) 三格 vanilla 杀 JS 漏=此级联缺失；PlantCheck 杀零掷，
@@ -2037,15 +2043,20 @@ export class LiquidSim {
         const il = i - 1, ir = i + 1, iu = i - st.w, id = i + st.w;
         // ★VVV 批全量转写（1456 WorldGen.cs:81167-81220 / 1457 :81704-81757）：
         // 原版首分支谓词= liquid>0 ∧ nactive() ∧ Main.tileSolid ∧ !Main.tileSolidTop。
-        // nactive()= active ∧ !checkingLiquid（Tile.cs:270）——因到场已清位，
-        // 此处 checkingLiquid 恒 false ⇒ nactive ≡ active。★关键结构差异：不满足
+        // nactive()= active ∧ !inActive（Tile.cs:242-248 `(sTileHeader&0x60)==32`），
+        // 与 checkingLiquid（bTileHeader3 bit3,Tile.cs:496-509）完全无关——旧注
+        // "nactive=active∧!checkingLiquid(Tile.cs:270)"系误读残文（:270 实为
+        // ClearMetadata 的 frameX=0;checking 半边债已由 blocksLiquid ★IIIII70b
+        // 同源定谳驳回,checking 位图只承担 vanilla 直读点）。★终审④③（2026-09-04）：
+        // 补 !inActive 半边——致动实心格含水时原版不走首分支（不清液体,落 else-if
+        // 死亡复查+流动臂）,曾漏 ⇒ 致动格液体被误清。★关键结构差异：不满足
         // 首分支（含【幽灵格 flags=0 但液体>0】与【在列 checking 格】）一律落 else-if，
         // 幽灵格虽跳过死亡检查、但下灌/侧流三重入列判定**照常执行**——JS 曾把
         // 整个 rebuild 尾段折进 active 门内，幽灵湿格整段漏重建 → 下一轮沉降活量/
         // 触点漂移（g#98 初轮 1283 格首见覆盖差 + 罐28×23 组/棺木42/丛林植物233
         // 孤儿块的全部直接根因；x86 W-probe 对拍实证）。
         // 379（泡泡,QuickWater 已置实心）例外保留液体且不复查（1456 :81170-74）。
-        const nactive = st.flags[i] !== 0;
+        const nactive = st.flags[i] !== 0 && ((st.wire[i] >>> 5) & 1) === 0;   // active ∧ !inActive（Tile.cs:242-248）
         let solidBr = false;
         if (t >= 0 && nactive && this.solidNP[t] === 1) {
           solidBr = true;

@@ -1,11 +1,13 @@
-// 鞭修复批回归（2026-08-22，标杆 Terarria1456/Terraria/Projectile.cs）：
+// 鞭修复批回归（2026-08-22，标杆 Terarria1456/Terraria/Projectile.cs——①段行号仍锚
+//  1456;②伴生召唤段 2026-09-04 SW-AB1 重锚 Terarria1457/Terraria/Projectile.cs）：
 //  ① 半程鞭尖音（AI_165 :45051-45070）：ai[0] 到达 (int)(timeToFlyOut/2f) 在鞭尖
 //    （FillWhipControlPoints 缺省视觉曲线 :45618，控制点末位 :45054）播音，分档
 //    1029→NPCDeath1（音量 0.6 :45057）/ 1030→NPCHit9（:45061）/ 1033→Item193
 //    （:45065）/ 其余全部→Item153（:45069）
-//  ② 鞭伴生召唤出生点（:12943-12963）：917 雪花哨兵 / 1036 小蜘蛛出生在【被命中
+//  ② 鞭伴生召唤出生点（:13979-14000;SW-AB1 2026-09-04 重锚 1457,旧 1456 :12943-12963）：
+//    917 雪花哨兵 / 1036 小蜘蛛出生在【被命中
 //    敌怪 Center】、速度零矢量、击退 0（NewProjectile(..., targetNPC.Center,
-//    Vector2.Zero, 917, 15, 0f, owner) :12948 / 1036, 2, 0f :12959）
+//    Vector2.Zero, 917, 15, 0f, owner) :13984 / 1036, 2, 0f :13995）
 import { describe, expect, it } from 'vitest';
 import { WhipProj } from '../src/entities/WhipProj';
 import { MinionProj } from '../src/entities/MinionProj';
@@ -118,11 +120,11 @@ describe('鞭半程鞭尖音分档（:45051-45070）', () => {
   });
 });
 
-// ============ ② 伴生召唤出生点（:12943-12963） ============
-describe('鞭伴生召唤出生在敌怪 Center + kb 0（:12948/:12959）', () => {
+// ============ ② 伴生召唤出生点（:13979-14000,SW-AB1 2026-09-04 重锚 1457） ============
+describe('鞭伴生召唤出生在敌怪 Center + kb 0（:13984/:13995）', () => {
   const CASES: Array<[itemId: number, whipProj: number, sidekickProj: number, dmg: number]> = [
-    [4911, 912, 917, 15],   // 酷鞭 → 雪花哨兵（:12943-12953）
-    [5473, 1028, 1036, 2],  // 麻线鞭 → 小蜘蛛（:12954-12964）
+    [4911, 912, 917, 15],   // 酷鞭 → 雪花哨兵（:13979-13989）
+    [5473, 1028, 1036, 2],  // 麻线鞭 → 小蜘蛛（:13990-14000）
   ];
 
   for (const [itemId, whipProj, sidekickProj, dmg] of CASES) {
@@ -140,10 +142,10 @@ describe('鞭伴生召唤出生在敌怪 Center + kb 0（:12948/:12959）', () =
       expect(enemy.hits.length).toBeGreaterThan(0);     // 命中链先成立
       const m = added.find((e) => e instanceof MinionProj && (e as MinionProj).projId === sidekickProj) as MinionProj | undefined;
       expect(m).toBeDefined();
-      // 出生点 = 被命中敌怪 Center（targetNPC.Center :12948/:12959），非玩家旁
+      // 出生点 = 被命中敌怪 Center（targetNPC.Center :13984/:13995,SW-AB1 重锚 1457），非玩家旁
       expect(m!.x).toBe(enemy.cx);
       expect(m!.y).toBe(enemy.cy);
-      expect(m!.knockback).toBe(0);                     // kb 0f（:12948/:12959）
+      expect(m!.knockback).toBe(0);                     // kb 0f（:13984/:13995）
       expect(m!.vx).toBe(0); expect(m!.vy).toBe(0);     // Vector2.Zero
       expect(m!.damage).toBe(dmg);                      // 15 / 2
       expect(m!.noSlot).toBe(true);                     // 不占随从槽

@@ -334,11 +334,29 @@ function checkOasisPlantAt(st: TileStore, gs: GenState, i: number, j: number): v
     for (let ll = num - 1; ll <= num + 2; ll++) frameCellGen(st, gs, kk, ll);
 }
 
-/** RangeFrame(x1,y1,x2,y2)（cs:80924）生成期子集：逐格 TileFrame（上面的
- *  frameCellGen）。棕榈尾扫入口。 */
+/** SquareTileFrame 语义（cs:81470-81482，3×3 逐格 TileFrame 无外扩）的生成期子集：
+ *  逐格 frameCellGen。KillTile 尾 3×3 级联（placeOasisPlant 清盒 cs:63974）入口。
+ *  ★与 rangeFrameGen 区分：RangeFrame 才有 ±1 外扩环，SquareTileFrame 没有。 */
 export function palmRangeFrame(st: TileStore, gs: GenState, x0: number, y0: number, x1: number, y1: number): void {
   for (let x = x0; x <= x1; x++)
     for (let y = y0; y <= y1; y++) frameCellGen(st, gs, x, y);
+}
+
+/** RangeFrame(startX,startY,endX,endY)（cs:81685-81696）1:1：循环界
+ *  `for (i = startX - 1; i < endX + 2; i++) for (j = startY - 1; j < endY + 2; j++)`
+ *  ——调用窗四边各外扩 1 格（MapUpdateQueue 矩形同款 (startX-2, startY-2,
+ *  w+4, h+4) 扩窗），逐格 TileFrame + Framing.WallFrame（生成期帧/墙为渲染态，
+ *  有效子集=frameCellGen：死格 half/slope 双清 cs:82077-81 + 530/529 Check）。
+ *  ★IIIII101f 定罪（GFB #99 反演重放 tools/_iii101f-replay.test.ts：金标 098 带帧
+ *  基座单跑 pass99 八通道唯一差 S0>1@(1587,981)）：旧 palmRangeFrame 兼职棕榈尾扫
+ *  缺 ±1 环——GrowPalmTree 尾 RangeFrame(i-2, num-num3-1, i+2, num+1) 实扫
+ *  x∈[i-3,i+3]，#99 幽灵沙 (1587,981)（#19 Full_Desert 沙丘坡 sl1、#70 Quick_Cleanup
+ *  失活成幽灵）恰在棕榈列 1590 的 i-3 环位，vanilla 经 TileFrame !active() 分支
+ *  死格重置 sl1→0，JS 漏扫 → #99 槽末唯一 1 格 Sl 差（#100 Tile Cleanup 杀幽灵
+ *  自愈掩蔽，「vanilla 也有、JS 缺失」非「JS 多写」）。 */
+export function rangeFrameGen(st: TileStore, gs: GenState, x0: number, y0: number, x1: number, y1: number): void {
+  for (let x = x0 - 1; x <= x1 + 1; x++)
+    for (let y = y0 - 1; y <= y1 + 1; y++) frameCellGen(st, gs, x, y);
 }
 
 
@@ -411,7 +429,7 @@ export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number, gs?:
     }
     st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(0, 2), tilt); // fx=22*Next(0,3)
   }
-  if (gs) palmRangeFrame(st, gs, i - 2, index1 - height - 1, i + 2, index1 + 1);
+  if (gs) rangeFrameGen(st, gs, i - 2, index1 - height - 1, i + 2, index1 + 1);   // ★IIIII101f：RangeFrame ±1 外扩环（cs:81685）
   return true;
 }
 

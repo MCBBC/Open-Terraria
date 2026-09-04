@@ -70,7 +70,90 @@ function placeTileDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: n
   };
   if (!(inact(x, j - 1) && inact(x, j - 2) && actSolid(x, j - 3))) return false;
   placeDoorHF(st, rng, x, j - 1, style);
+  // ★IIIII108b2：PlaceTile case10 落门后原版 SquareTileFrame(i,j)（cs:60378）——
+  //   3×3 门肃清投影（对齐 x86,见 hellFortSquareDoorFrame 注）
+  hellFortSquareDoorFrame(st, x, j);
   return true;
+}
+
+// ★IIIII108b2（2026-09-04）winter A 格 (1862,1047) 定罪修复：SquareTileFrame→
+//   TileFrame 的「门肃清」最小投影。原版每次 PlaceTile 成功（case10 门 cs:60378 /
+//   case19 平台 cs:60760 / case4 火把）尾置 SquareTileFrame(i,j)（cs:81470）对 3×3
+//   逐格 TileFrame（cs:82613）：失活格清 halfBrick/slope/块漆/块涂层（cs:82631-35,
+//   ClearBlockPaintAndCoating=Tile.cs:906）；活性门(10) 走 TileFrameImportant→
+//   CheckDoorClosed（cs:87722）整门体检——由 frameY%54/18 反推门顶 num,上(num-1)/
+//   下(num+3) 须 SolidTile(Tile)（cs:70495,nactive 口径）且三门位全活性 type10,
+//   否则 destroyObject 置位逐位 KillTile（cs:64037:失活格早退+type10 才杀+尾置
+//   SquareTileFrame）+DropDoorItem（生成期物品面,JS 无实体域,略）。
+//   mile8 winter A 格机理：T#7 右外门落 3 格门 (1862,1047..1049) → T#8 绘制期
+//   raw-write 以边墙行覆写门中位 (…,1048)（Terraria 绘制期无 TileFrame,门暂存活）、
+//   室内写幽灵化门底位 (…,1049) → T#8 顶层平台 PlaceTile(1863,1048) 的 3×3 越框
+//   Framing 门顶 (…,1047) → CheckDoorClosed 查中位≠门 → KillTile 门顶
+//   （门底已失活被 KillTile 早退豁免=ghost 门保留）——x86 dump028 终态
+//   (1047)=0:0:0/(1048)=75:1:0/(1049)=10:0:14 由此逐字节成立。JS 管线无 TileFrame,
+//   本投影在 HellFort 的 PlaceTile 受理面补齐该状态面。
+//   生成期其余活性非 frame-important 格 TileFrame 零状态面（TileFrameCosmetic 被
+//   !generatingWorld 门跳过,cs:82656）;家具/挂画环 PlaceTile 肃清投影未接线（备案债,
+//   本链无受理窗）。
+let hfDestroyObject = false;
+
+/** WorldGen.SolidTile(Tile)（cs:70495）：nactive+tileSolid+!tileSolidTop+!half+slope0 */
+function hfSolidTileTile(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || ((st.wire[i] >>> 5) & 1)) return false;
+  const d = TILE_DEFS[st.type[i]];
+  return !!d && !!d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+}
+
+/** CheckDoorClosed（cs:87722）1:1：整门体检+破门清算（destroyObject 重入门;
+ *  KillTile 只杀活性 type10 位——被后写截断的中位/已幽灵化的底位均豁免）。 */
+function hfCheckDoorClosed(st: TileStore, i: number, j: number): void {
+  if (hfDestroyObject) return;
+  const ti = st.idx(i, j);
+  const top = j - Math.floor((st.frameY[ti] % 54) / 18);   // num = j - frameY%54/18
+  const doorAt = (y: number): boolean => st.inBounds(i, y)
+    && !!st.flags[st.idx(i, y)] && st.type[st.idx(i, y)] === T_DOOR;
+  if (hfSolidTileTile(st, i, top - 1) && hfSolidTileTile(st, i, top + 3)
+    && doorAt(top) && doorAt(top + 1) && doorAt(top + 2)) return;
+  hfDestroyObject = true;
+  for (let y = top; y <= top + 2; y++) {
+    if (!st.inBounds(i, y)) continue;
+    const t = st.idx(i, y);
+    if (!st.flags[t] || st.type[t] !== T_DOOR) continue;    // KillTile 早退口径
+    st.flags[t] = 0;                                       // active(false)
+    st.half[t] = 0;                                        // halfBrick(false)
+    st.type[t] = 0;                                        // 尾置 type=0
+    st.paint[t] = 0;                                       // ClearBlockPaintAndCoating
+    st.coat[t] &= ~TileStore.COAT_BLOCK_MASK;
+    hellFortSquareDoorFrame(st, i, y);                     // KillTile 尾 SquareTileFrame
+  }
+  hfDestroyObject = false;
+}
+
+/** TileFrame(i,j) 生成期状态面投影（cs:82613）：±5 边界门;失活支清 half/slope/
+ *  块漆/块涂层;活性门→hfCheckDoorClosed;其余类型生成期零状态面。 */
+function hfTileFrameProj(st: TileStore, i: number, j: number): void {
+  if (i <= 5 || j <= 5 || i >= st.w - 5 || j >= st.h - 5) return;
+  const ti = st.idx(i, j);
+  if (!st.flags[ti]) {
+    st.half[ti] = 0;
+    st.slope[ti] = 0;
+    st.paint[ti] = 0;
+    st.coat[ti] &= ~TileStore.COAT_BLOCK_MASK;
+    return;
+  }
+  if (st.type[ti] === T_DOOR) hfCheckDoorClosed(st, i, j);
+}
+
+/** SquareTileFrame(i,j)（cs:81470）3×3 投影（行主序=原版 (i-1,j-1)→(i+1,j+1) 序）——
+ *  HellFort 域 PlaceTile 受理面（门/平台/火把）后必调。 */
+export function hellFortSquareDoorFrame(st: TileStore, cx: number, cy: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      hfTileFrameProj(st, cx + dx, cy + dy);
+    }
+  }
 }
 
 /** PlaceDoor（cs:31938）——与 live HellFortPass.placeDoorHF 同构（副本存档） */

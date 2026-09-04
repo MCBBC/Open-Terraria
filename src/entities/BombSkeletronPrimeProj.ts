@@ -8,8 +8,10 @@
 //    timeLeft 缺省 3600（:789 SetDefaults 字段复位;NewProjectile 后置表 :10971-11090
 //    无 102 行）。
 //  · AI_016_Bombs P.cs:47763-48518（逐拍序）：平台/花盆箱中心格 Kill（:47786-47800,
-//    TileID.Sets.Platforms || 380=PlanterBox TileID.cs:1197;本仓 isPlatform 表已含
-//    380,TileStore.ts:194）→ 引信嘶声循环（:47780 IsABombWithFuse[102]=true,
+//    tile.active() && (TileID.Sets.Platforms{19,427,435-439} || 380=PlanterBox
+//    TileID.cs:1197;SW-X1 2026-09-04 M-2:判据按 vanilla sheet 集直查+裸 active 位,
+//    非 TileStore.isPlatform 可站面——致动平台仍杀/矿车轨 239 与家具族不杀））→
+//    引信嘶声循环（:47780 IsABombWithFuse[102]=true,
 //    ProjectileID.cs:277;Kill :71796-71798 Stop）→ 102 专支（:47993-48010：vy>10
 //    终端钳/出手音 Item10 一次（soundDelay 门）/2 帧动画 4t 一帧/落地引信钳 3）→
 //    timeLeft≤3 Kill（:48031-48037）→ damage=0 每拍复写（:48048-48051,102 不在
@@ -39,6 +41,7 @@ import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
+import { TILE_DEFS } from '../data/tiles';
 import { moveAndCollide } from '../physics/TileCollision';
 import { hitPlayer } from './projTargets';
 import { projFrameImg } from './Arrow';
@@ -54,6 +57,22 @@ export function primeBombTerrainRadius(getGoodWorld: boolean, tenthAnniversary: 
 export function primeBombFallClamp(vy: number): number {
   return vy > 10 ? 10 : vy;
 }
+
+/** SW-X1 2026-09-04（M-2）：:47786-47800 中心格 Kill 判据集 = TileID.Sets.Platforms
+ *  （TileID.cs:243 `Factory.CreateBoolSet(19, 427, 435, 436, 437, 438, 439)`）∪
+ *  {380=PlanterBox TileID.cs:1197}。★按 vanilla sheet id 过滤本仓 tile 表
+ *  （仓 id≠原版 id,映射同 TileStore.isPlatform 的 sheet 通道——239 矿车轨可站但
+ *  不入原版 Platforms 集）。★非 TileStore.isPlatform——后者是"可站面"查询
+ *  （家具族 frameY==0（工作台/桌/铁砧/书架/钢琴等）也在内,且对已致动平台返
+ *  false）≠ 原版本判据:裸 active() 位（致动平台仍杀,TileStore.hasTile 即该位）。
+ *  仓内同值集合先例：VanillaFraming.ts:93 SETS_PLATFORMS / FinalCleanupPass.ts:214 /
+ *  WldImport.ts:435。 */
+const PRIME_BOMB_PLATFORM_IDS = new Set<number>(
+  TILE_DEFS.flatMap((d, i) => {
+    const s = d?.vanilla?.sheet;
+    return s !== undefined && (s === 19 || s === 380 || s === 427 || (s >= 435 && s <= 439)) ? [i] : [];
+  }),
+);
 
 /** :48332-48394 重力门步进纯函数。ai[0] 每拍 +1（:48332）;门 `ai[0] > 5f`
  *  （:48377 第二析取支——102 不在第一支名单）;开门拍 ai[0] 钳 10（:48379）,
@@ -114,8 +133,11 @@ export class BombSkeletronPrimeProj extends Entity {
       return;
     }
     // ---- AI_016_Bombs（vanilla 逐拍序）----
-    // :47786-47800 平台/花盆箱中心格 Kill（tile.active() && (Platforms[t] || t==380)）
-    if (st.isPlatform(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+    // SW-X1 2026-09-04（M-2）：:47786-47800 中心格 Kill 判据原版字面
+    //  `tile.active() && (TileID.Sets.Platforms[tile.type] || tile.type == 380)`——
+    //  旧 st.isPlatform() 是"可站面"查询（家具/矿车轨 239 在内、致动位排除）≠本判据。
+    const tx102 = Math.floor(this.cx / TILE), ty102 = Math.floor(this.cy / TILE);
+    if (st.hasTile(tx102, ty102) && PRIME_BOMB_PLATFORM_IDS.has(st.get(tx102, ty102))) {
       this.explode(game);
       return;
     }
@@ -140,6 +162,10 @@ export class BombSkeletronPrimeProj extends Entity {
       this.explode(game);
       return;
     }
+    // SW-X1 2026-09-04（H-1）：timeLeft-- 每拍递减（Update :17305-17311 `timeLeft--;
+    //  if (timeLeft <= 0) Kill()`,位=AI(:16880) 后/HandleMovement 前——本仓 AI 体
+    //  Kill 门后即原版相位）。曾整缺 → 纯空中 3600t 兜底 Kill 永不到达,弹永不爆。
+    this.fuse--;
     // :48048-48051 damage=0——ctor readonly 0 恒成立（在飞接触零伤,注释见字段）
     // :48285-48322 引信烟尘通支：掷 Next(2)==0 → 双尘齐出（31 小烟 + 主尘 num30=6）,
     //  出生点 = Center+(0,−h/2[−6]).RotBy(rot)×1.1（引信尖,随滚转自转）,scale/fadeIn
@@ -169,6 +195,7 @@ export class BombSkeletronPrimeProj extends Entity {
     // ---- 位移 + 撞块（Update aiStyle16 支 :19867-19900;moveAndCollide 正典管线,
     //      GrenadeProj 投掷支同款;dropThrough=true = 原版弹不拦平台,平台面 Kill 走上支）----
     const lastVx = this.vx, lastVy = this.vy;
+    const bodyY0 = this.y;   // SW-X1：本拍积分前 y（残差口径,WeaponProj SW-N1/W1 同构）
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
@@ -176,11 +203,21 @@ export class BombSkeletronPrimeProj extends Entity {
       tileCollide: true, dropThrough: true,
     };
     moveAndCollide(body, game.world, this.vx, this.vy);
+    // SW-X1 2026-09-04（H-1）：碰撞结果回写——原版 :17718
+    //  `velocity = Collision.TileCollision(...)` 把结果赋回 velocity,次拍 AI 读之。
+    //  曾只回写 x/y 不回写 vx/vy → this.vy 恒保 AI 拍前值 → primeBombLandingFuse
+    //  （vy==0 门 :48004-48006）永不触发 + timeLeft 无递减 → 引信恒 3600 落地永不爆。
+    //  X 支（:19872-19876）：TileCollision 改 X（撞墙）→ vx = lastVx × -0.4（102 无
+    //  29 的 ×0.8 二次衰减）;未改 → 保留管线终值。
+    //  Y 支（:19877-19886）：反弹支被 `type != 102` 排除 → 保留 TileCollision 钳后
+    //  速度 = 残差口径 body.y − bodyY0（本拍实际位移;SW-N1 论证：落地返「到贴面距」,
+    //  残差存活到下拍 → 下拍 AI vy==0 落地引信钳相位与原版一致;body.vy 恒 0 会吞
+    //  残差把钳位提前 1 拍）。勿补 bounce。
+    if (body.hitWall) this.vx = lastVx * -0.4;
+    else this.vx = body.vx;
+    if (body.hitHead || body.onGround) this.vy = body.y - bodyY0;
+    else this.vy = body.vy;
     this.x = body.x; this.y = body.y;
-    if (body.hitWall) this.vx = lastVx * -0.4;      // :19874-19876（102 无 29 的 ×0.8 二次衰减）
-    // Y 反弹支 :19882 `velocity.Y != lastVelocity.Y && lastVelocity.Y > 0.7 && type != 102`
-    //  ——102 被排除:无任何写面,落地/顶头保留管线钳后速度（落地驻停 → 次拍 AI 读
-    //  vy==0 → 落地引信钳 3 → 同拍 Kill;弹体 Y 响应即此"无操作",勿补 bounce）
   }
 
   destroy(): void {
@@ -191,7 +228,10 @@ export class BombSkeletronPrimeProj extends Entity {
   /** Kill P.cs:71752（aiStyle16 支）+ Kill_Bombs_DoUsualKillCode :80070-80115 +
    *  Kill_ExplodeTiles :79027-79035。伤害/视觉/地形序 = 原版：Damage()#1（128² 盒×
    *  damage 40,PrepareBombToBlow :47688-47693）→ 视觉 + 二次 Damage（免疫帧挡,
-   *  单结算同效）→ 地形爆（FTW 闸门）。 */
+   *  单结算同效）→ 地形爆（FTW 闸门）。
+   *  SW-X1 2026-09-04（L-4④ 核）：onProjectileDeath 对 102 无 Item_10 支
+   *  （Game.BULLET_KILL_SFX = Kill :77650 列表逐字,102 不在）→ 出手音 :47999
+   *  单口不叠播,无需修。 */
   private explode(game: GameHooks): void {
     if (this.dead) return;
     this.dead = true;

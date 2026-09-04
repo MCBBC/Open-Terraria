@@ -520,7 +520,11 @@ export class Wiring {
       const i = this.p2i(x, y);
       // ★R8-47:原版只处理双向触发值 3（WR57:670-680）——单侧 1/2 不翻帧;
       // 曾自造 v===1 水平支致水平单触发被错误归零
+      // ★X2-F8(2026-09-04):原版 PixelBoxPass（Wiring.cs:674-76）只写 frameX、
+      //  不动 active/type 位——经 setTile 会把幽灵格残型复活成 active（帧写复活
+      //  幽灵格）。幽灵格跳过帧写（保守=原版可观测面:inactive 格帧写无效帧不绘制）
       if (v === 3) {
+        if (!st.hasTile(x, y)) continue;
         if (st.frameX[i] !== 18) st.setTile(x, y, st.type[i], 18, st.frameY[i]);
         else st.setTile(x, y, st.type[i], 0, st.frameY[i]);
       }

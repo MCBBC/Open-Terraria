@@ -1581,10 +1581,20 @@ export class Dart extends Entity {
             && !sst.hasTile(prevTx, prevTy)) {
             sst.setTile(prevTx, prevTy, T_SAND);
           }
-          // ★R8 F1(:79260-79266 传送带重挂档):蚁狮沙球落传送带(421/422)→不放沙但
-          // 掉 num18=169 沙块件×1(此前纯消失=掉件面整缺;Game AISTYLE10_PLACE[31] 专支
-          // 不路由 onProjectileDeath 为死代码,活口在此直驱)
-          if (onConveyor) game.spawnDrop?.(this.cx, this.cy, 'vi_169_SandBlock', 1);
+          // ★终审 B④（2026-09-04）：flag2 掉件面 = Projectile.cs:79290-99 全量——
+          //  flag2 三支（轨道 314 :79256-79259 / 传送带 421-422 :79260-79266 / 沙塌
+          //  BlockBelowMakesSandFall :79267-79270）→ 免 PlaceTile（flag=false）→
+          //  :79296-98 `else if (!flag && num18 > 0) RequestNewItem(DropAsItem,
+          //  Center+(0,-2), num18)`。itemType 判定照原文 num18 表（:79131-79140）：
+          //  type 31 → 169,ai[0]==2f → 0——本仓 31 唯一生成位=蚁狮敌吐（Enemy.ts
+          //  shootDart ↔ NPC.cs:24579-24604 两吐位均 `ai[0] = 2f`）→ 轨道/沙塌支
+          //  num18=0 不掉件（=原版蚁狮版纯消失,非掉件面缺;判定面按原式接 spawnDrop
+          //  通道,将来接入 ai0≠2 的 31 生成位即活）。传送带支 :79263-79265 对 31
+          //  无条件重挂 169 → 掉 vi_169_SandBlock ×1（R8 F1 已接,本批补 :79297 锚
+          //  Center+(0,-2)——曾用 Center 少 -2px）。被占支 :79300-79304 num18=0
+          //  同样不掉（上方放置门注释已录）。
+          const num18Flag2 = onConveyor ? 169 : 0;
+          if (num18Flag2 > 0) game.spawnDrop?.(this.cx, this.cy - 2, 'vi_169_SandBlock', 1);
         }
         this.dead = true; return;
       }

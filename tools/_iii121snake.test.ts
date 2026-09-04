@@ -11,7 +11,7 @@ import { runDualDungeonsDitherSnakePass, snkRollCounter } from '../src/world/gen
 import { dualDungeonState } from '../src/world/gen/vanilla/DungeonStyles1457';
 
 const RUN = process.env.SW_I121S === '1';
-const G2 = '/tmp/iii84-out/x86-i78-ddual';
+const G2 = process.env.SW_I121_G2 ?? '/tmp/iii84-out/x86-i78-ddual';   // ★IIIII101c-b 追记：G2 可换桶（/tmp 灭失时指 ~/GoldenChains/golden-ddual）
 const W = 4200, H = 1200;
 function le16(p: string): Uint16Array {
   const b = readFileSync(p);

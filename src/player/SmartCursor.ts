@@ -183,6 +183,13 @@ export interface SmartCursorEnv {
   wireToolMode: number;
   /** EmptyTile 判定的占位实体（玩家 + NPC，px 盒） */
   occupants: Array<{ x: number; y: number; w: number; h: number }>;
+  /** Step_Boulders :941-949(1457) 玩家命中盒净空的全玩家列表（原版遍历
+   *  Main.player[0..254] 取 active && !dead 者——【只查玩家】，与 occupants
+   *  （玩家+敌怪+城镇 NPC，口径来自 Collision.EmptyTile Collision.cs:1361-1376
+   *  的双循环）不同；拿 occupants 代读会让敌怪/NPC 错误顶掉巨石候选）。
+   *  缺省回退 [actor]（单人即 Main.player[0]；Game 侧 lookup 时玩家必非 dead），
+   *  联机态由 Game 侧显式传全玩家列表。 */
+  players?: Array<{ x: number; y: number; w: number; h: number }>;
   /** 是否正在按住使用键（controlUseItem）——锁清理与 Hold 模式语义用 */
   controlUseItem: boolean;
   /** 当前背包油漆 id（SmartCursorHelper.cs:167-181 TryFindingPaintInplayerInventory 的
@@ -195,6 +202,11 @@ export interface SmartCursorEnv {
   /** 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：player.grappling 表
    *  各锚 Center 的 tile 坐标）。Step_Pickaxe_MineSolids 射线终点/免挖集用；缺省空集 */
   grappleAnchors?: Pt[];
+  /** Main.worldSurface（tile 坐标；本仓 = World.groundLevel 同一标量口径，
+   *  Housing.ts:903 / HairDyeColor.ts:42 同源备案）。Step_Pigronata :987(1457)
+   *  循环条件 / Step_PumpkinSeeds :1049(1457) 循环内 break 的地表截断线。
+   *  缺省 Infinity = 不截断（未接世界态时保持旧行为；Game 侧恒传实况）。 */
+  worldSurface?: number;
   /** WorldGen.IsAlchemyPlantHarvestable（WorldGen.cs:66198-66225）所需世界态。
    *  仅 Step_AlchemySeeds 的"成熟药草可覆盖"判定用；缺省按"未到收获期"处理
    *  （等价语义 = 仅 type 84 直接可收）。time 为原版 Main.time 口径：
@@ -1062,16 +1074,20 @@ export class SmartCursor {
     return { x: Math.trunc(Math.cos(ang) * 1.5) || 0, y: Math.trunc(Math.sin(ang) * 1.5) || 0 };
   }
 
-  /** :1165-1321 矿车轨道（2340/2739 主 + 2492 压力轨道段） */
+  /** :1175-1332(1457) 矿车轨道：2340(MinecartTrack)/2739(BoosterTrack) 方向量化主段
+   *  + 2492(PressureTrack) 压力轨道独立段（:1277-1331，无方向量化左右各续一格） */
   private stepMinecartTracks(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     const st = env.st;
     const p = env.actor;
-    // 原版按物品 id 2340/2739 门；我方轨道放置物（place_v_314_*）无 vid → 以 createTile sheet==314 认定
-    const isTrackItem = sem.createTileSheet === 314 || sem.vid === 2340 || sem.vid === 2739 || sem.vid === 2492;
-    if (isTrackItem && !taken()) {
+    // 主段门（:1177(1457)）= 物品 id 2340/2739；我方轨道放置物（place_v_314_*）无 vid
+    // → 以 createTile sheet==314 认定。★2492(PressureTrack) 同为 sheet 314 但原版
+    // 【不走主段】——须按 vid 先行排除（X1-④ 拆分，原"并入主段"登记债清偿）。
+    const isMainTrack = (sem.createTileSheet === 314 && sem.vid !== 2492)
+      || sem.vid === 2340 || sem.vid === 2739;
+    if (isMainTrack && !taken()) {
       // :1170-1196 主方向判定（±0.5 阈值；斜向组合时水平让位）
       const dx = env.mouse.x - p.cx, dy = env.mouse.y - p.cy;
       const len = Math.hypot(dx, dy) || 1;
@@ -1121,8 +1137,41 @@ export class SmartCursor {
         }
       }
     }
-    // :1267-1321 压力轨道（2492）：左右各续一格——我方无该物品的独立数据段，
-    // 已并入上面 sheet==314 的通用延伸（2492 命中 isTrackItem 同走主段）
+    // :1277-1331(1457) 压力轨道（2492）独立段——门 `item.type != 2492 || focused != -1
+    //  → return`（仅主段未钉中时参与）。无方向量化：鼠标格已在轨道上（:1282 active()
+    //  口径）→ 不产候选；否则扫可达区已有轨道（:1289 active() 口径），左右邻格
+    //  空/可割/可顶替（:1294/:1299）入候选，上下均非轨道（:1310，水平端点）者取
+    //  离鼠标最近（num5 != -1 由 nearestOf 空集返回 null 等价承担）。
+    if (sem.vid === 2492 && !taken()) {
+      const hoverTrack = hasTileAt(st, screenX, screenY) && sheetOf(st.get(screenX, screenY)) === 314;
+      if (!hoverTrack) {
+        const targets: Pt[] = [];
+        for (let i = reach.x0; i <= reach.x1; i++) {
+          for (let j = reach.y0; j <= reach.y1; j++) {
+            if (!st.inBounds(i, j) || !hasTileAt(st, i, j) || sheetOf(st.get(i, j)) !== 314) continue;
+            for (const ox of [-1, 1]) {
+              const nx = i + ox;
+              if (!st.inBounds(nx, j)) continue;
+              const nt = st.get(nx, j);
+              // :1294/:1299 `!tile.active() || Main.tileCut[tile.type] || TileID.Sets.BreakableWhenPlacing[tile.type]`
+              if (!hasTileAt(st, nx, j) || tileCutType(nt) || breakableWhenPlacing(sheetOf(nt))) {
+                targets.push({ x: nx, y: j });
+              }
+            }
+          }
+        }
+        // :1308-1321 候选上下均非轨道（:1310 active() 口径）才入选，取离鼠标最近
+        const ends = targets.filter((t) => {
+          const above = st.inBounds(t.x, t.y - 1) && hasTileAt(st, t.x, t.y - 1) && sheetOf(st.get(t.x, t.y - 1)) === 314;
+          const below = st.inBounds(t.x, t.y + 1) && hasTileAt(st, t.x, t.y + 1) && sheetOf(st.get(t.x, t.y + 1)) === 314;
+          return !above && !below;
+        });
+        const point = nearestOf(ends, env.mouse);
+        if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          set(point.x, point.y);
+        }
+      }
+    }
   }
 
   /** :1099-1163 铺墙：可铺墙格四向有依附，取最近 */
@@ -1161,17 +1210,25 @@ export class SmartCursor {
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
   }
 
-  /** :1026-1097 南瓜种子（createTile 254） */
+  /** :1036-1108(1457) 南瓜种子（createTile 254） */
   private stepPumpkinSeeds(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     if (sem.createTileSheet !== 254 || taken()) return;
+    const ws = env.worldSurface ?? Infinity;
     pumpkinOrBoulderScan(env, reach, set, (st, i, j) => {
+      // :1049(1457) `if ((double)j > Main.worldSurface - 2.0) break;`——j 单调递增、
+      //  截断线与 i 无关，循环内 break ≡ 该行起整列拒绝（与逐行 false 等价）
+      if (j > ws - 2) return false;
       // :1043-1070 草面 2 格宽、无坡无半砖、上方 2×2 无阻挡
       const a = st.inBounds(i, j + 1) ? st.get(i, j + 1) : 0;
       const b = st.inBounds(i + 1, j + 1) ? st.get(i + 1, j + 1) : 0;
       if (!hasTileAt(st, i, j + 1) || !hasTileAt(st, i + 1, j + 1)) return false; // :1054 active()
+      // :1058(1457) `tile2.slope() > 0 || tile.slope() > 0 || tile2.halfBrick() || tile.halfBrick()`
+      //  ——两块地面格（(i,j+1)/(i+1,j+1)）任一有坡或半砖即拒
+      if (st.slope[st.idx(i, j + 1)] > 0 || st.slope[st.idx(i + 1, j + 1)] > 0
+        || st.half[st.idx(i, j + 1)] > 0 || st.half[st.idx(i + 1, j + 1)] > 0) return false;
       const grassOk = (t: number): boolean => [2, 477, 109, 492].includes(sheetOf(t));
       if (!grassOk(a) || !grassOk(b)) return false;
       for (let k = i; k <= i + 1; k++) {
@@ -1239,7 +1296,7 @@ export class SmartCursor {
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
   }
 
-  /** :968-1024 皮纳塔（createTile 454） */
+  /** :978-1035(1457) 皮纳塔（createTile 454） */
   private stepPigronata(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
@@ -1247,8 +1304,11 @@ export class SmartCursor {
     if (sem.createTileSheet !== 454 || taken()) return;
     const st = env.st;
     const targets: Pt[] = [];
+    const ws = env.worldSurface ?? Infinity;
     for (let i = reach.x0; i <= reach.x1; i++) {
-      for (let j = reach.y0; j <= reach.y1; j++) {
+      // :987(1457) `j <= reachableEndY && !((double)j > Main.worldSurface - 2.0)`——
+      //  地表下（j > worldSurface-2）整列截断
+      for (let j = reach.y0; j <= reach.y1 && !(j > ws - 2); j++) {
         if (!st.inBounds(i, j)) continue;
         // :979-1002 顶部一行实心 + 下方 4×3 空
         let flag = true;
@@ -1270,7 +1330,7 @@ export class SmartCursor {
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
   }
 
-  /** :885-966 巨石（TileID.Sets.Boulders） */
+  /** :895-977(1457) 巨石（TileID.Sets.Boulders） */
   private stepBoulders(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
@@ -1281,7 +1341,6 @@ export class SmartCursor {
       // :898-925 下方两格 nactive 无坡无半砖、可承重（tileSolid ∪ tileTable 全表
       //  Main.cs:7018-7100 77 条——曾以"TILE_DEFS 已注册"近似=任何件都承重）、
       //  非 tileNoAttach（:921）；上方 2×2 无阻挡。
-      //  台账：:941-949 另有 255 玩家 Hitbox∩32×32 净空检查未移植（需 env 玩家盒列表）。
       for (const ox of [0, 1]) {
         const bx = i + ox, by = j + 1;
         if (!st.inBounds(bx, by) || !activeAt(st, bx, by)) return false;
@@ -1296,6 +1355,15 @@ export class SmartCursor {
           const t = st.get(k, l);
           if (hasTileAt(st, k, l) && !tileCutType(t)) return false; // :930 active()
         }
+      }
+      // :936-949(1457) 玩家命中盒净空：32×32 @ (i*16, j*16-16)（= 上方 2×2 格区）
+      //  与任一 active && !dead 玩家 Hitbox 相交即拒（首个命中 break ≡ 短路返回）。
+      //  原版此处只遍历 Main.player[0..254]，不查敌怪/城镇 NPC——走 players
+      //  （缺省 [actor]）而非 occupants（那是 Collision.EmptyTile 的双循环口径）。
+      const rx = i * 16, ry = j * 16 - 16;
+      for (const pl of (env.players ?? [env.actor])) {
+        // XNA Rectangle.Intersects：other.X < Right && X < other.Right && other.Y < Bottom && Y < other.Bottom
+        if (pl.x < rx + 32 && rx < pl.x + pl.w && pl.y < ry + 32 && ry < pl.y + pl.h) return false;
       }
       return true;
     });

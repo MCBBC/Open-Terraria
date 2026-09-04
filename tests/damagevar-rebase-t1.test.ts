@@ -23,7 +23,8 @@ describe('SW-T1 DamageVar 重基线（31 档/float32/ToEven/luck）', () => {
     const outs = new Set<number>();
     for (let t = -15; t <= 15; t++) { const v = damageVarRoll(100, 0, tierRnd(t)); outs.add(v); expect(v).toBeGreaterThanOrEqual(85); }
     expect(outs.size).toBe(31);
-    // 原版 float32 真值锚（Main.cs:67102 逐级 f32 舍入;double 直算会得 55/29/32）
+    // 原版 float32 真值锚（Main.cs:67103 逐级 f32 舍入;double 直算会得 55/29/32;
+    // SW-X1 2026-09-04 引注勘误,曾 :67102）
     expect(damageVarRoll(50, 0, tierRnd(9))).toBe(54); expect(damageVarRoll(25, 0, tierRnd(14))).toBe(28);
     expect(damageVarRoll(30, 0, tierRnd(5))).toBe(31);
   });

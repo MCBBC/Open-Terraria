@@ -74,9 +74,13 @@ export function xmasDecorStyle(st: TileStore, ax: number, ay: number, obj: numbe
 
 /** setXmasTree（:39430-39500）：写入该槽位段，其余槽位保持原值。
  *  style=0 清空该槽（物品链不会传 0，破坏整树时清理用）。
- *  经 setTile 写回（同型重写不清油漆/半砖，且触发 chunk 重烘焙与联机上报） */
+ *  经 setTile 写回（同型重写不清油漆/半砖，且触发 chunk 重烘焙与联机上报）。
+ *  ★X2-F8(2026-09-04)：原版 setXmasTree（WorldGen.cs:39781+）只或/与 frameY 位段、
+ *  不动 active/type——经 setTile 会把幽灵锚格残型复活成 active（帧写复活幽灵格）。
+ *  幽灵锚跳过（保守=原版可观测面：inactive 格帧写无效） */
 export function xmasSetDecor(st: TileStore, ax: number, ay: number, obj: number, style: number): void {
   if (!st.inBounds(ax, ay)) return;
+  if (!st.hasTile(ax, ay)) return;
   const i = st.idx(ax, ay);
   const [shift, bits] = SLOT_BITS[obj];
   const mask = ((1 << bits) - 1) << shift;

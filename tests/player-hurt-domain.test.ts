@@ -1154,3 +1154,77 @@ describe('★GMC 真环：接触环消费变形盒/乘区/桶通道（Enemy.fixe
     }
   });
 });
+
+// ============================================================
+// ★终审 B⑤（2026-09-04）落地云床缓冲扫描（Player.cs:25531-25542,本仓整缺补）：
+//   velocity.Y==0 落地段,num11>0 时扫脚线一行（gd==1: (int)((Y+h+1)/16);
+//   num12..num13=(int)(X/16)..(int)((X+w)/16) 含端）——格 tile.active()
+//   （=hasTile 裸位,含已致动）且 [TileID.Sets.Clouds（TileID.cs:197=
+//   {189,196,460,717,718,719}）|| type==666 粪块 || (type==19 && frameY/18==49
+//   云平台样)] → num11=0（消费位=石化支 :25544-25556 与常规支 :25557-25567）。
+//   曾整缺 → 云床/云格落地照结摔伤。
+// ============================================================
+describe('★终审 B⑤ 落地云床缓冲（Player.cs:25531-25542）', () => {
+  function worldWithRow(rowTile: number, frameY = 0): World {
+    const w = new World(80, 80, 13, 'cloud-fall');
+    for (let x = 10; x <= 46; x++) w.store.setTileSilent(x, 44, rowTile, 0, frameY);
+    return w;
+  }
+
+  it('云块 189 床上 40 格落差落地：num11=0 → 零摔伤（曾整缺照结 150）', () => {
+    const w = worldWithRow(TILE_BY_KEY['v_189_cloud_block']!);   // TileID.Sets.Clouds
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);   // 先落定
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;         // 落差 40 整格
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(p.fallStartY).toBeNull();                            // 结算走完（重置）
+    expect(captures.length).toBe(0);                            // 云床免摔伤
+  });
+
+  it('已致动云块照常缓冲（扫描门=裸 active()=hasTile,非 nactive）', () => {
+    const w = worldWithRow(TILE_BY_KEY['v_189_cloud_block']!);
+    for (let x = 10; x <= 46; x++) w.store.setActuated(x, 44, true);
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(captures.length).toBe(0);                            // 致动云=active() 仍在 → 缓冲
+  });
+
+  it('云平台样（19 && frameY/18==49）落地免摔伤（:25537 flag8 支）', () => {
+    const w = worldWithRow(TILE_BY_KEY['platform']!, 49 * 18);  // style 49 平台
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(captures.length).toBe(0);
+  });
+
+  it('对照：土床同落差照结 (40-25)×10=150（扫描未越权扩大豁免面）', () => {
+    const w = worldWithRow(TILE_BY_KEY['dirt']!);
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(captures.length).toBe(1);
+    expect(captures[0].args[0]).toBe(150);
+  });
+
+  it('脚线双格含端扫描（num12..num13）：半身云半身土 → 命中云格即免', () => {
+    const w = new World(80, 80, 13, 'cloud-fall-mixed');
+    const st = w.store;
+    for (let x = 10; x <= 46; x++) st.setTileSilent(x, 44, TILE_BY_KEY['dirt']!);
+    // 玩家横跨 27/28 两列：27 上方留云、28 留土
+    st.setTileSilent(27, 44, TILE_BY_KEY['v_189_cloud_block']!, 0, 0);
+    const p = new Player(27 * 16 + 2, 40 * 16, new Inventory());   // 占 27..28 两列
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(captures.length).toBe(0);                            // 云列命中 break → num11=0
+  });
+});

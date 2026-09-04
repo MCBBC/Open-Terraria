@@ -61,12 +61,18 @@ export async function settleWorldLiquids(
     //   maxTilesY 天然豁免（WorldFile.cs:739）→ 不设值即同义。地牢豁免：落点在
     //   outerPotentialDungeonBounds 半图盒内且水源墙 ∈ wallDungeon{7,8,9,94-99}
     //   （Main.cs:10507-10515）→ 回水（:186-188）
+    //   ★IIIII105b（2026-09-04）边界语义修正：原版 DungeonBounds.SetBounds→Rectangle
+    //   hitbox 的 Contains 为【右/下边 exclus】（DungeonBounds.cs:175→Rectangle.Contains;
+    //   Right=num3=w-(int)(w*0.05)=3990/Bottom=UnderworldLayer-10），JS 旧式 x<=x1/y<=y1
+    //   把边界列含入 → 恰在 x=3990（右缘列）的越 waterLine 水滴被误豁免回水，
+    //   x86 同位落岩浆 ⇒ sparkle #49 L=3121/Lt=61 残余的全域级联源。x>=x0/y>=y0
+    //   两沿原版本来就含（Rectangle 左/上闭），不动。
     if (world.genWaterLine > 0) {
       sim.genWaterLine = world.genWaterLine;
       const d = world.genDungeonExempt;
       if (d) {
         sim.dungeonWaterExempt = (x, y, w) =>
-          x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1
+          x >= d.x0 && x < d.x1 && y >= d.y0 && y < d.y1
           && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
       }
     }

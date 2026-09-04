@@ -742,6 +742,13 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (f12 && rng.int(0, 2) === 0) pushItem(2197);
     if (flags.temple) pushItem(2195); // flag13（cs:37428）：蜥蜴炉恒给
     if (flags.dungeon && rng.int(0, 7) === 0) pushItem(2192); // flag9（cs:37432）1/8 血腥砍刀
+    // ★IIIII100f（2026-09-04）：5515 MoonLordBody 哑骰门（1458 cs:37803-37806 ≡1457
+    //   同位）——`if (flag9 && Main.getGoodWorld && genRand.Next(5) == 0)` 命中入箱。
+    //   掷面：flag9&&getGood 时**恒耗 1 掷**（命中 1/5 才 push）——曾整缺 ⇒ getGood
+    //   旗地牢位箱（IsDungeon 落点/上锁地牢生物群系箱）流相移。GFB mile8 实证惰性：
+    //   pass97 两 ivy 箱 flag9=false 短路零掷、pass59 窗 99,298 掷已与 x86 逐字节同源
+    //   （k=0）——本刀对既有绿链零扰动，纯 future-correctness。
+    if (flags.dungeon && gs.seedFlags.getGoodWorld && rng.int(0, 4) === 0) pushItem(5515); // cs:37803-37806
     if (f12) {
       const n38 = rng.int(0, 5);
       pushItem([5258, 5226, 5254, 5238, 5255, 5388][n38]); // cs:37440-37468
@@ -862,6 +869,13 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
         else rng.nextInt(4);
       }
       return;
+    // ★IIIII101d（cs:69707-69713 尾支）：314 轨块尘=每粒 3 掷（Next(-2,3)×2+Next(0,51)）
+    //   ——与 TrackPass/FinalCleanupPass 副本同步（三副本纪律）。
+    case 314:
+      rng.int(-2, 2);
+      rng.int(-2, 2);
+      rng.int(0, 50);
+      return;
     default:
       if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
   }
@@ -891,6 +905,9 @@ export function killTileChest(st: TileStore, rng: RNG, x: number, y: number): vo
   const k = st.idx(x, y);
   if (!st.flags[k]) return;
   const sheet = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+  // ★IIIII99c(bis) 取证钩（dormant）：箱族击杀事件流（零开销：无钩不进）
+  (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void })
+    .__swChestEv?.('kill', x, y, (globalThis as { __swRollN?: number }).__swRollN ?? -1);
   if (killSurviveAnchors && KILL_SURVIVE_CHEST_SHEETS.has(sheet)) {
     // CanDestroyChest 锚（帧列模 2 / 帧行）＝CheckTileBreakability2_ShouldTileSurvive 同位
     let num = Math.trunc(st.frameX[k]! / 18);

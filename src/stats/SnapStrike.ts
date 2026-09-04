@@ -15,7 +15,8 @@
 //   （:14457）→ kind1 另行给受击者本体 Hellfire。trySnapStrike 因此把旧 boolean
 //   返回值改为【返回 num14 终值】(number,未触发/冷却拦下 = 0)——所有调用站须把它
 //   并入本次 e.hurt 实伤参（防御前）。迁移时序说明：
-//    · 原版弹幕侧（Projectile.Damage_PVE_Inner）加伤点在 DamageVar(:12959) 与
+//    · 原版弹幕侧（Projectile.Damage_PVE_Inner）加伤点在 DamageVar(:12970;★SW-AB1
+//      2026-09-04 引注校准:旧 1456 锚 :12959 → 1457 `int dmg = Main.DamageVar(num15, luck)`) 与
 //      banner(:13387-91) 之后、parry ×5(:13634)/StrikeNPC(:13702) 之前 ⇒ num14 不吃
 //      攻端旗乘区；暴击翻倍在 StrikeNPC_Inner 防后 (:81990 num*(crit?2:1)) 故 num14
 //      【随本次命中一起】吃暴击——仓内调用侧预倍惯例下按 `+ bonus*(crit?2:1)` 并入；

@@ -23,7 +23,12 @@ const CHAINS: Record<string, ChainCfg> = {
   g:         { name: 'g',         seed: '9293480',    evil: 0,  g2: C('golden-g') },
   s22222:    { name: 's22222',    seed: '22222',      evil: 1,  g2: C('gen2-s22222') },
   m:         { name: 'm',         seed: '20260811',   evil: 0,  w: 6400, h: 1800, g2: C('gen2-m') },
-  const:     { name: 'const',     seed: '1321365005', evil: -1, flags: { theConstant: true } },
+  // ★IIIII107b2（2026-09-04）：const 桶重产接居——endgame 权威桶 /tmp/rrrr-out/x86-const 与
+  //   iii98 regen 拷贝双双 /tmp 灭失后,按 runbook §4 重产（seed=1321365005 + 官方
+  //   serverconfig 键 seed_theconstant=1,i128-rig SW_DUMP_ALL 面）,72/72 sample md5 ≡
+  //   cert-endgame TRUTH-MANIFEST['const']（中立性自证）→ 迁居 ~/GoldenChains/golden-const,
+  //   本链由 AB 模式升格为 A·DUMP 八通道对拍（evil=-1=随机邪恶随种子,与 cert lane-params 一致）
+  const:     { name: 'const',     seed: '1321365005', evil: -1, flags: { theConstant: true }, g2: C('golden-const') },
   ntb:       { name: 'ntb',       seed: '1372357239', evil: -1, flags: { notTheBees: true }, g2: C('gen2-ntb') },
   // ★IIIII97b：notraps/c12345 桶收养迁居（原直引 /tmp 灭失高危路径，照 fishmox §0-1
   //   前例迁 ~/GoldenChains；golden-notraps 含 pc2.txt sha256 9de78680…fdb，两桶
@@ -43,13 +48,26 @@ const CHAINS: Record<string, ChainCfg> = {
   // ★IIIII104：pumpkin/jagged 五点接入（配方=m8all.sh/jagged 章）
   // ★IIIII227：G2 迁居真身 ~/GoldenChains（runbook L60-61:原 /tmp/iii84-out、/tmp/iii80-out
   //   仅 symlink 已灭，照 IIII97b 桶收养前例改直引 HOME 真身）
-  pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: { halloweenGen: true }, g2: C('x86-i78-pumpkin') },
+  // ★IIIII110b（2026-09-04）配方勘误销账：桶=IIIII202 重产（i171-rig,无旗域 IIII163 定谳,
+  //  x86 全 110 dump 254=0、active 指纹≡ctl171）——旧 flags:{halloweenGen:true} 是把 JS
+  //  文本路由出的旗注进对拍=CXV c12345 EVIL 漂移同判例（伪红面：mile8 #86 起 20 行 +
+  //  五点 #105 T165/T373 族「登记红」全部=旗级联伪影,旗关即归零,见 /tmp/iii140-out）。
+  //  配方=runbook「无旗」原文：flags:{} 直注压掉 parseSeedChain 回退（cfg.seedFlags 非
+  //  nullish 即短路文本路由）。如未来桶带 halloween 臂重产,再按新桶配方回填本行。
+  pumpkin:   { name: 'pumpkin',   seed: 'pumpkinseason|20260904', evil: 0, flags: {}, g2: C('x86-i78-pumpkin') },
   jagged:    { name: 'jagged',    seed: '771005',     evil: 0,  flags: { digExtraHoles: true }, g2: C('x86-jagged') },
   // ★IIIII111c（2026-09-02）：涂装族五点接入（G2=IIII132 涂装桶 /tmp/iii132-out/paint；
   //  五点不含 pnt/pwal/cbt 三通道——漆/涂层全域对拍以 mile8 _iii81m8 SW_I81_PAINT=1 为准，
   //  invisibleplane/negativeinfinity 已 106 行满绿收官，xrayvision 同）
   xrayvision: { name: 'xrayvision', seed: 'xrayvision|106107', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-xrayvision' },
   monochrome: { name: 'monochrome', seed: 'monochrome|106108', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-monochrome' },
+  // ★IIIII134（2026-09-04）：waterpark/remix 五点接入（III134 批回归矩阵交办面;
+  //   配方=runbook §1 golden-waterpark/golden-remix 行;remix G2=dumps 子目录布局）
+  waterpark: { name: 'waterpark', seed: 'waterpark|20260905', evil: 0, flags: { extraLiquid: true }, g2: C('golden-waterpark') },
+  remix:     { name: 'remix',     seed: '1138154190',       evil: -1, flags: { remix: true }, g2: C('golden-remix/dumps') },
+  // ★IIIII101c（2026-09-04）：planetoids 五点接入——G2=LIX 旗标真值链 golden-planetoids
+  //  （SW_FLAG_PLD 直注 rig 产;本批 stx-pld 复刻 pc 106/106 全等再证）;配方=runbook LIX 表行。
+  planetoids: { name: 'planetoids', seed: 'planetoids|20260908', evil: 0, flags: { roundLandmasses: true }, g2: C('golden-planetoids') },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';

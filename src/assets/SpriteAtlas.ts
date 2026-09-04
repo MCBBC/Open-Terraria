@@ -1,3 +1,12 @@
+// ★破环（2026-09-04）：AssetCache.ts:21 反向 import 本文件 VANILLA_MISC，静态互引在
+//  SpriteAtlas 为环入口时，AssetCache 模块体 priorityPlan() 求值期触碰 TDZ 崩
+//  （"VANILLA_MISC is not iterable"，所有拉游戏图的 vitest 导入期炸）。swTrace 是
+//  纯日志面 → 懒载破环，首调时动态取回。
+let swTraceLazy: ((msg: string) => void) | null = null;
+const swTrace = (msg: string): void => {
+  if (swTraceLazy) { swTraceLazy(msg); return; }
+  void import('../net/AssetCache').then((m) => { swTraceLazy = m.swTrace; swTraceLazy(msg); }).catch(() => {});
+};
 // Unity 素材图集运行时加载器
 // 数据由 scripts/build-atlas.mjs 生成（public/sprites/atlas.json + resources.json）
 // 原版素材由 scripts/vanilla-atlas.mjs 生成（public/sprites/vanilla.json，独立命名空间、无 Unity y 翻转）
@@ -160,17 +169,28 @@ function hardAlpha(img: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
 
 /** 驱逐 SW 资产缓存中该文件的条目(best-effort,失败静默——dev 无 SW 时
  *  caches API 仍可写,但无人读它,无副作用)。贴图加载失败时调用,让 TTL
- * 重试能拿到网络新字节而非同一份缓存毒。 */
+ * 重试能拿到网络新字节而非同一份缓存毒。
+ *  ★双门(2026-09-04 线上实锤"cache 逐会话缩水 12060→11966,丢的恰是天空族"):
+ *  ①SW 未控制页面(controller 空窗/reload 后)时 Image 直连网络必 404(prune
+ *  散件),此因触发 onerror 会把【缓存里完好的条目】当毒删掉=自毁循环(每会话
+ *  空窗删一批,累计 94 条)——controller 缺席绝不驱逐;
+ *  ②驱逐前 match 命中才删(miss=本无可删,更不该误伤)。 */
 export function evictSwCacheEntry(file: string): void {
   if (typeof caches === 'undefined') return;
+  if (!navigator.serviceWorker?.controller) return;   // 门①:SW 缺席=失败原因不在缓存
   const url = new URL('sprites/' + encodeURI(file), location.href).href;
   void (async () => {
     try {
+      let deleted = 0;
       for (const name of await caches.keys()) {
         if (!name.startsWith('sw-assets-v')) continue;
         const c = await caches.open(name);
+        const hit = await c.match(url);
+        if (!hit) continue;                              // 门②:miss 本无可删
         await c.delete(url);
+        deleted++;
       }
+      if (deleted) swTrace(`evict ${file}(命中即删 ${deleted} 名)`);
     } catch { /* 隐私模式/权限异常忽略 */ }
   })();
 }
@@ -620,8 +640,23 @@ export class SpriteAtlas {
       // = 该贴图【本页面生命周期内】永久消失,与"文件真不存在"不可区分。
       // 改 10s 冷却后允许重试;失败瞬间顺带驱逐 SW 缓存里的同路径条目
       // (cache-first 下不驱逐则重试永远再吃同一份坏字节)
+      // ★瞬态失败不驱逐(2026-09-04 线上实锤"Tiles_123/NPC_357 命中即删"=
+      //  驱逐了完好条目):一次 onerror 可能是 SW/网络瞬态——主动重试一次,
+      //  成功=缓存完好(不驱逐);再失败才驱逐(真坏字节)
       this._vImageFailed.set(file, performance.now());
-      void evictSwCacheEntry(file);
+      const retry = new Image();
+      retry.onload = () => {
+        const store = SpriteAtlas.USE_BITMAP ? im : retry;
+        this.vimages.set(file, store);
+        this._vImageFailed.delete(file);
+        if (this.bakeTracker) this.bakeTracker.onLoaded(file);
+        this.onVImageLoaded?.(file);
+      };
+      retry.onerror = () => {
+        this._vImageFailed.set(file, performance.now());
+        void evictSwCacheEntry(file);
+      };
+      retry.src = im.src;
     };
     im.src = `sprites/${encodeURI(file)}`;
     return null;

@@ -630,7 +630,7 @@ export class WhipProj extends Entity {
         // 命中链（case 912/1028 :13981-13992）保持固定 180t 不缩放
         const hb = WHIP_HIT_BUFF[this.itemId];
         if (hb && owner) owner.whipBuffs[hb] = 180;
-        // 伴生召唤出生点 = 被命中敌怪 Center（:12948/:12959 NewProjectile 位置参）
+        // 伴生召唤出生点 = 被命中敌怪 Center（:13984/:13995 NewProjectile 位置参;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12948/:12959 重锚 1457）
         if (WHIP_HIT_SIDEKICK[this.itemId] && owner) {
           this.spawnSidekick(game, owner, this.itemId, v2(e.x + e.w / 2, e.y + e.h / 2));
         }
@@ -638,19 +638,19 @@ export class WhipProj extends Entity {
     }
   }
 
-  /** 命中附属召唤（:12943-12963）：酷鞭 4911 → 雪花哨兵 917（伤 15，buff 312 维持）；
+  /** 命中附属召唤（:13979-14000;SW-AB1 2026-09-04 重锚 1457,旧 1456 :12943-12963）：酷鞭 4911 → 雪花哨兵 917（伤 15，buff 312 维持）；
    *  麻线鞭 5473 → 小蜘蛛 1036（伤 2，buff 365 维持）——同类在场不重复生成
    *  （原版 coolWhipBuff/cobWhipBuff flag 在 buff 期内置位）。
    *  出生点 = 被命中敌怪 Center、速度零矢量、击退 0（NewProjectile(
    *  GetProjectileSource_FromThis(), targetNPC.Center, Vector2.Zero, 917, 15, 0f,
-   *  owner) :12948 / 1036, 2, 0f :12959——此前误出生玩家旁 + kb 1.5） */
+   *  owner) :13984 / 1036, 2, 0f :13995（SW-AB1 2026-09-04 重锚 1457）——此前误出生玩家旁 + kb 1.5） */
   private spawnSidekick(game: GameHooks, owner: Player, itemId: number, at: V2): void {
     const want = WHIP_HIT_SIDEKICK[itemId];
     if (!want) return;
     const projs = (game as unknown as { entities: { projectiles: MinionProj[]; add: (e: unknown, b: string) => void } }).entities;
     if (projs.projectiles.some((m) => m instanceof MinionProj && !m.dead && m.projId === want.proj)) return;
     const m = new MinionProj(at.x, at.y, want.proj, want.dmg, 0,
-      false, 0, false, () => (owner.dead ? null : owner)); // kb=0f :12948/:12959
+      false, 0, false, () => (owner.dead ? null : owner)); // kb=0f :13984/:13995（SW-AB1 2026-09-04 重锚 1457）
     m.noSlot = true;
     projs.add(m, 'projectiles');
   }

@@ -225,6 +225,15 @@ function makeTileDustRoll(rng: RNG, sheet: number, fx: number): void {
         else rng.nextInt(4);
       }
       return;
+    // ★IIIII101d（cs:69707-69713 尾支 Dust.NewDust(…,213, Next(-2,3)×2)+fadeIn Next(0,51)
+    //   =每粒 3 掷；graveyard #97 STRK 巷 × LTRK#2 旧轨交叠 8 列每列恰 1 粒 314 轨块被
+    //   巷杀（GetTileDustAmount default 10）⇒ 每列 30 掷——JS 旧表整缺 ⇒ 每处少 30×列数）：
+    //   x86 rig 掷栈+P1 逐列 Δ 实证（/tmp/iii129-out）。
+    case 314:
+      rng.int(-2, 2);
+      rng.int(-2, 2);
+      rng.int(0, 50);
+      return;
     default:
       if (FURNITURE_DUST.has(sheet)) rng.nextInt(3);
   }

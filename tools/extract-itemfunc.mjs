@@ -710,6 +710,13 @@ const FIELDS = [
   ['ammo', /\bammo = (\d+);/, 'n'],
   ['useAmmo', /\buseAmmo = (\d+);/, 'n'],
   ['notAmmo', /notAmmo = true;/, 'b'],
+  // SW-AA1 2026-09-04（红队 F2）：noUseGraphic case 体显式 true 纳入提取——此前
+  //  仅 DefaultTo* helper 种子（:47782/:47823/:47836/:48011/:48036）隐式落键,
+  //  case 体显式 `noUseGraphic = true;`（4682 :38562/4702 :38651/2436-2438 等
+  //  ~206 件）漏提。BASE_BOOLEANS 同步登记（种子 × 显式 false 取消协同——
+  //  1457/1458 SetDefaults 域现无显式 false,唯一 `noUseGraphic = false;` 在
+  //  ResetStats :48994 域外,登记零行为差）。
+  ['noUseGraphic', /noUseGraphic = true;/, 'b'],
   ['shoot', /\bshoot = (-?\d+);/, 'n'],
   ['holdStyle', /\bholdStyle = (\d+);/, 'n'],
   ['useStyle', /\buseStyle = (\d+);/, 'n'],
@@ -806,7 +813,7 @@ function boolArg(expr) {
  *  false(:43196)、5629 星星炮 ranged=false(:44242)、case(:35612) autoReuse=false、
  *  case(:43121) useTurn=false。false 在条件块内的不取消（残文已剥块,基态口径）。 */
 const BASE_BOOLEANS = ['melee', 'ranged', 'magic', 'summon', 'noMelee', 'consumable', 'autoReuse',
-  'channel', 'torch', 'potion', 'notAmmo', 'useTurn'];
+  'channel', 'torch', 'potion', 'notAmmo', 'useTurn', 'noUseGraphic'];   // SW-AA1 2026-09-04（红队 F2）协同登记
 function cancelFalseBooleans(f, text) {
   if (!text) return;
   const residue = segResidue(text);
@@ -837,7 +844,8 @@ function cancelFalseBooleans(f, text) {
  *  · Bomb(proj,speed) :47771-47783 → useStyle1/shoot/consumable/noMelee/noUseGraphic
  *  · Solution(pid) :47800-47810 → shoot=pid-145/ammo=AmmoID.Solution=780/consumable
  *  · Whip(p,dmg,kb,spd[,anim]) :47811-47827 → useStyle1/damage/knockBack/shoot/
- *    noMelee/summon + 显式 autoReuse=false→0（体首行 :47813;1325 显式 false=提取事实同款）
+ *    noMelee/summon/noUseGraphic(:47824;SW-X1 2026-09-04 补,18 鞭重产物缺) +
+ *    显式 autoReuse=false→0（体首行 :47813;1325 显式 false=提取事实同款）
  *  · Kite(p) :47829-47840 = ThrownWeapon(p,15,8f) 后取反 consumable/ranged(:47834-47835)
  *    +noUseGraphic/createTile 723 → shoot/useStyle1/noMelee/noUseGraphic/createTile
  *  · Vanitypet(p,buff) :47937-47950 → damage0/useStyle1/noMelee/buffType/shoot
@@ -960,7 +968,9 @@ function defaultToBase(seg, id) {
       f.useStyle = 1; f.autoReuse = 0;
       const dmg = evalHelperArg(a[1], id); if (dmg !== undefined) f.damage = dmg;
       const kb = evalHelperArg(a[2], id); if (kb !== undefined) f.knockBack = kb;
-      f.shoot = proj; f.noMelee = 1; f.summon = 1;
+      // SW-X1 2026-09-04（L-2①）：体首段 noUseGraphic = true（Item.cs:47824,DefaultToWhip
+      // 内第 10 行）——18 鞭重产物缺此键（使用期间不绘物品贴图,与 Kite/GolfBall 同）
+      f.shoot = proj; f.noMelee = 1; f.summon = 1; f.noUseGraphic = 1;
     }
   }
   if ((m = callOf(segClean, 'Kite')) !== undefined) {

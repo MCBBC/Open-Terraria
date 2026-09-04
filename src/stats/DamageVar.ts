@@ -1,7 +1,7 @@
 /**
  * ★F9（2026-08-31 蓝队三批）Main.DamageVar 单源模块。
  *
- * 原文锚：Terarria1457/Terraria/Main.cs:67097-67124
+ * 原文锚：Terarria1457/Terraria/Main.cs:67097-67123
  *   public static int DamageVar(float dmg, float luck = 0f)
  *     float num = dmg * (1f + rand.Next(-15, 16) * 0.01f);
  *     if (luck > 0) { if (rand.NextFloat() < luck) { …取较大 } }
@@ -21,7 +21,7 @@
  *    曾写连续 uniform×30−15 + half-up round = 双偏差）；
  *  · PvP 近战线载伤（ItemCheck_MeleeHitPVP :44438 同式）与联机弹幕傀儡结算；
  *  · 弹侧实体结算（村正刀气 977/血舌球 524/火山爆弹 978 等——原版 Damage_PVE
- *    :12959 `int dmg = Main.DamageVar(num15, player.luck)`）。
+ *    :12970 `int dmg = Main.DamageVar(num15, player.luck)`）。
  */
 
 /** C# (int)Math.Round 的 MidpointRounding.ToEven 等价（输入域为正伤害值）。 */
@@ -35,7 +35,8 @@ export function toEvenRound(x: number): number {
 
 /** 单次 ±15% 离散档乘积——★SW-T1 2026-09-04：float32 逐级精确化（推翻旧"double
  *  直算、不做 fround"近似）。原版全式在 float32 域：`dmg * (1f + (float)tier * 0.01f)`
- *  （Main.cs:67102），每级一次向偶舍入；double 直算在 ~0.31% 的 (base,tier) 组合
+ *  （Main.cs:67103,SW-Z1 2026-09-04 引注校准:DamageVar 函数体首行=67103,67102 是
+ *  NoDamageVar 支收括号行），每级一次向偶舍入；double 直算在 ~0.31% 的 (base,tier) 组合
  *  （如 50×+9 档：原版 54、double 55）越中点差 ±1，违反"反编译唯一标杆"。
  *  精确性论证：tier(int,≤5bit)×f32(0.01) 双精度内精确 → fround=正确舍入的 float32
  *  乘积；1+x（x∈[0.85,1.15] float32）双精度内精确 → fround=C# float 加法；

@@ -118,7 +118,15 @@ function isSaveSlope(t: number): boolean {
     || sh === 19 || sh === 239 || sh === 380 || sh === 427
     || (sh >= 435 && sh <= 439)
     || sh === 192 || sh === 481 || sh === 482 || sh === 483
-    || sh === 379;
+    || sh === 379
+    // ★IIIII107（2026-09-04）：原版 SaveSlopes[0]=true——Main.tileSolid[0]=true
+    //   （1458 Main.cs:7995，与 1456 Main.cs:7759 同款）在 TileID.Sets.PostSetupContent
+    //   （1458 TileID.cs:425-432 SaveSlopes=tileSolid∪NonSolidSaveSlopes）之前生效。
+    //   残型格（岩浆烧除裸写 type=0 而 active/half/slope 全保留，III213 定谳域）的
+    //   JS 镜像=活性 internal-0（sheet 无映射），在 REMIX 深带 3 格带 half/slope
+    //   （(3482,851)/(3422,857) H、(3419,858) S）被误 ClearSlope（双清）⇒ mile8
+    //   #100..#105 Hf=2/Sl=1 残量。活性 internal-0 须按 vanilla-0（泥土域）保坡。
+    || t === 0;
   return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 

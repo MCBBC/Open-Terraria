@@ -16,7 +16,9 @@ export function golemSpawnFromAltar(
   for (let j = Math.max(0, pcx - 20); j < Math.min(st.w, pcx + 20); j++) {
     for (let k = Math.max(0, pcy - 20); k < Math.min(st.h, pcy + 20); k++) {
       const i = st.idx(j, k);
-      if (st.type[i] !== altarTileId) continue;
+      // ★X2-F6(2026-09-04):active 门（NPC.cs:81317-21 `tile.active() && type==237
+      //  && frameX==18 && frameY==0`）——幽灵祭坛残型不得作石巨人落位锚
+      if (!st.hasTile(j, k) || st.type[i] !== altarTileId) continue;
       if (st.frameX[i] === 18 && st.frameY[i] === 0) { ax = j; ay = k; }   // :81300-81304
     }
   }

@@ -52,6 +52,13 @@ export function openDoor(st: TileStore, x: number, y: number, direction: number)
     if (--ay < 0) return false;
   }
   if (st.get(x, ay) !== T.DOOR_CLOSED) return false;
+  // ★X2-F7(2026-09-04):ValidateTileSquareIsActiveAndOfType(num6,num,1,3,10)
+  //  （OpenDoor :38055 调用→:38252-38268）active+type 双验列走查——幽灵门列
+  //  （flags=0 残型）拒开（原版头格 :38037 裸读 type 是本相,列验证才查 active）
+  for (let dy = 0; dy < 3; dy++) {
+    if (!st.inBounds(x, ay + dy) || !st.hasTile(x, ay + dy)
+      || st.get(x, ay + dy) !== T.DOOR_CLOSED) return false;
+  }
   const ai = st.idx(x, ay);
   const style = doorStyleOf(st.frameX[ai], st.frameY[ai]);
   const col = Math.floor(style / 36), row = style % 36;
@@ -170,7 +177,11 @@ export function shiftTallGate(
   const anchorY = y - tallGateRowOf(fy);   // :52129-52134 heights 递减行归一
   for (let dy = 0; dy < 5; dy++) {
     const ii = st.idx(x, anchorY + dy);
-    if (!st.inBounds(x, anchorY + dy) || st.type[ii] !== from) return null; // ValidateTileSquare
+    // ★X2-F7(2026-09-04):ValidateTileSquareIsActiveAndOfType（:38252-38268,
+    //  ShiftTallGate :52196 调用）= `!tile.active() || tile.type != type` 双验——
+    //  补 active 半边:幽灵门列（flags=0 残型）拒切换（不复活残型）
+    if (!st.inBounds(x, anchorY + dy) || !st.hasTile(x, anchorY + dy)
+      || st.type[ii] !== from) return null;
   }
   for (let dy = 0; dy < 5; dy++) st.setTile(x, anchorY + dy, to, st.frameX[i0], st.frameY[st.idx(x, anchorY + dy)]);
   sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(ShiftTallGate :52213,★引注修正:旧注 :51786 失真);旧'door'非法名经 as 断言静默失效

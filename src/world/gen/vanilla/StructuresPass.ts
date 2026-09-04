@@ -1642,14 +1642,22 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number, gs?: G
   if (!st.flags[anchor] || st.half[anchor] !== 0
     || (anchorType !== CACTUS && !SAND_CONV.has(anchorType))
     || st.liquid[st.idx(i, j - 1)] > 0) return;
-  // ---- 50×25 水盒（cs:56599-56609；remix 分支不触发）----
+  // ---- 50×25 水盒（1458 cs:57073-57085；1457=57066-57078；1456=56591-56603）----
+  //   ★IIIII107 定罪修复②：超限早退带 remix 深带豁免——三版逐字同：
+  //   `if ((!Main.remixWorld || !((double)j > Main.worldSurface)) && num3/255 >
+  //   cactusWaterLimit) return;` —— remix 且锚在假地表(worldSurface=337)之下时
+  //   水盒【不设限】。旧注「remix 分支不触发」系误读 ⇒ REMIX 深带含水沙锚
+  //   （洞穴水袋 50×25 邻域）被 JS 误杀：vanilla 照长仙人掌+坡清（(1386,682)
+  //   cactus+(1386,683) sl1→0 等 V 独占写面），且 growCactus 在 PlantCactus 150
+  //   试环内被高频调用、掷流面污染远超单格。
   let water = 0;
   for (let k = i - CACTUS_WATER_WIDTH; k < i + CACTUS_WATER_WIDTH; k++) {
     for (let l = j - CACTUS_WATER_HEIGHT; l < j + CACTUS_WATER_HEIGHT; l++) {
       if (st.inBounds(k, l)) water += st.liquid[st.idx(k, l)];
     }
   }
-  if (Math.trunc(water / 255) > CACTUS_WATER_LIMIT) return;
+  const remixDeep = gs !== undefined && !!gs.seedFlags.remix && j > gs.worldSurface;
+  if (!remixDeep && Math.trunc(water / 255) > CACTUS_WATER_LIMIT) return;
   const activeAt = (x: number, y: number): boolean =>
     st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1;
   const isCactus = (x: number, y: number): boolean =>

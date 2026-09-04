@@ -196,6 +196,8 @@ export function runFinishRemixWorld(
 
   // ── ② 全图大环（cs:26691-26871）——每格恒掷两颗（Next(3)+Next(19,22)）──
   for (let k = 25; k < w - 25; k++) {
+    // ★IIIII101e 段标（列级掷位仪,与 rig TSEG|rxC 同位同口径）
+    if (k % 50 === 27) { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('rxC', String(k)); } catch { /* probe */ } }
     for (let l = 25; l < h - 25; l++) {
       const conversionType = crimson ? 4 : 1;    // cs:26692-26696
       // cs:26698：云行下带门（|| 逐支——errorWorld/surfaceIsInSpace 组合域旗）

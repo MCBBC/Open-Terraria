@@ -189,6 +189,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
   // ★IIIII221：引擎 CheckSign 状态复位 + 签字牌存档钩（graveyard #76 幽灵掷主刀；
   //   vanilla Sign.KillSign 的 JS 存档面=world.signs 同步移除）
   engineResetSignState(world.signs);
+  engineRegisterWallHouse(WALL_HOUSE);   // ★IIIII101d：SpawnOnPlayer 落点搜索 wallHouse 支（表体注册,避引擎反 import 环）
   // 旗标解析：cfg.seedFlags 直注优先（S0-1 解耦），次选 dotted 配方位，缺省回退 seedText 派生。
   // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转等）
   world.seedFlags = cfg.seedFlags ?? copied?.flags ?? parseSeedChain(effSeedText).flags;
@@ -532,18 +533,15 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
   //   ——首存复位 dayTime=false/bloodMoon=true/time=1.0/moonPhase=0；tile 面（遍地墓园）
   //   在 potPass 槽 graveyardSeedGate 已有，此处只补时钟初始态）
   applyGraveyardInitialClockState(world);
-  // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
-  // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
-  vampireSeedFinishPass(ctx);
-  // ★IIIII41-T3①：randomSpawn「how did I get here」终段（cs:655-658 FinalizeSecretSeeds
-  //   randomSpawn 臂 → DoRandomSpawn :1896）。★挂位注：原版 SpawnPoint pass(cs:19605)
-  //   先于 FinalizeSecretSeeds(:22666)，重掷不被覆盖；本仓 SpawnPoint 写回被上提到
-  //   finalize()＝管线末，若臂按原文挂 finalCleanupPass 的 beforeShimmer 钩内，出生点
-  //   重掷会被 finalize 覆盖——故与 vampire 臂同域挂尾。调用序在 vampire 之后 =
-  //   vanilla 的 vampire(:22659) 先于 FinalizeSecretSeeds(:22666)；两者共享
-  //   worldSpawnHasBeenRandomized 互斥门（randomSpawn+ 组合由先到者胜）。旗关零掷
-  //   ⇒ 普通种子对金标链零扰动。
-  doRandomSpawnFinishPass(ctx);
+  // ★IIIII110b：vampire/randomSpawn 两臂自本尾段【归位】——vanilla vampire 臂在
+  //   FinalCleanup pass 体 cs:22659-22662、randomSpawn 臂在 FinalizeSecretSeeds
+  //   内 cs:655-658（两臂同核共宿 randomizeWorldSpawnCore/doAdditional…Core）。
+  //   IIII41 期挂尾的前提（SpawnPoint 写回内嵌 finalize 尾、重掷会被覆盖）自
+  //   SpawnPoint 归位独立管线槽「出生点」后失效；尾挂时点晚于 #105 dump，
+  //   火把环整个落在快照后（mch 链唯一红）→ 现按原版位执行：
+  //   vampire 臂=finalCleanupPass beforeShimmer 钩头（cs:22659，Finish* 族之后、
+  //   FinalizeSecretSeeds 之前）；randomSpawn 臂=finalizeSecretSeedDoEnds 体内
+  //   cs:655-658 原位。旗关零掷 ⇒ 普通种子对金标链零扰动。
   // ★TTTTTTT（2026-08-26）：FinalSeedCleanup 移位——1457 WorldGen.cs:22666
   //   `SecretSeed.FinalizeSecretSeeds()` 实际在 FinalCleanup pass 体【内】
   //   （ShimmerCleanUp cs:22639 之前），曾挂此处（finalize 之后）时点晚于 dump
@@ -574,7 +572,7 @@ import { flipGenSolid, resetGenSolid, snapshotGenSolid, vanGenSolidType, vanSoli
 // ★IIII191：SpreadingGrass remix 臂⑥ QuickWater(-2) 一次性实例（runExtraLiquidAddBubbleBlocks 同款接线）
 import { LiquidSim } from '../liquid/LiquidSim';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
-import { engineResetSignState } from './vanilla/FinalCleanupPass';   // ★IIIII221 CheckSign 引擎状态/签字牌钩
+import { engineRegisterWallHouse, engineResetSignState } from './vanilla/FinalCleanupPass';   // ★IIIII221 CheckSign 引擎状态/签字牌钩; ★IIIII101d wallHouse 表注册
 import { parseSeedChain, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
@@ -603,7 +601,7 @@ import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass, genSquareTileFrame } from './vanilla/FinalCleanupPass';
-import { runFinishDrunkGenPass } from './vanilla/FinishDrunkGenPass';   // ★IIIII21 FinishDrunkGen 1:1（cs:26493-26611）
+// ★IIIII101e：FinishDrunkGen import 随调用位迁至 vanilla/FinalCleanupPass.ts（cs:22630 体位接线）
 // IIIII16 秘种子生成终结面（Do* 族九旗标；接线点见下方各 ★IIIII16 注）
 import {
   doDigExtraHoles, doSurfaceIsMushroomsEarly, pumpkinSeasonArm,
@@ -633,6 +631,7 @@ import {
   runGrassPlantsPass, runGlowingMushroomPlantsPass,
   runSunflowersPart2Pass, runJunglePlantsPart2Pass,
   placeSunflower,   // ★IIII191：SpreadingGrass remix 臂④ PlaceTile(27) 复用
+  WALL_HOUSE,       // ★IIIII101d：Main.wallHouse 全表（SpawnOnPlayer 搜索支注册用）
 } from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runBeeLarvaPass } from './vanilla/HiveSpiderPass';
@@ -1772,6 +1771,12 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
     spawnX: world.spawnX,
     spawnY: world.spawnY,
     beforeShimmer: () => {
+          // ★IIIII110b：vampire 臂归位（cs:22659-22662——Finish* 族之后、
+          //   FinalizeSecretSeeds(:22666) 之前；!worldSpawnHasBeenRandomized 门内
+          //   { RandomizeWorldSpawn(); DoAdditionalChangesAroundSpawnIfNeeded(); }，
+          //   PutMonsterVanityInChests 登记债维持原判）。原尾挂位（generateWorld 尾）
+          //   时点晚于 #105 dump 且后于 randomSpawn 臂=组合序错位，一并清偿。
+          vampireSeedFinishPass(store, rng, world);
           // ★IIIII16（2026-08-28）：FinalizeSecretSeeds 终结面九旗标子集，按 cs:589-663
           //   原 if 链序——surfaceIsInSpace(:599) → surfaceIsMushrooms(:607-614 含 !noSurface
           //   时 **连调两次** 的怪癖照录) → noInfection(:619) → hallowOnTheSurface(:623)
@@ -1799,13 +1804,11 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
           }
         },
   });
-  // ★IIIII21（2026-08-28）：FinishDrunkGen（WorldGen.cs:26493-26611，调用点 :22630
-  //   FinalCleanup pass 体内 noTraps/tenth 之后、notTheBees/getGood/remix/LiquidCheck
-  //   之前）——paint/wallColor 三链 + 宝箱红药水/月总腿尾修。旗关零掷骰=普通种子
-  //   全流零扰动。
-  if (ctxGs[0]!.seedFlags?.drunkWorld) {
-    runFinishDrunkGenPass(store, rng, ctxGs[0]!, world.chests);
-  }
+  // ★IIIII21（2026-08-28）→ ★IIIII101e 迁移：FinishDrunkGen 调用位从本处
+  //   （runFinalCleanupPass 返回之后）迁回 runFinalCleanupPass 体原版位
+  //   （1458 cs:22630：Tenth 之后、NTB/GG/Remix 之前）——单 Finish* 车道相对序
+  //   不变仍绿；zenith 七依赖下原位使 Drunk 掷流落到 NTB/GG/Remix 之后 ⇒ 三支
+  //   掷流全错位 + GG paint==14 扫描读不到 Drunk 涂装（GFB #105 定罪主根①）。
   // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck
   // (createMergeTilesDuringGen:true)（cs:22639-50，ShimmerCleanUp 之后）——曾挂在
   // #49/#97 沉降尾（settle.ts，时点早 8 pass）。终清理槽直调，掷骰走 pass 链流。
@@ -2712,30 +2715,18 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
 /** 吸血鬼种子终段：出生点重掷到地牢对侧地下带 + 出生周边火把/清障。
  *  ★PutMonsterVanityInChests（cs:25010-25064，1/7 箱注入怪物时装）登记 GAP：物品族未
  *  全量入库。落点检查为 Utils.CheckForGoodTeleportationSpot（cs:55234-55370）精简核。 */
-function vampireSeedFinishPass(ctx: GenCtx): void {
-  const { store: st, world, rng } = ctx;
+function vampireSeedFinishPass(st: World['store'], rng: RNG, world: World): void {
   if (!world.seedFlags?.vampireSeed) return;
   const gs = ctxGs[0];
   if (!gs) return;
-  // cs:22659-22662 的 !worldSpawnHasBeenRandomized 门：randomSpawn 臂先行置位时
-  // （'howdidigethere|what...' 组合），此处让位（vanilla 同构）。
+  // cs:22659-22662 的 !worldSpawnHasBeenRandomized 门：noSurface(:1048)/remix 岛链尾
+  // （:23015）先行置位时让位（vanilla 同构）。
   if (!gs.worldSpawnHasBeenRandomized) {
     randomizeWorldSpawnCore(st, rng, gs, world);
     doAdditionalChangesAroundSpawnCore(st, rng, gs, world);
   }
 }
 
-/** ★IIIII41-T3①：randomSpawn 终段（DoRandomSpawn :1896-1903）——见调用位挂位注。
- *  cs:1898 `if (!GenVars.worldSpawnHasBeenRandomized)`：noSurface(:1048)/vampire
- *  (:22659)/remix 岛链尾(:23015) 先到者已置位时让位（本仓 noSurface/remix 臂未实装，
- *  现可达先到者=vampire 终段）。 */
-function doRandomSpawnFinishPass(ctx: GenCtx): void {
-  const { store: st, world, rng } = ctx;
-  if (!world.seedFlags?.randomSpawn) return;
-  const gs = ctxGs[0];
-  if (!gs) return;
-  if (!gs.worldSpawnHasBeenRandomized) {
-    randomizeWorldSpawnCore(st, rng, gs, world);                       // RandomizeWorldSpawn :24112
-    doAdditionalChangesAroundSpawnCore(st, rng, gs, world);            // :25211 torches + noTraps 清障
-  }
-}
+/** ★IIIII41-T3① 遗构（doRandomSpawnFinishPass）已退役（★IIIII110b）：randomSpawn
+ *  臂归位 finalizeSecretSeedDoEnds 体内 cs:655-658 原位（vanilla DoRandomSpawn
+ *  :1896-1903）——挂位史与归位理由见 generateWorld 尾注与彼处臂注。 */

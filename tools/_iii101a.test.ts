@@ -115,7 +115,7 @@ function desVal(v: unknown): unknown {
   };
   try {
     await generateWorld({
-      width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
+      width: W, height: H_, seedText: SEED, evil: EVIL as -1 | 0 | 1,
       seedFlags: Object.keys(FLAGS).length ? FLAGS : undefined,
       onWorldPartial: (w2) => { liveStore = w2.store as never as TileStore; },
     });

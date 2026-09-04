@@ -35,22 +35,29 @@ const B = loadBin('b'), A = loadBin('a');
   const sb = readFileSync(`${OUT}/sheet.bin`);
   var SHEET = new Int32Array(sb.buffer.slice(sb.byteOffset, sb.byteOffset + sb.byteLength));
 }
-const jsSheet = (t) => (SHEET[t] >= 0 ? SHEET[t] : 9999);
+const jsSheet = (t) => (t === 0 ? 0 : (SHEET[t] >= 0 ? SHEET[t] : 9999));
 const meta = JSON.parse(readFileSync(`${OUT}/meta-base.json`, 'utf8'));
 console.log(`meta-base: rcBase=${meta.rcBase} rng.rolls=${meta.rng.rolls} worldSurface=${meta.gsPick.worldSurface} numOasis=${JSON.stringify(meta.gsPick.numOasis)}`);
 
 // ---- 1) 基座自检 b ≡ dump098 ----
 {
   let bad = 0, fI = -1;
+  const badList = [];
   for (let i = 0; i < N; i++) {
-    if (d98.a[i] !== (B.flags[i] & 1)) { bad++; if (fI < 0) fI = i; continue; }
+    const why = [];
+    if (d98.a[i] !== (B.flags[i] & 1)) why.push('act');
     const vt = d98.a[i] ? d98.t[i] : 0;
     const jt = (B.flags[i] & 1) ? jsSheet(B.type[i]) : 0;
-    if (vt !== jt) { bad++; if (fI < 0) fI = i; }
-    if (d98.w[i] !== B.wall[i] || d98.l[i] !== B.liquid[i] || d98.hf[i] !== B.half[i]
-      || d98.sl[i] !== B.slope[i] || (d98.ia[i] ? 1 : 0) !== ((B.wire[i] >>> 5) & 1)) { bad++; if (fI < 0) fI = i; }
+    if (vt !== jt) why.push('typ');
+    if (d98.w[i] !== B.wall[i]) why.push('wal');
+    if (d98.l[i] !== B.liquid[i]) why.push('liq');
+    if (d98.hf[i] !== B.half[i]) why.push('hf');
+    if (d98.sl[i] !== B.slope[i]) why.push('sl');
+    if ((d98.ia[i] ? 1 : 0) !== ((B.wire[i] >>> 5) & 1)) why.push('ia');
+    if (why.length) { bad++; if (fI < 0) fI = i; if (badList.length < 12) badList.push(`(${i % W},${(i / W) | 0})[${why.join(',')}] x86 t${vt} liq${d98.l[i]} sl${d98.sl[i]} hf${d98.hf[i]} wal${d98.w[i]} | js t${(B.flags[i] & 1) ? jsSheet(B.type[i]) : 0} liq${B.liquid[i]} sl${B.slope[i]} hf${B.half[i]} wal${B.wall[i]}`); }
   }
   console.log(`基座自检 b vs dump098: ${bad === 0 ? '逐位全等 ✓' : `差 ${bad} 格 首@(${fI % W},${(fI / W) | 0}) ✗`}`);
+  for (const s of badList) console.log('   ' + s);
 }
 
 // ---- 2) 复现 a vs dump099（mile8 口径） ----

@@ -202,6 +202,10 @@ export function priorityPlan(): { urls: string[]; phases: Array<{ phase: AssetPh
 
 export interface AssetCacheState {
   enabled: boolean;
+  /** ★存储不可用(2026-09-04 用户立项"降级显式化"):Cache Storage open/访问
+   *  失败(隐私模式禁用/损坏/策略)——资源走网络直载(每次启动需下载 364MB),
+   *  UI 须显式提示而非静默劣化。 */
+  storageUnavailable?: boolean;
   version: string;
   total: number;
   done: number;
@@ -225,6 +229,7 @@ export interface AssetCacheState {
 const state: AssetCacheState = {
   enabled: false, version: '', total: 0, done: 0, failed: 0, phase: 'idle', warming: false,
   bytesDone: 0, bytesTotal: 0, calibrated: false, coveragePct: undefined,
+  storageUnavailable: false,
 };
 
 let plan = priorityPlan();
@@ -493,6 +498,16 @@ async function doInitAssetCache(): Promise<void> {
   }
   if (typeof caches === 'undefined') {
     notePipelineDown('无 CacheStorage API(隐私模式/站点存储被禁)', false);
+    return;
+  }
+  // ★open 探测(2026-09-04 用户立项"存储不可用显式化"):API 存在但 open 失败
+  //  (隐私模式禁用/存储损坏/配额策略)——此前静默走网络直载,用户只看到
+  //  无反馈的等待(364MB 每次启动)。显式落账+启动警示。
+  try {
+    await caches.open('sw-assets-probe');
+    await caches.delete('sw-assets-probe');   // 幂等探测名,清掉不累积
+  } catch (e) {
+    notePipelineDown(`CacheStorage 不可用(${String(e).slice(0, 60)})——资源走网络直载,每次启动需重新下载`, false);
     return;
   }
   try {
@@ -849,7 +864,11 @@ async function startZipWarm(): Promise<void> {
       return { file: p.file, zipBytes: p.zipBytes, missing };
     });
     state.done = Math.min(base, state.total);
-    swTrace(`warm启动 have=${have.size} jobs=${jobs.filter((j) => j.missing.length).length}片 缺${jobs.reduce((a, j) => a + j.missing.length, 0)}条 ver=${state.version} cache="${'sw-assets-v' + state.version}"`);
+    {
+      const missAll = jobs.flatMap((j) => j.missing);
+      swTrace(`warm启动 have=${have.size} jobs=${jobs.filter((j) => j.missing.length).length}片 缺${missAll.length}条 ver=${state.version} cache="${'sw-assets-v' + state.version}"` +
+        (missAll.length ? ` 缺失样本:${missAll.slice(0, 20).join(', ')}` : ' (零缺失)'));
+    }
     state.bytesDone = 0;
     state.bytesTotal = jobs.reduce((a, j) => a + (j.missing.length ? j.zipBytes : 0), 0);
     if (state.done >= state.total) {   // 已全就位(被清后自愈完成/重复调用)

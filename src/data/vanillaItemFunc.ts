@@ -91,8 +91,11 @@ FUNC['2422'] = { ...FUNC['2422'], shoot: 382 };
 // '5594'/'5595'）；爆炸伤 200/击退 9 由弹侧 PrepareBombToBlow（P.cs:47652-47657）
 // 承载，物品面 damage/knockBack 缺省 0=原版同态。消费面=itemTooltip 分类行/
 // MobileControls 持械门（Game 投掷分流走 combatWeapon 不经本表,与炸弹 166 同构）。
-FUNC['5594'] = { shoot: 1086, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
-FUNC['5595'] = { shoot: 1087, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
+// SW-X1 2026-09-04（L-2②）：整对象替换改 spread 合并——本三行是手填画像,若未来
+// vanilla-itemfunc.json 重产（解析直出面比手填多 autoReuse/noUseGraphic 等键,
+// Blue 实证）,整对象替换会静默剥掉解析键;spread 合并后手填键只做覆写。
+FUNC['5594'] = { ...FUNC['5594'], shoot: 1086, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
+FUNC['5595'] = { ...FUNC['5595'], shoot: 1087, useStyle: 1, useTime: 40, consumable: 1, noMelee: 1 };
 
 // SW-K1 2026-09-03：割草机 4049（Item.cs:35615-35618 → DefaultToLawnMower
 // :48532-48541 形参赋值提取器不解析 → json 缺键）。useStyle 11 = MowTheLawn
@@ -100,7 +103,9 @@ FUNC['5595'] = { shoot: 1087, useStyle: 1, useTime: 40, consumable: 1, noMelee: 
 // GolfPlay 是两档,仓内 Renderer.useStyleBodyRow case 11 行 4/3/2 即本档,仅注释
 // 名互换）;holdStyle 1 = 静持也渲染（Renderer 静持门读 itemFunc.holdStyle）;
 // useTime/autoReuse 战斗面权威在 vanillaItemCombat.ts EXTRACT_PATCH '4049'。
-FUNC['4049'] = { useStyle: 11, holdStyle: 1 };
+// SW-X1 2026-09-04（L-2②）：同上 spread 合并防重产剥键（解析直出比手填多
+// autoReuse/noUseGraphic,Blue 实证）。
+FUNC['4049'] = { ...FUNC['4049'], useStyle: 11, holdStyle: 1 };
 
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {

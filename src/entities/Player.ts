@@ -152,6 +152,12 @@ export const ICE_SLIP_IDS = new Set<number>([
 export const FROZEN_SLIME_ID = TILE_BY_KEY['v_197_frozen_slime_block'] ?? 0;   // slippy2
 export const ASPHALT_ID = TILE_BY_KEY['v_198_asphalt_block'] ?? 0;             // powerrun
 
+/** TileID.Sets.Clouds（TileID.cs:197 `Factory.CreateBoolSet(189,196,460,717,718,719)`：
+ *  189 云/196 雨云/460 雪云/717 岩浆云/718 星云/719 彩虹云）——落地云床缓冲扫描
+ *  （Player.cs:25538,本仓 2026-09-04 终审 B⑤ 补）消费面；本仓 sheet 域直比
+ *  （消费者先经 TILE_DEFS[].vanilla?.sheet 归一,同 ICE_SLIP_IDS 教训） */
+const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+
 // ---- 绳锚几何系统常量（绳锚批 2026-08-19：pulley 悬挂 + 线起点链）----
 /** ItemID.Sets.Yoyo（ItemID.cs:1166）——悠悠球物品 vid 集
  *  （ApplyItemPositionOffsetFromMount flag9 :50660） */
@@ -5560,7 +5566,35 @@ export class Player extends Entity {
       const gd = this.gravDir === -1 ? -1 : 1;         // 倒挂世界 num11*gravDir 归正
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
-      const fallSigned = (landTileY - startTileY) * gd; // ≙ 原 num11*gravDir（顺势落为正）
+      let fallSigned = (landTileY - startTileY) * gd; // ≙ 原 num11*gravDir（顺势落为正）
+      // ★终审 B⑤（2026-09-04）落地云床缓冲扫描（Player.cs:25531-25542,本仓整缺补）：
+      //  num11>0（倒挂 num11<0,统一 ≙ fallSigned>0）时扫脚线一行——num14 =
+      //  gd==1 ? (int)((position.Y+height+1)/16)（脚底像素下一格,原式 +1 在底缘
+      //  恰在格界时外推一行,照抄）: (int)((position.Y-1)/16)（头顶上一格）;
+      //  num12..num13 = (int)(position.X/16)..(int)((position.X+width)/16) 含端。
+      //  格 tile.active()（=hasTile,裸位含已致动,原版照致动格生效）且
+      //  [TileID.Sets.Clouds[type]（TileID.cs:197={189,196,460,717,718,719}）
+      //  || type==666 粪块 || (type==19 平台 && frameY/18==49 云平台样)] →
+      //  num11=0 break——云床/云格落地免摔伤。消费位=下方石化支(:25544-25556,
+      //  num11=0 → num16=(0-2)×20<0 不伤)与常规支(:25557-25567,门槛不入)同源。
+      if (fallSigned > 0) {
+        const stC = world.store;
+        const yC = gd === 1
+          ? Math.floor((this.y + this.h + 1) / TILE)
+          : Math.floor((this.y - 1) / TILE);
+        const x0C = Math.floor(this.x / TILE);
+        const x1C = Math.floor((this.x + this.w) / TILE);
+        for (let xc = x0C; xc <= x1C; xc++) {
+          if (!stC.hasTile(xc, yC)) continue;
+          const iC = stC.idx(xc, yC);
+          const sheetC = TILE_DEFS[stC.type[iC]]?.vanilla?.sheet ?? -1;
+          const cloudPlatform = sheetC === 19 && Math.floor(stC.frameY[iC] / 18) === 49;
+          if (CLOUD_SHEETS.has(sheetC) || sheetC === 666 || cloudPlatform) {
+            fallSigned = 0;
+            break;
+          }
+        }
+      }
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
       else if (this.buffs.has(BuffType.Stoned)) {
         // 石化摔伤（:25544-25556）：(num11*gravDir−2)×20——无 25 格安全阈值、不吃

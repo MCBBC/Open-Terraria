@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
-import { ITEM_DEFS } from '../src/data/items';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { TILE_BY_KEY, TILE_DEFS, T, VANILLA_TILE_ID } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 import { Enemy } from '../src/entities/Enemy';
@@ -19,6 +19,10 @@ import { PetFollower } from '../src/entities/PetFollower';
 import { TrapShot, Dart } from '../src/entities/Dart';
 import { wetCollisionProbe } from '../src/entities/MinionProj';
 import { TileStore } from '../src/world/TileStore';
+import { Wiring } from '../src/world/Wiring';
+import { openDoor, placeDoorClosed, shiftTallGate, TALL_GATE_ROW_FY } from '../src/world/Door';
+import { isLightningAttractor } from '../src/world/StormLightningSpawner';
+import { xmasDecorStyle, xmasSetDecor } from '../src/world/XmasTree';
 import type { GameHooks } from '../src/entities/types';
 
 const WOOD_V = 9;    // vi_9_Wood（木材）
@@ -41,7 +45,8 @@ function defOf(vid: number) {
 
 interface Shell {
   world: World;
-  player: { inv: { slots: unknown[]; heldItem(): unknown } };
+  player: { inv: { slots: unknown[]; selected: number; removeAt(): void; heldItem(): unknown } }
+    & Record<string, unknown>;   // 其余运动学/状态字段由各用例自由携带
   tryPlace(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;
 }
 
@@ -550,5 +555,283 @@ describe('F3 沙球族幽灵门（碎晶 :59031-59033 / 落沙占位 :79246）',
     rollBall(d, hooks, 30);
     expect(d.dead).toBe(true);              // 穿非实心草落地
     expect(st.get(60, BFLOOR - 1)).toBe(TILE_BY_KEY['grass']);  // 原样（未放沙）
+  });
+});
+
+// ============================================================
+// 特效发射器幽灵格门（用户实报"幽灵矿仍闪"——TileDrawing :7529-7646 闪光/尘表
+// 循环在原版 active 绘制路径内）
+// ============================================================
+describe('特效发射器幽灵格门', () => {
+  function emitterShell(w: World, heldVid = 0): unknown {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    g.world = w;
+    g.tickCount = 0;                                    // 0%3===0 → 发射拍
+    g.camera = { x: 20 * TILE, y: 20 * TILE, viewW: 640, viewH: 480, zoom: 1 };
+    g.lighting = { lightAt: () => [255, 255, 255] };    // 满光（lightGate 20 过）
+    g.particles = [] as unknown[];
+    g.recLog = () => {};
+    g.player = { inv: { selected: 0, slots: [], heldItem: () => null } };
+    return g;
+  }
+
+  it('幽灵铁矿（flags=0）不闪：零粒子；活性铁矿照常闪光', () => {
+    const w = new World(40, 40, 7, 'ghost-sparkle');
+    const st = w.store;
+    const rand = Math.random;
+    Math.random = () => 0;                              // 钳 0 → 全部概率门通过
+    try {
+      // 幽灵矿
+      st.type[st.idx(20, 20)] = TILE_BY_KEY['ore_iron'];
+      st.flags[st.idx(20, 20)] = 0;
+      const g1 = emitterShell(w) as { particles: unknown[] };
+      (g1 as unknown as { emitTileParticles(): void }).emitTileParticles();
+      const ghostCount = (g1.particles as unknown[]).length;
+      expect(ghostCount).toBe(0);                       // 不闪（核心回归）
+      // 活性矿
+      st.setTileSilent(21, 20, TILE_BY_KEY['ore_iron']);
+      const g2 = emitterShell(w) as { particles: unknown[] };
+      (g2 as unknown as { emitTileParticles(): void }).emitTileParticles();
+      const liveCount = (g2.particles as unknown[]).length;
+      expect(liveCount).toBeGreaterThan(0);             // 照常闪光
+    } finally {
+      Math.random = rand;
+    }
+  });
+});
+
+// ============================================================
+// ★终审 B①（2026-09-04）致动域放置门：原版 CanPlace TileObject.cs:357（占用）与
+//  Place TileObject.cs:82（清格）占用面均为【裸 active()】（非 nactive()）——
+//  已致动格=占用,原版拒绝放置进致动格。曾用 isActive=nactive() → 已致动格被当
+//  空位：非豁免件直铺且 setTile 不清 WIRE_ACTUATED=新块继承隐形态（原版不存在
+//  此态）；豁免件清格侧 KillTile 尾 WorldGen.cs:64431 `tile.inActive(false)` 复位
+//  → TileStore.setTile(0) 已同步清位。本组走真 tryPlace 锁通用清格相与火把占用门。
+// ============================================================
+describe('★终审 B① 致动域放置门（CanPlace/Place 裸 active()）', () => {
+  const WOOD_DEF = defOf(WOOD_V);
+  // 火把 def：运行期由 items.ts tile 回填（createTile=4 → TILE_KEY_BY_SHEET 'torch'）
+  // 得 tile 字段——测试直取注册态不可靠,按运行终态形构造（key/tile 两参即门消费面）
+  const TORCH_DEF = {
+    key: VANILLA_ITEM_KEY_BY_ID[8],
+    tile: 'torch',
+  } as unknown as (typeof ITEM_DEFS)[number];
+
+  it('拒绝面：已致动木材格上放木材 → 原版拒（格原样仍致动、不消耗）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(8, 20, WOOD_T);
+    st.setActuated(8, 20, true);                     // 已致动（active=1,inActive=1）
+    const drops: Array<[string, number]> = [];
+    const g = shell(w, drops, WOOD_V, false);
+    let consumed = 0;
+    (g.player.inv as unknown as { removeAt: () => void }).removeAt = () => { consumed++; };
+    g.tryPlace(8, 20, WOOD_DEF);
+    expect(consumed).toBe(0);                        // 拒绝=不消耗（旧 isActive 门会直铺并消耗）
+    expect(st.type[st.idx(8, 20)]).toBe(WOOD_T);     // 格原样
+    expect(st.flags[st.idx(8, 20)]).toBe(1);
+    expect(st.isActuated(8, 20)).toBe(true);         // 未被覆写（不产生继承隐形态的新块）
+  });
+
+  it('豁免面：已致动草丛（tileCut）上放木材 → 清格铺放且新块不复位致动态', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(12, 20, TILE_BY_KEY['tallgrass']);
+    st.setActuated(12, 20, true);
+    const drops: Array<[string, number]> = [];
+    const g = shell(w, drops, WOOD_V, false);
+    let consumed = 0;
+    Object.assign(g.player.inv as unknown as Record<string, unknown>, {
+      removeAt: () => { consumed++; },
+      countOf: () => 0,           // killTileShouldDropSeeds 探针（草族掉落链,非本测面）
+    });
+    g.tryPlace(12, 20, WOOD_DEF);
+    expect(st.type[st.idx(12, 20)]).toBe(WOOD_T);    // 清格后铺放（CanPlace :357 tileCut 支放行）
+    expect(st.isActuated(12, 20)).toBe(false);       // ★KillTile :64431 inActive 复位（setTile(0) 清位）
+    expect(st.flags[st.idx(12, 20)]).toBe(1);        // 新块活性
+    expect(consumed).toBe(1);                        // 放置成功=消耗
+  });
+
+  it('火把占用门（:20959 区）：已致动草丛上放火把 → 清格照常落炬且不复位致动态', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(14, 20, TILE_BY_KEY['tallgrass']);
+    st.setActuated(14, 20, true);
+    const drops: Array<[string, number]> = [];
+    const g = shell(w, drops, 8, false);             // held vid 8=火把
+    let consumed = 0;
+    Object.assign(g.player.inv as unknown as Record<string, unknown>, {
+      removeAt: () => { consumed++; },
+      countOf: () => 0,
+    });
+    g.tryPlace(14, 20, TORCH_DEF);
+    expect(st.type[st.idx(14, 20)]).toBe(TILE_BY_KEY['torch']);   // 火把落格（占用门 hasTile→清格）
+    expect(st.isActuated(14, 20)).toBe(false);       // 新炬不继承隐形态
+    expect(consumed).toBe(1);
+  });
+});
+
+// ============================================================
+// 触达面族幽灵格门（红队终扫 X2 F1/F2/F4/F5/F7/F8,2026-09-04）：接触扫描/
+// 注册表/邻域触达面的判定原版一律先查 active() 位本体——Collision.cs:3276-77
+// （SwitchTiles active 门在 HitSwitch 之前）/ PressurePlateHelper.cs:67/:81
+// （428 注册 `tile.active() && type==428`）/ WorldGen.cs:82624-82627（TileFrame
+// 头门 `!tile.active()` return,Check2x2 唯一调用面不可达幽灵）/:72538-47
+// （IsLightningAttractor nactive 门）/:81317-21（SpawnOnPlayer 祭坛锚 active 门）。
+// 幽灵残型格（flags=0,type≠0）不在触达域;对照组一律证活性面行为不变。
+// ============================================================
+
+/** 触达面族 fixture：80 高世界（switchTilesScan 的 y1=min(h-40,…) 扫描下界需 h>60） */
+function mkTouchWorld(): World {
+  const w = new World(80, 80, 7, 'ghost-touch');
+  const st = w.store;
+  for (let x = 2; x < 78; x++) st.setTileSilent(x, 21, TILE_BY_KEY['stone']);
+  return w;
+}
+
+describe('触达面族幽灵格门（X2 F1/F2/F4/F5/F7/F8）', () => {
+  it('F1:幽灵压板被踩不触发（hitSwitch 不达）;活性压板照常触发（Collision.cs:3276-77 active 门在 HitSwitch 前）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const wr = new Wiring(st);
+    const calls: Array<[number, number]> = [];
+    (wr as unknown as { hitSwitch: (x: number, y: number) => void }).hitSwitch = (x, y) => { calls.push([x, y]); };
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      switchTilesScan(e: { x: number; y: number; w: number; h: number; id: number },
+        objType: 1 | 2 | 3 | 4 | 5, latch: Set<string>, pressed?: Set<string>): void;
+      world: World; wiring: Wiring; breakTile: (x: number, y: number) => void;
+    };
+    g.world = w; g.wiring = wr; g.breakTile = () => {};
+    // 站板姿态：底边=地面行顶（板 135 在 (8,20),脚带 [20*16+12,20*16+16.01) 被底边跨过）
+    const foot = { x: 8 * TILE + 2, y: 21 * TILE - 28, w: 12, h: 28, id: 1 };
+    st.type[st.idx(8, 20)] = TILE_BY_KEY['v_135_pressure_plates'];
+    st.flags[st.idx(8, 20)] = 0;                       // 幽灵压板
+    g.switchTilesScan(foot, 5, new Set(), new Set());
+    expect(calls).toEqual([]);                         // 核心回归:幽灵不触发
+    expect(st.flags[st.idx(8, 20)]).toBe(0);           // 残型原样
+    st.setTileSilent(8, 20, TILE_BY_KEY['v_135_pressure_plates']);   // 对照:活性压板
+    g.switchTilesScan(foot, 5, new Set(), new Set());
+    expect(calls).toEqual([[8, 20]]);                  // 照常触发
+  });
+
+  it('F2:幽灵测重板 428 不进注册表;活性板登记、致幽灵后增量摘除（PressurePlateHelper.cs:67/:81）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      scanTriggerTiles(): void;
+      world: World;
+      triggerTiles428: Set<number>; triggerTiles423: Set<number>; sensorLiquidGrace: Map<number, number>;
+    };
+    g.world = w;
+    g.triggerTiles428 = new Set(); g.triggerTiles423 = new Set(); g.sensorLiquidGrace = new Map();
+    st.type[st.idx(8, 20)] = TILE_BY_KEY['v_428_weightedpressureplate'];
+    st.flags[st.idx(8, 20)] = 0;                       // 幽灵 428
+    st.setTileSilent(9, 20, TILE_BY_KEY['v_428_weightedpressureplate']);   // 活性 428
+    g.scanTriggerTiles();
+    expect(g.triggerTiles428.has(st.idx(8, 20))).toBe(false);   // 核心回归:幽灵不登记
+    expect(g.triggerTiles428.has(st.idx(9, 20))).toBe(true);    // 活性照常登记
+    st.deactivateTile(9, 20);                          // 变幽灵（onTileChanged 触发）
+    expect(g.triggerTiles428.has(st.idx(9, 20))).toBe(false);   // 增量摘除
+  });
+
+  it('F4:幽灵巨石残型不被 ±2 邻域扫转化滚石;活性巨石失撑照常转化（TileFrame 头门 :82624-82627）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const BOULDER = TILE_BY_KEY['v_138_boulder'];
+    const added: unknown[] = [];
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      scanBoulderFamilyNear(cx: number, cy: number): void;
+      world: World; breakTile: (x: number, y: number) => void;
+      entities: { add: (e: unknown, bucket: string) => void };
+      recLog: (k: string, v: Record<string, unknown>) => void;
+    };
+    g.world = w;
+    g.breakTile = (x, y) => st.setTile(x, y, 0);
+    g.entities = { add: (e) => { added.push(e); } };
+    g.recLog = () => {};
+    // 悬空巨石 2×2@(28..29,28..29)（下方 30 行空 → 判据②失撑）
+    const cells: Array<[number, number, number, number]> = [
+      [28, 28, 0, 0], [29, 28, 18, 0], [28, 29, 0, 18], [29, 29, 18, 18],
+    ];
+    for (const [x, y, fx, fy] of cells) {              // 幽灵残型（型+帧在,active 位清）
+      st.type[st.idx(x, y)] = BOULDER; st.flags[st.idx(x, y)] = 0;
+      st.frameX[st.idx(x, y)] = fx; st.frameY[st.idx(x, y)] = fy;
+    }
+    g.scanBoulderFamilyNear(30, 30);                   // 邻域变化点（±2 覆盖巨石格）
+    expect(added).toEqual([]);                         // 核心回归:幽灵不转化滚石
+    expect(st.flags[st.idx(28, 28)]).toBe(0);          // 残型原样
+    expect(st.type[st.idx(29, 29)]).toBe(BOULDER);
+    for (const [x, y, fx, fy] of cells) st.setTileSilent(x, y, BOULDER, fx, fy);   // 对照:活性
+    g.scanBoulderFamilyNear(30, 30);
+    expect(added).toHaveLength(1);                     // 出滚石
+    expect(st.type[st.idx(28, 28)]).toBe(0);           // 2×2 已清
+    expect(st.type[st.idx(29, 29)]).toBe(0);
+  });
+
+  it('F5:幽灵/已致动吸雷块不引雷;活性铁矿照常吸雷（WorldGen.cs:72538-47 nactive 门,双重偏差一次收口）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const hooks = { world: w } as unknown as GameHooks;
+    st.setTileSilent(30, 30, ORE_T);                   // 铁矿 sheet6 ∈ AttractsStormLightning
+    expect(isLightningAttractor(hooks, 30, 30)).toBe(true);    // 活性吸雷
+    st.setActuated(30, 30, true);
+    expect(isLightningAttractor(hooks, 30, 30)).toBe(false);   // 已致动（nactive=false）不吸
+    st.setActuated(30, 30, false);
+    st.flags[st.idx(30, 30)] = 0;                      // → 幽灵残型
+    expect(isLightningAttractor(hooks, 30, 30)).toBe(false);   // 核心回归:幽灵不吸
+  });
+
+  it('F7:幽灵门列拒开、残型不复活（ValidateTileSquareIsActiveAndOfType :38252 active+type 双验）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    placeDoorClosed(st, 10, 18, 0);                    // 1×3 关门列 (10,18..20)
+    st.flags[st.idx(10, 19)] = 0;                      // 中格变幽灵残型
+    expect(openDoor(st, 10, 20, 1)).toBe(false);       // 核心回归:拒开
+    expect(st.flags[st.idx(10, 19)]).toBe(0);          // 残型未复活
+    expect(st.get(10, 19)).toBe(T.DOOR_CLOSED);        // 型保留
+    placeDoorClosed(st, 12, 18, 0);                    // 对照:活性门列照常开
+    expect(openDoor(st, 12, 20, 1)).toBe(true);
+    expect(st.get(12, 20)).toBe(T.DOOR_OPEN);
+  });
+
+  it('F7:幽灵高门列拒切换（ShiftTallGate ValidateTileSquare :52196）', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const GATE_C = TILE_BY_KEY['v_388_tall_gate_closed'];
+    const GATE_O = TILE_BY_KEY['v_389_tall_gate_open'];
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(20, 18 + dy, GATE_C, 0, TALL_GATE_ROW_FY[dy]!);
+    st.flags[st.idx(20, 20)] = 0;                      // 中行幽灵残型
+    expect(shiftTallGate(st, 20, 20, false)).toBeNull();   // 核心回归:拒切换
+    expect(st.get(20, 20)).toBe(GATE_C);               // 残型未复活成开门
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(21, 18 + dy, GATE_C, 0, TALL_GATE_ROW_FY[dy]!);
+    expect(shiftTallGate(st, 21, 20, false)).toEqual([21, 18]);   // 对照:照常切换
+    expect(st.get(21, 20)).toBe(GATE_O);
+  });
+
+  it('F8:帧写不复活幽灵格——pixelBox 翻帧跳过幽灵（Wiring.cs:674-76 只写 frameX）、幽灵树锚不写装饰位段', () => {
+    const w = mkTouchWorld();
+    const st = w.store;
+    const wr = new Wiring(st);
+    st.setTileSilent(10, 20, TILE_BY_KEY['v_445_pixelbox']);
+    st.type[st.idx(11, 20)] = TILE_BY_KEY['v_445_pixelbox'];
+    st.flags[st.idx(11, 20)] = 0;                      // 幽灵像素盒
+    const wb = wr as unknown as { pixelBoxPass(): void; pixelBoxTriggers: Map<number, number> };
+    wb.pixelBoxTriggers.set(st.idx(10, 20), 3);
+    wb.pixelBoxTriggers.set(st.idx(11, 20), 3);
+    wb.pixelBoxPass();
+    expect(st.frameX[st.idx(10, 20)]).toBe(18);        // 活性照常翻帧 0→18
+    expect(st.flags[st.idx(11, 20)]).toBe(0);          // 核心回归:幽灵未复活
+    expect(st.frameX[st.idx(11, 20)]).toBe(0);         // 帧未写
+    // xmasSetDecor（WorldGen.cs:39781+ 只或/与 frameY 位段,不动 active）
+    st.setTileSilent(20, 20, TILE_BY_KEY['v_171_christmas_tree'], 10, 0);
+    st.type[st.idx(21, 20)] = TILE_BY_KEY['v_171_christmas_tree'];
+    st.flags[st.idx(21, 20)] = 0;
+    st.frameX[st.idx(21, 20)] = 10;                    // 幽灵树锚
+    xmasSetDecor(st, 21, 20, 0, 2);
+    expect(st.flags[st.idx(21, 20)]).toBe(0);          // 核心回归:幽灵锚未复活
+    expect(xmasDecorStyle(st, 21, 20, 0)).toBe(-1);    // 位段未写
+    xmasSetDecor(st, 20, 20, 0, 2);
+    expect(xmasDecorStyle(st, 20, 20, 0)).toBe(2);     // 活性锚照常换装
+    expect(st.flags[st.idx(20, 20)]).toBe(1);
   });
 });

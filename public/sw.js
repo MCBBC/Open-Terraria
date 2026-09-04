@@ -97,7 +97,7 @@ self.addEventListener('fetch', (e) => {
         if (res && res.ok) cache.put(req, res.clone());
         return res;
       } catch (err) {
-        const hit = await cache.match(req);
+        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
         if (hit) return hit;
         throw err;
       }
@@ -107,7 +107,7 @@ self.addEventListener('fetch', (e) => {
   if (isShellJs) {
     e.respondWith((async () => {
       const cache = await getCache();
-      const hit = await cache.match(req);
+      const hit = await cache.match(req, { ignoreVary: true });
       if (hit) return hit;
       try {
         const res = await fetch(req);
@@ -130,7 +130,7 @@ self.addEventListener('fetch', (e) => {
         if (res && res.ok && res.type === 'basic' && mimeOk(path, res)) cache.put(req, res.clone());
         return res;
       } catch (err) {
-        const hit = await cache.match(req);
+        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
         if (hit) return hit;
         throw err;
       }
@@ -140,7 +140,7 @@ self.addEventListener('fetch', (e) => {
   if (!ASSET_RE.test(path)) return;
   e.respondWith((async () => {
     const cache = await getCache();
-    const hit = await cache.match(req);
+    const hit = await cache.match(req, { ignoreVary: true });
     if (hit) return hit;
     try {
       const res = await fetch(req);
@@ -153,7 +153,9 @@ self.addEventListener('fetch', (e) => {
       cache.put(req, res.clone());
       return res;
     } catch (err) {
-      return hit || Response.error();
+      // ★fetch 瞬态失败(离线/闪断):二次 match 回退——期间可能有并发 put 落地
+      const hit2 = await cache.match(req, { ignoreVary: true }).catch(() => null);
+      return hit2 || Response.error();
     }
   })());
 });
@@ -292,7 +294,7 @@ async function _scrubInner(force = false) {
     for (const req of await cache.keys()) {
       const p = new URL(req.url).pathname;
       if (!MIME_BY_EXT.some(([re]) => re.test(p))) continue;
-      const res = await cache.match(req);
+      const res = await cache.match(req, { ignoreVary: true });
       if (!res) continue;
       if (!mimeOk(p, res)) bad.push(req);
     }

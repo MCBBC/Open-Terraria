@@ -132,6 +132,10 @@ const dumpNames = (dir: string): Map<number, string> => {
   const rng = new RNG(SEED as unknown as number);
   rng.reseed(SEED as unknown as number);
   const evs: string[] = [];
+  {
+    const i434 = 434 * W + 367;
+    console.log(`pre-settle (367,434): liquid=${st.liquid[i434]} lty=${st.liquidType[i434]} | world.groundLevel=${(world as unknown as { groundLevel: number }).groundLevel} rockLevel=${(world as unknown as { rockLevel: number }).rockLevel} genWaterLine=${(world as unknown as { genWaterLine: number }).genWaterLine}`);
+  }
   // ---- 指纹流（updateLiquid 尾；镜像 rig SW_LIQLOG 14B/FNV 布局,rel=1 起与 rig 同锚）----
   const { LiquidSim } = await import('../src/world/liquid/LiquidSim');
   const { mkdirSync: mkFp } = await import('node:fs');
@@ -146,6 +150,13 @@ const dumpNames = (dir: string): Map<number, string> => {
   };
   const proto = LiquidSim.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
   const oUpd = proto.updateLiquid;
+  const sevLines: string[] = [];
+  const inBox = (x: number, y: number): boolean => x >= 3950 && x <= 4080 && y >= 730 && y <= 800;
+  LiquidSim.settleEv = (kind, tag) => {
+    const [xs, ys] = tag.split('|');
+    const x = Number(xs), y = Number(ys);
+    if (inBox(x, y)) sevLines.push(`${kind}|${tag}`);
+  };
   const oWC = proto.waterCheck;
   let wcN = 0;
   const wcEntries: string[] = [];
@@ -163,7 +174,7 @@ const dumpNames = (dir: string): Map<number, string> => {
     const r = oWC.apply(this, arguments);
     const sim = this as unknown as SimT;
     wcN++;
-    wcEntries.push(`---WC ${wcN} nl=${sim.numLiquid} nb=${sim.bufCount}\n` + dumpEntries(sim));
+    wcEntries.push(`---WC ${wcN} nl=${sim.numLiquid} nb=${sim.bufCount} wl=${(sim as unknown as { genWaterLine: number }).genWaterLine}\n` + dumpEntries(sim));
     if (wcN === 1) {
       // WC1 全量世界 6 通道（lty vanilla 0 基）——sweep 面世界态定罪
       const s2 = sim.world.store as unknown as Record<string, Uint8Array | Uint16Array>;
@@ -230,7 +241,7 @@ const dumpNames = (dir: string): Map<number, string> => {
     flipGenSolid([379], true);
     setBoulderSolidity(false);
     flipGenSolid([546], false);
-    await liquidSettlePass({ world, rng, store: st, prog: undefined } as never, false, gs);
+    await liquidSettlePass({ world, rng, store: st, prog: undefined } as never, true, gs);
     setBoulderSolidity(true);
     flipGenSolid([546], true);
     flipGenSolid([10, 192, 191, 190], true);
@@ -245,6 +256,9 @@ const dumpNames = (dir: string): Map<number, string> => {
       }
     } catch {}
     writeFileSync('/tmp/iii128-out/js49/j-wc-anchors.txt', wcEntries.join('\n'));
+    writeFileSync('/tmp/iii128-out/js-settlev-spk.txt', sevLines.join('\n') + '\n');
+    console.log(`settleEv lines: ${sevLines.length}`);
+    console.log(`gs.waterLine=${(gsp as { waterLine: number }).waterLine} worldSurface=${(gsp as { worldSurface: number }).worldSurface} rockLevel=${(gsp as { rockLevel: number }).rockLevel}`);
     delete (globalThis as unknown as Record<string, unknown>).__swLqKill;
     writeFileSync('/tmp/iii128-out/js-liqlog-spk49.txt', fpLines.join('\n') + '\n');
     console.log(`fp lines: ${fpLines.length} (first: ${fpLines[0] ?? '-'} | last: ${fpLines[fpLines.length - 1] ?? '-'})`);

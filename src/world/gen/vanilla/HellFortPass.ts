@@ -47,7 +47,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 // ★1457 对齐档 2：门落点/塌墙 helper 从 1457 语义存档即插接线（存档自包含副本,
 //   与本文件 placeDoorHF/placeTileDoorHF/solidTileHF 同构,勿双向耦合）
-import { hellFortAttemptDoorAt, hellFortPlaceDoorLoop, hellFortCanCrumbleWall, hellFortAttemptCrumbleWall } from './rollback1457/HellFort.1457';
+import { hellFortAttemptDoorAt, hellFortPlaceDoorLoop, hellFortCanCrumbleWall, hellFortAttemptCrumbleWall, hellFortSquareDoorFrame } from './rollback1457/HellFort.1457';
 import { registerChest, findLiveChest } from '../ChestRegistry';   // ★IIII102c 洞数组 sink
 import type { SparseChestSink } from '../ChestRegistry';
 
@@ -563,6 +563,8 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
       // cs:59863-59865 PlaceTile case4:只写 frameY=22*style,frameX 不动(=0);
       // style=7(恶魔火把)→ frameY=154。旧实现把 style 写进 frameX 属轴写反(H3)
       st.setTileSilent(x + side, y, TORCH, 0, 22 * 7);
+      // ★IIIII108b2：PlaceTile(4,forced)（cs:32506）尾 SquareTileFrame 门肃清投影
+      hellFortSquareDoorFrame(st, x + side, y);
       placed = true;
     }
   }
@@ -975,6 +977,8 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
   // cell 循环头门= `!array5||!InWorld(array2[c],array4[r],10) → continue`——InWorld
   // 失败时该格的平台写与门13 Next(3) 掷都被跳过（w≥4200 现世界尺寸恒不可达,
   // errorWorld 域可分叉）
+  // ★IIIII108b2：平台写=PlaceTile(19,forced)（cs:33232）尾置 SquareTileFrame（cs:60760）
+  //   ——3×3 门肃清投影 hellFortSquareDoorFrame 接线（顶平台/门/火把同批）
   for (let c = 0; c < 5; c++) {
     for (let r = 0; r < 10; r++) {
       if (!occ[c][r]) continue;
@@ -996,6 +1000,7 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             const ti = st.idx(x, rowT[r]);
             st.flags[ti] = 0;
             st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
+            hellFortSquareDoorFrame(st, x, rowT[r]);   // ★IIIII108b2
             st.wall[ti] = wallType;
           }
         } else break;
@@ -1089,6 +1094,9 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
               const ti = st.idx(x, rowT[r]);
               st.flags[ti] = 0;
               st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
+              // ★IIIII108b2：PlaceTile(19,forced) 尾 SquareTileFrame——本处即 winter
+              //   A 格清算触发窗（T#8 topPlat (1863,1048) 3×3 越框 Framing (1862,1047)）
+              hellFortSquareDoorFrame(st, x, rowT[r]);
             }
           }
           searching = false;

@@ -5,6 +5,8 @@
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS, VANILLA_TILE_ID } from '../data/tiles';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import type { TileStore } from '../world/TileStore';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -16,6 +18,48 @@ const T_RAIL = VANILLA_TILE_ID.get(314);      // MinecartTrack
 const T_CONV_L = VANILLA_TILE_ID.get(421);    // ConveyorBeltLeft
 const T_CONV_R = VANILLA_TILE_ID.get(422);    // ConveyorBeltRight
 const T_STALAC = VANILLA_TILE_ID.get(165);    // CaveDecos 钟乳石
+
+// Main.tileSolid ∩ Main.tileSolidTop 九件套（Main.cs:8031-8032/9797-9800/10118-10119/
+// 10126-10136——tileSolid 真值且 tileSolidTop 的全部成员;本仓 def.solid 对九件恒 false）
+const TILE_SOLID_TOP_SHEETS = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+/** Main.tileSolid 代理：def.solid（tileSolid∧!tileSolidTop 域）∪ 九件套（tileSolid∧
+ *  tileSolidTop）。家具（tileSolid=false∧tileSolidTop=true,如桌 18）不在此列——
+ *  与 "def.solid||def.platform" 朴素代理的分野（BBMSF :87884 arm2 判据点）。 */
+const tileSolidOf = (t: number): boolean => {
+  const d = TILE_DEFS[t];
+  if (!d) return false;
+  if (d.solid === true) return true;
+  return d.platform === true && TILE_SOLID_TOP_SHEETS.has(d.vanilla?.sheet ?? -1);
+};
+
+/** WorldGen.BlockBelowMakesSandFall（WorldGen.cs:87868-87893）1:1：判定 (bx,by) 下方格
+ *  是否"会使沙再塌"（true=撑不住）。nactive()=active∧!inActive（Tile.cs:242-248
+ *  `(sTileHeader&0x60)==32`——hasTile+!isActuated,与 liquid/checkingLiquid 无关）；
+ *  越界=vanilla null/j≥maxTilesY-1 早退 false（:87871-87879）。
+ *  ★终审④（2026-09-04）三消费位单源：FallingBlock 落地 flag2（Projectile.cs:79268）
+ *  + Game 沙队支撑判定（SpawnFallingBlockProjectile :87328 同门）。 */
+export function blockBelowMakesSandFall(st: TileStore, bx: number, by: number): boolean {
+  if (!st.inBounds(bx, by + 1)) return false;                            // :87871-87879
+  if (!st.hasTile(bx, by + 1) || st.isActuated(bx, by + 1)) return true; // :87880-87883 !tile.nactive()
+  const below2Nact = by + 2 < st.h && st.hasTile(bx, by + 2) && !st.isActuated(bx, by + 2);
+  const b1 = st.idx(bx, by + 1);
+  // :87884-87887 `!tile[j+2].nactive() && (!tile.active() || !Main.tileSolid[tile.type])`
+  if (!below2Nact && !(st.hasTile(bx, by + 1) && tileSolidOf(st.type[b1]))) return true;
+  // :87888-87891 `tile.active() && tile.type == 165`（钟乳石）
+  if (st.hasTile(bx, by + 1) && st.type[b1] === T_STALAC) return true;
+  return false;
+}
+
+/** num18 兜底件表（Projectile.Kill aiStyle 10 :79122-79222 × GetSandfallProjData
+ *  WorldGen.cs:87797-87837 复合换算：TileID.Sets.Falling 集（TileID.cs:395 =
+ *  53/234/112/116/224/123/330-333/495,全部命中显式分支,default=53→31）→ 落块弹型 →
+ *  Kill 表 num18）。SpawnFallingBlockProjectile 恒 ai[0]=1（WorldGen.cs:87352）→
+ *  31 档 num18=169（:79133-79136 的 ai[0]==2 免掉落档=蚁狮敌弹档不适用;传送带重挂
+ *  :79262-79265 仅 type==31 生效且同值 169=对本路径 no-op）。 */
+const FALLING_TILE_DROP_ITEM = new Map<number, number>([
+  [53, 169], [112, 370], [116, 408], [123, 424], [224, 1103], [234, 1246],
+  [330, 71], [331, 72], [332, 73], [333, 74], [495, 4090],
+]);
 
 export class FallingBlock extends Entity {
   w = 10; h = 10; // 原版 width/height = 10(vanilla-projectiles.json 全沙族一致)
@@ -78,56 +122,78 @@ export class FallingBlock extends Entity {
     if (hitCritters(this, game)) { /* 小动物被砸即死,块继续坠 */ }
 
     // ---- 落地:变回 tile(原版 Projectile.Kill aiStyle==10 :79117-79310 等价)----
-    // ★放置格 = 上一帧中心格:原版 TileCollision 把弹体挡在实心【外】,Kill 时中心格
-    // =实心上方空格;本仓碰撞判定在积分后(中心已入实心格半步),上一帧中心格即原版
-    // 弹回后的中心格。放置格须空(!active),被占→直接消失不放置(:79248 门)。
-    // ★修正史:初版"向上扫第一个空位"→沙抬到草/仙人掌上方悬空叠放(用户实报
-    // "蚁狮沙堆叠在草上/仙人掌断缝");二版把放置条件钉在碰撞格上→中心入实心恒被占
-    // =下落沙【永不落格】的隐性回归;本版(2026-08-25)按上一帧中心格落格。
-    // 下方 314 轨道/421-422 传送带 → 不放(:79256-79260);BlockBelowMakesSandFall
-    // (WorldGen.cs:87868:下方空/下方非实心且再下空/钟乳石165)→不放,防放置即再落。
-    // (半砖修正 :79242-79246 依赖运行时半砖碰撞面,本仓无,登记;玩家版被占时掉落
-    //  对应物品块 num18>0(:79300)——本仓无投射物掉物接口,登记)
+    // ★终审④（2026-09-04）落点几何对齐+被占/flag2 掉件面 1:1。死亡格=TileCollision
+    //  钳位后弹心格（Projectile.cs:79120-79121 (int)((position.Y+height/2)/16)）。
+    //  直落弹（SpawnFallingBlockProjectile vx=0/vy≤10 :59078-59081）钳位几何
+    //  （Collision.cs:2299-2460）：全实心/平台/家具顶/底坡3-4=盒底钳到面顶
+    //  （:2388-2404;底坡无 flag2 豁免:2361-2371）→ 钳位中心=面顶-5 → 死亡格=面格
+    //  上一格=上一帧中心格（恒等）;顶坡1-2 flag2 豁免竖钳（:2372-2383）→ 先被
+    //  AI_010 :59044-59052 SlopeTile 拍平+position.Y-=16 → 等效钳在拍平方格顶
+    //  （同上一格）;半砖=碰撞盒折半（:2350-2354 vector4.Y+=8）→ 钳位中心=面顶+3
+    //  ∈面格内 → 死亡格=半砖格本身（:79243 半砖上移支 velocity.Y 已被 TileCollision
+    //  清 0=死支,R2' F2 同谳）→ 格 active 走 outer else :79298-79301。
+    //  掉件面：被占=RequestNewItem(Center)（:79298-79301）;flag2/放置失败=
+    //  Center+(0,-2)（:79293-79296）;flag2=:79250-79272 死亡格下方 active 且
+    //  （rail 314 ∥ 传送带 421/422 ∥ BlockBelowMakesSandFall→blockBelowMakesSandFall）。
+    //  ★修正史:初版"向上扫第一个空位"→沙抬到草/仙人掌上方悬空叠放(用户实报
+    //  "蚁狮沙堆叠在草上/仙人掌断缝");二版把放置条件钉在碰撞格上→中心入实心恒被占
+    //  =下落沙【永不落格】的隐性回归;2026-08-25 按上一帧中心格落格。
     if (st.isSolid(tx, ty) || st.isPlatform(tx, ty)) {
       const tid = TILE_BY_KEY[this.tileKey];
-      const below = st.inBounds(prevTx, prevTy + 1) ? st.get(prevTx, prevTy + 1) : 0;
-      const below2 = st.inBounds(prevTx, prevTy + 2) ? st.get(prevTx, prevTy + 2) : 0;
-      // ★幽灵保域（2026-09-03）：下方"空"判定补 flags bit0——原版
-      //  BlockBelowMakesSandFall（WorldGen.cs:87879-87889）首支 `!tile.nactive()`
-      //  （幽灵格=未激活=下方空→不放,防放置即再落）
-      const belowGhost = st.inBounds(prevTx, prevTy + 1)
-        && (st.flags[st.idx(prevTx, prevTy + 1)] & 1) === 0;
-      const below2Ghost = st.inBounds(prevTx, prevTy + 2)
-        && (st.flags[st.idx(prevTx, prevTy + 2)] & 1) === 0;
-      let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
-      if (!noPlace && (below === 0 || belowGhost)) noPlace = true;
-      else if (!noPlace && (below2 === 0 || below2Ghost) && !st.isSolid(prevTx, prevTy + 1)) noPlace = true;
-      else if (!noPlace && below === T_STALAC) noPlace = true;
-      // ★幽灵保域（2026-09-03）：放置门 = 原版 Projectile.cs:79248 `!tile.active()`
-      //  ——幽灵格（flags=0,type≠0）视为空可落格
-      if (tid !== undefined && !noPlace && st.inBounds(prevTx, prevTy)
-        && (st.type[st.idx(prevTx, prevTy)] === 0 || (st.flags[st.idx(prevTx, prevTy)] & 1) === 0)) {
-        st.setTile(prevTx, prevTy, tid, 0, 0);
-        // ★无声（2026-09-03 F5 音效录制定罪）：原版沙落回格【不播任何声音】——
-        //  aiStyle 10 Kill 落格支(:79248-79310)无 PlaySound,WorldGen.PlaceTile
-        //  (:59833-60450)全程零 PlaySound（仅 736-738 化石落块 :79102 播 Item127、
-        //  爆破族 :79384 播 Item14）。曾在此播 'dig'×0.6 且**不传坐标** → 距离衰减
-        //  永不生效,全世界任意处的落沙（远超 2500px 可闻半径）每格满响一声;
-        //  沙潮期 6-43 连发 = 用户报"听到错误的音效"主因（F5 录制 audio.sfx 环实锤:
-        //  Dig_0/1/2 无坐标全 'ok' 爆发,计数与落沙潮逐一吻合）
-        // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus
-        // 级联;沙坡/沙堆改变邻接后悬托仙人掌须断根——用户实报"仙人掌悬在沙坡上")
-        const CAC = TILE_BY_KEY['v_80_cactus'];
-        if (CAC !== undefined) {
-          for (const [ax, ay] of [[prevTx, prevTy - 1], [prevTx - 1, prevTy], [prevTx + 1, prevTy], [prevTx - 1, prevTy - 1], [prevTx + 1, prevTy - 1]] as const) {
-            if (st.inBounds(ax, ay) && st.get(ax, ay) === CAC) {
-              game.fellCactus?.(ax, ay);
-              break;
+      // 死亡格与钳位中心（掉件锚）:半砖落面 → 死亡格=半砖格本身,钳位中心=面顶+8-5
+      const surfHalf = st.half[st.idx(tx, ty)] !== 0;
+      const dtx = surfHalf ? tx : prevTx;
+      const dty = surfHalf ? ty : prevTy;
+      const clampCy = surfHalf ? ty * TILE + 8 - this.h / 2 : ty * TILE - this.h / 2;
+      // num18（Falling 集 tile → 弹型 → num18,见 FALLING_TILE_DROP_ITEM 表注）;
+      // 掉件键缺失=静默无掉（与 Game.onProjectileDeath AISTYLE10 支 dropKey 守卫同口径）
+      const sheet = tid !== undefined ? TILE_DEFS[tid]?.vanilla?.sheet : undefined;
+      const dropItem = sheet !== undefined ? (FALLING_TILE_DROP_ITEM.get(sheet) ?? 0) : 0;
+      const drop = (py: number) => {
+        const dropKey = dropItem > 0 ? VANILLA_ITEM_KEY_BY_ID[dropItem] : undefined;
+        if (dropKey) game.spawnDrop(this.x + this.w / 2, py, dropKey);
+      };
+      // flag2（:79250-79273）：死亡格下方 active 且（rail ∥ 传送带 ∥ BBMSF;
+      // 三支 vanilla 为并列 if,布尔并集同判）
+      let flag2 = false;
+      if (st.inBounds(dtx, dty + 1) && st.hasTile(dtx, dty + 1)) {
+        const bs = st.type[st.idx(dtx, dty + 1)];
+        if (bs === T_RAIL || bs === T_CONV_L || bs === T_CONV_R) flag2 = true;
+        if (blockBelowMakesSandFall(st, dtx, dty)) flag2 = true;
+      }
+      // :79247 `!Main.tile[num15,num16].active() && num17>=0`（落块弹 num17 恒≥0,
+      //  109 过远档不经本实体）;幽灵格（flags=0,type≠0）=未激活=可落格（裸 active() 门）
+      if (tid !== undefined && st.inBounds(dtx, dty) && !st.hasTile(dtx, dty)) {
+        if (!flag2) {
+          st.setTile(dtx, dty, tid, 0, 0);
+          // :79278-79287 放置成功 → 下方半砖/坡面拍平（SlopeTile）——顶坡落面
+          //  vanilla 由 AI_010 :59044-59052 先拍;此处为 Kill 尾统一面,两支同效
+          if (st.inBounds(dtx, dty + 1)) {
+            const bi = st.idx(dtx, dty + 1);
+            if (st.flags[bi] && (st.half[bi] !== 0 || st.slope[bi] !== 0)) st.setSlope(dtx, dty + 1, 0);
+          }
+          // ★无声（2026-09-03 F5 音效录制定罪）：原版沙落回格【不播任何声音】——
+          //  aiStyle 10 Kill 落格支(:79248-79310)无 PlaySound,WorldGen.PlaceTile
+          //  (:59833-60450)全程零 PlaySound。曾播 'dig'×0.6 且不传坐标=距离衰减
+          //  失效（F5 audio.sfx 环实锤:Dig_0/1/2 无坐标满响,计数与落沙潮吻合）
+          // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus
+          // 级联;沙坡/沙堆改变邻接后悬托仙人掌须断根——用户实报"仙人掌悬在沙坡上")
+          const CAC = TILE_BY_KEY['v_80_cactus'];
+          if (CAC !== undefined) {
+            for (const [ax, ay] of [[dtx, dty - 1], [dtx - 1, dty], [dtx + 1, dty], [dtx - 1, dty - 1], [dtx + 1, dty - 1]] as const) {
+              if (st.inBounds(ax, ay) && st.get(ax, ay) === CAC) {
+                game.fellCactus?.(ax, ay);
+                break;
+              }
             }
           }
+        } else if (dropItem > 0) {
+          drop(clampCy - 2);                       // flag2 不放置仍掉件（:79293-79296 Center+(0,-2)）
         }
+      } else if (dropItem > 0) {
+        drop(clampCy);                             // 死亡格被占（含半砖落面）→ :79298-79301 Center
       }
-      this.dead = true;   // 放置格被占/门拦截 → 沙消失(原版同,蚁狮版 num18=0 纯消失)
+      this.dead = true;   // 落地终局:放置/掉件/纯消失（num18=0 型被占,原版同 :79298 num18 门）
     }
   }
 
