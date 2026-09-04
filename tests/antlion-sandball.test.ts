@@ -122,3 +122,40 @@ describe('沙球落地放沙 + 沿途击碎（:75430-75536 / :55106-55136）', (
     expect(rec.breaks.some(([x, y]) => x === 60 && y === 20)).toBe(true);
   });
 });
+
+// ===================== ★④（2026-09-04 掉落/沙族批）沙球放置支 BBMSF 单源化 =====================
+// 旧内联第 4 份副本 arm2 用 !isSolid（def.solid 域）代 !Main.tileSolid ——tileSolid∧
+// tileSolidTop 九件套（19/239/380/427/435-439,Main.cs:10118-10136,含种植箱 380）被漏。
+// 可观测面（落弹直落时死亡格下方恒=落面本身,arm2 无差）=水平切入:弹横移撞墙,死亡格
+// =上一帧中心格,其正下=种植箱 → vanilla arm2（tileSolid[380]=true）不塌 → 照常放沙;
+// 旧内联误判"沙塌"不放。
+describe('★④ 沙球放置 BBMSF 单源（arm2 九件套 tileSolid 域）', () => {
+  // 几何：沙球有重力 0.2/tick（ai[0]==2 档）→ 横移撞墙须 8 tick 内到位（下坠 <1 行）。
+  // 弹从 cy=39*16+14+5=643（row40.2）出发 vx=3 → 死亡拍心 ∈ [61*16, 61*16+3) →
+  // 上一帧中心格=(60,40),其正下 (60,41) 摆种植箱/工作台。（y=顶左锚,cy=y+h/2,h=10）
+  it('死亡格正下=种植箱 380（tileSolid 九件套）→ arm2 不塌,沙放箱上', () => {
+    const w = makeWorld();
+    const st = w.store;
+    st.setTile(60, 41, TILE_BY_KEY['v_380_planter_boxes']!, 0, 0);   // 种植箱（非 def.solid）
+    st.setTile(61, 40, TILE_BY_KEY['stone']!, 0, 0);                 // 右侧石墙（横移撞点）
+    const { hooks } = makeHooks(w);
+    const d = new Dart(59 * TILE + 8, 39 * TILE + 14, 3, 0, 10, 31);
+    d.hostile = true;
+    step(d, hooks, 30);
+    expect(d.dead).toBe(true);
+    expect(st.get(60, 40)).toBe(TILE_BY_KEY['sand']);   // 箱上放沙（arm2 tileSolid[380]=true）
+    expect(st.get(60, 41)).toBe(TILE_BY_KEY['v_380_planter_boxes']!);
+  });
+
+  it('对照:死亡格正下=悬空工作台（tileSolid=false 且再下格空）→ arm2 真 → 不放沙', () => {
+    const w = makeWorld();
+    const st = w.store;
+    st.setTileSilent(60, 41, TILE_BY_KEY['workbench']!, 0, 0);
+    st.setTile(61, 40, TILE_BY_KEY['stone']!, 0, 0);
+    const { hooks } = makeHooks(w);
+    const d = new Dart(59 * TILE + 8, 39 * TILE + 14, 3, 0, 10, 31);
+    d.hostile = true;
+    step(d, hooks, 30);
+    expect(st.get(60, 40)).toBe(0);                   // BBMSF arm2（家具+再下空）→ 不放
+  });
+});

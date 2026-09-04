@@ -1,43 +1,45 @@
 // 拍击石系三脉冲（Projectile.TryMakingSnappingStoneStrike 1457 :14347-14465 1:1）：
 //  6167 拍击石   kind 0（ranged 命中触发 :13443-13446）——30×rangedDamage/120px/2 目标；
-//                加伤基座 num3=40（:14363 头部缺省值,kind0 不覆写）
+//                加伤基座 num3=40（:14359 头部缺省值,kind0 不覆写;SW-AJ1 2026-09-05 校准,旧 :14363）
 //  6178 焰爆石   kind 1（melee|ranged 命中触发 :13439-13442）——45×meleeDamage/300px/
-//                弹 1131 + 目标 323 Hellfire 180t（:14396-14401）；1131 出射逐弹按
-//                持有者 meleeCrit>rangedCrit 现场定类 :14414-14418（★F3,见 trySnapStrike）；
-//                加伤基座 num3=70（:14373）/乘区 = max(meleeDamage,rangedDamage)
-//                （:14448-14451,与初始伤的 meleeDamage【不同式】）+ 受击者本体
-//                AddBuff(323,180)（:14444）
+//                弹 1131（:14389）+ 目标 323 Hellfire 180t（:14413;SW-AJ1 2026-09-05 校准,旧 :14396-14401）；1131 出射逐弹按
+//                持有者 meleeCrit>rangedCrit 现场定类 :14410-14412（★F3,见 trySnapStrike;SW-AJ1 校准,旧 :14414-14418）；
+//                加伤基座 num3=70（:14369;SW-AJ1 2026-09-05 校准,旧 :14373）/乘区 = max(meleeDamage,rangedDamage)
+//                （:14443-14444,SW-AJ1 校准,旧 :14448-14451,与初始伤的 meleeDamage【不同式】）+ 受击者本体
+//                AddBuff(323,180)（:14445;SW-AJ1 校准,旧 :14444）
 //  6179 毁灭臂镗 kind 2（tag 命中触发 :13447-13450）——150×minionDamage/400px/弹 1132；
-//                加伤基座 num3=150（:14378）
+//                加伤基座 num3=150（:14376;SW-AJ1 2026-09-05 校准,旧 :14378）
 // ★F1（蓝队四轮，2026-08-31）：脉冲扫描尾【无条件】把加伤并入本次触发命中的 dmg：
-//   `num13 = num2 − num7`（:14442,漏配额=2−实出弹数,零目标也非负）→
-//   `num14 = num3 + num4*num13`（num4=10,:14362）→ 按 kind 乘区截断 → `dmg += num14`
-//   （:14457）→ kind1 另行给受击者本体 Hellfire。trySnapStrike 因此把旧 boolean
+//   `num13 = num2 − num7`（:14435,SW-AJ1 2026-09-05 校准,旧 :14442,漏配额=2−实出弹数,零目标也非负）→
+//   `num14 = num3 + num4*num13`（num4=10,:14360;AJ1 校准,旧 :14362）→ 按 kind 乘区截断 → `dmg += num14`
+//   （:14451;SW-AJ1 校准,旧 :14457）→ kind1 另行给受击者本体 Hellfire。trySnapStrike 因此把旧 boolean
 //   返回值改为【返回 num14 终值】(number,未触发/冷却拦下 = 0)——所有调用站须把它
 //   并入本次 e.hurt 实伤参（防御前）。迁移时序说明：
 //    · 原版弹幕侧（Projectile.Damage_PVE_Inner）加伤点在 DamageVar(:12970;★SW-AB1
 //      2026-09-04 引注校准:旧 1456 锚 :12959 → 1457 `int dmg = Main.DamageVar(num15, luck)`) 与
-//      banner(:13387-91) 之后、parry ×5(:13634)/StrikeNPC(:13702) 之前 ⇒ num14 不吃
-//      攻端旗乘区；暴击翻倍在 StrikeNPC_Inner 防后 (:81990 num*(crit?2:1)) 故 num14
+//      banner(:13388 门/:13390 dmg 采样;SW-AJ1 2026-09-05 校准,旧 :13387-91) 之后、
+//      parry ×5(:13627 门/:13629 dmg*=5;SW-AJ1 校准,旧 :13634)/StrikeNPC(:13702) 之前 ⇒ num14 不吃
+//      攻端旗乘区；暴击翻倍在 StrikeNPC_Inner 防后 (:82067 num*(crit?2:1);SW-AJ1 校准,旧 :81990) 故 num14
 //      【随本次命中一起】吃暴击——仓内调用侧预倍惯例下按 `+ bonus*(crit?2:1)` 并入；
-//    · 原版挥砍侧（Player.ProcessHitAgainstNPC :44684-86）恰好相反：加伤在
-//      DamageVar(:44700 前) 之前 ⇒ num14 跟全链一起掷 ±15%（Game.ts 已按此序并入）。
+//    · 原版挥砍侧（Player.ProcessHitAgainstNPC :44694-44696 accPyroclast 支;SW-AJ1 2026-09-05
+//      校准,旧 :44684-86）恰好相反：加伤在 DamageVar(:44698 前;AJ1 校准,旧 :44700) 之前
+//      ⇒ num14 跟全链一起掷 ±15%（Game.ts 已按此序并入）。
 // 共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383,Player.ts:571 字段/
-//  :3837 逐 t 递减——Update_SnappingStone :28592-28604 同款）;目标选取 =
-//  FindTargetWithLineOfSight（Projectile.cs:46474-46501,至多 num2=2 个,跳过本次受击者
+//  :3837 逐 t 递减——Update_SnappingStone :28597-28604 同款;SW-AJ1 2026-09-05 校准,旧 :28592-28604）;目标选取 =
+//  FindTargetWithLineOfSight（Projectile.cs:46471-46499,SW-AJ1 校准,旧 :46474-46501,至多 num2=2 个,跳过本次受击者
 //  + 此前已选者）。★F2（蓝队四轮）：扫描面已按原文重建——①最近距离收缩语义
 //  （`num2 < num` STRICT 严格小于：距离恰等于 maxRange 的目标不取;原版 Distance()
 //  为 f32 长度,仓内 f64 双精度在常规量程与 f32 同值,f32 次常差异域备案），
 //  每个 num8 循环迭代以本次结果为 skipTargets 新成员重扫（缩短半径）；②视线门
 //  Collision.CanHit(targeter 整盒 → npc 整盒)（:46491,physics.canHit 家族复用；
 //  targeterBox 缺省 = 点盒(hx,hy,0,0),仅测试桩形态）;③localNPCImmunity!=0 排除
-//  （:46488,targeter 为 Projectile 时——经 ctx.exclude 读各宿主弹体的局部免疫窗，
+//  （:46484,SW-AJ1 2026-09-05 校准,旧 :46488,targeter 为 Projectile 时——经 ctx.exclude 读各宿主弹体的局部免疫窗，
 //  对齐 GC1 noteNpcPlayerImmune 体系承载的同语义窗位）。
-//  弹 1121/1131/1132 timeLeft=2 速 UnitY×0.1（:14413-14416）——本仓 Arrow 直生近似。
+//  弹 1121/1131/1132 timeLeft=2 速 UnitY×0.1（:14406-14407;SW-AJ1 2026-09-05 校准,旧 :14413-14416）——本仓 Arrow 直生近似。
 //  ★1457 编排器对齐（2026-08-23）：命中尘 = Spawn_SnappingStone{,Melee,Summon}
 //  （ParticleOrchestrator.cs:593-812）Dust 段 1:1 入 vanillaDust 池（见
-//  snapStrikeDust）。受击者自身脉冲（Projectile.cs:14432-
-//  14437 victim.Center,X=盒径/2 裸值无钳）已补（R4-33,蓝队）——victimBox 经 ctx 传;
+//  snapStrikeDust）。受击者自身脉冲（Projectile.cs:14430-
+//  14434 victim.Center,X=盒径/2 裸值无钳;SW-AJ1 2026-09-05 校准,旧 :14432-14437）已补（R4-33,蓝队）——victimBox 经 ctx 传;
 //  ★W-A2（2026-09-03）：受击者拍补齐【完整 Spawn_ 面】本地段（音+环带+尘,原版
 //  RequestParticleSpawn(clientOnly:false)=本地直生+上行,ParticleOrchestrator.cs:52-64）,
 //  曾本地只生尘段=本端失明失声而远端全须全尾。

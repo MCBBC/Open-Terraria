@@ -77,6 +77,11 @@ function defAt(st: World['store'], x: number, y: number) {
 function solidPureFlat(st: World['store'], x: number, y: number, flatten: boolean): boolean {
   // SolidTile 位：tileSolid 且非 tileSolidTop；默认还要求 blockType==0
   // （FlattenAnchors 时坡/半砖亦可）；noAttach 表近似忽略（常见家具锚面皆可附）
+  // ★G1谓词批(2026-09-04)：现无调用点（死代码备案）。复活前置——须补原版 active
+  // 双门（WorldGen.cs:70652-70658 SolidTile = active() && tileSolid && !tileSolidTop
+  // && !halfBrick && slope==0 && !inActive()）：首门 active 位本体读 st.hasTile、
+  // 尾门致动位 st.isActuated——本函数只读 type/half/slope,幽灵残型与已致动格都会
+  // 被误判锚面
   const d = defAt(st, x, y);
   if (!d) return false;
   if (!(d.solid && !d.platform)) return false;

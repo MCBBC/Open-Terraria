@@ -35,6 +35,8 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { GorePiece } from './GorePiece';
 import { applyBannerDamageDealt, hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 
 /** 弹 12 数据面（AI_148 星临盆 NewProjectile :54059 实参）：damage=1000（natural 星
@@ -70,6 +72,25 @@ export class FallingStar extends Entity {
    *  type 12 不属 503/1037/1049 的"对齐速度向"族，替换旧 atan2−π/2 画法） */
   private rot = 0;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
+  //  → projWetSection 共享体接入;两 id 豁免核对：12 SetDefaults :926-940 无
+  //  ignoreWater 行、720 :7619-7627 无 → 双双受段）----
+  //  位序口径：原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)；本类 AI
+  //  （α 振荡/滚转/尾迹/音效 :24179-24239）无湿旗消费者 → 段置于 tick 头与"AI 后"
+  //  等价（旗=上拍值）;且原版 AI-Kill 拍（白天清除 :24092/:54030）湿段照跑
+  //  （Kill 置 active=false 但 !active 早退 :17127 在 HandleMovement 之后）——tick 头
+  //  恰保真。湿阻尼 :17721-17764 读【本拍刷新后】旗（:16870 wetVelocity 初值 →
+  //  湿段改旗 → HandleMovement 读）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1；
+   *  12/720 非 extraUpdates 弹 → 每拍 1 次） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, warmup: number, homing: boolean, natural: boolean) {
     super();
     this.x = x; this.y = y;
@@ -92,6 +113,13 @@ export class FallingStar extends Entity {
     // ★T2：十周年世界旗（Main.tenthAnniversaryWorld）——Kill HotPink 环 :77265-77268 /
     //  AI 尘 1/15 并联门 :24236 / AI gore 池反转 :24229-24232 三消费位共用
     const anniv = !!w.seedFlags?.tenthAnniversary;
+    // ---- ★通用湿段（:16903-17113,tick 头口径见字段块注;溅花尘/音=共享体
+    //      wetSplashStepShared 弹面 10 粒）---- 720/12 逐拍各传本相 id（暖机=Spawner
+    //      720,转正=12;原版转换拍是 720 Kill+同位 NewProjectile 12 :54059——12 重做
+    //      出生预置同位等价,单实体模型取转换前 id,湿面无差：两 id 均无特支/消亡表成员）
+    const wetId = this.warmup > 0 ? 720 : 12;
+    projectileWetSection(this, game, w.store, this.x, this.y, this.w, this.h,
+      wetId, !!projectileData(wetId)?.ignoreWater);
     // 白天清除（Spawner :50193 / 正星 :22141——仅自然星）
     if (w.clock.isDay) {
       if (this.natural || this.warmup > 0) { this.dead = true; return; }
@@ -122,7 +150,13 @@ export class FallingStar extends Entity {
     //   vx==0 → 1）
     this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.01 * (this.vx < 0 ? -1 : 1);
     // 恒速直线下落（aiStyle 5 无重力）+ 落点碰撞
-    const nx = this.x + this.vx, ny = this.y + this.vy;
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：12 非 UpdatePosition
+    //  跳过表成员（:20551 表=aiStyle 4/38/84/148/...）→ UpdatePosition :20557
+    //  `position += wetVelocity` 生效——速度【场】不减只削位移（直积分乘进位移行;
+    //  AI 无速度场写入方,无"读旧场"序差）。★720 暖机相不适用：aiStyle 148 在
+    //  跳过表（:20551）且本仓暖机期不积分（原版 Spawner 无位移,两向同净效果）
+    const df = projWaterDragFactor(this);
+    const nx = this.x + this.vx * df, ny = this.y + this.vy * df;
     const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h) / TILE);
     const st = w.store;
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) {

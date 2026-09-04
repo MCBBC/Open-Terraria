@@ -14,12 +14,15 @@ import {
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { styleDropVidOfFrames, styleFromFrame } from '../src/data/vanillaStyleDrops';
 
-/** 立地基础档构造器：下方实心泥土+上方空格+目标格干净 */
+/** 立地基础档构造器：下方实心泥土+上方空格+目标格干净
+ *  （★A-3 2026-09-04 分位：belowActive=裸 active()、belowNactive=nactive()——
+ *  style6 下邻专用,常规基档两者同真=无致动器格） */
 const spot = (over: Partial<DyePlantSpot>): DyePlantSpot => ({
   style: 0,
   aboveActive: false, aboveSheet: -1,
   aboveSolid: false,
   belowActive: true, belowSheet: 0,
+  belowNactive: true,
   sideLeftActive: false, sideRightActive: false,
   belowSolid: true,
   selfLiquidFullWater: false,
@@ -70,11 +73,14 @@ describe('dyePlaceOk（PlaceDye cs:54451-54502 门纯函数）', () => {
     expect(dyePlaceOk(spot({ style: 7, aboveSolid: true, belowActive: true, belowSheet: 3 }))).toBe(false);
   });
   it('仙人掌寄生档 style6（世界生成专用,物品面无 6 档）：下邻须 nactive+80 且左右两行空', () => {
-    expect(dyePlaceOk(spot({ style: 6, belowActive: false, belowSheet: 80 }))).toBe(false);   // 下邻未激活=拒
-    // 原版 cs:54472 要求 nactive()：belowActive=true + sheet80 + 侧空
+    expect(dyePlaceOk(spot({ style: 6, belowNactive: false, belowSheet: 80 }))).toBe(false);   // 下邻未激活=拒
+    // 原版 cs:54472 要求 nactive()：belowNactive=true（裸 active 位亦真）+ sheet80 + 侧空
     expect(dyePlaceOk(spot({ style: 6, belowActive: true, belowSheet: 80 }))).toBe(true);
     expect(dyePlaceOk(spot({ style: 6, belowActive: true, belowSheet: 80, sideLeftActive: true }))).toBe(false);
     expect(dyePlaceOk(spot({ style: 6, belowActive: true, belowSheet: 60 }))).toBe(false);
+    // ★A-3 分位（2026-09-04）：裸 active 但已致动（nactive=false）→ 拒；
+    //  裸 active=false 而 nactive=true 不可能（nactive ⊆ active）——补反例锁死门式
+    expect(dyePlaceOk(spot({ style: 6, belowActive: true, belowNactive: false, belowSheet: 80 }))).toBe(false);
   });
 });
 

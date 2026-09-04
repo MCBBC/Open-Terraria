@@ -17,6 +17,7 @@ import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
 import { Clock } from '../world/World';
 import { moveAndCollide } from '../physics/TileCollision';
+import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import {
   fishingPowerMultiplier, rollDropLevels, rollJunk, heightLevelOf, prepareFishingContext,
   tryGetItemDrop, CAN_FISH_IN_LAVA_POLES, IS_LAVA_BAIT, ANGLER_QUEST_ITEMS,
@@ -542,11 +543,27 @@ export class Bobber extends Entity {
     return this.ffView;
   }
 
-  /** AI_061_FishingBobber_DoASplash（Projectile.cs:54839-54852）近似：
-   *  水花尘团（原版 100 粒水尘 noGravity，此处粒子池口径 24 粒）+ 溅水音 19 */
+  /** AI_061_FishingBobber_DoASplash（Projectile.cs:54839-54852）1:1（2026-09-04 升格,
+   *  曾 spawnParticles 24 粒色方块近似+playSfx('splash') Splash_0..5 六变体乱掷）：
+   *  100×Dust.dustWater()（waterStyle→33/98-105/123/288）盒 (x−6, y−10, w+12, 24)
+   *  vy−4 vx×2.5 scale0.8 α100 noGravity + PlaySound(19,…,0)=Splash_0（:54852）。
+   *  ★水族尘的 NewDust 型内预处理（33/98-105: v×0.5+Y++、α=170,Dust.cs:234-237）
+   *  VanillaDust.spawn 已植同值;123/288 原文本就无 → 调用侧 vy−4/vx×2.5 后置覆写
+   *  即逐位等价;scale/α 为绝对覆写（消解 NewDust ±0.2 scale 抖）。waterStyle 探测
+   *  同 FakeFish 结构化约定（renderer?.waterStyle,测试 mock 兼容） */
   private doSplash(game: GameHooks): void {
-    game.spawnParticles(this.cx, this.cy - 4, '#A8D8F0', 24, 2, { life: 30 });
-    game.playSfx('splash', 1);
+    const waterStyle = (game as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0;
+    for (let i = 0; i < 100; i++) {
+      const d = game.spawnDust?.(this.x - 6, this.y - 10, this.w + 12, 24, dustWaterFor(waterStyle));
+      if (d) {
+        d.vy -= 4;
+        d.vx *= 2.5;
+        d.scale = 0.8;
+        d.alpha = 100;
+        d.noGravity = true;
+      }
+    }
+    game.playSfxWav?.('Splash_0', 1, this.x, this.y);
   }
 
   /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵/血月敌怪——后者查 catchEnemy）；消耗鱼饵。
@@ -582,14 +599,21 @@ export class Bobber extends Entity {
     // 命中渔获：原版 ai[1]=itemType 随收线飞行、触玩家盒 Kill 时 GiveItemToPlayer
     // （Projectile.cs:73234-73241）——本仓 Game.reelBobber 即时入包契约不变（登记偏差：
     // 收到即得，无飞行携物），浮漂此处即灭=竿静持随之解除。
+    // ★拉杆溅花补位（AI_061 :54626-54631 `ai[1]>0 && localAI[1]!=0 → DoASplash`，即
+    //   PullBobber else 支 :53082 bobber.ai[1]=localAI[1] 后的第一拍）——原版物品渔获
+    //   拉出水面必溅;本仓携物飞行缺席=拉杆拍即溅花位。岩浆/蜂蜜免溅门
+    //   `!lavaWet && !honeyWet`（:54629）以 liquidKind 承载（同 :243 断线位口径——
+    //   两溅花位判值时刻浮漂均尚在液内,静态位 ≙ 原版粘滞位）。断线支（retract=2）
+    //   的溅花在 fixedUpdate :243 侧,与此互斥不重播
     // ★收竿带渔获置位（Player.cs:53082 else 支 bobber.ai[1]=localAI[1],断线/敌怪支
     //   不置）——FakeFish CheckLatch(:158-165) 据此判「本鱼即渔获」自灭;本仓浮漂即时
     //   Kill 等不到鱼下一 tick 的检查,releaseCaughtFakeFish 时点直驱补偿
     this.ai1 = caught;
     this.caughtVid = caught;
+    // 拉杆溅花（:54626-54631 补位,见上注）——渔获拉出水面即溅（岩浆/蜂蜜免溅）
+    if (this.liquidKind === 'water' || this.liquidKind === null) this.doSplash(game);
     releaseCaughtFakeFish(this.fakeFishView(), caught);
     this.dead = true;
-    void game;
     return caught;
   }
 

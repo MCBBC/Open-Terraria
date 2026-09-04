@@ -7,7 +7,7 @@
     "dev": "vite",
     "l10n": "node scripts/build-l10n.mjs",
     "build": "node scripts/build-l10n.mjs && node scripts/pack-assets.mjs && tsc && vite build && node scripts/prune-dist.mjs && node scripts/gen-sw-twa.mjs",
-    "build:release": "npm run test:audit && node scripts/build-l10n.mjs && node scripts/pack-assets.mjs && export SW_DIST_DIR=${SW_RELEASE_DIR:-dist-release} && vite build --outDir \"$SW_DIST_DIR\" --emptyOutDir && RELEASE=1 STRIP_DEBUG=${STRIP_DEBUG:-1} node scripts/prune-dist.mjs && node --max-old-space-size=6144 tools/obfuscate-dist.mjs && RELEASE=1 STRIP_DEBUG=${STRIP_DEBUG:-1} node tools/audit-dist.mjs && node scripts/gen-sw-twa.mjs dist-release",
+    "build:release": "npm run test:audit && node scripts/build-l10n.mjs && node scripts/encode-sounds-opus.mjs && node scripts/pack-assets.mjs && export SW_DIST_DIR=${SW_RELEASE_DIR:-dist-release} && vite build --outDir \"$SW_DIST_DIR\" --emptyOutDir && RELEASE=1 STRIP_DEBUG=${STRIP_DEBUG:-1} node scripts/prune-dist.mjs && node --max-old-space-size=6144 tools/obfuscate-dist.mjs && RELEASE=1 STRIP_DEBUG=${STRIP_DEBUG:-1} node tools/audit-dist.mjs && node scripts/gen-sw-twa.mjs dist-release",
     "build:release:full": "PRUNE_DIST=0 npm run build:release",
     "preview": "vite preview",
     "preview:release": "vite preview --port 4176 --outDir dist-release --strictPort",

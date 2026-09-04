@@ -934,12 +934,17 @@ function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
  *    final   = dst×(1−src.a) + src.rgb = dst×(1−texA×cA) + texP.rgb×cRGB
  *  canvas 两步精确等价（每尘 2 次 drawImage,零逐帧 getImageData）:
  *    ① 'destination-out' 画 erase 面（alpha=texA×cA,按贴图形状限域）→ dst×(1−texA×cA)
- *    ② 'lighter' 画 add 面（RGB=texP×cRGB、A=255 全额加法）→ +texP.rgb×cRGB
+ *    ② 'lighter' 画 add 面（RGB=texP×cRGB、A=max(e,预乘rgb)≥e）→ α 项 +≥e 与
+ *      rgb 项 +texP.rgb×cRGB 合成 out = dst×(1−e)+texP×cRGB（2026-09-04 起——旧
+ *      A=255 档在半透 worldLayer 把天空挡死=水花黑十字,见循环内注;add 面按
+ *      【直色】putImageData 回存,浏览器预乘换算在画布内完成）
  *  A=0 档（cA=0）自动退化为纯加法（erase 无操作）——与既有 A=0 'lighter' 通道同式。
  *
  *  入参 mR/mG/mB/mA 为字节化乘数（0-255,调用侧 Math.round(c×255)）:直色→预乘×Color
  *  单次量化（round(tex×texA×m/255²)）与 XNA shader 输出 8bit 同精度。
- *  返回两张 RGBA 面:add.A 钉 255、erase.RGB 置 0（blend 不读）。 */
+ *  返回两张 RGBA 面:add.A=max(e,预乘)（cA≈0 档二值 255/0）、erase.RGB 置 0（blend 不读）。
+ *  ★add[] 字节为【直色】值（直色 rgb + α=存面α）——消费只经 putImageData/drawImage
+ *  'lighter'（预乘换算在画布内完成）,勿按预乘直读。 */
 export function dustPremulBake(
   tex: Uint8ClampedArray, mR: number, mG: number, mB: number, mA: number,
 ): { add: Uint8ClampedArray; erase: Uint8ClampedArray } {
@@ -953,13 +958,31 @@ export function dustPremulBake(
     add[i] = aR; add[i + 1] = aG; add[i + 2] = aB;
     // ★2026-09-03 黑方块定谳（用户实报"叶尘/尾焰尘变黑色实心方块"）：add.A 曾恒 255
     //  ——rgb=0 的 texel（帧透明角/叶尘黑晕圈）经 'lighter' 把 worldLayer 透明区
-    //  抬成 a=255 黑 → 合成 source-over 替换天空=黑方块（十字帧角被抬=方块化；
-    //  与拖尾 premul 陷阱同根：rgb=0 加算贡献恒 0,a 抬升纯害）。修=有 rgb 值的
-    //  texel a=255（'lighter' rgb 加成在预乘域=a=255 全额通过）、rgb=0 的 a=0。
-    //  ★判据读【量化后】rgb（Uint8ClampedArray 自 round）——float 判据会漏
-    //  "暗 texel×低 m → 量化归 0"档（哨兵 1954 违例即此,如 147×255×0.608→0.35）。
-    add[i + 3] = add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0;
-    erase[i + 3] = (tA * mA) / 255;
+    //  抬成 a=255 黑 → 合成 source-over 替换天空=黑方块（十字帧角被抬=方块化）。
+    // ★2026-09-04 水花黑十字定谳（用户实报"箭入水花边缘变黑+显大"）：黑方块修的
+    //  "有 rgb 则 a=255" 二值残段在同管线下半透 dst 域炸出同族伪影——lit 尘画进
+    //  半透明 worldLayer，'lighter' 把 src.a 全额累进 alpha；空中（dst≈透明）尘格
+    //  α 被顶满 255 → compositeLight 后 source-over 挡死天空，只剩量化后微量 rgb
+    //  =黑色实心十字（软边 texel rgb 最小 → 边缘最黑；同迹：探针 _splash-dust-
+    //  verdict.mjs 水面十字水下蓝/水上黑）。XNA 语义 src.a = texA×cA = e（与 erase
+    //  同源同值），'lighter' α 加算后 out.a = dst.a×(1−e)+e 恰合公式第二项。修=
+    //  add.A 钉 e；putImageData 按【直色】解释回存，直色 rgb = 预乘×255/存面α。
+    //  预乘面 rgb≤a 约束 vs XNA 允许 rgb>a（colorPass/331 亮色档）→ 存面 α 取
+    //  max(e, aR,aG,aB)：rgb 恒逐字节精确可表；α 仅在 rgb>e 的亮点位过冲到
+    //  rgb 本值（远小于旧 255;本体 num 档 rgb≤e 恒 α=e 精确——水花即此档）。
+    //  e<0.5（含 cA=0 纯加性档）：直色面无法表达 rgb>0 且 a≈0，沿用二值 a=255/0
+    //  （A=0 家族运行时走 A=0 'lighter' 直绘支不经烘焙对，此支仅数学契约保真）。
+    const e = (tA * mA) / 255;
+    if (e >= 0.5) {
+      const m = Math.max(e, aR, aG, aB);
+      add[i] = (aR * 255) / m;
+      add[i + 1] = (aG * 255) / m;
+      add[i + 2] = (aB * 255) / m;
+      add[i + 3] = m;
+    } else {
+      add[i + 3] = add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0;
+    }
+    erase[i + 3] = e;
   }
   return { add, erase };
 }

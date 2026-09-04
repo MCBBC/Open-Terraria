@@ -13,6 +13,15 @@
 //     4：蛇形（垂直向 ×cos(t·π/45)×3，ai1=1 时起步相位 +45）；5：40u 后
 //     g0.08；6：30u 后 g0.1），终端 vy 16、rotation=atan2+π/2、
 //     GetCeleb2Color 变体光。
+// ★通用湿段定谳（2026-09-04 溅花缺口批）：本文件弹 id 豁免面逐 id 核对——
+//   · 持械枪口 714 :7574-7585 `ignoreWater=true`@:7584 / 615 :6622-6633
+//     true@:6632 → 【豁免】不接湿段（挂手位弹,velocity 亦非位移源）。
+//   · 烟花弹 715/717 :7586-7597、716/718 :7598-7609 均无 ignoreWater 行 → 【受段】,
+//     Celeb2Rocket 已接（位序=每子步 AI(switch) → 湿段(:16903) → 位移(:19973)，
+//     extraUpdates=2 → 每拍 3 子步各跑一次,与原版子步环 :16781 同频）。
+//   · "子爆"=Kill 内原位 Resize+Damage()+AI_147_Explosion（:75037-75049）,原版
+//     【不 spawn 子弹实体】→ 无子爆弹 id 可枚举（本仓 explodeAt 直爆同构）;
+//     派对机枪 616 彩带弹走 Arrow 载体（Arrow 湿段域,非本文件）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -20,6 +29,8 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -180,6 +191,24 @@ export class Celeb2Rocket extends Entity {
   private rot = 0;
   private onExplode: (x: number, y: number, damage: number, oldVx?: number) => void;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
+  //  → projWetSection 共享体接入;豁免核对：715/717 :7586-7597、716/718 :7598-7609
+  //  均【无】ignoreWater 行 → 受段）----
+  //  位序口径：原版每【子步】（extraUpdates=2 → 3 子步/拍,子步环 :16781）跑
+  //  AI()(:16880) → 湿段(:16903) → HandleMovement(:17120)/UpdatePosition(:19973)
+  //  → 本类 wet 段置 step() 内 switch（AI_147）后、位移行前;wetCount 冷却窗亦逐
+  //  子步 −1（:17109-17112 在子步环内）,与原版同频。湿阻尼 :17721-17764 读【本
+  //  子步刷新后】旗;aiStyle 147 不在 UpdatePosition 跳过表（:20551）→ 阻尼适用。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行——首子步
+   *  同位=出生盒,原版 NewProjectile 时点等价） */
+  presetDone = false;
+
   constructor(projId: number, variant: number, x: number, y: number, vx: number, vy: number,
     damage: number, knockback: number, ai1Flag: boolean,
     onExplode: (x: number, y: number, damage: number, oldVx?: number) => void) {
@@ -277,8 +306,16 @@ export class Celeb2Rocket extends Entity {
       default:
         break;
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    // ---- ★通用湿段（:16903-17113,共享体;每子步一次,溅花尘/音=wetSplashStepShared
+    //      弹面 10 粒）---- case4 蛇形侧移（:50154-50156 position 直改）属 AI 相位
+    //      置位,原版阻尼只作用于 UpdatePosition 的 velocity 积分 → 侧移【不】吃阻尼
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度【场】不减只削
+    // 位移（UpdatePosition :20557 position += wetVelocity,直积分乘进位移行）
+    const df = projWaterDragFactor(this);
+    this.x += this.vx * df;
+    this.y += this.vy * df;
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty)) { this.dead = true; return; }

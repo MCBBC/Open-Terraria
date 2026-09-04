@@ -7228,7 +7228,14 @@ Checkpoint("dungeon"); DgFlow("END");   // #32 转录落地（原 slush 同态�
         for (int s = 0; s < 32; s += 8) fh = (fh ^ ((v >> s) & 0xffu)) * 16777619u;
     }
     for (int s = 0; s < 32; s += 8) fh = (fh ^ ((uix2 >> s) & 0xffu)) * 16777619u;
-    Console.Error.WriteLine($"DGFLOW dungeon-rand-fnv={fh:x8} (x86真值 f890f8a6)");
+    // ★IIIII157 锚重定：f890f8a6=k243293 系 1456 时代 rig 锚（1457 gothic 掷 R11-D2+
+    //   gothic 门⑥+6156 第三掷 KKKKKKK 合法移流后不可再命中）——1457 真值改锚
+    //   mile8 认证 JS 链 dungeon 末态：seed 9293480/E0=c20d461f、
+    //   seed 1511931452/E1=26fec909（本行只印 seed9293480 口径对照）。
+    if (seed == 9293480 && evil == 0)
+        Console.Error.WriteLine($"DGFLOW dungeon-rand-fnv={fh:x8} (1457真值 c20d461f=JS mile8 认证;旧 1456 锚 f890f8a6 已废——IIIII157)");
+    else
+        Console.Error.WriteLine($"DGFLOW dungeon-rand-fnv={fh:x8} (异种子常量注解不适用——IIIII157 重锚后按对代际 JS 链核)");
 }
 // ---- Dungeon 局部函数（均在隐式 Main 作用域内，可前向引用）----
 // InAnyPotentialDungeonBounds（outer，fluff=0 → Rectangle.Contains 半开区间）
@@ -9599,7 +9606,9 @@ int[] DgPrefixClass(int item) => item switch
 {
     155 => DgPre.Swords, 156 => DgPre.Acc, 157 => DgPre.Magic, 163 => DgPre.Spears, 113 => DgPre.Magic,
     3317 => DgPre.Boom, 164 => DgPre.Guns, 1156 => DgPre.Guns, 1571 => DgPre.Boom, 1569 => DgPre.Boom,
-    1260 => DgPre.Magic, 1572 => DgPre.Summon, 4607 => DgPre.Summon, 5465 => DgPre.Acc, _ => null
+    1260 => DgPre.Magic, 1572 => DgPre.Summon, 4607 => DgPre.Summon, 5465 => DgPre.Acc,
+    6156 => DgPre.Acc,   // ★IIIII157：KKKKKKK 同款（JS DungeonPass :165 6156:'acc'）——6156 Prefix(-1) 掷
+    _ => null
 };
 void DgPrefixRolls(int item)
 {
@@ -9614,6 +9623,10 @@ void DgPrefixRolls(int item)
 // AddBuriedChest（WorldGen.cs:35920-37600）——放置 + 战利品掷骰流（物品不入哈希，仅流对齐）
 bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
 {
+    // ★IIIII157：C|调用点观测行（与 JS DungeonPass SW_DG_CHEST_TRACE 逐字段同构——
+    //   C|ix|jy|mainItem|style|chestTile|主流态FNV@调用时点）——箱调用序列/流态双侧对拍
+    if (Environment.GetEnvironmentVariable("DG_CHEST_TRACE") != null)
+        Console.Error.WriteLine($"C|{i}|{j}|{mainItem}|{style}|{(chestTile == 21 ? 21 : 467)}|{DgStreamFNV():x8}");
     for (int k = j; k < H - 10; k++)
     {
         if (act[k * W + i] != 0 && typ[k * W + i] == 231) return false;
@@ -9715,6 +9728,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                 {
                     if (!dgShadowKey || r.Next(3) == 0) dgShadowKey = true;
                     if (!dgRamRune || r.Next(8) == 0) { dgRamRune = true; DgPrefixRolls(5465); }
+                    if (r.Next(4) == 0) DgPrefixRolls(6156);   // ★IIIII157：6156 第三掷（1457 cs:36953/:37254；KKKKKKK JS :4553/:4604 同款）——曾缺=G 段主流相移 dungeonG 起全链红根因
                 }
             }
             else
@@ -9746,6 +9760,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                 {
                     if (!dgShadowKey || r.Next(3) == 0) dgShadowKey = true;
                     if (!dgRamRune || r.Next(8) == 0) { dgRamRune = true; DgPrefixRolls(5465); }
+                    if (r.Next(4) == 0) DgPrefixRolls(6156);   // ★IIIII157：6156 第三掷（1457 cs:36953/:37254；KKKKKKK JS :4553/:4604 同款）——曾缺=G 段主流相移 dungeonG 起全链红根因
                 }
             }
             else
@@ -11918,7 +11933,8 @@ bool AddBuriedChestGen(int i, int j, int mainItemInChest, int chestStyle, ushort
                     if (fDun && !fLock)
                     {
                         if (!genShadowKey || (int)r.Next(3) == 0) { genShadowKey = true; itemIndex++; }
-                        if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; itemIndex++; }
+                        if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; DgPrefixRolls(5465); itemIndex++; }   // ★IIIII157：5465 Prefix(-1) 掷补齐（JS rollChestLoot :571/:642 同款；本块链内休眠——金字塔/丛林箱无地牢墙背景）
+                        if (r.Next(4) == 0) { DgPrefixRolls(6156); itemIndex++; }   // ★IIIII157：6156 第三掷（1457 cs:36953/:37254；JS rollChestLoot :578/:646 同款）
                     }
                 }
                 else
@@ -11958,7 +11974,8 @@ bool AddBuriedChestGen(int i, int j, int mainItemInChest, int chestStyle, ushort
                     if (fDun && !fLock)
                     {
                         if (!genShadowKey || (int)r.Next(3) == 0) { genShadowKey = true; itemIndex++; }
-                        if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; itemIndex++; }
+                        if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; DgPrefixRolls(5465); itemIndex++; }   // ★IIIII157：5465 Prefix(-1) 掷补齐（JS rollChestLoot :571/:642 同款；本块链内休眠——金字塔/丛林箱无地牢墙背景）
+                        if (r.Next(4) == 0) { DgPrefixRolls(6156); itemIndex++; }   // ★IIIII157：6156 第三掷（1457 cs:36953/:37254；JS rollChestLoot :578/:646 同款）
                     }
                 }
                 else
@@ -17718,6 +17735,7 @@ Replay(); // ▶MicroBiomes cs:21785
             // flag9 门（首暗影钥匙必给后 1/3；Ram Rune 1/8 带 Prefix）
             if (!genShadowKey || (int)r.Next(3) == 0) genShadowKey = true;
             if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; MbPrefixRolls(5465); }
+            if ((int)r.Next(4) == 0) MbPrefixRolls(6156);   // ★IIIII157：6156 第三掷（JS rollChestLoot :578/:646 同款；MbPrefixRolls 6156→cls0 零掷=JS BuriedChests PRE_CLASS 缺 6156 同构零掷，双侧休眠等价）
         }
         if (Environment.GetEnvironmentVariable("MB_TRACE") != null)
             Console.Error.WriteLine($"MBIVYLOOT gy={gy} mainId={mainId} dg={flagDungeon} isGold={((gy < rockLayer) ? 1 : 0)} n={QRollWrap.N}");

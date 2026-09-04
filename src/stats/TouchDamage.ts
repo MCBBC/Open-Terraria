@@ -35,7 +35,7 @@ const setOf = (sheets: number[]) => new Set(sheets.map(tid).filter((v) => v >= 0
  * DrownCollision 豁免行（Collision.cs:1418）tileSolidTop 项消费——不可用
  * TileStore.isPlatform 代替：其带 nactive() 致动闸,致动平台原版恒吃 tileSolidTop。
  */
-const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+export const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427, 435, 436, 437, 438, 439]);
 
 /**
  * 触碰直接伤害【基准】值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等）。

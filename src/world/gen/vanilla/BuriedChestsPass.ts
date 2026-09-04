@@ -543,6 +543,21 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4460);
       }
       if (flag12 && rng.int(0, 39) === 0) { push(4978); prefixRolls(rng, 4978); } // cs:36568 1/40 幼翼（Prefix 调用点）
+      // ★IIIII108d（planetoids #42 定罪；1458 cs:36935-36953）：金档 flag6 天空三连——
+      //   原版此三连在【地表档(cs:36603-36654)与金档(cs:36935-36953)两处】各有一份
+      //   （5629/4429 全库仅此两 loot 位;grep 实证），JS 曾只移植地表档那份（:484-488），
+      //   金档 mainId>0 路径整缺 ⇒ style12 天空箱（落定格邻墙 244 → flags.sky）落到
+      //   金档带（gy ≥ ws+25 且 < rockLayer）时漏掷 3 骰。planetoids 活木房箱
+      //   (2282,363)（gy=364 ≥ 362=ws+25,树锚在圆盘地形上比 g 链低）正中此域：
+      //   vanilla 三连 miss/miss/hit(5528 入箱,w.wld 直读实证) 后房下竖井 6 步段
+      //   边界骰全相移 → 井筒蛇形走位分叉（y371..489, mile8 #42 A=416/T=795/W=406）。
+      //   掷面：flag6 短路,非 sky 箱零掷（对既有绿链零扰动——认证链活木房箱均未落
+      //   金档带,故从未暴露）。
+      if (flags.sky) {
+        if (rng.int(0, 2) === 0) push(5629);                            // cs:36923
+        if (rng.int(0, 5) === 0) push(rng.int(0, 1) === 0 ? 4429 : 4427); // cs:36925-36940
+        if (rng.int(0, 2) !== 0) push(5528);                            // cs:36942
+      }
       // 地牢箱 flag9 门（cs:36597-36611，flag10 上锁箱不给钥匙）：
       // 首只暗影钥匙必给（无则 1/3）、Ram Rune 1/8
       if (flags.dungeon && !flags.lockedBiome) {
@@ -555,6 +570,12 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
           push(5465);
           prefixRolls(rng, 5465);
         }
+        // ★IIIII154：6156 第三掷（1457 cs:36950-36955 ≡1458 :36959-36964）——块内恒掷
+        //   Next(4)（无 GenVars 簿记），命中→6156+Prefix(-1)。DungeonPass 两副本
+        //   KKKKKKK 已接（:4553/:4604），本文件两副本漏接=IIII108d 交办潜伏账定谳。
+        //   旗9 箱=tile21∧style≠0∧IsDungeon∧非上锁群系箱——认证链 BuriedChests 段
+        //   从未产生此类箱（17 链 mile8 全绿在案）=本次补掷零触及。
+        if (rng.int(0, 3) === 0) { push(6156); prefixRolls(rng, 6156); }
       }
       // ★ivy(3360/3361/4426/5525) 附赠原版只在洞穴分支（cs:36864-36880）——
       // 金箱分支无 flag4 段（cs:36545-36703），曾误带致常春藤箱落金箱深度多整套附赠
@@ -620,6 +641,9 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
           push(5465);
           prefixRolls(rng, 5465);
         }
+        // ★IIIII154：中深支 6156 第三掷（1457 cs:37251-37256 ≡1458 :37260-37265）——
+        //   同金支，块内恒掷 Next(4)，命中→6156+Prefix(-1)（K 批 DungeonPass :4604 同款）。
+        if (rng.int(0, 3) === 0) { push(6156); prefixRolls(rng, 6156); }
       }
     } else {
       // 主件(cs:36911-36975)：num25=Next(7) 先掷恒消耗（种子对齐），再掷 906/997 门。

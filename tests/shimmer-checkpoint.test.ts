@@ -36,7 +36,7 @@ import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass'
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass, runGemsPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
-import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runUnderworldPass, underworldAshGrassTrees } from '../src/world/gen/vanilla/UnderworldPass';
 import { runHellFortPass } from '../src/world/gen/vanilla/HellFortPass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
@@ -155,6 +155,10 @@ function shimmerChain(seedText: string, evil: 0 | 1) {
   runWebsPass(st, rng, gs); snap('webs');
   replay(); // ▶Underworld cs:13697
   runUnderworldPass(st, rng, gs);
+  // ★IIIII154：⑧ 灰烬草 633+灰烬树 634（cs:13869-13915，AddHellHouses 前=WorldGen.ts:1357
+  //   管线同序、oracle 同位内联）——本链回放曾整支缺调=gems 起网格分叉根因（stream 经
+  //   pass 头重播自愈对齐、网格携带 underworld 区 633 缺失,IIIII154 定谳）。
+  if (!gs.seedFlags.remix && !gs.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gs, false);
   runHellFortPass(st, rng, gs); // Ⅲ 批：原版 AddHellHouses 在 Underworld pass 尾（cs:13893）——金标再生窗口接线（RRR 演练发现）
   snap('underworld');
   replay(); // ▶CorruptionAndCrimson cs:13919

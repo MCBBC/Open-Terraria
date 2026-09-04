@@ -159,7 +159,9 @@ export function snapSavedHome(st: TileStore, x: number, y: number): [number, num
     // （泛出房间同含原锚点与自身,开门锚帧格属房间界集合）;全候选失败则返 null,
     // 调用方按既有路径优雅转 homeless。
     const ii = st.idx(x, cy);
-    if (st.flags[ii]) {
+    // ★G1谓词批(2026-09-04)：跳过集必须镜像 floodRoom 种子拒门（:542 已改
+    //  isActive）——已致动种子现在可入泛洪,不再预跳（位读 flags 同漏致动半边）
+    if (st.isActive(x, cy)) {
       const cT = st.type[ii];
       if (tileSolidLike(cT)) continue;
       const cDef = TILE_DEFS[cT];
@@ -319,7 +321,9 @@ function solidTilesIn(st: TileStore, x0: number, x1: number, y0: number, y1: num
     for (let x = x0; x <= x1; x++) {
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
-      if (st.flags[i] && tileSolidLike(st.type[i])) return true;
+      // ★G1谓词批(2026-09-04)：原版 Collision.SolidTiles（Collision.cs:3494）=
+      // `active() && !inActive() && tileSolid && !tileSolidTop`——补致动位半边
+      if (st.isActive(x, y) && tileSolidLike(st.type[i])) return true;
     }
   }
   return false;
@@ -405,19 +409,23 @@ export function scoreRoom(
     for (let i = rx1 + 1; i < rx2; i++) {
       if (!st.inBounds(i, j)) continue;
       const ii = st.idx(i, j);
-      if (!st.flags[ii] || sheetOf(st.type[ii]) === BOULDER_SHEET) continue;
+      // ★G1谓词批(2026-09-04)：地板候选首门=原版 nactive（WorldGen.cs:5881
+      //  `!Main.tile[i,j].nactive() || …`）——已致动格不作家点,flags 位读漏 !inActive 半边
+      if (!st.isActive(i, j) || sheetOf(st.type[ii]) === BOULDER_SHEET) continue;
       if (!tileSolidLike(st.type[ii])) continue;
       if (solidTilesIn(st, i - 1, i + 1, j - 3, j - 1)) continue; // 头顶 3 格净空
       const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
-      if (!st.flags[li] || !tileSolidLike(st.type[li])) continue; // 左右须实心
-      if (!st.flags[ri] || !tileSolidLike(st.type[ri])) continue;
+      // ★G1谓词批(2026-09-04)：左右支撑同门 nactive（WorldGen.cs:5881 尾两支
+      //  `!Main.tile[i∓1,j].nactive() || !tileSolid[...]`）
+      if (!st.isActive(i - 1, j) || !tileSolidLike(st.type[li])) continue; // 左右须实心
+      if (!st.isActive(i + 1, j) || !tileSolidLike(st.type[ri])) continue;
       let num = base;
       let centerCol = 0, chests = 0;
       for (let k = i - 2; k <= i + 2; k++) {
         for (let l = j - 4; l < j; l++) {
           if (!st.inBounds(k, l)) continue;
           const ci = st.idx(k, l);
-          if (!st.flags[ci]) continue;
+          if (!st.isActive(k, l)) continue; // ★G1谓词批(2026-09-04)：原版 tile.nactive()（WorldGen.cs:5890）
           const sh = sheetOf(st.type[ci]);
           if (IGNORED_IN_HOUSE_SCORE.has(sh)) continue;
           if (sh === DOOR_OPEN_SHEET && !isOpenDoorAnchorFrame(st, k, l)) continue;
@@ -465,8 +473,8 @@ export function checkRoomEnclosure(st: TileStore, x: number, y: number, extraSol
   //   default 档 → notValid）
   if (!st.inBounds(x, y)) return null;
   if (st.isSolid(x, y)
-    || (extraSolid !== undefined && st.flags[st.idx(x, y)] !== 0
-      && extraSolid.has(sheetOf(st.type[st.idx(x, y)])))) {
+    || (extraSolid !== undefined && st.isActive(x, y)
+      && extraSolid.has(sheetOf(st.type[st.idx(x, y)])))) { // ★G1谓词批(2026-09-04)：extraSolid 支=CheckSpawn 期 tileSolid[379] 翻转+nactive 门（WorldGen.cs:6108）
     lastRoomCheckFail = 'notValid';
     return null;
   }
@@ -491,15 +499,18 @@ export function checkRoom(st: TileStore, doorX: number, doorY: number): Room | n
  *  wall>0=TooManyUnsafeWalls/无墙=HoleInWallIsTooBig,B2 起逐格执行） */
 function hasLooseWallEvidence(st: TileStore, x: number, y: number): boolean {
   // TileID.Sets.HousingWalls（TileID.cs:377）：11 栅栏 / 386 高门 / 389
-  const wallLike = (ii: number): boolean => {
+  const wallLike = (wx: number, wy: number): boolean => {
+    const ii = st.idx(wx, wy);
     if (WALL_HOUSE.has(st.wall[ii])) return true;
-    if (!st.flags[ii]) return false;
+    // ★G1谓词批(2026-09-04)：tile 支=原版 nactive 门（WorldGen.cs:6143/:6151
+    //  `tile.nactive() && (tileSolid || HousingWalls)`）——flags 位读漏 !inActive 半边
+    if (!st.isActive(wx, wy)) return false;
     return tileSolidLike(st.type[ii]) || HOUSING_WALL_TILES.has(sheetOf(st.type[ii]));
   };
   let horiz = false, vert = false;
   for (let k = -2; k <= 2; k++) {
-    if (st.inBounds(x + k, y) && wallLike(st.idx(x + k, y))) horiz = true;
-    if (st.inBounds(x, y + k) && wallLike(st.idx(x, y + k))) vert = true;
+    if (st.inBounds(x + k, y) && wallLike(x + k, y)) horiz = true;
+    if (st.inBounds(x, y + k) && wallLike(x, y + k)) vert = true;
   }
   return horiz && vert;
 }
@@ -539,7 +550,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   // ★幽灵保域（2026-09-03）：BlockingWall/BlockingOpenGate/extraSolid 三支全在
   //  nactive 门内（原版 WorldGen.cs:6108-6127 `Main.tile[x,y].nactive() → …`）
   //  ——幽灵格（flags=0,type≠0）不封房不作门界,种子帧自检同域放行
-  if ((st.flags[si] & 1) !== 0
+  //  ★G1谓词批(2026-09-04)：nactive=active&&!inActive——位读 (flags&1) 漏致动半边,
+  //  已致动实心格会被误判房界（原版致动格可穿）→ 改读 isActive()
+  if (st.isActive(sx, sy)
     && (tileSolidLike(sT)
       || (sT !== 0 && doorFrameBoundary(sSheet, st.frameX[si], st.frameY[si]))
       || (sT !== 0 && extraSolid.has(sSheet)))) {
@@ -593,7 +606,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       lastRoomCheckFail = st.wall[i] > 0 ? 'unsafeWalls' : 'hole';
       return null;
     }
-    if (st.flags[i] && def) {
+    // ★G1谓词批(2026-09-04)：houseTile/臭虫置位同在 nactive 门内（WorldGen.cs:6108
+    //  `if nactive → houseTile[type]=true` + :6128-6137 630/631）——已致动格不登记
+    if (st.isActive(x, y) && def) {
       const sh = def.vanilla?.sheet ?? -1;
       markHouseTile(sh);
       // ★对抗修复批④（C-F5）：臭虫旗置位（CheckRoom cs:6128-6137 同构）。本仓
@@ -622,7 +637,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       const nsheet = ndef ? (ndef.vanilla?.sheet ?? -1) : -1;
       // ★幽灵保域（2026-09-03）：边界三支全在 nactive 门内（WorldGen.cs:6108-6127）
       //  ——幽灵格可穿透,泛洪继续（houseTile 登记同门,原版 :6109 在 nactive 内）
-      if ((st.flags[ni] & 1) !== 0
+      //  ★G1谓词批(2026-09-04)：nactive=active&&!inActive——位读 (flags&1) 漏致动
+      //  半边,已致动实心格会被误判房界阻断泛洪 → 改读 isActive()
+      if (st.isActive(nx, ny)
         && (tileSolidLike(nt)
           || (nt !== 0 && doorFrameBoundary(nsheet, st.frameX[ni], st.frameY[ni]))
           || (nt !== 0 && extraSolid.has(nsheet)))) {
@@ -668,9 +685,11 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   let fy = sy;
   // ★幽灵保域（2026-09-03）：房界只认活跃格（泛洪侧同口径——幽灵格非 BlockingWall,
   //  WorldGen.cs:6108 nactive 门）,幽灵残型继续下探
+  //  ★G1谓词批(2026-09-04)：同口径 nactive=active&&!inActive（IsActive 门）,位读改
+  //  isActive——已致动实心格非房界,下探/种子自检与泛洪边界三分支保持同一谓词
   while (fy < st.h - 2
-    && !((st.flags[st.idx(sx, fy)] & 1) !== 0 && tileSolidLike(st.type[st.idx(sx, fy)]))) fy++;
-  const startSolidLike = st.flags[st.idx(sx, sy)] && tileSolidLike(st.type[st.idx(sx, sy)]);
+    && !(st.isActive(sx, fy) && tileSolidLike(st.type[st.idx(sx, fy)]))) fy++;
+  const startSolidLike = st.isActive(sx, sy) && tileSolidLike(st.type[st.idx(sx, sy)]);
   const standIdx = st.idx(sx, Math.max(sy, fy - 1));
   if (startSolidLike || fy >= st.h - 2 || !tiles.has(standIdx)) {
     lastRoomCheckFail = 'notValid';
@@ -719,9 +738,11 @@ export function findFreeHouse(
         const leftSame = st.inBounds(x - 1, y) && sheetOf(st.type[st.idx(x - 1, y)]) === sheetOf(t);
         // ★幽灵保域（2026-09-03）：上方格"非实心"判定补 flags bit0（幽灵格=非实心,
         //  泛洪可自其上方格起探——与 floodRoom 边界 nactive 门同口径）
+        //  ★G1谓词批(2026-09-04)：同口径升级 isActive（nactive=active&&!inActive,
+        //  已致动实心格可穿）——探针谓词与泛洪边界分支对齐
         const ai = st.idx(x, y - 1);
         if (!leftSame && st.inBounds(x, y - 1)
-          && !((st.flags[ai] & 1) !== 0 && tileSolidLike(st.type[ai]))) {
+          && !(st.isActive(x, y - 1) && tileSolidLike(st.type[ai]))) {
           room = floodRoom(st, x, y - 1);
         }
       }
@@ -800,7 +821,9 @@ export function queryRoom(st: TileStore, x: number, y: number,
   // 起点实心（StartedInASolidTile :6025-6032）——原版仅置 canSpawn=false 后继续
   // 泛洪（同轮后续检查会失败）；此处直接判失败等价（实心种子的泛洪无意义）。
   // ★C-F4：Main.tileSolid[379] 翻转窗内种子格同判实心（同构 checkRoomEnclosure 预检）
-  if (st.flags[st.idx(x, y)]
+  // ★G1谓词批(2026-09-04)：原版门= nactive && tileSolid（WorldGen.cs:6025）——位读
+  //  改 isActive（漏致动半边,已致动实心格不是 StartedInASolidTile）
+  if (st.isActive(x, y)
     && (tileSolidLike(st.type[st.idx(x, y)])
       || MAIN_EXTRA_SOLID.has(sheetOf(st.type[st.idx(x, y)])))) {
     return { room: null, flags, reason: 'solid' };

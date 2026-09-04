@@ -35,12 +35,32 @@
 //   (:54539-54546 直呼 AddChumLocation),过滤全在消费侧,本仓同构(chumReport 无门,
 //   Bobber/VanillaSpawner 两侧各自带原版过滤)。
 // 登记偏差：泡沫 gore(1201/1208)与浮泡粒子未接 GorePiece 表——以 spawnParticles 最小
-//   视觉近似;同型互斥扫描按 game.projectiles() 只读桶等价(原版 Main.projectile 全扫);
-//   液体 wet 判定 = 弹心格 liquid>0(Arrow 469 同口径近似原版 WetCollision)。
+//   视觉近似;同型互斥扫描按 game.projectiles() 只读桶等价(原版 Main.projectile 全扫)。
+//
+// ★通用湿段接入（2026-09-04 弹幕湿段缺口批,projWetSection.ts 共享体 1:1）：
+//   820 非 ignoreWater 豁免(SetDefaults :8021-8031 逐块无 ignoreWater 行=原版缺省
+//   false;数据面 PROJ_IGNORE_WATER 262 id 集缺 820 行,运行时
+//   !!projectileData(820)?.ignoreWater 复核)。位序 = 原版 Update:AI_163(读【上拍】
+//   旗)→ 湿段 :16903-17113 → HandleMovement(湿阻尼 :17721-17764 只削位移——本类
+//   直积分宿主,阻尼乘进 x+=/y+= 位移行)。★AI_163 自身入水物理(:54439-54494)与
+//   通用湿段溅花【两支都跑,一支不裁】:AI 分支消费上拍 wet 字段做 vx×0.9/vy×0.5/
+//   液面收敛;湿段在 AI 后当拍采样做入/出水溅花(10 粒)+四旗维护——首拍 AI 读的
+//   字段 = NewProjectile :10886-10892 出生预置(spawnPresetWet 在 AI 前补做)。
+//   原"弹心格 liquid"内联湿判定退役(原版 wet=盒 WetCollision,Collision.cs:1578
+//   缩减盒 10×h/2 中心带,且为逐拍维护字段非当拍重测);液面线同步换 AI_061_
+//   FishingBobber_GetWaterLine(:54805-54830)逐值 1:1——三档窗 [Y-1,Y,Y+1] 同式
+//   line=(行+1)*16−trunc(liquid/16)+全空档回退 num6=position.Y+height(盒底);
+//   ★共享 getWaterLine 的 found=false 门(深处 tx,ty-2 有液/边缘/超浅)原版无此
+//   分支——深桶原版照拉收敛线上浮至液面(逐相阶梯收敛),旧版放任下沉=偏差,随
+//   本批复位。AI_163 wet 分支头部的 direction/tile 空守卫块(:54444-54457)为死码
+//   (num3/num4 重赋值前无读),不移植。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
-import { getWaterLine } from './npcLiquid';
+import { wetCollision } from './npcLiquid';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { chumReport } from './chumBucket';
 
 export class ChumBucketProj extends Entity {
@@ -52,11 +72,54 @@ export class ChumBucketProj extends Entity {
   rot = 0;
   frame = 0;
 
+  // ---- ★通用湿段旗（ProjWetFlags 同名承载面,projWetSection.ts 共享体消费;
+  //      Projectile 同名字段——820 无 ignoreWater 豁免,全员受段）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.vx = vx; this.vy = vy;
     this.frame = (Math.random() * 4) | 0;
+  }
+
+  /** NewProjectile 出生预置（Projectile.cs:10886-10892 逐值 1:1）：出生盒
+   *  WetCollision 首测 + honey/shimmer 静态旗;★原版此点【不设】lavaWet（粘滞
+   *  首档由首拍 Update 湿段 :16906 并入——共享体常规段承接）;ignoreWater 仅清
+   *  wet（:10888-10890）,honey/shimmer 不随豁免清（原文字面,820 恒走 r.wet 支）。
+   *  时点 = 首拍 AI【前】（AI_163 首拍即消费 wet 旗）;出生位 = 构造位（首拍
+   *  位移前同位 ✔ = 原版 NewProjectile 采样时点）。 */
+  private spawnPresetWet(st: TileStore): void {
+    if (this.presetDone) return;
+    this.presetDone = true;
+    const r = wetCollision(st, this.x, this.y, this.w, this.h);
+    this.wet = !!projectileData(this.projId)?.ignoreWater ? false : r.wet;   // :10887-10890
+    this.honeyWet = r.honey;                                                 // :10891
+    this.shimmerWet = r.shimmer;                                             // :10892
+  }
+
+  /** AI_061_FishingBobber_GetWaterLine（Projectile.cs:54805-54830,逐值 1:1）：
+   *  三档窗 [Y-1,Y,Y+1]（Y=(int)Center.Y/16,X=(int)Center.X/16）同式
+   *  line=(液体行+1)*16 − trunc(liquid/16)（C# int 除）;三档全空回退
+   *  num6 = position.Y + height（盒底）。★原版无"found"门——深处/边缘照拉
+   *  收敛线（深桶逐相阶梯上浮至液面 = 原版本相,旧 getWaterLine found 门退役）。 */
+  private waterLine(st: TileStore): number {
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    const liq = (x: number, y: number): number => (st.inBounds(x, y) ? st.liquid[st.idx(x, y)] : 0);
+    const lAbove = liq(tx, ty - 1);
+    if (lAbove > 0) return ty * TILE - Math.trunc(lAbove / 16);          // :54820-54824
+    const lHere = liq(tx, ty);
+    if (lHere > 0) return (ty + 1) * TILE - Math.trunc(lHere / 16);      // :54825-54828
+    const lBelow = liq(tx, ty + 1);
+    if (lBelow > 0) return (ty + 2) * TILE - Math.trunc(lBelow / 16);    // :54829-54832
+    return this.y + this.h;                                              // :54807 回退=盒底
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -66,6 +129,8 @@ export class ChumBucketProj extends Entity {
     const cxT = Math.floor(this.cx / TILE), cyT = Math.floor(this.cy / TILE);
     if (!st.inBounds(cxT, cyT)) { this.dead = true; return; }
     if (--this.life <= 0) { this.dead = true; return; }
+    // ---- 出生预置（NewProjectile :10886-10892,首拍 AI 前同位首测——AI_163 首拍即消费 wet 旗）----
+    this.spawnPresetWet(st);
     // ---- 同型互斥推挤（AI_163 :54415-54437）：|dx|+|dy| < w/2 → 按相对方位 ±0.05 ----
     const others = game.projectiles?.() ?? [];
     for (const o of others) {
@@ -76,33 +141,31 @@ export class ChumBucketProj extends Entity {
       if (dx < 0) this.vx -= 0.05; else this.vx += 0.05;
       if (dy < 0) this.vy -= 0.05; else this.vy += 0.05;
     }
-    // ---- 湿身悬浮 vs 干抛物理（:54439-54502）----
-    const liqHere = st.liquid[st.idx(cxT, cyT)] > 0;
-    if (liqHere) {
-      this.vx *= 0.9;
-      if (this.vy > 0) this.vy *= 0.5;
-      const wl = getWaterLine(st, cxT, cyT);
-      if (wl.found) {
-        // num6 = 液面线（AI_061_FishingBobber_GetWaterLine 同源公式）;found=false
-        // （深处/超浅）放任下沉——vanilla 直拉收敛（:54478-54494）
-        if (this.cy > wl.line) {
-          this.vy -= 0.1;
-          if (this.vy < -8) this.vy = -8;
-          if (this.cy + this.vy < wl.line) this.vy = wl.line - this.cy;
-        } else {
-          this.vy = wl.line - this.cy;
-        }
+    // ---- 湿身悬浮 vs 干抛物理（:54439-54502,AI_163 消费【上拍】wet 字段）----
+    // ★wet = 原版逐拍维护字段（上拍湿段终值/出生预置）非当拍重测——本仓旧
+    //   "弹心格 liquid" 内联近似退役（WetCollision=盒 10×h/2 中心带,非弹心单格）
+    if (this.wet) {
+      this.vx *= 0.9;                                    // :54440
+      if (this.vy > 0) this.vy *= 0.5;                   // :54460-54462
+      const wl = this.waterLine(st);                     // num6（:54805 三档+回退,无 found 门）
+      if (this.cy > wl) {                                // :54472-54481
+        this.vy -= 0.1;
+        if (this.vy < -8) this.vy = -8;
+        if (this.cy + this.vy < wl) this.vy = wl - this.cy;
+      } else {
+        this.vy = wl - this.cy;                          // :54482-54485 else 直拉
       }
     } else {
-      if (this.vy === 0) this.vx *= 0.95;
+      if (this.vy === 0) this.vx *= 0.95;                // :54487-54497
       this.vx *= 0.98;
       this.vy += 0.3;
       if (this.vy > 15.9) this.vy = 15.9;
     }
     // ---- 自旋（:54522 rotation += vx*0.14）----
     this.rot += this.vx * 0.14;
-    // ---- 入水泡沫最小视觉（gore 1201/1208 未建表——spawnParticles 近似,登记偏差）----
-    if (liqHere && Math.random() < 0.05) {
+    // ---- 入水泡沫最小视觉（gore 1201/1208 未建表——spawnParticles 近似,登记偏差;
+    //      湿源随本批从 liqHere 换 this.wet 同步退役）----
+    if (this.wet && Math.random() < 0.05) {
       game.spawnParticles?.(this.x + 6, this.y + this.h,
         'rgba(220,240,255,0.55)', 1, 0.7,
         { life: 20, vx: (Math.random() - 0.5) * 1.4, vy: -Math.random(), damp: 0.96 });
@@ -115,11 +178,20 @@ export class ChumBucketProj extends Entity {
     if (timeLeftV > 60) {
       chumReport(this.cx, this.cy + 16, this.x, this.y, this.w, this.h);
     }
+    // ---- ★通用湿段（:16903-17113 全体弹共用段,projWetSection.ts 共享体 1:1）----
+    // 位序 = 原版 Update:AI_163（读上拍旗）→ 本段 → HandleMovement（阻尼在下方
+    // 位移行）。★AI_163 自身入水物理与通用湿段溅花两支都跑（原版同构,一支不裁）：
+    // AI 分支上面已跑（上拍旗）;本段当拍采样做入/出水溅花（10 粒,wetCount==0 门）
+    // + 四旗置位/三清 + wetCount 冷却窗——溅花尘/音由共享体 wetSplashStepShared
+    // 承载,本类不自写。820 无 SetDefaults 特支、不在 IsDestroyedByWater 六型 →
+    // 各钩缺省。采样位 = AI 后位移前 = 上拍移动结算位 ✔ 原版湿段同位。
+    projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // scale 缩没段仅视觉（lerp(timeLeft,60)）——画侧 s 由 drawScale 承载
     // ---- 位移（撞实心贴面驻留=原版真态,无 Kill——见文件头 ★A-5 裁决）----
     // 竖撞以【底缘】跨行探测钉合块面（原版 TileCollision 以整盒对格面 clamp 并清零
-    // 撞面分量）;曾用"下一中心格"探测——快落下坠时半身沉入块内 1-2 帧、慢落末段
-    // 每 ~20 拍回跳一次的锯齿抖动。
+    // 撞面分量——探测用【全场速度】,原版 TileCollision 同）;曾用"下一中心格"探测
+    // ——快落下坠时半身沉入块内 1-2 帧、慢落末段每 ~20 拍回跳一次的锯齿抖动。
     if (this.vy > 0) {
       const fx = Math.floor(this.cx / TILE);
       const feet = Math.floor((this.cy + this.vy + this.h / 2) / TILE);
@@ -135,8 +207,13 @@ export class ChumBucketProj extends Entity {
         this.vy = 0;
       }
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    // ★水中位移阻尼（HandleMovement :17721-17764 wetVelocity = velocity×档位
+    //   0.5 水/0.25 蜂蜜/0.375 微光/1 干——速度【场】不减、只削当拍位移;读【本拍
+    //   刷新后】旗 = 湿段 :16903 已先于本位跑）。直积分宿主：阻尼乘进 x+=/y+=
+    //   位移行（速度场原样,无除回）。
+    const drag = projWaterDragFactor(this);
+    this.x += this.vx * drag;
+    this.y += this.vy * drag;
   }
 
   get drawScale(): number {

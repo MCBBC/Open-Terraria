@@ -20,6 +20,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite } from './Arrow';
+import { projectileWetSection } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
@@ -2270,8 +2271,10 @@ export class MinionProj extends Entity {
       const cap = trusty ? 36 : 26;
       let probed = 0, damaged = 0;
       const digTile = (x: number, y: number): void => {
-        if (!st.inBounds(x, y)) return;
-        if (!st.isSolid(x, y)) return;                  // WorldGen.SolidTile3 门（:39466/:39485）
+        // WorldGen.SolidTile3 门（:39466/:39485 坐标重载）——★A-5 边带（2026-09-04）：
+        // 首门 InWorld(·,1)（WorldGen.cs:71006-71008）世界最外一圈不可采
+        if (!st.inWorld1(x, y)) return;
+        if (!st.isSolid(x, y)) return;
         probed++;
         if (game.petPickTile?.(x, y, pickPower, cap)) damaged++;
       };
@@ -5693,6 +5696,24 @@ export class TigerPounce extends Entity {
   private hitSet = new Set<number>();
   private ownerRef: () => Player | null;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口
+  //  清偿批,仆从弹类接入。四旗/wetCount/presetDone 形状=ProjWetFlags 共享体）----
+  //  逐 id 豁免核对：818 ∈ MinionShot（ProjectileID.cs:291）——SetDefaults
+  //  （P.cs:8007-8016：132×132/aiStyle 162/tileCollide=false）【ignoreWater=true
+  //  :8013】→ 豁免 id,湿段整段门恒闭（:16903）= 原版零行为（字段照加、段照调,
+  //  豁免分流由 ignoreWater 参数自动承载）。阻尼不适用定谳（双证）：①豁免;
+  //  ②818 ∈ UpdatePosition 早退表（P.cs:20551-20553 `type == 818` → position
+  //  不积分,位移全由 AI CatmullRom 曲线插值覆写 :44073-44078——非 velocity 积分
+  //  宿主,wetVelocity 档位无消费位）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(
     x: number, y: number, vx: number, vy: number, damage: number,
     owner: () => Player | null, ai0: number, ai1: number,
@@ -5709,6 +5730,11 @@ export class TigerPounce extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113,projWetSection 共享体 1:1）——818 豁免 id
+    //  （P.cs:8013 ignoreWater=true）→ 段门恒闭零行为;插 tick 头与 AI/位移序无
+    //  观察差（段内唯一可见面=溅花,豁免即恒无）。位移阻尼不适用（双证见字段块头）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      818, !!projectileData(818)?.ignoreWater);
     if (this.a0 < 0) { this.a0 += 4; return; } // 延迟隐身（:44058-44063，Opacity=0）
     if (!this.started) { this.started = true; this.sx = this.cx; this.sy = this.cy; } // :44066-44072
     // CatmullRom 控制点（:44073-44078：端点 -0.1/+1.1 外扩，垂度 = 距离×1.5）

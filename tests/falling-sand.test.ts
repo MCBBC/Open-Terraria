@@ -2,7 +2,8 @@
 // 失去支撑 → FallingBlock 坠落(重力 0.3/tick)→ 落地变回 tile;命中实体 10 伤害。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
-import { TILE_BY_KEY } from '../src/data/tiles';
+import { Game } from '../src/core/Game';
+import { TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { FallingBlock } from '../src/entities/FallingBlock';
 import type { GameHooks } from '../src/entities/types';
 
@@ -219,5 +220,120 @@ describe('FallingBlock', () => {
     expect(fb.dead).toBe(true);
     expect(world.store.get(34, 30)).toBe(TILE_BY_KEY['sand']!);   // 死亡面(31)上一格
     expect(world.store.get(34, 31)).toBe(TILE_BY_KEY['stone']!);
+  });
+});
+
+// ===================== ★③（2026-09-04 掉落/碰撞族）弹 411-414 钱币堆落弹
+// 专配第二重碰撞（Projectile.cs:17707-17712 AnyCollisionWithSpecificTiles(
+// TileID.Sets.Falling, evenActuated:true)）——钱币堆 330-333 tileSolid=false,
+// 无此门则落堆穿堆;有此门=自上方接近钳堆顶 → 死亡格=堆面上一格 → Kill :79274-79277
+// PlaceTile(forced) 逐格堆高。对照:31/56 等"实心落弹族"无此碰撞=照穿（:17707 else-if
+// 只挂 411-414 四型）。 =====================
+
+describe('③ 钱币堆落弹堆叠碰撞（Projectile.cs:17707-17712）', () => {
+  const COPPER = TILE_BY_KEY['v_330_copper_coin_pile']!;
+  const clearCol = (w: World, x: number, y0: number, y1: number) => {
+    for (let y = y0; y <= y1; y++) w.store.setTile(x, y, 0, 0, 0);
+  };
+
+  it('铜币堆落弹落在旧铜币堆上 → 堆上堆（堆面上一格）,不掉件（盒底上穿堆顶当拍钳位）', () => {
+    const { game, world, drops } = makeGame();
+    clearCol(world, 32, 8, 18);
+    world.store.setTile(32, 20, TILE_BY_KEY['stone']!, 0, 0);
+    world.store.setTile(32, 19, COPPER, 0, 0);        // 旧铜币堆（非实心）
+    const fb = new FallingBlock(32 * 16 + 3, 10 * 16 + 3, 'v_330_copper_coin_pile');
+    for (let i = 0; i < 240 && !fb.dead; i++) fb.fixedUpdate(1 / 60, game);
+    expect(fb.dead).toBe(true);
+    expect(world.store.get(32, 18)).toBe(COPPER);     // 堆上堆（死亡格=堆面上一格=18）
+    expect(world.store.get(32, 19)).toBe(COPPER);     // 旧堆原样
+    expect(drops).toEqual([]);                        // 放置成功支不掉（num18 通道未走）
+  });
+
+  it('对照:沙弹（弹 31）无第二重碰撞 → 穿非实心堆落地面,死亡格=堆格被占 → 掉 169', () => {
+    const { game, world, drops } = makeGame();
+    clearCol(world, 33, 8, 18);
+    world.store.setTile(33, 20, TILE_BY_KEY['stone']!, 0, 0);
+    world.store.setTile(33, 19, COPPER, 0, 0);
+    const fb = new FallingBlock(33 * 16 + 3, 10 * 16 + 3, 'sand');
+    for (let i = 0; i < 240 && !fb.dead; i++) fb.fixedUpdate(1 / 60, game);
+    expect(fb.dead).toBe(true);
+    expect(world.store.get(33, 19)).toBe(COPPER);     // 堆原样（不堆叠——31 不吃该碰撞）
+    expect(world.store.get(33, 18)).toBe(0);
+    expect(drops.length).toBe(1);                     // 死亡格(19)被占 → :79298-79301 掉 169
+    expect(drops[0][0]).toMatch(/^vi_169_/);
+  });
+
+  it('嵌入态不触发:积分前盒底已越堆顶（自上方臂 vector3.Y+Height<=vector4.Y 不成立）→ 穿堆续坠', () => {
+    // 构造:弹出生即与堆格底边重叠（spawn 底=格顶+3+10=+13 越过下行堆顶不可能,改用
+    // 半程快照:直接把弹放在堆格内启动——自上方臂败=穿堆,落地面死亡格=堆上一格被占掉件）
+    const { game, world, drops } = makeGame();
+    clearCol(world, 32, 8, 18);
+    world.store.setTile(32, 20, TILE_BY_KEY['stone']!, 0, 0);
+    world.store.setTile(32, 19, COPPER, 0, 0);
+    // 弹心放堆格正中（y=19*16+8,盒底=19*16+13 已越堆顶 19*16=304）
+    const fb = new FallingBlock(32 * 16 + 3, 19 * 16 + 3, 'v_330_copper_coin_pile');
+    for (let i = 0; i < 240 && !fb.dead; i++) fb.fixedUpdate(1 / 60, game);
+    expect(fb.dead).toBe(true);
+    expect(world.store.get(32, 19)).toBe(COPPER);     // 堆原样（未堆叠——嵌入态无钳位）
+    expect(world.store.get(32, 18)).toBe(0);          // 堆上无新堆
+    expect(drops.length).toBe(1);                     // 落地面死亡格(19)被占 → 掉 71 铜币
+    expect(drops[0][0]).toMatch(/^vi_71_/);           // 330 → 弹 411 → num18=71（CopperCoin）
+  });
+});
+
+// ===================== ★⑥（2026-09-04 掉落/沙族批）AllowsSandfall 上方拒支门
+// （WorldGen.cs:87335 → :87895-87907,触发侧 SpawnFallingBlockProjectile）——
+// 上方承箱柜/仙人掌/祭坛/晶塔等整件时沙不塌 =====================
+
+describe('⑥ AllowsSandfall 上方拒支门（WorldGen.cs:87895-87907）', () => {
+  /** drainSandQueue 壳（同 active-gates-tb4 ⑤ B-3 桩面） */
+  function dqShell(w: World) {
+    const projs: unknown[] = [];
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    g.world = w;
+    g.entities = { add: (e: unknown) => { projs.push(e); }, projectiles: [] };
+    return { g: g as unknown as { sandQueue: Array<[number, number]>; drainSandQueue(): void }, projs };
+  }
+  const SAND = TILE_BY_KEY['sand']!;
+  const CHEST = TILE_INTERNAL_BY_SHEET.get(21)!;
+  const CAC = TILE_BY_KEY['v_80_cactus']!;
+  const ALTAR = TILE_INTERNAL_BY_SHEET.get(26)!;
+
+  function mkWorld(): World {
+    const w = new World(40, 40, 29, 'fs-allowsand');
+    for (let x = 2; x < 38; x++) for (let y = 8; y <= 30; y++) w.store.setTile(x, y, 0, 0, 0);
+    return w;
+  }
+
+  it('上方=箱 21/恶魔祭坛 26/仙人掌 80 → 沙不塌（tile 原样,零弹体）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(10, 20, CHEST, 0, 0);
+    st.setTileSilent(10, 21, SAND, 0, 0);
+    st.setTileSilent(12, 20, ALTAR, 0, 0);
+    st.setTileSilent(12, 21, SAND, 0, 0);
+    st.setTileSilent(14, 20, CAC, 0, 0);
+    st.setTileSilent(14, 21, SAND, 0, 0);
+    const { g, projs } = dqShell(w);
+    g.sandQueue = [[10, 21], [12, 21], [14, 21]];
+    g.drainSandQueue();
+    expect(st.type[st.idx(10, 21)]).toBe(SAND);       // 箱下沙不塌（BasicChest）
+    expect(st.type[st.idx(12, 21)]).toBe(SAND);       // 祭坛下沙不塌（裸表 26）
+    expect(st.type[st.idx(14, 21)]).toBe(SAND);       // 仙人掌下沙不塌（裸表 80）
+    expect(projs.length).toBe(0);
+  });
+
+  it('上方=普通实心（土）→ 照塌（拒支集外）;上方空 → 照塌（!active 不拒）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(10, 20, TILE_BY_KEY['dirt']!, 0, 0);
+    st.setTileSilent(10, 21, SAND, 0, 0);
+    st.setTileSilent(12, 21, SAND, 0, 0);             // 上方空
+    const { g, projs } = dqShell(w);
+    g.sandQueue = [[10, 21], [12, 21]];
+    g.drainSandQueue();
+    expect(st.hasTile(10, 21)).toBe(false);           // 土下沙塌（21 ∉ 拒支集）
+    expect(st.hasTile(12, 21)).toBe(false);           // 上空沙塌（!active → result=true）
+    expect(projs.length).toBe(2);
   });
 });

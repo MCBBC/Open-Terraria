@@ -673,14 +673,17 @@ export class Wiring {
     }
     st.setActuated(i, j, true);
     // ★R20-I4(造行为摘除,2026-08-24):原版 DeActive（Wiring.cs:3208-3236）无任何
-    // 巨石逻辑——Check2x2 失撑判据（WorldGen.cs:48937-48944）只查
-    // active()+tileSolid/tileSolidTop/halfBrick/slope,**不含 inActive 位**,
-    // 致动缩入的支撑块在原版仍算"有支撑"→ 巨石不会因下方被致动而滚出。
-    // 巨石→弹 99 只发生在支撑被【真实破坏】的 Check2x2 链（失撑+无墙→KillTile
-    // 整件+弹;失撑+有墙→frameX+72 隐没,WorldGen.cs:48945-48984）——该链由
-    // Game.breakTile 的 BOULDER_SUPPORT_SHEETS 支承担（spawnBoulderRoll）。
-    // 我方曾在致动缩入后强清上方巨石并生成弹 99("压板→致动石栅→巨石坠"演出)
-    // = 自造行为,摘除。
+    // 巨石逻辑。★G1谓词批(2026-09-04)注释勘误：旧文把失撑判据锚在 Check2x2 的
+    // type==132 分支（WorldGen.cs:48937-48944 = tileSolid/tileSolidTop/halfBrick/
+    // slope 判据——系 132 墓碑族 frameX±72 隐没支）,张冠李戴;巨石(138,Boulders
+    // 集)的真实失撑判据在 Check2x2 的 Boulders 分支 = 两列下格
+    // `!SolidTileAllowBottomSlope(num2,num6+2) && !SolidTileAllowBottomSlope(+1)`
+    // （WorldGen.cs:48878-48892 → :70698-70722,该式【含】!inActive()）——即原版
+    // 已致动缩入的支撑格【不】构成支撑,SquareTileFrame 级联会把巨石 KillTile+
+    // 弹 99（:49172;memory「巨石Check2x2释放即滚」同证）。旧文"不含 inActive 位→
+    // 致动缩入仍算有支撑"系判据锚位错置;R20-I4 摘除已被后续批翻案——
+    // BoulderMech.solidAllowBottomSlope 现按 !inActive 排致动支撑（致动即释放
+    // 巨石,与原版一致）,本处注释只留勘误记录,旧结论作废。
   }
 
   /** WorldGen.CanKillTile 全函数门（1457 WorldGen.cs:62716-62810 委托）。

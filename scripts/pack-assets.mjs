@@ -22,6 +22,13 @@ export const BOOT_FIRST_PREFIXES = [
   'sprites/vanilla/SplashScreens_',
   'audios/music/Music_50.mp3',
   'audios/music/Music_51.mp3',
+  // 主菜单天空首屏族(2026-09-04 用户定调):SkyRenderer 构造期即取 Sun/Moon_0,
+  // 云族每帧查——原落 p3(vanilla 字典序段),冷启动要等 p2+p3 各 21MB 下完,
+  // 期间天空无日月且懒载 404 窗口 60s+(new9 HAR 实报 5 连红)。合计仅 ~105KB,
+  // 并入 p0=音频门前就位,菜单揭开即完整天空
+  'sprites/vanilla/Sun.png',
+  'sprites/vanilla/Moon_0.png',
+  'sprites/vanilla/Cloud_',
 ];
 const OUT_DIR = join(PUB, 'assets-zip');
 const STATE_PATH = join(import.meta.dirname, '..', '.pack-assets-state.json');
@@ -33,10 +40,13 @@ const DIR_PHASE = {
   'sounds': 'sounds', 'audios/music': 'music',
 };
 /** 已压缩格式 store-only（level 0）；wav/json 走 deflate-6 */
-export const STORE_EXT = new Set(['.png', '.mp3', '.woff2', '.zip']);
+export const STORE_EXT = new Set(['.png', '.mp3', '.opus', '.ogg', '.woff2', '.zip']);
 // v2（2026-08-26）：Pages 直传单文件硬帽 25MiB → 分片预算从「unzipped 目标 64MiB」
 // 改为「输出 zip 体积硬帽」（worst-case 装箱），bump 强制快路径失效全量重分片。
-export const ALGO_VERSION = 2;
+// v3（2026-09-04）：BOOT_FIRST 并入主菜单天空首屏族（Sun/Moon_0/Cloud_）——快路径
+// 只校验 contentHash（文件内容）与 p0 纯度，清单集扩容不影响两者，须 bump 强制
+// 重分片（rest 片按输入 hash 集复用：仅 p0 重打，p1+ 片名不变 HTTP 缓存不失效）。
+export const ALGO_VERSION = 3;
 /** 片输出（zip 后）体积硬帽。Cloudflare Pages/Workers Assets 单文件上限 25MiB，
  *  预算取 20MiB 留 ~20% 余量给 per-entry 头+中央目录（4000 条最坏 ≈150KB）。 */
 export const MAX_PART_ZIP_BYTES = 20 << 20;

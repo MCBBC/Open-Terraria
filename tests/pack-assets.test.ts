@@ -14,7 +14,7 @@ describe('pack-assets 纯函数', () => {
     expect(fileExt('a/b.PNG')).toBe('.png');
     expect(fileExt('music.mp3')).toBe('.mp3');
     expect(fileExt('noext')).toBe('');
-    expect([...STORE_EXT].sort()).toEqual(['.mp3', '.png', '.woff2', '.zip']);
+    expect([...STORE_EXT].sort()).toEqual(['.mp3', '.ogg', '.opus', '.png', '.woff2', '.zip']);
   });
 
   it('planParts：确定性 + 双上限（worst-case 输出体积硬帽/条目数）贪心切分', () => {

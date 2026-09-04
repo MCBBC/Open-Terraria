@@ -193,10 +193,16 @@ export function placeOasis(st: TileStore, rng: RNG, gs: GenState, X: number, Y: 
 }
 
 /** pass 94 本体（cs:16327-16352）。cs:16329 拒绝条件：Skyblock.denyAllGeneration /
- *  roundLandmasses / noSurface /（蜜蜂世界且非 dontStarve）——本仓库仅建模
- *  skyblock 与 notTheBees（roundLandmasses/noSurface 未建模）。 */
+ *  roundLandmasses / noSurface /（蜜蜂世界且非 dontStarve）——本仓库建模
+ *  skyblock/notTheBees(→theConstant)。
+ *  ★IIIII108d（planetoids #51 收官）：roundLandmasses/noSurface 两因子补接线
+ *  （cs:16329 原文四因子门）——planetoids(roundLandmasses) 世界整 pass **零掷零写**
+ *  （外门在 num=Next(2) 等一切掷骰之前,与 OceanCaves cs:15243 外门同构）。
+ *  定罪：mile8 planetoids 0..50 绿后首差 #51 Oasis (2461,306) A=489/T=489/L=229
+ *  =JS 独跑整片绿洲（vanilla #051_Oasis ≡ #050 逐格）。 */
 export function runOasisPass(st: TileStore, rng: RNG, gs: GenState): void {
   if (gs.seedFlags.skyblock) return;
+  if (gs.seedFlags.roundLandmasses || gs.seedFlags.noSurface) return;   // ★IIIII108d cs:16329
   if (gs.seedFlags.notTheBees && !gs.seedFlags.theConstant) return;
   let num = Math.trunc(st.w / 2100);                         // C# int 除法
   num += rng.int(0, 1);                                      // cs:16336 Next(2)

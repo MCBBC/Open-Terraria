@@ -42,14 +42,14 @@ export function armBlockMouse(inp: { blockMouse: boolean }): void {
   inp.blockMouse = true;
 }
 
-/** SW-AD1 2026-09-04：blockMouse 吞沿判定纯函数（回归锚）——旗置位 ⇒ 本左键沿
- *  整体丢弃并自清（一次性）;未置位 ⇒ 不吞。Input.mousedown(button 0) 消费点
- *  在 mouseDown/mouseHeld 写入【前】调用,吞掉的点击对使用/持电平/UI 全链不可见
- *  （vanilla 门位 TriggersSet.cs:838-847 的本仓映射,语义差见 Input.blockMouse 注）。 */
-export function blockMouseSwallowEdge(inp: { blockMouse: boolean }): boolean {
-  if (!inp.blockMouse) return false;
+/** SW-AF1 2026-09-04（F-2 电平重构）：blockMouse 复位纯函数（回归锚;幂等）——
+ *  复位点 = 松键（vanilla TriggersSet.cs:844-847 `else { Main.blockMouse = false }`
+ *  = MouseLeft 电平消失即清）。本仓消费点：Input.mouseup(button 0)/touchend·
+ *  touchcancel（触摸按住等效）/clearForBlur（失焦=无按住态）。
+ *  旧 SW-AD1「一次性吞沿」版 blockMouseSwallowEdge 退役（语义差三场景备案见
+ *  Input.blockMouse 字段注）——电平版压制发生在按住期本体,不吞下一沿。 */
+export function releaseBlockMouse(inp: { blockMouse: boolean }): void {
   inp.blockMouse = false;
-  return true;
 }
 
 export class Input {
@@ -71,17 +71,19 @@ export class Input {
   /** R4-22（FocusHelper.cs:134-139 → TriggersSet.cs:851-859）：失焦置位,回焦首击
    *  被吞、松键解除——原版 delayUseItem 同名语义 */
   delayUseItem = false;
-  /** SW-AD1 2026-09-04：Main.blockMouse（Main.cs:2529）一次性吞点击旗——写点
-   *  = Game.tileHitDamage 334 锁定帧支（Player.cs:54687,num=0 同块写;128/269 模特
-   *  孪生写点 :54639 本仓不可达不写,SW-A1 备案）。原版消费面（自查核）：
-   *  TriggersSet.cs:838-847 `if (MouseLeft){ if (!blockMouse && !mouseInterface)
-   *  controlUseItem=true } else blockMouse=false` = 电平门+松键复位;UI 域还有
-   *  快捷栏点击（Main.cs:44357）/菜单/取色条同门。本仓一次性移植语义：置位后的
-   *  首个左键 mousedown 边沿整体丢弃（mouseDown/mouseHeld 均不置,使用与 UI 双向
-   *  不可见）,吞完自清——只吞"点击"不吞"按住"（持电平 mouseHeld 不回填,按住的
-   *  channel/autoReuse 不受追溯影响）。与原版差：原版置位发生于按住中（挖掘拍）
-   *  时压掉的是【余下按住期】的 controlUseItem、松键即复位,下次点击不受影响;
-   *  本仓一次性版把压制推迟到下一沿（备案差,写点/吞点位置=任务钉面）。 */
+  /** SW-AF1 2026-09-04（F-2 电平重构,替代同日 SW-AD1 一次性吞沿版）：Main.blockMouse
+   *  （Main.cs:2529）按住期使用压制旗——写点 = Game.tileHitDamage 334 锁定帧支
+   *  （Player.cs:54687,num=0 同块写;128/269 模特孪生写点 :54639 本仓不可达不写,
+   *  SW-A1 备案）。原版门（TriggersSet.cs:837-847 逐字）：
+   *  `if (MouseLeft){ if (!Main.blockMouse && !p.mouseInterface) p.controlUseItem=true }
+   *  else { Main.blockMouse=false }` = 【按住期持续压制 + 松键复位】电平门。
+   *  本仓映射：置位=armBlockMouse（写点不变）;复位=松键（mouseup/touchend/blur 清,
+   *  releaseBlockMouse）;消费=按住期 controlUseItem 门（本仓 controlUseItem 等价面 =
+   *  updateUse 左键分派早退门的 mouseDown/holdOk 支 + player.inputUseItem——
+   *  Game.updateUse `|| inp.blockMouse` 与 :7236 同旗,按住中置位即压掉【余下按住期】
+   *  的使用/挖掘/autoReuse 连发,松键即恢复,下次点击不受影响）。mouseHeld 仍持原版
+   *  MouseLeft 物理电平（blockMouse 不压 OS 电平,同原版）;mousedown 消费点不再设门
+   *  ——电平语义下复位先于任何新沿（mouseup 必经）,沿位门=死代码。 */
   blockMouse = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
@@ -181,10 +183,9 @@ export class Input {
       // 挖掘（2026-08-28 用户报）;2026-08-29 起名单合一并纳入 .sw-mobile 触屏层族
       if (isDomUiTarget(e.target)) return;
       if (e.button === 0) {
-        // SW-AD1 2026-09-04：blockMouse 一次性吞沿（写点=tileHitDamage 334 锁定帧
-        // 支）——吞掉的沿 mouseDown/mouseHeld 均不写 = 该次点击整链不可见;吞完
-        // 自清（纯函数 blockMouseSwallowEdge,语义/差注见 Input.blockMouse 字段注）
-        if (blockMouseSwallowEdge(this)) return;
+        // SW-AF1 2026-09-04（F-2 电平重构）：沿位不设 blockMouse 门——电平语义下
+        // 旗只存活于按住期（松键即清,mouseup 必经）,新 mousedown 到达时恒 false;
+        // 压制消费在按住期 controlUseItem 门（Game.updateUse,见 blockMouse 字段注）。
         // R4-22：delayUseItem 置位期间吞掉本次使用边沿（mouseHeld 保持——按住不松
         // 仍不开火,松键才解除,同 TriggersSet 语义）
         if (this.delayUseItem) return;
@@ -193,7 +194,12 @@ export class Input {
       if (e.button === 2) this.rightDown = true;
     }) as EventListener);
     onWin('mouseup', ((e: MouseEvent) => {
-      if (e.button === 0) { this.mouseDown = false; this.mouseHeld = false; this.delayUseItem = false; }
+      // SW-AF1 2026-09-04（F-2）：复位=松键（TriggersSet.cs:844-847 else 支）——
+      // 旧一次性吞沿版无复位点,旗跨沿残留=红队场景 B（松键再按被误吞）根因
+      if (e.button === 0) {
+        this.mouseDown = false; this.mouseHeld = false; this.delayUseItem = false;
+        releaseBlockMouse(this);
+      }
       if (e.button === 2) this.rightDown = false;
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());
@@ -259,6 +265,7 @@ export class Input {
         if (this.mouseDown) this.pendingTapRelease = true;
         this.mouseHeld = false;
         this.rightDown = false;
+        releaseBlockMouse(this);   // SW-AF1 2026-09-04（F-2）：触摸按住结束=松键复位（触摸挖掘同可置位 334 写点）
       }
     };
     onEl('touchend', endWorldTouch as EventListener, { passive: false });
@@ -280,6 +287,7 @@ export class Input {
     this.keys.clear();
     this.releaseAllVirtual();
     this.mouseHeld = false;
+    releaseBlockMouse(this);   // SW-AF1 2026-09-04（F-2）：失焦=无按住态,blockMouse 电平随松键链清零（防跨焦点残留）
     // R4-22（FocusHelper.cs:134-139）：窗口失焦即置 delayUseItem——回焦的那一下
     // mousedown 不开火（TriggersSet.cs:851-859：置位期间压掉使用键,松键才解除）
     this.delayUseItem = true;

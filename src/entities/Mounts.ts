@@ -323,21 +323,33 @@ export interface FishronView {
   windExposed: boolean;
 }
 
-/** WorldGen.InAPlaceWithWind（WorldGen.cs:66135-66161）1:1 子集：
- *  地表高度以上 + 命中盒每格无液体且无墙（AllowsWind 墙表白名单未实装，有墙即挡风） */
+/** WallID.Sets.AllowsWind（WallID.cs:54）= wall 0（无墙）+ 围栏族 12 型；
+ *  InAPlaceWithWind 的挡风墙白名单——白名单外墙体即挡风（cs:88158） */
+const WALL_ALLOWS_WIND: ReadonlySet<number>
+  = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
+
+/** WorldGen.InAPlaceWithWind（WorldGen.cs:88124-88162）1:1：
+ *  ① DoesWindBlowAtThisHeight（:88134-88139）= tileY < worldSurface，remixWorld 取反；
+ *  ② 命中盒（Vector2 重载两角 ToTileCoordinates 闭区间）逐格 !InWorld 跳过；
+ *     liquid > 0 → false；wall > 0 且 !WallID.Sets.AllowsWind[wall] → false。
+ *  remix 参缺省 false = 既有调用方零回归（remix 世界由调用侧传入接通翻转）。
+ *  单源消费位：Player 扫帚挂件/鱼龙风位、Enemy 624 侏儒石化（NPC.cs:56420） */
 export function inAPlaceWithWind(
   st: Pick<DrillStore, 'inBounds' | 'idx' | 'wall'> & { liquid?: ArrayLike<number> },
   x: number, y: number, w: number, h: number, worldSurface: number,
+  remix = false,
 ): boolean {
-  // DoesWindBlowAtThisHeight：tileY < worldSurface（remix 世界反转未实装）
-  if (Math.floor(y / 16) >= worldSurface) return false;
+  // DoesWindBlowAtThisHeight：tileY < worldSurface（remixWorld 取反,cs:88137-88138）
+  const windHeight = Math.floor(y / 16) < worldSurface;
+  if (windHeight === remix) return false;
   const x0 = Math.floor(x / 16), y0 = Math.floor(y / 16);
   const x1 = Math.floor((x + w) / 16), y1 = Math.floor((y + h) / 16);
   for (let i = x0; i <= x1; i++) {
     for (let j = y0; j <= y1; j++) {
       if (!st.inBounds(i, j)) continue;   // 越界格原版 InWorld 门外跳过
       const k = st.idx(i, j);
-      if ((st.liquid?.[k] ?? 0) > 0 || st.wall[k] > 0) return false;
+      if ((st.liquid?.[k] ?? 0) > 0) return false;   // tile.liquid > 0（cs:88158）
+      if (st.wall[k] !== 0 && !WALL_ALLOWS_WIND.has(st.wall[k])) return false;
     }
   }
   return true;

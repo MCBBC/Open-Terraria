@@ -5,6 +5,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII110b：PlaceTile 尾 SQF
 import type { GenState } from './GenState';
 
 const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
@@ -45,11 +46,17 @@ export function runHellforgesPass(st: TileStore, rng: RNG, gs?: GenState): void 
       //   （rng.int 闭区间；x 上界旧代码 w-2 少一列，2026-08-13 校源修正）
       const x = rng.int(1, w - 1);
       let y = rng.int(h - 250, h - 31);
+      const y0 = y;   // ★III158 instrument: raw rolled row
       // F1(cs:18312-18319)：墙非 13/14 时整个 if 块跳过——num3 不增，仅重掷 x/y 继续。
       //   旧代码此处 fail++ 烧预算，墙覆盖率低时地狱熔炉数量被预算虚吃提前见底。
       if (st.inBounds(x, y) && (st.wall[st.idx(x, y)] === 13 || st.wall[st.idx(x, y)] === 14)) {
         while (y < h - 20 && !st.flags[st.idx(x, y)]) y++;
         y--;
+        // ★III158 instrument（尝试台账，窗口 x∈[2556,2566]；未挂零开销）
+        const hfDbg = (x >= 2556 && x <= 2566)
+          ? (globalThis as { __swHfAttempt?: (s: string) => void }).__swHfAttempt
+          : undefined;
+        if (hfDbg) hfDbg(`ATT x=${x} y0=${y0} yc=${y} fc=${st.inBounds(x, y) ? (st.flags[st.idx(x, y)] & 1) : -1}`);
         // ★PlaceTile(77)（cs:18324）几何 = Style3x2 **中心底锚**：物体占 (x-1..x+1,
         //   j-1..j)（golden 实证：drawn x=1982 → 77 落 1981-1983 两行）。曾按
         //   左对齐 x..x+2 放置 → 全部熔炉右移一列（#72 干净基座 86+86 格自因，
@@ -60,15 +67,41 @@ export function runHellforgesPass(st: TileStore, rng: RNG, gs?: GenState): void 
         //   num3++ 重掷,烧 2 掷）——合法域 x∈[5,w-5]。曾缺 → 我方接受 x∈[1,w-2],
         //   宽出 7 列;命中宽出带时我方放置成功（少烧 2 掷）原版重掷 → ~13%/世界
         //   掷流分歧。（y 域 [h-252,h-33] 实际不可达,门照补全形。）
-        if (x < 5 || x > w - 5 || y < 5 || y > h - 5) { fail++; }
-        else if (y < 2 || !st.inBounds(x + 1, y - 1) || !st.inBounds(x - 1, y)) { fail++; }
-        else {
-          let ok = true;
-          for (let dx = -1; dx <= 1 && ok; dx++) {
-            for (let dy = -1; dy <= 0 && ok; dy++) {
-              if (st.flags[st.idx(x + dx, y + dy)]) ok = false;
+        // ★IIIII158（2026-09-04）PlaceTile(77) 逐段精确镜像（1458 cs:59841-60793 ／
+        //   1457 cs:59833-60785）——此前只补过尾奏 SQF,而 case 17/77/133 分支在
+        //   Place3x2 之后还有**无条件第一遍** SquareTileFrame（1458 cs:60579-60582 ／
+        //   1457 cs:60570-60574）：Place3x2 败（边距门/净空门/锚门）也照发。曾整缺 →
+        //   失败尝试九宫内幽灵坡面不清算（manors (2561,1082) S0>2×1 实证：call
+        //   cell=(2562,1081) 幽灵灰烬格,x86 经本击 SQF 九宫→TileFrame(i-1,j+1)=幽灵格
+        //   head 非活性支（1458 cs:82623-82628 ／ 1457 cs:82615-82620）slope 2→0 清坡;
+        //   JS 只在 Tile_Cleanup 经 b__314_104 直呼 TileFrame 才补清 → #72..#99 28 槽
+        //   瞬态差,105/106）。x86 TFWATCH 三击实录：击1=SmoothWorld KillTile→SQF（状态
+        //   零效）;击2=本击;击3=FinalCleanup 直呼 TileFrame（JS 已有路由）。
+        // ①PlaceTile 头部 488 门（1458 cs:59844-59847）：call cell 活性 488 → 整个
+        //   PlaceTile 早退（无 head Clear/无两级 SQF）。地狱域 call cell 族
+        //   {1,59,75,4,28,...} 不可达,全形照抄。
+        const callIdx = st.inBounds(x, y) ? st.idx(x, y) : -1;
+        const is488 = callIdx >= 0 && !!st.flags[callIdx]
+          && TILE_DEFS[st.type[callIdx]]?.vanilla?.sheet === 488;
+        if (!is488) {
+          // ②head Clear（1458 cs:59977-59980 ／ 1457 cs:59969-59972）——call cell 非活性 →
+          //   Clear(Tile|TilePaint|Slope)（type/active/帧/块漆/坡全清）。★IIIII110b 曾缺 →
+          //   幽灵锚格 slope 残留（manors (2561,1082) S0>2 实证：落锚恰为带坡幽灵格）。
+          if (callIdx >= 0 && !st.flags[callIdx]) {
+            st.setTileSilent(x, y, 0);
+            st.paint[callIdx] = 0;
+          }
+          // ③Place3x2（1458 cs:52533 / 1457 cs:52525）：头边距门 + 净空门 + 3 列底锚
+          //   SolidTile2——任一败=不写,但都不短路 case 分支的 SQF。
+          let ok = x >= 5 && x <= w - 5 && y >= 5 && y <= h - 5
+            && y >= 2 && st.inBounds(x + 1, y - 1) && st.inBounds(x - 1, y);
+          if (ok) {
+            for (let dx = -1; dx <= 1 && ok; dx++) {
+              for (let dy = -1; dy <= 0 && ok; dy++) {
+                if (st.flags[st.idx(x + dx, y + dy)]) ok = false;
+              }
+              if (ok && !anchorValid(st, x + dx, y + 1)) ok = false;
             }
-            if (ok && !anchorValid(st, x + dx, y + 1)) ok = false;
           }
           if (ok) {
             for (let dx = -1; dx <= 1; dx++) {
@@ -77,13 +110,19 @@ export function runHellforgesPass(st: TileStore, rng: RNG, gs?: GenState): void 
               }
             }
           }
-          // ★NNN：成功判据=PlaceTile 后头格 type==77（cs:18326-18327）——**含重叠幂等**：
-          //   落点恰为本 pass 早前熔炉格时，Place3x2 净空门拒写但头格已是 77 → vanilla
-          //   仍算成功（ntb 实证：#20 座 (2090,1092) 前的 (2035,1109) 重叠重放置，
-          //   JS 曾要求全新净空 → 多滚出一座多余熔炉 T0>77×6）。失败才 num3++。
-          done = st.type[st.idx(x, y)] === HELLFORGE;
-          if (!done) fail++;
+          // ★NNN：成功判据=PlaceTile 后头格 type==77（1458 cs:18326-18327）——**含重叠
+          //   幂等**：落点恰为本 pass 早前熔炉格时，Place3x2 净空门拒写但头格已是 77
+          //   → vanilla 仍算成功（ntb 实证：#20 座 (2090,1092) 前的 (2035,1109) 重叠
+          //   重放置，JS 曾要求全新净空 → 多滚出一座多余熔炉 T0>77×6）。失败才 num3++。
+          // ③'第一遍 SQF（无条件——case 17/77/133 分支体,Place3x2 败也发）
+          genSquareTileFrame(st, rng, x, y);
+          // ④尾奏第二遍 SQF（1458 cs:60754-60761 / 1457 cs:60746-60753）——call cell
+          //   活性（成功写入或预存在活性格的失败尝试）才发。
+          if (callIdx >= 0 && st.flags[callIdx]) genSquareTileFrame(st, rng, x, y);
+          if (hfDbg) hfDbg(`  => ok=${ok ? 1 : 0} sqf1=1 sqf2=${callIdx >= 0 && st.flags[callIdx] ? 1 : 0} typ77=${callIdx >= 0 && st.type[callIdx] === HELLFORGE ? 1 : 0}`);
         }
+        done = callIdx >= 0 && st.type[callIdx] === HELLFORGE;
+        if (!done) fail++;
         if (fail >= 10000) done = true;
       }
     }

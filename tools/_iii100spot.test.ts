@@ -37,7 +37,12 @@ const CHAINS: Record<string, ChainCfg> = {
   c12345:    { name: 'c12345',    seed: '12345',      evil: 1,  g2: C('gen2-12345') },
   // ★IIIII97b 笔误纠偏：认证配方=20260829/E1/skyblock（专用仪 _i46 实证 rc0；
   // IIII96b §④ 警示项落地——旧值 evil:0 为 spot 表笔误）
-  skyblock:  { name: 'skyblock',  seed: '20260829',   evil: 1,  flags: { skyblock: true }, g2: C('golden-skyblock') },
+  // ★IIIII154 销账改锚：denyAll 世界 JS 侧不注册 LihzahrdTemple/Beehives/JungleShrines
+  //   三个 reseed 标签（金标桶三 dump 文件其实在）→ 45/46/47 结构性不可达；空岛加型槽使
+  //   JS 槽序 +1（断线陷阱清理=58、终清理=59）→ 旧 `i==58→dump105` 硬锚把 JS#58 对上
+  //   桶#105=「T668>0×2/W41@(2169,218)」伪红（=桶自身 104→105 FinalCleanup 增量:668×2+
+  //   画墙继承 41 格,_i46 专用仪 d:104/d:105 双零差在案）。pts=[0,105]+名锚化销账。
+  skyblock:  { name: 'skyblock',  seed: '20260829',   evil: 1,  flags: { skyblock: true }, g2: C('golden-skyblock'), pts: [0, 105] },
   drunk:     { name: 'drunk',     seed: '51620200',   evil: -1, flags: { drunkWorld: true }, g2: C('golden-drunk') },
   celeb:     { name: 'celeb',     seed: '1999040562', evil: 0,  flags: { tenthAnniversary: true }, g2: C('golden-celeb') },
   toadstool: { name: 'toadstool', seed: '771002',     evil: 0,  flags: { surfaceIsMushrooms: true }, g2: C('golden-toadstool') },
@@ -59,8 +64,11 @@ const CHAINS: Record<string, ChainCfg> = {
   // ★IIIII111c（2026-09-02）：涂装族五点接入（G2=IIII132 涂装桶 /tmp/iii132-out/paint；
   //  五点不含 pnt/pwal/cbt 三通道——漆/涂层全域对拍以 mile8 _iii81m8 SW_I81_PAINT=1 为准，
   //  invisibleplane/negativeinfinity 已 106 行满绿收官，xrayvision 同）
-  xrayvision: { name: 'xrayvision', seed: 'xrayvision|106107', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-xrayvision' },
-  monochrome: { name: 'monochrome', seed: 'monochrome|106108', evil: 0, g2: '/tmp/iii132-out/paint/x86-coat-monochrome' },
+  // ★IIIII161（2026-09-04）：iii132 桶 /tmp 灭失（IIIII156 两红=环境债），改指 ~/GoldenChains/i106
+  //  重产桶（配方可勘误式 1.1.1.0.<flag>|<base>⇒小世界/经典/腐化，与下行 seed/evil 参数恒等；
+  //  run.log「Seed: xrayvision|106107, 4200×1200, Evil: 0」在桶自证）
+  xrayvision: { name: 'xrayvision', seed: 'xrayvision|106107', evil: 0, g2: C('i106/x86-xrayvision') },
+  monochrome: { name: 'monochrome', seed: 'monochrome|106108', evil: 0, g2: C('i106/x86-monochrome') },
   // ★IIIII134（2026-09-04）：waterpark/remix 五点接入（III134 批回归矩阵交办面;
   //   配方=runbook §1 golden-waterpark/golden-remix 行;remix G2=dumps 子目录布局）
   waterpark: { name: 'waterpark', seed: 'waterpark|20260905', evil: 0, flags: { extraLiquid: true }, g2: C('golden-waterpark') },
@@ -71,6 +79,10 @@ const CHAINS: Record<string, ChainCfg> = {
   // ★IIIII101g（2026-09-04）：sgis 五点接入——G2=golden-sgis（runbook §4 重产,i109 rig
   //  +SW_FLAG_SGIS 臂,seed=771001/E0;arm Enabled=True 落证+八通道 103 行全绿双证）。
   sgis: { name: 'sgis', seed: '771001', evil: 0, flags: { surfaceIsInSpace: true }, g2: C('golden-sgis') },
+  // ★IIIII110b（2026-09-04）：arachnophobia 五点接入——G2=CXVII 秘种子迷你链桶
+  //   mch3-arachno（i109 rig,seed='arachnophobia|20260904'/E0,配方=CXVII 章③;
+  //   mile8 103/103 满绿认证桶）。旗面走种子文本路由（flags 缺省=不直注）。
+  arachno: { name: 'arachno', seed: 'arachnophobia|20260904', evil: 0, g2: C('mch3-arachno') },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';
@@ -93,6 +105,8 @@ const LABEL2DUMP = new Map<string, number>([
   ['LihzahrdTemple', 45], ['Beehives', 46], ['JungleShrines', 47],
 ]);
 const N_POINTS = [0, 45, 46, 47, 105];
+// ★IIIII154：denyAll 特形链点集覆盖（skyblock 45/46/47 标签点结构性不可达,见链表注）
+const PTS = (cfg as unknown as { pts?: number[] } | undefined)?.pts ?? N_POINTS;
 
 let DUMPNAME = new Map<number, string>();
 {
@@ -129,7 +143,7 @@ const chansMissing = (idx: number): string[] => {
   const N = W * H;
 
   if (cfg.g2) {
-    const miss = N_POINTS.flatMap((i) => chansMissing(i).map((c) => `#${i}[${c}]`));
+    const miss = PTS.flatMap((i) => chansMissing(i).map((c) => `#${i}[${c}]`));
     if (miss.length) throw new Error(`${KEY}: G2 五点通道不全 ${miss.join(',')} (dir=${cfg.g2})`);
   }
 
@@ -281,13 +295,20 @@ const chansMissing = (idx: number): string[] => {
       seedFlags: cfg.flags,
       onWorldPartial: (w, i, pn) => {
         store = w.store as never as TileStore;
-        if (i === 0 || i === 58) {
-          if (pn !== SLOT_END_NAMES.get(i)) {
-            // skyblock 等 D 特形桶：终清理前存在额外特形槽（断线陷阱清理挂 #58 名），
-            // 只在该链首差点记录，不阻断（「名实不符」=命名约定差异而非内容差）
+        // ★IIIII154 名锚化（仅 pts 覆盖链=skyblock）：空岛加型槽使 JS 槽序 +1
+        //   （断线陷阱清理=58、终清理=59），旧 `i==58→dump105` 硬锚把 JS#58 对上桶#105
+        //   =「T668>0×2/W41@(2169,218)」伪红（=桶自身 104→105 FinalCleanup 增量,
+        //   _i46 专用仪 d:104/d:105 双零差在案）——改按槽名解析 dump 位。
+        const ptsOverride = (cfg as unknown as { pts?: number[] } | undefined)?.pts;
+        const nameIdx = ptsOverride
+          ? (pn === '终清理' ? 105 : pn === '断线陷阱清理' ? 104 : undefined)
+          : undefined;
+        if (i === 0 || i === 58 || nameIdx !== undefined) {
+          if (nameIdx === undefined && pn !== SLOT_END_NAMES.get(i)) {
+            // D 特形桶旧硬锚记录（名锚化后 pts 链不再走此支）
             console.log(`[slot 命名差异] 槽末#${i} 实到「${pn}」（期望 ${SLOT_END_NAMES.get(i)}，记录不阻断）`);
           }
-          const idx = i === 0 ? 0 : 105;
+          const idx = nameIdx ?? (i === 0 ? 0 : 105);
           if (!seenIdx.has(idx)) {
             seenIdx.add(idx);
             if (ABC) cmpSnap('abcmp', pn, idx);
@@ -299,7 +320,7 @@ const chansMissing = (idx: number): string[] => {
     });
   } finally { RNGp.reseed = oReseed; }
 
-  const missingPts = N_POINTS.filter((i) => !seenIdx.has(i));
+  const missingPts = PTS.filter((i) => !seenIdx.has(i));
   if (missingPts.length) throw new Error(`${KEY}: 五点未全部取到,缺 ${missingPts}`);
   const bad = rows.filter((r) => r.bad);
   if (bad.length) throw new Error(`${KEY}: 五点出现差 → ${bad.map((r) => `#${r.idx}`).join(',')}${bad[0]?.desc ?? ''}`);

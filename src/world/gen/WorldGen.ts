@@ -1637,6 +1637,9 @@ function pilesPass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenySome(gs.seedFlags)) return;                // ★IIIII44 cs:18920
+  // ★IIIII108c 重放仪捕获钩（env 门,缺省零开销,零行为面）：Piles 头 (store,gs) 直递
+  const h148 = (globalThis as { __swI148Grab?: (st: unknown, g: unknown) => void }).__swI148Grab;
+  if (h148) h148(store, gs);
   runPilesPass(store, rng, gs);
 }
 

@@ -452,7 +452,9 @@ export class LiquidSim {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
-    if (!st.flags[i]) return true;
+    // ★G1谓词批(2026-09-04)：锚门= !Main.tile[x,num-1].nactive()（WorldGen.cs:47164
+    //  通用支）——flags 位读漏 !inActive 半边（已致动锚格误判锚失）→ isActive()
+    if (!st.isActive(x, y)) return true;
     const t = st.type[i];
     return this.solidNP[t] !== 1;
   }
@@ -483,7 +485,9 @@ export class LiquidSim {
     if (ay < 0 || ay >= st.h) bad = true;                            // 锚越界=新 Tile
     else {
       const q = this.idx(x, ay);
-      const act = st.flags[q] !== 0;
+      // ★G1谓词批(2026-09-04)：锚门= tile.nactive()（WorldGen.cs:46537 `!tile.nactive()
+      //  → flag=true`）——flags 位读漏 !inActive 半边 → isActive()
+      const act = st.isActive(x, ay);
       if (!act) bad = true;                                          // cs:86469 !nactive
       else {
         const t = st.type[q]!;
@@ -1603,7 +1607,10 @@ export class LiquidSim {
     // DelWater 尾部（Liquid.cs:1607-1624）：出列格是草药 → CheckAlch 依附复查；
     // 是睡莲(518) → 快沉降/静水时 CheckLilyPad，否则仅 SquareTileFrame（本仓库帧为
     // 渲染期派生，该分支无操作）
-    if (st.flags[i5]) {
+    // ★G1谓词批(2026-09-04)：原版尾分派无 active 门（Liquid.cs:1591-1609 直接读
+    // tile4.type）——flags 门会漏幽灵/已致动药草·睡莲的完整性复查 → 去门
+    // （杀径经 KillTile 头门兜底,残型不误清）
+    {
       if (this.alchIds.has(st.type[i5])) this.checkAlch(x, y);
       else if (st.type[i5] === this.lilyPadId) {
         const iu = i5 - st.w;
@@ -1622,7 +1629,9 @@ export class LiquidSim {
     const i5 = this.idx(x, y);
     const id = this.idx(x, y + 1);
     let bad = false;
-    if (!st.flags[id]) bad = true;      // 下方无 active tile
+    // ★G1谓词批(2026-09-04)：依附面门= !Main.tile[x,y+1].nactive()（WorldGen.cs:46382）
+    // ——flags 位读漏 !inActive 半边（已致动基座误判依附成立）→ isActive()
+    if (!st.isActive(x, y + 1)) bad = true;   // 下方无 nactive tile
     if (st.half[id]) bad = true;        // halfBrick 不算依附面
     const stage = (st.frameX[i5] / 18) | 0;
     st.frameY[i5] = 0;

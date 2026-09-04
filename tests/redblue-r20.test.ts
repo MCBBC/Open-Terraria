@@ -43,7 +43,10 @@ function makeCtx() {
     doorClose: () => true,
     teleportPair: (a, b) => { tpPairs.push([a, b]); },
     relocateTownNpc: () => true,
-    explode: (tx, ty, dmg, _r, destroyTiles, projId) => { explosions.push({ tx, ty, dmg, destroyTiles, projId }); },
+    // SW-AF1 2026-09-04：mock 签名对齐真实 ctx.explode（Game.ts:23904 七参——第 6 参
+    // hurtBox、第 7 参 projId;devices.ts:824 `explode(x,y,250,0,false,64,164)` 自
+    // SW-R3 F-5 起 hurtBox=64 入位,旧六参 mock 把 64 误当 projId=金标陈旧,非行为回归）
+    explode: (tx, ty, dmg, _r, destroyTiles, _hurtBox, projId) => { explosions.push({ tx, ty, dmg, destroyTiles, projId }); },
     toast: () => {},
     sfx: () => {},
     extractinatorPull: () => null,

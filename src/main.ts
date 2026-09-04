@@ -4,6 +4,7 @@ import './workers/procShim';   // ★首导入兜底(见 procShim.ts;worker 侧�
 import { Game } from './core/Game';
 import { showSplash } from './ui/Splash';
 import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
+import { mountInstallPrompt } from './ui/InstallPrompt';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
@@ -47,6 +48,7 @@ import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
 // 构造前装——模块加载期的单例画布不计入,可接受(一次性常量非泄漏面)
 installCanvasWatch();
+mountInstallPrompt();   // PWA 安装提示条(beforeinstallprompt 捕获;iOS 引导;7 天冷却)
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);

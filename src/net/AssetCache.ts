@@ -256,7 +256,17 @@ export function onAssetProgress(cb: (s: AssetCacheState) => void): () => void {
   return () => progressCbs.delete(cb);
 }
 
+/** warm 窗口旗上次发送值(null=未发;controllerchange 后重置补发) */
+let lastWarmFlagSent: boolean | null = null;
 function emit(): void {
+  // ★warming 翻转同步到 SW(2026-09-04):SW 据此在 warm 窗口内把图片 miss 的
+  //  404 改应 204 静默(DevTools 不再冷启动满屏红;消费方 onerror/重试链不变),
+  //  终态后 miss 仍真 404 直通。postToSw 无 controller 时静默丢弃,故换控处
+  //  重置 lastWarmFlagSent 保证补发
+  if (lastWarmFlagSent !== state.warming) {
+    lastWarmFlagSent = state.warming;
+    postToSw({ type: 'zip-warm', on: state.warming });
+  }
   for (const cb of progressCbs) cb(assetCacheState());
 }
 
@@ -600,6 +610,10 @@ async function doInitAssetCache(): Promise<void> {
       state: assetCacheState, warm: warmAllAssets, complete: assetsComplete,
     }; // 调试/探针句柄
     sw.postMessage({ type: 'init', version: state.version });
+    // warm 窗口旗显式补发(2026-09-04):纠偏上会话崩溃遗留的 stale true——
+    // 页面启动即声明"当前未在 warm",之后 warming 翻转由 emit() 跟随同步
+    lastWarmFlagSent = state.warming;
+    postToSw({ type: 'zip-warm', on: state.warming });
     // ★gc 显式授权(2026-08-27):仅清单在手的会话允许 SW 清理旧版本缓存——
     // manifest 失败会话不发本消息,version 即便回退 base 形态也无破坏权
     // (localStorage 锚定失效的极端情况[崩溃丢盘]下缓存照样安全)。
@@ -613,6 +627,7 @@ async function doInitAssetCache(): Promise<void> {
       navigator.serviceWorker.addEventListener('message', onSwMessage);
       // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+      lastWarmFlagSent = null;   // 换控(含 SW 重启)后由 emit 补发 warming 旗
       postToSw({ type: 'status' });
       // ★首访竞态(2026-08-24 OSS 部署实锤,本地 dist-release 复现):SW activate 的
       //   clients.claim() 触发的换控事件可能【晚于】zip 暖缓存启动落地——此处盲目

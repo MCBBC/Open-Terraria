@@ -121,6 +121,15 @@ export class TileStore {
     return x >= 0 && y >= 0 && x < this.w && y < this.h;
   }
 
+  /** 原版 WorldGen.InWorld(x,y,fluff)（WorldGen.cs:9642-9649）fluff=1 档：
+   *  x<1 || x>=w-1 || y<1 || y>=h-1 → false——世界最外一圈恒不受理。
+   *  ★A-5 边带语义（2026-09-04）：SolidTile3(i,j)（WorldGen.cs:71005-71013）首门
+   *  即本档（坐标重载专属;Tile 重载 SolidTile3(Tile) 无此门,null→false 同面）——
+   *  消费位见 Player/Enemy/MinionProj/TileLightScanner 各 SolidTile3 锚。 */
+  inWorld1(x: number, y: number): boolean {
+    return x >= 1 && y >= 1 && x < this.w - 1 && y < this.h - 1;
+  }
+
   get(x: number, y: number): number { return this.inBounds(x, y) ? this.type[this.idx(x, y)] : 0; }
 
   isActive(x: number, y: number): boolean {

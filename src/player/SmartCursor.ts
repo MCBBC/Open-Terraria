@@ -193,6 +193,11 @@ export interface SmartCursorEnv {
   players?: Array<{ x: number; y: number; w: number; h: number }>;
   /** 是否正在按住使用键（controlUseItem）——锁清理与 Hold 模式语义用 */
   controlUseItem: boolean;
+  /** 致动魔杖单摆向锁（Player.cs:2599-2601/:47296-47310;Step_ActuationRod
+   *  :1506-1512 消费）——锁存期只标 LockSetting 同态格。缺省 false=无锁（与
+   *  Player 字段初值同面）;Game 侧每帧传实况。 */
+  actuationRodLock?: boolean;
+  actuationRodLockSetting?: boolean;
   /** 当前背包油漆 id（SmartCursorHelper.cs:167-181 TryFindingPaintInplayerInventory 的
    *  paintLookup；仅手持刷/滚（1071/1543/1072/1544）时由 FindPaintOrCoating 取值，
    *  刮刀不查——缺省 0 = 三油漆策略目标集恒空，1:1） */
@@ -959,15 +964,19 @@ export class SmartCursor {
   ): void {
     if (sem.vid !== 3620 || taken()) return;
     const st = env.st;
+    const lock = env.actuationRodLock ?? false;
+    const lockSetting = env.actuationRodLockSetting ?? false;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const w = st.wire[st.idx(i, j)];
-        // :1518 tile.active() && tile.actuator()——active() 口径：已致动格仍可被魔杖
-        // 选中（打回活体）。原版另有 ActuationRodLock 单摆向锁（Player.cs:47300-47303，
-        // 使用中锁定同态格），属交互状态机轴未移植（见报告台账）。
-        if (hasTileAt(st, i, j) && (w & TS.WIRE_ACTUATOR) !== 0) targets.push({ x: i, y: j });
+        // :1518 tile.active() && tile.actuator() && (!lock || lockSetting==inActive())
+        // ——active() 口径：已致动格仍可被魔杖选中（打回活体）。★A-6（2026-09-04）
+        // ActuationRodLock 单摆向锁已移植（Player.cs:47296-47310 置位/:18918-18921
+        // 左键松开清理）——锁存期只标 LockSetting 同态格,异态格不进目标集。
+        if (hasTileAt(st, i, j) && (w & TS.WIRE_ACTUATOR) !== 0
+          && (!lock || lockSetting === st.isActuated(i, j))) targets.push({ x: i, y: j });
       }
     }
     const point = nearestOf(targets, env.mouse);

@@ -1,9 +1,10 @@
 // SW-AD1 2026-09-04 回归：① 655 墙推支（:26595-26678 三档扫墙±0.5/全空 Center 格奇偶定向;
-//   门 ai[0]!=0·vy<=0·vx==0——首拍跳过/下落拍不推）② 334 锁定帧 blockMouse 一次性吞沿纯函数
+//   门 ai[0]!=0·vy<=0·vx==0——首拍跳过/下落拍不推）② 334 锁定帧 blockMouse 电平门
+//   （SW-AF1 2026-09-04 F-2：一次性吞沿改按住期压制+松键复位,用例同步改写）
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { GrenadeProj, beeWallPushDir } from '../src/entities/WeaponProj';
-import { Input, armBlockMouse, blockMouseSwallowEdge } from '../src/core/Input';
+import { Input, armBlockMouse, releaseBlockMouse } from '../src/core/Input';
 import type { GameHooks } from '../src/entities/types';
 
 const mk = (fills: Array<[number, number]> = []) => {
@@ -41,20 +42,34 @@ describe('SW-AD1 655 墙推支 + 334 blockMouse', () => {
     expect(f.vx).toBe(0);
     expect(f.vy).toBeGreaterThan(0);
   });
-  it('blockMouse 纯函数：置位幂等;吞沿一次性自清;未置位不吞', () => {
+  it('blockMouse 电平纯函数：置位幂等不清、松键复位幂等——旗跨沿不残留（F-2 电平语义）', () => {
     const s = { blockMouse: false };
     armBlockMouse(s); armBlockMouse(s);
-    expect(s.blockMouse).toBe(true);
-    expect([blockMouseSwallowEdge(s), s.blockMouse, blockMouseSwallowEdge(s)]).toEqual([true, false, false]);
+    expect(s.blockMouse).toBe(true);            // 置位幂等,且不再自清（一次性版差异）
+    releaseBlockMouse(s); releaseBlockMouse(s);
+    expect(s.blockMouse).toBe(false);           // 复位幂等
+    // 场景 B（松键再按）：复位后置位/复位可循环,下次点击不受前次置位追溯
+    armBlockMouse(s);
+    releaseBlockMouse(s);
+    expect(s.blockMouse).toBe(false);
   });
-  it('Input.mousedown 消费点：置位期首个左键沿整体丢弃（mouseDown/mouseHeld 均不置）并自清', () => {
+  it('Input.mousedown/up 消费点：置位不再吞沿（按住期压制由 updateUse 门承担）,松键复位旗', () => {
     const reg = new Map<string, (e: unknown) => void>();
     vi.stubGlobal('window', { addEventListener: (t: string, f: (e: unknown) => void) => reg.set(t, f), removeEventListener: () => {} });
     const inp = new Input({ addEventListener: () => {}, removeEventListener: () => {} } as unknown as HTMLElement);
+    // 场景 B：旗置位（334 锁定帧写点等价）时新沿不再被吞——mouseDown/mouseHeld 照常置
     armBlockMouse(inp);
     (reg.get('mousedown') as (e: unknown) => void)({ button: 0, target: null });
+    expect([inp.mouseDown, inp.mouseHeld, inp.blockMouse]).toEqual([true, true, true]);
+    // 复位 = 松键（mouseup 既有消费点）——TriggersSet.cs:844-847 else 支
+    (reg.get('mouseup') as (e: unknown) => void)({ button: 0 });
     expect([inp.mouseDown, inp.mouseHeld, inp.blockMouse]).toEqual([false, false, false]);
+    // 松键后再按：正常使用（场景 B 终态）
     (reg.get('mousedown') as (e: unknown) => void)({ button: 0, target: null });
-    expect([inp.mouseDown, inp.mouseHeld]).toEqual([true, true]);
+    expect([inp.mouseDown, inp.mouseHeld, inp.blockMouse]).toEqual([true, true, false]);
+    // 失焦清理链同复位（无按住态）
+    armBlockMouse(inp);
+    inp.clearForBlur();
+    expect(inp.blockMouse).toBe(false);
   });
 });

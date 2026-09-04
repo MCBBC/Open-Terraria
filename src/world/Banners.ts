@@ -151,7 +151,10 @@ export function scanBannerNpcs(
   if (bannerTileId === undefined) return npcs;
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
-      if (!store.isActive(x, y)) continue;
+      // ★G1 谓词形态批（2026-09-04）：SceneMetrics.ScanTiles :365-372
+      //  `if (!tile.active()) { liquid 计数; continue; }`=裸 active()——致动旗照计入
+      //  减伤/增伤 buff 面（nactive 门曾使致动旗整族静默失效）
+      if (!store.hasTile(x, y)) continue;
       const i = store.idx(x, y);
       if (store.type[i] !== bannerTileId) continue;
       const fx = Math.floor(store.frameX[i] / 18), fyRaw = store.frameY[i];
@@ -184,7 +187,9 @@ export function scanBannerReps(
   if (bannerTileId === undefined) return reps;
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
-      if (!store.isActive(x, y)) continue;
+      // ★G1 谓词形态批（2026-09-04）：同 scanBannerNpcs——SceneMetrics.ScanTiles
+      //  :365-372 裸 active() → hasTile（致动旗照计）
+      if (!store.hasTile(x, y)) continue;
       const i = store.idx(x, y);
       if (store.type[i] !== bannerTileId) continue;
       const fx = Math.floor(store.frameX[i] / 18), fyRaw = store.frameY[i];

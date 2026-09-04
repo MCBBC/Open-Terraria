@@ -362,7 +362,8 @@ export function dealContacts(
     const crit = Math.random() < self.critChance
       || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
     // ★F1（2026-08-31 蓝队三批）：Damage_PVE :13388 攻端旗乘区 + ★F9 DamageVar 单源
-    //   （原版序：DamageVar(:12970;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12959) → …→ banner(:13388) → armorPen 弹侧 :13679 在
+    //   （原版序：DamageVar(:12970;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12959) → …→ banner(:13388) → armorPen 弹侧 :13685
+    //   `dmg += targetNPC.checkArmorPenetration(num6, armorPenetrationPercent)`（SW-AJ1 2026-09-05 校准,旧 :13679 系 type22 kb 向支）在
     //   banner 后 ⇒ 不吃旗乘——armorPen 独立参传，此处序一致）。
     //   crit 翻倍沿用仓内调用侧预倍惯例（与 Enemy.hurt 内 (int)Math.Max(1,×2)
     //   截断式同值）。
@@ -373,7 +374,7 @@ export function dealContacts(
     // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——
     // 本共享结算面承载 1126/1127/1128/1129 等 1457 近战系新弹（数据面 melee），
     // 类门+触发统一走 projectileSnapStrikeBonus 单源；返回 num14 加伤在 banner 采样
-    // 之后并入（原版加伤 :14457 晚于 banner :13387）→ 不再吃旗乘区,随暴击已并 ×2。
+    // 之后并入（原版加伤 :14451 晚于 banner :13388-13390;SW-AJ1 2026-09-05 校准,旧 :14457/:13387）→ 不再吃旗乘区,随暴击已并 ×2。
     const snapBonus1457 = projectileSnapStrikeBonus(game, self,
       (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
       (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,

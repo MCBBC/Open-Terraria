@@ -47,7 +47,9 @@ describe('SW-R3 F-2+M-4：hurtBox16 = PrepareBombToBlow Resize 全表（P.cs:476
   });
   it('F-5：108 链爆/电路触发 hurtBox=130、164 地雷=64（SetDefaults 盒）', () => {
     // 尾参 ,1 = SW-AC1 2026-09-04 kbDir=弹体朝向+1（零速生成弹 Entity.direction 缺省/
-    // 自动面 else 档;kb 标量仍 0——SW-S1 决定维持,NewProjectile 生成参 kb=10f 勘误见 hook 注）
+    // 自动面 else 档）;kb=10 = SW-AD1 2026-09-04 终态（Wiring.cs:2042 生成参
+    // knockBack=10f,经 Projectile.cs:10884 赋值——旧 SW-S1"kb=0 维持"注已被勘误推翻,
+    // 见 Game.ts 链爆 SW-AD1 终态注）
     expect(gameSrc).toMatch(/explodeAt\(ex, ey, 500, 10, true, 130, 0, 108, undefined, undefined, 10, 1\)/);
     const devices = readFileSync(new URL('../src/world/wiring/devices.ts', import.meta.url), 'utf8');
     expect(devices).toMatch(/ctx\.explode\(x, y, 500, 10, true, 130, 108\)/);

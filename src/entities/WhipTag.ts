@@ -754,8 +754,8 @@ export function resolveWhipTagHit(
   stack.onHit(ctx, baseDmg, game);                                 // :13711（calcDamage = num7）
   // 毁灭臂镗 6179（Damage :13447-13450）：tag 伤害成立的命中 → kind2 脉冲
   //（150×minionDamage/400px/2 目标,共用 360t 冷却）。★F1（蓝队四轮）：原版 num14
-  // 加伤在 tag 栈(:12932)/DamageVar(:12959)/banner(:13387)【之后】并入 → 不吃
-  // tag/banner 乘区、随暴击翻倍（StrikeNPC 防后 ×2 :81990）——返回值移到 crit 倍率处并入
+  // 加伤在 tag 栈(:12947)/DamageVar(:12970)/banner(:13388-13390)【之后】并入 → 不吃
+  // tag/banner 乘区、随暴击翻倍（StrikeNPC 防后 ×2 :82067）——返回值移到 crit 倍率处并入
   let snapBonusKind2 = 0;
   if (changes.addProjectileTagDamage && owner?.equipStats.accArmletOfRuin) {
     const vw = en.w ?? 16, vh = en.h ?? 16, vx0 = en.x ?? hx, vy0 = en.y ?? hy;

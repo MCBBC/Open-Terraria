@@ -279,3 +279,81 @@ describe('灰烬崩塌弹 40（Projectile.cs:1229-1237+58809-59083+79107-79311�
     expect(store.type[store.idx(10, 99)]).toBe(ASH_ID);     // 台上一格补回灰烬
   });
 });
+
+// ===================== ★①（2026-09-04 掉落/沙族批）AI_010 沿途吞噬集+顶坡拍平
+// （Projectile.cs:59021-59054,owner==myPlayer && tileCollide）——盒内格
+// {185-187,165,12,665,639,105,178} → WorldGen.KillTile(i,j)（无 noItem=照常掉落,
+// 走仓内 breakTile 全语义）;else if topSlope(1|2) && !Platforms → SlopeTile(拍平
+// slope=0) + position.Y -= 16f。位次=AI 段内、落面 Kill 判据之前（拍平后中心格上移
+// → 不吃落面 Kill=原版穿顶坡续坠）。掷骰：该循环无 RNG=零掷（掉落骰在 KillTile
+// 域内,非本段）。 =====================
+
+describe('① 灰烬弹沿途吞噬集+顶坡拍平（Projectile.cs:59021-59054）', () => {
+  /** mkEntityHooks 变体：breakTile 记账并真实清格（KillTile 投影） */
+  function mkConsumeHooks(store: TileStore) {
+    const breaks: Array<[number, number]> = [];
+    const hooks = {
+      world: { store } as never,
+      player: { dead: false, iframes: 0, x: 99999, y: 99999, w: 20, h: 42 } as never,
+      enemies: () => [],
+      playSfx: () => {},
+      spawnDust: () => null,
+      spawnDrop: () => null,
+      damagePlayer: (): number => 0,
+      breakTile: (x: number, y: number) => { breaks.push([x, y]); store.setTile(x, y, 0); },
+    } as unknown as GameHooks;
+    return { hooks, breaks };
+  }
+
+  const CONSUME_SHEETS = [185, 186, 187, 165, 12, 665, 639, 105, 178];
+
+  for (const sheet of CONSUME_SHEETS) {
+    it(`吞噬集成员 sheet ${sheet}：盒内格 → breakTile（KillTile 无 noItem 投影）`, () => {
+      const store = new TileStore(40, 260);
+      const t = TILE_INTERNAL_BY_SHEET.get(sheet)!;
+      store.setTileSilent(10, 20, t, 0, 0);        // 弹心所在格
+      const { hooks, breaks } = mkConsumeHooks(store);
+      const p = new AshBallProj(10 * 16 + 8, 20 * 16 + 8, 0, 0.41, 15);
+      p.fixedUpdate(1 / 60, hooks);                // 首拍 tileCollide=false（:58937）
+      p.fixedUpdate(1 / 60, hooks);                // 次拍起消费循环（:59021 门）
+      expect(breaks.some(([x, y]) => x === 10 && y === 20)).toBe(true);
+    });
+  }
+
+  it('吞噬集外（石 1）→ 不吞（else-if 集合域外不进 KillTile）', () => {
+    const store = new TileStore(40, 260);
+    store.setTileSilent(10, 20, STONE, 0, 0);
+    const { hooks, breaks } = mkConsumeHooks(store);
+    const p = new AshBallProj(10 * 16 + 8, 20 * 16 + 8, 0, 0.41, 15);
+    stepUntil(p, hooks);
+    expect(breaks).toEqual([]);
+  });
+
+  it('顶坡（slope 2）拍平：SlopeTile → slope=0 + position.Y -= 16（拍平后中心上移不吃落面 Kill）', () => {
+    const store = new TileStore(40, 260);
+    store.setTileSilent(10, 20, STONE, 0, 0);
+    store.setSlope(10, 20, 2);                     // topSlope（:59045 topSlope()=1|2）
+    const { hooks } = mkConsumeHooks(store);
+    const p = new AshBallProj(10 * 16 + 8, 20 * 16 + 8, 0, 0.41, 15);
+    p.fixedUpdate(1 / 60, hooks);                  // 首拍免碰撞
+    const yBefore = p.y;
+    p.fixedUpdate(1 / 60, hooks);                  // 次拍：拍平 + y-=16 + 重力积分
+    expect(store.slope[store.idx(10, 20)]).toBe(0);   // SlopeTile（:59046）
+    expect(p.dead).toBe(false);                    // 拍平后中心格=上一格（不落面 Kill）
+    expect(p.y).toBeCloseTo(yBefore - 16 + 1.23, 5);  // -16f（:59051）+ vy 0.82+0.41（首拍即吃重力）
+  });
+
+  it('底坡（slope 3）不拍平、平台坡不拍平（:59045 !TileID.Sets.Platforms 门）', () => {
+    const store = new TileStore(40, 260);
+    store.setTileSilent(10, 20, STONE, 0, 0);
+    store.setSlope(10, 20, 3);                     // 底坡（topSlope()=false）
+    store.setTileSilent(12, 20, TILE_INTERNAL_BY_SHEET.get(19)!, 0, 0);   // 平台 19
+    store.setSlope(12, 20, 2);                     // 平台+topSlope → 门拒
+    const { hooks } = mkConsumeHooks(store);
+    const p = new AshBallProj(10 * 16 + 8, 20 * 16 + 8, 0, 0.41, 15);
+    p.fixedUpdate(1 / 60, hooks);
+    p.fixedUpdate(1 / 60, hooks);
+    expect(store.slope[store.idx(10, 20)]).toBe(3);   // 底坡原样
+    expect(store.slope[store.idx(12, 20)]).toBe(2);   // 平台坡原样（Platforms 门）
+  });
+});

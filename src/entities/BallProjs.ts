@@ -41,12 +41,32 @@
 //   受伤撒球（Player.cs:38542-38549）：hasFootball 玩家受击 → 全背包 4743 清空改为
 //     发射同数量弹 861（vel=(-hitDir×4,-6)，ai0=0/ai1=1/ai2=原堆叠数）。Game.damagePlayer 内接。
 //   Kill（Projectile.cs:79355-79357）：RequestNewItem(Center+(0,-2), 4743, max(ai[2],1))。
+// ---------------------------------------------------------------------------
+// ★通用湿段接入（2026-09-04 弹幕湿段缺口批，projWetSection.ts 共享体 1:1）：
+//   155/861 均非 ignoreWater 豁免（SetDefaults :2428-2434/:8269-8275 逐块无
+//   ignoreWater 行 = 原版缺省 false;数据面 PROJ_IGNORE_WATER 262 id 集两者皆缺行,
+//   运行时 !!projectileData(id)?.ignoreWater 复核）。位序 = 原版 Update:
+//   AI_032/AI_002（读【上拍】旗）→ 湿段 :16903-17113 → HandleMovement（湿阻尼
+//   :17721-17764 只削位移）。★155 AI 有湿旗消费者（摩擦 0.99 档 + 浮升族
+//   :27356-27381）→ 必须拆此位序;861 AI 无 wet 分支（:23692-23729 原文无 wet 消费
+//   ——同位序下与"tick 头调用"同态,取正典序）→ 出生预置（NewProjectile
+//   :10886-10892）在首拍 AI 前补做（spawnPresetWet）,常规湿段在 AI 后调用——
+//   原版 AI 读的字段 = 上拍湿段终值/出生预置,此序逐拍同构。155 特支两支由共享体
+//   内建:入水免溅（:16948 `type != 155` 门）+ 出水 velocity.Y×0.5（:16980-16981,
+//   hooks.onBeachBallExit 回写本体 vy,无溅花无冷却窗）;861 无特支（入/出水溅花
+//   10 粒 + wetCount 冷却窗全走共享体）。原内联"弹心格 liquid"湿判定退役——
+//   原版 wet = 盒 WetCollision（Collision.cs:1578 缩减盒 10×h/2 中心带）非弹心单格,
+//   且为逐拍维护字段（上拍语义）非当拍重测。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
+import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { wetCollision } from './npcLiquid';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { Lang } from '../i18n/Lang';
 
 /** 同 AABB 相交（Rectangle.Intersects 语义：边缘相贴不算） */
@@ -59,6 +79,17 @@ abstract class BallBase extends Entity {
   abstract readonly projId: number;
   dead = false;
 
+  // ---- ★通用湿段旗（ProjWetFlags 同名承载面,projWetSection.ts 共享体消费;
+  //      Projectile 同名字段——155/861 全员受段,无 ignoreWater 豁免）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, w: number, h: number) {
     super();
     this.w = w; this.h = h;
@@ -66,9 +97,30 @@ abstract class BallBase extends Entity {
     this.vx = vx; this.vy = vy;
   }
 
-  /** 命中扫掠盒（moveAndCollide 前），判本帧是否真的撞了 tile */
+  /** NewProjectile 出生预置（Projectile.cs:10886-10892 逐值 1:1）：出生盒
+   *  WetCollision 首测 + honey/shimmer 静态旗;★原版此点【不设】lavaWet（粘滞
+   *  首档由首拍 Update 湿段 :16906 并入——共享体常规段承接）;ignoreWater 仅清
+   *  wet（:10888-10890）,honey/shimmer 不随豁免清（原文字面）。时点 = 首拍
+   *  AI【前】（AI_032 首拍即消费 wet 旗）;出生位 = 构造位（首拍位移前同位 ✔
+   *  = 原版 NewProjectile 采样时点）。155/861 实际恒走 r.wet 支（均非豁免）。 */
+  protected spawnPresetWet(st: TileStore): void {
+    if (this.presetDone) return;
+    this.presetDone = true;
+    const r = wetCollision(st, this.x, this.y, this.w, this.h);
+    this.wet = !!projectileData(this.projId)?.ignoreWater ? false : r.wet;   // :10887-10890
+    this.honeyWet = r.honey;                                                 // :10891
+    this.shimmerWet = r.shimmer;                                             // :10892
+  }
+
+  /** 命中扫掠盒（moveAndCollide 前），判本帧是否真的撞了 tile。
+   *  ★水中位移阻尼（HandleMovement :17721-17764 wetVelocity = velocity×档位
+   *  0.5 水/0.25 蜂蜜/0.375 微光/1 干——速度【场】不减、只削当拍位移;读【本拍
+   *  刷新后】旗 = 湿段 :16903 已先于本位跑）。moveAndCollide 契约：dx/dy=本拍
+   *  位移、b.vx/vy=碰撞调整字段采纳处原样回读,★禁止采纳处除回（body 初值=
+   *  全场速度,除回=速度场指数爆炸）。 */
   protected stepWithCollision(world: import('../world/World').World): void {
-    moveAndCollide(this, world, this.vx, this.vy);
+    const drag = projWaterDragFactor(this);
+    moveAndCollide(this, world, this.vx * drag, this.vy * drag);
   }
 
   /** 出界防巡游（原版世界边缘 Kill 兜底等价） */
@@ -96,6 +148,8 @@ export class BeachBallProj extends BallBase {
   override fixedUpdate(_dt: number, game: GameHooks): void {
     const world = game.world;
     if (this.outOfBounds(game)) { this.dead = true; return; }
+    // ---- 出生预置（NewProjectile :10886-10892,首拍 AI 前同位首测——AI_032 首拍即消费 wet 旗）----
+    this.spawnPresetWet(world.store);
 
     // ---- 盒扫描踢飞（AI_032 :27264-27349）：原版单道门 = ai[0]++ 后仅 ≥20 一档,
     //      同支内复位 18 并扫描（稳态每 2t 恰一轮）;曾写成复位后再开一道 ≥18 门
@@ -141,21 +195,19 @@ export class BeachBallProj extends BallBase {
     //       ★须在重力/摩擦前判,否则贴地 vy 恒被 +0.1 再顶起,永不成零）----
     if (this.vx === 0 && this.vy === 0) { this.dieReturnItem(game); return; }
 
-    // ---- 湿身判定（wet 由上一帧 WetCollision 写;本仓取当前弹心格 liquid）----
-    const st = world.store;
-    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-    const wet = st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
-
     // rotation += vx×0.02（:27352）
     this.rot += 0.02 * this.vx;
     // 摩擦（:27354-27361）： vy==0 → ×0.98 / wet 0.99 / 空 0.995;|vx|<0.03 归零
+    // ★wet = 原版逐拍维护字段（上拍湿段终值/出生预置）,非当拍重测——本仓旧
+    //   "弹心格 liquid" 内联近似退役（WetCollision=盒 10×h/2 中心带,非弹心单格）
     if (this.vy === 0) this.vx *= 0.98;
-    else if (wet) this.vx *= 0.99;
+    else if (this.wet) this.vx *= 0.99;
     else this.vx *= 0.995;
     if (Math.abs(this.vx) < 0.03) this.vx = 0;
 
-    // ---- AI 重力/浮力（:27362-27381）：湿浮 vy−0.1 下限 −4 且 vx==0 即 Kill；干重力 +0.1 上限 10 ----
-    if (wet) {
+    // ---- AI 重力/浮力（:27362-27381）：湿浮 vy−0.1 下限 −4 且 vx==0 即 Kill；干重力 +0.1;
+    //       ★:27402-27405 vy>10 钳在 wet/dry 两支【外】（逐字形状,曾误收进 dry 支）----
+    if (this.wet) {
       this.bounceCount = 0;
       if (this.vy > 0) this.vy *= 0.95;
       this.vy -= 0.1;
@@ -166,8 +218,19 @@ export class BeachBallProj extends BallBase {
       }
     } else {
       this.vy += 0.1;
-      if (this.vy > 10) this.vy = 10;
     }
+    if (this.vy > 10) this.vy = 10;
+
+    // ---- ★通用湿段（:16903-17113 全体弹共用段,projWetSection.ts 共享体 1:1）----
+    // 位序 = 原版 Update:AI_032（读上拍旗）→ 本段 → HandleMovement（阻尼在
+    // stepWithCollision）。溅花尘/音由共享体 wetSplashStepShared 承载（弹面 10 粒/
+    // vy−4 等逐值注在彼处）,本类不自写。155 特支:入水免溅（:16948 type!=155 门,
+    // 共享体内建）+ 出水 velocity.Y×0.5（:16980-16981,经钩回写本体 vy——无溅花
+    // 无冷却窗,共享体 else-if 序保证）。采样位=AI 后位移前 = 上拍移动结算位 ✔
+    // 原版湿段同位（HandleMovement :17120 在段后）。
+    projectileWetSection(this, game, world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater,
+      { onBeachBallExit: () => { this.vy *= 0.5; } });
 
     // ---- 移动+撞墙（HandleMovement WallCollision 支 :18714-18728）----
     const lvx = this.vx, lvy = this.vy;
@@ -242,6 +305,8 @@ export class FootballProj extends BallBase {
   override fixedUpdate(_dt: number, game: GameHooks): void {
     const world = game.world;
     if (this.outOfBounds(game)) { this.dead = true; return; }
+    // ---- 出生预置（NewProjectile :10886-10892,首拍 AI 前同位首测）----
+    this.spawnPresetWet(world.store);
 
     // 接触回收（:23677-23691）：owner 本地门本仓恒真（单人/代理弹都归本端桶）。
     // Kill() 单口 → :79355-79357 回落段同样生效（被"捡走"= 回到玩家头顶掉落）。
@@ -284,6 +349,15 @@ export class FootballProj extends BallBase {
       this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;   // velocity.ToRotation()+90°
       if (this.vx < 0) this.rot += Math.PI / 2;      // spriteDirection==-1 微调
     }
+
+    // ---- ★通用湿段（:16903-17113 全体弹共用段,projWetSection.ts 共享体 1:1）----
+    // 位序 = 原版 Update:AI（读上拍旗;AI_002 型专段 :23692-23729 原文无 wet 分支
+    // ——861 无湿旗消费者,本位序与"tick 头调用"同态,取正典序）→ 本段 →
+    // HandleMovement（湿阻尼在 stepWithCollision）。861 无 SetDefaults 特支、不在
+    // IsDestroyedByWater 六型 → 各钩全缺省;入/出水溅花 10 粒 + wetCount 冷却窗
+    // + 四旗置位/三清全走共享体（溅花尘/音=wetSplashStepShared,本类不自写）。
+    projectileWetSection(this, game, world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
 
     // ---- 移动+撞墙（HandleMovement 支 :18484-18502,lastVelocity 门镜像）----
     const lvx = this.vx, lvy = this.vy;

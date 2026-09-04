@@ -3413,6 +3413,10 @@ const snap: SnapFn = (name) => {
     pdHallPoint(Math.trunc(hl.ex), Math.trunc(hl.ey), hl.edy, null);
   }
   // DungeonData.CanGenerateFeatureAt（:132-166）。feat: 0=常规 1=BiomeChests 2=Paintings/WallVariants
+  // ★IIIII160：拒因观测标（SW_I179;零掷 logging-only,x86 rig DungeonData.cs:153/:163 DR|CG 同构
+  //   同名）—— LIGHTS 相界定罪面（拒因流 x86↔JS 结构对拍）。
+  const i179ok = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I179;
+  const mk179ok = (ln: string): void => { if (i179ok) (globalThis as { __swI113?: (line: string) => void }).__swI113?.(ln); };
   function featOK(x: number, y: number, feat: number): boolean {
     if (!inW(x, y, 5)) return false;
     if (wallAt(x, y) === 350) return false;
@@ -3421,12 +3425,42 @@ const snap: SnapFn = (name) => {
     // ★IIIII108c 第④刀：DropTrap 成功盒（DungeonDropTrap.CanGenerateFeatureAt 恒 false
     //   ⇒ data.CanGenerateFeatureAt 的 dungeonFeatures 扫描对**一切**特征恒拒收,
     //   含窗/PitTrap 本身——故必须先于下面两个 feat!== 条件,全特征生效）。
-    for (const db of dropBoxes) if (db.contains(x, y)) return false;
+    for (const db of dropBoxes) if (db.contains(x, y)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=DropTrap`); return false; }
     if (feat !== 2 && feat !== 3) {
-      for (const pb of pits) if (pb.contains(x, y)) return false;
+      for (const pb of pits) if (pb.contains(x, y)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=PitTrap`); return false; }
     }
     if (feat !== 3) {
-      for (const wb of winBoxes) if (wb.contains(x, y)) return false;   // ★QQQQQQ 窗盒门
+      for (const wb of winBoxes) if (wb.contains(x, y)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=Window`); return false; }   // ★QQQQQQ 窗盒门
+    }
+    // ★IIIII111 R7：CanGenerateFeatureAt 【房间扫描】补全（DungeonData.cs:152-162）——
+    //   逐已生成房：OuterBounds.Contains(x,y) ∧ 房.CanGenerateFeatureAt=false ⇒ 拒。
+    //   此前 JS 整缺 ⇒ 座1 Books 相 −115 掷首漂移（x86 @ROOM:4 (308,701,388,781) 实锤）
+    //   → 座2 全域掷位级联（RM 123↔121/GB 157↔141/#33）。房类覆写：
+    //   · BiomeDungeonRoom.cs:27：拒 {DropTrap(7),PitTrap(6),Spikes(5),Traps(4),Bookshelves(0)}；
+    //   · BiomeRuggedDungeonRoom.cs:45：追加拒 {Banners(8),Paintings(2)}；
+    //   · Square/Structured 继承基类；GenShapeDungeonRoom.cs:43 仅 Hourglass/Doughnut 拒
+    //     Window（JS 无 Window featOK 调用方,不建模）。
+    //   房基（DungeonRoom.cs:164）：Window∧非 dual 拒（dual 恒放行,JS 仅 dual 装载）；
+    //   PitTrap ConnectedRoom≠本房支=坑门本地环职责（featOK 不重复）；尾级 StyleData 覆写
+    //   （DungeonGenerationStyles.cs:13-58）：Shimmer11/Crystal15 拒 Pit；LivingWood13/
+    //   LivingMahogany14 拒 Spike/Pit；Beehive9 拒 Painting/Spike/Pit；Temple10 拒 Pit
+    //   （+Pillar——JS 无 Pillar featOK 调用方,不建模）；生物房类表未命中 → base 续走 StyleData。
+    //   普通世界 gfFeatRooms 恒空 ⇒ 本扫描零迭代=非 dual 零扰动。
+    if (gfFeatRooms.length > 0) {
+      for (const rm of gfFeatRooms) {
+        if (!rm.gen) continue;
+        const ol = rm.oL ?? rm.L, ot = rm.oT ?? rm.T, or2 = rm.oR ?? rm.R, ob = rm.oB ?? rm.B;
+        if (!(x >= ol && x < or2 && y >= ot && y < ob)) continue;
+        if (rm.bio) {
+          if (feat === 0 || feat === 4 || feat === 5 || feat === 6 || feat === 7) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=ROOM:${rm.st}`); return false; }
+          if (rm.bt === 5 && (feat === 2 || feat === 8)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=ROOM:${rm.st}`); return false; }
+          // 生物房类表未命中 → base.CanGenerateFeatureAt → 续走 StyleData 覆写（不 continue）
+        }
+        const stv = rm.st;
+        if (feat === 6 && (stv === 9 || stv === 10 || stv === 11 || stv === 13 || stv === 14 || stv === 15)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=ROOM:${stv}`); return false; }
+        else if (feat === 5 && (stv === 9 || stv === 13 || stv === 14)) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=ROOM:${stv}`); return false; }
+        else if (feat === 2 && stv === 9) { mk179ok(`DR|CG|x=${x}|y=${y}|ft=ROOM:${stv}`); return false; }
+      }
     }
     return true;
   }
@@ -3435,10 +3469,10 @@ const snap: SnapFn = (name) => {
   //   BiomeChests=feat1，上表已覆）。入口 hitbox=Bounds（CalculateHitbox 后）=entBounds。
   const entNoFeat = (x: number, y: number): boolean =>
     entKind !== 0 && entExists && entBounds.contains(x, y);
-  const featAreaOK = (x: number, y: number, fluff: number): boolean => {
+  const featAreaOK = (x: number, y: number, fluff: number, feat = 0): boolean => {
     for (let a = x - fluff; a <= x + fluff; a++) {
       for (let b = y - fluff; b <= y + fluff; b++) {
-        if (!featOK(a, b, 0)) return false;
+        if (!featOK(a, b, feat)) return false;
       }
     }
     return true;
@@ -3636,9 +3670,9 @@ const snap: SnapFn = (name) => {
       const compX = round === 0 ? fx : (_i93LegacySpike ? fx : wx - d);
       const compY = round === 0 ? fy - d : (_i93LegacySpike ? fy - d : cy);
       if (spkT) spkT('STEP', `cell=${fx},${fy} comp=${compX},${compY}`
-        + ` fA=${featOK(fx, fy, 0) ? 1 : 0}/${entNoFeat(fx, fy) ? 1 : 0}`
-        + ` fB=${featOK(compX, compY, 0) ? 1 : 0}/${entNoFeat(compX, compY) ? 1 : 0}`);
-      if (!featOK(fx, fy, 0) || entNoFeat(fx, fy) || !featOK(compX, compY, 0)
+        + ` fA=${featOK(fx, fy, 5) ? 1 : 0}/${entNoFeat(fx, fy) ? 1 : 0}`
+        + ` fB=${featOK(compX, compY, 5) ? 1 : 0}/${entNoFeat(compX, compY) ? 1 : 0}`);
+      if (!featOK(fx, fy, 5) || entNoFeat(fx, fy) || !featOK(compX, compY, 5)
         || entNoFeat(compX, compY)) {
         if (spkT) spkT('REFUSE', '');
         if (round === 0) cx += step; else cy += step;
@@ -4331,6 +4365,24 @@ const snap: SnapFn = (name) => {
       let flag2 = false, flag3 = false, flag4 = false, flag5 = false, flag6 = false;
       let flag7 = false, flag8 = false, flag11 = false, flag12 = false, flag13 = false, flag14 = false;
       const IS_21 = TILE_BY_KEY['chest'], IS_467 = CHEST2;
+      // ★IIIII108c2（1458 cs:36371-36405）：errorWorld 箱样式洗牌臂（与 BuriedChestsPass
+      //   同刀第二副本——本文件 dgAddBuriedChest 是 AddBuriedChest 的独立移植，普通种子
+      //   零路径；iamerror 链地牢生物箱/普通箱（tile21）每箱 1-3 掷。位序=num9/num10
+      //   初始化后、flag3 沙漠门（cs:36408）前，与 cs 原文一致）。
+      if (gs.seedFlags.errorWorld && chestTileType === IS_21) {
+        if (rng.int(0, 1) === 0) {
+          let num11 = -1;
+          if (num9 === 1 || num9 === 11 || num9 === 12 || num9 === 13 || num9 === 15) num11 = 6;
+          else if (num9 === 0) num11 = 5;
+          if (num11 > -1) {
+            if (rng.int(0, 2) === 0) {
+              num11 = rng.int(0, 51);
+              while (num11 >= 18 && num11 <= 27) num11 = rng.int(0, 51);
+            }
+            num9 = num11;
+          }
+        }
+      }
       // —— ★IIIII188 style→箱型支链（WG.cs:36409-36583 全序 1:1；dual 座表支触发面：
       //    467/10(4267 Desert 表)→flag3、21/11(681)·467/24(5805)→flag2、21/8(626)·
       //    21/10(680)·21/29(2249,dual 门)→flag4、21/15(952)→939 填充、21/12(831)→
@@ -4688,7 +4740,7 @@ const snap: SnapFn = (name) => {
         const num = Math.trunc(bnd.L + (bnd.R - bnd.L) * rd());
         const num2 = Math.trunc(bnd.T + (bnd.B - bnd.T) * rd());
         // ★IIIII215 取证钩（SW_I215;x86 rig DR|BCX 同构,零掷）
-        const bcGate = featAreaOK(num, num2, 1);             // CanGenerateFeatureInArea(:296)
+        const bcGate = featAreaOK(num, num2, 1, isDualWorld ? 1 : 0);             // CanGenerateFeatureInArea(:296)
         if (i215B) mk215B(`DR|BCX|num=${num}|num2=${num2}|ok=${bcGate ? 1 : 0}`);
         // ★IIIII222 试样邻域 81×81 窗 dump（SW_I222;仅 (num,num2)==(i222X,i222Y) 首次命中发;
         //   与 x86 rig DungeonUtils.GenerateDungeonBiomeChest DumpBox 同位同构）
@@ -4852,16 +4904,23 @@ const snap: SnapFn = (name) => {
       // ★IIIII188：GC-RM/GC-FA/GC-TRY 补 |mr=|rc= 注脚（x86 rig JJHook.Mark 同构格式,
       //   per-style 掷率对账用;logging-only 零掷）
       const gcRc = (): number => (globalThis as { __swRollTotal?: number }).__swRollTotal ?? 0;
-      if (gcT) console.log(`GC-RM ${gcRm++} leg=${leg ? 1 : 0} lo=${lo} hi=${hi} loY=${loY} hiY=${hiY} st=${rmSt}|mr=${dgMainRolls}|rc=${gcRc()}`);
+      // ★IIIII160：gcRm++ 提出为无条件（原在 gcT 条件内,BCR 房号恒 −1）
+      if (gcT) console.log(`GC-RM ${gcRm} leg=${leg ? 1 : 0} lo=${lo} hi=${hi} loY=${loY} hiY=${hiY} st=${rmSt}|mr=${dgMainRolls}|rc=${gcRc()}`);
+      gcRm++;
       (globalThis as { __swI154GRm?: number }).__swI154GRm = gcRm - 1;
       gcRsnOn = true;
+      // ★IIIII160：BCR=逐房受理窗（x86 rig BCR 同构;零掷）
+      if (i179F) mk179R(`DR|BCR|r=${gcRm - 1}|b=${lo},${loY},${hi},${hiY}`);
       for (let j = 0; j < 1000; j++) {
         // num=(int)Lerp(minX,maxX,rd)、num2=(int)Lerp(minY,maxY,rd)（DU.cs:337-338）
         const num = Math.trunc(lo + (hi - lo) * rd());
         const num2 = Math.trunc(loY + (hiY - loY) * rd());
-        if (!featAreaOK(num, num2, 1)) {
+        // ★IIIII160：BCP=逐 attempt 采样位（x86 rig DU.cs:341 后 BCP 同构）
+        if (i179F) mk179R(`DR|BCP|x=${num}|y=${num2}`);
+        if (!featAreaOK(num, num2, 1, isDualWorld ? 1 : 0)) {
           // ★IIIII188：GC-FA 镜像（rig DU.cs:347-353 gate 拒支,曾整缺=JS 侧 gate 拒无声）
           if (gcT) console.log(`GC-FA rm=${gcRm - 1} num=${num} num2=${num2}|mr=${dgMainRolls}|rc=${gcRc()}`);
+          if (i179F) mk179R(`DR|BCG|x=${num}|y=${num2}`);   // ★IIIII160：门拒标（x86 BCG 同构）
           continue;                                        // data.CanGenerateFeatureInArea(:339)
         }
         let itemType = rmSt === 0 ? 0 : -1, chestStyle = 2;
@@ -5152,6 +5211,8 @@ const snap: SnapFn = (name) => {
     //   掷耗 JS≈1417 vs 1371（3.3% 残差）——几何面已对齐，缺口全在本配额。
     const num5 = Math.trunc(28 * (w / 4200) * gfFeatScalar);
     let ncount = 0, num4 = 0;
+    // ★IIIII160：LGQ=配额头（x86 rig W1 同构;零掷）
+    if (i179L) mk179L(`DR|LGQ|s=${instIdx}|n5=${num5}|bnd=${bounds.L},${bounds.T},${bounds.R},${bounds.B}`);
     // ★105c 取证仪（dormant）：SW_I137_LIGHTS=1 时漏斗计数——批后可整段移除。
     const lgSt137 = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I137_LIGHTS;
     const LF = lgSt137 ? ((globalThis as unknown as { __dglF?: Record<string, number> }).__dglF ??= {}) : null;
@@ -5177,9 +5238,13 @@ const snap: SnapFn = (name) => {
             for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((uix >>> s2) & 0xff), 16777619) >>> 0;
             console.log(`A|${x}|${cy}|${fh.toString(16)}`);
           }
-          if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && gfIsBkDT(typAt(x, cy - 1))
-            && featOK(x, cy, 0)
-            && ((entExists && entBounds.contains(x, cy)) || gfIsDW(wallAt(x, cy))))) continue;
+          // ★IIIII160：候选三门拆嵌套 + LG1/LG2/LC 逐门标（x86 rig W3 同构;零掷,语义同序）
+          if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && gfIsBkDT(typAt(x, cy - 1)))) continue;
+          if (i179L) mk179L(`DR|LG1|x=${x}|cy=${cy}`);
+          if (!featOK(x, cy, 10)) continue;
+          if (i179L) mk179L(`DR|LG2|x=${x}|cy=${cy}`);
+          if (!((entExists && entBounds.contains(x, cy)) || gfIsDW(wallAt(x, cy)))) continue;
+          if (i179L) mk179L(`DR|LC|x=${x}|cy=${cy}`);
           if (LF) LF.cand = (LF.cand ?? 0) + 1;
           let near = false;
           outer5:
@@ -5249,6 +5314,7 @@ const snap: SnapFn = (name) => {
             }
             if (lgTr) console.log(`DG CH x=${x} cy=${cy} gate=${cSty !== null ? 1 : 0} blocked=${blocked ? 1 : 0}`);
             if (chOK) {
+              if (i179L) mk179L(`DR|LCOK|x=${x}|cy=${cy}`);   // ★IIIII160：吊灯落型（x86 W7a 同构）
               if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(`MARK|LCHD|${x},${cy}`);
               {
                 const ev = (globalThis as { __swDgDecor?: Array<unknown> }).__swDgDecor;
@@ -5277,6 +5343,7 @@ const snap: SnapFn = (name) => {
               || (lantT as number[]).length === 0;
             if (LF) LF.lanArm = (LF.lanArm ?? 0) + 1;
             const gothicRoll = isDefArm ? rn(3) : -1;         // Next(3) 仅 Default 臂（cs:128）
+            let lNum10 = 42, lStyle = 0;                      // ★IIIII160：提出臂级作用域供 LLA 标
             // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 两格）
             const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
             // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
@@ -5287,7 +5354,6 @@ const snap: SnapFn = (name) => {
             if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !abvInact && !DG_SOLID_TOP.has(aboveSheet)
               && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
               if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
-              let lNum10 = 42, lStyle: number;
               if (!isDefArm) {
                 const lItem = (lantT as number[])[rn((lantT as number[]).length)]!;
                 const pd = ipOf(lItem);
@@ -5312,10 +5378,13 @@ const snap: SnapFn = (name) => {
                   const ev = (globalThis as { __swDgDecor?: Array<unknown> }).__swDgDecor;
                   if (ev) ev.push({ k: 'L', n4: num4, x, y: cy, s: lStyle });
                 }
+                if (i179L) mk179L(`DR|LLOK|x=${x}|cy=${cy}`);   // ★IIIII160：灯笼落型（x86 W9e 同构）
                 placed = true; ncount = 0; num4++;
                 dgSwitch(x, cy);
               }
             }
+            // ★IIIII160：LLA=灯笼臂明细（x86 W9f 同构;a/g/t/s/ok）
+            if (i179L) mk179L(`DR|LLA|x=${x}|cy=${cy}|a=${isDefArm ? 0 : 1}|g=${gothicRoll}|t=${lNum10}|s=${lStyle}|ok=${placed ? 1 : 0}`);
             break;                                            // 两臂同以 break 终结上扫（:131/:134）
           }
         }
@@ -5368,6 +5437,8 @@ const snap: SnapFn = (name) => {
       lswIters++;
       const a = x + ri(-12, 12);
       const b = y + ri(3, 20);
+      // ★IIIII160：LSI=开关逐迭代采样位（x86 rig Lights_GenerateSwitch LSI 同构;零掷）
+      i165?.(`DR|LSI|x=${x}|y=${y}|i=${i}|a=${a}|b=${b}`);
       const sgInW = inW(a, b, 0) && inW(a, b + 1, 0);
       const sgAct = sgInW && actAt(a, b) === 0 && actAt(a, b + 1) === 0;
       const sgL = sgAct && inW(a - 1, b, 0) && gfIsBkDT(typAt(a - 1, b));   // ★105c 座面化
@@ -5503,7 +5574,7 @@ const snap: SnapFn = (name) => {
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(Math.trunc(ws), bounds.B - 1);
       // ★IIIII179：TRP=陷阱逐 attempt（x86 同构;dual 支三门直读）
-      if (i179F) mk179R(`DR|TRP|x=${x}|y=${y}|g=${isDual ? (gfIsDW(wallAt(x, y)) && featOK(x, y, 0) && !wallIsInStyle(DungeonGenerationStyles.Temple, wallAt(x, y)) ? 1 : 0) : (gfIsDW(wallAt(x, y)) ? 1 : 0)}`);
+      if (i179F) mk179R(`DR|TRP|x=${x}|y=${y}|g=${isDual ? (gfIsDW(wallAt(x, y)) && featOK(x, y, 4) && !wallIsInStyle(DungeonGenerationStyles.Temple, wallAt(x, y)) ? 1 : 0) : (gfIsDW(wallAt(x, y)) ? 1 : 0)}`);
       let okT = false;
       if (isDual) {
         // ★IIIII114b2：dual 支谓词一=**座面合并集** gfIsDW（C# IsConsideredDungeonWall=
@@ -5511,7 +5582,7 @@ const snap: SnapFn = (name) => {
         //   seat1 Snow/Desert/Hallow/Temple 墙 349/187/28/87 全靠座内扩张）；旧 isDW
         //   静态 {7,8,9,94..99} 仅 legacy 等价。
         const d1 = gfIsDW(wallAt(x, y));
-        const d2 = d1 && featOK(x, y, 0);
+        const d2 = d1 && featOK(x, y, 4);
         const d3 = d2 && !wallIsInStyle(DungeonGenerationStyles.Temple, wallAt(x, y));
         okT = d3 && placeTrap0(x, y);
         if (TF) {
@@ -5895,7 +5966,7 @@ const snap: SnapFn = (name) => {
       const WV68 = (globalThis as { __wvLines?: string[] }).__wvLines;
       const DGFX = WV68 !== undefined && (globalThis as { __swDgFx?: boolean }).__swDgFx === true;
       if (DGFX) WV68!.push(`MARK|dg_fs ${i},${j} n=${num} k=${k} n2=${num2} n3=${num3} alch=${alch} bew=${bew} m=${dgMainRolls}`);
-      if (!featOK(num3, j, 0)) { if (DGFX) WV68!.push(`MARK|dg_fX CANREJ ${num3},${j} m=${dgMainRolls}`); return; }
+      if (!featOK(num3, j, 9)) { if (DGFX) WV68!.push(`MARK|dg_fX CANREJ ${num3},${j} m=${dgMainRolls}`); return; }
       const ccA = inW(num3, j, 0) && actAt(num3, j) === 0;
       const ccW = isDW(wallAt(num3, j));
       const ccS = dgSolidFT(num3, j + 1);
@@ -5946,7 +6017,7 @@ const snap: SnapFn = (name) => {
             //   外层 l 扫描继续，后续列仍参与 flag4（±15 邻域已有 354/355 表）检测。
             //   此前 break outer6 整体跳出 → (481,769) 锚没扫到 (501,768) 的巫惑台 →
             //   flag4 漏置 → bew 计数在错位消耗（vanilla bew@401,735 vs JS@481,769）。
-            if (!featOK(a, b, 0)) { flag3 = true; break; }
+            if (!featOK(a, b, 9)) { flag3 = true; break; }
             if (actAt(a, b) !== 0) { num18 = -1; break; }
           }
           if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) flag4 = true;
@@ -6093,7 +6164,7 @@ const snap: SnapFn = (name) => {
   /** per-seat 特征载荷与 climb 大厅基线（runDualDungeonLayout 返回后装配） */
   // ★IIIII107c：+o*/bio 可选字段（S1..S7 臂 OuterBounds/BiomeDungeonRoom 门消费面）
   const gfFeatRooms: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number;
-    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean }> = [];
+    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean; bt?: number }> = [];
   const gfFeatHalls: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }> = [];
   /** ★IIIII109b：GenerateEarlyDungeonFeaturesInRoom 每房分派载荷（cs:588-591 循环序）。
    *  provider 出口装配 + climb 插入房尾随追加（cs :446-458 Legacy 插入房亦属
@@ -6197,7 +6268,7 @@ const snap: SnapFn = (name) => {
     k--;
     const num2 = k - num, num3 = Math.trunc((k + num) / 2);                          // :268-269
     emit132(`MARK|dg_fs ${i},${j} n=${num} k=${k} n2=${num2} n3=${num3} alch=${refs.alch.v} bew=${refs.bew.v}`);
-    if (!featOK(num3, j, 0)) return false;                        // data.CanGenerateFeatureAt(this,num3,j) :270
+    if (!featOK(num3, j, 9)) return false;                        // data.CanGenerateFeatureAt(this,num3,j) :270
     // :274 候选门（active∨dungeon-wall∨下格实心∨下格 spike 簇四连判——wall=per-seat IsConsideredDungeonWall）
     if (!(inW(num3, j, 0) && actAt(num3, j) === 0 && gfIsDW(wallAt(num3, j))
       && dgSolidFT(num3, j + 1) && typAt(num3, j + 1) !== SPIKE)) {
@@ -6268,7 +6339,7 @@ const snap: SnapFn = (name) => {
       for (let b = j - num20 - num21; b <= j + num21; b++) {
         if (!inW(a, b, 0)) continue;
         if (a >= num3 - num19 && a <= num3 + num19 && b >= j - num20 && b <= j) {
-          if (!featOK(a, b, 0)) { flag3 = true; break; }         // CanGenerateFeatureAt 逐格门
+          if (!featOK(a, b, 9)) { flag3 = true; break; }         // CanGenerateFeatureAt 逐格门
           if (!noReg && actAt(a, b) !== 0) { num18 = -1; break; }// noReg 时中止门关闭(:531)
         }
         if (stricterSpecialCheck && (refs.alch.v > 0 || refs.bew.v > 0)
@@ -7249,10 +7320,10 @@ const snap: SnapFn = (name) => {
         WV65b.push(`MARK|dg_bz i=${i} acc=${sxB},${syB} rr=${rrB} ex=${exB} an=${x},${y} drop=${dd}`
           + ` wl=${wallAt(x, y)} upT=${typAt(x, y - 1)}`
           + ` f=${actAt(x, y)}${actAt(x, y + 1)}${actAt(x, y + 2)}${actAt(x, y + 3)}`
-          + ` ok=${featOK(x, y, 0) ? 1 : 0}${isDW(wallAt(x, y)) ? 1 : 0} spk=${typAt(x, y - 1) === SPIKE ? 1 : 0} dr=${dr}`
+          + ` ok=${featOK(x, y, 8) ? 1 : 0}${isDW(wallAt(x, y)) ? 1 : 0} spk=${typAt(x, y - 1) === SPIKE ? 1 : 0} dr=${dr}`
           + (mc99 !== undefined ? ` mc=${mc99}` : ''));   // ★IIIII99 主实例累计样本镜像
       }
-      if (!featOK(x, y, 0) || !gfIsDW(wallAt(x, y))   // ★IIIII179 座面化（Banners.cs:66）
+      if (!featOK(x, y, 8) || !gfIsDW(wallAt(x, y))   // ★IIIII179 座面化（Banners.cs:66）
         || typAt(x, y - 1) === SPIKE
         || actAt(x, y) !== 0
         || actAt(x, y + 1) !== 0
@@ -7942,7 +8013,7 @@ const snap: SnapFn = (name) => {
       //   三段梯 att 24 vs 20 的真根）。修=≤ 环（DropTrap cs:196 域 JS 已是 ≤ 环正确,勿动）。
       for (let px = hit.L; px <= hit.R; px++) {             // CanGenerateFeatureInArea=含 Right/Bottom（cs:111）
         for (let py = hit.T; py <= hit.B; py++) {
-          if (!featOK(px, py, 0)) { pitGate = 'area'; return false; }
+          if (!featOK(px, py, 6)) { pitGate = 'area'; return false; }
           // ★IIIII192：DungeonData.CanGenerateFeatureAt 尾部 **per-room 门**（DungeonRoom.cs:40-51
           //  经 CanGenerateFeatureInArea→CanGenerateFeatureAt 逐格调用的收尾支）——命中已生成房
           //  OuterBounds 的格：ConnectedRoom≠本房 → 拒（坑盒伸进邻房即整盒拒）；=本房 →
@@ -8239,7 +8310,7 @@ const snap: SnapFn = (name) => {
             : kindPick === 'Slush' ? 'Slush' : 'Silt';
           if (kindPick === 'random') dkind++;
           const okD = deDropTrap({ st, w, h, ws, uw: h - 200, rng,
-            canGenerateFeatureAt: (qx, qy) => featOK(qx, qy, 0),
+            canGenerateFeatureAt: (qx, qy) => featOK(qx, qy, 7),
             // ★IIIII108c 第④刀：成功盒登记（cs SetBounds 直值,hitbox 半开语义同构）
             registerDropBox: (box) => {
               const db = new DBnd(w, h);

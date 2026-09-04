@@ -1301,8 +1301,10 @@ export class TownNPC extends Entity {
    *  回归），无需独立重生系统。防御 = defDefense + 进度链（AI_007 头部每 tick
    *  defense = defDefense 起步逐旗累计 :53419-53534，受击时现算等价；dryadWard
    *  :53401-53412 树妖结界 buff 165 本仓无载体，登记）。击退 = StrikeNPC
-   *  :82183-82241：kb×kbResist(1) 软帽链 → 大伤害门（dmg×10>lifeMax 叠加+上抛）
-   *  / 常规门置换 vx=kb×hitDir、vy=−kb×0.75
+   *  （1456 :82183-82241 = 1457 :82216-82312）：kb×kbResist 软帽链（resist 逐型取
+   *  VANILLA_NPCS,SW-AF1 2026-09-04 F-1 补——旧版缺乘恒按 1）→ 大伤害门
+   *  （dmg×10>lifeMax 叠加+上抛）/ 常规门置换 vx=kb×hitDir×resist、
+   *  vy=−kb×0.75×resist（二次乘=原版 :82304/:82310）
    *
    *  ★穿甲契约（2026-08-31 对齐批④：Player.cs:44700 → 本接收端；GA 波次按此接线）：
    *    hurt(dmg, kbX, kbY, game, penPercent?, flatPen?)
@@ -1380,26 +1382,50 @@ export class TownNPC extends Entity {
       crit ? COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT : COMBAT_TEXT_DAMAGED_FRIENDLY);
     // 受击血粒子(原版 StrikeNPC 尘近似,与 Enemy.hurt 同规)
     game.spawnParticles(this.cx, this.cy, '#B01818', 5, 1.4, { life: 22, grav: 0.06 });
-    // 击退（StrikeNPC :82143-82241）：hitDirection = sign(kb)
+    // 击退（StrikeNPC 1456 锚 :82143-82241 = 1457 :82216-82312）：hitDirection = sign(kb)
+    // SW-AF1 2026-09-04（F-1）：补 knockBackResist 乘——原版整段单门
+    // `knockBack > 0f && knockBackResist > 0f`（1457 :82216）,num3 = knockBack×resist
+    // （:82218）,常规门置换支 num3【再】乘一次 resist（:82304/:82310——二次乘=原版
+    // 如此,Enemy.ts:13475-13476 同款）。resist 值源 = VANILLA_NPCS（vanilla-npcs.json
+    // SetDefaults 逐型:向导 22=0.5f=NPC.cs:9089、商人 17=0.5f、机械师 0.5f…缺省 1f
+    // = NPC.cs:8561）。kb=0 或 resist=0（不可击退型）整段跳过——旧版 kb=0 时大伤害门
+    // 的 `if (vy < 0) vy = 0` 会误清上升速度,双门补上后自然消除。
+    // onFire2 ×1.1（:82219-82222）城镇 NPC 无诅咒焰载体不接。
+    // ★SW-AO1 2026-09-05：大伤害门补专家 ×15 臂（NPC.cs:82255-82259 原文位次——
+    //   `int num8 = num * 10; if (Main.expertMode) { num8 = num * 15; } if (num8 > lifeMax)`，
+    //   在 kb 软帽链/暴击 ×1.4 之后、Y 加法钳区内：门真=叠加+上抛衰减档,门假=常规门置换支。
+    //   num = 实伤（StrikeNPC_Inner :82067 def/暴击后）= 本仓 dmg（防御/暴击已结）。
+    //   Main.expertMode 在大师档恒真（Main.cs 难度轴 expertMode ⊇ masterMode）→
+    //   world.isExpert（mainDifficulty≥EXPERT,ScaleStats.ts:206）即原版语义,非
+    //   "expert 专属、master 不接"。×15 使门在专家/大师更易开启（阈值 lifeMax/15）,
+    //   仅经击退速度可观测（1457 StrikeNPC 无 bitDamaged 出参,SW-G1 结论不变）。
+    const kbr = VANILLA_NPCS[String(this.vanillaId)]?.knockBackResist ?? 1;
     const hd = kbx < 0 ? -1 : 1;
-    const kb = knockbackCap(Math.abs(kbx));
-    if (dmg * 10 > this.maxHp) {
-      // 大伤害门（:82186-82222）：叠加 + 双倍上抛衰减档
-      if (hd < 0 && this.vx > -kb) {
-        if (this.vx > 0) this.vx -= kb;
-        this.vx -= kb;
-        if (this.vx < -kb) this.vx = -kb;
-      } else if (hd > 0 && this.vx < kb) {
-        if (this.vx < 0) this.vx += kb;
-        this.vx += kb;
-        if (this.vx > kb) this.vx = kb;
+    if (Math.abs(kbx) > 0 && kbr > 0) {                 // :82216 双门
+      let kb = knockbackCap(Math.abs(kbx) * kbr);       // :82218 ×resist → 五段软帽链
+      if (crit) kb *= 1.4;                              // :82251-82254 暴击 ×1.4（帽后,F-4 命中面）
+      const num8 = dmg * (game.world.isExpert ? 15 : 10);   // :82255-82259（SW-AO1）
+      if (num8 > this.maxHp) {
+        // 大伤害门（:82260-82298）：叠加 + 双倍上抛衰减档（Y 加法钳 = vy>num3 才追加）
+        if (hd < 0 && this.vx > -kb) {
+          if (this.vx > 0) this.vx -= kb;
+          this.vx -= kb;
+          if (this.vx < -kb) this.vx = -kb;
+        } else if (hd > 0 && this.vx < kb) {
+          if (this.vx < 0) this.vx += kb;
+          this.vx += kb;
+          if (this.vx > kb) this.vx = kb;
+        }
+        const vyKb = kb * -0.75;                        // :82290（城镇 NPC 恒有重力,-0.5 档不适用）
+        if (this.vy > vyKb) {
+          this.vy += vyKb;
+          if (this.vy < vyKb) this.vy = vyKb;
+        }
+      } else {
+        // 常规门（:82300-82311）：置换式,resist 二次乘
+        this.vx = kb * hd * kbr;
+        this.vy = -kb * 0.75 * kbr;
       }
-      this.vy += kb * -0.75;
-      if (this.vy < kb * -0.75) this.vy = kb * -0.75;
-    } else {
-      // 常规门（:82229-82238）：置换式
-      this.vx = kb * hd;
-      this.vy = -kb * 0.75;
     }
     if (this.hp <= 0) {
       this.dead = true;
@@ -4613,7 +4639,9 @@ export class TownNPC extends Entity {
     let hitY = -1;
     for (const ry of [n26 - 2, n26 - 1, n26]) {
       const ii = st.idx(n25, ry);
-      if (!st.flags[ii]) continue;
+      // ★G1谓词批(2026-09-04)：门探格门= tileSafely5.nactive()（NPC.cs:54606）——
+      // flags 位读漏 !inActive 半边（已致动门格会被误判可开）→ 改 isActive()
+      if (!st.isActive(n25, ry)) continue;
       const tt = st.type[ii];
       if (tt === TILE_BY_KEY_DOOR_TILES['door_closed']) { hitKind = 'door'; hitY = ry; break; }
       if (tt === TILE_BY_KEY_DOOR_TILES['tall_gate_closed']) { hitKind = 'gate'; hitY = ry; break; }

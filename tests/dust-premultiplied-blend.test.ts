@@ -71,29 +71,56 @@ function mkDst(): number[] {
 }
 
 describe('dustPremulBake 烘焙面（Renderer 预乘对数据源）', () => {
-  it('add=直色→预乘×Color 单次量化(A=255)、erase.A=texA×mA/255(RGB=0)', () => {
+  // ★2026-09-04 水花黑十字定谳：add[] 字节改【直色】语义（rgb=预乘×255/e、A=e）——
+  // putImageData 直色解释→浏览器预乘存面 rgb×e/255 恰还原 XNA 贡献。断言以
+  // "直色×α/255 重建预乘贡献"为准，±2 容差（两段量化：直色 byte + erase byte）。
+  it('add=直色面(A=max(e,预乘))还原预乘贡献、erase.A=texA×mA/255(RGB=0)', () => {
     const { add, erase } = dustPremulBake(TEX, 120, 120, 120, 120);
     for (let i = 0; i < TEX.length; i += 4) {
       const tA = TEX[i + 3];
+      const e = (tA * 120) / 255;
       for (let ch = 0; ch < 3; ch++) {
-        expect(Math.abs(add[i + ch] - Math.round((TEX[i + ch] * tA * 120) / 65025))).toBeLessThanOrEqual(1);
+        const premul = Math.round((TEX[i + ch] * tA * 120) / 65025);
+        const rebuilt = e >= 0.5 ? (add[i + ch] * add[i + 3]) / 255 : 0;   // e<0.5 档 add 面=0
+        expect(Math.abs(rebuilt - premul)).toBeLessThanOrEqual(2);
       }
-      // ★2026-09-03 黑方块定谳：a=rgb>0?255:0——rgb=0 的 texel 不抬 alpha
-      //  （恒 255 曾把帧透明角/黑晕圈抬成不透明黑='lighter' 后 worldLayer 落黑块）
-      expect(add[i + 3]).toBe(add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0);
+      // ★α=src.a 语义（XNA 第二混合因子=texA×cA）——旧二值 255/0 在半透 worldLayer
+      //  把天空 α 顶满=水花黑十字（_splash-dust-verdict.mjs 实机复现）。本体 num 档
+      //  （mRGB=mA）预乘≤e 恒 α=e 精确；亮点位过冲上限=预乘本值。
+      const mExp = e >= 0.5 ? Math.max(e, (TEX[i] * tA * 120) / 65025, (TEX[i + 1] * tA * 120) / 65025, (TEX[i + 2] * tA * 120) / 65025)
+        : (add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0);
+      expect(Math.abs(add[i + 3] - mExp)).toBeLessThanOrEqual(1);
       expect(Math.abs(erase[i + 3] - Math.round((tA * 120) / 255))).toBeLessThanOrEqual(1);
       expect(erase[i]).toBe(0); expect(erase[i + 1]).toBe(0); expect(erase[i + 2]).toBe(0);
     }
   });
 
-  it('colorPass 档逐通道乘数独立（mR≠mG≠mB）', () => {
+  it('半透 dst 上 α 合成 ≡ XNA（out.a = dst.a×(1−texA·cA)+texA·cA,钉死黑十字修复）', () => {
+    // worldLayer 空中域 dst.a≈0：'lighter' α 加算后 out.a 应恰为 e（天空仍透 1−e）
+    const { add, erase } = dustPremulBake(TEX, 120, 120, 120, 120);
+    for (let i = 0; i < TEX.length; i += 4) {
+      const tA = TEX[i + 3] / 255, cA = 120 / 255;
+      const e = tA * cA;
+      const dstA = 0;                                   // 空中透明域
+      const outA = dstA * (1 - e) + (add[i + 3] / 255); // erase 已乘 (1−e),lighter 加 src.a
+      expect(Math.abs(outA - e)).toBeLessThanOrEqual(2 / 255);
+      // 旧实现（a=255）同式会得 out.a=1 → 天空全挡死=黑十字（防回退钉）
+      expect(1 - e).toBeGreaterThan(0.5);
+    }
+  });
+
+  it('colorPass 档逐通道乘数独立（mR≠mG≠mB;rgb>a 亮点位 rgb 仍精确）', () => {
     const { add } = dustPremulBake(TEX, 250, 120, 40, 200);
     for (let i = 0; i < TEX.length; i += 4) {
       const tA = TEX[i + 3];
-      expect(Math.abs(add[i] - Math.round((TEX[i] * tA * 250) / 65025))).toBeLessThanOrEqual(1);
-      expect(Math.abs(add[i + 1] - Math.round((TEX[i + 1] * tA * 120) / 65025))).toBeLessThanOrEqual(1);
-      expect(Math.abs(add[i + 2] - Math.round((TEX[i + 2] * tA * 40) / 65025))).toBeLessThanOrEqual(1);
-      expect(add[i + 3]).toBe(add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0);
+      const e = (tA * 200) / 255;
+      for (let ch = 0; ch < 3; ch++) {
+        const mul = [250, 120, 40][ch];
+        const premul = Math.round((TEX[i + ch] * tA * mul) / 65025);
+        const rebuilt = e >= 0.5 ? (add[i + ch] * add[i + 3]) / 255 : 0;
+        // 存面 α=max(e,预乘) → 直色=预乘×255/α 回存后 rgb 恒精确（无钳位降饱和）
+        expect(Math.abs(rebuilt - premul)).toBeLessThanOrEqual(2);
+      }
     }
   });
 });

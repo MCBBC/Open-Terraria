@@ -7,6 +7,7 @@ import {
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   mountHorizontalCharges, grantCollisionAttackImmunity, chilletDashCharge,
@@ -660,9 +661,20 @@ export class Player extends Entity {
   /** WorldGen.InAPlaceWithWind(中心格) 每 tick 缓存（Player.fixedUpdate 头刷新）——
    *  扫帚坐骑挂件摆幅的露天 1f/室内 0.5f 档（Mount.cs :3597-3602）渲染端消费 */
   mountWindExposed = false;
-  /** 出入水 10t 去抖（Player.wetCount，Player.cs:27464/27558 置 10、:27651 每tick 递减、
-   *  :37203 重生清零）——水波涟漪尺寸因子（WaterShaderData.cs:263 h·wetCount/9） */
+  /** 出入水 10t 去抖（Player.wetCount，1457 :27986/:28080 置 10、:28169-28171 每tick 递减、
+   *  :37921 重生清零；1456 = :27464/:27558/:27649/:37203）——水波涟漪尺寸因子
+   *  （WaterShaderData.cs:263 h·wetCount/9）+ 出入液溅花门（:27984/:28078） */
   wetCount = 0;
+  /** 原版 lavaWet 粘滞镜像（Player.cs:27872 flag24 / :27883 lavaWet=flag25 / :28164 !wet 清）
+   *  ——溅花液型门专用：入水门=本拍 flag25（:27989）、出水门=上拍值（:28083）。
+   *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离） */
+  private splashLavaWet = false;
+  /** 原版 shimmerWet 粘滞镜像（:27943 置位 / :28161 !shimmer 清 / :28164 !wet 清）
+   *  ——inShimmer 桶位是当拍即时值,溅花需要跨拍粘滞（出水拍读上拍液型） */
+  private splashShimmerWet = false;
+  /** 原版 honeyWet 粘滞镜像（:27957 置位（!shimmering 门）/ :28155 !flag27 清 / :28164 !wet 清）
+   *  ——inHoney 桶位混入 :3416 二次盒查询（"任一含蜜"≠原版 WetCollision 首中语义）,不作溅花源 */
+  private splashHoneyWet = false;
   /** 史莱姆坐骑湿态（Player.wetSlime，1457 Player.cs:1538 / 1456 :1472）：骑史莱姆族
    *  坐骑（3 粘粘鞍/50 史莱姆皇后）浸液置 30、每 tick 递减；>0 期间压制 JumpMovement
    *  的弹跳踩踏循环（:20693 门）+ 起跳瞬间清除（:28108-28114，出水跳门）。滴答/
@@ -2734,7 +2746,8 @@ export class Player extends Entity {
         dripping: this.buffs.has(BuffType.Wet),  // Player.dripping（buff 103 Wet 激活 :11342）
         raining,
         windExposed: raining && !!st
-          && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel),
+          && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel,
+            game.world.seedFlags?.remix === true),
       },
     };
   }
@@ -2863,13 +2876,84 @@ export class Player extends Entity {
     return result;
   }
 
+  // ---- 出入液溅花尘四发射器（Player.cs:27991-28056 入 / :28085-28150 出循环体 1:1）----
+  //  spawnDust 后置覆写与原版逐行同序;★308 与 34/35/152 的 NewDust 型内初速预处理
+  //  （Dust.cs:239-243 v×0.5+Y++ / :252-256 v×0.1+vy 钉 −0.5）VanillaDust.spawn 未植
+  //  → 发射器内按原版链补齐（水族 33/98-105 池内已植、123/288 原文本就无——逐型净
+  //  初速与原版逐位等价）;scale/alpha 为绝对覆写（消解 NewDust ±0.2 scale 抖）。
+  //  waterStyle 探测同 FakeFish 结构化约定（renderer?.waterStyle,测试 mock 兼容）
+  /** 水支（:28031-28041 入 / :28125-28135 出）：50×dustWater(),vy−kick、vx×2.5、
+   *  scale0.8、α100、noGravity */
+  private splashWaterDust(game: GameHooks, boxY: number, vyKick: number): void {
+    const waterStyle = (game as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0;
+    for (let i = 0; i < 50; i++) {
+      const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, dustWaterFor(waterStyle));
+      if (d) {
+        d.vy -= vyKick;
+        d.vx *= 2.5;
+        d.scale = 0.8;
+        d.alpha = 100;
+        d.noGravity = true;
+      }
+    }
+  }
+  /** 微光支（:27991-28016 入 / :28085-28110 出）：50×308,vy−4、vx×2.5、scale 入 0.8/
+   *  出 0.75、noGravity（α 不设=0）+ Next(6) 六掷三色/缺省第四色 */
+  private splashShimmerDust(game: GameHooks, boxY: number, scale: number): void {
+    for (let i = 0; i < 50; i++) {
+      const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 308);
+      if (d) {
+        d.vx *= 0.5; d.vy = d.vy * 0.5 + 1;   // NewDust 308 支补链（Dust.cs:239-243）
+        d.vy -= 4;
+        d.vx *= 2.5;
+        d.scale = scale;
+        d.noGravity = true;
+        const roll = (Math.random() * 6) | 0;   // Main.rand.Next(6)（:28000/:28094）
+        d.color = roll === 0 ? { r: 255, g: 255, b: 210, a: 255 }
+          : roll === 1 ? { r: 190, g: 245, b: 255, a: 255 }
+          : roll === 2 ? { r: 255, g: 150, b: 255, a: 255 }
+          : { r: 190, g: 175, b: 255, a: 255 };
+      }
+    }
+  }
+  /** 蜜支（:28018-28028 入 / :28112-28122 出）：20×152,vy−1、vx×2.5、scale1.3、
+   *  α100、noGravity */
+  private splashHoneyDust(game: GameHooks, boxY: number): void {
+    for (let i = 0; i < 20; i++) {
+      const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 152);
+      if (d) {
+        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:252-256）
+        d.vy -= 1;
+        d.vx *= 2.5;
+        d.scale = 1.3;
+        d.alpha = 100;
+        d.noGravity = true;
+      }
+    }
+  }
+  /** 岩浆支（:28045-28055 入 / :28139-28149 出）：20×35,vy−1.5、vx×2.5、scale1.3、
+   *  α100、noGravity */
+  private splashLavaDust(game: GameHooks, boxY: number): void {
+    for (let i = 0; i < 20; i++) {
+      const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 35);
+      if (d) {
+        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:252-256）
+        d.vy -= 1.5;
+        d.vx *= 2.5;
+        d.scale = 1.3;
+        d.alpha = 100;
+        d.noGravity = true;
+      }
+    }
+  }
+
   fixedUpdate(dt: number, game: GameHooks) {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     // 扫帚挂件露天位（WorldGen.InAPlaceWithWind 中心格 :3597——GetWitchBroomTrinket
     // Rotation 的 num3 露天 1f/室内 0.5f 档消费源；渲染端 mountLights 直读）
     this.mountWindExposed = inAPlaceWithWind(world.store, this.x, this.y, this.w, this.h,
-      world.groundLevel);
+      world.groundLevel, world.seedFlags?.remix === true);
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     // 下方向连按计时（holdDownCardinalTimer[0] Player.cs:25260-25268）：held++/
     // 松开清零，≥45t → controlDownHold。本帧输入已由 Game.fixedUpdate 注入，
@@ -3343,8 +3427,7 @@ export class Player extends Entity {
     //   正确居中盒故无此症）。2026-08-22 改与 NPC 侧共用同一实现（含坡面格+上液
     //   满高计 :1635-1654 分支——旧手写盒缺该支，坡面涉水判定偏浅）。
     //   居中盒同样解决旧"脚底单点采样"的水下走坡 1-2px 抖动翻转问题。
-    const wasInWater = this.inWater;
-    const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 出水截跳消费位（下方 :3370 处原口径，不动）
+    const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 出水截跳消费位（下方 _wetExitJumpClip 段原口径，不动）
     // 原版 wet 位 = WetCollision 原始返回：Collision.cs:1608 `liquid > 0` 对任意液体
     // 成立（岩浆/微光/蜜都是液体,无排除项）、:1627 首中即返——wet 含岩浆+微光
     // （铁证：Player.cs:28049-28056 岩浆溅花尘 35 与 :28060 `wet = true` 同体）。
@@ -3352,56 +3435,111 @@ export class Player extends Entity {
     // Collision.cs:1418 `!tile.lava() && !tile.shimmer()`）当 wet 位——勘误退役
     // （红队 R1-F5/F10 2026-09-03）。inWater 是本仓"去岩浆"窄化位,honey/shimmer
     // 桶与 wetCollision 返回同源同盒 → 四桶并集 ≙ 原版 wet
+    // 原版序（Player.cs:27871-27938）：flag24=lavaWet 上拍留存 → LavaCollision（先于
+    // WetCollision）→ WetCollision → shimmer/honey 旗 → 溅花段。原版 lavaWet 带
+    // !shimmering 门（:27878-27882）→ 溅花用粘滞镜像字段（见字段注）;inLava 桶位
+    // 保持无门原口径（灼烧/Wet 剥离/inWater 窄化消费面不动）
+    const wasShimmering = this.shimmering;   // 原版 UpdateBuffs(:25763) 先于本段——此刻读值 ≙ 原版 shimmering
+    const flag24 = this.splashLavaWet;       // :27872（上拍 lavaWet——出水溅花岩浆门）
     const wasWetAll = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+    // 水上行走缩高 6px（原版 num82,Player.cs:27875-27881:水面行走不因脚尖触浆受伤）
+    // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）——原独立块随
+    // LavaCollision 前移到此（vanilla 序:27877-27938）
+    const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
+    const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
+    this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
+    const flag25 = !wasShimmering && this.inLava;   // :27878-27882（!shimmering 门 + 本拍 LavaCollision）
+    this.splashLavaWet = flag25;                    // :27883 lavaWet = flag25
     let wetNow = false;
+    let flag27 = false;      // Collision.honey（:27939,WetCollision 首中液格型）
+    let shimmerNow = false;  // Collision.shimmer（:27940）
     {
       const r = wetCollision(world.store, this.x, this.y, this.w, this.h);
       this.inWater = r.wet && !this.inLava;   // inWater = 原版 inWater 窄化位（岩浆里不能"游泳"）
       this.inHoney = r.honey;
       wetNow = r.wet;                          // 原版 num86（Player.cs:27938）
+      flag27 = r.honey;
+      shimmerNow = r.shimmer;
     }
+    // :27941-27943 shimmerWet / :27954-27958 honeyWet 置位（AddBuff(353)/(48) 本体在
+    // 下方各自段落,不动;此处只镜像溅花旗标——粘滞语义见字段注）
+    if (shimmerNow) this.splashShimmerWet = true;
+    if (flag27 && !wasShimmering) this.splashHoneyWet = true;
     // 入水过渡拍（vanilla `if (num86) { if (!wet) { wet = true; … } }` Player.cs:27959/
-    // :27982/:28060——wet 位任意液体）——湿阻尼消费旗（运动块尾 :5259）
+    // :27982/:28060——wet 位任意液体）——湿阻尼消费旗（运动块尾 wetEntryNow 消费）
     const wetEntryNow = !wasWetAll && wetNow;
-    // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
-    // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
-    // 原版两方向都出尘+SoundID 19(splash)（Player.cs:27500-27546 入 / :27595-27630 出）：
-    //   水 50 颗 dustWater(33) vy−3(入)/−4(出)、蜜 152 20 颗 vy−1、岩浆 35 20 颗 vy−1.5；
-    //   共同 = NewDust 基础速度 ±2 均匀 + vx×2.5 → vx∈±5、vy 全向上（喷发冠）+
-    //   scale 0.8(水)/1.3(蜜岩浆)、α100、noGravity。
-    //   ★出生盒 y：入水恒 h/2−8；出水水样 h/2（无 −8）、蜜/岩浆 h/2−8。
-    //   ★曾用 spawnParticles 随机方向弱漂移（≈四成向下+上浮力 0.12）——喷发冠
-    //   不存在，快速落入时出生点又整体在水面下（中心盒翻转穿透深）→ 水面零
-    //   表现 = 用户报"正上方落入无涟漪、边缘走入正常"（涟漪环同理：翻转点深
-    //   → 环心水下 11px 只露顶部窄弧；走入环心水下 5px 露宽弧——环公式与原版
-    //   一致不动，本修补齐原版赖以可见的喷发尘）。
-    if (this.inWater !== wasInWater && this.wetCount === 0) {
-      const exiting = !this.inWater;
-      const bx = this.x - 6;
-      const by = this.y + this.h / 2 - (exiting && !this.inHoney && !this.inLava ? 0 : 8);
-      const bw = this.w + 12, bh = 24;
-      const count = this.inHoney || this.inLava ? 20 : 50;
-      const vyKick = this.inHoney ? 1 : this.inLava ? 1.5 : exiting ? 4 : 3;
-      const size = this.inHoney || this.inLava ? 2.6 : 1.6;   // dust scale 1.3/0.8 × 2px 基准
-      const color = this.inHoney ? '#D4A017' : this.inLava ? '#FF6600' : '#4A9EFF';
-      for (let i = 0; i < count; i++) {
-        const dx = bx + Math.random() * bw;
-        const dy = by + Math.random() * bh;
-        const vx = (Math.random() * 2 - 1) * 5;                       // ±2 均匀 ×2.5
-        const vy = (Math.random() * 2 - 1) * 2 - vyKick;              // ±2 均匀 − 踢 → 全向上
-        game.spawnParticles(dx, dy, color, 1, 0, { life: 30, vx, vy, size, damp: 0.98 });
+    // ---- 出入液溅花 1:1（Player.cs:27959-28153;2026-09-04 升格——曾 spawnParticles
+    //      色方块近似+playSfx('splash') Splash_0..5 六变体乱掷、微光支整缺、
+    //      触发门用 inWater 窄化位+inLava 后写时序差）：
+    //      触发门 = num86（wet 位=任意液体）对 wasWetAll（四桶并集≙原版 wet 粘滞位）
+    //      翻转 + wetCount==0（:27984/:28078）;wetCount=10 与溅花同门内置（:27986/:28080）
+    //      尘逐值（见四发射器注;scale/alpha 为绝对覆写）：
+    //        水   50×dustWater() vy−3(入:28036)/−4(出:28130) vx×2.5 scale0.8 α100
+    //             noGravity;盒 y+h/2−8(入:28035)/y+h/2(出:28129)
+    //        微光 50×308 vy−4 vx×2.5 scale0.8(入:27998)/0.75(出:28092) noGravity（α 不设）
+    //             盒 y+h/2（两向均无 −8:27995/:28089）+Next(6) 六掷三色
+    //        蜜   20×152 vy−1 vx×2.5 scale1.3 α100 noGravity 盒 −8（:28022/:28116）
+    //        岩浆 20×35 vy−1.5 vx×2.5 scale1.3 α100 noGravity 盒 −8（:28049/:28143）
+    //      岩浆门：入=本拍 flag25（:27989）、出=上拍 flag24（:28083）;微光优先蜜/水
+    //      音 = PlaySound(19)=Splash_N（LegacySoundPlayer.cs:363 Style 缺省 1、:874 case19
+    //      num=Style 直映变体）：水 0(:28042/:28136)/微光入 2(:28016)/微光出 3(:28110)/
+    //      蜜·岩浆缺省 1(:28029/:28056/:28123/:28150)——playSfxWav 直文件;Splash_2/3
+    //      ×0.75 音量与各档音高抖动由 Sfx 库层 FILE_CASE_VOL/PITCH 承载 ----
+    if (wetNow) {
+      if (!wasWetAll && this.wetCount === 0) {          // :27982-27984 入水翻转
+        this.wetCount = 10;                              // :27986
+        if (!wasShimmering) {                            // :27987 !shimmering
+          if (!flag25) {                                 // :27989 !flag25（非岩浆）
+            if (this.splashShimmerWet) {                 // :27991 shimmerWet
+              this.splashShimmerDust(game, this.y + this.h / 2, 0.8);
+              game.playSfxWav?.('Splash_2', 1, this.x, this.y);   // :28016 style 2
+            } else if (this.splashHoneyWet) {            // :28018 honeyWet
+              this.splashHoneyDust(game, this.y + this.h / 2 - 8);
+              game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :28029 缺省 style=1
+            } else {                                     // :28031 水
+              this.splashWaterDust(game, this.y + this.h / 2 - 8, 3);   // :28035-28038
+              game.playSfxWav?.('Splash_0', 1, this.x, this.y);   // :28042 style 0
+            }
+          } else {                                       // :28045 岩浆
+            this.splashLavaDust(game, this.y + this.h / 2 - 8);   // :28049-28052
+            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :28056 缺省 style=1
+          }
+        }
       }
-      game.playSfx('splash');
+      // wet = true（:28060）——本仓 wet 粘滞位由四桶并集承载;ShouldFloatInWater
+      // vy 对折钳 3（:28061-28067）由运动块尾 wetEntryNow 消费（湿态阻尼段）
+    } else if (wasWetAll) {                              // :28071 else if (wet)
+      // 出水截跳（:28074-28076 jump=jumpHeight/5）——本仓 _wetExitJumpClip（下方段）
+      if (this.wetCount === 0) {                         // :28078
+        this.wetCount = 10;                              // :28080
+        if (!wasShimmering) {                            // :28081
+          if (!flag24) {                                 // :28083 !flag24（上拍 lavaWet）
+            if (this.splashShimmerWet) {                 // :28085
+              this.splashShimmerDust(game, this.y + this.h / 2, 0.75);   // 出水 0.75（:28092）
+              game.playSfxWav?.('Splash_3', 1, this.x, this.y);   // :28110 style 3
+            } else if (this.splashHoneyWet) {            // :28112
+              this.splashHoneyDust(game, this.y + this.h / 2 - 8);
+              game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :28123
+            } else {                                     // :28125 水
+              this.splashWaterDust(game, this.y + this.h / 2, 4);   // :28129-28132 盒无 −8
+              game.playSfxWav?.('Splash_0', 1, this.x, this.y);   // :28136 style 0
+            }
+          } else {                                       // :28139 岩浆
+            this.splashLavaDust(game, this.y + this.h / 2 - 8);   // :28143
+            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :28150
+          }
+        }
+      }
     }
-    // wetCount 去抖（Player.cs:27464-27466 入水置 10 / :27558-27560 出水置 10 /
-    // :27649-27651 每 tick 递减）——水波系统涟漪尺寸因子消费
-    if (this.inWater && !wasInWater && this.wetCount === 0) this.wetCount = 10;
-    else if (!this.inWater && wasInWater && this.wetCount === 0) this.wetCount = 10;
-    // waterWalk 时缩高 6px 判定(原版 num80,Player.cs:27349/27352:水面行走不因脚尖触浆受伤)
-    // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）
-    const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
-    const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
-    this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
+    // :28155-28168 拍末粘滞清偿（wet 粘滞位本拍后值 = wetNow||wasWetAll——num86 真
+    // →true(:28060)、假→上拍值（:28073 置 false 已并入 wasWetAll 假））
+    if (!flag27) this.splashHoneyWet = false;
+    if (!shimmerNow) this.splashShimmerWet = false;
+    if (!(wetNow || wasWetAll)) {
+      this.splashLavaWet = false;
+      this.splashHoneyWet = false;
+      this.splashShimmerWet = false;
+    }
     // Wet 103：浸岩浆即刻移除（UpdateBuffs :11335-11338 `if (lavaWet) DelBuff(j)`——
     // 岩浆蒸干一身水。★须在 inLava 判定同帧执行（原版 Collision 先于 UpdateBuffs），
     // 放 buffs.tick 前会因 inLava 滞后一帧）
@@ -3485,7 +3623,9 @@ export class Player extends Entity {
         const sy0 = Math.floor(this.y / TILE), sy1 = Math.floor((this.y + this.h) / TILE);
         outer: for (let sy = sy0; sy <= sy1; sy++) {
           for (let sx = sx0; sx <= sx1; sx++) {
-            if (world.store.inBounds(sx, sy) && world.store.isSolid(sx, sy)) { inSolid = true; break outer; }
+            // WorldGen.SolidTile3(num20,num21)（Player.cs:11899）——★A-5 边带（2026-09-04）：
+            // 坐标重载首门 InWorld(·,1)（WorldGen.cs:71006-71008）世界最外一圈恒非实心
+            if (world.store.inWorld1(sx, sy) && world.store.isSolid(sx, sy)) { inSolid = true; break outer; }
           }
         }
         if (inSolid) this.buffs.set(BuffType.Shimmered, 0.1);
@@ -3633,8 +3773,14 @@ export class Player extends Entity {
       const ry = Math.floor((this.y + (this.gravDir === -1 ? this.h : 0) - 44 * this.gravDir) / TILE);
       if (world.store.inBounds(rx, ry)) {
         const ri = world.store.idx(rx, ry);
+        // ★G1谓词批(2026-09-04)：原版口格门= 裸 active()（Player.cs:23395
+        //  `!tile.active() || !tileSolid[type] || tileSolidTop[type]`）——isActive 漏
+        //  致动半边（已致动实心盖口会误判可换气）→ 改 hasTile;第二支 !tileSolid[type]
+        //  是【类型表】读（与致动无关）,isSolid 排致动位会让已致动实心经此支漏气
+        //  → 改 TILE_DEFS 实心位静态读（isPlatform≈tileSolidTop 支不变）
+        const rt = world.store.type[ri];
         if (world.store.liquid[ri] < 128
-          && (!world.store.isActive(rx, ry) || !world.store.isSolid(rx, ry) || world.store.isPlatform(rx, ry))) {
+          && (!world.store.hasTile(rx, ry) || !TILE_DEFS[rt]?.solid || world.store.isPlatform(rx, ry))) {
           drown = false;
         }
       }
@@ -5182,7 +5328,10 @@ export class Player extends Entity {
           const t = st.type[st.idx(tx, ty)];
           // ★幽灵保域（2026-09-03）：active() 门补 flags bit0（原版 Collision.cs:3404
           //  `!Main.tile[i,j].active() → continue`）——幽灵蛛网/蜂蜜块不黏滞
-          if (t === 0 || (st.flags[st.idx(tx, ty)] & 1) === 0) continue;
+          //  ★G1谓词批(2026-09-04)：原版全门= `null || !active() || inActive() →
+          //  continue`（Collision.cs:3402-3405）——粘着须 nactive,位读漏致动半边
+          //  （已致动蛛网/蜂蜜块会继续黏滞）→ 改 isActive()
+          if (t === 0 || !st.isActive(tx, ty)) continue;
           const cell = { x: tx * TILE, y: ty * TILE };
           const pad = t === honeyId ? 1 : 0;
           if (this.x + this.w > cell.x - pad && this.x < cell.x + TILE + pad
@@ -5838,7 +5987,9 @@ export class Player extends Entity {
         const t = st.get(tx, feetY);
         // SolidTileAllowBottomSlope active 门（WorldGen.cs:70712）——hasTile 位本体
         // （红蓝对抗 F10：曾用 type≠0 代读，幽灵残型地面误判"站普通地面"不触发）
-        if (t === 0 || !st.hasTile(tx, feetY)) continue;
+        // ★G1谓词批(2026-09-04)：原式含 !inActive()（:70718）——isActive 位读补致动
+        // 半边（已致动地面不算普通地面,裂碎照常触发）
+        if (t === 0 || !st.isActive(tx, feetY)) continue;
         const d = TILE_DEFS[t];
         // SolidTileAllowBottomSlope && !CrackedBricks（:23060）→ 站普通地面不触发
         if (d?.solid && !d.platform && !isCrackedSheet(d.vanilla?.sheet)) { flag = false; break; }
@@ -5853,7 +6004,9 @@ export class Player extends Entity {
       const t = st.get(x, y);
       // SolidTile active 门（WorldGen.cs:70652）——hasTile 位本体（红蓝对抗 F10：
       //   曾用 type≠0 代读，幽灵残型顶盖误判实心顶 → 裂砖不碎）
-      if (t === 0 || !st.hasTile(x, y)) return false;
+      // ★G1谓词批(2026-09-04)：SolidTile 原式含 !inActive()（:70658）——isActive
+      // 位读补致动半边（已致动顶盖不算实心顶）
+      if (t === 0 || !st.isActive(x, y)) return false;
       const d = TILE_DEFS[t];
       return !!d?.solid && !d.platform;
     };
@@ -7351,6 +7504,12 @@ export class Player extends Entity {
   /** 左键（controlUseItem）/ 右键（controlUseTile）按住电平——钻头坐骑挖掘驱动 */
   inputUseItem = false;
   inputUseTile = false;
+  /** 致动魔杖单摆向锁（★A-6 2026-09-04 移植 Player.cs:2599-2601 字段/:47296-47310
+   *  置位/:18918-18921 清理）：成功翻转一格致动器后锁向——LockSetting=翻转后的
+   *  inActive() 态;锁存期间（左键持续按住,:43160 releaseUseItem=!controlUseItem →
+   *  松开即清）再施只翻同态格（SmartCursor Step_ActuationRod :1506-1512 同门） */
+  actuationRodLock = false;
+  actuationRodLockSetting = false;
   /** 上一 tick 的两键电平（ItemCheck_HandleMount :52074 的 releaseUseItem&&releaseUseTile
    *  按压边沿 = 上 tick 双松 + 本 tick 任一按下） */
   prevUseItem = false;
@@ -8111,7 +8270,9 @@ export class Player extends Entity {
       num2--;                                           // :28232
       // :28233-28237 上方一格 SolidTile3 且本格非沙(54)/回声块(541) → 屋顶，停扫
       // （tile.* 读的是本格（自减前），SolidTile3 读的是上一格——照抄原版结构）
-      const above = st.inBounds(num, num2)
+      // ★A-5 边带（2026-09-04）：SolidTile3(num,num2)（Player.cs:28935 坐标重载）
+      // 首门 InWorld(·,1)（WorldGen.cs:71006-71008）——世界最外一圈恒无屋顶
+      const above = st.inWorld1(num, num2)
         ? st.isActive(num, num2) && TileStoreRT.SOLID_LUT[st.type[st.idx(num, num2)]] === 1
         : false;
       if (above && sheet !== 54 && sheet !== 541) break;

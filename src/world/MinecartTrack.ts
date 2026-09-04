@@ -427,6 +427,10 @@ export function frameTrackArea(st: TileStore, i: number, j: number): void {
 export function flipSwitchTrack(st: TileStore, i: number, j: number): boolean {
   if (!st.inBounds(i, j)) return false;
   const idx = st.idx(i, j);
+  // ★G1谓词批(2026-09-04)：原版 FlipSwitchTrack（Minecart.cs:1302-1306）裸
+  // FrontTrack() 无 active/nactive 门——本仓 isTrackCell(nactive) 多排的门对 314
+  // 无害（轨道无致动面,actuator 不附着 314,inActive 恒假;幽灵轨道经 ghost 计数
+  // 通道另行处理）,注释钉死=有意保留,勿当谓词债清理
   if (!isTrackCell(st, idx)) return false;
   const num = frontTrack(st, idx);
   if (num === -1) return false;

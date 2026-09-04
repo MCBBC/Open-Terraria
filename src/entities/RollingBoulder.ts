@@ -14,6 +14,9 @@ import type { Camera } from '../render/Camera';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
 import { projSprite } from './Arrow';
+import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：1047 滚石踢墙门单源化（与 655/99 同摄取器）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 const KB_X = 10;               // 出生 kb 第二参 = 10f
 
@@ -29,6 +32,26 @@ export class RollingBoulder extends Entity {
   /** 每目标命中免疫：目标 id → 剩余 tick（localNPCHitCooldown=10 镜像） */
   private immunities = new Map<number, number>();
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
+  //  → projWetSection 共享体接入;豁免核对（SetDefaults 逐 id,ignoreWater=缺行）：
+  //  · :1835-1852 共块 {99,727,1013,1014,1053,1054,1055,1057} 无 ignoreWater 行 → 受段
+  //  · 1048 :9930-9939 无行 → 受段;1047 :9920-9929 `ignoreWater=true`@:9928 → 豁免
+  //    （共享体整段门早退,四旗恒 false,溅花/阻尼零触发——与原版 :16903 同向）
+  //  · 1002（sheet 654 大石柱仙人掌球）:9525-9539 无行 → 受段（注：原版 1002 是
+  //    aiStyle 16 弹,本类按既有模型同跑 AI_025——湿段仍按真 id 1002 传参接线）----
+  //  位序口径：AI_025（踢门/滚转/滚地加速/重力/:26748 AnyWet 消费）→ 湿段(:16903)
+  //  → moveAndCollide（HandleMovement :17721-17764 湿阻尼读【本拍刷新后】旗,乘进
+  //  dx/dy 入参、采纳处原样回读）。99 系 aiStyle 25 不在 UpdatePosition 跳过表
+  //  （:20551）→ 阻尼适用。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
+  presetDone = false;
+
   constructor(x: number, y: number, sheet: number) {
     super();
     this.x = x; this.y = y;
@@ -40,13 +63,6 @@ export class RollingBoulder extends Entity {
   /** ai[0]：首 tick 后恒 1（cs:26682）；静止自启支的前置门 */
   private ai0 = false;
 
-  /** 实心探测（cs:26688-26708 用 WorldGen.SolidTile 双行） */
-  private solidAt(game: GameHooks, tx: number, ty: number): boolean {
-    const st = game.world.store;
-    if (!st.inBounds(tx, ty)) return true;
-    return st.isSolid(tx, ty);
-  }
-
   fixedUpdate(dt: number, game: GameHooks): void {
     void dt;
     for (const [id, t] of [...this.immunities]) {
@@ -54,25 +70,17 @@ export class RollingBoulder extends Entity {
     }
     // ---- 静止自启（cs:26684-26711 verbatim 门：ai[0]!=0 && vy<=0 && vx==0）——
     // 落入柱龛停稳后朝开阔侧踢 ±0.5，三级探柱(0/16/32px 外扩)都堵则按 cx 奇偶定边
+    // SW-AF1 2026-09-04（F-3 收敛）：踢墙摄取器单源化 → WeaponProj.beeWallPushDir
+    //  （655 蜂巢支/99 巨石支同一摄取器：三级递宽 ±8/24/40px 扫窗、左实优先、
+    //  Center.X 奇偶兜底、SolidTile 全语义摄取 = active && tileSolid && !tileSolidTop
+    //  && !halfBrick && slope==0（W.cs:70642-70655））。原第二实现 solidAt 用
+    //  st.isSolid()（缺 halfBrick/slope/platform 排除→斜坡/半砖/平台格误判实心墙起踢）
+    //  且 Math.floor 负商分叉,一并随 trunc(C# (int)) 修正。行为变更=1:1 目标。
+    //  ★OOB 备案：vanilla Main.tile 越界=null → SolidTile 返 true（:70646-70649）,
+    //  旧 solidAt 同返 true;beeWallPushDir 沿 store 惯例"世界外视为空"返 false——
+    //  世界缘 8~40px 带内踢向可能差一档,与 655/99 三支同口径备案（beeWallPushDir 注）。
     if (this.ai0 && this.vy <= 0 && this.vx === 0) {
-      const KICK = 0.5;
-      const ty = Math.floor(this.y / 16);
-      const solidCol = (tx: number): boolean =>
-        this.solidAt(game, tx, ty) || this.solidAt(game, tx, ty + 1);
-      const probe = (leftTx: number, rightTx: number): number => {
-        if (solidCol(leftTx)) return 1;
-        if (solidCol(rightTx)) return -1;
-        return 0;
-      };
-      const cxL = Math.floor((this.x - 8) / 16);
-      const cxR = Math.floor((this.x + this.w + 8) / 16);
-      let dir = probe(cxL, cxR);
-      if (dir === 0) dir = probe(cxL - 1, cxR + 1);
-      if (dir === 0) {
-        dir = probe(cxL - 2, cxR + 2);
-        if (dir === 0) dir = (Math.floor(this.cx / 16) % 2 === 0) ? 1 : -1;
-      }
-      this.vx = dir * KICK;
+      this.vx = beeWallPushDir(game.world.store, this.x, this.y, this.w, this.cx);
     }
     this.ai0 = true;
     // ---- AI_025 运动核 ----
@@ -81,10 +89,30 @@ export class RollingBoulder extends Entity {
       if (this.vx < 0 && this.vx > -7) this.vx -= 0.05;
     }
     this.vy = Math.min(this.vy + 0.3, 16);
+    // ---- AI_025 AnyWet 消费（:26748-26762,原版 AI 段尾——读【上拍】湿旗字段）----
+    //  `if (AnyWet && netMode != 1)`: 1053 → Kill(任一液) / wet∧655 → Kill(蜂巢,
+    //  WeaponProj GrenadeProj 域已接) / lavaWet∧(727|1054) → Kill。99/1013/1014/
+    //  1047/1048/1055/1057 无湿杀面;1002 原版 aiStyle 16 无此块 → 显式排除。
+    //  1047 豁免湿段 → 四旗恒 false → 恒不触发（与原版同向）。
+    if (this.projId !== 1002
+      && (this.wet || this.lavaWet || this.honeyWet || this.shimmerWet)) {
+      if (this.projId === 1053) this.dead = true;                     // :26750-26752
+      else if (this.lavaWet && (this.projId === 727 || this.projId === 1054)) {
+        this.dead = true;                                             // :26758-26760
+      }
+    }
+    if (this.dead) return;
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 碰撞响应（Projectile.cs:19055-19101 巨石族分支 verbatim）----
     const lastVX = this.vx, lastVY = this.vy;
     // 碰撞位移（Body 旗由 lib 维护：onGround/collideY/hitWall）
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度【场】不减只削
+    // 位移：阻尼乘进 dx/dy 入参,b.vx/vy=碰撞调整字段采纳处原样回读（勿除回,
+    // 原版碰撞响应式读的也是未阻尼 velocity 场,lastVelocity 档不掺阻尼）
+    const df = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * df, this.vy * df);
     this.rotation += this.vx * 0.06;
     // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）
     if (this.vy !== lastVY && lastVY > 5) {

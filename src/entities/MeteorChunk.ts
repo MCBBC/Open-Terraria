@@ -16,6 +16,8 @@ import { BuffType } from '../stats/Buffs';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 export class MeteorChunk extends Entity {
   w = 14; h = 14;
@@ -26,6 +28,22 @@ export class MeteorChunk extends Entity {
   private hitPlayer = false;
   private hitCd = new Map<number, number>();
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
+  //  → projWetSection 共享体接入;豁免核对：1078 SetDefaults :10069-10079 无
+  //  ignoreWater 行 → 受段）----
+  //  位序口径：原版 AI_199(:40743-40761) → 湿段(:16903) → UpdatePosition(:19973)。
+  //  AI_199 有湿旗消费者（尘 6 !wet 门 :40752,读上拍旗）→ 湿段【必须】在 AI 段后、
+  //  位移前拆位调用（勿上移 tick 头,否则门读当拍旗差一拍）。湿阻尼 :17721-17764
+  //  读【本拍刷新后】旗;1078 非 UpdatePosition 跳过表成员（:20551）→ 阻尼适用。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, frame = Math.floor(Math.random() * 3)) {
     super();
     this.x = x; this.y = y; this.vx = vx; this.vy = vy;
@@ -35,15 +53,30 @@ export class MeteorChunk extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
-    // 通用重力抛物线(aiStyle 199 仅视觉,运动走 Projectile 通用路径,0.3 同族常数)
-    this.vy = Math.min(this.vy + 0.3, 16);
-    this.x += this.vx;
-    this.y += this.vy;
-    this.rot += this.vx * 0.06 + (this.vx >= 0 ? 0.06 : -0.06);   // :37689-37690
+    const st = game.world.store;
+    // ---- AI_199 视觉段（1457 :40743-40761 / 1456 :37668-37691,两版同文;原版 AI
+    //      :16880 先于湿段 :16903——挪到湿段前,尘位=pre-move 同原版 NewDust(position)) ----
+    this.rot += this.vx * 0.06 + (this.vx >= 0 ? 0.06 : -0.06);   // 1457 :40759-40760
+    // 尘 6 !wet 门（1457 :40752,读上拍湿旗）——尘 31（1457 :40745-40749）原版无门。既有
+    // 0.5 降采样单粒子近似 conflates 两尘,门按 !wet 接线=入水停飞尘;尘 31 缺面
+    // 登记（视觉批域,非本批引入）
+    if (!this.wet && Math.random() < 0.5) {
+      game.spawnParticles(this.cx, this.cy, '#FF7050', 1, 0.5, { life: 18 });
+    }
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
-    const st = game.world.store;
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
+      1078, !!projectileData(1078)?.ignoreWater);
+    // 通用重力抛物线(aiStyle 199 仅视觉,运动走 Projectile 通用路径,0.3 同族常数)
+    // ★登记不修：AI_199 无重力行（1457/1456 同核）,0.3 系既有近似档——本批域外
+    this.vy = Math.min(this.vy + 0.3, 16);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：速度【场】不减只削
+    // 位移（UpdatePosition :20557 position += wetVelocity,直积分乘进位移行）
+    const df = projWaterDragFactor(this);
+    this.x += this.vx * df;
+    this.y += this.vy * df;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!st.inBounds(tx, ty)) { this.dead = true; return; }
@@ -69,10 +102,6 @@ export class MeteorChunk extends Entity {
       e.hurt(dmg, Math.sign(this.vx) * 5, 0, game, 0, false, 0, true);   // fromPlayer=DPS 计
     }
     hitCritters(this, game);
-    // 尘迹(AI_199 :37675-37687 每帧双尘,概率降采样防 60TPS 粒子爆)
-    if (Math.random() < 0.5) {
-      game.spawnParticles(this.cx, this.cy, '#FF7050', 1, 0.5, { life: 18 });
-    }
     // 撞地消亡(tileCollide 默认)
     if (st.isSolid(tx, ty)) {
       // Kill 掉落（Projectile.cs:76509-76511,netMode!=1 门=纯客户端不掷）：

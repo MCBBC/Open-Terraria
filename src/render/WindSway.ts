@@ -577,7 +577,10 @@ function drawMultiGrass(
         const cx = ax + k, cy = ay + j;
         if (!st.inBounds(cx, cy)) continue;
         const idx = st.idx(cx, cy);
-        if (st.type[idx] !== type || !st.flags[idx]) continue;
+        // ★G1谓词批(2026-09-04)：原版格循环门= `type2 != type || !IsVisible(tile)`
+      // （TileDrawing.cs:9153/:9430+ 段内——IsVisible 只查 invisibleBlock/19fy48/
+      // 541/631,无 active 门）——flags 门会漏摆幽灵/已致动残型格 → 去门
+      if (st.type[idx] !== type) continue;
         drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE, cy * TILE, 0, 0, 0, 0, 0, trees);
       }
     }
@@ -606,7 +609,10 @@ function drawMultiGrass(
       const cx = ax + k;
       if (!st.inBounds(cx, cy)) continue;
       const idx = st.idx(cx, cy);
-      if (st.type[idx] !== type || !st.flags[idx]) continue;
+      // ★G1谓词批(2026-09-04)：原版格循环门= `type2 != type || !IsVisible(tile)`
+      // （TileDrawing.cs:9153/:9430+ 段内——IsVisible 只查 invisibleBlock/19fy48/
+      // 541/631,无 active 门）——flags 门会漏摆幽灵/已致动残型格 → 去门
+      if (st.type[idx] !== type) continue;
       drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE, cy * TILE,
         pivotX, pivotBaseY + offY, wc * rotFactor * hFrac, 0, offY, trees,
         cattailGlow ? ((dpx, dpy) => cattailGlow(dpx, dpy, idx)) : undefined);
@@ -825,7 +831,10 @@ function drawMultiVine(
       const cx = ax + k, cy = ay + j;
       if (!st.inBounds(cx, cy)) continue;
       const idx = st.idx(cx, cy);
-      if (st.type[idx] !== type || !st.flags[idx]) continue;
+      // ★G1谓词批(2026-09-04)：原版格循环门= `type2 != type || !IsVisible(tile)`
+      // （TileDrawing.cs:9153/:9430+ 段内——IsVisible 只查 invisibleBlock/19fy48/
+      // 541/631,无 active 门）——flags 门会漏摆幽灵/已致动残型格 → 去门
+      if (st.type[idx] !== type) continue;
       const fxRaw = st.frameX[idx], fyRaw = st.frameY[idx];
       vineAdvanceSeed(seedBox, cx, cy);
       drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE + offX, cy * TILE,

@@ -16,6 +16,7 @@
 // 关键顺序（勿调换）：注册进 shake 表【先于】叶顶/实心门（WorldGen.cs:63190 先于
 //   :63199）——被封死/无叶顶的树同样消耗掉当日份额（原版行为）。
 import { TILE_DEFS } from '../data/tiles';
+import { tileSolidLike } from './Housing';   // ★G1谓词批(2026-09-04)：Main.tileSolid 代理（棕榈寻底落门）
 import type { TileStore } from './TileStore';
 import type { RNG } from '../core/rng';
 import { getTreeLeaf } from '../render/NatureParticles';
@@ -167,7 +168,10 @@ function killTileGetItemDrops_Tree(st: TileStore, i: number, j: number, genRand:
     let y = j;
     while (y < st.h - 1) {
       const ii = st.idx(i, y);
-      if (st.flags[ii] !== 0 && st.isSolid(i, y)) break;    // :65277-65280 向下找实心地面
+      // ★G1谓词批(2026-09-04)：落门= 裸 active() && Main.tileSolid（WorldGen.cs
+      //  :65744-65748 `for (j = y; !tile.active() || !tileSolid[tile.type]; j++)`）——
+      //  isSolid 多排致动位与 solidTop 族豁免（平台 19 tileSolid=true）=棕榈寻底过严
+      if (st.flags[ii] !== 0 && tileSolidLike(st.type[ii])) break;
       y++;
     }
     const gs = sheetAt(st, i, y);

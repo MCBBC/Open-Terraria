@@ -6,8 +6,10 @@
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileWetSection } from './projWetSection';
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 
 interface EnemyLike {
@@ -86,6 +88,27 @@ export class JavelinStickerProj extends Entity {
   private localAI1 = 0;
   private rotation = 0;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口
+  //  清偿批,JavelinStickerProj 接入。四旗/wetCount/presetDone 形状=ProjWetFlags
+  //  共享体）----
+  //  逐 id 豁免核对：971/975（ TentacleSpike/BloodButcherer 尖刺,唯一出生点
+  //  Game.ts:27209/:27232）——SetDefaults（P.cs:9199-9209 / :9289-9298）【无
+  //  ignoreWater 行】,但 AI_113 钉扎态 `if (ai[0] == 1f)` 首拍即置
+  //  `ignoreWater = true; tileCollide = false`（P.cs:41397-41399）;出生 NewProjectile
+  //  ai0=1f（Player.cs:44518/:44535）→ 全程钉扎 → 段门恒闭（:16903）= 原版零行为
+  //  （字段照加、段照调,豁免由 ai0 门自动承载）。阻尼不适用定谳（双证）：①豁免;
+  //  ②钉扎态 tileCollide=false → HandleMovement 湿阻尼块整在 `if (tileCollide)`
+  //  门内（P.cs:17578/:17583/:17722）,wetVelocity 恒等 velocity（:16870 初值不改）
+  //  → 档位无消费位;且 AI 每拍 Center 重钉目标（:41480）位移非速度积分。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(projType: number, x: number, y: number, vx: number, vy: number,
     targetId: number) {
     super();
@@ -100,6 +123,12 @@ export class JavelinStickerProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ★通用湿段（:16903-17113,projWetSection 共享体 1:1）——豁免面 = AI_113 钉扎态
+    //  ai0==1 置 ignoreWater=true（P.cs:41397-41399;本类 ai0 恒 1）∪ SetDefaults 数据
+    //  面（971/975 均无行）→ 段门恒闭零行为;插 tick 头与 AI/位移序无观察差（段内
+    //  唯一可见面=溅花,豁免即恒无）。位移阻尼不适用（双证见字段块头）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projType, this.ai0 === 1 || !!projectileData(this.projType)?.ignoreWater);
     // AI_113 头部 alpha 淡出（:41294-41298）：每 tick −25 至 0（XNA α 域，971 才可见）
     this.alpha -= this.projType === 971 ? 25 : 0;      // 975 初值 0 且 hide，无需淡出
     if (this.alpha < 0) this.alpha = 0;
@@ -448,7 +477,7 @@ export class BladetongueGlobProj extends Entity {
         dmgVar = applyBannerDamageDealt(game, e, dmgVar);
         // ★F3 接线（蓝队四轮）：血舌球 524 数据面 melee（SetDefaults :5941-54 类旗投影）
         // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 子步结算生效；
-        // 加伤在 banner 后并入（原版序 :14457 晚于 :13387），随暴击并入实伤参。
+        // 加伤在 banner 后并入（原版序 :14451 晚于 :13388-13390），随暴击并入实伤参。
         const snapBonusGlob = projectileSnapStrikeBonus(game,
           { projId: 524 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
           { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },

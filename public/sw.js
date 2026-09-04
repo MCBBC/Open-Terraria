@@ -19,6 +19,7 @@ const ASSET_RE = /\/(sprites|fonts|l10n|sounds|audios)\//;
 // 只判 res.ok 会把兜底 HTML 当资产正文塞进 Cache API ——永久坏图毒丸。故所有
 // 资产类回填必须按扩展名校验 content-type 族;不符一律视作 miss、拒入缓存。
 const MIME_BY_EXT = [
+  [/\.opus$/, /^audio\/ogg/],
   [/\.png$|\.jpe?g$|\.webp$|\.gif$/, /^image\//],
   [/\.woff2?$|\.ttf$/, /^font\//],
   [/\.json$/, /^(application\/json|text\/json)\b/],
@@ -30,8 +31,8 @@ const MIME_BY_EXT = [
  *  在 CPU profile 里成 SW 线程头号热点,2026-08-28 trace 实证）。未登记=null 不拦 */
 const MIME_BY_EXT_MAP = new Map();
 for (const [re, want] of MIME_BY_EXT) {
-  for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'woff2', 'woff', 'ttf', 'json',
-    'wav', 'mp3', 'ogg', 'js', 'mjs', 'css']) {
+  for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'opus', 'ogg', 'woff2', 'woff', 'ttf', 'json',
+    'wav', 'mp3', 'js', 'mjs', 'css']) {
     if (re.test('.' + ext)) MIME_BY_EXT_MAP.set(ext, want);
   }
 }
@@ -43,6 +44,46 @@ function mimeOk(path, res) {
   const ct = res.headers.get('content-type') || '';
   return want.test(ct);
 }
+// ★warm 窗口 404 静默(2026-09-04):冷启动分片 warm 进行中,懒加载 miss 会穿透
+// 到网络的真 404(prune 形态散件不存在,HAR 实报 Sun/Moon 5 连红)。功能上无碍
+// (204 与 404 同样触发消费方 onerror/退避重试链,自愈语义零变化),但 DevTools
+// Network/Console 满屏红、HAR 审计噪音大。改:页面 AssetCache 经 {type:'zip-warm'}
+// 消息同步 warming 旗(SW 被杀重启后从 __sw_meta__ 恢复),窗口内对【图片类 GET
+// miss 的 404】应答 204 No Content(无体→任何浏览器都必然 onerror)。边界:
+//  · 仅 GET——HEAD 存在性探测(ui 失败负缓存长 TTL 分档)直通不受扰
+//  · warm 终态后 miss 仍真 404 直通=诊断面保留;真首访(无版本缓存)无从判定,不拦
+const IMG_MISS_RE = /\.png$|\.jpe?g$|\.webp$|\.gif$/;
+let zipWarmActive = null;   // null=未知(SW 重启后),true/false=消息/缓存恢复
+async function isZipWarmActive() {
+  if (zipWarmActive !== null) return zipWarmActive;
+  try {
+    const cache = await getCache();
+    const m = await cache.match('__sw_meta__');
+    const j = m ? await m.json().catch(() => null) : null;
+    zipWarmActive = !!(j && j.zipWarm);
+  } catch { zipWarmActive = false; }
+  return zipWarmActive;
+}
+function setZipWarmFlag(on) {
+  zipWarmActive = !!on;
+  return (async () => {
+    try {
+      const cache = await getCache();
+      const m = await cache.match('__sw_meta__');
+      const j = (m ? await m.json().catch(() => null) : null) || {};
+      j.zipWarm = !!on;
+      await cache.put('__sw_meta__', new Response(JSON.stringify(j)));
+    } catch { /* 持久失败仅影响 SW 重启后的窗口判定,本轮内存旗已生效 */ }
+  })();
+}
+/** warm 窗口图片 miss 静默应答(命中返回 204,否则 null=走原路径) */
+async function silentWarmMiss(req, path) {
+  if (req.method !== 'GET' || !IMG_MISS_RE.test(path)) return null;
+  if (!(await isZipWarmActive())) return null;
+  // x-sw-warm-miss 头:HAR 审计可直接识别"这是 warm 窗口静默,非真缺"
+  return new Response(null, { status: 204, headers: { 'x-sw-warm-miss': '1' } });
+}
+
 const CACHE_PREFIX = 'sw-assets-v';
 let currentVersion = '';
 let cacheReady = null;
@@ -71,6 +112,50 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
+const SHELL_RE = /^\/assets\/.+\.(js|css|woff2?)$/;
+const isDocPath = (req, path) => req.destination === 'document' || path === '/' || path.endsWith('.html');
+
+/** ★版本恢复(2026-09-04 线上实锤"进世界后天空/雷管族逐会话 404"):SW 进程被
+ *  浏览器 ~3min 击杀重启后,内存 currentVersion 丢失('')——fetch handler 的
+ *  `!currentVersion → return 放行` 让所有资产请求裸奔网络(prune 散件 404),
+ *  且 zip 模式页面无周期 version 消息 ⇒ 永不恢复。兜底:caches.keys() 的唯一
+ *  sw-assets-v* 名即当前版本(单版本不变式);推导一次,此后走同步快路径。 */
+async function recoverVersion() {
+  if (currentVersion) return currentVersion;
+  try {
+    const names = (await caches.keys()).filter((n) => n.startsWith(CACHE_PREFIX));
+    if (names.length === 1) {
+      currentVersion = names[0].slice(CACHE_PREFIX.length);
+      cacheReady = null;
+    }
+  } catch { /* */ }
+  return currentVersion;
+}
+
+/** 资产服务主逻辑(fetch handler 主体;返回 null = 放行网络) */
+async function serveAsset(req, path) {
+  const cache = await getCache();
+  const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
+  if (hit) return hit;
+  try {
+    const res = await fetch(req);
+    // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
+    // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
+    if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
+      if (res && !res.ok) {
+        return (await silentWarmMiss(req, path)) || res;   // warm 窗口图片 miss → 204 静默
+      }
+      return (await silentWarmMiss(req, path)) || new Response('', { status: 404 });
+    }
+    cache.put(req, res.clone());
+    return res;
+  } catch (err) {
+    // ★fetch 瞬态失败(离线/闪断):二次 match 回退——期间可能有并发 put 落地
+    const hit2 = await cache.match(req, { ignoreVary: true }).catch(() => null);
+    return hit2 || Response.error();
+  }
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   // ★scheme 门(2026-08-13 用户实报):浏览器扩展注入的 chrome-extension:// 等
@@ -78,8 +163,23 @@ self.addEventListener('fetch', (e) => {
   // "Request scheme 'chrome-extension' is unsupported"。非 http(s) 一律放行。
   const url = new URL(req.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-  if (req.method !== 'GET' || !currentVersion) return;
+  if (req.method !== 'GET') return;
   const path = url.pathname;
+  const assetish = ASSET_RE.test(path) || SHELL_RE.test(path) || path.startsWith('/l10n/') ||
+    isDocPath(req, path);
+  // ★SW 重启后 currentVersion=''——此窗口的资产请求放行=裸奔 404(prune)。
+  //  兜底:caches.keys() 的唯一 sw-assets-v* 名 = 当前版本(单版本不变式),
+  //  async 恢复一次后所有请求走 serveAsset 快路径。
+  if (assetish && !currentVersion) {
+    e.respondWith((async () => {
+      const ver = await recoverVersion();
+      if (!ver) return fetch(req);            // 无任何版本缓存(真首访)→ 网络
+      const res = await serveAsset(req, path);
+      return res ?? fetch(req);
+    })());
+    return;
+  }
+
   // ② 应用壳(拆双策略,2026-08-25):
   //    a) 内容寻址资产(/assets/ 下 js/css/woff2 均为 vite 哈希名,不可变):
   //       cache-first——老用户重复访问零重下(实测省主 chunk 2.2MB gz/次)。
@@ -147,8 +247,10 @@ self.addEventListener('fetch', (e) => {
       // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
       // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
       if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
-        if (res && !res.ok) return res;         // 真 404/5xx 直通语义不变
-        return new Response('', { status: 404 });
+        if (res && !res.ok) {
+          return (await silentWarmMiss(req, path)) || res;   // warm 窗口图片 miss → 204 静默
+        }
+        return (await silentWarmMiss(req, path)) || new Response('', { status: 404 });
       }
       cache.put(req, res.clone());
       return res;
@@ -300,7 +402,11 @@ async function _scrubInner(force = false) {
     }
     for (const r of bad) await cache.delete(r);
     if (bad.length) console.log(`[sw] 清除 SPA 兜底伪图 ${bad.length} 条`);
-    await cache.put('__sw_meta__', new Response(JSON.stringify({ scrubbedVersion: currentVersion })));
+    // ★合并写入(2026-09-04):__sw_meta__ 还存 zipWarm 旗(warm 窗口静默),
+    //  整对象覆盖会把它抹掉——SW 重启后窗口判定失真
+    const prevMeta = await cache.match('__sw_meta__').catch(() => null);
+    const prevJ = (prevMeta ? await prevMeta.json().catch(() => null) : null) || {};
+    await cache.put('__sw_meta__', new Response(JSON.stringify({ ...prevJ, scrubbedVersion: currentVersion })));
   } catch { /* 清扫失败不阻断 init */ }
 }
 
@@ -355,6 +461,10 @@ self.addEventListener('message', (e) => {
     e.waitUntil(warm(d.tag || '', d.urls || [], d.base || 0).catch(() => {}));
   } else if (d.type === 'warm-cancel') {
     warmAbort = true;
+  } else if (d.type === 'zip-warm') {
+    // warm 窗口旗同步(页面 AssetCache emit 翻转检测;持久进 __sw_meta__,
+    // SW 被杀重启后 isZipWarmActive 首调从缓存恢复)
+    e.waitUntil(setZipWarmFlag(!!d.on));
   } else if (d.type === 'ping') {
     postMessageToPages({ type: 'pong', version: currentVersion, lastGcErr: self.__swLastGcErr ?? null });
   } else if (d.type === 'status') {

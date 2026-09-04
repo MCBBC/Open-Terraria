@@ -1415,7 +1415,11 @@ export function growLivingTree(
   //   T191>0×3333/T0>192×8543 等），并把本 pass 内主流掷位整体前移。
   num2 = gs.seedFlags.remix ? 0 : num2;
   for (let n43 = 0; n43 < num2; n43++) {
-    let n44 = rng.int(5, 7);
+    let n44 = rng.int(5, 7);                    // cs:28797 Next(5,8) 恒掷
+    // ★IIIII110b（1458 cs:28798-28801）：errorWorld 叶簇尺寸臂——再掷 Next(3,12)
+    //   覆写（**多耗 1 掷/簇**,array7 圆冠簇再叠 Next(6,12)=3 掷）；叶冠变大 ⇒
+    //   逐列 pile/vine 掷面同步膨胀。缺失 ⇒ 树冠变小+掷流 −9,944 全链错位。
+    if (gs.seedFlags.errorWorld) n44 = rng.int(3, 11);   // Next(3,12) 闭区间映射
     n44 = Math.trunc(n44 * (1 + num5 * 0.05));
     if (ax7[n43]) n44 = rng.int(6, 11) + num5;
     if (LT_TRACE) console.log(`ANCH n43=${n43} x=${ax5[n43]} y=${ax6[n43]} round=${ax7[n43] ? 1 : 0} n44=${n44}`);
@@ -1669,6 +1673,12 @@ export function runLivingTreesPass(
                         num10--;
                       }
                       flag2 = true;
+                      // ★IIIII110b（1458 cs:15756-15777）：卫星 patch 树的砖/云排除扫
+                      //   整段包在 `if (!SecretSeed.errorWorld.Enabled)` 内——errorWorld
+                      //   **整跳**本扫描（主锚扫描 cs:15645 的 !errorWorld 门既有,卫星侧
+                      //   曾漏 → 卫星树被砖/云邻域误拒 ⇒ 掷流 −9,944 错位,#42 起全链
+                      //   T191/192 双向错位）。云格 eLT 豁免支=块内既有语义,块外不动。
+                      if (!gs.seedFlags.errorWorld) {
                       outer2:
                       for (let n11 = num6 - 50; n11 < num6 + 50; n11++) {
                         for (let n12 = j - 50; n12 < j + 50; n12++) {
@@ -1677,6 +1687,7 @@ export function runLivingTreesPass(
                           if (EXCLUDE_BRICK.has(sh)) { flag2 = false; break outer2; }
                           if (CLOUD_SHEETS.has(sh)) { flag2 = false; break outer2; }
                         }
+                      }
                       }
                       if (flag2) {
                         if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltPA|${num7},${num10}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);

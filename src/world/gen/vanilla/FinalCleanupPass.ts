@@ -1197,6 +1197,12 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   （cs:86770 派发 / 48034 实现）——FC 大循环曾缺路由 ⇒ 绿洲植物块
     //   （3×2=6 格，基座任一格 53→397 硬化砂后 !Conversion.Sand）永不校验击杀。
     case 530: checkOasisPlantSweep(st, ctx, x, y); return true;
+    // ★IIIII110b：CheckDye（cs:54265-54288）——染料植物 227 完整性（frameX/34 分相：
+    //   7=垂吊株锚上方 SolidTile / 6=仙人掌顶株下方 nactive∧type80 / default=下方
+    //   SolidTile）——失支撑即 KillTile（尘掷表+级联）。旧备案"未移植族"清偿：
+    //   x86 KILLWATCH 栈实证 KillTile←CheckDye←TileFrameImportant（pglun/manors
+    //   两种子 Micro_Biomes 域染料株被邻域框架横扫清算，各 1 格残差）。
+    case 227: checkDyeSweep(st, ctx, x, y); return true;
     case 571: checkBambooSweep(st, ctx, x, y); return true;
     case 72: frame72Sweep(st, ctx, x, y); return true;
     case 184: frame184Sweep(st, ctx, x, y); return true;
@@ -3270,6 +3276,26 @@ function checkVinesSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
 }
 
 /** CheckCactus（cs:54132）：追底杀，返回 true=已杀 */
+/** CheckDye（WorldGen.cs:54265-54288）1:1：染料植物 227 frameX/34 分相支撑校验。 */
+function checkDyeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  const i = st.idx(x, y);
+  switch (Math.trunc(st.frameX[i]! / 34)) {
+    case 7:
+      if (!solidTile(st, x, y - 1)) killTileGen(st, ctx, x, y);
+      break;
+    case 6:
+      {
+        const di = st.idx(x, y + 1);
+        const nact = st.inBounds(x, y + 1) && st.flags[di] !== 0 && (st.wire[di] & 32) === 0;
+        if (!nact || SWEEP_SHEET[st.type[di]] !== 80) killTileGen(st, ctx, x, y);   // type!=80(仙人掌)
+      }
+      break;
+    default:
+      if (!solidTile(st, x, y + 1)) killTileGen(st, ctx, x, y);
+      break;
+  }
+}
+
 function checkCactusSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): boolean {
   let ny = y, nx = x;
   while (st.inBounds(nx, ny) && st.flags[st.idx(nx, ny)] && sheetAt2(st, nx, ny) === 80) {

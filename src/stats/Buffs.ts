@@ -352,7 +352,7 @@ export enum BuffType {
   // ---- ★治理批 B6①（2026-08-31）：盾反伤害 buff 建模销账（此前「枚举未建模以
   //      字段+倒计时承载」）——vanilla 198 ParryDamageBuff：格挡窗口内接触反噬成功
   //      → Player.cs:31668 AddBuff(198,300)；消费 = 近战乘区 ×5 + ClearBuff（:44662-
-  //      44664，Projectile.cs:13634 弹幕面同式）。现役授予/消费载体仍为
+  //      44664，Projectile.cs:13627 门/:13629 dmg×5 弹幕面同式）。现役授予/消费载体仍为
   //      Player.parryDamageBuff/parryDamageBuffT（Game.ts 接触反伤区推进,战斗缝合面
   //      归属另线,不在本批触碰面）——本枚举位使 buffTypeByVanilla(198)/存档名单/
   //      图标直链贯通,BUFF_NO_SAVE 已含 198(Main.cs:8896-8990 名单)。图标 =

@@ -16,6 +16,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { Arrow, projSprite } from './Arrow';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
   resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
   applyBannerDamageDealt } from './projTargets';
@@ -31,7 +32,7 @@ import { noteVanillaProjImmune } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
-import { wetCollision } from './npcLiquid';
+import { wetCollision, lavaCollision } from './npcLiquid';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { damageVarRoll } from '../stats/DamageVar';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
@@ -601,8 +602,9 @@ export function flaironSpawnNudge(
 }
 
 /** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size;
- *  光刃族 1065-1070/1072/1074/1076/1102=46,其余 38） */
-const BOOMERANG_SIZE: Record<number, number> = {
+ *  光刃族 1065-1070/1072/1074/1076/1102=46,其余 38）。
+ *  exported：湿段豁免审计（tests/proj-wet-boomerang-yoyo）以本表键集=域 id 全集 */
+export const BOOMERANG_SIZE: Record<number, number> = {
   6: 22, 19: 22, 33: 38, 52: 22, 106: 32, 113: 22, 182: 30, 272: 32,
   301: 38, 320: 34, 333: 38, 383: 34, 866: 30, 867: 22, 902: 20, 1000: 22,
   1052: 22, 1074: 46,
@@ -718,6 +720,30 @@ export class Boomerang extends Entity {
   life = 3600;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口清偿批,
+  //  projWetSection.ts 共享体 1:1;本域 id 集 = BOOMERANG_SIZE 全 36 型 aiStyle3）----
+  //  豁免核对（1457 SetDefaults :699-10676 逐块脚本化扫描,块界=2 缩进 if/else-if 链）：
+  //  6(:866-875)/19(:1010-1019)/33(:1154-1163)/52(:1347-1355)/106(:1938-1947)/
+  //  113(:2014-2024)/182(:2688-2698)/272(:3580-3589)/301(:3918-3929)/320(:4132-4140)/
+  //  333(:4260-4269)/383(:4657-4665)/866(:8314-8326)/867(:8327-8336)/902(:8601-8610)/
+  //  1000(:9493-9502)/1052(:9980-9988)/光刃族三区间块 :10008-10023((1059-1064)||1071||
+  //  1075||1101)/:10024-10039((1065-1070)||1072||1076||1102)/:10049-10060(1074)——
+  //  全 36 型均无 ignoreWater=true 行（缺省 false @:763）→ 全员受段;与
+  //  PROJ_IGNORE_WATER（vanillaProjectiles.ts）亦零交集。四特支（34/80/155/2）与
+  //  IsDestroyedByWater 六型 {85,15,188,34,1097,1106} 域内无成员（死码在共享体内照抄）。
+  //  位序 = 原版 Update 逐子步:AI(:16880) → 本湿段(:16895 门,step() 内 AI 后/移动前)
+  //  → HandleMovement(:17120,湿阻尼 :17721-17764 只进位移)。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112,逐 AI 子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10887-10893 等价——首子步 AI 后同位测值。
+   *  ★301 例外:悬停支（outT<30,:40029 钉 Center=玩家中心−velocity）首子步即写位,
+   *  湿段首测位=钉位而非出生盒（懒预置结构债,仅影响出生即刻落液首拍溅花判定面,登记） */
+  presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
     projId: number, dir = 1) {
     super();
@@ -768,6 +794,9 @@ export class Boomerang extends Entity {
   private step(game: GameHooks): void {
     const p = game.player;
     const isPhase = PHASEBLADE_PROJ.has(this.projId);
+    // :16870 `Vector2 wetVelocity = velocity`（逐子步 AI 前 velocity 快照——湿态返回段
+    // 位移面消费,见 moveStep 返回段;逐子步重拍 = 原版 numUpdates 循环内同位）
+    const preVx = this.vx, preVy = this.vy;
     // ---- AI 段 ----
     // 掷出呼啸（1458 AI_003_Boomerang 头段 :39574-39597,1457 同段同值——终清波实装）：
     //   383/光刃族豁免。缺省族 = soundDelay 8×(extra+1)、Item_7 直播（三参无 pitch 档,
@@ -811,8 +840,15 @@ export class Boomerang extends Entity {
     if (this.ai0 === 0) this.aiOut(game, isPhase);
     else if (isPhase && this.ai0 === 2) this.aiHover(game); // 光刃撞墙悬停
     else this.aiReturn(game, isPhase);
-    // ---- 移动段（HandleMovement;ai[0]==1 时 tileCollide=false 穿墙 :37145） ----
-    this.moveStep(game, isPhase);
+    // ---- 通用湿段（:16903-17113;projWetSection 共享体——四液旗/出入水溅花/wetCount;
+    //      位序 = 原版 Update 逐子步 AI(:16880) → 湿段(:16895) → HandleMovement(:17120),
+    //      恰插本位;湿段只读 position 不读 velocity,故置于 AI 写位（301 悬停钉位）之后
+    //      = 原版 post-AI 同位。域 id 全不豁免（字段块注）,ignoreWater 仍按数据面传
+    //      （数据驱动防未来 id 入域）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    // ---- 移动段（HandleMovement;ai[0]==1 时 tileCollide=false 穿墙 :37145/:40108） ----
+    this.moveStep(game, isPhase, preVx, preVy);
     // ---- 尾段 rotation/尘（:37294-37352,全部状态运行） ----
     this.aiVisual(game, isPhase);
     // ---- direction 自动更新（Projectile.Update :15674-15682 AutomaticallyChangesDirection:
@@ -1024,9 +1060,18 @@ export class Boomerang extends Entity {
     }
   }
 
-  /** 移动/撞墙段（HandleMovement 撞墙分支 :18103-18161;分轴探测 = lastVelocity 语义） */
-  private moveStep(game: GameHooks, isPhase: boolean): void {
-    if (this.ai0 === 1) { this.x += this.vx; this.y += this.vy; return; } // 穿墙（:37145）
+  /** 移动/撞墙段（HandleMovement 撞墙分支 :18103-18161;分轴探测 = lastVelocity 语义）。
+   *  preVx/preVy = 本子步 AI 前 velocity 快照（:16870 wetVelocity 源,湿态返回段消费） */
+  private moveStep(game: GameHooks, isPhase: boolean, preVx: number, preVy: number): void {
+    if (this.ai0 === 1) {
+      // 返回段位移（ai[0]==1 → tileCollide=false :40108 → HandleMovement 湿阻尼分支
+      //  :17721 整体在 if(tileCollide) :17585 内【不跑】）。UpdatePosition :20555-20562
+      //  分叉照抄：wet → position += wetVelocity（= :16870 本子步 AI 前快照,无阻尼——
+      //  湿态返回位移滞后一子步 = 原版 quirk 本体）;dry → position += velocity（post-AI）。
+      if (this.wet) { this.x += preVx; this.y += preVy; }
+      else { this.x += this.vx; this.y += this.vy; }
+      return;
+    } // 穿墙（:37145/:40108 tileCollide=false）
     // ★嵌入态裸位移(2026-09-01 用户实录定罪):中心格在实体内 = 弹体出生嵌在斜坡/
     //  阶梯立体几何中。处置 = 无管线/无碰撞响应/无声的裸位移——以投掷动量自然滑出,
     //  进入自由空间后正常差分门接管。修复两个症状:
@@ -1036,7 +1081,11 @@ export class Boomerang extends Entity {
       const stE = game.world.store;
       const _cx = Math.floor(this.cx / TILE), _cy = Math.floor(this.cy / TILE);
       if (stE.inBounds(_cx, _cy) && stE.isSolid(_cx, _cy)) {
-        this.x += this.vx; this.y += this.vy; return;
+        // tileCollide=true（ai[0]==0）位移模拟 → 湿阻尼同吃（GrenadeProj sticky 直积分
+        //  `x += vx*dragS` 同款先例;原版本体=TileCollision 拦截,此处取"水中位移减半"面）
+        const dragE = projWaterDragFactor(this);
+        this.x += this.vx * dragE; this.y += this.vy * dragE;
+        return;
       }
     }
     // ★正典碰撞管线（2026-09-01 定罪「站斜砖旋刃原地打转」,终结本族第三次近似迭代：
@@ -1060,7 +1109,16 @@ export class Boomerang extends Entity {
       tileCollide: this.ai0 !== 1,
       dropThrough: true,
     };
-    moveAndCollide(body, game.world, lvx, lvy);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度【场】不减只削当拍
+    //  位移（原版 wetVelocity = post-TileCollision velocity×0.5/0.25/0.375,仅进
+    //  UpdatePosition :20557 `if (wet) position += wetVelocity`;dry 走 :20561
+    //  `position += velocity`）。阻尼只乘进 dx/dy 位移入参,body.vx/vy=碰撞调整字段
+    //  采纳处原样回读——下方撞墙响应 chX/chY 判与反弹式（-lvx/-lvy=未阻尼
+    //  lastVelocity :17696,原版同构）全不受阻尼影响。逐轴 passthrough 差
+    //  （原版 TileCollision 改速轴不阻尼 :17728-17733 等）= moveAndCollide 共享契约
+    //  外（GrenadeProj 同批同口径,登记）。
+    const drag = projWaterDragFactor(this);
+    moveAndCollide(body, game.world, lvx * drag, lvy * drag);
     // ★接触路径恢复 lastV——反射公式(-lvx/-lvy)与 383 豁免、301 盾钳定均以
     // 【入撞前速度】为基准。slope 粘滞编辑的持久化问题(右下弹射)归管线层修。
     this.x = body.x; this.y = body.y;
@@ -2742,6 +2800,28 @@ export class YoyoProj extends Entity {
   /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
   topSpeed = 10;
   dead = false;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口清偿批,
+  //  projWetSection.ts 共享体 1:1;本域 id 集 = YOYO_RANGE 全 21 型 aiStyle99）----
+  //  豁免核对（1457 SetDefaults :699-10676 逐块脚本化扫描）:534(:6015-6022)/
+  //  541-555 区间块(:6023-6046,DefaultToYoyo :6028)/562-564(:6047-6062)/
+  //  603(:6063-6072)/999(:9485-9492)——全 21 型均无 ignoreWater=true 行（缺省 false
+  //  @:763;DefaultToYoyo :10766-10773 亦不置位）→ 全员受段;与 PROJ_IGNORE_WATER
+  //  零交集。★位移方式定谳:AI_099_2_Yoyos（:68785-69161）全程只写 velocity/rotation、
+  //  无任何 position 直写 → 位移 = HandleMovement position += wetVelocity/velocity
+  //  （UpdatePosition :20549-20562）。活跃/脱离态 tileCollide=true 缺省（:771,
+  //  DefaultToYoyo 不改）→ 湿阻尼分支 :17721-17764 适用（仅削位移）;回收态 ai[0]<0
+  //  在 AI 内 tileCollide=false（:69138）→ 阻尼分支不跑,wet 位移走 :16870 AI 前快照
+  //  （无阻尼、滞后一子步 quirk）/dry 走 post-AI velocity——fixedUpdate 三处分叉照抄。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10887-10893 等价——首拍同位测值;
+   *  AI_099_2 无 position 写面 → 首拍位=出生盒,与原版 NewProjectile 时点同位） */
+  presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
   /** 同型前球在场（AI_099_2 flag :64827-64835：手套二号球寿命加速烧 rand(10,31)×0.1、
    *  死区 +20（:64976-64978）、免持械转向（:64907-64934）——Game 注入闭包扫描） */
   secondInPlay?: () => boolean;
@@ -2819,6 +2899,9 @@ export class YoyoProj extends Entity {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
+    // :16870 `Vector2 wetVelocity = velocity`（本拍 AI 前 velocity 快照——回收态湿位移
+    //  消费,见下方回收段;AI_099_2 首个 velocity 写面在活跃块 ×0.98,此前捕获=同位）
+    const preVx = this.vx, preVy = this.vy;
     const p = game.player;
     const eq = p.equipStats;
     // 线起点（Main.cs:27794-27803）：mountedCenter → mount52 修正 → +gfxOffY →
@@ -2975,6 +3058,15 @@ export class YoyoProj extends Entity {
         Math.trunc(this.damage * 0.75), Math.trunc(this.knockback * 0.75));
     }
     if (this.ai0 === -3) { this.ghost = true; this.damage = 0; }   // :65117-65119
+    // ---- ★通用湿段（:16903-17113;projWetSection 共享体——四液旗/出入水溅花/
+    //      wetCount。位序 = 原版 Update AI(:16880) → 湿段(:16895) → HandleMovement
+    //      (:17120):本仓 AI_099_2 全部 velocity 编辑（活跃逼近/-2 重力/回收 lerp）
+    //      到此跑完,位移在下方（回收直积分/活跃·脱离 moveAndCollide）——恰插本位。
+    //      湿段只读 position 不读 velocity;AI 无 position 写面 → 测位=上拍位移后同位,
+    //      与原版 post-AI 位一致。三态全受段（原版湿段门只有 !ignoreWater :16895,
+    //      与 ai[0] 无关）;域 id 全不豁免（字段块注）,ignoreWater 仍按数据面传）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 状态尾段（:65118-65177）----
     if (this.ai0 === -2) {
       // 脱离坠落（:65118-65151）：penetrate 懒置 Next(3,7)、重力 0.3、速度上限 16、
@@ -3003,8 +3095,13 @@ export class YoyoProj extends Entity {
       if (d < top + 10 || d === 0 || d > 2000) { this.dead = true; return; }
       this.vx = (this.vx * (inertia - 1) + (dx / d) * top) / inertia;
       this.vy = (this.vy * (inertia - 1) + (dy / d) * top) / inertia;
-      this.x += this.vx;
-      this.y += this.vy;
+      // 位移分叉（原版回收态 tileCollide=false :69138 → HandleMovement 湿阻尼分支
+      //  :17721 整体在 if(tileCollide) :17585 内【不跑】;UpdatePosition :20555-20562：
+      //  wet → position += wetVelocity（:16870 AI 前快照=本拍入速 preVx/preVy,无阻尼
+      //  ——湿态回收位移滞后一子步 = 原版 quirk 本体）;dry → position += velocity
+      //  （post-lerp,原版同构））
+      if (this.wet) { this.x += preVx; this.y += preVy; }
+      else { this.x += this.vx; this.y += this.vy; }
       hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
         (e) => this.onYoyoHit(e, game), undefined, true);
       return;
@@ -3012,7 +3109,16 @@ export class YoyoProj extends Entity {
     // ---- 活跃/脱离态移动+碰撞（原版 yoyo tileCollide=true 撞墙滑动;
     //      回收态上方已穿墙直积分返回）----
     const lvy = this.vy;
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度【场】不减只削当拍
+    //  位移（原版 wetVelocity = post-TileCollision velocity×0.5/0.25/0.375,仅进
+    //  UpdatePosition :20557 `if (wet) position += wetVelocity`;dry 走 :20561
+    //  `position += velocity`）。阻尼只乘进 dx/dy 位移入参,velocity 字段不动——
+    //  -2 反弹式（-lvy×0.6=未阻尼 lastVelocity :17696/:18517,原版同构）与命中链
+    //  反弹（this.vx 读数=velocity 域）全不受阻尼影响。逐轴 passthrough 差
+    //  （TileCollision 改速轴不阻尼 :17728-17733）= moveAndCollide 共享契约外登记
+    //  （GrenadeProj/Boomerang 同批同口径）。
+    const drag = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * drag, this.vy * drag);
     if (this.ai0 === -2) {
       // 脱离态撞块（:16988-17006）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
       // SoundID 0 + Kill
@@ -4880,6 +4986,25 @@ export class GrenadeProj extends Entity {
    *  :26752 入水 Kill 门与 Kill wet 分支共用;曾硬编码 false=水中也裂蜂） */
   private wet655 = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 火箭水花缺
+  //  口批,GrenadeProj 域此前整段缺位 → 火箭/手雷/炸弹入水无溅花+无水中位移阻尼）----
+  //  原版本段对【所有】非 ignoreWater 弹逐 update 维护：四液旗置位/三清
+  //  （:16906-16918/:17103-17108）、入水/出水溅花（:16935-17102,wetCount==0 门）、
+  //  wetCount 出水冷却窗（:16984 置 10/:17109-17112 逐 update −1）。本域 id 集
+  //  （AI_016 炸弹/手雷/炸药棍/粘性族/发射族 133-144/303/338-341/776-810/930/
+  //  903-911/1086-1088 + AI_025 蜂巢 655）SetDefaults 均无 ignoreWater 行 → 全员
+  //  受段;四特支（34 火鞭/80 冰块/155 沙滩球/2 燃烧箭变型）与 IsDestroyedByWater
+  //  六型 {85,15,188,34,1097,1106}（:16921-16931）域内均无成员 → 不移植（Arrow.ts
+  //  侧已移植）。溅花面 = wetSplashStepShared（Arrow.ts 共享体,逐值注在彼处）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首 update 头同位测值） */
+  presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
+
   // ---- 发射器弹药族（AI_016 else 发射支 :44542-44911，2026-08-14 对账新增）----
   /** fired = 发射族（无 PrepareBombToBlow 投掷臂路径；无重力直线/加速/追踪） */
   fired = false;
@@ -5294,13 +5419,18 @@ export class GrenadeProj extends Entity {
     // 地形脚下必爆"(2026-08-23 用户报)这类出生盒重叠病灶由管线嵌入自愈一并终结。
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
+    // ★水中位移阻尼（HandleMovement :17721-17764,2026-09-04 湿段批）——速度【场】
+    //  不减只削位移（原版 wetVelocity = velocity×drag 后仅进 UpdatePosition,velocity
+    //  字段本身不被水阻改写）。moveAndCollide 契约：dx/dy=本拍位移、b.vx/vy=碰撞调整
+    //  字段（采纳处原样回读）——阻尼只进位移入参,采纳行不动
+    const drag = this.wetDragFactor();
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: true,
     };
-    moveAndCollide(body, game.world, this.vx, this.vy);
+    moveAndCollide(body, game.world, this.vx * drag, this.vy * drag);
     this.x = body.x; this.y = body.y;
     // ★1:1 同批:采纳管线后速度(lastVx/lastVy 已存档供反弹式引用)——贴坡等编辑持久化
     this.vx = body.vx; this.vy = body.vy;
@@ -5393,6 +5523,21 @@ export class GrenadeProj extends Entity {
     this.fuseSnd = null;
   }
 
+  /** 水中位移阻尼档（HandleMovement :17721-17764：wetVelocity = velocity×0.5 水 /
+   *  ×0.25 蜂蜜 / ×0.375 微光——速度【场】不减、只削当拍位移；读【本拍刷新后】
+   *  旗（原版湿段 :16903 在 HandleMovement :17120 前）） */
+  /** 水中位移阻尼档（HandleMovement :17721-17764——projWaterDragFactor 共享体） */
+  private wetDragFactor(): number {
+    return projWaterDragFactor(this);
+  }
+
+  /** ★通用湿段（:16903-17113 全体弹共用段——projWetSection.ts 共享体 1:1,域注/
+   *  位序/特支注见共享体文件头与本类字段块头;首批先行移植版已同源收编） */
+  private grenadeWetSection(game: GameHooks): void {
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
     if (this.dead) return;   // ★Projectile.Update :16780 `!active → return` 结构等价
                              // （原版 Kill 后 active=false 跳过 Update；本仓实体虽被
@@ -5409,6 +5554,9 @@ export class GrenadeProj extends Entity {
       this.destroy();
       return;
     }
+    // ★通用湿段（:16903-17113,2026-09-04 火箭水花缺口批）——入/出水溅花+四旗维护;
+    //  位移阻尼消费在下方两路移动位（wetDragFactor,原版 HandleMovement 同拍联动）
+    this.grenadeWetSection(game);
     if (this.fired) { this.firedStep(game); return; }
     // ---- 液体炸弹入液即爆（AI_016 :44267：wet && {903..906} 族 → timeLeft=1 次帧爆；
     //      wet = Collision.WetCollision 投射物盒与任一液体格重叠 :10248）----
@@ -5670,8 +5818,11 @@ export class GrenadeProj extends Entity {
       //   rotation 同样恒跑,故置 bombGravityStep 早退之外）。STICKY_PROJ 全员
       //   AI_016 滚转档（134/303/338-341/776-810/930 atan2 族不入粘性集）。
       this.rot += this.vx * (this.projId === 519 ? 0.06 : 0.1);
-      this.x += this.vx;
-      this.y += this.vy;
+      // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度场不减只削位移
+      //  （粘性族飞行相同吃;贴附后速度≈0 阻尼恒等无感）
+      const dragS = this.wetDragFactor();
+      this.x += this.vx * dragS;
+      this.y += this.vy * dragS;
       if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
       return;
     }
@@ -5719,13 +5870,16 @@ export class GrenadeProj extends Entity {
     }
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——同 firedStep 位注：
+    //  阻尼只进位移入参,b.vx/vy=碰撞调整字段采纳处不动
+    const drag = this.wetDragFactor();
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false,
       stepUp: false, dropThrough: false, stepDownGate: 'gravity' as const,
     };
-    moveAndCollide(body, game.world, this.vx, this.vy);
+    moveAndCollide(body, game.world, this.vx * drag, this.vy * drag);
     // 655 蜂巢专属（:19379-19391,旧注 :17856 系 Update 位移段误标）：Y 反弹门
     //   `velocity.Y != lastVelocity.Y && lastVelocity.Y > 5f` → HitTiles+音 0+
     //   vy=lastVy×-0.2（只弹不杀）;X 变化（撞墙）→ Kill 裂蜂。
@@ -5757,7 +5911,7 @@ export class GrenadeProj extends Entity {
       this.vx = lastVx * -0.4;
       if (this.projId === 29) this.vx *= 0.8;
     } else {
-      this.vx = body.vx;
+      this.vx = body.vx;   // 碰撞调整字段原样回读（阻尼只进位移入参,湿段批位注）
     }
     // 落地反弹/贴地滚动（:19877-19886 + :44888-44895）：
     // lastVy>0.7（且 type≠102）→ vy = lastVy × -0.4（仅 29 再 ×0.8）；
@@ -5792,7 +5946,7 @@ export class GrenadeProj extends Entity {
         this.vy = body.y - bodyY0;
       }
     } else {
-      this.vy = body.vy;
+      this.vy = body.vy;   // 碰撞调整字段原样回读（阻尼只进位移入参,湿段批位注）
     }
     this.x = body.x;
     this.y = body.y;

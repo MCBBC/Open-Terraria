@@ -141,6 +141,16 @@ export interface GameHooks {
   fellCactus?(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
+  /** 多格 framed 件运行期裸写（TileObject.Place TileObject.cs:94-110 语义：写循环期
+   *  抑制 DECOR 逐格完整性裁决,全格写完后在锚点做一次 SquareTileFrame 级联
+   *  （PlaceObject WorldGen.cs:51886-51888 尾）。Game 实现 = _decorPlaceBuilding 窗
+   *  + 逐格 setTile（netReporter 照常逐格广播）+ checkDecorSquareFrame(锚点)。
+   *  运行期放置单点——624 侏儒石化 PlaceTile(567)（NPC.cs:56449）消费；
+   *  缺省（测试 mock）=调用侧回落逐格 setTile */
+  placeObjectCells?(
+    cells: ReadonlyArray<{ x: number; y: number; type: number; fx: number; fy: number }>,
+    cascadeX: number, cascadeY: number,
+  ): void;
   /** 成就系统（拾取通知等；仅 Game 本体注入） */
   achievements?: import('../core/Achievements').Achievements;
   /** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup:底部居中 40px、

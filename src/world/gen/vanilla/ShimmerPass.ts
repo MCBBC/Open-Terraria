@@ -21,7 +21,7 @@ import type { GenState } from './GenState';
 import { addProtectedStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
-import { genSolidType } from './GenSolid';
+import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { solidTile, registerTileFrame165 } from './HalfBrickPass';
 import { growGemTree } from './TreePass';
 
@@ -38,6 +38,13 @@ const d59 = (o: Record<string, unknown>): void => {
 
 /** Main.tileMoss（TileID.cs）：苔藓族 sheet 集（石族钟乳石帧判定用） */
 const MOSS_SHEETS = new Set<number>(Array.from(idsByVanillaSheet(182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627)).map((id) => TILE_DEFS[id]?.vanilla?.sheet ?? -1));
+
+/** JS type → 原版 sheet（ShimmerMakeBiomeOpening 的 SolidTile tileSolidTop 族门用） */
+const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let _i = 0; _i < TILE_DEFS.length; _i++) {
+  const _s = TILE_DEFS[_i]?.vanilla?.sheet;
+  if (typeof _s === 'number') SHEET_OF_TYPE[_i] = _s;
+}
 
 const STONE = TILE_BY_KEY['stone']!;         // 原版 type 1
 const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 原版 type 165(PlaceTight)
@@ -261,11 +268,23 @@ function shimmerOpening(st: TileStore, rng: RNG, dir: number, X: number, Y: numb
   let num = X;
   let y = Y;
   size--;
-  // 原版此处是 WorldGen.SolidTile（cs:35102/35112,读可变 tileSolid）——659 以太石块
-  // 生成期非实心（cs:11500）,隧道开口可穿以太石本体。旧近似只查 active（flags）,
-  // 已校正为 GenSolid 口径（active && 生成期 tileSolid）
-  const solidAt = (x: number, yy: number) =>
-    st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0 && genSolidType(st.type[st.idx(x, yy)]);
+  // 原版此处是 WorldGen.SolidTile（1457 cs:70642/1458 cs:70650 全五门,读可变 tileSolid）
+  // ——659 以太石块生成期非实心（cs:11500）,隧道开口可穿以太石本体。
+  // ★IIIII156（2026-09-04）定谳补全：旧近似 `flags!==0 && genSolidType` 漏
+  // !tileSolidTop/!halfBrick/slope==0/!inActive 四门——tooeasy|20260911 东开口
+  // 写门格 (495,537)（大理石 88,PlaceSlab SmoothSlope slope=3,wall178）x86 拒
+  // JS 收 ⇒ mile8 唯一残差 W=1;本格翻案 LXVIII「mono vs V8 pow ULP 翻脸」备案
+  //（该格根本不在 ShimmerMakeBiome 椭圆盒 x[222,446] 内,差额实为开口臂写门）。
+  // 五门 1:1 对齐 SecretSeedDoEndsPass.solidTileGround 已认证实现（XXV 批）。
+  const solidAt = (x: number, yy: number) => {
+    if (!st.inBounds(x, yy)) return false;
+    const i = st.idx(x, yy);
+    if ((st.flags[i] & 1) === 0) return false;                    // active()（bit0,禁幽灵位代读）
+    if ((st.wire[i] & 32) !== 0) return false;                    // !inActive()
+    const sh = SHEET_OF_TYPE[st.type[i]];
+    if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;     // !tileSolidTop∪非实心族
+    return genSolidType(st.type[i]) && st.half[i] === 0 && st.slope[i] === 0;
+  };
   for (;;) {
     num += dir;
     let open = true;

@@ -522,13 +522,19 @@ export function specialTileLight(
       const rnd = ctx.localRand?.();
       if (!rnd) return null;
       const above = ctx.y - 1;
-      if (!ctx.st.inBounds(ctx.x, above)) return null;
-      const ai = ctx.st.idx(ctx.x, above);
-      const ad = TILE_DEFS[ctx.st.type[ai]];
-      // ★幽灵保域（2026-09-03）：WorldGen.SolidTile3 首门 = nactive()（active&&!inActive,
-      // WorldGen.cs:71005-71015）——幽灵格残型不算实心
-      const solid3 = ctx.st.flags[ai] !== 0 && (ctx.st.wire[ai] & TileStore.WIRE_ACTUATED) === 0
-        && ctx.st.type[ai] !== 0 && (ad?.solid ?? false) && !ad?.platform;
+      // ★A-5 边带（2026-09-04）：WorldGen.SolidTile3(x, y-1)（TileLightScanner.cs:863
+      // 坐标重载）首门 InWorld(·,1)（WorldGen.cs:71006-71008）——边带内上邻恒判
+      // "非实心"（false）→ 发光支继续,而非本仓旧 inBounds 早退（把边带上邻当
+      // 无数据=星云被遮断,原版恰相反）
+      let solid3 = false;
+      if (ctx.st.inWorld1(ctx.x, above)) {
+        const ai = ctx.st.idx(ctx.x, above);
+        const ad = TILE_DEFS[ctx.st.type[ai]];
+        // ★幽灵保域（2026-09-03）：WorldGen.SolidTile3 首门 = nactive()（active&&!inActive,
+        // WorldGen.cs:71005-71015）——幽灵格残型不算实心
+        solid3 = ctx.st.flags[ai] !== 0 && (ctx.st.wire[ai] & TileStore.WIRE_ACTUATED) === 0
+          && ctx.st.type[ai] !== 0 && (ad?.solid ?? false) && !ad?.platform;
+      }
       if (solid3) return null;   // WorldGen.SolidTile3
       return [
         rnd.nextFloat() * 0.04 + 0.1 + (d[0] * 255) / 800,

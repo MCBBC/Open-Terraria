@@ -27,6 +27,16 @@
 //   帧带 21×8/21×6/21×8）；466 三层（宽 ×0.6/0.4/0.2，色 (115,204,219)/(113,251,255)/
 //   白，各 ×0.5 加色）；580 两层（宽 ×0.5/0.3，localAI1∈{−1,1} 再 −0.2，
 //   色 (115,244,219)/白）。本仓以 Extra_33 体带（0,8,21,6）沿段拉伸近似。
+// ★通用湿段定谳（2026-09-04 溅花缺口批）：本类两 id 【双双豁免】通用湿段
+//   （Projectile.cs:16903 `if (!ignoreWater)` 整段门）——SetDefaults 逐块核对：
+//   466 :5394-5405 `ignoreWater=true`@:5401；580 :6296-6307 `ignoreWater=true`
+//   @:6303（同块还有 578/579 邻族豁免,本类不含）。故不接 projectileWetSection：
+//   四液旗/溅花/wetCount 冷却窗原版本就不维护（新弹入水无溅花=原版相）;湿阻尼
+//   （HandleMovement :17721-17764）同门不适用——:16870 `wetVelocity=velocity` 初值
+//   恒等、UpdatePosition :20555 走 `position += velocity` 全速支。位移方式登记：
+//   466/580 为 velocity 积分弹（aiStyle 88 不在 :20551 跳过表）,若未来解豁免阻尼
+//   即乘进 subStep 尾部 `this.x += this.vx` 位移行。※任务单提到的 576（星旋激光,
+//   Arrow/Dart 域）不在本类,本类实服务 id 只有 466/580 两型（生成点见上）。
 import { Entity } from './Entity';
 import { UnifiedRandom } from '../core/rng';
 import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';

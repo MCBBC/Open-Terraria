@@ -469,12 +469,19 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
         budget--;
         let x = rng.int(25, w - 26);          // Next(25, w-25)
         let y = rng.int(ws, h - 301);         // Next((int)worldSurface, h-300)
-        while (ocean(x, y)) { x = rng.int(25, w - 26); y = rng.int(ws, h - 301); }
+        // ★IIIII159 OT 钩（oceanDepths 入口镜像,无钩零开销）
+        (globalThis as { __swI159OT?: (x: number, y: number) => void }).__swI159OT?.(x, y);
+        while (ocean(x, y)) {
+          x = rng.int(25, w - 26); y = rng.int(ws, h - 301);
+          (globalThis as { __swI159OT?: (x: number, y: number) => void }).__swI159OT?.(x, y);
+        }
         if (!st.flags[st.idx(x, y)]) {
           let type = 186;
           y = dropTo(x, y);
           const wall = st.wall[st.idx(x, y)];
           const below = sheetAt(st, x, y + 1);
+          // ★IIIII108c 一次性仪（env 门,缺省零开销）：segment① attempt 级追踪
+          (globalThis as { __swI148Att?: (x: number, y: number, bl: number, wl: number) => void }).__swI148Att?.(x, y, below, wall);
           if (below >= 0) {
             let style = rng.int(0, 21);       // Next(22)
             if (style >= 16 && style <= 22) style = rng.int(0, 21);
@@ -498,7 +505,10 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (WALL_DUNGEON.has(wall) && rng.int(0, 2) !== 0) {
               flag = true;                    // 地牢墙 2/3 直接视为命中
             } else {
-              if (!shimmerAt(x, y)) placePile3x2(st, rng, x, y, pick(type), style);
+              // ★IIIII159：ok 捕获仅仪用（返回值原版 void 等价,行为零变）
+              const okP = !shimmerAt(x, y) ? placePile3x2(st, rng, x, y, pick(type), style) : false;
+              // ★IIIII159 attempt 级裁决钩（无钩零开销）：seg/m/budget/ok/残值/flag
+              (globalThis as { __swI159Ver?: (seg: number, m: number, budget: number, x: number, y: number, t: number, s: number, ok: boolean, raw: number, flag: boolean, wall: number, below: number) => void }).__swI159Ver?.(1, i, budget, x, y, SHEET[type] ?? -1, style, okP, rawSheetAt(st, x, y), flag, wall, below);
               // cs:18989：残值 type==186||187 即命中（shimmer 拒置后残值同样可命中）
               if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;
               if (flag && type === 186 && style <= 7) scatter(x, y);
@@ -530,7 +540,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (y > h - 300 || WALL_DUNGEON.has(wall) || below === 30 || below === 19) style = rng.int(0, 6);
             if ((below === 57 || below === 58) && rng.int(0, 2) < 2) { type = 187; style = rng.int(6, 8); }
             if (below === 147 || below === 161 || below === 162) style = rng.int(26, 31);
-            placePile3x2(st, rng, x, y, pick(type), style);
+            const okP2 = placePile3x2(st, rng, x, y, pick(type), style);   // ★IIIII159 ok 捕获仅仪用
+            (globalThis as { __swI159Ver?: (seg: number, m: number, budget: number, x: number, y: number, t: number, s: number, ok: boolean, raw: number, flag: boolean, wall: number, below: number) => void }).__swI159Ver?.(2, i, budget, x, y, SHEET[type] ?? -1, style, okP2, rawSheetAt(st, x, y), flag, wall, below);
             if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;  // cs:19103
             if (flag && type === 186 && style <= 7) scatter(x, y);
           }

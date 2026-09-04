@@ -197,17 +197,38 @@ const le16 = (p: string): Uint16Array => {
   // IIII108d（planetoids #42）：raw inner-sample 值流落盘（SW_I118_ROLLVAL=path）
   // ——x86 rollval.txt 同构（ordinal|value），与 pass 头 reseed 对齐后逐位对拍。
   const ROLLVAL_PATH = process.env.SW_I118_ROLLVAL ?? '';
-  const rollLines: string[] | null = ROLLVAL_PATH ? [] : null;
+  const TAGS_PATH = process.env.SW_I118_TAGS ?? '';
+  const rollLines: string[] | null = (ROLLVAL_PATH || TAGS_PATH) ? [] : null;
   const gR = globalThis as unknown as { __swOnRoll?: (v: number, inst?: object) => void };
   const oOnRoll = gR.__swOnRoll;
   if (rollLines) {
-    gR.__swOnRoll = (v) => { rollLines.push(`${rollLines.length + 1}|${v}`); if (oOnRoll) oOnRoll.call(gR, v); };
+    gR.__swOnRoll = (v) => {
+      if (TAGS_PATH) {
+        const stack = (new Error().stack ?? '').split('\n').slice(1).join('\n');
+        const frames: string[] = [];
+        for (const line of stack.split('\n')) {
+          const m = line.match(/(?:\/src\/)([^\s()]+\.ts):(\d+):\d+/);
+          if (!m) continue;
+          if (m[1]!.includes('core/rng') || m[1]!.includes('_iii118lt')) continue;
+          frames.push(`${m[1]!.replace(/^.*?(gen|world)\//, '')}:${m[2]}`);
+          if (frames.length >= 3) break;
+        }
+        rollLines.push(`${rollLines.length + 1}|${v}|${frames.join('<')}`);
+      } else {
+        rollLines.push(`${rollLines.length + 1}|${v}`);
+      }
+      if (oOnRoll) oOnRoll.call(gR, v);
+    };
   }
   const t0 = Date.now();
   try {
     runLivingTreesPass(st, rng, gs, [] as never);
   } finally {
-    if (rollLines) { gR.__swOnRoll = oOnRoll; writeFileSync(ROLLVAL_PATH, rollLines.join('\n') + '\n'); }
+    if (rollLines) {
+      gR.__swOnRoll = oOnRoll;
+      if (ROLLVAL_PATH) writeFileSync(ROLLVAL_PATH, rollLines.map((l) => l.split('|').slice(0, 2).join('|')).join('\n') + '\n');
+      if (TAGS_PATH) writeFileSync(TAGS_PATH, rollLines.join('\n') + '\n');
+    }
   }
   console.log(`runLivingTreesPass ${Date.now() - t0}ms rolls=${rcBox.n}${rollLines ? ` rollval->${ROLLVAL_PATH} (${rollLines.length})` : ''}`);
   if (process.env.SW_I118_SAVE === '1') {

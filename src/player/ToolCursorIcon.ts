@@ -322,7 +322,9 @@ export function toolCursorIcon(env: ToolCursorIconEnv): ToolCursorIconResult {
       if ((vid === 1072 || vid === 1544) && tt.wall > 0) enabled = true;
       if ((vid === 1100 || vid === 1545)
         && ((tt.wall > 0 && tt.paintedWall) || (tt.active && tt.painted))) enabled = true;
-      if ((vid === 1100 || vid === 1545) && tt.active && tt.sheet === 184) enabled = true;
+      // ★G1谓词批(2026-09-04)：LongMoss 原版裸 type 读（Player.cs:42142
+      //  `if (Main.tile[x,y].type != 184) return;`无 active 门）——去 tt.active 门
+      if ((vid === 1100 || vid === 1545) && tt.sheet === 184) enabled = true;
       if (env.isTorch === true && tt.active && tt.sheet === 209
         && Math.floor(tt.frameX / 72) < 3) enabled = true;
     }

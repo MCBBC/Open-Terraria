@@ -7,6 +7,7 @@ import { shadowbeamLineFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { moveAndCollide } from '../physics/TileCollision';
+import { blockBelowMakesSandFall } from './FallingBlock';   // ★④ BBMSF 单源（掉落/沙族批 2026-09-04）
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
 import { prefetchProjectiles } from './Arrow';
@@ -22,6 +23,8 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { noteVanillaProjImmune } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { GorePiece } from './GorePiece';
+import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：99 巨石踢墙门单源化（与 655/1047 同摄取器）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -229,6 +232,18 @@ function trapPen(kind: TrapShotKind): number {
   return p ?? 1;
 }
 
+/** 弹型(+色变体 form) → 原版弹 id 全映射（★通用湿段批补全——TRAP_PROJ_ID 只列
+ *  反射白名单族,烟花三件套/马桶按 form 展开全 id;湿段/豁免面须逐 id 核） */
+function trapWetProjId(kind: TrapShotKind, form: number): number {
+  switch (kind) {
+    case 'fireworkRocket': return 167 + form;        // 167-170（SetDefaults :2560-2571 共块）
+    case 'fireworksBoxRocket': return 415 + form;    // 415-418（:4944-4951 共块）
+    case 'fireworkFountain': return 419 + form;      // 419-422（:4952-4960 共块）
+    case 'toiletPop': return 733;                    // :7718-7727
+    default: return TRAP_PROJ_ID[kind] ?? -1;
+  }
+}
+
 export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;
@@ -265,6 +280,33 @@ export class TrapShot extends Entity {
   /** 逐目标剩余窗口 tick（本仓承载 targetNPC.immune[owner] 语义的弹级镜像表；
    *  键=目标对象引用，随 fixedUpdate 每 tick 递减到 0 删档） */
   private hitCdT = new Map<object, number>();
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
+  //  → projWetSection 共享体接入;逐 id 豁免核对（SetDefaults ignoreWater 行）：
+  //  【豁免=不接湿段面(共享体整段门早退)】187 烈焰 :2743-2753 true@:2750 /
+  //  186 矛 :2730-2742 true@:2737 / 654 热泉 :7026-7039 true@:7033 /
+  //  733 马桶 :7718-7727 true@:7724；
+  //  【受段(无行=缺省 false)】98 :1825-1834 / 184 :2709-2718 / 980 :9332-9341 /
+  //  185 :2719-2729 / 99 :1835-1852 / 162 :2508-2516 / 166 :2551-2559 /
+  //  281 :3678-3689 / 601 :6504-6512 / 1049 :9940-9954 / 167-170 :2560-2571 /
+  //  415-418 :4944-4951 / 419-422 :4952-4960。
+  //  位序口径：原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)/
+  //  UpdatePosition(:19973)。本域各 aiStyle（1/2/5/14/25/34/49/73）AI 段湿旗消费者
+  //  普查（AI() 全域 :23404-37400 wet 读点 ：24351 aiStyle5(1037/1049 尘 6 !wet 门)
+  //  /:25563/:25590 aiStyle14(326-328,400-402,1107-1109 专属)——均非本类现役 id 的
+  //  受理面）→ 湿段置 tick 头（AI 前）语义等价（旗=上拍值,消费面为零）;1049 的
+  //  :24351 !wet 尘 6 完美支本仓整条尘链缺位（视觉批域登记,非本批引入）,旗字段
+  //  就绪后接入即活。湿阻尼 :17721-17764 读【本拍刷新后】旗。----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1；
+   *  1049 extraUpdates=1 → 原版每拍 2 子步各 −1,本仓湿段每拍 1 次——窗 10 拍口径,
+   *  子步对齐残差 ≤1 拍登记） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
+  presetDone = false;
 
   /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕。
    *  ★未加载(懒加载 pending)不得判 blank——否则 null 会被永久缓存,贴图晚到也不恢复
@@ -349,6 +391,13 @@ export class TrapShot extends Entity {
       this.fireworkUpdate(game);
       return;
     }
+    // ---- ★通用湿段（:16903-17113,tick 头口径见字段块注;溅花尘/音=wetSplashStepShared
+    //      弹面 10 粒;豁免 id 由共享体 :16903 整段门早退=零触发）----
+    //  置于 timeLeft 递减/Kill 前：原版湿段 :16903 与 timeLeft--(:17307)/Kill(:17308)
+    //  同在子步环内且在前 → 寿终拍湿段照跑（烟花支 fireworkUpdate 头同口径）
+    const wetId = trapWetProjId(this.kind, this.form);
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      wetId, !!projectileData(wetId)?.ignoreWater);
     // timeLeft-- 原版在 extraUpdates 子步环内逐次执行（Projectile.cs:16780-16781
     // `numUpdates = extraUpdates; while (numUpdates >= 0)` → :17307 `timeLeft--;`
     // :17308-17311 timeLeft<=0 → Kill）——即每拍递减 (extraUpdates+1) 次。1049
@@ -388,21 +437,18 @@ export class TrapShot extends Entity {
       // 探 ±40px(8+32)侧壁:左实 → 向右踢 0.5 / 右实 → 向左 / 两侧空 → 按
       // Center.X 奇偶定向。没有这一踢,vx=0 命不中滚地加速两分支 → 落地即死停。
       if (this.boulderLanded && this.vy <= 0 && this.vx === 0) {
-        const st8 = game.world.store;
-        const solid2 = (px: number, py: number) => st8.isSolid(Math.floor(px / TILE), Math.floor(py / TILE));
-        // 单级探针 = 同一深度两侧各一列×两行(posY 行与 +1 行,:26600-26603)。原版为
-        // 三级【递宽】窗:±8px 首查,全空再 ±24、再 ±40(:26603-26669 三层嵌套);
-        // 首中即定踢向(左实→+0.5 右实→−0.5,左实优先=:26614-26619 的 if/else 序)。
-        // ★终清波补缺:旧实现只测最宽窗(40px)丢单/中距墙命中面,且双侧皆实时误落
-        // 奇偶兜底(vanilla 左实恒胜);三级级联就此转正。
-        const sideSolid = (off: number): 'L' | 'R' | null =>
-          solid2(this.x - off, this.y) || solid2(this.x - off, this.y + TILE) ? 'L'
-            : solid2(this.x + this.w + off, this.y) || solid2(this.x + this.w + off, this.y + TILE) ? 'R'
-              : null;
-        // 最宽窗仍两侧全空才落 Center.X 格奇偶兜底(:26663-26679,偶格=向右)
-        const kickTo = sideSolid(8) ?? sideSolid(24) ?? sideSolid(40)
-          ?? (Math.floor(this.cx / TILE) % 2 === 0 ? 'L' as const : 'R' as const);
-        this.vx = kickTo === 'L' ? 0.5 : -0.5;
+        // SW-AF1 2026-09-04（F-3 收敛）：踢墙摄取器单源化 → WeaponProj.beeWallPushDir
+        //  （655 蜂巢支同一摄取器,三级递宽 ±8/24/40px 扫窗 + 左实优先 + Center.X 奇偶
+        //  兜底全同构）。原第二实现用 st.isSolid()=缺 halfBrick/slope/platform 排除
+        //  （原版 SolidTile W.cs:70642-70655 = active && !inActive && tileSolid &&
+        //  !tileSolidTop && !halfBrick && slope==0）→ 斜坡/半砖/平台格被误判实心墙
+        //  而起踢;Math.floor 负商分叉也随 trunc(C# (int) 朝零) 修正。★行为变更=1:1
+        //  目标:斜坡/半砖/平台格原版不踢,本仓亦不踢。
+        //  ★OOB 备案：vanilla Main.tile 越界=null → SolidTile 返 true
+        //  （:70646-70649）;beeWallPushDir 沿 store 惯例"世界外视为空"返 false——
+        //  世界缘 8~40px 带内踢向可能差一档,与 655/1047 三支同口径备案
+        //  （WeaponProj.ts beeWallPushDir 注同文）。
+        this.vx = beeWallPushDir(game.world.store, this.x, this.y, this.w, this.cx);
       }
       // 重力 0.3/终端 16(1458 :26741/:26685-26687);滚地加速:vy≤6 且 |vx|<7 →
       // ±0.05(:26717-26723)——落地后不会停,持续加速滚动直到撞墙;旋转 = vx×0.06
@@ -424,7 +470,11 @@ export class TrapShot extends Entity {
       // 陷阱几何:巨石右列常坐在未致动石上,出生即嵌地形 ~15px——自建边缘
       // 采样两轮翻车(出生叠壁误碎→预叠容忍→贴地恒沉→严格阻挡又嵌住),
       // 全部退役。响应旗标:hitWall=撞墙碎裂;onGround=落地(硬落反弹 ×0.2)。
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼(HandleMovement :17721-17764,湿段批)——速度【场】不减只削
+      // 位移:乘进 dx/dy 入参,采纳处(lastVX/lastVY 档+反弹式)原样回读勿除回
+      // (原版碰撞响应读的也是未阻尼 velocity 场)。
+      const dfB = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfB, this.vy * dfB);
       if (this.hitWall) {
         game.playSfx('tink', 1, this.cx, this.cy);      // HitTiles 敲击音
         game.spawnParticles(this.cx + this.w / 2 * Math.sign(lvx || 1), this.cy, '#9A8C72', 8, 2.4, { life: 40 });
@@ -453,11 +503,13 @@ export class TrapShot extends Entity {
       // 分轴积分 + type185 反弹响应（1458 P.cs:19818-19826）：
       // X 阻挡 → vx=-lastVx*0.9；Y 阻挡且 lastVy>1 → vy=-lastVy*0.9，否则落定 0。
       // ★探针升级整盒（B-M：曾只测中心格——擦角穿墙/半嵌天花板两向漏检）
+      // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度场不减只削位移
+      const dfS = projWaterDragFactor(this);
       const lvx = this.vx, lvy = this.vy;
-      this.x += this.vx;
-      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.x -= this.vx; this.vx = -lvx * 0.9; }
-      this.y += this.vy;
-      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.y -= this.vy; this.vy = lvy > 1 ? -lvy * 0.9 : 0; }
+      this.x += this.vx * dfS;
+      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.x -= this.vx * dfS; this.vx = -lvx * 0.9; }
+      this.y += this.vy * dfS;
+      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.y -= this.vy * dfS; this.vy = lvy > 1 ? -lvy * 0.9 : 0; }
     } else if (st.gravDelay !== undefined) {
       // 炮弹族弧线：前 gravDelay tick 直线，之后 vy+=grav / vx*=xDamp
       // （162/281=Projectile.cs:21546-21550/26844-26849 的 ai[0]>=18；166=:21879-21884 的 >=20）
@@ -472,10 +524,13 @@ export class TrapShot extends Entity {
     if (this.kind !== 'spiky' && this.kind !== 'boulder') {
       // extraUpdates 位移倍步（1049 extraUpdates=1 :9949 → 2 步/拍；其余表项单步）。
       // 步间不重查块——陷阱弹碰撞模型维持拍末中心点单查（类头注既有简化）
+      // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——逐子步位移同削
+      //（原版 UpdatePosition :19973 每子步 position += wetVelocity）
+      const df = projWaterDragFactor(this);
       const steps = st.steps ?? 1;
       for (let s2 = 0; s2 < steps; s2++) {
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += this.vx * df;
+        this.y += this.vy * df;
       }
     }
     // 粒子拖尾(原版火焰陷阱/热喷泉的视觉主体是沿途粒子;每 2 tick 一次防刷屏)
@@ -737,6 +792,14 @@ export class TrapShot extends Entity {
    *  马桶（aiStyle153，:49278-49314）：11 帧水花后自杀 */
   private fireworkUpdate(game: GameHooks): void {
     const isRocket = this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket';
+    // ---- ★通用湿段（:16903-17113,共享体;tick 头口径同 fixedUpdate 字段块注）----
+    //  烟花三件套逐 id：167-170/415-418/419-422 受段（SetDefaults :2560/:4944/:4952
+    //  均无 ignoreWater 行）,733 马桶豁免（:7718-7727 true@:7724 → 共享体整段门早退）。
+    //  ★寿终拍湿段照跑口径：原版 timeLeft 归零 Kill 在子步环 :17307-17311,湿段
+    //  :16903 同环在前——故置本函数头（--life 早退之前）。
+    const wetIdFw = trapWetProjId(this.kind, this.form);
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      wetIdFw, !!projectileData(wetIdFw)?.ignoreWater);
     if (--this.life <= 0) {
       if (isRocket) this.explodeFirework(game); // timeLeft 45 到点 → Projectile.Kill（:73435）
       else this.dead = true;                    // 喷泉 3600 自然耗尽（马桶由下方 age 分支自杀）
@@ -745,8 +808,11 @@ export class TrapShot extends Entity {
     this.age++;
     const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
     if (isRocket) {
-      this.x += this.vx;
-      this.y += this.vy;
+      // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——aiStyle 34 不在
+      // UpdatePosition 跳过表（:20551）,velocity 场不减只削位移（直积分乘进位移行）
+      const dfFw = projWaterDragFactor(this);
+      this.x += this.vx * dfFw;
+      this.y += this.vy * dfFw;
       // 尾烟（AI_034 :25724-25739）：167-170 每帧 1 粒尘 6；415-418 自 ai[0]>4 起（:25722-25733）
       //（引擎粒子 2 tick 一发节流，视觉近似）
       const trailOk = this.kind === 'fireworkRocket' || this.age > 4;
@@ -1562,18 +1628,25 @@ export class Dart extends Entity {
         // 本仓第 53 号注册位=别的方块)。
         if (st.sandBall) {
           const sst = game.world.store;
-          const below = sst.inBounds(prevTx, prevTy + 1) ? sst.get(prevTx, prevTy + 1) : 0;
-          const below2 = sst.inBounds(prevTx, prevTy + 2) ? sst.get(prevTx, prevTy + 2) : 0;
-          let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
-          const onConveyor = below === T_CONV_L || below === T_CONV_R;   // ★R8 F1:传送带来因单列
-          // ★幽灵保域（2026-09-04 F3b）：支撑判定 = BlockBelowMakesSandFall 三支的
-          //  nactive 门（WorldGen.cs:87880/:87884/:87888;nactive=active&&!致动
-          //  =TileStore.isActive,FallingBlock.blockBelowMakesSandFall（★M13 A-2 单源）
-          //  同口径逐支照抄——裸 type≠0 代读漏幽灵/致动两态）——幽灵格=未激活=下方空
-          //  →不放,防放置即再落（FallingBlock.ts:95-105 同族口径）
-          if (!noPlace && !sst.isActive(prevTx, prevTy + 1)) noPlace = true;
-          else if (!noPlace && !sst.isActive(prevTx, prevTy + 2) && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;
-          else if (!noPlace && below === T_STALAC) noPlace = true;
+          let noPlace = false;
+          let onConveyor = false;
+          // ★A-4（2026-09-04）：flag2 外门 = :79255 `num16 < Main.maxTilesY - 2`——
+          //  世界底部 2 行不进 flag2 扫描（轨道/传送带/沙塌三支整体跳过 → 照常
+          //  PlaceTile;旧实现逐读 inBounds 无此外门,差一行）
+          if (prevTy < sst.h - 2) {
+            const below = sst.inBounds(prevTx, prevTy + 1) ? sst.get(prevTx, prevTy + 1) : 0;
+            noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
+            onConveyor = below === T_CONV_L || below === T_CONV_R;   // ★R8 F1:传送带来因单列
+            // ★幽灵保域（2026-09-04 F3b）+★④（2026-09-04 掉落/沙族批）：支撑判定
+            //  单源化 → FallingBlock.blockBelowMakesSandFall（WorldGen.cs:87868-87893
+            //  1:1,nactive=active∧!致动,三支+早退序同原文）。曾内联第 4 份副本
+            //  （DirtBall/Game/FallingBlock 三份已单源,★M13 A-2）：arm2 用 !isSolid
+            //  （def.solid 域）代 !Main.tileSolid —— tileSolid∧tileSolidTop 九件套
+            //  （19/239/380/427/435-439,Main.cs:10118-10136,含种植箱 380）被漏 →
+            //  沙球落种植箱/平台上被误判"沙塌不放置"（平台病同源）;arm3 裸 type==165
+            //  比对漏 active 门 → 幽灵钟乳石残型误触发。两态按单源闭合。
+            if (!noPlace && blockBelowMakesSandFall(sst, prevTx, prevTy)) noPlace = true;
+          }
           // ★幽灵保域（2026-09-04 F3b）：放置占位门 = :79246
           //  `!Main.tile[num15,num16].active()`（hasTile=纯 active 位）——
           //  幽灵格（flags=0,type≠0）视为空可落格,沙覆盖残型直铺
@@ -2167,7 +2240,7 @@ const T_SAND = TILE_BY_KEY['sand'];
 const T_RAIL = VANILLA_TILE_ID.get(314);          // MinecartTrack
 const T_CONV_L = VANILLA_TILE_ID.get(421);        // ConveyorBeltLeft
 const T_CONV_R = VANILLA_TILE_ID.get(422);        // ConveyorBeltRight
-const T_STALAC = VANILLA_TILE_ID.get(165);        // CaveDecos 钟乳石
+// （T_STALAC 已随 ★④ BBMSF 单源化移除——arm3 钟乳石支归 blockBelowMakesSandFall）
 // 沿途击碎清单（:55106-55136 KillTile）：水晶12/雕像105/钟乳石165/裸露宝石178/
 // 小石堆185/大石堆186-187/魔力水晶639/生命水晶巨石665
 const SHATTER_VANILLA = [12, 105, 165, 178, 185, 186, 187, 639, 665]

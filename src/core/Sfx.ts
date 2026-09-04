@@ -1020,11 +1020,28 @@ export class Sfx {
     const p = (async () => {
       try {
         const override = packSoundOverrides.get(file);
-        const ab = override
-          ? override.slice().buffer
-          : await fetch(`sounds/${file}.wav`).then((r) => (r.ok ? r.arrayBuffer() : null));
-        const decoded = ab ? await ctx.decodeAudioData(ab) : null;
-        if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); this.failedAt.delete(file); return decoded; }
+        if (override) {
+          const decoded = await ctx.decodeAudioData(override.slice().buffer).catch(() => null);
+          if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); this.failedAt.delete(file); return decoded; }
+          this.markFailed(file);
+          return null;
+        }
+        // ★双格式回退(2026-09-04 Opus 兼容报告定案):.opus 主(Safari 桌面全系
+        //  对 Ogg Opus 的 decodeAudioData 仍"部分支持")→ decode 失败/404 →
+        //  .mp3 回退(wav→mp3 96k,全兼容,体积仅原 1/10)。双失败 → 15s 负缓存。
+        for (const ext of ['opus', 'mp3'] as const) {
+          try {
+            const r = await fetch(`sounds/${file}.${ext}`);
+            if (!r.ok) continue;                     // 404 → 下一格式
+            const decoded = await ctx.decodeAudioData(await r.arrayBuffer()).catch(() => null);
+            if (decoded) {
+              this.buffers.set(file, decoded);
+              this.failed.delete(file); this.failedAt.delete(file);
+              return decoded;
+            }
+            // decode 失败(该浏览器不支持此编码)→ 下一格式
+          } catch { /* 网络瞬态 → 下一格式 */ }
+        }
         this.markFailed(file);
         return null;
       } catch {

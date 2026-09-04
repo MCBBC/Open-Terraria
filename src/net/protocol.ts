@@ -92,7 +92,16 @@ export const PROTO_MAGIC = 'SW1';
  *       client 自钳写 ≥9999 封顶输入 = 矩阵退化为恒等;回绕域仅由脏输入可达,接收端按
  *       各自合约清洗（msg117 脏帧整拒,msg44 由被击端本地门禁兜底）。Game.
  *       reportNonPvpPlayerHurt 上游 min(9999)(:2786) 在 Game.ts 属权外未动——实扣
- *       ≤maxHp 下永不绑定,残余为恒等路径。 */
+ *       ≤maxHp 下永不绑定,残余为恒等路径。
+ *    j) ★SW-AM1 2026-09-05（爆炸远端半边值同步,不升版不改线格式——msg44 flags 同
+ *       字节位域按支割离复用,同 d)/h) 先例）：bit7 爆炸支内 bit1=dmgPreRolled——
+ *       rawDmg 语义升级为【发送侧已掷终值】（SelfHurtPlayers :15118 DV+:15131
+ *       sweater cap 在爆炸端算毕,被炸端直读不再掷;vanilla 多人伤害=值同步非种子
+ *       同步,Damage_PVP :14718 owner 掷后 :14747 SendPlayerHurt 值同步同构）。
+ *       enchant 域（bits1-4）仅近战支消费、bit7 帧 bits1-4 恒 0 零撞位;服务器
+ *       room.ts flags 整字节透传,新旧 server 零改动。降级矩阵：旧发端（无位）→
+ *       新收端=基伤本地掷（=改动前行为,逐位）;新发端→旧收端=对已掷值再掷（±15%
+ *       重卷,有界漂移,无权威/崩溃面）。 */
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -179,7 +188,18 @@ export const enum Msg {
                        //   不信任客户端自报）。PvP 命中意向广播。
                        //   flags：bit0=crit / bits1-4=武器浸剂 meleeEnchant / bit5=圣骑士盾转移
                        //   （rawDmg=转移额,被击端独立冷却槽,死因 teamTank）/
-                       //   bit6=狱火光环（rawDmg=20,被击端 per-owner 60t 冷却,死因 inferno）
+                       //   bit6=狱火光环（rawDmg=20,被击端 per-owner 60t 冷却,死因 inferno）/
+                       //   bit7=爆炸意向（explodeAt/scarabBombExplode 广播,任意房放行——
+                       //   服务器 room.ts 仅 bit7 绕 pvpAllowed 门;rawDmg=意向伤）
+                       //   ★SW-AM1 2026-09-05：bit7 支内 bit1 复用为 dmgPreRolled——
+                       //   rawDmg=发送侧已掷终值（SelfHurtPlayers :15118 DV+:15131 sweater
+                       //   cap 爆炸端算毕,收端直读不再掷;vanilla 多人伤害=值同步非种子同步,
+                       //   Damage_PVP :14718 owner 掷后 :14747 SendPlayerHurt 同构）。
+                       //   enchant 域（bits1-4）仅近战支消费、bit7 帧 bits1-4 恒 0,位域按支
+                       //   割离零撞位（同 msg27 kind bit7=hostile 先例）;服务器 flags 整字节
+                       //   透传,新旧 server 均零改动。降级矩阵：旧发端（无位）→新收端=
+                       //   基伤本地掷（=改动前行为逐位）;新发端→旧收端=对已掷值再掷（±15%
+                       //   重卷有界漂移,无权威/崩溃面）。详见 PROTO_VER 注 j)
                        //   权威模型=被打方本地结算（与 msg16 客户端权威 HP 同构）：
                        //   攻击端只报意向，被打端过 InOpposingTeam 门禁后自行结算扣血，
                        //   伪造包最多影响显示、无法强制扣血。武器 id 供死因文案（DeathSource.Player）

@@ -12,6 +12,7 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -44,6 +45,26 @@ export class MagicProj extends Entity {
   drawScale = 1;
   /** 出生态 tick（多帧行帧推进用；联机傀儡不推进 = 帧冻结，同 Arrow.age 语义） */
   private age = 0;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口
+  //  清偿批,MagicProj 接入。四旗/wetCount/presetDone 形状=ProjWetFlags 共享体）----
+  //  本类服务 id 全集：现役 = {0}（兜底圆点;唯一活构造点 Game.ts:3485 net kind4
+  //  重建,projId 走缺省 0——旧 heldDef.magic 直射支 :14342 已成"扣蓝无弹"空壳不再
+  //  出生本类）;构造器第 8 参可携任意 magic id（未来接线自动生效）。豁免 =
+  //  PROJ_IGNORE_WATER 逐 id 自动分流（projectileData 缺行=不豁免=原版缺省 false）。
+  //  魔法多族逐 id 抽验（SetDefaults P.cs:699-10676）：
+  //    · 27 水涛【不】豁免（P.cs:1097-1107 无 ignoreWater 行）→ 入水溅花+湿阻尼
+  //    · 150/151/152 豁免（P.cs:2398-2409 ignoreWater=true）
+  //    · 0 兜底 id：vanilla 无 type 0 出生面,按非豁免通段处理（与"缺行=不豁免"
+  //      口径同向）
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位同液态首测） */
+  presetDone = false;
 
   /** 第 8 参 projId 为可选尾参（缺省 0=圆点）：既有调用点
    *  Game.ts:1024（联机 kind 4 重建）/ :5992（旧 heldDef.magic 直射）零改动兼容。
@@ -113,13 +134,30 @@ export class MagicProj extends Entity {
     return true;
   }
 
+  /** ★通用湿段（:16903-17113——projWetSection.ts 共享体 1:1;段内特支/位序注见
+   *  共享体文件头与本类字段块头。溅花尘/音由共享体调 wetSplashStepShared,不自写） */
+  private wetSection(game: GameHooks): void {
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ★通用湿段（:16903-17113,2026-09-04 溅花缺口清偿批）——原版 Update 位序
+    //   AI(:16880) → 湿段(:16903) → HandleMovement(:17120)。本类 AI 退化=寿命/帧计
+    //   （无湿旗消费者）→ 段插寿命判后/位移前 = 原版同序;湿段测位 = 上拍位移末位
+    //   （原版"AI 后未移动位"同构）。寿命判在头的既有类近似保持不动 → 末拍无位移
+    //   亦无溅花（末拍位不变,溅花无从跃迁——既有位移面近似的一部分,登记不扩）。
+    this.wetSection(game);
     if (--this.life <= 0) { this.dead = true; return; }
     this.age++;
-    this.x += this.vx;
-    this.y += this.vy;
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562
+    //   `if (wet) position += wetVelocity`）——直积分宿主：速度场不减只削当拍位移
+    //   （wetVelocity = velocity×档,velocity 字段本身不被水阻改写）;干态档=1 数值恒等
+    const drag = projWaterDragFactor(this);
+    this.x += this.vx * drag;
+    this.y += this.vy * drag;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }

@@ -627,7 +627,7 @@ export class WhipProj extends Entity {
         // 鞭敌方直伤 debuff（ApplyWhipDebuffs :11067-11090 表驱动 1:1）
         applyWhipDebuffs(this.projId, e as unknown as Record<string, number>);
         // 玩家 buff——tag 链已随 applyTagToNPC 入栈（AddTheBuff ×tagEffectDuration）;
-        // 命中链（case 912/1028 :13981-13992）保持固定 180t 不缩放
+        // 命中链（case 912 起 :13979/case 1028 起 :13990;SW-AJ1 2026-09-05 校准,旧 :13981-13992）保持固定 180t 不缩放
         const hb = WHIP_HIT_BUFF[this.itemId];
         if (hb && owner) owner.whipBuffs[hb] = 180;
         // 伴生召唤出生点 = 被命中敌怪 Center（:13984/:13995 NewProjectile 位置参;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12948/:12959 重锚 1457）

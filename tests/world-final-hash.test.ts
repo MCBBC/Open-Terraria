@@ -40,6 +40,21 @@
 //   9293480:     type 816e0bcf flags 93f048c5 wall 4f89a71f liquid 893afc95
 //   1511931452:  type 1e3fcec8 flags 1e64968d wall cedb77a4 liquid dc75ac81
 //   （批4 review 的 PlantCheck 61/碗锚/FSC 涂格等修复史见 git/批账,此处不再展开）
+//
+// ── ★IIIII153(GFB-E 嫁接收尾)统一时刻再生(2026-09-04 15:2x) ──
+//   9293480:     type 4ce4ffc2 flags e1c7adcd wall 178c5701 liquid 0ec752c3
+//   1511931452:  type 6c4c4c13 flags 7c15b684 wall 2ef6e888 liquid 1b568412
+//   重冻原因:XIII 章(IIIII80)挂账「多车道共享树上终态哈希金标需统一时刻再生,已挂
+//   GFB-E 清账」——R3 基线(08-23)后 09-02..09-04 worldgen 并行落刀数十文件(GFB-A..D/
+//   GFB shimmer/神庙/#97 箱框/CXX palmRangeFrame/IIIII108c ClearTile 幽灵保域/IIIII110b
+//   大屋 no-op 翻案等),终态四数组随之合法漂移。再生前认证(本批仪 tools/_iii153fin
+//   .test.ts,SW_I153_SLOT=105_Final_Cleanup):JS 终态 vs x86 golden-g/105_Final_Cleanup
+//   **八通道零差**(9293480/E0)——终态哈希面=槽链末锚同态,x86 认证;另 mile8 GFB
+//   (golden-gfb-c)103 锚行 8 通道零差同刻复验。注意:-004_PostFinSeed 瞬态是
+//   FinalCleanup pass **中途**锚(cs:22680 FinalizeSecretSeeds 语句尾,CXVII §JJHook
+//   在案),其→105 差(霓虹苔域+液)为该 pass 后半段(ShimmerCleanUp+LiquidCheck
+//   createMergeTilesDuringGen)合法增量,禁作终态对拍基准。共享树在飞:再生值=冻结
+//   时刻快照,后续车道行为面改动会再次合法重触发本门,届时照本注规程再冻。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

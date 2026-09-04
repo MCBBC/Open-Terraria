@@ -151,3 +151,77 @@ describe('BoulderMech（Check2x2 移植）', () => {
     expect(spyConvert).toHaveBeenCalledTimes(1);
   });
 });
+
+// ===========================================================================
+// ★坡域对齐批（2026-09-04）：SolidTileAllowBottomSlope（WorldGen.cs:70698-70716）
+//   收坡 0/3/4（bottomSlope=Tile.cs:302-309）拒顶坡 1/2（topSlope=Tile.cs:292-299）
+//   ——旧实现收 {0,1,2} 拒 {3,4} 为整体倒置。巨石判据 cs:48968-48984。
+// ===========================================================================
+describe('BoulderMech 坡域（SolidTileAllowBottomSlope :70698）', () => {
+  function support(st: ReturnType<typeof mkStore>, x: number, y: number,
+    sheet: number, slope: number, frameX = 0) {
+    const i = st.idx(x, y);
+    st.type[i] = sheet;      // mock 内部 id ≡ sheet
+    st.flags[i] = 1;
+    st.frameX[i] = frameX;
+    st.slope[i] = slope;
+  }
+
+  it('底坡 slope=3（右高左低）支撑 → 巨石可站不释放', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    support(st, 6, 8, 1, 3); support(st, 7, 8, 1, 3);
+    const r = run(st);
+    expect(r.converted).toEqual([]);
+    expect(r.killed).toEqual([]);
+  });
+
+  it('底坡 slope=4 支撑 → 不释放', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    support(st, 6, 8, 1, 4); support(st, 7, 8, 1, 4);
+    const r = run(st);
+    expect(r.converted).toEqual([]);
+  });
+
+  it('顶坡 slope=1 → 拒（释放）', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    support(st, 6, 8, 1, 1); support(st, 7, 8, 1, 1);
+    const r = run(st);
+    expect(r.converted).toEqual([[6, 6, 138]]);
+  });
+
+  it('顶坡 slope=2 → 拒（释放）', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    support(st, 6, 8, 1, 2); support(st, 7, 8, 1, 2);
+    const r = run(st);
+    expect(r.converted).toEqual([[6, 6, 138]]);
+  });
+
+  it('平台（tileSolidTop）slope=0 → 支撑不释放', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    support(st, 6, 8, 11, 0); support(st, 7, 8, 11, 0);   // 11=platform
+    const r = run(st);
+    expect(r.converted).toEqual([]);
+  });
+
+  it('半砖支撑 → 拒（halfBrick 显式排除）', () => {
+    const st = mkStore();
+    const f = fixture(st);
+    f.put4(138);
+    for (const x of [6, 7]) {
+      const i = st.idx(x, 8);
+      st.type[i] = 1; st.flags[i] = 1; st.half[i] = 1;
+    }
+    const r = run(st);
+    expect(r.converted).toEqual([[6, 6, 138]]);
+  });
+});

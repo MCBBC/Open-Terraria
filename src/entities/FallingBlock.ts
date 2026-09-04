@@ -66,6 +66,32 @@ const FALLING_TILE_DROP_ITEM = new Map<number, number>([
   [330, 71], [331, 72], [332, 73], [333, 74], [495, 4090],
 ]);
 
+/** TileID.Sets.Falling（TileID.cs:395 = 53/234/112/116/224/123/330-333/495）原版 sheet 集
+ *  ——弹 411-414 专配第二重碰撞的判集（Projectile.cs:17707-17712）。与 Game.FALLING_TILES
+ *  （本仓 id 域触发集）同源异域：彼按 tile id 入队,此按 sheet 判碰撞。 */
+const FALLING_SHEET_SET = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+/** 弹 411-414 四档 = 钱币堆落弹（GetSandfallProjData :87824-87831 → Kill num17=330-333）。
+ *  ★唯一非实心的 Falling 成员：Main.tileSolid[330-333] 全表无赋值（Main.cs）=decor 格,
+ *  TileCollision 不接 → 无第二重碰撞则落堆穿堆。495 贝壳堆 tileSolid=true（Main.cs:10291）
+ *  /沙族全实心——对本表其余成员第二重碰撞与 TileCollision 合流=无增量。 */
+const COIN_PILE_SHEETS = new Set([330, 331, 332, 333]);
+
+/** WorldGen.AllowsSandfall（WorldGen.cs:87895-87907）1:1：沙格【上方】格拒支门——
+ *  上方 active 且 ∈ 拒支集 → 沙不塌。拒支集 = TileID.Sets.BasicChest{21,467}
+ *  （TileID.cs:315）/ BasicChestFake{441,468}（:317）+ 裸表 {26 恶魔祭坛,77 地狱熔炉,
+ *  80 仙人掌,88 梳妆台,323 棕榈树,470 模特,475 帽架,597 传输晶塔}
+ *  （TileID.cs:489/591/597/613/1083/1377/1387/1631）——TE/整件锚定件不被下方落沙掀飞。
+ *  唯一消费点 = 触发侧 SpawnFallingBlockProjectile（WorldGen.cs:87335,在
+ *  BlockBelowMakesSandFall :87332 之后）——Kill 侧 flag2 的 BBMSF（:79268）不带此门,
+ *  故本助手只接触发侧（Game.drainSandQueue）,不入 blockBelowMakesSandFall 单源。 */
+const SANDFALL_TOP_REJECT_SHEETS = new Set([21, 467, 441, 468, 26, 77, 80, 88, 323, 470, 475, 597]);
+export function allowsSandfall(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y - 1)) return false;                // tileTopCache==null → false（:87898-87900）
+  if (!st.hasTile(x, y - 1)) return true;                  // !active() → 不拒（:87902 result 初值 true）
+  const sheet = TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? -1;
+  return !SANDFALL_TOP_REJECT_SHEETS.has(sheet);           // :87903-87905
+}
+
 export class FallingBlock extends Entity {
   w = 10; h = 10; // 原版 width/height = 10(vanilla-projectiles.json 全沙族一致)
   tileKey: string;
@@ -87,6 +113,9 @@ export class FallingBlock extends Entity {
   private static readonly ZERO_DMG_SHEETS = new Set([330, 331, 332, 333]);
   /** 本块弹的 NewProjectile damage 参数（GetSandfallProjData 按型档,缺省 10） */
   readonly dmg: number;
+  /** 本块是否为钱币堆落弹（弹 411-414 四档=330-333,Projectile.cs:17707-17712
+   *  第二重碰撞唯一受众） */
+  private readonly coinBall: boolean;
 
   constructor(x: number, y: number, tileKey: string) {
     super();
@@ -96,6 +125,7 @@ export class FallingBlock extends Entity {
     const sheet0 = tid0 !== undefined ? TILE_DEFS[tid0]?.vanilla?.sheet : undefined;
     this.dmg = sheet0 !== undefined && FallingBlock.ZERO_DMG_SHEETS.has(sheet0)
       ? 0 : FallingBlock.DAMAGE;
+    this.coinBall = sheet0 !== undefined && COIN_PILE_SHEETS.has(sheet0);
     this.vy = FallingBlock.SPAWN_VY;
   }
 
@@ -106,6 +136,9 @@ export class FallingBlock extends Entity {
     // 上一帧中心格（落地放置格,见下方落地段注释）
     const prevTx = Math.floor((this.x + this.w / 2) / TILE);
     const prevTy = Math.floor((this.y + this.h / 2) / TILE);
+    // AnyCollision 自上方接近门（Collision.cs:2866-2871 `vector3.Y + Height <=
+    //  vector4.Y`）的积分前盒底——钱币堆第二重碰撞（下方 pileLanding 段）用
+    const prevBottom = this.y + this.h;
     this.vy = Math.min(this.vy + FallingBlock.GRAV, FallingBlock.VY_CAP);
     this.x += this.vx;
     this.y += this.vy;
@@ -162,13 +195,44 @@ export class FallingBlock extends Entity {
     //  ★修正史:初版"向上扫第一个空位"→沙抬到草/仙人掌上方悬空叠放(用户实报
     //  "蚁狮沙堆叠在草上/仙人掌断缝");二版把放置条件钉在碰撞格上→中心入实心恒被占
     //  =下落沙【永不落格】的隐性回归;2026-08-25 按上一帧中心格落格。
-    if (st.isSolid(tx, ty) || st.isPlatform(tx, ty)) {
+    // ★③（2026-09-04 幽灵战役掉落/碰撞族）：弹 411-414（钱币堆落弹）专配第二重碰撞
+    //  ——Projectile.cs:17707-17712（aiStyle 10 碰撞链 `else if (type == 411 || 412 ||
+    //  413 || 414)`：TileCollision 后再过 Collision.AnyCollisionWithSpecificTiles(
+    //  TileID.Sets.Falling, evenActuated:true)）。钱币堆 330-333 tileSolid=false
+    //  （Main.cs 全表无 tileSolid[330-333]）→ 无此门则落堆穿堆=堆叠面缺失；有此门：
+    //  自上方接近臂（Collision.cs:2866-2871 `vector3.Y + Height <= vector4.Y` 且扫掠盒
+    //  相交）在【盒底上穿堆格顶】当拍钳到堆顶（result.Y = 堆顶 − 盒底）→ 死亡格=
+    //  堆面上一格 → Kill :79274-79277 PlaceTile(forced) 落在旧堆上=钱币堆逐格堆高。
+    //  几何=原文式：穿越行 r=ceil(积分前盒底/16)（单拍步长 ≤10<16 → 至多一行）,
+    //  触发条件 r*16 ≤ 积分后盒底（等号=原文 <= 贴面即钳）;积分前盒底已越过堆顶
+    //  （嵌入态）→ 自上方臂不触发=穿堆续坠（原文同判）。evenActuated:true = 已致动格
+    //  照接（本仓 hasTile 含致动=同判）;X 侧两臂（Collision.cs:2874-2882）对 vx≡0
+    //  落沙弹（SpawnFallingBlockProjectile :87355 SpeedX=0f,本仓无 vx 写点）不可达=不建;
+    //  Falling 集实心成员（沙/淤泥/贝壳堆 495）与 isSolid 判据合流=无增量。
+    let pileLanding = false;
+    let pileCrossRow = -1;
+    if (this.coinBall) {
+      const cross = Math.ceil(prevBottom / TILE);
+      if (cross * TILE <= this.y + this.h && st.inBounds(tx, cross)) {
+        const csheet = st.hasTile(tx, cross)
+          ? TILE_DEFS[st.type[st.idx(tx, cross)]]?.vanilla?.sheet ?? -1 : -1;
+        if (FALLING_SHEET_SET.has(csheet)) {
+          pileLanding = true;
+          pileCrossRow = cross;
+        }
+      }
+    }
+    if (pileLanding || st.isSolid(tx, ty) || st.isPlatform(tx, ty)) {
       const tid = TILE_BY_KEY[this.tileKey];
-      // 死亡格与钳位中心（掉件锚）:半砖落面 → 死亡格=半砖格本身,钳位中心=面顶+8-5
+      // 死亡格与钳位中心（掉件锚）:半砖落面 → 死亡格=半砖格本身,钳位中心=面顶+8-5;
+      // 钱币堆第二重碰撞落面 → 死亡格=堆面上一格（=积分前中心格,见上）,钳位中心=
+      // 堆顶−5（Collision.cs:2866-2871 result.Y 钳位,DeathRow=穿越行）
       const surfHalf = st.half[st.idx(tx, ty)] !== 0;
       const dtx = surfHalf ? tx : prevTx;
       const dty = surfHalf ? ty : prevTy;
-      const clampCy = surfHalf ? ty * TILE + 8 - this.h / 2 : ty * TILE - this.h / 2;
+      const clampCy = surfHalf ? ty * TILE + 8 - this.h / 2
+        : pileLanding ? pileCrossRow * TILE - this.h / 2
+        : ty * TILE - this.h / 2;
       // num18（Falling 集 tile → 弹型 → num18,见 FALLING_TILE_DROP_ITEM 表注）;
       // 掉件键缺失=静默无掉（与 Game.onProjectileDeath AISTYLE10 支 dropKey 守卫同口径）
       const sheet = tid !== undefined ? TILE_DEFS[tid]?.vanilla?.sheet : undefined;
@@ -178,9 +242,11 @@ export class FallingBlock extends Entity {
         if (dropKey) game.spawnDrop(this.x + this.w / 2, py, dropKey);
       };
       // flag2（:79250-79273）：死亡格下方 active 且（rail ∥ 传送带 ∥ BBMSF;
-      // 三支 vanilla 为并列 if,布尔并集同判）
+      // 三支 vanilla 为并列 if,布尔并集同判）——★A-4（2026-09-04）外门=
+      // :79255 `num16 < Main.maxTilesY - 2`（世界底部 2 行不进 flag2 扫描;
+      // 旧 inBounds 只查 j+1<h,差一行。x 向越界=vanilla null→false,hasTile 同面）
       let flag2 = false;
-      if (st.inBounds(dtx, dty + 1) && st.hasTile(dtx, dty + 1)) {
+      if (dty < st.h - 2 && st.inBounds(dtx, dty + 1) && st.hasTile(dtx, dty + 1)) {
         const bs = st.type[st.idx(dtx, dty + 1)];
         if (bs === T_RAIL || bs === T_CONV_L || bs === T_CONV_R) flag2 = true;
         if (blockBelowMakesSandFall(st, dtx, dty)) flag2 = true;
@@ -192,9 +258,11 @@ export class FallingBlock extends Entity {
           st.setTile(dtx, dty, tid, 0, 0);
           // :79278-79287 放置成功 → 下方半砖/坡面拍平（SlopeTile）——顶坡落面
           //  vanilla 由 AI_010 :59044-59052 先拍;此处为 Kill 尾统一面,两支同效
+          //  ★G1谓词批(2026-09-04)：下格判定=裸 halfBrick()/slope()（:79280 无
+          //  active 门）——曾加 flags 门与 DirtBallProj 无门副本矛盾,统一去门
           if (st.inBounds(dtx, dty + 1)) {
             const bi = st.idx(dtx, dty + 1);
-            if (st.flags[bi] && (st.half[bi] !== 0 || st.slope[bi] !== 0)) st.setSlope(dtx, dty + 1, 0);
+            if (st.half[bi] !== 0 || st.slope[bi] !== 0) st.setSlope(dtx, dty + 1, 0);
           }
           // ★无声（2026-09-03 F5 音效录制定罪）：原版沙落回格【不播任何声音】——
           //  aiStyle 10 Kill 落格支(:79248-79310)无 PlaySound,WorldGen.PlaceTile

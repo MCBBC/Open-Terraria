@@ -31,6 +31,7 @@
 //     （API 档，1456 运行时无消费方——照抄备用）；火把转换
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
+import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
 import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../data/tiles';
 import { RNG } from '../../core/rng';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
@@ -63,6 +64,13 @@ const TILE_ALCH = new Set([82, 83, 84]);
 // Main.tileMoss（= TileID.Sets.Conversion.Moss，TileID.cs:38）
 const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+// WorldGen.GetTileMossColor（WorldGen.cs:82492-82523）：苔/苔砖 11 对 → 色序号
+// 0..10（184 苔藓植物 frameX = 22×序号,TileFrame case 184 cs:86449-86488）;域外 -1
+const MOSS_COLOR_OF = new Map<number, number>([
+  [179, 0], [512, 0], [180, 1], [513, 1], [181, 2], [514, 2], [182, 3], [515, 3],
+  [183, 4], [516, 4], [381, 5], [517, 5], [534, 6], [535, 6], [536, 7], [537, 7],
+  [539, 8], [540, 8], [625, 9], [626, 9], [627, 10], [628, 10],
+]);
 // TileID.Sets.Conversion.*（TileID.cs:14-36）
 const CONV_JUNGLE_GRASS = new Set([60, 661, 662]);
 const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
@@ -161,10 +169,36 @@ export interface EvolutionHost {
    *  荆棘清除门（overgroundTile 链首支：场上无存活世纪之花 → KillTile）。缺省 undefined
    *  = 场上无世纪之花（原版无 NPC 同相,荆棘照清）。 */
   anyPlantera?: () => boolean;
+  /** ★⑤（2026-09-04 掉落族批）：演化域 kill 位次的 KillTile 掉落出口（宿主实现=
+   *  Game 侧 vid→物品键→spawnDrop,盒锚 (x*16,y*16)）。缺省 = 无掉落且整面跳过
+   *  （离线测试零掷签零流差）。 */
+  spawnKillDrop?: (vid: number, x: number, y: number, stack: number) => void;
+  /** KillTile_GetTreeDrops :66744-66746 最近玩家选中物品 axe（:66745 单机=本地手持）。 */
+  selectedAxePower?: () => number;
+  /** SpecialSeedFeatures.ShouldDropExtraWood（SpecialSeedFeatures.cs:15-24 =
+   *  tenth && drunk && !remix && !ntb）缺的两侧——drunkWorld/remixWorld 上已有 */
+  tenthAnniversary?: boolean;
+  notTheBees?: boolean;
   /** 世界种子（NB-F：蔓延专用持久流 = 原版 Main.SwapRandom("UpdateWorldGen") 的
    *  `new UnifiedRandom(ActiveWorldFileData.Seed)`，Main.cs:3300-3312——跨 tick
    *  持续、每 tick 不重置）。缺省 0 = 离线测试兜底（同样确定性）。 */
   seed?: number;
+  /** ★②（2026-09-05 kill 掉落面扩展批）：KillTile_GetItemDrops 玩家位门/骰的宿主出口
+   *  （原版 GetPlayerForTile(x,y)=Player.FindClosest 最近玩家,单机=本地玩家;缺省
+   *  false = 原版"无玩家/无饰品"态——离线测试零掉落零骰）。
+   *  · playerHasItem = Player.HasItem（背包全扫）——KillTile_ShouldDropSeeds
+   *    （cs:66688-66698）的 281 吹管/986 吹枪持有判（种子是弹药）;
+   *  · playerCordage =饰品 3068 植物纤维绳索宝典装备位（Player.cs:15125 UpdateEquips,
+   *    case 52/62/382 藤绳 2996 的 GetPlayerForTile.cordage 门）;
+   *  · alchemyHarvestable = IsAlchemyPlantHarvestable（cs:66647-66669,case 83/84
+   *    种子臂;Game 侧同型谓词已移植,经此注入）;
+   *  · playerStaffOfRegrowthBonus = Player.cs:41360/:45021 持杖（213/5295）挥动帧瞬态
+   *    ——演化 kill 位次无可达 true 态（挥杆砍取走 Game 侧 breakTile 面）,Game 侧
+   *    接线取其 _staffHarvestBonus 同型位（右键采收窗,近似度登记）。 */
+  playerHasItem?: (vid: number) => boolean;
+  playerCordage?: () => boolean;
+  alchemyHarvestable?: (style: number, y: number) => boolean;
+  playerStaffOfRegrowthBonus?: () => boolean;
 }
 
 export class WorldEvolution {
@@ -254,17 +288,229 @@ export class WorldEvolution {
     //   active 判（行为不变），此门防新增调用点误杀残型（此前以 type!==0 代 active 位,
     //   幽灵格会连残型一起清=KillTile 语义外的硬清）。
     if (!st.inBounds(x, y) || !st.hasTile(x, y)) return;
+    // ★⑤（2026-09-04 掉落族批）：KillTile 掉落面——原版 DropBait/DropItems
+    //   （cs:64375-64376）在清格（:64430 tile.type=0）前跑,帧/基座须读活格。
+    this.killDropFace(x, y);
     st.setTile(x, y, 0);
     // ★W2 级联：原版 KillTile 尾 SquareTileFrame(i,j)（cs:64432）→ 3×3 TileFrame
     //   派发 Check 族——锚定物被移除后依存物连锁拆除
     this.frameDependents(x, y);
   }
-  /** WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0 */
+
+  /** ★⑤（2026-09-04 掉落族批,★② 2026-09-05 扩展）：kill 位次的 KillTile 掉落面 =
+   *  KillTile_GetItemDrops（cs:64477 起 switch(tileCache.type)）在本域可达型的逐支
+   *  移植。可达性（演化域 kill()/级联 killFlat 的全部杀位次 × case 表）：
+   *   · 树干族 5/596/616/634（cs:65730-65745 → KillTile_GetTreeDrops :66710-66768,
+   *     getTreeTypeAndTreeBottom@TreeShake.ts 单源）：dropItem=9 起步；冠/枝标记帧
+   *     （frameX>=22 && frameY>=198）掷 genRand.Next(2)==0 → TreeTypeDropsAcorns
+   *     （:63621-63627 None/Mushroom/Jungle 外）附橡实 27；树型按基座草族换木
+   *     （Ash 5215/Corrupt 619/Crimson 911/Jungle 620/Hallowed 621/Mushroom
+   *     genRand.Next(2)→183|0/Snow 2503）；**斧骰无条件**（cs:66763-66768 在树型
+   *     switch 之后——genRand.Next(35)<=最近玩家 axe || Main.rand.Next(3)==0 → stack
+   *     1→2,蘑菇 0 木档照掷=骰位保真）；ShouldDropExtraWood（tenth&&drunk&&!remix
+   *     &&!ntb）& dropIsWood → stack ×2（cs:65742）。
+   *   · 棕榈 323（cs:65748-65778）：木 2504 起步;tenth → stack += genRand.Next(2,5)
+   *     （蔓延流骰）;frameX∈[88,132] → 附橡实 27;向下扫首个实心基座——猩红沙 234→911 /
+   *     珍珠沙 116→621 / 黑檀沙 112→619（其余保 2504）;ShouldDropExtraWood → ×3（无
+   *     dropIsWood 门,原文如斯）。
+   *   · 宝石树 583-589（cs:66219-66262 → SetGemTreeDrops :66614-66624）：
+   *     Main.rand.Next(10)==0 → 宝石（589:999 琥珀/584:181 红玉/583:180 绿玉/
+   *     586:179 蓝玉/585:177 紫晶/587:178 黄晶/588:182 钻石）else 泥土 3;冠帧
+   *     （fx>=22 && fy>=198）Main.rand.Next(2)==0 → 附宝石树种（4851-4857）;
+   *     掉泥土档 stack = Main.rand.Next(1,3)。
+   *   · 蘑菇族 71/72（cs:66163-66172）：Main.rand.Next(40)==0 → 194 发光蘑菇
+   *     else Next(2)==0 → 183 蘑菇（71 小株经 PlantCheck 级联、72 树经 case 72 坍塌）。
+   *   · 仙人掌 80（cs:65232）→ 276（水淹 SlowlyDiesInWater cs:72761 区可达）。
+   *   · 草族 3/24/110/201/73（cs:65506/:65534/:65528/:65540/:65546）：蘑菇株帧
+   *     （3/110@fx144→5、24@fx144→60、201@fx270→2887）;3/73 种子臂
+   *     KillTile_ShouldDropSeeds（cs:66688：Main.rand.Next(2)==0 且最近玩家有 281/986）。
+   *   · 丛林株 61/74（cs:66142-66161）：61@fx144→331×Next(2,4) / @fx162→223 /
+   *     @fx108-126→Next(20)==0→208 / else Next(100)==0→195（74 只走末支）。
+   *   · 药草 83/84（cs:66194-66213）：草 313+style（style6→2358）;再生法杖加成位
+   *     （GetPlayerForTile.staffOfRegrowthBonus）→ 草 ×Next(1,3)+种子 307+style
+   *     （style6→2357）×Next(1,6);否则 IsHarvestableHerbWithSeed（84 恒真/83 走
+   *     IsAlchemyPlantHarvestable）→ 种子 ×Next(1,4)。82 芽∈no-drop 组（cs:66291）。
+   *   · 藤 52/62/382（cs:65552-65558）：Main.rand.Next(2)==0 且 cordage → 2996;
+   *     528 蘑菇藤（cs:65522-65527）：genRand.Next(2)==0 → 183。
+   *   · 637 灰烬株（cs:65490）：Main.rand.Next(100)==0 → 5214。
+   *   · 不可达/零掉面（登记,不设 case）：655 荆棘∈no-drop 组（cs:66580）、595/615 苗、
+   *     529/530/549/518/32/352/69/205/636/638/184/113 均属 no-drop 大组（cs:66360-66586
+   *     裸 break）=原版本就不掉;51 蛛网（case 51→150,cs:65193）/227 染料（cs:65563）/
+   *     519 香蒲（cs:65516）/泥土·苔藓族（case 0/2/109/…→2、633→172、moss→3）在本域
+   *     无 kill 位次（演化杀位次清单见上）;KillTile_DropBait（cs:66777 蠕虫/蜗牛/蚱蜢
+   *     genRand 骰面,til 3/73/637/61/74/62/185-187/233）未接=登记（Game 侧
+   *     killTileDropBait 已覆盖玩家破坏面）。
+   *  掷签流归属：genRand 骰=本域蔓延流（UpdateWorld 期 WorldGen.genRand ⇒
+   *  SwapRandom("UpdateWorldGen") 命名流,this.rng()）；Main.rand 骰=宿主全局流
+   *  （Math.random,Game.killTileDropItems 同口径——不占蔓延流位）。各 case 内骰序
+   *  =原文序。宿主无出口（离线测试）→ 整面跳过=零掷签零流差。 */
+  private killDropFace(x: number, y: number): void {
+    const host = this.host;
+    if (!host.spawnKillDrop) return;
+    const st = host.store;
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    const sheet = sheetOf(st.type[i]);
+    const fx = st.frameX[i];
+    const fy = st.frameY[i];
+    const drop = (vid: number, stack = 1): void => {
+      if (vid > 0) host.spawnKillDrop!(vid, x, y, stack);
+    };
+    switch (sheet) {
+      case 5:
+      case 596:
+      case 616:
+      case 634: {
+        const tt = getTreeTypeAndTreeBottom(st, x, y);        // :63093-63105（清格前读活格）
+        let vid = 9;
+        let acorns = false;
+        if (fx >= 22 && fy >= 198 && this.rng() < 0.5) {      // :66712-66727 冠/枝帧 50% 掷
+          acorns = tt.type !== TreeTypes.None && tt.type !== TreeTypes.Mushroom
+            && tt.type !== TreeTypes.Jungle;                  // TreeTypeDropsAcorns :63621
+        }
+        switch (tt.type) {                                    // :66745-66762 树型换木
+          case TreeTypes.Ash: vid = 5215; break;
+          case TreeTypes.Corrupt: vid = 619; break;
+          case TreeTypes.Crimson: vid = 911; break;
+          case TreeTypes.Jungle: vid = 620; break;
+          case TreeTypes.Hallowed: vid = 621; break;
+          case TreeTypes.Mushroom: vid = this.rng() < 0.5 ? 183 : 0; break;   // :66754-66761
+          case TreeTypes.Snow: vid = 2503; break;
+          default: break;
+        }
+        // :66763-66768 斧骰无条件（dropItem=0 蘑菇档照掷——骰位在树型 switch 之后）
+        const axe = host.selectedAxePower?.() ?? 0;
+        const bonus = Math.floor(this.rng() * 35) <= axe      // genRand.Next(35)<=axe
+          || Math.floor(Math.random() * 3) === 0;             // || Main.rand.Next(3)==0（全局流）
+        let stack = bonus ? 2 : 1;                            // dropItemStack 1+bonus（:65736-65738）
+        if (host.tenthAnniversary && host.drunkWorld && !host.remixWorld
+          && !host.notTheBees) stack *= 2;                    // ShouldDropExtraWood & dropIsWood（:65742）
+        drop(vid, stack);                                     // :64473 if(dropItem>0)
+        if (acorns) drop(27);                                 // secondaryItem 27 ×1（:64478 默认 stack 1）
+        break;
+      }
+      case 323: {                                             // cs:65748-65778 棕榈
+        let stack = 1;
+        if (host.tenthAnniversary) stack += 2 + Math.floor(this.rng() * 3);   // genRand.Next(2,5)
+        let secondary = false;
+        if (fx >= 88 && fx <= 132) secondary = true;          // secondaryItem 27（frameX∈[88,132]）
+        // 向下扫首个实心基座（cs:65763-65766 `for(j=y; !active||!tileSolid[type]; j++)`）
+        let vid = 2504;
+        for (let gy = y; gy < st.h; gy++) {
+          if (!st.hasTile(x, gy)) continue;
+          const d = TILE_DEFS[st.type[st.idx(x, gy)]];
+          if (d?.solid) {
+            const gs = sheetOf(st.type[st.idx(x, gy)]);
+            if (gs === 234) vid = 911;
+            else if (gs === 116) vid = 621;
+            else if (gs === 112) vid = 619;
+            break;
+          }
+        }
+        if (host.tenthAnniversary && host.drunkWorld && !host.remixWorld
+          && !host.notTheBees) stack *= 3;                    // ShouldDropExtraWood（:65776-65778,无门 ×3）
+        drop(vid, stack);                                     // 主件先出（:64476-64479 次序）
+        if (secondary) drop(27);
+        break;
+      }
+      case 589: case 584: case 583: case 586: case 585: case 587: case 588: {
+        // SetGemTreeDrops（cs:66614-66624）——gemType/seedType 按 case 表（cs:66219-66262）
+        const gemPair: Record<number, [number, number]> = {
+          589: [999, 4857], 584: [181, 4852], 583: [180, 4851], 586: [179, 4854],
+          585: [177, 4853], 587: [178, 4855], 588: [182, 4856],
+        };
+        const [gem, seed] = gemPair[sheet];
+        let vid = 3;
+        let seedHit = false;
+        if (Math.floor(Math.random() * 10) === 0) vid = gem;  // Main.rand.Next(10)==0 → 宝石
+        if (fx >= 22 && fy >= 198 && Math.floor(Math.random() * 2) === 0) seedHit = true;   // 冠帧附树种
+        drop(vid, vid === 3 ? 1 + Math.floor(Math.random() * 2) : 1);   // 泥土档 stack=Next(1,3)（:66221-66223）
+        if (seedHit) drop(seed);                              // 次件后出（:64476-64479 次序）
+        break;
+      }
+      case 71:
+      case 72:                                                // cs:66163-66172 蘑菇族
+        if (Math.floor(Math.random() * 40) === 0) drop(194);
+        else if (Math.floor(Math.random() * 2) === 0) drop(183);
+        break;
+      case 80:                                                // cs:65232 仙人掌 → 276
+        drop(276);
+        break;
+      case 3:                                                 // cs:65506-65513
+        if (fx === 144) drop(5);
+        else if (this.shouldDropSeeds()) drop(283);
+        break;
+      case 24:                                                // cs:65534-65539
+        if (fx === 144) drop(60);
+        break;
+      case 110:                                               // cs:65528-65533（无种子支）
+        if (fx === 144) drop(5);
+        break;
+      case 201:                                               // cs:65540-65545
+        if (fx === 270) drop(2887);
+        break;
+      case 73:                                                // cs:65546-65551
+        if (this.shouldDropSeeds()) drop(283);
+        break;
+      case 61:                                                // cs:66142-66161 丛林株
+        if (fx === 144) drop(331, 2 + Math.floor(Math.random() * 2));         // Next(2,4)
+        else if (fx === 162) drop(223);
+        else if (fx >= 108 && fx <= 126) {
+          if (Math.floor(Math.random() * 20) === 0) drop(208);
+        } else if (Math.floor(Math.random() * 100) === 0) drop(195);
+        break;
+      case 74:                                                // cs:66142-66161（61 专帧支全不中→末支）
+        if (Math.floor(Math.random() * 100) === 0) drop(195);
+        break;
+      case 83:
+      case 84: {                                              // cs:66194-66213 药草
+        const style = Math.floor(fx / 18);
+        const herb = style === 6 ? 2358 : 313 + style;
+        const seed = style === 6 ? 2357 : 307 + style;
+        const harvestable = sheet === 84                      // IsHarvestableHerbWithSeed（cs:66627-66645）
+          || !!(host.alchemyHarvestable?.(style, y));
+        if (host.playerStaffOfRegrowthBonus?.() ?? false) {
+          drop(herb, 1 + Math.floor(Math.random() * 2));      // Next(1,3)
+          drop(seed, 1 + Math.floor(Math.random() * 5));      // Next(1,6)
+        } else if (harvestable) {
+          drop(herb);
+          drop(seed, 1 + Math.floor(Math.random() * 3));      // Next(1,4)
+        } else {
+          drop(herb);
+        }
+        break;
+      }
+      case 52:
+      case 62:
+      case 382:                                               // cs:65552-65558 藤 cordage
+        if (Math.floor(Math.random() * 2) === 0 && (host.playerCordage?.() ?? false)) drop(2996);
+        break;
+      case 528:                                               // cs:65522-65527 蘑菇藤（genRand 骰）
+        if (this.rng() < 0.5) drop(183);
+        break;
+      case 637:                                               // cs:65490-65496 灰烬株
+        if (Math.floor(Math.random() * 100) === 0) drop(5214);
+        break;
+      default:
+        break;
+      }
+  }
+
+  /** KillTile_ShouldDropSeeds（cs:66688-66698）：Main.rand.Next(2)==0（全局流,先掷）
+   *  且最近玩家有 281 吹管/986 吹枪（Player.HasItem;种子=弹药）。宿主无出口 → false。 */
+  private shouldDropSeeds(): boolean {
+    if (Math.floor(Math.random() * 2) !== 0) return false;
+    if (this.host.playerHasItem?.(281)) return true;
+    return this.host.playerHasItem?.(986) ?? false;
+  }
+  /** WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0
+   *  && !inActive（WorldGen.cs:70652-70658）。★G1谓词批(2026-09-04)：补致动位半边
+   *  ——原位读漏 !inActive,已致动格被当有效支撑（约 10 消费点随之正确） */
   private solidTile(x: number, y: number): boolean {
     const st = this.host.store;
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
-    if (!st.flags[i]) return false;
+    if (!st.flags[i] || st.isActuated(x, y)) return false;
     const d = TILE_DEFS[st.type[i]];
     return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
   }
@@ -292,14 +538,39 @@ export class WorldEvolution {
   /** 无级联写空（KillTile 的 type 面：setTile(0) 已含 half/slope/漆清位）。
    *  ★RD-F9/F10 配套：头门随原版 KillTile（cs:64043 `!active() → return`）——幽灵
    *  残型格掷而不落（现调用点全在 active 域内=行为不变）。
+   *  ★②（2026-09-05 掉落面扩展批）：本函数升级为 KillTile 默认参等价——清格前走
+   *  killDropFace（原版 :64375-64376 DropBait/DropItems 在 :64430 清格前,帧/基座读活格;
+   *  Check* 级联杀与树坍塌杀的 KillTile 同为默认参=带掉落）。级联传播仍由调用方
+   *  （frameDependents 队列 / kill() 尾派发）显式续接,此处不重入。
    *  @returns 是否真的发生了击杀 */
   private killFlat(x: number, y: number): boolean {
     const st = this.host.store;
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
     if (!st.hasTile(x, y)) return false;
+    this.killDropFace(x, y);
     st.setTile(x, y, 0);
     return true;
+  }
+
+  /** KillTile(noItem:true) 等价（原版覆写位次零掉落：PlaceJunglePlant cs:48242 /
+   *  PlaceOasisPlant cs:47994 均 `KillTile(k,l,false,false,noItem:true)`;
+   *  AttemptToGeneratePlanteraBulbAt force 支 cs:74788-74830 为 ClearTile+SquareTileFrame
+   *  ——同为无掉落）。级联（KillTile 尾 SquareTileFrame cs:64432）照走。
+   *  @returns 是否真的发生了击杀 */
+  private killFlatNoItem(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y)) return false;
+    if (!st.hasTile(x, y)) return false;
+    st.setTile(x, y, 0);
+    return true;
+  }
+
+  /** KillTile(noItem:true) 全位次（清格 + SquareTileFrame 级联,零掉落）——覆写放置族
+   *  （placeJunglePlant/placeOasisPlant/attemptBulbAt）专用入口（★②：掉落面扩展后,
+   *  这些原版 noItem 位次若续走 kill() 会对被覆写株凭空掉落=偏差）。 */
+  private killNoItem(x: number, y: number): void {
+    if (this.killFlatNoItem(x, y)) this.frameDependents(x, y);
   }
 
   /** 锚定物变更后派发 3×3 依存物复检（含中心格）。 */
@@ -327,6 +598,12 @@ export class WorldEvolution {
   }
 
   /** 单格依存物复检（TileFrame 派发面子集；vanilla 活性门=各 Check 自带）。
+   *  ★①（2026-09-05 树坍塌批）：补 TileFrame 帧重要块 default 支的树干族 case
+   *  （cs:87146-87195）——case 5→CheckTree / 583-589→GemTreeGroundTest /
+   *  596·616→VanityTreeGroundTest / 634→AshTreeGroundTest / 323→CheckPalmTree /
+   *  72→case 72 内联。同支的 567 守望矮人/630·631 驱虫剂/723·724 锚桩三 case
+   *  非树干族,不在本批（登记）。case 80 仙人掌 CheckCactus（cs:54579,派发
+   *  cs:82646）=同派发面另一族,亦登记未接。
    *  @returns 本格是否被杀（级联继续扩散） */
   private killDependentAt(x: number, y: number): boolean {
     const st = this.host.store;
@@ -338,6 +615,18 @@ export class WorldEvolution {
     if (IS_VINE.has(sh)) return this.vineCheckAt(x, y);      // CheckVines IsVine 全族
     if (sh === 184) return this.mossCheckAt(x, y);           // 长苔藓 case 184
     if (sh === 518) return this.checkLilyPad(x, y);          // 睡莲 case 518
+    if (sh === 5) return this.treeCheckAt(x, y);             // case 5 → CheckTree（cs:87152-87154）
+    if (sh === 72) return this.mushroomTreeCheckAt(x, y);    // case 72 内联（cs:87106-87140）
+    if (sh === 323) return this.palmCheckAt(x, y);           // case 323 → CheckPalmTree（cs:87191）
+    if (sh >= 583 && sh <= 589) {                            // cs:87155-87163 宝石树族
+      return this.treeCheckSettingsAt(x, y, 'gem');
+    }
+    if (sh === 596 || sh === 616) {                          // cs:87164-87176 景观树族
+      return this.treeCheckSettingsAt(x, y, 'vanity');
+    }
+    if (sh === 634) {                                        // cs:87177-87183 灰烬树
+      return this.treeCheckSettingsAt(x, y, 'ash');
+    }
     return false;
   }
 
@@ -356,8 +645,10 @@ export class WorldEvolution {
   }
 
   /** PlantCheck（cs:81818）：下格地基失配 → TryGetNewType 换型（腐化过境变型，原版
-   *  不杀）/ 无法变型即杀。703 特支（cs:81847-81853）：下方须 SolidTileAllowBottomSlope。 */
-  private plantCheckAt(x: number, y: number): boolean {
+   *  不杀）/ 无法变型即杀。703 特支（cs:81847-81853）：下方须 SolidTileAllowBottomSlope。
+   *  ★②（2026-09-05）：noItem 位次（sanitizePlants=读档/导入期清整,原版
+   *  isGeneratingOrLoadingWorld → KillTile 强制 noItem,cs:64057-64059）零掉落。 */
+  private plantCheckAt(x: number, y: number, noItem = false): boolean {
     const st = this.host.store;
     const sheet = sheetOf(this.typeAt(x, y));
     // PlantCheck down 判据（cs:81838-81844）：下格 nactive+非半砖+slope==0 才认地基
@@ -369,7 +660,9 @@ export class WorldEvolution {
       }
     }
     if (sheet === 703) {
-      if (!this.solidTileAllowBottomSlope(x, y + 1)) return this.killFlat(x, y);
+      if (!this.solidTileAllowBottomSlope(x, y + 1)) {
+        return noItem ? this.killFlatNoItem(x, y) : this.killFlat(x, y);
+      }
       return false;
     }
     if (!plantBadMatch(down, sheet)) return false;
@@ -382,7 +675,7 @@ export class WorldEvolution {
         return false;
       }
     }
-    return this.killFlat(x, y);
+    return noItem ? this.killFlatNoItem(x, y) : this.killFlat(x, y);
   }
 
   /** CheckAlch（cs:46371）锚定面：下格 nactive 失效/半砖/类型表失配/自身岩浆 → 杀。
@@ -553,6 +846,199 @@ export class WorldEvolution {
     return false;
   }
 
+  // ================= ① 树坍塌级联（TileFrame 帧重要块 default 支树干族,2026-09-05） =================
+  //  原版链：KillTile 尾 SquareTileFrame(i,j)（cs:64432）→ TileFrame 3×3 → 树干族
+  //  case（cs:87146-87195）——任意树格失基（下方亡）/失续（侧接帧亡）→ KillTile
+  //  （killFlat 带掉落面=逐格掉木）→ 本域由 frameDependents 队列显式续推 3×3
+  //  （=原版 KillTile→SquareTileFrame→TileFrame 的递归面,树干向上爬+已清格
+  //  hasTile 头门终止,无死循环）。掷骰核：CheckTree/CheckTreeWithSettings 全支
+  //  无掷（帧重锚=确定性算术）;CheckPalmTree 重锚 genRand.Next(7,10)（cs:54851,
+  //  杀臂后 frameX=-1 ≤44 照掷=原版字面）;case 72 重锚 genRand.Next(3)（cs:87117）。
+  //  重锚尾的 4 邻 TileFrame 重派发（cs:54872-54876/:55007-55011/:55244-55248）省略
+  //  =等价：杀臂只读邻格 type 与自身帧型,重锚输出（0/66/88/110/132/154）永不落入
+  //  杀臂帧型（22/44/66+{0,22,44}/88+{66,88,110}）且邻格 type 不因重锚变化 → 杀集
+  //  不变;杀后重派发与 KillTile 自身 SquareTileFrame 3×3 重合;棕榈/72 的骰臂帧收敛
+  //  （重锚后 frameX>44 / ≠0）→ 骰位不增不减。
+
+  /** CheckTree（cs:55045-55249,case 5 派发）：地基=草族归一表 → 2（cs:55083-55106）。 */
+  private treeCheckAt(x: number, y: number): boolean {
+    return this.treeCheckCore(x, y, false, () => false);
+  }
+
+  /** CheckTreeWithSettings（cs:54877-55043）：宝石 583-589/景观 596·616/灰烬 634 派发
+   *  （cs:87155-87183）,地基谓词=GemTreeGroundTest（cs:30585,Conversion.Stone∪Moss）/
+   *  VanityTreeGroundTest（cs:30598,Conversion.Grass-{23,199}）/AshTreeGroundTest
+   *  （cs:30611,633）。 */
+  private treeCheckSettingsAt(x: number, y: number, ground: 'gem' | 'vanity' | 'ash'): boolean {
+    return this.treeCheckCore(x, y, true, (below: number) => {
+      if (below < 0) return false;                          // 三测试共通头门（:30587/:30600/:30613）
+      if (ground === 'gem') return CONV_STONE.has(below) || TILE_MOSS.has(below);
+      if (ground === 'vanity') return CONV_GRASS.has(below) && below !== 23 && below !== 199;
+      return below === 633;
+    });
+  }
+
+  /** CheckTree / CheckTreeWithSettings 合流核（两函数逐臂对照仅四点异：地基判据
+   *  flag vs 归一 num4==2、臂 4 杀后续写 vs else-if、尾臂 num4==23 附加支、对角
+   *  四读(无消费)——其余臂完全同构,且 WithSettings 的 flag3=左/flag2=右 与 CheckTree
+   *  裸 num2=左/num3=右 一一对应）。@returns 是否被杀（队列续推） */
+  private treeCheckCore(x: number, y: number, settings: boolean,
+    groundValid: (belowSheet: number) => boolean): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const type = sheetOf(st.type[i]);
+    const fx0 = st.frameX[i];
+    const fy0 = st.frameY[i];
+    let fx = fx0;
+    let fy = fy0;
+    const num = this.active(x, y - 1) ? sheetOf(this.typeAt(x, y - 1)) : -1;      // 上（cs:54887-54890/:55056-55059）
+    const num2 = this.active(x - 1, y) ? sheetOf(this.typeAt(x - 1, y)) : -1;     // 左
+    const num3 = this.active(x + 1, y) ? sheetOf(this.typeAt(x + 1, y)) : -1;     // 右
+    const raw4 = this.active(x, y + 1) ? sheetOf(this.typeAt(x, y + 1)) : -1;     // 下
+    let num4: number;
+    let flag: boolean;
+    if (settings) {
+      num4 = raw4;
+      flag = groundValid(raw4);                           // cs:54894 settings.IsGroundValid(num4)
+    } else {
+      // CheckTree 地基归一（cs:55083-55106）：草族全表 → 2
+      num4 = (raw4 === 2 || raw4 === 23 || raw4 === 661 || raw4 === 477 || raw4 === 60
+        || raw4 === 70 || raw4 === 109 || raw4 === 147 || raw4 === 199 || raw4 === 662
+        || raw4 === 492) ? 2 : raw4;
+      flag = num4 === 2;
+    }
+    const flag2 = num3 === type;                          // cs:54895（右）
+    const flag3 = num2 === type;                          // cs:54896（左）
+    let killed = false;
+    const kill = (): void => {
+      if (this.killFlat(x, y)) {
+        killed = true;
+        fx = -1; fy = -1;                                 // KillTile 清帧（cs:64428-64429 frameX/Y=-1）
+      }
+    };
+    // 杀臂 1（cs:54897-54901 WithSettings / cs:55107-55111 CheckTree）
+    if (!flag && num4 !== type
+      && ((fx === 0 && fy <= 130) || (fx === 22 && fy <= 130) || (fx === 44 && fy <= 130))) {
+      kill();
+    }
+    // 杀臂 2（cs:54903-54912 / cs:55112-55122）——臂 3 是它的 else-if
+    if (fx >= 22 && fx <= 44 && fy >= 132 && fy <= 176) {
+      if (!flag) kill();
+      else if (!((fx === 22) && flag3) && !((fx === 44) && flag2)) kill();
+    } else if ((fx === 88 && fy >= 0 && fy <= 44) || (fx === 66 && fy >= 66 && fy <= 130)
+      || (fx === 110 && fy >= 66 && fy <= 110) || (fx === 132 && fy >= 0 && fy <= 176)) {
+      const num5 = fy % 66;                               // cs:54916 / cs:55125
+      if (flag3 && flag2) { fx = 110; fy = 66 + num5; }
+      else if (flag3) { fx = 88; fy = num5; }             // cs:54920-54923（左接续帧）
+      else if (flag2) { fx = 66; fy = 66 + num5; }        // cs:54924-54927（右接续帧）
+      else { fx = 0; fy = num5; }
+    }
+    // 杀臂 4（cs:54938-54964 WithSettings=else-if 链 / cs:55147-55174 CheckTree=杀后续写）
+    if (fy >= 132 && fy <= 176 && (fx === 0 || fx === 66 || fx === 88)) {
+      const num6 = fy % 66;
+      const reframe = (): void => {
+        if (num2 !== type && num3 !== type) { fx = 0; fy = num6; }
+        else if (num2 !== type) { fx = 0; fy = 132 + num6; }
+        else if (num3 !== type) { fx = 66; fy = 132 + num6; }
+        else { fx = 88; fy = 132 + num6; }
+      };
+      if (settings) {
+        if (!flag) kill();
+        else reframe();
+      } else {
+        if (num4 !== 2) kill();
+        if (!killed) reframe();                           // CheckTree 杀后续写=原版字面（死格写,本仓跳过）
+      }
+    }
+    // 杀臂 5（cs:54966-54979 / cs:55175-55192）——两函数在 5a/5b 的左右判镜像同构
+    if ((fx === 66 && (fy === 0 || fy === 22 || fy === 44))
+      || (fx === 44 && (fy === 198 || fy === 220 || fy === 242))) {
+      if (!flag2) kill();                                 // 5a：右邻失续（cs:54968/cs:55177）
+    } else if ((fx === 88 && (fy === 66 || fy === 88 || fy === 110))
+      || (fx === 66 && (fy === 198 || fy === 220 || fy === 242))) {
+      if (!flag3) kill();                                 // 5b：左邻失续（cs:54975/cs:55184）
+    } else if (num4 === -1 || (!settings && num4 === 23)) {
+      kill();                                             // 5c：下方亡（cs:54980/cs:55189——23 支系归一后死码,照抄）
+    } else if (num !== type && fy < 198 && ((fx !== 22 && fx !== 44) || fy < 132)) {
+      // 5d 干身重锚（cs:54984-55028 / cs:55193-55236）
+      const num7 = fy % 66;
+      if (flag3 || flag2) {
+        if (num4 === type) {
+          if (flag3 && flag2) { fx = 132; fy = 132 + num7; }
+          else if (flag3) { fx = 132; fy = num7; }
+          else if (flag2) { fx = 132; fy = 66 + num7; }
+        } else if (flag3 && flag2) { fx = 154; fy = 132 + num7; }
+        else if (flag3) { fx = 154; fy = num7; }
+        else if (flag2) { fx = 154; fy = 66 + num7; }
+      } else {
+        fx = 110; fy = num7;
+      }
+    }
+    if (!killed && (fx !== fx0 || fy !== fy0)) {
+      st.frameX[i] = fx;
+      st.frameY[i] = fy;
+    }
+    return killed;
+  }
+
+  /** CheckPalmTree（cs:54821-54877,case 323 派发 cs:87191）：棕榈单格整树——下格
+   *  沙族归一（234/116/112→53,cs:54834-54847）失配即杀;frameX 66/220 特支（顶段
+   *  沙门）;上邻异型重锚掷 genRand.Next(7,10)（cs:54851,杀臂后 -1≤44 照掷=原版字面）。 */
+  private palmCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const type = sheetOf(st.type[i]);
+    const fx0 = st.frameX[i];
+    const fy0 = st.frameY[i];
+    let fx = fx0;
+    let fy = fy0;
+    const num = this.active(x, y - 1) ? sheetOf(this.typeAt(x, y - 1)) : -1;      // 上（cs:54828-54831）
+    let num2 = this.active(x, y + 1) ? sheetOf(this.typeAt(x, y + 1)) : -1;       // 下
+    if (num2 === 234 || num2 === 116 || num2 === 112) num2 = 53;                  // cs:54834-54847
+    let killed = false;
+    if (num2 !== 53 && num2 !== type) {
+      if (this.killFlat(x, y)) { killed = true; fx = -1; fy = -1; }
+    }
+    if ((fx === 66 || fx === 220) && num2 !== 53) {                               // cs:54848-54851
+      if (this.killFlat(x, y)) { killed = true; fx = -1; fy = -1; }
+    }
+    if (num !== type && fx <= 44) fx = (7 + Math.floor(this.rng() * 3)) * 22;     // genRand.Next(7,10)
+    else if (num !== type && fx === 66) fx = 220;                                 // cs:54854-54856
+    if (!killed && (fx !== fx0 || fy !== fy0)) {
+      st.frameX[i] = fx;
+      st.frameY[i] = fy;
+    }
+    return killed;
+  }
+
+  /** TileFrame case 72 内联（cs:87106-87140 蘑菇树）：下格 ∉{72,70} → 杀（整树
+   *  单列坍塌面）;上邻异型且 frameX==0 → 重锚掷 genRand.Next(3)（frameX=18,
+   *  frameY=0/18/36）。 */
+  private mushroomTreeCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const i = st.idx(x, y);
+    const type = sheetOf(st.type[i]);
+    const fx0 = st.frameX[i];
+    const fy0 = st.frameY[i];
+    let fx = fx0;
+    let fy = fy0;
+    const num12 = this.active(x, y - 1) ? sheetOf(this.typeAt(x, y - 1)) : -1;    // 上（cs:87109-87114）
+    const num11 = this.active(x, y + 1) ? sheetOf(this.typeAt(x, y + 1)) : -1;    // 下
+    let killed = false;
+    if (num11 !== type && num11 !== 70) {
+      if (this.killFlat(x, y)) { killed = true; fx = -1; fy = -1; }
+    } else if (num12 !== type && fx === 0) {                                      // cs:87117-87131
+      const num13 = Math.floor(this.rng() * 3);                                   // genRand.Next(3)
+      fx = 18;
+      fy = num13 * 18;
+    }
+    if (!killed && (fx !== fx0 || fy !== fy0)) {
+      st.frameX[i] = fx;
+      st.frameY[i] = fy;
+    }
+    return killed;
+  }
+
   private mechAny(): boolean {
     const f = this.host.flags;
     return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
@@ -585,6 +1071,8 @@ export class WorldEvolution {
   /** 进图一次性植物孤儿清整：全网格按 PlantCheck 处置历史遗留（读档/导入期写入的
    *  非法锚植株——运行时监听只护支撑变化后状态，粘滞件在此收口）。换型用
    *  TryGetNewType 同表；无法变型即静默清除（等价导入期 FinalCleanupPass）。
+   *  ★②（2026-09-05）：noItem=true（原版生成/读档期 isGeneratingOrLoadingWorld →
+   *  KillTile 强制 noItem,cs:64057-64059）——清整零掉落零骰。
    *  O(w·h) 单次线性，flags 先筛实活格，几十 ms 级。 */
   sanitizePlants(): void {
     const st = this.host.store;
@@ -596,7 +1084,7 @@ export class WorldEvolution {
       // PlantCheck 派发族 + 703 特支（与 killDependentAt 同一 single-source：plantCheckAt）
       if (!PLANT_CHECK_SHEETS.includes(sheet) && sheet !== 703) continue;
       const x = i % w, y = Math.floor(i / w);
-      this.plantCheckAt(x, y);
+      this.plantCheckAt(x, y, true);
     }
   }
 
@@ -709,18 +1197,21 @@ export class WorldEvolution {
         }
       }
       if (score < 12) return false;
-      // 清 4×4 + 外环转丛林草（cs:74298-74309）
+      // 清 4×4 + 外环转丛林草（cs:74298-74309）——★②：原版 force 支 = ClearTile+
+      //  SquareTileFrame（:74816-74830）=零掉落位次,走 killNoItem（掉落面扩展后,
+      //  泥/草/株若续走 kill() 会凭空掉泥土=偏差）
       for (let m = -2; m < 2; m++) {
         for (let n = -2; n < 2; n++) {
-          this.kill(i + m, j + n);
+          this.killNoItem(i + m, j + n);
           if (m === -2 || m === 1 || n === -2 || n === 1) this.setType(i + m, j + n, S(60)!);
         }
       }
     } else {
       // 覆写允许族（cs:48238-48245 KillTile noItem）——非活动水格不动（原版同款共存）
+      // ★②：noItem 位次（同上）,零掉落
       for (let dx = -1; dx <= 0; dx++) {
         for (let dy = -1; dy <= 0; dy++) {
-          if (this.active(i + dx, j + dy)) this.kill(i + dx, j + dy);
+          if (this.active(i + dx, j + dy)) this.killNoItem(i + dx, j + dy);
         }
       }
     }
@@ -2122,7 +2613,8 @@ export class WorldEvolution {
     if (near) this.convert(x, y, conv, false, true);
   }
 
-  // ================= 苔藓（Overground/UndergroundTile 同段 cs:72400-72462） =================
+  // ==== 苔藓（UpdateWorld_OvergroundTile tileMoss 支 cs:72946-73003;★A-1 2026-09-04
+  //  换锚——旧注 cs:72400-72462 系 1456 代行号,1457 该区已为 SpawnThunderStorm/雷暴落雷） ====
 
   private mossUpdate(i: number, j: number, minI: number, maxI: number, minJ: number, maxJ: number): void {
     if (this.rng() >= 0.5) return;
@@ -2139,11 +2631,60 @@ export class WorldEvolution {
         }
       }
     }
-    // 藓堆 184（cs:72447-72462）：1/6 随机相邻空格
+    // 藓堆 184（★A-1 2026-09-04 换锚+支级对齐）：掷门=cs:72974 `genRand.Next(6)==0`
+    //  → cs:72978 Next(4) 定向（dirs 序=case 0..3）→ cs:72992 裸 active() 空格门 →
+    //  PlaceTile(184,mute)（cs:72995）：支撑门=四邻 (tileMoss|tileMossBrick)+SolidTile
+    //  （cs:60196-60199/:60205-60208,两支并列=并集;两表并集≡GetTileMossColor 域）→
+    //  写面 frameX=style*18=0/frameY=Next(3)*18（cs:60200-60203）→ PlaceTile 尾
+    //  SquareTileFrame 的 TileFrame case 184（cs:86428-86499）重锚 frameX=22×
+    //  GetTileMossColor(首支苔邻,序=下/上/左/右)+frameY 分带（下0/上54/左108/右162,
+    //  variant*18 ∈[0,36] 恒在带外→恒赋值 base+variant*18）→ cs:72997
+    //  CopyPaintAndCoating(源格)。与原版次序的等同性：TileFrame 重锚只读四邻,与
+    //  本格写面先后无关 → 一次 setTile 直达终态（掷位不增不减=Next(3) 一掷,
+    //  原版 tileMoss/tileMossBrick 双支同过时二掷重写 frameY,分布同形,流域注记）。
     if (this.rng() < 1 / 6) {
       const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
       const [dx, dy] = dirs[Math.floor(this.rng() * 4)];
-      if (!this.active(i + dx, j + dy)) this.place1(i + dx, j + dy, 184, 0, 3);
+      const tx = i + dx, ty = j + dy;
+      if (st.inBounds(tx, ty) && !this.active(tx, ty)) {
+        const actN = (ax: number, ay: number): boolean =>
+          st.inBounds(ax, ay) && st.flags[st.idx(ax, ay)] !== 0;
+        // GetTileMossColor（cs:82492）：苔/苔砖 11 对 → 色序号 0..10,域外 -1
+        const colorAt = (ax: number, ay: number): number => {
+          if (!actN(ax, ay)) return -1;
+          const sh = sheetOf(st.type[st.idx(ax, ay)]);
+          return MOSS_COLOR_OF.get(sh) ?? -1;
+        };
+        // PlaceTile 支撑门（cs:60196-60199∪60205-60208）：任一邻 (苔|苔砖)+SolidTile
+        const mossAnchor = (ax: number, ay: number): boolean =>
+          colorAt(ax, ay) >= 0 && this.solidTile(ax, ay);
+        if (mossAnchor(tx - 1, ty) || mossAnchor(tx + 1, ty)
+          || mossAnchor(tx, ty - 1) || mossAnchor(tx, ty + 1)) {
+          const variant = Math.floor(this.rng() * 3);        // cs:60203 Next(3)*18
+          // TileFrame case 184（cs:86428-86499）：四邻序 下/上/左/右取首支苔邻
+          // （下+!half+!顶坡 cs:86434、上+!底坡 cs:86431、左右裸 active cs:86438-86441）
+          const isTopSlope = (sl: number): boolean => sl === 1 || sl === 2;
+          const isBottomSlope = (sl: number): boolean => sl === 3 || sl === 4;
+          const slopeAt = (ax: number, ay: number): number =>
+            st.inBounds(ax, ay) ? st.slope[st.idx(ax, ay)] : 0;
+          let anchor = colorAt(tx, ty + 1); let bandBase = 0;   // 下邻支（带 [0,36]）
+          if (anchor < 0 || !actN(tx, ty + 1) || st.half[st.idx(tx, ty + 1)] !== 0
+            || isTopSlope(slopeAt(tx, ty + 1))) {
+            anchor = colorAt(tx, ty - 1); bandBase = 54;        // 上邻支（带 [54,90]）
+            if ((anchor < 0 || !actN(tx, ty - 1) || isBottomSlope(slopeAt(tx, ty - 1)))) {
+              anchor = colorAt(tx - 1, ty); bandBase = 108;     // 左邻支（带 [108,144]）
+              if (anchor < 0) { anchor = colorAt(tx + 1, ty); bandBase = 162; }  // 右邻支
+            }
+          }
+          if (anchor >= 0) {
+            st.setTile(tx, ty, S(184), anchor * 22, bandBase + variant * 18);
+            this.frameDependents(tx, ty);                       // PlaceTile 尾 SquareTileFrame
+            // CopyPaintAndCoating(源格)（cs:72997）：paint + invisible/fullbright 两位
+            st.setPaint(tx, ty, st.paint[st.idx(i, j)]);
+            st.setCoat(tx, ty, 2 | 8, st.coat[st.idx(i, j)] & (2 | 8));  // COAT_BLOCK_MASK
+          }
+        }
+      }
     }
   }
 
@@ -2408,9 +2949,10 @@ export class WorldEvolution {
         if (!this.solidTile(X2 + dx, num + 1) || sheetOf(this.typeAt(X2 + dx, num + 1)) !== 60) return false;
       }
       // 覆写允许族（cs:48238-48245 KillTile noItem）——非活动水格不动（原版同款共存）
+      // ★②：noItem 位次零掉落（掉落面扩展后防凭空掉株）
       for (let dx = -1; dx <= 0; dx++) {
         for (let dy = -1; dy <= 0; dy++) {
-          if (this.active(X2 + dx, num + dy)) this.kill(X2 + dx, num + dy);
+          if (this.active(X2 + dx, num + dy)) this.killNoItem(X2 + dx, num + dy);
         }
       }
       const num2 = 36 * styleX;
@@ -2437,7 +2979,8 @@ export class WorldEvolution {
     }
     for (let k = X2 - 1; k < X2 + 2; k++) {
       for (let l = Y2 - 1; l < Y2 + 1; l++) {
-        if (this.active(k, l)) this.kill(k, l);
+        // ★②：cs:48238-48245 同位 noItem（3×2 档覆写）——零掉落
+        if (this.active(k, l)) this.killNoItem(k, l);
       }
     }
     const num6 = 54 * styleX;
@@ -2651,7 +3194,8 @@ export class WorldEvolution {
     if (!this.oasisPlantWaterCheck(X, Y)) return false;
     for (let k = X - 1; k < X + 2; k++) {
       for (let l = Y - 1; l < Y + 1; l++) {
-        if (this.active(k, l)) this.kill(k, l);
+        // ★②：PlaceOasisPlant 覆写 = KillTile noItem（cs:47994）——零掉落
+        if (this.active(k, l)) this.killNoItem(k, l);
       }
     }
     const num3 = 54 * styleRoll;

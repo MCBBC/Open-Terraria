@@ -112,7 +112,17 @@ export function runQuickCleanupPass(st: TileStore, rng: RNG, gs: GenState): void
       }
 
       // (b) 海洋带表面沙下方填土（cs:18009-18022）。Next(4,7) 在条件里=逐判定消耗
-      if (j < gs.worldSurface && oceanDepths(st, gs, i, j) && st.flags[t] === 1 && st.type[t] === SAND) {
+      //   ★IIIII108d（planetoids #70 收官）：cs:18021 四因子门补 `!roundLandmasses`
+      //   因子（原文 `(double)j < Main.worldSurface && oceanDepths(i,j) &&
+      //   !SecretSeed.roundLandmasses.Enabled && tile.type==53 && tile.active()`）——
+      //   planetoids 世界整段 (b) 跳过（海洋沙柱在圆盘地形上不该被掏填）。定罪：
+      //   mile8 0..69 绿后首差 #70 (323,237) T1>0×582=vanilla 石 / JS 泥——JS 曾在
+      //   西海洋带沙锚下 (b) 填土把石/黏土连片覆写成泥,而 vanilla 圆盘世界零写。
+      if (
+        j < gs.worldSurface && oceanDepths(st, gs, i, j)
+        && !gs.seedFlags.roundLandmasses   // ★IIIII108d cs:18021
+        && st.flags[t] === 1 && st.type[t] === SAND
+      ) {
         if (st.slope[t] === 3 || st.slope[t] === 4) st.slope[t] = 0; // bottomSlope → slope(0)
         for (
           let k = j + 1;

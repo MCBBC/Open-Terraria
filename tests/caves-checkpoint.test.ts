@@ -37,7 +37,7 @@ import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass'
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
-import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runUnderworldPass, underworldAshGrassTrees } from '../src/world/gen/vanilla/UnderworldPass';
 import { runHellFortPass } from '../src/world/gen/vanilla/HellFortPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
@@ -231,6 +231,11 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runWebsPass(st, rng, gs); snap('webs');
   replay(); // ▶Underworld cs:13697（AddHellHouses cs:13893 是其尾段，不另重播）
   runUnderworldPass(st, rng, gs);
+  // ★IIIII154：⑧ 灰烬草 633+灰烬树 634（cs:13869-13915，外缘 17% 带，AddHellHouses 前
+  //   ——WorldGen.ts:1357 管线同序、oracle underworld 段 ⑧ 同位内联）。本链回放曾整支
+  //   缺调=underworld 检查点网格+掷流双分叉根因（T633>57×14707 级签名,IIIII154 定谳,
+  //   非 IIII227b 所记「oracle 液体域残差」）。
+  if (!gs.seedFlags.remix && !gs.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gs, false);
   runHellFortPass(st, rng, gs); // Ⅲ 批：原版 AddHellHouses 在 Underworld pass 尾（cs:13893）——金标再生窗口接线（RRR 演练发现）
   snap('underworld');
   // #29 Corruption（cs:13919，oracle 已转录）

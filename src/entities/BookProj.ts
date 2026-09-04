@@ -15,6 +15,7 @@ import type { GameHooks } from './types';
 import { hitPlayer } from './projTargets';
 import { GorePiece } from './GorePiece';
 import { projFrameImg, projSprite } from './Arrow';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { TILE } from '../core/constants';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -38,6 +39,23 @@ export class BookProj extends Entity {
   private frame = 0;
   /** 目标玩家（ai[2]=target 索引，单人恒本地玩家） */
   private target: { cx: number; cy: number; dead: boolean } | null;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-04 溅花缺口
+  //  清偿批,BookProj 接入。四旗/wetCount/presetDone 形状=ProjWetFlags 共享体）----
+  //  逐 id 豁免核对：1092 图书管理员骷髅 volley——SetDefaults（P.cs:10188-10196：
+  //  16×16/aiStyle 18/hostile/penetrate -1/timeLeft 420）【无 ignoreWater 行】→
+  //  不豁免受段（hostile 弹同吃 :16903 通段,门只认 ignoreWater 不认 friendly）。
+  //  1092 ∉ IsDestroyedByWater {85,15,188,34,1097,1106}（ProjectileID.cs:287/
+  //  :16921-16926）→ 无消亡钩;∉ {242,302,638}（:16894 强制 wet=false 特支）;
+  //  aiStyle 18 ∉ UpdatePosition 早退表（P.cs:20551-20553）→ 湿阻尼适用。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位同液态首测） */
+  presetDone = false;
 
   constructor(x: number, y: number, damage: number,
     target: { cx: number; cy: number; dead: boolean } | null) {
@@ -103,9 +121,19 @@ export class BookProj extends Entity {
       if (d) { d.vx = this.vx * 0.5; d.vy = 0.5 + this.vy * 0.25; d.noLight = true; d.scale = 1.2; }
     }
 
+    // ★通用湿段（:16903-17113,2026-09-04 溅花缺口清偿批）——原版 Update 位序
+    //   AI(:16880) → 湿段(:16903) → HandleMovement(:17120)。本类 AI 段无湿旗消费者
+    //   → 段插 AI 尾/位移前 = 原版同序,湿段测位 = 上拍位移末位（原版"AI 后未移动
+    //   位"同构）。溅花尘/音由共享体调 wetSplashStepShared,不自写。
+    this.wetSection(game);
+
     // 位移（Projectile 通用）+ 撞墙/越界消亡（tileCollide 缺省 → Kill）
-    this.x += this.vx;
-    this.y += this.vy;
+    // ★水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562
+    //   `if (wet) position += wetVelocity`）——直积分宿主：速度场不减只削当拍位移
+    //   （wetVelocity = velocity×档,velocity 字段本身不被水阻改写）;干态档=1 恒等
+    const drag = projWaterDragFactor(this);
+    this.x += this.vx * drag;
+    this.y += this.vy * drag;
     const st = game.world.store;
     const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) {
@@ -119,6 +147,13 @@ export class BookProj extends Entity {
       this.dead = true;
       game.onProjectileDeath?.(1092, this.x, this.y, this.w, this.h, this.vx, this.vy);
     }
+  }
+
+  /** ★通用湿段（:16903-17113——projWetSection.ts 共享体 1:1;1092 豁免核对/位序注
+   *  见本类字段块头。溅花尘/音由共享体调 wetSplashStepShared,不自写） */
+  private wetSection(game: GameHooks): void {
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      1092, false);   // 1092 不豁免（P.cs:10188-10196 无 ignoreWater 行,核对见字段块头）
   }
 
   draw(r: Renderer, _cam: Camera): void {

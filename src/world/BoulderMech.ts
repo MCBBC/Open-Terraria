@@ -57,8 +57,23 @@ export interface BoulderAnchorCtx {
 
 let _destroying = false;   // cs 全局 destroyObject：递归熔断
 
-function solidAllowBottomSlope(st: BoulderCellGrid, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return false;
+/** PlatformProperTopFrame（WorldGen.cs:70684-70694）：frameX/PlatformFrameWidth()
+ *  ∈ [0,7]∪[12,16]∪[25,26]——平台"平顶"连接帧域。PlatformFrameWidth() =
+ *  _data[19].CoordinateFullWidth = (CoordinateWidth16+Padding2)×Width1 = 18
+ *  （TileObjectData.cs:2131-2140 addTile(19) + Calculate styleWidth 式）。 */
+function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.floor(frameX / 18);
+  return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+}
+
+/** WorldGen.SolidTileAllowBottomSlope（WorldGen.cs:70698-70716）1:1：
+ *  界外（!InWorld）=true；active+(solid|solidTop)+【非顶坡 slope∈{1,2}——例外:
+ *  平台且 PlatformProperTopFrame(frameX)】+非半砖+未致动 ⇒ 承放态。
+ *  坡域口径：拒顶坡 topSlope{1,2}（Tile.cs:292-299）、收底坡 bottomSlope{3,4}
+ *  （Tile.cs:302-309）与平放 0。消费位=Check2x2 巨石下支撑（cs:48968-48984）与
+ *  624 侏儒石化脚面（NPC.cs:56446）——单一来源，禁在消费侧复刻坡域 */
+export function solidAllowBottomSlope(st: BoulderCellGrid, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;   // 原版 !InWorld(i,j) → true（界外算支撑不判坏）
   const i = st.idx(x, y);
   const t = st.type[i];
   // ★幽灵保域（2026-09-03）：active 门补 flags bit0（原版 WorldGen.cs:70710
@@ -70,7 +85,12 @@ function solidAllowBottomSlope(st: BoulderCellGrid, x: number, y: number): boole
   if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;   // ★inActive 位（cs:70713）——
     // 致动缩入的支撑不算实心 ⇒ 压板/亡命箱致动石栅即释放巨石（R20-I4 判例此处曾错引柜支）
   const sl = st.slope[i] ?? 0;
-  if (sl !== 0 && sl !== 1 && sl !== 2) return false; // bottomSlope=slope∈{1,2}
+  // ★坡域对齐（2026-09-04）：旧实现收 slope{0,1,2} 拒{3,4}=坡域整体倒置（把
+  //  topSlope 当 bottomSlope）——巨石站不上底坡台地、反悬在顶坡上。原版拒【顶坡】
+  //  {1,2}，例外支 = Platforms[type] && PlatformProperTopFrame(frameX)（cs:70711
+  //  原文防御臂：平台不坡,防陈旧 slope 位误伤,照抄）
+  if ((sl === 1 || sl === 2)
+    && !(d.platform === true && platformProperTopFrame(st.frameX[i]))) return false;
   return d.solid === true || d.platform === true;     // main.tileSolid ∪ tileSolidTop
 }
 

@@ -183,7 +183,10 @@ export interface DyePlantSpot {
   aboveActive: boolean; aboveSheet: number;
   aboveSolid: boolean;            // SolidTile(x,y-1)——style 7 吊顶档的锚（上邻严格实心）
   belowActive: boolean; belowSheet: number;
-  sideLeftActive: boolean; sideRightActive: boolean;   // 仅 style 6 用（x±1,y+1）
+  /** ★A-3（2026-09-04）：style6 下邻 nactive() 专位（cs:54472）——与 belowActive
+   *  （裸 active(),cs:54459/:54464）分位：两种活性位仅在邻格带致动器时分歧 */
+  belowNactive: boolean;
+  sideLeftActive: boolean; sideRightActive: boolean;   // 仅 style 6 用（x±1,y+1,裸 active）
   belowSolid: boolean;            // SolidTile(x,y+1)
   selfLiquidFullWater: boolean;   // liquid==255 && !lava() && !honey() && !shimmer()
   selfHasLiquid: boolean;         // Main.tile[x,y].liquid != 0
@@ -199,7 +202,8 @@ export function dyePlaceOk(sp: DyePlantSpot): boolean {
   if (sp.aboveActive && !DYE_PLANT_PLANT_FAMILY.has(sp.aboveSheet)) return false;
   if (sp.style === 6) {
     // 仙人掌寄生档（cs:54472-54478）：下邻 nactive+80,且左右两侧(y+1 行)非 active
-    return sp.belowActive && sp.belowSheet === 80
+    //（左右=裸 active(),cs:54473-54474——★A-3 分位后勿并 nactive）
+    return sp.belowNactive && sp.belowSheet === 80
       && !sp.sideLeftActive && !sp.sideRightActive;
   }
   if (!sp.belowSolid || sp.aboveActive) return false;

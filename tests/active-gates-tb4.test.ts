@@ -294,8 +294,9 @@ describe('⑥ B-4 liqGateHerb 补 active 臂（Player.cs:40058 只对非活性�
     st.setLiquid(8, 20, 255, 2);                    // 岩浆
     const drops: Array<[string, number]> = [];
     placeShell(w, drops, SEED_FIRE_V).tryPlace(8, 20, defOf(SEED_FIRE_V));
-    // 植上且 CheckAlch col5 岩浆熟转换 83→84（liquid 255>16）
-    expect(st.type[st.idx(8, 20)]).toBe(TILE_INTERNAL_BY_SHEET.get(84)!);
+    // ★②（2026-09-04 掉落/放置族批）PlaceAlch 运行时接链后写面=82 芽（PlaceAlch :45866
+    //  tile.type=82 硬编码;82 未熟档不参与 col5 岩浆熟转换 :46451 break → 保持 82）
+    expect(st.type[st.idx(8, 20)]).toBe(TILE_INTERNAL_BY_SHEET.get(82)!);
     expect(st.flags[st.idx(8, 20)]).not.toBe(0);
   });
 

@@ -17,6 +17,7 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision, lavaCollision } from './npcLiquid';
+import { projWaterDragFactor } from './projWetSection';
 
 import { LIQUID_TYPE } from '../world/TileStore';
 import { LCG32 } from '../fx/LightningGenerator';
@@ -551,6 +552,71 @@ function splashPitch(style: number): number {
   return (style === 4 || style === 5
     ? Math.floor(Math.random() * 21) - 20
     : Math.floor(Math.random() * 21) - 10) * 0.01;
+}
+
+/** ★V3 溅花段共享体（Projectile.cs:16935-17102 producer 站=湿缓存刷新位,2026-09-03；
+ *  2026-09-04 火箭水花缺口批抽出为自由函数——Arrow.wetSplashStep 与 GrenadeProj
+ *  通用湿段（WeaponProj.ts）共用,参数化实体位 (x,y,w,h) 与三粘滞旗）：
+ *  入水（flag2 支 :16935-16976）与出水（else-if wet 支 :16977-17102）共用的
+ *  四液溅花面——每拍 10 粒、矩形 (x−6, y+h/2−8, w+12, 24)（★唯一例外 = 出水
+ *  【水】支 :17059 `position.Y + height/2` 无 −8 逐字保留）、字段覆写/音效逐值：
+ *   · 微光 d308：vy−4 / vx×2.5 / scale=1.3 / noGravity / 六掷三色
+ *     （:204-218 Next(6)：0=(255,255,210) 1=(190,245,255) 2=(255,150,255)
+ *     default×3=(190,175,255)）+ PlaySound(19,…,4|5)【循环内】×10——原版
+ *     LegacySoundPlayer case19 头 `SoundInstanceSplash[num] 未停 → break`（:874-878）
+ *     同拍去重 ⟹ 有效 1 次（:893-901 style4/5 互斥对,音量 ×0.75、pitch Next(−20,1)×0.01）
+ *     → 本仓播 1 次；Splash_4（入）/Splash_5（出）。
+ *   · 蜂蜜 d152：vy−1 / vx×2.5 / scale=1.3 / α100 / noGravity + Splash_1（循环外）。
+ *   · 水 dustWater()（Dust.cs:405 waterStyle 分档,缺省 33）：vy−4 / vx×2.5 /
+ *     scale=1.3 / α100 / noGravity + Splash_1（循环外）。
+ *   · 岩浆 d35：vy−1.5 / vx×2.5 / scale=1.3 / α100 / noGravity + Splash_1（循环外）。
+ *  档位选择：入水看 !flag（当拍 LavaCollision）出蜂蜜/微光/水、flag=岩浆
+ *  （:16942/:16966）；出水看 !lavaWet（粘滞旗,:16988/:17047）——岩浆粘滞弹出水
+ *  溅岩浆花。Splash_1 音 = PlaySound(19) Style 缺省 1 → SoundSplash[1]（:874 直取
+ *  num=1,音量 1、pitch Next(−10,11)×0.01 :879-887）。
+ *  尘池契约：spawnDust 缺省 5px 盒/±2 随机初速（NewDust :122-151 同式）,
+ *  scale=1.3 为【绝对覆写】（抹平 NewDust ±0.2 抖动,原版 :16953 等同款）。 */
+export function wetSplashStepShared(
+  game: GameHooks, x: number, y: number, w: number, h: number,
+  lavaFlag: boolean, leaving: boolean, lavaWet: boolean, shimmerWet: boolean, honeyWet: boolean,
+): void {
+  const useLava = leaving ? lavaWet : lavaFlag;
+  const shimmer = !useLava && shimmerWet;
+  const honey = !useLava && !shimmer && honeyWet;
+  const dustType = useLava ? 35
+    : shimmer ? 308
+    : honey ? 152
+    : dustWaterFor((game as unknown as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0);
+  const dy = leaving && !useLava && !shimmer && !honey ? 0 : -8;   // 出水【水】支无 −8（:17059）
+  const boxX = x - 6, boxY = y + h / 2 + dy;
+  const shimmerStyle = leaving ? 5 : 4;                           // PlaySound(19,…,4) 入 / (19,…,5) 出
+  for (let n = 0; n < 10; n++) {
+    const d = game.spawnDust?.(boxX, boxY, w + 12, 24, dustType);
+    if (d) {
+      if (shimmer) {
+        d.vy -= 4; d.vx *= 2.5; d.scale = 1.3; d.noGravity = true;
+        const c = Math.floor(Math.random() * 6);            // Next(6) 六掷三色+缺省×3
+        d.color = c === 0 ? { r: 255, g: 255, b: 210, a: 255 }
+          : c === 1 ? { r: 190, g: 245, b: 255, a: 255 }
+          : c === 2 ? { r: 255, g: 150, b: 255, a: 255 }
+          : { r: 190, g: 175, b: 255, a: 255 };
+      } else if (honey) {
+        d.vy -= 1; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
+      } else if (useLava) {
+        d.vy -= 1.5; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
+      } else {
+        d.vy -= 4; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
+      }
+    }
+    // :16966/:16996 PlaySound(19,…,4|5) 在原版位于循环【内】×10——case19 头
+    // `SoundInstanceSplash[num] 未停 → break`（LegacySoundPlayer.cs:874-878）同拍
+    // 去重 ⟹ 有效恰 1 次（style4/5 互斥对 :893-901,音量 ×0.75）→ 本仓循环外播 1 次
+  }
+  if (shimmer) {
+    game.playSfxWav?.(`Splash_${shimmerStyle}`, 0.75, x + w / 2, y + h / 2, splashPitch(shimmerStyle));
+  } else {
+    game.playSfxWav?.('Splash_1', 1, x + w / 2, y + h / 2, splashPitch(1));   // :16970/:16975/:16991 等循环外
+  }
 }
 const ADDITIVE_GLOW_PROJS = new Set([15, 93, 94, 95, 96, 1114, 253, 258, 102,
   // ★T2/R 类清账（2026-09-02 用户拍板）：34 火焰鞭出组——活分支 :80753
@@ -1586,16 +1652,13 @@ export class Arrow extends Entity {
    *  变型 :16921-16931——旧写「弹心格内联探测」退役后这些 id 的消亡块改读缓存,
    *  必须入消费面才有人维护）。原版全体弹都维护此缓存;本仓其余弹族不为无消费者
    *  付每子步重测成本——消费面扩族时同步入表 */
-  private get wetCacheConsumer(): boolean {
-    // ★2026-09-02 观感面缺口批扩员：376 随从鬼火（:56548-56550 wet && !lavaWet →
-    // Kill）/ 710 空中祸害（:56375 wet → Kill）——两型 SetDefaults 均无 ignoreWater
-    // 行 → 原版共享 wet 段每 update 全量刷新湿旗,湿旗不刷新则其 AI 内 wet 消亡门
-    // 仅出生入水才可能触发（冻结算死代码）。入自家 AI 消亡块消费（subStepAI 各自
-    // 分支）,不含 IsDestroyedByWater 泛杀语义（泛杀面仍走 ARROW_DESTROYED_BY_WATER）。
-    const p = this.projId;
-    return p === 181 || p === 189 || p === 307 || p === 316 || p === 566 || p === 469
-      || p === 2 || p === 376 || p === 710 || ARROW_DESTROYED_BY_WATER.has(p);
-  }
+  // ★2026-09-04 旧 wetCacheConsumer id 集（蜂族 181/189/307/316/566 + 469 + 2 +
+  //  376/710 + IsDestroyedByWater 六型）已随湿段全面开闸退役（见 subStepAI 湿段门注
+  //  ——溅花面本身就是全体弹的消费者,id 限域=其余弹入水永不溅花）。AI 湿敏消费位
+  //  （469 蜂箭/蜂族三旗/376 鬼火/710 空中祸害/IsDestroyedByWater 消亡/2 变型）读的
+  //  this.wet* 四旗如今对全体非 ignoreWater 弹逐子步维护,无需入表。376/710 勘误
+  //  （2026-09-02）保留有效：AI 消亡门读缓存(现全体刷新)。
+
   // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支 :58383-58465）----
   /** ai[0] 索敌延迟（>20 后激活，:58403-58405 自减钳 20） */
   private vx616Delay = 0;
@@ -4052,7 +4115,7 @@ export class Arrow extends Entity {
     //   freed-index 回槽错过当拍的延迟同构（原版亦非零延迟面）。
     //   ⇒ 出生预置=首子步头同位同液态测值;消费位（subStepAI 头）读缓存与原版
     //   读字段同源,时序差归零。消费者=wetCacheConsumer（蜂族+469）。
-    if (!this.wetPresetDone && this.wetCacheConsumer) {
+    if (!this.wetPresetDone && !projectileData(this.projId)?.ignoreWater) {   // ★2026-09-04 随湿段开闸:预置全体化(水中出生不假溅花)
       this.wetPresetDone = true;
       const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
       this.wet = rWet.wet;
@@ -4125,64 +4188,11 @@ export class Arrow extends Entity {
 
   }
 
-  /** ★V3 溅花段（Projectile.cs:16935-17102 producer 站=湿缓存刷新位,2026-09-03）：
-   *  入水（flag2 支 :16935-16976）与出水（else-if wet 支 :16977-17102）共用的
-   *  四液溅花面——每拍 10 粒、矩形 (x−6, y+h/2−8, w+12, 24)（★唯一例外 = 出水
-   *  【水】支 :17059 `position.Y + height/2` 无 −8 逐字保留）、字段覆写/音效逐值：
-   *   · 微光 d308：vy−4 / vx×2.5 / scale=1.3 / noGravity / 六掷三色
-   *     （:204-218 Next(6)：0=(255,255,210) 1=(190,245,255) 2=(255,150,255)
-   *     default×3=(190,175,255)）+ PlaySound(19,…,4|5)【循环内】×10——原版
-   *     LegacySoundPlayer case19 头 `SoundInstanceSplash[num] 未停 → break`（:874-878）
-   *     同拍去重 ⟹ 有效 1 次（:893-901 style4/5 互斥对,音量 ×0.75、pitch Next(−20,1)×0.01）
-   *     → 本仓播 1 次；Splash_4（入）/Splash_5（出）。
-   *   · 蜂蜜 d152：vy−1 / vx×2.5 / scale=1.3 / α100 / noGravity + Splash_1（循环外）。
-   *   · 水 dustWater()（Dust.cs:405 waterStyle 分档,缺省 33）：vy−4 / vx×2.5 /
-   *     scale=1.3 / α100 / noGravity + Splash_1（循环外）。
-   *   · 岩浆 d35：vy−1.5 / vx×2.5 / scale=1.3 / α100 / noGravity + Splash_1（循环外）。
-   *  档位选择：入水看 !flag（当拍 LavaCollision）出蜂蜜/微光/水、flag=岩浆
-   *  （:16942/:16966）；出水看 !lavaWet（粘滞旗,:16988/:17047）——岩浆粘滞弹出水
-   *  溅岩浆花。Splash_1 音 = PlaySound(19) Style 缺省 1 → SoundSplash[1]（:874 直取
-   *  num=1,音量 1、pitch Next(−10,11)×0.01 :879-887）。
-   *  尘池契约：spawnDust 缺省 5px 盒/±2 随机初速（NewDust :122-151 同式）,
-   *  scale=1.3 为【绝对覆写】（抹平 NewDust ±0.2 抖动,原版 :16953 等同款）。 */
+  /** ★V3 溅花段（:16935-17102 逐值注已迁 wetSplashStepShared 共享体头,2026-09-04
+   *  火箭水花批抽出——GrenadeProj 通用湿段同源共用,本方法仅剩实体位穿参） */
   private wetSplashStep(game: GameHooks, lavaFlag: boolean, leaving: boolean): void {
-    const useLava = leaving ? this.lavaWet : lavaFlag;
-    const shimmer = !useLava && this.shimmerWet;
-    const honey = !useLava && !shimmer && this.honeyWet;
-    const dustType = useLava ? 35
-      : shimmer ? 308
-      : honey ? 152
-      : dustWaterFor((game as unknown as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0);
-    const dy = leaving && !useLava && !shimmer && !honey ? 0 : -8;   // 出水【水】支无 −8（:17059）
-    const boxX = this.x - 6, boxY = this.y + this.h / 2 + dy;
-    const shimmerStyle = leaving ? 5 : 4;                           // PlaySound(19,…,4) 入 / (19,…,5) 出
-    for (let n = 0; n < 10; n++) {
-      const d = game.spawnDust?.(boxX, boxY, this.w + 12, 24, dustType);
-      if (d) {
-        if (shimmer) {
-          d.vy -= 4; d.vx *= 2.5; d.scale = 1.3; d.noGravity = true;
-          const c = Math.floor(Math.random() * 6);            // Next(6) 六掷三色+缺省×3
-          d.color = c === 0 ? { r: 255, g: 255, b: 210, a: 255 }
-            : c === 1 ? { r: 190, g: 245, b: 255, a: 255 }
-            : c === 2 ? { r: 255, g: 150, b: 255, a: 255 }
-            : { r: 190, g: 175, b: 255, a: 255 };
-        } else if (honey) {
-          d.vy -= 1; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
-        } else if (useLava) {
-          d.vy -= 1.5; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
-        } else {
-          d.vy -= 4; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
-        }
-      }
-      // :16966/:16996 PlaySound(19,…,4|5) 在原版位于循环【内】×10——case19 头
-      // `SoundInstanceSplash[num] 未停 → break`（LegacySoundPlayer.cs:874-878）同拍
-      // 去重 ⟹ 有效恰 1 次（style4/5 互斥对 :893-901,音量 ×0.75）→ 本仓循环外播 1 次
-    }
-    if (shimmer) {
-      game.playSfxWav?.(`Splash_${shimmerStyle}`, 0.75, this.cx, this.cy, splashPitch(shimmerStyle));
-    } else {
-      game.playSfxWav?.('Splash_1', 1, this.cx, this.cy, splashPitch(1));   // :16970/:16975/:16991 等循环外
-    }
+    wetSplashStepShared(game, this.x, this.y, this.w, this.h,
+      lavaFlag, leaving, this.lavaWet, this.shimmerWet, this.honeyWet);
   }
 
   /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
@@ -4194,62 +4204,14 @@ export class Arrow extends Entity {
     if (this.life <= 0) { this.killNow(game); return; }   // 防御（正常由尾部递减杀）
     this.subStepAI(game);
     if (this.dead) return;                                // AI 侧已杀（killNow 已走）
-    // ★L2 湿缓存逐子步刷新（Projectile.cs:16903-17113 wet 段时序=AI 后、timeLeft
-    //   递减前）：位置 = 本子步末（AI 尾位移后）= 下一子步 AI 头读位——消费位读
-    //   到的即"上子步液段值",与原版字段语义逐值同。★F3（2026-09-01）生命周期
-    //   对称补齐：①ignoreWater 门——原文 `if (!ignoreWater)` 全段跳过（:16903）,
-    //   wet/lavaWet/honeyWet/shimmerWet 四旗一律不更新（出生预置 :10888-10890 同门
-    //   只清 wet）;②lavaWet 维护——LavaCollision 全盒命中置 true【只置不清】
-    //   （:16906-16911 粘滞）,清位在主循环 `if (!wet)` 段与 honey/shimmer 同批
-    //   三清（:17103-17108）——照抄位次,非"出浆即清"。
-    //   ★V2/V3（2026-09-03）：湿段残段全量收口——③:16933-16936 type 34 火鞭浆中
-    //   穿行支（`flag2 = (wet = (lavaWet = false))`：34 的 lavaWet 不粘滞、当拍湿
-    //   旗全清 → 浆里不溅花不判湿）与 ④:16937-16944 type 80 IceBlock 支（湿旗全清
-    //   + 浆里 ai[0]>=0 即 Kill;本仓 80 无出生面=死码,照抄收口）;⑤:16935-17102
-    //   溅花/湿计数段逐值移植（见 wetSplashStep）。本段时序仍为"上子步末同位测值"
-    //   ⑥成员粘滞——原文本段对【全体弹】type 无关逐子步维护;本仓按 id 限域（F3
-    //   成本口径）后,段内 TransformType(2 燃烧箭→1 木箭 :16929) 会使 projId 离开
-    //   id 集 → 变型后 wet 四旗冻结（wet 卡死 true,出水不溅花/wetCount 不衰减）。
-    //   故刷新门 = id 集 ∪ wetPresetDone（出生拍已是消费族的弹终生维持缓存=原版
-    //   生命周期语义,直生木箭仍不入域维持成本口径）。
-    //   ——溅花门读的 `!wet` = 上子步湿态,与原版同位次（AI 读缓存 → 消亡/变型 →
-    //   湿旗 → 溅花 → wet 写回 → !wet 三清 → wetCount--）。
-    if ((this.wetCacheConsumer || this.wetPresetDone) && !projectileData(this.projId)?.ignoreWater) {
-      const rLava = lavaCollision(game.world.store, this.x, this.y, this.w, this.h);
-      const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
-      if (rLava) this.lavaWet = true;                 // :16909-16911 只置不清（粘滞）
-      if (rWet.honey) this.honeyWet = true;           // :16912-16914 honeyWet 只置不清
-      if (rWet.shimmer) this.shimmerWet = true;       // :16915-16918 shimmerWet 只置不清
-      let flag2 = rWet.wet;                           // flag2 = WetCollision 当拍值
-      if (this.projId === 34 && this.lavaWet) {       // :16933-16936 火鞭浆穿支
-        flag2 = this.wet = this.lavaWet = false;      // `flag2 = (wet = (lavaWet = false))`
-      }
-      if (this.projId === 80) {                       // :16937-16944 IceBlock 支（无出生面）
-        flag2 = false;
-        this.wet = false;
-        if (rLava && this.hostileAi0 >= 0) { this.killNow(game); return; }   // ai[0]>=0f（:16941）
-      }
-      // :16935-16976 入水溅花（155 BeachBall 特例门照抄,出水侧走 vy×0.5 替代溅花）+ wet=true
-      if (flag2) {
-        if (this.projId !== 155 && this.wetCount === 0 && !this.wet) {
-          this.wetSplashStep(game, rLava, false);     // !flag=浆外四液档 / flag=岩浆档
-        }
-        this.wet = true;
-      } else if (this.wet) {                          // :16977-17102 出水支
-        this.wet = false;
-        if (this.projId === 155) this.vy *= 0.5;      // :16980-16981 velocity.Y ×0.5
-        else if (this.wetCount === 0) {
-          this.wetCount = 10;                         // :16984 出水冷却窗 10 子步
-          this.wetSplashStep(game, rLava, true);      // !lavaWet=四液档（水支无 −8 偏移）/否则岩浆档
-        }
-      }
-      if (!this.wet) {                                // :17103-17108 !wet 三清
-        this.lavaWet = false;
-        this.honeyWet = false;
-        this.shimmerWet = false;
-      }
-      if (this.wetCount > 0) this.wetCount--;         // :17109-17112 wetCount 逐子步递减
-    }
+    // ★2026-09-04 湿段时序重排：通用湿段（:16903-17113 旗刷新+水death/2 变型+34/80
+    //   +溅花+三清+wetCount）已整体挪入 subStepAI 尾、通用位移行【之前】——原挂
+    //   本处（子步尾=位移后）,段内 WetCollision 测位/溅花出生位晚一步、位移消费的
+    //   是上拍旗,与原文 Update 内 AI(:16880)→湿段(:16903)→HandleMovement(:17120)
+    //   位序差一拍。挪后 AI 头湿旗消费者（469/376/蜂族/710）读到的仍是上一子步段值
+    //   （字段语义逐值同）,段注/段体见 subStepAI 尾湿段块。本子步余段=原版段后：
+    //   位移（subStepAI 尾已跑）→ Update 尾通用尘（:17141-17182,下方 switch）→
+    //   timeLeft（:17307）——序不变。
     // ---- Update 尾尘通用段（Projectile.cs:17141-17182;★R1 红队勘误:段在
     //      numUpdates 子步循环【内】(:16781 while 体延伸至 :17345)——每【子步】1 粒,
     //      278/5 EU=1 → ×2/帧,余型 EU=0 ×1):2/82 燃烧箭 d6 α100 /
@@ -4415,24 +4377,16 @@ export class Arrow extends Entity {
         }
       }
     }
-    // 入水块（AI_001 共享 wet 段 Projectile.cs:16921-16931）：wet && !lavaWet →
-    // ① IsDestroyedByWater{85,15,188,34,1097,1106}（ProjectileID.cs:287）Kill;
-    // ② type 2 燃烧箭 → TransformType(1) 变木箭 + light = 0（projId 改 1 后
-    //   数据表 1 无 light,光自动归零=原版语义）。
-    // ★F3（2026-09-01 NX3 遗留3 清偿）：读【湿缓存】+ lavaWet 粘滞面——旧写
-    // 「弹心格 liquid>0 且液型≠岩浆」为中心格几何近似（浅缘半浸/邻格液面两向偏差,
-    // 且缺 lavaWet 渡浆语义）,登记近似退役。原文判定位次（同一段内）：
-    //   Lava/WetCollision 同位双测（:16906-16908）→ lavaWet|=flag（:16909-16911,
-    //   只置不清）→ honey/shimmer|=（:16912-16918）→ 本消亡判定（:16921-16931）
-    //   → wet=flag2（:16976）/!wet 三清（:17103-17108）。原版语义：wet 为逐拍现值、
-    //   lavaWet 粘滞——沾浆弹在湿状态下永不消亡/不变型（浆→水直渡豁免）,离液拍
-    //   （!wet） lavaWet 归零,再入清水才判;岩浆中 wet 同真（WetCollision 只查
-    //   liquid>0）而 lavaWet 同真 → 双跳过。本仓读取=上一子步末同位测值（与
-    //   469/蜂族消费位同时序;出生拍=预置值,预置含 tick1 档 lavaWet——见预置注）。
-    if (this.wet && !this.lavaWet) {
-      if (ARROW_DESTROYED_BY_WATER.has(this.projId)) { this.killNow(game); return; }
-      if (this.projId === 2) this.projId = 1;   // TransformType(1)（:16929）
-    }
+    // 入水消亡/2 变型支（AI_001 共享 wet 段 Projectile.cs:16921-16931：wet && !lavaWet
+    //  → ① IsDestroyedByWater{85,15,188,34,1097,1106}（ProjectileID.cs:287）Kill;
+    //  ② type 2 燃烧箭 → TransformType(1) 变木箭 + light = 0）★2026-09-04 湿段时序
+    //  重排并回段内原位——原文本支在 AI()【之后】的通用湿段内执行（:16903 段 →
+    //  HandleMovement :17120），旧 AI 链中段落位（本处）虽读同值（上拍段缓存）,却使
+    //  消亡/变型先于 376/蜂族/710 等 AI 消费位与 AI 尾段执行,与原文相反;现随湿段
+    //  （subStepAI 尾、位移行前）按段内子序收口：旗(:16906)→水death/变型(:16921)→
+    //  34/80(:16933)→溅花(:16935)→三清(:17103)→wetCount--(:17109),逐值未动。
+    //  ★F3（2026-09-01 NX3 遗留3 清偿）语义注随支迁移,见下方湿段块注（lavaWet
+    //  粘滞面/沾浆渡水豁免/预置含 tick1 档 lavaWet）。
     // ---- ★B1-X3 微光气球 936 巨星解锁段（2026-08-30 触发域修正：killNow → Shimmer()）----
     // 原版唯一出处 = Shimmer()（P.cs:22564 方法头）aiStyle==2 分支 :22676-22697，
     // 调用域 Update :17114-17117 `if (shimmerWet) Shimmer();`——浸微光液才跑，与
@@ -5551,7 +5505,8 @@ export class Arrow extends Entity {
         // ★L2（2026-09-01 NX3 遗留2）：原版 :27685 读【字段】wet/honeyWet/shimmerWet
         //   （出生预置 NewProjectile :10887-93 + 每子步液段 :16900-16908/三清
         //   :17104-17108），非当场重测——本仓同源缓存见 fixedUpdate 出生预置块/
-        //   subStep 刷新块；AI 头读缓存=读上子步液段值（出生拍=预置值），时序
+        //   subStepAI 段前刷新块（湿段在位移前=原版 :16903 位序,2026-09-04 重排）；
+        //   AI 头读缓存=读上子步液段值（出生拍=预置值），时序
         //   与原版同构（旧"内联即时读差 1 子步"登记作废）。蜂蜜/微光旗随缓存
         //   附带（置位只增不清——蜜→水直渡豁免语义同原版 !wet 三清位）。
         if (this.wet && !this.honeyWet && !this.shimmerWet && this.projId !== 307) {
@@ -7196,14 +7151,99 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- ★L2 通用湿段（Projectile.cs:16903-17113 全体非 ignoreWater 弹共用段,逐值
+    //      1:1）★2026-09-04 时序重排到原版位：原挂 subStep 尾（=本子步位移【后】）,
+    //      与原文 Update 内位序 AI(:16880)→湿段(:16903)→HandleMovement(:17120) 差一
+    //      拍——旧位下段内 WetCollision 测位/溅花出生位是"本子步位移后"位置（原文=
+    //      上一子步位移后=本子步位移前）,且位移侧阻尼无旗可用（登记未修）。现挪至
+    //      AI 链末（最后湿旗消费位 710 之后、通用位移行前）：AI 头湿旗消费者
+    //      （469/376/蜂族/710）读到的仍是【上一子步段值】（字段语义逐值同——原文
+    //      AI 读的 wet* 也是上一 update 湿段写下的字段值;出生拍=预置值,fixedUpdate
+    //      头出生预置块同位不动）,段内水death/2 变型支自 AI 链中段（旧 :4451 位）
+    //      并回段内原位（原文本支就在段内 :16921,AI 整体之后）,位移在段后消费当拍
+    //      旗做阻尼（下方位移行）。段内子序照抄原文：旗(:16906)→水death/变型
+    //      (:16921)→34/80(:16933)→溅花(:16935)→三清(:17103)→wetCount--(:17109)。
+    //      ★F3（2026-09-01）生命周期对称补齐：①ignoreWater 门——原文
+    //      `if (!ignoreWater)` 全段跳过（:16903）,wet/lavaWet/honeyWet/shimmerWet
+    //      四旗一律不更新（出生预置 :10888-10890 同门只清 wet）;②lavaWet 维护
+    //      ——LavaCollision 全盒命中置 true【只置不清】（:16906-16911 粘滞）,清位
+    //      在 `if (!wet)` 段与 honey/shimmer 同批三清（:17103-17108）——照抄位次,
+    //      非"出浆即清"（沾浆弹湿态下永不消亡/不变型=浆→水直渡豁免;岩浆中 wet 与
+    //      lavaWet 同真双跳过;离液拍 !wet 三清归零,再入清水才判）。预置含 tick1 档
+    //      lavaWet（原版 tick1 段 :16906 在消亡判定 :16921 前并入,出生即在浆里的
+    //      IsDestroyedByWater 弹首子步受粘滞面保护）。
+    //      ★V2/V3（2026-09-03）残段收口：34 火鞭浆穿支（`flag2 = (wet = (lavaWet =
+    //      false))`：34 的 lavaWet 不粘滞、当拍湿旗全清 → 浆里不溅花不判湿）与 80
+    //      IceBlock 支（湿旗全清 + 浆里 ai[0]>=0 即 Kill;本仓 80 无出生面=死码,照抄
+    //      收口）;溅花/湿计数段逐值移植（见 wetSplashStep/wetSplashStepShared）。
+    //      ★2026-09-04 全面开闸（用户 review"还有哪些溅花缺口"批）：原版本段对
+    //      【全体弹】维护的唯一"消费者"就是溅花面本身（+waterWalk 涟漪等派生）
+    //      ——id 限域等于其余弹族入水永不溅花（箭 1/3/4/星 75/91/手里剑/飞刀/子弹/
+    //      魔法弹…全部原版都溅,ignoreWater=SetDefaults 显式 true 的 264 id 才豁免,
+    //      projectileData 缺行=不豁免,与原版缺省 false 同向）。湿段内 type 特支
+    //      （水death/2 变型/34/80/155）全部 id 显式守卫,开闸零波及。
+    if (!projectileData(this.projId)?.ignoreWater) {
+      const rLava = lavaCollision(game.world.store, this.x, this.y, this.w, this.h);
+      const rWet = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+      if (rLava) this.lavaWet = true;                 // :16909-16911 只置不清（粘滞）
+      if (rWet.honey) this.honeyWet = true;           // :16912-16914 honeyWet 只置不清
+      if (rWet.shimmer) this.shimmerWet = true;       // :16915-16918 shimmerWet 只置不清
+      // :16921-16931 水death/2 变型（读 wet=上拍段值;★F3：lavaWet 粘滞面保护）
+      if (this.wet && !this.lavaWet) {
+        if (ARROW_DESTROYED_BY_WATER.has(this.projId)) { this.killNow(game); return; }
+        if (this.projId === 2) this.projId = 1;       // TransformType(1)（:16929,light=0
+      }                                               //   由 projId=1 数据缺 light 行承载）
+      let flag2 = rWet.wet;                           // flag2 = WetCollision 当拍值
+      if (this.projId === 34 && this.lavaWet) {       // :16933-16936 火鞭浆穿支
+        flag2 = this.wet = this.lavaWet = false;      // `flag2 = (wet = (lavaWet = false))`
+      }
+      if (this.projId === 80) {                       // :16937-16944 IceBlock 支（无出生面）
+        flag2 = false;
+        this.wet = false;
+        if (rLava && this.hostileAi0 >= 0) { this.killNow(game); return; }   // ai[0]>=0f（:16941）
+      }
+      // :16935-16976 入水溅花（155 BeachBall 特例门照抄,出水侧走 vy×0.5 替代溅花）+ wet=true
+      if (flag2) {
+        if (this.projId !== 155 && this.wetCount === 0 && !this.wet) {
+          this.wetSplashStep(game, rLava, false);     // !flag=浆外四液档 / flag=岩浆档
+        }
+        this.wet = true;
+      } else if (this.wet) {                          // :16977-17102 出水支
+        this.wet = false;
+        if (this.projId === 155) this.vy *= 0.5;      // :16980-16981 velocity.Y ×0.5
+        else if (this.wetCount === 0) {
+          this.wetCount = 10;                         // :16984 出水冷却窗 10 子步
+          this.wetSplashStep(game, rLava, true);      // !lavaWet=四液档（水支无 −8 偏移）/否则岩浆档
+        }
+      }
+      if (!this.wet) {                                // :17103-17108 !wet 三清
+        this.lavaWet = false;
+        this.honeyWet = false;
+        this.shimmerWet = false;
+      }
+      if (this.wetCount > 0) this.wetCount--;         // :17109-17112 wetCount 逐子步递减
+    }
     // aiStyle4 荆棘链：UpdatePosition 早退（Projectile.cs:20552）——链段全程静止，
     // 不消费速度位移（"接力推进"= 子段出生在父段前方一格速度处）
     // ★630 幻象弓载体同款早退（2026-09-02）：aiStyle75 无通用位移积分——velocity
     //   是纯姿态/重瞄向量,position 每拍由 AI_075 尾钉在玩家挂点（:68401）。若照常
     //   积分,钉位后被速度再推 11px = 载体沿瞄准向恒偏一格（2026-09-02 用户实报批）
+    // ★水中位移阻尼（HandleMovement :17721-17764 → UpdatePosition :20555-20562
+    //   `if (wet) position += wetVelocity;`）——wetVelocity = velocity×{微光 0.375/
+    //   蜂蜜 0.25/水(含岩浆) 0.5},档位读湿段刚写下的【当拍】旗（projWaterDragFactor,
+    //   档序 shimmer>honey>wet 与原文 if/else 链同构）;干态因子=1 恒等。直积分契约：
+    //   因子乘进位移行——速度【场】vx/vy 任何情况下不被水阻改写（原版 wetVelocity
+    //   是局部量,velocity 字段本身不动）;本类无 moveAndCollide body,"采纳处除回=
+    //   速度场指数爆炸"债不涉（见 projWaterDragFactor 注）。aiStyle4/75 早退位原版
+    //   即不进 UpdatePosition → 同样不吃阻尼;aiStyle 38/84/148 等其余 UpdatePosition
+    //   早退型不在本类承载域。原版 HandleMovement 型别特支（flare 贴壁 lastVelocity、
+    //   nail93 position+=velocity 等）为独立 position 写,不走 UpdatePosition→不阻尼,
+    //   本仓对应位同样保持全速（flare 原文 wet 时 /2 为型别特支,与通用阻尼异构,
+    //   维持"本仓 wet 未建模恒全速"既案登记,未随本批扩面）。
     if (!this.thornChain && !(this.projId === 630 && this.ph630Ctl)) {
-      this.x += this.vx;
-      this.y += this.vy;
+      const dragF = projWaterDragFactor(this);
+      this.x += this.vx * dragF;
+      this.y += this.vy * dragF;
     }
     // 喵刀弹 502：迪斯科点光（Projectile.cs:22613-22621 (Disco+0.5)/2）+ 拖尾采样
     if (this.projId === 502) {
@@ -7830,7 +7870,7 @@ export class Arrow extends Entity {
         // projectileSnapStrikeBonus 单源（pyroclastProjectileGate /
         // snappingStoneProjectileGate——原 kind0 内联 projectileData.ranged 手搓口径撤销）；
         // F2 扫描面 = FindTargetWithLineOfSight 原文语义；返回值 = num14 加伤并
-        // 【不吃攻端旗乘区】（原版 banner :13387 在加伤 :14457 前），随暴击并入本次实伤。
+        // 【不吃攻端旗乘区】（原版 banner :13388-13390 在加伤 :14451 前），随暴击并入本次实伤。
         // 排除面 = 本弹局部免疫窗投影（vanilla localNPCImmunity[i]!=0 :46487-89 的仓内读面）。
         const snapBonusArrow = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2, e.id, {
           victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },       // R4-33 victim 自脉冲

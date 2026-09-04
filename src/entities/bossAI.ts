@@ -1658,7 +1658,8 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
  *  语义位,萤火虫/蜂后/ Martian saucer 等 id 消费互不相干）,逐拍 ++（头旋冲支再 +=2/+3,
  *  :28722/:28958）,阈值 crossing（>140f/>40f/>200f/>80f）即开火清零——相位历史跨态
  *  保留（旋冲期计数走快,切回常态自中间值续走）;态切换复位仅三处:炮 1100f/300f 门
- *  （:28777/:28865）、激光 200f 门（:29101）,★激光 800f 门不清零（:28996-29000）。
+ *  （:28777/:28865）、激光 200f 门（:29101）,★激光 800f 门不清零（:29011-29015——
+ *  SW-AF1 2026-09-04 F-6 引注校准:旧锚 :28996-29000 系 else 前扫地渣段）。
  *  公共:头失效→自毁;头离场(ai1==3)→自毁;远离锚点 800px→追赶态 99。 */
 export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
   const headId = e.ai1;

@@ -49,6 +49,13 @@ export function crackedChainKill(
     if (!st.inBounds(nx, ny)) continue;
     const t = st.get(nx, ny);
     if (t === 0) continue;
+    // ★G2-F0 掷流污染定罪批（2026-09-04，红队 G1 最高优先）：active 门在【掷签前】——
+    //  原版 WorldGen.cs:64330 `tile3.active() && genRand.Next(num16) == 0 && type 481-483`
+    //  字面序：tile3 非 active 时短路【不消费】genRand 掷。幽灵裂砖（flags=0,type 481-483
+    //  残型）本仓裸 type 扫会把幽灵格当活跃邻格白耗一掷 → 同拍后续随机消费序整体漂移
+    //  （全仓唯一掷流序污染点）。修=掷前补 hasTile 门（幽灵裂砖不掷不链;致动裂砖
+    //  active 位仍真照掷照链,原版本相）。
+    if (!st.hasTile(nx, ny)) continue;            // :64330 tile3.active() 掷前短路
     // 掷签先于裂砖判定（WorldGen.cs:64326-64344 `tile3.active() && genRand.Next(num16)==0
     // && type∈{481..483}`——非裂砖活跃邻格也消耗一次掷签，红队 J-1：曾先查 sheet 再掷
     // =非裂砖邻格零掷，改变同拍后续随机消费序）

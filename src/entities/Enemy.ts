@@ -8,6 +8,9 @@ import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from
 import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
+import { inAPlaceWithWind } from './Mounts';
+import { anchorSpecOf, validateAnchors } from '../world/TileAnchorValidator';
+import { solidAllowBottomSlope } from '../world/BoulderMech';
 import { liquidCollision, drownCollision } from '../stats/TouchDamage';
 import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks, LootPlayerCtx } from './types';
@@ -497,8 +500,6 @@ export class Enemy extends Entity {
    *  其在 fixedUpdate 头快照（=上一拍移动后值），计数时点 x===prevX 恒真 →
    *  计数恒 +1 永不衰减（R6-B 修正）。首值由 fromVanilla 置出生 x（首拍 +1=出生小跳） */
   fighterPrevX = 0;
-  /** 存活 tick 计数(侏儒石化等用) */
-  gnomeAge = 0;
   prevY = 0;
   /** EoW 掘地音效间隔（:52375-52395 soundDelay，距离/40 钳 10..20） */
   digSndDelay = 0;
@@ -1921,30 +1922,6 @@ export class Enemy extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.prevX = this.x; this.prevY = this.y;
-    this.gnomeAge++;
-    // 侏儒 624 日光石化（NPC.cs:56252-56280 + :56232 ShouldTurnToStone——白天且
-    // 头上无实心遮挡 → 脚下实心 → PlaceTile(567 花园侏儒 style rand(5)) +
-    // bestiary RegisterKill + Achievement 24,2026-08-13）
-    if (this.vanillaId === 624 && !this.dead && this.gnomeAge > 60) {
-      const w = game.world as import('../world/World').World;
-      if (w?.clock?.isDay && w?.store) {
-        const st = w.store;
-        const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h) / 16);
-        if (st.inBounds(tx, ty) && st.isSolid(tx, ty) && !st.isActive(tx, ty - 1)) {
-          let sheltered = false;
-          for (let dy = 1; dy <= 5; dy++) {
-            if (st.inBounds(tx, ty - dy) && st.isSolid(tx, ty - dy)) { sheltered = true; break; }
-          }
-          if (!sheltered) {
-            const style = Math.floor(Math.random() * 5);
-            st.setTile(tx, ty - 1, TILE_BY_KEY['v_567_garden_gnome'] ?? 0, style * 36, 0);
-            game.spawnParticles(this.cx, this.cy, '#E0E0E0', 5, 1, { life: 30 });
-            this.dead = true; this.hp = 0;
-            return;
-          }
-        }
-      }
-    }
     // 联机傀儡（房主权威快照驱动）：无本地 AI——P3.2 插值/外推推进 + 动画计时，
     // 打击/拾取等交互经 entityNet 上报房主结算
     if (this.netPuppet) {
@@ -3244,8 +3221,10 @@ export class Enemy extends Entity {
     if (style === -1) return;
     // PlaceAlch（:45386-45484）：目标格 (x, y-1) 净空、基座 nactive 整砖无坡
     const k = st.idx(x, y - 1), g = st.idx(x, y);
-    if (st.flags[k]) return;                                   // 目标格已活
-    if (!st.flags[g] || st.half[g] || st.slope[g] !== 0) return;
+    if (st.flags[k]) return;                                   // 目标格已活（原版裸 active()——非 nactive,勿改）
+    // ★G1谓词批(2026-09-04)：基座门= tile2.nactive()（WorldGen.cs:45790）——flags
+    // 位读漏 !inActive 半边,已致动基座会误种药草 → 改 isActive()
+    if (!st.isActive(x, y) || st.half[g] || st.slope[g] !== 0) return;
     const ground = TILE_DEFS[st.type[g]]?.vanilla?.sheet ?? -1;
     const liq = st.liquid[k];
     const liqType = st.liquidType[k];
@@ -3995,7 +3974,9 @@ export class Enemy extends Entity {
     let flag = false;
     const ty = Math.floor((this.y + this.h + 1) / TILE);
     for (let j = Math.floor(this.x / TILE); j <= Math.floor((this.x + this.w) / TILE); j++) {
-      if (!st.inBounds(j, ty)) continue;
+      // ★A-5 边带（2026-09-04）：SolidTile3(j,num10)（NPC.cs:61178 坐标重载）首门
+      // InWorld(·,1)（WorldGen.cs:71006-71008）——世界最外一圈不踩漆不变色
+      if (!st.inWorld1(j, ty)) continue;
       const i = st.idx(j, ty);
       const t = st.type[i];
       // SolidTile3：非活性格/已致动/非实心/平台（tileSolidTop）都不算立足点
@@ -4412,6 +4393,64 @@ export class Enemy extends Entity {
     // 脚底同高 → -1（同层追击可站平台）；缺省 1 → 其余情况（含站台上玩家在别层）
     // 下落/站立均判下落 = 平台穿透，vanilla 僵尸不恋平台的行为根基）
     if (rawPlayer && rawPlayer.y + rawPlayer.h === this.y + this.h) this.dirY = -1;
+    // ---- 624 侏儒日光石化（AI_003_Fighters :56437-56470 + AI_003_Gnomes_ShouldTurnToStone
+    //      :56413-56423——AI_003 帧首序：directionY 维护(:56248)之后、其余 type 段之前）。
+    //      谓词 = remix 世界 `position.Y/16 > maxTilesY-350`（:56415-56417 深度支,昼夜
+    //      无关）；否则 Main.dayTime && WorldGen.InAPlaceWithWind(position,width,height)
+    //      （:56418-56421 白天+风高户外盒——Mounts.inAPlaceWithWind 单源,AllowsWind
+    //      白名单+remix 翻转已对齐 WorldGen.cs:88124-88162）。旧「头顶无遮挡+脚下实心」
+    //      五格盒与 gnomeAge>60 自创冷却退役（2026-09-04 谓词重写批）。
+    //      效果链(:56438-56470)：尘43(白,α254,scale.5,velocity×.2)×1 → 脚面格
+    //      (Center.X/16, Bottom.Y/16) SolidTileAllowBottomSlope（:70698 单源,收坡 0/3/4
+    //      拒顶坡 1/2）→ 尘×5 → TileObject.CanPlace(num,num2-1,567,0,direction,onlyCheck)
+    //      && PlaceTile(num,num2-1,567,rand(5)) → 图鉴 RegisterKill(IsNPCValidForBestiary
+    //      KillCredit 门)+CountKillForBannersAndDropThem(原文无交互门)+成就
+    //      NotifyProgressionEvent(24) → life=0+active=false（不走 checkDead——无掉落/
+    //      尸块/死音;石像被拆才出 4609,CheckGnome :54400 于 Game 'gnome' 支）。傀儡不跑
+    //      fighterAI ⇒ 石化只发生在权威端（旧 fixedUpdate 头置位曾让访客本地误判）。
+    if (this.vanillaId === 624 && !this.dead) {
+      const w = game.world;
+      const remixG = w.seedFlags?.remix === true;
+      // AI_003_Gnomes_ShouldTurnToStone（:56413-56423）
+      const toStone = remixG
+        ? this.y / 16 > w.store.h - 350
+        : !!w.clock?.isDay
+          && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, w.groundLevel);
+      if (toStone) {
+        const num = Math.floor(this.cx / 16);              // :56438 (int)(Center.X / 16f)
+        const num2 = Math.floor((this.y + this.h) / 16);   // :56439 (int)(Bottom.Y / 16f)
+        game.spawnParticles(this.cx, this.cy, '#E0E0E0', 1, 0.2, { life: 30 });
+        if (solidAllowBottomSlope(st, num, num2)) {
+          game.spawnParticles(this.cx, this.cy, '#E0E0E0', 5, 0.2, { life: 30 });
+          const gnomeTile = TILE_BY_KEY['v_567_garden_gnome'] ?? 0;
+          // 占位左上 = Origin(0,1) 对位（Style1x2,TileObjectData.cs:4126-4141
+          // addTile(567)：CoordinateWidth 26+pad2=风格步 28、heights{18,18}+pad2=行帧 0/20）
+          const ax = num, ay = num2 - 2;
+          const rec = anchorSpecOf(567);
+          // CanPlace(onlyCheck)（:56449）——占位/锚点/液体全门；direction 仅作用
+          // alternates 维,567 无备选 ⇒ 方向无关（TileObject.cs:205-208 循环单圈）
+          const canPlace = !!rec && gnomeTile !== 0 && validateAnchors(st, ax, ay, rec, 0);
+          if (canPlace) {
+            const style = Math.floor(Math.random() * 5);   // Main.rand.Next(5)（:56450）
+            const cells = [
+              { x: num, y: ay, type: gnomeTile, fx: style * 28, fy: 0 },
+              { x: num, y: num2 - 1, type: gnomeTile, fx: style * 28, fy: 20 },
+            ];
+            if (game.placeObjectCells) game.placeObjectCells(cells, num, num2 - 1);
+            else for (const c of cells) st.setTile(c.x, c.y, c.type, c.fx, c.fy);  // mock 兜底
+            game.playSfx('place', 1, num * 16, num2 * 16);   // PlaceObject !mute → PlaySound(0)
+            // 击杀记账（:56455-56463 netMode!=1 域=权威端）：onEnemyKilled = 仓内单口
+            // （图鉴 RegisterKill 带 isNpcValidForBestiaryKillCredit 门+net 广播+
+            // achCheckBestiary;旗杀 CountKillForBannersAndDropThem → recordBannerKill
+            // ——该段带仓内 R3-A3 玩家交互门=登记偏差面,石化原文无此门）
+            game.onEnemyKilled(this.key, this);
+            game.achievements?.notifyProgressionEvent(24);   // :56466（GAIN_TORCH_GODS_FAVOR）
+            this.dead = true; this.hp = 0;                   // life=0+active=false（:56467-56468）
+            return;
+          }
+        }
+      }
+    }
     // ---- 111 僵尸威慑态（AI_003 :57368-57407，AI_127_Pal 生成的双僵尸 ai[3]<0）：
     //      TargetClosest(不转面) + 受击/玩家 <200px 解除（转普通僵尸 ai0=0）；
     //      威慑期 directionY=-1、vx ×0.93（<0.1 归零）、恒面向被威慑宠、
@@ -4633,9 +4672,11 @@ export class Enemy extends Entity {
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
     // 门块/跳梯互斥探测（:60584 if(门) else 跳梯）：前方脚上一格是关闭的门
     // （sheet 10）或高门（388）且 flag8 → 本 tick 走攻门、跳梯整体短路
+    // ★G1谓词批(2026-09-04)：原版门= tile.nactive()（NPC.cs:60584）——flags 位读
+    // 漏 !inActive 半边,已致动门格会被误判可攻 → 改 isActive()
     let atDoorTile: number | null = null;              // 命中的门 sheet（10/388）
     if (this.vanillaId != null && !FIGHTER_NO_DOOR.has(this.vanillaId)
-      && st.inBounds(fx, fy - 1) && st.flags[st.idx(fx, fy - 1)]) {
+      && st.inBounds(fx, fy - 1) && st.isActive(fx, fy - 1)) {
       const sheet = TILE_DEFS[st.type[st.idx(fx, fy - 1)]]?.vanilla?.sheet;
       if (sheet === 10 || sheet === 388) atDoorTile = sheet;
     }
@@ -8831,8 +8872,11 @@ export class Enemy extends Entity {
       {
         const botCol = Math.floor(this.cx / TILE);                  // num277 = Center.X/16
         const botRow = Math.floor((this.y + this.h) / TILE);        // num278 = (pos.Y+h)/16
+        // ★G1谓词批(2026-09-04)：原版裸 topSlope()（NPC.cs:24346/:24350）无 active/
+        // nactive 门——isActive 门会漏判已致动/残型坡格致不翻向 → 去门,仅留界内守卫
+        // （vanilla null→空 Tile slope=0 同构）
         const slAt = (x: number, y: number): number =>
-          st.inBounds(x, y) && st.isActive(x, y) ? (st.slope[st.idx(x, y)] ?? 0) : 0;
+          st.inBounds(x, y) ? (st.slope[st.idx(x, y)] ?? 0) : 0;
         const sa = slAt(botCol, botRow);
         const sb = slAt(botCol, botRow + 1);
         if (sa === 1 || sa === 2 || sb === 1 || sb === 2) {         // topSlope()
@@ -8892,10 +8936,13 @@ export class Enemy extends Entity {
         if (this.vy > 1) this.ai0 = -1;
       }
       // 液深探测（cs:24440-24455）：中心上格液>128 且下 1-2 格实心 → 转向上
+      // ★G1谓词批(2026-09-04)：原版裸 active()（NPC.cs:24488/:24491）——含已致动格,
+      // isActive 误排致动底格 → 改 hasTile（:8717 姊妹副本 flags 读同语义,统一向
+      // 正确副本）
       const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
       if (st.inBounds(cx, cy) && st.liquid[st.idx(cx, cy - 1)] > 128) {
-        if ((st.inBounds(cx, cy + 1) && st.isActive(cx, cy + 1))
-          || (st.inBounds(cx, cy + 2) && st.isActive(cx, cy + 2))) this.ai0 = -1;
+        if ((st.inBounds(cx, cy + 1) && st.hasTile(cx, cy + 1))
+          || (st.inBounds(cx, cy + 2) && st.hasTile(cx, cy + 2))) this.ai0 = -1;
       } else {
         this.ai0 = 1;
       }
@@ -11124,8 +11171,11 @@ export class Enemy extends Entity {
       if (Math.abs(tgt.cy - this.cy) < halfH) { y4 = (tgt.cy - halfH) / TILE; y5 = (tgt.cy + halfH) / TILE; }
       else if (tgt.cy < this.cy) { y4 = (tgt.cy + halfH) / TILE; y5 = this.cy / TILE; }
       else { y4 = this.cy / TILE; y5 = (tgt.cy - halfH) / TILE; }
-      const solid2 = (tx: number, ty: number): boolean =>
-        st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0 && !!TILE_DEFS[st.type[st.idx(tx, ty)]]?.solid;
+      // ★G1谓词批(2026-09-04)：落点基座= WorldGen.SolidTile2（NPC.cs:43891 →
+      //  WorldGen.cs:71023 active&&!inActive&&tileSolid[+坡/半砖细支]）——手搓 flags
+      //  读漏 !inActive 半边（已致动实心会被当落地基座）→ 改 st.isSolid()（active+
+      //  致动位+实心 LUT 同核;坡/半砖细支为既有近似,非本批面）
+      const solid2 = (tx: number, ty: number): boolean => st.isSolid(tx, ty);
       const clearAbove = (tx: number, ty: number): boolean => {   // IsThisAGoodPlaceForAStatueMimic（:43751）
         for (let dy = 1; dy <= 3; dy++) {
           if (!st.inBounds(tx, ty - dy)) continue;
@@ -11640,16 +11690,18 @@ export class Enemy extends Entity {
     if (squids >= 3) return;
     const cxT = Math.floor(this.cx / TILE), cyT = Math.floor(this.cy / TILE);
     const pxT = Math.floor(pp.cx / TILE), pyT = Math.floor(pp.cy / TILE);
-    const solid2 = (tx: number, ty: number) =>
-      st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0 && !!TILE_DEFS[st.type[st.idx(tx, ty)]]?.solid;
-    const active = (tx: number, ty: number) => st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0;
+    // ★G1谓词批(2026-09-04)：落点门= !tile.nactive()（NPC.cs:48009）+ 排实心=
+    // Collision.SolidTiles ±2（:48014 → Collision.cs:3494 active&&!inActive&&
+    // tileSolid&&!tileSolidTop;本仓平台 solid=false 同域排除）——手搓 flags 读漏
+    // !inActive 半边 → st.isActive()/st.isSolid()
+    const solid2 = (tx: number, ty: number) => st.isSolid(tx, ty);
     for (let attempt = 0; attempt < 100; attempt++) {
       const x = cxT + Math.floor(Math.random() * 41) - 20;
       const y = cyT + Math.floor(Math.random() * 41) - 20;
       // 双排除环（:47855-47857）：离本体 ±8 / 离玩家 ±3 之外
       if (Math.abs(y - cyT) <= 8 && Math.abs(x - cxT) <= 8) continue;
       if (Math.abs(y - pyT) <= 3 && Math.abs(x - pxT) <= 3) continue;
-      if (active(x, y)) continue;               // nactive() = active&&!inActive 近似
+      if (st.isActive(x, y)) continue;          // nactive()
       if (st.inBounds(x, y) && st.liquid[st.idx(x, y)] === 2) continue;   // lava
       let clear = true;                         // Collision.SolidTiles ±2
       for (let xx = x - 2; xx <= x + 2 && clear; xx++) {
@@ -11792,10 +11844,13 @@ export class Enemy extends Entity {
           && TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet === 519;
         if (Math.floor(Math.random() * (cattail ? 30 : 4)) === 0) {
           // FindCattailTop（NPC.cs:80977-81004）：±30×±20 找 frameX≥180 香蒲顶,蓄水池采样
+          // ★G1谓词批(2026-09-04)：原版裸 active()（NPC.cs:81007 `tile.active() &&
+          //  type==519`）——isActive 误排已致动香蒲 → 改 hasTile（对齐
+          //  VanillaSpawner.findCattailTop 正确副本 flags 读）
           let bx = ax, by = ay, found = false, denom = 1;
           for (let i = ax - 30; i <= ax + 30; i++) {
             for (let j = ay - 20; j <= ay + 20; j++) {
-              if (!st.inBounds(i, j) || !st.isActive(i, j)) continue;
+              if (!st.inBounds(i, j) || !st.hasTile(i, j)) continue;
               const ii = st.idx(i, j);
               if (TILE_DEFS[st.type[ii]]?.vanilla?.sheet === 519 && st.frameX[ii] >= 180
                 && Math.floor(Math.random() * denom) === 0) {

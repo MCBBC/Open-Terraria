@@ -43,12 +43,21 @@ const out = await page.evaluate(async () => {
       }
       for (const alpha of ALPHAS) {
         const m = (255 - alpha) / 255;
-        const { add } = dustPremulBake(tex, m, m, m, m);
+        const { add, erase } = dustPremulBake(tex, m, m, m, m);
         checked++;
+        // ★2026-09-04 水花黑十字定谳后真不变量更新：add.A 不得超过 XNA src.a=e
+        //  （=erase.A,±1 舍入）——α 超式即半透域挡天（水花黑十字/黑方块同根）;
+        //  "有 α 无 rgb" 仅在 α≤e 内合法（XNA 黑 texel 本征压暗,哨兵 1954 旧判据
+        //  按二值 255/0 语义已废）。
         for (let i = 0; i < add.length; i += 4) {
-          if (add[i + 3] > 0 && add[i] + add[i + 1] + add[i + 2] === 0) {
-            viol.push({ type, fvi, alpha, texel: [i / 4 % 8, Math.floor(i / 4 / 8)] });
-            break;   // 每帧×档报一次即可
+          const e = erase[i + 3];
+          const excess = add[i + 3] - e;
+          if (excess > 1) {
+            const rgbM = Math.max(add[i], add[i + 1], add[i + 2]);
+            if (excess > rgbM + 1) {   // α 过冲必须恰好由 rgb 亮度兜底（存面 rgb≤a 约束）
+              viol.push({ type, fvi, alpha, texel: [i / 4 % 8, Math.floor(i / 4 / 8)], addA: add[i + 3], e, rgbM });
+              break;
+            }
           }
         }
       }

@@ -12,6 +12,9 @@ function fakeStore(cells: Array<{ x: number; y: number; t: number; fx: number; f
   return {
     idx: (x: number, y: number) => x * 100000 + y,
     isActive: (x: number, y: number) => map.has(String(x * 100000 + y)),
+    // ★G1 谓词形态批（2026-09-04）：scanBannerNpcs/scanBannerReps 改读裸 active()
+    // （SceneMetrics.ScanTiles :365-372）→ mock 同步提供 hasTile
+    hasTile: (x: number, y: number) => map.has(String(x * 100000 + y)),
     type: new Proxy({}, { get: (_t, p) => map.get(String(p))?.t ?? 0 }),
     frameX: new Proxy({}, { get: (_t, p) => map.get(String(p))?.fx ?? 0 }),
     frameY: new Proxy({}, { get: (_t, p) => map.get(String(p))?.fy ?? 0 }),

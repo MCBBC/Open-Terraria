@@ -13,6 +13,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { FlailProj } from '../src/entities/WeaponProj';
 import { Arrow } from '../src/entities/Arrow';
+import { projWaterDragFactor } from '../src/entities/projWetSection';
 import { projectileData } from '../src/data/vanillaProjectiles';
 import type { GameHooks } from '../src/entities/types';
 
@@ -348,5 +349,102 @@ describe('★V3 溅花/湿计数段（:16935-17102）逐值', () => {
     S.tick(1);
     expect(S.splash().length).toBe(0);                 // wet 已是 false → 不走出水支
     expect((S.a as unknown as { wetCount: number }).wetCount).toBe(0);
+  });
+});
+
+// =====================================================================
+// ★L2 湿段时序钉 + 水中位移阻尼（2026-09-04 重排金标）
+//  原版本段位序 = Update 内 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)：
+//  段内 WetCollision 测位/溅花出生位在【位移前】,AI 头湿旗消费者读【上一子步段值】
+//  （字段语义）,位移消费当拍旗做阻尼（wetVelocity=velocity×档位只进 UpdatePosition
+//  :17721-17764/:20555-20562,速度【场】不被改写）。旧仓湿段挂子步尾（位移后）：
+//  段值/溅花晚一拍、位移无阻尼——本组钉重排后的逐值时序。
+//  ★重锚论证（既有 F3①②/V3 全案零改全绿）：各案弹均为静止弹（grav:0、v=0）,
+//  位移前位 ≡ 位移后位 → 段测位逐值不变;F3① 变型时序同拍（出生预置已带 wet=true,
+//  水death 支自 AI 中段并回段内原位 :16921 后仍在首子步触发）——旧断言无一钉
+//  "段在子步尾"结构（两测试文件全文核对,无源码结构断言）,故无需改写、仅新增。
+// =====================================================================
+describe('★L2 湿段时序钉 + 水中位移阻尼（2026-09-04 重排金标）', () => {
+  /** 位移记录宿主（469/1 型 EU=0 → 1 fixedUpdate = 1 子步;尘按盒尺寸分流） */
+  function mkMoving(store: TileStore, projId: number, x: number, y: number, vx: number) {
+    const dusts: Array<{ sw: number; sh: number; type: number }> = [];
+    const a = new Arrow(x, y, vx, 0, 12, 1, projId, null, { grav: 0 });
+    const g = {
+      ...hooks(store),
+      spawnDust: (_sx: number, _sy: number, sw: number, sh: number, type: number) => {
+        dusts.push({ sw, sh, type });
+        return null;
+      },
+    } as unknown as GameHooks;
+    const tick = (n: number) => { for (let i = 0; i < n && !a.dead; i++) a.fixedUpdate(1 / 60, g); };
+    const splash = () => dusts.filter((e) => e.sw === 22 && e.sh === 24);   // 溅花专用盒 (w+12,24)
+    return { a, dusts, splash, tick };
+  }
+
+  it('时序钉：AI 头湿旗消费者读【上拍段值】——位移后本拍入水不杀,次拍才杀;溅花在段位（位移前）', () => {
+    const st = new TileStore(60, 160);
+    st.liquid[st.idx(20, 40)] = LIQ; st.liquidType[st.idx(20, 40)] = 1;
+    // 469 蜂箭（EU=0,探针 [x,x+10]×[y+3,y+8]）出生 x=290、vx=6/子步：
+    //   位移后位次 296/302/308/314…——探针右缘 x+10>320 首现于 tick4 位移后（314）;
+    //   湿段测位=【下一子步头】(tick5 段测 314=上拍位移末位) → tick5 段置 wet+入水
+    //   溅花（段在位移前）,tick6 AI 头才读到 wet → Kill。
+    //   旧"段在子步尾"版：wet 于 tick4 段置上（测位移后 314）→ tick4 已溅花、tick5
+    //   即杀——本断言组即重排钉（旧版下四处 expect 全爆红）。
+    const M = mkMoving(st, 469, 290, 637, 6);
+    M.tick(4);
+    expect(M.a.dead).toBe(false);
+    expect(M.splash().length).toBe(0);                 // tick4：段测的是位移前 308（干）
+    expect(M.a.wet).toBe(false);
+    M.tick(1);                                         // tick5：段测 314（上拍位移末位）→湿
+    expect(M.a.dead).toBe(false);                      // AI 头读上拍段值（dry）→ 不杀
+    expect(M.splash().length).toBe(10);                // 入水溅花在段位（位移前）触发
+    expect(M.a.wet).toBe(true);
+    M.tick(1);                                         // tick6：AI 头读到 tick5 段值 wet → Kill
+    expect(M.a.dead).toBe(true);
+  });
+
+  it('阻尼档：projWaterDragFactor 微光 0.375/蜂蜜 0.25/水 0.5/干 1（档序同原文 if/else 链,岩浆归水档）', () => {
+    expect(projWaterDragFactor({ wet: false, honeyWet: false, shimmerWet: false })).toBe(1);
+    expect(projWaterDragFactor({ wet: true, honeyWet: false, shimmerWet: false })).toBe(0.5);
+    expect(projWaterDragFactor({ wet: true, honeyWet: true, shimmerWet: false })).toBe(0.25);
+    expect(projWaterDragFactor({ wet: true, honeyWet: false, shimmerWet: true })).toBe(0.375);
+    // 档序：shimmer > honey > wet（原文 :17724 shimmerWet → :17740 honeyWet → else 水）
+    expect(projWaterDragFactor({ wet: true, honeyWet: true, shimmerWet: true })).toBe(0.375);
+    // 岩浆无独立档：WetCollision 对 liquid>0 不分液型恒 wet → 走水档 else 支
+    //（:17753）；实路钉在下方位移案 LV（lavaWet 粘滞下 ×0.5）
+  });
+
+  it('位移减半速度场不变：湿态 x += vx×档位（水 3/蜜 1.5/微光 2.25）,vx/vy 字段恒 6/0;干态全速', () => {
+    // 水列 20（[320,336]）：出生盒内（探针 [322,332]）→ 预置 wet=true → 首子步位移即吃档
+    const col = (t: number) => {
+      const s = new TileStore(60, 160);
+      s.liquid[s.idx(20, 40)] = LIQ; s.liquidType[s.idx(20, 40)] = t;
+      return s;
+    };
+    const W = mkMoving(col(1), 1, 322, 637, 6);        // 1 木箭：非 ignoreWater/非消亡族
+    W.tick(2);
+    expect(W.a.x).toBe(322 + 3 + 3);                   // 6×0.5/子步 ×2
+    expect(W.a.vx).toBe(6);                            // ★速度【场】不被水阻改写
+    expect(W.a.vy).toBe(0);
+    expect(W.a.wet).toBe(true);
+    const H = mkMoving(col(3), 1, 322, 637, 6);        // 蜂蜜：×0.25 → 1.5/子步
+    H.tick(2);
+    expect(H.a.x).toBe(322 + 1.5 + 1.5);
+    expect(H.a.vx).toBe(6);
+    expect(H.a.honeyWet).toBe(true);
+    const SH = mkMoving(col(4), 1, 322, 637, 6);       // 微光：×0.375 → 2.25/子步
+    SH.tick(2);
+    expect(SH.a.x).toBe(322 + 2.25 + 2.25);
+    expect(SH.a.vx).toBe(6);
+    expect(SH.a.shimmerWet).toBe(true);
+    const LV = mkMoving(col(2), 1, 322, 637, 6);       // 岩浆：wet 同真 → 水档 ×0.5
+    LV.tick(2);
+    expect(LV.a.x).toBe(322 + 3 + 3);
+    expect(LV.a.vx).toBe(6);
+    const D = mkMoving(new TileStore(60, 160), 1, 309, 637, 6);   // 干区对照：×1 全速
+    D.tick(2);
+    expect(D.a.x).toBe(309 + 6 + 6);
+    expect(D.a.vx).toBe(6);
+    expect(D.a.wet).toBe(false);
   });
 });

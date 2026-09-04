@@ -12,6 +12,7 @@ import { Game } from '../src/core/Game';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { TILE_BY_KEY, TILE_DEFS, T, VANILLA_TILE_ID } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
+import { Achievements } from '../src/core/Achievements';
 import { Enemy } from '../src/entities/Enemy';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -833,5 +834,20 @@ describe('触达面族幽灵格门（X2 F1/F2/F4/F5/F7/F8）', () => {
     xmasSetDecor(st, 20, 20, 0, 2);
     expect(xmasDecorStyle(st, 20, 20, 0)).toBe(2);     // 活性锚照常换装
     expect(st.flags[st.idx(20, 20)]).toBe(1);
+  });
+});
+
+// ============================================================
+// 合成成就双通知（CraftItem_GrantItem Main.cs:43353-54 尾奏）——
+// OBTAIN_HAMMER("停！锤子时间到！")= ItemPickupCondition(37 锤族,木锤 7 在列)，
+// 触发面=合成授予（NotifyItemPickup(recipe.createItem)），非拾取掉落物
+// ============================================================
+describe('合成成就双通知', () => {
+  it('合成木锤 → notifyItemCraft+notifyItemPickup(7) 双调', () => {
+    // 模块级锁：Achievements.notifyItemPickup(7) 完成表内 OBTAIN_HAMMER
+    const ach = new Achievements();
+    expect(ach.isCompleted('OBTAIN_HAMMER')).toBe(false);
+    ach.notifyItemPickup(7);
+    expect(ach.isCompleted('OBTAIN_HAMMER')).toBe(true);
   });
 });

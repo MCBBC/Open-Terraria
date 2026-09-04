@@ -3842,8 +3842,10 @@ export interface DualLayoutResult {
   featRooms?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number;
     /** ★IIIII107c：EarlyDual S1..S7 臂扩展面（可选字段,旧消费者零感知）——
      *  o*=OuterBounds 四界（DungeonBounds 域,含即 [L,R)×[T,B) 半开语义由消费端自解释）；
-     *  bio=BiomeDungeonRoom 实例旗（S4 候选剔除门 cs:205-209）。 */
-    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean }>;
+     *  bio=BiomeDungeonRoom 实例旗（S4 候选剔除门 cs:205-209）；
+     *  ★IIIII111 R7：bt=roomType（BiomeRugged=5 追加拒 Banners/Paintings 的
+     *  BiomeRuggedDungeonRoom.cs:45 房类覆写判别域）。 */
+    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean; bt?: number }>;
   featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
   /** ★IIIII111c：PD 面厅载荷（DungeonCrawler.cs:484-487 厅循环消费域）——
    *  ht=HallType（0 Legacy/2 Regular/3 Stairwell/4 Sine）、ent=IsEntranceHall
@@ -4043,6 +4045,9 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     // ★IIIII107c：S4 ConnectedRoom.OuterBounds 门 + BiomeDungeonRoom 剔除门投影
     oL: rm.outer.L, oT: rm.outer.T, oR: rm.outer.R, oB: rm.outer.B,
     bio: rm instanceof DBiomeRoomBase,
+    // ★IIIII111 R7：房类型（BiomeDungeonRoom.cs:27 基类拒表 + BiomeRuggedDungeonRoom.cs:45
+    //   追加拒 Banners/Paintings 的房类判别——bt=5 即 Rugged）
+    bt: rm.settings.roomType,
   }));
   const featHalls = data.halls.map((hh) => ({
     gen: hh.generated, st: hh.settings.style.Style,
