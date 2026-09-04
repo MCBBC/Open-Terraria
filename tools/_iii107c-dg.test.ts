@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, append
 import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
-import { RNG } from '../src/core/rng';
+import { RNG, UnifiedRandom } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
 
@@ -195,13 +195,19 @@ const le16 = (p: string): Uint16Array => {
   let rollSeq = 0;
   const oOnRoll = (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll;
   const rollRows: number[] = [];
+  let inst406: { next(): number } | null = null;
+  const instHist = new Map<object, number[]>();
   if (ROLLCAP || ROLLSTACK > 0 || ROLLSTACK2 > 0) {
-    (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v) => {
+    (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v, inst) => {
       rollSeq++;
       rollRows.push(v);
+      let h = instHist.get(inst);
+      if (!h) { h = []; instHist.set(inst, h); }
+      h.push(v);
       if ((rollSeq === ROLLSTACK && ROLLSTACK > 0) || (rollSeq === ROLLSTACK2 && ROLLSTACK2 > 0)) {
         const stack = (new Error().stack ?? '').split('\n').filter((l) => l.includes('/src/')).slice(0, 9);
         console.log(`[107c] roll#${rollSeq} value=${v}\n${stack.join('\n')}`);
+        inst406 = inst as { next(): number };
       }
     };
   }
@@ -215,6 +221,45 @@ const le16 = (p: string): Uint16Array => {
     runDungeonPass(st, rng, gs, [], () => {});
   } finally {
     (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = oOnRoll;
+    // ★fork 实证：#406 实例的后续采样 == x86 窗口 #407..#737 的 331 样本块？
+    if (inst406 && existsSync('/tmp/iii145-out/x86-dg-window.txt')) {
+      const xw2 = readFileSync('/tmp/iii145-out/x86-dg-window.txt', 'utf8').split('\n');
+      const xvals = xw2.slice(406, 406 + 331).map((l) => l.split('|')[2]);
+      const inst2 = inst406 as unknown as { next(): number };
+      const cont: number[] = [];
+      for (let i = 0; i < 6000; i++) cont.push(inst2.next());
+      const head = xvals[0];
+      const hits: number[] = [];
+      for (let k = 0; k < cont.length - 340; k++) if (String(cont[k]) === head) hits.push(k);
+      for (const k of hits.slice(0, 5)) {
+        const ok = xvals.every((v, i) => String(cont[k + i]) === v);
+        console.log(`[107c] fork-block probe: block found at continuation offset k=${k} full331match=${ok}`);
+      }
+      if (hits.length === 0) {
+        console.log('[107c] fork-block probe: no hit within 6000-sample continuation');
+        // ★全实例状态快照搜索：对 pass 内每个 UnifiedRandom 实例，快照→消费 400 样本
+        //   找 block 头→331 全匹配验证→恢复。命中者=x86 超耗实例（JS 侧已停采）。
+        const head3 = xvals.slice(0, 3);
+        let hitInfo = '';
+        for (const [inst2, hist] of instHist) {
+          const rec = inst2 as unknown as { seedArray: Int32Array; inext: number };
+          if (!rec.seedArray) continue;
+          const saSave = Int32Array.from(rec.seedArray);
+          const ixSave = rec.inext;
+          const probe: number[] = [];
+          const asU = inst2 as unknown as { next(): number };
+          for (let i = 0; i < 400; i++) probe.push(asU.next());
+          rec.seedArray.set(saSave); rec.inext = ixSave;
+          const at = probe.findIndex((v, i) => String(v) === head3[0] && i + 331 <= probe.length
+            && xvals.every((x, j) => String(probe[i + j]) === x));
+          if (at >= 0) {
+            hitInfo = `inst histLen=${hist.length} firstVal=${hist[0]} lastVal=${hist[hist.length - 1]} blockAtContinuationOffset=${at}`;
+            break;
+          }
+        }
+        console.log(`[107c] fork-block instance sweep: ${hitInfo || 'no instance hit'}`);
+      }
+    }
     if (ROLLCAP) {
       writeFileSync(ROLLCAP, rollRows.map((v, i) => `R|${i + 1}|${v}`).join('\n') + '\n');
       console.log(`[107c] rollcap rows=${rollRows.length} -> ${ROLLCAP}`);

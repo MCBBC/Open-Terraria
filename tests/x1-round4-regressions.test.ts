@@ -1,4 +1,7 @@
 // SW-X1 2026-09-04：红蓝四轮 findings 清偿回归（H-1/M-1/M-2/L-1）。
+// SW-AE1 2026-09-04：M-1/F-2 拍序断言改写为 localAI[0] 计数器 crossing 期望序列
+// （NPC.cs 1457 :28838-41/:28918-21 炮、:29074-77/:29153-56 激光;aiT 取模退役——
+// 用例不再驱动 aiT（恒 0）,旧取模模型会每拍齐射即被证伪;首发 = 计数 crossing 拍）。
 // 标杆 Terarria1457——H-1/BombSkeletronPrimeProj（Projectile.cs :47786-47800 平台判据 /
 // :17305-17311 timeLeft-- / :17718 TileCollision 赋回 / :48004-48006 落地引信钳）、
 // M-1/bossAI 炮臂（NPC.cs :28722 localAI+=2 与 :28838-28841/:28918-28921 计数终态）、
@@ -161,34 +164,36 @@ describe('SW-X1 M-1：Prime 炮臂（aiStyle 35）发弹周期/几何', () => {
     return { env, head: head!, arm: arm!, projs, player };
   }
 
-  it('悬停支:普通 141t/发、头旋冲 47t/发（:28722 localAI+=2 与 :28838-28841 计数终态）', () => {
-    for (const [charge, period, want] of [[false, 141, 3], [true, 47, 7]] as const) {
+  // SW-AE1 2026-09-04：计数器 crossing 序列——aiT 不再驱动（恒 0,旧取模模型每拍齐射即证伪）;
+  // 首发 = localAI[0] crossing 拍（初值 0,普通 141 拍/旋冲 47 拍）,steady 拍序同 SW-X1 钉值。
+  it('悬停支 crossing:普通 141t/发（>140f）、头旋冲 +3/t → 47t/发（:28722+:28838-41）', () => {
+    for (const [charge, want] of [
+      [false, [140, 281]],
+      [true, [46, 93, 140, 187, 234, 281]],
+    ] as const) {
       const { arm, head, projs, env, player } = mkArm();
       head.ai1 = charge ? 1 : 0;
       const fireTicks: number[] = [];
       for (let t = 0; t < 300; t++) {
-        arm.aiT = t;
         const before = projs.length;
         primePartAI(arm, env.g, player);
         if (projs.length > before) fireTicks.push(t);
       }
-      expect(fireTicks, `charge=${charge}`).toEqual([0, ...Array.from(
-        { length: want - 1 }, (_, i) => (i + 1) * period)]);
+      expect(fireTicks, `charge=${charge}`).toEqual(want);
     }
   });
 
-  it('直冲支（ai2==1）:41t/发,无旋冲加成（:28918-28921 唯一 ++）;速 10 ±离散散布', () => {
+  it('直冲支（ai2==1）crossing:41t/发（>40f）,无旋冲加成（:28918-28921 唯一 ++）;速 10 ±离散散布', () => {
     const { arm, head, projs, env, player } = mkArm();
     head.ai1 = 1;                                             // 旋冲态也不加成
     arm.ai2 = 1;
     const fireTicks: number[] = [];
     for (let t = 0; t < 300; t++) {
-      arm.aiT = t;
       const before = projs.length;
       primePartAI(arm, env.g, player);
       if (projs.length > before) fireTicks.push(t);
     }
-    expect(fireTicks).toEqual([0, 41, 82, 123, 164, 205, 246, 287]);
+    expect(fireTicks).toEqual([40, 81, 122, 163, 204, 245, 286]);
     const d = Math.hypot(projs[0].vx, projs[0].vy);
     expect(Math.abs(d - 10)).toBeLessThanOrEqual(0.6);        // num568=10 ±散布 ≤0.4/轴
   });
@@ -198,7 +203,6 @@ describe('SW-X1 M-1：Prime 炮臂（aiStyle 35）发弹周期/几何', () => {
     head.ai1 = 0;
     let checked = 0;
     for (let t = 0; t < 141; t++) {
-      arm.aiT = t;
       const before = projs.length;
       const cx0 = arm.cx, cy0 = arm.cy;
       primePartAI(arm, env.g, player);
@@ -316,31 +320,30 @@ describe('SW-AA1 F-2：Prime 激光臂（aiStyle 36）出膛位/散布', () => {
     }
   }
 
-  it('attached（ai2=0）201t/发、速 8 ±0.05 离散散布、出膛位 ×8（:29074-29091）', () => {
+  // SW-AE1 2026-09-04：crossing 序列（aiT 恒 0;首发 = >200f/>80f crossing 拍）
+  it('attached（ai2=0）crossing 201t/发、速 8 ±0.05 离散散布、出膛位 ×8（:29074-29091）', () => {
     const { arm, head, projs, env, player } = mkLaserArm();
     head.ai1 = 0;
     const fireTicks: number[] = [];
     for (let t = 0; t < 420; t++) {
-      arm.aiT = t;
       const before = projs.length;
       const cx0 = arm.cx, cy0 = arm.cy;                              // primePartAI 尾段 e.x+=e.vx 会移臂,先捕发拍中心
       primePartAI(arm, env.g, player);
       if (projs.length > before) { fireTicks.push(t); assertGeometry(cx0, cy0, player, projs, before, 8); }
     }
-    expect(fireTicks).toEqual([0, 201, 402]);
+    expect(fireTicks).toEqual([200, 401]);
   });
 
-  it('detached（ai2=1）81t/发、速 10 ±0.05 离散散布、出膛位系数恒 8（:29153-29170）', () => {
+  it('detached（ai2=1）crossing 81t/发、速 10 ±0.05 离散散布、出膛位系数恒 8（:29153-29170）', () => {
     const { arm, head, projs, env, player } = mkLaserArm();
     head.ai1 = 0; arm.ai2 = 1;
     const fireTicks: number[] = [];
     for (let t = 0; t < 160; t++) {                                  // ai3≥200 回翻前只验 detached 窗
-      arm.aiT = t;
       const before = projs.length;
       const cx0 = arm.cx, cy0 = arm.cy;
       primePartAI(arm, env.g, player);
       if (projs.length > before) { fireTicks.push(t); assertGeometry(cx0, cy0, player, projs, before, 10); }
     }
-    expect(fireTicks).toEqual([0, 81]);
+    expect(fireTicks).toEqual([80]);
   });
 });

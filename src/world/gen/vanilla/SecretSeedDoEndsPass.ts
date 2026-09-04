@@ -51,10 +51,15 @@
 //      树基与转化面重叠罕见，出现即落为坍塌级联而非换种；
 //   ③ DoRainbowStuff 播种臂 PlaceTile→Place2x2(126 discoball) 按 acceptance 门直译
 //      （cs:51780-51873），不含通用 PlaceTile 全前置门清单——discoball 相关门已被函数体
-//      自身条件 + 天花板实心门覆盖；
+//      自身条件 + 天花板实心门覆盖；★IIIII108a 补齐：邻近 126 活性门 + 天花板支撑
+//      SolidTile(int,int) 全门（solidTileGround）+ 落位成功尾 SquareTileFrame（cs:60754），
+//      残余近似仅剩 PlaceTile 头门恒真（126/184 均 ∉tileSolid ⇒ !tileSolid[num] 支恒过）
+//      与生成期无玩家/NPC 的 EmptyTile 退化——均结构性恒等；
 //   ④ 箱染尾段以 compact items 数组等价实现「首空槽插入」（SW ChestData 无稀疏槽位模型）；
-//   ⑤ OverGrownDungeonWithRainbowMoss 的 PlaceTile(184, style=10) 苔芽简化为空格+任一实心
-//      邻支撑门直写帧 frameX=180。
+//   ⑤（已失效留档，勿据此回归）OverGrownDungeonWithRainbowMoss 的苔芽放置曾是
+//      「空格+任一实心邻直写 frameX=180」近似——★IIIII108a 起为 placeTile184Gen
+//      PlaceTile(184,style:10) 全语义（tileMoss∪tileMossBrick 双支邻门+SolidTile+
+//      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
 import type { RNG } from '../../../core/rng';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
@@ -788,6 +793,183 @@ export function doSurfaceIsDesertFinish(st: TileStore, rng: RNG, gs: GenState): 
 }
 
 // ============================================================
+// ★IIIII106b DoErrorWorldShuffleBlocks（i am error 乱块海，cs:1095-1282）
+// 消费位①=LifeCrystals pass 头（cs:16866，denySomeGeneration 门内 errorWorld 支）
+// 消费位②=GenerateSkyBlockWorld 尾（cs:23013，skyblock 组合域=GAP-IIII44 登记不接）
+// ============================================================
+/** Main.tileDungeon（地牢砖族，tileDungeon 表） */
+const EW_TILE_DUNGEON = new Set([41, 43, 44, 481, 482, 483]);
+/** DoErrorWorldGetRandomBlock（cs:1085-1093）：Next(754) 拒采至
+ *  solid && !solidTop && !frameImportant && !tileDungeon && !{58,226,404}。 */
+function ewGetRandomBlock(rng: RNG): number {
+  for (;;) {
+    const num = rng.nextInt(754);                                    // TileID.Count=754（TileID.cs:1945）
+    if (!genSolidType(idOf(num))) continue;
+    if (VAN_TILE_SOLID_EXTRA.has(num)) continue;                     // tileSolidTop 家族
+    if (EW_FRAME_IMPORTANT_SHEET[num]) continue;
+    if (EW_TILE_DUNGEON.has(num) || num === 58 || num === 226 || num === 404) continue;
+    return num;
+  }
+}
+/** ErrorWorldSwapTiles（cs:1284-1300）：type/active/paint/fullbright+invisible 位四联互换。 */
+function ewSwapTiles(st: TileStore, i1: number, i2: number): void {
+  const t1 = st.type[i1], a1 = st.flags[i1] & 1, c1 = st.paint[i1];
+  const cb1 = st.coat[i1] & (TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK);
+  st.type[i1] = st.type[i2];
+  st.flags[i1] = (st.flags[i1] & ~1) | (st.flags[i2] & 1);
+  st.paint[i1] = st.paint[i2];
+  st.coat[i1] = (st.coat[i1] & ~(TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK))
+    | (st.coat[i2] & (TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK));
+  st.type[i2] = t1;
+  st.flags[i2] = (st.flags[i2] & ~1) | a1;
+  st.paint[i2] = c1;
+  st.coat[i2] = (st.coat[i2] & ~(TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK)) | cb1;
+}
+/** 格元可采判定（phase2/3/4 共用）：!anyShimmer && solid && !solidTop && !frameImportant */
+function ewCellSwapable(st: TileStore, x: number, y: number, shimmerCheck: boolean): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  const sh = SHEET_OF_TYPE[t];
+  if (shimmerCheck) {
+    if (st.liquid[i] !== 0 && st.liquidType[i] === LIQUID_TYPE.SHIMMER) return false;   // anyShimmer
+  }
+  if (!genSolidType(t)) return false;
+  if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;
+  if (EW_FRAME_IMPORTANT_SHEET[sh]) return false;
+  if (EW_FRAME_IMPORTANT_SHEET[SHEET_OF_TYPE[st.type[st.idx(x, y - 1)]] ?? -1]) return false;  // 上邻 FI 门
+  if (EW_FRAME_IMPORTANT_SHEET[SHEET_OF_TYPE[st.type[st.idx(x, y + 1)]] ?? -1]) return false;  // 下邻 FI 门
+  return true;
+}
+/** DoErrorWorldShuffleBlocks 本体。单旗标域 errorWorldAdjustment(1.0)≡1。 */
+export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState): void {
+  const num = 30, num2 = 50;                                           // cs:1101-1102 字面
+  const remix = !!gs.seedFlags.remix;
+  const underworld = st.h - 200;
+  // ── 相①（cs:1103-1118）：maxTilesX*10 枚单格随机置换（GetRandomBlock 拒采域）──
+  {
+    const count = Math.trunc(st.w * 10 / 1);
+    for (let i = 0; i < count; i++) {
+      let num4 = rng.nextIntRange(num, st.w - num);
+      let num5 = rng.nextIntRange(num + num2, st.h - num);
+      while (!ewCellSwapable(st, num4, num5, false)) {
+        num4 = rng.nextIntRange(num, st.w - num);
+        num5 = rng.nextIntRange(num + num2, st.h - num);
+      }
+      st.type[st.idx(num4, num5)] = idOf(ewGetRandomBlock(rng));
+    }
+  }
+  // ── 相②（cs:1120-1152）：maxTilesX/2 对「竖直两格对」整体互换 ──
+  {
+    const count = Math.trunc(st.w / 2 / 1);
+    for (let j = 0; j < count; j++) {
+      let num6 = rng.nextIntRange(num, st.w - num);
+      let num7 = rng.nextIntRange(num + num2, st.h - num);
+      while (!ewCellSwapable(st, num6, num7, true)) {
+        num6 = rng.nextIntRange(num, st.w - num);
+        num7 = rng.nextIntRange(num + num2, st.h - num);
+      }
+      let num8 = rng.nextIntRange(num, st.w - num);
+      let num9 = rng.nextIntRange(num + num2, st.h - num);
+      while (!ewCellSwapable(st, num8, num9, true)) {
+        num8 = rng.nextIntRange(num, st.w - num);
+        num9 = rng.nextIntRange(num + num2, st.h - num);
+      }
+      if (remix) {
+        if ((num6 > st.w / 2 - 30 && num6 < st.w / 2 + 30 && num7 > underworld)
+          || (num8 > st.w / 2 - 30 && num8 < st.w / 2 + 30 && num9 > underworld)) continue;
+      } else if ((num6 > st.w / 2 - 30 && num6 < st.w / 2 + 30 && num7 < gs.worldSurface)
+        || (num8 > st.w / 2 - 30 && num8 < st.w / 2 + 30 && num9 < gs.worldSurface)) {
+        continue;
+      }
+      ewSwapTiles(st, st.idx(num6, num7), st.idx(num8, num9));
+    }
+  }
+  // ── 相③（cs:1153-1232）：maxTilesX/2 块矩形互换（横 5-20×1-3 / 竖 1-4×5-20）──
+  {
+    const count = Math.trunc(st.w / 2 / 1);
+    for (let k = 0; k < count; k++) {
+      let num10 = 1, num11 = 1;
+      if (rng.nextInt(2) === 0) {
+        num10 = rng.nextIntRange(5, 20);
+        num11 = rng.nextIntRange(1, 3);
+      } else {
+        num10 = rng.nextIntRange(1, 3);
+        num11 = rng.nextIntRange(5, 20);
+      }
+      let num12 = rng.nextIntRange(num, st.w - num);
+      let num13 = rng.nextIntRange(num + num2, st.h - num);
+      let flag = false;
+      for (let l = num12; l < num12 + num10 && !flag; l++) {
+        for (let m = num13; m < num13 + num11; m++) {
+          if (!ewCellSwapable(st, l, m, true)) { flag = true; break; }
+        }
+      }
+      if (flag) continue;
+      let num14 = rng.nextIntRange(num, st.w - num);
+      let num15 = rng.nextIntRange(num + num2, st.h - num);
+      flag = false;
+      for (let n = num14; n < num14 + num10 && !flag; n++) {
+        for (let o = num15; o < num15 + num11; o++) {
+          if (!ewCellSwapable(st, n, o, true)) { flag = true; break; }
+        }
+      }
+      if (flag) continue;
+      if (remix) {
+        if ((num12 + num10 / 2 > st.w / 2 - 50 && num12 < st.w / 2 + 50 && num13 > underworld)
+          || (num14 + num10 / 2 > st.w / 2 - 50 && num14 < st.w / 2 + 50 && num15 > underworld)) continue;
+      } else if ((num12 + num10 / 2 > st.w / 2 - 50 && num12 < st.w / 2 + 50 && num13 < gs.worldSurface)
+        || (num14 + num10 / 2 > st.w / 2 - 50 && num14 < st.w / 2 + 50 && num15 < gs.worldSurface)) {
+        continue;
+      }
+      for (let a = 0; a < num10; a++) {
+        for (let b = 0; b < num11; b++) {
+          ewSwapTiles(st, st.idx(num12 + a, num13 + b), st.idx(num14 + a, num15 + b));
+        }
+      }
+    }
+  }
+  // ── 相④（cs:1233-1282）：maxTilesX*10 条「同型爬藤」——锚格选向步进复制 ──
+  {
+    const count = Math.trunc(st.w * 10 / 1);
+    for (let n = 0; n < count; n++) {
+      let num20 = rng.nextIntRange(num, st.w - num);
+      let num21 = rng.nextIntRange(num + num2, st.h - num);
+      while (!ewCellSwapable(st, num20, num21, false)
+        || EW_TILE_DUNGEON.has(SHEET_OF_TYPE[st.type[st.idx(num20, num21)]])) {
+        num20 = rng.nextIntRange(num, st.w - num);
+        num21 = rng.nextIntRange(num + num2, st.h - num);
+      }
+      let vx = 0, vy = 0;
+      if (rng.nextInt(2) === 0) {
+        vx = rng.nextInt(2) === 0 ? -1 : 1;
+      } else if (rng.nextInt(2) === 0) {
+        vy = -1;
+      } else {
+        vy = 1;
+      }
+      const num22 = rng.nextIntRange(5, 20);
+      const src = st.idx(num20, num21);
+      let num23 = num20, num24 = num21;
+      for (let s = 0; s < num22; s++) {
+        num23 += vx;
+        num24 += vy;
+        if (!st.inBounds(num23, num24)) break;
+        const dst = st.idx(num23, num24);
+        if (st.flags[dst] & 1) break;                              // tile2.active() → break
+        st.slope[src] = 0;
+        st.half[src] = 0;
+        if (st.flags[src] & 1) st.flags[dst] |= 1; else st.flags[dst] &= ~1;   // tile2.active(tile.active())
+        st.type[dst] = st.type[src];
+        st.paint[dst] = st.paint[src];
+        st.coat[dst] = (st.coat[dst] & ~(TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK))
+          | (st.coat[src] & (TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK));
+      }
+    }
+  }
+}
+
+// ============================================================
 // ★IIIII106 DoErrorWorldFinish（i am error，cs:1301-1543；FinalizeSecretSeeds :671-674
 // 在 worldIsFrozen Finish 位后、teamBasedSpawns/FinalSeedCleanup 前调用）
 // ============================================================
@@ -1371,31 +1553,50 @@ export function doStartInHardmode(world: World, rng: RNG): void {
 const MOSS_CONVERSION = TILE_MOSS;                                      // Conversion.Moss 同集
 const RAINBOW_CHEST_POOL = [3556, 2870, 1067, 1066, 5075, 4469];        // cs:2840 NextFromList
 
-/** OverGrownDungeonWithRainbowMoss（cs:24303-24347） */
+/** OverGrownDungeonWithRainbowMoss（1458 cs:24303-24347）——★IIIII108a 1:1 重写。
+ *  旧实现三罪（rainbow #105 Final_Cleanup A=3835/T=5088 @(629,119) 定罪，
+ *  8 通道差面全落 {628,184,126} 彩虹苔域，详见 content-parity「IIIII108a 批」章）：
+ *  ① **八邻判定反置**：原版转化门=列出邻项任一 `!active()` 即转（cs:24321-23），
+ *     且第 8 项是第 3 项 TR 的重言——BR(j+1,k+1) 从不参与（原文 quirk）；旧 JS
+ *     「任一 active 即跳」⇒ 只转八邻全失活孤砖，活跃砖面（T628>44×1253）整域漏转；
+ *  ② **幽灵格激活**：原版 `Main.tile[j,k].type = 628` 仅写 type——幽灵地牢砖
+ *     （inactive+型残值）转化后仍是幽灵；旧 JS setTileSilent 把它激活成实心
+ *     628（T0>628×512 = JS 独有激活面）；
+ *  ③ **苔芽放置语义整缺**：原版走 PlaceTile(184,style:10)——双支邻型表
+ *     tileMoss∪tileMossBrick 四向邻 + SolidTile 才落位（frameY=Next(3) 掷 +
+ *     SquareTileFrame 级联×2）；旧=任一实心邻直写零掷零级联（T0>184×2014 /
+ *     T184>0×941 双向差主根）。 */
 function overGrownDungeonWithRainbowMoss(st: TileStore, rng: RNG, gs: GenState): void {
   const num = Math.trunc(st.w / 2);
   const half = Math.trunc(st.w / 2);
-  const sideRight = gs.dungeonSide === 1;
-  const MOSS_BRICK = idOf(628);
+  const sideRight = (gs.dungeonSide ?? 0) >= 1;                       // >= DungeonSide.Right(=1)（cs:24308）
   for (let n = 0; n < num; n++) {
-    let cx = rng.nextIntRange(50, half);                               // Next(50, w/2)
-    if (sideRight) cx = rng.nextIntRange(half, st.w - 50);
-    const cy = rng.nextIntRange(50, st.h - 50);
-    if (!st.inBounds(cx, cy) || !isDungeonWallId(st.wall[st.idx(cx, cy)])) continue;
-    const r = rng.nextIntRange(4, 13);                                  // Next(4,13)
+    let cx = rng.nextIntRange(50, half);                               // Next(50, w/2)（cs:24307）
+    if (sideRight) cx = rng.nextIntRange(half, st.w - 50);             // Next(w/2, w-50)
+    const cy = rng.nextIntRange(50, st.h - 50);                        // Next(50, h-50)
+    if (!st.inBounds(cx, cy) || !isDungeonWallId(st.wall[st.idx(cx, cy)])) continue;   // wallDungeon 门
+    const r = rng.nextIntRange(4, 13);                                 // Next(4,13)（cs:24314）
     for (let j = cx - r; j <= cx + r; j++) {
       for (let k = cy - r; k <= cy + r; k++) {
-        if (j < 1 || k < 1 || j >= st.w - 1 || k >= st.h - 1) continue;
+        if (!st.inBounds(j, k)) continue;                              // cx±12/cy±12 域内恒真，防御保留
         const ii = st.idx(j, k);
-        const hasActiveNeighbor =
-          anyOf8(st, j, k);
-        if (!TILE_DUNGEON_BRICK.has(shOf(st, ii))) continue;
-        if (hasActiveNeighbor) continue;                                // cs:24323 八邻全空气才转
-        st.setTileSilent(j, k, MOSS_BRICK);
-        if (!tileFilledAny(st, j, k - 1)) placeMossTuft(st, j, k - 1);
-        if (!tileFilledAny(st, j, k + 1)) placeMossTuft(st, j, k + 1);
-        if (!tileFilledAny(st, j - 1, k)) placeMossTuft(st, j - 1, k);
-        if (!tileFilledAny(st, j + 1, k)) placeMossTuft(st, j + 1, k);
+        if (!TILE_DUNGEON_BRICK.has(shOf(st, ii))) continue;           // tileDungeon 裸 type 读（幽灵砖同判）
+        // cs:24321-23 转化门：列出项任一 !active() 即转。字面八项=(j-1,k-1)/(j,k-1)/
+        //   (j+1,k-1)/(j-1,k)/(j+1,k)/(j-1,k+1)/(j,k+1)/(j+1,k-1)——末项=TR 重言，
+        //   BR 从不参与=原文 quirk，1:1 保留（BR 独失活的砖 vanilla 不转）。
+        const act = (x2: number, y2: number): boolean => st.flags[st.idx(x2, y2)] !== 0;
+        const anyInactive =
+          !act(j - 1, k - 1) || !act(j, k - 1) || !act(j + 1, k - 1) ||
+          !act(j - 1, k) || !act(j + 1, k) ||
+          !act(j - 1, k + 1) || !act(j, k + 1) ||
+          !act(j + 1, k - 1);
+        if (!anyInactive) continue;
+        st.type[ii] = idOf(628);                                       // 仅写 type——幽灵保持幽灵（cs:24324）
+        clearPaintCoat(st, j, k);                                      // ClearBlockPaintAndCoating
+        if (!tileFilledAny(st, j, k - 1)) placeTile184Gen(st, rng, j, k - 1);   // cs:24326-44 四向
+        if (!tileFilledAny(st, j, k + 1)) placeTile184Gen(st, rng, j, k + 1);
+        if (!tileFilledAny(st, j - 1, k)) placeTile184Gen(st, rng, j - 1, k);
+        if (!tileFilledAny(st, j + 1, k)) placeTile184Gen(st, rng, j + 1, k);
       }
     }
   }
@@ -1404,33 +1605,61 @@ const TILE_DUNGEON_BRICK = new Set([41, 43, 44, 677, 678, 679]);        // Main.
 function isDungeonWallId(wall: number): boolean {
   return wall === 7 || wall === 8 || wall === 9 || (wall >= 94 && wall <= 99);
 }
-/** cs:24323 判定逐项：任一八邻 active 即 false（非「有墙」）。注意 vanilla 读的是
- *  `!Main.tile[j,k±..].active()`——纯 tile 活性，不含墙。 */
-function anyOf8(st: TileStore, j: number, k: number): boolean {
-  const offs: Array<[number, number]> = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
-  for (const [dx, dy] of offs) {
-    const x = j + dx, y = k + dy;
-    if (st.inBounds(x, y) && st.flags[st.idx(x, y)]) return true;
-  }
-  return false;
-}
 function tileFilledAny(st: TileStore, x: number, y: number): boolean {
   return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
 }
-/** 苔藓芽近似⑤：空格 + 任一实心邻 → 直写 style10 帧 */
-function placeMossTuft(st: TileStore, x: number, y: number): void {
-  if (!st.inBounds(x, y)) return;
+/** TileID.Sets.tileMossBrick（TileID.cs:309）——PlaceTile 184 第二支邻型表 */
+const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** WorldGen.PlaceTile(i,j,184,mute:true,forced:false,plr:-1,style:10) 生成期域 1:1
+ *  （1458 cs:59841 头门 + cs:60202-60223 双支 + cs:60749-60755 无条件尾帧）。
+ *  - 预门 `forced||EmptyTile||!tileSolid[num]||…`：tileSolid[184]=false ⇒ 恒过；
+ *    液体支 184 不在火把/植物拒置名单 → 不拒（cs:59941-59957）；
+ *  - 非活性锚格 tile.Clear(Tile|TilePaint|Slope)（cs:60008，**与成败无关**——幽灵型/
+ *    帧/坡/半砖/块漆清零，双支皆败也留痕）；
+ *  - 双支顺序 if（非 else-if）：四向邻 `tileMoss[裸型]&&SolidTile` 与
+ *    `tileMossBrick[裸型]&&SolidTile` 各判一次，可先后命中（二次写+二次 Next(3)
+ *    掷+二次级联）；裸型读不套 active 门，SolidTile 才要求活性（幽灵邻恒拒）；
+ *  - 成功写：active+type184+frameX=style*18+frameY=Next(3)*18（1 掷）+SquareTileFrame(i,j)；
+ *    尾 tile.active() 再 SquareTileFrame(i,j)（TruncatesWalls 不含 184）。
+ *  级联复用 FinalCleanupPass 引擎（本文件 :68 既有反向 import 先例）。 */
+function placeTile184Gen(st: TileStore, rng: RNG, x: number, y: number, style = 10): void {
+  if (!st.inBounds(x, y)) return;                                      // cs:59854 边界门
   const i = st.idx(x, y);
-  if (st.flags[i]) return;
-  const supported =
-    solidTileAt(st, x, y + 1) || solidTileAt(st, x, y - 1)
-    || solidTileAt(st, x - 1, y) || solidTileAt(st, x + 1, y);
-  if (!supported) return;
-  st.setTileSilent(x, y, idOf(184), 10 * 18, 0);
+  if (st.flags[i]) return;                                             // 调用方门=!active（cs:24326）
+  st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0;                  // tile.Clear(Tile)
+  st.paint[i] = 0; st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;           //   |TilePaint
+  st.slope[i] = 0; st.half[i] = 0;                                     //   |Slope
+  const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  const nbrOk = (set: Set<number>): boolean =>
+    dirs.some(([dx, dy]) => {
+      const x2 = x + dx, y2 = y + dy;
+      if (!st.inBounds(x2, y2)) return false;
+      const q = st.idx(x2, y2);
+      return set.has(SHEET_OF_TYPE[st.type[q]]) && solidTileGround(st, x2, y2);   // 裸型+SolidTile(cs:70650)
+    });
+  let placed = false;
+  if (nbrOk(TILE_MOSS)) {                                              // cs:60203 tileMoss 支
+    st.flags[i] = 1; st.type[i] = idOf(184);
+    st.frameX[i] = style * 18;
+    st.frameY[i] = rng.nextInt(3) * 18;                                // cs:60210 Next(3)
+    genSquareTileFrame(st, rng, x, y);
+    placed = true;
+  }
+  if (nbrOk(TILE_MOSS_BRICK)) {                                        // cs:60216 tileMossBrick 支
+    st.flags[i] = 1; st.type[i] = idOf(184);
+    st.frameX[i] = style * 18;
+    st.frameY[i] = rng.nextInt(3) * 18;
+    genSquareTileFrame(st, rng, x, y);
+    placed = true;
+  }
+  if (placed) genSquareTileFrame(st, rng, x, y);                       // cs:60754 尾 SquareTileFrame
 }
 
-/** Place2x2 discoball 臂（cs:51780-51873 的 126 支直译） */
-function placeDiscoball(st: TileStore, x: number, y: number): boolean {
+/** Place2x2 discoball 臂（cs:51780-51873 的 126 支直译）。
+ *  ★IIIII108a：PlaceTile(126) 落位成功后尾扫 SquareTileFrame(i,j)（cs:60749-55——
+ *  锚格 active 即触发,TruncatesWalls 不含 126;原版序=Place2x2 写块→尾帧→调用方
+ *  四格 ClearPaint,本函数在写块后补尾帧,调用方漆清随其后保持原序）。 */
+function placeDiscoball(st: TileStore, rng: RNG, x: number, y: number): boolean {
   const yy = y + 1;                                                     // type126 → y++
   if (x < 5 || x > st.w - 5 || yy < 5 || yy > st.h - 5) return false;
   for (let cx = x - 1; cx <= x; cx++) {
@@ -1451,6 +1680,7 @@ function placeDiscoball(st: TileStore, x: number, y: number): boolean {
       st.coat[i3] &= ~TileStore.COAT_BLOCK_MASK;
     }
   }
+  genSquareTileFrame(st, rng, x, y);                                    // ★IIIII108a PlaceTile 尾帧(cs:60754)
   return true;
 }
 
@@ -1529,11 +1759,14 @@ export function doRainbowStuff(st: TileStore, rng: RNG, gs: GenState, chests: Wo
       const nbMUp = st.inBounds(px, py - 1) ? shOf(st, st.idx(px, py - 1)) : -1;
       const cond = !st.flags[st.idx(px + 1, py)]
         && nbR !== 162
-        && solidTileAt(st, px - 1, py - 1) && solidTileAt(st, px, py - 1)
+        // ★IIIII108a：vanilla SolidTile(int,int)（cs:70650）=active+solid+!solidTop+
+        //   !half+slope0+!inActive——旧 solidTileAt 缺后四门 ⇒ 坡/半砖/致动天花板
+        //   误收（T0>126×332 过量落位面成分之一）。
+        && solidTileGround(st, px - 1, py - 1) && solidTileGround(st, px, py - 1)
         && nbLUp !== 48 && nbMUp !== 48
         && nbLUp !== 232 && nbMUp !== 232
         && !isTileNearby126(st, px, py, 20);
-      if (cond && placeDiscoball(st, px, py)) {
+      if (cond && placeDiscoball(st, rng, px, py)) {
         clearPaintCoat(st, px - 1, py); clearPaintCoat(st, px, py);
         clearPaintCoat(st, px - 1, py + 1); clearPaintCoat(st, px, py + 1);
       }
@@ -1564,8 +1797,11 @@ export function doRainbowStuff(st: TileStore, rng: RNG, gs: GenState, chests: Wo
 function isTileNearby126(st: TileStore, x: number, y: number, distance: number): boolean {
   for (let i = x - distance; i <= x + distance; i++) {
     for (let j = y - distance; j <= y + distance; j++) {
-      if (!st.inBounds(i, j)) continue;
-      if (shOf(st, st.idx(i, j)) === 126) return true;
+      if (!st.inBounds(i, j)) continue;                                 // IsTileNearby 内 InWorld(i,j)（cs:8821）
+      const q = st.idx(i, j);
+      // ★IIIII108a：vanilla 要求 tile.active() && type==126（cs:8826）——旧码裸型读
+      //  把幽灵 126（被杀迪斯科球残值）也计近邻 ⇒ 误拒落位（T126>0×36 欠 placement 面）。
+      if (st.flags[q] && shOf(st, q) === 126) return true;
     }
   }
   return false;
@@ -1712,12 +1948,20 @@ export function doWorldIsFrozenSweep(st: TileStore, rng: RNG, gs: GenState): voi
     if (from !== undefined && targets[from] < 0) targets[from] = id;
   }
   // 墙域：本仓 WALL_DEFS「id 直用原版 wld 墙 id」⇒ 无需内部↔sheet 换算（tiles.ts:175）
+  // ★IIIII108b2（2026-09-04）：cs:2255-2258 `type == 0 → 147` 的 type 字段在**空格**上
+  //   恒 0 ⇒ 空气格同样落入 0→147 臂（写后仍 inactive=x86 幽灵雪层,带内 ~56 万格）。
+  //   本仓 'empty'=internal 0 无 vanilla.sheet（SHEET_OF_TYPE=-1）⇒ 该臂曾整段死码
+  //   （头注「air 幽灵型一并改型」未兑现）;mile8 对 inactive 型掩蔽不可见,经
+  //   Piles rawSheetAt 残值读外显为 winter B 格 (1762,1106) 写序涟漪。补空格臂:
+  //   空(internal 0)走 sheet0(dirt) 的同一条 0→147 映射。
+  const emptyTo = targets[INTERNAL_OF_SHEET.get(0) ?? -1] ?? -1;
   for (let i = 0; i < st.w; i++) {
     let j = 0;
     while (j < num + rng.nextInt(3)) {                               // cs:2237 判定即掷（含失败末掷）
       const ii = st.idx(i, j);
       const sh = SHEET_OF_TYPE[st.type[ii]];
-      const to = sh >= 0 ? targets[st.type[ii]] : -1;
+      let to = sh >= 0 ? targets[st.type[ii]] : -1;
+      if (to < 0 && st.type[ii] === 0) to = emptyTo;                 // ★IIIII108b2 空格臂
       if (to >= 0) st.type[ii] = to;
       const wto = FROZEN_WALL_MAP.get(st.wall[ii]);
       if (wto !== undefined) st.wall[ii] = wto;
@@ -2084,9 +2328,13 @@ export function doAdditionalChangesAroundSpawnCore(st: TileStore, rng: RNG, _gs:
         continue;
       }
       st.setTileSilent(tx, ty, TORCH, 0, style * 22);        // tile.frameY = 22*style（cs:60352）
-      teleportSpotRspRaw(`P|${i}|${tx}|${ty}|1|${style}`);
-      // ★AAAAAA：PlaceTile(4) 成功尾 SquareTileFrame（cs:60354）→ CheckTorch 附着向
+      // ★AAAAAA：PlaceTile(4) case 支 SquareTileFrame（cs:60354）→ CheckTorch 附着向；
+      //   ★IIIII110b 勘误②：PlaceTile 尾奏（cs:60754-60761 `if (tile.active())
+      //   SquareTileFrame(i,j)`）第二遍九宫【曾整缺】——x86 TFR 窗实证每支火把
+      //   两遍九宫各 +1 掷（TFR|3604|787 两遍均耗掷）⇒ 每支 -1 掷流漂移。
       genSquareTileFrame(st, rng, tx, ty);
+      genSquareTileFrame(st, rng, tx, ty);
+      teleportSpotRspRaw(`P|${i}|${tx}|${ty}|1|${style}`);   // 行尾=x86 PlaceTile 返回位（含两遍九宫掷耗）
     } else {
       i--;   // cs:25268 命中实格不消耗次数
     }

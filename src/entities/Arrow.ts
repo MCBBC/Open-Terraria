@@ -8,7 +8,7 @@ import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { harpyCharmFamilyFx, silverBulletSparkleFx, shimmerArrowFx,
   deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
-import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
+import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
@@ -91,13 +91,15 @@ export function projSprite(projId: number): ImageBitmap | HTMLImageElement | nul
   };
   im.onerror = () => {
     spritePending.delete(projId);
-    // ★瞬态失败不立即驱逐(2026-09-04 线上实锤"Tiles_123/NPC_357 命中即删"=
-    //  驱逐了完好条目):重试一次,成功=缓存完好(不驱逐);再失败才驱逐(真坏)
+    // ★瞬态失败不驱逐(2026-09-04 线上实锤"Tiles_123/NPC_357 命中即删"=
+    //  驱逐了完好条目,累计 94 条天空族被自删):一次 onerror 可能是 SW 控制权
+    //  空窗/网络瞬态——重试一次,成功=缓存完好。★evict 调用整体移除:发布形态
+    //  缓存内容全部来自自家 zip(CRC 校验),不存在"投毒来源",驱逐只有误伤;
+    //  持续性失败由 15s TTL 重试+对账补下自愈。
     const retry = new Image();
     retry.onload = () => { land(retry); };
     retry.onerror = () => {
       spriteFailTtl.set(projId, performance.now());
-      void evictSwCacheEntry(`vanilla/Projectile_${projId}.png`);
     };
     retry.src = im.src;
   };

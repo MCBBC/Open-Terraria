@@ -5722,7 +5722,43 @@ const snap: SnapFn = (name) => {
     chTile(st.idx(x2, num), TILE_BY_KEY['v_135_pressure_plates'], false);
     st.frameX[st.idx(x2, num)] = 0;
     st.frameY[st.idx(x2, num)] = pStyle * 18;
-    st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）
+    // ★IIIII108d（planetoids #32 四族收官）：锚格 KillTile 1:1 化——vanilla placeTrap
+    //   case0 成功位 KillTile(锚)（cs:9111）在锚=活性裂砖(481-483)时走 cs:64315-64360
+    //   裂砖级联：8 邻 case 序逐格「active() 短路先于 Next」各掷 1 骰（num16=6,唯上邻
+    //   case2 /2=3；Next==0 → 当前格灭活+KillTile(邻,noItem) 递归；裂砖非
+    //   frameImportant=级联可达前提;生成期 isGeneratingOrLoadingWorld→noItem=true
+    //   ⇒ DropBait/DropItems 零掷,netMode=2 无音效/成就面）。
+    //   定罪（stx-pld pass-32）：attempt(x2=199,y2=764,Next(3)=1) 锚=(168,762)=裂砖481,
+    //   5 活邻（167,762/168,761/168,763/167,761/167,763）→ x86 rollval 88842776-80
+    //   `KillTile<placeTrap` span×5（五骰 Next(6/3) 均非 0,零邻居杀,写面中性纯掷面）；
+    //   JS 裸 flags=0 零掷 ⇒ 自 attempt#73 起 attempt 骰相移 5 ⇒ 末席陷阱
+    //   (452,656)↔(596,588),且同相移波及下游 Furniture/Paintings/Banners 尝试骰
+    //   （mile8 #32 四族=T0>241×12/T240>0×9/T0>91×6/T91>0×6/T14>0×4/T15>0×4/
+    //   T0>79×4/T79>0×4/T137>41/T41>137 的单一根因）。
+    {
+      const ak = st.type[st.idx(num26, num27)]!;
+      if (ak === TILE_BY_KEY['v_481_cracked_blue_brick'] || ak === TILE_BY_KEY['v_482_cracked_green_brick'] || ak === TILE_BY_KEY['v_483_cracked_pink_brick']) {
+        const KILL_NB: Array<[number, number, number]> = [[-1, 0, 6], [1, 0, 6], [0, -1, 3], [0, 1, 6], [-1, -1, 6], [1, -1, 6], [-1, 1, 6], [1, 1, 6]];
+        const crackCascade = (cx: number, cy: number): void => {
+          const ci = st.idx(cx, cy);
+          for (const [dx, dy, n16] of KILL_NB) {
+            const nx = cx + dx, ny = cy + dy;
+            if (!st.inBounds(nx, ny)) continue;
+            const ni = st.idx(nx, ny);
+            if ((st.flags[ni] & 1) === 0) continue;      // vanilla: tile3.active() 短路先于 Next（死邻零掷）
+            if (rn(n16) !== 0) continue;
+            const nt = st.type[ni]!;
+            if (nt !== TILE_BY_KEY['v_481_cracked_blue_brick'] && nt !== TILE_BY_KEY['v_482_cracked_green_brick'] && nt !== TILE_BY_KEY['v_483_cracked_pink_brick']) continue;
+            st.flags[ci] = 0;                            // tile.active(false)——当前格灭活（cs:64352,先于递归）
+            st.flags[ni] = 0;                            // KillTile(邻) general kill（noItem:true）
+            st.type[ni] = 0;                             // 尾部 tile.type=0（快照 ghost 面对齐）
+            crackCascade(nx, ny);                        // KillTile(邻,noItem) 自身级联臂（邻已灭活⇒有终止）
+          }
+        };
+        crackCascade(num26, num27);
+      }
+    }
+    st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）general kill: active(false)
     {
       const WVt0 = (globalThis as { __wvLines?: string[] }).__wvLines;
       if (WVt0 && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WVt0.push(`MARK|js_t0 KILL x2=${x2},num=${num} anch=${num26},${num27}`);

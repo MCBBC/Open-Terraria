@@ -178,11 +178,11 @@ export class Celeb2Rocket extends Entity {
   /** case1 scale 长大 */
   private drawScale = 1;
   private rot = 0;
-  private onExplode: (x: number, y: number, damage: number) => void;
+  private onExplode: (x: number, y: number, damage: number, oldVx?: number) => void;
 
   constructor(projId: number, variant: number, x: number, y: number, vx: number, vy: number,
     damage: number, knockback: number, ai1Flag: boolean,
-    onExplode: (x: number, y: number, damage: number) => void) {
+    onExplode: (x: number, y: number, damage: number, oldVx?: number) => void) {
     super();
     this.projId = projId;
     this.variant = variant;
@@ -328,7 +328,10 @@ export class Celeb2Rocket extends Entity {
     const col = `rgb(${CELEB2_COLORS[Math.min(6, this.variant)].join(',')})`;
     game.spawnParticles(this.cx, this.cy, col, 14, 2.2, { life: 24 });
     game.spawnParticles(this.cx, this.cy, '#E8C060', 6, 1.8, { life: 20 });
-    this.onExplode(this.cx, this.cy, this.damage);
+    // SW-AC1 2026-09-04：尾参 oldVx=Kill 态弹末 vx——Game 侧换算 kbDir 弹体朝向
+    //  （Projectile.direction,Update :17121-17132 sign(velocity.X) 自动面;
+    //  715-718 aiStyle147 不在排除表,X 分量 AI 不改 → Kill 态=本 vx 符号,0→+1）
+    this.onExplode(this.cx, this.cy, this.damage, this.vx);
   }
 
   draw(r: Renderer, _cam: Camera): void {

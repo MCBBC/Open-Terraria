@@ -670,6 +670,7 @@ import type { ChestSink } from './vanilla/BuriedChestsPass';
 import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
 // ★IIIII106：i am error 终结端点（WorldGen.cs:1301，FinalizeSecretSeeds :671-674）
 import { doErrorWorldFinish } from './vanilla/SecretSeedDoEndsPass';
+import { doErrorWorldShuffleBlocks } from './vanilla/SecretSeedDoEndsPass';
 // ★IIIII17：DoPortalGunInChests（WorldGen.cs:3004，FinalizeSecretSeeds #18 位）
 import { doPortalGunInChests } from './vanilla/FinalSeedCleanupPass';
 
@@ -1573,6 +1574,9 @@ function vanillaLifeCrystals({ store, rng }: GenCtx) {
   //   pass 97 之前读窗（Statues/BuriedChests/SurfaceChests/JungleShrines/WaterChests/
   //   SpiderCaves…）雪块按非实心裁决;普通种子 getGood=false 零行为差。曾缺=
   //   GenSolid 文末「特殊种子专属翻转(不接线)」备案末笔清偿。
+  // ★IIIII106b cs:16866-16870：errorWorld 乱块海（LifeCrystals 槽头首消费位；
+  //   denySome 门内、getGood 56 翻转支之前）
+  if (gs.seedFlags.errorWorld) doErrorWorldShuffleBlocks(store, rng, gs);
   if (gs.seedFlags.getGoodWorld) flipGenSolid([56], false);
   // ★UUUUUU：NotTheBees() 槽头（LifeCrystals cs:16861——errorWorld/getGood 门后首掷位）
   if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);

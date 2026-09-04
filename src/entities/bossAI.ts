@@ -1650,9 +1650,15 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
   e.y += e.vy;
 }
 
-/** AI_033-036 Prime 四部件(NPC.cs:28055-29110):ai1=头 id,ai0=侧 ±1。
- *  33=锯 129(上冲俯冲 22 速)/34=激光 130(直冲 20 速,ai3 初始 150 预热)/
- *  35=钳 128(悬头侧,激光 102 0 伤)/36=炮 131(玩家上空悬停,激光 100 25 伤)。
+/** AI_033-036 Prime 四部件(NPC.cs 1457:28116-29175,1456:28055-29110;本注旧锚系 1456):
+ *  ai1=头 id,ai0=侧 ±1。33=锯 129(近战,上冲俯冲 22 速)/34=钳 130(近战,直冲 20 速,
+ *  ai3 初始 150 预热)/35=炮 128(悬头侧,弹 102 BombSkeletronPrime)/
+ *  36=激光 131(玩家上空悬停,弹 100 25 伤)——id 面权威 NPCID.cs:11321-11327。
+ *  SW-AE1 2026-09-04：发射相位 = localAI[0] 连续计数器（e.lai0,Enemy.ts:1735 localAI
+ *  语义位,萤火虫/蜂后/ Martian saucer 等 id 消费互不相干）,逐拍 ++（头旋冲支再 +=2/+3,
+ *  :28722/:28958）,阈值 crossing（>140f/>40f/>200f/>80f）即开火清零——相位历史跨态
+ *  保留（旋冲期计数走快,切回常态自中间值续走）;态切换复位仅三处:炮 1100f/300f 门
+ *  （:28777/:28865）、激光 200f 门（:29101）,★激光 800f 门不清零（:28996-29000）。
  *  公共:头失效→自毁;头离场(ai1==3)→自毁;远离锚点 800px→追赶态 99。 */
 export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
   const headId = e.ai1;
@@ -1817,14 +1823,16 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       else { e.ai2 = 4; e.ai3 += 1; }
     }
   } else if (style === 35) {
-    // ---- 炮(NPC 128,aiStyle 35,:28640-28875;弹 102 伤 0 威慑;曾误标"钳") ----
+    // ---- 炮(NPC 128,aiStyle 35;1457:28701-28936,1456:28640-28875;弹 102;曾误标"钳") ----
     if (e.ai2 === 0) {
       if (head.ai1 !== 0) {
+        e.lai0 += 2; // SW-AE1 2026-09-04：头旋冲计数加成(:28722,1456:28661)——与共享 ++ 同拍 = +3/t
         hoverBand(-100, -100, 0.07, 6);
         xWindow(-120 * side, -120 * side, 0.1, 8);
       } else {
         e.ai3 += 1;
-        if (e.ai3 >= 1100) { e.ai2 = 1; e.ai3 = 0; }
+        // attached→detached 门(:28777,1456:28716):原版本门显式 localAI[0]=0
+        if (e.ai3 >= 1100) { e.lai0 = 0; e.ai2 = 1; e.ai3 = 0; }
         hoverBand(-150, -150, 0.04, 3);
         xWindow(200, 160, 0.2, 8);
       }
@@ -1844,7 +1852,14 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       //  曾 4px 沿基准向）。L-4③：102 不带 ownerNpcId（projTargets.ts:550 "发射者
       //  追踪未建模"备案）→ Prime 旗减伤（projTargets :553 有 ownerNpcId 才吃）
       //  不触发,维持备案。
-      if (e.aiT % (head.ai1 !== 0 ? 47 : 141) === 0) {
+      // SW-AE1 2026-09-04：aiT 取模退役,改 localAI[0] 计数器 crossing——
+      //  :28838 `localAI[0]++`（1456:28777）→ :28839 `if (>140f)` 命中即 :28841
+      //  清零开火;steady 拍序 141（旋冲 +3/t → 47）由 crossing 涌现,与 SW-X1 钉值
+      //  同源;首发 = 出场第 141 拍（原版 localAI[0] 初值 0,不再 aiT==0 即发）,
+      //  相位历史跨态保留（旋冲切回常态自中间值续走,不再回对齐全局倍数拍）。
+      e.lai0 += 1;
+      if (e.lai0 > 140) {
+        e.lai0 = 0;
         const dx = -(ax - e.cx), dy = -(ay - e.cy);
         const d = Math.hypot(dx, dy) || 1;
         const sx = (Math.floor(Math.random() * 81) - 40) * 0.01;   // Next(-40,41)×0.01
@@ -1855,7 +1870,8 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     } else if (e.ai2 === 1 && player) {
       e.ai3 += 1;
-      if (e.ai3 >= 300) { e.ai2 = 0; e.ai3 = 0; }
+      // detached→attached 门(:28865,1456:28804):原版本门显式 localAI[0]=0
+      if (e.ai3 >= 300) { e.lai0 = 0; e.ai2 = 0; e.ai3 = 0; }
       // 悬停:头 X / 玩家上方 80(6 速,0.04 X/0.08 Y,0.9 阻尼)
       seekSteer2(e, head.cx, player.cy - 80, 6, 0.04, 0.08);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
@@ -1864,7 +1880,11 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       //  28701-28936 全支仅 :28918 一处 ++,旧"÷3"分支系误挂该支,删）。
       //  散布/出膛位同悬停支（:28922-28926 Next(-40,41)×0.01 / center+velocity×4,
       //  num568=10/num570=102/num569 伤 0）。
-      if (e.aiT % 41 === 0) {
+      // SW-AE1 2026-09-04：同悬停支改计数器 crossing（:28918-21,1456:28857-60）,
+      //  41t/发由 >40f crossing 涌现;无旋冲加成保持。
+      e.lai0 += 1;
+      if (e.lai0 > 40) {
+        e.lai0 = 0;
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         const sx = (Math.floor(Math.random() * 81) - 40) * 0.01;
@@ -1875,22 +1895,30 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     }
   } else if (style === 36) {
-    // ---- 激光(NPC 131,aiStyle 36,:28876-29110;初 ai3=150 计入 800 门;曾误标"炮") ----
+    // ---- 激光(NPC 131,aiStyle 36;1457:28937-29175,1456:28876-29110;初 ai3=150 计入 800 门;曾误标"炮") ----
     if (e.ai2 === 0 || e.ai2 === 3) {
       if (head.ai1 !== 0) {
+        e.lai0 += 3; // SW-AE1 2026-09-04：头旋冲计数加成(:28958,1456:28897)——与共享 ++ 同拍 = +4/t
         hoverBand(-100, -100, 0.07, 6);
         xWindow(-120 * side, -120 * side, 0.1, 8);
       } else {
         e.ai3 += 1;
+        // attached→detached 门(:29011-29015,1456:28950-28954):原版本门【不】复位
+        // localAI[0]——相位跨态带进 detached（与炮 1100f 门显式清零相对,SW-AE1）
         if (e.ai3 >= 800) { e.ai2 = 1; e.ai3 = 0; }
         hoverBand(-100, -100, 0.1, 3);
         xWindow(-180 * side, -180 * side, 0.14, 8);
       }
       if (player) {
         e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-        // SW-Z1 2026-09-04：拍序改纯函数——attached 201t（:29074-29075 >200f 先加后判）、
+        // SW-Z1 2026-09-04：拍序钉值——attached 201t（:29074-29075 >200f 先加后判）、
         // 头旋支悬停 +=3(:28958)→+4/t=⌈201/4⌉=51t;旧 round(200/4)=50/200 双偏一拍
-        if (e.aiT % laserArmShotInterval(head.ai1 !== 0, false) === 0) {
+        // SW-AE1 2026-09-04：aiT 取模退役,改 localAI[0] 计数器 crossing——
+        //  :29074 `localAI[0]++` → :29075 `if (>200f)` 命中即 :29077 清零开火;
+        //  steady 拍序 201/51 由 crossing 涌现（laserArmShotInterval 钉值互证）。
+        e.lai0 += 1;
+        if (e.lai0 > 200) {
+          e.lai0 = 0;
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
           const d = Math.hypot(dx, dy) || 1;
           // SW-AA1 2026-09-04（F-2）：出膛位/散布对齐原文（:29080-29091）——速度 num575=8f
@@ -1907,13 +1935,17 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     } else if (e.ai2 === 1 && player) {
       e.ai3 += 1;
-      if (e.ai3 >= 200) { e.ai2 = 0; e.ai3 = 0; }
+      // detached→attached 门(:29101,1456:29040):原版本门显式 localAI[0]=0
+      if (e.ai3 >= 200) { e.lai0 = 0; e.ai2 = 0; e.ai3 = 0; }
       // 悬停玩家左侧 350/上方 20(7 速,0.1/0.03,0.9 阻尼)
       seekSteer2(e, player.cx - 350, player.cy - 20, 7, 0.1, 0.03);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
       // SW-Z1 2026-09-04：detached 81t（:29153-29154 >80f）——原版 detached 支无悬停
       //  加成（+=3 只在 attached 头旋支）,旧 80 且误套 /4 双重 diverge
-      if (e.aiT % laserArmShotInterval(head.ai1 !== 0, true) === 0) {
+      // SW-AE1 2026-09-04：同改计数器 crossing（:29153-56,1456:29092-95）。
+      e.lai0 += 1;
+      if (e.lai0 > 80) {
+        e.lai0 = 0;
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         // SW-AA1 2026-09-04（F-2）：同上对齐 detached 支（:29159-29170）——速度
@@ -1962,7 +1994,10 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
  *     50.25 应进 51;旧 round(200/4)=50 双重偏一）;
  *   · detached（ai[2]==1）: `localAI[0]++; if (> 80f)`（:29153-29154）→ 81t/发,
  *     ★无旋加成——悬停 +=3 只挂 attached 头旋支,detached 支不消费 spinning
- *     （炮臂 aiStyle35 悬停加成是 :28722 `+= 2f`→⌈141/3⌉=47,两臂结构勿混）。 */
+ *     （炮臂 aiStyle35 悬停加成是 :28722 `+= 2f`→⌈141/3⌉=47,两臂结构勿混）。
+ *  SW-AE1 2026-09-04：primePartAI 发射面已改 localAI[0] 计数器 crossing 实装,
+ *  steady 拍序由 crossing 涌现;本函数退役为拍序钉值参考（tests/explosion-z1-siblings
+ *  钉面 + prime-ae1-phase-counter 互证 steady=钉值）,值 201/51/81 不变。 */
 export function laserArmShotInterval(spinning: boolean, detached: boolean): number {
   if (detached) return 81;
   return spinning ? 51 : 201;

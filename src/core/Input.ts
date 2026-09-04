@@ -35,6 +35,23 @@ const ACTION_CODE_SET: ReadonlySet<string> = new Set([
   'ToggleCreativeMenu', 'ToggleCameraMode',
 ]);
 
+/** SW-AD1 2026-09-04：blockMouse 置位纯函数（回归锚;幂等）。写点 =
+ *  Game.tileHitDamage 334 锁定帧 dmg=0 同块（Player.cs:54687 `num = 0;
+ *  Main.blockMouse = true`）。 */
+export function armBlockMouse(inp: { blockMouse: boolean }): void {
+  inp.blockMouse = true;
+}
+
+/** SW-AD1 2026-09-04：blockMouse 吞沿判定纯函数（回归锚）——旗置位 ⇒ 本左键沿
+ *  整体丢弃并自清（一次性）;未置位 ⇒ 不吞。Input.mousedown(button 0) 消费点
+ *  在 mouseDown/mouseHeld 写入【前】调用,吞掉的点击对使用/持电平/UI 全链不可见
+ *  （vanilla 门位 TriggersSet.cs:838-847 的本仓映射,语义差见 Input.blockMouse 注）。 */
+export function blockMouseSwallowEdge(inp: { blockMouse: boolean }): boolean {
+  if (!inp.blockMouse) return false;
+  inp.blockMouse = false;
+  return true;
+}
+
 export class Input {
   keys = new Set<string>();
   /** 虚拟按键电平桶（移动端控件注入——MobileControls 持有）。down() 与物理键盘同权：
@@ -54,6 +71,18 @@ export class Input {
   /** R4-22（FocusHelper.cs:134-139 → TriggersSet.cs:851-859）：失焦置位,回焦首击
    *  被吞、松键解除——原版 delayUseItem 同名语义 */
   delayUseItem = false;
+  /** SW-AD1 2026-09-04：Main.blockMouse（Main.cs:2529）一次性吞点击旗——写点
+   *  = Game.tileHitDamage 334 锁定帧支（Player.cs:54687,num=0 同块写;128/269 模特
+   *  孪生写点 :54639 本仓不可达不写,SW-A1 备案）。原版消费面（自查核）：
+   *  TriggersSet.cs:838-847 `if (MouseLeft){ if (!blockMouse && !mouseInterface)
+   *  controlUseItem=true } else blockMouse=false` = 电平门+松键复位;UI 域还有
+   *  快捷栏点击（Main.cs:44357）/菜单/取色条同门。本仓一次性移植语义：置位后的
+   *  首个左键 mousedown 边沿整体丢弃（mouseDown/mouseHeld 均不置,使用与 UI 双向
+   *  不可见）,吞完自清——只吞"点击"不吞"按住"（持电平 mouseHeld 不回填,按住的
+   *  channel/autoReuse 不受追溯影响）。与原版差：原版置位发生于按住中（挖掘拍）
+   *  时压掉的是【余下按住期】的 controlUseItem、松键即复位,下次点击不受影响;
+   *  本仓一次性版把压制推迟到下一沿（备案差,写点/吞点位置=任务钉面）。 */
+  blockMouse = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
   /** keydown 边沿回调（含原生事件与虚拟按键沿）。第二参已泛化为 KeyEventLite:
@@ -152,6 +181,10 @@ export class Input {
       // 挖掘（2026-08-28 用户报）;2026-08-29 起名单合一并纳入 .sw-mobile 触屏层族
       if (isDomUiTarget(e.target)) return;
       if (e.button === 0) {
+        // SW-AD1 2026-09-04：blockMouse 一次性吞沿（写点=tileHitDamage 334 锁定帧
+        // 支）——吞掉的沿 mouseDown/mouseHeld 均不写 = 该次点击整链不可见;吞完
+        // 自清（纯函数 blockMouseSwallowEdge,语义/差注见 Input.blockMouse 字段注）
+        if (blockMouseSwallowEdge(this)) return;
         // R4-22：delayUseItem 置位期间吞掉本次使用边沿（mouseHeld 保持——按住不松
         // 仍不开火,松键才解除,同 TriggersSet 语义）
         if (this.delayUseItem) return;

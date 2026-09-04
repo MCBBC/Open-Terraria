@@ -4683,6 +4683,44 @@ export function bombGravityGateOf(projId: number): number | null {
   return BOMB_GATE10.has(projId) ? 10 : 5;
 }
 
+/** SW-AD1 2026-09-04：655 蜂巢墙推支纯函数（Projectile.cs:26595-26678 逐式）。
+ *  调用侧门（:26595 `ai[0] != 0f && velocity.Y <= 0f && !flag9 && velocity.X == 0f`）
+ *  本函数不重复判定——flag9 仅 1047（:26471）/1055（:26527）置位,655 恒 false。
+ *  方向判定三档扫墙（num213=0.5f）：
+ *  · 每档取左右缘外 8px±档距的 tile 列（(int) 除法=C# 朝零截断 → Math.trunc,
+ *    近 x=0 负商 floor/trunc 分叉）;查 (y/16, y/16+1) 两行 WorldGen.SolidTile;
+ *  · 左墙在 → vx=+0.5 推离（flag11）,右墙在 → vx=−0.5（flag12）,档内左优先;
+ *  · 0/16/32px 三档全空 → Center 格 X 偶数推右、奇数推左（:26669-26674）。
+ *  SolidTile 摄取（W.cs:70642-70655）= active() && !inActive() && tileSolid &&
+ *  !tileSolidTop && !halfBrick && slope==0 —— active/!inActive ≡ st.isActive
+ *  （nactive）,tileSolidTop 以 d.platform 代理（tileSolid∩tileSolidTop 九件套
+ *  即平台行为族,同 Game.ts:17423 solidFull/LineOfSight fullSolid 惯用法）。
+ *  ★越界差：vanilla Main.tile OOB=null → SolidTile 返 true（:70646-70649）,
+ *  本仓 store 惯例"世界外视为空"——世界缘 8~40px 带内推向可能差一档,备案
+ *  （与 moveAndCollide 同源边界,非本支引入）。 */
+export function beeWallPushDir(
+  st: Pick<TileStore, 'inBounds' | 'isActive' | 'get' | 'idx' | 'half' | 'slope'>,
+  x: number, y: number, w: number, cx: number,
+): 0.5 | -0.5 {
+  const solidTile = (tx: number, ty: number): boolean => {
+    if (!st.inBounds(tx, ty) || !st.isActive(tx, ty)) return false;
+    const d = TILE_DEFS[st.get(tx, ty)];
+    const i = st.idx(tx, ty);
+    return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+  };
+  const cint = (v: number): number => Math.trunc(v);   // C# (int) cast
+  const row = cint(y / 16);
+  for (const off of [0, 16, 32]) {                     // 三档：8px 外缘、+16、+32
+    const li = cint((x - 8 - off) / 16);
+    const ri = cint((x + w + 8 + off) / 16);
+    const fl = solidTile(li, row) || solidTile(li, row + 1);
+    const fr = solidTile(ri, row) || solidTile(ri, row + 1);
+    if (fl) return 0.5;
+    if (fr) return -0.5;
+  }
+  return cint(cx / 16) % 2 === 0 ? 0.5 : -0.5;         // 三档全空：Center 格奇偶定向
+}
+
 /** SW-I1 2026-09-03：AI_016 每 tick `damage=0` 豁免表（P.cs:48030-48047 逐字，
  *  1456 同支 ：44255 系）。表内型保留发射伤 → Damage_PVE（`if (damage <= 0)
  *  return` P.cs:12576）飞行接触可结算（伤=物品伤 + aiStyle16 钳 timeLeft=3
@@ -5647,6 +5685,18 @@ export class GrenadeProj extends Entity {
     // SW-W1 2026-09-04：655 蜂巢 AI_025 滚转（:26679-26682 `if (type != 1055)
     //   rotation += velocity.X * 0.06f`,位=墙推支后/clamp+重力前——与 AI_016 的
     //   门后位相反）——曾混入 AI_016 通支读 ×0.1（系数错+位序错,见上方迁址注）。
+    // SW-AD1 2026-09-04：655 蜂巢墙推支（AI_025 :26595-26678,SW-W1 备案清偿）——
+    //   贴地/上升（vy<=0,=上拍碰撞后残差/反弹终值,与原版 AI 读上拍碰撞后 velocity
+    //   同相）且 vx==0 且非首 AI 拍（ai[0]!=0:首拍 ai[0]==0 跳过、:26682 尾写 1,
+    //   本仓 ai0 计数同相 SW-I1）→ 三档扫墙 ±0.5 推离 / 全空按 Center 格奇偶定向
+    //   （beeWallPushDir）。★此支同时是 vx==0 蜂巢落地起滚的唯一起因：无它则直上
+    //   直落的蜂巢永驻原地（X 自加速开区间门 `vx>0&&vx<7` 对 0 不可达,SW-X1 注）；
+    //   起滚后 |vx|≥0.5 → 门不再开 → 原文恒等价（每拍重定向仅 vx==0 时发生）。
+    //   位序=原文:墙推(:26595)→滚转(:26679)→ai[0]=1(:26682)→钳16(:26683)→
+    //   X 自加速(:26694)→重力(:26738)——本支置滚转前即原位。
+    if (this.projId === 655 && this.ai0 !== 0 && this.vy <= 0 && this.vx === 0) {
+      this.vx = beeWallPushDir(st, this.x, this.y, this.w, this.cx);
+    }
     if (this.projId === 655) this.rot += this.vx * 0.06;
     // SW-I1 2026-09-03：重力门（:48332 ai[0]++ → :48377）——炸弹族 ai[0]>5、
     //   手雷族 >10 前零重力（出手直飞）;门值/摩擦/911 钳在 bombGravityStep。

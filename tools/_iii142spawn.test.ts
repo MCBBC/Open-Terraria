@@ -28,6 +28,9 @@ const W = Number(process.env.SW142_W ?? 4200), H = Number(process.env.SW142_H ??
   (g as { __swSqfCell?: unknown }).__swSqfCell = (k: number, l: number, t: number, before: number, after: number) => {
     lines.push(`R|SQF|${k}|${l}|${t}|${before}|${after}|${rollCount}`);
   };
+  (g as { __swTfr?: unknown }).__swTfr = (x2: number, y2: number, t: number, c: number) => {
+    lines.push(`R|TFR|${x2}|${y2}|${t}|${c}|${rollCount}`);
+  };
   if (OUT) setTeleportSpotTrace((l) => lines.push(l + '|' + rollCount));
   try {
     const world = await generateWorld({

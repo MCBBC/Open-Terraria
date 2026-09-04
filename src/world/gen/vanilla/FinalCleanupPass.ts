@@ -836,6 +836,12 @@ function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset:
     }
   } catch { /* noop */ }
   __swFnt39('TF', x, y);
+  // ★IIIII110b instrument：窗口内 TileFrame 入口取证（与 x86 rig TFR 行同構）
+  if (x >= 3596 && x <= 3612 && y >= 780 && y <= 796) {
+    (globalThis as unknown as { __swTfr?: (x2: number, y2: number, t: number, c: number) => void })
+      .__swTfr?.(x, y, (st.inBounds(x, y) && st.flags[st.idx(x, y)]) ? SWEEP_SHEET[st.type[st.idx(x, y)]!]! : -1,
+        (globalThis as unknown as { __swRollCount?: { get(): number } }).__swRollCount?.get() ?? 0);
+  }
   // 边距 5 早退（cs:82070）；!active 清 half/slope/块漆早退（cs:82078-82082，
   // ClearBlockPaintAndCoating——RRRR 补块漆清）
   // ★IIIII111c（2026-09-02）涂层半边补清：Tile.cs:906-911 ClearBlockPaintAndCoating

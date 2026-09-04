@@ -16,6 +16,9 @@ let armed = false;
 let calls = 0;
 let rollCount = 0;
 let passK = 0;
+let store: Record<string, unknown> | null = null;
+let rawTyp: Uint16Array | null = null;
+let rawFlags: Uint8Array | null = null;
 
 function makeProxy(name: string, arr: Uint16Array | Uint8Array): ProxyConstructor {
   return new Proxy(arr, {
@@ -40,6 +43,9 @@ function makeProxy(name: string, arr: Uint16Array | Uint8Array): ProxyConstructo
     if (calls !== 7 || armed) return;   // @BEACHHEAD：Piles 前最后一个钩
     armed = true;
     const st = rawSt as Record<string, unknown>;
+    store = st;
+    rawTyp = st.type as Uint16Array;
+    rawFlags = st.flags as Uint8Array;
     log.push(`ARMED @call7`);
     for (const name of ['type', 'flags', 'slope', 'wall'] as const) {
       let proxied = makeProxy(name, st[name] as Uint16Array | Uint8Array);
@@ -53,15 +59,55 @@ function makeProxy(name: string, arr: Uint16Array | Uint8Array): ProxyConstructo
       });
     }
   };
+  let snapDone = false;
+  (globalThis as { __swPTdbg?: unknown }).__swPTdbg = (s: string) => {
+    if (!snapDone && store) {
+      snapDone = true;
+      const n = W * H;
+      require('node:fs').writeFileSync('/tmp/iii139-out/js-piles-start.typ', Buffer.from(rawTyp!.buffer, rawTyp!.byteOffset, n * 2));
+      log.push('SNAPSHOT typ @first PILES3x2');
+      // 映射 JS 内部 id → vanilla sheet 后与 x86 076 原始 dump 对差（ghost 残型可见化）
+      void (async () => {
+        const { TILE_DEFS } = await import('../src/data/tiles');
+        const fs2 = await import('node:fs');
+        const sheet = TILE_DEFS.map((d: { vanilla?: { sheet?: number } }) => (typeof d?.vanilla?.sheet === 'number' ? d.vanilla.sheet : -1));
+        const x86 = new Uint16Array(fs2.readFileSync('/Users/vinlic/GoldenChains/golden-winter/076_Traps.typ').buffer, 0, n);
+        const mapped = new Uint16Array(n);
+        for (let k = 0; k < n; k++) mapped[k] = rawTyp![k] < sheet.length ? Math.max(sheet[rawTyp![k]], 0) : 0;
+        const diffs: number[] = [];
+        for (let k = 0; k < n; k++) if (mapped[k] !== x86[k]) diffs.push(k);
+        log.push(`MAPPED-DIFF count=${diffs.length}`);
+        for (const d of diffs.slice(0, 60)) {
+          const x = d % W, y = (d - x) / W;
+          log.push(`MD (${x},${y}) x86=${x86[d]} js=${mapped[d]}`);
+        }
+        fs2.writeFileSync('/tmp/iii139-out/mapped-diff.txt', diffs.map((d) => { const x = d % W, y = (d - x) / W; return `(${x},${y}) x86=${x86[d]} js=${mapped[d]}`; }).join('\n'));
+      })();
+    }
+    log.push(`DBG ${s}`);
+  };
   (globalThis as { __swPilesCap?: unknown }).__swPilesCap = (x: number, y: number, t: number, s: number) => {
     if (x >= 1700 && x <= 1900 && y >= 1030 && y <= 1180) log.push(`PILE p${passK} r${rollCount} (${x},${y}) sheet=${t} style=${s}`);
   };
   // RNG 滚动计数（对齐 rig R 口径:全实例 InternalSample——__swOnRoll 同位钩,QQQQQQQQ）
-  (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = () => { rollCount++; };
+  const rollBox = { v: 0 };
+  (globalThis as { __swRollCount?: { v: number } }).__swRollCount = rollBox;
+  (globalThis as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = () => { rollCount++; rollBox.v = rollCount; };
   const { RNG } = await import('../src/core/rng');
   const rp = RNG.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
   const origReseed = rp.reseed;
-  rp.reseed = function (this: unknown, s: number) { passK++; log.push(`PASS#${passK} r${rollCount}`); return (origReseed as (...a: unknown[]) => void).call(this, s); };
+  rp.reseed = function (this: unknown, s: number) {
+    passK++;
+    log.push(`PASS#${passK} r${rollCount}`);
+    if (passK === 91 && rawTyp && rawFlags) {
+      const n = W * H;
+      const fs2 = require('node:fs') as typeof import('node:fs');
+      fs2.writeFileSync('/tmp/iii139-out/js-prepiles.typ', Buffer.from(rawTyp.buffer, rawTyp.byteOffset, n * 2));
+      fs2.writeFileSync('/tmp/iii139-out/js-prepiles.act', Buffer.from(rawFlags.buffer, rawFlags.byteOffset, n));
+      log.push('SNAPSHOT pre-Piles @reseed91');
+    }
+    return (origReseed as (...a: unknown[]) => void).call(this, s);
+  };
   await generateWorld({ width: W, height: H, seedText: SEED });
   log.push('DONE');
   writeFileSync(`${OUT}/writelog-b2.txt`, log.join('\n'));

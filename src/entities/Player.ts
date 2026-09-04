@@ -360,6 +360,12 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     canFloat: boolean;   // canFloatInWater（字段 :2711——仅两源：甲件 4404 水上漂靴 :13364-67 ∪ buff265 Flamingo 坐骑 :9982-86；脚蹼药 109 只授 ignoreWater+accFlipper 不置此位 :10257-59、flipper 饰品亦不授——旧注":9592 脚蹼药水"系 1456 期 ignoreWater 面错锚，R1-F1 勘误 2026-09-03）
     shimmerImmune: boolean;   // Player.shimmerImmune（:15643-46 幻彩斗篷 5355 且未按住下 45t——浮液/微光 buff 双消费 :23641/:27944）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
+    /** 死人毛衣 5007（GrantArmorBenefits case 5007 :13226-13229 `deadMansSweater = true`
+     *  ——功能性胸甲槽件 bodySlot 234,社交槽不授：UpdateEquips_CanItemGrantBenefits
+     *  case 1 门=`bodySlot > -1` 而 case 3-9 门=`item.accessory`）;重置位 :18434。
+     *  消费面 = Projectile.SelfHurtPlayers :15131-15134 `sweater && trap →
+     *  自伤 ×0.5 截断再 min 300`（Game.selfHurtSweaterCap,SW-AC1 2026-09-04） */
+    deadMansSweater: boolean;
     dontHurtCritters: boolean;   // ★E：4767/5323（RefreshMechanicalAccs :12922-12924）
     preventAllItemPickups: boolean;   // ★F3：4346（WorksInVoidBag=false 例外面）
     hasLucyTheAxe: boolean;           // ★F3：5095
@@ -1931,6 +1937,11 @@ export class Player extends Entity {
       return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     };
     const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
+    // SW-AC1 2026-09-04：死人毛衣 5007 胸甲件旗（GrantArmorBenefits case 5007
+    //  Player.cs:13226-13229 `deadMansSweater = true`——装甲三件扫描位,社交槽
+    //  3-9 门=item.accessory 不授 :12970-12989;消费=SelfHurtPlayers :15131-15134）
+    let deadMansSweater = false;
+    if (bVid === 5007) deadMansSweater = true;
     // 老猩红甲套装 crimsonRegen（ArmorSetBonuses.cs:433
     // `Add(Benefits.Crimson,"ArmorSetBonus.Crimson",792,793,794)`——头 792/headSlot57
     // ·胸 793/bodySlot37·腿 794/legSlot35,vanillaArmorSets 表暂未收录此键,内联检测
@@ -2127,6 +2138,7 @@ export class Player extends Entity {
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat, shimmerImmune,
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
+      deadMansSweater,   // SW-AC1：死人毛衣 5007 胸甲件(SelfHurtPlayers 自伤 cap 面)
       dontHurtCritters: dontHurtCrittersAcc,   // ★E（4767/5323——小动物免伤面）
       preventAllItemPickups: mech.preventAllItemPickups,   // ★F3（4346——WorksInVoidBag=false 面）
       hasLucyTheAxe: mech.hasLucyTheAxe,                    // ★F3（5095）

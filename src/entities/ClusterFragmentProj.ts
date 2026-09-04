@@ -69,7 +69,7 @@ export class ClusterFragmentProj extends Entity {
   private fuse: number;
   /** 暴击率（父弹发射玩家 crit——原版 Damage_PVE 按 owner 玩家面板掷） */
   critChance = 0;
-  onExplode: (x: number, y: number, damage: number) => void;
+  onExplode: (x: number, y: number, damage: number, oldVx?: number) => void;
   private rot = 0;
   /** ai[0]（:48332 每 tick +1;重力门节拍轴） */
   private ai0 = 0;
@@ -77,7 +77,7 @@ export class ClusterFragmentProj extends Entity {
   private frame = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
-    projId: number, fuse: number, onExplode: (x: number, y: number, damage: number) => void) {
+    projId: number, fuse: number, onExplode: (x: number, y: number, damage: number, oldVx?: number) => void) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;   // NewProjectile position=Center−Size/2（P.cs:10878）
     this.vx = vx; this.vy = vy;
@@ -137,7 +137,10 @@ export class ClusterFragmentProj extends Entity {
     if (--this.fuse <= 2) {
       this.dead = true;
       game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
-      this.onExplode(this.cx, this.cy, this.damage);
+      // SW-AC1 2026-09-04：尾参 oldVx=Kill 态弹末 vx——Game 侧换算 kbDir 弹体朝向
+      //  （Projectile.direction,Update :17121-17132 sign(velocity.X);裂片 779/783/
+      //  862/863 aiStyle16 自动面,0→+1 else 档）
+      this.onExplode(this.cx, this.cy, this.damage, this.vx);
       return;
     }
     // ---- 专支尘（P.cs:48265-48276 逐参;两掷独立,可同拍双出）----

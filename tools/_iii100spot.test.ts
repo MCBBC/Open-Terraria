@@ -68,6 +68,9 @@ const CHAINS: Record<string, ChainCfg> = {
   // ★IIIII101c（2026-09-04）：planetoids 五点接入——G2=LIX 旗标真值链 golden-planetoids
   //  （SW_FLAG_PLD 直注 rig 产;本批 stx-pld 复刻 pc 106/106 全等再证）;配方=runbook LIX 表行。
   planetoids: { name: 'planetoids', seed: 'planetoids|20260908', evil: 0, flags: { roundLandmasses: true }, g2: C('golden-planetoids') },
+  // ★IIIII101g（2026-09-04）：sgis 五点接入——G2=golden-sgis（runbook §4 重产,i109 rig
+  //  +SW_FLAG_SGIS 臂,seed=771001/E0;arm Enabled=True 落证+八通道 103 行全绿双证）。
+  sgis: { name: 'sgis', seed: '771001', evil: 0, flags: { surfaceIsInSpace: true }, g2: C('golden-sgis') },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';

@@ -1751,27 +1751,38 @@ function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, r
       flags: !underground ? { wooden: true } : {},
     });
   };
+  // ★IIIII110b instrument：PC 分相细台账（__swPcEv；零掷零写，未挂零开销）
+  const pcEv = (globalThis as { __swPcEv?: (row: string) => void }).__swPcEv;
+  const pc = (row: string): void => { pcEv?.(`${row}|${(globalThis as { __swRollN?: number }).__swRollN ?? -1}`); };
+  pc('PC0');
   // 级联 1:各房底行随机 10 次
+  let ri = 0;
   for (const r of rooms) {
     const floorY = r.y + r.h - 1;
     let ok = false;
-    for (let t = 0; t < 10 && !ok; t++) ok = tryAt(rng.int(2, r.w - 3) + r.x, floorY);
-    if (ok) return;
+    pc(`C1R${ri} w${r.w} h${r.h} at${r.x},${r.y}`);
+    for (let t = 0; t < 10 && !ok; t++) { ok = tryAt(rng.int(2, r.w - 3) + r.x, floorY); pc(`C1R${ri}T${t} ${ok ? 'OK' : 'no'}`); }
+    if (ok) { pc(`C1RET`); return; }
     for (let x = r.x + 2; x <= r.x + r.w - 2 && !ok; x++) ok = tryAt(x, floorY);
-    if (ok) return;
+    if (ok) { pc('C1SWEEP'); return; }
+    ri++;
   }
   // 级联 2:各房顶行(Y-1)
+  ri = 0;
   for (const r of rooms) {
     const ceilY = r.y - 1;
     let ok = false;
-    for (let t = 0; t < 10 && !ok; t++) ok = tryAt(rng.int(2, r.w - 3) + r.x, ceilY);
-    if (ok) return;
+    pc(`C2R${ri} w${r.w} at${r.x},${r.y}`);
+    for (let t = 0; t < 10 && !ok; t++) { ok = tryAt(rng.int(2, r.w - 3) + r.x, ceilY); pc(`C2R${ri}T${t} ${ok ? 'OK' : 'no'}`); }
+    if (ok) { pc('C2RET'); return; }
     for (let x = r.x + 2; x <= r.x + r.w - 2 && !ok; x++) ok = tryAt(x, ceilY);
-    if (ok) return;
+    if (ok) { pc('C2SWEEP'); return; }
+    ri++;
   }
   // 级联 3:房外 ±30 随机 1000 次
+  pc('C3');
   for (let t = 0; t < 1000; t++) {
-    if (tryAt(rng.int(rooms[0].x - 30, rooms[0].x + 29), rng.int(rooms[0].y - 30, rooms[0].y + 29))) return;
+    if (tryAt(rng.int(rooms[0].x - 30, rooms[0].x + 29), rng.int(rooms[0].y - 30, rooms[0].y + 29))) { pc(`C3T${t} OK`); return; }
   }
 }
 

@@ -246,8 +246,11 @@ export class BombSkeletronPrimeProj extends Entity {
       !!game.world.seedFlags?.getGoodWorld, !!game.world.seedFlags?.tenthAnniversary);
     // 非入表象限 radius=0/destroyTiles=false → explodeAt 零地形,通支视觉照跑
     // （烟 31×20/火 6 对×10/gore 61-63×4/Item14 = :80070-80115 小族,projId 102 在列）
+    // SW-AC1 2026-09-04：尾参 kbDir=Kill 态弹末 vx 符号——Projectile.direction
+    //  （Update :17121-17132 自动面 `velocity.X < 0 → -1 else 1`,102 aiStyle16
+    //  在自动面,落地/炮臂轨迹不改 X 符号;0 落 else 档 +1）
     game.explodePrimeBomb102?.(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
-      this.cx, this.cy, radius, radius > 0);
+      this.cx, this.cy, radius, radius > 0, this.vx < 0 ? -1 : 1);
   }
 
   draw(r: Renderer, cam: Camera): void {

@@ -22,7 +22,7 @@ import { plates428Pressed } from '../render/VanillaTiler';
 import { imageToGrid, findArtPlacement, placeArt } from '../dev/PixelArtImport';
 import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
-import { Input } from './Input';
+import { Input, armBlockMouse } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
@@ -1751,10 +1751,16 @@ export const PREPARE_BOMB_HURT_BOX: Readonly<Record<number, number>> = (() => {
  *  各分支 `knockBack = f` 逐支照抄（分支序与 PREPARE_BOMB_HURT_BOX 一一对应）：
  *  128² 炸弹族 8 / 773 8 / 250² 炸药棍族 10 / 280² 超级炸弹 9 / 手雷族 8 / 681 8 /
  *  102 8 / 集束裂片 8 / 火箭 I·II 8 / 迷你核弹 12 / 集束母弹 12 / 湿·液体火箭族 12 /
- *  火箭 III·IV 10。消费面 = explodeAt 可选 kb 参（调用点按弹型穿,击退方向沿用
- *  爆心→受击体 X 向推导）。表外弹口径：
+ *  火箭 III·IV 10。消费面 = explodeAt 可选 kb 参（调用点按弹型穿;方向面 SW-AC1
+ *  2026-09-04 起=kbDir 弹体朝向 :13652 `num40 = direction`,见 explosionKbDir 注,
+ *  旧"爆心→受击体 X 向"径向近似退役）。表外弹口径：
  *  · 108/164/1002：PrepareBombToBlow 无分支 + SetDefaults 无 knockBack 行
  *    （:1955-1968/:9525-9539/:2528-2539,缺省 :95 `knockBack = 0f`）→ 原版击退 0；
+ *    ★SW-AC1 2026-09-04 勘误备案：上注漏算 NewProjectile 生成参——Wiring.cs:2042
+ *    （108）/ :3093（164）/ WorldGen.cs:49178（1002）均传 knockBack=10f,经
+ *    Projectile.NewProjectile :10885 `projectile.knockBack = KnockBack` 覆写缺省
+ *    0 → 原版电路/链爆/地雷/TNT 桶爆 NPC 击退=10 非 0。本仓暂维持 kb=0（金标
+ *    tests/explosion-redteam-r3.test.ts:49 钉源码,改值须连金标重审）,遗留债；
  *  · 715-718（Celeb2 烟花弹）：同样不入表,Kill 直调 Damage() 不改 kb（:75034-75049）
  *    → 击退 = 发射时武器 kb,由调用点穿 kb2。 */
 export const PREPARE_BOMB_KB: Readonly<Record<number, number>> = (() => {
@@ -1774,8 +1780,15 @@ export const PREPARE_BOMB_KB: Readonly<Record<number, number>> = (() => {
   put(12, [784, 785, 786, 805, 903, 787, 788, 789, 806, 904, 790, 791, 792, 807, 905,
     799, 800, 801, 810, 906, 910, 911]);             // :47699-47711 湿/液体火箭
   put(10, [139, 140, 141, 142, 143, 144, 340, 341]); // :47712-47717 火箭 III/IV
+  // SW-AC1 发现+SW-AD1 落地（2026-09-04）：108/164/1002 的 kb 来自 NewProjectile
+  // 生成参 knockBack=10f（Wiring.cs:2044 case141→108/:3095 case→164、WorldGen.cs:
+  // 49179 case654→1002,经 Projectile.cs:10885 `projectile.knockBack = KnockBack`
+  // 赋值）——S1 曾据"SetDefaults 无 knockBack 行"定 0=漏算生成参（原版 NPC 受
+  // 电路/地雷/桶爆击退 10 非 0）
+  put(10, [108, 164, 1002]);
   return t;
 })();
+
 function dropVanillaId(d: ItemDrop): number {
   return slotVanillaId(d.itemId);
 }
@@ -2294,9 +2307,10 @@ export function freeUpMinionsForSummon(
  *  原版 78 个对象对 = {133-144}∪{776-801} 38 型×60 + 1117:120,与下式全等。
  *  与下方 skip 集交集为空;层级=skip（调用侧门 :71786）先行,fixed（函数内
  *  覆写 :15113-15116）在门内才轮到。★Dead Man's Sweater 分支（:15131-15134
- *  `deadMansSweater && trap → ×0.5 cap300`）本仓【无】对应旗:deadMansSweater
- *  由胸甲件 5007（Player.cs:13224-13231 ApplyEquip* switch）置位,本仓 equipStats
- *  未建模该件——备案缺口,待配饰面扩表批一并清偿 */
+ *  `deadMansSweater && trap → ×0.5 截断再 min 300`）——SW-AC1 2026-09-04 清偿：
+ *  equipStats.deadMansSweater（胸甲 vi_5007,GrantArmorBenefits case 5007
+ *  Player.cs:13226-13229）+ explodeAt 玩家段 selfHurtSweaterCap（原 F-4 备案
+ *  退役;sweater 佩戴语义定谳=功能性胸甲槽件,bodySlot 234——非皮肤/特殊栏）。 */
 export const FIXED_SELF_DAMAGE_FOR_PLAYERS: Record<number, number> = (() => {
   const t: Record<number, number> = {};
   for (let i = 133; i <= 144; i++) t[i] = 60;
@@ -12976,9 +12990,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   for (const s of shots) {
                     const rk = new Celeb2Rocket(pid2, variant, s.x, s.y, s.vx, s.vy,
                       dmg2, kb2, fo.bonusAi1,
-                      (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
+                      (ex, ey, edmg, evx) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
                         edmg, er2, er2 > 0, 11, this.player.equipStats.armorPen + (ps?.arpen ?? 0), pid2,
-                        ex, ey, kb2));   // SW-F1 2026-09-03 真像素爆心直穿（716/718=center 系,k=0）;SW-S1 2026-09-04 kb=发射 kb（715-718 不入 PrepareBombToBlow 表,Kill :75034-75049 直调 Damage() 不改 kb→原版击退=武器 kb）
+                        ex, ey, kb2, Game.explosionKbDir(evx)));   // SW-F1 2026-09-03 真像素爆心直穿（716/718=center 系,k=0）;SW-S1 2026-09-04 kb=发射 kb（715-718 不入 PrepareBombToBlow 表,Kill :75034-75049 直调 Damage() 不改 kb→原版击退=武器 kb）;SW-AC1 2026-09-04 kbDir=弹末 vx 符号（aiStyle147 不在自动面排除表,Update :17121-17132 同式;0 落 else 档+1）
                     rk.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0)) / 100;   // 阈值=小数(Celeb2Rocket roll 直用;曾传百分点=恒暴击)
                     rk.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
                     this.entities.add(rk, 'projectiles');
@@ -13167,10 +13181,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (projId === 1088) { this.acornSeedDeath(ex, ey, evx ?? 0, evy ?? 0); return; }
               this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
                 hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId,
-                ex, ey, PREPARE_BOMB_KB[projId]);
+                ex, ey, PREPARE_BOMB_KB[projId], Game.explosionKbDir(evx));
               // SW-F1 2026-09-03 真像素爆心直穿（aiStyle16 弹心,半盒偏移按型内表）;
               // SW-S1 2026-09-04 kb=PrepareBombToBlow :47629-47720 各支 knockBack
-              // （1088 上行早退不经此参——Kill :71784 排除出爆炸支,表亦无 1088 档=undefined→旧冲量面）
+              // （1088 上行早退不经此参——Kill :71784 排除出爆炸支,表亦无 1088 档=undefined→旧冲量面）;
+              // SW-AC1 2026-09-04 kbDir=弹末 vx 符号（onExplode oldVx 直穿;aiStyle16 自动面
+              //  sign(velocity.X) else 档 +1——粘性贴附族 vx=0 → +1,原版同式）
               // 液体火箭载荷（Kill :74051-74244 同 903-906 四分发）
               const payload16 = Game.BOMB_PAYLOAD[projId];
               if (payload16) {
@@ -13196,12 +13212,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   const frag = new ClusterFragmentProj(ex, ey,
                     Math.cos(fa) * fs, Math.sin(fa) * fs - 1,
                     Math.trunc(edmg / 2), fragId, 31 + Math.floor(Math.random() * 30),
-                    (fx, fy, fdmg) => {
+                    (fx, fy, fdmg, fvx) => {
                       // pen=0：裂片经 NewProjectile 生成（:79821 七参重载无 armorPen
                       // 位,不吃武器穿甲）;crit=父弹发射玩家面板（ClusterFragmentProj.critChance）
                       // SW-S1 2026-09-04：kb=PrepareBombToBlow :47674-47678（779/783/862/863）knockBack 8
+                      // SW-AC1 2026-09-04：kbDir=裂片弹末 vx 符号（aiStyle16 自动面同式）
                       this.explodeAt(Math.floor(fx / TILE), Math.floor(fy / TILE), fdmg,
-                        fragR, fragR > 0, 24, 0, fragId, fx, fy, PREPARE_BOMB_KB[fragId]);
+                        fragR, fragR > 0, 24, 0, fragId, fx, fy, PREPARE_BOMB_KB[fragId],
+                        Game.explosionKbDir(fvx));
                     });
                   frag.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
                   this.entities.add(frag, 'projectiles');
@@ -14815,14 +14833,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★R30 §4.2 落点清单 #1 收口（2026-08-30）：曾吃通用偏差 px/py(中心前14px/y−4)
         const thrownBomb = new GrenadeProj(this.player.cx, this.player.cy,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          dmg, fuse, cw.shoot, (ex, ey, edmg) => {
+          dmg, fuse, cw.shoot, (ex, ey, edmg, evx) => {
             // 773 不走圆盘 explodeAt：Kill 尾段专支（P.cs:79951-80058）沿
             // GetScarabBombDigDirectionSnap8 远离玩家侧挖 3 宽直隧道
-            if (isScarab) { this.scarabBombExplode(ex, ey, edmg); return; }
+            if (isScarab) { this.scarabBombExplode(ex, ey, edmg, Game.explosionKbDir(evx)); return; }
             // SW-F1 2026-09-03：真像素爆心直穿（:79068 center2=position=弹心−Kill 终态半盒,
             // 半盒按型查 explosionCompareHalfBoxPx;1086/1087=Center 系 k=0）
+            // SW-AC1 2026-09-04：kbDir=弹末 vx 符号（onExplode oldVx 直穿;AI_016 自动面
+            //  sign(velocity.X) else 档 +1——粘性贴附/摇树弹 vx=0 → +1,原版同式）
             this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot, ex, ey,
-              PREPARE_BOMB_KB[cw.shoot]);   // SW-S1 2026-09-04：kb=PrepareBombToBlow :47629-47720 各支（28 族 8/29 族 10/手雷族 8/1086 族 9/湿炸弹族 12…）
+              PREPARE_BOMB_KB[cw.shoot], Game.explosionKbDir(evx));   // SW-S1 2026-09-04：kb=PrepareBombToBlow :47629-47720 各支（28 族 8/29 族 10/手雷族 8/1086 族 9/湿炸弹族 12…）
             if (payload) {
               const painted = Game.spreadBombPayload(this.world.store, payload,
                 Math.floor(ex / TILE), Math.floor(ey / TILE));
@@ -17753,7 +17773,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //    可达面：334 经 WldImport sheetFallback copyFrame 逐字入世界（RACK334 解码
       //    WldImport.ts:586+ 还原裸架,但七批④前旧存档/杂波帧可残留 5000 系标记——
       //    wallhang stripRackFx（m-4 批）同款容忍）→ 本仓无 334 写入面,
-      //    标记帧唯此两源。Main.blockMouse 本仓无对应输入旗标,不移植,仅 dmg=0。
+      //    标记帧唯此两源。Main.blockMouse 旗 SW-AD1 2026-09-04 已补
+      //    （Input.blockMouse 一次性吞沿,写点在下方 dmg=0 同块）。
       if (sheet === 334) {
         const wr = this.world.store;
         let ry = ty;                               // :54644-54655 y 收敛到中行（锁帧判定半边）
@@ -17765,7 +17786,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const lockFx = rackFx >= 5000 ? rackFx    // :54657 本格带标记
           : (tx - n3 >= 0 && wr.inBounds(tx - n3, ry)
             ? wr.frameX[wr.idx(tx - n3, ry)] : 0); // :54663-54668 锚格（越界=无锁）
-        if (lockFx >= 5000) dmg = 0;              // :54679-54688 num=0
+        if (lockFx >= 5000) {
+          dmg = 0;                                // :54679-54688 num=0
+          // SW-AD1 2026-09-04：Main.blockMouse=true 写点（:54687 `num = 0;
+          //   Main.blockMouse = true` 同块）——dmg=0（持武架锁定帧不可挖）的同一击
+          //   吞掉下一次鼠标点击沿（语义/一次性移植口径见 Input.blockMouse 字段注;
+          //   armBlockMouse = 纯函数写点,回归锚）。128/269 模特孪生写点 :54639 本仓
+          //   不可达（上方备案三通道全断）不写。petPickTile（钻地龟 PickTile 通道
+          //   :54473）经本函数同写 = 原文本相（GetPickaxeDamage 共享写点）。
+          armBlockMouse(this.input);
+        }
       }
     } else {
       // 斧/锤点在非斧族 tile：原版该分支无伤害（hammer 墙路径在上方已分流）
@@ -17910,13 +17940,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const dmg = vid === 75 ? 60 : 100;
         const radius = vid === 75 ? 0 : (Game.EXPLODE_RADIUS[28] ?? 0);
         const p = new GrenadeProj(px, py, vx, 0, dmg, 180, vid,
-          (ex, ey, ed) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
+          (ex, ey, ed, evx) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
             radius, radius > 0, 64, this.player.equipStats.armorPen, vid,
             ex, ey,
-            vid === 75 ? 8 : PREPARE_BOMB_KB[vid]));
+            vid === 75 ? 8 : PREPARE_BOMB_KB[vid], Game.explosionKbDir(evx)));
         // SW-F1 2026-09-03 真像素爆心直穿（摇树弹 28,k=11 半盒）;
         // SW-S1 2026-09-04 kb：28=PrepareBombToBlow :47634-47638 knockBack 8;
         // 75=Kill 专支 :80116-80123 `Resize(128,128); damage=60; knockBack=8f`（不入 PrepareBombToBlow 表）
+        // SW-AC1 2026-09-04：kbDir=弹末 vx 符号——原版 ShakeTree 弹初速
+        //  Next(-100,101)×0.002f（WorldGen.cs:63686）两向皆可能,自动面随飞行 vx 更新
         this.entities.add(p, 'projectiles');
       },
       // 弹 655 蜂巢（AI_025 :19379-19391 落地反弹/撞墙裂 + Kill :76611-76660——
@@ -23665,10 +23697,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // SetDefaults 盒半宽;缺省 undefined → explodeAt 内 R*TILE 旧行为）
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, hurtBox?: number, projId?: number) =>
         this.explodeAt(tx, ty, damage, radius, destroyTiles, hurtBox, 0, projId ?? 108,
-          undefined, undefined, PREPARE_BOMB_KB[projId ?? 108] ?? 0),
+          undefined, undefined, PREPARE_BOMB_KB[projId ?? 108] ?? 0,
+          1 /* SW-AC1 2026-09-04：kbDir=+1——电路/器件爆炸弹出生恒零速
+              * （Wiring.cs:2042 108/:3093 164 零速 NewProjectile）→ Entity.direction
+              * 缺省 1 + 自动面 else 档同值,原版全 victim 击退方向恒 +1 */),
         // SW-S1 2026-09-04：电路/器件爆炸 kb——108/164 SetDefaults 无 knockBack 行
         // （:1955-1968/:2528-2539,缺省 :95=0f）且不入 PrepareBombToBlow 表 → 原版击退 0
         // （表内弹型经器件通道触发时仍取表值）;未列型 ?? 0 同口径
+        // ★SW-AC1 2026-09-04 勘误备案：上注漏算 NewProjectile 生成参——Wiring.cs:2042
+        // （108,damage500）/ :3093（164,damage250）第 7 实参 knockBack=10f,经
+        // Projectile.NewProjectile :10885 `projectile.knockBack = KnockBack` 覆写
+        // 缺省 0（PrepareBombToBlow :47629-47720 确无 108/164 分支不改写）→ 原版
+        // 电路爆 NPC 击退=10 非 0。本仓暂维持 kb=0（SW-S1 决定被
+        // tests/explosion-redteam-r3.test.ts:49 源码金标钉死,改值须连金标重审）
+        // ——记为遗留债,不在本方向批次擅动
       extractinatorPull: (ax: number, ay: number, blockType: number) =>
         this.extractinatorPullImpl(ax, ay, blockType),
       dropItemStack: (vid: number, stack: number, px: number, py: number) =>
@@ -23905,6 +23947,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  爆炸圈 = {108 电路炸药, 1002 TNT 桶}；其余 trap 成员（12/98/99 族/184-188/654/655/
    *  980/1005/1007/1048/1049/1073/1078/1091）不经 explodeAt 结算。 */
   static readonly EXPLODE_TRAP_PROJS = new Set([108, 1002]);
+
+  /** SW-AC1 2026-09-04（S1 备案"kb 方向近似"清偿）：爆炸弹 Kill 态弹体朝向 =
+   *  Projectile.direction（Update :17121-17132 AutomaticallyChangesDirection 自动面
+   *  `velocity.X < 0 → -1 else 1`——0 与正同落 else 档 +1）。Damage() :13652
+   *  `int num40 = direction` 全 victim 同向穿 StrikeNPC hitDirection（逐 victim
+   *  特例表 697/699/707/708/759、aiStyle 188-191/15、type 22、301/1116/383 无爆炸
+   *  弹成员）。粘性贴附族（37/397/470/519/773/911/1087）贴附拍 velocity.X=0
+   *  （:47871）→ Kill 态方向恒 +1（原版 else 档,非贴附前朝向）;773 甲虫炸弹
+   *  GetScarabBombDigDirectionSnap8（:71606）只喂 Kill 隧道几何/尘,与击退方向
+   *  无关（:13652 无 773 特例）。 */
+  static explosionKbDir(vx: number | undefined): -1 | 1 {
+    return (vx ?? 0) < 0 ? -1 : 1;
+  }
+
+  /** SW-AC1 2026-09-04（F-4 半边清偿）：SelfHurtPlayers Dead Man's Sweater 分支
+   *  纯函数（Projectile.cs:15131-15134 逐式）——`if (localPlayer.deadMansSweater
+   *  && trap) { num2 = (int)((float)num2 * 0.5f); num2 = Math.Min(num2, 300); }`
+   *  ：先 ×0.5（float 乘后 int 截断）【再】min 300（非"仅 cap"）;sweater 置位 =
+   *  GrantArmorBenefits case 5007（Player.cs:13226-13229,胸甲槽件——社交槽不授,
+   *  UpdateEquips_CanItemGrantBenefits case 1 门=bodySlot>-1、case 3-9 门=accessory）;
+   *  trap 弹真值源 = Projectile.trap（本 face 爆炸圈交集 = EXPLODE_TRAP_PROJS
+   *  {108,1002}）。 */
+  static selfHurtSweaterCap(dmg: number, trap: boolean, sweater: boolean): number {
+    if (!sweater || !trap) return dmg;
+    return Math.min(Math.trunc(dmg * 0.5), 300);
+  }
+
   /** SW-M1 2026-09-03（清偿①②;★SW-R3 2026-09-03 蓝队 M-1 位次翻案重排）：爆炸对
    *  NPC/小动物伤害结算链纯函数（测试钉序;explodeAt 敌怪支/小动物支共用——原版
    *  critter 与普通 NPC 同在 Damage_PVE 遍历 :11869 → Damage_PVE_Inner 一条链）。
@@ -24068,8 +24137,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （PrepareBombToBlow :47629-47720 各支）;缺省 undefined = 未穿表调用点保持旧
    *  像素向量冲量面（wiring/TNT 桶等,留债）。传值时击退走 Enemy.hurt 武器路径
    *  （kby=0,StrikeNPC 全语义含五段软封顶/大伤害门）,方向沿用现推导
-   *  （爆心在受击体右侧 → +1 推离,与 Damage_PVE hitDirection 同式）。 */
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0, comparePx?: number, comparePy?: number, kb?: number) {
+   *  （爆心在受击体右侧 → +1 推离,与 Damage_PVE hitDirection 同式）。
+   *  SW-AC1 2026-09-04（S1 备案"kb 方向近似"清偿）：kbDir=弹体朝向参（-1/1/0,
+   *  缺省 0）——原版爆炸击退方向 = Damage() :13652 `int num40 = direction`
+   *  （弹体朝向,Update :17121-17132 sign(velocity.X) 自动面,0 落 else 档 +1,
+   *  全 victim 同向;见 explosionKbDir 注）,非"爆心→受击体 X 向"逐 victim 径向。
+   *  调用点穿 Game.explosionKbDir(弹末 vx)（grenade 分派/celeb2/aiStyle16 投掷/
+   *  摇树 28/链爆 108/电路 hook/TNT 桶 1002/102 Prime/裂片——零速生成弹
+   *  108/164/1002 恒 +1）;kbDir=0（纯格调用点）维持旧径向推导。敌怪/小动物/
+   *  城镇(巫毒)三支统一吃 kbDir;玩家自伤段原版 SelfHurtPlayers 本就逐 victim
+   *  径向（:15121 direction=受击体相对位推导）,不经此参。 */
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0, comparePx?: number, comparePy?: number, kb?: number, kbDir: -1 | 0 | 1 = 0) {
     // 行为录制：爆炸汇总一条（盘内逐格破坏走 breakTile 各自记录，此处锚定
     // 风暴起点/半径——DebugReport 侧按 t 邻近聚合即可还原爆炸半径）
     this.recLog('bomb', { x: tx, y: ty, r: radius, dmg: damage, destroyTiles, projId });
@@ -24150,9 +24228,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         });
         // SW-S1 2026-09-04（清偿④）：击退标量穿链——kb 传值面走 Enemy.hurt 武器路径
         //  （kby=0=StrikeNPC 全语义:kb×resist→五段软封顶→大伤害门,Enemy.ts 击退管线）,
-        //  方向沿用现推导（爆心→受击体 X 向,同 Damage_PVE hitDirection）;未穿表
-        //  调用点（kb undefined）保持旧像素向量冲量面（kby≠0 加法支）。
-        en.hurt(hurt, kb === undefined ? cx - (en.cx ?? cx) : (Math.sign(cx - (en.cx ?? cx)) || 1) * kb,
+        //  未穿表调用点（kb undefined）保持旧像素向量冲量面（kby≠0 加法支）。
+        //  SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（Damage() :13652
+        //  `num40 = direction`,全 victim 同向）;kbDir=0 未穿弹体朝向的调用点
+        //  维持旧径向推导。
+        en.hurt(hurt, kb === undefined ? cx - (en.cx ?? cx)
+          : (kbDir || (Math.sign(cx - (en.cx ?? cx)) || 1)) * kb,
           kb === undefined ? cy - (en.cy ?? cy) : 0, this, pen, false, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
         // 冰霜盔甲×爆炸（StatusNPC :11524-11527 `(melee||ranged) && frostBurn →
         // AddBuff(324, 60×Next(5,15))`）：爆炸结算同走 Damage→StrikeNPC→StatusNPC
@@ -24184,7 +24265,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         });   // 1002 半伤原式（SW-J1）并入链（:12971,截断同 floor）
         // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成;音/飘值=单点)
         // SW-S1 2026-09-04（清偿④）：击退标量与敌怪支同构（同走 Damage_PVE_Inner 一条链）
-        c.hurt(churt, kb === undefined ? cx - (c.cx ?? cx) : (Math.sign(cx - (c.cx ?? cx)) || 1) * kb,
+        // SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（:13652 num40=direction）,
+        //  0=未穿弹体朝向调用点维持旧径向推导
+        c.hurt(churt, kb === undefined ? cx - (c.cx ?? cx)
+          : (kbDir || (Math.sign(cx - (c.cx ?? cx)) || 1)) * kb,
           kb === undefined ? cy - (c.cy ?? cy) : 0, this, pen);
       }
     }
@@ -24203,8 +24287,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // SW-S1 2026-09-04（清偿⑤）：friendly victim 亦走全链（DamageVar/旗乘区,
           //  explodeFriendlyVictimDamage 与敌怪支同构）;击退 = PREPARE_BOMB_KB[弹型]
           //  （原版 StrikeNPC knockBack 单标量）,未穿表调用点保留旧 ×2 档
+          // SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（:13652 num40=direction,
+          //  城镇 NPC 同走 StrikeNPC hitDirection）——kbDir 路径 kb=0 即零推
+          //  （旧式 `|| 1` 兜底会把 0 标量假抬成 kb1 推,与原版 knockBack>0 双门相悖）
           tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
-            (Math.sign(tn.cx - cx) * (kb ?? 2)) || 1, 0, this);
+            kbDir ? kbDir * (kb ?? 2) : ((Math.sign(tn.cx - cx) * (kb ?? 2)) || 1), 0, this);
         }
       }
     }
@@ -24239,9 +24326,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  :15118 `Main.DamageVar(value, 0f - localPlayer.luck)`——luck 取负
       //  （厄运=负 luck → -luck>0 概率重掷取 min = 伤更大,方向与原版一致）
       const selfRolled = damageVarRoll(fixedSelf ?? damage, -p.luck);
+      // SW-AC1 2026-09-04（F-4 半边清偿）：Dead Man's Sweater 分支——:15131-15134
+      //  `if (localPlayer.deadMansSweater && trap)` → ×0.5 截断再 min 300（纯函数
+      //  selfHurtSweaterCap）。trap 真值源 = Projectile.trap ∩ 本 face =
+      //  EXPLODE_TRAP_PROJS {108,1002};sweater 旗 = equipStats.deadMansSweater
+      //  （胸甲 vi_5007 置位,Player.ts computeEquipStats）。★弹型次序：cap 在
+      //  DamageVar【后】（:15118 → :15131-15134）
+      const selfCapped = Game.selfHurtSweaterCap(selfRolled,
+        Game.EXPLODE_TRAP_PROJS.has(projId), p.equipStats.deadMansSweater);
       // ★FR2-F：自炸伤害走统一漏斗——非 quiet Hurt 面（msg117/飘字/voice 单点承载），
       // 远端经 damagePlayer 尾通用通道可见本次受击（原版爆炸族 SendPlayerHurt 覆盖自伤）
-      this.damagePlayer(selfRolled, cx, cy);
+      this.damagePlayer(selfCapped, cx, cy);
     }
     // BombsHurtPlayers 跨端半边（Projectile.cs:13944-13981）：原版各端只结算【本地
     // 玩家】被炸（Main.LocalPlayer）——爆炸天然 victim-settles。远端代理在本端无爆炸
@@ -24481,7 +24576,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // SW-S1 2026-09-04：kb=0——108 SetDefaults 无 knockBack 行（:1955-1968,缺省
       // :95=0f）,PrepareBombToBlow 亦无分支 → 原版 NPC 受链爆零击退（Damage()→
       // StrikeNPC `knockBack>0` 双门不过）
-      this.explodeAt(ex, ey, 500, 10, true, 130, 0, 108, undefined, undefined, 0);  // 语义=Projectile 108 Explosives
+      // SW-AC1 2026-09-04：kbDir=+1——链爆语义=电路炸药 108（Wiring.cs:2042 零速
+      //  NewProjectile）→ 弹体朝向恒 +1（Entity.direction 缺省 1=自动面 else 档）,
+      //  全 victim 击退同向;kb 仍 0（SW-S1 决定,金标钉死,勘误备案见电路 hook 注）
+      this.explodeAt(ex, ey, 500, 10, true, 130, 0, 108, undefined, undefined, 10, 1);  // kb=10（Wiring.cs:2044 生成参,SW-AD1 表落地）语义=Projectile 108 Explosives
     }
   }
 
@@ -24503,8 +24601,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *     `!(hostile & flag2)`）,在下方专用扫段补齐（真实 diverge 修复）。
    *  radius/destroyTiles = 弹侧 FTW 四象限门（BombSkeletronPrimeProj.
    *  primeBombTerrainRadius）传入。 */
-  explodePrimeBomb102(tx: number, ty: number, px: number, py: number, radius: number, destroyTiles: boolean): void {
-    this.explodeAt(tx, ty, 0, radius, destroyTiles, -1e9, 0, 102, px, py, 0);
+  explodePrimeBomb102(tx: number, ty: number, px: number, py: number, radius: number, destroyTiles: boolean,
+    kbDir: -1 | 0 | 1 = 0): void {
+    // SW-AC1 2026-09-04：kbDir 由弹侧（BombSkeletronPrimeProj.explode）穿弹末 vx
+    //  符号（102 aiStyle16 自动面 sign(velocity.X) else 档 +1）;缺省 0 = 旧径向。
+    //  主调 kb=0/hurtBox=-1e9（四实体段中性化）→ 此 kbDir 仅契约直穿,实际消费
+    //  在下方城镇半边。
+    this.explodeAt(tx, ty, 0, radius, destroyTiles, -1e9, 0, 102, px, py, 0, kbDir);
     // SW-Z1 2026-09-04：城镇 NPC 半边（Damage_PVE_Inner :12626 flag2/:12631 Return
     //  门 hostile 爆炸窄门,非巫毒门——仇弹打城镇 NPC,40 伤 DV 值）。盒 =
     //  PrepareBombToBlow :47668-47672 Resize(128,128) 保中心 → projRectangle =
@@ -24515,9 +24618,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  `!npcProj && !trap` = 真 → luck 正向重掷取 max;banner :13386-13391;无
     //  tag/sentry/crit 修正——102 SetDefaults :1898-1903 无 ranged/melee/magic）
     //  = 同文件巫毒窄门城镇支 explodeFriendlyVictimDamage 形态;kb =
-    //  PREPARE_BOMB_KB[102]=8（:47672 knockBack=8f → num5 :13143）,方向沿用四实体
-    //  段爆心→受击体 X 向推导（原版 num40=direction,:17121-17132 Update 自动面
-    //  sign(velocity.X),非爆心向——与既有各段同款近似,备案）;StrikeNPC 打点
+    //  PREPARE_BOMB_KB[102]=8（:47672 knockBack=8f → num5 :13143）,
+    //  SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（原版 num40=direction,
+    //  :17121-17132 Update 自动面 sign(velocity.X),非爆心向——原"爆心→受击体
+    //  X 向推导"近似随本批退役）;StrikeNPC 打点
     //  :13702（TownNPC.hurt 内联:防御减算/大伤害门/iframes10）。★原版链无 bound
     //  豁免支（:12605-13700 全链无 bound 读）→ 本段不查 tn.bound,只查 dead。
     for (const nent of this.entities.npcs) {
@@ -24525,7 +24629,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!(tn instanceof TownNPC) || tn.dead) continue;
       if (Math.abs(tn.cx - px) < 64 + tn.w / 2 && Math.abs(tn.cy - py) < 64 + tn.h / 2) {
         tn.hurt(this.explodeFriendlyVictimDamage(40, tn),
-          (Math.sign(tn.cx - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1, 0, this);
+          kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
+            : ((Math.sign(tn.cx - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1), 0, this);
       }
     }
     // SW-AA1 2026-09-04（F-1）：friendly 敌怪半边——受害集 `friendly &&
@@ -24543,8 +24648,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const en = eent as Enemy;
       if (en.vanillaId !== 548 || en.dead || en.dontTakeDamage) continue;
       if (Math.abs((en.cx ?? px) - px) < 64 + en.w / 2 && Math.abs((en.cy ?? py) - py) < 64 + en.h / 2) {
+        // SW-AC1 2026-09-04：方向 = kbDir 弹体朝向（同城镇半边,:13652 num40=direction）
         en.hurt(this.explodeFriendlyVictimDamage(40, en),
-          (Math.sign((en.cx ?? px) - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1, 0, this, 0, false, 0, true);
+          kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
+            : ((Math.sign((en.cx ?? px) - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1),
+          0, this, 0, false, 0, true);
       }
     }
   }
@@ -24567,7 +24675,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  娃娃窄门城镇 NPC（DV+banner 全链）/本地玩家 SelfHurtPlayers（FixedSelfDamage
    *  ForPlayers 无 773 条目 → 自然伤入 DamageVar(-luck) ±15%）;爆炸音 Item14。
    *  尘/gore 走 vanillaDust 池近似,Kill 镜头尘型 59/31 组合按 :79965-80045 密度取样 */
-  private scarabBombExplode(exPx: number, exPy: number, damage: number): void {
+  private scarabBombExplode(exPx: number, exPy: number, damage: number, kbDir: -1 | 0 | 1 = 0): void {
     const st = this.world.store;
     const hardMode = !!this.world.flags.hardMode;
     const golemDown = !!this.world.flags['downed_245'];
@@ -24641,7 +24749,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  773 非 trap 且 ≠1002 → 两次减伤臂不适用,banner 与 /5 间无夹层
         const eowFifth = this.world.isExpert && (en.vanillaId ?? 0) >= 13 && (en.vanillaId ?? 0) <= 15
           ? Math.trunc(dmgVar / 5) : dmgVar;
-        en.hurt(eowFifth, (Math.sign(en.cx - exPx) || 1) * 8, 0, this, pen, false, 0, true);   // kb=8（P.cs:47644）
+        // SW-AC1 2026-09-04（S1 清偿）：方向 = kbDir 弹体朝向（:13652 num40=direction,
+        //  AI_016 自动面 sign(velocity.X) else 档 +1——773 贴附拍 vx=0 → 恒 +1;
+        //  snap8 挖向只喂隧道几何/尘 :79955,与击退方向无关,旧"径向"近似退役）
+        en.hurt(eowFifth, (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, false, 0, true);   // kb=8（P.cs:47644）
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
       }
     }
@@ -24655,7 +24766,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const cdmg = applyBannerDamageDealt(this, c, cdmg0);
         c.hurt(this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
           ? Math.trunc(cdmg / 5) : cdmg,
-          Math.sign(c.cx - exPx) || 1, 0, this, pen);
+          kbDir || (Math.sign(c.cx - exPx) || 1), 0, this, pen);   // SW-AC1：方向同上=弹体朝向
       }
     }
     for (const nent of this.entities.npcs) {
@@ -24668,7 +24779,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  （explodeFriendlyVictimDamage=DV(luck 正向)→旗乘区）;kb=8（P.cs:47644
       //  PrepareBombToBlow knockBack——旧 ×2 档为占位）
       if (inBox(tn.cx, tn.cy, tn.w, tn.h)) {
-        tn.hurt(this.explodeFriendlyVictimDamage(damage, tn), (Math.sign(tn.cx - exPx) * 8) || 1, 0, this);
+        tn.hurt(this.explodeFriendlyVictimDamage(damage, tn),
+          (kbDir || (Math.sign(tn.cx - exPx) || 1)) * 8, 0, this);   // SW-AC1：方向=弹体朝向（同敌怪支）
       }
     }
     // SelfHurtPlayers（:15104-15152）：FixedSelfDamageForPlayers 表无 773 → 自然伤害
@@ -24677,8 +24789,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // SW-S1 2026-09-04（清偿①）：±15% 方差接入——:15118 `Main.DamageVar(value,
       //  0f - localPlayer.luck)`【luck 取负：厄运(负 luck)→-luck>0 重掷取 min=伤更大,
       //  与 NPC 面 :12970 的正 luck 方向相反】,单源 damageVarRoll（31 档+ToEven+重掷）
+      // SW-AC1 2026-09-04（F-4 同面）：sweater cap 同函数共面（原版 SelfHurtPlayers
+      //  单函数 :15131-15134）——trap 真值按弹查表（773 ∉ {108,1002} → 分支惰性,
+      //  结构照跑与 explodeAt 玩家段同式）
       // ★FR2-F：同上走统一漏斗（msg117/飘字/voice 单点）
-      this.damagePlayer(damageVarRoll(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, -p.luck), exPx, exPy);
+      const selfBase = damageVarRoll(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, -p.luck);
+      this.damagePlayer(Game.selfHurtSweaterCap(selfBase,
+        Game.EXPLODE_TRAP_PROJS.has(773), p.equipStats.deadMansSweater), exPx, exPy);
     }
     if (this.net?.active) {
       for (const rpEnt of this.remotePlayerProxies) {
@@ -37896,10 +38013,14 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     try {
       // SW-S1 2026-09-04：kb=0——1002 SetDefaults 无 knockBack 行（:9525-9539,缺省
       // :95=0f）,PrepareBombToBlow 亦无分支 → 原版 NPC 受桶爆零击退
-      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002, undefined, undefined, 0);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
+      // SW-AC1 2026-09-04：kbDir=+1——桶爆弹 1002 出生零速（WorldGen.cs:49178
+      //  `NewProjectile(...,num2*16+8,num6*16+8,0f,0f,1002,...)`）→ 弹体朝向恒 +1
+      //  （Entity.direction 缺省 1=自动面 else 档）,全 victim 击退同向;
+      //  kb 仍 0（SW-S1 决定维持,勘误备案见电路 hook 注——原版出生参 knockBack=10f）
+      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002, undefined, undefined, 0, 1);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
       while (pending.length) {
         const [px, py] = pending.shift()!;
-        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002, undefined, undefined, 0);   // SW-J1 同上
+        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002, undefined, undefined, 0, 1);   // SW-J1 同上;SW-AC1 kbDir 同上
       }
     } finally {
       this._tntBlasting = false;

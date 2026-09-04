@@ -889,10 +889,9 @@ async function startZipWarm(): Promise<void> {
         mime?: string[]; failed?: number; done?: number; got?: number;
       };
       if (d.type === 'dl' && d.got) {
-        // worker 报的是【当前片内累计】——页面按 已提交片+当前片 清算(片重试
-        // 从 0 重报,Math.max 吸收回卷;partDone 时提交并入账)
-        dlPartGot = Math.max(dlPartGot, d.got);
-        state.bytesDone = Math.min(dlCommitted + dlPartGot, state.bytesTotal);
+        // ★全局字节直通(2026-09-04 worker 并发化):worker 内部统一全局计数
+        //  (片重试回卷由 worker 修正),页面直用不再分账(dlPartGot/dlCommitted 废止)
+        state.bytesDone = Math.min(d.got, state.bytesTotal);
         lastProgressAt = Date.now();   // 喂 zip 停滞看门狗(45s 无消息=挂死)
         emit();
         return;
@@ -909,9 +908,7 @@ async function startZipWarm(): Promise<void> {
         state.phase = state.done >= state.total ? 'done' : zipPhaseAt(zipPlan!.parts, state.done);
         emit();
       } else if (d.type === 'partDone') {
-        dlCommitted += dlPartGot;   // 当前片字节入账(片下载失败也按已流部分计)
-        dlPartGot = 0;
-        zipFailedAcc += d.failed ?? 0;
+        zipFailedAcc += d.failed ?? 0;   // 字节账已由 'dl' 全局直通,无需分片入账
         state.failed = zipFailedAcc;
         lastProgressAt = Date.now();
         emit();
