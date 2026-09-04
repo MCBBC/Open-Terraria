@@ -604,7 +604,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (st.wall[i] === 87 || (st.flags[i] && st.type[i] === BRICK)) inside = true;
       if (st.flags[i] && st.type[i] === BRICK) {
         if (y > tunDeep) tunDeep = y;   // ★T3(cs:34131-34133):记录最深挖砖行
-        st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+        // ★IIIII168：vanilla 入口隧道杀砖 = `active(false); wall=87`（1457 cs:34205-34208
+        //   ≡1456:34127-34131）**不写 type**——蜥蜴砖残型(幽灵226)保留。JS 曾多写
+        //   `type=0` → 151 格幽灵 226>0(区域 x[1348,1369]y[594,602] 入口隧带),
+        //   被 errorWorld 乱块海 raw 门消费成行为差(CXLII 章 792 幽灵债的神庙组①)。
+        st.flags[i] = 0; st.wall[i] = 87;
       }
     }
     if (!inside) break;
@@ -740,6 +744,19 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     //   （掷数 +1978、神庙装饰/祭坛全偏）
     const ax = acx + 15 - rng.int(0, 29);
     const ay = acy + 15 - rng.int(0, 29);
+    // ★IIIII168 祭坛采样格残型清零（x86 权威律,细胞级验证）：vanilla 主循环每次
+    //   PlaceTile(237) 尝试后,被采样格在 x86 #046 终态恒为 act0+type0（墙保留）。
+    //   iamerror 实证：1000 次采样 → 600 个不同格 = x86 幽灵 0 集 **600/600 逐格全等**
+    //   （Poisson 覆盖率 600/900=66.7% 与 1-(899/900)^1000=67.1% 吻合）；JS 曾不清
+    //   → 600 格幽灵 226 残留（CXLII 章 792 幽灵债的神庙组②,乱块海 raw 门消费）。
+    //   ★1457 反编译 PlaceTile(237)→Place3x2 失败支无可查写点,机制源不可锚——
+    //   本刀以 x86 金标链为权威,并加「仅惰性格」门：不改任何格的活性,门判定
+    //   与既有全链零位移（其它种子链安全性保守取此域,源锚缺口已备案待 rig 验）。
+    if (st.inBounds(ax, ay)) {
+      const si = st.idx(ax, ay);
+      if (!st.flags[si]) st.type[si] = 0;
+    }
+    { const f = (globalThis as { __swTmAltar?: (n: number, x: number, y: number) => void }).__swTmAltar; if (f) f(tries, ax, ay); }   // ★IIIII168 取证钩（dormant）
     let ok = true;
     for (let dx = -1; dx <= 1 && ok; dx++) {
       for (let dy = -1; dy <= 0; dy++) {

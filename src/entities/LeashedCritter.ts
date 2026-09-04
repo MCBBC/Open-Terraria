@@ -335,30 +335,15 @@ export function flyerIsBlockedByMedium(
 }
 
 /**
- * WorldGen.InAPlaceWithWind(position, width, height)（WorldGen.cs:87586-87627）：
- *  ① DoesWindBlowAtThisHeight(tileY) = tileY < worldSurface（remixWorld 取反，本仓恒正世界）；
- *  ② 覆盖盒内任一格 liquid>0 或（wall>0 && !WallID.Sets.AllowsWind[wall]）→ false。
- *  AllowsWind 全表（WallID.cs:54）：{0,150,138,145,107,152,140,139,141,106,245,315,317}。
- *  风筝升力/风向的门槛判定（LeashedKite.Update :150 / KiteLogic :45865）
- */
-const WALL_ALLOWS_WIND: ReadonlySet<number> = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
-
-export function inAPlaceWithWind(
-  st: TileStore, px: number, py: number, w: number, h: number, worldSurface: number,
-): boolean {
-  if (!(py / T < worldSurface)) return false;               // ①高度门（DoesWindBlowAtThisHeight）
-  const x0 = Math.floor(px / T), y0 = Math.floor(py / T);
-  const x1 = Math.floor((px + w) / T), y1 = Math.floor((py + h) / T);   // ToTileCoordinates（截断）
-  for (let i = x0; i <= x1; i++) {
-    for (let j = y0; j <= y1; j++) {                        // ② width = 1+x1-x0（含端点）
-      if (!st.inBounds(i, j)) continue;                     // 原版 !InWorld 格直接跳过
-      const k = st.idx(i, j);
-      if (st.liquid[k] !== 0) return false;
-      if (st.wall[k] !== 0 && !WALL_ALLOWS_WIND.has(st.wall[k])) return false;
-    }
-  }
-  return true;
-}
+ * WorldGen.InAPlaceWithWind(position, width, height)（LeashedKite.cs:149/:102——
+ * Vector2 重载）已收敛到 Mounts 单源 `inAPlaceWithWind`（WorldGen.cs:88124-88163
+ * 两重载 1:1,AllowsWind 白名单 + DoesWindBlowAtThisHeight remix 翻转齐备）。
+ * 旧本地版两处漂移 2026-09-04 清偿：①高度门用 `py/T < worldSurface`（未先取整,
+ * worldSurface 为小数时与原版 `tileY<surface` 判定发散）②缺 remix 翻转参。
+ * 本文件仅保留消费位注记：inWind（LeashedKite.Update :149-157）；
+ * 再导出保持既有 import 面（tests/leashed-critters.test.ts 等） */
+import { inAPlaceWithWind } from './Mounts';
+export { inAPlaceWithWind };
 
 /**
  * WorldGen.AnyLiquidAt(x, y, liquidType=-1)（WorldGen.cs:70259-70277）：liquid>0。
@@ -858,6 +843,9 @@ export interface LeashedEnv {
   dayTime: boolean;
   /** Main.worldSurface（萤火虫地表门 / 风筝 DoesWindBlowAtThisHeight） */
   worldSurface: number;
+  /** Main.remixWorld（DoesWindBlowAtThisHeight 翻转——remix 世界地下才有风,
+   *  风筝风场门 LeashedKite.cs:149 经 InAPlaceWithWind 内部消费） */
+  remix: boolean;
   /** Main.WindForVisuals（风筝 windTarget，LeashedKite.cs:100-102） */
   windForVisuals: number;
   /** Main.cloudAlpha（风筝，LeashedKite.cs:101） */
@@ -2315,11 +2303,12 @@ export class LeashedKiteEntity {
     this.netOffsetY = moveTowardsF(this.netOffsetY, 0, 2);
   }
 
-  /** WorldGen.InAPlaceWithWind(position, width, height)（LeashedKite.cs:150） */
+  /** WorldGen.InAPlaceWithWind(position, width, height)（LeashedKite.cs:150；
+   *  Mounts 单源——remix 翻转经 env.remix 接通） */
   private inWind(env: LeashedEnv): boolean {
     const st = this.store;
     if (!st) return false;
-    return inAPlaceWithWind(st, this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, env.worldSurface);
+    return inAPlaceWithWind(st, this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, env.worldSurface, env.remix);
   }
 
   private initTrail(): void {

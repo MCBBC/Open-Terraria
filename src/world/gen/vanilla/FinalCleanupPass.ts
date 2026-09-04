@@ -3706,14 +3706,20 @@ export function runFinalCleanupPass(
           //   曾漏第二支 → 柱停在陶罐/可切格前,末写格被主循环重扫转硬化沙
           while ((!st.flags[st.idx(i, num2)] || tileCutAt(st, i, num2)) && num > 0 && num2 < h - 50) {
             flatten(st, i, num2 - 1);
-            st.setTileSilent(i, num2, type);
+            // ★IIIII169·C2（R3）：cs:22341-22343 裸写族 `active(true)+type=源型`——
+            // 帧不动（残帧存续,如 (899,344) t61 f(18,0) 草帧被沙柱覆写保留）;
+            // setTileSilent 会反向清帧 → 改直写
+            st.type[st.idx(i, num2)] = type;
+            st.flags[st.idx(i, num2)] = 1;
             flatten(st, i, num2);
             num2++;
             num--;
           }
           if (num === 0 && !st.flags[st.idx(i, num2)]) {
-            // 封底(cs:22345-22368)
-            st.setTileSilent(i, num2, SAND_FALL_BASE.get(type)!);
+            // 封底(cs:22345-22368)——★IIIII169·C2：cs:22346-22349 同裸写族,type+active
+            // 两行、帧不动,禁 setTileSilent 反向清帧
+            st.type[st.idx(i, num2)] = SAND_FALL_BASE.get(type)!;
+            st.flags[st.idx(i, num2)] = 1;
           } else {
             const below = st.idx(i, num2);
             if (st.flags[below] && tileSolidT(st.type[below])

@@ -1463,12 +1463,16 @@ export class UI {
   private shiftClick(i: number, where: SlotWhere): void {
     const inv = this.game.player.inv;
     if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
-      // Unequip（:634-649）：卸回背包
+      // Unequip（:634-649）：卸回背包（AlternateClickAction.Unequip=7 → ItemSlot.cs:763-768
+      // GetItem(QuickTransferFromSlot) → NotifyItemPickup——落背包才发,case-0 语义）
       const arr = this.equipArray(where);
       const cur = arr[i];
       if (!cur || cur.favorited) return;
       const left = inv.add(cur.id, cur.stack);
       if (left === 0) arr[i] = null;
+      const picked = cur.stack - Math.max(0, left);
+      const uv = vidOf(cur.id);
+      if (picked > 0 && uv > 0) this.game.achievements.notifyItemPickup(uv);
       this.refreshAll();
       return;
     }
@@ -1513,7 +1517,8 @@ export class UI {
       return;
     }
     if (where === 'chest') {
-      // TransferFromChest（:626-633）：箱→背包
+      // TransferFromChest（:626-633）：箱→背包（ItemSlot.cs:763-768 cursorOverride 7
+      // GetItem → NotifyItemPickup——落背包才发,case-0 语义,按实际落袋数）
       const chest = this.openChest;
       if (!chest) return;
       const cur = chest.items[i];
@@ -1521,6 +1526,9 @@ export class UI {
       const left = inv.add(cur.id, cur.stack);
       if (left === 0) chest.items[i] = null;
       else cur.stack = left;
+      const picked = cur.stack - Math.max(0, left);
+      const cv = vidOf(cur.id);
+      if (picked > 0 && cv > 0) this.game.achievements.notifyItemPickup(cv);
       this.refreshAll();
     }
   }
@@ -1803,21 +1811,28 @@ export class UI {
       const inv = this.game.player.inv;
       if (!inv.canAccept(i, this.heldStack.id)) return; // 装备位校验失败：弹回原处
       const cur = inv.slots[i];
+      // 成就：光标物落主背包格（ItemSlot case 0 :932 NotifyItemPickup：MouseItemSwap/
+      // 并入后 `inv[slot].stack > 0 && context == 0` 才发——落背包才发,case-0 语义）
+      let landedVid = -1;
       if (!cur) {
         inv.slots[i] = this.heldStack;
+        landedVid = vidOf(this.heldStack.id);
         this.heldStack = null;
       } else if (cur.id === this.heldStack.id) {
         const max = ITEM_DEFS[cur.id].maxStack;
         const put = Math.min(max - cur.stack, this.heldStack.stack);
         cur.stack += put;
         this.heldStack.stack -= put;
+        if (put > 0) landedVid = vidOf(cur.id);
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else if (inv.canAccept(i, cur.id) === false) {
         return; // 占位物品放不回普通格（理论不发生，防御）
       } else {
         inv.slots[i] = this.heldStack;
+        landedVid = vidOf(this.heldStack.id);   // 交换=被放入格者即"拾取"件
         this.heldStack = cur;
       }
+      if (landedVid > 0) this.game.achievements.notifyItemPickup(landedVid);
       // 放置/合并/交换音（ItemSlot.cs:987-989 → SoundID 7 Grab）
       this.game.sfx.play('pickup', 1);
     } else {
@@ -4157,7 +4172,13 @@ export class UI {
     const moved = lootAllFromContainer(inv,
       chest.items as Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>,
       spill,
-      { skipFavorited: chest.x === -5 });
+      { skipFavorited: chest.x === -5,
+        // 成就：Loot All 入包拾取通知（Player.GetItem 主背包/VoidVault 各填充支
+        // NotifyItemPickup,Player.cs:39765-39882——按实际落袋数回传）
+        onPickup: (internalId, _picked) => {
+          const v = vidOf(internalId);
+          if (v > 0) this.game.achievements.notifyItemPickup(v);
+        } });
     if (moved) this.game.sfx.play('pickup');
     this.refreshAll();
   }

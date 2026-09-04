@@ -73,6 +73,19 @@ export interface SeedFlags {
   negativeJustSomeThings?: boolean;
 }
 
+/**
+ * Main.surviveHardcoreDeath（Main.cs:2723-2733 计算属性 1:1——不是可赋值字段，
+ * 全仓无赋值面，纯派生）：The Constant（dontStarveWorld）× Celebrationmk10
+ * （tenthAnniversaryWorld）组合世界且【非 For the Worthy】→ true。硬核死亡结算
+ * （Player.HardcoreDeathPenalty Player.cs:39075-39087）据此决定 -60 上限存活
+ * （成就 35 EXTRA_LIFE）还是 KillMeForGood 删档；zenith（getfixedboi）因
+ * getGoodWorld 恒真被排除（原版 forum 实证：FTW 附加即失效）。
+ */
+export function surviveHardcoreDeath(sf: SeedFlags | null | undefined): boolean {
+  if (!sf?.theConstant || !sf.tenthAnniversary) return false;
+  return !sf.getGoodWorld;
+}
+
 // ── 特殊种子注册表（WorldGenerationOptions.cs:27-40 注册序逐项 1:1）──
 const SPECIAL_OPTIONS: ReadonlyArray<{
   values: readonly number[];

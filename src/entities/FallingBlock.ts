@@ -70,6 +70,82 @@ const FALLING_TILE_DROP_ITEM = new Map<number, number>([
  *  ——弹 411-414 专配第二重碰撞的判集（Projectile.cs:17707-17712）。与 Game.FALLING_TILES
  *  （本仓 id 域触发集）同源异域：彼按 tile id 入队,此按 sheet 判碰撞。 */
 const FALLING_SHEET_SET = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+
+// ============================================================
+// ★死分支移植（2026-09-05 用户指令）：Collision.AnyCollisionWithSpecificTiles
+//  （Collision.cs:2826-2925）四臂全量 1:1——含当前【不可达】的 X 侧/下方三臂。
+//  不可达定谳：全仓落沙生成位（SpawnFallingBlockProjectile :87355 SpeedX=0f,
+//  无任何 vx 写点）恒 vx≡0 → 水平位移分支结构性跳过；vy 恒 >0（重力 0.41 封顶
+//  10 向下）→ 下方臂（cur.Y ≥ box 底向上顶头）亦不可达。移植备 future：将来
+//  出现带 vx 的 411-414 生成位（接线点=Projectile.cs:17710 调用位）时本函数
+//  即为权威碰撞面。运行时 coinBall 路径现役的 cross-row 自上方臂（pileLanding
+//  段）与其臂 1 等价（红队 M13 核净+测试锁定），维持不动。
+//  逐行对照：scan 窗 [pos/16-1, (pos+尺寸)/16+2) 钳 [0,max]（y 底钳 maxTilesY-40，
+//  C# (int) 截断=trunc）；tile 盒 halfBrick 折半（Y+8/H-8）；相交门=【积分后盒】
+//  （vector2=pos+vel）严格四不等式；四臂按【积分前盒】（vector3=pos）与盒的相对
+//  位互斥分派，num5/6=水平臂记名 num7/8=垂直臂记名，跨臂记名相等校验防同格双钳
+//  （num7==num5 → result.Y=原速回滚等）。SolidTop 排除=臂 2/3/4 各自带
+//  （!Main.tileSolidTop——TILE_DEFS.platform ≡ 该表 85 成员,机械核对在案）；
+//  evenActuated=true → 跳过 inActive 排除（弹 411-414 调用点字面）。
+// ============================================================
+export function anyCollisionWithSpecificTiles(
+  st: TileStore, posX: number, posY: number, velX: number, velY: number,
+  width: number, height: number, tileSheets: ReadonlySet<number>, evenActuated = false,
+): { x: number; y: number } {
+  const result = { x: velX, y: velY };
+  const vector = { x: velX, y: velY };
+  const nextX = posX + velX;                         // vector2 = Position + Velocity
+  const nextY = posY + velY;
+  const curX = posX;                                  // vector3 = Position
+  const curY = posY;
+  // scan 窗（:2832-2835，C# (int) 截断；窗界钳 [0,max] / y 底 maxTilesY-40）
+  const num = Math.max(0, Math.trunc(posX / 16) - 1);
+  const num2 = Math.min(st.w, Math.trunc((posX + width) / 16) + 2);
+  const num3 = Math.max(0, Math.trunc(posY / 16) - 1);
+  const num4 = Math.min(st.h - 40, Math.trunc((posY + height) / 16) + 2);
+  let num5 = -1;                                      // 水平臂记名 X
+  let num6 = -1;                                      // 水平臂记名 Y
+  let num7 = -1;                                      // 垂直臂记名 X
+  let num8 = -1;                                      // 垂直臂记名 Y
+  for (let i = num; i < num2; i++) {
+    for (let j = num3; j < num4; j++) {
+      if (!st.hasTile(i, j)) continue;
+      if (!evenActuated && st.isActuated(i, j)) continue;
+      const tid = st.type[st.idx(i, j)];
+      const sheet = TILE_DEFS[tid]?.vanilla?.sheet;
+      if (sheet === undefined || !tileSheets.has(sheet)) continue;
+      let boxY = j * 16;
+      let boxH = 16;
+      if (st.half[st.idx(i, j)] !== 0) { boxY += 8; boxH -= 8; }   // halfBrick 折半
+      const boxX = i * 16;
+      // 相交门（:2874-77 积分后盒 vector2 严格四不等式）
+      if (!(nextX + width > boxX) || !(nextX < boxX + 16)
+        || !(nextY + height > boxY) || !(nextY < boxY + boxH)) continue;
+      const solidTop = !!TILE_DEFS[tid]?.platform;    // Main.tileSolidTop ≡ def.platform（85 成员）
+      // 臂 1（:2878-86 自上方）：积分前盒底 ≤ 盒顶 → 垂直钳位（落堆/落沙面）
+      if (curY + height <= boxY) {
+        num7 = i; num8 = j;
+        if (num7 !== num5) result.y = boxY - (curY + height);
+      } else if (curX + width <= boxX && !solidTop) {
+        // 臂 2（:2887-99 自左侧）：水平钳位到盒左；垂直臂记名同格 → result.Y 回滚原速
+        num5 = i; num6 = j;
+        if (num6 !== num8) result.x = boxX - (curX + width);
+        if (num7 === num5) result.y = vector.y;
+      } else if (curX >= boxX + 16 && !solidTop) {
+        // 臂 3（:2900-12 自右侧）：水平钳位到盒右
+        num5 = i; num6 = j;
+        if (num6 !== num8) result.x = boxX + 16 - curX;
+        if (num7 === num5) result.y = vector.y;
+      } else if (curY >= boxY + boxH && !solidTop) {
+        // 臂 4（:2913-22 自下方）：顶头 +0.01 微推；水平臂记名同格 → result.X 回滚原速+0.01
+        num7 = i; num8 = j;
+        result.y = boxY + boxH - curY + 0.01;
+        if (num8 === num6) result.x = vector.x + 0.01;
+      }
+    }
+  }
+  return result;
+}
 /** 弹 411-414 四档 = 钱币堆落弹（GetSandfallProjData :87824-87831 → Kill num17=330-333）。
  *  ★唯一非实心的 Falling 成员：Main.tileSolid[330-333] 全表无赋值（Main.cs）=decor 格,
  *  TileCollision 不接 → 无第二重碰撞则落堆穿堆。495 贝壳堆 tileSolid=true（Main.cs:10291）

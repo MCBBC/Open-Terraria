@@ -430,6 +430,10 @@ export class TrapShot extends Entity {
       // aiStyle49（Projectile.cs:26841）：rotation += vx*0.05 + direction*0.05
       this.rot += this.vx * 0.05 + (this.vx < 0 ? -1 : 1) * 0.05;
     }
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位——
+    //  机关巨石 kind==='boulder' 走 objType 3（:17195 白名单）、余 kind 走 objType 4
+    //  （:19978）,两路 SwitchTiles 内部新旧位判定（Collision.cs:3346-3353/:3356）消费）
+    this.oldX = this.x; this.oldY = this.y;
     if (this.kind === 'boulder') {
       // ---- 巨石 aiStyle 25(AI_025 1458 :26359 起;踢块 :26596-26677 + 撞块族
       //      :17530-17551)----
@@ -444,10 +448,10 @@ export class TrapShot extends Entity {
         //  !tileSolidTop && !halfBrick && slope==0）→ 斜坡/半砖/平台格被误判实心墙
         //  而起踢;Math.floor 负商分叉也随 trunc(C# (int) 朝零) 修正。★行为变更=1:1
         //  目标:斜坡/半砖/平台格原版不踢,本仓亦不踢。
-        //  ★OOB 备案：vanilla Main.tile 越界=null → SolidTile 返 true
-        //  （:70646-70649）;beeWallPushDir 沿 store 惯例"世界外视为空"返 false——
-        //  世界缘 8~40px 带内踢向可能差一档,与 655/1047 三支同口径备案
-        //  （WeaponProj.ts beeWallPushDir 注同文）。
+        //  ★OOB 语义（SW-AL1 2026-09-05 定谳,纠正旧备案"越界=null→true"）：
+        //  vanilla Main.tile 是裸 Tile[,]（Main.cs:1690）,OOB 下标抛异常被 SolidTile
+        //  catch 吞掉【返 false】（W.cs:70642-70655）——beeWallPushDir OOB=false
+        //  ≡ 原版,非差项（详证见 WeaponProj.ts beeWallPushDir 注）。
         this.vx = beeWallPushDir(game.world.store, this.x, this.y, this.w, this.cx);
       }
       // 重力 0.3/终端 16(1458 :26741/:26685-26687);滚地加速:vy≤6 且 |vx|<7 →

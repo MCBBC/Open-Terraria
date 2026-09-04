@@ -7,7 +7,8 @@
 //                 DrawTrees :8184 / DrawMultiTileGrassInWind :9080 /
 //                 DrawVineStrip :9170 / DrawRisingVineStrip :9258 /
 //                 DrawMultiTileVinesInWind :9407
-//   风门          WorldGen.InAPlaceWithWind :87603（地表+无液体+墙 AllowsWind）
+//   风门          WorldGen.InAPlaceWithWind :88124-88162（地表+无液体+墙 AllowsWind；
+//                 1456 锚 :87603 已统一 1457 实测值）
 //
 // 架构：摆动图块从 ChunkCache 烘焙中摘除（swayBakeSkip），由 Renderer 在 tile 层之后
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
@@ -262,7 +263,8 @@ function highestWindGridPushComplex(x: number, y: number, sizeY: number, totalTi
   return result;
 }
 
-/** WorldGen.InAPlaceWithWind（:87603）：地表（remix 翻转）+ 区域内无液体、无挡风墙 */
+/** WorldGen.InAPlaceWithWind（WorldGen.cs:88141-88163 int 重载,tile 坐标域；1456 锚
+ *  :87603 已统一 1457 实测值）：地表（remix 翻转）+ 区域内无液体、无挡风墙 */
 function inAPlaceWithWind(st: TileStore, x: number, y: number, w: number, h: number, worldSurface: number, remix = false): boolean {
   const aboveSurface = y < worldSurface;
   if (aboveSurface === remix) return false; // DoesWindBlowAtThisHeight

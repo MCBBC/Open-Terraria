@@ -1092,7 +1092,17 @@ export function growLivingTree(
   //   （cs:28167-28173 的 tenthAnniversary 存活支=191/192/383/384 脚基拒——
   //   celebrationmk10 组合,常规路径不可达,不移植。）
   const ntbFoot = gs.seedFlags.notTheBees && (gSheet === 60 || gSheet === 59);
-  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) { vnEmit(`GF|x=${i}|y=${j}|n=3`); if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
+  // ★IIIII162（1458 cs:28162-28177）：vanilla 脚基类型门整段包在
+  //   `!errorWorld.Enabled && !skyblockWorldGen && …` 内——errorWorld 世界**整跳**
+  //   本门（沙 53/雪 53 等任意脚基均可种）。JS 曾缺此旗臂 ⇒ iamerror 卫星 patch 树
+  //   落沙锚（如 x=338/325/443/469 j=233..267 ground=53/25）JS 全数 r3 拒、x86 正常
+  //   生长 ⇒ 338 卫星树整缺+全流 −3,755 掷级联（LT 窗 21,453 vs x86 22,277 残差主源,
+  //   #042 首差 (3764,166) 上游根因）。skyblock 分支 JS 由 skyblock 车道自管,此处只
+  //   补 errorWorld 臂（vanilla 双旗联结,skyblock 域照旧）。
+  if (!gs.seedFlags.errorWorld
+    && gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) {
+    vnEmit(`GF|x=${i}|y=${j}|n=3`); if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false;
+  }
   if (j < 150) { vnEmit(`GF|x=${i}|y=${j}|n=5`); if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
 
   // ★YYYYYY（2026-08-23）NTB #42：1458 cs:28312-28327 干宽四连——Next(2,3)×2 后

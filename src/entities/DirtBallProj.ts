@@ -323,6 +323,12 @@ export class DirtBallProj extends Entity {
         return;
       }
     }
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位——清植/
+    //  削坡 y−16 属原版 AI_010 :59051 体内移,含在 oldPosition 内,故置位于其后）——
+    //  17 走 objType 4 扫描（:19978）,新旧位判定（Collision.cs:3346-3353/:3356）消费;
+    //  碰撞 Kill 拍（clamp.clamped）实体位不积分,旧位存留上拍值（死亡拍扫描偏差
+    //  微差备案,报告债④）
+    this.oldX = this.x; this.oldY = this.y;
     // 积分（UpdatePosition :20561-20562 position+=velocity,非碰撞路径原速直写）
     this.x += this.vx;
     this.y += this.vy;

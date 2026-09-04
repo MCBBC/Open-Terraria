@@ -476,7 +476,7 @@ describe('TileStore 存储 + 清漆语义', () => {
     expect(hits.length).toBe(2);
   });
 
-  it('KillTile 清漆（WorldGen.cs:63933-63939）', () => {
+  it('KillTile 清漆（WorldGen.cs:63933-63939；1457:64398-64402 active(false)+ClearBlockPaintAndCoating）', () => {
     const st = new TileStore(4, 4);
     st.setTileSilent(1, 1, DIRT);
     st.setPaintSilent(1, 1, 5);
@@ -484,16 +484,38 @@ describe('TileStore 存储 + 清漆语义', () => {
     expect(st.paint[st.idx(1, 1)]).toBe(0);
   });
 
-  it('PlaceTile 在非活性格上清漆（:59499-59501）；active→active 替换保留漆', () => {
+  // ★IIIII201 重产（2026-09-04）：旧断言把 PlaceTile 的运行时头 Clear 套到
+  //   setTileSilent（世界生成直写域）上。两域反编译真值：
+  //   · PlaceTile 头 `if (!tile.active()) tile.Clear(Tile|TilePaint|Slope)` 在
+  //     1456:59499-59501 / 1457:59964-59966，Tile.Clear 的 TilePaint 位即
+  //     ClearBlockPaintAndCoating（Tile.cs:758-762 → :906-911 漆+方块涂层同清）
+  //     ——该语义只属运行时 setTile 域（下一条）；
+  //   · 世界生成落位 = 直写 tile.active(true)+tile.type（PlaceTile default 支
+  //     1457:60725-60741 同形，1456:60258-60262），不动 paint/coat 位——
+  //     setTileSilent 曾连 !wasActive 一并清，extraLiquid 泡泡方块（cs:1788-1794
+  //     全方格 fullbrightBlock）内后置落位丢亮涂层（waterpark #105 实证），
+  //     2026-09-03 勘误为仅 type===0（KillTile 族）清。
+  it('setTileSilent（世界生成直写域）：非活性格落位保漆保涂层；active→active 换型同样保留', () => {
     const st = new TileStore(4, 4);
-    // 空格遗留漆（模拟导入脏数据）→ 放块即清
+    // 空格遗留漆/涂层（extraLiquid 泡泡方块后置落位链）→ 直写全保留
     st.setPaintSilent(1, 1, 5);
+    st.setCoatSilent(1, 1, TileStore.COAT_BLOCK_MASK, TileStore.COAT_FULLBRIGHT_BLOCK);
     st.setTileSilent(1, 1, DIRT);
-    expect(st.paint[st.idx(1, 1)]).toBe(0);
+    expect(st.paint[st.idx(1, 1)]).toBe(5);
+    expect(st.coat[st.idx(1, 1)] & TileStore.COAT_FULLBRIGHT_BLOCK).toBe(TileStore.COAT_FULLBRIGHT_BLOCK);
     // 已活性格带漆 → 换型保留（草化/转化路径）
     st.setPaintSilent(1, 1, 7);
     st.setTileSilent(1, 1, STONE);
     expect(st.paint[st.idx(1, 1)]).toBe(7);
+  });
+
+  it('setTile（运行时 PlaceTile 域）：!active 格落位清漆+方块涂层（PlaceTile 头 Clear，1456:59499-59501/1457:59964-59966）', () => {
+    const st = new TileStore(4, 4);
+    st.setPaintSilent(1, 1, 5);
+    st.setCoatSilent(1, 1, TileStore.COAT_BLOCK_MASK, TileStore.COAT_FULLBRIGHT_BLOCK);
+    st.setTile(1, 1, DIRT);
+    expect(st.paint[st.idx(1, 1)]).toBe(0);
+    expect(st.coat[st.idx(1, 1)] & TileStore.COAT_BLOCK_MASK).toBe(0);
   });
 
   it('KillWall 清墙漆（WorldGen.cs:60425-60426）；铺新墙从零开始', () => {
@@ -680,6 +702,11 @@ describe('SmartCursor 油漆三策略（SmartCursorHelper.cs:668-807）', () => 
   });
 });
 
+// ★消 flake 根（2026-09-04）：原版绿史莱姆首 AI 帧掷体内物品（slimeRollContainedItem，
+// NPC.cs:60750-60960 1:1，Math.random 主桶 1/20 + 副桶 19/20×1/40 ≈ 7%）——掷中即激活
+// NPC.cs:60984-61086 物品色 lerp（实证爆红 = ai1=3086 目标 R=59，59×(1−0.95^120)=58.87）。
+// 踩漆链无回归；各用例 spawn 后钉 ai1=-1（:60752「已掷=空」哨兵，roll 门 ai1!==0 早退）
+// 把渐变面隔离到踩漆路径本身。
 describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
   it('站在红漆上：颜色向 (255,0,0) 收敛、alpha 向 100 收敛（:60977-60981）', () => {
     const w = new World(64, 48, 7, 'slime-paint');
@@ -690,6 +717,7 @@ describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE); // 绿史莱姆（type 1）
     expect(e).not.toBeNull();
     expect(e!.colorRGBA).not.toBeNull();
+    e!.ai1 = -1;   // 钉死体内物品掷骰（见 describe 头注释）
     const before = [...e!.colorRGBA!];
     const p = new Player(40 * TILE, 20 * TILE, new Inventory());   // 玩家放漆面中央上方,史莱姆双向跳跃不出界
     const h = hooks(w, p);
@@ -707,6 +735,7 @@ describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
     for (let x = 28; x < 36; x++) w.store.setTileSilent(x, 30, DIRT);
     w.store.setPaintSilent(30, 30, 30);
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE)!;
+    e.ai1 = -1;   // 钉死体内物品掷骰（见 describe 头注释）
     const before = [...e.colorRGBA!];
     const h = hooks(w, new Player(4 * TILE, 20 * TILE, new Inventory()));
     for (let i = 0; i < 120 && !e.dead; i++) e.fixedUpdate(1 / 60, h);
@@ -718,6 +747,7 @@ describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
     const w = new World(64, 48, 7, 'slime-plain');
     for (let x = 8; x < 56; x++) w.store.setTileSilent(x, 30, DIRT);   // 加固:宽台防走出界
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE)!;
+    e.ai1 = -1;   // 钉死体内物品掷骰（见 describe 头注释）
     const before = [...e.colorRGBA!];
     const h = hooks(w, new Player(4 * TILE, 20 * TILE, new Inventory()));
     for (let i = 0; i < 120 && !e.dead; i++) e.fixedUpdate(1 / 60, h);
@@ -736,6 +766,7 @@ describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
     st.setPaintSilent(30, 30, 1);
     st.setPaintSilent(31, 30, 1); // 空气格遗留漆
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE)!;
+    e.ai1 = -1;   // 钉死体内物品掷骰（见 describe 头注释）
     const before = [...e.colorRGBA!];
     const h = hooks(w, new Player(4 * TILE, 20 * TILE, new Inventory()));
     for (let i = 0; i < 120 && !e.dead; i++) e.fixedUpdate(1 / 60, h);

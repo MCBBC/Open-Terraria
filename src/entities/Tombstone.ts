@@ -1,16 +1,28 @@
-// 墓碑实体：Player.DropTombstone + Projectile aiStyle 17（1.4.5.6）1:1。
-//   Player.cs:38427-38467  款式按身家：≤10 万铜币 → 43（1/6）或 200+rand(6)；
+// 墓碑实体：Player.DropTombstone + Projectile aiStyle 17 1:1（1456 :38427-38467 款式
+//   段 / 1457 DropTombstone = Player.cs:39410-39462，aiStyle17 = 1457 Projectile.cs:25636-25690）。
+//   Player.cs:39410-39462  款式按身家：≤10 万铜币 → 43（1/6）或 200+rand(6)；
 //                           >10 万 → 527+rand(5)（金墓碑）；从玩家中心抛射
 //                           （vx = rand(10..30)*0.1*击退方向 + 随机游走修正；vy = rand(-40..-20)*0.1 上抛）
-//   Projectile.cs:23677-23718 aiStyle17 物理：vy+=0.2/帧；rotation+=vx*0.1（翻滚随位移）；
+//   ★FTW 伤害面（:39429-39439 + Projectile SetDefaults :1260-1271）：getGoodWorld →
+//     damage=70 / knockBack=10 / 弹速 ×1.5，且 SetDefaults 对 43/201-205/527-531 置
+//     friendly=true + hostile=true → Projectile.Damage（:12549-12580）三面全开：
+//     PVE（friendly 臂）打敌怪 + hostile&friendly 臂（:12631 flag2）打城镇 NPC、
+//     EVP（hostile, damage>0, netMode≠2）打本地玩家、小动物照杀（Player.cs:20675 面）。
+//     非 FTW damage=0 纯物理（Damage_PVE/PVP/EVP 首门 `damage <= 0` 全早退）。
+//     联机 PvP 面（Damage_PVP）本仓无该模拟域，不接（备案）。
+//   ★击杀归因（成就 36 GRAVE_MISTAKE，Player.OnKillNPC :20623-20636）：
+//     Projectile.cs:13702-13706 `attempt.DidNPCDie()` → OnKillNPC(ref attempt, this)
+//     → IsAGravestone[type] && townNPC → NotifyProgressionEvent(36)。
+//   Projectile.cs:25636-25690 aiStyle17 物理：vy+=0.2/帧；rotation+=vx*0.1（翻滚随位移）；
 //                           落地（vy==0）vx*=0.98 摩擦；无弹跳。每帧检查底缘中心下方格：
 //                           可放 2×2 墓碑(tile 85) → 放置 + 写碑文(死亡文本+日期) + 消失
-//   style 映射（Projectile.cs:23696-23700）：43→0；201-205→1-5；527-531→6-10（Tiles_85 偶数列）
+//   style 映射（Projectile.cs:25681-25687）：43→0；201-205→1-5；527-531→6-10（Tiles_85 偶数列）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE_BY_KEY } from '../data/tiles';
+import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';
 
 /** 程序化像素墓碑贴图（16×22）——仅作贴图缺失时的兜底 */
 let tombstoneCanvas: HTMLCanvasElement | null = null;
@@ -69,8 +81,17 @@ export class Tombstone extends Entity {
   readonly epitaph: string;
   /** 落格安放的墓碑 tile 左上角（安放成功后有效；渲染/交互用） */
   placedAt: { x: number; y: number } | null = null;
+  /** DropTombstone damage（:39429-39433）：非 FTW 0（三伤害面早退）/ FTW 70 */
+  dmg = 0;
+  /** DropTombstone knockBack（num3,NewProjectile 第 8 参覆写 SetDefaults 12f） */
+  knockBack = 0;
+  /** per-enemy 免疫镜（NPC.immune[owner] 10t 等价;AshBallProj 同制） */
+  private immunities = new Map<number, number>();
 
-  constructor(x: number, y: number, coinsOwned: number, deathText: string, hitDirection: number) {
+  constructor(x: number, y: number, coinsOwned: number, deathText: string, hitDirection: number,
+    /** FTW（getGoodWorld）伤害面：damage 70 / knockBack 10 / 弹速 ×1.5
+     *  （DropTombstone :39429-39439；SetDefaults :1260-1271 friendly+hostile） */
+    getGood = false) {
     super();
     this.style = pickStyle(coinsOwned);
     this.epitaph = `${deathText}\n${longDate()}`;
@@ -79,18 +100,34 @@ export class Tombstone extends Entity {
     while (num < 2 && num > -2) num += (Math.floor(Math.random() * 61) - 30) * 0.1;
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
-    this.vx = (Math.floor(Math.random() * 21) + 10) * 0.1 * hitDirection + num;
-    this.vy = (Math.floor(Math.random() * 21) - 40) * 0.1; // -2 .. -4 上抛
+    // :39437-39439 非 FTW 抛射 / :39440-39442 getGood 分支 ×1.5
+    const mul = getGood ? 1.5 : 1;
+    this.vx = ((Math.floor(Math.random() * 21) + 10) * 0.1 * hitDirection + num) * mul;
+    this.vy = (Math.floor(Math.random() * 21) - 40) * 0.1 * mul; // -2 .. -4 上抛
+    this.dmg = getGood ? 70 : 0;      // :39430-39433（damage=0 → 三伤害面全早退）
+    this.knockBack = getGood ? 10 : 0; // num3（:39431-39433;NewProjectile 第 8 参覆写 12f）
+  }
+
+  /** 墓碑弹型（ProjectileID.IsAGravestone 域：ProjectileID.cs:29）——style 反查
+   *  （:25681-25687 的正映射逆运算）：0→43、1-5→201-205、6-10→527-531 */
+  get projId(): number {
+    if (this.style === 0) return 43;
+    if (this.style <= 5) return 200 + this.style;
+    return 522 + this.style;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
-    // aiStyle17（Projectile.cs:23677-23686）：落地摩擦 → 翻滚 → 重力
+    // aiStyle17（Projectile.cs:25636-25646）：落地摩擦 → 翻滚 → 重力
     if (this.vy === 0) this.vx *= 0.98;
     this.angle += this.vx * 0.1;
-    // aiStyle17 专用重力 0.2/帧（Projectile.cs:23681，非全局 GRAVITY 0.36）
+    // aiStyle17 专用重力 0.2/帧（Projectile.cs:25641，非全局 GRAVITY 0.36）
     this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
-    // 落格检查（L23689-23717）：底缘中心下方格可放墓碑 → 放置 + 碑文 + 消失
+    // FTW 伤害面（Projectile.Damage :12549-12580 → PVE/PVP/EVP；dmg=0 非 FTW 全早退）。
+    // 序 = 位置积分后、落格安放判定前——原版 Damage 在 Update 尾（积分后）恒跑，
+    // 安放 Kill 在下拍 AI 头，落地拍照常结算接触
+    if (this.dmg > 0) this.applyDamage(game);
+    // 落格检查（:25663-25689）：底缘中心下方格可放墓碑 → 放置 + 碑文 + 消失
     const bx = Math.floor((this.x + this.w / 2) / 16);
     const by = Math.floor((this.y + this.h - 4) / 16); // 脚下贴地的行
     const top = by - 1;                                 // 2×2 物件顶行（底行与脚对齐）
@@ -99,6 +136,45 @@ export class Tombstone extends Entity {
       return;
     }
     void dt;
+  }
+
+  /** FTW 伤害面三通道（SetDefaults :1260-1271 FTW 支 friendly=true+hostile=true →
+   *  Projectile.Damage :12549-12580 全开）：
+   *  ① Damage_PVE friendly 臂 → 敌怪（kb 方向 = projectile.direction = sign(vx)）；
+   *  ② hostile & friendly 臂（:12631 flag2 = victim.friendly && !dontTakeDamageFromHostiles）
+   *     → 城镇 NPC（:12633 `(!friendly || !flag…) && !(hostile & flag2)` 双半开门——
+   *     FTW 墓碑对镇民恒过门,不经巫毒娃娃窄门）+ 击杀归因 OnKillNPC → 成就 36；
+   *  ③ Damage_EVP（:14846 hostile && damage>0 && netMode≠2）→ 本地玩家（hitPlayer
+   *     = EVP 镜像:iframes/SkipDamage_EVP/DamageVar/难度乘区）。
+   *  小动物照杀（:20675 面,hitCritters）。联机 PvP 面（Damage_PVP）不接（备案）。
+   *  免疫镜 = per-enemy 10t（NPC.immune[owner] 等价,Projectile.cs:12651 门;AshBallProj
+   *  同制）;墓碑 penetrate=-1 穿透不消失,持续翻滚。 */
+  private applyDamage(game: GameHooks): void {
+    for (const [id, t] of [...this.immunities]) {
+      if (t <= 1) this.immunities.delete(id); else this.immunities.set(id, t - 1);
+    }
+    const dir = this.vx >= 0 ? 1 : -1;   // projectile.direction（NewProjectile 速度符）
+    const kb = this.knockBack * dir;
+    for (const raw of game.enemies() as Array<Record<string, unknown>>) {
+      const e = raw as unknown as {
+        id: number; dead?: boolean; friendly?: boolean; immortal?: boolean; dontTakeDamage?: boolean;
+        x: number; y: number; w: number; h: number;
+        hurt?: (dmg: number, kbx: number, kby: number, game: unknown) => boolean | void;
+      };
+      if (!e || e.dead || e.friendly || e.immortal || e.dontTakeDamage) continue;
+      if ((this.immunities.get(e.id) ?? 0) > 0) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      this.immunities.set(e.id, 10);
+      e.hurt?.(this.dmg, kb, 0, game);
+    }
+    // 城镇 NPC（hostile 臂恒过门）+ 击杀归因（:13702-13706 DidNPCDie → OnKillNPC
+    // :20623-20636 IsAGravestone && townNPC → NotifyProgressionEvent(36) GRAVE_MISTAKE;
+    // 单人 Main.myPlayer==whoAmI 恒真 = :20624 门）
+    hitTownNpcs(this, game, this.dmg, kb, 'hostile', this.projId, undefined, () => {
+      game.achievements?.notifyProgressionEvent(36);
+    });
+    hitCritters(this, game);
+    hitPlayer(this, game, this.dmg);
   }
 
   /** TileObject.CanPlace(85) 近似：2×2 全空 + 底下两格实心支撑 */

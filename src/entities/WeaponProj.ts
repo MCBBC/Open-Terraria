@@ -4801,9 +4801,13 @@ export function bombGravityGateOf(projId: number): number | null {
  *  !tileSolidTop && !halfBrick && slope==0 —— active/!inActive ≡ st.isActive
  *  （nactive）,tileSolidTop 以 d.platform 代理（tileSolid∩tileSolidTop 九件套
  *  即平台行为族,同 Game.ts:17423 solidFull/LineOfSight fullSolid 惯用法）。
- *  ★越界差：vanilla Main.tile OOB=null → SolidTile 返 true（:70646-70649）,
- *  本仓 store 惯例"世界外视为空"——世界缘 8~40px 带内推向可能差一档,备案
- *  （与 moveAndCollide 同源边界,非本支引入）。 */
+ *  ★OOB 语义（SW-AL1 2026-09-05 定谳,纠正 SW-AD1 旧备案"OOB=null→true"）：
+ *  vanilla Main.tile 是裸 Tile[,]（Main.cs:1690）——OOB 下标抛 IndexOutOfRange,
+ *  被 SolidTile try/catch 吞掉【返 false】（W.cs:70642-70655 catch 尾）;null→true
+ *  分支仅【界内】null 格可达（单人 clearWorld W.cs:7088-7121 全量 new Tile(),
+ *  仅 MP 客户端未流送段持 null）。本仓 OOB=false（store"世界外视为空"）≡ 原版
+ *  OOB 异常路径,非差项。世界缘实体面：玩家位置钳制（Player.cs:24243-24314）、
+ *  弹幕触界 active=false 消散（P.cs:16789-16802;655 已接=GrenadeProj 出界杀）。 */
 export function beeWallPushDir(
   st: Pick<TileStore, 'inBounds' | 'isActive' | 'get' | 'idx' | 'half' | 'slope'>,
   x: number, y: number, w: number, cx: number,
@@ -5411,6 +5415,11 @@ export class GrenadeProj extends Entity {
         if (Math.random() < 0.5 && !inBodyBox(this.cx, this.cy)) game.spawnParticles(this.cx, this.cy, '#C0C0B0', 1, 1.4, { life: 16 });
       }
     }
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位）——
+    //  中央压板扫描新旧位判定消费（Collision.cs:3346-3353/:3356 + :19974 门）。
+    //  ★置位在 stickPending 早退【前】：贴墙待爆拍位不移（position==oldPosition
+    //  ≡ 原版 :19974 门不达同相),旧位必须逐拍刷新防 stale 值重触发
+    this.oldX = this.x; this.oldY = this.y;
     if (this.stickPending) return;                                        // 贴墙待爆：vel=0 静止
     // ---- 位移（无重力）+ 撞块（AI_016 响应表）----
     // ★残余债清偿(2026-09-01):三点半采样撞块在斜砖/半砖上漏检(几何空区)+误检并存,
@@ -5870,6 +5879,9 @@ export class GrenadeProj extends Entity {
     }
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-N1：本拍积分前 y（软着陆钳速残差 = body.y − bodyY0）
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 同位序,655 蜂巢支）——
+    //  655 ∈ OBJTYPE3 白名单（:17195）,objType 3 扫描同消费新旧位判定
+    this.oldX = this.x; this.oldY = this.y;
     // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——同 firedStep 位注：
     //  阻尼只进位移入参,b.vx/vy=碰撞调整字段采纳处不动
     const drag = this.wetDragFactor();

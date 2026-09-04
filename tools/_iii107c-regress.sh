@@ -32,9 +32,13 @@ SW_MB_1457=1 SW_M8_NOCACHE=1 SW_I81=1 SW_I81_MINNAMES=5 \
 echo "[m8-sparkle] rc=$?"
 SW_MB_1457=1 SW_M8_NOCACHE=1 SW_I81=1 SW_I81_MINNAMES=5 \
   SW_I81_G2=$HOME/GoldenChains/golden-grvfix SW_I81_VG=$HOME/GoldenChains/golden-grvfix \
-  SW_I81_SEED='nightofthelivingdead|20260903' SW_I81_EVIL=-1 SW_I81_FLAGS=graveyardBloodmoonStart \
+  SW_I81_SEED='nightofthelivingdead|20260903' SW_I81_EVIL=0 SW_I81_FLAGS=graveyardBloodmoonStart \
   npx vitest run tools/_iii81m8.test.ts > "$OUT/m8-grv.log" 2>&1
 echo "[m8-grv] rc=$?"
+# ★IIIII174b（2026-09-05）：grv 段 SW_I81_EVIL -1→0 钉死——golden-grvfix 桶=SW_EVIL=0 产物
+#   （runbook §1），EVIL=-1 误跑=JS 侧邪恶自然掷对桶伪红（#26 Shinies T22>204×752 配方伪红；
+#   IIIRS158 判例 m8-grv EVIL=0 钉 105✓/0✗ 在案，IIIRS168 批「graveyard #26 先在债」同签名
+#   误报——IIIII174b 批 EVIL=0 复跑 105✓/0✗ 复证后销账，脚本原文自此钉 0 防再犯）。
 
 echo "== [5] tests/golden 零写入复核 =="
 ls tests/golden/ > /tmp/iii145-out/golden-ls-after.txt

@@ -122,8 +122,102 @@ function parseBlock(body, prefix, extra = {}) {
   const d = { ...extra };
   const lines = body.split('\n');
   const rel = (f) => `${prefix}.${f}`;
-  let yBase = null;                 // playerYOffsets 循环基值
-  const yDelta = new Map();         // 帧索引 → 增量
+  // ---- playerYOffsets 反编译语句微解释器（2026-09-04 blue-fix）----
+  // 旧实现只认字面 `array[i]` 循环变量 + 数字下标 +=/-=，漏掉反编译器重命名循环变量
+  // （num3..num27）的均匀填充型、负实参助手代入（8 - -10 + -8）、直接赋值 array[K] = N
+  // 与条件增量 if (V == a || ...) { array[V] += M; } —— 34 个坐骑 playerYOffsets 缺键。
+  // 形态全集（1457 Mount.cs 逐句核对，与 1456 同构）：
+  //   [F1] (int[] )array = new int[(mountData|newMount).totalFrames];
+  //   [F2] for (int V = 0; V < array.Length; V++) { array[V] = N; [if (V == a || ...) { array[V] += M; }] }
+  //   [F3] array[K] = N; / array[K] += N; / array[K] -= N;  （K = 数字 | 循环变量 | array.Length - 1）
+  //   [F4] ref int r = ref array[K]; r = r;                  （反编译 no-op，跳过）
+  //   [F5] array[i] = N - verticalOffset + playerVerticalOffset;（SetAsMinecart 助手实参代入后为数字）
+  // 数值表达式 = 数字/标识符的加减链；未知标识符 → 整句放弃并告警（宁缺勿错）。
+  let arr = null;
+  let yAssigned = false;
+  const numExpr = (e) => {
+    if (e === undefined) return undefined;
+    const whole = String(e).trim().match(/^(?:mountData|newMount)\.(\w+)$/);
+    if (whole) return d[whole[1]];
+    const parts = String(e).trim().match(/-?\d+(?:\.\d+)?|[A-Za-z_]\w*|[+-]/g);
+    if (!parts) return undefined;
+    let val = 0, op = 1, seen = false;
+    for (const p of parts) {
+      if (p === '+') { op = 1; continue; }
+      if (p === '-') { op = -1; continue; }
+      let v;
+      if (/^-?\d/.test(p)) v = +p;
+      else if (p === 'verticalOffset') v = extra.verticalOffset ?? 0;
+      else if (p === 'playerVerticalOffset') v = extra.playerVerticalOffset ?? 0;
+      else if (/^(?:mountData|newMount)\.(\w+)$/.test(p)) v = d[RegExp.$1];
+      else if (p in d) v = d[p];
+      else return undefined;
+      if (v === undefined) return undefined;
+      val += op * v; op = 1; seen = true;
+    }
+    return seen ? val : undefined;
+  };
+  const idxOf = (k, scope) => {
+    if (/^\d+$/.test(k)) return +k;
+    if (k === 'array.Length - 1') return arr.length - 1;
+    if (scope && k in scope) return scope[k];
+    return null;
+  };
+  const takeBlock = (ls, open) => {
+    // 开括号在头行行尾或下一行（反编译为 Allman 风格,{ 独占一行）
+    let start = -1;
+    for (let j = open; j < Math.min(ls.length, open + 3); j++) {
+      if (ls[j].includes('{')) { start = j; break; }
+    }
+    if (start < 0) return [null, open + 1];
+    let depth = 0;
+    for (let j = start; j < ls.length; j++) {
+      for (const c of ls[j]) {
+        if (c === '{') depth++;
+        else if (c === '}') depth--;
+      }
+      if (depth <= 0 && j >= start) return [ls.slice(start + 1, j), j + 1];
+    }
+    return [null, ls.length];
+  };
+  const applyArrStmt = (t, scope) => {
+    const m = t.match(/^array\[(\w+)\] (=|\+=|-=) (.+);$/);
+    if (!m) return false;
+    if (arr) {
+      const i = idxOf(m[1], scope), v = numExpr(m[3]);   // m[2]=操作符, m[3]=数值表达式
+      if (i == null || v === undefined) console.error(`[extract-mounts] playerYOffsets 语句未解析(登记缺): ${t.trim()}`);
+      else if (m[2] === '=') arr[i] = v;
+      else if (m[2] === '+=') arr[i] += v;
+      else arr[i] -= v;
+    }
+    return true;
+  };
+  const runStmts = (ls, scope) => {
+    for (let i = 0; i < ls.length; i++) {
+      const t = ls[i].trim();
+      if (!t) continue;
+      if (/^(?:mountData|newMount)\.playerYOffsets = array;$/.test(t)) return;   // 赋值后无需再扫
+      let m;
+      if ((m = t.match(/^for \(int (\w+) = 0; \1 < array\.Length; \1\+\+\)$/))) {
+        const [body, next] = takeBlock(ls, i);
+        if (body) for (let idx = 0; idx < arr.length; idx++) runStmts(body, { ...scope, [m[1]]: idx });
+        i = next - 1;
+        continue;
+      }
+      if ((m = t.match(/^if \(([^)]*)\)$/))) {
+        const [body, next] = takeBlock(ls, i);
+        const cs = [...m[1].matchAll(/(\w+) == (-?\d+)/g)];
+        const residue = m[1].replace(/(\w+) == -?\d+/g, '').replace(/\|\|/g, '').trim();
+        if (body && !residue && cs.length && cs.every((c) => scope && c[1] in scope)
+          && cs.some((c) => scope[c[1]] === +c[2])) runStmts(body, scope);
+        i = next - 1;
+        continue;
+      }
+      if (/^ref int \w+ = ref array\[\d+\];$/.test(t)) continue;   // [F4] no-op 声明
+      if (/^\w+ = \w+;$/.test(t)) continue;                        // reference = reference; no-op
+      applyArrStmt(t, scope);
+    }
+  };
   for (let li = 0; li < lines.length; li++) {
     const t = lines[li].trim();
     for (const f of NUM_FIELDS) {
@@ -147,16 +241,19 @@ function parseBlock(body, prefix, extra = {}) {
       const m = t.match(new RegExp(`^${rel(f)} = (true|false);$`));
       if (m) d[f] = m[1] === 'true';
     }
-    // playerYOffsets 循环填充：array[i] = <num> - vertOff + pVertOff
-    const fill = t.match(/^array\[i\] = (-?\d+)(?: - (\w+))?(?: \+ (\w+))?;/);
-    if (fill) yBase = { v: +fill[1], minus: fill[2] ?? null, plus: fill[3] ?? null };
-    const plus = t.match(/^array\[(\w+)\] \+= (-?\d+);$/);
-    if (plus) {
-      const k = plus[1] === 'array.Length - 1' ? -1 : +plus[1];
-      yDelta.set(k, (yDelta.get(k) ?? 0) + (+plus[2]));
+    // [F1] 数组建制：建零数组后从下一行起执行到块尾（后续字段行不匹配语句形态，安全）
+    const ac = t.match(/^(?:int\[\] )?array = new int\[([\w.]+)\];$/);
+    if (ac) {
+      const n = numExpr(ac[1]);
+      if (n !== undefined && n > 0) {
+        arr = new Array(n).fill(0);
+        runStmts(lines.slice(li + 1), null);
+      } else {
+        arr = null;
+        console.error(`[extract-mounts] array 长度表达式未解析(登记缺): ${t.trim()}`);
+      }
     }
-    const set = t.match(/^array\[(\d+)\] -= (-?\d+);$/);
-    if (set) yDelta.set(+set[1], (yDelta.get(+set[1]) ?? 0) - (+set[2]));
+    if (/^(?:mountData|newMount)\.playerYOffsets = array;$/.test(t)) yAssigned = true;
     // 贴图四层
     for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra', 'frontTextureExtraGlow']) {
       if (d[slot] === undefined) {
@@ -172,14 +269,12 @@ function parseBlock(body, prefix, extra = {}) {
   for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra', 'frontTextureExtraGlow']) {
     if (typeof d[slot] === 'string') d[slot] = texOf(d[slot]) ?? d[slot];
   }
-  // playerYOffsets 定稿
-  if (yBase !== null && d.totalFrames) {
-    const n = d.totalFrames;
-    const off = yBase.minus === 'verticalOffset' ? (extra.verticalOffset ?? 0) : 0;
-    const add = yBase.plus === 'playerVerticalOffset' ? (extra.playerVerticalOffset ?? 0) : 0;
-    d.playerYOffsets = Array.from({ length: n }, (_, i) =>
-      yBase.v - off + add + (yDelta.get(i) ?? 0));
-    if (yDelta.has(-1)) d.playerYOffsets[n - 1] += yDelta.get(-1);
+  // playerYOffsets 定稿（微解释器产物；未赋值语句的块不落键 = 原版本就没有该数组）
+  if (arr && yAssigned) {
+    if (d.totalFrames !== undefined && d.totalFrames !== arr.length) {
+      console.error(`[extract-mounts] playerYOffsets 长度 ${arr.length} ≠ totalFrames ${d.totalFrames}（登记异常）`);
+    }
+    d.playerYOffsets = arr;
   }
   if (d.yOffset !== undefined && extra.verticalOffset) d.yOffset += extra.verticalOffset;
   return d;
@@ -280,8 +375,11 @@ const buffMount = {};
 //   :166 Count = 66；Mount.cs:2567-2572 `SetAsChillet(mountData, 391, Extra[301], hardmode:true)`
 //   → mounts[64]、`SetAsChillet(mountData, 392, Extra[302], hardmode:true)` → mounts[65]。
 // 数值 = SetAsChillet hardmode 支（1457 Mount.cs:2682-2690）：dashSpeed 9/jumpHeight 11/
-// jumpSpeed 8.1（非 hardmode 支 6.5/6/8.01 是 1457 侧 62/63 的新值——本仓 62/63 仍
-// 1456 旧值 9/8/8.01,登记不随迁）。其余字段/帧组/playerYOffsets 与 hardmode 无关
+// jumpSpeed 8.1。非 hardmode 支 1457 终值 dashSpeed 6.5/jumpHeight 6/jumpSpeed 8.01
+// （1457 Mount.cs:2691-2697 else 支;调用点 :2562/:2565 `hardmode: false`）→ 62/63 按
+// CLAUDE.md"1456 与 1457 冲突以 1457 为准"在下方显式覆盖（2026-09-04 blue-fix;
+// 旧注"62/63 仍 1456 旧值 9/8 不随迁"作废——盘上 json 实为 1457 终值,提取器重跑曾回退）。
+// 其余字段/帧组/playerYOffsets 与 hardmode 无关
 // （1457 :2691-2756 ≡ 1456 :2652-2716 逐行同,62 条目即证）。贴图与 62/63 共用
 // Extra_301/302.png（1457 :2752-2753 同一 TextureAssets.Extra 下标）。
 // 召唤物品 6150/6151（1457 Item.cs:47385-47410 `mountType = 64/65`,UseSound=PalSummon）+
@@ -330,6 +428,12 @@ for (const [id, data] of Object.entries(MOUNTS_1457_TRUSTY)) {
 Object.assign(itemMount, ITEM_MOUNT_1457);
 Object.assign(buffMount, BUFF_MOUNT_1457);
 mountCount = COUNT_1457;
+// ★1457 终值覆盖：62/63 = SetAsChillet 非 hardmode 支（1457 Mount.cs:2691-2697
+// else 支 dashSpeed 6.5/jumpHeight 6/jumpSpeed 8.01；调用点 :2562/:2565 hardmode: false）。
+// 主源 1456 的 else 支是旧值 9/8/8.01，此处按 1457 钉终值（jumpSpeed 8.01 两版相同不动）。
+for (const id of ['62', '63']) {
+  if (mounts[id]) { mounts[id].dashSpeed = 6.5; mounts[id].jumpHeight = 6; }
+}
 // Sets 能力位数组随 Count 扩到 66（本表全 bool 集,缺省 false）+ CanDash 64/65 置位
 for (const arr of Object.values(sets)) {
   while (arr.length < mountCount) arr.push(false);

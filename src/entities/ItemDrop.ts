@@ -502,8 +502,14 @@ export class ItemDrop extends Entity {
     // 微光转化完成音 = SoundID.Item176（WorldItem.cs:1689-1696 ShimmerEffect——
     // GetShimmered 全部分支【共尾】单点调用 :1875,钱币支不 return 也走）。
     // 音量 ×0.9 = LegacySoundPlayer.cs:520-521（case 2 num==176 支）。
-    // 本仓链是早退分支结构 → 每个落地分支补一次（下方各支同款行）
-    const shimmerDoneSfx = (): void => game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
+    // 本仓链是早退分支结构 → 每个落地分支补一次（下方各支同款行）。
+    // ★共尾同时发 TRANSMUTE_ITEM prog 27（WorldItem.cs:1878
+    // `AchievementsHelper.NotifyProgressionEvent(27)`——GetShimmered 共尾段,转化/
+    // decraft/钱币/放生各支同发,2026-09-04 成就触发面审计接线）
+    const shimmerDoneSfx = (): void => {
+      game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
+      game.achievements?.notifyProgressionEvent(27);
+    };
     if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
       // 钱币 → 微光化币（:1791-1810）：面额放大后 AddCoinLuck（距离 <1000px 才累计，
       // LuckState.addCoinLuck 1:1），物品消失
@@ -538,7 +544,10 @@ export class ItemDrop extends Entity {
       flags['unlockedSlimeRainbowSpawn'] = true;              // NPC.unlockedSlimeRainbowSpawn
       const e = game.spawnNpcByVanilla?.(681, this.cx + 4, this.cy);
       if (e) { e.vx = this.vx; e.spawnAlpha = 254; e.alphaFade = true; }
-      // WorldGen.CheckAchievement_RealEstateAndTownSlimes(:1831)——成就项未接，登记
+      // 成就：彩虹史莱姆解锁复查（WorldItem.cs:1771 WorldGen.
+      // CheckAchievement_RealEstateAndTownSlimes 1:1——ALL_TOWN_SLIMES 26 面补全，
+      // 2026-09-04 审计接；原"成就项未接，登记"注退役）
+      game.checkAchievementRealEstateAndTownSlimes?.();
       this.stack--;
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1832-1836 type=0
       else this.shimmerTime = 1;                                   // :1948-1951 共尾
@@ -622,8 +631,9 @@ export class ItemDrop extends Entity {
     else this.shimmerTime = 1;                   // :1936 剩余 stack 保留并重置浸入进度
     game.playSfx('shimmerSplash', 1, this.cx, this.cy);
     // Item176 转化音（WorldItem.cs:1875 GetShimmered 共尾 → ShimmerEffect :1689-1696；
-    // ×0.9 = LegacySoundPlayer.cs:520）——decraft 支同走该尾
+    // ×0.9 = LegacySoundPlayer.cs:520）——decraft 支同走该尾；prog 27 同共尾（:1878）
     game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
+    game.achievements?.notifyProgressionEvent(27);
     return true;
   }
 

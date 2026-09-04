@@ -73,6 +73,7 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
   g.sfx = { play: (n: string) => { sfxNames.push(n); },
     playWavFile: (f: string) => { sfxNames.push(f); return true; } };
   g.spawnParticles = () => {};
+  g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };   // breakTile→inMiningWindow 面（SW-AF1 后新增消费）
   return { g, world, playerRecords, sfxNames };
 }
 

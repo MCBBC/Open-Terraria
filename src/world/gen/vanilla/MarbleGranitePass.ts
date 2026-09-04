@@ -291,6 +291,11 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
           st.flags[ti] = slabSolid(pst, i, j, 3) ? 1 : 0;
           st.liquid[ti] = 0; st.liquidType[ti] = 0;
           st.half[ti] = 0; st.slope[ti] = 0;  // ResetToType 清 sTileHeader（半砖/坡面）
+          // ★IIIII169·B1（R1）：Tile.ResetToType（Tile.cs:251-261）frameX=0/frameY=0——
+          // 生成期 TileFrame 的 TileFrameCosmetic 被 !generatingWorld 门死（WorldGen.cs:82652）
+          // 帧不会邻接重排,必须显式清零;否则 placeTight 钟乳石材质带残帧（486/504/522,18..90）
+          // 在 marblePlace 覆写时顺延（x86 窗 #21 一跳 t367 f(0,0)）
+          st.frameX[ti] = 0; st.frameY[ti] = 0;
           // ★wall 是 Tile.cs 独立 ushort 字段——ResetToType 的 bTileHeader*=0 不清墙，
           // HasWall=false 时保留旧墙（SquareWallFrame 掷照旧）
           if (pWall) st.wall[ti] = mW;
@@ -480,6 +485,10 @@ function granitePlace(st: TileStore, rng: RNG, gs: GenState, x0: number, y0: num
         st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : gT;
         st.flags[ti] = 1; st.liquid[ti] = 0; st.liquidType[ti] = 0;
         st.half[ti] = 0; st.slope[ti] = 0;           // ResetToType 清 sTileHeader
+        // ★IIIII169·B1（R1）：同 marblePlace——ResetToType 帧清零（残帧只进 ResetToType 支;
+        // res<0.01 ClearTile 支与 CleanupTiles 是 Tile.ClearTile（Tile.cs:124-128）帧保留,
+        // 反向清帧=R3 教训,勿加）
+        st.frameX[ti] = 0; st.frameY[ti] = 0;
         st.wall[ti] = gW;
       } else if (res[mi]! < 0.01) {
         st.flags[ti] = 0;                            // ClearTile：type/wall/液体保留

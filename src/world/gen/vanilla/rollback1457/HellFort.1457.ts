@@ -123,6 +123,11 @@ function hfCheckDoorClosed(st: TileStore, i: number, j: number): void {
     if (!st.flags[t] || st.type[t] !== T_DOOR) continue;    // KillTile 早退口径
     st.flags[t] = 0;                                       // active(false)
     st.half[t] = 0;                                        // halfBrick(false)
+    // ★IIIII169·C4（R2）：KillTile 尾 `frameX=-1; frameY=-1`（cs:64400-64401,u16
+    //   环回 65535）——漏写则门帧 (Next(3)*18, 54*style%36)（如 style19=(18,1026)）
+    //   残留进终态（winter (1862,1047) x86 幽灵 65535 实证）
+    st.frameX[t] = 65535;
+    st.frameY[t] = 65535;
     st.type[t] = 0;                                        // 尾置 type=0
     st.paint[t] = 0;                                       // ClearBlockPaintAndCoating
     st.coat[t] &= ~TileStore.COAT_BLOCK_MASK;

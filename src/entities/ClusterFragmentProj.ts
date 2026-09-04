@@ -169,6 +169,10 @@ export class ClusterFragmentProj extends Entity {
     // 裂片不在 FIRED_STICK 撞块 vel=0 表）
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-R3 2026-09-03（F-6②）：本拍积分前 y（残差=实际位移）
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位）——
+    //  779/783/862/863 走 objType 4 扫描（:19978）,新旧位判定
+    //  （Collision.cs:3346-3353/:3356）消费
+    this.oldX = this.x; this.oldY = this.y;
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,

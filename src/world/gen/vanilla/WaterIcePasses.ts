@@ -5,11 +5,12 @@
 //     冰原水面上铺 BreakableIce 162（薄冰），注册序 Waterfalls(16697) < 本 pass <
 //     CaveWallVariety(16786)。
 // 两 pass 均零掷骰（纯扫描），不影响 RNG 流。
-import type { TileStore } from '../../TileStore';
+import { TileStore } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';
 import { doWorldIsFrozenSweep } from './SecretSeedDoEndsPass';   // ★IIIII110 冻结重放
 
 const SAND = TILE_BY_KEY['sand']!;                 // 53
@@ -67,8 +68,16 @@ export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState):
  *  门禁：上格无液无块、前进侧邻格非半砖；越界即止。
  *  ★R9-5（2026-08-24）：函数门补 `&& !remix`（cs:80746 `|| (lava() && !Main.remixWorld)`）
  *  ——remix 世界岩浆柱两道门都放行（调用门 cs:16791 同款），岩浆面照样铺薄冰；
- *  旧注释"remix 分支不触发"判断有误。 */
-function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false): void {
+ *  旧注释"remix 分支不触发"判断有误。
+ *  ★IIIII159（2026-09-04）：落位由 setTileSilent 改为 **PlaceTile(162,mute) 1:1**
+ *  （cs:59841 主体：!active 前置清 Tile|TilePaint|Slope=Tile.Clear(TileDataType) cs:746
+ *  → 内层 default 支 active+type 直写 cs:60733-60741 → **尾 SquareTileFrame cs:60760**）
+ *  ——级联 TileFrame 打到邻格 165 钟乳 → CheckStalactite→UpdateStalagtiteStyle
+ *  （cs:39067）样式失配即 Next(3)+重写 frameX：x86 rig 逐 pass 帧 dump 实证
+ *  (2931,861) fx=72(石)→0(冰) 恰发生在本 pass（055_Ice）,JS 曾缺级联 fx 滞留 72 →
+ *  Piles #1425 级联 JS 多耗 1 掷(样失配重掷) → 过渡窗采样错位 → x86 (3744,893)
+ *  地牢墙 flag 独占 m+1 → m251(末段)边界相移 → 段② B 格 (1762,1106) 前置清缺失。 */
+function makeWateryIceThing(st: TileStore, rng: RNG, i: number, j: number, remix = false): void {
   const inWorld = (x: number, y: number): boolean =>
     x >= 1 && y >= 1 && x < st.w - 1 && y < st.h - 1;
   if (!inWorld(i, j)) return;
@@ -90,6 +99,17 @@ function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false):
   num++;
   if (!st.flags[st.idx(i, num)]) {
     // 水面线（num 行）：向左直到门禁破，再从 i+1 向右
+    // ★IIIII159：单格落位 = PlaceTile(162,mute:true) 1:1——前置清（!active →
+    //   Tile.Clear(Tile|TilePaint|Slope)：slope/half/paint/涂层块位清,液保留）+
+    //   active+type 直写 + 尾 genSquareTileFrame（CheckStalactite 族掷/重写载体）。
+    const placeThinIce = (x: number): void => {
+      const k = st.idx(x, num);
+      st.slope[k] = 0; st.half[k] = 0; st.paint[k] = 0;
+      st.coat[k] &= ~TileStore.COAT_BLOCK_MASK;    // TilePaint→ClearBlockPaintAndCoating
+      st.type[k] = THIN_ICE; st.flags[k] = 1;
+      st.frameX[k] = 0; st.frameY[k] = 0;
+      genSquareTileFrame(st, rng, x, num);         // cs:60760 尾级联（165 邻格重查掷位）
+    };
     let x = i;
     for (;;) {
       if (!inWorld(x, num)) break;
@@ -98,7 +118,7 @@ function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false):
       const up = st.idx(x, num - 1);
       if (st.liquid[up] !== 0 || st.flags[up]) break;
       if (st.half[st.idx(x - 1, num)]) break;
-      st.setTileSilent(x, num, THIN_ICE, 0, 0);    // PlaceTile(162, mute)
+      placeThinIce(x);
       x--;
     }
     for (let x2 = i + 1;; x2++) {
@@ -108,7 +128,7 @@ function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false):
       const up = st.idx(x2, num - 1);
       if (st.liquid[up] !== 0 || st.flags[up]) break;
       if (st.half[st.idx(x2 + 1, num)]) break;
-      st.setTileSilent(x2, num, THIN_ICE, 0, 0);
+      placeThinIce(x2);
     }
   }
 }
@@ -120,11 +140,12 @@ function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false):
  *    **worldIsFrozen 时 DoWorldIsFrozen() 全带重放再置 num=0**（cs:16781-16785）
  *    → y∈[num,h-100) 液体格 MakeWateryIceThing → 尾 tileSolid 226/162=false。 */
 export function runFragileIcePass(st: TileStore, gs: GenState, rng?: RNG): void {
-  // ★pass 头 tileSolid 翻转（cs:16797-16798）：226 蜥蜴砖 / 162 薄冰自此非实心——
-  //   UndergroundHouses 头（cs:17076-79）短暂回实心、尾（cs:17220-23）再翻 false,
-  //   226 到 CaveWalls 头（cs:17822）回 true,162 到 BeeLarva 尾（cs:21048）回 true。
-  //   生成期无还原本句之后到上述各点之间,相关消费端经 GenSolid 可见非实心态。
-  flipGenSolid([226, 162], false);
+  // ★IIIII159 勘误：tileSolid 226/162 翻转原被置 pass 头,而原版在**扫水循环之后**
+  //   （cs:16796-98=MakeWateryIceThing 循环尾）——扫水期间 162 仍实心（数据面初值），
+  //   落位级联（genSquareTileFrame→CheckStalactite 支撑判定）读的就是实心态；
+  //   pass 尾翻 false 后到 UndergroundHouses 头（cs:17076-79）短暂回实心、尾
+  //   （cs:17220-23）再翻 false,226 到 CaveWalls 头（cs:17822）回 true,162 到
+  //   BeeLarva 尾（cs:21048）回 true——窗口语义不变,仅头/尾位归位。
   let y0 = Math.floor(gs.worldSurface);                                // cs:16779
   if (gs.seedFlags.worldIsFrozen) {                                    // cs:16781-16785
     // 冻结世界：全带冰化在此重放（深层石/土/草族 → 冰/雪/冰浆糖层,单种子 count=1
@@ -141,7 +162,9 @@ export function runFragileIcePass(st: TileStore, gs: GenState, rng?: RNG): void 
   for (let x = 10; x < st.w - 10; x++) {
     for (let y = y0; y < y1; y++) {
       const i = st.idx(x, y);
-      if (st.liquid[i] > 0 && (st.liquidType[i] !== 2 || remix)) makeWateryIceThing(st, x, y, remix);
+      if (st.liquid[i] > 0 && (st.liquidType[i] !== 2 || remix)) makeWateryIceThing(st, rng as RNG, x, y, remix);
     }
   }
+  // cs:16796-98：扫水循环后 226 蜥蜴砖 / 162 薄冰自此非实心（GenSolid 窗口起点）
+  flipGenSolid([226, 162], false);
 }

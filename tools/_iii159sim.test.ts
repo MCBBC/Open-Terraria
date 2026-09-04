@@ -66,6 +66,8 @@ function cloneStore(st: TileStore): TileStore {
     fs4.writeFileSync(`${OUT}/js-076.half`, u8(st.half));
     fs4.writeFileSync(`${OUT}/js-076.liq`, u8(st.liquid));
     fs4.writeFileSync(`${OUT}/js-076.lty`, u8(st.liquidType));
+    fs4.writeFileSync(`${OUT}/js-076.fx`, u16(st.frameX));
+    fs4.writeFileSync(`${OUT}/js-076.fy`, u16(st.frameY));
   }
 
   // ---- ② 重放:全程掷值流 + 结构事件 + attempt 追踪 ----
@@ -104,6 +106,11 @@ function cloneStore(st: TileStore): TileStore {
   G.__swI159OT = (x: number, y: number) => {
     ot.push(`OT|${roll}|${x},${y}`);
   };
+  const prevD59 = G.__swD59v;
+  const d59l: string[] = [];
+  G.__swD59v = (o: Record<string, unknown>) => {
+    if (roll >= 12100 && roll <= 34200) d59l.push(JSON.stringify(o) + ` @${roll}`);
+  };
   try {
     restoreGenSolid(lut);
     const stc = cloneStore(st);
@@ -117,6 +124,7 @@ function cloneStore(st: TileStore): TileStore {
     G.__swI148Att = prevAtt;
     G.__swI159Ver = prevVer;
     G.__swI159OT = prevOT;
+    G.__swD59v = prevD59;
   }
   console.log(`replay total rolls=${roll} events=${evs.length} attempts=${att.length} verdicts=${ver.length}`);
   writeFileSync(`${OUT}/js-rv-full.txt`, rv.join('\n'));
@@ -125,6 +133,7 @@ function cloneStore(st: TileStore): TileStore {
   writeFileSync(`${OUT}/js-att.txt`, att.join('\n'));
   writeFileSync(`${OUT}/js-ver.txt`, ver.join('\n'));
   writeFileSync(`${OUT}/js-ot.txt`, ot.join('\n'));
+  writeFileSync(`${OUT}/js-d59.txt`, d59l.join('\n'));
 
   // ---- ③a 事件流对齐:x86-piles-labeled(R n = 第 n+1 掷) ----
   const x86s: string[] = [];

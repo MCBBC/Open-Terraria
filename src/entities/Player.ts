@@ -25,13 +25,14 @@ import { viIdFromKey } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TileStoreRT } from '../world/TileStore';   // 运行时 SOLID_LUT（type-only import 会被剥）
+import { surviveHardcoreDeath } from '../world/gen/SeedEasterEggs';   // Main.surviveHardcoreDeath（Main.cs:2723）
 import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
-import { accFxOfInternal } from '../data/vanillaAccFx';
+import { accFxOfInternal, accFxJsonOfVid } from '../data/vanillaAccFx';
 import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL,
   FACE_HEAD_LAYER, FACE_MASK_LAYER, FACE_FLOWER_LAYER } from '../data/vanillaAccDrawslots';
 import { plotTileLine } from '../lighting/LightingEngine';
@@ -2002,17 +2003,55 @@ export class Player extends Entity {
       if (_d.ammoCost80) ammoSaveCost80 = true;
       if (_d.huntressAmmoCost90) ammoSaveHuntress = true;
     }
+    // ---- ★armorStat 甲件主属性环（2026-09-04 死键批收偿,退役 2026-09-03 死键备案）——常规甲件
+    //      GrantArmorBenefits if-chain（Player.cs:13557-14052）逐件主属性。此前
+    //      vanilla-accfx.json 甲件行只被配饰槽 3+ 消费环（Player.ts:1524）与 divingHelm
+    //      专查（:1945）扫到,盔甲三件面全死键;此处对 [hVid,bVid,lVid] 消费 json 数值
+    //      主属性面（mana/life/move/meleeSpd/dmg×3/crit×3/manaCostOff,与配饰链
+    //      Player.ts:1688-1715 同字段同聚合;accfx 提取器漏标的 manaCost 面已补进 json:
+    //      4982 :13726/1003 :13755/2760 :14021/2189 :13782/1282-1287+4256 :13825-13850）。
+    //      单源互斥（免双计）:
+    //      · 1546-1548 蘑菇矿头（叶/弹/火箭 ×1.12+crit5）→ shroomiteType 单源
+    //        （本仓 :2358-2363 乘区 + :2604 crit）,整行跳过;
+    //      · 行为旗（1549 ammoSave/4983 huntressSave…）不消费——省弹档由
+    //        ARMOR_AMMO_SAVE_VID（下方表）单源承载;
+    //      · 召唤面 minionDamage（552/4901/1004/403/1208/1209/1214/1218/1219）→
+    //        SUMMON_GEAR 承载（2026-09-04 入表）;maxMinions 面（5524/4873/4899）原已在表;
+    //      · SUMMON_GEAR 已带主属性面的甲件（3776 禁戒面具/3777/3778 禁戒袍裤/
+    //        1834 诡异腿——sumFx 盔甲扫描位已加）→ 字段级优先,本环对已覆盖字段
+    //        记 0（accfx 行与其同源同值,tests/accfx-armor-mainstats 断言恒等）;
+    //      · 套装层（vanillaArmorSets 槽序键）与甲件层分属原版两通道,不重叠。
+    //      ★任务清单勘误:4982-4984 = CrystalNinja 水晶忍者套（ItemID.cs 实名）,非日曜;
+    //        真日曜 Solar Flare = 2763-2765（aggro+300/lifeRegen+2/melee 面——accfx 行
+    //        2763-2765 值经核对 :13987-14000 无误,由本环消费,aggro 走 AGGRO_ARMOR_PIECE）。
+    for (const v of [hVid, bVid, lVid]) {
+      if (v === 1546 || v === 1547 || v === 1548) continue;
+      const afx = accFxJsonOfVid(v);
+      if (!afx) continue;
+      const sg = SUMMON_GEAR[v];
+      const sgHas = (f: string): boolean => sg !== undefined && (sg as unknown as Record<string, number | undefined>)[f] !== undefined;
+      const face = (f: 'mana' | 'life' | 'move' | 'meleeSpd' | 'dmgMelee' | 'dmgRanged' | 'dmgMagic' | 'dmgAll' | 'critMelee' | 'critRanged' | 'critMagic' | 'manaCostOff'): number =>
+        sgHas(f) ? 0 : afx[f] ?? 0;
+      mana += face('mana');                                  // statManaMax2（:13757 1003 等）
+      life += face('life');                                  // lifeRegen（:13987 2763 等,N/2 HP/s）
+      move += face('move');                                  // moveSpeed
+      meleeSpeed += face('meleeSpd');                        // meleeSpeed
+      dmgMelee += face('dmgMelee');
+      dmgRanged += face('dmgRanged');
+      dmgMagic += face('dmgMagic');
+      if (face('dmgAll')) { dmgMelee += face('dmgAll'); dmgRanged += face('dmgAll'); dmgMagic += face('dmgAll'); }
+      critMelee += face('critMelee');
+      critRanged += face('critRanged');
+      critMagic += face('critMagic');
+      manaCostOffAcc += face('manaCostOff');                 // manaCost -= X【加算】池（:13726 等）
+    }
     // ---- 盔甲单件省弹门（Player.cs GrantArmorBenefits if-chain + :13226 switch 逐件
     //      1:1——提取器 accfx 表漏标 2758/1002 档位键，此处手读直表；行号 1457 重锚）：
     //  星旋胸 2758 → ammoCost75=1/4（:14008）；叶绿头 1002 → chloroAmmoCost80=1/5
     //  （:13749）；蘑菇矿胸 1549 → ammoCost80=1/5（:13815，accfx 已标 ammoSave 同值）；
     //  水晶忍者胸 4983 → huntressAmmoCost90=1/10（:13734）；女猎手护甲 3804 →
     //  huntressAmmoCost90=1/10（:13278）；女猎手 T3 胸 3878 → ammoCost80=1/5（:13321）。
-    //  ★accfx 盔甲死键备案（2026-09-03 对账）：vanilla-accfx.json 收录若干甲件主属性行
-    //  （2758 dmgRanged0.12/critRanged12、1001-1003 叶绿、2199-2202 甲虫、551-553/4896-4901
-    //  神圣、4982-4984 日曜…），但 accfx 消费环只扫配饰槽 3+（accFxOfInternal 两调用位
-    //  =配饰循环+divingHelm 专查），盔甲三件面从未消费=死键；3804 远程伤+0.2 已由
-    //  DD2_PIECE_FX（:13275 实读）承载，其余甲件死键属"armorStat 大批"后续批次 ----
+    //  （★accfx 盔甲死键备案 2026-09-03 → 2026-09-04 armorStat 环接线,见上）
     // ★1457 叶绿素套水晶叶三修（OnHit :6986-7036,1456 :6615-6640）——叶绿素套
     //  SetBonus 的水晶叶追踪弹（226 剑气→227 花瓣）三处门：①目标须 CanBeChasedBy
     //  （:6991-6996,1456 无）②226 弹 !active 即跳过（:7000,1456 无 active 检）③
@@ -4036,6 +4075,18 @@ export class Player extends Entity {
         // 能力维护（Player.cs:25373 UpdateEffects 能力子集）：猪鲨崽计数器/增益 +
         // Scutlix 索敌-充能-开火。须在 upkeep 后、hover 消费前（fishronBoost 本 tick 新鲜）
         this.mount.updateMountEffects(this, this.mountEffectsCtx(game));
+        // 成就：RAINBOWS_AND_UNICORNS（Mount.UpdateEffects case 10 独角兽 Mount.cs:5013-5016：
+        // `itemAnimation > 0 && inventory[selectedItem].type == 1260 → HandleSpecialEvent(5)`
+        // ——骑独角兽持彩虹枪使用帧；本 call 位 = updateMountEffects（UpdateEffects
+        // 等价）同 tick 点。playerInteraction 门无——Mount 侧直发
+        if (this.mount.type === 10 && this.itemAnimTicks > 0) {
+          const held = this.inv.heldItem();
+          const hv = held ? (ITEM_DEFS[held.id]?.vid ?? viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') ?? -1) : -1;
+          if (hv === 1260) {
+            game.achievements?.handleSpecialEvent(5,
+              { statLifeMax: this.maxHp, statManaMax: this.maxMana });
+          }
+        }
       }
     }
     const ix = this.inputX;
@@ -5490,7 +5541,7 @@ export class Player extends Entity {
       this.vy = Math.fround(this.vy / 2);
       if (this.vy > 3) this.vy = 3;
     }
-    this.bordersMovement(world);
+    this.bordersMovement(world, game);
     // StepUp 抬升检测（原版 gfxOffY）：水平移动中被抬升 ≤16px → 渲染缓动补偿
     const lifted = preY - this.y;
     if (this.inputX !== 0 && lifted > 0.5 && lifted <= 16.1) this.stepRenderY = lifted;
@@ -7526,11 +7577,13 @@ export class Player extends Entity {
    *  碰撞积分后调用，调用点对应原版 :27968）。
    *  边界 = 世界边缘内缩 640px（=40 格 = offLimitBorderTiles×16，Main.cs:433）：
    *  - 左/右越线 → 钳回 + vx=0（原版另置 cameraX=0 抗镜头抖动，本仓库无对应，略）
-   *  - 顶越线 → 钳回 + vy 下推至 ≥0.11 + gravDir 复位 1（原版 remix/forcedGravity
-   *    分支出界即死，普通世界取 else 支——:23797-23818）
+   *  - 顶越线 → 【remix/forcedGravity 分支：出界即死】KillMe 原因 19 伤害 10
+   *    （:24264 + 成就 44 MY_PEOPLE_NEED_ME :24266-24268）+ 半幅钳位（num4=320，
+   *    :24269-24276）；【普通世界：钳回】+ vy 下推至 ≥0.11 + gravDir 复位 1
+   *    （else 支 :24277-24283）
    *  - 底越线 → 【出界即死】KillMe 原因 21 伤害 10（:23829-23834——地狱地板
    *    挖穿/坠落兜底；走 damage 直杀近似，iframes 只延迟一 tick 不改语义） */
-  bordersMovement(world: import('../world/World').World): void {
+  bordersMovement(world: import('../world/World').World, game?: import('./types').GameHooks): void {
     const B = 640;                              // offLimitBorderTiles(40) × 16
     const wPx = world.store.w * TILE;           // Main.rightWorld
     const hPx = world.store.h * TILE;           // Main.bottomWorld（leftWorld/topWorld=0）
@@ -7540,9 +7593,33 @@ export class Player extends Entity {
     if (this.x < B) { this.x = B; this.vx = 0; }
     if (this.x > wPx - B - this.w) { this.x = wPx - B - this.w; this.vx = 0; }
     if (this.y < B) {
-      this.y = B;
-      if (this.vy < 0.11) this.vy = 0.11;
-      this.gravDir = 1;
+      // ★MY_PEOPLE_NEED_ME 批（2026-09-04）：补 remix/forcedGravity 分支
+      //  （1457 :24255-24272）——remix 世界（don't dig up）/克脑强制重力期间
+      //  顶界出界即死（KillMe(ByOther(19),10) :24264）,非 remix 世界才钳位上推
+      if (world.seedFlags?.remix || this.forcedGravityT > 0) {
+        if (this.y < B - this.h && !this.dead) {
+          // KillMe(ByOther(19) = Space_1..5,10.0)：creativeGodMode 门在原版
+          // KillMe 头(:39096 早退)——直杀通道对应跳过,成就 44 通知在 KillMe 之外
+          // 恒执行（:24266-24268 whoAmI==myPlayer,单人恒真;神模式照发=原版语义）
+          if (!journeyGodmodeActive()) {
+            this.hp = 0;
+            this.lastDamageCause = { kind: 'space' };   // ByOther(19) Space_1..5
+          }
+          game?.achievements?.notifyProgressionEvent(44);   // MY_PEOPLE_NEED_ME
+        }
+        // 顶界内缩半幅钳位（:24269-24276 num4 = 640/2）——死亡线 = 640−height（上支），
+        // 活体只可在 [640−height, 640) 带内存活；320 钳位仅对传送/尸体等
+        // 单拍大幅越线生效（y<320 时上支已置死,此处只钳位摆尸）
+        if (this.y < B / 2) {
+          this.y = B / 2;
+          if (this.vy < 0) this.vy = 0;
+          this.gravDir = 1;
+        }
+      } else {
+        this.y = B;
+        if (this.vy < 0.11) this.vy = 0.11;
+        this.gravDir = 1;
+      }
     }
     if (this.y > hPx - B) {
       // 旅程上帝模式（Player.cs:23837-23845 creativeGodMode）：越界钳位不致死
@@ -8293,7 +8370,13 @@ export class Player extends Entity {
   isGhostPhase(world: import('../world/World').World): boolean {
     // ★倒计数语义（2026-08-25）：respawnTimer 已改死亡置满值递减（:38303/:16896），
     //  硬核幽灵相 = 计时到期（≤0）而非"越过阈值"。阈值判断已前移到死亡置值时刻
-    return this.dead && this.appearance?.difficulty === 2 && this.respawnTimer <= 0;
+    // ★EXTRA_LIFE 批（2026-09-04）：补 :17161 完整门——原版 `difficulty == 2 &&
+    //  (statLifeMax <= 0 || !Main.surviveHardcoreDeath)` 才 ghost 化（:17161），
+    //  survive 组合世界（theConstant×tenthAnniversary 非 FTW,Main.cs:2723）扣 60 上限
+    //  后仍有余额 → 走 :17170 else 支正常重生（Spawn(ReviveFromDeath)）不 ghost 化
+    return this.dead && this.appearance?.difficulty === 2
+      && (this.baseMaxHp <= 0 || !surviveHardcoreDeath(world.seedFlags))
+      && this.respawnTimer <= 0;
   }
 
   // ============ 眼睑状态机（PlayerEyeHelper.cs 全文 1:1） ============

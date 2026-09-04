@@ -963,6 +963,11 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
           for (let l = -1; l <= 0; l++) {
             const ki = st.idx(ax + kk, ay + l);
             st.flags[ki] = 0; st.type[ki] = 0; st.half[ki] = 0; st.slope[ki] = 0;
+            // ★IIIII169·C4（R2）：vanilla 走 KillTile（Check3x2 cs:49868-49876 逐格派发）→
+            // 尾 `frameX=-1; frameY=-1`（cs:64400-64401,u16 环回 65535,CXXXVIII 口径）——
+            // 裸写清型保帧会把 place3x2 的 style*54+k*18 装饰帧带进终态（x86 幽灵 65535 实证）。
+            // 本杀位是内联直清,不经 killTileWholeCore,无双写风险。
+            st.frameX[ki] = 65535; st.frameY[ki] = 65535;
           }
         }
         return;

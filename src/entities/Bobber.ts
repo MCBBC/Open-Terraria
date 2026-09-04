@@ -458,6 +458,18 @@ export class Bobber extends Entity {
       }
       magnetFakeFish(st, this.fakeFishView(), this.catchId);
     }
+    // 成就：GO_LAVA_FISHING（SetFishingCheckResults 尾 Projectile.cs:20921-20923：
+    // `if (fisher.CanFishInLava && fisher.inLava) HandleSpecialEvent(player, 19)`——
+    // CanFishInLava 三源（:20758 CanFishInLava[竿]||IsLavaBait[饵]||accLavaFishing,与
+    // canFishInLava 同式）;抵达 SetFishingCheckResults 的每次 FishingCheck 均发（咬钩/
+    // 空咬两支同发——原版该门在 flag if/else 之后;上方 <75 水/松露虫/渔力 0 早退支
+    // 原版即不发）。flag 幂等
+    const fireLavaFishingAch = (): void => {
+      if (canFishInLava && pond.lava) {
+        game.achievements?.handleSpecialEvent(19,
+          { statLifeMax: p.maxHp, statManaMax: p.maxMana });
+      }
+    };
     if (this.catchId > 0 || this.catchEnemy > 0) {
       this.openBiteWindow(level);                     // :19348/:19362
       game.playSfx('splash', 1);
@@ -468,6 +480,7 @@ export class Bobber extends Entity {
       if (p.buffs.has(BuffType.Sonar)) game.playSfxWav?.('sonar_potion', 1, this.cx, this.cy);
       game.spawnParticles(this.cx, this.cy, this.catchEnemy > 0 ? '#C04040' : '#80B8FF',
         6, 1.5, { life: 24 });
+      fireLavaFishingAch();                           // :20921 尾奏（咬钩支同发）
       return;
     }
     // 二者皆空（:19368-19391）：岩浆且三源 ≥2 → 累积器 +240/+480 加速下一咬
@@ -479,6 +492,7 @@ export class Bobber extends Entity {
       if (n >= 3) this.lAI1 += 480;                   // :19383-19386
       else if (n >= 2) this.lAI1 += 240;              // :19387-19390
     }
+    fireLavaFishingAch();                             // :20921 尾奏（空咬支同发）
   }
 
   /** FishingCheck_ProbeForQuestFish（:20089-20104）1:1：当日任务鱼；玩家已持有 /

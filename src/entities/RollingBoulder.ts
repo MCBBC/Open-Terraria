@@ -76,9 +76,11 @@ export class RollingBoulder extends Entity {
     //  && !halfBrick && slope==0（W.cs:70642-70655））。原第二实现 solidAt 用
     //  st.isSolid()（缺 halfBrick/slope/platform 排除→斜坡/半砖/平台格误判实心墙起踢）
     //  且 Math.floor 负商分叉,一并随 trunc(C# (int)) 修正。行为变更=1:1 目标。
-    //  ★OOB 备案：vanilla Main.tile 越界=null → SolidTile 返 true（:70646-70649）,
-    //  旧 solidAt 同返 true;beeWallPushDir 沿 store 惯例"世界外视为空"返 false——
-    //  世界缘 8~40px 带内踢向可能差一档,与 655/99 三支同口径备案（beeWallPushDir 注）。
+    //  ★OOB 语义（SW-AL1 2026-09-05 定谳,纠正旧备案"越界=null→true"）：
+    //  vanilla Main.tile 是裸 Tile[,]（Main.cs:1690）,OOB 下标抛异常被 SolidTile
+    //  catch 吞掉【返 false】——beeWallPushDir OOB=false ≡ 原版,非差项
+    //  （详证见 WeaponProj.ts beeWallPushDir 注）。※欠账备案：原版弹幕触世界界
+    //  active=false 消散（P.cs:16789-16802）,本实体未接出界杀（655/949 已接）。
     if (this.ai0 && this.vy <= 0 && this.vx === 0) {
       this.vx = beeWallPushDir(game.world.store, this.x, this.y, this.w, this.cx);
     }
@@ -112,6 +114,11 @@ export class RollingBoulder extends Entity {
     // 位移：阻尼乘进 dx/dy 入参,b.vx/vy=碰撞调整字段采纳处原样回读（勿除回,
     // 原版碰撞响应式读的也是未阻尼 velocity 场,lastVelocity 档不掺阻尼）
     const df = projWaterDragFactor(this);
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位）——
+    //  99 ∈ OBJTYPE3 白名单（:17195）,objType 3 扫描新旧位判定
+    //  （Collision.cs:3346-3353/:3356）消费;滚石撞墙碎裂拍 dead=true,
+    //  旧位=本拍位移前真实值,碎裂拍扫描按原版 :19966 后位序照跑
+    this.oldX = this.x; this.oldY = this.y;
     moveAndCollide(this, game.world, this.vx * df, this.vy * df);
     this.rotation += this.vx * 0.06;
     // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）

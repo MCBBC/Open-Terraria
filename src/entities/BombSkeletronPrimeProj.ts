@@ -196,6 +196,9 @@ export class BombSkeletronPrimeProj extends Entity {
     //      GrenadeProj 投掷支同款;dropThrough=true = 原版弹不拦平台,平台面 Kill 走上支）----
     const lastVx = this.vx, lastVy = this.vy;
     const bodyY0 = this.y;   // SW-X1：本拍积分前 y（残差口径,WeaponProj SW-N1/W1 同构）
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位）——
+    //  102 走 objType 4 扫描（:19978）,新旧位判定（Collision.cs:3346-3353/:3356）消费
+    this.oldX = this.x; this.oldY = this.y;
     const body = {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,

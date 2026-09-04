@@ -628,8 +628,75 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
       checkOnTable1x1KT(st, rng, x, y);                            // cs:86348 组→CheckOnTable1x1
     } else if (sheet === 91) {
       checkBannerKT(st, rng, x, y);                                // cs:86438 case 91→CheckBanner
+    } else if (sheet === 10 || sheet === 11) {
+      // ★IIIII165 补派发（cs:86575-82 default→CheckDoorClosed/Open,1457:87714/87620
+      //   ≡1458:87722/87628）：killTile→squareTileFrame 级联帧到门格——vanilla 经
+      //   TileFrameImportant default 支走门完整性（1x3 门体+上下 SolidTile 锚,失守=
+      //   整组 KillTile）。iamerror #53 Smooth_World (1308,1066) 地狱残门定罪：
+      //   T62 支杀 (1307,1067) 黑曜石砖 → 尾九宫帧 (x+1,y-1)=门格 → CheckDoorClosed
+      //   下锚 (1308,1069) 非实心 → 杀门;本副本此前无门支=门永生 → T0>10×1
+      //   （#53..#56 四槽同源）。sheet11 开门生成期无放置源（备案死支,镜像
+      //   FinalCleanupPass.checkDoorOpenSweep 同款）。
+      if (sheet === 10) checkDoorClosedKT(st, rng, x, y);
+      else checkDoorOpenKT(st, rng, x, y);
     }
   }
+}
+
+/** CheckDoorClosed（cs:87176 1457 / 87722 1458）：1x3 门体+上下 SolidTile 锚。
+ *  尾无条件 destroyObject=false（vanilla 原样——门检查会清全局杀位）。
+ *  DropDoorItem 生成期零掷（Item.NewItem isGeneratingOrLoadingWorld 早退）不移植。 */
+function checkDoorClosedKT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return;                                       // cs:87178
+  const i = st.idx(x, y);
+  const num = y - Math.floor((st.frameY[i]! % 54) / 18);           // cs:87188 门顶行
+  const sheetAt = (xx: number, yy: number): number =>
+    st.inBounds(xx, yy) ? (SHEET_OF[st.type[st.idx(xx, yy)]] ?? -1) : -1;
+  let bad = !solidTile(st, x, num - 1) || !solidTile(st, x, num + 3);
+  for (let k = 0; k <= 2; k++) {
+    if (!st.inBounds(x, num + k) || !st.flags[st.idx(x, num + k)] || sheetAt(x, num + k) !== 10) bad = true;
+  }
+  if (bad) {
+    destroyObject = true;
+    for (let k = 0; k <= 2; k++) {
+      if (sheetAt(x, num + k) === 10) killTile(st, rng, x, num + k);
+    }
+  }
+  destroyObject = false;
+}
+
+/** CheckDoorOpen（cs:87620 1457 / 87628 1458）：2x3 开门体+上下 SolidTile 锚。
+ *  生成期无开门放置源（备案死支,镜像 FinalCleanupPass.checkDoorOpenSweep）。 */
+function checkDoorOpenKT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return;                                       // cs:87622
+  const i = st.idx(x, y);
+  const fx = st.frameX[i]!;
+  const num3 = y - Math.floor((st.frameY[i]! % 54) / 18);          // cs:87631 门顶行
+  let num2 = x;
+  switch (fx % 72) {                                               // cs:87633-48
+    case 0: num2 = x; break;
+    case 18: num2 = x - 1; break;
+    case 36: num2 = x + 1; break;
+    case 54: num2 = x; break;
+  }
+  let bad = !solidTile(st, num2, num3 - 1) || !solidTile(st, num2, num3 + 3);
+  const x0 = fx % 72 === 36 || fx % 72 === 54 ? num2 - 1 : num2;   // cs:87661 num=-1 支
+  if (!bad) {
+    for (let k = x0; k < x0 + 2 && !bad; k++) {
+      for (let l = num3; l < num3 + 3; l++) {
+        if (!st.inBounds(k, l) || !st.flags[st.idx(k, l)] || (SHEET_OF[st.type[st.idx(k, l)]] ?? -1) !== 11) { bad = true; break; }
+      }
+    }
+  }
+  if (bad) {
+    destroyObject = true;
+    for (let k = x0; k < x0 + 2; k++) {
+      for (let l = num3; l < num3 + 3; l++) {
+        if (st.inBounds(k, l) && st.flags[st.idx(k, l)] && (SHEET_OF[st.type[st.idx(k, l)]] ?? -1) === 11) killTile(st, rng, k, l);
+      }
+    }
+  }
+  destroyObject = false;
 }
 
 /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */

@@ -320,8 +320,13 @@ export class TileStore {
     if (this.wall[i] !== wall) {
       this.wall[i] = wall;
       // 墙漆清位：KillWall（WorldGen.cs:60425-60426）wall=0 后 ClearWallPaintAndCoating；
-      // PlaceWall（:75199-75201）本身不清 wallColor——但 KillWall 已保证 wall==0 ⇒ 无漆，
-      // 故 0→非0 铺墙时同样归零（保持原版不可达态不变量，见 world/Paint.ts）
+      // PlaceWall（:75727-75745）本身不清 wallColor——但 KillWall 已保证 wall==0 ⇒ 无漆，
+      // 故 0→非0 铺墙时同样归零（保持原版不可达态不变量，见 world/Paint.ts）。
+      // ★非0→非0 不在此清漆（H3-3 落点裁决,2026-09-04）：本原语被硬后蔓延
+      // （HardmodePass → Convert_ActuallyConvertWall WorldGen.cs:55708-55722 区
+      // `theTile.wall = newType` 裸写【保漆】）与世界演化 convWall 复用——清漆臂
+      // 落在 ReplaceWall 语义专属调用点（Game.tryPlaceWall 墙替换支,
+      // WorldGen.cs:63049-63050 `tile.wall = targetWall; ClearWallPaintAndCoating()`）
       if (wall === 0 || !hadWall) {
         this.paintWall[i] = 0;
         this.coat[i] &= ~TileStore.COAT_WALL_MASK; // ClearWallPaintAndCoating（Tile.cs:941-946）

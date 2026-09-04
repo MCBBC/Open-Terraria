@@ -49,7 +49,12 @@ describe('R4 盔甲套装加成', () => {
     p.inv.armor[2] = { id: _iid(233), stack: 1 };
     const st = p.equipStats;
     expect(st.setBonus?.name).toBe('Molten');
-    expect(st.dmgMelee).toBeCloseTo(0.1, 5);
+    // ★2026-09-04 armorStat 甲件环收偿后 = 套装 +10%（vanillaArmorSets）+ 逐件面
+    //   （GrantArmorBenefits :13477-13489 实读:231 头 meleeCrit+7/232 胸 meleeDamage+0.07/
+    //    233 腿 meleeSpeed+0.07——此前 accfx 甲件行死键,本断言曾钉 0.1 旧账）
+    expect(st.dmgMelee).toBeCloseTo(0.17, 5);
+    expect(st.critMelee).toBe(7);
+    expect(st.meleeSpeed).toBeCloseTo(0.07, 5);
     expect(st.fireWalk).toBe(true);
   });
   it('死灵三件（7|7|7）：远程暴 +10（头 75/7 均命中）', async () => {

@@ -15097,6 +15097,11 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     //   R=轮界 W=WaterCheck 后区域快照
     System.IO.StreamWriter liqTw = null;
     int liqSeq = 0, liqRx0 = 0, liqRy0 = 0, liqRx1 = 0, liqRy1 = 0;
+    // ★IIIII173：逐调用指纹仪（LIQ_CALLCHK + LIQC_OUT；JS 侧 tools/_iii173liq.test.ts 同构）
+    bool lcChk = Environment.GetEnvironmentVariable("LIQ_CALLCHK") != null;
+    System.IO.StreamWriter lcTw = lcChk ? new System.IO.StreamWriter(Environment.GetEnvironmentVariable("LIQC_OUT") ?? "/tmp/iii173-out/or-liqchk.txt") : null;
+    int lcN = 0;
+    uint LsStep(uint h, byte b) { h ^= b; h *= 16777619u; return h; }
     if (Environment.GetEnvironmentVariable("LIQ_REG") != null)
     {
         var lr = Environment.GetEnvironmentVariable("LIQ_REG").Split(',');
@@ -16148,7 +16153,26 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         int maxIter = (numLiquid + bufCount) * 5;    // 轮预算=轮始活量×5（无下限）
         int roundIter = 0;
         if (liqTw != null) LiqLog($"ROUND {round} numLiquid={numLiquid} buf={bufCount} maxIter={maxIter}");
-        while (numLiquid > 0 && roundIter < maxIter) { if (liqTw != null) LiqLog($"C nl={numLiquid} wc={wetCounter}"); UpdateLiquid(); roundIter++; }
+        while (numLiquid > 0 && roundIter < maxIter)
+        {
+            if (liqTw != null) LiqLog($"C nl={numLiquid} wc={wetCounter}");
+            // ★IIIII173：逐 UpdateLiquid 调用指纹（LIQ_CALLCHK）——lq 队列序 FNV + liq 全图 FNV，
+            //   与 JS tools/_iii173liq.test.ts SW_173L_CALLCHK=1 同构对拍；无 env 零开销。
+            if (lcChk)
+            {
+                uint h1 = 0x811c9dc5;
+                for (int i = 0; i < numLiquid; i++)
+                {
+                    h1 = LsStep(h1, (byte)lq[i].x); h1 = LsStep(h1, (byte)((uint)lq[i].x >> 8));
+                    h1 = LsStep(h1, (byte)lq[i].y); h1 = LsStep(h1, (byte)((uint)lq[i].y >> 8));
+                }
+                uint h2 = 0x811c9dc5;
+                for (int i = 0; i < liq.Length; i++) { h2 ^= liq[i]; h2 *= 16777619u; }
+                lcTw.WriteLine($"{lcN++} K nl={numLiquid} buf={bufCount} lq={h1:x8} liq={h2:x8}");
+            }
+            UpdateLiquid();
+            roundIter++;
+        }
         WaterCheck();
         if (liqTw != null)                      // 区域快照（轮末）
         {
@@ -16169,6 +16193,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     //   水侧（LiquidCheck(x,y,0)）整缺补全。settle 本体恢复 #49/#97 strip-only 原版口径。
     SOLID.Remove(484);                                      // pass 尾 tileSolid[484]=false（cs:21111）
     liqTw?.Flush(); liqTw?.Close();                         // ★MMMMMM：区域液迹收口
+    lcTw?.Flush(); lcTw?.Close();                           // ★IIIII173：逐调用指纹收口
 }
 Checkpoint("settle2");
 StreamPt("settle2");

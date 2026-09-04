@@ -797,15 +797,35 @@ export function doSurfaceIsDesertFinish(st: TileStore, rng: RNG, gs: GenState): 
 // 消费位①=LifeCrystals pass 头（cs:16866，denySomeGeneration 门内 errorWorld 支）
 // 消费位②=GenerateSkyBlockWorld 尾（cs:23013，skyblock 组合域=GAP-IIII44 登记不接）
 // ============================================================
-/** Main.tileDungeon（地牢砖族，tileDungeon 表） */
-const EW_TILE_DUNGEON = new Set([41, 43, 44, 481, 482, 483]);
+/** Main.tileDungeon（地牢砖族，tileDungeon 表,Main.cs:8131-8136 原文）。
+ *  ★IIIII165 勘误：曾写 {41,43,44,481,482,483}——481-483 是裂纹砖（tileDungeon=false,
+ *  LC 时点 tileSolid 亦 false,双门同拒故被掩蔽）；真第四族=677-679 古代地牢砖
+ *  （AncientBlue/Green/PinkBrick,TileID.cs:1791-1795）。 */
+const EW_TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.tileSolidTop 生成期可见族（Main.cs:6764+ 全 86 项；FinalCleanupPass.TILE_SOLID_TOP
+ *  同源副本——同源副本禁互 import 惯例）。★IIIII165：原用 GenSolid.VAN_TILE_SOLID_EXTRA
+ *  （tileSolid 碰撞差集 9 项）冒名 solidTop——语义错位,幸全部被 genSolid 拒采掩蔽。 */
+const EW_TILE_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** vanilla 原始 type 读语义（乱块海 raw 门专用,cs:1088/1106-1110/1233-1236）：
+ *  vanilla Tile.type 缺省 0=Dirt（tileSolid[0]=true,Main.cs:7995;tileSolidTop/FI[0]=false）
+ *  ——JS 内部 0=空气（TILE_DEFS[0] 无 sheet、solid=false）⇒ raw 读需特判 0=泥土。
+ *  ★IIIII165 定罪：air/泥土残型格（x86 dump #056 raw type 0 共 981,210 格）曾全被
+ *  JS 门拒 ⇒ 相①/④ 重试圈错位（LC 窗 +58,789 掷）+ vanilla 幽灵写/活化链缺失
+ *  （Gh=149,686/(1473,78) 活化泥柱）。 */
+const ewRawSheetOf = (t: number): number => (t === 0 ? 0 : SHEET_OF_TYPE[t]);
+const ewRawSolid = (t: number): boolean => (t === 0 ? true : genSolidType(t));
 /** DoErrorWorldGetRandomBlock（cs:1085-1093）：Next(754) 拒采至
  *  solid && !solidTop && !frameImportant && !tileDungeon && !{58,226,404}。 */
 function ewGetRandomBlock(rng: RNG): number {
   for (;;) {
     const num = rng.nextInt(754);                                    // TileID.Count=754（TileID.cs:1945）
+    // ★IIIII165：候选 0=Dirt——idOf(0)=JS 泥土(1) genSolid 真 ✓；FI[0]/solidTop[0]=false
+    //   （金标表），vanilla 允许把格残型改写成泥土 raw 0。
     if (!genSolidType(idOf(num))) continue;
-    if (VAN_TILE_SOLID_EXTRA.has(num)) continue;                     // tileSolidTop 家族
+    if (EW_TILE_SOLID_TOP.has(num)) continue;                        // tileSolidTop 家族（Main.cs:6764+）
     if (EW_FRAME_IMPORTANT_SHEET[num]) continue;
     if (EW_TILE_DUNGEON.has(num) || num === 58 || num === 226 || num === 404) continue;
     return num;
@@ -825,20 +845,38 @@ function ewSwapTiles(st: TileStore, i1: number, i2: number): void {
   st.paint[i2] = c1;
   st.coat[i2] = (st.coat[i2] & ~(TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK)) | cb1;
 }
-/** 格元可采判定（phase2/3/4 共用）：!anyShimmer && solid && !solidTop && !frameImportant */
+/** 格元可采判定（phase2/3/4 共用）：!anyShimmer && solid && !solidTop && !frameImportant。
+ *  ★IIIII165：raw type 读语义——0=泥土（ewRawSolid/ewRawSheetOf），solidTop/FI 走
+ *  vanilla 权威表（EW_TILE_SOLID_TOP/EW_FRAME_IMPORTANT_SHEET）。 */
 function ewCellSwapable(st: TileStore, x: number, y: number, shimmerCheck: boolean): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   const t = st.type[i];
-  const sh = SHEET_OF_TYPE[t];
+  const sh = ewRawSheetOf(t);
   if (shimmerCheck) {
     if (st.liquid[i] !== 0 && st.liquidType[i] === LIQUID_TYPE.SHIMMER) return false;   // anyShimmer
   }
-  if (!genSolidType(t)) return false;
-  if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;
+  if (!ewRawSolid(t)) return false;
+  if (EW_TILE_SOLID_TOP.has(sh)) return false;
   if (EW_FRAME_IMPORTANT_SHEET[sh]) return false;
-  if (EW_FRAME_IMPORTANT_SHEET[SHEET_OF_TYPE[st.type[st.idx(x, y - 1)]] ?? -1]) return false;  // 上邻 FI 门
-  if (EW_FRAME_IMPORTANT_SHEET[SHEET_OF_TYPE[st.type[st.idx(x, y + 1)]] ?? -1]) return false;  // 下邻 FI 门
+  if (EW_FRAME_IMPORTANT_SHEET[ewRawSheetOf(st.type[st.idx(x, y - 1)])]) return false;  // 上邻 FI 门
+  if (EW_FRAME_IMPORTANT_SHEET[ewRawSheetOf(st.type[st.idx(x, y + 1)])]) return false;  // 下邻 FI 门
+  return true;
+}
+
+/** ★IIIII162：相①/相④ 专用本体门（1458 cs:1106-1110/cs:1233-1236 原文）——
+ *  vanilla 相① 只查 `!tileSolid||tileSolidTop||frameImportant[type]`、相④ 再加
+ *  `tileDungeon`，**均无 ±1 邻格 frameImportant 检查**（那是相②/③ 专属）。JS 曾
+ *  四相共用 ewCellSwapable ⇒ 相①/④ 重试圈多拒 ⇒ 乱块海流位错 ⇒ LifeCrystals 起
+ *  全图置换面漂移（iamerror #057 A=68,536 @(1473,78) 活化泥柱族主源）。
+ *  ★IIIII165：raw type 0=泥土语义 + vanilla 权威 solidTop/FI 表（见 EW_TILE_SOLID_TOP 注）。 */
+function ewCellSwapableBody(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const t = st.type[st.idx(x, y)];
+  const sh = ewRawSheetOf(t);
+  if (!ewRawSolid(t)) return false;
+  if (EW_TILE_SOLID_TOP.has(sh)) return false;
+  if (EW_FRAME_IMPORTANT_SHEET[sh]) return false;
   return true;
 }
 /** DoErrorWorldShuffleBlocks 本体。单旗标域 errorWorldAdjustment(1.0)≡1。 */
@@ -846,21 +884,26 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
   const num = 30, num2 = 50;                                           // cs:1101-1102 字面
   const remix = !!gs.seedFlags.remix;
   const underworld = st.h - 200;
+  const ewTr = (globalThis as { __swEw?: (kind: string, a: number, b: number, c: number) => void }).__swEw;   // ★IIIII165 取证钩（dormant）
   // ── 相①（cs:1103-1118）：maxTilesX*10 枚单格随机置换（GetRandomBlock 拒采域）──
   {
     const count = Math.trunc(st.w * 10 / 1);
     for (let i = 0; i < count; i++) {
       let num4 = rng.nextIntRange(num, st.w - num);
       let num5 = rng.nextIntRange(num + num2, st.h - num);
-      while (!ewCellSwapable(st, num4, num5, false)) {
+      while (!ewCellSwapableBody(st, num4, num5)) {   // ★IIIII162：相① 本体门（无 ±1 邻检）
+        ewTr?.('p1r', num4, num5, st.type[st.idx(num4, num5)]);
         num4 = rng.nextIntRange(num, st.w - num);
         num5 = rng.nextIntRange(num + num2, st.h - num);
       }
-      st.type[st.idx(num4, num5)] = idOf(ewGetRandomBlock(rng));
+      const blk = idOf(ewGetRandomBlock(rng));
+      ewTr?.('p1w', num4, num5, blk);
+      st.type[st.idx(num4, num5)] = blk;
     }
   }
   // ── 相②（cs:1120-1152）：maxTilesX/2 对「竖直两格对」整体互换 ──
   {
+    ewTr?.('p2b', 0, 0, 0);   // ★IIIII165 取证钩（dormant）
     const count = Math.trunc(st.w / 2 / 1);
     for (let j = 0; j < count; j++) {
       let num6 = rng.nextIntRange(num, st.w - num);
@@ -882,20 +925,24 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
         || (num8 > st.w / 2 - 30 && num8 < st.w / 2 + 30 && num9 < gs.worldSurface)) {
         continue;
       }
+      ewTr?.('p2s', num6, num7, num8);         // ★IIIII165 取证钩（dormant;num9=+1）
       ewSwapTiles(st, st.idx(num6, num7), st.idx(num8, num9));
     }
   }
   // ── 相③（cs:1153-1232）：maxTilesX/2 块矩形互换（横 5-20×1-3 / 竖 1-4×5-20）──
   {
+    ewTr?.('p3b', 0, 0, 0);   // ★IIIII165 取证钩（dormant）
     const count = Math.trunc(st.w / 2 / 1);
     for (let k = 0; k < count; k++) {
       let num10 = 1, num11 = 1;
+      // ★IIIII165 勘误：vanilla Next(5,21)/Next(1,4)（cs:1165-1171）——IIII80 全文件
+      //   b+1 勘误漏及本函数（IIIII106b 后移植）→ 曾 (5,20)/(1,3) 少上界一格。
       if (rng.nextInt(2) === 0) {
-        num10 = rng.nextIntRange(5, 20);
-        num11 = rng.nextIntRange(1, 3);
+        num10 = rng.nextIntRange(5, 21);
+        num11 = rng.nextIntRange(1, 4);
       } else {
-        num10 = rng.nextIntRange(1, 3);
-        num11 = rng.nextIntRange(5, 20);
+        num10 = rng.nextIntRange(1, 4);
+        num11 = rng.nextIntRange(5, 21);
       }
       let num12 = rng.nextIntRange(num, st.w - num);
       let num13 = rng.nextIntRange(num + num2, st.h - num);
@@ -931,12 +978,13 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
   }
   // ── 相④（cs:1233-1282）：maxTilesX*10 条「同型爬藤」——锚格选向步进复制 ──
   {
+    ewTr?.('p4b', 0, 0, 0);   // ★IIIII165 取证钩（dormant）
     const count = Math.trunc(st.w * 10 / 1);
     for (let n = 0; n < count; n++) {
       let num20 = rng.nextIntRange(num, st.w - num);
       let num21 = rng.nextIntRange(num + num2, st.h - num);
-      while (!ewCellSwapable(st, num20, num21, false)
-        || EW_TILE_DUNGEON.has(SHEET_OF_TYPE[st.type[st.idx(num20, num21)]])) {
+      while (!ewCellSwapableBody(st, num20, num21)    // ★IIIII162：相④ 本体门（无 ±1 邻检）
+        || EW_TILE_DUNGEON.has(ewRawSheetOf(st.type[st.idx(num20, num21)]))) {   // ★IIIII165 raw 语义
         num20 = rng.nextIntRange(num, st.w - num);
         num21 = rng.nextIntRange(num + num2, st.h - num);
       }
@@ -948,7 +996,8 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
       } else {
         vy = 1;
       }
-      const num22 = rng.nextIntRange(5, 20);
+      const num22 = rng.nextIntRange(5, 21);   // ★IIIII165 勘误：vanilla Next(5,21)（cs:1263）
+      ewTr?.('p4a', num20, num21, num22);      // ★IIIII165 取证钩（dormant）
       const src = st.idx(num20, num21);
       let num23 = num20, num24 = num21;
       for (let s = 0; s < num22; s++) {
@@ -966,6 +1015,7 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
           | (st.coat[src] & (TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_INVISIBLE_BLOCK));
       }
     }
+    ewTr?.('p4end', 0, 0, 0);   // ★IIIII165 取证钩（dormant）
   }
 }
 
@@ -978,13 +1028,32 @@ const ERROR_CHEST_SWAP_IMMUNITY = new Set([0, 1156, 1571, 1569, 1260, 1572, 4607
 /** CrackedBricks / Conversion.Moss（TileID.cs） */
 const EW_CRACKED = new Set([481, 482, 483]);
 const EW_CONV_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
-/** tileFrameImportant 表（def.framed × vanilla.sheet 缺省推导；与 VanillaFraming 同构） */
+/** tileFrameImportant 表（vanilla 权威 412 项＝tests/golden/frameImportant.json,
+ *  反编译 Main.cs tileFrameImportant 全表金标）。
+ *  ★IIIII165 定罪：旧「def.framed × vanilla.sheet 推导」被 JS 侧杂类污染——
+ *    320 像素方块→sheet0（FI[0]=true!泥土被拒=主凶）、315→32、318→80（假 FI,
+ *    被 non-solid 掩蔽）＋19/380 漏登记（被 solidTop/genSolid 双掩蔽）——
+ *    FI[0]=true 使相①/④ raw 门拒尽泥土/空气残型格 ⇒ 乱块海全流错位。 */
+const EW_FRAME_IMPORTANT_VANILLA: readonly number[] = [
+  3,4,5,10,11,12,13,14,15,16,17,18,19,20,21,24,26,27,28,29,31,33,34,35,36,42,49,50,55,61,71,72,73,74,
+  77,78,79,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,110,
+  113,114,125,126,128,129,132,133,134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,
+  184,185,186,187,201,207,209,210,212,215,216,217,218,219,220,227,228,231,233,235,236,237,238,239,240,
+  241,242,243,244,245,246,247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,
+  290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,
+  319,320,323,324,334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,
+  377,378,380,386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,
+  427,428,429,435,436,437,438,439,440,441,442,443,444,445,452,453,454,455,456,457,461,462,463,464,465,
+  466,467,468,469,470,471,475,476,480,484,485,486,487,488,489,490,491,493,494,497,499,505,506,509,510,
+  511,518,519,520,521,522,523,524,525,526,527,529,530,531,532,533,538,542,543,544,545,547,548,549,550,
+  551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,584,585,
+  586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,
+  611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,642,643,644,645,
+  646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,698,699,700,701,702,
+  703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,733,751,752,753];
 const EW_FRAME_IMPORTANT_SHEET = (() => {
   const b = new Array(800).fill(false) as boolean[];
-  for (let i = 0; i < TILE_DEFS.length; i++) {
-    const v = TILE_DEFS[i]?.vanilla;
-    if (v && v.sheet < 800 && TILE_DEFS[i].framed) b[v.sheet] = true;
-  }
+  for (const s of EW_FRAME_IMPORTANT_VANILLA) b[s] = true;
   return b;
 })();
 /** 内部物品 id → 原版 vid（免疫表是 vid 空间；世界箱 items 是内部 id 空间） */

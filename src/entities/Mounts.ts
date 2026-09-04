@@ -328,31 +328,46 @@ export interface FishronView {
 const WALL_ALLOWS_WIND: ReadonlySet<number>
   = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
 
-/** WorldGen.InAPlaceWithWind（WorldGen.cs:88124-88162）1:1：
- *  ① DoesWindBlowAtThisHeight（:88134-88139）= tileY < worldSurface，remixWorld 取反；
- *  ② 命中盒（Vector2 重载两角 ToTileCoordinates 闭区间）逐格 !InWorld 跳过；
- *     liquid > 0 → false；wall > 0 且 !WallID.Sets.AllowsWind[wall] → false。
+/** WorldGen.InAPlaceWithWind int 重载（WorldGen.cs:88141-88163）1:1：tile 坐标域，
+ *  width/height = 格数（TileDrawing.cs:4562-4564 有同名私有二次封装供贴图风门消费）。
+ *  ① DoesWindBlowAtThisHeight（:88131-88139）= tileY < worldSurface，remixWorld 取反；
+ *  ② (x..x+width-1, y..y+height-1) 逐格：!InWorld 跳过；liquid > 0 → false；
+ *     wall > 0 且 !WallID.Sets.AllowsWind[wall] → false（cs:88158-88159）。
  *  remix 参缺省 false = 既有调用方零回归（remix 世界由调用侧传入接通翻转）。
- *  单源消费位：Player 扫帚挂件/鱼龙风位、Enemy 624 侏儒石化（NPC.cs:56420） */
-export function inAPlaceWithWind(
+ *  单源消费位：TileDrawing 贴图风门（489 风铃 2×3/:4802、490 风向标 2×2/:4817、
+ *  493 旗 1×1/:5312——VanillaTiler 收敛）、Player 扫帚挂件/鱼龙风位、
+ *  Enemy 624 侏儒石化（NPC.cs:56421）、LeashedKite 风场（LeashedKite.cs:149）、
+ *  Mount.cs:3597 扫帚挂件中心格 */
+export function inAPlaceWithWindTiles(
   st: Pick<DrillStore, 'inBounds' | 'idx' | 'wall'> & { liquid?: ArrayLike<number> },
   x: number, y: number, w: number, h: number, worldSurface: number,
   remix = false,
 ): boolean {
-  // DoesWindBlowAtThisHeight：tileY < worldSurface（remixWorld 取反,cs:88137-88138）
-  const windHeight = Math.floor(y / 16) < worldSurface;
-  if (windHeight === remix) return false;
-  const x0 = Math.floor(x / 16), y0 = Math.floor(y / 16);
-  const x1 = Math.floor((x + w) / 16), y1 = Math.floor((y + h) / 16);
-  for (let i = x0; i <= x1; i++) {
-    for (let j = y0; j <= y1; j++) {
-      if (!st.inBounds(i, j)) continue;   // 越界格原版 InWorld 门外跳过
-      const k = st.idx(i, j);
+  // DoesWindBlowAtThisHeight：tileY < worldSurface（remixWorld 取反,cs:88132-88138）
+  if ((y < worldSurface) === remix) return false;
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < h; j++) {
+      if (!st.inBounds(x + i, y + j)) continue;   // 越界格原版 InWorld 门外跳过
+      const k = st.idx(x + i, y + j);
       if ((st.liquid?.[k] ?? 0) > 0) return false;   // tile.liquid > 0（cs:88158）
       if (st.wall[k] !== 0 && !WALL_ALLOWS_WIND.has(st.wall[k])) return false;
     }
   }
   return true;
+}
+
+/** WorldGen.InAPlaceWithWind Vector2 重载（WorldGen.cs:88124-88129）：position/
+ *  width/height 像素域——两角 ToTileCoordinates（截断）得闭区间后转调 int 重载
+ *  （width = 1 + point2.X - point.X,cs:88128）。NPC/Player/Mount/LeashedKite 四处
+ *  调用全部取本形态（position, width, height） */
+export function inAPlaceWithWind(
+  st: Pick<DrillStore, 'inBounds' | 'idx' | 'wall'> & { liquid?: ArrayLike<number> },
+  x: number, y: number, w: number, h: number, worldSurface: number,
+  remix = false,
+): boolean {
+  const x0 = Math.floor(x / 16), y0 = Math.floor(y / 16);
+  const x1 = Math.floor((x + w) / 16), y1 = Math.floor((y + h) / 16);
+  return inAPlaceWithWindTiles(st, x0, y0, 1 + x1 - x0, 1 + y1 - y0, worldSurface, remix);
 }
 
 /** 激光弹型（ProjectileID.ScutlixEye = 606；UseAbility :3227 type2） */
@@ -620,8 +635,16 @@ function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, 
  *  ★active 判据=裸 active 位（本格 :62729/上格 :62735/传送器扫格 :62798,SW-L1
  *  2026-09-03 F10——曾用 isActive(nactive) 误拦已致动格,原版 tile.active() 不含
  *  致动位,致动块仍可被钻头杀）。
- *  ★原版另带 out blockDamaged（巨石/锁门/235 三分支置 true）——本 API 无该出参且
- *  全部消费方只读返回值，四子项均以 false 收敛，出参差异不可观测 */
+ *  ★out blockDamaged（SW-AP1 2026-09-05 消费定谳）：1457 WorldGen.cs:62716 出参,
+ *  三置位支 = 巨石+CheckBoulderChest（:62780-62783）/锁门 case 10（:62787-62792）/
+ *  传送器 235 上方 3 格（:62794-62804）。全仓读点 grep：1457 反编译 blockDamaged
+ *  仅 WorldGen.cs 自身（wrapper :62712 声明、定义 :62716/:62718、三置位）——全部
+ *  调用面（Player.cs:46058/:46104/:52946/:54474、Mount.cs:3217、Wiring.cs:1428/
+ *  :3227,Player.cs:20507 走 SpecialKillTileContext 重载→二参 wrapper）无一传 out,
+ *  1458 同（置位 :62790/:62798/:62810,调用面同）⇒ 出参仅传递性、无独立 UI 消费
+ *  （无红字/裂纹/专音）；挖掘被拒的原版反馈 = 返回 false → num2/damage=0 →
+ *  KillTile(fail:true) 每击音尘,本仓 Game.tryMine 已接。本 API 以 blockDamagedOut
+ *  盒暴露三置位支（缺省不收集,返回面与原版对齐）,消费端按上 verdict 备案收口 */
 /** 裸 active 位（原版 tile.active(),Tile.cs:591-593 header 0x20 位——不含 0x40
  *  致动位）。SW-L1 2026-09-03 F10：CanKillTile 三处判格全用裸 active
  *  （本格 :62729/上格 :62735/传送器扫格 :62798）——已致动格仍可被钻头杀。
@@ -634,7 +657,8 @@ function tileActiveBare(st: DrillStore, x: number, y: number): boolean {
   return st.isActive(x, y);
 }
 
-export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx): boolean {
+export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx,
+  blockDamagedOut?: { value: boolean }): boolean {
   if (!st.inBounds(x, y) || !tileActiveBare(st, x, y)) return false;    // !tile.active()（:62729）
   const i = st.idx(x, y);
   if (st.wall[i] === 350) return false;
@@ -676,17 +700,26 @@ export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTi
     while (fy >= 36) fy -= 36;
     const top = y - Math.trunc(fy / 18);
     if (hasReasonToReturnEarly(st, mine, left, top - 1, true, ctx)
-      || hasReasonToReturnEarly(st, mine, left + 1, top - 1, true, ctx)) return false;
+      || hasReasonToReturnEarly(st, mine, left + 1, top - 1, true, ctx)) {
+      if (blockDamagedOut) blockDamagedOut.value = true;               // SW-AP1（:62782）
+      return false;
+    }
   }
   // ---- 上锁门（:62323-62330 case 10）----
-  if (isLockedDoorAt(st, x, y)) return false;
+  if (isLockedDoorAt(st, x, y)) {
+    if (blockDamagedOut) blockDamagedOut.value = true;                 // SW-AP1（:62790）
+    return false;
+  }
   // ---- 传送器 235（:62788-62800 case 235）：锚点列起上方 3 格扫描（裸 active）----
   if (TELEPORTER_IDS.has(mine)) {
     const baseX = x - Math.trunc(((st.frameX?.[i] ?? 0) % 54) / 18);
     for (let k = 0; k < 3; k++) {
       const bx = baseX + k;
       if (st.inBounds(bx, y - 1) && tileActiveBare(st, bx, y - 1)   // tile3.active()（:62798）
-        && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) return false;
+        && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) {
+        if (blockDamagedOut) blockDamagedOut.value = true;           // SW-AP1（:62802）
+        return false;
+      }
     }
   }
   // ---- 容器内容门（:62345-62356 case 21/467/88）：CanDestroyChest——

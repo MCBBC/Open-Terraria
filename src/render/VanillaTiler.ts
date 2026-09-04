@@ -15,6 +15,7 @@ import {
   DECOR_LEFT_DOWN, DECOR_RIGHT_DOWN, DECOR_BOUNCY_BUMPER, DECOR_REGULAR_BUMPER,
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
+import { inAPlaceWithWindTiles } from '../entities/Mounts';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, TILE_ANIM_RATE } from './TileAnim';
 import { tileFrameCapture as cap } from '../debug/TileFrameCapture';
@@ -1762,6 +1763,8 @@ export const renderEnv = {
   wind: 0,
   /** Main.worldSurface(DoesWindBlowAtThisHeight 用) */
   worldSurface: 0,
+  /** Main.remixWorld("don't dig up"——DoesWindBlowAtThisHeight 翻转,Renderer 注入) */
+  remix: false,
   /** 当前渲染 zoom（Renderer 每帧注入；摆动层设备像素吸附用——0=缺省 1） */
   zoom: 0,
 };
@@ -1786,19 +1789,12 @@ const rectSnap = (x: number, y: number, w: number, h: number): [number, number, 
 /** 428 测重板被踩状态(Game.triggerTiles428 镜像;原版 PressurePlateHelper.PressurePlatesPressed) */
 export const plates428Pressed = new Set<number>();
 
-/** WorldGen.InAPlaceWithWind(:87603):高度在 worldSurface 之上且区域内无液体无墙
- *  (AllowsWind 墙集合未提取,任何墙挡风为保守近似) */
-function inAPlaceWithWind(st: TileStore, x: number, y: number, w2: number, h2: number): boolean {
-  if (y >= renderEnv.worldSurface) return false;
-  for (let i = 0; i < w2; i++) {
-    for (let j = 0; j < h2; j++) {
-      if (!st.inBounds(x + i, y + j)) continue;
-      const ti = st.idx(x + i, y + j);
-      if (st.liquid[ti] > 0 || st.wall[ti] > 0) return false;
-    }
-  }
-  return true;
-}
+/** WorldGen.InAPlaceWithWind 风门已收敛到 Mounts 单源（inAPlaceWithWindTiles，
+ *  int 重载 tile 坐标域 1:1,WorldGen.cs:88141-88163）——旧本地版无 AllowsWall
+ *  白名单（任何墙挡风=保守近似）且无 remix 翻转,双漂移 2026-09-04 收敛清偿。
+ *  TileDrawing.cs:4562-4564 私有同名封装 = 本重载的 tile 域形态,消费位:
+ *  489 风铃 2×3（:4802）/ 490 风向标 2×2（:4817）/ 493 旗 1×1（:5312,注意原文
+ *  传 x 而非 num9=帧还原 x——下同款保留） */
 
 /** 生物群系变体(529/530 的 GetBiomeInfluence 近似:看正下方格所属邪恶群系;海滩看 x) */
 function biomeVariant529(st: TileStore, x: number, y: number, w: number): number {
@@ -1930,13 +1926,13 @@ function drawAdjust(
       a.sy = fy + 36 * (((Math.floor(tileAnim.tick / 5) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4);
       break;
     case 489:   // :4791-4804:风门 2×3 → 16 帧快摆
-      if (inAPlaceWithWind(st, x - Math.floor(fx / 18), y - Math.floor(fy / 18), 2, 3)) {
+      if (inAPlaceWithWindTiles(st, x - Math.floor(fx / 18), y - Math.floor(fy / 18), 2, 3, renderEnv.worldSurface, renderEnv.remix)) {
         a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 5) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 16 + 16) % 16);
       }
       break;
     case 490: {  // :4805-4880:风门 2×2 → 帧率帧 + 强风摇晃偏移(weatherVaneBobframe 用 tick 采样近似)
       const ax = x - Math.floor(fx / 18), ay = y - Math.floor(fy / 18);
-      const windy = inAPlaceWithWind(st, ax, ay, 2, 2);
+      const windy = inAPlaceWithWindTiles(st, ax, ay, 2, 2, renderEnv.worldSurface, renderEnv.remix);
       let n = windy ? animRot() % 8 : 0;
       let bob = 0;
       if (windy && Math.abs(renderEnv.wind) > 0.5) {
@@ -1950,7 +1946,7 @@ function drawAdjust(
     case 493: {  // :5300-5332:风门 1×1,按风速分档 6/12 帧带
       if (fy === 0) {
         const ax = x - Math.floor(fx / 18), ay = y - Math.floor(fy / 18);
-        let windAbs = inAPlaceWithWind(st, x, ay, 1, 1) ? Math.abs(renderEnv.wind) : 0;
+        let windAbs = inAPlaceWithWindTiles(st, x, ay, 1, 1, renderEnv.worldSurface, renderEnv.remix) ? Math.abs(renderEnv.wind) : 0;
         if (windAbs >= 0.1) {
           let n: number;
           if (windAbs < 0.5) {

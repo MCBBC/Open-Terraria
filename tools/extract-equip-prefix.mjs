@@ -353,6 +353,10 @@ const ACC_PATTERNS = [
   ['critMelee', /meleeCrit \+= (\d+);/],
   ['critRanged', /rangedCrit \+= (\d+);/],
   ['critMagic', /magicCrit \+= (\d+);/],
+  // 耗魔折扣【加算】池（Player.manaCost 单浮点逐项 -=——2026-09-04 补,此前提取器无此
+  // 模式,GrantArmorBenefits 甲件段 4982/1003/2760/2189/1282-1287/4256/2279 的
+  // manaCost -= X 面全漏,json 由蓝队批手工补齐并经 tests/accfx-armor-mainstats 钉值）
+  ['manaCostOff', /manaCost -= ([\d.]+)f;/],
   // ---- 行为型字段（二轮：跳跃/飞行/免疫/受击触发）----
   ['extraFall', /extraFall \+= (\d+);/],          // 摔伤豁免高度
   ['lavaMax', /lavaMax \+= (\d+);/],              // 岩浆免疫时长（420=7s）

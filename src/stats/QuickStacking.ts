@@ -490,12 +490,16 @@ export function chestSettingsAllowsVault(openChestX: number | undefined): boolea
  *  `!item.favorited` 门槛 :447——唯一带此判定的容器分支；真箱/猪猪/保险箱/熔炉
  *  分支无收藏锁）。收藏物可经 UI 拖拽落进 bank4 格（heldStack favorited 透传），
  *  vault 面板 Loot All 时按原文跳过不拉取。
+ *  @param opts.onPickup 实际入包（含虚空袋溢流段）回调——Player.GetItem 主背包/
+ *  VoidVault 各填充支均发 NotifyItemPickup（Player.cs:39765/39771/39816/39821/39857/
+ *  39882），按【实际落袋数】通知（ItemSlot case-0 "落背包才发"同源语义；
+ *  2026-09-04 成就触发面审计接线）。
  *  @returns 有任何实际搬移（入包或溢流入袋）时 true */
 export function lootAllFromContainer(
   inv: Inventory,
   items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>,
   voidSpill?: ((itemId: number, stack: number) => number) | undefined,
-  opts?: { skipFavorited?: boolean },
+  opts?: { skipFavorited?: boolean; onPickup?: (internalId: number, pickedStack: number) => void },
 ): boolean {
   let anyMoved = false;
   for (let i = 0; i < items.length; i++) {
@@ -507,7 +511,10 @@ export function lootAllFromContainer(
     if (left > 0 && voidSpill) left = voidSpill(cur.id, left);
     if (left === 0) items[i] = null;
     else cur.stack = left;
-    if (left !== before) anyMoved = true;
+    if (left !== before) {
+      anyMoved = true;
+      opts?.onPickup?.(cur.id, before - left);
+    }
   }
   return anyMoved;
 }

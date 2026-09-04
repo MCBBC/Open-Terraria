@@ -4301,7 +4301,8 @@ export class Enemy extends Entity {
 
   private wetSwimStep(game: GameHooks, player: Player | null, mode: 461 | 586 | 620): boolean {
     if (!this.wet) {
-      // ---- 出水复原（461 :56409-56440 / 586 :56536-56558）----
+      // ---- 出水复原（461 :56597-56624 / 586 :56730-56750,1456 锚 :56409-56440/
+      //      :56536-56558 已统一 1457）----
       if (mode === 461) {
         this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.4, this.difficulty);
         const cx = this.cx, cy = this.cy;
@@ -4353,7 +4354,8 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return true;
     }
-    // 无视线：斜上巡航（:56388-56405 / :56519-56536 / :64321-64336）
+    // 无视线：斜上巡航（461 :56575-56595 / 586 :56708-56726 / 620 :64524-64539，
+    // 1456 锚 :56388-56405/:56519-56536/:64321-64336 已统一 1457）
     let cruise = 5;
     if (this.vy > 0) cruise = 3;
     if (this.vy < 0) cruise = 8;
@@ -4393,8 +4395,9 @@ export class Enemy extends Entity {
     // 脚底同高 → -1（同层追击可站平台）；缺省 1 → 其余情况（含站台上玩家在别层）
     // 下落/站立均判下落 = 平台穿透，vanilla 僵尸不恋平台的行为根基）
     if (rawPlayer && rawPlayer.y + rawPlayer.h === this.y + this.h) this.dirY = -1;
-    // ---- 624 侏儒日光石化（AI_003_Fighters :56437-56470 + AI_003_Gnomes_ShouldTurnToStone
-    //      :56413-56423——AI_003 帧首序：directionY 维护(:56248)之后、其余 type 段之前）。
+    // ---- 624 侏儒日光石化（AI_003_Fighters :56433-56470 + AI_003_Gnomes_ShouldTurnToStone
+    //      :56413-56424——AI_003 帧首序：directionY 维护(:56428-56431,1456 锚
+    //      :56248-56251 已统一 1457)之后、其余 type 段之前）。
     //      谓词 = remix 世界 `position.Y/16 > maxTilesY-350`（:56415-56417 深度支,昼夜
     //      无关）；否则 Main.dayTime && WorldGen.InAPlaceWithWind(position,width,height)
     //      （:56418-56421 白天+风高户外盒——Mounts.inAPlaceWithWind 单源,AllowsWind
@@ -4438,12 +4441,15 @@ export class Enemy extends Entity {
             ];
             if (game.placeObjectCells) game.placeObjectCells(cells, num, num2 - 1);
             else for (const c of cells) st.setTile(c.x, c.y, c.type, c.fx, c.fy);  // mock 兜底
-            game.playSfx('place', 1, num * 16, num2 * 16);   // PlaceObject !mute → PlaySound(0)
-            // 击杀记账（:56455-56463 netMode!=1 域=权威端）：onEnemyKilled = 仓内单口
+            // 音位 = PlaceObject(x,y) 尾 PlaySound(0, x*16, y*16)（WorldGen.cs:51891），
+            // 传入的 y = 锚点行 num2-1（:56450 PlaceTile(num, num2-1, 567,...)）
+            game.playSfx('place', 1, num * 16, (num2 - 1) * 16);   // PlaceObject !mute → PlaySound(0)
+            // 击杀记账（:56456-56463 netMode!=1 域=权威端）：onEnemyKilled = 仓内单口
             // （图鉴 RegisterKill 带 isNpcValidForBestiaryKillCredit 门+net 广播+
-            // achCheckBestiary;旗杀 CountKillForBannersAndDropThem → recordBannerKill
-            // ——该段带仓内 R3-A3 玩家交互门=登记偏差面,石化原文无此门）
-            game.onEnemyKilled(this.key, this);
+            // achCheckBestiary;旗杀 CountKillForBannersAndDropThem → recordBannerKill）
+            // ★石化旁路（H2-2）：原文无交互门也不调 lastCreatureHit/NotifyNPCKilled,
+            // 经 opts.petrifyBypassInteractionGate 逐项对齐
+            game.onEnemyKilled(this.key, this, { petrifyBypassInteractionGate: true });
             game.achievements?.notifyProgressionEvent(24);   // :56466（GAIN_TORCH_GODS_FAVOR）
             this.dead = true; this.hp = 0;                   // life=0+active=false（:56467-56468）
             return;
@@ -4451,39 +4457,40 @@ export class Enemy extends Entity {
         }
       }
     }
-    // ---- 111 僵尸威慑态（AI_003 :57368-57407，AI_127_Pal 生成的双僵尸 ai[3]<0）：
+    // ---- 111 僵尸威慑态（AI_003 :57550-57586,1456 锚 :57368-57407 已统一 1457，
+    //      AI_127_Pal 生成的双僵尸 ai[3]<0）：
     //      TargetClosest(不转面) + 受击/玩家 <200px 解除（转普通僵尸 ai0=0）；
     //      威慑期 directionY=-1、vx ×0.93（<0.1 归零）、恒面向被威慑宠、
     //      ai0 计 1000→1300 循环（无行为效果），本 tick 到此为止（不追不跳） ----
     if (this.vanillaId === 111 && this.menacePal && !this.menacePal.dead) {
       const rawP = this.targetRef(game);
       if (this.justHit || (rawP && !rawP.dead && Math.hypot(rawP.cx - this.cx, rawP.cy - this.cy) < 200)) {
-        this.menacePal = null;                       // :57372-57377 ai[3]=0, ai[0]=0
+        this.menacePal = null;                       // :57556-57559 ai[3]=0, ai[0]=0
         this.ai0 = 0;
       } else {
-        this.dirY = -1;                              // :57379 directionY = -1
-        this.vx *= 0.93;                             // :57381-57385
+        this.dirY = -1;                              // :57561 directionY = -1
+        this.vx *= 0.93;                             // :57563-57567
         if (this.vx > -0.1 && this.vx < 0.1) this.vx = 0;
         const pal = this.menacePal;                  // num56 = -ai[3]-1 → num57 朝向宠
         const dir57 = Math.sign(pal.cx - this.cx) || 1;
         if (dir57 !== this.facing) { this.vx = 0; this.facing = dir57; }
-        if (this.ai0 < 1000) this.ai0 = 1000;        // :57395-57402
+        if (this.ai0 < 1000) this.ai0 = 1000;        // :57574-57576
         if (++this.ai0 >= 1300) this.ai0 = 1000;
-        // :57403 跳过常规战士 AI——但 UpdateNPC 尾部重力/碰撞（:91523-91534）仍跑
+        // :57582 跳过常规战士 AI（1456 锚 :57403 已统一 1457）——但 UpdateNPC 尾部重力/碰撞（:91523-91534）仍跑
         //（本仓 gravity/move 在 fighterAI 内 → 威慑段自补 groundPhysics 等价）
         this.groundPhysics(game);
         return;
       }
     } else if (this.vanillaId === 111 && this.ai0 >= 1000) {
-      this.ai0 = 0;                                  // :57405-57407（解除后归零）
+      this.ai0 = 0;                                  // :57583-57586（解除后归零,1456 锚 :57405-57407 已统一 1457）
     }
-    // ---- 586 僵尸人鱼出水演出（F16，NPC.cs:56445-56466）：出生 alpha=255（SetDefaults
-    //  :16548）首帧 TargetClosest + vy=-6 + 35 尘爆发；随后 alpha −15/t 渐显，渐显期
+    // ---- 586 僵尸人鱼出水演出（F16，NPC.cs:56626-56650）：出生 alpha=255（SetDefaults
+    //  :16648）首帧 TargetClosest + vy=-6 + 35 尘爆发；随后 alpha −15/t 渐显，渐显期
     //  2 尘/t + 1/3 环境尘。fromVanilla 对 586 不走通用 alphaFade（保 255 初值）----
     if (this.vanillaId === 586) {
       if (this.spawnAlpha === 255) {
         if (rawPlayer && !rawPlayer.dead) this.facing = this.seekDirX(rawPlayer);
-        this.vy = -6;                                          // :56451
+        this.vy = -6;                                          // :56632（1456 锚 :56451 已统一 1457）
         game.spawnParticles(this.x, this.y, '#B09058', 35, 1.5, { life: 30 });
       }
       this.spawnAlpha = Math.max(0, this.spawnAlpha - 15);     // :56462-56466
@@ -4539,23 +4546,23 @@ export class Enemy extends Entity {
         }
       }
       if (this.ai3 < 0) {
-        this.dirY = -1;                                        // :57381
-        this.vx *= 0.93;                                       // :57383
+        this.dirY = -1;                                        // :57561（1456 锚 :57381 已统一 1457）
+        this.vx *= 0.93;                                       // :57563
         if (Math.abs(this.vx) < 0.1) this.vx = 0;
-        const num56 = Math.trunc(-this.ai3 - 1);               // :57388
+        const num56 = Math.trunc(-this.ai3 - 1);               // :57568
         const anchor = (game.enemies() as Enemy[])[num56];
         if (anchor && !anchor.dead) {
-          const num57 = Math.sign(anchor.cx - this.cx) || 1;   // :57389
+          const num57 = Math.sign(anchor.cx - this.cx) || 1;   // :57569-57570
           if (num57 !== this.facing) { this.vx = 0; this.facing = num57; }
         }
-        if (this.ai0 < 1000) this.ai0 = 1000;                  // :57396-57399
+        if (this.ai0 < 1000) this.ai0 = 1000;                  // :57574-57576
         this.ai0 += 1;
-        if (this.ai0 >= 1300) this.ai0 = 1000;                 // :57400-57404
+        if (this.ai0 >= 1300) this.ai0 = 1000;                 // :57577-57581
         this.applyGravity(game);
         moveAndCollide(this, game.world, this.vx, this.vy);
-        return;                                                // :57405
+        return;                                                // :57582
       }
-      if (this.ai0 >= 1000) this.ai0 = 0;                      // :57407-57410
+      if (this.ai0 >= 1000) this.ai0 = 0;                      // :57583-57586
     }
     // 美杜莎 480 蓄力石化（NPC.cs:56751-56889,位于 AI_003 通用行走之后——行走段先跑,
     //  蓄力期行走被本块 velocity.X*=0.9 阻尼近似）。ai2: >0 冷却递减 / 0 蓄机判定 /
@@ -10595,6 +10602,19 @@ export class Enemy extends Entity {
     if (this.vanillaId === 583) this.lightRGB = [(255 / 255) * 0.7, (105 / 255) * 0.7, (180 / 255) * 0.7];
     else if (this.vanillaId === 584) this.lightRGB = [(50 / 255) * 0.7, (205 / 255) * 0.7, (50 / 255) * 0.7];
     else if (this.vanillaId === 585) this.lightRGB = [(65 / 255) * 0.7, (105 / 255) * 0.7, (225 / 255) * 0.7];
+    // 成就：FIND_A_FAIRY（AI_112 视效段尾 NPC.cs:49163-49171：`Main.netMode != 2` 内
+    // `!localPlayer.dead && localPlayer.HitboxForBestiaryNearbyCheck.Intersects(base.Hitbox)
+    // → HandleSpecialEvent(22)`——判据盒 = 玩家盒 Inflate(300,200)
+    // （Player.HitboxForBestiaryNearbyCheck Player.cs:3297-3303）,逐帧幂等
+    {
+      const lp = player;
+      if (lp && !lp.dead
+        && lp.x - 300 < this.x + this.w && lp.x + lp.w + 300 > this.x
+        && lp.y - 200 < this.y + this.h && lp.y + lp.h + 200 > this.y) {
+        game.achievements?.handleSpecialEvent(22,
+          { statLifeMax: lp.maxHp, statManaMax: lp.maxMana });
+      }
+    }
     // 寿命（cs:48457-48473）：仅引导态 ai[2]>1 才累计（曾全态累计且与 ai3 复用
     // 被清零）;期满进状态 7 飞离而非原地消失
     if (this.ai2 > 1) {

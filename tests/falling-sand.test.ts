@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
-import { FallingBlock } from '../src/entities/FallingBlock';
+import { FallingBlock, anyCollisionWithSpecificTiles } from '../src/entities/FallingBlock';
 import type { GameHooks } from '../src/entities/types';
 
 function makeGame(): { game: GameHooks; world: World; dmg: number[]; drops: Array<[string, number, number]> } {
@@ -337,3 +337,99 @@ describe('⑥ AllowsSandfall 上方拒支门（WorldGen.cs:87895-87907）', () =
     expect(projs.length).toBe(2);
   });
 });
+
+// ============================================================
+// 死分支移植锁定（2026-09-05 用户指令）：AnyCollisionWithSpecificTiles 四臂
+// 1:1（Collision.cs:2826-2925）——臂 2/3/4（自左/自右/自下方）当前生成位
+// vx≡0 不可达（:87355 SpeedX=0f），移植备 future 带 vx 生成位
+// ============================================================
+describe('AnyCollisionWithSpecificTiles 死分支移植', () => {
+  const ST_W = 60;
+  const mkStore = () => {
+    const w = new World(ST_W, 120, 7, 'anycol');  // h=120 → st.h-40=80>row40
+    return w.store;
+  };
+  const SHEETS = new Set([53]);                        // 沙
+  const run = (st: TileStore, px: number, py: number, vx: number, vy: number) =>
+    anyCollisionWithSpecificTiles(st, px, py, vx, vy, 10, 10, SHEETS, true);
+
+  it('臂 1 自上方：result.Y 钳到盒顶（:2878-86，现役路径的权威原式）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);     // 盒 [480,640,16]
+    // 弹上方：curY+H = 638 ≤ 640 ✓；nextY+H = 643 > 640 ✓（积分后盒相交）
+    const r = run(st, 480, 628, 0, 5);
+    expect(r.y).toBe(640 - 638);                       // boxY - (curY+H) = 2
+  });
+
+  it('臂 2 自左侧：result.X 钳到盒左（:2887-99）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);     // 盒 [480,640]
+    // 弹左侧：curX+W = 478 ≤ 480 ✓；nextX+W = 483 > 480 ✓（积分后相交）
+    const r = run(st, 468, 640, 5, 0.4);
+    expect(r.x).toBe(480 - 478);                       // boxX - (curX+W) = 2
+  });
+
+  it('臂 3 自右侧：result.X 钳到盒右（:2900-12）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);
+    // 弹右侧：curX = 498 ≥ 盒右 496 ✓；nextX = 493 < 496 ✓（积分后相交）
+    const r = run(st, 498, 640, -5, 0.4);
+    expect(r.x).toBe(496 - 498);                       // boxRight - curX = -2
+  });
+
+  it('臂 4 自下方：result.Y 顶头 +0.01（:2913-22）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);     // 盒 [640,656]
+    // 弹下方：curY = 658 ≥ 盒底 656 ✓；nextY = 655 < 656 ✓（积分后相交）
+    const r = run(st, 480, 658, 0, -3);
+    expect(r.y).toBe(656 - 658 + 0.01);                // boxBottom - curY + 0.01
+  });
+
+  it('SolidTop 排除：平台不触发臂 2（:2887 !tileSolidTop 门）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['wood_platform']);
+    const r = run(st, 468, 640, 5, 0.4);
+    expect(r.x).toBe(5);                               // 原速（排除臂）
+    expect(r.y).toBe(0.4);
+  });
+
+  it('halfBrick 盒折半（Y+8/H-8）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);
+    st.half[st.idx(30, 40)] = 1;                       // 盒 [648, 8]
+    // 弹下方：curY = 658 ≥ 盒底 648+8=656 ✓
+    const r = run(st, 480, 658, 0, -3);
+    expect(r.y).toBe(656 - 658 + 0.01);
+  });
+
+  it('evenActuated=false 排致动格（弹 411-414 调用点传 true=含致动）', () => {
+    const st = mkStore();
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);
+    st.setActuated(30, 40, true);
+    // evenActuated=false → 致动格跳过 → 原速
+    const r = anyCollisionWithSpecificTiles(st, 480, 628, 0, 5, 10, 10, SHEETS, false);
+    expect(r.y).toBe(5);
+    // evenActuated=true → 致动格照处理 → 臂 1 钳位
+    const r2 = anyCollisionWithSpecificTiles(st, 480, 628, 0, 5, 10, 10, SHEETS, true);
+    expect(r2.y).toBe(640 - 638);                       // 臂 1 钳位
+  });
+
+  it('跨臂记名：臂 1 记名 (num7) 后臂 2 记名 (num5) → num7==num5 时 Y 回滚', () => {
+    const st = mkStore();
+    // 构造：两格（30,40）sand 臂 1 + (31,41) sand 臂 2——弹从左上斜向落入
+    // 扫描序 i 外 j 内：(30,40) 先判臂 1 记名 num7=30 → (31,40) 臂 2 记名 num5=30
+    // → num7==num5 → result.y 回滚原速（:2895-98）
+    st.setTileSilent(30, 40, TILE_BY_KEY['sand']);
+    st.setTileSilent(31, 40, TILE_BY_KEY['sand']);
+    // 弹在 (30,40) 上方偏左（curY+H ≤ 640 → 臂 1）；vx>0 → next 盒交 (31,40)
+    const r = run(st, 470, 628, 5, 5);
+    // (30,40) 臂 1：curY+H=638≤640 ✓ num7=30; result.y=640-638=2
+    // (31,40) 臂 2：curX+W=485>496? no 485<496 ✓ curX+W=480≤496 ✓ num5=31
+    //   num6=40, num7=30≠num8=-1 → result.x=496-480=16
+    //   num7(30)==num5(31)? NO → 不回滚
+    // 实际上两格同 y 行，臂 1 在 (30,40) 触发后 (31,40) 也触发臂 1（curY+H 同值）
+    // → num7 被覆写为 31 → result.y = 640-638 = 2（同值）
+    expect(r.y).toBe(2);
+  });
+});
+

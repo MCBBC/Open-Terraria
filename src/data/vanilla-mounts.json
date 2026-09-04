@@ -907,7 +907,16 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 12,
    "swimFrameStart": 5,
-   "backTexture": "Mount_Bunny.png"
+   "backTexture": "Mount_Bunny.png",
+   "playerYOffsets": [
+    14,
+    14,
+    16,
+    18,
+    22,
+    22,
+    14
+   ]
   },
   "2": {
    "spawnDust": 58,
@@ -943,7 +952,25 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 12,
    "swimFrameStart": 0,
-   "backTexture": "Mount_Pigron.png"
+   "backTexture": "Mount_Pigron.png",
+   "playerYOffsets": [
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    24,
+    26,
+    24,
+    22
+   ]
   },
   "3": {
    "spawnDust": 56,
@@ -979,7 +1006,13 @@
    "idleFrameDelay": 0,
    "idleFrameStart": 0,
    "idleFrameLoop": false,
-   "backTexture": "Mount_Slime.png"
+   "backTexture": "Mount_Slime.png",
+   "playerYOffsets": [
+    20,
+    22,
+    20,
+    18
+   ]
   },
   "4": {
    "spawnDust": 56,
@@ -1017,7 +1050,21 @@
    "swimFrameCount": 6,
    "swimFrameDelay": 12,
    "swimFrameStart": 6,
-   "backTexture": "Mount_Turtle.png"
+   "backTexture": "Mount_Turtle.png",
+   "playerYOffsets": [
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26
+   ]
   },
   "5": {
    "spawnDust": 152,
@@ -1058,7 +1105,21 @@
    "swimFrameDelay": 12,
    "swimFrameStart": 0,
    "backTexture": "Mount_Bee.png",
-   "backTextureExtra": "Mount_BeeWings.png"
+   "backTextureExtra": "Mount_BeeWings.png",
+   "playerYOffsets": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    18,
+    16,
+    16,
+    16
+   ]
   },
   "6": {
    "Minecart": true,
@@ -1094,7 +1155,12 @@
    "idleFrameDelay": 0,
    "idleFrameStart": 0,
    "idleFrameLoop": false,
-   "frontTexture": "Mount_Minecart.png"
+   "frontTexture": "Mount_Minecart.png",
+   "playerYOffsets": [
+    8,
+    8,
+    8
+   ]
   },
   "7": {
    "spawnDust": 226,
@@ -1136,7 +1202,17 @@
    "swimFrameDelay": 12,
    "swimFrameStart": 0,
    "frontTexture": "Mount_UFO.png",
-   "frontTextureExtra": "Mount_UFOGlow.png"
+   "frontTextureExtra": "Mount_UFOGlow.png",
+   "playerYOffsets": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+   ]
   },
   "8": {
    "spawnDust": 226,
@@ -1187,7 +1263,10 @@
    "frontTexture": "Mount_DrillSeat.png",
    "frontTextureGlow": "Mount_Glow_DrillSeat.png",
    "frontTextureExtra": "Mount_DrillDiode.png",
-   "frontTextureExtraGlow": "Mount_Glow_DrillDiode.png"
+   "frontTextureExtraGlow": "Mount_Glow_DrillDiode.png",
+   "playerYOffsets": [
+    4
+   ]
   },
   "9": {
    "spawnDust": 15,
@@ -1231,7 +1310,21 @@
    "swimFrameStart": 0,
    "backTexture": "Mount_Scutlix.png",
    "frontTexture": "Mount_ScutlixEyes.png",
-   "frontTextureExtra": "Mount_ScutlixEyeGlow.png"
+   "frontTextureExtra": "Mount_ScutlixEyeGlow.png",
+   "playerYOffsets": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+   ]
   },
   "10": {
    "spawnDust": 15,
@@ -1271,7 +1364,25 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 12,
    "swimFrameStart": 15,
-   "backTexture": "Mount_Unicorn.png"
+   "backTexture": "Mount_Unicorn.png",
+   "playerYOffsets": [
+    28,
+    28,
+    28,
+    30,
+    30,
+    28,
+    28,
+    30,
+    30,
+    28,
+    28,
+    28,
+    30,
+    30,
+    28,
+    32
+   ]
   },
   "11": {
    "Minecart": true,
@@ -1308,7 +1419,12 @@
    "idleFrameStart": 0,
    "idleFrameLoop": false,
    "frontTexture": "Mount_MinecartMech.png",
-   "frontTextureGlow": "Mount_MinecartMechGlow.png"
+   "frontTextureGlow": "Mount_MinecartMechGlow.png",
+   "playerYOffsets": [
+    9,
+    9,
+    9
+   ]
   },
   "12": {
    "spawnDust": 15,
@@ -1350,7 +1466,32 @@
    "swimFrameDelay": 4,
    "swimFrameStart": 15,
    "backTexture": "Mount_CuteFishron1.png",
-   "backTextureGlow": "Mount_CuteFishron2.png"
+   "backTextureGlow": "Mount_CuteFishron2.png",
+   "playerYOffsets": [
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12
+   ]
   },
   "13": {
    "Minecart": true,
@@ -1386,7 +1527,12 @@
    "idleFrameDelay": 0,
    "idleFrameStart": 0,
    "idleFrameLoop": false,
-   "frontTexture": "Mount_MinecartWood.png"
+   "frontTexture": "Mount_MinecartWood.png",
+   "playerYOffsets": [
+    8,
+    8,
+    8
+   ]
   },
   "14": {
    "spawnDust": 15,
@@ -1419,7 +1565,17 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 12,
    "swimFrameStart": 1,
-   "backTexture": "Mount_Basilisk.png"
+   "backTexture": "Mount_Basilisk.png",
+   "playerYOffsets": [
+    8,
+    10,
+    8,
+    10,
+    8,
+    8,
+    10,
+    8
+   ]
   },
   "15": {
    "Minecart": true,
@@ -1498,7 +1654,12 @@
    "idleFrameDelay": 0,
    "idleFrameStart": 0,
    "idleFrameLoop": false,
-   "frontTexture": "Mount_MinecartMineCarp.png"
+   "frontTexture": "Mount_MinecartMineCarp.png",
+   "playerYOffsets": [
+    8,
+    8,
+    8
+   ]
   },
   "17": {
    "spawnDust": 15,
@@ -1531,7 +1692,13 @@
    "swimFrameDelay": 12,
    "swimFrameStart": 1,
    "backTexture": "Extra_97.png",
-   "backTextureExtra": "Extra_96.png"
+   "backTextureExtra": "Extra_96.png",
+   "playerYOffsets": [
+    8,
+    8,
+    8,
+    8
+   ]
   },
   "18": {
    "Minecart": true,
@@ -1787,7 +1954,15 @@
    "swimFrameCount": 0,
    "swimFrameDelay": 0,
    "swimFrameStart": 0,
-   "backTexture": "Extra_113.png"
+   "backTexture": "Extra_113.png",
+   "playerYOffsets": [
+    6,
+    6,
+    6,
+    6,
+    6,
+    6
+   ]
   },
   "24": {
    "Minecart": true,
@@ -2380,7 +2555,19 @@
    "swimFrameCount": 7,
    "swimFrameDelay": 10,
    "swimFrameStart": 2,
-   "backTexture": "Extra_149.png"
+   "backTexture": "Extra_149.png",
+   "playerYOffsets": [
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20,
+    20
+   ]
   },
   "38": {
    "Minecart": true,
@@ -2677,7 +2864,13 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 5,
    "swimFrameStart": 0,
-   "frontTexture": "Extra_164.png"
+   "frontTexture": "Extra_164.png",
+   "playerYOffsets": [
+    14,
+    14,
+    14,
+    14
+   ]
   },
   "44": {
    "spawnDust": 228,
@@ -2702,7 +2895,19 @@
    "runningFrameCount": 10,
    "runningFrameDelay": 8,
    "runningFrameStart": 0,
-   "frontTexture": "Extra_166.png"
+   "frontTexture": "Extra_166.png",
+   "playerYOffsets": [
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9
+   ]
   },
   "45": {
    "spawnDust": 6,
@@ -2738,7 +2943,17 @@
    "swimFrameCount": 6,
    "swimFrameDelay": 20,
    "swimFrameStart": 2,
-   "backTexture": "Extra_167.png"
+   "backTexture": "Extra_167.png",
+   "playerYOffsets": [
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30
+   ]
   },
   "46": {
    "spawnDust": 15,
@@ -2774,7 +2989,36 @@
    "swimFrameDelay": 12,
    "swimFrameStart": 0,
    "frontTexture": "Extra_168.png",
-   "frontTextureExtra": "Extra_168.png"
+   "frontTextureExtra": "Extra_168.png",
+   "playerYOffsets": [
+    4,
+    6,
+    6,
+    4,
+    4,
+    4,
+    4,
+    6,
+    6,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+   ]
   },
   "47": {
    "spawnDust": 5,
@@ -2814,7 +3058,25 @@
    "swimFrameCount": 1,
    "swimFrameDelay": 12,
    "swimFrameStart": 15,
-   "backTexture": "Extra_169.png"
+   "backTexture": "Extra_169.png",
+   "playerYOffsets": [
+    30,
+    30,
+    30,
+    32,
+    32,
+    30,
+    30,
+    32,
+    32,
+    30,
+    30,
+    30,
+    32,
+    32,
+    30,
+    34
+   ]
   },
   "48": {
    "spawnDust": 62,
@@ -2837,7 +3099,15 @@
    "runningFrameCount": 6,
    "runningFrameDelay": 8,
    "runningFrameStart": 0,
-   "backTexture": "Extra_170.png"
+   "backTexture": "Extra_170.png",
+   "playerYOffsets": [
+    15,
+    15,
+    13,
+    13,
+    13,
+    15
+   ]
   },
   "49": {
    "spawnDust": 35,
@@ -2876,7 +3146,17 @@
    "swimFrameCount": 4,
    "swimFrameDelay": 16,
    "swimFrameStart": 0,
-   "backTexture": "Extra_172.png"
+   "backTexture": "Extra_172.png",
+   "playerYOffsets": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10
+   ]
   },
   "50": {
    "spawnDust": 243,
@@ -2911,7 +3191,17 @@
    "idleFrameDelay": 0,
    "idleFrameStart": 0,
    "idleFrameLoop": false,
-   "backTexture": "Extra_204.png"
+   "backTexture": "Extra_204.png",
+   "playerYOffsets": [
+    20,
+    22,
+    20,
+    20,
+    22,
+    22,
+    20,
+    20
+   ]
   },
   "51": {
    "Minecart": true,
@@ -2947,6 +3237,11 @@
    "idleFrameStart": 0,
    "idleFrameLoop": false,
    "frontTexture": "Extra_246.png",
+   "playerYOffsets": [
+    10,
+    10,
+    10
+   ],
    "buff": 338,
    "verticalOffset": -10,
    "playerVerticalOffset": -8
@@ -2981,7 +3276,24 @@
    "swimFrameDelay": 12,
    "swimFrameStart": 12,
    "frontTexture": "Extra_253.png",
-   "frontTextureExtra": "Extra_254.png"
+   "frontTextureExtra": "Extra_254.png",
+   "playerYOffsets": [
+    0,
+    -14,
+    -10,
+    -8,
+    18,
+    -2,
+    0,
+    2,
+    4,
+    4,
+    2,
+    0,
+    4,
+    2,
+    -4
+   ]
   },
   "53": {
    "Minecart": true,
@@ -3017,6 +3329,11 @@
    "idleFrameStart": 0,
    "idleFrameLoop": false,
    "frontTexture": "Extra_251.png",
+   "playerYOffsets": [
+    10,
+    10,
+    10
+   ],
    "buff": 346,
    "verticalOffset": -10,
    "playerVerticalOffset": -8
@@ -3055,7 +3372,30 @@
    "swimFrameDelay": 6,
    "swimFrameStart": 5,
    "frontTexture": "Extra_271.png",
-   "frontTextureExtra": "Extra_272.png"
+   "frontTextureExtra": "Extra_272.png",
+   "playerYOffsets": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
   },
   "55": {
    "spawnDust": 31,
@@ -3092,7 +3432,25 @@
    "swimFrameCount": 3,
    "swimFrameDelay": 6,
    "swimFrameStart": 12,
-   "frontTexture": "Extra_273.png"
+   "frontTexture": "Extra_273.png",
+   "playerYOffsets": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
   },
   "56": {
    "spawnDust": 31,
@@ -3135,7 +3493,25 @@
    "swimFrameCount": 8,
    "swimFrameDelay": 5,
    "swimFrameStart": 1,
-   "frontTexture": "Extra_274.png"
+   "frontTexture": "Extra_274.png",
+   "playerYOffsets": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
   },
   "57": {
    "spawnDust": 31,
@@ -3272,7 +3648,13 @@
    "swimFrameDelay": 6,
    "swimFrameStart": 0,
    "frontTexture": "Extra_290.png",
-   "frontTextureExtra": "Extra_291.png"
+   "frontTextureExtra": "Extra_291.png",
+   "playerYOffsets": [
+    0,
+    0,
+    0,
+    0
+   ]
   },
   "62": {
    "spawnDust": 15,

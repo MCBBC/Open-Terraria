@@ -149,6 +149,62 @@ const DG_PRE: Record<string, number[]> = {
   acc: [62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
 };
 const DG_PRE_REDUCED = new Set([7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49]);
+// ★IIIII166：Prefix(-1) 重掷链两张表（Item.cs:704-1044 TryGetPrefixStatMultipliersForItem
+//   switch + :1064-1080 四后置门;PrefixID.cs ReducedNaturalChance=上面 DG_PRE_REDUCED）。
+//   DG_PRE_GATE=前缀→[dmg,spd,mcst,kb]乘子(仅 ≠1 项;1/2/7/9/36/61/62-80/95/96 全 1 不入表
+//   ——62-80 acc 族在 switch 内无 case=恒真)。DG_ITEM_GATE=物品→[damage,useAnimation,mana,
+//   knockBack]（SetDefaults 终值;acc/非战斗族全 0）。
+//   四后置门（C# banker's rounding + float32 乘积,fround 仿真）:
+//     dmg≠1∧Round(d0*dmg)==d0 / spd≠1∧Round(ua0*spd)==ua0 /
+//     mcst≠1∧Round(mana0*mcst)==mana0 / kb≠1∧kb0==0 → false ⇒ rolledPrefix=-1 重掷。
+//   曾按 BBBBB 勘误注判「地牢箱族恒不触发,单轮即止」——该审计只覆盖高伤武器面;低伤面
+//   (213 d7/4281 d7/1319 d10/5011 d9)实触发（rig att#8337 实证 213 掷 55→46→57 三轮 6 掷）。
+const DG_PRE_GATE: Record<number, [number, number, number, number]> = {
+  3: [1.05, 1, 1, 1], 4: [1.1, 1, 1, 1.1], 5: [1.15, 1, 1, 1], 6: [1.1, 1, 1, 1],
+  8: [0.85, 1, 1, 0.85], 10: [0.85, 1, 1, 1], 11: [1, 1.1, 1, 0.9], 12: [1.05, 1.15, 1, 1.1],
+  13: [0.9, 1, 1, 0.8], 14: [1, 1.1, 1, 1.15], 15: [1, 0.85, 1, 0.9], 16: [1.1, 1, 1, 1],
+  17: [1, 0.85, 1, 1], 18: [1, 0.9, 1, 1], 19: [1, 1, 1, 1.15], 20: [1.1, 0.95, 1, 1.05],
+  21: [1.1, 1, 1, 1.15], 22: [0.85, 1, 1, 0.9], 23: [1, 1.15, 1, 1], 24: [1, 1.1, 1, 0.8],
+  25: [1.15, 1.1, 1, 1], 26: [1.1, 1, 0.85, 1], 27: [1, 1, 0.85, 1], 28: [1.15, 1, 0.85, 1.05],
+  29: [1, 1, 1.1, 1], 30: [0.9, 1, 1.2, 1], 31: [1.1, 1, 0.9, 1], 32: [1, 1, 0.9, 1],
+  33: [1.15, 1, 0.85, 1], 34: [1.1, 1, 1.2, 0.9], 35: [1.05, 1, 1.15, 1], 37: [1.1, 1, 1, 1.1],
+  38: [1, 1, 1, 1.15], 39: [0.7, 1, 1, 0.8], 40: [0.85, 1, 1, 1], 41: [0.9, 1, 1, 0.85],
+  42: [1, 0.9, 1, 1], 43: [1.1, 0.9, 1, 1], 44: [1, 0.9, 1, 1], 45: [1, 0.95, 1, 1],
+  46: [1.07, 0.94, 1, 1], 47: [1, 1.15, 1, 1], 48: [1, 1.2, 1, 1], 49: [1, 1.08, 1, 1],
+  50: [0.8, 1.15, 1, 1], 51: [1.05, 0.9, 1, 0.9], 52: [0.9, 0.9, 0.9, 1], 53: [1.1, 1, 1, 1],
+  54: [1, 1, 1, 1.15], 55: [1.05, 1, 1, 1.15], 56: [1, 1, 1, 0.8], 57: [1.18, 1, 1, 0.9],
+  58: [0.85, 0.85, 1, 1], 59: [1.15, 1, 1, 1.15], 60: [1.15, 1, 1, 1], 81: [1.15, 0.9, 1, 1.15],
+  82: [1.15, 0.9, 1, 1.15], 83: [1.15, 0.9, 0.9, 1.15], 84: [1.17, 1, 1, 1.17],
+  85: [1.15, 1, 1, 1.15], 86: [1.1, 1, 1, 1.05], 87: [1.15, 1, 1, 1], 88: [1.1, 1, 1, 1],
+  89: [0.95, 1, 1, 1], 90: [1.1, 1, 1, 0.9], 91: [0.95, 1, 1, 1], 92: [0.7, 1, 1, 1],
+  93: [1, 1, 1, 0.75], 94: [0.85, 1, 1, 0.9], 97: [1, 1, 1, 1.25],
+};
+// [damage, useAnimation, mana, knockBack]（vanilla-itemcombat.json 金标 + SetDefaults 逐 id 复核:
+//   4061=DefaultToSpear(…,28)+SetWeaponValues(14,6f);4062=DefaultToStaff→ua17/mana6/d24/kb3;
+//   6153=DefaultToMagicWeapon(1115,24,4f)+mana10/d11/kb2;acc 族 211/212/5465/6156/975/906/49/53/54
+//   与 156 全 0。4978/5010/3017/2292 无池不查表。）
+const DG_ITEM_GATE: Record<number, [number, number, number, number]> = {
+  155: [24, 18, 0, 3], 156: [0, 0, 0, 0], 157: [27, 16, 7, 7], 163: [27, 45, 0, 6],
+  113: [35, 22, 14, 7.5], 3317: [28, 25, 0, 3.85], 164: [26, 15, 0, 3], 1156: [40, 30, 0, 1],
+  1571: [70, 20, 0, 5], 1569: [29, 16, 0, 2.75], 1260: [45, 40, 20, 2.5], 1572: [100, 30, 0, 7.5],
+  4607: [41, 36, 0, 2.5], 5465: [0, 0, 0, 0], 6156: [0, 0, 0, 0], 211: [0, 0, 0, 0],
+  212: [0, 0, 0, 0], 213: [7, 25, 0, 3], 964: [14, 40, 0, 5.75], 4281: [7, 36, 0, 4],
+  670: [21, 20, 0, 8.5], 724: [17, 20, 0, 4.75], 1319: [10, 19, 0, 1], 6153: [11, 24, 10, 2],
+  4061: [14, 28, 0, 6], 4062: [24, 17, 6, 3], 975: [0, 0, 0, 0], 906: [0, 0, 0, 0],
+  5011: [9, 45, 0, 4.6], 49: [0, 0, 0, 0], 53: [0, 0, 0, 0], 54: [0, 0, 0, 0],
+  // ★IIIII166：acc 族/65 补全（acc 族 gate 恒不触发,占位 0;65=case65 d25/ua20/kb5）
+  3017: [0, 0, 0, 0], 950: [0, 0, 0, 0], 987: [0, 0, 0, 0], 1579: [0, 0, 0, 0],
+  159: [0, 0, 0, 0], 158: [0, 0, 0, 0], 2219: [0, 0, 0, 0], 65: [25, 20, 0, 5],
+};
+// C# Math.Round(double)=banker's rounding（.5 → 偶）;乘积先 fround 仿真 (float)d0*(float)mul
+// 的 IEEE 单精度舍入（双精度积 48 位 ≤53 恒精确,故 fround(双积)=正确单精度积）。
+const dgRoundCS = (x: number): number => {
+  const f = Math.floor(x);
+  const d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return (f & 1) === 0 ? f : f + 1;
+};
 // ★BBBBB 勘误（2026-08-19）：TryGetPrefixStatMultipliersForItem 的 switch（Item.cs:704-1031）
 //   内【零】return false——81-89（Legendary 族）均有乘子（case 81: kb/dmg/crt/spd/size）。
 //   唯四条后置门（Round(damage*dmg)==damage 等，:1039-1060）可 false→Prefix 重掷，但对
@@ -171,6 +227,28 @@ const DG_PRE_CLASS: Record<number, string> = {
   //   每 jungle/flag2 主件少 1-2 骰（style8/9 ok 成本 x86 30.78/28.60 vs JS 23.48/24.40 实证）。
   211: 'acc', 212: 'acc', 213: 'swords', 964: 'guns', 4281: 'summon',
   670: 'boom', 724: 'swords', 1319: 'guns', 6153: 'magic', 4061: 'spears', 4062: 'magic',
+  // ★IIIII160：BASICCHESTS 深支 num25/switch6 空手支 item 前缀池补全（AddBuriedChest
+  //   loot else 臂 SetDefaults+Prefix(-1) 面 WG.cs:36969-36993/:37270-37337/:37580-37599）——
+  //   975=鞋靴饰品(Item.cs:12618 accessory=true,shoeSlot=4)→acc 池；906=手部饰品
+  //   (Item.cs case 906 accessory=true,handOnSlot=24)→acc 池；5011∈
+  //   SpearsMacesChainsawsDrillsPunchCannon(PrefixLegacy.cs:79)→spears 池。
+  //   三者 CanGetPrefixes 缺省 true（ItemID.cs:179 异常表无此 id）。缺登=每中箱
+  //   少 1-2 掷（room#2 −1/room#3 −2 rig 逐 raw 实证）⇒ BASICCHESTS −56 首根。
+  //   ★补遗（nt8 rolltxt 逐 raw 重放定罪）：49/53/54 亦=accessory（Item.cs SetDefaults
+  //   1971/2018/2026：49 handOnSlot?、53 waistSlot=1、54 shoeSlot=6）→ acc 池；
+  //   50=消耗品（useStyle4,无 accessory）、930/931（damage 但零集表命中）、997/5379
+  //   无池=Prefix 零掷,JS 不调 prefixRolls 同径。
+  975: 'acc', 906: 'acc', 5011: 'spears', 49: 'acc', 53: 'acc', 54: 'acc',
+  // ★IIIII166：acc 族主件补全（IsAPrefixableAccessory 路:accessory=true 且不在
+  //   ItemID.cs:179 CanGetPrefixes 异常表→PrefixesForAccessories 19 池）——
+  //   3017=丛林箱 Next(20) 稀有件(shoeSlot=16,rig att#8339 实证 x86 掷 Next(4) 1 颗
+  //   而 JS 0 颗=−1 相移根因);950/987/1579=flag2 冰箱 SelectRandom 表内 acc 件;
+  //   159/158/2219=flag12 门 num10 acc 件。acc 前缀 62-80 在 TryGet switch 内无
+  //   case=乘子恒 1→四门恒不触发→单轮即止（gate stats 占位 0 即安全）。
+  //   65=flag12 门 num10,SwordsHammersAxesPicks 集(PrefixLegacy.cs)→swords 池,
+  //   SetDefaults d25/ua20/kb5/mana0→四门对全 swords 前缀均不触发,单轮。
+  3017: 'acc', 950: 'acc', 987: 'acc', 1579: 'acc', 159: 'acc', 158: 'acc', 2219: 'acc',
+  65: 'swords',
   // ★BBBBB 勘误：327=Golden Key（ItemID.cs:2193）——非 accessory/无任何前缀类
   //   （Item.cs case 327 仅 width/height）→ GetRollablePrefixes=null → Prefix(-1) 零掷。
   //   水覆写箱（num2<ws+50 → itemType=327）的 loot 修正点在 surf 支门（见 dgChestLoot），
@@ -4222,13 +4300,31 @@ const snap: SnapFn = (name) => {
   function prefixRolls(item: number): void {
     const cls = DG_PRE_CLASS[item];
     if (!cls) return;
-    // Prefix(-1)（Item.cs:486-560）单轮：Next(4)==0→rolledPrefix=0（乘子恒 1→真，止）；
-    // 否则 RollAPrefix=Next(len)；Reduced 且 Next(3)!=0 → 降 0 止。（无重掷链——见
-    // DG_PRE_REDUCED 上方 BBBBB 勘误注：switch 内零 false，后置四门对本族恒真。）
-    if (rn(4) !== 0) {
-      const arr = DG_PRE[cls];
-      const rolled = arr[rn(arr.length)];
-      if (DG_PRE_REDUCED.has(rolled)) rn(3);
+    // Prefix(-1)（Item.cs:549-568 while 循环）完整链：Next(4)==0→rolledPrefix=0（乘子恒 1
+    // →TryGet 真止）；否则 RollAPrefix=Next(len)；Reduced 且 Next(3)!=0 → 降 0 止；
+    // TryGetPrefixStatMultipliersForItem 四后置门 false ⇒ rolledPrefix=-1 整轮重掷
+    // （Next(4)/Next(池)/Next(3) 全链重耗）。
+    // ★IIIII166 翻案（rig nt8 att#8337 逐 raw 定罪）：旧「单轮即止」系 BBBBB 审计只覆盖
+    //   高伤武器面——低伤面 213(d7)/4281(d7)/1319(d10)/5011(d9) 的 dmg 1.05/1.07/0.95 门
+    //   实触发（seat0 room#73 (642,781) 箱 213 掷 55→RETRY→46→RETRY→57=6 掷 vs 单轮 2）。
+    const pool = DG_PRE[cls];
+    const st = DG_ITEM_GATE[item];
+    let rp = -1;
+    for (;;) {
+      if (rp === -1 && rn(4) === 0) rp = 0;
+      if (rp === -1) rp = pool[rn(pool.length)]!;
+      if (DG_PRE_REDUCED.has(rp) && rn(3) !== 0) rp = 0;
+      // TryGet 四后置门（st 缺表=旧面 item,按恒真处理——与单轮时代行为一致）
+      if (st === undefined) break;
+      const m = DG_PRE_GATE[rp];
+      if (m !== undefined) {
+        const d0 = st[0], ua0 = st[1], mana0 = st[2], kb0 = st[3];
+        if (m[0] !== 1 && dgRoundCS(Math.fround(Math.fround(d0) * Math.fround(m[0]))) === d0) { rp = -1; continue; }
+        if (m[1] !== 1 && dgRoundCS(Math.fround(Math.fround(ua0) * Math.fround(m[1]))) === ua0) { rp = -1; continue; }
+        if (m[2] !== 1 && dgRoundCS(Math.fround(Math.fround(mana0) * Math.fround(m[2]))) === mana0) { rp = -1; continue; }
+        if (m[3] !== 1 && kb0 === 0) { rp = -1; continue; }
+      }
+      break;
     }
   }
   // ★IIIII114b2：G 段受理失败原因镜像钩（x86 rig GC-RSN/GC-PC 同格式；dormant——
@@ -4587,11 +4683,17 @@ const snap: SnapFn = (name) => {
           if (rn(4) === 0) { prefixRolls(6156); dgLoot.push(6156); }
         }
       } else {
-        rn(6);
-        if (rn(20) === 0) { /* 997 类 */ }
+        // ★IIIII160：switch(Next(6)) 的 Prefix 面（WG.cs:36969-36993）——case4=5011(spears)/
+        //   default=975(acc) 有池,余零掷；997/930 无池,930 的 931 stack=Next(26)+25。
+        const c6 = rn(6);
+        prefixRolls(c6 === 0 ? 49 : c6 === 1 ? 50 : c6 === 2 ? 53 : c6 === 3 ? 54 : c6 === 4 ? 5011 : 975);
+        if (rn(20) === 0) { /* 997（无池,零掷） */ }
         else if (rn(20) === 0) rn(26);
       }
-      if (rn(3) === 0) rn(20);
+      // ★IIIII166 勘误：中支尾首块（WG.cs:37044-37063）= if(flag3){Next(3)==0→4423
+      //   stack=Next(10,20)} ELSE IF(Next(3)==0→166 stack=Next(10,20)}——两 gate if/else-if,
+      //   miss 时 C# 耗 2 颗;曾误并单 gate（miss −1 相位漂移）。
+      if (flag3) { if (rn(3) === 0) rn(20); } else if (rn(3) === 0) rn(20);
       if (rn(5) === 0) { /* 52 */ }
       if (rn(3) === 0) rn(51);
       if (rn(2) === 0) { rn(2); rn(10); }
@@ -4638,10 +4740,15 @@ const snap: SnapFn = (name) => {
           if (rn(4) === 0) { prefixRolls(6156); dgLoot.push(6156); }
         }
       } else {
-        rn(7);
-        if (rn(20) === 0 && num7 > gs.lavaLine) { /* 906 */ }
-        else if (rn(15) === 0) { /* 997 */ }
-        else if (false) rn(26);
+        // ★IIIII160 定罪（BASICCHESTS −56 单根之一）：C# num25==6 支 = 930(无前缀池,
+        //   Prefix 零掷)+931 stack=Next(26)+25（WG.cs:37323-37337,deep else;:37323 在
+        //   1458 与 1456 同位）——JS 旧写 `else if (false) rn(26)` 死支 ⇒ num25==6 且
+        //   906/997 双 miss 时每箱少 1 掷（room#2 rig 实证 x86 fill23 vs JS20）。
+        const c7 = rn(7);
+        if (rn(20) === 0 && num7 > gs.lavaLine) { prefixRolls(906); }   // ★IIIII160：906=acc 池（Item.cs case 906）
+        else if (rn(15) === 0) { /* 997（无池,零掷） */ }
+        else if (c7 === 6) rn(26);          // case6: 930 无池+931 stack=Next(26)+25（rainbow 时 5379 同耗 1 掷）
+        else prefixRolls(c7 === 0 ? 49 : c7 === 1 ? 50 : c7 === 2 ? 53 : c7 === 3 ? 54 : c7 === 4 ? 5011 : 975);   // ★IIIII160：case0-5 Prefix 面（5011=spears/975=acc 有池,余零掷）
       }
       if (rn(5) === 0) { /* 43 */ }
       if (rn(3) === 0) { /* 167 */ }
@@ -4660,35 +4767,52 @@ const snap: SnapFn = (name) => {
     } else {
       if (num10 > 0) prefixRolls(num10);
       else rn(4);
+      // ★IIIII166 勘误（nt8 att#13415 逐 raw 定罪,seat0 room#108 (1250,952) 箱 num10=155
+      //   hell 支 x86 21 vs JS 23）：三处与 cs:37597-37764 失配——
+      //   ① num35 门 Next(4)>0（:37646）曾误写 rn(3)>0（模数错=命中率错+命中才掷内层）
+      //   ② num36 门 Next(3)>0（:37685）曾误写 >1（value=1 时 C# 掷 2 颗 JS 零掷）
+      //   ③ 2350/4870 块（:37724）= if(Next(3)==0){Next(1,3);Next(2)} 条件 1/3 掷,
+      //     曾误写无条件 rn(3);rn(2)（miss 时 JS +1、hit 时 JS −1）
       if (rn(3) === 0) { /* 167 */ }
       if (rn(2) === 0) { rn(2); rn(15); }
       if (rn(2) === 0) { rn(2); rn(25); }
       if (rn(2) === 0) rn(6);
-      if (rn(3) > 0) { rn(8); rn(3); }
-      if (rn(3) > 1) { rn(8); rn(3); }
-      rn(3); rn(2);
-      if (rn(2) === 0) { rn(2); rn(15); }
-      if (rn(2) === 0) rn(3);
+      if (rn(4) > 0) { rn(8); ri(1, 2); }          // num35（:37646 Next(4)>0,stack=Next(1,3)）
+      if (rn(3) > 0) { rn(8); ri(1, 2); }          // num36（:37685 Next(3)>0,stack=Next(1,3)）
+      if (rn(3) === 0) { ri(1, 2); rn(2); }        // 2350/4870（:37724,stack=Next(1,3)+2 选 1）
+      if (rn(2) === 0) { rn(2); rn(15); }          // 8/282（:37738）
+      if (rn(2) === 0) rn(3);                      // 73 stack=Next(2,5)（:37758）
     }
-    // 尾段（cs:37414-37560）★U 批修正（oracle DGSEGHASH 实证）：
-    //   21 块 = flag9 1/8 砍刀（:37432 无 !flag10 门——上锁箱也掷）+ (num9∈23..27)&&1/2
-    //   残片 5234（:37476）；467 块独立 = (num9==13)&&Next(2)（:37543，无 flag9 掷）；
-    //   voice 门 Next(12) 命中再 GetRandomVoiceItem=Next(14)（:37554+Item.cs:49024）。
-    //   旧近似 flag9 误挂 !flag10 门 + 残片门误并 flag10 → 上锁 21 箱每箱少掷 1 颗。
-    if (flag9 && chestTile === TILE_BY_KEY['chest']) { if (rn(8) === 0) { /* 2192 */ } }
-    // ★IIIII99d2（2026-08-31）：FTW 追加掷（1457 WG.cs:37795-37797 / 1456 :37436-37438 /
-    //   1458 :37803-37805，1457 即终值）——`flag9 && Main.getGoodWorld && genRand.Next(5)==0
-    //   → SetDefaults(5515)`。位序=flag9 砍刀掷(:37792)之后、num9∈23..27 残片掷(:37834)
-    //   之前；仅 tile21 块有此支（467 尾段无 getGoodWorld 掷）。缺此掷=FTW 下每座
-    //   dungeon-wall 21 号箱少耗 1 颗主流骰 → BiomeChests 段 −N 起全城邦相位漂移
-    //   （本批 rig 定罪：x86 fill21 vs JS20 @i=0 同坐标逐格同 attempt；467 箱两侧相等）。
-    //   vanilla 内容面与 2192/5234 同口径（dice 记账为主,5515 不入 SW 箱列——
-    //   本仓 items 表无此 id,dgLootItems 对未注册 id 自动跳过）。
-    if (flag9 && chestTile === TILE_BY_KEY['chest'] && gs.seedFlags.getGoodWorld) {
-      if (rn(5) === 0) { /* 5515 */ }
+    // 尾段（1457 cs:37765-37957；1456 :37414 起为少 753/669 二门的旧形）★U 批修正
+    //   （oracle DGSEGHASH 实证：flag9 砍刀无 !flag10 门/残片门拆分）+★IIIII166 补全
+    //   （nt8 rolltxt 逐 raw 重放 + wld 箱内容双证定罪）：21/467 两尾块的
+    //   flag4/flag2/flag12/flag13 附加件门整缺——tile21 丛林箱（style8/10/29,
+    //   seat0 room#4 att#6）每箱少 2 掷（Next(4)→2204+Next(50)→753,后者 1457 新增）
+    //   = BASICCHESTS room#4 att#6 x86 26 vs JS 24 根因。箱栅 itemIndex>0：loot 各支
+    //   末态恒 ≥1 件（每支至少落一件主/杂物）,免门照抄 2192/5234 先例；dice 记账
+    //   为主（同 2192/5234/5515 口径,命中件暂不入 SW 箱列——登记债见
+    //   BuriedChestsPass 尾段 pushItem 先例,内容面另批清偿）。
+    if (chestTile === TILE_BY_KEY['chest']) {
+      // 21 块（cs:37765-37852）
+      if (flag4) { if (rn(4) === 0) { /* 2204 */ } if (rn(50) === 0) { /* 753 */ } }   // :37767/:37771
+      if (flag2) { if (rn(7) === 0) { /* 2198 */ } if (rn(50) === 0) { /* 669 */ } }   // :37775/:37779
+      // flag12：2197 门 1/3 + 五选一 num38=Next(6)（:37799,恒掷）+ 751 stack=Next(50,101)（:37828,恒掷）
+      if (flag12) { if (rn(3) === 0) { /* 2197 */ } rn(6); ri(50, 100); }              // :37783/:37799/:37828
+      // flag13：2195 蜥蜴炉恒给（零掷）+ 2767 1/5 否则 2766 stack=Next(3,8)（:37839-37851）
+      if (flag13) { /* 2195 */ if (rn(5) === 0) { /* 2767 */ } else ri(3, 7); }        // :37787/:37839
+      if (flag9) { if (rn(8) === 0) { /* 2192 */ } }                                   // :37791（无 !flag10 门——上锁箱也掷）
+      // ★IIIII99d2（2026-08-31）：FTW 追加掷（1457 WG.cs:37795-37797 / 1458 :37803-37805）
+      //   ——仅 tile21 块有此支（467 尾块无 getGoodWorld 掷）。5515 不入 SW 箱列
+      //   （本仓 items 表无此 id,dgLootItems 对未注册 id 自动跳过）。
+      if (flag9 && gs.seedFlags.getGoodWorld) { if (rn(5) === 0) { /* 5515 */ } }
+      if (num9 >= 23 && num9 <= 27) { if (rn(2) === 0) { /* 5234 */ } }                // :37834
+    } else if (chestTile === CHEST2) {
+      // 467 块（cs:37853-37914）——无 flag9/flag13/getGoodWorld 支
+      if (flag4) { if (rn(4) === 0) { /* 2204 */ } if (rn(50) === 0) { /* 753 */ } }   // :37855/:37859
+      if (flag2) { if (rn(7) === 0) { /* 2198 */ } if (rn(50) === 0) { /* 669 */ } }   // :37863/:37867
+      if (flag12) { if (rn(3) === 0) { /* 2197 */ } rn(6); ri(50, 100); }              // :37871/:37877(Next(6))/:37906
+      if (num9 === 13) { if (rn(2) === 0) { /* 5234 */ } }                             // :37909
     }
-    if (chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) { if (rn(2) === 0) { /* 5234 */ } }
-    else if (chestTile === CHEST2 && num9 === 13) { if (rn(2) === 0) { /* 5234 */ } }
     // ★IIIII99d（2026-08-31）：rainbowStuff 生物群系箱追加 1260（1458 WG.cs:37920-37927）——
     //   `if (SecretSeed.rainbowStuff.Enabled && (num10==1156||1571||1569||1572||4607))
     //   { SetDefaults(1260); Prefix(-1); itemIndex++; }`。位序=21 块残片掷(:37833)/467 块
@@ -5365,7 +5489,14 @@ const snap: SnapFn = (name) => {
                   : lwl === wallVariants[1] ? lantern[1] : lwl === wallVariants[2] ? lantern[2] : lantern[0];
               }
               if (lNum10 >= 0) {
-                const ltInternal = TILE_INTERNAL_BY_SHEET.get(lNum10) ?? LANTERN;
+                // ★IIIII166 勘误（nt8 逐 raw 定罪,seat0 (915,713) LN 分歧根因）：
+                //   表支 lNum10=pd.t 已是 internal 域（ipOf 内部已过 TILE_INTERNAL_BY_SHEET）,
+                //   曾再 get(lNum10) 把 internal 当 sheet 二次映射——internal77(=sheet42 灯笼)
+                //   被再映射成 internal397(=sheet77) → 表支灯笼写错砖型,且近旁 42/34 扫描
+                //   （LANTERN=77）随之漏检 → LN 判定漂移。Default 支 lNum10=42 为 sheet,照旧映射。
+                const ltInternal = isDefArm
+                  ? (TILE_INTERNAL_BY_SHEET.get(lNum10) ?? LANTERN)
+                  : lNum10;
                 if ((__swProcessEnv ?? {}).SW_I101_MARK) (globalThis as { __wvLines?: string[] }).__wvLines?.push(`MARK|LLNT|${x},${cy}|s=${lStyle}`);
                 chTile(st.idx(x, cy), ltInternal, false);
                 chTile(st.idx(x, cy + 1), ltInternal, false);
@@ -5383,8 +5514,9 @@ const snap: SnapFn = (name) => {
                 dgSwitch(x, cy);
               }
             }
-            // ★IIIII160：LLA=灯笼臂明细（x86 W9f 同构;a/g/t/s/ok）
-            if (i179L) mk179L(`DR|LLA|x=${x}|cy=${cy}|a=${isDefArm ? 0 : 1}|g=${gothicRoll}|t=${lNum10}|s=${lStyle}|ok=${placed ? 1 : 0}`);
+            // ★IIIII160：LLA=灯笼臂明细（x86 W9f 同构;a/g/t/s/ok）★IIIII166：t 统一 sheet 域
+            //   （表支 lNum10 为 internal,对数前转回 sheet——与 x86 num10=sheet 可直比）
+            if (i179L) mk179L(`DR|LLA|x=${x}|cy=${cy}|a=${isDefArm ? 0 : 1}|g=${gothicRoll}|t=${isDefArm ? lNum10 : (TILE_DEFS[lNum10]?.vanilla?.sheet ?? lNum10)}|s=${lStyle}|ok=${placed ? 1 : 0}`);
             break;                                            // 两臂同以 break 终结上扫（:131/:134）
           }
         }
@@ -5556,7 +5688,288 @@ const snap: SnapFn = (name) => {
   //   GenVars.DualDungeon_AllowTrapGenerationInDungeon=true/false——窗口内世界
   //   placeTrap 的双地牢界拒门放行（原版窗口覆盖本特征全程;JS 侧世界 placeTrap
   //   只在 TrapsPass（后置 pass）跑,窗口此处开闭即还原原版时序语义）。
+  // ★IIIII170 TRAPS 面逐 raw 重放自校验门（SW_I170=1;dormant;默认关闭零开销）：
+  //   dgTraps 写面前把 tile 态十数组备份,用 x86 原始掷流（globalThis.__swI170Feed=
+  //   x86 Dungeon pass local roll#377449 起,即 seat0 TRAPS|i 相界）驱动 vanilla
+  //   语义模型（DungeonGlobalTraps.Traps + WorldGen.placeTrap type0,cs=1457/1458
+  //   终态 1:1）在【克隆态】上重放,模型写面直接落 st（共享 featOK/gfIsDW 等
+  //   closure 谓词）、结束 .set() 回滚——主流 RNG 零消费、真实 dgTraps 初态不变。
+  //   自校验判据=模型总掷耗恰等 x86 相界掷耗（seat0 TRAPS Δ=3928）;行级 trace 走
+  //   globalThis.__swI170Trace 供探针落盘,与 JS TRP 流逐 attempt 定位首分歧门。
+  //   模型与 JS 已知刻意差异（建模即 vanilla 终态,勿反向"对齐"）：
+  //   ①placeTrap 入口 placeTrap_CanContinue（cs:8879-8881 wall350）——JS 缺;
+  //   ②SolidTile 全项含 !half && slope==0（cs:70642-70660）——JS dgSolid 缺两判项;
+  //   ③锚扫 while 环内逐格 CanContinue（cs:9020-9024/:9030-9034）——JS 缺;
+  //   ④maya 尾厅循环=provider 厅∪climb 厅全序（DC.cs:484-487 dungeonHalls 全序）
+  //     ——JS 只扫 gfPdHalls;climb 厅 JS 无 style 字段（DAsset 缺口,备案）。
+  function i170TrapReplay(): void {
+    const g170 = globalThis as {
+      __swI170Feed?: ArrayLike<number>; __swI113?: (l: string) => void; __swI170Trace?: string[];
+    };
+    const feed = g170.__swI170Feed;
+    if (!feed || feed.length === 0) return;
+    const trace: string[] = (g170.__swI170Trace = []);
+    const SAMP = 4.656612875245797e-10;                                  // 1/(2^31-1)
+    let fp = 0, consumed = 0;
+    const ni = (n: number): number => { consumed++; return Math.trunc((feed[fp++] ?? 0) * SAMP * n); };
+    const nir = (a: number, b: number): number => { consumed++; return (Math.trunc((feed[fp++] ?? 0) * SAMP * (b - a)) + a) | 0; };
+    // ——— 态备份/回滚（TileStore 数组 readonly,内容级换血;模型写面落在 st 本体）———
+    const BK: Array<[Uint8Array | Uint16Array, Uint8Array | Uint16Array]> = [];
+    const arrs: Array<Uint8Array | Uint16Array> = [st.type, st.flags, st.frameX, st.frameY, st.wall, st.liquid, st.liquidType, st.half, st.slope, st.wire];
+    for (const a of arrs) BK.push([a, a.slice()]);
+    const real113 = g170.__swI113;
+    g170.__swI113 = (l: string) => trace.push(`M|CG|${l}`);               // 模型期 featOK 拒因静默入 trace
+    try {
+      const num5 = Math.trunc(8.399999618530273 * (w / 4200) * gfFeatScalar);  // (double)(8.4f*num)
+      const solidV = (x: number, y: number): boolean => {                 // vanilla SolidTile(i,j) 全项（cs:70642-70660）
+        if (!st.inBounds(x, y)) return false;
+        const i = st.idx(x, y);
+        if (!st.flags[i]) return false;
+        if ((st.wire[i] >>> 5) & 1) return false;
+        const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+        if (!genSolidType(st.type[i]) || DG_SOLID_TOP.has(sheet)) return false;
+        if (sheet === 481 || sheet === 482 || sheet === 483) return false; // SetCrackedBrickSolidity(false)（DC:344）
+        if (st.half[i] !== 0 || st.slope[i] !== 0) return false;
+        return true;
+      };
+      const wallV = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
+      const typeV = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
+      const actV = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
+      const crackV = (x: number, y: number): boolean => {                 // tileCracked={481,482,483}（Main.cs:7329-7331）
+        if (!st.inBounds(x, y)) return false;
+        const sheet = TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1;
+        return sheet === 481 || sheet === 482 || sheet === 483;
+      };
+      const canCont = (x: number, y: number): boolean => wallV(x, y) !== 350;  // 窗口期 AllowTrapGenerationInDungeon=true→仅 wall350
+      const nactV = (x: number, y: number): boolean => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0 && ((st.wire[st.idx(x, y)] >>> 5) & 1) === 0;
+      const doorV = (x: number, y: number): boolean => { const t = typeV(x, y); return t === DOOR || t === SPIKE; };  // cs:9051-9056 type∈{10,48}
+      // —— vanilla placeTrap(x2,y2,0)（WorldGen.cs:8872-9137 type0 支）———
+      const placeTrapV = (x2: number, y2: number): boolean => {
+        if (!canCont(x2, y2)) { trace.push(`V|x=${x2}|y=${y2}|st=entry350`); return false; }
+        // shimmer 距离门（cs:8883-8886）：dual 链 Shimmer pass 后置（039），dungeon 时点
+        //   shimmerPosition=Vector2.Zero（WG:6989）且地牢界 L≥200/下界 y≥ws ⇒ 距离恒>100,备案不建模。
+        let num = y2, flag2 = false;
+        while (!solidV(x2, num)) {
+          num++;
+          if (num > h - 10) { trace.push(`V|x=${x2}|y=${y2}|st=down-exh`); return false; }
+          if (!canCont(x2, num)) { trace.push(`V|x=${x2}|y=${y2}|st=down-350`); return false; }
+          if (num >= h - 300) flag2 = true;
+        }
+        num--;
+        for (let a = x2 - 20; a <= x2 + 20; a++) {                        // IsTileNearby(x2,num,70,20)（cs:8812-8828）
+          for (let b = num - 20; b <= num + 20; b++) {
+            if (st.inBounds(a, b) && st.flags[st.idx(a, b)] && st.type[st.idx(a, b)] === TILE_BY_KEY['v_70_mushroom_grass_block']) { trace.push(`V|x=${x2}|y=${y2}|st=mush`); return false; }
+          }
+        }
+        if (wallV(x2, num) === 87) { trace.push(`V|x=${x2}|y=${y2}|st=wall87`); return false; }
+        if (wallV(x2, num) === 350) { trace.push(`V|x=${x2}|y=${y2}|st=wall350`); return false; }
+        const lava = st.inBounds(x2, num) && st.liquid[st.idx(x2, num)] > 0 && st.liquidType[st.idx(x2, num)] === 2;
+        if (!inW(x2, num, 3)) { trace.push(`V|x=${x2}|y=${y2}|st=inw3`); return false; }  // cs:8942
+        if (lava) { trace.push(`V|x=${x2}|y=${y2}|st=lava`); return false; }               // cs:8945（type=0≠3）
+        if (flag2) { trace.push(`V|x=${x2}|y=${y2}|st=flag2`); return false; }             // cs:8948
+        {
+          const NB9: Array<[number, number]> = [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]];
+          let hit: string | null = null;
+          for (const [ox, oy] of NB9) {
+            if (nactV(x2 + ox, num + oy)) { hit = `${ox},${oy}@${x2 + ox},${num + oy}t${typeV(x2 + ox, num + oy)}`; break; }
+          }
+          if (hit !== null) { trace.push(`V|x=${x2}|y=${y2}|st=nact|hit=${hit}`); return false; }
+        }
+        if (actV(x2, num + 1) && (typeV(x2, num + 1) === SPIKE || typeV(x2, num + 1) === TILE_BY_KEY['v_232_wooden_spike'])) { trace.push(`V|x=${x2}|y=${y2}|st=spike`); return false; }
+        {                                                                   // CanGeneratePressurePlateAt（cs:11056-11073）
+          if (!(x2 >= 3 && x2 < w - 3 && num >= 3 && num < h - 3)) { trace.push(`V|x=${x2}|y=${y2}|st=inw3p`); return false; }
+          const fi = st.idx(x2, num + 1);
+          let allowBottom = false;
+          if (st.flags[fi]) {
+            const ft = st.type[fi], fsheet = TILE_DEFS[ft]?.vanilla?.sheet ?? -1;
+            const topSlope = st.slope[fi] === 1 || st.slope[fi] === 2;
+            allowBottom = (genSolidType(ft) || DG_SOLID_TOP.has(fsheet))
+              && (!topSlope || ((TILE_DEFS[ft]?.platform ?? false) && platformProperFrameDg(st.frameX[fi]!)))
+              && !st.half[fi] && ((st.wire[fi] >>> 5) & 1) === 0;           // SolidTileAllowBottomSlope（cs:70698-70714）
+          }
+          if (!allowBottom) { trace.push(`V|x=${x2}|y=${y2}|st=plat-bottom`); return false; }
+          const bs = TILE_DEFS[st.type[fi]]?.vanilla?.sheet ?? -1;
+          if (bs === 138 || bs === 484 || bs === 664 || bs === 665 || (bs >= 711 && bs <= 716)) { trace.push(`V|x=${x2}|y=${y2}|st=boulder`); return false; }
+          if (st.wall[fi] === 350) { trace.push(`V|x=${x2}|y=${y2}|st=plate-w350`); return false; }
+        }
+        let num10 = x2, num11 = num;                                        // case 0（cs:9026 起）
+        num11 -= ni(3);
+        while (!solidV(num10, num11) && !crackV(num10, num11)) {
+          num10--;
+          if (num10 < 0 || !canCont(num10, num11)) { trace.push(`V|x=${x2}|y=${y2}|st=ancL`); return false; }
+        }
+        const num12 = num10;
+        num10 = x2;
+        while (!solidV(num10, num11) && !crackV(num10, num11)) {
+          num10++;
+          if (num10 >= w || !canCont(num10, num11)) { trace.push(`V|x=${x2}|y=${y2}|st=ancR`); return false; }
+        }
+        const num13 = num10;
+        const num14 = x2 - num12, num15 = num13 - x2;
+        let f3 = num14 > 5 && num14 < 50, f4 = num15 > 5 && num15 < 50;
+        if (f3 && !solidV(num12, num11 + 1)) f3 = false;
+        if (f4 && !solidV(num13, num11 + 1)) f4 = false;
+        if (f3 && (doorV(num12, num11) || doorV(num12, num11 + 1))) f3 = false;
+        if (f4 && (doorV(num13, num11) || doorV(num13, num11 + 1))) f4 = false;
+        let num16 = 0, numA = num12;
+        if (f3 && f4) { num16 = 1; numA = num12; if (ni(2) === 0) { numA = num13; num16 = -1; } }
+        else if (f4) { numA = num13; num16 = -1; }
+        else { if (!f3) { trace.push(`V|x=${x2}|y=${y2}|st=no-anchor`); return false; } numA = num12; num16 = 1; }
+        const sheetA = TILE_DEFS[typeV(numA, num11)]?.vanilla?.sheet ?? -1;
+        if (sheetA === 190) { trace.push(`V|x=${x2}|y=${y2}|st=type190`); return false; }
+        if (wallV(numA, num11) === 350) { trace.push(`V|x=${x2}|y=${y2}|st=anc-w350`); return false; }
+        const pStyle = wallV(x2, num) > 0 ? 2 : nir(2, 4);                  // cs:9104-9110
+        chTile(st.idx(x2, num), TILE_BY_KEY['v_135_pressure_plates'], false);
+        st.frameX[st.idx(x2, num)] = 0; st.frameY[st.idx(x2, num)] = pStyle * 18;
+        {                                                                   // KillTile(锚)+裂砖级联（写面镜像 placeTrap0,掷骰换 feed）
+          const ai = st.idx(numA, num11);
+          const ak = TILE_DEFS[st.type[ai]]?.vanilla?.sheet ?? -1;
+          if (ak === 481 || ak === 482 || ak === 483) {
+            const KILL_NB: Array<[number, number, number]> = [[-1, 0, 6], [1, 0, 6], [0, -1, 3], [0, 1, 6], [-1, -1, 6], [1, -1, 6], [-1, 1, 6], [1, 1, 6]];
+            const casc = (cx: number, cy: number): void => {
+              const ci = st.idx(cx, cy);
+              for (const [dx, dy, n16] of KILL_NB) {
+                const nx = cx + dx, ny = cy + dy;
+                if (!st.inBounds(nx, ny)) continue;
+                const ni2 = st.idx(nx, ny);
+                if ((st.flags[ni2] & 1) === 0) continue;
+                if (ni(n16) !== 0) continue;
+                const nt = TILE_DEFS[st.type[ni2]]?.vanilla?.sheet ?? -1;
+                if (nt !== 481 && nt !== 482 && nt !== 483) continue;
+                st.flags[ci] = 0; st.flags[ni2] = 0; st.type[ni2] = 0;
+                casc(nx, ny);
+              }
+            };
+            casc(numA, num11);
+          }
+        }
+        st.flags[st.idx(numA, num11)] = 0;
+        chTile(st.idx(numA, num11), TILE_BY_KEY['v_137_traps'], false);
+        st.frameX[st.idx(numA, num11)] = num16 === 1 ? 18 : 0; st.frameY[st.idx(numA, num11)] = 0;
+        {
+          let wa = x2, wb = num;
+          while (wa !== numA || wb !== num11) {
+            if (st.inBounds(wa, wb)) st.wire[st.idx(wa, wb)] |= 1;
+            if (wa > numA) wa--; if (wa < numA) wa++;
+            if (st.inBounds(wa, wb)) st.wire[st.idx(wa, wb)] |= 1;
+            if (wb > num11) wb--; if (wb < num11) wb++;
+            if (st.inBounds(wa, wb)) st.wire[st.idx(wa, wb)] |= 1;
+          }
+        }
+        trace.push(`P|x2=${x2}|num=${num}|anc=${numA},${num11}|dir=${num16}|dL=${num14}|dR=${num15}`);
+        return true;
+      };
+      let num2 = 0, num4 = 0, att = 0, okN = 0;
+      while (num4 < num5) {
+        num2++; att++;
+        const x = nir(bounds.L, bounds.R);
+        const y = nir(Math.trunc(ws), bounds.B);
+        const d1 = gfIsDW(wallV(x, y));
+        const d2 = d1 && featOK(x, y, 4);
+        const d3 = d2 && !wallIsInStyle(DungeonGenerationStyles.Temple, wallV(x, y));
+        let okT = false;
+        if (d3) okT = placeTrapV(x, y);
+        if (okT) { num2 = 1000; okN++; }
+        if (num2 > 1000) { num4++; num2 = 0; }
+        trace.push(`R|att=${att}|x=${x}|y=${y}|g=${d3 ? 1 : 0}|ok=${okT ? 1 : 0}|c=${consumed}|n4=${num4}|n2=${num2}`);
+      }
+      // —— mayan 尾（cs:523-620）：厅循环=provider∪climb 全序（JS 侧只扫 provider=备案差异）——
+      let tailRolls = -consumed;
+      const num8 = 30 + nir(0, 11);
+      let num9 = num8, hallN = 0, hall10 = 0, roomN = 0, room10 = 0;
+      const feedRng = {
+        nextInt: (n: number) => ni(n),
+        next: () => { consumed++; return (feed[fp++] ?? 0) * SAMP; },
+        int: (a: number, b: number) => nir(a, b + 1),
+        chance: (p: number) => { consumed++; return (feed[fp++] ?? 0) * SAMP < p; },
+        pick: (xs: unknown[]) => xs[ni(xs.length)],
+      } as unknown as typeof rng;
+      const mayanTryV = (tx: number, ty: number): boolean =>
+        !((st.flags[st.idx(tx, ty)] ?? 0) & 1) && wallIsInStyle(DungeonGenerationStyles.Temple, wallV(tx, ty))
+        && mayanTrap(st, feedRng, gs, tx, ty);
+      // ★IIIII170 假设检验臂（SW_I170_ALLCAND=1）：厅/房循环【不做 style10 剪枝】——
+      //   若 seat0 总掷耗由此恰落 3928 ⇒ x86 尾部实际迭代全体 candidate,定罪=style 剪枝差。
+      const allCand = (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I170_ALLCAND === '1');
+      for (const hh of gfPdHalls) {
+        if (!hh.gen || (!allCand && (hh.st !== 10 || hh.gL === undefined)) || (allCand && hh.gL === undefined)) continue;
+        hallN++;
+        if (mayanTryV(nir(hh.gL, hh.gR!), nir(hh.gT!, hh.gB!))) { num9--; if (num9 <= 0) break; }
+      }
+      for (const hl of halls) { hall10++; if (allCand && hl.generated) { hallN++; if (mayanTryV(nir(hl.bounds.L, hl.bounds.R), nir(hl.bounds.T, hl.bounds.B))) { num9--; if (num9 <= 0) break; } } }      // climb 厅计数（style 字段 JS 缺,备案）
+      if (num9 > 0) {
+        for (const rm2 of rooms) {
+          if (!rm2.generated || (!allCand && rm2.st !== 10)) continue;
+          roomN++;
+          if (mayanTryV(nir(rm2.inner.L, rm2.inner.R), nir(rm2.inner.T, rm2.inner.B))) { num9--; if (num9 <= 0) break; }
+        }
+      }
+      let bndN = 0;
+      if (num9 > 0 && _gfSeatProgBounds !== null) {
+        for (let k2 = 0; k2 < gfStyles.length; k2++) {
+          if (gfStyles[k2]!.Style !== 10) continue;
+          const bb = _gfSeatProgBounds[k2]!;
+          let num14 = 1000;
+          while (num9 > 0) { num14--; if (num14 <= 0) break; bndN++; if (mayanTryV(nir(bb.L, bb.R), nir(bb.T, bb.B))) num9--; }
+          break;
+        }
+      }
+      tailRolls += consumed;
+      {
+        const rH: Record<number, number> = {}, pH: Record<number, number> = {}, rR: Record<number, number> = {}, sS: number[] = [];
+        for (const hl of halls) rH[hl.isEntrance ? -1 : 0] = (rH[hl.isEntrance ? -1 : 0] ?? 0) + 1;
+        for (const ph of gfPdHalls) pH[ph.st] = (pH[ph.st] ?? 0) + 1;
+        for (const rm of rooms) rR[rm.st ?? -1] = (rR[rm.st ?? -1] ?? 0) + 1;
+        for (const syy of gfStyles) sS.push(syy.Style);
+        trace.push(`LST|pdHalls=${gfPdHalls.length}|climbHalls=${halls.length}|rooms=${rooms.length}|pdHallStyles=${JSON.stringify(pH)}|roomStyles=${JSON.stringify(rR)}|gfStyles=${JSON.stringify(sS)}|progB=${_gfSeatProgBounds === null ? -1 : _gfSeatProgBounds.length}`);
+      }
+      trace.push(`SUM|num5=${num5}|att=${att}|ok=${okN}|consumed=${consumed}|tail=${tailRolls}|num8=${num8}|hallN=${hallN}|climbHalls=${halls.length}|roomN=${roomN}|bndN=${bndN}|scalar=${gfFeatScalar}`);
+      console.log(`[i170] TRAPS replay s=${instIdx}: ${trace[trace.length - 1]}`);
+      {   // ★IIIII170 态取证：TRAPS|i 时点 seat0 域 typ/wal 快照（经探针回调落盘,x86 #033 对读）
+        const dmp = (globalThis as { __swI170Dump?: (d: { x0: number; y0: number; x1: number; y1: number; w: number; h: number; typ: Uint8Array; wal: Uint8Array }) => void }).__swI170Dump;
+        if (dmp) {
+          const x0 = 0, y0 = 300, x1 = 2100, y1 = 1050, ww = x1 - x0, hh2 = y1 - y0;
+          const typB = BK[0][1] as Uint16Array, walB = BK[4][1] as Uint16Array;   // TRAPS|i 备份=pre 态
+          const typ = new Uint8Array(ww * hh2), wal = new Uint8Array(ww * hh2);
+          for (let yy = y0; yy < y1; yy++) {
+            for (let xx = x0; xx < x1; xx++) {
+              const i = yy * w + xx, o = (yy - y0) * ww + (xx - x0);
+              const t = typB[i]!;
+              typ[o] = t <= 255 ? t : 255; wal[o] = walB[i]! <= 255 ? walB[i]! : 255;
+            }
+          }
+          dmp({ x0, y0, x1, y1, w: ww, h: hh2, typ, wal });
+        }
+      }
+      {   // ★IIIII175：sheet 域 T0 快照（dormant,零掷;仅 __swI175Dump 挂载时落盘）——
+        //   内部 id>255 被 i170 typ 钳 255,裂砖(481-483)分布对拍需 vanilla sheet 域。
+        const dmp175 = (globalThis as { __swI175Dump?: (d: { x0: number; y0: number; w: number; h: number; typ: Uint8Array; act: Uint8Array; wal: Uint8Array }) => void }).__swI175Dump;
+        if (dmp175) {
+          const x0 = 0, y0 = 300, x1 = 2100, y1 = 1050, ww = x1 - x0, hh2 = y1 - y0;
+          const typB = BK[0][1] as Uint16Array, walB = BK[4][1] as Uint16Array, flgB = BK[1][1] as Uint16Array;
+          const typ = new Uint8Array(ww * hh2), act = new Uint8Array(ww * hh2), wal = new Uint8Array(ww * hh2);
+          for (let yy = y0; yy < y1; yy++) {
+            for (let xx = x0; xx < x1; xx++) {
+              const i = yy * w + xx, o = (yy - y0) * ww + (xx - x0);
+              const sh = TILE_DEFS[typB[i]!]?.vanilla?.sheet;
+              typ[o] = sh != null && sh <= 255 ? sh : 255;
+              act[o] = (flgB[i]! & 1) !== 0 ? 1 : 0;
+              wal[o] = walB[i]! <= 255 ? walB[i]! : 255;
+            }
+          }
+          dmp175({ x0, y0, w: ww, h: hh2, typ, act, wal });
+        }
+      }
+    } catch (e170) {
+      console.log(`[i170] replay aborted: ${String(e170)} consumed=${consumed}`);
+    } finally {
+      for (const [a, b] of BK) a.set(b);
+      g170.__swI113 = real113;
+    }
+  }
   function dgTraps(): void {
+    if (typeof process !== 'undefined' && (__swProcessEnv ?? {}).SW_I170 === '1' && instIdx === 0) {
+      try { i170TrapReplay(); } catch (e170x) { console.log(`[i170] gate error ${String(e170x)}`); }
+    }
     dualDungeonTrapWindow.allowTrapGenerationInDungeon = true;
     // ★IIIII114b2（T 同刀·三件套同落）：①配额 gfFeatScalar——C# `(int)((double)(8.4f*num)*
     //   data.globalFeatureScalar)`（DungeonGlobalTraps.cs:31）dual 座≈6.55、普通世界恒 1.0

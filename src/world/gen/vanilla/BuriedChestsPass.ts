@@ -248,6 +248,14 @@ const PRE_CLASS: Record<number, string> = {
   //   照「不可前缀化（零掷,勿加）」名单处置,勿登记。remix 世界 rainbow/vampire 臂
   //   恒关门=零流影响,登记为跨种子保险（同 725/517 先例）。
   1260: 'magic', 900: 'acc',
+  // ★IIIII162：DoErrorWorldFindChestItem 表内可前缀化件登记（PrefixLegacy 七集实扫
+  //   + IsAPrefixableAccessory;CanGetPrefixes 排除表 103 件零命中）。未列出的表项
+  //   （4008/238/2275/5451/3385-3388/4951/4420/3043/2800/3623/4980）不可前缀化 0 掷。
+  3352: 'swords', 2341: 'swords', 4711: 'swords',
+  3262: 'boom', 4818: 'boom', 1825: 'boom',
+  1325: 'spears', 4144: 'spears', 2342: 'spears',
+  3350: 'guns', 4347: 'magic', 1309: 'summons', 4273: 'summons',   // ★池键=summons(复数,同 4281 判例)
+  3334: 'acc', 1863: 'acc', 485: 'acc', 748: 'acc', 1321: 'acc',
 };
 // ---- 主件 Prefix(-1)（尾批 2-C）：四分支头 SetDefaults(num10)+Prefix(-1) 无条件调用
 //   （surface cs:36287 / gold cs:36554 / cave cs:36841 / hell cs:37167）——可前缀化
@@ -374,7 +382,35 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   //   knockBack 2.5f）。900 MoonStone 系 acc 类——acc 池前缀（62-80）无四元乘子恒通过,
   //   照 6165/5010 先例不入 PRE_STATS。
   1260: { d: 45, ua: 40, mana: 20, kb0: false },
+  // ★IIIII162：DoErrorWorldFindChestItem 表内可前缀化件 stats（Item.cs SetDefaults
+  //   逐 case 提取;acc 类 3334/1863/485/748/1321 无四元乘子恒通过不入;其余表项
+  //   4008/238/2275/5451/3385-3388/4951/4420/3043/2800/3623/4980 不在 PrefixLegacy
+  //   七集且非 acc（或 damage>0 但无集合=鞭/杂件类）→ 不可前缀化 0 掷）。
+  3352: { d: 14, ua: 13, mana: 0, kb0: false },    // cs:31969 Anchor?=叶绿?剑族 swords
+  3262: { d: 21, ua: 25, mana: 0, kb0: false },    // cs:30043 回旋镖族 boom（内层 case 3262 d21/kb3.25）
+  4818: { d: 25, ua: 15, mana: 0, kb0: false },    // boom
+  1325: { d: 12, ua: 20, mana: 0, kb0: false },    // spears
+  4144: { d: 17, ua: 25, mana: 0, kb0: false },    // spears
+  3350: { d: 12, ua: 24, mana: 0, kb0: false },    // guns
+  4347: { d: 42, ua: 36, mana: 16, kb0: false },   // magic（DefaultToMagicWeapon(876,36,15f)）
+  1309: { d: 8, ua: 28, mana: 0, kb0: false },     // summon
+  1825: { d: 20, ua: 15, mana: 0, kb0: false },    // boom
+  2341: { d: 16, ua: 22, mana: 0, kb0: false },    // swords（镐/钻族 Drax 形,melee=true）
+  2342: { d: 13, ua: 25, mana: 0, kb0: false },    // spears（锯/斧族 chainsaw 形）
+  4273: { d: 11, ua: 36, mana: 0, kb0: false },    // summon
+  4711: { d: 12, ua: 22, mana: 0, kb0: false },    // swords
 };
+
+// ★IIIII162（1458 cs:1561-1596）：DoErrorWorldFindChestItem 32 元表（errorWorld 埋箱
+//   无主件臂 cc:37009 金支 / cs:37354 中深支的取物池）。switch 无 case 23 → 落
+//   default 4420（表内 23 位直填 4420）。errorWorldBalancedChests（多秘 count≥6）
+//   时返 -1 不掷——本仓单旗标域恒假（照 SecretSeedDoEndsPass ewAdjust 单旗标恒等
+//   判例），Next(32) 恒耗。
+const EW_CHEST_ITEMS: readonly number[] = [
+  4008, 238, 2275, 3352, 3262, 3334, 4818, 1325, 4144, 3350, 4347, 1309, 1863,
+  485, 748, 1825, 1321, 5451, 3385, 3386, 3387, 3388, 4951, 4420, 3043, 2341,
+  2342, 2800, 3623, 4980, 4273, 4711,
+];
 const __fr = Math.fround;
 /** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入） */
 function netRoundEq(base: number, mult: number): boolean {
@@ -430,6 +466,12 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   const push = (v: number, stack = 1) => {
     const id = vid(v);
     if (id >= 0 && out.length < 40) out.push({ id, stack });
+  };
+  // ★IIIII162：同槽覆写语义（vanilla 主件坑位 chest.item[itemIndex] 在 itemIndex++
+  //   前可被 vampireSeed/errorWorld 臂 SetDefaults 覆写——非追加）。
+  const replaceLast = (v: number) => {
+    const id = vid(v);
+    if (id >= 0 && out.length > 0) out[out.length - 1] = { id, stack: 1 };
   };
   const pick = (arr: number[]) => arr[rng.int(0, arr.length - 1)];
 
@@ -583,6 +625,26 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       const m = pick([49, 50, 53, 54, 5011, 975]);
       push(m);
       prefixRolls(rng, m);   // cs:36563+：金箱主件 SetDefaults+Prefix(-1)（50 魔镜 0 掷）
+      // ★IIIII162（1458 cs:37002-37017）：金支无主件坑位双臂——**同槽覆写**（itemIndex
+      //   在臂后 ++，vanilla SetDefaults 直接覆写 chest.item[itemIndex]）：
+      //   ①vampireSeed 臂 Next(10)==1 → Next(2) 1800/900 + Prefix(-1)（1800 钩爪不可
+      //     前缀化 0 掷,900=acc 耗掷）——iamerror 零路径,跨种子保险（照 725/517 判例）；
+      //   ②errorWorld 臂 Next(ewAdjust(3.0))==0（单旗标域=Next(3)）→ DoErrorWorld-
+      //     FindChestItem（cs:1561,Next(32) 表,balanced 多秘域返 -1 不掷——本仓单旗标
+      //     域恒真掷）→ num>0 时 SetDefaults 覆写同槽 + Prefix(-1)。iamerror 活面：
+      //     金支无主件箱（BuriedChests/SurfaceChests 金档）每箱恒 +1 门掷。
+      if (gs.seedFlags.vampireSeed && rng.int(0, 9) === 1) {
+        const v = rng.int(0, 1) === 0 ? 1800 : 900;
+        replaceLast(v);
+        prefixRolls(rng, v);
+      }
+      if (gs.seedFlags.errorWorld && rng.int(0, 2) === 0) {
+        const num21 = EW_CHEST_ITEMS[rng.nextInt(32)]!;
+        if (num21 > 0) {
+          replaceLast(num21);
+          prefixRolls(rng, num21);   // num<=0（仅 balanced 多秘域）时 vanilla 对空槽 Prefix=0 掷,此处同构零掷
+        }
+      }
       if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
       else if (rng.int(0, 19) === 0) { push(930); push(931, rng.nextInt(26) + 25); } // 1/20 信号枪+闪光弹 cs:36685 Next(26)+25
     }
@@ -664,7 +726,27 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       else if (rng.int(0, 14) === 0) push(997);
       else {
         if (num25 === 6) { push(930); push(931, rng.nextInt(26) + 25); }   // cs:36977 Next(26)+25
-        else { const m = [49, 50, 53, 54, 5011, 975][num25]!; push(m); prefixRolls(rng, m); }
+        else {
+          const m = [49, 50, 53, 54, 5011, 975][num25]!; push(m); prefixRolls(rng, m);
+          // ★IIIII162（1458 cs:37337-37356）：中深支无主件坑位双臂（num25∈0..5 才达,
+          //   930 支整跳；同槽覆写,itemIndex 在外层 ++）——
+          //   ①vampireSeed 臂 Next(10)==0（注意:金支是 ==1,两支比较子不同勿互搬）
+          //     → Next(2) 1800/900 + Prefix；
+          //   ②errorWorld 臂 Next(ewAdjust(3.0))==0 → DoErrorWorldFindChestItem(Next(32))
+          //     → num>0 覆写同槽 + Prefix(-1)。iamerror 活面：洞穴档无主件箱每箱 +1 门掷。
+          if (gs.seedFlags.vampireSeed && rng.int(0, 9) === 0) {
+            const v = rng.int(0, 1) === 0 ? 1800 : 900;
+            replaceLast(v);
+            prefixRolls(rng, v);
+          }
+          if (gs.seedFlags.errorWorld && rng.int(0, 2) === 0) {
+            const num21 = EW_CHEST_ITEMS[rng.nextInt(32)]!;
+            if (num21 > 0) {
+              replaceLast(num21);
+              prefixRolls(rng, num21);
+            }
+          }
+        }
       }
     }
     // ★JJJJ：蘑菇箱 flag7（cs:37007-37022）——主件 if/else 【之外】（双路径共享，
@@ -1350,6 +1432,13 @@ function placeBuriedChestInner(
   //   天空箱坠到地表土墙带走此门——(532,234) 金标 sty0/木制回旋镖 loot vs 本仓
   //   sty12/天空 loot 帧债实证）；邻墙 244 → flag6 天空主题。零掷（getGood 分支
   //   普通 seed 不达）。
+  //   ★IIIII162（1458 cs:36523-36539）：本门读**洗牌后** num9（cs:36371 errorWorld
+  //   洗牌 Next(2)==0 → num9=6/随机）——洗牌命中后 num9≠12 ⇒ vanilla flag6 恒假、
+  //   flag(wooden) 恒假 ⇒ loot 走金/洞穴档且天空三连（5629/4429/5528）整跳。JS
+  //   caller（LivingTreePass 密室房/runSurfaceChestsPass）按洗牌前 wall 扫描预挂
+  //   flags.sky=true，洗牌改写 style 后此门不发火 ⇒ 预挂旗残留 → loot 误走地表档
+  //   +3~4 掷（iamerror #042 房1 实锤：x86 箱 16 掷金支 vs JS 24 掷地表支）。故
+  //   style≠12（洗牌后）时必须清 flags.sky——vanilla flag6 只能由本门 else 支置位。
   if (tile === CHEST && style === 12) {
     if (st.wall[st.idx(i - 1, gy - 1)] !== 244) {
       style = 0;
@@ -1359,6 +1448,8 @@ function placeBuriedChestInner(
       flags.sky = true;
       if (ftwChestDie() === 0) ftwTake52();   // ★IIIII99e cs:36578-36580（天空降档 else 支,主件仍可被 52 覆写）
     }
+  } else if (flags.sky) {
+    flags.sky = false;   // ★IIIII162：洗牌命中（style 12→6/随机）后 flag6 恒假（cs:36523 num9==12 门）
   }
   // ★IIIII99e：水(chestTileType21&&num9==17, cs:36562-36564) 与蘑菇(num9==32,
   //   cs:36585-36587) 两门的 FTW 恒掷——C# 位于天空降档块之后、IsDungeon 判定之前。

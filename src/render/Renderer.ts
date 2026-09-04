@@ -2965,9 +2965,10 @@ export class Renderer {
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
-    // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface
+    // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface + remix
     renderEnv.wind = world.weather?.windSpeedCurrent ?? 0;
     renderEnv.worldSurface = world.groundLevel;
+    renderEnv.remix = !!world.seedFlags?.remix;   // DoesWindBlowAtThisHeight 翻转
     const mainCtx = this.ctx;
     let ctx = mainCtx;   // 世界层切换期指向 worldCtx（光照分层，见 beginWorldLayer）
     const viewW = this.canvas.width, viewH = this.canvas.height;
@@ -5576,6 +5577,7 @@ export class Renderer {
       timeForVisualEffects: visEffectFrames(),
       dayTime: world.clock.isDay,
       worldSurface: world.groundLevel,
+      remix: !!world.seedFlags?.remix,   // Main.remixWorld（风筝风场门 DoesWindBlowAtThisHeight 翻转）
       windForVisuals: world.weather?.windSpeedCurrent ?? 0,
       cloudAlpha: world.weather?.cloudAlpha ?? 0,
       playerCx: this.mainPlayer?.cx ?? 0,

@@ -118,6 +118,26 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   4899: { slot: 1, dmg: 0.10 },         // 神圣面具(远古)
   5524: { slot: 1, dmg: 0.16 },         // 绿藻头饰
   5068: { slot: 1, dmg: 0.05 },         // Flinx 皮大衣
+
+  // ---- ★armorStat 甲件 minionDamage 面（2026-09-04 死键批收偿）——vanilla-accfx.json
+  //  提取器不覆盖 minionDamage 模式（本表头注）,这些常规甲件的召唤伤加算面此前无处
+  //  承载=缺;非召唤面（伤/暴/速/移速）仍走 accfx 甲件环（Player.ts armorStat,若本表
+  //  与 accfx 行同 vid 需字段互斥——1834 move 为先例）。行号全 1457 GrantArmorBenefits
+  //  if-chain 实读,件名 = ItemID.cs 常量: ----
+  403:  { dmg: 0.08 },                  // 精金胸甲 AdamantiteBreastplate（:13567 case,minionDamage+0.08）
+  552:  { dmg: 0.07 },                  // 神圣护腿 HallowedGreaves（:13713 case 同 4901,minionDamage+0.07）
+  4901: { dmg: 0.07 },                  // 神圣护腿·远古 AncientHallowedGreaves（:13713 同行）
+  1004: { dmg: 0.05 },                  // 叶绿板甲胸 ChlorophytePlateMail（:13762 case,minionDamage+0.05 @13767）
+  1208: { dmg: 0.03 },                  // 钯金胸甲 PalladiumBreastplate（:13597 case,minionDamage+0.03）
+  1209: { dmg: 0.02 },                  // 钯金护腿 PalladiumLeggings（:13607 case,minionDamage+0.02）
+  1214: { dmg: 0.08 },                  // 山铜护腿 OrichalcumLeggings（:13639 case,minionDamage+0.08）
+  1218: { dmg: 0.04 },                  // 钛金胸甲 TitaniumBreastplate（:13664 case,minionDamage+0.04）
+  1219: { dmg: 0.03 },                  // 钛金护腿 TitaniumLeggings（:13674 case,minionDamage+0.03）
+  792:  { dmg: 0.03 },                  // 猩红头盔 CrimtaneHelmet（:13470 case 三件共支,minionDamage+0.03 @13475）
+  793:  { dmg: 0.03 },                  // 猩红胸甲（:13470 同支）
+  794:  { dmg: 0.03 },                  // 猩红护腿（:13470 同支）
+  375:  { dmg: 0.03 },                  // 钴护腿 CobaltLeggings（:13511 case,minionDamage+0.03 @13516）
+  379:  { dmg: 0.07 },                  // 秘银链甲 MythrilChainmail（:13534 case,minionDamage+0.07 @13539）
 };
 
 /** 套装奖励中的召唤系条目（Player.cs:15905-16167；槽序键同 ARMOR_SET_BONUSES） */

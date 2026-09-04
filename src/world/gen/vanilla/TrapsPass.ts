@@ -1912,15 +1912,22 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
       } else if (yy === sandTop - pocketH) {                          // 底行：ClearTile 后 397/396
         const above = st.idx(xx, yy - 1);
         const hard = flag && st.flags[above] !== 0 && vanGenSolidType(st.type[above]!);
-        st.setTileSilent(xx, yy, hard ? HARDSAND : SANDSTONE);
+        // ★IIIII169·C1（R3）：vanilla 裸写族（cs:35996-36006 ClearTile+active+type=397/396）
+        // 帧不动——setTileSilent 会反向清帧（frameX/Y=0）→ 改 st.type/st.flags 直写保帧
+        st.type[ii] = hard ? HARDSAND : SANDSTONE;
+        st.flags[ii] = 1;
         st.half[ii] = 0; st.slope[ii] = 0;
       } else if (dx === -pocketW - 1 || dx === pocketW + 1) {         // 侧列：空补砂岩；实心清坡/半砖
         if (!flag) {
-          st.setTileSilent(xx, yy, SANDSTONE);
+          // ★IIIII169·C1（R3）：cs:36008-36012 ClearTile+active+type=396 裸写保帧
+          st.type[ii] = SANDSTONE;
+          st.flags[ii] = 1;
           st.half[ii] = 0; st.slope[ii] = 0;
         } else { st.slope[ii] = 0; st.half[ii] = 0; }
       } else {                                                        // 内部：纯沙
-        st.setTileSilent(xx, yy, SAND);
+        // ★IIIII169·C1（R3）：cs:36014-36017 ClearTile+active+type=53 裸写保帧
+        st.type[ii] = SAND;
+        st.flags[ii] = 1;
         st.half[ii] = 0; st.slope[ii] = 0;
       }
     }

@@ -1,7 +1,7 @@
 // 真实世界门口几何离线重放:从 debug-report 的 areaCamera 网格重建 TileStore,
 // 在向导实测出生点跑真 TownNPC.fixedUpdate 流水线,观察开门分支为何不触发。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { TILE } from '../src/core/constants';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
@@ -28,9 +28,14 @@ let logGateAll: Array<Record<string, unknown>> = [];
   (g_stub as Record<string, unknown>).behavioLog = (k: string, dd: unknown) => { if (k === 'npcDoor') logNpcDoor.push({ ...(dd as Record<string, unknown>) }); else logGateAll.push({ k, ...(dd as Record<string, unknown>) }); };
   g_stub.world.store = g_stub.world.store;
 
-describe('door 重放', () => {
+// 一次性诊断重放：夹具 = npc-door 调试探针（debug-report areaCamera 网格导出）落在
+// /tmp 的临时产物，不入库——缺夹具时条件跳过（_ 前缀诊断测试不许因环境缺文件常红；
+// 重跑对应探针生成 cam-grid.json 后本套件恢复常绿）。
+const CAM_GRID_PATH = '/tmp/fx/cam-grid.json';
+
+describe.skipIf(!existsSync(CAM_GRID_PATH))('door 重放', () => {
   it('report 几何回放', () => {
-    const camGrid: Record<string, number[]> = JSON.parse(readFileSync('/tmp/fx/cam-grid.json', 'utf8'));
+    const camGrid: Record<string, number[]> = JSON.parse(readFileSync(CAM_GRID_PATH, 'utf8'));
     const X0 = 4078, Y0 = 427;
     const st = new TileStore(8400, 2400);
     // ★sheet 域 → 内部 id 域换算(本批核心教训的又一次现身)

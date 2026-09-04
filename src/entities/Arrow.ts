@@ -7240,6 +7240,11 @@ export class Arrow extends Entity {
     //   nail93 position+=velocity 等）为独立 position 写,不走 UpdatePosition→不阻尼,
     //   本仓对应位同样保持全速（flare 原文 wet 时 /2 为型别特支,与通用阻尼异构,
     //   维持"本仓 wet 未建模恒全速"既案登记,未随本批扩面）。
+    // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 `oldPosition = position`
+    //  位序 = AI 后/HandleMovement 前——本行即 UpdatePosition 等效积分位,每子步刷新;
+    //  thornChain/630 载体早退支 old≡新位 = 原版零位移拍 :19974 门不达同相）——
+    //  中央压板扫描新旧位判定消费（Collision.cs:3346-3353/:3356）
+    this.oldX = this.x; this.oldY = this.y;
     if (!this.thornChain && !(this.projId === 630 && this.ph630Ctl)) {
       const dragF = projWaterDragFactor(this);
       this.x += this.vx * dragF;

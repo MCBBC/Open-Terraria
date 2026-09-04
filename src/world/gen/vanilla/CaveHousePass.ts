@@ -476,27 +476,43 @@ export function placeFurniture(st: TileStore, rng: RNG, key: string, x: number, 
       // ★AAAAAA：cs:44982-44987 num4=style/27*108 为 **frameX** 基、num5=style%27*72
       //   为 **frameY** 基——曾两基转置（s242 48 格帧债）。
       return placeWallArt(st, x - 2, y - 2, 6, 4, t, (dx) => Math.floor(style / 27) * 108 + dx * 18, (dy) => (style % 27) * 72 + dy * 18);
-    case 34: {                      // PlaceChand(cs:52753)：(x-1,y) 3×3 吊挂；门=九格 !active
+    case 34: {                      // PlaceChand(cs:53189)：(x-1,y) 3×3 吊挂；门=九格 !active
       //   + (x,y-1) nactive && tileSolid && !tileSolidTop——【无下方承地门】(吊灯
       //   悬顶),曾误走 placeFloorObject 的 below 检查 → 房内吊灯全灭(room1 实锤)
-      if (!st.inBounds(x, y - 1) || !solid2(st, x, y - 1) || HOUSE_SOLID_TOP.has(sheetOf(st, x, y - 1))) return false;
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = 0; dy < 3; dy++) {
-          if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)] !== 0) return false;
+      // ★IIIII169·C3（R5）两段化：vanilla=HouseBuilder.cs:455-465 case1「PlaceTile(34,Next(6))
+      //   后【不论成败】九格 frameX += 54（原始 +=,含幽灵/失活格 stale 帧）」——旧 JS 把
+      //   +54 烘进 setTileSilent 且门失败整臂早退 ⇒ 活格/混合格域从不落 +54（x86 终态
+      //   t321 ghost f(54,0) 两簇实证）。两段:①门→PlaceChand 本体写面;②无条件原始 +=54。
+      //   ★红线=掷面零改动:style 掷仍在调用位 Next(6),genSquareTileFrame 仍仅成功支派发。
+      let chandOK = st.inBounds(x, y - 1) && solid2(st, x, y - 1) && !HOUSE_SOLID_TOP.has(sheetOf(st, x, y - 1));
+      if (chandOK) {
+        for (let dx = -1; dx <= 1 && chandOK; dx++) {
+          for (let dy = 0; dy < 3; dy++) {
+            if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)] !== 0) { chandOK = false; break; }
+          }
         }
       }
+      if (chandOK) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = 0; dy < 3; dy++) {
+            // ①PlaceChand 本体帧（cs:53210-53255:num2=style/36*108 + dx*18 / num3=style*54+dy*18;
+            //   num2>=108 的 num3 修正仅 style≥36 可达,Next(6) 值域 0..5 不可达）
+            st.setTileSilent(x + dx, y + dy, t, Math.floor(style / 36) * 108 + (dx + 1) * 18, style * 54 + dy * 18);
+          }
+        }
+        regHouseObj(st, x - 1, y, 3, 3, 'chand');
+        // ★IIIIIII：PlaceTile(34) 成功尾 SquareTileFrame 九格派发（FFF ③ 落刀；
+        //   PlaceChand 成功 → cs:60748 尾派发，中心=(x,y)）
+        genSquareTileFrame(st, rng, x, y);
+      }
+      // ②HouseBuilder.cs:461-465：PlaceTile 后【不论成败】九格 frameX += 54（原始 +=,
+      //   成败皆达;幽灵格 stale 帧+54 = x86 终态 f(54,0) 的机制）
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = 0; dy < 3; dy++) {
-          // ★AAAAAA：HouseBuilder.cs:459-465 PlaceTile(34) 后对九格 frameX += 54
-          //   （洞穴小屋吊灯专用列偏移——曾漏，s34 297 格帧债唯一源）。
-          st.setTileSilent(x + dx, y + dy, t, Math.floor(style / 36) * 108 + (dx + 1) * 18 + 54, style * 54 + dy * 18);
+          if (st.inBounds(x + dx, y + dy)) st.frameX[st.idx(x + dx, y + dy)] += 54;
         }
       }
-      regHouseObj(st, x - 1, y, 3, 3, 'chand');
-      // ★IIIIIII：PlaceTile(34) 成功尾 SquareTileFrame 九格派发（FFF ③ 落刀；
-      //   PlaceChand 成功 → cs:60748 尾派发，中心=(x,y)）
-      genSquareTileFrame(st, rng, x, y);
-      return true;
+      return chandOK;
     }
     case 14: case 26: case 86: case 87: case 88: case 89: case 114: case 187: case 215: case 217: case 218:
     case 377: case 469:             // Place3x2(cs:52097)：(x-1,y-1) 3×2，下方逐列 SolidTile2

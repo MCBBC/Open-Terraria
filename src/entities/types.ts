@@ -139,8 +139,11 @@ export interface GameHooks {
   breakTile?(x: number, y: number): void;
   /** 仙人掌支撑复查+整株断根(CheckCactus :54132 级联)——沙落/邻格变化后触发 */
   fellCactus?(x: number, y: number): void;
-  /** 敌人死亡 */
-  onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
+  /** 敌人死亡。opts.petrifyBypassInteractionGate（H2-2）：624 侏儒石化路径——
+   *  原文不经 NPCLoot 交互门直记旗杀（NPC.cs:56456-56463）且不写
+   *  lastCreatureHit/不调 NotifyNPCKilled */
+  onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy,
+    opts?: { petrifyBypassInteractionGate?: boolean }): void;
   /** 多格 framed 件运行期裸写（TileObject.Place TileObject.cs:94-110 语义：写循环期
    *  抑制 DECOR 逐格完整性裁决,全格写完后在锚点做一次 SquareTileFrame 级联
    *  （PlaceObject WorldGen.cs:51886-51888 尾）。Game 实现 = _decorPlaceBuilding 窗
@@ -161,6 +164,9 @@ export interface GameHooks {
   /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。
    *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝 */
   spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
+  /** WorldGen.CheckAchievement_RealEstateAndTownSlimes（WorldGen.cs:5581）——镇民
+   *  史莱姆/Transform 族实体侧触发面（微光 4986 解锁等）回调 Game 实现 */
+  checkAchievementRealEstateAndTownSlimes?: () => void;
   /** 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):冷却门+生成 1 颗 723 法力星(ai2=1 落地掉 4143) */
   tryManaCloakStarOnMagicHit?(x: number, y: number): void;
   /** MP：他人掉落（傀儡）被本端【整堆】拾取后上报 take（op1）——拥有端移除真身。

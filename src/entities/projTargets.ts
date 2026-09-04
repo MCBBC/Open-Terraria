@@ -42,6 +42,11 @@ export function hitTownNpcs(
   projId = 0,
   /** 同 hitPlayer 的 Colliding 自定义判定通道（2026-08-31 双件批）——缺省 AABB */
   collide?: (n: { x: number; y: number; w: number; h: number }) => boolean,
+  /** 击杀归因（NPCKillAttempt 语义——Projectile.cs:13702-13706 `attempt.DidNPCDie()`
+   *  → Main.player[owner].OnKillNPC(ref attempt, this)）。本次 hurt 落地且该 NPC
+   *  当场死亡（hurt 内 hp≤0 → dead=true 同步置位）时回调,消费端 = 墓碑弹杀镇民
+   *  成就 36 GRAVE_MISTAKE（Player.OnKillNPC Player.cs:20623-20636） */
+  onKill?: (n: { vanillaId?: number }) => void,
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -66,7 +71,10 @@ export function hitTownNpcs(
       if (!doll && projId !== 318) continue;
     }
     const kb = kbx !== 0 ? kbx : Math.sign(n.x + n.w / 2 - (self.x + self.w / 2)) * 2 || 1;
-    if (n.hurt(dmg, kb, 0, game)) any = true;
+    if (n.hurt(dmg, kb, 0, game)) {
+      if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
+      any = true;
+    }
   }
   return any;
 }

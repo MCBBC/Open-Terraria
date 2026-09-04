@@ -262,8 +262,15 @@ describe('R25-⑦ HarpyCharm 音效段', () => {
     expect(phoenix[0].name).toBe('Item_20');          // flag=6181 → SoundID.Item20
   });
 
-  it('两 wav 在盘', () => {
-    expect(readFileSync(join(GAME, 'public/sounds/Item_39.wav')).byteLength).toBeGreaterThan(0);
-    expect(readFileSync(join(GAME, 'public/sounds/Item_20.wav')).byteLength).toBeGreaterThan(0);
+  // ★重产（2026-09-04）：音效资产管线整体 wav→opus/mp3 迁移（盘上 0 个 .wav、
+  //   863 对 opus+mp3），Sfx 解析序改为 .opus 主 → .mp3 回退（src/core/Sfx.ts
+  //   ensureBufferAsync 双格式回退段）——本仓消费链吃双格式，非资产缺口
+  //   （asset-gap-report.md 原版音全量在库，无需登记）。oracle 改锁双格式在盘。
+  it('两轨资产在盘（Sfx 双格式解析序 opus→mp3 对应双格式落盘）', () => {
+    for (const name of ['Item_39', 'Item_20']) {
+      for (const ext of ['opus', 'mp3'] as const) {
+        expect(readFileSync(join(GAME, `public/sounds/${name}.${ext}`)).byteLength).toBeGreaterThan(0);
+      }
+    }
   });
 });

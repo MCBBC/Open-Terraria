@@ -155,3 +155,10 @@ const FX_BY_IID = (() => {
 export function accFxOfInternal(id: number): AccFx | null {
   return FX_BY_IID.get(id) ?? null;
 }
+
+/** vid 直查（json 数值面,不含 BEHAVIOR_FX 行为旗）——甲件主属性环用
+ *  （Player.ts armorStat:盔甲三件 GrantArmorBenefits if-chain 逐件消费;
+ *  2026-09-04 死键批收偿,此前 accfx 消费环只扫配饰槽 3+,甲件面全死键） */
+export function accFxJsonOfVid(vid: number): AccFx | null {
+  return vid >= 0 ? FX[String(vid)] ?? null : null;
+}
