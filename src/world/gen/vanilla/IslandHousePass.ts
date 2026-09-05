@@ -12,6 +12,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest } from './BuriedChestsPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
 import { placeFurn } from './DungeonPass';
 import { growPalmTree } from './TreePass';
 
@@ -70,6 +71,7 @@ export function runIslandHousePass(
 ): void {
   let houseCount = 0;
   for (const isl of gs.floatingIslands) {
+    (globalThis as { __swIhIsland?: (x: number, y: number, lake: number, sty: number) => void }).__swIhIsland?.(isl.x, isl.y, isl.isLake ? 1 : 0, isl.style); // ★IIIII187 取证钩
     // cs:17983:skyLake 不调用 IslandHouse,天然不消耗计数
     if (isl.isLake) continue;
     // cs:79830-79841 早退的屋整栋放弃且不消耗 skyIslandHouseCount(cs:80022 的
@@ -93,7 +95,10 @@ function islandHouse(
     for (let l = j - 30; l <= j + 30; l++) {
       if (!st.inBounds(k, l)) continue;
       const wl = st.wall[st.idx(k, l)];
-      if ((wl >= 7 && wl <= 9) || (wl >= 94 && wl <= 99) || wl === 87 || wl === 3 || wl === 83) return false;
+      if ((wl >= 7 && wl <= 9) || (wl >= 94 && wl <= 99) || wl === 87 || wl === 3 || wl === 83) {
+        (globalThis as { __swIhAbort?: (x: number, y: number, wl: number) => void }).__swIhAbort?.(i, j, wl); // ★IIIII187 取证钩
+        return false;
+      }
     }
   }
   const dir = rng.next() < 0.5 ? -1 : 1;
@@ -112,16 +117,25 @@ function islandHouse(
   // type∉{192,191,384}(生命树叶/生命木/红木叶族)"的首行,取其上一格;
   // 不命中 floorY 保持传入 j(不是继续外推)。旧实现只看首个活性格,会把
   // 无墙的云壳(189)当楼层,屋底落到云壳表面而非有墙土芯(I3)。
-  // 注:cs:79853-79856 的 j>worldSurface 分支对浮空岛恒走 else 扫描,不另移植
+  // ★IIIII187（iamerror #69 定罪修复）：cs:79853-79856 的 `j>worldSurface →
+  //   val.Y=j-5` 分支【必须移植】——errorWorld 深岛重掷臂（cs:13108-13111）把
+  //   3/4 的岛沉入 [ws+50, UnderworldLayer-50)（本种 7 岛中 6 座 y≥489>337）,
+  //   j>worldSurface 恒真 ⇒ vanilla 直接 val.Y=j-5 不扫描;旧注「对浮空岛恒走
+  //   else 扫描」仅对天上岛成立。漏此支 ⇒ JS 走扫描找错楼层（屋 1152:vanilla
+  //   val.Y=911 vs JS 902）→ 全屋/箱/桌椅整体位移 → #69 全域 8 通道错位。
   let floorY = j;
   const probeX = i + (halfW + 2) * dir;
-  for (let y = j - 15; y < j + 30; y++) {
-    if (!st.inBounds(probeX, y)) continue;
-    const ti = st.idx(probeX, y);
-    if (st.wall[ti] > 0 && st.flags[ti] && solidTile(st, probeX, y)
-      && st.type[ti] !== LEAF && st.type[ti] !== LIVINGWOOD && st.type[ti] !== MAHOGANY_LEAF) {
-      floorY = y - 1;
-      break;
+  if (j > gs.worldSurface) {
+    floorY = j - 5;
+  } else {
+    for (let y = j - 15; y < j + 30; y++) {
+      if (!st.inBounds(probeX, y)) continue;
+      const ti = st.idx(probeX, y);
+      if (st.wall[ti] > 0 && st.flags[ti] && solidTile(st, probeX, y)
+        && st.type[ti] !== LEAF && st.type[ti] !== LIVINGWOOD && st.type[ti] !== MAHOGANY_LEAF) {
+        floorY = y - 1;
+        break;
+      }
     }
   }
   // 外壳(cs:79875-79890):整块实心日光板+清墙,仅顶行两角跳过。
@@ -186,6 +200,9 @@ function islandHouse(
   // 零掷直接 return false——不移植。PlaceDoor(cs:31938-31949)护栏:nactive+
   // tileSolid(j'-2=floorY-3) && SolidTile(j'+2=floorY+1);过护栏才逐行
   // 掷变体放门(顶行在下:floorY-2/−1/0,frameY 486/504/522)。
+  // ★IIIII179：PlaceTile(doorX,floorY,10,style 9)（cs:79949）受理序预清（cs:59966）——
+  //  门洞清空(ClearTile 保 type)后顶格惰性残型归零;分支 A 判定前=序言位,分支败时预清外显。
+  placeTilePrologueClear(st, doorX, floorY);
   const dGate = (dy: number) => st.inBounds(doorX, floorY + dy) && st.flags[st.idx(doorX, floorY + dy)] === 0;
   const solidTileAt = (dy: number): boolean => {
     if (!st.inBounds(doorX, floorY + dy)) return false;
@@ -197,9 +214,16 @@ function islandHouse(
     const guard3 = st.flags[ti3] === 1 && st.half[ti3] === 0 && !!TILE_DEFS[st.type[ti3]]?.solid;
     if (guard3 && solidTile(st, doorX, floorY + 1)) {
       const doorStyle = remixArm ? (crimsonArm ? 5 : 38) : 9;   // ★IIIII186 cs:80500-80508
+      // ★IIIII186-n3b（帧域 N3-b 定谳批）：PlaceDoor(cs:32070-32072) 帧公式=页展开
+      //   num=style/36、num2=style%36 → frameX=54*num+Next(3)*18、frameY=54*num2+row*18。
+      //   上一行 style 38（remix 腐化臂）曾直写 54*38=2052（漏 %36）→ fx 漏 54*页位移
+      //   → finalize 帧净化按越表清零 ⇒ remix (517,107)/(2439,106) 双门 JS(0,0) vs
+      //   x86 fx 54/72/90 + fy 108/126/144（=style38 页1 fx54*1、页内 num2=2）。
+      //   style 5/9（<36）两支不受影响（页 0 时两式恒等）。
       for (let dy = 0; dy < 3; dy++) {
         const variant = rng.int(0, 2); // PlaceDoor 每行独立 genRand.Next(3)
-        st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED, variant * 18, 54 * doorStyle + dy * 18);
+        st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED,
+          54 * Math.floor(doorStyle / 36) + variant * 18, 54 * (doorStyle % 36) + dy * 18);
       }
       // ★QQQQQ（m20260811 #69 定谳）：case10 成功支尾 SquareTileFrame(doorX,floorY)
       //   （cs:59895/59902）——3×3 TileFrame 头对非活跃格清 halfBrick/slope/块漆
@@ -384,6 +408,9 @@ function tileActiveAt(st: TileStore, x: number, y: number): boolean {
  *  （furnitureStyleBase sheet15 竖排 40 步；朝向翻转 +18 由调用方追加）。
  *  ★IIIII186 补 style 参（remix 椅 s8/s38,cs:80592-80603）。 */
 function placeChairD(st: TileStore, x: number, anchorY: number, chair: number, style = 10): boolean {
+  // ★IIIII179：PlaceTile(x,anchorY,15)→case15→Place1x2（cs:46665）受理序预清（cs:59966）
+  //  ——锚格(椅底格)不查净空,预清外显即椅位残型归零。
+  placeTilePrologueClear(st, x, anchorY);
   // SolidTile2（cs:70497）：active && tileSolid && slope==0 && !halfBrick
   if (!st.inBounds(x, anchorY + 1)) return false;
   const bi = st.idx(x, anchorY + 1);

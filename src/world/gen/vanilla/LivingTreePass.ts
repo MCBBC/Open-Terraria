@@ -38,8 +38,11 @@ import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';
 // ★YYYYYY（2026-08-23）：Check3x2 清除环 KillTile 头门（cs:63579）——HalfBrickPass 1:1 实现
 import { checkTileBreakability } from './HalfBrickPass';
+// ★IIIII202：dualDungeons 三门消费面（潜在地牢界域登记表,Dunes 头装配后绪）
+import { intersectsAnyPotentialDungeonBounds, dualDungeonState } from './DungeonStyles1457';
 
 /** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
 const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
@@ -317,6 +320,10 @@ function deactivate(st: TileStore, x: number, y: number): void {
  *  ★AAAAAA：PlaceTile 成功尾 SquareTileFrame（cs:60281）——平台连接码写 frameX
  *  （引擎 framePlatformSweep；曾缺 = s19 帧债活木树支）。 */
 function placePlatform(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+  // ★IIIII179：PlaceTile(x,y,19,style)（cs:28312/28741/29063/29103/33232）受理序预清
+  //  （cs:59966）——19 非实心→析取恒过;19∉液体草植/火把/drip 集⇒惰性即清。序言位在
+  //  case19 写型前;受理则覆写,TileObject 门拒时外显。
+  placeTilePrologueClear(st, x, y);
   if (!st.inBounds(x, y)) return;
   st.setTileSilent(x, y, PLATFORM, 0, style * 18);
   // ★IIIII115b：cs PlaceTile 主放置路径 `type=num; halfBrick(false); slope(0)`
@@ -484,18 +491,9 @@ function squareTileFrameGen(st: TileStore, x: number, y: number): void {
  *  锚格 inactive 时 Clear(Tile|Paint|Slope)（cs:59497-59499,幽灵归零——对拍实证
  *  (415,153)g1→0g）+ Place3x2 + case 尾 SquareTileFrame(i,j)（成败都跑）。 */
 function placeTilePile(st: TileStore, x: number, y: number, style: number): boolean {
-  if (st.inBounds(x, y)) {
-    const i = st.idx(x, y);
-    if (!st.flags[i]) {
-      // Tile.Clear(Tile|TilePaint|Slope)（Tile.cs:774-782/803-807）
-      st.type[i] = 0;
-      st.frameX[i] = 0;
-      st.frameY[i] = 0;
-      st.paint[i] = 0;
-      st.slope[i] = 0;
-      st.half[i] = 0;
-    }
-  }
+  // ★IIIII179：内联序言预清收编为共享 helper placeTilePrologueClear（语义增补块涂层
+  //  方块侧两位——Tile.Clear(131) 含 ClearBlockPaintAndCoating,Tile.cs:906-911）。
+  placeTilePrologueClear(st, x, y);
   const ok = place3x2(st, x, y, style);
   squareTileFrameGen(st, x, y);
   return ok;
@@ -504,6 +502,9 @@ function placeTilePile(st: TileStore, x: number, y: number, style: number): bool
 /** WorldGen.Place3x3 num=-2 分支（cs:53549,type 300-308 含织机 304）：3×3 底中锚
  *  (x-1..x+1)×(y-2..y) 足印全空 + 下列实心（经 PlaceTile case 304 派发）。 */
 function place3x3(st: TileStore, x: number, y: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,304)（cs:29409 派发 case304→Place3x3）受理序预清
+  //  （cs:59966）——304 非实心无型拒⇒惰性即清;序言位在 case 臂足印门前。
+  placeTilePrologueClear(st, x, y);
   let ok = true;
   for (let c = x - 1; c <= x + 1; c++) {
     for (let d = y - 2; d <= y; d++) {
@@ -525,6 +526,10 @@ function place3x3(st: TileStore, x: number, y: number): boolean {
 /** WorldGen.Place1x2（cs:46665,经 PlaceTile case 15 派发）：占 (x,y-1)..(x,y)，
  *  仅要求下方 SolidTile2 + (x,y-1) 空（不查 (x,y) 本身——原版如此）。 */
 function place1x2(st: TileStore, x: number, y: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,15,style)（cs:29498/29518 派发 case15→Place1x2）受理序
+  //  预清（cs:59966）——15 非实心无型拒⇒惰性即清;序言位在 case 臂门前（原版 case15
+  //  臂亦不查 (x,y) 本体活性,预清外显即椅位残型归零）。
+  placeTilePrologueClear(st, x, y);
   if (!st.inBounds(x, y - 1) || !st.inBounds(x, y + 1)) return false;
   // ★IIIII73:cs:47086 SolidTile2（原 solidAt——平台族支承语义修正）
   if (!ltSolid2(st, x, y + 1) || activeAt(st, x, y - 1)) return false;
@@ -540,6 +545,11 @@ function place1x2(st: TileStore, x: number, y: number, style: number): boolean {
  *  → PlaceDoor(i,j+1)；否则失败。★PlaceDoor 成功放门 3 格各掷 Next(3) 帧变体
  *  （cs:31952/31959/31966——流相关，此前 JS 无条件直写 0 掷=流错位根源之一）。 */
 function placeDoorTile(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,10,style 7)（cs:29488/29541 直呼 PassageRoom、28907 段
+  //  HorizontalTunnel 双呼）受理序预清（cs:59966）——10 实心 tile,forced=false ⇒ 析取经
+  //  EmptyTile(=目标惰性)放行;10 无型拒/drip/液体拒支⇒惰性即清。序言位在 case10 方向
+  //  分派（上行/下行三格门框判定）前;受理(PlaceDoor 落 3 格)则覆写,门框/锚门拒时外显。
+  placeTilePrologueClear(st, x, y);
   if (!st.inBounds(x, y - 3) || !st.inBounds(x, y + 3)) return false;
   if (!activeAt(st, x, y - 1) && !activeAt(st, x, y - 2)
     && activeAt(st, x, y - 3) && genSolidType(typeAt(st, x, y - 3))) {
@@ -601,6 +611,18 @@ function canPlaceLeaves(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
+// ★IIIII202（1458 cs:28939/:29003/:29184/:29457）：GrowLivingTree 家族 dualDungeons 三门。
+//  【可达性】仅 SecretSeed.dualDungeons（doubledaringdangers 系）世界可达——普通世界
+//  dualDungeonState.potentialBounds 恒空 → intersects 恒 false,与 vanilla 同（零扰动）。
+//  XNA Rectangle(x,y,w,h) 调用形按半开 [l,r)×[t,b) 换算（DungeonUtils.cs:2149-2168
+//  IntersectsAnyPotentialDungeonBounds = Left<Right ∧ Left<Right ∧ Top<Bottom ∧ Top<Bottom）。
+//  郑重记录：反编译字面 Rectangle(i+5, j-7, i+num3, j+7) 第三参为「i+num3」（非宽度差）——
+//  照录（IIIII202 手译重放 gold 043 八通道零差实证,勿"修正"）。
+/** 界域交集判（含 dualDungeons 旗门,调用侧传 gs.seedFlags.dualDungeons） */
+function ltDualGate(dual: boolean | undefined, rl: number, rt: number, rr: number, rb: number): boolean {
+  return !!dual && intersectsAnyPotentialDungeonBounds(rl, rt, rr, rb);
+}
+
 // ---------- GrowLivingTreePassageRoom（cs:29306-29510） ----------
 function growLivingTreePassageRoom(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, minl: number, minr: number, Y: number,
@@ -621,6 +643,12 @@ function growLivingTreePassageRoom(
     for (let j = Y - 20; j < Y + 10; j++) {
       if (wallAt(st, i, j) === 0 && !activeAt(st, i, j) && j < worldSurface) { mk109(`PR1|airgate|i=${i}|j=${j}`); return; }
     }
+  }
+  // ★IIIII202（cs:29457-29461）：dualDungeons 房箱界域门——Rectangle(num3, Y-20, num5, Y+10)
+  //   与潜在地牢界域相交 ⇒ 整房放弃（零掷,先于第一腔）。ddual 链本簇房箱全拒实证。
+  if (ltDualGate(gs.seedFlags.dualDungeons, num3, Y - 20, num3 + num5, (Y - 20) + (Y + 10))) {
+    mk109('PR1|dualgate');
+    return;
   }
   // 第一腔（cs:29333-29360）：3×(Y+2-(Y-4)) 壳 + 内腔空心
   for (let k = num3; k <= num5; k++) {
@@ -764,6 +792,12 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
   for (let k = 0; k < 2; k++) {
     // ---- 向右探测（cs:28796-28860） ----
     if (right === i && num4 > 0) {
+      // ★IIIII202（cs:28939-28943）：dualDungeons 隧道界域门——Rectangle(i+5, j-7, i+num3,
+      //   j+7) 与潜在地牢界域相交 ⇒ 整隧拒（零写,在方向掷之后;ddual 链全隧拒实证）
+      if (ltDualGate(gs.seedFlags.dualDungeons, i + 5, j - 7, (i + 5) + (i + num3), (j - 7) + (j + 7))) {
+        mk109('TUs|R|dualgate');
+        return false;
+      }
       for (let l = i + 5; l < i + num3; l++) {
         if (!inWorld(st, l, j, 10)) return false;
         // ★IIIII97c 定罪①（cs:28803 `type==48`）：尖刺排除须比对原版 sheet 48——
@@ -792,6 +826,11 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
     }
     // ---- 向左探测（cs:28861-28916） ----
     if (left === i && num4 < 0) {
+      // ★IIIII202（cs:29003-29007）：dualDungeons 隧道界域门——Rectangle(i-num3, j-7, i-5, j+7)
+      if (ltDualGate(gs.seedFlags.dualDungeons, i - num3, j - 7, (i - num3) + (i - 5), (j - 7) + (j + 7))) {
+        mk109('TUs|L|dualgate');
+        return false;
+      }
       for (let l = i - 5; l > i - num3; l--) {
         if (!inWorld(st, l, j, 10)) return false;
         // ★IIIII97c 定罪①镜像（cs:28868）
@@ -910,6 +949,20 @@ function growLivingTreeMakePassage(
   let num9 = rng.int(5, 15);
   if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gpA|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
   let minl = refs.minl, minr = refs.minr;
+  // ★IIIII202（cs:29184-29188）：dualDungeons 竖井深钳——Rectangle(minl, num4, max(1,minr-minl),
+  //   num6) 与潜在地牢界域相交 ⇒ num6 = 界域 Top - num4 - 2（井止于界上 2 格;纯钳不耗掷）。
+  //   ddual 链界 Top=347 ⇒ 各井统止 y=345——曾整缺 ⇒ 井掘 400-700 穿雪冰域至 y=466,
+  //   隧道多掷/卫星锚全体相移（#43 A=4760 主根因）。
+  if (gs.seedFlags.dualDungeons) {
+    const rl = minl, rr = minl + Math.max(1, minr - minl), rb = num4 + num6;
+    for (const b of dualDungeonState.potentialBounds) {
+      if (rl < b.r && b.l < rr && num4 < b.b && b.t < rb) {
+        num6 = b.t - num4 - 2;
+        mk109(`MP0|dualclamp|top=${b.t}|num6=${num6}`);
+        break;
+      }
+    }
+  }
   if (LT_TRACE) console.log(`MP enter st=${ltStream()} num6=${num6} num9=${num9}`);
   while (num6 > 0) {
     if (num4 > underworldLayer + rng.int(15, 30)) num6 = 0;   // cs:29053
@@ -1066,6 +1119,16 @@ function growLivingTreeMakePassage(
   }
 }
 
+
+// ★IIIII202：手译重放对账出口（tools/_iii202hand.ts 独立编排复用已认证叶级助手；
+//   仅导出表面,零行为改动）
+export {
+  sheetAt, activeAt, wallAt, ltSolid, ltSolid2, isDungeonWall, inWorld,
+  isTileNearby, isTileNearbySheet,
+  setLivingWood, setLeaf, deactivate, placePlatform,
+  placeTilePile, placeSmallPile, placeDoorTile, place1x2, place3x3, squareTileFrameGen,
+  canPlaceLeaves,
+};
 
 // ---------- GrowLivingTree（cs:28123-28759） ----------
 export function growLivingTree(

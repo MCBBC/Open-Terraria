@@ -2,8 +2,10 @@
 // SW-L1 2026-09-03 蓝队二轮 F1/F3/F5/F6/F7/F8/F9+红队 I-3a 清偿;SW-N1 2026-09-03
 // 备案;★SW-AH1 2026-09-05 嵌入/Kill 语义按原版 TileCollision 重基线,N1 备案清偿）。
 // 锚点:Projectile.cs SetDefaults :987-994(10×10/aiStyle10/friendly/ignoreWater) +
-// AI_010 :58809-59083(泥球通道支)+ Kill_Bombs_DoUsualKillCode :79119-79300(aiStyle10
-// 亡格铺设段——num17=0 泥土格/num18=2 泥土块物品为 type 17 的表缺省值)。
+// AI_010 :58809-59083(泥球通道支)+ Kill_ExplodeTiles :79119-79300(aiStyle10
+// 亡格铺设段——num17=0 泥土格/num18=2 泥土块物品为 type 17 的表缺省值;
+// SW-AM2 2026-09-05 方法名锚校准:该段在 Kill_ExplodeTiles(:78995-79378)体内,
+// Kill_Bombs_DoUsualKillCode 起于 :79379,旧注曾误挂)。
 //
 // ★SW-AH1 嵌入/Kill 语义重基线（N1 备案"忠实修必破坏钉面"就此清偿,钉面同步重推导）:
 //   原版每拍序(Projectile.Update):HandleMovement(:17578)[velocity=TileCollision
@@ -159,13 +161,31 @@ function tileCollisionFaceClamp(
           }
         }
       } else if (x + W <= tx4 && !solidTop) {                                 // 左→右行（:2406-2424）
-        num = i; num2 = j;
-        if (num2 !== num4) rx = tx4 - (x + W);
-        if (num3 === num) ry = vy;                                            // 角互锁还原（:2420-2422）
+        // SW-AL2 2026-09-05（F-3）：hoik 邻格坡门（:2412 逐字）——身后格 (i−1,j)
+        //  slope∈{2,4} 时【整支】跳过（num/num2 簿记+X 钳+角还原一并,非仅 X 钳——
+        //  原版 if 包全支体）。TileCollision 末参 hoik 缺省 true（:2299）,aiStyle10
+        //  调用只传 6 参（Projectile.cs:17718）→ 弹幕域 hoik 生效;i<1 短路=原版
+        //  逐字（界外左邻不豁免;原版先 null 填 tile[i−1,j],空格 slope=0 同效,
+        //  本仓 slope 数组对无 tile 格恒 0 同效）。memory tent-hoik-gate-ejection
+        //  -verdict"hoik 默认 false 勿移植"判例前提与 1456/1457 反编译不符（签名
+        //  默认 true）——玩家/NPC 分轴自洽不动,弹幕域按原版默认开补（本批 F-3）
+        if (i < 1 || (st.slope[st.idx(i - 1, j)] !== 2 && st.slope[st.idx(i - 1, j)] !== 4)) {
+          num = i; num2 = j;
+          if (num2 !== num4) rx = tx4 - (x + W);
+          if (num3 === num) ry = vy;                                            // 角互锁还原（:2420-2422）
+        }
       } else if (x >= tx4 + 16 && !solidTop) {                                // 右→左行（:2426-2444）
-        num = i; num2 = j;
-        if (num2 !== num4) rx = tx4 + 16 - x;
-        if (num3 === num) ry = vy;                                            // :2440-2442
+        // SW-AL2 2026-09-05（F-3）：右支 hoik 门（:2432 逐字）——身后格 (i+1,j)
+        //  slope∈{1,3}（与左支 {2,4} 对调,勿并写）。i+1 恒在界内（i1 钳 st.w−1
+        //  排他 → i≤st.w−2）,原版即无上界守卫同式。★可达面注：aiStyle10 削平链
+        //  （Projectile.cs:59045-59051）只削坡 1/2 且先于本函数跑——坡 1 臂被削平
+        //  链先手消化（盒扫格恒覆盖身侧邻列）,坡 3 臂为右支实际可达面（坡 3/4
+        //  不在 topSlope 削平域,见 dirtball-embed-slope34 头注）
+        if (st.slope[st.idx(i + 1, j)] !== 1 && st.slope[st.idx(i + 1, j)] !== 3) {
+          num = i; num2 = j;
+          if (num2 !== num4) rx = tx4 + 16 - x;
+          if (num3 === num) ry = vy;                                            // :2440-2442
+        }
       } else if (y >= ty4 + num7 && !solidTop) {                              // up（:2446-2456）
         num3 = i; num4 = j;
         ry = ty4 + num7 - y + 0.01;                                           // gravDir=1 ε（:2451）
@@ -195,7 +215,8 @@ export interface DirtBallDeposit {
   blocked: boolean;
 }
 
-/** Kill_Bombs_DoUsualKillCode 的落点格计算(:79120-79271,aiStyle10 共用段):
+/** Kill_ExplodeTiles 的落点格计算(:79120-79271,aiStyle10 共用段——SW-AM2
+ *  2026-09-05 方法名锚校准,旧注误挂 Kill_Bombs_DoUsualKillCode):
  *  centerX/centerY = 弹中心像素;vx/vy = 撞格时速度(半砖上推判向用)。C# int
  *  整除 = Math.trunc(负坐标同截断语义)。
  *  `death`（★M13 A-1,2026-09-04）：碰撞 Kill 时已知的 TileCollision 钳位死亡格
@@ -325,7 +346,8 @@ export class DirtBallProj extends Entity {
     }
     // SW-AQ1 2026-09-05：oldPosition 上报（Update :17118 AI 后/位移前置位——清植/
     //  削坡 y−16 属原版 AI_010 :59051 体内移,含在 oldPosition 内,故置位于其后）——
-    //  17 走 objType 4 扫描（:19978）,新旧位判定（Collision.cs:3346-3353/:3356）消费;
+    //  17 走 objType 4 扫描（:19978）,新旧位判定（Collision.cs:3314/:3323,SW-AM2
+    //  2026-09-05 引注校准,旧 :3346-3353/:3356=1456 行号）消费;
     //  碰撞 Kill 拍（clamp.clamped）实体位不积分,旧位存留上拍值（死亡拍扫描偏差
     //  微差备案,报告债④）
     this.oldX = this.x; this.oldY = this.y;
@@ -338,7 +360,8 @@ export class DirtBallProj extends Entity {
     if (--this.life <= 0) { this.kill(game, this.x + this.w / 2, this.y + this.h / 2); }
   }
 
-  /** Kill → aiStyle10 铺设段（Kill_Bombs_DoUsualKillCode :79120-79300）+ Kill 音尘
+  /** Kill → aiStyle10 铺设段（Kill_ExplodeTiles :79120-79300——SW-AM2 方法名锚
+   *  校准）+ Kill 音尘
    *  （:77801-77808）。bx/by = 爆心 = 死亡位中心像素（★SW-AH1：碰撞 Kill=
    *  :19966 position+=velocity 贴面位中心（:79120-79121 同式）;寿终 Kill=积分后
    *  中心）:铺泥/掉泥块两支共用。this.vx/vy 已是 Kill 时钳后速度（半砖上推

@@ -93,7 +93,8 @@ export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
 }
 
 /** PlacePot（1457 WorldGen.cs:54529≡1458 同号）1:1：2×2（x..x+1, y-1..y）须净空；
- *  下方双列须 nactive && !halfBrick && slope==0 && tileSolid；成功才掷 Next(3) 变体。
+ *  下方双列须 nactive（active&&!inActive&&!half，★IIIII206 补 !inActive）&& slope==0
+ *  && tileSolid；成功才掷 Next(3) 变体。
  *  ★IIIII186 remix 拒收带（cs:54532-54535）：`remix && x∈(0.48w,0.52w) && y>h-220`
  *  → flag=false（**先于净空检查、不掷变体骰**）——JS 曾整缺此门，remix 下中央深带
  *  多放罐且重试账错位（#71 A=16,837 主源之一;x86 侧拒后继续扫列至 h-20 烧扫描掷） */
@@ -106,7 +107,11 @@ export function placePot(store: TileStore, rng: RNG, x: number, y: number, type:
     }
     if (!store.inBounds(x + dx, y + 1)) return false;
     const gi = store.idx(x + dx, y + 1);
-    if (!store.flags[gi] || store.half[gi] || store.slope[gi] !== 0) return false;
+    // ★IIIII206（#72 定罪落刀）：地面判项=vanilla nactive()（Tile.cs:active&&!inActive
+    //   &&!halfBrick）——曾缺 !inActive：act=1/inact=1 的致动格（本链 gold#071 有 3304
+    //   格,t226/t117/t60…）vanilla nactive=false 拒罐继续下扫,JS 误收=掷变体骰+落罐
+    //   ⇒ 流位相移全 pass 罐位错位（#72 T0>28/T28>0×9002 双向）。
+    if (!store.flags[gi] || ((store.wire[gi] >>> 5) & 1) === 1 || store.half[gi] || store.slope[gi] !== 0) return false;
     if (!vanGenSolidType(store.type[gi])) return false;
   }
   const variant = rng.int(0, 2) * 36;   // genRand.Next(3)*36（仅成功时消费）

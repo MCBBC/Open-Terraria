@@ -36,8 +36,10 @@ export abstract class Entity {
   // ---- SW-AQ1 2026-09-05：本拍位移前位（原版 Projectile.oldPosition 同名语义）----
   /** 弹幕类在位移段前写（原版 Update :17118 `oldPosition = position` 位序 = AI 后/
    *  HandleMovement 前；extraUpdates 子步型每子步刷新）。消费点 = Game.switchTilesScan
-   *  弹幕路由（objType 3/4）：原版 SwitchTiles 内部新旧位判定（Collision.cs:3346-3353
-   *  442 子矩形新入旧出 / :3356 旧位全格带跳过）与 :19974 `position != oldPosition`
+   *  弹幕路由（objType 3/4）：原版 SwitchTiles 内部新旧位判定（Collision.cs:3314
+   *  442 子矩形新入旧出 / :3323 旧位排除带跳过,SW-AM2 2026-09-05 引注校准——
+   *  旧 :3346-3353/:3356 系 1456 行号;1457 主门在 :3323,Y 排除带 +12 偏移）
+   *  与 :19974 `position != oldPosition`
    *  门——碰撞帧（挡停/静置/已在板格内）不触发。undefined = 未上报 → 回退既有
    *  latch 口径（玩家/NPC/小动物面与未改造弹幕类零变化） */
   oldX?: number;

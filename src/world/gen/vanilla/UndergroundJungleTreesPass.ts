@@ -11,7 +11,8 @@
 //   ① 掷序：num4=Next(3) 在 num5=Next(10) **之前**（GrowTree 相反）——cs:31031-31032；
 //   ② 基座/根部三个 num4 各自独立掷（cs:31321/31342/31359），GrowTree 复用一掷；
 //   ③ 树冠门是 Next(8)（cs:31414），GrowTree 是 Next(13)。
-// 入场门（cs:31009）：基座=丛林草 60 且整砖无坡，且左右邻至少一侧 active 丛林草。
+// 入场门（cs:31009/1457 cs:31133）：基座=丛林草 60 且 nactive（active&&!inActive&&!half）
+// 且无坡，且左右邻至少一侧 active 丛林草（★IIIII206：!inActive 判项曾缺,见 growUndergroundTree）。
 // 净空门 EmptyTileCheck(ignoreID=20)（cs:31020→31611）：CommonSapling={20,590,595,615}
 // 与植物白名单 {3,24,32,61,62,69,71,73,74,82,83,84,110,113,184,201,233,352,485,
 // 529,530,637,655}（cs:31669-31691）以外任何 active 格 → 拒绝。
@@ -76,8 +77,14 @@ function emptyTileCheckSapling(st: TileStore, x0: number, x1: number, y0: number
  *  导出供单测直调（pass 体的 Next(10) 门是概率性,单测绕门锁结构） */
 export function growUndergroundTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): void {
   const gi = st.idx(i, y);
-  // 入场门（cs:31009）：丛林草 + nactive(=active&&!half) + 无坡 + 左右邻至少一侧丛林草
-  if (!st.flags[gi] || !JUNGLE_GRASS.has(st.type[gi]) || st.half[gi] === 1 || st.slope[gi] !== 0) return;
+  // 入场门（1457/1458 cs:31133；1456 cs:31009 同域）：丛林草 + nactive(=active&&
+  //   !inActive&&!half，Tile.cs nactive 三判项) + 无坡 + 左右邻至少一侧丛林草。
+  //   ★IIIII206（#69 定罪落刀）：曾缺 !inActive 判项——(417,808) 锚格 act=1/t60/
+  //   inact=1，vanilla nactive()=false 入场即拒（0 掷），JS 误入掷 num2 后被
+  //   EmptyTileCheck 拒（1 掷）⇒ 1 掷流位相移 ⇒ 全 pass 候选错位（JS 14 树 vs
+  //   vanilla 10 树，#69 A=255/T=255 双向）。
+  if (!st.flags[gi] || ((st.wire[gi] >>> 5) & 1) === 1 || !JUNGLE_GRASS.has(st.type[gi])
+    || st.half[gi] === 1 || st.slope[gi] !== 0) return;
   const sideJungle = (dx: number) =>
     st.inBounds(i + dx, y) && !!st.flags[st.idx(i + dx, y)] && JUNGLE_GRASS.has(st.type[st.idx(i + dx, y)]);
   if (!sideJungle(-1) && !sideJungle(1)) return;
@@ -119,7 +126,10 @@ export function growUndergroundTree(st: TileStore, rng: RNG, gs: GenState, i: nu
   const rootFit = (dx: number) => {
     if (!st.inBounds(i + dx, y)) return false;
     const si = st.idx(i + dx, y);
-    return !!st.flags[si] && st.half[si] === 0 && st.slope[si] === 0 && ROOT_FIT.has(st.type[si]);
+    // cs:31379/31387 flag3/flag4 判项=nactive()&&!halfBrick()&&slope()==0&&草族——
+    //   nactive 含 !inActive（★IIIII206 补,与入场门同款缺项）
+    return !!st.flags[si] && ((st.wire[si] >>> 5) & 1) === 0 && st.half[si] === 0
+      && st.slope[si] === 0 && ROOT_FIT.has(st.type[si]);
   };
   const fitL = rootFit(-1), fitR = rootFit(1);
   if (!fitL) { if (num6 === 0) num6 = 2; else if (num6 === 1) num6 = 3; }

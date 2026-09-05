@@ -177,7 +177,12 @@ function platformProperTopFrame(frameX: number): boolean {
 }
 
 /** ValidAnchorForMultiDirectionalTile（:60321）：dir 0=上锚 1=下锚 2=左锚 3=右锚。
- *  生成期无 inActive；slope 原版编码（Tile.cs:320-350）：topSlope()=1|2、
+ *  ★III207（2026-09-05 #94 定罪）：四向 SolidTileAllow* 族（1458 cs:70706/70859/
+ *  70879/70899）原生带 `&& !tile.inActive()` 腿——本函数四向整缺 ⇒ act∧inact 格
+ *  （ddual 基座 3,304 格）被误收锚 ⇒ 幻影放置（place 后被引擎 frame178Sweep 复核
+ *  杀 ⇒ ghost 残留 + roll1 白掷 + 流位相移）⇒ #94 双向 16 格。SIM 链（8ch 全零）
+ *  四向全带腿定谳。旧注「生成期无 inActive」随 CLXXXIII 家族教训一并作废。
+ *  slope 原版编码（Tile.cs:320-350）：topSlope()=1|2、
  *  bottomSlope()=3|4——旧注释"1/2=底坡 3/4=顶坡"整体写反（代码同病，已一并纠正）；
  *  leftSlope()=2|4、rightSlope()=1|3（仓库原本即对）。 */
 function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
@@ -198,24 +203,28 @@ function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): b
   //   topSlope()=1|2、bottomSlope()=3|4，方向基带随之纠正
   const topSlope = sl === 1 || sl === 2, bottomSlope = sl === 3 || sl === 4;
   const leftSlope = sl === 2 || sl === 4, rightSlope = sl === 1 || sl === 3;
+  // ★III207：!inActive 腿（wire bit5=32，引擎 solidAllow* 同款 `(st.wire[i] & 32)`）
+  const inact = (st.wire[i] & 32) !== 0;
   if (dir === 0) {
-    // SolidTileAllowTopSlope（cs:70325）：(tileSolid||380) && ((!平台&&!底坡)||(平台&&半砖))
-    return (solid || TYPE_380.has(t)) && ((!platform && !bottomSlope) || (platform && half));
+    // SolidTileAllowTopSlope（cs:70859）：(tileSolid||380) && ((!平台&&!底坡)||(平台&&半砖)) && !inActive
+    return (solid || TYPE_380.has(t)) && ((!platform && !bottomSlope) || (platform && half)) && !inact;
   }
   if (dir === 1) {
-    // SolidTileAllowBottomSlope（cs:70211-70229）：(tileSolid||tileSolidTop近似平台) &&
+    // SolidTileAllowBottomSlope（cs:70706）：(tileSolid||tileSolidTop) &&
     //  (!topSlope || (平台 && PlatformProperTopFrame(frameX))) && !半砖 && !inActive。
     //  ★G7：平台顶帧豁免曾缺失（只写 !topSlope 一刀切）——平台带顶坡时，frameX
-    //  落在顶帧段仍可作下锚（cs:70223）
-    return (solid || platform)
-      && (!topSlope || (platform && platformProperTopFrame(st.frameX[i]))) && !half;
+    //  落在顶帧段仍可作下锚（cs:70223）。
+    //  ★III207：`(solid||platform)` 系原版 `(tileSolid||tileSolidTop)` 误缩——非平台
+    //  tileSolidTop 族（桌 14/工作台 18 等）vanilla 可作下锚，照 SOLID_TOP 表补回
+    return (solid || platform || SOLID_TOP.has(SHEET[t]))
+      && (!topSlope || (platform && platformProperTopFrame(st.frameX[i]))) && !half && !inact;
   }
   if (dir === 2) {
-    // SolidTileAllowLeftSlope：tileSolid && !半砖 && !右坡 && !平台
-    return solid && !half && !rightSlope && !platform;
+    // SolidTileAllowLeftSlope（cs:70879）：tileSolid && !半砖 && !右坡 && !平台 && !inActive
+    return solid && !half && !rightSlope && !platform && !inact;
   }
-  // dir 3：SolidTileAllowRightSlope 镜像
-  return solid && !half && !leftSlope && !platform;
+  // dir 3：SolidTileAllowRightSlope（cs:70899）镜像
+  return solid && !half && !leftSlope && !platform && !inact;
 }
 
 /** CheckAndAdjustMultiDirectionalTile（:60338）：下>左>右>上优先，锚类型须 tileSolid&&!tileSolidTop。

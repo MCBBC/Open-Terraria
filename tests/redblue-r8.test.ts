@@ -204,7 +204,7 @@ function plateAt(w: World, x: number, y: number, style: number): void {
   w.store.setTileSilent(x, y, PLATE, 0, style * 18);
 }
 
-describe('R8-44 SwitchTiles 板风格门（Collision.cs:3240-3377）', () => {
+describe('R8-44 SwitchTiles 板风格门（Collision.cs:3240-3373）', () => {
   it('敌怪(objType 2)可触发风格 5 板、不可触发风格 2 板；玩家(5)反之', () => {
     const { w, wr, hits } = wiringWorld();
     plateAt(w, 20, 40, 5);   // 风格 5：NPC/弹幕可触

@@ -12,6 +12,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { smoothSlope } from './HalfBrickPass';
 
@@ -920,6 +921,11 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   /** Place2x2（WorldGen.cs:51352-51445）1:1：锚=右下格，先 x--/y-- 再写，
    *  占 (ax-1..ax)×(ay-1..ay)；门禁=2x2 区全空+双底列 nactive&&(solid||tileTable) */
   const place2x2 = (ax: number, ay: number, tile: number, style: number) => {
+    // ★IIIII179：PlaceTile(ax,ay,751/484,forced)（DesertHive.cs:490/494）受理序预清
+    //   （cs:59966）——forced 直达 Proceed 析取,751/484 无型拒/drip/液体拒支⇒惰性即清;
+    //   位在 Place2x2 自有垫界门前=vanilla「序言后、case 臂前」。受理则覆写,垫界/
+    //   区空/双底锚拒时外显（rig 3424 行 100% act0 的 484/751 组）。
+    placeTilePrologueClear(st, ax, ay);
     if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return;   // 原版 x<5||x>max-5
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) if (!freeAt(ax - 1 + k, ay - 1 + l)) return;
@@ -934,6 +940,9 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   /** Place3x2（WorldGen.cs:52097-52240）1:1：占 (ax-1..ax+1)×(ay-1..ay)；
    *  flag2 门禁=3x2 区全空+三列底 SolidTile2+187 专属底 Boulders 禁——任一失败整组不放 */
   const place3x2 = (ax: number, ay: number, tile: number, style: number): boolean => {
+    // ★IIIII179：PlaceTile(ax,ay,187,forced)（DesertHive.cs:502）受理序预清（cs:59966）
+    //   ——序言后、Place3x2 自有垫界门前（受理/Check3x2Kill 覆写,门拒时外显=187 组幽灵源）。
+    placeTilePrologueClear(st, ax, ay);
     if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return false;
     for (let k = -1; k <= 1; k++) {
       if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return false;
@@ -1014,6 +1023,10 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
    *  骰序=CanPlace 原版顺序：两条界早退（无掷）→ RandomStyleRange 掷 1×Next(4)
    *  （成败都掷）→ 门禁。液体按 LiquidPlace 默认 Allowed 放行（本函数不再查液体）。 */
   const place485 = (ax: number, ay: number, style: number) => {
+    // ★IIIII179：PlaceTile(ax,ay,485,forced)（DesertHive.cs:490）受理序预清（cs:59966）
+    //   ——序言后、TileObject.CanPlace 粗界前（预清零掷,与粗界早退零掷相对次序不影响
+    //   骰流;CanPlace 拒时预清外显=485 组幽灵源）。
+    placeTilePrologueClear(st, ax, ay);
     const fail = (r: string) => d59({ e: 'p485', x: ax, y: ay, r });
     // 粗界（cs:180-186：num<0||num+W>=maxTilesX||num2<0||num2+H>=maxTilesY）
     if (ax < 0 || ax + 2 >= W || ay - 1 < 0 || ay + 1 >= H) { fail('coarse-bounds'); return; }
@@ -1083,7 +1096,14 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         // placeTight（ShimmerPass 1:1）按邻接材质分派（396/397 → 沙岩列 378+var*18），
         // 帧序倒挂 0/18、地面 36/54、单格 72/90（地面形顶格列=x 勿偏）。
         // 锚点 = py+(flag?-1:+1)（:491）
-        br = '165'; placeTight(st, rng, px, py + (flag ? -1 : 1));
+        br = '165';
+        // ★IIIII179：vanilla 此处走 PlaceTile(px,py±1,165,forced)（DesertHive.cs:498）
+        //   →受理序预清（cs:59966）后才派发 case165→PlaceTight。ShimmerPass.placeTight
+        //   本体另有四处 vanilla **直呼 PlaceTight** 点（cs:35384/35388 shimmer、
+        //   22282-22309 宝石树、3688 蛛网 spiders、20180）不经过 PlaceTile 序言,故预清
+        //   挂沙漠调用位而非 helper 入口（否则 shimmer/宝石/蛛网域过度移植）。
+        placeTilePrologueClear(st, px, py + (flag ? -1 : 1));
+        placeTight(st, rng, px, py + (flag ? -1 : 1));
       } else if (flag && tg('av_g187').int(0, 4) === 0) {          // 187：style 29+Next(6)
         br = '187';
         if (place3x2(px, py - 1, T187, 29 + tg('av_st6').int(0, 5))) check3x2Kill187(px, py - 1);

@@ -19,6 +19,8 @@ import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef, setTenthRef } from './MushroomPass';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { idsByVanillaSheet } from './TileRunner';
+// ★IIIII202：Altars dualDungeons 两臂消费（坛数减半 + 内界域拒绝采样）
+import { inAnyInnerPotentialDungeonBounds } from './DungeonStyles1457';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
@@ -317,6 +319,9 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const remixFlag = !!gs.seedFlags.remix;
   let count = Math.trunc(st.w * st.h * 3.3e-06);
   if (remixFlag) count *= 3;                         // ★IIIII90 cs:15846-15849：remix×3（16→48）
+  // ★IIIII202（cs:15852-15854）：dualDungeons 坛数减半——`num /= 2` int 截断除
+  //   （4200×1200:16→8）。曾缺 ⇒ 候选面 2 倍,坛位全体漂移（ddual #45 T0>26×90 定谳）。
+  if (gs.seedFlags.dualDungeons) count = Math.trunc(count / 2);
   const drunkA = !!gs.seedFlags.drunkWorld;
   const styleOf = (x: number): number => {
     if (!drunkA) return gs.crimson ? 1 : 0;
@@ -344,8 +349,12 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
       while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);    // 避中央带（重掷仅 x）
       let y = rollY();
       // 拒绝采样（cs:15869-15881）：两点全重掷（x 先过中央带门再掷 y，remix 双掷照常）
+      //   ★IIIII202（cs:15871）：dualDungeons 内界域臂 `InAnyPotentialDungeonBounds(
+      //   num2,num3,0,inner:true)`——inner=outer 内缩 10（CreatePotentialDungeonBounds
+      //   innerBuffer=10）。曾缺 ⇒ 井旁坛落界内（gold 拒/JS 收）双侧重掷漂移。
       while (oceanDepths(st, gs, x, y)
-        || (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY)) {
+        || (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY)
+        || (gs.seedFlags.dualDungeons && inAnyInnerPotentialDungeonBounds(x, y))) {
         P90?.push([x, y]);
         x = rng.int(281, st.w - 284);
         while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);

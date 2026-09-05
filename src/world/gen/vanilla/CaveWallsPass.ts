@@ -322,13 +322,22 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState,
         const qi = st.idx(qx, qy);
         if (cells.has(qi)) continue;
         // IsNotSolid：active 且 SolidOrSlopedTile → Fail（不入形、不计数）
-        // ★SolidOrSlopedTile（cs:70046）= active && tileSolid && !tileSolidTop &&
-        //   !inActive —— **不含 halfBrick/slope**（名字带 Sloped 但不查坡位）！曾加
-        //   `half||slope!==0` 门 → 斜面密集腔被误判实心截断洪泛 → 斑误放（9293480
-        //   债线 056 出口 wal=78678 的自因主源）。solid 走 GenSolid：本 pass 时点
-        //   226/162 已被 FragileIce（cs:16782-83）翻非实心,原版读可变 tileSolid 同值。
+        // ★SolidOrSlopedTile（cs:70046/70523-70547）= active && tileSolid &&
+        //   !tileSolidTop && !inActive —— **不含 halfBrick/slope**（名字带 Sloped 但
+        //   不查坡位）！曾加 `half||slope!==0` 门 → 斜面密集腔被误判实心截断洪泛 →
+        //   斑误放（9293480 债线 056 出口 wal=78678 的自因主源）。solid 走 GenSolid：
+        //   本 pass 时点 226/162 已被 FragileIce（cs:16782-83）翻非实心,原版读可变
+        //   tileSolid 同值。
+        // ★IIIII203（第五判项 !inActive 补移植）：inActive 格（TileStore wire bit5
+        //   =0x20,与 x86 dump .inact 通道 3304/3304 全量核对一致）不计实心——洪泛
+        //   穿行+入形+铺墙。ddual 链 (441,808) 斑实锤：JS 洪泛 429 vs vanilla 521
+        //   （92 差格全为 inActive 泥 59/丛庙 309）→ 布墙掷流位移 4 掷 → 后续选点
+        //   全域漂移 → #57 Wall_Variety 2661 差。MicroBiomes ★XXXX"!inActive 生成期
+        //   恒真"旧备案系 actuator 位混淆——x86 dump 056/057 实证生成期 inActive
+        //   存在（3304 格,泥墙 64 域）。写法对齐本文件 solidAt() 的 `(wire & 32)===0`。
         const qd = TILE_DEFS[st.type[qi]];
-        if (st.flags[qi] && qd && genSolidType(st.type[qi]) && !qd.platform) continue;
+        if (st.flags[qi] && qd && genSolidType(st.type[qi]) && !qd.platform
+          && (st.wire[qi] & 32) === 0) continue;
         cells.add(qi);
         quota--;
         // IsTouching(8 向，cs:16828-16833)：触碰无效集 → foundInvalidTile

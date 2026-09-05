@@ -859,7 +859,9 @@ function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number
 }
 
 /** 生命水晶(pass 57,cs:16863-16904):area×2e-5 次;每次拒绝采样上限 10000
- *  (skyblock=10,本仓库非 skyblock)。★掷序 Y 先 X 后(cs:16886/16891)。 */
+ *  (skyblock=10,本仓库非 skyblock)。★掷序 Y 先 X 后(cs:16886/16891)。
+ *  ★IIIII183 第二臂:AddManaCrystal(1457 cs:16920-16958,errorWorld∨noSurface 门,
+ *  area×1e-5 颗法力水晶 639)整臂补落——详见下方注释与 addManaCrystal。 */
 export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void {
   // 一次性探针钩（同 WebsPass 模式）：LifeCrystals 入口快照（债时间线用）
   {
@@ -885,7 +887,34 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
       done = addLifeCrystal(st, x, y);
     }
   }
-  // ★pass 尾 tileSolid 翻转（cs:16944 `Main.tileSolid[225] = false`）：蜂巢块自此
+  // ★★★IIIII183（2026-09-05）：第二臂 AddManaCrystal 整臂补落（1457 cs:16920-16958 ≡
+  //   1458 同线 cs:16920-16958；AddManaCrystal 本体 1457 cs:32270-32337 ≡ 1458
+  //   cs:32278-32345,逐行零差,1456 cs:32146 起同构）。门序：`SecretSeed.errorWorld.Enabled
+  //   || SecretSeed.noSurface.Enabled`（cs:16920）——errorWorld(iamerror)/noSurface
+  //   (molepeople) 专属。★mile8 iamerror #57 Life_Crystals A=200/T=200 定谳真身
+  //   （IIIRS179b/CLVI 章）：x86 057_Life_Crystals 槽恰 200 格新增活性 typ=639
+  //   （2×2 对齐 50 颗,4200×1200=area×1E-05=50.4→50），JS 整臂缺失 → 200 格硬差。
+  //   掷序与首臂同构：Y 先 X 后（cs:16938/16944）、remix 先掷后覆写双骰恒耗
+  //   （cs:16940）；count=area×1E-05（cs:16921-16928,tenth×1.2;starGame×
+  //   starGameMath(0.2) 本仓未建模同首臂）；失败上限 num2=10000（cs:16888-16891,
+  //   skyblock=10）。★CLVI「A200/T200×49 行级联」说经本臂落刀实证修正：臂面只及
+  //   #57/#58 两行（落刀后 A/T/Hf/Sl 全零,Gh 157→4）,#59..#105 残差同源异根
+  //   ——批章 CLVII 逐行账。
+  if (gs.seedFlags.errorWorld || gs.seedFlags.noSurface) {
+    const manaCount = Math.floor(w * h * 0.00001 * (gs.seedFlags.tenthAnniversary ? 1.2 : 1));
+    const manaTries = gs.seedFlags.skyblock ? 10 : 10000;          // num2（cs:16888-16891）
+    for (let n = 0; n < manaCount; n++) {
+      let done = false;
+      for (let tries = 0; !done && tries < manaTries; tries++) {
+        let y = rng.int(yMin, h - 301);               // cs:16938 Next(yMin, h-300)
+        if (remixLC) y = rng.int(Math.trunc(gs.worldSurface), h - 401);   // cs:16940 remix 覆写
+        const x = rng.int(40, w - 41);                // cs:16944 offLimitBorderTiles=40
+        done = addManaCrystal(st, x, y, !!gs.seedFlags.skyblock);
+      }
+    }
+  }
+  // ★pass 尾 tileSolid 翻转（1457 cs:16959 `Main.tileSolid[225] = false`;1456 同段
+  //   cs:16944——旧注行号系 1456 口径）：蜂巢块自此
   //   非实心——UndergroundHouses 头（cs:17078）短暂回实心、尾（cs:17222）再翻 false,
   //   Piles 尾（cs:19599）最终还原 true。蜂巢在此前已生成（Hives pass cs:16005）,
   //   下游小屋/宝箱锚定不应踩在蜂巢上（消费端走 GenSolid 可见）。
@@ -936,6 +965,69 @@ function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
     st.setTileSilent(i, num - 1, HEART, 18, 0);
     st.setTileSilent(i - 1, num, HEART, 0, 18);
     st.setTileSilent(i, num, HEART, 18, 18);
+    return true;
+  }
+  return false;
+}
+
+const MANA = TILE_BY_KEY['v_639_mana_crystal']!;   // TileID.ManaCrystal（TileID.cs:1715）
+
+/** ★IIIII183 AddManaCrystal（1457 cs:32270-32337 ≡ 1458 cs:32278-32345,逐行零差；
+ *  1456 cs:32146 起同构）
+ *  1:1：自 j 向下扫列 i 首个实心活性格,锚行 num=k-1。**raw-write 直写**（active/
+ *  type/frameX/frameY 四件套,非 PlaceTile 路由——无邻帧/TileFrame 级联,与
+ *  addLifeCrystal 同构）。门序（cs 行号=1457）：
+ *  ①anyLava 心位(i,num-1)∨左邻(i-1,num-1)→false（cs:32277）②anyShimmer 心位→false
+ *  （cs:32281）③EmptyTileCheck(i-1,i,num-1,num) 心位 2×2 无活性块（cs:32285,
+ *  ignoreID=-1 支=活性即拒）④wallDungeon[(i,num).wall]→false（cs:32289）
+ *  ⑤skyblockWorldGen && IsTileNearby(i,num,639,50)→false（cs:32293;仅 skyblock+
+ *  破戒世界可达——denySome 才跳过本 pass;普通世界零扫描）
+ *  ⑥底座 (i-1,num+1)/(i,num+1) 须 nactive+tileSolid（cs:32299/32303）,blockType!=0
+ *  坡/半砖复位（cs:32307-32315）⑦四格 type 639,frame (0,0)/(18,0)/(0,18)/(18,18)
+ *  （cs:32317-32334）。
+ *  ★tileSolid 语义=生成期 Main.tileSolid（vanGenSolidType,同 addLifeCrystal）。 */
+function addManaCrystal(st: TileStore, i: number, j: number, skyblock: boolean): boolean {
+  const { h } = st;
+  if (!st.inBounds(i, j)) return false;
+  for (let k = j; k < h; k++) {
+    const ki = st.idx(i, k);
+    if (!st.flags[ki] || !vanGenSolidType(st.type[ki])) continue;
+    const num = k - 1;
+    const at = (xx: number, yy: number) => st.idx(xx, yy);
+    if (!st.inBounds(i, num - 1) || !st.inBounds(i - 1, num - 1)
+      || !st.inBounds(i, num + 1) || !st.inBounds(i - 1, num + 1)) return false;
+    // cs:32277-32285:心位/左邻岩浆、心位微光 → false
+    if ((st.liquid[at(i, num - 1)] > 0 && st.liquidType[at(i, num - 1)] === 2)
+      || (st.liquid[at(i - 1, num - 1)] > 0 && st.liquidType[at(i - 1, num - 1)] === 2)) return false;
+    if (st.liquid[at(i, num - 1)] > 0 && st.liquidType[at(i, num - 1)] === 4) return false;
+    // cs:32285 EmptyTileCheck(i-1, i, num-1, num):心位 2×2 无活性块
+    for (let xx = i - 1; xx <= i; xx++) {
+      for (let yy = num - 1; yy <= num; yy++) {
+        if (st.flags[at(xx, yy)]) return false;
+      }
+    }
+    // cs:32289:锚行墙为地牢墙 → false
+    if (DUNGEON_WALLS.has(st.wall[at(i, num)])) return false;
+    // cs:32293:skyblock 邻域 639 回避（IsTileNearby(cs:8812) 方形 ±50 步长 1）
+    if (skyblock) {
+      for (let sx = i - 50; sx <= i + 50; sx++) {
+        for (let sy = num - 50; sy <= num + 50; sy++) {
+          if (st.inBounds(sx, sy) && st.flags[at(sx, sy)] !== 0 && st.type[at(sx, sy)] === MANA) return false;
+        }
+      }
+    }
+    // cs:32298-32315:底座 (i-1,num+1)/(i,num+1) 须 nactive+tileSolid;blockType!=0
+    //   → slope(0)+halfBrick(false) 复位
+    for (const bx of [i - 1, i]) {
+      const bi = at(bx, num + 1);
+      if (!st.flags[bi] || ((st.wire[bi] >>> 5) & 1) === 1 || !vanGenSolidType(st.type[bi])) return false;
+      if (st.half[bi] !== 0 || st.slope[bi] !== 0) { st.half[bi] = 0; st.slope[bi] = 0; }
+    }
+    // cs:32317-32334:四格法力水晶,frameX 0/18、frameY 0/18
+    st.setTileSilent(i - 1, num - 1, MANA, 0, 0);
+    st.setTileSilent(i, num - 1, MANA, 18, 0);
+    st.setTileSilent(i - 1, num, MANA, 0, 18);
+    st.setTileSilent(i, num, MANA, 18, 18);
     return true;
   }
   return false;
@@ -1429,7 +1521,10 @@ function placeAlch(st: TileStore, x: number, y: number, style: number): boolean 
   const k = st.idx(x, y);
   const g = st.idx(x, y + 1);
   if (st.flags[k]) return false;
-  if (!st.flags[g] || st.half[g] || st.slope[g] !== 0) return false;
+  // ★IIIII206（#84 定罪落刀）：基座门=vanilla nactive()（active&&!inActive&&!half,
+  //   Tile.cs:270=(sTileHeader&0x60)==32 && !half）——曾缺 !inActive：致动格（本链
+  //   gold#083 act=1/inact=1 的 t161/t25 等）vanilla 拒种,JS 误种 ⇒ #84 T0>82×3。
+  if (!st.flags[g] || ((st.wire[g] >>> 5) & 1) === 1 || st.half[g] || st.slope[g] !== 0) return false;
   if (!ALCH_GROUND[style].has(st.type[g])) return false;
   const liq = st.liquid[k];
   const lava = liq > 0 && st.liquidType[k] === 2;
@@ -1456,7 +1551,9 @@ function plantAlch(st: TileStore, rng: RNG, gs: GenState): void {
   while (y < h - 20 && !(st.inBounds(num, y) && st.flags[st.idx(num, y)])) y++;
   if (!st.inBounds(num, y)) return;
   const k = st.idx(num, y);
-  if (!st.flags[k] || st.half[k] || st.slope[k] !== 0) return;   // nactive
+  // ★IIIII206：cs:45940 `!Main.tile[num,num2].nactive()` 含 !inActive 判项（与
+  //   placeAlch 基座门同款补刀）——致动格锚 vanilla 即返,JS 曾误入种草药。
+  if (!st.flags[k] || ((st.wire[k] >>> 5) & 1) === 1 || st.half[k] || st.slope[k] !== 0) return;
   if (!st.inBounds(num, y - 1)) return;
   if (st.flags[st.idx(num, y - 1)] || st.liquid[st.idx(num, y - 1)] !== 0) return;
   const rad = Math.floor(15 * (w / 4200));

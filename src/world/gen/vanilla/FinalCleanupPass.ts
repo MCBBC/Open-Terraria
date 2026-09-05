@@ -280,7 +280,9 @@ const genSolidSheet = (sh: number): boolean => SOLID_BY_SHEET.get(sh) ?? true;
  *  连接码写入 frameX（0/18/36/54/72/90/108/126/144/180/216/234/252/270/288/342/360/
  *  378/396/414/432/450/468）。HandleRopeEndFraming 尾调用（cs:82022）生成期柱内无
  *  绳族/380/314 邻 → no-op 备案。 */
-function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+// ★IIIII190 导出：HellFort.1457 hfTileFrameProj 投影补平台支消费（PlaceTile(19) 尾
+//   SquareTileFrame 派发的 TileFrameImportant Platforms 支 cs:86648-86772;零掷纯帧）。
+export function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   void ctx;
   const i = st.idx(x, y);
   const sh = SWEEP_SHEET[st.type[i]]!;
@@ -1169,7 +1171,10 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     || sheet === 15 || sheet === 20 || sheet === 216 || sheet === 338 || sheet === 390
     || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
     || sheet === 12 || sheet === 31 || sheet === 639 || sheet === 696 || sheet === 484
-    || sheet === 91)) {   // IIIIIII3：CheckBanner 组帧校验自读帧族（91 同列 sparse 免疫）
+    || sheet === 91   // IIIIIII3：CheckBanner 组帧校验自读帧族（91 同列 sparse 免疫）
+    // ★IIIRS200：Check2x1 横 2 格族同列（16/18/29/103/134/462/649——完整性门读双格帧）
+    || sheet === 16 || sheet === 18 || sheet === 29 || sheet === 103
+    || sheet === 134 || sheet === 462 || sheet === 649)) {
     return true;   // UUUU：178 同列读帧族（sparse 模式下嵌合帧会伪杀 CheckAndAdjust）
   }
   // ★AAAAAA：平台连接帧（TileFrameImportant 的 Platforms 早支，cs:86110-86230）——
@@ -1190,6 +1195,14 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   竖组完整性 + 上锚门整组杀——g #105 (564,328) 孤儿旗帜实证（此前仅 LiquidSim
     //   前置扫镜像覆盖沉降级联，引擎主臂缺席）。稀疏模式同列豁免见上方 frameSparse 清单。
     case 91: checkBannerSweep(st, ctx, x, y); return true;
+    // ★IIIII206（1457 cs:86983-85 派发 case 92/93/453 → Check1xX cs:38169-38252）：
+    //   灯族 1×N 组完整性 + 底锚 SolidTileAllowBottomSlope 门整组杀——ddual #78
+    //   (779,753-755) T0>93×3 实证：Piles 槽 tileSolid[225]=false 失效窗（前序 pass
+    //   翻,cs:19620 尾还原）,(779,752) 空位放堆失败 → SquareTileFrame 帧到下邻灯组 →
+    //   Check1xX 地面 225 读「非实心」→ 整组 KillTile（vanilla 1t93→0t0×3,JS 曾落空支
+    //   存活）。92/453 同 case 列照录（生成期在场面待各链自证,引擎语义与原版全同）。
+    //   组杀尘掷走 genKillTile 认证面（ddual #78 掷流全程对齐实证=杀面零掷差）。
+    case 92: case 93: case 453: check1xXSweep(st, ctx, x, y, sheet); return true;
     case 518: checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
@@ -1227,6 +1240,13 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
       plantCheckSweep(st, ctx, x, y, sheet); return true;
     case 13: case 33: case 49: case 50: case 78: case 174: case 372: case 646: case 707:
       checkOnTableSweep(st, ctx, x, y, sheet); return true;
+    // ★IIIRS200（2026-09-05）：Check2x1 派发组（1457 cs:86876-86882 → Check2x1 cs:47379）
+    //   ——横 2 格完整性 + 非桌族双底 SolidTileAllowBottomSlope 支撑门 + {29,103,462}
+    //   桌面门（check2x1Sweep 本体早已全量实现,唯缺本分派=iamerror #105 残差
+    //   工作台 (2665,487) 右半被幽灵 501 覆盖 → vanilla 整件杀/JS 存活 实证）。
+    //   掷零档（KillTile 尘掷门 18 不在杀族;完整性门零掷）→ 派发 RNG 流零移。
+    case 16: case 18: case 29: case 103: case 134: case 462: case 649:
+      check2x1Sweep(st, ctx, x, y, sheet); return true;
     case 185: checkPileSweep(st, ctx, x, y); return true;
     // KKKKK 批补（#101 金标 14 格击杀实证——文件头"零击杀证据"备案陈旧）：
     //   CheckAlch 药草（cs:86573 default 的 tileAlch 族）/ CheckJunglePlant 233/236/
@@ -1461,6 +1481,45 @@ function checkBannerSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): v
     if (st.type[q] === selfType) killTileGen(st, ctx, x, yy);   // cs:46560 不查 active（vanilla 同）
   }
   ctx.destroyObject = false;                                         // cs:46657
+}
+
+/** Check1xX（cs:38169-38252）——★IIIII206 补派发（case 92/93/453）。1×N 灯族：
+ *  num=3（92→6）；组顶=本格 y−(frameY%(18*num))/18、样式段 num3=frameY/(18*num) 整除；
+ *  组完整性四判（active/type/frameY==k*18+num3*num*18/frameX 全等，任一失配=bad）+
+ *  底锚 (x,top+num) SolidTileAllowBottomSlope 门（Piles 槽 tileSolid[225]=false 失效窗
+ *  即由此现形,见派发处注）。败 → destroyObject 闸内整组 KillTile（type 裸读不查
+ *  active,vanilla 同）；92/453/93 的 Item.NewItem 掉落零掷不移植（生成期 items 面
+ *  与 tile 对拍无关,引擎既定口径）。 */
+function check1xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                     // cs:38171 头闸
+  const i0 = st.idx(x, y);
+  const selfType = st.type[i0]!;                                     // cs:38172 派发参
+  const fx0 = st.frameX[i0]!;                                        // cs:38173 frameX
+  const num = sheet === 92 ? 6 : 3;                                  // cs:38174-76
+  let num2 = st.frameY[i0]!;                                         // cs:38178 frameY
+  let num3 = 0;
+  while (num2 >= 18 * num) { num2 -= 18 * num; num3++; }             // cs:38179-83 样式段
+  const top = y - Math.trunc(num2 / 18);                             // cs:38186 num5=组顶
+  let bad = false;
+  for (let k = 0; k < num; k++) {                                    // cs:38187-38209 组校验
+    const yy = top + k;
+    if (yy < 0 || yy >= st.h) { bad = true; continue; }              // Main.tile==null → 失配
+    const q = st.idx(x, yy);
+    if ((st.flags[q] & 1) === 0) bad = true;
+    else if (st.type[q] !== selfType) bad = true;
+    else if (st.frameY[q] !== k * 18 + num3 * num * 18) bad = true;
+    else if (st.frameX[q] !== fx0) bad = true;
+  }
+  if (!solidAllowBottom(st, x, top + num)) bad = true;               // cs:38214-19 底锚门
+  if (!bad) return;
+  ctx.destroyObject = true;                                          // cs:38222
+  for (let k = 0; k < num; k++) {
+    const yy = top + k;
+    if (yy < 0 || yy >= st.h) continue;
+    const q = st.idx(x, yy);
+    if (st.type[q] === selfType) killTileGen(st, ctx, x, yy);        // cs:38224-28
+  }
+  ctx.destroyObject = false;                                         // cs:38252
 }
 
 
@@ -1763,7 +1822,14 @@ function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vani
   };
   const wr = (nfx: number, nfy: number): void => {
     cfx = nfx; cfy = nfy;
-    if (!dead) { st.frameX[k] = nfx; st.frameY[k] = nfy; }
+    // ★IIIII177b：杀后重帧必须写回 store——vanilla CheckTree/CheckTreeWithSettings
+    //   的后续重帧块写的是 Main.tile[i,j] 死格对象本体（KillTile 只改字段不换对象），
+    //   帧重写在 kill 后仍持久（R3 杀支 (0,132+num6) 族 / R4else3 孤立支 (110,-1)/(154,-1)
+    //   族）。实证：winter w159 (1136,721)=t0 ghost f(0,132)、(1137,721)=t0 f(110,-1)
+    //   ——Micro_Biomes mahogany 叶球 SetFrames(frameNeighbors:true) 邻级联中 CheckTree
+    //   杀 t5 树格（叶下 384≠草族）后续块重帧（x86 #097 dump 逐槽考古）。
+    //   曾 `if (!dead)` 丢弃 → JS 死格帧停 kill 值(0×2)≠x86 重帧值。
+    st.frameX[k] = nfx; st.frameY[k] = nfy;
   };
   if (!groundOk && num4 !== self
     && ((cfx === 0 && cfy <= 130) || (cfx === 22 && cfy <= 130) || (cfx === 44 && cfy <= 130))) kill();   // R1

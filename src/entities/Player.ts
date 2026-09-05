@@ -44,6 +44,7 @@ import { TagEffectStack } from './WhipTag';
 import { harpyCharmEffect } from './Arrow';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
+import { getAutoDoorVelocityContribution } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 自动门速度贡献
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { damageVarRoll } from '../stats/DamageVar';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
@@ -1188,6 +1189,13 @@ export class Player extends Entity {
   get ridingMount(): boolean { return this.mount.active && !this.mount.isCart; }
   /** 游泳族坐骑门（坐骑 buff 的 ignoreWater 语义：海龟 131/猪鲨崽 168/熔岩鲨 265） */
   get ridingMountSwimFree(): boolean { return this.ridingMount && this.mount.swimFree; }
+
+  /** ★SW-AS1 2026-09-05 自动开门速度贡献（Player.cs:24534-24540 1:1）：velocity.X；
+   *  骑滚轴鞋（MountID.Sets.IsRollerSkates={57,58,59,60}）且 |vx|<3f → 3f×sign(vx)。
+   *  消费点=DoorOpeningHelper.GetPlayerInfoForOpeningDoor（:325）。 */
+  getAutoDoorVelocityContribution(): number {
+    return getAutoDoorVelocityContribution(this.vx, this.mount.active, this.mount.type);
+  }
 
   constructor(x: number, y: number, inv: Inventory) {
     super();

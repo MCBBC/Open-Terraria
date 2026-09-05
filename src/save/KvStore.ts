@@ -89,13 +89,18 @@ export async function kvGet(key: string): Promise<string | null> {
   return localStorage.getItem(key);
 }
 
-/** 写入：字符串 ≤ 2MB 进 localStorage（快速路径），否则只进 IndexedDB */
+/** 写入：字符串 ≤ 2MB 双写 localStorage(读加速副本)+IndexedDB(权威),>2MB 只进 IDB。
+ *  ★双写(2026-09-05 方案A):小记录此前只落 localStorage(唯一副本)——iOS ITP 7 天
+ *  驱逐/壳浏览器单独清 localStorage 会让角色外观/随身态蒸发而 IDB 空闲;现 IDB
+ *  恒为权威副本,localStorage 仅加速。localStorage 满溢不再影响数据安全
+ *  (catch 后仍写 IDB,返回值如实反映落点)。 */
 export async function kvSet(key: string, value: string): Promise<'local' | 'idb' | 'fail'> {
+  let where: 'local' | 'idb' = 'idb';
   if (value.length <= 2 * 1024 * 1024) {
     try {
       localStorage.setItem(key, value);
-      return 'local';
-    } catch { /* 超限或被禁 → 落 IndexedDB */ }
+      where = 'local';
+    } catch { /* 超限或被禁 → IDB 单写 */ }
   }
   try {
     const db = await openDb();
@@ -105,9 +110,10 @@ export async function kvSet(key: string, value: string): Promise<'local' | 'idb'
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-    return 'idb';
+    return where;
   } catch {
-    return 'fail';
+    // IDB 也不可用:快路径已成功(≤2MB)算 'local',否则整体失败
+    return where === 'local' ? 'local' : 'fail';
   }
 }
 

@@ -13,6 +13,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { framedCellFrame } from '../src/world/FurnitureStyle';
 import { repairTallGateFramesInStore } from '../src/world/tallgateFrameRepair';
 import { TALL_GATE_ROW_FY, TALL_GATE_CFH, TALL_GATE_HEIGHTS, tallGateRowOf } from '../src/world/Door';
+import { DoorOpeningHelper } from '../src/world/DoorOpeningHelper';
 
 // 高门右键交互回归锁（Player.cs:32552-32560 右键 388→开/389→关;怪物攻开的 389
 //  玩家可右键复原——DoorOpeningHelper 只自动关【helper 自己开的】门,vanilla 同）
@@ -97,34 +98,33 @@ describe('门悬停图标（tileInteractionsMouseOver）', () => {
   });
 });
 
-// 站定门回归锁(DoorOpeningHelper.cs:305-307 LookForDoorsToOpen 入口门):
+// 站定门回归锁(DoorOpeningHelper.cs:302-305 LookForDoorsToOpen 入口门):
 // 无方向输入且 vx==0 → 自动开扫描整帧跳过(右键关门后站门口不被立即弹开);
-// 持方向键/滑速 → 照常自动开
+// 持方向键/滑速 → 照常自动开。★SW-AS1 2026-09-05:旧 updateTallGateAuto 简化面退役,
+// 改驱动 Game.updateDoorHelperAuto(DoorOpeningHelper 全量移植),行为锁保留。
 describe('高门自动开站定门', () => {
   it('关门后站门口(无输入+vx=0)保持 388;持 Right 键 → 自动开 389', () => {
     const w = new World(60, 120, 1, 'tg2');
     const st = w.store;
     const T388 = TILE_BY_KEY['v_388_tall_gate_closed'] ?? -1;
     const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
-    const keys = new Set<string>();
     const g = Object.create(Game.prototype) as unknown as {
       world: World; sfx: { play(n: string): void };
-      input: { rightDown: boolean; downAction(a: string): boolean };
-      openTallGates: Map<number, number>; tickCount: number; player: unknown;
-      updateTallGateAuto(): void;
+      doorHelper: DoorOpeningHelper; player: unknown; overlapsEntity(x: number, y: number): boolean;
+      updateDoorHelperAuto(): void;
     };
     g.world = w;
     g.sfx = { play: () => {} };
-    g.input = { rightDown: false, downAction: (a: string) => keys.has(a) };
-    g.openTallGates = new Map();   // 壳不跑字段初始化,手动补
-    g.tickCount = 0;
-    const player = { x: 30 * 16 - 2, y: 40 * 16, w: 20, h: 42, vx: 0, dead: false };
+    g.doorHelper = new DoorOpeningHelper();   // 壳不跑字段初始化,手动补
+    g.overlapsEntity = () => false;
+    const player = { x: 30 * 16 - 2, y: 40 * 16, w: 20, h: 42, vx: 0, gravDir: 1,
+      inputLeft: false, inputRight: false, getAutoDoorVelocityContribution: () => 0 };
     g.player = player;
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
-    g.updateTallGateAuto();                              // 站定:不重开
+    g.updateDoorHelperAuto();                            // 站定:不重开
     expect(st.get(30, 40)).toBe(T388);
-    keys.add('Right'); player.vx = 1;
-    g.updateTallGateAuto();                              // 持输入:自动开
+    player.inputRight = true; player.vx = 1;
+    g.updateDoorHelperAuto();                            // 持输入:自动开
     expect(st.get(30, 40)).toBe(T389);
   });
 });
@@ -227,16 +227,15 @@ describe('高门自动开几何门（TryOpenDoor :172-192 行为锁）', () => {
     const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
     const g = Object.create(Game.prototype) as unknown as {
       world: World; sfx: { play(n: string): void };
-      input: { rightDown: boolean; downAction(a: string): boolean };
-      openTallGates: Map<number, number>; tickCount: number; player: unknown;
-      updateTallGateAuto(): void;
+      doorHelper: DoorOpeningHelper; player: unknown; overlapsEntity(x: number, y: number): boolean;
+      updateDoorHelperAuto(): void;
     };
     g.world = w;
     g.sfx = { play: () => {} };
-    g.input = { rightDown: false, downAction: () => true };   // 持输入(过站定门)
-    g.openTallGates = new Map();
-    g.tickCount = 0;
-    const player = { x: 30 * 16 + 4, y: 44 * 16, w: 20, h: 42, vx: 1, dead: false };
+    g.doorHelper = new DoorOpeningHelper();
+    g.overlapsEntity = () => false;
+    const player = { x: 30 * 16 + 4, y: 44 * 16, w: 20, h: 42, vx: 1, gravDir: 1,
+      inputLeft: false, inputRight: true, getAutoDoorVelocityContribution: () => 0 };   // 持输入(过站定门)
     g.player = player;
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
     return { g, st, player, T388, T389 };
@@ -245,29 +244,29 @@ describe('高门自动开几何门（TryOpenDoor :172-192 行为锁）', () => {
   it('玩家垂直全含于门盒(640..736) → 开', () => {
     const { g, st, player, T389 } = mkGate();
     player.y = 45 * 16 - player.h;          // 脚=门底(720),盒 678..720 → 收缩 679..719 ⊆ 640..736
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T389);
   });
 
   it('站门顶(脚=门顶 640)不开——vanilla 不开脚下门(相交门失败)', () => {
     const { g, st, player, T388 } = mkGate();
     player.y = 40 * 16 - player.h;          // 盒 598..640,收缩 599..639:与门盒不相交(639 < 640)
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T388);
   });
 
   it('脚在门底+16 以下(752)不开——垂直全含失败(751 > 736)', () => {
     const { g, st, player, T388 } = mkGate();
     player.y = 47 * 16 - player.h;
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T388);
   });
 
   it('贴边不算相交(Rectangle.Intersects 严格):玩家左缘=门右缘(496)不开', () => {
     const { g, st, player, T388 } = mkGate();
-    player.x = 31 * 16;                     // 盒 496..516:左缘贴门右缘,扫描(±2px)仍会扫到列 30
+    player.x = 31 * 16;                     // 盒 496..516(+num3=1 → 497..517):左缘贴/越门右缘(496)
     player.y = 45 * 16 - player.h;
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T388);
   });
 });
@@ -287,51 +286,56 @@ describe('高门自动关 R6 贴边带 + R7 失败放弃跟踪（TryCloseDoor :1
     const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
     const g = Object.create(Game.prototype) as unknown as {
       world: World; sfx: { play(n: string): void };
-      input: { rightDown: boolean; downAction(a: string): boolean };
-      openTallGates: Map<number, number>; tickCount: number; tallGateVelWindow: number;
-      player: unknown; updateTallGateAuto(): void;
+      doorHelper: DoorOpeningHelper; player: unknown; overlapsEntity(x: number, y: number): boolean;
+      updateDoorHelperAuto(): void;
     };
     g.world = w;
     const played: string[] = [];
     g.sfx = { play: (n: string) => played.push(n) };
-    g.input = { rightDown: false, downAction: () => false };
-    g.openTallGates = new Map();
-    g.tickCount = 0;
-    g.tallGateVelWindow = 0;                     // 壳不跑字段初始化,手动补
-    // 直接布开门态 389 五行(锚 30,40)并登记跟踪——不经开路径,免输入桩耦合
-    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T389, 0, TALL_GATE_ROW_FY[dy]);
-    g.openTallGates.set(st.idx(30, 40), 0);
-    const player = { x: 0, y: 0, w: 20, h: 42, vx: 0, dead: false };
+    g.doorHelper = new DoorOpeningHelper();
+    g.overlapsEntity = () => false;
+    // 闭态门 + 玩家贴门持输入 → 走真实开路径入跟踪（替代旧手工 openTallGates.set）
+    const player = { x: 30 * 16 - 2, y: 44 * 16 - 42, w: 20, h: 42, vx: 0, gravDir: 1,
+      inputLeft: false, inputRight: true, getAutoDoorVelocityContribution: () => 0 };
     g.player = player;
-    return { g, st, player, T388, T389, anchorIdx: st.idx(30, 40), played };
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    g.updateDoorHelperAuto();                        // 自动开 → 389 + 跟踪
+    expect(st.get(30, 40)).toBe(T389);
+    return { g, st, player, T388, T389, played };
   };
 
   it('R6 贴边:玩家右缘=门区左缘(479)零宽接触不关;再远 1px 才关', () => {
-    const { g, st, player, T388, T389, anchorIdx, played } = mkOpenGate();
+    const { g, st, player, T388, T389, played } = mkOpenGate();
+    player.inputRight = false; player.vx = 0;
     player.x = 479 - player.w;              // 盒 459..479:右缘贴门区左缘(门区 479..497)
     player.y = 44 * 16;                     // 盒 704..746 与门区 640..720 正重叠(另一轴正宽)
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T389);      // 贴边=仍算在门区 → 不关
-    expect(g.openTallGates.has(anchorIdx)).toBe(true);
+    expect(g.doorHelper.isTrackingOpenDoor(30, 40)).toBe(true);
     player.x -= 1;                          // 右缘 478 < 479 → 双轴分离 → 关
-    g.updateTallGateAuto();
+    g.updateDoorHelperAuto();
     expect(st.get(30, 40)).toBe(T388);
-    expect(g.openTallGates.has(anchorIdx)).toBe(false);   // ClosedDoor 移除跟踪
-    expect(played.length).toBe(1);          // 关门音 1 次(失败档不播,ShiftTallGate :52213 前置)
+    expect(g.doorHelper.isTrackingOpenDoor(30, 40)).toBe(false);   // ClosedDoor 移除跟踪
+    expect(played.length).toBe(2);          // 开/关各 1 次(ShiftTallGate :52213 不分开关恒播)
   });
 
   it('R7 失败档:结构残缺 shiftTallGate null → 放弃跟踪不重试;门被拆(DoorIsInvalidated)同', () => {
-    const { g, st, T389, anchorIdx, played } = mkOpenGate();
+    const { g, st, player, T388, T389, played } = mkOpenGate();
     const STONE = idOfSheet(1);
     st.setTileSilent(30, 42, STONE, 0, 0);  // 中行换石 → ValidateTileSquare 失败(:52201)
-    g.updateTallGateAuto();                 // 玩家在 (0,0) 远离门区
-    expect(g.openTallGates.has(anchorIdx)).toBe(false);   // FailedToCloseDoor → 放弃(曾重试)
+    player.x = 0; player.y = 0; player.inputRight = false;   // 移远(足印外) → 触发关尝试
+    g.updateDoorHelperAuto();
+    expect(g.doorHelper.isTrackingOpenDoor(30, 40)).toBe(false);   // FailedToCloseDoor → 放弃(曾重试)
     expect(st.get(30, 40)).toBe(T389);      // 残门保持开门态未强行关成(原版同)
-    // DoorIsInvalidated:锚格被拆 → 同样移除跟踪
-    st.setTileSilent(30, 40, 0, 0, 0);
-    g.openTallGates.set(anchorIdx, 0);
-    g.updateTallGateAuto();
-    expect(g.openTallGates.has(anchorIdx)).toBe(false);
-    expect(played.length).toBe(0);          // 两次皆失败档,无开关音
+    // DoorIsInvalidated:再走真实开路径开一扇(34 列)→锚格被拆 → 同样移除跟踪
+    for (let dy = 0; dy < 5; dy++) st.setTileSilent(34, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    player.x = 34 * 16 - 2; player.y = 44 * 16 - 42; player.inputRight = true;
+    g.updateDoorHelperAuto();
+    expect(g.doorHelper.isTrackingOpenDoor(34, 40)).toBe(true);
+    st.setTileSilent(34, 40, 0, 0, 0);      // 锚格被拆
+    player.x = 0; player.y = 0; player.inputRight = false;
+    g.updateDoorHelperAuto();
+    expect(g.doorHelper.isTrackingOpenDoor(34, 40)).toBe(false);
+    expect(played.filter((n) => n === 'door_open').length).toBe(2);   // 两次成功开门音;失败档不播(:52213 前置)
   });
 });

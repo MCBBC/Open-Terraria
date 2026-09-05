@@ -14915,6 +14915,8 @@ export class Renderer {
   timeUiHover = false;
   /** UI 点击边沿检测（render 存 _mouseDown，drawMinimap 末尾更新） */
   private _uiPrevMouseDown = false;
+  /** 小地图按钮点击闩（按钮区消费的 click 不触发小地图→全图展开；drawMinimap 末清零） */
+  private _minimapBtnClicked = false;
 
   /** UI 贴图 bitmap-only 缓存（loadBitmapOnly：在飞守卫 + 失败回退 Image 永不缺图）。
    *  未就绪返回 null（消费方跳帧自愈）。★旧版返回 Image 且升级位图被丢弃——
@@ -15109,6 +15111,16 @@ export class Renderer {
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
       entities.filter((e) => e instanceof Enemy) as Enemy[], world,
       this.remotePlayers);
+    // ★出生点标记（SpawnMapLayer 同源贴图——原版 DrawMap 图标层在 minimap 模式也跑）
+    const spTex = this.spawnMapTex('point');
+    if (spTex) {
+      const spMX = ox + (world.spawnX + 0.5 - sx) / viewTiles * size;
+      const spMY = oy + (world.spawnY - sy) / viewTiles * size;
+      if (spMX >= ox - 8 && spMX <= ox + size + 8 && spMY >= oy - 8 && spMY <= oy + size + 8) {
+        const icS = Math.max(8, size / viewTiles * 1.5);
+        ctx.drawImage(spTex, spMX - icS / 2, spMY - icS / 2, icS, icS);
+      }
+    }
     ctx.restore();
     ctx.globalAlpha = 1;   // 框前景/按钮/时间文字不随 α（MinimapFrame.cs:182-188 恒 White）
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
@@ -15167,6 +15179,7 @@ export class Renderer {
       ctx.font = 'bold 13px monospace';
       ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
       if (clicked && btnHover) {
+        this._minimapBtnClicked = true;
         // ★首用确认门（2026-08-27 用户要求,同道具搜索）：未确认 → 弹窗明示超游
         //   风险,确认后 localStorage 持久放行且本次即开面板；已确认 → 直接开合
         showJourneyQuickGate('time', () => { this.timePanelOpen = !this.timePanelOpen; });
@@ -15188,7 +15201,7 @@ export class Renderer {
         ctx.fillStyle = '#e8e8f4';
         ctx.font = '12px sans-serif';
         ctx.fillText(label, x + w / 2, y + h / 2 + 4);
-        if (clicked && hov) act();
+        if (clicked && hov) { act(); this._minimapBtnClicked = true; }
       };
       const setT = (t: number) => { clock.timeOfDay = ((t % 1) + 1) % 1; };
       box(px + 8, py + 8, 76, 22, '\u2212 1 \u5c0f\u65f6', () => setT(clock.timeOfDay - 1 / 24));
@@ -15238,7 +15251,7 @@ export class Renderer {
         ctx.fillStyle = '#e8e8f4';
         ctx.font = '12px sans-serif';
         ctx.fillText(label, x + w2 / 2, y + h2 / 2 + 4);
-        if (clicked && hov) act();
+        if (clicked && hov) { act(); this._minimapBtnClicked = true; }
       };
       const presetsW: Array<[string, string]> = [
         ['晴朗', 'clear'], ['多云', 'cloudy'], ['小雨', 'lightrain'], ['大雨', 'heavyrain'],
@@ -15256,6 +15269,17 @@ export class Renderer {
         box2(px2 + pw2 - 60, py2 + 88, 52, 18, '+ 风', () => { wd.windSpeedTarget = Math.min(0.8, wd.windSpeedTarget + 0.2); });
       }
     }
+    // ★点击小地图地图区域 → 打开全图（用户实报缺失——原版 DrawMap 全模式共用
+    //  MapIconOverlay，小地图模式可点击展开全图；按钮/天气控件已消费的点击不触发）
+    if (clicked && !this._minimapBtnClicked
+      && mx >= ox && mx <= ox + size && my >= oy && my <= oy + size) {
+      this.fullMap.open = true;
+      this.fullMap.zoomTarget = Math.max(0.25, this.minimapZoom * 0.5);
+      this.fullMap.zoom = this.fullMap.zoomTarget;
+      this.fullMap.anchorMX = Math.floor(mx / TILE);
+      this.fullMap.anchorMY = Math.floor(my / TILE);
+    }
+    this._minimapBtnClicked = false;
     this._uiPrevMouseDown = this._mouseDown;
     ctx.restore();
     ctx.restore(); // 移动端缩放变换（uiS=1 时为空 save/restore，恒等）

@@ -877,15 +877,22 @@ describe('P1-8 受击（NPC.cs:82143-82241/:53419-53534）', () => {
     expect(npc.hurt(20, 0, 0, game)).toBe(true);    // iframes=0
   });
 
-  it('击退置换式（:82229-82238 常规门）：vx=kb×hitDir、vy=−kb×0.75', () => {
+  it('击退置换式（:82300-82311 常规门,SW-AM2 重钉 AF1 resist 链终值）：vx=num3×hd×resist、vy=−num3×0.75×resist', () => {
     const world = flatWorld('kb');
     const npc = new TownNPC('guide', 100 * 16, F * 16);
     npc.vx = 0.5;                       // 原值被置换（旧版为 += 叠加）
     const { game } = makeGame(world, { npcs: [npc] });
     npc.rng = () => 0.9;
-    npc.hurt(20, 6, 0, game);           // 20×10=200 < 250 常规门
-    expect(npc.vx).toBe(6);
-    expect(npc.vy).toBe(-4.5);
+    // ★SW-AM2 2026-09-05 重钉（旧期望 vx=6/vy=−4.5 系 AF1 resist 链前置位旧值）：
+    //  1457 StrikeNPC :82216 双门 → :82218 num3 = kb×resist = 6×0.5 = 3（向导
+    //  knockBackResist=0.5,NPC.cs:9089）→ ≤8 不进五段软帽（:82224-82248）→ 非暴击
+    //  不×1.4 → dmg=20−def30×0.5=5,num8=5×10=50 < lifeMax 250 → 常规门置换支：
+    //  vx = num3×hitDirection×resist = 3×1×0.5 = 1.5（:82310）,
+    //  vy = −num3×0.75×resist = −3×0.75×0.5 = −1.125（:82304,noGravity=false 档）。
+    //  resist 二次乘（cap 输入一次 + 置换支一次）= 原版如此（Enemy.ts:13475 同款）。
+    npc.hurt(20, 6, 0, game);
+    expect(npc.vx).toBe(1.5);
+    expect(npc.vy).toBe(-1.125);
   });
 
   it('Boss 防御链（:53437-53534）：史莱姆王 +2 / 硬模式 +12 从 world.flags 读', () => {

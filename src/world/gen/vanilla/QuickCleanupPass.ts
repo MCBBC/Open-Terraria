@@ -9,7 +9,8 @@
 //   (c) 沙岩墙 187/硬化沙墙 216（地下沙漠天然墙，非大理石/花岗岩——墙 178/180
 //       是 MarbleUnsafe/GraniteUnsafe）：泥 59/粉沙淤泥 123/雪泥 224/花岗 368/
 //       大理 367 → 硬化沙 397（不查 active，幽灵 type 同改=原版语义）；液体二分：
-//       j<=rockLayer 清液，否则任何液体→满 255 岩浆；
+//       j<=rockLayer 清液，否则任何液体→满 255 岩浆——★IIIII206 该支 cs:18048
+//       `!Main.dualDungeonsSeed` 门（双地牢世界整支跳过,普通世界照跑）；
 //   (d) 表面悬空沙下墙补齐：沙下格无墙且非实心 → 7×7 扫描取墙值回填。★C# 的
 //       break 只断内层 m 循环——num=最右一列（含墙者）的最上方墙值，bug-for-bug；
 //   (e) SaveSlopes 归一：非 active 或非 SaveSlopes 类型一律 ClearSlope（slope=0
@@ -77,7 +78,12 @@ function isSaveSlope(t: number): boolean {
     || sh === 19 || sh === 239 || sh === 380 || sh === 427
     || (sh >= 435 && sh <= 439)
     || sh === 192 || sh === 481 || sh === 482 || sh === 483;
-  return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
+  // ★IIIII187（iamerror #70 定罪修复）：vanilla SaveSlopes[t]=tileSolid[t]∪NonSolidSaveSlopes
+  //   读【生成期动态】tileSolid——errorWorld 深岛屋区域 379 幻影块在
+  //   UndergroundJungleTrees 头 cs:17956 flip=true（到 Traps cs:18773 才回 false），
+  //   (e) 段 ClearSlope 门须视 379 为 SaveSlopes；曾只按 pristine 静态判 ⇒ 379 坡位
+  //   被误 ClearSlope（x86 slope=1/half=1 保留 vs JS 0/0，#70 双格残留、#71+ 级联）。
+  return pristineSolid || genSolidType(t) || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:42370)：active && tileSolid && !tileSolidTop && !halfBrick
@@ -88,7 +94,14 @@ function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.flags[i]) return false;
   const t = st.type[i];
   const d = TILE_DEFS[t];
-  return genSolidType(t) && !!d && d.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+  // ★IIIII187（iamerror #70 定罪修复）：勿再 AND `d.solid`——genSolidType(t) 已含
+  // 生成期覆写语义（覆写值直接替代静态初值，GenSolid.ts 头注「消费端用
+  // isGenSolid/genSolidType 替代裸 TILE_DEFS[t]?.solid」）。errorWorld 深岛屋
+  // （cs:13108 沉底岛）屋门坡脚格下方为 379 幻影块（UndergroundJungleTrees 头
+  // cs:17956 flip=true 且到 Traps cs:18773 前不还原）——曾 `genSolidType && d.solid`
+  // 被静态 solid=false 压死 ⇒ SolidTile(2183,513) 误 false → (e) 段误杀坡脚格
+  // （x86 act=1/slope=1 保留 vs JS act=0/slope=0，#70 单格残留、#71+ 级联）。
+  return genSolidType(t) && !!d && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
 }
 
 /** oceanDepths(cs:10978-10989)：y 超海洋层 false；横向进沙滩带 true
@@ -142,15 +155,21 @@ export function runQuickCleanupPass(st: TileStore, rng: RNG, gs: GenState): void
         }
       }
 
-      // (c) 沙岩/硬化沙墙内杂块转硬化沙 + 液体二分（cs:18023-18045，不查 active）
+      // (c) 沙岩/硬化沙墙内杂块转硬化沙 + 液体二分（cs:18023-18045，不查 active）。
+      //   ★IIIII206（#71 定谳落刀）：液体二分支被 `if (!Main.dualDungeonsSeed)` 包裹
+      //   （1457/1458 WorldGen.cs:18048；1456 同域无门=曾按 1456 移植恒执行）——双地牢
+      //   世界 vanilla 既不 清液 也不 灌岩浆，JS 曾恒执行 → #71 L=21/Lt=997。型转
+      //   泥/粉沙/雪泥/花岗/大理→硬化沙在门**外**（cs:18035-18043），保持无条件。
       if (st.wall[t] === WALL_SANDSTONE || st.wall[t] === WALL_HARDSAND) {
         if (st.type[t] === MUD || st.type[t] === SILT || st.type[t] === SLUSH) st.type[t] = HARDSAND;
         if (st.type[t] === GRANITE || st.type[t] === MARBLE) st.type[t] = HARDSAND;
-        if (j <= gs.rockLevel) {
-          st.liquid[t] = 0;
-        } else if (st.liquid[t] > 0) {
-          st.liquid[t] = 255;
-          st.liquidType[t] = LIQUID_TYPE.LAVA;
+        if (!gs.seedFlags.dualDungeons) {
+          if (j <= gs.rockLevel) {
+            st.liquid[t] = 0;
+          } else if (st.liquid[t] > 0) {
+            st.liquid[t] = 255;
+            st.liquidType[t] = LIQUID_TYPE.LAVA;
+          }
         }
       }
 

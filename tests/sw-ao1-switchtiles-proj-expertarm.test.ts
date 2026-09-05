@@ -1,4 +1,4 @@
-// SW-AO1 2026-09-05 回归：①SwitchTiles 弹幕消费面路由（Collision.cs:3240-3377 内联集
+// SW-AO1 2026-09-05 回归：①SwitchTiles 弹幕消费面路由（Collision.cs:3240-3373 内联集
 //   {135,210,443,442};Projectile.cs:19973-19979 objType4 门=!collided&&!flag4&&(tileCollide|flag5)、
 //   :17195 objType3 白名单=巨石族;ForcePlateDetection 巨石族=false/爆炸箭族=true（ProjectileID.cs:297-373））
 // ②TownNPC.hurt 大伤害门专家 ×15 臂（NPC.cs:82255-82259 num8=num*10→expertMode num*15）
@@ -25,7 +25,7 @@ function plateShell(w: World, projs: unknown[]) {
   g.entities = { projectiles: projs, critters: [], npcs: [], enemies: [] };
   return { g, calls };
 }
-/** 弹体姿态：盒跨 (8,20) 板面带 [20*16+12, 20*16+16.01)（Collision.cs:3352-3357） */
+/** 弹体姿态：盒跨 (8,20) 板面带 [20*16+12, 20*16+16.01)（Collision.cs:3323/:3277） */
 const shot = (id: number, over: object = {}) => ({ x: 8 * TILE + 4, y: 20 * TILE + 8, w: 8, h: 8, id, ...over });
 
 describe('SW-AO1①: SwitchTiles 弹幕路由', () => {
@@ -65,7 +65,7 @@ describe('SW-AO1①: SwitchTiles 弹幕路由', () => {
     const d = plateShell(w, [shot(2, { tileCollide: false, projId: 37 })]); d.g.updateEntityPlates();
     expect(d.calls).toEqual([[8, 20]]);
   });
-  it('442 取向读 frameX/22（Collision.cs:3294）且豁免脚带门（:3346 flag）——右带 pad 侧带可触', () => {
+  it('442 取向读 frameX/22（Collision.cs:3287）且豁免脚带门（:3321 flag）——右带 pad 侧带可触', () => {
     const w = new World(80, 80, 7, 't'); const st = w.store;
     st.setTileSilent(8, 20, PAD); st.frameX[st.idx(8, 20)] = 66;   // 右带装（WorldGen.cs:87463）
     const r = plateShell(w, [{ x: 8 * TILE + 8, y: 20 * TILE - 4, w: 8, h: 8, id: 1 }]);

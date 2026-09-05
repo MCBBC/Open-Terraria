@@ -33,7 +33,7 @@ import {
   type DungeonGenVars1457,
   type DungeonStyleData,
 } from './DungeonStyles1457';
-import { genSolidType } from './GenSolid';
+import { genSolidType, vanSolidOrSloped } from './GenSolid';
 import {
   SnakeOrientation as SO,
   dualSnakes,
@@ -144,6 +144,8 @@ export const DPHallType = { Legacy: 0, LegacyEntrance: 1, Regular: 2, Stairwell:
 export const Protection = { None: 0, Tiles: 1, Walls: 2, TilesAndWalls: 3 } as const;
 export const CPQuality = { Good: 0, Okay: 1, Bad: 2, VeryBad: 3 } as const;
 const GenShapeT = { Circle: 0, Mound: 1, Hourglass: 2, Doughnut: 3, QuadCircle: 4 } as const;
+// ★IIIII185：房雕 probes 总闸（SW_I185BS;零掷,缺省零开销）
+const i185bsG = typeof process !== 'undefined' && !!(typeof __swProcessEnv !== 'undefined' ? (__swProcessEnv ?? {}).SW_I185BS : undefined);
 /** SceneMetrics.ShimmerTileThreshold（SceneMetrics.cs:24）。 */
 const SHIMMER_TILE_THRESHOLD = 300;
 
@@ -235,6 +237,16 @@ function chTileSheet(st: TileStore, x: number, y: number, sheetType: number, res
   const t = TILE_INTERNAL_BY_SHEET.get(sheetType);
   if (t === undefined || !st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // ★IIIII175：格写监视（dormant,零开销;仅 __swI175Watch 命中时打点;裂砖族全量+1 帧调用方）
+  const w175 = (globalThis as { __swI175Watch?: Set<string>; __swI175Log?: (l: string) => void }).__swI175Watch;
+  if (w175) {
+    const log175 = (globalThis as { __swI175Log?: (l: string) => void }).__swI175Log;
+    if (w175.has(`${x},${y}`)) log175?.(`W|chTileSheet|x=${x}|y=${y}|sheet=${sheetType}|rst=${resetTile ? 1 : 0}|pre_a=${st.flags[i] & 1}|pre_t=${st.type[i]}`);
+    if ((sheetType === 481 || sheetType === 482 || sheetType === 483) && !w175.has('off')) {
+      const st2 = new Error().stack?.split('\n') ?? [];
+      log175?.(`W|CRACK|x=${x}|y=${y}|sheet=${sheetType}|via=${(st2[2] ?? '').trim().slice(0, 90)} <= ${(st2[3] ?? '').trim().slice(0, 60)}`);
+    }
+  }
   if (resetTile) {
     st.type[i] = 0; st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0; st.flags[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
@@ -260,6 +272,9 @@ function chWallSheet(st: TileStore, x: number, y: number, wallType: number, rese
 function clearTileOnly(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // ★IIIII175：格写监视（dormant,零开销）
+  const w175 = (globalThis as { __swI175Watch?: Set<string>; __swI175Log?: (l: string) => void }).__swI175Watch;
+  if (w175 && w175.has(`${x},${y}`)) (globalThis as { __swI175Log?: (l: string) => void }).__swI175Log?.(`W|clearOnly|x=${x}|y=${y}|pre_a=${st.flags[i] & 1}|pre_t=${st.type[i]}`);
   st.slope[i] = 0; st.half[i] = 0;
   st.flags[i] &= ~1;
   st.wire[i] &= ~32;
@@ -758,16 +773,21 @@ class DLegacyRoom extends DRoomBase {
     if (!this.generated) return;
     const st = ctx.st;
     const jsLiq = liquidSheetType + 1;                      // vanilla 0 基 ↔ JS +1 基
+    let fillN = 0;
     this.innerShape.forEachPoint((dx, dy) => {
       const x = Math.trunc(this.startPos.x) + dx;
       const y = Math.trunc(this.startPos.y) + dy;
       if (!st.inBounds(x, y)) return;
       const i = st.idx(x, y);
       if (!(y >= this.inner.centerY())) return;             // IsBelowHeight inclusive=y>=Y 通过
-      if (st.flags[i] & 1 && genSolidType(st.type[i])) return;   // IsNotSolid 拒
+      if (vanSolidOrSloped(st, x, y)) return;               // ★IIIII199 IsNotSolid=!SolidOrSlopedTile（Modifiers.cs:563-571→WG.cs:70515）
       st.liquid[i] = 255;
       st.liquidType[i] = jsLiq;
+      fillN++;
     });
+    if ((__swProcessEnv.SW_I199FLOODLOG ?? '') === '1') {
+      console.log(`FLD199|Legacy|start=${Math.trunc(this.startPos.x)},${Math.trunc(this.startPos.y)}|cy=${this.inner.centerY()}|box=${this.inner.L},${this.inner.T},${this.inner.R},${this.inner.B}|pts=${this.innerShape.size()}|fill=${fillN}`);
+    }
   }
   private phase(generating: boolean, data: DualDungeonData, ctx: DualLayoutCtx): void {
     const st = ctx.st;
@@ -951,7 +971,7 @@ class DWormlikeRoom extends DRoomBase {
       if (!st.inBounds(x, y)) return;
       const i = st.idx(x, y);
       if (!(y >= this.inner.centerY())) return;
-      if (st.flags[i] & 1 && genSolidType(st.type[i])) return;
+      if (vanSolidOrSloped(st, x, y)) return;               // ★IIIII199 IsNotSolid=!SolidOrSlopedTile
       st.liquid[i] = 255; st.liquidType[i] = jsLiq;
     });
   }
@@ -1072,7 +1092,7 @@ class DGenShapeRoom extends DRoomBase {
       if (!st.inBounds(x, y)) return;
       const i = st.idx(x, y);
       if (!(y >= oy)) return;
-      if (st.flags[i] & 1 && genSolidType(st.type[i])) return;
+      if (vanSolidOrSloped(st, x, y)) return;               // ★IIIII199 IsNotSolid=!SolidOrSlopedTile
       st.liquid[i] = 255; st.liquidType[i] = jsLiq;
     });
   }
@@ -1524,6 +1544,11 @@ class DBiomeStructuredRoom extends DBiomeRoomBase {
     const num14 = n12 - n11;
     const variant = ur.nextInt(4);
     const shapeAdd = 1;                                     // num15
+    // ★IIIII185 取证钩（SW_I185BS=1;零掷 logging-only）——BiomeStructured 房雕刻分支计数
+    const i185bs = typeof process !== 'undefined' && !!(__swProcessEnv ?? {}).SW_I185BS;
+    const cnt185 = i185bs ? { band: 0, hollow: 0, fill: 0, skip: 0 } : null;
+    if (i185bs) (globalThis as { __swI113?: (l: string) => void }).__swI113?.(
+      `I185BS|seed=${this.settings.randomSeed}|var=${variant}|px=${px}|py=${py}|num=${num}|n5=${n5}|n6=${n6}|n7=${n7}|n8=${n8}|n9=${n9}|n10=${n10}|n11=${n11}|n12=${n12}|gen=${generating ? 1 : 0}`);
     for (let k = n9; k < n10; k++) {
       const pctX = fr(Math.max(0, Math.min(1, fr(fr(k - n9) / fr(Math.max(1, fr(fr(n10) - 1 - n9)))))));
       const pctYRow = this.getYPercent(variant, pctX);
@@ -1548,11 +1573,13 @@ class DBiomeStructuredRoom extends DBiomeRoomBase {
         if (l < n20 || l > n22 || k < n27 || k > n29) continue;
         if (k <= n9 + num2 - 1 || k >= n10 - num2 + 1 || (l >= n20 && l <= n19f) || (l >= n21f && l <= n22)
           || (k >= n27 && k <= n26) || (k >= n28 && k <= n29)) {
+          if (cnt185) cnt185.band++;
           if (!generating) { this.shapeDataOuter!.add(k - Math.trunc(px) + shapeAdd, l - Math.trunc(py) + shapeAdd); continue; }
           chTileSheet(st, k, l, style.BrickTileType, false, tilePaint);
           if (st.liquid[ii] > 0) { st.liquid[ii] = 0; st.liquidType[ii] = 1; }
           chWallSheet(st, k, l, style.BrickWallType, false, wallPaint);
         } else if (this.inner.contains(k, l)) {
+          if (cnt185) cnt185.hollow++;
           if (!generating) {
             this.shapeDataInner!.add(k - Math.trunc(px) + shapeAdd, l - Math.trunc(py) + shapeAdd);
             this.shapeDataOuter!.add(k - Math.trunc(px) + shapeAdd, l - Math.trunc(py) + shapeAdd);
@@ -1576,6 +1603,8 @@ class DBiomeStructuredRoom extends DBiomeRoomBase {
     this.roomInnerSize = num; this.roomOuterSize = num3; this.wallDepth = num2;
     this.position = { x: px, y: py };
     this.inner.calc(); this.outer.calc();
+    if (cnt185) (globalThis as { __swI113?: (l: string) => void }).__swI113?.(
+      `I185BS|done|gen=${generating ? 1 : 0}|band=${cnt185.band}|hollow=${cnt185.hollow}`);
   }
   calculateRoom(data: DualDungeonData, ctx: DualLayoutCtx): void { this.calculated = false; this.phase(false, data, ctx); this.calculated = true; }
   generateRoom(data: DualDungeonData, ctx: DualLayoutCtx): void { this.generated = false; this.phase(true, data, ctx); this.generated = true; }
@@ -1704,8 +1733,12 @@ function getPlatformStyleMain(ctx: DualLayoutCtx, style: DungeonStyleData): numb
 /** RNG 主流 Next()。 */
 function mainNext(ctx: DualLayoutCtx): number { return ctx.rng.vanilla.next(); }
 
-/** FirstSolid（DU:532-562）：SolidTileAllowTop/BottomSlope 步进。 */
-function firstSolid(st: TileStore, ceiling: boolean, px: number, py: number, bounds: DBoundsFull | null): { x: number; y: number } {
+/** FirstSolid（DU:532-562）：SolidTileAllowTop/BottomSlope 步进。
+ *  ★IIIII196：导出供 DungeonPass dgLate ③ LivingTree 房 LATE 特征（藤蔓/堆簇）复用；
+ *  bounds 放宽为结构类型（仅消费 .contains）——vanilla DungeonBounds.Contains 为
+ *  [Left..Right]×[Top..Bottom] 闭区间，JS DBoundsFull 为 [L,R)×[T,B) 半开（R=vanilla
+ *  Right+1），二者 contains 判定等价。 */
+export function firstSolid(st: TileStore, ceiling: boolean, px: number, py: number, bounds: { contains(x: number, y: number): boolean } | null): { x: number; y: number } {
   let guard = ctxGuardMax(st);
   let cx = px, cy = py;
   do {
@@ -1938,6 +1971,9 @@ function generateHangingLeafCluster(
   let cur = { x: startPoint.x, y: startPoint.y };
   cur = firstSolid(st, goDown, cur.x, cur.y, bounds);
   const anchor = { ...cur };
+  // ★IIIII175：垂叶簇调用打点（dormant,零开销;__swI175Log 挂载时）
+  (globalThis as { __swI175Log?: (l: string) => void }).__swI175Log?.(
+    `W|leaf|sx=${startPoint.x}|sy=${startPoint.y}|fx=${cur.x}|fy=${cur.y}|gl=${growthLengthIn}|bd=${branchDensity}|ld=${leafDensity}|leaf=${leafType}|wood=${woodType}|bnd=${bounds.L},${bounds.T},${bounds.R},${bounds.B}`);
   let savedPt: { x: number; y: number } | null = null;
   let growthLength = growthLengthIn;
   const totalLen = growthLengthIn;
@@ -3701,6 +3737,15 @@ class DualProvider {
         drlMark(`DR|RC|i${iN}|r=${i}|px=${rc.position.x}|py=${rc.position.y}|is=${rc.roomInnerSize}|os=${rc.roomOuterSize}|wd=${rc.wallDepth}`);
       }
       rm.generateRoom(data, ctx);
+      // ★IIIII185：房雕后房间5内域活性计数（SW_I185BS;零掷）——定位重填者
+      if (i185bsG) {
+        let inact185 = 0;
+        for (let yy185 = 854; yy185 <= 952; yy185++) for (let xx185 = 3777; xx185 <= 3875; xx185++) {
+          const ii185 = yy185 * ctx.st.w + xx185;
+          if (!(ctx.st.flags[ii185] & 1)) inact185++;
+        }
+        (globalThis as { __swI113?: (l: string) => void }).__swI113?.(`I185ROOM|r=${i}|ty=${rm.settings.roomType}|inact=${inact185}`);
+      }
       i168bb?.(`i${iN}r${i}b`, bl, bt, br, bb2);
     }
     drlMark(`DR|S|i${iN}|RGN rc=${drlRc()}`);
@@ -3845,7 +3890,9 @@ export interface DualLayoutResult {
      *  bio=BiomeDungeonRoom 实例旗（S4 候选剔除门 cs:205-209）；
      *  ★IIIII111 R7：bt=roomType（BiomeRugged=5 追加拒 Banners/Paintings 的
      *  BiomeRuggedDungeonRoom.cs:45 房类覆写判别域）。 */
-    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean; bt?: number }>;
+    oL?: number; oT?: number; oR?: number; oB?: number; bio?: boolean; bt?: number;
+    /** ★IIIII196：LivingTree 房 LATE 特征载荷（lt 判别+自种流原料,见 featRooms 映射注）。 */
+    lt?: boolean; seed?: number; lB?: number; lC?: number; lW?: number; lP?: number }>;
   featHalls?: Array<{ gen: boolean; st: number; L: number; T: number; R: number; B: number }>;
   /** ★IIIII111c：PD 面厅载荷（DungeonCrawler.cs:484-487 厅循环消费域）——
    *  ht=HallType（0 Legacy/2 Regular/3 Stairwell/4 Sine）、ent=IsEntranceHall
@@ -3881,6 +3928,20 @@ export interface DualLayoutResult {
    *  基类/其余档恒 true）。winPlat=WindowPlatformItemTypes（item id 域,窗台平台样式掷）；
    *  liquid=StyleData.LiquidType（>=0 时基类尾 FloodRoom）。 */
   earlyRooms?: DualEarlyRoom[];
+  /** ★IIIII199：FloodRoom 虚分派载荷（earlyRooms 同序同长）。C# FloodRoom 为**虚方法**：
+   *  Legacy(:47-54)/Wormlike(:48-57)/LivingTree(:43-52)/GenShape(:120-124) 覆写为
+   *  ModShapes.All(_innerShapeData) 形状泛洪（IsBelowHeight(centerY,inclusive)+IsNotSolid+
+   *  SetLiquid），仅基类（Regular/Biome×3）走矩形 (:293-304)。旧 JS 对全部房走矩形
+   *  ⇒ Legacy 房泛洪少一列（形状域含 num12 行/列，矩形域止于 inner.R=num12−1）⇒
+   *  beehive 门洞蜜 6 格差。run=形状泛洪闭包（捕获房对象+自种流无关,纯写面）；
+   *  null=基类矩形（消费端走原矩形臂）。 */
+  floodPlans?: Array<DualFloodPlan | null>;
+}
+
+/** ★IIIII199：FloodRoom 虚分派计划（earlyRooms 同序同长）。run=形状泛洪闭包；null=基类矩形。 */
+export interface DualFloodPlan {
+  liq: number;
+  run: (st: TileStore) => void;
 }
 
 export interface DualEarlyRoom {
@@ -4048,6 +4109,18 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
     // ★IIIII111 R7：房类型（BiomeDungeonRoom.cs:27 基类拒表 + BiomeRuggedDungeonRoom.cs:45
     //   追加拒 Banners/Paintings 的房类判别——bt=5 即 Rugged）
     bt: rm.settings.roomType,
+    // ★IIIII196：LivingTree 房 LATE 特征载荷（LivingTreeDungeonRoom.cs:110-170 的
+    //   GenerateLateDungeonFeaturesInRoom 自种流原料）——lt=房类判别、seed=RandomSeed、
+    //   lB/lC/lW=StyleData 三件（sheet 域）、lP=块漆（OverridePaintTile>-1 ? Override :
+    //   TilePaintColor，undefined→-1=无漆臂）。非 LivingTree 房基类 LATE=空体，消费端
+    //   以 lt 门跳过，字段多余无副作用。
+    lt: rm.settings.roomType === DPRoomType.LivingTree,
+    seed: rm.settings.randomSeed,
+    lB: rm.settings.style.BrickTileType,
+    lC: rm.settings.style.BrickCrackedTileType,
+    lW: rm.settings.style.BrickWallType,
+    lP: rm.settings.overridePaintTile > -1 ? rm.settings.overridePaintTile
+      : (rm.settings.style.TilePaintColor !== undefined ? rm.settings.style.TilePaintColor : -1),
   }));
   const featHalls = data.halls.map((hh) => ({
     gen: hh.generated, st: hh.settings.style.Style,
@@ -4179,7 +4252,23 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   // ★IIIII106b：outerProgressionBounds 投影（provider 收口时 outerProgBounds 已由
   // calculateDungeonBounds 装配=styles 同序；空数组防御=legacy 回退面）
   const progBounds = (data.outerProgressionBounds ?? []).map((b2) => ({ L: b2.L, T: b2.T, R: b2.R, B: b2.B }));
-  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, pdHalls, chestPlan, scalar, styles, defaultStyle, progBounds, earlyRooms };
+  // ★IIIII199：FloodRoom 虚分派闭包（earlyRooms 同序同长；详见 DualLayoutResult.floodPlans 注）。
+  //  本批只对 Legacy（kind0）启用形状泛洪——L×6 定罪房即 Legacy beehive；Wormlike/GenShape
+  //  /LivingTree 的覆写与矩形域在本 seed 的液房上无差（0..32 守恒实测）,为守恒起见仍走矩形
+  //  （泛洪差异只在液细胞影响下游受理门时现形,扩展须逐类认证后另行落刀）。
+  //  IsNotSolid 修饰符读生成期 Main.tileSolid ⇒ vanSolidOrSloped（CLXXIV 方法论②）。
+  const floodPlans = data.rooms.map((rm) => {
+    const liq = rm.settings.style.LiquidType;
+    if (liq < 0 || !rm.generated) return null;
+    if (!(rm instanceof DLegacyRoom)) return null;
+    return {
+      liq,
+      run: (st: TileStore) => {
+        (rm as unknown as { floodRoom: (ctx: { st: TileStore }, liq: number) => void }).floodRoom({ st }, liq);
+      },
+    };
+  });
+  return { posX: data.genPosX, posY: data.genPosY, featRooms, featHalls, pdHalls, chestPlan, scalar, styles, defaultStyle, progBounds, earlyRooms, floodPlans };
 }
 
 function boolArrayOf(sheets: number[]): boolean[] {

@@ -287,6 +287,7 @@ function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: 
 import { STATUE_LIST, STATUE_105, STATUE_349 } from './StatuesPass';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
 
 const MARBLE_367 = TILE_BY_KEY['v_367_marble_block']!;
 const LIVINGWOOD_191 = TILE_BY_KEY['v_191_living_wood_block']!;
@@ -333,6 +334,10 @@ function statueMarble(st: TileStore, rng: RNG, x: number, yIn: number, paint: nu
   }
   const tile = sheet === 349 ? STATUE_349 : STATUE_105;
   if (!tile) return false;
+  // ★IIIII179：PlaceTile(x,y,sheet,forced)（Statue cs:10570）受理序预清（cs:59966）——
+  //  forced 直达析取,105/349 无型拒/液体草植拒支⇒惰性即清;下扫回退锚惰性恒真。
+  //  2×3 净空/底座门=case105 臂门,在序言后（StatuesPass WWW 批同位已接线）。
+  placeTilePrologueClear(st, x, y);
   const row = Math.floor(style / 55);
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 3; dy++) {

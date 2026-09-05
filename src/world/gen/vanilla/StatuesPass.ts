@@ -9,6 +9,8 @@ import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
+import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';   // ★III205 cs:17009 dual 门
 import { genSolidType } from './GenSolid';
 
 /** statueList(cs:4395-4433):73 项 (tile, style) 对,原序 */
@@ -270,6 +272,9 @@ export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number, g
       if (SHEET[st.type[bi]] === 162) { if (ev) ev('verdict', x, y, tx, ty, 'base-162'); continue; }
       // Place1x1 cs:45213 机关门：底座是 Boulders 族 → 不落陷阱（续扫）
       if (BOULDERS.has(SHEET[st.type[bi]])) { if (ev) ev('verdict', x, y, tx, ty, 'boulder-base'); continue; }
+      // ★IIIII179：PlaceTile(tx,ty,135)（cs:4451）受理序预清（cs:59966）——135 非实心,
+      // 扫描门已保证 !tile2.active() ⇒ 惰性即清;Place1x1 底座门后、写位前=序言位。
+      placeTilePrologueClear(st, tx, ty);
       st.setTileSilent(tx, ty, TRAP, 0, 0);
       statueFrameSweep(st, rng, tx, ty);                            // PlaceTile(135) 尾九宫
       // cs:4453：放置成功（tile2 活性且 type==135）才拉线返回，否则续扫
@@ -329,7 +334,13 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
       //   其后才重掷并补 remix 弃骰；旧式 guard 在条件里先耗一位与原版 100 次上界错一。
       let num8 = 100;
       for (;;) {
-        if (!(y <= oceanTop && (x < gs.beachDistance || x > w - gs.beachDistance))) break;
+        // ★III205（1458 cs:17009,1456 无此判项）：回避判项= oceanDepths(num6,num7)
+        //   || (dualDungeons.Enabled && InAnyPotentialDungeonBounds(num6,num7))
+        //   ——ddual 链潜在地牢界域命中即重掷（本链两域覆盖 80% x 带×全候选 y 域,
+        //   x86-exact 反演实测 7939 拒/19954 掷 vs JS 旧 4862 掷,掷流自 idx=2 候选起
+        //   全相移）。普通世界旗关恒假零扰动（potentialBounds 亦空,双保险）。
+        if (!(y <= oceanTop && (x < gs.beachDistance || x > w - gs.beachDistance))
+          && !(nf.dualDungeons && inAnyPotentialDungeonBounds(x, y))) break;
         num8--;
         if (num8 <= 0) break;
         x = rng.int(20, w - 21);
@@ -416,3 +427,7 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 }
+
+/** ★III205 导出块（离线反演-重放复用面,零行为改动——照 CLXXIX LivingTreePass 判例）:
+ *  tools/_iii205stat SIM 手译编排复用 flag2 锚门表与放置期帧扫,唯一自由变量=编排。 */
+export { statueFrameSweep, FR_IMPORTANT_NOCUT };

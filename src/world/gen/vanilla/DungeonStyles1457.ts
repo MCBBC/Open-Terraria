@@ -591,10 +591,15 @@ export const dualDungeonState: {
 
 /** ★IIIII121：SetupDungeonGenVarVariables×2 的 isDungeonTile 合并面
  *  （DungeonCrawler.cs:131-176 完整语义——克隆 Main.tileDungeon 基表
- *  {41,43,44,677,678,679},再并入两套样式表（含 SubStyles）的
- *  BrickTileType/BrickGrassTileType/ExtraTileTypes）。★奇偶分支条件
- *  `num2 == 0 || num2 != 1` 恒真 ⇒ **两座地牢都用 [Cavern,Crimson|Corruption,
- *  Jungle,Default]** ——原反编译 else 支死码,勿按直觉改回奇偶二分。
+ *  {41,43,44,677,678,679},再并入该座样式表（含 SubStyles）的
+ *  BrickTileType/BrickGrassTileType/ExtraTileTypes）。★IIIII201 改判：奇偶分支
+ *  条件 `num2 == 0 || num2 != 1` 在 num2==1 时两支**皆假** ⇒ else 支是**活码**
+ *  （IIIII88 曾误判恒真/else 死码）——逐座二分：偶座(0)=[Cavern,Crimson|
+ *  Corruption,Jungle,dungeonStyle]、奇座(1)=[Snow,Desert,Hallow,Temple]，
+ *  与布局侧 dualDungeonStyles()（DitherSnakePass/DungeonDualLayout 已按此消费,
+ *  0..33 绿带即其认证）同源。雪座砖族={161 IceBlock,224 Slush,147 SnowBlock}+
+ *  墙{71,40}——漏装 ⇒ CanBeClearedDuringGeneration/TileRunner flag4/Cavinator
+ *  dual 停走对雪座域不拒清（#34 Mountain_Caves 冰砖塔 JS 侧整吞定谳）。
  *  在 Dunes 头（主题两掷齐后）调用;早于 Silt/OresAndShinies 消费窗。 */
 function boolArrayOf(vals: number[]): boolean[] {
   const t = new Array<boolean>(1024).fill(false);
@@ -604,10 +609,7 @@ function boolArrayOf(vals: number[]): boolean[] {
 
 export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number, crimson: boolean): void {
   if (!dualDungeonState.enabled) return;
-  const styleListFor = (theme: number): DungeonStyleData[] => [
-    DungeonGenerationStyles.Cavern,
-    crimson ? DungeonGenerationStyles.Crimson : DungeonGenerationStyles.Corruption,
-    DungeonGenerationStyles.Jungle,
+  const themeStyle = (theme: number): DungeonStyleData =>
     getCurrentDungeonStyle({
       brickTileType: theme === 0 ? 41 : theme === 1 ? 43 : 44,
       brickCrackedTileType: theme === 0 ? 481 : theme === 1 ? 482 : 483,
@@ -616,7 +618,14 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
       windowClosedGlassWallType: theme === 0 ? 96 : theme === 1 ? 94 : 98,
       windowEdgeWallType: theme === 0 ? 8 : theme === 1 ? 9 : 7,
       windowPlatformItemTypes: [theme === 0 ? 1386 : theme === 1 ? 1385 : 1384],
-    }),
+    });
+  // ★IIIII201：per-dungeon 索引二分（DungeonCrawler.cs:113-139）——偶座走
+  //   [Cavern,Crimson|Corruption,Jungle,dungeonStyle]、奇座走 [Snow,Desert,Hallow,
+  //   Temple]（奇座列表**不含** dungeonStyle——genVars.dungeonStyle 只进偶座表）。
+  //   旧版两座都装偶表 ⇒ 雪座 161/224/147+墙71/40 全裸奔（#34 定谳根因）。
+  const lists: DungeonStyleData[][] = [
+    dualDungeonStyles(0, crimson, themeStyle(d0Theme)),
+    dualDungeonStyles(1, crimson, themeStyle(d1Theme)),
   ];
   const base = boolArrayOf([41, 43, 44, 677, 678, 679]);
   const merge = (list: DungeonStyleData[]): boolean[] => {
@@ -631,7 +640,7 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
     }
     return t;
   };
-  dualDungeonState.tileProtection = [merge(styleListFor(d0Theme)), merge(styleListFor(d1Theme))];
+  dualDungeonState.tileProtection = [merge(lists[0]!), merge(lists[1]!)];
   // ★IIIII179：isDungeonWall 并集面（IsConsideredDungeonWall(w,allDungeons:true) 的
   //  ⋃_i dungeonGenVars[i].isDungeonWall——DungeonUtils.cs:1929-1950;含 base
   //  Main.wallDungeon 基表）。Cavinator dual 停走支（WorldGen.cs:81277-81283）消费。
@@ -647,8 +656,8 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
     }
     return w;
   };
-  const w0 = mergeW(styleListFor(d0Theme));
-  const w1 = mergeW(styleListFor(d1Theme));
+  const w0 = mergeW(lists[0]!);
+  const w1 = mergeW(lists[1]!);
   dualDungeonState.wallProtection = w0.map((v, i2) => v || w1[i2] || false);
 }
 
@@ -666,11 +675,27 @@ export function canBeClearedDuringGenerationDual(typeSheet: number, x: number, y
   return true;
 }
 
-/** DungeonUtils.InAnyPotentialDungeonBounds（:2136-2165,ContainsWithFluff fluff=0 语义
- *  =半开矩形含端判定;JS 侧 DungeonPass.potContains 同构）。 */
-export function inAnyPotentialDungeonBounds(x: number, y: number): boolean {
+/** DungeonUtils.InAnyPotentialDungeonBounds（:2136-2165,ContainsWithFluff 语义
+ *  =半开矩形 [l,r)×[t,b) 判定;fluff>0 时四边外扩 fluff（DungeonBounds.cs
+ *  ContainsWithFluff=int 膨胀矩形 XNA Contains）;JS 侧 DungeonPass.potContains 同构）。
+ *  ★IIIII201：补 fluff 缺省 0 参数——oceanCave flag2 闩锁（WorldGen.cs:77345）
+ *  以 fluff=5 消费,原 JS 签名无 fluff 口。 */
+export function inAnyPotentialDungeonBounds(x: number, y: number, fluff = 0): boolean {
   for (const b of dualDungeonState.potentialBounds) {
-    if (x >= b.l && x < b.r && y >= b.t && y < b.b) return true;
+    if (x >= b.l - fluff && x < b.r + fluff && y >= b.t - fluff && y < b.b + fluff) return true;
+  }
+  return false;
+}
+
+/** DungeonUtils.InAnyPotentialDungeonBounds(inner:true)（:2134-2147 inner 支 ∪
+ *  CreatePotentialDungeonBounds innerBuffer=10 内缩——innerBounds.SetBounds(num2+10,
+ *  num4+10, num3-10, num5-10)，Contains=XNA 半开 [l,r)×[t,b)，fluff 四边外扩）。
+ *  ★IIIII202：Altars 拒绝采样内界域臂（WorldGen.cs:15871）消费——此前仓库只外泄 outer 面。
+ *  本表由 refreshDualPotentialBounds 装配（Dunes 头），普通世界恒空 → 恒 false（vanilla 同）。 */
+export function inAnyInnerPotentialDungeonBounds(x: number, y: number, fluff = 0): boolean {
+  for (const b of dualDungeonState.potentialBounds) {
+    const l = b.l + 10, t = b.t + 10, r = b.r - 10, btm = b.b - 10;
+    if (x >= l - fluff && x < r + fluff && y >= t - fluff && y < btm + fluff) return true;
   }
   return false;
 }

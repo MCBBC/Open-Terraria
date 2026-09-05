@@ -49,9 +49,10 @@ import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
-import { vanGenSolidType, flipGenSolid } from './GenSolid';
+import { vanGenSolidType, flipGenSolid, snapshotGenSolid, restoreGenSolid } from './GenSolid';
 import { hfIs1457 } from './HellFortPass';
 import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
+import { inAnyPotentialDungeonBounds, intersectsAnyPotentialDungeonBounds, canBeClearedDuringGenerationDual } from './DungeonStyles1457';   // ★IIIII208 dual 门族（CLXXXV）：MB 全段界域门补装;★IIIII209 增 cbcDg 双态全语义
 
 /** Main.wallLargeFrames 非零墙（Main.cs:9653-9787；余皆 0）——Framing.WallFrame
  *  resetFrame=true 掷门用（UUUU：Mahogany PlaceWall(78) 的 SquareWallFrame×5 每格
@@ -202,8 +203,16 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   const t = st.type[i]!;
   // ★III12：Main.tileSolid 直读（WorldGen.cs:70642-70663 SolidTile(i,j)）→ mbTileSolidGen
-  return st.flags[i] !== 0 && mbTileSolidGen(t) && !TILE_DEFS[t]?.platform
-    && st.half[i] === 0 && st.slope[i] === 0;
+  // ★IIIII208（CLXXXIII 家族第 7 域）：SolidTile(i,j) 原生腿 `!Main.tile[i,j].inActive()`
+  //   （:70650）——JS 漏 actuator-inactive 位（wire bit5=32）⇒ 微活格被误判实心。
+  // ★IIIII208 根因腿：Main.cs:7995 `tileSolid[0]=true`（启动期恒置,生成期全程成立）
+  //   ⇒ vanilla SolidTile(活型0 格)=真（IIIII227b 判例同源）；JS GenSolid[0]=false
+  //   ⇒ countTiles 洪水穿透活空格（vanilla 拒停）——DM 候选 40 门槛翻转源：
+  //   (660,448)/(1912,486) JS 经活空走廊触墙捷径误收、vanilla <40 拒；
+  //   (71,490) 相应 −4 相移后 slot303 扫期读 (4,4,3,0)→柱 65 首活性 (65,476)→EN=1
+  //   入选（gold 实放置 467@71-72,490-491）。消费面=CampsiteBiome 首门（cs:13）同款。
+  return st.flags[i] !== 0 && (t === 0 || mbTileSolidGen(t)) && !TILE_DEFS[t]?.platform
+    && st.half[i] === 0 && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
 }
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
@@ -433,7 +442,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       // RandomWorldPoint(worldSurface+20, 50, 200, 50)(cs:21836)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
-      const _tiOk = placeThinIcePatch(st, rng, gs, ox, oy);
+      // ★IIIII208（cs:21138-21140）：dualDungeons 潜在地牢界域点门——命中 → flag=false，
+      //   Place 不调（零掷）按失败计（num8++ → 失败上限推进）
+      const _tiOk = !(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+        && placeThinIcePatch(st, rng, gs, ox, oy);
       // ★IIII102c：镜像 rig `118TI|{num8}|{x},{y}|{okTI}|rc` 行（SW_I121_SEG=1 才落盘,
       //   生成面零行为影响）。num8=组内连续失败计数,x86 在 Place 后按前置值打印。
       segProbe('118TI', `${iceFail}|${ox},${oy}|${_tiOk ? 1 : 0}`);
@@ -452,29 +464,53 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   // ★原版在 MicroBiomes pass 内、ThinIce 与 Campsite 之间注册(cs:21858-21908)——
   //   曾拆在独立 SwordShrinePass(结构槽,微群系之前执行)= 管线错位 + 逻辑近似
   //   (洞穴中心放种子点上方 10-20 格,原版是 origin.Y+20 **下方**)。2026-08-13 归位重写。
-  //   SecretSeed.Variations.noSurfaceNoSwordShrines 门(cs:21858)无对应变体,恒启用
-  //   (普通世界行为一致);errorWorld 分支(cs:21879-21882/21890)未建模。
+  //   SecretSeed.Variations.noSurfaceNoSwordShrines 门(cs:21148)无对应变体,恒启用
+  //   (普通世界行为一致);errorWorld 分支(cs:21158-21162/21174)★IIIII195 已建模(下)。
   {
     // ★SSS-CELEB（1458 cs:21869-21874）：tenth → attempts ×2 / placementChance ÷2，
     //   且**首座(i==0)恒试放**（cs:21162 `(i==0 && tenth) || !(NextDouble<num13)`）。
     const celbSword = !!gs.seedFlags?.tenthAnniversary;
+    // ★IIIII195（1457 cs:21158-21162）：errorWorld 剑冢臂——
+    //   `errorWorld && 6/errorWorldAdjustment(1.0) > 1`（**int 除**）时
+    //   attempts ×(6/adj)、placementChance ÷(6/adj)。errorWorldAdjustment(v)
+    //   =(int)(v×((activeSecretSeedCount+3)/4))（cs:329-337）：单旗标域 (1+3)/4
+    //   整除=1 ⇒ 6/adj=6 ⇒ ×6 / ÷6。iamerror 链活面：此前整缺 → 首骰 NextDouble<num13
+    //   极性面即分叉（0.5 vs 0.0833）→ campsite/mine/mahogany/track/lava 全尾漂移
+    //   =mile8 iamerror #97..105 级联真源。多旗标组合域 adj 缩水另案备案
+    //   （照 TreePass IIIII111/StructuresPass ewAdjust 单旗标判例）。
+    const ewSword = !!gs.seedFlags.errorWorld;
+    const ewMul = ewSword ? 6 : 0;                 // 6/errorWorldAdjustment(1.0)=6/1
     let swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
-    if (celbSword) swordAttempts *= 2;             // ×2（cs:21870）
+    if (celbSword) swordAttempts *= 2;             // ×2（cs:21152-21155）
+    if (ewMul > 1) swordAttempts *= ewMul;         // ×6（cs:21160）
+    const swordChance = (celbSword ? 0.25 : 0.5) / (ewMul > 1 ? ewMul : 1);  // ÷6（cs:21161）
     segProbe('swordAttempts', swordAttempts);
     for (let i = 0; i < swordAttempts; i++) {
-      // !(NextDouble < SwordShrinePlacementChance 0.5/2=0.25) 才放置(cs:21886)——注意极性
-      if ((celbSword && i === 0) || !(rng.next() < (celbSword ? 0.25 : 0.5))) {
-        // 重试 while (num15++ <= maxTilesX)(cs:21888):最多 w+1 次,掷序 Y→Next(2)→X
-        // ★BBBBBB：cs:21888 `origin3.Y = (int)GenVars.worldSurface + Next(50,100)`——
+      // !(NextDouble < SwordShrinePlacementChance) 才放置(cs:21162)——注意极性
+      if ((celbSword && i === 0) || !(rng.next() < swordChance)) {
+        // 重试 while (num15++ <= maxTilesX)(cs:21164):最多 w+1 次,掷序 Y→[ew:Next(3)→
+        //   (Next(50,100)→Next(Y域))]→Next(2)→X
+        // ★BBBBBB：cs:21164 `origin3.Y = (int)GenVars.worldSurface + Next(50,100)`——
         //   是 GenVars.worldSurface(Terrain 游走终值)非 Main.worldSurface！曾混用
         //   gs.worldSurface(=Main.worldSurface)→ Y 域整体偏移(22222 实测差 71 格)，
         //   剑冢 12/12 全拒 vs JS 过门多掷 → 掷流自 sword 段分叉 → 尾段全错位。
         //   同款 GenVars 混淆 XXXXX 批已修矿爆点 rockLayer，此处为漏网点。
         for (let t = 0; t <= w; t++) {
-          const oy = Math.floor(gs.genWorldSurface) + rng.int(50, 99);   // Next(50, 100)
+          let oy = Math.floor(gs.genWorldSurface) + rng.int(50, 99);   // Next(50, 100)
+          // ★IIIII195（1457 cs:21174-21178）：errorWorld 深埋臂——Next(3) 恒耗掷；
+          //   ≠0（或 noSurface 世界恒进门）→ 重掷 Next(50,100) 内偏 + Next(genWS+内偏,
+          //   UnderworldLayer-100)。Main.UnderworldLayer=maxTilesY-200（Main.cs:2886）
+          //   ⇒ C# Next 开区间上界 h-300 ⇒ JS 含端 h-301。
+          if (ewSword && (rng.int(0, 2) !== 0 || !!gs.seedFlags.noSurface)) {
+            const inner = rng.int(50, 99);
+            oy = rng.int(Math.floor(gs.genWorldSurface) + inner, h - 301);
+          }
           const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
-            ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
+            ? rng.int(50, Math.floor(w * 0.3) - 1)
             : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
+          // ★IIIII208（cs:21179-21181）：dual 世界此处有 `InAnyPotentialDungeonBounds(
+          //   origin3.X, origin3.Y)` **弃值探针调用**——无掷无副作用（界域查询纯读），
+          //   JS 免装；真实界域门在 EnchantedSwordBiome.Place 内部（矩形相交,下方）。
           segProbe(`STRY ${ox},${oy} t=${t}`);
           if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) { segProbe(`SOK ${ox},${oy}`); break; }
         }
@@ -498,10 +534,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     if (++tries >= 1000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // RandomWorldPoint(top,right,bottom,left)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
+    // ★IIIII208（cs:21923-21925）：dualDungeons 潜在地牢界域点门——命中 → Place 不调
     segProbe('CAMPPRE');
     // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）——CAMP x,y rc=<掷数> ok=
     const d0c = mbDraws();
-    if (placeCampsite(st, rng, gs, ox, oy)) {
+    if (!(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+      && placeCampsite(st, rng, gs, ox, oy)) {
       placed++;
       mbProbe(`CAMP ${ox},${oy} rc=${mbDraws() - d0c} ok=1 gate=1`);
     } else mbProbe(`CAMP ${ox},${oy} rc=${mbDraws() - d0c} ok=0 gate=1`);
@@ -541,8 +579,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       : rng.int(Math.floor(gs.genRockLayer), h - 201);
     segProbe('MINEPRE');
     // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）
+    // ★IIIII208（cs:21268-21270）：dualDungeons 潜在地牢界域点门——命中 → Place 不调
     const d0m = mbDraws();
-    if (placeMiningExplosives(st, rng, gs, ox, oy)) {
+    if (!(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+      && placeMiningExplosives(st, rng, gs, ox, oy)) {
       placed++;
       mbProbe(`MINE ${ox},${oy} rc=${mbDraws() - d0m} ok=1 gate=1`);
     } else mbProbe(`MINE ${ox},${oy} rc=${mbDraws() - d0m} ok=0 gate=1`);
@@ -563,7 +603,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 50, h - 501);
       const d0t = mbDraws();
-      const okT = placeMahoganyTree(st, rng, gs, chests, ox, oy);
+      // ★IIIII208（cs:22063-22065）：dualDungeons 潜在地牢界域点门——命中 → Place 不调
+      //   （num22++ 尝试计数照走）
+      const okT = !(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+        && placeMahoganyTree(st, rng, gs, chests, ox, oy);
       // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）
       mbProbe(`MAHOG ${ox},${oy} rc=${mbDraws() - d0t} ok=${okT ? 1 : 0} gate=1`);
       if (okT) mDone++;
@@ -574,20 +617,43 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   // ★IIII226B 休眠探针：轨段起点全态直递（store/rng/gs；__swSeg 未挂载时零开销、
   //   零掷零写，同 __swI87Cap/__swGrvCand 先例）——IIII226b 轨段离线重放仪数据源。
   segProbe('mbTrack', { st, rng, gs, chests });
+  // ★IIIII193：轨段域 tileSolid 时线补播（save/set/restore,零净面）。
+  //   vanilla 全链在轨段前已由 BeeLarva（头 cs:21022 `tileSolid[229]=true`、尾
+  //   cs:21047-48 `tileSolid[232/162]=true`）把三值还原实心——真实生产链槽序
+  //   矿骨堆<栽树<蜂巢幼虫<二次沉降<仙人掌<microbiomes（WorldGen.ts pass 表）,
+  //   此处三值恒已 true ⇒ 生产域本补播逐位 no-op（8ch 守恒）。
+  //   caves-checkpoint 缩水链无 BeeLarva 槽,CaveWalls 头 cs:17821 翻假的 162/232
+  //   与 Piles 头 cs:18907 翻假的 229 stale 到轨段——TrackPass.stateAt 的
+  //   trkTileSolidGen 把薄冰域(162 活格)读成非实心：seed 9293480 长轨 cell748
+  //   createTunnel 扫描 (1505,731)(全 162) OBSTR→AVAIL 误判 → 选 UP 斜隧道
+  //   （vanilla/oracle 选 DOWN(1507,741)）,raw 路径 ±1 行级联=1,271 typ 残差真身。
+  //   oracle 轨段经 MbStaticSolid/MB_STATIC_RESTORE（caves-oracle.cs:16761）静态
+  //   烘焙同值。save/restore 把补播严格限定在轨段读写域：arm 段与 pass 后域维持
+  //   缩水链动态值（oracle 的 arm/settle2/cactus 域同为动态 stale 值,提前补播
+  //   曾实测改红 settle2/cactus 并生出 5 格 SmallPiles 差）。
+  const __i193Snap = snapshotGenSolid();
+  flipGenSolid([229, 232, 162], true);
   // ---- 5. TrackGenerator(cs:22014-22091)----
   gp?.set(0.68);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trackGen = new TrackGenerator(st, gs, chests);
-  const trackFailLimit = Math.floor(w / 2);        // num25
+  // ★IIIII195（1457 cs:21305-21308）：num25=maxTilesX/2；errorWorld 时再 /=2（int 除）
+  //   ⇒ 连败伪推进环提前触发（卡死链少掷→轨段后流位对齐）。漏建模=iamerror 轨段漂移面。
+  let trackFailLimit = Math.floor(w / 2);
+  if (gs.seedFlags.errorWorld) trackFailLimit = Math.trunc(trackFailLimit / 2);
   // 长轨:LongTrackCount 1-2 ×WorldWidth,长 400-1000 ×WorldWidth
   let trackCount = rng.int(scW(1), scW(2));
+  // ★IIIII208（cs:21303-21305）：dualDungeons 长轨数量减半（int 除,掷后）
+  if (gs.seedFlags.dualDungeons) trackCount = Math.trunc(trackCount / 2);
   segProbe('longTrackCount', trackCount);
   let tDone = 0, tFail = 0;
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);                // RandomWorldPoint(worldSurface, 10, 200, 10)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
+    // ★IIIII208（cs:21315-21317）：dualDungeons 潜在地牢界域点门——命中 → Place 不调
     // ★III12：per-attempt rc（x86 WorldGen patch 同格式，失败尝试也打点）
     const d0l = mbDraws();
-    const _okL = trackGen.place(ox, oy, scW(400), scW(1000), rng);
+    const _okL = !(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+      && trackGen.place(ox, oy, scW(400), scW(1000), rng);
     mbProbe(`LTRK ${ox},${oy} rc=${mbDraws() - d0l} ok=${_okL ? 1 : 0}`);
     if (_okL) {
       segProbe(`LTRK ${ox},${oy} ok=1`);
@@ -599,14 +665,20 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
   // 标准轨:StandardTrackCount 4-7 ×WorldArea,长 150-300 ×WorldWidth
   trackCount = rng.int(Math.max(1, Math.trunc(areaScale * 4)), Math.max(1, Math.trunc(areaScale * 7)));
+  // ★IIIII195（1457 cs:21346-21349）：errorWorld 标准轨数量 ×1.5（(int)((double)n*1.5)）
+  if (gs.seedFlags.errorWorld) trackCount = Math.trunc(trackCount * 1.5);
+  // ★IIIII208（cs:21351-21353）：dualDungeons 标准轨数量减半（int 除,×1.5 之后）
+  if (gs.seedFlags.dualDungeons) trackCount = Math.trunc(trackCount / 2);
   segProbe('stdTrackCount', trackCount);
   tDone = 0; tFail = 0;
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
+    // ★IIIII208（cs:21356-21358）：dualDungeons 潜在地牢界域点门——命中 → Place 不调
     // ★III12：per-attempt rc（同上）
     const d0s = mbDraws();
-    const _okS = trackGen.place(ox, oy, scW(150), scW(300), rng);
+    const _okS = !(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy))
+      && trackGen.place(ox, oy, scW(150), scW(300), rng);
     mbProbe(`STRK ${ox},${oy} rc=${mbDraws() - d0s} ok=${_okS ? 1 : 0}`);
     if (_okS) {
       segProbe(`STRK ${ox},${oy} ok=1`);
@@ -616,6 +688,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       if (tFail > trackFailLimit) { tDone++; tFail = 0; }
     }
   }
+  restoreGenSolid(__i193Snap);   // ★IIIII193:补播只覆盖轨段读写域（见 mbTrack 前注）
 
   segProbe('mbLavaS');
   // ---- 6. placeLavaTrap(cs:22093-22127):w*0.02 次 × 10150 尝试 ----
@@ -627,7 +700,10 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       for (let k = 0; k < 10150; k++) {
         const x = rng.int(200, w - 201);
         const y = rng.int(gs.lavaLine - 100, h - 211);   // Next(lavaLine-100, h-210)
-        const __r = placeLavaTrap(st, gs, x, y, rng);
+        // ★IIIII208（cs:21408-21410）：dualDungeons 潜在地牢界域点门——命中 →
+        //   placeLavaTrap 不调（零掷）,k 循环续走不 break
+        const __r = !(gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(x, y))
+          && placeLavaTrap(st, gs, x, y, rng);
         segProbe('tAtt', [x, y, __r ? 1 : 0]);
         if (__r) { segProbe('lavaOk', [x, y]); break; }
       }
@@ -1755,7 +1831,11 @@ export class DeadMansChestBiome {
         if (st.flags[idx] && !TILE_DEFS[t]?.framed && mbTileSolidGen(t)) {
           counts.set(t, (counts.get(t) ?? 0) + 1);
         }
-        if ((st.flags[idx] && NOT_CLEARABLE.has(t)) || (st.flags[idx] && isContainer(t))) {
+        // ★IIIII209（cs:248-251 1:1）：CanBeClearedDuringGeneration 全语义=静态集
+        //   （NOT_CLEARABLE,internal 域）∪ dual 动态拒支（canBeClearedDuringGenerationDual,
+        //   sheet 域——dualDungeons 界域内 dungeon tile 不可清,DungeonCrawler isDungeonTile
+        //   含各风格 BrickTileType）。曾漏动态支 ⇒ (660,448) 候选门误收（CLXXXV DM 悖论根）。
+        if ((st.flags[idx] && (NOT_CLEARABLE.has(t) || !canBeClearedDuringGenerationDual(mbSheetOf(t), i, j))) || (st.flags[idx] && isContainer(t))) {
           fail = `gateA(${i},${j},t${mbSheetOf(t)})`; break gateA;
         }
       }
@@ -1828,8 +1908,9 @@ export class DeadMansChestBiome {
       const active = st.flags[idx] !== 0;
       // 非容器 && 实心 → 5 格外且可清 → 飞镖锚点;否则失败
       if (!(active && isContainer(t)) && active && mbTileSolidGen(t)) {
+        // ★IIIII209（cs:325 1:1）：ok 门 CanBeClearedDuringGeneration 全语义（静态集∪dual 动态支）
         const ok = i >= 5 && (st.wire[idx] & WIRE_ACTUATOR) === 0 && !TILE_DEFS[t]?.framed
-          && !NOT_CLEARABLE.has(t);
+          && !NOT_CLEARABLE.has(t) && canBeClearedDuringGenerationDual(mbSheetOf(t), x, py);
         if (!ok) segProbe(`DCHK ${px},${py} dir=${directionX} i=${i} t=${(t===0?0:SHEET_OF_MB[t])} act=${((st.wire[idx] & WIRE_ACTUATOR) !== 0) ? 1 : 0}`);
         if (ok) {
           this.darts.push({ x: px, y: py, directionX, xPush: i, trapX: x, trapY: py });
@@ -1894,7 +1975,17 @@ export class DeadMansChestBiome {
     if (st.type[idx] !== CHEST) return false;
     if (Math.trunc(st.frameX[idx] / 36) !== 1) return false;
     const below = st.idx(x, y + 2);
-    if (NOT_CLEARABLE.has(st.type[below])) return false;   // CanBeClearedDuringGeneration
+    // ★IIIII209（cs:469-477 1:1）：CanBeClearedDuringGeneration 全语义——静态集
+    //   （NOT_CLEARABLE=internal 域假表）∪ dual 动态拒支（WorldGen.cs:81679-81687：
+    //   generating && dualDungeons.Enabled && InAnyPotentialDungeonBounds(x,y+2)
+    //   && IsConsideredDungeonTile(type,allDungeons:true) ⇒ 不可清）。★IIIII208 曾按
+    //   「(660,450)=御座(102)」推演 dual 臂不拒——实为 JS 内部 id 误读：该格 vanilla
+    //   sheet=38（GrayBrick,风格 1 BrickTileType）∈ d0 isDungeonTile,界域 [210..1889]×
+    //   [347..990] 含 (660,450) ⇒ vanilla 拒 (660,448) 候选（rig DmLog SPOT cc=0 实证）,
+    //   JS 误收 → 多 1 passer×4 掷 → DM 段掷流 +4 相移 → slot303 (71,490) 扫期柱集
+    //   {68,71,74} 全 gateB 败于幽灵格而缺席（gold 实放置该房）——CLXXXV 悖论真根。
+    if (NOT_CLEARABLE.has(st.type[below])) return false;
+    if (!canBeClearedDuringGenerationDual(mbSheetOf(st.type[below]), x, y + 2)) return false;
     if (countWires(st, x, y, 20) > 0) return false;
     if (countTiles(st, x, y) < 40) return false;
     return true;
@@ -2256,7 +2347,10 @@ function placeEnchantedSwordShrine(
   const __mbD = (): number => ((globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws?.() ?? 0);
   const __swB = __mbD();
   const __p = (nm: string): void => { segProbe(`SWDS ${nm} rc=${__mbD() - __swB}`); };
-  // ① 50×50 泥+石计数门(cs:24-30):TileScanner(0,1) 之和 < 1250 → 拒(errorWorld 625 不建模)
+  // ① 50×50 泥+石计数门(cs:24-30):TileScanner(0,1) 之和 < 1250 → 拒
+  //   ★IIIII195（EnchantedSwordBiome.cs:24-30）：errorWorld 门值减半 625（宽门槛=深埋
+  //   剑冢按岩性受理）。此前 JS 恒按 1250。
+  const ewShrine = !!gs.seedFlags.errorWorld;
   let dirtStone = 0;
   for (let dx = 0; dx < 50; dx++) {
     for (let dy = 0; dy < 50; dy++) {
@@ -2267,9 +2361,9 @@ function placeEnchantedSwordShrine(
       if (st.type[i] === DIRT || st.type[i] === STONE) dirtStone++;
     }
   }
-  if (dirtStone < 1250) return false;
-  // ② origin.Y > 55(cs:34-36)
-  const num2 = 55;
+  if (dirtStone < (ewShrine ? 625 : 1250)) return false;
+  // ② origin.Y > num2(cs:34-38):errorWorld 105（普通 55）
+  const num2 = ewShrine ? 105 : 55;
   if (oy <= num2) return false;
   // ③ Up(num3) 搜索(cs:38-49):IsSolid().AreaOr(1,num4).Not() = 首个
   //   "1×num4 竖条内无实心"的行(向上数);未命中或 result.Y <= 55 → 拒
@@ -2284,13 +2378,22 @@ function placeEnchantedSwordShrine(
     }
     if (!solid) { resultY = oy - i; break; }
   }
-  if (resultY < 0 || resultY <= num2) return false;
-  // ④ 沙列检查(cs:51-53):origin 向上 origin.Y-result.Y 行内列上有沙 53 → 拒(避开沙漠)
-  for (let i = 0; i < oy - resultY; i++) {
-    const y = oy - i;
-    if (!st.inBounds(ox, y)) continue;
-    const ii = st.idx(ox, y);
-    if (st.flags[ii] && st.type[ii] === SAND) return false;
+  // ★IIIII195（cs:45-56）：未命中竖井列**或命中行 ≤ num2** 时——普通世界拒；
+  //   errorWorld 兜底 result.Y = origin.Y - 100（竖井锚整体下移,继续受理）。
+  if (resultY < 0 || resultY <= num2) {
+    if (!ewShrine) return false;
+    resultY = oy - 100;
+  }
+  // ④ 沙列检查(cs:58):origin 向上 origin.Y-result.Y 行内列上有沙 53 → 拒(避开沙漠)
+  //   errorWorld 跳过该拒绝（cs:58 `&& !errorWorld.Enabled`；vanilla 的 Find 仍跑但
+  //   弃结果,零掷骰 ⇒ JS 直接短路与原版掷流逐位恒等）
+  if (!ewShrine) {
+    for (let i = 0; i < oy - resultY; i++) {
+      const y = oy - i;
+      if (!st.inBounds(ox, y)) continue;
+      const ii = st.idx(ox, y);
+      if (st.flags[ii] && st.type[ii] === SAND) return false;
+    }
   }
   resultY += 50;   // cs:55(竖井底锚下移 50)
   // ⑤ 洞穴/土丘中心(cs:58-59):均在种子点下方
@@ -2307,6 +2410,15 @@ function placeEnchantedSwordShrine(
   if (!shrineCanPlace(st, gs, rect1, 0)) return false;
   const rect2: Rect = { x0: ox, y0: resultY + 10, x1: ox + 1, y1: resultY + 10 + (oy - resultY - 9) };
   if (!shrineCanPlace(st, gs, rect2, 2)) return false;
+  // ★IIIII208（EnchantedSwordBiome.cs:85）：dualDungeons 界域矩形门——洞穴盒或竖井盒
+  //   与任一潜在地牢界域（outer,半开 XNA Intersects:A.Left<B.Right && B.Left<A.Right
+  //   && A.Top<B.Bottom && B.Top<A.Bottom）相交 → 拒。双双紧邻 CanPlace 之后、首个
+  //   Gen 之前；零掷。ddual 链 #98 首差 (2941,297) 花墙 W68>2 定谳根因：JS 缺此臂
+  //   → x~980 界域内剑冢被 JS 误受理（vanilla 拒后重掷流位,尾段 campsite/mine/
+  //   mahogany/track/lava 全相位移）。
+  if (gs.seedFlags.dualDungeons
+    && (intersectsAnyPotentialDungeonBounds(rect1.x0, rect1.y0, rect1.x1, rect1.y1)
+      || intersectsAnyPotentialDungeonBounds(rect2.x0, rect2.y0, rect2.x1, rect2.y1))) return false;
 
   const blot: Array<[number, number]> = [];
   // ⑧ 洞穴(cs:75):Slime(20, num5, 1.0) + Blotches(2, 0.4) + ClearTile → shapeData
@@ -2433,6 +2545,18 @@ function placeEnchantedSwordShrine(
     const shaft = new ShrineShape();
     const sy0 = resultY + 10;
     const syH = oy - resultY - 9;
+    // ★IIIII195 泛洪填充定罪修复（vanilla=WorldUtils.Gen 一次遍历 Shapes.Rectangle(1,h)
+    //   点流：Blotches(2,0.2) 扇出 → SkipTiles(191,192) → ClearTile().Output(data) →
+    //   Expand(1)（Modifiers.cs:32,GenAction 逐点 ±1 扇出）→ OnlyTiles(53) →
+    //   SetTile(397).Output(data)）。**Output(data) 是收集器,绝不参与迭代源**；
+    //   旧 JS 对 shaft 边 each 边 add（收集器=迭代源）⇒ OnlyTiles(53) 过门的硬化格
+    //   回灌迭代源 → 沿连通沙域泛洪（iamerror 海洋剑冢一次 +14,564 格 53→397,
+    //   海底全带硬化+棕榈 TileFrame 失根清除+W15 清墙+L255 清水= mile8 #97
+    //   T53>397×14236/T323>0×141/W/L/S 残差真身；普通种子剑冢 shaft 短且柱域
+    //   少沙,泛洪无种子 → 22 链 slot97 仍绿,该债仅 errorWorld 深埋剑冢暴露）。
+    //   修复=①Expand 扇出内联进清除点循环（vanilla 链序:data 插入序=清除点后
+    //   立即跟其 9 邻域硬化点,决定第二 Gen 枚举序=掷流序）；②SetFrames 阶段
+    //   （cs:86）才枚举终态收集器（清除∪硬化,有界 ≤90h 格）。
     for (let j = 0; j < syH; j++) {                          // Shapes.Rectangle(1, h)
       shrineBlotches(rng, ox, sy0 + j, 2, 2, 2, 2, 0.2, blot);
       for (const [px, py] of blot) {
@@ -2442,31 +2566,27 @@ function placeEnchantedSwordShrine(
         st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;          // ClearTile
         st.wire[i] &= ~WIRE_ACTUATOR;                              // +inActive(false)(Tile.cs:153)
         shaft.add(px - ox, py - sy0);
-      }
-    }
-    // Expand(1)+OnlyTiles(53)+SetTile(397):±1 邻域的沙 → 硬化沙(Modifiers.cs 各 Apply)
-    shaft.each((dx, dy) => {
-      for (let i = -1; i <= 1; i++) {
-        for (let j = -1; j <= 1; j++) {
-          const px = ox + dx + i, py = sy0 + dy + j;
-          if (!st.inBounds(px, py)) continue;
-          const i2 = st.idx(px, py);
-          if (!st.flags[i2] || st.type[i2] !== SAND) continue;     // OnlyTiles(53)
-          st.type[i2] = HARDSAND_TILE;                             // SetTile(397)
-          st.frameX[i2] = 0; st.frameY[i2] = 0;
-          // ★RRRRRRR：SetTile(397) 默认 clearTile=true → Clear(~(Wiring|Actuator))
-          //   连墙带液清（与 ⑪ 轮廓格同款；入口支此前漏清）
-          st.wall[i2] = 0; st.liquid[i2] = 0; st.liquidType[i2] = 0;
-          st.slope[i2] = 0; st.half[i2] = 0;
-          // ★BBBBBB：SetTile(397).Output(data)（cs:84）——硬化格并入 data（HashSet
-          //   重复 add 无害，枚举序=槽序）
-          shaft.add(dx + i, dy + j);
+        // Expand(1) 逐清除点内联扇出 → OnlyTiles(53) → SetTile(397)+Output(data)
+        for (let ei = -1; ei <= 1; ei++) {
+          for (let ej = -1; ej <= 1; ej++) {
+            const qx = px + ei, qy = py + ej;
+            if (!st.inBounds(qx, qy)) continue;
+            const qi = st.idx(qx, qy);
+            if (!st.flags[qi] || st.type[qi] !== SAND) continue;   // OnlyTiles(53)
+            st.type[qi] = HARDSAND_TILE;                           // SetTile(397)
+            st.frameX[qi] = 0; st.frameY[qi] = 0;
+            // ★RRRRRRR：SetTile(397) 默认 clearTile=true → Clear(~(Wiring|Actuator))
+            //   连墙带液清（与 ⑪ 轮廓格同款）
+            st.wall[qi] = 0; st.liquid[qi] = 0; st.liquidType[qi] = 0;
+            st.slope[qi] = 0; st.half[qi] = 0;
+            shaft.add(qx - ox, qy - sy0);   // 收集器追加(HashSet 重复 add 无害,枚举序=槽序)
+          }
         }
       }
-    });
+    }
     // ★BBBBBB：第二行 Gen（cs:86）= ModShapes.All(data) + SetFrames(frameNeighbors:
-    //   true)——对 data 全集（清除格∪硬化格）五连 TileFrame（reset=true，184 每访
-    //   恒掷 + 中心苔藓掷）
+    //   true)——对 data 全集（清除格∪硬化格,有界）五连 TileFrame（reset=true，184
+    //   每访恒掷 + 中心苔藓掷）。此阶段枚举终态收集器,零 add（泛洪根除）。
     shaft.each((dx, dy) => {
       const px = ox + dx, py = sy0 + dy;
       if (!st.inBounds(px, py)) return;

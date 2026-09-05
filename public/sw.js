@@ -52,7 +52,11 @@ function mimeOk(path, res) {
 // miss 的 404】应答 204 No Content(无体→任何浏览器都必然 onerror)。边界:
 //  · 仅 GET——HEAD 存在性探测(ui 失败负缓存长 TTL 分档)直通不受扰
 //  · warm 终态后 miss 仍真 404 直通=诊断面保留;真首访(无版本缓存)无从判定,不拦
-const IMG_MISS_RE = /\.png$|\.jpe?g$|\.webp$|\.gif$/;
+//  · 音频(2026-09-05 生产实报"hit.opus 404":版本换代重下窗口放方块触发 SFX):
+//    fetch 型消费方 r.ok 对 204=true,但空体 decodeAudioData 必 reject——
+//    Sfx.ensureBufferAsync(continue 下格式→15s 负缓存)与 Audio.buffer(markFailed)
+//    均已在 try-catch 内,与 404 同归宿,已逐一核实(2026-09-05)
+const MEDIA_MISS_RE = /\.png$|\.jpe?g$|\.webp$|\.gif$|\.opus$|\.ogg$|\.mp3$|\.wav$/;
 let zipWarmActive = null;   // null=未知(SW 重启后),true/false=消息/缓存恢复
 async function isZipWarmActive() {
   if (zipWarmActive !== null) return zipWarmActive;
@@ -78,7 +82,7 @@ function setZipWarmFlag(on) {
 }
 /** warm 窗口图片 miss 静默应答(命中返回 204,否则 null=走原路径) */
 async function silentWarmMiss(req, path) {
-  if (req.method !== 'GET' || !IMG_MISS_RE.test(path)) return null;
+  if (req.method !== 'GET' || !MEDIA_MISS_RE.test(path)) return null;
   if (!(await isZipWarmActive())) return null;
   // x-sw-warm-miss 头:HAR 审计可直接识别"这是 warm 窗口静默,非真缺"
   return new Response(null, { status: 204, headers: { 'x-sw-warm-miss': '1' } });

@@ -46,6 +46,11 @@ export function clearDoorAt(st: TileStore, x: number, y: number): [number, numbe
  *  返回 false = 目标侧被挡（调用方应换 -direction 重试）。 */
 export function openDoor(st: TileStore, x: number, y: number, direction: number): boolean {
   if (st.get(x, y) !== T.DOOR_CLOSED) return false;
+  // ★SW-AS1(2026-09-05):IsLockedDoor 早退（OpenDoor :38027-38030）——神庙锁门
+  //  （style 11 段 fy∈[594,646]）拒开。此前仅手动路径有锁拦截（Player.cs:32332
+  //  开锁消耗钥匙后 UnlockDoor 出锁区再开门）,DoorOpeningHelper/NPC 直调本函数
+  //  会无钥匙开锁门;原版 WorldGen.OpenDoor 自身拒绝。
+  if (isLockedDoor(st, x, y)) return false;
   // 锚点行：frameY % 54 === 0
   let ay = y;
   while (st.get(x, ay) === T.DOOR_CLOSED && st.frameY[st.idx(x, ay)] % 54 !== 0) {

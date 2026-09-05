@@ -874,7 +874,13 @@ function checkSuperT(st: TileStore, x: number, y: number): void {
     if (!bad) {
       const num36 = Math.trunc(fx / 36);
       for (let m = 0; m < def.w; m++) {
-        st.frameX[ax + m] = (m * 18 + (floorOk ? Math.trunc(num36 / 2) * 36 : Math.trunc((num36 - 2) / 2) * 36 + 72)) as never;
+        // ★IIIII182（N2 簇根因，写入点拦截仪实证）：写目标须走 st.idx(ax+m, ay)——
+        //   vanilla=cs:48616-48625 `Framing.GetTileSafely(num2+m, num3).frameX=…`
+        //   （二维寻址）；曾裸写 `frameX[ax+m]`=把 tile x 坐标当【扁平数组下标】
+        //   ⇒ 恒落第 0 行（y = ax+m−(ay·W+ax) 的行 0 列）fx18/0 污染（notraps 13+
+        //   remix 1 顶行残帧簇=本行独苗；引擎主副本 checkSuperSweep 的同臂写法
+        //   `st.frameX[st.idx(num2+m, num3)]` 正确）。数值式两侧逐字同构，仅寻址修。
+        st.frameX[st.idx(ax + m, ay)] = (m * 18 + (floorOk ? Math.trunc(num36 / 2) * 36 : Math.trunc((num36 - 2) / 2) * 36 + 72)) as never;
       }
     }
   }
@@ -1121,6 +1127,17 @@ function check2x2Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
       }
     }
     (globalThis as { __swC2M?: (x: number, y: number, t: number, m: Array<[number, number, number, number]>) => void }).__swC2M?.(num2, num6, t, mem);
+  }
+  // ★IIIII192（rig SW_KILLWATCH 栈定谳）：vanilla Check2x2 尾支（rig-src cs:49300-49307
+  // ≡1457 同段）——destroyObject 还 false 后对碎片域 **4×4 TileFrame(resetFrame=false)
+  // 补帧扫**：(num2-1..num2+2, num6-1..num6+2)。此扫是【贴邻对象级联】的真源头：
+  // iamerror #76 (1801,607) 三座巨石=左半滚刺 Check2x2 杀块→尾扫帧到上方巨石→
+  // 其锚(滚刺残格已死)失守→级联自毁；JS 旧无此尾 ⇒ 巨石存留 12 格（T0>138×12）
+  // 且级联掷流位移。genTileFrameNeighbor=TileFrame 缺省 resetFrame=false 的 1:1 入口。
+  for (let k = num2 - 1; k < num2 + 3; k++) {
+    for (let l = num6 - 1; l < num6 + 3; l++) {
+      genTileFrameNeighbor(st, rng, k, l);
+    }
   }
 }
 

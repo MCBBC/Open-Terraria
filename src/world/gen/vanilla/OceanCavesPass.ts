@@ -9,6 +9,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
+import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';
 
 const SAND = TILE_BY_KEY['sand']!;            // 53
 const HARDSAND = TILE_BY_KEY['hardened_sand']!; // 397
@@ -71,13 +72,21 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
   const MIN_R = 4;
   let steep = true;   // flag:初期陡降
   let itN = 0;
+  // ★IIIII201：flag2（cs:77291 双地牢界域闩锁）补缺——本仓注释「flag2 恒 false」只对
+  //   非双地牢世界成立；ddual 世界 cs:77345-77347 在半径×3 盒扫描里
+  //   `!flag2 && dualDungeons.Enabled && InAnyPotentialDungeonBounds(k,l,5)` 一旦命中
+  //   即永久闩锁 ⇒ 下一轮起衰减支(cs:77297 flag2||海滩带)每轮 ×0.96,蠕虫 40 轮内缩到
+  //   MIN_R 收束。漏闩 ⇒ JS 洞在左/右洋向陆蠕进全程满半径满寿命（ddual #38 首差:
+  //   JS 水 36,867 格 vs vanilla 16,356,沙壳外扩 ~7,200 格;左洋 vanilla 液域 x≤175
+  //   vs JS 漫到 197+）。闩锁扫描在 badOceanCaveTiles continue **之前**(坏格也算域)。
+  let ddLatch = false;   // flag2
 
   while (radius > MIN_R && life > 0) {
     // ★flag3/flag4/flag5 每轮重置(cs:76756-76758)
     let firstShaft = true;   // flag3:本轮中心列竖井一次
     let firstWater = true;   // flag4:本轮中心列水柱一次
-    // 离开海滩带(越过 beachDistance-50)后每步 ×0.96(cs:76760-76764;flag2 恒 false)
-    if (vx > gs.beachDistance - 50 && vx < w - gs.beachDistance + 50) {
+    // 离开海滩带(越过 beachDistance-50)后每步 ×0.96(cs:77297；flag2 闩锁后恒衰减)
+    if (ddLatch || (vx > gs.beachDistance - 50 && vx < w - gs.beachDistance + 50)) {
       radius *= 0.96; life *= 0.96;
     }
     // ★big 判定在衰减**之后**(cs:76765-76767:先 ×0.96 再比 num6+2/20)——衰减跨阈
@@ -94,6 +103,10 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
     ocTrace()?.(`BOX|${itN}|${x0},${x1},${y0},${y1}`);
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
+        // ★IIIII201：flag2 闩锁扫描（cs:77345-77347,InAnyPotentialDungeonBounds fluff=5,
+        //  双地牢界域 outer 集）——置于 badOceanCaveTiles continue **之前**,坏格亦参与判域;
+        //  闩锁只置真,当轮盒扫描后续格照扫,衰减在下一轮循环头生效（与 C# 同序）。
+        if (!ddLatch && gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(x, y, 5)) ddLatch = true;
         if (badOceanCaveTiles(st, x, y)) continue;
         // ★R9-1（2026-08-24）：Math.hypot → Math.sqrt(dx²+dy²)（Vector2D.Length，
         //  cs:77353-77354；hypot 按规约做无溢出稳定计算，与 sqrt 可差 1 ulp——
@@ -120,7 +133,11 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
             }
           } else if ((dirX < 0 && x < i) || (dirX > 0 && x > i)) {
             if (st.liquid[ti] === 255) st.setWallSilent(x, y, 0);
-            st.setTileSilent(x, y, SAND);
+            // ★IIIII190（R3 同族反向面）：vanilla cs:77386-77387 裸 type 写+active(true)
+            //  ——失帧覆写保帧语义（继承大理石帧,x86 t53 f(504,36) 等实证）;setTileSilent
+            //  清帧=CLXIV after 残余 89 格 jagged t53×15 家族根因。framePreserving 裸写。
+            st.type[ti] = SAND;
+            st.flags[ti] = 1;
             // 中心列竖井(本轮 flag3 一次,cs:76850-76904)
             if (x === Math.floor(vx) && firstShaft) {
               firstShaft = false;
@@ -153,12 +170,24 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
                     // 旧近似(active+tileSolid 二件套)=#37 首差根因(91,365 slope=3 案)。
                     if (solidTileFull(st, sx, sy)
                       && st.type[st.idx(sx, sy)] !== SAND) break;
-                    st.setTileSilent(sx, sy, HARDSAND);
+                    const ci = st.idx(sx, sy);
+                    // ★IIIII190：cs:77424 裸 type 写（num3）+ cs:77430 active(true)——保帧
+                    if (st.inBounds(sx, sy)) { st.type[ci] = HARDSAND; st.flags[ci] = 1; }
                   } else {
-                    st.setTileSilent(sx, sy, SAND);
+                    // ★IIIII190：cs:77428 裸 type 写（num2）+ cs:77430 active(true)——保帧
+                    if (st.inBounds(sx, sy)) { st.type[st.idx(sx, sy)] = SAND; st.flags[st.idx(sx, sy)] = 1; }
                   }
-                  if (rng.int(0, 2) === 0 && st.inBounds(sx - 1, sy)) st.setTileSilent(sx - 1, sy, SAND);
-                  if (rng.int(0, 2) === 0 && st.inBounds(sx + 1, sy)) st.setTileSilent(sx + 1, sy, SAND);
+                  // ★IIIII190：cs:77431-77439 裸 type 写（num2）+ active(true)——保帧
+                  if (rng.int(0, 2) === 0 && st.inBounds(sx - 1, sy)) {
+                    const li = st.idx(sx - 1, sy);
+                    st.type[li] = SAND;
+                    st.flags[li] = 1;
+                  }
+                  if (rng.int(0, 2) === 0 && st.inBounds(sx + 1, sy)) {
+                    const ri = st.idx(sx + 1, sy);
+                    st.type[ri] = SAND;
+                    st.flags[ri] = 1;
+                  }
                 }
               }
             }

@@ -11,6 +11,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 // ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
 import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';
 // ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省曾为 1456 砖线=「全房对
 //   四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760）服务七条 mile8 槽链
 //   认证线;SW_MB_1457=1 → 1457 GenerateBricks（存档即插,迁移战役线）。
@@ -667,6 +668,12 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   // ★曾 placeDoorClosed 固定 variant=0 零掷 → 祭坛兜底流位 +3 偏（兜底锚 3505→3504
   // 整列左移）+ 木刺段流错位——GGG 批 2026-08-18（226>0 结构债之外的掷流残差根因）。
   {
+    // ★IIIII179：PlaceTile(i1,jy,10,style 11) 受理序预清（cs:59966）——门 10 为实心
+    //   tile,forced=false ⇒ Proceed 析取经 EmptyTile(=目标惰性)放行;后续共享门对 10
+    //   无拒支(81 门属 81、drip 集不含 10、液体草植不含 10)⇒ 惰性即预清。此处即
+    //   「共享拒门后、case10 方向分派（dj 判定→PlaceDoor）前」= vanilla 序言位;
+    //   受理(PlaceDoor 落 3 格)则预清被覆盖,门框/锚门拒时外显。
+    placeTilePrologueClear(st, i1, jy);
     const actI = (x: number, y: number): boolean => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
     const solI = (x: number, y: number): boolean => {
       if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) return false;
@@ -749,13 +756,12 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     //   iamerror 实证：1000 次采样 → 600 个不同格 = x86 幽灵 0 集 **600/600 逐格全等**
     //   （Poisson 覆盖率 600/900=66.7% 与 1-(899/900)^1000=67.1% 吻合）；JS 曾不清
     //   → 600 格幽灵 226 残留（CXLII 章 792 幽灵债的神庙组②,乱块海 raw 门消费）。
-    //   ★1457 反编译 PlaceTile(237)→Place3x2 失败支无可查写点,机制源不可锚——
-    //   本刀以 x86 金标链为权威,并加「仅惰性格」门：不改任何格的活性,门判定
-    //   与既有全链零位移（其它种子链安全性保守取此域,源锚缺口已备案待 rig 验）。
-    if (st.inBounds(ax, ay)) {
-      const si = st.idx(ax, ay);
-      if (!st.flags[si]) st.type[si] = 0;
-    }
+    //   ★IIIII179 升级替换 IIII168「CXLVII 补丁」（彼时仅清 type,缺 slope/half/帧X/帧Y/
+    //   块漆;且机制源「不可锚」备案已失效）：真机制源=WorldGen.PlaceTile 受理序惰性
+    //   落点预清臂（cs:59966-59971,IL_0528 Clear(131)）——237 非实心→共享拒门恒过→
+    //   预清后 case 派发 Place3x2,锚门拒时预清外显。helper 零掷、不改活性,门判定
+    //   与既有全链零位移；本位即「共享拒门后、Place3x2 锚门前」= vanilla 序言位。
+    placeTilePrologueClear(st, ax, ay);
     { const f = (globalThis as { __swTmAltar?: (n: number, x: number, y: number) => void }).__swTmAltar; if (f) f(tries, ax, ay); }   // ★IIIII168 取证钩（dormant）
     let ok = true;
     for (let dx = -1; dx <= 1 && ok; dx++) {
@@ -1347,11 +1353,18 @@ export function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   // cs:8318：num2 = 1；Next(3)==0 → 0（横向）
   let num2 = 1;
   if (rng.nextInt(3) === 0) num2 = 0;
-  // cs:8325-8333：下扫 SolidOrSlopedTile，地狱界 num3 >= maxTilesY-300 拒
+  // cs:8325-8333：下扫 SolidOrSlopedTile，地狱界拒——★IIII194（ddual 第十六轮）TRAPS
+  //   mayan 尾 #6 (2669,894) 定罪：cs:8316-8319 dualDungeonsSeed 支 num=UnderworldLayer-5
+  //   （=h-205,Main.cs:2863 UW=h-200）整缺，js 恒用非 dual 档 h-300 ⇒ 扫到 900+ 的
+  //   Temple 厅落点被提前拒（attempt (2669,894)：首实心 907，js 在 num3++ 后界检
+  //   907>=900 先于实心重测即 return false 掷 1 骰；rig 界 995 落点 907 进 case0 再掷
+  //   Next(3)=1 共 2 骰）→ mayan 尾骰相移 −59 下游 FURNITURE/PAINTINGS/BANNERS 全洗。
+  //   递增后先界检后重测实心的顺序为原版同构（cs:8328-8331），两支界值均如此。
+  const mayanScanCap = gs.seedFlags.dualDungeons ? st.h - 200 - 5 : st.h - 300;
   let num3 = y2;
   while (!solidOrSlopedTP(st, x2, num3)) {
     num3++;
-    if (num3 >= st.h - 300) return false;
+    if (num3 >= mayanScanCap) return false;
   }
   // cs:8335：落点是 232 木刺 / 10 门 → 拒（★曾误查 226 蜥蜴砖——落点砖是合法地面）
   const landSheet = sheetAt(x2, num3);
@@ -1387,11 +1400,13 @@ export function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     let flag2 = num16 > 5 && num16 < 50;
     if (flag && !solidOrSlopedTP(st, num13, num12 + 1)) flag = false;
     if (flag2 && !solidOrSlopedTP(st, num14, num12 + 1)) flag2 = false;
-    // cs:8397-8412：锚侧 10/48 拒（本体格与下一格）
-    if (flag && (sheetAt(num13, num12) === 10 || sheetAt(num13, num12) === 48
-      || sheetAt(num13, num12 + 1) === 10 || sheetAt(num13, num12 + 1) === 48)) flag = false;
-    if (flag2 && (sheetAt(num14, num12) === 10 || sheetAt(num14, num12) === 48
-      || sheetAt(num14, num12 + 1) === 10 || sheetAt(num14, num12 + 1) === 48)) flag2 = false;
+    // cs:8395-8412：锚侧 10/num17 拒（本体格与下一格）——★IIII194：num17=dualDungeonsSeed
+    //   支 232（木刺）非 48（cs:8395-8398），js 曾恒 48 ⇒ ddual Temple 厅锚侧木刺漏拒
+    const num17 = gs.seedFlags.dualDungeons ? 232 : 48;
+    if (flag && (sheetAt(num13, num12) === 10 || sheetAt(num13, num12) === num17
+      || sheetAt(num13, num12 + 1) === 10 || sheetAt(num13, num12 + 1) === num17)) flag = false;
+    if (flag2 && (sheetAt(num14, num12) === 10 || sheetAt(num14, num12) === num17
+      || sheetAt(num14, num12 + 1) === 10 || sheetAt(num14, num12 + 1) === num17)) flag2 = false;
     let num18 = 0;
     if (flag && flag2) {
       num18 = 1; num11 = num13;

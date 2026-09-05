@@ -1072,11 +1072,18 @@ interface EWChestLike { x?: number; y?: number; items: Array<{ id: number; stack
  *  （组合世界 count≥2 才缩水——多秘计数另案，本仓按单旗标域恒等） */
 function ewAdjust(_value: number): number { return _value; }
 
-/** 40 槽窗视图（SW compact items → vanilla item[40]）：读/写都在 0..39 槽内。 */
+/** 40 槽窗视图（SW compact items → vanilla item[40]）：读/写都在 0..39 槽内。
+ *  ★IIIRS200：空槽哨兵改 −1（原 0 与内部物品 id 0 合法位碰撞——EW_INTERNAL_TO_VID.get(0)=109
+ *  使空槽伪装成 vid109 非免疫物=箱换流巨量拒采/空物互换根因,x86 KLOG 实证 i1r 111 vs 52607）。
+ *  消费端一律走 ewVidOf 映射（−1→vid 0=item.type==0 原版语义）。 */
 function ewSlotRead(items: Array<{ id: number; stack: number } | null>, idx: number): number {
-  if (idx >= items.length || idx >= 40) return 0;
+  if (idx >= items.length || idx >= 40) return -1;
   const it = items[idx];
-  return it ? it.id : 0;
+  return it ? it.id : -1;
+}
+/** ★IIIRS200：slot 读值 → 原版 vid（空槽=item.type 0）。 */
+function ewVidOf(raw: number): number {
+  return raw < 0 ? 0 : (EW_INTERNAL_TO_VID.get(raw) ?? 0);
 }
 function ewSlotWrite(items: Array<{ id: number; stack: number } | null>, idx: number, val: { id: number; stack: number } | null): void {
   if (idx >= 40) return;
@@ -1093,45 +1100,98 @@ export function doErrorWorldFinish(
   starterTowns: Array<{ key: string; givenName?: string; x: number; y: number; anchor: [number, number]; dir?: number }> | undefined,
 ): void {
   const F = gs.seedFlags;
+  // ★IIIRS200 KLOG 仪装（__swI200EWK 钩;观测型零掷,批后还原）——与 x86 rig SW_EWKLOG
+  //   织标事件面逐行同构：EWE 入口普查 / EWC 箱账(槽序 vid 列表) / R|n= 逐掷
+  //   (s1/s1r/i1/i1r/s2/s2r/i2/i2r+bx/by/bt+SW_EWKLOG_J0/J1 窗内无条件臂) / SW 换物
+  //   决策 / CK 列检查点(本地骰计数 ewN=对齐主键) / H 条件命中(moss/w137/pot/k7/k15/
+  //   p30/pw30/fbb/fbw/inv250) / BB 泡块决策 / EWX 出口。x86 重连环扫(cs:1424-1499)
+  //   JS 镜像未移植=独立债,其 H|rcn/WW 行 JS 侧无（零掷,不涉相位）。
+  const ewK = (): { w(line: string): void; flush?(): void } | undefined =>
+    (globalThis as { __swI200EWK?: { w(line: string): void; flush?(): void } }).__swI200EWK;
+  const ewLog = (line: string): void => { ewK()?.w(line); };
+  const ewFlushK = (): void => { ewK()?.flush?.(); };
+  let ewN = 0;
+  const ewOn = !!ewK();                                 // ★IIIRS200：热路径字符串零开销门
+  const ewJ0 = Number(process.env.SW_EWKLOG_J0 ?? -1);
+  const ewJ1 = Number(process.env.SW_EWKLOG_J1 ?? -1);
+  const ewWin = (jc: number): boolean => ewJ0 < 0 || (jc >= ewJ0 && jc < ewJ1);
+  if (ewK()) {
+    let ewAlive = 0;
+    for (let ewi = 0; ewi < chests.length; ewi++) {
+      const c = chests[ewi];
+      if (!c) continue;
+      let ewIts = '';
+      for (let ewq = 0; ewq < c.items.length; ewq++) {
+        const it = c.items[ewq];
+        if (it) {
+          const vid = EW_INTERNAL_TO_VID.get(it.id) ?? it.id;
+          if (vid !== 0) ewIts += `${ewq}:${vid},`;
+        }
+      }
+      const it0 = c.items[0];
+      if (it0 && (EW_INTERNAL_TO_VID.get(it0.id) ?? it0.id) !== 0) ewAlive++;
+      ewLog(`EWC|i=${ewi}|x=${c.x}|y=${c.y}|it=${ewIts}`);
+    }
+    ewLog(`EWE|w=${st.w}|h=${st.h}|ws=${String(gs.worldSurface)}|adj5=${ewAdjust(5)}|iters=${st.w * 2}|alive=${ewAlive}`);
+  }
   // ── ① 宝箱换物主循环（cs:1303-1349）：迭代 maxTilesX*2 次，两箱四掷 + 免疫/空箱拒采。
   //    Main.chest[8000] 稀疏数组语义 = 索引≥count 即 null ⇒ Next(8000) 接受率按 count 比例，
   //    拒采掷全量照录（这是本端点的巨型骰消费面）。num3 守卫耗尽=return 整段。
   const aliveChest = (slot: EWChestLike | undefined): slot is EWChestLike =>
     !!slot && !!slot.items[0];                          // item[0].type==0 判空主件槽
-  const pickChestIdx = (guardReturn: boolean): number => {
+  const pickChestIdx = (guardReturn: boolean, tag: string): number => {
     let guard = 100000;
     let idx = rng.nextInt(8000);
+    ewN++;
+    if (ewOn) ewLog(`R|n=${ewN}|${tag}|${idx}`);
     while (!aliveChest(chests[idx])) {
       idx = rng.nextInt(8000);
+      ewN++;
+      if (ewOn) ewLog(`R|n=${ewN}|${tag}r|${idx}`);
       if (guardReturn && --guard <= 0) return -1;
     }
     return idx;
   };
-  const pickItemSlot = (ch: EWChestLike, guarded: boolean): number => {
+  const pickItemSlot = (ch: EWChestLike, guarded: boolean, tag: string): number => {
     let guard = 100000;
     let s = rng.nextInt(40);                            // item.Length=40 定长
-    while (ERROR_CHEST_SWAP_IMMUNITY.has(EW_INTERNAL_TO_VID.get(ewSlotRead(ch.items, s)) ?? 0)) {
+    ewN++;
+    if (ewOn) ewLog(`R|n=${ewN}|${tag}|${s}`);
+    while (ERROR_CHEST_SWAP_IMMUNITY.has(ewVidOf(ewSlotRead(ch.items, s)))) {
       s = rng.nextInt(40);
+      ewN++;
+      if (ewOn) ewLog(`R|n=${ewN}|${tag}r|${s}`);
       if (guarded && --guard <= 0) return -1;
     }
     return s;
   };
   const iterations = st.w * 2;                          // num = maxTilesX*2
   for (let i = 0; i < iterations; i++) {
-    const aIdx = pickChestIdx(true);
-    if (aIdx < 0) return;                               // cs:1310 守卫耗尽 → 整函数退出
+    const aIdx = pickChestIdx(true, 's1');
+    if (aIdx < 0) {
+      ewLog(`EWX|swap-early|i=${i}|at=s1r|n=${ewN}`);
+      ewFlushK();
+      return;
+    }                               // cs:1310 守卫耗尽 → 整函数退出
     const ca = chests[aIdx]!;
-    const sA = pickItemSlot(ca, true);
-    if (sA < 0) return;
-    const bIdx = pickChestIdx(false);                   // cs:1326 无守卫支
+    const sA = pickItemSlot(ca, true, 'i1');
+    if (sA < 0) {
+      ewLog(`EWX|swap-early|i=${i}|at=i1r|n=${ewN}`);
+      ewFlushK();
+      return;
+    }
+    const bIdx = pickChestIdx(false, 's2');             // cs:1326 无守卫支
     const cb = chests[bIdx];
     if (!cb) continue;
-    const sB = pickItemSlot(cb, false);                 // cs:1331-1335 无守卫支
+    const sB = pickItemSlot(cb, false, 'i2');           // cs:1331-1335 无守卫支
     // cs:1338：balancedChests(count>=6 组合臂)=false 单旗标恒直换——不改 rare 相等门
+    // ★IIIRS200：SW 行=x86 同构（本 seed balancedChests=false 恒直换,行必出;rare JS 无源记 -1）
+    if (ewOn) ewLog(`SW|${i}|a=${aIdx}:${sA}:${ewVidOf(ewSlotRead(ca.items, sA))}|b=${bIdx}:${sB}:${ewVidOf(ewSlotRead(cb.items, sB))}|r1=-1|r2=-1`);
     const tmp = ca.items[sA] ?? null;
     ewSlotWrite(ca.items, sA, cb.items[sB] ?? null);
     ewSlotWrite(cb.items, sB, tmp);
   }
+  ewLog(`EWX|swap-done|n=${ewN}`);
 
   // ── ② [20,w-20)×[20,h-20) 全图调形扫（cs:1350-1423）
   const canKillEW = (x: number, y: number): boolean => {   // CanKillTile 本语境可达子集
@@ -1151,20 +1211,35 @@ export function doErrorWorldFinish(
         if (!sideBranch && fy < 198) return false;
         if (shU === 323 && (fx === 66 || fx === 220)) return false;
       }
+      // ★IIIRS200：C# case 80（cs:62766-62772）仙人掌臂保护——上邻为仙人掌且本格异型、
+      //   frameX/18∈{0,1,4,5}（臂/基段）→ 拒杀（iamerror #105 残差 (1723,300) 沙块
+      //   上方仙人掌实证:x86 d=0 仅 invisibleBlock、旧 JS 误杀）。
+      if (shU === 80 && shU !== shS) {
+        const num80 = Math.trunc(st.frameX[uUp] / 18);
+        if (num80 >= 0 && (num80 <= 1 || num80 === 4 || num80 === 5)) return false;
+      }
     }
     return true;
   };
   const setT = (x: number, y: number, sheet: number): void => { st.type[st.idx(x, y)] = idOf(sheet); };
   for (let j = 20; j < st.w - 20; j++) {
+    if (ewOn) ewLog(`CK|j=${j}|n=${ewN}`);
     for (let k = 20; k < st.h - 20; k++) {
       const ii = st.idx(j, k);
       // ★ghost 域字面：C# 各判据直读 .type/.wall（不查 active），且逐条 if **即时重读**——
       //   前臂改型后后臂看到新值。统一走 tNow()。
       const tNow = (): number => shOf(st, ii);
       if (EW_CRACKED.has(tNow())) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;     // invisibleBlock(true)
-      if (EW_CONV_MOSS.has(tNow()) && tNow() !== 381 && rng.nextInt(ewAdjust(5)) === 0) {
-        const roll = rng.nextInt(5);                    // NextFromList 5 元素=Next(5)
-        setT(j, k, [539, 536, 534, 625, 627][roll]!);
+      if (EW_CONV_MOSS.has(tNow()) && tNow() !== 381) {
+        ewN++;
+        const mv = rng.nextInt(ewAdjust(5));
+        if (mv === 0) {
+          ewN++;
+          const roll = rng.nextInt(5);                  // NextFromList 5 元素=Next(5)
+          const vid = [539, 536, 534, 625, 627][roll]!;
+          ewLog(`H|moss|j=${j},k=${k}|p=${vid}`);
+          setT(j, k, vid);
+        }
       }
       if (k > gs.worldSurface && st.wall[ii] === 73) st.wall[ii] = 0;
       if (tNow() === 501) {
@@ -1172,41 +1247,109 @@ export function doErrorWorldFinish(
         else st.flags[ii] = 0;                          // active(false)
       }
       if (st.wall[ii] === 238) st.wall[ii] = 0;
-      if (tNow() === 137 && (st.wire[ii] & 1) === 0) st.frameX[ii] = rng.nextInt(6) * 18;
-      if (tNow() === 28 && rng.nextInt(5) === 0) st.flags[ii] = 0;
-      if (rng.nextInt(ewAdjust(7)) === 0
+      if (tNow() === 137 && (st.wire[ii] & 1) === 0) {
+        ewN++;
+        const wv = rng.nextInt(6);
+        ewLog(`H|w137|j=${j},k=${k}|v=${wv}|fx=${st.frameX[ii]}`);
+        st.frameX[ii] = wv * 18;
+      }
+      if (tNow() === 28) {
+        ewN++;
+        const pv = rng.nextInt(5);
+        if (pv === 0) {
+          ewLog(`H|pot|j=${j},k=${k}`);
+          st.flags[ii] = 0;
+        }
+      }
+      ewN++;
+      const k7v = rng.nextInt(ewAdjust(7));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k7|${k7v}|j=${j},k=${k}`);
+      if (k7v === 0
         && [48, 232, 21, 467, 28, 639, 12, 484].includes(tNow())) {
+        ewLog(`H|k7|j=${j},k=${k}`);
         st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
       }
-      if (rng.nextInt(ewAdjust(15)) === 0 && solidNonTopAt(st, j, k)
+      ewN++;
+      const k15v = rng.nextInt(ewAdjust(15));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k15|${k15v}|j=${j},k=${k}`);
+      if (k15v === 0 && solidNonTopAt(st, j, k)
         && !EW_FRAME_IMPORTANT_SHEET[tNow()]
         && st.flags[st.idx(j, k - 1)]
         && !solidNonTopAt(st, j, k - 1)
         && [237, 231, 355, 354, 26, 77, 642, 506, 377].indexOf(shOf(st, st.idx(j, k - 1))) < 0) {
-        if (canKillEW(j, k)) st.flags[ii] = 0;
-        else st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+        if (canKillEW(j, k)) {
+          ewLog(`H|k15|j=${j},k=${k}|d=1`);
+          st.flags[ii] = 0;
+        } else {
+          ewLog(`H|k15|j=${j},k=${k}|d=0`);
+          st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+        }
       }
-      if (rng.nextInt(ewAdjust(10000)) === 0) st.paint[ii] = 30;
-      if (rng.nextInt(ewAdjust(10000)) === 0) st.paintWall[ii] = 30;
-      if (rng.nextInt(ewAdjust(50000)) === 0) st.coat[ii] |= TileStore.COAT_FULLBRIGHT_BLOCK;
-      if (rng.nextInt(ewAdjust(50000)) === 0) st.coat[ii] |= TileStore.COAT_FULLBRIGHT_WALL;
-      if (rng.nextInt(ewAdjust(250000)) === 0) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+      ewN++;
+      const k10av = rng.nextInt(ewAdjust(10000));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k10a|${k10av}|j=${j},k=${k}`);
+      if (k10av === 0) {
+        ewLog(`H|p30|j=${j},k=${k}`);
+        st.paint[ii] = 30;
+      }
+      ewN++;
+      const k10bv = rng.nextInt(ewAdjust(10000));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k10b|${k10bv}|j=${j},k=${k}`);
+      if (k10bv === 0) {
+        ewLog(`H|pw30|j=${j},k=${k}`);
+        st.paintWall[ii] = 30;
+      }
+      ewN++;
+      const k50av = rng.nextInt(ewAdjust(50000));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k50a|${k50av}|j=${j},k=${k}`);
+      if (k50av === 0) {
+        ewLog(`H|fbb|j=${j},k=${k}`);
+        st.coat[ii] |= TileStore.COAT_FULLBRIGHT_BLOCK;
+      }
+      ewN++;
+      const k50bv = rng.nextInt(ewAdjust(50000));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k50b|${k50bv}|j=${j},k=${k}`);
+      if (k50bv === 0) {
+        ewLog(`H|fbw|j=${j},k=${k}`);
+        st.coat[ii] |= TileStore.COAT_FULLBRIGHT_WALL;
+      }
+      ewN++;
+      const k250v = rng.nextInt(ewAdjust(250000));
+      if (ewWin(j)) ewLog(`R|n=${ewN}|k250|${k250v}|j=${j},k=${k}`);
+      if (k250v === 0) {
+        ewLog(`H|inv250|j=${j},k=${k}`);
+        st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
+      }
     }
   }
+  ewLog(`EWX|sweep-done|n=${ewN}`);
 
   // ── ③ 泡块种散（cs:1508-1540）：maxTilesX/3 次；2×2 空/无液格置 379+满液体。
+  //   ★IIIRS200 注：cs:1424-1499 重连环扫（137 无线格 50 环最近导线连线）位于本段
+  //   之前、泡块段之前——JS 镜像未移植（零掷,不涉相位;wire 通道 8ch dump 不可见）,
+  //   x86 KLOG 的 H|rcn/WW 行为该支取证,移交独立清偿。
   {
     const count = Math.trunc(st.w / 3 / ewAdjust(1));
     for (let n = 0; n < count; n++) {
+      ewN++;
       const x = rng.nextIntRange(50, st.w - 50);
+      ewLog(`R|n=${ewN}|bx|${x}`);
+      ewN++;
       const y = rng.nextIntRange(Math.floor(gs.worldSurface), st.h - 50);
+      ewLog(`R|n=${ewN}|by|${y}`);
       let busy = false;
       for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
         const q = st.idx(x + dx, y + dy);
         if (st.flags[q] || st.liquid[q] !== 0) busy = true;
       }
-      if (busy) continue;
+      if (busy) {
+        ewLog(`BB|${n}|${x},${y}|d=0`);
+        continue;
+      }
+      ewN++;
       const lty = rng.nextInt(4);
+      ewLog(`R|n=${ewN}|bt|${lty}`);
+      ewLog(`BB|${n}|${x},${y}|d=1|lty=${lty}`);
       for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
         const q = st.idx(x + dx, y + dy);
         st.flags[q] = 1;
@@ -1221,7 +1364,12 @@ export function doErrorWorldFinish(
   // ── ④ 镇民重掷（cs:1543-1543！!:1541-1561 —— !infected&&!vampire 门）：
   //    全部非 37 型镇民在出生点位复活为 homeless 老头、原体停用（零命名掷——
   //    Language 表 37 无 RandomFromCategory 分支，NPC.cs:7312-7323）。
-  if (!!F.infectedSeed || !!F.vampireSeed) return;
+  if (!!F.infectedSeed || !!F.vampireSeed) {
+    ewLog(`EWX|done|path=infected|n=${ewN}`);
+    ewFlushK();
+    return;
+  }
+  let ewTown = 0;
   if (starterTowns) {
     for (let i = 0; i < starterTowns.length; i++) {
       const t0 = starterTowns[i]!;
@@ -1232,8 +1380,11 @@ export function doErrorWorldFinish(
         anchor: [Math.round(t0.x / 16), Math.round(t0.y / 16)],
         dir: 1,
       };
+      ewTown++;
     }
   }
+  ewLog(`EWX|done|path=town|r=${ewTown}|n=${ewN}`);
+  ewFlushK();
 }
 function shOf(st: TileStore, ii: number): number { return SHEET_OF_TYPE[st.type[ii]]; }
 function shNb(st: TileStore, x: number, y: number): number {

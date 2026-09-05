@@ -95,11 +95,21 @@ export const PROTO_MAGIC = 'SW1';
  *       ≤maxHp 下永不绑定,残余为恒等路径。
  *    j) ★SW-AM1 2026-09-05（爆炸远端半边值同步,不升版不改线格式——msg44 flags 同
  *       字节位域按支割离复用,同 d)/h) 先例）：bit7 爆炸支内 bit1=dmgPreRolled——
- *       rawDmg 语义升级为【发送侧已掷终值】（SelfHurtPlayers :15118 DV+:15131
- *       sweater cap 在爆炸端算毕,被炸端直读不再掷;vanilla 多人伤害=值同步非种子
- *       同步,Damage_PVP :14718 owner 掷后 :14747 SendPlayerHurt 值同步同构）。
- *       enchant 域（bits1-4）仅近战支消费、bit7 帧 bits1-4 恒 0 零撞位;服务器
- *       room.ts flags 整字节透传,新旧 server 零改动。降级矩阵：旧发端（无位）→
+ *       rawDmg 语义升级为【发送侧已掷终值】（SelfHurtPlayers :15118 DV+:15119-15122
+ *       sweater cap 在爆炸端算毕,被炸端直读不再掷）。
+ *       SW-AM2 2026-09-05（蓝F4）定性降格：vanilla 炸弹对玩家的伤是【两张脸】——
+ *       SelfHurtPlayers :15104-15152（各端只结算本地玩家、本机 fresh luck
+ *       :15107/:15118,无跨端同步）与 Damage_PVP :14637-14785（owner==myPlayer
+ *       结算【其他 hostile 玩家】,:14718 owner 掷 → :14747 SendPlayerHurt 携掷后
+ *       值=原生值同步,pvp:true 字面 :14748）。本仓 bit1 预掷终值的定性=
+ *       借用 Damage_PVP 式"掷后下行"形制的【值同步策略选择】:bit7 面混载两类
+ *       受击（PvP 掷弹伤/接线炸药伤）,与任一原版单脸都不完全同构,勿以单脸
+ *       论证其同构性。
+ *       位域论证（蓝F6）：bit7 帧现恒带 bit1（dmgPreRolled）,与 bits1-4 enchant
+ *       域零撞位的性质=收端位序——Game.netApplyStrikePlayer 的 bit7 分支先于
+ *       bits1-4 消费并 return（bit1 在该分支内读作 dmgPreRolled,不再下落）,
+ *       enchant 域 (flags>>1)&15 仅近战支消费。服务器 room.ts flags 整字节透传,
+ *       新旧 server 零改动。降级矩阵：旧发端（无位）→
  *       新收端=基伤本地掷（=改动前行为,逐位）;新发端→旧收端=对已掷值再掷（±15%
  *       重卷,有界漂移,无权威/崩溃面）。 */
 export const PROTO_VER = 7;
@@ -192,11 +202,18 @@ export const enum Msg {
                        //   bit7=爆炸意向（explodeAt/scarabBombExplode 广播,任意房放行——
                        //   服务器 room.ts 仅 bit7 绕 pvpAllowed 门;rawDmg=意向伤）
                        //   ★SW-AM1 2026-09-05：bit7 支内 bit1 复用为 dmgPreRolled——
-                       //   rawDmg=发送侧已掷终值（SelfHurtPlayers :15118 DV+:15131 sweater
-                       //   cap 爆炸端算毕,收端直读不再掷;vanilla 多人伤害=值同步非种子同步,
-                       //   Damage_PVP :14718 owner 掷后 :14747 SendPlayerHurt 同构）。
-                       //   enchant 域（bits1-4）仅近战支消费、bit7 帧 bits1-4 恒 0,位域按支
-                       //   割离零撞位（同 msg27 kind bit7=hostile 先例）;服务器 flags 整字节
+                       //   rawDmg=发送侧已掷终值（SelfHurtPlayers :15118 DV+:15119-15122
+                       //   sweater cap 爆炸端算毕,收端直读不再掷）。
+                       //   SW-AM2 2026-09-05（蓝F4）：定性=值同步策略选择,非原版单脸
+                       //   同构——vanilla 炸弹对玩家的伤有两张脸（SelfHurtPlayers
+                       //   :15104-15152 受害端自结算、本机 fresh luck;Damage_PVP
+                       //   :14637-14785 owner 结算 PvP 伤、:14718 掷后 :14747 下行）,
+                       //   bit7 面混载两类受击,预掷终值只是借用后者的形制。
+                       //   位域论证（蓝F6）：bit7 帧恒带 bit1（dmgPreRolled）,与
+                       //   bits1-4 enchant 域零撞位的性质=收端位序——bit7 分支先于
+                       //   bits1-4 消费并 return（bit1 在该分支内读作 dmgPreRolled,
+                       //   不再下落）,enchant 域 (flags>>1)&15 仅近战支消费
+                       //   （同 msg27 kind bit7=hostile 先例）;服务器 flags 整字节
                        //   透传,新旧 server 均零改动。降级矩阵：旧发端（无位）→新收端=
                        //   基伤本地掷（=改动前行为逐位）;新发端→旧收端=对已掷值再掷（±15%
                        //   重卷有界漂移,无权威/崩溃面）。详见 PROTO_VER 注 j)

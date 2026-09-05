@@ -1343,6 +1343,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       ofy -= 1998 * wrapN;
       ofx += 36 * wrapN;
     }
+    // ★IIIII182（N5）：音乐盒 139 虚拟页折列（TileDrawing.cs:5093-5097 case 139 1:1）：
+    //   wld 帧空间=style*36 无界（skyblock style87 = fy 3132/3150 越 2016 表底），
+    //   绘制端 `num5=frameY/2016; addFrY-=2016*num5; addFrX+=72*num5` 折页。表只有
+    //   4×56 盒,页 n 折到第 n+0/n+1 盒列（72px=2 盒）。与 finalize 帧净化 139 豁免
+    //   （WorldGen.ts）同批——不折则 vframeAt 落空回退 (0,0)=整物第一格平铺。
+    if (sheet === 139) {
+      const pageNum = Math.floor(ofy / 2016);
+      ofy -= 2016 * pageNum;
+      ofx += 72 * pageNum;
+    }
     // 旧版素材表【分带布局】兼容：wld 帧按新游戏单行布局存储（样式全部横排一行），
     // 而素材包里的表较窄、样式分多带排列（一行放不下就换到下一带）。
     // 样式索引超出一带容量 → 换带重算（如 Tiles_187：带宽 35 样式×54px，

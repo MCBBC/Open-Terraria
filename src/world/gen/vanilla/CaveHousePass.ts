@@ -19,6 +19,8 @@ import { flipGenSolid, genSolidType, vanGenSolidType, VAN_TILE_SOLID_EXTRA } fro
 import { placeTight, checkStalactite } from './ShimmerPass';
 import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
 import { killTileChest } from './BuriedChestsPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
+import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';   // ★III205 cs:17197 dual 门
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -178,7 +180,8 @@ function solidPct(st: TileStore, r: Rect): number {
  *  （★errorWorld 骰面共享路径——属性【每次读取】各掷一颗，读点=①主循环 y 钳制
  *  cs:17180、②CreateRooms 分支 HouseUtils.cs:88、③支撑梁短路臂 HouseBuilder.cs:639
  *  （`num7<50 && !…` 短路,num7≥50 或 num7≤0 不评估=不掷）；双旗皆关 → false。
- *  本仓 parseSeed 单播语义两旗互斥,errorWorld 臂休眠但语义就位（组合输入接线后即活）。
+ *  ★IIIII184 勘误：旧注「errorWorld 臂休眠」已失效——1457 iamerror 等单秘种子链
+ *  errorWorld 恒真,本 getter 的 Next(3) 掷位在errorWorld 全程活跃（mile8 #59 收敛实证）。
  *  ★旗开启时 getter 恒早退【零掷】,纯 abandoned manors 世界对普通流零扰动。 */
 function genBiggerAbandonedHouses(gs: GenState, rng: RNG): boolean {
   const f = gs.seedFlags;
@@ -460,6 +463,10 @@ export function placeFurniture(st: TileStore, rng: RNG, key: string, x: number, 
   const t = TILE_BY_KEY[key];
   if (t === undefined) return false;
   const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+  // ★IIIII179：FillRooms/cascadePlace 全部经 WorldGen.PlaceTile（本函数头注）⇒ 受理序
+  //  惰性落点预清（cs:59966）。家具/画作型非实心且无型拒/drip/液体草植/火把拒支 ⇒
+  //  惰性即清;位在逐型 case 分派前=vanilla 序言位。受理覆写;各型门拒时外显。
+  placeTilePrologueClear(st, x, y);
   switch (sheet) {
     case 240: case 440: {           // Place3x3Wall(cs:44281)：(x-1,y-1) 3×3，style>35 行卷绕
       let s = style, row = 0;
@@ -534,6 +541,11 @@ export function placeFurniture(st: TileStore, rng: RNG, key: string, x: number, 
     case 101:                       // Place3x4(cs:51943)：(x-1,y-3) 3×4 + SquareTileFrame（零掷）
       return placeFloorObject(st, x - 1, y - 3, 3, 4, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
     case 219:                       // case106 族 Place3x3(cs:53549 num=-2 段)：(x-1,y-2) 3×3
+    // ★IIIII184：642（叶绿素提炼机）与 219 同组——vanilla PlaceTile 派发
+    //   `num==106||212||219||220||…||491||642||733||753` → Place3x3（同几何同帧步）。
+    //   errorWorld 沙漠屋提炼机=642（HouseBuilder.cs:873-876）,缺 case 曾致
+    //   cascadePlace 十掷全败零写 → bt 段多耗 9 掷 + 提炼机整缺（house20 定罪）。
+    case 642:
       return placeFloorObject(st, x - 1, y - 2, 3, 3, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
     case 506:                       // Place2xX(case 104 族)：(x,y-2) 2×3
       return placeFloorObject(st, x, y - 2, 2, 3, t, (dx) => style * 36 + dx * 18, (dy) => dy * 18);
@@ -1581,6 +1593,10 @@ function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void
         st.half[i] = 0;
         genFrameNeighbors(st, rng, x, exitY + dy, 'clearTile');
       }
+      // ★IIIII179：PlaceTile(x,exitY,10)（HouseBuilder.cs:549）受理序预清（cs:59966）
+      //   ——10 实心,forced=false ⇒ 析取经 EmptyTile(=门洞顶格惰性)放行;原版清洞
+      //   ClearTile 保 type,惰性残型由此归零;分支 A/B 判定前=序言位,分支零写时预清外显。
+      placeTilePrologueClear(st, x, exitY);
       const actAt = (yy: number) => st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0;
       const tableSolidAt = (yy: number) => {   // Main.tileSolid[type]（生成期翻转表）
         if (!st.inBounds(x, yy)) return false;
@@ -1980,8 +1996,32 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       //   created→builder 3 vs 4，age1 级联 +37）。其余链旗关零影响。
       //   NextFloat=(float)NextDouble（Utils.cs:1233 扩展）→ 比较须 fround 对齐
       //   float32 域（0.4f = fround(0.4)）。
-      const __seedFloat = rng.next();
-      if (!(Math.fround(__seedFloat) > Math.fround(0.4))) {
+      // ★IIIII184（HouseBuilder.cs:127-223 IF 支）：errorWorld 时走【样式骰+Next(20)
+      //   转换表】臂——C# if/else 互斥，NextFloat 早退门【不执行】。每屋恒 8 骰：
+      //   PlatformStyle Next(49)→DoorStyle Next(49)→TableStyle Next(35)→WorkbenchStyle
+      //   Next(44)→PianoStyle Next(39)→BookcaseStyle Next(40)→ChairStyle Next(44)
+      //   （worldgen 无椅消费位,只掷不消费）→switch Next(20)；20 出路【全部】换
+      //   TileType/WallType（default=159/43 恰为 case0），case3 541/318 附加
+      //   PlatformStyle=48。ChestStyle/BeamType/UsesTables2 本支不动。 iamerror 链
+      //   #59 定罪根因：旧实现只走 else 支（1 骰 NextFloat+特殊表），errorWorld 下
+      //   每屋少 7 骰且 20/20 材质转换整缺 → 全屋材质原样+流位级联漂移。
+      if (gs.seedFlags?.errorWorld) {
+        def.platformStyle = rng.nextInt(49);
+        def.door = rng.nextInt(49);
+        def.table = rng.nextInt(35);
+        def.workbench = rng.nextInt(44);
+        def.piano = rng.nextInt(39);
+        def.bookcase = rng.nextInt(40);
+        rng.nextInt(44);
+        const seedCase = rng.nextInt(20);
+        const seedHouse = [[159, 43], [422, 225], [194, 75], [541, 318], [137, 147],
+          [48, 245], [370, 182], [140, 33], [347, 174], [508, 243], [507, 242], [546, 167],
+          [329, 169], [326, 136], [327, 137], [345, 172], [708, 347], [501, 238],
+          [272, 225], [421, 225]][seedCase]!;
+        const seedT = sheetTile(seedHouse[0]);
+        if (seedT >= 0) { def.tile = seedT; def.wall = seedHouse[1]; }
+        if (seedCase === 3) def.platformStyle = 48;
+      } else if (!(Math.fround(rng.next()) > Math.fround(0.4))) {
         // ★IIIII110 PotentiallyConvertToSeedHouse else 支全臂（HouseBuilder.cs:228-261）：
         //   ≤0.4f 命中后按序组 special list——①NTB+tenth 丛林屋 {562,563,229}；
         //   ②(drunk+tenth)×(wood|ice) 屋 {197 糖果木|193};③(frozen×ice)屋 Next(3)==0 →
@@ -2190,7 +2230,9 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       if (cascadePlace(st, rng, rooms, 'v_377_sharpening_station', false)) sharpCount++;
     }
     if (theme === 'desert' && extractCount < rng.int(2, 4)) {
-      if (cascadePlace(st, rng, rooms, 'v_219_extractinator', false)) extractCount++;
+      // ★IIIII184（HouseBuilder.cs:873-876）：errorWorld 沙漠屋提炼机换叶绿素提炼机
+      //   642（原 219）——门序在 Next(2,5) 上限判定之后,骰面零变化仅换 tile。
+      if (cascadePlace(st, rng, rooms, gs.seedFlags?.errorWorld ? 'v_642_chlorophyte_extractinator' : 'v_219_extractinator', false)) extractCount++;
     }
     // ★SSS-CELEB：WoodHouseBuilder.Place 覆写尾 → RainbowifyOnTenthAnniversaryWorlds
     //   （HouseBuilder.cs:114-124）：TileType==160 时掷 Next(2)（==0 则整屋跳漆），
@@ -2246,6 +2288,12 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       oy = oy < lo ? lo : oy > hi ? hi : oy;
     }
     __hc?.('try', ox, oy);
+    // ★III205（cs:17197）：oceanDepths 臂后、caveHouseBiome.Place 前的 dual 界域
+    //   else-if 臂——dualDungeons 门（普通世界旗关恒假零扰动;两侧判项均零掷,
+    //   臂序与流位无关,受理面与 vanilla else-if 链逐臂同构）。
+    if (gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(ox, oy)) {
+      fail--; __hc?.('dual', ox, oy); continue;
+    }
     if (!placeHouse(ox, oy, true)) { fail--; __hc?.('no', ox, oy); continue; }
     __hc?.('ok', ox, oy);
     n++;

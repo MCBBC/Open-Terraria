@@ -211,6 +211,9 @@ function genSolidTile2(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  // ★IIIII206：「inActive 生成期恒 0」惯例被 ddual 链证伪（gold#083 起致动格 3304+,
+  //   Tile.cs nactive/SolidTile 系列原生带 !inActive 判项）——下同款补刀
+  if ((st.wire[i] >>> 5) & 1) return false;
   const t = st.type[i];
   if (!genSolidType(t)) return false;
   const sl = st.slope[i];
@@ -228,6 +231,8 @@ function genSolidAllowBottomSlope(st: TileStore, x: number, y: number): boolean 
   if (!st.inBounds(x, y)) return true;                                 // 原版 !InWorld → return true
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  // ★IIIII206：cs:70713 原生带 `!tile.inActive()` 判项（恒 0 惯例被 ddual 链证伪）
+  if ((st.wire[i] >>> 5) & 1) return false;
   const t = st.type[i];
   if (!(genSolidType(t) || TILE_DEFS[t]?.platform)) return false;      // tileSolid || tileSolidTop
   const sl = st.slope[i];
@@ -612,7 +617,14 @@ function checkTreeAt(st: TileStore, rng: RNG, x: number, y: number, vanity: bool
   };
   const wr = (nfx: number, nfy: number): void => {
     cfx = nfx; cfy = nfy;
-    if (!dead) { st.frameX[k] = nfx; st.frameY[k] = nfy; }
+    // ★IIIII177b：杀后重帧必须写回 store——vanilla CheckTree/CheckTreeWithSettings
+    //   后续重帧块写的是 Main.tile[i,j] 死格对象本体（KillTile 只改字段不换对象），
+    //   帧重写在 kill 后仍持久（R3 杀支 (0,132+num6) 族 / R4else3 孤立支 (110,-1)/
+    //   (154,-1) 族；WithSettings R3 本体=else-if 结构杀后不重帧，与 CheckTree 差异
+    //   由 R3 分支结构自带，wr 无条件写不影响）。实证 winter w159 (1136,721) f(0,132)/
+    //   (1137,721) f(110,-1)——mahogany 叶球邻级联 CheckTree 杀 t5 后重帧。
+    //   与 vanilla/FinalCleanupPass.checkTreeSweep 同款同修（副本纪律）。
+    st.frameX[k] = nfx; st.frameY[k] = nfy;
   };
   // R1（cs:54640 / 54449）：下方非草族非同类干 + 直干帧（fx∈{0,22,44} 且 fy≤130）
   if (!groundOk && num4 !== self
@@ -2213,11 +2225,33 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** Mushrooms pass（cs:20744-20840）1:1：蘑菇斑帧重刷（不消耗内层 RNG） */
 export function runMushroomsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
-  const spots = Math.floor(w * 0.002);
+  // ★IIIII190：remixWorldGen 支整缺（cs:20768-20770 num×9 + cs:20781-20830 地下盒支）
+  //  ——remix 世界 JS 跑了非 remix 地表扫描支：掷账 3/iter vs 原版 6/iter（初始
+  //  Next(4,10)/Next(15,30) **恒先消耗**、remix 再重掷 Next(8,17)×2 + Next(rockLayer,·)）、
+  //  盒数 ×9 缺、盒心=地下（Next(rockLayer, maxTilesY-350)）非地表 → x86 写 144 的
+  //  地下草植格 JS 全空（remix t3×3+t24×3=CLXIV after 残余 89 格族）。
+  const spots = Math.floor(w * 0.002) * (gs.seedFlags.remix ? 9 : 1);
   for (let i = 0; i < spots; i++) {
     const cx = rng.int(20, w - 21);                                     // Next(20, w-20)
-    const rx = rng.int(4, 9);                                           // Next(4,10)
-    const ry = rng.int(15, 29);                                         // Next(15,30)
+    const rx = rng.int(4, 9);                                           // Next(4,10)——remix 支先消耗后重掷,非 remix 直用
+    const ry = rng.int(15, 29);                                         // Next(15,30)——同上
+    if (gs.seedFlags.remix) {
+      // remix 盒支（cs:20781-20830）：重掷半径+地下盒心,中心活性才刷帧（无地表扫描 break）
+      const rx2 = rng.int(8, 16);                                       // Next(8,17)
+      const ry2 = rng.int(8, 16);                                       // Next(8,17)
+      const cy = rng.int(gs.rockLevel, h - 351);                        // Next((int)rockLayer, maxTilesY-350)
+      if (activeAt(st, cx, cy)) {
+        for (let m = cx - rx2; m < cx + rx2; m++) {
+          for (let n = cy - ry2; n < cy + ry2; n++) {
+            if (m < 10 || n < 0 || m > w - 10 || n > h - 10) break;     // 原版逐层 break（cs:20813-20828）
+            const s = sheetAt(st, m, n);
+            if (s === 3 || s === 24) st.frameX[st.idx(m, n)] = 144;     // 裸帧写（不动 type/act/fy）
+            else if (s === 201) st.frameX[st.idx(m, n)] = 270;
+          }
+        }
+      }
+      continue;
+    }
     for (let l = 1; l < gs.worldSurface - 1; l++) {
       if (!activeAt(st, cx, l)) continue;
       for (let m = cx - rx; m < cx + rx; m++) {

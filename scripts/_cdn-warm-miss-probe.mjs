@@ -45,9 +45,19 @@ console.log('② warm 窗口 4s 内天空族请求:', skyReqs.map((x) => `${x.f}
 const probe = await page.evaluate(async () => {
   const g = await fetch('/sprites/vanilla/Tiles_200.png');
   const h = await fetch('/sprites/vanilla/Tiles_200.png', { method: 'HEAD' }).then((r) => r.status).catch(() => 'ERR');
-  return { get: g.status, getMiss: g.headers.get('x-sw-warm-miss') ?? '', head: h };
+  // 音频族(2026-09-05 生产实报 hit.opus 404 收口):窗口期应同款 204 静默
+  const a = await fetch('/sounds/hit.opus');
+  const am = a.headers.get('x-sw-warm-miss') ?? '';
+  // 消费方语义实测:204 空体 decodeAudioData 必失败(Sfx/Audio 的失败归宿前提)
+  const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+  let decodeFail = false;
+  if (AC) {
+    try { await new AC().decodeAudioData(await a.arrayBuffer()); } catch { decodeFail = true; }
+  }
+  return { get: g.status, getMiss: g.headers.get('x-sw-warm-miss') ?? '', head: h, audio: a.status, audioMiss: am, decodeFail };
 });
 console.log('②b 窗口期 GET Tiles_200.png:', probe.get, probe.getMiss ? '(x-sw-warm-miss:' + probe.getMiss + ')' : '', '| HEAD 直通:', probe.head, '(应 404)');
+console.log('②c 窗口期 GET sounds/hit.opus:', probe.audio, probe.audioMiss ? '(x-sw-warm-miss:' + probe.audioMiss + ')' : '', '| 204空体 decodeAudioData 失败:', probe.decodeFail, '(应 true=失败归宿链成立)');
 
 // ③ 等 warm 终态(最长 8 分钟)
 let final = '';
@@ -76,7 +86,8 @@ console.log('④ warm 终态后 fetch Sun.png:', sun.st, sun.ct);
 const window404 = skyReqs.filter((x) => x.st === 404);
 console.log('== 判定 ==');
 console.log(`窗口天空族 404: ${window404.length}(应 0)| 窗口期 GET 静默: ${probe.get === 204 ? '✓204' : '✗' + probe.get} ${probe.getMiss ? '(带 x-sw-warm-miss)' : '(无头!)'} | HEAD 直通 404: ${probe.head === 404 ? '✓' : '✗' + probe.head}`);
+console.log(`窗口期音频静默: ${probe.audio === 204 ? '✓204' : '✗' + probe.audio} ${probe.audioMiss ? '(带头)' : '(无头!)'} | 空体 decode 失败: ${probe.decodeFail ? '✓' : '✗'}`);
 console.log(`终态后 Sun: ${sun.st}(应 200)`);
 await browser.close();
-const ok = window404.length === 0 && probe.get === 204 && !!probe.getMiss && probe.head === 404 && sun.st === 200;
+const ok = window404.length === 0 && probe.get === 204 && !!probe.getMiss && probe.head === 404 && probe.audio === 204 && !!probe.audioMiss && probe.decodeFail && sun.st === 200;
 process.exit(ok ? 0 : 1);

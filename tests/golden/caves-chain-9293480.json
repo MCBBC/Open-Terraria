@@ -75,10 +75,10 @@
     "beehives|ed4ae425 0c3df66c 8d11153b dac82b8d",
     "piles|adbfe5cf e6637985 8d11153b dac82b8d",
     "trees|d5a00797 0e99059c 8d11153b dac82b8d",
-    "settle2|07217769 82fd15ed 8d11153b c80f0316",
-    "cactus|675f90aa 55ef8544 8d11153b c80f0316",
-    "microbiomes|df6e8615 f2abecc5 157250ff a8821ad6",
-    "finalcleanup|57c6edc1 d35ee125 702ad67c d882b16c"
+    "settle2|07217769 82fd15ed 8d11153b aa3ce148",
+    "cactus|675f90aa 55ef8544 8d11153b aa3ce148",
+    "microbiomes|df6e8615 f2abecc5 157250ff 8518ae76",
+    "finalcleanup|57c6edc1 d35ee125 702ad67c 5e8e7654"
   ],
   "stream": [
     "beaches|fb014fa7",
@@ -103,7 +103,7 @@
     "beehives|7c7dbcf5",
     "piles|2225a7f4",
     "trees|49f252c2",
-    "settle2|51e2ebaa",
+    "settle2|0cd6c044",
     "cactus|45e570b2",
     "microbiomes|f11306bf"
   ]

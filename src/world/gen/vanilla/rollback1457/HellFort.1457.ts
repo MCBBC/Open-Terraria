@@ -33,6 +33,8 @@
 import { TileStore } from '../../../TileStore';
 import type { RNG } from '../../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../../data/tiles';
+import { placeTilePrologueClear } from '../WorldGenTileHelpers';
+import { framePlatformSweep } from '../FinalCleanupPass';
 
 const T_DOOR = TILE_BY_KEY['door_closed']!;
 
@@ -60,6 +62,12 @@ function solidTileNoDoorsHF(st: TileStore, x: number, y: number, noDoors: boolea
 /** PlaceTile(x, j, 10, forced:false) 分支 A（向上门）→ PlaceDoor——与 live
  *  HellFortPass.placeTileDoorHF 同构（1456≡1457），此处副本仅存档用。 */
 function placeTileDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,j,10,forced:false)（AttemptToPlaceDoor cs:33468 调）受理序
+  //  预清（cs:59966）——10 实心,forced=false ⇒ 析取经 EmptyTile(=目标惰性)放行;10 无
+  //  型拒/drip/液体拒支⇒惰性即清（AttemptToPlaceDoor 头清 y-1..y-3 后 (x,j) 恒惰性,
+  //  残型门洞格由此归零;受理则门三格覆写,PlaceDoor 锚门拒时外显）。序言位在分支 A/B
+  //  方向判定前=vanilla 序言位。
+  placeTilePrologueClear(st, x, j);
   const inact = (a: number, b: number): boolean => !!st.inBounds(a, b) && st.flags[st.idx(a, b)] === 0;
   const actSolid = (a: number, b: number): boolean => {
     if (!st.inBounds(a, b)) return false;
@@ -137,7 +145,9 @@ function hfCheckDoorClosed(st: TileStore, i: number, j: number): void {
 }
 
 /** TileFrame(i,j) 生成期状态面投影（cs:82613）：±5 边界门;失活支清 half/slope/
- *  块漆/块涂层;活性门→hfCheckDoorClosed;其余类型生成期零状态面。 */
+ *  块漆/块涂层;活性门→hfCheckDoorClosed;活性平台→framePlatformSweep（★IIIII190 补支,
+ *  原投影漏 cs:86648-86772 Platforms 支→顶平台 frameX 恒 0,x86 连接码 (54/72,234)
+ *  残差=CLXIV after 89 格族 t19×11+t75×2）;其余类型生成期零状态面。 */
 function hfTileFrameProj(st: TileStore, i: number, j: number): void {
   if (i <= 5 || j <= 5 || i >= st.w - 5 || j >= st.h - 5) return;
   const ti = st.idx(i, j);
@@ -148,8 +158,19 @@ function hfTileFrameProj(st: TileStore, i: number, j: number): void {
     st.coat[ti] &= ~TileStore.COAT_BLOCK_MASK;
     return;
   }
+  // ★IIIII190：TileFrameImportant Platforms 支（cs:86648 `TileID.Sets.Platforms[type]`）。
+  //  PlaceTile case19（cs:60739 frameY=18*style）尾 SquareTileFrame（cs:60753）→ TileFrame
+  //  → 本支写平台连接码 frameX（0/18/36/54/72…纯帧零掷）。HellFort 平台 style=13
+  //  （cs:33181）→ 连接码 x86 实证 (54,234)/(72,234)（CLXIV 残余格逐格）。
+  //  本塔面仅 PlaceTile(19) 一种平台（framePlatformSweep 邻域谓词族 {19,427,435-439}
+  //  内其余型在本链不可达,门支 gate=sheet 19 精确）。终值=派发时刻邻域纯函数,与
+  //  vanilla 逐格增量派发终态恒等（连接码不含掷）。
+  if (TILE_DEFS[st.type[ti]]?.vanilla?.sheet === 19) framePlatformSweep(st, HF_FRAME_CTX, i, j);
   if (st.type[ti] === T_DOOR) hfCheckDoorClosed(st, i, j);
 }
+
+/** framePlatformSweep 的 ctx 形参（函数体内 void ctx,零消费——占位实参）。 */
+const HF_FRAME_CTX = { rng: undefined, destroyObject: false, frameSparse: false } as const;
 
 /** SquareTileFrame(i,j)（cs:81470）3×3 投影（行主序=原版 (i-1,j-1)→(i+1,j+1) 序）——
  *  HellFort 域 PlaceTile 受理面（门/平台/火把）后必调。 */

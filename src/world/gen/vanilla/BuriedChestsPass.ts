@@ -22,6 +22,7 @@ import { genSquareTileFrame } from './FinalCleanupPass';
 //   ★IIIII23（2026-08-28）缺省翻转：现缺省 1457 形,SW_MB_1456=1 / SW_MB_1457=0
 //   显式降档（见 HellFortPass.hfIs1457 头注的七链双态实证）。
 import { hfIs1457 } from './HellFortPass';
+import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';   // ★III205 cs:17129/17155 dual 门
 import { registerChest } from '../ChestRegistry';
 import type { SparseChestSink } from '../ChestRegistry';
 // 1456 主物门回退值（cs:36130-36133 Next(50)==0）——经具名常量承载（VVVVVV 双态
@@ -57,7 +58,13 @@ export const PC_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239,
   405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
   601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
 /** TileID.Sets.TileAnchorIfZero... noAttach 族（U 批 DG_NO_ATTACH 同表） */
-const PC_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
+// ★IIIII184 勘误：507（Gold Starry Block）曾误入本表——vanilla Main.tileNoAttach
+//   全量静态+运行时赋值（Main.cs:7428-7482/10130 循环 435-439）均【无 507】
+//   （1456/1457/1458 三版核对一致）。507 唯一进入世界的通道=errorWorld Potentially-
+//   ConvertToSeedHouse case10（507/242）→ 屋内地板做箱腿时本表误拒 → 该屋宝箱
+//   全 cascade 落空走 C3 千掷环 → 流位永久漂移（iamerror #59 house19 定罪实录）。
+//   普通种子 507 恒不存在=休眠债，errorWorld 链显形。
+const PC_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
 /** 锚定无效表（U 批 DG_CHEST_ANCH_INVALID 同表） */
 const PC_CHEST_ANCH_INVALID = new Set([127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716]);
 const PC_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
@@ -238,6 +245,18 @@ const PRE_CLASS: Record<number, string> = {
   //   ②517（表面箱主物池 remix 换位 3069→517,cs(1457):36688-36694）Magic 类同漏,
   //   预防性登记（同表 1:1,非本种实爆位）。
   725: 'guns', 517: 'magic',
+  // ★IIIII187（iamerror #69 定罪修复）：浮空岛屋箱主件四件补登记——IslandHouse
+  //   AddBuriedChest(i, num13-3, mainItem, false, 13)（cs:80543-80549）主件
+  //   num16∈{0:159,1:65,2:158,3:2219}，gy≥ws+25 ⇒ loot 走金支 num10>0 径
+  //   `SetDefaults(num10); Prefix(-1);`（cs:36909-36911）——vanilla 可前缀化耗掷：
+  //   159=Shiny Red Balloon（accessory=true,Item.cs:3287-3292;CanGetPrefixes 缺省
+  //   true 不在例外表）→ IsAPrefixableAccessory → acc 池 19；158=Cloud in a Bottle
+  //   （accessory=true,cs:3280-3285）→ acc；2219=Sandstorm in a Bottle → acc；
+  //   65=Starfury（damage25/shootSpeed25,PrefixLegacy SwordsHammersAxesPicks 含 65）
+  //   → swords 池 40。JS 曾缺登记 ⇒ prefixRolls 零掷 vs vanilla 1~4+ 掷,每岛箱
+  //   相位漂 → 后续屋 dir/halfW/hgt 骰面重洗 → #69 全屋域错位（x86 ABRES 岛箱
+  //   逐呼 D 对拍实证）。demotion：160/651 等 num16 随机域不再登记面（缺省走 0..3）。
+  159: 'acc', 65: 'swords', 158: 'acc', 2219: 'acc',
   // ★IIIII175（2026-09-02）：尾段秘种子臂新件补登记（AddBuriedChest 尾段 1458 终值
   //   cs:37923-37932）——①1260=RainbowGun（RainbowGun=Magic 武器,Item.cs:15625-15641,
   //   magic=true）：rainbowStuff 臂 `num10∈{1156,1571,1569,1572,4607}→SetDefaults(1260)
@@ -1174,7 +1193,10 @@ function placeBuriedChestInner(
     if (argStyle !== undefined) num9 = argStyle;
     style = num9;
     // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）
-    if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && num9 === 0))) flags.wooden = true;
+    //   ★IIIII187（iamerror #60 定罪修复）此处【不再】置位——真二进制读**洗牌后** num9：
+    //   1458 源位序铁证 = errorWorld 洗牌臂 cs:36375-36403 在前、flag 块 cs:36408 在后；
+    //   rig 织入 M1/M2 标记实测（箱 3081,276：洗牌命中 num9=5 → PlaceChest 前 flag=0 →
+    //   loot 落金档 24 掷 vs JS 地表档 31 掷=Δ7 流漂首源）。洗牌后重算见洗牌臂之后。
   }
   // ★IIIII108c2（1458 cs:36371-36405）：errorWorld 箱样式洗牌臂——「I am error」彩蛋
   //   本体：tile21 箱掷 Next(2)==0 → num9∈{1,11,12,13,15}→6 / num9==0→5；再
@@ -1199,6 +1221,13 @@ function placeBuriedChestInner(
       }
     }
   }
+  // ★IIIII187：wooden flag 洗牌后重算（vanilla flag 块 cs:36408 位序=洗牌臂【之后】，
+  //   读洗牌后 num9）：(chestStyle==0)||(chestStyle==-1 && 洗牌后 num9==0)。洗牌命中
+  //   （Next(2)==0）时 num9∈{5,6,52掷} 恒≠0 ⇒ wooden 恒假 → loot 落金/洞穴深度档
+  //   （Next(52) 掷得 0 为例外回正）。非 errorWorld 洗牌不跑、style===num9 恒等 ⇒
+  //   对既有认证链零扰动。位序在天空降档门（style==12→wooden 兜底）之前，与其
+  //   覆写序一致（vanilla flag 块→…→天空门 cs:36523）。
+  if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && style === 0))) flags.wooden = true;
   // ★IIIII99e：AddBuriedChest 内七处 `getGoodWorldGen && genRand.Next(num)==0 → num10=52`
   //   FTW 专用骰（cs:36477 沙漠 / 36517 冰箱 / 36543 地牢flag4 / 36554 地狱 /
   //   36562 style17 水 / 36578 天空降档else支 / 36587 style32 蘑菇；num=15,十周年×3）。
@@ -1626,7 +1655,10 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
     if (remixBC) y = rng.int(Math.trunc(gs.worldSurface), h - 401);
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
     // cs:17109：wallDungeon[wall] || wall == 87（神庙墙 87 独立门）→ 整体重掷
+    // ★III205（cs:17129）：wallDungeon/87/oceanDepths 臂后、AddBuriedChest 前的
+    //   else-if dual 界域臂——dualDungeons 门（普通世界旗关恒假零扰动）。
     if (isDungeonWall(wl) || wl === 87 || (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance))
+      || (gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(x, y))
       || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
@@ -1647,8 +1679,11 @@ export function runUnderworldChestsPass(st: TileStore, rng: RNG, gs: GenState, c
     const x = rng.int(20, w - 21);
     const y = rng.int(h - 200, h - 51);
     // cs:17134-17140：wallDungeon[wall] → 整体重掷（无 wall==87/oceanDepths 门）
+    // ★III205（cs:17155）：wallDungeon 臂后的 dual 界域 else-if 臂（本域 y≥h-200
+    //   恒在界域 b=h-210 之外=不动点, vanilla 语义照录零扰动）。
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
-    if (isDungeonWall(wl) || !placeBuriedChest(st, rng, gs, chests, x, y)) {
+    if (isDungeonWall(wl) || (gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(x, y))
+      || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;
@@ -1688,6 +1723,10 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
       }
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
+      // ★IIIII187 取证钩（dormant，__swScGate 未挂载零开销）：pass 级 flag3 门逐 attempt
+      //   台账（初始点/分支/scan 候选数/选中点/活掷数）——#60 Surface_Chests 单箱定罪仪。
+      const __scGate = (globalThis as { __swScGate?: (ev: string, x: number, y: number, a?: number, b?: number) => void }).__swScGate;
+      __scGate?.('try', x, y);
       // cs:17264-17276 两分支：空格走墙门（2/59/244，墙 244 → 天空箱；★remix 无视
       //   墙面恒收）——落点活性格走 101×101（步 2）蓄水池采样找墙 244 空格
       let sky = false;
@@ -1695,7 +1734,9 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
       if (!st.flags[i]) {
         if (st.wall[i] === 2 || st.wall[i] === 59 || st.wall[i] === 244 || remixSC) {
           if (st.wall[i] === 244) sky = true;
+          __scGate?.('inact', x, y, st.wall[i]);
         } else {
+          __scGate?.('rej-wall', x, y, st.wall[i]);
           continue;   // flag3=false → 本轮作废
         }
       } else {
@@ -1705,11 +1746,13 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
         //   [359,459] 框，AB#2 k=314 vs vanilla k=175 实锤 → 位置半数差+8.2k 欠掷）
         let num8 = 1;
         let hit = false;
+        let __scCand = 0;
         for (let j = x - 50; j <= x + 50; j += 2) {
           for (let k = y - 50; k <= y + 50; k += 2) {
             if (k >= gs.worldSurface) continue;
             if (!st.inBounds(j, k) || st.flags[st.idx(j, k)]) continue;
             if (st.wall[st.idx(j, k)] !== 244) continue;
+            __scCand++;
             if (rng.int(0, num8 - 1) !== 0) continue;                    // Next(num8)==0
             sky = true;
             num8++;
@@ -1717,6 +1760,7 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
             cx = j; cy = k;
           }
         }
+        __scGate?.(hit ? 'scan' : 'rej-scan', cx, cy, __scCand, x);
         if (!hit) continue;   // 蓄水池无墙 244 空格 → 本轮作废
       }
       // ★PPPPPPP（2026-08-25）：非 sky 支原版传 chestStyle=-1（cs:17292 flag2?12:-1）

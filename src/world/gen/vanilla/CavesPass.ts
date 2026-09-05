@@ -134,7 +134,7 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState,
     }
   }
   // Rock Layer Caves（cs:12135-12165）：掷序 type→strength→steps→x→y（曾错位+改 digTunnel）
-  rng.reseed(gs.seed); gp?.beginVan('Rock Layer Caves'); // ▶cs:12135（内部 pass 边界）
+  rng.reseed(gs.seed); gp?.beginVan('Rock Layer Caves'); // ▶RockLayerCaves cs:12135（内部 pass 边界;★IIIII174b 补锚标签=mile8 dump 011_Dirt_Layer_Caves 窗,前值▶cs:12135 无名未接线）
   {
     let num = Math.trunc(area * 0.00013);
     // ★IIIII43 REMIX（1457 cs:12152-12154）：主循环数量 ×1.1
@@ -179,7 +179,7 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState,
     }
   }
   // Surface Caves（cs:12191-12300）：五组地表入口
-  rng.reseed(gs.seed); gp?.beginVan('Surface Caves'); // ▶cs:12191（内部 pass 边界；分段值域 .0/.2/.4/.6/.8→1 锚点即组间）
+  rng.reseed(gs.seed); gp?.beginVan('Surface Caves'); // ▶SurfaceCaves cs:12191（内部 pass 边界；分段值域 .0/.2/.4/.6/.8→1 锚点即组间;★IIIII174b 补锚标签=mile8 dump 012_Rock_Layer_Caves 窗,前值▶cs:12191 无名未接线）
   const beachL = gs.beachLeftEnd + 20, beachR = gs.beachRightStart - 20;
   /** 14a-14d 骨架：拒绝采样（无界 while）+ 首实心行（上界 GenVars.worldSurfaceHigh
    *  raw double；找不到则整轮跳过不掷 runner 骰——原版 for-break 语义） */

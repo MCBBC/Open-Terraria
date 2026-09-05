@@ -1458,7 +1458,7 @@ function vanillaStructures({ store, rng, world, prog }: GenCtx) {
   // Demon And Crimson Altars(15825,全图随机撒 16 坛)——注册序 LivingTreeWalls(15792) <
   // 本 pass < SurfaceWaterInJungle(15887)。★与 Corruption pass 内猩红逐组祭坛(cs:14241)
   // 是原版两处放置,勿合并(见 CorruptionPass.runAltarsPass 头注);2026-08-13 前整 pass 缺失。
-  rng.reseed(gs.seed); prog?.beginVan('Altars');                       // ▶cs:15825
+  rng.reseed(gs.seed); prog?.beginVan('Altars');                       // ▶DemonAndCrimsonAltars cs:15825（★IIIII174b 补锚标签=mile8 dump 043_Wood_Tree_Walls 窗,前值▶cs:15825 无名未接线）
   runAltarsPass(store, rng, gs);                      // Demon And Crimson Altars(全图祭坛)
   rng.reseed(gs.seed);                                    // ▶SurfaceWaterInJungle cs:15887（零掷骰）
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
@@ -2473,7 +2473,8 @@ function sheetToTile(sheet: number): number {
 // 完整覆盖(见 vanillaBiomes),legacy 版会造成双倍密度+索引帧宝箱(已修的 bug 源)。
 
 // ---------- 收尾：出生点（选最平坦区域并整平） ----------
-// sheet id → 贴图表 [宽,高]（帧越界净化用；数据源 public/sprites/vanilla.json）
+// sheet id → 贴图表 [宽,高]（★IIIII188 改判后仅剩 139 超页折页判据消费，见 finalize 内注；
+//   数据源 public/sprites/vanilla.json）
 const V_SHEET_DIM: Record<number, [number, number]> = (() => {
   const out: Record<number, [number, number]> = {};
   const t = (vanillaJson as unknown as { tiles: Record<string, { grid: [number, number]; cols: number; rows: number }> }).tiles;
@@ -2483,10 +2484,6 @@ const V_SHEET_DIM: Record<number, [number, number]> = (() => {
   }
   return out;
 })();
-// ★IIIII99d：Place1xX 竖排样式带家族（cs(1458):60561-65 PlaceTile case
-//   92/93/453 → Place1xX；frameY=hgt*style*18+row*18 原样落盘可越表底）——
-//   finalize 帧净化纵向豁免的消费面（见 finalize 内注）。
-const VERTICAL_STYLE_SHEETS = new Set([92, 93, 453]);
 function finalize({ store, world }: GenCtx) {
   // ★幽灵保域（2026-09-02 GH-A/GH-B 双审计定谳）：幽灵净化【删除】——原指征
   //   （存档格式无 active 位，防重读激活成浮空块）已由 serialize.ts 的 tileActive
@@ -2503,75 +2500,58 @@ function finalize({ store, world }: GenCtx) {
   for (let i = 0; i < store.type.length; i++) {
     if (store.type[i] === 0) store.flags[i] = 0; // 幻影活性(type 0 不可有 flags)
   }
-  // ---- 帧越界净化：生成期大量 type 直写/覆盖不清帧（LivingTree setLeaf、Terrain
-  //      type=1 等），旧 framed tile 帧残留进新类型 = 渲染越界/错位（实测 sheet1
-  //      fx=1080 / sheet4 fx=252 / sheet51 fy=216 等）。像素级粗判（超出表宽/高即清 0），
-  //      非均匀行高表（187 的 16/18 行）不受影响（越表判比步长判宽松）
+  // ---- 帧净化 ★IIIII188 改判刀（2026-09-05，CLXI/IIIRS186 章移交终局）：目标域重定义。
+  //      旧净化「越表即清（分带/折页解码救回为例外）」在继承帧域整族误杀：x86 世界生成
+  //      存在大量【无帧直写/失帧覆写】（type 裸写不写帧；Tile.ClearTile() 不碰帧），新
+  //      类型继承供体帧、越出自身表底，vanilla 不清帧原样落盘 .wld（x86 渲染端=XNA 源
+  //      矩形 Clamp 溢染=原版视觉）：
+  //      · LifeTree 叶 cs:28793/28804 `type=192` 裸写 → 继承树冠帧 fx2700-2790（树冠
+  //        style*54 帧域）；leaf→hive 换型 cs:25471-25476（type=384 裸写，ntb）同构；
+  //      · PlaceSandTrap 灭罐补沙 cs:36020-36022（t53）/沙化石边界 cs:35997-36010、
+  //        36051-36056（t396/397）→ 继承瓦罐帧 fy=style*36+(l+1)*18（PlacePot
+  //        cs:54537-54569，Tiles_28 108×1332 表内合法，越 53/396/75 自身表底）；
+  //      · HellFort cs:33166-33169 `type=tileType(75)` 裸写 → 继承供体帧（fy1062 等）；
+  //      · t638 填充 cs:20593-20595 裸写。
+  //        x86 22 链终态活性越真表底帧共 2,414 格（tools/_iii188census 实测：
+  //        192×2229 / 53×54 / 384×110 / 396×15 / 75×3 / 638×3）——旧净化每清一格即
+  //        一帧通道伪差（x86_framed_js0），CLXI drunk 658 残差中 565 格即此源。
+  //        ⇒【越真表底帧一律保留】，越表域的数据侧净化删除（曾按越表清零的既有
+  //        事故账：keg/loom 象限帧（IIIII182 N3-a）、skyblock 音乐盒页帧（N5）、
+  //        187 头骨石堆分带（2026-08-17）、92/93/453 竖排样式带（IIIII99d）——本刀
+  //        为其结构性终局：放置侧写面已 1:1，绘制端自有解码/回退，数据侧不再代偿）。
+  //      仅清【真正越界】（实存面皆空集，22 链普查零命中）：
+  //      ① 非法 tile：无表 type 持帧=帧域无主（TILE_DEFS 仅 leaves(9) 无表，装饰族，
+  //         生成域零活性格；x86 侧 typ=sheet 空间全表覆盖不可能出现）。
+  //      ② 超页：139 音乐盒虚拟页折后仍出表（wld 帧空间 style*36 无界，绘制端
+  //         TileDrawing.cs:5093-5099 `num5=frameY/2016; addFrY-=2016*num5;
+  //         addFrX+=72*num5` 折页；skyblock style87=fy3132/3150 页 1 在域内=x86 原样
+  //         存，本刀维持放行）。
+  //      ③ 负帧：回绕区间（≥32768）=刻意的有符号偏移——棕榈 323 干身/树冠倾斜像素
+  //         （65534=-2 等，VanillaTiler.ts palm 分支同约定解码）+ 65535 未定帧哨兵
+  //         （normFrame 双侧归零；清哨兵会误伤 ShimmerPass/DungeonPass 的 -1 惯用法
+  //         消费面）。22 链普查负帧半区全属棕榈约定（62..335 格/链），无真垃圾负帧
+  //         ⇒ 维持放行（棕榈被清 → 树冠+倾斜全部消失，2026-08 前科）。
   {
-    const wmax = new Map<number, number>();
-    const hmax = new Map<number, number>();
     for (let i = 0; i < store.type.length; i++) {
       if (!store.flags[i]) continue;
       const d = TILE_DEFS[store.type[i]];
       const sh = d?.vanilla?.sheet;
-      if (sh == null) continue;
-      let w = wmax.get(sh), h2 = hmax.get(sh);
-      if (w === undefined || h2 === undefined) {
-        const m = V_SHEET_DIM[sh];
-        w = m ? m[0] : 0; h2 = m ? m[1] : 0;
-        wmax.set(sh, w); hmax.set(sh, h2);
-      }
-      if (w === 0) continue;
-      // ★ 回绕区间（≥32768）是【刻意的有符号偏移】——棕榈 323 干身/树冠的
-      // frameY=倾斜像素（65534=-2 等，VanillaTiler.ts palm 分支同约定解码），
-      // 不是格位索引，绝不可清（左倾棕榈被清 → 树冠+倾斜全部消失）。
-      // ★ 横越表 fx 另有【合法多带样式】——原版 wld 即存原始 fx（Tiles_187 样式
-      // 52-54 = fx 2808，绘制端 VanillaTiler 分带换算回 (918, fy+36)）。曾按越表
-      // 一律清零：沙漠头骨石堆 187 整族塌零帧 → 相邻零帧重建错位（2026-08-17）。
-      // 换算后仍在表内 = 合法帧，勿清。
       const fxv = store.frameX[i], fyv = store.frameY[i];
-      if (fxv < 32768 && fyv < 32768 && (fxv >= w || fyv >= h2)) {
-        let legal = false;
-        if (fxv >= 0 && fxv >= w) {
-          const dvan = d.vanilla!;
-          const objW = (dvan.fw ?? 1) * 18;
-          const bandH = (dvan.fh ?? 1) * 18;
-          const colsPerBand = objW > 0 ? Math.floor(w / objW) : 0;
-          if (colsPerBand > 0) {
-            const styleIdx = Math.floor(fxv / objW);
-            if (styleIdx >= colsPerBand) {
-              const wx = (styleIdx % colsPerBand) * objW + (fxv % objW);
-              const wy = fyv + Math.floor(styleIdx / colsPerBand) * bandH;
-              if (wx + 16 <= w && wy + 16 <= h2) legal = true;
-            }
-          }
-        }
-        // ★IIIII99d 纵向多带样式豁免（fx 分带的对称补支，【限 Place1xX 家族】）——
-        //   Place1xX(cs(1458):39578,case 92/93/453) 的样式带为竖排且**不换表底**，
-        //   wld 原样存 raw 帧：沙岩房 style47 灯 fy=2538..2590 越 H2032（渲染端
-        //   VanillaTiler case93 折列 num70=floor(fy/1998)、ofx+=36n 同构解码）。
-        //   曾被本净化清零 ⇒ m 链实测 (1302,952)/(1512,1292) 两塔 x86 fy=2538..2574
-        //   而 JS 终态 fy=0 差 9 格。合法性判据：带高=objH=fh*18、页数=
-        //   floor(h2/objH)；wy=(页%页数)*objH+(fy%objH)、wx+页位移在表内即放行。
-        //   非该家族维持旧行为（垃圾帧照清），零外溢。
-        if (!legal && fyv >= 0 && fyv >= h2 && VERTICAL_STYLE_SHEETS.has(sh)) {
-          const dvan = d.vanilla!;
-          const objW = (dvan.fw ?? 1) * 18;
-          const objH = (dvan.fh ?? 1) * 18;
-          const rowsPerBand = objH > 0 ? Math.floor(h2 / objH) : 0;
-          if (rowsPerBand > 0) {
-            const styleIdx = Math.floor(fyv / objH);
-            if (styleIdx >= rowsPerBand) {
-              const wy = (styleIdx % rowsPerBand) * objH + (fyv % objH);
-              const wx = fxv + Math.floor(styleIdx / rowsPerBand) * objW;
-              if (wx + 16 <= w && wy + 16 <= h2) legal = true;
-            }
-          }
-        }
-        if (!legal) {
-          store.frameX[i] = 0; store.frameY[i] = 0;
-        }
+      if (sh == null) {
+        // ①非法 tile（帧域无主）——生成域空集，防御性保留旧「清垃圾」语义
+        if (fxv !== 0 || fyv !== 0) { store.frameX[i] = 0; store.frameY[i] = 0; }
+        continue;
       }
+      // ③回绕区间=有符号偏移/未定帧哨兵域，绝不可清
+      if (fxv >= 32768 || fyv >= 32768) continue;
+      if (sh === 139) {
+        // ②超页：折页（TileDrawing.cs:5093-5099 同构）后仍出表才清；域内原样保留
+        const m = V_SHEET_DIM[139];
+        const page = Math.floor(fyv / 2016);
+        const wx = fxv + 72 * page, wy = fyv - 2016 * page;
+        if (m && (wx + 16 > m[0] || wy + 16 > m[1])) { store.frameX[i] = 0; store.frameY[i] = 0; }
+      }
+      // 其余（越真表底继承帧/样式带/折页域内帧）一律原样保留——vanilla 不清帧，x86 同构
     }
   }
   // ---- 出生点（原版 SpawnPoint cs:19605-19724）已归位为独立管线槽「出生点」

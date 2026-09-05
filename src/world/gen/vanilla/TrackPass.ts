@@ -36,6 +36,7 @@ import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
 import { vanGenSolidType } from './GenSolid';
 import { hfIs1457 } from './HellFortPass';
+import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';   // ★IIIII208 dual 拒位臂
 
 /** FFFFF 探针:placePath 逐列步进钩(harness _wwwrep 经 __setTrackStepProbe 安装;
  *  缺省 undefined 零开销)。loop 1=清轨巷遍/2=铺轨遍。 */
@@ -65,6 +66,13 @@ export interface TrackHistCell { x: number; y: number; slope: number; mode: numb
 let __trackHistProbe: ((tag: string, hist: TrackHistCell[], len: number, dir: number, ox: number, oy: number) => void) | undefined;
 export function __setTrackHistProbe(fn: ((tag: string, hist: TrackHistCell[], len: number, dir: number, ox: number, oy: number) => void) | undefined): void {
   __trackHistProbe = fn;
+}
+
+/** ★IIIII193 探针:tryRewrite 步进钩（caves-oracle.cs MBREW 行同位同窗对拍——仅
+ *  slope==DOWN 臂、段评估后/改写前发;undefined 零开销）。seg ∈ {0 AVAIL,1 OBSTR,2 INVALID}。 */
+let __trackRewProbe: ((len: number, num: number, seg: number, cell: TrackHistCell) => void) | undefined;
+export function __setTrackRewProbe(fn: ((len: number, num: number, seg: number, cell: TrackHistCell) => void) | undefined): void {
+  __trackRewProbe = fn;
 }
 
 /** ★IIIII209 探针:placePath 逐列累计掷数钩（x86 rig P1/P2 行同口径=环起点起累计;undefined 零开销） */
@@ -422,6 +430,8 @@ export class TrackGenerator {
     }
     this.len = Math.min(maxLength, length);
     if (this.len < minLength) return false;
+    // ★IIIII193:pre-smooth 历史转储（oracle MBSEG_TH2 同位——minLength 门后/平滑前）
+    __trackHistProbe?.('TPRE', this.hist, this.len, this.xDir, 0, 0);
     this.smoothTrack();
     return this.segmentState(0, this.len) !== INVALID;
   }
@@ -474,6 +484,7 @@ export class TrackGenerator {
     while (num >= this.len - size) {
       if (this.hist[num].slope === DOWN) {
         const state = this.segmentState(num, this.len - num);
+        __trackRewProbe?.(this.len, num, state, this.hist[num]);   // ★IIIII193:MBREW 镜像(改写前发)
         if (state === AVAILABLE) return state;
         this.rewriteSlope(num, STRAIGHT);
       }
@@ -1274,7 +1285,10 @@ export class TrackGenerator {
     // oceanDepths(cs:446-448):y ≤ oceanLevel 且在海滩带
     const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
     if (y <= oceanLevel && (x < gs.beachDistance || x > st.w - gs.beachDistance)) return true;
-    // dualDungeons 分支未接(无 DungeonUtils)
+    // ★IIIII208（TrackGenerator.cs:447-450）：dualDungeons 潜在地牢界域拒位臂——
+    //   轨选址点在任一 outer 界域内 → 拒（DungeonUtils.InAnyPotentialDungeonBounds,
+    //   fluff=0）。旧备案「dualDungeons 分支未接(无 DungeonUtils)」清偿。
+    if (gs.seedFlags.dualDungeons && inAnyPotentialDungeonBounds(x, y)) return true;
     const idx = st.inBounds(x, y) ? st.idx(x, y) : -1;
     // NTB 豁免:wall 108 不拒位(cs:458-464 `(!notTheBees || wall != 108)`)
     if (idx >= 0 && INVALID_WALLS.has(st.wall[idx])

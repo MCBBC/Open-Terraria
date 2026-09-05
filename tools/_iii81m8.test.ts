@@ -368,6 +368,19 @@ function labelOf(file: string, line: number): string {
     const m = f.match(/^(\d{3})_(.+)\.typ$/);
     if (m) { DUMPNAME.set(Number(m[1]), m[2]); NAME2IDX.set(m[2], Number(m[1])); }
   }
+  // ★IIIII191（2026-09-05）蛇槽名表补全（目录形态自检,双保险）:dual 链形状适配
+  // （上方 IS_DUAL 注入）只在 SW_I81_FLAGS=dualDungeons 时生效;配方走 seedText 明文路由
+  // （如 '1.1.1.0.doubledaringdangers|…'）时 flags 直注缺位 ⇒ IS_DUAL=false ⇒
+  // ▶DitherSnake 锚落 [unmapped-label]、▶Dungeon 锚经基表 'Dungeon'→'Slush' 错对
+  // #031_Slush（=蛇前态）,烧出「蛇整 pass 大额红」伪差（CLXV 槽31 A=581,839 实证:
+  // js P|32 后态 vs golden 031_Slush）。目录含 Dual_Dungeons_Dither_Snake dump 即
+  // 按 ddual 链补映射,与旗注路径等价;NAME2IDX 已建,后续槽名(Dungeon/Mountain_Caves…)
+  // 全部自动 +1 顺移,无需改 SLOT_END。
+  if (NAME2IDX.has('Dual_Dungeons_Dither_Snake') && !LAB2NAME.has('DitherSnake')) {
+    LAB2NAME.set('Dungeon', 'Dual_Dungeons_Dither_Snake');
+    LAB2NAME.set('SnakeEnd', 'Dual_Dungeons_Dither_Snake');
+    LAB2NAME.set('DitherSnake', 'Slush');
+  }
   console.log(`dump names: ${DUMPNAME.size} (8ch dir=${G2})`);
   // ★YYYYYY（2026-08-23）假绿免疫（XXXXX 批遗留#6 落地）：VG 传错目录（如 home-sec-*
   //  只有 .wld）→ DUMPNAME 空 → chans() 全 '(no dump)' → 全槽假绿。名表必须从

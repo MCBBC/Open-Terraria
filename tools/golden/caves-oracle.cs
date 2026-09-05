@@ -785,9 +785,55 @@ void Check3x2Kill187(int ax, int ay)
 }
 // 活树版（cs:49190-49438）：由帧重建 3×2 原点，六格 type+帧一致 + 支撑行实心；
 // 失败 → KillTile 六格中仍为 187 的 active 格（类型门）。
+// ★IIIII73/IIIII100b（2026-09-05 IIII173 批）：活树 Check3x2Pile 对齐 JS
+//   vanilla/LivingTreePass.ts（x86 sparkle 认证语义）——①destroyObject 再入门
+//   （cs:49627 头拒/cs:49856 置位/cs:50291 复位）②支撑行 SolidTileAllowBottomSlope
+//   （cs:49708→cs:70706：tileSolid∪tileSolidTop+topSlope 平台豁免+!halfBrick，
+//   旧 SolidTileGen 无 slope/half/tileSolidTop 门）+InvalidTileForPilesOrSpeleothems
+//   （cs:39005 滚石族）③杀组后 5×4 邻域 TileFrame 重验窗（cs:50291-50300）——
+//   seed SandboxWorld (2753..2755,167..168) 石堆组五格杀差的主根因（相邻组杀
+//   尾窗补杀缺臂 → oracle 残留 JS 已杀的组）。
+//   注：JGS 定义在后段（13329），此处按同式内联（SOLID−{239,380,427,435..439}）。
+bool ltDestroyObjPile = false;
+var LT_SOLID_TOP = new HashSet<ushort> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,
+    285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,
+    405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,
+    601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+var LT_PILE_BOULDERS = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };   // TileID.Sets.Boulders（cs:195）
+bool LtPlatformProperTopFrame(ushort sheet, int frameX)
+{
+    if (sheet != 19) return false;
+    int num = frameX / 18;
+    if ((num < 0 || num > 7) && (num < 12 || num > 16))
+    {
+        if (num >= 25) return num <= 26;
+        return false;
+    }
+    return true;
+}
+bool LtSolidAllowBottomSlope(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return false;          // JS inBounds 口径
+    int i = y * W + x;
+    if (act[i] == 0) return false;                                 // active()
+    ushort t = typ[i];
+    bool jgs = SOLID.Contains(t) && t != 239 && t != 380 && t != 427 && !(t >= 435 && t <= 439);
+    if (!jgs && !LT_SOLID_TOP.Contains(t)) return false;           // tileSolid ∪ tileSolidTop
+    bool topSlope = slope[i] == 1 || slope[i] == 2;
+    if (topSlope && !(t == 19 && LtPlatformProperTopFrame(t, frX[i]))) return false;
+    if (half[i] != 0) return false;                                // !halfBrick
+    return true;                                                   // （无 wire 数组——inActive 生成期恒假）
+}
+bool LtInvalidForPiles(int x, int y)
+{
+    if (x < 2 || y < 2 || x >= W - 2 || y >= H - 2) return false;  // InWorld(fluff 2)
+    int i = y * W + x;
+    return act[i] != 0 && LT_PILE_BOULDERS.Contains(typ[i]);
+}
 void Check3x2Pile(int i, int j)
 {
     if (i < 0 || i >= W || j < 0 || j >= H) return;
+    if (ltDestroyObjPile) return;                                  // ★IIIII100b cs:49627（级联期静默）
     int ii = j * W + i;
     if (act[ii] == 0 || typ[ii] != 187) return;
     int frameX = frX[ii], frameY = frY[ii];
@@ -806,9 +852,11 @@ void Check3x2Pile(int i, int j)
             int idx2 = l * W + k;
             if (act[idx2] == 0 || typ[idx2] != 187 || frX[idx2] != (ushort)((k - n5) * 18 + num7) || frY[idx2] != (ushort)((l - num) * 18 + num3 * 36)) flag = true;
         }
-        if (!SolidTileGen(k, num8)) flag = true;   // 活树 solidAt：无 slope 门（LivingTreePass 口径）
+        if (!LtSolidAllowBottomSlope(k, num8)) flag = true;        // ★IIIII73 cs:49708
+        if (LtInvalidForPiles(k, num8)) flag = true;               // cs:49712 滚石族
     }
     if (!flag) return;
+    ltDestroyObjPile = true;                                       // cs:49856
     for (int k = n5; k < n5 + 3; k++)
         for (int l = num; l < num8; l++)
         {
@@ -819,6 +867,12 @@ void Check3x2Pile(int i, int j)
                 act[idx2] = 0; half[idx2] = 0; frX[idx2] = 65535; frY[idx2] = 65535; typ[idx2] = 0;
             }
         }
+    ltDestroyObjPile = false;                                      // cs:50291
+    // ★IIIII100b：杀组尾 5×4 邻域 TileFrame 重验窗（cs:50291-50300）——邻接石堆组
+    //   的残活成员由此补杀（本域 TileFrame 其余分支无破坏性写，直调本函数等价）。
+    for (int nx = n5 - 1; nx < n5 + 4; nx++)
+        for (int ny = num - 1; ny < num + 4; ny++)
+            Check3x2Pile(nx, ny);
 }
 // SquareTileFrame（cs:80924）活树语境子集：3×3 逐格 → 仅 187 走 Check3x2Pile
 void SquareTileFramePile(int x, int y)
@@ -15101,6 +15155,9 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     bool lcChk = Environment.GetEnvironmentVariable("LIQ_CALLCHK") != null;
     System.IO.StreamWriter lcTw = lcChk ? new System.IO.StreamWriter(Environment.GetEnvironmentVariable("LIQC_OUT") ?? "/tmp/iii173-out/or-liqchk.txt") : null;
     int lcN = 0;
+    int lcCallLo = Environment.GetEnvironmentVariable("LIQ_CALL_LO") != null ? int.Parse(Environment.GetEnvironmentVariable("LIQ_CALL_LO")) : -1;
+    int lcCallHi = Environment.GetEnvironmentVariable("LIQ_CALL_HI") != null ? int.Parse(Environment.GetEnvironmentVariable("LIQ_CALL_HI")) : -1;
+    int lcCurCall = -999;
     uint LsStep(uint h, byte b) { h ^= b; h *= 16777619u; return h; }
     if (Environment.GetEnvironmentVariable("LIQ_REG") != null)
     {
@@ -15108,7 +15165,8 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         liqRx0 = int.Parse(lr[0]); liqRy0 = int.Parse(lr[1]); liqRx1 = int.Parse(lr[2]); liqRy1 = int.Parse(lr[3]);
         liqTw = new System.IO.StreamWriter(Environment.GetEnvironmentVariable("LIQ_OUT") ?? "/tmp/or-liqtrace.txt");
     }
-    bool LiqIn(int x, int y) => liqTw != null && x >= liqRx0 && x <= liqRx1 && y >= liqRy0 && y <= liqRy1;
+    bool LiqIn(int x, int y) => liqTw != null && x >= liqRx0 && x <= liqRx1 && y >= liqRy0 && y <= liqRy1
+        && (lcCallLo < 0 || (lcCurCall >= lcCallLo && lcCurCall <= lcCallHi));   // ★IIIII173：调用窗门
     void LiqLog(string s) { liqTw.WriteLine($"{liqSeq++} {s}"); }
     (int x, int y)? lsShimmer = shimmerXOut > 0 ? ((int x, int y)?)(shimmerXOut, shimmerYOut) : null;  // 以太中心
     int dgSide = dungeonRight ? 1 : -1;
@@ -15769,7 +15827,11 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                 int ny = y + (t == 2 ? -1 : t == 3 ? 1 : 0);
                 if (!QQInW(nx, ny)) continue;
                 int ni = ny * W + nx;
-                if (liq[ni] > 0 && liqT[ni] == 1) AddWater(nx, ny);
+                // ★IIIII173：裸型位唤醒（vanilla tile4.lava()≡(bTileHeader&0x60)==32,
+                //   Tile.cs:347-384——与液量无关!JS LiquidSim 同构裸型位）。曾加 liq>0 门
+                //   → 岩浆幽灵格（液 0 型位残留,LavaCheck merge/排空尾）漏唤醒 →
+                //   队列序 55 号调用起分叉（seed g (3142,560)→(3142,561) 实证）。
+                if (liqT[ni] == 1) AddWater(nx, ny);
             }
             if (myType == 2)                                 // 蜂蜜
             {
@@ -15789,7 +15851,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                     int ny = y + (t == 2 ? -1 : t == 3 ? 1 : 0);
                     if (!QQInW(nx, ny)) continue;
                     int ni = ny * W + nx;
-                    if (liq[ni] > 0 && liqT[ni] == 2) AddWater(nx, ny);
+                    if (liqT[ni] == 2) AddWater(nx, ny);   // ★IIIII173：裸型位（同上）
                 }
                 if (myType == 3) ShimmerCheck(x, y);         // 微光：流动性同水，无降速
                 else
@@ -15800,7 +15862,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                         int ny = y + (t == 2 ? -1 : t == 3 ? 1 : 0);
                         if (!QQInW(nx, ny)) continue;
                         int ni = ny * W + nx;
-                        if (liq[ni] > 0 && liqT[ni] == 3) AddWater(nx, ny);
+                        if (liqT[ni] == 3) AddWater(nx, ny);   // ★IIIII173：裸型位（同上）
                     }
                 }
             }
@@ -15810,15 +15872,19 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
             int bi = i5 + W;
             int belowAmt = liq[bi];
             byte belowType = liqT[bi];
+            // ★IIIII173（G2#98 同款）：下灌门/型写逐语句取 tile5.liquidType() 现场值
+            //   （Liquid.cs:568/579）——LavaCheck merge 可把本格改写成水型,myType 头部
+            //   快照在此失真;JS LiquidSim myTypeLive 同构。
+            byte myTypeLive = liqT[i5];
             bool belowBlocks = y + 1 >= H ? true : BlocksLiquid(x, y + 1);
-            if (!belowBlocks && (belowAmt <= 0 || belowType == myType) && belowAmt < 255)
+            if (!belowBlocks && (belowAmt <= 0 || belowType == myTypeLive) && belowAmt < 255)
             {
                 int t = 255 - belowAmt;
                 if (t > liq[i5]) t = liq[i5];
                 bool flag = t == 1 && liq[i5] == 255;        // 缺口 1 满格不扣源
                 if (!flag) liq[i5] -= (byte)t;
                 liq[bi] += (byte)t;
-                liqT[bi] = myType;
+                liqT[bi] = myTypeLive;
                 AddWater(x, y + 1);
                 skipB[bi] = 1;
                 skipB[i5] = 1;
@@ -16168,7 +16234,8 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                 }
                 uint h2 = 0x811c9dc5;
                 for (int i = 0; i < liq.Length; i++) { h2 ^= liq[i]; h2 *= 16777619u; }
-                lcTw.WriteLine($"{lcN++} K nl={numLiquid} buf={bufCount} lq={h1:x8} liq={h2:x8}");
+                lcTw.WriteLine($"{lcN} K nl={numLiquid} buf={bufCount} lq={h1:x8} liq={h2:x8}");
+                lcCurCall = lcN; lcN++;
             }
             UpdateLiquid();
             roundIter++;
@@ -16760,6 +16827,10 @@ Replay(); // ▶MicroBiomes cs:21785
                 MbSetTile(k, l, t, (k - x + 1) * 18, (l - y + 1) * 18);            // cs:51434-43
     }
     int mbTrace = Environment.GetEnvironmentVariable("MB_TRACE") != null ? 1 : 0;
+    // ★IIII180：段账仪（MBSEG env 门,零开销）——与 JS tools/_iii180ledger.test.ts 台账
+    //   同名臂逐行对拍;rc=QRollWrap.N（需 ROLL_TRACE=1 开追踪窗,窗口 beehives..microbiomes
+    //   覆盖全段;JS 侧 rc=internalSample 链累计——两侧只比臂间 delta）。
+    bool mbSeg = Environment.GetEnvironmentVariable("MBSEG") != null;
     // 隔离对拍辅助（本段私有，env 门控）：入口态 liqT/protRects 落盘（JS 探针回灌对拍用）
     {
         var p1 = Environment.GetEnvironmentVariable("MB_LIQT_DUMP");
@@ -16768,12 +16839,14 @@ Replay(); // ▶MicroBiomes cs:21785
         if (p2 != null) File.WriteAllText(p2, string.Join("\n", protRects.Select(pr => $"{pr.x0} {pr.y0} {pr.x1} {pr.y1}")));
         if (mbTrace != 0) Console.WriteLine($"MB entry protRects={protRects.Count}");
     }
+    if (mbSeg) Console.WriteLine($"MBSEG passStart rc={QRollWrap.N}");
 
     // ═══ 1. Dead Man's Chests（cs:21801-21819）——备案简化 ═══
     // 完整候选机（chest sink 创建序 + style1 帧门 + GetPossibleChests 每候选 4 掷 +
     // place 五件套）依赖 sink/帧通道，oracle 无从重构；双链种子实证候选恒空
     // （style 全非 1，含/不含 wire 同空）→ 本段唯一掷骰 = deadCount 计数掷。
-    { int mbDeadCount = (int)r.Next(MbScW(10), MbScW(20) + 1); if (mbTrace != 0) Console.WriteLine($"MB deadCount={mbDeadCount} candidates=0"); }
+    { int mbDeadCount = (int)r.Next(MbScW(10), MbScW(20) + 1); if (mbTrace != 0) Console.WriteLine($"MB deadCount={mbDeadCount} candidates=0");
+      if (mbSeg) Console.WriteLine($"MBSEG deadCount {mbDeadCount} rc={QRollWrap.N}"); }
 
     // ═══ 2. Thin Ice（cs:21825-21854；notTheBees 门=真——特殊种子分支不建模，备案）═══
     var MB_ICE_SRC = new HashSet<ushort> { 147, 161, 224, 0, 1 };   // OnlyTiles
@@ -16873,14 +16946,18 @@ Replay(); // ▶MicroBiomes cs:21785
         //   撤登记——JS 为真值，oracle 对齐。
         return true;
     }
+    if (mbSeg) Console.WriteLine($"MBSEG mbThin rc={QRollWrap.N}");
     {
         int iceCount = (int)r.Next(MbScW(3), MbScW(5) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG iceCount {iceCount} rc={QRollWrap.N}");
         int iceDone = 0, iceFail = 0;
         while (iceDone < iceCount)
         {
             int ox = (int)r.Next(50, W - 50);
             int oy = (int)r.Next(worldSurface + 20, H - 200);
-            if (MbPlaceThinIcePatch(ox, oy)) { iceDone++; iceFail = 0; }
+            bool tiOk = MbPlaceThinIcePatch(ox, oy);
+            if (mbSeg) Console.WriteLine($"MBSEG 118TI {iceFail}|{ox},{oy}|{(tiOk ? 1 : 0)} rc={QRollWrap.N}");
+            if (tiOk) { iceDone++; iceFail = 0; }
             else { iceFail++; if (iceFail > 1000) { iceDone++; iceFail = 0; } }
         }
         if (mbTrace != 0) Console.WriteLine($"MB thinIce done={iceDone}");
@@ -17083,6 +17160,11 @@ Replay(); // ▶MicroBiomes cs:21785
             if (!QQInW(px, py)) continue;
             int i = py * W + px;
             typ[i] = 2; act[i] = 1; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+            // ★RRRRRRR（2026-08-26，IIII180 补）：vanilla SetTile(2) 默认 clearTile=true
+            //   （Actions.cs:213/221-227）→ tile.Clear(~(Wiring|Actuator)) 连墙带液全清。
+            //   曾只写块不清墙：轮廓格残留天然墙 → ⑬ PlaceWall 邻帧掷读旧墙≠0 多掷
+            //   （seed1 实测剑冢体 +122 掷，SWDS 分账 wallvines 相位）→ 全链漂移。
+            wal[i] = 0; liq[i] = 0; liqT[i] = 0;
             MbFrameNbrSet(px, py);                                           // ★BBBBBB：五连（cs:78）
         }
         // ⑫ 灌水（RectangleMask(-40,40,0,40) + IsEmpty → 水 255）
@@ -17149,6 +17231,9 @@ Replay(); // ▶MicroBiomes cs:21785
                         int i2 = py * W + px;
                         if (act[i2] == 0 || typ[i2] != 53) continue;
                         typ[i2] = 397; frX[i2] = 0; frY[i2] = 0;
+                        // ★RRRRRRR（IIII180 补）：SetTile(397) 默认 clearTile=true 连墙带液清
+                        //   （JS :2455-2460；与 ⑪ 轮廓格同款，入口支此前漏清）
+                        wal[i2] = 0; liq[i2] = 0; liqT[i2] = 0; slope[i2] = 0; half[i2] = 0;
                         long k2 = MbKey(dx + i, dy + j);                     // ★SetTile(397).Output(data)
                         if (shaftSet.Add(k2)) shaftKeys.Add(k2);
                     }
@@ -17210,6 +17295,7 @@ Replay(); // ▶MicroBiomes cs:21785
     }
     {
         int swordAttempts = (int)r.Next(MbScW(1), MbScW(2) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG swordAttempts {swordAttempts} rc={QRollWrap.N}");
         for (int i = 0; i < swordAttempts; i++)
         {
             if (!(r.NextDouble() < 0.5))
@@ -17222,10 +17308,12 @@ Replay(); // ▶MicroBiomes cs:21785
                     int ox = (int)r.Next(2) == 0
                         ? (int)r.Next(50, (int)Math.Floor(W * 0.3))
                         : (int)r.Next((int)Math.Floor(W * 0.7), W - 50);
-                    if (MbPlaceSwordShrine(ox, oy)) break;
+                    if (mbSeg) Console.WriteLine($"MBSEG STRY {ox},{oy} t={t} rc={QRollWrap.N}");
+                    if (MbPlaceSwordShrine(ox, oy)) { if (mbSeg) Console.WriteLine($"MBSEG SOK {ox},{oy} rc={QRollWrap.N}"); break; }
                 }
             }
         }
+        if (mbSeg) Console.WriteLine($"MBSEG mbSword rc={QRollWrap.N}");
         if (mbTrace != 0) Console.WriteLine($"MB sword attempts={swordAttempts}");
     }
 
@@ -17264,7 +17352,10 @@ Replay(); // ▶MicroBiomes cs:21785
             if (solid < total - 5) return false;
         }
         int num = (int)r.Next(6, 10), num2 = (int)r.Next(1, 5);
-        if (!QQCanPlace(ox - num, oy - num, ox + num + 1, oy + num + 1, 0)) return false;
+        // ★IIIII113b（IIII180 补）：CampsiteBiome.cs:23 `Rectangle(origin.X-num, origin.Y-num,
+        //   num*2, num*2)` → XNA 右/下边界 Exclusive=origin±num-1。QQCanPlace 右/下参数为
+        //   Exclusive 语义 ⇒ 传 ox+num（曾传 +1 = 候选域宽 1 格,与原版保护矩形各偏 1）。
+        if (!QQCanPlace(ox - num, oy - num, ox + num, oy + num, 0)) return false;
         {
             int n3 = num + 3;
             for (int dx = -n3; dx <= n3; dx++)
@@ -17402,23 +17493,100 @@ Replay(); // ▶MicroBiomes cs:21785
                     }
             }
         }
-        QQAddProt(ox - num, oy - num, ox + num + 1, oy + num + 1, 4);
+        // ★IIIII113b（IIII180 补）：AddProtectedStructure(Inflate 4) 同款右/下 Exclusive——
+        //   保护矩形右/下缘 = origin±num（曾 +1 剪掉矿爆候选首列）
+        QQAddProt(ox - num, oy - num, ox + num, oy + num, 4);
         return true;
     }
+    if (mbSeg) Console.WriteLine($"MBSEG mbSwordEnd rc={QRollWrap.N}");
     {
         int campCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 6)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 11)) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG campCount {campCount} rc={QRollWrap.N}");
         int placed = 0, tries = 0;
         while (placed < campCount)
         {
-            if (++tries > 1000) break;
+            // ★IIIII100g（IIII180 补）：cs:21916-21918 `num4=1000; num4--; if (num4<=0) break;`
+            //   先减后判 ⇒ 实掷尝试恰 999 次（旧 `++tries > 1000` 多跑第 1000 次）
+            if (++tries >= 1000) break;
             int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
             int oy = (int)r.Next(worldSurface, H - 200);
-            if (MbPlaceCampsite(ox, oy)) placed++;
+            if (mbSeg) Console.WriteLine($"MBSEG CAMPPRE rc={QRollWrap.N}");
+            int n0c = (int)QRollWrap.N;
+            bool okC = MbPlaceCampsite(ox, oy);
+            if (mbSeg) Console.WriteLine($"MBSEG CAMP {ox},{oy} rc={(int)QRollWrap.N - n0c} ok={(okC ? 1 : 0)} gate=1");
+            if (okC) placed++;
         }
+        if (mbSeg) Console.WriteLine($"MBSEG mbMine rc={QRollWrap.N}");
         if (mbTrace != 0) Console.WriteLine($"MB campsites placed={placed}/{campCount}");
     }
 
     // ═══ 4. Mining Explosives（cs:21951-21975）═══
+    // ★IIII180 补（OOOOOOO 1457 前置门消费体）：CanKillTile 生成期档=JS canKillTileMB
+    //   （MicroBiomesPass.ts:294-348）镜像——1457 MiningExplosivesBiome.cs:74-78 新增
+    //   「炸药桶锚格活性且 !CanKillTile → 整 Place 失败」门，oracle 曾整段缺。
+    var MBX_TREE_TRUNK = new HashSet<ushort> { 5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634 };
+    var MBX_UP_PROTECT = new HashSet<ushort> { 21, 26, 72, 77, 88, 467, 488 };
+    var MBX_PREV_REMOVAL = new HashSet<ushort> { 5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634 };
+    bool MbCheckBoulderChestGate(int x, int y, int shSelf)   // CheckBoulderChest（cs:48810-33,JS :329-348）
+    {
+        int ii = y * W + x;
+        int fx = frX[ii] == 65535 ? -1 : frX[ii];   // oracle 65535=-1 语义还原（JS Int16 直存）
+        int fy = frY[ii] == 65535 ? -1 : frY[ii];
+        int num = fx / 18 * -1;
+        if (num < -1) num += 2;
+        num += x;
+        int num2 = fy;
+        while (num2 >= 36) num2 -= 36;
+        num2 = y - num2 / 18;
+        for (int dx = 0; dx <= 1; dx++)
+        {
+            int xx = num + dx, yy = num2 - 1;
+            if (QQInW(xx, yy) && act[yy * W + xx] != 0)
+            {
+                int tU = typ[yy * W + xx];
+                if (tU != shSelf && (tU == 19 || MBX_PREV_REMOVAL.Contains((ushort)tU))) return true;
+                if (MbIsLockedDoor(xx, yy)) return true;
+                if (tU == 21 || tU == 467 || tU == 88) return true;
+            }
+        }
+        return false;
+    }
+    bool MbCanKillTileGate(int x, int y)        // CanKillTile 生成期档（cs:62719-62830,JS :294-326）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;                       // cs:62745 !active
+        if (wal[i] == 350) return false;                     // cs:62749
+        int shSelf = typ[i];
+        if (y - 1 >= 0 && act[(y - 1) * W + x] != 0)
+        {
+            int ui = (y - 1) * W + x;
+            int tUp = typ[ui];
+            int fxu = frX[ui] == 65535 ? -1 : frX[ui];
+            int fyu = frY[ui] == 65535 ? -1 : frY[ui];
+            if (MBX_TREE_TRUNK.Contains((ushort)tUp) && shSelf != tUp
+                && !(fxu == 66 && fyu >= 0 && fyu <= 44)
+                && !(fxu == 88 && fyu >= 66 && fyu <= 110) && fyu < 198) return false;
+            if (tUp == 323 && shSelf != tUp && (fxu == 66 || fxu == 220)) return false;
+            if (MBX_UP_PROTECT.Contains((ushort)tUp) && shSelf != tUp) return false;
+            if (tUp == 80 && shSelf != tUp)
+            {
+                int num = fxu / 18;
+                if (num <= 1 || (num >= 4 && num <= 5)) return false;
+            }
+        }
+        if (MB_BOULDER_TILES.Contains((ushort)shSelf) && MbCheckBoulderChestGate(x, y, shSelf)) return false;
+        if (shSelf == 10 && MbIsLockedDoor(x, y)) return false;
+        if (shSelf == 235)                                   // 音乐盒 3×1 上邻扫（cs:62322-35,JS :318-324）
+        {
+            int fx = frX[i] == 65535 ? -1 : frX[i];
+            int num2 = x - fx % 54 / 18;
+            for (int k = 0; k < 3; k++)
+                if (QQInW(num2 + k, y - 1) && act[(y - 1) * W + num2 + k] != 0
+                    && typ[(y - 1) * W + num2 + k] != shSelf) return false;
+        }
+        return true;
+    }
     bool MbPlaceMiningExplosives(int ox, int oy)
     {
         if (MbEntryStrict(ox, oy)) return false;   // HHHH: JS solidTileStrict（严式五门）
@@ -17551,11 +17719,19 @@ Replay(); // ▶MicroBiomes cs:21785
         //   非巨石族+锚格活性快照）——曾"空格即写"。
         for (int i = -1; i <= 1; i++)
         {
-            int px = detX + i, py = detTop;
-            if (QQInW(px, py))
+            int px = detX + i;
+            // ★OOOOOOO 1457（IIII180 补，MiningExplosivesBiome.cs:60-63）：掏空扩为 5 行
+            //   （detTop..detTop-4）——1456 仅 detTop 单行 ⇒ Place2x2 上行常被埋 → 起爆器
+            //   空置门败（JS placeMiningExplosives rows=hfIs1457?[0,-1,-2,-3,-4]:[0]）。
+            //   ClearTile 缺省 frameNeighbors:false=纯格清零掷（wall/liquid/type 不动）。
+            foreach (int mdy in new[] { 0, -1, -2, -3, -4 })
             {
-                int ci = py * W + px;
-                act[ci] = 0; slope[ci] = 0; half[ci] = 0; inAct[ci] = 0;    // ClearTile(+inActive)
+                int py = detTop + mdy;
+                if (QQInW(px, py))
+                {
+                    int ci = py * W + px;
+                    act[ci] = 0; slope[ci] = 0; half[ci] = 0; inAct[ci] = 0;    // ClearTile(+inActive)
+                }
             }
             int below = detTop + 1;
             if (QQInW(px, below))
@@ -17580,6 +17756,9 @@ Replay(); // ▶MicroBiomes cs:21785
             {
                 int ai = barGround * W + barX;
                 bool wasActive = act[ai] != 0;
+                // ★OOOOOOO 1457 前置门（IIII180 补，cs:74-78）：锚格活性且 !CanKillTile →
+                //   整个 Place 失败（跳过 141/411/WireLine/保护图）。1456 无此门。
+                if (wasActive && !MbCanKillTileGate(barX, barGround)) return false;
                 // ★CCCCC：前奏 Clear 仅 !active 时（cs:59500）——活性格保留原格（曾无条件清）
                 if (!wasActive)
                 {
@@ -17622,19 +17801,27 @@ Replay(); // ▶MicroBiomes cs:21785
     }
     {
         int trapCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 14)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 29)) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG trapCount {trapCount} rc={QRollWrap.N}");
         // getGoodWorld/noTraps ×1.5 分支不建模（特殊种子，备案）
         int placed = 0, tries = 0;
         while (placed < trapCount)
         {
-            if (++tries > 3000) break;
+            // ★IIIII100g（IIII180 补）：cs:21954-21956 先减后判 ⇒ 实掷尝试恰 2999 次
+            //   （旧 `++tries > 3000` 多跑第 3000 次=+995 掷,GFB #97 实爆案同源）
+            if (++tries >= 3000) break;
             int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
             // ★GGGGGG：cs:21964 top2=(int)GenVars.rockLayer（游走终值 gvRockLayer）——
             //   曾误用 Main.rockLayer（rockLayer，493）→ 矿爆点 Y 域偏移 13 格
             //   （JS XXXX 批同案定谳：van Next(523,1000) vs 误用版 Next(571,1000)）。
             int oy = (int)r.Next((int)gvRockLayer, H - 200);
+            if (mbSeg) Console.WriteLine($"MBSEG MINEPRE rc={QRollWrap.N}");
+            int n0m = (int)QRollWrap.N;
+            bool okM = MbPlaceMiningExplosives(ox, oy);
+            if (mbSeg) Console.WriteLine($"MBSEG MINE {ox},{oy} rc={(int)QRollWrap.N - n0m} ok={(okM ? 1 : 0)} gate=1");
             if (mbTrace != 0) Console.Error.WriteLine($"MBTRY ({ox},{oy})");
-            if (MbPlaceMiningExplosives(ox, oy)) placed++;
+            if (okM) placed++;
         }
+        if (mbSeg) Console.WriteLine($"MBSEG mbTree rc={QRollWrap.N}");
         if (mbTrace != 0) Console.WriteLine($"MB mines placed={placed}/{trapCount}");
     }
 
@@ -18161,24 +18348,47 @@ Replay(); // ▶MicroBiomes cs:21785
         QQAddProt(rx - 30, ry - 30, rx + 30, ry + 30, 0);
         return true;
     }
+    if (mbSeg) Console.WriteLine($"MBSEG mbTreePre rc={QRollWrap.N}");
     {
         int treeCount = (int)r.Next(MbScW(6), MbScW(11) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG treeCount {treeCount} rc={QRollWrap.N}");
         int mDone = 0, mTries = 0;
         while (mDone < treeCount && mTries < 20000)
         {
             int ox = (int)r.Next(50, W - 50);
             int oy = (int)r.Next(worldSurface + 50, H - 500);
-            if (MbPlaceMahogany(ox, oy)) mDone++;
+            int n0t = (int)QRollWrap.N;
+            bool okT = MbPlaceMahogany(ox, oy);
+            if (mbSeg) Console.WriteLine($"MBSEG MAHOG {ox},{oy} rc={(int)QRollWrap.N - n0t} ok={(okT ? 1 : 0)} gate=1");
+            if (okT) mDone++;
             mTries++;
         }
+        if (mbSeg) Console.WriteLine($"MBSEG mbTrack rc={QRollWrap.N}");
         if (mbTrace != 0) Console.WriteLine($"MB mahogany done={mDone}/{treeCount} tries={mTries}");
+        // ★IIII180：轨段起点全图快照（MB_TRACKDUMP 前缀;与 JS segProbe('mbTrack') 探针侧
+        //   dump 同构对拍——先 arms 写面差定位）
+        {
+            var td = Environment.GetEnvironmentVariable("MB_TRACKDUMP");
+            if (td != null)
+            {
+                File.WriteAllBytes(td + ".typ", ToBytes(typ));
+                File.WriteAllBytes(td + ".act", act);
+                File.WriteAllBytes(td + ".wal", ToBytes(wal));
+                File.WriteAllBytes(td + ".half", half);
+                File.WriteAllBytes(td + ".slope", slope);
+            }
+        }
     }
 
     // ═══ 5. TrackGenerator（cs:22014-22091 + TrackPass.ts 全文镜像）═══
     const int MB_TRACK_TILE = 314;
     var MB_INVALID_WALLS = new HashSet<ushort> { 7, 94, 95, 8, 98, 99, 9, 96, 97, 3, 83, 68, 62, 78, 87, 86, 42, 74, 27, 149 };
     var MB_INVALID_TILES = new HashSet<ushort> { 383, 384, 15, 304, 30, 321, 245, 246, 240, 241, 242, 16, 34, 158, 377, 94, 10, 19, 86, 219,
-        484, 190, 664, 665, 41, 43, 44, 226, 237, 711, 712, 713, 714, 715, 716, 379, 314 };
+        484, 190, 664, 665, 41, 43, 44, 226, 237, 711, 712, 713, 714, 715, 716, 379, 314,
+        // ★SSSSSSS 1457 追加五型（IIII180 补,JS TrackPass INVALID_TILES_1457_EXTRA）：
+        //   141 炸药/411 起爆器/21·467·88 箱族——生成期 placePath 落块前建表,
+        //   曾缺 → 箱域 calcState 放行 → 路径状态机分歧（seed1 LTRK col149 y 差 1）
+        141, 411, 21, 467, 88 };
     var MB_PLACE_BLOCKED = new HashSet<ushort> { 225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467, 12, 665, 639,
         138, 664, 711, 712, 713, 714, 715, 716 };
     bool MbTrackSolidTile(int x, int y)   // TrackPass.solidTile（静态 solid 口径）
@@ -18192,6 +18402,7 @@ Replay(); // ▶MicroBiomes cs:21785
     const int MB_UP = -1, MB_STRAIGHT = 0, MB_DOWN = 1;
     const int MB_MODE_NORMAL = 0, MB_MODE_TUNNEL = 1;
     var mbTrackCells = new List<(int x, int y)>();    // 全图轨道格索引（IsTileNearby 全扫替代——布尔结果恒等）
+    bool mbDestroyObj = false;                        // ★IIII180：WorldGen.destroyObject 实例旗（Check2x1 双杀门）
     var mbTrackSet = new HashSet<long>();
     for (int y = 0; y < H; y++)
         for (int x = 0; x < W; x++)
@@ -18200,6 +18411,9 @@ Replay(); // ▶MicroBiomes cs:21785
             if (act[i] != 0 && typ[i] == MB_TRACK_TILE) { mbTrackCells.Add((x, y)); mbTrackSet.Add((long)y * W + x); }
         }
     var mbStateCache = new Dictionary<long, int>();
+    bool mbSegRw = Environment.GetEnvironmentVariable("MBREW") != null;   // ★IIII180：tryRewrite 步进追踪
+    int[] mbStateProbe = Environment.GetEnvironmentVariable("MBSTATE") != null
+        ? Environment.GetEnvironmentVariable("MBSTATE").Split(',').Select(int.Parse).ToArray() : null;
     bool MbIsTrackNearby(int x, int y, int distance)
     {
         if (mbTrackCells.Count == 0) return false;
@@ -18245,6 +18459,9 @@ Replay(); // ▶MicroBiomes cs:21785
         long key = (long)y * W + x;
         if (mbStateCache.TryGetValue(key, out int st)) return st;
         st = MbCalcState(x, y);
+        // ★IIII180：状态探针（MBSTATE=X0,Y0,X1,Y1 门）——分歧格直查
+        if (mbStateProbe != null && x >= mbStateProbe[0] && y >= mbStateProbe[1] && x <= mbStateProbe[2] && y <= mbStateProbe[3])
+            Console.WriteLine($"MBSTATE ({x},{y}) -> {st} t={typ[y * W + x]} a={act[y * W + x]} h={half[y * W + x]} s={slope[y * W + x]}");
         mbStateCache[key] = st;
         return st;
     }
@@ -18308,6 +18525,7 @@ Replay(); // ▶MicroBiomes cs:21785
             if (mbHist[num].slope == MB_DOWN)
             {
                 int state = MbSegmentState(num, mbLen - num);
+                if (mbSegRw) Console.WriteLine($"MBREW len={mbLen} num={num} seg={state} cell={mbHist[num].x},{mbHist[num].y},{mbHist[num].slope},{mbHist[num].mode}");
                 if (state == MB_AVAILABLE) return state;
                 MbRewriteSlope(num, MB_STRAIGHT);
             }
@@ -18390,7 +18608,18 @@ Replay(); // ▶MicroBiomes cs:21785
         {
             case 2: case 477: case 27: case 243: case 244: case 204: case 478:
             case 641: case 370: case 171:
+            // ★IIIII209 补族（IIII180 同步，cs:69461-69522 if 链逐字;JS TrackPass
+            //   makeTileDustRoll 对齐——23/24/661 腐化草族、58/76/77/684 神圣草族、
+            //   37/32 草族、25/109/492 泥族、34/42）：oracle 曾整族缺 → 轨巷尘掷缺
+            case 23: case 24: case 661:
+            case 58: case 76: case 77: case 684:
+            case 37: case 32:
+            case 25: case 109: case 492:
+            case 34: case 42:
                 rr2.Next(2); return;
+            case 31: case 696: case 35:              // cs:69519 (31||696||35)&&fx≥36 → 免掷
+                if (fx < 36) rr2.Next(2);
+                return;
             case 26: case 695:
                 if (fx < 54) rr2.Next(2);
                 return;
@@ -18402,12 +18631,23 @@ Replay(); // ▶MicroBiomes cs:21785
                 rr2.Next(10); rr2.Next(12); return;
             case 238:
                 rr2.Next(3); return;
+            case 231:                                // cs:69225 num=153 后恒掷 Next(3)
+                rr2.Next(3); return;
             case 385:
                 rr2.Next(68, 71); return;
+            // ★III122 档位（cs:68839-68871）：<72 零掷 / <108 Next(3) / <144 Next(2) /
+            //   else Next(4)——曾用旧错档（<72 Next(3)）
             case 254:
-                if (fx < 72) rr2.Next(3);
-                else if (fx < 108) rr2.Next(2);
-                else rr2.Next(4);
+                if (fx >= 72)
+                {
+                    if (fx < 108) rr2.Next(3);
+                    else if (fx < 144) rr2.Next(2);
+                    else rr2.Next(4);
+                }
+                return;
+            // ★IIIII101d（IIII180 同步，cs:69707-13 尾支）：314 轨块尘 3 掷/粒
+            case 314:
+                rr2.Next(-2, 3); rr2.Next(-2, 3); rr2.Next(0, 51);
                 return;
             default:
                 if (MB_FURNITURE_DUST.Contains(sh)) rr2.Next(3);
@@ -18511,7 +18751,23 @@ Replay(); // ▶MicroBiomes cs:21785
     // （MbSolidOrSloped 复用 :16388 既有定义=SolidOrSlopedTile 同语义）
     bool MbForbidsSloping(int x, int y)             // ForbidsSloping（cs:81484，按型查）
         => QQInW(x, y) && MB_FORBIDS_SLOPING.Contains(typ[y * W + x]);
-    bool MbCanDestroyChest(int x, int y) => !MbCx.Anchors.Contains((long)y * 16384 + x);
+    // ★IIII180 补（IIIII110b）：有货箱锚位集=JS TrackGenerator.blockedChestAnchors 镜像
+    //   （构造期按 chest sink 建表,生成期箱皆有货;sink≈活性箱 tile 网格扫描,备案等价）
+    //   ——旧 MbCx.Anchors 只含桃花心木常春藤箱且键序 y*16384+x 与 JS x*16384+y 相反。
+    var mbTrkChestAnchors = new HashSet<long>();
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            int i = y * W + x;
+            if (act[i] == 0) continue;
+            ushort ct = typ[i];
+            if (ct != 21 && ct != 467 && ct != 88) continue;
+            int fxv = frX[i] == 65535 ? -1 : frX[i];
+            int fyv = frY[i] == 65535 ? -1 : frY[i];
+            int ax = ct == 88 ? x - fxv / 18 % 3 : x - fxv / 18 % 2;
+            mbTrkChestAnchors.Add((long)ax * 16384 + (y - fyv / 18));
+        }
+    bool MbCanDestroyChest(int x, int y) => !mbTrkChestAnchors.Contains((long)x * 16384 + y);
     bool MbCanKillTileSlope(int x, int y)           // CanKillTile（cs:62262-62345 生成期档）
     {
         if (!QQInW(x, y)) return false;
@@ -18608,6 +18864,7 @@ Replay(); // ▶MicroBiomes cs:21785
     {
         if (!QQInW(x, y)) return;
         int i = y * W + x;
+        if (mbSeg) Console.WriteLine($"MBSEG KILL {x},{y} t={typ[i]} fx={frX[i]} fy={frY[i]} rc={QRollWrap.N}");   // ★IIII180：逐杀账
         if (act[i] == 0) return;
         if (typ[i] >= 753) return;                 // JS sheet<0 门（未实装 sheet 恒拒杀）
         // ★IIIIII：CheckTileBreakability 门（cs:63579 在 KillTile 体内）——brk2 整跳 /
@@ -18622,37 +18879,263 @@ Replay(); // ▶MicroBiomes cs:21785
             else if (sh0 == 633) typ[i] = 57;
             else if (sh0 == 60 || sh0 == 661 || sh0 == 662 || sh0 == 70) typ[i] = 59;
             if (MB_TRK_MOSS.Contains((ushort)typ[i])) typ[i] = 1;
-            FcSquareTileFrame(x, y);
+            MbSquareTileFrameT(x, y);              // ★IIII180：本地九宫（178/185 分派）
             return;
         }
         int dust = MbKillDustAmount(typ[i], frX[i]);
         for (int k = 0; k < dust; k++) MbDustRoll(r, typ[i], frX[i]);
         MbFossilShatter(x, y, typ[i]);             // ★IIIIII：cs:63756（曾缺）
+        // ★IIIII110b（IIII180 补）：ShouldTileSurvive 箱存活门（cs:64365→CheckTileBreakability2）
+        //   ——有货箱锚位=DestroyChest false→击杀早退（尘掷/化石已照序执行,早退点在
+        //   SquareTileFrame 之前）。xrayvision #097 (2500,769) T21>0×4 定罪案同源。
+        int shKill = typ[i];
+        if (shKill == 21 || shKill == 467 || shKill == 88)
+        {
+            int fxv = frX[i] == 65535 ? -1 : frX[i];
+            int fyv = frY[i] == 65535 ? -1 : frY[i];
+            if (shKill == 88)
+            {
+                int dx88 = fxv / 18 % 3;
+                if (mbTrkChestAnchors.Contains((long)(x - dx88) * 16384 + (y - fyv / 18))) return;
+            }
+            else
+            {
+                int dx21 = fxv / 18;
+                while (dx21 > 1) dx21 -= 2;
+                if (mbTrkChestAnchors.Contains((long)(x - dx21) * 16384 + (y - fyv / 18))) return;
+            }
+        }
+        // ★IIIII199（IIII180 补）：蛛网落罐判定掷（cs:64619）——noItem 门但掷照耗
+        //   （tooeasy #097 轨道首 attempt 巷 (2090,635) t51 wall62 实证）
+        if (shKill == 51 && wal[i] == 62) r.Next(4);
+        // ★IIIII223（IIII180 补）：KillTile 尾液体灌入族三臂（cs:64405-64420）——
+        //   ①58 狱石 h-200 下灌岩浆 128（无掷;②230 脆蜂蜜/③冰族 getGoodWorld·remix
+        //   限——普通种子惰性,特殊种子 oracle 未建模,备案）。
+        if (shKill == 58 && y > H - 200) { liq[i] = 128; liqT[i] = 1; }
         // ★IIIIII：写侧不再走 FcKillTile——其体内自带 FcDustAmount 尘掷循环（EE_NEWARMS
         //   默认开）→ 曾与本函数头上的 MbDustRoll 循环【双重尘掷】（std#51 窗 N(2) 240 vs
         //   JS 120 实锤），自第 4 轨起全段轨系漂移。改为内联 setTileSilent(0)+九宫级联
         //   （=FcKillTile 尾段，尘掷只保留头上一次，vanilla 顺序 尘→化石→写）。
         FcSetTile(x, y, 0);
-        FcSquareTileFrame(x, y);
+        MbSquareTileFrameT(x, y);                  // ★IIII180：本地九宫（178/185 分派）
     }
-    void MbTf314(int x, int y)                      // WorldGen.TileFrame(resetFrame:true) 单格 314 分派
+    void MbTf314(int x, int y, bool reset)          // WorldGen.TileFrame 单格本地分派（JS tileFrameTrack）
     {
         if (x <= 5 || y <= 5 || x >= W - 5 || y >= H - 5) return;
         int i = y * W + x;
         if (act[i] != 0 && typ[i] == MB_TRACK_TILE) return;      // 314 → FrameTrack（零掷纯帧写——四通道不可见省略）
-        FcTileFrame(x, y);                                       // 其余全族（184 苔藓 Next(3) 掷等）
+        // ★FFFFF（IIII180 补）：178 宝石/185 堆族本地分派——引擎 solidAllowSide 左右坡
+        //   排除项与原版不符（各漏一项），轨道巷语境取本地原版判（JS TrackPass 同款；
+        //   #101 金标 gem (1320,776) 右邻 s4 冰被引擎误放行定罪）。reset 在
+        //   TileFrameImportant 仅 case 178 消费（cs:85850 唯一位）。
+        if (act[i] != 0 && typ[i] == 178) { MbFrame178(x, y, reset); return; }
+        if (act[i] != 0 && typ[i] == 185) { MbCheckPile(x, y); return; }
+        FcTileFrame(x, y, reset);                                // 其余全族（184 苔藓 Next(3) 掷等）
     }
-    void MbWuTileFrame(int x, int y)                // WorldUtils.TileFrame 五连：中心→+x→-x→+y→-y
+    void MbWuTileFrame(int x, int y)                // WorldUtils.TileFrame 五连：中心→+x→-x→+y→-y（reset=true）
     {
-        MbTf314(x, y);
-        MbTf314(x + 1, y);
-        MbTf314(x - 1, y);
-        MbTf314(x, y + 1);
-        MbTf314(x, y - 1);
+        MbTf314(x, y, true);
+        MbTf314(x + 1, y, true);
+        MbTf314(x - 1, y, true);
+        MbTf314(x, y + 1, true);
+        MbTf314(x, y - 1, true);
+    }
+    // ★IIII180 补：SquareTileFrame 本地版（cs:80924 九宫固定序、仅中心 reset=true）——
+    //   轨巷语境 314/178/185 走本地分派，不能用 FcSquareTileFrame 引擎版。
+    void MbSquareTileFrameT(int x, int y)
+    {
+        MbTf314(x - 1, y - 1, false); MbTf314(x - 1, y, false); MbTf314(x - 1, y + 1, false);
+        MbTf314(x, y - 1, false); MbTf314(x, y, true); MbTf314(x, y + 1, false);
+        MbTf314(x + 1, y - 1, false); MbTf314(x + 1, y, false); MbTf314(x + 1, y + 1, false);
+    }
+    // ---- 178 宝石族本地镜像（JS TrackPass frame178/checkAndAdjustGem/gemAnchor）----
+    var MB_TRK_SNOW = new HashSet<ushort> { 147 };
+    var MB_TRK_ICE = new HashSet<ushort> { 161, 163, 164, 200 };
+    var MB_TRK_SAND = new HashSet<ushort> { 53, 112, 116, 234 };
+    var MB_TRK_HARDSAND = new HashSet<ushort> { 397, 398, 402, 399 };
+    var MB_TRK_SANDSTONE = new HashSet<ushort> { 396, 400, 403, 401 };
+    bool MbPlatformProperTop(int frameX)             // cs:70197 全表
+    {
+        int num = frameX / 18;
+        return (num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26);
+    }
+    bool MbTrkAllowBottom(int x, int y)              // SolidTileAllowBottomSlope（cs:70211-33,JS allowBottom）
+    {
+        if (x < 0 || x >= W || y < 0 || y >= H) return true;         // 原版 !InWorld → true
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        ushort t = typ[i];
+        bool plat = MB_PLATFORM.Contains(t);
+        bool solid = MbTrkSolidTile(x, y);
+        int sl = slope[i];
+        return (solid || plat) && ((sl != 1 && sl != 2) || (plat && MbPlatformProperTop(frX[i]))) && half[i] == 0;
+    }
+    bool MbGemAnchor(int x, int y, int dir)          // ValidAnchorForMultiDirectionalTile+Allow*Slope 全门
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        int sh = typ[i];
+        if (MB_TRK_BOULDERS.Contains((ushort)sh) || sh == 10) return false;   // cs:60320 预门
+        int sl = slope[i], hf = half[i];
+        bool plat = MB_PLATFORM.Contains((ushort)sh);
+        bool solid = MbTrkSolidTile(x, y);
+        switch (dir)
+        {
+            case 0:  // AllowTopSlope:(solid||380) && ((!plat&&!bottomSlope{3,4}) || (plat&&half))
+                return (solid || sh == 380) && ((!plat && sl != 3 && sl != 4) || (plat && hf != 0));
+            case 1:  // AllowBottomSlope:(solid||solidTop) && (!topSlope{1,2}||(plat&&properTop)) && !half
+                return (solid || plat) && ((sl != 1 && sl != 2) || (plat && MbPlatformProperTop(frX[i]))) && hf == 0;
+            case 2:  // AllowLeftSlope:solid && !half && !rightSlope{1,3} && !plat
+                return solid && hf == 0 && sl != 1 && sl != 3 && !plat;
+            default: // AllowRightSlope:solid && !half && !leftSlope{2,4} && !plat
+                return solid && hf == 0 && sl != 2 && sl != 4 && !plat;
+        }
+    }
+    int MbCheckAndAdjustGem(int x, int y)            // CheckAndAdjustMultiDirectionalTile（宝石语境）
+    {
+        if (x < 2 || y < 2 || x >= W - 2 || y >= H - 2) return -1;   // InWorld(i,j,2)
+        if (MbGemAnchor(x, y + 1, 1)) return 0;
+        if (MbGemAnchor(x - 1, y, 2)) return 2;
+        if (MbGemAnchor(x + 1, y, 3)) return 3;
+        if (MbGemAnchor(x, y - 1, 0)) return 1;
+        return -1;
+    }
+    void MbFrame178(int x, int y, bool reset)        // TileFrameImportant case 178（cs:85843-85876）
+    {
+        int i = y * W + x;
+        int frameY2 = frY[i] == 65535 ? -1 : frY[i];
+        int dir = MbCheckAndAdjustGem(x, y);
+        if (dir < 0) { MbKillTileLane(x, y); return; }
+        int num21 = reset ? r.Next(3) * 18 : frameY2 % 54;   // C# 有符号 % 与 JS 一致（负帧守 16 位同补码）
+        int num22 = -1;
+        int fxv = frX[i] == 65535 ? -1 : frX[i];
+        if (dir == 0 && (frameY2 < 0 || frameY2 > 36)) num22 = 0;
+        else if (dir == 1 && (frameY2 < 54 || frameY2 > 90)) num22 = 54;
+        else if (dir == 2 && (frameY2 < 108 || frameY2 > 144)) num22 = 108;
+        else if (dir == 3 && (frameY2 < 162 || frameY2 > 198)) num22 = 162;
+        if (num22 > -1) frY[i] = (ushort)(num22 + num21);
+    }
+    void MbCheckPile(int x, int y)                   // CheckPile（cs:46891-46974,sheet 185）
+    {
+        int i = y * W + x;
+        int fyv = frY[i] == 65535 ? -1 : frY[i];
+        if (fyv == 18) { MbCheck2x1(x, y, 185); return; }
+        if (!MbTrkAllowBottom(x, y + 1)) { MbKillTileLane(x, y); return; }
+        int fx18 = frX[i] / 18;
+        int belowSh = QQInW(x, y + 1) && act[(y + 1) * W + x] != 0 ? typ[(y + 1) * W + x] : -1;
+        if (belowSh < 0) return;
+        if (fx18 >= 36 && fx18 <= 47)                                    // 雪堆带（cs:46948-55）
+        {
+            if (!(MB_TRK_SNOW.Contains((ushort)belowSh) || MB_TRK_ICE.Contains((ushort)belowSh)
+                || belowSh == 162 || belowSh == 224)) MbKillTileLane(x, y);
+        }
+        else if ((fx18 >= 54 && fx18 <= 59) || fx18 >= 73)               // 沙堆带（cs:46956-68;60-72 无查）
+        {
+            if (!(MB_TRK_SAND.Contains((ushort)belowSh) || MB_TRK_HARDSAND.Contains((ushort)belowSh)
+                || MB_TRK_SANDSTONE.Contains((ushort)belowSh))) MbKillTileLane(x, y);
+        }
+    }
+    void MbCheck2x1(int x, int y, int sheet)         // Check2x1（cs:46989-47369,185/649）
+    {
+        if (mbDestroyObj) return;
+        int i = y * W + x;
+        int num = x - (frX[i] / 18 % 2);
+        bool flag = true;
+        if (QQInW(num + 1, y))
+        {
+            int l = y * W + num, rr2 = y * W + num + 1;
+            if (frX[rr2] == frX[l] + 18 && typ[l] == sheet && typ[rr2] == sheet && act[l] != 0 && act[rr2] != 0) flag = false;
+        }
+        if (!QQInW(num + 1, y + 1)) flag = true;                          // 越界=AllowBottom 早退真
+        else
+        {
+            if (!MbTrkAllowBottom(num, y + 1)) flag = true;
+            if (!MbTrkAllowBottom(num + 1, y + 1)) flag = true;
+        }
+        if (sheet == 185)
+        {
+            int l = y * W + num, rr2 = y * W + num + 1;
+            if (frX[l] >= 1368 && frX[l] <= 1458)                         // cs:47050-54 伪堆帧回正
+            {
+                int bl = (y + 1) * W + num, br = (y + 1) * W + num + 1;
+                if (QQInW(num, y + 1) && QQInW(num + 1, y + 1)
+                    && typ[bl] != 2 && typ[br] != 2 && typ[bl] != 477 && typ[br] != 477
+                    && typ[bl] != 492 && typ[br] != 492)
+                {
+                    frX[l] = (ushort)(frX[l] - 1368);
+                    frX[rr2] = (ushort)(frX[rr2] - 1368);
+                }
+            }
+            int num5 = frX[l] / 36 + (frY[l] / 18 - 1) * 52;
+            for (int j = num; j < num + 2; j++)
+            {
+                if (!QQInW(j, y + 1)) break;
+                int bi = (y + 1) * W + j;
+                if (act[bi] != 0 && MB_TRK_BOULDERS.Contains(typ[bi])) { flag = true; break; }   // InvalidTileForPiles（cs:39005）
+                if (act[bi] == 0) continue;
+                int type2 = typ[bi];
+                if (num5 >= 25 && num5 <= 30)                             // 雪带（cs:47072-80）
+                {
+                    if (!(type2 == 147 || MB_TRK_ICE.Contains((ushort)type2) || type2 == 162 || type2 == 224)) flag = true;
+                }
+                else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64))   // 沙带（cs:47081-91）
+                {
+                    if (!(MB_TRK_SAND.Contains((ushort)type2) || MB_TRK_HARDSAND.Contains((ushort)type2)
+                        || MB_TRK_SANDSTONE.Contains((ushort)type2))) flag = true;
+                }
+            }
+        }
+        if (!flag) return;
+        int dropFx = frX[y * W + num];
+        if (act[y * W + num] == 0) dropFx = frX[y * W + num + 1];
+        mbDestroyObj = true;
+        if (typ[y * W + num] == sheet) MbKillTileLane(num, y);
+        if (typ[y * W + num + 1] == sheet) MbKillTileLane(num + 1, y);
+        if (sheet == 185) MbPileDropRolls(dropFx);                        // cs:47137-47232 内容掉落掷
+        mbDestroyObj = false;
+        MbSquareTileFrameT(num, y);                                       // cs:47366-47368
+        MbSquareTileFrameT(num + 1, y);
+    }
+    void MbPileDropRolls(int fx)                     // Check2x1 type==185 内容掉落掷（cs:47137-47232）
+    {
+        if (fx >= 576 && fx <= 610)                                       // 明胶(71)
+        {
+            r.Next(10, 100); r.Next(20, 100);
+            if (r.Next(3) != 0) r.Next(10, 100);
+            if (r.Next(3) != 0) r.Next(20, 100);
+            if (r.Next(2) == 0) r.Next(10, 100);
+            if (r.Next(2) == 0) r.Next(20, 100);
+            if (r.Next(3) == 0) r.Next(10, 100);
+            if (r.Next(3) == 0) r.Next(20, 100);
+            if (r.Next(4) == 0) r.Next(10, 100);
+            if (r.Next(4) == 0) r.Next(20, 100);
+            if (r.Next(5) == 0) r.Next(10, 100);
+            if (r.Next(5) == 0) r.Next(20, 100);
+        }
+        else if (fx >= 612 && fx <= 646)                                  // 火把堆(72)
+        {
+            r.Next(10, 100);
+            if (r.Next(2) == 0) r.Next(20, 100);
+            if (r.Next(3) == 0) r.Next(30, 100);
+        }
+        else if (fx >= 648 && fx <= 682)                                  // 炸弹堆(73)
+        {
+            r.Next(1, 6);
+            if (r.Next(2) == 0) r.Next(2, 6);
+            if (r.Next(3) == 0) r.Next(3, 6);
+        }
+        else if ((fx >= 684 && fx <= 718) || (fx >= 720 && fx <= 754) || (fx >= 756 && fx <= 790)
+            || (fx >= 792 && fx <= 826) || (fx >= 828 && fx <= 862) || (fx >= 864 && fx <= 898))
+        {
+            r.Next(1, 4);                                                 // 181/180/177/179/178/182 六带同掷
+        }
     }
     void MbPlacePath()
     {
         var pressure = new byte[mbLen];
+        bool mbSegP = Environment.GetEnvironmentVariable("MBSEG") != null;   // ★IIII180：逐列掷账
+        int p1d0 = (int)QRollWrap.N;
         // 第一遍：清轨巷（cs:85-116）——墙 244 清 + 压板探测 + KillTile(379 泡泡豁免)
         for (int i = 0; i < mbLen; i++)
         {
@@ -18670,8 +19153,10 @@ Replay(); // ▶MicroBiomes cs:21785
                 if (act[idx] != 0 && typ[idx] == 135) pressure[i] = 1;
                 if (typ[idx] != 379) MbKillTileLane(th.x, th.y - j);
             }
+            if (mbSegP) Console.WriteLine($"MBSEG P1 {i} {th.x} {th.y} {mbPlayerHeight} {(int)QRollWrap.N - p1d0}");
         }
         // 第二遍：铺轨 + 帧链（cs:117-161）
+        int p2d0 = (int)QRollWrap.N;
         for (int k = 0; k < mbLen; k++)
         {
             if ((int)r.Next(7) == 0) mbPlayerHeight = (int)r.Next(5, 9);
@@ -18691,7 +19176,7 @@ Replay(); // ▶MicroBiomes cs:21785
                 wal[idx] = 0;                       // ClearEverything（cs:135：墙/液/旗标/帧全清）
                 liq[idx] = 0; liqT[idx] = 0; mbWire[idx] = 0; half[idx] = 0; slope[idx] = 0;
                 MbSetTile(th.x, th.y, MB_TRACK_TILE, 20, 0xFFFF);   // PlaceTrack（帧 20/-1，cs:136）
-                FcSquareTileFrame(th.x, th.y);      // 尾部九宫 SquareTileFrame（314 帧=不可见；引擎掷/写全保留）
+                MbSquareTileFrameT(th.x, th.y);     // ★IIII180：尾部九宫改本地版（squareTileFrame314——178/185 分派+reset 语义）
             }
             else
             {
@@ -18700,10 +19185,11 @@ Replay(); // ▶MicroBiomes cs:21785
             }
             mbWire[idx] = (byte)wireBits;           // 四色线精确还原（致动位不还原，cs:142-145）
             if (mbTrackSet.Add((long)th.y * W + th.x)) mbTrackCells.Add((th.x, th.y));
-            if (k == 0) continue;                   // cs:146-149
+            if (k == 0) { if (mbSegP) Console.WriteLine($"MBSEG P2 {k} {th.x} {th.y} {mbPlayerHeight} {(int)QRollWrap.N - p2d0}"); continue; }                   // cs:146-149
             for (int l = 0; l < 8; l++) MbWuTileFrame(mbHist[k - 1].x, mbHist[k - 1].y - l);   // 列 k-1 上扫 8 格（含 l=0 轨道格）
             if (k == mbLen - 1)
                 for (int m = 0; m < mbPlayerHeight; m++) MbWuTileFrame(th.x, th.y - m);        // 末列收尾（本次迭代重掷后的 playerHeight）
+            if (mbSegP) Console.WriteLine($"MBSEG P2 {k} {th.x} {th.y} {mbPlayerHeight} {(int)QRollWrap.N - p2d0}");
         }
     }
     var mbTrackFail = new int[6];   // [originInvalid, originEdge, originNotAvail, shortLen, segInvalid, placed]
@@ -18748,7 +19234,13 @@ Replay(); // ▶MicroBiomes cs:21785
             }
             mbLen = Math.Min(maxLength, length);
             if (mbLen < minLength) { if (mbDbg != 0) { mbTrackFail[3]++; if (mbTrackFail[3] <= 5) Console.WriteLine($"MBTT shortLen origin=({originX},{originY}) len={mbLen} min={minLength}"); } return false; }
+            if (Environment.GetEnvironmentVariable("MBSEG_TH2") != null)
+                for (int ti = 0; ti < mbLen; ti++)
+                    Console.WriteLine($"MBSEG TH2 {ti} {mbHist[ti].x} {mbHist[ti].y} {mbHist[ti].slope} {mbHist[ti].mode}");
             MbSmoothTrack();
+            if (Environment.GetEnvironmentVariable("MBSEG_TH") != null)
+                for (int ti = 0; ti < mbLen; ti++)
+                    Console.WriteLine($"MBSEG TH {ti} {mbHist[ti].x} {mbHist[ti].y} {mbHist[ti].slope} {mbHist[ti].mode}");
             if (MbSegmentState(0, mbLen) == MB_INVALID) { if (mbDbg != 0) mbTrackFail[4]++; return false; }
         }
         MbPlacePath();
@@ -18760,27 +19252,34 @@ Replay(); // ▶MicroBiomes cs:21785
         bool mbTT2 = Environment.GetEnvironmentVariable("MB_TTRACE") != null;   // ★IIIIII：逐 attempt 账
         int mbAtt = 0;
         int trackCount = (int)r.Next(MbScW(1), MbScW(2) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG longTrackCount {trackCount} rc={QRollWrap.N}");
         int tDone = 0, tFail = 0;
         while (tDone < trackCount)
         {
             int ox = (int)r.Next(10, W - 10);
             int oy = (int)r.Next(worldSurface, H - 200);
+            int n0l = (int)QRollWrap.N;
             bool ok = MbTrackPlace(ox, oy, MbScW(400), MbScW(1000));
+            if (mbSeg) Console.WriteLine($"MBSEG LTRK {ox},{oy} rc={(int)QRollWrap.N - n0l} ok={(ok ? 1 : 0)}");
             if (mbTT2) Console.WriteLine($"MBATT long #{mbAtt++} ox={ox} oy={oy} -> {(ok ? "PLACED" : $"fail{mbTrackFail[0]},{mbTrackFail[1]},{mbTrackFail[2]},{mbTrackFail[3]},{mbTrackFail[4]}")}");
             if (ok) { tDone++; tFail = 0; }
             else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
         }
         trackCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 4)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 7)) + 1);
+        if (mbSeg) Console.WriteLine($"MBSEG stdTrackCount {trackCount} rc={QRollWrap.N}");
         tDone = 0; tFail = 0;
         while (tDone < trackCount)
         {
             int ox = (int)r.Next(10, W - 10);
             int oy = (int)r.Next(worldSurface, H - 200);
+            int n0s = (int)QRollWrap.N;
             bool ok = MbTrackPlace(ox, oy, MbScW(150), MbScW(300));
+            if (mbSeg) Console.WriteLine($"MBSEG STRK {ox},{oy} rc={(int)QRollWrap.N - n0s} ok={(ok ? 1 : 0)}");
             if (mbTT2) Console.WriteLine($"MBATT std #{mbAtt++} ox={ox} oy={oy} -> {(ok ? "PLACED" : $"fail{mbTrackFail[0]},{mbTrackFail[1]},{mbTrackFail[2]},{mbTrackFail[3]},{mbTrackFail[4]}")}");
             if (ok) { tDone++; tFail = 0; }
             else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
         }
+        if (mbSeg) Console.WriteLine($"MBSEG mbLavaS rc={QRollWrap.N}");
         int trackCells = 0;
         for (int i = 0; i < W * H; i++) if (act[i] != 0 && typ[i] == MB_TRACK_TILE) trackCells++;
         if (mbTrace != 0) Console.WriteLine($"MB tracks long+standard placed, cells={trackCells}");
@@ -18837,6 +19336,14 @@ Replay(); // ▶MicroBiomes cs:21785
         slope[floorIdx] = 0;
         half[floorIdx] = 0;
         MbSetTile(x, num10, 135, 0, 126);                                   // 压板 style7（frameY=126）
+        // ★FFFFF/CCCCC（IIII180 补）：PlaceTile case135 支恒调 SquareTileFrame
+        //   （cs:60225-27 门败也走）+ 尾 tile.active() 门 SquareTileFrame（cs:60284）
+        //   ——双帧九宫 184 苔藓掷（JS placeLavaTrap :2640/:2642 genSquareTileFrame×2；
+        //   曾单帧漏掷 → 压板后掷流前移,岩浆臂全段漂移）。IIIII217 前置清（cs:59965-68,
+        //   inactive 锚格清 type/帧/坡/漆）不掷且 oracle 无漆/涂层通道——setTileSilent
+        //   覆写后净可见面为零,备案不移植。
+        FcSquareTileFrame(x, num10);
+        if (QQInW(x, num10) && act[num10 * W + x] != 0) FcSquareTileFrame(x, num10);
         for (int m = num8; m <= num10; m++)
         {
             if (!QQInW(x, m)) continue;
@@ -18854,12 +19361,19 @@ Replay(); // ▶MicroBiomes cs:21785
     {
         double lavaTries = W * 0.02;   // 裸 double 上限（JS 同款不取整）
         for (int j = 0; j < lavaTries; j++)
+        {
+            if (mbSeg) Console.WriteLine($"MBSEG lavaJ {j} rc={QRollWrap.N}");
             for (int k = 0; k < 10150; k++)
             {
                 int x = (int)r.Next(200, W - 200);
                 int y = (int)r.Next(lavaLine - 100, H - 210);
-                if (MbPlaceLavaTrap(x, y)) break;
+                bool okL = MbPlaceLavaTrap(x, y);
+                if (mbSeg && Environment.GetEnvironmentVariable("MBSEG_TATT") != null)
+                    Console.WriteLine($"MBSEG tAtt rc={QRollWrap.N} [{x},{y},{(okL ? 1 : 0)}]");
+                if (okL) { if (mbSeg) Console.WriteLine($"MBSEG lavaOk rc={QRollWrap.N} [{x},{y}]"); break; }
             }
+        }
+        if (mbSeg) Console.WriteLine($"MBSEG mbEnd rc={QRollWrap.N}");
         int plates = 0;
         for (int i = 0; i < W * H; i++) if (act[i] != 0 && typ[i] == 135 && frY[i] == 126) plates++;
         if (mbTrace != 0) Console.WriteLine($"MB lavaTraps plates={plates}");
@@ -20638,11 +21152,50 @@ void Fc3x2(int x, int y, int sheet)                // Check3x2（cs:49190）
         return;
     }
     if (!bad) return;
+    int fxChk = frX[i];   // ★IIIII81（IIII180 补）：击杀前捕获锚格 frameX（KillTile 会写 -1;186 金币堆掉落掷的门,JS :3206）
     fcDestroy = true;
     for (int k = x0; k < x0 + 3; k++)
         for (int l = y0; l < yEnd; l++)
             if (FcInB2(k, l) && typ[l * W + k] == sheet && act[l * W + k] != 0) FcKillTile(k, l);
+    // ★IIII180 补：case 186 内容掉落掷（cs:49436-49855,JS FinalCleanupPass :3218-3244）
+    //   ——生成期 Item.NewItem 急切求值掷;fxChk<864 及他族零掷。曾整段缺 → 轨巷
+    //   压 186 金币堆（fx=918 带）时 JS 多耗 ~24 掷 → microbiomes 段矿轨臂全面漂移。
+    if (sheet == 186 && fxChk >= 864)
+    {
+        if (fxChk <= 954)
+        {
+            r.Next(20, 100); r.Next(30, 100); r.Next(40, 100);
+            int[][] pairs = {
+                new[]{3,20,1}, new[]{3,30,1}, new[]{3,40,1},
+                new[]{2,20,0}, new[]{2,30,0}, new[]{2,40,0},
+                new[]{3,20,0}, new[]{3,30,0}, new[]{3,40,0},
+                new[]{4,20,0}, new[]{4,30,0}, new[]{4,40,0},
+                new[]{5,20,0}, new[]{5,30,0}, new[]{5,40,0},
+            };
+            foreach (var pr in pairs)
+                if ((pr[2] != 0 ? r.Next(pr[0]) != 0 : r.Next(pr[0]) == 0)) r.Next(pr[1], 100);
+        }
+        else if (fxChk <= 1062)
+        {
+            r.Next(10, 100);
+            if (r.Next(2) == 0) r.Next(20, 100);
+            if (r.Next(3) == 0) r.Next(30, 100);
+            if (r.Next(4) == 0) r.Next(40, 100);
+            if (r.Next(5) == 0) r.Next(50, 100);
+        }
+        else if (fxChk <= 1170)
+        {
+            r.Next(1, 7);
+            if (r.Next(2) == 0) r.Next(2, 7);
+            if (r.Next(3) == 0) r.Next(3, 7);
+            if (r.Next(4) == 0) r.Next(4, 7);
+            if (r.Next(5) == 0) r.Next(5, 7);
+        }
+    }
     fcDestroy = false;
+    // ★IIII180 补：尾部 5×5 TileFrame 扫（cs:49856-49862）——邻堆递归复核（连杀）+ 苔藓芽掷
+    for (int c = x0 - 1; c < x0 + 4; c++)
+        for (int r2 = y0 - 1; r2 < y0 + 4; r2++) FcTileFrame(c, r2, false);
 }
 void FcCheckVines(int x, int y, int sheet)         // CheckVines（cs:85599）
 {

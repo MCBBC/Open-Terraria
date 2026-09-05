@@ -29,7 +29,8 @@ import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
 import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
-  TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY, tallGateRowOf } from '../world/Door';
+  TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
+import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
@@ -1923,7 +1924,8 @@ export function projectileSwitchBox(
 
 /** SW-AQ1 2026-09-05：同上，但盒锚在本拍位移前位 oldX/oldY——原版 :19977-19978 对
  *  position 与 oldPosition 施同一 vector25 偏移（宽高取当帧值,旧位仅换锚点），
- *  SwitchTiles 内部新旧位判定（Collision.cs:3346-3353/:3356）消费。 */
+ *  SwitchTiles 内部新旧位判定（Collision.cs:3314/:3323,SW-AM2 2026-09-05 引注
+ *  校准）消费。 */
 export function projectileSwitchBoxOld(
   e: { x: number; y: number; w: number; h: number; id: number }, vid: number, oldX: number, oldY: number,
 ): { x: number; y: number; w: number; h: number; id: number } {
@@ -3726,11 +3728,31 @@ export class Game implements GameHooks {
     // ★FR3-F srcX 锚点单式 = 伤害源中心 x。RemotePlayerState 只携左上位（msg13
     // position），不备盒宽——原版玩家碰撞盒恒宽 20（Player.width），常数合成中心
     const srcXCenter = rp.x + 10;
-    // ---- bit7 爆炸意向（BombsHurtPlayers :13944-13981 的被炸端结算）----
-    // ★原版爆炸无 hostile/InOpposingTeam 门（炸谁都成立）;pvp 参仅投射物 108/1002
-    // 为 false(:13964-13967)其余恒 true。伤害=±15% DamageVar 本地掷(:13953 用
-    // -luck);命中且未死 → StatusPlayer debuff(:13979-13980);死因 ByProjectile
-    // （:13974,weaponId 携投射物型）
+    // ---- bit7 爆炸意向（1457 SelfHurtPlayers :15104-15152 的被炸端结算;1456 同位
+    //  = BombsHurtPlayers :13944-13981 已随其退役——1457 全树零命中,SW-AM2 2026-09-05
+    //  蓝F3 引注重锚）----
+    // ★原版爆炸无 hostile/InOpposingTeam 门（炸谁都成立）;pvp 参=:15124
+    //  `bool flag = !hostile && type != 949`——hostile 弹（75/102/108/164/1002,
+    //  SetDefaults :1555/:1903/:1961/:2534/:9531）false,非 hostile 炸弹
+    //  （28/29/30/133-144/397/516 族/773/776-810 等）true。伤害=±15% DV 本地掷
+    //  (:15118 用 -luck);命中且未死 → StatusPlayer（:15134）;死因 ByProjectile
+    //  （:15131,weaponId 携投射物型）
+    // ★SW-AU1 2026-09-05 双脸裁决（拓扑考古收束,详见 explodeAt 跨端半边同批注）：
+    //  原版两脸按受害对【互斥】——SelfHurtPlayers victim 恒=结算机本地玩家
+    //  （owner 门 :71786-71789 myPlayer/255/getGood 三臂+AI_184 :43579+1117 :71961）,
+    //  Damage_PVP victim 恒=i≠owner（:14643 continue,owner 本人在 PVP 脸不可达）；
+    //  本 bit7 面唯一受害对=「远端投弹者→本机」,其原版【首结算脸】按弹型分极:
+    //  非 hostile 弹=投弹者 Damage_PVP（pvp:true 字面 :14747-14748→msg117 收端
+    //  pvp 位同步置位）→ 表外 pvpHit=true ✔;hostile 接线陷阱 {108,164,1002}=受害端
+    //  自持 SelfHurtPlayers（164/1002 服务端 spawn owner=255,Wiring.cs:3085 netMode!=1
+    //  门/:71787 flag5 第二臂;108 case141 :2042 无 netMode 门=各端自持副本走第一臂）
+    //  pvp=！hostile=false → 表内 pvpHit=false ✔。原版 PVP 脸对 hostile 弹=免疫窗
+    //  吸收的后到域（服务端 Main.player[255].hostile=false 入口即死 :14639;非 owner
+    //  端 owner≠myPlayer 不进 :12522）——两脸无同对双达,表旗极性≡首结算脸极性。
+    //  真交叠在原版=SelfHurtPlayers×Damage_EVP（同受害对,hostile 弹同拍两达）,
+    //  由调用序（:71790 SelfHurt 先于 :71792 Damage()）+Hurt 冷却门（Player.cs
+    //  :38494-38497 `!flag→return 0`）吸收;本仓爆炸弹不傀儡（msg27 kind=-1 未知类
+    //  跳过）,bit7 为跨端唯一通道=结构性单结算,无此交叠面。
     if (flags & 0x80) {
       const projType = weaponId;
       // ★SW-T1 2026-09-04：DV 单源——SelfHurtPlayers :15118 `Main.DamageVar(value,
@@ -3738,26 +3760,36 @@ export class Game implements GameHooks {
       //  SW-X1 2026-09-04 引注勘误,曾 :15122）
       // SW-AM1 2026-09-05（S1/AC1 清偿③）：flags bit1=dmgPreRolled（protocol.ts
       //  msg44 注/PROTO_VER 注 j）——新端发送侧已掷终值（DV+sweater cap 算毕,
-      //  SelfHurtPlayers 式整体搬到伤害方,vanilla :14718/:14747 值同步同构）→
-      //  直读不再掷;无位（旧端发,server flags 透传不变）=基伤,维持本地掷
-      //  （改动前行为逐位,向后兼容分支）
+      //  SelfHurtPlayers 式整体搬到伤害方）→ 直读不再掷;无位（旧端发,server flags
+      //  透传不变）=基伤,维持本地掷（改动前行为逐位,向后兼容分支）。
+      //  SW-AM2 2026-09-05（蓝F4）定性降格：vanilla 炸弹对玩家的伤是两张脸——
+      //  SelfHurtPlayers（受害端自结算、本机 fresh luck :15107/:15118,无跨端同步）
+      //  与 Damage_PVP（owner 结算 PvP 伤 :14718 掷后 :14747 下行）——本仓"发送侧
+      //  预掷终值"=借用后者的形制,bit7 面混载两类受击（PvP 掷弹/接线炸药）,与任一
+      //  原版单脸都不完全同构,定性为 client-authority 模型下的值同步策略选择
       const rolled = (flags & 0x02)
         ? Math.max(1, dmg)
         : Math.max(1, damageVarRoll(dmg, -p.luck));
       p.lastDamageCause = { kind: 'projectile', name: Lang.projectileName(projType) ?? 'Explosives' };
-      const pvpHit = projType !== 108 && projType !== 1002;
+      // SW-AM2 2026-09-05（蓝F3）：pvp 判集改 1457 :15124 `!hostile && type != 949`
+      //  语义（SELF_HURT_NON_PVP_PROJS 表,见其注）——旧 1456 特判
+      //  `type!==108 && type!==1002` 退役;★164 归类反转（1456 判 pvp=true,
+      //  1457 hostile=true → false）,75/102 同批入表（同样曾是 pvp=true）
+      const pvpHit = !Game.SELF_HURT_NON_PVP_PROJS.has(projType);
       // ★走 damagePlayer 而非直调 p.damage：死亡结算块（pvpDeath 计数/不掉钱/复活
       // 计时）挂在 damagePlayer 尾部——直调会绕过,_pvp-e2e 实抓"炸死无计数"）
       const hpBeforeBit7 = p.hp;
       if (this.damagePlayer(rolled, srcXCenter, rp.y, undefined, false, pvpHit)) {
         // ★R22:删第二声 'hit'（NPC_Hit_1-5=怪物受击库）——原版玩家受伤只有
         // Player_Hit(case1),damagePlayer 内已播,此处叠声
-        // ★hostile=false（爆炸无敌我门 :13979-13980——!hostile 分支（285 二块/253/
-        // 399-402）唯一可触发路径）
+        // ★hostile=false（爆炸无敌我门 :15132-15134——Hurt 的 pvp 参=flag,StatusPlayer
+        //  在 Hurt>0 && !dead 门内,非 hostile 玩家源唯一可触发路径）
         if (!p.dead && p.hp > 0) statusPlayer(this, projType, false);
-        // ★GA4 被击端实扣权威广播（爆炸支，Projectile.cs 爆炸族 SendPlayerHurt
-        //  同构位 :13981 族；crit 恒 false——Damage_PVP 式暴击掷不存在于爆炸面）。
-        //  ★FR2-F（三轮蓝队）：仅 PvP 面显式发——108/1002（pvp:false 档 :13964-13967）
+        // ★GA4 被击端实扣权威广播（爆炸支——原版 SelfHurtPlayers :15132 Hurt 内
+        //  SendPlayerHurt 值同步;crit 恒 false——:15132 Crit:false 字面,爆炸面无
+        //  暴击掷）。SW-AM2 2026-09-05（蓝F4）：定性=值同步策略选择的 GA4 补位,
+        //  非原版同构锚。
+        //  ★FR2-F（三轮蓝队）：仅 PvP 面显式发——hostile 弹（pvp:false 档 :15124）
         //  的 msg117 已由 damagePlayer 尾通用通道自动生产，再发 = 双帧双飘字
         if (pvpHit) this.reportPlayerHurt(hpBeforeBit7, srcXCenter, false);
       }
@@ -7964,7 +7996,7 @@ export class Game implements GameHooks {
         }
       }
     }
-    this.updateTallGateAuto();
+    this.updateDoorHelperAuto();   // SW-AS1 2026-09-05:旧 updateTallGateAuto 退役,门自动开关全量入 DoorOpeningHelper
     if (player.dead) {
       // 死亡瞬间：红色粉碎粒子 + 原地留墓碑（只处理一次）
       if (!this._deathHandled) {
@@ -11025,6 +11057,21 @@ export class Game implements GameHooks {
     return isDomUiTarget(el ?? null);
   }
 
+  /** SW-AT1 2026-09-05：autoReuseAllItems 全局连发臂（TryAllowingItemReuse
+   *  Player.cs:53542-53558）：`(stressBall || autoReuseAllWeapons) && sItem.damage > 0
+   *  && (!sItem.channel || !channel)` → releaseUseItem = true——非 autoReuse 物品也允许
+   *  持按连发（核心消费 = ItemCheck :43064 use-start 门 controlUseItem&&releaseUseItem）。
+   *  本仓映射：autoReuseAllItems = Main.SettingsEnabled_AutoReuseAllItems（Main.cs:262；
+   *  Player.cs:24648 autoReuseAllWeapons 每 tick 同步）；damage>0 原条件保留（damage 0
+   *  件——玩具球/灯笼/桶族/透镜——不连发）；stressBall（原版手持 5543 减压球置位,
+   *  Player.cs:14836-14838）本仓无该物品＝备案债；channel 例外（channel 物品连发中
+   *  不强制重施）由本仓 channel 载体 SetDummyItemTime 钉持承担：refreshChannelItem
+   *  （:37057）钉 useTime≥10,PrismProj/GlacierFangShot/630 载体/705 载体逐 tick 调用
+   *  + yoyo/flail 在场唯一性守卫——各分支 useTime===0 门在 channel 期天然拒重入。 */
+  private autoReuseAllChain(vid: number): boolean {
+    return options.data.autoReuseAllItems && (itemCombat(vid)?.damage ?? 0) > 0;
+  }
+
   private updateUse(_dt: number) {
     const inp = this.input;
     // pendingItemReuse 复位（ItemCheck :42921 函数头 `pendingItemReuse = false`）：
@@ -11419,7 +11466,12 @@ export class Game implements GameHooks {
     //  下次点击不受影响;复位在 Input.mouseup/touchend/blur）。本早退门即本仓
     //  controlUseItem 消费面（mouseDown 边沿 + holdOk 持电平两支全被压制）。
     const cwEarly = heldDef ? combatWeapon(heldDef) : null;
-    const holdOk = !!((cwEarly as { autoReuse?: boolean } | null)?.autoReuse && inp.mouseHeld && !this.annotateMode);
+    // SW-AT1 2026-09-05：autoReuseAllItems 臂（TryAllowingItemReuse Player.cs:53550,
+    // 见 autoReuseAllChain 注）——本早退门是 updateUse 全分派的重入总闸,全武器连发
+    // 开启时 damage>0 非 autoReuse 物品同样放行持按重入（各分支门仍自守 useTime/channel）
+    const holdOk = !!(((cwEarly as { autoReuse?: boolean } | null)?.autoReuse
+      || (cwEarly && this.autoReuseAllChain(heldDef!.vid ?? viIdFromKey(heldDef!.key))))
+      && inp.mouseHeld && !this.annotateMode);
     if ((!inp.mouseDown && !holdOk) || this.annotateMode || inp.blockMouse) {
       this.mining = null;
       return;
@@ -11612,7 +11664,14 @@ export class Game implements GameHooks {
       const gloveReuse = this.player.equipStats.autoReuseGlove && heldVid !== 3030;
       // Main.SettingsEnabled_AutoReuseAllItems（IngameOptions.cs:689；Player.cs:24182
       // autoReuseAllWeapons = 该开关——全局持按连挥档，与物品原生/手套链 OR）
-      const autoReuse = cwMelee ? (cwMelee.autoReuse || gloveReuse || options.data.autoReuseAllItems) : true;
+      // SW-AT1 2026-09-05：全局档补 damage>0 原条件（TryAllowingItemReuse :53550
+      //  `sItem.damage > 0`——damage 0 近战件（5129 等 3 件）不连发;手套臂原版无
+      //  damage 门,gloveReuse 维持无条件。读原始数据面 c.damage ?? 0＝原版
+      //  SetDefaults 缺省 0 真值——cwMelee.damage 有 `?? 1` 兜底会误放行）
+      const autoReuse = cwMelee
+        ? (cwMelee.autoReuse || gloveReuse
+          || (options.data.autoReuseAllItems && (itemCombat(heldVid)?.damage ?? 0) > 0))
+        : true;
       const clickEdge = inp.mouseDown && !this.prevSwingMouse;
       const canChain = autoReuse || clickEdge; // 非 autoReuse 武器需重新点击（原版语义）
       // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
@@ -12463,7 +12522,11 @@ export class Game implements GameHooks {
       && ORPHAN_B1_BUFF_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
       // fresh click 门（同下方 thrownCombat ⑩：非 autoReuse 消耗件必须松手再点,
       // 否则 useTime 到零后按住连掷——原版 TryStartUse 门 itemAnimation==0 语义）
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse || (inp.mouseDown && !this._prevMouseDown))) {
+      // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550,
+      // damage>0）——蜜雷锋 1130 damage 12 全局档持按连发
+      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
+        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+        || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 B1 波（buff/光环簇）分派（2026-08-30；见 ORPHAN_B1_BUFF_VIDS 注）。
       //       必须排在下方 thrownCombat 之前——1130 现走该通用档会被射成 ai2 直坠箭体，
       //       原版弹 183 是 aiStyle14 弹跳瓶体（SetDefaults P.cs:2699-2708 timeLeft180）
@@ -12474,7 +12537,11 @@ export class Game implements GameHooks {
       // ★fresh-click 门（⑩ 统一式,X-F1）：非 autoReuse 消耗件必须松手再点——
       // 门此前由 throwFertilizer 尾部 this.input.mouseDown=false 吞边沿承担,现上提
       // 到分派位与 A/B3/B1 统一(处理器不再伪造"松手",全链 _prevMouseDown 电沿对齐)
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse || (inp.mouseDown && !this._prevMouseDown))) {
+      // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550, damage>0）——
+      // 肥料二件 5438/5518 原版 damage 0 → 全局档不连发（保持单发）
+      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
+        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+        || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 B2 波·世界改造簇分派（2026-08-30；见 ORPHAN_B2_VIDS 注）。
       //       肥料二件 combatWeapon 返 null + thrownCombat 已加显式退出——不拦截则
       //       落通用投掷档被射成箭体（1019/1051 实为 aiStyle6 云体）
@@ -12489,7 +12556,11 @@ export class Game implements GameHooks {
       // input.mouseDown 是粘滞电平(touchend 才清)→按住 LMB 每 useTime 周期连掷
       // 打窝桶/天灯/晶洞(consumable 白耗库存,X-F1 定罪)。水枪 2272/微光枪 5495
       // 是 autoReuse=true(Item.cs:22888/:43326)故保留豁免项,按住照常连发
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse || (inp.mouseDown && !this._prevMouseDown))) {
+      // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550, damage>0）——
+      // 打窝桶 4608/天灯 4702/晶洞 4400 原版 damage 0 → 全局档不连发（保持单发）
+      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
+        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+        || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 A 波五件分派（2026-08-30；见 ORPHAN_THROW_VIDS 注——各件
       //       vanilla 行号锚与行为摘要在各自 fire*/throw* 方法注内）----
       const owVid = viIdFromKey(heldDef.key) ?? -1;
@@ -12498,6 +12569,7 @@ export class Game implements GameHooks {
       else if (owVid === 4702) this.throwSkyLantern(heldDef);
       else if (owVid === 4400) this.throwGeode(heldDef);
     } else if (heldDef && ((((itemCombat(viIdFromKey(heldDef.key))?.autoReuse
+        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)   // SW-AT1 2026-09-05（:53550 damage>0）——B3 四件全 damage 0 → 全局档不连发
         || (inp.mouseDown && !this._prevMouseDown)))
         && this.player.useTime === 0)                       // ★左键 fresh-click 门（⑩ 统一式,X-F1,
         //   注同 A 波支）——球类/透镜弹全非 autoReuse(Item.cs SetDefaults 无该行),
@@ -13101,7 +13173,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.cb.onInventoryChanged();
         }
       }
-    } else if (heldDef && ((itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true)
+    } else if (heldDef && ((itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
+      || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key)))   // SW-AT1 2026-09-05：全局连发电平臂
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（同 cw 门 2026-08-24）
       : inp.mouseDown) && this.player.useTime === 0
       && (heldDef.ranged || rangedAmmoWeapon(heldDef))
@@ -13110,7 +13183,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  DefaultToBow/RangedWeapon 默认 autoReuse=false（Item.cs:48037/:48057）——
       //  木弓 39/火枪 96/手枪 164 逐发；真连发件以 combat.autoReuse===true 为准
       //  （undefined 视为 false，防高阶连发枪被误伤）
+      //  SW-AT1 2026-09-05：补 autoReuseAllItems 臂（TryAllowingItemReuse
+      //  Player.cs:53550 `(stressBall || autoReuseAllWeapons) && sItem.damage > 0
+      //  && (!sItem.channel || !channel)` → releaseUseItem）——全局连发开时弓/枪族
+      //  持按连发（damage>0 原条件;channel 例外=630/705 载体 SetDummyItemTime 钉
+      //  useTime+在场唯一性守卫,见 autoReuseAllChain 注）
       && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
+        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))
         || (inp.mouseDown && !this._prevMouseDown))) {
       // 远程武器（弓/枪/吹箭筒）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
       //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
@@ -14089,11 +14168,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 6)
           * (this.heldPrefixStat()?.spd ?? 1)));
       }
-    } else if (heldDef && cw && (((cw as { autoReuse?: boolean }).autoReuse || options.data.autoReuseAllItems)
+    } else if (heldDef && cw && (((cw as { autoReuse?: boolean }).autoReuse
+      || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key)))   // SW-AT1 2026-09-05：改走单一真源（补 damage>0）
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
       : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
       && this.player.useTime === 0 && cw.kind !== 'melee'
-      && ((cw as { autoReuse?: boolean }).autoReuse || options.data.autoReuseAllItems
+      && ((cw as { autoReuse?: boolean }).autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))
         || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门（★全局档并列：
         // Main.SettingsEnabled_AutoReuseAllItems 归 Player.cs:24182 autoReuseAllWeapons,
         // TryAllowingItemReuse(P.cs:52044) 对【一切 damage>0 物品】生效——此前本支漏并
@@ -14102,7 +14183,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)
-      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse || options.data.autoReuseAllItems
+      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))   // SW-AT1 2026-09-05：补 damage>0 原条件
         || (inp.mouseDown && !this._prevMouseDown))) { // ⑩（全局档并列,同上支 :12186 注记）
       // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
       // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
@@ -23501,7 +23583,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** Collision.SwitchTiles(Collision.cs:3240-3377)1:1 接触扫描。
+  /** Collision.SwitchTiles(Collision.cs:3240-3373)1:1 接触扫描。
    *  objType:2=NPC(NPC.cs:91619 全量 lifeMax>1 && !noTileCollide;type 白名单只管
    *  蜗牛缩壳 ai 不影响 HitSwitch)/3=弹幕白名单 {99,1013,1047,655,727,1014,1021,
    *  1048,1053,1054,1055,1057}(Projectile.cs:17195)/4=其余 tileCollide 弹幕
@@ -23512,14 +23594,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  210 地雷全体、443 间歇泉仅 objType{1,5}、442 感应垫板仅 objType 4 且按
    *  frameX/22 四向 16×10 子矩形新旧位判定;风格 7 触发后 KillTile 一次性;
    *  135 命中即 return(每实体每帧至多一块板),210/443 continue。
-   *  边沿触发经 latch(原版 oldPosition 全格带判定同构:入带触发/离带复位)。
+   *  边沿触发经 latch(原版 oldPosition 排除带判定同构:入带触发/离带复位)。
    *  silent=true（SW-AP1 2026-09-05）：仅 pressed/latch 记账不触发——高尔夫球
    *  静置期预热锁存（AI_149 :20477 Moving 门;Resting→Moving 首拍原版
-   *  oldPosition 全格带排除 ⇒ 在带不响,离带复位后 re-entry 才触发）。
-   *  old 非空（SW-AQ1 2026-09-05）：上报弹走原版【新旧位逐字判定】替代 latch——
-   *  442 = :3346-3353 子矩形新入∧旧出;135/210/443 = :3352-3357 新位脚带∧旧位
-   *  全格 [i*16, j*16+16.01) 不交（X 全格带,Y 上沿 +16.01）。碰撞帧语义落地：
-   *  本拍零位移/旧位已在板格（挡停、静置、竖向穿板格落板）⇒ 新旧位对不满足 ⇒
+   *  oldPosition 排除带 ⇒ 在带不响,离带复位后 re-entry 才触发）。
+   *  old 非空（SW-AQ1 2026-09-05;SW-AL2 2026-09-05 F-1 带重钉）：上报弹走原版
+   *  【新旧位逐字判定】替代 latch——442 = :3314 子矩形新入∧旧出（442 置
+   *  flag=true 短路公共带,:3321,自用子矩形无 +12 偏移）;135/210/443 = :3323
+   *  新位脚带 [j*16+12, j*16+16.01) ∧ 旧位排除带 X 全格 [i*16,i*16+16) ∧
+   *  Y [j*16+12, j*16+28.01)（vector.Y=j*16+12 :3277;oldY+H>vector.Y ∧
+   *  oldY<vector.Y+16.01——排除带=脚带向下延 12px,非全格）。碰撞帧语义落地：
+   *  本拍零位移/旧位已在排除带（挡停、静置、续拍在带）⇒ 新旧位对不满足 ⇒
    *  不触发——原版此判定在 objType 全路统一,无 FPD 豁免（FPD 只翻 :19974 flag4/
    *  :19977 flag5 两臂）;上报量 = Entity.oldX/oldY（Projectile.oldPosition 镜像,
    *  Update :17118 AI 后/HandleMovement 前置位） */
@@ -23535,7 +23620,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const y1 = Math.min(st.h - 40, Math.floor((e.y + e.h) / TILE) + 2);
     for (let ty = y0; ty < y1; ty++) {
       for (let tx = x0; tx < x1; tx++) {
-        // ★X2-F1(2026-09-04):active 门在 HitSwitch 之前（Collision.cs:3276-77
+        // ★X2-F1(2026-09-04):active 门在 HitSwitch 之前（Collision.cs:3272-3275
         //  `!tile.active() || (type!=135&&…)` continue）——幽灵压板/地雷/间歇泉/垫板
         //  (flags=0 残型)被踩不得触发;sheetOf 裸读 type 是原版本相,门在调用方
         if (!st.hasTile(tx, ty)) continue;
@@ -23543,11 +23628,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (sh !== 135 && sh !== 210 && sh !== 443 && sh !== 442) continue;
         const key = e.id + '|' + tx + ',' + ty;
         if (sh === 442) {
-          // 感应垫板（SW-AO1 2026-09-05 两修）:原版 flag=true（:3346）令脚部带门
-          //  (:3352-3357 `flag || !(…)` 恒真 continue)对 442 不生效——子矩形判定
-          //  独立于脚带,墙装/顶装的侧带才可达;取向读 frameX/22（:3294,构向写
+          // 感应垫板（SW-AO1 2026-09-05 两修）:原版 flag=true（:3321）令脚部带门
+          //  (:3323 `flag || !(…)` 恒真 continue)对 442 不生效——子矩形判定
+          //  独立于脚带,墙装/顶装的侧带才可达;取向读 frameX/22（:3287,构向写
           //  frameX=0/22/44/66 = WorldGen.cs:87463 CheckProjectilePressurePad;
-          //  曾读 frameY 恒落 case 0=底带）。仅 objType 4（:3287）;
+          //  曾读 frameY 恒落 case 0=底带）。仅 objType 4（:3281）;
           //  边沿=新入旧出（oldPosition 对同一子矩形,latch 入带触发/离带复位同构）
           if (objType === 4) {
             const r = { x: tx * TILE, y: ty * TILE, w: 16, h: 10 };
@@ -23560,7 +23645,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const isIn = e.x + e.w > r.x && e.x < r.x + r.w && e.y + e.h > r.y && e.y < r.y + r.h;
             if (isIn) {
               pressed?.add(key);
-              // SW-AQ1 2026-09-05：old 上报 = :3350-3353 原文逐值（旧位仍入子矩形
+              // SW-AQ1 2026-09-05：old 上报 = :3314 原文逐值（旧位仍入子矩形
               //  ⇒ 不触发——落板帧新入旧出才响,驻板/挡停帧零触发）;fresh-old 下与
               //  latch 边沿同判定域, stale-old 静置帧（早退路径未刷新 oldX/oldY）
               //  由 latch 兜底防重触发
@@ -23574,36 +23659,41 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           continue;
         }
-        // 脚部带判定(Collision.cs:3352-3357:vector.Y=j*16+12,带高 4.01)
+        // 脚部带判定(Collision.cs:3323/:3277:vector.Y=j*16+12,带高 4.01)
         const vy = ty * TILE + 12;
         if (!(e.x + e.w > tx * TILE && e.x < tx * TILE + TILE
           && e.y + e.h > vy && e.y < vy + 4.01)) continue;
-        // 旧位全格带跳过(:3356 oldPosition 判定;latch 入带触发/离带复位同构)
+        // 旧位排除带跳过(SW-AL2 2026-09-05 F-1 重钉 :3323 原文;latch 入带触发/
+        //  离带复位同构)
         pressed?.add(key);
         if (latch.has(key)) continue;
         latch.add(key);
-        // SW-AQ1 2026-09-05：old 上报 = :3356 原文逐值——旧位盒与板格全格
-        //  [i*16,i*16+16)×[j*16,j*16+16.01) 相交 ⇒ 不触发（碰撞帧/静置帧/竖向
-        //  穿板格落板不响;fresh-old 下与上方 latch 边沿同判定域——带内存续拍
-        //  old 必在格内,stale-old 静置帧由 latch 兜底防重触发）
+        // SW-AL2 2026-09-05（F-1）：old 上报 = :3323 原文逐值——旧位盒与板格
+        //  X 全格带 [i*16,i*16+16) ∧ Y 排除带 [j*16+12, j*16+28.01)（vector.Y=
+        //  j*16+12 :3277;oldY+H > vector.Y ∧ oldY < vector.Y+16.01——排除带=
+        //  触发脚带 [j*16+12,j*16+16.01) 向下延 12px）相交 ⇒ 不触发（驻带续拍/
+        //  碰撞帧不响;fresh-old 入带续拍 old 必在排除带内,离带清 latch 再入才
+        //  触发;stale-old 静置帧由 latch 兜底防重触发）。旧"全格 [j*16,
+        //  j*16+16.01)"带曾误吞终速<16px/t 竖向落板帧——old 底∈(j*16, j*16+4]
+        //  时原版必触发（SW-AQ1 旧注 :3356 引注为 1456 行号,1457 实锚 :3323）
         if (old && old.x + old.w > tx * TILE && old.x < tx * TILE + TILE
-          && old.y + old.h > ty * TILE && old.y < ty * TILE + TILE + 0.01) continue;
+          && old.y + old.h > ty * TILE + 12 && old.y < ty * TILE + 28.01) continue;
         // SW-AP1:silent（高尔夫静球预热）只记账不触发——210/443/135 全支同静;
         //  禁触风格的预热键 latch 已挂,Moving 拍走 has→continue 不过风格门,
         //  存续至离带清除——但该风格本就永不为 objType 4 触发,无行为差
         if (silent) continue;
-        if (sh === 210) { w.hitSwitch(tx, ty); continue; }          // 地雷:全体(:3374-3378)
-        if (sh === 443) {                                            // 间歇泉:objType 1/5(:3379-3385)
+        if (sh === 210) { w.hitSwitch(tx, ty); continue; }          // 地雷:全体(:3329-3332)
+        if (sh === 443) {                                            // 间歇泉:objType 1/5(:3333-3339)
           if (objType === 1 || objType === 5) w.hitSwitch(tx, ty);
           continue;
         }
-        // 压板 135 风格门(:3358-3368)
+        // 压板 135 风格门(:3341-3353)
         const style = Math.floor(st.frameY[st.idx(tx, ty)] / 18);
         if ((style === 4 || style === 2 || style === 3 || style === 6 || style === 7) && objType !== 5) { latch.delete(key); pressed?.delete(key); continue; }
         if (style === 5 && (objType === 1 || objType === 4 || objType === 5)) { latch.delete(key); pressed?.delete(key); continue; }
         w.hitSwitch(tx, ty);
-        if (style === 7) this.breakTile(tx, ty);  // 一次性板(:3366-3372 KillTile)
-        return;  // :3375 命中即返回(每实体每帧至多一块压板)
+        if (style === 7) this.breakTile(tx, ty);  // 一次性板(:3361-3368 KillTile)
+        return;  // :3369 命中即返回(每实体每帧至多一块压板)
       }
     }
   }
@@ -23715,7 +23805,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  · 巨石族 12 id（Projectile.cs:17195 白名单,netMode!=1 单机恒真）→ objType 3
     //    （TrapShot 无 projId 槽,机关巨石 kind==='boulder'≡vid 99 同表）;
     //  · 该族 ForcePlateDetection=false 11 项 → :19974 flag4 禁 objType 4;
-    //  · 其余弹 objType 4（:19978 HandleMovement,owner==myPlayer 单机恒真）:
+    //  · 其余弹 objType 4（:19978 HandleMovement,owner==myPlayer 门 = netPuppet
+    //    取反,SW-AM2 2026-09-05 蓝F5——单机恒真,联机房挡远端傀儡弹）:
     //    :19977 `(tileCollide | flag5)` 门 = tileCollide=false 不扫,FPD[true]
     //    爆炸/箭矢族（SWITCHTILES_PLATE_FORCED_ON）除外;穿墙弹 noTileCollide 不扫
     for (const p of this.entities.projectiles) {
@@ -23725,23 +23816,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // TrapShot 无 projId 槽 → kind 反查原版 id（Dart.ts TRAP_PROJ_ID;boulder≡99）
       const vid = pe.projId ?? pe.vanillaId
         ?? (kind === 'boulder' ? 99 : -1);
+      // SW-AM2 2026-09-05（蓝F5）：objType 4 面 owner==Main.myPlayer 门（Projectile.cs
+      //  :19973 门链 `!flag2 && !flag4 && owner == Main.myPlayer && (tileCollide |
+      //  flag5) && position != oldPosition`）——本仓 owner 域 = netPuppet 取反（本机
+      //  弹 netPuppet=false 恒真=零变化;远端傀儡弹 true=不扫,联机房此前缺门 → 远端
+      //  弹在本端重复触发板/地雷）。objType 3 白名单面（:17195 netMode!=1 门）原版
+      //  无 owner 门,不在此列。
+      const isMine = !p.netPuppet;
       // SW-AP1 2026-09-05：高尔夫球 AI_149 Moving 门（Projectile.cs:20477-20484）——
-      //  仅 BallState.Moving 拍消费 Collision.SwitchTiles(objType 4)。同行另两门恒真
-      //  不移植：owner==Main.myPlayer 单机恒真;FPD[135]（tile id 怪读作 proj 表键,
-      //  ProjectileID.cs:297-373 84 对无 135 → null → !HasValue 恒过）。静球
+      //  仅 BallState.Moving 拍消费 Collision.SwitchTiles(objType 4)。同行另一门恒真
+      //  不移植：FPD[135]（tile id 怪读作 proj 表键,ProjectileID.cs:297-373 84 对无
+      //  135 → null → !HasValue 恒过）。静球
       //  （Resting/OutOfBounds,含球座待发 ai[1]==-1 早退帧）不得触发板/地雷/间歇泉/
-      //  垫板,但静置在带期间以 silent 扫描预热锁存 = 原版 :3356 oldPosition 全格带
-      //  排除语义——Resting→Moving 首拍 oldPosition 仍在板格盒内不重触发,离带
+      //  垫板,但静置在带期间以 silent 扫描预热锁存 = 原版 :3323 oldPosition 排除带
+      //  语义——Resting→Moving 首拍 oldPosition 仍在板格盒内不重触发,离带
       //  再入才触发（静球被击打原地首拍不响板,GolfHelper 语义）
       if (p instanceof GolfBall && p.ballState !== BallState.Moving) {
-        this.switchTilesScan(projectileSwitchBox(p, vid), 4, latch, pressed, true);
+        if (isMine) this.switchTilesScan(projectileSwitchBox(p, vid), 4, latch, pressed, true);
         continue;
       }
       const isObj3 = kind === 'boulder' || SWITCHTILES_OBJTYPE3_PROJS.has(vid);
       // SW-AQ1 2026-09-05：oldPosition 上报弹（GrenadeProj/Arrow/Dart/RollingBoulder/
       //  DirtBallProj/ClusterFragmentProj/BombSkeletronPrimeProj 位移段前置位
       //  Entity.oldX/oldY = 原版 Update :17118 `oldPosition = position` 镜像）→
-      //  SwitchTiles 内部新旧位判定走原版逐字路径（:3346-3353/:3356,见
+      //  SwitchTiles 内部新旧位判定走原版逐字路径（:3314/:3323,见
       //  switchTilesScan old 分支注）;未上报弹 latch 口径不变。
       //  :19974 尾门 `!flag2 && … && position != oldPosition`：flag2 臂=子步扫路径
       //  （:17897 子步循环内置位 + :17899 每子步自扫——本仓无该管线,单次聚合扫
@@ -23760,7 +23858,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const box4 = projectileSwitchBox(p, vid);   // SW-AR1 2026-09-05 同上
       if (oldBox && oldBox.x === box4.x && oldBox.y === box4.y
         && oldBox.w === box4.w && oldBox.h === box4.h) continue;   // :19974 position==oldPosition
-      this.switchTilesScan(box4, 4, latch, pressed, false, oldBox);
+      if (isMine) this.switchTilesScan(box4, 4, latch, pressed, false, oldBox);   // SW-AM2:owner 门
     }
     for (const key of pressed) latch.add(key);
     // 离带复位:仅清"压板/垫板"键(210/443 无 latch 语义,键不会入 pressed——
@@ -24640,6 +24738,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  980/1005/1007/1048/1049/1073/1078/1091）不经 explodeAt 结算。 */
   static readonly EXPLODE_TRAP_PROJS = new Set([108, 1002]);
 
+  /** SW-AM2 2026-09-05（蓝F3）：SelfHurtPlayers pvp 判集（Projectile.cs:15124
+   *  `bool flag = !hostile && type != 949` 的本 face 有限域展开）。hostile=true ∩
+   *  爆炸 face（explodeAt/bit7 weaponId 分派域）= {75,102,108,164,1002}——1457
+   *  SetDefaults :1555/:1903/:1961/:2534/:9531 逐值核,仓库 vanilla-projectiles.json
+   *  hostile 位对全爆炸域 54 型对账一致（1457 提取器重跑后未见漂移）;其余爆炸弹
+   *  （28/29/30/37/397/470/516/517/519/566/588/637/716/718/773/133-144/776-810/
+   *  862/863/930/1086/1087/1088）非 hostile → pvp=true。★1456 特判
+   *  BombsHurtPlayers :13964-13967（仅 108/1002 pvp=false）已随函数退役（1457 全树
+   *  零命中）——164 归类反转（地雷自伤/被炸 pvp true→false）=本批可见修正,75/102
+   *  同批入表。949（恶运火把,aiStyle 184 非 hostile）按 :15124 字面补护栏——不经
+   *  爆炸 face 恒不达,收录为逐字。集合语义仅在爆炸 face 域内承诺 ≡ 原式。 */
+  static readonly SELF_HURT_NON_PVP_PROJS = new Set([75, 102, 108, 164, 1002, 949]);
+
   /** SW-AC1 2026-09-04（S1 备案"kb 方向近似"清偿）：爆炸弹 Kill 态弹体朝向 =
    *  Projectile.direction（Update :17121-17132 AutomaticallyChangesDirection 自动面
    *  `velocity.X < 0 → -1 else 1`——0 与正同落 else 档 +1）。Damage() :13652
@@ -25030,7 +25141,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     const p = this.player;
-    // 爆炸炸死玩家的死亡归因 = ByProjectile（BombsHurtPlayers :13974）：投射物名
+    // 爆炸炸死玩家的死亡归因 = ByProjectile（1457 SelfHurtPlayers :15131;1456
+    //  BombsHurtPlayers :13974 同位,SW-AM2 2026-09-05 引注校准）：投射物名
     // 取 Lang.GetProjectileName(projType)——掷出的炸弹/雷管/手雷按型号、电路炸药=108
     // Explosives、地雷=164 Landmine、链爆=108。此前漏设 → 死因残留上一次受击来源
     // （如已反杀的洞穴蝙蝠,"凶手是洞穴蝙蝠"串归因 bug 即此）。
@@ -25065,46 +25177,71 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  selfHurtSweaterCap）。trap 真值源 = Projectile.trap ∩ 本 face =
       //  EXPLODE_TRAP_PROJS {108,1002};sweater 旗 = equipStats.deadMansSweater
       //  （胸甲 vi_5007 置位,Player.ts computeEquipStats）。★弹型次序：cap 在
-      //  DamageVar【后】（:15118 → :15131-15134）
+      //  DamageVar【后】（:15118 → :15119-15122,SW-AM2 2026-09-05 行号校准）
       const selfCapped = Game.selfHurtSweaterCap(selfRolled,
         Game.EXPLODE_TRAP_PROJS.has(projId), p.equipStats.deadMansSweater);
-      // ★FR2-F：自炸伤害走统一漏斗——非 quiet Hurt 面（msg117/飘字/voice 单点承载），
-      // 远端经 damagePlayer 尾通用通道可见本次受击（原版爆炸族 SendPlayerHurt 覆盖自伤）
-      this.damagePlayer(selfCapped, cx, cy);
+      // SW-AM2 2026-09-05（蓝F3）：pvp 参按 :15124 `!hostile && type != 949` 对齐——
+      //  非 hostile 炸弹（28 等）自伤 pvp=true（8t 无敌帧/pvpDeath 计数 = Player.damage
+      //  pvp 语义,原版 Hurt :15132 第 4 参同值）,hostile 弹（SELF_HURT_NON_PVP_PROJS
+      //  表内 5 项,旧 1456 特判面）pvp=false。★FR2-F：自炸伤害走统一漏斗（msg117/
+      //  飘字/voice 单点承载）——pvp=true 时 damagePlayer 尾 !pvp 通道不发,GA4 显式
+      //  reportPlayerHurt 补位（同 bit7 半边先例）;pvp=false 仍走通用通道
+      const selfPvp = !Game.SELF_HURT_NON_PVP_PROJS.has(projId);
+      const hpBeforeSelfHurt = p.hp;
+      if (this.damagePlayer(selfCapped, cx, cy, undefined, false, selfPvp) > 0) {
+        if (selfPvp) this.reportPlayerHurt(hpBeforeSelfHurt, cx, false);
+      }
     }
-    // BombsHurtPlayers 跨端半边（Projectile.cs:13944-13981）：原版各端只结算【本地
-    // 玩家】被炸（Main.LocalPlayer）——爆炸天然 victim-settles。远端代理在本端无爆炸
-    // 模拟,由爆炸端按同盒广播 msg44 bit7 意向、被炸端本地结算。★原版爆炸无
-    // hostile/InOpposingTeam 门（:13948 无 hostile 检查）——pvp 参仅 108/1002 为
-    // false（:13964-13967）其余恒 true;故 bit7 走非 PvP 门,服务器亦放行非 pvp 房。
-    // ★SW-R3 2026-09-03（F-1）：豁免集在原版作用于【调用侧】（1456 :67386 一处
-    //  调用点同门）——被炸端本地结算与爆炸端意向同源于该门,故广播随门同豁免
-    //  （否则远端被炸而本地零伤=两端分叉）。
+    // 跨端半边（SW-AL2 2026-09-05 F-2 重基线：Damage_PVP 脸,Projectile.cs
+    //  :14637-14785）：原版 Damage() :12521-12525 `if (owner == Main.myPlayer)`
+    //  伤害方结算 Damage_PVP——远端受害者由【投弹者客户端】算伤并 SendPlayerHurt
+    //  （:14747,值同步）,非受害端 SelfHurtPlayers 自结算。1457 wiring 爆炸弹
+    //  108/164/1002 均以 Main.myPlayer 生成（Wiring.cs:2043/:3093,WorldGen.cs:
+    //  49178）非 owner 255 ⇒ 本 face 全弹域=PVP 脸（SW-AM1 旧"沿用 SelfHurtPlayers
+    //  :15118 式"退役）。门组 1:1——:14639 `damage<=0||!Main.player[myPlayer]
+    //  .hostile` 早退 + :14646 victim `dead/immune/!hostile/team` 门;pvpAllowed
+    //  =本仓房策略等价物（RoomPolicy.pvpAllowed——非 PvP 房 server 剥 hostile 位
+    //  →victim.hostile 恒假,双保险同向）;immune=getProxyPvpImmuneRemaining>0
+    //  （2026-08-30 攻端门禁契约,⇔ :14646 player.immune）。DV :14718
+    //  `Main.DamageVar(damage*mult, Main.player[owner].luck)`=投弹者本地活 luck
+    //  【正向】——mult 面（:14501-14533 IsARocket×2/mine×3）爆炸族 Kill 拍
+    //  timeLeft==3/速度门不触=1,damage 即裸伤;FixedSelf 表(:15113)/sweater cap
+    //  (:15131) 均 SelfHurtPlayers 专属,PVP 脸皆不吃（本地面自伤半边原样保留）。
+    //  flags bit1=dmgPreRolled（protocol.ts msg44 注/PROTO_VER 注 j）——收端据此
+    //  直读不再掷;单机/net 未激活不进本支=本地面零变化。
+    //  ★SW-AU1 2026-09-05 双脸裁决（拓扑考古,netApplyStrikePlayer bit7 同批注）：
+    //  上段"非 owner 255"前提仅单机成立——MP 面 Wiring.ExplodeMine(:3087)
+    //  与 WorldGen 桶爆(:49174)都挂 `Main.netMode != 1`（客户端不 spawn）,而服务端
+    //  Main.myPlayer≡255 ⇒ owner=255;case141 电路炸药(:2042,HitWireSingle 内无
+    //  netMode 门)=各端自持副本 owner=各自 myPlayer。故 hostile 陷阱的跨端受害对
+    //  在原版【不经 PVP 脸】（服务端 :14639 入口 Main.player[255].hostile=false
+    //  即死;客户端 owner≠myPlayer 不进 :12522）,首结算脸=受害端自持 SelfHurtPlayers
+    //  （:71787 flag5 owner==255/myPlayer 臂,pvp=:15124 !hostile=false）,本仓由受害端
+    //  本地自伤半边同构承载;PVP 脸若达（hostile 房各端 108 副本互炸）恒为受害端
+    //  免疫窗吸收的后到域。本 face 对 {108,164,1002} 的广播=冗余载波（受端本地半边
+    //  先落/immune 吸收,非双扣）,pvp 旗由收端表极性还原≡首结算脸极性=裁决正确。
+    //  值域残留债（AM1/AL2 已案）：陷阱跨端受击原版吃 sweater cap（108/1002 trap=true
+    //  :15131）与受害端 -luck（:15118）,本 face 发送侧裸伤无 cap（108 测试钉"不截
+    //  300"为 PVP 脸口径）——受端本地半边先落时由其补齐,仅发送侧独占触发流欠 cap。
+    //  ★SW-R3 2026-09-03（F-1）：RocketsSkip 豁免集在原版作用于【调用侧】
+    //  （:71786-71789 flag4）——广播随门同豁免（否则远端被炸而本地零伤=分叉）。
+    //  getGood 双落位（:71787 flag5 第三臂=FTW 世界受害端 SelfHurtPlayers 亦跑,
+    //  与本 face immune 窗吸收后到者）+混合版新发旧收瞬态=备案,不双发。
     if (!ROCKETS_SKIP_DAMAGE_FOR_PLAYERS.has(projId) && this.net?.active) {
+      const pvpFace = damage > 0 && this.player.hostile === true
+        && this.net.policy?.pvpAllowed === true;
       for (const rpEnt of this.remotePlayerProxies) {
         const rp = rpEnt as Player;
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
         if (slot === undefined || rp.dead) continue;
         if (Math.abs(rp.cx - cx) < hb + rp.w / 2 && Math.abs(rp.cy - cy) < hb + rp.h / 2) {
-          // direction(:13951)=玩家在弹右→1 否则 -1（击退朝远离爆炸侧）
-          // SW-AM1 2026-09-05（S1/AC1 备案清偿③）：远端半边改携【掷后终伤】（值同步）——
-          //  vanilla Damage() :12521 `if (owner == Main.myPlayer)` 伤害方结算 +
-          //  Damage_PVP :14718 `Main.DamageVar(damage*mult, Main.player[owner].luck)`
-          //  掷后 :14747 SendPlayerHurt 值同步（多人伤害协议=值同步非种子同步）。
-          //  bit7 支公式沿用 SelfHurtPlayers :15118（-victim.luck,与本地半边同式同参,
-          //  SW-T1 锚点不动）——victim luck 取本端 msg16 镜像（RemotePlayerState.luck,
-          //  缺尾段缺省 0=分布中心回退;镜像滞后一层=vanilla 伤害方 Main.player[远端]
-          //  代理同层近似）。sweater cap 同面发送侧算毕（:15131-15134,穿 victim 自己
-          //  的 deadMansSweater——msg5 盔甲镜像→代理 equipStats,同 netPvpOwnerCtx
-          //  frostBurn 先例）;序=DV→cap（:15118→:15131）与本地半边一致。
-          //  flags bit1=dmgPreRolled（protocol.ts msg44 注/PROTO_VER 注 j）——收端据此
-          //  直读不再掷;单机/net 未激活不进本支=本地面零变化（本地半边已掷原样）。
-          const rpLuck = -(this.net.players.get(slot)?.luck ?? 0);
-          const rpRolled = Math.max(1, damageVarRoll(
-            FIXED_SELF_DAMAGE_FOR_PLAYERS[projId] ?? damage, rpLuck));
-          const rpCapped = Game.selfHurtSweaterCap(rpRolled,
-            Game.EXPLODE_TRAP_PROJS.has(projId), rp.equipStats.deadMansSweater);
-          this.net.sendStrikePlayer(slot, rpCapped, rp.cx < cx ? -1 : 1, 0, projId || 108,
+          if (!pvpFace) continue;                                                 // :14639 早退域
+          // direction(:14681-14689)=玩家在弹右→1 否则 -1（击退朝远离爆炸侧）
+          if (!rp.hostile) continue;                                              // :14646 !player.hostile
+          if (this.player.team !== 0 && this.player.team === rp.team) continue;   // :14646 team 门
+          if (this.net.getProxyPvpImmuneRemaining(slot) > 0) continue;            // :14646 immune 门
+          const rolled = Math.max(1, damageVarRoll(damage, this.player.luck));    // :14718 投弹者 luck 正向
+          this.net.sendStrikePlayer(slot, rolled, rp.cx < cx ? -1 : 1, 0, projId || 108,
             0x80 | 0x02);
         }
       }
@@ -25549,27 +25686,38 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  单函数 :15131-15134）——trap 真值按弹查表（773 ∉ {108,1002} → 分支惰性,
       //  结构照跑与 explodeAt 玩家段同式）
       // ★FR2-F：同上走统一漏斗（msg117/飘字/voice 单点）
+      // SW-AU1 2026-09-05（双脸裁决,verdict b 局部修）：补 pvp 参+GA4 显式回执——
+      //  773 非 hostile 且 ≠949 ⇒ :15124 flag=true（pvp:true,Hurt :38674 8t 免疫档
+      //  +pvpDeath 计数+Hurt 内 SendPlayerHurt :38664 携 pvp 位）,与 explodeAt 本地
+      //  自伤半边 selfPvp 同式（!SELF_HURT_NON_PVP_PROJS.has）——此前漏参=pvp 缺省
+      //  false,与同 face 的 explodeAt 半边自相分歧（远端只见非 pvp 广播/pvpDeath 漏计）
+      const selfPvp = !Game.SELF_HURT_NON_PVP_PROJS.has(773);
       const selfBase = damageVarRoll(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, -p.luck);
-      this.damagePlayer(Game.selfHurtSweaterCap(selfBase,
-        Game.EXPLODE_TRAP_PROJS.has(773), p.equipStats.deadMansSweater), exPx, exPy);
+      const hpBeforeScarabSelf = p.hp;
+      if (this.damagePlayer(Game.selfHurtSweaterCap(selfBase,
+        Game.EXPLODE_TRAP_PROJS.has(773), p.equipStats.deadMansSweater),
+      exPx, exPy, undefined, false, selfPvp) > 0) {
+        if (selfPvp) this.reportPlayerHurt(hpBeforeScarabSelf, exPx, false);
+      }
     }
     if (this.net?.active) {
+      // SW-AL2 2026-09-05（F-2）：同 explodeAt 远端半边改 Damage_PVP 脸
+      //  （:14637-14785——门组/投弹者 luck 正向/sweater 不吃,773 玩家弹
+      //  owner==myPlayer 同域;SW-AM1 旧 SelfHurtPlayers :15118 式退役,
+      //  详见 explodeAt 同批总注）。773 ∉ FixedSelf 表 ⇒ damage 即裸伤。
+      const pvpFace = damage > 0 && this.player.hostile === true
+        && this.net.policy?.pvpAllowed === true;
       for (const rpEnt of this.remotePlayerProxies) {
         const rp = rpEnt as Player;
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
         if (slot === undefined || rp.dead) continue;
         if (inBox(rp.cx, rp.cy, rp.w, rp.h)) {
-          // SW-AM1 2026-09-05（S1/AC1 清偿③）：同 explodeAt 远端半边——掷后终伤值同步
-          //  （SelfHurtPlayers :15118 式,-victim.luck 取 msg16 镜像 RemotePlayerState.luck,
-          //  缺省 0 回退）+ sweater cap 发送侧算毕（:15131-15134,victim 自己的
-          //  deadMansSweater 经 msg5 代理镜像;773 ∉ EXPLODE_TRAP_PROJS → 分支惰性,
-          //  结构照跑与本地半边 25168-25169 同式）;flags bit1=dmgPreRolled
-          //  （protocol.ts msg44 注/PROTO_VER 注 j）——收端据此直读不再掷。
-          const rpLuck = -(this.net.players.get(slot)?.luck ?? 0);
-          const rpCapped = Game.selfHurtSweaterCap(
-            Math.max(1, damageVarRoll(FIXED_SELF_DAMAGE_FOR_PLAYERS[773] ?? damage, rpLuck)),
-            Game.EXPLODE_TRAP_PROJS.has(773), rp.equipStats.deadMansSweater);
-          this.net.sendStrikePlayer(slot, rpCapped,
+          if (!pvpFace) continue;                                                 // :14639
+          if (!rp.hostile) continue;                                              // :14646
+          if (this.player.team !== 0 && this.player.team === rp.team) continue;   // :14646
+          if (this.net.getProxyPvpImmuneRemaining(slot) > 0) continue;            // :14646
+          this.net.sendStrikePlayer(slot,
+            Math.max(1, damageVarRoll(damage, this.player.luck)),                 // :14718
             rp.cx < exPx ? -1 : 1, 0, 773, 0x80 | 0x02);
         }
       }
@@ -25851,8 +25999,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  389→closing:true=关——怪物攻开的门(389)玩家右键即可复原(vanilla 同语义;
    *  DoorOpeningHelper 的自动关只认【helper 自己开的】门 _ongoingOpenDoors,
    *  怪物开的门 vanilla 也不自动关——玩家手动关是唯一复原通道)。成功消费右键,
-   *  失败(结构残缺/占用)不消费可重试;手动开关不入 updateTallGateAuto 的
-   *  openTallGates 跟踪(vanilla 右键开不进 _ongoingOpenDoors 同语义) */
+   *  失败(结构残缺/占用)不消费可重试;手动开关不入 DoorOpeningHelper 的
+   *  _ongoingOpenDoors 跟踪(vanilla 右键开不进 _ongoingOpenDoors 同语义) */
   private toggleTallGate(x: number, y: number, closing: boolean) {
     const st = this.world.store;
     if (!shiftTallGate(st, x, y, closing, (n: string) => this.sfx.play(n as SfxName))) return;
@@ -33340,7 +33488,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** knockback：击退段透传位（Player.damage :37908-37912 ——hitDirection=0 型环境伤
    *  （黑暗/祭坛反噬）传 false 保持零击退原式；缺省 true 不改既有调用方） */
   /** 返回实际扣除 HP（0=未受伤——damage() 返回值直通;爆炸/近战 PvP 接收端按此
-   *  决定 StatusPlayer debuff 与受击音,对齐原版 Hurt>0 语义 :13979） */
+   *  决定 StatusPlayer debuff 与受击音,对齐原版 Hurt>0 语义 :15132-15134,
+   *  SW-AM2 2026-09-05 引注校准——旧 :13979 系 1456 行号） */
   /** ★清零批·受击域 A1/A2/A3（2026-08-31）：opts 为环境伤族接漏斗新增透传位
    *  （hitDir/floatDealt/floatColor/noLocalFloat——语义见 GameHooks.damagePlayer 注）。 */
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy,
@@ -37348,96 +37497,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  // ================= 高门自动通行（DoorOpeningHelper.cs 1:1 简化） =================
-  // 玩家 hitbox 与关闭高门(388)矩形 (16×96) 相交且垂直容纳 → 自动 ShiftTallGate 开门；
-  // 离开门区（矩形外扩 1px）→ 自动关闭。仅玩家（NPC/敌怪不触发——原版同）。
-  private openTallGates = new Map<number, number>(); // 锚点 idx → 开门时刻（tick）
-  /** R8② velocity-alone 窗剩余帧（DoorOpeningHelper._timeWeCanOpenDoorsUsingVelocityAlone :232） */
-  private tallGateVelWindow = 0;
-  private updateTallGateAuto() {
-    const st = this.world.store;
+  // ================= 门自动开关（DoorOpeningHelper.cs 1:1 全量,SW-AS1 2026-09-05） =================
+  // 普通门(10/11)+高门(388/389)统一走 DoorOpeningHelper;旧 openTallGates 简化面退役
+  // （差异清偿:扫描区 ±2px 垫→原版 Union/ToTileCoordinates 精确式;站定门三量写死→
+  //  原版 dir==0&&vx==0 入口门;偏好写死 enabled→消费 Options.doorOpeningPreference
+  //  （Settings UI 三档,R8① 清偿）;滚轮鞋 3f 钳补建(:24534-24540,R8② 登记差异清偿);
+  //  p.dead 早退删（原版无此门）。R6 贴边带/R7 失败放弃跟踪/几何门三案行为锁迁
+  //  tests/tallgate-frame-repair.test.ts 新驱动。
+  private doorHelper = new DoorOpeningHelper();
+  /** Player.cs:24897 `if (whoAmI == Main.myPlayer) doorHelper.Update(this)`（本仓单本地玩家）。
+   *  注入窗先于 Update（原版 DashMovement :21555 在 Player.Update 内先于 :24897）,
+   *  窗递减在 helper.Update 尾(:246-249)——原版时序=注入→关扫→开扫→递减。 */
+  private updateDoorHelperAuto() {
     const p = this.player;
-    if (p.dead) return;
-    const CLOSED = TILE_BY_KEY['v_388_tall_gate_closed'];
-    const OPEN = TILE_BY_KEY['v_389_tall_gate_open'];
-    if (!CLOSED || !OPEN) return;
-    // 玩家覆盖格 ±1 扫关闭高门 → 自动开
-    // ★vanilla LookForDoorsToOpen 入口门(DoorOpeningHelper.cs:305-307):无方向输入
-    //  且 vx==0 → 整帧跳过开扫(站定不重开——右键关门后站在门口不被下一 tick 立即
-    //  弹开;持方向键贴门/被击退滑入仍照常开)。关门扫(离开检测)原版即分立方法
-    //  LookForDoorsToClose,不受此门。
-    const autoOpenAllowed = this.input.downAction('Left') || this.input.downAction('Right') || p.vx !== 0;
-    // ★R8① 偏好档（红蓝台账）：原版 PreferenceSettings 缺省=EnabledForEverything
-    //  (DoorOpeningHelper.cs:216) → ShouldTryOpeningDoors 恒 true(:252-260)，本仓无
-    //  偏好开关即「全开」缺省档等价；CyclePreferences 三态循环(Disabled↔Everything↔
-    //  GamepadOnly :262-276)无设置 UI 对应物，登记差异不移植。
-    // ★R8② velocity-alone 窗（红蓝台账）：Player.cs:21555 在 DashMovement 内 dash>0
-    //  每帧注入 num17*3（dash2=30 其余 20 → 90/60 帧窗；dash6 终帧 30 单帧微差登记），
-    //  dash>0 含就绪/冷却态（dash=dashType 粘滞 :21214-21218）→ 本仓对应事件钩=
-    //  equipStats.dash 装备聚合 + dash6 坐骑(:21208-21210 MOUNT_DASH6_TYPES)，按原式
-    //  接线并逐帧递减(:246-249)。窗的消费点=开检盒/扫描盒 X 前移 num3
-    //  （GetPlayerInfoForOpeningDoor :325-330 无输入且窗尽 → 速度贡献清零）；
-    //  入口门(:302-305) vx≠0 照常过（窗不参与，与站定门锁一致）。
-    //  GetAutoDoorVelocityContribution(:24534-24539) 滚轮坐骑 |vx|<3→3 钳未建模，登记微差。
+    // ★R8② velocity-alone 注入窗:Player.cs:21555 DashMovement dash>0 每帧 num17*3
+    //  （dash2=30 其余 20 → 90/60 帧窗,dash6 终帧 30 单帧微差登记）;dash>0 含就绪/
+    //  冷却态（dash=dashType 粘滞 :21214-21218）→ 本仓事件钩=equipStats.dash 装备聚合
+    //  + dash6 坐骑(:21208-21210 MOUNT_DASH6_TYPES),按原式每帧刷新。
     const eqDash = p.equipStats?.dash ?? 0;   // 测试桩玩家无 equipStats/mount → 视为无 dash
     const dash6Mount = p.mount?.active === true && MOUNT_DASH6_TYPES.has(p.mount.type);
-    if (eqDash !== 0 || dash6Mount) this.tallGateVelWindow = (eqDash === 2 ? 30 : 20) * 3;   // :21555
-    else if (this.tallGateVelWindow > 0) this.tallGateVelWindow--;                          // :246-249
-    if (autoOpenAllowed) {
-      // num3 前移(:330-339)：value=输入±1+速度贡献；num3=sign·ceil(|value|)
-      const inputDir = (this.input.downAction('Right') ? 1 : 0) - (this.input.downAction('Left') ? 1 : 0);
-      const velContrib = (inputDir === 0 && !(this.tallGateVelWindow > 0)) ? 0 : p.vx;   // :325-329
-      const value = inputDir + velContrib;
-      const num3 = Math.sign(value) * Math.ceil(Math.abs(value));
-      const sbL = Math.min(p.x, p.x + num3) - 2, sbR = Math.max(p.x + p.w, p.x + p.w + num3) + 2;
-      const tx0 = Math.floor(sbL / TILE), tx1 = Math.floor(sbR / TILE);
-      const ty0 = Math.floor((p.y - 2) / TILE), ty1 = Math.floor((p.y + p.h + 2) / TILE);
-      for (let x = tx0; x <= tx1; x++) {
-        for (let y = ty0; y <= ty1; y++) {
-          if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== CLOSED) continue;
-          // ★2026-09-03 红蓝定谳——补 TryOpenDoor 几何门(TallGateOpeningInfoProvider
-          //  :172-192):门盒=(锚X*16,锚Y*16,16,80),gravDir=1 → 高度+16(底外延一格,
-          //  本仓无重力翻转恒取此支);须与【收缩盒】(GetPlayerInfoForOpeningDoor
-          //  :322-324 hitbox.Y+=1/H-=2)相交且玩家【垂直全含】于门盒。
-          //  曾缺此门=扫描命中即开——站门顶(脚下被开洞)/半身对门也误开。
-          //  Rectangle.Intersects(:174-176)=严格不等式,贴边不算相交
-          const anchorY = y - tallGateRowOf(st.frameY[st.idx(x, y)]);   // ProvideInfo :158 行归一
-          const gateL = x * TILE, rectTop = anchorY * TILE, rectH = 6 * TILE;
-          const hbTop = p.y + 1, hbBottom = p.y + p.h - 1;
-          const hbLeft = p.x + num3;                        // :332 hitbox.X += num3（R8②）
-          const intersects = hbLeft < gateL + TILE && hbLeft + p.w > gateL
-            && hbTop < rectTop + rectH && hbBottom > rectTop;
-          const contained = hbTop >= rectTop && hbBottom <= rectTop + rectH;
-          if (!intersects || !contained) continue;
-          const anchor = shiftTallGate(st, x, y, false, (n: string) => this.sfx.play(n as SfxName));
-          if (anchor) this.openTallGates.set(st.idx(anchor[0], anchor[1]), this.tickCount);
-        }
-      }
+    if (eqDash !== 0 || dash6Mount) {
+      this.doorHelper.allowOpeningDoorsByVelocityAloneForATime((eqDash === 2 ? 30 : 20) * 3);   // :21555
     }
-    // 已开门离开检测（LookForDoorsToClose :278-289 + TallGate.TryCloseDoor :189-213）：
-    // 门区=闭足印 (X*16-1,Y*16,18,80)（:198 Inflate(1,0)）。
-    // ★R6 贴边带（红蓝台账）：判定=Rectangle.Intersect(:200)+「Width>0||Height>0」
-    // (:201-204)——两轴取 max/min，right<left||bottom<top 才 Empty；单轴零宽接触
-    // (贴边)交 0×n 矩形仍算 StillInDoorArea 不关。曾用严格 AABB(<)把贴边帧判为
-    // 已离开=提前关门。
-    // ★R7 失败档（红蓝台账）：TryCloseDoor 非 StillInDoorArea 一律自 _ongoingOpenDoors
-    // 移除(:281-288)——ClosedDoor=关成；DoorIsInvalidated=门被拆/换型(:193-196)；
-    // FailedToCloseDoor=结构残缺(ValidateTileSquare WorldGen.cs:52201)或闭足印被活体
-    // 堵(:52208-52212 EmptyTile ignoreTiles=true 只查玩家/NPC 占位——本仓 shiftTallGate
-    // 未建模该臂，登记差异)→ 全部放弃跟踪不重试。曾对 null 保持跟踪=重试语义。
-    for (const ai of Array.from(this.openTallGates.keys())) {
-      const ax = ai % st.w, ay = Math.floor(ai / st.w);
-      if (st.get(ax, ay) !== OPEN) { this.openTallGates.delete(ai); continue; }   // DoorIsInvalidated
-      const ixL = Math.max(ax * TILE - 1, p.x);
-      const ixR = Math.min((ax + 1) * TILE + 1, p.x + p.w);
-      const ixT = Math.max(ay * TILE, p.y);
-      const ixB = Math.min((ay + 5) * TILE, p.y + p.h);
-      const inDoorArea = ixR >= ixL && ixB >= ixT && (ixR > ixL || ixB > ixT);   // R6: 单轴零宽仍算在门区
-      if (!inDoorArea) {
-        shiftTallGate(st, ax, ay, true, (n: string) => this.sfx.play(n as SfxName));
-        this.openTallGates.delete(ai);   // R7: ClosedDoor/FailedToCloseDoor 皆移除跟踪
-      }
-    }
+    this.doorHelper.preference = options.data.doorOpeningPreference;
+    this.doorHelper.update(this.world.store, {
+      x: p.x, y: p.y, w: p.w, h: p.h,
+      vx: p.vx,
+      gravDir: p.gravDir,                                       // (int)gravDir :321
+      controlLeft: p.inputLeft, controlRight: p.inputRight,     // controlLeft/Right（fixedUpdate 装配面 :7402-7403）
+      velocityContribution: p.getAutoDoorVelocityContribution(),  // :24534-24540
+      usingGamepad: false,                                      // PlayerInput.UsingGamepad（本作无手柄,:10902 同口径）
+    }, {
+      sfx: (n: string) => this.sfx.play(n as SfxName),
+      blocked: (bx, by) => this.overlapsEntity(bx, by),         // CloseDoor EmptyTile(ignoreTiles:true) 臂
+    });
   }
 
   /** 火把锚定检查：格 (x,y) 变化后，检查其四邻与自身的火把是否失去支撑 → 掉落 */

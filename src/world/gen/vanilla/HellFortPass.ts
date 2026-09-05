@@ -48,6 +48,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 // ★1457 对齐档 2：门落点/塌墙 helper 从 1457 语义存档即插接线（存档自包含副本,
 //   与本文件 placeDoorHF/placeTileDoorHF/solidTileHF 同构,勿双向耦合）
 import { hellFortAttemptDoorAt, hellFortPlaceDoorLoop, hellFortCanCrumbleWall, hellFortAttemptCrumbleWall, hellFortSquareDoorFrame } from './rollback1457/HellFort.1457';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
 import { registerChest, findLiveChest } from '../ChestRegistry';   // ★IIII102c 洞数组 sink
 import type { SparseChestSink } from '../ChestRegistry';
 
@@ -202,6 +203,10 @@ const inB5 = (st: TileStore, x: number, y: number): boolean =>
  *  （此前"恒成功不登记"=纯登记债:sink 缺 2 条地狱梳妆台,DeadMans 候选不受影响
  *  ——type 88 过不了 IsAGoodSpot 的 21 门,零掷）。 */
 function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: number, chests?: import('./BuriedChestsPass').ChestSink): boolean {
+  // ★IIIII179：PlaceTile(x,y,14/87/88/89,forced:false)→case→Place3x2（cs:52097）受理序
+  //  预清（cs:59966）——家具非实心→析取恒过,无型拒/drip/液体拒支⇒惰性即清;位在垫界
+  //  /区空/底检前=序言位。受理覆写;梳妆台 Chest 槽烧注分支按原版序在 flag2 终判前,不动。
+  placeTilePrologueClear(st, x, y);
   if (!inB5(st, x, y)) return false;
   let ok = true;
   for (let i = x - 1; i < x + 2; i++) {
@@ -226,6 +231,8 @@ function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: nu
 /** Place2x1（cs:47371,工作台 18）：x..x+1 × y 净空 + SolidTile2 两列(y+1)；
  *  frameX=36*style+col*18,frameY=0。 */
 function place2x1HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,18)→case18→Place2x1（cs:47371）受理序预清（cs:59966）。
+  placeTilePrologueClear(st, x, y);
   if (st.flags[st.idx(x, y)] || st.flags[st.idx(x + 1, y)]) return false;
   if (!solidTile2HF(st, x, y + 1) || !solidTile2HF(st, x + 1, y + 1)) return false;
   const fx = 36 * style;
@@ -237,6 +244,9 @@ function place2x1HF(st: TileStore, x: number, y: number, tile: number, style: nu
 /** Place1x2（cs:46665,椅 15）：SolidTile2(x,y+1) 且 (x,y-1) 空；
  *  frameY=40*style+{0,18},frameX=0。 */
 function place1x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,15)→case15→Place1x2（cs:46665）受理序预清（cs:59966）——
+  //  原 case15 臂亦不查 (x,y) 本体活性,预清外显即椅位残型归零（rig 15×34 组）。
+  placeTilePrologueClear(st, x, y);
   if (!solidTile2HF(st, x, y + 1) || st.flags[st.idx(x, y - 1)]) return false;
   const fy = style * 40;
   st.setTileSilent(x, y - 1, tile, 0, fy);
@@ -247,6 +257,8 @@ function place1x2HF(st: TileStore, x: number, y: number, tile: number, style: nu
 /** Place1x2Top（cs:46694,灯笼 42）：(x,y-1) 活性+tileSolid+非 solidTop 且
  *  (x,y+1) 空；frameY=36*style+{0,18},frameX=0。 */
 function place1x2TopHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,42)→case42→Place1x2Top（cs:46694）受理序预清（cs:59966）。
+  placeTilePrologueClear(st, x, y);
   const up = st.idx(x, y - 1);
   const dUp = TILE_DEFS[st.type[up]];
   if (!st.flags[up] || !dUp || !dUp.solid || dUp.platform) return false;
@@ -260,6 +272,8 @@ function place1x2TopHF(st: TileStore, x: number, y: number, tile: number, style:
 /** Place1xX（cs:39203,落地灯 93）：高 3（92 为 6）,格子净空（93 另需无液体）
  *  + SolidTile2(x,y+1)；frameY=3*style*18+j*18,frameX=0。 */
 function place1xXHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,93/92)→case92/93/453→Place1xX（cs:39203）受理序预清。
+  placeTilePrologueClear(st, x, y);
   const hgt = 3;
   let ok = true;
   for (let j = y - hgt + 1; j <= y; j++) {
@@ -274,6 +288,9 @@ function place1xXHF(st: TileStore, x: number, y: number, tile: number, style: nu
 /** Place2x2（cs:51352,烛台 100）：x-1..x × y-1..y 净空 + 逐列
  *  (i,y+1) 活性且（SolidTile2 或 tileTable）；frameX=col*18,frameY=style*36+row*18。 */
 function place2x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,100)→case100→Place2x2（cs:51352）受理序预清（cs:59966）
+  //  （rig 100×22 组）。
+  placeTilePrologueClear(st, x, y);
   if (!inB5(st, x, y)) return false;
   for (let i = x - 1; i < x + 1; i++) {
     for (let j = y - 1; j < y + 1; j++) {
@@ -291,6 +308,9 @@ function place2x2HF(st: TileStore, x: number, y: number, tile: number, style: nu
  *  + SolidTile2 两列(y+1)；雕像 55 样式绕回（style 49 无绕回）；
  *  frameX=style*36(+54 绕回列)+{0,18},frameY=j*18。 */
 function place2xXHF(st: TileStore, x: number, y: number, tile: number, style: number, hgt: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,104/105)→case104/105/…→Place2xX（cs:39705）受理序预清
+  //  （rig 105×19 组;雕像 style 55 绕回计算在预清后,与原版序一致）。
+  placeTilePrologueClear(st, x, y);
   let fx = style * 36, fy0 = 0;
   if (tile === T_STATUE) {
     const wrap = Math.floor(style / 55);
@@ -312,6 +332,8 @@ function place2xXHF(st: TileStore, x: number, y: number, tile: number, style: nu
 /** Place3x4（cs:51943,书架 101）：x-1..x+1 × y-3..y 净空 + 逐列 SolidTile2(y+1)；
  *  frameX=54*style+col*18,frameY=row*18。 */
 function place3x4HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,101)→case101→Place3x4（cs:51943）受理序预清（cs:59966）。
+  placeTilePrologueClear(st, x, y);
   if (!inB5(st, x, y)) return false;
   let ok = true;
   for (let i = x - 1; i < x + 2; i++) {
@@ -331,6 +353,9 @@ function place3x4HF(st: TileStore, x: number, y: number, tile: number, style: nu
  *  +tileSolid+非 solidTop；frameX=(style/36)*108+col*18,
  *  frameY=style*54(-54*(num2/108)*37 绕回)+row*18。 */
 function placeChandHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,34)→case34→PlaceChand（cs:52753）受理序预清（cs:59966）
+  //  （rig 34×28 组;塔内臂 HellFort cs:rel 116 同路由）。
+  placeTilePrologueClear(st, x, y);
   let ok = true;
   for (let i = x - 1; i < x + 2; i++) {
     for (let j = y; j < y + 3; j++) {
@@ -352,6 +377,9 @@ function placeChandHF(st: TileStore, x: number, y: number, tile: number, style: 
 /** PlaceBanner（cs:46270,旗帜 91）：(x,y-1) 活性+tileSolid+非 solidTop 且
  *  (x,y..y+2) 净空；frameX=style*18(111 绕回),frameY={0,18,36}+绕回基。 */
 function placeBannerHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,91)→case91→PlaceBanner（cs:46270）受理序预清（cs:59966）
+  //  （rig 91×29 组;111 绕回计算在预清后,与原版序一致）。
+  placeTilePrologueClear(st, x, y);
   let fx = style * 18, fy0 = 0, s3 = style;
   while (s3 >= 111) { s3 -= 111; fx -= 1998; fy0 += 54; }
   const up = st.idx(x, y - 1);
@@ -383,6 +411,9 @@ function place4x2HF(st: TileStore, x: number, y: number, tile: number, direction
  *  frameX=0,frameY=style*22。 */
 const TABLE_FAMILY = new Set<number>([T_TABLE, TILE_BY_KEY['v_555_picnic_tables'] ?? T_TABLE, T_BENCH_W, T_PIANO, T_DRESSER, T_BENCH, T_BOOKCASE, TILE_BY_KEY['v_577_toilet'] ?? -1]);
 function placeOnTableHF(st: TileStore, tile: number, x: number, y: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,33)→case33→PlaceOnTable1x1（cs:45346）受理序预清
+  //  （cs:59966）——33 非实心无型拒⇒惰性即清;桌面族门在 case 臂内,预清先行=序言位。
+  placeTilePrologueClear(st, x, y);
   if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return false;
   const i = st.idx(x, y), bi = st.idx(x, y + 1);
   if (st.flags[i]) return false;
@@ -394,6 +425,9 @@ function placeOnTableHF(st: TileStore, tile: number, x: number, y: number, style
 /** Place3x3Wall（cs:44281,画 240）：x-1..x+1 × y-1..y+1 净空且 wall≠0；
  *  frameX=(style%36)*54+col*18,frameY=(style/36)*54+row*18。 */
 function place3x3WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,240)（挂画环 cs:rel 442 paintingEntry 直呼 PlaceTile）受理序
+  //  预清（cs:59966）——画类非实心无型拒⇒惰性即清;墙≠0 门在 case 臂内,预清先行。
+  placeTilePrologueClear(st, x, y);
   for (let i = x - 1; i < x + 2; i++) {
     for (let j = y - 1; j < y + 2; j++) {
       if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
@@ -409,6 +443,8 @@ function place3x3WallHF(st: TileStore, x: number, y: number, tile: number, style
 /** Place6x4Wall（cs:44959,画 242）：x-2..x+3 × y-2..y+1 净空且 wall≠0；
  *  frameX=(style/27)*108+col*18,frameY=(style%27)*72+row*18。 */
 function place6x4WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,242)→Place6x4Wall（cs:44959）受理序预清（cs:59966）。
+  placeTilePrologueClear(st, x, y);
   for (let i = x - 2; i < x + 4; i++) {
     for (let j = y - 2; j < y + 2; j++) {
       if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
@@ -423,6 +459,9 @@ function place6x4WallHF(st: TileStore, x: number, y: number, tile: number, style
 /** Place2x3Wall（cs:44595,画 245）：x..x+1 × y-1..y+1 净空且 wall≠0；
  *  frameX=style*36+col*18,frameY=row*18。 */
 function place2x3WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,245)→Place2x3Wall（cs:44595）受理序预清（cs:59966）
+  //  （rig 245×15 组）。
+  placeTilePrologueClear(st, x, y);
   for (let i = x; i < x + 2; i++) {
     for (let j = y - 1; j < y + 2; j++) {
       if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
@@ -437,6 +476,8 @@ function place2x3WallHF(st: TileStore, x: number, y: number, tile: number, style
 /** Place3x2Wall（cs:44752,画 246）：x-1..x+1 × y..y+1 净空且 wall≠0；
  *  frameX=col*18,frameY=style*36+row*18。 */
 function place3x2WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  // ★IIIII179：PlaceTile(x,y,246)→Place3x2Wall（cs:44752）受理序预清（cs:59966）。
+  placeTilePrologueClear(st, x, y);
   for (let i = x - 1; i < x + 2; i++) {
     for (let j = y; j < y + 2; j++) {
       if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
@@ -562,6 +603,10 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
       if (near) { if (tries > 1000) break; else continue; }
       // cs:59863-59865 PlaceTile case4:只写 frameY=22*style,frameX 不动(=0);
       // style=7(恶魔火把)→ frameY=154。旧实现把 style 写进 frameX 属轴写反(H3)
+      // ★IIIII179：受理序预清（cs:59966）——火把属 Torches 集,共享液体门（cs:59786）
+      //   在预清**前**：目标有液且 style7∉{8,11,17}（且 WaterPlacement≠Allowed）⇒
+      //   原版拒且不清,故本位仅无液目标预清;case4 臂写帧不动 frameX,预清后受理覆写。
+      if (st.liquid[st.idx(x + side, y)] === 0) placeTilePrologueClear(st, x + side, y);
       st.setTileSilent(x + side, y, TORCH, 0, 22 * 7);
       // ★IIIII108b2：PlaceTile(4,forced)（cs:32506）尾 SquareTileFrame 门肃清投影
       hellFortSquareDoorFrame(st, x + side, y);

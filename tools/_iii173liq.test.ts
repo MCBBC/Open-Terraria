@@ -20,6 +20,7 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
   const log = (s: string) => appendFileSync(OUT, `${s}\n`);
   let seq = 0;
   const snap = (tag: string, world: { store: { w: number; h: number; liquid: Uint8Array; liquidType: Uint8Array } }) => {
+    if (CALL_LO >= 0) return;               // 调用窗模式下只收窗内事件
     const st = world.store;
     for (let y = RY0; y <= RY1; y++)
       for (let x = RX0; x <= RX1; x++) {
@@ -32,7 +33,12 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
 
   const P = LiquidSim.prototype as unknown as Record<string, (...a: never[]) => unknown>;
   // —— ★IIIII173：逐 updateLiquid 调用指纹（SW_173L_CALLCHK=1）——lq 队列序 FNV + liq
-  //    全图 FNV，与 caves-oracle.cs LIQ_CALLCHK 同构对拍。
+  //    全图 FNV，与 caves-oracle.cs LIQ_CALLCHK 同构对拍。SW_173L_LO/HI=调用窗（事件
+  //    日志仅记录窗内调用；-1=不限）。
+  let curCall = -999;
+  const CALL_LO = Number(process.env.SW_173L_LO ?? -1);
+  const CALL_HI = Number(process.env.SW_173L_HI ?? -1);
+  const inCallWin = () => CALL_LO < 0 || (curCall >= CALL_LO && curCall <= CALL_HI);
   if (!!process.env.SW_173L_CALLCHK) {
     let call = 0;
     const st1 = (h: number, b: number) => { h ^= b & 0xff; return (Math.imul(h, 0x01000193) >>> 0); };
@@ -51,7 +57,9 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
       }
       let h2 = 0x811c9dc5 >>> 0;
       for (let i = 0; i < stw.liquid.length; i++) { h2 ^= stw.liquid[i]; h2 = (Math.imul(h2, 0x01000193) >>> 0); }
-      log(`${call++} K nl=${sim.numLiquid} buf=${sim.bufCount} lq=${h1.toString(16)} liq=${h2.toString(16)}`);
+      log(`${call} K nl=${sim.numLiquid} buf=${sim.bufCount} lq=${h1.toString(16)} liq=${h2.toString(16)}`);
+      curCall = call;
+      call++;
       return origUL.call(this);
     } as never;
   }
@@ -75,7 +83,7 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
     P.settleWaterAt = function (this: InstanceType<typeof LiquidSim>, ox: number, oy: number) {
       const st = this.world.store;
       const i = oy * st.w + ox;
-      if (inReg(ox, oy)) log(`${seq++} S ${ox} ${oy} amt=${st.liquid[i]} t=${st.liquidType[i] - 1}`);
+      if (inReg(ox, oy) && inCallWin()) log(`${seq++} S ${ox} ${oy} amt=${st.liquid[i]} t=${st.liquidType[i] - 1}`);
       return origSW.call(this, ox, oy);
     } as never;
     // —— A/B：AddWater 入列/入缓冲 ——
@@ -83,7 +91,7 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
     P.addWater = function (this: InstanceType<typeof LiquidSim>, ax: number, ay: number) {
       const nl0 = this.numLiquid, bf0 = this.bufCount;
       const r = origAW.call(this, ax, ay);
-      if (inReg(ax, ay)) {
+      if (inReg(ax, ay) && inCallWin()) {
         if (this.bufCount > bf0) log(`${seq++} B ${ax} ${ay} buf=${this.bufCount} nl=${this.numLiquid}`);
         else if (this.numLiquid > nl0) log(`${seq++} A ${ax} ${ay} nl=${this.numLiquid}`);
       }
@@ -95,17 +103,16 @@ const [RX0, RY0, RX1, RY1] = (process.env.SW_173L_REG ?? '3920,273,4199,283').sp
       const e = (this as unknown as { liquids: { x: number; y: number; kill: number }[] }).liquids[l];
       const x = e?.x, y = e?.y;
       const st = this.world.store;
-      if (inReg(x, y)) log(`${seq++} D ${x} ${y} amt=${st.liquid[y * st.w + x]} kill=${e.kill} l=${l} nl=${this.numLiquid}`);
+      if (inReg(x, y) && inCallWin()) log(`${seq++} D ${x} ${y} amt=${st.liquid[y * st.w + x]} kill=${e.kill} l=${l} nl=${this.numLiquid}`);
       const r = origDW.call(this, l);
-      if (inReg(x, y)) log(`${seq++} d ${x} ${y} -> ${st.liquid[y * st.w + x]}`);
+      if (inReg(x, y) && inCallWin()) log(`${seq++} d ${x} ${y} -> ${st.liquid[y * st.w + x]}`);
       return r;
     } as never;
-    // —— U/u：update 进/出（走内置 trkProbe/trkBox：sig=-1 进端）——
-    const st0 = { w: 4200 };
-    void st0;
+    // —— U/u：update 进/出（走内置 trkProbe/trkBox：sig=-1 进端；pre=进端真量）——
     LiquidSim.trkBox = { x0: RX0, x1: RX1, y0: RY0, y1: RY1 };
-    LiquidSim.trkProbe = (iter, x, y, sig, amt, lty, kill, delay) => {
-      if (sig === -1) log(`${seq++} U ${x} ${y} amt=${amt} k=${kill} d=${delay} it=${iter}`);
+    LiquidSim.trkProbe = (iter, x, y, sig, amt, lty, kill, delay, pre) => {
+      if (!inCallWin()) return;
+      if (sig === -1) log(`${seq++} U ${x} ${y} amt=${pre?.amt ?? amt} lt=${pre?.lty ?? lty} k=${kill} d=${delay} it=${iter}`);
       else log(`${seq++} u ${x} ${y} -> ${amt} k=${kill} sig=${sig}`);
     };
   }

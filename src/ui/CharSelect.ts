@@ -8,8 +8,10 @@
 //  收藏行悬停删除钮显 UI.CannotDeleteFavorited（本仓禁用态+悬停标签，简化登记：
 //  原版另有 Yes/No 确认页 UICharacterSelect.DeleteConfirmation）。
 import { CharacterStore, type CharacterMeta } from '../save/CharacterStore';
-import { type Appearance, DIFFICULTY_INFO } from '../player/Appearance';
+import { type Appearance, DIFFICULTY_INFO, validateAppearance } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
+import { parsePlr } from '../save/PlrImport';
+import type { SaveData } from '../save/serialize';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit } from './vanillaKit';
 
@@ -151,12 +153,26 @@ export class CharSelectPanel {
       <div class="sw-vsel-panel sw-vpanel"><div class="sw-vsel-list"></div></div>
       <div class="sw-vsel-footer">
         <button class="sw-vbtn" data-act="back">${Lang.text('UI.Back')}</button>
+        <button class="sw-vbtn" data-act="import">${Lang.text('Mods.SandboxWorld.CharSelect.ImportBtn')}</button>
         <button class="sw-vbtn" data-act="new">${Lang.text('UI.New')}</button>
       </div>
     `;
     this.body = this.panel.querySelector('.sw-vsel-list')!;
     this.panel.querySelector('[data-act=back]')!.addEventListener('click', () => this.close(flow.onBack));
     this.panel.querySelector('[data-act=new]')!.addEventListener('click', () => this.close(flow.onNew));
+    this.panel.querySelector('[data-act=import]')!.addEventListener('click', () => this.pickImportFile());
+    // 隐藏文件选择器(导入通道:.sbchar.json 自有档 / .plr 原版档,见 onImportFile)
+    const file = document.createElement('input');
+    file.type = 'file';
+    file.accept = '.json,.plr';
+    file.style.display = 'none';
+    file.addEventListener('change', () => {
+      const f = file.files?.[0];
+      file.value = '';   // 同文件重选仍触发 change
+      if (f) void this.onImportFile(f);
+    });
+    this.panel.appendChild(file);
+    this.importInput = file;
     parent.appendChild(this.panel);
     void this.reload();
     this.loop();
@@ -164,8 +180,67 @@ export class CharSelectPanel {
       (this.panel.querySelector('.sw-vsel-title') as HTMLElement).textContent = Lang.text('UI.SelectPlayer');
       (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent = Lang.text('UI.Back');
       (this.panel.querySelector('[data-act=new]') as HTMLElement).textContent = Lang.text('UI.New');
+      (this.panel.querySelector('[data-act=import]') as HTMLElement).textContent = Lang.text('Mods.SandboxWorld.CharSelect.ImportBtn');
       void this.reload();
     });
+  }
+
+  private importInput: HTMLInputElement | null = null;
+
+  private pickImportFile(): void {
+    this.importInput?.click();
+  }
+
+  /** 导入分流(2026-09-05):自有 JSON 档(magic=sandboxworld.character)或原版 .plr。
+   *  判据:扩展名 .plr → 原版二进制;.json 或首字节 '{' → 自有 JSON;其余按 .plr 试 */
+  private async onImportFile(f: File): Promise<void> {
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      const isJson = /\.json$/i.test(f.name) || buf[0] === 0x7b;
+      let appearance: Appearance;
+      let playerState: SaveData['player'] | null = null;
+      if (isJson) {
+        const j = JSON.parse(new TextDecoder('utf-8').decode(buf)) as {
+          magic?: string; appearance?: Partial<Appearance>; playerState?: SaveData['player'];
+        };
+        if (j?.magic !== 'sandboxworld.character' || !j.appearance) {
+          throw new Error(Lang.text('Mods.SandboxWorld.CharSelect.ImportNotExport'));
+        }
+        appearance = validateAppearance(j.appearance);
+        playerState = j.playerState ?? null;
+      } else {
+        const parsed = parsePlr(buf);
+        appearance = parsed.appearance;
+        playerState = parsed.playerState;
+      }
+      const meta = await this.store.create(appearance);
+      if (playerState) await this.store.setState(meta.id, playerState);
+      await this.reload();
+      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportOk', appearance.name || `#${meta.id}`));
+    } catch (e) {
+      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+    }
+  }
+
+  /** 导出为自有 JSON 档(外观+随身态;原版 .plr 有加密写回复杂度,导出仅自有格式) */
+  private async exportCharacter(meta: CharacterMeta): Promise<void> {
+    const a = await this.store.get(meta.id);
+    if (!a) return;
+    const st = await this.store.getState(meta.id);
+    const json = JSON.stringify({
+      magic: 'sandboxworld.character',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      appearance: a,
+      playerState: st,
+    });
+    const safe = (a.name || `character${meta.id}`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const aEl = document.createElement('a');
+    aEl.href = url;
+    aEl.download = `${safe}.sbchar.json`;
+    aEl.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   private unsubLang: (() => void) | null = null;
@@ -251,6 +326,11 @@ export class CharSelectPanel {
         a.name = name2.slice(0, 20);
         await this.store.update(meta.id, a);
         await this.reload();
+      });
+      // 导出钮(2026-09-05 用户需求):下载自有 JSON 档(.sbchar.json,外观+随身态)。
+      // 原版无此钮(UI_ButtonSeed 借作分享语义图标);.plr 加密写回不做(导出仅自有格式)
+      this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('Mods.SandboxWorld.CharSelect.Export'), () => {
+        void this.exportCharacter(meta);
       });
       // 删除钮（收藏防删，UICharacterListItem.cs:114-116 原版仅 !IsFavorite 挂
       // 处理器：收藏行禁用态 + 悬停显 UI.CannotDeleteFavorited）

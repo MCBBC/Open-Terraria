@@ -9,7 +9,9 @@
 // Next(1,5)×Next(-10,11)×Next(5)×Next(12,36)。
 // pass 头 tileSolid 覆写（cs:18906-18916）：379/229/190/196/189/717-719/202/460/484
 // 期间置非实心（已迁移 GenSolid 统一翻转,pass 尾 cs:19591-19599 还原,见 runPilesPass）。
-import type { TileStore } from '../../TileStore';
+// ★IIIII192：TileStore 改值导入（COAT_INVISIBLE_BLOCK 位包常量——errorWorld 巨石
+//  invisibleBlock 三连写面,Tile.cs:535-542 bTileHeader3 bit5(0x20) 的仓内单字节编码）
+import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
@@ -377,6 +379,35 @@ function place2x2Piles(st: TileStore, x: number, y: number, type: number): boole
   return true;
 }
 
+/** ★IIIII192：WorldGen.PlaceTile(i, j, 138|711, mute:true) 生成期全语义
+ *  （1457 cs:59833≡1458 同号——巨石臂 cs:18160/18179/18189 三连的完整载体）。
+ *  place2x2Piles 只覆盖了头门+锚 Clear(Tile|TilePaint|Slope)（cs:59966-59969）
+ *  与 Place2x2 分派（cs:60232→51780）；**尾支整缺**——cs:60746-60753
+ *  `if (tile.active()) { TruncatesWalls?SquareWallFrame; SquareTileFrame(i, j); result = true; }`
+ *  与 if/else 链【同级】（花括号深度定谳：链体 depth4/尾支 depth3 同在门块内），
+ *  对 Place2x2 支同样生效 ⇒ 两债：
+ *  ①SquareTileFrame(i,j)（cs:81462）九宫 TileFrame（中心 resetFrame=true）——
+ *    frameImportant Check* 击杀链（残型 484 滚刺/165 钟乳石邻簇被杀=iamerror #71
+ *    T0>484×3+T0>165×1 实证）+击杀尘掷流；
+ *  ②result=true ⇒ errorWorld invisibleBlock 三连（cs:18165-18197）**可达**
+ *    （旧结论「Place2x2 支不置 result=死代码」系误读）：Placement 成功且级联后
+ *    锚 type==num4 → 本格 2×2=(x-1..x, y-1..y) 全簇 coat|=INV_B（Tile.cs:535-542
+ *    bTileHeader3 |= 0x20 ↔ TileStore.COAT_INVISIBLE_BLOCK，cbt 位包 INV_B 通道）。
+ *  mute:true 无声零掷；TruncatesWalls[138/711]=false（TileID.cs:365 集合{54,328,459,748}）。
+ *  返回值=PlaceTile 返回（Place2x2 写入成功即真——尾支 result 无条件置位）。 */
+function placeTileBoulder(st: TileStore, rng: RNG, x: number, y: number, type: number, errorWorld: boolean): boolean {
+  if (!place2x2Piles(st, x, y, type)) return false;
+  genSquareTileFrame(st, rng, x, y);   // cs:60752 尾支九宫级联（尘掷/击杀流同源）
+  if (errorWorld && st.type[st.idx(x, y)] === type) {
+    for (let k = x - 1; k <= x; k++) {
+      for (let l = y - 1; l <= y; l++) {
+        st.coat[st.idx(k, l)] |= TileStore.COAT_INVISIBLE_BLOCK;   // invisibleBlock(true)
+      }
+    }
+  }
+  return true;
+}
+
 /** ★SSSSSS-NOTRAPS（cs:18921-18190→1457 cs:18135-18204）：noTraps/errorWorld 巨石
  *  三角堆——W*H*0.0004 次（remix ÷2）：全域掷点下扫首个活性格上一格，anyShimmer 拒，
  *  三连 PlaceTile(138)（tenth 1/5 用 711）= (x,y)/(x+2,y)/(x+1,y-2) 三角。段首
@@ -410,9 +441,12 @@ export function runBoulderPileSection(st: TileStore, rng: RNG, gs: GenState): vo
     if (st.liquid[ji] > 0 && st.liquidType[ji] === 4) continue;       // anyShimmer 拒
     let boulder = b138;
     if (nf.tenthAnniversary && rng.int(0, 4) === 0) boulder = b711;   // tenth 1/5 彩虹巨石
-    place2x2Piles(st, x, j, boulder);
-    place2x2Piles(st, x + 2, j, boulder);
-    place2x2Piles(st, x + 1, j - 2, boulder);
+    // ★IIIII192：place2x2Piles → placeTileBoulder——PlaceTile 全语义（尾支
+    //   SquareTileFrame 九宫级联 + result/errorWorld invisibleBlock 三连），见下注。
+    const ew = nf.errorWorld === true;
+    placeTileBoulder(st, rng, x, j, boulder, ew);          // cs:18160  (num3,   j)
+    placeTileBoulder(st, rng, x + 2, j, boulder, ew);      // cs:18179  (num3+2, j)
+    placeTileBoulder(st, rng, x + 1, j - 2, boulder, ew);  // cs:18189  (num3+1, j-2)
   }
   setBoulderSolidity(false);
 }

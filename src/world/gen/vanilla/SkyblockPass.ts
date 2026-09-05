@@ -102,7 +102,9 @@ import { DG_TILE_TABLE } from './DungeonPass';
 const TILE_TABLE_SHEETS = DG_TILE_TABLE;
 
 /** PlaceMB（cs:51729）：139 音乐盒 2×2，锚=cols X..X+1 × rows y-1..y，
- *  frameY=style*36、左列 frameX=0 右列 18。 */
+ *  frameY=style*36（下行 +18：cs:51778/:51781 两底格）、左列 frameX=0 右列 18。
+ *  ★IIIII182：底行 frameY 曾漏 +18（写 (style*36) 双行）——SwitchMB(cs:51405)
+ *  锚反解 num3=frameY/18 mod 2 依赖下行 3150 才能解出组顶；帧域 N5 簇修复件。 */
 function placeMB(st: TileStore, X: number, y: number, internalId: number, style: number): boolean {
   const num = X + 1;
   if (num < 5 || num > st.w - 5 || y < 5 || y > st.h - 5) return false;
@@ -124,7 +126,7 @@ function placeMB(st: TileStore, X: number, y: number, internalId: number, style:
       st.flags[i] = 1;
       st.type[i] = internalId;
       st.frameX[i] = c * 18;
-      st.frameY[i] = style * 36;
+      st.frameY[i] = style * 36 + r * 18;   // ★IIIII182：+r*18=cs:51778/:51781 底行（原 style*36 双行）
     }
   }
   return true;

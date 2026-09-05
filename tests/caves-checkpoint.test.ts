@@ -308,6 +308,9 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   settlePart2ChainSync(world, st, gs, rng); snap('settle2');
   replay(); // ▶CactusPalmTreesAndCoral cs:21115
   runCactusPalmTreesAndCoralPass(st, rng, gs); snap('cactus');
+  // ★IIIII193：BeeLarva(cs:21018) 在本缩水链缺位 → 其 tileSolid 时间线还原
+  //   （229/232/162）不生效。该补播现置于 runMicroBiomesPass 轨段域内
+  //   （save/restore 零净面,见 vanilla/MicroBiomesPass.ts ★IIIII193 注）。
   replay(); // ▶MicroBiomes cs:21785（QQ #101，oracle 末尾追加区同序）
   runMicroBiomesPass(st, rng, gs, world.chests); snap('microbiomes');
   // ★GGGGGG（2026-08-22）：检查点 76 定名（runbook ④「75→N」首名）——pass 105
