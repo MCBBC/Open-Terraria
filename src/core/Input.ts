@@ -111,6 +111,15 @@ export class Input {
    *  未被消费即挂本旗,endFrame(fixedUpdate 尾,Game.ts"inp.endFrame()")强制释放
    *  ——保证每个 tap 至少活过一个消费窗口。桌面 mousedown/mouseup 不经此路 */
   private pendingTapRelease = false;
+  /** 右键子帧轻点兜底（SW-AW1 2026-09-06）：Windows 用户实报右键交互（NPC 对话/
+   *  开箱）整类失效而 macOS 正常——rightDown 是纯电平,若 mousedown(b2)→mouseup(b2)
+   *  对完整落在两个游戏帧之间的间隙里（合成事件/远控压缩流/驱动合拍都可造出
+   *  毫秒级 down-up 对）,下一帧采样到的已是 false,交互整类扑空。桌面原被
+   *  pendingTapRelease 注释假定为"恒有 tick 窗",该假定对右键不成立。
+   *  三态机：0=纯电平（常态）;1=按下未过帧（武装）;2=松开落在首帧窗内（延迟清）。
+   *  ★endFrame 只在态 2 清电平——态 1 归零回纯电平,PanControl Hold 档（:9314
+   *  需按住右键持续电平）不被首帧末掐断。 */
+  private pendingRightRelease: 0 | 1 | 2 = 0;
 
   private el: HTMLElement;
   /** 已注册监听(destroy 时全部移除——window 强引用曾把整个旧 Game 钉死,
@@ -191,7 +200,7 @@ export class Input {
         if (this.delayUseItem) return;
         this.mouseDown = true; this.mouseHeld = true;
       }
-      if (e.button === 2) this.rightDown = true;
+      if (e.button === 2) { this.rightDown = true; this.pendingRightRelease = 1; }   // SW-AW1 武装
     }) as EventListener);
     onWin('mouseup', ((e: MouseEvent) => {
       // SW-AF1 2026-09-04（F-2）：复位=松键（TriggersSet.cs:844-847 else 支）——
@@ -200,7 +209,12 @@ export class Input {
         this.mouseDown = false; this.mouseHeld = false; this.delayUseItem = false;
         releaseBlockMouse(this);
       }
-      if (e.button === 2) this.rightDown = false;
+      // SW-AW1：松开落在首帧窗内（态1→2）延迟清,本帧采样窗保住 true 电平;
+      // 已过首帧（态0）照旧立即清
+      if (e.button === 2) {
+        if (this.pendingRightRelease === 1) this.pendingRightRelease = 2;
+        else this.rightDown = false;
+      }
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());
     onEl('wheel', ((e: WheelEvent) => {
@@ -299,6 +313,12 @@ export class Input {
     this.touchKeys.clear();
     this.virtualActions.clear();
     this.pendingTapRelease = false;
+    // SW-AW1：兜底态非零时连态带电平一起清,防 blur/退世界把态摘了却留下 true
+    // 残电平（态 0 不碰电平,长按语义不变）
+    if (this.pendingRightRelease !== 0) {
+      this.pendingRightRelease = 0;
+      this.rightDown = false;
+    }
   }
 
   down(code: string): boolean {
@@ -415,6 +435,15 @@ export class Input {
       // 再留着只会在下一个 tick 假触发第二次使用)
       this.mouseDown = false;
       this.pendingTapRelease = false;
+    }
+    if (this.pendingRightRelease === 1) {
+      // SW-AW1：按住跨过了首帧 → 归纯电平（后续 mouseup 立即清,Hold 档不受影响）
+      this.pendingRightRelease = 0;
+    } else if (this.pendingRightRelease === 2) {
+      // SW-AW1：子帧轻点保底窗到此强制释放（本帧消费窗已过,再留着会在下一 tick
+      // 假触发第二次交互）
+      this.rightDown = false;
+      this.pendingRightRelease = 0;
     }
   }
 }

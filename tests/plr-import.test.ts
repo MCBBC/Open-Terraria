@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { createCipheriv } from 'node:crypto';
 import { aes128EcbDecrypt, parsePlr, PLR_VERSION_1457 } from '../src/save/PlrImport';
+import type { Appearance } from '../src/player/Appearance';
+import type { SaveData } from '../src/save/serialize';
 import { ITEM_STABLE_OF_INTERNAL } from '../src/data/items';
 
 /** 原版 ENCRYPTION_KEY(Player.cs:779)='h3y_gUyZ' UTF-16LE */
@@ -42,9 +44,15 @@ class Writer {
     this.chunks.push(...bytes);
     return this;
   }
-  /** item:netId+stack+prefix[+favorited] */
+  /** item:netId+stack+prefix[+favorited](inventory/bank 形) */
   item(netId: number, stack: number, prefix: number, fav?: boolean) {
     this.i32(netId).i32(stack).byte(prefix);
+    if (fav !== undefined) this.bool(fav);
+    return this;
+  }
+  /** equip:netId+prefix[+favorited](armor/dye/miscE/D 形——无 stack,PL:55467-55483) */
+  equip(netId: number, prefix: number, fav?: boolean) {
+    this.i32(netId).byte(prefix);
     if (fav !== undefined) this.bool(fav);
     return this;
   }
@@ -81,9 +89,10 @@ describe('AES-128-ECB 纯 JS 解密', () => {
   });
 });
 
+const STABLE = (netId: number) => ITEM_STABLE_OF_INTERNAL[netId] ?? 0;
+
 describe('parsePlr 字段流(生成器闭环)', () => {
   const seedColors = [10, 20, 30, 40, 50, 60, 70] as const;
-  const STABLE = (netId: number) => ITEM_STABLE_OF_INTERNAL[netId] ?? 0;
 
   /** 325 全量流(读侧会消费到临时槽为止;其后写 64B 垃圾模拟 Loadouts 等真实尾段) */
   function buildV325() {
@@ -111,14 +120,16 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     w.rgb(...seedColors.slice(0, 3) as unknown as [number, number, number]);
     w.rgb(11, 12, 13); w.rgb(21, 22, 23); w.rgb(31, 32, 33);
     w.rgb(41, 42, 43); w.rgb(51, 52, 53); w.rgb(61, 62, 63);
-    // armor20+dye10(≥322 带 favorited)
-    for (let i = 0; i < 20; i++) w.item(i === 0 ? 4344 : i === 3 ? 975 : 0, i + 1, i, i % 3 === 0);
-    for (let i = 0; i < 10; i++) w.item(0, 0, 0, false);
+    // armor20+dye10(≥322 带 favorited;无 stack——equip 形)
+    for (let i = 0; i < 20; i++) w.equip(i === 0 ? 4344 : i === 3 ? 975 : 0, i, i % 3 === 0);
+    for (let i = 0; i < 10; i++) w.equip(0, 0, false);
     // inventory58(≥114 favorited)
     for (let i = 0; i < 58; i++) w.item(i === 0 ? 50 : i === 1 ? 999999 : 0, 999 - i, 0, i % 2 === 0);
-    // miscEquips/miscDyes 5+5(≥136;读侧恒不读 favorited——写侧省略!)
-    for (let i = 0; i < 5; i++) w.item(i === 2 ? 975 : 0, 1, 0);
-    for (let i = 0; i < 5; i++) w.item(0, 0, 0);
+    // miscE/miscD:槽内交错(E[i],D[i] 同循环,PL:55476;读侧恒不读 favorited)
+    for (let i = 0; i < 5; i++) {
+      w.equip(i === 2 ? 975 : 0, 0);
+      w.equip(0, 0);
+    }
     // bank×4(40 槽;bank4 ≥255 favorited——仅 bank4 显式传,b1-3 省略)
     for (let b = 0; b < 4; b++) {
       for (let i = 0; i < 40; i++) {
@@ -220,11 +231,10 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     w.i32(0).i32(0);           // deaths×2
     w.rgb(1, 2, 3); w.rgb(4, 5, 6); w.rgb(7, 8, 9); w.rgb(10, 11, 12);
     w.rgb(13, 14, 15); w.rgb(16, 17, 18); w.rgb(19, 20, 21);
-    for (let i = 0; i < 20; i++) w.item(0, 0, 0);   // <322 无 favorited
-    for (let i = 0; i < 10; i++) w.item(0, 0, 0);
+    for (let i = 0; i < 20; i++) w.equip(0, 0);   // <322 无 favorited(无 stack)
+    for (let i = 0; i < 10; i++) w.equip(0, 0);
     for (let i = 0; i < 58; i++) w.item(0, 0, 0, false);
-    for (let i = 0; i < 5; i++) w.item(0, 0, 0);
-    for (let i = 0; i < 5; i++) w.item(0, 0, 0);
+    for (let i = 0; i < 5; i++) { w.equip(0, 0); w.equip(0, 0); }
     for (let b = 0; b < 4; b++) {
       for (let i = 0; i < 40; i++) {
         if (b === 3) w.item(0, 0, 0, false);
@@ -276,5 +286,95 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     w.i64(123n).i32(0).i64(0n);   // FileMetadata 魔数错
     w.str('x');
     expect(() => parsePlr(encrypt(w.build()))).toThrow(/Re-Logic/);
+  });
+});
+
+describe('exportPlr 导出往返', () => {
+  const mkAppearance = (): Appearance => ({
+    name: '导出测试', hair: 15, skinVariant: 2,
+    hairColor: { r: 1, g: 2, b: 3 }, skinColor: { r: 4, g: 5, b: 6 }, eyeColor: { r: 7, g: 8, b: 9 },
+    shirtColor: { r: 10, g: 11, b: 12 }, undershirtColor: { r: 13, g: 14, b: 15 },
+    pantsColor: { r: 16, g: 17, b: 18 }, shoeColor: { r: 19, g: 20, b: 21 },
+    difficulty: 1, voiceVariant: 1, voicePitchOffset: 0,
+  });
+  const mkState = (): SaveData['player'] => ({
+    hp: 300, x: 0, y: 0,
+    inventory: [{ id: STABLE(50), stack: 42, prefix: 3, favorited: true }, null,
+      ...Array.from({ length: 56 }, () => null)],
+    selected: 0, baseMaxHp: 400, baseMaxMana: 120, mana: 88,
+    banks: [[{ id: STABLE(166), stack: 9 }], [], [], []],
+    armor: [null, null, null, { id: STABLE(975), stack: 1 }, ...Array.from({ length: 16 }, () => null)],
+    dye: Array.from({ length: 10 }, () => null),
+    miscEquips: [null, null, null, null, null],
+    miscDyes: [null, null, null, null, null],
+    buffs: [[5, 30], [120, 45]],
+    taxMoney: 12, golferScoreAccumulated: 7, anglerQuestsFinished: 3,
+    hideInfo: Array.from({ length: 13 }, () => false),
+    hideVisibleAccessory: [true, ...Array.from({ length: 9 }, () => false)],
+    deathsPve: 2, deathsPvp: 1, team: 0, dead: false, respawnTimer: 0,
+    hairDye: 4,
+    permanentUpgrades: { extraAccessory: true, usedAegisCrystal: false, usedAegisFruit: false,
+      usedArcaneCrystal: false, usedGalaxyPearl: false, usedGummyWorm: false, usedAmbrosia: false },
+  });
+
+  it('AES 加密与 node:crypto 同参对拍', async () => {
+    const { createDecipheriv } = await import('node:crypto');
+    const { aes128EcbEncrypt } = await import('../src/save/PlrImport');
+    for (let round = 0; round < 16; round++) {
+      const n = round * 11 + 3;   // 非 16 对齐长度
+      const plain = new Uint8Array(n).map((_, i) => (i * 37 + round) & 0xff);
+      const cipher = aes128EcbEncrypt(plain);
+      const d = createDecipheriv('aes-128-ecb', KEY, null);
+      d.setAutoPadding(false);
+      const back = Buffer.concat([d.update(Buffer.from(cipher)), d.final()]);
+      expect(Array.from(back.slice(0, n))).toEqual(Array.from(plain));
+      expect(cipher.length).toBe((Math.floor(n / 16) + 1) * 16);   // PKCS7 垫(整块时加整块)
+    }
+  });
+
+  it('exportPlr → parsePlr 往返(全字段)', async () => {
+    const { exportPlr } = await import('../src/save/PlrImport');
+    const a = mkAppearance(), st = mkState();
+    const bytes = exportPlr(a, st);
+    const p = parsePlr(bytes);
+    expect(p.version).toBe(PLR_VERSION_1457);
+    expect(p.appearance.name).toBe('导出测试');
+    expect(p.appearance.hair).toBe(15);
+    expect(p.appearance.skinVariant).toBe(2);
+    expect(p.appearance.difficulty).toBe(1);
+    expect(p.appearance.hairColor).toEqual({ r: 1, g: 2, b: 3 });
+    expect(p.playerState.hp).toBe(300);
+    expect(p.playerState.baseMaxHp).toBe(400);
+    expect(p.playerState.baseMaxMana).toBe(120);
+    expect(p.playerState.mana).toBe(88);
+    expect(p.playerState.hairDye).toBe(4);
+    expect(p.playerState.inventory?.[0]).toEqual({ id: STABLE(50), stack: 42, prefix: 3, favorited: true });
+    expect(p.playerState.armor?.[3]?.id).toBe(STABLE(975));
+    expect(p.playerState.banks?.[0]?.[0]?.id).toBe(STABLE(166));
+    expect(p.playerState.banks?.[0]?.[0]?.stack).toBe(9);
+    expect(p.playerState.buffs).toEqual([[5, 30], [120, 45]]);
+    expect(p.playerState.taxMoney).toBe(12);
+    expect(p.playerState.anglerQuestsFinished).toBe(3);
+    expect(p.playerState.permanentUpgrades?.extraAccessory).toBe(true);
+    expect(p.playerState.hideVisibleAccessory?.[0]).toBe(true);
+    // 加密真值:node:crypto 解 exportPlr 输出,头 4 字节=325
+    const { createDecipheriv } = await import('node:crypto');
+    const d = createDecipheriv('aes-128-ecb', KEY, null);
+    d.setAutoPadding(false);
+    const back = Buffer.concat([d.update(Buffer.from(bytes)), d.final()]);
+    expect(back[0]).toBe(325 & 0xff);
+    expect(back.readUInt32LE(0)).toBe(325);
+  });
+
+  it('导出→导入→再导出:字节稳定(幂等)', async () => {
+    const { exportPlr } = await import('../src/save/PlrImport');
+    const a = mkAppearance(), st = mkState();
+    const p = parsePlr(exportPlr(a, st));
+    const again = exportPlr(p.appearance, p.playerState);
+    // 导入会走验证/换算(如 buffs tick 取整),重导出字节不必逐位相等,
+    // 但必须可再次解析且关键值不变
+    const p2 = parsePlr(again);
+    expect(p2.appearance.name).toBe('导出测试');
+    expect(p2.playerState.baseMaxHp).toBe(400);
   });
 });

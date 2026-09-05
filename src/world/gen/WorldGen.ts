@@ -728,6 +728,20 @@ export async function liquidSettlePass({ world, rng, store, prog }: GenCtx, ocea
       world.genDungeonExempt = gs.dungeonSide < 0
         ? { x0: edge, x1: Math.floor(world.w * 0.45), y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 }
         : { x0: mid, x1: world.w - edge, y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 };
+      // ★IIIII210（ddual #99 定罪修复）：dual 世界豁免域按原版全形传递——
+      //   ①界域=Liquid.cs:187 InAnyPotentialDungeonBounds（**各座** outer bounds
+      //   并集,DungeonUtils.cs:2136-2147;dual=2 盒;potentialBounds 由 Dunes 头
+      //   refreshDualPotentialBounds 装配,半开 [l,r)×[t,b) 与单盒同式）；
+      //   ②墙支=IsConsideredDungeonWall(tile.wall, allDungeons:true)（DU.cs:1929-1950
+      //   ＝Main.wallDungeon 基线∪各座 isDungeonWall）——wallProtection 并集表
+      //   （IIIII179 建,Cavinator 同源消费,vanilla wall id 索引）直传。旧版只传
+      //   gs.dungeonSide 一座盒+基线墙集 ⇒ 丛林座域（205 等 biome 墙）落水越
+      //   waterLine 被误转岩浆、原版回水（x86 L|751|831 b=0 实证）＝#99 全域
+      //   ±1..±6 池差+8 罐 kill 集差根因。非 dual 两字段不置=旧语义逐位不变。
+      if (dualDungeonState.enabled && dualDungeonState.wallProtection && dualDungeonState.potentialBounds.length > 0) {
+        world.genDungeonExempt.walls = dualDungeonState.wallProtection;
+        world.genDungeonExempt.boxes = dualDungeonState.potentialBounds.map((b) => ({ x0: b.l, y0: b.t, x1: b.r, y1: b.b }));
+      }
     }
     // ★IIIII58：REMIX 落水分型带（Liquid.cs:182-185）——仅供 gen 模式沉降与
     // Underworld pass 内 QuickWater 消费；非 remix 恒 null（走 waterLine 规则）

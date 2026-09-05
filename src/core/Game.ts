@@ -1319,6 +1319,9 @@ const BLOCK_SWAP_DOESNT_PLACE_SHEETS = new Set<number>([2, 60, 70, 109, 199, 23,
 const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
 const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
 const PLATFORMS_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439]);
+// IsLivingFire（TileID.cs:241）——IsTilePoundable 的活火臂（Player.cs:45940），锤目标
+// 但 TryPoundingTile 无专属支=门内 no-op（与原版一致,勿再"补"动作）
+const LIVING_FIRE_SHEETS = new Set<number>([336, 340, 341, 342, 343, 344]);
 const BASIC_CHEST_SHEETS = new Set<number>([21, 467]);
 const ROPE_ITEM_VIDS = new Set<number>([85, 965, 2996, 3077, 3078]);
 const CONVERSION_GRASS_SHEETS = new Set<number>([2, 23, 199, 109, 477, 492]);
@@ -17715,10 +17718,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //      被误消费成一次整形（2026-09-01 用户实报第二次反馈）----
       const dH = type !== 0 ? TILE_DEFS[type] : null;
       const shH = dH?.vanilla?.sheet ?? -1;
+      // IsAHammerTarget（Player.cs:45923-45930）→ IsTilePoundable（:45932-45943）：
+      // tileHammer 族（祭坛）恒目标；`!tileSolid && ∉{314,424,442,351,470}` →
+      // IsLivingFire（TileID.cs:241）；其余 true。★平台=solid：Main.cs:8031-8032
+      // `tileSolidTop[19]=true; tileSolid[19]=true` 双旗同置（碰撞走 solidTop 特判，
+      // 原始旗位 solid 真；427 :10119、435-439 :10125 循环同）——本仓数据面把单向
+      // 语义拆在 platform 旗、solid 恒 false，故 solid 缺失面以 PLATFORMS_SHEETS
+      //（=TileID.cs:243 {19,427,435-439}）补齐；16 铁砧/18 工作台原版本就非 solid
+      //（platform 旗面超集）不入目标。SW-AW1b 2026-09-06：旧式缺平台臂 → 瞄准平台
+      // 复位闩+整形门恒闭，坡循环整段死码（platform-hammer.test 旧用本地复算函数
+      // 绕门未察觉，Windows 用户实报"平台没做锤变形"）。
       const isHammerTarget = type !== 0 && (type === TILE_BY_KEY['v_26_altars'] || !!dH?.solid
+        || (dH?.platform === true && PLATFORMS_SHEETS.has(shH))
+        || LIVING_FIRE_SHEETS.has(shH)
         || shH === 314 || shH === 424 || shH === 442 || shH === 351 || shH === 470);
       if (type === 0 || !isHammerTarget) this.hammerPoundRelease = false;
-      // ---- TryPoundingTile（poundRelease 态整形一步，:46359+；IsAHammerTarget :45920）
+      // ---- TryPoundingTile（poundRelease 态整形一步，:46359+；IsAHammerTarget :45923）
       //      闩=释放后置位（fixedUpdate !mouseHeld），再按的第一挥消费——按住期间
       //      :46000 每挥不复位但闩本为 false，光标扫过方块只会拆墙不会整形 ----
       if (this.hammerPoundRelease && !throttled && isHammerTarget) {
@@ -17736,13 +17751,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.mining = null;
             return;
           }
-          // 平台坡循环（:45394-45440 1:1）：半砖 → PoundTile 回整；整 → slope(num) →
+          // 平台坡循环（TryPoundingTile 平台支 Player.cs:46410-46445,1457；旧引
+          // :45394-45440 系 1456 布局）：半砖 → PoundTile 回整；整 → slope(num) →
           // 另一侧 → CanPoundTile 过门 → slope0+半砖。num 默认 1；右邻(y-1)/左下邻(y+1)
           // 是平台或「右实左空」→ num=2
-          if (dH?.platform) {
+          if (dH?.platform && PLATFORMS_SHEETS.has(shH)) {   // SW-AW1b：分支门=原版 TileID.Sets.Platforms（TileID.cs:243）,非 platform 旗超集（16/18/380 不整形）
             const i = st.idx(tx, ty);
             if (st.half[i]) {
-              st.setHalfBrick(tx, ty, false);           // :45398-45402 PoundTile（半砖回整）
+              st.setHalfBrick(tx, ty, false);           // PoundTile（半砖回整）:46411-46415
             } else {
               // ★G1 谓词形态批（2026-09-04）：平台坡循环邻判=SolidTile（:70642
               //  `active && tileSolid && !tileSolidTop && !halfBrick && slope==0 &&
@@ -17754,8 +17770,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 const dj = TILE_DEFS[st.type[j]];
                 return st.isSolid(x, y) && !!dj && !dj.platform && !st.half[j] && st.slope[j] === 0;
               };
+              // 原版邻判=TileID.Sets.Platforms（TileID.cs:243）——dH.platform 是超集
+              //（16 铁砧/18 工作台/380 种植箱等）,工作台对角会误翻方向感知（SW-AW1b）
               const platAt = (x: number, y: number): boolean =>
-                st.inBounds(x, y) && !!TILE_DEFS[st.type[st.idx(x, y)]]?.platform;
+                st.inBounds(x, y) && PLATFORMS_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1);
               let num = 1, other = 2;                   // :45406-45415
               if (platAt(tx + 1, ty - 1) || platAt(tx - 1, ty + 1)
                 || (solidFullP(tx + 1, ty) && !solidFullP(tx - 1, ty))) { num = 2; other = 1; }

@@ -298,8 +298,21 @@ export class World {
   genRemixWater: { lavaLine: number; rockLevel: number; oceanLevel: number } | null = null;
   /** 地牢豁免盒（DungeonUtils.CreatePotentialDungeonBounds 的 outerPotential
    *  DungeonBounds=半图矩形）。落水点在盒内且水源格墙 ∈ wallDungeon{7,8,9,94-99}
-   *  → 回水不转岩浆（Liquid.cs:186-188） */
-  genDungeonExempt: { x0: number; y0: number; x1: number; y1: number } | null = null;
+   *  → 回水不转岩浆（Liquid.cs:186-188）。
+   *  ★IIIII210（ddual #99 定罪）：原版墙支=DungeonUtils.IsConsideredDungeonWall
+   *  (tile.wall, allDungeons:true)＝Main.wallDungeon 基线 ∪ **各座 genvars 的
+   *  isDungeonWall**（per-seat 风格墙族,DC.cs:147-185 注册;双地牢丛林座 205 等
+   *  biome 墙在册）——旧硬编码基线集漏 dual 座 biome 墙 ⇒ 丛林座域落水恒转岩浆
+   *  而原版回水（x86 S/L 事件流 L|751|831 b=0 vs JS b=1 实证）。界域支同理:
+   *  原版 InAnyPotentialDungeonBounds=**各座** outer bounds 并集（dual=2 盒）,
+   *  旧单盒=gs.dungeonSide 一座。dual 世界由 liquidSettlePass 附 boxes+walls
+   *  （walls=dualDungeonState.wallProtection 并集表,vanilla wall id 索引）；
+   *  两字段缺省 undefined=非 dual 旧语义（单盒+基线墙集,16 链绿带面不变）。 */
+  genDungeonExempt: {
+    x0: number; y0: number; x1: number; y1: number;
+    boxes?: Array<{ x0: number; y0: number; x1: number; y1: number }>;
+    walls?: boolean[];
+  } | null = null;
   /** 以太生物群系中心（GenVars.shimmerPosition；无微光世界为 0）。ShimmerPass 写入，
    *  生成期沉降 ShimmerRemoveWater（WorldGen.cs:34859）按此清腔内非微光液体 */
   shimmerX = 0;

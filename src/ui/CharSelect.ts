@@ -10,7 +10,7 @@
 import { CharacterStore, type CharacterMeta } from '../save/CharacterStore';
 import { type Appearance, DIFFICULTY_INFO, validateAppearance } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
-import { parsePlr } from '../save/PlrImport';
+import { parsePlr, exportPlr } from '../save/PlrImport';
 import type { SaveData } from '../save/serialize';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit } from './vanillaKit';
@@ -222,36 +222,45 @@ export class CharSelectPanel {
     }
   }
 
-  /** 导出为自有 JSON 档(外观+随身态;原版 .plr 有加密写回复杂度,导出仅自有格式) */
+  /** 导出为原版 .plr 档(325 格式 AES 加密,原版游戏可直接读;外观+随身态全套。
+   *  旅程研究不随档——creativeTracker 写空表,见 exportPlr 注) */
   private async exportCharacter(meta: CharacterMeta): Promise<void> {
     const a = await this.store.get(meta.id);
     if (!a) return;
     const st = await this.store.getState(meta.id);
-    const json = JSON.stringify({
-      magic: 'sandboxworld.character',
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      appearance: a,
-      playerState: st,
-    });
+    let bytes: Uint8Array;
+    try {
+      bytes = exportPlr(a, st ?? emptyPlayerState(a));
+    } catch (e) {
+      alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+      return;
+    }
     const safe = (a.name || `character${meta.id}`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
-    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
     const aEl = document.createElement('a');
     aEl.href = url;
-    aEl.download = `${safe}.sbchar.json`;
+    aEl.download = `${safe}.plr`;
     aEl.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   private unsubLang: (() => void) | null = null;
 
-  private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): void {
+  private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void, back?: string): void {
     // 24px 图标外包 .sw-vico 触控热区层(C 档 padding 6/margin -6 → 36² 热区,
-    // 桌面无样式盒尺寸=img 几何零变化);click 挂热区层,img 点击冒泡仍触发
+    // 桌面无样式盒尺寸=img 几何零变化);click 挂热区层,img 点击冒泡仍触发。
+    // back=裸图标(如捏人 Copy 20×20 无底框)时以原版按钮底贴图打底(UI_ButtonBacking),
+    // 与自带底框的 Button 家族(Play/Rename 等 22×22)视觉同形
     const wrap = document.createElement('span');
     wrap.className = 'sw-vico';
     const img = document.createElement('img');
     img.src = BTN_SRC(src);
+    if (back) {
+      img.style.backgroundImage = `url(${BTN_SRC(back)})`;
+      img.style.backgroundSize = '100% 100%';
+      img.style.backgroundPosition = 'center';
+      img.style.backgroundRepeat = 'no-repeat';
+    }
     img.title = label;
     img.addEventListener('mouseenter', () => { this.setLabel(wrap, label, false); });
     img.addEventListener('mouseleave', () => { this.setLabel(wrap, '', false); });
@@ -327,11 +336,11 @@ export class CharSelectPanel {
         await this.store.update(meta.id, a);
         await this.reload();
       });
-      // 导出钮(2026-09-05 用户需求):下载自有 JSON 档(.sbchar.json,外观+随身态)。
-      // 原版无此钮(UI_ButtonSeed 借作分享语义图标);.plr 加密写回不做(导出仅自有格式)
-      this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('Mods.SandboxWorld.CharSelect.Export'), () => {
+      // 导出钮(2026-09-05 用户需求):下载原版 .plr 档(外观+随身态全套,原版游戏可读)。
+      // 图标借捏人复制钮 UI_CharCreation_Copy(复制/导出语义;原版无导出钮)
+      this.iconBtn(btns, 'UI_CharCreation_Copy', Lang.text('Mods.SandboxWorld.CharSelect.Export'), () => {
         void this.exportCharacter(meta);
-      });
+      }, 'UI_ButtonBacking');
       // 删除钮（收藏防删，UICharacterListItem.cs:114-116 原版仅 !IsFavorite 挂
       // 处理器：收藏行禁用态 + 悬停显 UI.CannotDeleteFavorited）
       const del = document.createElement('div');
@@ -403,4 +412,22 @@ export class CharSelectPanel {
     this.panel.remove();
     fn?.();
   }
+}
+
+/** 无随身态角色的缺省 playerState(新角色/从未进过世界=原版全新 .plr 初始形) */
+function emptyPlayerState(a: Appearance): SaveData['player'] {
+  return {
+    hp: 100, x: 0, y: 0,
+    inventory: Array.from({ length: 58 }, () => null),
+    selected: 0,
+    baseMaxHp: 100, baseMaxMana: 20, mana: 20,
+    banks: [[], [], [], []],
+    armor: Array.from({ length: 20 }, () => null),
+    dye: Array.from({ length: 10 }, () => null),
+    miscEquips: Array.from({ length: 5 }, () => null),
+    miscDyes: Array.from({ length: 5 }, () => null),
+    buffs: [],
+    hideInfo: Array.from({ length: 13 }, () => false),
+    hideVisibleAccessory: Array.from({ length: 10 }, () => false),
+  } as SaveData['player'];
 }

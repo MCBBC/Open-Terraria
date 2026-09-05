@@ -9281,6 +9281,23 @@ const snap: SnapFn = (name) => {
         }
       }
       if (!flagCrack) {                                     // 板线链 cs:330-400（Falling 族均走此支）
+        // ★IIIII210：AddWireFromPointToPoint（WorldGen.cs:58775-58803）——PitTrap 板间
+        //   连线（DungeonPitTrap.cs:388-393：次枚板受理后对 prev 板走 L 形红线）。
+        //   每迭代三布（起/移 x 后/移 y 后），自 (x2,y2)=prev 板走向 (x,y)=当前板；
+        //   纯 wire 通道零掷。曾整缺（旧注"8ch 不比,账面恒进"）＝ddual #105 断线清理
+        //   把 640 压力板当孤儿整网拆杀（T135>0×640 @(1588,404)）的根因。
+        const addWirePTP = (stL: TileStore, x: number, y: number, x2: number, y2: number): void => {
+          if (!stL.inBounds(x, y) || !stL.inBounds(x2, y2)) return;   // vanilla InWorld 门(:58778)
+          while (x2 !== x || y2 !== y) {
+            stL.wire[stL.idx(x2, y2)] |= 1;
+            if (x2 > x) x2--;
+            if (x2 < x) x2++;
+            stL.wire[stL.idx(x2, y2)] |= 1;
+            if (y2 > y) y2--;
+            if (y2 < y) y2++;
+            stL.wire[stL.idx(x2, y2)] |= 1;
+          }
+        };
         let prevX = 0, prevY = 0;
         for (let c = i - num6; c <= i + num6; c++) {
           const startP = heights[c - (i - num6)]!;
@@ -9307,7 +9324,7 @@ const snap: SnapFn = (name) => {
             const tp = st.idx(c, q - 1);
             if ((st.flags[tp] & 1) && shOfAt(c, q - 1) === 135) {
               st.wire[tp] |= 1;
-              if (prevX !== 0 || prevY !== 0) { /* AddWireFromPointToPoint：纯 wire 通道(8ch 不比),账面恒进 */ }
+              if (prevX !== 0 || prevY !== 0) addWirePTP(st, c, q - 1, prevX, prevY);   // ★IIIII210 实装
               prevX = c; prevY = q - 1;
             }
           }

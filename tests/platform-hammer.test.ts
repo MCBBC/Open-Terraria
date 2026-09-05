@@ -1,4 +1,5 @@
-// 平台族锤循环 + 坡面平台楼梯碰撞（Player.cs:45394-45440 / Collision.cs:1851-1866）：
+// 平台族锤循环 + 坡面平台楼梯碰撞（TryPoundingTile 平台支 Player.cs:46410-46445,1457
+//  ——旧引 :45394-45440 系 1456 布局,SW-AW1b 校正 / Collision.cs:1851-1866）：
 // ① 锤输入循环状态机：半砖→整 / 整→slope(num)→slope(另一侧)→半砖（num 由
 //    右邻(y-1)平台/左下邻(y+1)平台/右实左空决定）
 // ② 坡面平台单向碰撞：站上坡面贴合、上升不挡（stepUp 爬楼梯）、按住下穿透、
@@ -131,5 +132,92 @@ describe('坡面平台楼梯碰撞（Collision.cs:1851-1866 单向门）', () =>
     moveAndCollide(b as never, w, 0, 2);
     expect(b.y).toBe(10 * TILE + 2 + 2);   // 原样下落，未被抬到坡面
     expect(b.onGround).toBe(false);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SW-AW1b（2026-09-06）分派级回归：Windows 用户实报"平台没做锤变形"。
+// 根因 = Game.tryMine 的 isHammerTarget 缺平台臂 → 瞄准平台复位闩 + 整形门恒闭，
+// 坡循环整段死码。上文"状态机"用本地复算函数绕过了 Game 门（代码 PASS≠实机成立
+// 再犯）——本节走【真 Game.tryMine 分派】钉门。
+// 原版锚：IsAHammerTarget（Player.cs:45923-45930）→ IsTilePoundable（:45932-45943）；
+// ★Main.cs:8031-8032 平台 tileSolidTop/tileSolid 双 true（平台=solid，仓库数据面拆
+// 在 platform 旗故门需 PLATFORMS_SHEETS 补臂）；平台支 = Player.cs:46410-46445。
+import { Game } from '../src/core/Game';
+
+function mkHammerGame(w = 40, h = 20) {
+  const store = new TileStore(w, h);
+  const world = { store, w, h, flags: {}, chests: [] } as unknown as World;
+  const g = Object.create(Game.prototype) as unknown as Record<string, any>;
+  g.world = world;
+  g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {} };
+  g.tickCount = 100;
+  g.lastMineHitTick = -999;
+  g.hammerPoundRelease = true;
+  g.trackTile = 0;
+  g.mining = null;
+  g.sfx = { play: () => {}, playWavFile: () => true };
+  g.playSfxFile = () => true;
+  g.spawnParticles = () => {};
+  g.hitTiles = { addDamage: () => 0, clear: () => {} };
+  g.input = { mouseX: 8 * TILE, mouseY: 8 * TILE, rightDown: false, mouseDown: false, mouseHeld: false };
+  return { g, store };
+}
+
+describe('SW-AW1b 分派级：真 tryMine 锤门（旧版死码定罪）', () => {
+  it('孤立木平台四拍循环：整 → slope1 → slope2 → 半砖 → 整（闩逐步再武装）', () => {
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, PLAT, 0, 0);
+    for (const want of [1, 2, 0]) {
+      g.hammerPoundRelease = true;                    // 原版节拍：松开→再按的第一挥整形
+      (g as any).tryMine(8, 8, 0, 'hammer', 20);
+      g.lastMineHitTick = -999;                       // 逐步去节流
+      expect(store.slope[store.idx(8, 8)]).toBe(want);
+    }
+    expect(!!store.half[store.idx(8, 8)]).toBe(true); // 第三拍（slope2→CanPoundTile 门）→ 半砖
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(!!store.half[store.idx(8, 8)]).toBe(false); // 第四拍 → PoundTile 回整
+    expect(store.slope[store.idx(8, 8)]).toBe(0);
+  });
+
+  it('闩=false（按住期）→ 形不变——原版按住拆墙/松开整形节拍（poundRelease 门）', () => {
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, PLAT, 0, 0);
+    g.hammerPoundRelease = false;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.slope[store.idx(8, 8)]).toBe(0);
+    expect(!!store.half[store.idx(8, 8)]).toBe(false);
+  });
+
+  it('platform=solid 定谳臂：427 队伍平台同入锤目标可循环；16 铁砧/18 工作台非目标且复位闩（IsTilePoundable 对齐）', () => {
+    const TEAM = TILE_BY_KEY['v_427_red_team_platform']!;
+    const ANVIL = TILE_BY_KEY['anvil']!;
+    const BENCH = TILE_BY_KEY['workbench']!;
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, TEAM, 0, 0);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.slope[store.idx(8, 8)]).toBe(1);     // 427 在 PLATFORMS_SHEETS → 可整形
+    // ——铁砧/工作台：非锤目标 → 闩被复位（原版 :45997-46003 瞄准非目标复位）、形不变
+    for (const [key, id] of [['anvil', ANVIL], ['workbench', BENCH]] as const) {
+      store.setTileSilent(10, 8, id, 0, 0);
+      g.hammerPoundRelease = true;
+      (g as any).tryMine(10, 8, 0, 'hammer', 20);
+      expect(g.hammerPoundRelease).toBe(false);       // 复位闩
+      expect(!!store.half[store.idx(10, 8)]).toBe(false);
+      expect(store.slope[store.idx(10, 8)]).toBe(0);
+      void key;
+    }
+  });
+
+  it('方向感知走原版 Platforms 邻判：右实左空 → num=2 起步（slope2 先行）', () => {
+    const DIRT = TILE_BY_KEY['dirt']!;
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, PLAT, 0, 0);
+    store.setTileSilent(9, 8, DIRT, 0, 0);            // 右实
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.slope[store.idx(8, 8)]).toBe(2);     // num=2（贴墙楼梯朝向）
   });
 });

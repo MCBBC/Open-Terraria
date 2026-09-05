@@ -71,9 +71,23 @@ export async function settleWorldLiquids(
       sim.genWaterLine = world.genWaterLine;
       const d = world.genDungeonExempt;
       if (d) {
-        sim.dungeonWaterExempt = (x, y, w) =>
-          x >= d.x0 && x < d.x1 && y >= d.y0 && y < d.y1
-          && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
+        // ★IIIII210（ddual #99 定罪修复）：墙支原版=DungeonUtils.IsConsideredDungeonWall
+        //   (tile.wall, allDungeons:true)（Liquid.cs:189,DU.cs:1929-1950）＝wallDungeon
+        //   基线∪各座 genvars.isDungeonWall（per-seat 风格墙族含 SubStyles/ExtraWallTypes
+        //   ——dual 丛林座 204/205/206/207/15、雪座 71/40、沙座 216/223 等在册）；
+        //   界域支=InAnyPotentialDungeonBounds（Liquid.cs:187,各座 outer bounds 并集）。
+        //   旧版硬编码基线墙集+单座盒 ⇒ dual 丛林座域落水越 waterLine 误转岩浆（原版回水）
+        //   ＝#99 2241 格池差+8 罐 kill 集差根因。walls/boxes 由 liquidSettlePass 在
+        //   dual 世界附传（World.ts 字段注）；缺省 undefined=非 dual 旧语义逐位不变。
+        const boxes = d.boxes;
+        const walls = d.walls;
+        sim.dungeonWaterExempt = (x, y, w) => {
+          const inB = boxes
+            ? boxes.some((b) => x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1)
+            : (x >= d.x0 && x < d.x1 && y >= d.y0 && y < d.y1);
+          if (!inB) return false;
+          return walls ? walls[w] === true : (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
+        };
       }
     }
     // ★IIIII58：REMIX 落水分型带接线（Liquid.cs:182-185 首臂，恒改写型——

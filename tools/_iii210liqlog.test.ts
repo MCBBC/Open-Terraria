@@ -88,6 +88,47 @@ function cmp8(st: TileStore, xv: ReturnType<typeof dumpPre>) {
   };
   const proto = LiquidSim.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
   const oUpd = proto.updateLiquid;
+  // ---- WC 尾镜像（rig JJHook.AfterWaterCheck：sweep 清单 dump + "---WC n nl=.."）----
+  let wcCount = 0;
+  const oWc = proto.waterCheck;
+  proto.waterCheck = function (this: unknown) {
+    const r = oWc.apply(this, arguments);
+    if (!active) return r;
+    const sim = this as unknown as SimT;
+    const s = sim.world.store;
+    wcCount++;
+    const nl = sim.numLiquid, nb = sim.bufCount;
+    const buf: string[] = ['# x y delay kill amt lty'];
+    for (let k = 0; k < nl; k++) {
+      const e = sim.liquids[k]!;
+      const ti = e.y * s.w + e.x;
+      buf.push(`${e.x} ${e.y} ${e.delay} ${e.kill} ${s.liquid[ti]} ${s.liquidType[ti] === 0 ? 0 : s.liquidType[ti]! - 1}`);
+    }
+    buf.push(`# buf n=${nb}`);
+    writeFileSync(`${OUT}/j-entries-wc${wcCount}.txt`, buf.join('\n') + '\n');
+    if (wcCount === 1 || wcCount === 2) {
+      // 世界通道 wc 时刻快照（对 x86 K.wc1-s89.*）——入口清单≠湿格全 Womens（top-off 支不进列）
+      mkdirSync(`${OUT}/jdumpwc`, { recursive: true });
+      const typ = Buffer.alloc(N * 2), wal = Buffer.alloc(N * 2);
+      const act = Buffer.alloc(N), liq = Buffer.alloc(N), lt = Buffer.alloc(N), ia = Buffer.alloc(N);
+      for (let q = 0; q < N; q++) {
+        typ[q * 2] = SHEET[s.type[q]]! & 0xff; typ[q * 2 + 1] = (SHEET[s.type[q]]! >> 8) & 0xff;
+        act[q] = s.flags[q]! & 1;
+        wal[q * 2] = s.wall[q]! & 0xff; wal[q * 2 + 1] = (s.wall[q]! >> 8) & 0xff;
+        liq[q] = s.liquid[q]!;
+        lt[q] = s.liquidType[q] === 0 ? 0 : s.liquidType[q]! - 1;
+        ia[q] = (s.wire[q]! >>> 5) & 1;
+      }
+      writeFileSync(`${OUT}/jdumpwc/K.typ-wc${wcCount}`, typ);
+      writeFileSync(`${OUT}/jdumpwc/K.wal-wc${wcCount}`, wal);
+      writeFileSync(`${OUT}/jdumpwc/K.act-wc${wcCount}`, act);
+      writeFileSync(`${OUT}/jdumpwc/K.liq-wc${wcCount}`, liq);
+      writeFileSync(`${OUT}/jdumpwc/K.lty-wc${wcCount}`, lt);
+      writeFileSync(`${OUT}/jdumpwc/K.inact-wc${wcCount}`, ia);
+    }
+    lines.push(`---WC ${wcCount} nl=${nl} nb=${nb}`);
+    return r;
+  };
   proto.updateLiquid = function (this: unknown) {
     const r = oUpd.apply(this, arguments);
     if (!active) return r;
@@ -144,6 +185,25 @@ function cmp8(st: TileStore, xv: ReturnType<typeof dumpPre>) {
     }
     return r;
   };
+  // ---- SettleWaterAt S/L 事件流（镜像 rig SW_SETTLEEV：盒门 x[700,800] y[300,900]，
+  //      S=拾起 L=落点写回;JS type 为 store 域(1=水)→统一减 1 成 vanilla 0 基）----
+  const evLines: string[] = [];
+  const inBox = (x: number, y: number) => x >= 700 && x <= 800 && y >= 300 && y <= 900;
+  LiquidSim.settleEv = (kind: string, payload: string) => {
+    if (!active) return;
+    if (kind !== 'S' && kind !== 'L' && kind !== 'M' && kind !== 'F') return;
+    const f = payload.split('|');
+    const x = Number(f[0]), y = Number(f[1]);
+    if (!inBox(x, y)) return;
+    if (kind === 'M') {
+      // rig 在灌注后记 amt,JS 在灌注前记 → 只对齐坐标域（amt 差语义已知,定罪读 S/L）
+      evLines.push(`M|${x}|${y}|${f[2]}|${f[3]}`);
+    } else if (kind === 'F') {
+      evLines.push(`F|${x}|${y}|${f[2]}|${Number(f[3]) - 1}|${f[4]}|${f[5]}|${f[6]}`);
+    } else {
+      evLines.push(`${kind}|${x}|${y}|${f[2]}|${Number(f[3]) - 1}`);
+    }
+  };
   // ---- 槽头钩：『二次沉降』头装锚（capture + active=true,rel=0=rig PASS BEGIN 同锚）----
   g.__swI91Cap = (stRaw: unknown, gsRaw: unknown, _ch: unknown, name: string) => {
     if (name !== '二次沉降') return;
@@ -156,6 +216,7 @@ function cmp8(st: TileStore, xv: ReturnType<typeof dumpPre>) {
     writeFileSync(`${OUT}/snap99base/base_gs.json`, JSON.stringify(gsRaw));
     lines.push('---PASS BEGIN 99 Settle Liquids Again');
     rel = 0;
+    wcCount = 0;
     active = true;
   };
   try {
@@ -179,5 +240,6 @@ function cmp8(st: TileStore, xv: ReturnType<typeof dumpPre>) {
     proto.updateLiquid = oUpd;
   }
   writeFileSync(`${OUT}/j-liqlog.txt`, lines.join('\n') + '\n');
-  console.log(`liqlog lines=${lines.length} first=${lines[1] ?? lines[0]} last=${lines[lines.length - 1]}`);
+  writeFileSync(`${OUT}/j-settlev.txt`, evLines.join('\n') + '\n');
+  console.log(`liqlog lines=${lines.length} ev lines=${evLines.length} first=${lines[1] ?? lines[0]} last=${lines[lines.length - 1]}`);
 }, 600_000);
