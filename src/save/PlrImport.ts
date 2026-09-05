@@ -362,6 +362,15 @@ export class BinaryWriterLE {
     const big = BigInt(v);
     return this.i32(Number(big & 0xffffffffn)).i32(Number((big >> 32n) & 0xffffffffn));
   }
+  i16(v: number): this { const b = v | 0; this.chunks.push(b & 0xff, (b >>> 8) & 0xff); return this; }
+  u16(v: number): this { const b = v & 0xffff; this.chunks.push(b & 0xff, (b >>> 8) & 0xff); return this; }
+  u32(v: number): this { const b = v >>> 0; this.chunks.push(b & 0xff, (b >>> 8) & 0xff, (b >>> 16) & 0xff, (b >>> 24) & 0xff); return this; }
+  f64(v: number): this {
+    const dv = new DataView(new ArrayBuffer(8));
+    dv.setFloat64(0, v, true);
+    for (let i = 0; i < 8; i++) this.chunks.push(dv.getUint8(i));
+    return this;
+  }
   f32(v: number): this {
     const dv = new DataView(new ArrayBuffer(4));
     dv.setFloat32(0, v, true);

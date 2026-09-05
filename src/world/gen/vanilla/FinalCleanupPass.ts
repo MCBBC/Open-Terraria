@@ -114,11 +114,19 @@ function tileSolidT(t: number): boolean {
   return genSolidType(t);
 }
 
-/** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0 */
+/** WorldGen.SolidTile(cs:70876 int overload):active && tileSolid && !tileSolidTop
+ *  && !halfBrick && slope==0 && **!inActive**。
+ *  ★IIIII210（ddual #106 定罪修复）：末句 inActive 排除曾整缺——地牢 PitTrap 的
+ *  Falling 伪装柱（inActive 淤雪 224 柱）被当实心 ⇒ ③ 悬空落体柱静态化支整列跳过，
+ *  随后 FinalSeedCleanup 的 resetToType 全清写（liquid/wire 擦除+224/161→147 错位
+ *  静态化）取而代之 ⇒ #106 T147>224×52/T224>147×23/L255>0×21 @(2584,430)。
+ *  vanilla SolidTile 两 overload（Tile 版 cs:70729 / int 版 cs:70886）均含 !inActive，
+ *  本文件四消费位（cs:53786/Check 族杀门×2/③入口门）语义同一。 */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if ((st.wire[i] >>> 5) & 1) return false;   // !inActive（nactive 腿,cs:70886）
   const d = TILE_DEFS[st.type[i]];
   return !!d && tileSolidT(st.type[i]) && !d.platform && !st.half[i] && st.slope[i] === 0;
 }

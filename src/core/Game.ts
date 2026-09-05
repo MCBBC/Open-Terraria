@@ -162,7 +162,7 @@ for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBu
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
-import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
+import { availableRecipes, collectOwnedItems, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
@@ -5098,6 +5098,17 @@ export class Game implements GameHooks {
         return;
       }
       // Hotbar1-10（PlayerInput.cs:1920-1929 D1-D10；本仓 Digit1-Digit0 同键位）
+      // ★SW-AV2 2026-09-06 裁决（用户问「为何要先放进快捷栏才能放置」）：原版本相。
+      //   直接使用/放置的作用物品 = HeldItem = inventory[selectedItem]（Player.cs:3835-3837），
+      //   用户选槽通道全部钳 0-9：数字键 Hotbar1-10（Player.cs:25289-25328）/ 滚轮
+      //   ClampHotbarOffset（:32134-32145 while>9 减 10）/ 热栏点击（Main.cs:44336-44359
+      //   GUIHotbarDrawInner 循环 i<10）/ 手柄转盘 Bindings[i]=i（:633）。SelectedItemState
+      //   Select 的 ≥10 支（:469-501）只有三条瞬态源：Shift 智选 SmartSelect_PickToolForStrategy
+      //   （:17588 扫 0-49 自动换斧/镐/锤/火把,松键还原 Update :513-521）、光标持物镜像槽 58
+      //   （PickItemSelectionOverride :17528-17532 + dropItemCheck :5122 inventory[58]=
+      //   mouseItem.Clone——左键点世界=用光标物,本仓未实现该支,点击世界=丢出,登记）
+      //   、AFK 自动风筝。背包 10-49 槽永远不能被直接选中使用——钉面测试
+      //   tests/sw-av2-chest-crafting.test.ts「使用源门钉面」防回退。
       if (this.player && !this.input.uiBlocking) {
         const digit = /^Digit([0-9])$/.exec(code);
         if (digit) {
@@ -32484,8 +32495,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 商店出售（Player.SellItem Player.cs:34716-34878 + ItemSlot.OverrideLeftClick
-   *  cursorOverride==10 分支 ItemSlot.cs:780-798）：Shift+左键背包格整叠卖出。
-   *  返回是否消费了该次点击——原版该分支恒 return true（:798），卖不掉也不回落
+   *  cursorOverride==10 分支 ItemSlot.cs:823-841）：Ctrl+左键背包格整叠卖出
+   *  （★SW-AU2 2026-09-06 更正：GetSellOrTrash 走 Quick Trash 修饰键 = Options
+   *  缺省 "Quick Trash: Left Control"（IngameOptions menu[224]，ItemSlot.cs:28
+   *  DisableLeftShiftTrashCan=true），Shift 在缺省档只做快移不卖不扔）。
+   *  返回是否消费了该次点击——原版该分支恒 return true（:840-841），卖不掉也不回落
    *  垃圾桶；调用方（UI.shiftClick）据此短路 */
   npcShopSell(slot: number): boolean {
     if (!this.npcShopOpen) return false;          // GetSellOrTrash :187-190 店外走垃圾桶
@@ -39547,7 +39561,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       banks: p.banks.map((b) => ({ items: b })),   // bank 裸数组 → CraftItemSource 包装
       voidBagHeld: heldVids.has(4131),
       voidVaultHeld: heldVids.has(5325),
-      openIsBank4: false,   // 本仓开 bank 走 openChest({x:-2-bi}) 而非 chest 槽——虚空袋重复计入门不适用
+      // SW-AV2 2026-09-06：虚空袋门 openIsBank4 由 openChest.x===-5 自动派生
+      // （vanilla Recipe.cs:382 `player.useVoidBag() && player.chest != -5`——开
+      //  placed vault/透镜面板时 bank4 已随开箱容器入列,不再走虚空袋支；
+      //  旧恒 false 的备案推理有误）
       store: this.world.store,
       centerTileX: Math.floor(p.cx / TILE),
       centerTileY: Math.floor(p.cy / TILE),
@@ -39562,6 +39579,15 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       mechdusa: (!!this.world.seedFlags.remix && !!this.world.seedFlags.getGoodWorld) || !!this.world.seedFlags.everything,
       torchGod: !!this.world.flags.unlockedBiomeTorches,
     }, this._craftSourcesCache());
+  }
+
+  /** 材料源聚合持有量表（Recipe._ownedItems；GetAvailableItemCount Recipe.cs:313-320
+   *  的数据面）。UI 行内材料统计/满足度必须取此表而非 inv.countOf——否则附近箱/bank
+   *  材料在统计里隐形（SW-AV2 2026-09-06 用户实报「宝箱里的物品不参与制作」根因：
+   *  合成扣料链早已接箱,唯 UI 统计面只读背包）。与 vanillaAvailableRecipes 同 tick
+   *  缓存源（_craftSourcesCache）→ 同一刷新内两表恒一致 */
+  vanillaCraftOwned(): Map<number, number> {
+    return collectOwnedItems(this.player.inv, this._craftSourcesCache());
   }
 
   /** 执行原版配方合成（CraftingRequests.CraftLocally 主干）：扣材料→成品入背包 */

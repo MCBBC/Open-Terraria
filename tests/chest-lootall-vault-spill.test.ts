@@ -57,11 +57,11 @@ function driveOpen(chest: { x: number; y: number; items: Slot[] }): { plays: str
   const plays: string[] = [];
   const fake = Object.create(UI.prototype) as unknown as {
     openChest: typeof chest;
-    game: { player: Player; sfx: { play(n: string): void } };
+    game: { player: Player; sfx: { play(n: string): void }; achievements: { notifyItemPickup(v: number): void } };
     refreshAll(): void;
   };
   fake.openChest = chest;
-  fake.game = { player: vaultPlayer(), sfx: { play: (n) => plays.push(n) } };
+  fake.game = { player: vaultPlayer(), sfx: { play: (n) => plays.push(n) }, achievements: { notifyItemPickup: () => {} } };   // SW-AU2 重钉：onPickup 成就回执（UI.ts:4284）需桩
   fake.refreshAll = () => { refreshCount++; };
   fillBag(fake.game.player);                       // 全满+半堆尾,制造确定分流面
   (Object.getPrototypeOf(fake) as { chestLootAll(this: unknown): void }).chestLootAll.call(fake);
@@ -75,7 +75,7 @@ describe('① UI 生产接线（红队 F1 的"零接线"主张钉死）', () => 
     // 调用链面：settings 二选一 → lootAllFromContainer,-5 支收藏锁随入参携带
     expect(srcMatch(/const moved = lootAllFromContainer\(/)).toBe(true);
     expect(srcMatch(/chestSettingsAllowsVault\(chest\.x\)\s*\?[\s\S]*depositIntoVoidVault/)).toBe(true);
-    expect(srcMatch(/\{ skipFavorited: chest\.x === -5 \}/)).toBe(true);
+    expect(srcMatch(/\{ skipFavorited: chest\.x === -5,/)).toBe(true);   // SW-AU2 重钉：-5 收藏锁入参（onPickup 成就回执后续键）
     // 库函数面：QuickStacking 导出两符号（非测试孤挂）
     expect(srcMatch(/export function chestSettingsAllowsVault/, '../src/stats/QuickStacking.ts')).toBe(true);
     expect(srcMatch(/export function lootAllFromContainer/, '../src/stats/QuickStacking.ts')).toBe(true);

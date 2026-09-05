@@ -15,7 +15,10 @@ import { mainDifficulty, GDL } from '../stats/ScaleStats';
  *  1.4 起原版无 10 槽箱；曾用 10 = 容量 1/4 + wld 导入静默丢第 11-40 格,R21-3） */
 export const CHEST_MAX_ITEMS = 40;
 
-export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number } | null>; locked?: boolean; }
+/** ★SW-AU2 2026-09-06 items 元素并入 favorited/placeStyle 可选位：银行/虚空袋条目
+ *  原版随 .plr 存收藏标记（Player.cs:55515 bank4 favorited 序列化），箱格进出清/
+ *  保标记面（ItemSlot.cs:362-366 MouseItemSwap）需该数据位在容器面可达 */
+export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean; placeStyle?: number } | null>; locked?: boolean; }
 
 /** 世界尺寸档（原版 WorldGen.GetWorldSize cs:6518）：≤4200→0 小 / ≤6400→1 中 / 其余→2 大。
  *  UIWorldCreation 三档 = 4200×1200 / 6400×1800 / 8400×2400（WorldGen.cs:11163）。 */

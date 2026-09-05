@@ -24,7 +24,7 @@ const BOUND_ID_MAP: Record<number, { key: string; bound: boolean }> = {
   589: { key: 'golfer', bound: true },
   534: { key: 'tax_collector', bound: true },
 };
-const TOWN_NPC_KEY_BY_ID: Record<number, { key: string; bound: boolean }> = {
+export const TOWN_NPC_KEY_BY_ID: Record<number, { key: string; bound: boolean }> = {
   ...BOUND_ID_MAP,
   ...Object.fromEntries(Object.entries(TOWN_NPC_IDS).map(([k, v]) => [v.id, { key: k, bound: false }])),
 };
@@ -917,7 +917,7 @@ const vanillaTileNames = vanillaData.tileNames ?? {};
 const vanillaItemNames = vanillaData.itemNames ?? {};
 
 /** half + slope → blockType 单字节(原版 Tile.blockType 编码) */
-function combineHalfSlope(half: Uint8Array, slope: Uint8Array): Uint8Array {
+export function combineHalfSlope(half: Uint8Array, slope: Uint8Array): Uint8Array {
   const out = new Uint8Array(half.length);
   for (let i = 0; i < half.length; i++) {
     out[i] = half[i] ? 1 : (slope[i] >= 1 && slope[i] <= 4 ? slope[i] + 1 : 0);

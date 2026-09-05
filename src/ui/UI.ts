@@ -8,7 +8,7 @@ import { isFunctionalTileItem } from '../world/evolution/PlantRules';
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
-import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, availableItemCountFor, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
@@ -136,8 +136,13 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
-import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts } from '../items/Inventory';
 import { chestSettingsAllowsVault, lootAllFromContainer } from '../stats/QuickStacking';
+import {
+  slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
+  CAN_FAVORITE_AT, CAN_LOADOUT_SHARE_AT, CAN_SHARE_AT, RETAIN_FAVORITE_ON_MOVE_AT,
+  type SlotWhereLike,
+} from './SlotActions';   // SW-AU2 2026-09-06 Alt/Shift/Ctrl 槽位动作 1:1 路由
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
@@ -1286,52 +1291,17 @@ export class UI {
         this.splitHalf(i, where);
         return;
       }
-      // Shift+左键（GetAlternateClickAction :563-662）：背包→箱子/装备→卸下/箱内→背包
-      if (e.shiftKey && !e.altKey) {
-        this.shiftClick(i, where);
-        return;
-      }
-      // Alt+左键（OverrideHover :533-561）：背包/钱币/弹药格=收藏/取消（favorited 禁
-      // Shift 转移）;装备/染料格=跨配装共享开关（R4-15,canLoadoutShareAt[8-12]
-      // IS57:367-371 → ToggleLoadoutShare :851-861：置 favorited+音12+
-      // ClearSlotShareInOtherLoadouts :863-884 同槽仅一套可共享）。★misc 族原版
-      // 无任何 Alt 语义（canFavoriteAt 仅 0/1/2/32,R4-15③ 已清零=落空走常规点击）
-      if (e.altKey && !e.shiftKey) {
-        const inv = this.game.player.inv;
-        if (where === 'inv' && i < 58) {
-          const cur = inv.slots[i];
-          if (cur) {
-            cur.favorited = !cur.favorited;
-            this.game.sfx.play('menuTick', 1);
-            this.refreshAll();
-            return;
-          }
-        } else if (where === 'armor' || where === 'dye') {
-          // ★misc/miscDye 原版无任何 Alt 语义（canFavoriteAt 仅 context 0/1/2/32,
-          // IS57:358-361;canLoadoutShareAt 仅 8-12,:367-371）——此前 toggle=R4-15
-          // 登记偏离,清零：Alt 在杂项格落空走常规点击/拖拽（原版 Alt 不抑制普通
-          // 点击）;旧档残留收藏由 sanitizeEquipStacks 剥除
-          const cur = this.slotContent(where, i);
-          if (cur) {
-            cur.favorited = !cur.favorited;
-            // DisableLoadoutShareHint :857-860（R4-14 持久化清偿）——原版 :391 有
-            // if(ShowLoadoutShareHint) 卫门,已熄则不触发 emit/防抖写盘
-            if (cur.favorited && options.data.showLoadoutShareHint) {
-              void options.set('showLoadoutShareHint', false);
-            }
-            if (cur.favorited) {
-              const backups = inv.loadouts.map((l) => (where === 'armor' ? l.armor : l.dye));
-              for (const arr of backups) {
-                const b = arr[i];
-                if (b) b.favorited = false;
-              }
-            }
-            this.game.sfx.play('menuTick', 1);
-            this.refreshAll();
-            return;
-          }
-        }
-      }
+      // ★SW-AU2 2026-09-06 Alt/Shift/Ctrl+左键槽位动作 1:1。优先级链 =
+      //  ItemSlot.OverrideHover :571-599（Alt=FavoriteKey（Main.cs:67607 缺省
+      //  LeftAlt）：聊天分享→收藏；语境不收藏再落 GetAlternateClickAction）→
+      //  GetAlternateClickAction :601-700（Ctrl Quick Trash :609 先于 Shift 快移
+      //  :616；收藏物/空格恒 null :604）→ OverrideLeftClick :702-843 分派。
+      //  路由表/执行器在 SlotActions.ts；false=语境无动作 → 回落普通点击
+      //  （dragFrom：原版无替代目标时 Shift+点=普通拾取 LeftClick case-0 :906）。
+      //  ★关包快捷栏（Main.cs:44374 只 Draw 不 Handle）＝无 Alt/Shift/Ctrl 语义
+      const panelOpen = !!this.invPanel && this.invPanel.style.display === 'block';
+      if (e.altKey && this.altSlotClick(i, where, panelOpen)) return;
+      if ((e.shiftKey || e.ctrlKey) && this.altMoveClick(i, where, e.shiftKey, e.ctrlKey, panelOpen)) return;
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
     // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
@@ -1458,79 +1428,176 @@ export class UI {
     this.game.achNotifyEquipChanged();
   }
 
-  /** Shift+左键快速转移（GetAlternateClickAction :563-662 主干）：
-   *  开箱→入箱（仅堆已有或空格）；装备/配饰/染料/杂项→卸回背包；箱内→背包；背包内→垃圾桶 */
-  private shiftClick(i: number, where: SlotWhere): void {
-    const inv = this.game.player.inv;
-    if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
-      // Unequip（:634-649）：卸回背包（AlternateClickAction.Unequip=7 → ItemSlot.cs:763-768
-      // GetItem(QuickTransferFromSlot) → NotifyItemPickup——落背包才发,case-0 语义）
-      const arr = this.equipArray(where);
-      const cur = arr[i];
-      if (!cur || cur.favorited) return;
-      const left = inv.add(cur.id, cur.stack);
-      if (left === 0) arr[i] = null;
-      const picked = cur.stack - Math.max(0, left);
-      const uv = vidOf(cur.id);
-      if (picked > 0 && uv > 0) this.game.achievements.notifyItemPickup(uv);
-      this.refreshAll();
-      return;
+  /** ★SW-AU2 2026-09-06 Alt+左键（FavoriteKey，Main.cs:67607 缺省 LeftAlt）语义：
+   *  OverrideHover :571-599 优先级（聊天分享 :583-587 → 收藏/共享 :588-592）+
+   *  OverrideLeftClick cursorOverride 2/3 分派 :709-730。返回 true=点击已消费；
+   *  false=语境无 Alt 动作（:577 空格早退 / 语境域外）→ 调用方回落普通点击。
+   *  ★misc/miscDye 族无任何 Alt 语义（canFavoriteAt 仅 0/1/2/32 :358-361、
+   *  canLoadoutShareAt 仅 8-12 :367-371，R4-15③）→ 落空走常规点击。★关包快捷栏
+   *  context 13（Main.cs:44374 无 Handle）同落空——Alt+点选中栏位不收藏 */
+  private altSlotClick(i: number, where: SlotWhere, panelOpen: boolean): boolean {
+    const cur = this.slotContent(where, i);
+    if (!cur) return false;                                  // :577 IsAir return
+    const ctx = slotContext(where, i, panelOpen);
+    // 聊天分享（:583-587 drawingPlayerChat && canShareAt → cursorOverride 2 →
+    // :709-716 ChatManager.AddChatText 插物品 tag + SoundID 12）
+    if (this.game.chatInput?.isOpen && CAN_SHARE_AT.includes(ctx)) {
+      this.game.insertChatItemTag(vidOf(cur.id));
+      this.game.sfx.play('menuTick', 1);
+      return true;
     }
-    if (where === 'inv') {
-      const cur = inv.slots[i];
-      if (!cur || cur.favorited) return; // 收藏禁转移（:566）
-      if (this.openChest) {
-        // TryPlacingInChest（QuickStack 语义：先合并箱内已有类型再空格）
-        const chest = this.openChest;
-        let moved = 0;
-        for (let k = 0; k < chest.items.length; k++) {
-          const cs = chest.items[k];
-          if (cs && cs.id === cur.id && cs.stack < ITEM_DEFS[cur.id].maxStack) {
-            const put = Math.min(ITEM_DEFS[cur.id].maxStack - cs.stack, cur.stack);
-            cs.stack += put; cur.stack -= put; moved += put;
-            if (cur.stack <= 0) break;
-          }
+    if (CAN_FAVORITE_AT.includes(ctx)) {                     // :717-723 ToggleFavorited
+      cur.favorited = !cur.favorited;
+      this.game.sfx.play('menuTick', 1);                     // SoundID 12（:848）
+      this.refreshAll();
+      return true;
+    }
+    if (CAN_LOADOUT_SHARE_AT.includes(ctx)) {                // :724-727 ToggleLoadoutShare
+      cur.favorited = !cur.favorited;
+      this.game.sfx.play('menuTick', 1);                     // SoundID 12（:855）
+      if (cur.favorited) {
+        // DisableLoadoutShareHint :857-860（R4-14 持久化清偿）——原版 :391 有
+        // if(ShowLoadoutShareHint) 卫门,已熄则不触发 emit/防抖写盘
+        if (options.data.showLoadoutShareHint) {
+          void options.set('showLoadoutShareHint', false);
         }
-        for (let k = 0; k < chest.items.length && cur.stack > 0; k++) {
-          if (!chest.items[k]) { chest.items[k] = cur; inv.slots[i] = null; return; }
+        // ClearSlotShareInOtherLoadouts :863-884：同槽仅一套可共享
+        const inv = this.game.player.inv;
+        const backups = inv.loadouts.map((l) => (where === 'armor' ? l.armor : l.dye));
+        for (const arr of backups) {
+          const b = arr[i];
+          if (b) b.favorited = false;
         }
-        if (cur.stack <= 0) inv.slots[i] = null;
-        if (moved > 0 || !inv.slots[i]) this.refreshAll();
-        return;
       }
-      // NPC 商店开着 → 卖出（GetAlternateClickAction :589-626 → GetSellOrTrash
-      //  ItemSlot.cs:185-196：npcShop>0 时 Sell 优先于垃圾桶；钱币 71-74 返回 null
-      //  = 不动作——与箱子的优先级同原版：chest != -1 分支在 npcShop 之前判定）
-      if (this.game.npcShopOpen) {
-        if (coinIndexOf(cur.id) >= 0) return;   // :191-194 钱币豁免（不卖也不扔）
+      this.refreshAll();
+      return true;
+    }
+    return false;
+  }
+
+  /** ★SW-AU2 2026-09-06 Shift/Ctrl+左键快移动作：GetAlternateClickAction :601-700
+   *  路由 + OverrideLeftClick cursorOverride 6/7/8/9/10 分派 :702-843。返回 true=
+   *  已消费（sell 支原版恒 return true :840-841——卖不掉也不回落）；false=语境无
+   *  动作 → 普通点击（拾取/选中）。缺省设置面（Options :28-30 = "Quick Trash:
+   *  Left Control" 档）：Shift 只做快移（无去处=无动作），Ctrl 做垃圾桶/卖出 */
+  private altMoveClick(i: number, where: SlotWhere, shift: boolean, ctrl: boolean, panelOpen: boolean): boolean {
+    const cur = this.slotContent(where, i);
+    const inv = this.game.player.inv;
+    const chest = this.openChest;
+    const maxStack = cur ? (ITEM_DEFS[cur.id]?.maxStack ?? 1) : 1;
+    const plan = planAlternateClick({
+      context: slotContext(where, i, panelOpen),
+      itemAir: !cur,
+      favorited: !!cur?.favorited,
+      isCoin: cur ? coinIndexOf(cur.id) >= 0 : false,
+      shopOpen: this.game.npcShopOpen,
+      chestOpen: !!chest,
+      chestCanTake: !!cur && !!chest && chestCanTakeJustCheck(chest.items, cur.id, maxStack),
+      canTakeToInventory: !!cur && canTakeToPersonalInventory(inv.slots, cur.id, maxStack,
+        coinIndexOf(cur.id) >= 0, ammoSlotAccepts(cur.id)),
+      shiftDown: shift,
+      controlDown: ctrl,
+    });
+    if (!plan) return false;
+    switch (plan.kind) {
+      case 'sell': {
+        // cursorOverride 10（:823-841）：SellItem 入店，恒消费（:840 return true）
         this.game.npcShopSell(i);
         this.refreshAll();
-        return;
+        return true;
       }
-      // 无箱→垃圾桶（覆盖旧内容，OverrideLeftClick cursorOverride 6 :689-706）
-      inv.trash = cur;
-      inv.slots[i] = null;
-      // 音 = TrashItem+Grab 双音（:692-706，同垃圾桶直丢路径；曾 menuTick 偏差）
-      this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);
-      this.game.sfx.play('pickup', 1);
-      this.refreshAll();
-      return;
+      case 'trash': {
+        // cursorOverride 6（:731-748）：trashItem = item.Clone() 覆盖旧桶 +
+        // item.TurnToAir()，TrashItem+Grab 双音（同垃圾桶直丢路径）；context 6
+        // 不保留收藏（retainFavoriteOnMoveAt :362-366 → MouseItemSwap 清标记）
+        const item = { ...cur!, favorited: false };
+        if (where === 'chest') chest!.items[i] = null;
+        else inv.slots[i] = null;
+        inv.trash = item;
+        this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);
+        this.game.sfx.play('pickup', 1);
+        this.refreshAll();
+        return true;
+      }
+      case 'toChest': {
+        // cursorOverride 9（:785-821 else 支 :818）→ ChestUI.TryPlacingInChest
+        // （ChestUI.cs:1205-1285 justCheck:false）——路由面已过 justCheck 门
+        if (cur && chest) this.shiftDepositToChest(i, cur);
+        return true;
+      }
+      case 'fromChest': {
+        // cursorOverride 8（:772-784）：GetItem(QuickTransferFromSlot) 箱→背包，
+        // 落袋才发 NotifyItemPickup + GetItem 内 SoundID 7（Player.cs:39755）
+        if (!chest || !cur) return true;
+        const left = inv.add(cur.id, cur.stack, cur.prefix, (cur as { placeStyle?: number }).placeStyle);
+        const picked = cur.stack - Math.max(0, left);
+        if (left === 0) chest.items[i] = null;
+        else cur.stack = left;
+        if (picked > 0) {
+          const cv = vidOf(cur.id);
+          if (cv > 0) this.game.achievements.notifyItemPickup(cv);
+          this.game.sfx.play('pickup', 1);
+        }
+        this.refreshAll();
+        return true;
+      }
+      case 'unequip': {
+        // cursorOverride 7（:749-771）：GetItem(QuickTransferFromSlot) 卸回背包。
+        // 落袋音 GetItem 7（:39755）+ 支尾 SoundID 12（:769）
+        if (!cur) return true;
+        const arr = this.equipArray(where);
+        const left = inv.add(cur.id, cur.stack, cur.prefix, (cur as { placeStyle?: number }).placeStyle);
+        const picked = cur.stack - Math.max(0, left);
+        if (left === 0) arr[i] = null;
+        else if (arr[i]) arr[i]!.stack = left;   // ★残量写回（旧实现漏写=整叠复制进槽）
+        if (picked > 0) {
+          const uv = vidOf(cur.id);
+          if (uv > 0) this.game.achievements.notifyItemPickup(uv);
+          this.game.sfx.play('pickup', 1);
+          this.game.sfx.play('menuTick', 1);
+        }
+        this.refreshAll();
+        return true;
+      }
+      case 'toBackpack':
+      case 'creativeDupe':
+        // 语境 5/6/7/29（重铸格/垃圾桶/向导格/旅程无限复制格）——本仓垃圾桶支在
+        // 垃圾桶槽监听器直连（SlotWhere 无垃圾桶域），其余槽未建模 → 不可达
+        return false;
     }
-    if (where === 'chest') {
-      // TransferFromChest（:626-633）：箱→背包（ItemSlot.cs:763-768 cursorOverride 7
-      // GetItem → NotifyItemPickup——落背包才发,case-0 语义,按实际落袋数）
-      const chest = this.openChest;
-      if (!chest) return;
-      const cur = chest.items[i];
-      if (!cur) return;
-      const left = inv.add(cur.id, cur.stack);
-      if (left === 0) chest.items[i] = null;
-      else cur.stack = left;
-      const picked = cur.stack - Math.max(0, left);
-      const cv = vidOf(cur.id);
-      if (picked > 0 && cv > 0) this.game.achievements.notifyItemPickup(cv);
-      this.refreshAll();
+  }
+
+  /** ★SW-AU2 2026-09-06 快移入箱（ChestUI.TryPlacingInChest :1205-1285
+   *  justCheck:false 段 1:1）：先并箱内同型余堆（:1219-1256 逐堆、SoundID 7），
+   *  余量克隆进首空格（:1258-1283、SoundID 7）——入箱即清收藏（context 3 不在
+   *  retainFavoriteOnMoveAt :362-366，MouseItemSwap :1230-1234 双端清） */
+  private shiftDepositToChest(i: number, cur: { id: number; stack: number; prefix?: number; placeStyle?: number; favorited?: boolean }): void {
+    const chest = this.openChest;
+    if (!chest || cur.stack <= 0) return;
+    const inv = this.game.player.inv;
+    const max = ITEM_DEFS[cur.id]?.maxStack ?? 1;
+    let moved = 0;
+    if (max > 1) {
+      for (const cs of chest.items) {
+        if (!cs || cs.id !== cur.id || cs.stack >= max) continue;
+        const put = Math.min(max - cs.stack, cur.stack);
+        cs.stack += put; cur.stack -= put; moved += put;
+        if (cur.stack <= 0) break;
+      }
     }
+    if (cur.stack > 0) {
+      for (let k = 0; k < chest.items.length; k++) {
+        if (!chest.items[k]) {
+          chest.items[k] = { ...cur, favorited: false } as ChestData['items'][number];   // item.Clone()（:1273）——SW-AV2 2026-09-06 仅补类型断言（箱槽元素型无 favorited;运行时语义原样,pre-existing 修复）
+          inv.slots[i] = null;                             // item.SetDefaults(0)（:1274）
+          moved += cur.stack;
+          break;
+        }
+      }
+    }
+    if (cur.stack <= 0) inv.slots[i] = null;
+    if (moved > 0) this.game.sfx.play('pickup', 1);        // SoundID 7（:1237/:1272）
+    this.refreshAll();
   }
 
   // ---- 拖拽系统：按下起点 + 光标持有物（ghost 跟随） ----
@@ -1666,8 +1733,12 @@ export class UI {
     else if (where === 'misc') this.game.player.inv.miscEquips[i] = null;
     else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
+    // ★SW-AU2 2026-09-06 收藏标记保留域 = retainFavoriteOnMoveAt（ItemSlot.cs:362-366，
+    // 背包族 0/1/2 + 虚空袋 32 + 重铸 5）：MouseItemSwap :1227-1235 语境不在表内则
+    // 双端清 favorited——箱/装备/染料/杂项面取出即清（装备面清标记=共享状态终结，
+    // GetEffectiveArmor 只认收藏件 :240-251）；本仓虚空袋并入 chest 面按 3 处理（登记债）
     if (this.heldStack) this.heldStack.stack += cur.stack;
-    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: cur.favorited, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②）
+    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: where === 'inv' ? cur.favorited : false, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②；收藏域见上 SW-AU2 注）
     // 拿取/合并音（ItemSlot.cs:987-989：转移后光标或格子有物 → SoundID 7 Grab）
     this.game.sfx.play('pickup', 1);
     this.refreshAll();
@@ -1782,10 +1853,10 @@ export class UI {
       // 此前整叠入槽+同型合并 = 99 翅膀全上身（2026-08-24 用户截图实报）
       if (!cur) {
         if (this.heldStack.stack === 1) {
-          arr[i] = this.heldStack;
+          arr[i] = { ...this.heldStack, favorited: false };   // ★SW-AU2：装备/染料/杂项语境（8-12/16-20/33）不保留收藏（:362-366）
           this.heldStack = null;
         } else {
-          arr[i] = { ...this.heldStack, stack: 1 };
+          arr[i] = { ...this.heldStack, stack: 1, favorited: false };
           this.heldStack.stack--;
         }
         // 空装备槽放置音（原版 case1/2 MouseItemSwap 后 SoundID 7 :1018）
@@ -1793,8 +1864,8 @@ export class UI {
       } else if (this.heldStack.stack === 1 && cur.id !== this.heldStack.id) {
         // 交换前反向校验（取出的物品总是合法的，防御性保留）
         if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
-        arr[i] = this.heldStack;
-        this.heldStack = cur;
+        arr[i] = { ...this.heldStack, favorited: false };
+        this.heldStack = { ...cur, favorited: false };   // ★SW-AU2：MouseItemSwap 双端清（:1230-1234）——装备面取出到光标同清
         // R4-39（AfterItemSwap,IS57:1975-1985）：装备/杂项槽交换后播音——新入槽件
         // ∈换型表（含 1457 新 6168/6169/6193/6194）→ SoundID 22(Unlock),否则 7(Grab)
         const nv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
@@ -1838,9 +1909,12 @@ export class UI {
     } else {
       const chest = this.openChest;
       if (!chest) return;
+      // ★SW-AU2 2026-09-06 箱语境（3/4）不保留收藏（retainFavoriteOnMoveAt
+      //  ItemSlot.cs:362-366 → MouseItemSwap :1230-1234 双端清）——放入箱与箱中
+      //  取出到光标的双向面同清
       const cur = chest.items[i];
       if (!cur) {
-        chest.items[i] = this.heldStack;
+        chest.items[i] = { ...this.heldStack, favorited: false };
         this.heldStack = null;
       } else if (cur.id === this.heldStack.id) {
         const max = ITEM_DEFS[cur.id].maxStack;
@@ -1849,8 +1923,8 @@ export class UI {
         this.heldStack.stack -= put;
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else {
-        chest.items[i] = this.heldStack;
-        this.heldStack = cur;
+        chest.items[i] = { ...this.heldStack, favorited: false };
+        this.heldStack = { ...cur, favorited: false };
       }
       // 箱格放置/合并/交换音（同 :987-989 → SoundID 7）
       this.game.sfx.play('pickup', 1);
@@ -2139,6 +2213,16 @@ export class UI {
       } else if (options.data.showLoadoutShareHint) {   // ShowLoadoutShareHint（options 持久化,R4-14 清偿;Main.cs:21517 同门）
         linesHtml += `<br><span style="color:rgba(255,231,69,0.75)">${Lang.text('UI.ItemLoadoutShareHint')}</span>`;
       }
+    }
+    // ★SW-AU2 2026-09-06 收藏两行（Main.cs:20841-20845 `else if (item.favorited)`：
+    // tip[56] "Marked as favorite" + tip[57] "Quick trash, stacking, and selling
+    // will be blocked" = LegacyTooltip.56/57）——与 LoadoutShare 行族同一 if/else
+    // 链（:20824/:20841），收藏件走装备/染料行时不重复出这两行
+    else if (s.favorited) {
+      linesHtml += `<br>${Lang.text('LegacyTooltip.56')}`;
+      linesHtml += `<br>${Lang.text('LegacyTooltip.57')}`;
+      // :20845-20852 钱袋/虚空袋族收藏时加 "CannotBePlacedInsideItself" 行——
+      // 本仓容器族不产生收藏标记（Alt 域外），缺此行零行为差（登记）
     }
     for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
       const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫
@@ -3072,7 +3156,9 @@ export class UI {
     // 原版 Trash 槽=覆盖销毁（ItemSlot.cs:692-701：trashItem=item.Clone() 旧物直接
     // 丢弃 + TrashItem/Grab 双音）——曾做同型合并/异型交换，旧物回手上="遗弃"
     // 语义失效（2026-08-21 用户报"无法遗弃任何东西"）
-    this.game.player.inv.trash = { ...this.heldStack };
+    // ★SW-AU2 2026-09-06 context 6 不在 retainFavoriteOnMoveAt（:362-366）→
+    //  MouseItemSwap :1230-1234 清 favorited（入桶即失收藏标记，原版同）
+    this.game.player.inv.trash = { ...this.heldStack, favorited: false };
     this.heldStack = null;
     this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);   // SoundID.TrashItem
     this.game.sfx.play('pickup', 1);                                 // SoundID 7 Grab（:698）
@@ -3460,8 +3546,26 @@ export class UI {
     const trash = el('div', 'sw-slot trash sw-trash');
     trash.style.cssText = 'width:44px; height:44px; flex:none;'
       + 'background-image:url(sprites/vanilla/Inventory_Back7.png);';
+    trash.addEventListener('contextmenu', (e) => e.preventDefault());   // SW-AU2：Ctrl+点(Mac=长按右键菜单面)在槽域同被吞
     trash.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      // ★SW-AU2 2026-09-06 Shift+左键垃圾桶 = 桶→背包（GetAlternateClickAction
+      //  :688-696 case 6 → cursorOverride 7 → OverrideLeftClick :764-770
+      //  GetItem(QuickTransferFromSlot)：落袋 GetItem SoundID 7 + 支尾 SoundID 12；
+      //  残量留桶 = inv[slot] 即 GetItem 返回值）。右键面原版无（RightClick :1632
+      //  `context == 6` 早退）；Ctrl 原版不在 Quick Trash 域（:611 仅 0-4/7/32）→ 取回
+      if (!e.button && e.shiftKey && !e.altKey && !e.ctrlKey && this.game.player.inv.trash) {
+        const t = this.game.player.inv.trash;
+        const left = this.game.player.inv.add(t.id, t.stack, t.prefix, (t as { placeStyle?: number }).placeStyle);
+        if (left < t.stack) {
+          this.game.player.inv.trash = left > 0 ? { ...t, stack: left } : null;
+          this.game.sfx.play('pickup', 1);
+          this.game.sfx.play('menuTick', 1);
+        }
+        this.paintTrash();
+        this.refreshAll();
+        return;
+      }
       if (this.heldStack) {
         this.placeTrash();
       } else if (this.game.player.inv.trash) {
@@ -4836,8 +4940,9 @@ export class UI {
    *  滚动只滚列表不换选中，材料格/详情不随滚动切换。-1=未选中（初始/搜索
    *  重置）→ 材料格空,不默认显示第一个配方(2026-08-25 用户定案) */
   private craftFocus = -1;
-  /** 当前可用配方（行内容与材料格的共用数据源;met=背包材料满足态,置灰与
-   *  「可合成排前」同源;签名比对跳过无关重建——r 引用静态 VANILLA_RECIPES 恒稳） */
+  /** 当前可用配方（行内容与材料格的共用数据源;met=「仅用背包材料即可合成」的
+   *  排序层标记——SW-AV2 起与置灰/可点解耦,置灰只看 count<=0;签名比对跳过无关
+   *  重建——r 引用静态 VANILLA_RECIPES 恒稳） */
   private craftAvailRef: Array<{ r: import('../data/vanillaRecipes').VanillaRecipeLike; count: number; met: boolean }> = [];
   private static readonly CRAFT_ROW_H = 30;   // border-box: 22 贴图+3×2 padding+2 边框=30;容器高度按 30 整除取整(末行半裁观感即消失)
   /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动列表——列表滚动
@@ -4862,6 +4967,12 @@ export class UI {
     const cl = this.craftListEl;
     if (!game || !cl) return;
     let avail = game.vanillaAvailableRecipes();
+    // 材料源聚合持有量表（Recipe._ownedItems——GetAvailableItemCount 数据面）：
+    // SW-AV2 2026-09-06 修复「宝箱里的物品不参与制作」：合成扣料链（vanillaCraft →
+    // consumeMaterials）早已计入附近箱/bank（craftSourcesFor,Recipe.cs:375-407）,
+    // 唯本列表的满足度/材料统计只读背包——箱内材料行被误判「未满足」置灰禁点。
+    // 材料统计自本表取数,与可用性判定同源（同 tick _craftSourcesCache）。
+    const owned = game.vanillaCraftOwned();
     const q = this.craftSearchEl?.value.trim().toLowerCase() ?? '';
     if (q) {
       const filtered = avail.filter(({ r }) => {
@@ -4871,15 +4982,15 @@ export class UI {
       });
       if (filtered.length) avail = filtered;
     }
-    // ★2026-08-27 用户要求：可合成（背包材料齐）排最前，未满足置灰垫底——
-    // 稳定排序保持组内原版注册序；置灰行不可点击（见行 mousedown 门）。
-    // 原版口径备案：UpdateRecipeList 只列材料齐的配方（CollectedEnoughItemsToCraft
-    // >0,未满足根本不显示）,顺序 = 注册序静态;本仓扩展显示未满足行故自行分组
+    // ★2026-08-27 用户要求：可合成（背包材料齐）排最前，「需动用附近箱/bank 材料」
+    // 的行垫底（仍可点击合成——vanilla 语义：CollectedEnoughItemsToCraft>0 即入列
+    // 可合成,UpdateRecipeList Recipe.cs:252;原版不区分材料来自背包还是箱）。
+    // SW-AV2：置灰(.no)只留给 count<=0（材料源聚合后仍不可合成——本表不会入列,
+    // 防御性保留）,箱材料行不再置灰禁点。稳定排序保持组内原版注册序。
     const metFlags = avail.map(({ r }) => {
       let met = r.items.length > 0;
       for (const req of r.items) {
-        const k2 = ingredientKey(req.id);
-        const have = k2 ? game.player.inv.countOf(game.itemId(k2)) : 0;
+        const have = availableItemCountFor(r, req.id, owned);
         if (have < req.stack) { met = false; break; }
       }
       return met;
@@ -4924,13 +5035,16 @@ export class UI {
       const mats = el('span', '', r.items.map((req) => {
         const k2 = ingredientKey(req.id);
         if (!k2) return ` ? ${req.stack}`;
-        const have = game.player.inv.countOf(game.itemId(k2));
+        // SW-AV2 2026-09-06：材料持有数取材料源聚合表（含附近箱/bank,GetAvailableItemCount
+        // 同义）——曾只数背包,箱内料显示为缺口
+        const have = availableItemCountFor(r, req.id, owned);
         return ` ${Lang.itemNameByKey(k2)} ${Math.min(have, req.stack)}/${req.stack}`;
       }).join(' ·'));
       mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
       row.appendChild(mats);
-      // 材料未满足 = 置灰（.sw-recipe.no img/span opacity .45）——met 与排序同源
-      row.classList.toggle('no', !rec.met);
+      // 材料源聚合后仍不可合成 = 置灰（.sw-recipe.no img/span opacity .45）——
+      // SW-AV2 起与「需动用箱料」的排序垫底层解耦：垫底层行样式正常、可点击
+      row.classList.toggle('no', rec.count <= 0);
       row.addEventListener('mouseenter', () => {
         // 悬停预选两门（2026-08-21/24/25 定标,只动材料格不动列表）：
         // mousemove 门 150ms——滚动经停行无伴随 mousemove,不预选;
@@ -4944,8 +5058,11 @@ export class UI {
       });
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
-        if (row.classList.contains('no')) return;   // ★置灰行（背包材料未齐,可经
-        //   仓库合成）不可点击合成——原版语义:列表只列可合成项,置灰为本仓扩展
+        // SW-AV2 2026-09-06：可合成门 = 材料源聚合（背包+附近箱/bank）后 count>0
+        // （vanilla CollectedEnoughItemsToCraft,Recipe.cs:280-283）——曾按背包-only
+        // 满足度禁点,箱料齐的配方点不动（用户实报根因）。count<=0 行本表不会入列,
+        // 门保留作防御。原注释「背包材料未齐,可经仓库合成」的禁点语义废弃。
+        if (rec.count <= 0) return;
         this.craftFocus = idx;      // 选中配方——仅点击设置，滚动不改
         this.hoverFocus = -1;       // 点击行即焦点，预览态退场
         // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）

@@ -175,14 +175,18 @@ function bankSourcesForCrafting(
 
 export interface CraftSourcesOpts {
   /** 当前打开容器（Recipe.cs:381-384：player.chest != -1 → GetCurrentContainer
-   *  Player.cs:33036-33047 首入列；Game 开 bank 面板时传 {x:-2-bi, items:banks[bi]} 同源） */
-  openChest?: CraftItemSource | null;
+   *  Player.cs:33036-33047 首入列；Game 开 bank 面板时传 {x:-2-bi, items:banks[bi]} 同源）。
+   *  x 随 ChestData 携带容器索引约定（-2..-5=bank..bank4）→ 虚空袋门（:386 chest!=-5）
+   *  按 x===-5 自动派生（SW-AV2 2026-09-06） */
+  openChest?: (CraftItemSource & { x?: number }) | null;
   /** 玩家 bank×4（piggy/safe/forge/void vault；null/缺省 = 无该 bank） */
   banks?: ReadonlyArray<CraftItemSource | null | undefined>;
   /** 背包持有虚空袋 4131（useVoidBag Player.cs:22892-22902）→ bank4 计入（Recipe.cs:385-388，
    *  与当前开的是否 bank4 无关的语义由 openIsBank4 表达） */
   voidBagHeld?: boolean;
-  /** 当前打开容器就是 bank4（player.chest == -5）→ 虚空袋规则不再重复计入（:386 门） */
+  /** 当前打开容器就是 bank4（player.chest == -5）→ 虚空袋规则不再重复计入（:386 门）。
+   *  SW-AV2 2026-09-06：缺省时由 openChest?.x === -5 自动派生（本仓 placed vault/透镜
+   *  面板 x=-5 与原版 chest=-5 同约定），显式传值仅作覆盖 */
   openIsBank4?: boolean;
   /** 背包持有虚空vault物品 5325 → 放置的 vault 槽不计（ContainerIndexToPlayerBank :119-130） */
   voidVaultHeld?: boolean;
@@ -197,21 +201,36 @@ export interface CraftSourcesOpts {
  * Recipe._recipeChests 组装序（Recipe.cs:378-405 CollectItemsFromChests 1:1）：
  *  ① 当前打开容器 → ② 虚空袋持有且未开 bank4 → bank4 → ③ 附近 bank tile（盒判定）
  *  → ④ 附近世界箱（600px 圈，locked/占用排除）。px/py = 玩家 position（左上角 px）。
+ *  SW-AV2 2026-09-06：去重按 items 数组身份（vanilla Contains 按 Chest 对象引用
+ *  Recipe.cs:390/:398；本仓开中的 bank 面板 openChest 与 banks 扫描包装是两个对象
+ *  但同一 items 数组——曾按包装对象 includes 判重失手：开中的 placed bank 会在
+ *  ③ 里再入列一次，同一 bank 内容计双份 → craftableCount 翻倍而扣料只扣得动一份
+ *  = 校验过、实扣不足的白嫖窗口）。
  */
 export function craftSourcesFor(
   chests: readonly ChestData[], px: number, py: number, opts: CraftSourcesOpts = {},
 ): CraftItemSource[] {
   const out: CraftItemSource[] = [];
-  if (opts.openChest) out.push(opts.openChest);
-  if (opts.voidBagHeld && !opts.openIsBank4 && opts.banks?.[3]) out.push(opts.banks[3]);
+  const push = (s: CraftItemSource | null | undefined) => {
+    if (!s) return;
+    if (out.some((o) => o.items === s.items)) return;   // 同一 Chest 对象=同一 items 数组
+    out.push(s);
+  };
+  if (opts.openChest) push(opts.openChest);
+  // 虚空袋门（Recipe.cs:382 `player.useVoidBag() && player.chest != -5`）：当前打开的
+  // 就是 vault/bank4 面板（本仓 placed vault 491 / 透镜面板 openChest.x=-5，Game.ts
+  // 储物族 :22687 bi=3 → -2-3）时不重复计入——旧 openIsBank4 恒 false 的备案推理有误
+  // （vanilla 开 placed vault 同样置 chest=-5 走此门）。未显式传时按 openChest.x 派生。
+  const openIsBank4 = opts.openIsBank4 ?? opts.openChest?.x === -5;
+  if (opts.voidBagHeld && !openIsBank4) push(opts.banks?.[3]);
   if (opts.store && opts.centerTileX !== undefined && opts.centerTileY !== undefined) {
     for (const b of bankSourcesForCrafting(opts.store, opts.centerTileX, opts.centerTileY,
       opts.banks, CRAFT_CHEST_RANGE_PX, !!opts.voidVaultHeld)) {
-      if (!out.includes(b)) out.push(b);
+      push(b);
     }
   }
   for (const c of nearbyChestsForCrafting(chests, px, py, CRAFT_CHEST_RANGE_PX, opts.openChest)) {
-    out.push(c);
+    push(c);
   }
   return out;
 }
@@ -377,6 +396,14 @@ export function availableRecipes(
     if (count > 0) out.push({ r, count });
   }
   return out;
+}
+
+/** Recipe.GetAvailableItemCount（Recipe.cs:313-320）等价：某材料槽在材料源聚合
+ *  持有量表（collectOwnedItems 产物,含附近箱/bank）中的可用数——组槽返回组假 id
+ *  聚合值（itemMatches 同义）。UI 行内材料统计与 availableRecipes 必须同源取表
+ *  （SW-AV2 2026-09-06：曾只数背包,箱内材料在行统计显示缺口且行被误置灰禁点） */
+export function availableItemCountFor(r: VanillaRecipe, reqId: number, owned: Map<number, number>): number {
+  return itemMatches(r, reqId, owned);
 }
 
 /** 单材料匹配（RequiredItemEntry.Matches Recipe.cs:35-42 的实例判定侧）：
