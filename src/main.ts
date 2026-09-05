@@ -345,7 +345,8 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory'): vo
         game!.paused = false;
       },
       onSave: () => flow?.doSave(),
-      onExport: () => flow?.doExportSave(),
+      // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
+      // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
       onSettings: () => flow?.openSettings(true),
       onBestiary: () => flow?.openBestiary(),
       onQuit: () => {

@@ -15,6 +15,7 @@ import { WorldStore, type WorldMeta } from '../save/WorldStore';
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
 import { parseSeed } from '../world/gen/SeedEasterEggs';
+import { exportWld } from '../wld/WldExport';
 
 export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
@@ -176,7 +177,7 @@ export class WorldSelectPanel {
     // change 后清 value 允许连选同一文件;导入中按钮进 loading 态(文案+禁用)
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
-    this.fileInput.accept = '.wld,.json';
+    this.fileInput.accept = '.wld';
     this.fileInput.style.display = 'none';
     this.panel.querySelector('[data-act=import]')!.addEventListener('click', () => {
       if (this.importBusy) return;
@@ -378,6 +379,23 @@ export class WorldSelectPanel {
         if (name == null || name.trim() === '') return;
         await this.store.rename(m.id, name.trim());
         await this.reload();
+      });
+      // 导出钮(2026-09-06 用户需求):下载原版 .wld(自足格式,见 WldExport 头注)
+      this.iconBtn(btns, 'UI_CharCreation_Copy', Lang.text('Mods.SandboxWorld.WorldSelect.Export'), async () => {
+        try {
+          const raw = await this.store.load(meta);
+          if (!raw) throw new Error('存档缺失');
+          const bytes = exportWld(JSON.parse(raw) as import('../save/serialize').SaveData);
+          const safe = (meta.name || `world${meta.id}`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+          const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+          const aEl = document.createElement('a');
+          aEl.href = url;
+          aEl.download = `${safe}.wld`;
+          aEl.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) {
+          alert(Lang.text('Mods.SandboxWorld.CharSelect.ImportFail', String(e instanceof Error ? e.message : e).slice(0, 120)));
+        }
       });
       // 删除钮（收藏防删，UIWorldListItem.cs:151-157 原版仅 !IsFavorite 挂
       // 处理器：收藏行禁用态 + 悬停显 UI.CannotDeleteFavorited）

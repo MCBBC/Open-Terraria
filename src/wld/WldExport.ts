@@ -87,9 +87,7 @@ const FRAME_IMPORTANT: boolean[] = (() => {
 })();
 
 // ---- 原版 tile 编码(WF:1438-1511 逐位) ----
-let cellLog = 0;
 function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
-  cellLog = 0;
   const width = save.header.width, height = save.header.height;
   const n = width * height;
   // ★行主序(i=y*width+x,与 WldImport 读侧 chest anchor=y*w+x 同构)。
@@ -168,10 +166,6 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
         if (run > 255) { b |= 0x80; payload.push((run >> 8) & 0xff); }
         else b |= 0x40;
       }
-      if (x === 0 && cellLog < 8) {
-        cellLog++;
-        console.log(`CELL x0 y=${y} type=${type} act=${isActive} run=${run} b=0x${b.toString(16)} payload=${payload.join(',')}`);
-      }
       w.byte(b);
       for (const v of payload) w.byte(v);
     }
@@ -240,7 +234,8 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   w.bool(!!fl.hardMode);
   w.bool(false);                              // afterPartyOfDoom(≥257)
   const inv = save.invasion;
-  w.i32(inv?.delay ?? 0).i32(inv?.size ?? 0).i32(inv?.type ?? 0).i32(inv?.x ?? 0).f64(0);   // slimeRainTime
+  // invasion 四元组:delay/size/type i32 + X **f64**(Main.invasionX=double,WF:1313)+slimeRainTime f64(WF:1316)
+  w.i32(inv?.delay ?? 0).i32(inv?.size ?? 0).i32(inv?.type ?? 0).f64(inv?.x ?? 0).f64(wtr.slimeRainTime ?? 0);
   w.byte(h.sundialCooldown ?? 0);
   w.bool(!!wtr.raining).i32(wtr.rainTime ?? 0).f32(wtr.maxRaining ?? 0);
   w.i32(-1).i32(-1).i32(-1);                  // SavedOreTiers Cobalt/Mythril/Adamantite(-1=未锁定)

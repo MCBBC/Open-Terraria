@@ -22,8 +22,8 @@ function mkSave(): SaveData {
   const n = W * H;
   const type = new Uint16Array(n), frameX = new Uint16Array(n), frameY = new Uint16Array(n);
   const wall = new Uint16Array(n), liquid = new Uint16Array(n), liquidType = new Uint16Array(n);
-  const wire = new Uint16Array(n), half = new Uint16Array(n), slope = new Uint16Array(n);
-  const paint = new Uint16Array(n), paintWall = new Uint16Array(n), coat = new Uint16Array(n);
+  const wire = new Uint16Array(n), half = new Uint8Array(n), slope = new Uint8Array(n);
+  const paint = new Uint8Array(n), paintWall = new Uint8Array(n), coat = new Uint8Array(n);
   // 地面:泥 0(y=20 起,内部 id=0);石 1(y=22 起);一格 255 号(高 id>255 走扩展头)
   for (let y = 20; y < H; y++) for (let x = 0; x < W; x++) { type[y * W + x] = 1; frameX[y * W + x] = 18; frameY[y * W + x] = 0; }
   for (let y = 22; y < H; y++) for (let x = 0; x < W; x++) { type[y * W + x] = 1; }
@@ -85,6 +85,18 @@ describe('exportWld → parseWldToSave 闭环', () => {
       let hexs = '';
       for (let i = ps[1]; i < Math.min(ps[1] + 48, ps[2]); i++) hexs += bytes[i].toString(16).padStart(2, '0') + ' ';
       console.log('TILEHEAD ' + hexs);
+      let hh = '';
+      for (let i = 753; i < 853; i++) hh += bytes[i].toString(16).padStart(2, '0') + ' ';
+      console.log('HDRTAIL ' + hh);
+      let hh2 = '';
+      for (let i = 640; i < 753; i++) hh2 += bytes[i].toString(16).padStart(2, '0') + ' ';
+      console.log('HDRMID ' + hh2);
+      let hh3 = '';
+      for (let i = 520; i < 645; i++) hh3 += bytes[i].toString(16).padStart(2, '0') + ' ';
+      console.log('HDRM2 ' + hh3);
+      let hh4 = '';
+      for (let i = 480; i < 545; i++) hh4 += bytes[i].toString(16).padStart(2, '0') + ' ';
+      console.log('HDRM3 ' + hh4);
       let hexs2 = '';
       for (let i = Math.max(ps[1], ps[2] - 32); i < ps[2]; i++) hexs2 += bytes[i].toString(16).padStart(2, '0') + ' ';
       console.log('TILETAIL ' + hexs2);
@@ -118,6 +130,7 @@ describe('exportWld → parseWldToSave 闭环', () => {
     expect(back.save.header.seedFlags?.drunkWorld).toBe(true);
     // 杂数域
     expect(back.save.altarCount).toBe(2);
+    console.log('BK ' + JSON.stringify(back.save.bannerKills));
     expect(back.save.bannerKills?.[5]).toBe(12);
     expect(back.save.bannerKills?.[40]).toBe(3);
     expect(back.save.weather?.raining).toBe(true);
