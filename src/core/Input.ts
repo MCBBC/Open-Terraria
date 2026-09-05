@@ -213,7 +213,9 @@ export class Input {
       // 已过首帧（态0）照旧立即清
       if (e.button === 2) {
         if (this.pendingRightRelease === 1) this.pendingRightRelease = 2;
-        else this.rightDown = false;
+        // SW-RB2 2026-09-06：态2=释放已决（保底窗挂起中）——重复 mouseup（合成事件流
+        // 重复派发/远控重放）不得提前掐断保底窗,只在纯电平态0立即清
+        else if (this.pendingRightRelease === 0) this.rightDown = false;
       }
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());
@@ -301,6 +303,13 @@ export class Input {
     this.keys.clear();
     this.releaseAllVirtual();
     this.mouseHeld = false;
+    // SW-RB2 2026-09-06：态0（按住已跨帧/触摸长按脉冲）的右键电平在失焦面同样清零
+    // ——releaseAllVirtual 只清兜底态非零（态0 不碰电平）,纯电平态残留 true 会成幽灵
+    // 右键:松键发生在失焦期=收不到 mouseup,回焦后 PanControl Hold 档立即平移,且回焦
+    // 首次右键的上升沿被 _prevRightDown(true) 吞掉=第一击交互失效。同 mouseHeld
+    // 「失焦=无按住态」约定（keys/blockMouse 同批清）。
+    this.rightDown = false;
+    this.pendingRightRelease = 0;
     releaseBlockMouse(this);   // SW-AF1 2026-09-04（F-2）：失焦=无按住态,blockMouse 电平随松键链清零（防跨焦点残留）
     // R4-22（FocusHelper.cs:134-139）：窗口失焦即置 delayUseItem——回焦的那一下
     // mousedown 不开火（TriggersSet.cs:851-859：置位期间压掉使用键,松键才解除）

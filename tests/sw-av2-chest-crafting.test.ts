@@ -259,5 +259,11 @@ describe('SW-AV2 使用源门钉面（Q2 裁决：背包 10-49 不能直接使�
     expect(game).toMatch(/Math\.min\(rp\.selectedItem, 9\)/);
     // UI 热栏点击选中仅 0-9（Main.cs:44336-44359 GUIHotbarDrawInner i<10）
     expect(ui).toMatch(/from\.i < 10 && !panelOpen/);
+    // SW-RB1 2026-09-06 met 排序判据钉面：met=「仅用背包材料」→ 背包-only 表
+    // （collectOwnedItems 无源态）——SW-AV2 曾误用聚合表 ⇒ met ≡ count>0 恒真,
+    // 2026-08-27「背包齐料排最前/需动箱料垫底」排序退化空转。置灰/点击门仍用聚合表 owned
+    expect(ui).toMatch(/const ownedInvOnly = collectOwnedItems\(game\.player\.inv\)/);
+    expect(ui).toMatch(/availableItemCountFor\(r, req\.id, ownedInvOnly\)/);
+    expect(ui).not.toMatch(/const have = availableItemCountFor\(r, req\.id, owned\);\s*\n\s*if \(have < req\.stack\) \{ met = false/);
   });
 });

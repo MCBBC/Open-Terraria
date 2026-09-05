@@ -17733,12 +17733,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // tileHammer 族（祭坛）恒目标；`!tileSolid && ∉{314,424,442,351,470}` →
       // IsLivingFire（TileID.cs:241）；其余 true。★平台=solid：Main.cs:8031-8032
       // `tileSolidTop[19]=true; tileSolid[19]=true` 双旗同置（碰撞走 solidTop 特判，
-      // 原始旗位 solid 真；427 :10119、435-439 :10125 循环同）——本仓数据面把单向
-      // 语义拆在 platform 旗、solid 恒 false，故 solid 缺失面以 PLATFORMS_SHEETS
-      //（=TileID.cs:243 {19,427,435-439}）补齐；16 铁砧/18 工作台原版本就非 solid
-      //（platform 旗面超集）不入目标。SW-AW1b 2026-09-06：旧式缺平台臂 → 瞄准平台
-      // 复位闩+整形门恒闭，坡循环整段死码（platform-hammer.test 旧用本地复算函数
-      // 绕门未察觉，Windows 用户实报"平台没做锤变形"）。
+      // 原始旗位 solid 真；427 :10118-10119、435-439 :10125-10130 循环同）——本仓
+      // 数据面把单向语义拆在 platform 旗、solid 恒 false，故 solid 缺失面以
+      // PLATFORMS_SHEETS（=TileID.cs:243 {19,427,435-439}）补齐；16 铁砧/18 工作台
+      // 原版本就非 solid（platform 旗面超集）不入目标。SW-AW1b 2026-09-06：旧式缺
+      // 平台臂 → 瞄准平台复位闩+整形门恒闭，坡循环整段死码（platform-hammer.test
+      // 旧用本地复算函数绕门未察觉，Windows 用户实报"平台没做锤变形"）。
+      // SW-RB2 2026-09-06 全类枚举修正：原版 tileSolid+tileSolidTop 双 true 全集 =
+      // {19,427,435-439} ∪ {239 矿石条架(Main.cs:9798-9799),380 种植箱(Main.cs:9799-
+      // 9800)}——239/380 本仓 solid=false/platform=true 而 ∉ PLATFORMS_SHEETS → 非目标
+      // （闩被 :17747 复位）。原版面：239/380=目标（闩保持,整形挥消费闩 :46700）,
+      // 但 380 被 CanPoundTile(:81972 case 380) 拒整形=无观感差;239 原版可整↔半
+      // （PoundTile 无型排除）=微缺登记【备案:补齐需 239 半砖渲染帧核验,static 反查
+      // FI[239]=true 非平凡,且仅门闩语义差异无观感,暂不实装】。pixel_block(vanilla
+      // sheet 0 别名渲染件)同理备案:复刻件无原版对应物,不按 sheet0 泥土语义整形。
       const isHammerTarget = type !== 0 && (type === TILE_BY_KEY['v_26_altars'] || !!dH?.solid
         || (dH?.platform === true && PLATFORMS_SHEETS.has(shH))
         || LIVING_FIRE_SHEETS.has(shH)
@@ -17749,9 +17757,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //      :46000 每挥不复位但闩本为 false，光标扫过方块只会拆墙不会整形 ----
       if (this.hammerPoundRelease && !throttled && isHammerTarget) {
         {
-          this.hammerPoundRelease = false;            // 消费闩（:46699 尾段同款）
+          this.hammerPoundRelease = false;            // 消费闩（vanilla 尾段 :46700 同款）
           this.lastMineHitTick = this.tickCount;      // ApplyItemTime(:46368)
-          // 矿车轨道换向（:45442-45447 FrameTrack(pound)；帧变 → Item52）
+          // 矿车轨道换向（:46448 FrameTrack(pound)；帧变 → Item52）
           if (type === this.trackTile && this.trackTile !== 0) {
             const ti = st.idx(tx, ty);
             const beforeX = st.frameX[ti], beforeY = st.frameY[ti];
@@ -17768,8 +17776,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 是平台或「右实左空」→ num=2
           if (dH?.platform && PLATFORMS_SHEETS.has(shH)) {   // SW-AW1b：分支门=原版 TileID.Sets.Platforms（TileID.cs:243）,非 platform 旗超集（16/18/380 不整形）
             const i = st.idx(tx, ty);
+            // SW-RB2 2026-09-06：半砖回整拍同挂 CanPoundTile（vanilla 半支=PoundTile
+            // :46413 → 内嵌 CanPoundTile :82083；上邻 ForbidsSloping 时原版保持半砖）
+            const poundOk = this.canPoundTile(tx, ty);
             if (st.half[i]) {
-              st.setHalfBrick(tx, ty, false);           // PoundTile（半砖回整）:46411-46415
+              if (poundOk) st.setHalfBrick(tx, ty, false);   // PoundTile（半砖回整）:46411-46415
             } else {
               // ★G1 谓词形态批（2026-09-04）：平台坡循环邻判=SolidTile（:70642
               //  `active && tileSolid && !tileSolidTop && !halfBrick && slope==0 &&
@@ -17785,16 +17796,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               //（16 铁砧/18 工作台/380 种植箱等）,工作台对角会误翻方向感知（SW-AW1b）
               const platAt = (x: number, y: number): boolean =>
                 st.inBounds(x, y) && PLATFORMS_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1);
-              let num = 1, other = 2;                   // :45406-45415
+              let num = 1, other = 2;                   // :46417-46424
               if (platAt(tx + 1, ty - 1) || platAt(tx - 1, ty + 1)
                 || (solidFullP(tx + 1, ty) && !solidFullP(tx - 1, ty))) { num = 2; other = 1; }
               const s = st.slope[i];
+              // SW-RB2 2026-09-06：坡循环拍与回整拍统一吃上方 poundOk（vanilla
+              // SlopeTile WorldGen.cs:82022 每拍内嵌 CanPoundTile,原版仅第三拍显式判
+              // :46435。缺门=上邻 ForbidsSloping（:81480+ {21,26,77,88,235,237,441,
+              // 467,468,470,475,488,597},如工作台 88 压平台）时平台仍被坡化、台上
+              // 家具悬空（原版形不变））
               if (s === 0) {
-                st.setSlope(tx, ty, num);               // :45417-45421 SlopeTile(num)
+                if (poundOk) st.setSlope(tx, ty, num);            // :46419 SlopeTile(num)
               } else if (s === num) {
-                st.setSlope(tx, ty, other);             // :45422-45428 SlopeTile(另一侧)
-              } else if (this.canPoundTile(tx, ty)) {
-                st.setSlope(tx, ty, 0);                 // :45429-45438 slope0 + PoundTile → 半砖
+                if (poundOk) st.setSlope(tx, ty, other);          // :46428 SlopeTile(另一侧)
+              } else if (poundOk) {
+                st.setSlope(tx, ty, 0);                 // :46435-46438 slope0 + PoundTile → 半砖
                 st.setHalfBrick(tx, ty, true);
               }
             }
@@ -17805,7 +17821,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 普通可整形块（:46470 尾段 1:1）：整 → PoundTile 半砖；已整形 → 坡循环
           // （方向感知：右实左空 → 先 slope2；上实下空 → num11=-1 反向），循环尾
           // SlopeTile() 复位 → 半砖；整→半由尾段 else PoundTile 承接
-          const poundable = !!dH && dH.solid && !dH.framed;
+          // SW-RB2 2026-09-06：补 CanPoundTile 内门——原版尾两支的 PoundTile(:82083)/
+          // SlopeTile(:82022) 均内嵌 CanPoundTile(:81972 case {10,48,137,232,380,387,
+          // 388,476,484} ∪ Sets.Boulders(TileID.cs:195 {138,484,664,665,711-716}) +
+          // 上邻 ForbidsSloping + CanKillTile)。缺门实锤两件：尖刺 48/木尖刺 232
+          // （solid && !framed,被锤出半砖/坡——原版恒拒,形不变）；带树苗(21)/工作台(88)
+          // 等上邻的块被整形（原版拒）。仓库自有 canPoundTile(:18428)=CanPoundTile 全式
+          const poundable = !!dH && dH.solid && !dH.framed && this.canPoundTile(tx, ty);
           if (poundable && st.isSolid(tx, ty)) {
             const i = st.idx(tx, ty);
             // WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0

@@ -22,19 +22,24 @@ function makeWorld(w = 40, h = 20): World {
 
 interface TestBody { x: number; y: number; w: number; h: number; vx: number; vy: number; onGround: boolean; hitWall: boolean; hitHead: boolean }
 
-describe('平台族锤循环状态机（Player.cs:45394-45440）', () => {
-  /** 与 Game 锤平台分支同式的循环步进（对 TileStore 直接演算） */
+describe('平台族锤循环状态机（Player.cs:46410-46445,1457——旧引 :45394-45440 系 1456 布局,SW-AW1b 校正）', () => {
+  /** 与 Game 锤平台分支同式的循环步进（对 TileStore 直接演算）。
+   *  SW-RB2 2026-09-06：platAt 对齐 Game 收窄后的原版 Platforms 邻判
+   *  （TileID.cs:243 {19,427,435-439},非 platform 旗超集）;solidFull 对齐 st.isSolid()
+   *  （含 !inActive 半边,G1 谓词形态批同式） */
+  const PLATFORMS_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439]);
   function cycleStep(st: TileStore, x: number, y: number): void {
     const i = st.idx(x, y);
     if (st.half[i]) { st.setHalfBrick(x, y, false); return; }
     const solidFull = (ax: number, ay: number) => {
       if (!st.inBounds(ax, ay)) return false;
       const j = st.idx(ax, ay);
-      return !!st.flags[j] && !!TILE_DEFS[st.type[j]]?.solid
-        && !TILE_DEFS[st.type[j]]?.platform && !st.half[j] && st.slope[j] === 0;
+      return st.isSolid(ax, ay) && !!TILE_DEFS[st.type[j]]
+        && !TILE_DEFS[st.type[j]].platform && !st.half[j] && st.slope[j] === 0;
     };
     const platAt = (ax: number, ay: number) =>
-      st.inBounds(ax, ay) && !!TILE_DEFS[st.type[st.idx(ax, ay)]]?.platform;
+      st.inBounds(ax, ay)
+      && PLATFORMS_SHEETS.has(TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? -1);
     let num = 1, other = 2;
     if (platAt(x + 1, y - 1) || platAt(x - 1, y + 1)
       || (solidFull(x + 1, y) && !solidFull(x - 1, y))) { num = 2; other = 1; }
@@ -219,5 +224,31 @@ describe('SW-AW1b 分派级：真 tryMine 锤门（旧版死码定罪）', () =>
     g.hammerPoundRelease = true;
     (g as any).tryMine(8, 8, 0, 'hammer', 20);
     expect(store.slope[store.idx(8, 8)]).toBe(2);     // num=2（贴墙楼梯朝向）
+  });
+
+  // ---- SW-RB2 2026-09-06：CanPoundTile 内门补齐（vanilla PoundTile :82083/SlopeTile
+  //      :82022 均内嵌;原版平台分支仅第三拍显式判 :46435,尾段两支全靠内门） ----
+
+  it('CanPoundTile 内门：上邻 ForbidsSloping（梳妆台 88 压平台）→ 平台不坡化、形不变', () => {
+    const DRESSER = TILE_BY_KEY['dresser']!;          // sheet 88 ∈ ForbidsSloping(:81480+)
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, PLAT, 0, 0);
+    store.setTileSilent(8, 7, DRESSER, 0, 0);         // 台上家具
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.slope[store.idx(8, 8)]).toBe(0);     // 原版 SlopeTile 内门拒 → 形不变
+    expect(!!store.half[store.idx(8, 8)]).toBe(false);
+    expect(g.hammerPoundRelease).toBe(false);         // 闩照常消费（vanilla :46700）
+  });
+
+  it('CanPoundTile 内门：尖刺 48 尾段拒整形（原版 case 48 恒拒,不产半砖/坡）', () => {
+    const SPIKE = TILE_BY_KEY['v_48_spike']!;         // solid && !framed → 旧式尾段可整形=越权
+    const { g, store } = mkHammerGame();
+    store.setTileSilent(8, 8, SPIKE, 0, 0);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(!!store.half[store.idx(8, 8)]).toBe(false);
+    expect(store.slope[store.idx(8, 8)]).toBe(0);
+    expect(g.hammerPoundRelease).toBe(false);         // 目标成立（tileSolid）→ 闩消费同原版
   });
 });

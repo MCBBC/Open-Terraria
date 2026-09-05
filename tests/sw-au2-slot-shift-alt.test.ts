@@ -290,16 +290,13 @@ describe('④ UI.altMoveClick：装备槽卸下（:749-771 cursorOverride 7）',
     expect(plays).toContain('menuTick');                         // :769 SoundID 12
     // 残量支：背包预置 999-500 余位 → 卸下 500 只落 499，槽内留 1
     inv.armor[3] = { id: WOOD, stack: 500 };
-    const before = inv.countOf(WOOD);
-    const room = WOOD_MAX - inv.countOf(WOOD);                   // 500-? 满 999 上限
-    void room;
-    expect(inv.armor[3]).not.toBeNull();
     inv.slots.forEach((s, i2) => { if (s?.id === WOOD) inv.slots[i2]!.stack = WOOD_MAX; });
     // 制造满包：全背包塞满木 → 卸下应全拒并保留槽内整叠（canTakeToInventory=false → null）
     for (let i = 0; i < 58; i++) inv.slots[i] = { id: WOOD, stack: WOOD_MAX };
+    const packed = inv.countOf(WOOD);   // ★SW-RB1 2026-09-06 恒真断言重钉（旧 `before >= 0 ? countOf : 0` 自比恒真）
     expect(fake.altMoveClick(3, 'armor', true, false, true)).toBe(false);
     expect(inv.armor[3]!.stack).toBe(500);
-    expect(inv.countOf(WOOD)).toBe(before >= 0 ? inv.countOf(WOOD) : 0);   // 无复制
+    expect(inv.countOf(WOOD)).toBe(packed);   // 无复制：满包基数不增
   });
 
   it('收藏装备件禁卸下（:604）——Alt 收藏的共享件不会被 Shift 扫出装备栏', () => {
@@ -440,13 +437,40 @@ describe('⑥ 收藏标记随移动的清/保面', () => {
   it('垃圾桶 Shift+左键 = 桶→背包（GetAlternateClickAction :688-696 case 6 面）——源文本接线钉', () => {
     expect(srcMatch(/shiftKey && !e\.altKey && !e\.ctrlKey && this\.game\.player\.inv\.trash/)).toBe(true);
     expect(srcMatch(/playFiles\(\['trash_item_0', 'trash_item_1'\], 1\)/)).toBe(true);
+    // SW-RB1 全拒回落普通面：ItemSpace 拒（plan null）→ LeftClick case-0 Swap 面
+    // （满包 Shift+点=旧桶销毁+持物入桶 / 无持物=桶件上光标）——恒消费 return 只许在落袋支内
+    expect(srcMatch(/if \(left < t\.stack\) \{\s*\n\s*[\s\S]*?return;\s*\n\s*\}\s*\n\s*\/\/ ★SW-RB1/)).toBe(true);
   });
 
-  it('makeSlotEl 优先级链接线（Alt 先于 Shift/Ctrl；无动作回落 dragFrom 普通面）', () => {
-    expect(srcMatch(/if \(e\.altKey && this\.altSlotClick\(i, where, panelOpen\)\) return;/)).toBe(true);
-    expect(srcMatch(/if \(\(e\.shiftKey \|\| e\.ctrlKey\) && this\.altMoveClick\(i, where, e\.shiftKey, e\.ctrlKey, panelOpen\)\) return;/)).toBe(true);
+  it('SW-RB1 箱料并入光标：MouseItemSwap 双端清（:1227-1235）收藏标记不越箱存活', () => {
+    const { fake } = fakeUI({ chestItems: [{ id: WOOD, stack: 2 }] });
+    fake.pickUp = (UI.prototype as unknown as { pickUp: unknown }).pickUp as typeof fake.pickUp;
+    fake.heldStack = { id: WOOD, stack: 1, favorited: true };   // 收藏件先从背包拾起（context 0 保留）
+    fake.pickUp.call(fake, 0, 'chest');
+    expect(fake.heldStack!.stack).toBe(3);
+    expect(fake.heldStack!.favorited).toBe(false);              // 箱语境 ∉ retainFavoriteOnMoveAt
+    const inv = (fake.game.player as { inv: Inventory }).inv;
+    fake.heldStack = { id: WOOD, stack: 1, favorited: true };
+    inv.slots[11] = { id: WOOD, stack: 2 };
+    fake.pickUp.call(fake, 11, 'inv');
+    expect(fake.heldStack!.stack).toBe(3);
+    expect(fake.heldStack!.favorited).toBe(true);               // 背包语境 ∈ 表 → 保留
+  });
+
+  it('makeSlotEl 优先级链接线（左键门+Alt 先于 Shift/Ctrl；无动作回落 dragFrom 普通面）', () => {
+    expect(srcMatch(/if \(e\.button === 0 && e\.altKey && this\.altSlotClick\(i, where, panelOpen\)\) return;/)).toBe(true);
+    expect(srcMatch(/if \(e\.button === 0 && \(e\.shiftKey \|\| e\.ctrlKey\) && this\.altMoveClick\(i, where, e\.shiftKey, e\.ctrlKey, panelOpen\)\) return;/)).toBe(true);
     expect(srcMatch(/this\.dragFrom = \{ i, where, sx: e\.clientX, sy: e\.clientY \};/)).toBe(true);
     expect(srcMatch(/planAlternateClick\(\{/, '../src/ui/UI.ts')).toBe(true);
     expect(srcMatch(/export function planAlternateClick/, '../src/ui/SlotActions.ts')).toBe(true);
+  });
+
+  it('SW-RB1 中键/侧键无槽位语义（e.button===0 门，原版替代点击仅左键驱动）', () => {
+    expect(srcMatch(/e\.button === 0 && e\.altKey/)).toBe(true);
+    expect(srcMatch(/e\.button === 0 && \(e\.shiftKey \|\| e\.ctrlKey\)/)).toBe(true);
+  });
+
+  it('SW-RB1 SwapClearFavorite 双端清接线：右键装备交换被换下件清收藏（ItemSlot.cs:1237-1242）', () => {
+    expect(srcMatch(/if \(tmp\) tmp\.favorited = false;/)).toBe(true);
   });
 });

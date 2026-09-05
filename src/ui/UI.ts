@@ -8,7 +8,7 @@ import { isFunctionalTileItem } from '../world/evolution/PlantRules';
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
-import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, availableItemCountFor, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, availableItemCountFor, collectOwnedItems, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
@@ -1300,8 +1300,11 @@ export class UI {
       //  （dragFrom：原版无替代目标时 Shift+点=普通拾取 LeftClick case-0 :906）。
       //  ★关包快捷栏（Main.cs:44374 只 Draw 不 Handle）＝无 Alt/Shift/Ctrl 语义
       const panelOpen = !!this.invPanel && this.invPanel.style.display === 'block';
-      if (e.altKey && this.altSlotClick(i, where, panelOpen)) return;
-      if ((e.shiftKey || e.ctrlKey) && this.altMoveClick(i, where, e.shiftKey, e.ctrlKey, panelOpen)) return;
+      // ★SW-RB1 2026-09-06 e.button===0 门：替代点击语义仅左键（原版 OverrideHover/
+      //  OverrideLeftClick 只由左键驱动 :552/:895）——曾让中键/侧键+Shift/Ctrl 触发
+      //  快移/丢桶（改动前中键=惰性 dragFrom,mouseup button!==0 早退）
+      if (e.button === 0 && e.altKey && this.altSlotClick(i, where, panelOpen)) return;
+      if (e.button === 0 && (e.shiftKey || e.ctrlKey) && this.altMoveClick(i, where, e.shiftKey, e.ctrlKey, panelOpen)) return;
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
     // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
@@ -1417,6 +1420,7 @@ export class UI {
     src.favorited = false; // 装上取消收藏（原版 ArmorSwap :3341）
     const arr = targetWhere === 'armor' ? inv.armor : targetWhere === 'dye' ? inv.dye : inv.miscEquips;
     const tmp = arr[target];
+    if (tmp) tmp.favorited = false;   // ★SW-RB1 2026-09-06 SwapClearFavorite（ItemSlot.cs:1237-1242）双端清——被换下装备件回背包不得保留共享/收藏标记（ArmorSwap :3341 同调）
     arr[target] = src;
     if (where === 'inv') inv.slots[i] = tmp ?? null;
     else if (where === 'armor') inv.armor[i] = tmp ?? null;
@@ -1737,7 +1741,13 @@ export class UI {
     // 背包族 0/1/2 + 虚空袋 32 + 重铸 5）：MouseItemSwap :1227-1235 语境不在表内则
     // 双端清 favorited——箱/装备/染料/杂项面取出即清（装备面清标记=共享状态终结，
     // GetEffectiveArmor 只认收藏件 :240-251）；本仓虚空袋并入 chest 面按 3 处理（登记债）
-    if (this.heldStack) this.heldStack.stack += cur.stack;
+    if (this.heldStack) {
+      // ★SW-RB1 2026-09-06 并入光标面同走 MouseItemSwap 双端清（ItemSlot.cs:1227-1235）：
+      // 语境不在 retainFavoriteOnMoveAt（箱 3/装备 8-12/杂项 16-20/33）时,光标端收藏
+      // 一并清——曾只清槽端,箱料并进收藏光标堆后收藏标记越箱存活（提示行/防丢域泄漏）
+      if (where !== 'inv') this.heldStack.favorited = false;
+      this.heldStack.stack += cur.stack;
+    }
     else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: where === 'inv' ? cur.favorited : false, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②；收藏域见上 SW-AU2 注）
     // 拿取/合并音（ItemSlot.cs:987-989：转移后光标或格子有物 → SoundID 7 Grab）
     this.game.sfx.play('pickup', 1);
@@ -3561,10 +3571,14 @@ export class UI {
           this.game.player.inv.trash = left > 0 ? { ...t, stack: left } : null;
           this.game.sfx.play('pickup', 1);
           this.game.sfx.play('menuTick', 1);
+          this.paintTrash();
+          this.refreshAll();
+          return;
         }
-        this.paintTrash();
-        this.refreshAll();
-        return;
+        // ★SW-RB1 2026-09-06 全拒回落普通面：GetAlternateClickAction(:688-696) 因
+        //  ItemSpace 拒而 null → LeftClick case-0（PickItemMovementAction context 6
+        //  :1465 result=0）——满包时 Shift+点=旧桶销毁+光标物入桶 / 无持物=桶件上光标。
+        //  旧实现恒消费 return ⇒ 满包 Shift+点垃圾桶成死键（原版可回落拾取/覆盖面）
       }
       if (this.heldStack) {
         this.placeTrash();
@@ -4973,6 +4987,12 @@ export class UI {
     // 唯本列表的满足度/材料统计只读背包——箱内材料行被误判「未满足」置灰禁点。
     // 材料统计自本表取数,与可用性判定同源（同 tick _craftSourcesCache）。
     const owned = game.vanillaCraftOwned();
+    // ★SW-RB1 2026-09-06 met 判据修复：met =「仅用背包材料即可合成」排序层标记
+    // （见下注/2026-08-27 用户要求：背包齐料行排最前、需动用附近箱/bank 料行垫底）。
+    // SW-AV2 曾误用聚合表（含箱/bank）算 met ⇒ met ≡ (count>0) 恒真（本列表只入列
+    // count>0 行）⇒ 排序退化空转。判据改回背包-only 表（collectOwnedItems 无源态）；
+    // 置灰(.no)/点击门维持 SW-AV2 聚合面不变（箱料行仍可点可合成）
+    const ownedInvOnly = collectOwnedItems(game.player.inv);
     const q = this.craftSearchEl?.value.trim().toLowerCase() ?? '';
     if (q) {
       const filtered = avail.filter(({ r }) => {
@@ -4990,7 +5010,7 @@ export class UI {
     const metFlags = avail.map(({ r }) => {
       let met = r.items.length > 0;
       for (const req of r.items) {
-        const have = availableItemCountFor(r, req.id, owned);
+        const have = availableItemCountFor(r, req.id, ownedInvOnly);   // ★SW-RB1 2026-09-06 背包-only 判据（was: owned 聚合表 ⇒ 恒真）
         if (have < req.stack) { met = false; break; }
       }
       return met;

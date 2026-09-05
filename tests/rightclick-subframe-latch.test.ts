@@ -115,4 +115,54 @@ describe('右键子帧轻点兜底（SW-AW1 三态机）', () => {
     expect(inp.mouseDown).toBe(false);
     expect(inp.mouseHeld).toBe(false);
   });
+
+  // ---- SW-RB2 2026-09-06 红蓝对抗补强（全空间乱序转移枚举） ----
+
+  it('SW-RB2 态0 失焦：按住已跨帧再 blur → 电平清零不残留（松键在失焦期收不到 mouseup）', () => {
+    dispatchWin('mousedown', mouseEv(2));
+    inp.endFrame();                                // 帧1 过 → 态1 归态0（纯电平、rightDown 仍 true）
+    expect(inp.rightDown).toBe(true);
+    inp.clearForBlur();
+    expect(inp.rightDown).toBe(false);
+    inp.endFrame();                                // 无态可消费,无二次动作
+    expect(inp.rightDown).toBe(false);
+  });
+
+  it('SW-RB2 态1 失焦：按下未过帧 blur → 态带电平一起清（releaseAllVirtual 既有臂）', () => {
+    dispatchWin('mousedown', mouseEv(2));          // 态1
+    inp.clearForBlur();
+    expect(inp.rightDown).toBe(false);
+    inp.endFrame();
+    expect(inp.rightDown).toBe(false);
+  });
+
+  it('SW-RB2 态2 重复 mouseup：不提前掐断保底窗（合成流重复派发）', () => {
+    dispatchWin('mousedown', mouseEv(2));
+    dispatchWin('mouseup', mouseEv(2));            // 态2（保底窗挂起）
+    dispatchWin('mouseup', mouseEv(2));            // 重复释放——不得立即清
+    expect(inp.rightDown).toBe(true);
+    inp.endFrame();                                // 保底窗照常在本帧末释放
+    expect(inp.rightDown).toBe(false);
+  });
+
+  it('SW-RB2 态2 期间消费者清电平：endFrame 无残留/无二次触发', () => {
+    dispatchWin('mousedown', mouseEv(2));
+    dispatchWin('mouseup', mouseEv(2));            // 态2
+    inp.rightDown = false;                         // 模拟 Game 消费点（开箱/交谈后 rightDown=false）
+    inp.endFrame();                                // 态2 臂再清一次=幂等
+    expect(inp.rightDown).toBe(false);
+    inp.endFrame();
+    expect(inp.rightDown).toBe(false);
+  });
+
+  it('SW-RB2 态2 未决时再按下：新按压接管（态1）,首帧末归纯电平不掉电平', () => {
+    dispatchWin('mousedown', mouseEv(2));
+    dispatchWin('mouseup', mouseEv(2));            // 态2 未决
+    dispatchWin('mousedown', mouseEv(2));          // 新按压 → 态1、电平 true
+    expect(inp.rightDown).toBe(true);
+    inp.endFrame();                                // 态1 → 态0（不清电平=物理仍按住）
+    expect(inp.rightDown).toBe(true);
+    dispatchWin('mouseup', mouseEv(2));
+    expect(inp.rightDown).toBe(false);
+  });
 });
