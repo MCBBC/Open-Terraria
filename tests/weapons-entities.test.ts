@@ -644,16 +644,20 @@ describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => 
   });
 
   it('③ 948 火焰重锤入水变 947(:44542-44546,1456 :41064-41067);岩浆豁免(lavaWet 置位 :16906-16911,1456 :15450-15459)', () => {
+    // ★R3 湿段批夹具改道（2026-09-06）：变型检查收编【湿段维护旗】（原文 :44542 读
+    //   当拍旗,湿段 :16903 先行刷新）→ 湿段插位 = AI 后/位移前,掷出态（st=1）AI 无
+    //  position 写面 → 涂液格 = 上拍末位 = 本拍湿段测位（原旋轨道 st=0 夹具的 AI 每
+    //  拍重写 orbit 位,涂液格滞后一旋步,不再可用——几何意图不变,时序对齐原文）。
     const { hooks, player } = makeHooks();
     const store = (hooks.world as { store: TileStore }).store;
-    const mk = () => new FlailProj(player.cx, player.cy - 4, 30, 4, 948, () => true,
+    const mk = () => new FlailProj(player.cx, player.cy - 4, 30, 4, 948, () => false,
       () => ({ x: player.cx + 10, y: player.cy }));
     const f = mk();
-    f.fixedUpdate(1 / 60, hooks);
+    f.fixedUpdate(1 / 60, hooks);     // 松手掷出（st=1,位=玩家心+一拍掷速）
     expect(f.projId).toBe(948);       // 干燥不变
-    store.setLiquid(Math.floor(f.cx / 16), Math.floor(f.cy / 16), 255, 1); // 水
+    store.setLiquid(Math.floor(f.cx / 16), Math.floor(f.cy / 16), 255, 1); // 水（=本拍湿段测位）
     f.fixedUpdate(1 / 60, hooks);
-    expect(f.projId).toBe(947);       // wet && !lavaWet → 变型
+    expect(f.projId).toBe(947);       // wet && !lavaWet → 变型（湿段首测湿拍同拍）
     const f2 = mk();
     f2.fixedUpdate(1 / 60, hooks);
     store.setLiquid(Math.floor(f2.cx / 16), Math.floor(f2.cy / 16), 255, 2); // 岩浆

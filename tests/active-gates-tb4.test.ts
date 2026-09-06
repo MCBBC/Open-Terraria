@@ -115,6 +115,7 @@ function placeShell(w: World, drops: Array<[string, number]>, heldVid: number) {
       slots: new Array(50).fill(null),
       heldItem: () => ({ id: iidOf(heldVid), stack: 5 }),
       removeAt: () => {},
+      removeHeld: () => {},   // SW-AZ1:手持消耗统一入口
     },
   };
   return g as unknown as { tryPlace: (tx: number, ty: number, def: (typeof ITEM_DEFS)[number]) => void };

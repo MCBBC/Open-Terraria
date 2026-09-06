@@ -117,7 +117,19 @@ export class PrismProng extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.slowFade = (game.player as unknown as { slowMagicUse?: boolean }).slowMagicUse === true;
     const p = this.parent;
-    if (!p || p.dead) { this.dead = true; return; }
+    if (!p || p.dead) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_084 锚失联 Kill+return
+      //  （:31977-31981 `if (type != 632 || !TryGetActive(633)) { Kill(); return; }`）
+      //  【先于本支锚位写】→ 死拍 position=上拍钉位,Update 湿段(:16895)无 active 门
+      //  照跑（`!active` 门在 :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。本仓杀位
+      //  早退曾跳过湿段;现补跑,测位=存储位（原版死拍同位,逐值等价）。杀支与
+      //  AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;632 ∉
+      //  IsDestroyedByWater 六型/非 80 → 段内无补 Kill,幂等面不涉。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     const charge = p.charge;
     // ---- 充能三段展开（:30338-30366）----
     let num723 = 20, num725 = 15, num726 = -2, num724 = 1;
@@ -543,7 +555,18 @@ export class BlasterBeam extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     const p = this.parent;
-    if (!p || p.dead) { this.dead = true; return; }
+    if (!p || p.dead) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_084 461 锚失联 Kill+return
+      //  （:31958-31963 TryGetActive(460) 失败 → else 支 :31977-31981 同门）先于锚位
+      //  写 :31961 → 死拍 position=上拍钉位,Update 湿段(:16895)无 active 门照跑
+      //  （`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。补跑测位=存储位
+      //  （原版死拍同位,逐值等价）;杀支与 AI 尾活拍调用点同拍互斥 → 无需
+      //  wetSectionRan 旗;461 ∉ IsDestroyedByWater 六型/非 80 → 无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     // 锚定（AI_84 :30313-30319：Center = 父.Center + 归一vel×16）
     this.x = p.cx + p.dirX * 16 - this.w / 2;
     this.y = p.cy + p.dirY * 16 - this.h / 2;

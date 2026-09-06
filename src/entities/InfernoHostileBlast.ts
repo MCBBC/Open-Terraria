@@ -86,7 +86,19 @@ export class InfernoHostileBlast extends Entity {
       game.playSfxFiles?.(['Item_74'], 1, this.cx, this.cy);
     }
     this.age++;                                             // ai[0]++（:28787）
-    if (this.age >= INFERNO_BLAST_LIFETIME) { this.dead = true; return; }   // :28792-28800
+    if (this.age >= INFERNO_BLAST_LIFETIME) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 aiStyle50 寿限 Kill（:28793-28801
+      //  `if (num361 <= 0f) { num361 = 0f; Kill(); }`）【不 return】——尘柱循环以
+      //  num361=0 自然空转（本仓早退跳过尘柱同态）,Update 湿段(:16895)无 active 门
+      //  照跑（`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。本仓杀位曾
+      //  跳过湿段;现补跑,测位=存储位（aiStyle50 不写 position,原版死拍湿段同位,
+      //  逐值等价）。杀支与 AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;
+      //  292 ∉ IsDestroyedByWater 六型/非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        292, !!projectileData(292)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     // ---- 25×d174 火焰柱（:28806-28823）----
     //  原式：NewDust(盒,174,0,0,100,default,1.5) 后逐尘覆写 position=Center+Next(-10,11)
     //  与 velocity=归一向——本仓 spawnDust 同式出生后覆写（掠过 NewDust 随机 ±2 掺速）

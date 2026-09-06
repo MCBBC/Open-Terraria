@@ -447,7 +447,11 @@ export class WhipProj extends Entity {
       let echoAnim = this.anim;
       let echoSpeed = this.speed;
       if (owner.maxTagEffects > 1) {
-        const from = owner.inv.selected + 1;
+        // ★SW-RB4a 2026-09-06 原版扫描窗 = selectedItem+1..49（Player.cs:43055）——
+        // 光标持物伪选中（PickItemSelectionOverride→selectedItem==58）时窗口 59..49
+        // 为空 = 不扫,sItem 保持本鞭（同鞭回声）。本仓伪选中以 inv.cursorMirror 表达、
+        // 不写 selected,故须显式短路（曾用热栏 selected+1 扫描 = 镜像鞭打出异鞭回声）
+        const from = owner.inv.cursorMirror ? 50 : owner.inv.selected + 1;
         for (let k = from; k < 50; k++) {
           const s = owner.inv.slots[k];
           if (!s) continue;
@@ -535,9 +539,11 @@ export class WhipProj extends Entity {
       const b = this.wetBoxAt(ai0At ?? this.ai0);
       const rW = wetCollision(st, b.x, b.y, this.w, this.h);
       this.wet = rW.wet;                                   // :10887
-      if (lavaCollision(st, b.x, b.y, this.w, this.h)) this.lavaWet = true;   // :10888-10890
-      if (rW.honey) this.honeyWet = true;
-      if (rW.shimmer) this.shimmerWet = true;
+      // :10888-10891 豁免反清(鞭族全非豁免,恒走 wet=WetCollision 值)
+      this.honeyWet = rW.honey;                            // :10892 无条件赋值
+      this.shimmerWet = rW.shimmer;                        // :10893 无条件赋值
+      // ★lavaWet 预置不写(原文 NewProjectile 无此行)——首子步湿段 :16906-16911 并入
+      //  (蓝队E 预置逐字面化同款;旧写系 :10888-10890 锚误标)
     }
     // 1104 火鞭 OnFire 窗口（蓝队 R7-41）：buff 24 仅当鞭身 !wet && ai[0] ∈
     // ((t/3)×2 ± 1) && 鞭尖 50×50 盒与敌盒相交（StatusNPC :11255-11272——中段

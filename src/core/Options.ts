@@ -210,9 +210,35 @@ export interface OptionsData {
    *  紧凑 HUD+世界触摸合成);keyboard=强制键鼠档(整页桌面几何+恢复指针+停用
    *  触摸合成)。消费口唯一=core/input/touchMode.resolveTouchMode */
   touchOpMode: 'auto' | 'touch' | 'keyboard';
+  /** ★SW-AY1 #10 快速丢弃三态（IngameOptions menu[223]=Left Shift / menu[224]=
+   *  Left Control / menu[253]=Disabled；Main.cs:51444-51466 循环切换。缺省
+   *  Left Control = ItemSlot.Options 缺省（ItemSlot.cs:28-30 DLS=true/DQT=false）。
+   *  映射消费=SlotActions.quickTrashOptionsOf → UI.altMoveClick AltClickEnv.opts） */
+  quickTrashMode: 'leftControl' | 'leftShift' | 'disabled';
+  /** ★SW-AZ1 2026-09-06 附近箱参与制作开关（Player.Settings.CraftFromNearbyChests，
+   *  Player.cs:355 默认 true；config.json 键 "CraftFromNearbyChests" Main.cs:4297/:4642）。
+   *  ★作用域（Recipe.cs:375-407 逐行核实）：false 只旁路【③附近 bank（盒/弹体）+
+   *  ④600px 世界箱】；①当前开箱容器（:378-381）与②虚空袋 bank4（:382-385）不受此
+   *  开关管。原版开关面 = 制作列表旁 ChestCraft 图标钮（CraftingUI.
+   *  DrawCraftFromNearbyChestsToggle CraftingUI.cs，Main.cs:42442；tooltip
+   *  GameUI.CraftFromNearbyChestsOn/Off 官译）；本仓设置面落 Settings 页 game 组。
+   *  消费：vanillaRecipes.craftSourcesFor 的 nearbyChestsEnabled 门 */
+  craftFromNearbyChests: boolean;
 }
 
 const KEY = 'sandboxworld.options';
+
+/** ★SW-AY1 #10 Quick Trash 三态全集（menu[224] Left Control / menu[223] Left Shift /
+ *  menu[253] Disabled——显示文案键对齐 IngameOptions 循环终态） */
+export const QUICK_TRASH_MODES: readonly OptionsData['quickTrashMode'][] =
+  ['leftControl', 'leftShift', 'disabled'];
+
+/** Quick Trash 三态循环（IngameOptions Main.cs:51454-51466 1:1：Disabled→
+ *  Left Control→Left Shift→Disabled——即本表正序循环；缺省档 Left Control 点一下
+ *  到 Left Shift，再点 Disabled，再点回 Left Control） */
+export function cycleQuickTrashMode(mode: OptionsData['quickTrashMode']): OptionsData['quickTrashMode'] {
+  return QUICK_TRASH_MODES[(QUICK_TRASH_MODES.indexOf(mode) + 1) % QUICK_TRASH_MODES.length];
+}
 
 export class OptionsStore {
   data: OptionsData = {
@@ -275,6 +301,8 @@ export class OptionsStore {
     hudScaleMode: 'auto',
     hudScaleFactor: 1,
     touchOpMode: 'auto',                    // 默认按设备
+    quickTrashMode: 'leftControl',          // ★SW-AY1 #10（ItemSlot.cs:28-30 缺省档）
+    craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -404,6 +432,12 @@ export class OptionsStore {
       if (!(['auto', 'touch', 'keyboard'] as const).includes(this.data.touchOpMode)) {
         this.data.touchOpMode = 'auto';
       }
+      // ★SW-AY1 #10 Quick Trash 三态卫门：旧档缺键/坏值 → 原版缺省 Left Control
+      if (!QUICK_TRASH_MODES.includes(this.data.quickTrashMode)) {
+        this.data.quickTrashMode = 'leftControl';
+      }
+      // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
+      if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
     } catch { /* 无存档用默认 */ }
     this.emit();
   }

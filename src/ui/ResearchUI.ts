@@ -184,6 +184,13 @@ export function openResearchPanel(game: Game): void {
   game.sfx.play('menuTick', 1);
 }
 
+/** ★SW-AY1 R5：Main.CreativeMenu.IsShowingResearchMenu() 等价探针（ItemSlot.cs:631
+ *  消费——Shift+点背包格 context 0 = 研究献祭特化支的路由判别）。面板为模块级单例，
+ *  UI 层无法经实例访问，故走本导出 */
+export function isResearchPanelOpen(): boolean {
+  return panel !== null;
+}
+
 export function closeResearchPanel(): void {
   (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
     ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = false);

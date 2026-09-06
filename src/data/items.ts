@@ -1519,10 +1519,51 @@ export const PRIV_ITEM_STABLE: Record<string, number> = {
 
 // ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取,292 项）：
 // 已注册的 vi_ 墙物品补 wallId；缺的按 vi_ 命名注册（稳定 id = 物品 id 自动派生）
+// SW-BG1 2026-09-06：wallId 必须落到【玩家实持 def】——掉落/合成/创造浏览器/读档
+// 全经 VI 权威反查 VANILLA_ITEM_KEY_BY_ID[vid]（驼峰键,上方 1056-1085 循环建立）。
+// 旧循环只按表内蛇形键 byKey[wi.key] 命中:恰被桥接批预注册过的 8 件（26 石墙/
+// 93 木墙/130 灰砖墙/330 黑曜石砖墙/392 玻璃墙/1723 生命木墙/2263 白朝墙/2433 石板墙）
+// 蛇形=驼峰同 def → wallId 生效;其余 284 件蛇形键未预注册 → 走 item() 另建影子 def
+// 挂 wallId,而实持的驼峰 def 无 wallId → Game.updateUse 派发门 `heldDef.wallId != null`
+// 整类不进（用户实报「只有木墙可放置,石墙/棕榈木墙都不能放置」,2026-09-06）。
+// 修法 = 先按 vid 走权威反查挂 wallId。
+// SW-BK1 2026-09-06（同日后续批）：影子 def 注册路径已撤——284 件归一为「权威 def +
+// 蛇形键别名」（下方 ③,存档解码链安全性核实见彼处注）,dual-key 清理债墙族部分清偿。
 import wallItemsJson from './vanilla-wallitems.json';
-for (const wi of Object.values(wallItemsJson as Record<string, { wall: number; key: string }>)) {
-  const existing = byKey[wi.key];
-  if (existing !== undefined) { ITEM_DEFS[existing].wallId = wi.wall; continue; }
+for (const [wiVid, wi] of Object.entries(wallItemsJson as Record<string, { wall: number; key: string }>)) {
+  const canonicalIdx = (() => {
+    const ck = VANILLA_ITEM_KEY_BY_ID[Number(wiVid)];
+    return ck !== undefined ? byKey[ck] : undefined;
+  })();
+  // ① 权威 def 挂 wallId（玩家实持面——放置/工具光标/智能光标全读它）
+  if (canonicalIdx !== undefined) ITEM_DEFS[canonicalIdx].wallId = wi.wall;
+  // ② 蛇形键原语义原样保留：已注册（桥接批件,通常与 ① 同 def）→ 挂 wallId
+  const snakeIdx = byKey[wi.key];
+  if (snakeIdx !== undefined) {
+    if (snakeIdx !== canonicalIdx) ITEM_DEFS[snakeIdx].wallId = wi.wall;
+    continue;
+  }
+  // ③ SW-BK1 2026-09-06 dual-key 归一试点（墙族 284 件影子 def 撤注册）：驼峰权威
+  //    def 已在（①已挂 wallId;2026-09-06 探针实测 284/284 影子 def 与权威 def 字段面
+  //    全等——影子件仅 {value:1,wallId},零字段搬移负担）→ 蛇形键【别名】到同 vid 权威
+  //    def（288267a5 Pascal 别名同构）,不再注册影子 def。同 vid 单 def 双键,消除
+  //    「字段落到影子 def 而实持 def 缺失」整类病根（SW-BG1 事故类）。
+  //    ★存档解码链核实（撤注册安全性）：
+  //    · v4/v5 存档（现行为 version 5）全走稳定 id（=key 内嵌 vid 派生）,内部 id 平移免疫;
+  //    · v3 armor/dye/trash/misc 裸下标经 legacyItemIndex 快照【键】中转
+  //      （SaveFile.mapLegacySlot: 快照[it.id]→key→ITEM_BY_KEY[key] 现值）——快照索引
+  //      与现行注册表布局早已分叉（快照 :6925-6945=Demonite 家具族,现行同位=墙影子件）,
+  //      解码零依赖现行下标;快照内蛇形键本批全部保留可反查（键不删,只撤 def 条目）;
+  //    · v2 直读裸下标=既有「接受破损」政策,本批不改其语义;
+  //    · 快照冻结后新注册的 12 件（内部 id ≥7467）不可能出现在 v3 档（v3 段止于冻结前）。
+  //    内部 id 平移面：影子件撤注册后墙物品循环之后的注册（敌旗 290/钓鱼/具名等）
+  //    整体 -284——ITEM_STABLE_OF_INTERNAL 建于文件尾（D1）按最终注册表重算,
+  //    PRIV/WldImport/UI 全 vid/key 反查,无平移前下标依赖（item-retirement 往返锁）。
+  if (canonicalIdx !== undefined) {
+    byKey[wi.key] = canonicalIdx;
+    continue;
+  }
+  // ④ 无权威 def 的 vid（vanilla.json 无条目）:照旧注册（蛇形件即唯一 def）
   item({ key: wi.key, name: '', maxStack: 999, value: 1, wallId: wi.wall });
 }
 // 稳定 id 表构建在【文件尾】（D1 修复,2026-08-21）——见文件尾 ITEM_STABLE_OF_INTERNAL 段。

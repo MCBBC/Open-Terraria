@@ -60,6 +60,15 @@
 //   保 5526/2611 型 false→true 双赋值;1325 型变体支伪值仍走合并层 1→0 记录）。
 //   金标修正面（重产生效时）:4058/4381 useAmmo 1→40（旧 Bow 分支硬编码 1 系笔误,
 //   AmmoID.Arrow=40）+4682/4702 ranged 键删除（C# 显式 false,与 combat json 同值）。
+// 2026-09-06 ★SW-BK1 createWall 向上归因（共享算式/区间块缺档根治,35 件墙物品）：
+//   提取器此前只认 `createWall = (\d+);` 字面——①共享 case 段/嵌套 case 专属段的
+//   `createWall = 116 + type - 1948;` 算式（:21139/21428/22090/22370/24086/26651/
+//   33328 七处）不命中 → fallthrough 组成员 26 件整缺+组末支 7 件缺 createWall 键;
+//   ②default 支内 `if (type >= 2263 && type <= 2264)` 区间块（:22764-22769）整段
+//   丢弃 → 2 件整缺。修=evalArithExpr（wallitems 提取器 evalExpr 同构,evalFields
+//   fill-when-undefined）+ structuralIfRanges（wallitems 路径 B 同构,仅收 createWall
+//   体）。对账面=vanilla-wallitems.json 292 项逐值;重产 diff 恰 35 件新增字段
+//   （28 整缺条目 + 7 既有条目补 createWall 键）,其余 3730 条 md5 级零 diff。
 import { readFileSync, writeFileSync } from 'node:fs';
 // SW-V1 2026-09-04: 增 AMMO_ID——DefaultTo* 参数化展开需解 AmmoID.X 枚举实参
 // （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
@@ -447,6 +456,29 @@ function evalFields(text, id) {
       }
     }
   }
+  // SW-BK1 2026-09-06: createWall 共享算式补提取（fill-when-undefined 零漂移）。
+  // FIELDS 字面正则 `\bcreateWall = (\d+);` 不命中 `createWall = 116 + type - 1948;`
+  // 共享算式形态（Item.cs:21139/21428/22090/22370/24086/26651/33328 七处 case 体,
+  // 共享 fallthrough 组/嵌套 case 专属段）→ 组成员与组末支整键缺失（35 件墙物品缺口,
+  // 对账面 = vanilla-wallitems.json 292 项）。fill-when-undefined：字面/种子已值不覆写
+  // （既有 257 条 createWall 零漂移,后写序仍由主扫描承担）;末匹配→首匹配回落与
+  // lastFieldMatch 同口径（残文=无条件裸语句面,Variant 变体支不入）。
+  if (f.createWall === undefined) {
+    const em = lastFieldMatch(clean, /\bcreateWall = ([^;]+);/);
+    if (em) {
+      const wv = evalArithExpr(em[1], id);
+      if (wv !== undefined) f.createWall = wv;
+    }
+  }
+  // SW-BK1: useTurn 结构层补提取（同款 fill-when-undefined,布尔语义与 FIELDS 族同构
+  // ——只认显式 `useTurn = true;` 取末匹配）。useTurn 此前全靠 EXTRA_USETURN
+  // （combat 提取器侧）,其对【嵌套 switch 内 fallthrough 组非末支】漏覆盖（2210-2212/
+  // 2432-2433/2789-2790 八件,combat json 同位 null 同根因）→ 本批新建条目缺 useTurn。
+  // 对既有条目零漂移：sf 增值走覆写同值门,cur 缺键不新增（createWall 补键规则外）。
+  if (f.useTurn === undefined) {
+    const um = lastFieldMatch(clean, /(?:^|[^\w.])useTurn = true;/);
+    if (um) f.useTurn = 1;
+  }
   return f;
 }
 
@@ -541,6 +573,47 @@ function structuralFields(src) {
           top.cur = t === 'default:' ? null : +m[2];
           top.segStart = m.index + t.length;
         }
+      }
+    }
+  }
+  return out;
+}
+
+// ================= ★SW-BK1 if 区间段向上归因（2026-09-06,wallitems 提取器路径 B 同构） =================
+// `if (type <cmp> N && type <cmp> M) { … }` 区间块不被任何 case 段归属
+// （fieldsResolveSwitch 只分派显式 case,default 段整段丢弃——Item.cs:22764-22769
+// default 支内 2263/2264 白/蓝朝佰墙区间块即此形态,createWall 整缺）。
+// 平衡花括号取 if 体;【仅收 createWall 体】（区间体常含 createTile 算式/value 等
+// FUNC 域外或不可解字段,盲收会超预期扩面——其余字段维持既有口径零漂移）;
+// 区间内逐 id evalFields（基态口径,useTurn 仍由 EXTRA_USETURN 后置叠加补齐）。
+function structuralIfRanges(src) {
+  const out = new Map();
+  const rangeRe = /if \(type (>=|>|<=|<) (\d+) && type (>=|>|<=|<) (\d+)\)/g;
+  const cmp = (op, a, b) => (op === '>=' ? a >= b : op === '>' ? a > b : op === '<=' ? a <= b : a < b);
+  for (const n of [1, 2, 3, 4, 5]) {
+    const body = methodBodyOf(src, `public void SetDefaults${n}(`)
+      || methodBodyOf(src, `private void SetDefaults${n}(`)
+      || methodBodyOf(src, `void SetDefaults${n}(`);
+    if (!body) continue;
+    let m;
+    while ((m = rangeRe.exec(body))) {
+      // 平衡花括号取 if 体（{ 起算,净深度归零止——同 wallitems 提取器路径 B）
+      const brace = body.indexOf('{', m.index + m[0].length);
+      if (brace < 0) continue;
+      let d = 0, end = -1;
+      for (let i = brace; i < body.length; i++) {
+        if (body[i] === '{') d++;
+        else if (body[i] === '}') { d--; if (d === 0) { end = i; break; } }
+      }
+      if (end < 0) continue;
+      rangeRe.lastIndex = end + 1;
+      const ifBody = body.slice(brace + 1, end);
+      if (!/\bcreateWall\s*=/.test(ifBody)) continue;   // SW-BK1: 仅收 createWall 体
+      const [lo, hi] = [Number(m[2]), Number(m[4])].sort((a, b) => a - b);
+      for (let id = lo; id <= hi; id++) {
+        if (!cmp(m[1], id, Number(m[2])) || !cmp(m[3], id, Number(m[4]))) continue;
+        const f = evalFields(ifBody, id);
+        if (f.createWall !== undefined) out.set(id, f);
       }
     }
   }
@@ -777,6 +850,21 @@ function evalAmmoArg(expr, id) {
   const em = /AmmoID\.(\w+)/.exec(expr);
   if (em) return AMMO_ID[em[1]] ?? -1;
   return evalHelperArg(expr, id);
+}
+
+// SW-BK1 2026-09-06: createWall 共享算式求值（extract-wallitems.mjs evalExpr 同构移植）。
+// 剥 (ushort)/(int) 显式转换、type 代入 id,只解纯算术（数字/+-*/()/空格）;不可解返回
+// undefined（与 wallitems 提取器 throw 不同——itemfunc 全字段面远宽于 createWall,
+// 未知形态拒值不拒产,由 diff 闸门兜底）。
+function evalArithExpr(expr, id) {
+  if (expr === undefined) return undefined;
+  const js = expr
+    .replace(/\(ushort\)/g, '')
+    .replace(/\(int\)/g, '')
+    .replace(/\btype\b/g, `(${id})`)
+    .replace(/\s+/g, '');
+  if (!/^[-+*/()0-9]+$/.test(js)) return undefined;
+  return Math.trunc(Function(`"use strict"; return (${js});`)());
 }
 
 /** 段内首个 `DefaultTo<name>( … )` 调用的实参串（括号配对,非首 `)` 截断）。
@@ -1083,6 +1171,8 @@ for (const [id, seg] of SEGS) {
 {
   const PS_OLD = structuralPlaceStyles(itemSrc);
   const STRUCT = structuralFields(itemSrc);
+  // SW-BK1 2026-09-06: if 区间段归因面（2263/2264 default 支区间块;仅收 createWall 体）
+  const RANGE = structuralIfRanges(itemSrc);
   let psDrift = 0;
   for (const [id, ps] of PS_OLD) {
     if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
@@ -1094,9 +1184,14 @@ for (const [id, seg] of SEGS) {
     if (f.placeStyle !== undefined && !HELPER_SEED.has(Number(id)) && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
   }
   if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
+  // SW-BK1: 统一归并面 = STRUCT ∪ RANGE（显式 case 值 per-key 优先——RANGE 只补缺档,
+  // 同 wallitems 提取器 path A 先于 path B 的首值优先序）
+  const SF = new Map();
+  for (const [id, sf0] of STRUCT) SF.set(id, RANGE.has(id) ? { ...RANGE.get(id), ...sf0 } : sf0);
+  for (const [id, rf] of RANGE) if (!SF.has(id)) SF.set(id, rf);
   let fix = 0, del = 0, add = 0;
   const fixed = [], deleted = [], added = [];
-  for (const [id, sf] of STRUCT) {
+  for (const [id, sf] of SF) {
     const cur = FUNC[id];
     if (cur) {
       for (const k of Object.keys(cur)) {
@@ -1106,6 +1201,12 @@ for (const [id, seg] of SEGS) {
           deleted.push(`${id}.${k}(${cur[k]})`); delete cur[k]; del++;
         }
       }
+      // SW-BK1: createWall 补键（仅此字段——其余字段维持「不新增 cur 缺的键」零漂移
+      // 纪律）。7 件组末支既有条目（1957/2014/2160/2213/2434/2791/3762）由共享算式
+      // 求值补上（Item.cs:21139 等七处,与 vanilla-wallitems.json 逐值对账）。
+      if (cur.createWall === undefined && sf.createWall !== undefined) {
+        cur.createWall = sf.createWall; fixed.push(`${id}.createWall +${sf.createWall}`); fix++;
+      }
       if (!Object.keys(cur).length) {
         if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
         else delete FUNC[id];
@@ -1114,6 +1215,13 @@ for (const [id, seg] of SEGS) {
       // SW-V1 2026-09-04: DefaultTo* 种子 id（fallthrough 组非末支等形态）——整条按
       // 基态结构值落表,与组末支的 v1 条目同口径（不再是 placeStyle 单键最小新增）。
       // 金标=vanillaItemFunc FUNC['5594']/['5595'] 与 EXTRACT_PATCH 重叠字段逐字段对拍。
+      FUNC[id] = { ...sf };
+      added.push(`${id}:${JSON.stringify(sf)}`); add++;
+    } else if (sf.createWall !== undefined) {
+      // SW-BK1 2026-09-06: createWall 缺档整条落表（共享 fallthrough 组非末支/嵌套
+      // case 专属段/区间件——与组末支 v1 条目同口径;useTurn 由 EXTRA_USETURN 后置
+      // 叠加补齐）。28 件整缺:1948-1956/2008-2013/2158-2159/2210-2212/2263-2264/
+      // 2432-2433/2789-2790/3760-3761。
       FUNC[id] = { ...sf };
       added.push(`${id}:${JSON.stringify(sf)}`); add++;
     } else if (sf.placeStyle !== undefined) {

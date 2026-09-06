@@ -254,7 +254,7 @@ describe('#14 生命果 UseLifeFruit（Player.cs:44671-44685）', () => {
     expect(block).toContain('baseMaxHp += 5');
     expect(block).toMatch(/hp = Math\.min\(this\.player\.maxHp, this\.player\.hp \+ 5\)/);
     // 消耗（ApplyItemTime 后 stack--）+ 成就 HandleSpecialEvent(2)（:44683）
-    expect(block).toContain("removeAt(this.player.inv.selected, 1)");
+    expect(block).toContain("removeHeld(1)");   // SW-AZ1：手持消耗统一入口（镜像槽 58 消费改道）
     expect(block).toContain('handleSpecialEvent(2');
   });
 });

@@ -17,6 +17,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 // 落格门用原版 TileID → 本仓 id 换算（★本仓 tile id ≠ 原版 TileID,2026-08-25 修正）
 const T_RAIL = VANILLA_TILE_ID.get(314);      // MinecartTrack
@@ -64,6 +66,13 @@ export function blockBelowMakesSandFall(st: TileStore, bx: number, by: number): 
 const FALLING_TILE_DROP_ITEM = new Map<number, number>([
   [53, 169], [112, 370], [116, 408], [123, 424], [224, 1103], [234, 1246],
   [330, 71], [331, 72], [332, 73], [333, 74], [495, 4090],
+]);
+
+/** GetSandfallProjData（WorldGen.cs:87797-87840）tile sheet → 落沙弹型映射（default=53
+ *  → 31）。湿段按真弹 id 传参（豁免分流=projectileData(id).ignoreWater 数据面）。 */
+const SANDFALL_SHEET_PROJ = new Map<number, number>([
+  [112, 56], [116, 67], [123, 71], [224, 179], [234, 241],
+  [330, 411], [331, 412], [332, 413], [333, 414], [495, 812],
 ]);
 
 /** TileID.Sets.Falling（TileID.cs:395 = 53/234/112/116/224/123/330-333/495）原版 sheet 集
@@ -192,6 +201,29 @@ export class FallingBlock extends Entity {
   /** 本块是否为钱币堆落弹（弹 411-414 四档=330-333,Projectile.cs:17707-17712
    *  第二重碰撞唯一受众） */
   private readonly coinBall: boolean;
+  /** 原版落沙弹型（GetSandfallProjData :87797-87840 sheet→proj,default=31）——
+   *  通用湿段按真 id 传参 */
+  readonly projId: number;
+
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
+  //  逐 id 豁免核对（SetDefaults P.cs 逐块）：31(:1133-1142)/56/67/71/179/241/
+  //  411-414(:4935-4943 共档)/812(:7955-7964)——【均无 ignoreWater 行】= 全受段
+  //  （projectileData 数据面同向）。下沙入水=高频面（沙柱坠湖逐粒溅花）。
+  //  阻尼不适用定谳：aiStyle 10 ∈ HandleMovement 专支（:17700-17720
+  //  `if (aiStyle == 10) velocity = TileCollision(...)`,与 :17721 `else if (wet)`
+  //  湿阻尼支【互斥】）→ 位移不折减（与 AshBallProj 40/DebrisProj 736-738 同谳）。
+  //  插位=tick 头（AI_010 只写 velocity 不写 position,采样位=上拍位移后 ≡ 原版
+  //  AI(:16880)后湿段(:16895)采样;杀拍口径：本类唯一头杀位=`--life` 头杀
+  //  （vanilla timeLeft 杀在 Update 尾 :17307——湿段后）,湿段置于头杀【前】=
+  //  杀拍照跑,双调用点/防双跑机不适用（单调用点天然覆盖）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(x: number, y: number, tileKey: string) {
     super();
@@ -202,12 +234,18 @@ export class FallingBlock extends Entity {
     this.dmg = sheet0 !== undefined && FallingBlock.ZERO_DMG_SHEETS.has(sheet0)
       ? 0 : FallingBlock.DAMAGE;
     this.coinBall = sheet0 !== undefined && COIN_PILE_SHEETS.has(sheet0);
+    this.projId = sheet0 !== undefined ? (SANDFALL_SHEET_PROJ.get(sheet0) ?? 31) : 31;
     this.vy = FallingBlock.SPAWN_VY;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    //  tick 头插位（杀拍覆盖/采样位论证见字段块头注）;aiStyle 10 专支 → 阻尼不适用,
+    //  位移行保持全速（下方 x/y 积分不乘档位）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     if (--this.life <= 0) { this.dead = true; return; }
     // 上一帧中心格（落地放置格,见下方落地段注释）
     const prevTx = Math.floor((this.x + this.w / 2) / TILE);

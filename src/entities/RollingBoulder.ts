@@ -160,7 +160,13 @@ export class RollingBoulder extends Entity {
     if (!p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
       if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
         this.immunities.set(-1, 10);
-        game.damagePlayer(this.dmg, this.cx, this.cy, this);
+        // ★SW-BI1 2026-09-06（用户崩溃报告定谳）：不传 this 作 attacker——attacker 槽是
+        //  Enemy 受击反击面（荆棘/仙人掌套/日曜爆闪 → attacker.hurt(...)），弹体无 hurt
+        //  方法，把滚石自身送进反击槽 → `k.hurt is not a function` → 帧循环守卫停机
+        //  （沙漠滚仙人掌球实报，2026-09-06 报告 SW-BI1）。与全弹族调用约定对齐
+        //  （FallingBlock:275/MeteorChunk:126/Dart 系/bossAI_* 均不传 attacker）：
+        //  原版弹侧命中无 NPC 可反（PlayerDeathReason.ByProjectile），本无攻击者槽语义。
+        game.damagePlayer(this.dmg, this.cx, this.cy);
       }
     }
   }

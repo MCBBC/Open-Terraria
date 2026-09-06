@@ -152,9 +152,18 @@ export class ClusterFragmentProj extends Entity {
         }
       }
     }
-    // 引信爆（原版 AI 头 timeLeft≤3 Kill → Update 尾 dec;本仓 SW-L1 口径
+    // 引信爆（原版 AI_016 :48034-48037 `timeLeft <= 3 → Kill`【不 return】→ else 块
+    // （尾尘/帧/damage 复写）整跳=本仓早退同态;Update 尾 dec 不涉——本仓 SW-L1 口径
     // post-dec ≤2 ≡ pre-dec ≤3——与 GrenadeProj 同式）
     if (--this.fuse <= 2) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版引信 Kill 后 AI 归位,Update 湿段
+      //  (:16895)【无 active 门】照跑（`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍
+      //  溅花照走（湿中爆裂片先溅花后爆=原版相位）。本仓杀位早退曾跳过湿段;现补跑,
+      //  测位=存储位：AI_016 对 779/783/862/863 不写 position → 原版死拍湿段同位,
+      //  逐值等价。杀支与 AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;
+      //  裂片四型 ∉ IsDestroyedByWater 六型/非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
       this.dead = true;
       game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
       // SW-AC1 2026-09-04：尾参 oldVx=Kill 态弹末 vx——Game 侧换算 kbDir 弹体朝向
@@ -188,9 +197,8 @@ export class ClusterFragmentProj extends Entity {
     // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
     // 位序 = 原版 Update 子步内 AI(:16880)→湿段(:16903)→HandleMovement(:17120)。
     // 采样位=AI 后位移前 = 上拍移动结算位（oldPosition :17116-17117 也在段后置位,
-    // 故本调用须先于下方 oldX/oldY 上报）。引信爆拍不跑湿段（本仓 SW-L1 口径
-    // post-dec ≤2 早退=原版 AI 头 Kill;仓内湿段批统一口径=AI 杀拍不跑,与
-    // RollingBoulder 同式,登记有界偏差）。
+    // 故本调用须先于下方 oldX/oldY 上报）。引信爆拍湿段已由杀支补跑（2026-09-06
+    // ⑥杀拍口径批,见上方引信爆支注）——活拍/杀拍两支同拍互斥。
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater);
     // 位移+撞块（aiStyle16 通用反弹 ×−0.4——与 GrenadeProj firedStep 同式;

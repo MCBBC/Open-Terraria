@@ -326,7 +326,20 @@ export class SpectreSoulProj extends Entity {
             const q = quirkDist(ents[i] as never as { x: number; y: number; w: number; h: number });
             if (q < 800) cand.push(ents[i]);
           }
-          if (cand.length === 0) { this.dead = true; return; }        //（:29399-29401 Kill）
+          if (cand.length === 0) {
+            // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_059 无锁敌 Kill+return
+            //  （:29392-29396 `if (num439 == 0) { Kill(); return; }`）——AI 早退跳过
+            //  尘循环（本仓上方短路同态）,但 Update 湿段(:16895)【无 active 门】照跑
+            //  （`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。本仓杀位曾
+            //  整体跳过湿段;现补跑,测位=存储位（AI_059 不写 position,原版死拍湿段
+            //  同位,逐值等价）。该子步的活拍湿段调用点（尘尾后）因 return 不达 →
+            //  同拍互斥,无需 wetSectionRan 旗;356 ∉ IsDestroyedByWater 六型/非 80
+            //  → 段内无补 Kill 面。
+            projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+              this.projId, !!projectileData(this.projId)?.ignoreWater);
+            this.dead = true;
+            return;                                                    //（:29399-29401 Kill）
+          }
           const pick = cand[Math.floor(Math.random() * cand.length)]; //（:29403 Main.rand.Next）
           num438 = (pick as { id: number }).id;
           this.lockId = num438;                    //（:29404 ai[0] 回写 + netUpdate）

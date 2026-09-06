@@ -188,7 +188,7 @@ describe('useTime 五件落点（Game.ts）', () => {
     expect(blk).toContain('itemCombat(43)?.useTime ?? 45');
     expect(blk).not.toMatch(/useTime = 30/);
     // 消耗在成功支内
-    const consume = blk.indexOf('inv.removeAt');
+    const consume = blk.indexOf('inv.removeHeld');
     expect(consume).toBeGreaterThan(gate);
   });
 
@@ -231,7 +231,7 @@ function wireGame() {
   const world = new World(80, 80, 20, 'wg');
   const wiring = new Wiring(world.store);
   const inv = new Inventory();
-  const player = { cx: 40 * TILE, cy: 40 * TILE, useTime: 0, inv };
+  const player = { cx: 40 * TILE, cy: 40 * TILE, useTime: 0, inv, buffs: { has: () => false }, equipStats: {} };   // buffs 桩补 blockRange Builder 臂（既有缺桩,SW-AZ1 顺手补）
   g.world = world;
   g.wiring = wiring;
   g.player = player;
@@ -262,7 +262,8 @@ describe('useWireTool 逐工具 useTime（Item.cs:11315/:32588）', () => {
   });
 
   it('致动魔杖 3620 翻转:已有致动器格 actuate 成功 + useTime 5（旧 15）', () => {
-    const { g, wiring, player } = wireGame();
+    const { g, wiring, world, player } = wireGame();
+    world.store.setTileSilent(30, 30, 1);   // SW-AZ1:补实 tile（seed 环境下 (30,30) 为空气,deActive flags=0 空转——既有缺桩）
     expect(wiring.placeActuator(30, 30)).toBe(true);
     g.useWireTool(30, 30, defOf(3620));
     expect(player.useTime).toBe(5);

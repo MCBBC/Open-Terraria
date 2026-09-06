@@ -22,6 +22,13 @@
 //   · "子爆"=Kill 内原位 Resize+Damage()+AI_147_Explosion（:75037-75049）,原版
 //     【不 spawn 子弹实体】→ 无子爆弹 id 可枚举（本仓 explodeAt 直爆同构）;
 //     派对机枪 616 彩带弹走 Arrow 载体（Arrow 湿段域,非本文件）。
+//   · ★⑥杀拍口径核查（2026-09-06 湿段配方推广批,清白注不落刀）：本文件杀位全览——
+//     ①枪口弹 714/615（Celeb2Muzzle）杀位 owner 亡/断 channel/无弹药（fixedUpdate
+//     头 :89/:90/:138）：两 id SetDefaults ignoreWater=true（714 :7584/615 :6632）
+//     → 原版本就不跑湿段,杀拍跳段=原版同态,零观测差;②烟花弹 715-718
+//     （Celeb2Rocket）杀位=出界/撞块/命中（step 内 :321/:322/:340,全在湿段调用位
+//     :312 之后）→ 湿段已先跑=原版同相位（Kill 位在位移/Damage 域,湿段之后）。
+//     两支均无杀拍湿段缺口,无需补跑。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';

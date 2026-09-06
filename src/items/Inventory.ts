@@ -9,6 +9,7 @@
 // 旧版（2026-08-11 前）自创布局 0-39 背包/40-44 配饰/45-47 盔甲/48-50 时装/51-53 钱币
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { canMergeStack } from '../ui/SlotActions';   // ★SW-AY1 R1 合并谓词单源（Item.CanStack）
 import { VI_KEY } from '../data/itemKeys';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -222,8 +223,37 @@ export class Inventory {
     this.currentLoadout = idx;
   }
 
+  /** 光标持物镜像槽 58（SW-AZ1 2026-09-06）。vanilla 三件套：dropItemCheck（Player.cs:5122
+   *  `inventory[58] = Main.mouseItem.Clone()`，每 tick）+ PickItemSelectionOverride
+   *  （:17526-17548 mouseItem 非空 → 伪选中 58）→ HeldItem = inventory[selectedItem=58] =
+   *  光标物——背包开着+光标捏物时，左键点世界 = 直接使用/放置光标物。
+   *  本仓形态：UI.heldStack 活对象直挂（Game.syncCursorMirror 每 tick 同步/清端），
+   *  消耗经 removeHeld() 直写 stack = 回写光标物（vanilla 消费点 :43659/:53421
+   *  `Main.mouseItem = inventory[58].Clone()` 同步支同语义）。null = 未激活
+   *  （光标空手 / 背包关 / CanChangeSelectedItemImmediately=false 窗——:415-421）。
+   *  ★不入存档（SaveFile 只序列化 slots）不参与 collectOwnedItems（CollectItems
+   *  Recipe.cs:418-433 槽帽 58 = 0-57，58 号镜像槽在原版同样不计材料） */
+  cursorMirror: InvItem | null = null;
+
   heldItem(): InvItem | null {
-    return this.slots[this.selected];
+    // 伪选中支（PickItemSelectionOverride Player.cs:17528-17532）：镜像非空即 HeldItem
+    return this.cursorMirror ?? this.slots[this.selected];
+  }
+
+  /** 手持消耗统一入口（removeAt(selected) 的 HeldItem 语义版，SW-AZ1 2026-09-06）：
+   *  镜像激活（光标持物伪选中）→ 扣镜像（共享对象，stack 变更即回写 UI 光标物，
+   *  归零由 Game.syncCursorMirror 检出并清光标）；否则扣选中槽。
+   *  原版全部 inventory[selectedItem].stack-- 消费点（放置 :43612-43651 族/
+   *  消耗品/召唤物）在 selectedItem==58 期间都落在光标物上——本仓 56 处
+   *  removeAt(selected) 消费点经本方法统一改道 */
+  removeHeld(count = 1): boolean {
+    const m = this.cursorMirror;
+    if (m) {
+      if (m.stack < count) return false;
+      m.stack -= count;
+      return true;
+    }
+    return this.removeAt(this.selected, count);
   }
 
   /** GetEffectiveArmor（1457 Player.cs:5679-5734,LoadoutShare"收藏装备跨配装共享"）：
@@ -444,7 +474,7 @@ export class Inventory {
         if (count === before) break;   // 无进展（格满且不再转换）→ 溢出走背包
       }
       if (count > 0) {
-        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);
+        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix);
         for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
           if (!this.slots[i]) {
             const put = Math.min(max, count);
@@ -460,7 +490,7 @@ export class Inventory {
     //    仅 CanFillEmptyAmmoSlot 物（凝胶/沙/坠星等特殊弹药不自动入栏）
     if (ammoSlotAccepts(id)) {
       // 第一趟只合并（FillAmmo :38594-38630——全部弹药并已有堆,凝胶亦然）
-      count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max, placeStyle, true);
+      count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max, placeStyle, true, prefix);
       // 第二趟空格仅 CanFillEmptyAmmoSlot（:38632-38651）
       if (count > 0 && canFillEmptyAmmoSlot(id)) {
         for (let i = AMMO_START; i < AMMO_START + AMMO_SLOTS && count > 0; i++) {
@@ -495,7 +525,7 @@ export class Inventory {
       if (count <= 0) return 0;
     }
     // ③ 合并 0-49 已有堆
-    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);
+    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix);
     // ④ 空槽降序（原版非 favorited 降序从背包尾填，:38711-38730）
     for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
       if (!this.slots[i]) {
@@ -507,14 +537,16 @@ export class Inventory {
     return count;
   }
 
-  /** 范围内先合并后空格填充 */
+  /** 范围内先合并后空格填充。★SW-AY1 R1：合并判据补词缀面（Item.CanStack
+   *  Item.cs:49870-49874 同型且 prefix 相等）——经 SlotActions.canMergeStack 单源
+   *  谓词（与 UI 合并三路径同源）；placeStyle 门为本仓实例样式防混堆扩展,原版无 */
   private fillRange(start: number, len: number, id: number, count: number, max: number,
-    placeStyle?: number, mergeOnly = false): number {
+    placeStyle?: number, mergeOnly = false, prefix?: number): number {
     for (let i = start; i < start + len && count > 0; i++) {
       const s = this.slots[i];
       // placeStyle 匹配门(2026-08-13):不同敌旗(bannerId)不并入已有堆——
       // 原版每旗独立 item id 天然隔离,本仓单物品+实例 style 需此门防混堆
-      if (s && s.id === id && s.stack < max
+      if (s && s.stack < max && canMergeStack(s, { id, prefix })
         && (placeStyle === undefined || s.placeStyle === undefined || s.placeStyle === placeStyle)) {
         const put = Math.min(max - s.stack, count);
         s.stack += put;
@@ -525,7 +557,9 @@ export class Inventory {
       for (let i = start; i < start + len && count > 0; i++) {
         if (!this.slots[i]) {
           const put = Math.min(max, count);
-          this.slots[i] = { id, stack: put };
+          // ★SW-AY1 R1：空格落位随行词缀（原版整 Item 对象入槽,prefix 不丢）——
+          // 旧实现裸 {id,stack} 曾把词缀件落成无词缀堆（词缀门建立后成数据矛盾）
+          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}) };
           count -= put;
         }
       }

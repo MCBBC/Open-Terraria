@@ -105,7 +105,7 @@ export interface GameHooks {
    *      sign(cx−srcX)||1 推算不改五 PvP 支）；
    *    · opts.floatDealt/floatColor/noLocalFloat：本地飘字单点化控制——漏斗是唯一
    *      显示点，环境站经 damagePreview 预演回填终值保像素零漂移并消除双发。 */
-  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown,
+  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: import('./Enemy').Enemy,
     contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
     opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number;
   /** ★充能电水母反噬单口（Player.TakeDamageFromJellyfish :44607-44613）——近战

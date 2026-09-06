@@ -235,8 +235,11 @@ describe('湿旗跃迁 / 三清 / wetCount 冷却窗（:16921-16926/:17103-17112
 describe('湿位移阻尼档（HandleMovement :17721-17764 projWaterDragFactor）', () => {
   it('微光 0.375 / 蜂蜜 0.25 / 水 0.5 / 干 1;微光>蜂蜜>水 优先序', () => {
     expect(projWaterDragFactor({ wet: true, honeyWet: false, shimmerWet: false })).toBe(0.5);
-    expect(projWaterDragFactor({ wet: false, honeyWet: true, shimmerWet: false })).toBe(0.25);
-    expect(projWaterDragFactor({ wet: false, honeyWet: false, shimmerWet: true })).toBe(0.375);
+    // ★wet=false 时蜜/微光档原文不可达(HandleMovement :17721 `else if (wet)` 支内
+    //  才赋值 wetVelocity、:20555 `if (wet)` 才消费)——预置逐字面化后豁免弹出生带旗
+    //  态恒全速(红蓝轮③清偿;旧钉 0.25/0.375 系漏 wet 前置门的近似)
+    expect(projWaterDragFactor({ wet: false, honeyWet: true, shimmerWet: false })).toBe(1);
+    expect(projWaterDragFactor({ wet: false, honeyWet: false, shimmerWet: true })).toBe(1);
     expect(projWaterDragFactor({ wet: false, honeyWet: false, shimmerWet: false })).toBe(1);
     expect(projWaterDragFactor({ wet: true, honeyWet: true, shimmerWet: true })).toBe(0.375);
     expect(projWaterDragFactor({ wet: true, honeyWet: true, shimmerWet: false })).toBe(0.25);

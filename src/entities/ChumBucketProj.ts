@@ -127,8 +127,20 @@ export class ChumBucketProj extends Entity {
     const st = game.world.store;
     // ---- 出界防巡游（tile 越界即杀;原版由世界边缘 Kill 兜底）----
     const cxT = Math.floor(this.cx / TILE), cyT = Math.floor(this.cy / TILE);
-    if (!st.inBounds(cxT, cyT)) { this.dead = true; return; }
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (!st.inBounds(cxT, cyT)) { this.dead = true; return; }   // 原版界外 :16793-16802 早退,湿段同跳=原版同态
+    if (--this.life <= 0) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 timeLeft--/Kill 在子步【末尾】
+      //  （:17307-17311,AI(:16880)→湿段(:16895)→位移→Damage 之后）→ 寿命尽当拍湿段
+      //  照跑（`!active` 门 :17132 只拦 Damage/尾尘）。本仓递减杀在拍头曾整体跳过
+      //  湿段;现补跑,测位=存储位：AI_163 只写 velocity/rotation 不写 position →
+      //  原版杀拍湿段测位=上拍位移末位=存储位,逐值等价。杀支与 AI 尾活拍调用点
+      //  同拍互斥（早退）→ 无需 wetSectionRan 旗;820 ∉ IsDestroyedByWater 六型/
+      //  非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     // ---- 出生预置（NewProjectile :10886-10892,首拍 AI 前同位首测——AI_163 首拍即消费 wet 旗）----
     this.spawnPresetWet(st);
     // ---- 同型互斥推挤（AI_163 :54415-54437）：|dx|+|dy| < w/2 → 按相对方位 ±0.05 ----

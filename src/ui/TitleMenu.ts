@@ -18,6 +18,7 @@
 //   B2 拖动改时间：原版抓取即写 Main.time 使日/月跟手（Main.cs:62434-62446 反算）。
 //      MenuBackground.clock 私有无 setter——暴露 setClockT(t01) 并在 showTitle 的
 //      TitleMenu flow 里接 onSunMoonGrab 即原版般跟手；time01 已按原版公式反算好抛出。
+import APP_VERSION from '../version';
 import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
 import { decayCelestialModY } from '../render/SkyRenderer';
@@ -183,7 +184,7 @@ export class TitleMenu {
         #sw-title-chrome { position: fixed; inset: 0; z-index: 35; pointer-events: none;
           opacity: var(--sw-splash-alpha, 1); }
       </style>
-      <div class="sw-title-version"><div>SandboxWorld v0.1.0</div><div class="sw-title-baseline">${Lang.text('Mods.SandboxWorld.Title.RemakeBaseline')}</div></div>
+      <div class="sw-title-version"><div>SandboxWorld v${APP_VERSION}</div><div class="sw-title-baseline">${Lang.text('Mods.SandboxWorld.Title.RemakeBaseline')}</div></div>
       <div data-credit style="position:fixed;right:10px;bottom:8px;font-size:13px;color:#fff;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;"></div>
     `;
     document.body.appendChild(this.chrome);

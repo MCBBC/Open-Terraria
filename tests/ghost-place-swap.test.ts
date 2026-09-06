@@ -76,6 +76,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid: number, withPi
       slots: withPick ? [{ id: iidOf(PICK_V), stack: 1 }] : new Array(50).fill(null),
       heldItem: () => (heldVid ? { id: iidOf(heldVid), stack: 5 } : null),
       removeAt: () => {},
+      removeHeld: () => {},   // SW-AZ1：手持消耗统一入口（镜像臂,桩恒成功）
     },
   };
   return g;
@@ -644,6 +645,7 @@ describe('★终审 B① 致动域放置门（CanPlace/Place 裸 active()）', (
     let consumed = 0;
     Object.assign(g.player.inv as unknown as Record<string, unknown>, {
       removeAt: () => { consumed++; },
+      removeHeld: () => { consumed++; },   // SW-AZ1：手持消耗统一入口
       countOf: () => 0,           // killTileShouldDropSeeds 探针（草族掉落链,非本测面）
     });
     g.tryPlace(12, 20, WOOD_DEF);
@@ -663,6 +665,7 @@ describe('★终审 B① 致动域放置门（CanPlace/Place 裸 active()）', (
     let consumed = 0;
     Object.assign(g.player.inv as unknown as Record<string, unknown>, {
       removeAt: () => { consumed++; },
+      removeHeld: () => { consumed++; },   // SW-AZ1：手持消耗统一入口
       countOf: () => 0,
     });
     g.tryPlace(14, 20, TORCH_DEF);

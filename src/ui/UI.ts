@@ -140,11 +140,13 @@ import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts } from '
 import { chestSettingsAllowsVault, lootAllFromContainer } from '../stats/QuickStacking';
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
+  chestContainerContext, canMergeStack, quickTrashOptionsOf,
   CAN_FAVORITE_AT, CAN_LOADOUT_SHARE_AT, CAN_SHARE_AT, RETAIN_FAVORITE_ON_MOVE_AT,
+  blockedFromTransferIntoChest,
   type SlotWhereLike,
 } from './SlotActions';   // SW-AU2 2026-09-06 Alt/Shift/Ctrl 槽位动作 1:1 路由
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
-import { openResearchPanel, closeResearchPanel } from './ResearchUI';
+import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
 import { openPlayerListPanel } from './PlayerListPanel';
 import { openEmoteMenu } from './EmoteMenu';
@@ -585,6 +587,9 @@ export class UI {
   invPanel!: HTMLElement;
   chestPanel!: HTMLElement;
   craftListEl!: HTMLElement;
+  /** ★SW-BJ1 2026-09-06 合成区 CraftFromNearbyChests 开关贴图（CraftingUI.cs:342
+   *  ChestCraft 四帧;设置页/本钮双入口同步） */
+  craftNearbyToggleImg: HTMLImageElement | null = null;
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
   achWrapEl: HTMLElement | null = null;
@@ -1084,6 +1089,28 @@ export class UI {
     // 原版该态点击世界=抛掷 mouseItem（Player.cs:5139 mouseItem 臂）,本仓无抛掷
     // 路径,保持「持物时世界点击不触发使用」的现状语义
     game.uiHeldItemRef = () => !!this.heldStack;
+    // ★SW-BJ1 2026-09-06 触摸长按丢出等价：光标持物时 Input 长按 400ms 右键脉冲
+    // 先经此预钩（Game.touchRightPulse → Input.onLongPressRightPulse）——
+    // throwHeldToWorld 与桌面右键丢出臂 :1814 同一落地（DropSelectedItem(58) :5154
+    // 语义）；返回 true=吞沿,rightDown 不置位 → 同一次长按不再触世界右键分派。
+    // 桌面路径不经此钩（mousedown b2 直走 :1788 丢出臂）
+    game.uiTouchRightPulse = () => {
+      if (!this.heldStack) return false;
+      this.throwHeldToWorld();
+      this.refreshAll();
+      return true;
+    };
+    // ★SW-AZ1 2026-09-06 光标持物镜像槽 58（使用/放置支）：heldStack 活对象直挂
+    // Inventory.cursorMirror（Game.syncCursorMirror 每 tick 同步）——使用/放置消耗经
+    // removeHeld() 直改本对象 stack 即回写光标显示;耗尽由 Game 调 uiHeldItemClear
+    // 清光标（vanilla TurnToAir → mouseItem.IsAir → PickItemSelectionOverride 次拍失选）
+    game.uiHeldItemObj = () => this.heldStack;
+    game.uiHeldItemClear = () => {
+      this.heldStack = null;
+      this.heldFrom = null;
+      this.moveGhost();
+      this.refreshAll();
+    };
     // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
     // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
     // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）
@@ -1442,7 +1469,8 @@ export class UI {
   private altSlotClick(i: number, where: SlotWhere, panelOpen: boolean): boolean {
     const cur = this.slotContent(where, i);
     if (!cur) return false;                                  // :577 IsAir return
-    const ctx = slotContext(where, i, panelOpen);
+    // ★SW-AY1 R7：容器来源入语境（世界箱 3/银行 4/虚空保险库 32——canFavoriteAt[32]）
+    const ctx = slotContext(where, i, panelOpen, where === 'chest' ? this.openChest?.x : undefined);
     // 聊天分享（:583-587 drawingPlayerChat && canShareAt → cursorOverride 2 →
     // :709-716 ChatManager.AddChatText 插物品 tag + SoundID 12）
     if (this.game.chatInput?.isOpen && CAN_SHARE_AT.includes(ctx)) {
@@ -1479,6 +1507,12 @@ export class UI {
     return false;
   }
 
+  /** ★SW-AY1 R5 研究献祭面板在显探针（CreativeMenu.IsShowingResearchMenu :631 的
+   *  仓库等价=isResearchPanelOpen 间接层——方法化便于测试面覆写） */
+  private researchMenuShowing(): boolean {
+    return isResearchPanelOpen();
+  }
+
   /** ★SW-AU2 2026-09-06 Shift/Ctrl+左键快移动作：GetAlternateClickAction :601-700
    *  路由 + OverrideLeftClick cursorOverride 6/7/8/9/10 分派 :702-843。返回 true=
    *  已消费（sell 支原版恒 return true :840-841——卖不掉也不回落）；false=语境无
@@ -1489,18 +1523,27 @@ export class UI {
     const inv = this.game.player.inv;
     const chest = this.openChest;
     const maxStack = cur ? (ITEM_DEFS[cur.id]?.maxStack ?? 1) : 1;
+    // ★SW-AY1 #10：Quick Trash 三态设置进路由（缺省 Left Control = QUICK_TRASH_DEFAULTS）
+    const curVid = cur ? vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '') : -1;
     const plan = planAlternateClick({
-      context: slotContext(where, i, panelOpen),
+      context: slotContext(where, i, panelOpen, where === 'chest' ? chest?.x : undefined),
       itemAir: !cur,
       favorited: !!cur?.favorited,
       isCoin: cur ? coinIndexOf(cur.id) >= 0 : false,
       shopOpen: this.game.npcShopOpen,
       chestOpen: !!chest,
-      chestCanTake: !!cur && !!chest && chestCanTakeJustCheck(chest.items, cur.id, maxStack),
+      chestCanTake: !!cur && !!chest && chestCanTakeJustCheck(chest.items, cur.id, maxStack, cur.prefix),
       canTakeToInventory: !!cur && canTakeToPersonalInventory(inv.slots, cur.id, maxStack,
-        coinIndexOf(cur.id) >= 0, ammoSlotAccepts(cur.id)),
+        coinIndexOf(cur.id) >= 0, ammoSlotAccepts(cur.id), cur.prefix),
       shiftDown: shift,
       controlDown: ctrl,
+      opts: quickTrashOptionsOf(options.data.quickTrashMode),
+      // ★SW-AY1 R5 菜单特化支入路由（ItemSlot.cs:631-651 else-if 序）：
+      // 研究献祭面板在显（CreativeMenu.IsShowingResearchMenu）/ 向导反查在显
+      // （InGuideCraftMenu）——重铸支不可达（showReforge 全屏 overlay,结案不传）
+      researchMenuOpen: this.researchMenuShowing(),
+      guideMenuOpen: !!this.guideEl,
+      itemMaterial: cur ? curVid > 0 && materialIids().has(curVid) : false,
     });
     if (!plan) return false;
     switch (plan.kind) {
@@ -1517,16 +1560,36 @@ export class UI {
         const item = { ...cur!, favorited: false };
         if (where === 'chest') chest!.items[i] = null;
         else inv.slots[i] = null;
+        const oldTrash = inv.trash;                    // ★SW-AY1 R4b：旧桶件先取（:734 ref 面）
         inv.trash = item;
-        this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);
+        // ★SW-AY1 R4b journey 研究随垃圾桶（:733-738）：新件克隆按
+        // onlySacrificeIfItWouldFinishResearch 献祭 + 旧桶件整段献祭——两支皆空
+        // 才播 TrashItem（:735-737 `!(A | B)` 非短路序）。TryResearchingItem 内
+        // 播 Research_0/1-3（:1265/:1268）
+        let researchedNew = false;
+        let researchedOld = false;
+        if (this.game.world?.isJourney && cur) {
+          researchedNew = this.tryResearchIntoTrash(cur, true);
+          researchedOld = oldTrash ? this.tryResearchIntoTrash(oldTrash, false) : false;
+        }
+        if (!(researchedNew || researchedOld)) this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);
         this.game.sfx.play('pickup', 1);
         this.refreshAll();
         return true;
       }
       case 'toChest': {
-        // cursorOverride 9（:785-821 else 支 :818）→ ChestUI.TryPlacingInChest
-        // （ChestUI.cs:1205-1285 justCheck:false）——路由面已过 justCheck 门
-        if (cur && chest) this.shiftDepositToChest(i, cur);
+        // cursorOverride 9 分派（:785-821）：研究献祭 → 重铸（不可达,结案）→
+        // 向导对换 → 入箱（ChestUI.TryPlacingInChest justCheck:false :818）
+        if (!cur) return true;
+        if (this.researchMenuShowing()) {              // :787-792 SwapItem+SacrificeItemInSacrificeSlot
+          this.shiftResearchSacrifice(i, cur);
+          return true;
+        }
+        if (this.guideEl) {                            // :810-815 Utils.Swap(inv[slot], guideItem)
+          this.shiftGuideSwap(i, cur);
+          return true;
+        }
+        if (chest) this.shiftDepositToChest(i, cur);
         return true;
       }
       case 'fromChest': {
@@ -1540,7 +1603,8 @@ export class UI {
         if (picked > 0) {
           const cv = vidOf(cur.id);
           if (cv > 0) this.game.achievements.notifyItemPickup(cv);
-          this.game.sfx.play('pickup', 1);
+          // ★SW-AY1 #9 GetItem 币种专音（:39755 `IsACoin ? 38 : 7`，SoundID 38=CoinPickup）
+          this.game.sfx.play(coinIndexOf(cur.id) >= 0 ? 'coin' : 'pickup', 1);
         }
         this.refreshAll();
         return true;
@@ -1557,9 +1621,12 @@ export class UI {
         if (picked > 0) {
           const uv = vidOf(cur.id);
           if (uv > 0) this.game.achievements.notifyItemPickup(uv);
-          this.game.sfx.play('pickup', 1);
-          this.game.sfx.play('menuTick', 1);
+          // ★SW-AY1 #9 GetItem 币种专音（:39755 IsACoin ? 38 : 7）
+          this.game.sfx.play(coinIndexOf(cur.id) >= 0 ? 'coin' : 'pickup', 1);
         }
+        // ★SW-RB4a 2026-09-06：支尾 SoundID 12（ItemSlot.cs:769）【无条件】播放——
+        // 曾挂 picked>0 门=满背包卸下时静默（vanilla cursorOverride 7 尾奏不看落袋成败）
+        this.game.sfx.play('menuTick', 1);
         this.refreshAll();
         return true;
       }
@@ -1571,10 +1638,69 @@ export class UI {
     }
   }
 
+  /** ★SW-AY1 R4b journey 研究随垃圾桶（ItemSlot.cs:733-736 → TryResearchingItem
+   *  :1249-1272 + CreativeUI.SacrificeItem :288-329 spawnExcessItem:false 等价）：
+   *  被丢件照原样入桶（原版是对 DeepClone 献祭、本体照扔），研究登记在献祭面。
+   *  @param onlyIfFinish onlySacrificeIfItWouldFinishResearch（:304-307——只在本件
+   *  覆盖剩余研究缺口整段时才献）。返回是否献祭成立（:735 `!(A|B)` 音面判据） */
+  private tryResearchIntoTrash(it: { id: number; stack: number }, onlyIfFinish: boolean): boolean {
+    const vid = vanillaIdOfItemKey(ITEM_DEFS[it.id]?.key ?? '');
+    if (!(vid > 0)) return false;
+    const n = this.game.research.tryGetSacrificeNumbers(vid);
+    if (!n) return false;                                  // :293-295 无条目 CannotSacrifice
+    const remaining = n.need - n.have;
+    if (remaining <= 0) return false;                      // :297-301 num==0
+    const num2 = Math.min(remaining, it.stack);            // :302
+    if (onlyIfFinish && num2 !== remaining) return false;  // :304-307
+    const done = this.game.research.sacrifice(vid, num2);  // :312 RegisterItemSacrifice
+    // TryResearchingItem :1262-1270 音：跨线完成 64=Research_0 / 推进未满 63=Research_1..3
+    if (done) this.game.sfx.playWavFile('Research_0');
+    else this.game.sfx.playFiles(['Research_1', 'Research_2', 'Research_3'], 1);
+    this.game.net?.sendJourneyUnlock(vid, num2);           // M9（SacrificeItem :308 序列化上报）
+    this.game.cb?.onInventoryChanged?.();
+    return true;
+  }
+
+  /** ★SW-AY1 R5 cursorOverride 9 研究支（ItemSlot.cs:787-792 SwapItem +
+   *  SacrificeItemInSacrificeSlot → UICreativeInfiniteItemsDisplay.SacrificeWhatYouCan
+   *  :446-462 = SacrificeItem 缺省参 spawnExcessItem:true）：Shift+点背包格整段
+   *  献祭 min(need-have, stack)。近似登记：本仓研究面板无实体献祭格（列表化
+   *  ResearchUI），SwapItem 的回吐面=净无操作；献后溢出留原格（原版经
+   *  GetItem(ReturnItemFromSlot) 回包/落地，净语义同为「留在身上」） */
+  private shiftResearchSacrifice(i: number, cur: { id: number; stack: number }): void {
+    const vid = vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '');
+    const n = vid > 0 ? this.game.research.tryGetSacrificeNumbers(vid) : null;
+    const remaining = n ? n.need - n.have : 0;
+    if (!n || remaining <= 0) return;                      // 不可研究=原版 Swap 后原样回桌
+    const num2 = Math.min(remaining, cur.stack);
+    const done = this.game.research.sacrifice(vid, num2);
+    cur.stack -= num2;                                     // :314 item.stack -= num2
+    if (cur.stack <= 0) this.game.player.inv.slots[i] = null;   // :315-318 TurnToAir
+    if (done) this.game.sfx.playWavFile('Research_0');     // 献祭动画拍音（:354/:372）
+    else this.game.sfx.playFiles(['Research_1', 'Research_2', 'Research_3'], 1);
+    this.game.net?.sendJourneyUnlock(vid, num2);
+    this.game.cb?.onInventoryChanged?.();
+    this.refreshAll();
+  }
+
+  /** ★SW-AY1 R5 cursorOverride 9 向导支（ItemSlot.cs:810-815 Utils.Swap
+   *  (ref inv[slot], ref Main.guideItem) + SoundID 7）：Shift+点背包材料格与反查
+   *  材料槽对换。guidePlaced 为 {id,stack} 近似（prefix 丢面=槽位驱动流同款已登记） */
+  private shiftGuideSwap(i: number, cur: { id: number; stack: number }): void {
+    const pl = this.guidePlaced;
+    this.guidePlaced = { id: cur.id, stack: cur.stack };
+    this.game.player.inv.slots[i] = pl ? { ...pl } : null;
+    this.game.sfx.play('pickup', 1);                       // SoundEngine.PlaySound(7)（:814）
+    this.guideRefresh?.();                                 // 反查面板材料行/槽面即刻重刷
+    this.refreshAll();
+  }
+
   /** ★SW-AU2 2026-09-06 快移入箱（ChestUI.TryPlacingInChest :1205-1285
    *  justCheck:false 段 1:1）：先并箱内同型余堆（:1219-1256 逐堆、SoundID 7），
-   *  余量克隆进首空格（:1258-1283、SoundID 7）——入箱即清收藏（context 3 不在
-   *  retainFavoriteOnMoveAt :362-366，MouseItemSwap :1230-1234 双端清） */
+   *  余量克隆进首空格（:1258-1283、SoundID 7）——入箱即清收藏（context 3/4 不在
+   *  retainFavoriteOnMoveAt :362-366，MouseItemSwap :1230-1234 双端清；32 虚空袋
+   *  面不走本方法——Shift 入柜面收藏件被 :604 总闸拦截）。★SW-AY1 R1 合并判据
+   *  改 canMergeStack（CanStack 词缀面 :1221） */
   private shiftDepositToChest(i: number, cur: { id: number; stack: number; prefix?: number; placeStyle?: number; favorited?: boolean }): void {
     const chest = this.openChest;
     if (!chest || cur.stack <= 0) return;
@@ -1583,7 +1709,7 @@ export class UI {
     let moved = 0;
     if (max > 1) {
       for (const cs of chest.items) {
-        if (!cs || cs.id !== cur.id || cs.stack >= max) continue;
+        if (!cs || cs.stack >= max || !canMergeStack(cs, cur)) continue;
         const put = Math.min(max - cs.stack, cur.stack);
         cs.stack += put; cur.stack -= put; moved += put;
         if (cur.stack <= 0) break;
@@ -1636,7 +1762,7 @@ export class UI {
       const put = Math.min(remaining, max);
       this.heldStack = { id, stack: put, ...(prefix !== undefined ? { prefix } : {}) };
       remaining -= put;
-    } else if (this.heldStack.id === id && (this.heldStack.prefix ?? undefined) === prefix) {
+    } else if (canMergeStack(this.heldStack, { id, prefix })) {   // ★SW-AY1 R1 谓词单源（语义同旧式）
       const space = max - this.heldStack.stack;
       const put = Math.min(space, remaining);
       if (put > 0) this.heldStack.stack += put;
@@ -1693,7 +1819,19 @@ export class UI {
         return;
       }
       if (t?.closest?.('.sw-npc-dialog') || t?.closest?.('.sw-happy-panel')) return;
+      // ★SW-AZ1 2026-09-06 光标持物镜像槽 58（使用/放置支）：左键点世界不再是丢出——
+      // 原版光标持物左键 = 直接使用/放置（PickItemSelectionOverride Player.cs:17526-17548
+      // 伪选中 58 + dropItemCheck :5122 inventory[58]=mouseItem.Clone;旧注「点击世界=
+      // 抛掷」系误读 mouseItem 臂 :5139——那是【右键】释放臂）。左键事件放行给世界
+      // 使用链（Game.updateUse 光标镜像支,照常消耗光标物 stack）;右键保持丢出（原版
+      // 丢出臂,DropSelectedItem(58) :5154）
+      if (e.button === 0) return;
       this.throwHeldToWorld();
+      // ★SW-RB4a 2026-09-06：丢出臂吞掉本次按压（vanilla dropItemCheck :5141-5144
+      //  `releaseUseTile = false; Main.mouseRightRelease = false`——丢出后同一次右按
+      //  不再触世界交互）。曾不吞=右键丢出瞬间 heldStack 清空 → cursorHeld 门失位,
+      //  同一按压漏进世界右键交互链（开箱/开门/NPC 对话误触发）
+      if (this.game?.input) this.game.input.rightDown = false;
       this.refreshAll();
     });
     document.addEventListener('mousemove', (e) => {
@@ -1740,15 +1878,23 @@ export class UI {
     // ★SW-AU2 2026-09-06 收藏标记保留域 = retainFavoriteOnMoveAt（ItemSlot.cs:362-366，
     // 背包族 0/1/2 + 虚空袋 32 + 重铸 5）：MouseItemSwap :1227-1235 语境不在表内则
     // 双端清 favorited——箱/装备/染料/杂项面取出即清（装备面清标记=共享状态终结，
-    // GetEffectiveArmor 只认收藏件 :240-251）；本仓虚空袋并入 chest 面按 3 处理（登记债）
+    // GetEffectiveArmor 只认收藏件 :240-251）。
+    // ★SW-AY1 R7：语境按容器来源取全（世界箱 3/银行 4=清、虚空保险库 32=保）——
+    // 旧实现 chest 面一律按 3 清（登记债已销）；关包快捷栏语境 13 原版不在表内
+    // （面板关拖拽取件同清）
+    const panelOpenNow = !!this.invPanel && this.invPanel.style.display === 'block';
+    const ctxNow = where === 'chest'
+      ? chestContainerContext(this.openChest?.x)
+      : slotContext(where, i, panelOpenNow);
+    const retainFav = RETAIN_FAVORITE_ON_MOVE_AT.includes(ctxNow);
     if (this.heldStack) {
       // ★SW-RB1 2026-09-06 并入光标面同走 MouseItemSwap 双端清（ItemSlot.cs:1227-1235）：
       // 语境不在 retainFavoriteOnMoveAt（箱 3/装备 8-12/杂项 16-20/33）时,光标端收藏
       // 一并清——曾只清槽端,箱料并进收藏光标堆后收藏标记越箱存活（提示行/防丢域泄漏）
-      if (where !== 'inv') this.heldStack.favorited = false;
+      if (!retainFav) this.heldStack.favorited = false;
       this.heldStack.stack += cur.stack;
     }
-    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: where === 'inv' ? cur.favorited : false, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②；收藏域见上 SW-AU2 注）
+    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: retainFav ? cur.favorited : false, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②；收藏域见上 SW-AU2/R7 注）
     // 拿取/合并音（ItemSlot.cs:987-989：转移后光标或格子有物 → SoundID 7 Grab）
     this.game.sfx.play('pickup', 1);
     this.refreshAll();
@@ -1899,7 +2045,7 @@ export class UI {
         inv.slots[i] = this.heldStack;
         landedVid = vidOf(this.heldStack.id);
         this.heldStack = null;
-      } else if (cur.id === this.heldStack.id) {
+      } else if (canMergeStack(cur, this.heldStack)) {   // ★SW-AY1 R1：合并门=CanStack 词缀面
         const max = ITEM_DEFS[cur.id].maxStack;
         const put = Math.min(max - cur.stack, this.heldStack.stack);
         cur.stack += put;
@@ -1919,22 +2065,35 @@ export class UI {
     } else {
       const chest = this.openChest;
       if (!chest) return;
+      // ★SW-AY1 R7：容器语境按来源取（世界箱 3/银行 4 不保留收藏；虚空保险库
+      //  32 ∈ retainFavoriteOnMoveAt（ItemSlot.cs:365）→ 放入/交换双向保留收藏）
+      const chestCtx = chestContainerContext(chest.x);
+      const keepFav = chestCtx === 32;
+      // ★SW-AY1 R8 IsBlockedFromTransferIntoChest（ChestUI.cs:1287-1298）拖放面：
+      //  PickItemMovementAction case 4/32（:1483-1492）对收藏钱袋(3213)→存钱罐、
+      //  收藏虚空袋(4131/5325)→虚空保险库 拒发移动动作（result=-1 无操作）。
+      //  世界箱（context 3）无此门（case 3 直通 :1480-1482）——按容器身份判
+      if (this.heldStack.favorited) {
+        const hv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
+        // ★SW-BJ1：判别式抽 blockedFromTransferIntoChest 单源（拖放臂/tooltip 行共用）
+        if (blockedFromTransferIntoChest(chest.x, hv)) return;
+      }
       // ★SW-AU2 2026-09-06 箱语境（3/4）不保留收藏（retainFavoriteOnMoveAt
       //  ItemSlot.cs:362-366 → MouseItemSwap :1230-1234 双端清）——放入箱与箱中
       //  取出到光标的双向面同清
       const cur = chest.items[i];
       if (!cur) {
-        chest.items[i] = { ...this.heldStack, favorited: false };
+        chest.items[i] = { ...this.heldStack, favorited: keepFav ? !!this.heldStack.favorited : false };
         this.heldStack = null;
-      } else if (cur.id === this.heldStack.id) {
+      } else if (canMergeStack(cur, this.heldStack)) {   // ★SW-AY1 R1：合并门=CanStack 词缀面
         const max = ITEM_DEFS[cur.id].maxStack;
         const put = Math.min(max - cur.stack, this.heldStack.stack);
         cur.stack += put;
         this.heldStack.stack -= put;
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else {
-        chest.items[i] = { ...this.heldStack, favorited: false };
-        this.heldStack = { ...cur, favorited: false };
+        chest.items[i] = { ...this.heldStack, favorited: keepFav ? !!this.heldStack.favorited : false };
+        this.heldStack = { ...cur, favorited: keepFav ? !!cur.favorited : false };
       }
       // 箱格放置/合并/交换音（同 :987-989 → SoundID 7）
       this.game.sfx.play('pickup', 1);
@@ -2231,8 +2390,17 @@ export class UI {
     else if (s.favorited) {
       linesHtml += `<br>${Lang.text('LegacyTooltip.56')}`;
       linesHtml += `<br>${Lang.text('LegacyTooltip.57')}`;
-      // :20845-20852 钱袋/虚空袋族收藏时加 "CannotBePlacedInsideItself" 行——
-      // 本仓容器族不产生收藏标记（Alt 域外），缺此行零行为差（登记）
+      // ★SW-BJ1 2026-09-06 收藏自锁行（Main.cs:20846-20852）：容器开着时
+      // IsBlockedFromTransferIntoChest（ChestUI.cs:1287-1298：收藏钱槽 3213 →
+      // 存钱罐 bank、收藏虚空袋 4131/5325 → 虚空袋 bank4）→ UI.ItemCannotBePlaced-
+      // InsideItself（"此物品无法被放入其自身"）。可达性：CAN_FAVORITE_AT 含背包
+      // 0/1/2/32 槽（SlotActions.ts:61），收藏钱袋/虚空袋存在（拖放臂同判别式
+      // 已挡移动）——旧注「容器族不产生收藏标记」系误判,本行为差为真
+      if (this.openChest
+        && blockedFromTransferIntoChest(this.openChest.x,
+          vanillaIdOfItemKey(ITEM_DEFS[s.id]?.key ?? ''))) {
+        linesHtml += `<br>${Lang.text('UI.ItemCannotBePlacedInsideItself')}`;
+      }
     }
     for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
       const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫
@@ -2463,9 +2631,20 @@ export class UI {
     this.closeItemSearch();
     this.closeGuideSearch();
     this.closeChest();
-    // 放回手上物品
+    // 放回手上物品。★SW-RB4a 2026-09-06 关包光标物归位 1:1（dropItemCheck :5136-5140
+    // `!Main.playerInventory` 臂 → GetOrDropItem（ReturnItemFromSlot）→ GetItem + 余量
+    // RequestNewItem 落地 Player.cs:5132-5136）：①词缀/实例样式随行入包（曾裸
+    // (id,stack)=词缀件关包即洗白——重铸词缀在 getEffectiveArmor/重铸格回流面丢词缀）；
+    // ②满包余量落地（曾静默丢弃=物损方向）。收藏标记不入 add 通道（fillRange 落位
+    // 新堆无收藏域）——关包丢收藏金边为登记偏差（vanilla 整 Item 对象回包保标记）
     if (this.heldStack) {
-      this.game.player.inv.add(this.heldStack.id, this.heldStack.stack);
+      const h = this.heldStack;
+      const hDef = ITEM_DEFS[h.id];
+      const left = this.game.player.inv.add(h.id, h.stack, h.prefix, h.placeStyle);
+      if (left > 0) {
+        const p = this.game.player;
+        this.game.spawnDrop(p.cx, p.y, hDef?.key ?? '', left, 0, -2, h.placeStyle);
+      }
       this.heldStack = null;
     }
     // 材料格内容归还背包（CraftingGrid 关闭语义）
@@ -2811,6 +2990,9 @@ export class UI {
   // ============ 向导配方反查（guideItem → CollectGuideRecipes，组匹配生效） ============
 
   private guideEl: HTMLDivElement | null = null;
+  /** ★SW-AY1 R5 反查面板刷新钩子（openGuideSearch 内注入 changed 闭包,关闭即清）
+   *  ——Shift 对换支改 guidePlaced 后由 shiftGuideSwap 触发面板即刻重刷 */
+  private guideRefresh: (() => void) | null = null;
   /** Esc 关闭监听（openGuideSearch 挂载/closeGuideSearch 对称摘除） */
   private guideEscHandler: ((e: KeyboardEvent) => void) | null = null;
   /** 手持材料「光标幽灵」（canvas 手持绘制层级低于 DOM 面板——进入反查浮层会看不见
@@ -2947,6 +3129,7 @@ export class UI {
       let action: 'none' | 'take' | 'move' = 'none';
       if (cur && !isMaterialVid(vidOfItem(cur.id))) return;          // 放置门不过=原样拒
       const changed = (): void => { refreshHeader(); renderRecipes(); applyFilter(); };
+      this.guideRefresh = changed;   // ★SW-AY1 R5：Shift 对换支（shiftGuideSwap）同刷面板
       if (e.button === 0) {
         if (!cur && pl) {                                            // 空手 → 取整组
           const hadPrefix = (pl as { prefix?: number }).prefix;
@@ -3071,7 +3254,10 @@ export class UI {
           ghost.appendChild(n);
         }
       }
-      ghost.querySelector('.n')!.textContent = String(hs.stack);
+      // ★SW-BI1 2026-09-06：非空断言改空守卫（同 refreshCrafting 防御计数器注，
+      //  本通道同在 refreshAll 逐帧刷——ghost 内 .n 缺失即空指针刷屏）
+      const ghostN = ghost.querySelector('.n');
+      if (ghostN) ghostN.textContent = String(hs.stack);
       ghost.style.display = 'block';
       ghost.style.left = `${e.clientX + 10}px`;
       ghost.style.top = `${e.clientY + 8}px`;
@@ -3128,6 +3314,7 @@ export class UI {
 
   closeGuideSearch(): void {
     // 光标幽灵摘除（元素+mousemove 对称回收）
+    this.guideRefresh = null;   // ★SW-AY1 R5 对称摘除（面板闭后 Shift 支不再触刷新）
     if (this.guideGhostMove) {
       window.removeEventListener('mousemove', this.guideGhostMove);
       this.guideGhostMove = null;
@@ -3168,10 +3355,20 @@ export class UI {
     // 语义失效（2026-08-21 用户报"无法遗弃任何东西"）
     // ★SW-AU2 2026-09-06 context 6 不在 retainFavoriteOnMoveAt（:362-366）→
     //  MouseItemSwap :1230-1234 清 favorited（入桶即失收藏标记，原版同）
+    // ★SW-AY1 R4b journey 研究随垃圾桶（LeftClick case 0 context 6 :909-916）：
+    //  持物入桶 = 新件克隆 onlyIfFinish 献祭 + 桶内旧件整段献祭（:912 `A|B` 非短路），
+    //  旧件随即 SetDefaults(0)（:916）；两支皆空才播 TrashItem（:978-981 `!flag2`）
+    const oldTrash = this.game.player.inv.trash;
+    let researchedNew = false;
+    let researchedOld = false;
+    if (this.game.world?.isJourney) {
+      researchedNew = this.tryResearchIntoTrash(this.heldStack, true);
+      researchedOld = oldTrash ? this.tryResearchIntoTrash(oldTrash, false) : false;
+    }
     this.game.player.inv.trash = { ...this.heldStack, favorited: false };
     this.heldStack = null;
-    this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);   // SoundID.TrashItem
-    this.game.sfx.play('pickup', 1);                                 // SoundID 7 Grab（:698）
+    if (!(researchedNew || researchedOld)) this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);   // SoundID.TrashItem（:980）
+    this.game.sfx.play('pickup', 1);                                 // SoundID 7 Grab（:982）
     this.paintTrash();
   }
 
@@ -3559,6 +3756,15 @@ export class UI {
     trash.addEventListener('contextmenu', (e) => e.preventDefault());   // SW-AU2：Ctrl+点(Mac=长按右键菜单面)在槽域同被吞
     trash.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      // ★SW-AY1 R4a Alt(FavoriteKey)+聊天输入开着 = 插物品 tag——本槽不走
+      //  makeSlotEl（自建监听器,不在 makeSlotEl 优先级链内）,此处补 OverrideHover
+      //  :581-587 最高优先支：context 6 ∈ canShareAt（:380）→ cursorOverride 2 →
+      //  OverrideLeftClick :709-716 ChatManager.AddChatText + SoundID 12 消费
+      if (!e.button && e.altKey && this.game.chatInput?.isOpen && this.game.player.inv.trash) {
+        this.game.insertChatItemTag(vidOf(this.game.player.inv.trash.id));
+        this.game.sfx.play('menuTick', 1);
+        return;
+      }
       // ★SW-AU2 2026-09-06 Shift+左键垃圾桶 = 桶→背包（GetAlternateClickAction
       //  :688-696 case 6 → cursorOverride 7 → OverrideLeftClick :764-770
       //  GetItem(QuickTransferFromSlot)：落袋 GetItem SoundID 7 + 支尾 SoundID 12；
@@ -3569,7 +3775,8 @@ export class UI {
         const left = this.game.player.inv.add(t.id, t.stack, t.prefix, (t as { placeStyle?: number }).placeStyle);
         if (left < t.stack) {
           this.game.player.inv.trash = left > 0 ? { ...t, stack: left } : null;
-          this.game.sfx.play('pickup', 1);
+          // ★SW-AY1 #9 GetItem 币种专音（:764-770 → Player.cs:39755 IsACoin ? 38 : 7）
+          this.game.sfx.play(coinIndexOf(t.id) >= 0 ? 'coin' : 'pickup', 1);
           this.game.sfx.play('menuTick', 1);
           this.paintTrash();
           this.refreshAll();
@@ -3858,6 +4065,50 @@ export class UI {
     // ---- Modern 合成网格控件（1.4.5 CraftingGrid：搜索栏 + 焦点配方材料格） ----
     const modernRow = el('div');
     modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
+    // ★SW-BJ1 2026-09-06 附近箱参与制作开关（CraftingUI.DrawCraftFromNearbyChestsToggle
+    // CraftingUI.cs:336-356，Main.cs:42442 挂点 = 网格开关下方 40px、配方列表旁）：
+    // ChestCraft 四帧贴图（index = 2−val×2+hover：0/1 开态常驻/悬停、2/3 关态），
+    // 悬停 tooltip = GameUI.CraftFromNearbyChestsOn/Off（MouseTextNoOverride :345），
+    // 点击翻转 + SoundID 12 + NewCraftingUI.RefreshGrid（:349-352 → 本仓 refresh-
+    // VanillaCrafting）。设置页入口保留（Settings.ts game 组,双入口同 original 一面）
+    {
+      const btn = el('div');
+      btn.style.cssText = 'flex:0 0 auto; width:32px; height:34px; cursor:pointer; line-height:0;';
+      btn.title = '';
+      const img = document.createElement('img');
+      img.draggable = false;
+      img.style.cssText = 'width:32px; height:34px; image-rendering:pixelated;';
+      this.craftNearbyToggleImg = img;
+      const sync = (): void => {
+        img.src = `sprites/vanilla-ui/UI_ChestCraft_${
+          options.data.craftFromNearbyChests ? 0 : 2}.png`;
+      };
+      sync();
+      options.onChange(sync);   // 设置页入口翻转时同步贴图（UI 单例长存无退订点,同 :1071）
+      const tip = (): void => this.showBuffTooltip(btn,
+        Lang.text(options.data.craftFromNearbyChests
+          ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'), '');
+      btn.addEventListener('mouseenter', () => {
+        img.src = `sprites/vanilla-ui/UI_ChestCraft_${
+          options.data.craftFromNearbyChests ? 1 : 3}.png`;
+        tip();
+      });
+      btn.addEventListener('mouseleave', () => {
+        img.src = `sprites/vanilla-ui/UI_ChestCraft_${
+          options.data.craftFromNearbyChests ? 0 : 2}.png`;
+        this.hideBuffTooltip();
+      });
+      btn.addEventListener('click', () => {
+        void options.set('craftFromNearbyChests', !options.data.craftFromNearbyChests);
+        this.game?.sfx.play('menuTick', 1);            // SoundID 12（CraftingUI.cs:351）
+        this.craftFocus = -1;
+        this.hoverFocus = -1;
+        this.refreshVanillaCrafting();                 // NewCraftingUI.RefreshGrid 同语义
+        tip();                                         // 悬停中翻转 → 文案随态换行
+      });
+      btn.appendChild(img);
+      modernRow.appendChild(btn);
+    }
     this.craftSearchEl = el('input') as HTMLInputElement;
     this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
     // ★input 高度对齐右侧配方细项盒(38px)并恒定——未 hover 时细项盒塌掉曾把
@@ -4742,7 +4993,9 @@ export class UI {
     // 走 itemNameByKey 全链（vi_ key 前缀→官方 l10n→id-maps 兜底→place_v_ 方块名→
     // Mods 自有键→def.name）：vi_ def 的 vid 字段不落、name 恒 ''（items.ts 自动注册
     // 循环不写 vid），裸取 def.vid 会级联落空 → 恒显 inter(37)"物品"（退役批回归）
-    const held = inv.slots[inv.selected];
+    // ★SW-AZ1 2026-09-06：经 heldItem() 取手持（光标持物伪选中时=镜像槽 58——
+    // vanilla 该行读 HeldItem Player.cs:3835-3837,光标捏物时显示光标物名）
+    const held = inv.heldItem();
     const name = held ? Lang.itemNameByKey(ITEM_DEFS[held.id]?.key ?? '') : null;
     this.hotbarNameEl.textContent = name || Lang.inter(37);
   }
@@ -4938,7 +5191,12 @@ export class UI {
         }
         if (url && imgEl.getAttribute('src') !== url) imgEl.src = url;
       }
-      defEl.querySelector('span')!.textContent = String(p.defense);
+      // ★SW-BI1 2026-09-06：去非空断言改空守卫——本函数经 refreshAll 的 rAF 合并
+      //  通道在背包事件风暴期逐帧跑，defEl 内缺 <span>（旧档/坞迁移期标记不齐）
+      //  曾以 `Cannot set properties of null (setting 'textContent')` 每帧刷屏
+      //  （SW-BI1 报告 49 连发同形），守卫后静默跳过等下轮重建补齐。
+      const defNumEl = defEl.querySelector('span');
+      if (defNumEl) defNumEl.textContent = String(p.defense);
     }
     const stationsEl = this.invPanel.querySelector('[data-role="stations"]') as HTMLElement;
     if (stationsEl) {

@@ -480,7 +480,14 @@ export class SpriteAtlas {
    *  再加载;清单外的入参按路径直用(资源包注入等直路径调用方的逃生门)。
    *  曾把键当路径直发(sprites/Player_Hair_5.png,缺 vanilla-ui/ 前缀)→ 发型页
    *  452 键全 404 且 SW 不缓存 404,开面板两波 904 个往返跑完才开始烘焙
-   *  (2026-08-26 用户实报"发型列表等 904 个 404 才渲染") */
+   *  (2026-08-26 用户实报"发型列表等 904 个 404 才渲染")
+   *  SW-BB1 2026-09-06 评估结案(不动):lane 循环的每次 await waitUi 都停在真实
+   *  图片事件(onload/onerror/负缓存),无微任务风暴——"~60ms 单任务束"实测为
+   *  同帧内多图 onload 回调+bitmap 升级批次,量级受 tryBitmapUpgrade 批形态支配,
+   *  改批形态会波及全 UI 面加载语义(11 处 vui 消费方按帧重查)。值得动的判据:
+   *  探针实测到单个 onload 批 >32ms 且落在关键交互窗口(而非后台预抢期)。
+   *  全仓消费面仅 vui/assets/UITextures.ensure → CharCreation 两处(烘焙前置/
+   *  变体预抢),超时等策略已在调用侧解决(D4b)。 */
   async ensureUiBatch(names: string[], concurrency = 8): Promise<void> {
     let i = 0;
     const lanes = Array.from({ length: Math.min(concurrency, names.length) }, async () => {

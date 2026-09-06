@@ -51,6 +51,14 @@ function csRound(v: number): number {
 }
 
 import { TILE_OBJECT_DEATH, type TodEntry } from './tile-object-death-table';
+/** 对象死亡档「与全局表同判」的 sheet 预计算（2026-09-06 大世界提速）：diesIn
+ *  热路径原每调用 `Object.keys(rec.subs).length`——临时数组分配，6400×1800 档
+ *  waterCheck 58 万 wet 格 ×2 次/格 = 百万级 churn。diesIn 首支谓词
+ *  `rec.d===null ∧ subs 空 ∧ alts 空` ⇔ 本集合含该 sheet（模块加载期算一次）。 */
+const TOD_DIRECT_SHEETS = new Set<number>();
+for (const [k, rec] of Object.entries(TILE_OBJECT_DEATH)) {
+  if (rec.d === null && !Object.keys(rec.subs).length && !rec.alts.length) TOD_DIRECT_SHEETS.add(+k);
+}
 /** Main.tileWaterDeath 表（Main.cs:7182-7240 区段提取，vanilla tile id）。
  *  ★liqGateLegacy（2026-09-03 十三批）导出：Game.ts legacy 置放门复用同源表
  *  （TileObjectData.LiquidPlace 静态回落 TileObjectData.cs:5045-5062 消费位）。 */
@@ -158,8 +166,18 @@ const ROPE_SHEETS = new Set([77, 213]);
 
 export class LiquidSim {
   world: World;
-  /** 活动液体条目（原版 Main.liquid[]，dense 数组 + swap-remove） */
+  /** 活动液体条目（原版 Main.liquid[]，dense 数组 + swap-remove）。
+   *  ★池化（2026-09-06 大世界提速）：槽对象常驻复用（C# 侧本就是槽位池），
+   *  有效区由 numLiquid 界定；字段语义由写点保证（addWater 全量覆写 /
+   *  delWater swap-remove 只搬 x/y/kill），任何取槽路径不得依赖 length。 */
   private liquids: LiquidEntry[] = [];
+
+  /** 取第 n 槽（缺则建池）。热路径：addWater 每次入列调用。 */
+  private liquidSlot(n: number): LiquidEntry {
+    let s = this.liquids[n];
+    if (s === undefined) { s = { x: 0, y: 0, kill: 0, delay: 0 }; this.liquids[n] = s; }
+    return s;
+  }
   /** 联机变化格收集（原版 Liquid.NetSendLiquid 的 sink 形态——AddWater/DelWater
    *  两时刻记格，Liquid.cs:1189/:1583；null=单机/访客（不模拟）零开销）。
    *  60ms 节流上报见 net/syncModules.ts module0 注 */
@@ -716,8 +734,7 @@ export class LiquidSim {
   /** 丢弃模拟器：预沉降临时实例调用，停止响应唤醒 */
   dispose() {
     this.disposed = true;
-    this.liquids.length = 0;
-    this.numLiquid = 0;
+    this.numLiquid = 0; // 池化:槽随实例 GC,不手动清
   }
 
   private idx(x: number, y: number): number { return y * this.world.store.w + x; }
@@ -792,8 +809,11 @@ export class LiquidSim {
     this.checking[i] = 1;
     this.skip[i] = 0;
     // AddWater L1182-1185：kill/delay 显式清零（1456 反编译实证——池对象复用但
-    // 三字段全写，勿改成残留语义）
-    this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
+    // 字段全写，勿改成残留语义）。★池化槽复用（2026-09-06 大世界提速）：原
+    // `= {x,y,...}` 字面量每次分配新对象——settle 主循环 10 万轮 × 万级入列 =
+    // 亿级短命对象 GC churn；原版本就是池化数组（C# Liquid 槽位复用），此处对齐。
+    const slot = this.liquidSlot(this.numLiquid);
+    slot.x = x; slot.y = y; slot.kill = 0; slot.delay = 0;
     this.numLiquid++;
     // NetSendLiquid（Liquid.cs:1188-1190：netMode==2 且入列成功才记——缓冲路径
     // 此处未达，回灌出列再入时会补记）
@@ -844,8 +864,7 @@ export class LiquidSim {
             this.panicMode = true;
             this.panicCounter = 0;
             this.panicY = st.h - 3;
-            this.liquids.length = 0;
-            this.numLiquid = 0;
+            this.numLiquid = 0;   // 池化:槽常驻
             this.bufCount = 0;   // StartPanic 清 LiquidBuffer（cs:980）
           }
         } else {
@@ -1603,7 +1622,8 @@ export class LiquidSim {
     this.checking[i5] = 0;
     const tail = this.liquids[this.numLiquid];
     e.x = tail.x; e.y = tail.y; e.kill = tail.kill;
-    this.liquids.length = this.numLiquid;
+    // 池化(2026-09-06)：不再 length 截断——槽常驻，有效区由 numLiquid 界定
+    // （原截断行会丢尾槽对象，池退化回 new 字面量）
     // DelWater 尾部（Liquid.cs:1607-1624）：出列格是草药 → CheckAlch 依附复查；
     // 是睡莲(518) → 快沉降/静水时 CheckLilyPad，否则仅 SquareTileFrame（本仓库帧为
     // 渲染期派生，该分支无操作）
@@ -2000,8 +2020,9 @@ export class LiquidSim {
    *  解析 style/alt 取对象值。style 解析用 C# int 除法（向零截断——frameX=-1 时
    *  floor 会差 1 档）。 */
   private diesIn(t: number, fx: number, fy: number, isLava: boolean): boolean {
-    const rec: TodEntry | undefined = TILE_OBJECT_DEATH[SHEET_OF[t]!];
-    if (rec === undefined || rec.d === null && !Object.keys(rec.subs).length && !rec.alts.length) {
+    const sheetK = SHEET_OF[t]!;
+    const rec: TodEntry | undefined = TILE_OBJECT_DEATH[sheetK];
+    if (rec === undefined || TOD_DIRECT_SHEETS.has(sheetK)) {
       return isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
     }
     const tr = (v: number, d: number) => Math.trunc(v / d);   // C# int 除法
@@ -2031,8 +2052,7 @@ export class LiquidSim {
 
   private waterCheckInner() {
     const st = this.world.store;
-    this.liquids.length = 0;
-    this.numLiquid = 0;
+    this.numLiquid = 0; // 池化(2026-09-06):槽常驻,清有效区即可(旧 length=0 丢池)
     this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（1456 WorldGen.cs:81157）
     // ★IIIIIII4（ntb #98 掷窗分歧定罪修复）：checking 位必须【扫描到达时逐格清除】
     // （1456 WorldGen.cs:81160 / 1457 :81698——循环体内、谓词求值前

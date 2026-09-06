@@ -154,6 +154,15 @@ export class TabletShardProj extends Entity {
     const dist = Math.hypot(dx, dy);
     const vel = Math.hypot(this.vx, this.vy);
     if (dist < vel) {                                            // 抵靶 Kill(:33750)
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_098 抵靶 Kill+return
+      //  （:33749-33753 `if (value13.Length() < velocity.Length()) { Kill(); return; }`）
+      //  早退跳过尾迹尘支,但 Update 湿段(:16895)【无 active 门】照跑（`!active` 门
+      //  :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。本仓杀位曾整体跳过湿段;现补跑,
+      //  测位=存储位（AI_098 不写 position,原版死拍湿段同位,逐值等价）。杀支与
+      //  AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;526 ∉
+      //  IsDestroyedByWater 六型/非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        526, !!projectileData(526)?.ignoreWater);
       this.spawnTrail(game);
       this.dead = true;
       return;
@@ -2195,11 +2204,33 @@ export class LunarOrb extends Entity {
     const preVx = this.vx, preVy = this.vy;
     const orbitT = this.kind === 539 ? 210 : 180;
     const alive = !!parent && !parent.dead;
-    if (this.kind === 574 && !alive) { this.dead = true; return; }   // :32083-32092
+    if (this.kind === 574 && !alive) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_102 574 父失联 Kill+return
+      //  （flag50 门 :33880-33887 `if (!Main.npc[num826].active || type != num821)
+      //  { Kill(); return; }`）先于盘旋跟随位写 → 死拍 position=上拍位,Update 湿段
+      //  (:16895)无 active 门照跑（`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍溅花
+      //  照走。杀支与 AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;
+      //  574 ∉ IsDestroyedByWater 六型/非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.kind, !!projectileData(this.kind)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     this.ai0 += 1;
     // 574 随父存续（:32092 每 tick timeLeft=2 刷新,自身永不过期——父亡已在上行 Kill）
     if (this.kind === 574) this.life = 2;
-    if (this.life-- <= 0) { this.explode(game); return; }
+    if (this.life-- <= 0) {
+      // ★⑥杀拍口径（2026-09-06）：539 寿命尽——原版 timeLeft--/Kill 在子步【末尾】
+      //  （:17307-17311,AI(:16880)→湿段(:16895)→位移→Damage 之后）→ 寿命尽当拍湿段
+      //  照跑。本仓递减杀在拍头曾跳过湿段;现补跑。测位=存储位：539 寿命期(600t)
+      //  已入冲刺相（ai0>210）,AI 只写 velocity/帧/尘不写 position（:34023+）,
+      //  原版杀拍湿段测位=上拍位移末位=存储位,逐值等价。539 ∉ IsDestroyedByWater
+      //  六型/非 80 → 段内无补 Kill 面;与 AI 尾活拍调用点同拍互斥（早退）。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.kind, !!projectileData(this.kind)?.ignoreWater);
+      this.explode(game);
+      return;
+    }
     if (this.ai0 < orbitT) {
       if (alive) {
         // 盘旋:随父位移 + 符号步进逼近父心(钳 6)(:32100-32118)
@@ -2288,7 +2319,10 @@ export class LunarOrb extends Entity {
       if (p.x < this.cx + half && p.x + p.w > this.cx - half
         && p.y < this.cy + half && p.y + p.h > this.cy - half) {
         // Damage_EVP：539/574 生成基础 60，命中再过乘区×2
-        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, null);
+        // SW-BL1 2026-09-06：attacker 位显式 null（运行时等价 undefined,falsy 同面）
+        // 改缺省——GameHooks.damagePlayer 类型闸收窄（SW-BI1 两起 attacker 槽事故后）
+        // 后 null 不再入域,语义零变化
+        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
       }
     }
   }

@@ -485,7 +485,7 @@ export function tryGetExtraSpawnPointForTeam(w: World, team: number): ExtraSpawn
 }
 
 /**
- * Player.Spawn :37911-37916 三分支的纯函数形态（Game.applyTeamSpawnPlacement 与测试共用）：
+ * Player.Spawn :37911-37916 三分支的纯函数形态（Game.spawnPlacementCoords 队点臂消费,SW-BC1 批更名）：
  * 床点优先 → 队伍 ≥1 时取队点扫位。旗关/床位/队号三道门任一命中即 null。
  * @param bedActive 本仓床点语义：world.spawn≠原始出生点即视为"有床"（per-world 共享位）
  */

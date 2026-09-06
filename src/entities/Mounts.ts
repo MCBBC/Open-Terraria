@@ -2331,7 +2331,21 @@ export class MountShot extends TownShot {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 timeLeft--/Kill 在子步【末尾】
+      //  （:17307-17311,AI(:16880)→湿段(:16895)→位移→Damage 之后,且在 numUpdates
+      //  子步环内）→ 寿命尽当拍湿段照跑（`!active` 门 :17132 只拦 Damage/尾尘）。
+      //  本仓 life 拍头单减（子步不折减=既有登记口径）杀在湿段前曾整体跳过;现补跑
+      //  一次,测位=存储位：AI 只写 velocity（重力）/帧/尘不写 position → 原版杀拍
+      //  首子步湿段测位=上拍位移末位=存储位（余子步测位随死拍位移推进,死拍不可
+      //  观测,登记有界）。杀支与子步内活拍调用点同拍互斥（早退）→ 无需
+      //  wetSectionRan 旗;14 ∉ IsDestroyedByWater 六型/非 80,606 ignoreWater=true
+      //  (:6542) → 段门恒闭,补跑零行为。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     for (let s = 0; s < this.substeps; s++) {
       this.vy += this.gravity;
       // ---- ★通用湿段（:16903-17113,共享体）——子步内 AI→湿段→位移位序（Update

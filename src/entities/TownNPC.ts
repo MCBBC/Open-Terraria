@@ -1952,11 +1952,25 @@ export class TownNPC extends Entity {
           if (moved) {
             this.teleportedHome = true;   // 落位即试坐（TeleportToHome :56081）
           } else {
-            // 全堵（:56087-56090）：homeless=true + QuickFindHome——本仓置
-            // home=null 交 Game 入驻轮（updateTownNpcArrival ①）接管重找房
+            // 全堵（:56087-56090）：`homeless = true; WorldGen.QuickFindHome(whoAmI);`
+            // （NPC.cs:56236-56237 字面——同 tick 以【旧 homeTile】为锚重扫 3 步窗,
+            // WorldGen.cs:5654;成功即原房/邻位重安家,失败保持无家）。
+            // ★★SW-BJ2 2026-09-06：曾错误地清 home + anchorTile=当前位置 → 无家锚随
+            // NPC 漂移,且每 tick 近玩家回收链把家搬进玩家视野内空房（用户实报
+            // 「入住跟着玩家走」次生根因）。重扫经 game.quickFindHomeForNpc（Game 层
+            // 持占用集/松露门/成就）;测试桩无该钩子时保底按旧路径转无家。
+            const oldHome = this.home;
             this.home = null;
             this.leashHome = false;
-            this.anchorTile = { x: Math.floor(this.cx / TILE), y: Math.floor((this.y + this.h + 4) / TILE) };
+            const g = game as unknown as {
+              quickFindHomeForNpc?: (npc: TownNPC, oldHome: { x: number; y: number }) => boolean;
+            };
+            const rehoused = oldHome != null && (g.quickFindHomeForNpc?.(this, oldHome) ?? false);
+            if (!rehoused && oldHome) {
+              // vanilla 失败支不清 homeTile（homeless 游走/夜行锚=旧 homeTile,
+              // NPC.cs:53701 仅 -1 时首落锚）——钉回旧家地行（home.y 站格 → 地行 +1）
+              this.anchorTile = { x: oldHome.x, y: oldHome.y + 1 };
+            }
           }
         }
       }

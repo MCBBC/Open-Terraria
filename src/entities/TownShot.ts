@@ -15,6 +15,7 @@ import { projSprite, projFrameCount } from './Arrow';
 import { projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { BuffType } from '../stats/Buffs';
+import { projectileWetSection, projWaterDragFactor, PROJ_DESTROYED_BY_WATER } from './projWetSection';
 
 const GRAV = 0.3; // 箭族重力(aiStyle 1/2 同值)
 
@@ -137,6 +138,36 @@ export class TownShot extends Entity {
   /** 翻滚/自旋累积角(tumble/up20 后段/spin 模式) */
   rotAcc = 0;
 
+  // ---- ★通用湿段(Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批)----
+  //  域 id 全集 = TOWN_DRAW_SPEC 30 型(NPC.cs AI_007 自卫攻击 npcProj 语义)逐 id
+  //  豁免核对(SetDefaults P.cs 逐块;projectileData 数据面同向)：
+  //  · 豁免(ignoreWater=true,段门恒闭零行为)={606:6542, 242:3253, 590:6397,
+  //    950:8966, 880:8447}——湿段调用照走,整段门分流(:16895;预置 :10886-10893
+  //    无条件跑=共享体 2026-09-06 逐字面化批口径);
+  //  · 受段=其余 25 型(15/24/585/589/582/669/930/1/2/14/48/21/162/583/30/588/
+  //    133/135/721/134/587/267/357/520/586)——溅花+旗维护;
+  //  · 15 ∈ ProjectileID.Sets.IsDestroyedByWater({85,15,188,34,1097,1106},
+  //    ProjectileID.cs:287)→ 湿段消亡面接 hooks.kill(:16923-16925 `wet && !lavaWet`
+  //    → Kill;本仓=dead 置位,型专属 Kill 尘面本类既有口径不变——669 kill669 爆炸
+  //    仍在自身杀位)。
+  //  阻尼：tileCollide 缺省 true 的受段型 → HandleMovement :17721 湿支生效,乘进
+  //  位移行(速度场不减);tileCollide=false 型(721 高尔夫/豁免 590/606/950/880)
+  //  → 档位不消费(:17721 只在 tileCollide 支,与 Misc 簇 golf/钩爪同谳)。
+  //  插位=tick 头：AI(重力/翻滚累积,只写 velocity/rotAcc) → 湿段 → 位移=原版
+  //  Update 同序,采样位=上拍位移后 ≡ 原版湿段采样。杀拍口径(Arrow.ts ⑥配方逐位
+  //  核)：杀位=寿命头杀(fixedUpdate 首行,669 同拍带 kill669 爆炸)/撞块杀/命中杀
+  //  ——寿命杀在湿段【前】(vanilla timeLeft 杀在 Update 尾 :17307=湿段后),tick 头
+  //  单调用点使杀拍湿段照跑;撞块/命中杀在位移【后】=湿段已跑。双调用点/防双跑机
+  //  不适用(单调用点天然覆盖全部杀拍)。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗(Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1) */
+  wetCount = 0;
+  /** 出生预置已做(一次;NewProjectile :10886-10893 等价;共享体首调自做) */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, projId: number,
     opts?: { ai1?: number; ai2?: number; life?: number; noGravity?: boolean }) {
     super();
@@ -253,6 +284,12 @@ export class TownShot extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    //  tick 头插位（杀拍覆盖/采样位论证见字段块头注）;15 水death 经 hooks.kill。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater,
+      PROJ_DESTROYED_BY_WATER.has(this.projId) ? { kill: () => { this.dead = true; } } : undefined);
+    if (this.dead) return;   // 段内水death（15）——vanilla `!active` 门(:17132)截 Damage/位移同相
     if (--this.life <= 0) { if (this.projId === 669) this.kill669(game); this.dead = true; return; }
     if (!this.noGrav) this.vy += GRAV;
     // 翻滚/自旋累积(aiStyle 2 :21517 / 自旋款)——up20 前 20t 由姿态锁覆盖
@@ -263,8 +300,12 @@ export class TownShot extends Entity {
     } else if (spec.rot === 'spin') {
       this.rotAcc += spec.spinRate;
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    // 水中位移阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 时进——
+    // tileCollide=false 型（721/豁免 590·606·950·880）档位不消费,位移全速;
+    // 受段型乘进位移行,速度场 vx/vy 不减）
+    const df = projectileData(this.projId)?.tileCollide !== false ? projWaterDragFactor(this) : 1;
+    this.x += this.vx * df;
+    this.y += this.vy * df;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) {

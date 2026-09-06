@@ -182,6 +182,22 @@ for (let i = 0; i < 6; i++) {
   if (r.lt.length) console.log(`   longtask: ${r.lt.map((e) => `@+${e.at}:${e.ms}ms`).join(' ')}`);
 }
 
+// ---- 连点压力:同任务同步连击 ×12(单飞折叠:1 飞行+1 尾随=至多 2 次编码) ----
+const spam = await page.evaluate(async () => {
+  const A = window.__ax1;
+  const mark = { tobLen: A.tob.length, ensureLen: A.ensure.length };
+  const btn = [...document.querySelectorAll('.sw-cc-looklow .sw-cc-small')].find((b) => (b.querySelector('img')?.src ?? '').includes('Randomize'));
+  const t0 = performance.now();
+  for (let i = 0; i < 12; i++) {
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));   // 无间隔:12 击同一宏任务,全撞同一飞行
+  }
+  await new Promise((r) => setTimeout(r, 800));   // 飞行+尾随落地
+  const bakes = A.tob.slice(mark.tobLen).filter((d) => d.w === 440 && d.h === 80);
+  const ensures = A.ensure.slice(mark.ensureLen);
+  return { ms: performance.now() - t0, bakeCount: bakes.length, ensureCount: ensures.length };
+});
+console.log(`\n== 同步连击 12 击 == sheet 编码次数=${spam.bakeCount}(单飞上界=2;旧实现=12) ensure 次数=${spam.ensureCount} 总耗时=${spam.ms.toFixed(0)}ms`);
+
 // ---- hair 页:重烘(随机后)计时 + 转圈遮罩时序 ----
 const hair = await page.evaluate(async () => {
   const A = window.__ax1;

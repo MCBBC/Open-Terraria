@@ -82,6 +82,11 @@ function shell(w: World, drops: Drop[], opts: {
         return !!slot && ((ITEM_DEFS[slot.id] as { paint?: number })?.paint ?? 0) !== 0;
       }),
       heldItem: () => ({ id: -1, stack: opts.heldStack ?? 9 }),
+      removeHeld: (n: number) => {   // SW-AZ1:手持消耗统一入口（镜像臂;selected 恒 0 同 removeAt 记 0）
+        consumed.push(0);
+        const hs = slots[0] as { stack: number } | null;
+        if (hs) hs.stack = Math.max(0, hs.stack - n);
+      },
       removeAt: (i: number, n: number) => {
         consumed.push(i);
         const s = slots[i] as { stack: number } | null;

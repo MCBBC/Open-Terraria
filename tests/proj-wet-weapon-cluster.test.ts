@@ -11,12 +11,14 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 import { ChloroLeafShot } from '../src/entities/ChloroLeafCrystalProj';
-import { ChloroSaberStab, ChloroSporeCloud, ThunderBoltShot } from '../src/entities/proj1457';
+import { ChloroSaberStab, ChloroSporeCloud, ThunderBoltShot, BookStormTwister } from '../src/entities/proj1457';
 import { MagicMissileProj } from '../src/entities/MissileProj';
 import { SpectreSoulProj } from '../src/entities/SpectreSoulProj';
 import { PhoenixBolt } from '../src/entities/PhoenixBowProj';
 import { PrismProng, BlasterBeam } from '../src/entities/PrismProj';
 import { RainbowBolt, RainbowSegment } from '../src/entities/RainbowProj';
+import { Arrow } from '../src/entities/Arrow';
+import { projectileWetSection } from '../src/entities/projWetSection';
 import { projectileData } from '../src/data/vanillaProjectiles';
 
 const LIQ = 255;
@@ -32,11 +34,19 @@ function liquidAt(w: World, x0: number, x1: number, y0: number, y1: number, type
 }
 
 /** stub game：spawnDust/playSfxWav/spawnParticles 计数 + 离屏玩家 + 空敌桶 */
+type DustRec = {
+  x: number; y: number; w: number; h: number; type: number;
+  d: { vx: number; vy: number; scale: number; alpha: number; noGravity: boolean; color: unknown };
+};
 function makeGame(w: World): {
-  g: GameHooks; dust: Array<{ x: number; y: number; w: number; h: number }>;
-  splash: string[]; particles: () => number;
+  g: GameHooks; dust: DustRec[];
+  splash: string[]; sfx: string[]; particles: () => number;
 } {
-  const dust: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // ★2026-09-06 尘桩改可变（勿 return null,参照 proj-wet-cache mkSplash）：四液溅花
+  //  尘的型内初速预处理（Dust.cs:227-231/:246-254,调用侧补链）以【有返回值】为门,
+  //  null 桩 = 型内段静默丢弃 → 四液尘型/字段覆写断言无从立起。返回可变尘对象并
+  //  随盒记录一并留存（rec.d）,调用侧覆写面（vx/vy/scale/alpha/noGravity/color）可断言。
+  const dust: DustRec[] = [];
   const splash: string[] = [];
   const sfx: string[] = [];
   let parts = 0;
@@ -45,9 +55,10 @@ function makeGame(w: World): {
     world: w,
     player: { x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21, dead: true, iframes: 0, equipStats: {} },
     enemies: () => [], critters: () => [], npcs: () => [],
-    spawnDust: (x: number, y: number, bw: number, bh: number) => {
-      dust.push({ x, y, w: bw, h: bh });
-      return null;
+    spawnDust: (x: number, y: number, bw: number, bh: number, type = 0) => {
+      const d = { vx: 1, vy: 1, scale: 1, alpha: 0, noGravity: false, color: null as unknown };
+      dust.push({ x, y, w: bw, h: bh, type, d });
+      return d;
     },
     playSfxWav: (name: string) => { if (String(name).startsWith('Splash')) splash.push(String(name)); },
     spawnParticles: () => { parts++; },
@@ -431,5 +442,186 @@ describe('RainbowBolt/RainbowSegment 豁免零触发（250 :3332 / 251 :3348）'
     expect(splash.length).toBe(0);
     expect(splashDustOf(dust, 14).length).toBe(0);
     expect(s.dead).toBe(false);
+  });
+});
+
+// =====================================================================
+// ★2026-09-06 修刀批 E（红队四件）：
+//  ①704 支撑谓词补 WetCollision（P.cs:71467 `SolidCollision(...) || WetCollision(...)`
+//    ——湿柱也算支撑=水面悬停;旧版只查 isSolid → 龙卷穿水）;
+//  ②1127 杀拍湿段（⑥口径 Arrow.ts wetSectionStep 配方推广——原版湿段无 active 门,
+//    AI 杀当拍湿段照跑）;
+//  ③出生预置逐字面化（NewProjectile :10886-10893 红队 R1+R2:wet/honey/shimmer 无条件
+//    写【含豁免弹】,仅 `if (ignoreWater) wet=false` 清 wet;lavaWet 原文本点不写）;
+//  ④:16891-16894 三型前置换位（242 高速子弹/302 狙击弹/638 月主炮弹 wet=false,
+//    AI 后/湿段前,豁免门外=死码照抄）。
+// =====================================================================
+
+describe('BookStormTwister 704 支撑谓词（:71467 SolidCollision || WetCollision,盒=16×160 探测柱）', () => {
+  it('水面悬停：探测柱湿支命中 → 升支（vy<0）;60 拍悬停带内震荡不沉穿水底;干区对照直坠（修前穿水）', () => {
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1);                 // px [480,656]×[960,1136]
+    const { g } = makeGame(w);
+    // 中心 (552,945) → 盒 y=840、底=1050;wet 子盒=探测柱(16×160)内缩 10×80 底心
+    // → [547,557)×[930,1010)（npcLiquid.wetCollision 同式）——与水面带 [960,1136) 相交
+    const tw = new BookStormTwister(552, 945, 0, 100, 4);
+    tw.fixedUpdate(1 / 60, g);
+    expect(tw.vy).toBeLessThan(0);                   // ← 湿柱算支撑 → 升（修前走坠支 vy=+2）
+    expect(tw.y).toBeLessThan(840);
+    // 悬停：平衡带 = wet 子盒下沿门（底 >1000 即 blocked）→ 底在 ≈1000 附近震荡,
+    // 既不沉到水带底（1136）也不脱离
+    let minBottom = Infinity, maxBottom = -Infinity;
+    for (let t = 0; t < 60 && !tw.dead; t++) {
+      tw.fixedUpdate(1 / 60, g);
+      minBottom = Math.min(minBottom, tw.y + tw.h);
+      maxBottom = Math.max(maxBottom, tw.y + tw.h);
+    }
+    expect(tw.dead).toBe(false);
+    expect(minBottom).toBeLessThanOrEqual(1010);     // 触到平衡带
+    expect(maxBottom).toBeLessThan(1136);            // 全程未沉穿水带底（修前恒穿）
+    // 干区对照：同位无水 → 直坠,10 拍内坠深超过水带全深
+    const dry = new BookStormTwister(552, 945, 0, 100, 4);
+    const dg = makeGame(mkWorld()).g;
+    let dryBottom = 1050;
+    for (let t = 0; t < 10 && !dry.dead; t++) { dry.fixedUpdate(1 / 60, dg); dryBottom = dry.y + dry.h; }
+    expect(dryBottom).toBeGreaterThan(1120);
+  });
+});
+
+describe('ChloroSaberStab 1127 杀拍湿段（⑥口径:AI 杀当拍湿段照跑,:16895 无 active 门）', () => {
+  it('寿命尽拍恰逢入水（液后变）→ 死拍补跑湿段溅花 ×10 + Splash_1（修前跳段=不溅）', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const s = new ChloroSaberStab(1, 0, 12, 1, 100, 4);   // life=16×1+5=21;终位盒 [511,529]×[332,350]
+    for (let t = 0; t < 20; t++) s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(false);
+    expect(splash.length).toBe(0);                   // 前 20 拍干区（世界无液体）
+    liquidAt(w, 31, 33, 20, 21);                     // 淹没终位盒（px [496,544)×[320,352)）
+    s.fixedUpdate(1 / 60, g);                        // t=21 寿命尽 → Kill 拍
+    expect(s.dead).toBe(true);
+    expect(splash.length).toBe(1);                   // ← 杀拍湿段补跑（修前恒 0）
+    expect(splash[0]).toBe('Splash_1');
+    expect(splashDustOf(dust, 18).length).toBe(10);  // w=18 → 溅花盒 30×24
+  });
+});
+
+describe('出生预置逐字面化（NewProjectile :10886-10893,红队 R1+R2）', () => {
+  it('共享体·豁免弹（16）出生在蜂蜜：wet=false 反清 + honeyWet=true 无条件写（修前整段跳过=漏写）', () => {
+    expect(projectileData(16)?.ignoreWater, '前置:16 豁免').toBe(true);
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1, 3);              // 蜂蜜带
+    const { g } = makeGame(w);
+    const m = new MagicMissileProj(34 * TILE, 1000, 0, 8, {
+      projId: 16, damage: 100, knockback: 4, useTime: 20,
+      channelCb: () => false, aimCb: () => ({ x: 0, y: 0 }), payMana: () => true,
+    });
+    m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(false);                       // :10888-10891（豁免只反清 wet）
+    expect(m.honeyWet).toBe(true);                   // :10892 无条件赋值（原文字面,修前=false）
+    expect(m.shimmerWet).toBe(false);
+  });
+  it('共享体·豁免弹（16）出生在微光：shimmerWet=true 无条件写', () => {
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1, 4);              // 微光带
+    const { g } = makeGame(w);
+    const m = new MagicMissileProj(34 * TILE, 1000, 0, 8, {
+      projId: 16, damage: 100, knockback: 4, useTime: 20,
+      channelCb: () => false, aimCb: () => ({ x: 0, y: 0 }), payMana: () => true,
+    });
+    m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(false);
+    expect(m.shimmerWet).toBe(true);                 // :10893 无条件赋值（修前=false）
+    expect(m.honeyWet).toBe(false);
+  });
+  it('共享体·非豁免（731）出生在蜂蜜：wet=true + honeyWet=true（无条件写对受段弹同值,消亡族除外）', () => {
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1, 3);
+    const { g } = makeGame(w);
+    const b = new ThunderBoltShot(34 * TILE, 1000, 0, 8, 100, 2);
+    b.fixedUpdate(1 / 60, g);
+    expect(b.wet).toBe(true);                        // WetCollision 对任意液体真
+    expect(b.honeyWet).toBe(true);
+    expect(b.dead).toBe(false);                      // 731 非消亡族
+  });
+  it('Arrow 预置逐字面：豁免弹（5 水矢）出生在蜂蜜 → wet=false 且 honeyWet=true;非豁免（2）出生在浆 → lavaWet 由首拍湿段并入=保护仍在', () => {
+    expect(projectileData(5)?.ignoreWater, '前置:5 豁免').toBe(true);
+    const hw = mkWorld();
+    liquidAt(hw, WX0, WX1, WY0, WY1, 3);
+    const a = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 5, null, { grav: 0 });
+    a.w = 10; a.h = 10;
+    a.fixedUpdate(1 / 60, makeGame(hw).g);
+    expect(a.wet).toBe(false);                       // :10888-10891
+    expect(a.honeyWet).toBe(true);                   // :10892（修前豁免整块跳过=漏写）
+    expect(a.shimmerWet).toBe(false);
+    // 浆中出生（非豁免 2 变型族）:lavaWet 首档不再出自预置（原文本点不写）,由本子步
+    // 湿段 :16906-16911 在消亡判定 :16921 前并入 → 粘滞面保护不因预置瘦身而失
+    const lw = mkWorld();
+    liquidAt(lw, WX0, WX1, WY0, WY1, 2);
+    const b = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 2, null, { grav: 0 });
+    b.w = 10; b.h = 10;
+    b.fixedUpdate(1 / 60, makeGame(lw).g);
+    expect(b.dead).toBe(false);
+    expect(b.projId).toBe(2);                        // 不误杀/不变型
+    expect(b.lavaWet).toBe(true);                    // :16906-16911 并入（tick1 档）
+  });
+});
+
+describe('四液溅花尘型（可变尘桩,型内预处理段以有返回值为门）', () => {
+  it('水 33 / 蜂蜜 152 / 微光 308 / 岩浆 35（各 10 粒,盒 (w+12)×24）+ 覆写面逐值', () => {
+    // 覆写面期望（桩初速 vx=vy=1,scale=1,α=0）:型内预处理（Dust.cs 型内段）→ 调用侧覆写
+    //   水 33：型内 α170/v×0.5/Y++（池内已植,桩侧不现）→ vy=1−4=−3、vx=2.5、α100
+    //   蜜 152：型内 v×0.1+vy 钉 −0.5 → 桩净 vy=−0.5−1=−1.5、vx=0.25、α100
+    //   微光 308：型内 v×0.5+Y++ → 桩净 vy=1.5−4=−2.5、vx=1.25、α 不设=0、六掷三色
+    //   岩浆 35：型内 v×0.1+vy 钉 −0.5 → 桩净 vy=−0.5−1.5=−2、vx=0.25、α100
+    const palette = [[255, 255, 210], [190, 245, 255], [255, 150, 255], [190, 175, 255]];
+    const want: Record<number, { vy: number; vx: number; alpha: number }> = {
+      33: { vy: -3, vx: 2.5, alpha: 100 },
+      152: { vy: -1.5, vx: 0.25, alpha: 100 },
+      308: { vy: -2.5, vx: 1.25, alpha: 0 },
+      35: { vy: -2, vx: 0.25, alpha: 100 },
+    };
+    for (const [liq, dustId] of [[0, 33], [3, 152], [4, 308], [2, 35]] as const) {
+      const w = mkWorld();
+      liquidAt(w, WX0, WX1, WY0, WY1, liq);
+      const { g, dust } = makeGame(w);
+      const b = new ThunderBoltShot(34 * TILE, 900, 0, 8, 100, 2);   // 飞行入液
+      for (let t = 0; t < 8 && !b.dead; t++) b.fixedUpdate(1 / 60, g);
+      const sd = dust.filter((d) => d.w === 22 && d.h === 24);       // 溅花专用盒
+      expect(sd.length, `liquid ${liq} 溅花粒数`).toBe(10);
+      expect(sd.every((d) => d.type === dustId), `liquid ${liq} 尘型`).toBe(true);
+      const wv = want[dustId];
+      expect(sd.every((d) => d.d.vy === wv.vy && d.d.vx === wv.vx), `liquid ${liq} 净初速`).toBe(true);
+      expect(sd.every((d) => d.d.scale === 1.3 && d.d.noGravity && d.d.alpha === wv.alpha),
+        `liquid ${liq} scale/noGravity/α`).toBe(true);
+      if (dustId === 308) {   // 微光六掷三色（Projectile.cs :16954-16970 同式）
+        expect(sd.every((d) => {
+          const c = d.d.color as { r: number; g: number; b: number; a: number };
+          return palette.some(([r, g2, b2]) => c.r === r && c.g === g2 && c.b === b2 && c.a === 255);
+        }), '微光三色档').toBe(true);
+      }
+    }
+  });
+});
+
+describe(':16891-16894 三型前置换位（242/302/638 wet=false——双重死码照抄,直驱共享体激活）', () => {
+  // 三型数据面均为豁免弹（242/302/638 ignoreWater=true）→ 实机无任何活体走到本支:
+  // 豁免弹预置已反清 wet+段体整跳,共享体消费域亦无此三型。本组直驱 projectileWetSection
+  // （ignoreWater=false 假想受段宿主）钉清位分支本体。
+  it('wet 旗已真入段：242 被前置换位 → !wet 溅花门重开当拍溅 10 粒;对照 id（1）同态零溅', () => {
+    for (const id of [242, 302, 638]) {
+      expect(projectileData(id)?.ignoreWater, `${id} 数据面豁免（清位在豁免门外,原文如此）`).toBe(true);
+    }
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust } = makeGame(w);
+    const mkFlags = () => ({ wet: true, lavaWet: false, honeyWet: false, shimmerWet: false, wetCount: 0, presetDone: true });
+    const f242 = mkFlags();
+    projectileWetSection(f242, g, w.store, 34 * TILE, 1000, 10, 10, 242, false);
+    expect(dust.filter((d) => d.w === 22 && d.h === 24).length).toBe(10);   // ← 清位开门（修前 0）
+    expect(f242.wet).toBe(true);                    // 段尾 flag2 重新置真（:17020）
+    const f1 = mkFlags();
+    projectileWetSection(f1, g, w.store, 34 * TILE, 1000, 10, 10, 1, false);
+    expect(dust.filter((d) => d.w === 22 && d.h === 24).length).toBe(10);   // 仍 10 = 对照零新增
+    expect(f1.wet).toBe(true);
   });
 });

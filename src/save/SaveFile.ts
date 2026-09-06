@@ -252,6 +252,10 @@ export function playerFromDiskForm(p: SaveData['player']): SaveData['player'] {
 }
 
 export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => void): { world: World; player: SaveData['player']; data: SaveData } {
+  // ★二进制兼容(2026-09-06):binary 存档的通道以 Uint8Array 直出(免 base64 解码),
+  //  旧 JSON 档的通道以 base64 string 存放(走 b64ToBytes 解码)。统一由此入口转换。
+  const asBytes = (v: string | Uint8Array | undefined): Uint8Array =>
+    v instanceof Uint8Array ? v : b64ToBytes(v ?? '');
   // 物品 id 还原(箱子/背包/储物就地重写):v3+ 走稳定 id;v2 旧档直读(接受破损政策)。
   // v4 起 armor/dye/trash/misc/loadouts 也是稳定 id;v3 恰为裸内部下标——用迁移锚
   // 快照(LEGACY_KEY_OF_INTERNAL_V3)反查 key 再转 vi_/原定义(本地物品退役兼容层)
@@ -397,7 +401,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // tiles(v3:RLE 里的 type 是稳定 id,查 INTERNAL_OF_STABLE 还原;v2 旧档=内部下标直读)
   {
     const v3 = (data.version ?? 1) >= 3;
-    const u8 = b64ToBytes(data.tiles);
+    const u8 = asBytes(data.tiles);
+    data.tiles = '';   // ★RLE 已解码→释放 base64(6400×1800 世界此串可达 10-30MB)
     let p = 0, i = 0;
     let nextMilestone = onTilesProgress ? nAll / 100 : Infinity;
     while (i < nAll && p < u8.length) {
@@ -432,7 +437,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   //   未激活存活、幻影活性（type=0 带活位）还原活位。缺段（≤v4 旧档）=保持
   //   派生式，语义与旧「写侧幽灵净化」一致（旧档本就无幽灵）。
   {
-    const u8 = b64ToBytes(data.tileActive ?? '');
+    const u8 = asBytes(data.tileActive ?? '');
+    data.tileActive = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -451,7 +457,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   {
     const legacy = (data.version ?? 1) < 2;
     const migrate = (v: number) => (legacy ? (v === 1 ? 2 : v === 2 ? 1 : v === 3 ? 4 : v) : v);
-    const u8 = b64ToBytes(data.walls);
+    const u8 = asBytes(data.walls);
+    data.walls = '';
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -465,7 +472,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   }
   // wire 电路位（旧存档缺此字段 → 全 0 = 无导线，缺字段容忍同 liquidType）
   {
-    const u8 = b64ToBytes(data.wire ?? '');
+    const u8 = asBytes(data.wire ?? '');
+    data.wire = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -478,7 +486,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   }
   // half/slope(旧存档缺 → 全整砖;v3+ 语义)
   {
-    const u8 = b64ToBytes(data.blocks ?? '');
+    const u8 = asBytes(data.blocks ?? '');
+    data.blocks = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -496,7 +505,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   }
   // liquid type（旧存档缺此字段 → 全 0，由液体模拟按 1=水 补全）
   {
-    const u8 = b64ToBytes(data.liquidType ?? '');
+    const u8 = asBytes(data.liquidType ?? '');
+    (data as unknown as Record<string, unknown>).liquidType = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -510,7 +520,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // 油漆双通道（WF:1474-1491 独立字节位；旧档缺字段 → 全 0 = 无漆）。
   // 值域 0-31 与 5bit 位域等价，解码后钳 &31 防脏数据越出 PaintID 域
   {
-    const u8 = b64ToBytes(data.paint ?? '');
+    const u8 = asBytes(data.paint ?? '');
+    data.paint = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -522,7 +533,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     }
   }
   {
-    const u8 = b64ToBytes(data.paintWall ?? '');
+    const u8 = asBytes(data.paintWall ?? '');
+    data.paintWall = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -536,7 +548,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // 涂层四位（WF:1539-1552 存档位 2/4/8/16；旧档缺字段 → 全 0 = 无涂层，同 paint 容忍）
   {
     const tyC = st.coat;
-    const u8 = b64ToBytes(data.coat ?? '');
+    const u8 = asBytes(data.coat ?? '');
+    data.coat = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -557,7 +570,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // explored 已由构造器按 w*h 全零分配，RLE 游程未覆盖的尾部保持 0——同 wire 缺段容忍）
   {
     const ex = world.explored;
-    const u8 = b64ToBytes(data.explored ?? '');
+    const u8 = asBytes(data.explored ?? '');
+    data.explored = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -571,7 +585,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   }
   // liquid
   {
-    const u8 = b64ToBytes(data.liquid);
+    const u8 = asBytes(data.liquid);
+    data.liquid = '';
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;

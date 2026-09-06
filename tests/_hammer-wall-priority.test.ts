@@ -28,6 +28,7 @@ function makeGame(w: World): { g: Record<string, unknown>; st: World['store'] } 
   };
   g.killTileBreakSound = () => {};
   g.spawnParticles = () => {};
+  g.spawnDrop = () => null;   // SW-BF1 2026-09-06：锤墙拆墙现走 KillWall_DropItems 掉落（真 spawnDrop 需运行时态,本测试只断墙/整形面）
   g.tileAboveProtected = () => false;
   g.sfx = { play: () => {} };
   g.playSfxFile = () => {};

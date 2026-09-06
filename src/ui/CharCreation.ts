@@ -46,7 +46,7 @@ import {
 } from '../player/Appearance';
 import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
 import { compositePaperDoll, dollFrame, walkFrame, clearPaperDollCache } from '../player/PaperDoll';
-import { bakeCells, canvasToUrl, isObjectUrl, SingleFlightBake, DelayedMask, BAKE_MASK_DELAY_MS } from './charBake';   // SW-AX1 2026-09-06
+import { bakeCells, canvasToUrl, isObjectUrl, SingleFlightBake, DelayedMask, BAKE_MASK_DELAY_MS, yieldTask, type BakeOutcome } from './charBake';   // SW-AX1 2026-09-06 / SW-BB1 2026-09-06
 import { UITextures } from '../vui/assets/UITextures';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
@@ -105,6 +105,14 @@ const TAB_ICON_TEX: Partial<Record<string, string>> = {
 const LOOK_LAYERS: Array<keyof Appearance> = [
   'hairColor', 'eyeColor', 'skinColor', 'shirtColor', 'undershirtColor', 'pantsColor', 'shoeColor',
 ];
+
+/** SW-BB1 D4b 2026-09-06: 烘焙前置懒载的调用侧超时。waitUi/ensureUiBatch（共享
+ *  核心,SpriteAtlas.ts）无超时且【不动】——超时只作用本面板的 ensure 等待:
+ *  全仓 UITextures.ensure/ensureUiBatch/waitUi 消费面仅本文件两处
+ *  （ensureBakeSources 阻塞等待 + scheduleVariantPrefetch 后台 fire-and-forget）,
+ *  调用侧 race 超时波及面=零。超时视作 miss 继续烘（缺格→missed→retry 链自愈,
+ *  ensure 仍在后台跑,贴图晚到由重烘收口）;防「慢源悬挂→单飞永久折叠后续请求」 */
+const BAKE_SOURCE_TIMEOUT_MS = 10_000;
 
 // ================= 原版贴图小工具 =================
 
@@ -566,12 +574,17 @@ export class CharCreation {
   private lastHex = '';
   // ---- SW-AX1 2026-09-06: 烘焙单飞 + 延迟 loading 态 + 变体预抢 ----
   /** 单飞烘焙调度（randomize 直调 bakeSheets 与 buildLook/buildHair 尾
-   *  scheduleSheetBake(0) 双入口在此折叠；同态快照键=不尾随重烘） */
+   *  scheduleSheetBake(0) 双入口在此折叠；同态快照键=不尾随重烘）。
+   *  SW-BB1 D1 2026-09-06: 落地账（键同∧洁净=跳过不重烘；不洁/强制通道保自愈）——
+   *  runBakeSheets 按 BakeOutcome 回传洁净度,run 异常由单飞侧记不洁 */
   private bakeRunner = new SingleFlightBake(
     () => this.runBakeSheets(),
     () => this.bakeStateKey(),
     () => this.panel.isConnected,
   );
+  /** SW-BB1 D1: 重试链强制重烘标记——scheduleThumbRetry 挂上、scheduleSheetBake
+   *  消费（走 forceRequest 绕过落地账跳过,防死 sheet 被同键跳过永不自愈） */
+  private bakeForceNext = false;
   /** 烘焙 loading 遮罩（延迟 120ms 挂——快烘不闪，慢烘可见；无旧 sheet 的首访立即挂，
    *  保持 2026-08-27 行为）。apply 映射到当前页容器 class，双页都摘防切页残留 */
   private bakeMask = new DelayedMask(BAKE_MASK_DELAY_MS, (on) => {
@@ -581,6 +594,9 @@ export class CharCreation {
   });
   /** 变体域预抢只发一次 */
   private sheetPrefetchDone = false;
+  /** SW-BB1 D2a: 预抢被后台切走跳过时的 visibilitychange 重武装监听（一次性,
+   *  触发即自摘;close 兜底摘除防孤儿监听） */
+  private prefetchVisHandler: (() => void) | null = null;
 
   constructor(private root: HTMLElement, private cb: CharCreationCallbacks, opts: CharCreationOptions = {}) {
     ensureVanillaKit();
@@ -864,6 +880,10 @@ export class CharCreation {
     if (this.iconTintRaf) cancelAnimationFrame(this.iconTintRaf);
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     if (this.thumbTimer) clearTimeout(this.thumbTimer);
+    if (this.prefetchVisHandler) {   // SW-BB1 D2a: 摘预抢重武装监听
+      document.removeEventListener('visibilitychange', this.prefetchVisHandler);
+      this.prefetchVisHandler = null;
+    }
     this.bakeMask.disarm();      // SW-AX1: 摘遮罩+吞尾随重烘
     this.bakeRunner.cancel();
     this.revokeSheetUrls();
@@ -917,6 +937,8 @@ export class CharCreation {
       this.bakeMask.disarm();
       return;
     }
+    // SW-BB1 D1 2026-09-06: 重试链重烘走强制通道(绕过落地账「键同∧洁净」跳过)
+    this.bakeForceNext = true;
     this.thumbTimer = setTimeout(() => {
       this.thumbTimer = 0;
       if (!this.content.isConnected) return;                   // 面板已关
@@ -1005,7 +1027,16 @@ export class CharCreation {
         names.add(`Player_HairAlt_${hairId + 1}.png`);
       }
     }
-    await UITextures.ensure([...names]);
+    // SW-BB1 D4b: 调用侧超时（10s,BAKE_SOURCE_TIMEOUT_MS 注释钉消费面清单与语义）
+    let ensureTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        UITextures.ensure([...names]),
+        new Promise<void>((resolve) => { ensureTimer = setTimeout(resolve, BAKE_SOURCE_TIMEOUT_MS); }),
+      ]);
+    } finally {
+      clearTimeout(ensureTimer);   // 正路径清掉 race 败者定时器(测试环境不留悬挂句柄)
+    }
   }
 
   /** 烘当前页所需 sheet：发型页 44×44 头像格 ×213 / 外观页 44×80 全身格 ×10。
@@ -1046,22 +1077,30 @@ export class CharCreation {
     this.lookSheetUrl = null;
   }
 
-  /** 烘焙主体（单飞内执行） */
-  private async runBakeSheets(): Promise<void> {
-    if (!this.panel.isConnected) return;
+  /** 烘焙主体（单飞内执行）。SW-BB1 D1 2026-09-06: 回传 BakeOutcome 供单飞落地账
+   *  记账——'clean'=落地且自检过（同键后续 request 跳过不重烘）/'dirty'=有缺口
+   *  （miss/全透明,同键必须重烘=自愈通路）/'noop'=无 sheet 页或中途放弃（不动账） */
+  private async runBakeSheets(): Promise<BakeOutcome> {
+    if (!this.panel.isConnected) return 'noop';
     await this.ensureBakeSources();
-    if (!this.panel.isConnected) return;
+    if (!this.panel.isConnected) return 'noop';
+    let outcome: BakeOutcome = 'noop';
     if (this.tab === 'hair') {
       const cols = 10, cell = 44;
       const rows = Math.ceil(CHAR_CREATION_HAIRS.length / cols);
       const cv = document.createElement('canvas');
       cv.width = cols * cell; cv.height = rows * cell;
+      // ★SW-BM1 2026-09-06：烘焙目标保持 GPU 加速(绘制路径最快)——但其延迟命令
+      //  队列若积到尾部物化点(getImageData/toBlob 发起)一次性冲刷 = 89-273ms 单
+      //  长任务(探针 _bm1-cc-cellspike 多轮定谳)。治理 = afterBatch 每批 1×1 读回
+      //  放血(见 bakeCells 调用),把冲刷摊进批间协作点
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
       // loading 态（SW-AX1）：无旧图(首访)立即遮罩（2026-08-27 行为保持），
       // 重烘延迟 120ms 挂——快烘不闪、慢烘可见
       this.bakeMask.arm(!this.hairSheetUrl);
       let missed = false;
+      let sinceFlush = 0;   // ★SW-BM1: 距上次放血的累计批耗时（见 bakeCells afterBatch）
       // ★分帧合成(2026-08-27 用户报"加载时很卡"):213 次纸娃娃合成曾整段同步阻塞
       //   主线程;bakeCells 批间 yieldTask 让出(MessageChannel 宏任务,无 setTimeout(0)
       //   嵌套 4ms 钳制税) + 批大小按耗时自适应——"不阻塞主线程"底线不回退。
@@ -1071,95 +1110,172 @@ export class CharCreation {
         const doll = compositePaperDoll({ ...this.appearance, hair: hairId }, undefined, { rows: { body: 0, legs: 0 } });
         if (doll) g.drawImage(doll, 0, 0, 40, 44, (i % cols) * cell + 2, Math.floor(i / cols) * cell, 40, 44);
         else missed = true;
-      }, { shouldAbort: () => !this.panel.isConnected });
-      if (!this.panel.isConnected) return;
+      }, {
+        shouldAbort: () => !this.panel.isConnected,
+        // ★SW-BM1 2026-09-06：分频放血——累计批耗时 ≥12ms 才 1×1 读回强制物化
+        //  (放血有 ~25ms 固定 GPU sync;逐批放血实测 wall +45%,分频后峰值任务
+        //  ~30(物化)+25(sync) ≈ 55ms,较旧尾部单次冲刷 89-273ms 降 ~70-80%)
+        afterBatch: (batchMs) => {
+          sinceFlush += batchMs;
+          if (sinceFlush >= 12) { g.getImageData(0, 0, 1, 1); sinceFlush = 0; }
+        },
+      });
+      if (!this.panel.isConnected) return 'noop';   // SW-BB1 D1: 中途放弃不动落地账
       if (missed) this.scheduleThumbRetry(true);
       // ★内容自检(2026-08-25 用户实报"随机几次后样式全空")：doll 非 null 但内容全透明
       //   = 源 canvas 被静默清零(显存驱逐类)——空 sheet 挂上缩略图不重烘就永久空槽。
       //   SW-AX1 把检测前移到编码前:全透明直接弃 canvas(免 blob 白造)+清 PaperDoll
       //   缓存+重烘;旧序先 toDataURL/赋 URL 再检,retry rebuild 会把空 sheet 挂上格子
-      if (!missed && this.sheetAllTransparent(cv)) {
+      if (!missed && await this.sheetAllTransparent(cv)) {
         clearPaperDollCache();
         this.scheduleThumbRetry(true);
-        return;
+        return 'dirty';   // SW-BB1 D1: 全透明=不洁落地账(同键重烘通路保留)
       }
-      this.setSheetUrl('hair', await canvasToUrl(cv));
+      // SW-RB3 2026-09-06: close() 竞态窗收口——本 await(toBlob 编码 10-85ms)期间面板
+      // 关闭时 revokeSheetUrls() 已跑过,落地赋值=新 blob 挂到已关面板且永无人回收
+      // (唯一回收点是下次 setSheetUrl 换图/close,二者都不会再来)。落地前活性复检,
+      // 已关则当场回收并放弃挂载(单飞 catch 兜底,run 正常返回)
+      const hairUrl = await canvasToUrl(cv);
+      if (!this.panel.isConnected) {
+        if (isObjectUrl(hairUrl)) URL.revokeObjectURL(hairUrl);
+        return 'noop';
+      }
+      this.setSheetUrl('hair', hairUrl);
+      // SW-BB1 D3: 洁净落地=成功路径,重试计数清零（防「累计 6 次失败后永久停」;
+      // missed/全透明=失败不清,保 6 次有界降级语义）;missed 格落地记不洁
+      if (!missed) { this.thumbRetry = 0; outcome = 'clean'; }
+      else outcome = 'dirty';
     } else if (this.tab === 'look') {
       const cell = 44;
       const cv = document.createElement('canvas');
       cv.width = VALID_CLOTH_STYLES.length * cell; cv.height = 80;
+      // ★SW-BM1 2026-09-06：同 hair 支——GPU 目标 + afterBatch 逐批放血
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
       this.bakeMask.arm(!this.lookSheetUrl);
       let missed = false;
+      let sinceFlush = 0;   // ★SW-BM1: 同 hair 支分频放血账
       // 单帧行模式同 hair 支（消费面 = dollFrame(doll, IDLE_FRAME) 的第 0 帧 40×56）
       await bakeCells(VALID_CLOTH_STYLES, (styleId, i) => {
         const doll = compositePaperDoll({ ...this.appearance, skinVariant: styleId }, undefined, { rows: { body: 0, legs: 0 } });
         if (doll) g.drawImage(doll, 0, 0, 40, 56, i * cell + 2, 12, 40, 56);
         else missed = true;
-      }, { shouldAbort: () => !this.panel.isConnected });
-      if (!this.panel.isConnected) return;
+      }, {
+        shouldAbort: () => !this.panel.isConnected,
+        afterBatch: () => { g.getImageData(0, 0, 1, 1); },   // ★SW-BM1 同 hair 支
+      });
+      if (!this.panel.isConnected) return 'noop';   // SW-BB1 D1: 中途放弃不动落地账
       if (missed) this.scheduleThumbRetry(true);
       // ★内容自检(2026-08-25 用户实报"随机几次后样式全空"):doll 非 null 但内容
       //   全透明 = 源 canvas 被静默清零(显存驱逐类,菜单阶段无 Renderer.onLost 扫)
       //   ——空 sheet 一旦挂上缩略图,不重烘就永久空槽。检测到全透明 → 清 PaperDoll
       //   缓存(弃掉可能已死的缓存画布)+ 重烘(retry 链有界,6 次后放弃=降级不卡死)
-      if (!missed && this.sheetAllTransparent(cv)) {
+      if (!missed && await this.sheetAllTransparent(cv)) {
         clearPaperDollCache();
         this.scheduleThumbRetry(true);
-        return;
+        return 'dirty';   // SW-BB1 D1: 全透明=不洁落地账
       }
-      this.setSheetUrl('look', await canvasToUrl(cv));
+      // SW-RB3 2026-09-06: 同 hair 支——编码 await 窗内 close() 后落地会泄漏 blob
+      const lookUrl = await canvasToUrl(cv);
+      if (!this.panel.isConnected) {
+        if (isObjectUrl(lookUrl)) URL.revokeObjectURL(lookUrl);
+        return 'noop';
+      }
+      this.setSheetUrl('look', lookUrl);
+      // SW-BB1 D3: 同 hair 支——洁净落地清重试计数;missed 格记不洁
+      if (!missed) { this.thumbRetry = 0; outcome = 'clean'; }
+      else outcome = 'dirty';
     } else {
-      return;   // 信息/颜色页无 sheet——只跑 ensure(预览贴图懒载),不动 URL/遮罩
+      // 信息/颜色页无 sheet——只跑 ensure(预览贴图懒载),不动 URL/遮罩/落地账
+      return 'noop';
     }
     this.applySheetUrls();
     this.scheduleVariantPrefetch();
+    return outcome;
   }
 
   /** 变体域预抢（SW-AX1,后台一次）：look 页烘 10 样式格需要全部 VALID_CLOTH_STYLES
    *  变体的 Player_{v}_{s},而随机必换变体——此前每次随机都 stall 在新变体懒载
    *  (实测 13-16ms / 9-15 文件)。首烘成功 800ms 后 8 路池后台拉齐（ensureUiBatch
-   *  按文件去重合流;产品态 zip warm 全 CacheStorage 命中,冷会话不抢首屏） */
+   *  按文件去重合流;产品态 zip warm 全 CacheStorage 命中,冷会话不抢首屏）。
+   *  SW-BB1 D2a 2026-09-06: 800ms 到点时若面板在后台(document.hidden),旧码 return
+   *  =该面板实例预抢永久跳过（sheetPrefetchDone 已置位）——改为挂一次性
+   *  visibilitychange 重武装,回前台且面板仍在时补跑。★内存常驻面不动（RB3 量化
+   *  28MB 可接受;LRU 驱逐会伤 atlas.uiimages 共享 Map 的所有消费面,明确不做） */
   private scheduleVariantPrefetch(): void {
     if (this.sheetPrefetchDone) return;
     this.sheetPrefetchDone = true;
     setTimeout(() => {
-      if (!this.panel.isConnected || document.hidden) return;
-      const sheets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 10, 11, 12];
-      const names = new Set<string>();
-      for (const v of new Set<number>([...VALID_CLOTH_STYLES, ...MALE_VARIANTS, ...FEMALE_VARIANTS])) {
-        for (const s of sheets) {
-          names.add(`Player_${v}_${s}.png`);
-          names.add(`Player_0_${s}.png`);
-        }
-      }
-      void UITextures.ensure([...names]);
+      if (!this.panel.isConnected) return;
+      if (document.hidden) { this.armVariantPrefetchOnVisible(); return; }
+      this.runVariantPrefetch();
     }, 800);
   }
 
-  /** 全透明检测(2026-08-25):采样 400 像素,全 <α16 = 烘焙画了空气(源 canvas
-   *  被静默清零)——触发缓存弃置+重烘。正常 sheet 亮像素占比高,误报可忽略 */
-  private sheetAllTransparent(cv: HTMLCanvasElement): boolean {
+  /** SW-BB1 D2a: 回前台重武装（hide→visible 的 visible 边沿才触发,hide 不消耗） */
+  private armVariantPrefetchOnVisible(): void {
+    if (this.prefetchVisHandler) return;
+    const h = () => {
+      if (document.hidden) return;   // 切入后台的边沿:不摘钩不消耗
+      document.removeEventListener('visibilitychange', h);
+      this.prefetchVisHandler = null;
+      if (this.panel.isConnected) this.runVariantPrefetch();
+    };
+    this.prefetchVisHandler = h;
+    document.addEventListener('visibilitychange', h);
+  }
+
+  private runVariantPrefetch(): void {
+    const sheets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 10, 11, 12];
+    const names = new Set<string>();
+    for (const v of new Set<number>([...VALID_CLOTH_STYLES, ...MALE_VARIANTS, ...FEMALE_VARIANTS])) {
+      for (const s of sheets) {
+        names.add(`Player_${v}_${s}.png`);
+        names.add(`Player_0_${s}.png`);
+      }
+    }
+    void UITextures.ensure([...names]);
+  }
+
+  /** 全透明检测(2026-08-25):采样步进读 α,全 <α16 = 烘焙画了空气(源 canvas
+   *  被静默清零)——触发缓存弃置+重烘。正常 sheet 亮像素占比高,误报可忽略。
+   *  ★SW-BM1 2026-09-06 协作式分条带:旧版整面一次 getImageData(440×968)在 GPU
+   *  加速管线(目标+tint 源均 GPU 化)下 = 主线程命令队列冲刷 89-273ms 单长任务
+   *  (探针 _bm1-cc-cellspike 多轮:长任务时间戳与读点/toBlob 发起点逐一重合;
+   *  微探针 _bm1-gid-micro H 组:同形态整读 56ms)。修 = ①烘焙目标与 PaperDoll
+   *  tint 源画布改 CPU 光栅(willReadFrequently)→ 命令即时光栅、读即 memcpy;
+   *  ②本函数 64 行分条带 + 条间 yieldTask 让出 + 首 α>16 早退(判定谓词与步进
+   *  同旧版,语义不变;正常 sheet 首条带即早退,全透明病态态才付全扫+让出税)。
+   *  ★不读 GPU 对象(合成 doll 画布仍 GPU 化供渲染消费)——读路径零 GPU sync */
+  private async sheetAllTransparent(cv: HTMLCanvasElement): Promise<boolean> {
     const g = cv.getContext('2d', { willReadFrequently: true });
     if (!g) return false;
     const step = Math.max(4, Math.floor(cv.width / 100) * 4);
-    const d = g.getImageData(0, 0, cv.width, cv.height).data;
-    let sampled = 0;
-    for (let i = 3; i < d.length; i += step * 4) {
-      sampled++;
-      if (d[i] > 16) return false;
+    const STRIP = 64;
+    for (let y = 0; y < cv.height; y += STRIP) {
+      const h = Math.min(STRIP, cv.height - y);
+      const d = g.getImageData(0, y, cv.width, h).data;
+      for (let i = 3; i < d.length; i += step * 4) {
+        if (d[i] > 16) return false;
+      }
+      if (y + h < cv.height) await yieldTask();   // 条间让出(最后一条免让)
     }
-    void sampled;
     return true;
   }
 
-  /** 防抖重烘（拖色每帧重烘 213 格太贵——停手 250ms 后一次烘） */
+  /** 防抖重烘（拖色每帧重烘 213 格太贵——停手 250ms 后一次烘）。
+   *  SW-BB1 D1: 自愈/retry 链挂的 bakeForceNext 在此消费——强制通道绕过单飞
+   *  落地账跳过;普通防抖重烘仍走 request()（键同∧洁净即复用,不重烘） */
   private scheduleSheetBake(delay = 250): void {
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     this.sheetTimer = setTimeout(() => {
       this.sheetTimer = 0;
-      void this.bakeSheets();
+      if (this.bakeForceNext) {
+        this.bakeForceNext = false;
+        void this.bakeRunner.forceRequest();
+      } else {
+        void this.bakeSheets();
+      }
     }, delay);
   }
 

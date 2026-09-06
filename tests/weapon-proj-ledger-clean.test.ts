@@ -406,6 +406,9 @@ describe('终清波 C·FlaironSpike 反射轴差分/Kill 尘坐标修正', () =>
 
 describe('终清波 D·Wet 坡面支 + 冲击波/块尘几何(窗口/Item14/dd2 音资产)', () => {
   it('948 入水:斜砖上方液体经坡面支判湿 → 转型 947(:1646-1666 清偿鉴别样本)', () => {
+    // ★R3 湿段批夹具改道（2026-09-06）：湿段插位 = AI 后/位移前（原文 Update 序
+    //   :16880→:16903→:17120）——掷出首拍 case0 把球重钉到玩家心,故把玩家心搬运到
+    //   斜砖探针位,使湿段测位恰落在坡面支鉴定域（几何意图不变,时序对齐原文）。
     const t = mkHooks();
     const st = t.store;
     st.setTile(60, 99, 1);
@@ -413,6 +416,8 @@ describe('终清波 D·Wet 坡面支 + 冲击波/块尘几何(窗口/Item14/dd2 
     st.setLiquid(60, 98, 255, 1);    // 液体在斜砖上一格（原版判湿域）
     st.setTile(60, 98, 0);
     const cxp = 60 * TILE + 8, cyp = 99 * TILE + 8;            // 探针整体落在斜砖行内
+    const pl = t.hooks.player as unknown as { x: number; y: number };
+    pl.x = cxp - 10; pl.y = cyp - 21;                          // 玩家心=斜砖探针位（掷出重钉落点）
     const flail = new FlailProj(cxp, cyp, 30, 4, 948,
       () => false, () => ({ x: cxp + 100, y: cyp }));
     flail.fixedUpdate(1 / 60, t.hooks);

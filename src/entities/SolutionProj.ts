@@ -232,8 +232,11 @@ export class WaterSplashProj extends Entity {
     // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
     // 位序 = AI(:16880)→湿段(:16903)→HandleMovement(:17120)→位移(:20561);采样位=
     // AI 后位移前 = 上拍移动结算位。69/70/621 受段（见头注 ②）;IsDestroyedByWater
-    // 六型表不含三瓶 → 无水death支;AI 杀拍（撞块/命中 splash）早退不跑湿段=仓内
-    // 湿段批统一口径（RollingBoulder 同式,登记有界偏差）
+    // 六型表不含三瓶 → 无水death支。★⑥杀拍口径核查（2026-09-06 配方推广批）：
+    // 三处 splash() 杀位（撞块 :251/命中 :273/超时 :278）全在湿段调用位(:237)
+    // 【之后】→ 杀拍湿段已先跑=原版同相位（原版 Kill 位在 HandleMovement/Damage
+    // 域,湿段其后;撞块 Kill 用探针位、溅花测位=当前位,融合拍序既有登记不变）。
+    // 无杀拍湿段缺口,不落刀。
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ★水中位移阻尼（HandleMovement :17721-17764）：速度【场】不减只削当拍位移。

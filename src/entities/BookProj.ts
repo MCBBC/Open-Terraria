@@ -92,6 +92,14 @@ export class BookProj extends Entity {
       if (this.ai1-- <= 0) {
         // :23769-23780 冲撞转化：目标失效即 Kill；速 9 直指玩家；帧重掷
         if (!p || p.dead) {
+          // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版目标失效 Kill（aiStyle18
+          //  :25741-25744 `if (!player3.active) Kill();`）【不从 AI 返回】——后续
+          //  速度/帧重掷照跑（死弹不可观测,不在本刀域）,Update 湿段(:16895)无
+          //  active 门照跑（`!active` 门 :17132 只拦 Damage/尾尘）→ 杀拍溅花照走。
+          //  本仓杀位早退曾跳过湿段;现补跑,测位=存储位（AI 不写 position,原版
+          //  死拍湿段同位,逐值等价）。杀支与 AI 尾活拍调用点同拍互斥（早退）→
+          //  无需 wetSectionRan 旗;1092 ∉ IsDestroyedByWater 六型/非 80 → 无补 Kill。
+          this.wetSection(game);
           this.dead = true;
           game.onProjectileDeath?.(1092, this.x, this.y, this.w, this.h, this.vx, this.vy);
           return;

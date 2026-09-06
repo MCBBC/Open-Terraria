@@ -41,6 +41,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid = 0): Shell {
   g.spawnNpcByVanilla = () => null;
   g.spawnParticles = () => {};
   g.spawnDrop = (_x, _y, key, n) => { drops.push([key, n]); };
+  g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };   // breakTile 成就链桩（既有缺桩,SW-AZ1 顺手补）
   g.player = {
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28, facing: 1, useTime: 0,
     buffs: { has: () => false }, equipStats: {},
@@ -48,6 +49,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid = 0): Shell {
       selected: 0, slots: new Array(50).fill(null),
       heldItem: () => (heldVid ? { id: heldItemIdOf(heldVid), stack: 5 } : null),
       removeAt: () => {},
+      removeHeld: () => {},   // SW-AZ1:手持消耗统一入口
     },
   };
   return g;

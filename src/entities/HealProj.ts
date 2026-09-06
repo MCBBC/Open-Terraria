@@ -16,6 +16,8 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 export class HealProj extends Entity {
   w = 6; h = 6;
@@ -29,6 +31,28 @@ export class HealProj extends Entity {
   private readonly target: { x: number; y: number; w: number; h: number;
     hp: number; maxHp: number };
   private life = 3600;   // 兜底寿命（原版 NewProjectile 默认 timeLeft，防永不命中滞留）
+
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
+  //  豁免核对：298（P.cs:3885-3893）/305（:3967-3974）SetDefaults【均无 ignoreWater
+  //  行】= 全受段（数据面同向）。本体 α=255 隐形（GetAlpha 无 298/305 特判）但原版
+  //  照样溅 10 粒——可见观感=溅花尘面。
+  //  ★子步口径：湿段在 numUpdates 子步循环【内】（:16781-17345）——298 extraUpdates=3
+  //  (:3614)→每 tick 4 次 / 305=10(:3696)→11 次,本仓 extraUpdates 子步循环内调用。
+  //  阻尼不适用：tileCollide=false（:3892/:3973）→ HandleMovement :17721 湿支不进。
+  //  杀拍口径（Arrow.ts ⑥配方逐位核）：①命中消亡（:28952 Kill,命中分支内无 return
+  //  ——当拍余段速度混合/尾迹尘照跑,湿段在其后=杀拍照跑,单调用点覆盖）;
+  //  ②life 头杀（fixedUpdate 首,本仓兜底寿位）——vanilla timeLeft 杀在 Update 尾
+  //  (:17307)湿段【后】,头杀拍由 dead 支补跑一次（湿段只在此拍单跑,与子步调用
+  //  互斥=天然防双跑,无需 wetSectionRan 机）。IsDestroyedByWater 域不含 298/305
+  //  （{85,15,188,34,1097,1106}）→ hooks 不接。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐【子步】−1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(projType: 298 | 305, x: number, y: number, heal: number,
     target: { x: number; y: number; w: number; h: number; hp: number; maxHp: number }) {
@@ -50,8 +74,24 @@ export class HealProj extends Entity {
     void _cam;
   }
 
+  /** ★通用湿段单点（:16895-17113,共享体;调用位=杀拍①②两处,见字段块头注）。
+   *  mock hooks 可缺 world（a-batch1 治疗弹桩同 player 缺面口径）——无世界=无液态
+   *  采样域,湿段跳过（生产恒有 world,非行为旁路）。 */
+  private wetStep(game: GameHooks): void {
+    const st = (game as Partial<GameHooks>).world?.store;
+    if (!st) return;
+    projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
+      this.projType, !!projectileData(this.projType)?.ignoreWater);
+  }
+
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) {
+      // ★杀拍口径②（见字段块头注）：life 头杀拍湿段补跑一次（vanilla timeLeft 杀
+      // 在 Update 尾 :17307,湿段 :16895 该拍照跑;本仓头杀位曾整体跳过=杀拍溅花缺口）
+      this.dead = true;
+      this.wetStep(game);
+      return;
+    }
     // 原版 extraUpdates：每 tick AI+位移共 extraUpdates+1 次；消亡后 active=false
     // ⇒ 残余子步 AI 不再进（Projectile.Update :16878-16881）——当拍子步走完后止
     for (let u = 0; u <= this.extraUpdates && !this.dead; u++) {
@@ -106,6 +146,11 @@ export class HealProj extends Entity {
           d.y -= -(this.vy * 0.2) * i;               // :28984
         }
       }
+      // ---- ★通用湿段（:16895-17113,共享体;每【子步】一次 :16781 子步循环内）----
+      //  位序 = AI(速度混合/尾迹尘)后 → 湿段 → 位移 = 原版 Update 子步同序;
+      //  消亡拍（命中 dead=true 分支无 return）湿段照跑 = 杀拍口径①（见字段块头注）。
+      //  tileCollide=false → 阻尼不适用,位移行保持全速。
+      this.wetStep(game);
       this.x += this.vx;   // tileCollide=false——穿墙不检碰撞（:3615/:3696）
       this.y += this.vy;
     }

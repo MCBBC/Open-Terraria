@@ -82,6 +82,7 @@ function shell(w: World, opts: {
       slots: inv.slots,
       heldItem: () => inv.heldItem(),
       removeAt: (i: number, n: number) => inv.removeAt(i, n),
+      removeHeld: (n: number) => inv.removeHeld(n),   // SW-AZ1：手持消耗统一入口
       findPaintSlot: () => -1,
       countOf: () => 0,
     },

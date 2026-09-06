@@ -196,7 +196,7 @@ describe('循环配方 craftOne 端到端', () => {
     expect(envOk(r, ctx([]))).toBe(r.tile < 0);
     expect(envOk(r, ctx(sheets))).toBe(true);
     expect(craftableCount(r, collectOwnedItems(inv))).toBe(1);
-    expect(consumeMaterials(inv, r, 1, false)).toBe(true);
+    expect(consumeMaterials(inv, r, 1, false)).toBe(1);
     // 材料按配方需求量精确投放 → 合成后全部扣净
     for (const [vid] of mats) expect(inv.countOf(invIndexOfVanilla(vid))).toBe(0);
     // 产物可反查到仓库 item key（合成 UI 放置进背包的入口）——伪装宝箱族

@@ -22,8 +22,22 @@ const WHIPS = [4672, 4678, 4679, 4680, 4911, 4912, 4913, 4914, 5074,
   5473, 5474, 5475, 5476, 5477, 5478, 5479, 5480, 5688];
 
 describe('vanilla-itemfunc.json SW-V1 重产落地钉面', () => {
-  it('计数锚：3765 条（存量 2296 + 纯新增 1469;未来提取器扩面须有意识地更新本锚）', () => {
-    expect(Object.keys(RAW).length).toBe(3765);
+  it('计数锚：3793 条（SW-V1 定格 3765 + SW-BK1 createWall 缺档整补 28;未来提取器扩面须有意识地更新本锚）', () => {
+    expect(Object.keys(RAW).length).toBe(3793);
+  });
+
+  // SW-BK1 2026-09-06：createWall 共享算式/区间块缺档补齐（35 件=28 整缺条目 +
+  // 7 既有条目补键;重产 diff 恰 35 件新增字段 + SW-AA1 在途 noUseGraphic 206 件,
+  // 全量账见 vanilla-itemfunc-swbk1-wallgap.test.ts——SW-AA1 提取器改动晚于上次
+  // 重产,本次重产顺带落地,该键运行时零消费[Game.ts:10098 读 combat 列]）。
+  it('SW-BK1 组末支 7 件 createWall 补键（共享算式,wallitems 提取器逐值同源）', () => {
+    expect(RAW['1957']?.createWall).toBe(125);
+    expect(RAW['2014']?.createWall).toBe(132);
+    expect(RAW['2160']?.createWall).toBe(135);
+    expect(RAW['2213']?.createWall).toBe(141);
+    expect(RAW['2434']?.createWall).toBe(148);
+    expect(RAW['2791']?.createWall).toBe(175);
+    expect(RAW['3762']?.createWall).toBe(230);
   });
 
   it('18 鞭 noUseGraphic=1（Item.cs:47824 体首行;使用期不绘手持贴图=原版本相）', () => {

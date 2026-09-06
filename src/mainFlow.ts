@@ -1291,7 +1291,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   // KvStore 延迟引入避免顶层副作用顺序问题
   async function kvSetCompat(json: string): Promise<string> {
-    const { kvSet } = await import('./save/KvStore');
+    const { kvSet, kvSetBinary } = await import('./save/KvStore');
+    const { packSaveBinary } = await import('./save/BinarySave');
+    // ★v6 二进制副本(2026-09-06):主格式仍 JSON(兼容旧读侧),并行写二进制副本
+    //   供 worker 快速加载(免 JSON.parse 大字符串)。旧 JSON 副本在下次保存时移除。
+    try {
+      const buf = packSaveBinary(JSON.parse(json));
+      void kvSetBinary(QUICK_SAVE_KEY, buf);
+    } catch { /* 二进制副本失败不阻塞 JSON 主写入 */ }
     return kvSet(QUICK_SAVE_KEY, json);
   }
 

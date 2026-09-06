@@ -832,7 +832,68 @@ function __swFnt39(tag: string, x: number, y: number, mid?: string): void {
 }
 
 /** TileFrame 生成期（cs:82067） */
+// ★大世界帧级联修复(2026-09-06):tileFrameGen→frameImportantDispatch→
+//  checkStalactite(callback=tileFrameGen)→tileFrameGen 递归链,大世界钟乳石/悬挂
+//  结构可达千层(6400×1800 用户实报)。深度计数超限入队,顶层排空。
+// ★OOM 修复(2026-09-06 当日二刀):首版入队=JS 元组数组+排空 splice(0) 逐项直调
+//  inner——6400×1800 导入档 waterCheck 实测 4GB→8GB 堆爆:settle 期钟乳石级联
+//  入队百万级,每项一个 5 元组新数组+嵌套排空(每项完成后 depth==0 再 splice)
+//  的数组反复重建=GC churn。终版=平铺 Int32Array FIFO 环形队列(12B/项,2M 项
+//  封顶护栏)+while 驱动循环(非递归排空,防嵌套 splice)。消费顺序仍=旧 splice
+//  排空的 FIFO 语义(队列头逐项);ctx/st 变化的嵌套级联不入队(锁定首项上下文,
+//  异源项同步直调=旧版「每项自带 st/ctx」在唯一现实场景——同链级联 ctx 恒同
+//  ——下的等效回退),超限丢弃计数 __swFrameDropped 登记。
+let _frameCascadeDepth = 0;
+const _FRAME_CASCADE_MAX = 150;
+const _DQ_CAP = 1 << 21;
+const _dqX = new Int32Array(_DQ_CAP);
+const _dqY = new Int32Array(_DQ_CAP);
+const _dqR = new Uint8Array(_DQ_CAP);
+let _dqLen = 0, _dqHead = 0;
+let _dqSt: TileStore | null = null;
+let _dqCtx: SweepCtx | null = null;
+let _dqDraining = false;
+
 function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
+  if (_frameCascadeDepth > _FRAME_CASCADE_MAX) {
+    if (_dqSt === null) { _dqSt = st; _dqCtx = ctx; }
+    if (st !== _dqSt || ctx !== _dqCtx) { _tileFrameGenInner(st, ctx, x, y, reset); return; }
+    if (_dqLen >= _DQ_CAP) {
+      const G = globalThis as { __swFrameDropped?: number };
+      G.__swFrameDropped = (G.__swFrameDropped ?? 0) + 1;
+      return;
+    }
+    const tail = (_dqHead + _dqLen) % _DQ_CAP;
+    _dqX[tail] = x; _dqY[tail] = y; _dqR[tail] = reset ? 1 : 0;
+    _dqLen++;
+    return;
+  }
+  _frameCascadeDepth++;
+  try {
+    _tileFrameGenInner(st, ctx, x, y, reset);
+  } finally {
+    _frameCascadeDepth--;
+    // 顶层退出时排空延迟队列:while 驱动(非递归)——排空期新入队项由同一循环
+    // 继续消费,不再触发嵌套 splice;_dqDraining 防重入兜底
+    if (_frameCascadeDepth === 0 && _dqLen > 0 && !_dqDraining) {
+      _dqDraining = true;
+      try {
+        while (_dqLen > 0) {
+          const hx = _dqX[_dqHead], hy = _dqY[_dqHead], hr = _dqR[_dqHead] !== 0;
+          _dqHead = (_dqHead + 1) % _DQ_CAP;
+          _dqLen--;
+          _frameCascadeDepth = 1;
+          try { _tileFrameGenInner(_dqSt as TileStore, _dqCtx as SweepCtx, hx, hy, hr); }
+          finally { _frameCascadeDepth = 0; }
+        }
+      } finally {
+        _dqDraining = false; _dqLen = 0; _dqHead = 0; _dqSt = null; _dqCtx = null;
+      }
+    }
+  }
+}
+
+function _tileFrameGenInner(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
   // IIII68b：时序线探针（与 x86 JJHook.Fc 事件同词表；无钩零开销）
   try {
     const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;

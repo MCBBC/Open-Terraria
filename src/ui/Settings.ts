@@ -6,7 +6,7 @@
 // 文案全部走 Lang（M8 语言系统）：原版键（LegacyMenu.*）+ 自有键（Mods.SandboxWorld.*）。
 // 语言切换：网格按钮（原版语义=用当前语言显示所有语言名，Language.* 类别），
 // 点击后 Lang.setLanguage → 本面板经 Lang.onChange 重建（保留当前分栏）。
-import { options, cycleMinimapFrame } from '../core/Options';
+import { options, cycleMinimapFrame, cycleQuickTrashMode } from '../core/Options';
 import {
   KEYBIND_ACTIONS, bindsOf, assignBinding, resetBinding, resetAllKeybinds,
   keybindActionLabel, keybindCodeLabel, type KeybindAction,
@@ -636,6 +636,32 @@ export class SettingsPanel {
           () => String(d.mouseShowBuildingGrid),
           () => Lang.menu(d.mouseShowBuildingGrid ? 229 : 230),
           () => void options.set('mouseShowBuildingGrid', !d.mouseShowBuildingGrid),
+        ),
+        // ★SW-AY1 #10 快速丢弃三态（Main.cs:51444-51466；menu[223] Left Shift /
+        // menu[224] Left Control / menu[253] Disabled，缺省 Left Control =
+        // ItemSlot.cs:28-30。循环序 Disabled→Left Control→Left Shift→Disabled；
+        // 映射消费=SlotActions.quickTrashOptionsOf → AltClickEnv.opts）
+        this.modeRow(
+          Lang.menu(224).replace(/[:：].*$/, ''),
+          () => d.quickTrashMode,
+          () => Lang.menu(d.quickTrashMode === 'leftShift' ? 223
+            : d.quickTrashMode === 'disabled' ? 253 : 224),
+          () => void options.set('quickTrashMode', cycleQuickTrashMode(d.quickTrashMode)),
+        ),
+        // ★SW-AZ1 2026-09-06 附近箱参与制作开关（Player.Settings.CraftFromNearbyChests
+        // Player.cs:355 默认 true；config.json 键 Main.cs:4297/:4642）。行文案 = 自有键
+        // Settings.CraftFromNearbyChests（tools/l10n-custom 双语）；开/关态 = 原版官译
+        // GameUI.CraftFromNearbyChestsOn/Off（CraftingUI.cs 切换 tooltip 同源）。
+        // ★作用域：关=③附近 bank（盒/弹体）+④600px 世界箱整体旁路,①开箱容器/
+        // ②虚空袋不受管（Recipe.cs:375-407 逐行核实——vanilla 该开关只包住 :386-397）。
+        // 原版开关面在制作列表旁（CraftingUI.DrawCraftFromNearbyChestsToggle）,
+        // 本仓落设置页（surface 偏差登记,语义面 1:1）
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.CraftFromNearbyChests'),
+          () => String(d.craftFromNearbyChests),
+          () => Lang.text(d.craftFromNearbyChests
+            ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'),
+          () => void options.set('craftFromNearbyChests', !d.craftFromNearbyChests),
         ),
       );
       const hint = document.createElement('div');

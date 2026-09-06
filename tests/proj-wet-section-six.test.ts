@@ -15,6 +15,18 @@ import { LightningBoltProj } from '../src/entities/LightningBoltProj';
 import { TrapShot } from '../src/entities/Dart';
 import { Celeb2Rocket } from '../src/entities/Celeb2';
 import { projectileData } from '../src/data/vanillaProjectiles';
+// ★⑥杀拍湿段批（2026-09-06）新增接入类
+import { ChainsawProj } from '../src/entities/ChainsawProj';
+import { PrismProng, BlasterBeam } from '../src/entities/PrismProj';
+import { BookProj } from '../src/entities/BookProj';
+import { SpectreSoulProj } from '../src/entities/SpectreSoulProj';
+import { TabletShardProj, LunarOrb } from '../src/entities/bossAI_lunar_misc';
+import { DebrisProj } from '../src/entities/DebrisProj';
+import { MountShot } from '../src/entities/Mounts';
+import { InfernoHostileBlast, INFERNO_BLAST_LIFETIME } from '../src/entities/InfernoHostileBlast';
+import { ClusterFragmentProj } from '../src/entities/ClusterFragmentProj';
+import { ChumBucketProj } from '../src/entities/ChumBucketProj';
+import { BombSkeletronPrimeProj } from '../src/entities/BombSkeletronPrimeProj';
 
 const LIQ = 255;
 /** 水带：列 [x0..x1] 行 [y0..y1] 满格液体（type 0=水 / 2=岩浆） */
@@ -28,12 +40,18 @@ function liquidAt(w: World, x0: number, x1: number, y0: number, y1: number, type
   }
 }
 
-/** stub game：spawnDust/playSfxWav(Splash)/spawnParticles 三通道计数 */
+/** stub game：spawnDust/playSfxWav(Splash)/spawnParticles 三通道计数。
+ *  ★2026-09-06 ⑥杀拍批桩同修：spawnDust 回【可变尘记录】（真池 NewDust 同构——
+ *  消费侧 d.vx=/d.scale= 后置覆写面要有着落,勿再回 null）。 */
 function makeGame(w: World): {
-  g: GameHooks; dust: Array<{ x: number; y: number; w: number; h: number; type: number }>;
+  g: GameHooks; dust: Array<{ x: number; y: number; w: number; h: number; type: number;
+    vx: number; vy: number; scale: number; alpha: number; fadeIn: number;
+    noGravity: boolean; noLight: boolean; color: { r: number; g: number; b: number; a: number } | null }>;
   splash: string[]; particles: () => number;
 } {
-  const dust: Array<{ x: number; y: number; w: number; h: number; type: number }> = [];
+  const dust: Array<{ x: number; y: number; w: number; h: number; type: number;
+    vx: number; vy: number; scale: number; alpha: number; fadeIn: number;
+    noGravity: boolean; noLight: boolean; color: { r: number; g: number; b: number; a: number } | null }> = [];
   const splash: string[] = [];
   let parts = 0;
   const px = 20 * TILE, py = 20 * TILE;
@@ -42,8 +60,10 @@ function makeGame(w: World): {
     player: { x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21, dead: true, iframes: 0, equipStats: {} },
     enemies: () => [], critters: () => [], npcs: () => [],
     spawnDust: (x: number, y: number, bw: number, bh: number, type: number) => {
-      dust.push({ x, y, w: bw, h: bh, type });
-      return null;
+      const d = { x, y, w: bw, h: bh, type, vx: 0, vy: 0, scale: 1, alpha: 0, fadeIn: 0,
+        noGravity: false, noLight: false, color: null };
+      dust.push(d);
+      return d;
     },
     playSfxWav: (name: string) => { if (String(name).startsWith('Splash')) splash.push(String(name)); },
     spawnParticles: () => { parts++; },
@@ -481,5 +501,237 @@ describe('Celeb2Rocket ★通用湿段（每子步,extraUpdates=2 → 3 子步/�
     const v0 = r.wetCount;
     r.fixedUpdate(1 / 60, g);                            // 整拍 3 子步
     expect(r.wetCount).toBe(v0 - 3);                     // 逐子步 −1 ×3（非逐拍 −1）
+  });
+});
+
+// =====================================================================
+// ★⑥杀拍湿段口径（2026-09-06 配方推广批）：原版 Projectile.cs——AI(:16878
+//  `if (active)`) 内 Kill（active=false）当拍湿段(:16895 `if (!ignoreWater)`)
+//  【仍跑】（无 active 门）;`!active` 门在 HandleMovement(:17120) 后 :17132-17135
+//  才生效、只拦 ProjLight/尾尘/Damage;Kill 头幂等(:71763-71766)。仓内杀位早退
+//  跳段=杀拍溅花缺口,照 Arrow.ts wetSectionStep 配方逐类补跑（杀支与活拍调用点
+//  同拍互斥 → 无需 wetSectionRan 旗;段内水death/80 补 Kill 借 hooks 缺省不接）。
+//  范式：首拍干位跑湿段（预置/活拍,wet=false 不溅）→ 就位放水（覆盖弹盒触格）
+//  → 触发杀位 → 断言当拍仍溅 10 粒 d33 + Splash_1 + wet 旗照刷 + 实体结死。
+// =====================================================================
+describe('★⑥杀拍湿段（AI 内 Kill 当拍湿段照跑——杀位补跑范式）', () => {
+  /** 弹盒触格覆盖放水（wetCollision 测盒中心带 Collision.cs:1578,±1 格裕量必覆） */
+  function waterOverBox(w: World, x: number, y: number, bw: number, bh: number): void {
+    liquidAt(w, Math.floor(x / TILE) - 1, Math.floor((x + bw) / TILE) + 1,
+      Math.floor(y / TILE) - 1, Math.floor((y + bh) / TILE) + 1);
+  }
+  /** 杀拍断言共用尾段：恰一次 Splash_1 + 恰 10 粒水花尘 d33 */
+  function expectKillSplash(splash: string[], dust: Array<{ type: number }>): void {
+    expect(splash).toEqual(['Splash_1']);
+    expect(dust.filter((d) => d.type === 33).length).toBe(10);
+  }
+
+  it('MeteorChunk 1078 寿命尽杀拍（life 拍头递减杀）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const m = new MeteorChunk(34 * TILE, 900, 0, 0);      // 零速=全程同位（AI_199 无位移写行）
+    m.fixedUpdate(1 / 60, g);                             // 干位活拍（预置）
+    expect(m.dead).toBe(false); expect(m.wet).toBe(false);
+    waterOverBox(w, m.x, m.y, m.w, m.h);
+    (m as unknown as { life: number }).life = 1;
+    m.fixedUpdate(1 / 60, g);                             // 寿命尽拍（原版 :17307 相位=湿段后）
+    expect(m.dead).toBe(true);
+    expect(m.wet).toBe(true);                             // 杀拍湿段旗照刷
+    expectKillSplash(splash, dust);
+  });
+
+  it('BookProj 1092 目标失效杀拍（悬停态 ai1 尽,AI_018 :25741-25744）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const b = new BookProj(34 * TILE, 900, 13, null);     // target=null
+    b.fixedUpdate(1 / 60, g);                             // 出生拍（干位预置）
+    expect(b.dead).toBe(false);
+    waterOverBox(w, b.x, b.y, b.w, b.h);
+    (b as unknown as { ai1: number }).ai1 = 0;            // 次拍 ai1-- ≤0 且靶失效 → Kill
+    b.fixedUpdate(1 / 60, g);
+    expect(b.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('ClusterFragmentProj 779 引信尽杀拍（AI_016 :48034-48037）湿中爆先溅花后爆', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    let exploded = 0;
+    const f = new ClusterFragmentProj(34 * TILE, 900, 0, 0, 10, 779, 60, () => { exploded++; });
+    f.fixedUpdate(1 / 60, g);                             // 干位活拍（fuse 60→59）
+    expect(f.dead).toBe(false);
+    waterOverBox(w, f.x, f.y, f.w, f.h);
+    (f as unknown as { fuse: number }).fuse = 3;          // post-dec ≤2 口径：3→2 杀
+    f.fixedUpdate(1 / 60, g);
+    expect(f.dead).toBe(true);
+    expect(exploded).toBe(1);                             // 溅花在爆前,爆仍结算
+    expectKillSplash(splash, dust);
+  });
+
+  it('ChainsawProj 509 断链杀拍（AI_020 :25870-25873,Kill 不返回→挂点重钉+湿段照跑）', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    let channel = true;
+    const owner = { cx: 34 * TILE + 11, cy: 900, facing: 1, dead: false };
+    const c = new ChainsawProj(owner, 20, 1, () => channel,
+      () => ({ x: owner.cx + 10, y: owner.cy }), { projId: 509 });
+    c.fixedUpdate(1 / 60, g);                             // 干位活拍（钉挂点+预置）
+    expect(c.dead).toBe(false); expect(c.wet).toBe(false);
+    waterOverBox(w, c.x, c.y, c.w, c.h);
+    channel = false;
+    c.fixedUpdate(1 / 60, g);                             // 断链拍
+    expect(c.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('ChainsawProj 445 激光钻（ignoreWater :5175）断链杀拍零溅花——豁免段门恒闭对照', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    let channel = true;
+    const owner = { cx: 34 * TILE + 11, cy: 900, facing: 1, dead: false };
+    const c = new ChainsawProj(owner, 20, 1, () => channel,
+      () => ({ x: owner.cx + 10, y: owner.cy }), { projId: 445, laser: true });
+    c.fixedUpdate(1 / 60, g);
+    waterOverBox(w, c.x, c.y, c.w, c.h);
+    channel = false;
+    c.fixedUpdate(1 / 60, g);
+    expect(c.dead).toBe(true);
+    expect(splash).toEqual([]);
+    expect(dust.length).toBe(0);                          // 445 无 AI 尘（laser 支）
+  });
+
+  it('SpectreSoulProj 356 无锁敌杀拍（AI_059 :29392-29396 Kill+return,EU 子步内）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const s = new SpectreSoulProj(34 * TILE, 900, 0, 0, 100, null);
+    s.fixedUpdate(1 / 60, g);                             // 干位拍（4 子步 ai1 0→4,不杀）
+    expect(s.dead).toBe(false);
+    waterOverBox(w, s.x, s.y, s.w, s.h);
+    (s as unknown as { ai1: number }).ai1 = 59;           // 次拍首子步 ≥60 → 空候选杀
+    s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('TabletShardProj 526 抵靶杀拍（AI_098 :33749-33753 Kill+return）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const t = new TabletShardProj(34 * TILE, 900, 5, 0, 34 * TILE + 2000, 900);   // 远靶不杀
+    t.fixedUpdate(1 / 60, g);                             // 干位活拍（Lerp 追靶,预置）
+    expect(t.dead).toBe(false);
+    waterOverBox(w, t.x, t.y, t.w, t.h);
+    (t as unknown as { tgtX: number; tgtY: number }).tgtX = t.cx;
+    (t as unknown as { tgtY: number }).tgtY = t.cy;       // 靶=当前位 → dist<vel 杀
+    t.fixedUpdate(1 / 60, g);
+    expect(t.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('LunarOrb 539 寿命尽杀拍（原版 :17307 湿段后相位;AI 头递减杀补跑）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const o = new LunarOrb(null, 539, 0, 0, 60, 34 * TILE, 900);   // 无父→直冲相
+    o.fixedUpdate(1 / 60, g);                             // 干位活拍
+    expect(o.dead).toBe(false);
+    waterOverBox(w, o.x, o.y, o.w, o.h);
+    (o as unknown as { life: number }).life = 0;          // life-- 后置判：0 ≤ 0 即杀
+    o.fixedUpdate(1 / 60, g);
+    expect(o.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('PrismProng 632 锚失联杀拍（AI_084 :31977-31981 Kill+return）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const pr = new PrismProng(0, 10, 1);
+    const fake = { dead: false, charge: 0, dirX: 1, dirY: 0, cx: 34 * TILE + 8, cy: 900 };
+    pr.parent = fake as never;                            // 最小父态（charge/dirX/dirY/cx/cy）
+    pr.fixedUpdate(1 / 60, g);                            // 干位活拍（锚位+预置）
+    expect(pr.dead).toBe(false); expect(pr.wet).toBe(false);
+    waterOverBox(w, pr.x, pr.y, pr.w, pr.h);
+    fake.dead = true;
+    pr.fixedUpdate(1 / 60, g);                            // 锚失联拍
+    expect(pr.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('BlasterBeam 461 锚失联杀拍（同 AI_084 门）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const b = new BlasterBeam(10, 1);
+    const fake = { dead: false, cx: 34 * TILE + 8, cy: 900, dirX: 1, dirY: 0 };
+    b.parent = fake as never;
+    b.fixedUpdate(1 / 60, g);
+    expect(b.dead).toBe(false);
+    waterOverBox(w, b.x, b.y, b.w, b.h);
+    fake.dead = true;
+    b.fixedUpdate(1 / 60, g);
+    expect(b.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('DebrisProj 736 寿命尽杀拍（life 拍头递减杀）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const d = new DebrisProj(481, 34 * TILE + 8, 900);
+    d.fixedUpdate(1 / 60, g);                             // 干位活拍（重力落体,预置）
+    expect(d.dead).toBe(false);
+    waterOverBox(w, d.x, d.y, d.w, d.h);
+    (d as unknown as { life: number }).life = 1;
+    d.fixedUpdate(1 / 60, g);
+    expect(d.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('MountShot 14 寿命尽杀拍（life 拍头递减杀,606 豁免/14 受段族）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const s = new MountShot(34 * TILE, 900, 0, 0, 10, 1, 14, { gravity: 0 });
+    s.fixedUpdate(1 / 60, g);                             // 干位活拍（零重力=同位）
+    expect(s.dead).toBe(false);
+    waterOverBox(w, s.x, s.y, s.w, s.h);
+    (s as unknown as { life: number }).life = 1;
+    s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('InfernoHostileBlast 292 寿限杀拍（aiStyle50 :28793-28801 Kill 不返回）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const b = new InfernoHostileBlast(34 * TILE + 8, 900, 30);
+    b.fixedUpdate(1 / 60, g);                             // 干位拍（尘柱 174×25+预置）
+    expect(b.dead).toBe(false);
+    waterOverBox(w, b.x, b.y, b.w, b.h);
+    (b as unknown as { age: number }).age = INFERNO_BLAST_LIFETIME;
+    b.fixedUpdate(1 / 60, g);
+    expect(b.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('ChumBucketProj 820 寿命尽杀拍（life 拍头递减杀）仍溅 10 粒', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const c = new ChumBucketProj(34 * TILE, 900, 0, 0);
+    c.fixedUpdate(1 / 60, g);                             // 干位活拍（spawnPresetWet+AI+段）
+    expect(c.dead).toBe(false); expect(c.wet).toBe(false);
+    waterOverBox(w, c.x, c.y, c.w, c.h);
+    (c as unknown as { life: number }).life = 1;
+    c.fixedUpdate(1 / 60, g);
+    expect(c.dead).toBe(true);
+    expectKillSplash(splash, dust);
+  });
+
+  it('BombSkeletronPrimeProj 102 引信尽杀拍（AI_016 :48034-48037）湿中爆先溅花后爆', () => {
+    const w = mkWorld();
+    const { g, dust, splash } = makeGame(w);
+    const b = new BombSkeletronPrimeProj(34 * TILE, 900, 0, 2);   // vy=2 防落地引信钳即爆
+    b.fixedUpdate(1 / 60, g);                             // 干位活拍
+    expect(b.dead).toBe(false);
+    waterOverBox(w, b.x, b.y, b.w, b.h);
+    (b as unknown as { fuse: number }).fuse = 3;
+    b.fixedUpdate(1 / 60, g);                             // 引信尽拍
+    expect(b.dead).toBe(true);
+    expectKillSplash(splash, dust);
   });
 });

@@ -48,6 +48,7 @@ function plrSkeleton(mutate?: (w: PlrWriter) => void): Uint8Array {
   w.i64(0n);                 // playTime
   w.i32(0);                  // hair
   w.byte(0);                 // hairDye
+  w.byte(0);                 // team(≥283,WF:55422;曾漏=错位 1B,红队抓)
   w.byte(0).byte(0);         // hideVisible
   w.byte(0);                 // hideMisc
   w.byte(0);                 // skinVariant
@@ -150,43 +151,26 @@ describe('红队:plr 对抗输入', () => {
     const plain = plrSkeleton();
     const dv = new DataView(plain.buffer);
     void dv;   // 注入二分开关:下三行恢复
-    // dv.setInt32(46, -3, true);
-    // dv.setInt32(296, -1, true);
-    // dv.setInt32(300, 0x7fffffff, true);
-    console.log('PLAINLEN ' + plain.length);
-    {
-      let hh = '';
-      for (let i = Math.max(0, plain.length - 40); i < plain.length; i++) hh += plain[i].toString(16).padStart(2, '0') + ' ';
-      console.log('SPWHEX ' + hh);
-    }
+    dv.setInt32(46, -3, true);                       // hair=-3(负值;hair 段@46)
+    dv.setInt32(297, -1, true);                      // inventory[0].id=-1(team byte 补后:inv 段起=297)
+    dv.setInt32(301, 0x7fffffff, true);              // inventory[0].stack=极大
     const p = parsePlr(enc(plain));
     expect(p.appearance.hair).toBe(0);               // 蓝队:负 hair clamp 0
     expect(p.playerState.inventory?.[0]).toBeNull(); // 负 id=空(原版 netDefaults(0) 同归宿)
     // buffs 负时长:字节注入 buffs[0].time(buffs 段@2377,首对 time@2381)
     const plain2 = plrSkeleton();
     const dv2 = new DataView(plain2.buffer);
-    dv2.setInt32(2377, 5, true);                     // buff type=5
-    dv2.setInt32(2381, -100, true);                  // time=-100(负)
+    dv2.setInt32(2378, 5, true);                     // buff type=5(team +1)
+    dv2.setInt32(2382, -100, true);                  // time=-100(负)
     const p2 = parsePlr(enc(plain2));
     expect(p2.playerState.buffs?.length ?? 0).toBe(0); // 负时长不落(读侧 time>0 门)
   });
   it('spawn 列表:-1 终止 + 循环有界(for(200) 上限,无死循环面)', () => {
     const plain = plrSkeleton();
-    console.log('SPAWNLEN ' + plain.length);
-    {
-      let hh = '';
-      for (let i = 2740; i < 2790; i++) hh += (plain[i] ?? 0).toString(16).padStart(2, '0') + ' ';
-      console.log('SPAWNMID2 ' + hh);
-    }
     {
       let hh = '';
       for (let i = 2740; i < 2780; i++) hh += (plain[i] ?? 0).toString(16).padStart(2, '0') + ' ';
       console.log('SPAWNMID ' + hh);
-    }
-    {
-      let hh = '';
-      for (let i = Math.max(0, plain.length - 40); i < plain.length; i++) hh += plain[i].toString(16).padStart(2, '0') + ' ';
-      console.log('SPAWNHEX ' + hh);
     }
     const p = parsePlr(enc(plain));
     expect(p.version).toBe(PLR_VERSION_1457);

@@ -190,6 +190,20 @@ export interface CraftSourcesOpts {
   openIsBank4?: boolean;
   /** 背包持有虚空vault物品 5325 → 放置的 vault 槽不计（ContainerIndexToPlayerBank :119-130） */
   voidVaultHeld?: boolean;
+  /** ★SW-AZ1 2026-09-06（item4）：Player.Settings.CraftFromNearbyChests（Player.cs:355
+   *  默认 true）作用域门。false = ③④ 整体旁路——附近 bank（盒/弹体）与 600px 世界箱
+   *  不计；①当前开箱容器（Recipe.cs:378-381）与 ②虚空袋 bank4（:382-385）【不受此
+   *  开关管】（vanilla 该开关只包住 :386-397 的两段 GetBanksInRangeOf/GetChestsInRangeOf
+   *  循环——逐行核实）。缺省 true = 原版默认 */
+  nearbyChestsEnabled?: boolean;
+  /** ★SW-AZ1 2026-09-06（item5）：弹体容器支（GetBanksInRangeOf 弹体段 :44-58——
+   *  Projectile.TryGetContainerIndex Projectile.cs:80559-80568：525 飞猪存钱罐/
+   *  960 Chester → -2 = player.bank、734 虚空透镜 → -5 = player.bank4）——射程盒内
+   *  的容器弹体把对应 bank 计入合成源。Game 侧算好"存活∧射程盒内∧(透镜:背包无
+   *  5325)"的 bank 包装传入；与 tile 段/虚空袋支按 items 身份去重（同一 bank 数组
+   *  只计一次,vanilla Contains :388/:398 同义）。入列序在 tile 盒扫描之前（vanilla
+   *  弹体段先于 tile 段）;受 nearbyChestsEnabled 管辖（③族）。缺省 = 无弹体源 */
+  projectileBanks?: ReadonlyArray<CraftItemSource>;
   /** bank tile 扫描源（GetBanksInRangeOf tile 段 :61-89）；缺省 = 跳过 bank 扫描 */
   store?: Pick<TileStore, 'w' | 'h' | 'inBounds' | 'idx' | 'type'>;
   /** 玩家中心 tile（GetBanksInRangeOf :42 player.Center.ToTileCoordinates()） */
@@ -223,14 +237,23 @@ export function craftSourcesFor(
   // （vanilla 开 placed vault 同样置 chest=-5 走此门）。未显式传时按 openChest.x 派生。
   const openIsBank4 = opts.openIsBank4 ?? opts.openChest?.x === -5;
   if (opts.voidBagHeld && !openIsBank4) push(opts.banks?.[3]);
-  if (opts.store && opts.centerTileX !== undefined && opts.centerTileY !== undefined) {
-    for (const b of bankSourcesForCrafting(opts.store, opts.centerTileX, opts.centerTileY,
-      opts.banks, CRAFT_CHEST_RANGE_PX, !!opts.voidVaultHeld)) {
-      push(b);
+  // ★SW-AZ1（item4）：CraftFromNearbyChests=false → ③④ 整体旁路（vanilla 该开关
+  // 只包住 Recipe.cs:386-397 的 bank 盒/世界箱两段;①开箱②虚空袋在其外,上面已入列）
+  if (opts.nearbyChestsEnabled !== false) {
+    // 弹体容器支（GetBanksInRangeOf 弹体段 :44-58,先于 tile 段——TryGetContainerIndex
+    // Projectile.cs:80559-80568:525/960→bank、734→bank4；射程/5325 门由 Game 侧预筛）
+    if (opts.projectileBanks) {
+      for (const pb of opts.projectileBanks) push(pb);
     }
-  }
-  for (const c of nearbyChestsForCrafting(chests, px, py, CRAFT_CHEST_RANGE_PX, opts.openChest)) {
-    push(c);
+    if (opts.store && opts.centerTileX !== undefined && opts.centerTileY !== undefined) {
+      for (const b of bankSourcesForCrafting(opts.store, opts.centerTileX, opts.centerTileY,
+        opts.banks, CRAFT_CHEST_RANGE_PX, !!opts.voidVaultHeld)) {
+        push(b);
+      }
+    }
+    for (const c of nearbyChestsForCrafting(chests, px, py, CRAFT_CHEST_RANGE_PX, opts.openChest)) {
+      push(c);
+    }
   }
   return out;
 }
@@ -444,80 +467,114 @@ function countReqAcross(
   return n;
 }
 
-/** 执行合成（CraftingRequests.CraftLocally 主干）：扣材料→返成品 key（放置进背包由调用方）。
+/** 执行合成（CraftingRequests.CraftItem 循环主干）：扣材料→返【实际合成轮数】
+ *  （SW-AZ1 2026-09-06 R3：0 = 一轮都没合成,以前调用方按 false 处理）。
  *  sources = 附近箱/bank（CraftFromNearbyChests）：校验计入箱材料，扣料先背包后箱
- *  （CraftingRequests.Consume :220-235），箱内按槽序部分扣/整格清空（:242-285） */
+ *  （CraftingRequests.Consume :220-235），箱内按槽序部分扣/整格清空（:242-285）。
+ *
+ *  ★R3 部分量语义（CraftingRequests.cs:88-110 CraftItem 1:1）：循环 qty 次、
+ *  每轮【重查】CollectedEnoughItemsToCraft（_ownedItems 逐轮 SubtractOwnedItem
+ *  :259-265 按 req.stack【未折扣面】递减）——料够 3 造 3（shift×10 不再"不够 10 造 0"）。
+ *  i==0 无门（:93 `i <= 0 ||`——调用方 UI 行点击已保证 count>0）;i>0 门不过即停。
+ *  每轮扣料前仍按实际持有量校验（countReqAcross vs 本轮折扣后需求）——R14-B2
+ *  防蒸发不变量保持：校验不过整轮不扣、同 tick 校验与实扣同源计数,白嫖窗口不重开。
+ *  炼金台折扣按【实际发生的每轮】独立掷（GetIngredientsForOneCraft →
+ *  GetIngredientCraftingDiscount REC57:214-227 对每材料掷 stack 次 Next(3)==0）——
+ *  旧"先一次性掷满 times 轮"在部分量停产时会烧掉未发生迭代的掷（随 R3 语义一并修正,
+ *  掷流序备案 B9 更新：掷次数 = 实际合成轮数 × 材料数 × stack）。 */
 export function consumeMaterials(
   inv: Inventory, r: VanillaRecipe, times = 1, alchemyTable = false,
   sources?: readonly CraftItemSource[],
-): boolean {
-  // ---- 第一阶段：可用性校验（不扣）——CraftingRequests.cs:86-102 每次迭代重查、
-  // 永不过扣。旧实现"边扣边查、不足 return false 不回滚"=材料部分销毁零产出
-  // （shift ×10 合成时整批蒸发,2026-08-13 修）----
-  // R14-B2：炼金台折扣按【每次合成迭代独立掷】（CraftItem CRQ57:96-103 循环 qty 次、
-  // 每次调 GetIngredientsForOneCraft → GetIngredientCraftingDiscount REC57:214-227
-  // 对每材料掷 stack 次 Next(3)==0）——曾 times===1 才折扣,shift×10 整批跳过=材料差 1.5 倍。
-  // 此处先一次性掷完全部迭代的折扣（期望/分布与逐次一致;掷流序备案 B9）
-  const needOf = new Map<object, number>();
-  for (const req of r.items) {
-    let total = 0;
-    for (let k = 0; k < times; k++) {
+): number {
+  // 材料源聚合持有量表（Recipe._ownedItems——CollectItemsToCraftWithFrom :366-373
+  // 聚一次,轮内不重collect;逐轮 SubtractOwnedItem 递减,与原版同构）
+  const ownedAcc = collectOwnedItems(inv, sources);
+  let crafted = 0;
+  for (let k = 0; k < times; k++) {
+    // ---- 轮门（k>0）：CollectedEnoughItemsToCraft（Recipe.cs:280-283 →
+    // HowManyTimesCanRecipeBeCrafted :289-310 min(have/req.stack)>0）——组槽按
+    // 组假 id 聚合值取数（itemMatches 同义）。ownedAcc 按【未折扣 req.stack】递减
+    // （SubtractOwnedItem :259-265 Max(value-stack,0)）——炼金折扣省下的料不续命
+    // 迭代,与原版同判（1:1 关键:实扣是折扣面、账面是未折扣面,两本账分离）----
+    if (k > 0) {
+      let ok = true;
+      for (const req of r.items) {
+        const have = itemMatches(r, req.id, ownedAcc);
+        if (have < req.stack) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    // ---- 本轮需求：折扣按本轮独立掷（CraftItem :95 GetIngredientsForOneCraft）----
+    const needOf = new Map<object, number>();
+    for (const req of r.items) {
       let need = req.stack;
       if (r.alchemy && alchemyTable) {
         let discounted = 0;
         for (let i = 0; i < req.stack; i++) if (Math.random() < 1 / 3) discounted++;
         need -= discounted;
       }
-      total += Math.max(0, need);   // :206-208 stack-=discount; >0 才入列
+      needOf.set(req, Math.max(0, need));   // :206-208 stack-=discount; >0 才入列
     }
-    needOf.set(req, total);
-  }
-  for (const req of r.items) {
-    const need = needOf.get(req)!;
-    if (countReqAcross(r, req.id, inv, sources) < need) return false;
-  }
-  // ---- 第二阶段：执行扣除（校验已过,理论不触不足;保持原折扣/组扣语义）----
-  for (const req of r.items) {
-    let need = needOf.get(req)!;
-    // 组材料（groupOf:占位 id/哨兵 id 统一判定,ConsumeFromInventory :451 语义——
-    // 组槽可扣组内任一成员,依序补足）
-    const gid2 = groupOf(r, req.id);
-    if (gid2 >= 0) {
-      for (const g of (RECIPE_GROUP_ITEMS[String(gid2)] ?? [])) {
-        if (need <= 0) break;
-        const iid = invIndexOfVanilla(g);
-        if (iid < 0) continue;
-        const take = Math.min(inv.countOf(iid), need);
-        if (take > 0) { inv.remove(iid, take); need -= take; }
-      }
-      // 阶段一已过,残余只可能来自折扣外并发,放行不吞
-    } else {
-      // 单 id 材料：扣后同步递减 need（ConsumeItemsFrom :252-275 语义）——旧代码
-      // 扣背包不减 need，接附近箱扣料后会重复扣箱（2026-08-13 随箱联动修复）
-      const iid = invIndexOfVanilla(req.id);
-      if (iid >= 0) {
-        const take = Math.min(inv.countOf(iid), need);
-        inv.remove(iid, take);
-        need -= take;
-      }
+    // ---- 本轮校验（不扣）——R14-B2 防蒸发：任一材料实际持有不足 → 整轮不扣,
+    // 循环终止（首轮不过 = 0 轮合成零扣减,旧行为的 false 等价面）----
+    let lack = false;
+    for (const req of r.items) {
+      const need = needOf.get(req)!;
+      if (countReqAcross(r, req.id, inv, sources) < need) { lack = true; break; }
     }
-    // ---- 箱/bank 扣减（CraftingRequests.Consume :220-235：先背包后箱,
-    // 背包扣净后 need≤0 本段自然空转;ConsumeItemsFrom :242-285：槽序扫,
-    // stack>need 部分扣、否则整格清空,need 归零即停。组槽按 Matches 任一成员）----
-    if (sources && need > 0) {
-      for (const src of sources) {
-        if (need <= 0) break;
-        const items = src.items;
-        for (let i = 0; i < items.length && need > 0; i++) {
-          const it = items[i];
-          if (!it || it.stack <= 0 || !reqMatchesItem(r, req.id, it.id)) continue;
-          if (it.stack > need) { it.stack -= need; need = 0; }
-          else { need -= it.stack; items[i] = null; }
+    if (lack) break;
+    // ---- 本轮执行扣除（校验已过,理论不触不足;保持原折扣/组扣语义）----
+    for (const req of r.items) {
+      let need = needOf.get(req)!;
+      // 组材料（groupOf:占位 id/哨兵 id 统一判定,ConsumeFromInventory :451 语义——
+      // 组槽可扣组内任一成员,依序补足）
+      const gid2 = groupOf(r, req.id);
+      if (gid2 >= 0) {
+        for (const g of (RECIPE_GROUP_ITEMS[String(gid2)] ?? [])) {
+          if (need <= 0) break;
+          const iid = invIndexOfVanilla(g);
+          if (iid < 0) continue;
+          const take = Math.min(inv.countOf(iid), need);
+          if (take > 0) { inv.remove(iid, take); need -= take; }
+        }
+        // 阶段一已过,残余只可能来自折扣外并发,放行不吞
+      } else {
+        // 单 id 材料：扣后同步递减 need（ConsumeItemsFrom :252-275 语义）——旧代码
+        // 扣背包不减 need，接附近箱扣料后会重复扣箱（2026-08-13 随箱联动修复）
+        const iid = invIndexOfVanilla(req.id);
+        if (iid >= 0) {
+          const take = Math.min(inv.countOf(iid), need);
+          inv.remove(iid, take);
+          need -= take;
         }
       }
+      // ---- 箱/bank 扣减（CraftingRequests.Consume :220-235：先背包后箱,
+      // 背包扣净后 need≤0 本段自然空转;ConsumeItemsFrom :242-285：槽序扫,
+      // stack>need 部分扣、否则整格清空,need 归零即停。组槽按 Matches 任一成员）----
+      if (sources && need > 0) {
+        for (const src of sources) {
+          if (need <= 0) break;
+          const items = src.items;
+          for (let i = 0; i < items.length && need > 0; i++) {
+            const it = items[i];
+            if (!it || it.stack <= 0 || !reqMatchesItem(r, req.id, it.id)) continue;
+            if (it.stack > need) { it.stack -= need; need = 0; }
+            else { need -= it.stack; items[i] = null; }
+          }
+        }
+      }
+      // ---- 账面递减（CraftItem :108-110 SubtractOwnedItem：按 req.stack 未折扣面,
+      // Max(...,0) 钳非负;组槽按组假 id 键——vanilla req.itemIdOrRecipeGroup 同键）。
+      // ★只在【入列材料】上递减——GetIngredientsForOneCraft 对折扣归零的材料不入列
+      // （:206-208 `stack-=discount; >0 才入列`）,账面随之不动（vanilla 同构）----
+      if (needOf.get(req)! > 0) {
+        const accKey = gid2 >= 0 ? 1000000 + gid2 : req.id;
+        ownedAcc.set(accKey, Math.max((ownedAcc.get(accKey) ?? 0) - req.stack, 0));
+      }
     }
+    crafted++;
   }
-  return true;
+  return crafted;
 }
 
 /** 原版 item id → Inventory 内部 item id（缓存） */

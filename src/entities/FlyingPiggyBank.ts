@@ -20,6 +20,8 @@ import type { GameHooks } from './types';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 const FRAME_SEQ = [0, 1, 2, 3, 4, 3, 2, 1];
 const FRAMES = 5;          // projFrames[525]（Main.cs:8618）
@@ -42,6 +44,28 @@ export class FlyingPiggyBank extends Entity {
   /** 原版 timeLeft（Update :15861 每 tick 递减，≤0 Kill——3 分钟静默自灭） */
   timeLeft = TIME_LEFT_MAX;
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
+  //  豁免核对：525 SetDefaults（P.cs:5955-5963：30×24/aiStyle 97/tileCollide=false/
+  //  timeLeft 10800）【无 ignoreWater 行】= 受段（projectileData 数据面同向）。
+  //  阻尼不适用：tileCollide=false → HandleMovement :17721 湿支不进（位移全速,
+  //  与湿段批 Misc 簇钩爪/链锯同谳）。
+  //  插位=tick 头：AI_097 只写 velocity（×0.94/浮点),位移在分支尾直写——采样位=
+  //  上拍位移后 ≡ 原版 AI(:16880)后湿段(:16895)采样。杀拍口径（Arrow.ts ⑥配方
+  //  逐位核）：本类杀位=同主同型去重（:33682-33698——活拍湿段【前】的 early return
+  //  杀位）与 timeLeft 自灭（分支尾,湿段【后】）——tick 头单调用点两者天然覆盖,
+  //  双调用点/防双跑机不适用。去重【被杀方】(o.dead=true 直写) 在原版=彼弹自身
+  //  Update 外被 Kill（:33696）→ 彼弹湿段本拍本就不跑,同构。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+  /** 原版弹型 id（SetDefaults :5955-5963）——湿段按真 id 传参 */
+  readonly projId = 525;
+
   constructor(x: number, y: number, vx: number, vy: number,
     private ownerRef: () => { cx: number; cy: number } | null) {
     super();
@@ -51,6 +75,10 @@ export class FlyingPiggyBank extends Entity {
   }
 
   override fixedUpdate(_dt: number, game: GameHooks): void {
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    //  tick 头插位（杀拍覆盖/采样位论证见字段块头注）;tileCollide=false → 阻尼不适用。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // 帧机（:33642-33680）：frameCounter++ 每 4t 一帧，序 [0,1,2,3,4,3,2,1] 循环
     if (++this.frameCounter >= FRAME_SEQ.length * 4) this.frameCounter = 0;
     this.frame = FRAME_SEQ[Math.floor(this.frameCounter / 4)];

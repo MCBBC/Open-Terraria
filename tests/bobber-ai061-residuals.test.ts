@@ -91,8 +91,9 @@ describe('微光钩爪面（浮微光 → AddBuff(353,60)+Splash_2 一次门）'
   it('浮微光：owner 得 Shimmered(353) + Splash_2 恰一声（声源=玩家坐标）;续拍不重播', () => {
     const h = mkHarness(4);
     const b = new Bobber(50 * TILE, 40 * TILE, 0, 0, 5, 0, 5, () => h.player);
-    b.fixedUpdate(1 / 60, h.hooks);   // 出生盒即在微光内：湿段出生预置 shimmerWet → 浮态段即消费
+    b.fixedUpdate(1 / 60, h.hooks);   // 出生盒即在微光内：湿段出生预置 shimmerWet + 入液注册
     expect(b.floating).toBe(true);
+    b.fixedUpdate(1 / 60, h.hooks);   // 浮态首拍（拍 1 为飞行/入液注册支,微光面在浮态段）
     expect(h.player.buffs.has(BuffType.Shimmered)).toBe(true);   // :54691 AddBuff(353,60)
     expect(h.sfx.filter((s) => s === 'Splash_2').length).toBe(1); // :54696 style 2
     for (let k = 0; k < 30; k++) b.fixedUpdate(1 / 60, h.hooks);
@@ -104,6 +105,7 @@ describe('微光钩爪面（浮微光 → AddBuff(353,60)+Splash_2 一次门）'
     const b = new Bobber(50 * TILE, 40 * TILE, 0, 0, 5, 0, 5, () => h.player);
     (b as unknown as { lai2: number }).lai2 = 250;   // 咬钩后 localAI[2]=BaitItemType
     b.fixedUpdate(1 / 60, h.hooks);
+    b.fixedUpdate(1 / 60, h.hooks);   // 浮态首拍
     expect(h.player.buffs.has(BuffType.Shimmered)).toBe(true);
     expect(h.sfx.filter((s) => s === 'Splash_2').length).toBe(0);
   });
@@ -117,16 +119,28 @@ describe('浮支物理/咬钩抖动（:54699-54802,静态钉位退役）', () =>
   it('入液 settled 点 = 液面（GetWaterLine）,rotation=0（:54699）', () => {
     const h = mkHarness(1);
     const b = new Bobber(50 * TILE, 36 * TILE, 0, 2, 5, 0, 5, () => h.player);
-    for (let k = 0; k < 200 && !(b.floating && b.cy >= WL - 0.01); k++) b.fixedUpdate(1, h.hooks);
-    for (let k = 0; k < 160; k++) b.fixedUpdate(1, h.hooks);   // 收敛尾
-    expect(Math.abs(b.cy - WL)).toBeLessThanOrEqual(0.01);
-    expect(Math.abs((b as unknown as { vy: number }).vy)).toBeLessThanOrEqual(1e-9);
-    expect((b as unknown as { drawRot: number }).drawRot).toBe(0);
+    // 压随机≥咬钩门（floor(0.99×100)=99 > ⌊(力+75)/2⌋）：settled 收敛尾里累积器照跑,
+    // 不隔离会随机开咬 → 抖动踢破坏 vy≈0 断言（曾实测 flake）
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      for (let k = 0; k < 200 && !(b.floating && b.cy >= WL - 0.01); k++) b.fixedUpdate(1, h.hooks);
+      for (let k = 0; k < 160; k++) b.fixedUpdate(1, h.hooks);   // 收敛尾
+      expect(Math.abs(b.cy - WL)).toBeLessThanOrEqual(0.01);
+      expect(Math.abs((b as unknown as { vy: number }).vy)).toBeLessThanOrEqual(1e-9);
+      expect((b as unknown as { drawRot: number }).drawRot).toBe(0);
+    } finally {
+      rnd.mockRestore();
+    }
   });
 
   it('咬钩踢：vy=1.5..7.485 / vx=±1.5 + wet/lavaWet/honeyWet 三旗复位（:54789-54793）', () => {
     const h = mkHarness(1);
-    const b = new Bobber(50 * TILE, WL - 7, 0, 0, 5, 0, 5, () => h.player);   // cy 精确落 wl
+    const b = new Bobber(50 * TILE, WL - 7, 0, 0, 5, 0, 5, () => h.player);
+    b.fixedUpdate(1, h.hooks);                      // 出生预置 + 入液注册（拍 1=飞行/入液支）
+    // 预置 settled 精确态：cy==wl → 浮支 else 支（:54732-54735）字面 vy=wl−cy=0，
+    // 免 float 收敛尾（ulp 级 tie-break）随机性——踢门 vy==0 即原版字面
+    b.y = WL - 7;
+    (b as unknown as { vy: number }).vy = 0;
     (b as unknown as { ai1: number }).ai1 = -100;   // 咬钩窗内
     b.fixedUpdate(1, h.hooks);
     const s = b as unknown as { vy: number; vx: number; wet: boolean; lavaWet: boolean; honeyWet: boolean };
@@ -142,6 +156,9 @@ describe('浮支物理/咬钩抖动（:54699-54802,静态钉位退役）', () =>
   it('三旗复位 → 次拍共享湿段重触发入水溅花 10 粒+Splash_1（:16948 门＝原版咬钩水花）', () => {
     const h = mkHarness(1);
     const b = new Bobber(50 * TILE, WL - 7, 0, 0, 5, 0, 5, () => h.player);
+    b.fixedUpdate(1, h.hooks);
+    b.y = WL - 7;
+    (b as unknown as { vy: number }).vy = 0;
     (b as unknown as { ai1: number }).ai1 = -100;
     b.fixedUpdate(1, h.hooks);                      // 踢 + 三旗复位
     const nDust = h.dusts.length, nSfx = h.sfx.length;

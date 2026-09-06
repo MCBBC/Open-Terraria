@@ -227,3 +227,29 @@ export async function remasterDelete(id: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+
+/** 二进制存取(ArrayBuffer 值;IndexedDB 原生支持,免 JSON 序列化) */
+export async function kvSetBinary(key: string, buf: ArrayBuffer): Promise<boolean> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(buf, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch { return false; }
+}
+export async function kvGetBinary(key: string): Promise<ArrayBuffer | null> {
+  try {
+    const db = await openDb();
+    return await new Promise<ArrayBuffer | null>((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => resolve(req.result instanceof ArrayBuffer ? req.result : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}

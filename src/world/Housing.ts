@@ -763,6 +763,102 @@ export function findFreeHouse(
   return best;
 }
 
+// ================= QuickFindHome（WorldGen.cs:5654-5716,1457=1458 同文；SW-BJ2 2026-09-06） =================
+
+export interface QuickFindHomeOutcome {
+  /** true = 原版守卫未过（homeTile 出界,cs:5661）→ 整个 QuickFindHome 无操作：
+   *  调用方必须保持原状（已安家者不重扫、无家者不转有家——vanilla 字面） */
+  noop: boolean;
+  /** 受理成功时的新家站立格（vanilla 写 homeTileX/Y=bestX/bestY 地板行,本仓换算
+   *  站立行 y-1）；null = 转无家（homeless=true,cs:5706-5713） */
+  home: { x: number; y: number } | null;
+}
+
+/**
+ * WorldGen.QuickFindHome 1:1（1457 实测 WorldGen.cs:5654-5716;1458 :5654 同文零改动）。
+ * ★SW-BJ2 2026-09-06 用户实报「NPC 入住跟着玩家走」根因修复：原版复核锚 = NPC 的
+ * homeTile（房位）,与玩家位置【零】耦合;三步扫描全部「自扫描点泛洪出所在房间」,
+ * 不存在「±10 窗内枚举门锚再多房择优」的语义——旧 findFreeHouse 路径在「门/入口
+ * 距 home 站格 >10 格」的宽房/远门房每 7200t 复核必判无房 → NPC 被误转无家 →
+ * 每 tick 近玩家回收链（CheckForHousesNearAPlayer）把它迁进玩家视野内的空房
+ * =「家跟着玩家搬」。
+ *
+ * 逐式对照（行号 1457）：
+ *  · 守卫 :5661 `homeTileX>10 && homeTileY>10 && homeTileX<maxTilesX-10 && homeTileY<maxTilesY`
+ *    ——未过 = 整函数无操作（ homeless 态保持不变;入参按 vanilla homeTile 口径=地板行）。
+ *  · step1 :5662-5664 `StartRoomCheck(homeTileX, homeTileY - 1)`——自 homeTile 上一行
+ *    （=本仓 home 站格）直锚泛洪所在房间;成功即跳过 2/3 步。
+ *  · step2 :5665-5673 3×3：i∈[hx-1,hx+1] × j∈[hy-1,hy+1]（vanilla homeTileY 口径）。
+ *  · step3 :5674-5682 ±10 步长 2 网格：k∈[hx-10,hx+10] / l∈[hy-10,hy+10] 均 step2。
+ *    ★原版字面 quirk：内层 `j<…+2 && !StartRoomCheck(i,j)` 只在【同列】首成功处停,
+ *    外层无 break——后续列的探测会覆写 canSpawn（终值=最后一列的探测结果,后列成功
+ *    即以该列房间受理;前列成功被冲掉）。本移植逐字保留该 quirk,勿"修好"它。
+ *  · 泛洪语义 = StartRoomCheck（:5996-6046）：纯围合+尺寸+漏墙,【无】RoomNeeds/站立
+ *    尾程（ignoreNeeds+requireStand:false 同构）,tileSolid[379] 翻转窗 = 本仓
+ *    MAIN_EXTRA_SOLID 缺省（floodRoom :537）。
+ *  · RoomNeeds :5686-5690：对【最后泛出的房间】四旗判（本仓 flags 由 flush 出参携带）。
+ *  · ScoreRoom(npc,type) :5690-5692 + IsRoomConsideredOccupiedForNPCIndex :5694-5696
+ *    → 本仓 scoreRoom（占用返回 -1 一体覆盖两支）。
+ *  · 成功 :5698-5705 写 homeTileX/Y=bestX/bestY + homeless=false（本仓站立格换算）;
+ *    任一失败 :5706-5713 homeless=true。
+ *  · CheckSpecialTownNPCSpawningConditions（:5684-5686,松露居所门）留在调用方
+ *    （Game 层持 world flags）,对【找到的房】复核——vanilla 门位在 RoomNeeds 之前,
+ *    结果等价（该门失败同样只是转无家）。
+ *  入参 (homeTileX, homeTileY) = vanilla homeTile 口径【地板行】;本仓 home.y 为站立
+ *  行,调用方传 home.y+1（helper 内部换算 step1 种子=站立行）。
+ */
+export function quickFindHome(
+  st: TileStore,
+  occupied: ReadonlyArray<{ x: number; y: number; npcId?: number }>,
+  homeTileX: number, homeTileY: number,
+  askingNpcId = -1,
+): QuickFindHomeOutcome {
+  // vanilla 守卫（cs:5661）——注意 homeTileY < maxTilesY 无 -10 截断,逐字
+  if (!(homeTileX > 10 && homeTileY > 10 && homeTileX < st.w - 10 && homeTileY < st.h)) {
+    return { noop: true, home: null };
+  }
+  const probe = (x: number, y: number): { ok: boolean; q: HousingQueryResult } => {
+    const q = queryRoom(st, x, y, { ignoreNeeds: true, requireStand: false });
+    return { ok: q.room != null, q };
+  };
+  const fy = homeTileY - 1;   // vanilla step1 种子行（=本仓 home 站立行）
+  // step1 :5662-5664
+  let cur = probe(homeTileX, fy);
+  let ok = cur.ok;
+  // step2 :5665-5673（仅 step1 失败;★quirk:外层无 break,终值=末列结果）
+  if (!ok) {
+    for (let i = homeTileX - 1; i < homeTileX + 2; i++) {
+      for (let j = fy; j < fy + 3; j++) {
+        const r = probe(i, j);
+        cur = r;
+        if (r.ok) break;
+      }
+      ok = cur.ok;
+    }
+  }
+  // step3 :5674-5682（仅 1/2 步全失败;同 quirk——终值=k=hx+10 列的探测结果）
+  if (!ok) {
+    for (let k = homeTileX - 10; k <= homeTileX + 10; k += 2) {
+      for (let l = homeTileY - 10; l <= homeTileY + 10; l += 2) {
+        const r = probe(k, l);
+        cur = r;
+        if (r.ok) break;
+      }
+      ok = cur.ok;
+    }
+  }
+  const room = cur.q.room;
+  if (!ok || !room) return { noop: false, home: null };
+  // RoomNeeds :5686-5690（四旗齐备;flags 随 flush 出参,见 floodRoom :580-588）
+  const f = cur.q.flags;
+  if (!(f.door && f.table && f.chair && f.light)) return { noop: false, home: null };
+  // ScoreRoom + IsRoomConsideredOccupiedForNPCIndex :5690-5696（占用 → hiScore=-1）
+  const s = scoreRoom(st, room, occupied, askingNpcId);
+  if (s.score <= 0) return { noop: false, home: null };
+  // 成功支 :5698-5705（bestX/bestY=地板行 → 本仓站立行 y-1）
+  return { noop: false, home: { x: s.x, y: s.y - 1 } };
+}
+
 // ================= 住房查询/分配（原版住房界面 MoveTownNPC + moveRoom，2026-08-15 B 方案） =================
 
 /** 房屋需求旗标（1457 实测 RoomNeeds def :5601 起,四布尔；填充由 floodRoom 完成，失败时也保留已见项）
@@ -810,7 +906,7 @@ export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'uns
 export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
 export function queryRoom(st: TileStore, x: number, y: number,
-  opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid'> = {}): HousingQueryResult {
+  opts: Pick<FloodOpts, 'ignoreNeeds' | 'extraSolid' | 'requireStand'> = {}): HousingQueryResult {
   const flags: RoomNeedsFlags = {
     table: false, chair: false, light: false, door: false,
     stinkbug: false, echoStinkbug: false,

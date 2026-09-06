@@ -185,6 +185,15 @@ export class BombSkeletronPrimeProj extends Entity {
     // :48031-48037 Kill 门（timeLeft≤3；落地钳 3 → 同拍爆 = 原版"落地即爆"节奏;
     //  永不落地侧 3600t 兜底同门）
     if (this.fuse <= 3) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 AI_016 引信 Kill（:48034-48037
+      //  `timeLeft <= 3 → Kill()`,【不 return】→ else 块（引信烟尘/damage 复写）整跳
+      //  =本仓早退同态）后 Update 湿段(:16895)【无 active 门】照跑（`!active` 门
+      //  :17132 只拦 Damage/尾尘）→ 湿中爆先溅花后爆=原版相位。本仓杀位早退曾跳过
+      //  湿段;现补跑,测位=存储位：AI_016 对 102 不写 position → 原版死拍湿段同位,
+      //  逐值等价。杀支与 AI 尾活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;
+      //  102 ∉ IsDestroyedByWater 六型/非 80 → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        102, !!projectileData(102)?.ignoreWater);
       this.explode(game);
       return;
     }

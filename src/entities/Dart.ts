@@ -302,9 +302,8 @@ export class TrapShot extends Entity {
   lavaWet = false;
   honeyWet = false;
   shimmerWet = false;
-  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1；
-   *  1049 extraUpdates=1 → 原版每拍 2 子步各 −1,本仓湿段每拍 1 次——窗 10 拍口径,
-   *  子步对齐残差 ≤1 拍登记） */
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步 −1；
+   *  1049 extraUpdates=1 → 每拍 2 子步各 −1（R2 P2-4 子步湿段收编）→ 10 计窗=5 拍） */
   wetCount = 0;
   /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
   presetDone = false;
@@ -587,9 +586,21 @@ export class TrapShot extends Entity {
       // 步间不重查块——陷阱弹碰撞模型维持拍末中心点单查（类头注既有简化）
       // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——逐子步位移同削
       //（原版 UpdatePosition :19973 每子步 position += wetVelocity）
-      const df = projWaterDragFactor(this);
+      // ★R2 P2-4（2026-09-07）湿段逐【子步】：原版湿段在 numUpdates 子步环内
+      //  (:16781-17345,湿段 :16903)——extraUpdates=1 → 每拍 2 次,采样位=本子步头
+      //  （上一子步位移末位）;wetCount :17109-17112 逐子步 −1 → 10 计窗=5 拍
+      //  （旧每拍 1 次=10 拍,子步节奏残差清偿）。首子步湿段=拍头既有调用（测试位=
+      //  上拍位移后同位）;步 k≥2 在本环内补跑（采样位=上一子步位移末位=原版子步
+      //  头同位）,阻尼档随子步旗刷新（HandleMovement :17721 读本子步湿段后旗）。
+      //  1049 AI 侧尘链仍拍级 2 轮连排读拍头旗——AI 逐子步拆分属视觉尘域,登记不动。
+      let df = projWaterDragFactor(this);
       const steps = st.steps ?? 1;
       for (let s2 = 0; s2 < steps; s2++) {
+        if (s2 > 0) {
+          projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+            wetId, !!projectileData(wetId)?.ignoreWater);
+          df = projWaterDragFactor(this);
+        }
         this.x += this.vx * df;
         this.y += this.vy * df;
       }
@@ -753,18 +764,22 @@ export class TrapShot extends Entity {
     // 反射后转 hostile 同样走此出口（原版敌弹对 NPC 无伤害）
     if (!this.hostile || this.reflected) return;
     // 小动物桶（Enemy 单参 shim / Critter.hurt(game) 皆可，被击即死）
-    const buckets = (game as unknown as { entities?: { critters: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (g: GameHooks) => boolean }>; npcs: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean }> } }).entities;
+    // ★SW-BI1 2026-09-06：hurt 改可选形+调用前守卫——npcs 桶有非 TownNPC 成员
+    //  （PetFollower 宠物走 Game.ts:36787 入 npcs 桶、无 hurt 方法），机关弹碰上
+    //  即 `k.hurt is not a function` 帧循环停机（SW-BI1 报告同族二道防线；原版
+    //  单数组 Main.npc 全员有 StrikeNPC，本仓分桶后必须逐员验 hurt）。
+    const buckets = (game as unknown as { entities?: { critters: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt?: (g: GameHooks) => boolean }>; npcs: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt?: (d: number, kx: number, ky: number, g: GameHooks) => boolean }> } }).entities;
     if (buckets) {
       for (const c of buckets.critters) {
-        if (c.dead || !overlaps(c)) continue;
+        if (c.dead || !c.hurt || !overlaps(c)) continue;
         const ck = c as unknown as object;
         if (!windowOpen(ck)) continue;
         c.hurt(game);
         if (!afterHit(ck)) { this.dead = true; return; }
       }
-      // 城镇 NPC（TownNPC.hurt：防御减伤+无敌帧+死亡移除）
+      // 城镇 NPC（TownNPC.hurt：防御减伤+无敌帧+死亡移除）；无 hurt 成员（宠物）跳过
       for (const n of buckets.npcs) {
-        if (n.dead || !overlaps(n)) continue;
+        if (n.dead || !n.hurt || !overlaps(n)) continue;
         const nk = n as unknown as object;
         if (!windowOpen(nk)) continue;
         n.hurt(this.damage, Math.sign(this.vx) * (st.kb ?? 2), 0, game);
@@ -797,10 +812,12 @@ export class TrapShot extends Entity {
     hitPlayer({ x: cx - r, y: cy - r, w: r * 2, h: r * 2, projId: 1049 } as { x: number; y: number; w: number; h: number },
       game, this.damage, true);
     // 城镇 NPC（Damage_PVE hostile&flag2 门 :12607——1049 hostile=true 故可命中）
+    // ★SW-BI1 2026-09-06：hurt 改可选形+守卫——npcs 桶含 PetFollower（无 hurt），
+    //  同 SW-BI1 二道防线（见上方 buckets 循环注）。
     for (const n of game.npcs?.() ?? []) {
       const t = n as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks) => void };
-      if (t.dead) continue;
+        hurt?: (d: number, kx: number, ky: number, g: GameHooks) => void };
+      if (t.dead || !t.hurt) continue;
       if (!(cx - r < t.x + t.w && cx + r > t.x && cy - r < t.y + t.h && cy + r > t.y)) continue;
       t.hurt(this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE.hail.kb ?? 2), 0, game);
     }

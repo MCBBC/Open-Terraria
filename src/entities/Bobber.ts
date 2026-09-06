@@ -1,15 +1,19 @@
 // 钓鱼浮标实体：抛竿抛物线 → 落水漂浮 → 咬钩窗口 → 收竿掷渔获。
-// 原版 Projectile.AI_061_FishingBobber（Projectile.cs:50762-50937）1:1：
-//   抛出 grav 抛物线；入液（水/蜜/岩浆）转漂浮；等待 = localAI[1] 累积器
-//   （:50930-50947：每 tick += ⌊FinalFishingLevel/30⌋ + rand(1,3) + rand(300)<力 ? rand(1,3) : 0
+// 原版 Projectile.AI_061_FishingBobber（1457 :54595-54803）1:1：
+//   抛出抛物线；入液（水/蜜/岩浆）转漂浮（浮支物理 = GetWaterLine 液面回拉
+//   :54699-54740/:54805-54833，settled 门 :54736-54739）；等待 = localAI[1] 累积器
+//   （:54766-54784：每 tick += ⌊FinalFishingLevel/30⌋ + rand(1,3) + rand(300)<力 ? rand(1,3) : 0
 //   + 1/60 概率 +60；>660 触发 FishingCheck）；
-//   FishingCheck（:19175-19187）→ TryBuildFishingContext（:19189-19331，本实体
+//   FishingCheck（:20703-20712）→ TryBuildFishingContext（:20714-20859，本实体
 //   fishingCheck 内 1:1：水量/atmo 缩放/幸运度/heightLevel/junk/五档/任务鱼探测）
-//   → 咬钩门 rand(100) <= ⌊(力+75)/2⌋ → SetFishingCheckResults（:19333-19396：
+//   → 咬钩门 rand(100) <= ⌊(力+75)/2⌋ → SetFishingCheckResults（:20861-20924：
 //   敌怪先掷、渔获后掷）→ FishDropRuleList 全量表掷渔获（FishDropRule.cs:31-51）；
-//   咬钩窗口 = ai[1] 取 rand(-240,-90) - 力 的负值，每 tick += rand(1,5)，
-//   归零即逃脱（渔获作废，:50949-50960 / :19348/:19362）；
-//   窗口内收竿 → 消耗鱼饵（消耗率 1/(1+bait/6)，钓具箱 +1 分母）。
+//   咬钩窗口 = ai[1] 取 rand(-240,-90) - 力 的负值，每 tick += rand(1,5)（抖动踢+
+//   湿三旗复位 :54785-54802），归零即逃脱（渔获作废，:54796-54801 / :20876/:20890）；
+//   窗口内收竿 → 消耗鱼饵（消耗率 1/(1+bait/6)，钓具箱 +1 分母）；
+//   饵 2673 松露虫渔情警告每拍写（:54754-54757,浮/飞两段同写——显示侧
+//   Game.tickInfoAccs 只读粘性缓存）；浮支收敛尾 = XNA float32 语义（Math.fround
+//   站点模拟——float64 尾撞 ULP64 墙晚 ~29 拍,咬钩重抖节拍翻倍,B1 定谳 2026-09-07）。
 import { Entity } from './Entity';
 import { projFrameImg } from './Arrow';
 import type { GameHooks } from './types';
@@ -64,6 +68,14 @@ export const BOBBER_BOX = 14;
 function nextInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min));
 }
+
+// ---- XNA float32 常量（C# 字面 0.9f/0.1f/0.015f/0.01f 的单精度值。运算前先对常量
+//      fround 消双重舍入：fround(x×fround(0.9)) ≙ fl32(x*0.9f)，直写 fround(x*0.9)
+//      是 fl64(x*0.9) 再舍入 ≠ 原版。B1 浮态收敛尾定谳 2026-09-07）----
+const F32_09 = Math.fround(0.9);
+const F32_01 = Math.fround(0.1);
+const F32_015 = Math.fround(0.015);
+const F32_001 = Math.fround(0.01);
 
 /** 鱼竿物品 id → 浮标弹型（Item.cs SetDefaults :23001 `shoot = 361 + type - 2291`
  *  （竿 2291-2296 → 361-366）、2289 显式 360 / 4325 血肉竿 760 / 4442 热钓竿 775。
@@ -321,6 +333,11 @@ export class Bobber extends Entity {
       // dx/dy 入参（moveAndCollide 契约——采纳处原样回读勿除回）,速度场不减
       const dfF = projWaterDragFactor(this);
       moveAndCollide(this, game.world, this.vx * dfF, this.vy * dfF);
+      // 咬钩饵警告每拍写在飞行段同样成立（:54754-54757 位=干物理后/!flag3 早退前,
+      // 原版飞行中即写;条件口径同浮态段注——抛竿拍快照 baitVid）
+      if (this.baitVid === 2673) {
+        p.displayedFishingInfo = Lang.text('GameUI.FishingWarning');
+      }
       if (liqType === 'water' || liqType === 'honey') {
         this.floating = true;
         this.liquidKind = liqType;
@@ -364,20 +381,40 @@ export class Bobber extends Entity {
         game.playSfxWav?.('Splash_2', 1, p.x, p.y);  // PlaySound(19,(int)player.position.X/Y,2)
       }
     }
-    // 浮支物理（:54699-54740）
+    // 浮支物理（:54699-54740）——★float32 语义模拟（B1 定谳落刀 2026-09-07）：
+    //   XNA 全程 float32，本仓 float64 的 halving 收敛尾要降到 ULP64(y≈2048)≈4.5e-13
+    //   才撞墙，原版 fl32 在 ULP32≈2.4e-4 即落地——收敛尾多 ~29 拍 → 咬钩重抖/重溅
+    //   节拍 123t vs 原版 59t（仿真三臂对拍：fl32=59 / float64=117~123 / 修后=59 且与
+    //   fl32 逐拍恒等）。修=浮支全体 float 站点 Math.fround（常量先 fround，见模块头）
+    //   + 湿位移和取整（下方 moveAndCollide 后）。飞行段不包：入水前状态本仓抛竿向量
+    //   式与原版 ItemCheck_Shoot 异源，逐位对齐不可达，墙标度由浮支自建（飞段 vy 公式
+    //   本就近似档）；x 轴位移和取整省略（vx 无精确等门消费面，只进画线摆垂）。
+    const cyF = Math.fround(this.cy);        // Center.Y（fl32(position.Y+7f) 单精度和）
     this.drawRot = 0;                        // rotation = 0f（:54699——浮态恒正立）
-    this.vx *= 0.9;                          // :54700
+    this.vx = Math.fround(this.vx * F32_09); // :54700 velocity.X *= 0.9f
     // :54701-54712 盒沿 tile 空分配探针=行为死码（只 new Tile 不读）不移植;
-    if (this.vy > 0) this.vy *= 0.5;         // :54713-54716
+    if (this.vy > 0) this.vy = Math.fround(this.vy * 0.5);   // :54713-54716（×0.5 精确,包裹为语义完整）
     const wl = this.getWaterLine(st, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
-    if (this.cy > wl) {                      // :54720-54731
-      this.vy -= 0.1;
+    if (cyF > wl) {                          // :54720-54731
+      this.vy = Math.fround(this.vy - F32_01);              // velocity.Y -= 0.1f
       if (this.vy < -8) this.vy = -8;
-      if (this.cy + this.vy < wl) this.vy = wl - this.cy;
+      if (Math.fround(cyF + this.vy) < wl) {                // fl32(Center.Y+velocity.Y) < num10
+        this.vy = Math.fround(wl - cyF);                    // velocity.Y = num10 - Center.Y
+      }
     } else {
-      this.vy = wl - this.cy;                // :54732-54735
+      this.vy = Math.fround(wl - cyF);       // :54732-54735 else 直拉
     }
-    let flag3 = this.vy >= -0.01 && this.vy <= 0.01;   // :54736-54739 settled
+    let flag3 = this.vy >= -0.01 && this.vy <= 0.01;   // :54736-54739 settled（(double)vy 比较,双精度字面）
+    // ---- 咬钩饵警告（AI_061 :54754-54757,每拍）：myPlayer==owner（单机恒真）且
+    //      饵=松露虫 2673 → displayedFishingInfo=FishingWarning。写位=浮/干物理之后、
+    //      累积/咬钩之前——FishingCheck 同拍后写者胜＝原版同构；显示侧
+    //      Game.tickInfoAccs 浮标在场只读粘性缓存（R25-E16 补写位）。★条件口径：原版
+    //      = GetFishingConditions().BaitItemType 现算（Fishing_GetBait :42578 逐帧扫
+    //      盘）；本仓 bobber 域饵源=抛竿拍快照 baitVid（fishingCheck 松露虫支/
+    //      consumeBait/IsLavaBait 同源）——中途换饵的现算差=快照口径既有域，非本刀面。 ----
+    if (this.baitVid === 2673) {
+      p.displayedFishingInfo = Lang.text('GameUI.FishingWarning');
+    }
     // ---- 累积/咬钩（:54758-54802；原版 !flag3 早退 :54762-54764）----
     if (this.ai1 !== 0) flag3 = true;        // :54758-54761（咬钩窗内不受 settled 门）
     if (flag3) {
@@ -395,13 +432,15 @@ export class Bobber extends Entity {
       } else if (this.ai1 < 0) {
         // 咬钩窗（:54785-54802）：ai[1] 每 tick += rand(1,5)；归零 = 逃脱——
         // localAI[1] 清零（渔获作废），回到等待累积
-        if (this.vy === 0 || (this.honeyWet && Math.abs(this.vy) <= 0.01)) {
+        if (this.vy === 0 || (this.honeyWet && Math.abs(this.vy) <= F32_001)) {
           // 抖动踢（:54789-54790）+ 三旗复位（:54791-54793 wet/lavaWet/honeyWet——
           // ★任务面"localAI[0] 等"系误记,原文三旗即湿旗）:复位后下一拍共享湿段
           //  !wet && wetCount==0 → 重触发入水溅花 10 粒+Splash_1（:16948 门）＝原版
           //  咬钩水花;本仓湿段在拍头 → 溅花滞后一拍（位序登记,projWetSection 头注同源）
-          this.vy = nextInt(100, 500) * 0.015;     // 1.5..7.485 下沉
-          this.vx = nextInt(-100, 101) * 0.015;    // ±1.5
+          //  踢幅 = fl32(Next×0.015f)（:54789-54790 字面 0.015f）→ 值域 [1.5, 7.48499966]
+          //  （fl32(100×0.015f) 舍入恰回 1.5;float64 直乘 7.485 顶=近似值,已正）
+          this.vy = Math.fround(nextInt(100, 500) * F32_015);      // (float)Next(100,500)*0.015f 下沉
+          this.vx = Math.fround(nextInt(-100, 101) * F32_015);     // (float)Next(-100,101)*0.015f ±1.5
           this.wet = false;
           this.lavaWet = false;
           this.honeyWet = false;
@@ -421,6 +460,11 @@ export class Bobber extends Entity {
     // HandleMovement(:17120) 同拍尾序：咬钩踢速度当拍即入位移（抖动当拍可见）
     const dfW = projWaterDragFactor(this);
     moveAndCollide(this, game.world, this.vx * dfW, this.vy * dfW);
+    // ★position += wetVelocity 的 fl32 和取整（UpdatePosition :20555 `if (wet)
+    //  position += wetVelocity`——XNA Vector2 加法单精度）：B1 收敛尾墙标度本体。
+    //  moveAndCollide 内和为 float64 精确和（两 float32 值之和 ≤49 位恒精确）,
+    //  此处 fround ≙ fl32(y_prev+Δ)；碰撞钳位/贴面吸附写整值恒 fl32 恒等,零扰动
+    this.y = Math.fround(this.y);
   }
 
   /** AI_061_FishingBobber_GetWaterLine（Projectile.cs:54805-54833）1:1：探中心列

@@ -977,6 +977,11 @@ export class MartianDeathray extends Entity {
   wetCount = 0;
   /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
   presetDone = false;
+  // ★⑥杀拍口径核查（2026-09-06 湿段配方推广批,清白注不落刀）：本类杀位（锚失联/
+  //  电报窗关/寿限 :996/:999/:1000）全在湿段调用位(:992)【之后】→ 湿段已先跑=
+  //  原版同相位（Kill 位在 AI 域,湿段其后）;且 447 ignoreWater=true(:5198) →
+  //  段门恒闭零行为,杀拍湿段缺口双清白。file 内 moveAndCollide/dutchmanCannonAI
+  //  为 NPC 侧物理助手,非湿段弹宿主,不涉。
 
   constructor(src: Enemy, dmg: number) {
     super();

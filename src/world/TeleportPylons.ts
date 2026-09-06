@@ -205,47 +205,74 @@ export interface PylonGateInput {
   playerTileX: number; playerTileY: number;
   /** 目标塔 */
   target: TeleportPylonInfo;
-  /** 当前所在塔（玩家 ±60 格内可达且过门的那座；无则 fail=NotNearAPylon 档） */
-  current: TeleportPylonInfo | null;
+  /** 玩家 ±60 交互盒内的全部晶塔（:149-177 遍历 _pylons 全表逐座尝试——
+   *  ★SW-BD1 2026-09-06 前只取首座：玩家同时处于两塔范围内而首座 NPC 门/群系门
+   *  败时，原版会继续尝试其余在范围内塔，本仓误拒） */
+  currents: TeleportPylonInfo[];
   /** 入住城镇 NPC（家 + 现位，tile 单位） */
   npcs: NpcHomeLike[];
-  /** 目标塔位的群系扫描 */
-  targetScene: SceneFlags;
-  /** 当前塔位的群系扫描（无 current 时可传 EMPTY_SCENE） */
-  currentScene: SceneFlags;
   downedPlantBoss: boolean;
+  /** 塔位群系扫描（原版 _sceneMetrics.Scan，Scan 中心 = 锚点 ToWorldCoordinates，
+   *  即锚点格左上角世界像素 x*16,y*16）。惰性求：目标塔先扫（:135），当前塔仅在
+   *  该座 NPC 门通过后才扫（:167 同序） */
+  scanAt: (p: TeleportPylonInfo) => SceneFlags;
 }
 
 /** HandleTeleportRequest 门禁五连（:100-205）。传送副作用由调用方执行（落位见文件头）。 */
 export function checkPylonTeleport(world: World, g: PylonGateInput): PylonTeleportCheck {
-  // 1) 玩家在晶塔旁（:105-109）——current 由调用方按"最近可达塔"求出，无则直接失败档
-  if (!g.current) {
+  // 1) 玩家在晶塔旁（:105-112 IsPlayerNearAPylon = ±60 盒内 597 tile 扫描）——
+  //  currents 由调用方按交互盒求出，空表即"不在任何晶塔旁"直接失败档
+  if (g.currents.length === 0) {
     return { ok: false, fail: 'Net.CannotTeleportToPylonBecausePlayerIsNotNearAPylon' };
   }
-  // 2) 目标塔 NPC 足量（:111-118）
+  // 2) 目标塔 NPC 足量（:113-121）
   const needTarget = npcsNeeded(g.target.type);
   if (!positionHasEnoughNpcs(needTarget, g.target.x, g.target.y, g.npcs)) {
     return { ok: false, fail: 'Net.CannotTeleportToPylonBecauseNotEnoughNPCs' };
   }
-  // 3) 蜥蜴神庙早入（:120-128）
+  // 3) 蜥蜴神庙早入（:122-131）
   if (!g.downedPlantBoss && isInLihzahrdTempleEarly(world, g.target.x, g.target.y)) {
     return { ok: false, fail: 'Net.CannotTeleportToPylonBecauseAccessingLihzahrdTempleEarly' };
   }
-  // 4) 目标塔群系要求（:130-136）
-  if (!pylonAcceptsTeleportation(g.target.type, world, g.targetScene, g.target.x, g.target.y)) {
+  // 4) 目标塔群系要求（:132-143）
+  if (!pylonAcceptsTeleportation(g.target.type, world, g.scanAt(g.target), g.target.x, g.target.y)) {
     return { ok: false, fail: 'Net.CannotTeleportToPylonBecauseNotMeetingBiomeRequirements' };
   }
-  // 5) 当前塔同样过 NPC + 群系门（:138-192；失败文案按最接近档位）
-  const needCurrent = npcsNeeded(g.current.type);
-  const npcOk = positionHasEnoughNpcs(needCurrent, g.current.x, g.current.y, g.npcs);
-  const biomeOk = pylonAcceptsTeleportation(g.current.type, world, g.currentScene, g.current.x, g.current.y);
-  if (!npcOk || !biomeOk) {
-    const fail = !npcOk
-      ? 'Net.CannotTeleportToPylonBecauseNotEnoughNPCsAtCurrentPylon'
-      : 'Net.CannotTeleportToPylonBecauseNotMeetingBiomeRequirements';
-    return { ok: false, fail };
+  // 5) 玩家侧在范围内逐塔尝试 NPC + 群系门（:145-192，任一座全过即 flag2=true 放行）；
+  //  全败时失败文案按 num 档（:180-187）：1=在范围内但 NPC 门全败 → AtCurrentPylon、
+  //  2=NPC 过而群系门全败 → BiomeRequirements、0=范围外（step1 已拦，保守同文案）
+  let num = 0;
+  for (const p of g.currents) {
+    if (num < 1) num = 1;
+    if (positionHasEnoughNpcs(npcsNeeded(p.type), p.x, p.y, g.npcs)) {
+      if (num < 2) num = 2;
+      if (pylonAcceptsTeleportation(p.type, world, g.scanAt(p), p.x, p.y)) {
+        return { ok: true, fail: null };
+      }
+    }
   }
-  return { ok: true, fail: null };
+  const fail = num === 1
+    ? 'Net.CannotTeleportToPylonBecauseNotEnoughNPCsAtCurrentPylon'
+    : num === 2
+      ? 'Net.CannotTeleportToPylonBecauseNotMeetingBiomeRequirements'
+      : 'Net.CannotTeleportToPylonBecausePlayerIsNotNearAPylon';
+  return { ok: false, fail };
+}
+
+/** SpawnInWorldDust 配色表（TeleportPylonsSystem.cs:338-404）：塔型 → 尘 43
+ *  颜色 (r,g,b)。SurfacePurity/Underworld/Shimmer 同色（:345-349/:390-399），
+ *  Snow/GlowingMushroom 蓝分量 1.2（XNA 渲染钳 1 → 白/亮蓝） */
+export const PYLON_DUST_RGB: Readonly<Record<number, readonly [number, number, number]>> = {
+  0: [0.05, 0.8, 0.3], 1: [0.7, 0.8, 0.05], 2: [0.5, 0.3, 0.7], 3: [0.4, 0.4, 0.6],
+  4: [0.2, 0.2, 0.95], 5: [0.85, 0.45, 0.1], 6: [1, 1, 1.2], 7: [0.4, 0.7, 1.2],
+  8: [0.7, 0.7, 0.7], 9: [0.05, 0.8, 0.3], 10: [0.05, 0.8, 0.3],
+};
+
+/** 尘 43 颜色 → hex（NewDust color(r,g,b,1)；分量 >1 按渲染钳位 1） */
+export function pylonDustHex(style: number): string {
+  const [r, g, b] = PYLON_DUST_RGB[style] ?? PYLON_DUST_RGB[0];
+  const ch = (v: number) => Math.round(Math.min(1, v) * 255).toString(16).padStart(2, '0');
+  return `#${ch(r)}${ch(g)}${ch(b)}`;
 }
 
 /** 地图对焦包围盒（Player.cs:31717-31747）：本塔 + 全部已揭示塔的包围盒外扩 20 格。
@@ -267,4 +294,31 @@ export function mapFocusRect(
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   const scale = Math.min((viewW - 40) / w, (viewH - 40) / h);
   return { cx, cy, scale };
+}
+
+/** 全屏地图晶塔图标命中（TeleportPylonsMapLayer.cs:77-89 IsMouseOver）：
+ *  命中域 = 绘制精灵的屏幕包围盒（context.Draw 悬停判定），几何与
+ *  Renderer.drawPylonMapLayer 逐字同源——图标中心 = 锚点 + (1.5, 2) 格
+ *  （:56/63 PositionInTiles+(1.5,2)），尺寸 = Extra_182 帧 30×38 × scale
+ *  （scale = max(1,min(2,zoom))——vanilla 基线 1×/悬停 2×，屏幕尺寸不随地图
+ *  zoom 缩放）。屏幕→世界逆变换与 Game 地图点击链同式：
+ *  cx0 = viewW/2 − worldW·zoom/2 + panX（Y 轴用 worldH）。
+ *  ★SW-BD1 2026-09-06：此前 Game 侧用 tile 域 ±2 格判定——zoom 2 时仅图标中央
+ *  8×8px 可点，图标外圈整片死区（用户实报"点晶塔没反应"第二断点）。
+ *  多图标重叠时后写覆盖（:87 num2=j，与原版逐座覆写同序） */
+export function pylonIconHit(
+  pylons: TeleportPylonInfo[], mx: number, my: number,
+  view: { worldW: number; worldH: number; viewW: number; viewH: number; zoom: number; panX: number; panY: number },
+): TeleportPylonInfo | null {
+  if (!pylons.length) return null;
+  const cx0 = view.viewW / 2 - (view.worldW * view.zoom) / 2 + view.panX;
+  const cy0 = view.viewH / 2 - (view.worldH * view.zoom) / 2 + view.panY;
+  const scale = Math.max(1, Math.min(2, view.zoom));
+  const hw = 15 * scale, hh = 19 * scale;   // Extra_182 帧 30×38 半宽/半高
+  let hit: TeleportPylonInfo | null = null;
+  for (const p of pylons) {
+    const mxI = cx0 + (p.x + 1.5) * view.zoom, myI = cy0 + (p.y + 2) * view.zoom;
+    if (Math.abs(mx - mxI) <= hw && Math.abs(my - myI) <= hh) hit = p;
+  }
+  return hit;
 }

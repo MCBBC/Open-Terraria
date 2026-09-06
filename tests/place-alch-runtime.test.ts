@@ -69,6 +69,7 @@ function placeShell(w: World, heldVid: number) {
       slots: new Array(50).fill(null),
       heldItem: () => ({ id: iidOf(heldVid), stack: 5 }),
       removeAt: () => { consumed.push(1); },
+      removeHeld: () => { consumed.push(1); },   // SW-AZ1:手持消耗统一入口
     },
   };
   return {

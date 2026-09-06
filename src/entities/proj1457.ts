@@ -26,6 +26,7 @@ import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { wetCollision } from './npcLiquid';
 import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
@@ -632,6 +633,7 @@ export class ChloroSaberStab extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.wetSectionRan = false;                        // ⑥杀拍配方:每拍头重置（Arrow.ts 同款）
     const p = game.player;
     this.t++;
     const life = Math.round(16 * this.ms) + 5;                 // num（:48492）
@@ -645,7 +647,22 @@ export class ChloroSaberStab extends Entity {
     this.y = p.cy + this.dy * this.spd * (adv - 1) + py - this.h / 2;
     // 朝向随出手向量（:48510-48512 spriteDirection；:48496-48499 1127 ChangeDir）
     if (this.dx !== 0) p.facing = this.dx > 0 ? 1 : -1;
-    if (this.t >= life) { this.dead = true; return; }
+    if (this.t >= life) {
+      // ★⑥杀拍口径（2026-09-06,Arrow.ts wetSectionStep 配方推广到本类）：原版
+      //  Update 对湿段【无 active 门】——AI(:16880 `if (active)`)内 Kill（active=false）
+      //  当拍湿段(:16895 `if (!ignoreWater)`)照跑（旗刷新/溅花/wetCount 维护）,`!active`
+      //  门在 HandleMovement(:17120) 之后 :17132 才生效、只拦 Damage 管线。本仓杀拍
+      //  `dead=true; return` 曾整体跳过湿段=杀拍溅花缺口（寿命尽拍恰入水,原版溅、
+      //  本仓不溅）。修法照 Arrow.ts 配方:wetSectionStep 双调用点（杀拍补跑此处 +
+      //  活拍=subStepAI 等价尾原位）+ wetSectionRan 防同拍双跑;死亡拍 CutTiles/尘/
+      //  命中仍跳过（Kill FX 已在杀位结死,本类无位移行,湿段采样位=锚位不变,登记
+      //  与 Arrow 死拍同款"死拍位移零观感"口径）。1127 无 Kill FX/Kill 管线（消亡=
+      //  dead 布尔置位）且不接湿段 kill 钩（非 IsDestroyedByWater 六型）→ Arrow 的
+      //  killNow 头幂等门在此无对应面,dead 布尔即幂等门（登记）。
+      this.dead = true;
+      this.wetSectionStep(game);
+      return;
+    }
     // CutTiles（802/842/938-945/1127 线支 :15326-15331）：PlotTileLine(Center,
     // Center+SafeNormalize(velocity,−UnitY)×88f, width=10×scale)——★A⑤ 转正：
     // 全程带扫替换旧"单点刃尖"近似
@@ -658,15 +675,25 @@ export class ChloroSaberStab extends Entity {
     // 尘 157 + Item1 每 12t（:48522-48545；音效本仓 Item_1）
     if (this.t % 12 === 1) game.playSfxAt?.('hit', this.cx, this.cy);
     game.spawnParticles(this.cx, this.cy, '#4C8C3C', 2, 1.2, { life: 16, grav: 0, damp: 0.9 });
-    // ---- ★通用湿段（:16903-17113）——原版 Update 位序 AI(:16880) → 湿段(:16895) →
+    // ---- ★通用湿段（:16895-17113）——原版 Update 位序 AI(:16880) → 湿段(:16895) →
     // HandleMovement(:17120) → Damage(:17184)。本类 AI 退化=锚位重算+尘（无湿旗消费者）,
     // 段插 AI 尾（cutTiles/尘后）/Damage 前 = 原版同位;采样位=AI 直写锚位（原版"AI 后
     // 未移动位"同构——本类不建模 HandleMovement 的 `position += velocity` 叠加,登记既有近似）。
     // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写。ignoreWater 按数据面传（1127 缺行
     // =不豁免;数据驱动防未来 id 复用本类）。
+    this.wetSectionStep(game);
+    dealContacts(this, game, this.hitCd, -1);
+  }
+
+  /** 通用湿段单点封装（⑥杀拍口径双调用点共用;wetSectionRan=同拍防双跑,Arrow.ts
+   *  同名配方——本类杀位在段位【前】,活拍路径无补跑面,旗照配方挂全防未来杀位
+   *  后移破防双跑）。 */
+  private wetSectionRan = false;
+
+  private wetSectionStep(game: GameHooks): void {
+    this.wetSectionRan = true;
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater);
-    dealContacts(this, game, this.hitCd, -1);
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -2453,7 +2480,13 @@ export class BookStormTwister extends Entity {
       this.dead = true;
       return;
     }                                                      // :71454-71457
-    // 垂直物理（:71467-71510）：身下 16×160 探测柱
+    // 垂直物理（:71467-71510）：身下 16×160 探测柱——支撑谓词 = SolidCollision ||
+    // WetCollision（:71467 逐字;红队 MED 2026-09-06:旧版漏湿支 → 龙卷过水柱照穿,
+    // 原版水面悬停=湿柱也算支撑,入水即升）。WetCollision 的盒 = 与 SolidCollision
+    // 同一探测柱 (vector3,16,160)（:71466-71467 同参——非实体盒 60×210;WetCollision
+    // 内部再缩 10×h/2 底心盒,npcLiquid.wetCollision 同式实现,传探测柱即可）。
+    // ★登记近似：固块支沿单列逐行采样（原版 SolidCollision=整盒任一固块,16 宽柱
+    // 跨列界时原文可两列齐查）——既有实现,本批只补湿支不动固块支。
     const probeX = this.cx - 8, probeYTop = this.y + this.h - 160;
     let blocked = false;
     {
@@ -2462,6 +2495,7 @@ export class BookStormTwister extends Entity {
         const tx = Math.floor(probeX / TILE), ty = Math.floor(yy / TILE);
         if (st.inBounds(tx, ty) && (st.isSolid(tx, ty))) blocked = true;
       }
+      if (!blocked && wetCollision(st, probeX, probeYTop, 16, 160).wet) blocked = true;   // :71467 `|| Collision.WetCollision`
     }
     if (blocked) {                                              // 支撑/浸液 → 升
       if (this.vy > 0) this.vy = 0;

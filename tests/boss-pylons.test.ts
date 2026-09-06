@@ -442,28 +442,29 @@ describe('传送晶塔 597（TeleportPylonsSystem.cs）', () => {
     const current: TeleportPylonInfo = { x: 100, y: 40, type: PYLON.Victory };
     const base = {
       playerTileX: 100, playerTileY: 41,
-      target, current,
+      target, currents: [current],
       npcs: [] as NpcHomeLike[],
-      targetScene: { ...EMPTY_SCENE },
-      currentScene: { ...EMPTY_SCENE },
       downedPlantBoss: true,
+      // ★SW-BD1 2026-09-06：群系扫描改惰性 scanAt（Scan 中心 = 锚点世界像素，
+      // TeleportPylonsSystem.cs:135/:167）；测试桩 = 纯净无群系
+      scanAt: () => ({ ...EMPTY_SCENE }),
     };
     // Victory 塔免 NPC 门 → 全过（:206）
     expect(checkPylonTeleport(w, base).ok).toBe(true);
-    // 1) 无当前塔（玩家不在任何晶塔 ±60 格内）→ NotNearAPylon（:105-109）
-    expect(checkPylonTeleport(w, { ...base, current: null }).fail)
+    // 1) 无当前塔（玩家不在任何晶塔 ±60 格内）→ NotNearAPylon（:105-112）
+    expect(checkPylonTeleport(w, { ...base, currents: [] }).fail)
       .toBe('Net.CannotTeleportToPylonBecausePlayerIsNotNearAPylon');
-    // 2) 非 Victory 塔缺 NPC → NotEnoughNPCs（:111-118）
+    // 2) 非 Victory 塔缺 NPC → NotEnoughNPCs（:113-121）
     expect(checkPylonTeleport(w, { ...base, target: { x: 200, y: 40, type: PYLON.Jungle } }).fail)
       .toBe('Net.CannotTeleportToPylonBecauseNotEnoughNPCs');
-    // 3) 蜥蜴神庙早入（未败世花 + 墙 87 + 地下）→ Early（:120-128）
+    // 3) 蜥蜴神庙早入（未败世花 + 墙 87 + 地下）→ Early（:122-131）
     const w2 = makeWorld();
     w2.groundLevel = 50;
     for (let dx = 0; dx < 3; dx++) w2.store.setWall(200 + dx, 100, 87);
     expect(checkPylonTeleport(w2, {
       ...base, downedPlantBoss: false, target: { x: 200, y: 100, type: PYLON.Victory },
     }).fail).toBe('Net.CannotTeleportToPylonBecauseAccessingLihzahrdTempleEarly');
-    // 4) 目标塔群系不符（地下纯净塔）→ BiomeRequirements（:130-136）
+    // 4) 目标塔群系不符（地下纯净塔）→ BiomeRequirements（:132-143）
     //    NPC 门先过：目标塔旁给 2 名入住 NPC（家在 169×124 窗内、不离家）
     const housed: NpcHomeLike[] = [
       { homeX: 200, homeY: 39, x: 200, y: 40 }, { homeX: 201, homeY: 39, x: 201, y: 40 },
@@ -472,11 +473,11 @@ describe('传送晶塔 597（TeleportPylonsSystem.cs）', () => {
     expect(checkPylonTeleport(w, {
       ...base, npcs: housed, target: { x: 200, y: 100, type: PYLON.SurfacePurity },
     }).fail).toBe('Net.CannotTeleportToPylonBecauseNotMeetingBiomeRequirements');
-    // 5) 当前塔缺 NPC（目标 Victory 免检）→ AtCurrentPylon（:155-192）
+    // 5) 当前塔缺 NPC（目标 Victory 免检）→ AtCurrentPylon（:145-192）
     expect(checkPylonTeleport(w, {
       ...base,
       npcs: [{ homeX: 200, homeY: 39, x: 200, y: 40 }, { homeX: 201, homeY: 39, x: 201, y: 40 }],
-      current: { x: 100, y: 40, type: PYLON.Jungle },
+      currents: [{ x: 100, y: 40, type: PYLON.Jungle }],
     }).fail).toBe('Net.CannotTeleportToPylonBecauseNotEnoughNPCsAtCurrentPylon');
   });
 

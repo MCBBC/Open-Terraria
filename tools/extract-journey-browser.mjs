@@ -162,6 +162,21 @@ function resolveCaseField(seg, pattern, id) {
   return val;
 }
 
+// SW-BK1 2026-09-06: createWall 共享算式求值（extract-wallitems.mjs evalExpr 同构,
+// 与 extract-itemfunc.mjs evalArithExpr 同款）——`createWall = 116 + type - 1948;`
+// 形态（Item.cs:21139/21428/22090/22370/24086/26651/33328）不被字面正则命中,
+// 此前 35 件墙物品 cw 缺失只能等 itemfunc f.createWall 兜底（2263/2264 区间件在
+// default 段,本提取器 CASE_SEGMENTS 不归属,仍走 itemfunc 兜底）。
+function evalWallExpr(expr, id) {
+  const js = expr
+    .replace(/\(ushort\)/g, '')
+    .replace(/\(int\)/g, '')
+    .replace(/\btype\b/g, `(${id})`)
+    .replace(/\s+/g, '');
+  if (!/^[-+*/()0-9]+$/.test(js)) return undefined;
+  return Math.trunc(Function(`"use strict"; return (${js});`)());
+}
+
 // ---- ① 新字段扫描 ----
 const DAMAGE = new Map();      // 显式 damage（含 0/-1；缺省本身也是 -1，见下）
 const VANITY = new Set();
@@ -172,6 +187,7 @@ const PLACE_WALL = new Map();  // DefaultToPlaceableWall(wall)
 const CT_LITERAL = new Map();  // 字面量 createTile
 const PS_LITERAL = new Map();  // 字面量 placeStyle
 const CW_LITERAL = new Map();  // 字面量 createWall
+const CW_EXPR = new Map();     // SW-BK1 2026-09-06: 共享算式 createWall（type 算式 per-id 求值）
 const BUFF_TIME = new Map();
 const FISHING = new Map();
 const EXPERT = new Set();
@@ -195,6 +211,18 @@ for (const [id, seg] of CASE_SEGMENTS) {
   if (ps !== undefined) PS_LITERAL.set(id, ps);
   const cw = resolveCaseField(seg, '\\bcreateWall\\s*=\\s*(\\d+);', id);
   if (cw !== undefined) CW_LITERAL.set(id, cw);
+  // SW-BK1 2026-09-06: 共享算式补提取（fill-when-undefined——字面已值不覆写;取段内
+  // 最后命中同 C# 后写语义）。2263/2264 区间件不在 CASE_SEGMENTS（default 段丢弃）,
+  // 仍由 itemfunc f.createWall 兜底——两路同值（wallitems 提取器对账面）。
+  else {
+    for (const p of caseParts(seg, id)) {
+      const em = [...p.matchAll(/\bcreateWall\s*=\s*([^;]+);/g)].pop();
+      if (em) {
+        const wv = evalWallExpr(em[1], id);
+        if (wv !== undefined) { CW_EXPR.set(id, wv); break; }
+      }
+    }
+  }
   const bft = resolveCaseField(seg, '\\bbuffTime\\s*=\\s*(\\d+);', id);
   if (bft !== undefined) BUFF_TIME.set(id, bft);
   const fp = resolveCaseField(seg, '\\bfishingPole\\s*=\\s*(\\d+);', id);
@@ -277,8 +305,8 @@ for (let vid = 1; vid < ITEM_COUNT; vid++) {
   const ptArgs = PLACE_TILE_ARGS.get(vid);
   const ct = vanCt != null ? vanCt : ptArgs ? ptArgs[0] : CT_LITERAL.get(vid) ?? -1;
   if (ct >= 0) rec.ct = ct;
-  // createWall：DefaultToPlaceableWall → 字面量 → itemfunc
-  const cw = PLACE_WALL.get(vid) ?? CW_LITERAL.get(vid) ?? f.createWall ?? -1;
+  // createWall：DefaultToPlaceableWall → 字面量 → 共享算式(SW-BK1) → itemfunc
+  const cw = PLACE_WALL.get(vid) ?? CW_LITERAL.get(vid) ?? CW_EXPR.get(vid) ?? f.createWall ?? -1;
   if (cw >= 0) rec.cw = cw;
   // placeStyle：字面量 → DefaultToPlaceableTile 第二参 → itemfunc
   const ps = PS_LITERAL.get(vid) ?? ptArgs?.[1] ?? f.placeStyle ?? 0;

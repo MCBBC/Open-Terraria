@@ -204,7 +204,7 @@ describe('SW-AV2 可合成判定与扣料（跨源）', () => {
     const inv = new Inventory();
     inv.slots[10] = { id: woodIid, stack: 4 };
     const c = chest(10, 0, [{ id: woodIid, stack: 6 }, { id: gelIid, stack: 1 }]);
-    expect(consumeMaterials(inv, workbench, 1, false, [c])).toBe(true);
+    expect(consumeMaterials(inv, workbench, 1, false, [c])).toBe(1);
     expect(inv.countOf(woodIid)).toBe(0);
     expect(c.items[0]).toBeNull();       // 需 6=存 6 → 整格清空（ConsumeItemsFrom :277-282）
     expect(c.items[1]).not.toBeNull();   // 非本配方材料不动

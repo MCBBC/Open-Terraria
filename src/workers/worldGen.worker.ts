@@ -140,11 +140,27 @@ ctx.onmessage = async (e) => {
     if (req.type === 'saveParse') {
       // 三源：key=worker 内直读 IDB（主路径，免大字符串 clone）；json=小档/调试；save=.wld 导入
       const __t0 = performance.now();
-      const data = req.save
-        ? req.save
-        : JSON.parse(req.json ?? (await kvGetIdb(req.key ?? '')) ?? 'null') as import('../save/SaveFile').SaveData | null;
+      let data: import('../save/SaveFile').SaveData | null;
+      {
+        // ★v6 二进制格式(2026-09-06):IndexedDB 存 ArrayBuffer(免 JSON 字符串+base64 膨胀)
+        //  旧 JSON 档自动兼容(kvGetIdb 返回 string → JSON.parse)
+        const raw = (await kvGetIdb(req.key ?? '')) as string | ArrayBuffer | null;
+        if (raw instanceof ArrayBuffer) {
+          const { unpackSaveBinary } = await import('../save/BinarySave');
+          data = unpackSaveBinary(raw);   // binary 通道以 Uint8Array 直出(免 base64)
+        } else {
+          data = JSON.parse(raw ?? 'null') as import('../save/SaveFile').SaveData | null;
+        }
+      }
       if (!data) throw new Error('存档数据缺失');
       __wkLog.push(`idb+parse ${Math.round(performance.now() - __t0)}ms`);
+      // ★大世界内存峰值削减(2026-09-06)：SaveData 对象在 loadSaveData 后不再需要,
+      //   立即提取尾部需要的字段并释放引用——6400×1800 世界 SaveData+TypedArrays
+      //   同时存活 ~500MB→峰值过剩。req.json 大字符串同步释放。
+      const savedDifficulty = data.header?.difficulty;
+      const savedEvents = data.events;
+      if ('json' in req) (req as { json?: string }).json = undefined;
+      if ('save' in req) (req as { save?: unknown }).save = undefined;
       ctx.postMessage({ id: req.id, type: 'progress', phase: 'parse', p: 0.3 });
       // 原版 loadWorld 进度序列(WorldFile.cs):LoadWorldTiles gen[51] 按列(:2514)→
       // 沉降 gen[27] 收敛比例 50-100%(:762)。p 现为收敛比例 0..1(settle.ts),
@@ -153,6 +169,9 @@ ctx.onmessage = async (e) => {
       const { world, player } = loadSaveData(data,
         (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'tiles', p }));
       __wkLog.push(`loadSaveData ${Math.round(performance.now() - __t1)}ms`);
+      // ★loadSaveData 完成后立即释放 SaveData 引用(GC 可回收 ~100-200MB 的
+      //   base64 字符串+解析对象——6400×1800 世界峰值削减关键)
+      data = null as unknown as typeof data;
       // ★历史索引帧修复（#perf2026-08-28 前移到 worker）：旧档多格家具的格内偏移
       // 曾写成格索引(0/1)而非像素(0/18)。★必须在沉降【前】——LiquidSim.diesIn 按
       // frameX/frameY 解析对象死亡档位（TILE_OBJECT_DEATH style/alt），索引态帧会
@@ -171,7 +190,7 @@ ctx.onmessage = async (e) => {
       // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化)
       ctx.postMessage({
         id: req.id, type: 'result', world: packet, player, wkLog: __wkLog,
-        save: { header: { difficulty: data.header?.difficulty }, events: data.events } as typeof data,
+        save: { header: { difficulty: savedDifficulty }, events: savedEvents } as typeof data,
       }, transfer);
       return;
     }

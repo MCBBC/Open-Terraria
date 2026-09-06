@@ -252,3 +252,214 @@ describe('SW-AW1b 分派级：真 tryMine 锤门（旧版死码定罪）', () =>
     expect(g.hammerPoundRelease).toBe(false);         // 目标成立（tileSolid）→ 闩消费同原版
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SW-BA1（2026-09-06）锤击/输入域备案项清偿：
+//   ① 239 矿石条架/380 种植箱（双 true 全集 RB2 B-3）入锤目标门——239 走尾段
+//     else PoundTile 整↔半 toggle（Player.cs:46687/WorldGen.cs:82096-82103，
+//     tileSolidTop 使通用坡支 :46646 不可入=非平台坡循环）；380 被 CanPoundTile
+//     （:81972 case 380）拒整形=门内闩消费 no-op。
+//   ② TryPoundingTile 特例四支（137 :46494-46546 / 424 :46548-46560 /
+//     442 :46560-46644 / 470 :46403-46405）+ 尾段终端化——原版 :46373
+//     `hitWall=false` 在分派前已置=闩消费挥【恒不拆墙】，旧仓库未命中整形臂
+//     回落拆墙段=比原版早一挥拆墙。
+//   ③ 非锤工具挥击清闩（TryPoundingTile 头 :46365-46368 `sItem.hammer <= 0 ||
+//     !tile.active() → poundRelease=false`）；钻头链不清（Mount.UseDrill →
+//     PickTile 直调 Mount.cs:3071-3140，不经过 TryPoundingTile）。
+// 判别力：每例走【真 Game.tryMine 分派】——删 isHammerTarget 对应臂/撤终端化/
+// 撤清闩行即变红（门测试学：禁用单门应变红）。
+describe('SW-BA1：239/380 双 true 家族 + 特例四支 + 尾段终端化 + 非锤清闩', () => {
+  const ORE_BARS = TILE_BY_KEY['v_239_ore_bars']!;
+  const PLANTER = TILE_BY_KEY['v_380_planter_boxes']!;
+  const PIPE = TILE_BY_KEY['v_424_wirepipe']!;
+  const TRAP = TILE_BY_KEY['v_137_traps']!;
+  const PAD = TILE_BY_KEY['v_442_projectilepressurepad']!;
+  const DOLL = TILE_BY_KEY['v_470_mannequins']!;
+  const ALTAR = TILE_BY_KEY['v_26_altars']!;
+
+  /** mkHammerGame + addDamage 记录器：wallHits 非空=拆墙段被到达（闩消费挥恒空） */
+  function mkBA1(w = 24, h = 24) {
+    const { g, store } = mkHammerGame(w, h);
+    const wallHits: Array<[number, number, number]> = [];
+    g.hitTiles = {
+      addDamage: (x: number, y: number, d: number) => { wallHits.push([x, y, d]); return d; },
+      clear: () => {},
+      getDamage: () => 0,
+      prune: () => {},   // PickWall 尾 :46377 dmgW!=0 → Prune（tryMine :18147）
+    };
+    return { g, store, wallHits };
+  }
+  const halfAt = (st: TileStore, x: number, y: number): boolean => !!st.half[st.idx(x, y)];
+
+  it('239 矿石条架：整↔半 toggle（尾段 PoundTile，slope 恒 0 不坡化）', () => {
+    const { g, store } = mkBA1();
+    store.setTileSilent(8, 8, ORE_BARS, 0, 0);
+    for (const wantHalf of [true, false, true]) {
+      g.hammerPoundRelease = true;                    // 松开→再按的第一挥整形
+      (g as any).tryMine(8, 8, 0, 'hammer', 20);
+      g.lastMineHitTick = -999;
+      expect(halfAt(store, 8, 8)).toBe(wantHalf);     // :46687 else PoundTile toggle
+      expect(store.slope[store.idx(8, 8)]).toBe(0);   // tileSolidTop → 通用坡支不可入
+      expect(g.hammerPoundRelease).toBe(false);       // 闩消费（:46700）
+    }
+  });
+
+  it('380 种植箱：入目标门但 CanPoundTile(case 380) 拒整形=闩消费 no-op；闩消费挥不拆墙（对照：闩=false 同挥拆墙）', () => {
+    const { g, store, wallHits } = mkBA1();
+    store.setTileSilent(8, 8, PLANTER, 0, 0);
+    store.setWall(8, 8, 1);                           // 身后自然墙（3×3 有开口=可拆）
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);        // power>0=墙分支本可及
+    expect(g.hammerPoundRelease).toBe(false);         // 闩照常消费（原版 :46700）
+    expect(wallHits.length).toBe(0);                  // ★终端化：整形挥不落拆墙段
+    expect(store.get(8, 8)).toBe(PLANTER);            // 型不变
+    expect(store.half[store.idx(8, 8)]).toBe(0);      // CanPoundTile 拒 → 无半砖
+    // 对照：闩=false（按住态）同格同 power → 墙被锤（原版 TryHittingWall 门
+    // `!poundRelease` 在按住态恒真）
+    g.lastMineHitTick = -999;
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);
+    expect(wallHits.length).toBe(1);
+    expect(wallHits[0][0]).toBe(8);
+    expect(wallHits[0][1]).toBe(8);
+  });
+
+  it('424 接线盒：frameX 0→18→36→0 三态循环（:46548-46560 verbatim），闩消费挥不拆墙', () => {
+    const { g, store, wallHits } = mkBA1();
+    store.setTileSilent(8, 8, PIPE, 0, 0);
+    store.setWall(8, 8, 1);
+    for (const want of [18, 36, 0]) {
+      g.hammerPoundRelease = true;
+      (g as any).tryMine(8, 8, 5, 'hammer', 20);
+      g.lastMineHitTick = -999;
+      expect(store.frameX[store.idx(8, 8)]).toBe(want);
+      expect(g.hammerPoundRelease).toBe(false);
+    }
+    expect(wallHits.length).toBe(0);                  // 三挥全为闩消费挥 → 墙完好
+  });
+
+  it('137 陷阱换向映射表（:46494-46546 verbatim）：行 0 循环 / 行 3 映射 / default 档', () => {
+    const { g, store } = mkBA1();
+    store.setTileSilent(8, 8, TRAP, 0, 0);            // frameY=0（行 0 飞镖档）
+    for (const want of [36, 72, 18, 54, 90, 0]) {     // col0→2,col2→4,col4→1,col1→3,col3→5,col5→0
+      g.hammerPoundRelease = true;
+      (g as any).tryMine(8, 8, 0, 'hammer', 20);
+      g.lastMineHitTick = -999;
+      expect(store.frameX[store.idx(8, 8)]).toBe(want);
+    }
+    expect(store.frameY[store.idx(8, 8)]).toBe(0);    // frameY 不动（:46543 只写 frameX）
+    // 行 3（尖刺球档 frameY=54）：col0→3、col2→4、col3→2、col4→0（default col5→0）
+    const rowCases: Array<[number, number]> = [[0, 54], [36, 72], [54, 36], [72, 0], [90, 0]];
+    for (const [fx, want] of rowCases) {
+      store.setTileSilent(8, 8, TRAP, fx, 54);
+      g.hammerPoundRelease = true;
+      (g as any).tryMine(8, 8, 0, 'hammer', 20);
+      g.lastMineHitTick = -999;
+      expect(store.frameX[store.idx(8, 8)]).toBe(want);
+    }
+  });
+
+  it('442 弹幕压力垫板重算朝向（:46560-46644）：无支撑维持原帧 / 左支撑→44 / 上支撑→22', () => {
+    const { g, store } = mkBA1();
+    const DIRT = TILE_BY_KEY['dirt']!;
+    // 无任何支撑：cur0 → flag 全 false → num10=-1 维持原帧（:46634 门）
+    store.setTileSilent(8, 8, PAD, 0, 0);
+    g.hammerPoundRelease = true;
+    g.lastMineHitTick = -999;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.frameX[store.idx(8, 8)]).toBe(0);
+    // 左支撑（实心邻）：cur0 → flag2=true → num10=2 → frameX=44
+    store.setTileSilent(7, 8, DIRT, 0, 0);
+    g.hammerPoundRelease = true;
+    g.lastMineHitTick = -999;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.frameX[store.idx(8, 8)]).toBe(44);
+    // 上支撑：清左邻（上一步残留）→ cur0 → flag=true、flag2=false → num10=1 → frameX=22
+    store.setTileSilent(7, 8, 0, 0, 0);
+    store.setTileSilent(8, 8, PAD, 0, 0);
+    store.setTileSilent(8, 7, DIRT, 0, 0);
+    g.hammerPoundRelease = true;
+    g.lastMineHitTick = -999;
+    (g as any).tryMine(8, 8, 0, 'hammer', 20);
+    expect(store.frameX[store.idx(8, 8)]).toBe(22);
+  });
+
+  it('470 模特假人：姿态系统缺位=证据结案 no-op，闩消费挥不拆墙（:46403-46405 分派面）', () => {
+    const { g, store, wallHits } = mkBA1();
+    store.setTileSilent(8, 8, DOLL, 0, 0);
+    store.setWall(8, 8, 1);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);
+    expect(g.hammerPoundRelease).toBe(false);         // 闩消费（原版 470 支先于尾段）
+    expect(wallHits.length).toBe(0);                  // 不落拆墙段
+    expect(store.get(8, 8)).toBe(DOLL);               // 假人无损（TryChangePose 等价物缺位）
+    expect(store.frameX[store.idx(8, 8)]).toBe(0);
+  });
+
+  it('非锤工具挥击清闩（:46365-46368）；钻头链不清（Mount.UseDrill → PickTile 直调）', () => {
+    const { g, store } = mkBA1();
+    // 镐挥祭坛（tileHammer 族非锤=整支无动作）→ 闩清（TryPoundingTile 头 hammer<=0 臂）
+    store.setTileSilent(8, 8, ALTAR, 0, 0);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 0, 'pick', 20);
+    expect(g.hammerPoundRelease).toBe(false);
+    // 镐挥空格（!tile.active() 同支）→ 闩清
+    store.setTileSilent(10, 10, 0, 0, 0);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(10, 10, 0, 'axe', 20);
+    expect(g.hammerPoundRelease).toBe(false);
+    // 钻头链不清：Mount.UseDrill → PickTile 不经过 TryPoundingTile（勿过度接线）
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(10, 10, 0, 'pick', 20, undefined, { drill: true });
+    expect(g.hammerPoundRelease).toBe(true);
+  });
+
+  // SW-RB4b 2026-09-06：锁门邻接拒整形门（TryPoundingTile :46377-46387 damageAmount=0
+  // → AddDamage<100 fail 支 = 效尘+Dig 音、【不整形】、早退在 :46700 消费点前=闩保留）
+  it('SW-RB4b 锁门邻接拒整形：上邻神庙锁门 → 不整形+闩保留+不落拆墙段；清锁门对照 → 正常整形', () => {
+    const { g, store, wallHits } = mkBA1();
+    const DOOR = TILE_BY_KEY['door_closed']!;
+    store.setTileSilent(8, 8, ORE_BARS, 0, 0);
+    store.setTileSilent(8, 7, DOOR, 0, 594);          // 神庙锁门段（IsLockedDoor: fy∈[594,646]∧fx<54）
+    store.setWall(8, 8, 1);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);
+    expect(store.half[store.idx(8, 8)]).toBe(0);      // 不整形（fail 支早退）
+    expect(g.hammerPoundRelease).toBe(true);          // 闩保留（:46387 早退未到 :46700）
+    expect(wallHits.length).toBe(0);                  // 同挥也不落拆墙段（hitWall=false 已置）
+    // 下邻锁门同门（vanilla 查 y±1 双向）
+    store.setTileSilent(8, 7, 0, 0, 0);
+    store.setTileSilent(8, 9, DOOR, 0, 594);
+    g.hammerPoundRelease = true;
+    g.lastMineHitTick = -999;                         // 去节流（每次独立挥击）
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);
+    expect(store.half[store.idx(8, 8)]).toBe(0);
+    expect(g.hammerPoundRelease).toBe(true);
+    // 对照：清锁门 → 同挥尾段 PoundTile toggle 整→半、闩消费
+    store.setTileSilent(8, 9, 0, 0, 0);
+    g.hammerPoundRelease = true;
+    g.lastMineHitTick = -999;
+    (g as any).tryMine(8, 8, 5, 'hammer', 20);
+    expect(store.half[store.idx(8, 8)]).toBe(1);
+    expect(g.hammerPoundRelease).toBe(false);
+  });
+
+  // SW-RB4b 2026-09-06：尾段 slope 邻读界卫——原版 tileTarget 钳 [5,maxTiles-5]
+  //（Player.cs:25594-25604）x±1 恒在界内;本仓 tileUnder 无钳,tx=w-1 时裸读
+  // st.idx 回绕下一行读他行 slope 误翻 num12/num13 朝向感知
+  it('SW-RB4b 尾段 slope 界卫：tx=w-1 时下一行 (0,y+1) 的 slope 不得误翻朝向', () => {
+    const { g, store } = mkBA1(24, 24);
+    const DIRT = TILE_BY_KEY['dirt']!;
+    g.player.cx = 22 * TILE; g.player.cy = 8 * TILE;  // 挪近目标（inTileRange 门）
+    g.player.x = 22 * TILE - 10; g.player.y = 8 * TILE - 21;
+    store.setTileSilent(23, 8, DIRT, 0, 0);           // 世界最右列目标格（shaped: slope1）
+    store.setSlope(23, 8, 1);
+    // 回绕陷阱格：st.idx(24,8)=8*24+24=216 ≡ (0,9)——装 slope1 复现误翻
+    store.setTileSilent(0, 9, DIRT, 0, 0);
+    store.setSlope(0, 9, 1);
+    g.hammerPoundRelease = true;
+    (g as any).tryMine(23, 8, 0, 'hammer', 20);
+    // 界卫读 0 → 不翻转 num12=1/num13=2：s=1→num12=1 命中 → num13=2
+    expect(store.slope[store.idx(23, 8)]).toBe(2);
+    expect(g.hammerPoundRelease).toBe(false);
+  });
+});

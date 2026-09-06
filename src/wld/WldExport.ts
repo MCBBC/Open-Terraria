@@ -210,13 +210,14 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   for (const a of angler) w.str(a);
   // [flags 2] savedAngler.._tempCultistDelay
   for (let i = idx('savedAngler'); i <= idx('_tempCultistDelay'); i++) put(HEADER_FLAGS[i]);
-  // [特例] banners(i16 n+n×i32 kills[下标序];[≥289]i16 m+m×u16 claimable 空)
+  // [特例] banners(i16 n + n×i32 kills;[≥289]i16 m + m×u16 claimable 空)——
+  // ★原版写全表(MaxBannerTypes=293,n 恒 293;实机 BadSectionPointer 对账定谳:
+  // orig header 有 1168B banners 块=2+293×4+2;截断 n 会错位后续全部)
   const bk = save.bannerKills ?? {};
-  const idxs = Object.keys(bk).map(Number).filter((k) => k > 0 && k < 293 && (bk[k] ?? 0) > 0).sort((a, b) => a - b);
-  const maxIdx = idxs.length ? idxs[idxs.length - 1]! : 0;
-  w.i16(maxIdx + 1);
-  for (let i = 0; i <= maxIdx; i++) w.i32(bk[i] ?? 0);
-  w.i16(0);
+  w.i16(293);
+  for (let i = 0; i < 293; i++) w.i32(bk[i] ?? 0);
+  w.i16(293);
+  for (let i = 0; i < 293; i++) w.u16(0);   // claimable 全表(本仓不建模,写 0)
   // [flags 3] fastForwardTimeToDawn..teamBasedSpawnsSeed(中插 Celebrating list 与 ExtraSpawn 特例)
   const iFFDawn = idx('fastForwardTimeToDawn');
   const iPartyCooldown = idx('_tempPartyCooldown');
@@ -260,13 +261,15 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
     if (teType === 1 || teType === 4 || teType === 6 || teType === 8) { slot(f.slots?.[0]); }
     else if (teType === 3) {
       // 模特:位图×2(v307 前)+pose(v307+)+misc 位图(v308+)+三元组×N(v311 特例顺序)
-      // ——本仓 SaveData 只存 slots(equip 9+dye 9)+pose,按 v311 读序回写:
+      // ——本仓 SaveData 只存 slots(equip 9+dye 9)【无 pose 字段,SW-BL1 2026-09-06
+      //   勘误:旧注"只存 slots+pose"不实——WldImport 解析 pose 后即弃(WldImport.ts
+      //   doll 支不入库),导出恒 0=读回姿态归零,与"导入丢姿态"同债】:
       //   位图1(equip 0-7)/位图2(dye 0-8+misc)/pose/misc 位图/equip[8]/三元组按位序
       const eq = Array.from({ length: 9 }, (_, i) => f.slots?.[i] ?? null);
       const dy = Array.from({ length: 9 }, (_, i) => f.slots?.[9 + i] ?? null);
       const bits = (arr: Array<unknown>, n: number) => { let b = 0; for (let i = 0; i < n; i++) if (arr[i]) b |= 1 << i; return b; };
       w.byte(bits(eq, 8)).byte(bits(dy, 9));
-      w.byte(0);                                   // pose(读侧 v307+ byte)
+      w.byte(0);                                   // pose(读侧 v307+ byte;未入库恒 0)
       w.byte(0);                                   // misc 位图(v308+)
       w.i16(0).byte(0).i16(0);                     // misc 单槽三元组
       w.i16(netIdOfStable(eq[8]?.id ?? 0)).byte(eq[8]?.prefix ?? 0).i16(eq[8]?.stack ?? 0);   // equip[8](v311 后置)

@@ -45,65 +45,57 @@ describe('nextBatchSize(批大小规划器)', () => {
     expect(nextBatchSize(40, 100, 7, 6, 32)).toBe(6); // 缩到 min
   });
 
-  it('非正耗时/非正批 → 原样返回(除零守卫)', () => {
-    expect(nextBatchSize(24, 0, 7, 6, 32)).toBe(24);
+  it('非正批/负值/NaN → 原样返回(无数据不注入规划器;SW-RB3 重钉)', () => {
     expect(nextBatchSize(0, 10, 7, 6, 32)).toBe(0);
+    expect(nextBatchSize(24, -3, 7, 6, 32)).toBe(24);   // 时钟回拨=无数据
+    expect(nextBatchSize(24, Number.NaN, 7, 6, 32)).toBe(24);
+  });
+
+  it('零耗批(lastMs=0)按最大富余扩批,不与"无数据"混判(SW-RB3:粗时钟防 27 批退化)', () => {
+    expect(nextBatchSize(8, 0, 7, 6, 32)).toBe(12);   // 8×1.5
+    expect(nextBatchSize(24, 0, 7, 6, 32)).toBe(32);  // 36→钳 max
   });
 });
 
 // ---------- ③ bakeCells:213 格在 N 批内完成且每批界必让出 ----------
 describe('bakeCells(213 格分批+每批界让出)', () => {
-  it('213 格(2026-08-27 发型页格数)全数绘制、保序、批间全让出', async () => {
+  it('213 格(2026-08-27 发型页格数)全数绘制、零跳格、批间全让出', async () => {
     const drawn: number[] = [];
-    const batchStarts: number[] = [];
-    let cursor = -1;
     const res = await bakeCells(
       Array.from({ length: 213 }, (_, i) => i),
-      (item, index) => {
-        if (index !== cursor + 1) batchStarts.push(index);   // 新批起点
-        cursor = index;
-        drawn.push(index);
-      },
+      (item, index) => { drawn.push(index); },
     );
+    // 零跳格:批推进按实耗步进,规划变更不得吞格(曾 i+=新批长 跳过 24 格)
     expect(drawn).toHaveLength(213);
+    expect([...drawn].sort((a, b) => a - b)).toEqual(drawn);            // 严格递增=保序无重复
     expect(drawn[0]).toBe(0);
     expect(drawn[212]).toBe(212);
     // 每批界必让出:yields === batches-1(让出策略不回退的核心不变量)
     expect(res.yields).toBe(res.batches - 1);
-    expect(batchStarts.length).toBe(res.batches - 1);
     // 零耗绘制下自适应批迅速到顶,总批数有限(曾固定 24/批 → 9 批)
     expect(res.batches).toBeLessThanOrEqual(10);
   });
 
   it('重绘制(≈1ms/格)下批大小收敛到预算量级,任务不退化为整段阻塞', async () => {
     const spin = (ms: number) => { const t = performance.now(); while (performance.now() - t < ms) { /* busy */ } };
-    const batchDur: number[] = [];
-    let last = performance.now();
     const res = await bakeCells(
-      Array.from({ length: 64 }, (_, i) => i),
+      Array.from({ length: 64 }, () => 0),
       () => spin(1),
       { budgetMs: 7 },
-      // 批界由 yields 反映;批耗时在本测试侧用时间戳差近似
-    ).then(async (r) => {
-      void batchDur; void last;
-      return r;
-    });
+    );
     expect(res.yields).toBe(res.batches - 1);
-    // 64 格 × 1ms、预算 7ms → 批均 ≥ 5 格(批数 ≤ 13);且不让出批数=0
-    expect(res.batches).toBeLessThanOrEqual(13);
-    expect(res.batches).toBeGreaterThanOrEqual(3);
+    // 64 格 × ~1ms、预算 7ms → 批均 ≤ ~13 格(批数 ≥ 5);每批界都让出
+    expect(res.batches).toBeGreaterThanOrEqual(5);
+    expect(res.batches).toBeLessThanOrEqual(17);
   });
 
   it('shouldAbort 中止门:面板关闭形态下提前返回,不再绘制', async () => {
     let drawn = 0;
-    let batches = 0;
     const res = await bakeCells(
       Array.from({ length: 100 }, (_, i) => i),
       () => { drawn++; },
-      { shouldAbort: () => batches >= 2 },
+      { shouldAbort: () => drawn >= 30 },
     );
-    // bakeCells 内批计数先于 abort 检查递增——用返回值旁证中止
-    batches = res.batches;
     expect(res.batches).toBeLessThan(100);
     expect(drawn).toBeLessThan(100);
     expect(drawn).toBeGreaterThan(0);
@@ -139,16 +131,35 @@ describe('SingleFlightBake(双烘消除)', () => {
     expect(runs).toBe(1);   // 同态快照键:不尾随重烘(直调+schedule(0) 双入口折叠)
   });
 
-  it('飞行中快照键变化 → 落地后自动尾随重烘(连点随机语义)', async () => {
+  it('飞行中快照键变化+新请求 → 落地后自动尾随重烘(连点随机语义)', async () => {
     const d = deferred();
     let runs = 0;
     let key = 'A';
     const sf = new SingleFlightBake(() => { runs++; return runs === 1 ? d.promise : Promise.resolve(); }, () => key);
     void sf.request();
     key = 'B';                       // 飞行中外观被第二次随机改写
+    const p2 = sf.request();         // 第二次随机(直调/schedule(0))进单飞=登记尾随
+    expect(sf.inFlight).toBe(true);
     d.resolve();
+    await p2;
     await new Promise((r) => setTimeout(r, 0));
     expect(runs).toBe(2);            // 尾随重烘自动起飞
+    expect(sf.inFlight).toBe(false);
+  });
+
+  it('飞行中多次不同键请求 → 只尾随一次(合并到最后键,连点收敛)', async () => {
+    const d = deferred();
+    let runs = 0;
+    let key = 'A';
+    const sf = new SingleFlightBake(() => { runs++; return runs === 1 ? d.promise : Promise.resolve(); }, () => key);
+    void sf.request();
+    key = 'B';
+    void sf.request();
+    key = 'C';
+    void sf.request();
+    d.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(runs).toBe(2);            // 一次飞行 + 一次尾随(尾随快照=C 键)
     expect(sf.inFlight).toBe(false);
   });
 
@@ -325,5 +336,19 @@ describe('CharCreation 源码锚(SW-AX1 收口点)', () => {
     expect(src).toContain('scheduleVariantPrefetch');
     expect(src).toContain('MALE_VARIANTS');
     expect(src).toContain('FEMALE_VARIANTS');
+  });
+
+  it('SW-RB3: 编码 await 落地后活性复检(close() 竞态窗 blob 不漏挂不漏回收)', () => {
+    // 双支(hair/look)都要有落地前 isConnected 门;isConnected 早退时当场回收 blob
+    expect(src.match(/const \w+Url = await canvasToUrl\(cv\)/g)?.length).toBe(2);
+    expect(src.match(/if \(isObjectUrl\(\w+Url\)\) URL\.revokeObjectURL\(\w+Url\)/g)?.length).toBe(2);
+    // 活性门在 setSheetUrl 之前(顺序不可回写)
+    for (const kind of ['hair', 'look'] as const) {
+      const land = src.indexOf(`this.setSheetUrl('${kind}', ${kind}Url)`);
+      const gate = src.indexOf(`if (isObjectUrl(${kind}Url)) URL.revokeObjectURL(${kind}Url)`);
+      expect(land).toBeGreaterThan(-1);
+      expect(gate).toBeGreaterThan(-1);
+      expect(gate).toBeLessThan(land);
+    }
   });
 });

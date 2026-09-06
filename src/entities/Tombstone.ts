@@ -23,6 +23,8 @@ import { MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE_BY_KEY } from '../data/tiles';
 import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 程序化像素墓碑贴图（16×22）——仅作贴图缺失时的兜底 */
 let tombstoneCanvas: HTMLCanvasElement | null = null;
@@ -88,6 +90,26 @@ export class Tombstone extends Entity {
   /** per-enemy 免疫镜（NPC.immune[owner] 10t 等价;AshBallProj 同制） */
   private immunities = new Map<number, number>();
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
+  //  逐 id 豁免核对（SetDefaults P.cs 逐块）：43(:1260-1272)/201-205(:2874-2898 逐块)/
+  //  527-531(:5973-5986 共档)——【均无 ignoreWater 行】= 全受段（props 桶实体;
+  //  豁免分流由 ignoreWater 参数按 projId 数据面自动承载）。FTW 伤害面与本段正交。
+  //  阻尼适用：aiStyle 17 tileCollide 缺省 true → HandleMovement :17721 湿支生效,
+  //  乘进 moveAndCollide 入参（速度场不减,契约见 projWetSection 头）。
+  //  位序：AI(摩擦/翻滚/重力,只写 velocity) → 湿段 → moveAndCollide = 原版 Update
+  //  同序;采样位=上拍位移后 ≡ 原版湿段采样。杀拍口径：本类唯一杀位=落格安放
+  //  （:25663-25689,在湿段【后】）→ 湿段逐拍恒跑,双调用点机不适用。
+  //  登记残差：本仓判定盒 14×14 vs 原版 SetDefaults 24×24（:2877-2878）——溅花
+  //  弹面盒 (w+12,24) 随判定盒窄 10px（盒尺寸差=既有面,非本批引入,不动码）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+
   constructor(x: number, y: number, coinsOwned: number, deathText: string, hitDirection: number,
     /** FTW（getGoodWorld）伤害面：damage 70 / knockBack 10 / 弹速 ×1.5
      *  （DropTombstone :39429-39439；SetDefaults :1260-1271 friendly+hostile） */
@@ -122,7 +144,16 @@ export class Tombstone extends Entity {
     this.angle += this.vx * 0.1;
     // aiStyle17 专用重力 0.2/帧（Projectile.cs:25641，非全局 GRAVITY 0.36）
     this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ---- ★通用湿段（:16895-17113,共享体）——AI 后/位移前 = 原版 Update 同序;
+    //  溅花尘/音由共享体 wetSplashStepShared 承载（水中墓碑入水/出水各溅 10 粒）;
+    //  IsDestroyedByWater 域不含墓碑族（{85,15,188,34,1097,1106}）→ hooks 不接。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20561 `if (wet)
+    // position += wetVelocity`）——moveAndCollide 契约：阻尼乘进 dx/dy 入参,
+    // 速度场 vx/vy 不减（干态档=1 恒等）
+    const df = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * df, this.vy * df);
     // FTW 伤害面（Projectile.Damage :12549-12580 → PVE/PVP/EVP；dmg=0 非 FTW 全早退）。
     // 序 = 位置积分后、落格安放判定前——原版 Damage 在 Update 尾（积分后）恒跑，
     // 安放 Kill 在下拍 AI 头，落地拍照常结算接触

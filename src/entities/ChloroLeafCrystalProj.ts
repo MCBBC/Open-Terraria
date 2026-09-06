@@ -279,6 +279,12 @@ export class ChloroLeafShot extends Entity {
   wetCount = 0;
   /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步 AI 后/位移前同位） */
   presetDone = false;
+  // ★⑥杀拍口径核查（2026-09-06 湿段配方推广批,清白注不落刀）：本类两杀位全在
+  //  湿段域外或原版同态——①锚体 226 头杀（buff 失效 :28190-93,fixedUpdate :163）
+  //  ：226 ignoreWater=true（:3124）→ 原版本就不跑湿段,零观测差;②叶弹 227 子步
+  //  出界静默消亡（:16789-16804 `active=false; return;` 在湿段(:16895)【前】）→
+  //  原版该子步同样跳过湿段,本仓早退同态;命中杀/寿命杀（killWithFx :351/:356）
+  //  在湿段调用位(:340)之后 → 湿段已先跑=原版同相位。四支均无杀拍湿段缺口。
   private rotation = 0;
   private timeLeft = 180;        // SetDefaults :3129-3137 timeLeft=180（子步消耗制）
   private burstDone = false;

@@ -67,12 +67,24 @@ export class DebrisProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 timeLeft--/Kill 在子步【末尾】
+      //  （:17307-17311,AI(:16880)→湿段(:16895)→位移→Damage 之后）→ 寿命尽当拍湿段
+      //  照跑（`!active` 门 :17132 只拦 Damage/尾尘）。本仓递减杀在拍头曾整体跳过
+      //  湿段;现补跑,测位=存储位：AI_010 重力只写 velocity 不写 position → 原版杀拍
+      //  湿段测位=上拍位移末位=存储位,逐值等价。杀支与 AI 尾活拍调用点同拍互斥
+      //  （早退）→ 无需 wetSectionRan 旗;736-738 ∉ IsDestroyedByWater 六型/非 80
+      //  → 段内无补 Kill 面。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     this.vy += 0.3;                                   // 重力落体（aiStyle 10 近似）
     // ---- ★通用湿段（:16903-17113,共享体）——AI(:16880)→湿段(:16903)→位移
     //      (:17120 HandleMovement→:20561 UpdatePosition)位序;采样位=AI 后位移前
-    //      =上拍移动结算位。AI 杀拍（撞块/命中,本类融合拍序在位移后判定）不跑湿段
-    //      =仓内湿段批统一口径（RollingBoulder 同式,登记有界偏差）
+    //      =上拍移动结算位。撞块/命中杀拍在位移后判定（本类融合拍序）,湿段已先跑
+    //      =原版同相位（Kill 位在 HandleMovement/Damage 域,湿段之后）✔
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater);
     this.x += this.vx;

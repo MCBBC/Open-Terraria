@@ -166,3 +166,32 @@ describe('右键子帧轻点兜底（SW-AW1 三态机）', () => {
     expect(inp.rightDown).toBe(false);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SW-BA1（2026-09-06）结构锁：画布重建=无按住态（与 clearForBlur 同约定）。
+// 旧 onCanvasRecreated 把 mouseHeld/rightDown 随实例迁移，但右键三态机
+// （pendingRightRelease,私有）不随迁 → 迁来的 rightDown=true 落在纯电平态 0，
+// 残留只能靠下次 mouseup 自愈（按钮若在熔断窗内已松则永不自愈=幽灵右键，
+// RB2 A-5 同族）。修=鼠标电平显式归零（new Input 缺省 false）+键电平迁移保留
+// （OS 不补发 keydown,清=键静默死,2026-09-01 用户实证域）+delayUseItem 迁移保留
+// （一次性吞沿闩,非按住态,R4-22 语义）。源文本锚锁死判据,防静默回迁。
+import { readFileSync } from 'node:fs';
+
+describe('SW-BA1 结构锁：onCanvasRecreated 重建=无按住态（Game.ts 源锚）', () => {
+  const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+
+  it('鼠标电平不再随实例迁移（mouseHeld/rightDown 无写回行）', () => {
+    expect(gameSrc).not.toContain('this.input.mouseHeld = heldMouse');
+    expect(gameSrc).not.toContain('this.input.rightDown = heldMouse');
+    expect(gameSrc).not.toContain("heldMouse.held");
+  });
+
+  it('键电平迁移保留（2026-09-01 域:OS 不补发 keydown）+ delayUseItem 迁移保留', () => {
+    expect(gameSrc).toContain('this.input.keys = heldKeys;');
+    expect(gameSrc).toContain('this.input.delayUseItem = heldDelayUse;');
+  });
+
+  it('SW-BA1 判据注释在位（重建=无按住态,防注释与行为脱钩）', () => {
+    expect(gameSrc).toContain('重建=无按住态');
+  });
+});

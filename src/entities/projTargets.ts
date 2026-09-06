@@ -467,7 +467,7 @@ export const evpNoCheeseSlot = (projId: number | undefined): boolean =>
  *  通道注入后 Player.damage 的门面（:6520-6527 blocksHit 早退）与写面
  *  （:6619-6626 applyAfterHit num10）自动接管——调用方零重复。 */
 export function damageEvPNoCheese(
-  game: GameHooks, dmg: number, sx: number, sy: number, attacker?: unknown,
+  game: GameHooks, dmg: number, sx: number, sy: number, attacker?: import('./Enemy').Enemy,
 ): number {
   const buckets = getGlobalHurtBuckets();
   const p = game.player;

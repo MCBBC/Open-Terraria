@@ -416,22 +416,43 @@ export class MagicMissileProj extends Entity {
     if (i >= 0) ALIVE.splice(i, 1);
   }
 
-  fixedUpdate(_dt: number, game: GameHooks): void {
-    if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.timeLeft <= 0) { this.killNow(game); return; }
-    this.pvx = this.vx; this.pvy = this.vy;
-    this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
-    this.steer(game);
-    if (this.dead) return;
-    // ---- ★通用湿段（:16903-17113）——AI 后/位移前 = 原版 Update 同序。溅花尘/音由
-    // 共享体 wetSplashStepShared 承载,不自写;16/79 豁免经数据面分流 = 段 no-op
-    // （:16903 整段门,presetDone 同步跳过 = 原版 :10888-10890 只清 wet 同向）。
-    // 34 水death Kill（:16923-16925）经钩走 killNow——原版 Kill 后 HandleMovement
-    // 仍跑一步（段无 active 门）,`!active` 早退 :17157 跳过 Damage 与拖尾记录带,
-    // 故死亡拍位移照走、带记录/命中不跑（下方 dead 分支）。
+  /** ★⑥杀拍口径（2026-09-06,Arrow.ts 配方推广）：原版 Update 对湿段【无 active 门】
+   *  ——AI(:16880 `if (active)`)内 Kill（active=false）当拍湿段(:16895
+   *  `if (!ignoreWater)`)照跑,`!active` 门在 HandleMovement(:17120) 之后 :17132 才
+   *  生效、只拦 Damage 管线。本类杀位=timeLeft 头杀(fixedUpdate 首)与 steer 内
+   *  非有限速度杀位(steer 尾 killNow+return)——曾整体跳过湿段=杀拍溅花缺口;hitStep/出界
+   *  杀位在活拍湿段【后】(wetSectionRan 已置,防双跑)。死亡拍位移仍跳过=零观感
+   *  （Kill 尘已结死、弹体随即移除,证毕登记非债,Arrow 同口径）;杀拍段内水death
+   *  (34) 的补 Kill 借 killNow 头幂等门（P.cs:71755-71758 `if (!active) return;`）
+   *  免双爆。 */
+  private wetSectionRan = false;
+
+  private wetSectionStep(game: GameHooks): void {
+    if (this.wetSectionRan) return;   // 防同拍双跑（活拍已跑 → 杀拍补跑 no-op）
+    this.wetSectionRan = true;
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音由 wetSplashStepShared 承载,
+    //  不自写;16/79 豁免经数据面分流 = 段门 no-op（:16895;出生预置 :10886-10893
+    //  无条件跑=共享体逐字面化批口径）。34 水death Kill（:16921-16925）经钩走
+    //  killNow——原版 Kill 后 HandleMovement 仍跑一步（段无 active 门）,`!active`
+    //  早退 :17157 跳过 Damage 与拖尾记录带,故死亡拍位移照走、带记录/命中不跑。 ----
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater,
       { kill: () => this.killNow(game) });
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.wetSectionRan = false;
+    // timeLeft 头杀（vanilla timeLeft 杀在 Update 尾 :17307-17311=湿段后——本仓
+    // 头杀位不再直接早退,湿段由下方 dead 支补跑=杀拍口径⑥）
+    if (--this.timeLeft <= 0) this.killNow(game);
+    if (!this.dead) {
+      this.pvx = this.vx; this.pvy = this.vy;
+      this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
+      this.steer(game);
+    }
+    if (this.dead) { this.wetSectionStep(game); return; }   // ★杀拍补跑（防双跑见 wetSectionRan 注）
+    this.wetSectionStep(game);   // ★活拍：AI 后/位移前 = 原版 Update 同序
     // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20551 `if (wet)
     // position += wetVelocity`）——直积分宿主：速度场不减只削当拍位移（干态档=1 恒等;
     // 16/79 豁免弹 wet 恒 false → 档恒 1 数值不变）
@@ -774,6 +795,10 @@ export class MagicMissileProj extends Entity {
    *  2026-09-01 终清波真值化）→ 型专属尾段（79 = RainbowRodHit 编排×2 + 14×d66;
    *  16/34 = 20 循环径向尘）。逐型差异全在 KILL_BURST 表（见其头注） */
   private killNow(game: GameHooks): void {
+    // ★Kill 幂等头门（P.cs:71755-71758 `if (!active) return;` 1:1）——二次 Kill
+    //  no-op（杀拍湿段水death 补 Kill/杀位连射防双爆:死亡 AoE/onProjectileDeath
+    //  只结一次）
+    if (this.dead) return;
     const spec = KILL_BURST[this.projId];
     if (spec && !this.dead) {
       // Resize(盒) 死亡 AoE（:72428-72434/:72504-72510/:72598-72604）：以弹心为心
@@ -1178,6 +1203,20 @@ export class FlyingKnifeProj extends Entity {
   private dir = 1;
   /** timeLeft（SetDefaults 缺省 3600，:526） */
   private timeLeft = 3600;
+  // ---- ★通用湿段(Projectile.cs:16903-17113 全体弹共用段,2026-09-06 终波;491 非豁免
+  //  ——SetDefaults :5132-5133 无 ignoreWater 行,数据面缺行=受段)----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  wetCount = 0;
+  presetDone = false;
+  private wetSectionRan = false;
+  /** AI 前速度快照(:16870 wetVelocity 语义)——回收态(tileCollide=false)湿位移消费
+   *  此快照(无阻尼滞后一子步 quirk,UpdatePosition :20549-20562 分叉,Boomerang/
+   *  YoyoProj 回收态同款先例) */
+  private preVx = 0;
+  private preVy = 0;
   /** 回收段 tileCollide=false（:40871） */
   private passTiles = false;
   /** 同敌冷却（NPC.immune[owner]=10——:13189-13192 penetrate≠1 缺省档） */
@@ -1196,15 +1235,27 @@ export class FlyingKnifeProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.timeLeft <= 0) { this.killNow(game); return; }
+    this.wetSectionRan = false;
+    this.preVx = this.vx; this.preVy = this.vy;   // :16870 AI 前快照(回收态湿位移源)
+    if (--this.timeLeft <= 0) { this.killNow(game); this.wetSectionStep(game); return; }   // 杀拍湿段(原版湿段无 active 门)
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     this.steer(game);                      // :40753-40909（操控/回收/姿态/2000px 门）
+    this.wetSectionStep(game);             // ★活拍湿段(原版序 AI:16880→湿段:16903→HandleMovement:17120)
     if (this.dead) return;
     this.moveStep(game);                   // 撞块反弹 :17053-17066 / 回收穿墙 :40871
     if (this.dead) return;
     this.hitStep(game);                    // 穿透 −1：10t 冷却后同敌可再中
+  }
+
+  /** ★⑥杀拍口径(Arrow.ts wetSectionStep 同配方):活拍=steer 后/moveStep 前,杀拍=
+   *  timeLeft/steer killNow 早退支补跑;wetSectionRan 防同子步双跑。 */
+  private wetSectionStep(game: GameHooks): void {
+    if (this.wetSectionRan) return;
+    this.wetSectionRan = true;
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, false);
   }
 
   /** AI_009_MagicMissiles_Old（:40753-40910） */
@@ -1266,8 +1317,14 @@ export class FlyingKnifeProj extends Entity {
 
   /** 移动 + 撞块反弹（:17053-17066 双轴 lastVelocity 取反 + 操控态自锁 −10） */
   private moveStep(game: GameHooks): void {
-    if (this.passTiles) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.passTiles) {
+      // 回收态 tileCollide=false(:40871)→湿位移消费 AI 前快照(无阻尼滞后 quirk;干态=当拍速)
+      this.x += this.wet ? this.preVx : this.vx;
+      this.y += this.wet ? this.preVy : this.vy;
+      return;
+    }
     const st = game.world.store;
+    const drag = projWaterDragFactor(this);   // 操控态 tileCollide=true→湿阻尼乘位移(速度场不减)
     const solidBox = (x: number, y: number): boolean => {
       const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
       const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
@@ -1278,9 +1335,9 @@ export class FlyingKnifeProj extends Entity {
     };
     const lvx = this.vx, lvy = this.vy;
     let hitX = false, hitY = false;
-    const nx = this.x + this.vx;
+    const nx = this.x + this.vx * drag;
     if (solidBox(nx, this.y)) hitX = true; else this.x = nx;
-    const ny = this.y + this.vy;
+    const ny = this.y + this.vy * drag;
     if (solidBox(this.x, ny)) hitY = true; else this.y = ny;
     if (!hitX && !hitY) return;
     game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
@@ -1377,6 +1434,27 @@ export class StarfuryStar extends Entity {
   dead = false;
   private soundT = 0;
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批,
+  //  红队 P1-2）----
+  //  豁免核对：9 SetDefaults（P.cs:888-898：24×24/aiStyle 5/penetrate 2/scale 0.8/
+  //  tileCollide=false/melee）【无 ignoreWater 行】= 受段（projectileData 数据面同向）。
+  //  阻尼（湿支 :17721-17764 只在 HandleMovement tileCollide 支）：9 的 tileCollide
+  //  动态门（:22159-22162 Bottom.Y ≥ ai[1]）——越线【前】false → 位移全速;越线【后】
+  //  true → 湿态档位消费（水 0.5/蜂蜜 0.25/微光 0.375,乘进位移行,速度场不减）。
+  //  杀拍口径（Arrow.ts ⑥配方）：杀位=timeLeft 头杀（fixedUpdate 首;vanilla timeLeft
+  //  杀在 Update 尾 :17307-17311=湿段后）/出界/撞块/穿透尽——头杀拍由 dead 支补跑
+  //  （wetSectionRan 防双跑;活拍位=AI 后/位移前）,其余杀位在活拍湿段【后】已跑。
+  //  死拍位移跳过=零观感（Arrow 同口径,证毕登记非债）。IsDestroyedByWater 域不含
+  //  9（{85,15,188,34,1097,1106}）→ hooks 不接。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number,
     damage: number, pierce: number, targetY: number) {
     super();
@@ -1385,13 +1463,33 @@ export class StarfuryStar extends Entity {
     this.damage = damage;
     this.pierce = pierce;
     this.targetY = targetY;
-    this.w = 24; this.h = 24;
+    // SetDefaults :889-890 24×24 × scale=0.8（:895）→ SetDefaults 尾 :10672-10673
+    // `width = (int)((float)width * scale)` = (int)19.2 = 19——判定盒 19×19
+    //（★红队 P1-2：旧 24×24 漏乘 SetDefaults 尾缩放;溅花弹面盒/Bottom.Y 越线门/
+    //  Center.Y α 钳位全部随真盒收正）
+    this.w = 19; this.h = 19;
     this.timeLeft = 3600;
+  }
+
+  /** ★⑥杀拍口径（Arrow.ts 配方推广,见字段块头注） */
+  private wetSectionRan = false;
+
+  private wetSectionStep(game: GameHooks): void {
+    if (this.wetSectionRan) return;   // 防同拍双跑（活拍已跑 → 杀拍补跑 no-op）
+    this.wetSectionRan = true;
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒,
+    //  盒 19×19 → 弹面 (31,24)）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.timeLeft <= 0) { this.killNow(game); return; }
+    this.wetSectionRan = false;
+    // timeLeft 头杀（vanilla 杀在 Update 尾 :17307-17311=湿段后——杀拍湿段由下方
+    // dead 支补跑=杀拍口径⑥）
+    if (--this.timeLeft <= 0) this.killNow(game);
+    if (this.dead) { this.wetSectionStep(game); return; }   // ★杀拍补跑
     // :22159-22162 tileCollide = Bottom.Y ≥ ai[1]（越线前穿墙）
     const collide = this.y + this.h >= this.targetY;
     // :22175-22179 Item9 周期音（20-60t 掷一次）
@@ -1404,8 +1502,12 @@ export class StarfuryStar extends Entity {
     this.alpha = Math.max(floor, this.alpha - 15);
     // :22246 翻滚（503 才是 rotation = vel−π/2，:22242）
     this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.01;
-    this.x += this.vx;
-    this.y += this.vy;
+    this.wetSectionStep(game);   // ★活拍：AI 后/位移前 = 原版 Update 同序
+    // 位移（★水中位移阻尼：HandleMovement :17721 湿支只在 tileCollide 支——
+    // 越线前 tileCollide=false 全速,越线后湿态吃档位;速度场不减只削当拍位移）
+    const drag = collide ? projWaterDragFactor(this) : 1;
+    this.x += this.vx * drag;
+    this.y += this.vy * drag;
     // :22325-22337 尘 86 粉星尾（1/4 概率；半数位置回退 vel×4）
     if (Math.random() < 0.25) {
       const px = Math.random() < 0.5 ? this.cx - this.vx * 4 : this.cx;
@@ -1444,6 +1546,9 @@ export class StarfuryStar extends Entity {
   }
 
   private killNow(game: GameHooks): void {
+    // ★Kill 幂等头门（P.cs:71755-71758 `if (!active) return;` 1:1）——二次 Kill
+    //  no-op（杀拍湿段/杀位连射防 onProjectileDeath 双爆）
+    if (this.dead) return;
     this.dead = true;
     // ★Kill 消亡面清偿批 2（2026-09-02）：补传消亡速度——Game.onProjectileDeath 9 支
     // （Projectile.cs:77259-77318）尘 58 初速 = v×0.1、gore 16/17 初速 = v×0.05，

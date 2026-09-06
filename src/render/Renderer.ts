@@ -2732,6 +2732,12 @@ export class Renderer {
   mapWormholeHead: { slot: number; name: string } | null = null;
   /** 全屏地图悬停远端头像名（无门禁原始命中，:55407 text=name——悬停提示位） */
   mapHeadHoverName: string | null = null;
+  /** 地图城镇 NPC 头像悬停名（★SW-BJ1 2026-09-06：Main.DrawNPCMapIcons2
+   *  Main.cs:56988-57013 小地图支 + DrawNPCMapIcons :56705-56734 全屏支——鼠标落在
+   *  头像贴图矩形（W×H×headScale,中心锚）内 → mouseTextString = npc.FullName
+   *  （NPC.cs:6753-6761 = givenName ? Game.NPCTitle(givenName,TypeName) : TypeName）；
+   *  恒显门 DrawNPCMapIcon_CanBeSeen_Townie :57142 恒 true。drawMapHeads 每帧重算） */
+  mapNpcHeadHoverName: string | null = null;
 
   /** 全屏地图缩放：以鼠标位置为锚点（鼠标下的地图点不动，不乱飞） */
   zoomFullMapAt(newZoom: number, mouseX: number, mouseY: number) {
@@ -2941,6 +2947,7 @@ export class Renderer {
       this._mapFogRowSeen = -1;
       this.mapWormholeHead = null;   // 关图清悬停态（防下次开图读到陈旧命中）
       this.mapHeadHoverName = null;
+      this.mapNpcHeadHoverName = null;   // ★SW-BJ1 同上（NPC 头像悬停名）
     }
     this._fmWasOpen = this.fullMap.open;
     // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):
@@ -15110,7 +15117,15 @@ export class Renderer {
       (wy) => oy + (wy / TILE - sy) / viewTiles * size,
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
       entities.filter((e) => e instanceof Enemy) as Enemy[], world,
-      this.remotePlayers);
+      this.remotePlayers,
+      null,
+      // ★SW-BJ1 小地图 NPC 头像悬停名（Main.cs:56988 DrawNPCMapIcons2）——原版仅在
+      // 小地图窗口内做命中（:57000 窗口裁剪）;框外不喂 mouse
+      (() => {
+        const mx = lmX(this._mouseX), my = lmY(this._mouseY);
+        return (mx > ox && mx < ox + size && my > oy && my < oy + size)
+          ? { x: mx, y: my } : null;
+      })());
     // ★出生点标记（SpawnMapLayer 同源贴图——原版 DrawMap 图标层在 minimap 模式也跑）
     const spTex = this.spawnMapTex('point');
     if (spTex) {
@@ -15281,6 +15296,25 @@ export class Renderer {
     }
     this._minimapBtnClicked = false;
     this._uiPrevMouseDown = this._mouseDown;
+    // ★SW-BJ1 小地图城镇 NPC 头像悬停名（Main.cs:56988 DrawNPCMapIcons2
+    // :57011-57013 → mouseTextString，经 MouseText 光标白字显示）：drawMapHeads
+    // 帧内命中后在此出字（尾段=原版 MouseText 画在界面链末端的同层级）。
+    // 色 = mouseTextColor 脉动白 + 四向影（Renderer :14070 同偏差登记）
+    if (this.mapNpcHeadHoverName) {
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      const mtm = this.lighting?.clock.mouseTextColor ?? 255;
+      const c3 = Math.round((mtm / 255) * 255);
+      const tx2 = Math.min(lmX(this._mouseX) + 14, ctx.canvas.width / uiS - 8 - 160);
+      const ty2 = lmY(this._mouseY) + 22;
+      for (const [dx2, dy2] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+        ctx.fillStyle = '#000';
+        ctx.fillText(this.mapNpcHeadHoverName, tx2 + dx2, ty2 + dy2);
+      }
+      ctx.fillStyle = `rgb(${c3},${c3},${c3})`;
+      ctx.fillText(this.mapNpcHeadHoverName, tx2, ty2);
+    }
     ctx.restore();
     ctx.restore(); // 移动端缩放变换（uiS=1 时为空 save/restore，恒等）
   }
@@ -15429,8 +15463,10 @@ export class Renderer {
     world: World | null = null,
     remotePlayers: Player[] = [],
     wormholeSlot: number | null = null,
+    mouse: { x: number; y: number } | null = null,
   ) {
     if (!this.atlas) return;
+    this.mapNpcHeadHoverName = null;   // 帧内重算（多图样式各自喂 mouse,null=不检测）
     const drawHead = (img: CanvasImageSource | null, wx: number, wy: number,
       flip: boolean, rotation = 0, extra = 0, sw = 24, sh = 22,
       opts?: { scale?: number; border?: string | null }) => {
@@ -15534,6 +15570,17 @@ export class Renderer {
       const headIdx = TOWN_NPC_HEAD_INDEX[n.vanillaId];
       if (headIdx === undefined) continue;
       drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_${headIdx}.png`), n.cx, n.cy, n.facing > 0);
+      // ★SW-BJ1 悬停名（Main.cs:57001-57013 小地图 / :56724-56728 全屏）：鼠标落在
+      // 头像贴图矩形（24×22×headScale 中心锚,本仓 drawHead 同尺寸）内 → FullName
+      if (mouse) {
+        const hx = mapX(n.cx), hy = mapY(n.cy);
+        if (Math.abs(mouse.x - hx) <= 12 * headScale && Math.abs(mouse.y - hy) <= 11 * headScale) {
+          const typeName = Lang.npcName(n.vanillaId) ?? '';
+          // NPC.FullName（NPC.cs:6753-6761）= HasGivenName ? NPCTitle(given,TypeName) : TypeName
+          this.mapNpcHeadHoverName = n.givenName
+            ? Lang.text('Game.NPCTitle', n.givenName, typeName) : typeName;
+        }
+      }
     }
     // Boss 头
     for (const e of enemies) {
@@ -15839,6 +15886,7 @@ export class Renderer {
     const p = this._lastPlayer;
     this.mapWormholeHead = null;
     this.mapHeadHoverName = null;
+    this.mapNpcHeadHoverName = null;   // ★SW-BJ1 防小地图帧值渗漏（双图同帧先后跑）
     if (p) {
       const headScale = Math.min(1, (fm.zoom * 0.2 * 2 + 1) / 3) * 1.1;
       const hi = wormholeHeadHit(mouseX, mouseY, cx0, cy0, fm.zoom, this.remotePlayers);
@@ -15860,7 +15908,8 @@ export class Renderer {
         (wy) => cy0 + wy / TILE * fm.zoom,
         entities.filter((e) => e instanceof TownNPC) as TownNPC[],
         entities.filter((e) => e instanceof Enemy) as Enemy[], world,
-        this.remotePlayers, this.mapWormholeHead?.slot ?? null);
+        this.remotePlayers, this.mapWormholeHead?.slot ?? null,
+        { x: mouseX, y: mouseY });   // ★SW-BJ1：NPC 头像悬停名命中（:56724-56728）
     }
     // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
     const tp = this.tpMark;
@@ -15910,8 +15959,13 @@ export class Renderer {
     if (this.mapWormholeHead) {
       this.fullMapHoverName = Lang.text('Game.TeleportTo', this.mapWormholeHead.name)
         ?? this.fullMapHoverName;
-    } else if (this.mapHeadHoverName) {
-      this.fullMapHoverName = this.mapHeadHoverName;
+    } else {
+      // ★SW-BJ1：城镇 NPC 头像悬停名让位远端玩家头像（原版全屏链 NPC 层 :56757 先跑、
+      // 玩家头像环 :56790+ 后写 text 同序）；远端玩家名→NPC 名→地块名的单槽链
+      this.mapHeadHoverName ??= this.mapNpcHeadHoverName;
+      if (this.mapHeadHoverName) {
+        this.fullMapHoverName = this.mapHeadHoverName;
+      }
     }
     // ★1457 钻地龟图标层（DigtoiseMapLayer——MapIconOverlay 注册序 Main.cs:374
     //   Digtoise→BossBag→Spawn→TeamBasedSpawn→TeleportPylons,画在晶塔层之前）
@@ -16076,7 +16130,9 @@ export class Renderer {
    *   - 图标（:77-104）：Extra_182.png 11 帧横排（330×38，帧 30×38），帧号 = 塔型；
    *     玩家不在晶塔旁 → 半透明灰（color = Gray*0.5 :70-73）
    *   - 悬停提示（:97-99）：晶塔物品名
-   *  击中判定（Game.tryPylonMapTeleport）：图标中心 = 锚点 + (1.5, 2) 格。 */
+   *  击中判定（Game.pylonIconHitTest，TeleportPylonsMapLayer.cs:79 IsMouseOver =
+   *  绘制精灵屏幕包围盒）：图标中心 = 锚点 + (1.5, 2) 格，屏盒 30×38×scale
+   *  （scale = max(1,min(2,zoom))——本层绘制式逐字同源，SW-BD1 2026-09-06）。 */
   /** 全屏地图出生点图标层（SpawnMapLayer.cs 1:1；MapIconOverlay 注册序
    *  Digtoise→BossBag→Spawn→TeamBasedSpawn→Pylons→Pings Main.cs:349-351——
    *  本链曾缺 Spawn 层,旧批注释已登记）：

@@ -25,8 +25,8 @@
 // − size/2（:23879/:23921-23922）= 无 UpdatePosition 位移行;且 tileCollide=false
 // ⇒ wetVelocity 恒=velocity（:16870,阻尼算式仅在 HandleMovement tileCollide 支）。
 // AI_020/AI_075 无 wet 消费（:23837-23950/:67168-67330 grep 实证）→ 溅花+旗维护即
-// 全部效果。断链 Kill 拍（:23904-23907）原版湿段仍跑一子步——本仓早退不跑（仓内
-// 湿段批统一口径,登记有界偏差）。
+// 全部效果。断链 Kill 拍（AI_020 :25870-25873）原版湿段仍跑一子步——2026-09-06
+// ⑥杀拍口径批已照配方清偿（杀位补跑湿段+挂点重钉,见 fixedUpdate 杀支注）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
@@ -146,8 +146,29 @@ export class ChainsawProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    // channel 门（:23882-23907）：断链即 Kill
-    if (!this.channelCb()) { this.dead = true; return; }
+    // channel 门（AI_020 :25848-25873）：断链即 Kill
+    if (!this.channelCb()) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版断链 Kill（AI_020 :25870-25873）
+      //  【不从 AI 返回】——后续 :25887-25888 position 钉挂点照跑,Update 里湿段
+      //  (:16895 `if (!ignoreWater)`)【无 active 门】照跑（AI(:16880 `if (active)`)
+      //  内 Kill 只置 active=false;`!active` 门在 HandleMovement(:17120)后 :17132
+      //  才生效、只拦 Damage/尾尘）→ 杀拍溅花/旗维护/wetCount 折减照走。本仓杀位
+      //  早退曾整体跳过湿段（头注"登记有界偏差"随批清偿）。
+      //  · 杀拍测位=钉挂点重算（rotatedRelativePoint 纯函数;本仓 player.fixedUpdate
+      //    先于实体轮 Game.ts:7548/:8102 → owner cx/cy 已是本拍值,与原版杀拍
+      //    :25887 同位）;尾位活拍调用点与本支同拍互斥（早退不达尾）→ 无需
+      //    wetSectionRan 防双跑旗;段内水death/80 补 Kill 借 hooks 缺省不接
+      //    （509/252/445 ∉ IsDestroyedByWater 六型、非 80）。
+      //  · 445 激光钻 ignoreWater=true(:5175) → 段门恒闭,本调用零行为（与其杀拍
+      //    尾段续跑差异面一致,死弹位不可观测）。
+      const anchor = rotatedRelativePoint(this.owner);
+      this.x = anchor.x - this.w / 2;
+      this.y = anchor.y - this.h / 2;
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     // 帧动画（:25807-25829）：AI_020 仅 252（4 帧 4t/帧）与 509（2 帧 2t/帧）有帧推进，
     // 其余 aiStyle20 族无支=恒 frame0——扩族防多帧贴图误动（r33-④P2）
     const ft = this.projId === 252 ? 4 : this.projId === 509 ? 2 : 0;

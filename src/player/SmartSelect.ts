@@ -169,6 +169,9 @@ export interface SmartSelectEnv {
   slots: SmartSelectSlot[];
   /** Player.selectedItem（SelectedItemState.Selected，Player.cs:3689） */
   selectedItem: number;
+  /** ★SW-RB4a 2026-09-06：Main.mouseItem 非空（光标持物伪选中 58 在显）——
+   *  PickItemSelectionOverride :17528-17531 短路臂，真时 Shift 智选不被咨询 */
+  mouseItemHeld?: boolean;
   /** IsInTileInteractionRange（Player.cs:31548，TileReachCheckSettings.Simple 档 + tileBoost） */
   inRange: (tx: number, ty: number, tileBoost: number) => boolean;
 }
@@ -279,9 +282,14 @@ export class SmartSelect {
     if (this.overridden >= 0) host.selected = this.overridden; // :491-494
     this.overridden = -1;                                      // :497
     if (host.selected >= 10 && host.isSlotEmpty(host.selected)) host.selected = host.hotbar; // :499-501
-    // PickItemSelectionOverride（Player.cs:17259-17265）：Main.mouseItem 非空 → 选中槽 58。
-    // 本作鼠标携带物仅存在于背包 UI 拖拽中，而 UI 打开时 controlTorch 已被屏蔽（Input.down
-    // 的 uiBlocking 门 = TriggersSet.cs:783 键盘 UI 模式让位的等价），故此处无可让位分支。
+    // PickItemSelectionOverride（Player.cs:17259-17265 / :17526-17532）：Main.mouseItem
+    // 非空 → 伪选中 58 且【先于】SmartSelectLookup 返回——Shift 智选在此窗不被咨询
+    // （:17266 不可达）。★SW-RB4a 2026-09-06：SW-AZ1 光标持物可使用后，背包开着捏物
+    // = 伪选中同态（本仓以 Inventory.cursorMirror 表达，不写 selected）——旧注「本作
+    // 鼠标携带物仅存在于背包 UI 拖拽中，故此处无可让位分支」系 SW-AZ1 前旧态已失效；
+    // 曾缺此门 = 镜像激活时按 Shift 智选改写 selected（原版保持 58），光标物耗尽后
+    // heldItem() 落到智选槽而非原槽
+    if (env.mouseItemHeld) return;                             // :17528-17531 短路
     const slot = this.lookup(env);                             // :17266
     this.slot = slot;
     if (this.lookupActive(env)) {                              // SmartSelectLookup 返回 true

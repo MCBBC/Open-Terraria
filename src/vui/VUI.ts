@@ -62,10 +62,27 @@ export class VUI {
       if (e.button === 0) VUI.releases++;
       else if (e.button === 2) VUI.rightReleases++;
     });
-    window.addEventListener('blur', () => { VUI.hasFocus = false; VUI.leftDown = false; });
+    window.addEventListener('blur', () => VUI.clearForBlur());
     window.addEventListener('focus', () => { VUI.hasFocus = true; });
     // wheel 记 UI 侧增量；游戏侧 Input 另有自己的监听（分流在 main.ts 编排）
     window.addEventListener('wheel', (e) => { VUI.wheel += Math.sign(e.deltaY); }, { passive: true });
+  }
+
+  /** 窗口失焦清理（SW-BA1 2026-09-06；镜像 Input.clearForBlur 的「失焦=无按住态」
+   *  约定，blur 与测试共用入口）。旧版只清 leftDown——rightDown/rightPresses/
+   *  rightReleases 残留=幽灵右键（RB2 A-5 同族）：失焦期松键收不到 mouseup，
+   *  rightDown=true 一路残到下一次右键 down-up 对才自愈，期间 ui.update 收到幽灵
+   *  按住态；未消费的按下计数跨失焦也会在回焦首帧被当新沿消费。故电平与计数
+   *  全套归零（blur 与 mousedown 无竞争：失焦窗内点击先 focus 再派发 mousedown，
+   *  不丢真沿）。 */
+  static clearForBlur(): void {
+    VUI.hasFocus = false;
+    VUI.leftDown = false;
+    VUI.rightDown = false;
+    VUI.presses = 0;
+    VUI.releases = 0;
+    VUI.rightPresses = 0;
+    VUI.rightReleases = 0;
   }
 
   /** 自愈退避态：风暴期（GPU 显存压力→上下文反复被逐）无脑每帧重建会

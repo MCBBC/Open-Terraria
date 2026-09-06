@@ -55,7 +55,19 @@ export class MeteorChunk extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) {
+      // ★⑥杀拍口径（2026-09-06 湿段配方推广）：原版 timeLeft--/Kill 在子步【末尾】
+      //  （:17307-17311,AI(:16880)→湿段(:16895)→位移→Damage 之后）→ 寿命尽当拍湿段
+      //  照跑（`!active` 门 :17132 只拦 Damage/尾尘）。本仓递减杀在拍头曾整体跳过
+      //  湿段;现补跑,测位=存储位：AI_199（:40743-40761）只写帧/尘/rotation 不写
+      //  position → 原版杀拍湿段测位=上拍位移末位=存储位,逐值等价。杀支与 AI 尾
+      //  活拍调用点同拍互斥（早退）→ 无需 wetSectionRan 旗;1078 ∉ IsDestroyedByWater
+      //  六型/非 80 → 段内无补 Kill 面（杀拍时点=原版 Kill 前相位,段先死后）。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        1078, !!projectileData(1078)?.ignoreWater);
+      this.dead = true;
+      return;
+    }
     const st = game.world.store;
     // ---- AI_199 视觉段（1457 :40743-40761 / 1456 :37668-37691,两版同文;原版 AI
     //      :16880 先于湿段 :16903——挪到湿段前,尘位=pre-move 同原版 NewDust(position)) ----

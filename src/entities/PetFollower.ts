@@ -208,6 +208,21 @@ export function flyAccelOf(projId: number, d: number, fallback: number): number 
 }
 
 // ===================== 实体 =====================
+/** ★SW-BL1 2026-09-06 伤害面定谳（证据结案,守卫即 1:1——不接 hurt/不加入任何可受击桶）：
+ *  原版宠物全体=【投射物】非 NPC。宠物型 ∈ Main.projPet（Main.cs:8869-8989 逐型在案:
+ *  208/211/653/764/774/825/957/958/960/1027/1050/1056/1090/1093…）;光宠 18（Shadow Orb,
+ *  aiStyle 11,Projectile.cs:995-1005）/492（Magic Lantern,aiStyle 90,:5645-5652）不在
+ *  projPet 表但同为投射物,light-pet 旗走 Buff 域（Main.lightPet bool[BuffID.Count],
+ *  Main.cs:786）。投射物数据模型无 life/无 StrikeNPC,受害集三脸（Projectile.Damage
+ *  :12502 分派）——Damage_PVE (:12572,Main.npc) / Damage_PVP (:14637,Main.player) /
+ *  Damage_EVP (:12528,Main.player)——均不含投射物自身;且 Damage_CanDealDamage :12495
+ *  对 projPet 型【反方向】恒 false（宠物也不能打 NPC,266/407/317 等祖辈例外除外）。
+ *  敌怪 AI 索敌集=Main.player/城镇,从不选宠物。⇒ 原版宠物是结构免疫体（不存在
+ *  "被打死/重生"语义——存续只由装备槽 buff 驱动 Player.UpdatePet :17147-17162）。
+ *  仓内对应:本类为 Game.petFollower/lightPetFollower 单例（Game.ts:36287-36288,
+ *  非 enemies/critters/npcs 桶成员）,无 hurt() 方法,爆炸/enemy 接触/弹幕全部 victim
+ *  集不可达=1:1。任务面曾以"原版 Main.npc 单数组全员可被打"为前提评估——该前提对
+ *  宠物不适用（宠物非 NPC）,以本注为正解结案。 */
 export class PetFollower extends Entity {
   /** 原版宠物全体走 Collision.StepUp（AI_026 :59280 / AI_067 :47756） */
   stepUp = true;

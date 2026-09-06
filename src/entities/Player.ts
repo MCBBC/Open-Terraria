@@ -138,7 +138,7 @@ import {
 import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
-import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28574）
+import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28576-28581）
 import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
@@ -635,7 +635,7 @@ export class Player extends Entity {
    *  [0]=bank 存钱罐(29) / [1]=bank2 保险箱(97) / [2]=bank3 守护者熔炉(463) /
    *  [3]=bank4 虚空保险库(491)——右键绑定见 Player.cs:32598+。内容随玩家存档，
    *  方块破坏不丢内容（原版同语义，掉落回收 place_v_ 物品） */
-  banks: Array<Array<{ id: number; stack: number; /** 重铸词缀（Item.prefix，0/缺省=无）——★F2：虚空袋空位落格整件随行须带（Player.cs:39845） */ prefix?: number } | null>> = [
+  banks: Array<Array<{ id: number; stack: number; /** 重铸词缀（Item.prefix，0/缺省=无）——★F2：虚空袋空位落格整件随行须带（Player.cs:39845） */ prefix?: number; /** ★SW-AY1 R7：收藏标记——虚空保险库(-5)语境 32 ∈ retainFavoriteOnMoveAt（ItemSlot.cs:365）/canFavoriteAt[32]（:361），存档随行（SavedItem.favorited） */ favorited?: boolean } | null>> = [
     Array(40).fill(null), Array(40).fill(null), Array(40).fill(null), Array(40).fill(null),
   ];
   buffs = new BuffState();
@@ -2925,7 +2925,7 @@ export class Player extends Entity {
 
   // ---- 出入液溅花尘四发射器（Player.cs:27991-28056 入 / :28085-28150 出循环体 1:1）----
   //  spawnDust 后置覆写与原版逐行同序;★308 与 34/35/152 的 NewDust 型内初速预处理
-  //  （Dust.cs:239-243 v×0.5+Y++ / :252-256 v×0.1+vy 钉 −0.5）VanillaDust.spawn 未植
+  //  （Dust.cs:227-231 v×0.5+Y++ / :246-254 v×0.1+vy 钉 −0.5）VanillaDust.spawn 未植
   //  → 发射器内按原版链补齐（水族 33/98-105 池内已植、123/288 原文本就无——逐型净
   //  初速与原版逐位等价）;scale/alpha 为绝对覆写（消解 NewDust ±0.2 scale 抖）。
   //  waterStyle 探测同 FakeFish 结构化约定（renderer?.waterStyle,测试 mock 兼容）
@@ -2950,7 +2950,7 @@ export class Player extends Entity {
     for (let i = 0; i < 50; i++) {
       const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 308);
       if (d) {
-        d.vx *= 0.5; d.vy = d.vy * 0.5 + 1;   // NewDust 308 支补链（Dust.cs:239-243）
+        d.vx *= 0.5; d.vy = d.vy * 0.5 + 1;   // NewDust 308 支补链（Dust.cs:227-231）
         d.vy -= 4;
         d.vx *= 2.5;
         d.scale = scale;
@@ -2969,7 +2969,7 @@ export class Player extends Entity {
     for (let i = 0; i < 20; i++) {
       const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 152);
       if (d) {
-        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:252-256）
+        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:246-254）
         d.vy -= 1;
         d.vx *= 2.5;
         d.scale = 1.3;
@@ -2984,7 +2984,7 @@ export class Player extends Entity {
     for (let i = 0; i < 20; i++) {
       const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, 35);
       if (d) {
-        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:252-256）
+        d.vx *= 0.1; d.vy = -0.5;   // NewDust 34/35/152 支补链（Dust.cs:246-254）
         d.vy -= 1.5;
         d.vx *= 2.5;
         d.scale = 1.3;

@@ -171,7 +171,7 @@ describe('附近箱子合成联动（NearbyChests.cs:10-31 / CraftingRequests.cs
       { id: woodIid, stack: 4 }, { id: gelIid, stack: 5 }, null,
       { id: invIndexOfVanilla(5215), stack: 2 },
     ]);
-    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(true);
+    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(2);   // SW-AZ1 R3：返实际合成轮数
     // 火把=1木+1凝胶，×2 → 木扣 2（背包 1 清空 + 箱补 1 → 箱 4-1=3）；
     // 凝胶扣 2（背包清空，箱不动）；箱内 Boreal 木槽（Wood 组）不受单 id 木扣波及
     expect(inv.slots[10]).toBeNull();
@@ -187,7 +187,7 @@ describe('附近箱子合成联动（NearbyChests.cs:10-31 / CraftingRequests.cs
     inv.slots[10] = { id: woodIid, stack: 5 };
     inv.slots[11] = { id: gelIid, stack: 5 };
     const c = chest(3, 3, [{ id: woodIid, stack: 9 }]);
-    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(true);
+    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(2);
     expect(c.items[0]).toEqual({ id: woodIid, stack: 9 });
     expect(inv.slots[10]).toEqual({ id: woodIid, stack: 3 });
   });
@@ -199,17 +199,25 @@ describe('附近箱子合成联动（NearbyChests.cs:10-31 / CraftingRequests.cs
     const inv = new Inventory();
     inv.slots[10] = { id: gelIid, stack: 1 };
     const c = chest(3, 3, [{ id: borealIid, stack: 2 }]);
-    expect(consumeMaterials(inv, torch, 1, false, [c])).toBe(true);
+    expect(consumeMaterials(inv, torch, 1, false, [c])).toBe(1);
     expect(c.items[0]).toEqual({ id: borealIid, stack: 1 });
   });
 
-  it('consumeMaterials：背包+箱合计仍不足 → false 且零扣减（阶段一守卫）', () => {
+  it('consumeMaterials：首轮不足 → 返 0 且零扣减（R14-B2 守卫,SW-AZ1 数值契约）；部分量=造到不够为止', () => {
     const torch = VANILLA_RECIPES.find((r) => r.create === 8)!;
     const inv = new Inventory();
     inv.slots[10] = { id: gelIid, stack: 9 };
     const c = chest(3, 3, [{ id: woodIid, stack: 1 }]);
-    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(false);
-    expect(c.items[0]).toEqual({ id: woodIid, stack: 1 });
-    expect(inv.slots[10]).toEqual({ id: gelIid, stack: 9 });
+    // 木材全源仅 1 → 首轮可造 1（i==0 无门,CraftItem CRQ57:93 `i<=0 ||`）,第 2 轮
+    // 账面守卫（ownedAcc 未折扣递减）不过即停：返 1、扣 1 木+1 凝胶,零蒸发
+    expect(consumeMaterials(inv, torch, 2, false, [c])).toBe(1);
+    expect(c.items[0]).toBeNull();
+    expect(inv.slots[10]).toEqual({ id: gelIid, stack: 8 });
+    // 全源真不足（木 0）→ 首轮校验不过 = 0 轮合成零扣减（旧 false 面等价）
+    const inv2 = new Inventory();
+    inv2.slots[10] = { id: gelIid, stack: 9 };
+    const c2 = chest(3, 3, [{ id: invIndexOfVanilla(8), stack: 3 }]);
+    expect(consumeMaterials(inv2, torch, 2, false, [c2])).toBe(0);
+    expect(inv2.slots[10]).toEqual({ id: gelIid, stack: 9 });
   });
 });

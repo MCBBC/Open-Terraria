@@ -27,6 +27,8 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { TtlSprite } from '../assets/ttlSprite';
 import { spawnVanillaEnemy } from './bossAI';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** Extra_47 落点束贴图懒加载（Arrow.projSprite 同款模式；不 import Renderer 运行时
  *  以免 Enemy→StardustMarkProj→Renderer→Enemy 运行时环） */
@@ -48,6 +50,27 @@ export class StardustMarkProj extends Entity {
   private alpha = 255;
   private timeLeft = 300;                // :5878 兜底（AI 淡出更早杀）
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
+  //  豁免核对：540 SetDefaults（P.cs:6153-6161：20×20/aiStyle 103/penetrate −1/
+  //  timeLeft 300/alpha 255）【无 ignoreWater 行】= 受段（数据面同向）。
+  //  阻尼不适用（双证）：①UpdatePosition 早退表（P.cs:20549-20553 `type == 540` →
+  //  position 不积分——velocity 只作落点束方向/长度参数）;②本仓弹体恒静止。
+  //  插位=tick 头：弹体恒静止 → 采样位逐拍同点 ≡ 原版任意插位（AI(:32272-32299)
+  //  无 position 写）。杀拍口径（Arrow.ts ⑥配方逐位核）：杀位=timeLeft 300 兜底
+  //  （fixedUpdate 头杀）与 alpha≥250 淡出杀（:32277-32282,AI 段内）——tick 头单
+  //  调用点两者天然覆盖（湿段先于两杀位跑）,双调用点/防双跑机不适用。
+  //  IsDestroyedByWater 域不含 540（{85,15,188,34,1097,1106}）→ hooks 不接。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+  /** 原版弹型 id（SetDefaults :6153-6161）——湿段按真 id 传参 */
+  readonly projId = 540;
+
   /** x/y = NewProjectile 的 position（左上角原样传入，非中心）；vx/vy = 落点束
    *  方向/长度（不作位移——UpdatePosition :19028 对 540 早退）；gen = 世代 num5 */
   constructor(x: number, y: number, vx: number, vy: number, gen: number) {
@@ -59,6 +82,10 @@ export class StardustMarkProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    //  tick 头插位（杀拍覆盖见字段块头注）;静止弹/UpdatePosition 早退 → 阻尼不适用。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     if (--this.timeLeft <= 0) { this.dead = true; return; }   // timeLeft 300 兜底
     this.ai0 += 1;                                            // :32275-32276 先自增
     if (this.ai0 >= 30) {                                      // :32277-32282 淡出

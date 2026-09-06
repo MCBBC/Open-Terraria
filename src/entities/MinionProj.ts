@@ -20,7 +20,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { BuffType } from '../stats/Buffs';
 import { canHit, canHitLine, solidTileAt } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount, projSprite } from './Arrow';
-import { projectileWetSection } from './projWetSection';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
@@ -38,6 +38,15 @@ import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCel
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  开火动画、第 12t 出火球（弹型/速度/周期/冷却按 FLAMEBURST_TIERS 分层） */
 const FLAMEBURST_TOWER = new Set([663, 665, 667]);
+
+/** 通用湿段服务域=1.4.5 新随从八型（红队 R3 定谳）+ 旧受段族十三型（蓝队 K
+ *  2026-09-07 移交批接入;逐 id SetDefaults 豁免核对见 MinionProj 字段块头注——
+ *  廿一型均无 ignoreWater 行=受段,豁免分流由 projectileData(id).ignoreWater
+ *  数据面自动承载）。其余主类 id 本批不接（域外核对面见同注）。 */
+const MINION_WET_IDS = new Set([
+  1022, 1093, 1094, 1098, 1112, 1113, 1118, 1123,           // R3 八型
+  317, 390, 391, 392, 393, 394, 395, 758, 833, 834, 835, 917, 1036,   // 旧受段族
+]);
 /** 弩车三档（AI_134 :65584/1457 :69584）：帧 0 待机、帧 1-5 开火（每 5t）、
  *  开火第 6t（ai[1]==5）出弩箭 680（速 16，T2 套装 21;num2=num6=5,num2 的初值 12 已被
  *  `num2 = num6` 覆写——旧"第12t"是初值误读,2026-08-31 批②修）、25t 结束、
@@ -718,6 +727,53 @@ export class MinionProj extends Entity {
   damage: number;
   knockback: number;
   projId: number;
+
+  // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批,
+  //  红队 R3 定谳域=1.4.5 新随从八型;2026-09-07 蓝队 K 移交批扩=旧受段族十三型）----
+  //  逐 id 豁免核对（SetDefaults P.cs 逐块,【均无 ignoreWater 行】= 全受段,
+  //  projectileData 数据面同向）：R3 八型 1022(:9669-9681)/1093(:10197-10210)/
+  //  1094(:10212-10222)/1098(:10243-10252)/1112(:10364-10377)/1113(:10379-10389)/
+  //  1118(:10452-10464)/1123(:10506-10515);旧受段族（蓝队 K 批逐块复核同向）
+  //  317(:4101-4111)/390-392(:4744-4756)/393-395(:4757-4769)/758(:7816-7829)/
+  //  833-835(:8084-8125)/917(:8703-8714)/1036(:9769-9780)。
+  //  · 本批不接的主类 id（红队域外,豁免面亦核对备查）：AI_062 五射手 373(:4565)/
+  //    375(:4589)/407(:4880)/423(:4962)/613(:6600)/963(:9102)、533(:5999)/387(:4700)/
+  //    388(:4716)/653(:7014)/627(:6737)/628(:6733)/831(:8069)/970(:9184)/946(:8924)/
+  //    755(:7779)/1119(:10466) 均 ignoreWater=true=豁免。
+  //  · 1106 狐火（MinionShot ∈ IsDestroyedByWater{85,15,188,34,1097,1106},
+  //    ProjectileID.cs:287;SetDefaults :10305-10317 无 ignoreWater 行=受段）走
+  //    Arrow 载体（foxChannel 支 spawn）——ARROW_DESTROYED_BY_WATER（Arrow.ts:546）
+  //    已含 1106,水death 消亡面已接 killNow,本类湿段 hooks 不涉（域内 id 均不在
+  //    IsDestroyedByWater 表,kill 钩恒空）。
+  //  插位=tick 头（fixedUpdate 首）：R3 八型家族 AI（AI_067 flag6/8/9、AI_026 flag8/10、
+  //  AI_204）vanilla 无 wet 旗消费——本仓 palGroundStep/mushBoiStep 的 wet 消费走
+  //  wetCollisionProbe 现场盒测独立面（台账批⑥,R3 域留存）,与湿段旗互不读 →
+  //  tick 头语义等价（共享体头注口径）。★旧受段族批（蓝队 K）：家族 AI 有 wet 旗
+  //  消费（AI_067 :51027 海盗俯扑门 / :51616 跳跃结算湿身 ×2 共享核,消费 id=
+  //  393-395/758/833-835/1036;AI_026 :60716/:60734 属 774/1046 非蜘蛛）——本批按
+  //  「互不双轨」纪律改读维护字段 this.wet（probe 消费位同步撤除）,tick 头插位下
+  //  AI 读到的是【当拍】段值（采样位=上拍位移后位）;vanilla AI 读【上拍】段值
+  //  （原版 :16880 AI → :16895 段序,段采样位=AI 后位移前同位）——两序采样位相同、
+  //  相位差 1 拍（入水/出水边界拍本仓 AI 早 1 拍感知,登记近似;AI 中途瞬移拍
+  //  （>2000 回收/虎扑链直写位）两序读到的都是瞬移前采样,同向）。
+  //  阻尼=各族位移位乘 projWaterDragFactor（HandleMovement :17721-17764 湿支只对
+  //  tileCollide=true 宿主跑——917 SetDefaults tileCollide=false(:8708) 与 317
+  //  归位态 ai[0]==1（aiStyle 54 :29079 else 支;:29042 attack 态置真）不适用,各支留锚）。
+  //  杀拍口径（Arrow.ts ⑥配方逐位核）：主类全部杀位=哨兵寿命(:4294)/携行失主
+  //  (:4309)【哨兵八型不涉,且哨兵 id 全豁免（663/665/667:7137/677-679:7248/
+  //  688-690:7332/308:4004/377:4622/966:9150/1025:9714/641:6923/643:6936）】/
+  //  随从失主(:4910)/钻地龟四杀位(digtoiseStep :2143/:2144/:2168/:2176)——
+  //  全部在 tick 头调用【后】→ 湿段杀拍恒跑,双调用点/防双跑机不适用
+  //  （单调用点天然覆盖）;palGroundStep/mushBoiStep/foxChannel 零杀位。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+
   /** true=哨兵（定点炮台，独立于随从上限） */
   sentry: boolean;
   /** 1457 哨兵携带态（原版 ai[2]==1f，IsSentryBeingCarried :80527-80530）：被
@@ -1228,7 +1284,12 @@ export class MinionProj extends Entity {
     this.stepUp = true;                                 // Collision.StepUp（:51466）
     this.tileCollide = true;                            // :51273 每 tick 置真
     const num62 = getLerpValue(0, 100, v15y) * getLerpValue(-2, -6, this.vy);   // :51509
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
+    //  速度场不减只削当拍位移——下方 wet 起跳 ×2 读 velocity 场=未阻尼,原文同相）。
+    //  现役调用面=虎 833-835/海盗 393-395（旧受段族批,均受段）;域外未来调用者
+    //  四旗恒 false → 档恒 1 数值不变。
+    const dfWalk067 = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfWalk067, this.vy * dfWalk067);
     if (this.vy === 0 && jump) {                        // 结算段（落地才生效）
       this.ai67JumpLadder(st, intent);
       if (v15y < -48) {                                 // 高出距离表（:51492-51527）
@@ -1295,7 +1356,9 @@ export class MinionProj extends Entity {
     }
     const st = game.world.store;
     const tgt = tgtPre;
-    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet
+    // ——互不双轨纪律:probe 现场盒测位退役,见类字段块头注）
+    const wet = this.wet;
     let ax: number, ay: number;
     if (tgt) {
       ax = tgt.cx; ay = tgt.cy;
@@ -1483,12 +1546,16 @@ export class MinionProj extends Entity {
   }
   private pirateStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
-    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51027 俯扑门读 Projectile.wet
+    // ——互不双轨纪律:probe 现场盒测位退役,见类字段块头注）
+    const wet = this.wet;
     // 终清波批：Minion_FindTargetInRange(800, skipOwnBody) 双距检索归真（单距近似退役）
     const tgtF = this.findTargetInRangeDual(game, 800);
     // ---- ai[0]==1 归位飞行（:50636-50712 族档）----
     if (this.pirA0 === 1) {
       this.tileCollide = false;
+      // 位移阻尼不适用（vanilla :50648 tileCollide=false → 湿阻尼块 :17721 不跑;
+      //  直写位=velocity 场全量位移,本仓 x += vx 同相）
       const dx = p.cx - this.cx, dy = p.cy - this.cy;
       const dl = Math.hypot(dx, dy);
       if (dl > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }
@@ -1527,7 +1594,9 @@ export class MinionProj extends Entity {
       this.pirFrame = Math.min(6, 4 + Math.floor((15 - this.pirA1) / 5))
         + (this.vy !== 0 ? 3 : 0);
       this.vy = Math.min(this.vy + 0.4, 10);
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（:17721 湿支;扑击态 tileCollide 承地面拍 :51266 置真,湿支照跑）
+      const dfPirPounce = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfPirPounce, this.vy * dfPirPounce);
       this.contact(game, dmg0, 18);                      // 扑击窗内才有接触伤（friendly=true 支）
       if (--this.pirA1 <= 0) { this.pirA0 = 0; this.pirA1 = 0; }     // num9=0 直回 0
       return;
@@ -1774,7 +1843,10 @@ export class MinionProj extends Entity {
         this.facing = tx >= this.cx ? 1 : -1;
       }
       this.vy = Math.min(this.vy + 0.4, 10);  // :50951-50953
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
+      // 速度场不减只削位移——projWetSection 头注契约）
+      const dfPounce = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfPounce, this.vy * dfPounce);
       this.contact(game, dmg0, flag8 ? 9 : 30); // friendly=true 段（:50904）；冷却 :10375/:10483
       if (this.palA1 <= 0) { this.palA0 = 0; this.palA1 = 0; } // num9=0 → 直回 0（:50954-50956）
       return;
@@ -1853,7 +1925,10 @@ export class MinionProj extends Entity {
     const stJump = game.world.store;
     const jump = this.ai67JumpFlags(stJump, ax, ay);
     this.vy = Math.min(this.vy + 0.4, 10);                  // :51553-51556（num=0.4，先加后移=原版 AI 末重力+Update 积分序）
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
+    // 速度场不减只削位移——下方 wet 起跳 ×2 读 velocity 场=未阻尼,原文同相）
+    const dfWalk = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfWalk, this.vy * dfWalk);
     if (this.onGround) {
       if (jump) this.ai67JumpLadder(stJump, Math.sign(dx) || 1);
       if (dyA < -48) {                                      // :51492-51527 目标高出距离表
@@ -2076,7 +2151,9 @@ export class MinionProj extends Entity {
     const jump = this.ai67JumpFlags(st, ax, ay);
     this.vy = Math.min(this.vy + 0.4, 10);                // 重力 0.4 封顶 10（:51553-51556）
     this.tileCollide = true;                              // 地面段恒 true（:51266——先于移动）
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗）
+    const dfMush = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfMush, this.vy * dfMush);
     if (this.onGround) {
       if (jump) this.ai67JumpLadder(st, Math.sign(dx) || 1);
       if (dyA < -48) {                                    // :51492-51527 高出距离表
@@ -2180,7 +2257,9 @@ export class MinionProj extends Entity {
         this.digFrameCounter = 0;
         if (--this.digFrame < 0) this.digFrame = 0;
       }
-      moveAndCollide(this, game.world, this.vx, this.vy);   // 重力+摩擦位移（引擎段等价）
+      // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗）
+      const dfSurf = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfSurf, this.vy * dfSurf);   // 重力+摩擦位移（引擎段等价）
       return;
     }
     const digging = flag2 || flag3 || flag4;            // flag8（:39262）
@@ -2259,7 +2338,9 @@ export class MinionProj extends Entity {
       }
       // 位移（tileCollide=true + correctSlopeCollision——挖掘面前进，撞实心由
       // moveAndCollide 截停；向下态纯重力坠入挖开的井道）
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗）
+      const dfDig = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfDig, this.vy * dfDig);
       // 挖节拍（:39455-39470）：ai[1]≥num4+30 → 采掘一轮，ai[1] 回 num4+10
       // （1123 回 num4+20 → 间隔 10t，1098 间隔 20t）
       this.digA1++;
@@ -2294,7 +2375,9 @@ export class MinionProj extends Entity {
     // 蓄势段（ai[1]≤num4 :39455-39459）：frame=0、ai[1]++
     this.digFrame = 0;
     this.digA1++;
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗）
+    const dfCharge = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfCharge, this.vy * dfCharge);
   }
 
   /** 阿比盖尔本体 963（AI_062 963 档 1:1，1457 Projectile.cs :66074-66090 计数档/
@@ -3200,8 +3283,8 @@ export class MinionProj extends Entity {
           // 飞行朝向（:61626-61633）：|vx|>0.5 → spriteDirection=-sign(vx)
           if (this.vx > 0.5) this.facing = -1;
           else if (this.vx < -0.5) this.facing = 1;
-          this.x += this.vx; this.y += this.vy;       // tileCollide=false（:61410）直写位移
-          this.spFrame = 3;
+          this.x += this.vx; this.y += this.vy;       // tileCollide=false（:61410）直写位移——
+          //  位移阻尼不适用（tileCollide=false → 湿阻尼块 :17721 不跑,velocity 全量）
         }
       }
       return;
@@ -3330,7 +3413,10 @@ export class MinionProj extends Entity {
         this.facing = this.spDir;                                // :65135（+direction,非取反）
       } else this.rot = Math.atan2(vy10, vx10) + Math.PI / 2;
       this.spFrame = 4 + Math.floor(this.age / 2) % 4;   // :65136-65147 帧 4-7
-      this.x += this.vx; this.y += this.vy;
+      // 原版爬墙段只写 velocity（:65112-65119）,位移走 HandleMovement（蜘蛛
+      //  tileCollide=true 缺省,湿支照跑）→ 本仓直写位乘湿阻尼档,同相
+      const dfSpiderWall = projWaterDragFactor(this);
+      this.x += this.vx * dfSpiderWall; this.y += this.vy * dfSpiderWall;
       // 撤退拍 friendly=false（:63004）不咬;命中置撤退计时（StatusNPC :14027-14030）
       if (!retreat && this.contact(game, dmg0)) this.spLai1 = 20;   // 台账批③：蜘蛛族 idStatic 15（CONTACT_CD_TABLE :4754）
       return;
@@ -3359,7 +3445,9 @@ export class MinionProj extends Entity {
     if (this.vx < -num184 && flag2) this.spDir = -1;
     this.facing = -this.spDir;
     this.vy = Math.min(this.vy + 0.4, 10);            // :65244-65247
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（:17721 湿支;蜘蛛 tileCollide 动态门 :62843-62845,真拍走湿支）
+    const dfSpiderWalk = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfSpiderWalk, this.vy * dfSpiderWalk);
     if (this.onGround && jump && (flag2 || flag3)) {
       this.walkerJumpLadder(st, flag2 ? -1 : 1);      // :63220-63290
     }
@@ -3402,14 +3490,15 @@ export class MinionProj extends Entity {
   private frogStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
     this.stepUp = true;
-    // 台账批⑥：wet = Collision.WetCollision 盒级判定（Collision.cs:1575-1650），
-    // 非中心单格——内探针小盒（min(10,W)×H/2）浸液即湿
-    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet
+    // ——互不双轨纪律:台账批⑥ probe 现场盒测位退役,见类字段块头注）
+    const wet = this.wet;
     // 终清波批：Minion_FindTargetInRange(num2=800, skipOwnBody) 双距检索归真
     const tgt = this.findTargetInRangeDual(game, 800);
     // ---- ai[0]=1 归位飞行（:50636-50712）----
     if (this.frA0 === 1) {
       this.tileCollide = false;                       // :50648
+      // 位移阻尼不适用（tileCollide=false → 湿阻尼块 :17721 不跑;直写位=velocity 全量）
       const dx = p.cx - this.cx, dy = p.cy - this.cy;
       const dl = Math.hypot(dx, dy);
       if (dl > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }   // :50659-50662
@@ -3432,7 +3521,9 @@ export class MinionProj extends Entity {
       this.frA1--;                                    // :50953
       if (this.frA1 === 20 - 1 && this.vy === 0) this.vx *= 0.1;   // :50905-50907
       this.vy = Math.min(this.vy + 0.4, 10);          // :50951-50953
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（:17721 湿支;扑击态 tileCollide 承地面拍 :51266 置真,湿支照跑）
+      const dfFrogPounce = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfFrogPounce, this.vy * dfFrogPounce);
       if (this.frA1 <= 0) { this.frA0 = 0; this.frA1 = 0; }        // :50954-50956
       this.contact(game, dmg0);                       // 台账批③：吸血蛙 idStatic 10（CONTACT_CD_TABLE :7825）
       return;
@@ -3489,7 +3580,10 @@ export class MinionProj extends Entity {
     //      ai67JumpLadder 三柱承立闸 + 单柱中腰基准五档（虎先例共轨）
     const jump = this.ai67JumpFlags(st, ax, ay, { wallIntent: tgt !== null });
     this.vy = Math.min(this.vy + 0.4, 10);            // :51553-51557
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（:17721 湿支;湿段 tick 头已刷新当拍旗,速度场不减只削当拍位移
+    //  ——下方 wet 起跳 ×2 读 velocity 场=未阻尼,原文同相）
+    const dfFrogWalk = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfFrogWalk, this.vy * dfFrogWalk);
     if (this.onGround) {
       if (jump) this.ai67JumpLadder(st, Math.sign(dx) || 1);
       const dyA = ay - this.cy;
@@ -3514,6 +3608,9 @@ export class MinionProj extends Entity {
    *  仅扑击中有接触伤（friendly 门 :27568/:27581），localNPCHitCooldown=10（:3836）；
    *  命中重置 ai[1]=-1（case 317 :12777-12780） */
   private ravenBody(game: GameHooks, p: Player, dmg0: number): void {
+    // vanilla aiStyle 54 每拍按【入拍 ai[0]】写 tileCollide（:29042 attack 真 /
+    //  :29079 归位假;近身回攻 ai[0]=0 写在后,不回写本拍碰撞位）→ 湿阻尼门锚入拍态
+    const rA0Entry = this.rA0;
     // 同类分离（:27397-27416）
     const projs = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles;
     for (const m of projs) {
@@ -3559,7 +3656,10 @@ export class MinionProj extends Entity {
       this.rot = this.vx * 0.05; // :27542
       this.ravenZone = 0;        // 帧 0-3（:27543-27549）
       if (Math.abs(this.vx) > 0.2) this.facing = -Math.sign(this.vx); // :27551-27553（spriteDirection=-direction）
-      this.x += this.vx; this.y += this.vy;
+      // ★水中位移阻尼（:17721 湿支只对 tileCollide=true 宿主跑——attack 态 :29042;
+      //  归位态 :29079 false → 恒全速）
+      const dfRavenFollow = rA0Entry === 0 ? projWaterDragFactor(this) : 1;
+      this.x += this.vx * dfRavenFollow; this.y += this.vy * dfRavenFollow;
       this.rFriendly = false; // :27519（跟随期收尾 friendly=false——下一 tick 归位门读此值）
       return; // friendly=false（:27544）——跟随期无接触伤
     }
@@ -3585,7 +3685,9 @@ export class MinionProj extends Entity {
     this.rot = this.vx * 0.05; // :27587
     this.ravenZone = 1;        // 帧 4-7（:27588-27594）
     if (Math.abs(this.vx) > 0.2) this.facing = -Math.sign(this.vx);
-    this.x += this.vx; this.y += this.vy;
+    // ★水中位移阻尼（扑击循环仅在 attack 态（:29042 tileCollide=true）可达,湿支照跑）
+    const dfRavenPounce = projWaterDragFactor(this);
+    this.x += this.vx * dfRavenPounce; this.y += this.vy * dfRavenPounce;
     if (charging && this.contact(game, dmg0, 10)) this.rA1 = -1; // 命中重置（:12777-12780）
   }
 
@@ -3921,7 +4023,10 @@ export class MinionProj extends Entity {
     //  禁戒魂灵 1119 14×22（:10467-10468）/ 火绒狐 1113 18×18（:10381-10382）
     if (projId === 1098 || projId === 1123) { this.w = 34; this.h = 34; }
     else if (projId === 1093 || projId === 1112 || projId === 1118 || projId === 1119) { this.w = 14; this.h = 22; }
-    else if (projId === 1113) { this.w = 18; this.h = 18; }
+    // 火绒狐 1094/1113 双型 18×18（1094 SetDefaults Projectile.cs:10215-10216——
+    // ★2026-09-06 杂项簇批补：旧表只注册了 1113（:10382-10383）,1094 漏注册落
+    // 16×16 缺省=判定盒/湿段采样盒窄 2px）
+    else if (projId === 1094 || projId === 1113) { this.w = 18; this.h = 18; }
     // 蘑菇小伙伴 1022（Dead Cells 联动,5456）：20×30（SetDefaults Projectile.cs:9670-9671）
     else if (projId === 1022) { this.w = 20; this.h = 30; }
     // ★GC 移交收口（终局扫尾批 A7，2026-08-31）：DD2 哨兵塔 SetDefaults 真盒注册——
@@ -4256,6 +4361,14 @@ export class MinionProj extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     void dt;
+    // ---- ★通用湿段（:16895-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    //  tick 头插位（杀拍覆盖/采样位/域论证见字段块头注）;阻尼=位移处乘档位
+    //  （palGroundStep/mushBoiStep/digtoiseStep/ai067WalkChase/spiderStep/frogStep/
+    //  ravenBody/whip 族 1036/通用飞行·地面各积分位——旧受段族批同口径）。
+    if (MINION_WET_IDS.has(this.projId)) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+    }
     this.age++;
     if (this.attackFlash > 0) this.attackFlash--;
     // ---- 族专属召唤音（生成后首帧起按 at 节拍各一次，见 MINION_SUMMON_SFX 注） ----
@@ -5067,8 +5180,12 @@ export class MinionProj extends Entity {
         this.vy = (dy / d) * spd;
         this.facing = p.facing;
       }
-      this.x += this.vx;
-      this.y += this.vy;
+      // ★水中位移阻尼（:17721 湿支只对 tileCollide=true 宿主跑）：1036 SetDefaults
+      //  无 tileCollide 行（:9769-9780）=缺省 true → 湿档削位移;917 显式
+      //  tileCollide=false（:8708）→ 湿阻尼块不跑,恒全速（留锚）
+      const dfWhip = this.projId === 1036 ? projWaterDragFactor(this) : 1;
+      this.x += this.vx * dfWhip;
+      this.y += this.vy * dfWhip;
       this.contact(game, dmg0, 20); // armorPen 30（:9494）由 contact 内 pen0 两源通道结算
       return;
     }
@@ -5121,8 +5238,11 @@ export class MinionProj extends Entity {
           this.vy += lty ? -0.05 : 0.05;
         }
       }
-      this.x += this.vx;
-      this.y += this.vy;
+      // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
+      // 速度场不减只削位移;域外 id 无湿段 → 四旗恒 false → 档恒 1 数值不变）
+      const dfFly = projWaterDragFactor(this);
+      this.x += this.vx * dfFly;
+      this.y += this.vy * dfFly;
       // 回收（1456 AI_062 :62786-62790：num35>2000 → 瞬移回玩家中心；曾写 >1300）
       if (Math.hypot(this.cx - p.cx, this.cy - p.cy) > 2000) {
         this.x = p.cx - p.facing * 30;
@@ -5141,7 +5261,10 @@ export class MinionProj extends Entity {
         if (Math.abs(dx) > 60) this.vx = Math.max(-2.5, Math.min(2.5, dx * 0.02));
       }
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗;
+      // 域外 id 无湿段 → 四旗恒 false → 档恒 1 数值不变）
+      const dfGnd = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfGnd, this.vy * dfGnd);
     }
     // 朝向（AI_062 :62983-62990：velocity.X>0 → spriteDirection=-1——贴图朝左，
     // 右行才翻转 = facing 取 -sign(vx)；963 阿比盖尔特判 ×-1 自带朝右贴图已在其

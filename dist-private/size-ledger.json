@@ -1,19 +1,19 @@
 {
- "at": "2026-09-06T06:16:21.928Z",
+ "at": "2026-09-06T15:08:06.128Z",
  "release": true,
- "totalJsMb": 18.2,
+ "totalJsMb": 18.25,
  "chunks": [
   {
-   "file": "assets/index-CEk3yand.js",
-   "kb": 11016.9
+   "file": "assets/index-DW-KOr4r.js",
+   "kb": 11064.9
   },
   {
-   "file": "assets/worldGen.worker-BQ0RrZhh.js",
-   "kb": 5025
+   "file": "assets/worldGen.worker-DtfOWToi.js",
+   "kb": 5027.3
   },
   {
-   "file": "assets/save.worker-ByZHk9m3.js",
-   "kb": 2547.9
+   "file": "assets/save.worker-hMpAoCQj.js",
+   "kb": 2547.2
   },
   {
    "file": "sw.js",
@@ -24,12 +24,20 @@
    "kb": 9.7
   },
   {
-   "file": "assets/HousingPanel-Dg8IavqE.js",
+   "file": "assets/HousingPanel-DI5dOZC2.js",
    "kb": 8.3
   },
   {
-   "file": "assets/RemasterPanel-DnmXt-fp.js",
+   "file": "assets/RemasterPanel-BpFIpv1R.js",
    "kb": 8.3
+  },
+  {
+   "file": "assets/BinarySave-Dumc2bHv.js",
+   "kb": 2.4
+  },
+  {
+   "file": "assets/BinarySave-C7ASyfow.js",
+   "kb": 1.7
   }
  ]
 }

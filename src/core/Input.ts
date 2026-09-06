@@ -68,6 +68,12 @@ export class Input {
    *  被 use 清掉后无 mousedown 事件回填,链球出生 1 帧即判松手回收(2026-08-13) */
   mouseHeld = false;
   rightDown = false;
+  /** ★SW-BJ1 2026-09-06 触摸长按右键脉冲预钩（Game 注入,UI 落地）：返回 true=脉冲
+   *  已被消费（光标持物丢出等价,Player.dropItemCheck :5139
+   *  `mouseRight && !mouseInterface && mouseRightRelease` 的右压沿语义——触摸长按
+   *  脉冲与实体右键脉冲同源）→ 不再置 rightDown（丢出吞沿 :5141-5144 同语义）。
+   *  null/false = 常规路径置 rightDown 供世界右键分派 */
+  onLongPressRightPulse: (() => boolean) | null = null;
   /** R4-22（FocusHelper.cs:134-139 → TriggersSet.cs:851-859）：失焦置位,回焦首击
    *  被吞、松键解除——原版 delayUseItem 同名语义 */
   delayUseItem = false;
@@ -252,6 +258,9 @@ export class Input {
       touchStartX = t.clientX; touchStartY = t.clientY; touchStartT = performance.now();
       clearLongPress();
       longPressTimer = setTimeout(() => {           // 长按 → 右键交互脉冲
+        // ★SW-BJ1：光标持物时脉冲先走丢出预钩（dropItemCheck 右压沿等价）,
+        // 消费则不置 rightDown——丢出吞沿,同一次按压不再触世界右键交互
+        if (this.onLongPressRightPulse?.()) return;
         this.rightDown = true;
       }, 400);
     }) as EventListener, { passive: false });

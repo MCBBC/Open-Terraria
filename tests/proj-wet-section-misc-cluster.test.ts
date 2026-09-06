@@ -31,6 +31,15 @@ import { GrappleProj } from '../src/entities/GrappleProj';
 import { WhipProj } from '../src/entities/WhipProj';
 import { ChainsawProj } from '../src/entities/ChainsawProj';
 import { MountShot, SantankShellProj } from '../src/entities/Mounts';
+import { FallingBlock } from '../src/entities/FallingBlock';
+import { Tombstone } from '../src/entities/Tombstone';
+import { FlyingPiggyBank } from '../src/entities/FlyingPiggyBank';
+import { VoidLensProj } from '../src/entities/VoidLensProj';
+import { StardustMarkProj } from '../src/entities/StardustMarkProj';
+import { TownShot } from '../src/entities/TownShot';
+import { HealProj } from '../src/entities/HealProj';
+import { MinionProj } from '../src/entities/MinionProj';
+import { MagicMissileProj, StarfuryStar } from '../src/entities/MissileProj';
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -48,12 +57,20 @@ function liquidAt(w: World, x0: number, x1: number, y0: number, y1: number, type
 }
 
 /** stub game：spawnDust/playSfxWav(Splash)/spawnParticles 三通道计数 */
+interface DustRec {
+  x: number; y: number; w: number; h: number; type: number;
+  /** 可变尘对象（proj-wet-cache mkSplash 同款）：溅花覆写面（vy−4/vx×2.5/scale1.3/
+   *  α100/noGravity）可断言;★勿返 null（null=引擎池满语义,覆写支被 if(d) 短路） */
+  d: { vx: number; vy: number; scale: number; alpha: number; fadeIn: number;
+    noGravity: boolean; noLight: boolean; noLightEmittance: boolean; color: unknown };
+}
 function makeGame(w: World): {
-  g: GameHooks; dust: Array<{ x: number; y: number; w: number; h: number; type: number }>;
-  splash: string[]; particles: () => number;
+  g: GameHooks; dust: DustRec[];
+  splash: string[]; particles: () => number; deaths: number[];
 } {
-  const dust: Array<{ x: number; y: number; w: number; h: number; type: number }> = [];
+  const dust: DustRec[] = [];
   const splash: string[] = [];
+  const deaths: number[] = [];
   let parts = 0;
   const px = 20 * TILE, py = 20 * TILE;
   const g = {
@@ -61,8 +78,10 @@ function makeGame(w: World): {
     player: { x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21, dead: true, iframes: 0, equipStats: {} },
     enemies: () => [], critters: () => [], npcs: () => [],
     spawnDust: (x: number, y: number, bw: number, bh: number, type: number) => {
-      dust.push({ x, y, w: bw, h: bh, type });
-      return null;
+      const d = { vx: 1, vy: 1, scale: 1, alpha: 0, fadeIn: 0, noGravity: false,
+        noLight: false, noLightEmittance: false, color: null as unknown };
+      dust.push({ x, y, w: bw, h: bh, type, d });
+      return d;
     },
     playSfxWav: (name: string) => { if (String(name).startsWith('Splash')) splash.push(String(name)); },
     spawnParticles: () => { parts++; },
@@ -70,8 +89,9 @@ function makeGame(w: World): {
     spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     notifyInventoryChanged: () => {}, addLightAt: () => {},
+    onProjectileDeath: (id: number) => { deaths.push(id); },
   } as unknown as GameHooks;
-  return { g, dust, splash, particles: () => parts };
+  return { g, dust, splash, particles: () => parts, deaths };
 }
 
 function mkWorld(): World {
@@ -512,5 +532,419 @@ describe('豁免类湿段零触发（N/A 定谳 runtime 面）', () => {
     expect(splash.length).toBe(0);
     expect(splashDustCount(dust, 10)).toBe(0);
     void killed;
+  });
+});
+
+// =====================================================================
+// ★2026-09-06 杂项弹簇批二：FallingBlock / Tombstone / FlyingPiggyBank /
+// VoidLensProj / StardustMarkProj / TownShot / HealProj / MinionProj 主类八新随从 /
+// MissileProj(StarfuryStar 9 + 杀拍推广)——逐类接入 projectileWetSection 共享体。
+// 豁免定谳（各文件字段块头注逐 id SetDefaults 核对）：TownShot {606,242,590,950,880}
+// 豁免、其余 25 型受段（15 ∈ IsDestroyedByWater → hooks.kill）;本批其余类 id 全受段。
+// =====================================================================
+describe('批二豁免数据面抽查（SetDefaults ignoreWater 行）', () => {
+  it('受段 id 无 ignoreWater 行（缺行=不豁免同向）', () => {
+    const inSection = [
+      31, 56, 67, 71, 179, 241, 411, 412, 413, 414, 812,          // 落沙族（GetSandfallProjData 全档）
+      43, 201, 202, 203, 204, 205, 527, 528, 529, 530, 531,       // 墓碑族（IsAGravestone 域）
+      525, 734, 540, 9, 298, 305,                                  // 飞猪/虚空透镜/星尘标记/星怒星/治疗弹
+      1022, 1093, 1094, 1098, 1112, 1113, 1118, 1123,             // 1.4.5 新随从八型
+      1, 2, 14, 587, 267, 357, 48, 520, 21, 162, 583, 30, 588,    // TownShot 受段域
+      133, 135, 721, 134, 24, 15, 585, 582, 669, 586,
+    ];
+    for (const id of inSection) {
+      expect(projectileData(id)?.ignoreWater, `id ${id} 应受段`).toBeFalsy();
+    }
+  });
+  it('TownShot 豁免五型有 ignoreWater=true（段门恒闭零行为）', () => {
+    for (const id of [606, 242, 590, 950, 880]) {
+      expect(projectileData(id)?.ignoreWater, `id ${id} 应豁免`).toBe(true);
+    }
+  });
+});
+
+// =====================================================================
+// FallingBlock（落沙族 31/56/67/71/179/241/411-414/812——GetSandfallProjData
+// sheet→proj 映射;aiStyle 10 ∈ HandleMovement 专支 :17700-17720 → 阻尼 N/A）
+// =====================================================================
+describe('FallingBlock ★通用湿段（31 :1133-1142 / 411-414 :4935-4943 / 812 :7955-7964 无 ignoreWater 行 → 全受段）', () => {
+  it('出生在水中：预置 wet=true 无溅花（NewProjectile :10887 同向）;弹 id 按 sheet 映射（sand→31）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const fb = new FallingBlock(500, 1000, 'sand');        // sheet 53 → proj 31
+    fb.fixedUpdate(1 / 60, g);
+    expect(fb.projId).toBe(31);
+    expect(fb.wet).toBe(true);
+    expect(splash.length).toBe(0);                          // 出生即水中=预置无溅花
+    expect(splashDustCount(dust, 10)).toBe(0);
+  });
+
+  it('空中坠入水带：入水溅花 10 粒 + Splash_1 + wet 旗跃迁（下沙入水高频面）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const fb = new FallingBlock(500, 800, 'sand');
+    let sawWet = false;
+    for (let t = 0; t < 60 && !fb.dead; t++) {
+      fb.fixedUpdate(1 / 60, g);
+      sawWet = sawWet || fb.wet;
+    }
+    expect(sawWet).toBe(true);
+    expect(splash.length).toBeGreaterThanOrEqual(1);
+    expect(splash[0]).toBe('Splash_1');
+    expect(splashDustCount(dust, 10)).toBeGreaterThanOrEqual(10);
+    const s = dust.find((e) => isSplashDust(e, 10))!.d;
+    expect(s.vy).toBe(-3);                                  // 初速 (1,1) 桩 → vy 1−4
+    expect(s.vx).toBe(2.5);                                 // vx ×2.5
+    expect(s.scale).toBe(1.3); expect(s.alpha).toBe(100); expect(s.noGravity).toBe(true);
+  });
+
+  it('阻尼 N/A 定谳（aiStyle 10 专支 :17700-17720 与湿支互斥）：干/湿轨迹逐拍全等', () => {
+    const wetW = mkWorld(); liquidAt(wetW, WX0, WX1, WY0, WY1);
+    const dryW = mkWorld();
+    const { g: gW } = makeGame(wetW);
+    const { g: gD } = makeGame(dryW);
+    const a = new FallingBlock(500, 800, 'sand');
+    const b = new FallingBlock(500, 800, 'sand');
+    let sawWet = false;
+    for (let t = 0; t < 40 && !a.dead && !b.dead; t++) {
+      a.fixedUpdate(1 / 60, gW);
+      b.fixedUpdate(1 / 60, gD);
+      sawWet = sawWet || a.wet;
+      expect(a.x).toBe(b.x);                                // 无湿阻尼 → 逐位同轨迹
+      expect(a.y).toBe(b.y);
+    }
+    expect(sawWet).toBe(true);
+  });
+});
+
+// =====================================================================
+// Tombstone（墓碑族 43/201-205/527-531 全受段;aiStyle 17 tileCollide 缺省 true
+// → 湿阻尼适用,乘进 moveAndCollide 入参）
+// =====================================================================
+describe('Tombstone ★通用湿段（43 :1260-1272 / 201-205 :2874-2898 / 527-531 :5973-5986 无 ignoreWater 行 → 全受段）', () => {
+  it('抛入水带：入水溅花 10 粒（弹面盒 (w+12,24)=26×24）+ wet 旗跃迁', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const ts = new Tombstone(500, 800, 100000, 'test', 1);
+    ts.vx = 0; ts.vy = 2;                                   // 钉直落（ctor 抛射随机游走摘除）
+    let sawWet = false;
+    for (let t = 0; t < 40 && !ts.dead; t++) {
+      ts.fixedUpdate(1 / 60, g);
+      sawWet = sawWet || ts.wet;
+    }
+    expect(sawWet).toBe(true);
+    expect(splash.length).toBeGreaterThanOrEqual(1);
+    expect(splashDustCount(dust, 14)).toBeGreaterThanOrEqual(10);
+  });
+
+  it('阻尼适用：湿拍下坠位移 < 干拍（moveAndCollide 入参 ×0.5,速度场不减）', () => {
+    const wetW = mkWorld(); liquidAt(wetW, WX0, WX1, WY0, WY1);
+    const dryW = mkWorld();
+    const { g: gW } = makeGame(wetW);
+    const { g: gD } = makeGame(dryW);
+    const a = new Tombstone(500, 800, 100000, 'test', 1);
+    const b = new Tombstone(500, 800, 100000, 'test', 1);
+    a.vx = 0; a.vy = 2; b.vx = 0; b.vy = 2;
+    let sawWet = false, sawDrag = false;
+    for (let t = 0; t < 40 && !a.dead && !b.dead; t++) {
+      const ay = a.y, by = b.y;
+      a.fixedUpdate(1 / 60, gW);
+      b.fixedUpdate(1 / 60, gD);
+      sawWet = sawWet || a.wet;
+      if (a.wet && Math.abs(a.y - ay) > 0 && Math.abs(a.y - ay) * 2 <= Math.abs(b.y - by) + 1e-9) {
+        sawDrag = true;                                     // 湿态位移 ≈ 干态一半
+      }
+    }
+    expect(sawWet).toBe(true);
+    expect(sawDrag).toBe(true);
+  });
+});
+
+// =====================================================================
+// FlyingPiggyBank 525 / VoidLensProj 734（受段;tileCollide=false → 阻尼 N/A）
+// =====================================================================
+describe('FlyingPiggyBank 525 / VoidLensProj 734 ★通用湿段（525 :5955-5963 / 734 :7728-7736 无 ignoreWater 行 → 受段）', () => {
+  it('525 出生在水中：预置 wet=true 无溅花;tileCollide=false → 干/湿轨迹逐拍全等', () => {
+    const wetW = mkWorld(); liquidAt(wetW, WX0, WX1, WY0, WY1);
+    const dryW = mkWorld();
+    const { g: gW, dust, splash } = makeGame(wetW);
+    const { g: gD } = makeGame(dryW);
+    const a = new FlyingPiggyBank(500, 1000, 3, 0, () => null);
+    const b = new FlyingPiggyBank(500, 1000, 3, 0, () => null);
+    for (let t = 0; t < 10; t++) {
+      a.fixedUpdate(1 / 60, gW);
+      b.fixedUpdate(1 / 60, gD);
+      expect(a.x).toBe(b.x);                                // 无阻尼面 → 逐位同轨迹
+      expect(a.y).toBe(b.y);
+    }
+    expect(a.wet).toBe(true);
+    expect(b.wet).toBe(false);
+    expect(splash.length).toBe(0);                          // 出生即水中=预置无溅花
+    expect(splashDustCount(dust, 30)).toBe(0);
+  });
+
+  it('734 出生在水中：wet=true（共享体预置;豁免弹亦跑预置逐字面化批口径不涉——734 受段）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, splash } = makeGame(w);
+    const v = new VoidLensProj(500, 1000, 2, 0);
+    v.fixedUpdate(1 / 60, g);
+    expect(v.wet).toBe(true);
+    expect(splash.length).toBe(0);
+  });
+});
+
+// =====================================================================
+// StardustMarkProj 540（受段;UpdatePosition :20549-20553 `type == 540` 早退 →
+// 弹体恒静止、阻尼 N/A;timeLeft 300 兜底头杀拍湿段已由 tick 头覆盖）
+// =====================================================================
+describe('StardustMarkProj ★通用湿段（540 :6153-6161 无 ignoreWater 行 → 受段）', () => {
+  it('出生在水中：wet=true、无溅花;弹体恒静止（位移零）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, splash } = makeGame(w);
+    const m = new StardustMarkProj(500, 1000, 30, 0, 0);    // v=落点束参数不作位移
+    for (let t = 0; t < 5; t++) m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(true);
+    expect(m.x).toBe(500); expect(m.y).toBe(1000);          // :19028 早退 → 零位移
+    expect(splash.length).toBe(0);                          // 出生即水中=预置无溅花
+  });
+});
+
+// =====================================================================
+// TownShot（30 型域:豁免 {606,242,590,950,880} 段门零行为、其余受段;
+// 15 ∈ IsDestroyedByWater → hooks.kill 水death;寿命头杀拍=湿段 tick 头覆盖）
+// =====================================================================
+describe('TownShot ★通用湿段（受段 25 型溅花/豁免五型零行为/15 水death/杀拍口径）', () => {
+  it('1 木箭坠入水带：入水溅花 10 粒 + wet 旗跃迁 + 湿拍位移折半（tileCollide 缺省 true）', () => {
+    const wetW = mkWorld(); liquidAt(wetW, WX0, WX1, WY0, WY1);
+    const dryW = mkWorld();
+    const { g: gW, dust, splash } = makeGame(wetW);
+    const { g: gD } = makeGame(dryW);
+    const a = new TownShot(495, 900, 0, 2, 10, 1, 1);
+    const b = new TownShot(495, 900, 0, 2, 10, 1, 1);
+    let sawWet = false, sawDrag = false;
+    for (let t = 0; t < 30 && !a.dead && !b.dead; t++) {
+      const ay = a.y, by = b.y;
+      a.fixedUpdate(1 / 60, gW);
+      b.fixedUpdate(1 / 60, gD);
+      sawWet = sawWet || a.wet;
+      if (a.wet && Math.abs(a.y - ay) * 2 <= Math.abs(b.y - by) + 1e-9) sawDrag = true;
+    }
+    expect(sawWet).toBe(true);
+    expect(splash.length).toBeGreaterThanOrEqual(1);
+    expect(splashDustCount(dust, 10)).toBeGreaterThanOrEqual(10);
+    expect(sawDrag).toBe(true);                             // :17755 阻尼进位移行
+  });
+
+  it('242 豁免（:3253 ignoreWater=true）：水中 wet 恒 false、零溅花（段门直跳）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const s = new TownShot(500, 1000, 0, 0, 10, 1, 242, { noGravity: true });
+    for (let t = 0; t < 6 && !s.dead; t++) s.fixedUpdate(1 / 60, g);
+    expect(s.wet).toBe(false);
+    expect(splash.length).toBe(0);
+    expect(splashDustCount(dust, 4)).toBe(0);
+  });
+
+  it('★杀拍口径：寿命头杀拍湿段照跑（出水溅花在杀拍结账:wetCount 置 10 后逐拍 −1）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust } = makeGame(w);
+    const s = new TownShot(500, 1000, 0, 0, 10, 1, 1, { noGravity: true });
+    s.fixedUpdate(1 / 60, g);                               // 出生即水中（预置 wet=true,无溅花）
+    expect(s.wet).toBe(true);
+    (s as { y: number }).y = 900;                           // 移出水面（次拍湿段测位=原版同位）
+    s.life = 1;                                             // 本拍寿命尽（vanilla :17307 杀在湿段后）
+    s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(true);
+    expect(s.wet).toBe(false);                              // 出水支 :17024
+    expect(s.wetCount).toBe(9);                             // 置 10（:16984）后同拍 −1（:17109）
+    expect(splashDustCount(dust, 10)).toBe(10);             // 杀拍出水溅花 10 粒
+  });
+
+  it('15 ∈ IsDestroyedByWater（ProjectileID.cs:287）：水death 经 hooks.kill 当拍消亡', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const s = new TownShot(500, 1000, 0, 0, 10, 1, 15, { noGravity: true });
+    s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(true);                              // :16923-16925 wet && !lavaWet → Kill
+    expect(s.wet).toBe(true);
+    expect(splash.length).toBe(0);                          // 出生即水中=预置无溅花（水death 同拍）
+    expect(splashDustCount(dust, 16)).toBe(0);
+    expect(s.life).toBe(3600);                              // 寿命递减未达（!active 门同相截断;15 无 timeLeft 覆写=缺省档）
+  });
+});
+
+// =====================================================================
+// HealProj（298/305 全受段;本体 α255 隐形但溅花照出;湿段在 numUpdates 子步循环内
+// :16781-17345 → 每【子步】一次;tileCollide=false → 阻尼 N/A;life 头杀拍补跑）
+// =====================================================================
+describe('HealProj ★通用湿段（298 :3885-3893 / 305 :3967-3974 无 ignoreWater 行 → 全受段）', () => {
+  it('305 追疗穿越水带：入水溅花（每【子步】采样,EU=10 → 11 子步/tick）+ wet 旗跃迁', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const target = { x: 2000, y: 1000, w: 20, h: 42, hp: 50, maxHp: 100 };
+    const h = new HealProj(305, 300, 1000, 5, target);
+    let sawWet = false;
+    for (let t = 0; t < 30 && !h.dead; t++) {
+      h.fixedUpdate(1 / 60, g);
+      sawWet = sawWet || h.wet;
+    }
+    expect(sawWet).toBe(true);
+    expect(splash.length).toBeGreaterThanOrEqual(1);
+    expect(splashDustCount(dust, 6)).toBeGreaterThanOrEqual(10);
+  });
+
+  it('★杀拍口径：life 头杀拍湿段补跑（入水溅花在杀拍结账）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust } = makeGame(w);
+    const target = { x: 2000, y: 1000, w: 20, h: 42, hp: 50, maxHp: 100 };
+    const h = new HealProj(305, 300, 1000, 5, target);
+    h.fixedUpdate(1 / 60, g);                               // 干拍首拍（出生预置 done,wet=false）
+    expect(h.wet).toBe(false);
+    (h as { x: number }).x = 500;                           // 移入水带（次拍湿段测位=原版同位）
+    (h as unknown as { life: number }).life = 1;            // 本拍寿命尽
+    h.fixedUpdate(1 / 60, g);
+    expect(h.dead).toBe(true);
+    expect(h.wet).toBe(true);
+    expect(splashDustCount(dust, 6)).toBe(10);              // 杀拍入水溅花 10 粒
+  });
+});
+
+// =====================================================================
+// MinionProj 主类（1.4.5 新随从八型全受段,红队 R3 定谳域;tick 头插位=杀拍覆盖;
+// 家族 AI 无湿旗消费者——本仓 wet 消费走 wetCollisionProbe 独立面）
+// =====================================================================
+describe('MinionProj 主类 ★通用湿段（1022/1093/1094/1098/1112/1113/1118/1123 SetDefaults 逐块无 ignoreWater 行 → 全受段）', () => {
+  const mkMinion = (g: GameHooks, w: World, owner: Player | null, x = 500, y = 800) => {
+    const m = new MinionProj(x, y, 1094, 10, 2, false, 0, false, () => owner);
+    m.fixedUpdate(1 / 60, g);                               // 干拍首拍（出生预置 done）
+    void w;
+    return m;
+  };
+
+  it('1094 出生在水中：预置 wet=true 无溅花（NewProjectile :10887 同向）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const p = new Player(20 * TILE, 20 * TILE, new Inventory());
+    const m = new MinionProj(500, 1000, 1094, 10, 2, false, 0, false, () => p);
+    m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(true);
+    expect(splash.length).toBe(0);
+    expect(splashDustCount(dust, 18)).toBe(0);
+  });
+
+  it('1094 移入水带：入水溅花 10 粒（tick 头湿段采样）+ wet 旗跃迁', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const p = new Player(20 * TILE, 20 * TILE, new Inventory());
+    const m = mkMinion(g, w, p);
+    expect(m.wet).toBe(false);
+    (m as { y: number }).y = 1000;                          // 移入水带（次拍湿段测位=原版同位）
+    m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(true);
+    expect(splash.length).toBe(1);
+    expect(splash[0]).toBe('Splash_1');
+    expect(splashDustCount(dust, 18)).toBe(10);
+  });
+
+  it('★杀拍口径：随从失主杀位（ownerRef→null）湿段照跑（wet 旗在杀拍置位）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, splash } = makeGame(w);
+    const m = new MinionProj(500, 1000, 1094, 10, 2, false, 0, false, () => null);
+    m.fixedUpdate(1 / 60, g);                               // tick 头湿段（预置 wet=true）→ 失主杀
+    expect(m.dead).toBe(true);
+    expect(m.wet).toBe(true);                               // 湿段先于杀位跑（tick 头覆盖杀拍）
+    expect(splash.length).toBe(0);
+  });
+});
+
+// =====================================================================
+// MissileProj：StarfuryStar 9（受段+盒 19×19=SetDefaults 尾 scale 缩放;越线后
+// tileCollide=true → 湿阻尼适用）+ 杀拍推广（timeLeft 头杀拍湿段补跑 + Kill 幂等头门）
+// =====================================================================
+describe('StarfuryStar ★通用湿段（9 :888-898 无 ignoreWater 行 → 受段;P.cs:10672-10673 width=(int)(24×0.8)=19）', () => {
+  it('★盒 19×19（红队 P1-2:SetDefaults 尾 width=(int)(width×scale),scale=0.8）', () => {
+    const s = new StarfuryStar(500, 800, 0, 5, 10, 2, 1300);
+    expect(s.w).toBe(19);
+    expect(s.h).toBe(19);
+  });
+
+  it('坠入水带（越线前 tileCollide=false）：入水溅花 10 粒 + wet 旗跃迁', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const s = new StarfuryStar(500, 800, 0, 6, 10, 2, 1300);   // 目标线带下方 → 带内恒穿墙
+    let sawWet = false;
+    for (let t = 0; t < 40 && !s.dead; t++) {
+      s.fixedUpdate(1 / 60, g);
+      sawWet = sawWet || s.wet;
+    }
+    expect(sawWet).toBe(true);
+    expect(splash.length).toBeGreaterThanOrEqual(1);
+    expect(splashDustCount(dust, 19)).toBeGreaterThanOrEqual(10);
+  });
+
+  it('阻尼（越线后 tileCollide=true → 湿支 :17721 生效）：湿拍位移 < 干拍', () => {
+    const wetW = mkWorld(); liquidAt(wetW, WX0, WX1, WY0, WY1);
+    const dryW = mkWorld();
+    const { g: gW } = makeGame(wetW);
+    const { g: gD } = makeGame(dryW);
+    const a = new StarfuryStar(500, 800, 0, 6, 10, 2, 900);    // 目标线 900 < 带顶 960 → 带内恒越线
+    const b = new StarfuryStar(500, 800, 0, 6, 10, 2, 900);
+    let sawWet = false, sawDrag = false;
+    for (let t = 0; t < 40 && !a.dead && !b.dead; t++) {
+      const ay = a.y, by = b.y;
+      a.fixedUpdate(1 / 60, gW);
+      b.fixedUpdate(1 / 60, gD);
+      sawWet = sawWet || a.wet;
+      if (a.wet && Math.abs(a.y - ay) * 2 <= Math.abs(b.y - by) + 1e-9) sawDrag = true;
+    }
+    expect(sawWet).toBe(true);
+    expect(sawDrag).toBe(true);
+  });
+});
+
+describe('MissileProj 杀拍推广（Arrow.ts ⑥配方:timeLeft 头杀拍湿段补跑 + Kill 幂等头门）', () => {
+  const missileCtor = (projId: 16 | 34 | 79) => ({
+    projId, damage: 10, knockback: 1, useTime: 20,
+    channelCb: () => false, aimCb: () => ({ x: 0, y: 0 }), payMana: () => true,
+  });
+
+  it('34 Flamelash 入水后 timeLeft 头杀：杀拍湿段补跑 → 入水溅花 10 粒（弹面盒 (w+12,24)=44×24）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust } = makeGame(w);
+    const m = new MagicMissileProj(300, 700, 8, 0, missileCtor(34));   // 干区行（带顶 960 上方）横飞
+    for (let t = 0; t < 40 && !(m.cx >= 490 && m.cx <= 640); t++) m.fixedUpdate(1 / 60, g);
+    expect(m.wet).toBe(false);                              // 干区（入水前杀）
+    (m as { y: number }).y = 1000;                          // 移入水带（次拍湿段测位=原版同位）
+    m.timeLeft = 1;                                         // 本拍寿命尽（vanilla :17307 杀在湿段后）
+    m.fixedUpdate(1 / 60, g);
+    expect(m.dead).toBe(true);
+    expect(m.wet).toBe(true);                               // 杀拍湿段照跑（入水溅花面结账）
+    expect(splashDustCount(dust, 32)).toBe(10);
+  });
+
+  it('34 出生在水中 + timeLeft=1：头杀与湿段水death 同拍 → onProjectileDeath 恰 1 次（Kill 幂等头门 :71755-71758）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, deaths } = makeGame(w);
+    const m = new MagicMissileProj(500, 1000, 0, 0, missileCtor(34));
+    m.timeLeft = 1;
+    m.fixedUpdate(1 / 60, g);                               // 头杀 killNow → 杀拍湿段（预置 wet=true → 水death hooks.kill → 头门拦截）
+    expect(m.dead).toBe(true);
+    expect(m.wet).toBe(true);
+    expect(deaths.filter((id) => id === 34).length).toBe(1);
+  });
+
+  it('9 StarfuryStar timeLeft 头杀：杀拍湿段补跑（出水溅花结账, wetCount 置 10）', () => {
+    const w = mkWorld(); liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust } = makeGame(w);
+    const s = new StarfuryStar(500, 1000, 0, 0, 10, 2, 1300);   // 出生即水中（目标线带下方）
+    s.fixedUpdate(1 / 60, g);                               // 预置 wet=true 无溅花
+    expect(s.wet).toBe(true);
+    (s as { y: number }).y = 900;                           // 移出水面
+    s.timeLeft = 1;
+    s.fixedUpdate(1 / 60, g);
+    expect(s.dead).toBe(true);
+    expect(s.wet).toBe(false);
+    expect(s.wetCount).toBe(9);                             // 出水支置 10 后同拍 −1
+    expect(splashDustCount(dust, 19)).toBe(10);             // 杀拍出水溅花 10 粒
   });
 });

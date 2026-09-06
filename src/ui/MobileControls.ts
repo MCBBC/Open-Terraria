@@ -721,8 +721,10 @@ export class MobileControls {
    *  条件项(journey/net)与系统列锚(minimap 底缘下沉) */
   private refresh(): void {
     const g = this.game;
-    // 使用钮面=当前手持物品(官方手游同形;拾取切换后 ≤1s 跟手)
-    const held = g.player.inv.slots[g.player.inv.selected];
+    // 使用钮面=当前手持物品(官方手游同形;拾取切换后 ≤1s 跟手)。
+    // ★SW-RB4a 2026-09-06：经 heldItem() 取手持——光标持物伪选中（SW-AZ1 镜像槽 58）
+    // 时使用链用光标物,使用钮面须同相;曾直读 slots[selected]=分裂面
+    const held = g.player.inv.heldItem();
     this.useFace(held ? held.id : -1);
     // 药水：有治疗药水 → 显示；受伤时亮起
     let hasHeal = false;

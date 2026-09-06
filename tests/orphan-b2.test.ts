@@ -22,6 +22,8 @@ import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from
 import { itemCombat, combatWeapon, thrownCombat } from '../src/data/vanillaItemCombat';
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { TILE_BY_KEY, TILE_DEFS, T } from '../src/data/tiles';
+import { WALL_DROPS } from '../src/data/wallDrops';   // SW-BL1 2026-09-06 清墙掉落守卫
+import { VI } from '../src/data/itemKeys';
 import type { GameHooks } from '../src/entities/types';
 
 const TREE_ID = () => TILE_BY_KEY['tree']!;
@@ -73,6 +75,12 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
   g.sfx = { play: (n: string) => { sfxNames.push(n); },
     playWavFile: (f: string) => { sfxNames.push(f); return true; } };
   g.spawnParticles = () => {};
+  // SW-BL1 2026-09-06：爆炸清墙 KillWall 全语义掉落消费面（wallDrops 单源）录制桩
+  g.spawnDrop = (x: number, y: number, key: string, count: number) => {
+    (g as any).dropRecords.push({ x, y, key, count });
+    return null;
+  };
+  g.dropRecords = [] as Array<{ x: number; y: number; key: string; count: number }>;
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };   // breakTile→inMiningWindow 面（SW-AF1 后新增消费）
   return { g, world, playerRecords, sfxNames };
 }
@@ -396,6 +404,47 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     for (let x = 48; x <= 52; x++) expect(st.wall[st.idx(x, 146)]).toBe(1);
     expect(st.get(47, 150)).toBe(scene.stone);
     expect(st.get(53, 170)).toBe(scene.stone);
+    // ——SW-BL1：清墙掉落全语义（KillWall_DropItems WorldGen.cs:60934-60941）。墙 1 =
+    //   Unsafe 泥墙 → 掉 vi_26（WALL_DROPS[1]=26）1 件@格中心（vy=-2）；负对照带
+    //   （col 47/53、row 146）墙未清不掉。清墙格 5×11=55 + 巷道邻域带若干 → 至少 55 件
+    const wallDrops = ((g as any).dropRecords as Array<{ x: number; y: number; key: string; count: number }>)
+      .filter((d) => d.key === VI(WALL_DROPS[1]));
+    expect(wallDrops.length).toBeGreaterThanOrEqual(55);
+    expect(wallDrops.every((d) =>
+      Math.abs(d.x - (Math.round((d.x - 8) / TILE) * TILE + 8)) < 1e-6 && d.count === 1)).toBe(true);
+  });
+
+  it('SW-BL1：清墙 fail 门（KillWall_CheckFailure WorldGen.cs:60901-60912）——地牢墙未败骷髅王爆炸墙保持原状不掉物,败后同场景照清照掉', () => {
+    const scene = scarabScene();
+    const { g, st } = scene;
+    // 步盒（col 50 ±1）邻域带铺墙 7（wallDungeon 表 Main.cs:10507-10515 {7,8,9,94-99}）
+    for (let y = 148; y <= 152; y++) {
+      for (let x = 48; x <= 52; x++) {
+        st.setTileSilent(x, y, 0, 0, 0);
+        st.setWallSilent(x, y, 7);
+      }
+    }
+    (g as any).scarabBombExplode(50 * TILE + 8, 150 * TILE, 100);
+    // fail → 铺墙带（cols 48-52,含步盒清墙窗全范围）墙全部保持原状
+    for (let y = 148; y <= 152; y++) {
+      for (let x = 48; x <= 52; x++) expect(st.wall[st.idx(x, y)]).toBe(7);
+    }
+    expect(((g as any).dropRecords as Array<{ key: string }>)
+      .filter((d) => d.key === VI(WALL_DROPS[7]))).toHaveLength(0);
+    // 败骷髅王（downed_35）后同场景 → 照清照掉（蓝砖墙 vi_135）
+    const scene2 = scarabScene();
+    const st2 = scene2.st;
+    (scene2.g as any).world.flags['downed_35'] = true;
+    for (let y = 148; y <= 152; y++) {
+      for (let x = 48; x <= 52; x++) {
+        st2.setTileSilent(x, y, 0, 0, 0);
+        st2.setWallSilent(x, y, 7);
+      }
+    }
+    (scene2.g as any).scarabBombExplode(50 * TILE + 8, 150 * TILE, 100);
+    expect(st2.wall[st2.idx(50, 150)]).toBe(0);
+    expect(((scene2.g as any).dropRecords as Array<{ key: string }>)
+      .filter((d) => d.key === VI(WALL_DROPS[7])).length).toBeGreaterThan(0);
   });
 
   it('接触敌怪零伤零钳引信（SW-I1 2026-09-03 翻案：:48046 每 tick damage=0 → Damage_PVE :12576 damage<=0 早退——:13153 钳门只在 Kill 爆炸结算可达）→ 引信自然耗尽照常开挖', () => {

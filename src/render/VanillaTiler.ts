@@ -1850,7 +1850,15 @@ function drawAdjust(
     //   捕获报告实证：站点侧 fb/clamp 全零而视觉仍闪 ⇒ 盲区即在此。）----
     case 81: if (fit(fx, fy, 24, 26)) { a.sw = 24; a.sh = 26; } break;   // :4979-4983 珊瑚 24×26
     case 323: case 324: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break; // :5059-5070
-    case 442: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // :5704-5720
+    // SW-BL1 2026-09-06：case 2（左装取向）tileWidth=24（:5704-5720 case 2 分支
+    //  `tileTop=-2; tileWidth=24`——源矩形 24×20 后,主路径 fdx=−(24−16)/2=−4 的
+    //  X 位移与 tileTop −2（tileTopCond）自动生效;曾恒 20×20=左装取向右缘缺 4px）
+    case 442: {
+      const c = Math.floor(fx / 22);
+      const w442 = c === 2 ? 24 : 20;
+      if (fit(fx, fy, w442, 20)) { a.sw = w442; a.sh = 20; }
+      break;
+    }
     case 476: if (fit(fx, fy, 20, 18)) { a.sw = 20; a.sh = 18; } break;  // 高尔夫奖杯 w20×h18
     case 567: if (fit(fx, fy, 26, 18)) { a.sw = 26; a.sh = 18; } break;  // :5203-5206 花园侏儒 26×18
     case 579: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // 石巨人头 20×20
