@@ -6,6 +6,9 @@
 //   AI：60t 消亡；帧=rand(15)；vel.RotatedBy(ai0)；Opacity 淡入 12t/末 12t；
 //   rotation=π/4×spriteDir+vel 角（左向 +π）；尘 278 尾（1/15，>7t）。
 //   绘制：Projectile_857 帧条（贴图尺寸待运行期取），×Opacity。
+// ★通用湿段定谳（2026-09-06 武器弹簇批）：857 SetDefaults（:8222-8232）
+//   ignoreWater=true（:8231）= 豁免——P.cs:16903 湿段整段门不开,溅花/湿旗/水阻尼
+//   全不适用,不接 projectileWetSection。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';

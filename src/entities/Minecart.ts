@@ -6,6 +6,12 @@ import { BuffType } from '../stats/Buffs';
 // props 实体承载同一状态，fixedUpdate 跑 1:1 运动学，玩家位置每 tick 回写
 //（Player.ridingCart 封常规移动）。
 //
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：矿车 = Mount 非 projectile（Projectile.cs
+// 无矿车弹型;原版矿车湿态表现走 Player 湿段/NPC 液体域,不属 :16903 全体弹共用段）
+// → 不接 projectileWetSection（N/A）。本文件唯二弹型载体：CartLaserBeam = 弹 591
+// MinecartMechLaser 的【纯视觉数据结构】（SetDefaults :6400-6410,ignoreWater=true
+// @:6409 → 本就豁免;且 damage 发射拍落账后归零,余下弹体纯视觉 aiStyle101 :31987-32029,
+// 不跑实体 tick）→ 无湿段面。
 // 坐骑参数按矿车族逐型取 Mount.cs mounts[n]（tools/extract-mounts.mjs 提取的
 // vanilla-mounts.json）：
 //   6  Minecart          13/13/0.04/15/5.15  heightBoost 10

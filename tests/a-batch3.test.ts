@@ -292,6 +292,10 @@ describe('钓鱼咬钩（AI_061 :50897-50934 / FishingCheck :19179-19184 / :1933
       b.reel(hooks);
       b.dead = false;   // 复用同一浮标继续统计池归属
       b.retract = 0;    // R32：断线掷命中时 reel 已置收线态——复用统计须一并复位
+      // 2026-09-06 浮支物理批：reel() 渔获支置 ai1=caught（原版拉杆携物态,真实流
+      // 中浮标即 Kill 不可达）——原版 ai[1]>0 时累积/咬钩两支都不跑（:54766/:54785
+      // if/else 字面），浮支批按原文收口后复用浮标须一并复位 ai1,否则累积死锁
+      (b as unknown as { ai1: number }).ai1 = 0;
     }
     // 全量规则表语义（Populate :10-30 注册序 + Stopper 只在本组命中时生效 :108）：
     // Junk/Crate/Rare 组先于 Ocean 可先命中；Ocean 各档掷空时 stopper 不触发，

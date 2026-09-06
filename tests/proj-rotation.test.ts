@@ -93,6 +93,8 @@ describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2
         store: {
           inBounds: () => true, get: () => 0, isSolid: () => false,
           w: 100, h: 100, liquid: new Uint8Array(1), liquidType: new Uint8Array(1),
+          // 湿段预置全体化(2026-09-04)后首拍走 WetCollision/LavaCollision——补最小面
+          idx: () => 0, flags: new Uint8Array(1), slope: new Uint8Array(1),
         },
       },
       enemies: () => [], critters: () => [], spawnDrop: () => null,

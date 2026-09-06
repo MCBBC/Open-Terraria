@@ -45,6 +45,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { moveAndCollide } from '../physics/TileCollision';
 import { hitPlayer } from './projTargets';
 import { projFrameImg } from './Arrow';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** Kill_ExplodeTiles :79027-79035 闸门纯函数（SW-B1 注四象限面）：`type == 102 &&
  *  Main.getGoodWorld && !Main.tenthAnniversaryWorld` 才入爆炸表,半径 num6=4
@@ -116,6 +118,30 @@ export class BombSkeletronPrimeProj extends Entity {
   private frameCounter = 0;
   /** 引信嘶声循环句柄（:47780 PlayTrackedLoopedSound;Kill :71796-71798 Stop） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,projWetSection.ts 共享体
+  //  1:1;溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：102 BombSkeletronPrime SetDefaults P.cs:1898-1905（22×22/aiStyle 16/
+  //  hostile/penetrate −1）【无】ignoreWater 行 → 受段（数据面 PROJ_IGNORE_WATER 亦无
+  //  102）。102 ∉ IsDestroyedByWater 六型 {85,15,188,34,1097,1106}、非 2/34/80/155 →
+  //  各特支钩缺省（IsABombWithFuse[102] 是引信面非湿段面,不相干）。
+  //  阻尼适用：tileCollide 缺省 true → HandleMovement 湿支 :17721-17764 跑
+  //  （wetVelocity = velocity×0.5/0.25/0.375,UpdatePosition :20557 `if (wet)
+  //  position += wetVelocity` 消费）;aiStyle 16 不在 UpdatePosition 早退表（:20551）。
+  //  速度场（vx/vy,含重力加算/终端钳/落地摩擦）不减,只削当拍位移入参;撞墙响应
+  //  （lastVx×−0.4）读未阻尼 lastVelocity :17696 = 原版同构（GrenadeProj 同批同口径;
+  //  逐轴 passthrough 差 = TileCollision 改速轴不阻尼 :17728-17733,moveAndCollide
+  //  共享契约外,登记）。
+  //  位序 = 原版 Update 逐子步:AI_016（:47763-48518）→ 本湿段（:16903）→
+  //  oldPosition 置位（:17118）→ HandleMovement（:17120）——恰插 oldX/oldY 前。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number) {
     super();
@@ -192,6 +218,11 @@ export class BombSkeletronPrimeProj extends Entity {
     const g = primeBombGravityStep(this.ai0, this.vx, this.vy);
     this.ai0 = g.ai0; this.vx = g.vx; this.vy = g.vy;
     this.rot += this.vx * 0.1;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_016（引信/尘/重力门/滚转完）→ 本段 → oldPosition（:17118）
+    // → HandleMovement（阻尼在下方位移入参）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      102, !!projectileData(102)?.ignoreWater);
     // ---- 位移 + 撞块（Update aiStyle16 支 :19867-19900;moveAndCollide 正典管线,
     //      GrenadeProj 投掷支同款;dropThrough=true = 原版弹不拦平台,平台面 Kill 走上支）----
     const lastVx = this.vx, lastVy = this.vy;
@@ -205,7 +236,13 @@ export class BombSkeletronPrimeProj extends Entity {
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: true,
     };
-    moveAndCollide(body, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——速度【场】不减只削当拍
+    //  位移（原版 wetVelocity = post-TileCollision velocity×0.5/0.25/0.375,仅进
+    //  UpdatePosition :20557 `if (wet) position += wetVelocity`;dry 走 :20561
+    //  `position += velocity`）。阻尼只乘进 dx/dy 位移入参;下方撞墙响应 lastVx×−0.4
+    //  与落地残差口径全读未阻尼 lastVelocity（:17696 原版同构）。
+    const df102 = projWaterDragFactor(this);
+    moveAndCollide(body, game.world, this.vx * df102, this.vy * df102);
     // SW-X1 2026-09-04（H-1）：碰撞结果回写——原版 :17718
     //  `velocity = Collision.TileCollision(...)` 把结果赋回 velocity,次拍 AI 读之。
     //  曾只回写 x/y 不回写 vx/vy → this.vy 恒保 AI 拍前值 → primeBombLandingFuse

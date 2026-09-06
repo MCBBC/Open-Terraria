@@ -41,6 +41,11 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { TILE } from '../core/constants';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { wetCollision } from './npcLiquid';
+import { projectileData } from '../data/vanillaProjectiles';
+import type { TileStore } from '../world/TileStore';
 
 /** 玩家侧挂点（RotatedRelativePoint(MountedCenter) ≈ 中心；SkyDragonFury.DragonOwner 同口径）
  *  ppPhoenixCounter = Player.phantomPhoneixCounter（Player.cs:1171）宿主字段——挂在玩家
@@ -287,6 +292,24 @@ export class PhoenixBolt extends Entity {
   private playedSnd = false;
   /** usesLocalNPCImmunity + localNPCHitCooldown=10（:7471-7472） */
   private hitCd = new HitCd();
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇批）----
+  //  706 SetDefaults（:7463-7475）【无】ignoreWater 行 = 受段（豁免对照：载体 705
+  //  block :6769-6781 `type == 630 || type == 705` ignoreWater=true :6781 = 不受段）。
+  //  段位序 = AI(:16880) → 湿段(:16895) → HandleMovement(:17120)。AI_001 706 支湿灭
+  //  （:56743-56746 `if (wet) { Kill(); return; }`）消费【上拍】湿段终值旗 → 出生预置
+  //  （NewProjectile :10886-10892）必须先于首拍 AI（spawnPresetWet,BallProjs/ChumBucket
+  //  同约定）;旧"弹心单格 liquid"近似退役（wet=盒级 WetCollision 静态旗）。湿段无
+  //  active 门 → 湿灭拍仍跑旗/溅花;HandleMovement 亦跑（tileCollide 缺省 true → 水中
+  //  位移阻尼 ×0.5/蜂蜜 0.25/微光 0.375 :17721-17764 速度场不减只削位移）,`!active`
+  //  早退 :17157 才断尾段/寿命/命中。706 不在 IsDestroyedByWater 六型 → 无 kill 钩。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
     super();
@@ -304,43 +327,70 @@ export class PhoenixBolt extends Entity {
       this.vx, this.vy, this.damage, {});
   }
 
+  /** NewProjectile 出生预置（Projectile.cs:10886-10892 逐值 1:1）：出生盒 WetCollision
+   *  首测 + honey/shimmer 静态旗;时点 = 首拍 AI【前】（AI_001 706 支 :56743 首拍即消费
+   *  wet 旗——出生入水当拍即灭）;出生位 = 构造位（首拍位移前同位 ✔）。 */
+  private spawnPresetWet(st: TileStore): void {
+    if (this.presetDone) return;
+    this.presetDone = true;
+    const r = wetCollision(st, this.x, this.y, this.w, this.h);
+    this.wet = !!projectileData(this.projId)?.ignoreWater ? false : r.wet;   // :10887-10890
+    this.honeyWet = r.honey;                                                 // :10891
+    this.shimmerWet = r.shimmer;                                             // :10892
+  }
+
   override fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.spawnPresetWet(game.world.store);
 
-    // ---- 湿灭（:56743-56746 `if (wet) { Kill(); return; }`）：wet = Collision
-    //      .WetCollision（Collision.cs:1575-1652）对【任意液体】返回 true——水/岩浆/
-    //      蜂蜜/微光全档即消（无 469 式 honey/shimmer 豁免）。★2026-08-26 审计修：
-    //      曾误抄 469 蜂箭的 {WATER,LAVA} 窄门（Arrow.ts:2641-2650），蜂蜜/微光里不灭 ----
-    {
-      const st = game.world.store;
-      const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-      if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0) { this.die(game); return; }
+    // ---- 湿灭（AI_001 706 支 :56743-56746 `if (wet) { Kill(); return; }`）：wet =
+    //      【上拍】湿段终值/出生预置旗（盒级 Collision.WetCollision :1575-1652 对任意
+    //      液体返回 true——水/岩浆/蜂蜜/微光全档,无 469 式豁免）。AI 即返 → 首拍音尘/
+    //      重力/尾迹本拍全跳;湿段与 HandleMovement 无 active 门仍跑（下两段）。
+    //      ★2026-09-06 湿段批：旧"弹心单格 liquid"近似退役 ----
+    if (this.wet) this.die(game);
+    else {
+      // ---- 首拍音 + 尘爆（localAI[1]==0 :56748-56763）----
+      if (!this.playedSnd) {
+        this.playedSnd = true;
+        // SoundEngine.PlayTrackedSound(SoundID.DD2_PhantomPhoenixShot, Center)——3 变体
+        // 随机组（SoundID.cs:1014 CreateTrackable(...,3)）；跟踪位播近似为出生点位播
+        game.playSfxFiles(soundTrackFiles('dd2_phantom_phoenix_shot'), 1, this.cx, this.cy);
+        for (let i = 0; i < 15; i++) {
+          if (Math.floor(Math.random() * 4) !== 0) {       // Main.rand.Next(4) != 0
+            burstDust(game, this.cx, this.cy);
+          }
+        }
+      }
+
+      // ---- 默认重力支（aiStyle1 兜底 :58554-58565）ai0≥15 后 vy+=0.1 ----
+      if (++this.gravT >= 15) this.vy += 0.1;
     }
 
-    // ---- 首拍音 + 尘爆（localAI[1]==0 :56748-56763）----
-    if (!this.playedSnd) {
-      this.playedSnd = true;
-      // SoundEngine.PlayTrackedSound(SoundID.DD2_PhantomPhoenixShot, Center)——3 变体
-      // 随机组（SoundID.cs:1014 CreateTrackable(...,3)）；跟踪位播近似为出生点位播
-      game.playSfxFiles(soundTrackFiles('dd2_phantom_phoenix_shot'), 1, this.cx, this.cy);
-      for (let i = 0; i < 15; i++) {
-        if (Math.floor(Math.random() * 4) !== 0) {       // Main.rand.Next(4) != 0
-          burstDust(game, this.cx, this.cy);
+    // ---- ★通用湿段（:16903-17113）——AI 后/位移前 = 原版 Update 同序;段无 active 门
+    // （湿灭拍仍跑旗/溅花;706 非 waterdeath 型 → 无 kill 钩）。溅花尘/音由共享体
+    // wetSplashStepShared 承载,不自写 ----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+
+    // ---- 移动：水中位移阻尼（HandleMovement :17721-17764 wetVelocity=velocity×档,
+    //      速度场不减只削位移;干态档=1 恒等）;子步推进防 16px/t 穿墙（撞实心块亡 =
+    //      aiStyle1 tileCollide 默认真）。★移动无 active 门——AI 湿灭（:56745 Kill）
+    //      拍仍走满两半步（原版 HandleMovement 在 AI Kill 后照跑,!active 早退在其后
+    //      :17157）,hitsSolid 判亡只在未死时受理（die 幂等）----
+    {
+      const drag = projWaterDragFactor(this);
+      const st = game.world.store as unknown as SolidProbe;
+      for (let s = 0; s < 2; s++) {
+        this.x += this.vx / 2 * drag;
+        this.y += this.vy / 2 * drag;
+        if (!this.dead && PhoenixBolt.hitsSolid(st, this.x, this.y, this.w, this.h)) {
+          this.die(game);
+          break;
         }
       }
     }
-
-    // ---- 移动：默认重力支（aiStyle1 兜底 :58554-58565）ai0≥15 后 vy+=0.1；
-    //      子步推进防 16px/t 穿墙（撞实心块亡 = aiStyle1 tileCollide 默认真）----
-    if (++this.gravT >= 15) this.vy += 0.1;
-    {
-      const st = game.world.store as unknown as SolidProbe;
-      for (let s = 0; s < 2 && !this.dead; s++) {
-        this.x += this.vx / 2;
-        this.y += this.vy / 2;
-        if (PhoenixBolt.hitsSolid(st, this.x, this.y, this.w, this.h)) { this.die(game); return; }
-      }
-    }
+    if (this.dead) return;   // !active 早退（:17157）——尾段/寿命/命中不跑（原版同构）
 
     // ---- alpha<=0 段尾迹（:56779-56824）：2 粒烟|火（1/4 缺席）+ 羽尘双生 ----
     if (this.alphaI <= 0) {

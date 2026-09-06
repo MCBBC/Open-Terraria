@@ -118,6 +118,9 @@ describe('AI_061 存活门与距离断线（R32）', () => {
     let landed = false;
     for (let k = 0; k < 300; k++) { b.fixedUpdate(1, hooks); if (b.floating) { landed = true; break; } }
     expect(landed).toBe(true);
+    // 2026-09-06 浮支物理批：入液后 settled 点=液面（GetWaterLine 回拉 :54699-54740，
+    // 2-6 拍收敛）——钉位基准取 settled 后位（落水点位不再恒定）
+    for (let k = 0; k < 40; k++) b.fixedUpdate(1, hooks);
     const ax = b.x, ay = b.y;
     // 玩家左右踱步 ±48px × 60 tick
     for (let s = 0; s < 4; s++) {

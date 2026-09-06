@@ -27,6 +27,9 @@
 //     Y−70/X+velX×20/inflate(−30,0) 子盒）/699 :16016-16028（Center 反向 95px 线段厚 23×scale）
 //   CutTiles 697/707 :15326-15335（沿挥轴 ±40/±60 线宽 width×scale）
 //   Damage 击退向 :13652-13661（697/699/707/708 = 远离【玩家】中心；698/700 用默认弹体向）
+// ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 逐块）：四弹全【豁免】——
+//   SetDefaults 显式 ignoreWater=true（697 :7381 / 698 :7394 / 699 :7416 / 700 :7432）
+//   → Projectile.cs:16903 湿段整段门不开,溅花/湿旗/水阻尼全不适用,不接 projectileWetSection。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { cutTilesBox } from './ProjCutTiles';

@@ -16,6 +16,23 @@
 // 16 个专署 tip 函数（:36818-37669）竖向帧切片沿控制点排布（WHIP_TIPS 分发表）——
 // 此前误用鞭贴图整条切片近似。光照色一律原色直画（实体层画在全屏光照合成前 =
 // 合成自动乘光,StringLine 渔线段链既有口径）。
+//
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：鞭族 18 型（841/847/848/849/912/913/
+// 914/915/952/1028/1029/1030/1031/1032/1033/1034/1035/1104）SetDefaults 逐 id 核验
+// 【均无 ignoreWater 行】——841 :8144-8146、847 :8157-8160(+extraUpdates 2)、
+// 848 :8162-8164、849 :8166-8169(+extraUpdates 2)、952 :8987-8989、1028-1035
+// :9738-9768、1104 :10293-10295（余 912-915 走 OR-链 DefaultToWhip 档亦无）,
+// DefaultToWhip() :10706-10718 本身无 ignoreWater → 全员受段。
+// ★位移模型定谳（AI_165_Whip :48539）：每【子步】AI 直写 Center =
+// GetArmPosition() + velocity×(ai[0]−1)（:48550）→ 通用湿段(:16903,采样=该位)→
+// UpdatePosition(:19973/:20561 `position += wetVelocity`)步进一拍。extraUpdates=1
+// → MaxUpdates 2 子步/tick（847/849 extraUpdates=2 → 3 子步）,湿段随 Update 主体
+// 在 numUpdates 子步循环内(:16781-17345)→【每子步各跑一次】。vel = 出膛向×shootSpeed
+// 恒定 → 每子步采样盒 = arm + velocity×(ai0s−1)（ai0s=prevAi0+s）;tileCollide=false
+// ⇒ wetVelocity 恒=velocity(:16870,阻尼算式仅在 HandleMovement tileCollide 支
+// :17583/:17721)→ 阻尼 N/A。湿旗消费者：1104 火鞭 OnFire 中段窗 StatusNPC
+// `!wet && ai[0]∈(t/3×2±1)`（:11262）——AI 先读【上一子步】段值、段后刷新（原文序),
+// 旧 wetSnapshot 出生快照近似就此退役。
 import { Entity } from './Entity';
 import { applyProjStatus, applyBuffTicks, applyMeleeImbue, debuffWriteAllowed } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
@@ -24,7 +41,9 @@ import { BuffType } from '../stats/Buffs';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import type { Player } from './Player';
 import { projSprite } from './Arrow';
-import { wetCollisionProbe } from './MinionProj';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
+import { wetCollision, lavaCollision } from './npcLiquid';
 import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
@@ -144,9 +163,20 @@ export class WhipProj extends Entity {
   private lai1: number;
   /** 蛇环补挥标记（补挥不再级联补挥;原版经 withAudioVisualFeedback=false 分支无动画自然不触发） */
   isEcho = false;
-  /** projectile.wet 出生时刻快照（NewProjectile :10887-10891 Collision.WetCollision
-   *  盒级判定,aiStyle165 不重评）——1104 火鞭 OnFire 窗口消费;undefined=未求值 */
-  private wetSnapshot?: boolean;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐子步维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价——首子步 AI 读出生旗,故在首次
+   *  tryHit 处预置而非段调用时;wetSnapshot 出生快照近似退役,见 tryHit 注） */
+  presetDone = false;
+  /** 鞭弹 velocity（AI_165 :48550 Center 式 + 1035 尾尘 弹向 消费）——出膛向×shootSpeed,
+   *  生存期恒定（AI_165 不改写）;wet 段采样盒与阻尼定谳见文件头注 */
+  private readonly wvx: number;
+  private readonly wvy: number;
   /** proc 启用门（case 913/1031/1032 localAI[0]==0 :13970-13977；847/1033/1035 无门） */
   private procEnabled = false;
   private ownerRef: () => Player | null;
@@ -165,6 +195,8 @@ export class WhipProj extends Entity {
     this.itemId = itemId;
     this.knockback = knockback;
     this.speed = speed;
+    this.wvx = Math.cos(ang) * speed;                 // velocity = 出膛向×shootSpeed（:48550 消费）
+    this.wvy = Math.sin(ang) * speed;
     this.aimAng = aimAng ?? (() => ang);
     this.rotation = ang + Math.PI / 2; // :45013
     this.spriteDir = Math.cos(ang) >= 0 ? 1 : -1; // :45018
@@ -335,7 +367,15 @@ export class WhipProj extends Entity {
     //   此前靠 Game.ts 调用点 dead→null + 空转（null owner 不杀,鞭悬空飞完）= 双偏离
     if (owner?.dead) { this.dead = true; return; }
     this.ai0 += this.maxUpdates; // 每 update ai[0]+1（:45014）
-    if (this.ai0 >= this.timeToFlyOut) { this.dead = true; return; } // :45019-45022
+    if (this.ai0 >= this.timeToFlyOut) {
+      // :45019-45022 Kill——原文湿段在该子步仍跑（AI 写位后 Kill,湿段无 active 门
+      // :16903;采样盒=本子步 AI 直写位）;owner-dead 支原文在 AI_165 头 :49309 前置,
+      // 位未写,湿段采样=上子步位——本仓早退不跑（仓内湿段批统一口径,登记有界偏差）
+      const b = this.wetBoxAt(this.ai0);
+      projectileWetSection(this, game, game.world.store, b.x, b.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.dead = true; return;
+    }
     // 锚点载体钉在玩家身上（锚点=手部位置，见 armPos；proj 本体随 velocity 前漂
     //  :45017 由曲线相对锚点表达）
     if (owner) { this.x = owner.cx; this.y = owner.cy; }
@@ -346,6 +386,13 @@ export class WhipProj extends Entity {
       const pts = this.pointsAt(ai0s, true);
       this.cutTilesAlong(game, pts);   // CutTiles（:15292-15300,蓝队 R7-38 整缺）
       this.tryHit(game, owner, pts, ai0s);
+      // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+      // 每子步一次（Update 主体在 numUpdates 子步循环内 :16781-17345）;采样盒=
+      // AI_165 直写 Center（:48550,arm+velocity×(ai0s−1),见文件头注/位移模型定谳）;
+      // tryHit 先读上子步旗、本调用后刷新 = 原文 AI→湿段序
+      const wb = this.wetBoxAt(ai0s);
+      projectileWetSection(this, game, game.world.store, wb.x, wb.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
     }
     // ---- 半程鞭尖音（AI_165 :45051-45070）：ai[0] 到达 (int)(timeToFlyOut/2f) 那一
     //  update,在鞭尖（FillWhipControlPoints 缺省视觉曲线 :45618 getActualCollisionPoints=
@@ -437,7 +484,7 @@ export class WhipProj extends Entity {
           t: ai0s / this.timeToFlyOut,
           facing,
           pvx: owner?.vx ?? 0, pvy: owner?.vy ?? 0,
-          vx: this.vx, vy: this.vy,
+          vx: this.wvx, vy: this.wvy,   // proj.velocity（:48853 支 1035 弹向消费;旧传空 vx/vy）
         });
       }
     }
@@ -467,25 +514,42 @@ export class WhipProj extends Entity {
     }
   }
 
+  /** AI_165 每子步直写的弹体 Center（:48550 `Center = GetArmPosition() + velocity×
+   *  (ai[0]−1)`）→ 通用湿段采样盒（湿段跑在 AI 与 UpdatePosition 之间 :16903/:19973）。
+   *  盒=SetDefaults 18×18（DefaultToWhip :10707-10708,scale 1）左上角 */
+  private wetBoxAt(ai0s: number): { x: number; y: number } {
+    const arm = this.armPos();
+    return { x: arm.x + this.wvx * (ai0s - 1) - this.w / 2,
+             y: arm.y + this.wvy * (ai0s - 1) - this.h / 2 };
+  }
+
   /** 单次曲线快照的命中结算（tag/proc/debuff/buff 语义见各段注释） */
   private tryHit(game: GameHooks, owner: Player | null, pts: V2[], ai0At?: number): void {
+    // ★通用湿段·出生预置（NewProjectile :10886-10892：盒级 WetCollision/LavaCollision
+    //  首测——原文 AI 首子步读出生旗,故预置在首次 tryHit 落位（首子步 ai0s=1 → 盒=
+    //  arm+velocity×0 = 出膛位 ≡ NewProjectile 位）;共享体 presetDone 同款置位,
+    //  段调用侧不再重复预置。旧 wetSnapshot 出生快照近似就此退役）
+    if (!this.presetDone) {
+      this.presetDone = true;
+      const st = game.world.store;
+      const b = this.wetBoxAt(ai0At ?? this.ai0);
+      const rW = wetCollision(st, b.x, b.y, this.w, this.h);
+      this.wet = rW.wet;                                   // :10887
+      if (lavaCollision(st, b.x, b.y, this.w, this.h)) this.lavaWet = true;   // :10888-10890
+      if (rW.honey) this.honeyWet = true;
+      if (rW.shimmer) this.shimmerWet = true;
+    }
     // 1104 火鞭 OnFire 窗口（蓝队 R7-41）：buff 24 仅当鞭身 !wet && ai[0] ∈
     // ((t/3)×2 ± 1) && 鞭尖 50×50 盒与敌盒相交（StatusNPC :11255-11272——中段
     // "溅火"专属;曾表驱动无条件每击必上）。
-    // ★台账批：wet 旗升级盒级 WetCollision 且为【出生时刻快照】——原版 projectile.wet
-    // 只在 NewProjectile 里以 Collision.WetCollision(整盒) 判定一次（Projectile.cs:
-    // 10887-10891），AI_165 全程不重评；旧实现取弹心格每帧液检=浅缘漏判/半浸早判双向漂移。
-    if (this.projId === 1104 && this.wetSnapshot === undefined) {
-      this.wetSnapshot = wetCollisionProbe(
-        game.world.store as unknown as Parameters<typeof wetCollisionProbe>[0],
-        this.x, this.y, this.w, this.h);
-    }
+    // ★湿段批：wet 消费升级为【逐子步维护旗】——原文 StatusNPC 在 AI 内读上子步
+    // 段值（AI :16880 → 湿段 :16903 位序;1104 非豁免 :10293-10295 无 ignoreWater 行）
     let spark1104 = false;
     let tipBox1104: { x: number; y: number; w: number; h: number } | null = null;
     if (this.projId === 1104) {
       const num2 = Math.trunc(this.timeToFlyOut / 3) * 2;      // :11259-11260
       const a0 = ai0At ?? this.ai0;
-      if (!this.wetSnapshot && a0 >= num2 - 1 && a0 <= num2 + 1) {   // :11262 中段 ±1
+      if (!this.wet && a0 >= num2 - 1 && a0 <= num2 + 1) {   // :11262 中段 ±1（!wet=维护旗）
         const tip = pts[pts.length - 1];
         tipBox1104 = { x: tip.x - 25, y: tip.y - 25, w: 50, h: 50 };   // :11266 50×50 盒
         spark1104 = true;

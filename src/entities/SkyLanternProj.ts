@@ -20,14 +20,31 @@
 //   为自发光弹体上升体,LanternSky 的灯笼海由 LanternNight.lanternsUp 驱动,【不存在】
 //   "放飞注册入天灯海"的通道（LanternSky.cs 无 855 引用实证）；本类不接入该表。
 //   静音：case 4702 与 DefaultToThrownWeapon 均无 UseSound（itemUseSound 表缺省即静默）。
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：855 走 SetDefaults :8199-8207
+//   （netImportant/12×12/aiStyle166/penetrate −1/timeLeft 1000）【无 ignoreWater 行】
+//   → 受段（vanilla-projectiles.json 同向）。AI_166_Dove type855 支无 wet 消费
+//   （:48410-48483 grep 实证）→ 溅花+旗维护即全部效果。tileCollide 缺省 true
+//   → 湿阻尼适用（:17755 wetVelocity=velocity×0.5 只进 UpdatePosition :20561 位移行,
+//   velocity 场不减——乘进位移行,碰撞探针仍读未阻尼 velocity 同 TileCollision 原文）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
 
 export class SkyLanternProj extends Entity {
   w = 12; h = 12;
   dead = false;
   readonly projId = 855;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   life = 1000;
   rot = 0;
   frame = 0;
@@ -66,6 +83,10 @@ export class SkyLanternProj extends Entity {
     const wind = (game.world as unknown as { weather?: { windSpeedCurrent?: number } }).weather?.windSpeedCurrent ?? 0;
     this.vx += 0.0525 * (wind === 0 ? 0.1 : wind);
     this.vx = Math.min(2, Math.max(-2, this.vx));
+    // ---- ★通用湿段（:16903-17113,共享体）——AI(:16880)→湿段(:16903)→HandleMovement
+    //      (:17120)位序;采样位=AI 后位移前 = 上拍移动结算位
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 撞块反身（HandleMovement :18459-18473；单盒双轴实心近似 TileCollision）----
     {
       const nxT = Math.floor((this.cx + this.vx) / TILE), cyT = Math.floor(this.cy / TILE);
@@ -81,9 +102,11 @@ export class SkyLanternProj extends Entity {
         if (rising) this.vy *= 0.25;                        // (:18466-18470 顶升限幅)
       }
     }
-    // ---- 位移 ----
-    this.x += this.vx;
-    this.y += this.vy;
+    // ---- 位移（★水中阻尼 ×0.5/蜂蜜 0.25/微光 0.375 乘进位移行,velocity 场不减
+    //      ——HandleMovement :17755 wetVelocity 只进 UpdatePosition :20561）----
+    const df = projWaterDragFactor(this);
+    this.x += this.vx * df;
+    this.y += this.vy * df;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; return; }
     // ---- 寿命/淡出（:15861 timeLeft-- 子步尾 + :48467-48472）----
     if (--this.life <= 0) { this.dead = true; return; }

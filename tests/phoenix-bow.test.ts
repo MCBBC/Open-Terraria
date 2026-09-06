@@ -247,12 +247,12 @@ describe('幻影凤凰 ③：706 凤凰弹', () => {
     expect(groups[0].every((f) => f.startsWith('dd2_phantom_phoenix_shot'))).toBe(true);
   });
 
-  it('湿灭：入水格即 Kill（:56743-56746）', () => {
+  it('湿灭：出生预置湿旗 → 首拍 Kill（:10886-10892 预置 + :56743-56746 wet 旗驱动;2026-09-06 湿段批——wet=盒级 WetCollision 中心带,旧弹心单格近似退役;满格液面=格顶）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     const bolt = new PhoenixBolt(80 * TILE, 100 * TILE, 16, 0, 100, 2);
     const tx = Math.floor(bolt.cx / TILE), ty = Math.floor(bolt.cy / TILE);
-    w.store.liquid[w.store.idx(tx, ty)] = 200;
+    w.store.liquid[w.store.idx(tx, ty)] = 255;   // 满格（255）：液面=格顶——10×10 盒中心带浸入
     w.store.liquidType[w.store.idx(tx, ty)] = LIQUID_TYPE.WATER;
     bolt.fixedUpdate(1, game);
     expect(bolt.dead).toBe(true);

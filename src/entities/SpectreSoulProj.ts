@@ -38,6 +38,9 @@ import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
 import { canBeChasedBy, playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
 import { cutTilesBox } from './ProjCutTiles';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** NPC.canGhostHeal=false 族（NPC.cs SetDefaults 写点——NPC.cs:6270 字段缺省 true；
  *  false 站点 :13921(type384)/:13961(type387)/:13978(type388)/:15839(type523)）。
@@ -253,7 +256,22 @@ export class SpectreSoulProj extends Entity {
   friendly = false;
   alpha = 255;
   tileCollide = false;            // 穿墙
-  ignoreWater = true;
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体;2026-09-06 武器弹簇批）----
+  //  356 SetDefaults（:4466-4475）【无】ignoreWater 行 = 受段——旧字段
+  //  `ignoreWater = true` 系误标（SetDefaults 无此行,数据面 PROJ_IGNORE_WATER
+  //  亦缺 356）,本批撤除改接湿段。溅花湿段随 EU 子步逐跑（extraUpdates=3 → 4 子步,
+  //  原版 Update 子步循环 :16781 内 :16895 同序;wetCount 逐子步 −1 :17109-17112）;
+  //  阻尼 N/A：tileCollide=false :4473 → HandleMovement :17581 `if (tileCollide)`
+  //  阻尼块整跳（wetVelocity≡velocity,UpdatePosition :20551 无水减）——禁硬安。
+  //  356 不在 IsDestroyedByWater 六型（:287={85,15,188,34,1097,1106}）→ 无 kill 钩。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步 AI 后/位移前同位） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number, public damage: number,
     lock: { id: number } | null) {
@@ -331,6 +349,10 @@ export class SpectreSoulProj extends Entity {
       // 原 Kill 支(cand 空)return 已在上方短路 ⇒ 该子步不出尘,与原版 AI() 提前
       // return 跳过尘循环同态 ----
       this.spawnTrailDust(game);
+      // ---- ★通用湿段（:16903-17113）随子步逐跑（AI 后/位移前 = 原版 Update 同序;
+      // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写;阻尼 N/A 见字段块注）----
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
       // ---- 位移 + 接触（HandleMovement :17121 → Damage :17188）----
       this.x += this.vx;
       this.y += this.vy;

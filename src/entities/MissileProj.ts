@@ -52,6 +52,8 @@ import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { VDust } from '../fx/VanillaDust';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 
 // ===================== 数学原语（逐字对源码） =====================
 
@@ -359,6 +361,27 @@ export class MagicMissileProj extends Entity {
   private hitCd = new Map<number, number>();
   /** 持按连发计数（useTime 拍） */
   private reuseT = 0;
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇批）----
+  //  本类服务 id 全集 = aiStyle 9 三型（Game.ts:16718 projId:cw.shoot）逐 id 定谳
+  //  （SetDefaults P.cs 699-10676 逐块）：
+  //    · 16 魔法飞弹   — block :976-986 ignoreWater=true :985 = 豁免（段 no-op）
+  //    · 34 Flamelash    — block :1164-1175 【无】ignoreWater 行 = 受段！溅花 +
+  //      水中位移阻尼（tileCollide 缺省 true → HandleMovement :17581 阻尼块生效）
+  //      + IsDestroyedByWater 水death（ProjectileID.Sets :287 六型含 34;:16923-16925
+  //      `wet && !lavaWet` → Kill——经 hooks.kill 接 killNow,段内特支 34 浆穿
+  //      :16933-16936 由共享体内建）。出生侧禁射门（Player.cs:51274 wet&&¬lavaWet
+  //      &&shoot∈{85,15,34}）已在 Game.useCombatWeapon :16701。
+  //    · 79 彩虹魔杖弹 — block :1596-1606 ignoreWater=true :1607 = 豁免（段 no-op）
+  //  段位序 = AI(steer) → 湿段 → 位移（直积分乘 drag,速度场不减）;本类 AI 无湿旗
+  //  消费者 → 无需 spawn 前置预置（共享体首拍内建 :10886-10892 等价）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 后/位移前同位） */
+  presetDone = false;
   private useTime: number;
   private channelCb: () => boolean;
   private aimCb: () => { x: number; y: number };
@@ -400,8 +423,22 @@ export class MagicMissileProj extends Entity {
     this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
     this.steer(game);
     if (this.dead) return;
-    this.x += this.vx;
-    this.y += this.vy;
+    // ---- ★通用湿段（:16903-17113）——AI 后/位移前 = 原版 Update 同序。溅花尘/音由
+    // 共享体 wetSplashStepShared 承载,不自写;16/79 豁免经数据面分流 = 段 no-op
+    // （:16903 整段门,presetDone 同步跳过 = 原版 :10888-10890 只清 wet 同向）。
+    // 34 水death Kill（:16923-16925）经钩走 killNow——原版 Kill 后 HandleMovement
+    // 仍跑一步（段无 active 门）,`!active` 早退 :17157 跳过 Damage 与拖尾记录带,
+    // 故死亡拍位移照走、带记录/命中不跑（下方 dead 分支）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater,
+      { kill: () => this.killNow(game) });
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20551 `if (wet)
+    // position += wetVelocity`）——直积分宿主：速度场不减只削当拍位移（干态档=1 恒等;
+    // 16/79 豁免弹 wet 恒 false → 档恒 1 数值不变）
+    const drag = projWaterDragFactor(this);
+    this.x += this.vx * drag;
+    this.y += this.vy * drag;
+    if (this.dead) return;   // 段内水death（34）——:17157 !active 早退,不入带不结算
     if (this.stripCap > 0) this.stripRecord();   // P.cs:17197（位移后;TrailingMode[16/34/79]=3）
     this.hitStep(game);
   }

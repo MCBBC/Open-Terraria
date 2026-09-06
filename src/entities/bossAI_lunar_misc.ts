@@ -57,6 +57,8 @@ import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 原版 localAI[0..3](Enemy 只有 ai0-ai3,localAI 独立 → WeakMap 落盘) */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -114,6 +116,27 @@ export class TabletShardProj extends Entity {
   h = 8;
   dead = false;
   private age = 0;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：526 CultistBossParticle SetDefaults P.cs:5964-5972（8×8/aiStyle 98/
+  //  tileCollide=false【:5969】/timeLeft 120/alpha 255）【无】ignoreWater 行 →
+  //  受段（数据面 PROJ_IGNORE_WATER 亦无 526）。526 ∉ IsDestroyedByWater 六型、
+  //  非 2/34/80/155 → 各特支钩缺省（本类无 projId 字段,段参传字面 526——防
+  //  Game.ts:3042 快照通判抢 kind1,同 DukeSharknadoBolt 注）。
+  //  阻尼不适用（原版形态锚）：tileCollide=false【:5969】→ HandleMovement 湿阻尼支
+  //  :17721-17764 整支不进,wetVelocity 保持 :16870 的 AI 前 velocity 快照（无阻尼、
+  //  滞后一子步 quirk,YoyoProj 回收态同款三分叉先例）→ wet 位移 = AI 前快照 /
+  //  dry 位移 = post-AI velocity（UpdatePosition :20557-20562 分叉,aiStyle 98 不在
+  //  早退表 :20551）。本类 AI 每拍 Lerp 重算速度 → 快照 = 上拍末速,湿态即一拍滞后。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number,
     private tgtX: number, private tgtY: number) {
     super();
@@ -124,6 +147,9 @@ export class TabletShardProj extends Entity {
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (++this.age > 120) { this.dead = true; return; }          // timeLeft=120(:5970)
+    // :16870 `Vector2 wetVelocity = velocity`（逐子步 AI 前 velocity 快照——526
+    //  tileCollide=false,湿态位移消费这份快照,见字段块头注）
+    const preVx = this.vx, preVy = this.vy;
     const dx = this.tgtX - this.cx, dy = this.tgtY - this.cy;
     const dist = Math.hypot(dx, dy);
     const vel = Math.hypot(this.vx, this.vy);
@@ -136,8 +162,15 @@ export class TabletShardProj extends Entity {
     ux *= 15; uy *= 15;
     this.vx += (ux - this.vx) * 0.1;                             // Lerp(velocity,val,.1)(:33757)
     this.vy += (uy - this.vy) * 0.1;
-    this.x += this.vx;                                           // AI_098 无重力项
-    this.y += this.vy;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_098（Lerp 追踪完）→ 本段 → HandleMovement/UpdatePosition。
+    // 溅花尘/音由共享体调 wetSplashStepShared,本类不自写。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      526, !!projectileData(526)?.ignoreWater);
+    // 位移（tileCollide=false :5969 → 湿阻尼支不进）：wet → position += AI 前快照
+    // （:16870,无阻尼滞后一子步 quirk）/ dry → post-AI velocity（:20557-20562 分叉）
+    if (this.wet) { this.x += preVx; this.y += preVy; }
+    else { this.x += this.vx; this.y += this.vy; }
     this.spawnTrail(game);
   }
   /** 2×d228 尾迹（:33758-33765）：NewDust(Center,0,0,228)→position+=(4,4)、
@@ -2104,6 +2137,29 @@ export class LunarOrb extends Entity {
   private frameT = 0;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对（双 kind）：539 SetDefaults P.cs:6144-6152（18×30/aiStyle 102/hostile/
+  //  penetrate −1/timeLeft 600,tileCollide 缺省 true【无覆写行】）【无】ignoreWater
+  //  行 → 受段;574 P.cs:6241-6249（18×18/aiStyle 102/hostile/timeLeft 600/
+  //  tileCollide=false【:6248】）【无】ignoreWater 行 → 受段（数据面
+  //  PROJ_IGNORE_WATER 两者皆无）。两 id ∉ IsDestroyedByWater 六型、非 2/34/80/155。
+  //  阻尼（按 kind 分叉,aiStyle 102 不在 UpdatePosition 早退表 :20551）：
+  //  · 539 tileCollide=true → 湿阻尼支 :17721-17764 跑,速度积分行乘档（速度场
+  //    不减只削当拍位移）;盘旋段 AI 直写的父体跟随位移（position += npc 位差
+  //    :33884-33887）非 velocity 积分宿主,不受阻尼——与原版同构。
+  //  · 574 tileCollide=false【:6248】→ 湿阻尼支整支不进,wetVelocity 保持 :16870
+  //    的 AI 前 velocity 快照（无阻尼、滞后一子步 quirk）→ wet 位移 = AI 前快照 /
+  //    dry 位移 = post-AI velocity（:20557-20562 分叉,YoyoProj 回收态先例）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
+
   constructor(parent: Enemy | null, kind: 539 | 574, vx: number, vy: number, dmg: number, x?: number, y?: number) {
     super();
     this.kind = kind;
@@ -2134,6 +2190,9 @@ export class LunarOrb extends Entity {
     const parent = this.parentNetId
       ? (game.enemies() as Enemy[]).find((n) => n.netId === this.parentNetId)
       : (game.enemies() as Enemy[]).find((n) => n.id === this.parentId);
+    // :16870 `Vector2 wetVelocity = velocity`（逐子步 AI 前 velocity 快照——574
+    //  tileCollide=false 湿态位移消费这份快照,见字段块头注）
+    const preVx = this.vx, preVy = this.vy;
     const orbitT = this.kind === 539 ? 210 : 180;
     const alive = !!parent && !parent.dead;
     if (this.kind === 574 && !alive) { this.dead = true; return; }   // :32083-32092
@@ -2193,7 +2252,22 @@ export class LunarOrb extends Entity {
     if (this.kind === 539 && this.ai0 > orbitT && ++this.frameT >= 2) {
       this.frameT = 0; this.frame++;                  // 冲刺段帧率加倍(:32227-32235)
     }
-    this.x += this.vx; this.y += this.vy;             // 539 tileCollide / 574 穿墙
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_102（盘旋/冲刺态机完,父体跟随直写位已发生）→ 本段 →
+    // HandleMovement/UpdatePosition（测位 = post-AI 盘旋跟随位,原版同位）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.kind, !!projectileData(this.kind)?.ignoreWater);
+    // 位移（按 kind 阻尼分叉,见字段块头注）：539 tileCollide=true → 速度积分乘档
+    // （速度场不减只削当拍位移）;574 tileCollide=false → wet 走 AI 前快照（无阻尼
+    // 滞后一子步 quirk）/ dry 走 post-AI velocity。父体跟随直写位移两档均不受阻尼。
+    if (this.kind === 539) {
+      const df539 = projWaterDragFactor(this);
+      this.x += this.vx * df539; this.y += this.vy * df539;   // 539 tileCollide
+    } else if (this.wet) {
+      this.x += preVx; this.y += preVy;                       // 574 湿态=:16870 快照
+    } else {
+      this.x += this.vx; this.y += this.vy;                   // 574 dry=post-AI 速度
+    }
     if (this.kind === 539) {
       const st = game.world.store;
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
@@ -2278,6 +2352,22 @@ export class VortexPortalProj extends Entity {
   private rot = 0;
   private sndPlayed = false;       // localAI[1]
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对（双 id 合块）：578 VortexVortexLightning / 579 VortexVortexPortal
+  //  SetDefaults P.cs:6284-6294（32×32/aiStyle 108/friendly/alpha 255/
+  //  tileCollide=false/ignoreWater=true【:6291】/hostile/drawLayer 1）→ 两 id 全豁免
+  //  （数据面 PROJ_IGNORE_WATER 亦含 578/579）→ 段门恒闭（:16903）= 原版零行为
+  //  （字段照加、段照调,豁免分流由 ignoreWater 参数自动承载）。阻尼不适用（双证）：
+  //  ①豁免;②零速定点门体（AI 全程不积分 velocity,位置仅出生锚定）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   /** x/y = NewProjectile 的 X/Y（中心锚，:10258）；type ∈ {578, 579} */
   constructor(x: number, y: number, projId: 578 | 579) {
     super();
@@ -2287,6 +2377,10 @@ export class VortexPortalProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——578/579 豁免 id（P.cs:6291 ignoreWater=true）→
+    //  段门恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // 开门爆尘（:32508-32523）：ai1==1 → 25 颗尘（229/229/161 掷、×3.5..4 速、scale
     // 1.75+1.25r、fadeIn 0.25、noLight）
     if (this.ai1 === 1) {

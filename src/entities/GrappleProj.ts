@@ -15,11 +15,29 @@
 //  · 链/钩头渲染已 1:1 分节贴图（src/data/grappleChains.ts，ChainID 表）；贴图未就绪
 //    或缺失时回退旧线段+方块渲染（下帧自愈，全表贴图已解包=恒不触发）
 //  · 935 皇后钩瞬移走 moveAndCollide 逐步步进（原版 TileCollision 150 步 ×12px 同构）
+//
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：钩爪全族（13/32/73/74/165/230-235/
+// 256/315/322/331/332/372/396/403/446/486-489/646-649/652/753/865/935）SetDefaults
+// 逐 id 核验【均无 ignoreWater 行】（13 :942-951、74 :1539-1549、165 :2541-2550、
+// 256 :3391-3402、315 :4080-4089、322 :4152-4161、331 :4238-4247、332 :4249-4259、
+// 372 :4555-4564、396 :4772-4782、403 :4839-4848、446 :5179-5189、652 :7004-7013、
+// 753 :7759-7768、865 :8304-8313、935 :8887-8897;73/230-235/486-489/646-649 走
+// OR-链/共档亦无）→ 全员受段。钩爪入水溅花 = 原版真行为（通用湿段 :16903 对所有
+// 非 ignoreWater 弹逐 Update 维护）。AI_007 全段无 wet 消费（:53483-54250 grep 实证）
+// → 溅花+旗维护即全部效果。★阻尼 N/A 定谳：钩爪 tileCollide=false（各 SetDefaults
+// 显式 false）⇒ wetVelocity 恒=velocity（:16870 初始化,阻尼算式只存在于
+// HandleMovement 的 tileCollide 支 :17583/:17721-17764）→ 位移不折减。
+// 位序：本仓 substep 头调用 = 原文「上子步 UpdatePosition 后位 → 湿段(:16903) →
+// 本子步 AI(:16880)/UpdatePosition(:19973)」——采样位逐子步与原文全等（首子步=
+// 出生位=NewProjectile :10886-10892 预置位）。登记有界偏差：doLatch 直写吸附位,
+// 锚定子步的湿段采样位较原文晚一子步（原文 AI 写位后即采样）;AI 杀拍（超程/回收
+// 贴身）不跑湿段=仓内湿段批统一口径。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { BuffType } from '../stats/Buffs';
 import { TILE } from '../core/constants';
+import { projectileWetSection } from './projWetSection';
 import {
   HOOK_KILL_DISTANCE, HOOK_RETRACT_KILL_DIST, HOOK_TIME_LEFT, CRACKED_BRICK_SHEETS,
   TREE_TRUNK_SHEETS, TRACK_SHEET, TREE_SHEET, HOOK_PROJ_STATS, isHookProjectile,
@@ -86,6 +104,15 @@ export class GrappleProj extends Entity {
   /** 446 反重力钩 localAI[0]（0..27 循环，Projectile.cs:49686-49696）——链贴图
    *  帧行 = ⌊lai0/7⌋ ∈ 0..3（Main.cs:28895-28900），纯视觉 */
   lai0 = 0;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   /** 652 静态钩钩头帧（6 帧循环，Projectile.cs:49697-49704；projFrames=6 Main.cs:8450）——纯视觉 */
   headFrame = 0;
   /** 652 帧计数器（++frameCounter >= 7 推帧） */
@@ -116,6 +143,11 @@ export class GrappleProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     // sub-step = 1 + extraUpdates（Projectile.extraUpdates；256=1、935=3）
     for (let step = 0; step <= this.stats.extraUpdates; step++) {
+      // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+      // 子步头位采样 = 上子步 UpdatePosition 结算位（首子步=出生位=预置位）——
+      // 逐 id 豁免面/阻尼 N/A 见头注;AI_007 无湿旗消费者 → 段调用不拆 AI
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.projW, this.projH,
+        this.projType, !!projectileData(this.projType)?.ignoreWater);
       this.aiStep(game);
       if (this.dead) return;
     }

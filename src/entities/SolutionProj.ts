@@ -11,12 +11,23 @@
 //   弹心消耗链（PickAmmo 加法弹型 + 动画窗扣耗）见 solutionConsumesThisShot。
 //   转换实效经 GameHooks.applySolution 回调走 WorldEvolution.convertArea
 //  （与 PowderProj→Game.applyPowder 同构——实体不持 Evolution 引用）。
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：
+//   ① SolutionProj 145-149（SetDefaults :2341-2351/:2353-2363/:2365-2375/:2377-2387/
+//      :2389-2399）与 1015-1017（:9635-9639 → DefaultToSpray() :10693-10703）——
+//      【全部 ignoreWater=true】（:2350/:2362/:2374/:2386/:2398/:10702）→ 豁免
+//      （:16901 整段门直跳,wet 恒 false,N/A 不接;vanilla-projectiles.json 同向）。
+//   ② WaterSplashProj 69/70/621（:1491-1497/:1499-1505/:1507-1513,均 14×14/aiStyle2/
+//      friendly/penetrate 1,无 ignoreWater 行）→ 受段,已接 projectileWetSection
+//      （aiStyle 2 AI 无湿旗消费 :22674-22698 grep 实证 → 溅花+旗维护即全部效果;
+//      tileCollide 缺省 true → 湿阻尼乘进位移行,velocity 场不减 :17755/:20561）。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 /** 溶液弹型号表（AI_031 switch，cs:25321-25358）：projId → [conv, dust]。
@@ -158,6 +169,15 @@ export class WaterSplashProj extends Entity {
   knockback: number;
   critChance = 0;
   armorPen = 0;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   private ai0 = 0;
   private rotation = 0;
   private direction = 1;
@@ -209,7 +229,18 @@ export class WaterSplashProj extends Entity {
       this.vx *= 0.99;
     }
     if (this.vy > 32) this.vy = 32;                 // :21970 终端（aiStyle 2 全体）
-    let nx = this.x + this.vx, ny = this.y + this.vy;
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    // 位序 = AI(:16880)→湿段(:16903)→HandleMovement(:17120)→位移(:20561);采样位=
+    // AI 后位移前 = 上拍移动结算位。69/70/621 受段（见头注 ②）;IsDestroyedByWater
+    // 六型表不含三瓶 → 无水death支;AI 杀拍（撞块/命中 splash）早退不跑湿段=仓内
+    // 湿段批统一口径（RollingBoulder 同式,登记有界偏差）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    // ★水中位移阻尼（HandleMovement :17721-17764）：速度【场】不减只削当拍位移。
+    //   原文序 = TileCollision 用【未阻尼】velocity 探撞（:17752）→ wetVelocity=
+    //   velocity×0.5 只进 UpdatePosition（:20561）→ 探针读原速、位移吃阻尼,两处勿混
+    const df = projWaterDragFactor(this);
+    const nx = this.x + this.vx, ny = this.y + this.vy;   // 探针 = 未阻尼 velocity
     const solidAt = (px: number, py: number) => {
       const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
       return st.inBounds(tx, ty) && st.isSolid(tx, ty);
@@ -220,7 +251,7 @@ export class WaterSplashProj extends Entity {
       this.splash(game);
       return;
     }
-    this.x = nx; this.y = ny;
+    this.x += this.vx * df; this.y += this.vy * df;        // 位移 = wetVelocity 档
     // 命中敌（friendly/penetrate 1 → 一击即 Kill）：Damage_CanDealDamage 对
     // aiStyle 2 无豁免（:11782 豁免表无此族），伤害/击退照常结算
     for (const ent of game.enemies()) {

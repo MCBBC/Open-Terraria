@@ -6,7 +6,9 @@
 //     ×0.95/×1.05——彩虹头呈抛物拱弧；速度恒归一到 15.95；rotation=atan2−π/2；
 //     timeLeft 钳 2400；撞块即亡（tileCollide 默认 true）。
 //   251 彩虹段（SetDefaults :3067）：14×14 aiStyle46 friendly magic penetrate-1
-//     scale1.25 light0.3 tileCollide=false；首帧锁 rotation=弹头方向、timeLeft=2400
+//     scale1.25 light0.3 tileCollide=false ignoreWater=true（:3348——★湿段定谳
+//     2026-09-06：250 :3332 / 251 :3348 双双豁免,P.cs:16903 湿段整段门不开,
+//     不接 projectileWetSection）；首帧锁 rotation=弹头方向、timeLeft=2400
 //     （≈40s 持续）；alpha 生命周期（:26758-26770）：首 10t 淡入（255→0）、
 //     中段恒 0（全显）、末 10t 淡出（GetAlpha :76647 亮度=255−alpha）；
 //     命中 usesIDStaticNPCImmunity + idStaticNPCHitCooldown 10——【全段共享】

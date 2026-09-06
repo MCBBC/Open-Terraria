@@ -138,22 +138,30 @@ describe('FallingStar ★通用湿段（12 :926-940 / 720 :7619-7627 均受段�
 // MeteorChunk（1078 陨石碎块）
 // =====================================================================
 describe('MeteorChunk ★通用湿段（1078 :10069-10079 受段）', () => {
-  it('入水溅花 10 粒 + 湿旗跃迁 + wetCount 出水窗', () => {
+  it('入水/出水溅花 10 粒×2（水支 dustWater 33）+ 湿旗跃迁——AI_199 尘 31/6 与溅花尘分型不混计', () => {
     const w = mkWorld();
     liquidAt(w, WX0, WX1, WY0, WY1);
     const { g, dust, splash } = makeGame(w);
-    const m = new MeteorChunk(34 * TILE, 900, 0, 4);
+    // 斜向穿越（vx=4,vy=4 无重力直线=原版斜掷形态）：横向出水带而非纵向触底——
+    // 纵向会撞水带底邻接实心层、出水溅花被撞块 Kill 抢先（湿段先于 Kill 照跑入水支）
+    const m = new MeteorChunk(34 * TILE, 900, 4, 4);
     let sawWet = false;
+    let ticks = 0;
     for (let t = 0; t < 80 && !m.dead; t++) {
       m.fixedUpdate(1 / 60, g);
       sawWet = sawWet || m.wet;
+      ticks++;
     }
     expect(splash.length).toBe(2);
-    expect(dust.length).toBe(20);
+    expect(dust.filter((d) => d.type === 33).length).toBe(20);      // 溅花=入/出水各 10（水支 33）
+    expect(dust.filter((d) => d.type === 31).length).toBe(ticks);   // AI_199 尘 31 无门每拍 1（:40745）
+    const d6 = dust.filter((d) => d.type === 6).length;
+    expect(d6).toBeGreaterThan(0);                                  // 干态尘 6 照发
+    expect(d6).toBeLessThan(ticks);                                 // !wet 门（湿窗停发）
     expect(sawWet).toBe(true);
   });
 
-  it('水中位移阻尼 ×0.5：重力照加速度场，位移减半（直积分乘进位移行）', () => {
+  it('水中位移阻尼 ×0.5：★无重力恒速直线（AI_199/通用路径无速度写行）,速度场不变、位移减半', () => {
     const w = mkWorld();
     liquidAt(w, WX0, WX1, WY0, WY1);
     const { g } = makeGame(w);
@@ -162,26 +170,26 @@ describe('MeteorChunk ★通用湿段（1078 :10069-10079 受段）', () => {
     expect(m.wet).toBe(true);
     const y0 = m.y, vy0 = m.vy;
     m.fixedUpdate(1 / 60, g);
-    expect(m.vy).toBeCloseTo(vy0 + 0.3, 6);          // 重力照加（速度场）
-    expect(m.y - y0).toBeCloseTo((vy0 + 0.3) * 0.5, 6);   // 位移减半
+    expect(m.vy).toBe(vy0);                          // ★初速即终速（旧 vy+=0.3 抛物线近似已退役）
+    expect(m.y - y0).toBeCloseTo(vy0 * 0.5, 6);      // 位移减半
   });
 
-  it('AI_199 尘 6 !wet 门（1457 :40752）：水中零飞尘、干态照发', () => {
+  it('AI_199 两尘分立（1457 :40745-40757）：干态 31+6 各 1/拍,湿态尘 6 停发、尘 31 照发', () => {
     const w = mkWorld();
     liquidAt(w, WX0, WX1, WY0, WY1);
-    const { g, particles } = makeGame(w);
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0);   // 尘门 0<0.5 恒发
+    const { g, dust } = makeGame(w);
     const dry = new MeteorChunk(70 * TILE, 900, 0, 4);         // 干列（70>41 出水带）
-    for (let t = 0; t < 5; t++) dry.fixedUpdate(1 / 60, g);
-    const dryN = particles();
-    expect(dryN).toBeGreaterThan(0);
-    const wet = new MeteorChunk(34 * TILE, 970, 0, 4);         // 水带内
+    for (let t = 0; t < 3; t++) dry.fixedUpdate(1 / 60, g);
+    expect(dust.filter((d) => d.type === 31).length).toBe(3);  // 尘 31 无门（:40745-40749）
+    expect(dust.filter((d) => d.type === 6).length).toBe(3);   // 尘 6 !wet 门干态恒发（:40751-40757）
+    const wet = new MeteorChunk(34 * TILE, 970, 0, 4);         // 水带内（出生盒即湿）
     wet.fixedUpdate(1 / 60, g);
     expect(wet.wet).toBe(true);
-    const before = particles();
+    const n31 = dust.filter((d) => d.type === 31).length;
+    const n6 = dust.filter((d) => d.type === 6).length;
     wet.fixedUpdate(1 / 60, g);
-    expect(particles()).toBe(before);                          // !wet 门=零飞尘
-    expect(spy).toBeDefined();
+    expect(dust.filter((d) => d.type === 31).length).toBe(n31 + 1);  // 水中尘 31 照发（无门）
+    expect(dust.filter((d) => d.type === 6).length).toBe(n6);        // !wet 门=尘 6 停发
   });
 });
 
@@ -362,6 +370,73 @@ describe('TrapShot ★通用湿段', () => {
     for (let n = 0; n < 3 && !t.dead; n++) t.fixedUpdate(1 / 60, g);
     expect(t.wet).toBe(false);
     expect(splash.length).toBe(0); expect(dust.length).toBe(0);
+  });
+});
+
+// =====================================================================
+// TrapShot 1049 AI_5 尘链（1457 :24342-24364;2026-09-06 残差清偿——整链补齐）
+// 掷 0 钉：Next(2)==0 双支恒发、Next(4)==0 → 尘型 6、NextFloat()=0（velocity 归零）
+// =====================================================================
+describe('TrapShot 1049 hail AI_5 尘链（:24342-24364）', () => {
+  interface HailDustRec {
+    x: number; y: number; w: number; h: number; type: number;
+    vx: number; vy: number; scale: number; fadeIn: number; noGravity: boolean;
+  }
+  /** 记录型 stub：回填可变尘（初速 2/2、scale 1——隔离调用侧覆写面;真池的
+   *  NewDust 掷序/烟族型内预处理由 VanillaDust.spawn 自身承载,不在本测重复） */
+  function hailGame(w: World) {
+    const base = makeGame(w);
+    const rec: HailDustRec[] = [];
+    (base.g as unknown as { spawnDust: unknown }).spawnDust =
+      (x: number, y: number, bw: number, bh: number, type: number) => {
+        const d: HailDustRec = { x, y, w: bw, h: bh, type, vx: 2, vy: 2, scale: 1, fadeIn: 0, noGravity: false };
+        rec.push(d);
+        return d;
+      };
+    return { ...base, rec };
+  }
+
+  it('干态每拍 2 子步 ×（±π/2 双支各 1/2 掷 + !wet 完美支 1）=6 粒,位/scale/fadeIn 逐值', () => {
+    const w = mkWorld();
+    const { g, rec } = hailGame(w);
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const h = new TrapShot(440, 900, 8, 0, 30, 'hail');        // 干区（col 27）
+    h.fixedUpdate(1 / 60, g);
+    spy.mockRestore();
+    expect(rec.length).toBe(6);                                // extraUpdates=1 → 2 子步 × 3 粒
+    const cx = 440 + 12, cy = 900 + 12;                        // hail 盒 24×24
+    for (const s of [0, 1]) {                                  // 每子步序：A(+π/2) → B(−π/2) → 完美
+      const a = rec[s * 3], b = rec[s * 3 + 1], p = rec[s * 3 + 2];
+      expect(a.type).toBe(6);                                  // (Main.rand.Next(4)==0)?6:31（掷 0→6）
+      expect(a.w).toBe(24); expect(a.h).toBe(24);              // NewDust(position, width, height, …)
+      expect(a.x).toBe(cx + 10);                               // vector9=C+n(v)×10（nx=1）;+=Rot(π/2)=(−vy,vx)=(0,+8)
+      expect(a.y).toBe(cy + 8);
+      expect(a.scale).toBe(0.3);                               // 1×(0.3+0.9×NextFloat=0)（:24350）
+      expect(a.vx).toBe(0); expect(a.vy).toBe(0);              // velocity ×= NextFloat()（:24351）
+      expect(a.noGravity).toBe(true);                          // :24352
+      expect(b.x).toBe(cx + 10);                               // +=Rot(−π/2)=(vy,−vx)=(0,−8)
+      expect(b.y).toBe(cy - 8);
+      expect(p.type).toBe(6);
+      expect(p.w).toBe(0); expect(p.h).toBe(0);                // NewDustPerfect(Position,0,0,6)（:24360）
+      expect(p.x).toBe(cx); expect(p.y).toBe(cy);              // 圆点=NextFloat×25=0 → Center 本位（perfect 覆写）
+      expect(p.vx).toBe(1); expect(p.vy).toBe(1);              // 桩 2 × 0.5（:24362）
+      expect(p.scale).toBe(1.3);                               // :24363
+      expect(p.fadeIn).toBe(1);                                // :24364
+      expect(p.noGravity).toBe(true);                          // :24365
+    }
+  });
+
+  it('!wet 完美支读湿旗（:24359）：出生即湿 → 每子步仅 ±π/2 双支 2 粒', () => {
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, rec } = hailGame(w);
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const h = new TrapShot(34 * TILE, 970, 8, 0, 30, 'hail');  // 出生盒即湿（预置拍置旗）
+    h.fixedUpdate(1 / 60, g);
+    spy.mockRestore();
+    expect(h.wet).toBe(true);
+    expect(rec.length).toBe(4);                                // 2 子步 × 双支;完美支被 !wet 关断
+    expect(rec.every((d) => d.type === 6)).toBe(true);
   });
 });
 

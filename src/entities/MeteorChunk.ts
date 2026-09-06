@@ -1,14 +1,17 @@
 // 流星雨陨石碎块(Projectile 1078 "MeteorOre",WorldGen.UpdateWorld :71771-71810
 // 消耗 meteorShowerCount 的产物)。与夜间坠星(FallingStar,弹幕 12)是两个东西:
-// 1078 带重力抛物线、伤害 50(专家40/大师35)+ 击退 5、命中玩家施加 OnFire(24)
+// 1078 无重力恒速直线(★2026-09-06 翻案:AI_199(:40743-40761)与 Projectile 通用
+// 路径均无 velocity 写行,初速即终速——WorldGen.cs:72326-72335 num11=12 归一注入,
+// 直到 tileCollide 撞块消亡;旧"带重力抛物线 vy+=0.3"系既有近似,已退役)、
+// 伤害 50(专家40/大师35)+ 击退 5、命中玩家施加 OnFire(24)
 // 300-600t(Projectile.cs:11456-11459)、撞地消亡但带掉落(Kill :76509-76511:
 // netMode!=1 门内 1/16 × item116 陨石矿 ×Next(2,7)=2..6)——★头注旧"撞地无掉落"
 // 系审计误读(F2 2026-08-26 勘误):把 1078 与坠星弹幕 12 的掉落语义混记了。两者
 // 区分:1078=概率小量陨石矿;弹幕 12 自然星(damage>500)落地必掉 item75×1
 // (Kill_ExplodeTiles :79349-79351,FallingStar natural 支已对齐)。
 // · SetDefaults(:9783-9793):w=h=14, hostile+friendly, penetrate=-1
-// · AI_199(:37668-37691):frame=rand(3) 视觉;尘 31+6 号;红光(1,0,0);
-//   rotation += vx*0.06 + direction*0.06;运动=通用重力(0.3,aiStyle 199 无运动覆写)
+// · AI_199(:40743-40761):frame=rand(3) 视觉;尘 31(无门)+尘 6(!wet 门);红光(1,0,0);
+//   rotation += vx*0.06 + direction*0.06;运动=无重力恒速直线(无 velocity 写行)
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -57,11 +60,31 @@ export class MeteorChunk extends Entity {
     // ---- AI_199 视觉段（1457 :40743-40761 / 1456 :37668-37691,两版同文;原版 AI
     //      :16880 先于湿段 :16903——挪到湿段前,尘位=pre-move 同原版 NewDust(position)) ----
     this.rot += this.vx * 0.06 + (this.vx >= 0 ? 0.06 : -0.06);   // 1457 :40759-40760
-    // 尘 6 !wet 门（1457 :40752,读上拍湿旗）——尘 31（1457 :40745-40749）原版无门。既有
-    // 0.5 降采样单粒子近似 conflates 两尘,门按 !wet 接线=入水停飞尘;尘 31 缺面
-    // 登记（视觉批域,非本批引入）
-    if (!this.wet && Math.random() < 0.5) {
-      game.spawnParticles(this.cx, this.cy, '#FF7050', 1, 0.5, { life: 18 });
+    // 尘 31（1457 :40745-40749,无门每拍 1 粒）：NewDust(盒 14×14, 31, 0,0, α100) +
+    // scale=0.1+Next(5)×0.1（绝对覆写,消解 NewDust ±0.2 抖）+ fadeIn=1.5+Next(5)×0.1
+    // + noGravity。★2026-09-06 残差翻案清偿：既有"0.5 降采样 spawnParticles 单粒子"
+    // 近似 conflates 两尘——尘 31 整条缺面（原版无门恒发）,尘 6 的 !wet 门只对受控
+    // 半生效;现按原文两尘分立逐值补齐（spawnDust 直入原版尘池,颜色/贴图由尘型承载）
+    const d31 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100);
+    if (d31) {
+      d31.scale = 0.1 + Math.floor(Math.random() * 5) * 0.1;    // :40746
+      d31.fadeIn = 1.5 + Math.floor(Math.random() * 5) * 0.1;   // :40747
+      d31.noGravity = true;                                     // :40748
+    }
+    // 尘 6 !wet 门（1457 :40751-40757,读【上拍】湿旗——本链在湿段调用前=上拍值）：
+    // NewDustDirect(盒 14×14, 6, 0,0, α100) + scale=1+Next(5)×0.1（绝对覆写——
+    // NewDust ±0.2 抖与 6 号烟族型内 ×0.7 一并消解,与原版赋值序同构）+ 盒内随机位
+    // ±Next(-40,41)×0.1 + noGravity。烟族型内初速预处理（Dust.cs:221-226: vx×0.3/
+    // vy=Next(-10,6)×0.1）VanillaDust.spawn 已植且【不被】本支覆写（原版调用侧只动
+    // scale/position/noGravity）→ 速度面逐位保留
+    if (!this.wet) {
+      const d6 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+      if (d6) {
+        d6.scale = 1 + Math.floor(Math.random() * 5) * 0.1;     // :40754
+        d6.x += (Math.floor(Math.random() * 81) - 40) * 0.1;    // :40755 Next(-40,41)×0.1
+        d6.y += (Math.floor(Math.random() * 81) - 40) * 0.1;    // :40756
+        d6.noGravity = true;                                    // :40757
+      }
     }
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
@@ -69,9 +92,10 @@ export class MeteorChunk extends Entity {
     // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
     projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
       1078, !!projectileData(1078)?.ignoreWater);
-    // 通用重力抛物线(aiStyle 199 仅视觉,运动走 Projectile 通用路径,0.3 同族常数)
-    // ★登记不修：AI_199 无重力行（1457/1456 同核）,0.3 系既有近似档——本批域外
-    this.vy = Math.min(this.vy + 0.3, 16);
+    // ★运动=纯直线（2026-09-06 翻案清偿,旧 vy+=0.3 抛物线近似退役）：AI_199
+    // （:40743-40761）无任何 velocity 写行、Projectile 通用路径亦无跨型重力——
+    // 1078 初速即终速恒 12px/t 直线（WorldGen.cs:72326-72335 num11=12 归一注入,
+    // 本仓 Game.ts 生成位同式 k0=12/hypot）,直至 tileCollide 撞块消亡（:76509）。
     // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：速度【场】不减只削
     // 位移（UpdatePosition :20557 position += wetVelocity,直积分乘进位移行）
     const df = projWaterDragFactor(this);

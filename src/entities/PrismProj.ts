@@ -27,6 +27,20 @@ import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { tintedTex } from '../render/StringLine';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
+
+// ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
+//  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
+//  （block :5319-5330 无 ignoreWater 行）——两者皆 aiStyle 84 锚定束：位置每拍自
+//  父晶体锚直写（AI 直写位）+ tileCollide=false（:6816/:5328 → HandleMovement
+//  :17581 阻尼块整跳）+ aiStyle 84 在 UpdatePosition :20549 早退表内 → 湿段只吃
+//  旗/溅花,阻尼 N/A 留锚禁硬安。湿段插 AI 尾/命中环前 = 原版 AI(:16880)→湿段
+//  (:16895)→Damage(:17184) 同序。
+//  豁免：633 棱镜晶体（block :6795-6806 ignoreWater=true :6805）/ 460 充能晶体
+//  （block :5306-5318 ignoreWater=true :5317）/ 459 小弹（block :5294-5305
+//  ignoreWater=true :5303）——SetDefaults 显式 ignoreWater,湿段不跑。
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
 function hueToRgb(h: number): [number, number, number] {
@@ -55,6 +69,8 @@ function rgbToHue([r, g, b]: [number, number, number]): number {
 
 export class PrismProng extends Entity {
   w = 18; h = 18;
+  /** 原版弹 id（SetDefaults :6807-6817——湿段/数据面消费;类此前未载 id,本批补） */
+  readonly projId = 632;
   /** ai[0] 棱序 0-5 */
   idx: number;
   parent: PrismProj | null = null;
@@ -78,6 +94,17 @@ export class PrismProng extends Entity {
   /** ★1458 蓝空过载淡出快照（Main.cs:32832-32838 消费,draw 侧无 game 句柄故
    *  fixedUpdate 每 tick 采样 owner slowMagicUse） */
   private slowFade = false;
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——632 block :6807-6817 无
+  //  ignoreWater 行 = 受段;阻尼 N/A 见文件头定谳注：aiStyle 84 锚定束,AI 直写位 +
+  //  tileCollide=false :6816 + UpdatePosition :20549 早退表内）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 后/命中前同位） */
+  presetDone = false;
 
   constructor(idx: number, damage: number, knockback: number) {
     super();
@@ -137,6 +164,11 @@ export class PrismProng extends Entity {
       if (st.isSolid(tx, ty)) { scanLen = d; break; }
     }
     this.beamLen = this.beamLen + (scanLen - this.beamLen) * 0.75;   // Lerp 0.75（:30518-30521）
+    // ---- ★通用湿段（:16903-17113）——AI（锚位/束向/束长）后/命中环前 = 原版 Update
+    // AI(:16880)→湿段(:16895)→Damage(:17184) 同序;溅花尘/音由共享体
+    // wetSplashStepShared 承载,不自写;阻尼 N/A 见字段块注（aiStyle 84 锚定束）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 命中：线碰撞盒 厚 22×scale（:14669-14677），friendly=charge>30 ----
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
@@ -478,6 +510,8 @@ export class PrismProj extends Entity {
  *  命中 461 = 线碰撞 22×scale（:14612-14620）+ LaserScan 2400。 */
 export class BlasterBeam extends Entity {
   w = 18; h = 18;
+  /** 原版弹 id（SetDefaults :5319-5330——湿段/数据面消费;类此前未载 id,本批补） */
+  readonly projId = 461;
   damage: number;
   knockback: number;
   critChance = 0.04;
@@ -488,6 +522,17 @@ export class BlasterBeam extends Entity {
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = [0.5, 0.2, 0.5];
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——461 block :5319-5330 无
+  //  ignoreWater 行 = 受段;阻尼 N/A 见文件头定谳注：aiStyle 84 锚定束,AI 直写位 +
+  //  tileCollide=false :5328 + UpdatePosition :20549 早退表内）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 后/命中前同位） */
+  presetDone = false;
 
   constructor(damage: number, knockback: number) {
     super();
@@ -513,6 +558,11 @@ export class BlasterBeam extends Entity {
       if (st.isSolid(tx, ty)) { scanLen = d; break; }
     }
     this.beamLen = this.beamLen + (scanLen - this.beamLen) * 0.75;
+    // ---- ★通用湿段（:16903-17113）——AI（锚位/束向/束长）后/命中环前 = 原版 Update
+    // AI(:16880)→湿段(:16895)→Damage(:17184) 同序;溅花尘/音由共享体
+    // wetSplashStepShared 承载,不自写;阻尼 N/A 见字段块注（aiStyle 84 锚定束）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // 线碰撞命中（厚 22）
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);

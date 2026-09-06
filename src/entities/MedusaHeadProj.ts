@@ -15,6 +15,11 @@
 // ★文件边界：发射链挂点/扣魔点在 Game.ts case 'magic'（R26 蓝队分区）——本类由
 //   Arrow 出生自校正把通用 Arrow-535 首子步转换为本实体；上游误扣魔以"首轮已预付"
 //   +重复施法退款两机制在实体侧收敛到原版经济（见 MEDUSA_REFUND_LEGACY_CHARGE）。
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：535 MedusaHead【豁免】——SetDefaults
+//   :6097-6108（18×18/aiStyle100/tileCollide=false/drawLayer 8/usesOwnerLight）尾
+//   ignoreWater=true@:6107 → :16901 整段门直跳、wet 恒 false,不接
+//   projectileWetSection（N/A）。凝视束 536（本类 beams=纯视觉载体,伤害生成拍落账）
+//   原文本就是即时 Damage 形态,无独立弹体湿段面。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';

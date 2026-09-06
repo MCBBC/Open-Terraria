@@ -293,10 +293,11 @@ export class TrapShot extends Entity {
   //  位序口径：原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)/
   //  UpdatePosition(:19973)。本域各 aiStyle（1/2/5/14/25/34/49/73）AI 段湿旗消费者
   //  普查（AI() 全域 :23404-37400 wet 读点 ：24351 aiStyle5(1037/1049 尘 6 !wet 门)
-  //  /:25563/:25590 aiStyle14(326-328,400-402,1107-1109 专属)——均非本类现役 id 的
-  //  受理面）→ 湿段置 tick 头（AI 前）语义等价（旗=上拍值,消费面为零）;1049 的
-  //  :24351 !wet 尘 6 完美支本仓整条尘链缺位（视觉批域登记,非本批引入）,旗字段
-  //  就绪后接入即活。湿阻尼 :17721-17764 读【本拍刷新后】旗。----
+  //  /:25563/:25590 aiStyle14(326-328,400-402,1107-1109 专属)——本类现役受理面唯
+  //  1049 命中）→ 湿段置 tick 头（AI 前）时,1049 尘链落位于湿段调用【之后】
+  //  （fixedUpdate 内,见下）→ 门读当拍段值（出生拍=预置值,较原版 AI 读上一子步段值
+  //  新 ≤1 子步,视觉尘门登记域）;其余 kind 消费面为零,语义不变。湿阻尼 :17721-17764
+  //  读【本拍刷新后】旗。----
   wet = false;
   lavaWet = false;
   honeyWet = false;
@@ -398,6 +399,62 @@ export class TrapShot extends Entity {
     const wetId = trapWetProjId(this.kind, this.form);
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       wetId, !!projectileData(wetId)?.ignoreWater);
+
+    // ---- 1049 天界塔霰石 AI_5 尘链（1457 :24342-24364 aiStyle5 `type != 1037 &&
+    //      type != 1049 return` 后的 1037/1049 专属支;2026-09-06 残差清偿——本链此前
+    //      整条缺位）:落位=湿段调用【后】——!wet 完美支（:24359）读本湿段刚写下的
+    //      当拍旗（出生拍=预置值,同原版 NewProjectile 预置先于首拍 AI;后续拍较原版
+    //      AI 读上一子步段值新 ≤1 子步,视觉尘门登记域）。★extraUpdates=1（:9949）→
+    //      原版 AI 在子步环内（:16781 while(numUpdates>=0)）每拍跑 2 次 → 本链每拍
+    //      2 轮（steps 同源）。
+    //      逐值：vector9=Center+Normalize(v)×10（:24343）;两支各 1/2 掷（:24344/:24358）
+    //      尘型 Next(4)==0?6:31（:24345）——velocity=（v.RotatedBy(±π/2)×0.25+v/3)×0.9
+    //      （:24347 绝对赋值,消解 NewDust 抖与 6 号烟族型内初速——原版同款覆写）、
+    //      position=vector9+v.RotatedBy(±π/2)（:24346/:24348）、scale×=0.3+0.9×NextFloat
+    //      （:24350,链式——烟族 ×0.7 预处理【保留】）、velocity×=NextFloat（:24351）、
+    //      noGravity（:24352）;!wet 支（:24359-24365）1 粒 NewDustPerfect(
+    //      Center+NextVector2Circular(25,25), 6)——perfect 位置精确覆写（Dust.cs:52-63,
+    //      Velocity 缺省 null → 烟族型内预处理初速【保留】,仅 ×0.5/:24362）、scale×=1.3
+    //      （:24363）、fadeIn=1（:24364）、noGravity（:24365）----
+    if (this.kind === 'hail') {
+      const hailSteps = TRAP_SHOT_STYLE.hail.steps ?? 1;
+      const hsp = Math.hypot(this.vx, this.vy);
+      const hnx = hsp > 1e-6 ? this.vx / hsp : 0;
+      const hny = hsp > 1e-6 ? this.vy / hsp : 0;
+      for (let hs = 0; hs < hailSteps; hs++) {
+        const v9x = this.cx + hnx * 10, v9y = this.cy + hny * 10;        // vector9 :24343
+        for (const side of [-1, 1] as const) {                            // +π/2 支先掷（:24344）
+          if (Math.random() >= 0.5) continue;                             // Main.rand.Next(2)==0
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            Math.floor(Math.random() * 4) === 0 ? 6 : 31);                // :24345 型掷在 NewDust 实参位
+          if (d) {
+            const rx = side < 0 ? -this.vy : this.vy;                     // v.RotatedBy(±π/2)（XNA 旋转 ±90°）
+            const ry = side < 0 ? this.vx : -this.vx;
+            d.x = v9x; d.y = v9y;                                         // dust6.position = vector9 :24346
+            d.vx = (rx * 0.25 + this.vx / 3) * 0.9;                       // :24347
+            d.vy = (ry * 0.25 + this.vy / 3) * 0.9;
+            d.x += rx; d.y += ry;                                         // position += v.RotatedBy :24348-24349
+            d.scale *= 0.3 + 0.9 * Math.random();                         // :24350
+            d.vx *= Math.random();                                        // :24351
+            d.vy *= Math.random();
+            d.noGravity = true;                                           // :24352
+          }
+        }
+        if (!this.wet) {                                                  // :24359（读上拍旗）
+          const ha = Math.random() * Math.PI * 2;                         // NextVector2Unit :Utils.cs:1295
+          const hr = Math.random() * 25;                                  // ×NextFloat()×(25,25) :Utils.cs:1301
+          const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 6);          // NewDustPerfect(Position,0,0,6)
+          if (d) {
+            d.x = this.cx + Math.cos(ha) * hr;                            // perfect 位置覆写（Dust.cs:55-56）
+            d.y = this.cy + Math.sin(ha) * hr;
+            d.vx *= 0.5; d.vy *= 0.5;                                     // :24362 velocity×0.5（双分量）
+            d.scale *= 1.3;                                               // :24363
+            d.fadeIn = 1;                                                 // :24364
+            d.noGravity = true;                                           // :24365
+          }
+        }
+      }
+    }
     // timeLeft-- 原版在 extraUpdates 子步环内逐次执行（Projectile.cs:16780-16781
     // `numUpdates = extraUpdates; while (numUpdates >= 0)` → :17307 `timeLeft--;`
     // :17308-17311 timeLeft<=0 → Kill）——即每拍递减 (extraUpdates+1) 次。1049

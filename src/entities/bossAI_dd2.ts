@@ -92,6 +92,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { GDL, getKnockbackMultiplierScaledByDifficulty, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { GorePiece } from './GorePiece';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
@@ -296,6 +298,22 @@ export class DD2HealPulse extends Entity {
   /** ai[0]（:35548 每 AI 步 +1;≥40 Kill） */
   private ai0 = 0;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：674 DD2DarkMageHeal SetDefaults P.cs:7210-7222（674||673 合块——10×10/
+  //  aiStyle 133/alpha 255/tileCollide=false/ignoreWater=true【:7216】/timeLeft 900/
+  //  hostile/penetrate −1/drawLayer 2）→ 豁免 id,段门恒闭（:16903）= 原版零行为
+  //  （字段照加、段照调,豁免分流由 ignoreWater 参数自动承载）。
+  //  阻尼不适用（三证）：①豁免;②tileCollide=false → 湿阻尼支 :17721-17764 不进;
+  //  ③本弹零速定点（NewProjectile (0,0) 速,AI 不改速）,无位移宿主。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(x: number, y: number) {
     super();
     this.x = x;
@@ -303,6 +321,10 @@ export class DD2HealPulse extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——674 豁免 id（P.cs:7216 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      674, !!projectileData(674)?.ignoreWater);
     if (this.ai0 === 0) {
       // :35544-35547 首帧 DD2_DarkMageHealImpact（PlayTrackedSound 无音量覆写 → 1）
       game.playSfxFiles(soundTrackFiles('dd2_dark_mage_heal_impact'), 1, this.cx, this.cy);
@@ -1656,6 +1678,25 @@ export class DD2BetsyFireball extends Entity {
   /** 移动前位置尾迹盒（unshift 头插,length 钳 20=TrailCacheLength[686]） */
   private trail: Array<{ x: number; y: number }> = [];
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：686 DD2BetsyFireball SetDefaults P.cs:7307-7316（30×30/aiStyle 1/
+  //  alpha 255/penetrate −1/friendly=false/hostile=true）【无】ignoreWater 行 →
+  //  受段（数据面 PROJ_IGNORE_WATER 亦无 686）。686 ∉ IsDestroyedByWater 六型、
+  //  非 2/34/80/155 → 各特支钩缺省。
+  //  阻尼适用：tileCollide 缺省 true（无覆写行）→ HandleMovement 湿支
+  //  :17721-17764 跑（wetVelocity = velocity×档,UpdatePosition :20557 消费）;
+  //  aiStyle 1 不在 UpdatePosition 早退表（:20551）。速度场（vx/vy——含 AI 重力
+  //  加算）不减,只削当拍位移（干态档=1 数值恒等）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
+
   constructor(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number) {
     super();
     this.x = x - this.w / 2;
@@ -1683,8 +1724,16 @@ export class DD2BetsyFireball extends Entity {
     if (this.vy > 32) this.vy = 32;                // :58525-58527
     // 飞行尘近似（:57495-58497 新尘 d55 ×1/4 + trail 旧位 ×1/3 择一采样降频）
     if (Math.random() < 0.25) game.spawnParticles?.(this.cx, this.cy, '#D08840', 1, 1.2, { life: 22 });
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_001（重力/衰减完）→ 本段 → HandleMovement（阻尼在下方
+    // 位移行）。溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      686, !!projectileData(686)?.ignoreWater);
     // ---- 位移 + tileCollide 撞块即亡（aiStyle1 缺省档,方形直检同 Arrow 精神）----
-    const nx = this.x + this.vx, ny = this.y + this.vy;
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562）
+    // ——速度场（vx/vy）不减只削当拍位移,干态档=1 恒等
+    const df686 = projWaterDragFactor(this);
+    const nx = this.x + this.vx * df686, ny = this.y + this.vy * df686;
     if (this.hitsSolid(game, nx, ny)) { this.killNow(game); return; }
     this.x = nx;
     this.y = ny;
@@ -1820,6 +1869,25 @@ export class BetsyBreath extends Entity {
   private anchor: { x: number; y: number } | null = null;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：687 DD2BetsyFlameBreath SetDefaults P.cs:7317-7326（30×30/aiStyle 136/
+  //  alpha 255/penetrate −1/friendly=false/hostile=true）【无】ignoreWater 行 →
+  //  受段（数据面 PROJ_IGNORE_WATER 亦无 687）。687 ∉ IsDestroyedByWater 六型、
+  //  非 2/34/80/155 → 各特支钩缺省。
+  //  阻尼不适用（原版形态锚）：AI_136 每 tick 直写 position（焰心 = 主心 + 嘴部
+  //  偏移 RotBy(rotation),:65848-65851 同式）,velocity 不积分（aiStyle 136 不在
+  //  UpdatePosition 早退表 :20551,但本类无 velocity 位移宿主可乘）;湿段只承载
+  //  溅花/湿旗面。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(src: Enemy, dmg: number) {
     super();
     this.srcId = src.id;
@@ -1851,6 +1919,11 @@ export class BetsyBreath extends Entity {
     }
     this.x = mx - this.w / 2;
     this.y = my - this.h / 2;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_136（锚定写位）→ 本段 → HandleMovement（无位移面）。
+    // 测位 = 本拍锚定位（段后位置不再变,与 post-AI 同位）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      687, !!projectileData(687)?.ignoreWater);
     this.t++;
     if (this.t >= 78) { this.dead = true; return; }          // :65911-65914
     this.frameT++;
@@ -3067,6 +3140,28 @@ export class DD2GoblinBomb extends Entity {
   private ai0 = 0;
   /** 引信嘶声循环句柄（:47780 PlayTrackedLoopedSound;Kill Stop——同 GrenadeProj） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：681 DD2GoblinBomb SetDefaults P.cs:7265-7273（14×14/aiStyle 16/
+  //  hostile/penetrate −1/ranged）【无】ignoreWater 行 → 受段（数据面
+  //  PROJ_IGNORE_WATER 亦无 681——姊妹 683 跺地波 :7291 才豁免）。681 ∉
+  //  IsDestroyedByWater 六型、非 2/34/80/155 → 各特支钩缺省（IsABombWithFuse[681]
+  //  是引信面非湿段面,不相干）。
+  //  阻尼适用：tileCollide 缺省 true → HandleMovement 湿支 :17721-17764 跑
+  //  （wetVelocity = velocity×档,UpdatePosition :20557 消费）;aiStyle 16 不在
+  //  UpdatePosition 早退表（:20551）。速度场（vx/vy,含重力加算/落地摩擦）不减,
+  //  只削当拍位移;撞墙/落地反弹式（×−0.4/驻停）读未阻尼速度场 = 原版 lastVelocity
+  //  :17696 同构（GrenadeProj 同批同口径）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, dmg: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
@@ -3123,7 +3218,15 @@ export class DD2GoblinBomb extends Entity {
       this.vy += 0.2;   // SW-R3 2026-09-03：SW-N1 同案——:48394 恒 +0.2 无终端钳
                         // （仅 911 有 Clamp :48396-48399）;钳 16 为旧近似,随 F-9 顺手清偿
     }
-    let nx = this.x + this.vx, ny = this.y + this.vy;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_016（引信/尘/重力门/滚转完）→ 本段 → HandleMovement
+    // （阻尼在下方位移行;反弹式读未阻尼速度场 = lastVelocity :17696 同构）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      681, !!projectileData(681)?.ignoreWater);
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562）
+    // ——速度场（vx/vy）不减只削当拍位移,干态档=1 恒等
+    const df681 = projWaterDragFactor(this);
+    let nx = this.x + this.vx * df681, ny = this.y + this.vy * df681;
     const solidAtP = (px: number, py: number): boolean => {
       const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
       return st.inBounds(tx, ty) && st.isSolid(tx, ty);
@@ -3234,12 +3337,33 @@ export class DD2OgreSmash extends Entity {
   private ai0 = 0;
   private dmg: number;
   private readonly hitIds = new Set<number>();
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：683 DD2OgreSmash SetDefaults P.cs:7284-7295（30×30/aiStyle 135/
+  //  alpha 255/tileCollide=false/ignoreWater=true【:7291】/timeLeft 120/hostile/
+  //  penetrate −1）→ 豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、段照调,
+  //  豁免分流由 ignoreWater 参数自动承载）。
+  //  阻尼不适用（双证）：①豁免;②原地扩盒（AI 每 tick 以 Center 重排盒）,无
+  //  velocity 位移宿主。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(x: number, y: number, dmg: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.dmg = dmg;
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——683 豁免 id（P.cs:7291 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      683, !!projectileData(683)?.ignoreWater);
     this.ai0 += 1;
     if (this.ai0 > 9) { this.dead = true; game.onProjectileDeath?.(683, this.x, this.y, this.w, this.h); return; }
     // 扩盒（:65740 Size = 16×lerp(5,40,ai0/9)）

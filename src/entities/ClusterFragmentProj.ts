@@ -27,8 +27,19 @@
 //   Kill 视觉 :79719-79783（Item62+尘 31×15/228×10/226×3+gore 61-64）——
 //   SW-R3 2026-09-03（Q-4）起由 Game.explodeAt 裂片专支逐参承载（旧"通用爆炸
 //   近似/视觉单口径"备案退役;母弹专支 :79753-79800 同批）。
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：779/783/862/863 全员【受段】——
+//   SetDefaults 779/783 走 `(776..801)||(803..810)` 共档 :7941-7954、862/863 走
+//   :8277-8285,均无 ignoreWater 行（vanilla-projectiles.json 同向）→ 火箭水上空爆
+//   spawn 6 片 = 高频入水面,溅花/旗维护照原版跑。extraUpdates=0 → 每 tick 恰 1 子步;
+//   AI_016 对四型无 wet 消费（:47763-48410 内 wet 支只挂 799/800/801/810/906/784-807/
+//   903-905/1077,grep 实证）→ 溅花+旗维护即全部效果。阻尼适用（tileCollide 缺省
+//   true → HandleMovement wet 支 :17755 wetVelocity=velocity×0.5 只进 UpdatePosition
+//   :20561 位移行,velocity 场不减——乘进 moveAndCollide dx/dy 入参,碰撞响应读的
+//   lastVx/lastVy 仍为未阻尼场,与 RollingBoulder 接入式同款）。
 import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -65,6 +76,15 @@ export class ClusterFragmentProj extends Entity {
   damage: number;
   projId: number;
   dead = false;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   /** 引信（timeLeft;NewProjectile 表 60 − 发射侧 Next(30) → 本仓在出生点传值） */
   private fuse: number;
   /** 暴击率（父弹发射玩家 crit——原版 Damage_PVE 按 owner 玩家面板掷） */
@@ -165,6 +185,14 @@ export class ClusterFragmentProj extends Entity {
       this.vy += 0.2;   // SW-R3 2026-09-03（F-6①）：SW-N1 定谳——AI_016 :48394 恒
                         // +0.2 无终端钳（仅 911 有 Clamp :48396-48399）,去钳
     }
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    // 位序 = 原版 Update 子步内 AI(:16880)→湿段(:16903)→HandleMovement(:17120)。
+    // 采样位=AI 后位移前 = 上拍移动结算位（oldPosition :17116-17117 也在段后置位,
+    // 故本调用须先于下方 oldX/oldY 上报）。引信爆拍不跑湿段（本仓 SW-L1 口径
+    // post-dec ≤2 早退=原版 AI 头 Kill;仓内湿段批统一口径=AI 杀拍不跑,与
+    // RollingBoulder 同式,登记有界偏差）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // 位移+撞块（aiStyle16 通用反弹 ×−0.4——与 GrenadeProj firedStep 同式;
     // 裂片不在 FIRED_STICK 撞块 vel=0 表）
     const lastVx = this.vx, lastVy = this.vy;
@@ -179,7 +207,10 @@ export class ClusterFragmentProj extends Entity {
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: true,
     };
-    moveAndCollide(body, game.world, this.vx, this.vy);
+    // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：速度【场】不减只削
+    // 位移——乘进 dx/dy 入参,碰撞响应式读 lastVx/lastVy 未阻尼场（勿在采纳处除回）
+    const df = projWaterDragFactor(this);
+    moveAndCollide(body, game.world, this.vx * df, this.vy * df);
     this.x = body.x; this.y = body.y;
     this.vx = body.vx; this.vy = body.vy;
     if (body.hitWall) this.vx = lastVx * -0.4;

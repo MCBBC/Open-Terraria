@@ -40,12 +40,20 @@
 // 联机：不入 msg27 kind 表（netMakeProj 无档,同 DirtBallProj/RollingBoulder 惯例）——
 // 房主侧连锁毁格+弹侧 PlaceTile 经 TileStore setTile 的 listeners/netReporter 通道
 // 自然同步（脏区/联机格操作均走该口）,弹体本身对访客不可见（视觉面缺口,备案）。
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：40 走 SetDefaults :1229-1238
+//   （knockBack 6/10×10/aiStyle10/friendly/hostile/penetrate −1）【无 ignoreWater 行】
+//   → 受段（vanilla-projectiles.json 同向;姊妹弹 17 DirtBall 是 :993 true=豁免,两姊妹
+//   异面勿混）。AI_010 无 wet 消费（:58809-59083 grep 实证）→ 溅花+旗维护即全部效果。
+//   ★阻尼 N/A 定谳：aiStyle 10 在 HandleMovement 走专支 :17701-17720（TileCollision
+//   直连,与 wet 阻尼支 :17718 互斥）→ 位移不折减;湿段采样位=AI 后位移前（上拍结算位）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitPlayer } from './projTargets';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { dirtBallDepositTile } from './DirtBallProj';
 import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../data/tiles';
 
@@ -53,6 +61,15 @@ export class AshBallProj extends Entity {
   w = 10; h = 10;                                  // SetDefaults :1231-1232
   dead = false;
   readonly projId = 40;                            // ProjectileID.AshBallFalling
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   /** NewProjectile 第 6 参（WorldGen.cs:64298）——damage 15 直传,不吃面板 */
   readonly dmg: number;
   /** timeLeft 缺省 3600（Projectile.cs:789 SetDefaults 头;type 40 无覆写） */
@@ -119,6 +136,16 @@ export class AshBallProj extends Entity {
           }
         }
       }
+    }
+    // ---- ★通用湿段（:16903-17113,共享体）——AI(:16880)→湿段(:16903)→HandleMovement
+    //      (:17120,本类融合拍序=下方撞格 Kill 判定)→UpdatePosition(:20561)位序。
+    //      采样位=AI 后位移前 = 上拍移动结算位（撞格 Kill 判定读同一未积分位,同原版
+    //      HandleMovement 在湿段【后】撞停的取位——杀拍湿段照跑）。首拍（ai0=0,
+    //      tileCollide=false）也照跑（原版同）→ 出生预置即此拍落位;aiStyle10 无湿
+    //      阻尼（见头注定谳）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    if (tileCollide) {
       // tileCollide:落面 → Kill（爆心=上一 tick 未嵌入位,F1）。落面判据对齐 FallingBlock
       // 同族几何（★M13 A-1/A-4,2026-09-04）：isSolid||isPlatform——平台/家具顶
       // （tileSolidTop 底行 frameY==0）照接（Collision.cs:2330-2333 flag 门;40 ∈
@@ -140,6 +167,8 @@ export class AshBallProj extends Entity {
       }
     }
     // :59075-59082（非 736-738 支恒达）——旋转 + vy 封顶 10
+    // （原版此段在 AI_010 尾=湿段【前】;本仓融合拍序保留在撞格 Kill 判定后——
+    //  rotation/vyCap 与湿段无交互,杀拍二者皆死端,无观感差,登记）
     this.rotation += 0.1;
     if (this.vy > 10) this.vy = 10;
     // F1 爆心回退锚：记录本拍积分前位（下一拍撞格 Kill 时作铺设/音尘爆心）

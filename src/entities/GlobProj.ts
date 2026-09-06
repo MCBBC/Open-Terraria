@@ -29,6 +29,12 @@
 //     α 基值 75 上三掷各 +25 → 不透明度 0.29±~0.10。
 //   · Kill 尘爆 = 50 粒家族尘（vel=oldVelocity×0.2 基向量散布,oldV×0.2 老速度语义
 //     与 SlimeGlob 同源承自 :75466/:75550）。
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：本类真实弹域 = 358 水枪黏液
+//   （SetDefaults :4489-4497,ignoreWater=true@:4497）+ 1042 微光枪黏液（:9850-9858,
+//   ignoreWater=true@:9858）→【两型全豁免】:16901 整段门直跳、wet 恒 false,
+//   不接 projectileWetSection（N/A）。任务侧旧记"682-684"系 id 误记——
+//   682 DD2LightningBugZap/:7280 与 683 DD2OgreSmash/:7291 确在豁免集、684
+//   DD2SquireSonicBoom 受段,但三者均非本类域（DD2 事件弹,别类承载）。
 // 登记偏差：extraUpdates=2 三子步未展开、单步等速直线（同 SlimeGlob 家族档）；
 //   alpha=255 按 SetDefaults 终值不透明绘制(SlimeGlob 同判);d211 无逐色映射以 rgba
 //   近似;d324 色相按原版调色板映射（权重 [1,1,1,3],pickGlobDustColor）但无调色板位,

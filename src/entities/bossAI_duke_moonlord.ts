@@ -37,6 +37,9 @@ import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
 import { damageEvPNoCheese } from './projTargets';   // ★台账⑥ BossNoCheese 分桶命中通道
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { wetCollision } from './npcLiquid';
+import { projectileData } from '../data/vanillaProjectiles';
 
 // ---------------------------------------------------------------------------
 // 通用工具
@@ -690,6 +693,28 @@ export class DukeSharknadoBolt extends Entity {
   private tgt: Player | null;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,projWetSection.ts 共享体
+  //  1:1;溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：385 SetDefaults P.cs:4678-4686（30×30/aiStyle 65/hostile/penetrate −1/
+  //  alpha 255/timeLeft 300）【无】ignoreWater 行 → 受段（384/386 龙卷兄弟段
+  //  :4672/:4694 才有 ignoreWater=true;数据面 PROJ_IGNORE_WATER 亦无 385）。
+  //  阻尼适用：tileCollide 缺省 true（无覆写行）→ HandleMovement 湿支
+  //  :17721-17764 跑（wetVelocity = velocity×0.5/0.25/0.375,UpdatePosition :20557
+  //  `if (wet) position += wetVelocity` 消费）;aiStyle 65 不在 UpdatePosition 早退表
+  //  （:20551）。速度场（vx0/vy0）不减,只削当拍位移（干态档=1 数值恒等）。
+  //  位序 = 原版 Update:AI_065（读上拍 wet 旗——:30078 AI 内 `if (wet)` 水面 Kill 支
+  //  消费上子步旗）→ 本湿段 → 位移。extraUpdates 缺省 0（SetDefaults 无行）→
+  //  1 子步/拍,AI 读"上一拍"旗:入水拍置旗+阻尼位移,次拍 AI 抬 16px Kill。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892——fixedUpdate 头显式前置,
+   *  早于首拍 AI 湿旗消费;共享体段内预置同位同值,置位后自动跳过） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, big: boolean, enraged: boolean, src: Enemy,
     tgt?: Player | null) {
     super();
@@ -703,6 +728,19 @@ export class DukeSharknadoBolt extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.kill(game); return; }
+    // ★NewProjectile 出生预置（P.cs:10886-10892,spawn 时、首次 Update AI 之前）：
+    //  wet = 出生盒 WetCollision（ignoreWater 反清 :10888-10890——385 无此行不反清）、
+    //  honey/shimmer 随 Collision 静态;lavaWet【不】预置（首拍湿段 :16906 粘滞并入,
+    //  原版同序,段内置位跳过预置后仍照常跑）。385 AI 尾支 `if (wet)`（:30078）消费
+    //  此旗 → 原版水面出生首拍即 Kill;共享体段内预置在湿段首调（AI 之后）才跑,
+    //  时点晚一拍 → 此处显式前置。
+    if (!this.presetDone) {
+      this.presetDone = true;
+      const rP = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+      this.wet = rP.wet;                               // :10887
+      if (rP.honey) this.honeyWet = true;              // :10891
+      if (rP.shimmer) this.shimmerWet = true;          // :10892
+    }
     this.age++;
     // 绘制态推进（AI_065 :30023-30035 追踪支 / :30055-30067 摆动支同款）：
     // localAI[0]>10 后 α−5 钳 100、rotation += v.X×0.1、frame=(localAI[0]/3)%3
@@ -732,12 +770,36 @@ export class DukeSharknadoBolt extends Entity {
       this.phase += 1;
       this.vy0 += f(this.phase) - d0;
     }
-    this.x += this.vx0;
-    this.y += this.vy0;
-    // :28477-28481 入水上浮 16px 后 Kill
+    // ---- AI_065 尾支（:30078-30082,aiStyle65 块末、大小两支共用）----
+    // `if (wet) { position.Y -= 16; Kill(); }`——原版 Update 内 AI（:16880）先于
+    // 湿段（:16892）→ 此处读的 wet = 上一拍湿段/出生预置所留旗（extraUpdates=0 →
+    // 1 子步/拍,"上子步"=上一拍）。入水拍：本支 wet=false 不 Kill → 湿段置旗 +
+    // 位移 ×0.5;次拍：本支见旗 → 抬 16px 后 Kill（Kill 拍序 = 入水后一拍,与
+    // 原版逐值同相——旧中心格液面近似=入水当拍 Kill,提前一拍,已废）。
+    // ★不 return:原版 Kill 后同拍湿段/HandleMovement 照跑（!active 门在
+    //  HandleMovement 后 :17126,湿段 :16892 无门）→ 浅触水 Kill 拍在抬高 16px 的
+    //  探针位走"出水溅花"面（wetCount==0 门,10 粒+Splash_1）;幂等由 kill() 头
+    //  `if (dead) return`（原版 Kill :71763 `if (!active) return`）承载。
+    if (this.wet) { this.y -= 16; this.kill(game); }
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_065（上支消费上拍 wet 旗）→ 本段 → HandleMovement。
+    // 溅花尘/音由共享体调 wetSplashStepShared（弹面 10 粒四液逐值注在彼处）,本类
+    // 不自写。出生预置已上提至 fixedUpdate 头（见彼注）。
+    // ★projId 传字面 385:本类刻意不设 projId 字段（Game.ts:3042 快照收集器
+    //  `projId !== undefined` 通判会抢 kind1 武器族,压掉本类 netProjMeta kind5
+    //  分支——InfernoHostileBlast 同款规避）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      385, !!projectileData(385)?.ignoreWater);
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562）
+    // ——tileCollide=true 宿主:速度场（vx0/vy0）不减只削当拍位移,干态档=1 恒等。
+    // 入水拍即 ×0.5（本拍湿段置旗在先,原版 UpdatePosition `if (wet)` 同拍消费）。
+    const df = projWaterDragFactor(this);
+    this.x += this.vx0 * df;
+    this.y += this.vy0 * df;
+    // tileCollide 撞块 Kill(原版 HandleMovement TileCollision 命中即 Kill;中心格
+    // 近似为既有既批面,不在本登记内)
     const st = game.world.store;
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-    if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0) { this.y -= 16; this.kill(game); return; }
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.kill(game); return; }
   }
 
@@ -745,6 +807,7 @@ export class DukeSharknadoBolt extends Entity {
    *  v6 联机傀儡:运动/消亡本地自算(确定性),但不落龙卷——房主的龙卷经 kind6 同步,
    *  双端各自生成会重复 */
   private kill(game: GameHooks): void {
+    if (this.dead) return;   // 原版 Kill :71763 `if (!active) return`——Kill 拍湿段/撞块面照跑时防双龙卷/双音
     this.dead = true;
     game.spawnParticles(this.cx, this.cy, '#7FB8E8', 10, 2.4, { life: 24, damp: 0.94 });
     // :70716 弹 385 落地 = PlaySound(4,…,19) = NPC_Killed_19(case4=死音库,2026-08-19 终审补)
@@ -829,6 +892,26 @@ export class DukeSharknadoTornado extends Entity {
   private src: Enemy;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对（双 id）：384 Sharknado SetDefaults P.cs:4666-4675 ignoreWater=true
+  //  【:4672】/ 386 Cthulunado P.cs:4688-4697 ignoreWater=true【:4694】→ 两档全豁免
+  //  （数据面 PROJ_IGNORE_WATER 亦含 384/386）→ 段门恒闭（:16903）= 原版零行为
+  //  （字段照加、段照调,豁免分流由 ignoreWater 参数自动承载;projId 传字面——本类
+  //  无 projId 字段,防 Game.ts:3042 快照通判抢 kind1,同 DukeSharknadoBolt 注）。
+  //  阻尼不适用（双证）：①豁免;②aiStyle 64 tileCollide=false（:4671/:4693）→
+  //  HandleMovement 湿阻尼支 :17721-17764 不进,且位移全由 AI 段生长/摇摆直写
+  //  （resize/topY/x 摇摆),velocity 不积分（aiStyle 64 不在 UpdatePosition 早退表
+  //  :20551,但 wet 分支 position += wetVelocity = AI 前快照——本类 AI 后无 velocity
+  //  位移面可乘）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(x: number, y: number, big: boolean, src: Enemy) {
     super();
     this.big = big;
@@ -856,6 +939,10 @@ export class DukeSharknadoTornado extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——384/386 豁免 id（P.cs:4672/:4694 ignoreWater=true）
+    //  → 段门恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.big ? 386 : 384, !!projectileData(this.big ? 386 : 384)?.ignoreWater);
     if (--this.life <= 0) { this.dead = true; return; }
     this.age++;
     // alpha(:28336-28360):嵌实体块渐隐,否则向 60(大 100)显形
@@ -1270,8 +1357,31 @@ export class MoonLeechProj extends Entity {
     return Math.atan2(src.cy - this.tgt.cy + 216, src.cx - this.tgt.cx) + Math.PI / 2;
   }
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：456 MoonLeech SetDefaults P.cs:5283-5293（16×16/aiStyle 85/hostile/
+  //  penetrate −1/alpha 255/timeLeft 600/tileCollide=false）【无】ignoreWater 行 →
+  //  受段（数据面 PROJ_IGNORE_WATER 亦无 456）。456 ∉ IsDestroyedByWater 六型、
+  //  非 2/34/80/155 → 各特支钩缺省。
+  //  阻尼不适用（原版形态锚）：tileCollide=false【:5292】→ HandleMovement 湿阻尼支
+  //  :17721-17764 整支不进（湿支嵌 :17585 `if (tileCollide)` 内）,wetVelocity 保持
+  //  :16870 的 AI 前 velocity 快照（无阻尼、滞后一子步 quirk,YoyoProj 回收态同款
+  //  三分叉先例）→ wet 位移 = AI 前快照 / dry 位移 = post-AI velocity（UpdatePosition
+  //  :20557-20562 分叉,aiStyle 85 不在早退表 :20551）。本类 AI 每拍从零重算速度 →
+  //  快照 = 上拍末速,湿态即一拍滞后。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍同位测值） */
+  presetDone = false;
+
   fixedUpdate(_dt: number, game: GameHooks): void {
     const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    // :16870 `Vector2 wetVelocity = velocity`（逐子步 AI 前 velocity 快照——456
+    //  tileCollide=false,湿态位移消费这份快照,见字段块头注）
+    const preVx = this.vx, preVy = this.vy;
     // 目标 = 构造期冻结的月总索敌目标（moonLordHeadAI 分发层 targetRef 传参；
     // 原版 Main.player[ai[1]] 同源冻结）——M11 索敌链。本弹无 netProjMeta（房主
     // 独占），联机目标为访客代理时 buff 施加不上链（引擎级缺口，同 proxy buff 类）
@@ -1288,7 +1398,15 @@ export class MoonLeechProj extends Entity {
     const d = Math.hypot(dx, dy);
     const spd = Math.min(16, d);
     if (d > 0.001) { this.vx = (dx / d) * spd; this.vy = (dy / d) * spd; }
-    this.x += this.vx; this.y += this.vy;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_085 → 本段 → HandleMovement/UpdatePosition。溅花尘/音
+    // 由共享体调 wetSplashStepShared,本类不自写。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      456, !!projectileData(456)?.ignoreWater);
+    // 位移（tileCollide=false :5292 → 湿阻尼支不进）：wet → position += AI 前快照
+    // （:16870,无阻尼滞后一子步 quirk）/ dry → post-AI velocity（:20557-20562 分叉）
+    if (this.wet) { this.x += preVx; this.y += preVy; }
+    else { this.x += this.vx; this.y += this.vy; }
     // 贴身结算：出击段 <20px 授 MoonLeech 145（:30726-30732）；回程段 <20px Kill（:30740-30743）
     if (this.out && d < 20 && !this.fed) {
       this.fed = true;
@@ -1368,6 +1486,25 @@ export class MLDeathray extends Entity {
   private dmg: number;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：455 PhantasmalDeathray SetDefaults P.cs:5272-5282（36×36/aiStyle 84/
+  //  hostile/penetrate −1/alpha 255/timeLeft 600/tileCollide=false）【无】ignoreWater
+  //  行 → 受段（数据面 PROJ_IGNORE_WATER 亦无 455;月主姊妹弹 453 才豁免 :5251）。
+  //  455 ∉ IsDestroyedByWater 六型、非 2/34/80/155 → 各特支钩缺省。
+  //  阻尼不适用（双证）：①aiStyle 84 ∈ UpdatePosition 早退表（:20551 `aiStyle == 84`
+  //  → position 不积分,位移全由 AI 锚定写位）;②本类 AI 每 tick 直写 position
+  //  （束原点 = 源心 + 眼球椭圆偏移,:30293-30308）,无 velocity 积分宿主。
+  //  位序 = 原版 Update:AI（写位）→ 本段 → HandleMovement（无位移面）。溅花尘/音
+  //  由共享体 wetSplashStepShared 承载（束体入/出水各溅一次,10 粒四液）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(src: Enemy | null, kind: 'head' | 'core', angle: number, sweep: number, dmg: number, x?: number, y?: number) {
     super();
     this.srcId = src?.id ?? 0;
@@ -1430,6 +1567,12 @@ export class MLDeathray extends Entity {
       : mlElipseVec(eyeA, 30 * open, 30 * open);
     this.x = src.cx + ex - this.w / 2;
     this.y = src.cy + ey - this.h / 2;
+
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI_084（束原点锚定写位）→ 本段 → HandleMovement（aiStyle 84
+    // 早退,无位移面）。测位 = 本拍锚定位（原版 post-AI 同位;段后束长/尘均不改位）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      455, !!projectileData(455)?.ignoreWater);
 
     // 束长:LaserScan 3 采样(线宽 36·scale,最大 2400)均值,:30483-30509
     const scale = Math.min(this.maxScale, Math.sin((this.age * Math.PI) / 180) * 10 * this.maxScale);

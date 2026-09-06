@@ -951,6 +951,8 @@ export function martianFighterExtras(e: Enemy, game: GameHooks, player: Player |
 // 每 tick 重算；母舰不在/电报窗关（395 ai[3]%120 窗）即 Kill。尘 228×2/t。
 // ---------------------------------------------------------------------------
 import { Entity } from './Entity';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 export class MartianDeathray extends Entity {
   w = 30; h = 30;
@@ -959,6 +961,22 @@ export class MartianDeathray extends Entity {
   private srcId: number;
   private dmg: number;
   private age = 0;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：447 SaucerDeathray SetDefaults P.cs:5190-5200（30×30/aiStyle 79/
+  //  hostile/penetrate −1/tileCollide=false/ignoreWater=true【:5198】/timeLeft 240）
+  //  → 豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、段照调,豁免分流由
+  //  ignoreWater 参数自动承载;projId 传字面 447——本类无 projId 字段,防
+  //  Game.ts:3042 快照通判抢 kind1,同 DukeSharknadoBolt 注）。阻尼不适用（双证）：
+  //  ①豁免;②AI 每 tick 重算锚定束盒（母舰 Y+46 → 束脚）,无 velocity 位移宿主。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
 
   constructor(src: Enemy, dmg: number) {
     super();
@@ -969,6 +987,10 @@ export class MartianDeathray extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.dead) return;
+    // ★通用湿段（:16903-17113）——447 豁免 id（P.cs:5198 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      447, !!projectileData(447)?.ignoreWater);
     const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
     // :29718-29722 门：锚不在场（或非 392/395 电报者/窗口关）→ Kill
     if (!src || src.dead || (src.vanillaId !== 392 && src.vanillaId !== 395)) {

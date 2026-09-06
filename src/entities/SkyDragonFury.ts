@@ -17,6 +17,9 @@
 //   1110（aiStyle 77 :29583-29700，SetDefaults :10058-10070：80×80 脉动
 //     num641=max(0.75+0.25v, 0.8−0.2v)（v=−cosθ）∈[0.778,1] → 尺寸 [62,80]、
 //     4 帧 3t、8t 免疫 penetrate −1）：滞留 AoE 圈，尘 226 环抛。
+// ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 逐块）：四弹全【豁免】——
+//   SetDefaults 显式 ignoreWater=true（707 :7488 / 708 :7505 / 709 :7518 / 1110 :10351）
+//   → Projectile.cs:16903 湿段整段门不开,溅花/湿旗/水阻尼全不适用,不接 projectileWetSection。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { cutTilesBox } from './ProjCutTiles';

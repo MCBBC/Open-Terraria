@@ -17,10 +17,21 @@
 // :42891-42899 照常结算）并行完成，弹体只承载接触伤害。本仓同构承接：Game
 // 工具分支 tryMine 并行挖掘（1262 tool.useTime=7 节奏 / 3098 axe30 经
 // itemFuncTool 桥接），弹体侧无 CutTiles/KillTile 逻辑（原版同构，非债）。
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：509 屠夫链锯（SetDefaults :5790-5797）
+// 与 252 叶绿插孔锤（:3354-3359）走 DefaultToDrillOrChainsaw()（:10734-10744：
+// aiStyle20/friendly/penetrate −1/tileCollide=false/ownerHitCheck…）【无 ignoreWater
+// 行】→ 受段;445 激光钻（:5165-5177）ignoreWater=true@:5175 → 豁免（共享体整段门
+// 直跳）。★阻尼 N/A 定谳：AI_020 每帧直写 position=RotatedRelativePoint(MountedCenter)
+// − size/2（:23879/:23921-23922）= 无 UpdatePosition 位移行;且 tileCollide=false
+// ⇒ wetVelocity 恒=velocity（:16870,阻尼算式仅在 HandleMovement tileCollide 支）。
+// AI_020/AI_075 无 wet 消费（:23837-23950/:67168-67330 grep 实证）→ 溅花+旗维护即
+// 全部效果。断链 Kill 拍（:23904-23907）原版湿段仍跑一子步——本仓早退不跑（仓内
+// 湿段批统一口径,登记有界偏差）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { damageVar } from '../stats/ScaleStats';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
@@ -84,6 +95,15 @@ export class ChainsawProj extends Entity {
   channelCb: () => boolean;
   aimCb: () => { x: number; y: number };
   dead = false;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   /** 绘制 scale（SetDefaults：509=1.2 :5522 / 252=1.1 :3088） */
   private drawScale: number;
   /** ai75 激光钻分支标记（Game.ts 调用点按 projectileData(shoot).aiStyle===75 置位） */
@@ -221,6 +241,11 @@ export class ChainsawProj extends Entity {
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    // AI 尾采样（position 由本 tick AI 直写挂点位 = 原文湿段同位;445 豁免直跳,
+    // 阻尼 N/A 见头注）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {

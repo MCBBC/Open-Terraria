@@ -483,3 +483,85 @@ describe('湖面星闪积分步（★F2 两段除法）', () => {
     throw new Error('60 种子均未出星闪（1/5 列门失效?）');
   });
 });
+
+// ============ ★2026-09-06 残差清偿：DoStandardWaterSplash 型内初速补链+水支盒 ============
+
+describe('溅花尘净初速/盒偏移（FakeFishParticle.cs:190-261 逐位）', () => {
+  interface SplashRec {
+    type: number; x: number; y: number; vx: number; vy: number;
+    scale: number; alpha: number; noGravity: boolean; color: unknown;
+  }
+  function pulseRec(liquidType: number): { sfx: SfxCall[]; rec: SplashRec[]; fy: number } {
+    const st = new TileStore(64, 200);
+    pool(st, 20, 30, 4, 4, liquidType);
+    const sfx: SfxCall[] = [];
+    const rec: SplashRec[] = [];
+    const host = {
+      world: { store: st },
+      playSfxWav: (file: string, vol = 1, x?: number, y?: number, pitch?: number) => {
+        sfx.push({ file, vol, x, y, pitch });
+      },
+      // 桩零初速+单位 scale/α——隔离【调用侧后置覆写面】（型内预处理补链在分支内,
+      // 净初速对原版逐位等价,口径同 player-bobber-splash-1457 头注）
+      spawnDust: (x: number, y: number, _w: number, _h: number, type: number) => {
+        const d = { type, x, y, vx: 0, vy: 0, scale: 1, alpha: 0, noGravity: false, color: null };
+        rec.push(d);
+        return d as never;
+      },
+    } as unknown as FakeFishHost;
+    const f = new FakeFish();
+    f.lifeTotal = 100000;
+    f.x = 21 * 16 + 8; f.y = 31 * 16 + 8;
+    f.update(host);
+    f.update(host);                                 // 液沿触发 EmitWaterPulse
+    return { sfx, rec, fy: f.y };
+  }
+
+  it('微光 308：型内预处理 0×0.5+1−4=−3（Dust.cs:230-233 补链）,盒 y=f.y−8（:199）', () => {
+    const { rec, fy } = pulseRec(4);
+    expect(rec.length).toBe(10);
+    for (const d of rec) {
+      expect(d.type).toBe(308);
+      expect(d.vy).toBe(-3);
+      expect(d.vx).toBe(0);                         // 0×0.5×2.5
+      expect(d.scale).toBe(1.3);
+      expect(d.alpha).toBe(0);                      // 微光支无 α 行
+      expect(d.noGravity).toBe(true);
+      expect(d.color).not.toBeNull();
+      expect(d.y).toBe(fy - 8);                     // vector.Y+num2/2−8
+    }
+  });
+
+  it('蜂蜜 152：−0.5−1=−1.5（Dust.cs:252-256 补链）;岩浆 35：−0.5−1.5=−2;盒 y=f.y−8', () => {
+    const honey = pulseRec(3);
+    expect(honey.rec.length).toBe(10);
+    for (const d of honey.rec) {
+      expect(d.type).toBe(152);
+      expect(d.vy).toBe(-1.5);
+      expect(d.vx).toBe(0);
+      expect(d.scale).toBe(1.3);
+      expect(d.alpha).toBe(100);
+      expect(d.y).toBe(honey.fy - 8);
+    }
+    const lava = pulseRec(2);
+    for (const d of lava.rec) {
+      expect(d.type).toBe(35);
+      expect(d.vy).toBe(-2);
+      expect(d.alpha).toBe(100);
+      expect(d.y).toBe(lava.fy - 8);
+    }
+  });
+
+  it('水支盒 y=f.y（:252 vector.Y+num2/2【无 −8】,旧四支统一 −8 退役）;vy−4（33 族型内预处理池内承载）', () => {
+    const { rec, fy } = pulseRec(1);
+    expect(rec.length).toBe(10);
+    for (const d of rec) {
+      expect(d.type).toBe(33);
+      expect(d.vy).toBe(-4);
+      expect(d.vx).toBe(0);
+      expect(d.scale).toBe(1.3);
+      expect(d.alpha).toBe(100);
+      expect(d.y).toBe(fy);                         // 无 −8
+    }
+  });
+});

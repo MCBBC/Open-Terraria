@@ -17,6 +17,8 @@
 //   同 damage/kb）→ 本类由 Dart.inferno291Kill 构造入 'projectiles' 桶。
 import { Entity } from './Entity';
 import { hitPlayer, statusPlayer } from './projTargets';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -48,6 +50,26 @@ export class InfernoHostileBlast extends Entity {
   //  误碎爆区内陶罐/草。本仓 minion 旗无召唤槽计数消费面（按类 instanceof 计数），
   //  借旗规避为最小侵入——若未来收口补 friendly 门可摘除。
   minion = true;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,projWetSection.ts 共享体
+  //  1:1;溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
+  //  豁免核对：292 InfernoHostileBlast SetDefaults P.cs:3817-3827（130×130/aiStyle 50/
+  //  hostile/alpha 255/magic/tileCollide=false【:3825】/penetrate −1）【无】ignoreWater
+  //  行 → 受段（数据面 PROJ_IGNORE_WATER 亦无 292;地狱火叉玩家侧 296 同参数但非本
+  //  类域）。292 ∉ IsDestroyedByWater 六型、非 2/34/80/155 → 各特支钩缺省。
+  //  阻尼不适用（原版形态锚）：tileCollide=false【:3825】→ HandleMovement 湿阻尼支
+  //  :17721-17764 整支不进（wet 位移本应走 :16870 AI 前快照 quirk）;且本弹 NewProjectile
+  //  (0,0) 速（:75806）、AI_050 不改速 → 快照恒 (0,0),UpdatePosition :20557-20562
+  //  两支位移均为 0,阻尼无消费位（出生即钉死原位爆区）。湿段只承载溅花/湿旗面——
+  //  岩浆/水漫入爆区盒时首拍各溅一次。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
 
   constructor(cx: number, cy: number, damage: number) {
     super();
@@ -84,6 +106,11 @@ export class InfernoHostileBlast extends Entity {
         d.vx = dx; d.vy = dy;                               // velocity 直写（:28821-28822）
       }
     }
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1）----
+    // 位序 = 原版 Update:AI（aiStyle50 落地段音/ai0++/尘柱完）→ 本段 → HandleMovement
+    // （零速无位移面）→ Damage。溅花尘/音由共享体调 wetSplashStepShared,本类不自写。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      292, !!projectileData(292)?.ignoreWater);
     // ---- 接触伤害（Damage_EVP 常规链；player.immune 门在 hitPlayer 内，命中不
     //      消耗穿透=灼烧区持续重判）+ On Fire 表（:12337-12340）----
     if (!game.player.dead && hitPlayer(this, game, this.damage)) {

@@ -26,6 +26,8 @@ import { segHitsRect } from './bossAI_duke_moonlord';   // 线段×AABB(CheckAAB
 import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { hslToRgb255 } from '../render/AuroraSky';
 import { TtlSprite } from '../assets/ttlSprite';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 // ---------------------------------------------------------------------------
 // 彩虹乘色烘焙(919/923 专供):本地 multiply+destination-in 两步染形,键按
@@ -219,6 +221,21 @@ export class CultistRitualCircle extends Entity {
   private interrupted = false;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：490 CultistRitual SetDefaults P.cs:5657-5668（14×14/aiStyle 89/
+  //  hostile/alpha 255/ignoreWater=true【:5664】/tileCollide=false/timeLeft 600/
+  //  netImportant）→ 豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、段照调,
+  //  豁免分流由 ignoreWater 参数自动承载）。阻尼不适用（双证）：①豁免;②零速
+  //  锚定体（锚 NPC 心,AI 不积分 velocity）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(src: Enemy) {
     super();
     this.srcId = src.id;
@@ -233,6 +250,10 @@ export class CultistRitualCircle extends Entity {
   private get scale(): number { return (1 - this.alpha / 255) * 0.6; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——490 豁免 id（P.cs:5664 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      490, !!projectileData(490)?.ignoreWater);
     // 淡入/淡出（:31195-31214）：中断（ai[1]=-1）或 age≥300 → +12/t；否则 -5/t
     this.alpha += (this.interrupted || this.age >= 300) ? 12 : -5;
     this.alpha = Math.max(0, Math.min(255, this.alpha));
@@ -334,6 +355,21 @@ export class IceMistCloud extends Entity {
   private rot = 0;                 // rotation（NewProjectile 缺省 0，仅母云自旋改写）
   private sndPlayed = false;       // localAI[1]
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：464 CultistBossIceMist SetDefaults P.cs:5353-5363（60×60/aiStyle 86/
+  //  hostile/tileCollide=false/penetrate −1/alpha 255/ignoreWater=true【:5362】）→
+  //  豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、段照调,豁免分流由
+  //  ignoreWater 参数自动承载）。阻尼不适用（双证）：①豁免;②母云漂移/子体
+  //  净静止抵消（AI position∓velocity）= 原版 :16870 快照 quirk 域,无湿阻尼面。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   /** x/y = NewProjectile 的 X/Y（中心锚）；vx/vy = 发射向量（母云=瞄速 4） */
   constructor(x: number, y: number, vx: number, vy: number, damage: number, mother: boolean) {
     super();
@@ -350,6 +386,10 @@ export class IceMistCloud extends Entity {
       game.playSfxWav?.('Item_120', 1, this.x, this.y);
     }
     this.ai0++;
+    // ★通用湿段（:16903-17113）——464 豁免 id（P.cs:5362 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 AI 中段与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      464, !!projectileData(464)?.ignoreWater);
     if (this.mother) {
       // ---- 母云档（:30763-30790）----
       this.alpha = Math.max(0, Math.min(255, this.alpha + (this.ai0 >= 130 ? 10 : -10)));
@@ -472,6 +512,22 @@ export class LightningOrb extends Entity {
   private frameCounter = 0;
   private frame = 0;               // projFrames[465]=4（vanilla-projframes.json）
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：465 CultistBossLightningOrb SetDefaults P.cs:5384-5393（80×80/
+  //  aiStyle 88/hostile/alpha 255/ignoreWater=true【:5391】/tileCollide=false）→
+  //  豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、段照调,豁免分流由
+  //  ignoreWater 参数自动承载）。掷出的 466 电弧也豁免（P.cs:5399）且走
+  //  LightningBoltProj（湿段批已接）。阻尼不适用（双证）：①豁免;②零速定点
+  //  （NewProjectile 速度 0,AI 不积分 velocity）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   /** x/y = NewProjectile 的 X/Y（中心锚 = 教徒 Center −(0,100)）；速度恒 0 */
   constructor(x: number, y: number, damage: number) {
     super();
@@ -481,6 +537,10 @@ export class LightningOrb extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——465 豁免 id（P.cs:5391 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      465, !!projectileData(465)?.ignoreWater);
     // 淡入/淡出（:30870-30887）
     if (this.ai0 < 180) this.alpha = Math.max(0, this.alpha - 5);
     else {
@@ -1170,6 +1230,22 @@ export class FairyQueenLance extends Entity {
   private alpha = 255;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：919 FairyQueenLance SetDefaults P.cs:8716-8728（8×8/aiStyle 179/
+  //  alpha 255/penetrate −1/hostile/timeLeft 240/tileCollide=false【:8726】/
+  //  ignoreWater=true【:8727】）→ 豁免 id,段门恒闭（:16903）= 原版零行为（字段照加、
+  //  段照调,豁免分流由 ignoreWater 参数自动承载）。阻尼不适用（双证）：①豁免;
+  //  ②tileCollide=false → 湿阻尼支 :17721-17764 不进（蓄射相速度 0,发射相当拍
+  //  积分走 :16870 快照同值——AI 置速后同帧位移,快照=post-AI,quirk 无观察差）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(x: number, y: number, ang: number, ai1: number, damage: number,
     enraged = false) {
     super();
@@ -1189,6 +1265,10 @@ export class FairyQueenLance extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——919 豁免 id（P.cs:8727 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      919, !!projectileData(919)?.ignoreWater);
     this.la0++;
     if (this.la0 >= 60) {                                    // :45855-45866 发射相
       this.vx = Math.cos(this.ang) * 40;
@@ -1362,6 +1442,22 @@ export class SunDanceBeam extends Entity {
   private sndPlayed = false;
   dead = false;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
+  //  豁免核对：923 FairyQueenSunDance SetDefaults P.cs:8759-8772（30×30/aiStyle 180/
+  //  alpha 255/penetrate −1/hostile/timeLeft 180/tileCollide=false【:8769】/
+  //  ignoreWater=true【:8770】/drawLayer 2）→ 豁免 id,段门恒闭（:16903）= 原版零行为
+  //  （字段照加、段照调,豁免分流由 ignoreWater 参数自动承载）。阻尼不适用（双证）：
+  //  ①豁免;②AI 锚本体（ai[1] 反查 636 → Center 吸附）+ 零速（:45815 velocity=0）,
+  //  无 velocity 位移宿主。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
+  presetDone = false;
+
   constructor(x: number, y: number, ang: number, bossId: number, damage: number, enraged: boolean) {
     super();
     this.x = x - this.w / 2;
@@ -1389,6 +1485,10 @@ export class SunDanceBeam extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // ★通用湿段（:16903-17113）——923 豁免 id（P.cs:8770 ignoreWater=true）→ 段门
+    //  恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      923, !!projectileData(923)?.ignoreWater);
     if (!this.sndPlayed) {
       this.sndPlayed = true;
       game.playSfxWav?.('Item_159', 1, this.cx, this.cy);      // :45794-45797 base.Center

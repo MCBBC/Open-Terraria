@@ -360,3 +360,60 @@ describe('浮漂溅花（AI_061 :54626-54652 / :54839-54852）', () => {
     expect(h.sfx.filter((s) => s.file === 'Splash_0').length).toBe(0);
   });
 });
+
+// ============ C. 浮漂通用湿段（Projectile.cs:16903-17113;2026-09-06 残差批接入） ============
+
+describe('浮漂通用湿段（:16903-17113 受段;入水 10 粒与 DoASplash 100 粒两支并存）', () => {
+  const mkFlyingBobber = (h: ReturnType<typeof mkHarness>): Bobber => {
+    const poleId = ITEM_BY_KEY[vanillaItemKey(2289)!]!;
+    h.player.inv.slots[0] = { id: poleId, stack: 1 };
+    // 池上方半空出生、下落触液（池 rows14-17/floor row18——头注①钳制窗内）
+    const b = new Bobber(20 * TILE, 12 * TILE, 0, 8, 5, 1, 5, () => h.player);
+    h.setTrack(b);
+    return b;
+  };
+
+  it('入水溅花改由通用湿段承载：10×dustWater(33) 盒(x−6,y+h/2−8,w+12,24) vy−4 scale1.3 α100 + Splash_1（旧 playSfx(\'splash\') 乱掷退役）', () => {
+    const h = mkHarness();
+    h.fill(1);
+    const b = mkFlyingBobber(h);
+    // ★不折返跑满窗：盒沿探针（湿段,位移前）晚于落定探针（浮起判定,位移后）一拍,
+    // 入水溅花在浮起次拍才触发——提前 break 会漏采
+    for (let t = 0; t < 40 && !b.dead; t++) b.fixedUpdate(1 / 60, h.game as never);
+    expect(b.floating).toBe(true);
+    expect(h.sfx.filter((s) => s.file === 'SYN:splash').length).toBe(0);   // 旧乱掷音退役
+    expect(h.sfx.filter((s) => s.file === 'Splash_1').length).toBe(1);     // :16975 缺省 style 1
+    const splashDust = h.dusts.filter((d) => d.type === 33);
+    expect(splashDust.length).toBe(10);                                    // :16966 循环 10
+    for (const d of splashDust) {
+      expect(d.x).toBe(d.px - 6);                                          // position.X−6
+      expect(d.y).toBe(d.py + b.h / 2 - 8);                                // 入水盒 −8（:16966）
+      expect(d.w).toBe(b.w + 12);
+      expect(d.h).toBe(24);
+      expect(d.vy).toBe(-4);                                               // :16968（水支型内预处理池内已植）
+      expect(d.vx).toBe(0);                                                // ×2.5（桩零初速）
+      expect(d.scale).toBe(1.3);                                           // :16969
+      expect(d.alpha).toBe(100);                                           // :16970
+      expect(d.noGravity).toBe(true);
+      expect(d.color).toBeNull();
+    }
+    expect(b.wet).toBe(true);
+    expect(h.particles.length).toBe(0);                                    // 旧 spawnParticles 通道零调用
+  });
+
+  it('漂浮湿态零重溅（:16949 !wet 门）：续拍尘/音零增量,wet 恒真', () => {
+    const h = mkHarness();
+    h.fill(1);
+    const b = mkFlyingBobber(h);
+    for (let t = 0; t < 40 && !(b.floating && h.dusts.length > 0); t++) {
+      b.fixedUpdate(1 / 60, h.game as never);
+    }
+    expect(b.floating).toBe(true);
+    expect(h.dusts.length).toBe(10);            // 入水溅花已发生（10 粒）
+    const nDust = h.dusts.length, nSfx = h.sfx.length;
+    for (let t = 0; t < 10; t++) b.fixedUpdate(1 / 60, h.game as never);
+    expect(h.dusts.length).toBe(nDust);          // 盒沿恒湿 → 不重触发（wetCount 门亦不涉）
+    expect(h.sfx.length).toBe(nSfx);
+    expect(b.wet).toBe(true);
+  });
+});

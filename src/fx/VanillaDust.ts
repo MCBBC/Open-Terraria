@@ -312,7 +312,7 @@ export class VanillaDust {
     if (!ps && (type === 33 || type === 52 || type === 266 || (type >= 98 && type <= 105))) {
       d.alpha = 170;
       d.vx *= 0.5;
-      d.vy += 1;
+      d.vy = d.vy * 0.5 + 1;   // 原文 velocity *= 0.5f 矢量(含 Y)后 Y++——红队R2-P1-1:曾漏 vy×0.5,净初速分布偏散至多 1px/t
     }
     // :52-63 NewDustPerfect：dust.position = Position；Velocity.HasValue →
     // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）。

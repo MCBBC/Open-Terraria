@@ -8,6 +8,7 @@
 //      维护（:16906-16911 只置不清 / :17103-17108 !wet 三清,照抄位次）。
 //      三案：沾浆渡水不杀不变型 / 浅缘邻格两向 / ignoreWater 幽灵弹不置 wet。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -315,7 +316,9 @@ describe('★V3 溅花/湿计数段（:16935-17102）逐值', () => {
     S.tick(1);
     expect(S.splash().length).toBe(10);
     expect(S.splash().every((e) => e.type === 35)).toBe(true);   // lavaWet 粘滞 → 岩浆档
-    expect(S.splash().every((e) => e.d.vy === -0.5)).toBe(true); // vy−1.5
+    // ★2026-09-06 残差批补链重锚：35 型内预处理（Dust.cs:252-256 v×0.1+vy=−0.5）→
+    // 桩净 vy=−0.5−1.5=−2、vx=1×0.1×2.5=0.25（旧桩净 −0.5=缺型内段近似值）
+    expect(S.splash().every((e) => e.d.vy === -2 && e.d.vx === 0.25)).toBe(true);
   });
 
   it('微光档：d308 六掷三色 + Splash_4/5 音量 0.75 循环内播但同拍去重=各 1 次', () => {
@@ -325,6 +328,9 @@ describe('★V3 溅花/湿计数段（:16935-17102）逐值', () => {
     expect(S.splash().length).toBe(10);
     expect(S.splash().every((e) => e.type === 308)).toBe(true);
     expect(S.splash().every((e) => e.d.alpha === 0 && e.d.noGravity)).toBe(true); // 微光支无 α100
+    // ★2026-09-06 残差批补链钉：308 型内预处理（Dust.cs:230-233 v×0.5+Y++）→
+    // 桩净 vy=1×0.5+1−4=−2.5、vx=1×0.5×2.5=1.25
+    expect(S.splash().every((e) => e.d.vy === -2.5 && e.d.vx === 1.25)).toBe(true);
     const palette = [[255, 255, 210], [190, 245, 255], [255, 150, 255], [190, 175, 255]];
     expect(S.splash().every((e) => {
       const c = e.d.color as { r: number; g: number; b: number; a: number };
@@ -446,5 +452,139 @@ describe('★L2 湿段时序钉 + 水中位移阻尼（2026-09-04 重排金标�
     expect(D.a.x).toBe(309 + 6 + 6);
     expect(D.a.vx).toBe(6);
     expect(D.a.wet).toBe(false);
+  });
+});
+
+// =====================================================================
+// ★⑥ 杀拍湿段口径（2026-09-06）——原版 Update 对湿段【无 active 门】：
+//   AI(:16880 `if (active)`) 内 Kill（active=false）当拍湿段(:16903)照跑（旗刷新/
+//   水death 判定/溅花/wetCount 维护），`!active` 门在 HandleMovement(:17120) 之后
+//   :17132 才生效、只拦 Damage 管线。本仓 AI 杀位（killNow+return）曾整体跳过湿段
+//   =杀拍溅花缺口（469 出水杀拍/计时·α 渐隐族入水杀拍…原版都溅）。
+//   修法=wetSectionStep 双调用点（subStepAI 尾活拍原位 + subStep dead 支补跑,
+//   wetSectionRan 防同子步双跑）+ killNow 头幂等门（:71763-71766 `if (!active)`）。
+//   案例位序：杀拍溅花出生位=杀位（AI 不挪位;同原版湿段采样=AI 后位）。
+// =====================================================================
+describe('★⑥ 杀拍湿段（AI 杀当拍湿段照跑,:16903 无 active 门）', () => {
+  function mkKill(store: TileStore, projId: number, x: number, y: number) {
+    const dusts: Array<{ sw: number; sh: number; type: number }> = [];
+    const a = new Arrow(x, y, 0, 0, 12, 1, projId, null, { grav: 0 });
+    a.w = 10; a.h = 10;
+    const g = {
+      ...hooks(store),
+      spawnDust: (_sx: number, _sy: number, sw: number, sh: number, type: number) => {
+        dusts.push({ sw, sh, type });
+        return null;
+      },
+    } as unknown as GameHooks;
+    const tick = (n: number) => { for (let i = 0; i < n && !a.dead; i++) a.fixedUpdate(1 / 60, g); };
+    const splash = () => dusts.filter((e) => e.sw === 22 && e.sh === 24);   // 溅花专用盒 (w+12,24)
+    return { a, dusts, splash, tick, g };
+  }
+
+  const waterCol = () => {
+    const st = new TileStore(60, 160);
+    st.liquid[st.idx(20, 40)] = LIQ; st.liquidType[st.idx(20, 40)] = 1;
+    return st;
+  };
+
+  it('469 蜂箭出水杀拍：AI 头 Kill(:54969) 当拍湿段补跑 → 出水溅花 ×10 + wetCount 窗 10→9（修前跳段=不溅）', () => {
+    const K = mkKill(waterCol(), 469, 309, 637);   // 出生干区（探针 [309,319] 与列 20 无交）
+    K.tick(1);
+    expect(K.a.dead).toBe(false);
+    expect(K.splash().length).toBe(0);
+    K.a.x = 322;                                    // 渡入水列（探针 [322,332] ⊂ [320,336]）
+    K.tick(1);                                      // AI 头读上拍 wet(干)→不杀;湿段置 wet+入水溅花
+    expect(K.a.dead).toBe(false);
+    expect(K.splash().length).toBe(10);             // 入水溅花（活拍,既有 V3 面）
+    K.a.x = 500; K.a.y = 300;                       // 出水（=上子步位移出水的等价驱动）
+    K.tick(1);                                      // AI 头读 wet(湿)→Kill;★杀拍湿段补跑→出水溅花
+    expect(K.a.dead).toBe(true);
+    expect(K.splash().length).toBe(20);             // ← 杀拍出水溅花 ×10（修前恒 10）
+    expect((K.a as unknown as { wetCount: number }).wetCount).toBe(9);   // :16984 置 10 + 同段尾 :17109 −1
+  });
+
+  it('131 孢子云入水杀拍：α 渐隐 Kill（非湿条件 AI 杀位 :4518 档）当拍渡入水 → 杀拍湿段补跑入水溅花 ×10', () => {
+    const K = mkKill(waterCol(), 131, 309, 637);
+    K.tick(1);                                      // 干拍活着（α+4）
+    expect(K.a.dead).toBe(false);
+    expect(K.splash().length).toBe(0);
+    K.a.x = 322;                                    // 渡入水列（上子步位移入水的等价驱动）
+    (K.a as unknown as { alpha: number }).alpha = 251;   // 下拍 AI α+4=255 ≥255 → Kill
+    K.tick(1);
+    expect(K.a.dead).toBe(true);
+    expect(K.splash().length).toBe(10);             // ← 杀拍入水溅花（修前恒 0）
+  });
+
+  it('Kill 幂等门（:71763-71766 if(!active) return）：已死弹再杀零新增 FX——杀拍湿段水death/80 补 Kill 免双爆', () => {
+    const K = mkKill(new TileStore(60, 160), 1, 309, 637);   // 1 木箭：Kill=dig 音+尘7×10
+    K.tick(1);
+    const kn = K.a as unknown as { killNow(g: GameHooks): void; dead: boolean };
+    kn.killNow(K.g);
+    expect(kn.dead).toBe(true);
+    const n1 = K.dusts.length;
+    expect(n1).toBeGreaterThan(0);                  // 首杀 FX 已结（防"全 miss 恒 0"反向陷阱）
+    kn.killNow(K.g);                                // 二次杀（杀拍湿段水death 补 Kill 的等价路径）
+    expect(K.dusts.length).toBe(n1);                // 幂等门：零新增
+  });
+});
+
+// =====================================================================
+// ★③ flare 贴壁与通用湿阻尼叠加对拍（HandleMovement aiStyle 33 支 :18731-18745
+//   vs 湿阻尼 :17721-17764 + UpdatePosition :20555-20562）
+//   定谳（反编译逐句）：贴壁支是 HandleMovement 碰撞反弹链内的【独立 position 写】,
+//   消费 lastVelocity（撞块前速度）×(wet?0.5:1)——【不消费 wetVelocity】、不吃通用
+//   阻尼档；而通用阻尼写（UpdatePosition `if (wet) position += wetVelocity`）同拍
+//   【照加】——原文两写是加法关系,非互斥、也无 0.5×0.5 双重减半（贴壁拍 velocity*=0
+//   :18743 在 wetVelocity 采样(:17755)之后,湿态 UpdatePosition 加的是采样值）。
+//   本仓同构：通用位移行 dragF 写 + 贴壁支 raw v×stickAdv 写,加法叠加。
+//   登记残差（repo 级碰撞模型,非湿阻尼面）：原文第二写吃【撞后】速度（blocked 轴
+//   已被 TileCollision 清零）,本仓通用位移行在撞块判定【前】以撞前速度积分
+//   （move-then-check 模型）→ 首触拍嵌入深度比原文深至多一个(阻尼档)速度步——
+//   全体撞块弹同族（消亡型即移除零观感,flare 停驻弹可见）,非本批修面。
+// =====================================================================
+describe('★③ flare 贴壁与通用湿阻尼叠加对拍（:18731-18745 × :17721-17764/:20555-20562）', () => {
+  function mkFlare(store: TileStore, x: number, y: number, vx: number) {
+    const a = new Arrow(x, y, vx, 0, 12, 1, 163, null, { grav: 0 });
+    a.w = 10; a.h = 10;
+    const g = hooks(store);
+    const tick = (n: number) => { for (let i = 0; i < n && !a.dead; i++) a.fixedUpdate(1 / 60, g); };
+    return { a, tick };
+  }
+  const wallCol = (withWater: boolean) => {
+    const st = new TileStore(60, 160);
+    st.type[st.idx(21, 40)] = 2; st.flags[st.idx(21, 40)] = 1;   // 石墙列 21 [336,352]
+    if (withWater) {
+      st.liquid[st.idx(19, 40)] = LIQ; st.liquidType[st.idx(19, 40)] = 1;
+      st.liquid[st.idx(20, 40)] = LIQ; st.liquidType[st.idx(20, 40)] = 1;
+    }
+    return st;
+  };
+
+  it('结构锁：贴壁支=raw v×(wet?0.5:1) 不乘阻尼档;通用位移行=projWaterDragFactor（源文本锚）', () => {
+    const src = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
+    expect(src).toContain('const stickAdv = this.wet ? 0.5 : 1;');            // :18733-18739
+    expect(src).toContain('this.x += this.vx * stickAdv;');
+    expect(src).toContain('const dragF = projWaterDragFactor(this);');
+    expect(src).toContain('this.x += this.vx * dragF;');
+  });
+
+  it('湿态首触拍：位移 = dragF 写(12×0.5) + 贴壁写(12×0.5) = 12 全额——无 0.25 双重减半', () => {
+    const F = mkFlare(wallCol(true), 325, 637, 12);   // 盒[325,335]⊂水列20,心330(列20)
+    F.tick(1);
+    expect(F.a.wet).toBe(true);
+    expect(F.a.x).toBe(325 + 6 + 6);                  // dragF 写 6 + 贴壁写 6（双重减半版=325+6+3）
+    expect(F.a.vx).toBe(0);                           // :18743 velocity *= 0f（贴壁清零）
+    expect((F.a as unknown as { flareStuck: number }).flareStuck).toBe(1);   // :18744 localAI[0]=1
+    expect(F.a.dead).toBe(false);                     // 贴壁不消亡
+  });
+
+  it('干态首触拍：位移 = 1×v + 1×v = 2v——贴壁写不消费阻尼档（干态对照 stickAdv=1）', () => {
+    const F = mkFlare(wallCol(false), 327, 637, 6);   // 心332(列20 干区)
+    F.tick(1);
+    expect(F.a.x).toBe(327 + 6 + 6);
+    expect(F.a.vx).toBe(0);
+    expect((F.a as unknown as { flareStuck: number }).flareStuck).toBe(1);
+    expect(F.a.wet).toBe(false);
   });
 });

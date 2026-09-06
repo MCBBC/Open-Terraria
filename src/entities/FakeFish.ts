@@ -367,10 +367,16 @@ export class FakeFish {
 
   /** DoStandardWaterSplash（:190-261）四液分支：尘型 308/152/35/dustWater() 各 10 粒,
    *  noGravity+scale1.3;音 fish_splash——★微光支在循环【内】播 ×10(:219 原版如此)、
-   *  蜂蜜/岩浆/水支循环外一次(:233/:246/:259)。pitchOffset 见 FISH_SPLASH_PITCH_OFFSET */
+   *  蜂蜜/岩浆/水支循环外一次(:233/:246/:259)。pitchOffset 见 FISH_SPLASH_PITCH_OFFSET。
+   *  ★2026-09-06 残差清偿（Player.ts 溅花发射器同式）：308/152/35 的 NewDust 型内
+   *  初速预处理（Dust.cs:230-233 v×0.5+Y++ / :252-256 v×0.1+vy=−0.5）VanillaDust.spawn
+   *  未植 → 分支内按原版链先补型内段、再上调用侧覆写（净初速与原版逐位等价）;
+   *  水支 33 族池内已植无需补。★盒偏移分形逐字：水支 :252 `vector.Y+num2/2`【无 −8】、
+   *  微光/蜜/岩浆三支 :199/:226/:239 `−8`（曾四支统一 −8=水支高 8px 既有近似,退役） */
   private doStandardWaterSplash(game: FakeFishHost, kind: FishSplashLiquid): void {
     const vectorX = this.x - 4, vectorY = this.y - 4;     // castPosition-(4,4)
-    const boxX = vectorX - 6, boxY = vectorY + (8 / 2) - 8;   // -(6, h/2-8)
+    const boxX = vectorX - 6;                             // -(6, …)
+    const boxY = kind === 'water' ? vectorY + 4 : vectorY + 4 - 8;   // h/2=4;水支无 −8(:252)
     const dustType =
       kind === 'shimmer' ? 308 :
       kind === 'honey' ? 152 :
@@ -381,13 +387,16 @@ export class FakeFish {
       if (d) {
         switch (kind) {
           case 'shimmer':                                 // :200-203
+            d.vx *= 0.5; d.vy = d.vy * 0.5 + 1;           // NewDust 308 型内预处理（Dust.cs:230-233）
             d.vy -= 4; d.vx *= 2.5; d.scale = 1.3; d.noGravity = true;
             d.color = SHIMMER_DUST_COLORS[next(6)];       // :204-218 六掷三色+缺省
             break;
           case 'honey':                                   // :227-231
+            d.vx *= 0.1; d.vy = -0.5;                     // NewDust 152 型内预处理（Dust.cs:252-256）
             d.vy -= 1; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
             break;
           case 'lava':                                    // :240-244
+            d.vx *= 0.1; d.vy = -0.5;                     // NewDust 35 型内预处理（Dust.cs:252-256）
             d.vy -= 1.5; d.vx *= 2.5; d.scale = 1.3; d.alpha = 100; d.noGravity = true;
             break;
           default:                                        // :252-257 水

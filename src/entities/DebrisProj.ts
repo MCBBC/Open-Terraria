@@ -4,12 +4,20 @@
 // 规格：10×10 / knockBack 6 / penetrate -1 / aiStyle 10（重力落体近似：g 0.3/tick）。
 // Kill（撞块/命中/寿命尽，:75336-75360）：Item_127 + 3 尘（dust 275/276/277 色系）+
 //   中心正下格若为裂砖 1/2 掷 KillTile（连锁——原版无 noItem，掉同色地牢砖）。
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：736-738 走 SetDefaults `(736||737||738)`
+//   共档 :7750-7757（10×10/aiStyle10/penetrate −1）,【无 ignoreWater 行】→ 受段
+//   （vanilla-projectiles.json 同向）;AI_010 无 wet 消费（:58809-59083 grep 实证）→
+//   溅花+旗维护即全部效果。★阻尼 N/A 定谳：aiStyle 10 在 HandleMovement 走专支
+//   :17701-17720（TileCollision 直连,与 wet 阻尼支 :17718 互斥——velocity 场不被
+//   阻尼改写,位移不折减）,本类直积分位移行原样照跑。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitPlayer } from './projTargets';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
 import { isCrackedAt } from '../world/CrackedBricks';
 
@@ -19,6 +27,15 @@ export class DebrisProj extends Entity {
   w = 10; h = 10;
   private readonly projId: number;   // 736/737/738（随 481/482/483 主题色）
   private life = 600;                // timeLeft 兜底（防滞留）
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(sheet481: number, x: number, y: number) {
     super();
@@ -52,6 +69,12 @@ export class DebrisProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
     this.vy += 0.3;                                   // 重力落体（aiStyle 10 近似）
+    // ---- ★通用湿段（:16903-17113,共享体）——AI(:16880)→湿段(:16903)→位移
+    //      (:17120 HandleMovement→:20561 UpdatePosition)位序;采样位=AI 后位移前
+    //      =上拍移动结算位。AI 杀拍（撞块/命中,本类融合拍序在位移后判定）不跑湿段
+    //      =仓内湿段批统一口径（RollingBoulder 同式,登记有界偏差）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     this.x += this.vx;
     this.y += this.vy;
     // 敌对命中（damage 20，NewProjectile 默认 friendly=false）

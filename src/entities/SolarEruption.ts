@@ -10,6 +10,9 @@
 //     （本仓单层近似，双层视觉差异小备案）。
 //   612（AI_117）：scale = ai[1]（0.85+rand×1.15 起，每 tick +0.01）；帧 3t/帧 ×5；
 //     ai[0]≥15 消亡；命中 AddBuff 189。贴图 52×260 = 5 帧 52px。
+// ★通用湿段定谳（2026-09-06 武器弹簇批）：611/612 SetDefaults（:6569-6584/:6586-6596）
+//   ignoreWater=true（611 :6581 / 612 :6593）= 豁免——P.cs:16903 湿段整段门不开,
+//   溅花/湿旗/水阻尼全不适用,不接 projectileWetSection。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';

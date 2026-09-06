@@ -7,6 +7,8 @@
 //
 // 弹体 SetDefaults（Terarria1457/Terraria/Projectile.cs:9255-9271）逐行：
 //   width=160 height=160 aiStyle=189 friendly=true alpha=255 ignoreWater=true
+//   （:9262——★湿段定谳 2026-09-06：豁免,P.cs:16903 湿段整段门不开,不接
+//   projectileWetSection;AI_189 亦无位移改写面）
 //   timeLeft=60（同函数 :9270 复写为终值 30） tileCollide=false ownerHitCheck=true
 //   penetrate=3 usesLocalNPCImmunity=true localNPCHitCooldown=-1 melee=true
 // 命中 debuff：StatusNPC `if (type == 978) nPC.AddBuff(24, 180)`（Projectile.cs:11365）

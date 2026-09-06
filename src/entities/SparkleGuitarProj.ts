@@ -2,8 +2,9 @@
 // 二轮蓝队批⑦修正 F1 触敌自杀+Kill 爆裂真结算、F2 减伤视线系别归位步行族）。
 // 标杆 Terarria1457/Terraria/Projectile.cs + Player.cs/Item.cs（行号均指该树）：
 //   SetDefaults 弹 856（:8208-8220）：32×32、aiStyle 167、friendly、alpha=255、magic、
-//     tileCollide=false、ignoreWater、extraUpdates=2、usesLocalNPCImmunity=true +
-//     localNPCHitCooldown=-1（每敌一跳终生一次）。
+//     tileCollide=false、ignoreWater=true（:8217——★湿段定谳 2026-09-06：豁免,P.cs
+//     :16903 湿段整段门不开,不接 projectileWetSection）、extraUpdates=2、
+//     usesLocalNPCImmunity=true + localNPCHitCooldown=-1（每敌一跳终生一次）。
 //   AI_167_SparkleGuitar（:47427-47445）：寿命 num=90t——localAI[0] 计满 88 Kill
 //     （`>= num-1f` 判定先于本轮位移,num2=t/90 曲线参数）;每拍 Center = CatmullRom 四控制点：
 //       P0 = player.Center − v×2        （value :47433）

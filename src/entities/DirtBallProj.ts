@@ -79,6 +79,12 @@
 // 出生:ItemCheck_Shoot :47605 RotatedRelativePoint(MountedCenter) ≈ 玩家中心
 // (fireSlimeGun 等仓内同口径 cx/cy-4);channel 目标与断链由 Game 侧 provider 注入
 // (player.channel 全局旗语义——StartChanneling(114) 置位,:43158 !controlUseItem 清)。
+//
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：17【豁免】——SetDefaults :993
+//   ignoreWater=true（头注已引）;:16901 整段门直跳 + NewProjectile :10887-10891
+//   强制 wet=false → 通用湿段（溅花/旗维护/IsDestroyedByWater/34·80·155 特支）对本弹
+//   【恒不触发】,不接 projectileWetSection（N/A）。姊妹弹 40 AshBallFalling 无该行
+//   =受段,两姊妹异面（AshBallProj.ts 已接）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';

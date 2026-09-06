@@ -17,6 +17,8 @@ import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
 import { Clock } from '../world/World';
 import { moveAndCollide } from '../physics/TileCollision';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import {
   fishingPowerMultiplier, rollDropLevels, rollJunk, heightLevelOf, prepareFishingContext,
@@ -54,7 +56,8 @@ export const KILL_DIST = 3000;
 export const REEL_SMOOTH = 10;
 /** 收线目标速度上限（方向归一 ×15.9 px/t，:54660） */
 export const REEL_SPEED = 15.9;
-/** 浮漂弹盒（SetDefaults :4511-4522 width=height=14——Kill 触玩家盒判定用） */
+/** 浮漂弹盒钉值（SetDefaults :4510-4520 width=height=14）——收线触玩家盒判定已改读
+ *  真盒 w/h（同值 14）;常量保留为 SetDefaults 钉值导出（tests/fishing-rod-hold 直测） */
 export const BOBBER_BOX = 14;
 
 /** Main.rand.Next(min, max)（左闭右开） */
@@ -108,7 +111,11 @@ function getFishingPondState(game: GameHooks, x: number, y: number): PondState {
 }
 
 export class Bobber extends Entity {
-  w = 8; h = 8;
+  // 弹盒 = SetDefaults（Projectile.cs:4510-4520,360-366/381/382/760/775 共块）
+  // width=height=14——2026-09-06 残差批由 8×8 修 14×14;消费位逐面核对（湿段 WetCollision
+  // 翻转点/doSplash 盒 w+12/渔线锚盒心·盒顶 10%/收线触玩家盒——均盒相对,随盒自适应,
+  // 唯旧 BOBBER_BOX 常量代读改真盒,见 retract 段注）
+  w = 14; h = 14;
   dead = false;
   /** 漂浮中（已落液） */
   floating = false;
@@ -143,8 +150,14 @@ export class Bobber extends Entity {
   private airT = 0;
   /** ai[1]（AI_061）：0 = 等待累积中；<0 = 咬钩窗口（负值幅度 = rand(-240,-90) - 钓鱼力） */
   private ai1 = 0;
-  /** localAI[1]：等待累积器（>660 触发 FishingCheck，:50943-50947） */
+  /** localAI[1]：等待累积器（>660 触发 FishingCheck，:54779-54783） */
   private lAI1 = 0;
+  /** localAI[2]（AI_061）：微光 Splash_2 一次门（:54693-54697 置 1）；咬钩时被
+   *  SetFishingCheckResults 覆写为饵 vid（:20878/:20892）——ConsumeBait 的
+   *  localAI[2] 消费本仓由 baitSlot 承载（ItemCheck_CheckFishingBobber_ConsumeBait
+   *  :53093 槽位投影），本字段只服务微光音门生命周期（咬钩后 >0 → 微光音不再重播,
+   *  与原版「每浮漂至多一声」同态） */
+  private lai2 = 0;
   /** ai[0]（AI_061 :54635 起）：0=飞行/漂浮；1=收线中（PullFishingBobbers :53031 /
    *  超 900px :54704）；2=断线/敌怪收线（收线首 tick 播 Item17+溅水一次后自增 3，
    *  :54636-54645）。收线飞行 tileCollide=false 直移、触玩家盒即 Kill（:54666-54668） */
@@ -152,6 +165,28 @@ export class Bobber extends Entity {
   /** 当前浮着液体（入液时登记；AI_061 wet/lavaWet/honeyWet 三位最小投影——
    *  收线断线溅水门 :54641-54644 岩浆/蜂蜜免溅用） */
   liquidKind: 'water' | 'lava' | 'honey' | null = null;
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-06 残差批接入;
+  //  2026-09-05 溅花台账登记"浮漂入水声乱掷属通用弹湿段域"就此清偿）----
+  //  豁免核对：SetDefaults :4510-4520（360-366/381/382/760/775 共块 w=h=14 aiStyle61
+  //  bobber）无 ignoreWater 行 → 受段（360-366 是原版真弹非豁免）。溅花两支分野（勿混）：
+  //  本湿段 = 入/出水【盒沿】触发 10 粒四液花 + Splash_1（:16948-16976/:17029-17031,
+  //  出生盒沿第一次触液即溅）——AI_061_DoASplash（:54839-54852,收线断线/拉杆 100 粒
+  //  Splash_0,doSplash 承载）是另一条独立原版支,并存不重复。
+  //  位序：本调用在收线/飞行各支【之前】——收线相位（ai[0]>=1）原版无湿段豁免,
+  //  出水溅花/位移阻尼在收线飞行同样成立（UpdatePosition :20557 每子步消费 wetVelocity）。
+  //  浮漂 AI 侧 wet 旗消费面：漂浮门/微光 buff353（:54685-54698）与咬钩抖动三旗复位
+  //  （:54791-54793）2026-09-06 二批已接（浮态段直读共享体旗——shimmerWet 真蕴含 wet,
+  //  ≙ 原版嵌套门;湿段拍头 → 消费滞后原版一拍,位序登记）;收线免溅 :54641-54644 仍走
+  //  liquidKind 投影（tests/player-bobber-splash-1457 桩直设 liquidKind,勿改旗读法）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐 update −1） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
+  presetDone = false;
   /** 收线态只读（Game.reelBobber 尾部 Kill 门消费——原版收线非即时消失） */
   get retracting(): boolean { return this.retract >= 1; }
 
@@ -234,6 +269,10 @@ export class Bobber extends Entity {
       this.dead = true;
       return;
     }
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒;
+    //      位序/分野见字段块注）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 收线态（ai[0]>=1，:54635-54668）：断线哨(2→3 播 Item17+溅水一次) →
     //      localAI[0] 0→100（钓线摆垂权重收敛，:54647-54649）→ tileCollide=false
     //      直移朝玩家（平滑窗 10、速度归一 ×15.9）→ >3000 Kill / 触玩家盒 Kill ----
@@ -251,11 +290,15 @@ export class Bobber extends Entity {
       const tyv = d > 1e-6 ? (dyp / d) * REEL_SPEED : 0;
       this.vx = (this.vx * (REEL_SMOOTH - 1) + txv) / REEL_SMOOTH;   // :54659-54664
       this.vy = (this.vy * (REEL_SMOOTH - 1) + tyv) / REEL_SMOOTH;
-      this.x += this.vx;
-      this.y += this.vy;                    // tileCollide=false（:54652）无碰撞直移
-      // Hitbox.Intersects(player.Hitbox)（:54666-54668）：14×14 弹盒 vs 玩家盒
-      if (this.cx + BOBBER_BOX / 2 > p.x && this.cx - BOBBER_BOX / 2 < p.x + p.w
-        && this.cy + BOBBER_BOX / 2 > p.y && this.cy - BOBBER_BOX / 2 < p.y + p.h) {
+      // ★水中位移阻尼（HandleMovement :17721-17764 → UpdatePosition :20557 湿态
+      //  position += wetVelocity）：直积分乘进位移行,速度【场】vx/vy 不动
+      const dfR = projWaterDragFactor(this);
+      this.x += this.vx * dfR;
+      this.y += this.vy * dfR;              // tileCollide=false（:54652）无碰撞直移
+      // Hitbox.Intersects(player.Hitbox)（:54666-54668）：弹盒 vs 玩家盒——盒改 14×14
+      // 后改读真盒 w/h（原 BOBBER_BOX 常量代读退役;常量保留=SetDefaults 钉值导出供测试）
+      if (this.cx + this.w / 2 > p.x && this.cx - this.w / 2 < p.x + p.w
+        && this.cy + this.h / 2 > p.y && this.cy - this.h / 2 < p.y + p.h) {
         this.dead = true;
         return;
       }
@@ -274,53 +317,127 @@ export class Bobber extends Entity {
     if (!this.floating) {
       this.vy = Math.min(this.vy + GRAVITY * 0.7, 8);
       this.vx *= 0.99;
-      moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★水中位移阻尼（HandleMovement :17721-17764 → UpdatePosition :20557）：因子乘进
+      // dx/dy 入参（moveAndCollide 契约——采纳处原样回读勿除回）,速度场不减
+      const dfF = projWaterDragFactor(this);
+      moveAndCollide(this, game.world, this.vx * dfF, this.vy * dfF);
       if (liqType === 'water' || liqType === 'honey') {
         this.floating = true;
         this.liquidKind = liqType;
-        this.vx = 0; this.vy = 0;
-        // 原版浮标经 AI_061_GetWaterLine（:50947-50978）沉到液面以下、中心格 wet；
-        // 此处把中心对齐到入液行中部，保证 FishingCheck 的 Center/16 坐标落在液格内
-        const rowY = Math.floor((this.y + this.h) / TILE);
-        this.y = rowY * TILE + (TILE - this.h) / 2;
-        game.playSfx('splash', 1);
+        // 原版入液【不清速度、不钉位】（AI_061 无此二行）——速度由浮支物理衰减
+        // （vy>0 每拍 ×0.5 + GetWaterLine 液面回拉 :54699-54740,2-6 拍 settled），
+        // settled 点 = 液面（表层液格内）→ FishingCheck 的 Center/16 仍落液格;
+        // 入水溅花/音已上移通用湿段（10 粒四液花 + Splash_1 原版 style1）——旧
+        // playSfx('splash') 六变体乱掷近似退役（2026-09-06 残差清偿,见字段块注）
       } else if (liqType === 'lava') {
         // 岩浆：无熔线钓钩配饰则浮标烧毁（accLavaFishing 门）
         const canLava = this.ownerLavaOk();
         if (!canLava) { this.dead = true; return; }
         this.floating = true;
         this.liquidKind = 'lava';
-        this.vx = 0; this.vy = 0;
-        const rowYL = Math.floor((this.y + this.h) / TILE);
-        this.y = rowYL * TILE + (TILE - this.h) / 2;
       } else if (++this.airT > 600) {
         this.dead = true; // 落地未入水超时
       }
       return;
     }
-    if (this.ai1 < 0) {
-      // 咬钩窗口（AI_061 :50918-50934）：ai[1] 每 tick += rand(1,5)；
-      // 归零 = 逃脱——localAI[1] 清零（渔获作废），回到等待累积
-      this.ai1 += nextInt(1, 5);
-      if (this.ai1 >= 0) {
-        this.ai1 = 0;        // :50930
-        this.lAI1 = 0;       // :50931（渔获作废）
-        this.catchId = 0;
-        this.catchEnemy = 0;
-        this.truffleBite = false;
+    // ---- 浮态（AI_061 if (wet) 浮支 :54684-54753 1:1；2026-09-06 二批——旧
+    //      「入液行静态钉位 + 速度清零 + 累积无 settled 门」近似整体退役：
+    //      settled 门（:54736-54739/:54758-54764）、咬钩抖动（:54785-54802）、
+    //      液面回拉皆依赖本段）----
+    //      ★分支选择器 = floating（本仓 wet 最小投影,任务面口径）：原版选择器是
+    //      湿旗,但弹湿旗扫描窗 y 钳 maxTilesY−40（Collision.cs:1596 Utils.Clamp,
+    //      共享段同源）——测试小世界深池/地狱底 40 行读不到湿（真实世界鱼池永不落
+    //      钳制窗,钳制无行为差）;floating 由入液格探针直读注册（无钳）,湿旗仍逐拍
+    //      维护供微光面/咬钩溅花重触发消费。水位被抽走时原版走 else 重力支
+    //      （:54741-54753）,此处浮支物理以缺省液面=盒底（GetWaterLine :54807）
+    //      匀速下沉承接——既存近似登记,终态同（触底即驻,settled 门挡累积）。
+    // 微光钩爪面（:54685-54698）：浮在微光里 → owner 每 tick AddBuff(353,60)（微光化）
+    // + localAI[2] 一次门播 PlaySound(19,…,2)=Splash_2（声源=玩家坐标,style 2 直映
+    //   LegacySoundPlayer.cs:874 case19）。★353=Shimmered 微光化（Player.cs:27944-27951
+    //   玩家涉微光同款授予）,非"微光免疫"——任务面曾误标,以反编译为准。
+    //   原版无 shimmerImmune/UnderworldLayer 门（那两门在玩家自涉支 :27944-27948,
+    //   浮漂支没有）——1:1 不加门
+    if (this.shimmerWet) {
+      p.buffs.apply(BuffType.Shimmered, 1);          // :54691 AddBuff(353,60)（myPlayer==owner 单机恒真;60t=1s）
+      if (this.lai2 === 0) {                         // :54693-54697 一次门
+        this.lai2 = 1;
+        game.playSfxWav?.('Splash_2', 1, p.x, p.y);  // PlaySound(19,(int)player.position.X/Y,2)
       }
-      return;
     }
-    // 等待累积（AI_061 :50897-50915）
-    const level = this.fishingPower(p, game);
-    if (Math.floor(Math.random() * 300) < level) this.lAI1 += nextInt(1, 3);   // :50900-50902
-    this.lAI1 += Math.floor(level / 30);                                       // :50903
-    this.lAI1 += nextInt(1, 3);                                                // :50904
-    if (Math.floor(Math.random() * 60) === 0) this.lAI1 += 60;                 // :50905-50908
-    if (this.lAI1 > 660) {
-      this.lAI1 = 0;                                                           // :50912
-      this.fishingCheck(p, game, idx);
+    // 浮支物理（:54699-54740）
+    this.drawRot = 0;                        // rotation = 0f（:54699——浮态恒正立）
+    this.vx *= 0.9;                          // :54700
+    // :54701-54712 盒沿 tile 空分配探针=行为死码（只 new Tile 不读）不移植;
+    if (this.vy > 0) this.vy *= 0.5;         // :54713-54716
+    const wl = this.getWaterLine(st, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+    if (this.cy > wl) {                      // :54720-54731
+      this.vy -= 0.1;
+      if (this.vy < -8) this.vy = -8;
+      if (this.cy + this.vy < wl) this.vy = wl - this.cy;
+    } else {
+      this.vy = wl - this.cy;                // :54732-54735
     }
+    let flag3 = this.vy >= -0.01 && this.vy <= 0.01;   // :54736-54739 settled
+    // ---- 累积/咬钩（:54758-54802；原版 !flag3 早退 :54762-54764）----
+    if (this.ai1 !== 0) flag3 = true;        // :54758-54761（咬钩窗内不受 settled 门）
+    if (flag3) {
+      if (this.ai1 === 0) {
+        // 等待累积（:54766-54784）
+        const level = this.fishingPower(p, game);
+        if (Math.floor(Math.random() * 300) < level) this.lAI1 += nextInt(1, 3);   // :54769-54772
+        this.lAI1 += Math.floor(level / 30);                                       // :54773
+        this.lAI1 += nextInt(1, 3);                                                // :54774
+        if (Math.floor(Math.random() * 60) === 0) this.lAI1 += 60;                 // :54775-54778
+        if (this.lAI1 > 660) {
+          this.lAI1 = 0;                                                           // :54781
+          this.fishingCheck(p, game, idx);
+        }
+      } else if (this.ai1 < 0) {
+        // 咬钩窗（:54785-54802）：ai[1] 每 tick += rand(1,5)；归零 = 逃脱——
+        // localAI[1] 清零（渔获作废），回到等待累积
+        if (this.vy === 0 || (this.honeyWet && Math.abs(this.vy) <= 0.01)) {
+          // 抖动踢（:54789-54790）+ 三旗复位（:54791-54793 wet/lavaWet/honeyWet——
+          // ★任务面"localAI[0] 等"系误记,原文三旗即湿旗）:复位后下一拍共享湿段
+          //  !wet && wetCount==0 → 重触发入水溅花 10 粒+Splash_1（:16948 门）＝原版
+          //  咬钩水花;本仓湿段在拍头 → 溅花滞后一拍（位序登记,projWetSection 头注同源）
+          this.vy = nextInt(100, 500) * 0.015;     // 1.5..7.485 下沉
+          this.vx = nextInt(-100, 101) * 0.015;    // ±1.5
+          this.wet = false;
+          this.lavaWet = false;
+          this.honeyWet = false;
+        }
+        this.ai1 += nextInt(1, 5);               // :54795
+        if (this.ai1 >= 0) {                     // :54796-54801 归零逃脱
+          this.ai1 = 0;
+          this.lAI1 = 0;
+          this.catchId = 0;
+          this.catchEnemy = 0;
+          this.truffleBite = false;
+        }
+      }
+    }
+    // 位移积分（HandleMovement :17721-17764 湿阻尼 ×0.5/0.25/0.375 只进位移,
+    // 速度场不减）——置于 ai1 分支之后＝原版 AI(:16880)→湿段(:16895)→
+    // HandleMovement(:17120) 同拍尾序：咬钩踢速度当拍即入位移（抖动当拍可见）
+    const dfW = projWaterDragFactor(this);
+    moveAndCollide(this, game.world, this.vx * dfW, this.vy * dfW);
+  }
+
+  /** AI_061_FishingBobber_GetWaterLine（Projectile.cs:54805-54833）1:1：探中心列
+   *  Y-1/Y/Y+1 三格液面高、首中即返；缺省=盒底（position.Y+height）。液面 =
+   *  行底 − liquid/16（C# 整除）；越界格=无液（原版 Main.tile 越界 null 由调用侧
+   *  空分配守卫,行为等价无液支）。settled 点即本值——FishingCheck 的 Center/16
+   *  落点恒在表层液格内（液面 ≥ 行底−15 < 行底） */
+  private getWaterLine(st: World['store'], xT: number, yT: number): number {
+    const liq = (i: number, j: number): number =>
+      st.inBounds(i, j) ? st.liquid[st.idx(i, j)] : 0;
+    const l1 = liq(xT, yT - 1);
+    if (l1 > 0) return yT * TILE - Math.floor(l1 / 16);              // :54814-54817
+    const l2 = liq(xT, yT);
+    if (l2 > 0) return (yT + 1) * TILE - Math.floor(l2 / 16);        // :54818-54821
+    const l3 = liq(xT, yT + 1);
+    if (l3 > 0) return (yT + 2) * TILE - Math.floor(l3 / 16);        // :54822-54825
+    return this.y + this.h;                                          // :54807 缺省=盒底
   }
 
   /** FishingCheck（Projectile.cs:19175-19187）+ TryBuildFishingContext
@@ -471,15 +588,18 @@ export class Bobber extends Entity {
       }
     };
     if (this.catchId > 0 || this.catchEnemy > 0) {
+      this.lai2 = this.baitVid;                       // :20878/:20892 localAI[2]=BaitItemType（微光音一次门就此闭锁）
       this.openBiteWindow(level);                     // :19348/:19362
-      game.playSfx('splash', 1);
+      // ★咬钩无声定谳（2026-09-06 残差批）：FishingCheck(:20703-20712)/
+      //   SetFishingCheckResults(:20861-20924) 全文无 PlaySound——仅 sonarPotion 门
+      //   两处 SoundID.SonarPotion（:20873/:20888,下行保留）。旧 playSfx('splash')
+      //   咬钩声=自创,删;咬钩的原版可感反馈=抖动踢+共享湿段重溅（浮态段 :54787-54794）
+      //   + 旧 spawnParticles 6 粒色方块近似同批退役（原版咬钩无此尘）
       // 声呐药水咬钩音（Projectile.cs SetFishingCheckResults :20874/:20888 sonarPotion
       //   门 → SoundID.SonarPotion=sonar_potion.wav：SoundID.cs:1128 WithVolume(0.65)
       //   经 FILE_CASE_VOL 库层生效、WithPitchVariance(0.03)→PITCH_CASE ±0.03）。
       //   旧 'Item_9'（水晶风暴连发音）冒名已正（2026-08-26）
       if (p.buffs.has(BuffType.Sonar)) game.playSfxWav?.('sonar_potion', 1, this.cx, this.cy);
-      game.spawnParticles(this.cx, this.cy, this.catchEnemy > 0 ? '#C04040' : '#80B8FF',
-        6, 1.5, { life: 24 });
       fireLavaFishingAch();                           // :20921 尾奏（咬钩支同发）
       return;
     }

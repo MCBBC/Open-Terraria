@@ -4,7 +4,10 @@
 //     Item34 音 → 1 每 update 搜敌（634 半径 250 / 635 500 + CanHitLine 视线；
 //     距敌 <20 即 Kill）→ 锁定 ai[1]=6、ai[0]=敌 → >5 追踪（vel = lerp(vel,
 //     朝向×6, 1/30)；目标失效回 1）；无重力（:54638 排除 634/635）；40×40 盒、
-//     extraUpdates=2、alpha 淡入 40/次、4 帧（4×MaxUpdates=12 update/帧）、
+//     extraUpdates 634=2（:6826 → 3 子步/拍）/ 635=3（:6837 → 4 子步/拍,子步环
+//     :16780-16782 numUpdates 3→0 逐值 4 圈）、alpha 淡入 40/子步、4 帧（帧阀
+//     num32 :55434 4×MaxUpdates=12 / :55443 635 专改 3×MaxUpdates=12——两档同
+//     值 12,故 634 帧 4 拍/帧、635 帧 3 拍/帧）、
 //     尘椭圆 (8,10)/(10,20) 旋转 π/24 + 4 组随机尘。Kill :68745-68807：盒扩
 //     50×50 居中 + Damage()（penetrate −1 小 AoE）+ Item14 音 + 40+20 尘爆。
 //   月耀 3570 → 弹 645×3 天降（Player.cs:47072-47097：X = 玩家中 + Next(201)
@@ -22,6 +25,8 @@ import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { canHit, canHitLine } from '../physics/LineOfSight';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -62,6 +67,28 @@ export class NebulaBlazeBolt extends Entity {
   private rot = 0;
   /** 参数档：[搜索半径, 尘椭圆(x,y), 尘 scale, 光色, 尘基色表, 尘底色] */
   private cfg: { seek: number; ex: number; ey: number; scale: number; rgb: [number, number, number]; palette: number[]; base: number };
+
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）——原版逐子步跑
+  //  （extraUpdates 环 :16779,AI → 湿段 :16903 → HandleMovement :17120）,故接入
+  //  点在 step() 内（每子步）而非 fixedUpdate 头）----
+  //  豁免核对（双 variant 合类）：634 NebulaBlaze1 SetDefaults P.cs:6818-6828
+  //  （40×40/aiStyle 1/friendly/alpha 255/ignoreWater=true【:6825】/extraUpdates 2/
+  //  magic）→ 豁免 id 段门恒闭（:16903）;635 NebulaBlaze2 P.cs:6829-6839（40×40/
+  //  aiStyle 1/friendly/alpha 255/friendly/extraUpdates 3/magic）【无】ignoreWater 行
+  //  → 受段（数据面 PROJ_IGNORE_WATER 含 634 不含 635）。两 id ∉ IsDestroyedByWater
+  //  六型、非 2/34/80/155。
+  //  阻尼：635 tileCollide 缺省 true → 湿阻尼支 :17721-17764 跑,速度积分行乘档
+  //  （速度场不减只削当拍位移;追踪 Lerp 速度编辑照常）;634 豁免旗恒 false → 档=1
+  //  数值恒等。aiStyle 1 不在 UpdatePosition 早退表（:20551）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步同位测值） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, variant: 634 | 635) {
     super();
@@ -104,7 +131,14 @@ export class NebulaBlazeBolt extends Entity {
         this.rot = Math.atan2(nvy, nvx);
       }
     }
-    for (let i = 0; i < 3 && !this.dead; i++) this.step(game);   // extraUpdates=2（MaxUpdates 3）
+    // 子步数 = extraUpdates+1（Update :16780-16782 `numUpdates = extraUpdates;
+    // while (numUpdates >= 0) { numUpdates--; 体内全跑 }` → 634 extraUpdates=2
+    // （:6826）3 圈 / 635 extraUpdates=3（:6837）4 圈）。step() 内逐子步面 =
+    // 原版子步环内逐面（AI_001 状态机/视觉/全尘 :55426-55609 → 湿段 :16892 →
+    // HandleMovement :17120/UpdatePosition :20551 → Damage :17158）,勿上提。
+    // 634 同族核对：同分支共享全部 AI 面(:55426 起双 id 合一),豁免面仅湿段
+    // （ignoreWater=true :6825 + 数据面）与阻尼（豁免旗 false → 档恒 1）,无遗漏。
+    for (let i = 0; i < (this.projId === 635 ? 4 : 3) && !this.dead; i++) this.step(game);
   }
 
   private step(game: GameHooks): void {
@@ -151,7 +185,7 @@ export class NebulaBlazeBolt extends Entity {
     }
     // ---- 视觉（:51667-51703）----
     this.alphaI = Math.max(0, this.alphaI - 40);
-    if (++this.frameCtr >= 12) {                     // num32 = 4×MaxUpdates = 12
+    if (++this.frameCtr >= 12) {                     // num32：634 4×MaxUpdates(:55434)=12 / 635 3×MaxUpdates(:55443)=12——原版两式同值,帧阀恒 12
       this.frameCtr = 0;
       this.frame = (this.frame + 1) % 4;
     }
@@ -226,9 +260,17 @@ export class NebulaBlazeBolt extends Entity {
         }
       }
     }
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1,逐子步）----
+    // 位序 = 原版 Update 逐子步:AI_001（追踪态机/视觉完）→ 本段 → HandleMovement
+    // （阻尼在下方位移行）。projId 634 豁免 → 段门恒闭;635 受段。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 位移 + 撞块（aiStyle1 直飞无重力 + tileCollide）----
-    this.x += this.vx;
-    this.y += this.vy;
+    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20557-20562）——
+    // 635 tileCollide=true 宿主:速度场不减只削当拍位移（634 豁免旗恒 false → 档=1 恒等）
+    const dfNeb = projWaterDragFactor(this);
+    this.x += this.vx * dfNeb;
+    this.y += this.vy * dfNeb;
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.burst(game); return; }
@@ -347,6 +389,29 @@ export class LunarFlareStar extends Entity {
   private lineYFixed = false;
   private startY = 0;
 
+  // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
+  //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）——原版逐子步跑
+  //  （extraUpdates 环 :16779,AI → 湿段 :16903 → HandleMovement :17120）,故接入
+  //  点在 step() 内（每子步）而非 fixedUpdate 头）----
+  //  豁免核对：645 LunarFlare SetDefaults P.cs:6955-6967（10×10/aiStyle 1/friendly/
+  //  magic/tileCollide=false【:6962,出生档——AI 过线支 :57939-57942 置 true】/
+  //  extraUpdates 5/penetrate −1/usesLocalNPCImmunity）【无】ignoreWater 行 →
+  //  受段（数据面 PROJ_IGNORE_WATER 亦无 645）。645 ∉ IsDestroyedByWater 六型、
+  //  非 2/34/80/155。
+  //  阻尼（分相,aiStyle 1 不在 UpdatePosition 早退表 :20551）：飞行相 tileCollide
+  //  出生 false → 湿阻尼支 :17721-17764 不进（wet 位移本应走 :16870 AI 前快照——
+  //  本相 AI 不改速,快照≡当前速,quirk 无观察差 → 直积分恒等式）;过线后 AI 置
+  //  tileCollide=true【:57940】→ 阻尼支跑,速度积分乘档。爆炸相（ai[1]=−1）AI 置
+  //  velocity=0 + 直写锚定盒（:57957-57964）→ 无位移宿主,阻尼不适用。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步同位测值） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, lineY: number) {
     super();
     this.x = x; this.y = y;
@@ -393,6 +458,11 @@ export class LunarFlareStar extends Entity {
       this.vx = 0; this.vy = 0;
       this.w = 140; this.h = 140;
       this.x = this.ecx - 70; this.y = this.ecy - 70;
+      // ★通用湿段（:16903-17113,逐子步）——爆炸相 AI 置速 0 + 直写锚定盒 → 无位移
+      //  宿主,湿段只承载溅花/湿旗面（爆区盒被水漫过首拍溅一次）。位序 = AI（写位）
+      //  → 本段 → HandleMovement（无位移面）。
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        645, !!projectileData(645)?.ignoreWater);
       this.alphaI = Math.max(0, this.alphaI - 10);
       if (++this.frameCtr >= 18) { this.frameCtr = 0; this.frame++; }
       for (const ent of game.enemies()) {
@@ -424,9 +494,20 @@ export class LunarFlareStar extends Entity {
         return;
       }
     }
-    // 位移（直飞无重力）+ 撞块（过线后）
-    this.x += this.vx;
-    this.y += this.vy;
+    // ---- ★通用湿段（:16903-17113,projWetSection 共享体 1:1,逐子步）----
+    // 位序 = 原版 Update 逐子步:AI_001 飞行相（过线 tileCollide=true 写位/尘/索敌完）
+    // → 本段 → HandleMovement（阻尼在下方位移行）。explodeNow 早退的子步湿段跳一
+    // 子步（原版 Kill 后湿段仍跑,同 substep 边界差,登记）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      645, !!projectileData(645)?.ignoreWater);
+    // 位移（直飞无重力）+ 撞块（过线后）——水中位移阻尼（HandleMovement
+    // :17721-17764 + UpdatePosition :20557-20562）：过线后 tileCollide=true
+    // （:57940,AI 每子步 Y>线 即置真,vy 恒向下单调 → 与一次置真等价）→ 乘档;
+    // 过线前 tileCollide=false 湿阻尼支不进（AI 不改速 → :16870 快照≡当前速,
+    // 直积分恒等式）。速度场不减只削当拍位移。
+    const df645 = collide ? projWaterDragFactor(this) : 1;
+    this.x += this.vx * df645;
+    this.y += this.vy * df645;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (collide && st.inBounds(tx, ty) && st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) {
       this.killDust(game);

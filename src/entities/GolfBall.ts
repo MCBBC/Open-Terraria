@@ -23,8 +23,19 @@
 //   GetGolfTrailColor                :10533-10550（球色表；1458 = Projectile.cs:11154-11174,
 //   DrawProjDirect 动球支 = Main.cs:31459-31515 / 通用本体 = :31578）
 // ============================================================================
+// ★通用湿段接入（2026-09-06 溅花缺口杂项批）：高尔夫球 721/739-752 走 SetDefaults
+// 共档 :7628-7637（netImportant/7×7/friendly/penetrate −1/aiStyle149/tileCollide
+// false）【无 ignoreWater 行】→ 受段（vanilla-projectiles.json 同向;任务侧旧记
+// "607-609 豁免"系 id 误记——606 ScutlixLaser/607 SolarFlareRay/608 SolarCounter 才在
+// 豁免集,球体真实域=721/739-752 全受段）。AI_149 无湿旗消费（:20447-20545 grep 实证
+// ——球体物理 StepGolfBall/BallCollision 不读 wet）→ 入/出水溅花+旗维护即全部效果。
+// ★阻尼 N/A 定谳：IsAGolfBall ∈ UpdatePosition 早退表（:20551-20552
+// `ProjectileID.Sets.IsAGolfBall[type]` → return）= 位移全由 AI_149 直写,
+// wetVelocity 位移行永不消费 → 位移不折减。
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { TILE_DEFS } from '../data/tiles';
@@ -60,6 +71,15 @@ export class GolfBall extends Entity {
   projId: number;
   /** ai[1]：击杆数；-1 = 球座待发态（NewProjectile 末参，Player.cs:31881/48916） */
   swings = 0;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐值维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
   /** localAI[0]：角速度 */
   angular = 0;
   /** localAI[1]：BallState（Resting=0/Moving=1）——GolfState.getLastHitBall 的跟踪门 */
@@ -131,6 +151,10 @@ export class GolfBall extends Entity {
       const active = st.inBounds(btx, bty) && st.flags[st.idx(btx, bty)] !== 0;
       const isTee = active && TILE_DEFS[st.type[st.idx(btx, bty)]]?.vanilla?.sheet === 494;
       if (!isTee) this.swings = 0;              // !tile.active() || type != 494（:18936-18938）
+      // ★湿段照跑（原版 AI_149 球座支 :18931-18941 早退在 AI 内,湿段在其后 :16903
+      //  无 active/分支门——球座待发球静置水中仍维护旗/溅花）
+      projectileWetSection(this, game, st, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
       return;                                   // :18941（本帧不做物理）
     }
     // ---- 物理步进（AI_149 :18943 + BallCollision.Step）----
@@ -157,6 +181,12 @@ export class GolfBall extends Entity {
     if (this.vy !== 0 && state === BallState.Moving) {
       this.rotation += this.vx * 0.1 + this.vy * 0.1;
     }
+    // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----
+    // 位序 = AI_149(:20447,含 StepGolfBall 物理直写位)→湿段(:16903)→HandleMovement
+    // (:17120,tileCollide=false 无位移)→UpdatePosition(:20551 IsAGolfBall 早退表 →
+    // 阻尼 N/A,见头注)。采样位=AI 物理结算后位 = 原版湿段同位
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // oldPos 平移缓存（Projectile.cs:17200-17203 每 Update 尾随平移 1 格，
     // SetDefaults :7636 无 extraUpdates ⇒ 每 tick 恰 1 次）：渲染窗(posHist,
     // DrawProjDirect :31503 读 oldPos[4])+Resting 弱判定窗(restHist,尾槽

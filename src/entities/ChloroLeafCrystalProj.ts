@@ -59,6 +59,9 @@ import { canBeChasedBy } from './projTargets';
 import { HitCdImpl, dealContacts } from './proj1457';
 import { leafTrailInfoByte, leafCrystalShotFx } from '../fx/orchestraFx';
 import { projSprite } from './Arrow';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** Player.crystalLeafDamage static 初值（Player.cs:821） */
 export const CHLORO_LEAF_DAMAGE = 100;
@@ -261,6 +264,21 @@ export class ChloroLeafShot extends Entity {
   armorPen = 0;
   meleeProj = false;
   dead = false;
+  // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇批）----
+  //  227 SetDefaults（:3126-3138）【无】ignoreWater 行 = 受段（豁免对照：锚体 226
+  //  block :3113-3124 ignoreWater=true :3124 = 不受段,纯锚定无溅花）。溅花湿段随
+  //  181 子步逐跑（原版 Update 子步循环 :16781 内 :16895 同序;wetCount 逐子步 −1
+  //  :17109-17112）;阻尼 N/A：tileCollide=false :3129 → HandleMovement :17581
+  //  `if (tileCollide)` 阻尼块整跳（wetVelocity≡velocity,UpdatePosition :20551
+  //  `position += velocity` 无水减）——禁硬安。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步 AI 后/位移前同位） */
+  presetDone = false;
   private rotation = 0;
   private timeLeft = 180;        // SetDefaults :3129-3137 timeLeft=180（子步消耗制）
   private burstDone = false;
@@ -317,6 +335,10 @@ export class ChloroLeafShot extends Entity {
         this.dead = true;                        // active=false 静默出界（同段）
         return;
       }
+      // ---- ★通用湿段（:16903-17113）随子步逐跑（原版湿段在子步循环内,AI 后/位移前;
+      // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写;阻尼 N/A 见字段块注）----
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
       this.x += this.vx;
       this.y += this.vy;
       this.trailStep(game, u);

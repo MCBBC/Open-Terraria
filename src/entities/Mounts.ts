@@ -26,6 +26,7 @@ import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
 import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { canHitLine } from '../physics/LineOfSight';
 import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
 // ★终清波批：930 圣坦爆散 gore 段（GorePiece.newGore 通道,旧"无 API 不接"退役）
@@ -2285,6 +2286,17 @@ export function mountOfBuff(buffId: number): number {
 // ============================================================================
 // 坐骑开火弹实体（Scutlix 眼激光 606 / Santank 炮击 930 / 子弹 14）
 // ============================================================================
+// ★通用湿段定谳（2026-09-06 溅花缺口杂项批）：
+//   · 606 ScutlixLaser（SetDefaults :6533-6543）ignoreWater=true@:6542 → 豁免
+//     （共享体整段门直跳）;14 Bullet（:953-965,4×4/aiStyle1/penetrate 1/extraUpdates 1）
+//     无 ignoreWater 行 → 受段;930 SantankMountRocket（:8820-8827,14×14/aiStyle16/
+//     penetrate −1/ranged）无 ignoreWater 行 → 受段（vanilla-projectiles.json 同向）。
+//   · Update 全体（AI+湿段+HandleMovement）在 numUpdates 子步循环内
+//     （:16781-17345）→ 湿段【每子步】各跑一次、采样位=本子步位移前;
+//   · 湿阻尼（:17721-17764,湿支 wetVelocity=velocity×0.5）只进 UpdatePosition
+//     :20561 位移行,velocity 场不减 → 乘进每子步位移（tileCollide 缺省 true）。
+//   · AI 侧湿旗消费：AI_001 仅 type 469（:54969）、AI_016 仅 799/800/801/810/906/
+//     784-807/903-905/1077 → 14/930 均无 → 溅花+旗维护即全部效果。
 
 /** MountShot——坐骑能力弹（Projectile.NewProjectile 最小实体化，替代 TownShot 载体）：
  *  - extraUpdates 1:1（Projectile.extraUpdates+1 个子步/tick：606=3 子步 ×14 速 =
@@ -2299,6 +2311,15 @@ export class MountShot extends TownShot {
   gravity = 0.3;
   /** 落格标记（诊断用） */
   bounced = false;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐子步维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
     projId: number, opts?: { noGravity?: boolean; gravity?: number; life?: number; extraUpdates?: number }) {
@@ -2313,8 +2334,14 @@ export class MountShot extends TownShot {
     if (--this.life <= 0) { this.dead = true; return; }
     for (let s = 0; s < this.substeps; s++) {
       this.vy += this.gravity;
-      this.x += this.vx;
-      this.y += this.vy;
+      // ---- ★通用湿段（:16903-17113,共享体）——子步内 AI→湿段→位移位序（Update
+      // 主体在 numUpdates 子步循环内 :16781-17345）;606 豁免直跳/14 受段（头注定谳）
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      // ★水中位移阻尼：速度【场】不减只削当拍位移（:17755→:20561）
+      const df = projWaterDragFactor(this);
+      this.x += this.vx * df;
+      this.y += this.vy * df;
       const tx = Math.floor((this.x + this.w / 2) / TILE);
       const ty = Math.floor((this.y + this.h / 2) / TILE);
       if (game.world.store.isSolid(tx, ty)) { this.dead = true; this.bounced = true; return; }
@@ -2367,6 +2394,15 @@ export class SantankShellProj extends TownShot {
   /** 弹体透明度消费旗（诊断/渲染） */
   explodedAlpha = false;
   bounced = false;
+  // ---- ★通用湿段旗（ProjWetFlags 同形;projectileWetSection 共享体逐子步维护）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步折减） */
+  wetCount = 0;
+  /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
     projId: number, opts?: { gravity?: number; life?: number }) {
@@ -2470,6 +2506,10 @@ export class SantankShellProj extends TownShot {
     for (const [k, v] of this.hitCd) { if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1); }
     // ---- 引信相（触 tile 后 timeLeft=3 lingering：定格+隐身+重盒 Damage 一拍） ----
     if (this.fuse >= 0) {
+      // ★湿段照跑（原版引信相弹仍 active,Update 子步不跳湿段;静止位只可能入水
+      // 溅花一次——搁水炮弹溅花=原版面）;AI 杀拍（引信爆）段后即死,原文序一致
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
       if (--this.fuse <= 0) this.explode(game);
       return;
     }
@@ -2495,7 +2535,12 @@ export class SantankShellProj extends TownShot {
       const t = 1 / 12 / substeps;
       this.vx += (dx - this.vx) * t;
       this.vy += (dy - this.vy) * t;
-      this.x += this.vx; this.y += this.vy;
+      // ---- ★通用湿段（:16903-17113,共享体）——AI→湿段→位移位序;930 受段（头注）
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      // ★水中位移阻尼：速度【场】不减只削当拍位移（:17755→:20561）
+      const df = projWaterDragFactor(this);
+      this.x += this.vx * df; this.y += this.vy * df;
       // 触 tile（tileCollide=true 默认）→ 入引信相
       const sttx = Math.floor(this.cx / 16), stty = Math.floor(this.cy / 16);
       if (sttx >= 0 && stty >= 0 && sttx < game.world.store.w && stty < game.world.store.h

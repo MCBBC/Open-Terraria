@@ -181,7 +181,7 @@ export function parsePlr(raw: Uint8Array): PlrImported {
   const difficulty = r.byte();
   if (version >= 138) r.i64();                       // playTime ticks
   let hair = r.i32();
-  if (hair >= 228) hair = 0;
+  if (hair >= 228 || hair < 0) hair = 0;   // 原版读侧亦钳负值(红色对抗:负 hair→Player_Hair_-1 查表)
   const hairDye = version >= 82 ? r.byte() : 0;
   const team = version >= 283 ? r.byte() : 0;
   const hideVisible: boolean[] = new Array(10).fill(false);
@@ -226,10 +226,12 @@ export function parsePlr(raw: Uint8Array): PlrImported {
 
   // 装备/染料/背包/银行(≥124 布局:armor20+dye10;≥322 多读 favorited)
   const favEquip = version >= 322;
+  if (typeof process !== 'undefined') console.log(`PP@armor pos=${r.pos}`);
   const armor: SavedItem[] = [];
   for (let i = 0; i < 20; i++) armor.push(readItem(r, favEquip, false));
   const dye: SavedItem[] = [];
   for (let i = 0; i < 10; i++) dye.push(readItem(r, favEquip, false));
+  if (typeof process !== 'undefined') console.log(`PP@inventory pos=${r.pos}`);
   const inventory: SavedItem[] = [];
   for (let i = 0; i < 58; i++) inventory.push(readItem(r, version >= 114, true));
   const miscEquips: SavedItem[] = [], miscDyes: SavedItem[] = [];
@@ -243,6 +245,8 @@ export function parsePlr(raw: Uint8Array): PlrImported {
       miscDyes.push(readItem(r, false, false));
     }
   }
+  if (typeof process !== 'undefined') console.log(`PP@banks pos=${r.pos}`);
+  if (typeof process !== 'undefined') console.log(`PP@misc=${r.pos}`);
   const banks: SavedItem[][] = [];
   for (let b = 0; b < 4; b++) {
     // bank1/2 ≥58(支持域内恒有);bank3 ≥182;bank4 ≥198(≥255 多 favorited)
@@ -252,9 +256,11 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     for (let i = 0; i < 40; i++) items.push(readItem(r, b === 3 && version >= 255, true));
     banks.push(items);
   }
+  if (typeof process !== 'undefined') console.log(`PP@banks=${r.pos}`);
   if (version >= 199) r.byte();                      // voidVaultInfo
 
   // buffs(≥11;44 槽 ≥252):读到非零对为止,零对跳过继续(原版 :56222-56240 语义)
+  if (typeof process !== 'undefined') console.log(`PP@buffs pos=${r.pos}`);
   const buffs: Array<[number, number]> = [];
   if (version >= 11) {
     let target = version >= 252 ? 44 : version < 74 ? 10 : 22;
@@ -268,11 +274,14 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     }
   }
   // spawn 点列表(-1 终止;本仓不消费,流必须对齐)
+  if (typeof process !== 'undefined') console.log(`PP@spawn pos=${r.pos}`);
   for (let i = 0; i < 200; i++) {
     const x = r.i32();
+    if (typeof process !== 'undefined' && i < 3) console.log(`SPW i=${i} x=${x} pos=${r.pos}`);
     if (x === -1) break;
     r.i32(); r.i32(); r.string();
   }
+  if (typeof process !== 'undefined') console.log(`SPW end pos=${r.pos}`);
   if (version >= 16) r.boolean();                    // hbLocked
   const hideInfo: boolean[] | undefined = version >= 115
     ? Array.from({ length: 13 }, () => r.boolean())
@@ -302,6 +311,7 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     const bb = r.byte();
     for (let i = 0; i < 4; i++) if (bb & (1 << i)) { r.i32(); r.i32(); r.byte(); }
   }
+  if (typeof process !== 'undefined') console.log(`PPDBG2 pos=${r.pos}`);
   // —— 到此为止:其后 superCart/Loadouts/voice/pendingRefunds/dialogues 不读 ——
 
   // voiceVariant/voicePitchOffset 在流中位于停止点之后(280/281,夹在 Loadouts 与

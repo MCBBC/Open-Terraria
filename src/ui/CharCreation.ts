@@ -40,11 +40,13 @@
 // .sw-char-row input[type=text]、创建按钮保留 [data-act=create]。
 import {
   type Appearance, type RGBColor, randomAppearance, DIFFICULTY_INFO,
-  VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, hslToRgb, rgbToScaledHsl, scaledLuminosity,
+  VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, MALE_VARIANTS, FEMALE_VARIANTS,
+  hslToRgb, rgbToScaledHsl, scaledLuminosity,
   defaultVoiceVariant,
 } from '../player/Appearance';
 import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
-import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME, clearPaperDollCache } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, walkFrame, clearPaperDollCache } from '../player/PaperDoll';
+import { bakeCells, canvasToUrl, isObjectUrl, SingleFlightBake, DelayedMask, BAKE_MASK_DELAY_MS } from './charBake';   // SW-AX1 2026-09-06
 import { UITextures } from '../vui/assets/UITextures';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
@@ -456,6 +458,18 @@ const CSS = `
   animation: sw-cc-bakespin 0.9s steps(8) infinite;
 }
 @keyframes sw-cc-bakespin { to { transform: rotate(360deg); } }
+/* SW-AX1 2026-09-06: look 页同链烘焙遮罩(延迟 120ms 挂,快烘不闪)——只盖样式行
+   10 格域(0..96px),下沿复制/粘贴/随机钮保持可点;复用 hair 页转圈动画 */
+.sw-cc-look.baking::before {
+  content: ''; position: absolute; left: 0; top: 0; width: 100%; height: 96px; z-index: 6;
+  background: rgba(10, 14, 40, 0.72);
+}
+.sw-cc-look.baking::after {
+  content: ''; position: absolute; left: 50%; top: 40px; width: 22px; height: 22px;
+  margin: -11px 0 0 -11px; z-index: 7;
+  border: 3px solid #7d92d6; border-top-color: #ffd76e;
+  animation: sw-cc-bakespin 0.9s steps(8) infinite;
+}
 .sw-cc-hairgrid { flex: 1; min-height: 0; overflow-y: auto; display: grid;
   grid-template-columns: repeat(10, 44px); gap: 4px 2px; justify-content: center; align-content: start;
   padding: 2px 14px 8px 2px; scrollbar-width: thin; scrollbar-color: #4a5aa0 rgba(10, 14, 40, 0.6); }
@@ -543,11 +557,30 @@ export class CharCreation {
   /** 页签乘色图标层登记表（贴图 + 部位 + 可选帧裁剪；颜色变化时重烘 dataURL） */
   private tintLayers: Array<{ elm: HTMLElement; tex: string; part: keyof Appearance; crop?: [number, number, number, number] }> = [];
   private iconTintRaf = 0;
-  /** 烘焙缩略图 sprite sheet（dataURL；格子 background-position 切片） */
+  /** 烘焙缩略图 sprite sheet（URL；格子 background-position 切片。
+   *  SW-AX1: sheet 由 toDataURL 换 toBlob+objectURL（同步 PNG 编码下放编码线程,
+   *  440×968 实测 85ms 主线程阻塞），旧 URL 换新时 revoke（见 setSheetUrl） */
   private hairSheetUrl: string | null = null;
   private lookSheetUrl: string | null = null;
   private sheetTimer: ReturnType<typeof setTimeout> | 0 = 0;
   private lastHex = '';
+  // ---- SW-AX1 2026-09-06: 烘焙单飞 + 延迟 loading 态 + 变体预抢 ----
+  /** 单飞烘焙调度（randomize 直调 bakeSheets 与 buildLook/buildHair 尾
+   *  scheduleSheetBake(0) 双入口在此折叠；同态快照键=不尾随重烘） */
+  private bakeRunner = new SingleFlightBake(
+    () => this.runBakeSheets(),
+    () => this.bakeStateKey(),
+    () => this.panel.isConnected,
+  );
+  /** 烘焙 loading 遮罩（延迟 120ms 挂——快烘不闪，慢烘可见；无旧 sheet 的首访立即挂，
+   *  保持 2026-08-27 行为）。apply 映射到当前页容器 class，双页都摘防切页残留 */
+  private bakeMask = new DelayedMask(BAKE_MASK_DELAY_MS, (on) => {
+    for (const sel of ['.sw-cc-hair', '.sw-cc-look']) {
+      this.content.querySelector(sel)?.classList.toggle('baking', on);
+    }
+  });
+  /** 变体域预抢只发一次 */
+  private sheetPrefetchDone = false;
 
   constructor(private root: HTMLElement, private cb: CharCreationCallbacks, opts: CharCreationOptions = {}) {
     ensureVanillaKit();
@@ -831,6 +864,9 @@ export class CharCreation {
     if (this.iconTintRaf) cancelAnimationFrame(this.iconTintRaf);
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     if (this.thumbTimer) clearTimeout(this.thumbTimer);
+    this.bakeMask.disarm();      // SW-AX1: 摘遮罩+吞尾随重烘
+    this.bakeRunner.cancel();
+    this.revokeSheetUrls();
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
     window.removeEventListener('resize', this.fitPanel);
     window.removeEventListener('orientationchange', this.fitPanel);
@@ -877,8 +913,8 @@ export class CharCreation {
   private thumbTimer: ReturnType<typeof setTimeout> | 0 = 0;
   private scheduleThumbRetry(missed: boolean) {
     if (!missed || ++this.thumbRetry > 6 || this.thumbTimer) {
-      // 重试链耗尽:撤烘焙遮罩(空槽诚实可见,不永久转圈)
-      this.content.querySelector('.sw-cc-hair')?.classList.remove('baking');
+      // 重试链耗尽:撤烘焙遮罩(空槽诚实可见,不永久转圈;SW-AX1 走统一挂/摘)
+      this.bakeMask.disarm();
       return;
     }
     this.thumbTimer = setTimeout(() => {
@@ -940,9 +976,11 @@ export class CharCreation {
     this.syncHslFromPart();
     this.queueIconTint();
     this.buildContent();
-    // 随机后同步重烘当前页 sheet（buildLook/buildHair 尾部的 scheduleSheetBake(0)
+    // 随机后立即重烘当前页 sheet（buildLook/buildHair 尾部的 scheduleSheetBake(0)
     // 走 setTimeout 异步+retry 链依赖贴图重载——contextlost 清缓存后 retry 期格子
-    // 全空（2026-08-24 用户实报）。同步烘一次立即出图，retry 链仍作兜底
+    // 全空（2026-08-24 用户实报）。同步烘一次立即出图，retry 链仍作兜底。
+    // SW-AX1: 直调与 scheduleSheetBake(0) 双入口已由 bakeRunner 单飞折叠——
+    // 同态快照键下第二轮不再重跑全链（此前每击随机双 ensure/双编码/双 apply）
     void this.bakeSheets();
   }
 
@@ -970,10 +1008,49 @@ export class CharCreation {
     await UITextures.ensure([...names]);
   }
 
-  /** 烘当前页所需 sheet：发型页 44×44 头像格 ×213 / 外观页 44×80 全身格 ×10 */
-  private async bakeSheets(): Promise<void> {
+  /** 烘当前页所需 sheet：发型页 44×44 头像格 ×213 / 外观页 44×80 全身格 ×10。
+   *  SW-AX1: 单飞入口——飞行中的重复请求折叠为同一 Promise;请求时快照键与起飞时
+   *  同态不尾随重烘（randomize 直调 + buildLook/buildHair 尾 scheduleSheetBake(0)
+   *  双入口;此前每击随机白跑第二轮全链） */
+  private bakeSheets(): Promise<void> {
+    return this.bakeRunner.request();
+  }
+
+  /** 烘焙态快照键（单飞折叠判据：sheet 只依赖页签+skinVariant+hair+七色） */
+  private bakeStateKey(): string {
+    const a = this.appearance;
+    return [this.tab, a.skinVariant, a.hair,
+      a.hairColor.r, a.hairColor.g, a.hairColor.b,
+      a.skinColor.r, a.skinColor.g, a.skinColor.b,
+      a.eyeColor.r, a.eyeColor.g, a.eyeColor.b,
+      a.shirtColor.r, a.shirtColor.g, a.shirtColor.b,
+      a.undershirtColor.r, a.undershirtColor.g, a.undershirtColor.b,
+      a.pantsColor.r, a.pantsColor.g, a.pantsColor.b,
+      a.shoeColor.r, a.shoeColor.g, a.shoeColor.b,
+    ].join('|');
+  }
+
+  /** 换 sheet URL（SW-AX1：blob: 旧图回收；dataURL 无需） */
+  private setSheetUrl(kind: 'hair' | 'look', url: string): void {
+    const prev = kind === 'hair' ? this.hairSheetUrl : this.lookSheetUrl;
+    if (kind === 'hair') this.hairSheetUrl = url;
+    else this.lookSheetUrl = url;
+    if (prev && prev !== url && isObjectUrl(prev)) URL.revokeObjectURL(prev);
+  }
+
+  private revokeSheetUrls(): void {
+    for (const u of [this.hairSheetUrl, this.lookSheetUrl]) {
+      if (u && isObjectUrl(u)) URL.revokeObjectURL(u);
+    }
+    this.hairSheetUrl = null;
+    this.lookSheetUrl = null;
+  }
+
+  /** 烘焙主体（单飞内执行） */
+  private async runBakeSheets(): Promise<void> {
     if (!this.panel.isConnected) return;
     await this.ensureBakeSources();
+    if (!this.panel.isConnected) return;
     if (this.tab === 'hair') {
       const cols = 10, cell = 44;
       const rows = Math.ceil(CHAR_CREATION_HAIRS.length / cols);
@@ -981,43 +1058,48 @@ export class CharCreation {
       cv.width = cols * cell; cv.height = rows * cell;
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
-      // ★分帧合成(2026-08-27 用户报"加载时很卡"):213 次纸娃娃合成曾整段同步
-      //   阻塞主线程;改 24 格/帧,yield 让出(界面保持响应),页面切走即中止
-      this.content.querySelector('.sw-cc-hair')?.classList.add('baking');
+      // loading 态（SW-AX1）：无旧图(首访)立即遮罩（2026-08-27 行为保持），
+      // 重烘延迟 120ms 挂——快烘不闪、慢烘可见
+      this.bakeMask.arm(!this.hairSheetUrl);
       let missed = false;
-      for (let start = 0; start < CHAR_CREATION_HAIRS.length; start += 24) {
-        const slice = CHAR_CREATION_HAIRS.slice(start, start + 24);
-        slice.forEach((hairId, j) => {
-          const i = start + j;
-          const doll = compositePaperDoll({ ...this.appearance, hair: hairId });
-          if (doll) g.drawImage(doll, 0, 0, 40, 44, (i % cols) * cell + 2, Math.floor(i / cols) * cell, 40, 44);
-          else missed = true;
-        });
-        await new Promise((r) => setTimeout(r, 0));
-        if (!this.panel.isConnected) return;
-      }
-      this.hairSheetUrl = cv.toDataURL();
+      // ★分帧合成(2026-08-27 用户报"加载时很卡"):213 次纸娃娃合成曾整段同步阻塞
+      //   主线程;bakeCells 批间 yieldTask 让出(MessageChannel 宏任务,无 setTimeout(0)
+      //   嵌套 4ms 钳制税) + 批大小按耗时自适应——"不阻塞主线程"底线不回退。
+      // ★单帧行模式(SW-AX1 定谳):缩略图只消费第 0 帧头部 40×44——整表合成 20 帧
+      //   白烘 19 帧(213 格 ~400ms);rows{0,0} 单帧 = 1/20 合成工作量
+      await bakeCells(CHAR_CREATION_HAIRS, (hairId, i) => {
+        const doll = compositePaperDoll({ ...this.appearance, hair: hairId }, undefined, { rows: { body: 0, legs: 0 } });
+        if (doll) g.drawImage(doll, 0, 0, 40, 44, (i % cols) * cell + 2, Math.floor(i / cols) * cell, 40, 44);
+        else missed = true;
+      }, { shouldAbort: () => !this.panel.isConnected });
+      if (!this.panel.isConnected) return;
+      if (missed) this.scheduleThumbRetry(true);
+      // ★内容自检(2026-08-25 用户实报"随机几次后样式全空")：doll 非 null 但内容全透明
+      //   = 源 canvas 被静默清零(显存驱逐类)——空 sheet 挂上缩略图不重烘就永久空槽。
+      //   SW-AX1 把检测前移到编码前:全透明直接弃 canvas(免 blob 白造)+清 PaperDoll
+      //   缓存+重烘;旧序先 toDataURL/赋 URL 再检,retry rebuild 会把空 sheet 挂上格子
       if (!missed && this.sheetAllTransparent(cv)) {
         clearPaperDollCache();
         this.scheduleThumbRetry(true);
         return;
       }
-      if (missed) this.scheduleThumbRetry(true);
+      this.setSheetUrl('hair', await canvasToUrl(cv));
     } else if (this.tab === 'look') {
       const cell = 44;
       const cv = document.createElement('canvas');
       cv.width = VALID_CLOTH_STYLES.length * cell; cv.height = 80;
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
+      this.bakeMask.arm(!this.lookSheetUrl);
       let missed = false;
-      VALID_CLOTH_STYLES.forEach((styleId, i) => {
-        const doll = compositePaperDoll({ ...this.appearance, skinVariant: styleId });
-        if (doll) {
-          const f = dollFrame(doll, IDLE_FRAME);
-          g.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, i * cell + 2, 12, 40, 56);
-        } else missed = true;
-      });
-      this.lookSheetUrl = cv.toDataURL();
+      // 单帧行模式同 hair 支（消费面 = dollFrame(doll, IDLE_FRAME) 的第 0 帧 40×56）
+      await bakeCells(VALID_CLOTH_STYLES, (styleId, i) => {
+        const doll = compositePaperDoll({ ...this.appearance, skinVariant: styleId }, undefined, { rows: { body: 0, legs: 0 } });
+        if (doll) g.drawImage(doll, 0, 0, 40, 56, i * cell + 2, 12, 40, 56);
+        else missed = true;
+      }, { shouldAbort: () => !this.panel.isConnected });
+      if (!this.panel.isConnected) return;
+      if (missed) this.scheduleThumbRetry(true);
       // ★内容自检(2026-08-25 用户实报"随机几次后样式全空"):doll 非 null 但内容
       //   全透明 = 源 canvas 被静默清零(显存驱逐类,菜单阶段无 Renderer.onLost 扫)
       //   ——空 sheet 一旦挂上缩略图,不重烘就永久空槽。检测到全透明 → 清 PaperDoll
@@ -1027,9 +1109,33 @@ export class CharCreation {
         this.scheduleThumbRetry(true);
         return;
       }
-      if (missed) this.scheduleThumbRetry(true);
+      this.setSheetUrl('look', await canvasToUrl(cv));
+    } else {
+      return;   // 信息/颜色页无 sheet——只跑 ensure(预览贴图懒载),不动 URL/遮罩
     }
     this.applySheetUrls();
+    this.scheduleVariantPrefetch();
+  }
+
+  /** 变体域预抢（SW-AX1,后台一次）：look 页烘 10 样式格需要全部 VALID_CLOTH_STYLES
+   *  变体的 Player_{v}_{s},而随机必换变体——此前每次随机都 stall 在新变体懒载
+   *  (实测 13-16ms / 9-15 文件)。首烘成功 800ms 后 8 路池后台拉齐（ensureUiBatch
+   *  按文件去重合流;产品态 zip warm 全 CacheStorage 命中,冷会话不抢首屏） */
+  private scheduleVariantPrefetch(): void {
+    if (this.sheetPrefetchDone) return;
+    this.sheetPrefetchDone = true;
+    setTimeout(() => {
+      if (!this.panel.isConnected || document.hidden) return;
+      const sheets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 10, 11, 12];
+      const names = new Set<string>();
+      for (const v of new Set<number>([...VALID_CLOTH_STYLES, ...MALE_VARIANTS, ...FEMALE_VARIANTS])) {
+        for (const s of sheets) {
+          names.add(`Player_${v}_${s}.png`);
+          names.add(`Player_0_${s}.png`);
+        }
+      }
+      void UITextures.ensure([...names]);
+    }, 800);
   }
 
   /** 全透明检测(2026-08-25):采样 400 像素,全 <α16 = 烘焙画了空气(源 canvas
@@ -1059,7 +1165,7 @@ export class CharCreation {
 
   /** 已挂载格子原地换 sheet（不重建网格） */
   private applySheetUrls(): void {
-    this.content.querySelector('.sw-cc-hair')?.classList.remove('baking');
+    this.bakeMask.disarm();   // SW-AX1: 统一挂/摘（双页防切页残留）
     if (this.hairSheetUrl) {
       const img = `url(${this.hairSheetUrl})`;
       this.content.querySelectorAll<HTMLElement>('.sw-cc-hairbtn .sw-cc-thumb')
@@ -1161,6 +1267,7 @@ export class CharCreation {
       b.addEventListener('click', () => { this.appearance.skinVariant = styleId; this.buildContent(); UISfx.click(); });
       grid.appendChild(b);
     });
+    if (!this.lookSheetUrl) box.classList.add('baking');   // SW-AX1: 首访烘焙遮罩(同 hair 页)
     box.appendChild(grid);
     // 组下分隔线（:452-460 宽 442 @y89）+ 复制/粘贴/随机外观模板（:405-430）
     box.appendChild(el('i', 'sw-cc-looksep'));

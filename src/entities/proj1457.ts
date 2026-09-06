@@ -24,12 +24,33 @@ import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
+// ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { mainDifficulty, sampleCurve, remap, GDL, f32, curveKey, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
   type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
+
+// ---- ★通用湿段定谳表（2026-09-06 武器弹簇批;逐 id 反编译 P.cs SetDefaults 699-10676,
+//  `ignoreWater = true` 行号逐块核对;缺行=不豁免=原版缺省 false=受湿段 :16903 整段门）----
+//  受段（本文件内接 projectileWetSection）：
+//    · 1127 ChloroSaberStab   — block :10561-10566 经 DefaultToShortsword(:10775-10788)
+//      【无】ignoreWater 行（DefaultToSpray :10693-10704 才置位）→ 溅花;阻尼 N/A
+//      （tileCollide=false :10563 → HandleMovement :17581 `if (tileCollide)` 阻尼块整跳,
+//       wetVelocity≡velocity;且 AI_161 每拍从玩家锚直写 Center,AI 直写位）
+//    · 1128 ChloroSporeCloud  — block :10567-10581 无 ignoreWater;tileCollide=false
+//      :10569 → 阻尼 N/A（同上）;湿段在 AI 后/位移前逐拍
+//    · 731  ThunderBoltShot   — block :7696-7706 无 ignoreWater;tileCollide 缺省 true
+//      → 水中位移阻尼 ×0.5/蜂蜜 0.25/微光 0.375 生效（extraUpdates=1 → 2 子步,
+//      湿段随子步逐跑 = 原版 Update 子步循环 :16781 内 :16895 同序）
+//  豁免（N/A——SetDefaults 显式 ignoreWater=true,湿段不跑）：
+//    1126 :10555 / 1129 :10589 / 1116 :10425 / 1117 :10433 / 1122 :10443 /
+//    1091 :10184 / 1115 :10410 / 439 :5104 / 440 :5117 / 704 :7461 / 950 :8966 /
+//    908 :8631
+//  （数据面 vanillaProjectiles.PROJ_IGNORE_WATER 同集;运行时经
+//   projectileData(id)?.ignoreWater 分流,新增 id 接入自动生效。）
 
 /** 同敌命中去重/冷却表（WeaponProj.HitCooldown 同构——该类模块私有，此处独立一份） */
 export class HitCdImpl {
@@ -573,6 +594,19 @@ export class ChloroSaberStab extends Entity {
   meleeProj = true;
   dead = false;
   readonly projId = 1127;
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——1127 block :10561-10566 经
+  //  DefaultToShortsword 无 ignoreWater 行 = 受段。溅花湿段逐拍跑;阻尼 N/A：
+  //  tileCollide=false :10563 → HandleMovement :17581 阻尼块整跳（wetVelocity≡velocity），
+  //  且 AI_161 :48503-48508 每拍自玩家锚【直写】Center（本仓 :610-611 同源）= AI 直写位,
+  //  无 velocity 积分位移行可乘——留锚禁硬安）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 后/位移前同位） */
+  presetDone = false;
   /** 出手单位向量（原版 velocity 归一）与速度模长 */
   private readonly dx: number;
   private readonly dy: number;
@@ -624,6 +658,14 @@ export class ChloroSaberStab extends Entity {
     // 尘 157 + Item1 每 12t（:48522-48545；音效本仓 Item_1）
     if (this.t % 12 === 1) game.playSfxAt?.('hit', this.cx, this.cy);
     game.spawnParticles(this.cx, this.cy, '#4C8C3C', 2, 1.2, { life: 16, grav: 0, damp: 0.9 });
+    // ---- ★通用湿段（:16903-17113）——原版 Update 位序 AI(:16880) → 湿段(:16895) →
+    // HandleMovement(:17120) → Damage(:17184)。本类 AI 退化=锚位重算+尘（无湿旗消费者）,
+    // 段插 AI 尾（cutTiles/尘后）/Damage 前 = 原版同位;采样位=AI 直写锚位（原版"AI 后
+    // 未移动位"同构——本类不建模 HandleMovement 的 `position += velocity` 叠加,登记既有近似）。
+    // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写。ignoreWater 按数据面传（1127 缺行
+    // =不豁免;数据驱动防未来 id 复用本类）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     dealContacts(this, game, this.hitCd, -1);
   }
 
@@ -674,6 +716,19 @@ export class ChloroSporeCloud extends Entity {
   meleeProj = true;
   dead = false;
   readonly projId = 1128;
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——1128 block :10567-10581 无
+  //  ignoreWater 行 = 受段。溅花湿段逐拍跑;阻尼 N/A：tileCollide=false :10569 →
+  //  HandleMovement :17581 阻尼块整跳（wetVelocity≡velocity,UpdatePosition :20551
+  //  `position += velocity` 无水减）——AI_92 flag46 支 :33182-33206 自算盒/速度衰减,
+  //  湿段只吃旗不吃位移,留锚禁硬安）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 后/位移前同位） */
+  presetDone = false;
   /** num796（:33173-33177 ai[1]==0 → 220） */
   private readonly life: number;
   /** ai[1] 原值（>=1 → 纯视觉零伤 + 老化 ×3;==0 → 结算云） */
@@ -705,6 +760,11 @@ export class ChloroSporeCloud extends Entity {
     this.w = side; this.h = side;
     this.vy -= 0.01;                                            // :33189
     this.vx *= 0.97; this.vy *= 0.97;                           // :33206 flag46 档
+    // ---- ★通用湿段（:16903-17113）——AI（盒重算+速度衰减）后/位移前 = 原版 Update
+    // 同序;采样盒 = 当拍重算后 w/h（湿段逐拍读位与盒,原版同构）。溅花尘/音由共享体
+    // wetSplashStepShared 承载;阻尼 N/A 见字段块注（tileCollide=false :10569）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     this.x += this.vx; this.y += this.vy;
     // 撞实心点 → 静止（原版 :33306-33405 多向反弹,云体低速近似=贴壁悬停）
     const st = game.world.store;
@@ -2023,6 +2083,19 @@ export class ThunderBoltShot extends Entity {
   dead = false;
   magicProj = true;
   readonly projId = 731;
+  // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——731 block :7696-7706 无
+  //  ignoreWater 行 = 受段;tileCollide 缺省 true → 水中位移阻尼（HandleMovement
+  //  :17721-17764 wetVelocity = velocity×档,速度场不减只削当拍位移）逐【子步】生效
+  //  （extraUpdates=1 → 2 子步,湿段随子步逐跑 = 原版 Update 子步循环 :16781 内
+  //  :16895 同序;wetCount 亦逐子步 −1 :17109-17112）----
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首子步 AI 后/位移前同位） */
+  presetDone = false;
   private t = 0;
   private readonly life = 90;      // timeLeft 90（SetDefaults）
   private ai0 = 0;                 // 摆相计数
@@ -2072,8 +2145,15 @@ export class ThunderBoltShot extends Entity {
     // 位移（SetDefaults extraUpdates=1 :7702-7704 → Update 每帧双跑,射程/位移×2——
     // ★A⑥ 转正：曾折叠为单步全速=射程减半。双子步各带 tileCollide 判（440 先例）,
     // AI/音尘按拍单跑登记差异（原版连 AI 亦双跑,仓内惯例折只剩运动面））
+    // ---- ★通用湿段（:16903-17113）随子步逐跑（原版湿段在子步循环内）+ 水中位移
+    // 阻尼 ×0.5/蜂蜜 0.25/微光 0.375（:17721-17764,直积分宿主乘位移行,速度场不减;
+    // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写）----
     for (let s9 = 0; s9 < 2; s9++) {
-      this.x += this.vx; this.y += this.vy;
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+      if (this.dead) return;                     // 水death/段内 Kill 早退（731 非 waterdeath,
+      const drag = projWaterDragFactor(this);    // 此门=护栏,死码照抄防静默缺面）
+      this.x += this.vx * drag; this.y += this.vy * drag;
       const st = game.world.store;
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
       if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
