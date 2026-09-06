@@ -172,3 +172,13 @@ describe('exportWld → parseWldToSave 闭环', () => {
     expect(npc?.bound ?? false).toBe(false);
   });
 });
+
+  it('wldSnap 快照优先(原版导入档零漂移)', () => {
+    const save = mkSave();
+    save.wldSnap = { GameMode: 2, moonType: 7, downedBoss1: true, title: '快照世界' };
+    const back = parseWldToSave(exportWld(save));
+    expect(back.gameMode).toBe(2);                 // 快照覆盖建模值(建模=1)
+    expect(back.save.header.moonType).toBe(7);     // 建模=4,快照=7
+    expect(back.save.flags.downed_4).toBe(true);
+    expect(back.save.header.name).toBe('快照世界');
+  });

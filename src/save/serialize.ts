@@ -228,6 +228,10 @@ export interface SaveData {
   /** 图鉴统计（BestiaryUnlocksTracker——原版随世界文件持久化 WorldFile.cs:3399/3405；
    *  旧档缺省=空三桶） */
   bestiary?: import('../data/Bestiary').BestiarySave;
+  /** ★原版 .wld header 快照(v6,2026-09-06):导入原版档时 SaveWorldFlags 全字段
+   *  原值(键=WldHeaderFields 台账 name,含本仓暂不建模的字段)——导出回写零漂移;
+   *  自建世界缺省=无(走台账映射/缺省)。WldHeaderFields.fieldValue 快照优先 */
+  wldSnap?: Record<string, number | boolean | string>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */

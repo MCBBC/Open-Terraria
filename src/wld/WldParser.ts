@@ -377,12 +377,16 @@ export function parseWld(buf: Uint8Array): WldWorld {
     for (let i = 0; i < n; i++) r.i32();
   }
   if (version >= 174) { r.boolean(); r.i32(); r.f32(); r.f32(); }
-  // ★R16-1：DD2 四 bool（v178,WF57:2266-2269 + DD2Event.cs:166-169 Load）
+  // ★savedBartender+DD2 三 bool（v178,WF:1369 savedBartender + DD2Event.cs:151-157
+  //  Save=3 bool(T1/T2/T3),Load 读 savedBartender+3 共 4 bool——**无第 4 个 Any**!
+  //  曾把第 1 位标成 dd2DownedT1(语义错位):flags.savedBartender 缺失=原版导入世界
+  //  酒保永不入住(VanillaSpawner :1815 消费),dd2DownedAny 键不存在于原版流。
+  //  2026-09-06 修正语义;旧导入档的 dd2DownedT1 实为 savedBartender(登记)。
   if (version >= 178) {
+    if (r.boolean()) flags.savedBartender = true;
     if (r.boolean()) flags.dd2DownedT1 = true;
     if (r.boolean()) flags.dd2DownedT2 = true;
     if (r.boolean()) flags.dd2DownedT3 = true;
-    if (r.boolean()) flags.dd2DownedAny = true;
   }
   // ★R16-5：背景样式 8/9/10-12（WF57:2294-2312 setBG(8..12)——曾读位即弃）
   const bgMushroom = version > 194 ? r.u8() : 0;

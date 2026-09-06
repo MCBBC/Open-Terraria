@@ -2,11 +2,12 @@
 // 反编译标杆:Terarria1457/Terraria.IO/WorldFile.cs(SaveWorld_Version2 :1156 段序/
 // SaveFileFormatHeader :1184/SaveWorldTiles :1438/SaveChests :1613/SaveSigns :1685/
 // SaveNPCs :1710/SaveFooter :1759/SaveTileEntities :3317)。
-// ★形态:【自足版】——section 指针/瓦片/箱子/标牌/TE 编码与原版 1:1(读侧
-//   WldParser 与原版同构,往返闭环可证),但 header flags 段只写【本仓读侧
-//   (WldParser :203-460)消费的字段序】,非原版全量 ~230 字段——原版 LoadWorld
-//   无法读(会读错位)。达成:导入导出统一 .wld、跨机迁移、json 通道退役;
-//   原版互通(全量 flags+DD2Event/TreeTops.Save/Manifest 等)为后续任务。
+// ★形态:【全量台账版 v2】——header 段经 WldHeaderFields 台账(WF:1264-1437 逐字段
+//   定谳,含 DD2 3 bool/TreeTops 恒 13/Manifest 空串合法/170 段=party 真值)全字段
+//   写出;wldSnap 快照优先(原版导入档零漂移)。tiles/chests/signs/npcs/TE 与原版
+//   1:1。已登记偏差: SavedOreTiers 三档 -1/四档 7/6/9/8 缺省、jungleBG 无键写 0、
+//   anglerWhoFinishedToday/CelebratingNPCs/ExtraSpawnPoint 写空、致动器/wire4/inActive
+//   无态写 0、manifest 空串(合法,原版 v<299 同款)。原版可读性=待 rig/TEdit 终验。
 // 数据源映射:save.header(时间/尺寸/spawn/地层/地牢/树与背景样式/月相快照)/
 //   save.flags(WldParser 命名键布尔旗)/save.weather/save.events/save.clock/
 //   save.bannerKills/save.invasion;缺省值按读侧缺省语义补(矿层 -1=未锁定、
@@ -16,6 +17,7 @@ import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 
 import { BinaryWriterLE } from '../save/PlrImport';
+import { HEADER_FLAGS, HEADER_PRE, fieldValue, type WldField, type WldVal } from './WldHeaderFields';
 import { TOWN_NPC_KEY_BY_ID } from './WldImport';
 import { bytesToB64, rlePairs, rleTiles } from '../save/SaveFile';
 import vanillaJson from '../../public/sprites/vanilla.json';
@@ -172,147 +174,75 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
   }
 }
 
-// ---- header section(WldParser :203-460 读序镜像;缺省=读侧缺省语义) ----
+// ---- header 段(WldHeaderFields 台账表驱动;P0 定谳 WF:1230-1437 逐字段) ----
 function writeHeader(w: BinaryWriterLE, save: SaveData): void {
-  const h = save.header;
-  const fl = save.flags ?? {};
-  const sf = h.seedFlags ?? {};
-  const bg = h.bgStyles ?? ({} as NonNullable<typeof h.bgStyles>);
-  const wtr = save.weather ?? ({} as NonNullable<SaveData['weather']>);
-  const ev = save.events ?? ({} as NonNullable<SaveData['events']>);
-  const ck = save.clock ?? ({} as NonNullable<SaveData['clock']>);
-  const bo = (v: boolean | undefined) => w.bool(!!v);
-  const width = h.width, height = h.height;
-
-  w.str(h.name || 'World');
-  w.str(String(h.seed ?? ''));               // SeedText(自足读侧 string 形)
-  w.i64(0n);                                  // worldGenVersion(读侧弃)
-  for (let i = 0; i < 16; i++) w.byte(0);     // guid
-  w.i32(((h.created ?? 0) ^ 0x5555_5555) & 0x7fffffff);   // worldId(随意稳定值)
-  w.i32(0).i32(width * 16).i32(0).i32(height * 16);       // bounds(读侧弃)
-  w.i32(height);                              // maxTilesY
-  w.i32(width);                               // maxTilesX
-  // gameMode(≥209 i32)+九种子旗
-  w.i32(h.difficulty ?? 0);
-  bo(sf.drunkWorld); bo(sf.getGoodWorld); bo(sf.tenthAnniversary); bo(sf.theConstant);
-  bo(sf.notTheBees); bo(sf.remix); bo(sf.noTraps); bo(sf.everything); bo(sf.skyblock);
-  w.i64(BigInt(h.created ?? 0) * 10000n);     // creationTime ticks
-  w.i64(BigInt(h.created ?? 0) * 10000n);     // lastPlayed
-  w.byte(h.moonType ?? 0);
-  const treeX = h.treeX && h.treeX.length >= 3 ? h.treeX : [width >> 2, width >> 1, (width * 3) >> 2];
-  w.i32(treeX[0]).i32(treeX[1]).i32(treeX[2]);
-  const ts = h.treeStyle ?? [0, 0, 0, 0];
-  w.i32(ts[0] ?? 0).i32(ts[1] ?? 0).i32(ts[2] ?? 0).i32(ts[3] ?? 0);
-  for (let i = 0; i < 3; i++) w.i32(treeX[i]);   // caveBackX(读侧弃)
-  const cb = bg.cave ?? [0, 0, 0, 0];
-  w.i32(cb[0] ?? 0).i32(cb[1] ?? 0).i32(cb[2] ?? 0).i32(cb[3] ?? 0);
-  w.i32(bg.ice ?? 0).i32(bg.jungle ?? 0).i32(bg.hell ?? 0);
-  w.i32(h.spawn?.[0] ?? width >> 1).i32(h.spawn?.[1] ?? 0);
-  w.f64(h.groundLevel ?? 0.3 * height);
-  w.f64(h.rockLevel ?? 0.6 * height);
-  // time 反换算(WldImport :743-754 正变换逆:昼 0.1875+t/54000×0.5,夜 0.6875+t/32400×0.5)
-  const tod = ck.timeOfDay ?? 0.25;
-  let time: number, dayTime: boolean;
-  if (tod >= 0.1875 && tod < 0.6875) { time = ((tod - 0.1875) / 0.5) * 54000; dayTime = true; }
-  else { time = (((tod - 0.6875 + 1) % 1) / 0.5) * 32400; dayTime = false; }
-  w.f64(time);
-  w.bool(dayTime);
-  w.i32(ck.moonPhase ?? 0);
-  bo(ck.bloodMoon); bo(ck.eclipse);
-  w.i32(h.dungeonX ?? 0).i32(h.dungeonY ?? 0);
-  w.bool(!!h.crimson);
-  // boss 十连 + saved 七连(键=WldParser 命名约定)
-  bo(fl.downed_4); bo(fl.downed_13); bo(fl.downed_35); bo(fl.downed_222);
-  bo(fl.downed_134); bo(fl.downed_125); bo(fl.downed_127); bo(fl.downedMechBossAny);
-  bo(fl.downed_262); bo(fl.downed_245);
-  w.bool(!!fl.downed_50);
-  bo(fl.savedGoblin); bo(fl.savedWizard); bo(fl.savedMech);
-  bo(fl.downedGoblins); bo(fl.downedClown); bo(fl.downedFrost); bo(fl.downedPirates);
-  bo(fl.shadowOrbSmashed); bo(fl.spawnMeteor);
-  w.byte(0);                                  // shadowOrbCount(读侧 u8;本仓未持久化,登记偏差)
-  w.i32(save.altarCount ?? 0);
-  w.bool(!!fl.hardMode);
-  w.bool(false);                              // afterPartyOfDoom(≥257)
-  const inv = save.invasion;
-  // invasion 四元组:delay/size/type i32 + X **f64**(Main.invasionX=double,WF:1313)+slimeRainTime f64(WF:1316)
-  w.i32(inv?.delay ?? 0).i32(inv?.size ?? 0).i32(inv?.type ?? 0).f64(inv?.x ?? 0).f64(wtr.slimeRainTime ?? 0);
-  w.byte(h.sundialCooldown ?? 0);
-  w.bool(!!wtr.raining).i32(wtr.rainTime ?? 0).f32(wtr.maxRaining ?? 0);
-  w.i32(-1).i32(-1).i32(-1);                  // SavedOreTiers Cobalt/Mythril/Adamantite(-1=未锁定)
-  // bg 字节八连(WF:1325-1331)
-  w.byte(bg.forest?.[0] ?? 0); w.byte(bg.corrupt ?? 0); w.byte(0);   // jungleBG(本仓 BgStylesSave 无此键,登记偏差)
-  w.byte(bg.snow ?? 0); w.byte(bg.hallow ?? 0); w.byte(bg.crimson ?? 0);
-  w.byte(bg.desert ?? 0); w.byte(bg.ocean ?? 0);
-  w.i32(wtr.cloudBGActive ?? 0).i16(wtr.numClouds ?? 0).f32(wtr.windSpeedTarget ?? 0);
-  w.i32(0);                                   // anglerWhoFinishedToday 空表
-  bo(fl.savedAngler);
-  w.i32(0);                                   // anglerQuest
-  bo(fl.savedStylist);
-  w.bool(!!fl.savedTaxCollector);             // ≥129
-  w.bool(!!fl.savedGolfer);                   // ≥201
-  w.i32(inv?.sizeStart ?? 0);                 // ≥107
-  w.i32(86400);                               // cultistDelay(读侧缺省同值)
-  // banners(WF:2210 BannerSystem:i16 n+n×i32 killCount[i];[≥289]i16 m+m×u16 claimable)
+  const snap = (save as { wldSnap?: Record<string, WldVal> }).wldSnap;
+  const get = (f: WldField): WldVal => (snap && snap[f.name] !== undefined ? snap[f.name] : fieldValue(save, f));
+  const put = (f: WldField): void => {
+    const v = get(f);
+    switch (f.type) {
+      case 'i32': w.i32(Number(v)); break;
+      case 'u8': w.byte(Number(v)); break;
+      case 'u32': w.u32(Number(v)); break;
+      case 'i16': w.i16(Number(v)); break;
+      case 'f64': w.f64(Number(v)); break;
+      case 'f32': w.f32(Number(v)); break;
+      case 'bool': w.bool(!!v); break;
+      case 'i64': w.i64(typeof v === 'bigint' ? v : BigInt(Math.round(Number(v)))); break;
+      case 'str': w.str(String(v)); break;
+    }
+  };
+  const idx = (name: string): number => {
+    const i = HEADER_FLAGS.findIndex((f) => f.name === name);
+    if (i < 0) throw new Error(`WldHeaderFields 缺锚点 ${name}`);
+    return i;
+  };
+  // [pre] title..maxTilesX(guid=16B 特例嵌在 PRE 里,按 name 分流)
+  for (const f of HEADER_PRE) {
+    if (f.name === 'guid') { for (let i = 0; i < 16; i++) w.byte(0); continue; }
+    put(f);
+  }
+  // [flags 1] GameMode..windSpeedTarget
+  for (let i = 0; i <= idx('windSpeedTarget'); i++) put(HEADER_FLAGS[i]);
+  // [特例] anglerWhoFinishedToday list(i32 n+n×str)
+  const angler = (save as { wldSnapAngler?: string[] }).wldSnapAngler ?? [];
+  w.i32(angler.length);
+  for (const a of angler) w.str(a);
+  // [flags 2] savedAngler.._tempCultistDelay
+  for (let i = idx('savedAngler'); i <= idx('_tempCultistDelay'); i++) put(HEADER_FLAGS[i]);
+  // [特例] banners(i16 n+n×i32 kills[下标序];[≥289]i16 m+m×u16 claimable 空)
   const bk = save.bannerKills ?? {};
   const idxs = Object.keys(bk).map(Number).filter((k) => k > 0 && k < 293 && (bk[k] ?? 0) > 0).sort((a, b) => a - b);
   const maxIdx = idxs.length ? idxs[idxs.length - 1]! : 0;
   w.i16(maxIdx + 1);
   for (let i = 0; i <= maxIdx; i++) w.i32(bk[i] ?? 0);
-  w.i16(0);                                   // claimable 本仓不建模写空
-  w.bool(!!h.fastForwardTimeToDawn);          // ≥128
-  bo(fl.downedFishron);
-  w.bool(!!fl.downedMartians); w.bool(!!fl.downed_439); w.bool(!!fl.downed_398);   // ≥131
-  bo(fl.downedHalloweenKing); bo(fl.downedHalloweenTree);
-  bo(fl.downedChristmasIceQueen); bo(fl.downedChristmasSantank); bo(fl.downedChristmasTree);
-  // 四塔 downed+active(≥140)
-  bo(fl.downedTowerSolar); bo(fl.downedTowerVortex); bo(fl.downedTowerNebula); bo(fl.downedTowerStardust);
-  bo(fl.towerActiveSolar); bo(fl.towerActiveVortex); bo(fl.towerActiveNebula); bo(fl.towerActiveStardust);
-  bo(fl.lunarApocalypseUp);
-  w.bool(false).bool(false).i32(0).i32(0);    // ≥170(party 前身,读侧弃)
-  w.bool(false).i32(0).f32(0).f32(0);         // ≥174(sandstorm 前身)
-  // DD2 四 bool(≥178)
-  bo(fl.dd2DownedT1); bo(fl.dd2DownedT2); bo(fl.dd2DownedT3); bo(fl.dd2DownedAny);
-  w.byte(bg.mushroom ?? 0);                   // >194
-  w.byte(bg.underworld ?? 0);                 // ≥215
-  w.byte(bg.bg10 ?? 0).byte(bg.bg11 ?? 0).byte(bg.bg12 ?? 0);   // >195
-  w.byte(bg.forest?.[1] ?? 0).byte(bg.forest?.[2] ?? 0).byte(bg.forest?.[3] ?? 0);   // treeBG2-4(≥204)
-  w.bool(!!fl.combatBook);
-  w.i32(0).bool(!!ev.lanternManual).bool(!!ev.lanternGenuine).bool(!!ev.lanternNext);   // ≥207 灯笼夜
-  // TreeTops(≥211):i32 n+n×i32
-  const tt = h.treeTops ?? [];
-  w.i32(tt.length);
-  for (const v of tt) w.i32(v ?? 0);
-  // ≥212 force 2bool
-  w.bool(!!fl.forceHalloweenForToday).bool(!!fl.forceXMasForToday);
-  // ≥216 oreTiers 铜/铁/银/金(缺省 7/6/9/8=WldImport 注记)
-  w.i32(7).i32(6).i32(9).i32(8);
-  // ≥217 宠物三连
-  w.bool(!!fl.boughtCat).bool(!!fl.boughtDog).bool(!!fl.boughtBunny);
-  w.bool(!!fl.downed_636).bool(!!fl.downed_657);   // ≥223
-  w.bool(!!fl.downed_668);                          // ≥240
-  w.bool(!!fl.unlockedSlimeBlueSpawn);              // ≥250
-  w.bool(!!fl.unlockedMerchantSpawn).bool(!!fl.unlockedDemolitionistSpawn);
-  w.bool(!!fl.unlockedPartyGirlSpawn).bool(!!fl.unlockedDyeTraderSpawn);
-  w.bool(!!fl.unlockedTruffleSpawn).bool(!!fl.unlockedArmsDealerSpawn);
-  w.bool(!!fl.unlockedNurseSpawn).bool(!!fl.unlockedPrincessSpawn);   // ≥251
-  w.bool(!!fl.combatBook2);                         // ≥259
-  w.bool(!!fl.peddler);                             // ≥260
-  w.bool(!!fl.unlockedSlimeGreenSpawn).bool(!!fl.unlockedSlimeOldSpawn);
-  w.bool(!!fl.unlockedSlimePurpleSpawn).bool(!!fl.unlockedSlimeRainbowSpawn);
-  w.bool(!!fl.unlockedSlimeRedSpawn).bool(!!fl.unlockedSlimeYellowSpawn);
-  w.bool(!!fl.unlockedSlimeCopperSpawn);            // ≥261
-  w.bool(!!h.fastForwardTimeToDusk).byte(h.moondialCooldown ?? 0);   // ≥264
-  w.bool(!!fl.forceHalloweenForever).bool(!!fl.forceXMasForever);    // ≥287
-  w.bool(!!fl.vampire);                             // ≥288
-  w.bool(!!fl.infected);                            // ≥296
-  w.i32(0).i32(0);                                  // ≥291
-  w.bool(!!fl.teamBasedSpawnsSeed);                 // ≥297
-  w.byte(0);                                        // ExtraSpawnPoint 空
-  w.bool(!!sf.dualDungeons);                        // ≥304
-  w.bool(!!sf.moreLightning).bool(!!sf.noLightning);   // ≥323
-  w.u32(0);                                         // ≥299 且 <313
-  w.str('');                                        // ≥299 manifest(空=读侧验读即弃)
+  w.i16(0);
+  // [flags 3] fastForwardTimeToDawn..teamBasedSpawnsSeed(中插 Celebrating list 与 ExtraSpawn 特例)
+  const iFFDawn = idx('fastForwardTimeToDawn');
+  const iPartyCooldown = idx('_tempPartyCooldown');
+  const iSand = idx('_tempSandstormHappening');
+  const iTeam = idx('teamBasedSpawnsSeed');
+  const iDual = idx('dualDungeonsSeed');
+  for (let i = iFFDawn; i <= iTeam; i++) {
+    put(HEADER_FLAGS[i]);
+    if (i === iPartyCooldown) {
+      // TempPartyCelebratingNPCs list(i32 n+n×i32;本仓不建模写空)——原版 :1381-1384
+      w.i32(0);
+    }
+    if (i === iSand) {
+      // ★TreeTops.Save(WorldGen.TreeTopsInfo :40:恒 13 项;Load :任 n≤13 逐项读)——
+      // 原版位置=lantern 四件套之后、force ForToday 之前(WF:1383 前),漏写=后续全错位
+      const tt = save.header.treeTops ?? [];
+      w.i32(13);
+      for (let k = 0; k < 13; k++) w.i32(tt[k] ?? 0);
+    }
+  }
+  // [特例] ExtraSpawnPoint(u8 0)——原版位置 teamBasedSpawnsSeed 与 dualDungeons 之间
+  w.byte(0);
+  // [flags 4] dualDungeonsSeed..manifest(尾)
+  for (let i = iDual; i < HEADER_FLAGS.length; i++) put(HEADER_FLAGS[i]);
 }
+
 // ---- TE 段(save.furniture 挂物族四类;其余类型本仓不建模写空段亦可) ----
 function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
   const list = save.furniture ?? [];
