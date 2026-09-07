@@ -202,11 +202,43 @@ function appearanceKey(a: Appearance): string {
   ].join('|');
 }
 
+/** PlayerDataInitializer.Load 的 CopyVariant 变体→源表链（反编译逐值,1457 同名文件）:
+ *  1/2/3/8←0;4←0 后覆盖 {3,4,5,6,7,8,9,10,11,12,13};5←4、6←4、7←4、9←4;
+ *  10←0 后覆盖 {0,2,3,5,7,9,10}+眼白别名;11←10。⇒ 女性子变体（5/6/7/9）的
+ *  设计缺省身体通道（3=躯干肤/5=臂肤B/7=臂肤A/9=臂手/10=腿肤）取【变体 4 女表】,
+ *  只有变体 4 也没有的通道（0 头/1 眼白/2 瞳/15 眼睑）才落到变体 0。
+ *  ★SW-BJ21 2026-09-07:旧 `v ?? 0` 直落男表——男表 (0,2) 复合格无女躯干
+ *  （Player_0_3.png 逐像素实测 row2 全空;女躯干/女底衫仅 Player_4_3/4_4 有 (0,2)/(1,2) 格）
+ *  ⇒ 女性子变体（含用户实报 v6 紫发角色）胸口/衣摆中缝镂空透背景。
+ *  对照:变体 4 自带全套女表,BJ11 就绪门修后 diff=0（探针 _swbj21-truth-diff 实测） */
+export const VARIANT_SHEET_SOURCE: Readonly<Record<number, number>> = {
+  1: 0, 2: 0, 3: 0, 4: 0, 5: 4, 6: 4, 7: 4, 8: 0, 9: 4, 10: 0, 11: 10,
+};
+
+/** 变体链源表（Game.ts 预载清单与 PaperDoll 取表/就绪门同源消费） */
+export function variantSheetSource(variant: number): number {
+  return VARIANT_SHEET_SOURCE[variant] ?? 0;
+}
+
+/** 变体通道源表解析（CopyVariant 语义,SW-BJ21 2026-09-07）:
+ *  own → 链源（4/10）→ 0,取第一个 exists 者。烘焙取表（sheetRect）与就绪门
+ *  必须【同一个解析】——门等的就是实际会画的那张（BJ11「门=实际绘制面」语义的链化） */
+export function variantSheetName(variant: number, sheet: number, exists: (name: string) => boolean): string {
+  const own = `Player_${variant}_${sheet}.png`;
+  if (exists(own)) return own;
+  const mid = variantSheetSource(variant);
+  if (mid !== 0 && mid !== variant) {
+    const midName = `Player_${mid}_${sheet}.png`;
+    if (exists(midName)) return midName;
+  }
+  return `Player_0_${sheet}.png`;
+}
+
 function sheetRect(variant: number, sheet: number): ImageBitmap | HTMLImageElement | null {
-  // 女性变体缺的通道回退男体（文件分布：Player_1_ 仅有 4,6,8,11,12,13）
+  // 女性变体缺的通道按 CopyVariant 链回退（5/6/7/9←4←0;见 VARIANT_SHEET_SOURCE 注）
   // 消费点埋点:回退 miss 时 vui 失配报告能给出"谁在查"
   noteVuiConsumer(`PaperDoll.sheetRect(v${variant},s${sheet})`);
-  const r = UITextures.get(`Player_${variant}_${sheet}.png`) ?? UITextures.get(`Player_0_${sheet}.png`);
+  const r = UITextures.get(variantSheetName(variant, sheet, (n) => UITextures.has(n)));
   return r ? (r.img as HTMLImageElement) : null;
 }
 
@@ -369,8 +401,11 @@ export function compositePaperDoll(
     //   appearanceKey 不含实际用表 → 混合烘焙被缓存定格 = 「头部与身体分离/悬空、
     //   穿装备后更明显」用户实报(SW-BJ11)。探针实证 scripts/_swbj11-race.mjs:
     //   冷烘 80px 差 / 强制预载+清缓存后 0 差(算法本体逐像素 1:1)。
-    const vName = `Player_${a.skinVariant}_${s}.png`;
-    if (!ready(UITextures.has(vName) ? vName : `Player_0_${s}.png`)) return null;
+    //   ★SW-BJ21 2026-09-07 门改走 CopyVariant 链解析(variantSheetName,与 sheetRect
+    //   同一函数):首个【清单存在】的源表必须就绪——女性子变体(5/6/7/9)设计缺省的
+    //   身体通道(3/5/7/9/10)清单无 v 表、也无旧门认得的「6_3 缺→等 0_3」语义,
+    //   旧门放行 0_3=男表 (0,2) 空格 = 镂空复发面;链化后等 Player_4_3 女表。
+    if (!ready(variantSheetName(a.skinVariant, s, (n) => UITextures.has(n)))) return null;
   }
   if (hairMode !== 'none' && (!part || part === 'head') && !ready(hairSrc)) return null;
   if (equip?.legs && (!part || part === 'legs') && !ready(`Armor_Legs_${equip.legs}.png`)) return null;

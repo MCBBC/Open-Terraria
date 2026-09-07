@@ -80,7 +80,8 @@ describe('Boss 表情解锁门（GetEmotesBosses :178-283）', () => {
     expect(emotesBosses({ downed_222: true })).toEqual([42]);          // 蜂后
     expect(emotesBosses({ downed_35: true })).toEqual([43]);           // 骷髅王
     expect(emotesBosses({ hardMode: true })).toEqual([44]);            // 肉山
-    expect(emotesBosses({ downed_641: true })).toEqual([144]);         // 史莱姆皇后
+    expect(emotesBosses({ downed_657: true })).toEqual([144]);         // 史莱姆皇后（SW-BN2 复核重钉：旗名=downed_657,
+                                                                       // 红蓝 R3-C3 已校正 src 侧,本行漏钉——WldParser.ts:438 同源）
     expect(emotesBosses({ downed_134: true })).toEqual([45]);          // 毁灭者
     expect(emotesBosses({ downed_127: true })).toEqual([46]);          // 铁骷髅王
     expect(emotesBosses({ downed_126: true })).toEqual([47]);          // 双子

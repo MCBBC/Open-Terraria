@@ -37,6 +37,11 @@ const CSS = `
 .sw-ach-row { pointer-events:auto; display:flex; gap:10px; align-items:center;
   background:rgba(20,26,52,0.55); border-radius:6px; padding:6px; cursor:pointer; }
 .sw-ach-row:hover { background:rgba(40,52,100,0.65); }
+.sw-ach-row.hl { animation: sw-ach-hl 0.8s ease-in-out 4; }
+@keyframes sw-ach-hl {
+  0%, 100% { background:rgba(40,52,100,0.65); box-shadow:none; }
+  50% { background:rgba(255,215,110,0.35); box-shadow:0 0 14px rgba(255,215,110,0.6); }
+}
 .sw-ach-icon { position:relative; width:72px; height:72px; flex:none; }
 .sw-ach-icon .glyph { position:absolute; left:4px; top:4px; width:64px; height:64px;
   background-image:url(sprites/vanilla/Achievements.png);
@@ -99,7 +104,7 @@ let openEscHandler: ((e: KeyboardEvent) => void) | null = null;
 /** 当前过滤类别（原版 4 个 UIToggleImage；全关 = 只看未完成? 原版至少留一个开） */
 const catOn = [true, true, true, true];
 
-export function openAchievementsPanel(game: Game): void {
+export function openAchievementsPanel(game: Game, focusName?: string): void {
   ensureCss();
   if (openPanel) { closeAchievementsPanel(); return; }
   const a = game.achievements;
@@ -148,12 +153,18 @@ export function openAchievementsPanel(game: Game): void {
   const renderList = () => {
     list.textContent = '';
     let doneN = 0;
+    // ★定位模式:重置过滤为全开(保证目标成就不被分类过滤隐藏)
+    if (focusName) {
+      for (let j = 0; j < 4; j++) catOn[j] = true;
+      catBtns.forEach((b, j) => b.style.opacity = '1');
+    }
     for (const def of a.defList()) {
       if (a.isCompleted(def.name)) doneN++;
       // 未归类成就（-1，如 GAIN_TORCH_GODS_FAVOR）不受过滤行影响恒显示
       if (def.category >= 0 && !catOn[def.category]) continue;
       const done = a.isCompleted(def.name);
       const row = el('div', 'sw-ach-row' + (done ? ' done' : ''));
+      row.dataset.ach = def.name;   // ★定位锚(点击弹窗滚动定位用)
       const icon = el('div', 'sw-ach-icon');
       const glyph = el('div', 'glyph');
       glyphStyle(glyph, a, def.name);
@@ -188,6 +199,17 @@ export function openAchievementsPanel(game: Game): void {
   openEscHandler = (e) => { if (e.code === 'Escape') closeAchievementsPanel(); };
   window.addEventListener('keydown', openEscHandler);
   game.sfx.play('menuTick', 1);
+  // ★滚动定位+高亮(2026-09-07 用户需求:成就解锁弹窗点击→定位到该项并高亮)
+  if (focusName) {
+    const target = list.querySelector(`[data-ach="${focusName}"]`);
+    if (target) {
+      requestAnimationFrame(() => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('hl');
+        setTimeout(() => target.classList.remove('hl'), 3200);
+      });
+    }
+  }
 }
 
 export function closeAchievementsPanel(): void {

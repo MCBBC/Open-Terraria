@@ -38,7 +38,7 @@ import { VI } from '../src/data/itemKeys';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
 import funcJson from '../src/data/vanilla-itemfunc.json';
 import vanillaItemMeta from '../public/sprites/vanilla.json';
-import { Game, multiTileDropKey, chestDestroyableAt } from '../src/core/Game';
+import { NO_RETURN_RECYCLE_SHEETS, Game, multiTileDropKey, chestDestroyableAt } from '../src/core/Game';
 import { shouldTileSurviveAt } from '../src/entities/Mounts';
 import { TrapShot } from '../src/entities/Dart';
 
@@ -353,7 +353,6 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
     // 兜底判据本身（createTile 双源）不变,仅消费侧让位特例支路;654 TNT 同理（❌1 dropKey=''）
     // ★2026-09-07 掉落对账批：484（滚石仙人掌,放置即消耗原版零返还）随滴水五型入
     //  NO_RETURN_RECYCLE_SHEETS——oracle 改走 Game.ts 同源常量（消费面单点）
-    const { NO_RETURN_RECYCLE_SHEETS } = require('../src/core/Game');
     let withItem = 0, withoutItem = 0, noReturn = 0;
     for (const d of multiDropNull) {
       const has = vanillaSheets.has(d.vanilla!.sheet!);
@@ -367,7 +366,7 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
     // ★H.4 批（2026-08-24）后基数 239：11 站（463/395/425/486/510/511/573/581/642/660/698）
     // 已定谳 Check* 锚点真掉落、补 def.drop 移出本集（见 G 段）
     expect(withoutItem).toBeGreaterThan(20); // 纯装饰 27 族
-    expect(noReturn).toBe(1);                // 484 滚石仙人掌（滴水五型在 drop!=null 前集）
+    expect(noReturn).toBe(4);                // {590 宝石树苗,595 樱花树苗,615 黄柳树苗,484 滚石仙人掌}——掉落对账批新增无返还档(滴水五型另有 drop!=null 前集)
   });
 
   it('vanillaPlaceableTileKeys 覆盖 oracle 全集（vi_ tile 反查无漏）', () => {

@@ -846,6 +846,7 @@ export class VanillaDust {
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
       case 230: return { rgb: 1, a: 0 };   // :2616-2619 Color(255,255,255,0)——钻头尘本体透明，纯光源
       case 229: return { rgb: 1, a: 25 / 255 };   // :2659-2663（Lerp(lighting,White,0.6) 近似为全亮基底，备案）
+      case 43: return { rgb: (num + 9) / 10, a: (num + 9) / 10 };   // :2755-2758（num+9)/10 闪光尘恒亮档——tileShine 闪光可见度批补（漏则闪尘近乎隐形）
       case 55: return { rgb: (num + 3) / 4, a: num };   // :2725-2727（num+3)/4 光乘区折减族
       // 15/57/274 亮色族走默认档：本体 A=255−alpha（:2756-2759），(num+3)/4 的
       // 光乘区折减由"画在合成后强制 White"（DrawDust :38406）等价表达

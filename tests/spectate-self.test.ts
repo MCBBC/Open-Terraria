@@ -208,7 +208,10 @@ describe('spectateKeyExits 退出键族（:16933 键盘半边,默认键位）', 
     // Jump / Inventory（既有两键——扩表不缩）
     expect(g.spectateKeyExits('Space')).toBe(true);         // Jump
     expect(g.spectateKeyExits('Escape')).toBe(true);        // Inventory
-    expect(g.spectateKeyExits('KeyE')).toBe(true);          // Inventory（本仓 E 并绑）
+    // SW-BN2 2026-09-07：E 缺省改属 Grapple（PlayerInput.cs:2075）——E 仍是退出键,
+    // 但途径换成 controlHook 臂（原版 :17200 键族含 controlHook,spectateKeyExits
+    // 已补 Grapple 臂;旧缺省 Grapple 空表时 E 经 Inventory 臂命中,现换轨同真）
+    expect(g.spectateKeyExits('KeyE')).toBe(true);          // Grapple（controlHook）
     // 新扩：Torch=SmartSelect / Smart=SmartCursor / Mount=QuickMount
     expect(g.spectateKeyExits('ShiftLeft')).toBe(true);     // SmartSelect(controlTorch)
     expect(g.spectateKeyExits('ControlLeft')).toBe(true);   // SmartCursor(controlSmart)

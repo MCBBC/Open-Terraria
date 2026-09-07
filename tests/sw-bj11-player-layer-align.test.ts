@@ -26,10 +26,12 @@ const atlasSrc = readFileSync(new URL('../src/assets/SpriteAtlas.ts', import.met
 describe('SW-BJ11 ① 变体通道就绪门(清单感知,禁 OR 兜底混烘)', () => {
   it('门=清单含变体表⇒必须等变体表;仅清单缺省才回退 Player_0_*', () => {
     // 判据表达式逐字锁死(混合烘焙的入口就在这行)
-    expect(src).toContain('if (!ready(UITextures.has(vName) ? vName : `Player_0_${s}.png`)) return null;');
-    expect(src).toContain('const vName = `Player_${a.skinVariant}_${s}.png`;');
+    // SW-BJ21 2026-09-07 重钉:门改走 variantSheetName 链解析(CopyVariant 5/6/7/9←4←0,
+    // 与 sheetRect 同一函数——门等的仍是【实际会画的那张】,女性子变体身体通道等 4_3 女表)
+    expect(src).toContain('if (!ready(variantSheetName(a.skinVariant, s, (n) => UITextures.has(n)))) return null;');
     // 旧 OR 门必须消失(回写即毒化复发)
     expect(src).not.toContain('!ready(`Player_${a.skinVariant}_${s}.png`) && !ready(`Player_0_${s}.png`)');
+    expect(src).not.toContain('if (!ready(UITextures.has(vName) ? vName : `Player_0_${s}.png`)) return null;');
   });
 
   it('UITextures.has = atlas.uiFileExists 直通(清单=构建期磁盘真相,零请求)', () => {

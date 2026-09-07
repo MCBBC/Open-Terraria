@@ -6,7 +6,7 @@ import { showSplash } from './ui/Splash';
 import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
 import { mountInstallPrompt } from './ui/InstallPrompt';
 import { UI } from './ui/UI';
-import { resolveEscapeChain, type EscapeIntent } from './ui/escapeChain';   // SW-BN2 2026-09-07
+import { resolveEscapeChain } from './ui/escapeChain';   // SW-BN2 2026-09-07
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
 import { ITEM_BY_KEY , VANILLA_ITEM_KEY_BY_ID , ITEM_DEFS } from './data/items';

@@ -55,6 +55,20 @@ log('played-waiting');
 for (let i = 0; i < 100; i++) {
   await new Promise((r) => setTimeout(r, 3000));
   try {
+    const spawnStat = await page.evaluate(() => {
+      const sp = globalThis.__swGame?.vanillaSpawner;
+      const ss = sp?.__samples ?? [];
+      if (!ss.length) return null;
+      let inView = 0;
+      for (const s of ss) {
+        if (Math.abs(s.dx) < s.vw * 1.0 && Math.abs(s.dy) < s.vh * 1.0) inView++;  // 画面内(1.0×半屏)
+      }
+      const dists = ss.map((s) => Math.max(Math.abs(s.dx) / s.vw, Math.abs(s.dy) / s.vh)).sort((a, b) => a - b);
+      return { n: ss.length, inView, ratio: (inView / ss.length).toFixed(3),
+        min: dists[0]?.toFixed(2), p25: dists[Math.floor(dists.length * 0.25)]?.toFixed(2),
+        med: dists[Math.floor(dists.length / 2)]?.toFixed(2) };
+    });
+    if (spawnStat) log('SPAWN-STAT ' + JSON.stringify(spawnStat));
     const ring = await page.evaluate(() => ({
       fatal: (window.__swErrorsFatal ?? []).slice(-4),
       all: (window.__swErrors ?? []).slice(-6),
@@ -64,6 +78,27 @@ for (let i = 0; i < 100; i++) {
     const inGame = await page.evaluate(() => !!globalThis.__swGame);
     if (inGame) {
       log('IN-GAME');
+      // spawn 统计:hook vanillaSpawner.spawn,记录生成点相对玩家的格距 vs viewHalf
+      try {
+        await page.evaluate(() => {
+          const g = globalThis.__swGame;
+          const sp = g.vanillaSpawner;
+          if (!sp || sp.__hooked) return;
+          sp.__hooked = true;
+          sp.__samples = [];
+          const orig = sp.spawn.bind(sp);
+          sp.spawn = function (...a) {
+            const ok = orig(...a);
+            if (ok) {
+              const dx = sp.spawnTileX - sp.pX, dy = sp.spawnTileY - sp.pY;
+              sp.__samples.push({ dx, dy, vw: a[3], vh: a[4] });
+              if (sp.__samples.length > 500) sp.__samples.shift();
+            }
+            return ok;
+          };
+        });
+        log('spawn-hooked');
+      } catch (e) { log('hook-err ' + e.message); }
       // bank 罐链检查:v_29_piggy_bank 的格数/internal/flags + player.banks
       try {
         const bank = await page.evaluate(() => {

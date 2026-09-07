@@ -147,9 +147,9 @@ describe('SW-BJ14 多钩跳键收爪（RemoveAllGrapplingHooks 全量杀 1457 Pl
 });
 
 describe('SW-BJ14 键位面（用户"按 R 无效/改绑 G 也无效"辨析）', () => {
-  it('R 缺省≠钩爪：原版 R=QuickMount（PlayerInput.cs:2081）、Grapple 缺省 E→本仓让位背包=空表', () => {
+  it('R 缺省≠钩爪：原版 R=QuickMount（PlayerInput.cs:2081）、Grapple 缺省=E（PlayerInput.cs:2075;SW-BN2 2026-09-07 缺省表对齐原版——E 曾让位物品栏,Inventory 收回纯 Escape 后按用户令回归）', () => {
     expect(DEFAULT_KEYBINDS.QuickMount).toEqual(['KeyR']);
-    expect(DEFAULT_KEYBINDS.Grapple).toEqual([]);
+    expect(DEFAULT_KEYBINDS.Grapple).toEqual(['KeyE']);
     expect(isBound('Grapple', 'KeyR')).toBe(false);   // 按 R 永不触发钩爪（原版同构）
   });
 

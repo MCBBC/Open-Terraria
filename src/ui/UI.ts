@@ -145,6 +145,7 @@ import {
   blockedFromTransferIntoChest,
   type SlotWhereLike,
 } from './SlotActions';   // SW-AU2 2026-09-06 Alt/Shift/Ctrl 槽位动作 1:1 路由
+import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
@@ -1827,15 +1828,23 @@ export class UI {
       const t = e.target as HTMLElement | null;
       // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
       if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock')) return;
-      // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:41279-41282 商店格区）：
-      //  · 行/按钮 → 各自 click 链（行 = 有货商店格；光标持有时 Game.npcShopBuy 内
-      //    的 CanStack/满叠门裁决，异型整链无动作 PickItemMovementAction :1427-1438）
-      //  · 空白区 = 空商店格 → 光标持有物整叠卖出（PickItemMovementAction case 15
-      //    :1435-1438 → LeftClick case 4 :1110-1129 SellItem(mouseItem)），
-      //    不丢世界、不放置
+      // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:42522-42532 商品格网格）：
+      //  ★SW-BJ22 2026-09-07 原版卖出触发面收窄——原版 40 格网格里【空商店格】
+      //  才是卖出放置区（PickItemMovementAction case 15 ItemSlot.cs:1435-1438
+      //  `inv[slot].type == 0 && checkItem.type > 0 && 非钱币` → result 4 →
+      //  LeftClick case 4 :1195-1212 SellItem(mouseItem) 整叠卖出）；格间空白
+      //  只置 mouseInterface 不 Handle 任何 slot（Main.cs:42518-42524 精确格
+      //  矩形命中）= 无动作。旧实现「点面板任意空白=卖」自创，用户实报存疑。
+      //  · 有货格（.sw-shop-item）/按钮 → 各自 click 链（买入/关闭；光标持有时
+      //    Game.npcShopBuy 内 CanStack/满叠门裁决，异型整链无动作 :1427-1434）
+      //  · 空商店格（.sw-shop-empty）+ 左键 + 持非币物 → npcShopSellHeld 整叠卖
+      //    （右键不卖：RightClick → HandleShopSlot rightClickIsValid 支 CanStack
+      //    早退 ItemSlot.cs:1878-1881，光标持物点空格右键无动作）
+      //  · 其余面板空白（标题/币行/格间距）→ 无动作，光标持有物原样
       //  · NPC 对话/心情浮层也是 UI（mouseInterface），点它不丢世界
       if (t?.closest?.('.sw-npc-shop')) {
         if (t.closest('.sw-shop-item') || t.closest('button')) return;
+        if (!t.closest('.sw-shop-empty') || e.button !== 0) return;   // 非空格/非左键=无动作
         if (this.game?.npcShopSellHeld(this.heldStack)) this.heldStack = null;  // :1116 SetDefaults(0)
         this.refreshAll();
         return;
@@ -2259,9 +2268,10 @@ export class UI {
     return '#b42cff';
   }
 
-  /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行）——slot 传合成槽
-   *  内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素 */
-  private showTooltipFor(i: number, where: SlotWhere, override?: { slot: { id: number; stack: number }; anchor: HTMLElement }) {
+  /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
+   *  合成槽内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素；shopCell = 商店
+   *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价） */
+  private showTooltipFor(i: number, where: SlotWhere, override?: { slot: { id: number; stack: number; prefix?: number }; anchor: HTMLElement; shopCell?: { price: number; medal?: number } }) {
     let s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
     // LoadoutShare 空槽悬停（ItemSlot.MouseHover IS57:3174-3178）：装备/染料格空槽
     // 悬停时共享件代打（GetSharedLoadoutItem → GetEffectiveArmor/Dye）——tooltip
@@ -2379,7 +2389,9 @@ export class UI {
         ? research.research.tryGetSacrificeNumbers(vid) : undefined,
       // 商店（:20310-20402 npcShop>0——NpcShop 面板开着时以买入价显示）：
       // 价格 = item.value×5 买入 / ÷5 卖出（GetItemExpectedPrice 近似走 def.value）
-      shop: this.shopTooltipContext(def, vid, s.stack),
+      // ★SW-BJ22 词缀随行（Item.cs:596-597 value 缩放进卖价）；shopCell =
+      //  商品格位买入价（context 15）；无 shopCell = 玩家物品卖出价语义
+      shop: this.shopTooltipContext(def, vid, s.stack, { prefix: s.prefix, shopCell: override?.shopCell }),
       expert: rare === -12,
       master: rare === -13,
       anglerQuestItemId: g.anglerQuestItemId?.() ?? 0,
@@ -2451,29 +2463,37 @@ export class UI {
     }
   }
 
-  /** 商店悬停上下文（:20309-20402，Main.npcShop<=0 早退——背包内不显价格）：
-   *  买入价走 openNpcShop 同源 expectedPrices（快乐度 PriceAdjustment×/折扣 0.8×/
-   *  银行家舍入——ShopEntry.price 已算好，这里反查货架条目即可；显示侧 min-1
-   *  门 Main.cs:20341-20343 在此同款）。非货架物品（玩家自带物悬停）→ 原版
-   *  hoverItem 是商店快照同款也显示买入价，此处按 expectedPrices(货架价×pa) 近似 */
-  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number, stack: number): { buy: boolean; priceCopper: number; medalPrice?: number } | null {
-    if (!this.game.npcShopOpen) return null;   // Main.npcShop<=0 早退（:20310-20312）
-    // 货架条目（isAShopItem）→ 买入价（expectedPrices 同链 :20312 calcForBuying）
-    const g = this.game as unknown as {
-      shopEntryPriceOf?: (vid: number) => number | null;
-      shopEntryMedalPriceOf?: (vid: number) => number | null;
-    };
-    // 勋章条目（hoverItem.shopSpecialCurrency≠-1，Main.cs:20313-20316）：价格行
-    // 走 GetPriceText 勋章文案（枚数 + Currency.DefenderMedals），不进铜币四档着色
-    const medal = g.shopEntryMedalPriceOf?.(vid);
-    if (medal != null) return { buy: true, priceCopper: medal, medalPrice: medal };
-    const listed = g.shopEntryPriceOf?.(vid);
-    if (listed != null) return { buy: true, priceCopper: Math.max(1, listed) };
-    // 玩家自带物在商店内 → 卖出价（:20312 calcForSelling → :20324-20326 ÷5 min1 ×stack）
-    const v = def.value ?? 0;
-    if (v <= 0) return { buy: false, priceCopper: 0 };  // 无价值行（tip51）
-    const unit = Math.max(1, Math.floor(v / 5));
-    return { buy: false, priceCopper: Math.max(1, unit * Math.max(1, stack)) };
+  /** 商店悬停上下文（MouseText_DrawItemTooltip_AddShopLines Main.cs:20632-20402，
+   *  SW-BJ22 2026-09-07 逐句重锚）。原版语义：门 = npcShop>0 && value≥0 && 非钱币
+   *  （:20634）；价格行买入/卖出由 HoverItem.buy 分流——buy 只在商店格悬停置位
+   *  （MouseHover context 15 ItemSlot.cs:3197-3201），背包/热栏格悬停恒 false =
+   *  卖出价行（旧实现把货架物品的背包悬停也判成买入价，系对 :3200 的误读，本刀
+   *  纠正）。卖出价 = computeSellValue 全链（calcForSelling÷5 min1 ×stack + 回购
+   *  差额 :20652-20660，与 Player.SellItem :34732-34743 同式——快乐度 ÷PriceAdjustment
+   *  /词缀 value 缩放/回购记全参与）；calcForSelling≤0 → tip[51] 无价值行
+   *  （:20731-20738 type!=3817 门——散护卫勋章 3817 不显「无价值」） */
+  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number, stack: number,
+    opts?: { prefix?: number; shopCell?: { price: number; medal?: number } }): { buy: boolean; priceCopper: number; medalPrice?: number } | null {
+    if (!this.game.npcShopOpen) return null;   // Main.npcShop<=0 早退（:20634）
+    if (vid >= 71 && vid <= 74) return null;   // 钱币无价格行（:20634 type 71-74 早退）
+    // 商品格位悬停（context 15 → HoverItem.buy=true）→ 买入价行 tip[50]
+    // （:20638 num=calcForBuying；勋章条目走 GetPriceText 勋章文案 :20644-20648，
+    //  CustomCurrencySingleCoin.GetPriceText :103-107）
+    if (opts?.shopCell) {
+      if (opts.shopCell.medal !== undefined) return { buy: true, priceCopper: opts.shopCell.medal, medalPrice: opts.shopCell.medal };
+      return { buy: true, priceCopper: Math.max(1, opts.shopCell.price) };
+    }
+    // 玩家物品（背包/热栏/箱格等悬停，buy=false）→ 卖出价行 tip[49]：
+    // computeSellValue = SellItem :34732-34743 同式（词缀缩放+快乐度÷+回购差额）
+    const quote = computeSellValue(vid, Math.max(1, stack), {
+      prefix: opts?.prefix ?? 0,
+      priceAdjustment: (this.game as unknown as { shopHappinessMul?: number }).shopHappinessMul,
+      discountAvailable: this.game.player.equipStats.discount,
+      sellbackAmount: (this.game as unknown as { shopSellbackMemo?: Map<string, number> })
+        .shopSellbackMemo?.get(`${vid}:${opts?.prefix ?? 0}`) ?? 0,
+    });
+    if (quote.sellable) return { buy: false, priceCopper: quote.copper };   // :20640 num>0 支
+    return vid === 3817 ? null : { buy: false, priceCopper: 0 };            // :20731-20738 tip51 门
   }
 
   /** mouseTextColor 亮度脉冲（DoUpdate_AnimateCursorColors :18064-18075：+1/tick
@@ -3458,7 +3478,8 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
-  /** 右下角无框坞（2026-09-02 用户要求）：装备列（配装行+染料/时装/装备+防御计数）
+  /** 右下角无框坞（2026-09-02 用户要求）：装备列（配装/染料/时装/装备四列+防御计数,
+   *  2026-09-07 起顶部对齐杂项列首行）
    *  与杂项/PvP 列的浮置容器——无面板底框,随背包开合显隐（open/closeInventory） */
   private eqDockEl: HTMLElement | null = null;
   /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
@@ -3550,11 +3571,15 @@ export class UI {
     this.invPanel.style.display = 'none';
     // 原版背包无标题栏（DrawInventory 直接铺槽位）——标题行已摘（2026-08-13）
 
-    // ---- Loadout 切换行（DrawLoadoutButtons Main.cs:41386+：当前套高亮）——
+    // ---- Loadout 切换列（DrawLoadoutButtons Main.cs:41386+：当前套高亮）——
     //  ★2026-08-27 用户要求：随装备列整体迁至右缘（成就/杂项列左侧）,不再占顶排
-    const loadoutRow = el('div');
-    loadoutRow.style.cssText = 'display:flex; gap:4px; align-items:center; margin:12px 0 6px;';   // margin-top:配装行离坞顶下移一点（2026-09-02 用户要求）
-    loadoutRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
+    //  ★2026-09-07 用户要求：横排改竖排列（label 在顶 + 3 钮纵叠,结构对齐 vcol2）,
+    //  移到时装列左侧作 eqPage 首列（挂载点见下方 eqPage.appendChild）
+    const loadoutCol = el('div');
+    loadoutCol.style.cssText = 'display:flex; flex-direction:column;';
+    loadoutCol.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
+    const loadoutWrap = el('div');
+    loadoutWrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
     this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
         // 原版 DrawLoadoutButtons（Main.cs:41395-41431）：Extra[259] 3×3 图集——
@@ -3576,9 +3601,10 @@ export class UI {
           this.flashLoadoutSwitch();
           this.refreshAll();
         });
-        loadoutRow.appendChild(b);
+        loadoutWrap.appendChild(b);
         this.loadoutBtns.push(b);
       }
+      loadoutCol.appendChild(loadoutWrap);
       // 顶排：页签/入口图标行——★2026-08-27 用户要求：不再占整行留空,挂到右缘列
       // 顶部（成就卡上方,居中可换行）,背包/弹药/配装三列直接顶到面板上沿
       const row = el('div');
@@ -3682,8 +3708,10 @@ export class UI {
     //  面板，浮置屏幕右下角、无面板底框——降低对世界画面的遮挡。随背包开合显隐,
     //  见 openInventory/closeInventory；点击命中登记进 domTargets 名单 .sw-eqdock）----
     const eqDock = el('div', 'sw-eqdock');
+    // ★2026-09-07 用户要求：flex-end（底对齐）→ flex-start（顶对齐）——装备四列
+    //  顶部与杂项列首行（宠物栏）对齐
     eqDock.style.cssText = 'position:fixed; right:10px; bottom:10px; display:none; pointer-events:auto;'
-      + 'align-items:flex-end; gap:26px; z-index:11;';
+      + 'align-items:flex-start; gap:26px; z-index:11;';
     this.eqDockEl = eqDock;
     // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 染料 0-2+3-7 | 时装 10-12 + 时装配饰 13-17）
     // / 杂项页（miscEquips[5] + miscDyes[5]，Main.cs:40616-40672 EquipPage==2）+
@@ -3691,14 +3719,13 @@ export class UI {
     const body = el('div');
     body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
     const left = el('div');
-    // 装备组（2026-08-27 用户要求：配装行+染料/时装/装备列整体迁至成就/杂项列左侧,
+    // 装备组（2026-08-27 用户要求：染料/时装/装备列整体迁至成就/杂项列左侧,
     // 背包贴热键栏；2026-09-02 再迁右下角无框坞——挂载点见 eqDock.appendChild(left)）
     left.style.cssText = 'display:flex; flex-direction:column; gap:6px; flex:none;';
-    left.appendChild(loadoutRow);
-    // 装备页：三列 L→R = 时装 | 装备 | 染料（2026-09-02 用户要求；原版序=染料 |
-    //  时装 | 装备,DrawInventory :42164/:42205/:42233 x=sw-64-28 / -47 / -47×2,
-    //  列距 47px；配饰段相对盔甲段下移 num35=4px）。
-    //  两段式竖列（盔甲段 + 4px 组距 + 配饰段）
+    // 装备页：四列 L→R = 配装 | 时装 | 装备 | 染料（2026-09-02 用户要求染料挪到装备
+    //  列右侧——染料↔装备按行索引配对,相邻更直观,原版序=染料|时装|装备为用户定策
+    //  偏离;2026-09-07 用户要求配装竖列并入本行首列——原横排行退役）。
+    //  两段式竖列（盔甲段 + 4px 组距 + 配饰段,原版列距 47px、配饰段下移 num35=4px）
     const vcol2 = (label: string, a: number, na: number, b: number, nb: number, where: SlotWhere, eyes = false) => {
       const col = el('div');
       col.appendChild(el('div', 'sw-lbl', label));
@@ -3718,12 +3745,13 @@ export class UI {
     this.accEyeEls.clear();   // 面板重建（重进世界）时旧眼钮引用作废
     const eqPage = el('div');
     eqPage.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
-    // 列序 L→R = 时装 | 装备 | 染料（2026-09-02 用户要求：染料挪到装备列右侧——
-    //  染料↔装备按行索引配对,相邻更直观。原版序为 染料|时装|装备,此为用户定策偏离）
-    eqPage.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
+    eqPage.appendChild(loadoutCol);   // 配装（2026-09-07 用户要求：竖排列居时装左侧）
+    const vanityCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor'); // 时装 armor[10-12]+[13-17]
+    eqPage.appendChild(vanityCol);
     const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
     eqPage.appendChild(equipCol);
-    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 5, 'dye'));            // 染料 dye[0-2]+[3-7]（追加格 dye[8]/[9] 按解锁显隐,见 extras 段——与装备/时装列逐行对应）
+    const dyeCol = vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 5, 'dye');                // 染料 dye[0-2]+[3-7]（追加格 dye[8]/[9] 按解锁显隐,见 extras 段——与装备/时装列逐行对应）
+    eqPage.appendChild(dyeCol);
     // 恶魔之心(armor[8]/dye[8])+大师(dye[9] 无独立时装...armor[9]) 追加槽——
     // 建面板即建、refreshEquipExtras 按解锁/占格显隐（Player.cs:4279 Shown 判定：
     // 解锁【或】格内有物；经典世界专家旗存物也显示但不生效=cs:18402 效果门在
@@ -3736,11 +3764,10 @@ export class UI {
       //  firstElementChild 是列标签 div,曾 append 进标签 ⇒ 恶魔之心/大师槽
       //  插到列最前面(2026-08-28 用户报),应在尾部配饰之后追加
       const equipWrap = equipCol.children[1] as HTMLElement | null;
-      // 列序 2026-09-02 调整后 eqPage children：[0]=时装 [1]=装备 [2]=染料
-      const vanityCol = eqPage.children[0] as HTMLElement | null;
-      const vanityWrap = vanityCol?.children[1] as HTMLElement | null;
-      const dyeCol = eqPage.children[2] as HTMLElement | null;
-      const dyeWrap = dyeCol?.children[1] as HTMLElement | null;
+      // 列序 2026-09-07 调整后 eqPage children：[0]=配装 [1]=时装 [2]=装备 [3]=染料
+      // （改用上方 vcol2 直接引用,不再按 children 序数取列——曾因插列翻车）
+      const vanityWrap = vanityCol.children[1] as HTMLElement | null;
+      const dyeWrap = dyeCol.children[1] as HTMLElement | null;
       for (let k = 0; k < 2; k++) {
         const es = this.makeSlotEl(8 + k, 'armor');
         this.attachVisibilityEye(es, 8 + k);
@@ -3992,7 +4019,7 @@ export class UI {
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
     // 要求——背包+合成整体贴向装备列,顺手中转距离更短）
     body.appendChild(rightRail);
-    // 装备组（配装行+染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
+    // 装备组（配装/染料/时装/装备列）→ 右下角无框坞（2026-09-02 用户要求：
     // 迁出背包面板,浮置屏幕右下角降低遮挡——不再占面板内列位）
     eqDock.appendChild(left);
     // ---- 成就卡（2026-09-02 第六批简化：图标/表情/搜索已入簇格 2×3,竖列只剩
@@ -5558,7 +5585,14 @@ export class UI {
       card.classList.add('out');
       setTimeout(() => card.remove(), 300);
     };
-    card.onclick = kill; // 原版点击开成就页并移除;成就页 UI 未接,先关闭(GAP)
+    // ★2026-09-07 用户需求:点击成就弹窗→打开成就面板+滚动定位到该成就+高亮
+    // (原版点击跳成就页;本仓成就页=openAchievementsPanel,GAP 已补)
+    card.onclick = () => {
+      kill();
+      if (this.game) {
+        import('./AchievementsUI').then((m) => m.openAchievementsPanel(this.game, name));
+      }
+    };
     this.achWrapEl.appendChild(card);
     setTimeout(kill, 5000); // 300t = 5s(InGamePopups.cs:54)
   }
@@ -5805,7 +5839,7 @@ export class UI {
     this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
   }
 
-  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }>, copper: number, happinessPct?: number, medals?: number): void {
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessPct?: number, medals?: number): void {
     // ★SW-BJ8 2026-09-07 开店强制开背包（Main.OpenShop Main.cs:41162-41170 首行
     //  :41164 `playerInventory = true`，1458 本域无增量）：缺此行=商店开着时背包
     //  面板不自动展开——可见物品只剩快捷栏，而关包快捷栏 = context 13
@@ -5837,6 +5871,38 @@ export class UI {
           // Main.npcShop=-1 + 回购记清（Main.UpdateOldNPCShop Main.cs:18056-18064）：
           // 卖出/回购价依赖开店会话状态，关店必须通知 Game 侧失效
           this.game?.npcShopClose();
+        },
+        // ★SW-BJ22 2026-09-07 格位悬停 tooltip 代打（MouseHover context 15 →
+        //  Main.HoverItem.buy=true ItemSlot.cs:3197-3201 → MouseText 物品全文 +
+        //  AddShopLines 买入价行 Main.cs:20632-20402）。价格取数现查 Game——
+        //  卖出/购买后 openNpcShop 重刷货架,闭包 entries 会陈旧；shopCell 传价
+        //  走 shopTooltipContext 的 context15 买入价支（HoverItem.buy 语义）
+        (hover, anchor) => {
+          if (!hover) {
+            this.tooltip.style.display = 'none';
+            cancelAnimationFrame(this.tooltipPulseRaf);
+            return;
+          }
+          if (!this.game) return;
+          const iid = internalIdOfVid(hover.vid);
+          if (!iid) return;
+          let shopCell: { price: number; medal?: number } | undefined;
+          if (hover.buyback !== undefined) {
+            const p = this.game.shopBuybackPriceOf(hover.vid, hover.buyback);
+            if (p != null) shopCell = { price: p };
+          } else {
+            const medal = this.game.shopEntryMedalPriceOf(hover.vid);
+            if (medal != null) shopCell = { price: medal, medal };
+            else {
+              const p = this.game.shopEntryPriceOf(hover.vid);
+              if (p != null) shopCell = { price: p };
+            }
+          }
+          this.showTooltipFor(iid, 'inv', {
+            slot: { id: iid, stack: hover.stack, prefix: hover.prefix },
+            anchor: anchor!,
+            shopCell,
+          });
         });
     }
     // 图标由 UI 侧按原版 id 补(atlas 管线)——iconUrl 收内部 id,vid 先转

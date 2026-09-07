@@ -45,7 +45,7 @@ import {
   defaultVoiceVariant,
 } from '../player/Appearance';
 import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
-import { compositePaperDoll, dollFrame, walkFrame, clearPaperDollCache } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, walkFrame, clearPaperDollCache, variantSheetName } from '../player/PaperDoll';
 import { bakeCells, canvasToUrl, isObjectUrl, SingleFlightBake, DelayedMask, BAKE_MASK_DELAY_MS, yieldTask, type BakeOutcome } from './charBake';   // SW-AX1 2026-09-06 / SW-BB1 2026-09-06
 import { UITextures } from '../vui/assets/UITextures';
 import { Lang } from '../i18n/Lang';
@@ -1016,7 +1016,9 @@ export class CharCreation {
     const sheets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 10, 11, 12];
     const v = this.appearance.skinVariant;
     for (const s of sheets) {
-      names.add(`Player_${v}_${s}.png`);
+      // SW-BJ21 2026-09-07:回退源同 CopyVariant 链(5/6/7/9←4←0)——女性子变体
+      // 身体通道(3 躯干肤等)烘焙取 Player_4_* 女表,预载须含之(否则门等待→重试)
+      names.add(variantSheetName(v, s, (n) => UITextures.has(n)));
       names.add(`Player_0_${s}.png`);   // 女体缺通道的回退源
     }
     names.add(`Player_Hair_${this.appearance.hair + 1}.png`);
@@ -1227,7 +1229,7 @@ export class CharCreation {
     const names = new Set<string>();
     for (const v of new Set<number>([...VALID_CLOTH_STYLES, ...MALE_VARIANTS, ...FEMALE_VARIANTS])) {
       for (const s of sheets) {
-        names.add(`Player_${v}_${s}.png`);
+        names.add(variantSheetName(v, s, (n) => UITextures.has(n)));   // SW-BJ21: CopyVariant 链
         names.add(`Player_0_${s}.png`);
       }
     }

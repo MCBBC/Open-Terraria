@@ -233,7 +233,7 @@ describe('SW-BJ10 并入项：占用实心格放置门（土块→石块,智能�
     expect(st.type[st.idx(20, 30)]).toBe(STONE);            // 积累不足,石原样
   });
 
-  it('有镐在包 + 积累 ≥100：块换走通=breakTile(石掉落)+泥土写入+两段录制（recorder 覆盖实证）', () => {
+  it('有镐在包 + 积累 ≥100：块换走通=ReplaceTile 原位重写（SW-BJ18）+单条 block-swap 录制', () => {
     const { w, st } = mkWorld();
     const log: Array<Record<string, unknown>> = [];
     st.setTileSilent(20, 30, STONE, 0, 0);
@@ -242,8 +242,12 @@ describe('SW-BJ10 并入项：占用实心格放置门（土块→石块,智能�
       .tryPlace(20, 30, DIRT_ITEM!);
     expect(st.type[st.idx(20, 30)]).toBe(DIRT);             // 块换成功=泥土写入
     const tileEvents = log.filter((e) => e.k === 'tile');
-    expect(tileEvents.some((e) => e.cause === 'mine' || e.cause === 'other')).toBe(true);   // 旧石破坏有录制
-    expect(tileEvents.some((e) => e.cause === 'place')).toBe(true);          // 泥土写入有录制
+    // ★SW-BJ18：原位重写后不再有 breakTile('other')+place 两段录制——原版 ReplaceTile
+    //  (:40218) 成功拍不经 KillTile/PlaceTile，本仓单条 from=旧 to=新 cause='block-swap'
+    expect(tileEvents).toHaveLength(1);
+    expect(tileEvents[0].cause).toBe('block-swap');
+    expect(tileEvents[0].from).toBe(TILE_DEFS[STONE]?.key ?? STONE);
+    expect(tileEvents[0].to).toBe(TILE_DEFS[DIRT]?.key ?? DIRT);
   });
 
   it('结构锁：placeObstructionClearable 豁免并集 = tileCut∪BWP（实心块族不入,484/654 carve-out 在位）', async () => {
@@ -402,9 +406,11 @@ describe('SW-BJ10 结构锁', () => {
     expect(src).toMatch(/st\.hasTile\(x \+ dx, y \+ dy\)\) return true;/);
   });
 
-  it('squareTileFramePlatform 三消费位在位：hammer/worldGenSlopeTile/tryPlace', async () => {
+  it('squareTileFramePlatform 四消费位在位：hammer/worldGenSlopeTile/tryPlace/replaceTileSingle（SW-BJ18）', async () => {
     const src = await (await import('node:fs/promises')).readFile('src/core/Game.ts', 'utf8');
-    expect(src.match(/this\.squareTileFramePlatform\(/g)?.length).toBe(3);
+    // ★SW-BJ18：ReplaceTile 原位重写单格路径尾 :63150 SquareTileFrame 的平台面
+    //  = 第 4 消费位（replaceTileSingle 内,块换平台/块→平台目标）
+    expect(src.match(/this\.squareTileFramePlatform\(/g)?.length).toBe(4);
     expect(src).toMatch(/import \{ framePlatformSweep \} from '\.\.\/world\/gen\/vanilla\/FinalCleanupPass';/);
   });
 

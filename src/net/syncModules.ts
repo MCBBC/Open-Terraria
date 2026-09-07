@@ -138,6 +138,18 @@ export class MapPingStore {
   clear(): void { this.pings.length = 0; }
 }
 
+/** SW-BJ20 2026-09-07：地图双击 ping 判定（Main.cs:56313 原式 1:1）——
+ *  `totalSeconds - _lastPingMouseDownTime < 0.5 && Vector2.Distance(MouseScreen,
+ *  _lastPingMousePosition) < 2f`。两门均严格小于（恰 0.5s / 恰 2px 不触发）；
+ *  距离 = 释放点屏幕坐标欧氏距（原版 Vector2.Distance）；时间基准原版为
+ *  gameTime.TotalGameTime（游戏秒），本仓地图点击链无暂停分叉，performance.now()
+ *  等价。lastMs<0 = 无前次释放记录（原版初值 0.0 + TotalGameTime 恒大的等价物） */
+export function isMapPingDoubleClick(
+  nowMs: number, x: number, y: number, lastMs: number, lastX: number, lastY: number,
+): boolean {
+  return (nowMs - lastMs) / 1000 < 0.5 && Math.hypot(x - lastX, y - lastY) < 2;
+}
+
 // ================= module4 图鉴（NetBestiaryModule.cs） =================
 //
 // 原版三子型：Kill {netId, 7bit killcount}（NPCKillsTracker.RegisterKill——服务器

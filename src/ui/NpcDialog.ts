@@ -66,8 +66,26 @@ export interface ShopEntry {
   /** 卖回货架条目下标（Chest.AddItemToShop buyOnce 克隆；购买时回传 npcShopBuy
    *  区分常规货——同 vid 双行时 data-id 撞号，以此区分） */
   buyback?: number;
+  /** 条目堆叠（SW-BJ22 2026-09-07：卖回克隆带 stack——Chest.AddItemToShop
+   *  :658-663 克隆原 stack；常规货架条目原版恒 1（SetDefaults）缺省即可）。
+   *  商品格位角标 + 悬停 tooltip 价格行 ×stack（Main.cs:20652 EstimateDisplayStack） */
+  stack?: number;
+  /** 条目词缀（卖回克隆带出——Item.Prefix :596-597 缩放后 value 随行；
+   *  tooltip 词缀行 + 买回价 shopBuybackPriceOf 同源） */
+  prefix?: number;
   iconUrl: string | null;
 }
+
+/** 商品格位悬停载荷（SW-BJ22 2026-09-07：vanilla 商品格悬停 = ItemSlot.MouseHover
+ *  context 15（ItemSlot.cs:3170-3204，:3197-3201 置 Main.HoverItem.buy=true）→
+ *  Main.MouseText 物品全文 tooltip + AddShopLines 买入价行；空格悬停无 tooltip
+ *  （IsAir 早退）。null = 离开格位收起） */
+export type ShopCellHover = {
+  vid: number;
+  stack: number;
+  prefix?: number;
+  buyback?: number;
+} | null;
 
 /** 勋章价格文案（CustomCurrencySingleCoin.GetPriceText :103-107：
  *  price + Language[Currency.DefenderMedals].ToLower()，色 (240,100,120)） */
@@ -137,17 +155,25 @@ const CSS = `
 .sw-shop-title { text-align: center; color: #ffe8a0; font-size: 15px; margin-bottom: 8px; }
 .sw-shop-coins { text-align: right; color: #ffd76e; font-size: 13px; margin-bottom: 6px; }
 .sw-shop-medals { color: #f06478; margin-left: 8px; }   /* 勋章持有（CurrencyTextColor 240,100,120） */
-.sw-shop-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+/* SW-BJ22 2026-09-07 货架网格（Main.cs:42522-42532 10×4=40 格 0.755 缩放观感；
+   空格 = 售卖放置区,光标持非币物左键整叠卖出 ItemSlot.cs:1435-1438/:1195-1212） */
+.sw-shop-grid { display: grid; grid-template-columns: repeat(10, 42px); gap: 5px;
+  justify-content: center; margin: 2px 0 6px; }
 .sw-shop-item {
-  display: flex; align-items: center; gap: 10px; padding: 5px 8px;
+  position: relative; width: 42px; height: 42px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
   background: #232c52; border: 1px solid #3a4680; border-radius: 4px;
-  cursor: pointer; font-size: 13px;
+  cursor: pointer;
 }
-.sw-shop-item:hover { background: #4a5aa0; }
+.sw-shop-item:hover { background: #3d4c8f; border-color: #6a80d0; }
 .sw-shop-item.poor { opacity: 0.45; cursor: default; }
-.sw-shop-item img { width: 26px; height: 26px; image-rendering: pixelated; }
-.sw-shop-item .nm { flex: 1; }
-.sw-shop-item .pr { color: #ffd76e; }
+.sw-shop-item img { width: 30px; height: 30px; image-rendering: pixelated; }
+.sw-shop-ph { width: 30px; height: 30px; display: inline-block; }
+.sw-shop-stack { position: absolute; right: 2px; bottom: 0; font-size: 11px; color: #fff;
+  text-shadow: 1px 1px 0 #000; pointer-events: none; }
+.sw-shop-empty { width: 42px; height: 42px; background: #1a2140;
+  border: 1px solid #2c3768; border-radius: 4px; }
+.sw-shop-empty:hover { border-color: #4a5aa0; background: #20294e; }
 .sw-shop-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 .sw-shop-happy { display: flex; align-items: center; gap: 6px; margin-left: 10px;
   font-size: 13px; color: #e8e8f4; }
@@ -426,7 +452,8 @@ export class NpcShop {
    *  批量买 10（CanBulkBuy ItemSlot.cs:2874-2881 ShiftInUse + GetBulkBuyAmount :2861-2870） */
   constructor(private parent: HTMLElement,
     private onBuy: (vanillaId: number, buybackIndex?: number, bulk?: boolean) => void,
-    private onClose: () => void) {}
+    private onClose: () => void,
+    private onCellHover?: (hover: ShopCellHover, anchor: HTMLElement | null) => void) {}
 
   open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null, medals?: number) {
     this.close();
@@ -435,11 +462,26 @@ export class NpcShop {
     // 支付能力判定按条目币种分流：勋章条目比勋章持有（medals），铜币条目比铜币
     const afford = (it: ShopEntry): boolean =>
       it.medal !== undefined ? (medals ?? 0) >= it.medal : copper >= it.price;
-    const rows = items.map((it) => `
-      <div class="sw-shop-item${afford(it) ? '' : ' poor'}" data-id="${it.vanillaId}"${it.buyback !== undefined ? ` data-bb="${it.buyback}"` : ''} data-ok="${afford(it) ? 1 : 0}">
-        ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span style="width:26px;height:26px;display:inline-block"></span>'}
-        <span class="nm">${it.name}</span><span class="pr">${it.medal !== undefined ? medalPriceText(it.medal) : formatCopper(it.price)}</span>
-      </div>`).join('');
+    // ★SW-BJ22 2026-09-07 原版形制货架网格（Main.cs:42522-42532：10×4=40 格，
+    //  空格同样以 InventoryBack 底框绘制并可命中——空格即「售卖放置区」，光标
+    //  持非币物左键 = 整叠卖出 PickItemMovementAction case 15 ItemSlot.cs:1435-1438
+    //  → LeftClick case 4 :1195-1212）。有货格按货架序占位（常规货 + 卖回架尾接，
+    //  Chest.AddItemToShop :658-663 落首空位语义同序）；余格全画空格。
+    //  旧「名称+价格」行列表 = 自创呈现且无售卖区（用户实报），整格替换。
+    const cells: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const it = items[i];
+      if (!it) {
+        cells.push(`<div class="sw-shop-empty" data-slot="${i}"></div>`);
+        continue;
+      }
+      const ok = afford(it);
+      cells.push(`
+      <div class="sw-shop-item${ok ? '' : ' poor'}" data-id="${it.vanillaId}"${it.buyback !== undefined ? ` data-bb="${it.buyback}"` : ''} data-ok="${ok ? 1 : 0}"${it.prefix ? ` data-prefix="${it.prefix}"` : ''}>
+        ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span class="sw-shop-ph"></span>'}
+        ${it.stack && it.stack > 1 ? `<span class="sw-shop-stack">${it.stack}</span>` : ''}
+      </div>`);
+    }
     // 快乐度头部指示已摘（2026-08-27 用户要求：商店标题旁不再显示快乐度系数——
     // 快乐度详情仍走底部「快乐度」页签；原版 Main.cs:41231-41243 参考备案）
     // 勋章持有并列显示（CustomCurrencyManager.DrawSavings :28-63：双货币店在
@@ -449,16 +491,31 @@ export class NpcShop {
     panel.innerHTML = `
       <div class="sw-shop-title">${title}</div>
       <div class="sw-shop-coins">${formatCopper(copper)}${medalLine}</div>
-      <div class="sw-shop-list">${rows}</div>
+      <div class="sw-shop-grid">${cells.join('')}</div>
       <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {
-      el.addEventListener('click', (ev) => {
-        if ((el as HTMLElement).dataset.ok !== '1') return;
-        const bb = (el as HTMLElement).dataset.bb;
-        this.onBuy(Number((el as HTMLElement).dataset.id),
+      const cell = el as HTMLElement;
+      cell.addEventListener('click', (ev) => {
+        if (cell.dataset.ok !== '1') return;
+        const bb = cell.dataset.bb;
+        this.onBuy(Number(cell.dataset.id),
           bb !== undefined ? Number(bb) : undefined,
           (ev as MouseEvent).shiftKey || undefined);   // Shift+点 = 批量买 10
       });
+      // 格位悬停 tooltip（MouseHover context 15 ItemSlot.cs:3170-3204 → Main.HoverItem
+      //  → MouseText 全文 + AddShopLines 买入价行；价格取数走 Game 现值——重开刷新后
+      //  闭包 entries 会陈旧，UI 侧回调现查 shopEntryPriceOf/shopBuybackPriceOf）
+      if (this.onCellHover) {
+        const bb = cell.dataset.bb;
+        const prefix = cell.dataset.prefix;
+        cell.addEventListener('mouseenter', () => this.onCellHover?.({
+          vid: Number(cell.dataset.id),
+          stack: 1,   // buyOnce 条目 EstimateDisplayStack=1（ItemSlot.cs:3155）、常规货架条目 stack 恒 1
+          prefix: prefix !== undefined ? Number(prefix) : undefined,
+          buyback: bb !== undefined ? Number(bb) : undefined,
+        }, cell));
+        cell.addEventListener('mouseleave', () => this.onCellHover?.(null, null));
+      }
     });
     (panel.querySelector('.sw-set-back') as HTMLElement).addEventListener('click', () => this.onClose());
     this.parent.appendChild(panel);
@@ -468,6 +525,8 @@ export class NpcShop {
   }
 
   close() {
+    // SW-BJ22：面板移除前收起格位 tooltip（Esc 关店时格上悬停态的气泡不残留）
+    if (this.panel) this.onCellHover?.(null, null);
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
     this.escHandler = null;
     this.panel?.remove();

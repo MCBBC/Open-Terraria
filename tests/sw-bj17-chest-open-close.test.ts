@@ -40,7 +40,7 @@ interface Rig {
   g: Game;
   sfx: string[];
   opened: ChestData[];
-  closedCount: number;
+  counters: { closed: number };
   dirties: Array<{ x0: number; y0: number; x1: number; y1: number }>;
   setOpen: (c: ChestData | null) => void;
   chestA: ChestData;
@@ -58,8 +58,8 @@ function makeRig(): Rig {
   const sfx: string[] = [];
   const opened: ChestData[] = [];
   const dirties: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  const counters = { closed: 0 };
   let openRef: ChestData | null = null;
-  let closedCount = 0;
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
   g.world = w;
   g.achievements = { handleSpecialEvent: () => {} };
@@ -68,9 +68,9 @@ function makeRig(): Rig {
   g.chunks = { markDirtyArea: (x0: number, y0: number, x1: number, y1: number) => { dirties.push({ x0, y0, x1, y1 }); } };
   g.openChestRef = () => openRef;
   g.openChest = (c: ChestData) => { openRef = c; opened.push(c); };
-  g.closeChestPanel = () => { openRef = null; closedCount++; };
+  g.closeChestPanel = () => { openRef = null; counters.closed++; };
   return {
-    g: g as unknown as Game, sfx, opened, closedCount, dirties,
+    g: g as unknown as Game, sfx, opened, counters, dirties,
     setOpen: (c) => { openRef = c; },
     chestA, chestB,
   };
@@ -151,14 +151,14 @@ describe('SW-BJ17 开/关/换箱音效链 tryOpenChest', () => {
     (rig.g as unknown as { tryOpenChest: (c: ChestData) => void }).tryOpenChest(rig.chestA);
     expect(rig.opened).toEqual([rig.chestA]);
     expect(rig.sfx).toEqual(['menuOpen']);
-    expect(rig.closedCount).toBe(0);
+    expect(rig.counters.closed).toBe(0);
   });
 
   it('同箱再点 → 关面板 + Sound 11 menuClose,不重开', () => {
     const rig = makeRig();
     rig.setOpen(rig.chestA);                       // chest == num77（:33497）
     (rig.g as unknown as { tryOpenChest: (c: ChestData) => void }).tryOpenChest(rig.chestA);
-    expect(rig.closedCount).toBe(1);               // chest = -1（:33498）
+    expect(rig.counters.closed).toBe(1);           // chest = -1（:33498）
     expect(rig.sfx).toEqual(['menuClose']);        // Sound 11（:33499）
     expect(rig.opened).toEqual([]);                // 不走 OpenChest
   });
@@ -169,7 +169,7 @@ describe('SW-BJ17 开/关/换箱音效链 tryOpenChest', () => {
     (rig.g as unknown as { tryOpenChest: (c: ChestData) => void }).tryOpenChest(rig.chestB);
     expect(rig.opened).toEqual([rig.chestB]);
     expect(rig.sfx).toEqual(['menuTick']);         // :33508（无 menuClose——OpenChest 重赋）
-    expect(rig.closedCount).toBe(0);
+    expect(rig.counters.closed).toBe(0);
   });
 });
 
@@ -219,9 +219,8 @@ describe('SW-BJ17 储物族开/关/换音（BANK_TILES 分支结构锁）', () =
     const g = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     const start = g.indexOf('for (const [key, bi] of BANK_TILES)');
     const body = g.slice(start, g.indexOf('if (type === T.DOOR_CLOSED', start));
-    expect(body).toContain("sfx.play('menuOpen'");
-    expect(body).toContain("sfx.play('menuClose'");
-    expect(body).toContain("sfx.play(curB ? 'menuTick' : 'menuOpen'");
+    expect(body).toContain("this.sfx.play('menuClose', 1)");                            // Sound 11（:33499）
+    expect(body).toContain("this.sfx.play(curB ? 'menuTick' : 'menuOpen', 1)");         // 12 / 10
     expect(body).not.toContain("sfx.play('tink')");
   });
 });

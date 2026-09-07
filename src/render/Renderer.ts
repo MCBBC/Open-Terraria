@@ -235,6 +235,7 @@ import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
+import { drawTileShineGrid, drawTileShineAdditive } from './TileShine';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -3418,6 +3419,20 @@ export class Renderer {
     this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z,
       { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY });
 
+    // 2c'''.5 tileShine 顶点色通道·乘法 delta（TileDrawing.cs:4429-4441 GetFinalLight →
+    //    Main.shine；Main.tileShine2 ×1.6 全案见 TileShine.ts 头注——用户实报"生命水晶
+    //    暗处看不见"修复）。原版顶点色 = light×shine；本仓乘光管线无逐格顶点色 →
+    //    delta=sprite×L×(k−1) 在【合成前】'lighter' 加进世界层，合成乘光后恒等
+    //    sprite×L×k（与底图同乘同一光照图）；实体/前景水在世界层内后画 → 覆盖序同
+    //    原版 tile 批次。+0.39 加法支（262-268 Gemspark,加在光上与 L 无关）在合成后
+    //    drawTileShineAdditive（7-涂层 段后）。atlas 未就绪同火苗层跳过。
+    if (this.atlas) {
+      drawTileShineGrid(ctx, this.atlas, world, chunks, cam, viewW, viewH, z,
+        { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY },
+        this.monoFilters.shimmerAlpha,
+        flicker?.mouseTextColor ?? this.lighting?.clock?.mouseTextColor ?? 255);
+    }
+
     // 3.7 血肉墙墙身/肌腱链/舌头（★2026-08-24 r15 R15-8 搬移：原版 DrawWoF 在
     //     DoDraw_WallsTilesNPCs 内紧随 DrawWalls(:64233→:64235)、在非实心 tile/
     //     瀑布(:64241-64242)之前——墙身垫在瀑布/火把格之下。本仓单烘焙层无法插进
@@ -3774,6 +3789,13 @@ export class Renderer {
     //    :160-172 全 1 同效）——涂层格在乘光后原样叠回 = "无视光照全亮"。
     //    开灯模式（this.fullbright）全屏已原色，叠层无意义跳过
     if (!this.fullbright) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
+
+    // 7-shine. tileShine +0.39 加法支（Main.shine case 262-268 Gemspark：原版加在
+    //    顶点色(光)上、与光照 L 无关 → 乘光合成后平加 sprite×0.39；设备矩形与
+    //    drawCoatGlowGrid 同式含低清 wKg 约定。乘法 delta 支在世界段 2c'''.5）
+    if (this.atlas) {
+      drawTileShineAdditive(ctx, world, chunks, cam, viewW, viewH, z, this._worldLowK || 1);
+    }
 
     // 7b'. 月总 30% 白斜坡（Main.cs:24345/24417/24479/24486
     //      GetAlpha(Color.Lerp(Lighting.GetColor, White, 0.3f))——原版月总四部件

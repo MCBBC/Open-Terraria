@@ -911,8 +911,9 @@ export class MinionProj extends Entity {
    *  frA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击）、frA1=ai[1]（扑击倒数 num10=20） */
   private frA0 = 0;
   private frA1 = 0;
-  /** 地面步行族 StepUp 坡步门（AI_026 :63261 / AI_067 同款 Collision.StepUp——
-   *  spiderStep/frogStep 入口置位,moveAndCollide 消费） */
+  /** 地面步行族 StepUp 坡步门（AI_026 :63261 / AI_067 :51508 同款 Collision.StepUp——
+   *  spiderStep/frogStep 入口置位;palGroundStep/mushBoiStep 2026-09-07 嵌入定谳批
+   *  补接（帕鲁扑击支显式复位 false,原版 StepUp 不入 ai[0]==2 块）,moveAndCollide 消费） */
   stepUp = false;
   /** Projectile.tileCollide 镜像（AI 逐态直写,moveAndCollide 消费=false 整段跳过碰撞）：
    *  蜘蛛归位飞行 :61410 false / 地面 :62843-62845 盒无实心回 true / :62852-62860
@@ -1844,9 +1845,16 @@ export class MinionProj extends Entity {
       }
       this.facing = this.vx !== 0 ? (this.vx > 0 ? 1 : -1) : p.facing;   // :50754-50756
       const st1 = game.world.store;
+      // 退出门第 4 连词（:50685-50692）= !Collision.SolidCollision(position,width,height)
+      // 【全盒】判——2026-09-07 1118 嵌入定谳批：旧中心单格近似在盒缘/脚行压墙而
+      // 中心落空气袋时放行退出 → 归位飞行（无碰撞直积分）穿墙后以嵌墙姿态落地进
+      // 步行态;湿身（wet 域内）时 unembedPass 整段让位（TileCollision.ts wet 跳支,
+      // 原文本无 unembed）→ 原版救援面（StepUp :51508/飞行态重入）接不上前持续卡
+      // 地形。全盒判 = 蛙 :50686-50692 同句同构（solidOverlap 家族既有 SolidCollision
+      // 等价,半砖窗差异登记于彼）
       if (Math.hypot(dpx1, dpy1) < 200 && p.vy === 0
         && this.y + this.h <= p.y + p.h
-        && !st1.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
+        && !this.solidOverlap(st1)) {
         this.palA0 = 0; this.palA1 = 0;                    // :50668-50676 落地净空退出
         if (this.vy < -6) this.vy = -6;
       }
@@ -1880,6 +1888,9 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + 0.4, 10);  // :50951-50953
       // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
       // 速度场不减只削位移——projWetSection 头注契约）
+      // StepUp 关（原版 Collision.StepUp 只在 ai[0]==0||3 运动块 :51508,扑击块
+      // :50901-50956 无此调用;步行拍置 true 会漏进扑击拍,此处显式复位）
+      this.stepUp = false;
       const dfPounce = projWaterDragFactor(this);
       moveAndCollide(this, game.world, this.vx * dfPounce, this.vy * dfPounce);
       this.contact(game, dmg0, flag8 ? 9 : 30); // friendly=true 段（:50904）；冷却 :10375/:10483
@@ -1962,6 +1973,15 @@ export class MinionProj extends Entity {
     this.vy = Math.min(this.vy + 0.4, 10);                  // :51553-51556（num=0.4，先加后移=原版 AI 末重力+Update 积分序）
     // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗,
     // 速度场不减只削位移——下方 wet 起跳 ×2 读 velocity 场=未阻尼,原文同相）
+    // StepUp（Collision.StepUp :51508,ai[0]==0||3 运动块逐拍直调,flag8/9 同受）——
+    // 2026-09-07 1118 嵌入定谳批补接：这是原版随从"浅嵌入自救"唯一干道（前导列
+    // 脚行沉入 ≤16.1px ∧ 上方净空 → 抬升上格,湿态无豁免支=水中同样生效）;曾只接
+    // ai067WalkChase（虎/海盗）与 spiderStep/frogStep,帕鲁/蘑菇漏接 = 步行坡步缺失
+    // + 浅嵌入（坡面三角/半砖缘）无救援。applyStepUp 是 :3641-3772 1:1 移植
+    // （16.1px 门/flag3/flag4/半砖 ±8 全同）。连带 StepDown 同通（moveAndCollide
+    // stepUp 门共用,原版 AI_067 无 StepDown）为家族既有口径（蛙/虎/蜘蛛同）,登记
+    // 不另分叉
+    this.stepUp = true;
     const dfWalk = projWaterDragFactor(this);
     moveAndCollide(this, game.world, this.vx * dfWalk, this.vy * dfWalk);
     if (this.onGround) {
@@ -2118,9 +2138,15 @@ export class MinionProj extends Entity {
         this.vy += Math.max(-0.3, Math.min(0.3, dpy / dl * sp - this.vy));
         this.x += this.vx; this.y += this.vy;
       }
-      // 退出门（:50685-50692）：距主 <200 且主落地且自身脚下净空
+      // 退出门（:50685-50692 四连词 1:1）：<200 ∧ 主落地 ∧ 自身底不高过主底 ∧
+      // 全盒无实心（Collision.SolidCollision）——2026-09-07 1118 嵌入定谳批同修：
+      // 旧"中心列+脚行"双格近似漏盒缘/头行压墙（嵌入位退出,同 palGroundStep）,
+      // 且缺 `position.Y+height <= player.position.Y+player.height` 第 3 连词
+      // （低过主底也退出 = 主站高台时贴墙底退）。solidOverlap=家族 SolidCollision
+      // 等价（蛙 :50686 同句同构）
       if (p.vy === 0 && Math.hypot(p.cx - this.cx, p.cy - this.cy) < 200
-        && !st.isSolid(Math.floor(this.cx / 16), Math.floor((this.y + this.h) / 16))) {
+        && this.y + this.h <= p.y + p.h
+        && !this.solidOverlap(st)) {
         this.mbA0 = 0;
         if (this.vy < -6) this.vy = -6;                   // :50689-50690
       }
@@ -2187,6 +2213,9 @@ export class MinionProj extends Entity {
     this.vy = Math.min(this.vy + 0.4, 10);                // 重力 0.4 封顶 10（:51553-51556）
     this.tileCollide = true;                              // 地面段恒 true（:51266——先于移动）
     // ★水中位移阻尼（HandleMovement :17721-17764 湿支;湿段 tick 头已刷新当拍旗）
+    // StepUp（Collision.StepUp :51508——flag6 同受 ai[0]==0||3 运动块直调;跃击
+    // mbA2 拍 ai[0] 仍 0 原文本就踏,单点置位即覆盖）——1118 嵌入定谳批同批补接
+    this.stepUp = true;
     const dfMush = projWaterDragFactor(this);
     moveAndCollide(this, game.world, this.vx * dfMush, this.vy * dfMush);
     if (this.onGround) {

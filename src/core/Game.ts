@@ -216,7 +216,7 @@ import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
 import { setNpcNameResolver, setGlobalSubstitutionContext } from '../i18n/LanguageManager';
-import { clearPaperDollCache } from '../player/PaperDoll';
+import { clearPaperDollCache, variantSheetName } from '../player/PaperDoll';
 import { portraitForNpc, portraitUrl, type DialoguePortraitPayload } from '../data/npcPortraits';
 import { oreRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
@@ -342,7 +342,7 @@ import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import { isDomUiTarget } from './input/domTargets';
 import {
-  MapPingStore, BestiarySub, PylonSub, ParticleOrchestraType,
+  MapPingStore, isMapPingDoubleClick, BestiarySub, PylonSub, ParticleOrchestraType,
   type LiquidCell, type BestiaryNetEvent, type PylonNetMsg, type ParticleSettings,
   type InstancedLootEntry,
 } from '../net/syncModules';
@@ -1333,6 +1333,16 @@ const BLOCK_SWAP_DOESNT_PLACE_SHEETS = new Set<number>([2, 60, 70, 109, 199, 23,
 const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
 const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
 const PLATFORMS_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439]);
+// ★SW-BJ18 2026-09-07：ReplaceTile_EliminateNaturalExtras 邻接清除表（消费位
+//  WorldGen.cs:63153-63166；表本体 TileID.cs:245/:247 Factory.CreateBoolSet 原表逐项，
+//  sheet 域）——单格原位重写【前】清上邻 BreakUp 36 件（苗/草/药草/小饰族，放块压苗
+//  即杀）或 165@frameY{36,54,90}、下邻 BreakDown 9 件（藤蔓/垂饰族）或
+//  165@frameY{0,18,72}；KillTile 全语义（带掉落）由本仓 breakTile 承载。
+const REPLACE_TILE_BREAK_UP_SHEETS = new Set<number>([
+  27, 20, 227, 24, 201, 110, 113, 61, 703, 74, 71, 3, 73, 186, 187, 185, 233,
+  530, 705, 236, 702, 238, 254, 484, 485, 84, 82, 83, 529, 549, 590, 595, 615, 624, 700, 637,
+]);
+const REPLACE_TILE_BREAK_DOWN_SHEETS = new Set<number>([205, 115, 62, 52, 382, 444, 528, 638, 636]);
 // SW-BA1 2026-09-06：原版 tileSolid+tileSolidTop【双 true】全集（RB2 B-3 定谳；锤目标域用）
 // = Platforms（TileID.cs:243）∪ {239 MetalBars,380 PlanterBox}（Main.cs:8031-8032、
 // 9797-9800、427 :10119-10120、435-439 循环 :10125-10130）。本仓数据面把 239/380 拆在
@@ -1538,7 +1548,7 @@ const ADRIP_TILE_SHEETS = new Set([373, 374, 375, 461, 709]);
 //  590 宝石树苗(gemcorn 放置,Check1x2 :86818 仅成长检)/595 樱花树苗(:86819)/
 //  615 黄柳树苗(:86820)/484 滚石仙人掌(Check2x2 仅弹 727 无物品)——金标
 //  NO_RETURN_RECYCLE_DEBT 已钉,防后车误补数值
-const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484]);
+export const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484]);
 
 export function multiTileDropKey(
   def: { drop?: string | number | null; key: string; vanilla?: { sheet?: number } },
@@ -2266,7 +2276,7 @@ export interface GameCallbacks {
    *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用）；
    *  buyback = 卖回货架条目下标（Chest.AddItemToShop 的 buyOnce 克隆，购买时
    *  回传给 npcShopBuy 以区分常规货） */
-  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }>, copper: number, happinessMul?: number, medals?: number) => void;
+  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessMul?: number, medals?: number) => void;
   /** NPC 快乐度详情浮层（ReportHappiness.Interact）：报告逐条文案 + 价格乘子 */
   onNpcHappiness?: (info: { name: string; lines: string[]; priceMul: number }) => void;
   onBuffsChanged?: () => void;
@@ -4148,11 +4158,13 @@ export class Game implements GameHooks {
 
   /** 观战退出键族判定（HandleSpectatingControls :16933 的键盘半边——原版为
    *  control* 电平 + Hotbar Current 触发器，keydown 边沿等价单发）。
-   *  :16933 原文键项 = Jump(JustReleased)/Inventory/Throw/Torch/Smart/Mount/
-   *  QuickHeal/QuickMana/CreativeMenu/Dash/ArmorSetAbility/Hotbar1-10/Hotbar±/
-   *  滚轮。触发器↔本仓 action 映射（TriggersSet.cs:786-833）：controlTorch=
+   *  :17200 原文键项 = Jump(JustReleased)/Inventory/Throw/Torch/Smart/Mount/
+   *  QuickHeal/QuickMana/CreativeMenu/Dash/ArmorSetAbility/Hook/Hotbar1-10/
+   *  Hotbar±/滚轮。触发器↔本仓 action 映射（TriggersSet.cs:786-833）：controlTorch=
    *  SmartSelect、controlSmart=SmartCursor、controlMount=QuickMount、
-   *  controlCreativeMenu=OpenCreativePowersMenu（本仓 ToggleCreativeMenu）；
+   *  controlCreativeMenu=OpenCreativePowersMenu（本仓 ToggleCreativeMenu）、
+   *  ★controlHook=Grapple（SW-BN2 2026-09-07 补——缺省表对齐后 Grapple 有缺省键 E,
+   *  原版观战按钩爪键同退;旧缺省空表时本支不可达故从未暴露）；
    *  Throw/Dash/ArmorSetAbility 本仓无 action（Keybinds.ts:3-4 手柄 trigger/
    *  拖出承担声明）→ 跳过；滚轮走 tick 半边（handleSpectatingControls）。
    *  ★QuickBuff 不在退出族——:16940-16945 是虫洞药水传送（CanWormholeTo
@@ -4162,6 +4174,7 @@ export class Game implements GameHooks {
       || isBound('SmartSelect', code) || isBound('SmartCursor', code)
       || isBound('QuickMount', code) || isBound('QuickHeal', code)
       || isBound('QuickMana', code) || isBound('ToggleCreativeMenu', code)
+      || isBound('Grapple', code)   // SW-BN2：controlHook（Player.cs:17200）
       || SPECTATE_EXIT_HOTBAR.some((a) => isBound(a, code));
   }
 
@@ -4545,8 +4558,13 @@ export class Game implements GameHooks {
   private _mapPressX = 0;
   private _mapPressY = 0;
   private _tpTarget: { x: number; y: number } | null = null;
-  /** 地图双击检测（Main.cs:54926-54931 _lastPingMouseDownTime/_lastPingMousePosition：
-   *  0.5s 内两次按压位移 <2px → TriggerPing） */
+  /** ★SW-BJ20 2026-09-07 地图双击 ping 检测（Main.cs:56310-56319 _lastPingMouseDownTime/
+   *  _lastPingMousePosition 1:1）：全屏地图每次左键【释放】都刷新时间戳+屏幕位（无拖距
+   *  门槛——原版靠 <2px 释放间距天然过滤拖拽）；0.5s 内且 <2px 二连击 → TriggerPing。
+   *  ms 初值 -1e9 = 无前次记录（原版初值 0.0+TotalGameTime 恒大语义等价） */
+  private _lastPingReleaseMs = -1e9;
+  private _lastPingReleaseX = 0;
+  private _lastPingReleaseY = 0;
   // ---- 传送晶塔（Player.cs:31707-31747 / TeleportPylonsSystem.cs）----
   /** 已放置晶塔缓存（scanPylons 整表扫——右键晶塔/放置/破坏时刷新；原版
    *  UpdatePylonsListAndBroadcastChanges 每 10s 扫 TileEntity 表的等价） */
@@ -5380,8 +5398,11 @@ export class Game implements GameHooks {
       // ★清单键过滤(2026-09-04):原版变体仅带差异通道(11 号只有 3/5/7/9/10),
       //  无条件 add 全 14 通道=缺失通道必 404(每会话固定噪声)。回退链(渲染层
       //  ?? Player_0)不变,此处只预载清单里真实存在的键。
-      if (a.uiFileExists(`Player_${variant}_${s}.png`)) files.add(`vanilla-ui/Player_${variant}_${s}.png`);
-      else if (a.uiFileExists(`Player_0_${s}.png`)) files.add(`vanilla-ui/Player_0_${s}.png`);
+      //  ★SW-BJ21 2026-09-07:回退链 1:1 化=CopyVariant(5/6/7/9←4、11←10,反编译
+      //  PlayerDataInitializer.cs)——与 PaperDoll.sheetRect/就绪门同一个
+      //  variantSheetName 解析;旧 `v ?? 0` 直落男表对女性子变体的身体通道
+      //  (3 躯干肤等)预载了男表、漏了实际要画的女表(4_3)=实机镂空的预载面
+      files.add(`vanilla-ui/${variantSheetName(variant, s, (n) => a.uiFileExists(n))}`);
       if (variant !== 0 && a.uiFileExists(`Player_0_${s}.png`)) files.add(`vanilla-ui/Player_0_${s}.png`);
     }
     for (const hf of [`Player_Hair_${hair + 1}.png`, `Player_HairAlt_${hair + 1}.png`]) {
@@ -5421,8 +5442,8 @@ export class Game implements GameHooks {
     const playerFiles = new Set<string>();
     for (const s of [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]) {
       // ★清单键过滤(同 ensureAppearanceFiles 注):缺失通道不进预载清单
-      if (a.uiFileExists(`Player_${variant}_${s}.png`)) playerFiles.add(`vanilla-ui/Player_${variant}_${s}.png`);
-      else if (a.uiFileExists(`Player_0_${s}.png`)) playerFiles.add(`vanilla-ui/Player_0_${s}.png`);
+      //  ★SW-BJ21 2026-09-07:回退链同 CopyVariant(见 ensureAppearanceFiles 注)
+      playerFiles.add(`vanilla-ui/${variantSheetName(variant, s, (n) => a.uiFileExists(n))}`);
       if (variant !== 0 && a.uiFileExists(`Player_0_${s}.png`)) playerFiles.add(`vanilla-ui/Player_0_${s}.png`);
     }
     for (const hf of [`Player_Hair_${hair + 1}.png`, `Player_HairAlt_${hair + 1}.png`]) {
@@ -5798,6 +5819,9 @@ export class Game implements GameHooks {
       direction: () => this.player.facing,
     });
     lucyEnterWorld();
+    // ★SW-BJ20 2026-09-07：地图 ping 随世界会话清空（WorldGen.clearWorld :6924
+    // Main.Pings.Clear()——读档/换世界跨会话不残留上一局的 ping 标记）
+    this.mapPings.clear();
     // Mechdusa queen 登记复位（WorldGen.clearWorld :6907 NPC.mechQueen=-1）
     resetMechQueen();
     // ★1457：homelessSpawnTimeout 复位 54000（clearWorld cs:6976——读档/换世界即节流重置）
@@ -7449,6 +7473,17 @@ export class Game implements GameHooks {
       }
       if (!inp.mouseDown && this._mapClickLatch2) {
         this._mapClickLatch2 = false;
+        // ★SW-BJ20 2026-09-07：原版双击记录门（Main.cs:56310-56319）——全屏地图每次左键
+        // 释放都无条件刷新 _lastPing 时间戳/屏幕位（含拖拽释放；原版无拖距门槛，靠
+        // <2px 释放间距天然过滤拖拽平移），随后才进各点击消费分支
+        const nowMs = performance.now();
+        const pingDouble = isMapPingDoubleClick(
+          nowMs, inp.mouseX, inp.mouseY,
+          this._lastPingReleaseMs, this._lastPingReleaseX, this._lastPingReleaseY,
+        );
+        this._lastPingReleaseMs = nowMs;
+        this._lastPingReleaseX = inp.mouseX;
+        this._lastPingReleaseY = inp.mouseY;
         const moved = Math.hypot(inp.mouseX - this._mapPressX, inp.mouseY - this._mapPressY);
         if (moved < 6) {
           const fm = this.renderer.fullMap;
@@ -7459,11 +7494,15 @@ export class Game implements GameHooks {
           // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
           const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
           const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
-          // 地图 ping（Main.cs:54926-54931 双击语义）——★修复(2026-08-20 用户报):
-          // 曾按原版把"快速双击"槽位给了 ping 并取消传送预选,直接废掉了自研的
-          // 同点两击传送调试功能(用户快速双击只看到 ping 气泡)。调试功能优先:
-          // 普通点击全归传送(第一次预选/第二次确认,不限速);ping 改走 Ctrl+点击
-          // (联机标记功能保留,原版双击槽位在调试构建下让位)
+          // 地图 ping 双通道（★SW-BJ20 2026-09-07 用户令重排）：
+          //  ① Ctrl+点击 = 显式 ping（2026-08-20 既有通道,两态恒可用——传送旗开启时
+          //     是 ping 的唯一键面;限界内）
+          //  ② 原版双击 ping（Main.cs:56310-56319：0.5s 内 <2px 二连击 → TriggerPing）
+          //     = 传送调试旗【关闭】时的默认点击面（旗开启时该槽位被两次点击传送占
+          //     用——2026-08-20 决议保留,用户令「传送开启时优先传送」同向）
+          // 优先级：Ctrl ping → 虫洞头像 → 晶塔图标（SW-BD1,常驻）→ 传送旗选点 →
+          // 原版双击 ping（晶塔/虫洞命中即消费点击——原版 teleport/pan 也置
+          // mouseLeftRelease=false,TeleportPylonsMapLayer.cs:96/:104）
           if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h
             && (inp.keys.has('ControlLeft') || inp.keys.has('ControlRight'))) {
             this.triggerMapPing(
@@ -7498,6 +7537,14 @@ export class Game implements GameHooks {
               this.renderer.tpMark = { x: tx, y: ty };
               this.cb.onToast(Lang.text('Mods.SandboxWorld.Map.Preselect', `(${tx}, ${ty})`));
             }
+          } else if (pingDouble) {
+            // ★SW-BJ20 2026-09-07：原版双击 ping（默认态地图点击=标记行为）。
+            // TriggerPing(Main.cs:57399-57405) 位置 = (MouseScreen-地图原点)/缩放 的
+            // tile 坐标（float,不取整;原版 :56315 减 num-10*num5 衬边项,本仓地图无
+            // 10 tile 衬边故直接除 zoom——与渲染 drawMapPingLayer cx0+x*zoom 同源）。
+            // 不做界内门（原版 :56315 无界检——点地图衬边/图外落负坐标 ping 同款放行）
+            this.triggerMapPing(
+              (inp.mouseX - cx0) / fm.zoom, (inp.mouseY - cy0) / fm.zoom);
           }
         }
       }
@@ -21659,6 +21706,176 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  // ===================== ★SW-BJ18 2026-09-07：WorldGen.ReplaceTile 原位重写 =====================
+  // 块换写面架构债清偿（docs/block-swap-replacetile-sw-bj18.md）：本仓块换曾是
+  // breakTile(掉旧块)+通用 place(放新块) 两段写面 → F2 致动不保/F3 坡保留/D2 篝火
+  // 燃态/D3 非空箱不可换/D4 亡命箱信号/交换音/箱实体七面缺口。本族 = WorldGen.cs
+  // ReplaceTile(:63061-63283) 1:1：Tile 对象原位改写，不经 KillTile 中心格（无瞬时
+  // 失撑级联=F4 面）、不经通用放置链（原版无支撑/实体/清格门）。1458 同文（逐字节
+  // diff 实证）。唯一分载体：AttemptFossilShattering(:63080) 随破坏域化石连锁债登记；
+  // SquareWallFrame 臂(:63146-63149) 墙帧绘制期虚拟化=架构 no-op（:20163 区同判）。
+
+  /** ReplaceTile_MoveReplaceTileAnchor（WorldGen.cs:63190-63207）：按【旧 tile】族帧
+   *  把点击格归一为物件锚左上（BasicChest frameX%36/18；BasicDresser(:63197)/
+   *  Campfires(:63202) 同式 frameX%54/18+frameY%36/18）。原版 ref 直改 x/y——本仓
+   *  返回归一坐标。 */
+  private moveReplaceTileAnchor(x: number, y: number, oldSheet: number, fx: number, fy: number): [number, number] {
+    if (oldSheet === 21 || oldSheet === 467) {           // TileID.Sets.BasicChest（TileID.cs:315）
+      return [x - Math.floor((fx % 36) / 18), y - Math.floor((fy % 36) / 18)];
+    }
+    if (oldSheet === 88 || oldSheet === 215) {           // BasicDresser（:319）/ Campfires（:407）
+      return [x - Math.floor((fx % 54) / 18), y - Math.floor((fy % 36) / 18)];
+    }
+    return [x, y];
+  }
+
+  /** ReplaceTile 的 KillTile_DropItems 面（WorldGen.cs:63079 → :64461-64475，
+   *  includeLargeObjectDrops:true）——旧块物品掉落【一次】。家族面 :64485-64501：
+   *  箱 21/467 / 柜 88 / 篝火 215 按【旧帧 style】走 GetItemDrop_Chests(:58489)/
+   *  Dressers(:50297)/Campfire(:50481)——本仓 styleDropVidOfFrames 同表 1:1
+   *  （styleFromFrame fx/36·fx/54·fy/18·fy/22 派生，vanillaStyleDrops.ts:440 区）；
+   *  普通块 GetItemDrops switch 面（苔→石 3/草族→泥 2/灰烬草→172…:64503-64549）
+   *  = def.drop 直域 + styleDrop 帧表 + place_v_ 兜底（与 breakTile 1×1 掉落链同式，
+   *  BJ12 掉落键零变化）。 */
+  private replaceTileDropOld(x: number, y: number, oldType: number): void {
+    const st = this.world.store;
+    const def = TILE_DEFS[oldType];
+    const sheet = def?.vanilla?.sheet ?? -1;
+    const i = st.idx(x, y);
+    let key = '';
+    const sv = styleDropVidOfFrames(sheet, st.frameX[i], st.frameY[i]);
+    if (sv > 0) key = VANILLA_ITEM_KEY_BY_ID[sv] ?? '';
+    else if (sv < 0) key = '';                    // 哨兵=原版显式无掉落档（假容器 441/468——块换域不可达,防御面）
+    else if (typeof def?.drop === 'number') key = VI(def.drop);
+    else if (typeof def?.drop === 'string') key = def.drop;
+    else if (def?.key.startsWith('v_') && !(sheet >= 0 && ADRIP_TILE_SHEETS.has(sheet))
+      && vanillaPlaceableTileKeys().has(def.key)) key = 'place_' + def.key;
+    if (key) this.spawnDrop(x * TILE + 8, y * TILE + 8, key, 1);
+  }
+
+  /** ReplaceTile_EliminateNaturalExtras（WorldGen.cs:63153-63166）：单格重写【前】
+   *  清上/下邻接植物族（REPLACE_TILE_BREAK_UP/DOWN_SHEETS + 165 帧域字面）——
+   *  KillTile 全语义（带掉落/级联）=本仓 breakTile 承载（byPlayer=false，原版
+   *  ReplaceTile 无 _isMining 窗）。InWorld(x,y,2) 边带门（:63155，fluff=2）。 */
+  private eliminateNaturalExtras(x: number, y: number): void {
+    const st = this.world.store;
+    if (x < 2 || y < 2 || x >= st.w - 2 || y >= st.h - 2) return;
+    const ui = st.idx(x, y - 1);
+    if (st.hasTile(x, y - 1)) {
+      const upSheet = TILE_DEFS[st.type[ui]]?.vanilla?.sheet ?? -1;
+      const upFy = st.frameY[ui];
+      if (REPLACE_TILE_BREAK_UP_SHEETS.has(upSheet)
+        || (upSheet === 165 && (upFy === 36 || upFy === 54 || upFy === 90))) {
+        this.breakTile(x, y - 1, false);
+      }
+    }
+    const di = st.idx(x, y + 1);
+    if (st.hasTile(x, y + 1)) {
+      const dnSheet = TILE_DEFS[st.type[di]]?.vanilla?.sheet ?? -1;
+      const dnFy = st.frameY[di];
+      if (REPLACE_TILE_BREAK_DOWN_SHEETS.has(dnSheet)
+        || (dnSheet === 165 && (dnFy === 0 || dnFy === 18 || dnFy === 72))) {
+        this.breakTile(x, y + 1, false);
+      }
+    }
+  }
+
+  /** ReplaceTile_DoActualReplacement_Single（WorldGen.cs:63111-63151）——单格原位重写。
+   *  逐行：邻接清除(:63113) → type 原位重写(:63115，active/wire/inActive 位全不触
+   *  =F2) → 帧域(:63114-63123，frameX 恒保留=火把锚帧/普通块变体；frameY 仅平台/380
+   *  =style*18 与火把=style*22 重写) → 清块漆(:63124，setTile 对 active→active 不清漆
+   *  须显式) → 坡保留面(:63125-63134，CanPoundTile 以【新 type】求值——原文 :63115
+   *  先于 :63125；平台↔平台恒保 :63126-63129；拒→slope(0)+halfBrick(false)，setSlope
+   *  内含清 half) → 平台帧重算(:63150 SquareTileFrame 的 TileFrameImportant 平台支，
+   *  SW-BJ10 面；普通块 cosmetic 帧本仓绘制期虚拟化=等效）。 */
+  private replaceTileSingle(x: number, y: number, newType: number, newSheet: number,
+    oldSheet: number, style: number): void {
+    const st = this.world.store;
+    this.eliminateNaturalExtras(x, y);
+    const i = st.idx(x, y);
+    let fx = st.frameX[i];
+    let fy = st.frameY[i];
+    if (newSheet === 4) fy = style * 22;                                   // :63120-63123
+    else if (PLATFORMS_SHEETS.has(newSheet) || newSheet === 380) fy = style * 18;   // :63116-63119
+    st.setTile(x, y, newType, fx, fy);
+    st.paint[i] = 0;                                   // :63124 ClearBlockPaintAndCoating
+    st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;          // （Tile.cs:934-939 只清方块侧两位）
+    let poundFail = !this.canPoundTile(x, y);          // :63125（新 type 已在位）
+    if (PLATFORMS_SHEETS.has(oldSheet) && PLATFORMS_SHEETS.has(newSheet)) poundFail = false;
+    if (poundFail && (st.slope[i] !== 0 || st.half[i] !== 0)) st.setSlope(x, y, 0);   // :63130-63134
+    if (PLATFORMS_SHEETS.has(newSheet)) this.squareTileFramePlatform(x, y);           // :63150 平台面
+  }
+
+  /** ReplaceTile_DoActualReplacement_Area（WorldGen.cs:63168-63188）——多格家族原位
+   *  重写（箱 2×2/柜 3×2/篝火 3×2）。逐格 type+帧(:63175-63177 frameX=style*(areaW*18)
+   *  +dx*18、frameY=dy*18+frameOffsetY)+清块漆(:63178)；写完一次 DECOR 复验（:63181-63187
+   *  逐格 SquareTileFrame 等价面，箱/柜/篝火无 TileFrameImportant 邻接帧面）。
+   *  slope/half/wire 全不触（原文无写位）。rigged（D4）写前触发：IsChestRigged
+   *  (:36127 = 467 frameX/36==4) → Wiring.HitSwitch(anchor)（:63089-63093，Main.netMode
+   *  !=1=权威侧——本仓破坏/布线链同口径；SendData(59) 单机无操作）。箱/柜实体登记
+   *  存续不动（D3：非空箱内容保留，原版无内容检查+无 dumpChest 面）。 */
+  private replaceTileArea(x: number, y: number, newType: number, style: number,
+    areaW: number, frameOffsetY: number, rigged: boolean): void {
+    const st = this.world.store;
+    if (rigged) this.wiring?.hitSwitch(x, y);
+    this._decorPlaceBuilding = true;      // 半件态抑制 DECOR 逐格分派（通用放置写循环同口径）
+    try {
+      for (let dx = 0; dx < areaW; dx++) {
+        for (let dy = 0; dy < 2; dy++) {
+          const px = x + dx, py = y + dy;
+          if (!st.inBounds(px, py)) continue;
+          const pi = st.idx(px, py);
+          st.setTile(px, py, newType, style * (areaW * 18) + dx * 18, dy * 18 + frameOffsetY);
+          st.paint[pi] = 0;                              // :63178 ClearBlockPaintAndCoating
+          st.coat[pi] &= ~TileStore.COAT_BLOCK_MASK;
+        }
+      }
+    } finally {
+      this._decorPlaceBuilding = false;
+    }
+    this.checkDecorSquareFrame(x, y);
+  }
+
+  /** WorldGen.ReplaceTile（WorldGen.cs:63061-63083）1:1 原位重写——块换成功拍写面。
+   *  门矩阵（BJ12：C1/C5/C6/C7/A/B2）已在调用位跑完；体内保留 :63068
+   *  IsTileReplaceable 复验（纯函数防御面，:22112 已同判）。:63064
+   *  WouldTileReplacementWork 不另植——调用位 :40356 已同判（通用⑤门+族 verdict
+   *  :1471-1480），绳邻支(:63220-63236) 随外门 :40328 拒绳目标不可达（D6 分期，
+   *  docs §6 坐标）。
+   *  @param newType 新块内部 id（HeldItem.createTile 域）；@param style 有效 placeStyle
+   *  @returns false=内门拒绝（调用位不消耗不施时=原版 ReplaceTile false 同义；
+   *  运行时不可达态）。尾奏（消耗/冷却/自动附件）在调用位，本函数只管写面。 */
+  private replaceTileInPlace(x: number, y: number, newType: number, style: number): boolean {
+    const st = this.world.store;
+    const i0 = st.idx(x, y);
+    const oldType = st.type[i0];
+    const oldDef = TILE_DEFS[oldType];
+    const oldSheet = oldDef?.vanilla?.sheet ?? -1;
+    if (!isTileReplaceable(st, x, y)) return false;      // :63068（:62825-62872 本仓 :1185 1:1）
+    const anchor = this.moveReplaceTileAnchor(x, y, oldSheet, st.frameX[i0], st.frameY[i0]);   // :63072
+    x = anchor[0]; y = anchor[1];
+    if (!st.inBounds(x, y)) return false;
+    // :63073-63077 尘 = KillTile_GetTileDustAmount(fail:false) default 档 10（:67123-67128；
+    //  本仓粒子 idiom，计数对齐原版档位）
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, oldDef?.mapColor ?? '#8a8a8a', 10, 1.5);
+    this.killTileBreakSound(oldType, x, y);              // :63078 KillTile_PlaySounds（无放置音）
+    this.replaceTileDropOld(x, y, oldType);              // :63079 旧块物一次（includeLarge 面）
+    const newSheet = TILE_DEFS[newType]?.vanilla?.sheet ?? -1;
+    const iA = st.idx(x, y);
+    if (newSheet === 21 || newSheet === 467) {           // :63087-63095 BasicChest[target]
+      const rigged = oldSheet === 467 && Math.floor(st.frameX[iA] / 36) === 4;   // IsChestRigged(:36127)
+      this.replaceTileArea(x, y, newType, style, 2, 0, rigged);
+    } else if (newSheet === 88) {                        // :63096-63098 BasicDresser[target]
+      this.replaceTileArea(x, y, newType, style, 3, 0, false);
+    } else if (newSheet === 215) {                       // :63100-63103 Campfires[target]+燃态（D2）
+      const lit = st.frameY[iA] >= 36;
+      this.replaceTileArea(x, y, newType, style, 3, lit ? 36 : 0, false);
+    } else {
+      this.replaceTileSingle(x, y, newType, newSheet, oldSheet, style);   // :63105-63107
+    }
+    return true;
+  }
+
   /** ★SW-BE1（2026-09-06）：WorldGen.SlopeTile 运行时面 1:1（WorldGen.cs:82045-82078）
    *  ——平台放置自动斜放/邻居联动专用写口。锤击整形（SW-AW1b/RB2）走 TryPoundingTile
    *  直写面不经此；本面仅 SpinSmartPlatform 链消费。逐行：
@@ -22230,7 +22447,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 方块替换（PlaceThing_Tiles_PlaceIt 之 hitReplace 支 Player.cs:40164-40230）：
             // 原版走 WorldGen.ReplaceTile :40218【非 KillTile】——不触发 NotifyTileDestroyed/
             // HandleMining（无成就面）→ byPlayer=false（2026-09-04 审计重定,曾误计）
-            this.breakTile(tx, ty, false);   // 旧块完整掉落链(音效+成就同破坏)
+            // ★SW-BJ18 2026-09-07：ReplaceTile 原位重写 1:1 替代 break+place 两段写面
+            //  （docs/block-swap-replacetile-sw-bj18.md 三表+集成图）——F2 致动保持/
+            //  F3 坡保留(CanPoundTile 面)/D2 篝火燃态/D3 非空箱可换/D4 亡命箱信号随原文
+            //  自然获得;且不再回落通用放置链（原版 :40218 成功后不经 PlaceTile：无支撑/
+            //  实体/清格门,交换音=仅旧块破坏音）。breakTile 老路径于本调用位退役
+            //  （其它 breakTile 调用方零触碰）。
+            this.recLog('tile', { x: tx, y: ty, from: TILE_DEFS[targetType]?.key ?? targetType,
+              to: TILE_DEFS[tileIdHere]?.key ?? tileIdHere, cause: 'block-swap' });
+            const heldSwap = this.player.inv.heldItem() as { placeStyle?: number } | null;
+            const swapStyle = heldSwap?.placeStyle !== undefined
+              ? heldSwap.placeStyle : (itemDef.placeStyle ?? 0);
+            if (this.replaceTileInPlace(tx, ty, tileIdHere, swapStyle)) {
+              // 尾奏（vanilla :40221-40226）：SendData(17,21) 单机无操作 → 消耗门
+              //  （:42602 域,与通用链 :23057 同式）→ SetItemTime(num4+num5)=方块段+镐段
+              //  （blockSwapPickSeg 合并,:23063 同式）→ SetItemAnimation（本仓 useSwing
+              //  承载,登记）→ PlaceIt_AutoPaintAndActuate（placeItAutoAcc 1×1,多格家族
+              //  由 vanilla :40931-40941 全域扫面近似=逐格）。成功即 return,不回落通用链。
+              if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
+                this.player.inv.removeHeld(1);
+              }
+              {
+                const utSwap = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+                this.player.useTime = (utSwap && utSwap > 0
+                  ? Math.max(1, Math.round(utSwap * this.paintTileSpeed()))
+                  : 14) + blockSwapPickSeg;
+              }
+              this.placeItAutoAcc(tx, ty);
+              this.cb.onInventoryChanged();
+              return;
+            }
+            return;   // 内门拒绝=原版 ReplaceTile false：不消耗不施时（运行时不可达防御面）
           }
         }
       }
@@ -33010,11 +33257,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     4723, 4724, 4725, 4726, 4727, 5257, 4728, 4729,
   ]);
 
+  /** 旅行商帕鲁联动甲上架触发物（Chest.cs:2786-2792 case 19——HasItemInAnyInventory
+   *  十选一：随从/宠物/坐骑召唤物原版 id；SW-BJ23 2026-09-07 逐值对勘 ItemID.cs） */
+  private static readonly PALWORLD_VENDOR_TRIGGER_IDS: ReadonlySet<number> = new Set([
+    5667, 5663, 5664, 5665, 5666,            // 捣蛋龟/坐骑猫/火绒狐/疾旋鼬/疾旋火鼬
+    6174, 6148, 6149, 6150, 6151,            // 可靠的碎岩龟/捣蛋猫/火绒狐/疾旋鼬/疾旋火鼬
+  ]);
+
   /** 当前对话 NPC 的商店商品表（Chest.SetupShop 数据驱动提取，tools/extract-shops.mjs）。
    *  元组第三位 = 勋章价（shopSpecialCurrency=DefenderMedals 条目；GetStoreValue
    *  = shopCustomPrice ?? value 优先级在此落定，Item.cs:49492-49500） */
   private shopStockFor(npc: TownNPC): Array<[number, number] | [number, number, number]> {
-    if (npc.npcKey === 'travelling_merchant') return this.travelStock.slice();  // 动态股票
+    if (npc.npcKey === 'travelling_merchant') {
+      // SW-BJ23 2026-09-07：帕鲁联动甲（Chest.cs:2785-2795 case 19 首段——玩家
+      // HasItemInAnyInventory 帕鲁宠物/随从/坐骑召唤物之一 → 旅行商先于流动货上架
+      // 帕鲁金属胸甲 5735 + 护腿 5736；extract-shops.mjs 对 HasItemInAnyInventory
+      // 无 token，shopstock 无 368 槽，此处直补。原版扫描 inventory/armor/dye/
+      // miscEquips/miscDyes/bank×4（Player.cs:56588-56625），本仓只达主背包含原版
+      // id 物（playerHasVanillaItem），其余槽面不建模=登记债）
+      if ([...Game.PALWORLD_VENDOR_TRIGGER_IDS].some((vid) => this.playerHasVanillaItem(vid))) {
+        return [[5735, ITEM_VALUES['5735'] ?? 0], [5736, ITEM_VALUES['5736'] ?? 0],
+          ...this.travelStock];
+      }
+      return this.travelStock.slice();  // 动态股票
+    }
     const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
     if (!stock) return [];
     // 勋章条目（Chest.cs case 21 shopSpecialCurrency=DefenderMedals 全段 37 条）：
@@ -33097,9 +33363,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (out[i][0] >= 4430 && out[i][0] <= 4441) out.splice(i, 1);
           }
           add(dryadMoonPhaseStock(phase, !!this.world.flags.hardMode));
-          // 吸血鬼+感染世界肉前补火把+邪恶彩火把（Chest.cs:1698-1705：!hardMode &&
-          // vampireSeed && infectedSeed → 8 + (crimson ? 4386 Ichor : 4385 Cursed)——
-          // infectedSeed 无文本映射恒 false，1:1 保留死分支）
+          // 吸血鬼+感染世界肉前补火把+邪恶彩火把（Chest.cs:1727-1738（1456 :1698-1705）：
+          // !hardMode && vampireSeed && infectedSeed → 8 + (crimson ? 4386 Ichor :
+          // 4385 Cursed)——infectedSeed 无文本映射恒 false，1:1 保留死分支）。
+          // SW-BJ23 2026-09-07：vanilla-shopstock.json 曾并存同三条目且门被提取器
+          // 丢成 '!hardMode'（vampireSeed/infectedSeed 无 token 静默剥离）→ 普通
+          // 肉前世界恒越货上架火把+邪恶火把；JSON 侧三行已删，本种子臂为唯一来源
           if (!this.world.flags.hardMode && !!this.world.seedFlags?.vampireSeed
             && !!this.world.seedFlags?.infectedSeed) {
             add([8]);
@@ -33532,6 +33801,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return hit && hit[2] !== undefined ? hit[2] : null;
   }
 
+  /** 卖回货架条目买回价（SW-BJ22 2026-09-07 商品格位悬停 tooltip 消费）：
+   *  buyOnce 分支 Player.cs:34930-34944（round(value/PriceAdjustment) → ÷5 →
+   *  min 1；折扣卡不参与——:34920 discount 门要求 !buyOnce）+ 显示侧 min-1
+   *  （Main.cs:20341-20343 num6<1→1）。条目不在架（下标失效/vid 不符）→ null */
+  shopBuybackPriceOf(vid: number, index: number): number | null {
+    const bb = this.shopBuybackStock[index];
+    if (!bb || bb.vid !== vid || !this.npcShopOpen) return null;
+    return Math.max(1, expectedPrices(itemValueWithPrefix(bb.vid, bb.prefix),
+      { buyOnce: true, priceAdjustment: this.shopHappinessMul }).buying);
+  }
+
   private openNpcShop(decor = false) {
     const npc = this.dialogNpc;
     if (!npc) return;
@@ -33551,7 +33831,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 勋章条目（shopSpecialCurrency≠-1，Player.cs:34909-34913 → CustomCurrency
     // System.GetItemExpectedPrice :266-271）：双价 = GetStoreValue() 原值——无折扣/
     // 快乐度乘区、无 min-1，medal 字段带勋章枚数（UI 以勋章文案渲染）
-    const entries: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }> = [];
+    const entries: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }> = [];
     // 常规货首现去重（动物学家/骷髅商动态表与 JSON 静态行存在成片双列——审计
     // 2026-08-30 TOP3/TOP4；首现保留 = 与原版 else-if 上架链同序。数据源合一后可撤）
     for (const [vid0, price0, medal0] of (decor ? this.painterDecorStock() : this.shopStockFor(npc))) {
@@ -33582,6 +33862,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         price: Math.max(1, expectedPrices(itemValueWithPrefix(bb.vid, bb.prefix),
           { buyOnce: true, priceAdjustment: mul }).buying),
         buyback: i,
+        // ★SW-BJ22 2026-09-07：克隆 stack/词缀随行（Chest.AddItemToShop :658-663）——
+        // 商品格位角标 + 悬停 tooltip（UI.showNpcShop ShopCellHover 链）
+        stack: bb.stack,
+        prefix: bb.prefix || undefined,
       });
     }
     // 第 4 参 = 快乐度价格百分比（Main.cs:41231-41243 商店标题旁表情/价格显示）

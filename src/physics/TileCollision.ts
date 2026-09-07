@@ -264,7 +264,17 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         }
         if (dir > 0) b.x = tx * TILE - b.w;
         else b.x = (tx + 1) * TILE;
-        b.vx = 0;
+        // ★SW-BJ19 2026-09-07：钳位后速度=实际位移残量,不再硬清零（vanilla 1:1）。
+        //  原版 TileCollision X 拦截支 result.X = tile左缘-(移前右缘)（Collision.cs:2437/
+        //  :2446 截断式）,调用方 velocity = result（Player.cs:23730-23747/:23766）——
+        //  贴行进方向的剩余位移保留为速度。本仓曾 b.vx=0 硬清零:上坡爬行时身体右缘
+        //  每逢坡缝(坡面对角线高端邻接整砖顶,脚带 ≤1px 亚像素滞后)触发拦截,速度
+        //  从 ~3 直接归零,跑链以 +0.08/t 重建(30+ 拍)= 用户实报"上坡走着走着突然
+        //  减速"（SW-BJ19 行为日志:vx 3→0.12-0.96 驻留 30-60 拍,x 51318-51345 两道
+        //  坡缝）。残量语义下跨缝只损失本拍越界部分,速度连续。跨格态(上方 wasAcross
+        //  支)维持零位移零速度 = 反穿墙兜底(该支位移本就归零,残量恒 0,不受本刀影响)。
+        const landed = dir > 0 ? b.x - oldX : oldX - b.x;   // 本子步实际前进量=vanilla result.X 残量
+        b.vx = dir > 0 ? Math.max(0, landed) : -Math.max(0, landed);
         hitX = true;
         break;
       }
