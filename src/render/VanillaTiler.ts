@@ -1058,6 +1058,9 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
   trees?: TreeStyleData,
+  // ★SW-BJ17 2026-09-07：宝箱开/关盖姿态（0 关/1 半开/2 全开）——来源
+  //  chestLidPoseAt（Game.updateChestFrames 驱动 ChestData.frame，Chest.cs:3599-3657）
+  chestPose = 0,
 ): void {
   // ★自研像素方块(F11 图片导入,原版无):RGB 编码在 frameX/frameY——
   // fx = ((r||1)<<8)|(g||1)、fy = (b||1)。纯色+斜面直画,不取素材表;
@@ -1389,6 +1392,13 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     }
     // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
+    // ★SW-BJ17 2026-09-07：宝箱开/关盖姿态带位移（TileDrawing.cs CacheSpecialDraws_
+    //  Part2 :4340-4347 addFrY = frame×38,frame∈{0,1,2}——Tiles_21/467 三姿态竖带
+    //  带距 38px：关 Y0-35 / 半开 Y38-73 / 全开 Y76-111,PNG 高 114 实证；BasicChest
+    //  集 = TileID.cs:315 CreateBoolSet(21,467)）。对四格源 Y 一致平移（vanilla 对
+    //  每格 drawData.addFrY 同值）。★必须在零帧重建门与分带换算之后叠加（预加会
+    //  破坏 (ofx===0&&ofy===0) 重建扫描与 ofx 带折——同 animYOffset 预加禁令同源）
+    if (chestPose > 0 && (sheet === 21 || sheet === 467)) ofy += chestPose * 38;
     r = atlas.vframeAt(sheet, ofx, ofy);
     let reconFb = false;
     if (!r) { reconFb = true; r = atlas.vframeAt(sheet, 0, 0); }   // ★落空回退(0,0)="整物第一格平铺"指纹
@@ -1615,6 +1625,26 @@ export function tileDrawYOffsetOf(sheet: number, fx: number, fy: number): number
 export function tileTopOf(sheet: number, fx: number, fy: number): number {
   const cond = tileTopCond(sheet, fx, fy);
   return cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+}
+
+/** ★SW-BJ17 2026-09-07：宝箱开/关盖姿态解析（TileDrawing.cs CacheSpecialDraws_Part2
+ *  :4321-4341 1:1）。BasicChest 集（TileID.cs:315 CreateBoolSet(21,467)）的格按
+ *  「frameX%36≠0 → 左退一格 / frameY%36≠0 → 上退一格」归一 2×2 锚点（:4324-4330）,
+ *  再按 Chest.FindChest(锚点) 查 Main.chest[i].frame（本仓 = world.chests 命中格的
+ *  frame 字段,由 Game.updateChestFrames 驱动,0 关/1 半开/2 全开）。查无箱登记
+ *  （wld 缺箱数据/装饰箱未登记）→ 0 = 不位移（vanilla `_chestPositions[key] != -1`
+ *  门 :4335 同语义）。纯函数：烘焙（ChunkCache）与动态层共用同一解析。 */
+export function chestLidPoseAt(
+  chests: Array<{ x: number; y: number; frame?: number }> | undefined,
+  x: number, y: number, fx: number, fy: number,
+): number {
+  if (!chests || chests.length === 0) return 0;
+  const ax = (fx % 36 !== 0) ? x - 1 : x;   // :4325-4327
+  const ay = (fy % 36 !== 0) ? y - 1 : y;   // :4328-4330
+  for (const c of chests) {
+    if (c.x === ax && c.y === ay) return c.frame ?? 0;   // Chest.FindChest 锚点匹配
+  }
+  return 0;
 }
 
 export const DRAW_Y_OFFSET: Record<number, number> = {

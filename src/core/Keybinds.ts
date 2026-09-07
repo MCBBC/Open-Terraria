@@ -3,8 +3,9 @@
 // MenuUp-Right/ArmorSetAbility/Dash）与鼠标键（MouseLeft/MouseRight=Input 硬编码）
 // Web 版不做（声明）；Throw 原版 1.4 键盘档无默认绑定且行为已由背包拖出承担，不入表。
 //
-// 默认值 = 原版 Redigit 预设 Keyboard 档（PlayerInput.cs:1885-1937），个别 action
-// 与本仓既有硬编码对齐（注释逐条标注）——重绑前行为与迁移前 100% 一致。
+// 默认值 = 原版 Redigit 预设 Keyboard 档（PlayerInput.cs:2062-2140；SW-BN2 2026-09-07
+// 起逐项对齐,含 Inventory=Escape / Grapple=E 回原版——旧默认迁出卫门见
+// migrateLegacyDefaults）,个别刻意偏差在 DEFAULT_KEYBINDS 注释逐条标注。
 // 重绑语义 = PlayerInput.CheckRebindingProcessKeyboard（:1495-1513）：
 //   监听中按下的键已在本 action 列表 → 移除（反选解绑，允许清成空表=键无功能）；
 //   否则整表替换为 [新键]。FixDerpedRebinds（:1399-1417）只保护
@@ -39,16 +40,19 @@ export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
 ];
 
 /**
- * 默认绑定（PlayerInput.cs:1885-1937 Keyboard 档）。
- * 与本仓迁移前硬编码的差异仅在注释标注处：
- * - Up/Down/Left/Right 含方向键：本仓既有行为（原版 KeyboardUI 档同为 W+↑ 双绑定，
- *   Keyboard 档纯 WASD）；Inventory 含 KeyE：本仓既有行为（原版仅 Escape，E=Grapple）；
- * - Grapple 默认空：原版默认 E 与本仓 E=物品栏冲突，用户可自行腾挪；
- * - MapZoomIn/Out 默认小键盘 +/-（原版 Add/Subtract），全屏地图打开时缩放地图，
- *   关闭时回落视野缩放（保持迁移前 Equal/NumpadAdd 双缩放视野的行为）；
- * - ToggleCameraMode 默认 F4（原版 PlayerInput.cs:1926）——调试键（全图迷雾
- *   消除）已迁 Shift+F4 让位（2026-08-20；scripts/_fog*-probe.mjs 均直接调
- *   world API 不按键,无探针破坏）。
+ * 默认绑定（原版 Redigit 预设 Keyboard 档 = PlayerInput.cs:2062 Reset + :2066
+ * PresetProfiles.Redigit + :2069 InputMode.Keyboard——SW-BN2 2026-09-07 逐项对齐：
+ * Inventory=Escape（:2074）、Grapple=E（:2075）按用户令回原版；旧默认（Inventory
+ * =Escape+KeyE / Grapple=空）经 migrateLegacyDefaults 一次性迁出，已存自定义不丢）。
+ * 与原版 Keyboard 档仅存的刻意偏差（超集，不缩水）：
+ * - Up/Down/Left/Right 含方向键（原版 KeyboardUI 档 :2182-2190 同为 W+↑ 双绑定，
+ *   本仓无手柄 UI 档，方向键保留移动可达）；
+ * - SmartCursor 含 ControlRight（原版仅 LeftControl :2077；右 Ctrl 为本仓既有
+ *   便利位，非缩水不回收）；
+ * - MapZoomIn/Out 默认小键盘 +/-（原版 Add/Subtract :2081-2082 同位），全屏地图
+ *   打开时缩放地图，关闭时回落视野缩放（保持迁移前 Equal/NumpadAdd 双缩放视野）；
+ * - HotbarMinus/Plus、Previous/NextLoadout 默认空 = 原版 Keyboard 档同样不绑
+ *   （:2069-2140 无这些 trigger，用户可在设置页自绑）。
  */
 export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
   Up: ['KeyW', 'ArrowUp'],
@@ -56,8 +60,8 @@ export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
   Left: ['KeyA', 'ArrowLeft'],
   Right: ['KeyD', 'ArrowRight'],
   Jump: ['Space'],
-  Inventory: ['Escape', 'KeyE'],
-  Grapple: [],
+  Inventory: ['Escape'],
+  Grapple: ['KeyE'],
   SmartSelect: ['ShiftLeft'],
   SmartCursor: ['ControlLeft', 'ControlRight'],
   QuickMount: ['KeyR'],
@@ -94,6 +98,38 @@ export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
 };
 
 const ACTION_SET: ReadonlySet<string> = new Set(KEYBIND_ACTIONS);
+
+/**
+ * ★SW-BN2 2026-09-07 旧档缺省迁移卫门（用户令#1：只动缺省,用户改绑不丢失）。
+ * 本批缺省表对齐原版（Inventory 收回纯 Escape,PlayerInput.cs:2074;Grapple 缺省
+ * 得 KeyE :2075——空表缺省无条目可比,不需迁移）。若某旧档曾把【当时的缺省值】
+ * 原样落盘（老版本写穿/手改 options.json），该条会被 bindsOf 当"用户自定义"压住
+ * 新缺省——与未自定义的存档行为劈叉。本函数把「自定义值 === 旧缺省值」的条目
+ * 摘除（=回新缺省）；任何非旧缺省的真正自定义（Inventory:['KeyE'] 等）与显式
+ * 空表（反选解绑的合法态）原样保留——显式解绑是用户意志,不覆盖。
+ * Options.load 在 sanitizeKeybinds 后调用；纯函数供单测。
+ */
+export const LEGACY_KEYBIND_DEFAULTS: Partial<Record<KeybindAction, readonly string[]>> = {
+  Inventory: ['Escape', 'KeyE'],   // SW-BN2 前旧默认
+};
+
+export function migrateLegacyDefaults(map: Record<string, string[]>): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(map)) {
+    const legacy = LEGACY_KEYBIND_DEFAULTS[k as KeybindAction];
+    if (legacy && v.length === legacy.length && legacy.every((c, i) => v[i] === c)) continue;
+    next[k] = v;
+  }
+  return next;
+}
+
+/** 活绑表键名提示（操作说明/欢迎语数据驱动用,SW-BN2 用户令#3）：返回该 action
+ *  当前绑定码的显示名 ' / ' 连接;空表 = "未绑定"官译（设置页 Lang.menu(195) 同源）。
+ *  重绑后随 bindsOf 即时跟随 */
+export function keybindHintLabel(action: KeybindAction): string {
+  const codes = bindsOf(action);
+  return codes.length ? codes.map(keybindCodeLabel).join(' / ') : Lang.text('Mods.SandboxWorld.UI.ManualUnbound');
+}
 
 /** 读当前生效绑定（用户自定义优先；无自定义条目=默认；自定义空表=无绑定——
  *  CheckRebindingProcessKeyboard 反选清空的合法态，isBound 恒 false）。
@@ -188,10 +224,16 @@ export function keybindActionLabel(action: KeybindAction): string {
   return action;
 }
 
-/** 物理键显示名：KeyX→X / DigitN→N / 修饰键用 Controls.* 官译，其余原样（原版即显示原始键名） */
+/** 物理键显示名：KeyX→X / DigitN→N / 方向键→箭头字形（SW-BN2：缺省表含方向键,
+ *  原始码 'ArrowLeft' 直出对玩家不可读）/ 修饰键用 Controls.* 官译，其余原样
+ *  （原版即显示原始键名） */
 export function keybindCodeLabel(code: string): string {
   if (code.startsWith('Key') && code.length === 4) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
+  if (code === 'ArrowUp') return '↑';
+  if (code === 'ArrowDown') return '↓';
+  if (code === 'ArrowLeft') return '←';
+  if (code === 'ArrowRight') return '→';
   if (code === 'ShiftLeft') return Lang.text('Controls.Shift');
   if (code === 'ControlLeft') return Lang.text('Controls.Control');
   if (code === 'ShiftRight') return `R·${Lang.text('Controls.Shift')}`;

@@ -282,6 +282,22 @@ const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
  *  :30077 switch 真值,但本支原版只消费 num151——经通用路消费即错锚）。 */
 const CENTER_ANCHOR_34788 = new Set([393, 394, 395, 423, 1022, 1036, 1093, 1112, 1118]);
 
+/** ★SW-BJ16 2026-09-07：Main.cs:33693 中心锚大支（本仓 MinionProj 域成员投影）。
+ *  原版本支锚 = proj.Center + (0, gfxOffY)（:33694-33695 vector99）、帧矩形 =
+ *  Frame(1, projFrames, 0, frame)（:33701）、origin = 帧尺寸/2（:33787 origin32）、
+ *  主绘 :34212——即「帧心锚于盒心」。这些型不走通用 num143/144 尾绘
+ *  （:34919 多帧/:35470 单帧 = 帧左上锚盒左上,本仓通用路语义）；本仓通用路对
+ *  未登记型吃 [0,0] 缺省 = 帧左上锚盒左上 ⇒ 精灵整体偏右下（758 曾 +58/951 类）。
+ *  支内改锚/改切片特例【不在集合表达内】,由 draw 支逐型消费（:33951 773 origin.Y=
+ *  帧高−12 / :33959 759 origin=(帧宽/2±1, 帧高−2) / :33964 758 锚 Y+=盒高/2+
+ *  origin=(帧宽/2, 帧高−4) / :33836 963 切片 Frame(4,13,0,frame)+锚 Y−2 /
+ *  :33771 1098·1123 锚 Y−2 / :33942 951 锚=盒底−帧高/2+4 / :34169 623 ai0==2 抖动）。
+ *  家族全表（含 WeaponProj 773 / BookProj 1092 域外成员与 A 支 641 债）=
+ *  docs/audit/summon-draw-branch-registry-2026-09-07.md,提取器 =
+ *  tools/extract-draw-branch-families.mjs（解析 Main.cs 分派条件→vid 集）。
+ *  守卫测试 = tests/sw-bj16-draw-branch-guard.test.ts（新增召唤物未查分支表即爆红）。 */
+const CENTER_ANCHOR_33703 = new Set([613, 623, 625, 626, 627, 628, 643, 758, 759, 831, 951, 963, 970, 1098, 1119, 1123]);
+
 /** 接触击退【玩家锚】方向族（Projectile.cs:13652-13660 switch,StrikeNPC num40 消费
  *  :13683）：697/699/707/708/759 原版既有 + ★1458 新增 1118 Clay Bud——击退方向 =
  *  玩家→敌（"always knocks enemies away from the player"）,非随从→敌 */
@@ -442,6 +458,14 @@ export function minionTrueBox(projId: number): { w: number; h: number } {
     case 393: case 394: case 395: return { w: 20, h: 30 };   // 海盗三变体（:4758-4759）★SW-BJ13
     case 423: return { w: 28, h: 28 };                   // 异星 UFO（:4964-4965）★SW-BJ13
     case 1036: return { w: 18, h: 10 };                  // 雾网蜘蛛（:9770-9771）★SW-BJ13
+    // ★SW-BJ16 2026-09-07：33693 中心锚支家族真盒（与构造器 if 链单源同步,判据同 BJ13）
+    case 613: return { w: 24, h: 24 };                   // 星尘细胞（:6600-6611 块内 width/height）
+    case 623: return { w: 50, h: 80 };                   // 星尘守护者（:6713-6714）
+    case 625: case 626: case 627: case 628: return { w: 24, h: 24 };   // 龙链四段（:6743-6744）
+    case 758: return { w: 20, h: 30 };                   // 吸血蛙（:7817-7818）
+    case 759: case 831: case 970: return { w: 10, h: 10 };   // 雀杖/虎宝石/阿比盖尔计数器（:7839/:8073/:9188）
+    case 951: return { w: 26, h: 26 };                   // 雪怪（:8972-8973）
+    case 963: return { w: 30, h: 48 };                   // 阿比盖尔一阶体（:9106-9107）
     case 663: return { w: 30, h: 54 };                   // :7133-7134
     case 665: return { w: 28, h: 58 };                   // :7141-7144
     case 667: return { w: 28, h: 60 };                   // :7145-7148
@@ -4047,6 +4071,20 @@ export class MinionProj extends Entity {
     else if (projId === 393 || projId === 394 || projId === 395) { this.w = 20; this.h = 30; }
     else if (projId === 423) { this.w = 28; this.h = 28; }
     else if (projId === 1036) { this.w = 18; this.h = 10; }
+    // ★SW-BJ16 2026-09-07：33693 中心锚支家族 SetDefaults 真盒补注册（同 BJ13 判据：
+    //  本支 draw 锚=盒心系,盒错即绘错；此前除 643/1098/1123/1119 外全落 16×16 缺省）：
+    //  星尘细胞 613 24×24（:6600-6611）/ 星尘守护者 623 50×80（:6713-6714）/
+    //  龙链四段 625-628 24×24（:6743-6744）/ 彩虹水晶 643 已注册 32×32（:6932-6933）/
+    //  吸血蛙 758 20×30（:7817-7818）/ 雀杖 759 10×10（:7839-7840）/ 虎宝石 831 10×10
+    //  （:8073-8074）/ 雪怪 951 26×26（:8972-8973）/ 阿比盖尔体 963 30×48（:9106-9107）/
+    //  阿比盖尔计数器 970 10×10（:9188-9189）
+    else if (projId === 613) { this.w = 24; this.h = 24; }
+    else if (projId === 623) { this.w = 50; this.h = 80; }
+    else if (projId === 625 || projId === 626 || projId === 627 || projId === 628) { this.w = 24; this.h = 24; }
+    else if (projId === 758) { this.w = 20; this.h = 30; }
+    else if (projId === 759 || projId === 831 || projId === 970) { this.w = 10; this.h = 10; }
+    else if (projId === 951) { this.w = 26; this.h = 26; }
+    else if (projId === 963) { this.w = 30; this.h = 48; }
     // ★GC 移交收口（终局扫尾批 A7，2026-08-31）：DD2 哨兵塔 SetDefaults 真盒注册——
     //   此前 663 族/弩车族落 16×16 兜底 ⇒ 判定盒/索敌锚与贴图错位。
     //   · 爆炸烈焰塔（AI_130）SetDefaults(:7132-7157)：663=30×54 → 665=28×58 →
@@ -5714,6 +5752,65 @@ export class MinionProj extends Entity {
       if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(img, -img.width / 2, -(img.height / 2 + num151));
+      ctx.restore();
+      return;
+    }
+    // ---- ★SW-BJ16 2026-09-07：33693 中心锚大支专绘（Main.cs:33693-34290,主绘 :34212）----
+    // 原版本支：锚 = proj.Center + (0, gfxOffY)（:33694-33695 vector99）、帧矩形 =
+    // Frame(1, projFrames, 0, frame)【帧高全高,无通用路的 num482−1 shave】（:33701）、
+    // origin = 帧尺寸/2（:33787 origin32）、rotation/dir 直传（:34212）。本仓成员见
+    // CENTER_ANCHOR_33703 注；通用路（:34919/:35470 = 帧左上锚盒左上+num143/144 表）
+    // 对未登记型吃 [0,0] 缺省 ⇒ 本族曾整体偏右下（如 758 (fw−bw)/2=+58、613 +4）。
+    // 支内改锚/改切片特例逐型照录（BJ13 警告「折算式仅适用支内无改锚者」的核验产物；
+    // 任务书预计算值 758 (+58,+12)/1098 (+24,+6) 系按「无特例」折算,与源码核对后
+    // 修正式为 758 (+58,+20)、1098 (+24,+8)——特例项见下）：
+    //  · 758 吸血蛙（:33964-33968）：锚 Y += 盒高/2（=盒底）、origin=(帧宽/2, 帧高−4)
+    //    ⇒ 精灵底 = 盒底 + 4（同族「脚微陷」恒量）
+    //  · 759 雀杖（:33959-33963）：origin.Y = 帧高−2、origin.X += 翻转?+1:−1
+    //    ⇒ 精灵底 = 盒心+2、横移朝向 1px（折进锚 ax）
+    //  · 951 雪怪（:33942-33946）：锚 Y += 盒高/2 − 帧高/2 + 4、origin=帧心
+    //    ⇒ 精灵底 = 盒底 + 4（任务书 17 型外的同支同病成员,提取器 B_33693 交集中补清）
+    //  · 963 阿比盖尔（:33704-33706 + :33836-33844）：切片 = Frame(4,13,0,frame)
+    //    ——4 列×13 行网格取【第 0 列】,帧 44×64（整宽竖条切片=4 倍宽错位）;锚 Y
+    //    += −2 + cos(mouseTextColor 脉冲)·4——静态 −2 照录,cos 摆系全局 UI 脉冲
+    //    （Main.cs:18399 mouseTextColor 三角波）本仓无全局 tick 源=登记债。
+    //    ★刻意不入 Arrow.PROJ_GRID：该表语义=列主序全格积（projFrameCount=cols×rows
+    //    =52）会谎报 963 帧数（原版 projFrames[963]=13,帧域恒第 0 列 0-12 行）——
+    //    帧计数被 AI 帧机/钳制消费,注册即污染;故本支内手工切片。
+    //  · 1098/1123 钻地龟（:33771-33773）：锚 Y −= 2
+    //  · 623 守护者（:34169-34177）：ai0==2 抖动 rand.NextVector2Circular(2,2)
+    //    （gamePaused 门+Main.rand 掷流,draw 侧不建模=登记债）;625-628/643/613/831/
+    //    970/1119 支内无改锚（逐型核验 :33693-34290 全支扫描结论,见审计文档）
+    //  · 域外成员：773（WeaponProj.draw 同式接入）/1092（BookProj 已合本支语义：
+    //    projFrameImg 走 PROJ_GRID[1092] 6×9 列主序 + 盒心帧心锚）
+    if (CENTER_ANCHOR_33703.has(this.projId) && img) {
+      const ax = this.projId === 759 ? (this.facing < 0 ? -1 : 1) : 0;   // :33960-33962
+      let ay = 0;
+      if (this.projId === 758) ay += this.h / 2;                          // :33965 盒底锚
+      else if (this.projId === 951) ay += this.h / 2 - img.height / 2 + 4; // :33943-33945
+      else if (this.projId === 963 || this.projId === 1098 || this.projId === 1123) ay += -2; // :33836/:33771
+      const oy = this.projId === 758 ? img.height - 4                     // :33966-33967
+        : this.projId === 759 ? img.height - 2                            // :33960
+        : img.height / 2;
+      ctx.save();
+      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+      ctx.translate(this.cx + ax, this.cy + ay);         // gfxOffY 未建模恒 0（通用路同）
+      if (this.rot !== 0 || MINION_ROT_ONLY.has(this.projId)) {
+        ctx.rotate(this.rot);
+        if (!MINION_ROT_ONLY.has(this.projId) && this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
+      } else if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
+      ctx.imageSmoothingEnabled = false;
+      if (this.projId === 963) {
+        // 切片 = Frame(4,13,0,frame)（:33704-33706）：第 0 列 × 第 frame 行,帧 44×64
+        const sheet = projSprite(963);
+        if (sheet) {
+          const fh = sheet.height / 13, fw = sheet.width / 4;
+          ctx.drawImage(sheet as CanvasImageSource, 0, Math.round(frame * fh), fw, fh,
+            -fw / 2, -fh / 2, fw, fh);
+        }
+      } else {
+        ctx.drawImage(img, -img.width / 2, -oy);
+      }
       ctx.restore();
       return;
     }

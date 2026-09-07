@@ -133,7 +133,9 @@ function mkGame(): { g: HG; st: World['store']; w: World } {
   g.mining = null;
   g.hardnessCache = 0;
   g.hammerPoundRelease = false;
-  g.player = { buffs: { has: () => false, wellFedTier: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true } };
+  g.player = { buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true } };
+  // ★SW-BJ12 2026-09-07 重钉：BJ10 smartCursor 门缺 stub（tryPlaceWall 不读,兜面）
+  g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.inTileRange = () => true;
   g.spawnParticles = () => {};
   g.sfx = { play: () => {} };
@@ -225,7 +227,8 @@ describe('SW-BF1 C3. 换墙掉旧墙物（tryPlaceWall 替换支 → ReplaceWall
     (g as unknown as Record<string, unknown>).cb = { onInventoryChanged: () => {} };
     (g as unknown as Record<string, unknown>).paintWallSpeed = () => 1;
     (g as unknown as { tryPlaceWall: (x: number, y: number, d: { wallId: number }) => void })
-      .tryPlaceWall(24, 40, { wallId: 1 });
+      // ★SW-BJ12：换墙冷却取 itemDef useTime（:40137）——def 补 vi_ 键供 vid 反解
+      .tryPlaceWall(24, 40, { wallId: 1, key: 'vi_30_stone_wall' } as { wallId: number });
     expect(st.wall[st.idx(24, 40)]).toBe(1);
     const keys = g.drops.map((d) => d.key);
     expect(keys).toContain(VI(30));            // 旧墙 Dirt Wall 掉落

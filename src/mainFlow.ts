@@ -11,6 +11,7 @@ import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
 import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
 import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
+import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
@@ -326,7 +327,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         ]).then(() => {
           ui.hideProgress();
           stopMenu();   // 撤菜单幕布+清 VUI 加载页(世界已上屏,零空窗)
-          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Welcome', g.world.name));
+          // SW-BN2 2026-09-07（用户令#3）：欢迎语键位标注改【活绑表驱动】——曾硬编码
+          // "A/D 移动，空格跳跃，E 背包，Esc 暂停"，缺省表对齐原版后 E/背包含义反转
+          // 即刻陈旧。四段标签全部经 keybindHintLabel 现读 bindsOf（重绑跟随）；
+          // 暂停段=Escape 仍绑在 Inventory 时才给键名（原版暂停浮层无独立 trigger,
+          // 本仓 Esc 链 face 派生自该绑定），否则显示"未绑定"。
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Welcome', g.world.name,
+            `${keybindHintLabel('Left')}/${keybindHintLabel('Right')}`,
+            keybindHintLabel('Jump'),
+            keybindHintLabel('Inventory'),
+            isBound('Inventory', 'Escape') ? keybindCodeLabel('Escape')
+              : Lang.text('Mods.SandboxWorld.UI.ManualUnbound')));
           maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce();
         });
       },

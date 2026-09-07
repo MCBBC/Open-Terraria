@@ -291,7 +291,7 @@ function buildRules(): TileParticleRule[] {
       // 原版尘通道 1:1：NewDust(...,43,0,0,254,newColor,0.5f)+velocity×0
       //（TileDrawing.cs:7652-7653，617/178 子支 :7573/:7604 同参）
       dust: 43, dustAlpha: 254, dustScale: 0.5,
-      // 色点回退路出生盒 = NewDust 内盒 rand.Next(W−4)+4，W=16 → [4,16)²（Dust.cs:167-170）
+      // 色点回退路出生盒 = NewDust 内盒 rand.Next(W−4)+4，W=16 → [4,16)²（Dust.cs:172-173）
       dxBox: [4, 16], dyBox: [4, 16],
       // dust 43 无重力/速度支（Dust.cs:1472-1521）+ 生成即 velocity 归零 → 静止微光
       rise: 0, grav: 0, life: 22, size: [1, 2],
@@ -333,6 +333,9 @@ function buildRules(): TileParticleRule[] {
 }
 
 /** sheet → 规则表（构建一次） */
+/** 闪光族 sheet 集（SHINE_TABLE 键集;发射器光照比例项 num43 只对这些 sheet 计算） */
+export const TILE_SHINE_SHEETS: ReadonlySet<number> = new Set(SHINE_TABLE.map((s) => s.sheet));
+
 export const TILE_PARTICLE_RULES: Map<number, TileParticleRule[]> = (() => {
   const m = new Map<number, TileParticleRule[]>();
   for (const rule of buildRules()) {

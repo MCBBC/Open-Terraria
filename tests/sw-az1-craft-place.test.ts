@@ -393,10 +393,12 @@ describe('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
     g.hitTiles = { addDamage: () => 100, clear: () => {} };
     g.swingTileCutSet = new Set();
     g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
+    // ★SW-BJ12 2026-09-07 重钉：BJ10 SmartCursorHelper.TileTargetDesired 门缺 stub
+    g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
     g.player = {
       cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
       facing: 1, useTime: 0, attackSpeedMult: 1,
-      buffs: { has: () => false }, equipStats: {},
+      buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
       inv,
     };
     const woodDef = ITEM_DEFS[iidOf(9)];

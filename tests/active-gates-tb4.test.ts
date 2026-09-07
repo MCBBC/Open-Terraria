@@ -106,10 +106,14 @@ function placeShell(w: World, drops: Array<[string, number]>, heldVid: number) {
   g.hitTiles = { addDamage: () => 100, clear: () => {} };
   g.swingTileCutSet = new Set<number>();
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
+  // ★SW-BJ12 2026-09-07 重钉：BJ10 SmartCursorHelper.TileTargetDesired 门
+  // （tryPlace 头 lockedContinuity 读）缺 stub——锁存续期 null=无锁直通
+  g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.player = {
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
-    buffs: { has: () => false }, equipStats: {},
+    // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐
+    buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
     inv: {
       selected: 0,
       slots: new Array(50).fill(null),

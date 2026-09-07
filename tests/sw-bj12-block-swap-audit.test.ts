@@ -192,6 +192,42 @@ describe('A1 积累不足分支摆拍冷却 + 整段 ItemTimeIsZero 闸', () => 
     expect(st.type[st.idx(9, 20)]).toBe(STONE_T);
     expect(g.drops).toEqual([]);
   });
+
+  it('F6 不获成就面（byPlayer=false → 不计 tileDestroyed/HandleMining）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(9, 20, setT('dirt'));
+    const g = shell(w, { held: WOOD_V, picks: [[COPPER_PICK, 5]] });
+    const destroyed: number[] = [];
+    (g.achievements as unknown as { notifyTileDestroyed: (n: number) => void }).notifyTileDestroyed =
+      (n: number) => destroyed.push(n);
+    g.player.useTime = 0;
+    g.tryPlace(9, 20, defOf(WOOD_V));                    // 一拍换完（土 70×2）
+    g.player.useTime = 0;
+    g.tryPlace(9, 20, defOf(WOOD_V));
+    expect(st.type[st.idx(9, 20)]).toBe(WOOD_T);
+    expect(destroyed).toEqual([]);                       // ReplaceTile 非破坏面,无成就
+  });
+});
+
+// ============================================================
+// F1 油漆移除（vanilla ReplaceTile ClearBlockPaintAndCoating :63171 同效面）
+// ============================================================
+describe('F1 交换移除油漆', () => {
+  it('带漆目标块换后新块无漆（breakTile 清格清漆 → 新块 fresh）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(9, 20, setT('dirt'));
+    const i = st.idx(9, 20);
+    st.paint[i] = 5;                                      // 旧块带漆
+    const g = shell(w, { held: WOOD_V, picks: [[COPPER_PICK, 5]] });
+    g.player.useTime = 0;
+    g.tryPlace(9, 20, defOf(WOOD_V));
+    g.player.useTime = 0;
+    g.tryPlace(9, 20, defOf(WOOD_V));
+    expect(st.type[i]).toBe(WOOD_T);
+    expect(st.paint[i]).toBe(0);                          // 漆随旧块移除
+  });
 });
 
 // ============================================================

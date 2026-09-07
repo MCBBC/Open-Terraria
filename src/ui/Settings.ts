@@ -235,9 +235,12 @@ export class SettingsPanel {
   }
 
   /** 监听下一键（PlayerInput.ListenFor + CheckRebindingProcessKeyboard :1495-1513：
-   *  键已在列表→移除（反选解绑）；否则整表替换为该键。Esc 取消。
-   *  capture 阶段拦截：面板 escHandler/main.ts 键盘链全不让位（含 F1-F12 防浏览器快捷） */
+   *  键已在列表→移除（反选解绑）；否则整表替换为该键。Esc/右键取消（SW-BN2 用户令#4：
+   *  未绑定 action 同样可点行录入——绑定成功前不写 options,Esc/右键只还原显示）。
+   *  capture 阶段拦截：面板 escHandler/main.ts 键盘链/Input 鼠标链全不让位（含
+   *  F1-F12 防浏览器快捷） */
   private rebindListener: ((e: KeyboardEvent) => void) | null = null;
+  private rebindCancelPointer: ((e: MouseEvent) => void) | null = null;
   private listenRebind(action: KeybindAction, btn: HTMLElement, refresh: () => void): void {
     this.cancelRebindListen();
     btn.textContent = Lang.text('Mods.SandboxWorld.Settings.ListeningKey');
@@ -254,12 +257,29 @@ export class SettingsPanel {
     };
     this.rebindListener = onKey;
     window.addEventListener('keydown', onKey, true);
+    // 右键取消（SW-BN2 2026-09-07）：监听期右压/菜单键=取消不写绑;捕获相拦截,
+    // Input 的 window mousedown（bubble 相）不收到 → 世界右键不误触
+    const onCancel = (e: MouseEvent): void => {
+      if (e.type === 'mousedown' && e.button !== 2) return;   // 左键照常（点他行换绑等）
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.cancelRebindListen();
+      refresh();
+    };
+    this.rebindCancelPointer = onCancel;
+    window.addEventListener('mousedown', onCancel, true);
+    window.addEventListener('contextmenu', onCancel, true);
   }
 
   private cancelRebindListen(): void {
     if (this.rebindListener) {
       window.removeEventListener('keydown', this.rebindListener, true);
       this.rebindListener = null;
+    }
+    if (this.rebindCancelPointer) {
+      window.removeEventListener('mousedown', this.rebindCancelPointer, true);
+      window.removeEventListener('contextmenu', this.rebindCancelPointer, true);
+      this.rebindCancelPointer = null;
     }
   }
 

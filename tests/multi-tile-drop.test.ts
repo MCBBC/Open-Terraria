@@ -109,9 +109,12 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
 
   it('容器/桌/水槽/砧/碗/拉杆/引爆器/宝石锁/钓鱼箱/二类桌', () => {
     // ★拉杆 132 已接真物品 513（审计 E ❌15,Check2x2 :48731,2026-08-23 批）;
+    // ★瑟银砧 134 已接真物品 525（掉落全表对账 2026-09-07,Check2x1 case 134 :47667
+    //   pin style0——1220 OrichalcumAnvil 档未建模=登记债）;
     // 碗 103/熔炉 133 的分档掉落走运行时 styleDropVidOfFrames（def 仍 null→place_ 基底）
     expect(dropKeyOf('v_132_lever')).toBe(VI(513));
-    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_134_anvils_hardmode', 'v_103_bowls', 'v_411_detonator', 'v_440_gemlocks', 'v_376_fishing_crates']) {
+    expect(dropKeyOf('v_134_anvils_hardmode')).toBe(VI(525));
+    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_103_bowls', 'v_411_detonator', 'v_440_gemlocks', 'v_376_fishing_crates']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });
@@ -171,22 +174,31 @@ describe('无原版放置物品的装饰：无放置物品返还（⚠️4 勘�
     }
   });
 
-  it('瓦砾 648/649/651/652 + 蜥蛋 751/752', () => {
+  it('瓦砾 648/651/652 + 蜥蛋 751/752', () => {
     // ⚠️4 登记：648（Check3x2 :49618 逐 style 掉 195/174/150/3/…）/651（:49679→195/331/
     // 62）/652（:48705-48707）/647（:49573 分档）原版有资源掉落——无【放置物品】返还,
     // 资源档登记待接（本表只锁放置物品侧）
-    for (const k of ['v_648_large_rubble_3x2_group_2', 'v_649_medium_rubble_2x1', 'v_651_large_rubble_3x2_group_3', 'v_652_medium_rubble_2x2', 'v_751_sleeping_digtoise', 'v_752_chillet_egg']) {
+    // ★649/751/752 已移出本组（掉落全表对账 2026-09-07）：649→Check2x1 case 649 :47677
+    //   带表 pin 首带 3;751/752→Check2x2 case 751/752 :48988-48993 恒掉 5667/6142
+    //   （两 tile 无放置物品,曾恒无掉落=真缺）
+    for (const k of ['v_648_large_rubble_3x2_group_2', 'v_651_large_rubble_3x2_group_3', 'v_652_medium_rubble_2x2']) {
       expect(dropKeyOf(k)).toBe('');
     }
+    expect(dropKeyOf('v_649_medium_rubble_2x1')).toBe(VI(3));
+    expect(dropKeyOf('v_751_sleeping_digtoise')).toBe(VI(5667));
+    expect(dropKeyOf('v_752_chillet_egg')).toBe(VI(6142));
   });
 
-  it('echo 变体/倒木/垃圾桶/开态门件（特例分支或特例拦截承担）', () => {
+  it('echo 变体/倒木/开态门件（特例分支或特例拦截承担）', () => {
     // 488 倒木→mysticLogs 延迟旗分支+木头 9×Next(10,21)（:49561,⚠️4 已接）；
     // 706→breakShrineSword（4144/989）；236/238→生命果/世花分支；
     // 386/389=开态（关闭态 387/388 才有物品;389 双 def 已并入 v_389_tall_gate_open）
     // ★v_334 legacy 武器架已移出本组（2026-09-02 ⑥-b 翻正）：def.drop=2699 直掉,
     //   专档见下方「legacy 武器架 334」describe（原「无放置物品返还」锁定档系误判）
-    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_99_trash_can', 'v_386_trapdooropen', 'v_389_tall_gate_open', 'v_165_cave_decos']) {
+    // ★v_99 垃圾桶已移出本组（掉落全表对账 2026-09-07）：Check2x2 case 99 :49099 恒掉
+    //   348 TrashCan——99 无放置物品曾恒无掉落=真缺,现 def.drop=348 直掉
+    expect(dropKeyOf('v_99_trash_can')).toBe(VI(348));
+    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_386_trapdooropen', 'v_389_tall_gate_open', 'v_165_cave_decos']) {
       expect(dropKeyOf(k)).toBe('');
     }
   });
@@ -339,17 +351,23 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
     // ★纯函数层 oracle：巨石族（Boulders 表 138/484/664/665/711-716,有放置物品档）运行时
     // 已改由 object 分支前拦截（❌2=整件清+滚石弹+无物品,A 段直证）,本表值不回改——
     // 兜底判据本身（createTile 双源）不变,仅消费侧让位特例支路;654 TNT 同理（❌1 dropKey=''）
-    let withItem = 0, withoutItem = 0;
+    // ★2026-09-07 掉落对账批：484（滚石仙人掌,放置即消耗原版零返还）随滴水五型入
+    //  NO_RETURN_RECYCLE_SHEETS——oracle 改走 Game.ts 同源常量（消费面单点）
+    const { NO_RETURN_RECYCLE_SHEETS } = require('../src/core/Game');
+    let withItem = 0, withoutItem = 0, noReturn = 0;
     for (const d of multiDropNull) {
       const has = vanillaSheets.has(d.vanilla!.sheet!);
-      const expected = has ? 'place_' + d.key : '';
+      const noRet = NO_RETURN_RECYCLE_SHEETS.has(d.vanilla!.sheet!);
+      const expected = has && !noRet ? 'place_' + d.key : '';
       expect(multiTileDropKey(d, placeable), `${d.key}(sheet ${d.vanilla!.sheet})`).toBe(expected);
-      has ? withItem++ : withoutItem++;
+      if (noRet) noReturn++;
+      else has ? withItem++ : withoutItem++;
     }
     expect(withItem).toBeGreaterThan(230);   // 审计 ⚠️1 主体（雕像/画/旗/功能站/笼缸…）
     // ★H.4 批（2026-08-24）后基数 239：11 站（463/395/425/486/510/511/573/581/642/660/698）
     // 已定谳 Check* 锚点真掉落、补 def.drop 移出本集（见 G 段）
     expect(withoutItem).toBeGreaterThan(20); // 纯装饰 27 族
+    expect(noReturn).toBe(1);                // 484 滚石仙人掌（滴水五型在 drop!=null 前集）
   });
 
   it('vanillaPlaceableTileKeys 覆盖 oracle 全集（vi_ tile 反查无漏）', () => {

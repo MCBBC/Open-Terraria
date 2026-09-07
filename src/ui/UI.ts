@@ -1243,6 +1243,20 @@ export class UI {
     if (bgImg && bgImg instanceof HTMLImageElement && !bgImg.complete) {
       bgImg.addEventListener('load', applyBg, { once: true });
     }
+    // SW-BN2 2026-09-07：Esc 关闭（uiBlocking 模态自带 Esc 是 Inventory/Esc 链
+    // "模态让位"支的前提——原版 inFancyUI 支 Player.cs:4987-4989 语义：fancy UI
+    // 打开时 Inventory 沿只关 fancy UI。此前手册无 Esc 口=该支唯一死端,补齐）。
+    // 关闭不视为"已读"：不置 manualSeen、不撤红点（"我知道了"钮才熄泡）。
+    const escClose = (e: KeyboardEvent): void => {
+      if (e.code !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.removeEventListener('keydown', escClose, true);
+      panel.remove();
+      if (!wasPaused) game.paused = false;
+      if (!wasBlocking) game.input.uiBlocking = false;
+    };
+    window.addEventListener('keydown', escClose, true);
     ok.addEventListener('click', () => {
       void options.set('manualSeen', true);   // 读过=熄泡
       if (hideChk.checked) {
@@ -1252,6 +1266,7 @@ export class UI {
       } else {
         this.manualBtn?.querySelector('.sw-manual-badge')?.remove();
       }
+      window.removeEventListener('keydown', escClose, true);
       panel.remove();
       if (!wasPaused) game.paused = false;
       if (!wasBlocking) game.input.uiBlocking = false;

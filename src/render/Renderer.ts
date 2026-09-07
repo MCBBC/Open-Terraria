@@ -2789,9 +2789,43 @@ export class Renderer {
   easeFullMap() {
     const fm = this.fullMap;
     const diff = fm.zoomTarget - fm.zoom;
-    if (Math.abs(diff) < 0.002) { fm.zoom = fm.zoomTarget; return; }
+    if (Math.abs(diff) < 0.002) {
+      // ★SW-BJ15 2026-09-07：收敛帧也按锚点反解一次——曾直接 return 不反解，
+      //   最后一段 (<0.002) 缩放不补偿，pan 残差 (zt-z1)×|锚-世界中心|
+      //   （实测 0.65px；锚靠版图边缘可达 ~1.2px）。拖拽路径保持 pan↔锚同步，重解恒等
+      fm.zoom = fm.zoomTarget;
+      this.applyMapAnchor();
+      return;
+    }
     fm.zoom += diff * 0.16;
     this.applyMapAnchor();
+  }
+
+  /** SW-BJ15 2026-09-07：开全屏地图并预置"主角居中"锚定态。原版开图 resetMapFull →
+   *  视口中心 = 屏幕中心（Main.cs:41810-41813 mapFullscreen=true + :56231-56239
+   *  mapFullscreenPos = (screenPosition+屏中心)/16）；本仓表现为 zoom 0.5→2 缓动、
+   *  缓动全程主角钉在屏幕中心（applyMapAnchor 每帧反解 pan）。
+   *  单一预置源：M 键（Game.toggleFullMap）与小地图点击（Game.update 边沿 + 本文件
+   *  drawMinimap 块）三入口共用同式。曾 drawMinimap 块自设 zoom=minimapZoom*0.5 且
+   *  anchorMX/MY=floor(屏幕px/TILE)（把屏幕坐标错当世界 tile）、anchorU/V 留旧值——
+   *  会话首开（anchorU/V=初始 0）时地图左缘被钉在屏幕左缘 = 用户实报"地图首次打开
+   *  偏到左边"；与 Game 入口同帧双开时还把正确预置踩成 0.525/垃圾锚（恒定偏心）。
+   *  本预置幂等：同帧多入口各写一遍同值，互不踩。 */
+  openFullMapFocusedOnPlayer(player: Player, worldW: number, worldH: number): void {
+    const fm = this.fullMap;
+    fm.open = true;
+    fm.zoom = 0.5;
+    fm.zoomTarget = 2;
+    fm.anchorU = player.cx / TILE;
+    fm.anchorV = player.cy / TILE;
+    fm.anchorMX = this.canvas.width / 2;
+    fm.anchorMY = this.canvas.height / 2;
+    // 预置 pan = applyMapAnchor 在 zoom 0.5 的反解（缓动首帧前 pan 必须已对）。
+    // 世界尺寸显式入参（不依赖 _fmWorldW 的 render() 置位时序）
+    fm.panX = (worldW * fm.zoom) / 2 - fm.anchorU * fm.zoom;
+    fm.panY = (worldH * fm.zoom) / 2 - fm.anchorV * fm.zoom;
+    this._mapInit = false;
+    this._mapOpenClick = true;   // 开图的那次点击不参与拖拽（drawFullMap 消费）
   }
   private _fmWorldW = 0;
   private _fmWorldH = 0;
@@ -15336,14 +15370,15 @@ export class Renderer {
       }
     }
     // ★点击小地图地图区域 → 打开全图（用户实报缺失——原版 DrawMap 全模式共用
-    //  MapIconOverlay，小地图模式可点击展开全图；按钮/天气控件已消费的点击不触发）
-    if (clicked && !this._minimapBtnClicked
+    //  MapIconOverlay，小地图模式可点击展开全图；按钮/天气控件已消费的点击不触发）。
+    //  ★SW-BJ15：加 !fullMap.open 门（本块在 render 早段运行，全屏地图打开时小地图
+    //  只是视觉被盖住，逻辑仍活——旧版无门，开图状态点右上区域会把已开地图的视图
+    //  状态整个重置）；开图预置统一走主角锚定 openFullMapFocusedOnPlayer（旧版
+    //  anchorMX=floor(屏幕px/TILE) 错把屏幕坐标当世界 tile + anchorU/V 留旧值 =
+    //  会话首开视野钉到地图左缘，用户实报"首次打开偏到左边"）
+    if (clicked && !this.fullMap.open && !this._minimapBtnClicked
       && mx >= ox && mx <= ox + size && my >= oy && my <= oy + size) {
-      this.fullMap.open = true;
-      this.fullMap.zoomTarget = Math.max(0.25, this.minimapZoom * 0.5);
-      this.fullMap.zoom = this.fullMap.zoomTarget;
-      this.fullMap.anchorMX = Math.floor(mx / TILE);
-      this.fullMap.anchorMY = Math.floor(my / TILE);
+      this.openFullMapFocusedOnPlayer(player, world.w, world.h);
     }
     this._minimapBtnClicked = false;
     this._uiPrevMouseDown = this._mouseDown;

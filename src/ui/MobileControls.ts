@@ -691,15 +691,16 @@ export class MobileControls {
     this.root.appendChild(col);
   }
 
-  /** 右下角暂停小钮(官方同位):tapVirtual('Inventory') 默认 Esc 形态=优先级链
-   *  (有面板先收面板,无面板开暂停菜单) */
+  /** 右下角暂停小钮(官方同位):tapVirtual('Inventory', intent 'pause')=暂停浮层面
+   *  (SW-BN2 2026-09-07:优先级链 intent 三态化——'pause'=无面板直达暂停菜单,
+   *  背包开着=叠开暂停浮层;有对话框/全图等先收面板,见 ui/escapeChain.ts) */
   private buildPauseBtn(): void {
     const b = document.createElement('div');
     b.className = 'sw-mbtn sw-mpause';
     this.setIcon(b, 'pause');
     b.addEventListener('touchstart', (e) => {
       e.preventDefault(); e.stopPropagation();
-      this.game.input.tapVirtual('Inventory', { virtualIntent: 'escape' });
+      this.game.input.tapVirtual('Inventory', { virtualIntent: 'pause' });
     }, { passive: false });
     this.root.appendChild(b);
   }

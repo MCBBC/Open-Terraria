@@ -73,18 +73,18 @@ try {
     g.input.tapVirtual('Inventory', { virtualIntent: 'inventory' });
     await new Promise((r) => setTimeout(r, 400));
     const closed = !(ui.invPanel && ui.invPanel.style.display === 'block');
-    // Esc 形态:无面板 → 暂停菜单
-    g.input.tapVirtual('Inventory', { virtualIntent: 'escape' });
+    // 暂停钮形态(intent 'pause',SW-BN2 三态化):无面板 → 暂停菜单
+    g.input.tapVirtual('Inventory', { virtualIntent: 'pause' });
     await new Promise((r) => setTimeout(r, 400));
     const pausePanel = !!document.querySelector('.sw-pause-panel');
-    g.input.tapVirtual('Escape');      // 收暂停(resume 分支)
+    g.input.tapVirtual('Escape');      // 收暂停(closePause 支)
     await new Promise((r) => setTimeout(r, 400));
     const pauseClosed = !document.querySelector('.sw-pause-panel');
     return { opened, pausedWhenOpen, closed, pausePanel, pauseClosed };
   });
   ok('A.virt inventory opens inv(open, not paused)', a3.opened && !a3.pausedWhenOpen);
   ok('A.virt inventory closes again', a3.closed);
-  ok('A.virt escape intent opens pause menu', a3.pausePanel);
+  ok('A.virt pause intent opens pause menu', a3.pausePanel);
   ok('A.pause closes on next esc edge', a3.pauseClosed);
 
   // 世界触摸长按 450ms → rightDown 脉冲(CDP 受信 touch)

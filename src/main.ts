@@ -6,6 +6,7 @@ import { showSplash } from './ui/Splash';
 import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
 import { mountInstallPrompt } from './ui/InstallPrompt';
 import { UI } from './ui/UI';
+import { resolveEscapeChain, type EscapeIntent } from './ui/escapeChain';   // SW-BN2 2026-09-07
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
 import { ITEM_BY_KEY , VANILLA_ITEM_KEY_BY_ID , ITEM_DEFS } from './data/items';
@@ -280,10 +281,12 @@ function enterGameHooks() {
   if (g) {
     g.input.keydownHandlers.push((code, ke) => {
       if (ke.origin !== 'virtual') return;
-      // action 口(系统列背包/暂停钮):intent 显式携带
+      // action 口(系统列背包/暂停钮):intent 显式携带。SW-BN2 起 intent=触发源形态
+      // 'escape'(Esc 键面)/'inventory'(背包钮/其余绑定键)/'pause'(触屏暂停小钮)
       if (ke.virtualAction === 'Inventory') {
         runInventoryEscapeChain(g,
           ke.virtualIntent === 'inventory' ? 'inventory'
+            : ke.virtualIntent === 'pause' ? 'pause'
             : ke.virtualIntent === 'escape' ? 'escape'
             : code === 'Escape' ? 'escape' : 'inventory');
         return;
@@ -322,57 +325,87 @@ function initCameraModeWiring(game: Game): boolean {
 }
 
 // ---- 键盘：背包/暂停/保存 ----
-/** Inventory/Esc 优先级态机(main.ts 原 window keydown 分支提取,逐语句等价;
- *  mobile-adaptation-plan 模块①:移动端触屏"背包/暂停"钮与物理键盘共用此唯一
- *  实现——虚拟路径 = Input.tapVirtual('Inventory') → keydownHandlers(origin=
- *  'virtual') 薄派发(enterGameHooks 注册),重绑即时跟随绑定表)。
- *  intent 终点形态:'escape'=暂停菜单(物理 Esc / 虚拟无面板默认),
- *  'inventory'=开背包(物理其它 Inventory 绑定键,如 KeyE) */
-function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory'): void {
-  if (game.summonPanel?.open) {
-    // F6 召唤面板打开时,Esc 先收面板不进暂停链
-    game.summonPanel.close();
-    game.input.uiBlocking = false;
-  } else if (game.renderer.fullMap.open) {
-    game.renderer.fullMap.open = false;
-  } else if (pausePanel) {
-    pausePanel.remove();
-    pausePanel = null;
-    game.paused = false;
-    ui.closeInventory();
-    game.input.uiBlocking = false;
-  } else if (game.npcDialogActive) {
-    // Player.cs:4960-5025 ToggleInv 优先序：talkNPC≥0 先关对话（Sound11 +
-    // playerInventory=false），不落背包/暂停——NpcDialog 自身 Esc 捕获监听已拦截
-    // 物理键，此分支承接虚拟沿（触屏暂停钮/重绑键）与 dialogNpc 残余态
-    game.closeNpcDialog();
-  } else if (ui.signDialogActive) {
-    // 同链路牌支：sign≥0 关牌先于背包（Player.cs ToggleInv 后段）
-    ui.closeSignDialog();
-  } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
-    ui.closeInventory();
-  } else if (intent === 'escape') {
-    game.paused = true;
-    pausePanel = ui.showPause({
-      onResume: () => {
-        pausePanel?.remove();
-        pausePanel = null;
-        game!.paused = false;
-      },
-      onSave: () => flow?.doSave(),
-      // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
-      // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
-      onSettings: () => flow?.openSettings(true),
-      onBestiary: () => flow?.openBestiary(),
-      onQuit: () => {
-        pausePanel = null;
-        game!.paused = false;
-        inGame = false;
-        flow?.quitToMenu();
-      },
-    });
-  } else {
-    ui.openInventory();
+/** 暂停/设置浮层（原版 IngameOptions 等价面）开启：game.paused = CanPauseGame
+ *  （Main.cs:17484 netMode==0 ∧ ingameOptionsWindow）的暂停旗;浮层可叠于背包
+ *  （SW-BN2:背包开着再按 Esc 直达此处,原版该浮层的背包态入口 =
+ *  DrawInterface_29_SettingsButton Main.cs:46287-46301）。 */
+function openInGamePause(game: Game): void {
+  game.paused = true;
+  pausePanel = ui.showPause({
+    onResume: () => {
+      pausePanel?.remove();
+      pausePanel = null;
+      game!.paused = false;
+    },
+    onSave: () => flow?.doSave(),
+    // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
+    // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
+    onSettings: () => flow?.openSettings(true),
+    onBestiary: () => flow?.openBestiary(),
+    onQuit: () => {
+      pausePanel = null;
+      game!.paused = false;
+      inGame = false;
+      flow?.quitToMenu();
+    },
+  });
+}
+
+/** Inventory/Esc 优先级态机执行器（SW-BN2 2026-09-07：决策核提取到 ui/escapeChain
+ *  的 resolveEscapeChain 纯函数——支序/原版锚/用户令分歧全锚在该文件头注,此处只
+ *  做状态现采 + 动作落盘。物理键盘/虚拟沿共用此唯一实现,重绑即时跟随绑定表）。
+ *  intent 触发源形态（EscapeIntent）：'escape'=物理 Esc 键; 'inventory'=其余
+ *  Inventory 绑定键与触屏背包钮; 'pause'=触屏暂停小钮。 */
+function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'pause'): void {
+  const act = resolveEscapeChain({
+    summonOpen: !!game.summonPanel?.open,
+    fullMapOpen: game.renderer.fullMap.open,
+    pauseOpen: pausePanel != null,
+    npcDialogActive: game.npcDialogActive,
+    signDialogActive: ui.signDialogActive,
+    // 模态面板（图鉴/研究/成就/旅程/表情/手册等）开着：链让位（原版 inFancyUI 支
+    // Player.cs:4987-4989——各面板自带 Esc 关闭监听,此沿不落背包/暂停）
+    uiBlocking: game.input.uiBlocking,
+    inventoryOpen: ui.inventoryOpen,
+  }, intent);
+  switch (act) {
+    case 'closeSummon':
+      game.summonPanel!.close();
+      game.input.uiBlocking = false;
+      break;
+    case 'closeFullMap':
+      game.renderer.fullMap.open = false;
+      break;
+    case 'closePause':
+      // 浮层开着 → 收浮层【并收背包】回游戏（SW-BN2 起浮层可叠于背包,Esc 一次
+      // 退出两层防"Esc→暂停→Esc→暂停"死循环;「继续游戏」钮仍只收浮层回背包,
+      // 同原版 IngameOptions.Close 后 playerInventory 不清）
+      pausePanel?.remove();
+      pausePanel = null;
+      game.paused = false;
+      ui.closeInventory();
+      game.input.uiBlocking = false;
+      break;
+    case 'closeNpcDialog':
+      // Player.cs:5000-5013 talkNPC 支：先关对话（Shop 级联关,closeNpcDialog
+      // →npcShopClose）,不落背包/暂停——NpcDialog 自身 Esc 捕获监听已拦截物理键,
+      // 此分支承接虚拟沿（触屏暂停钮/重绑键）与 dialogNpc 残余态
+      game.closeNpcDialog();
+      break;
+    case 'closeSign':
+      ui.closeSignDialog();   // Player.cs:5014-5016 sign 支
+      break;
+    case 'noop':
+      break;                  // uiBlocking 模态让位（escapeChain.ts 头注）
+    case 'openPause':
+      openInGamePause(game);
+      break;
+    case 'closeInventory':
+      ui.closeInventory();
+      break;
+    case 'openInventory':
+      ui.openInventory();     // Player.cs:5023-5025 OpenInventory
+      break;
   }
 }
 
@@ -383,9 +416,10 @@ window.addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement | null;
   const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
   if (typing && e.code !== 'Escape') return;
-  // ---- Inventory 动作（M5 键位表：默认 Escape+KeyE 双键——历史行为 E 同开背包；
-  //      判定在 code 无关处，重绑后跟随。原链：Esc=暂停菜单，其余键=开背包；
-  //      态机本体已提取为 runInventoryEscapeChain(唯一实现,虚拟沿共用)）----
+  // ---- Inventory 动作（SW-BN2 2026-09-07 键位表对齐原版：Inventory=Escape
+  //      （PlayerInput.cs:2074）,Grapple=E（:2075）——判定在 code 无关处,重绑后
+  //      跟随。Esc=开背包,背包开着再按 Esc=暂停/设置浮层（用户令#2,链细节见
+  //      ui/escapeChain.ts 头注）;其余绑定键=背包 toggle）----
   if (isBound('Inventory', e.code)) {
     e.preventDefault();
     runInventoryEscapeChain(game, e.code === 'Escape' ? 'escape' : 'inventory');
@@ -425,9 +459,9 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      // Shift+F4 = 全图迷雾消除/恢复（切换式：再按恢复到消除前的探索快照——
-      // World.toggleFullReveal 深拷贝位图快照+版本 bump 整幅重建；首用确认门;
-      // 非 Shift F4 = 相机模式（更早分支已 return））
+      // ★SW-BJ15 2026-09-07：Shift+F4 = 全图迷雾消除/恢复（切换式：再按恢复到
+      // 消除前的探索快照——World.toggleFullReveal 深拷贝位图快照+版本 bump 整幅
+      // 重建；首用确认门;非 Shift F4 = 相机模式（更早分支已 return））
       if (e.shiftKey) {
         e.preventDefault();
         showFeatureGate('fog', '全图迷雾消除（再按可恢复）', () => {

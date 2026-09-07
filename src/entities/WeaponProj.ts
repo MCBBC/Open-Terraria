@@ -5846,6 +5846,28 @@ export class GrenadeProj extends Entity {
     const drawFrames = this.projId === 519 ? BOMB_FISH_FRAMES
       : this.projId === 773 ? BEETLE_BOMB_FRAMES
       : this.projId === 1088 ? ACORN_SEED_FRAMES : 0;
+    // ★SW-BJ16 2026-09-07：773 甲虫炸弹 = Main.cs:33693 中心锚支成员（origin.Y =
+    //  帧高−12 :33951-33953）——不走通用尾绘盒左上锚。旧通用路（drawProj 帧通道）
+    //  精灵顶 = 盒顶（22×42 帧/22×22 盒）⇒ 整体偏低 19px（原版精灵顶 = 盒心−30 =
+    //  盒顶−19）。源矩形用全帧高：本支无 :35047 的 num482−1 shave（SW-L1 I-4 的
+    //  「519/773」并提中 773 半项随之退役——该 shave 系通用路语义,773 本就不在
+    //  通用路内；519 真·通用路成员不受影响）
+    if (this.projId === 773) {
+      const sheet = projSprite(773);
+      const ctx = r.ctx;
+      if (sheet && ctx) {
+        const fh = sheet.height / BEETLE_BOMB_FRAMES;
+        ctx.save();
+        ctx.globalAlpha *= firedA;
+        ctx.translate(this.cx, this.cy);
+        ctx.rotate(this.rot);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sheet as CanvasImageSource, 0, Math.round(drawFrame * fh),
+          sheet.width, fh, -sheet.width / 2, -(fh - 12), sheet.width, fh);
+        ctx.restore();
+        return;
+      }
+    }
     drawProj(r, cam, this, this.projId, this.rot, '#408040', firedA, -1, false, false, 1,
       drawFrame, drawFrames);
   }

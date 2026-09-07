@@ -68,10 +68,16 @@ def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05,
 def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#77694F', drop: 25, vanilla: { sheet: 11, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: 5, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: 27, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
+// drop:null（2026-09-07 掉落全表对账）：tile 3 掉落面只有 fx==144→蘑菇 5 / 种子门 283
+// （KillTile case 3 :65506-65515）——27 橡果从不在 tile 3 掉落面,27 曾是死值+误导;
+// 条件掉落由 Game.killTileDropItems sheet-3 分支承载（cut 路径先 return,def.drop 不可达）
+def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 169, vanilla: { sheet: 53, frame: 'blend' } });
 def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 593, vanilla: { sheet: 147, frame: 'blend' } });
-def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 27, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 2 } }); // fh:2=原版 TileObjectData Width1/Height2+frameSize[1,2](2026-08-13 atlas-lint ATL-06 裁决;此前 fh:1 错)
+// drop:null（2026-09-07 掉落全表对账）：树苗 20 在 KillTile 共享 no-drop 组（:66277）,
+// 原版砍树苗【零掉落】——曾 drop:27 橡果=砍苗还橡果(1×1 尾段 live 多掉,非 tileCut);
+// key 无 v_ 前缀不入 place_v_ 回收,null 即与原版一致
+def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: null, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 2 } }); // fh:2=原版 TileObjectData Width1/Height2+frameSize[1,2](2026-08-13 atlas-lint ATL-06 裁决;此前 fh:1 错)
 def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 172, vanilla: { sheet: 57, frame: 'auto' } }); // 172=AshBlock 独立物品（1.4.4+ 变更,1457 KillTile case 57 :65211→172,曾误掉 3 石块）
 
 // ===================== 原版素材图块（terraria-assets + TEdit 数据） =====================
@@ -231,7 +237,10 @@ def({ key: 'v_495_shell_pile_block', name: '', solid: true, opacity: 1, pick: 0,
 def({ key: 'v_479_smooth_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B27244', blend: true, drop: 4051, vanilla: { sheet: 479, frame: 'auto' } });
 def({ key: 'v_353_vine_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', blend: true, drop: 2996, rope: true, vanilla: { sheet: 353, frame: 'auto' } }); // D-6:case 353(:64170)→2996 Vine Rope（曾 place_v_ 兜底）
 def({ key: 'v_477_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 2, vanilla: { sheet: 477, frame: 'auto' } }); // 修剪草→泥土 2（case 0/2/109/199/477/492 组）
-def({ platform: true, key: 'v_380_planter_boxes', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: null, vanilla: { sheet: 380, frame: 'auto' } });
+// drop:3215（2026-09-07 掉落全表对账 pin style0）：KillTile case 380 `3215+frameY/18`
+// （:65726-65729）八档 3215-3222（DayBloom..FireBlossomPlanterBox）——曾 drop:null 走
+// place_v_ 回收;逐档未建模=登记债（同 v_137_traps「只回填最常见档」先例）
+def({ platform: true, key: 'v_380_planter_boxes', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: 3215, vanilla: { sheet: 380, frame: 'auto' } });
 def({ key: 'v_230_crispy_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#834F0D', blend: true, drop: 1127, vanilla: { sheet: 230, frame: 'auto' } });
 def({ key: 'v_562_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: 4564, vanilla: { sheet: 562, frame: 'auto' } });
 def({ key: 'v_371_pink_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F965BD', blend: true, drop: 3113, vanilla: { sheet: 371, frame: 'auto' } });
@@ -302,7 +311,11 @@ def({ key: 'v_587_ruby_tree', name: '', solid: false, framed: true, opacity: 0.0
 def({ key: 'v_86_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 332 /* Check3x2 :49698（审计 E ❌18） */, vanilla: { sheet: 86, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_376_fishing_crates', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#A0785C', drop: null, vanilla: { sheet: 376, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_470_mannequins', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', vanilla: { sheet: 470, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_324_seashells', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E4D5AD', drop: null, vanilla: { sheet: 324, frame: 'style', fw: 1, fh: 1 } });
+// drop:2625（2026-09-07 掉落全表对账 pin style0）：KillTile case 324 frameY/22 分档
+// （:65793-65812）0→2625 Seashell / 1→2626 Starfish / 2→4072 / 3→4073 / 4→4071——
+// 曾 drop:null 走 place_v_ 回收掉合成放置件;样式档逐 style 掉落未建模=登记债
+// （金标 tests/tile-drop-golden-1457.test.ts 条件表账本）
+def({ key: 'v_324_seashells', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E4D5AD', drop: 2625, vanilla: { sheet: 324, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_81_coral', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F585BF', drop: 275 /* KillTile :64770（审计 E ❌24;81 非 tileCut 走镐挖） */, vanilla: { sheet: 81, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_136_switch', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D5CBCC', drop: 538 /* KillTile :64809（审计 E ❌16） */, vanilla: { sheet: 136, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_355_alchemy_table', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8D6B59', drop: null, vanilla: { sheet: 355, frame: 'style', fw: 3, fh: 3 } });
@@ -408,8 +421,11 @@ def({ key: 'v_481_cracked_blue_brick', name: '', solid: true, opacity: 1, pick: 
 def({ key: 'v_119_iridescent_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B5C6C', blend: true, drop: 413, vanilla: { sheet: 119, frame: 'auto' } });
 def({ key: 'v_120_mudstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 414, vanilla: { sheet: 120, frame: 'auto' } });
 def({ key: 'v_714_spider_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 714, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_752_chillet_egg', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null, vanilla: { sheet: 752, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_751_sleeping_digtoise', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#baa854', drop: null, vanilla: { sheet: 751, frame: 'style', fw: 2, fh: 2 } });
+// 751/752（2026-09-07 掉落全表对账）：KillTile 主 switch 无 751+ case,掉落在
+// Check2x2 case 751→5667 Digtoise / 752→6142 Huge Dragon Egg（:48988-48993）——
+// 两 tile 无放置物品（回收不触发）曾恒无掉落=真缺
+def({ key: 'v_752_chillet_egg', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: 6142, vanilla: { sheet: 752, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_751_sleeping_digtoise', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#baa854', drop: 5667, vanilla: { sheet: 751, frame: 'style', fw: 2, fh: 2 } });
 // 1457 巨型提基雕像 753（2026-08-23 内容缺口批；TileID.cs:1943 `GiantTiki = 753`）：
 // TileObjectData.cs:4126-4131 CopyFrom(Style3x3) → 3×3 + AnchorBottom(SolidTile|
 // SolidWithTop|SolidSide|AlternateTile,宽3) + AnchorAlternateTiles=[753]（可叠放在
@@ -544,7 +560,9 @@ def({ key: 'v_499_decay_chamber', name: '', solid: false, framed: true, opacity:
 def({ key: 'v_36_presents', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E6595C', drop: 1869 /* KillTile :64548（审计 E ❌25） */, vanilla: { sheet: 36, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_46_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: 143, vanilla: { sheet: 46, frame: 'auto' } });
 def({ key: 'v_47_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: 145, vanilla: { sheet: 47, frame: 'auto' } });
-def({ key: 'v_99_trash_can', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 99, frame: 'style', fw: 2, fh: 2 } });
+// drop:348（2026-09-07 掉落全表对账）：Check2x2 case 99 恒掉 348 TrashCan（:49099-49102）
+// ——99 无放置物品（place_v_ 回收不触发）曾恒无掉落=真缺
+def({ key: 'v_99_trash_can', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 348, vanilla: { sheet: 99, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_102_throne', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#E5D449', drop: 355 /* Check3x4 :50162（审计 E ❌22） */, vanilla: { sheet: 102, frame: 'style', fw: 3, fh: 4 } });
 def({ key: 'v_115_hallowed_vines', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#21ABCF', blend: true, drop: null, vanilla: { sheet: 115, frame: 'auto' } }),  // ★F2 原版非实心：1457 Main.cs Initialize 无 tileSolid[115] 赋值（bool[] 默认 false）+TileID.cs:667 HallowedVines=装饰/藤饰
 def({ key: 'v_121_cobalt_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B508F', blend: true, drop: 415, vanilla: { sheet: 121, frame: 'auto' } });
@@ -552,7 +570,10 @@ def({ key: 'v_122_mythril_brick', name: '', solid: true, opacity: 1, pick: 0, ma
 def({ key: 'v_127_ice_ice_rod', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#80CCE6', blend: true, drop: null, vanilla: { sheet: 127, frame: 'auto' } });
 def({ key: 'v_128_mannequin_legacy', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 128, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_133_forges', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#E73538', drop: null, light: [212, 153, 128], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 133, frame: 'style', fw: 3, fh: 2 } });
-def({ platform: true, key: 'v_134_anvils_hardmode', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A6BB99', drop: null, vanilla: { sheet: 134, frame: 'style', fw: 2, fh: 1 } });
+// drop:525（2026-09-07 掉落全表对账 pin style0）：Check2x1 case 134 num3==1→1220
+// OrichalcumAnvil / else→525 MythrilAnvil（:47667-47676）——曾 drop:null 走 place_v_
+// 回收掉合成放置件;style1 档未建模=登记债（16 铁砧族同函数 case 16 :47525-47534）
+def({ platform: true, key: 'v_134_anvils_hardmode', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A6BB99', drop: 525, vanilla: { sheet: 134, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'v_140_demonite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#625FA7', blend: true, drop: 577, light: [31, 18, 82], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 140, frame: 'auto' } });
 def({ key: 'v_145_red_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C01E1E', blend: true, drop: 586, vanilla: { sheet: 145, frame: 'auto' } });
 def({ key: 'v_146_green_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2BC01E', blend: true, drop: 591, vanilla: { sheet: 146, frame: 'auto' } });
@@ -677,17 +698,20 @@ def({ key: 'v_416_vortex_fragment_block', name: '', solid: true, opacity: 1, pic
 def({ key: 'v_417_nebula_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A057EA', blend: true, drop: 3575, light: [153, 51, 153], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 417, frame: 'auto' } });
 def({ key: 'v_418_stardust_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#16ADFE', blend: true, drop: 3576, light: [153, 153, 230], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 418, frame: 'auto' } });
 def({ key: 'v_426_red_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8262F', blend: true, drop: 3621, vanilla: { sheet: 426, frame: 'auto' } });
-def({ platform: true, key: 'v_427_red_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#B7353E', drop: null, vanilla: { sheet: 427, frame: 'style', fw: 1, fh: 1 } });
+// 队伍平台五族 drop 数值化（2026-09-07 掉落全表对账）：KillTile case 427/435-439 恒掉
+// 对应队伍平台物品（:64587-64604）——曾 drop:null 走 place_v_ 回收掉合成放置件,
+// 数值化后掉原版真物品（3622 TeamBlockRedPlatform / 3638-3642 绿/蓝/黄/粉/白）
+def({ platform: true, key: 'v_427_red_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#B7353E', drop: 3622, vanilla: { sheet: 427, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_430_green_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#27A860', blend: true, drop: 3633, vanilla: { sheet: 430, frame: 'auto' } });
 def({ key: 'v_431_blue_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#275EA8', blend: true, drop: 3634, vanilla: { sheet: 431, frame: 'auto' } });
 def({ key: 'v_432_yellow_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F2DD64', blend: true, drop: 3635, vanilla: { sheet: 432, frame: 'auto' } });
 def({ key: 'v_433_pink_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E064F2', blend: true, drop: 3636, vanilla: { sheet: 433, frame: 'auto' } });
 def({ key: 'v_434_white_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C5C1D8', blend: true, drop: 3637, vanilla: { sheet: 434, frame: 'auto' } });
-def({ platform: true, key: 'v_435_green_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#36B76F', drop: null, vanilla: { sheet: 435, frame: 'style', fw: 1, fh: 1 } });
-def({ platform: true, key: 'v_436_blue_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#366DB7', drop: null, vanilla: { sheet: 436, frame: 'style', fw: 1, fh: 1 } });
-def({ platform: true, key: 'v_437_yellow_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#FFEC73', drop: null, vanilla: { sheet: 437, frame: 'style', fw: 1, fh: 1 } });
-def({ platform: true, key: 'v_438_pink_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#EF73FF', drop: null, vanilla: { sheet: 438, frame: 'style', fw: 1, fh: 1 } });
-def({ platform: true, key: 'v_439_white_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#D4D0E7', drop: null, vanilla: { sheet: 439, frame: 'style', fw: 1, fh: 1 } });
+def({ platform: true, key: 'v_435_green_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#36B76F', drop: 3638, vanilla: { sheet: 435, frame: 'style', fw: 1, fh: 1 } }); // :64590
+def({ platform: true, key: 'v_436_blue_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#366DB7', drop: 3639, vanilla: { sheet: 436, frame: 'style', fw: 1, fh: 1 } }); // :64593
+def({ platform: true, key: 'v_437_yellow_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#FFEC73', drop: 3640, vanilla: { sheet: 437, frame: 'style', fw: 1, fh: 1 } }); // :64596
+def({ platform: true, key: 'v_438_pink_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#EF73FF', drop: 3641, vanilla: { sheet: 438, frame: 'style', fw: 1, fh: 1 } }); // :64599
+def({ platform: true, key: 'v_439_white_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#D4D0E7', drop: 3642, vanilla: { sheet: 439, frame: 'style', fw: 1, fh: 1 } }); // :64602
 def({ key: 'v_446_silly_pink_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4298', blend: true, drop: 3736, vanilla: { sheet: 446, frame: 'auto' } });
 def({ key: 'v_447_silly_purple_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B384FF', blend: true, drop: 3737, vanilla: { sheet: 447, frame: 'auto' } });
 def({ key: 'v_448_silly_green_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00CEB4', blend: true, drop: 3738, vanilla: { sheet: 448, frame: 'auto' } });
@@ -807,7 +831,10 @@ def({ key: 'v_630_stinkbug_blocker', name: '', solid: false, framed: true, opaci
 def({ key: 'v_631_ghostly_stinkbug_blocker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#7AEAE1', drop: 5138, vanilla: { sheet: 631, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_632_scarlet_macaw_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 632, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_635_ash_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#917878', blend: true, drop: 5215, vanilla: { sheet: 635, frame: 'auto' } });
-def({ key: 'v_639_mana_crystal', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6E69FF', drop: null, vanilla: { sheet: 639, frame: 'style', fw: 2, fh: 2 } });
+// drop:109（2026-09-07 掉落全表对账）：CheckOrb case 639 恒掉 109 ManaCrystal
+// （:54703-54705）——放置物是 5287 RepairedManaCrystal,原版破坏【不还 5287】而还 109,
+// 曾 drop:null 走 place_v_ 回收掉修复版水晶=错值
+def({ key: 'v_639_mana_crystal', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6E69FF', drop: 109, vanilla: { sheet: 639, frame: 'style', fw: 2, fh: 2 } });
 def({ platform: true, key: 'v_640_blue_macaw_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 640, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_641_reef_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB7D96', blend: true, drop: 5306, vanilla: { sheet: 641, frame: 'auto' } });
 def({ platform: true, key: 'v_643_toucan_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 643, frame: 'style', fw: 6, fh: 3 } });
@@ -816,8 +843,16 @@ def({ platform: true, key: 'v_645_gray_cockatiel_cage', name: '', solid: false, 
 def({ key: 'v_646_shadow_candle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#6C858C', drop: 5322, vanilla: { sheet: 646, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_647_large_rubble_3x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#828268', drop: null, vanilla: { sheet: 647, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_648_large_rubble_3x2_group_2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#5F7A40', drop: null, vanilla: { sheet: 648, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_649_medium_rubble_2x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#5C5C5C', drop: null, vanilla: { sheet: 649, frame: 'style', fw: 2, fh: 1 } });
-def({ key: 'v_650_small_rubble_1x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#646464', drop: null, vanilla: { sheet: 650, frame: 'style', fw: 1, fh: 1 } });
+// drop:3（2026-09-07 掉落全表对账 pin 首带）：tile 649 = MediumPiles2x1Echo,Check2x1
+// case 649（:47677-47760+）num3 带表 <6→3 石 / <16→154 / <17-19→71-73 / <20-25→181..182
+// / <31→593 / <34→9 / <38→150 / <41→3 / <47→3271…（650 同族带表）——无放置物品曾恒无
+// 掉落;逐带未建模=登记债
+def({ key: 'v_649_medium_rubble_2x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#5C5C5C', drop: 3, vanilla: { sheet: 649, frame: 'style', fw: 2, fh: 1 } });
+// drop:3（2026-09-07 掉落全表对账 pin 首带）：tile 650 = SmallPiles1x1Echo,case 650
+// frameX/18 带表（:65868-65948）<6→3 石 / <12→2 泥 / <20,<28→154 / <36→9 / <42→593 /
+// <48→664 / <54→150 / <60→3271 / <66→3086 / <72→3081 / <73→62 / 73-81→169|276——
+// 曾 drop:null 恒无掉落（650 非 tileCut 且无放置物品,place_v_ 回收不触发）;逐带未建模=登记债
+def({ key: 'v_650_small_rubble_1x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#646464', drop: 3, vanilla: { sheet: 650, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_651_large_rubble_3x2_group_3', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB61D', drop: null, vanilla: { sheet: 651, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_652_medium_rubble_2x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6BB61D', drop: null, vanilla: { sheet: 652, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_653_pots_rubblemaker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#533830', drop: null, vanilla: { sheet: 653, frame: 'style', fw: 2, fh: 2 } });
@@ -841,9 +876,12 @@ def({ key: 'v_673_cryocore_brick', name: '', solid: true, opacity: 1, pick: 0, m
 def({ key: 'v_674_mercury_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#28313C', blend: true, drop: 5406, vanilla: { sheet: 674, frame: 'auto' } });
 def({ key: 'v_675_star_royale_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#150D4D', blend: true, drop: 5407, vanilla: { sheet: 675, frame: 'auto' } });
 def({ key: 'v_676_heavenforge_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C3C9D7', blend: true, drop: 5408, vanilla: { sheet: 676, frame: 'auto' } });
-def({ key: 'v_677_ancient_blue_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 677, frame: 'auto' } }); // 古砖=原版 tileDungeon[677]（Main.cs:7944）<100 不可挖,同 41/43/44 族 pick:100
-def({ key: 'v_678_ancient_green_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 678, frame: 'auto' } }); // pick 100 同上（tileDungeon[678] Main.cs:7945）
-def({ key: 'v_679_ancient_pink_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 679, frame: 'auto' } }); // pick 100 同上（tileDungeon[679] Main.cs:7946）
+// 古砖三族 drop 数值化（2026-09-07 掉落全表对账）：KillTile case 677/678/679 恒掉
+// 5417/5419/5421（:64704-64712,AncientBlue/Green/PinkDungeonBrick）——曾 drop:null
+// 走 place_v_ 回收掉合成放置件（注意三砖 pick:100 门是挖掘面,与掉落无关）
+def({ key: 'v_677_ancient_blue_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#42546D', blend: true, drop: 5417, vanilla: { sheet: 677, frame: 'auto' } }); // 古砖=原版 tileDungeon[677]（Main.cs:7944）<100 不可挖,同 41/43/44 族 pick:100
+def({ key: 'v_678_ancient_green_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#54643F', blend: true, drop: 5419, vanilla: { sheet: 678, frame: 'auto' } }); // pick 100 同上（tileDungeon[678] Main.cs:7945）
+def({ key: 'v_679_ancient_pink_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#6B4463', blend: true, drop: 5421, vanilla: { sheet: 679, frame: 'auto' } }); // pick 100 同上（tileDungeon[679] Main.cs:7946）
 def({ key: 'v_680_ancient_gold_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: 5423, vanilla: { sheet: 680, frame: 'auto' } });
 def({ key: 'v_681_ancient_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: 5425, vanilla: { sheet: 681, frame: 'auto' } });
 def({ key: 'v_682_ancient_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: 5427, vanilla: { sheet: 682, frame: 'auto' } });
@@ -857,7 +895,12 @@ def({ key: 'v_689_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 
 def({ key: 'v_690_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: 5442, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 690, frame: 'auto' } });
 def({ key: 'v_691_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: 5443, light: [77, 0, 89], /* ApplyTileLight case 625/626/691 静态 (0.3,0,0.35)×255（2026-09-07 对账 R 通道 76→77） */ vanilla: { sheet: 691, frame: 'auto' } });
 def({ key: 'v_692_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 5444, vanilla: { sheet: 692, frame: 'auto' } });
-def({ key: 'v_693_mitey_titey', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#050505', drop: null, vanilla: { sheet: 693, frame: 'style', fw: 1, fh: 1 } });
+// drop:664（2026-09-07 掉落全表对账 pin style0）：tile 693 = Stalactite1x1Echo
+// （TileID.cs:1823）,KillTile case 693 → GetStalactiteEchoDrop(fx/18)（:65560-65562,
+// 表 :39314-39363）style0→664 冰;与 694（1x2）同表——694 已走 echoResourceDropVid,
+// 693 并表移交（Game.ts ECHO_RESOURCE_SHEETS 扩一员即全 13 档),曾 drop:null 走 place_v_
+// 回收掉 Mitey-Titey 合成放置件（原版不还 5464）
+def({ key: 'v_693_mitey_titey', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#050505', drop: 664, vanilla: { sheet: 693, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_694_stalactite_1x2_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#32323c', drop: null, vanilla: { sheet: 694, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_695_replica_demon_altar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#77657D', drop: null, vanilla: { sheet: 695, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_696_replica_shadow_orb', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8D78A8', drop: null, vanilla: { sheet: 696, frame: 'style', fw: 2, fh: 2 } });
@@ -871,7 +914,10 @@ def({ key: 'v_703_jungle_plants_echo', name: '', solid: false, framed: true, opa
 def({ key: 'v_704_fallen_log_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 704, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_705_oasis_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB600', drop: null, vanilla: { sheet: 705, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_706_terragrim_shrine_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#1cd86d', drop: null, vanilla: { sheet: 706, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_707_books_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: null, vanilla: { sheet: 707, frame: 'style', fw: 1, fh: 1 } });
+// drop:149（2026-09-07 掉落全表对账 pin 基档）：tile 707 = BooksEcho,case 707
+// fx==90→165 WaterBolt(noPrefix) 否则 149 Book（:65183-65193,与 sheet 50 书同表——
+// 50 已入 styleDropVidOfFrames 特例,707 只 pin 基档 149,fx==90 档=登记债）
+def({ key: 'v_707_books_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: 149, vanilla: { sheet: 707, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_708_shimmerfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EDDAF4', blend: true, drop: 5493, vanilla: { sheet: 708, frame: 'auto' } });
 def({ key: 'v_709_magic_shimmer_dropper', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F7E4FE', drop: null, vanilla: { sheet: 709, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_710_pufferfish_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 710, frame: 'style', fw: 6, fh: 3 } });

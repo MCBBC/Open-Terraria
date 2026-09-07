@@ -373,7 +373,7 @@ import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { windSway } from '../render/WindSway';
 import { natureParticles } from '../render/NatureParticles';
 import { dustWaterFor, solidCollisionBox } from '../render/WeatherRenderer';
-import { TILE_PARTICLE_RULES } from '../render/TileParticles';
+import { TILE_PARTICLE_RULES, TILE_SHINE_SHEETS } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks, LootPlayerCtx } from '../entities/types';
@@ -1534,6 +1534,11 @@ export function isDirtRodTargetSheet(sheet: number): boolean {
  *  （滴水砖无 tile-drop；WorldGen KillTile 无此五型掉落支），否则 40 金滴管放置→
  *  挖除无限白嫖（2026-09-07 用户实报"挖会滴水的方块掉落魔法水滴管"） */
 const ADRIP_TILE_SHEETS = new Set([373, 374, 375, 461, 709]);
+// ★掉落对账批移交(2026-09-07):另四型"放置即消耗、原版破坏零返还"的同族——
+//  590 宝石树苗(gemcorn 放置,Check1x2 :86818 仅成长检)/595 樱花树苗(:86819)/
+//  615 黄柳树苗(:86820)/484 滚石仙人掌(Check2x2 仅弹 727 无物品)——金标
+//  NO_RETURN_RECYCLE_DEBT 已钉,防后车误补数值
+const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484]);
 
 export function multiTileDropKey(
   def: { drop?: string | number | null; key: string; vanilla?: { sheet?: number } },
@@ -1541,7 +1546,7 @@ export function multiTileDropKey(
 ): string {
   if (def.drop != null) return typeof def.drop === 'number' ? VI(def.drop) : def.drop;
   // 滴水装饰:drop=null 是【原文本相】(无 tile-drop),不走 place_ 回收
-  if (def.vanilla?.sheet !== undefined && ADRIP_TILE_SHEETS.has(def.vanilla.sheet)) return '';
+  if (def.vanilla?.sheet !== undefined && NO_RETURN_RECYCLE_SHEETS.has(def.vanilla.sheet)) return '';
   return def.key.startsWith('v_') && placeableTiles.has(def.key) ? 'place_' + def.key : '';
 }
 /** IsVine（TileID.cs:237）：八种垂藤（CheckVines 全族同构，见 Game.checkVineAt）；
@@ -5252,8 +5257,9 @@ export class Game implements GameHooks {
       if (isBound('ToggleCreativeMenu', code) && this.world?.isJourney && !this.input.uiBlocking && !this.paused) {
         openJourneyPowersPanel(this);
       }
-      // Grapple（E 原版默认；本仓默认不绑——E 为物品栏）：装备槽/背包首个钩爪
-      // 朝鼠标方向发射（Player.QuickGrapple :5971-6113 鼠标世界位方向）
+      // Grapple（E = 原版默认 PlayerInput.cs:2075，SW-BN2 2026-09-07 起缺省表对齐；
+      // Inventory 收回纯 Escape :2074）：装备槽/背包首个钩爪朝鼠标方向发射
+      // （Player.QuickGrapple :5971-6113 鼠标世界位方向）
       if (isBound('Grapple', code) && this.player && !this.input.uiBlocking && !this.paused) {
         const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
         this.useEquippedGrapple(wx - this.player.cx, wy - this.player.cy);
@@ -5746,8 +5752,12 @@ export class Game implements GameHooks {
     setGlobalSubstitutionContext({
       worldName: () => w.name,
       playerName: () => this.player.appearance?.name ?? '',
-      // Main.cInv（Lang.cs RegisterGlobalSubstitution InventoryKey）——M5 起读键位表
-      inventoryKey: () => keybindCodeLabel(bindsOf('Inventory')[0] ?? 'Escape'),
+      // Main.cInv（Lang.cs RegisterGlobalSubstitution InventoryKey）——M5 起读键位表。
+      // SW-BN2：空表（用户清空绑定）显示"<未绑定>"官译,不再回退硬编码 'Escape'
+      inventoryKey: () => {
+        const first = bindsOf('Inventory')[0];
+        return first ? keybindCodeLabel(first) : Lang.text('Mods.SandboxWorld.UI.ManualUnbound');
+      },
       anglerQuests: () => this.player.anglerQuestsFinished,
       totalDeaths: () => this.player.deathsPve,
       crimson: () => !!w.crimson,
@@ -7070,6 +7080,7 @@ export class Game implements GameHooks {
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
+    this.updateChestFrames();   // ★SW-BJ17 2026-09-07 宝箱盖动画帧（Chest.cs:3599,Main.cs:17993 60Hz 同拍）
     this.reactivateDummies();   // 训练假人再激活(TETrainingDummy.Update 节流)
     // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
     if (this.tickCount % 60 === 0) {
@@ -20261,7 +20272,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 五型已注册（PRIV 10190 等）非未知键——滴管放置即消耗,挖除不返还（原版
       // 滴水砖无 tile-drop）
       else if (!noItem && def.key.startsWith('v_')
-        && !(def.vanilla?.sheet !== undefined && ADRIP_TILE_SHEETS.has(def.vanilla.sheet))
+        && !(def.vanilla?.sheet !== undefined && NO_RETURN_RECYCLE_SHEETS.has(def.vanilla.sheet))
         && vanillaPlaceableTileKeys().has(def.key)) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     }
     this.killTileBreakSound(type, x, y);
@@ -21418,8 +21429,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       - (buffs.has(BuffType.SugarRush) ? 0.2 : 0)
       - (buffs.has(BuffType.KiteBuff) ? 0.1 : 0)   // ★1457 :10004 pickSpeed -= 0.1（旧 1456 钉 0.15 已反转）
       - (this.player.equipStats.chiselSpeed ? 0.25 : 0)
-      - [0, 0.05, 0.10, 0.15][buffs.wellFedTier]
-      + buffs.hungerPickSpeed;   // 饥饿/极饿 pickSpeed += 0.05/0.15（:11571/:11595——变慢，正号）
+      - [0, 0.05, 0.10, 0.15][buffs.wellFedTier ?? 0]
+      + (buffs.hungerPickSpeed ?? 0);   // 饥饿/极饿 pickSpeed += 0.05/0.15（:11571/:11595——变慢，正号）
   }
 
   /** 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
@@ -23623,8 +23634,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  与原版 player.chest = -2..-5 同约定）----
     for (const [key, bi] of BANK_TILES) {
       if (type === (TILE_BY_KEY[key] ?? -1)) {
-        this.openChest?.({ x: -2 - bi, y: 0, items: this.player.banks[bi] });
-        this.sfx.play('tink');
+        // ★SW-BJ17 2026-09-07：储物族与宝箱同一 vanilla 分支（Player.cs:33314
+        //  BasicChest∪29/97/463/491 同链），音效同尾部 num77 流转（:33352-33359
+        //  num77=-2..-5 → :33497-33509）——同箱再点=关+Sound 11 / 无容器=开+10 /
+        //  异容器=开+12。旧 'tink'(Sound 21)非原版此链音（解锁专属 :389）。
+        const bankC: ChestData = { x: -2 - bi, y: 0, items: this.player.banks[bi] };
+        const curB = this.openChestRef?.() ?? null;
+        if (curB && curB.x === bankC.x) {
+          this.closeChestPanel?.();                  // chest = -1（:33498）
+          this.sfx.play('menuClose', 1);             // Sound 11（:33499）
+        } else {
+          this.openChest?.(bankC);
+          this.sfx.play(curB ? 'menuTick' : 'menuOpen', 1);   // 12（:33508）/ 10（:33504）
+        }
         this.input.rightDown = false;
         return;
       }
@@ -24146,10 +24168,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
     }
+    // ★SW-BJ17 2026-09-07 开/关/换箱音效+同箱再点关（Player.cs:33497-33509 尾部 1:1）：
+    //  num77==chest → chest=-1 + Sound 11（menuClose）;chest==-1 → OpenChest + Sound 10
+    //  （menuOpen）;chest≠-1 且异箱 → OpenChest + Sound 12（menuTick,旧箱隐式关——
+    //  OpenChest 重赋 chest,无 11 音,盖帧经 UpdateChestFrames 衰减）。容器键：
+    //  世界箱 x>=0 按坐标（Chest.FindChest 索引等价）、储物族 x<0 按槽位值
+    //  （num77=-2..-5 直等,Player.cs:33352-33359）。解锁拍已开面板沿旧例同拍播 10
+    //  （原版解锁拍 num77 恒 -1 不开箱 :33493/:33466 flag14 支——登记债 BJ17-1）
+    const curC = this.openChestRef?.() ?? null;
+    const chestKey = (c: { x?: number; y?: number } | null): string | null =>
+      c === null || c.x === undefined ? null : (c.x >= 0 ? `w${c.x},${c.y}` : `b${c.x}`);
+    if (curC && chestKey(curC) === chestKey(chest as { x?: number; y?: number })) {
+      this.closeChestPanel?.();                       // chest = -1（:33498）
+      this.sfx.play('menuClose', 1);                  // Sound 11（:33499）
+      this.input.rightDown = false;
+      return;
+    }
     this.openChest?.(chest as never);
+    this.sfx.play(curC ? 'menuTick' : 'menuOpen', 1); // Sound 12（:33508）/ Sound 10（:33504）
     this.input.rightDown = false;
   }
-
   /** 拉杆/开关/计时器:右键 → Wiring.HitSwitch(Wiring.cs:163-252) */
   /** 拉杆/开关/计时器/起爆器:右键 → Wiring.hitSwitch(Wiring.cs:163-252 1:1)。
    *  hitSwitch 内按 sheet 分派帧翻转（开关 136 frameY 0↔18 / 计时器 144 注册冷却 /
@@ -27155,6 +27193,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.inTileRange(Math.floor(px / TILE), Math.floor(py / TILE))) {
       this.closeChestPanel?.();                                // chest = -1
       this.sfx.play('menuClose', 1);                           // Sound 11
+    }
+  }
+
+  /** ★SW-BJ17 2026-09-07 宝箱开/关盖动画帧驱动（Chest.UpdateChestFrames
+   *  Chest.cs:3599-3657 1:1；Main.cs:17993 每 world-update 60Hz 调一次——本仓挂
+   *  fixedUpdate 同拍,暂停同 vanilla UpdateWorld 停门）。在用（任一玩家
+   *  player.chest==该箱;单人 = openChestRef 指向该 ChestData 且 x>=0）→
+   *  frameCounter++ 否则 --,钳 [0,10]（:3636-3643）;frame = counter==0?0:
+   *  counter==10?2:1（:3644-3655）。关→半开→全开 = 10 拍渐进（盖动画非瞬变）。
+   *  frame 变化 → 周边块重烘（姿态带位移消费见 VanillaTiler.chestLidPoseAt /
+   *  drawVanillaCell chestPose）。banks(x<0) 非真实箱不计入（vanilla _chestInUse
+   *  收 chest>=0 门 :3604-3606）。★MP 其他玩家开箱面不驱动本端盖帧（vanilla
+   *  收全 255 玩家 chest 态 :3601-3606;本仓未同步他人 chest 索引——登记债 BJ17-2） */
+  private updateChestFrames(): void {
+    const world = this.world;
+    if (!world || world.chests.length === 0) return;
+    const cur = this.openChestRef?.() ?? null;
+    for (const c of world.chests) {
+      if (c.x < 0) continue;                       // banks/容器宠物槽位无 tile 姿态
+      let n = (c.frameCounter ?? 0) + (cur === c ? 1 : -1);
+      if (n < 0) n = 0; else if (n > 10) n = 10;   // :3636-3643
+      c.frameCounter = n;
+      const f = n === 0 ? 0 : (n === 10 ? 2 : 1);  // :3644-3655
+      if (f !== (c.frame ?? 0)) {
+        c.frame = f;
+        this.chunks?.markDirtyArea(c.x - 1, c.y - 1, c.x + 2, c.y + 2);   // 盖姿态带重烘
+      }
     }
   }
 
@@ -38779,23 +38844,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const rules = TILE_PARTICLE_RULES.get(sheetOf(st.type[i]));
         if (!rules) continue;
         const fx = st.frameX[i], fy = st.frameY[i];
+        // ★光照比例项(TileDrawing.cs:7543-7552):num43 = max(R,G,B)/30(C# 整除;
+        //  max≤30 → 0 = 不闪,:7539 三通道门实际被此吸收);每帧 p = num43/shine
+        let lightNum43 = 0;
+        if (TILE_SHINE_SHEETS.size > 0) {
+          const lcT = this.lighting.lightAt(x, y);
+          lightNum43 = Math.floor(Math.max(lcT[0], lcT[1], lcT[2]) / 30);
+        }
         for (const rule of rules) {
-          if (Math.random() >= rule.prob) continue;
+          // ★闪光族概率随光照缩放(num43/8;普通规则系数 1)——单次 roll,勿二次
+          const probEff = rule.prob * (rule.dust !== undefined ? lightNum43 / 8 : 1);
+          if (Math.random() >= probEff) continue;
           if (rule.fx0 !== undefined && fx !== rule.fx0) continue;
           if (rule.fy0 !== undefined && fy !== rule.fy0) continue;
           if (rule.pred && !rule.pred(fx, fy)) continue;
-          // ★光门 1:1(TileDrawing.cs:7539-7543):原文三通道全 ≤20 才不闪(=max(R,G,B)
-          //  >20 有机会),旧只查 R 通道漏纯蓝/绿光源(2026-09-07 逐字对勘修正)
-          if (rule.lightGate !== undefined) {
-            const lc = this.lighting.lightAt(x, y);
-            if (Math.max(lc[0], lc[1], lc[2]) <= rule.lightGate) continue;
-          }
+          // ★光门 1:1(TileDrawing.cs:7539-7543):原文三通道全 ≤20 才不闪——由上方
+          //  num43=0 的概率归零吸收(同语义,单点计算)
           const [smin, smax] = rule.size ?? [1.5, 3];
           const life = Math.round((rule.life ?? 40) * (0.7 + Math.random() * 0.6));
           const rise = rule.rise ?? 0.4;
           // ★矿物闪光族原版尘渲染（TileDrawing.cs:7657-7659）：NewDust(...,43,0,0,254,
           //  newColor,0.5f)+velocity×0——比 1-2px 色方块粒子可见度高一个量级(用户实报
           //  "暗处完全看不见生命水晶",2026-09-07)。hex→DustColor 内联。
+          if (rule.dust !== undefined && lightNum43 <= 0) continue;
           if (rule.dust !== undefined) {
             const h = rule.color;
             const rgb = {

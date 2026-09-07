@@ -29,7 +29,8 @@ describe('M5 键位绑定表', () => {
     expect(DEFAULT_KEYBINDS.Left).toEqual(['KeyA', 'ArrowLeft']);
     expect(DEFAULT_KEYBINDS.Right).toEqual(['KeyD', 'ArrowRight']);
     expect(DEFAULT_KEYBINDS.Jump).toEqual(['Space']);
-    expect(DEFAULT_KEYBINDS.Inventory).toEqual(['Escape', 'KeyE']);
+    // SW-BN2 2026-09-07 缺省表对齐原版（PlayerInput.cs:2074 Inventory=Escape）
+    expect(DEFAULT_KEYBINDS.Inventory).toEqual(['Escape']);
     expect(DEFAULT_KEYBINDS.SmartSelect).toEqual(['ShiftLeft']);
     expect(DEFAULT_KEYBINDS.SmartCursor).toEqual(['ControlLeft', 'ControlRight']);
     expect(DEFAULT_KEYBINDS.QuickMount).toEqual(['KeyR']);
@@ -50,16 +51,18 @@ describe('M5 键位绑定表', () => {
     expect(DEFAULT_KEYBINDS.Loadout2).toEqual(['F2']);
     expect(DEFAULT_KEYBINDS.Loadout3).toEqual(['F3']);
     expect(DEFAULT_KEYBINDS.ToggleCreativeMenu).toEqual(['KeyC']);
-    // Grapple 原版默认 E 被本仓 E=物品栏占用 → 默认不绑（可手绑）
-    expect(DEFAULT_KEYBINDS.Grapple).toEqual([]);
+    // SW-BN2 2026-09-07：Grapple 缺省 = E（原版 PlayerInput.cs:2075——E 曾让位物品栏,
+    // Inventory 收回纯 Escape 后按用户令回归原版面）
+    expect(DEFAULT_KEYBINDS.Grapple).toEqual(['KeyE']);
   });
 
   it('bindsOf/isBound/actionsForCode：自定义优先、缺省回默认、一键多 action 反查', () => {
     expect(bindsOf('Jump')).toEqual(['Space']);
     expect(isBound('Jump', 'Space')).toBe(true);
     expect(isBound('Jump', 'KeyW')).toBe(false);
-    // 未加载自定义时 KeyE 双触发 Inventory（现状行为）
-    expect(actionsForCode('KeyE')).toEqual(['Inventory']);
+    // 未加载自定义时 KeyE = Grapple（SW-BN2 缺省对齐原版;Inventory 收回纯 Escape）
+    expect(actionsForCode('KeyE')).toEqual(['Grapple']);
+    expect(actionsForCode('Escape')).toEqual(['Inventory']);
     // 自定义生效（直接写 options 内存值——不经 load() 的持久层）
     options.data.keybinds = { Jump: ['KeyZ'] };
     expect(bindsOf('Jump')).toEqual(['KeyZ']);

@@ -91,16 +91,19 @@ describe('① AI_062 逐型速度曲线（1457 :66529-66677）', () => {
   it('423 悬停带归 423/613 专段：70<距<130 → <100 反推 -3、≥100 吸附 7（:66641-66654）', () => {
     // 几何避开 :67097 扇区微调（rotTo ∈ [π/4,3π/4] 不触发）：瞄准点=敌顶心-80,
     // 取敌在随从下前方 40/100 → num23=107.7（≥100 → num30=7 吸附）
+    // ★夹具重布（SW-BJ13/BJ16 真盒）：423 真盒 28×28（:4964-4965）——出生左上移
+    // (−14,−14) 使盒心保持在原 16×16 缺省盒时代标定的 (1026,808)/(1036,828),
+    // 距离/分支断言不变
     const e1 = mkEnemy(1, 1066, 1000);
     const a = makeHooks([e1]);
-    const m1 = mkMinion(423, a.player, 1018, 800);       // 瞄准点 (1066,908):dx=40,dy=100
+    const m1 = mkMinion(423, a.player, 1012, 794);       // 盒心 (1026,808)→瞄准点 (1066,908):dx=40,dy=100
     m1.fixedUpdate(1, a.hooks);
     expect(m1.vx).toBeCloseTo((40 / Math.hypot(40, 100)) * 7 / 21, 6);
     expect(m1.vy).toBeCloseTo((100 / Math.hypot(40, 100)) * 7 / 21, 6);
     // 30/80 → num23=85.4（<100 → num30=-3 反推）
     const e2 = mkEnemy(2, 1066, 1000);
     const b = makeHooks([e2]);
-    const m2 = mkMinion(423, b.player, 1028, 820);       // 瞄准点 (1066,908):dx=30,dy=80
+    const m2 = mkMinion(423, b.player, 1022, 814);       // 盒心 (1036,828)→瞄准点 (1066,908):dx=30,dy=80
     m2.fixedUpdate(1, b.hooks);
     expect(m2.vx).toBeCloseTo((30 / Math.hypot(30, 80)) * -3 / 21, 6);
     expect(m2.vy).toBeCloseTo((80 / Math.hypot(30, 80)) * -3 / 21, 6);
@@ -353,14 +356,15 @@ describe('⑦ 随从绘制旋转枢 = 贴图宽/2（Main.cs:29601 化简,同 Wea
 // ---------------------------------------------------------------------------
 describe('⑧ 423/613 冲刺真子步（:16780-16783/:66556-66600）', () => {
   function dust423() {
-    // 随从盒左 (2000,1500)（心 2008,1508）;敌顶 (2508,1428) → 423 瞄准点 (2508,1348)
+    // 随从盒左 (1994,1494)（★真盒 28×28 → 心 2008,1508,与 16×16 缺省盒时代标定
+    // 的几何对齐）;敌顶 (2508,1428) → 423 瞄准点 (2508,1348)
     // → num23=√(500²+160²)=524.8 ∈ (300,800] → ai[1]=extraUpdates=52
     const e = mkEnemy(1, 2508, 1440);                    // 顶 = cy-12 = 1428
     const a = makeHooks([e]);
     const dust: number[] = [];
     (a.hooks as unknown as { spawnParticles: unknown }).spawnParticles =
       (...args: unknown[]) => { void args; dust.push(1); };
-    const m = mkMinion(423, a.player, 2000, 1500);
+    const m = mkMinion(423, a.player, 1994, 1494);
     return { a, m, dust, e };
   }
   it('423：触发拍位移恰 10px+extraUpdates=ai[1];次拍 52 子步一次走完（512px）→ 2 拍总位移 10N+2', () => {
@@ -389,19 +393,22 @@ describe('⑧ 423/613 冲刺真子步（:16780-16783/:66556-66600）', () => {
   it('613：同构子步（44 子步）+ 归零拍 15+15 尘爆（:66249-66270）+ 每子步双尘调用（:66198-66226）', () => {
     // 随从心 (2008,1508);敌心 (2508,1508)=正右 500 → 613 瞄准点 = 敌心+背向 60
     // = (2448,1508) → num23=440 → ai[1]=44
+    // ★夹具重布（SW-BJ16 真盒）：613 真盒 24×24（:6600-6611）——出生左上移
+    // (−4,−4) 使盒心保持在标定的 (2008,1508),ai[1]/尘账断言不变
     const e = mkEnemy(1, 2508, 1508);
     const a = makeHooks([e]);
     const dust: number[] = [];
     (a.hooks as unknown as { spawnParticles: unknown }).spawnParticles =
       (...args: unknown[]) => { void args; dust.push(1); };
-    const m = mkMinion(613, a.player, 2000, 1500);
+    const m = mkMinion(613, a.player, 1996, 1496);
+    const x0 = 1996;
     m.fixedUpdate(1, a.hooks);
     expect(priv(m).a62A1).toBe(44);                      // (int)(440/10)
-    expect(m.x - 2000).toBeCloseTo(10, 6);               // 触发拍 10px
+    expect(m.x - x0).toBeCloseTo(10, 6);                 // 触发拍 10px
     m.fixedUpdate(1, a.hooks);
     expect(priv(m).a62EU).toBe(0);                       // 归零重置（:66236）=冲刺终结
-    expect(m.x - 2000).toBeGreaterThan(440);             // 10+43×10+2=442（+归零拍 AI 微动）
-    expect(m.x - 2000).toBeLessThan(448);
+    expect(m.x - x0).toBeGreaterThan(440);               // 10+43×10+2=442（+归零拍 AI 微动）
+    expect(m.x - x0).toBeLessThan(448);
     // 尘调用：ai[1]>3 子步（递减值 43..4 共 40 拍）——numUpdates≥20 拍只出环 2 调用
     // （25 拍）,<20 拍出 3 粒群+环 3 调用（15 拍,:66199-66226 门）+归零爆 2 = 97
     expect(dust.length).toBe(25 * 2 + 15 * 3 + 2);

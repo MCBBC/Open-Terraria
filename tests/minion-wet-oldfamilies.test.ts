@@ -12,10 +12,13 @@
 //  · 湿旗消费=维护字段 this.wet（互不双轨：台账批⑥ probe 消费位在蛙/虎/海盗三族
 //    退役）——蛙湿身跳 ×2（:51616-51617,共享核）验维护字段链路。
 //  ★盒尺寸注：本类构造器未注册本批 id 的 SetDefaults 真盒（317=28×28/390-392=30×30/
-//  758=20×30/833=26×20/834-835=20×30/917=30×30）→ 落 16×16
+//  833=26×20/834-835=20×30/917=30×30）→ 落 16×16
 //  缺省=数据面缺口（本批登记移交,非本刀面）;测试几何按 16×16 布。
 //  ★SW-BJ13 2026-09-07 部分收复：393-395（20×30 :4758-4759）/1036（18×10 :9770-9771）
-//  已补注册（34788 专绘支家族批）——上列残留缺盒 id 再减二。
+//  已补注册（34788 专绘支家族批）。
+//  ★SW-BJ16 2026-09-07 再收复：758（20×30 :7817-7818）已补注册（33693 中心锚支家族批）
+//  ——上列残留缺盒 id 再减一,涉 758 的夹具几何已按真盒重布（溅花弹面 32×24/站位
+//  盒底=y+30）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -73,8 +76,10 @@ function mkGame(w: World): Harness {
 const mkMinion = (h: Harness, projId: number, x: number, y: number): MinionProj =>
   new MinionProj(x, y, projId, 10, 2, false, 0, false, () => h.player);
 
-/** 溅花尘识别：wetSplashStepShared 弹面盒 (w+12, 24)（w=16 → 28×24） */
-const splashDust = (h: Harness) => h.dust.filter((e) => e.w === 28 && e.h === 24);
+/** 溅花尘识别：wetSplashStepShared 弹面盒 (盒宽+12, 24)（:16996 原式 width+12——
+ *  ★SW-BJ16 2026-09-07：758 真盒补注册 20×30 后弹面 = 32×24（旧 28×24 系 16×16
+ *  缺省盒时代的夹具几何,原版本式随真盒走） */
+const splashDust = (h: Harness) => h.dust.filter((e) => e.w === 32 && e.h === 24);
 
 // =====================================================================
 // 豁免数据面（SetDefaults ignoreWater 行逐块核对）
@@ -190,8 +195,9 @@ describe('蛙 758 湿身跳 ×2（维护字段 this.wet 消费链）', () => {
         for (let y = 60; y <= 70; y++) h.w.store.liquid[h.w.store.idx(x, y)] = 0;
       }
     }
-    // 蛙站地板顶（盒底=y+16=1136）,玩家正上方 115px（>48 入高出距离表,<300 不归位）
-    const m = mkMinion(h, 758, 500, 1120);
+    // 蛙站地板顶（★SW-BJ16：真盒 20×30 → 盒底=y+30=1136,旧 y+16 系缺省盒几何）,
+    // 玩家正上方 115px（>48 入高出距离表,<300 不归位）
+    const m = mkMinion(h, 758, 500, 1106);
     h.player.x = 543; h.player.y = 992;          // p.cx=553 → ax=508=蛙心（dx=0,不触发墙意图）
     m.fixedUpdate(1 / 60, h.g);
     return m.vy;

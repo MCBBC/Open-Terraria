@@ -7,6 +7,8 @@
 // - 本文件保留 loadPackJson 顺序加载语义(测试可连续注入模拟原版双载)。
 
 import { DEFAULT_CULTURE_NAME, GameCulture, normalizeLang } from './GameCulture';
+import { bindsOf, keybindCodeLabel } from '../core/Keybinds';   // SW-BN2 2026-09-07
+import { options } from '../core/Options';
 
 type Pack = Record<string, Record<string, string>>; // { [category]: { [key]: value } }
 
@@ -72,23 +74,36 @@ export function setNpcNameResolver(fn: (npcType: number) => string | null): void
 
 function buildGlobalSubstitutions(lang: LangTextSource): Map<string, () => string | null> {
   const m = new Map<string, () => string | null>();
-  const k = (code: string) => () => code;                     // 原样键名（E/R 等）
+  const k = (code: string) => () => code;                     // 原样键名（Alt 等不可重绑键）
   const l = (key: string) => () => lang.getTextValue(key);    // Controls.* 本地化键名
-  // 键位（Lang.cs:146-160，键盘分支）
-  m.set('InputTrigger_ToggleOrOpen', l('Controls.RightClick'));
-  m.set('InputTrigger_InteractWithTile', l('Controls.RightClick'));
-  m.set('InputTrigger_InteractWithTileUI', l('Controls.RightClick'));
-  m.set('InputTrigger_UseOrAttack', l('Controls.LeftClick'));
-  m.set('InputTrigger_SmartCursor', l('Controls.Control'));
-  m.set('InputTrigger_Grapple', k('E'));
-  m.set('InputTrigger_QuickEquip', k('E'));
-  m.set('InputTrigger_SmartSelect', l('Controls.Shift'));
-  m.set('InputTrigger_LockOn', k(''));
-  m.set('InputTrigger_RadialQuickbar', k(''));
-  m.set('InputTrigger_RadialHotbar', k(''));
-  m.set('InputTriggerUI_BuildFromInventory', k('R'));
-  m.set('InputTriggerUI_FavoriteItem', k('Alt'));
-  m.set('InputTriggerUI_Trash', l('Controls.Shift'));
+  // ★SW-BN2 2026-09-07（用户令#3）：可重绑 trigger 的键名标注改【活绑表驱动】——
+  // 原版这些 token 全部经 PlayerInput.GenerateInputTag_ForCurrentGamemode 读
+  // KeyStatus 现值（Lang.cs:146-160 逐 token；GenerateRawInputList :1994-2005 =
+  // 空表 ""、多键 '/' 连接）。本仓曾硬编码 'E'/'R'/Shift 字面键名,缺省表对齐原版
+  // （Inventory=Escape/Grapple=E）后即成陈旧标注。triggerAction 现读 bindsOf：
+  // 重绑即时跟随,空表=空串（GenerateRawInputList :1996-1998 同形）。
+  const triggerAction = (action: Parameters<typeof bindsOf>[0]) => () =>
+    bindsOf(action).map(keybindCodeLabel).join('/');
+  // 键位（Lang.cs:146-160，键盘分支；右注=原版 token 的 trigger 名）
+  m.set('InputTrigger_ToggleOrOpen', l('Controls.RightClick'));          // MouseRight（键鼠硬编码,不可重绑）
+  m.set('InputTrigger_InteractWithTile', l('Controls.RightClick'));      // MouseRight
+  m.set('InputTrigger_InteractWithTileUI', l('Controls.RightClick'));    // MouseRight
+  m.set('InputTrigger_UseOrAttack', l('Controls.LeftClick'));            // MouseLeft
+  m.set('InputTrigger_SmartCursor', triggerAction('SmartCursor'));       // SmartCursor（:156）
+  m.set('InputTrigger_Grapple', triggerAction('Grapple'));               // Grapple（:151,原版缺省 E）
+  m.set('InputTrigger_QuickEquip', triggerAction('Grapple'));            // Grapple（:150——原版即同源 Grapple trigger）
+  m.set('InputTrigger_SmartSelect', triggerAction('SmartSelect'));       // SmartSelect（:159）
+  m.set('InputTrigger_LockOn', k(''));                                   // LockOn（手柄 trigger,Web 版不做）
+  m.set('InputTrigger_RadialQuickbar', triggerAction('HotbarMinus'));    // HotbarMinus（:153）
+  m.set('InputTrigger_RadialHotbar', triggerAction('HotbarPlus'));       // HotbarPlus（:154）
+  m.set('InputTriggerUI_BuildFromInventory', triggerAction('QuickMount')); // QuickMount（:149,原版缺省 R）
+  m.set('InputTriggerUI_FavoriteItem', k('Alt'));                        // Main.FavoriteKey（:155 键盘硬编码,非 PlayerInput trigger）
+  m.set('InputTriggerUI_Trash', () => {                                  // :154 DisableLeftShiftTrashCan 分支——
+    const mode = options.data.quickTrashMode;                            //   读快速丢弃设置（左Shift/左Ctrl）,曾恒 Shift 陈旧;
+    return mode === 'leftShift' ? lang.getTextValue('Controls.Shift')    //   disabled=空串（未绑 trigger 同形）
+      : mode === 'leftControl' ? lang.getTextValue('Controls.Control')
+      : '';
+  });
   // NPC 名（Lang.cs:101-125 全 23 名——GetFirstNPCNameOrNull,缺位 null 保留 token）
   const npc = (type: number) => () => npcNameResolver?.(type) ?? null;
   m.set('Nurse', npc(18)); m.set('Merchant', npc(17)); m.set('ArmsDealer', npc(19));

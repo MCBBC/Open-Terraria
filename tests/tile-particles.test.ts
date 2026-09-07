@@ -104,3 +104,126 @@ describe('方块环境粒子规则表（TileParticles）', () => {
     expect(fireblossom.color).toBe(DUST_COLOR[6]);
   });
 });
+
+// =====================================================================
+// tileShine 矿物闪光系统 1:1（Main.cs 赋值区 7273-10431 × TileDrawing.cs:7537-7654，
+// 2026-09-07 逐值复核批）。金标 = 原版 tileShine 全量 55 型（54 标量 + 178 七列拆分），
+// 经 tools 脚本逐行提取对账零漂移后冻结于此；表值回退/手改在此爆红。
+// =====================================================================
+const VANILLA_SHINE: ReadonlyArray<readonly [number, number]> = [
+  [221, 925], [222, 875], [223, 825], [129, 300],
+  [22, 1150], [6, 1150], [7, 1100], [8, 1000], [9, 1050],
+  [166, 1125], [167, 1075], [168, 1025], [169, 975],
+  [617, 400], [178, 500], [12, 300],
+  [21, 1200], [467, 1200], [441, 1200], [468, 1200],
+  [63, 900], [64, 900], [65, 900], [66, 900], [67, 900], [68, 900], [566, 900],
+  [45, 1900], [680, 1900], [46, 2000], [681, 2000], [47, 2100], [682, 2100],
+  [122, 1800], [686, 1800], [121, 1850], [685, 1850],
+  [125, 600], [109, 9000], [110, 9000], [116, 9000], [117, 9000], [118, 8000],
+  [107, 950], [108, 900], [111, 850], [211, 500], [639, 300], [239, 1100],
+  [346, 2000], [347, 1900], [348, 1800], [370, 1900], [407, 1000], [204, 1150],
+];
+// TileDrawing.cs:7557-7651 的 newColor 表（未列型 = Color.White）
+const VANILLA_SHINE_COLOR: ReadonlyArray<readonly [number, string]> = [
+  [63, '#0000FF'], [64, '#FF0000'], [65, '#00FF00'], [66, '#FFFF00'],
+  [67, '#FF00FF'], [68, '#FFFFFF'], [566, '#FFFF00'],
+  [12, '#FF0000'], [211, '#32FF64'], [204, '#FF0000'], [639, '#0000FF'],
+];
+
+describe('tileShine 矿物闪光 1:1（Main.cs × TileDrawing.cs:7537-7654）', () => {
+  // 闪光规则签名 = 带 lightGate 的规则（全规则表仅闪光族携带）
+  const shineRulesOf = (sheet: number): TileParticleRule[] =>
+    (TILE_PARTICLE_RULES.get(sheet) ?? []).filter((r) => r.lightGate !== undefined);
+
+  it('表抽取：55 型全覆盖、shine 值零漂移（178 拆七列 prob=24/500）', () => {
+    const scalar = new Map(SHINE_TABLE.map((s) => [s.sheet, s.shine] as const));
+    const seen = new Set<number>();
+    for (const [sheet, shine] of VANILLA_SHINE) {
+      const rules = shineRulesOf(sheet);
+      if (sheet === 178) {
+        expect(rules).toHaveLength(7);
+        for (const r of rules) expect(r.prob).toBeCloseTo(24 / 500, 12);
+      } else {
+        expect(rules).toHaveLength(1);
+        expect(rules[0].prob).toBeCloseTo(24 / shine, 12);
+        expect(scalar.get(sheet)).toBe(shine);
+      }
+      seen.add(sheet);
+    }
+    expect(seen.size).toBe(VANILLA_SHINE.length);
+    expect(SHINE_TABLE).toHaveLength(VANILLA_SHINE.length - 1); // 178 不入标量表
+  });
+
+  it('闪光色 1:1（:7557-7651 newColor 表；未列型 = Color.White）', () => {
+    for (const [sheet, color] of VANILLA_SHINE_COLOR) {
+      expect(shineRulesOf(sheet)[0].color).toBe(color);
+    }
+    for (const sheet of [22, 6, 239, 129, 21, 125, 617]) {
+      expect(shineRulesOf(sheet)[0].color).toBe('#FFFFFF');
+    }
+    // 178 七列色 [品红,黄,蓝,绿,红,白,黄]（fx/18 = 0..6）
+    const cols = shineRulesOf(178);
+    const EXPECT = ['#FF00FF', '#FFFF00', '#0000FF', '#00FF00', '#FF0000', '#FFFFFF', '#FFFF00'];
+    for (let col = 0; col < 7; col++) {
+      const hit = cols.find((r) => r.pred?.(col * 18, 0));
+      expect(hit).toBeDefined();
+      expect(hit!.color).toBe(EXPECT[col]);
+    }
+  });
+
+  it('尘通道 1:1：NewDust(...,43,0,0,254,·,0.5f)+velocity×0（:7652-7653）', () => {
+    for (const [sheet] of VANILLA_SHINE) {
+      for (const r of shineRulesOf(sheet)) {
+        expect(r.dust).toBe(43);
+        expect(r.dustAlpha).toBe(254);
+        expect(r.dustScale).toBe(0.5);
+      }
+    }
+  });
+
+  it('色点回退路：出生盒 = NewDust 内盒 [4,16)²（rand.Next(12)+4）、静止、life 22', () => {
+    for (const [sheet] of VANILLA_SHINE) {
+      for (const r of shineRulesOf(sheet)) {
+        expect(r.dxBox).toEqual([4, 16]);
+        expect(r.dyBox).toEqual([4, 16]);
+        expect(r.rise).toBe(0);
+        expect(r.grav).toBe(0);
+        expect(r.life).toBe(22);
+      }
+    }
+  });
+
+  it('箱族帧门 1:1（:7553）：21/441 亮格段 [36,180)∪[396,409]；467/468 仅 [144,180)', () => {
+    for (const sheet of [21, 441] as const) {
+      const r = shineRulesOf(sheet)[0];
+      expect(ruleMatches(r, 36, 0)).toBe(true);
+      expect(ruleMatches(r, 178, 0)).toBe(true);
+      expect(ruleMatches(r, 180, 0)).toBe(false);
+      expect(ruleMatches(r, 35, 0)).toBe(false);
+      expect(ruleMatches(r, 396, 0)).toBe(true);
+      expect(ruleMatches(r, 409, 0)).toBe(true);
+      expect(ruleMatches(r, 410, 0)).toBe(false);
+    }
+    for (const sheet of [467, 468] as const) {
+      const r = shineRulesOf(sheet)[0];
+      expect(ruleMatches(r, 144, 0)).toBe(true);
+      expect(ruleMatches(r, 179, 0)).toBe(true);
+      expect(ruleMatches(r, 143, 0)).toBe(false);
+      expect(ruleMatches(r, 180, 0)).toBe(false);
+    }
+  });
+
+  it('生命水晶 12 全链（用户实报"暗处完全看不见"主修复面）', () => {
+    const heart = shineRulesOf(12)[0];
+    expect(heart.prob).toBeCloseTo(24 / 300, 12);  // ≡ 原版满光 8/300/帧 ×3 tick 扫描
+    expect(heart.color).toBe('#FF0000');           // :7636 newColor(255,0,0)
+    expect(heart.pred).toBeUndefined();            // 2×2 每格独立可闪
+    expect(heart.lightGate).toBe(20);              // :7539-7543 三通道 max>20 门
+    expect(heart.dust).toBe(43);                   // TintableDustLighted
+    expect(heart.dustAlpha).toBe(254);
+    // 概率域：折算后不得超 1（表内最小 shine=300 → 恒真，结构性保险）
+    for (const [sheet] of VANILLA_SHINE) {
+      for (const r of shineRulesOf(sheet)) expect(r.prob).toBeLessThanOrEqual(1);
+    }
+  });
+});
