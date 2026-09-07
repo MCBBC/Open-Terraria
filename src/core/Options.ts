@@ -144,7 +144,8 @@ export interface OptionsData {
   autoSave: boolean;
   /** 自动保存间隔（分钟；原版恒 10 分钟不可调，此处为任务要求的 Web 便利扩展档） */
   autoSaveIntervalMin: number;
-  /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——原版语义="开界面暂停"
+  /** 自动暂停（Main.autoPause，Main.cs:1298 默认 false——★SW-RB7 2026-09-08 勘误,
+   *  曾写 :1280 实为 rainTime;config 键 "AutoPause" Main.cs:4203/:4426）——原版语义="开界面暂停"
    *  （CanPauseGame Main.cs:17493-17508：开背包/牌等界面时逐帧 gamePaused），
    *  非失焦暂停；失焦面归 SettingPlayWhenUnfocused（红队 R3-E2 ②正锚，两者互不
    *  耦合）。本仓消费=Game.applyAutoPauseUI（__swUI.inventoryOpen 逐帧重算）。
@@ -227,6 +228,12 @@ export interface OptionsData {
    *  GameUI.CraftFromNearbyChestsOn/Off 官译）；本仓设置面落 Settings 页 game 组。
    *  消费：vanillaRecipes.craftSourcesFor 的 nearbyChestsEnabled 门 */
   craftFromNearbyChests: boolean;
+  /** ★2026-09-07 背包布局灰度 flag(用户定策:重构为原版 1.4.5.7 布局,验证通过前
+   *  不替换现有布局)——缺省 classic=现行 DOM 背包(buildInventoryPanel 零改动);
+   *  vanilla=原版布局双构建器(UI.ts initInGame 按 flag 分派,运行期切换走
+   *  options.onChange → rebuildInventoryPanel)。会话覆盖 ?invlayout=vanilla|classic
+   *  (load() 内改内存不落盘,探针/评审直达);验证全绿后切缺省另刀。 */
+  inventoryLayout: 'classic' | 'vanilla';
 }
 
 const KEY = 'sandboxworld.options';
@@ -287,7 +294,7 @@ export class OptionsStore {
     opaqueBoxBehindTooltips: true,          // Main.cs:249
     autoSave: true,                         // Main.cs:1196
     autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
-    autoPause: false,                       // Main.cs:1280
+    autoPause: false,                       // Main.cs:1298（RB7 勘误,曾写 1280）
     playWhenUnfocused: false,               // Main.cs:268（失焦全静=原版默认）
     quickStackMode: 'quick',                // Player.Settings.StackToChestsPreferredMode（QuickStackToNearbyChests）
     panControlMode: 0,                      // Hold（PlayerInputProfile.cs:59 键盘缺省）
@@ -306,6 +313,7 @@ export class OptionsStore {
     touchOpMode: 'auto',                    // 默认按设备
     quickTrashMode: 'leftControl',          // ★SW-AY1 #10（ItemSlot.cs:28-30 缺省档）
     craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
+    inventoryLayout: 'classic',             // ★2026-09-07 灰度 flag(缺省现行布局;切缺省另刀)
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -444,6 +452,16 @@ export class OptionsStore {
       }
       // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
       if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
+      // ★2026-09-07 背包布局灰度：坏值回 classic；URL 会话覆盖（?invlayout=vanilla|
+      //  classic，只改内存不落盘——落盘唯一通道是 set()，探针/评审 URL 直达）
+      if (this.data.inventoryLayout !== 'vanilla' && this.data.inventoryLayout !== 'classic') {
+        this.data.inventoryLayout = 'classic';
+      }
+      {
+        const qLayout = typeof location !== 'undefined'
+          ? new URLSearchParams(location.search).get('invlayout') : null;
+        if (qLayout === 'vanilla' || qLayout === 'classic') this.data.inventoryLayout = qLayout;
+      }
     } catch { /* 无存档用默认 */ }
     this.emit();
   }

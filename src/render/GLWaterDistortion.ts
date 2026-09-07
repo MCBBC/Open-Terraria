@@ -209,14 +209,22 @@ void main() {
     this.texWater = gl.createTexture();
     this.texNoise = gl.createTexture();
     this.texWave = gl.createTexture();
-    // 场景/水层：CLAMP（越界 = 边缘重复，原版 PointClamp 同款边界语义）
-    for (const t of [this.texScene, this.texWater]) {
-      gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    }
+    // 场景：CLAMP + LINEAR（spriteBatch 场景采样线性同款）
+    gl.bindTexture(gl.TEXTURE_2D, this.texScene);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // 前景水门控：CLAMP + NEAREST —— 原版 UseImage(Main.waterTarget.Texture, 2,
+    // PointClamp)（文件头考古 :16）。★门控必须逐像素二值（2026-09-08 水面直线缝
+    // 定谳）：LINEAR 下水线边界 texel 的门控 α 被邻域平均 → 1-2px 半混合带
+    // （位移后空气色 × 未位移水色）= 水面上一条直线亮缝，可见度随位移场与
+    // texel 网格的亚像素相位（缩放/相机高度）隐现；NEAREST=原版二值门控。
+    gl.bindTexture(gl.TEXTURE_2D, this.texWater);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     // noise：256 pow2 → REPEAT 合法（LinearWrap，ScreenShaderData.cs:175-178 同款）
     gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);

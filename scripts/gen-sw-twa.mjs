@@ -67,22 +67,20 @@ const DOC_SRC = `  if (isDoc) {
     return;
   }`;
 const DOC_TWA = `  if (isDoc) {
-    // TWA stale-while-revalidate(2026-08-30):回缓存保离线冷启动,后台拉新版本
-    // 写版本缓存,下次启动生效(TWA 更新节奏=次启;在线时每次启动都追平)。
+    // ★network-first(2026-09-07 用户实报「推多版本要刷多次逐步提升」):SWR 的
+    //  「回缓存旧 HTML+后台拉新」在连跳多版本时每次 reload 只追一个版本。改
+    //  network-first:在线 fetch 成功=返回最新(同时更新缓存),离线才回退缓存
+    //  (离线可开保留;boot 缓存仍作冷启动兜底)。「更新并刷新」按钮 reload 一次到位。
     e.respondWith((async () => {
       const cache = await getCache();
       const boot = await caches.open(BOOT_CACHE);
-      const cached = (await cache.match(req)) || (await boot.match(req));
-      const net = fetch(req).then(async (res) => {
+      try {
+        const res = await fetch(req);
         if (res && res.ok) { try { await cache.put(req, res.clone()); } catch { /* 版本缓存名未定等瞬态 */ } }
         return res;
-      }).catch(() => null);
-      if (cached) {
-        e.waitUntil(net.catch(() => {}));
-        return cached;
-      }
-      const res = await net;   // 无缓存(首次)必须等网络结果
-      if (res) return res;
+      } catch { /* 离线:缓存回退 */ }
+      const cached = (await cache.match(req)) || (await boot.match(req));
+      if (cached) return cached;
       return new Response('', { status: 504, statusText: 'offline' });
     })());
     return;
@@ -131,4 +129,4 @@ if (readFileSync(idPath, 'utf8').trim() !== `${appVersion} ${buildId}`) {
   console.error('[gen-sw-twa] build-id.txt 写入校验失败');
   process.exit(1);
 }
-console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 SWR;主 chunk ${jsRefs.length} 个校验通过;build-id=${buildId})`);
+console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 network-first;主 chunk ${jsRefs.length} 个校验通过;build-id=${buildId})`);

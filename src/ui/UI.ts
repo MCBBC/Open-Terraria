@@ -143,8 +143,23 @@ import {
   chestContainerContext, canMergeStack, quickTrashOptionsOf,
   CAN_FAVORITE_AT, CAN_LOADOUT_SHARE_AT, CAN_SHARE_AT, RETAIN_FAVORITE_ON_MOVE_AT,
   blockedFromTransferIntoChest,
+  selectEquipPageOf, equipPageCapOf,
   type SlotWhereLike,
 } from './SlotActions';   // SW-AU2 2026-09-06 Alt/Shift/Ctrl 槽位动作 1:1 路由
+import {
+  INV_SCALE, gridSlotXY, coinSlotXY, ammoSlotXY, trashXY,
+  quickStackXY, sortXY, bestiaryXY, emoteXY,
+  mHOf, equipAreaTop, equipRowY, accessoryCheckY,
+  EQUIP_COL_X, VANITY_COL_X, DYE_COL_X, ACCESSORY_CHECK_X,
+  loadoutRailRect, loadoutBtnXY, defenseCenterXY,
+  TAB_Y, TAB_MISC_X, TAB_HOUSING_X, TAB_CAMERA_X,
+  TAB_MISC_SIZE, TAB_HOUSING_SIZE, TAB_CAMERA_SIZE,
+  miscRowY, miscCheckXY, housingSlotPositions,
+  MISC_COL_EQUIP_X, MISC_COL_DYE_X,
+  pvpSwordXY, pvpTeamXY,
+  vanillaScaleFor, ADVISOR_XY, TITLE_XY,
+  COIN_LABEL_XY, AMMO_LABEL_XY, COIN_AMMO_SCALE,
+} from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
@@ -621,6 +636,11 @@ export class UI {
     parent.appendChild(this.root);
     this.installDragListeners();
     (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
+    // ★2026-09-07 刀 2:背包布局 flag 运行期切换 → 面板重建(teardown+rebuild;
+    // initInGame 前未建则 no-op,由下次进世界自然分派)。classic 旁路零改动
+    options.onChange((d) => {
+      if (this._builtLayout && d.inventoryLayout !== this._builtLayout) this.rebuildInventoryPanel();
+    });
   }
 
   private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean; prefix?: number; placeStyle?: number } | null {
@@ -1831,7 +1851,7 @@ export class UI {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
       // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
-      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock')) return;
+      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock, .sw-vinv')) return;
       // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:42522-42532 商品格网格）：
       //  ★SW-BJ22 2026-09-07 原版卖出触发面收窄——原版 40 格网格里【空商店格】
       //  才是卖出放置区（PickItemMovementAction case 15 ItemSlot.cs:1435-1438
@@ -2152,7 +2172,7 @@ export class UI {
     }
     // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
     // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
-    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock');
+    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-vinv');
     if (!inPanel) {
       this.throwHeldToWorld();
     } else {
@@ -2595,6 +2615,10 @@ export class UI {
    *  投影弱化（opacity 曾连内容一起半透,用户纠正） */
   private positionInvPanel(): void {
     if (!this.invPanel) return;
+    // ★2026-09-07 刀 2 守卫:vanilla 布局自定位(.sw-vinv fixed inset:0+容器 scale,
+    // 见 buildVanillaInventoryPanel/layoutVanilla)——热键栏贴位/透明化全跳过,
+    // openInventory 链由此零改动复用
+    if (this._builtLayout === 'vanilla') return;
     let best: HTMLElement | null = null;
     let bestL = Infinity;
     for (const s of Array.from(this.hotbarEl?.querySelectorAll<HTMLElement>('.sw-slot') ?? [])) {
@@ -5036,6 +5060,17 @@ export class UI {
 
   refreshHotbar() {
     if (!this.game) return;
+    // ★2026-09-07 刀 2 守卫:vanilla 布局开包 = 原版 GUIHotbarDrawInner 整体早退
+    // (Main.cs:44324 `if (playerInventory || ...) return;`)——热键栏 DOM 隐藏,
+    // 第 0 行由 .sw-vinv 网格承担(paintVanillaInvSlots);关包态落下方 D0 画法
+    // (已 1:1 原版关包几何),此处只负责 display 还原
+    if (this._builtLayout === 'vanilla') {
+      const vinvOpen = this.invPanel?.style.display === 'block';
+      if (this.hotbarEl) this.hotbarEl.style.display = vinvOpen ? 'none' : '';
+      if (this.hotbarNameEl) this.hotbarNameEl.style.display = vinvOpen ? 'none' : '';
+      if (this.manualBtn) this.manualBtn.style.display = vinvOpen ? 'none' : '';
+      if (vinvOpen) return;
+    }
     const inv = this.game.player.inv;
     // 原版布局（Main.cs:43017-43060）：x 从 20 起步进 ⌊52×scale⌋+4；
     // y = 20 + 22×(1-scale)（选中 20，未选中 25→CSS 视觉再随 scale 收缩）；
@@ -5234,6 +5269,9 @@ export class UI {
         this.paintSlotChrome(slotEl, 'inv', i);
       }
     }
+    // ★2026-09-07 刀 2 守卫:vanilla 布局补绘——网格第 0 行(0-9,全局 slotEl 会
+    // 首匹配到隐藏热键栏)+ inv 族槽底覆写(原版开包=Inventory_Back 非经典 Back20)
+    if (this._builtLayout === 'vanilla') this.paintVanillaInvSlots();
     // 金币跳字（CoinSlot：堆叠变化触发且槽内有币——原版仅钱币族动画，空槽不跳）
     for (let k = 0; k < 4; k++) {
       const cur = inv.slots[COIN_START + k];
@@ -5743,10 +5781,14 @@ export class UI {
     for (const [t, r, g, b, width] of this.chatPending) this.chatMonitor.message(t, r, g, b, width);
     this.chatPending = [];
 
-    this.buildInventoryPanel();
+    // ★2026-09-07 刀 2:布局分派(vanilla 构建器必须在 buildHud【之后】跑——
+    // .sw-vinv 的 DOM 序在 hotbarEl 之后,关包态全局 slotEl(0-9) 首匹配=热键栏格)
+    const vinvLayout = options.data.inventoryLayout === 'vanilla';
+    if (!vinvLayout) this.buildInventoryPanel();   // classic 原路径(零改动)
     this.buildChestPanel();
     this.buildBuffBar();
     this.buildHud(this.game);
+    if (vinvLayout) this.buildVanillaInventoryPanel();
     // Buff → 图标物品映射
     const map: Array<[BuffType, string]> = [
       [BuffType.Agility, VI(290)], [BuffType.Ironskin, VI(292)],
@@ -6045,5 +6087,702 @@ export class UI {
       [BuffType.Shimmered, 'vi_5340_galaxy_pearl'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
+  }
+
+  // ================= 原版布局构建器(2026-09-07 刀 2;flag inventoryLayout='vanilla',缺省关) =================
+  // 权威 = Terarria1457/Terraria/Main.cs DrawInventory 族(几何逐行锚,数值单源
+  // vanillaInvLayout.ts;与 docs/inventory-crafting-research-1456.md §四 交叉验证一致)。
+  // 纪律:classic(buildInventoryPanel)零改动;本族全为新代码,共享区仅 4 处 flag 守卫
+  // (initInGame 分派/positionInvPanel 首行/refreshHotbar 开包早退/refreshAllNow 补绘)。
+  // 坑①:网格含槽 0-9,与关包热键栏 [data-idx] 全局 querySelector 首匹配冲突——
+  //   本族内一律走 vinvSlots 作用域引用,禁用 slotEl(0-9);DOM 序保证关包态全局查询
+  //   首命中热键栏(.sw-vinv 在 buildHud 之后挂载)。
+  // 坑②:独立类 .sw-vinv,不得复用 sw-panel/sw-inv/sw-invgrid/sw-eqdock(--slot:39px
+  //   等 CSS 渗漏),作用域样式见 vinvStyleEnsure。
+  // 登记债(不阻塞):住房页槽位(刀 3)/Sort 钮功能(ItemSorting 未移植)/相机页签接线/
+  //   杂项页超级矿车开关/开箱态垃圾桶-钮变体只随 chestOpen(商店态同面)。
+
+  private vinvRoot: HTMLElement | null = null;
+  /** 作用域槽引用 `${where}:${i}`(坑①:替代全局 slotEl) */
+  private vinvSlots = new Map<string, HTMLElement>();
+  private vinvPageEls: { equip: HTMLElement; misc: HTMLElement; housing: HTMLElement } | null = null;
+  private vinvTabMisc: HTMLElement | null = null;
+  private vinvTabHousing: HTMLElement | null = null;
+  private vinvTabCamera: HTMLElement | null = null;
+  /** EquipPage 状态(原版 Main.EquipPageSelected/-1 记忆语义;每帧重算见 vinvApplyPage) */
+  private vinvPageSelected: 0 | 1 | 2 = 0;
+  private vinvPageCurrent = -1;
+  private vinvQuickBtn: HTMLButtonElement | null = null;
+  private vinvSortBtn: HTMLButtonElement | null = null;
+  private vinvBestiaryBtn: HTMLButtonElement | null = null;
+  private vinvEmoteBtn: HTMLButtonElement | null = null;
+  private vinvDefenseEl: HTMLElement | null = null;
+  private vinvHousingSlots: HTMLElement[] = [];
+  /** 布局期元素表:{el, pos()}——pos 返回 null=隐藏(追加槽未解锁/开箱态堆叠钮) */
+  private vinvLayoutItems: Array<{ el: HTMLElement; pos: () => { x: number; y: number } | null }> = [];
+  private vinvRowMap = new Map<string, number>();   // `equip:8`→可见行号(追加槽重编号;查不到=隐藏)
+  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean } | null = null;
+  private vinvLayoutSig = '';
+  private vinvResizeHandler: (() => void) | null = null;
+  /** 当前已建布局(分派/重建判据;null=未建) */
+  private _builtLayout: 'classic' | 'vanilla' | null = null;
+
+  private buildInventoryFor(layout: 'classic' | 'vanilla'): void {
+    if (layout === 'vanilla') this.buildVanillaInventoryPanel();
+    else this.buildInventoryPanel();
+  }
+
+  /** 作用域样式(坑②):.sw-vinv 前缀全隔离;槽底 = eqdock 同款 gradient+multiply
+   *  纹理层(loadout 配装乘色在层内合成,免 ::before 加性发白),--slot-alpha 缺省 1
+   *  (原版开包格不透明底) */
+  private vinvStyleEnsure(): void {
+    if (document.getElementById('sw-vinv-style')) return;
+    const st = document.createElement('style');
+    st.id = 'sw-vinv-style';
+    st.textContent = `
+.sw-vinv { font-family:inherit; }
+.sw-vinv .sw-slot { position:absolute; width:52px; height:52px; background-image:none;
+  isolation:isolate; transform-origin:top left; touch-action:none; }
+.sw-vinv .sw-slot::after { content:''; position:absolute; inset:0; z-index:-1;
+  background-image:linear-gradient(var(--slot-tint, rgb(220,220,220)), var(--slot-tint, rgb(220,220,220))),
+    var(--slot-bgimg, url(sprites/vanilla/Inventory_Back.png));
+  background-size:100% 100%, 100% 100%; background-blend-mode:multiply, normal;
+  opacity:var(--slot-alpha, 1); }
+.sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
+.sw-vinv .sw-slot:hover::after { opacity:1; }
+.sw-vinv .vinv-btn { position:absolute; pointer-events:auto; margin:0; padding:0;
+  border:none; background-color:transparent; background-repeat:no-repeat;
+  image-rendering:pixelated; cursor:pointer; }
+.sw-vinv .vinv-txt { position:absolute; pointer-events:none; color:#e8e8f0;
+  text-shadow:1px 1px 0 #000; white-space:nowrap; }
+`;
+    document.head.appendChild(st);
+  }
+
+  private vinvMakeSlot(where: SlotWhere, i: number, scale: number): HTMLElement {
+    const s = this.makeSlotEl(i, where);
+    s.style.width = '52px';
+    s.style.height = '52px';
+    s.style.transform = `scale(${scale})`;
+    this.vinvSlots.set(`${where}:${i}`, s);
+    return s;
+  }
+
+  /** 原版布局构建器(几何逐函数锚 vanillaInvLayout.ts;行号注回 Main.cs) */
+  private buildVanillaInventoryPanel(): void {
+    this._builtLayout = 'vanilla';
+    this.vinvStyleEnsure();
+    this.accEyeEls.clear();
+    const root = el('div', 'sw-vinv');
+    root.style.cssText = 'position:fixed; inset:0; pointer-events:none; display:none; z-index:11;';
+    this.vinvRoot = root;
+    this.invPanel = root;   // 开合链/panelOpen/resolveDrop 语义共用 invPanel 字段
+    const F = (px: number): string => `${px}px`;
+    const txt = (text: string): HTMLElement => { const d = el('div', 'vinv-txt', text); root.appendChild(d); return d; };
+    const btn = (w: number, h: number): HTMLButtonElement => {
+      const b = el('button', 'vinv-btn') as HTMLButtonElement;
+      b.style.width = F(w); b.style.height = F(h);
+      root.appendChild(b);
+      return b;
+    };
+    const pos = (b: HTMLElement, p: () => { x: number; y: number } | null): void => {
+      this.vinvLayoutItems.push({ el: b, pos: p });
+    };
+
+    // ---- 10×5 网格(槽 0-49,热键栏=第 0 行;Main.cs:41731-41750) ----
+    for (let i = 0; i < 50; i++) {
+      const s = this.vinvMakeSlot('inv', i, INV_SCALE);
+      if (i < 10) s.appendChild(el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1)));
+      root.appendChild(s);
+      pos(s, () => gridSlotXY(i));
+    }
+    // 标题(Main.cs:41725 Lang.inter[4] "Inventory" @(40,0))
+    const title = txt(Lang.inter(4));
+    title.style.fontSize = '20px';
+    pos(title, () => ({ x: TITLE_XY.x, y: TITLE_XY.y }));
+    // 成就 Advisor(Main.cs:41758-41763 @(501,25))
+    const advWrap = el('div');
+    advWrap.style.cssText = 'position:absolute; pointer-events:auto;';
+    advWrap.appendChild(createAchievementAdvisor(this.game));
+    this.achAdvisorEl = advWrap.firstChild as HTMLElement & { update(): void };
+    root.appendChild(advWrap);
+    pos(advWrap, () => ({ x: ADVISOR_XY.x, y: ADVISOR_XY.y }));
+    // ---- 钱币/弹药列(Main.cs:42460-42495:标签 (496,84)/(532,84),槽 x=497/534) ----
+    const coinLbl = txt(Lang.text('LegacyInterface.26'));
+    coinLbl.style.fontSize = '15px';
+    pos(coinLbl, () => ({ x: COIN_LABEL_XY.x, y: COIN_LABEL_XY.y }));
+    const ammoLbl = txt(Lang.text('LegacyInterface.27'));
+    ammoLbl.style.fontSize = '15px';
+    pos(ammoLbl, () => ({ x: AMMO_LABEL_XY.x, y: AMMO_LABEL_XY.y }));
+    for (let k = 0; k < 4; k++) {
+      const cs = this.vinvMakeSlot('inv', COIN_START + k, COIN_AMMO_SCALE);
+      root.appendChild(cs);
+      pos(cs, () => coinSlotXY(k));
+      const as = this.vinvMakeSlot('inv', AMMO_START + k, COIN_AMMO_SCALE);
+      root.appendChild(as);
+      pos(as, () => ammoSlotXY(k));
+    }
+    // ---- 垃圾桶(Main.cs:43073-43090 (448,258) scale0.85;开箱/商店 (453,426)) ----
+    root.appendChild(this.vinvBuildTrash());
+
+    // ---- 2×2 快捷钮(Main.cs:42548-42613/43093-43193) ----
+    // QuickStack:左键=按 quickStackMode 执行(原版右键循环 StackToChestsPreferredMode
+    // 的本仓映射=右键循环 quick↔smart);开箱/商店不画(42548)
+    {
+      const b = btn(32, 30);
+      this.vinvQuickBtn = b;
+      const paintQuick = (): void => {
+        const base = options.data.quickStackMode === 'smart' ? 2 : 0;
+        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+        b.style.backgroundSize = '100% 100%';
+      };
+      paintQuick();
+      b.addEventListener('mouseenter', () => {
+        const base = options.data.quickStackMode === 'smart' ? 3 : 1;
+        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+      });
+      b.addEventListener('mouseleave', paintQuick);
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        this.game.quickStackAllChests(options.data.quickStackMode);
+        this.game.sfx.play('menuTick', 1);            // SoundID 12(:41292)
+        this.refreshAll();
+      });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void options.set('quickStackMode', options.data.quickStackMode === 'quick' ? 'smart' : 'quick');
+        paintQuick();
+        this.game.sfx.play('menuTick', 1);
+      });
+      pos(b, () => quickStackXY(!!this.vinvLayoutCtx?.chestOpen));
+    }
+    // Sort(534,244):★登记债——ItemSorting.SortInventory 未移植,钮画+音,点击 no-op
+    {
+      const b = btn(30, 30);
+      this.vinvSortBtn = b;
+      b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Sort_0.png)';
+      b.style.backgroundSize = '100% 100%';
+      b.addEventListener('mouseenter', () => { b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Sort_1.png)'; });
+      b.addEventListener('mouseleave', () => { b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Sort_0.png)'; });
+      b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.game.sfx.play('menuTick', 1); });
+      pos(b, () => sortXY(!!this.vinvLayoutCtx?.chestOpen));
+    }
+    // 图鉴(498,278)/表情(534,278):开箱态移 (503,446)/(539,446)(43103-43108)
+    {
+      const b = btn(30, 30);
+      this.vinvBestiaryBtn = b;
+      b.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
+      b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary.png)';
+      b.style.backgroundSize = '200% 100%';
+      b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
+      b.addEventListener('mouseleave', () => { b.style.backgroundPosition = '0 0'; });
+      b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.onBestiary?.(); });
+      pos(b, () => bestiaryXY(!!this.vinvLayoutCtx?.chestOpen));
+    }
+    {
+      const b = btn(30, 30);
+      this.vinvEmoteBtn = b;
+      b.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
+      b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Emotes.png)';
+      b.style.backgroundSize = '200% 100%';
+      b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
+      b.addEventListener('mouseleave', () => { b.style.backgroundPosition = '0 0'; });
+      b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.onEmoteMenu?.(); });
+      pos(b, () => emoteXY(!!this.vinvLayoutCtx?.chestOpen));
+    }
+
+    // ---- 三页容器(EquipPage 0/1/2;页签见下;页切换=display,坐标全绝对) ----
+    const pageOf = (): HTMLElement => {
+      const p = el('div');
+      p.style.cssText = 'position:absolute; inset:0; pointer-events:none;';
+      root.appendChild(p);
+      return p;
+    };
+    const pageEquip = pageOf();
+    const pageHousing = pageOf();   // 槽位刀 3(DrawNPCHousesInUI)
+    const pageMisc = pageOf();
+    this.vinvPageEls = { equip: pageEquip, misc: pageMisc, housing: pageHousing };
+    const pagePos = (b: HTMLElement, p: () => { x: number; y: number } | null): void => {
+      this.vinvLayoutItems.push({ el: b, pos: p });
+    };
+
+    // ---- 装备页(EquipPage==0 Main.cs:42085-42236):染料|时装|装备 三列+勾选框列 ----
+    const buildEquipCol = (col: 'equip' | 'vanity' | 'dye', slots: number[], xOf: (sw: number) => number, scale: number): void => {
+      for (const slot of slots) {
+        const where: SlotWhere = col === 'dye' ? 'dye' : 'armor';
+        const s = this.vinvMakeSlot(where, slot, scale);
+        pageEquip.appendChild(s);
+        pagePos(s, () => {
+          const row = this.vinvRowMap.get(`${col}:${slot}`);
+          if (row === undefined) return null;   // 追加槽未显示=不占行号(:42092-42113)
+          return { x: xOf(this.vinvLayoutCtx!.sw), y: equipRowY(this.vinvLayoutCtx!.num20, row) };
+        });
+      }
+    };
+    buildEquipCol('equip', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], EQUIP_COL_X, INV_SCALE);
+    buildEquipCol('vanity', [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], VANITY_COL_X, INV_SCALE);
+    buildEquipCol('dye', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], DYE_COL_X, INV_SCALE);
+    // 可见性勾选框(Main.cs:42118-42155:x=sw-58,仅功能段行>2;独格非槽角——原版同)
+    for (let slot = 3; slot <= 9; slot++) {
+      const eye = el('button', 'vinv-btn') as HTMLButtonElement;
+      eye.style.width = '16px'; eye.style.height = '12px';
+      eye.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (this.heldStack) return;   // mouseItem.IsAir 门(:40859)
+        const p = this.game?.player;
+        if (!p) return;
+        p.hideVisibleAccessory[slot] = !p.hideVisibleAccessory[slot];
+        this.game!.sfx.play('menuTick');
+        this.paintAccEyes();
+      });
+      this.accEyeEls.set(slot, eye);   // 复用 paintAccEyes 共享重刷(:1405)
+      this.paintAccEye(eye, slot);
+      pageEquip.appendChild(eye);
+      pagePos(eye, () => {
+        const row = this.vinvRowMap.get(`equip:${slot}`);
+        if (row === undefined) return null;
+        return { x: ACCESSORY_CHECK_X(this.vinvLayoutCtx!.sw), y: accessoryCheckY(this.vinvLayoutCtx!.num20, row) };
+      });
+    }
+    // 配装轨(DrawLoadoutButtons Main.cs:42651-42707:竖轨 sw-44+钮 32×32 @sw-40+36i)
+    {
+      const rail = el('div');
+      rail.style.cssText = 'position:absolute; width:4px; background:rgba(120,130,180,0.45);';
+      pageEquip.appendChild(rail);
+      pagePos(rail, () => {
+        const c = this.vinvLayoutCtx!;
+        const r = loadoutRailRect(c.sw, c.num20, 3);
+        return { x: r.x, y: r.y };
+      });
+      rail.style.height = `${loadoutRailRect(0, 0, 3).h}px`;   // 高度定值(3 套恒可切)
+      this.loadoutBtns = [];
+      for (let k = 0; k < 3; k++) {
+        const b = el('button', 'vinv-btn sw-loadout-btn') as HTMLButtonElement;
+        b.style.width = '32px'; b.style.height = '32px';
+        b.style.backgroundImage = 'url(sprites/vanilla/Extra_259.png)';
+        b.style.backgroundSize = '300% 300%';
+        b.style.backgroundPosition = `0% ${k * 50}%`;
+        b.addEventListener('mouseenter', () => {
+          if (this.game.player.inv.currentLoadout !== k) b.style.backgroundPosition = `100% ${k * 50}%`;
+        });
+        b.addEventListener('mouseleave', () => {
+          if (this.game.player.inv.currentLoadout !== k) b.style.backgroundPosition = `0% ${k * 50}%`;
+        });
+        b.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (this.game.player.inv.currentLoadout === k) return;
+          this.game.player.inv.trySwitchingLoadout(k, this.game.player.hideVisibleAccessory);
+          this.game.sfx.play('menuTick', 1);
+          this.flashLoadoutSwitch();
+          this.refreshAll();
+        });
+        pageEquip.appendChild(b);
+        this.loadoutBtns.push(b);
+        pagePos(b, () => loadoutBtnXY(this.vinvLayoutCtx!.sw, this.vinvLayoutCtx!.num20, k));
+      }
+    }
+    // 防御计数(DrawDefenseCounter Main.cs:42824-42899:中心 (sw-210, 末行 y+26))
+    {
+      const defRow = el('div');
+      defRow.dataset.role = 'defense';
+      defRow.style.cssText = 'position:absolute; width:40px; height:36px; pointer-events:auto; cursor:help;';
+      const defWrap = el('div');
+      defWrap.style.cssText = 'position:relative; width:40px; height:36px;';
+      const defShield = el('img');
+      defShield.alt = '';
+      defShield.style.cssText = 'position:absolute; inset:0; margin:auto; width:39px; height:36px; image-rendering:pixelated;';
+      defWrap.appendChild(defShield);
+      const defNum = el('span', '', '0');
+      defNum.style.cssText = 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center;'
+        + 'padding-top:2px; font-size:13px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
+      defWrap.appendChild(defNum);
+      defRow.appendChild(defWrap);
+      defRow.addEventListener('mouseenter', () => {
+        if (!this.game) return;
+        const p = this.game.player;
+        const st = p.defense;
+        const w = this.game.world;
+        const mul = w.isMaster ? 1.0 : w.isExpert ? 0.75 : 0.5;   // :42831-42840 难度换算
+        const reduce = Math.ceil(st * mul);
+        const dl = mainDifficulty(w);
+        const tipLines = [`${st} ${Lang.text('LegacyInterface.10')}`, Lang.text('UI.DefenseDamageReduction', reduce)];
+        if (dl >= GDL.LEGENDARY) tipLines.push(Lang.text('UI.Legendary'));
+        else if (dl >= GDL.MASTER) tipLines.push(Lang.text('UI.Master'));
+        else if (dl >= GDL.EXPERT) tipLines.push(Lang.text('UI.Expert'));
+        this.showBuffTooltip(defRow, tipLines[0], tipLines.slice(1).join('\n'));
+      });
+      defRow.addEventListener('mouseleave', () => this.hideBuffTooltip());
+      pageEquip.appendChild(defRow);
+      this.vinvDefenseEl = defRow;
+      pagePos(defRow, () => {
+        const c = this.vinvLayoutCtx!;
+        let last = 7;
+        for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
+        const ctr = defenseCenterXY(c.sw, c.num20, last);
+        return { x: ctr.x - 20, y: ctr.y - 18 };   // 40×36 盒左上=中心-(20,18)
+      });
+    }
+    // 页签(DrawPageIcons Main.cs:43511-43593:y=num20-32;杂项/住房=页切换,相机=债)
+    const mkTab = (w: number, h: number, imgNormal: string, title: string): HTMLButtonElement => {
+      const b = btn(w, h);
+      b.title = title;
+      b.style.backgroundImage = `url(sprites/vanilla-ui/${imgNormal})`;
+      b.style.backgroundSize = '100% 100%';
+      return b;
+    };
+    this.vinvTabMisc = mkTab(TAB_MISC_SIZE.w, TAB_MISC_SIZE.h, 'UI_DisplaySlots_2.png',
+      Lang.text('Mods.SandboxWorld.Tabs.Misc'));
+    this.vinvTabMisc.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.vinvPageSelected = this.vinvPageSelected === 2 ? 0 : 2;   // 同页再点回 0(:43584)
+      this.game.sfx.play('menuTick', 1);
+      this.vinvPageCurrent = -1;
+      this.vinvApplyPage();
+    });
+    this.vinvTabHousing = mkTab(TAB_HOUSING_SIZE.w, TAB_HOUSING_SIZE.h, 'UI_DisplaySlots_4.png',
+      Lang.text('Mods.SandboxWorld.Housing.Button'));
+    this.vinvTabHousing.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.vinvPageSelected = this.vinvPageSelected === 1 ? 0 : 1;
+      this.game.sfx.play('menuTick', 1);
+      this.vinvPageCurrent = -1;
+      this.vinvApplyPage();
+    });
+    // 相机页签(Main.cs:43549-43556 开截图界面)——★登记债:CaptureMode 接线,暂 no-op
+    this.vinvTabCamera = mkTab(TAB_CAMERA_SIZE.w, TAB_CAMERA_SIZE.h, 'UI_DisplaySlots_8.png', 'Camera');
+    this.vinvTabCamera.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    pos(this.vinvTabMisc, () => ({ x: TAB_MISC_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
+    pos(this.vinvTabHousing, () => ({ x: TAB_HOUSING_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
+    pos(this.vinvTabCamera, () => ({ x: TAB_CAMERA_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
+
+    // ---- 杂项页(EquipPage==2 Main.cs:41886-41932:两列 5 行,行距整型 47) ----
+    // miscEquips 序 = 宠物/光源/矿车/坐骑/钩爪(context 19/20/18/17/16;:41905-41931)
+    const MISC_LABEL_KEYS = ['Mods.SandboxWorld.Tabs.Pet', 'Mods.SandboxWorld.Tabs.Light',
+      'Mods.SandboxWorld.Tabs.Minecart', 'Mods.SandboxWorld.Tabs.Mount', 'Mods.SandboxWorld.Tabs.Grapple'] as const;
+    for (let m = 0; m < 5; m++) {
+      const lbl = txt(Lang.text(MISC_LABEL_KEYS[m]));
+      lbl.style.fontSize = '13px';
+      pageMisc.appendChild(lbl);   // appendChild 自 root 移入杂项页(DOM reparent)
+      pagePos(lbl, () => ({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw) - 24, y: miscRowY(this.vinvLayoutCtx!.num20, m) - 18 }));
+      const s = this.vinvMakeSlot('misc', m, INV_SCALE);
+      pageMisc.appendChild(s);
+      pagePos(s, () => ({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw), y: miscRowY(this.vinvLayoutCtx!.num20, m) }));
+      const d = this.vinvMakeSlot('miscDye', m, INV_SCALE);
+      pageMisc.appendChild(d);
+      pagePos(d, () => ({ x: MISC_COL_DYE_X(this.vinvLayoutCtx!.sw), y: miscRowY(this.vinvLayoutCtx!.num20, m) }));
+      // 宠物/光源开关勾选框(Main.cs:41934-41935 @(槽左+34,顶-2);TogglePet/Light :40666-40691)
+      if (m === 0 || m === 1) {
+        const eye = el('button', 'vinv-btn') as HTMLButtonElement;
+        eye.style.width = '16px'; eye.style.height = '12px';
+        eye.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (this.heldStack) return;
+          this.game.togglePetSlot(m as 0 | 1);
+          this.paintPetEye(eye, m as 0 | 1);
+        });
+        this.paintPetEye(eye, m as 0 | 1);
+        pageMisc.appendChild(eye);
+        pagePos(eye, () => miscCheckXY({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw), y: miscRowY(this.vinvLayoutCtx!.num20, m) }));
+      }
+    }
+
+    // ---- 住房页(EquipPage==1):壳(槽位+点击分配=刀 3 DrawNPCHousesInUI) ----
+    pageHousing.dataset.role = 'vinv-housing';
+
+    // ---- PvP/队伍(DrawPVPIcons Main.cs:43389-43443;本仓常开语义沿用 classic) ----
+    {
+      const sword = el('button', 'vinv-btn sw-btn') as HTMLButtonElement;
+      sword.style.width = '36px'; sword.style.height = '37px';
+      sword.style.backgroundImage = 'url(sprites/vanilla-ui/UI_PVP_0.png)';
+      sword.style.backgroundSize = '400% 600%';
+      // 视觉尺寸沿用 classic 帧制(36×37 @400%×600%;refreshPvpButtons 帧算依赖),
+      // 仅锚点取原版位(pvpSwordXY);原版 76×32×0.6 整帧绘制=帧制债
+      sword.addEventListener('mouseenter', () => this.refreshPvpButtons());
+      sword.addEventListener('mouseleave', () => this.refreshPvpButtons());
+      sword.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpToggleHostile(); });
+      root.appendChild(sword);
+      this.pvpSwordBtn = sword;
+      pos(sword, () => {
+        const c = this.vinvLayoutCtx!;
+        const p = pvpSwordXY(c.sw, c.mH, this.vinvPageCurrent === 2);
+        return { x: p.x, y: p.y };
+      });
+      for (let i = 0; i < 6; i++) {
+        const cell = el('button', 'vinv-btn sw-btn') as HTMLButtonElement;
+        cell.style.width = '20px'; cell.style.height = '20px';
+        const icon = el('div');
+        icon.style.cssText = 'position:absolute; left:2px; top:1px; width:16px; height:18px;'
+          + `background:url(sprites/vanilla-ui/UI_PVP_1.png); background-size:600% 100%;`
+          + `background-position:${PVP_TEAM_BUTTONS[i].team * 20}% 0%; image-rendering:pixelated; pointer-events:none;`;
+        cell.style.position = 'absolute';
+        cell.appendChild(icon);
+        cell.addEventListener('mouseenter', () => this.refreshPvpButtons());
+        cell.addEventListener('mouseleave', () => this.refreshPvpButtons());
+        cell.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpSetTeam(PVP_TEAM_BUTTONS[i].team); });
+        root.appendChild(cell);
+        this.pvpTeamBtns.push(cell);
+        pos(cell, () => pvpTeamXY(this.vinvLayoutCtx!.sw, this.vinvLayoutCtx!.mH, i));
+      }
+    }
+
+    // ★挂载序:在 hotbarEl 之后(buildHud 已跑)——关包态全局 slotEl(0-9) 首匹配=热键栏
+    this.root.appendChild(root);
+    this.vinvResizeHandler = () => { this.vinvLayoutSig = ''; this.layoutVanilla(); };
+    window.addEventListener('resize', this.vinvResizeHandler);
+    this.layoutVanilla();
+  }
+
+  /** 垃圾桶槽(Main.cs:43073-43090)。行为=classic 同面(Alt+聊天 tag/Shift 回包/
+   *  放置/取回),复制自 buildInventoryPanel 段(classic 区零改动红线) */
+  private vinvBuildTrash(): HTMLElement {
+    const trash = el('div', 'sw-slot trash sw-trash');
+    trash.style.cssText = 'width:44px; height:44px; pointer-events:auto;'
+      + 'background-image:url(sprites/vanilla/Inventory_Back7.png);';
+    trash.addEventListener('contextmenu', (e) => e.preventDefault());
+    trash.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (!e.button && e.altKey && this.game.chatInput?.isOpen && this.game.player.inv.trash) {
+        this.game.insertChatItemTag(vidOf(this.game.player.inv.trash.id));
+        this.game.sfx.play('menuTick', 1);
+        return;
+      }
+      if (!e.button && e.shiftKey && !e.altKey && !e.ctrlKey && this.game.player.inv.trash) {
+        const t = this.game.player.inv.trash;
+        const left = this.game.player.inv.add(t.id, t.stack, t.prefix, (t as { placeStyle?: number }).placeStyle);
+        if (left < t.stack) {
+          this.game.player.inv.trash = left > 0 ? { ...t, stack: left } : null;
+          this.game.sfx.play(coinIndexOf(t.id) >= 0 ? 'coin' : 'pickup', 1);
+          this.game.sfx.play('menuTick', 1);
+          this.paintTrash();
+          this.refreshAll();
+          return;
+        }
+      }
+      if (this.heldStack) {
+        this.placeTrash();
+      } else if (this.game.player.inv.trash) {
+        this.heldStack = this.game.player.inv.trash;
+        this.game.player.inv.trash = null;
+        this.game.sfx.play('pickup', 1);
+        this.paintTrash();
+      }
+      this.refreshAll();
+    });
+    this.trashEl = trash;
+    this.vinvLayoutItems.push({
+      el: trash,
+      pos: () => {
+        const t = trashXY(!!this.vinvLayoutCtx?.chestOpen);
+        return { x: t.x, y: t.y };
+      },
+    });
+    // scale 换档(0.85/0.755)在 layoutVanilla 尾统一处理
+    this.vinvTrashEl = trash;
+    return trash;
+  }
+
+  private vinvTrashEl: HTMLElement | null = null;
+
+  /** 布局重排(签名变化才写 style;每帧调用无害)。签名=视口|追加槽显隐|开箱态 */
+  private layoutVanilla(): void {
+    const root = this.vinvRoot;
+    if (!root || !this.game) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const K = vanillaScaleFor(vw, vh, options.data.uiScale);
+    const sw = vw / K, sh = vh / K;
+    const inv = this.game.player.inv;
+    const hasAt = (slot: number, dyeSlot: number): boolean => !!inv.armor[slot] || !!inv.dye[dyeSlot];
+    const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
+    const masterShown = inv.gateMaster || hasAt(9, 9);
+    const chestOpen = !!this.openChest || this.game.npcShopOpen;
+    // ★小地图占位:本仓 minimap 缺省恒开(mapStyle 1);全屏地图/关图态的 mH=0 联动=债
+    const mH = mHOf(true, sh);
+    const visibleRows = 8 + (heartShown ? 1 : 0) + (masterShown ? 1 : 0);
+    const num20 = equipAreaTop(sh, mH, visibleRows);
+    root.style.transformOrigin = 'top left';
+    root.style.transform = `scale(${K})`;
+    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen };
+    this.vinvComputeRows(heartShown, masterShown);
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}`;
+    if (sig === this.vinvLayoutSig) return;
+    this.vinvLayoutSig = sig;
+    for (const it of this.vinvLayoutItems) {
+      const p = it.pos();
+      if (p) {
+        it.el.style.display = '';
+        it.el.style.left = `${p.x}px`;
+        it.el.style.top = `${p.y}px`;
+      } else {
+        it.el.style.display = 'none';
+      }
+    }
+    // 垃圾桶 scale 换档(Main.cs:43078-43083 开箱 0.755)
+    if (this.vinvTrashEl) this.vinvTrashEl.style.transform = `scale(${trashXY(chestOpen).scale})`;
+  }
+
+  /** 装备列追加槽可见行号表(重编号;未显示不入表=隐藏不占行,:42092-42113) */
+  private vinvComputeRows(heartShown: boolean, masterShown: boolean): void {
+    this.vinvRowMap.clear();
+    for (let s = 0; s < 8; s++) this.vinvRowMap.set(`equip:${s}`, s);
+    for (let s = 10; s < 18; s++) this.vinvRowMap.set(`vanity:${s}`, s - 10);
+    for (let s = 0; s < 8; s++) this.vinvRowMap.set(`dye:${s}`, s);
+    if (heartShown) {
+      this.vinvRowMap.set('equip:8', 8);
+      this.vinvRowMap.set('vanity:18', 8);
+      this.vinvRowMap.set('dye:8', 8);
+    }
+    if (masterShown) {
+      const r = heartShown ? 9 : 8;
+      this.vinvRowMap.set('equip:9', r);
+      this.vinvRowMap.set('vanity:19', r);
+      this.vinvRowMap.set('dye:9', r);
+    }
+  }
+
+  /** vanilla 布局补绘(refreshAllNow 守卫调用):网格第 0 行+inv 族槽底覆写+页码 */
+  private paintVanillaInvSlots(): void {
+    if (!this.vinvRoot || !this.game) return;
+    this.layoutVanilla();
+    const inv = this.game.player.inv;
+    const backOverride = 'url(sprites/vanilla/Inventory_Back.png)';
+    // 原版开包格底 = Inventory_Back(paintSlotChrome 经典态写 Back20;收藏件 Back10 让行)
+    const paintInvSlot = (idx: number): void => {
+      const s = this.vinvSlots.get(`inv:${idx}`);
+      if (!s) return;
+      this.paintSlot(s, inv.slots[idx]);
+      this.paintSlotChrome(s, 'inv', idx);
+      const cur = s.style.getPropertyValue('--slot-bgimg');
+      if (!cur.includes('Inventory_Back10') && cur !== backOverride) {
+        s.style.setProperty('--slot-bgimg', backOverride);
+      }
+    };
+    for (let i = 0; i < 50; i++) paintInvSlot(i);
+    for (let k = 0; k < 4; k++) { paintInvSlot(COIN_START + k); paintInvSlot(AMMO_START + k); }
+    this.vinvApplyPage();
+    this.paintVanillaDefense();
+  }
+
+  /** EquipPage 状态机(原版 DrawPageIcons 帧尾 SelectEquipPage :43587 等价:
+   *  手持物每帧重算页码,变化才切 display;空手落记忆页) */
+  private vinvApplyPage(): void {
+    const pages = this.vinvPageEls;
+    if (!pages) return;
+    let page: 0 | 1 | 2 = this.vinvPageSelected;
+    if (this.heldStack) {
+      page = selectEquipPageOf(equipPageCapOf(this.heldStack.id), this.vinvPageSelected) ?? this.vinvPageSelected;
+    }
+    if (page === this.vinvPageCurrent) return;
+    this.vinvPageCurrent = page;
+    pages.equip.style.display = page === 0 ? 'block' : 'none';
+    pages.housing.style.display = page === 1 ? 'block' : 'none';
+    pages.misc.style.display = page === 2 ? 'block' : 'none';
+    if (this.vinvTabMisc) this.vinvTabMisc.style.backgroundImage =
+      `url(sprites/vanilla-ui/UI_DisplaySlots_${page === 2 ? 3 : 2}.png)`;
+    if (this.vinvTabHousing) this.vinvTabHousing.style.backgroundImage =
+      `url(sprites/vanilla-ui/UI_DisplaySlots_${page === 1 ? 5 : 4}.png)`;
+    this.vinvLayoutSig = '';   // PvP 剑 x+46(页 2)随页重排
+    this.layoutVanilla();
+  }
+
+  /** 防御计数重绘(refreshCrafting 的经典实现挂在 craftListEl 门后,vanilla 布局
+   *  刀 4 前无 craftListEl——此处独立重绘,盾烘焙缓存 DEF_SHIELD_URLS 共享) */
+  private paintVanillaDefense(): void {
+    const el = this.vinvDefenseEl;
+    if (!el || !this.game) return;
+    const p = this.game.player;
+    const w = this.game.world;
+    const col = w.isMaster ? 2 : w.isExpert ? 1 : 0;
+    const imgEl = el.querySelector('img');
+    const shield = this.game.atlas?.vmisc('vanilla/Extra_58.png');
+    if (imgEl && shield) {
+      const glow = col > 0 && p.defense > 0;
+      const key = `${col}|${glow ? 1 : 0}`;
+      let url = DEF_SHIELD_URLS.get(key);
+      const sc = DEF_SHIELD_SCRATCH;
+      if (!url && sc) {
+        const sx2 = sc.getContext('2d', { willReadFrequently: true })!;
+        sc.width = 52; sc.height = 48;
+        sx2.clearRect(0, 0, 52, 48);
+        sx2.drawImage(shield.img, shield.sx + col * 52, shield.sy, 52, 48, 0, 0, 52, 48);
+        if (glow) {
+          sx2.globalAlpha = 0.45;
+          sx2.drawImage(shield.img, shield.sx + col * 52, shield.sy + 48, 52, 48, 0, 0, 52, 48);
+          sx2.globalAlpha = 1;
+        }
+        url = sc.toDataURL('image/png');
+        DEF_SHIELD_URLS.set(key, url);
+      }
+      if (url && imgEl.getAttribute('src') !== url) imgEl.src = url;
+    }
+    const defNumEl = el.querySelector('span');
+    if (defNumEl) defNumEl.textContent = String(p.defense);
+  }
+
+  /** flag 运行期切换 → 面板重建(initInGame 前未建则交给下次进世界) */
+  private rebuildInventoryPanel(): void {
+    if (!this.invPanel || !this.invPanel.isConnected) return;
+    const wasOpen = this.invPanel.style.display === 'block';
+    if (wasOpen) this.closeInventory();   // 归光标物/关箱/关搜索全走既有链
+    this.teardownInventoryPanel();
+    this.buildInventoryFor(options.data.inventoryLayout);
+    this.refreshAll();
+    if (wasOpen) this.openInventory();
+  }
+
+  /** 双布局 teardown(重建路径;字段清单=两构建器可能填充的全部实例引用) */
+  private teardownInventoryPanel(): void {
+    this.invPanel?.remove();
+    this.eqDockEl?.remove();
+    document.getElementById('sw-vinv-style')?.remove();
+    this.invGridEl = null;
+    this.trashEl = null;
+    this.achAdvisorEl = null;
+    this.eqDockEl = null;
+    this.craftSearchEl = null;
+    this.craftGridEl = null;
+    this.craftListEl = null as unknown as HTMLElement;
+    this.craftNearbyToggleImg = null;
+    this.playerListBtn = null;
+    this.housingBtn = null;
+    this.itemSearchBtn = null as unknown as HTMLButtonElement;
+    this.bestiaryBtn = null as unknown as HTMLButtonElement;
+    this.quickStackBtn = null as unknown as HTMLButtonElement;
+    this.qsSmartBtn = null as unknown as HTMLButtonElement;
+    this.pvpSwordBtn = null as unknown as HTMLButtonElement;
+    this.loadoutBtns = [];
+    this.pvpTeamBtns = [];
+    this.accEyeEls.clear();
+    this.equipExtraSlots = null;
+    this.craftFocus = -1;
+    this.hoverFocus = -1;
+    this.craftAvailRef = [];
+    this.craftGridRecipe = null;
+    this.vinvRoot = null;
+    this.vinvSlots.clear();
+    this.vinvPageEls = null;
+    this.vinvTabMisc = null;
+    this.vinvTabHousing = null;
+    this.vinvTabCamera = null;
+    this.vinvPageSelected = 0;
+    this.vinvPageCurrent = -1;
+    this.vinvQuickBtn = this.vinvSortBtn = this.vinvBestiaryBtn = this.vinvEmoteBtn = null;
+    this.vinvDefenseEl = null;
+    this.vinvHousingSlots = [];
+    this.vinvLayoutItems = [];
+    this.vinvRowMap.clear();
+    this.vinvLayoutCtx = null;
+    this.vinvLayoutSig = '';
+    this.vinvTrashEl = null;
+    this._builtLayout = null;
+    if (this.vinvResizeHandler) {
+      window.removeEventListener('resize', this.vinvResizeHandler);
+      this.vinvResizeHandler = null;
+    }
+    // 热键栏/说明书钮还原(vanilla 开包隐藏态残留)
+    if (this.hotbarEl) this.hotbarEl.style.display = '';
+    if (this.hotbarNameEl) this.hotbarNameEl.style.display = '';
+    if (this.manualBtn) this.manualBtn.style.display = '';
   }
 }

@@ -36,7 +36,7 @@
 import { ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { viIdFromKey } from '../data/vanillaItemCombat';
-import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
+import { armorSlotIndexOfInternal, statOfInternal, isAnyAccessory } from '../data/vanillaItemStats';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 
 /** ItemSlot.Options 缺省（ItemSlot.cs:28-30）= IngameOptions "Quick Trash" 三态的
@@ -393,4 +393,52 @@ export function canTakeToPersonalInventory(
     if (s && s.stack < maxStack && canMergeStack(s, { id, prefix })) return true;
   }
   return false;                                           // 虚空袋兜底面不计（:246-256,Cofveve 臂贡献恒零）
+}
+
+// ---- EquipPage 自动翻页路由(2026-09-07 刀 1,原版 1:1) ----
+// 权威:ItemSlot.SelectEquipPage(ItemSlot.cs:4641-4671,1458 diff 零增量):
+//   EquipPage=-1 → 手持非空时逐支判定:projHook[shoot]→2 / mountType!=-1→2 /
+//   buffType>0&&vanityPet→2 / buffType>0&&lightPet→2 / dye>0&&Selected==1→0 /
+//   legSlot|headSlot|bodySlot!=-1||accessory→0;-1 由调用方落记忆页(Main.cs:43587)。
+// 消费:UI.vanilla 构建器每帧重算(refreshAllNow 门控,对应 DrawPageIcons 帧尾)。
+
+/** SelectEquipPage 判定帽(布尔集,字段名对齐原版 item 字段语义) */
+export interface EquipPageCap {
+  projHook: boolean;   // Main.projHook[item.shoot](aiStyle 7 钩链)
+  mountType: boolean;  // item.mountType != -1(坐骑/矿车同门)
+  vanityPet: boolean;  // buffType>0 && Main.vanityPet[buff]
+  lightPet: boolean;   // buffType>0 && Main.lightPet[buff]
+  dye: boolean;        // item.dye > 0
+  legSlot: boolean;    // item.legSlot != -1
+  headSlot: boolean;   // item.headSlot != -1
+  bodySlot: boolean;   // item.bodySlot != -1
+  accessory: boolean;  // item.accessory(任意配饰,含社交)
+}
+
+/** 内部 item id → 判定帽(数据源=本仓既有三表,判定谓词与 UI.ts:1412 同源) */
+export function equipPageCapOf(id: number): EquipPageCap {
+  const kind = equipKindOfInternal(id);
+  return {
+    projHook: kind === 'hook',
+    mountType: kind === 'mount' || kind === 'cart',
+    vanityPet: kind === 'pet',
+    lightPet: kind === 'light',
+    dye: kind === 'dye',
+    legSlot: armorSlotIndexOfInternal(id) === 2,
+    headSlot: armorSlotIndexOfInternal(id) === 0,
+    bodySlot: armorSlotIndexOfInternal(id) === 1,
+    accessory: isAnyAccessory(id),
+  };
+}
+
+/** SelectEquipPage 纯路由(ItemSlot.cs:4641-4671 分支序 1:1)。
+ *  返回 null = 原版 -1(调用方落记忆页 EquipPageSelected) */
+export function selectEquipPageOf(cap: EquipPageCap, selected: 0 | 1 | 2): 0 | 1 | 2 | null {
+  if (cap.projHook) return 2;
+  if (cap.mountType) return 2;
+  if (cap.vanityPet) return 2;
+  if (cap.lightPet) return 2;
+  if (cap.dye && selected === 1) return 0;
+  if (cap.legSlot || cap.headSlot || cap.bodySlot || cap.accessory) return 0;
+  return null;
 }

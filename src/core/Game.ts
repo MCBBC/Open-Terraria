@@ -5942,6 +5942,10 @@ export class Game implements GameHooks {
     this.weatherHooks = {
       lightAt: (tx, ty) => this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255],
       atmo: 1,
+      // ★SW-BJ26 2026-09-07：雨/雪生成总闸（Rain.cs:32 ZoneRain / Main.cs:13209
+      // SurfaceAtmospherics）——初值 false（未扫描期不发雨/雪），每帧 updateWeather 刷新
+      zoneRain: false,
+      surfaceAtmospherics: false,
       snowRatio: 0,
       snowTileCount: 0,
       bossDanger: false,
@@ -23817,8 +23821,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  交谈臂原版锚 = HoverOverNPCs Main.cs:43807 `talkNPC != i &&
    *  !tileInteractionHappened`——格交互（TileInteractionsUse Player.cs:32358，
    *  分支命中置 flag2 → tileInteractionHappened :33551）先行压制交谈。
-   *  本仓旗代理 = rightDown 未被格臂消费（interactAt 全支/tryOpenChest/家具/
-   *  锁箱失败支均自消；interactAt outOfRange 早退支也消=差异登记债）；
+   *  本仓旗代理 = rightDown 未被格臂消费（interactAt 各命中支/tryOpenChest/家具/
+   *  锁箱失败支均自消；★SW-RB7 2026-09-08：outOfRange 早退支旧也消=1:1 偏差已清
+   *  ——原版超射程整段不进 TileInteractionsUse,flag2 恒 false,本支现早退不消费；
+   *  残余窄口备案：门失败支（blocked 门/高门/坐凳目标解析失败）与 MP 网格
+   *  （editDenied/tryOpenChest 保护拒）不消费=原版 flag2 分支入口置旗面差异）；
    *  门二 = 右键边沿 !prevRightDown（原版 npcChatRelease=!mouseRight,
    *  DrawInterface_41 Main.cs:45755-45763；交谈消费 :43800 `mouseRight &&
    *  npcChatRelease` ≡ 按住右键滑到 NPC 不交谈）。悬停门 npcHoverHit 帧盒 +
@@ -23893,7 +23900,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     // 距离门（原版 Player.cs:31495 IsInTileInteractionRange Simple，TB=0——
     // :31495 调用不带 TB；此前整个 interactAt 无距离检查，隔全图右键可开储物/设床）
-    if (!this.inTileRange(tx, ty)) { this.input.rightDown = false; return; }
+    // ★SW-RB7 2026-09-08：超射程早退支不再消费 rightDown（旧 `rightDown=false` 是
+    //  1:1 偏差）——原版超射程时 LookForTileInteractions（Player.cs:32191-32197
+    //  `if (IsInTileInteractionRange(...)) TileInteractionsCheck(...)`）整段不进
+    //  TileInteractionsUse ⇒ flag2 恒 false ⇒ tileInteractionHappened 不置位 ⇒
+    //  :43807 交谈臂 `!tileInteractionHappened` 放行（BH1 交谈射程盒 worldRegion
+    //  与 tileRange 5/3 异形,NPC 帧盒探出 tile 区时原版可交谈,旧消费把它整压）；
+    //  且 6190/2611 快换臂（:31766 `!tileInteractionHappened`）超射程同样放行。
+    //  本支早退后 rightDown 保持=与「悬停空格」同态（无面板=按住中无消费者）。
+    if (!this.inTileRange(tx, ty)) return;
     const type = st.get(tx, ty);
     // 原版 active() 首门（Player.cs:32270-32281 TileInteractionsCheck：`if (Main.tile[myX,
     // myY].active())` 才进 MouseOver/Use——active() 为假即整体不进交互链，与原版逐字
@@ -25574,6 +25589,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const hooks = this.weatherHooks;
     if (hooks) {
       hooks.atmo = atmo;
+      // ★SW-BJ26 2026-09-07：雨滴零生成总闸（Rain.cs:32 `!SceneMetrics.ZoneRain`）+
+      // 雪粒门（Main.cs:13209 SurfaceAtmospherics）——scene 派生位（SceneMetrics.ts:392/:386）
+      hooks.zoneRain = !!this.scene?.zoneRain;
+      hooks.surfaceAtmospherics = !!this.scene?.surfaceAtmospherics;
       hooks.bossDanger = !!this.boss;
       // 雪区削减（Rain.cs NewRain :182-184）：clamp(SnowTileCount/SnowTileThreshold=1500,0,1)，
       // 平方在渲染端（spawnRain 的 snow = snowRatio²）

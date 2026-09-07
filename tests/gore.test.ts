@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
+import { moveAndCollide } from '../src/physics/TileCollision';
 import {
   GorePiece, deathGoreFor, spawnDeathGore, spawnNpcDeathGore,
   resetGorePool, liveGorePieces, GORE_TIME, ChildSafety,
@@ -751,5 +752,113 @@ describe('⑦ gore 16/17 火苗与 ChildSafety', () => {
       ChildSafety.disabled = before;
       resetGorePool();
     }
+  });
+});
+
+// ===================== ⑧ 粘滞碎块落水 = 穿水沉底（Gore.cs:931 IsDrip 门）=====================
+// 原版落水钉液面/溅音/涟漪段（Gore.cs:962-995）整段在 `IsDrip[type]` 门（:931）内，
+// sticky 支（:993-1042）只有 TileCollision + 落地摩擦 + 时档——碎块入水无任何水交互：
+// 水非实心 → TileCollision 不改速 → 重力 0.2 照加穿水下沉 → 沉底停驻至渐隐。
+// 曾误把该段照搬进 sticky 支（2026-09-07 用户实报"食人鱼碎块立即飞到液面浮动"）：
+// 满液格钉位 y=行顶−liquid/16 使盒底缘落进上一格 → 逐拍重算 16px/tick 级联上浮至水面。
+// 滴水族（IsDrip 706-717/943/1147/1160-62/1383，GoreID.cs:15）不出自 HitEffect，
+// 由 render/NatureParticles 独占移植（含 :955-985 溅落段）→ 本类实例恒非 drip。
+describe('⑧ 粘滞碎块落水 = 穿水沉底（Gore.cs:931 IsDrip 门 / :993 sticky 支）', () => {
+  // ★世界高 ≥ 水底行+41：WetCollision 扫描界 value4 有 maxTilesY-40 钳（Collision.cs:1594），
+  //   矮测试世界会让水体判湿恒假（2026-09-07 探针首跑伪影，此处留档防复发）
+  const WT = 60, WH = 120, FLOOR_Y = 44, WATER_TOP = 30;
+  function waterWorld(): World {
+    const w = new World(WT, WH, 7, 'gore-water');
+    const st = w.store;
+    for (let x = 0; x < WT; x++) { st.setTile(x, FLOOR_Y, 1); st.setTile(x, FLOOR_Y + 1, 1); }
+    for (let y = WATER_TOP; y < FLOOR_Y; y++) {
+      for (let x = 20; x <= 39; x++) st.setLiquid(x, y, y === WATER_TOP ? 180 : 255, 0);
+    }
+    return w;
+  }
+  function waterGame(w: World) {
+    const sounds: string[] = [];
+    const g = { world: w, playSfxFiles: (names: string[]) => { sounds.push(...names); } } as unknown as Parameters<GorePiece['fixedUpdate']>[1] & { sounds: string[] };
+    return { g, sounds };
+  }
+  /** 原版公式逐 tick 模型（:325-329 钳速 / :762 重力 / :998 TileCollision +
+   *  :1003 落地摩擦 / :1030 时档 / :1072 position+=velocity） */
+  function vanillaModel(world: World, x: number, y: number, vx: number, vy: number, ticks: number) {
+    const b = { x, y, w: 18, h: 18, vx, vy, onGround: false, hitWall: false, hitHead: false, collideY: false };
+    const ys: number[] = [];
+    for (let t = 0; t < ticks; t++) {
+      const sp = Math.hypot(b.vx, b.vy);
+      if (sp > 32) { b.vx *= 32 / sp; b.vy *= 32 / sp; }
+      b.vy += 0.2;
+      moveAndCollide(b, world, b.vx, b.vy);
+      if (b.vy === 0) {
+        b.vx *= 0.97;
+        if (b.vx > -0.01 && b.vx < 0.01) b.vx = 0;
+      }
+      ys.push(b.y);
+    }
+    return ys;
+  }
+
+  it('食人鱼(58)死亡 = 单块 gore 85（NPC.cs:87369-87371，贴图 28×20 → 盒 18）', () => {
+    resetGorePool();
+    const n = spawnDeathGore({
+      vanillaId: 58, x: 448, y: 560, w: 24, h: 18,
+      vx: 0.3, vy: 0.5, vanillaScale: 1.1,        // HitEffect 不传 scale → gore scale=1（非 NPC.scale）
+      ai0: 0, ai1: 0, ai2: 0, ai3: 0, hitDir: 1,
+    }, () => {});
+    expect(n).toBe(1);
+    const p = liveGorePieces()[0]!;
+    expect(p.goreId).toBe(85);
+    expect(p.sticky).toBe(true);
+    expect(p.w).toBe(18);                          // (int)(min(28,20)*0.9) = 18
+    resetGorePool();
+  });
+
+  it('入水碎块逐 tick 轨迹 = 原版公式 1:1：穿水下沉、沉底停驻、零溅音、永不钉液面', () => {
+    resetGorePool();
+    const world = waterWorld();
+    const { g, sounds } = waterGame(world);
+    spawnDeathGore({
+      vanillaId: 58, x: 448, y: 560, w: 24, h: 18, // 悬在水面下 5 格（行 35，满液 255）
+      vx: 0, vy: 0, vanillaScale: 1.1,
+      ai0: 0, ai1: 0, ai2: 0, ai3: 0, hitDir: 1,
+    }, () => {});
+    const p = liveGorePieces()[0]!;
+    const model = vanillaModel(world, p.x, p.y, p.vx, p.vy, 70);
+    for (let t = 1; t <= 70; t++) {
+      p.fixedUpdate(1 / 60, g);
+      expect(p.y, `tick ${t}`).toBeCloseTo(model[t - 1], 6);
+    }
+    // 终态：沉在水底地板上（floorTop−盒高），不在液面（液面钉位 = 30*16−180/16 = 468.75）
+    expect(p.y).toBeCloseTo(FLOOR_Y * 16 - 18, 6);
+    expect(p.vy).toBe(0);
+    expect(p.y).not.toBeCloseTo(468.75, 1);
+    // 原版 sticky 支无任何音效（溅音 39 只在 IsDrip 支）
+    expect(sounds).toEqual([]);
+    resetGorePool();
+  });
+
+  it('IsDrip ∩ vanilla-gore.json 全部可达 gore id = ∅（滴水族永不进本类物理）', () => {
+    // GoreID.Sets.IsDrip（GoreID.cs:15）
+    const DRIP = new Set([706, 714, 713, 707, 715, 711, 1147, 709, 710, 708, 712, 716, 717, 943, 1160, 1161, 1162, 1383]);
+    const ids = new Set<number>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      if (o && typeof o === 'object') {
+        const e = o as Record<string, unknown>;
+        if (typeof e.id === 'number') ids.add(e.id);
+        if (typeof e.idAlt === 'number') ids.add(e.idAlt);
+        if (Array.isArray(e.ids)) for (const v of e.ids) if (typeof v === 'number') ids.add(v);
+        if (typeof e.idMin === 'number' && typeof e.idMax === 'number') {
+          for (let v = e.idMin; v <= e.idMax; v++) ids.add(v);
+        }
+        for (const v of Object.values(e)) walk(v);
+      }
+    };
+    walk(TABLE);
+    expect(ids.size).toBeGreaterThan(1000);
+    const hit = [...ids].filter((v) => DRIP.has(v));
+    expect(hit).toEqual([]);
   });
 });

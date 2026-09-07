@@ -371,8 +371,10 @@ describe('天气环境音循环（Weather.updateAmbienceLoops）', () => {
     // num11 = min(1, 0.6×(10/9)×0.5+0.5)×1⁴ = min(1, 0.8333…) = 0.8333…（基线 0.5 为原版真态）
     expect(v.rain).toBeCloseTo(0.6 * (10 / 9) * 0.5 + 0.5, 5);
     expect(v.rainGate).toBe(true);   // 门位透传（setRain 第二参）
-    // 地表门关（ZoneRain&&!ZoneSnow 假，Main.cs:11713——地下 ZoneRain 恒假）→ 0
-    expect(w.loopVolumes(1, false).rain).toBe(0);
+    // 地表门关（ZoneRain&&!ZoneSnow 假，Main.cs:11713——地下 ZoneRain 恒假）
+    // ★SW-BJ26 2026-09-07 重钉（硬切勘误配平）：num11 与门位 num12 独立（Main.cs
+    // :11700-11709 num11 按 cloudAlpha 照算）→ level 恒 n28；门断走 TowardStopping 渐熄
+    expect(w.loopVolumes(1, false).rain).toBeCloseTo(0.6 * (10 / 9) * 0.5 + 0.5, 5);
     expect(w.loopVolumes(1, false).rainGate).toBe(false);
     // atmo⁴ 深度衰减：atmo=0.5 → ×0.0625
     expect(w.loopVolumes(0.5).rain).toBeCloseTo((0.6 * (10 / 9) * 0.5 + 0.5) * 0.5 ** 4, 5);
@@ -390,7 +392,10 @@ describe('天气环境音循环（Weather.updateAmbienceLoops）', () => {
     w.startRain(true, 0.6);
     const seen: WeatherLoopVolumes[] = [];
     for (let i = 0; i < 5; i++) w.update(wctx({ zoneRain: false, zoneSnow: false, onAmbience: (v) => seen.push(v) }));
-    expect(seen[seen.length - 1].rain).toBe(0);          // 地下：门假
+    // ★SW-BJ26 2026-09-07 重钉：level 与门位独立（Main.cs case28 num11 照算）——
+    // 「地下无雨声」由 rainGate=false → TowardStopping 渐熄状态机保证,非 level=0 硬切
+    expect(seen[seen.length - 1].rain).toBeCloseTo(0.6 * (10 / 9) * 0.5 + 0.5, 5);
+    expect(seen[seen.length - 1].rainGate).toBe(false);
     for (let i = 0; i < 5; i++) w.update(wctx({ zoneRain: true, zoneSnow: false, onAmbience: (v) => seen.push(v) }));
     expect(seen[seen.length - 1].rain).toBeGreaterThan(0.5);   // 地表：n28 ≥ 0.5 基线
   });

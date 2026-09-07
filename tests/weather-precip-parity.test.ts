@@ -48,7 +48,8 @@ describe('rain 列选型（Rain.cs:165/210）', () => {
   const fakeWeather = { sandstorm: { happening: false, severity: 0, timeLeft: 0, intendedSeverity: 0 }, cloudAlpha: 0.8, windSpeedCurrent: 1, raining: false } as never;
   const hooksFor = (waterStyle: number) => ({
     lightAt: () => [255, 255, 255] as [number, number, number],
-    atmo: 1, snowRatio: 0, snowTileCount: 0, bossDanger: false,
+    atmo: 1, zoneRain: true, surfaceAtmospherics: true,   // SW-BJ26：生成总闸开（地表态夹具）
+    snowRatio: 0, snowTileCount: 0, bossDanger: false,
     deerclopsNear: false,
     waterStyle, shimmerAlpha: 0,
     splashDust() {}, sandstormVisuals: false, desertSandTiles: 0,
@@ -197,7 +198,8 @@ describe('沙尘 grain 268 链（空中波动支/实心收缩支）', () => {
   const fakeWeather = { sandstorm: { happening: true, severity: 0.8, timeLeft: 100, intendedSeverity: 0.8 }, cloudAlpha: 0, windSpeedCurrent: 1, raining: false } as never;
   const hooks = {
     lightAt: () => [255, 255, 255] as [number, number, number],
-    atmo: 1, snowRatio: 0, snowTileCount: 0, bossDanger: false,
+    atmo: 1, zoneRain: true, surfaceAtmospherics: true,   // SW-BJ26：生成总闸开（地表态夹具）
+    snowRatio: 0, snowTileCount: 0, bossDanger: false,
     waterStyle: 0, shimmerAlpha: 0,
     splashDust() {}, sandstormVisuals: true, desertSandTiles: 500,
     sandColors: () => [{ color: '#C8A014', weight: 10 }],

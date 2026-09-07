@@ -5,6 +5,9 @@
 //     · 默认粘滞碎块：重力 0.2 + rotation += vx*0.05（:762-763）→ 碰撞盒
 //       min(w,h)*0.9*scale（:1000-1014）→ 落地 vx*=0.97（:1015-1029）→
 //       timeLeft -= DisappearSpeed / alpha += DisappearSpeedAlpha（:1030-1037）
+//       【无水交互】：落水钉液面/溅音/涟漪段（:962-995）在 IsDrip 门（:931）内，
+//       滴水族不出自 HitEffect 且由 NatureParticles 独占 → 粘滞碎块入水=穿水
+//       沉底（水非实心，TileCollision 不改速），见 fixedUpdate sticky 支注
 //     · 血块收缩族 {11,12,13,16,17,61,62,63,99,220-222,375-377,435-437,861-862}
 //       非粘滞：v*=0.98 + scale-=0.007/0.01（:535-556）+ alpha += 2*AlphaSpeed（:1041）
 //     · 276-282（庆典史莱姆彩带）：v*=0.98 + vy<scale 时 +0.05 + ±0.01 翻滚（:352-371）
@@ -28,8 +31,6 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { moveAndCollide } from '../physics/TileCollision';
-import { queueRipple } from '../render/WaterWaves';
-import { wetCollision } from '../player/SmartSelect';
 import goreTable from '../data/vanilla-gore.json';
 
 /** Gore.goreTime（Gore.cs:16） */
@@ -323,8 +324,6 @@ export class GorePiece extends Entity {
   /** SpriteFrame 行（多帧竖条：1217/1218 等） */
   row = 0;
   private frameCounter = 0;
-  /** ★落水段单次门(Gore.cs frame<10→10 等价:溅音/涟漪只发一次,此后浮于液面) */
-  private waterEntered = false;
 
   constructor(type: number, x: number, y: number, scale: number) {
     super();
@@ -509,33 +508,16 @@ export class GorePiece extends Entity {
 
     // ---- 碰撞/时档尾段（:929-1042）----
     if (this.sticky) {
-      // ★落水段(Gore.cs:975-992 1:1):先 TileCollision(改速=撞块→frame10+碎块
-      //  落水音 39 rand(2));未撞且 (position+velocity) 前方 WetCollision(16,14) →
-      //  frame10 + 落水音 style2 + WaterShaderData.QueueRipple(position+(8,8))
-      //  缺省重载(strength1/Square/size4/color(0.5,1,0,1));随后钉液面
-      //  (velocity×0,Y=行顶−liquid/16)。waterEntered=原文 frame<10→10 单次门。
-      const preVX = this.vx, preVY = this.vy;
+      // ★落水段【不属于】本支（Gore.cs:931 `IsDrip[type]` 门 + :962-995 钉液面/
+      //  落水音/涟漪都在 IsDrip 支内；:993 else-if sticky 支只有 TileCollision +
+      //  落地摩擦 + 时档）。滴水族 706-717/943/1147/1160-62/1383 全部不出自
+      //  NPC.HitEffect（vanilla-gore.json 全表与 IsDrip 零交集，2026-09-08 校验），
+      //  滴水由 render/NatureParticles 独占移植（含 :955-985 溅落段）——本类实例
+      //  恒非 drip，照搬该支曾致死亡碎块入水瞬移钉液面并逐拍 16px 级联上浮
+      //  （液面钉位 y=行顶−liquid/16 使满液格底缘落进上一格 → 逐拍重算上浮）。
+      //  原版碎块入水 = 无任何水交互，重力照加穿水沉底（水非实心 TileCollision
+      //  不改速）→ 沉底停驻至 timeLeft 渐隐（用户实报 2026-09-07 定谳）。
       moveAndCollide(this, game.world, this.vx, this.vy);
-      const px2 = this.x + 8, py2 = this.y + 8;
-      const hitSolid = this.hitWall || this.collideY || this.onGround || this.hitHead
-        || this.vx !== preVX || this.vy !== preVY;
-      if (hitSolid) {
-        if (!this.waterEntered) {
-          this.waterEntered = true;
-          game.playSfxFiles?.(Math.random() < 0.5 ? ['Drip_0'] : ['Drip_1'], 1, px2, py2);   // PlaySound(39,…,rand(2))
-        }
-      } else if (wetCollision(st, this.x + preVX, this.y + preVY, 16, 14)) {
-        if (!this.waterEntered) {
-          this.waterEntered = true;
-          game.playSfxFiles?.(['Drip_2'], 1, px2, py2);   // PlaySound(39,…,2)
-          queueRipple(this.x + 8, this.y + 8);           // 缺省重载:strength1/Square/size4
-        }
-        const nx = Math.floor((this.x + 8) / 16), ny = Math.floor((this.y + 14) / 16);
-        if (st.inBounds(nx, ny) && st.liquid[st.idx(nx, ny)] > 0) {
-          this.vx = 0; this.vy = 0;
-          this.y = ny * 16 - st.liquid[st.idx(nx, ny)] / 16;
-        }
-      }
       if (this.vy === 0) {
         // 落地摩擦（:1015-1029）：|vx|<0.01 归零
         this.vx *= 0.97;

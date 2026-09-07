@@ -235,6 +235,33 @@ describe('SW-BJ25 ⑤ talkNPC != i 门 + 智能支在旗代理下仍可达', () 
 });
 
 // ---------------------------------------------------------------------------
+// ⑦ 超射程早退支不置旗（★SW-RB7 2026-09-08 清偿 BJ25 头注登记债）：
+//    原版 Player.cs:32191-32197 超射程整段不进 TileInteractionsUse ⇒ flag2 恒
+//    false ⇒ tileInteractionHappened 不置位 ⇒ :43807 交谈臂放行（BH1 交谈射程盒
+//    worldRegion 与 tileRange 5/3 异形——NPC 帧盒探出 tile 区的头顶带原版可交谈）。
+//    旧 interactAt 早退支 `rightDown=false` 把交谈与 6190/2611 快换臂整压=偏差。
+// ---------------------------------------------------------------------------
+describe('SW-BJ25 ⑦ 超射程 tile 交互不置旗：交谈照常（RB7）', () => {
+  it('光标 tile 超射程（20,20）+ 帧盒悬停交谈射程内 → 开对话（不静默）', () => {
+    const rig = makeRig({ tileAt: { '20,20': piggyType } });   // 罐在 tile 区外
+    rig.g.input.mouseX = 200; rig.g.input.mouseY = 180;        // 向导帧盒内（交谈射程 worldRegion 内）
+    (rig.g as AnyGame).rightClickTileNpcDispatch(20, 20, null);
+    expect(rig.chestsOpened).toEqual([]);                      // 超射程不进格交互（:32191 门）
+    expect(rig.dialogOpened).toEqual([GUIDE]);                 // :43807 !tileInteractionHappened 放行
+    expect(rig.g.input.rightDown).toBe(false);                 // 交谈臂自消（:43800 消费面）
+  });
+
+  it('超射程 + 无 NPC 悬停 → rightDown 保持（旧码此处误消费,压制 6190/2611 快换臂）', () => {
+    const rig = makeRig({ tileAt: { '20,20': piggyType } });
+    rig.g.entities.npcs = [];
+    rig.g.input.mouseX = 700; rig.g.input.mouseY = 300;        // 帧盒外
+    (rig.g as AnyGame).rightClickTileNpcDispatch(20, 20, null);
+    expect(rig.dialogOpened).toEqual([]);
+    expect(rig.g.input.rightDown).toBe(true);                  // ★RB7：不再被早退支吞
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ⑥ 结构锁：分派序 = 宝箱→套件→眼→altUse→interactAt→交谈（防静默回退）
 // ---------------------------------------------------------------------------
 describe('SW-BJ25 ⑥ 结构锁（源文本锚）', () => {

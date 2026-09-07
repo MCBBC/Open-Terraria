@@ -52,8 +52,21 @@ const SAND_COLOR_ALPHA = 180;
 export interface WeatherFxHooks {
   /** 光照采样（0-255 RGB；雨滴着色 ×0.85） */
   lightAt(tx: number, ty: number): [number, number, number];
-  /** 地表开阔度 0-1（原版 atmo——地下无雨） */
+  /** 地表开阔度 0-1（原版 atmo——深度梯度 0→1 后钳 1，Main.cs:64148-64159；
+   *  地下恒 1≠「无雨」——真正的地下停雨闸是 zoneRain） */
   atmo: number;
+  /** ★SW-BJ26 2026-09-07：SceneMetrics.ZoneRain（SceneMetrics.cs:700 = Main.raining &&
+   *  SurfaceAtmospherics；沙暴态强制 false :702-704）——Rain.MakeRain 总闸（Rain.cs:32
+   *  `!Main.SceneMetrics.ZoneRain → return`）：玩家在地表以下（tileY>worldSurface）时
+   *  原版整帧【零生成】雨滴。洞内雨根因=缺此总闸：无墙洞穴的屏顶生成带（screenTop−20..100）
+   *  逐滴门（Rain.cs:86 非实心+无墙）全放行（行为日志 2059,380 洞区 2343 格 wall 全 0）。
+   *  Game 侧由 scene.zoneRain 派生，与雨声 cue28 门（Weather.ts rainGate）同源 */
+  zoneRain: boolean;
+  /** ★SW-BJ26 2026-09-07：SceneMetrics.SurfaceAtmospherics（SceneMetrics.cs:695 =
+   *  WorldGen.IsSurfaceForAtmospherics（玩家中心））——Main.snowing() 门（Main.cs:13209）。
+   *  非 atmo 梯度可替代：旧 `atmo<0.4` 近似在 92..worldSurface 天空带误杀、worldSurface
+   *  以下（atmo 钳 1）漏放=洞内飘雪，与洞内雨同族 */
+  surfaceAtmospherics: boolean;
   /** 雪区雪格比例 0-1（削减雨量；SceneMetrics SnowTileCount/Threshold 的平方） */
   snowRatio: number;
   /** 雪区雪格原始计数（snowing() 的密度指数；SceneMetrics.SnowTileCount） */
@@ -249,12 +262,23 @@ export class WeatherRenderer {
     }
   }
 
-  /** Rain.MakeRain（Rain.cs:21-77）：每帧按 cloudAlpha 掷新滴 */
+  /** Rain.MakeRain（Rain.cs:30-92）：每帧按 cloudAlpha 掷新滴。总闸序 = Rain.cs:32 的
+   *  五连 if（netMode/gamePaused/gameMenu/!ZoneRain/shimmerAlpha）——ZoneRain 是唯一
+   *  「玩家不在地表」整帧停发位，逐滴门（:86）只管【生成点】非实心无墙 */
   private makeRain(viewW: number, camX: number, camY: number, playerVx: number, playerVy: number, world: World) {
     const w = this.weather;
     const hooks = this.hooks;
-    if (!w || !hooks || w.cloudAlpha <= 0 || hooks.atmo < 0.4) return;
-    if (hooks.shimmerAlpha > 0) return;          // Main.shimmerAlpha 门（Rain.cs:32）
+    if (!w || !hooks || w.cloudAlpha <= 0) return;
+    // ★SW-BJ26 2026-09-07：总闸 `!Main.SceneMetrics.ZoneRain`（Rain.cs:32）——玩家在
+    // 地表以下（SurfaceAtmospherics=false，SceneMetrics.cs:700）时原版整帧不生成任何
+    // 雨滴。此前缺此闸只靠逐滴生成门（:86 非实心+无墙）+ atmo^9 削减：无墙洞穴的
+    // 屏顶生成带两条件全空 → 洞内出雨（用户实报 2026-09-07；行为日志
+    // behavior-log-粗暴的椰子地段：玩家 2059,380 洞区 2343 采样格 wall 全 0）。
+    // 旧 `hooks.atmo < 0.4` 早退是 Rain.cs NewRain :188-190 `atmo<0.4 → num2=0` 的
+    // 等价位（cap=0 恒不生成），保留在下——它不是地下停雨闸（atmo 地下钳 1）。
+    if (!hooks.zoneRain) return;
+    if (hooks.shimmerAlpha > 0) return;          // Main.shimmerAlpha 门（Rain.cs:32 同 if 链）
+    if (hooks.atmo < 0.4) return;                // NewRain :188-190（atmo<0.4 → 生成帽 0）
     let num = (viewW / 1920) * 25;               // MaxWorldViewSize.X≈1920 的比例
     num *= 0.25 + 1 * w.cloudAlpha;              // Rain.cs:28
     if (hooks.bossDanger) {                          // :39-47：num2>1 且折后<1 才抬到 1
@@ -263,9 +287,11 @@ export class WeatherRenderer {
       if (num2 > 1 && num < 1) num = 1;
     }
     for (let i = 0; i < num; i++) {
-      // 自动画质密度门(Rain.cs:123 rand(100)<gfxQuality×100):q 降则雨滴
-      // 按比例稀疏(每滴独立掷门,原版同款)
-      if (Math.random() * 100 >= gfxQuality.value * 100) continue;
+      // ★SW-BJ26 2026-09-07：删逐帧尝试 gfxQuality 掷门（2026-08-18 误挂）——
+      // MakeRain 循环体（Rain.cs:43-91）无任何 rand(100)/gfxQuality 测试，:123 的
+      // rand(100)<gfxQuality×100 是【溅花尘】概率（Update 死亡支）；画质对生成密度
+      // 的原版唯一作用面 = 池帽折减（NewRain :179-183 / NewRainForced :142-146，
+      // spawnRain/newRainForced 已 1:1）。旧门使 q<0.9 时雨密度双重削减（低于原版）
       // 屏外缓冲 ±600（玩家上跳 ×30，Rain.cs:44-48）
       let margin = 600;
       if (playerVy < 0) margin += Math.floor(Math.abs(playerVy) * 30);
@@ -423,7 +449,12 @@ export class WeatherRenderer {
   private makeSnow(viewW: number, viewH: number, camX: number, camY: number, playerVy: number, world: World) {
     const w = this.weather!;
     const hooks = this.hooks!;
-    if (hooks.atmo < 0.4 || hooks.snowTileCount <= 0) return;   // SurfaceAtmospherics 近似（同雨）
+    // ★SW-BJ26 2026-09-07：门 1:1（Main.cs:13208-13209 `gamePaused ||
+    // SceneMetrics.SnowTileCount <= 0 || !SceneMetrics.SurfaceAtmospherics → return`）
+    // ——地表性硬位（SurfaceAtmospherics=玩家 tileY≤worldSurface）非 atmo 梯度：
+    // 旧 `atmo<0.4` 近似在 92..worldSurface 天空带误杀雪、worldSurface 以下（atmo 钳 1）
+    // 近雪窗漏放=洞内飘雪（与洞内雨 SW-BJ26 同族根因）
+    if (!hooks.surfaceAtmospherics || hooks.snowTileCount <= 0) return;   // Main.cs:13209
     if ((world as unknown as { remixWorld?: boolean }).remixWorld) return;  // snowing() :13205 remix 早退
     let num = hooks.snowTileCount / 6000;                       // SnowTileMax（SceneMetrics.cs:46）
     num = Math.pow(num, 4 - w.cloudAlpha * 3);

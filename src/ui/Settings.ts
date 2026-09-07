@@ -687,6 +687,19 @@ export class SettingsPanel {
             ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'),
           () => void options.set('craftFromNearbyChests', !d.craftFromNearbyChests),
         ),
+        // ★2026-09-07 背包布局灰度 flag(用户定策「重构为原版 1.4.5.7 布局,验证通过
+        //  前不替换」):classic=现行 DOM 背包(缺省)/vanilla=原版布局双构建器
+        //  (UI.ts initInGame 分派;运行期切换 → options.onChange 重建面板)。
+        //  会话覆盖 ?invlayout= 优先于本行(Options.load)。
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.InventoryLayout'),
+          () => d.inventoryLayout,
+          () => Lang.text(d.inventoryLayout === 'vanilla'
+            ? 'Mods.SandboxWorld.Settings.InventoryLayoutVanilla'
+            : 'Mods.SandboxWorld.Settings.InventoryLayoutClassic'),
+          () => void options.set('inventoryLayout',
+            d.inventoryLayout === 'vanilla' ? 'classic' : 'vanilla'),
+        ),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';

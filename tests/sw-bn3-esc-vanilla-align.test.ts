@@ -178,7 +178,8 @@ describe('SW-BN3 ③结构锁（源文本锚,防链语义/暂停面静默回退�
     expect(fn).toContain('options.data.autoPause');
     expect(fn).toContain('inventoryOpen');
     expect(fn).toContain('!this.net?.active');                 // netMode==0 门
-    expect(game).toContain(':17500-17504');                    // 原文臂行号锚
+    expect(game).toContain('17493-17508');                     // 原文臂区行号锚
+    expect(game).toContain(':17502');                          // sign 臂行号锚（登记未接）
   });
 
   it('Settings autoPause 行在位（IngameOptions.cs:628 同位,LegacyMenu.69/70 官译）', () => {

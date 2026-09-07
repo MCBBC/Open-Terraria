@@ -9,7 +9,10 @@
 //
 // 消费点(与原版同款):
 //   · 瀑布:qualityMax = 1000×q / waterfallDist = 75×q + 25(WaterfallManager.cs:116-117)
-//   · 雨密度:rand(100) < q×100(Rain.cs:123);雨层数 ×(1+q)/2(:142/:179)
+//   · 雨池帽 ×(1+q)/2(Rain.cs:142 NewRainForced / :179 NewRain)——★SW-BJ26 2026-09-07
+//     勘误:MakeRain 生成尝试【无】画质门(Rain.cs:43-91 循环体无 rand(100)),:123 的
+//     rand(100)<q×100 是溅花尘概率(Rain.Update 死亡支,WeatherRenderer.update 消费);
+//     曾误挂"每滴尝试掷门"→ q<0.9 雨密度双重削减(低于原版),已删
 //   · 雪尘密度:num4×(q/2 + 0.5) + num4×0.1(Main.cs:12993)
 //   · 小地图更新节流:mapTimeMax = (1-q)×60ms(:16941-16945,q≥0.8 恒 0)
 // (qaStyle 1/2/3 手动钉 1/0.5/0 档暂缓——待波浪代理落地后随设置一起)
