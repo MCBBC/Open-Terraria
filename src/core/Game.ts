@@ -31358,7 +31358,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
  *  ai3==3、690 雕像宝箱怪、488 靶标假人、685 绑缚老史莱姆（:43748 走图标 327
  *  特化支无名牌——本仓该型在城镇桶但同样不显名）;aiStyle 87 熟睡族本仓无睡态
  *  建模 N/A。遍历序 = 敌怪桶先于城镇桶（与 talkToNearbyNpc 同序;原版单
- *  Main.npc 数组 index 序,双桶拆分后首遇优先语义保留）。 */
+ *  Main.npc 数组 index 序,双桶拆分后首遇优先语义保留）。
+ *  ★SW-BJ7 2026-09-07：本支数据面无改——消费端缺陷两处修在 Renderer.drawCursorItemIcon：
+ *  ①npcHover（悬碰撞盒）曾挂整函数早退连带吞名（原版 :45794 门只压图标支,MouseText
+ *  :45783/:20371 无悬停 NPC 门）→ npcHover 下沉至图标支门;②名文本锚 mouse+14 裸值
+ *  < 光标阴影右缘 → 改 MouseTextInner :20379-20419 同式（ThickMouse 默认档 +6=实锚
+ *  +20,屏幕缘 40px 收边）+ 左上锚钉死。 */
   private static readonly NPC_HOVER_NAME_EXCLUDE = new Set<number>([85, 341, 629, 690, 488, 685]);
 
   private tickHoverNpcName(): void {

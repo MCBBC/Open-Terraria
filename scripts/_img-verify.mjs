@@ -9,6 +9,7 @@ const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',
   userDataDir: '/tmp/img-v-' + Date.now() % 100000,
   args: ['--no-proxy-server'], defaultViewport: { width: 1600, height: 900 },
+  protocolTimeout: 600000,
 });
 const page = await browser.newPage();
 page.on('console', (m) => { const t = m.text(); if (/TypeError|RangeError|\[mem\]|worker|index/i.test(t)) log(`[c] ${t.slice(0, 200)}`); });
@@ -41,9 +42,12 @@ if (items.length) {
 }
 // 等进游戏
 let inGame = false;
-for (let i = 0; i < 120; i++) {
-  await new Promise((r) => setTimeout(r, 2000));
-  inGame = await page.evaluate(() => !!globalThis.__swGame && !!(globalThis.__swGame.world)).catch(() => false);
+for (let i = 0; i < 150; i++) {
+  await new Promise((r) => setTimeout(r, 3000));
+  try { inGame = await Promise.race([
+    page.evaluate(() => !!globalThis.__swGame && !!(globalThis.__swGame.world)),
+    new Promise((res) => setTimeout(() => res(false), 25000)),
+  ]); } catch { inGame = false; }
   if (inGame) break;
 }
 log(`inGame=${inGame}`);

@@ -1780,6 +1780,26 @@ export function popupLabelMeasure(text: string): { w: number; h: number } {
   return m;
 }
 
+/** MouseText 无面板纯文本支锚定算式（Main.MouseTextInner Main.cs:20379-20419 1:1,
+ *  1458 :20385-20425 同）：X=mouse+14/Y=mouse+14 → ThickMouse +6（MouseBorderColor
+ *  默认 (64,64,64,64) :276 ≠ Transparent → ThickMouse :2684 默认档恒 true;本仓无
+ *  该设置建模）→ 光标持物再 +34（:20390-20392）→ 屏幕右/下缘 40px 收边（度量=
+ *  MeasureString 全串）。悬停 NPC 名/孤儿箱名/信息饰品行标签等 MouseText 家族
+ *  共用（★SW-BJ7 2026-09-07：+14 裸锚 < 本仓光标阴影 pass 右缘 ≈+16.4,呼吸峰
+ *  箭头盖字首=用户实报,改同式后实锚 +20 恒净空）。node/无 DOM 环境纯函数直测。 */
+export function mouseTextAnchor(
+  mouseX: number, mouseY: number, textW: number, textH: number,
+  screenWidth: number, screenHeight: number,
+  opts?: { thickMouse?: boolean; heldOnCursor?: boolean },
+): { x: number; y: number } {
+  let x = mouseX + 14, y = mouseY + 14;          // :20379-20380
+  if (opts?.thickMouse ?? true) { x += 6; y += 6; }   // :20386-20389 默认档
+  if (opts?.heldOnCursor) x += 34;               // :20390-20392 mouseItem 非空
+  if (x + textW + 40 > screenWidth) x = screenWidth - textW - 40;   // :20412-20415
+  if (y + textH + 40 > screenHeight) y = screenHeight - textH - 40; // :20416-20419
+  return { x, y };
+}
+
 /** 飘字。数字类 1:1 CombatText.cs（spawn: NewText:59-121 / update: Update:131-206）:
  *  vy 普通恒 -7/t、暴击 -14/t、dot -4/t;life 60/120/40;scale 从 0 每 t+0.1 长到 1
  *  （dot +0.5 封顶 0.8）;alpha 0.6~1 闪烁;寿命归零后 scale 收缩至 0.1 消亡。
@@ -13979,10 +13999,17 @@ export class Renderer {
   ): void {
     void player;
     const c = this.cursorIconCtx;
-    // 门：悬 NPC / 手持 UI 拖拽物(MouseDisplayItem)→ 住房头像也一并取消(:44628)。
+    // 门：手持 UI 拖拽物(MouseDisplayItem)/UI 面板悬停 → 整函数不画。
     // ★红蓝对抗 C-F8：mouseInterface 门在 Draw 端（:45794）——置位侧照跑（缓存余辉
-    //  照刷新），UI 面板悬停时只压绘制不压数据
-    if (c.npcHover || c.uiHeld || c.uiBlocking) return;
+    //  照刷新），UI 面板悬停时只压绘制不压数据。
+    // ★SW-BJ7 2026-09-07 拆门：npcHover（悬城镇 NPC 碰撞盒/对话开）原版只压【图标】
+    //  （DrawInterface_40_InteractItemIcon :45794 `HoveringOverAnNPC || mouseInterface`
+    //  早退,1458 :45798 同）,不压 MouseText 名文本（MouseTextInner :20371 门仅
+    //  `mouseNPCType > -1 || cursorText == null`,:45783 绘制链无悬停 NPC 门）——
+    //  此前 npcHover 挂本函数头部整早退,光标指进碰撞盒时图标门连带吞掉 BJ1 名支
+    //  （帧盒=碰撞盒外扩,盒外反而能画名）=用户实报"盒内不显名、盒外反而显示"。
+    //  npcHover 下沉至图标支门（下文 flag||flag2 处）,名文本支与其解耦。
+    if (c.uiHeld || c.uiBlocking) return;
     if (!this.atlas) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -14005,7 +14032,10 @@ export class Renderer {
     if (p.cursorItemIconID !== 0) num = p.cursorItemIconID;
     const flag = p.cursorItemIconEnabled && num !== 0;           // 悬停/使用支
     const flag2 = c.cacheTime > 0 && !c.uiHeld;                   // 余辉支（:45816-45821 只看 mouseItem）
-    if (flag || flag2) {
+    // ★SW-BJ7 2026-09-07：npcHover（悬城镇 NPC 碰撞盒/对话开 ≈ HoveringOverAnNPC∨
+    //  mouseInterface）只压图标支——原版 :45794 早退在图标解析/余辉之前,本仓等位
+    //  折进此门（名支在下方独立绘制,不被此门波及）
+    if ((flag || flag2) && !c.npcHover) {
       // ★红蓝对抗 C-F9②：余辉支原版画 num（:45812-45814 先定格=当前手持/悬停 id,
       // 含群系火把覆写;:45816-45821 flag2 只换"画不画"不换"画什么"）——曾用缓存
       // id,群系火把覆写态下余辉退回基础火把
@@ -14062,26 +14092,39 @@ export class Renderer {
         }
       }
     }
-    // cursorItemIconText（:44540-44543 MouseText）——孤儿箱/命名箱类型名 tooltip。
-    // MouseTextInner（Main.cs:20032-20175,rare=0 纯文本支）:无面板带影文字,
-    // 锚 mouse+14,屏幕右/下缘 40px 收边,白 × mouseTextColor 脉动
+    // cursorItemIconText（:44540-44543 MouseText）——孤儿箱/命名箱类型名 tooltip +
+    // BJ1 悬停 NPC 名（HoverOverNPCs :43830 MouseTextHackZoom 同管线,1458 :43836 同）。
+    // MouseTextInner（Main.cs:20365-20430,rare=0 纯文本支）:无面板带影文字,
+    // 白 × mouseTextColor 脉动。
+    // ★SW-BJ7 2026-09-07 锚定改同式（用户实报"名字文本被光标箭头盖住一部分"）：
+    //   X=mouse+14/Y=mouse+14（:20379-20380）+ ThickMouse 再 +6（:20386-20389——
+    //   MouseBorderColor 默认 (64,64,64,64) Main.cs:276 ≠ Transparent →
+    //   ThickMouse :2684 默认档恒 true,本仓无该设置建模取默认）= 实锚 mouse+20;
+    //   此前裸 +14,而本仓光标阴影 pass 右缘 ≈ mouse+1+14×1.1≈+16.4（VUI.drawCursor
+    //   双 pass,呼吸峰 cursorScale=1.1）→ 箭头盖住字首。屏幕右/下缘 40px 收边
+    //   （:20412-20419）同式,度量 = MeasureString 全串（h 取 14px 行盒近似）。
+    //   原版 `!mouseItem.IsAir → X+=34`（:20390-20392）在本仓不可达（uiHeld 整函数
+    //   早退,见上）——helper 留参不接线（债 BJ7-R1）。
+    //   ★canvas fillText 锚 = XNA DrawString origin 零 = 字形【左上】——textAlign/
+    //   textBaseline 显式钉死（MouseText 家族锚语义,同 :14145-14147 前例;裸依赖
+    //   上游 alphabetic 基线时字形顶浮出锚上 ~11px,底缘收边也失准）。
     if (p.cursorItemIconText !== '') {
       const mt = this.lighting?.clock.mouseTextColor ?? 255;
       const c = Math.round((mt / 255) * 255);
       ctx.font = '14px monospace';
       const w = ctx.measureText(p.cursorItemIconText).width;
       const h = 14;
-      let x = this._mouseX + 14, y = this._mouseY + 14;
-      if (x + w + 40 > this.canvas.width) x = this.canvas.width - w - 40;
-      if (y + h + 40 > this.canvas.height) y = this.canvas.height - h - 40;
+      const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height);
       // 字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓 canvas 字+四向描边
       ctx.save();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
         ctx.fillStyle = '#000';
-        ctx.fillText(p.cursorItemIconText, x + ox, y + oy);
+        ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
       }
       ctx.fillStyle = `rgb(${c},${c},${c})`;
-      ctx.fillText(p.cursorItemIconText, x, y);
+      ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
       ctx.restore();
     }
     // 告示牌头顶指示泡（Main.cs:45133-45152 signBubble）：Chat2.png（32×28）挂锚顶

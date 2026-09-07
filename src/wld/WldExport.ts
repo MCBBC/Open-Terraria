@@ -123,14 +123,25 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
     for (let y = 0; y < height; y++) {
       const i = y * width + x;
       const type = t.type[i];
-      const isActive = actDiff ? ((actDiff[i] & 1) === 1) === (type !== 0) : type !== 0;
+      // ★tileActive 差分还原=XOR(2026-09-07 勘误,用户存档→导出 256 万格丢失实证):
+      //  v=(flags&1) XOR (type≠0)(serialize.ts rleTileActiveDiff)→ 还原 active=
+      //  (type≠0) XOR (v===1)。旧写 `((v&1)===1)===(type!==0)` 把语义写反——
+      //  正常 active 格(v=0)全被判 inactive → type payload 不写 → wld 整片空洞。
+      //  ★此前回环测试全绿的盲区:parse 产物不带 tileActive 段(actDiff=null),
+      //  只有「v5 存档→导出」链触雷。
+      const isActive = actDiff ? ((type !== 0) !== ((actDiff[i] & 1) === 1)) : type !== 0;
       const wall = walls[i], liq = liquid[i], liqType = liquidType[i];
       const blk = blocks[i], half = blk === 1, slope = blk >= 2 && blk <= 5 ? blk - 1 : 0;
       const c = coat[i];
       const wl = paintWall[i];
       let b = 0, b2 = 0, b3 = 0, b4 = 0;
       const payload: number[] = [];
-      if (isActive && type !== 0) {
+      // ★幽灵格转正(2026-09-07):本仓 v5「幽灵保域」允许 inactive+type≠0 格存在
+      //  (worldgen 遗留,实测一个世界可达 163 万格)——wld 流格式表达不了它们
+      //  (原版 WF:1444 inactive 格不写 type,读回即空气),不转正=导出后整片空洞
+      //  (用户「乱七八糟」的最终根因)。一律按活格写;活位差异不进 wld。
+      const writeType = type !== 0;
+      if (writeType) {
         // ★写流域=原版 sheet 域(WF:1444 tile.type 直写):t.type 是 internal
         //  (encodeTiles 头 stable→internal 反映射产物),须转回 sheet;曾直写
         //  internal → 回环 parse 二读类型错位(6400×1800 实测 t1=263→t2=354)。
