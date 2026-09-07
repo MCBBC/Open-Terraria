@@ -194,6 +194,11 @@ export function parsePlr(raw: Uint8Array): PlrImported {
   if (version >= 119) r.byte();                      // hideMisc
   let skinVariant = r.byte();                        // ≥107(支持域内恒此路径)
   if (version < 161 && skinVariant === 7) skinVariant = 9;
+  // ★SW-RB6c 2026-09-07：载入终钳（原版 LoadPlayer_LastMinuteFixes
+  //  Player.cs:56486 `Clamp(skinVariant, 0, PlayerVariantID.Count-1)`=0..11,对
+  //  全版本载入统一生效）——10/11 DisplayDoll 为原版合法域（渲染走 DisplayDoll
+  //  别名表,见 PaperDoll.variantSheetName）,>11 损坏值钳 11;曾漏钳=损坏档直通
+  skinVariant = Math.max(0, Math.min(11, skinVariant));
   const statLife = r.i32();
   let statLifeMax = r.i32();
   if (statLifeMax > 500) statLifeMax = 500;
@@ -310,15 +315,19 @@ export function parsePlr(raw: Uint8Array): PlrImported {
   // —— 到此为止:其后 superCart/Loadouts/voice/pendingRefunds/dialogues 不读 ——
 
   // voiceVariant/voicePitchOffset 在流中位于停止点之后(280/281,夹在 Loadouts 与
-  // _pendingRefunds 之间——本仓不读该段),全版本由 skinVariant 奇偶派生
-  // (泰拉瑞亚皮肤变体偶男奇女:0/2/4..=男→1,1/3/5..=女→2;原版 280- 建档同式)
+  // _pendingRefunds 之间——本仓不读该段,≥280 存储值放弃=既登记差异),全版本按
+  // 载入钳后变体的【性别】派生(原版 release<280 回退式 Player.cs:56390
+  // `voiceVariant = (newPlayer.Male ? 1 : 2)`,Male = PlayerVariantID.Sets.Male
+  // {0,1,2,3,8,10} 归属)。★SW-RB6c 2026-09-07:旧式按奇偶派生(偶男奇女)与
+  // 原版性别表不符——v4/6/8(女,偶)被派成 1 男声、v1/3(男,奇)被派成 2 女声
   const appearance: Appearance = {
     name,
     hair,
     skinVariant,
     hairColor, skinColor, eyeColor, shirtColor, undershirtColor, pantsColor, shoeColor,
     difficulty: (difficulty === 0 || difficulty === 1 || difficulty === 2 || difficulty === 3) ? difficulty : 0,
-    voiceVariant: (skinVariant % 2 === 1 ? 2 : 1),
+    voiceVariant: ((skinVariant === 0 || skinVariant === 1 || skinVariant === 2
+      || skinVariant === 3 || skinVariant === 8 || skinVariant === 10) ? 1 : 2),
     voicePitchOffset: 0,
   };
 
@@ -490,7 +499,11 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   for (let i = 0; i < 2; i++) if (hv[i + 8]) b2 |= 1 << i;
   w.byte(b1).byte(b2);
   w.byte(0);                                  // hideMisc
-  w.byte(Math.max(0, Math.min(9, a.skinVariant ?? 0)));
+  // ★SW-RB6c 2026-09-07：原版 SavePlayer 原值写出（Player.cs:55425
+  //  `fileIO.Write((byte)newPlayer.skinVariant)` 无钳）——载入侧已钳 0..11
+  //  （LastMinuteFixes :56486）,导出再钳 0..9 会把合法 10/11 DisplayDoll 档
+  //  静默改写成 9（数据变异）;NaN/undefined 由 ?? 0 兜底
+  w.byte(a.skinVariant ?? 0);
   w.i32(Math.max(1, st.hp ?? 100));
   w.i32(Math.min(500, Math.max(100, st.baseMaxHp ?? 100)));
   w.i32(Math.min(400, st.mana ?? 20));

@@ -223,7 +223,7 @@ export class WeatherRenderer {
   private bakeMemoized(key: string, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
     const hit = this.bakeMemo.get(key);
     if (hit !== undefined) return hit;
-    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) this.bakeMemo.clear();
+    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) { const k0 = this.bakeMemo.keys().next().value; if (k0 !== undefined) this.bakeMemo.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
     const baked = gen();
     if (!baked) { this.bakeMemo.set(key, null); return null; }
     const own = document.createElement('canvas');

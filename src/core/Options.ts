@@ -147,7 +147,10 @@ export interface OptionsData {
   /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——原版语义="开界面暂停"
    *  （CanPauseGame Main.cs:17493-17508：开背包/牌等界面时逐帧 gamePaused），
    *  非失焦暂停；失焦面归 SettingPlayWhenUnfocused（红队 R3-E2 ②正锚，两者互不
-   *  耦合）。本仓消费=Game.applyAutoPauseUI（__swUI.inventoryOpen 逐帧重算） */
+   *  耦合）。本仓消费=Game.applyAutoPauseUI（__swUI.inventoryOpen 逐帧重算）。
+   *  ★SW-BN3 2026-09-07：Esc 链对齐原版（背包开着 Esc=关背包 ToggleInv :5026）后,
+   *  本开关成为背包态的主暂停路径（"开背包即暂停"）;设置页开关行序紧随自动保存,
+   *  与 IngameOptions.cs:628 同位,文案=LegacyMenu.69/70 官译 */
   autoPause: boolean;
   /** 失焦播放（Main.SettingPlayWhenUnfocused，Main.cs:268 默认 false；config.json
    *  键 "PlayWhenUnfocused"，Main.cs:4301/:4444 持久化）。原版消费面（FocusHelper.cs）：

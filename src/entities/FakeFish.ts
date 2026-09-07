@@ -873,7 +873,7 @@ function silhouetteOf(
   const key = `${vid}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
   const hit = silhouetteCache.get(key);
   if (hit) return hit;
-  if (silhouetteCache.size > 256) silhouetteCache.clear();
+  if (silhouetteCache.size > 256) { const k0 = silhouetteCache.keys().next().value; if (k0 !== undefined) silhouetteCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   if (typeof document === 'undefined') return null;
   const ar = atlas.vicon(vid);
   if (!ar || ar.sw <= 0 || ar.sh <= 0) return null;   // 未就绪:不缓存,下次重试

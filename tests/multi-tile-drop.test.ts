@@ -114,7 +114,9 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
     // 碗 103/熔炉 133 的分档掉落走运行时 styleDropVidOfFrames（def 仍 null→place_ 基底）
     expect(dropKeyOf('v_132_lever')).toBe(VI(513));
     expect(dropKeyOf('v_134_anvils_hardmode')).toBe(VI(525));
-    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_103_bowls', 'v_411_detonator', 'v_440_gemlocks', 'v_376_fishing_crates']) {
+    // ★引爆器 411 已接真物品 3545（Check2x2 回收身份批 2026-09-07,Check2x2 case 411 :49109）
+    expect(dropKeyOf('v_411_detonator')).toBe(VI(3545));
+    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_103_bowls', 'v_440_gemlocks', 'v_376_fishing_crates']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });
@@ -149,8 +151,11 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 
   it('笼缸族（CAGE_ITEM_SHEET 92 条权威源——createTile 提取器解不开的 87 条）', () => {
-    // 6×3 大笼 275 / 2×2 罐缸 316 / 2×2 蝶罐 288（TileObjectData Style6x3/Style2x2）
-    for (const k of ['v_275_bunny_cage', 'v_316_blue_jellyfish_jar', 'v_288_monarch_butterfly_jar']) {
+    // 6×3 大笼 275（TileObjectData Style6x3）;★316 水母罐缸/288 蝶罐已接 Check2x2
+    //  真物品（回收身份批 2026-09-07:316→2439 :49073 / 288→2178 :49069）移出本组
+    expect(dropKeyOf('v_316_blue_jellyfish_jar')).toBe(VI(2439));
+    expect(dropKeyOf('v_288_monarch_butterfly_jar')).toBe(VI(2178));
+    for (const k of ['v_275_bunny_cage']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });
@@ -343,8 +348,11 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
     !!d && d.key.startsWith('v_') && d.vanilla?.sheet !== undefined && d.drop === null
     && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1));
 
-  it('样本量健康（机械重生成批的多格 drop:null def 应有 250+）', () => {
-    expect(multiDropNull.length).toBeGreaterThan(250);
+  it('样本量健康（多格 drop:null def 基数账）', () => {
+    // ★2026-09-07 Check2x2 回收身份批：43 def（龙蝇罐/萤火虫罐/蝶罐/水母罐/泵/迪斯科球/
+    //  传送器/茶壶等）定谳 vanilla 返还==放置物品,补 def.drop 真物品 id 移出本集
+    //  （261→218）,门槛随账下移（250→210）
+    expect(multiDropNull.length).toBeGreaterThan(210);
   });
 
   it('全量：有原版物品 ↔ place_v_ 兜底；无 ↔ 无掉落（与 vanillaPlaceableTileKeys 一致）', () => {
@@ -362,9 +370,11 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
       if (noRet) noReturn++;
       else has ? withItem++ : withoutItem++;
     }
-    expect(withItem).toBeGreaterThan(230);   // 审计 ⚠️1 主体（雕像/画/旗/功能站/笼缸…）
+    expect(withItem).toBeGreaterThan(180);   // 审计 ⚠️1 主体（雕像/画/旗/功能站/笼缸…）
     // ★H.4 批（2026-08-24）后基数 239：11 站（463/395/425/486/510/511/573/581/642/660/698）
     // 已定谳 Check* 锚点真掉落、补 def.drop 移出本集（见 G 段）
+    // ★2026-09-07 Check2x2 回收身份批再移出 43 def（龙蝇罐/萤火虫罐/蝶罐/水母罐/泵/
+    //  迪斯科球/传送器/茶壶等）→ 基数 231→188,门槛 230→180
     expect(withoutItem).toBeGreaterThan(20); // 纯装饰 27 族
     expect(noReturn).toBe(4);                // {590 宝石树苗,595 樱花树苗,615 黄柳树苗,484 滚石仙人掌}——掉落对账批新增无返还档(滴水五型另有 drop!=null 前集)
   });

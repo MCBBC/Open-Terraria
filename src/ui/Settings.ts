@@ -552,7 +552,11 @@ export class SettingsPanel {
             void options.set('autoSaveIntervalMin', steps[(steps.indexOf(d.autoSaveIntervalMin) + 1) % steps.length] ?? 10);
           },
         ),
-        // 自动暂停（:628 Main.autoPause 默认 false；Web 语义=切 tab 暂停）
+        // 自动暂停（:628 Main.autoPause 默认 false,config 键 "AutoPause"
+        // Main.cs:4203/:4426;原版语义=开界面暂停,CanPauseGame Main.cs:17493-17508
+        // autoPause 臂 :17500-17504——★非"切 tab 暂停",失焦面归 playWhenUnfocused,
+        // 两开关互不耦合。SW-BN3 2026-09-07 起 Esc 链对齐原版（背包开着 Esc=关背包）,
+        // 开背包即暂停由本开关承载=背包态主暂停路径;消费 Game.applyAutoPauseUI 逐帧）
         this.modeRow(
           Lang.menu(69).replace(/[:：].*$/, ''),
           () => String(d.autoPause),

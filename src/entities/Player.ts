@@ -4678,7 +4678,10 @@ export class Player extends Entity {
       } else if (!flying) {
         // 飞毯（CarpetMovement :26969）：条件=无多段跳余量/jumpHold 空/vy≠0/
         // 火箭靴未在用/翅膀时间尽；湿态重力=液体档 lGrav（原版写 gravity 字段）
-        if (eqWet.carpet && !mnt2 && this.extraJumps.length === 0 && this.jumpHold === 0
+        // SW-RB6b 2026-09-07：补 !grappling[0] 门（原版 CarpetMovement :22025 首条件
+        // `grappling[0] == -1`——挂钩中飞毯不启动；旧码漏接 ⇒ 挂钩悬空持跳=飞毯缓降
+        // 覆写锚点牵引 vy）
+        if (eqWet.carpet && !mnt2 && !this.grappling[0] && this.extraJumps.length === 0 && this.jumpHold === 0
           && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
           if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
           if (this.carpetTime > 0 && this.inputJump) {
@@ -4939,8 +4942,8 @@ export class Player extends Entity {
         } else if (!flying) {
           // ---- 飞毯（CarpetMovement :21568-21602）：条件=无多段跳余量/jumpHold 空/
           //      vy≠0/火箭靴未在用/翅膀时间尽；效果=vy 钳到 -(gravity+ε) 抵消重力 ----
-          if (eq.carpet && !mnt2 && this.extraJumps.length === 0 && this.jumpHold === 0
-            && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
+          if (eq.carpet && !mnt2 && !this.grappling[0] && this.extraJumps.length === 0 && this.jumpHold === 0
+            && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {   // !grappling[0]: SW-RB6b 2026-09-07（:22025）
             if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
             if (this.carpetTime > 0 && this.inputJump) {
               this.carpetTime--;
@@ -5464,7 +5467,11 @@ export class Player extends Entity {
     //      位移积分【前】语境不变（TileCollision 在更晚的 moveAndCollide）。
 
     this.dropThrough = !!this.inputDown || this.ratClimbVy !== null;   // 爬墙期间平台穿透（:27777）
-    this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
+    // SW-RB6b 2026-09-07：补 StepUp 的钩爪否决腿（原版 :28278 `(…)&& !controlDown &&
+    // !IsRidingTracks && !flag28 && grappling[0] == -1` 才 StepUp——挂钩中不自动上
+    // 台阶,牵引撞上半砖/台阶即被拦停）。旧恒 true = 挂钩沿地被拖时仍爬台阶。
+    // grappling[0] 语义=有 latched 锚（每 tick 由 stepLatched 重登记）≙ 原版 >=0。
+    this.stepUp = !this.grappling[0]; // 原版玩家走 Collision.StepUp（:28278 门;:23258/:27753）
     this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
     // 跑动/下落撞碎裂砖（Player.Update :27733 CheckIceBreak 后紧随——在 StepDown/StepUp
     // （:27745-27760）与 TileCollision（:27783+）【之前】调用：读碰撞前的完整速度与
@@ -5473,6 +5480,11 @@ export class Player extends Entity {
     this.checkCrackedBrickBreak(game);
     // 钩爪牵引（GrappleMovement 1:1，Player.cs:22338-22483）——moveAndCollide 前覆写速度
     this.grappleMovement(game);
+    // SW-RB6b 2026-09-07：钩爪下拉穿平台（原版 :28298 `… | GoingDownWithGrapple | pulley`
+    // → fallThrough=true——锚在下方向下牵引时平台不承接，玩家被拖穿站台落地）。
+    // dropThrough 旧仅 inputDown/ratClimb 两源，GoingDownWithGrapple 消费面整缺。
+    // 位序=grappleMovement 置位【后】、moveAndCollide 消费【前】（同原版 :27863→:28298 同拍序）
+    if (this.goingDownWithGrapple) this.dropThrough = true;
     // ---- gfxOffY 衰减（Player.cs:27695-27719，TileCollision 前位）。FindPulley
     //      落位同 tick 即衰减一次（原版 FindPulley :25805 早于本段）----
     this.decayGfxOffY();
@@ -6204,7 +6216,11 @@ export class Player extends Entity {
     // :22347-22347 坐骑挂不得（MountID.Sets.CanUseHooks）——本仓矿车无钩门，骑乘即否
     // :22351-22362 滑翔帧位（wingFrame/canCarpet/rocketFrame 复位 + RefreshMovementAbilities）
     if (this.equipStats.wing) this.wingTime = this.equipStats.wing.time;  // wingTime = wingTimeMax
-    if (this.onGround) this.extraJumps = [...this.equipStats.jumpOpts];   // RefreshDoubleJumps
+    // SW-RB6b 2026-09-07：原版 RefreshMovementAbilities()（:22833）无 onGround 门——
+    // 挂钩中每 tick 回满多段跳（RefreshDoubleJumps :23053 对每个 hasJumpOption 无条件置真，
+    // 全原版仅 :20932 落地跳/:22914 收爪/:23049 本处/:26259 滑轮/:26682 滑轮 5 个调用点）。
+    // 旧 onGround 门 ⇒ 半空挂钩收爪后多段跳不可用（云瓶挂墙释放跳后无法二段跳）。
+    this.extraJumps = [...this.equipStats.jumpOpts];                      // RefreshMovementAbilities→RefreshDoubleJumps
     this.canCarpet = true;
     this.fallStartY = null;                                // fallStart = position.Y/16 → 免摔伤
     // :22367-22373 轨道钩 403 贴轨上车（Minecart.GetOnTrack）——403 仅由右键轨道
@@ -6246,7 +6262,9 @@ export class Player extends Entity {
           this.vy += 0.01;                                 // :22911 velocity.Y += 0.01
           this.grappleReleaseJump = false;
         }
-        if (this.onGround) this.extraJumps = [...this.equipStats.jumpOpts]; // RefreshDoubleJumps
+        // SW-RB6b 2026-09-07：原版 RefreshDoubleJumps()（:22914）在收爪 if/else 两支【外】
+        // 无条件调用（canJump 上下皆回满）——旧 onGround 门=半空收爪丢二段跳。
+        this.extraJumps = [...this.equipStats.jumpOpts];   // RefreshDoubleJumps（:22914）
         this.removeAllGrapplingHooks();                    // :22915
       }
     } else {

@@ -451,7 +451,7 @@ export class NatureParticles {
     cx.fillRect(0, 0, cv.width, cv.height);
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(img, 0, 0);                       // 恢复 PNG alpha 形状
-    if (this.goreTintCache.size > 240) this.goreTintCache.clear();
+    if (this.goreTintCache.size > 240) { const k0 = this.goreTintCache.keys().next().value; if (k0 !== undefined) this.goreTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
     this.goreTintCache.set(key, cv);
     return cv;
   }

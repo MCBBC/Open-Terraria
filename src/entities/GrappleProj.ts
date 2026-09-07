@@ -141,6 +141,12 @@ export class GrappleProj extends Entity {
   owner(): Player | null { return this.playerRef(); }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // SW-RB6b 2026-09-07：死弹不再步进（原版 Main 循环只对 active 弹跑 Update；Kill
+    // :52457 置 active=false 即时出局）。本仓 kill() 可发生在玩家更新段（收爪/结网/
+    // 召回药/就座等经 removeAllGrapplingHooks）——同一 tick 的实体轮仍会对 dead 弹调
+    // fixedUpdate 一次，旧码无入口门 ⇒ 死钩多跑一步 AI：锚定死钩经 stepLatched 重登记
+    // 锚点表（下一 tick 幽灵牵引 1 拍）、飞行死钩可 stepFly 命中锚盒 doLatch 复活锚点。
+    if (this.dead) return;
     // sub-step = 1 + extraUpdates（Projectile.extraUpdates；256=1、935=3）
     for (let step = 0; step <= this.stats.extraUpdates; step++) {
       // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----

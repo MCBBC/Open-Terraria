@@ -14,6 +14,8 @@ interface Track {
   src: AudioBufferSourceNode;
   gain: GainNode;
   fade: number;   // 0..1（≈原版 Main.musicFade[id]）
+  /** ★fade 归零拆轨前置旗标(onended 哨兵用):true=正常停轨;ended 无此旗标=loop 失效 */
+  stoppedByFade?: boolean;
 }
 
 export class AudioSystem {
@@ -57,6 +59,24 @@ export class AudioSystem {
   }
   /** 目标曲目（≈原版 Main.curMusic；0 = 静音） */
   curMusic = 0;
+  /** ★BGM 诊断 trace(2026-09-07 用户报「蘑菇洞穴播完一轮 BGM 停止、失去循环」
+   *  ——代码层唯一停止路径=选曲变化 fade 归零,无显式「曲尾停止」;加环形记录
+   *  抓现场:选曲/停轨/取曲失败/静音/音量事件+周期快照。控制台
+   *  `__swAudio.trace` 直接读(环形 60 条);复现后 F5/控制台即可定位层次) */
+  trace: Array<Record<string, unknown>> = [];
+  private tracePush(e: Record<string, unknown>): void {
+    this.trace.push({ t: Math.round(performance.now() / 1000), cm: this.curMusic, muted: this.muted, moon: this.moonNum, ...e });
+    if (this.trace.length > 60) this.trace.shift();
+  }
+  /** 周期快照(内部状态)->trace;由 startLoop 每 ~10s 调一次 */
+  private lastSnapAt = 0;
+  private snapshotTrace(): void {
+    const now = performance.now();
+    if (now - this.lastSnapAt < 10000) return;
+    this.lastSnapAt = now;
+    const tracks = [...this.pool.entries()].map(([id, t]) => `${id}:${t.fade.toFixed(2)}`).join(',') || 'none';
+    this.tracePush({ e: 'snap', tracks, loop: [...this.pool.values()].every((t) => t.src.loop) });
+  }
   muted = false;
   /** 音乐音量 0..1（options.musicVol，M6 设置页） */
   volume = 0.35;
@@ -182,6 +202,7 @@ export class AudioSystem {
     } catch {
       this.markFailed(id);   // 限时负缓存（15s 窗口,见字段注释）——不再永久哨兵
       this.emit('fail', { id });   // BGM 取曲失败（"该段没音乐"根因,15s 内重试仍拦）
+      this.tracePush({ e: 'fail', id });
       return null;
     } finally {
       this.decoding.delete(id);
@@ -220,8 +241,18 @@ export class AudioSystem {
     const gain = ac.createGain();
     gain.gain.value = 0;
     src.connect(gain).connect(ac.destination);
+    // ★onended 哨兵(2026-09-07 用户报「蘑菇洞穴播完一轮 BGM 停止、失去循环」):
+    //  loop=true 的轨不应触发 ended——触发且无前置 fade 拆轨(t.stoppedByFade)
+    //  = **loop 失效实锤**(解码/浏览器层);常规 fade 归零拆轨已有 stop 事件对照
+    const track: Track = { src, gain, fade: 0 };
+    src.addEventListener('ended', () => {
+      // pool 已被拆轨移除时不重复报（stop 事件已对照）;此处只抓「无前置拆轨的 ended」
+      const stoppedByFade = track.stoppedByFade === true;
+      this.tracePush({ e: 'ended', id, stoppedByFade });
+      this.emit('ended', { id, stoppedByFade });
+    });
     src.start();
-    this.pool.set(id, { src, gain, fade: 0 });
+    this.pool.set(id, track);
     this.emit('start', { id });   // 实起（解码完成后轨真正出声的时刻）
   }
 
@@ -266,6 +297,7 @@ export class AudioSystem {
   private static readonly MAIN_AUDIBLE_FADE = 0.25;
   private tickFade(d: number) {
     if (this.muted) {
+      this.tracePush({ e: 'tick-muted' });
       for (const [id, t] of this.pool) {
         if (t.fade > 0) { t.fade = 0; t.gain.gain.value = 0; }
       }
@@ -285,6 +317,8 @@ export class AudioSystem {
         }
         if (t.fade === 0) {
           this.emit('stop', { id });   // 实停（渐熄到 0 拆轨；curMusic=0 时硬停同路）
+          t.stoppedByFade = true;
+          this.tracePush({ e: 'stop', id, cmAfter: this.curMusic, mainFade: mainFade.toFixed(2) });
           t.src.stop();
           this.pool.delete(id);
           continue;
@@ -303,11 +337,12 @@ export class AudioSystem {
 
   /** 切换目标曲目（≈原版 curMusic 赋值；实际音量由淡化循环渐变） */
   playMusic(id: number) {
-    if (this.muted) return;
+    if (this.muted) { this.tracePush({ e: 'sel-blocked-muted', id }); return; }
     if (this.curMusic === id) return;
     const prev = this.curMusic;
     this.curMusic = id;
     this.emit('sel', { id, ...(prev ? { p: prev } : {}) });   // 选曲意图（id=0 即静音选择）
+    this.tracePush({ e: 'sel', id, prev });
     if (id === 0) return;
     const ac = this.audio();
     if (!ac) return;

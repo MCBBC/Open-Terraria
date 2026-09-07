@@ -15,7 +15,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
-import { VANILLA_RECIPES } from '../data/vanillaRecipes';
+import { RECIPE_GROUP_ITEMS, VANILLA_RECIPES } from '../data/vanillaRecipes';
 import whipsJson from '../data/vanilla-whips.json';
 
 /** 鞭物品表（combat json 缺鞭族 damage——数据在 vanilla-whips.json） */
@@ -72,21 +72,40 @@ const T = (key: string, ...args: (string | number)[]) => Lang.text(key, ...args)
  *  实际用途就是合成提示，原料反查覆盖面等价）。
  *  ★RV3 集成审查勘误：配方 json 的 items[].id 是【原版 vid 域】（首条=凝胶 23+
  *  木材 9→火把 8），曾误当内部 id 与 slot.id（内部 id 域）直比——仅早期
- *  "内部 id≡vid"巧合段命中，4 处重复注册平移 +4 后全面失配。归一：vid 同时
- *  解析到【运行时】内部 id（VANILLA_ITEM_KEY_BY_ID→ITEM_BY_KEY，免疫 json
- *  烘焙期与运行期的下标漂移），两域并集供 has() */
+ *  "内部 id≡vid"巧合段命中，4 处重复注册平移 +4 后全面失配。
+ *  ★SW-BJ24 2026-09-07：①补组员臂——原版 Recipe.UpdateWhichItemsAreMaterials
+ *  （Recipe.cs:15209-15243）对任一配方【用到】的 RecipeGroup 把组内全体物品标
+ *  material（:15221-15233 组需臂 + :15233-15241 组员臂）。本 json 组需走 r.groups
+ *  （items[] 不含 1000000 偏移 id），漏组员臂曾致 16 个仅经组出现的 vid（杏/樱桃/
+ *  葡萄柚/李/辣树果/石榴、珍珠砂、7 张压力板、2 张向导陪伴指南）不入集=向导槽
+ *  误拒。②双域【分池】——旧「vid+iid 并集一池」跨域碰撞（实探：钉鞋 975 是原料，
+ *  其内部 iid 恰=24 ⇒ 并集 has(24)=真 ⇒ 木剑 24 误过向导槽门/误挂 Material 行；
+ *  反向 vid 值撞他件 iid 同理污染 tooltip 面）。真值源仍是同一 vid 集，消费面按
+ *  各自域取池：vid 域门（UI.ts 向导槽 :3186/Shift 特化支 :1563）用 materialVids()，
+ *  iid 域（tooltip Material 行 :329 slot.id=内部 iid）用 materialIids() */
+let MATERIAL_VIDS: Set<number> | null = null;
 let MATERIAL_IIDS: Set<number> | null = null;
-/** context7 材料门用（ItemSlot.cs:1502-1507 checkItem.material）——复用本近似集 */
+/** vid 域材料集（ItemID.Sets.IsAMaterial 的 vid 域真值 = 原料 ∪ 被用组全员） */
+export function materialVids(): Set<number> {
+  if (MATERIAL_VIDS) return MATERIAL_VIDS;
+  const s = new Set<number>();
+  for (const r of VANILLA_RECIPES) {
+    for (const ing of r.items) s.add(ing.id);
+    for (const gid of r.groups ?? []) {   // ★SW-BJ24 组员臂（Recipe.cs:15221-15241）
+      for (const vid of RECIPE_GROUP_ITEMS[gid] ?? []) s.add(vid);
+    }
+  }
+  MATERIAL_VIDS = s;
+  return s;
+}
+/** iid 域材料集（内部 id 域；slot.id 消费面，:329 Material 行） */
 export function materialIids(): Set<number> {
   if (MATERIAL_IIDS) return MATERIAL_IIDS;
   const s = new Set<number>();
-  for (const r of VANILLA_RECIPES) {
-    for (const ing of r.items) {
-      s.add(ing.id);
-      const k = VANILLA_ITEM_KEY_BY_ID[ing.id];
-      const iid = k !== undefined ? ITEM_BY_KEY[k] : undefined;
-      if (iid !== undefined) s.add(iid);
-    }
+  for (const vid of materialVids()) {
+    const k = VANILLA_ITEM_KEY_BY_ID[vid];
+    const iid = k !== undefined ? ITEM_BY_KEY[k] : undefined;
+    if (iid !== undefined) s.add(iid);
   }
   MATERIAL_IIDS = s;
   return s;

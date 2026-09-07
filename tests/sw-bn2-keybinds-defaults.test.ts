@@ -1,13 +1,17 @@
-// SW-BN2 2026-09-07 键位系统改造四令守卫（用户令×4）：
-//   ①E 回归钩爪 / ②Esc=背包+Esc 链（背包开着再按 Esc=暂停浮层）
-//   / ③操作说明键位标注活绑表驱动 / ④未绑项可点击录入绑定。
+// SW-BN2 2026-09-07 键位系统改造四令守卫（用户令×4；SW-BN3 2026-09-07 重钉：
+//   ② Esc 链对齐原版——背包开着再按 Esc=关背包（ToggleInv :5026）,BN2 的
+//   「Esc=暂停浮层」用户令分歧经用户拍板方案 A 撤销,「叠层/收两层」断言删除,
+//   浮层改走背包内设置钮/暂停钮/死亡态;语义矩阵详钉见 tests/sw-bn3-esc-vanilla-align）：
+//   ①E 回归钩爪 / ②Esc=背包开关循环 / ③操作说明键位标注活绑表驱动
+//   / ④未绑项可点击录入绑定。
 // 三层钉法（campaign-playbook P3：行为面 + 结构锁）：
 //   · 行为面——DEFAULT_KEYBINDS 全表锁（原版 Redigit Keyboard 档 1:1 + 偏差备案）、
 //     迁移卫门 migrateLegacyDefaults（旧档只动缺省不丢自定义）、Esc 链决策核
-//     resolveEscapeChain 全支矩阵 + Esc 循环链（开背包→暂停浮层→收回,无死循环）、
+//     resolveEscapeChain 全支矩阵 + Esc 开关循环（开背包→关背包→再开,无死循环）、
 //     未绑项绑定流（assignBinding 空表 action 录入/反选）、活标签 keybindHintLabel。
-//   · 结构锁——main.ts 执行器挂 resolveEscapeChain 决策核 / MobileControls 暂停钮
-//     intent 'pause' / mainFlow 欢迎语走活绑表 / escapeChain.ts 原版行号锚在位。
+//   · 结构锁——main.ts 执行器挂 resolveEscapeChain 决策核 / closePause 只收浮层
+//     不动背包 / MobileControls 暂停钮 intent 'pause' / mainFlow 欢迎语走活绑表 /
+//     escapeChain.ts 原版行号锚在位。
 // （SettingsPanel 录入交互为 DOM 链,测试环境无 DOM——行为核 assignBinding 由
 //   tests/keybinds.test.ts 与本文件 ④ 覆盖,面板监听器经结构锁钉住）
 import { describe, it, expect } from 'vitest';
@@ -96,11 +100,11 @@ describe('SW-BN2 ①缺省表对齐原版（PlayerInput.cs:2062-2140 Redigit Key
   });
 });
 
-describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:4961 ToggleInv）', () => {
+describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:4961 ToggleInv;SW-BN3 对齐原版重钉）', () => {
   const base: EscapeChainState = {
     summonOpen: false, fullMapOpen: false, pauseOpen: false,
     npcDialogActive: false, signDialogActive: false, uiBlocking: false,
-    inventoryOpen: false,
+    inventoryOpen: false, dead: false,   // SW-RB6b 2026-09-07 补死亡态字段
   };
   const s = (over: Partial<EscapeChainState>): EscapeChainState => ({ ...base, ...over });
   const ALL_INTENTS = ['escape', 'inventory', 'pause'] as const;
@@ -123,10 +127,10 @@ describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:49
     }
   });
 
-  it('②用户令主链：背包开着再按 Esc=暂停浮层（openPause,不清背包）;纯背包面=关背包', () => {
-    expect(resolveEscapeChain(s({ inventoryOpen: true }), 'escape')).toBe('openPause');
-    expect(resolveEscapeChain(s({ inventoryOpen: true }), 'pause')).toBe('openPause');
-    expect(resolveEscapeChain(s({ inventoryOpen: true }), 'inventory')).toBe('closeInventory');
+  it('②SW-BN3 主链翻转：背包开着任意触发面=关背包（原版 else 支 :5026,无触发面区分）', () => {
+    for (const intent of ALL_INTENTS) {
+      expect(resolveEscapeChain(s({ inventoryOpen: true }), intent)).toBe('closeInventory');
+    }
   });
 
   it('②无面板：Esc 面与背包面都开背包（原版 OpenInventory :5023-5025）;暂停钮面直达暂停', () => {
@@ -135,15 +139,30 @@ describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:49
     expect(resolveEscapeChain(base, 'pause')).toBe('openPause');
   });
 
-  it('②Esc 循环链收口：开背包→暂停浮层→一次收回两层,无"Esc↔暂停"死循环', () => {
+  it('②Esc 开关循环（SW-BN3 对齐原版）：开背包→关背包→再开,无"Esc↔暂停"死循环', () => {
     let st = base;
     expect(resolveEscapeChain(st, 'escape')).toBe('openInventory');
     st = s({ inventoryOpen: true });                       // 开背包后
-    expect(resolveEscapeChain(st, 'escape')).toBe('openPause');
-    st = s({ inventoryOpen: true, pauseOpen: true });      // 浮层叠于背包后
-    // closePause 执行器收浮层【并收背包】（main.ts 结构锁钉住）→ 回到无面板态
+    expect(resolveEscapeChain(st, 'escape')).toBe('closeInventory');   // 二段=关背包
+    st = base;                                             // 关背包后回无面板态
+    expect(resolveEscapeChain(st, 'escape')).toBe('openInventory');    // 再按=再开
+    // 浮层开着（经设置钮/暂停钮进入）→ Esc 只收浮层不动背包（closePause 执行器
+    // 结构锁钉住）;收浮层后背包若开着,下一段 Esc 才关背包
+    st = s({ inventoryOpen: true, pauseOpen: true });
     expect(resolveEscapeChain(st, 'escape')).toBe('closePause');
-    expect(resolveEscapeChain(base, 'escape')).toBe('openInventory');
+    expect(resolveEscapeChain(s({ inventoryOpen: true }), 'escape')).toBe('closeInventory');
+  });
+
+  it('SW-RB6b 死亡态：Inventory 沿改道暂停浮层开关（TryOpeningInGameOptions :17391-17410——'
+    + 'UpdateDead :17187 调用,ToggleInv 整链不跑,永不开关背包）', () => {
+    // 死亡无面板：Esc/绑键/暂停钮 → 开暂停浮层（原版 IngameOptions.Open）
+    for (const intent of ALL_INTENTS) {
+      expect(resolveEscapeChain(s({ dead: true }), intent)).toBe('openPause');
+    }
+    // 死亡 + 浮层已开 → 关（原版 ingameOptionsWindow ? Close : Open 的 Close 臂）
+    expect(resolveEscapeChain(s({ dead: true, pauseOpen: true }), 'escape')).toBe('closePause');
+    // 死亡 + 背包态字段为真（本仓死亡每 tick 强收,理论不可达）→ 仍不落背包
+    expect(resolveEscapeChain(s({ dead: true, inventoryOpen: true }), 'escape')).toBe('openPause');
   });
 });
 
@@ -194,13 +213,23 @@ describe('SW-BN2 ③操作说明/欢迎语标注活绑表驱动', () => {
 describe('SW-BN2 结构锁（源文本锚,防执行器/接线静默回退）', () => {
   const read = (p: string): string => readFileSync(`${srcRoot}/${p}`, 'utf8');
 
-  it('main.ts 执行器挂 resolveEscapeChain 决策核,closePause 收浮层并收背包', () => {
+  it('main.ts 执行器挂 resolveEscapeChain 决策核,closePause 只收浮层不动背包（SW-BN3 :4978-4986）', () => {
     const main = read('main.ts');
     expect(main).toContain("from './ui/escapeChain'");
     expect(main).toContain('resolveEscapeChain({');
     const closePause = /case 'closePause':[\s\S]*?break;/.exec(main)?.[0] ?? '';
-    expect(closePause).toContain('ui.closeInventory()');
+    expect(closePause).not.toContain('ui.closeInventory()');   // 「收两层」已退役
     expect(closePause).toContain('game.paused = false');
+  });
+
+  it('SW-BN3 背包内设置钮在位（原版 playerInventory 态设置入口 Main.cs:46287-46301）', () => {
+    const main = read('main.ts');
+    const ui = read('ui/UI.ts');
+    expect(ui).toContain('onPauseMenu?: () => void');
+    expect(ui).toContain("Lang.text('LegacyInterface.62')");   // 官译 "Settings/设置"
+    // 接线 = 开/收 toggle（clickAction = ingameOptionsWindow ? Close : Open :46294-46299）
+    expect(main).toContain('ui.onPauseMenu = () => {');
+    expect(main).toContain('openInGamePause(g);');
   });
 
   it('物理 Esc 面仍由 Inventory 绑定表驱动（isBound 门在 main.ts 键盘链）', () => {
@@ -237,8 +266,9 @@ describe('SW-BN2 结构锁（源文本锚,防执行器/接线静默回退）', (
     const ec = read('ui/escapeChain.ts');
     expect(ec).toContain('Player.cs:4961');
     expect(ec).toContain('17391');
-    expect(ec).toContain('Main.cs:17484');
+    expect(ec).toContain('Main.cs:17493');   // SW-BN3 正锚：CanPauseGame 1457 实测行
     expect(ec).toContain('Main.cs:46287');
     expect(ec).toContain('5023-5025');
+    expect(ec).toContain('5026');            // else 支关背包（SW-BN3 主链语义）
   });
 });

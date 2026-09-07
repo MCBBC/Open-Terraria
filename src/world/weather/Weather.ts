@@ -368,8 +368,12 @@ export class WeatherState {
     const n28 = Math.min(1, (this.cloudAlpha * (10 / 9) * 0.5 + 0.5) * shimMul)
       * Math.max(0, Math.min(1, atmo)) ** 4;
     return {
-      // 雨环境音（MusicID 28）：门不成立恒 0（渐熄斜坡在 Sfx.setRain 状态机）
-      rain: rainGate ? n28 : 0,
+      // 雨环境音(MusicID 28):★硬切勘误(2026-09-07 用户实报「地底雨声硬切无过渡」)
+      //  ——原版 num11 与门位 num12 **独立**:num11 按 cloudAlpha 照算(Main.cs:11700-11709
+      //  与 num12 无关),门断只走 TowardStopping 渐熄状态机(LegacyAudioSystem.cs:253-280:
+      //  Volume=trackVolume(0.005/帧 渐减)×num11=平滑淡出)。曾耦合 `rainGate ? n28 : 0`
+      //  → 门断 level=0 → 渐熄期 v=fade×sys=fade×0=0 → 第一帧音量归零=听感硬切
+      rain: n28,
       // 门位透传（Game.applyWeatherLoops → setRain 第二参；Main.cs:11712-11720
       // 门开/门关走 UpdateAmbientCueState/TowardStopping 两分支的语义差）
       rainGate,

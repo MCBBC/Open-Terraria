@@ -52,7 +52,7 @@ function tintBake(
   const key = `${prefix}|${sx},${sy},${sw},${sh}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
   const hit = rainbowTintCache.get(key);
   if (hit) return hit;
-  if (rainbowTintCache.size > 512) rainbowTintCache.clear();   // 上限护栏(单场 BOSS 面不至)
+  if (rainbowTintCache.size > 512) { const k0 = rainbowTintCache.keys().next().value; if (k0 !== undefined) rainbowTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const cx = c.getContext('2d');

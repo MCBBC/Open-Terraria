@@ -68,6 +68,9 @@ export interface DebugReportOptions {
    *  （d.f=轮换后 wav 文件名,d.o=结局码,d.n=合成兜底逻辑名）；bgm 事件类
    *  sel/start/stop/fail/mute（d.id=MUSIC 曲目 id,d.p=前曲） */
   audioTail?: { sfx: Array<{ t: number; k: string; d: unknown }> | null; bgm: Array<{ t: number; k: string; d: unknown }> | null } | null;
+  /** ★BGM 诊断 trace(2026-09-07):AudioSystem 环形 60 条(选曲/停轨/ended 哨兵/
+   *  失败/静音/周期快照)——「BGM 停止/失去循环」现场的关键证据层 */
+  musicTrace?: Array<Record<string, unknown>> | null;
   /** 动画帧捕获轻量导出（聚合账本+异常环；快照/截图仅长按录制的 dump.tileFrames 有） */
   tileFrames?: unknown;
 }
@@ -792,6 +795,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     behaviorTail: opts.behaviorTail ?? null,
     // 音效录制尾段（F5 短按注入；sfx/bgm 分列播放序列——错误音效/BGM 排查时间线）
     audioTail: opts.audioTail ?? null,
+    musicTrace: (globalThis as { __swAudio?: { trace?: Array<Record<string, unknown>> } }).__swAudio?.trace ?? null,
     // 动画帧捕获（被动聚合层；长按录制窗另并入 behavior dump.tileFrames 全量）
     tileFrames: opts.tileFrames ?? null,
     // 加载分段时间线（load.* performance.mark 族 + worker 检查点；2026-08-31 仪器）

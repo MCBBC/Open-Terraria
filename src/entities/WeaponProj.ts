@@ -3498,7 +3498,9 @@ export class YoyoProj extends Entity {
           const ja = jit();                                      // .RotatedBy(NextFloatDirection×2π×0.025)
           this.spawnShot({ x: this.cx, y: this.cy,
             vx: vx0 * Math.cos(ja) - vy0 * Math.sin(ja), vy: vx0 * Math.sin(ja) + vy0 * Math.cos(ja),
-            projId: 1134, dmg: this.damage, kb: this.knockback, sharedCd: shardCd });
+            projId: 1134, dmg: this.damage, kb: this.knockback, sharedCd: shardCd,
+            ai0: m === 0 ? 0 : 1 });   // ★SW-BJ17：NewProjectile 第 9 参 (m != 0)?1:0
+                                       // （:13834）——1134 出生音门 ai[0]==0 唯首颗出声
         }
       } else if (this.projId === 555 && p.everySomeYoyoHits(7, true)) {
         const t = findNearest(80);
@@ -3556,6 +3558,7 @@ export interface YoyoShotSpec {
   scale?: number;                // 1125/1130 的 ai[1]（缩放）
   excludeId?: number;            // localNPCImmunity[victimIndex]=-1（触发敌免中本弹）
   sharedCd?: HitCooldown;        // IDStatic 免疫共享（1134/1135 同型各弹共用一张表）
+  ai0?: number;                  // NewProjectile 第 9 参 ai[0]（1134:546 出膛首颗 0 余四颗 1,:13834）
 }
 export class YoyoShotProj extends Entity {
   damage: number;
@@ -3572,6 +3575,8 @@ export class YoyoShotProj extends Entity {
   private sharedCd: HitCooldown | null;
   private ownCd = new HitCooldown();     // local 免疫（1125/1130 每弹一张）
   private age = 0;                       // localAI[0]（AI_210 20t 寿命 / 1125 帧计数）
+  private ai0 = 0;                       // NewProjectile 第 9 参 ai[0]（:13834 1134 首颗 0 余 1）
+  private rotation = 0;                  // 1134 累计旋转（AI_024 :26293 rotation += vx×0.2）
   private alphaVal = 0;                  // 原版 alpha（SetDefaults 缺省 0;AI_210 每拍覆写 :37518/:37533）
   private frame = 0;
   private frameCounter = 0;
@@ -3607,6 +3612,7 @@ export class YoyoShotProj extends Entity {
     this.damage = Math.max(1, Math.trunc(spec.dmg));
     this.knockback = spec.kb;
     this.scale = spec.scale ?? 1;
+    this.ai0 = spec.ai0 ?? 0;
     this.excludeId = spec.excludeId ?? -1;
     this.sharedCd = spec.sharedCd ?? null;
     if (spec.projId === 1125) {
@@ -3618,6 +3624,7 @@ export class YoyoShotProj extends Entity {
       this.life = 20;                      // AI_210 :37516/:37540 localAI[0]>=20 → Kill
     } else {
       this.life = pd?.timeLeft ?? 600;     // 1134 timeLeft 600（:10650）
+      this.scale = pd?.scale ?? 1;         // 1134 scale=1.2（:10648）——AI_024 收缩起点(:26347)
     }
   }
 
@@ -3750,14 +3757,54 @@ export class YoyoShotProj extends Entity {
       const mv = utilMultiLerp(this.age / 20, YOYO_SHOT_ALPHA_ANCHORS);
       this.alphaVal = Math.trunc(255 + (0 - 255) * Math.min(1, Math.max(0, mv)));
     } else if (this.projId === 1134) {
-      // AI_024 共享段位移面（P.cs:26343-26345——type 94/1114 早退支之后落此,1134 无
-      // type 专属支）:velocity ×0.96/t = 1134 唯一速度写行。未折算登记（非位移刀面,
-      // 留锚）:出生尘/音（:26278-26291 localAI[0]==0 门,SoundID 13 ×0.35 + d70×6
-      // noGravity vel×2.5 scale×0.9）/ light=scale×0.5（:26292）/ rotation += vx×0.2
-      // （:26293,draw 现走 vel 向）/ ai[1]>15 起每拍 scale−0.05 至 0.2 → Kill
-      // （:26346-26354,寿命域——vanilla ~35t 即亡,本仓 life=timeLeft 600 语义,
-      // 移交寿命域属主批）
+      // ★SW-BJ17 2026-09-07：AI_024 1134 全支 1:1（P.cs:26275-26354;蓝队 K 位移批已接
+      //  ×0.96,本批补齐演出/寿命面——K 移交件②）。逐句：
+      //  ①出生门（:26275-26291 localAI[0]==0 → 1,即首拍）：ai[0]==0 才播
+      //    PlaySound(13,x,y,0,0.35)——legacy 13=Shatter（LegacySoundPlayer.cs:786,
+      //    盘上 Shatter.opus/mp3 在库;Game.ts:20800 同判例）。546 出膛 NewProjectile
+      //    (:13834) 首颗 ai0=0 余四颗 1 → 唯首颗出声,五颗全出尘。
+      //    d70×6 = NewDust(盒,70)+noGravity+velocity×2.5+scale×0.9（NewDust 本体
+      //    掷序/缺省随机速 ±2.0/scale ±0.2 由 VanillaDust.spawn 对齐）。
+      //    尘盒 = 原版活盒 width×height = SetDefaults 尾 width×scale :10674-10675
+      //    = int(6×1.2)=7（本仓 this.w 系 SetDefaults 字面 6,数据面全库口径;
+      //    尘盒按 7 折算=原版活盒）。
+      //  ②light=scale×0.5（:26292）→ ProjLight()（:16246 num=light 起;:16636-16640
+      //    1134 支乘区 (0.5,0.2,0.9)）= AddLight(0.25·s,0.1·s,0.45·s)。走实体光通道
+      //    lightRGB（数据路径 static 0.5 表值停用——AI 每拍覆写 light=scale×0.5）。
+      //  ③rotation += velocity.X×0.2（:26293 累计式——旧 draw 走速度向系误引
+      //    AI_210 :37536(1135 行),本批正轨）。
+      //  ④ai[1]++（:26294）= this.age（fixedUpdate 顶部每拍 +1,首拍=1,同序同值）。
+      //  ⑤velocity×0.96（:26343-26345,K 批已接,保留）。
+      //  ⑥ai[1]>15 起每拍 scale−0.05,≤0.2 钉 0.2 → Kill（:26346-26354）——scale 初值
+      //    1.2 → 恰 35t 即亡（首 15t 门 + 第 16..35t 收缩 20 次;JS double 第 20 次累减落
+      //    0.19999999999999946≤0.2,tick35 定谳;C# float 同点有 ±1t 漂移窗,登记）。
+      //    life=600（:10650）保留为保底上限。Kill 面定谳：Projectile.Kill 通用段仅
+      //    aiStyle16 炸弹族（:71770 flag2 起）,1134 支 :76811-76815=空循环 for(3){}
+      //    零死亡效果 → 本仓 dead 置位即 1:1,无需 Game.onProjectileDeath 接线
+      //    （1088 橡弹先例核毕=Kill :71784 爆炸支改写,1134 无对应面）。
+      if (this.age === 1) {
+        if (this.ai0 === 0) game.playSfxWav?.('Shatter', 0.35, this.cx, this.cy);
+        const bw = Math.trunc(this.w * (projectileData(1134)?.scale ?? 1));
+        const bh = Math.trunc(this.h * (projectileData(1134)?.scale ?? 1));
+        for (let i = 0; i < 6; i++) {
+          const d = game.spawnDust?.(this.x, this.y, bw, bh, 70);
+          if (!d) continue;
+          d.noGravity = true;
+          d.vx *= 2.5; d.vy *= 2.5;
+          d.scale *= 0.9;
+        }
+      }
+      this.lightRGB = [this.scale * 0.25, this.scale * 0.1, this.scale * 0.45];
+      this.rotation += this.vx * 0.2;
       this.vx *= 0.96; this.vy *= 0.96;
+      if (this.age > 15) {
+        this.scale -= 0.05;
+        if (this.scale <= 0.2) {
+          this.scale = 0.2;
+          this.dead = true;                    // Kill（:26353）——死亡面空循环,见上⑥
+          return;                              // 原版 Kill 即刻 !active → 湿段/命中本拍不达
+        }
+      }
     }
     // ---- 通用湿段（:16903-17113,projWetSection 共享体——AI 后/命中前;原版 Damage
     //      管线 :17132 在湿段之后。1125 ignoreWater=true 自动分流跳段,域注见字段块）----
@@ -3837,7 +3884,11 @@ export class YoyoShotProj extends Entity {
     if (this.projId === 1125) return;
     const rot = this.projId === 1130
       ? Math.atan2(this.vy, this.vx) - Math.PI / 2           // :37484 rotation=vel−π/2
-      : Math.atan2(this.vy, this.vx);                        // 1135/1134 =vel（:37536）
+      : this.projId === 1134
+        ? this.rotation                                      // ★SW-BJ17：AI_024 :26293
+                                                             //  累计式（旧 vel 向系误引
+                                                             //  AI_210 :37536=1135 行）
+      : Math.atan2(this.vy, this.vx);                        // 1135 =vel（:37536）
     if (this.projId === 1130) {
       // 6 帧竖条（projFrames[1130]=6,Main.cs:8866）——drawProj 无帧参,手绘
       const ctx = r.ctx;
@@ -3860,7 +3911,11 @@ export class YoyoShotProj extends Entity {
     drawProj(r, cam, this, this.projId, rot, this.projId === 1134 ? '#E0C0FF' : '#8090E0',
       this.projId === 1134 ? 0.8                                  // α=50 → (255−50)/255（:10645）
         : (this.netPuppet ? 1 : Math.min(1, this.age / 19))       // 1135 同 GetAlpha 支（:80595）
-          * (255 - this.alphaVal) / 255);
+          * (255 - this.alphaVal) / 255,
+      0, false, false,
+      // ★SW-BJ17：1134 收缩绘制（DrawProj dest=贴图×proj.scale）——AI_024 scale
+      //  1.2→0.2 每拍 −0.05（:26346-26354）;1135 SetDefaults scale=1（:10658）不变
+      this.projId === 1134 ? this.scale : 1);
   }
 }
 

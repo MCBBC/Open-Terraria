@@ -92,3 +92,82 @@ describe('蘑菇组发光（exportTo 种子光）', () => {
     expect(on[1]).toBeGreaterThanOrEqual(0.27);
   });
 });
+
+// ============ 2026-09-07 光照批两修边（TileLightScanner.ts 域） ============
+// ① 传送器 235 零 tile 光：原版 case 235（TileLightScanner.cs:1021-1029 光地板
+//    X/Y<0.6 抬底）整段在 ApplyTileLight `if (Main.tileLighted[tile.type])`（:350）
+//    门内,Main.cs 全树零处 tileLighted[235] 赋值 ⇒ 死分支——本仓曾发 [0.6,0.6,0]=债,
+//    已撤（对照 238 世纪之花球茎:tileLighted[238]=true（Main.cs:10384）真活分支保留）。
+// ② 涂装门 1:1（:2510-2511 case 22/140、:2578-2580 case 204/347、:2962-2967 case 739
+//    flag + 尾段 :3131-3141）：PaintID 26=White/27=Gray（PaintID.cs:57-59,非黑漆 25）。
+describe('涂装门 + 传送器死分支（2026-09-07 对账清偿）', () => {
+  const flicker = new FlickerClock();
+
+  /** 放 sheet tile（可带漆）后扫描取该格种子光（exportTo 直读,不经 Blur） */
+  const glowAt = (key: string, paint = 0): [number, number, number] => {
+    const st = new TileStore(3, 3);
+    st.setTile(1, 1, TILE_BY_KEY[key]!);
+    if (paint !== 0) st.setPaintSilent(1, 1, paint);
+    const world: ScannerWorld = {
+      store: st,
+      groundLevel: -1, lavaLine: st.h + 1,
+      get clock() { return { timeOfDay: 0.5, dayCount: 1 } as never; },
+    };
+    const map = new LightMap();
+    map.setSize(3, 3);
+    new TileLightScanner(flicker).exportTo(world, map, 0, 0, []);
+    const i = 1 * 3 + 1;
+    return [map.r[i], map.g[i], map.b[i]];
+  };
+
+  it('传送器 235：零 tile 光（死分支撤除）,238 世纪之花球茎保留光地板', () => {
+    expect(specialTileLight(235, 0, 0, flicker)).toBeNull();
+    // 238 活分支：光地板 X/Z 抬 0.5 ≙ max-merge (0.5,0,0.5)
+    expect(specialTileLight(238, 0, 0, flicker)).toEqual([0.5, 0, 0.5]);
+    const [r, g, b] = glowAt('v_235_teleporter');
+    expect(r).toBe(0); expect(g).toBe(0); expect(b).toBe(0);
+  });
+
+  it('魔矿 22：无漆 R=0.12；白(26)/灰(27)漆 R 置零 G/B 照常；黑(25)漆门不动', () => {
+    const base = glowAt('ore_demonite');
+    expect(base[0]).toBeCloseTo(31 / 255, 5);
+    expect(base[1]).toBeCloseTo(18 / 255, 5);
+    expect(base[2]).toBeCloseTo(82 / 255, 5);
+    const white = glowAt('ore_demonite', 26);
+    expect(white[0]).toBe(0);                                  // R 置零支
+    expect(white[1]).toBeCloseTo(18 / 255, 5);                 // G 照常（:2513 在门外）
+    expect(white[2]).toBeCloseTo(82 / 255, 5);                 // B 照常
+    const gray = glowAt('ore_demonite', 27);
+    expect(gray).toEqual(white);
+    const black = glowAt('ore_demonite', 25);                  // 黑漆不在门内
+    expect(black).toEqual(base);
+  });
+
+  it('魔矿砖 140 同门；猩红矿 204/347 白/灰漆整支归零（G/B 本为零）', () => {
+    const whiteBrick = glowAt('v_140_demonite_brick', 26);
+    expect(whiteBrick[0]).toBe(0);
+    expect(whiteBrick[1]).toBeCloseTo(18 / 255, 5);
+    expect(whiteBrick[2]).toBeCloseTo(82 / 255, 5);
+    const baseCrim = glowAt('ore_crimtane');
+    expect(baseCrim[0]).toBeCloseTo(89 / 255, 5);
+    const whiteCrim = glowAt('ore_crimtane', 26);
+    expect(whiteCrim).toEqual([0, 0, 0]);                      // 只抬 R → 归零不发光
+    const whiteBrick2 = glowAt('v_347_crimtane_brick', 27);
+    expect(whiteBrick2).toEqual([0, 0, 0]);
+  });
+
+  it('水母块 739：flag=true 涂装覆写支——无漆 (0.35,0.63,0.7),有漆整支覆写 paintColor/255', () => {
+    const base = glowAt('v_739_jellyfish_block');
+    expect(base[0]).toBeCloseTo(89 / 255, 5);
+    expect(base[1]).toBeCloseTo(161 / 255, 5);
+    expect(base[2]).toBeCloseTo(179 / 255, 5);
+    const yellow = glowAt('v_739_jellyfish_block', 3);         // 黄漆 paintColor(3)=(255,255,0)
+    expect(yellow).toEqual([1, 1, 0]);
+    const black = glowAt('v_739_jellyfish_block', 25);         // 黑漆 (75,75,75)≈压暗（Float32 精度 → closeTo）
+    expect(black[0]).toBeCloseTo(75 / 255, 6);
+    expect(black[1]).toBeCloseTo(75 / 255, 6);
+    expect(black[2]).toBeCloseTo(75 / 255, 6);
+    const white = glowAt('v_739_jellyfish_block', 26);         // 白漆 (255,255,255)
+    expect(white).toEqual([1, 1, 1]);
+  });
+});

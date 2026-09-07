@@ -143,27 +143,29 @@ describe('② 地面步行族贴地行走（1457 AI_026 flag7 / AI_067 flag2）'
   it('蜘蛛 390 贴地：落地静止 vy=0/onGround,玩家远移 → 步行追 vx>0 且保持贴地', () => {
     const { hooks, player } = makeHooks();
     player.y = 100 * 16 - 42;                            // 玩家落地（脚贴地表）
-    const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 16);  // 跟随锚上（p.cx-30）
+    // ★SW-BJ17：出生 y 按真盒 h=30（SetDefaults :4746-4747,旧 16×16 假设退役）——
+    //  盒底仍落 100*16 行顶,中腰行 99 不变（centerY=1585 → :63222 基准同档）
+    const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 30);  // 跟随锚上（p.cx-30）
     for (let k = 0; k < 5; k++) m.fixedUpdate(1, hooks);
     expect(m.onGround).toBe(true);                       // 贴地（重力 0.4 落地 :65221-65229）
-    expect(m.y).toBe(100 * 16 - 16);
+    expect(m.y).toBe(100 * 16 - 30);
     expect(m.vy).toBe(0);
     expect(m.vx).toBe(0);                                // 锚 ±(10+40) 死区内 → 无行走意图
     player.x = 60 * 16 + 200;                            // 玩家右移 200 → flag3 行走
     for (let k = 0; k < 10; k++) m.fixedUpdate(1, hooks);
     expect(m.vx).toBeGreaterThan(0);                     // 0.4/t 加速（:63099-63146）
     expect(m.onGround).toBe(true);                       // 行走中保持贴地
-    expect(m.y).toBe(100 * 16 - 16);
+    expect(m.y).toBe(100 * 16 - 30);
   });
   it('蜘蛛遇障跳梯：前方 2 高墙 → 探测命中落地起跳 vy=-7.1（:63208-63244 中腰行基准）', () => {
     const { hooks, player, store } = makeHooks();
     player.x = 60 * 16 + 200;
     player.y = 100 * 16 - 42;
-    const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 16);
+    const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 30);   // ★SW-BJ17 真盒 h=30
     // ★终清波批行基订正：AI_026 探测基准=中腰行（num190=centerY/16,:63222 重锚，
     // 旧实现误用脚下行）。立行 99（中腰=99）：墙占行 98/99 两高 → 前墙单格(99)
     // 检出、梯档 solid(-1)=98✓ 而 solid(-2)=97 空 → 第二档 -7.1（旧底行基算出
-    // -9.1 系失真面,随中腰重锚订正）
+    // -9.1 系失真面,随中腰重锚订正）——真盒 30 后 centerY=1585 → 中腰仍 99 行
     for (let y = 98; y <= 99; y++) { store.setTile(63, y, 1); store.setTile(64, y, 1); }
     let vy = 0;
     for (let k = 0; k < 60; k++) {
@@ -472,16 +474,16 @@ describe('⑨ 蜘蛛/蛙地面 AI（tileCollide 门/撤退档/镜像）', () => 
     const { hooks, player, store } = makeHooks();
     player.x = 60 * 16; player.y = 90 * 16 - 42;         // 主站平台上
     for (let x = 58; x <= 63; x++) store.setTile(x, 90, PLAT);
-    const m = mkMinion(390, player, 60 * 16, 90 * 16 - 16);
+    const m = mkMinion(390, player, 60 * 16, 90 * 16 - 30);   // ★SW-BJ17 真盒 h=30（盒底同行顶）
     for (let k = 0; k < 8; k++) m.fixedUpdate(1, hooks); // 落台
     expect(m.onGround).toBe(true);
-    expect(m.y).toBe(90 * 16 - 16);
+    expect(m.y).toBe(90 * 16 - 30);
     expect(m.tileCollide).toBe(true);                    // 盒无实心 → true（:62843-62845）
     const below = mkEnemy(1, 60 * 16 + 8, 96 * 16);      // 平台下 6 格 LOS 目标
     const b = makeHooks([below]);
     (b.hooks as unknown as { world: { store: TileStore } }).world.store = store;
     b.player.x = 60 * 16; b.player.y = 90 * 16 - 42;
-    const m2 = mkMinion(390, b.player, 60 * 16, 90 * 16 - 16);
+    const m2 = mkMinion(390, b.player, 60 * 16, 90 * 16 - 30);
     for (let k = 0; k < 8; k++) m2.fixedUpdate(1, b.hooks);
     expect(priv(m2).spLai1).toBe(0);
     expect(m2.tileCollide).toBe(false);                  // 敌在下方+脚踩平台（:62852-62860）

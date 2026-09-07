@@ -157,15 +157,37 @@ export function backHairDraw(hair: number): boolean {
     && hair !== 94 && hair !== 100 && hair !== 104 && hair !== 112 && hair < 116;
 }
 
-/** 随机外观（对齐 1.4.5.6 CreateCharacter：从白名单随机发型，
- *  性别由发型判定表推导（FEMALE_HAIRS），变体从对应性别列表取） */
+/** 变体性别对翻表（PlayerVariantID.Sets.AltGenderReference）：
+ *  CreateIntSet(default, k0,v0,…) 对 = (0↔4)(1↔5)(2↔6)(3↔7)(8↔9)(10↔11)。
+ *  消费 = Player.Male setter（Player.cs:3397-3407：set 值 ≠ Sets.Male[skinVariant]
+ *  时 skinVariant 翻到对表）与捏人随机键的发型性别校正 */
+export const ALT_GENDER_REFERENCE: Readonly<Record<number, number>> = {
+  0: 4, 4: 0, 1: 5, 5: 1, 2: 6, 6: 2, 3: 7, 7: 3, 8: 9, 9: 8, 10: 11, 11: 10,
+};
+
+/** 随机外观（UICharacterCreation.Click_RandomizePlayer :1546-1660 1:1,
+ *  ★SW-RB6c 2026-09-07 重排）：①变体 = `_validClothStyles[Main.rand.Next(…)]`
+ *  （:1571,表值 {0,2,1,3,8,9,7,5,6,4} = VALID_CLOTH_STYLES 同序）——旧实现从
+ *  VariantOrder 男女表（含 10/11 DisplayDoll）掷取,原版随机键面从不产出 10/11
+ *  （掷中异性变体后由发型 switch :1648-1651 设 player.Male → Male setter
+ *  Player.cs:3397-3407 翻 ALT_GENDER_REFERENCE 对表;10/11 两向均不可达）;
+ *  ②语音 = 掷出变体的性别 1/2（:1572,翻转【前】取性别）+ 50% → 3（:1573-1575
+ *  `Main.rand.Next(2)==0`）;
+ *  ③发型性别校正（switch(hair+1) 设 Male 的等价式,FemaleSet = FEMALE_HAIRS）。 */
 export function randomAppearance(name = ''): Appearance {
   const a = defaultAppearance(name);
   a.hair = CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)];
-  const pool = FEMALE_HAIRS.has(a.hair) ? FEMALE_VARIANTS : MALE_VARIANTS;
-  a.skinVariant = pool[Math.floor(Math.random() * pool.length)];
-  // 语音随性别初始化（Player.cs:56393 Male?1:2——随机掷定变体后同步落档）
-  a.voiceVariant = defaultVoiceVariant(a.skinVariant);
+  a.skinVariant = VALID_CLOTH_STYLES[Math.floor(Math.random() * VALID_CLOTH_STYLES.length)];
+  // 语音随性别初始化（:1572 Male?1:2——按掷出变体的 Sets.Male 归属;此时发型
+  // 校正尚未发生）+ 50% 掷 3「其他」（:1573-1575）
+  a.voiceVariant = MALE_VARIANTS.includes(a.skinVariant) ? 1 : 2;
+  if (Math.random() < 0.5) a.voiceVariant = 3;
+  // 发型性别校正（:1648-1651 switch(hair+1) 设 player.Male 的语义等价:
+  //  setter 只在 set 值 ≠ 当前变体性别时翻对表——同性别掷中保持原变体）
+  const wantMale = !FEMALE_HAIRS.has(a.hair);
+  if (wantMale !== MALE_VARIANTS.includes(a.skinVariant)) {
+    a.skinVariant = ALT_GENDER_REFERENCE[a.skinVariant] ?? a.skinVariant;
+  }
   const hsl = (h: number, s: number, l: number) => {
     const [r, g, b] = hslToRgb(h / 360, s, l);
     return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };

@@ -145,6 +145,22 @@ function pushSwWarn(msg: unknown) {
 
 ui.onBestiary = () => flow?.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
 ui.onHousing = () => flow?.openHousing?.(); // 背包面板住房按钮（原版 DrawInterface_33_Housing）
+// SW-BN3 2026-09-07：背包面板设置钮 → 暂停/设置浮层（原版 playerInventory 态的
+// 设置入口 = DrawInterface_29_SettingsButton Main.cs:46287-46301,clickAction =
+// ingameOptionsWindow ? Close : Open :46294-46299——开态点击=收浮层同款 toggle,
+// 浮层开时 playerInventory 不清,收浮层回背包态）
+ui.onPauseMenu = () => {
+  const g = flow?.game;
+  if (!g) return;
+  if (pausePanel) {
+    pausePanel.remove();
+    pausePanel = null;
+    g.paused = false;
+    g.input.uiBlocking = false;
+    return;
+  }
+  openInGamePause(g);
+};
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
 
@@ -156,7 +172,7 @@ let flow: FlowHandle | undefined;
 // Sfx.onEvent 是静态钩,覆盖 Game.sfx 与 UISfx 共享单例两实例;菜单实例（UISfx）
 // 的事件类带 @ui 后缀（对话按钮/相机快门等游戏内 UI 音可见出身）。
 Sfx.onEvent = (k, d, tag) => flow?.game?.audioRec.sfx.log(tag ? `${k}@ui` : k, d);
-audio.onEvent = (k, d) => flow?.game?.audioRec.bgm.log(k, d);
+audio.onEvent = (k, d) => flow?.game?.audioRec.bgm.log(k, d);   // sel/start/stop/fail/ended(ended+无 stoppedByFade=loop 失效哨兵)
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
 
@@ -325,10 +341,13 @@ function initCameraModeWiring(game: Game): boolean {
 }
 
 // ---- 键盘：背包/暂停/保存 ----
-/** 暂停/设置浮层（原版 IngameOptions 等价面）开启：game.paused = CanPauseGame
- *  （Main.cs:17484 netMode==0 ∧ ingameOptionsWindow）的暂停旗;浮层可叠于背包
- *  （SW-BN2:背包开着再按 Esc 直达此处,原版该浮层的背包态入口 =
- *  DrawInterface_29_SettingsButton Main.cs:46287-46301）。 */
+/** 暂停/设置浮层（原版 IngameOptions 等价面）开启：game.paused = true（CanPauseGame
+ *  Main.cs:17493 的 ingameOptionsWindow 臂,事件驱动同效——autoPause 臂逐帧重算另见
+ *  Game.applyAutoPauseUI,两者是原文析取式 :17496/:17500 的两支）。SW-BN3 2026-09-07
+ *  起 Esc 链对齐原版（Player.cs:5026 背包开着 Esc=关背包）,浮层入口=背包内设置钮
+ *  （DrawInterface_29_SettingsButton Main.cs:46287-46301,开时不清背包——浮层叠于
+ *  背包是原版此钮的本相）+ 触屏暂停钮 + 死亡态链支;浮层开着 Esc=仅收浮层
+ *  （:4978-4986 IngameOptions.Close,playerInventory 不清）。 */
 function openInGamePause(game: Game): void {
   game.paused = true;
   pausePanel = ui.showPause({
@@ -366,6 +385,10 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'p
     // 模态面板（图鉴/研究/成就/旅程/表情/手册等）开着：链让位（原版 inFancyUI 支
     // Player.cs:4987-4989——各面板自带 Esc 关闭监听,此沿不落背包/暂停）
     uiBlocking: game.input.uiBlocking,
+    // SW-RB6b 2026-09-07：死亡/幽灵态 → 暂停浮层开关切换（TryOpeningInGameOptions
+    // BasedOnInput :17391-17410,UpdateDead :17187 调用——原版此态 Inventory 沿不落
+    // ToggleInv,永不开关背包）
+    dead: game.player.dead,
     inventoryOpen: ui.inventoryOpen,
   }, intent);
   switch (act) {
@@ -377,13 +400,13 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'p
       game.renderer.fullMap.open = false;
       break;
     case 'closePause':
-      // 浮层开着 → 收浮层【并收背包】回游戏（SW-BN2 起浮层可叠于背包,Esc 一次
-      // 退出两层防"Esc→暂停→Esc→暂停"死循环;「继续游戏」钮仍只收浮层回背包,
-      // 同原版 IngameOptions.Close 后 playerInventory 不清）
+      // 原版 ingameOptionsWindow 支（Player.cs:4978-4986 IngameOptions.Close）：
+      // 只收浮层,playerInventory 不清（SW-BN3 2026-09-07 撤 BN2「收两层」——浮层
+      // 经背包内设置钮叠入时,Esc 收浮层回背包态,再按 Esc 才关背包 :5026;
+      // 链序 pauseOpen 在 inventoryOpen 之前,无"Esc↔暂停"死循环）
       pausePanel?.remove();
       pausePanel = null;
       game.paused = false;
-      ui.closeInventory();
       game.input.uiBlocking = false;
       break;
     case 'closeNpcDialog':
@@ -418,11 +441,15 @@ window.addEventListener('keydown', (e) => {
   if (typing && e.code !== 'Escape') return;
   // ---- Inventory 动作（SW-BN2 2026-09-07 键位表对齐原版：Inventory=Escape
   //      （PlayerInput.cs:2074）,Grapple=E（:2075）——判定在 code 无关处,重绑后
-  //      跟随。Esc=开背包,背包开着再按 Esc=暂停/设置浮层（用户令#2,链细节见
+  //      跟随。Esc=开背包,二段=关背包,开关循环（SW-BN3 2026-09-07 对齐原版
+  //      ToggleInv :5026,BN2 的「Esc=暂停浮层」用户令分歧已撤销;链细节见
   //      ui/escapeChain.ts 头注）;其余绑定键=背包 toggle）----
   if (isBound('Inventory', e.code)) {
     e.preventDefault();
-    runInventoryEscapeChain(game, e.code === 'Escape' ? 'escape' : 'inventory');
+    // SW-RB6b 2026-09-07：OS 自动重复沿不重触发链（原版 JustPressed.Inventory=
+    // 按下沿一发,PlayerInput.cs Triggers.JustPressed 边沿语义;Input.ts keydown
+    // 派发已滤 e.repeat,本监听器独立注册须自滤）。
+    if (!e.repeat) runInventoryEscapeChain(game, e.code === 'Escape' ? 'escape' : 'inventory');
     return;
   }
   // MapFull（M）等其余键位动作在 Game 的 keydownHandlers 统一派发（M5）——

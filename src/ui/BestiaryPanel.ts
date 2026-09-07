@@ -99,7 +99,7 @@ function bstTintedFrame(
     dd[i + 3] = occ * 255;
   }
   cx.putImageData(d, 0, 0);
-  if (bstTintCache.size > 800) bstTintCache.clear();   // 有界（负 id 变体×色键）
+  if (bstTintCache.size > 800) { const k0 = bstTintCache.keys().next().value; if (k0 !== undefined) bstTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear,2026-09-07)
   bstTintCache.set(key, c);
   return c;
 }
@@ -133,7 +133,7 @@ function bstTintedOverlay(name: string, img: ImageBitmap | HTMLImageElement, rgb
     }
     cx.putImageData(d, 0, 0);
   }
-  if (bstOverlayTintCache.size > 64) bstOverlayTintCache.clear();
+  if (bstOverlayTintCache.size > 64) { const k0 = bstOverlayTintCache.keys().next().value; if (k0 !== undefined) bstOverlayTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   bstOverlayTintCache.set(key, c);
   return c;
 }

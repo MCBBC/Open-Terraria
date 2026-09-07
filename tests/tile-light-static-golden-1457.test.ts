@@ -15,7 +15,11 @@
 //   byte>255 不钳制（扫描器按 /255 还原 >1 光量，如 342 的 1.1→280.5→281）。
 // - tileLighted 但主 switch 无 case 的 type（19/58/76/109/346/684/701）恒零光——
 //   本仓这些 sheet 的 def 不得带 def.light；case 235（传送器）存在但 tileLighted[235]
-//   未置位=死分支（specialTileLight case 235 仍在跑=登记债，修在 TileLightScanner.ts 域）。
+//   未置位=死分支（TileLightScanner.cs:1021-1029 在 :350 tileLighted 门内,Main.cs 全树
+//   零赋值）——2026-09-07 已按原版撤 specialTileLight case 235（零 tile 光,入库哨位）。
+// - 动态涂装门（22/140/204/347 白/灰漆 R 置零支 :2510/:2578；739 flag 覆写支 :2962+
+//   尾段 :3131-3141）——2026-09-07 已 1:1 移植进 TileLightScanner.ts ③ 静态光路径
+//   （def.light 基值仍为本表;门在扫描期按 st.paint 修正）。
 import { describe, it, expect } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 
@@ -88,11 +92,11 @@ const VANILLA_STATIC_LIGHT: Record<number, [number, number, number]> = {
   77: [0.75, 0.45, 0.25],       // :2495 Hellforge
   699: [0.4, 0.2, 0.15],        // :3004 DeadCellsPotionStation
   354: [0.65, 0.35, 0.15],      // :3124 BewitchingTable
-  22: [0.12, 0.07, 0.32],       // :2508/:2509 Demonite Ore/Brick——涂装 26/27 时 R=0（门未移植=登记债）
+  22: [0.12, 0.07, 0.32],       // :2508/:2509 Demonite Ore/Brick——涂装 26 白/27 灰 R=0 门已移植（TileLightScanner ③）
   140: [0.12, 0.07, 0.32],
-  204: [0.35, 0, 0],            // :2576/:2577 Crimtane Ore/Brick——同上涂装门
+  204: [0.35, 0, 0],            // :2576/:2577 Crimtane Ore/Brick——同上涂装门已移植
   347: [0.35, 0, 0],
-  739: [0.35, 0.63, 0.7],       // :2962 JellyfishBlock——flag=true 涂装覆写支未移植=登记债
+  739: [0.35, 0.63, 0.7],       // :2962 JellyfishBlock——flag=true 涂装覆写支已移植（TileLightScanner ③）
 };
 
 /** 原版无静态光的登记例外：sheet 4 火把（def.light 仅作扫描器 hasLightById 门牌，
@@ -103,9 +107,12 @@ const NON_STATIC_LIGHT_EXCEPTIONS = new Set([4, 70, 71, 72, 190, 348, 349, 528, 
 /** 原版 tileLighted 但主 switch 无 case → 恒零光（本仓 def 不得带 light）。 */
 const TILE_LIGHTED_NO_CASE = [19, 58, 76, 109, 346, 684, 701];
 
-/** Main.cs 无 tileLighted 也无 case → 零光代表位（心水晶=用户实报回归位）。 */
+/** Main.cs 无 tileLighted 也无 case → 零光代表位（心水晶=用户实报回归位）。
+ *  235=反例族：主 switch 有 case（:1021 光地板抬底）但 tileLighted[235] 全树零赋值
+ *  → 死分支恒零光（2026-09-07 specialTileLight case 235 已撤,哨位防回潮）。 */
 const NO_LIGHT_SENTINELS: Array<[number, string]> = [
   [12, 'crystal_heart'],
+  [235, 'teleporter（case 有但 tileLighted 未置位=死分支）'],
   ...TILE_LIGHTED_NO_CASE.map((s) => [s, `sheet ${s}`] as [number, string]),
 ];
 

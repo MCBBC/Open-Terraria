@@ -123,7 +123,7 @@ import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
-import { assembleTooltipLines, materialIids } from './itemTooltip';
+import { assembleTooltipLines, materialVids } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
@@ -608,6 +608,10 @@ export class UI {
   onEmoteMenu?: () => void;
   /** 住房面板入口（背包内房屋按钮 → HousingPanel；分配/查询走 game.housingMode） */
   onHousing?: () => void;
+  /** 暂停/设置浮层入口（背包面板设置钮 → main.openInGamePause;原版
+   *  playerInventory 态的设置入口 DrawInterface_29_SettingsButton Main.cs:46287
+   * -46301,SW-BN3 2026-09-07 补位——clickAction 开/收 toggle 在 main.ts 接线侧） */
+  onPauseMenu?: () => void;
 
   constructor(parent: HTMLElement) {
     const style = el('style');
@@ -1560,7 +1564,7 @@ export class UI {
       // （InGuideCraftMenu）——重铸支不可达（showReforge 全屏 overlay,结案不传）
       researchMenuOpen: this.researchMenuShowing(),
       guideMenuOpen: !!this.guideEl,
-      itemMaterial: cur ? curVid > 0 && materialIids().has(curVid) : false,
+      itemMaterial: cur ? curVid > 0 && materialVids().has(curVid) : false,   // ★SW-BJ24 2026-09-07 vid 域池（旧并集池 iid 跨域碰撞：钉鞋 975→iid 24 污染）
     });
     if (!plan) return false;
     switch (plan.kind) {
@@ -3175,7 +3179,16 @@ export class UI {
     //   maxStack / 异型双方皆材料则 SwapItem 对换；右键(RightClick 尾段单枚机)：
     //   每击移动 1 枚（空手取 1 / 手持同型放 1；满格或异型不动）。取→Grab(7)、
     //   右键动一枚→MenuTick(12)、左键放置原版无音效（:920-960 区间零 PlaySound）
-    const isMaterialVid = (vid: number): boolean => vidOfItem(vid) >= 0 && materialIids().has(vid);
+    // ★SW-BJ24 2026-09-07：旧式 `vidOfItem(vid) >= 0` 把 vid 误当 ITEM_DEFS 下标二次
+    //  解析（ITEM_DEFS 前 610 手写件后接 678 place_ 件——vid∈[610,1288) 整带解析到
+    //  place_ 键恒 -1,带内 200 个原料 vid 全误拒：真·圣剑 674/真·永夜之刃 675/
+    //  Terra Blade 757/钛金锭 1198/钯金矿 1104/暗影木·红木·珍珠木 619-621/
+    //  锡铅钨铂矿锭 699-706——用户实报「武器有时放不了」根因）。原版门 =
+    //  checkItem.material（ItemSlot.cs:1502-1507,1458 同式 :1502-1504）,手持件 vid
+    //  域直查 materialVids() 即可;mod 件（vidOfItem=-1）维持拒（原版无此域）。
+    //  ★同批：材料池双域分池（itemTooltip 注）——旧并集池被 iid 碰撞污染
+    //  （钉鞋 975 是原料且内部 iid=24 ⇒ has(24) 假真 ⇒ 木剑 24 误过门）。
+    const isMaterialVid = (vid: number): boolean => vid >= 0 && materialVids().has(vid);
     const maxStackOf = (iid: number): number => ITEM_DEFS[iid]?.maxStack ?? 999;
     slotBox.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -3640,6 +3653,21 @@ export class UI {
           openResearchPanel(this.game);
         });
         row.appendChild(bRes);
+      }
+      // 设置钮（SW-BN3 2026-09-07）：暂停/设置浮层入口——原版 playerInventory 态
+      // 的设置入口 DrawInterface_29_SettingsButton（Main.cs:46287-46301,可见态
+      // playerInventory ∥ ingameOptionsWindow ∥ dead,文字 = Lang.inter[62]
+      // "Settings/设置"）。随 row 以 display:contents 入簇格（跨双列,右缘列底行
+      // ≈原版背包右下钮位）；开/收 toggle 在 main.ts 接线侧（onPauseMenu）
+      {
+        const bSet = el('button', 'sw-btn', Lang.text('LegacyInterface.62'));
+        bSet.title = Lang.text('LegacyInterface.62');
+        bSet.style.cssText = 'margin:0; padding:4px 6px; font-size:12px; grid-column: 1 / -1;';
+        bSet.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.onPauseMenu?.();
+        });
+        row.appendChild(bSet);
       }
       // 道具搜索（调试检索器）：图标化入顶排图标组（2026-08-27 用户要求,原背包
       // 标签行文字钮退役）——★Bestiary 搜索贴图自带蓝底面板非裸 icon,用户定策

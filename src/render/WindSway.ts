@@ -334,7 +334,7 @@ function tintedSwayCell(
   // sheet323=GetPalmTreeBiome，其余表项无 style 维度传 0
   const special = paint >= 1 && paint <= 12 ? getTilePaintSettings(rec.sheet, style) ?? undefined : undefined;
   tintRegion(cctx, c, 0, 0, paint, 0, 0, false, special);
-  if (swayTintCache.size > 512) swayTintCache.clear();
+  if (swayTintCache.size > 512) { const k0 = swayTintCache.keys().next().value; if (k0 !== undefined) swayTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   swayTintCache.set(key, c);
   return c;
 }

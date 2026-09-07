@@ -137,7 +137,7 @@ export function tintedTex(tex: Tex, rgb: readonly [number, number, number], flat
     cx.drawImage(tex as CanvasImageSource, 0, 0);
   }
   cx.globalCompositeOperation = 'source-over';
-  if (m.size > 64) m.clear();
+  if (m.size > 64) { const k0 = m.keys().next().value; if (k0 !== undefined) m.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   m.set(key, c);
   return c;
 }

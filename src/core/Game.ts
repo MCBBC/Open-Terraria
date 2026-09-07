@@ -7072,7 +7072,13 @@ export class Game implements GameHooks {
    *  （renderer.playerInventory 同源,Main.playerInventory 语义）。sign 臂
    *  （LocalPlayer.sign>=0 :17502）本仓牌对话框无 Game 侧可读态,登记未接；MP 豁免
    *  （:17496 netMode==0 门）。与失焦暂停（applyFocusPause,消费 playWhenUnfocused）
-   *  互不耦合（红队 R3-E2 ②交叉态修正） */
+   *  互不耦合（红队 R3-E2 ②交叉态修正）。
+   *  ★SW-BN3 2026-09-07：原文析取式 `flag |= ingameOptionsWindow`（:17496）在本仓
+   *  = 事件驱动 openInGamePause/closePause（main.ts,浮层开即 paused=true/关即 false,
+   *  与逐帧 OR 同效,不进本逐帧门防 resume 权重打架）;Esc 链对齐后（:5026 背包开着
+   *  Esc=关背包）,autoPause∧开背包成为背包态下的主暂停路径（浮层入口=背包内设置钮
+   *  Main.cs:46287）。浮层收起后若背包仍开∧autoPause 开,下帧本门重新暂停=原文
+   *  :17372 逐帧重算同相（非 bug）。 */
   private _uiPausedByAutoPause = false;
   private applyAutoPauseUI(): void {
     const gate = options.data.autoPause && !!this.world && !this.net?.active
@@ -11584,57 +11590,10 @@ export class Game implements GameHooks {
           this.input.rightDown = false;
         }
       }
-      // 光标格本身是蜥蜴祭坛时跳过 ±1 格宝箱搜索——神庙宝箱全庙随机散布可能
-      // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱。
-      // ★射程门（Player.cs:31495）：TileInteractionsCheck 整体被
-      //   IsInTileInteractionRange(smartInteractX,smartInteractY,Simple) 门住——
-      //   光标 tile 不在 tileRange 5/3 矩形内连交互都不进。曾缺门=隔全图右键开箱
-      const cursorIsAltar = type === TILE_BY_KEY['v_237_lihzahrd_altar'];
-      const nearChest = !cursorIsAltar && this.inTileRange(tx, ty)
-        ? this.findChestNear(tx, ty)
-        : null;
-      if (nearChest) {
-        this.tryOpenChest(nearChest);
-        this.input.rightDown = false;
-      } else if (this.talkToNearbyNpc(...this.camera.screenToWorld(inp.mouseX, inp.mouseY))) {
-        // ★SW-BH1 2026-09-06：传精确世界像素光标（Main.DrawMouseOver Main.cs:43597-43599
-        // MouseScreen+screenPosition 1×1 矩形）——旧 tile 中心量化（+0.5)*TILE 有 ±8px 粒度
-        this.input.rightDown = false;
-      } else if (heldDef && viIdFromKey(heldDef.key) === 5289) {
-        // 矿车升级套件（Item 5289 MinecartPowerup → Player.unlockedSuperCart = true）：
-        // 永久解锁 SuperCart 档（runSpeed 20/accel 0.1/jump 5.15，Mount.cs:371-379），
-        // 持久化于世界 flags；已解锁时不再消耗
-        if (!this.superCartUnlocked()) {
-          (this.world.flags as Record<string, boolean>).superCart = true;
-          this.player.inv.removeHeld(1);
-          this.cb.onInventoryChanged();
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
-        }
-        this.input.rightDown = false;
-      } else if (heldDef && viIdFromKey(heldDef.key) === 43) {
-        if (!this.world.clock.isDay) {
-          // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）
-          if (this.useSuspiciousEye()) {
-            this.player.inv.removeHeld(1);
-            this.cb.onInventoryChanged();
-          }
-        } else {
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
-        }
-        this.input.rightDown = false;
-      } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
-        // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
-        // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
-        // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
-        // （autoReuse，DefaultToCapturedCritter :47614）；放置失败（占位/无支撑）
-        // 落空即可，不透传 interactAt。动画同 createTile 档（ApplyItemAnimation
-        // :4270-4272——使用即挥动，放置成败不影响）
-        if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
-        this.tryPlace(tx, ty, heldDef);
-        return;
-      } else {
-        this.interactAt(tx, ty);
-      }
+      // 格交互族 vs NPC 交谈仲裁（★SW-BJ25 2026-09-07 抽方法 rightClickTileNpcDispatch
+      // + 交谈臂移位到全格交互臂之后——序/旗代理/边沿门/偏离声明见该方法头注；
+      // 返回 true = altUse 放置臂原 return 语义透传 → updateUse 早退）
+      if (this.rightClickTileNpcDispatch(tx, ty, heldDef)) return;
       // 旧世界跑酷指南 6190↔6195 右键互换（★T2 批 2026-09-01；Player.cs:31764-31877
       // ItemCheck_ManageRightClickFeatures 快换表 case 6190→6195/6195→6190——SetDefaults
       // :47656-47660 无 useStyle 族物品的唯一消费面）。原版门 = flag（:31765）
@@ -23852,6 +23811,84 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return null;
   }
 
+  /** 右键「格交互族 vs NPC 交谈」仲裁分派（★SW-BJ25 2026-09-07 抽方法+移位）：
+   *  序 = 附近宝箱 ±1（cursorIsAltar 跳过）→ 矿车升级套件 5289 → 可疑之眼 43 →
+   *  PlaceTileOnAltUse 放置族 → interactAt 全格交互 → NPC 交谈。
+   *  交谈臂原版锚 = HoverOverNPCs Main.cs:43807 `talkNPC != i &&
+   *  !tileInteractionHappened`——格交互（TileInteractionsUse Player.cs:32358，
+   *  分支命中置 flag2 → tileInteractionHappened :33551）先行压制交谈。
+   *  本仓旗代理 = rightDown 未被格臂消费（interactAt 全支/tryOpenChest/家具/
+   *  锁箱失败支均自消；interactAt outOfRange 早退支也消=差异登记债）；
+   *  门二 = 右键边沿 !prevRightDown（原版 npcChatRelease=!mouseRight,
+   *  DrawInterface_41 Main.cs:45755-45763；交谈消费 :43800 `mouseRight &&
+   *  npcChatRelease` ≡ 按住右键滑到 NPC 不交谈）。悬停门 npcHoverHit 帧盒 +
+   *  射程门 worldRegionIntersects 保持（SW-BH1/SW-BJ1）。
+   *  ★与原版显式偏离（任务书裁决 2026-09-07）：原版光标同时命中 NPC 帧盒与
+   *  可交互格时 Player.cs:32190 消费闩（currentNPCShowingChatBubble 悬停帧盒
+   *  ⇒ 消费 releaseUseTile）使 NPC 赢；本仓按任务书判「格交互先行」——可交互
+   *  格（容器/牌/床/致动）恒赢过帧盒悬停（向导旁猪罐右键=开罐，用户实报）。
+   *  返回 true = updateUse 应早退（altUse 放置臂原 return 语义透传）。
+   *  抽方法目的 = 分派序可被 tests/sw-bj25-interact-priority.test.ts 直驱。 */
+  private rightClickTileNpcDispatch(tx: number, ty: number, heldDef: ItemDef | null): boolean {
+    const inp = this.input;
+    const type = this.world.store.get(tx, ty);
+    // 光标格本身是蜥蜴祭坛时跳过 ±1 格宝箱搜索——神庙宝箱全庙随机散布可能
+    // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱。
+    // ★射程门（Player.cs:31495）：TileInteractionsCheck 整体被
+    //   IsInTileInteractionRange(smartInteractX,smartInteractY,Simple) 门住——
+    //   光标 tile 不在 tileRange 5/3 矩形内连交互都不进。曾缺门=隔全图右键开箱
+    const cursorIsAltar = type === TILE_BY_KEY['v_237_lihzahrd_altar'];
+    const nearChest = !cursorIsAltar && this.inTileRange(tx, ty)
+      ? this.findChestNear(tx, ty)
+      : null;
+    if (nearChest) {
+      this.tryOpenChest(nearChest);
+      this.input.rightDown = false;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 5289) {
+      // 矿车升级套件（Item 5289 MinecartPowerup → Player.unlockedSuperCart = true）：
+      // 永久解锁 SuperCart 档（runSpeed 20/accel 0.1/jump 5.15，Mount.cs:371-379），
+      // 持久化于世界 flags；已解锁时不再消耗
+      if (!this.superCartUnlocked()) {
+        (this.world.flags as Record<string, boolean>).superCart = true;
+        this.player.inv.removeHeld(1);
+        this.cb.onInventoryChanged();
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
+      }
+      this.input.rightDown = false;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 43) {
+      if (!this.world.clock.isDay) {
+        // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）
+        if (this.useSuspiciousEye()) {
+          this.player.inv.removeHeld(1);
+          this.cb.onInventoryChanged();
+        }
+      } else {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
+      }
+      this.input.rightDown = false;
+    } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+      // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
+      // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
+      // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
+      // （autoReuse，DefaultToCapturedCritter :47614）；放置失败（占位/无支撑）
+      // 落空即可，不透传 interactAt。动画同 createTile 档（ApplyItemAnimation
+      // :4270-4272——使用即挥动，放置成败不影响）
+      if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
+      this.tryPlace(tx, ty, heldDef);
+      return true;
+    } else {
+      this.interactAt(tx, ty);
+    }
+    // ---- NPC 交谈（★SW-BJ25 2026-09-07 移位：格交互先行，旗/边沿门见方法头注）----
+    if (this.input.rightDown && !this._prevRightDown
+      && this.talkToNearbyNpc(...this.camera.screenToWorld(inp.mouseX, inp.mouseY))) {
+      // ★SW-BH1 2026-09-06：传精确世界像素光标（Main.DrawMouseOver Main.cs:43597-43599
+      // MouseScreen+screenPosition 1×1 矩形）——旧 tile 中心量化（+0.5)*TILE 有 ±8px 粒度
+      this.input.rightDown = false;
+    }
+    return false;
+  }
+
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
     // 距离门（原版 Player.cs:31495 IsInTileInteractionRange Simple，TB=0——
@@ -31210,7 +31247,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
  *  首个 flag2 候选 break 同语义）;弹 651 WireKite 在场支（:43783
  *  ownedProjectileCounts[651]>0）本仓无该弹种（宏伟蓝图 3611 族未移植）恒 0
  *  不可达备案;mouseInterface 支（:43787）= 本仓 updateUse 头部 uiBlocking/
- *  inpOverDomUi 早退同语义（:11274）。 */
+ *  inpOverDomUi 早退同语义（:11274）。
+ *  ★SW-BJ25 2026-09-07：消费位从「宝箱臂后」移到「全部格交互臂后」
+ *  （updateUse 右键块尾，格交互先行=原版 :43807 !tileInteractionHappened 语义，
+ *  旗代理=rightDown 未被格臂消费）+ 补 talkNPC != i 门（对话中同体不重谈）。 */
   private talkToNearbyNpc(mx: number, my: number): boolean {
     // 敌怪桶 bound 形态（睡渔夫 376 等）：原版同为右键 SetTalkNPC 触发（AI_000
     // :19782-19810 player.talkNPC==whoAmI → Transform 城镇型 + 置 saved 旗 +
@@ -31235,6 +31275,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
       if (!this.worldRegionIntersects(npc.x, npc.y, npc.w, npc.h)) continue;
+      // ★SW-BJ25 2026-09-07：talkNPC != i 门（Main.cs:43807）——已与该体对话中
+      // 右键不重谈（原版同体右键无操作；关对话=走远出界 keepAlive/Esc/交互他物）。
+      // 换谈支（对话中右键另一 NPC）不受此门影响（i 不同即过）
+      if (npc === this.dialogNpc) continue;
       // flag2（:43743）= 悬停帧盒 ∨ 智能交互候选（按 id 比对,跨帧数组重建安全）
       if (!this.npcHoverHit(npc.vanillaId, mx, my, npc.x, npc.y, npc.w, npc.h)
         && smartId !== npc.id) continue;

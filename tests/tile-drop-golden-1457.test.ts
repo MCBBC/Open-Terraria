@@ -158,6 +158,52 @@ const ANCHOR_DROPS: Record<number, { vid: number; why: string }> = {
   55: { vid: 171, why: 'CheckSign default :44158 恒掉 171' },
   102: { vid: 355, why: 'Check3x4 case 102 :50589 恒掉 355 Throne' },
   639: { vid: 109, why: 'CheckOrb case 639 :54704 恒掉 109 ManaCrystal（放置物 5287≠返还,曾回收错值）' },
+  // ── Check2x2 回收身份升级批（2026-09-07，43 def；vanilla 返还==放置物品逐条经
+  //  public/sprites/vanilla.json createTile 反查 ==sheet 全绿——原 place_v_ 合成件
+  //  value 1 无名牌=登记债清偿。行号=1457 WorldGen.cs num14 赋值行）──
+  126: { vid: 488, why: 'Check2x2 case 126 :49133 恒掉 488 DiscoBall（返还=放置物）' },
+  142: { vid: 581, why: 'Check2x2 case 142 :49141 恒掉 581 InletPump' },
+  143: { vid: 582, why: 'Check2x2 case 143 :49145 恒掉 582 OutletPump' },
+  173: { vid: 714, why: 'Check2x2 case 173 :49121 恒掉 714 PlatinumCandelabra' },
+  235: { vid: 1263, why: 'Check3x1 case 235 :49594 恒掉 1263 Teleporter（3 宽件,Check2x2 表外）' },
+  282: { vid: 250, why: 'Check2x2 case 282 :49149 恒掉 250 FishBowl' },
+  287: { vid: 2177, why: 'Check2x2 case 287 :49129 恒掉 2177 AmmoBox' },
+  288: { vid: 2178, why: 'Check2x2 :49069 带 288-295→2178+type-288（MonarchButterflyJar）' },
+  289: { vid: 2179, why: 'Check2x2 :49069 带 288-295→2178+type-288（PurpleEmperorButterflyJar）' },
+  290: { vid: 2180, why: 'Check2x2 :49069 带 288-295→2178+type-288（RedAdmiralButterflyJar）' },
+  291: { vid: 2181, why: 'Check2x2 :49069 带 288-295→2178+type-288（UlyssesButterflyJar）' },
+  292: { vid: 2182, why: 'Check2x2 :49069 带 288-295→2178+type-288（SulphurButterflyJar）' },
+  293: { vid: 2183, why: 'Check2x2 :49069 带 288-295→2178+type-288（TreeNymphButterflyJar）' },
+  294: { vid: 2184, why: 'Check2x2 :49069 带 288-295→2178+type-288（ZebraSwallowtailButterflyJar）' },
+  295: { vid: 2185, why: 'Check2x2 :49069 带 288-295→2178+type-288（JuliaButterflyJar）' },
+  316: { vid: 2439, why: 'Check2x2 :49073 带 316-318→2439+type-316（BlueJellyfishJar）' },
+  317: { vid: 2440, why: 'Check2x2 :49073 带 316-318→2439+type-316（GreenJellyfishJar）' },
+  318: { vid: 2441, why: 'Check2x2 :49073 带 316-318→2439+type-316（PinkJellyfishJar）' },
+  319: { vid: 2490, why: 'Check2x2 case 319 :49153 恒掉 2490 ShipInABottle' },
+  335: { vid: 2700, why: 'Check2x2 case 335 :49105 恒掉 2700 FireworksBox' },
+  360: { vid: 3072, why: 'Check2x2 case 360 :49037 恒掉 3072 GoldButterflyCage' },
+  411: { vid: 3545, why: 'Check2x2 case 411 :49109 恒掉 3545 Detonator' },
+  490: { vid: 4075, why: 'Check2x2 case 490 :49157 恒掉 4075 WeatherVane' },
+  505: { vid: 4275, why: 'Check2x2 case 505 :49049 恒掉 4275 GoldGoldfishBowl' },
+  521: { vid: 4327, why: 'Check2x2 case 521 :48995 恒掉 4327 BlackDragonflyJar' },
+  522: { vid: 4328, why: 'Check2x2 case 522 :48998 恒掉 4328 BlueDragonflyJar' },
+  523: { vid: 4329, why: 'Check2x2 case 523 :49001 恒掉 4329 GreenDragonflyJar' },
+  524: { vid: 4330, why: 'Check2x2 case 524 :49004 恒掉 4330 OrangeDragonflyJar' },
+  525: { vid: 4331, why: 'Check2x2 case 525 :49007 恒掉 4331 RedDragonflyJar' },
+  526: { vid: 4332, why: 'Check2x2 case 526 :49010 恒掉 4332 YellowDragonflyJar' },
+  527: { vid: 4333, why: 'Check2x2 case 527 :49013 恒掉 4333 GoldDragonflyJar' },
+  543: { vid: 4398, why: 'Check2x2 case 543 :49053 恒掉 4398 PupfishBowl' },
+  564: { vid: 4553, why: 'Check2x2 case 564 :49016 恒掉 4553 PlasmaLamp' },
+  565: { vid: 4552, why: 'Check2x2 case 565 :49019 恒掉 4552 FogMachine' },
+  568: { vid: 4655, why: 'Check2x2 case 568 :49057 恒掉 4655 PinkFairyJar' },
+  569: { vid: 4656, why: 'Check2x2 case 569 :49061 恒掉 4656 GreenFairyJar' },
+  570: { vid: 4657, why: 'Check2x2 case 570 :49065 恒掉 4657 BlueFairyJar' },
+  580: { vid: 4846, why: 'Check2x2 case 580 :49041 恒掉 4846 HellButterflyJar' },
+  594: { vid: 4869, why: 'Check2x2 case 594 :49022 恒掉 4869 VolcanoLarge' },
+  598: { vid: 4880, why: 'Check2x2 case 598 :49033 恒掉 4880 LavaFishbowl' },
+  620: { vid: 4964, why: 'Check2x2 case 620 :49045 恒掉 4964 EmpressButterflyJar' },
+  621: { vid: 3750, why: 'Check2x2 case 621 :49025 恒掉 3750 SliceOfCake' },
+  622: { vid: 5008, why: 'Check2x2 case 622 :49028 恒掉 5008 TeaKettle' },
 };
 
 /** KillTile 主 switch 无 case（751+）但 Check* 面有恒掉档的 sheet（禁无锚新增）。 */
@@ -278,6 +324,17 @@ describe('tile 掉落全表金标（1457 KillTile_GetItemDrops :64503-66611 对�
     expect(byKey('v_752_chillet_egg')?.drop).toBe(6142);
     expect(byKey('v_649_medium_rubble_2x1')?.drop).toBe(3);
     expect(byKey('v_134_anvils_hardmode')?.drop).toBe(525);
+    // 三批（2026-09-07 Check2x2 回收身份升级,43 def 全账见 ANCHOR_DROPS 尾段）：
+    // 抽检 8 位——龙蝇罐 521 / 萤火虫罐 568 / 鱼缸 282 / 瓶中船 319 / 引爆器 411 /
+    // 白金烛台 173 / 传送器 235（Check3x1 :49594 表外支）/ 茶壶 622
+    expect(byKey('v_521_black_dragonfly_jar')?.drop).toBe(4327);
+    expect(byKey('v_568_pink_fairy_jar')?.drop).toBe(4655);
+    expect(byKey('v_282_fish_bowl')?.drop).toBe(250);
+    expect(byKey('v_319_ship_in_a_bottle')?.drop).toBe(2490);
+    expect(byKey('v_411_detonator')?.drop).toBe(3545);
+    expect(byKey('v_173_platinumcandelabra')?.drop).toBe(714);
+    expect(byKey('v_235_teleporter')?.drop).toBe(1263);
+    expect(byKey('v_622_teapot')?.drop).toBe(5008);
   });
 
   it('③回收债账本钉死（零返还族不许数值化,待 Game.ts ADRIP 门扩展）', () => {

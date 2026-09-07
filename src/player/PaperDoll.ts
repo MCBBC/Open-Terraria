@@ -220,12 +220,32 @@ export function variantSheetSource(variant: number): number {
   return VARIANT_SHEET_SOURCE[variant] ?? 0;
 }
 
+/** DisplayDoll 别名面（LoadDisplayDollMale/Female 尾段重排,★SW-RB6c 2026-09-07）：
+ *  `val = TextureAssets.Players[10,2]`（Player_10_2.png,逐像素实测 40×1120 全透明）
+ *  把变体 10 的 {1 眼白,4 底衫,6 衫,8 臂底衫,11 裤,12 鞋,13 臂衫,15 眼睑} 与变体 11
+ *  的 {1,2,4,6,8,11,12,13,15} 全部指向该【空表】（原版=这些通道画空气,假人观感全靠
+ *  10_0 头 + 10_3/5/7/9/10 肤组）。旧链对 10/11 直落 0_* 男表 = 男式底衫/裤/鞋/
+ *  眼白上身（vanilla 为空）。可达面：.plr 导入（原版 LoadPlayer_LastMinuteFixes
+ *  Player.cs:56486 钳 0..11 放行 10/11）;创建期不可达（Click_RandomizePlayer
+ *  :1571 只掷 _validClothStyles 0-9,SW-RB6c 已对齐 randomAppearance）。 */
+const DISPLAY_DOLL_ALIAS: Readonly<Record<number, readonly number[]>> = {
+  10: [1, 4, 6, 8, 11, 12, 13, 15],
+  11: [1, 2, 4, 6, 8, 11, 12, 13, 15],
+};
+
 /** 变体通道源表解析（CopyVariant 语义,SW-BJ21 2026-09-07）:
- *  own → 链源（4/10）→ 0,取第一个 exists 者。烘焙取表（sheetRect）与就绪门
- *  必须【同一个解析】——门等的就是实际会画的那张（BJ11「门=实际绘制面」语义的链化） */
+ *  own → 别名面（10/11）→ 链源（4/10）→ 0,取第一个 exists 者。烘焙取表（sheetRect）
+ *  与就绪门必须【同一个解析】——门等的就是实际会画的那张（BJ11「门=实际绘制面」
+ *  语义的链化） */
 export function variantSheetName(variant: number, sheet: number, exists: (name: string) => boolean): string {
   const own = `Player_${variant}_${sheet}.png`;
   if (exists(own)) return own;
+  // ★SW-RB6c 2026-09-07：DisplayDoll 别名面先于 CopyVariant 链——原版重排块在
+  //  CopyVariant 之后=最终表值（11 的 {2} 别名与链中段 10→10_2 同值,列此保序）
+  if (DISPLAY_DOLL_ALIAS[variant]?.includes(sheet)) {
+    const alias = 'Player_10_2.png';
+    if (exists(alias)) return alias;
+  }
   const mid = variantSheetSource(variant);
   if (mid !== 0 && mid !== variant) {
     const midName = `Player_${mid}_${sheet}.png`;
@@ -649,11 +669,14 @@ export function compositePaperDoll(
 }
 
 /** 眼睑帧表（DrawPlayer_21_Head_TheFace_Eyelid PlayerDrawLayers.cs:2640-2683：
- *  TextureAssets.Players[skinVar,15] = Player_0_15.png 40×168 三帧竖排（全变体共用
- *  此一张——terraria-assets 解包实证无 Player_1_15），色通道 = colorHead → skinColor
- *  调色（tint 缓存）。帧序 0 睁(空) 1 半闭 2 全闭（EyeFrameToShow） */
+ *  TextureAssets.Players[skinVar,15] = Player_0_15.png 40×168 三帧竖排（变体 0-9
+ *  经 CopyVariant/未重排全指向此一张——terraria-assets 解包实证无 Player_1_15），
+ *  色通道 = colorHead → skinColor 调色（tint 缓存）。帧序 0 睁(空) 1 半闭 2 全闭
+ *  （EyeFrameToShow）。★SW-RB6c 2026-09-07 取表改走 variantSheetName 单点解析：
+ *  变体 10/11 的 [*,15] 经 DisplayDoll 重排指向 Player_10_2 空表（原版不画），
+ *  硬编码 0_15 对该两变体=多画男眼睑 */
 export function eyelidFrame(a: Appearance): Baked | null {
-  const r = UITextures.get('Player_0_15.png');
+  const r = UITextures.get(variantSheetName(a.skinVariant, 15, (n) => UITextures.has(n)));
   if (!r) return null;
   noteVuiConsumer('PaperDoll.eyelidFrame');
   return tint(r.img as HTMLImageElement, a.skinColor);

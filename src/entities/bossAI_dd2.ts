@@ -1836,7 +1836,7 @@ function betsyTint(
   const key = `b687|${sx},${sy},${sw},${sh}|${q(rgb[0])},${q(rgb[1])},${q(rgb[2])}`;
   const hit = betsyTintCache.get(key);
   if (hit) return hit;
-  if (betsyTintCache.size > 512) betsyTintCache.clear();
+  if (betsyTintCache.size > 512) { const k0 = betsyTintCache.keys().next().value; if (k0 !== undefined) betsyTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const cx = c.getContext('2d');
