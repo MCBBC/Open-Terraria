@@ -48,11 +48,13 @@ const bedType = TILE_BY_KEY['bed'] ?? -2;
 /** 假 store：tileAt[(x,y)]→type，frame/idx 由用例按需注入 */
 function makeStore(tileAt: Record<string, number>, frames: Record<number, [number, number]> = {}) {
   const W = 400;
+  // ★SW-RB7 2026-09-08：`t[k as number]` 直转 string|symbol→number 触 TS2352——经
+  //  PropertyKey 键域读取（语义同值）,清 tsc 触碰文件零错
   const fx: Record<number, number> = new Proxy({} as Record<number, number>, {
-    get: (t, k) => (k in t ? t[k as number] : 0),          // 真身 TypedArray 默认 0（未写帧=0）
+    get: (t, k) => (k in t ? (t as Record<PropertyKey, number>)[k] : 0),   // 真身 TypedArray 默认 0（未写帧=0）
   });
   const fy: Record<number, number> = new Proxy({} as Record<number, number>, {
-    get: (t, k) => (k in t ? t[k as number] : 0),
+    get: (t, k) => (k in t ? (t as Record<PropertyKey, number>)[k] : 0),
   });
   for (const [k, [a, b]] of Object.entries(frames)) fx[Number(k)] = a, fy[Number(k)] = b;
   return {

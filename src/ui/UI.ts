@@ -2728,6 +2728,9 @@ export class UI {
     this.craftGridRecipe = null;
     // 垃圾桶为持久槽（Player.trashItem 语义）：关闭背包保留，仅死亡时由 Game 清空
     this.moveGhost();
+    // ★2026-09-07 刀 2 守卫(共享区第 5 处):vanilla 布局关包须解除热键栏隐藏
+    // (refreshHotbar 开包早退的还原面;classic 关包链无刷新点,main.ts:427 直调)
+    if (this._builtLayout === 'vanilla') this.refreshAll();
     // ★2026-09-02：不再清 uiBlocking——背包自 2026-09-02 起不置位（世界输入解锁）,
     // 无条件清会打翻其他模态面板（手册/表情/图鉴）的 wasBlocking 恢复语义
   }

@@ -133,6 +133,13 @@ void main() {
   float x = clamp(dispy * 16000.0 / uCssSize.y + 0.5, 0.0, 1.0);
   float w = x * x * (3.0 - 2.0 * x);
   float gate = clamp(f * (1.0 - abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0))), 0.0, 1.0);
+  // ★水线上缘保护(2026-09-08 直线缝定谳):原版 obj19 的 waterTarget 采样坐标带
+  //   w/h' 调制(mad r1.zw/r0.xy 链)——波峰上移(w→0)时采样塌向 target 原点 α≈0
+  //   → f→0 → gate→0 = 边缘显示未位移水线。SW 朴素水采样(uvD/vUv 直读)下该处
+  //   dA=-1、w→0 → gate 饱和 1 → 水线行显示拉上来的背景色 = 贯穿直线缝
+  //   (缩放/相机高度改变亚像素相位→隐现)。深水 dA≈0 不受影响;下缘 dip 由
+  //   w→1 分支自带保护(|2·1+dA−1|→0)无需此钳。
+  if (dA < 0.0 && dispy < 0.0) gate = 0.0;
   gl_FragColor = mix(texture2D(uScene, vUv), texture2D(uScene, uvD), gate);
 }`;
 

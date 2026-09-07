@@ -39,12 +39,13 @@ await page.goto(ORIGIN + '/?play=small&invlayout=vanilla', { waitUntil: 'domcont
 await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 300000, polling: 1000 });
 await new Promise((r) => setTimeout(r, 1200));
 {
-  const v = await page.evaluate(() => {
+  const v = await page.evaluate(async () => {
     const ui = window.__swUI;
     const dock = !!document.querySelector('.sw-eqdock');
     const vinv = document.querySelector('.sw-vinv');
     if (!vinv) return { vinvExists: false };
     ui.openInventory();
+    await new Promise((r) => setTimeout(r, 150));   // refreshAll=rAF 合并通道,等一拍再读
     const hotbar = ui.hotbarEl.style.display;
     const invCount = vinv.querySelectorAll('.sw-slot[data-where="inv"]').length;
     const q = (sel) => vinv.querySelector(sel);
@@ -69,6 +70,18 @@ await new Promise((r) => setTimeout(r, 1200));
     const equipBack = equip.offsetParent !== null;
     return {
       vinvExists: true, dock, hotbar, invCount,
+      hotbarRestored: await (async () => {
+        let closeErr = 'ok';
+        try { ui.closeInventory(); } catch (e) { closeErr = String(e && e.stack || e).slice(0, 200); }
+        await new Promise((r) => setTimeout(r, 200));
+        const d = ui.hotbarEl.style.display;
+        const dName = ui.hotbarNameEl.style.display;
+        const invDisp = ui.invPanel.style.display;
+        ui.openInventory();
+        await new Promise((r) => setTimeout(r, 200));
+        window.__vinvDbg = { closeErr, d, dName, invDisp };
+        return d === '';
+      })(),
       slot0: { x: slot0.offsetLeft, y: slot0.offsetTop },
       pitch: slot1.offsetLeft - slot0.offsetLeft,
       slot49: { x: slot49.offsetLeft, y: slot49.offsetTop },
@@ -84,9 +97,11 @@ await new Promise((r) => setTimeout(r, 1200));
     };
   });
   ok(v.vinvExists === true && !v.dock, '② flag=vanilla:有 .sw-vinv 无 eqdock');
-  ok(v.invCount === 59, `② 网格+钱币弹药 = 59 inv 槽 (got ${v.invCount})`);
+  ok(v.invCount === 58, `② 网格 50+钱币弹药 8 = 58 inv 槽 (got ${v.invCount})`);
   ok(v.armorCount === 20 && v.dyeCount === 10 && v.miscCount === 5 && v.miscDyeCount === 5, `② 装备/时装 20+染料 10+杂项 5+杂项染料 5 (got ${v.armorCount}/${v.dyeCount}/${v.miscCount}/${v.miscDyeCount})`);
   ok(v.hotbar === 'none', '② 开包热键栏隐藏(原版 GUIHotbarDrawInner 早退)');
+  const dbg = await page.evaluate(() => window.__vinvDbg);
+  ok(v.hotbarRestored, `② 关包热键栏还原(display="") dbg=${JSON.stringify(dbg)}`);
   ok(v.slot0.x === 20 && v.slot0.y === 20, `② slot0=(20,20) (got ${v.slot0.x},${v.slot0.y})`);
   ok(v.pitch === 47, `② 步距 trunc(47.6)=47 (got ${v.pitch})`);
   ok(v.slot49.x === 448 && v.slot49.y === 210, `② slot49=(448,210) 第 5 行 (got ${v.slot49.x},${v.slot49.y})`);
@@ -98,8 +113,12 @@ await new Promise((r) => setTimeout(r, 1200));
   ok(!v.miscPageBefore && v.miscPageAfter && !v.equipPageAfter && v.equipBack, '② 页签切换:杂项页显/装备页藏/再点回装备页');
 }
 
-// 截图存档
-await page.evaluate(() => window.__swUI.openInventory());
+// 截图存档(先关欢迎弹窗)
+await page.evaluate(() => {
+  const btn = [...document.querySelectorAll('button, .sw-btn')].find((b) => (b.textContent || '').includes('我知晓'));
+  if (btn) btn.click();
+  window.__swUI.openInventory();
+});
 await new Promise((r) => setTimeout(r, 400));
 await page.screenshot({ path: '/tmp/vanilla-inv-knife2.png' });
 
