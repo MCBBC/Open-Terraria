@@ -854,7 +854,59 @@ let _dqSt: TileStore | null = null;
 let _dqCtx: SweepCtx | null = null;
 let _dqDraining = false;
 
+// ★大世界读档级联去重(2026-09-07):读档 settle 期 waterCheck 的 KillTile→
+// SquareTileFrame 级联在钟乳石/悬挂结构密集区(单连通分量可达数十万格)产生
+// 百万级重复 reframe——同格是多个杀格的 3×3 邻域成员,每项 inner 走全分派,
+// JS 上单格级联分钟级(6400×1800 海洋世界实测卡死;原版 C# 同量级联 ~100ns/项
+// 故无感,WorldFile.cs:81718 KillTile(i,num) 全默认参=原版同样全量级联)。
+// 修=killTouch 邻域杀追踪:格 A 被重帧后,仅当其 3×3 邻域【又有杀事件】时才
+// 允许再次重帧(支撑可能已变=必要复查);邻域无新杀的重复重帧=纯冗余(完整性
+// 结论不变),跳过。行为面论证:读档 settle 的级联掷骰(updateStalagtiteStyle
+// 等)走私有流(worker 不传 rng),钟乳石 style 每次读档本就随机重掷,无金标/
+// 无持久化契约;gen 路径(金标锁掷流)与运行期(玩家挖掘帧刷新必须逐次)不置位,
+// 零影响。settle 结束必须清位(setReframeDedupe(null) 配对调用)。
+let _seenOnce: Uint8Array | null = null;
+let _killTouch: Uint8Array | null = null;
+let _dedupeW = 0;
+
+/** settleWorldLiquids('load') 期间置位(传入 store);null=清除(必须配对调用,
+ *  否则后续 worldgen/运行期级联被错误去重)。 */
+export function setReframeDedupe(store: TileStore | null): void {
+  if (store === null) { _seenOnce = null; _killTouch = null; _dedupeW = 0; return; }
+  _seenOnce = new Uint8Array(store.w * store.h);
+  _killTouch = new Uint8Array(store.w * store.h);
+  _dedupeW = store.w;
+}
+
+/** 杀事件邻域标记(killTileGen 调用):杀格 (x,y) 时其 3×3 邻域的重帧资格置位。 */
+export function markKillTouch(x: number, y: number): void {
+  const kt = _killTouch;
+  if (kt === null) return;
+  const w = _dedupeW;
+  for (let dy = -1; dy <= 1; dy++) {
+    const yy = y + dy;
+    if (yy < 0) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx;
+      if (xx < 0 || xx >= w) continue;
+      kt[yy * w + xx] = 1;
+    }
+  }
+}
+
 function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
+  const seen = _seenOnce;
+  if (seen !== null) {
+    if (x < 0 || y < 0 || x >= _dedupeW) return;
+    const ri = y * _dedupeW + x;
+    if (seen[ri] === 0) {
+      seen[ri] = 1;
+    } else if (_killTouch![ri] === 1) {
+      _killTouch![ri] = 0;
+    } else {
+      return;
+    }
+  }
   if (_frameCascadeDepth > _FRAME_CASCADE_MAX) {
     if (_dqSt === null) { _dqSt = st; _dqCtx = ctx; }
     if (st !== _dqSt || ctx !== _dqCtx) { _tileFrameGenInner(st, ctx, x, y, reset); return; }

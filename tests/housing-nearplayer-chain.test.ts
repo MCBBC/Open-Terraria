@@ -78,6 +78,7 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
       st, players, 0,
       [mover] as NearChainNpcView<unknown>[],
       [],
+      17,   // ★SW-BO1：优先型锁=迁入者类型（FindNPCLookingForHomeThatCanMoveIn 配型门）
       rand,
     );
     expect(hitR.seedHit).toEqual([2102, 302]);
@@ -104,7 +105,7 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
     const occ = [{ x: 1800, y: 500, npcId: 22 }];
     const { players, rand } = cornerAt(2102, 302);
     const hitR = checkHousesNearAPlayer(
-      st, players, 0, [housed], occ, rand,
+      st, players, 0, [housed], occ, 22, rand,   // ★SW-BO1：锁=22(在场者型),无 22 流浪者→缓存支
     );
     expect(hitR.seedHit).toEqual([2102, 302]);
     expect(hitR.relocated).toBeNull();
@@ -119,7 +120,7 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
     const housedInTarget = { key: 'guide', npcId: 22, bound: false, home: { x: 2104, y: 304 }, ref: {} };
     const occ = [{ x: 2104, y: 304, npcId: 22 }];
     const { players, rand } = cornerAt(2102, 302);
-    const hitR = checkHousesNearAPlayer(st, players, 0, [housedInTarget], occ, rand);
+    const hitR = checkHousesNearAPlayer(st, players, 0, [housedInTarget], occ, 22, rand);
     expect(hitR.seedHit).toEqual([2102, 302]);
     expect(hitR.foundHouseNoSpawn).toBeNull();                       // hiScore<=0 早退(:5365)先于缓存
   });
@@ -133,7 +134,7 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
     expect(WALL_HOUSE.has(st.wall[st.idx(2000, 200)])).toBe(true);
     const mover = { key: 'merchant', npcId: 17, bound: false, home: null, ref: {} };
     const { players, rand } = cornerAt(2000, 200);
-    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], rand);
+    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], 17, rand);
     expect(hitR.seedHit).toEqual([2000, 200]);
     expect(hitR.relocated).toBeNull();
     expect(hitR.home).toBeNull();
@@ -150,7 +151,7 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
     // 近链通路不查锚池：玩家站在该房旁即可受理（vanilla CheckForHousesNearAPlayer
     // 与 SpawnHomelessNPC 的 num==0 门互不相干）
     const { players, rand } = cornerAt(2502, 302);
-    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], rand);
+    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], 17, rand);
     expect(hitR.relocated).not.toBeNull();
     expect(hitR.home).not.toBeNull();
   });
@@ -168,8 +169,13 @@ describe('(i)(ii) 近玩家实时回收链（CheckForHousesNearAPlayer cs:72184-
       { key: 'merchant', npcId: 17, bound: false, home: null, ref: { k: 'ok' } },
     ];
     const { players, rand } = cornerAt(2102, 302);
-    const hitR = checkHousesNearAPlayer(st, players, 0, views, [], rand);
+    const hitR = checkHousesNearAPlayer(st, players, 0, views, [], 17, rand);
     expect((hitR.relocated!.ref as { k?: string }).k).toBe('ok');    // 五个排除档跳过后首中商
+    // ★SW-BO1：优先型配型门（FindNPCLookingForHomeThatCanMoveIn :5539-5547）——
+    // 锁指 22 而在场流浪者仅 17 → mover=null,走缓存支（vanilla 近链只迁【同型】者）
+    const hitR2 = checkHousesNearAPlayer(st, players, 0, views, [], 22, rand);
+    expect(hitR2.relocated).toBeNull();
+    expect(hitR2.foundHouseNoSpawn).toEqual([2102, 302]);
   });
 });
 
@@ -286,7 +292,7 @@ describe('(v) 松露人居所条件外扩域（E-11/C-F6）', () => {
     buildHouse(w, 2100, 300, { lightless: true });   // 门/桌/椅齐,仅缺光源
     const mover = { key: 'merchant', npcId: 17, bound: false, home: null as { x: number; y: number } | null, ref: {} };
     const { players, rand } = cornerAt(2102, 302);
-    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], rand);
+    const hitR = checkHousesNearAPlayer(st, players, 0, [mover], [], 17, rand);
     expect(hitR.seedHit).toEqual([2102, 302]);        // 背墙命中照常发生
     expect(hitR.relocated).toBeNull();                // B1 前:此房被静默迁入(比 vanilla 宽松)
     expect(hitR.home).toBeNull();

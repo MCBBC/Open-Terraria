@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { UI } from '../src/ui/UI';
-import { Inventory } from '../src/items/Inventory';
+import { Inventory, canFillEmptyAmmoSlot } from '../src/items/Inventory';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/items';
 import { options } from '../src/core/Options';
 import {
@@ -223,20 +223,20 @@ describe('③ canTakeToPersonalInventory（Player.cs:39463-39507 ItemSpace 等�
     expect(canTakeToPersonalInventory(full.slots, WOOD, WOOD_MAX, true, false)).toBe(false); // 币域含钱格仍全满
     expect(slots(58).length).toBe(58);
   });
-  it('弹药族追加 54-57 面（:39485-39501）；非弹药面不扫 54-57', () => {
+  it('弹药族追加 54-57 面（:39485-39501）；非弹药面不扫 54-57（★SW-BM1 空弹药格臂重钉：canFillEmpty 随行）', () => {
     const ammo = iidOf(97);   // 木箭
     const inv = new Inventory();
     inv.slots[0] = { id: WOOD, stack: WOOD_MAX };
-    expect(canTakeToPersonalInventory(inv.slots, ammo, 999, false, true)).toBe(true);        // 弹药栏空
+    expect(canTakeToPersonalInventory(inv.slots, ammo, 999, false, true, undefined, canFillEmptyAmmoSlot(ammo))).toBe(true);        // 弹药栏空
     const DIRT = iidOf(2);
     const DIRT_MAX = ITEM_DEFS[DIRT].maxStack;
     const packed = Object.assign(new Inventory(), { slots: [...Array(58)].map(() => ({ id: DIRT, stack: DIRT_MAX } as Slot)) });
-    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true)).toBe(false);    // 54-57 亦占 → 全拒
+    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true, undefined, canFillEmptyAmmoSlot(ammo))).toBe(false);    // 54-57 亦占 → 全拒
     packed.slots[54] = null;
-    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true)).toBe(true);     // 空弹药格可收
+    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true, undefined, canFillEmptyAmmoSlot(ammo))).toBe(true);     // 空弹药格 + CanFillEmptyAmmoSlot → 可收
     packed.slots[54] = { id: DIRT, stack: 1 };                                               // 非同型不满堆 ≠ 可并
-    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true)).toBe(false);
-    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, false)).toBe(false);   // 非弹药域不扫 54-57
+    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, true, undefined, canFillEmptyAmmoSlot(ammo))).toBe(false);
+    expect(canTakeToPersonalInventory(packed.slots, ammo, 999, false, false, undefined, canFillEmptyAmmoSlot(ammo))).toBe(false);   // 非弹药域不扫 54-57
   });
 });
 

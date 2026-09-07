@@ -105,7 +105,7 @@ describe('SW-BJ2 NPC 入住与玩家位置解耦（QuickFindHome WorldGen.cs:565
       key: 'guide', npcId: 22, bound: false, home: { x: r1.home!.x, y: r1.home!.y }, ref: { tag: 'npc22' },
     };
     const { players, rand } = cornerAt(2102, 302);   // 定向首样=出生点房背墙格
-    const near = checkHousesNearAPlayer(st, players, 0, [housed], [{ x: r1.home!.x, y: r1.home!.y, npcId: 22 }], rand);
+    const near = checkHousesNearAPlayer(st, players, 0, [housed], [{ x: r1.home!.x, y: r1.home!.y, npcId: 22 }], 22, rand);
     expect(near.seedHit).toEqual([2102, 302]);       // 出生点旁空房确被采样命中
     expect(near.relocated).toBeNull();               // ★已入住者不搬（解耦判别核心断言）
     expect(near.home).toBeNull();
@@ -188,7 +188,7 @@ describe('SW-BJ2 NPC 入住与玩家位置解耦（QuickFindHome WorldGen.cs:565
       key: 'merchant', npcId: 17, bound: false, home: null, ref: { tag: 'npc17' },
     };
     const { players, rand } = cornerAt(2102, 302);
-    const near = checkHousesNearAPlayer(st, players, 0, [mover], [], rand);
+    const near = checkHousesNearAPlayer(st, players, 0, [mover], [], 17, rand);
     expect(near.seedHit).toBeNull();
     expect(near.relocated).toBeNull();
     expect(near.foundHouseNoSpawn).toBeNull();

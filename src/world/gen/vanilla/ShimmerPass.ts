@@ -24,6 +24,7 @@ import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { solidTile, registerTileFrame165 } from './HalfBrickPass';
 import { growGemTree } from './TreePass';
+import { markKillTouch } from './FinalCleanupPass';
 
 // TileFrame case165（cs:85996）注册：killTile 尾 SquareTileFrame 级联的钟乳石失锚
 // 链杀（TTTTTT 批 2026-08-23,CONST LavaLayerCaverer 带 38 格定罪）。注册制防
@@ -445,6 +446,7 @@ function killStalactiteTile(
   } catch { /* noop */ }
   if (!st.flags[i]) return;
   d59({ e: 'kill', x, y });
+  markKillTouch(x, y);   // ★级联去重杀事件标记(2026-09-07):钟乳石杀不走 killTileGen,单独标记
   st.flags[i] = 0; st.half[i] = 0;
   st.frameX[i] = 65535; st.frameY[i] = 65535;  // -1（Uint16 环回；inactive 格不读帧）
   st.type[i] = 0;

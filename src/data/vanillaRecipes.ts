@@ -493,9 +493,10 @@ export function consumeMaterials(
   for (let k = 0; k < times; k++) {
     // ---- 轮门（k>0）：CollectedEnoughItemsToCraft（Recipe.cs:280-283 →
     // HowManyTimesCanRecipeBeCrafted :289-310 min(have/req.stack)>0）——组槽按
-    // 组假 id 聚合值取数（itemMatches 同义）。ownedAcc 按【未折扣 req.stack】递减
-    // （SubtractOwnedItem :259-265 Max(value-stack,0)）——炼金折扣省下的料不续命
-    // 迭代,与原版同判（1:1 关键:实扣是折扣面、账面是未折扣面,两本账分离）----
+    // 组假 id 聚合值取数（itemMatches 同义）。ownedAcc 按【折扣后实扣面】递减
+    // （SubtractOwnedItem :259-265 消费的是 GetIngredientsForOneCraft 入列的折扣
+    // 副本,RequiredItemEntry=struct——★SW-RB5a 2026-09-07 纠注见下账面递减段;
+    // 旧注"未折扣面/折扣省料不续命"系误读）——折扣省料留在账面可续命迭代,1:1 ----
     if (k > 0) {
       let ok = true;
       for (const req of r.items) {
@@ -563,18 +564,39 @@ export function consumeMaterials(
           }
         }
       }
-      // ---- 账面递减（CraftItem :108-110 SubtractOwnedItem：按 req.stack 未折扣面,
+      // ---- 账面递减（CraftItem :108-110 SubtractOwnedItem：RequiredItemEntry 是
+      // struct——GetIngredientsForOneCraft :204 `stack -= discount` 改的是
+      // requiredItemQuickLookup[i] 的【副本】,入列副本随行折扣面 ⇒ SubtractOwnedItem
+      // 按【折扣后实扣面】递减（★SW-RB5a 2026-09-07 纠注:旧注"按 req.stack 未折扣面"
+      // 系误读 struct 拷贝语义;折扣省料留在账面,times>1 直调时可续命迭代）,
       // Max(...,0) 钳非负;组槽按组假 id 键——vanilla req.itemIdOrRecipeGroup 同键）。
       // ★只在【入列材料】上递减——GetIngredientsForOneCraft 对折扣归零的材料不入列
       // （:206-208 `stack-=discount; >0 才入列`）,账面随之不动（vanilla 同构）----
       if (needOf.get(req)! > 0) {
         const accKey = gid2 >= 0 ? 1000000 + gid2 : req.id;
-        ownedAcc.set(accKey, Math.max((ownedAcc.get(accKey) ?? 0) - req.stack, 0));
+        ownedAcc.set(accKey, Math.max((ownedAcc.get(accKey) ?? 0) - needOf.get(req)!, 0));
       }
     }
     crafted++;
   }
   return crafted;
+}
+
+/** CollectedEnoughItemsToCraft（Recipe.cs:275-283 → HowManyTimesCanRecipeBeCrafted
+ *  :285-310）＝ 持有量表上每个材料 req 的持有量 ≥ 未折扣 req.stack。组槽按组假 id
+ *  聚合值取数（itemMatches 同义）。★SW-BM1 2026-09-06（CraftItem 逐轮循环前置门
+ *  CraftingRequests.cs:102 `i<=0 || (CollectedEnoughItemsToCraft && …)` 的第一腿）：
+ *  与 consumeMaterials 内部 k>0 账面门同判（同 collectOwnedItems/itemMatches 机制）,
+ *  每轮 fresh 重算 = 逐轮 SubtractOwnedItem 递减的等价形态（账面=实际持有量快照）。
+ *  停轮先于炼金折扣掷发生 ⇒ 空轮不烧掷（掷流序 B9 备案保持） */
+export function collectedEnoughForCraft(
+  r: VanillaRecipe, inv: Inventory, sources?: readonly CraftItemSource[],
+): boolean {
+  const owned = collectOwnedItems(inv, sources);
+  for (const req of r.items) {
+    if (itemMatches(r, req.id, owned) < req.stack) return false;
+  }
+  return true;
 }
 
 /** 原版 item id → Inventory 内部 item id（缓存） */

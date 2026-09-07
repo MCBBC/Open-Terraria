@@ -78,17 +78,30 @@ if (new URLSearchParams(location.search).get('imglog') === '1') {
 
 // ---- 调试报告基础设施：错误 ring（F5 报告 errors 段唯一数据源）----
 // kind: 0=pageerror 1=unhandledrejection 2=console.error；stack 取首行
+// ★SW-BM1 2026-09-06（工具链债扩容）：总环 50→300 + fatal 独立环——旧 50 深环在
+// 渲染层 warn-once 失修刷屏时会把真错误挤出窗口;分级留存 = kind 0/1（pageerror/
+// unhandledrejection,崩溃类）另入 __swErrorsFatal(100) 独立环,console.error 噪声
+// 永远逐不出 fatal。内存上限：单条 ≤~850B（msg 500+stack 300+壳）→ 总环 ~255KB +
+// fatal ~85KB ≈ 340KB 常驻——F5 报告 errors 段上限 150 条（fatal 全量 ∪ 总环最近,
+// 按时间归并）≈ 130KB,对 2.1MB 报告体积增量 <7%,安全
 interface SwErrorRecord { t: number; kind: number; msg: string; stack: string | null }
-const ERR_RING_CAP = 50;
+const ERR_RING_CAP = 300;
+const ERR_FATAL_RING_CAP = 100;
 function pushSwError(kind: number, msg: unknown, stack: string | null | undefined) {
-  const w = window as unknown as { __swErrors?: SwErrorRecord[] };
+  const w = window as unknown as { __swErrors?: SwErrorRecord[]; __swErrorsFatal?: SwErrorRecord[] };
   if (!Array.isArray(w.__swErrors)) w.__swErrors = [];
-  w.__swErrors.push({
+  const rec: SwErrorRecord = {
     t: Date.now(), kind,
     msg: String(msg).slice(0, 500),
     stack: stack ? stack.split('\n')[0].slice(0, 300) : null,
-  });
+  };
+  w.__swErrors.push(rec);
   if (w.__swErrors.length > ERR_RING_CAP) w.__swErrors.shift();
+  if (kind <= 1) {
+    if (!Array.isArray(w.__swErrorsFatal)) w.__swErrorsFatal = [];
+    w.__swErrorsFatal.push(rec);
+    if (w.__swErrorsFatal.length > ERR_FATAL_RING_CAP) w.__swErrorsFatal.shift();
+  }
 }
 window.addEventListener('error', (e) => pushSwError(0, e.message, e.error instanceof Error ? e.error.stack : null));
 window.addEventListener('unhandledrejection', (e) =>
@@ -500,7 +513,7 @@ let f5DownAt = 0;
 const F5_LONGPRESS_MS = 500;
 window.addEventListener('keyup', (e) => {
   const game = flow?.game;
-  if (!inGame || !game || e.code !== 'F5' || !f5DownAt) return;
+  if (!inGame || !flow || !game || e.code !== 'F5' || !f5DownAt) return;   // ★SW-BJ5：+!flow 收窄（cumulativePlayMs 直读）
   const held = performance.now() - f5DownAt;
   f5DownAt = 0;
   if (held < F5_LONGPRESS_MS) {
@@ -508,7 +521,8 @@ window.addEventListener('keyup', (e) => {
     // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
     // + audioTail（音效/BGM 播放序列,sfx 800 / bgm 200 条——错误音效排查时间线）
     const r = downloadDebugReport(game, {
-      playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
+      // SW-BJ5 2026-09-07：累计口径（与世界列表/存档头同义）——旧值=会话净时长,两口径混写曾致排查误判"疑似单会话值"
+      playTimeMs: flow.cumulativePlayMs,
       behaviorTail: game.recorder.snapshotTail(2000),
       audioTail: game.audioRec?.tail(800, 200) ?? null,
       tileFrames: tileFrameCapture.exportLight(),
@@ -659,7 +673,9 @@ function exportTexFixes() {
 }
 
 function saveGameCompat(g: Game): string {
-  return saveGame(g.world, g.player, (flow as FlowHandle & { playStartNow: number }).playStartNow, g.townNpcsForSave(), g.eventsForSave());
+  // SW-BJ5 2026-09-07：导出地图档同累计口径（旧值=会话净时长,与槽位/quick 档不一致）；
+  // 调用面 exportMap 已有 game 非空门（⇒flow 在场）,此处 `?.` 仅为类型收窄兜 0
+  return saveGame(g.world, g.player, flow?.cumulativePlayMs ?? 0, g.townNpcsForSave(), g.eventsForSave());
 }
 
 // 暴露 tile/key 常量给调试控制台

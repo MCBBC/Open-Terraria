@@ -3771,6 +3771,11 @@ export class Player extends Entity {
     }
     // 入水熄灭着火（Player.cs:27426：wet 且非岩浆 → DelBuff 24）
     if (this.inWater && !this.inLava) this.buffs.remove(BuffType.OnFire);
+    // ★SW-RB5a 2026-09-07 入液洗掉恶臭（Player.cs:27968-27979）：num86=
+    //  WetCollision【任一液湿】→ DelBuff 120——着火臂才有 !lavaWet 豁免,
+    //  恶臭臂无（岩浆/蜂蜜湿亦洗）;缺此臂=洗澡不掉味,HoverOverNPCs 否决
+    //  （Main.cs:43785）与 luck −0.25（:29386）恒挂
+    if (this.inWater || this.inLava || this.inHoney) this.buffs.remove(BuffType.Stinky);
     // 冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（1458 Player.cs:28209
     // `expert && ZoneSnow && wet && !lavaWet && !honeyWet && !arcticDivingGear &&
     // environmentBuffImmunityTimer == 0`）；arcticDivingGear（1861 极地潜水装备）免疫。

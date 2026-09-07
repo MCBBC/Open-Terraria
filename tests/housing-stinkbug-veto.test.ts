@@ -119,7 +119,7 @@ describe('(iii) 近玩家受理面：臭虫房 Blocked 级——不迁入且不�
     const mover = { key: 'merchant', npcId: 17, bound: false, home: null as { x: number; y: number } | null, ref: {} };
     const { players, rand } = cornerAt(2102, 302);
     const r = checkHousesNearAPlayer(
-      w.store, players, 0, [mover] as NearChainNpcView<unknown>[], [], rand,
+      w.store, players, 0, [mover] as NearChainNpcView<unknown>[], [], 17, rand,
     );
     expect(r.seedHit).toEqual([2102, 302]);
     expect(r.relocated).toBeNull();            // 不迁入（RelocatedHomeless 支不可达）
@@ -144,7 +144,7 @@ describe('(iv) 无臭虫正控（同几何零改动）', () => {
     expect(q.reason).toBe('ok');
     const mover = { key: 'merchant', npcId: 17, bound: false, home: null, ref: { tag: 'npc17' } };
     const { players, rand } = cornerAt(2102, 302);
-    const r = checkHousesNearAPlayer(w.store, players, 0, [mover], [], rand);
+    const r = checkHousesNearAPlayer(w.store, players, 0, [mover], [], 17, rand);
     expect(r.seedHit).toEqual([2102, 302]);
     expect(r.relocated?.ref).toEqual({ tag: 'npc17' });   // 迁入照旧
     expect(r.foundHouseNoSpawn).toBeNull();

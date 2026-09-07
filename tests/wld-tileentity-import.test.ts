@@ -35,7 +35,7 @@ import { parseWldToSave } from '../src/wld/WldImport';
 import { parseWld } from '../src/wld/WldParser';
 import { loadSaveData } from '../src/save/SaveFile';
 import { TILE_BY_KEY } from '../src/data/tiles';
-import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { Game } from '../src/core/Game';
 
 // ---------------- 合成 .wld 固件（tests/wld-weapon-rack-import.test.ts 同款 Writer） ----------------
@@ -311,7 +311,11 @@ function buildFixture(tes: TeEntry[], version: number, withTeSection = true): Ui
 
 // ---------------- 断言 ----------------
 const vidKey = (vid: number) => VANILLA_ITEM_KEY_BY_ID[vid]!;
+/** vid → 内部 id(运行时域:loadSaveData 后 world.furnitureItems/drops 的槽位 id) */
 const vidIid = (vid: number) => ITEM_BY_KEY[vidKey(vid)]!;
+/** vid → 稳定 id(磁盘域:parseWldToSave 产物 save.furniture/chests 的槽位 id——
+ *  ★2026-09-07 全通道统一稳定域后 parse 产物与 serializeSave 同域) */
+const vidStable = (vid: number) => ITEM_STABLE_OF_INTERNAL[ITEM_BY_KEY[vidKey(vid)]!]!;
 const defKey = (vid: number) => ITEM_DEFS[vidIid(vid)]!.key;
 
 /** breakTile 运行时 harness（wld-weapon-rack-import.test.ts 同款） */
@@ -349,28 +353,28 @@ describe('wld 导入：TileEntities 段四类挂物家具还原（v326）', () =
     const r = rec('weapon_rack', 2, 2)!;
     expect(r).toBeDefined();
     expect(r.slots).toHaveLength(1);
-    expect(r.slots[0]).toEqual({ id: vidIid(3509), stack: 1 });
+    expect(r.slots[0]).toEqual({ id: vidStable(3509), stack: 1 });
   });
 
   it('物品框 395：单槽物还原', () => {
     const r = rec('item_frame', 6, 2)!;
-    expect(r.slots[0]).toEqual({ id: vidIid(353), stack: 1 });
+    expect(r.slots[0]).toEqual({ id: vidStable(353), stack: 1 });
   });
 
   it('模特 470：equip[9]→0..8 + misc→9 + dyes→10..18（19 槽持久化形状）', () => {
     const r = rec('display_doll', 9, 2)!;
     expect(r.slots).toHaveLength(19);
-    expect(r.slots[0]).toEqual({ id: vidIid(37), stack: 1 });        // equip0 头盔
+    expect(r.slots[0]).toEqual({ id: vidStable(37), stack: 1 });        // equip0 头盔
     expect(r.slots[8]).toBeNull();                                   // equip8 空
-    expect(r.slots[9]).toEqual({ id: vidIid(4), stack: 1, prefix: 3 });   // misc 持握
+    expect(r.slots[9]).toEqual({ id: vidStable(4), stack: 1, prefix: 3 });   // misc 持握
     expect(r.slots[10]).toBeNull();                                  // dyes 空
   });
 
   it('帽架 475：hat[2]→0..1 + dye[2]→2..3；未收录染料槽置空并计数', () => {
     const r = rec('hat_rack', 12, 2)!;
     expect(r.slots).toHaveLength(4);
-    expect(r.slots[0]).toEqual({ id: vidIid(37), stack: 1 });
-    expect(r.slots[1]).toEqual({ id: vidIid(88), stack: 1 });
+    expect(r.slots[0]).toEqual({ id: vidStable(37), stack: 1 });
+    expect(r.slots[1]).toEqual({ id: vidStable(88), stack: 1 });
     expect(r.slots[2]).toBeNull();
     const e = report.itemsSkipped.find((s) => s.id === 2777);
     expect(e?.count).toBe(1);
@@ -439,7 +443,7 @@ describe('wld 导入：TE 段容错', () => {
     const buf = buildFixture([{ t: 3, x: 2, y: 2, equip: [[37]] }], 279);
     const { save } = parseWldToSave(buf);
     const doll = (save.furniture ?? []).find((f) => f.kind === 'display_doll')!;
-    expect(doll.slots[0]).toEqual({ id: vidIid(37), stack: 1 });
+    expect(doll.slots[0]).toEqual({ id: vidStable(37), stack: 1 });
     expect(doll.slots[9]).toBeNull();     // 无 misc 位图 → 恒空
   });
 
@@ -447,8 +451,8 @@ describe('wld 导入：TE 段容错', () => {
     const buf = buildFixture([{ t: 3, x: 2, y: 2, equip: [null, null, null, null, null, null, null, null, [2430]], misc: [4] }], 311);
     const { save } = parseWldToSave(buf);
     const doll = (save.furniture ?? []).find((f) => f.kind === 'display_doll')!;
-    expect(doll.slots[8]).toEqual({ id: vidIid(2430), stack: 1 });   // 坐骑槽
-    expect(doll.slots[9]).toEqual({ id: vidIid(4), stack: 1 });      // misc
+    expect(doll.slots[8]).toEqual({ id: vidStable(2430), stack: 1 });   // 坐骑槽
+    expect(doll.slots[9]).toEqual({ id: vidStable(4), stack: 1 });      // misc
   });
 });
 

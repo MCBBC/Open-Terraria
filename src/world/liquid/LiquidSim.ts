@@ -29,7 +29,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
-import { genSquareTileFrame } from '../gen/vanilla/FinalCleanupPass';
+import { genSquareTileFrame, markKillTouch } from '../gen/vanilla/FinalCleanupPass';
 import { genSolidType } from '../gen/vanilla/GenSolid';
 
 interface LiquidEntry { x: number; y: number; kill: number; delay: number; }
@@ -344,6 +344,7 @@ export class LiquidSim {
     (globalThis as { __swLqKill?: (x: number, y: number, sheet: number, fx: number, fy: number, liq: number, lty: number) => void })
       .__swLqKill?.(x, y, SHEET_OF[st.type[i]] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
     const sheet = SHEET_OF[st.type[i]] ?? -1;
+    markKillTouch(x, y);   // ★级联去重杀事件标记(2026-09-07,见 FinalCleanupPass 注)
     // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem，生成期本就 true）
     if (sheet === 51 && st.wall[i] === 62) this.roll(4);
     const n = killDustAmount(sheet);

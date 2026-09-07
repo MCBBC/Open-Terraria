@@ -51,7 +51,9 @@ export function bytesToB64(u8: Uint8Array): string {
 export interface SaveData {
   format: 'sandboxworld.save';
   version: number;
-  /** v3: tile/item 磁盘 id = 原版 sheet/item id + 私有段(见 data/tiles.ts 稳定表);v2=旧内部下标 */
+  /** v3: tile/item 磁盘 id = 原版 sheet/item id + 私有段(见 data/tiles.ts 稳定表);v2=旧内部下标。
+   *  ★全通道统一稳定域(2026-09-07):wld 导入(parseWldToSave)产物也在解析出口统一转
+   *  稳定 id——SaveData 不存在第二个 id 域,读档/导出端无需任何判别 */
   idScheme?: 'sheet';
   header: {
     name: string; seed: number; width: number; height: number;
@@ -208,7 +210,10 @@ export interface SaveData {
       spawnRateSlider: number;
     };
   };
-  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  /** homelessDespawn = 原版 NPC.homelessDespawn（SpawnHomelessNPC 生成位 :5110 专设、
+   *  WorldFile.cs:1741 写/:2932 读 v315+ 随城镇 NPC 段持久化）——夜间清场扫
+   *  UnspawnHomelessNPC（WorldGen.cs:5127-5155）的标的位。旧档缺省 undefined=false */
+  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; homelessDespawn?: boolean }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
   events?: {
@@ -479,10 +484,12 @@ export function serializeSave(
     },
     npcs: townNpcs ?? [],   // 城镇 NPC 段(WorldFile.cs:1703-1750 NPC 段;曾硬编码 [] 断链)
     signs: meta.signs,
-    // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）
+    // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）；
+    // ★SW-BO1（SW-BL1 P1）：模特姿态 pose 可选字段透传（undefined 旧档自动兼容）
     furniture: meta.furniture?.map((e) => ({
       x: e.x, y: e.y, kind: e.kind,
       slots: e.slots.map((s) => (s ? { id: s.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[s.id] ?? 0, stack: s.stack, prefix: s.prefix } : null)),
+      pose: e.pose,
     })),
     flags: meta.flags,
     weather: meta.weather,

@@ -1100,7 +1100,6 @@ export class CharCreation {
       // 重烘延迟 120ms 挂——快烘不闪、慢烘可见
       this.bakeMask.arm(!this.hairSheetUrl);
       let missed = false;
-      let sinceFlush = 0;   // ★SW-BM1: 距上次放血的累计批耗时（见 bakeCells afterBatch）
       // ★分帧合成(2026-08-27 用户报"加载时很卡"):213 次纸娃娃合成曾整段同步阻塞
       //   主线程;bakeCells 批间 yieldTask 让出(MessageChannel 宏任务,无 setTimeout(0)
       //   嵌套 4ms 钳制税) + 批大小按耗时自适应——"不阻塞主线程"底线不回退。
@@ -1112,13 +1111,12 @@ export class CharCreation {
         else missed = true;
       }, {
         shouldAbort: () => !this.panel.isConnected,
-        // ★SW-BM1 2026-09-06：分频放血——累计批耗时 ≥12ms 才 1×1 读回强制物化
-        //  (放血有 ~25ms 固定 GPU sync;逐批放血实测 wall +45%,分频后峰值任务
-        //  ~30(物化)+25(sync) ≈ 55ms,较旧尾部单次冲刷 89-273ms 降 ~70-80%)
-        afterBatch: (batchMs) => {
-          sinceFlush += batchMs;
-          if (sinceFlush >= 12) { g.getImageData(0, 0, 1, 1); sinceFlush = 0; }
-        },
+        // ★SW-BM1 2026-09-06：逐批放血——1×1 读回强制物化本批命令。旧管线把 ~6000
+        //  次 blit 的物化积到尾部自检/toBlob 发起点 = 单次冲刷 89-273ms 长任务;逐批
+        //  放血后峰值任务 17-33ms(无 longtask),代价 = 每批 ~20-30ms 固定 GPU sync
+        //  计入 wall(hair 总时长 +~50-70ms——总物化功不变,只是从单点摊到批间)。
+        //  ★实测分频(累计≥12ms)更差:积量冲刷 63-340ms,弃
+        afterBatch: () => { g.getImageData(0, 0, 1, 1); },
       });
       if (!this.panel.isConnected) return 'noop';   // SW-BB1 D1: 中途放弃不动落地账
       if (missed) this.scheduleThumbRetry(true);
@@ -1154,7 +1152,6 @@ export class CharCreation {
       g.imageSmoothingEnabled = false;
       this.bakeMask.arm(!this.lookSheetUrl);
       let missed = false;
-      let sinceFlush = 0;   // ★SW-BM1: 同 hair 支分频放血账
       // 单帧行模式同 hair 支（消费面 = dollFrame(doll, IDLE_FRAME) 的第 0 帧 40×56）
       await bakeCells(VALID_CLOTH_STYLES, (styleId, i) => {
         const doll = compositePaperDoll({ ...this.appearance, skinVariant: styleId }, undefined, { rows: { body: 0, legs: 0 } });
@@ -1162,7 +1159,7 @@ export class CharCreation {
         else missed = true;
       }, {
         shouldAbort: () => !this.panel.isConnected,
-        afterBatch: () => { g.getImageData(0, 0, 1, 1); },   // ★SW-BM1 同 hair 支
+        afterBatch: () => { g.getImageData(0, 0, 1, 1); },   // ★SW-BM1 同 hair 支逐批放血
       });
       if (!this.panel.isConnected) return 'noop';   // SW-BB1 D1: 中途放弃不动落地账
       if (missed) this.scheduleThumbRetry(true);
@@ -1242,13 +1239,20 @@ export class CharCreation {
    *  ★SW-BM1 2026-09-06 协作式分条带:旧版整面一次 getImageData(440×968)在 GPU
    *  加速管线(目标+tint 源均 GPU 化)下 = 主线程命令队列冲刷 89-273ms 单长任务
    *  (探针 _bm1-cc-cellspike 多轮:长任务时间戳与读点/toBlob 发起点逐一重合;
-   *  微探针 _bm1-gid-micro H 组:同形态整读 56ms)。修 = ①烘焙目标与 PaperDoll
-   *  tint 源画布改 CPU 光栅(willReadFrequently)→ 命令即时光栅、读即 memcpy;
+   *  微探针 _bm1-gid-micro H 组:同形态整读 56ms)。修 = ①小体积 tint 源画布
+   *  (bakeTint/invBg) 首次 getContext 带 willReadFrequently=CPU 光栅(生效面);
    *  ②本函数 64 行分条带 + 条间 yieldTask 让出 + 首 α>16 早退(判定谓词与步进
    *  同旧版,语义不变;正常 sheet 首条带即早退,全透明病态态才付全扫+让出税)。
-   *  ★不读 GPU 对象(合成 doll 画布仍 GPU 化供渲染消费)——读路径零 GPU sync */
+   *  ★不读 GPU 对象(合成 doll 画布仍 GPU 化供渲染消费)——读路径零 GPU sync。
+   *  ★SW-BP1 2026-09-07 注释纠偏(RB5a 债①)：旧注「①烘焙目标…改 CPU 光栅
+   *  (willReadFrequently)」有误——烘焙目标(hair/look sheet,:1097/:1151)按 SW-BM1
+   *  实测权衡【保持 GPU 加速】(绘制路径最快,长任务由 afterBatch 逐批 1×1 读回
+   *  放血摊销,见 bakeCells 调用点);HTML 规范同一画布首次 getContext 之后再调
+   *  getContext 返回既有 context、【options 被忽略】——本函数曾传
+   *  {willReadFrequently:true} 属死选项(不会把 GPU 目标降级成 CPU),已移除以免
+   *  再误导(行为零变化)。 */
   private async sheetAllTransparent(cv: HTMLCanvasElement): Promise<boolean> {
-    const g = cv.getContext('2d', { willReadFrequently: true });
+    const g = cv.getContext('2d');
     if (!g) return false;
     const step = Math.max(4, Math.floor(cv.width / 100) * 4);
     const STRIP = 64;

@@ -13,7 +13,7 @@
 //   save.bannerKills/save.invasion;缺省值按读侧缺省语义补(矿层 -1=未锁定、
 //   4 档铜铁银金 7/6/9/8=WldImport 注记缺省)。
 import type { SaveData } from '../save/serialize';
-import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
+import { TILE_INTERNAL_OF_STABLE, TILE_DEFS } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 
 import { BinaryWriterLE } from '../save/PlrImport';
@@ -131,10 +131,15 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       let b = 0, b2 = 0, b3 = 0, b4 = 0;
       const payload: number[] = [];
       if (isActive && type !== 0) {
+        // ★写流域=原版 sheet 域(WF:1444 tile.type 直写):t.type 是 internal
+        //  (encodeTiles 头 stable→internal 反映射产物),须转回 sheet;曾直写
+        //  internal → 回环 parse 二读类型错位(6400×1800 实测 t1=263→t2=354)。
+        //  FRAME_IMPORTANT 键域同为 sheet(vanilla.json tiles 表)。
+        const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? 0;
         b |= 2;
-        payload.push(type & 0xff);
-        if (type > 255) { b |= 0x20; payload.push((type >> 8) & 0xff); }
-        if (FRAME_IMPORTANT[type]) {
+        payload.push(sheet & 0xff);
+        if (sheet > 255) { b |= 0x20; payload.push((sheet >> 8) & 0xff); }
+        if (FRAME_IMPORTANT[sheet]) {
           payload.push(t.frameX[i] & 0xff, (t.frameX[i] >> 8) & 0xff, t.frameY[i] & 0xff, (t.frameY[i] >> 8) & 0xff);
         }
         if (paint[i] !== 0) { b3 |= 8; payload.push(paint[i]); }
@@ -145,9 +150,13 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
         if (wl !== 0) { b3 |= 0x10; payload.push(wl); }
       }
       if (liq !== 0) {
-        if (liqType === 1) b |= 0x10;
-        else if (liqType === 2) b |= 0x18;
-        else if (liqType === 3) { b3 |= 0x80; b |= 8; }
+        // ★液体类型位 1:1 原版(WF:1500-1513,2026-09-07 勘误:旧写整体错一位——
+        //  内部 1 水 误写 0x10=岩浆位、2 岩浆→0x18=蜂蜜、3 蜂蜜→微光,回环
+        //  liquidType diff 57.8 万格实证「岩浆全变蜂蜜」):水=bit3(8)、
+        //  岩浆=bit4(0x10)、蜂蜜=bit3|bit4(0x18)、微光=bit3+b3[7](0x80)
+        if (liqType === 2) b |= 0x10;
+        else if (liqType === 3) b |= 0x18;
+        else if (liqType === 4) { b3 |= 0x80; b |= 8; }
         else b |= 8;
         payload.push(liq);
       }
@@ -257,24 +266,30 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
     if (teType === 0 || f.kind === 'kite_anchor' || f.kind === 'critter_anchor') { w.byte(9).i32(0).i16(f.x).i16(f.y); continue; }   // 9/10 桩=无 ExtraData(写 type 9 占位)
     w.byte(teType).i32(0).i16(f.x).i16(f.y);
     const slot = (s: { id: number; stack: number; prefix?: number } | null | undefined) =>
-      w.i16(s ? netIdOfStable(s.id) : 0).byte(s?.prefix ?? 0).i16(s ? s.stack ?? 0 : 0);
+      w.i16(s ? s.id : 0).byte(s?.prefix ?? 0).i16(s ? s.stack ?? 0 : 0);   // 稳定 id=原版 netId(★SW-BO1 勘误)
     if (teType === 1 || teType === 4 || teType === 6 || teType === 8) { slot(f.slots?.[0]); }
     else if (teType === 3) {
-      // 模特:位图×2(v307 前)+pose(v307+)+misc 位图(v308+)+三元组×N(v311 特例顺序)
-      // ——本仓 SaveData 只存 slots(equip 9+dye 9)【无 pose 字段,SW-BL1 2026-09-06
-      //   勘误:旧注"只存 slots+pose"不实——WldImport 解析 pose 后即弃(WldImport.ts
-      //   doll 支不入库),导出恒 0=读回姿态归零,与"导入丢姿态"同债】:
-      //   位图1(equip 0-7)/位图2(dye 0-8+misc)/pose/misc 位图/equip[8]/三元组按位序
+      // 模特（TEDisplayDoll.WriteExtraData TEDisplayDoll.cs:166-217 v325 逐字）：
+      //   位图1(equip 0-7)/位图2(dye 0-7)/pose(v307+)/位图3(misc[0]@bit0,equip[8]@bit1,
+      //   dye[8]@bit2,v308+)/三元组×N —— N 按位图【逐位门控】读（ReadExtraData :246-277
+      //   只对置位槽读三元组）。★SW-BO1 2026-09-07（SW-BL1 P1）重写：
+      //   ① pose 回写真值（此前恒 0,导入丢姿态同债）;
+      //   ② 三元组改按位图门控写（旧实现无条件全写+equip[8] 前置,与读侧位图门控
+      //      必失步——读侧按置位数消费,余量字节滞留流内=后续 TE 全体错位）;
+      //   ③ 槽位映射修正：misc=slots[9]/dyes=slots[10..18]（FurnitureItems.ts 布局,
+      //      旧 dy=slots[9+i] 把 misc 当 dye0 且 dye7(slots[18]) 截丢）。
       const eq = Array.from({ length: 9 }, (_, i) => f.slots?.[i] ?? null);
-      const dy = Array.from({ length: 9 }, (_, i) => f.slots?.[9 + i] ?? null);
+      const dy = Array.from({ length: 9 }, (_, i) => f.slots?.[10 + i] ?? null);
+      const misc = f.slots?.[9] ?? null;
       const bits = (arr: Array<unknown>, n: number) => { let b = 0; for (let i = 0; i < n; i++) if (arr[i]) b |= 1 << i; return b; };
-      w.byte(bits(eq, 8)).byte(bits(dy, 9));
-      w.byte(0);                                   // pose(读侧 v307+ byte;未入库恒 0)
-      w.byte(0);                                   // misc 位图(v308+)
-      w.i16(0).byte(0).i16(0);                     // misc 单槽三元组
-      w.i16(netIdOfStable(eq[8]?.id ?? 0)).byte(eq[8]?.prefix ?? 0).i16(eq[8]?.stack ?? 0);   // equip[8](v311 后置)
-      for (let i = 0; i < 8; i++) slot(eq[i]);
-      for (let i = 0; i < 9; i++) slot(dy[i]);
+      w.byte(bits(eq, 8));
+      w.byte(bits(dy, 8));
+      w.byte(Math.max(0, Math.min(255, Math.floor(f.pose ?? 0))));   // pose(v307+)
+      const b3 = (misc ? 1 : 0) | (eq[8] ? 2 : 0) | (dy[8] ? 4 : 0);
+      w.byte(b3);                                    // misc/equip[8]/dye[8] 位图(v308+)
+      for (let i = 0; i < 9; i++) if (i === 8 ? eq[8] : !!eq[i]) slot(eq[i]);    // equip 0-8 位序
+      for (let i = 0; i < 9; i++) if (i === 8 ? dy[8] : !!dy[i]) slot(dy[i]);    // dye 0-8 位序
+      if (misc) slot(misc);                          // misc[0]（_misc 单槽,WriteExtraData :202-211）
     } else if (teType === 5) {
       // 帽架:位图(bit0-1=hat,bit2-3=dye)+三元组×N
       const hat = [f.slots?.[0], f.slots?.[1]], dye = [f.slots?.[2], f.slots?.[3]];
@@ -289,10 +304,12 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
     }
   }
 }
-/** 稳定 id → 原版 netId(物品写回 .wld 用;未注册=0 空气) */
-function netIdOfStable(sid: number): number {
-  return sid > 0 ? (ITEM_INTERNAL_OF_STABLE.get(sid) ?? 0) : 0;
-}
+// ★SW-BO1 2026-09-07 勘误（wld-export 回环测试实证）：.wld 物品 id 域 = 原版 netId。
+//  SaveData 载荷里的物品 id 已是【稳定 id】域（serializeSave 统一过 ITEM_STABLE_OF_INTERNAL），
+//  而 vi_* 物品的稳定 id = 其原版 netId（items.ts 稳定 id 表 `/^vi_(\d+)_/ → Number` 同源），
+//  故写回 .wld 直接落稳定 id 即可。旧实现经 ITEM_INTERNAL_OF_STABLE 反查成【内部 id】
+//  （如 vid 4 铁短剑内部=1327）——写出的 .wld 物品 id 全域错位（原版读档物品乱套/
+//  本仓 parseWld 二读 vid 越表丢失）,且方向恰为「加载方向」的反向误用。
 
 // ---- 主出口 ----
 /** SaveData → 自足 .wld 字节(325 格式;本仓 parseWld 可读,原版不保证——见文件头注) */
@@ -333,7 +350,7 @@ export function exportWld(save: SaveData): Uint8Array {
     for (let i = 0; i < 40; i++) {
       const it = items[i];
       if (!it || (it.id === 0)) { w.i16(0); continue; }
-      const netId = netIdOfStable(it.id);
+      const netId = it.id;   // 稳定 id=原版 netId（★SW-BO1 勘误,见 netIdOfStable 删除注）
       if (!netId) { w.i16(0); continue; }
       w.i16(it.stack ?? 1).i32(netId).byte(0);   // chests 元素无 prefix 形
     }
@@ -359,7 +376,9 @@ export function exportWld(save: SaveData): Uint8Array {
     w.i32(n.home ? n.home[0] : -1).i32(n.home ? n.home[1] : -1);
     // ≥213 flag 位图:写 0(本仓读侧消费 flag&1→多读 i32;置 1 会错位)
     w.byte(0);
-    w.bool(false);                                  // ≥315(读侧 :574 验读即弃)
+    // ≥315 homelessDespawn（WorldFile.cs:1741 写/:2932 读）——★SW-BO1 起写真值
+    //  （此前恒 false,导出世界流浪 NPC 夜间清场链失效）
+    w.bool(!!n.homelessDespawn);
   }
   w.bool(false);
   w.bool(false);

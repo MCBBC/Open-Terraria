@@ -377,33 +377,125 @@ describe('SW-BJ3 D 碰撞面：坡面平台楼梯对异型平台同成立（Coll
   }
 });
 
-// ═══════════════ E 渲染面结构锁（源文本锚；行为面=探针截图） ═══════════════
+// ═══════════════ E 渲染面（行为级：recording ctx 驱动真 drawVanillaCell） ═══════════════
+// 平台半砖素材实证：Tiles_19.png 帧 y0-7 为 plank（15px 宽×8 行）、y8-17 全透明
+// （逐像素解码,SW-BJ3 审计）。旧半砖实现源 r.sy+8（帧下半）= 平台半砖整格隐形
+// （物理仍在）；实心块丢顶面棱线。原版半砖基础拍 = normalTileRect
+// (frameX, frameY, w, 16-8)（TileDrawing.cs:1016）画到格下半（:1022 y*16+8）。
+import { drawVanillaCell } from '../src/render/VanillaTiler';
+import type { SpriteAtlas, DrawRect } from '../src/assets/SpriteAtlas';
 
-describe('SW-BJ3 E 渲染面结构锁：VanillaTiler 平台坡补片/半砖源/slope2 抑制门', () => {
-  const tilerSrc = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/render/VanillaTiler.ts'), 'utf8');
+interface Draw9 { sx: number; sy: number; sw: number; sh: number; dx: number; dy: number; dw: number; dh: number }
 
-  it('平台坡面补片帧码 198/324（slope1）/162/306（slope2）绝对 X + style 行 r.sy 相对 Y（TileDrawing.cs:1552-1570）', () => {
-    expect(tilerSrc).toMatch(/slope === 1 && diagOK\(1\)[\s\S]{0,400}?324/);
-    expect(tilerSrc).toMatch(/slope === 2 && diagOK\(-1\)[\s\S]{0,400}?306/);
-    expect(tilerSrc).toMatch(/ctx\.drawImage\(r\.img, fx2, r\.sy, 16, 16, dpx, dpy \+ 16/);
+function recCtx9() {
+  const calls: Draw9[] = [];
+  return {
+    calls,
+    ctx: {
+      drawImage: (_img: unknown, sx: number, sy: number, sw: number, sh: number,
+        dx: number, dy: number, dw: number, dh: number) => { calls.push({ sx, sy, sw, sh, dx, dy, dw, dh }); },
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+    } as unknown as CanvasRenderingContext2D,
+  };
+}
+
+/** mock atlas：任意 sheet 皆按 18px 步长像素偏移回传（Tiles_19 几何 486×1260） */
+function mockAtlasStyle() {
+  const fakeImg = { width: 486, height: 1260 };
+  const meta = { sheet: 'x.png', grid: [16, 16], stride: [18, 18], cols: 27, rows: 70 };
+  return {
+    vmeta: () => meta,
+    ensureVImage: () => fakeImg as unknown as HTMLImageElement,
+    vframeAt: (_s: number, x: number, y: number): DrawRect =>
+      ({ img: fakeImg as unknown as HTMLImageElement, sx: x, sy: y, sw: 16, sh: 16 }),
+    vImageFailed: () => false,
+  } as unknown as SpriteAtlas;
+}
+
+function drawCell9(st: TileStore, sheet: number, type: number, fx: number, fy: number): Draw9[] {
+  const { ctx, calls } = recCtx9();
+  drawVanillaCell(ctx, mockAtlasStyle(), sheet, 'style', 1, 1, st, 10, 10, type,
+    () => true, 0, 0, fx, fy);
+  return calls;
+}
+
+describe('SW-BJ3 E 渲染面：半砖拍/坡补片抑制门（recording ctx 行为断言）', () => {
+  const ORE = TILE_BY_KEY['v_239_ore_bars']!;      // sheet 239（platform 旗超集,原版 Platforms 域外）
+
+  it('平台半砖（sheet19）→ 帧上半 8px 画格下半（旧源下半=plank 下透明区 → 隐形）', () => {
+    const st = new TileStore(24, 24);
+    st.setTileSilent(10, 10, PLAT, 0, 306);          // style 17 棕榈木（frameY=18*17）
+    st.half[st.idx(10, 10)] = 1;
+    expect(drawCell9(st, 19, PLAT, 0, 306)).toEqual([
+      { sx: 0, sy: 306, sw: 16, sh: 8, dx: 0, dy: 8, dw: 16, dh: 8 },   // 源=帧上半 → 目标格下半(py=0 基准)
+    ]);
   });
 
-  it('SW-BJ3 半砖源=帧上半（r.sy 起,非 r.sy+8）——平台半砖素材在帧上半 8px,原下半源=透明即隐形', () => {
-    // 原版：normalTileRect=(frameX,frameY,w,halfBrickHeight=8 减项)（TileDrawing.cs:1016）,
-    // 位置 y*16+halfBrickHeight（:1022）→ 源=帧【上半】8px 画到格下半。
-    // 旧实现源 r.sy+8（帧下半）对平台=纯透明区 → 半砖平台整格隐形（物理仍在）。
-    expect(tilerSrc).not.toMatch(/ctx\.drawImage\(r\.img, r\.sx, r\.sy \+ 8, r\.sw, 4/);
-    expect(tilerSrc).not.toMatch(/ctx\.drawImage\(r\.img, r\.sx, r\.sy \+ 8, r\.sw, r\.sh - 8/);
-    expect(tilerSrc).toMatch(/r\.sy, r\.sw, 4/);                    // 无支撑非平台:顶 4px + 暗条
+  it('平台半砖悬空（下方无支撑）→ 仍整 normalTileRect,无 (144,66) 暗条（原版 :1655 Platforms 支）', () => {
+    const st = new TileStore(24, 24);
+    st.setTileSilent(10, 10, PLAT, 0, 0);
+    st.half[st.idx(10, 10)] = 1;                     // 下方 (10,11) 留空
+    expect(drawCell9(st, 19, PLAT, 0, 0)).toEqual([
+      { sx: 0, sy: 0, sw: 16, sh: 8, dx: 0, dy: 8, dw: 16, dh: 8 },
+    ]);
   });
 
-  it('SW-BJ3 平台半砖不吃 D2 暗条支（原版 :1655 Platforms 支画整 normalTileRect）', () => {
-    // 原版 :1655 if(Platforms) 画 normalTileRect（与基础拍同）;暗条 (144,66) 仅非平台
-    expect(tilerSrc).toMatch(/isPlatHalf/);
+  it('239 矿石条架半砖（Platforms 域外）：有支撑 → 帧上半 8px；悬空 → 顶 4px + D2 暗条(144,66)@y+12', () => {
+    const st = new TileStore(24, 24);
+    st.setTileSilent(10, 10, ORE, 72, 0);            // style 4（frameX=18*4）
+    st.half[st.idx(10, 10)] = 1;
+    st.setTileSilent(10, 11, TILE_BY_KEY['dirt']!, 0, 0);
+    expect(drawCell9(st, 239, ORE, 72, 0)).toEqual([
+      { sx: 72, sy: 0, sw: 16, sh: 8, dx: 0, dy: 8, dw: 16, dh: 8 },
+    ]);
+    const st2 = new TileStore(24, 24);
+    st2.setTileSilent(10, 10, ORE, 72, 0);
+    st2.half[st2.idx(10, 10)] = 1;                   // 悬空
+    expect(drawCell9(st2, 239, ORE, 72, 0)).toEqual([
+      { sx: 72, sy: 0, sw: 16, sh: 4, dx: 0, dy: 8, dw: 16, dh: 4 },
+      { sx: 144, sy: 66, sw: 16, sh: 4, dx: 0, dy: 12, dw: 16, dh: 4 },
+    ]);
   });
 
-  it('SW-BJ3 slope2 补片抑制门 = below blockType∈{0,4}（原版 :1565 !=4;slope1 支 :1551 !=5）', () => {
-    expect(tilerSrc).toMatch(/bt !== 0 && bt !== 4/);               // slope2 支
-    expect(tilerSrc).toMatch(/bt !== 0 && bt !== 5/);               // slope1 支
+  it('SW-BJ3 支撑谓词含原版 tileSolid 双 true 域：半砖正下方是平台 → 有支撑（旧谓词漏平台臂画暗条）', () => {
+    const st = new TileStore(24, 24);
+    st.setTileSilent(10, 10, ORE, 0, 0);
+    st.half[st.idx(10, 10)] = 1;
+    st.setTileSilent(10, 11, PLAT, 0, 0);            // 正下方=平台（原版 tileSolid[19]=true）
+    expect(drawCell9(st, 239, ORE, 0, 0)).toEqual([
+      { sx: 0, sy: 0, sw: 16, sh: 8, dx: 0, dy: 8, dw: 16, dh: 8 },   // 无暗条=有支撑
+    ]);
+  });
+
+  it('slope2 平台补片抑制门含正下方 slope3（bt=4,原版 :1565 !=4;旧共用 {0,5} 漏抑制）', () => {
+    // ★抑制门读【正下方格】(x,y+1) 的 blockType（原版 :1540 `Tile tile = Main.tile[tileX, tileY+1]`,
+    //   :1565 slope2 支 `blockType()!=0 && !=4`），非对角格；对角格只吃 diagOK 的实心/对向坡门
+    const TRAP = TILE_BY_KEY['v_387_trap_door_closed']!;  // 387 闭合活板门 = BlocksStairs 族
+    const DIRT = TILE_BY_KEY['dirt']!;
+    const st = new TileStore(24, 24);
+    st.setTileSilent(10, 10, PLAT, 144, 306);            // slope2 平台（style17 行）
+    st.slope[st.idx(10, 10)] = 2;
+    st.setTileSilent(10, 11, TRAP, 0, 0);                // 正下方活板门（BlocksStairs 族）
+    st.slope[st.idx(10, 11)] = 3;                         // bt=4 → slope2 支抑制
+    st.setTileSilent(9, 11, DIRT, 0, 0);                 // 下对角实心（diagOK 实心门）
+    expect(drawCell9(st, 19, PLAT, 144, 306)).toEqual([{ sx: 144, sy: 306, sw: 16, sh: 16, dx: 0, dy: 0, dw: 16, dh: 16 }]);
+    // 对照：正下方 slope4（bt=5）→ slope2 支【不】抑制,补片照画（下对角 dirt 非平台 → 162 帧）
+    const st2 = new TileStore(24, 24);
+    st2.setTileSilent(10, 10, PLAT, 144, 306);
+    st2.slope[st2.idx(10, 10)] = 2;
+    st2.setTileSilent(10, 11, TRAP, 0, 0);
+    st2.slope[st2.idx(10, 11)] = 4;
+    st2.setTileSilent(9, 11, DIRT, 0, 0);
+    expect(drawCell9(st2, 19, PLAT, 144, 306)).toEqual([
+      { sx: 144, sy: 306, sw: 16, sh: 16, dx: 0, dy: 0, dw: 16, dh: 16 },
+      { sx: 162, sy: 306, sw: 16, sh: 16, dx: 0, dy: 16, dw: 16, dh: 16 },
+    ]);
+  });
+
+  it('结构锁：auto/共享尾两处半砖分支均路由 drawHalfBrickCell（防再次手写漂移）', () => {
+    const tilerSrc = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/render/VanillaTiler.ts'), 'utf8');
+    expect(tilerSrc.match(/drawHalfBrickCell\(ctx, r, st, x, y/g)?.length).toBe(2);
+    expect(tilerSrc).not.toMatch(/r\.sx, r\.sy \+ 8, r\.sw/);   // 旧下半源彻底清除
   });
 });

@@ -11,6 +11,7 @@ import { TileStore } from '../src/world/TileStore';
 import type { World } from '../src/world/World';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+import type { FurnitureItemRecord } from '../src/world/FurnitureItems';   // ★SW-BO1 P2 姿态循环 stub 用
 
 const TILE = 16;
 const PLAT = TILE_BY_KEY['platform']!;
@@ -152,7 +153,7 @@ import { Game } from '../src/core/Game';
 
 function mkHammerGame(w = 40, h = 20) {
   const store = new TileStore(w, h);
-  const world = { store, w, h, flags: {}, chests: [] } as unknown as World;
+  const world = { store, w, h, flags: {}, chests: [], furnitureItems: [] as FurnitureItemRecord[] } as unknown as World;
   const g = Object.create(Game.prototype) as unknown as Record<string, any>;
   g.world = world;
   g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {} };
@@ -383,16 +384,25 @@ describe('SW-BA1：239/380 双 true 家族 + 特例四支 + 尾段终端化 + �
     expect(store.frameX[store.idx(8, 8)]).toBe(22);
   });
 
-  it('470 模特假人：姿态系统缺位=证据结案 no-op，闩消费挥不拆墙（:46403-46405 分派面）', () => {
+  it('470 模特假人：★SW-BO1 P2 姿态循环（TryChangePose TEDisplayDoll.cs:900-923）——闩消费、假人无损、pose 0→1→2→3→回 0', () => {
     const { g, store, wallHits } = mkBA1();
     store.setTileSilent(8, 8, DOLL, 0, 0);
     store.setWall(8, 8, 1);
-    g.hammerPoundRelease = true;
-    (g as any).tryMine(8, 8, 5, 'hammer', 20);
-    expect(g.hammerPoundRelease).toBe(false);         // 闩消费（原版 470 支先于尾段）
-    expect(wallHits.length).toBe(0);                  // 不落拆墙段
-    expect(store.get(8, 8)).toBe(DOLL);               // 假人无损（TryChangePose 等价物缺位）
-    expect(store.frameX[store.idx(8, 8)]).toBe(0);
+    const poseOf = () => (g.world.furnitureItems as FurnitureItemRecord[]).find(
+      (r) => r.x === 8 && r.y === 8 && r.kind === 'display_doll')?.pose;
+    const poses: Array<number | undefined> = [];
+    for (let hit = 1; hit <= 4; hit++) {
+      g.hammerPoundRelease = true;
+      (g as any).tryMine(8, 8, 5, 'hammer', 20);
+      g.lastMineHitTick = -999;                       // 解除挥击节流（同 239 循环例）
+      expect(g.hammerPoundRelease).toBe(false);       // 闩消费（原版 470 支先于尾段）
+      expect(wallHits.length).toBe(0);                // 不落拆墙段（hitWall=false :46373）
+      expect(store.get(8, 8)).toBe(DOLL);             // 假人无损（pose=TE 态,无 tile 写面）
+      expect(store.frameX[store.idx(8, 8)]).toBe(0);
+      poses.push(poseOf());
+    }
+    // ChangePose（:918-923）：++ 后 IsValidPose（≤3 恒合法;持握槽空 → 4 非法回 0）
+    expect(poses).toEqual([1, 2, 3, 0]);
   });
 
   it('非锤工具挥击清闩（:46365-46368）；钻头链不清（Mount.UseDrill → PickTile 直调）', () => {

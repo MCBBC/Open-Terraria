@@ -32,6 +32,7 @@ import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { rollablePrefixes } from '../src/data/vanillaPrefixes';   // ★SW-BM1 逐件 roll 行为面
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -77,7 +78,7 @@ describe('SW-AZ1 R3 批量合成部分量语义', () => {
     expect(inv.countOf(woodIid)).toBe(4);
   });
 
-  it('炼金折扣账面=未折扣面（SubtractOwnedItem Recipe.cs:259-265）：全折扣轮不白嫖续命迭代', () => {
+  it('★SW-RB5a 纠注:账面=折扣后实扣面（SubtractOwnedItem 消费 GetIngredientsForOneCraft 折扣副本,RequiredItemEntry=struct）——全折扣轮不入列账面不动', () => {
     const alch = VANILLA_RECIPES.find((r) => r.alchemy && r.items.length === 1
       && !r.groups.length)!;
     const req = alch.items[0];
@@ -91,7 +92,37 @@ describe('SW-AZ1 R3 批量合成部分量语义', () => {
     expect(inv.countOf(iid)).toBe(req.stack * 3);   // 零消耗
   });
 
-  it('炼金账面两本账：无折扣时料够 3 造 3（账面未折扣递减,折扣剩余料不续命）', () => {
+  // ★SW-RB5a 2026-09-07 部分折扣回归：药瓶 28（瓶5×1+凝胶23×2+蘑菇31×2）。
+  // 每轮凝胶/蘑菇各折 1（掷序 [0.9,0.2,0.9,0.2,0.9] → 瓶0/凝胶1/蘑菇1）→
+  // 每轮实扣 1/1/1。vanilla 账面按实扣面递减 → 凝胶账面 8−k,门≥2 续到 k=7 造 7;
+  // 旧实现按未折扣面递减 → 8−2k,造 3（折扣省料被账面吞=少造）
+  it('★SW-RB5a 部分折扣省料留账面续命迭代（炼金台,CraftingRequests.GetIngredientsForOneCraft struct 拷贝链）', () => {
+    const alch = VANILLA_RECIPES.find((r) => r.create === 28)!;
+    expect(alch.alchemy).toBe(true);
+    const bottleIid = invIndexOfVanilla(5);
+    const gelIid2 = invIndexOfVanilla(23);
+    const mushIid = invIndexOfVanilla(31);
+    const inv = new Inventory();
+    inv.slots[10] = { id: bottleIid, stack: 10 };
+    inv.slots[11] = { id: gelIid2, stack: 8 };
+    inv.slots[12] = { id: mushIid, stack: 8 };
+    const orig = Math.random;
+    const queue = [0.9, 0.2, 0.9, 0.2, 0.9];   // 每轮 5 掷:瓶 0 折/凝胶 1 折/蘑菇 1 折
+    let qi = 0;
+    Math.random = () => queue[qi++ % queue.length]!;
+    try {
+      const crafted = consumeMaterials(inv, alch, 10, true);
+      expect(crafted).toBe(7);
+      expect(inv.countOf(bottleIid)).toBe(3);   // 每轮实扣 1 × 7 轮
+      expect(inv.countOf(gelIid2)).toBe(1);
+      expect(inv.countOf(mushIid)).toBe(1);
+    } finally {
+      Math.random = orig;
+      qi = 0;
+    }
+  });
+
+  it('炼金账面两本账：无折扣时料够 3 造 3（实扣=全价,账面同速递减）', () => {
     const alch = VANILLA_RECIPES.find((r) => r.alchemy && r.items.length === 1
       && !r.groups.length)!;
     const req = alch.items[0];
@@ -279,17 +310,24 @@ describe('SW-AZ1 结构锁', () => {
     expect(ui).toMatch(/this\.throwHeldToWorld\(\);\s*\n\s*\} else \{\s*\n\s*this\.placeHeld/);
   });
 
-  it('vanillaCraft 数值契约：crafted 轮数贯穿成品数量/词缀/NoCoinMerge 条件', () => {
-    expect(game).toMatch(/const crafted = consumeMaterials\(this\.player\.inv, r, times, this\._alchemyTable, this\._craftSourcesCache\(\)\)/);
+  it('vanillaCraft 数值契约（★SW-BM1 逐轮重构重钉）：每轮扣一轮料/每轮词缀 roll/双门逐轮', () => {
+    // 逐轮循环：每轮 consumeMaterials(times=1)（校验不过返 0 = 零扣,R14-B2 单点保持）
+    expect(game).toMatch(/consumeMaterials\(this\.player\.inv, r, 1, this\._alchemyTable, this\._craftSourcesCache\(\)\) <= 0\) break;/);
     expect(game).not.toMatch(/r\.createStack \* times/);
-    expect(game).toMatch(/r\.createStack === 1 && crafted === 1/);
+    // 每轮 CreateResult 词缀 roll（CreateResult CRQ57:126-133 `stack<=1 → Prefix(-1)`）
+    expect(game).toMatch(/r\.createStack <= 1 && pool && pool\.length \? rollPrefix\(pool, false\) : undefined;/);
+    // 双门逐轮：CollectedEnough（CraftingRequests.cs:102 前腿）+ CursorHasSpace（Main.cs:43032）
+    expect(game).toMatch(/i > 0 && !collectedEnoughForCraft\(r, this\.player\.inv, this\._craftSourcesCache\(\)\)\) break;/);
+    expect(game).toMatch(/toCursor && i > 0 && !this\.cursorCanTakeCraftResult\(r\)\) break;/);
   });
 
   it('craftSourcesFor：开关门与弹体支（③族序：弹体先于 tile 盒,受开关管辖）', () => {
     expect(recipes).toMatch(/if \(opts\.nearbyChestsEnabled !== false\) \{/);
     expect(recipes).toMatch(/if \(opts\.projectileBanks\) \{\s*\n\s*for \(const pb of opts\.projectileBanks\) push\(pb\);\s*\n\s*\}\s*\n\s*if \(opts\.store/);
-    // consumeMaterials 数值契约 + 账面未折扣递减仅在入列材料上
-    expect(recipes).toMatch(/ownedAcc\.set\(accKey, Math\.max\(\(ownedAcc\.get\(accKey\) \?\? 0\) - req\.stack, 0\)\)/);
+    // consumeMaterials 数值契约 + 账面按折扣后实扣面递减、仅在入列材料上
+    // （★SW-RB5a 2026-09-07 重钉：SubtractOwnedItem 消费 GetIngredientsForOneCraft
+    //  的 struct 折扣副本——旧钉"- req.stack"未折扣面系误读,已纠）
+    expect(recipes).toMatch(/ownedAcc\.set\(accKey, Math\.max\(\(ownedAcc\.get\(accKey\) \?\? 0\) - needOf\.get\(req\)!, 0\)\)/);
     expect(recipes).toMatch(/if \(needOf\.get\(req\)! > 0\) \{\s*\n\s*const accKey/);
   });
 
@@ -375,7 +413,8 @@ describe('SW-RB4a 修复钉', () => {
   const TORCH_MAX = ITEM_DEFS[torchIid]?.maxStack ?? 999;
 
   /** vanillaCraft 壳（Object.create 绕构造;_craftSourcesCache/uiHeldItemObj/cb 桩） */
-  function craftShell(cursorIn: { id: number; stack: number } | null) {
+  // ★SW-RB5a：cursorIn 带 prefix 位（grantToCursor 桩内 cursor.prefix 判等的类型面）
+  function craftShell(cursorIn: { id: number; stack: number; prefix?: number } | null) {
     const inv = new Inventory();
     let cursor = cursorIn ? { ...cursorIn } : null;
     const granted: Array<[number, number]> = [];
@@ -424,17 +463,34 @@ describe('SW-RB4a 修复钉', () => {
     expect(s.drops).toEqual([]);                         // 无地面掉落（旧缺陷:成品 spawnDrop）
   });
 
-  it('item5 同型无词缀有余位 → 放行;上光标余量回背包（CraftItem_GrantItem → GetItem NoCoinMerge）,不再 spawnDrop 落地', () => {
+  it('item5 同型无词缀有余位 → 放行；★SW-BM1 光标门逐轮生效（CursorHasSpaceToCraftRecipe）：光标收不下下一轮即停轮', () => {
     const s = craftShell({ id: torchIid, stack: TORCH_MAX - 4 });   // 光标捏 995 火把（同型无词缀）
     s.inv.slots[10] = { id: woodIid, stack: 30 };
     s.inv.slots[11] = { id: gelIid, stack: 30 };
     (s.g as unknown as { vanillaCraft(r: unknown, t?: number, c?: boolean): void })
-      .vanillaCraft(torch, 10, true);                    // 10 轮 × 3 火把 = 30
-    expect(s.getCursor()!.stack).toBe(TORCH_MAX);        // 光标并到满 999（4 上光标）
-    expect(s.inv.countOf(torchIid)).toBe(26);            // 余量 26 回背包（曾 spawnDrop 落地）
+      .vanillaCraft(torch, 10, true);                    // 请求 10 轮 × 3 火把（每轮耗 1木+1胶）
+    // 原版逐轮门（CraftingRequests.cs:102 + Main.cs:43052 `stack+createStack<=maxStack`）：
+    // 第 0 轮 995+3=998≤上限 放行 → 光标 998；第 1 轮门 998+3=1001>上限 拦停。
+    // 旧行为（整批一次授予+溢出入包）= 满包边缘转化方向差（RB4a 债①）,已废
+    expect(s.getCursor()!.stack).toBe(TORCH_MAX - 1);    // 光标 998（createStack=3）
+    expect(s.inv.countOf(torchIid)).toBe(0);             // 不再溢出入包
     expect(s.drops).toEqual([]);
-    expect(s.inv.countOf(woodIid)).toBe(20);             // 10 轮材料扣净
-    expect(s.inv.countOf(gelIid)).toBe(20);
+    expect(s.inv.countOf(woodIid)).toBe(29);             // 恰扣 1 轮材料（1木+1胶）
+    expect(s.inv.countOf(gelIid)).toBe(29);
+  });
+
+  it('★SW-BM1 逐轮授予：光标空手 shift×N → 每轮授予一轮量直至光标满（Main.cs:43052 逐轮复核）', () => {
+    const s = craftShell(null);                          // 光标空手
+    s.inv.slots[10] = { id: woodIid, stack: 4000 };
+    s.inv.slots[11] = { id: gelIid, stack: 4000 };
+    const rounds = Math.floor(TORCH_MAX / 3);            // 光标可整纳的轮数（3k ≤ maxStack）
+    (s.g as unknown as { vanillaCraft(r: unknown, t?: number, c?: boolean): void })
+      .vanillaCraft(torch, rounds + 10, true);           // 请求超额轮数 → 门拦停
+    // 光标空手进第 0 轮 → 逐轮并堆至 3×rounds → 下一轮门 3×rounds+3 > 上限 拦停
+    expect(s.getCursor()!.stack).toBe(rounds * 3);
+    expect(s.inv.countOf(woodIid)).toBe(4000 - rounds);  // 每轮恰扣 1木+1胶
+    expect(s.inv.countOf(gelIid)).toBe(4000 - rounds);
+    expect(s.drops).toEqual([]);
   });
 
   it('item1 SmartSelect 短路（PickItemSelectionOverride Player.cs:17528-17532 先于 SmartSelectLookup）：mouseItemHeld=true 时 selected 不被改写', async () => {
@@ -464,5 +520,38 @@ describe('SW-RB4a 修复钉', () => {
   it('item1 鞭回声扫描窗（Player.cs:43055 selectedItem+1..49）——镜像鞭同鞭回声（源文本锁）', () => {
     const whipSrc = src('../src/entities/WhipProj.ts');
     expect(whipSrc).toMatch(/owner\.inv\.cursorMirror \? 50 : owner\.inv\.selected \+ 1/);
+  });
+
+  it('★SW-BM1 逐件词缀 roll（CreateResult CRQ57:126-133 每轮 Prefix(-1)）：词缀域单件产出 crafted=3 → roll 3 次（旧实现 crafted===1 整批一次=0 次）', () => {
+    // 词缀域单件产出配方（createStack===1 且词缀池非空）——直接扫配方表取首个满足者
+    // （vanillaCraft 不复核环境站点,材料按表给足即可）
+    const craftable = VANILLA_RECIPES.find((r) => r.createStack === 1
+      && r.items.length === 1 && r.groups.length === 0
+      && (() => {
+        const vid = r.create;
+        const pool = rollablePrefixes(vid, false);
+        return !!pool && pool.length > 0;
+      })());
+    expect(craftable).toBeTruthy();
+    const matIid = invIndexOfVanilla(craftable!.items[0]!.id);
+    const s = craftShell(null);
+    s.inv.slots[10] = { id: matIid, stack: craftable!.items[0]!.stack * 3 };
+    const rngSpy = vi.spyOn(Math, 'random');
+    (s.g as unknown as { vanillaCraft(r: unknown, t?: number, c?: boolean): void })
+      .vanillaCraft(craftable!, 3, false);               // 3 轮 × 1 件直入背包（maxStack1 件的
+    expect(rngSpy.mock.calls.length).toBeGreaterThanOrEqual(3);   // toCursor 面被光标门拦停=原版同构;
+    rngSpy.mockRestore();                                // 背包面逐件 roll,旧 crafted===1 门=整批 0 次）
+  });
+
+  it('★SW-BM1 CollectedEnough 前置门空轮不烧掷（CraftingRequests.cs:102 门先于 GetIngredientsForOneCraft）', () => {
+    const s = craftShell(null);
+    s.inv.slots[10] = { id: woodIid, stack: 4 };         // 火把 1木+1胶 → 凝胶 0 = 第 1 轮后即尽
+    s.inv.slots[11] = { id: gelIid, stack: 1 };
+    const rngSpy = vi.spyOn(Math, 'random');
+    (s.g as unknown as { vanillaCraft(r: unknown, t?: number, c?: boolean): void })
+      .vanillaCraft(torch, 10, false);                   // 实合 1 轮,停轮
+    const burns = rngSpy.mock.calls.length;             // _alchemyTable=false → 折扣掷 0 次
+    expect(burns).toBe(0);                               // 非炼金配方停轮零掷(门在掷前)
+    rngSpy.mockRestore();
   });
 });

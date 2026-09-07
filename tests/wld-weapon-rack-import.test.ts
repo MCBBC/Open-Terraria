@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { loadSaveData } from '../src/save/SaveFile';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { FURNITURE_TILE_KIND } from '../src/world/FurnitureItems';
 import { Game } from '../src/core/Game';
 import { World } from '../src/world/World';
@@ -218,7 +218,11 @@ function buildFixture(): Uint8Array {
 
 // ---------------- 断言 ----------------
 const vidKey = (vid: number) => VANILLA_ITEM_KEY_BY_ID[vid]!;
+/** vid → 内部 id(运行时域:loadSaveData 后 world.furnitureItems/drops 的槽位 id) */
 const vidIid = (vid: number) => ITEM_BY_KEY[vidKey(vid)]!;
+/** vid → 稳定 id(磁盘域:parseWldToSave 产物 save.furniture/chests 的槽位 id——
+ *  ★2026-09-07 全通道统一稳定域后 parse 产物与 serializeSave 同域) */
+const vidStable = (vid: number) => ITEM_STABLE_OF_INTERNAL[ITEM_BY_KEY[vidKey(vid)]!]!;
 /** 掉落键 = ITEM_DEFS[id].key（def 注册键，可能带别名大小写差） */
 const defKey = (vid: number) => ITEM_DEFS[vidIid(vid)]!.key;
 
@@ -253,19 +257,19 @@ describe('wld 导入：334 legacy 武器架持武还原', () => {
   it('带一标记（vid4+prefix6）→ 锚格左上物化 weapon_rack 单槽记录', () => {
     const r = rec(2, 2);
     expect(r).toBeDefined();
-    expect(r!.slots[0]).toEqual({ id: vidIid(4), stack: 1, prefix: 6 });
+    expect(r!.slots[0]).toEqual({ id: vidStable(4), stack: 1, prefix: 6 });
   });
 
   it('带二标记（右向 alternate，vid3509+prefix9）→ 二带解码', () => {
     const r = rec(6, 2);
     expect(r).toBeDefined();
-    expect(r!.slots[0]).toEqual({ id: vidIid(3509), stack: 1, prefix: 9 });
+    expect(r!.slots[0]).toEqual({ id: vidStable(3509), stack: 1, prefix: 9 });
   });
 
   it('高段锚（vid5335 ≥4900，锚帧被剥系误判 col1）按帧对签名救回', () => {
     const r = rec(10, 6);
     expect(r).toBeDefined();
-    expect(r!.slots[0]).toEqual({ id: vidIid(5335), stack: 1, prefix: 3 });
+    expect(r!.slots[0]).toEqual({ id: vidStable(5335), stack: 1, prefix: 3 });
   });
 
   it('无标记裸架（rack C）不物化', () => {

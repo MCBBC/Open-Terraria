@@ -467,7 +467,8 @@ item({ key: 'vi_3121_goblin_tech', name: '', value: 1 });
 item({ key: 'vi_3122_rek_3000', name: '', value: 1 });
 item({ key: 'vi_3123_pda', name: '', value: 1 });
 item({ key: 'vi_5358_shellphone', name: '', value: 1 });
-item({ key: 'vi_5359_shellphone_spawn', name: '', value: 1 });
+// SW-BN1 2026-09-07：5359 首注册已撤（:801 同键重复注册,byKey 现指向后者;探针两 def
+//  字段面全等 {value:1},零行为差——同键双 def 消除,清理方案第 3 步②）。
 item({ key: 'vi_5360_shellphone_ocean', name: '', value: 1 });
 item({ key: 'vi_5361_shellphone_hell', name: '', value: 1 });
 item({ key: 'vi_4341_step_stool', name: '', value: 1 });
@@ -856,7 +857,9 @@ item({ key: 'vi_5275_joja_cola', name: '', value: 1 });
 item({ key: 'vi_5278_pomegranate', name: '', value: 1 });
 item({ key: 'vi_5277_spicy_pepper', name: '', value: 1 });
 item({ key: 'vi_5437_shellphone', name: '', value: 1 });
-item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 90 }, axePower: 30 }); // ←vi_1507_SpectreHamaxe 独有字段搬移(批次A)
+// SW-BN1 2026-09-07：1507 首注册已撤（:1035 工具力块同键重复注册,byKey 指后者——
+//  其 tool 经 VANILLA_TOOL_POWERS 回填含 speed/useTime/damage/knockback 全量,首 def
+//  仅 {type,power} 手写面;撤孤儿的零行为差,清理方案第 3 步②）。
 item({ key: 'vi_2250_steampunk_chest', name: '', value: 1 });
 item({ key: 'vi_392_glass_wall', name: '', value: 1 });
 item({ key: 'vi_2699_weapon_rack', name: '', value: 1 });
@@ -888,8 +891,9 @@ item({ key: 'vi_593_snow_block', name: '', value: 1 });
 item({ key: 'vi_3081_marble_block', name: '', value: 1 });
 item({ key: 'vi_1111_blue_berries', name: '', value: 1 });
 item({ key: 'vi_1115_red_husk', name: '', value: 1 });
-item({ key: 'vi_217_molten_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 70 }, axePower: 30 }); // ←vi_217_MoltenHamaxe 独有字段搬移(批次A)
-item({ key: 'vi_122_molten_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 100 } }); // ←vi_122_MoltenPickaxe 独有字段搬移(批次A)
+// SW-BN1 2026-09-07：217/122 首注册已撤（:1009/:1007 工具力块同键重复注册,byKey 指
+//  后者——tool 经 VANILLA_TOOL_POWERS 回填全量,首 def 仅手写 {type,power};零行为差,
+//  清理方案第 3 步②）。
 item({ key: 'vi_1827_bladed_glove', name: '', value: 1 });
 item({ key: 'vi_2263_white_dynasty_wall', name: '', value: 1 });
 item({ key: 'vi_330_obsidian_brick_wall', name: '', value: 1 });
@@ -1069,6 +1073,12 @@ for (const [idStr, m] of Object.entries(_vim)) {
   if (!m || typeof m.key !== 'string' || !m.key) continue;
   const vid = Number(idStr);
   const ik = 'vi_' + idStr + '_' + m.key.replace(/[^A-Za-z0-9]/g, '');
+  // SW-BN1 2026-09-07：4851-4857 宝石橡实在下方 :1316 显式注册（同键覆写 byKey）——
+  //  自动 def 曾与之同键双 def（后注册者胜,先注册的自动 def 沦为孤儿占位,探针实测
+  //  孤儿面 value=1 且 4851 缺 placeStyle）。此处跳过自动注册（dual-key 清理第 3 步②
+  //  「取后注册者」=显式件 value100/tile/placeStyle 权威）,VANILLA_ITEM_KEY_BY_ID 仍指
+  //  该键（显式注册随后落 byKey,终态与跳过前一致,仅消孤儿 def -7 平移）。
+  if (vid >= 4851 && vid <= 4857) { VANILLA_ITEM_KEY_BY_ID[vid] = ik; continue; }
   const existingIdx = VID_SEEN_IDX.get(vid);
   if (existingIdx !== undefined) {
     // 同 vid 已注册（桥接批 snake 键）：不再注册重复 def（内部 id 平移对存档无影响
@@ -1213,6 +1223,32 @@ const SHARED_GROUP_PLACE_STYLE_1457: ReadonlyArray<readonly [number, number]> = 
   [3866, 61],   // Betsy Trophy :34204-34207
   [3867, 60],   // Dark Mage Trophy :34203（default 直落,无覆写支）
   [3868, 62],   // Ogre Trophy :34208-34211
+  // ★SW-BJ3 2026-09-06：平台族 style 带位清偿（用户实报"各种木平台锤击/斜放是否生效"
+  //   全集审计——placeStyle 缺=放置帧恒 style0,全渲染成木平台/日光花盆）：
+  //   蒸汽朋克/天域/生命木/蜂蜜平台 19（:25639-25640 case 2627-2630 组
+  //   `placeStyle = 21 + type - 2627`）；
+  [2627, 21],   // SteampunkPlatform :25640
+  [2628, 22],   // SkywarePlatform :25640
+  [2629, 23],   // LivingWoodPlatform :25640
+  [2630, 24],   // HoneyPlatform :25640
+  //   水晶/金/王朝木/丛林蜥蜴/血肉/冰冻平台 19（:34549-34551 case 3903-3908 组
+  //   `placeStyle = 30 + type - 3903`）；
+  [3903, 30],   // CrystalPlatform :34551
+  [3904, 31],   // GoldenPlatform :34551
+  [3905, 32],   // DynastyPlatform :34551
+  [3906, 33],   // LihzahrdPlatform :34551
+  [3907, 34],   // FleshPlatform :34551
+  [3908, 35],   // FrozenPlatform :34551
+  //   花盆箱族 380（:29720-29740 case 3215-3222 组 `placeStyle = type - 3215`——
+  //   WorldGen.PlaceTile case 380 :60720 frameY=18*style 行带,Tiles_380 8 行带实证）
+  [3215, 0],    // DayBloomPlanterBox :29739
+  [3216, 1],    // MoonglowPlanterBox :29739
+  [3217, 2],    // CorruptPlanterBox :29739
+  [3218, 3],    // CrimsonPlanterBox :29739
+  [3219, 4],    // BlinkrootPlanterBox :29739
+  [3220, 5],    // WaterleafPlanterBox :29739
+  [3221, 6],    // ShiverthornPlanterBox :29739
+  [3222, 7],    // FireBlossomPlanterBox :29739
 ];
 for (const [vid, ps] of SHARED_GROUP_PLACE_STYLE_1457) {
   const kSg = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -1555,7 +1591,9 @@ for (const [wiVid, wi] of Object.entries(wallItemsJson as Record<string, { wall:
   //      与现行注册表布局早已分叉（快照 :6925-6945=Demonite 家具族,现行同位=墙影子件）,
   //      解码零依赖现行下标;快照内蛇形键本批全部保留可反查（键不删,只撤 def 条目）;
   //    · v2 直读裸下标=既有「接受破损」政策,本批不改其语义;
-  //    · 快照冻结后新注册的 12 件（内部 id ≥7467）不可能出现在 v3 档（v3 段止于冻结前）。
+  //    · 快照冻结后新注册的 12 件不可能出现在 v3 档（v3 段止于冻结前;
+  //      ★SW-RB5b 2026-09-07 注勘误:该 12 件内部 id 原为 ≥7467,撤注册 -284 后
+  //      现值 7183-7194——「v3 档不含它们」的实质不变,仅数字随平移过时）。
   //    内部 id 平移面：影子件撤注册后墙物品循环之后的注册（敌旗 290/钓鱼/具名等）
   //    整体 -284——ITEM_STABLE_OF_INTERNAL 建于文件尾（D1）按最终注册表重算,
   //    PRIV/WldImport/UI 全 vid/key 反查,无平移前下标依赖（item-retirement 往返锁）。
@@ -1606,296 +1644,33 @@ for (const [idS, tp] of Object.entries(VANILLA_TOOL_POWERS)) {
 }
 
 // ---- 敌旗独立物品(290 件,原版 BannerToItem 映射 1:1,2026-08-13) ----
-item({ key: 'vi_1615_banner_b1', name: '', maxStack: 99, value: 1 }); // 敌旗 banner1→item 1615
-item({ key: 'vi_1616_banner_b2', name: '', maxStack: 99, value: 1 }); // 敌旗 banner2→item 1616
-item({ key: 'vi_1617_banner_b3', name: '', maxStack: 99, value: 1 }); // 敌旗 banner3→item 1617
-item({ key: 'vi_1618_banner_b4', name: '', maxStack: 99, value: 1 }); // 敌旗 banner4→item 1618
-item({ key: 'vi_1619_banner_b5', name: '', maxStack: 99, value: 1 }); // 敌旗 banner5→item 1619
-item({ key: 'vi_1620_banner_b6', name: '', maxStack: 99, value: 1 }); // 敌旗 banner6→item 1620
-item({ key: 'vi_1621_banner_b7', name: '', maxStack: 99, value: 1 }); // 敌旗 banner7→item 1621
-item({ key: 'vi_1622_banner_b8', name: '', maxStack: 99, value: 1 }); // 敌旗 banner8→item 1622
-item({ key: 'vi_1623_banner_b9', name: '', maxStack: 99, value: 1 }); // 敌旗 banner9→item 1623
-item({ key: 'vi_1624_banner_b10', name: '', maxStack: 99, value: 1 }); // 敌旗 banner10→item 1624
-item({ key: 'vi_1625_banner_b11', name: '', maxStack: 99, value: 1 }); // 敌旗 banner11→item 1625
-item({ key: 'vi_1626_banner_b12', name: '', maxStack: 99, value: 1 }); // 敌旗 banner12→item 1626
-item({ key: 'vi_1627_banner_b13', name: '', maxStack: 99, value: 1 }); // 敌旗 banner13→item 1627
-item({ key: 'vi_1628_banner_b14', name: '', maxStack: 99, value: 1 }); // 敌旗 banner14→item 1628
-item({ key: 'vi_1629_banner_b15', name: '', maxStack: 99, value: 1 }); // 敌旗 banner15→item 1629
-item({ key: 'vi_1630_banner_b16', name: '', maxStack: 99, value: 1 }); // 敌旗 banner16→item 1630
-item({ key: 'vi_1631_banner_b17', name: '', maxStack: 99, value: 1 }); // 敌旗 banner17→item 1631
-item({ key: 'vi_1632_banner_b18', name: '', maxStack: 99, value: 1 }); // 敌旗 banner18→item 1632
-item({ key: 'vi_1633_banner_b19', name: '', maxStack: 99, value: 1 }); // 敌旗 banner19→item 1633
-item({ key: 'vi_1634_banner_b20', name: '', maxStack: 99, value: 1 }); // 敌旗 banner20→item 1634
-item({ key: 'vi_1635_banner_b21', name: '', maxStack: 99, value: 1 }); // 敌旗 banner21→item 1635
-item({ key: 'vi_1636_banner_b22', name: '', maxStack: 99, value: 1 }); // 敌旗 banner22→item 1636
-item({ key: 'vi_1637_banner_b23', name: '', maxStack: 99, value: 1 }); // 敌旗 banner23→item 1637
-item({ key: 'vi_1638_banner_b24', name: '', maxStack: 99, value: 1 }); // 敌旗 banner24→item 1638
-item({ key: 'vi_1639_banner_b25', name: '', maxStack: 99, value: 1 }); // 敌旗 banner25→item 1639
-item({ key: 'vi_1640_banner_b26', name: '', maxStack: 99, value: 1 }); // 敌旗 banner26→item 1640
-item({ key: 'vi_1641_banner_b27', name: '', maxStack: 99, value: 1 }); // 敌旗 banner27→item 1641
-item({ key: 'vi_1642_banner_b28', name: '', maxStack: 99, value: 1 }); // 敌旗 banner28→item 1642
-item({ key: 'vi_1643_banner_b29', name: '', maxStack: 99, value: 1 }); // 敌旗 banner29→item 1643
-item({ key: 'vi_1644_banner_b30', name: '', maxStack: 99, value: 1 }); // 敌旗 banner30→item 1644
-item({ key: 'vi_1645_banner_b31', name: '', maxStack: 99, value: 1 }); // 敌旗 banner31→item 1645
-item({ key: 'vi_1646_banner_b32', name: '', maxStack: 99, value: 1 }); // 敌旗 banner32→item 1646
-item({ key: 'vi_1647_banner_b33', name: '', maxStack: 99, value: 1 }); // 敌旗 banner33→item 1647
-item({ key: 'vi_1648_banner_b34', name: '', maxStack: 99, value: 1 }); // 敌旗 banner34→item 1648
-item({ key: 'vi_1649_banner_b35', name: '', maxStack: 99, value: 1 }); // 敌旗 banner35→item 1649
-item({ key: 'vi_1650_banner_b36', name: '', maxStack: 99, value: 1 }); // 敌旗 banner36→item 1650
-item({ key: 'vi_1651_banner_b37', name: '', maxStack: 99, value: 1 }); // 敌旗 banner37→item 1651
-item({ key: 'vi_1652_banner_b38', name: '', maxStack: 99, value: 1 }); // 敌旗 banner38→item 1652
-item({ key: 'vi_1653_banner_b39', name: '', maxStack: 99, value: 1 }); // 敌旗 banner39→item 1653
-item({ key: 'vi_1654_banner_b40', name: '', maxStack: 99, value: 1 }); // 敌旗 banner40→item 1654
-item({ key: 'vi_1655_banner_b41', name: '', maxStack: 99, value: 1 }); // 敌旗 banner41→item 1655
-item({ key: 'vi_1656_banner_b42', name: '', maxStack: 99, value: 1 }); // 敌旗 banner42→item 1656
-item({ key: 'vi_1657_banner_b43', name: '', maxStack: 99, value: 1 }); // 敌旗 banner43→item 1657
-item({ key: 'vi_1658_banner_b44', name: '', maxStack: 99, value: 1 }); // 敌旗 banner44→item 1658
-item({ key: 'vi_1659_banner_b45', name: '', maxStack: 99, value: 1 }); // 敌旗 banner45→item 1659
-item({ key: 'vi_1660_banner_b46', name: '', maxStack: 99, value: 1 }); // 敌旗 banner46→item 1660
-item({ key: 'vi_1661_banner_b47', name: '', maxStack: 99, value: 1 }); // 敌旗 banner47→item 1661
-item({ key: 'vi_1662_banner_b48', name: '', maxStack: 99, value: 1 }); // 敌旗 banner48→item 1662
-item({ key: 'vi_1663_banner_b49', name: '', maxStack: 99, value: 1 }); // 敌旗 banner49→item 1663
-item({ key: 'vi_1664_banner_b50', name: '', maxStack: 99, value: 1 }); // 敌旗 banner50→item 1664
-item({ key: 'vi_1665_banner_b51', name: '', maxStack: 99, value: 1 }); // 敌旗 banner51→item 1665
-item({ key: 'vi_1666_banner_b52', name: '', maxStack: 99, value: 1 }); // 敌旗 banner52→item 1666
-item({ key: 'vi_1667_banner_b53', name: '', maxStack: 99, value: 1 }); // 敌旗 banner53→item 1667
-item({ key: 'vi_1668_banner_b54', name: '', maxStack: 99, value: 1 }); // 敌旗 banner54→item 1668
-item({ key: 'vi_1669_banner_b55', name: '', maxStack: 99, value: 1 }); // 敌旗 banner55→item 1669
-item({ key: 'vi_1670_banner_b56', name: '', maxStack: 99, value: 1 }); // 敌旗 banner56→item 1670
-item({ key: 'vi_1671_banner_b57', name: '', maxStack: 99, value: 1 }); // 敌旗 banner57→item 1671
-item({ key: 'vi_1672_banner_b58', name: '', maxStack: 99, value: 1 }); // 敌旗 banner58→item 1672
-item({ key: 'vi_1673_banner_b59', name: '', maxStack: 99, value: 1 }); // 敌旗 banner59→item 1673
-item({ key: 'vi_1674_banner_b60', name: '', maxStack: 99, value: 1 }); // 敌旗 banner60→item 1674
-item({ key: 'vi_1675_banner_b61', name: '', maxStack: 99, value: 1 }); // 敌旗 banner61→item 1675
-item({ key: 'vi_1676_banner_b62', name: '', maxStack: 99, value: 1 }); // 敌旗 banner62→item 1676
-item({ key: 'vi_1677_banner_b63', name: '', maxStack: 99, value: 1 }); // 敌旗 banner63→item 1677
-item({ key: 'vi_1678_banner_b64', name: '', maxStack: 99, value: 1 }); // 敌旗 banner64→item 1678
-item({ key: 'vi_1679_banner_b65', name: '', maxStack: 99, value: 1 }); // 敌旗 banner65→item 1679
-item({ key: 'vi_1680_banner_b66', name: '', maxStack: 99, value: 1 }); // 敌旗 banner66→item 1680
-item({ key: 'vi_1681_banner_b67', name: '', maxStack: 99, value: 1 }); // 敌旗 banner67→item 1681
-item({ key: 'vi_1682_banner_b68', name: '', maxStack: 99, value: 1 }); // 敌旗 banner68→item 1682
-item({ key: 'vi_1683_banner_b69', name: '', maxStack: 99, value: 1 }); // 敌旗 banner69→item 1683
-item({ key: 'vi_1684_banner_b70', name: '', maxStack: 99, value: 1 }); // 敌旗 banner70→item 1684
-item({ key: 'vi_1685_banner_b71', name: '', maxStack: 99, value: 1 }); // 敌旗 banner71→item 1685
-item({ key: 'vi_1686_banner_b72', name: '', maxStack: 99, value: 1 }); // 敌旗 banner72→item 1686
-item({ key: 'vi_1687_banner_b73', name: '', maxStack: 99, value: 1 }); // 敌旗 banner73→item 1687
-item({ key: 'vi_1688_banner_b74', name: '', maxStack: 99, value: 1 }); // 敌旗 banner74→item 1688
-item({ key: 'vi_1689_banner_b75', name: '', maxStack: 99, value: 1 }); // 敌旗 banner75→item 1689
-item({ key: 'vi_1690_banner_b76', name: '', maxStack: 99, value: 1 }); // 敌旗 banner76→item 1690
-item({ key: 'vi_1691_banner_b77', name: '', maxStack: 99, value: 1 }); // 敌旗 banner77→item 1691
-item({ key: 'vi_1692_banner_b78', name: '', maxStack: 99, value: 1 }); // 敌旗 banner78→item 1692
-item({ key: 'vi_1693_banner_b79', name: '', maxStack: 99, value: 1 }); // 敌旗 banner79→item 1693
-item({ key: 'vi_1694_banner_b80', name: '', maxStack: 99, value: 1 }); // 敌旗 banner80→item 1694
-item({ key: 'vi_1695_banner_b81', name: '', maxStack: 99, value: 1 }); // 敌旗 banner81→item 1695
-item({ key: 'vi_1696_banner_b82', name: '', maxStack: 99, value: 1 }); // 敌旗 banner82→item 1696
-item({ key: 'vi_1697_banner_b83', name: '', maxStack: 99, value: 1 }); // 敌旗 banner83→item 1697
-item({ key: 'vi_1698_banner_b84', name: '', maxStack: 99, value: 1 }); // 敌旗 banner84→item 1698
-item({ key: 'vi_1699_banner_b85', name: '', maxStack: 99, value: 1 }); // 敌旗 banner85→item 1699
-item({ key: 'vi_1700_banner_b86', name: '', maxStack: 99, value: 1 }); // 敌旗 banner86→item 1700
-item({ key: 'vi_1701_banner_b87', name: '', maxStack: 99, value: 1 }); // 敌旗 banner87→item 1701
-item({ key: 'vi_2897_banner_b88', name: '', maxStack: 99, value: 1 }); // 敌旗 banner88→item 2897
-item({ key: 'vi_2898_banner_b89', name: '', maxStack: 99, value: 1 }); // 敌旗 banner89→item 2898
-item({ key: 'vi_2899_banner_b90', name: '', maxStack: 99, value: 1 }); // 敌旗 banner90→item 2899
-item({ key: 'vi_2900_banner_b91', name: '', maxStack: 99, value: 1 }); // 敌旗 banner91→item 2900
-item({ key: 'vi_2901_banner_b92', name: '', maxStack: 99, value: 1 }); // 敌旗 banner92→item 2901
-item({ key: 'vi_2902_banner_b93', name: '', maxStack: 99, value: 1 }); // 敌旗 banner93→item 2902
-item({ key: 'vi_2903_banner_b94', name: '', maxStack: 99, value: 1 }); // 敌旗 banner94→item 2903
-item({ key: 'vi_2904_banner_b95', name: '', maxStack: 99, value: 1 }); // 敌旗 banner95→item 2904
-item({ key: 'vi_2905_banner_b96', name: '', maxStack: 99, value: 1 }); // 敌旗 banner96→item 2905
-item({ key: 'vi_2906_banner_b97', name: '', maxStack: 99, value: 1 }); // 敌旗 banner97→item 2906
-item({ key: 'vi_2907_banner_b98', name: '', maxStack: 99, value: 1 }); // 敌旗 banner98→item 2907
-item({ key: 'vi_2908_banner_b99', name: '', maxStack: 99, value: 1 }); // 敌旗 banner99→item 2908
-item({ key: 'vi_2909_banner_b100', name: '', maxStack: 99, value: 1 }); // 敌旗 banner100→item 2909
-item({ key: 'vi_2910_banner_b101', name: '', maxStack: 99, value: 1 }); // 敌旗 banner101→item 2910
-item({ key: 'vi_2911_banner_b102', name: '', maxStack: 99, value: 1 }); // 敌旗 banner102→item 2911
-item({ key: 'vi_2912_banner_b103', name: '', maxStack: 99, value: 1 }); // 敌旗 banner103→item 2912
-item({ key: 'vi_2913_banner_b104', name: '', maxStack: 99, value: 1 }); // 敌旗 banner104→item 2913
-item({ key: 'vi_2914_banner_b105', name: '', maxStack: 99, value: 1 }); // 敌旗 banner105→item 2914
-item({ key: 'vi_2915_banner_b106', name: '', maxStack: 99, value: 1 }); // 敌旗 banner106→item 2915
-item({ key: 'vi_2916_banner_b107', name: '', maxStack: 99, value: 1 }); // 敌旗 banner107→item 2916
-item({ key: 'vi_2917_banner_b108', name: '', maxStack: 99, value: 1 }); // 敌旗 banner108→item 2917
-item({ key: 'vi_2918_banner_b109', name: '', maxStack: 99, value: 1 }); // 敌旗 banner109→item 2918
-item({ key: 'vi_2919_banner_b110', name: '', maxStack: 99, value: 1 }); // 敌旗 banner110→item 2919
-item({ key: 'vi_2920_banner_b111', name: '', maxStack: 99, value: 1 }); // 敌旗 banner111→item 2920
-item({ key: 'vi_2921_banner_b112', name: '', maxStack: 99, value: 1 }); // 敌旗 banner112→item 2921
-item({ key: 'vi_2922_banner_b113', name: '', maxStack: 99, value: 1 }); // 敌旗 banner113→item 2922
-item({ key: 'vi_2923_banner_b114', name: '', maxStack: 99, value: 1 }); // 敌旗 banner114→item 2923
-item({ key: 'vi_2924_banner_b115', name: '', maxStack: 99, value: 1 }); // 敌旗 banner115→item 2924
-item({ key: 'vi_2925_banner_b116', name: '', maxStack: 99, value: 1 }); // 敌旗 banner116→item 2925
-item({ key: 'vi_2926_banner_b117', name: '', maxStack: 99, value: 1 }); // 敌旗 banner117→item 2926
-item({ key: 'vi_2927_banner_b118', name: '', maxStack: 99, value: 1 }); // 敌旗 banner118→item 2927
-item({ key: 'vi_2928_banner_b119', name: '', maxStack: 99, value: 1 }); // 敌旗 banner119→item 2928
-item({ key: 'vi_2929_banner_b120', name: '', maxStack: 99, value: 1 }); // 敌旗 banner120→item 2929
-item({ key: 'vi_2930_banner_b121', name: '', maxStack: 99, value: 1 }); // 敌旗 banner121→item 2930
-item({ key: 'vi_2931_banner_b122', name: '', maxStack: 99, value: 1 }); // 敌旗 banner122→item 2931
-item({ key: 'vi_2932_banner_b123', name: '', maxStack: 99, value: 1 }); // 敌旗 banner123→item 2932
-item({ key: 'vi_2933_banner_b124', name: '', maxStack: 99, value: 1 }); // 敌旗 banner124→item 2933
-item({ key: 'vi_2934_banner_b125', name: '', maxStack: 99, value: 1 }); // 敌旗 banner125→item 2934
-item({ key: 'vi_2935_banner_b126', name: '', maxStack: 99, value: 1 }); // 敌旗 banner126→item 2935
-item({ key: 'vi_2936_banner_b127', name: '', maxStack: 99, value: 1 }); // 敌旗 banner127→item 2936
-item({ key: 'vi_2937_banner_b128', name: '', maxStack: 99, value: 1 }); // 敌旗 banner128→item 2937
-item({ key: 'vi_2938_banner_b129', name: '', maxStack: 99, value: 1 }); // 敌旗 banner129→item 2938
-item({ key: 'vi_2939_banner_b130', name: '', maxStack: 99, value: 1 }); // 敌旗 banner130→item 2939
-item({ key: 'vi_2940_banner_b131', name: '', maxStack: 99, value: 1 }); // 敌旗 banner131→item 2940
-item({ key: 'vi_2941_banner_b132', name: '', maxStack: 99, value: 1 }); // 敌旗 banner132→item 2941
-item({ key: 'vi_2942_banner_b133', name: '', maxStack: 99, value: 1 }); // 敌旗 banner133→item 2942
-item({ key: 'vi_2943_banner_b134', name: '', maxStack: 99, value: 1 }); // 敌旗 banner134→item 2943
-item({ key: 'vi_2944_banner_b135', name: '', maxStack: 99, value: 1 }); // 敌旗 banner135→item 2944
-item({ key: 'vi_2945_banner_b136', name: '', maxStack: 99, value: 1 }); // 敌旗 banner136→item 2945
-item({ key: 'vi_2946_banner_b137', name: '', maxStack: 99, value: 1 }); // 敌旗 banner137→item 2946
-item({ key: 'vi_2947_banner_b138', name: '', maxStack: 99, value: 1 }); // 敌旗 banner138→item 2947
-item({ key: 'vi_2948_banner_b139', name: '', maxStack: 99, value: 1 }); // 敌旗 banner139→item 2948
-item({ key: 'vi_2949_banner_b140', name: '', maxStack: 99, value: 1 }); // 敌旗 banner140→item 2949
-item({ key: 'vi_2950_banner_b141', name: '', maxStack: 99, value: 1 }); // 敌旗 banner141→item 2950
-item({ key: 'vi_2951_banner_b142', name: '', maxStack: 99, value: 1 }); // 敌旗 banner142→item 2951
-item({ key: 'vi_2952_banner_b143', name: '', maxStack: 99, value: 1 }); // 敌旗 banner143→item 2952
-item({ key: 'vi_2953_banner_b144', name: '', maxStack: 99, value: 1 }); // 敌旗 banner144→item 2953
-item({ key: 'vi_2954_banner_b145', name: '', maxStack: 99, value: 1 }); // 敌旗 banner145→item 2954
-item({ key: 'vi_2955_banner_b146', name: '', maxStack: 99, value: 1 }); // 敌旗 banner146→item 2955
-item({ key: 'vi_2956_banner_b147', name: '', maxStack: 99, value: 1 }); // 敌旗 banner147→item 2956
-item({ key: 'vi_2957_banner_b148', name: '', maxStack: 99, value: 1 }); // 敌旗 banner148→item 2957
-item({ key: 'vi_2958_banner_b149', name: '', maxStack: 99, value: 1 }); // 敌旗 banner149→item 2958
-item({ key: 'vi_2959_banner_b150', name: '', maxStack: 99, value: 1 }); // 敌旗 banner150→item 2959
-item({ key: 'vi_2960_banner_b151', name: '', maxStack: 99, value: 1 }); // 敌旗 banner151→item 2960
-item({ key: 'vi_2961_banner_b152', name: '', maxStack: 99, value: 1 }); // 敌旗 banner152→item 2961
-item({ key: 'vi_2962_banner_b153', name: '', maxStack: 99, value: 1 }); // 敌旗 banner153→item 2962
-item({ key: 'vi_2963_banner_b154', name: '', maxStack: 99, value: 1 }); // 敌旗 banner154→item 2963
-item({ key: 'vi_2964_banner_b155', name: '', maxStack: 99, value: 1 }); // 敌旗 banner155→item 2964
-item({ key: 'vi_2965_banner_b156', name: '', maxStack: 99, value: 1 }); // 敌旗 banner156→item 2965
-item({ key: 'vi_2966_banner_b157', name: '', maxStack: 99, value: 1 }); // 敌旗 banner157→item 2966
-item({ key: 'vi_2967_banner_b158', name: '', maxStack: 99, value: 1 }); // 敌旗 banner158→item 2967
-item({ key: 'vi_2968_banner_b159', name: '', maxStack: 99, value: 1 }); // 敌旗 banner159→item 2968
-item({ key: 'vi_2969_banner_b160', name: '', maxStack: 99, value: 1 }); // 敌旗 banner160→item 2969
-item({ key: 'vi_2970_banner_b161', name: '', maxStack: 99, value: 1 }); // 敌旗 banner161→item 2970
-item({ key: 'vi_2971_banner_b162', name: '', maxStack: 99, value: 1 }); // 敌旗 banner162→item 2971
-item({ key: 'vi_2972_banner_b163', name: '', maxStack: 99, value: 1 }); // 敌旗 banner163→item 2972
-item({ key: 'vi_2973_banner_b164', name: '', maxStack: 99, value: 1 }); // 敌旗 banner164→item 2973
-item({ key: 'vi_2974_banner_b165', name: '', maxStack: 99, value: 1 }); // 敌旗 banner165→item 2974
-item({ key: 'vi_2975_banner_b166', name: '', maxStack: 99, value: 1 }); // 敌旗 banner166→item 2975
-item({ key: 'vi_2976_banner_b167', name: '', maxStack: 99, value: 1 }); // 敌旗 banner167→item 2976
-item({ key: 'vi_2977_banner_b168', name: '', maxStack: 99, value: 1 }); // 敌旗 banner168→item 2977
-item({ key: 'vi_2978_banner_b169', name: '', maxStack: 99, value: 1 }); // 敌旗 banner169→item 2978
-item({ key: 'vi_2979_banner_b170', name: '', maxStack: 99, value: 1 }); // 敌旗 banner170→item 2979
-item({ key: 'vi_2980_banner_b171', name: '', maxStack: 99, value: 1 }); // 敌旗 banner171→item 2980
-item({ key: 'vi_2981_banner_b172', name: '', maxStack: 99, value: 1 }); // 敌旗 banner172→item 2981
-item({ key: 'vi_2982_banner_b173', name: '', maxStack: 99, value: 1 }); // 敌旗 banner173→item 2982
-item({ key: 'vi_2983_banner_b174', name: '', maxStack: 99, value: 1 }); // 敌旗 banner174→item 2983
-item({ key: 'vi_2984_banner_b175', name: '', maxStack: 99, value: 1 }); // 敌旗 banner175→item 2984
-item({ key: 'vi_2985_banner_b176', name: '', maxStack: 99, value: 1 }); // 敌旗 banner176→item 2985
-item({ key: 'vi_2986_banner_b177', name: '', maxStack: 99, value: 1 }); // 敌旗 banner177→item 2986
-item({ key: 'vi_2987_banner_b178', name: '', maxStack: 99, value: 1 }); // 敌旗 banner178→item 2987
-item({ key: 'vi_2988_banner_b179', name: '', maxStack: 99, value: 1 }); // 敌旗 banner179→item 2988
-item({ key: 'vi_2989_banner_b180', name: '', maxStack: 99, value: 1 }); // 敌旗 banner180→item 2989
-item({ key: 'vi_2990_banner_b181', name: '', maxStack: 99, value: 1 }); // 敌旗 banner181→item 2990
-item({ key: 'vi_2991_banner_b182', name: '', maxStack: 99, value: 1 }); // 敌旗 banner182→item 2991
-item({ key: 'vi_2992_banner_b183', name: '', maxStack: 99, value: 1 }); // 敌旗 banner183→item 2992
-item({ key: 'vi_2993_banner_b184', name: '', maxStack: 99, value: 1 }); // 敌旗 banner184→item 2993
-item({ key: 'vi_2994_banner_b185', name: '', maxStack: 99, value: 1 }); // 敌旗 banner185→item 2994
-item({ key: 'vi_3390_banner_b186', name: '', maxStack: 99, value: 1 }); // 敌旗 banner186→item 3390
-item({ key: 'vi_3391_banner_b187', name: '', maxStack: 99, value: 1 }); // 敌旗 banner187→item 3391
-item({ key: 'vi_3392_banner_b188', name: '', maxStack: 99, value: 1 }); // 敌旗 banner188→item 3392
-item({ key: 'vi_3393_banner_b189', name: '', maxStack: 99, value: 1 }); // 敌旗 banner189→item 3393
-item({ key: 'vi_3394_banner_b190', name: '', maxStack: 99, value: 1 }); // 敌旗 banner190→item 3394
-item({ key: 'vi_3395_banner_b191', name: '', maxStack: 99, value: 1 }); // 敌旗 banner191→item 3395
-item({ key: 'vi_3396_banner_b192', name: '', maxStack: 99, value: 1 }); // 敌旗 banner192→item 3396
-item({ key: 'vi_3397_banner_b193', name: '', maxStack: 99, value: 1 }); // 敌旗 banner193→item 3397
-item({ key: 'vi_3398_banner_b194', name: '', maxStack: 99, value: 1 }); // 敌旗 banner194→item 3398
-item({ key: 'vi_3399_banner_b195', name: '', maxStack: 99, value: 1 }); // 敌旗 banner195→item 3399
-item({ key: 'vi_3400_banner_b196', name: '', maxStack: 99, value: 1 }); // 敌旗 banner196→item 3400
-item({ key: 'vi_3401_banner_b197', name: '', maxStack: 99, value: 1 }); // 敌旗 banner197→item 3401
-item({ key: 'vi_3402_banner_b198', name: '', maxStack: 99, value: 1 }); // 敌旗 banner198→item 3402
-item({ key: 'vi_3403_banner_b199', name: '', maxStack: 99, value: 1 }); // 敌旗 banner199→item 3403
-item({ key: 'vi_3404_banner_b200', name: '', maxStack: 99, value: 1 }); // 敌旗 banner200→item 3404
-item({ key: 'vi_3405_banner_b201', name: '', maxStack: 99, value: 1 }); // 敌旗 banner201→item 3405
-item({ key: 'vi_3406_banner_b202', name: '', maxStack: 99, value: 1 }); // 敌旗 banner202→item 3406
-item({ key: 'vi_3407_banner_b203', name: '', maxStack: 99, value: 1 }); // 敌旗 banner203→item 3407
-item({ key: 'vi_3408_banner_b204', name: '', maxStack: 99, value: 1 }); // 敌旗 banner204→item 3408
-item({ key: 'vi_3409_banner_b205', name: '', maxStack: 99, value: 1 }); // 敌旗 banner205→item 3409
-item({ key: 'vi_3410_banner_b206', name: '', maxStack: 99, value: 1 }); // 敌旗 banner206→item 3410
-item({ key: 'vi_3411_banner_b207', name: '', maxStack: 99, value: 1 }); // 敌旗 banner207→item 3411
-item({ key: 'vi_3412_banner_b208', name: '', maxStack: 99, value: 1 }); // 敌旗 banner208→item 3412
-item({ key: 'vi_3413_banner_b209', name: '', maxStack: 99, value: 1 }); // 敌旗 banner209→item 3413
-item({ key: 'vi_3414_banner_b210', name: '', maxStack: 99, value: 1 }); // 敌旗 banner210→item 3414
-item({ key: 'vi_3415_banner_b211', name: '', maxStack: 99, value: 1 }); // 敌旗 banner211→item 3415
-item({ key: 'vi_3416_banner_b212', name: '', maxStack: 99, value: 1 }); // 敌旗 banner212→item 3416
-item({ key: 'vi_3417_banner_b213', name: '', maxStack: 99, value: 1 }); // 敌旗 banner213→item 3417
-item({ key: 'vi_3418_banner_b214', name: '', maxStack: 99, value: 1 }); // 敌旗 banner214→item 3418
-item({ key: 'vi_3419_banner_b215', name: '', maxStack: 99, value: 1 }); // 敌旗 banner215→item 3419
-item({ key: 'vi_3420_banner_b216', name: '', maxStack: 99, value: 1 }); // 敌旗 banner216→item 3420
-item({ key: 'vi_3421_banner_b217', name: '', maxStack: 99, value: 1 }); // 敌旗 banner217→item 3421
-item({ key: 'vi_3422_banner_b218', name: '', maxStack: 99, value: 1 }); // 敌旗 banner218→item 3422
-item({ key: 'vi_3423_banner_b219', name: '', maxStack: 99, value: 1 }); // 敌旗 banner219→item 3423
-item({ key: 'vi_3424_banner_b220', name: '', maxStack: 99, value: 1 }); // 敌旗 banner220→item 3424
-item({ key: 'vi_3425_banner_b221', name: '', maxStack: 99, value: 1 }); // 敌旗 banner221→item 3425
-item({ key: 'vi_3426_banner_b222', name: '', maxStack: 99, value: 1 }); // 敌旗 banner222→item 3426
-item({ key: 'vi_3427_banner_b223', name: '', maxStack: 99, value: 1 }); // 敌旗 banner223→item 3427
-item({ key: 'vi_3428_banner_b224', name: '', maxStack: 99, value: 1 }); // 敌旗 banner224→item 3428
-item({ key: 'vi_3429_banner_b225', name: '', maxStack: 99, value: 1 }); // 敌旗 banner225→item 3429
-item({ key: 'vi_3430_banner_b226', name: '', maxStack: 99, value: 1 }); // 敌旗 banner226→item 3430
-item({ key: 'vi_3431_banner_b227', name: '', maxStack: 99, value: 1 }); // 敌旗 banner227→item 3431
-item({ key: 'vi_3432_banner_b228', name: '', maxStack: 99, value: 1 }); // 敌旗 banner228→item 3432
-item({ key: 'vi_3433_banner_b229', name: '', maxStack: 99, value: 1 }); // 敌旗 banner229→item 3433
-item({ key: 'vi_3434_banner_b230', name: '', maxStack: 99, value: 1 }); // 敌旗 banner230→item 3434
-item({ key: 'vi_3435_banner_b231', name: '', maxStack: 99, value: 1 }); // 敌旗 banner231→item 3435
-item({ key: 'vi_3436_banner_b232', name: '', maxStack: 99, value: 1 }); // 敌旗 banner232→item 3436
-item({ key: 'vi_3437_banner_b233', name: '', maxStack: 99, value: 1 }); // 敌旗 banner233→item 3437
-item({ key: 'vi_3438_banner_b234', name: '', maxStack: 99, value: 1 }); // 敌旗 banner234→item 3438
-item({ key: 'vi_3439_banner_b235', name: '', maxStack: 99, value: 1 }); // 敌旗 banner235→item 3439
-item({ key: 'vi_3440_banner_b236', name: '', maxStack: 99, value: 1 }); // 敌旗 banner236→item 3440
-item({ key: 'vi_3441_banner_b237', name: '', maxStack: 99, value: 1 }); // 敌旗 banner237→item 3441
-item({ key: 'vi_3442_banner_b238', name: '', maxStack: 99, value: 1 }); // 敌旗 banner238→item 3442
-item({ key: 'vi_3443_banner_b239', name: '', maxStack: 99, value: 1 }); // 敌旗 banner239→item 3443
-item({ key: 'vi_3444_banner_b240', name: '', maxStack: 99, value: 1 }); // 敌旗 banner240→item 3444
-item({ key: 'vi_3445_banner_b241', name: '', maxStack: 99, value: 1 }); // 敌旗 banner241→item 3445
-item({ key: 'vi_3446_banner_b242', name: '', maxStack: 99, value: 1 }); // 敌旗 banner242→item 3446
-item({ key: 'vi_3447_banner_b243', name: '', maxStack: 99, value: 1 }); // 敌旗 banner243→item 3447
-item({ key: 'vi_3448_banner_b244', name: '', maxStack: 99, value: 1 }); // 敌旗 banner244→item 3448
-item({ key: 'vi_3449_banner_b245', name: '', maxStack: 99, value: 1 }); // 敌旗 banner245→item 3449
-item({ key: 'vi_3450_banner_b246', name: '', maxStack: 99, value: 1 }); // 敌旗 banner246→item 3450
-item({ key: 'vi_3451_banner_b247', name: '', maxStack: 99, value: 1 }); // 敌旗 banner247→item 3451
-item({ key: 'vi_3452_banner_b248', name: '', maxStack: 99, value: 1 }); // 敌旗 banner248→item 3452
-item({ key: 'vi_3593_banner_b249', name: '', maxStack: 99, value: 1 }); // 敌旗 banner249→item 3593
-item({ key: 'vi_3594_banner_b250', name: '', maxStack: 99, value: 1 }); // 敌旗 banner250→item 3594
-item({ key: 'vi_3780_banner_b251', name: '', maxStack: 99, value: 1 }); // 敌旗 banner251→item 3780
-item({ key: 'vi_3789_banner_b252', name: '', maxStack: 99, value: 1 }); // 敌旗 banner252→item 3789
-item({ key: 'vi_3790_banner_b253', name: '', maxStack: 99, value: 1 }); // 敌旗 banner253→item 3790
-item({ key: 'vi_3791_banner_b254', name: '', maxStack: 99, value: 1 }); // 敌旗 banner254→item 3791
-item({ key: 'vi_3792_banner_b255', name: '', maxStack: 99, value: 1 }); // 敌旗 banner255→item 3792
-item({ key: 'vi_3793_banner_b256', name: '', maxStack: 99, value: 1 }); // 敌旗 banner256→item 3793
-item({ key: 'vi_3837_banner_b257', name: '', maxStack: 99, value: 1 }); // 敌旗 banner257→item 3837
-item({ key: 'vi_3838_banner_b258', name: '', maxStack: 99, value: 1 }); // 敌旗 banner258→item 3838
-item({ key: 'vi_3839_banner_b259', name: '', maxStack: 99, value: 1 }); // 敌旗 banner259→item 3839
-item({ key: 'vi_3840_banner_b260', name: '', maxStack: 99, value: 1 }); // 敌旗 banner260→item 3840
-item({ key: 'vi_3841_banner_b261', name: '', maxStack: 99, value: 1 }); // 敌旗 banner261→item 3841
-item({ key: 'vi_3842_banner_b262', name: '', maxStack: 99, value: 1 }); // 敌旗 banner262→item 3842
-item({ key: 'vi_3843_banner_b263', name: '', maxStack: 99, value: 1 }); // 敌旗 banner263→item 3843
-item({ key: 'vi_3844_banner_b264', name: '', maxStack: 99, value: 1 }); // 敌旗 banner264→item 3844
-item({ key: 'vi_3845_banner_b265', name: '', maxStack: 99, value: 1 }); // 敌旗 banner265→item 3845
-item({ key: 'vi_3846_banner_b266', name: '', maxStack: 99, value: 1 }); // 敌旗 banner266→item 3846
-item({ key: 'vi_4541_banner_b267', name: '', maxStack: 99, value: 1 }); // 敌旗 banner267→item 4541
-item({ key: 'vi_4542_banner_b268', name: '', maxStack: 99, value: 1 }); // 敌旗 banner268→item 4542
-item({ key: 'vi_4543_banner_b269', name: '', maxStack: 99, value: 1 }); // 敌旗 banner269→item 4543
-item({ key: 'vi_4544_banner_b270', name: '', maxStack: 99, value: 1 }); // 敌旗 banner270→item 4544
-item({ key: 'vi_4545_banner_b271', name: '', maxStack: 99, value: 1 }); // 敌旗 banner271→item 4545
-item({ key: 'vi_4546_banner_b272', name: '', maxStack: 99, value: 1 }); // 敌旗 banner272→item 4546
-item({ key: 'vi_4602_banner_b273', name: '', maxStack: 99, value: 1 }); // 敌旗 banner273→item 4602
-item({ key: 'vi_4687_banner_b274', name: '', maxStack: 99, value: 1 }); // 敌旗 banner274→item 4687
-item({ key: 'vi_4688_banner_b275', name: '', maxStack: 99, value: 1 }); // 敌旗 banner275→item 4688
-item({ key: 'vi_4965_banner_b276', name: '', maxStack: 99, value: 1 }); // 敌旗 banner276→item 4965
-item({ key: 'vi_4966_banner_b277', name: '', maxStack: 99, value: 1 }); // 敌旗 banner277→item 4966
-item({ key: 'vi_4967_banner_b278', name: '', maxStack: 99, value: 1 }); // 敌旗 banner278→item 4967
-item({ key: 'vi_4968_banner_b279', name: '', maxStack: 99, value: 1 }); // 敌旗 banner279→item 4968
-item({ key: 'vi_4969_banner_b280', name: '', maxStack: 99, value: 1 }); // 敌旗 banner280→item 4969
-item({ key: 'vi_4970_banner_b281', name: '', maxStack: 99, value: 1 }); // 敌旗 banner281→item 4970
-item({ key: 'vi_4971_banner_b282', name: '', maxStack: 99, value: 1 }); // 敌旗 banner282→item 4971
-item({ key: 'vi_4972_banner_b283', name: '', maxStack: 99, value: 1 }); // 敌旗 banner283→item 4972
-item({ key: 'vi_4973_banner_b284', name: '', maxStack: 99, value: 1 }); // 敌旗 banner284→item 4973
-item({ key: 'vi_4974_banner_b285', name: '', maxStack: 99, value: 1 }); // 敌旗 banner285→item 4974
-item({ key: 'vi_4975_banner_b286', name: '', maxStack: 99, value: 1 }); // 敌旗 banner286→item 4975
-item({ key: 'vi_4976_banner_b287', name: '', maxStack: 99, value: 1 }); // 敌旗 banner287→item 4976
-item({ key: 'vi_4977_banner_b288', name: '', maxStack: 99, value: 1 }); // 敌旗 banner288→item 4977
-item({ key: 'vi_5352_banner_b289', name: '', maxStack: 99, value: 1 }); // 敌旗 banner289→item 5352
-item({ key: 'vi_5651_banner_b290', name: '', maxStack: 99, value: 1 }); // 敌旗 banner290→item 5651
+// SW-BN1 2026-09-07 dual-key 二期归一（docs/dual-key-cleanup-plan.md 第 3 步①,同构
+//  SW-BK1 墙族 ③）：290 件蛇形影子 def（vi_<vid>_banner_bN,原此 290 行逐条 item()）
+//  撤注册——权威=自动注册循环先建的驼峰 def（vi_1615_AnglerFishBanner 等,玩家实持面
+//  VANILLA_ITEM_KEY_BY_ID 全指它,且独有类级 placeStyle[bannerStyleClassPs 回填循环
+//  在本块之前跑,影子件注册序靠后恒未刷到→探针 285 红根因]）。落刀仪实测 290/290:
+//  影子 def 字段面={value:1} ⊆ 权威 def（value:1+placeStyle;3392/3393 权威件另有
+//  tile='v_91_banners'）→ 撤注册零字段损失。蛇形键保留=别名到权威 def（save.test/
+//  item-retirement 的 vi_1615_banner_b1 键反查、idNames.generated ITEM_KEY_TO_ID、
+//  SpriteAtlas 键映射、SaveFile legacyItemIndex 快照键全继续解析）;内部 id 平移安全
+//  论证同 SW-BK1 ③ 注（v4/v5 稳定 id、v3 快照键中转、ITEM_STABLE_OF_INTERNAL 文件尾重算）。
+const BANNER_VID_RUNS: ReadonlyArray<readonly [number, number]> = [
+  [1615, 1701], [2897, 2994], [3390, 3452], [3593, 3594], [3780, 3780], [3789, 3793],
+  [3837, 3846], [4541, 4546], [4602, 4602], [4687, 4688], [4965, 4977], [5352, 5352],
+  [5651, 5651],
+];
+{
+  let bN = 0;
+  for (const [bVid0, bVid1] of BANNER_VID_RUNS) {
+    for (let bVid = bVid0; bVid <= bVid1; bVid++) {
+      bN++;
+      const bKey = `vi_${bVid}_banner_b${bN}`;
+      const cKey = VANILLA_ITEM_KEY_BY_ID[bVid];
+      if (cKey !== undefined) { byKey[bKey] = byKey[cKey]; continue; }
+      item({ key: bKey, name: '', maxStack: 99, value: 1 }); // 无权威 def 兜底(vanilla.json 缺件,现 0/290,镜像墙族 ④)
+    }
+  }
+}
 // ---- 放置语义全量回填(vanilla-itemfunc.json Item.cs createTile/placeStyle 提取)：
 // tryPlace(Game)要求 def.tile,vi_ 骨架此前只有手写特例能放置。此处注册期把
 // itemfunc.createTile(=原版 TileID)经 sheet 反查落到 v_ tile key——蛇形/驼峰
@@ -2140,48 +1915,38 @@ export const PLACE_TILE_ON_ALT_USE: ReadonlySet<number> = new Set<number>([
   5300, 5311, 5312, 5313, 5350, 5511,
 ]);
 
-item({ key: 'vi_5573_torch_gods_potion', name: '', maxStack: 30, value: 1 }); // 火把神药水(Torch God's Potion——:10594-10596 授 TorchGodsFavor)
-// 格挡盾族（Player.cs:31254-31280 shield 旗标 + :30979 CanParryAgainst——2026-08-13）
-item({ key: 'vi_3823_brand_of_the_inferno', name: '', maxStack: 1, value: 1 });
-item({ key: 'vi_4760_sergeants_united_shield', name: '', maxStack: 1, value: 1 });
-// ---- 钓鱼链物品补齐
-item({ key: 'vi_4608_chum_bucket', name: '', maxStack: 99, value: 1 }); // 鱼饵桶(Chum Bucket——抛入水增渔力 +11/+6/+3,:19231-19242)(2026-08-13:饵/竿/药水/渔获——此前正常玩法无法抛竿,B26 断链) ----
-item({ key: 'vi_2422_hotline_fishing_hook', name: '', maxStack: 1, value: 1 }); // 熔线钓钩(Hotline Fishing Hook——岩浆钓三源之一,:19230/:19375-19378)
-item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_1992_Firefly 独有字段搬移(批次A)
-item({ key: 'vi_2001_f2001', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 8 }); // 饵(紫蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2001_JuliaButterfly 独有字段搬移(批次A)
-item({ key: 'vi_2002_f2002', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(红蜻蜓?)——数值/名走 itemfunc+l10n 链 // ←vi_2002_Worm 独有字段搬移(批次A)
-item({ key: 'vi_2004_f2004', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2004_LightningBug 独有字段搬移(批次A)
-item({ key: 'vi_2006_f2006', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2006_Snail 独有字段搬移(批次A)
-item({ key: 'vi_2007_f2007', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(瓢虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2007_GlowingSnail 独有字段搬移(批次A)
-item({ key: 'vi_2156_f2156', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链 // ←vi_2156_BlackScorpion 独有字段搬移(批次A)
-item({ key: 'vi_2157_f2157', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链 // ←vi_2157_Scorpion 独有字段搬移(批次A)
-item({ key: 'vi_2289_f2289', name: '', maxStack: 999, value: 1 }); // 竿(木质钓竿)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2291_f2291', name: '', maxStack: 999, value: 1 }); // 竿(强化钓竿?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2293_f2293', name: '', maxStack: 999, value: 1 }); // 竿(渔夫钓竿?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2294_f2294', name: '', maxStack: 999, value: 1 }); // 竿(灵魂钓手?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2295_f2295', name: '', maxStack: 999, value: 1 }); // 竿(玻璃钢钓竿?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2296_f2296', name: '', maxStack: 999, value: 1 }); // 竿(机械师钓竿?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2354_f2354', name: '', maxStack: 999, value: 1 }); // 药水(钓鱼药水)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2355_f2355', name: '', maxStack: 999, value: 1 }); // 药水(声呐药水)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2356_f2356', name: '', maxStack: 999, value: 1 }); // 药水(宝匣药水)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2438_f2438', name: '', maxStack: 999, value: 1 }); // 饵(蜗牛?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2613_f2613', name: '', maxStack: 999, value: 1, tile: 'chest' }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_2613_PinkDungeonChest 独有字段搬移(批次A追补 2026-09-02:驼峰 def 的 tile=chest 系 createTile 双源回填[51fefa56]所补,2613 在 itemfunc 提取外、走 vanilla.json createTile 21)
-item({ key: 'vi_2673_f2673', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(松露虫)——数值/名走 itemfunc+l10n 链 // ←vi_2673_TruffleWorm 独有字段搬移(批次A)
-item({ key: 'vi_2674_f2674', name: '', maxStack: 999, value: 1 }); // 饵(学徒饵)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2675_f2675', name: '', maxStack: 999, value: 1 }); // 饵(行家饵)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2676_f2676', name: '', maxStack: 999, value: 1 }); // 饵(大师饵)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2740_f2740', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(幼虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2740_Grasshopper 独有字段搬移(批次A)
-item({ key: 'vi_2895_f2895', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(蠕虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2895_GoldWorm 独有字段搬移(批次A)
-item({ key: 'vi_3191_f3191', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3191_EnchantedNightcrawler 独有字段搬移(批次A)
-item({ key: 'vi_3192_f3192', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3192_Grubby 独有字段搬移(批次A)
-item({ key: 'vi_3193_f3193', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3193_Sluggy 独有字段搬移(批次A)
-item({ key: 'vi_3194_f3194', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3194_Buggy 独有字段搬移(批次A)
-item({ key: 'vi_3392_f3392', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_3393_f3393', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_4325_f4325', name: '', maxStack: 999, value: 1 }); // 竿(血肉捕手)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_4339_f4339', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(熔岩萤火虫?)——数值/名走 itemfunc+l10n 链 // ←vi_4339_YellowDragonfly 独有字段搬移(批次A)
-item({ key: 'vi_4340_f4340', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(地狱蝴蝶?)——数值/名走 itemfunc+l10n 链 // ←vi_4340_GoldDragonfly 独有字段搬移(批次A)
-item({ key: 'vi_4442_f4442', name: '', maxStack: 999, value: 1 }); // 竿(深渊钓竿?)——数值/名走 itemfunc+l10n 链
+// SW-BN1 2026-09-07 dual-key 二期归一（docs/dual-key-cleanup-plan.md 第 3 步①,同构
+//  banner/墙族 ③）：杂 5 件 + 钓鱼 f兜底 35 件蛇形影子 def（原 40 行逐条 item()）撤
+//  注册,蛇形键别名到自动循环先建的权威驼峰 def（玩家实持面 VANILLA_ITEM_KEY_BY_ID 全
+//  指它）。落刀仪实测 40/40:影子 def 字段面 ⊆ 权威 def——批次A搬进影子的 tile/
+//  placeStyle 权威件经 itemfunc/createTile 回填同样在（2001 饵 placeStyle=8、2613 箱
+//  tile='chest' 等首尾字段面全等）,撤注册零字段损失;手写 maxStack(30/1/99) 对 vi_ 键
+//  本就不生效（VANILLA_MAX_STACK 表管辖→9999）,非有效字段。键语义保留=别名（save.test/
+//  item-retirement 的 vi_2289_f2289 键反查、idNames.generated ITEM_KEY_TO_ID、
+//  SpriteAtlas、legacyItemIndex 快照键全继续解析;内部 id 平移安全论证同 SW-BK1 ③ 注）。
+//  杂 5:5573 火把神药水(:10594-10596 授 TorchGodsFavor);3823/4760 格挡盾族
+//  （Player.cs:31254-31280 shield 旗标 + :30979 CanParryAgainst,2026-08-13）;
+//  4608 鱼饵桶(:19231-19242 抛入水增渔力+11/+6/+3,2026-08-13 B26 断链清偿);
+//  2422 熔线钓钩(:19230/:19375-19378 岩浆钓三源之一)。
+const SWBN1_MISC5_KEYS: ReadonlyArray<readonly [string, number]> = [
+  ['vi_5573_torch_gods_potion', 5573],
+  ['vi_3823_brand_of_the_inferno', 3823],
+  ['vi_4760_sergeants_united_shield', 4760],
+  ['vi_4608_chum_bucket', 4608],
+  ['vi_2422_hotline_fishing_hook', 2422],
+];
+// 钓鱼链 f兜底 35 件（竿/饵/药水/渔获——数值/名走 itemfunc+l10n 链,键 = vi_<vid>_f<vid>）
+const SWBN1_F_FALLBACK_VIDS: ReadonlyArray<number> = [
+  1992, 2001, 2002, 2004, 2006, 2007, 2156, 2157, 2289, 2291, 2293, 2294, 2295, 2296,
+  2354, 2355, 2356, 2438, 2613, 2673, 2674, 2675, 2676, 2740, 2895, 3191, 3192, 3193,
+  3194, 3392, 3393, 4325, 4339, 4340, 4442,
+];
+for (const [sKey, sVid] of [...SWBN1_MISC5_KEYS,
+  ...SWBN1_F_FALLBACK_VIDS.map((v) => [`vi_${v}_f${v}`, v] as const)]) {
+  const cKey = VANILLA_ITEM_KEY_BY_ID[sVid];
+  if (cKey !== undefined) { byKey[sKey] = byKey[cKey]; continue; }
+  item({ key: sKey, name: '', maxStack: 999, value: 1 }); // 无权威 def 兜底(vanilla.json 缺件,现 0/40,镜像墙族 ④)
+}
 
 // ---- 1457 批 B 素材到位后的注册收口（2026-08-21）----
 // 6147-6195 已随 TEdit items.json(+49) 进 vanilla.json → 由上方自动注册循环注册

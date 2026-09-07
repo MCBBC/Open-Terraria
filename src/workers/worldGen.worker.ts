@@ -158,6 +158,7 @@ ctx.onmessage = async (e) => {
       //   立即提取尾部需要的字段并释放引用——6400×1800 世界 SaveData+TypedArrays
       //   同时存活 ~500MB→峰值过剩。req.json 大字符串同步释放。
       const savedDifficulty = data.header?.difficulty;
+      const savedPlayMs = data.header?.playTimeMs;   // SW-BJ5 2026-09-07：主线程读档吸合基线用（副本/导入/quickLoad 槽位落后于存档头）
       const savedEvents = data.events;
       if ('json' in req) (req as { json?: string }).json = undefined;
       if ('save' in req) (req as { save?: unknown }).save = undefined;
@@ -186,11 +187,11 @@ ctx.onmessage = async (e) => {
       const __t2 = performance.now();
       const { packet, transfer } = packWorld(world);
       __wkLog.push(`settle+pack ${Math.round(performance.now() - __t2)}ms chests=${packet.chests?.length ?? 0}`);
-      // ★收窄:主线程只消费 difficulty/events(mainFlow.ts:275/278),整档 SaveData
-      // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化)
+      // ★收窄:主线程只消费 difficulty/playTimeMs/events(mainFlow.ts 读档吸合),整档 SaveData
+      // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化;SW-BJ5 2026-09-07 增 playTimeMs 单字段)
       ctx.postMessage({
         id: req.id, type: 'result', world: packet, player, wkLog: __wkLog,
-        save: { header: { difficulty: savedDifficulty }, events: savedEvents } as typeof data,
+        save: { header: { difficulty: savedDifficulty, playTimeMs: savedPlayMs }, events: savedEvents } as typeof data,
       }, transfer);
       return;
     }

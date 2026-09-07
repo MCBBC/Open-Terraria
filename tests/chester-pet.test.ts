@@ -98,14 +98,14 @@ describe('悬停光标 kind 分派（tickCursorIcon 容器宠物支）', () => {
     (g as unknown as Record<string, unknown>).itemIconCache = new ItemIconCache();
     (g as unknown as Record<string, unknown>).renderer = {};
     // 悬停扫描面（hoveringTownNpc/containerPetHit 都走 entities；缺省空桶）
-    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [] };
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], enemies: [], projectiles: [] };  // enemies 空桶（★SW-BP1 补:SW-BJ1 tickHoverNpcName 遍历敌怪桶,stub 缺桶=not iterable）
     return { g, player };
   }
 
   it('透镜弹 734 悬停 → 图标 4131（X-F5 主回归：曾误落 3213 钱槽图标）', () => {
     const { g, player } = cursorGame();
     const lens = new VoidLensProj(player.cx + 2 * TILE, player.cy, 0, 0);
-    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [lens] };
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], enemies: [], projectiles: [lens] };
     (g.input as { mouseX: number; mouseY: number }).mouseX = lens.x + 15;
     (g.input as { mouseX: number; mouseY: number }).mouseY = lens.y + 12;
     (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
@@ -116,7 +116,7 @@ describe('悬停光标 kind 分派（tickCursorIcon 容器宠物支）', () => {
   it('飞猪存钱罐 525 悬停 → 图标 3213（MoneyTrough 默认支）', () => {
     const { g, player } = cursorGame();
     const pig = new FlyingPiggyBank(player.cx + 2 * TILE, player.cy, 0, 0, () => player);
-    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [pig] };
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], enemies: [], projectiles: [pig] };
     (g.input as { mouseX: number; mouseY: number }).mouseX = pig.x + 15;
     (g.input as { mouseX: number; mouseY: number }).mouseY = pig.y + 12;
     (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
@@ -137,7 +137,7 @@ describe('悬停光标 kind 分派（tickCursorIcon 容器宠物支）', () => {
 
   it('无命中 → 不启用悬停图标（重置链首四字段归零）', () => {
     const { g, player } = cursorGame();
-    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [] };
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], enemies: [], projectiles: [] };  // enemies 空桶（★SW-BP1 补:SW-BJ1 tickHoverNpcName 遍历敌怪桶,stub 缺桶=not iterable）
     (g.input as { mouseX: number; mouseY: number }).mouseX = 200 * TILE;
     (g.input as { mouseX: number; mouseY: number }).mouseY = 200 * TILE;
     (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();

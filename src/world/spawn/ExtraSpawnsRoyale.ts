@@ -31,23 +31,45 @@
 //   登记偏差（docs/worldgen/secret-seed-audit-matrix §E 行同步更新）：
 //   R1 掷流源 = 独立种子盐重放，非世界生成 genRand 续掷（recompute 范式的必然代价；
 //      分布形态 1:1，具体点位与原版同种子不可逐位对拍）。另：像素级 Collision 逃逸探针
-//      /SlopeCollision 省略（同 WorldGen.ts vampireSeedFinishPass 判例，误差 <1 格）；坡度
-//      位 halfBrick()/topSlope() 不承载 ⇒ cs:248-251 臂恒不拒。
-//   R2 remix 带（GenVars.remixSurfaceLayerLow/MushroomLayerHigh，cs:133-137/:262-276）本仓
-//      未移植 remix 层参数 ⇒ settings.remix 一律按 false 评估（getfixedboi 世界按地表带
-//      语义取点，偏差登记）。
+//      /SlopeCollision 省略（同 WorldGen.ts vampireSeedFinishPass 判例，误差 <1 格）。
+//      ★SW-BP1 2026-09-07：坡度臂已接——cs:248-251 halfBrick()/topSlope()×左右岩浆邻
+//      在 specializedFloorOk 1:1（TileStore slope/half/liquidType 位全承载,原"不承载
+//      ⇒恒不拒"备案失效）。
+//   R2 remix 带（GenVars.remixSurfaceLayerLow/MushroomLayerHigh，cs:133-137/:262-276）
+//      ★SW-BP1 2026-09-07 复核：维持 settings.remix=false 证据结案——本仓 GenState 已
+//      建 remix 四带（TerrainPass.ts:202-205 = TerrainPass.cs:240-243 逐值同源），
+//      remixMushroomLayerHigh=maxTilesY-200 运行时可由 h 派生，但 remixSurfaceLayerLow
+//      =floor(rockLayerLow) 仅 GenState 持有（World/存档不持久,genRemixWater 先例=gen
+//      期专用）；接通需①持久化 remixSurfaceLayerLow（存档面/World 字段）②消费位五处
+//      一次接线（TryFindSpawnRandomly cs:136-139 带 / GetFallbackSpawn cs:355-359 均值
+//      臂 / specializedConditions cs:267-277 带外拒+小世界 sep150 / TryFindSpawnAt
+//      cs:208-213 remix+skyblock 直受（含一次 genRand 抽位）/ IterateDownToFloor
+//      cs:403-405 195/474 排除）。掷流面在重放 RNG 内不触 worldgen 金标，动刀归
+//      存档/世界字段车道。
 //   R3 skyblock/roundLandmass/extraliquid 三支候选集依赖 GenVars.landmassData（cs:44-80）
-//      本仓未建模结构登记表 ⇒ 候选恒空走 fallback 百分位列（vanilla 候选空时的既定行为，
-//      cs:168-186 while 循环 list 空 即穿出到 TryFindSpawnAt 失败追加 fallback）。GEN 侧
+//      ★SW-BP1 2026-09-07 复核：维持证据结案——gs.skyblockIslands（SkyblockPass.ts:665,
+//      cs:23806-23816）已登记但仅 gen 期 GenState 持有（World/存档不持久）;运行期重放
+//      取不到候选表 ⇒ 接通=候选集在「新生成世界 vs 读档世界」失同（重放确定性破缺）,
+//      须先持久化（新存档面）;RoundLandmass（cs:2891/2939 推入）与 ExtraLiquidBubbleSquare
+//      （SurfaceDecorPasses.ts:1180 备案跳过）本仓零登记。候选恒空走 fallback 百分位列
+//      =vanilla 候选空时的既定行为（cs:168-186 while list.Count<=0 穿出）。GEN 侧
 //      skyblock 按队 Style13 岛生成（cs:22789-22804）随双地牢/组合批另立车道。
 //   R4 PrepareExtraSpawns 尾扫（:417-428 地下点周边 DoAdditionalChangesAroundSpawnIfNeeded）
-//      未接（gen 期整链，登记 GAP）。
-//   R5 Spawn_ForceClearArea 分支在本移植按构造不可达（见 resolveTeamSpawnFloor 注），
-//      免 KillTile 掉落面误伤登入体验；若未来放宽扫位窗需先补静默清除通道。
+//      ★SW-BP1 2026-09-07 复核：维持证据结案——vanilla 调用位=生成期尾（WorldGen.cs
+//      :22683,FinalCleanup 内 FinalizeSecretSeeds 之后），本体=PlaceTorchesAroundSpawn
+//      （:25258-25310,genRand 密集续掷：2000 轮×每轮 2-6 掷）+noTraps 分支
+//      RemoveSpecificTilesUnderSpawn。接通须在 gen 流原位续掷（掷流位置敏感,动即
+//      worldgen 金标零处置纪律）;以运行期盐重放替掷=与 R1 同范式（可行,但落点表本身
+//      已非 vanilla 逐位对拍面,且会把火把写入读档世界=存档面变化）——归 worldgen
+//      车道带金标处置,不在本批。
+//   R5 Spawn_ForceClearArea 分支：★SW-BM1 2026-09-06 起随 resolveTeamSpawnFloor
+//      升级走 SpawnPlacement 全链而可达（moved∧非法 → forceClear 回调注入,Game 侧
+//      接 breakTile/setLiquid;纯查询调用方不注入=只扫不清,免 KillTile 掉落面误伤）。
 import { UnifiedRandom } from '../../core/rng';
 import { TileStore } from '../TileStore';
 import type { World } from '../World';
 import { TILE_DEFS } from '../../data/tiles';
+import { spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from './SpawnPlacement';
 
 /** PlayerTeamID.cs:17 Count=6（None+五色队） */
 export const PLAYER_TEAM_COUNT = 6;
@@ -182,40 +204,10 @@ function fallbackSpawn(
   return { x: px, y: py };
 }
 
-// ── Spawn_IsAreaValidSpawn（Player.cs:38263-38281 精简核；generatingSpawn 双地牢墙门
-//    在 vanilla 无 true 调用方 ⇒ 不涉。压板 135 与 CanTileHurt 近似保留） ────────
-
-/** Collision.CanTileHurt 家族保守近似（TouchDamage 常见表；Editor 口径 hurtTiles 工具
- *  为权威盒查路径，此处为扫位快筛用途，宽表偏安全侧备案） */
-const HURT_TILE_SHEETS = new Set([32, 48, 53, 59, 80, 130, 135, 137, 149, 160, 184, 232, 344, 351, 476, 512, 554, 562, 584]);
-
-export function isAreaValidSpawnLite(st: TileStore, floorX: number, floorY: number): boolean {
-  for (let i = floorX - 1; i < floorX + 2; i++) {
-    for (let j = floorY - 3; j < floorY; j++) {
-      if (!st.inBounds(i, j)) continue;
-      const idx = st.idx(i, j);
-      const tid = st.type[idx];
-      if (j === floorY - 1) {
-        // 底邻格伤害判定（Collision.CanTileHurt :38266）+ 135 门。
-        // ★RD-F7：门=tile2.active()（Player.cs:38252）——曾以 get()≠0（type 裸读）
-        //  代 active 位,幽灵残型底邻误拒
-        const below = st.get(i, j + 1);
-        const bs = sheetOf(below);
-        if (st.hasTile(i, j + 1) && (bs === 135 || HURT_TILE_SHEETS.has(bs))) return false;
-      }
-      // ★RD-F7：主门=tile.nactive()（Player.cs:38247）——幽灵残型（flags=0,type≠0）
-      //  与已致动格同跳 135/实心面（SolidCollision 语义=isActive 系）;曾以 tid≠0+
-      //  致动位拆判,幽灵格 135/实心面直通误拒
-      if (st.isActive(i, j)) {
-        if (sheetOf(tid) === 135) return false;
-        // SolidCollision 主门（tileSolid && !tileSolidTop ≈ SOLID_LUT 且非平台）
-        if (TileStore.SOLID_LUT[tid] === 1 && !TILE_DEFS[tid]?.platform) return false;
-      }
-      if (st.liquid[idx] > 0) return false;
-    }
-  }
-  return true;
-}
+// ── Spawn_IsAreaValidSpawn：★SW-BM1 2026-09-06 起不再自持精简核——队点臂统一
+//    消费 SpawnPlacement.ts 全链（spawnIsAreaValidSpawn,Player.cs:38222-38259）,
+//    isAreaValidSpawnLite（:38263-38281 精简核 + HURT_TILE_SHEETS 宽表近似）随
+//    resolveTeamSpawnFloor 升级退役（两套净空判据并存 = SW-BC1 债①） ────────────
 
 // ── CheckForGoodTeleportationSpot 精简核（Utils.cs:518-601） ────────────────
 
@@ -285,8 +277,22 @@ function specializedFloorOk(
     t === 135 || t === 48 || t === 232 || t === 750 || BOULDER_SHEETS.has(t);
   if (badFloor(tt) || (leftActive && badFloor(lt)) || (rightActive && badFloor(rt))) return false;
   if (TILE_DUNGEON_SHEETS.has(tt) || tt === 226) return false;
-  // 半砖/斜坡×左右岩浆臂（cs:248-251）：精简核不承载 frameX/frameY 坡度位（R1）⇒ 恒不拒；
-  // 左右岩浆邻其余入口由下方避液盒兜底
+  // ★SW-BP1 2026-09-07（R1 坡度臂清偿）：半砖/斜坡×左右岩浆邻臂（cs:248-251）
+  // 1:1 接入——`(tile.halfBrick() || tile.topSlope()) && ((leftTile.liquid > 0 &&
+  //  leftTile.lava()) || (rightTile.liquid > 0 && rightTile.lava())) → 拒`。原版
+  //  两邻只读 liquid 量+lava() 型（无 active() 门）;本仓 slope/half/liquidType 位
+  //  TileStore 全承载（此前 R1 备案"精简核不承载坡度位⇒恒不拒"已失效）。岩浆编码：
+  //  原版 Tile.lava()=liquidType==1（0水/1岩浆/2蜜）≠ 本仓 TileStore 约定
+  //  1=水/2=岩浆/3=蜜/4=微光 → 本仓 lava ⇔ liquidType===2。
+  if (st.inBounds(x, y)) {
+    const mi = st.idx(x, y);
+    if (st.half[mi] === 1 || st.slope[mi] === 1 || st.slope[mi] === 2) {
+      const li = st.inBounds(x - 1, y) ? st.idx(x - 1, y) : -1;
+      const ri = st.inBounds(x + 1, y) ? st.idx(x + 1, y) : -1;
+      const lavaAt = (q: number): boolean => q >= 0 && st.liquid[q] > 0 && st.liquidType[q] === 2;
+      if (lavaAt(li) || lavaAt(ri)) return false;
+    }
+  }
   if (settings.extraLiquid && tt === 379) return false;
   if (settings.skyblock && tt !== 0) return false;
   for (let i = 0; i < acceptedPoints.length; i++) {
@@ -488,39 +494,43 @@ export function tryGetExtraSpawnPointForTeam(w: World, team: number): ExtraSpawn
  * Player.Spawn :37911-37916 三分支的纯函数形态（Game.spawnPlacementCoords 队点臂消费,SW-BC1 批更名）：
  * 床点优先 → 队伍 ≥1 时取队点扫位。旗关/床位/队号三道门任一命中即 null。
  * @param bedActive 本仓床点语义：world.spawn≠原始出生点即视为"有床"（per-world 共享位）
+ * @param forceClear 落点仍非法时的 3×3 兜底通道（Spawn_ForceClearArea :38199-38220,
+ *   Game 侧注入 breakTile/setLiquid——纯查询调用方缺省不注入=只扫不清）
  */
 export function teamSpawnPlacement(
   w: World, pTeam: number, bedActive: boolean,
+  forceClear?: (floorX: number, floorY: number) => void,
 ): { tx: number; ty: number } | null {
   if (!w.seedFlags?.teamBasedSpawns) return null;
   if (bedActive) return null;                       // 床点优先(:37911)
   if (!(pTeam >= 1)) return null;                   // 队 0 ≡ extraSpawnPoints[0]=世界出生点(cs:101)
   ensureExtraSpawnPoints(w);
-  return resolveTeamSpawnFloor(w, pTeam);           // :38278-38290
+  return resolveTeamSpawnFloor(w, pTeam, forceClear);           // :38278-38290
 }
 
 /**
- * Player.Spawn"队伍点"臂完整落位（Spawn_SetPositionAtTeamSpawn :38278-38290）：
- * 取点 → Spawn_GetPositionAtSpawn 扫位（:38008-38046 上 30 行 X±1 三列 → 下 30 行同式，
- * 各命中位必过 Spawn_IsAreaValidSpawn）→ DescendFromDefaultSpace 落板由 iterateDown 语义
- * 并入扫位校验。落点合法由接受条件自证 ⇒ ForceClearArea 分支按构造不可达（R5）。
+ * Player.Spawn"队伍点"臂完整落位（Spawn_SetPositionAtTeamSpawn :38278-38290）。
+ * ★SW-BM1 2026-09-06（SW-BC1 债①清偿）：扫位升级走 SpawnPlacement.ts 全链——
+ * Spawn_GetPositionAtSpawn（:38008-38089 上 30 行 X±1 三列 → 下 30 行同式,
+ * InWorld(5) 边界档 + 命中位 DescendFromDefaultSpace 落板 :38103-38179）+
+ * moved∧终点仍非法 → Spawn_ForceClearArea（:38199-38220,经 forceClear 注入;
+ * 原精简核 30 行直扫 + isAreaValidSpawnLite 宽表近似退役,行为差异逐项：
+ *  ① lite 首个净空行直接落位 vs 全链 Descend 落板（命中行下方 50 行内找
+ *    ValidSpawnFloor 地板,singleBlockAllowed 重试）；
+ *  ② lite 用 st.inBounds vs 全链 WorldGen.InWorld(5)（边距 5 格外按 continue 处理）；
+ *  ③ lite 底邻伤害=HURT_TILE_SHEETS 宽表 vs 全链 Collision.CanTileHurt（TouchDamage）；
+ *  ④ lite 无 ForceClear 兜底 vs 全链 moved∧非法 → 破块排水（回调注入）。
  * @returns 落脚格坐标（原版 Spawn_SetPosition floor*16 定位锚）；null=旗关/无表/越界队
  */
-export function resolveTeamSpawnFloor(w: World, team: number): { tx: number; ty: number } | null {
+export function resolveTeamSpawnFloor(
+  w: World, team: number,
+  forceClear?: (floorX: number, floorY: number) => void,
+): { tx: number; ty: number } | null {
   const pt = tryGetExtraSpawnPointForTeam(w, team);
   if (!pt) return null;
-  const st = w.store;
-  for (let i = 0; i < 30; i++) {
-    for (const dx of [0, -1, 1]) {
-      const x = pt.x + dx, y = pt.y - i;
-      if (st.inBounds(x, y) && isAreaValidSpawnLite(st, x, y)) return { tx: x, ty: y };
-    }
+  const pos = spawnGetPositionAtSpawn(w.store, pt.x, pt.y);
+  if (pos.moved && !spawnIsAreaValidSpawn(w.store, pos.floorX, pos.floorY)) {
+    forceClear?.(pos.floorX, pos.floorY);           // :38288-38290（SetPosition 后判非法）
   }
-  for (let i = 0; i < 30; i++) {
-    for (const dx of [0, -1, 1]) {
-      const x = pt.x + dx, y = pt.y + i;
-      if (st.inBounds(x, y) && isAreaValidSpawnLite(st, x, y)) return { tx: x, ty: y };
-    }
-  }
-  return { tx: pt.x, ty: pt.y };
+  return { tx: pos.floorX, ty: pos.floorY };
 }

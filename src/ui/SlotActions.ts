@@ -26,8 +26,14 @@
  *    虚空保险库(-5)=32（canFavoriteAt[32]/retainFavoriteOnMoveAt[32] 生效面）；
  *  · 研究/向导菜单 Shift 特化支（ItemSlot.cs:631-651）进路由；重铸支不可达
  *    （UI.showReforge 全屏 overlay 拦截槽点击，证据结案不建模）。
+ *
+ * SW-BP1 2026-09-07（合成/物品/royale 剩余债）：
+ *  · canMergeStack 扩 placeStyle 位（RB4a 债⑦,四路单源同吃）+ chestCanTakeJustCheck
+ *    placeStyle 随行；
+ *  · canTakeToPersonalInventory 接 IsAPickup 恒真臂（RB4a 债③）；
+ *    uniqueStack/Cofveve 两臂证据结案（逐臂注释内锚行号）。
  */
-import { ITEM_DEFS, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../data/items';
+import { ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -226,7 +232,7 @@ function getSellOrTrash(e: AltClickEnv): AltClickPlan | null {
   return { kind: 'sell', cursorOverride: CURSOR_SELL };
 }
 
-export interface InvScanItem { id: number; stack: number; favorited?: boolean; prefix?: number }
+export interface InvScanItem { id: number; stack: number; favorited?: boolean; prefix?: number; /** ★SW-BP1：实例级放置样式随行（箱合并面 canMergeStack placeStyle 位） */ placeStyle?: number }
 
 /** ★SW-AY1 R1 合并谓词单源 = Item.CanStack（Item.cs:49870-49877）：
  *  ```csharp
@@ -238,9 +244,22 @@ export interface InvScanItem { id: number; stack: number; favorited?: boolean; p
  *  既有约定）。三处合并路径（chestCanTakeJustCheck / shiftDepositToChest /
  *  placeHeld 合并算式）+ Inventory.fillRange 同吃本谓词（R1：曾只比 id，
  *  preferHotbar 支却比 prefix = 三处失同）。maxStack>1 门不在谓词内（原版在
- *  调用侧 `stack < maxStack` 先决） */
-export function canMergeStack(a: { id: number; prefix?: number }, b: { id: number; prefix?: number }): boolean {
-  return a.id === b.id && (a.prefix ?? 0) === (b.prefix ?? 0);
+ *  调用侧 `stack < maxStack` 先决）。
+ *  ★SW-BP1 2026-09-07 placeStyle 位（RB4a 债⑦）：本仓实例级 placeStyle（敌旗
+ *  bannerId 等）跨样式禁并——原版每旗/每样式是独立 item id（Item.CanStack 的
+ *  type 相等天然隔离,原版无需也不存在此门）；本仓单物品+实例 style 建模下,箱
+ *  合并三路径（shiftDepositToChest/placeHeld 箱支/chestCanTakeJustCheck）此前只比
+ *  id+prefix = 敌旗跨样式并堆（与 Inventory.fillRange 2026-08-13 已有的门失同）。
+ *  语义沿用 fillRange 三元通配：任一侧 undefined（无实例样式=类级缺省）不设门，
+ *  双侧皆存才比相等——四路（含 fillRange）由本谓词单源同吃。 */
+export function canMergeStack(
+  a: { id: number; prefix?: number; placeStyle?: number },
+  b: { id: number; prefix?: number; placeStyle?: number },
+): boolean {
+  if (a.id !== b.id) return false;
+  if ((a.prefix ?? 0) !== (b.prefix ?? 0)) return false;
+  if (a.placeStyle !== undefined && b.placeStyle !== undefined && a.placeStyle !== b.placeStyle) return false;
+  return true;
 }
 
 /** ★SW-AY1 R2 OnlyNeedOneInInventory（Item.cs:1177-1193）：
@@ -279,16 +298,20 @@ function canBeEquippedLike(id: number): boolean {
 /** ChestUI.TryPlacingInChest(justCheck:true)（ChestUI.cs:1205-1284）：合并面
  *  （:1219-1233 首个有位同型堆）∪ 空格面（:1258-1270）任一成立 → 可移入。
  *  IsBlockedFromTransferIntoChest（:1287-1298 收藏容器自锁）面在收藏总闸内已覆盖。
- *  ★SW-AY1 R1：合并判据改 canMergeStack（CanStack 词缀面 :1221） */
+ *  ★SW-AY1 R1：合并判据改 canMergeStack（CanStack 词缀面 :1221）。
+ *  ★SW-BP1 2026-09-07（RB4a 债⑦）：placeStyle 随行——JustCheck 门必须与实刀
+ *  shiftDepositToChest 的合并算式同源同判（canMergeStack placeStyle 位），否则
+ *  敌旗跨样式「门放行/刀拒并」失同（落在已有堆上不并=预览说可移入） */
 export function chestCanTakeJustCheck(
   items: readonly (InvScanItem | null)[],
   id: number,
   maxStack: number,
   prefix?: number,
+  placeStyle?: number,
 ): boolean {
   if (maxStack > 1) {
     for (const cs of items) {
-      if (cs && cs.stack < maxStack && canMergeStack(cs, { id, prefix })) return true;
+      if (cs && cs.stack < maxStack && canMergeStack(cs, { id, prefix, placeStyle })) return true;
     }
   }
   for (const cs of items) {
@@ -297,19 +320,48 @@ export function chestCanTakeJustCheck(
   return false;
 }
 
+/** internal id → vanilla id（IsAPickup/OnlyNeedOne 判别共用） */
+function internalVidOf(id: number): number {
+  const d = ITEM_DEFS[id];
+  if (!d) return -1;
+  const vid = d.vid ?? viIdFromKey(d.key);
+  return vid > 0 ? vid : -1;
+}
+
 /** Player.ItemSpace(item).CanTakeItemToPersonalInventory（Player.cs:39463-39507 +
  *  CanItemSlotAcceptPickup :39530-39541 + ItemSpaceStatus :240-263）等价：
+ *  · ★SW-BP1 2026-09-07（RB4a 债③）IsAPickup 恒真臂（:39465-39468
+ *    `if (ItemID.Sets.IsAPickup[newItem.type]) return CanTakeItem: true`）1:1 接入：
+ *    pickup 类（心 58/星 184/糖果·姜饼心星变体 1734/1735/1867/1868/星云 booster
+ *    3453-3455/法力斗篷星 4143,ItemID.cs:254 BoolSet）【不受背包容量门】——拾取即
+ *    消费不占包位,ItemSpace 第一支即放行。消费面：Shift 快移门（fromChest/
+ *    unequip/重铸格等语境的 canTakeToInventory）对满包态的心/星也放行,与原版
+ *    GetAlternateClickAction 的 ItemSpace 判据逐位同效；
+ *  · uniqueStack 臂（:39469-39471 `uniqueStack && HasItem(type) → false`）证据结案
+ *    不建模：1457/1458 全量反编译 zero 写位（1456 唯一写位 DefaultToQuestFish
+ *    Item.cs:27630 已在 1457 移除,现版 :27652-27658 无此行）——原版本体即死码，
+ *    语义备档「uniqueStack 物=同型专格,身上已有一件即拒收」；
  *  · 钱币扫 0-53（:39474-39476 num=54）、其余扫 0-49（:39473 num=50）；
  *  · 空格 → true；同型且有余位（CanStack）→ true（:39540）；
  *  · ★R2 收藏格拒收面（:39536-39539 `theSlot.favorited && OnlyNeedOneInInventory()`
  *    → false）：收藏的 OnlyNeedOne 族堆不接受并堆——收藏保护域（消耗品例外）；
  *  · 弹药族（FitsAmmoSlot）追加 54-57 面（:39485-39494 CanGoIntoAmmoOnPickup）；
+ *    ★SW-BM1 2026-09-06（:39547-39552 1:1）：CanGoIntoAmmoOnPickup 空弹药格臂
+ *    `!theItemToAccept.CanFillEmptyAmmoSlot() && theSlot.type == 0 → false`——
+ *    【空的】弹药格只收 CanFillEmptyAmmoSlot 物（凝胶/沙/坠星等特殊弹药不自动
+ *    入栏,Item.cs:1379-1386 同一面;canFillEmptyAmmo 由调用方传,Inventory.ts
+ *    是本函数域的下游不可反向 import）。已占弹药格不受此门（CanItemSlotAcceptPickup）；
  *  · ★R2 :39495-39500 非弹药门同型扫——54-57 的无条件第二扫（不看 fitsAmmo、
  *    不看 favorited，纯 `type>0 && stack<maxStack && CanStack`）；
- *  · 虚空袋可收不计（:39502-39505 ItemIsGoingToVoidVault=true →
- *    CanTakeItemToPersonalInventory=false :246-256）——只装得进虚空袋 ≠ 能进背包。
- *  登记债（本批不动）：:39549 空弹药格须 CanFillEmptyAmmoSlot 的拒收面未接
- *  （现空弹药格恒可收）；Inventory.fillRange 拾取并堆面未接 favorited 拒收。 */
+ *  · ItemSpaceForCofveve 臂（:39502-39505/:39509-39528）证据结案不建模：该臂
+ *    返回 `{CanTakeItem:true, ItemIsGoingToVoidVault:true}` →
+ *    CanTakeItemToPersonalInventory = CanTakeItem && !ItemIsGoingToVoidVault =
+ *    false（ItemSpaceStatus :246-256）——对本函数返回值贡献恒零（真正消费面在
+ *    GetItem 的 void vault 支 Player.cs:39705,本仓虚袋面另链）。函数名系历史遗产
+ *    （1.4.4 窄化彩蛋物）,1456/1457 两版逐字等价且无 item-type 门（勿被名字误导
+ *    成「只认某彩蛋物」）；其 CanVoidVaultAccept = !questItem && type!=3822
+ *    （:39735-39742）——只装得进虚空袋 ≠ 能进背包,尾 `return false` 即 1:1；
+ *  登记债（本批清偿）：Inventory.fillRange 拾取并堆面 favorited 拒收同步接（SW-BM1）。 */
 export function canTakeToPersonalInventory(
   slots: readonly (InvScanItem | null)[],
   id: number,
@@ -317,7 +369,9 @@ export function canTakeToPersonalInventory(
   isCoin: boolean,
   fitsAmmo: boolean,
   prefix?: number,
+  canFillEmptyAmmo?: boolean,
 ): boolean {
+  if (ITEM_IS_A_PICKUP.has(internalVidOf(id))) return true;   // ★SW-BP1 :39465-39468
   const num = isCoin ? 54 : 50;
   for (let i = 0; i < num; i++) {
     const s = slots[i];
@@ -328,7 +382,8 @@ export function canTakeToPersonalInventory(
   if (fitsAmmo) {
     for (let j = 54; j < 58; j++) {
       const s = slots[j];
-      if (!s) return true;
+      // :39549 空弹药格臂——拾取物 CanFillEmptyAmmoSlot 不过 = 拒收（实弹药格照走下方）
+      if (!s) return !!canFillEmptyAmmo;
       if (s.favorited && onlyNeedOneInInventory(s.id)) continue;
       if (s.stack < maxStack && canMergeStack(s, { id, prefix })) return true;
     }
@@ -337,5 +392,5 @@ export function canTakeToPersonalInventory(
     const s = slots[k];
     if (s && s.stack < maxStack && canMergeStack(s, { id, prefix })) return true;
   }
-  return false;                                           // 虚空袋兜底面不计（:246-256）
+  return false;                                           // 虚空袋兜底面不计（:246-256,Cofveve 臂贡献恒零）
 }

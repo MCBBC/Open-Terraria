@@ -8,6 +8,7 @@ import { resolveTouchMode } from './core/input/touchMode';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
+import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
 import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
@@ -59,7 +60,9 @@ export interface FlowHandle {
   /** 住房面板（背包房屋按钮 B 方案,2026-08-15） */
   openHousing?(): void;
   game: Game | null;
-  playStart: number;
+  /** 累计游玩时长（存档口径,ms;SW-BJ5 2026-09-07）——存档/F5 报告统一取此值,
+   *  取代会话净时长 playStartNow（两口径混写=重复计费/累计清零家族根因） */
+  readonly cumulativePlayMs: number;
 }
 
 export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI, audio: AudioSystem): FlowHandle {
@@ -96,13 +99,39 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // #perf-gpulog:gpulog 安装提前到启动装配——菜单期(Game 未构造)也可观测
   // menubg 账本(三开压测:菜单页 GL 崩溃此前无任何观测面)。Game 处重复调用幂等
   maybeInstallGpuLoggerFromUrl();
-  let playStart = 0;
-  /** 累计游玩时长（vanilla .plr timePlayed 语义 = 全生涯累计）：槽位已累计值
-   *  （WorldStore.load 由 header.playTimeMs 回填）+ 本会话至今。此前三处保存点
-   *  直传 Date.now()-playStart（会话净时长）→ 世界列表“游戏时长”每局清零重计，
-   *  与原版持久化语义漂移（2026-09-01 存档时机审计修）。 */
+  // SW-BJ5 2026-09-07：累计游玩时长 = PlayTimeTracker（原版 PlayerFileData._playTime
+  // + _timer 语义,见 save/PlayTime.ts 头注）。基线只在会话边界钉死（enterGame 时取
+  // 槽位 meta 上次存档终值）+ 读档吸合（存档头优先）+ 失焦折算;存档只读 totalMs(),
+  // 对槽位 meta.playTimeMs 的回写【绝不回流进基线】——旧实现 base 每存一次被写回
+  // "基线+整段会话已过时长"而下存再整段叠加（自动保存 10min 一发）→ 二次方膨胀,
+  // 长挂机会话即世界列表"游玩 109843 分钟"(≈76 天)实报根因。
+  const play = new PlayTimeTracker();
+  /** 累计游玩时长（vanilla .plr timePlayed 语义 = 全生涯累计）。2026-09-01 审计修过
+   *  "会话净时长每局清零",本次（SW-BJ5）修其换来的重复计费:此前 base 直读
+   *  currentWorld.playTimeMs,而 worldStore.save 每存一次把它写回累计值（同一对象），
+   *  秒表仍从会话起点走 → 膨胀。 */
   function cumulativePlayMs(): number {
-    return (currentWorld?.playTimeMs ?? 0) + Math.max(0, Date.now() - playStart);
+    return play.totalMs(Date.now());
+  }
+  /** 读档吸合（SW-BJ5）：槽位基线取 max(槽位 meta, 存档头)。存档头=最持久真值——
+   *  副本/导入落库时 meta 可能落后（0）;quickLoad 会话无槽位,不吸合则该会话每次
+   *  存档把快速档 header.playTimeMs 清回"会话净时长"（累计丢失）。 */
+  function absorbLoadedPlayMs(save: unknown): void {
+    const h = (save as { header?: { playTimeMs?: number } } | null | undefined)?.header?.playTimeMs;
+    if (typeof h !== 'number' || !Number.isFinite(h)) return;
+    play.absorb(h, Date.now());
+    if (currentWorld && h > currentWorld.playTimeMs) currentWorld.playTimeMs = h; // 列表显示即时愈合,下次存档持久化
+  }
+  // 后台标签不计费（SW-BJ5 2026-09-07）：原版 FocusHelper.AllowCountingPlayerTime
+  // （FocusHelper.cs:59-68）只在窗口激活∧非暂停∧非菜单时计数,UpdatePlayTimer
+  // （Main.cs:17071）逐帧 Start/Pause;web 等价=visibilitychange 折算/续走
+  // （PausePlayTimer=StopPlayTimer 折算语义,续走只重锚不重复计）。
+  // 旧实现后台挂机墙钟照走,后台时长整段计入游玩时长（失焦计费缺口）。
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) play.pause(Date.now());
+      else play.resume(Date.now());
+    });
   }
   /** 程序化素材总包预热（#perf2026-08-28 三批修订）：buildAssets 是确定性全局单例
    *  （~6700 图标画布+全表，同步 ~400-700ms）。★只允许在【进世界路径起点】触发——
@@ -257,7 +286,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (new URLSearchParams(location.search).has('liquidlab')) {
       setTimeout(() => (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab?.(), 1500);
     }
-    playStart = Date.now();
+    // SW-BJ5 2026-09-07：会话起点=计费锚点（原版 StartPlayTimer,PlayerFileData.cs:159）。
+    // 基线钉死为槽位 meta 上次存档终值（新世界/导入=0）——此后存档对 meta 的回写不回流
+    play.start(currentWorld?.playTimeMs ?? 0, Date.now());
     // 物品图标后台预取(主菜单不载图标=省 6059 请求;进世界补齐,游戏内显示不变)
     atlas?.prefetchIcons();
     // 全屏地图背景族预取(MapBG* 43 张+卷轴 Map.png——vui 懒加载首次请求要几百 ms,
@@ -572,8 +603,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到
    *  worker 的主线程序列化开销——大存档实测秒级 100% CPU）；worker 不可用时
-   *  才在主线程 kvGet 走 fallback */
+   *  才在主线程 kvGet 走 fallback。
+   *  ★防重入门(2026-09-07):大世界读档链路含多个 await 窗口(worker 往返/
+   *  charStore/资源预热),双触发(双击 Play/探针事件重复)=两条链并行——第二链
+   *  makeGame() 重置全局 while 第一链仍引用旧 g,第一链恢复后 g.player 未建即
+   *  被 applyPlayer 访问(TypeError: reading 'inv',探针实测)。读档期间拒绝
+   *  二次进入,重入静默返回(加载页已在前一链手上)。 */
+  let loadFlowBusy = false;
   async function loadFromKey(key: string) {
+    if (loadFlowBusy) return;
+    loadFlowBusy = true;
     try {
       startAssetPrewarm();   // #perf2026-08-28:与读档 worker 并行,勿占菜单期表面预算
       // worker 路径：IDB 读取 + JSON 解析 + RLE 解码 + load 模式沉降全在后台
@@ -591,6 +630,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
+          absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：须在 g.loadWorld(触发 enterGame 计费锚)之后,否则 quickLoad 无槽位会话的吸合基线被 start(0) 覆写
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -607,6 +647,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
       alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+    } finally {
+      loadFlowBusy = false;
     }
   }
 
@@ -636,6 +678,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           __m('load.loadWorld.done');
+          absorbLoadedPlayMs(save);   // SW-BJ5 2026-09-07：同 loadFromKey——计费锚(enterGame)之后吸合存档头基线
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           __m('load.player.done');
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
@@ -659,6 +702,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       VUI.setState(loadState);
       loadState.setProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.3 + p * 0.6));
+      absorbLoadedPlayMs(data);   // SW-BJ5 2026-09-07：主线程回退路径同 worker 路径（data=全量 SaveData,含 header.playTimeMs）
       await applyPlayerWithCharacter(g, player);
       g.eventsApplySave(data.events);
     } catch (e) {
@@ -703,7 +747,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           difficulty: m.difficulty,
           evil: m.evil,
           hardMode: m.hardMode,
-        }, text);
+        }, text, m.playTimeMs);   // SW-BJ5 2026-09-07：存档头累计随数据落库（缺省 0）
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.WorldImported', meta.name));
       } else if (lower.endsWith('.wld')) {
         const buf = new Uint8Array(await file.arrayBuffer());
@@ -1366,9 +1410,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     openBestiary,
     openHousing,
     get game() { return game; },
-    playStart: 0,
-    get playStartNow() { return Date.now() - playStart; },
-  } as FlowHandle & { playStartNow: number };
+    get cumulativePlayMs() { return cumulativePlayMs(); },   // SW-BJ5 2026-09-07：存档/调试报告统一累计口径
+  } as FlowHandle;
 }
 
 /** 退出告别幕布（浏览器侧 window.close() 被策略拒绝时的兜底,2026-08-29）：

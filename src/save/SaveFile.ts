@@ -217,6 +217,11 @@ function remapPlayerSlots(p: SaveData['player'], v3: boolean, v4: boolean): Save
     if (v4) return mapItem(it);
     if (!v3) return it; // v2 及更早:裸下标直读
     // v3:armor/dye/trash/misc/loadouts 段 = 保存时构建的裸内部下标
+    // ★SW-BO1 2026-09-07（RB5b 建议清偿）：越界裸下标（≥ 快照表长——物品表冻结后
+    //  新增件、或旧存档下标超出当前表）无键可考。原 `return it` 会把越界裸下标
+    //  直接当当前内部 id 消费=错件幽灵（下标撞进新表其它物品）；落 0（空槽）与
+    //  下方退役键归 0 面同归，宁缺不错。
+    if (it.id < 0 || it.id >= LEGACY_KEY_OF_INTERNAL_V3.length) return { ...it, id: 0 };
     const key = LEGACY_KEY_OF_INTERNAL_V3[it.id];
     if (key === undefined) return it;
     if (/^vi_(\d+)_/.test(key)) {
@@ -402,7 +407,13 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   {
     const v3 = (data.version ?? 1) >= 3;
     const u8 = asBytes(data.tiles);
-    data.tiles = '';   // ★RLE 已解码→释放 base64(6400×1800 世界此串可达 10-30MB)
+    // ★SW-BJ4 2026-09-07 定谳：loadSaveData 禁就地释放入参通道。dae304d4 曾在11 个通道
+    //  解码后写 `data.X = ''/undefined` 释放 base64——同一 SaveData 二次载入即静默全空
+    //  图（tiles 段先毁→帧/type 全零）：tests/wld-tileentity-import ×2 +
+    //  tests/wld-weapon-rack-import ×4（两文件共享 save 多次 loadSaveData）全数爆红,
+    //  且「先毁后断言」用例呈伪红误导排查（曾误疑 items.ts BK1/BN1）。内存面由调用方
+    //  自管：worldGen.worker 载完即 `data = null`（:179 既有）;主线程 importWld/
+    //  loadSave 的 SaveData 作用域出口即 GC。
     let p = 0, i = 0;
     let nextMilestone = onTilesProgress ? nAll / 100 : Infinity;
     while (i < nAll && p < u8.length) {
@@ -438,7 +449,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   //   派生式，语义与旧「写侧幽灵净化」一致（旧档本就无幽灵）。
   {
     const u8 = asBytes(data.tileActive ?? '');
-    data.tileActive = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -458,7 +468,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     const legacy = (data.version ?? 1) < 2;
     const migrate = (v: number) => (legacy ? (v === 1 ? 2 : v === 2 ? 1 : v === 3 ? 4 : v) : v);
     const u8 = asBytes(data.walls);
-    data.walls = '';
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -473,7 +482,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // wire 电路位（旧存档缺此字段 → 全 0 = 无导线，缺字段容忍同 liquidType）
   {
     const u8 = asBytes(data.wire ?? '');
-    data.wire = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -487,7 +495,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // half/slope(旧存档缺 → 全整砖;v3+ 语义)
   {
     const u8 = asBytes(data.blocks ?? '');
-    data.blocks = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -506,7 +513,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // liquid type（旧存档缺此字段 → 全 0，由液体模拟按 1=水 补全）
   {
     const u8 = asBytes(data.liquidType ?? '');
-    (data as unknown as Record<string, unknown>).liquidType = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -521,7 +527,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // 值域 0-31 与 5bit 位域等价，解码后钳 &31 防脏数据越出 PaintID 域
   {
     const u8 = asBytes(data.paint ?? '');
-    data.paint = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -534,7 +539,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   }
   {
     const u8 = asBytes(data.paintWall ?? '');
-    data.paintWall = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -549,7 +553,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   {
     const tyC = st.coat;
     const u8 = asBytes(data.coat ?? '');
-    data.coat = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -571,7 +574,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   {
     const ex = world.explored;
     const u8 = asBytes(data.explored ?? '');
-    data.explored = undefined;
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
@@ -586,7 +588,6 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // liquid
   {
     const u8 = asBytes(data.liquid);
-    data.liquid = '';
     let p = 0, i = 0;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;

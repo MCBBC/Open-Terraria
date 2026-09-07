@@ -11,6 +11,7 @@
 import type { World } from '../World';
 import { LiquidSim } from './LiquidSim';
 import { snapshotGenSolid } from '../gen/vanilla/GenSolid';
+import { setReframeDedupe } from '../gen/vanilla/FinalCleanupPass';
 import type { RNG } from '../../core/rng';
 
 export async function settleWorldLiquids(
@@ -45,6 +46,11 @@ export async function settleWorldLiquids(
   }
   const sim = new LiquidSim(world);
   if (rng) sim.passRand = (max) => rng.nextInt(max);
+  // ★大世界读档级联去重(2026-09-07):load 模式 KillTile 级联在钟乳石密集区产生
+  // 百万级重复重帧(卡死实测)——去重置位,finally 配对清除;gen 模式不置位
+  // (金标掷流),运行期不置位(玩家帧刷新必须逐次)。行为面论证见 FinalCleanupPass。
+  const dedupeOn = mode === 'load';
+  if (dedupeOn) setReframeDedupe(world.store);
   // XXXXX 批：级联帧引擎掷骰源（与 passRand 同一实例——int/nextInt/next 同流）
   sim.passRng = rng ?? null;
   // isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：生成与读档
@@ -111,61 +117,66 @@ export async function settleWorldLiquids(
     sim.worldGenTilesIgnoreWater(true);
   }
   onProgress?.(0.05);
-  sim.quickWater();
-  onProgress?.(0.35);
-  await new Promise((r) => setTimeout(r, 0));
-  sim.waterCheck();
-  sim.quickSettle = true;
-  // 轮上限：读档 = WorldFile 单轮 100000（L752）；生成期 = 每轮 活量×5（WorldGen.cs:16252 num5）
-  const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
-  let iter = 0;
-  let lastYield = performance.now();
-  // 原版收敛比例(:755-762 与生成期 :16274-16277 同式):num5=初始活量(活量回升则抬升),
-  // p=(num5-当前)/num5 单调不减——生成期 progress.Set(num6/3+0.33)、读档 50%+num7*50%
-  let num5 = sim.numLiquid + sim.bufferLen;
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    // ★vanilla 轮上限 = 轮始活量×5（:16252/21079 num3*5）——无下限。#97 x86 实证：
-    //   尾轮 2 振子格 numLiquid=2 → 每轮恰 10 迭代打满预算 break（下限 1000 会多跑
-    //   8×990 迭代 = 掷流/末态双漂移）。无提前收敛出口（10 轮恒跑满:轮尾 WaterCheck
-    //   每轮都能把稳定浅洼重新激活）
-    const MAX_ITER = mode === 'gen' ? (sim.numLiquid + sim.bufferLen) * 5 : 100000;
-    let roundIter = 0;
-    while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
-      sim.updateLiquid();
-      iter++; roundIter++;
-      if (roundIter % 2000 === 0) {
-        const cur = sim.numLiquid + sim.bufferLen;
-        if (cur > num5) num5 = cur;
-        onProgress?.(num5 > 0 ? (num5 - cur) / num5 : 0);
-        if (performance.now() - lastYield >= 32) {
-          await new Promise((r) => setTimeout(r, 0));
-          lastYield = performance.now();
+  try {
+    sim.quickWater();
+    onProgress?.(0.35);
+    await new Promise((r) => setTimeout(r, 0));
+    sim.waterCheck();
+    sim.quickSettle = true;
+    // 轮上限：读档 = WorldFile 单轮 100000（L752）；生成期 = 每轮 活量×5（WorldGen.cs:16252 num5）
+    const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
+    let iter = 0;
+    let lastYield = performance.now();
+    // 原版收敛比例(:755-762 与生成期 :16274-16277 同式):num5=初始活量(活量回升则抬升),
+    // p=(num5-当前)/num5 单调不减——生成期 progress.Set(num6/3+0.33)、读档 50%+num7*50%
+    let num5 = sim.numLiquid + sim.bufferLen;
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      // ★vanilla 轮上限 = 轮始活量×5（:16252/21079 num3*5）——无下限。#97 x86 实证：
+      //   尾轮 2 振子格 numLiquid=2 → 每轮恰 10 迭代打满预算 break（下限 1000 会多跑
+      //   8×990 迭代 = 掷流/末态双漂移）。无提前收敛出口（10 轮恒跑满:轮尾 WaterCheck
+      //   每轮都能把稳定浅洼重新激活）
+      const MAX_ITER = mode === 'gen' ? (sim.numLiquid + sim.bufferLen) * 5 : 100000;
+      let roundIter = 0;
+      while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
+        sim.updateLiquid();
+        iter++; roundIter++;
+        if (roundIter % 2000 === 0) {
+          const cur = sim.numLiquid + sim.bufferLen;
+          if (cur > num5) num5 = cur;
+          onProgress?.(num5 > 0 ? (num5 - cur) / num5 : 0);
+          if (performance.now() - lastYield >= 32) {
+            await new Promise((r) => setTimeout(r, 0));
+            lastYield = performance.now();
+          }
         }
       }
+      // ★load 模式跳过轮尾扫描(原版 WorldFile.cs:738-770 只有一次终态 WaterCheck;
+      // 轮尾扫描是生成期 pass 49 十轮结构 :16286 的,load 单轮下与终态背靠背白跑一次全图)
+      if (mode === 'gen') sim.waterCheck();
+      // vanilla 无收敛早退（:16259 while(num<10) 恒 10 轮;load 单轮同义）——JS 曾有的
+      // `numLiquid===0 break` 掐掉了尾轮 WaterCheck 反复再激活的流掷尾段
     }
-    // ★load 模式跳过轮尾扫描(原版 WorldFile.cs:738-770 只有一次终态 WaterCheck;
-    // 轮尾扫描是生成期 pass 49 十轮结构 :16286 的,load 单轮下与终态背靠背白跑一次全图)
-    if (mode === 'gen') sim.waterCheck();
-    // vanilla 无收敛早退（:16259 while(num<10) 恒 10 轮;load 单轮同义）——JS 曾有的
-    // `numLiquid===0 break` 掐掉了尾轮 WaterCheck 反复再激活的流掷尾段
+    sim.quickSettle = false;
+    // 原版 pass 尾恢复（cs:21110/16293：worldGenTilesIgnoreWater(false)——在 ClearPendingLiquid
+    // 之后）；finalGenMergeCheck（本仓 #102 补挂段）按原版 Finish 时点在恢复之后跑。
+    sim.worldGenTilesIgnoreWater(false);
+    // ★尾部 WaterCheck 仅读档路径有（WorldFile.cs:765-769：quickSettle=false → WaterCheck →
+    //   isGeneratingOrLoadingWorld=false；该路径全程未开 worldGenTilesIgnoreWater 窗口）。
+    //   生成期两 pass（cs:16286-16293 / 21109-21113）在 worldGenTilesIgnoreWater(false)
+    //   恢复后【无任何 WaterCheck】直接结束——若恢复后补跑一次，10/190/191/192（关门门/
+    //   蘑菇块/活木/活叶）已翻回实心，轮内合法驻留其间的水/岩浆会被 clear 分支整片抹零
+    //   （#49 残差 L=47 根因：丛林活木 191 河床水池被尾部 WC 清空，vanilla 末态保留
+    //   238/255——x86 对拍实证）
+    if (mode === 'load') sim.waterCheck();
+    // ★DDDDDD 批（2026-08-21）归位：全图 LiquidCheck(createMergeTilesDuringGen:true)
+    //   （WorldGen.cs:22639-50）原版挂在 **FinalCleanup pass 体末**（cs:22304 委托内、
+    //   ShimmerCleanUp 之后）——曾挂在 #49/#97 沉降尾（时点早 8 pass，"管线无终 pass"
+    //   时代的备案；金标四链该域两侧均零接触故隐身）。现由 WorldGen 终清理槽直调
+    //   finalGenMergeScan()，settle 本体恢复 #49/#97 strip-only 原版口径。
+  } finally {
+    // ★异常安全:去重位图必须配对清除(残留会错误去重后续 worldgen/运行期级联)
+    if (dedupeOn) setReframeDedupe(null);
   }
-  sim.quickSettle = false;
-  // 原版 pass 尾恢复（cs:21110/16293：worldGenTilesIgnoreWater(false)——在 ClearPendingLiquid
-  // 之后）；finalGenMergeCheck（本仓 #102 补挂段）按原版 Finish 时点在恢复之后跑。
-  sim.worldGenTilesIgnoreWater(false);
-  // ★尾部 WaterCheck 仅读档路径有（WorldFile.cs:765-769：quickSettle=false → WaterCheck →
-  //   isGeneratingOrLoadingWorld=false；该路径全程未开 worldGenTilesIgnoreWater 窗口）。
-  //   生成期两 pass（cs:16286-16293 / 21109-21113）在 worldGenTilesIgnoreWater(false)
-  //   恢复后【无任何 WaterCheck】直接结束——若恢复后补跑一次，10/190/191/192（关门门/
-  //   蘑菇块/活木/活叶）已翻回实心，轮内合法驻留其间的水/岩浆会被 clear 分支整片抹零
-  //   （#49 残差 L=47 根因：丛林活木 191 河床水池被尾部 WC 清空，vanilla 末态保留
-  //   238/255——x86 对拍实证）
-  if (mode === 'load') sim.waterCheck();
-  // ★DDDDDD 批（2026-08-21）归位：全图 LiquidCheck(createMergeTilesDuringGen:true)
-  //   （WorldGen.cs:22639-50）原版挂在 **FinalCleanup pass 体末**（cs:22304 委托内、
-  //   ShimmerCleanUp 之后）——曾挂在 #49/#97 沉降尾（时点早 8 pass，"管线无终 pass"
-  //   时代的备案；金标四链该域两侧均零接触故隐身）。现由 WorldGen 终清理槽直调
-  //   finalGenMergeScan()，settle 本体恢复 #49/#97 strip-only 原版口径。
   sim.dispose();
   onProgress?.(1);
 }

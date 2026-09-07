@@ -1230,15 +1230,11 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       const slope = st.slope[si];
       const half = !!st.half[si];
       if (half && slope === 0) {
-        // D2:下方无支撑 → 半砖底 4px 换暗条(TileDrawing.cs:1657-1667)
-        const bi = st.idx(x, y + 1);
-        const noSupport = y + 1 >= st.h || !st.flags[bi] || !TILE_DEFS[st.type[bi]]?.solid || !!st.half[bi];
-        if (noSupport && r.sy + 12 <= r.img.height && 144 + r.sw <= r.img.width && 70 <= r.img.height) {
-          ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, 4, px, py + 8, r.sw, 4);
-          ctx.drawImage(r.img, 144, 66, r.sw, 4, px, py + 12, r.sw, 4);
-        } else {
-          ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, px, py + 8, r.sw, r.sh - 8);
-        }
+        // ★SW-BJ3 2026-09-06：半砖拍 1:1 重对（TileDrawing.cs:1016/:1022/:1653-1666）
+        //  ——旧实现源 r.sy+8（帧下半）系上下半颠倒：对实心块丢顶面棱线；对平台
+        //  材质（素材 plank 在帧上半 8px,下半全透明）→ 半砖平台整格隐形（物理仍在,
+        //  用户可见"站空气"）。抽公共 helper（auto/共享尾两条同体分支合并防漂移）。
+        drawHalfBrickCell(ctx, r, st, x, y, st.type[si], px, py);
       } else if (slope > 0 && !half) {
         // 坡面门控:421/422 专属坡帧整帧画;DontDrawTileSlopes 跳过切条走整帧
         if (HAS_SLOPE_FRAMES.has(sheet)) {
@@ -1461,16 +1457,8 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   const dpx = px - (sheet === 711 ? 0 : (r.sw - TILE) / 2);
   const dpy = py + dyOff;
   if (half && slope === 0) {
-    // 半砖:画下半 8px(源 y+8 高-8,目标 y+8;halfBrickHeight=8);
-    // D2:下方无支撑 → 底 4px 换暗条(TileDrawing.cs:1657-1667)
-    const bi = st.idx(x, y + 1);
-    const noSupport = y + 1 >= st.h || !st.flags[bi] || !TILE_DEFS[st.type[bi]]?.solid || !!st.half[bi];
-    if (noSupport && r.sy + 12 <= r.img.height && 144 + r.sw <= r.img.width && 70 <= r.img.height) {
-      ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, 4, dpx, dpy + 8, r.sw, 4);
-      ctx.drawImage(r.img, 144, 66, r.sw, 4, dpx, dpy + 12, r.sw, 4);
-    } else {
-      ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, dpx, dpy + 8, r.sw, r.sh - 8);
-    }
+    // ★SW-BJ3 2026-09-06：同 auto 路径半砖拍 1:1 重对（详见 drawHalfBrickCell 注）
+    drawHalfBrickCell(ctx, r, st, x, y, st.type[si], dpx, dpy);
     return;
   }
   if (slope > 0 && !half) {
@@ -1483,14 +1471,18 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // shouldShowInvisibleBlocks=false 语义排除。平台不走切条(原版在切条前 return)
     if (TILE_DEFS[st.type[si]]?.platform) {
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
-      // :1541/:1566 原版「下方格」三连门：active && 非echo && blockType∈{0,5} && BlocksStairs
+      // :1541/:1566 原版「下方格」三连门：active && 非echo && blockType∈{0,5|4} && BlocksStairs
+      // ★SW-BJ3 2026-09-06：blockType 档两支不同——slope1 支（:1551）`!=0 && !=5`
+      //  （whole/slope4 抑制）、slope2 支（:1565）`!=0 && !=4`（whole/slope3 抑制,
+      //  blockType():slope()+1,Tile.cs:204-214）。旧实现两支共用 {0,5} →
+      //  slope2 平台下邻 slope3 格漏抑制（多画一片补片）。
       const belowSuppresses = (): boolean => {
         if (!st.inBounds(x, y + 1)) return false;
         const bi = st.idx(x, y + 1);
         if (!st.flags[bi]) return false;
         if (st.coat[bi] & TileStore.COAT_INVISIBLE_BLOCK) return false;   // invisibleBlock 显示模式关
         const bt = st.slope[bi] > 0 ? st.slope[bi] + 1 : st.half[bi] ? 1 : 0;   // Tile.blockType()
-        if (bt !== 0 && bt !== 5) return false;
+        if (slope === 1 ? bt !== 0 && bt !== 5 : bt !== 0 && bt !== 4) return false;
         const bs = TILE_DEFS[st.type[bi]]?.vanilla?.sheet;
         return bs !== undefined && BLOCKS_STAIRS_SHEETS.has(bs);
       };
@@ -1747,6 +1739,16 @@ const HAS_SLOPE_FRAMES = new Set([421, 422]);
 /** TileID.Sets.BlocksStairs（TileID.cs:357）——平台坡面连接补片的抑制族
  *  （TileDrawing.cs:1551/:1565：正下方为该族整块(blockType 0)/坡4(5) 时不补） */
 const BLOCKS_STAIRS_SHEETS = new Set([386, 387, 54, 328, 459, 541]);
+// ★SW-BJ3 2026-09-06：原版 tileSolid+tileSolidTop【双 true】sheet 全集（Main.cs:8031-8032
+//  tile 19 / :9797-9800 tile 239 / :9799-9800 tile 380 / :10118-10119 tile 427 /
+//  :10125-10130 循环 435-439——SW-RB2 B-3 定谳同表）。半砖 D2 支撑谓词原版读
+//  _tileSolid[below.type]（TileDrawing.cs:1653）,平台族在内=「半砖压平台」算有支撑;
+//  本仓 solid=参与碰撞域（≈tileSolid&&!solidTop）不含平台,渲染侧用本表补臂
+// （Game.ts POUNDABLE_SOLID_TOP_SHEETS 为逻辑侧同值表,渲染层不 import 核心层,单源复制）
+const VANILLA_TS_DOUBLE_TRUE = new Set([19, 427, 435, 436, 437, 438, 439, 239, 380]);
+// ★SW-BJ3：TileID.Sets.Platforms（TileID.cs:243）——D2 平台支门用原版窄域
+// （本仓 def.platform 旗是含 239/380 的单向门超集,239/380 半砖原版吃暗条支）
+const VANILLA_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
 const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
 const NOT_REALLY_SOLID = new Set([387, 388, 10]);
 const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
@@ -1995,6 +1997,40 @@ function drawAdjust(
       break;
   }
   return a;
+}
+
+/** ★SW-BJ3（2026-09-06）：半砖格绘制 1:1（TileDrawing.cs:1016/:1022/:1653-1666）。
+ *  原版基础拍：normalTileRect = (frameX+addFrX, frameY+addFrY, tileWidth,
+ *  tileHeight - halfBrickHeight)（:1016——halfBrick 时高 16-8=8,即【帧上半】8px）、
+ *  位置 y*16 + tileTop + halfBrickHeight（:1022 → 格内下半）。半砖素材语义 =
+ *  顶面棱线在帧上半,画到格下半才是"矮台阶"顶面（D1 邻半砖衔接 :1610 的下半条
+ *  fy+8 与此不同源,勿混）。
+ *  D2 无支撑支（:1653）：下方 !active || !_tileSolid || halfBrick 时——
+ *   · 平台（:1655 Platforms 支）仍画整 normalTileRect（=上半 8px,无暗条）;
+ *   · 其余（:1658-1663）画 normalTileRect.Modified(0,0,0,-4)（帧顶 4px）+
+ *     暗条 (144+addFrX, 66+addFrY, w, 4) @ y+12（素材表固定区,悬空断茬）。
+ *  支撑域 _tileSolid = 原版 tileSolid（平台 19/427/435-439+239/380 双 true 在内）
+ *  = 本仓 solid ∪ VANILLA_TS_DOUBLE_TRUE（旧谓词缺平台臂:平台上压半砖被误判
+ *  悬空画暗条——用户实报"半砖放平台上出现黑条"同根）。
+ *  auto/共享尾两条同体分支合并走本函数（此前两份手写已漂移出同 bug）。 */
+function drawHalfBrickCell(
+  ctx: CanvasRenderingContext2D,
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  st: { idx(x: number, y: number): number; h: number; flags: Uint8Array; type: Uint16Array; half: Uint8Array },
+  x: number, y: number, type: number, px: number, py: number,
+): void {
+  const bi = st.idx(x, y + 1);
+  const belowDef = y + 1 < st.h && st.flags[bi] ? TILE_DEFS[st.type[bi]] : undefined;
+  const belowVanillaSolid = !!belowDef
+    && (!!belowDef.solid || VANILLA_TS_DOUBLE_TRUE.has(belowDef.vanilla?.sheet ?? -1));
+  const noSupport = y + 1 >= st.h || !st.flags[bi] || !belowVanillaSolid || !!st.half[bi];
+  const isPlatHalf = VANILLA_PLATFORM_SHEETS.has(TILE_DEFS[type]?.vanilla?.sheet ?? -1);
+  if (noSupport && !isPlatHalf && r.sy + 4 <= r.img.height && 144 + r.sw <= r.img.width && 70 <= r.img.height) {
+    ctx.drawImage(r.img, r.sx, r.sy, r.sw, 4, px, py + 8, r.sw, 4);          // 帧顶 4px
+    ctx.drawImage(r.img, 144, 66, r.sw, 4, px, py + 12, r.sw, 4);            // D2 暗条
+  } else {
+    ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh - 8, px, py + 8, r.sw, r.sh - 8);   // 帧上半 8px @格下半
+  }
 }
 
 /** D1 邻居半砖衔接(TileDrawing.cs:1609-1652):本格整砖实心、左右邻是半砖时,

@@ -366,3 +366,40 @@ describe('诡药 3001：随机回复 + 10/20/30% 档 240/120/60 i-帧', () => {
     expect(itemFuncOfVid(3001)!.healLife).toBe(70);   // 表基值（运行时随机覆写）
   });
 });
+
+// ============ ★SW-RB5a 2026-09-07 Stinky(120) 入液洗掉 ============
+// Player.cs:27968-27979：num86 = Collision.WetCollision（任一液湿）→ DelBuff 120。
+// 着火臂才有 `&& !lavaWet` 豁免,恶臭臂无（岩浆/蜂蜜湿同样洗）。缺臂 = 洗澡不掉味,
+// HoverOverNPCs 谈话否决（Main.cs:43785）与 luck −0.25（Player.cs:29386）恒挂。
+describe('★SW-RB5a Stinky(120) 入液洗掉（WetCollision 任一液湿 → DelBuff 120）', () => {
+  const hooks = (w: World, p?: Player): GameHooks =>
+    ({
+      world: w, player: p, enemies: () => [], critters: () => [],
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
+      playSfxFiles: () => {}, showPickupLabel: () => {},
+    }) as never;
+  /** 水池世界（water-jump.test.ts poolWorld 同构;高 200 防 WetCollision 扫描窗钳位伪影） */
+  function poolWorld(liquid = 1): World {
+    const w = new World(80, 200, 11, 'pool');
+    for (let x = 0; x < 80; x++) {
+      w.store.setTileSilent(x, 85, 1);
+      for (let y = 60; y < 85; y++) w.store.setLiquid(x, y, 255, liquid);
+    }
+    return w;
+  }
+  it('水中 fixedUpdate 一拍 → Stinky 移除', () => {
+    const w = poolWorld(1);
+    const p = new Player(40 * 16, 65 * 16, new Inventory());
+    p.buffs.apply(BuffType.Stinky, 30);
+    expect(p.buffs.has(BuffType.Stinky)).toBe(true);
+    p.fixedUpdate(1 / 60, hooks(w, p));
+    expect(p.inWater).toBe(true);
+    expect(p.buffs.has(BuffType.Stinky)).toBe(false);
+  });
+  it('洗臭臂无岩浆豁免（与着火臂 `&& !this.inLava` 相区分,Player.cs:27972 1:1）', () => {
+    expect(playerSrc).toContain('this.buffs.remove(BuffType.Stinky)');
+    expect(playerSrc).not.toContain('if (this.inWater && !this.inLava) this.buffs.remove(BuffType.Stinky)');
+  });
+});

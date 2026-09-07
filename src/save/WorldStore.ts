@@ -78,18 +78,24 @@ export class WorldStore {
       || (a.id - b.id));
   }
 
-  async register(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'>): Promise<WorldMeta> {
+  /** playTimeMs 可透传（SW-BJ5 2026-09-07）：新世界缺省 0;副本经 duplicate 的 spread
+   *  自动继承源槽位累计、导入槽经 importSlot 传存档头值——此前恒 0,副本/导入在
+   *  首次存档前列表显 0、读档基线丢累计 */
+  async register(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'> & { playTimeMs?: number }): Promise<WorldMeta> {
     await this.ensureLoaded();
-    const meta: WorldMeta = { ...m, id: nextId++, createdAt: Date.now(), lastPlayed: Date.now(), playTimeMs: 0, favorite: false };
+    const { playTimeMs, ...rest } = m;
+    const meta: WorldMeta = { ...rest, id: nextId++, createdAt: Date.now(), lastPlayed: Date.now(), playTimeMs: playTimeMs ?? 0, favorite: false };
     this.index.push(meta);
     await this.saveIndex();
     return meta;
   }
 
   /** 导入落库（世界列表「导入」路径）：register 只登记索引不落数据，
-   *  本方法一并写入存档全文（duplicate 同型；数据 = SaveFile JSON 全文） */
-  async importSlot(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'>, saveJson: string): Promise<WorldMeta> {
-    const meta = await this.register(m);
+   *  本方法一并写入存档全文（duplicate 同型；数据 = SaveFile JSON 全文）。
+   *  playTimeMs（SW-BJ5 2026-09-07）= 存档头值（.json 导入）;缺省 0（.wld 原版
+   *  WorldFile 无游玩时长字段,导入态无从取值） */
+  async importSlot(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'>, saveJson: string, playTimeMs?: number): Promise<WorldMeta> {
+    const meta = await this.register({ ...m, playTimeMs });
     await kvSet(dataKey(meta.id), saveJson);
     return meta;
   }

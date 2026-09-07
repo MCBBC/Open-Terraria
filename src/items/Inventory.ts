@@ -9,7 +9,7 @@
 // 旧版（2026-08-11 前）自创布局 0-39 背包/40-44 配饰/45-47 盔甲/48-50 时装/51-53 钱币
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { canMergeStack } from '../ui/SlotActions';   // ★SW-AY1 R1 合并谓词单源（Item.CanStack）
+import { canMergeStack, onlyNeedOneInInventory } from '../ui/SlotActions';   // ★SW-AY1 R1 合并谓词单源（Item.CanStack）
 import { VI_KEY } from '../data/itemKeys';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -445,7 +445,16 @@ export class Inventory {
   /** 添加物品（Player.GetItem :38657-38736 优先级 1:1），返回未能放入的数量：
    *  ① 钱币先进 50-53；② 弹药进 54-57（先合并已有再空格）；
    *  ③ 合并 0-49 已有堆（先于空槽）；④ 空槽【降序】从背包末尾填（原版非收藏物降序）
-   *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589） */
+   *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589）
+   *  ★SW-BP1 2026-09-07（RB4a 债④）favorited 随行：原版 GetItem 的空格落位
+   *  `inventory[i] = returnItem`（Player.cs:39873/GetItem_FillEmptyInventorySlot,
+   *  FillAmmo 空格支 :39620 同式）=【整个 Item 对象】入槽——favorited/prefix/
+   *  placeStyle 全随行。本仓 add 通道此前不收 favorited（落新堆丢收藏金边）。
+   *  语义域=「从 UI 面流回背包的整对象」（关包光标物归位 dropItemCheck→
+   *  GetOrDropItem Player.cs:5135-5140、向导材料格取回 GetOrDropItem(Main.guideItem)
+   *  :5112-5114）；世界拾取链调用方不传（缺省 false）=行为不变（世界掉落本无收藏）。
+   *  空格序：favorited 件升序落首空格（GetItem :39681-39698 favorited 臂同向——
+   *  本仓空格支升序见 ③ 注）。 */
   /** noCoinMerge（R14-B4）：钱币入包跳过 doCoins 自动升面额（GetItemSettings.cs:25
    *  ReturnItemShowAsNewNoCoinMerge——合成 1 银→100 铜不被瞬时合回） */
   addNoCoinMerge(id: number, count: number): number {
@@ -453,7 +462,7 @@ export class Inventory {
   }
 
   add(id: number, count: number, prefix?: number, placeStyle?: number, noCoinMerge = false,
-    preferHotbar = false): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）；preferHotbar=授予类入包先热栏（见 ②'）
+    preferHotbar = false, favorited = false): number { // prefix/placeStyle/favorited 随新放置槽写入（合并已有堆保留现有）；preferHotbar=授予类入包先热栏（见 ②'）
     // 未知 id 守卫(2026-08-18):裸 .maxStack 曾让一个不在定义表的掉落物在拾取瞬间
     // TypeError 炸掉整个帧循环(用户实报:砍树掉落自动收集时崩溃)——拒绝入包并
     // 留栈取证,定位是谁产出了这个 id
@@ -474,11 +483,11 @@ export class Inventory {
         if (count === before) break;   // 无进展（格满且不再转换）→ 溢出走背包
       }
       if (count > 0) {
-        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix);
+        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix, favorited);
         for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
           if (!this.slots[i]) {
             const put = Math.min(max, count);
-            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
             count -= put;
           }
         }
@@ -491,12 +500,13 @@ export class Inventory {
     if (ammoSlotAccepts(id)) {
       // 第一趟只合并（FillAmmo :38594-38630——全部弹药并已有堆,凝胶亦然）
       count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max, placeStyle, true, prefix);
-      // 第二趟空格仅 CanFillEmptyAmmoSlot（:38632-38651）
+      // 第二趟空格仅 CanFillEmptyAmmoSlot（:38632-38651；inventory[j] = newItem 整对象——
+      // ★SW-BP1 favorited 随行,FillAmmo 空格支 :39620 同式）
       if (count > 0 && canFillEmptyAmmoSlot(id)) {
         for (let i = AMMO_START; i < AMMO_START + AMMO_SLOTS && count > 0; i++) {
           if (!this.slots[i]) {
             const put = Math.min(max, count);
-            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
             count -= put;
           }
         }
@@ -512,25 +522,31 @@ export class Inventory {
         if (count <= 0) break;
         if (i >= 10) continue;
         const s = this.slots[i];
-        if (s && s.id === id && s.stack < max && (prefix ?? 0) === (s.prefix ?? 0)) {
+        // ★SW-BM1：同 fillRange——收藏 OnlyNeedOne 堆不并（授予路径同 GetItem 门面）
+        // ★SW-BP1：合并判据改 canMergeStack 单源（词缀+placeStyle 位同箱/fillRange 面）
+        if (s && s.stack < max && canMergeStack(s, { id, prefix, placeStyle })
+          && !(s.favorited && onlyNeedOneInInventory(s.id))) {
           const put = Math.min(max - s.stack, count);
           s.stack += put;
           count -= put;
         } else if (!s) {
           const put = Math.min(max, count);
-          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
           count -= put;
         }
       }
       if (count <= 0) return 0;
     }
-    // ③ 合并 0-49 已有堆
-    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix);
-    // ④ 空槽降序（原版非 favorited 降序从背包尾填，:38711-38730）
+    // ③ 合并 0-49 已有堆（fillRange 空格支升序先行落位——与原版 favorited 件空格臂
+    //    :39681-39686 升序同向；非收藏件原版降序臂 :39688-39700 被 fillRange 空格支
+    //    预占=登记偏差【2026-09-07 SW-BP1 复核在案,坐标:本行 mergeOnly 未设】,非本批刀）
+    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix, favorited);
+    // ④ 空槽降序（原版非 favorited 降序从背包尾填，:38711-38730；常态由 ③ 预收，
+    //    本循环为残量兜底）
     for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
       if (!this.slots[i]) {
         const put = Math.min(max, count);
-        this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+        this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
         count -= put;
       }
     }
@@ -539,15 +555,26 @@ export class Inventory {
 
   /** 范围内先合并后空格填充。★SW-AY1 R1：合并判据补词缀面（Item.CanStack
    *  Item.cs:49870-49874 同型且 prefix 相等）——经 SlotActions.canMergeStack 单源
-   *  谓词（与 UI 合并三路径同源）；placeStyle 门为本仓实例样式防混堆扩展,原版无 */
+   *  谓词（与 UI 合并三路径同源）；placeStyle 门为本仓实例样式防混堆扩展,原版无。
+   *  ★SW-BP1 2026-09-07（RB4a 候⑦）：placeStyle 门并入 canMergeStack placeStyle 位
+   *  （语义不变：任一侧 undefined 不设门/双侧皆存比相等——三元展开逐字等价），
+   *  与箱合并三路径单源同吃。
+   *  ★SW-BM1 2026-09-06（GetItem :39796-39800 CanItemSlotAcceptPickup 面拾取侧）：
+   *  合并支接收藏拒收 `theSlot.favorited && OnlyNeedOneInInventory() → 不可并`
+   *  （Player.cs:39536-39539 同判,SlotActions.onlyNeedOneInInventory 单源）——
+   *  世界拾取/合成溢出不再并入收藏的 OnlyNeedOne 族堆;mergeOnly=true（FillAmmo
+   *  :39575-39601 弹药首趟合并）原版无 favorited 门,不接;空格支原版恒收,不接。
+   *  ★SW-BP1 favorited 随行：空格落位带收藏标记（GetItem_FillEmptyInventorySlot
+   *  :39873 `inventory[i] = returnItem` 整对象语义,add 通道 favorited 入参透传） */
   private fillRange(start: number, len: number, id: number, count: number, max: number,
-    placeStyle?: number, mergeOnly = false, prefix?: number): number {
+    placeStyle?: number, mergeOnly = false, prefix?: number, favorited = false): number {
     for (let i = start; i < start + len && count > 0; i++) {
       const s = this.slots[i];
       // placeStyle 匹配门(2026-08-13):不同敌旗(bannerId)不并入已有堆——
       // 原版每旗独立 item id 天然隔离,本仓单物品+实例 style 需此门防混堆
-      if (s && s.stack < max && canMergeStack(s, { id, prefix })
-        && (placeStyle === undefined || s.placeStyle === undefined || s.placeStyle === placeStyle)) {
+      //（★SW-BP1 起判据在 canMergeStack placeStyle 位,此处不再内联展开）
+      if (s && s.stack < max && canMergeStack(s, { id, prefix, placeStyle })
+        && !(!mergeOnly && s.favorited && onlyNeedOneInInventory(s.id))) {
         const put = Math.min(max - s.stack, count);
         s.stack += put;
         count -= put;
@@ -559,7 +586,7 @@ export class Inventory {
           const put = Math.min(max, count);
           // ★SW-AY1 R1：空格落位随行词缀（原版整 Item 对象入槽,prefix 不丢）——
           // 旧实现裸 {id,stack} 曾把词缀件落成无词缀堆（词缀门建立后成数据矛盾）
-          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}) };
+          this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(favorited ? { favorited: true } : {}) };
           count -= put;
         }
       }

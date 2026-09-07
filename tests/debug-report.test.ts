@@ -360,3 +360,75 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     void w;
   });
 });
+
+// ==================== ★SW-BM1 2026-09-06 fatal 独立环归并（工具链债扩容） ====================
+describe('★SW-BM1 errors 段 fatal 环归并', () => {
+  it('fatal 环（kind 0/1）∪ 总环按时间归并,上限 150 条——console.error 刷屏逐不出 fatal', () => {
+    const { game } = sampleGame();
+    const fatal = [
+      { t: 100, kind: 0, msg: 'page-fatal', stack: null },
+      { t: 900, kind: 1, msg: 'unhandled-rejection', stack: null },
+    ];
+    const general = Array.from({ length: 60 }, (_, i) => ({ t: 200 + i, kind: 2, msg: `noise-${i}`, stack: null as string | null }));
+    const r = collectDebugReport(game, {
+      screenshot: false,
+      errors: general,
+      errorsFatal: fatal,
+    }) as Record<string, unknown>;
+    const errs = r.errors as Array<{ t: number; kind: number; msg: string }>;
+    expect(errs).toHaveLength(62);                       // 2 fatal + 60 noise 全在（<150 上限）
+    expect(errs[0].msg).toBe('page-fatal');              // 时间归并：fatal 首条最先
+    expect(errs[errs.length - 1].msg).toBe('unhandled-rejection');   // 尾条=最新（t=900）
+    expect(errs.some((e) => e.msg === 'noise-59')).toBe(true);
+  });
+  it('总量超 150：最近 150 + 被挤出 fatal 全量补回,上界 250 体积有界（★SW-RB5a 改约）', () => {
+    const { game } = sampleGame();
+    const fatal = Array.from({ length: 100 }, (_, i) => ({ t: i, kind: 0 as const, msg: `fatal-${i}`, stack: null }));
+    const general = Array.from({ length: 300 }, (_, i) => ({ t: 1000 + i, kind: 2 as const, msg: `n-${i}`, stack: null as string | null }));
+    const r = collectDebugReport(game, { screenshot: false, errors: general, errorsFatal: fatal }) as Record<string, unknown>;
+    const errs = r.errors as Array<{ t: number; msg: string }>;
+    expect(errs).toHaveLength(250);                      // 150 窗 + 100 被挤出 fatal 补回
+    expect(errs.filter((e) => e.msg.startsWith('fatal-'))).toHaveLength(100);  // fatal 全量
+    expect(errs[0].msg).toBe('fatal-0');                 // 补回段置前（时间早）
+    expect(errs[100].msg).toBe('n-150');                 // 噪声取最近 150
+    expect(errs[errs.length - 1].msg).toBe('n-299');
+    for (let i = 1; i < errs.length; i++) expect(errs[i].t).toBeGreaterThanOrEqual(errs[i - 1].t);
+  });
+  // ★SW-RB5a 2026-09-07：产线形态——pushSwError 把 kind≤1 的【同一对象】先推总环
+  // 再推 fatal 环;旧裸拼接让每条 fatal 在报告里出现两次（旧测试注入不相交数组测不出）。
+  // 且 console.error 刷屏 300 条时旧 slice(-150) 会把 fatal 环较老崩溃记录挤出报告,
+  // 违背「噪声逐不出 fatal」设计——被挤出 fatal 须置前补回
+  it('★SW-RB5a 产线双入环去重：fatal 记录同对象双环只报一次', () => {
+    const { game } = sampleGame();
+    const pageFatal = { t: 100, kind: 0 as const, msg: 'page-fatal', stack: null as string | null };
+    const rejFatal = { t: 200, kind: 1 as const, msg: 'unhandled-rejection', stack: null as string | null };
+    // 产线形态:总环含全部记录,fatal 环持有同对象引用
+    const general = [pageFatal, rejFatal,
+      ...Array.from({ length: 60 }, (_, i) => ({ t: 300 + i, kind: 2 as const, msg: `noise-${i}`, stack: null as string | null }))];
+    const r = collectDebugReport(game, {
+      screenshot: false,
+      errors: general,
+      errorsFatal: [pageFatal, rejFatal],
+    }) as Record<string, unknown>;
+    const errs = r.errors as Array<{ msg: string }>;
+    expect(errs.filter((e) => e.msg === 'page-fatal')).toHaveLength(1);
+    expect(errs.filter((e) => e.msg === 'unhandled-rejection')).toHaveLength(1);
+    expect(errs).toHaveLength(62);
+  });
+  it('★SW-RB5a console.error 刷屏挤出窗口：fatal 全量补回置前（时间序不破）', () => {
+    const { game } = sampleGame();
+    const fatal = Array.from({ length: 40 }, (_, i) => ({ t: i, kind: 0 as const, msg: `fatal-${i}`, stack: null }));
+    const general = Array.from({ length: 300 }, (_, i) => ({ t: 1000 + i, kind: 2 as const, msg: `n-${i}`, stack: null as string | null }));
+    const r = collectDebugReport(game, { screenshot: false, errors: general, errorsFatal: fatal }) as Record<string, unknown>;
+    const errs = r.errors as Array<{ t: number; msg: string }>;
+    // 40 条 fatal 全在报告（旧实现 slice(-150) 下全被 300 条新噪声挤出）
+    expect(errs.filter((e) => e.msg.startsWith('fatal-'))).toHaveLength(40);
+    // 旧 fatal 置前（时间上早于噪声段）,噪声取最近段,总体升序不破
+    expect(errs[0].msg).toBe('fatal-0');
+    const noise = errs.filter((e) => e.msg.startsWith('n-'));
+    expect(noise).toHaveLength(150);
+    expect(noise[0].msg).toBe('n-150');
+    expect(errs[errs.length - 1].msg).toBe('n-299');
+    for (let i = 1; i < errs.length; i++) expect(errs[i].t).toBeGreaterThanOrEqual(errs[i - 1].t);
+  });
+});

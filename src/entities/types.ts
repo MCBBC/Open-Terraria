@@ -167,6 +167,10 @@ export interface GameHooks {
   /** WorldGen.CheckAchievement_RealEstateAndTownSlimes（WorldGen.cs:5581）——镇民
    *  史莱姆/Transform 族实体侧触发面（微光 4986 解锁等）回调 Game 实现 */
   checkAchievementRealEstateAndTownSlimes?: () => void;
+  /** ★SW-BO1 2026-09-07：城镇 NPC 死亡复位优先型锁（NPC.cs:78986-78989）——
+   *  homeless=true 且其类型正持 WorldGen.prioritizedTownNPCType 锁 → 锁清零。
+   *  TownNPC.hurt 致死支消费；缺省（mock）= 静默 */
+  townNpcPrioritizedLockReset?(homeless: boolean, npcId: number): void;
   /** 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):冷却门+生成 1 颗 723 法力星(ai2=1 落地掉 4143) */
   tryManaCloakStarOnMagicHit?(x: number, y: number): void;
   /** MP：他人掉落（傀儡）被本端【整堆】拾取后上报 take（op1）——拥有端移除真身。

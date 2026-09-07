@@ -61,7 +61,7 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
     try {
       const h = (JSON.parse(req.text) as {
         header?: { name?: string; seed?: number | string; width?: number; height?: number;
-          difficulty?: number; crimson?: boolean; hardMode?: boolean };
+          difficulty?: number; crimson?: boolean; hardMode?: boolean; playTimeMs?: number };
       }).header;
       const ok = !!h && typeof h.width === 'number' && typeof h.height === 'number';
       (self as unknown as Worker).postMessage({
@@ -69,6 +69,7 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
         meta: ok ? {
           name: h.name ?? '', seed: String(h.seed ?? ''), w: h.width, h: h.height,
           difficulty: h.difficulty ?? 0, evil: h.crimson ? 1 : 0, hardMode: !!h.hardMode,
+          playTimeMs: typeof h.playTimeMs === 'number' && Number.isFinite(h.playTimeMs) ? h.playTimeMs : 0,   // SW-BJ5 2026-09-07
         } : undefined,
       });
     } catch {

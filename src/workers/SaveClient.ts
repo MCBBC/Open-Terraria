@@ -27,7 +27,8 @@ export interface ImportedWorld {
 export interface SaveHeaderInfo {
   ok: boolean;
   meta?: { name: string; seed: string; w: number; h: number;
-    difficulty: number; evil: 0 | 1; hardMode: boolean };
+    difficulty: number; evil: 0 | 1; hardMode: boolean;
+    playTimeMs: number };   // SW-BJ5 2026-09-07：存档头累计游玩时长（导入槽落库随数据走）
 }
 
 type SaveResponse =
@@ -229,12 +230,13 @@ export class SaveClient {
     try {
       const h = (JSON.parse(text) as {
         header?: { name?: string; seed?: number | string; width?: number; height?: number;
-          difficulty?: number; crimson?: boolean; hardMode?: boolean };
+          difficulty?: number; crimson?: boolean; hardMode?: boolean; playTimeMs?: number };
       }).header;
       if (!h || typeof h.width !== 'number' || typeof h.height !== 'number') return { ok: false };
       return { ok: true, meta: {
         name: h.name ?? '', seed: String(h.seed ?? ''), w: h.width, h: h.height,
         difficulty: h.difficulty ?? 0, evil: h.crimson ? 1 : 0, hardMode: !!h.hardMode,
+        playTimeMs: typeof h.playTimeMs === 'number' && Number.isFinite(h.playTimeMs) ? h.playTimeMs : 0,   // SW-BJ5 2026-09-07
       } };
     } catch {
       return { ok: false };

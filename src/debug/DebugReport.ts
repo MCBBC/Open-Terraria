@@ -49,10 +49,13 @@ export interface SwWarnRecord { t: number; msg: string }
 export interface DebugReportOptions {
   /** 截图段（默认 true）；无 DOM 环境自动降级为 null */
   screenshot?: boolean;
-  /** 游玩时长 ms（mainFlow.playStartNow；缺省由报告时间戳兜底 0） */
+  /** 游玩时长 ms（累计口径=flow.cumulativePlayMs,SW-BJ5 2026-09-07 前为会话净时长 playStartNow;缺省由报告时间戳兜底 0） */
   playTimeMs?: number;
   /** 错误 ring 注入（单测用；缺省读 globalThis.__swErrors） */
   errors?: SwErrorRecord[];
+  /** fatal 错误环注入（单测用；缺省读 globalThis.__swErrorsFatal——main.ts
+   *  kind 0/1 独立环,console.error 刷屏不可逐出;★SW-BM1 2026-09-06） */
+  errorsFatal?: SwErrorRecord[];
   /** 警告 ring 注入（单测用；缺省读 globalThis.__swWarns——main.ts console.warn 钩子） */
   warnings?: SwWarnRecord[];
   /** __swGame 挂载计数注入（单测用；缺省读 globalThis.__swInstanceCount） */
@@ -519,6 +522,8 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
   const cam = g.camera;
   const snap: GameDebugSnapshot = typeof g.debugSnapshot === 'function' ? g.debugSnapshot() : {};
   const errs = opts.errors ?? (globalThis as unknown as { __swErrors?: SwErrorRecord[] }).__swErrors ?? [];
+  const errsFatal = opts.errorsFatal
+    ?? (globalThis as unknown as { __swErrorsFatal?: SwErrorRecord[] }).__swErrorsFatal ?? [];
   const warns = opts.warnings ?? (globalThis as unknown as { __swWarns?: SwWarnRecord[] }).__swWarns ?? [];
 
   // ---- tiles：直方图 + 区域转储 ----
@@ -751,6 +756,19 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
   const wiring = g.wiring;
   const hitTop = (snap.hitTilesTop ?? []) as Array<{ x: number; y: number; type: number; damage: number; ttl: number }>;
 
+  // ★SW-RB5a 2026-09-07 两刀：①产线 fatal 记录【同一对象】双入环（main.pushSwError
+  //  先推总环再推 fatal 环）,裸拼接 = 每条 pageerror/rejection 在报告里出现两次
+  //  （单测注入的是两份不相交数组,测不出）→ 按对象身份去重;②slice(-150) 在
+  //  console.error 刷屏时会连 fatal 环里较老的崩溃记录一并挤出报告——与环设计
+  //  宣称「console.error 噪声永远逐不出 fatal」矛盾 → 被窗口挤出的 fatal 全量
+  //  置前补回（体积上界 150+100=250 条 ≈ 212KB,对 2.1MB 报告仍 <10%）
+  const fatalSet = new Set<SwErrorRecord>(errsFatal);
+  const merged = [...errsFatal, ...errs.filter((e) => !fatalSet.has(e))]
+    .sort((a, b) => a.t - b.t);
+  const tail = merged.slice(-150);
+  const tailSet = new Set<SwErrorRecord>(tail);
+  const evictedFatal = merged.filter((e) => fatalSet.has(e) && !tailSet.has(e));
+
   return {
     meta: {
       schemaVersion: DEBUG_REPORT_SCHEMA_VERSION,
@@ -765,7 +783,10 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       paused: g.paused ?? false,
       playTimeMs: opts.playTimeMs ?? 0,
     },
-    errors: errs.slice(-50).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg, stack: e.stack })),
+    // ★SW-BM1 2026-09-06：fatal 独立环（kind 0/1）∪ 总环最近,按时间归并取最近 150
+    // 条（环 300+fatal 100 深后报告段体积上限 ~130KB,对 2.1MB 报告 <7%）
+    // ★SW-RB5a 2026-09-07：去重+被挤出 fatal 补回逻辑见上方 return 前的合并段
+    errors: [...evictedFatal, ...tail].map((e) => ({ t: e.t, kind: e.kind, msg: e.msg, stack: e.stack })),
     warnings: warns.slice(-50).map((w) => ({ t: w.t, msg: w.msg })),
     // 行为录制尾段（F5 短按注入；时序因果日志 = 输入/方块/生死/掉落/伤害/公告）
     behaviorTail: opts.behaviorTail ?? null,

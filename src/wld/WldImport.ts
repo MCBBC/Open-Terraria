@@ -6,8 +6,8 @@ import { furnitureSlotCount, type FurnitureKind } from '../world/FurnitureItems'
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { CHEST_MAX_ITEMS } from '../world/World';
-import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
-import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL } from '../data/tiles';
+import { ITEM_BY_KEY, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
 // ★IIIIIII18 F-1：导入路径统一走与新创建世界相同的 seed 解析层——
 // parseSeedChain（WorldGen.CheckInputForSecretSeed 等价层 + '|' 多段协议）
@@ -686,6 +686,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         if (m) slots[i] = m;
       };
       if (te.item) put(0, te.item);
+      // ★SW-BO1 2026-09-07（SW-BL1 P1）：模特姿态 _pose 入库（原版 WriteExtraData
+      //  v307+ byte,TEDisplayDoll.cs:184；此前解析后即弃,导入世界姿态归零）
       if (te.doll) {
         te.doll.equip.forEach((it, i) => put(i, it));
         put(9, te.doll.misc);
@@ -695,7 +697,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         te.hat.hats.forEach((it, i) => put(i, it));
         te.hat.dyes.forEach((it, i) => put(2 + i, it));
       }
-      if (slots.some(Boolean)) furnitureSave.push({ x: te.x, y: te.y, kind: spec.kind, slots });
+      // 记录准入：有存物或【模特带非零姿态】（空模特姿态件原版同样落 TE,丢弃=姿态丢）
+      if (slots.some(Boolean) || (te.doll != null && te.doll.pose > 0)) {
+        furnitureSave.push({ x: te.x, y: te.y, kind: spec.kind, slots, ...(te.doll ? { pose: te.doll.pose } : {}) });
+      }
     }
     if (teInvalid > 0) warnings.push(`${teInvalid} 个挂物家具 TE 与地形脱节已跳过`);
   }
@@ -753,9 +758,20 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   }
   timeOfDay = timeOfDay % 1;
 
+  // ★物品统一稳定 id 域(2026-09-07):宝箱/挂物家具(含 TE 槽/模特装备染料)三源收口
+  //  ——域契约与 serializeSave 一致,loadSaveData/exportWld 的 stable 假设恒真。
+  //  未注册 id 归 0(空槽;与 loadSaveData 侧 `?? 0` 同归)。
+  const stItem = (id: number): number => (id === 0 ? 0 : (ITEM_STABLE_OF_INTERNAL[id] ?? 0));
+  for (const c of chests) for (const it of c.items) if (it) it.id = stItem(it.id);
+  for (const f of furnitureSave) for (const it of f.slots) if (it) it.id = stItem(it.id);
+
   const save: SaveData = {
     format: 'sandboxworld.save',
-    version: 2, // 墙已是原版 id 语义——不能低于 2，否则 loadSave 触发旧墙值迁移翻转
+    // ★v3(2026-09-07 统一稳定域):产物 tiles/items=稳定 id,读档端(v3 分支做
+    //  INTERNAL_OF_STABLE 还原)必须按 v3+ 解释,否则 furniture/chests 的稳定 id
+    //  被当内部 id 直读=错件(glowstick 替铁短剑,weapon-rack 测试实证)。曾 v2:
+    //  「墙已是原版 id 语义,低于 2 触发旧墙值迁移」——3>2 同样不触发 ✓
+    version: 3,
     header: {
       name: wld.title || '导入的地图',
       // ★R16-5：数值种子 = seed 文本经 TranslateSeed 派生（rng.ts:199 与原版
@@ -843,7 +859,14 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     altarCount: wld.altarCount,
     shadowOrbCount: wld.shadowOrbCount,
     savedOreTiers: wld.savedOreTiers,
-    tiles: bytesToB64(rleTiles({ type, frameX, frameY })),
+    // ★全通道统一稳定 id 域(2026-09-07):SaveData 唯一 id 域=稳定 id(与 serializeSave
+    //  产物同域)。此前 tiles/物品 落内部 id,而 loadSaveData/exportWld 按稳定域查表
+    //  (INTERNAL_OF_STABLE 二次映射)——导入原版 wld 后类型大面积错位(6400×1800 实测
+    //  577 万格错=「贴图乱七八糟/地图反相」的全部根因;小世界测试因早期段
+    //  stable≡internal 恒等而伪绿)。统一后读/导两侧契约恒真,无双域判别。
+    //  tiles 经 rleTiles stableMap 逐元素映射(游程按 raw 比较不膨胀);物品三源
+    //  (宝箱/挂物家具/TE 槽)统一在此收口。
+    tiles: bytesToB64(rleTiles({ type, frameX, frameY }, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(wall)),
     liquid: bytesToB64(rlePairs(liquidArr)),
     liquidType: bytesToB64(rlePairs(liquidTypeArr)),
@@ -882,7 +905,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       if (!entry) return [];   // 旅商/骷髅商等不落存档的类型跳过
       const hasHome = !n.homeless && n.homeX >= 0 && n.homeY >= 0;
       const home = hasHome ? [n.homeX, n.homeY] as [number, number] : null;
-      return [{ key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined }];
+      return [{
+        key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined,
+        // ★SW-BO1 2026-09-07：流浪清场标透传（原版 v315+ 持久位;仅 SpawnHomelessNPC
+        //  生成位会带 true,其余 homeless 者恒 false）
+        homelessDespawn: n.homelessDespawn || undefined,
+      }];
     }),
     // ★R16-1（2026-08-24）：LoadWorldFlags 全量旗标透传（WldParser.flags ~40 位：
     //  downedBoss 族/downed_ 双键/saved*/入侵四连/四塔 downed+active/lunarApocalypseUp/

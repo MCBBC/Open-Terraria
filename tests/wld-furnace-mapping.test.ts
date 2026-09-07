@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseWldToSave } from '../src/wld/WldImport';
-import { TILE_BY_KEY } from '../src/data/tiles';
+import { TILE_BY_KEY, TILE_STABLE_OF_INTERNAL } from '../src/data/tiles';
 
 
 describe('wld 导入:tile 17 = 熔炉(非铁砧)', () => {
@@ -18,7 +18,8 @@ describe('wld 导入:tile 17 = 熔炉(非铁砧)', () => {
       if (t !== 0) { x = rv(); y = rv(); }
       for (let k = 0; k < run && i < type.length; k++, i++) { type[i] = t; fx[i] = x; fy[i] = y; }
     }
-    const F = TILE_BY_KEY['furnace']!, A = TILE_BY_KEY['anvil']!;
+    // ★save.tiles 统一稳定域(2026-09-07)——断言常量经 STABLE 表换算
+    const F = TILE_STABLE_OF_INTERNAL[TILE_BY_KEY['furnace']!]!, A = TILE_STABLE_OF_INTERNAL[TILE_BY_KEY['anvil']!]!;
     const area: string[] = [];
     for (let y = 395; y <= 396; y++) {
       for (let x = 3171; x <= 3175; x++) {

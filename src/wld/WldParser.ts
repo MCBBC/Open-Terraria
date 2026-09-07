@@ -23,7 +23,10 @@ export interface WldTileData {
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
-export interface WldNPC { spriteId: number; name: string; x: number; y: number; homeX: number; homeY: number; homeless: boolean; }
+export interface WldNPC { spriteId: number; name: string; x: number; y: number; homeX: number; homeY: number; homeless: boolean;
+  /** homelessDespawn（v315+ byte,WorldFile.cs:2931-2933）——夜间清场扫标的位,
+   *  ★SW-BO1 2026-09-07 起随导入透传（此前验读即弃=导入世界流浪 NPC 永不清场） */
+  homelessDespawn?: boolean; }
 
 /** TileEntities 段单件物品三元组（TE WriteExtraData 的 (short type, byte prefix, short stack)，
  *  Item.prefix 为 byte——Item.cs:305） */
@@ -552,8 +555,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
         const flag = r.u8();
         if (flag & 1) r.i32();
       }
-      if (version >= 315) r.boolean();
-      npcs.push({ spriteId, name: displayName, x, y, homeX, homeY, homeless });
+      // homelessDespawn（WorldFile.cs:2931-2933 v315+）——★SW-BO1 起透传不再弃
+      const homelessDespawn = version >= 315 ? r.boolean() : false;
+      npcs.push({ spriteId, name: displayName, x, y, homeX, homeY, homeless, homelessDespawn });
     }
   }
 

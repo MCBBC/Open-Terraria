@@ -1,71 +1,84 @@
-// 批次A回归（docs/dual-key-cleanup-plan.md 第 1 步 · 2026-08-14）：
-// 双键注册 = 蛇形显式键（vi_832_living_wood_wand）+ 驼峰自动键（vi_832_LivingWoodWand，
-// items.ts 自动注册循环）。删除驼峰条目前必须先搬移其独有字段——本套件锁死搬移成果：
-// **任一双键对中，驼峰 def 的全部有效字段必须已被蛇形 def 覆盖（驼峰独有字段数 = 0）**。
-// 搬移史：60 蛇形键 / 63 行补丁（tool×35 + axePower×7 + value×2 + wireTool×1 +
-// tile×22 + placeStyle×14 = 81 字段，注释标来源驼峰键）。
-// 已知不在本锁范围：10 处值冲突（蛇形为手工修正值：草药籽 tile/placeStyle、人偶 tile）、
-// 14 个重复键异常（清理方案第 3 步，另行处理）。
-// ★2026-09-02 考古定性（本套件两红 → 守卫对齐当前阶段，依据 docs/dual-key-cleanup-plan.md
-// 状态节同日考古条目；工作树实测仪=esbuild 打包 items 逐提交复算 dualPairs/差异）：
-// ①基数红（611<1200）：阈值 1200 钉的是批次A时点基数（2026-08-14 实测 1227 对——彼时自动
-//   注册循环对所有 vanilla.json vid 补驼峰 def＝同 vid 双注册并存，恰是清理方案要拔的病根）。
-//   288267a5（2026-08-21）把该循环改按 vid 去重（VID_SEEN_IDX）+ Pascal 键别名到蛇形 def
-//   （修「道具搜索双行雷管」＝1246 组同 vid 双注册，且避免 ITEM_DEFS 下标平移事故）→
-//   双键对 1227→611。余对＝注册序晚于自动循环的蛇形族（banner×289＋f 兜底×33＋墙纸等×289）。
-//   此与方案第 3 步「删驼峰注册」/第 6 步终态「同 vid 多键=0」同向，属计划内推进非回归 →
-//   基数守卫按当前阶段基线 611 改 ≥600；第 3 步余量（f 兜底族等）若继续去重，对数会再降，
-//   届时应重推基线或让本守卫随套件退役（重复键异常仍存：蛇形自身双注册 vid 122/217/1507/
-//   1681/3392/3393/5359＋驼峰双 def vid 4851-4857，仍属第 3 步范围）。
-// ②vi_2613 tile 红：51fefa56（2026-08-18）createTile 双源回填（itemfunc 提取优先、缺时回退
-//   vanilla.json .items.createTile）令驼峰 def vi_2613_PinkDungeonChest 获 tile='chest'
-//   （2613 不在 itemfunc 提取内，createTile 21→TILE_KEY_BY_SHEET 'chest'），而蛇形
-//   vi_2613_f2613 注册在回填循环（items.ts 注册尾段）之后未被刷到 → 本次把 tile='chest'
-//   追补进蛇形 def（行尾注释标来源驼峰键，同批次A惯例；金标 item-stats-golden-1457 守恒）。
+// dual-key 注册归一守卫（docs/dual-key-cleanup-plan.md）。
+// ★SW-BN1 2026-09-07 终态改写：二期归一化把「同 vid 多 def」清零——
+//   banner×290＋f兜底×35＋杂×5 蛇形影子 def 撤注册（键别名到权威驼峰 def,同构
+//   SW-BK1 墙族 284 件试点）；蛇形自身双注册 122/217/1507/5359 撤首注册（保 byKey
+//   现指向）；4851-4857 宝石橡树自动孤儿 def 跳过（取后注册者=显式件）。
+//   ITEM_DEFS 7195→6854、byKey 8109 键零丢失、同 vid 双键对 327→0。
+// 本套件由批次A「字段搬移差异清零」守卫改写为终态守卫：
+//   ①同 vid 多 def=0（清理方案第 6 步终态断言转正,永久锁,防双键注册再犯）
+//   ②影子键别名解析锁（撤注册不删键——save.test/item-retirement 的蛇形键反查、
+//     idNames.generated ITEM_KEY_TO_ID、SpriteAtlas 键映射、SaveFile legacyItemIndex
+//     快照键全部依赖键可解析;别名还必须指向权威 def=VANILLA_ITEM_KEY_BY_ID 同靶）
+//   ③批次A搬移抽验保留（键全继续解析,断言语义不变）
+// 历史沿革：批次A(2026-08-14)锁「驼峰独有字段=0」;288267a5(2026-08-21)VID_SEEN_IDX
+//   按 vid 去重+Pascal 别名（对数 1227→611）;SW-BK1(2026-09-06)墙族 284 件试点
+//   （611→327,基数守卫 ≥1200→≥600→≥320）;SW-BN1(2026-09-07)余量 341 件撤注册→
+//   对数 0——基数守卫与「驼峰独有字段」断言随双键对消失一并退役（285 个 banner 族
+//   placeStyle 预存红同批清偿：权威件独有 placeStyle=影子件注册序晚于 bannerStyleClassPs
+//   类级回填循环恒未刷到,撤影子 def 后无对可差,且玩家实持权威件带 placeStyle 零行为差）。
 import { describe, it, expect } from 'vitest';
-import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 
-const STRUCTURAL = new Set(['key', 'name', 'maxStack']); // maxStack 对 vi_ 键由 VANILLA_MAX_STACK 表恒等
-const effectiveFields = (d: (typeof ITEM_DEFS)[number]) => {
-  const o: Record<string, unknown> = {};
-  for (const [f, v] of Object.entries(d)) if (!STRUCTURAL.has(f) && v !== undefined) o[f] = v;
-  return o;
-};
-
-/** 全部双键对（同 vid 蛇形+驼峰齐备；蛇形取首注册 def） */
-const dualPairs = (() => {
-  const byVid = new Map<number, { snake: number[]; camel: number[] }>();
+/** 同 vid 分组（vi_ 键;稳定 id = key 内嵌 vid 派生,分组即注册表拓扑） */
+const defsByVid = (() => {
+  const m = new Map<number, number[]>();
   ITEM_DEFS.forEach((d, i) => {
-    const m = /^vi_(\d+)_(.+)$/.exec(d.key);
-    if (!m) return;
-    const vid = Number(m[1]);
-    if (!byVid.has(vid)) byVid.set(vid, { snake: [], camel: [] });
-    (/^[A-Z]/.test(m[2]) ? byVid.get(vid)!.camel : byVid.get(vid)!.snake).push(i);
+    const vm = /^vi_(\d+)_/.exec(d.key);
+    if (!vm) return;
+    const vid = Number(vm[1]);
+    if (!m.has(vid)) m.set(vid, []);
+    m.get(vid)!.push(i);
   });
-  return [...byVid.values()].filter((g) => g.snake.length && g.camel.length);
+  return m;
 })();
 
-describe('双键清理批次A：字段搬移差异清零', () => {
-  it('配对基数就位（SW-BK1 墙族归一后 ≥320 对；基线 327=611−284,2026-09-06）——防止空转假绿', () => {
-    // 1200=批次A时点双注册基数，288267a5（2026-08-21）计划内去重后余 611，见文件头考古注。
-    // SW-BK1 2026-09-06：墙族 284 影子 def 归一（items.ts 墙物品循环③,蛇形键别名到
-    // 权威 def,同 vid 单 def）→ 对数 611→327（banner×289+f兜底×33+杂×5,实测）。
-    // 余对全量归一（banner/f 兜底族）= 清理方案第 3 步后续批,届时再重推基线。
-    expect(dualPairs.length).toBeGreaterThanOrEqual(320);
-  });
-
-  it('驼峰 def 无任何蛇形未覆盖字段（搬移后差异清零）', () => {
-    const uncovered: string[] = [];
-    for (const g of dualPairs) {
-      const snake = effectiveFields(ITEM_DEFS[g.snake[0]]);
-      const camel = effectiveFields(ITEM_DEFS[g.camel[0]]);
-      for (const f of Object.keys(camel))
-        if (!(f in snake)) uncovered.push(`vid 对 ${ITEM_DEFS[g.snake[0]].key} 缺驼峰独有字段 ${f}（来源 ${ITEM_DEFS[g.camel[0]].key}）`);
+describe('dual-key 归一终态锁（SW-BN1 2026-09-07）', () => {
+  it('终态：同 vid 多 def = 0（清理方案第 6 步断言,防双键注册再犯）', () => {
+    const dups: string[] = [];
+    for (const [vid, idxs] of defsByVid) {
+      if (idxs.length > 1) dups.push(`vid ${vid}: ${idxs.map((i) => ITEM_DEFS[i].key).join(' | ')}`);
     }
-    expect(uncovered, `驼峰独有字段 ${uncovered.length} 个未搬移:\n${uncovered.join('\n')}`).toEqual([]);
+    expect(dups, `同 vid 多 def ${dups.length} 组:\n${dups.join('\n')}`).toEqual([]);
   });
 
-  it('搬移抽验：挖掘力三件套（tool/axePower）落进蛇形 def', () => {
+  it('影子键别名解析锁：键仍在 byKey 且指向权威 def（VANILLA_ITEM_KEY_BY_ID 同靶）', () => {
+    // 代表集:banner 首末件/banner-plus 双影子/f兜底(带 tile)/杂5/蛇形自身双注册/宝石橡树同键
+    const shadowKeys: ReadonlyArray<readonly [string, number]> = [
+      ['vi_1615_banner_b1', 1615], ['vi_2916_banner_b107', 2916], ['vi_5651_banner_b290', 5651],
+      ['vi_3392_banner_b188', 3392], ['vi_3392_f3392', 3392], ['vi_3393_f3393', 3393],
+      ['vi_2289_f2289', 2289], ['vi_2001_f2001', 2001], ['vi_2613_f2613', 2613],
+      ['vi_5573_torch_gods_potion', 5573], ['vi_3823_brand_of_the_inferno', 3823],
+      ['vi_4760_sergeants_united_shield', 4760], ['vi_4608_chum_bucket', 4608],
+      ['vi_2422_hotline_fishing_hook', 2422],
+      ['vi_122_molten_pickaxe', 122], ['vi_217_molten_hamaxe', 217],
+      ['vi_1507_spectre_hamaxe', 1507], ['vi_5359_shellphone_spawn', 5359],
+      ['vi_4851_GemTreeTopazSeed', 4851], ['vi_4857_GemTreeAmberSeed', 4857],
+    ];
+    for (const [sKey, sVid] of shadowKeys) {
+      const si = ITEM_BY_KEY[sKey];
+      expect(si, `影子键 ${sKey} 必须仍可解析（撤注册不删键）`).not.toBeUndefined();
+      const aKey = VANILLA_ITEM_KEY_BY_ID[sVid];
+      expect(aKey, `vid ${sVid} 必须有权威反查键`).not.toBeUndefined();
+      const ai = ITEM_BY_KEY[aKey];
+      // 蛇形自身双注册/宝石橡树同键：sKey===aKey 或 sKey 与权威键同 def
+      expect(si, `${sKey} 应与权威 def ${aKey} 同靶（别名机制）`).toBe(ai);
+    }
+  });
+
+  it('归一后权威面抽验：banner placeStyle/钓饵锚 tile/宝箱 tile 落在唯一 def', () => {
+    // banner 族权威件独有 placeStyle（bannerStyleClassPs 类级回填）——别名后从蛇形键
+    // 也能取到（影子件撤注册前此断言恒红,SW-BN1 清偿）
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_1615_banner_b1']].placeStyle).toBe(22);   // :19231 placeStyle=22+type-1615
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_5651_banner_b290']].placeStyle).toBe(313); // 1457 Item.cs:44398 DefaultToBanner(313)
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_2001_f2001']].placeStyle).toBe(8);        // 蝶族变体 1+2001-1994
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_2613_f2613']].tile).toBe('chest');        // createTile 21 双源回填
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_4851_GemTreeTopazSeed']].value).toBe(100); // 取后注册者（显式件）
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_4857_GemTreeAmberSeed']].placeStyle).toBe(6);
+  });
+});
+
+describe('双键清理批次A：字段搬移抽验（键继续解析,语义保留）', () => {
+  it('搬移抽验：挖掘力三件套（tool/axePower）落进注册 def', () => {
     // vi_579_drax：pick 200 + axe 22（VANILLA_TOOL_POWERS 源数据，曾只落在驼峰 def）。
     // 2026-08-22 F1 工具节奏修复：回填循环把 itemCombat 的 speed/useTime/damage/
     // knockback + 三力（pickPower/axePower/hammerPower）一并桥进 tool——此处按
@@ -73,7 +86,7 @@ describe('双键清理批次A：字段搬移差异清零', () => {
     const drax = ITEM_DEFS[ITEM_BY_KEY['vi_579_drax']];
     expect(drax.tool).toMatchObject({ type: 'pick', power: 200, pickPower: 200, axePower: 22, useTime: 7, speed: 25 });
     expect(drax.axePower).toBe(22);
-    // vi_122_molten_pickaxe：pick 100
+    // vi_122_molten_pickaxe：pick 100（SW-BN1 后 = 工具力块注册件,tool 经回填全量）
     const molten = ITEM_DEFS[ITEM_BY_KEY['vi_122_molten_pickaxe']];
     expect(molten.tool).toMatchObject({ type: 'pick', power: 100, useTime: 18, speed: 23 });
     // vi_1305_the_axe：hammer 100 + axe 35
@@ -82,12 +95,11 @@ describe('双键清理批次A：字段搬移差异清零', () => {
     expect(axe.axePower).toBe(35);
   });
 
-  it('搬移抽验：value / wireTool / 锚桩 tile 落进蛇形 def', () => {
+  it('搬移抽验：value / wireTool / 锚桩 tile 落进注册 def', () => {
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_109_mana_crystal']].value).toBe(1);
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_1291_life_fruit']].value).toBe(1);
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_509_red_wrench']].wireTool).toEqual({ place: 1 });
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_4379_wyvern_kite']].tile).toBe('v_723_kite_anchor');
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_4375_rat']].tile).toBe('v_724_critter_anchor');
-    expect(ITEM_DEFS[ITEM_BY_KEY['vi_2001_f2001']].placeStyle).toBe(8); // 蝶族变体 1+2001-1994
   });
 });

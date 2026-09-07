@@ -136,7 +136,7 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
-import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inventory';
 import { chestSettingsAllowsVault, lootAllFromContainer } from '../stats/QuickStacking';
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
@@ -1532,9 +1532,10 @@ export class UI {
       isCoin: cur ? coinIndexOf(cur.id) >= 0 : false,
       shopOpen: this.game.npcShopOpen,
       chestOpen: !!chest,
-      chestCanTake: !!cur && !!chest && chestCanTakeJustCheck(chest.items, cur.id, maxStack, cur.prefix),
+      chestCanTake: !!cur && !!chest && chestCanTakeJustCheck(chest.items, cur.id, maxStack, cur.prefix, (cur as { placeStyle?: number }).placeStyle),   // ★SW-BP1 placeStyle 随行（与 shiftDepositToChest 同源同判）
       canTakeToInventory: !!cur && canTakeToPersonalInventory(inv.slots, cur.id, maxStack,
-        coinIndexOf(cur.id) >= 0, ammoSlotAccepts(cur.id), cur.prefix),
+        coinIndexOf(cur.id) >= 0, ammoSlotAccepts(cur.id), cur.prefix,
+        canFillEmptyAmmoSlot(cur.id)),
       shiftDown: shift,
       controlDown: ctrl,
       opts: quickTrashOptionsOf(options.data.quickTrashMode),
@@ -1685,10 +1686,15 @@ export class UI {
 
   /** ★SW-AY1 R5 cursorOverride 9 向导支（ItemSlot.cs:810-815 Utils.Swap
    *  (ref inv[slot], ref Main.guideItem) + SoundID 7）：Shift+点背包材料格与反查
-   *  材料槽对换。guidePlaced 为 {id,stack} 近似（prefix 丢面=槽位驱动流同款已登记） */
-  private shiftGuideSwap(i: number, cur: { id: number; stack: number }): void {
+   *  材料槽对换。★SW-BM1 2026-09-06：guidePlaced 增 prefix 位——对换回格件保词缀
+   *  （Utils.Swap 换的是整个 Item 对象,prefix 随行;旧 {id,stack} 近似丢词缀=
+   *  槽位驱动流同款已登记,本刀清偿）。★SW-RB5a 2026-09-07：此处是裸 Utils.Swap
+   *  （非 MouseItemSwap,context 7 不在 retainFavoriteOnMoveAt）——favorited 随整个
+   *  Item 对象双向骑行,收藏件对换往返不丢星（左键各支走 MouseItemSwap 双端清,
+   *  依旧不携带） */
+  private shiftGuideSwap(i: number, cur: { id: number; stack: number; prefix?: number; favorited?: boolean; placeStyle?: number }): void {
     const pl = this.guidePlaced;
-    this.guidePlaced = { id: cur.id, stack: cur.stack };
+    this.guidePlaced = { id: cur.id, stack: cur.stack, ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}), ...(cur.favorited ? { favorited: true } : {}), ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };
     this.game.player.inv.slots[i] = pl ? { ...pl } : null;
     this.game.sfx.play('pickup', 1);                       // SoundEngine.PlaySound(7)（:814）
     this.guideRefresh?.();                                 // 反查面板材料行/槽面即刻重刷
@@ -1700,7 +1706,8 @@ export class UI {
    *  余量克隆进首空格（:1258-1283、SoundID 7）——入箱即清收藏（context 3/4 不在
    *  retainFavoriteOnMoveAt :362-366，MouseItemSwap :1230-1234 双端清；32 虚空袋
    *  面不走本方法——Shift 入柜面收藏件被 :604 总闸拦截）。★SW-AY1 R1 合并判据
-   *  改 canMergeStack（CanStack 词缀面 :1221） */
+   *  改 canMergeStack（CanStack 词缀面 :1221）；★SW-BP1 2026-09-07 placeStyle 位
+   *  随 canMergeStack 生效（cur 携实例样式→敌旗跨样式不并;JustCheck 门同判同源） */
   private shiftDepositToChest(i: number, cur: { id: number; stack: number; prefix?: number; placeStyle?: number; favorited?: boolean }): void {
     const chest = this.openChest;
     if (!chest || cur.stack <= 0) return;
@@ -2635,15 +2642,21 @@ export class UI {
     // `!Main.playerInventory` 臂 → GetOrDropItem（ReturnItemFromSlot）→ GetItem + 余量
     // RequestNewItem 落地 Player.cs:5132-5136）：①词缀/实例样式随行入包（曾裸
     // (id,stack)=词缀件关包即洗白——重铸词缀在 getEffectiveArmor/重铸格回流面丢词缀）；
-    // ②满包余量落地（曾静默丢弃=物损方向）。收藏标记不入 add 通道（fillRange 落位
-    // 新堆无收藏域）——关包丢收藏金边为登记偏差（vanilla 整 Item 对象回包保标记）
+    // ②满包余量落地（曾静默丢弃=物损方向）。
+    // ★SW-BP1 2026-09-07（RB4a 债④ / RB5a 债②）：③收藏标记随行入包——原版 GetItem
+    // 空格落位 `inventory[i] = returnItem`（Player.cs:39873）=整个 Item 对象回包,
+    // favorited 金边随行；并入已有堆时堆位收藏保持（现有堆面不动）。本仓 add 通道
+    // 此前不收 favorited=落新堆丢收藏（登记偏差清偿）。④余量落点 p.y→p.cy
+    // （GetOrDropItem 尾 RequestNewItem(base.Center) Player.cs:7200-7202=玩家
+    // 【中心】,曾用顶 y）。favorited 件空格序升序（GetItem :39681-39698 favorited
+    // 臂同向）由 Inventory.add 内接。
     if (this.heldStack) {
       const h = this.heldStack;
       const hDef = ITEM_DEFS[h.id];
-      const left = this.game.player.inv.add(h.id, h.stack, h.prefix, h.placeStyle);
+      const left = this.game.player.inv.add(h.id, h.stack, h.prefix, h.placeStyle, false, false, !!h.favorited);
       if (left > 0) {
         const p = this.game.player;
-        this.game.spawnDrop(p.cx, p.y, hDef?.key ?? '', left, 0, -2, h.placeStyle);
+        this.game.spawnDrop(p.cx, p.cy, hDef?.key ?? '', left, 0, -2, h.placeStyle);
       }
       this.heldStack = null;
     }
@@ -3003,7 +3016,10 @@ export class UI {
   private guideIconTicker: ReturnType<typeof setInterval> | null = null;
   /** 向导反查物理材料槽（Main.guideItem 等价）：放置期间真实持有整组物品，
    *  空手点槽取回、关闭浮层自动归还（NewCraftingUI dropItemCheck 语义）。 */
-  private guidePlaced: { id: number; stack: number } | null = null;
+  /** ★SW-BM1 2026-09-06：增 prefix 位——向导材料槽对换/取回全程保词缀。
+   *  ★SW-RB5a 2026-09-07：增 favorited 位——仅 Shift 对换支（裸 Utils.Swap）双向骑行;
+   *  左键支（MouseItemSwap 语义,context 7 不在 retainFavoriteOnMoveAt）不置位=双端清 */
+  private guidePlaced: { id: number; stack: number; prefix?: number; favorited?: boolean; placeStyle?: number } | null = null;
   /** 反查面板：搜物品 → 列出以它为材料的全部配方（含 RecipeGroup 成员） */
   openGuideSearch(): void {
     this.closeGuideSearch();
@@ -3101,14 +3117,19 @@ export class UI {
         slotCaption.textContent = Lang.inter(24);   // 「在此放置材料」
       }
     };
-    /** 取回放置组回背包（溢出→脚下掉落；CloseNPCChatOrSign 出口等价） */
+    /** 取回放置组回背包（溢出→脚下掉落；CloseNPCChatOrSign 出口等价）。
+     *  ★SW-BP1 2026-09-07（RB4a 债④ / RB5a 债②）：①favorited 随行（GetOrDropItem
+     *  (Main.guideItem) Player.cs:5112-5114 → GetItem 整 Item 对象回包 :39873,
+     *  RB5a 对换先行批已让 guidePlaced 携带 favorited,本刀接 add 通道）；
+     *  ②余量落点 p.y→p.cy（GetOrDropItem 尾 RequestNewItem(base.Center)
+     *  :7200-7202=玩家中心） */
     const takeBackPlaced = (): void => {
       const pl = this.guidePlaced;
       if (!pl || !this.game) return;
-      const left = this.game.player.inv.add(pl.id, pl.stack);
+      const left = this.game.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);   // ★SW-BM1 随行词缀 + ★SW-RB5a 实例样式随行 + ★SW-BP1 收藏随行
       if (left > 0) {
         const key = ITEM_DEFS[pl.id]?.key ?? '';
-        this.game.spawnDrop(this.game.player.cx, this.game.player.y, key, left);
+        this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left);
       }
       this.game.cb.onInventoryChanged?.();
       this.guidePlaced = null;
@@ -3134,26 +3155,47 @@ export class UI {
         if (!cur && pl) {                                            // 空手 → 取整组
           const hadPrefix = (pl as { prefix?: number }).prefix;
           this.heldStack = { id: pl.id, stack: pl.stack,
-            ...(hadPrefix !== undefined ? { prefix: hadPrefix } : {}) };
+            ...(hadPrefix !== undefined ? { prefix: hadPrefix } : {}),
+            ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
           this.guidePlaced = null;
           this.game?.sfx.play('pickup');                             // SoundID.Grab(7)
           action = 'take';
         } else if (cur && !pl && isMaterialVid(vidOfItem(cur.id))) { // 手持 → 空槽整组
-          this.guidePlaced = { id: cur.id, stack: cur.stack };
-          this.heldStack = null;                                     // 原版左键放置无音效
+          this.guidePlaced = { id: cur.id, stack: cur.stack,
+            ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),   // ★SW-BM1 保词缀
+            ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
+          this.heldStack = null;
+          this.game?.sfx.play('pickup');                             // ★SW-RB5a：case 0 尾奏 SoundID 7（ItemSlot.cs:986-988）
           action = 'move';
         } else if (cur && pl) {
-          if (vidOfItem(cur.id) === vidOfItem(pl.id)) {              // 同型合并至上限
-            const cap = Math.max(0, maxStackOf(pl.id) - pl.stack);
-            const mv = Math.min(cur.stack, cap);
-            if (mv > 0) { pl.stack += mv; cur.stack -= mv; if (cur.stack <= 0) this.heldStack = null; }
-            action = 'move';
-          } else if (isMaterialVid(vidOfItem(pl.id))) {              // 异型 SwapItem 对换
-            const oldPl = { id: pl.id, stack: pl.stack };
-            this.guidePlaced = { id: cur.id, stack: cur.stack };
-            this.heldStack = oldPl;
-            action = 'move';
+          // ★SW-RB5a 2026-09-07 case 0 1:1（ItemSlot.cs:912 MouseItemSwap 先行 +
+          //  :968-985 CanStack 并回）：槽↔手整体对换后,同型同词缀（CanStack,
+          //  Item.cs:49870-49877 prefix 相等臂）且双方未满才并回——旧实现「同 vid
+          //  即并」漏词缀臂（异词缀同型物并堆=词缀丢失数据面）且槽满时 no-op
+          //  （原版=纯对换）;对换不再要求槽内件是材料（vanilla 只门手持侧
+          //  checkItem.material,PickItemMovementAction context 7 :1478-1481）。
+          //  MouseItemSwap 双端清收藏（context 7 不在 retainFavoriteOnMoveAt
+          //  :362-366）——对换产物不带 favorited
+          const oldPl = { id: pl.id, stack: pl.stack,
+            ...(pl.prefix !== undefined ? { prefix: pl.prefix } : {}),
+            ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };
+          this.guidePlaced = { id: cur.id, stack: cur.stack,
+            ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),
+            ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };
+          this.heldStack = oldPl;
+          const cap = maxStackOf(pl.id);
+          if (canMergeStack(cur, pl) && cur.stack !== cap && pl.stack !== cap) {
+            if (pl.stack + cur.stack <= cap) {
+              this.guidePlaced!.stack = pl.stack + cur.stack;        // 槽吸收手持原堆,手清空
+              this.heldStack = null;
+            } else {
+              const mv = cap - cur.stack;                            // num2 = maxStack − 对换后槽内堆
+              this.guidePlaced!.stack = cur.stack + mv;
+              this.heldStack!.stack = pl.stack - mv;                 // 余量留手
+            }
           }
+          this.game?.sfx.play('pickup');                             // case 0 尾奏 SoundID 7（:988）
+          action = 'move';
         }
       } else if (e.button === 2) {
         if (!cur && pl && pl.stack > 0) {                            // 空手右键 = 取 1
@@ -3165,7 +3207,7 @@ export class UI {
           if (pl.stack <= 0) this.guidePlaced = null;
           UISfx.click();                                             // RightClick 内 PlaySound(12)
           action = 'take';
-        } else if (cur && pl && vidOfItem(cur.id) === vidOfItem(pl.id)
+        } else if (cur && pl && canMergeStack(cur, pl)               // ★SW-RB5a：CanStack 词缀面（:1639）
           && cur.stack < maxStackOf(cur.id) && pl.stack > 0) {       // 手持同型不满 → 放 1
           pl.stack += 1; cur.stack -= 1;
           if (cur.stack <= 0) this.heldStack = null;
@@ -3322,14 +3364,17 @@ export class UI {
     this.guideGhostEl?.remove();
     this.guideGhostEl = null;
     // 放置中的材料自动归还（Main.CloseNPCChatOrSign → dropItemCheck 出口等价；
-    // MP 下走背包 add 与 msg5 差分同链）
+    // MP 下走背包 add 与 msg5 差分同链）。★SW-BP1 2026-09-07（RB4a 债④/债②）：
+    // ①词缀/实例样式/收藏全随行——原版 GetOrDropItem(Main.guideItem)（Player.cs
+    // :5112-5114）整 Item 对象回包（:39873 `inventory[i] = returnItem`）,曾裸
+    // (id,stack)=词缀/样式件关搜索面板即洗白;②余量落点 p.y→p.cy（:7200-7202 Center）
     {
       const pl = this.guidePlaced;
       if (pl && this.game) {
-        const left = this.game.player.inv.add(pl.id, pl.stack);
+        const left = this.game.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);
         if (left > 0) {
           const key = ITEM_DEFS[pl.id]?.key ?? '';
-          this.game.spawnDrop(this.game.player.cx, this.game.player.y, key, left);
+          this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left);
         }
         this.game.cb.onInventoryChanged?.();
       }
@@ -4091,6 +4136,9 @@ export class UI {
       btn.addEventListener('mouseenter', () => {
         img.src = `sprites/vanilla-ui/UI_ChestCraft_${
           options.data.craftFromNearbyChests ? 1 : 3}.png`;
+        // ★SW-RB5a：悬停进入音（DoStatefulTickSound Main.cs:3333-3344——hover 沿
+        //  false→true 播 SoundID 12,离开不播）
+        this.game?.sfx.play('menuTick', 1);
         tip();
       });
       btn.addEventListener('mouseleave', () => {

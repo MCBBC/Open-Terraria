@@ -980,6 +980,12 @@ export class TownNPC extends Entity {
   frame = 0;       // 当前贴图帧（原版 frame.Y/帧高）
   frameT = 0;      // 行走帧累加器（≈原版 frameCounter）
   home: NpcHome | null = null;
+  /** ★SW-BO1 2026-09-07：NPC.homelessDespawn（NPC.cs:6552）——夜间清场扫标的位。
+   *  唯一置位面 = SpawnHomelessNPC 流浪生成（WorldGen.cs:5110）；清位面 =
+   *  QuickFindHome 成功（:5701）/ SpawnTownNPC RelocatedHomeless（:5380）/
+   *  UnspawnHomelessNPC 非 homeless 复核（:5144）。原版 v315+ 随城镇 NPC 段持久化
+   *  （WorldFile.cs:1741/:2932），本仓同走存档面（serialize npcs.homelessDespawn） */
+  homelessDespawn = false;
   /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
    *  原版观感也是整日守在门口走廊 */
   stationary = false;
@@ -1060,8 +1066,11 @@ export class TownNPC extends Entity {
    *  溺水跳出记 position.X 后复用为跳点回位门 :54432——数值语义随消费点变体） */
   private turnLock = 0;
   /** 无家者游走锚（原版 homeTileX/Y 首落地锚 NPC.cs:53701-53704：homeless NPC
-   *  的 homeTile 仍是出生点，拴绳/回家以它为锚；本仓 home=null 表无家） */
-  private anchorTile: { x: number; y: number } | null = null;
+   *  的 homeTile 仍是出生点，拴绳/回家以它为锚；本仓 home=null 表无家）。
+   *  ★SW-BO1 2026-09-07 起公开：= 原版 homeless NPC 的 homeTile 权威投影
+   *  （vanilla QuickFindHome 以 NPC【自身】homeTile 为扫描锚——入驻环 ① face
+   *  与流浪生成位 QuickFindHome 消费；y 恒为地行/vanilla homeTileY 口径） */
+  anchorTile: { x: number; y: number } | null = null;
   /** 旧游走计时（已退役驱动位——保留字段防外部引用破坏；语义=停程剩余近似） */
   wanderT = 0;
   /** 溺水跳出记录的跳点 X（:54427 localAI[3]=position.X；回到该点 → 转身防横跳） */
@@ -1430,6 +1439,11 @@ export class TownNPC extends Entity {
     if (this.hp <= 0) {
       this.dead = true;
       game.recLog?.('death', { id: this.id, vid: this.vanillaId ?? null });   // 行为录制：城镇 NPC 死亡
+      // 死亡复位优先型锁（NPC.cs:78986-78989 `townNPC && netMode!=1 && homeless &&
+      // WorldGen.prioritizedTownNPCType == type → =0`）——homeless 死者锁住的类型
+      // 若不复位会滞留至下一轮首（UpdatePrioritizedTownNPC 只在有 homeless 者时改写,
+      // 无人合格不写），晨间 SpawnHomelessNPC 会按死者类型复生同一型。★SW-BO1 2026-09-07
+      game.townNpcPrioritizedLockReset?.(!this.home, this.vanillaId);
       game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
       game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
       // checkDead 死亡音（NPC.cs:78978-78982）：PlaySound(DeathSound, position)

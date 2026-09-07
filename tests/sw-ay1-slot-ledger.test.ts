@@ -27,6 +27,7 @@ import {
   slotContext, planAlternateClick, chestContainerContext, chestCanTakeJustCheck,
   canTakeToPersonalInventory, canMergeStack, onlyNeedOneInInventory, quickTrashOptionsOf,
 } from '../src/ui/SlotActions';
+import { canFillEmptyAmmoSlot } from '../src/items/Inventory';   // ★SW-BM1 :39549 空弹药格臂
 
 const iidOf = (vid: number): number => {
   const id = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]];
@@ -34,6 +35,8 @@ const iidOf = (vid: number): number => {
   return id;
 };
 const WOOD = iidOf(9);            // 木（可并堆、useStyle1 非消耗品 → OnlyNeedOne 真）
+const GEL = iidOf(23);            // 凝胶（NO_AUTO_FILL_AMMO 特殊弹药 → 空弹药格拒收面活体）
+const ARROW = iidOf(40);          // 木箭（普通弹药 → CanFillEmptyAmmoSlot 真）
 const COPPER_COIN = iidOf(71);    // 铜币
 const MONEY_TROUGH = iidOf(3213); // 收藏钱袋（入存钱罐自锁 ChestUI.cs:1289）
 const VOID_BAG = iidOf(4131);     // 虚空袋（入虚空保险库自锁 :1293）
@@ -229,11 +232,61 @@ describe('R2 canTakeToPersonalInventory：收藏格拒收（Player.cs:39536）+ 
     inv.slots[54] = { id: WOOD, stack: WOOD_MAX, favorited: true };   // 满堆 → 无处去
     expect(canTakeToPersonalInventory(inv.slots, WOOD, WOOD_MAX, false, false)).toBe(false);
   });
+  it('★SW-BM1 :39547-39552 空弹药格臂——CanGoIntoAmmoOnPickup：空弹药格只收 CanFillEmptyAmmoSlot 物', () => {
+    const inv = fullInv(WOOD);                                        // 全包满 → 只剩 54-57 弹药格面
+    for (let j = 54; j < 58; j++) inv.slots[j] = null;                // 清空弹药格 = 空格门活体
+    // 凝胶（23 ∈ NO_AUTO_FILL_AMMO 特殊弹药表,CanFillEmptyAmmoSlot=false）→ 空弹药格拒收
+    expect(canTakeToPersonalInventory(inv.slots, GEL, ITEM_DEFS[GEL].maxStack ?? 9999,
+      false, true, undefined, canFillEmptyAmmoSlot(GEL))).toBe(false);
+    // 箭（普通弹药,CanFillEmptyAmmoSlot=true）→ 空弹药格放行
+    expect(canTakeToPersonalInventory(inv.slots, ARROW, ITEM_DEFS[ARROW].maxStack ?? 9999,
+      false, true, undefined, canFillEmptyAmmoSlot(ARROW))).toBe(true);
+    // 已占弹药格同型余位堆不受空格门（CanItemSlotAcceptPickup :39540 面照走）
+    const inv2 = fullInv(WOOD);
+    inv2.slots[54] = { id: GEL, stack: 1 };
+    expect(canTakeToPersonalInventory(inv2.slots, GEL, ITEM_DEFS[GEL].maxStack ?? 9999,
+      false, true, undefined, false)).toBe(true);
+  });
+  it('★SW-BM1 Inventory.fillRange 拾取并堆 favorited 拒收（GetItem :39796 CanItemSlotAcceptPickup 面拾取侧）', () => {
+    const inv = new Inventory();
+    inv.slots[10] = { id: GEM, stack: 10, favorited: true };          // 收藏的 OnlyNeedOne 族余位堆
+    expect(inv.add(GEM, 5)).toBe(0);                                  // 拾取不丢——拒并后落空格（原版同构）
+    expect(inv.slots[10]!.stack).toBe(10);                            // 收藏堆分毫不动（不并堆）
+    expect(inv.slots.filter((s) => s?.id === GEM && !s.favorited).reduce((n, s) => n + s!.stack, 0)).toBe(5);
+    inv.slots[10] = { id: GEM, stack: 10 };                           // 去收藏 → 并堆面恢复（升序首匹配堆吸收）
+    expect(inv.add(GEM, 5)).toBe(0);
+    expect(inv.slots.filter((s) => s?.id === GEM).reduce((n, s) => n + s!.stack, 0)).toBe(20);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // R7 容器语境（ChestUI.cs:330-355）+ R8 收藏容器自锁拖放面
 // ---------------------------------------------------------------------------
+describe('★SW-BM1 guidePlaced 保词缀（向导材料槽对换/取回全程,Utils.Swap 整 Item 对象语义）', () => {
+  it('结构锁：guidePlaced 类型带 prefix 位 + 对换/置入/取回三写点随行词缀', () => {
+    // ★SW-RB5a 2026-09-07 重钉：类型增 favorited 位,Shift 对换支（裸 Utils.Swap,
+    // 非 MouseItemSwap）favorited 随 Item 对象双向骑行;左键支（MouseItemSwap
+    // 双端清,context 7 不在 retainFavoriteOnMoveAt）依旧不携带
+    // ★SW-BP1 2026-09-07 重钉：取回支 add 通道增 favorited 入参（GetOrDropItem
+    // 整 Item 对象回包面,closeInventory/guideSearch 两处同式）+ 落点 p.y→p.cy
+    expect(srcMatch(/private guidePlaced: \{ id: number; stack: number; prefix\?: number; favorited\?: boolean; placeStyle\?: number \} \| null = null;/)).toBe(true);
+    expect(srcMatch(/this\.guidePlaced = \{ id: cur\.id, stack: cur\.stack, \.\.\.\(cur\.prefix !== undefined \? \{ prefix: cur\.prefix \} : \{\}\), \.\.\.\(cur\.favorited \? \{ favorited: true \} : \{\}\), \.\.\.\(cur\.placeStyle !== undefined \? \{ placeStyle: cur\.placeStyle \} : \{\}\) \};/)).toBe(true);
+    expect(srcMatch(/inv\.add\(pl\.id, pl\.stack, pl\.prefix, pl\.placeStyle, false, false, !!pl\.favorited\)/)).toBe(true);
+    expect(srcMatch(/shiftGuideSwap\(i: number, cur: \{ id: number; stack: number; prefix\?: number; favorited\?: boolean; placeStyle\?: number \}\)/)).toBe(true);
+  });
+  // ★SW-RB5a 2026-09-07 左键 case 0 1:1（ItemSlot.cs:912 MouseItemSwap 先行 +
+  //  :968-985 CanStack 并回）：异词缀同型不并堆（词缀不丢）、槽满=纯对换（旧 no-op）、
+  //  放置/对换支补尾奏音 7（:986-988）;旧「同 vid 即并」「isMaterialVid(pl) 对换门」退役
+  it('★SW-RB5a 结构锁：左键 case 0 对换先行+CanStack 并回+尾奏音', () => {
+    expect(srcMatch(/if \(canMergeStack\(cur, pl\) && cur\.stack !== cap && pl\.stack !== cap\) \{/)).toBe(true);
+    expect(srcMatch(/const mv = cap - cur\.stack;/)).toBe(true);
+    expect(srcMatch(/this\.heldStack!\.stack = pl\.stack - mv;/)).toBe(true);
+    expect(srcMatch(/const cap = maxStackOf\(pl\.id\);/)).toBe(true);
+    expect(srcMatch(/vidOfItem\(cur\.id\) === vidOfItem\(pl\.id\)/)).toBe(false);
+    expect(srcMatch(/isMaterialVid\(vidOfItem\(pl\.id\)\)/)).toBe(false);
+  });
+});
+
 describe('R7 chestContainerContext：世界箱3 / 银行族4 / 虚空保险库32', () => {
   it(':331-355 逐支', () => {
     expect(chestContainerContext(0)).toBe(3);

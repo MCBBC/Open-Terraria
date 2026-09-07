@@ -221,7 +221,9 @@ export class World {
    *  原版 TileEntity 体系的最小等价，锚点 = 物件左上格。见 world/FurnitureItems.ts */
   furnitureItems: FurnitureItemRecord[] = [];
   /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
-  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean;
+    /** ★SW-BO1 2026-09-07：流浪清场标（NPC.homelessDespawn,WorldFile.cs:1741/:2932） */
+    homelessDespawn?: boolean }>;
   /** ★IIIIIII6：SpawnStarterNPCs pass（cs:19848-20068）播种的初始镇民——仅新世界首进
    *  消费一次后清空（不进存档：实例化后的镇民走 townNpcsForSave 的 town NPC 段，
    *  与原版一致）。celebrationmk10 五人组/组合分支记录，含 homeless 锚与朝向 */

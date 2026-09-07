@@ -7,8 +7,9 @@ import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import {
   ensureExtraSpawnPoints, tryGetExtraSpawnPointForTeam, teamSpawnPlacement,
-  isAreaValidSpawnLite, PLAYER_TEAM_COUNT,
+  PLAYER_TEAM_COUNT,
 } from '../src/world/spawn/ExtraSpawnsRoyale';
+import { spawnIsAreaValidSpawn } from '../src/world/spawn/SpawnPlacement';   // ★SW-BM1 全链净空判据
 import { scanChosenTileZones, canScanDualDungeonCell } from '../src/world/DungeonDualZones';
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { scanScene } from '../src/world/SceneMetrics';
@@ -100,18 +101,20 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
         const separated = !(Math.abs(p1.x - p2.x) < 250 && Math.abs(p1.y - p2.y) < 250);
         expect(separated, `found ${foundIdx[a]} vs ${foundIdx[b]} inside 250 box`).toBe(true);
       }
-      // 搜索成功项必须站在可落脚面附近（isAreaValidSpawnLite 已由 A3 复验）
+      // 搜索成功项必须站在可落脚面附近（落位净空已由 A3 以 Spawn_IsAreaValidSpawn
+      // 全链判据复验——SW-BM1 起 lite 宽表近似退役）
       void foundIdx[a];
     }
   });
 
-  it('A3 落位扫位通过 Spawn_IsAreaValidSpawn 精简核且不嵌格', () => {
+  it('A3 落位扫位通过 Spawn_IsAreaValidSpawn 全链净空判据且不嵌格（★SW-BM1 重钉）', () => {
     const world = fx.world!;
     for (let team = 1; team < PLAYER_TEAM_COUNT; team++) {
       const fl = teamSpawnPlacement(world, team, false);
       expect(fl, `team ${team}`).not.toBeNull();
-      // 接受条件内建于扫位核（Player.cs:38263-38281）——此处直接复验一致性
-      expect(isAreaValidSpawnLite(world.store, fl!.tx, fl!.ty)).toBe(true);
+      // 接受条件内建于扫位核（Player.cs:38222-38259 全链;SW-BM1 起队点臂统一消费
+      // SpawnPlacement.ts——lite 宽表近似退役）——此处直接复验一致性
+      expect(spawnIsAreaValidSpawn(world.store, fl!.tx, fl!.ty)).toBe(true);
     }
   });
 

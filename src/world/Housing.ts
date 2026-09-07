@@ -710,6 +710,10 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
  * 随机取一；冷启无安家者回退出生点。
  * occupied = 已入住 NPC 的 home tile 列表（npcId 供同房豁免判定）。
  * askingNpcId = 申请入住者（ScoreRoom 占用豁免 + 共用房避让）。
+ * ★SW-BO1 2026-09-07 退役注记：生产链最后两处消费（入驻环 ① homeless 自动安置/
+ * ③ 新住户锚扫）已按原版 homeless 找家语义改走 quickFindHome（选址=自锚点泛洪
+ * 首间房,非多房择优）——本函数降为 tests/sw-bj2-npc-housing 的「旧路径指纹」
+ * 判例仪（宽房假阴性/窗内多房搬家两偏差的对照面），零生产消费,勿再接线。
  */
 export function findFreeHouse(
   st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
@@ -1150,20 +1154,130 @@ export interface NearChainNpcView<K = unknown> {
 }
 
 /**
- * 近链流浪者迁入资格（FindNPCLookingForHomeThatCanMoveIn :5539-5545 homeless 门 +
- * FindAnyHomelessTownNPC :5551-5556 四元排除的最小等价集）。本仓近链迁入不按
- * prioritizedTownNPCType 配型（入驻环无跨帧优先型锁定——UpdatePrioritizedTownNPC 的
- * 世界态锁未移植,登记），故四元排除全量保留：37 老人地牢驻点恒 homeless、453 骷髅商
- * /368 旅商本就无家、160 松露人受蘑菇居所特殊条件约束（泛化迁入会把松露塞进无蘑菇
- * 房,违反 CheckSpecialTownNPCSpawningConditions(160)）。lookForHomeTimeout 本仓无对应物
- * （NewNPC spawn 链侧字段,任务指明省略）。
+ * 近链流浪者迁入资格（FindNPCLookingForHomeThatCanMoveIn WorldGen.cs:5539-5547）：
+ * ★SW-BO1 2026-09-07 补齐优先型配型——vanilla 门序 = `active && homeless &&
+ * type == prioritizedTownNPCType && lookForHomeTimeout == 0 &&
+ * CheckSpecialTownNPCSpawningConditions(type)`，mover 必须【同优先型】（锁由
+ * Game 层 UpdatePrioritizedTownNPC 每 tick 刷新后传入;此前"任一 homeless 者"
+ * 是锁未移植期的泛化,已按原文收回）。lookForHomeTimeout 本仓无 kickOut 链
+ * （唯一置位面 WorldGen.kickOut :4797 未建模）恒 0,免检登记。
+ * 160 松露人维持排除：vanilla 对它走 CheckSpecialTownNPCSpawningConditions(160)
+ * = 对【采样房】的蘑菇居所复核——本函数无房间上下文,泛化迁入会把松露塞进无蘑菇房;
+ * 37 老人（地牢驻点恒有 home 非 homeless）/453 骷髅商（vanilla 非 townNPC）/
+ * 368 旅商（ homeless 恒真不可迁）为防御性保留（锁面结构性不可达这三型）。
  */
-export function pickHomelessMover<K>(npcs: readonly NearChainNpcView<K>[]): NearChainNpcView<K> | null {
+export function pickHomelessMover<K>(
+  npcs: readonly NearChainNpcView<K>[], priorityType: number,
+): NearChainNpcView<K> | null {
   for (const v of npcs) {
     if (!v.home && !v.bound && v.key !== 'old_man'
-      && v.npcId !== 37 && v.npcId !== 453 && v.npcId !== 368 && v.npcId !== 160) return v;
+      && v.npcId !== 37 && v.npcId !== 453 && v.npcId !== 368 && v.npcId !== 160
+      && v.npcId === priorityType) return v;
   }
   return null;
+}
+
+// ================= 优先型锁（UpdatePrioritizedTownNPC WorldGen.cs:72168-72183,SW-BO1） =================
+
+/** 优先型锁扫描入参视图（Game 层实体桶的最小投影;纯函数无实体依赖） */
+export interface PrioritizedLockNpcView {
+  npcId: number;
+  /** homeless（本仓 home=null 承接;bound 被缚型 vanilla 为独立非 townNPC 型,归入排除面） */
+  homeless: boolean;
+  /** 被缚待救态（vanilla 无此型=非 townNPC;等价排除） */
+  bound: boolean;
+  dead: boolean;
+}
+
+/**
+ * UpdatePrioritizedTownNPC 扫描面 1:1（WorldGen.cs:72171-72182）：跳过 37 入口门
+ * （Game 层持锁判）后，取 NPC 数组序第一个 `homeless && townNPC &&
+ * lookForHomeTimeout == 0 && type != 368 && type != 160` 者的类型；无人合格返回
+ * -1 = 【不写锁】（vanilla 循环无人命中即保持旧值——锁不因空扫而清零,死亡/昼夜/
+ * 轮首清零是独立面）。本仓排除面：368/160 逐字 + 453（vanilla 非 townNPC,本仓
+ * 以 TownNPC 建模须显式排）+ bound（vanilla 被缚型非 townNPC）。453 者注：37 老人
+ * 本仓恒有 home（地牢口锚）不入 homeless 面,vanilla 同（NPC.cs:53899 homeless:false）。
+ */
+export function pickPrioritizedTownNPCType(
+  npcs: readonly PrioritizedLockNpcView[],
+): number {
+  for (const v of npcs) {
+    if (v.dead || v.homeless !== true || v.bound) continue;
+    if (v.npcId === 368 || v.npcId === 160 || v.npcId === 453) continue;
+    return v.npcId;
+  }
+  return -1;
+}
+
+// ================= 夜扫清场（UnspawnHomelessNPC WorldGen.cs:5127-5155,SW-BO1） =================
+
+/** 夜扫入参 NPC 视图（Game 层实体桶最小投影） */
+export interface HomelessSweepNpcView<K = unknown> {
+  key: string;
+  npcId: number;
+  /** homeless（null=无家）——vanilla homeless 位 */
+  home: { x: number; y: number } | null;
+  /** homelessDespawn 标（SpawnHomelessNPC 生成位 :5110 专设;其余 homeless 者无此标） */
+  homelessDespawn: boolean;
+  bound: boolean;
+  dead: boolean;
+  /** 中心像素 + 尺寸（玩家邻域盒求交用） */
+  cx: number; cy: number; w: number; h: number;
+  ref: K;
+}
+
+export interface HomelessSweepOutcome<K> {
+  /** 判离场者（active=false;vanilla 发 LegacyMisc.35 "{0} has departed!"） */
+  despawned: NearChainNpcView<K> | null;
+  /** 仅清标者（:5138-5142 !homeless||!active||!townNPC → homelessDespawn=false 不离场） */
+  flagCleared: NearChainNpcView<K> | null;
+  /** 玩家在安全邻域内 → 本 tick 跳过（:5146-5154 盒求交命中,标与实体均不动） */
+  skippedByPlayer: boolean;
+}
+
+/** NPC.sWidth/sHeight（NPC.cs:6791/6793 静态 1920/1200）与 safeRangeX/Y
+ *  （NPC.cs:6172/6174 = (sWidth/16)*0.52 取整 = 62/39）——安全邻域盒常量 */
+export const NPC_SAFE_RANGE_X = 62;
+export const NPC_SAFE_RANGE_Y = 39;
+export const NPC_S_WIDTH = 1920;
+export const NPC_S_HEIGHT = 1200;
+
+/**
+ * UnspawnHomelessNPC 单 tick 步 1:1（WorldGen.cs:5127-5155；调用门 = 主循环
+ * `!dayTime || time > 48600.0`（Main.cs:66022-66028）→ Game 层昼夜判后每 tick 调）：
+ * 取【数组序第一个】带 homelessDespawn 标的 NPC——
+ *  · 已非 homeless / 已死 / 非城镇体（bound 等价）→ 只清标（:5138-5142）;
+ *  · 任一 active 玩家盒与 NPC 中心安全邻域盒（sWidth/2+safeRange 外扩）相交
+ *    → 本 tick 跳过（:5146-5154,标与实体均不动,下一 tick 重试）;
+ *  · 否则离场（active=false;vanilla 先广播 LegacyMisc.35 + SendData(23)）。
+ * 玩家域：本仓单机=本地玩家（MP 远端不入世界实体桶,同 checkForHousesNearAPlayer 登记）。
+ */
+export function unspawnHomelessSweep<K>(
+  npcs: readonly HomelessSweepNpcView<K>[],
+  players: ReadonlyArray<{ x: number; y: number; w: number; h: number }>,
+): HomelessSweepOutcome<K> {
+  const none: HomelessSweepOutcome<K> = { despawned: null, flagCleared: null, skippedByPlayer: false };
+  let target: HomelessSweepNpcView<K> | null = null;
+  for (const v of npcs) {
+    if (!v.dead && v.homelessDespawn) { target = v; break; }
+  }
+  if (!target) return none;
+  if (target.home != null || target.dead || target.bound) {
+    return { ...none, flagCleared: { ...target } };
+  }
+  // :5145-5146 中心 tile → 中心像素盒外扩（Rectangle(num2*16+8-sWidth/2-safeRangeX, …,
+  //   sWidth+safeRangeX*2, …) verbatim）
+  const tx = Math.floor(target.cx / 16), ty = Math.floor(target.cy / 16);
+  const rx = tx * 16 + 8 - NPC_S_WIDTH / 2 - NPC_SAFE_RANGE_X;
+  const ry = ty * 16 + 8 - NPC_S_HEIGHT / 2 - NPC_SAFE_RANGE_Y;
+  const rw = NPC_S_WIDTH + NPC_SAFE_RANGE_X * 2;
+  const rh = NPC_S_HEIGHT + NPC_SAFE_RANGE_Y * 2;
+  for (const p of players) {
+    if (p.x < rx + rw && p.x + p.w > rx && p.y < ry + rh && p.y + p.h > ry) {
+      return { ...none, skippedByPlayer: true };
+    }
+  }
+  return { despawned: { ...target }, flagCleared: null, skippedByPlayer: false };
 }
 
 export interface NearChainOutcome<K> {
@@ -1181,6 +1295,8 @@ export interface NearChainOutcome<K> {
  * CheckForHousesNearAPlayer 单玩家步（cs:72184-72215 纯算法面）：turnIndex = 主轮转序号
  * （Main.GameUpdateCount%ActivePlayersCount 对应,调用方每 tick 自增计数传入）；
  * players = active 玩家中心 tile 坐标表（active 全量,死亡幽灵仍计入——vanilla active 口径）。
+ * priorityType = WorldGen.prioritizedTownNPCType 跨帧优先型锁当前值（Game 层每 tick
+ * UpdatePrioritizedTownNPC 刷新后传入,SW-BO1）——mover 配型门见 pickHomelessMover。
  * 命中 wallHouse 即走受理：存在合格流浪者 → RelocatedHomeless【静默】;受理通过但无可迁
  * 者（canSpawnNewTownNPC=false 直落缓存支）→ LastFoundHouse 缓存;Blocked 各早退支与
  * vanilla 一致不缓存。此通路独立于入驻环锚池（vanilla 近链也不查锚池）。
@@ -1191,6 +1307,7 @@ export function checkHousesNearAPlayer<K>(
   turnIndex: number,
   npcs: readonly NearChainNpcView<K>[],
   occupied: ReadonlyArray<{ x: number; y: number; npcId?: number }>,
+  priorityType: number,
   rand: () => number = Math.random,
 ): NearChainOutcome<K> {
   const none: NearChainOutcome<K> = { seedHit: null, relocated: null, home: null, foundHouseNoSpawn: null };
@@ -1198,7 +1315,7 @@ export function checkHousesNearAPlayer<K>(
   const pt = players[((turnIndex % players.length) + players.length) % players.length];
   const hit = sampleHouseSeed(st, nearHouseViewRect(st, pt.x, pt.y), rand);
   if (!hit) return none;
-  const mover = pickHomelessMover(npcs);
+  const mover = pickHomelessMover(npcs, priorityType);
   // vanilla 顺序：FindNPCLookingForHomeThatCanMoveIn 先于 RoomNeeds/ScoreRoom 打分
   const acc = acceptTownNPCAtHouse(st, occupied, hit[0], hit[1], mover?.npcId ?? -1);
   if (!acc.ok) return { ...none, seedHit: hit };                       // Blocked：不缓存

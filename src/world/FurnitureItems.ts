@@ -51,12 +51,16 @@ export interface FurnitureSlotItem {
 
 export type FurnitureSlot = FurnitureSlotItem | null;
 
-/** 一件挂物家具的存放记录。锚点 = 物件左上格（与 chests/signs 同约定） */
+/** 一件挂物家具的存放记录。锚点 = 物件左上格（与 chests/signs 同约定）。
+ *  ★SW-BO1 2026-09-07（SW-BL1 P1）：模特姿态 TEDisplayDoll._pose（byte,私有字段
+ *  TEDisplayDoll.cs:40）入库——原版 WriteExtraData 随位图落盘（WorldFile v307+,
+ *  TEDisplayDoll.cs:184）；仅 display_doll 记录消费,其余 kind 恒 undefined */
 export interface FurnitureItemRecord {
   x: number;
   y: number;
   kind: FurnitureKind;
   slots: FurnitureSlot[];
+  pose?: number;
 }
 
 /** 锚点化所需的最小 store 视图（TileStore 结构兼容；测试可伪造） */
@@ -515,12 +519,14 @@ export function furnitureTakeFirst(records: FurnitureItemRecord[], kind: Furnitu
 //   与 chests 的 ITEM_STABLE_OF_INTERNAL 路径同构）
 // ============================================================================
 
-/** 存档形状（SaveData.furniture；旧档缺省无） */
+/** 存档形状（SaveData.furniture；旧档缺省无）。★SW-BO1（SW-BL1 P1）：pose 为可选
+ *  新字段（旧档缺省 undefined = 原版 0 Standing 档）——JSON 序列化自动版本兼容 */
 export interface FurnitureSaveEntry {
   x: number;
   y: number;
   kind: FurnitureKind;
   slots: Array<{ id: number; stack: number; prefix?: number } | null>;
+  pose?: number;
 }
 
 /** 运行时记录 → 存档条目（mapId = 内部 id → 磁盘稳定 id） */
@@ -528,6 +534,7 @@ export function furnitureToSave(records: FurnitureItemRecord[], mapId: (id: numb
   return records.map((r) => ({
     x: r.x, y: r.y, kind: r.kind,
     slots: r.slots.map((s) => (s ? { id: mapId(s.id), stack: s.stack, prefix: s.prefix } : null)),
+    pose: r.pose,
   }));
 }
 
@@ -544,9 +551,51 @@ export function furnitureFromSave(entries: FurnitureSaveEntry[] | undefined, map
       if (s && mapped > 0) slots.push({ id: mapped, stack: s.stack, prefix: s.prefix });
       else slots.push(null);
     }
-    out.push({ x: e.x, y: e.y, kind: e.kind, slots });
+    out.push({ x: e.x, y: e.y, kind: e.kind, slots, pose: e.pose });
   }
   return out;
+}
+
+// ============================================================================
+// 模特姿态（★SW-BO1 2026-09-07 SW-BL1 P2：ChangePose + SupportedUseStylePoses 移植
+//   TEDisplayDoll.cs:53-89 注册表 / :918-923 ChangePose / :135-153 IsValidPose。
+//   渲染消费（P3 玩家形体合成器）单列未接——pose 数据在档,渲染仍图标近似）
+// ============================================================================
+
+/** DisplayDollPoseID（TEDisplayDoll.cs 枚举）：0 Standing / 1 Sitting / 2 Jumping /
+ *  3 Walking / 4-8 Use1-Use5 */
+const POSE_USE1 = 4;
+
+/**
+ * SupportedUseStylePoses 注册表（TEDisplayDoll.cs:53-89 RegisterUsePose 逐条 1:1，
+ * 键 = Item.useStyle、值 = 该 useStyle 合法姿态 id 集（itemAnimationPercent/
+ * ItemAimRadians 是渲染参数,P3 前无消费面不建模）：
+ *   1 剑/工具族 Use1-5、5 锤/投掷弧族 Use1-5、13 短剑族 Use1-5、12 回旋镖族 Use1-3、
+ *   其余（2 枪/3 弓/4 魔法/6 甩链/7 长柄/8 挥持/9 召唤/11/14/15）单 Use1。
+ */
+export const DOLL_SUPPORTED_USE_STYLE_POSES: Readonly<Record<number, readonly number[]>> = {
+  1: [4, 5, 6, 7, 8],
+  5: [4, 5, 6, 7, 8],
+  13: [4, 5, 6, 7, 8],
+  12: [4, 5, 6],
+  2: [POSE_USE1], 7: [POSE_USE1], 3: [POSE_USE1], 4: [POSE_USE1], 6: [POSE_USE1],
+  8: [POSE_USE1], 9: [POSE_USE1], 11: [POSE_USE1], 14: [POSE_USE1], 15: [POSE_USE1],
+};
+
+/**
+ * TEDisplayDoll.ChangePose（:918-923）1:1：_pose++ 后 IsValidPose 判——
+ * `<=3`（Standing..Walking）恒合法（IsValidPose :138-141 `(uint)testedPose <= 3u`）；
+ * 4+ 仅当持握展示槽（slots[9] = _misc[0],IsValidPose :142 `_misc[0]`）的物品
+ * useStyle ∈ 注册表且新 pose 在其列表内才合法，否则回 0。
+ * 纯函数：返回新 pose（调用方写回 rec.pose）。
+ */
+export function dollNextPose(rec: FurnitureItemRecord): number {
+  const next = (rec.pose ?? 0) + 1;
+  if (next <= 3) return next;
+  const held = rec.slots[9];
+  const vid = held ? slotVid(held.id) : -1;
+  const poses = vid > 0 ? DOLL_SUPPORTED_USE_STYLE_POSES[vanillaUseStyle(vid)] : undefined;
+  return poses && poses.includes(next) ? next : 0;
 }
 
 // ============================================================================
