@@ -32,6 +32,8 @@ import { options } from './core/Options';
 import { isBound } from './core/Keybinds';
 import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
+import { startUpdateCheck } from './update/UpdateCheck';
+import { mountUpdateBanner } from './update/UpdateBanner';
 import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
 import { initTileFrameCapture, tileFrameCapture } from './debug/TileFrameCapture';
@@ -791,6 +793,20 @@ kvHas('sandboxworld.quicksave').then(async () => {
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
   flow = createFlow(root, atlas, ui, audio);
+
+  // ★自动更新检查(2026-09-07):SW 文档 SWR 的陈旧窗口内页面常驻旧 bundle(用户
+  //  此前「要多刷新一两次才是最新」)——探针定期比对部署指纹 build-id.txt,发现
+  //  新版本出横幅;点击→静默存档兜底丢进度→reload 一次到位(SWR 已在后台更新缓存)
+  {
+    const banner = mountUpdateBanner(root, () => {
+      try { flow?.doSave(true); } catch { /* 存档失败也刷新(新版本优先) */ }
+      location.reload();
+    });
+    startUpdateCheck((version) => banner.show(version, () => {
+      try { flow?.doSave(true); } catch { /* 同上 */ }
+      location.reload();
+    }));
+  }
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示
   if (bootParams0.has('vuidemo')) {

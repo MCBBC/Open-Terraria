@@ -117,4 +117,18 @@ for (const rel of jsRefs) {
 }
 
 writeFileSync(join(outDir, 'sw-twa.js'), out);
-console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 SWR;主 chunk ${jsRefs.length} 个校验通过)`);
+
+// ---------- build-id.txt(2026-09-07 运行时更新检查探针) ----------
+// 内容=首屏主 chunk 文件名(index-*.js,vite 内容哈希=部署版本指纹)。页面侧
+// UpdateCheck 定期 no-store fetch 比对,发现新版本提示一键更新(自动存档+reload)。
+// 缓存头由 _headers 精确 no-cache(可变文件,绝不落入 immutable 通配)。
+const buildId = jsRefs[0].replace(/^\/assets\//, '');
+// 数字版本号与 bundle 指纹同行(bump-version.mjs 同步 package.json/version.ts——以 package 为准)
+const appVersion = JSON.parse(readFileSync(join(gameRoot, 'package.json'), 'utf8')).version ?? '';
+const idPath = join(outDir, 'build-id.txt');
+writeFileSync(idPath, `${appVersion} ${buildId}\n`);
+if (readFileSync(idPath, 'utf8').trim() !== `${appVersion} ${buildId}`) {
+  console.error('[gen-sw-twa] build-id.txt 写入校验失败');
+  process.exit(1);
+}
+console.log(`[gen-sw-twa] ${outDir}/sw-twa.js 生成完毕(boot precache + 文档 SWR;主 chunk ${jsRefs.length} 个校验通过;build-id=${buildId})`);

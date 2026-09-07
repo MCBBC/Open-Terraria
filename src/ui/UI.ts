@@ -5791,6 +5791,17 @@ export class UI {
   }
 
   showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }>, copper: number, happinessPct?: number, medals?: number): void {
+    // ★SW-BJ8 2026-09-07 开店强制开背包（Main.OpenShop Main.cs:41162-41170 首行
+    //  :41164 `playerInventory = true`，1458 本域无增量）：缺此行=商店开着时背包
+    //  面板不自动展开——可见物品只剩快捷栏，而关包快捷栏 = context 13
+    //  （Main.cs:44374 只 Draw 不 Handle）无 Alt/Shift/Ctrl 任何 ItemSlot 语义，
+    //  背包格 10-49 又不在屏 → 缺省档（Quick Trash=Left Control）的 Ctrl+左键
+    //  卖出（GetSellOrTrash ItemSlot.cs:185-196）无任何可达目标；且 Esc/E 在
+    //  npcDialogActive 态均走关对话链（Player.cs:4960-5025 ToggleInv 优先序），
+    //  背包在店开期间无法手动补开 ⇒「无法向 NPC 出售」整条死路（SW-BJ8 实报）。
+    //  force=true：卖出/购买后 openNpcShop 重刷货架会再次进入本方法，
+    //  openInventory 缺省是开/关翻转——非 force 会把背包连带关掉。
+    this.openInventory(true);
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
         // 行点击 = 有货商店格（PickItemMovementAction case 15 ItemSlot.cs:1426-1439）：

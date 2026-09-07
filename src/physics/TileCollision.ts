@@ -61,6 +61,12 @@ export interface Body {
    *  true 才启用天花板坡链水平穿越放行。普通实体恒 false——曾误开为无条件规则，
    *  导致天花板坡邻接实心格被永久豁免（tent 悬臂案例：幽灵入场+hitWall 恒 false）。 */
   hoik?: boolean;
+  /** ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃旗（AI_001 NPC.cs:62139/:62331
+   *  `position.X -= velocity.X + direction` 本拍刚执行时由 AI 置位）。
+   *  unembedPass 读到即整段让位并清位（consume-once）——原版无任何 unembed 等价
+   *  机制，嵌入体由该漂移每拍 1px 自行解卡（坡角相移穿越即此通道），本仓
+   *  unembed 在漂移中段的弹射属非原版瞬移。仅 AI_001 史莱姆两处写点。 */
+  unwedgeDrift?: boolean;
   /** ★斜坡 G2 门入口快照（2026-08-31 统一阻尼修复）：moveAndCollide 每 tick 在
    *  速度辅助/分轴解析【前】记录——slopeCollide 的贴合门用（原版
    *  `y = Position.Y + Velocity.Y`，Collision.cs G2 `Position.Y + num7 < y`） */
@@ -444,6 +450,10 @@ function slopeCollide(
   let bestDrop = 0;      // 天花板最大下推量
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
+  // ★SW-BJ6 2026-09-07：vanilla else 支站顶候选（Collision.cs:1968-1977）——
+  //  实心地面坡 rawNum4<0（身体缘已越过坡面高端）时原版不走抬升路径,直接把
+  //  脚站到格顶（num8 = vector4.Y - Height,棘轮取最高者），无受阻检查无滑移。
+  let bestStandTop = Infinity;
   let positionChanged = false;  // 贴合是否实际移动了 body（消费方 Y 冻结判定）
   let levelSupport: boolean | null = null;  // 行走优先级守卫（等高平顶支撑;惰性求值一次）
 
@@ -543,6 +553,12 @@ function slopeCollide(
       // 落地门槛不补救 → 角色沉进坡格;钳位后贴合保持到水平重叠结束,送脚到
       // 对角线高端点(=相邻整砖顶),由常规落地无缝接管
       let num4: number;
+      if (slope === 1 || slope === 3) num4 = b.x - vx0;
+      else num4 = vx0 + TILE - (b.x + b.w);
+      // ★SW-BJ6 2026-09-07：rawNum4 = 钳 0 前的原始缘进深（vanilla num4 字面，
+      //  :1927-1934）。实心地坡 rawNum4<0 走原版 else 支站顶（见 bestStandTop），
+      //  不再钳 0 后走抬升→受阻→±4px shortfall 滑移（坡角嵌入案 t=188 一刀）。
+      const rawNum4 = num4;
       // 平台坡【不钳 0】（原版 :1935+ num4<0 即跳过 = 高端侧外脱钩，楼梯竖柱
       // 里侧可走过）；实心坡维持钳 0（坡顶过渡贴合，见函数头注释）
       // ★2026-09-01 交替处坠落修（用户存档 3222-3223/275 实录）：num4 以【缘】
@@ -552,8 +568,6 @@ function slopeCollide(
       //   修 = 沉深门：脚在坡顶 vy0 之下 ≤8px（坡顶过渡带）时钳 0 支持
       //   （坡顶 = 邻接平台面等高，钳 0 零跳变）；深陷（竖柱里侧穿越,沉>8px）
       //   维持原版跳过语义。
-      if (slope === 1 || slope === 3) num4 = b.x - vx0;
-      else num4 = vx0 + TILE - (b.x + b.w);
       if (isPlatSlope) {
         if (num4 < 0) {
           if (b.y + b.h - vy0 > 8) continue;
@@ -571,6 +585,18 @@ function slopeCollide(
           if (num5 > bestDrop) { bestDrop = num5; if (SLOPE_G2) b.collideY = true; }
         }
       } else {
+        // ★SW-BJ6 2026-09-07：原版 else 支（Collision.cs:1968-1977）——实心地坡
+        // rawNum4<0（身体缘已越过坡面高端）不走抬升路径,直接把脚站到格顶
+        //（vector2.Y 棘轮,num8 = vector4.Y - Height,门 = 当前候选沉在格顶之下）,
+        // 无 G2 门无受阻检查无滑移。曾钳 0 走抬升→被堵→±4px shortfall 滑移
+        // = 非原版踢入墙体一刀（流浪汉舌 (1825,317) s1 坡角实录 t=188 dx=-5）。
+        if (!isPlatSlope && rawNum4 < 0) {
+          const standTop = vy0 - b.h;
+          if (Math.min(b.y, bestStandTop) > standTop && standTop < bestStandTop) {
+            bestStandTop = standTop;
+          }
+          continue;
+        }
         // 地面坡（:1935-1966）：沉到斜面下才抬回（gap<0 即抬升；面随下贴候选
         // 已上提到重叠门前,此处只保留抬升路径）
         const gap = vy0 + num4 - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入面下
@@ -587,7 +613,40 @@ function slopeCollide(
     }
   }
   if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记
-  if (bestLift < 0) {
+  // ★SW-BJ6 2026-09-07：else 支站顶应用（vanilla vector2.Y 棘轮收尾,取最高者,
+  //  优先于抬升——抬升目标 feet=vy0+num4 ≥ 站顶 feet=vy0）。受阻判定按原版
+  //  重跑 TileCollision 语义（:2003-2017）只认【新交】整块：站位前旧盒已与该格
+  //  相交的（坡角 0.01px 搭边态）被 TileCollision else 支忽略（:2440 无分支）,
+  //  不构成截短——vanilla 在坡角处把身体站进实心柱 0~1px 即为原版本体行为,
+  //  后续由 AI 嵌固回退漂移（unwedgeDrift）按原版通道解卡。
+  let standApplied = false;
+  if (bestStandTop !== Infinity && bestStandTop < b.y) {
+    let blocked = false;
+    const sx0 = Math.floor(b.x / TILE), sx1 = Math.floor((b.x + b.w - 0.01) / TILE);
+    const sy0 = Math.floor(bestStandTop / TILE), sy1 = Math.floor((bestStandTop + b.h - 0.01) / TILE);
+    for (let tx = sx0; tx <= sx1 && !blocked; tx++) {
+      for (let ty = sy0; ty <= sy1; ty++) {
+        if (!st.inBounds(tx, ty)) continue;
+        const j = st.idx(tx, ty);
+        if (!st.isSolid(tx, ty) || st.slope[j] > 0 || st.half[j]) continue;
+        const top = ty * TILE + (st.half[j] ? 8 : 0);
+        if (!(b.x + b.w > tx * TILE && b.x < tx * TILE + TILE)) continue;
+        // 旧盒（站位前）已与该格相交 = 原版忽略支,不算新交
+        const already = b.y + b.h > top && b.y < (ty + 1) * TILE;
+        if (!already) { blocked = true; break; }
+      }
+    }
+    if (!blocked) {
+      b.y = bestStandTop;
+      positionChanged = true;
+      if (b.vy > 0) b.vy = 0;                       // :1975-1977 vector3.Y > 0 → 0
+      if (b.vy >= 0) b.onGround = true;
+      if (SLOPE_G2) b.collideY = true;              // 站位=本帧 Y 结算改写 velocity.Y
+      standApplied = true;
+      if (srec) srec.push(`STAND top=${bestStandTop.toFixed(2)}`);
+    }
+  }
+  if (!standApplied && bestLift < 0) {
     const ny = b.y + bestLift;
     // 抬升后不能嵌进实心
     let blocked = false;
@@ -630,7 +689,7 @@ function slopeCollide(
       const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
       if (dbg) dbg.shortfall = (dbg.shortfall ?? 0) + 1;
     }
-  } else if (bestSnapY > 0) {
+  } else if (!standApplied && bestSnapY > 0) {
     // ★面随下贴执行（与抬升互斥——本 tick 有沉入贴合时无需下贴）：
     //   脚底压回对角线 + 置接地 + 清落速（原版面随态 velocity.Y==0 同效）。
     //   守卫对称抬升守卫：目标位不得嵌进整砖/半砖（坡线端点紧贴支撑砖顶的畸形地形）
@@ -886,6 +945,20 @@ function unembedPass(b: Body, world: World): void {
   //  干侧救援（凹龛/tent/活埋）不受影响。主 bounce 源=slopeCollide 贴合
   //  （vanilla 同款,另案定谳）。
   if (b.wet) return;
+  // ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃期整段让位（consume-once）。
+  //  原版嵌入体的唯一自救 = AI_001 的 position.X -= velocity.X + direction
+  //  （NPC.cs:62139 贴地支/:62331 滞空支，门 collideY+oldVelocity.Y≠0+
+  //  SolidCollision——SolidCollision :2713 对坡格取整块盒，站坡姿态恒判真），
+  //  每拍 1px 匀速解卡；坡角高端邻实心柱时漂移越过墙缘后经 SolidCollision 的
+  //  (柱,行) 格持续判真 → 不再自限 → 匀速相移穿越墙带（流浪汉舌 (1825,317) s1
+  //  坡角实录 t=188-210，绿史莱姆整只穿到井侧=原版本体行为）。本仓 unembed 在
+  //  漂移中段（embedTicks 计满 15）单帧横推 ≤64px 弹回原侧 = 非原版瞬移，把
+  //  vanilla 一次干净穿越打断成"沉入→弹出"循环（用户行为日志实录）。漂移
+  //  活跃期交还原版机制，与 wet 让位同构。 */
+  if (b.unwedgeDrift) {
+    b.unwedgeDrift = false;
+    return;
+  }
   const st = world.store;
   const cx = Math.floor((b.x + b.w / 2) / TILE);
   const cy = Math.floor((b.y + b.h / 2) / TILE);

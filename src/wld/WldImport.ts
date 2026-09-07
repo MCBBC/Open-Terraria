@@ -765,6 +765,21 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   for (const c of chests) for (const it of c.items) if (it) it.id = stItem(it.id);
   for (const f of furnitureSave) for (const it of f.slots) if (it) it.id = stItem(it.id);
 
+  // ★幽灵格差分还原(2026-09-07):导出侧把 v5 幽灵(inactive+type≠0)写成原版
+  //  致动虚化(active+inActive b3|4)——parser 把 inActive 并进 wireArr bit5。
+  //  此处识别「active+bit5」=幽灵 → tileActive 差分 v=1(loadSaveData 还原 flags=0,
+  //  回到不可见不实体的 v5 语义)。曾缺此段:虚化格读回全变活格=「漫天方块」
+  //  (用户实报);v0.1.10 的 export 曾反向把幽灵转正,同病同源。
+  let ghostAny = false;
+  const ghostV = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (type[i] !== 0 && wld.tiles.active[i] && (wireArr[i] & 0x20)) {
+      ghostV[i] = 1;
+      ghostAny = true;
+    }
+  }
+  if (ghostAny) warnings.push(`还原 ${ghostV.reduce((a, b) => a + (b ? 1 : 0), 0)} 个虚化格(幽灵保域)`);
+
   const save: SaveData = {
     format: 'sandboxworld.save',
     // ★v3(2026-09-07 统一稳定域):产物 tiles/items=稳定 id,读档端(v3 分支做
@@ -879,6 +894,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     // （MapHelper.SaveMap），.wld 本体不含——WldParser 只读 .wld，无从回填，
     // 导入后从头探索（与旧存档行为一致）
     explored: undefined,
+    // ★幽灵差分段(2026-09-07):虚化格 v=1——loadSaveData 按差分还原 flags=0
+    tileActive: ghostAny ? bytesToB64(rlePairs(ghostV)) : undefined,
     chests,
     // ★七批备案④收尾：334 legacy 武器架持武还原记录（内部 id——本 SaveData 为
     //  v2 内存态，loadSaveData v3=false 同 chests 直读；落盘经 serialize 转稳定 id）

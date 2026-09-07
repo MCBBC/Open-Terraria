@@ -136,10 +136,11 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       const wl = paintWall[i];
       let b = 0, b2 = 0, b3 = 0, b4 = 0;
       const payload: number[] = [];
-      // ★幽灵格转正(2026-09-07):本仓 v5「幽灵保域」允许 inactive+type≠0 格存在
-      //  (worldgen 遗留,实测一个世界可达 163 万格)——wld 流格式表达不了它们
-      //  (原版 WF:1444 inactive 格不写 type,读回即空气),不转正=导出后整片空洞
-      //  (用户「乱七八糟」的最终根因)。一律按活格写;活位差异不进 wld。
+      // ★幽灵格=原版致动虚化(2026-09-07 三修):v5「幽灵保域」(inactive+type≠0,
+      //  一个世界实测可达 163 万格)在 wld 的 1:1 表达=原版致动器虚化——active 位
+      //  +type 照写,再加 inActive 虚化位(WF:1533 b3|=4)。曾「转正为活格」→
+      //  导入后幽灵全部显形(用户实报「漫天方块」——幽灵在游戏里不可见,转正后
+      //  被渲染成实体)。虚化语义原版/本仓渲染碰撞一致(不可见不实体)。
       const writeType = type !== 0;
       if (writeType) {
         // ★写流域=原版 sheet 域(WF:1444 tile.type 直写):t.type 是 internal
@@ -154,6 +155,9 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
           payload.push(t.frameX[i] & 0xff, (t.frameX[i] >> 8) & 0xff, t.frameY[i] & 0xff, (t.frameY[i] >> 8) & 0xff);
         }
         if (paint[i] !== 0) { b3 |= 8; payload.push(paint[i]); }
+        // ★幽灵(非活)格 → 原版致动虚化位(WF:1533 inActive→b3|=4):type 保留、
+        //  不可见不实体——parse 侧经 wireArr bit5 → tileActive 差分 v=1 还原 flags=0
+        if (!isActive) b3 |= 4;
       }
       if (wall !== 0) {
         b |= 4;
@@ -174,6 +178,7 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       if (wire[i] & 1) b2 |= 2;
       if (wire[i] & 2) b2 |= 4;
       if (wire[i] & 4) b2 |= 8;
+      if (wire[i] & 8) b3 |= 0x20;   // ★黄线(wire4,WF:1534 b3|=0x20;parser header3&0x20→内部 bit3)——曾漏写
       b2 |= half ? 16 : (slope !== 0 ? (slope + 1) << 4 : 0);
       // 扩展头链(b4→b3→b2 前插;actuator/inActive/wire4 本仓无态,写 0——登记偏差)
       if (b4 !== 0) { b3 |= 1; payload.unshift(b4); }

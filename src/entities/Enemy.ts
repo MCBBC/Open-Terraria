@@ -1785,6 +1785,12 @@ export class Enemy extends Entity {
    *  携物梯 :61309 气球史莱姆落地弹跳 / :61932/:62124 落地嵌固回退（配对
    *  collideY=TileCollision 层 Y 碰撞位） */
   preCollideVy = 0;
+  /** ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃旗——:61932/:62124 两处
+   *  `position.X -= velocity.X + direction`（NPC.cs:62139/:62331）执行的当拍置位，
+   *  由 TileCollision.unembedPass 消费即清（consume-once）：原版无 unembed 等价
+   *  机制，嵌入体由该漂移每拍 1px 自行解卡，unembedPass 在漂移活跃期整段让位
+   *  （坡角相移穿越案：流浪汉舌 (1825,317) s1 坡角，实录 t=188-211）。 */
+  unwedgeDrift = false;
   /** 471 哥布林术士 defDefense 基线快照（NPC.cs:56891/:56920 飞行态 ×1.1 / 地面复原） */
   warlockDefBase?: number;
   /** 417 SolarSroller 态 6 伤害/防御覆写基线（原版 defDamage/defDefense = ScaleStats
@@ -3595,9 +3601,12 @@ export class Enemy extends Entity {
       // 落地嵌固回退（G5，:61932-61935）：上一 tick Y 碰撞（collideY）且碰撞前在
       // 动（oldVelocity.Y!=0，本仓 preCollideVy）而当前位置嵌进实心 → 后退
       // vx+direction 脱困（vx 通常已被碰撞清零 → 净退 1px/t 持续推出）
+      // ★SW-BJ6 2026-09-07：置漂移活跃旗——unembedPass 本拍让位（vanilla 无
+      //  unembed,该漂移即原版唯一嵌入自救通道）
       if (this.collideY && this.preCollideVy !== 0
         && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
         this.x -= this.vx + dir;
+        this.unwedgeDrift = true;
       }
       // 落地卡墙检测（1457 :62141-62146）：ai[3]==position.X 精确相等 = 白跳 →
       // 反转 + ai[2]=200（R6-B 2-5：曾用 |Δ|<1 容差）
@@ -3695,9 +3704,11 @@ export class Enemy extends Entity {
         this.x -= 1.4 * dir;
       }
       // 落地嵌固回退（G5，:62124-62127）——grounded 分支 :61932 同款（空中态版）
+      // ★SW-BJ6 2026-09-07：置漂移活跃旗（同 grounded 支——vanilla :62331 滞空支）
       if (this.collideY && this.preCollideVy !== 0
         && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
         this.x -= this.vx + dir;
+        this.unwedgeDrift = true;
       }
       if ((dir === -1 && this.vx < 0.01) || (dir === 1 && this.vx > -0.01)) {
         this.vx += 0.2 * dir;                                     // :62130-62133
