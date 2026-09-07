@@ -8,6 +8,7 @@ import './procShim';   // ★process 兜底首导入(见 procShim.ts;2026-09-02 
 import { serializeSave } from '../save/serialize';
 import type { SaveData, SaveMeta, SaveStoreView } from '../save/serialize';
 import { parseWldToSave } from '../wld/WldImport';
+import { exportWld } from '../wld/WldExport';
 
 interface SaveRequest {
   type: 'save';
@@ -34,7 +35,10 @@ interface SaveRequest {
 
 type SaveWorkerRequest = SaveRequest
   | { type: 'importWld'; id: number; buf: ArrayBuffer }
-  | { type: 'inspectSave'; id: number; text: string };
+  | { type: 'inspectSave'; id: number; text: string }
+  // ★导出 worker 化(2026-09-07 用户报「导出卡一下主线程」):存档 json 的
+  //  JSON.parse(大档数十 ms)+ 全图 tile 编码全搬本线程;产物 ArrayBuffer transfer
+  | { type: 'exportWld'; id: number; json: string };
 
 self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   const req = e.data;
@@ -74,6 +78,17 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
       });
     } catch {
       (self as unknown as Worker).postMessage({ type: 'inspected', id: req.id, ok: false });
+    }
+    return;
+  }
+  // ---- 导出:存档 json → 原版 .wld 字节(2026-09-07,红队 P0-1 勘误:曾只声明
+  //  类型未挂处理器,客户端固定空等 20s 超时再回退主线程) ----
+  if (req.type === 'exportWld') {
+    try {
+      const buf = exportWld(JSON.parse(req.json) as SaveData);
+      (self as unknown as Worker).postMessage({ type: 'exported-wld', id: req.id, buf }, [buf]);
+    } catch (err) {
+      (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });
     }
     return;
   }

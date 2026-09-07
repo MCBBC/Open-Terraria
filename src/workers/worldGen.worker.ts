@@ -132,6 +132,13 @@ ctx.onmessage = async (e) => {
       // 二次沉降(cs:21051)自 2026-08-17 起归位 generateWorld 管线内（蜂巢幼虫之后、
       // 仙人掌珊瑚之前）——此处不再生成后补跑（曾晚 8 个 pass：#98 液体门读到未沉水体）
       world.indexFramesRepaired = true;   // 生成端写像素帧终态，免主线程修复扫描
+      // ★幽灵净化(2026-09-07 方案B,生成边界):worldgen 挖洞遗留的幽灵格
+      //  (active=false+type≠0)在打包回传前清零——对齐原版「存档→读档后无幽灵」
+      //  的世界形态;净化点在 generateWorld 返回之后,生成会话内对拍金标(x86 rig
+      //  比较器豁免 act=0 的 typ)不受影响。运行时「裸读 type」路径的地雷就此终结
+      //  (g#98 液体判定/替换掉落/矿石闪光等历史修复随之成为防御性死代码,无害保留)
+      const purged = world.store.purgeGhostTiles();
+      if (purged > 0) console.log(`[gen] 幽灵格净化 ${purged} 格(对齐原版)`);
       const { packet, transfer } = packWorld(world); // 转移所有权（本分支最后一步）
       ctx.postMessage({ id: req.id, type: 'result', world: packet }, transfer);
       return;

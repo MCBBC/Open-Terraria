@@ -632,7 +632,7 @@ export class ChunkCache {
         // 回声涂层块不绘制（IsVisible 同款门，与主遍一致）
         if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) continue;
         const actuated = (st.wire[i] & 32) !== 0;
-        ctx.globalAlpha = actuated ? 0.3 : 1;
+        ctx.filter = actuated ? 'brightness(0.4)' : 'none';
         const sheet = def.vanilla.sheet;
         if (sheet === 80 && def.vanilla.frame === 'style') {
           drawCactusCell(ctx, this.autotiler.atlas, st, x, y, type, lx * TILE, -TILE);
@@ -670,10 +670,14 @@ export class ChunkCache {
         // 缺口透出 = 原版"隐形的墙后世界"）。特例同表：19 平台 48 行/541·631 恒隐
         // （:1437-1443，与涂层无关的固有隐形帧，本仓未建模该帧语义，不接）
         if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) continue;
-        // 已致动(inActive):幽灵态淡显(原版 DrawInactiveSorter,Main.cs:2828 附近)
-        // 每格开头统一设定 alpha(各 continue 路径无需逐个恢复,下一格自愈)
+        // 已致动(inActive):原版视觉=光照 RGB×0.4 暗化(TileDrawing.cs:4418-4421
+        // GetFinalLight 走 tileCache.actColor,Tile.cs:274-283 num=0.4 三通道乘、
+        // alpha 不变)——同纹理暗 40% 仍不透明,非半透明(曾 globalAlpha 0.3,
+        // 亮背景会透出墙/天空,与原版不等价)。注:旧注释引用的「DrawInactiveSorter
+        // Main.cs:2828」在 1457 反编译中不存在(调研 2026-09-07 全库零命中)。
+        // filter 只作用于紧随的 drawImage 源,精确到本格。
         const actuated = (st.wire[i] & 32) !== 0;
-        ctx.globalAlpha = actuated ? 0.3 : 1;
+        ctx.filter = actuated ? 'brightness(0.4)' : 'none';
         const def = TILE_DEFS[type];
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
         // 风摆动图块（草/藤/吊挂植物/树冠标记帧）：摘出静态烘焙，
@@ -772,7 +776,7 @@ export class ChunkCache {
         }
       }
     }
-    ctx.globalAlpha = 1; // 致动幽灵 alpha 复位(防影响后续 pass)
+    ctx.globalAlpha = 1; // alpha 复位(防影响后续 pass;致动暗化走 filter,已逐格显式复位)
 
     // ---- 油漆逐像素 pass：墙层 + tile 层分别着色（TileShader.cso 真值） ----
     // 原版 tile/wall 各自经 tileShader 按格取 paint（TilePaintSystemV2）；

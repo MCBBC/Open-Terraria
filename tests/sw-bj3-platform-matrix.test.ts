@@ -182,6 +182,8 @@ function mkHammerGame(w = 40, h = 20) {
   g.hammerPoundRelease = true;
   g.trackTile = 0;
   g.mining = null;
+  // ★SW-BJ10 2026-09-07：锤整形写位后走 squareTileFramePlatform → markDirtyArea 3×3
+  g.chunks = { markDirtyArea: () => {} };
   g.sfx = { play: () => {}, playWavFile: () => true };
   g.playSfxFile = () => true;
   g.spawnParticles = () => {};
@@ -329,7 +331,9 @@ describe('SW-BJ3 C 自动斜放面：智能光标态逐型斜上/斜下 + style 
       expect(st.type[i]).toBe(TILE_DEFS[TILE_BY_KEY[item.tile!]]?.vanilla?.sheet === 19 ? PLAT : st.type[i]);
       expect(st.slope[i]).toBe(2);                                    // 右上平台 → 斜上 slope2
       expect(st.frameY[i]).toBe(18 * ps);                             // ★style 帧与坡共存
-      expect(st.frameX[i]).toBe(0);
+      // ★SW-BJ10 2026-09-07：frameX 0 → 342（原版 num10 slope2 支 :86748——BL 空走
+      //  首臂,R 空但 TR=(11,19) 邻台经上对角链联动成 slope2 → 连接码 342；手推与实测一致）
+      expect(st.frameX[i]).toBe(342);
       expect(st.half[i]).toBe(0);
     });
     it(`${name}：左下邻台 → 斜下(slope2 下行链)`, () => {

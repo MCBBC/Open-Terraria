@@ -105,7 +105,7 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'downedPirates', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedPirates') },
   { name: 'shadowOrbSmashed', type: 'bool', ver: 0, get: (s) => B(F(s), 'shadowOrbSmashed') },
   { name: 'spawnMeteor', type: 'bool', ver: 0, get: (s) => B(F(s), 'spawnMeteor') },
-  { name: 'shadowOrbCount', type: 'u8', ver: 0, get: (s) => (H(s) as { shadowOrbCount?: number }).shadowOrbCount ?? 0 },
+  { name: 'shadowOrbCount', type: 'u8', ver: 0, get: (s) => (s as { shadowOrbCount?: number }).shadowOrbCount ?? 0 },   // ★P2-9:数据在顶层(serialize.ts :123),曾读 H(s)(header 无此键)恒 0
   { name: 'altarCount', type: 'i32', ver: 0, get: (s) => (s as { altarCount?: number }).altarCount ?? 0 },
   { name: 'hardMode', type: 'bool', ver: 0, get: (s) => B(F(s), 'hardMode') },
   { name: 'afterPartyOfDoom', type: 'bool', ver: 257, get: (s) => B(F(s), 'afterPartyOfDoom') },
@@ -134,12 +134,12 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'windSpeedTarget', type: 'f32', ver: 0, get: (s) => WT(s).windSpeedTarget ?? 0 },
   // anglerWhoFinishedToday list(动态,n 由 list 闭合,不进表——writeHeader 特例)
   { name: 'savedAngler', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedAngler') },
-  { name: 'anglerQuest', type: 'i32', ver: 0, get: () => 0 },
+  { name: 'anglerQuest', type: 'i32', ver: 0, get: (s) => (s as { angler?: { quest?: number } }).angler?.quest ?? 0 },   // ★P2-10:曾恒 0
   { name: 'savedStylist', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedStylist') },
   { name: 'savedTaxCollector', type: 'bool', ver: 129, get: (s) => B(F(s), 'savedTaxCollector') },
   { name: 'savedGolfer', type: 'bool', ver: 201, get: (s) => B(F(s), 'savedGolfer') },
   { name: 'invasionSizeStart', type: 'i32', ver: 107, get: (s) => IV(s).sizeStart },
-  { name: '_tempCultistDelay', type: 'i32', ver: 108, get: () => 86400 },
+  { name: '_tempCultistDelay', type: 'i32', ver: 108, get: (s) => (s as { cultistDelay?: number }).cultistDelay ?? 86400 },   // ★P2-10:曾恒 86400(石巨人后拜月教倒计时清零;数据在顶层 serialize.ts :113)
   // banners list(动态,writeHeader 特例;键=下标 1..292)
   { name: 'fastForwardTimeToDawn', type: 'bool', ver: 128, get: (s) => !!H(s).fastForwardTimeToDawn },
   { name: 'downedFishron', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedFishron') || B(F(s), 'downed_370') },
@@ -164,10 +164,10 @@ export const HEADER_FLAGS: WldField[] = [
   { name: '_tempPartyGenuine', type: 'bool', ver: 170, get: (s) => !!EV(s).partyGenuine },
   { name: '_tempPartyCooldown', type: 'i32', ver: 170, get: (s) => EV(s).partyCooldown ?? 0 },
   // TempPartyCelebratingNPCs list(动态,writeHeader 特例)
-  { name: '_tempSandstormHappening', type: 'bool', ver: 174, get: (s) => !!(WT(s) as { sandstorm?: boolean }).sandstorm },
-  { name: '_tempSandstormTimeLeft', type: 'i32', ver: 174, get: (s) => (WT(s) as { sandstormTime?: number }).sandstormTime ?? 0 },
-  { name: '_tempSandstormSeverity', type: 'f32', ver: 174, get: () => 0 },
-  { name: '_tempSandstormIntendedSeverity', type: 'f32', ver: 174, get: () => 0 },
+  { name: '_tempSandstormHappening', type: 'bool', ver: 174, get: (s) => !!(WT(s) as { sand?: { happening?: boolean } }).sand?.happening },   // ★P2-10:WeatherSave 键=sand.*
+  { name: '_tempSandstormTimeLeft', type: 'i32', ver: 174, get: (s) => (WT(s) as { sand?: { timeLeft?: number } }).sand?.timeLeft ?? 0 },
+    { name: '_tempSandstormSeverity', type: 'f32', ver: 174, get: (s) => (WT(s) as { sand?: { severity?: number } }).sand?.severity ?? 0 },   // ★红队复核补:曾恒 0
+  { name: '_tempSandstormIntendedSeverity', type: 'f32', ver: 174, get: (s) => (WT(s) as { sand?: { intendedSeverity?: number } }).sand?.intendedSeverity ?? 0 },
   { name: 'savedBartender', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedBartender') },
   // DD2Event.Save:3 bool(T1/T2/T3)——**无第 4 个**(DD2Event.cs:151-157;曾误写 Any=多 1B)
   { name: 'DD2_DownedInvasionT1', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT1') },
@@ -219,7 +219,7 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'forceXMasForever', type: 'bool', ver: 287, get: (s) => B(F(s), 'forceXMasForever') },
   { name: 'vampireSeed', type: 'bool', ver: 288, get: (s) => B(F(s), 'vampire') },
   { name: 'infectedSeed', type: 'bool', ver: 296, get: (s) => B(F(s), 'infected') },
-  { name: '_tempMeteorShowerCount', type: 'i32', ver: 291, get: () => 0 },
+  { name: '_tempMeteorShowerCount', type: 'i32', ver: 291, get: (s) => (s as { meteorShowerCount?: number }).meteorShowerCount ?? 0 },   // ★P2-10:曾恒 0(serialize.ts :104)
   { name: '_tempCoinRain', type: 'i32', ver: 291, get: () => 0 },
   { name: 'teamBasedSpawnsSeed', type: 'bool', ver: 297, get: (s) => B(F(s), 'teamBasedSpawnsSeed') },
   // ExtraSpawnPointManager.Write(动态:u8 n+n×(i16,i16),writeHeader 特例)

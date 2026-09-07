@@ -54,6 +54,9 @@ function shell(w: World, drops: Drop[], opts: {
   };
   const consumed: Array<number> = [];
   g.world = w;
+  // ★SW-BJ12 2026-09-07 重钉：BJ10 SmartCursorHelper.TileTargetDesired 门
+  // （tryPlace 头 lockedContinuity 读）缺 stub——锁存续期 null=无锁直通
+  g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.chunks = { markDirtyArea: () => {} };
   g.sfx = { play: () => {}, playWavFile: () => {} };
   g.cb = { onInventoryChanged: () => {} };

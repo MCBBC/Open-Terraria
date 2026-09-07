@@ -3048,6 +3048,14 @@ export class Renderer {
     this._monoFrameMs = this._liquidNow;
 
     this.updateWaterStyle(world, cam);
+    // ★SW-BJ15 2026-09-07：全屏地图锚点补偿依赖的世界尺寸须先于 easeFullMap 就位。
+    //  曾只在 drawFullMap（本函数后段）置位 → 会话首开时 easeFullMap→applyMapAnchor
+    //  反解 pan 时 (W×z)/2 项塌成 0：首帧 pan 短差 (W×z/2, H×z/2)（4200 世界实测
+    //  首开左偏 1554px/上偏 444px，二次开起 _fmWorldW 已就位故正常——用户实报
+    //  "地图首次打开偏到左边"）。Game.toggleFullMap 的 pan 预置只覆盖 zoom=0.5 初值，
+    //  第一帧缓动即被此处以 0 尺寸反解覆盖，必须在缓动前喂真值
+    this._fmWorldW = world.w;
+    this._fmWorldH = world.h;
     this.easeFullMap();
 
     // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线 / 世界尺寸 +

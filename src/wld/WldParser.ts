@@ -397,10 +397,13 @@ export function parseWld(buf: Uint8Array): WldWorld {
   // ★R16-7⑤：bg10-12 门 = `version > 195`（WF57:2309 严格大于）,非 >= 195
   let bg10 = 0, bg11 = 0, bg12 = 0;
   if (version > 195) { bg10 = r.u8(); bg11 = r.u8(); bg12 = r.u8(); }
-  // ★2026-09-03：二/三/四区森林背景样式（WF:1383-1385 DD2Event.Save 后三字节,
-  //  v>=204 门——combat book 位即紧跟其后;与 WF:1325 treeBG1 分处两段）
-  let treeBG2 = 0, treeBG3 = 0, treeBG4 = 0;
-  if (version >= 204) { treeBG2 = r.u8(); treeBG3 = r.u8(); treeBG4 = r.u8(); }
+  // ★P0-2 勘误(2026-09-07 红队):bg10/11/12 与 treeBG2/3/4 是**同一组三字节**——
+  //  写侧 WF:1381-1385 在 underworldBG 与 combatBook 之间恒写 3 字节(setBG(10/11/12)
+  //  即 treeBG2/3/4,WorldGen.cs:7173-7175),读侧 WF:2294-2312 同位读入 bg10-12。
+  //  旧实现在此处二次读 treeBG2-3-4 → v≥204(全部 1.4 档)恒超读 3 字节,尾部约 30
+  //  个旗标域(boss 击杀/NPC 解锁/宠物/季节事件/秘密种子)整体错位,TreeTops 读出
+  //  1280 项垃圾——「教科书式断言盲区」(tiles/chests 走指针 seek 不受影响)。
+  //  bg10-12 即 treeBG2-4,上方已读,不再二次读取。
   if (version >= 204 && r.boolean()) flags.combatBook = true;                              // combat book
   if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }                  // 灯笼夜四件套（运行时态,不落 flags）
   if (version >= 211) {
@@ -582,7 +585,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,
-    treeBG1, treeBG2, treeBG3, treeBG4, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,
+    treeBG1, treeBG2: bg10, treeBG3: bg11, treeBG4: bg12, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,
     tileEntities, teSkipped,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,
@@ -726,13 +729,15 @@ function decodeTiles(
       }
       let wl = 0;
       let wallPaint = 0;
+      let wallHiPending = false;
       if (header1 & 0x04) {
         wl = r.u8();
         if (header3 & 0x10) wallPaint = r.u8(); // wall color（WorldFile.cs:2583-2586）
-        if (version >= 222 && header3 & 0x40) {
-          wl |= r.u8() << 8;
-        }
-        // ★R16-9①（WF57:2593-2596/2667-2670）：墙 id 越界归 0（WallID.Count=367）——
+        // ★红队复核勘误(2026-09-07):墙高字节的流位在 **liquid 之后**(原版读侧
+        //  cs:2663-2665 在 b2>1 块尾;写侧 SaveTile num3 流水同理)——曾在此处读,
+        //  与原版流位互换(wall>255 且带液体的格:液量被当高字节、墙被钳 0)
+        wallHiPending = version >= 222 && (header3 & 0x40) !== 0;
+        // ★R16-9①（WF57:2593-2596）：墙 id 越界归 0（WallID.Count=367）——
         //  脏档/第三方工具写出越界 id 曾直存 → 渲染/存档侧未定义行为
         if (wl >= 367) wl = 0;
       }
@@ -756,6 +761,11 @@ function decodeTiles(
         //  store 编码 4=微光（serialize.ts:118）——曾折成 1(水)丢弃 → 1.4.4+
         //  存档微光池导入后全变普通水且不可逆（再存档即真水）。
         lqKind = (version >= 269 && header3 & 0x80) ? 4 : lqType;
+      }
+      // ★墙高字节合并(原版读侧 cs:2663-2665,liquid 之后——红队复核勘误同款移位)
+      if (wallHiPending) {
+        wl |= r.u8() << 8;
+        if (wl >= 367) wl = 0;
       }
       // RLE 计数
       const rleStorage = (header1 & 0xC0) >> 6;

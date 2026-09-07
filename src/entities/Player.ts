@@ -6128,13 +6128,22 @@ export class Player extends Entity {
     return out;
   }
 
-  /** Player.RemoveAllGrapplingHooks（Player.cs:33106-33116）：清黑名单 + 清锚点表 +
-   *  杀全部自有 aiStyle7 弹体 */
+  /** Player.RemoveAllGrapplingHooks（1457 Player.cs:33826-33838）：清黑名单 + 清锚点表 +
+   *  杀全部自有 aiStyle7 弹体。
+   *  ★SW-BJ14 2026-09-07：原版 = `for (int i=0;i<1000;i++) 扫 Main.projectile 全量
+   *  (owner==whoAmI && aiStyle==7) → Kill()`（:33831-33837）——Kill 不摘数组元素，全数
+   *  必死。本仓按登记表 grappleProjs 等价实现，但 GrappleProj.kill() 会同步反注册
+   *  （unregisterGrapple → splice），裸 for..of 在迭代中变异数组 = 游标跳格，只杀到
+   *  一半（n 钩杀 ⌊n/2⌋、余 ⌈n/2⌉ 个幸存钩）；随后 length=0 把幸存钩逐出登记表成
+   *  「孤儿钩」——仍每 tick 自登记锚点表拉人（GrappleProj.stepLatched），却不再被
+   *  任何收爪/上限面看见（Jump 收爪/fireGrapple 扫描/黑名单全走本表）⇒ 玩家悬空
+   *  卡死到钩 10 分钟 timeLeft 耗尽或死亡（用户实报 SW-BJ14）。快照迭代 = 语义对齐
+   *  原版「全量杀」；kill() 幂等（dead 短路），重复杀安全。 */
   removeAllGrapplingHooks(): void {
     this.clearGrapplingBlacklist();
     this.grappling[0] = null;
     this.grapCount = 0;
-    for (const g of this.grappleProjs) g.kill();
+    for (const g of [...this.grappleProjs]) g.kill();   // SW-BJ14：快照迭代防 kill→splice 游标跳格
     this.grappleProjs.length = 0;
     this.goingDownWithGrapple = false;
   }

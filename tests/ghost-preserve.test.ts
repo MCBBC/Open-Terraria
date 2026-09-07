@@ -40,7 +40,7 @@ function ghostCount(st: TileStore): number {
 }
 
 describe('幽灵保域：生成出口/存档/运行时门', () => {
-  it('①②③ 生成出口幽灵存活 + 净化视图哈希=迁移前金标 + v5 存读幽灵逐格存活', async () => {
+  it('①② 生成出口幽灵存活 + 净化视图哈希=迁移前金标;③(方案B 2026-09-07)存读边界净化:差分还原→净化清 type(对齐原版读档,用户拍板)', async () => {
     const world = await generateWorld({ width: 4200, height: 1200, seedText: '9293480', evil: 0 });
     const st = world.store;
     const n = st.type.length;
@@ -60,20 +60,31 @@ describe('幽灵保域：生成出口/存档/运行时门', () => {
 
     // ③ v5 存读：serializeSave 零就地写 + tileActive 落段 + 读档幽灵逐格还原
     const parts = buildSaveParts(world);
+    console.log(`[probe] before-serialize ghost=${ghostCount(st)}`);
     const json = serializeSave(parts.view, parts.meta, parts.player, 0);
+    console.log(`[probe] after-serialize ghost=${ghostCount(st)}`);
     expect(ghostCount(st)).toBe(gh);   // 序列化不动活存储（净化循环已删）
     const data = JSON.parse(json) as SaveData;
     expect(data.version).toBe(5);
     expect(typeof data.tileActive).toBe('string');
     expect(data.tileActive!.length).toBeGreaterThan(0);
     const { world: loaded } = loadSaveData(data);
+    console.log(`[probe] loaded ghost=${ghostCount(loaded.store)} flags0type0? sample check`);
     const lst = loaded.store;
-    expect(ghostCount(lst)).toBe(gh);  // 方案 A：跨存档存活（对齐原版 .wld inactive 位）
-    let diff = 0;
+    // ★方案B(2026-09-07):幽灵 type 净化清零后,「逐格全等」的旧断言被替换为
+    //  分组断言——正常活格逐格一致;幽灵格=净化清零(wall 等位保留);flags 全部一致
+    let liveDiff = 0, ghostUncleared = 0;
     for (let i = 0; i < n; i++) {
-      if (lst.type[i] !== st.type[i] || lst.flags[i] !== st.flags[i]) diff++;
+      if (st.flags[i] === 1) {
+        if (lst.type[i] !== st.type[i] || lst.flags[i] !== st.flags[i]) liveDiff++;
+      } else if (st.type[i] !== 0) {
+        if (lst.type[i] !== 0 || lst.flags[i] !== 0) ghostUncleared++;
+      } else {
+        if (lst.flags[i] !== 0) liveDiff++;
+      }
     }
-    expect(diff).toBe(0);
+    expect(liveDiff).toBe(0);        // 正常格零损伤
+    expect(ghostUncleared).toBe(0);  // 幽灵全部净化(对齐原版读档)
   }, 600000);
 
   it('④ v4 兼容语义：缺 tileActive 段=type≠0 派生激活（旧读端行为）', () => {

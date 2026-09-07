@@ -418,6 +418,33 @@ function solidBoxOverlap(
   return false;
 }
 
+/** ★SW-BJ9 2026-09-07 全实心判定（**刻意偏离原版**的漂移门谓词，见
+ *  applyUnwedgeDrift 偏离声明）：solid 且非坡/非半砖/非平台。激活感知与碰撞本体
+ *  同族——solid 走 st.isSolid（active 位 + 致动位 + SOLID_LUT，与
+ *  Collision.SolidCollision/moveAndCollide 实际碰撞语义一致：致动器把 tile 切成
+ *  可穿态时不判实心，漂移门不会把史莱姆卡在致动态地形上；幽灵格 flags=0 同判
+ *  非实心）；isPlatform 同族激活感知。坡/半砖/平台排除 = 嵌固判定
+ *  （SolidCollision 整块盒）的常态来源，排除后原版退坡楔功能保留。与 unembedPass
+ *  顶带/中心格判据（TileCollision.ts :980/:989 同款排除族）同构。
+ *  消费者：applyUnwedgeDrift（仅 AI_001 嵌固漂移门）。 */
+function fullSolidBoxOverlap(
+  st: GameHooks['world']['store'], x: number, y: number, w: number, h: number,
+): boolean {
+  const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE);
+  const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE);
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
+      const j = st.idx(tx, ty);
+      if (st.slope[j] !== 0 || st.half[j] || st.isPlatform(tx, ty)) continue;
+      if (x + w > tx * TILE && x < tx * TILE + TILE && y + h > ty * TILE && y < ty * TILE + TILE) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
   key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
@@ -1791,6 +1818,18 @@ export class Enemy extends Entity {
    *  机制，嵌入体由该漂移每拍 1px 自行解卡，unembedPass 在漂移活跃期整段让位
    *  （坡角相移穿越案：流浪汉舌 (1825,317) s1 坡角，实录 t=188-211）。 */
   unwedgeDrift = false;
+  /** ★SW-BJ9 2026-09-07：嵌固漂移 episode 终止闩（**刻意偏离原版**——产品拍板
+   *  「避免穿墙，哪怕偏离原版」）。原版漂移（NPC.cs:62139/:62331）在「地坡高端邻
+   *  实心柱」几何下不自限：SolidCollision(:2713) 坡格整块盒令嵌固判定恒真 +
+   *  TileCollision 对已重叠体忽略(:2440) → 每拍 1px 匀速相移穿整条墙带（流浪汉舌
+   *  (1825,317) s1 坡角实录 t=188-211）。本仓漂移步应用前先测「漂移后位盒全实心
+   *  重叠」（激活感知谓词，见 fullSolidBoxOverlap）：命中 → 本拍取消 + 本闩置位
+   *  （episode 终止，防逐拍磨墙）；只与坡格重叠 → 照常漂移（原版退坡楔功能保留）。
+   *  清位锚 = 嵌固判定链断开（两漂移点 else 臂）——此后原版行为链自然继续
+   *  （跳跃机/卡墙掉头接管）。范围铁律：仅 AI_001 两处漂移应用点进入本门
+   *  （applyUnwedgeDrift 全体消费者），行走/跳跃/击退/液浮/unembed 救援等一切
+   *  其它位移路径零触碰。 */
+  unwedgeBlocked = false;
   /** 471 哥布林术士 defDefense 基线快照（NPC.cs:56891/:56920 飞行态 ×1.1 / 地面复原） */
   warlockDefBase?: number;
   /** 417 SolarSroller 态 6 伤害/防御覆写基线（原版 defDamage/defDefense = ScaleStats
@@ -3270,6 +3309,43 @@ export class Enemy extends Entity {
       : expert + (master - expert) * (t - 0.5) * 2);
   }
 
+  /** ★SW-BJ9 2026-09-07 **刻意偏离原版**（deliberate deviation，产品拍板：避免穿墙，
+   *  哪怕偏离原版）——嵌固回退漂移步的「全程不进全实心」门 + episode 终止闩。
+   *  原版行为（NPC.cs:62139 贴地支/:62331 滞空支 `position.X -= velocity.X + direction`，
+   *  门 collideY + oldVelocity.Y≠0 + SolidCollision）在「地坡高端邻实心柱」几何下
+   *  不自限：SolidCollision(:2713) 对坡格取整块盒 → 嵌固判定恒真，且 TileCollision
+   *  对已重叠体忽略(:2440) → 每拍 1px 匀速相移穿越整条墙带（流浪汉舌 (1825,317)
+   *  s1 坡角实录 t=188-211，绿史莱姆整只穿到井侧=原版本体行为）。本仓偏离：
+   *  · 漂移 X 位移应用前先测【漂移后】位盒的全实心重叠（fullSolidBoxOverlap——
+   *    solid 且非坡/非半砖/非平台，激活感知谓词）：
+   *    - 命中全实心 → 本拍漂移取消（X 位移归零）+ episode 终止（unwedgeBlocked
+   *      置位，防逐拍磨墙）；unwedgeDrift 旗【不】置位 → unembedPass 不再让位，
+   *      真活埋照旧走既有救援通道；
+   *    - 只与坡格重叠（嵌固判定的常态来源）→ 照常漂移，原版退坡楔功能保留。
+   *  · episode 终止后不再漂移（unwedgeBlocked 消费于方法头），嵌固判定链断开时由
+   *    两调用点的 else 臂清位——此后原版行为链自然继续（跳跃机/卡墙掉头接管）。
+   *  偏离范围铁律：仅 AI_001 两处漂移应用点（slimeAI 贴地支 ：61932 通道/滞空支
+   *  :62124 通道）进入本门；右移漂移（direction 反向）同门（门测漂移后位盒，与
+   *  方向无关）。行走/跳跃/击退/液浮/unembed/StepUp/StepDown 等一切其它位移路径
+   *  零触碰。测试接缝：反证测试经原型补丁关断 unwedgeGateBlocksFullSolid 即复现
+   *  原版穿越（决定性翻转实验）。 */
+  private applyUnwedgeDrift(st: GameHooks['world']['store'], dir: number): void {
+    if (this.unwedgeBlocked) return;                       // episode 已终止：不再漂移
+    const postX = this.x - (this.vx + dir);                // 原版 position.X -= velocity.X + direction
+    if (this.unwedgeGateBlocksFullSolid(st, postX)) {
+      this.unwedgeBlocked = true;                          // 本拍取消 + episode 终止（SW-BJ9）
+      return;
+    }
+    this.x = postX;
+    this.unwedgeDrift = true;                              // SW-BJ6：漂移活跃旗（unembedPass 让位）
+  }
+
+  /** 全实心门判定（SW-BJ9，偏离声明见 applyUnwedgeDrift）。独立方法 = 反证测试的
+   *  唯一关断接缝：原型补丁置恒 false → 门关闭 → 同夹具复现原版穿越。 */
+  private unwedgeGateBlocksFullSolid(st: GameHooks['world']['store'], postDriftX: number): boolean {
+    return fullSolidBoxOverlap(st, postDriftX, this.y, this.w, this.h);
+  }
+
   private slimeAI(game: GameHooks, player: Player | null) {
     // ---- 体内物品掷骰（NPC.cs:60750 主掷段，只掷一次）。原版位于 ai[0]==-999 早退
     //      【之前】（:61436 才 return）——风气球挂载史莱姆（出生即 ai0=-999）由此
@@ -3603,10 +3679,14 @@ export class Enemy extends Entity {
       // vx+direction 脱困（vx 通常已被碰撞清零 → 净退 1px/t 持续推出）
       // ★SW-BJ6 2026-09-07：置漂移活跃旗——unembedPass 本拍让位（vanilla 无
       //  unembed,该漂移即原版唯一嵌入自救通道）
+      // ★SW-BJ9 2026-09-07：漂移步改经 applyUnwedgeDrift——「全程不进全实心」门 +
+      //  episode 终止闩（刻意偏离原版：原版此通道会匀速相移穿墙,偏离声明在方法注）;
+      //  嵌固判定链断开 → else 臂清 episode 闩,原版行为链自然继续
       if (this.collideY && this.preCollideVy !== 0
         && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
-        this.x -= this.vx + dir;
-        this.unwedgeDrift = true;
+        this.applyUnwedgeDrift(st, dir);
+      } else if (this.unwedgeBlocked) {
+        this.unwedgeBlocked = false;         // SW-BJ9：episode 锚清位（已离楔）
       }
       // 落地卡墙检测（1457 :62141-62146）：ai[3]==position.X 精确相等 = 白跳 →
       // 反转 + ai[2]=200（R6-B 2-5：曾用 |Δ|<1 容差）
@@ -3705,10 +3785,13 @@ export class Enemy extends Entity {
       }
       // 落地嵌固回退（G5，:62124-62127）——grounded 分支 :61932 同款（空中态版）
       // ★SW-BJ6 2026-09-07：置漂移活跃旗（同 grounded 支——vanilla :62331 滞空支）
+      // ★SW-BJ9 2026-09-07：同贴地支改经 applyUnwedgeDrift（全实心门+episode 闩，
+      //  刻意偏离原版,偏离声明在方法注）+ else 臂清 episode 闩
       if (this.collideY && this.preCollideVy !== 0
         && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
-        this.x -= this.vx + dir;
-        this.unwedgeDrift = true;
+        this.applyUnwedgeDrift(st, dir);
+      } else if (this.unwedgeBlocked) {
+        this.unwedgeBlocked = false;         // SW-BJ9：episode 锚清位（已离楔）
       }
       if ((dir === -1 && this.vx < 0.01) || (dir === 1 && this.vx > -0.01)) {
         this.vx += 0.2 * dir;                                     // :62130-62133

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  TILE_PARTICLE_RULES, ruleMatches, DUST_COLOR,
+  TILE_PARTICLE_RULES, ruleMatches, DUST_COLOR, SHINE_TABLE,
   type TileParticleRule,
 } from '../src/render/TileParticles';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';

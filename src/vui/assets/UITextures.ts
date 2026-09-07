@@ -27,4 +27,13 @@ export const UITextures = {
     if (!atlas) return Promise.resolve();
     return atlas.ensureUiBatch(names);
   },
+
+  /** 清单存在性查询(零请求零副作用;uiFileExists 直通)。SW-BJ11 2026-09-07:
+   *  纸娃娃变体通道就绪门用——清单含变体表 ⇒ 必须等变体表本身;清单无
+   *  (原版设计缺省,如 Player_4_0/1/2、1_3/5/7)⇒ 才允许回退 Player_0_*。
+   *  atlas 未挂时保守返回 false(调用方回退路径与旧行为一致) */
+  has(name: string): boolean {
+    if (!atlas) return false;
+    return atlas.uiFileExists(name.endsWith('.png') ? name : `${name}.png`);
+  },
 };

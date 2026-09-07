@@ -40,8 +40,8 @@ function readVarint(b: Uint8Array, pos: { p: number }): number {
     shift += 7;
   }
 }
-function unrlePairs(b64: string | undefined, n: number, fallback = 0): Uint8Array {
-  const out = new Uint8Array(n);
+function unrlePairs(b64: string | undefined, n: number, fallback = 0, wide = false): Uint16Array | Uint8Array {
+  const out = wide ? new Uint16Array(n) : new Uint8Array(n);
   if (!b64) { if (fallback) out.fill(fallback); return out; }
   try {
     const b = b64ToBytes(b64);
@@ -98,7 +98,7 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
   const tRaw = unrleTiles(save.tiles, n);
   const t = { type: new Uint16Array(n), frameX: tRaw.frameX, frameY: tRaw.frameY };
   for (let i = 0; i < n; i++) t.type[i] = tRaw.type[i] === 0 ? 0 : (TILE_INTERNAL_OF_STABLE[tRaw.type[i]] ?? 0);
-  const walls = unrlePairs(save.walls, n);
+  const walls = unrlePairs(save.walls, n, 0, true) as Uint16Array;   // ★P1-4:墙 id 0-366,曾 Uint8 截断(Echo 墙 300→44)
   const liquid = unrlePairs(save.liquid, n);
   const liquidType = unrlePairs(save.liquidType, n);
   const wire = unrlePairs(save.wire, n);
@@ -136,12 +136,13 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       const wl = paintWall[i];
       let b = 0, b2 = 0, b3 = 0, b4 = 0;
       const payload: number[] = [];
-      // ★幽灵格=原版致动虚化(2026-09-07 三修):v5「幽灵保域」(inactive+type≠0,
-      //  一个世界实测可达 163 万格)在 wld 的 1:1 表达=原版致动器虚化——active 位
-      //  +type 照写,再加 inActive 虚化位(WF:1533 b3|=4)。曾「转正为活格」→
-      //  导入后幽灵全部显形(用户实报「漫天方块」——幽灵在游戏里不可见,转正后
-      //  被渲染成实体)。虚化语义原版/本仓渲染碰撞一致(不可见不实体)。
-      const writeType = type !== 0;
+      // ★幽灵格丢弃(2026-09-07 四修,语义以用户定谳为准):本仓幽灵(inactive+
+      //  type≠0)是「完全不可见、不碰撞」的私有状态——不是原版致动器(虚化位
+      //  在本仓渲染=半透明,转正=实体,两者都会显形,用户两轮实报)。wld 流无法
+      //  表达「不可见的物块」,而丢弃后视觉零差异(幽灵本来就画不出来)——导出
+      //  时跳过。parse 侧反向链保留:原版致动虚化格(active+inActive)导入时
+      //  经 tileActive 差分还原为本仓幽灵,语义对齐。
+      const writeType = isActive && type !== 0;
       if (writeType) {
         // ★写流域=原版 sheet 域(WF:1444 tile.type 直写):t.type 是 internal
         //  (encodeTiles 头 stable→internal 反映射产物),须转回 sheet;曾直写
@@ -155,15 +156,29 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
           payload.push(t.frameX[i] & 0xff, (t.frameX[i] >> 8) & 0xff, t.frameY[i] & 0xff, (t.frameY[i] >> 8) & 0xff);
         }
         if (paint[i] !== 0) { b3 |= 8; payload.push(paint[i]); }
-        // ★幽灵(非活)格 → 原版致动虚化位(WF:1533 inActive→b3|=4):type 保留、
-        //  不可见不实体——parse 侧经 wireArr bit5 → tileActive 差分 v=1 还原 flags=0
-        if (!isActive) b3 |= 4;
+        // ★致动虚化位(WF:1533 inActive→b3|=4):源世界的真实致动格
+        //  (flags=1+wire bit5,v5 差分 v=0)位随档保真——曾漏写=致动格实体化
+        //  (用户实报隐藏层消失)。幽灵格不进本块(writeType 门,丢弃方案)。
+        //  ★P1-5 勘误:上次注释清理误删本行——无此行时 wld 流无 inActive 位,
+        //  parser 无法重建 wire bit5 → 致动格再导入恒实体(致动器机制失效)
+        if (wire[i] & 0x20) b3 |= 4;
       }
       if (wall !== 0) {
         b |= 4;
         payload.push(wall & 0xff);
         if (wl !== 0) { b3 |= 0x10; payload.push(wl); }
       }
+      // ★P2-6 补:header4 涂层四位(WF:1546-1560 invisibleBlock|2/invisibleWall|4/
+      //  fullbrightBlock|8/fullbrightWall|0x10 = coat 位域同构)——曾死存储(Echo
+      //  涂层整域不导出,与 Echo 墙 id 截断叠加=Echo 墙标配全灭)
+      if (c & 30) b4 = c & 30;
+      // ★P2-7 补:致动器安装位(WF:1528-1530 actuator→b3|=2;内部 wire bit4)——
+      //  曾漏写:导入后信号无法翻转这些格(Wiring 消费 bit4)
+      if (wire[i] & 0x10) b3 |= 2;
+      // ★P1-4+红队复核:墙高字节(WF:1540-1545 wall>255→payload 追加+b3|=0x40;
+      //  位置=liquid payload 之后(原版 num3 流水尾,读侧 cs:2663-2665 同位)——
+      //  曾写在 liquid 前=与原版流位互换(Echo 墙水下场景交叉错,不失步但错值)
+      if (wall > 255) { payload.push((wall >> 8) & 0xff); b3 |= 0x40; }
       if (liq !== 0) {
         // ★液体类型位 1:1 原版(WF:1500-1513,2026-09-07 勘误:旧写整体错一位——
         //  内部 1 水 误写 0x10=岩浆位、2 岩浆→0x18=蜂蜜、3 蜂蜜→微光,回环
@@ -180,7 +195,7 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       if (wire[i] & 4) b2 |= 8;
       if (wire[i] & 8) b3 |= 0x20;   // ★黄线(wire4,WF:1534 b3|=0x20;parser header3&0x20→内部 bit3)——曾漏写
       b2 |= half ? 16 : (slope !== 0 ? (slope + 1) << 4 : 0);
-      // 扩展头链(b4→b3→b2 前插;actuator/inActive/wire4 本仓无态,写 0——登记偏差)
+      // 扩展头链(b4→b3→b2 前插;actuator/inActive/wire4 均已按位导出,见上)
       if (b4 !== 0) { b3 |= 1; payload.unshift(b4); }
       if (b3 !== 0) { b2 |= 1; payload.unshift(b3); }
       if (b2 !== 0) { b |= 1; payload.unshift(b2); }
@@ -230,7 +245,10 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   // [flags 1] GameMode..windSpeedTarget
   for (let i = 0; i <= idx('windSpeedTarget'); i++) put(HEADER_FLAGS[i]);
   // [特例] anglerWhoFinishedToday list(i32 n+n×str)
-  const angler = (save as { wldSnapAngler?: string[] }).wldSnapAngler ?? [];
+  // ★P2-10:SW 原生档数据在 save.angler.whoFinishedToday(曾读不存在的 wldSnapAngler
+  //  键恒空=当日交付名单丢失可重复领奖);wldSnapAngler(原版导入快照)优先兼容
+  const snapAngler = (save as { wldSnapAngler?: string[] }).wldSnapAngler;
+  const angler = snapAngler ?? (save as { angler?: { whoFinishedToday?: string[] } }).angler?.whoFinishedToday ?? [];
   w.i32(angler.length);
   for (const a of angler) w.str(a);
   // [flags 2] savedAngler.._tempCultistDelay
@@ -247,6 +265,10 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   const iFFDawn = idx('fastForwardTimeToDawn');
   const iPartyCooldown = idx('_tempPartyCooldown');
   const iSand = idx('_tempSandstormHappening');
+  // ★P1-3 勘误(2026-09-07 红队):TreeTops 注入点=lantern 四件套之后(WF:1391,
+  //  _tempLanternNight* 键位),曾错挂在 sandstorm 键 → 导出头 TreeTops 块恰落
+  //  parse 侧 sandstormHappening 槽,导出档连自家解析器都越界(29 字节错位)
+  const iLantern = idx('_tempLanternNightNextNightIsGenuine');
   const iTeam = idx('teamBasedSpawnsSeed');
   const iDual = idx('dualDungeonsSeed');
   for (let i = iFFDawn; i <= iTeam; i++) {
@@ -255,9 +277,9 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
       // TempPartyCelebratingNPCs list(i32 n+n×i32;本仓不建模写空)——原版 :1381-1384
       w.i32(0);
     }
-    if (i === iSand) {
+    if (i === iLantern) {
       // ★TreeTops.Save(WorldGen.TreeTopsInfo :40:恒 13 项;Load :任 n≤13 逐项读)——
-      // 原版位置=lantern 四件套之后、force ForToday 之前(WF:1383 前),漏写=后续全错位
+      // 原版位置=lantern 四件套之后、force ForToday 之前(WF:1391)
       const tt = save.header.treeTops ?? [];
       w.i32(13);
       for (let k = 0; k < 13; k++) w.i32(tt[k] ?? 0);
@@ -282,7 +304,7 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
     if (teType === 0 || f.kind === 'kite_anchor' || f.kind === 'critter_anchor') { w.byte(9).i32(0).i16(f.x).i16(f.y); continue; }   // 9/10 桩=无 ExtraData(写 type 9 占位)
     w.byte(teType).i32(0).i16(f.x).i16(f.y);
     const slot = (s: { id: number; stack: number; prefix?: number } | null | undefined) =>
-      w.i16(s ? s.id : 0).byte(s?.prefix ?? 0).i16(s ? s.stack ?? 0 : 0);   // 稳定 id=原版 netId(★SW-BO1 勘误)
+      w.i16(s ? s.id : 0).byte(s?.prefix ?? 0).i16(s ? Math.max(1, s.stack ?? 1) : 0);   // 稳定 id=原版 netId(★SW-BO1 勘误);★P3:stack 钳 ≥1(原版 vanilla 钳,stack=0 曾被 parse 按空槽丢)
     if (teType === 1 || teType === 4 || teType === 6 || teType === 8) { slot(f.slots?.[0]); }
     else if (teType === 3) {
       // 模特（TEDisplayDoll.WriteExtraData TEDisplayDoll.cs:166-217 v325 逐字）：
@@ -368,7 +390,7 @@ export function exportWld(save: SaveData): Uint8Array {
       if (!it || (it.id === 0)) { w.i16(0); continue; }
       const netId = it.id;   // 稳定 id=原版 netId（★SW-BO1 勘误,见 netIdOfStable 删除注）
       if (!netId) { w.i16(0); continue; }
-      w.i16(it.stack ?? 1).i32(netId).byte(0);   // chests 元素无 prefix 形
+      w.i16(Math.max(1, it.stack ?? 1)).i32(netId).byte(0);   // chests 元素无 prefix 形;★P3:stack 钳 ≥1(红队半裁项)
     }
   }
   mark();                                           // [2] chests 尾
@@ -407,6 +429,9 @@ export function exportWld(save: SaveData): Uint8Array {
   // footer(WF:1759):true+name+worldId
   w.bool(true).str(save.header.name || 'World').i32(12345);
   mark();                                           // [10] footer 尾
+  // (2026-09-07 终版:幽灵格净化方案落地——存档在读档/生成边界已无幽灵,
+  //  actDiff 恒空,无需任何私有附加段。历史:本日曾三易其稿(丢弃/转正/虚化/
+  //  SBWGH 附加段),最终以「存读边界净化+inActive 位自然随档」对齐原版定稿)
   // SaveHeaderPointers(WF:1208):pos0 写 325,pos+20 后 short 11+11×i32
   const bytes = w.build();
   const dv = new DataView(bytes.buffer);

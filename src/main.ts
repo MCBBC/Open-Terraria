@@ -397,7 +397,7 @@ window.addEventListener('keydown', (e) => {
   //      :982-987 边沿门（死亡/幽灵不可开,再按可关;截图锁定中由
   //      toggleCamera 内 CameraLock 门自拒）。input 直连 = 相机界面需要
   //      mouseHeld/rightDown 电平（render 参数无右键面）;首次按下时绑一次。
-  //      ★Shift+F4 = 迷雾消除（下方 case 'F4',首用确认门）,不触发相机模式 ----
+  //      ★Shift+F4 = 迷雾消除/恢复切换（下方 case 'F4',首用确认门）,不触发相机模式 ----
   if (!e.shiftKey && isBound('ToggleCameraMode', e.code) && initCameraModeWiring(game)) {
     e.preventDefault();
     game.renderer.captureMode.toggleRequest(game.player, game.world);
@@ -425,14 +425,14 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      // Shift+F4 = 全图迷雾消除（首用确认门）;非 Shift F4 = 相机模式（更早分支已 return）
+      // Shift+F4 = 全图迷雾消除/恢复（切换式：再按恢复到消除前的探索快照——
+      // World.toggleFullReveal 深拷贝位图快照+版本 bump 整幅重建；首用确认门;
+      // 非 Shift F4 = 相机模式（更早分支已 return））
       if (e.shiftKey) {
         e.preventDefault();
-        showFeatureGate('fog', '全图迷雾消除', () => {
-          game.world.explored.fill(1);
-          game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
-          game.world.exploredVersion++; // 使迷雾缓存失效重建
-          ui.toast('已消除全图迷雾');
+        showFeatureGate('fog', '全图迷雾消除（再按可恢复）', () => {
+          const revealed = game.world.toggleFullReveal();
+          ui.toast(revealed ? '已消除全图迷雾（再按 Shift+F4 恢复）' : '已恢复迷雾快照');
         });
       }
       break;

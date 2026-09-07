@@ -40,7 +40,7 @@ const importBtn = await page.$('[data-act="import"]');
 if (importBtn) {
   await importBtn.click(); await new Promise((r) => setTimeout(r, 600));
   const fin = await page.$('.sw-vsel input[type=file]');
-  if (fin) { await fin.uploadFile('/Users/vinlic/Downloads/天真的钴最高点.wld'); await new Promise((r) => setTimeout(r, 12000)); }
+  if (fin) { await fin.uploadFile('/Users/vinlic/Downloads/粗暴的椰子地段.wld'); await new Promise((r) => setTimeout(r, 12000)); }
 }
 log('imported');
 const items = await page.$$('.sw-vsel .sw-vitem');
@@ -64,6 +64,21 @@ for (let i = 0; i < 100; i++) {
     const inGame = await page.evaluate(() => !!globalThis.__swGame);
     if (inGame) {
       log('IN-GAME');
+      // bank 罐链检查:v_29_piggy_bank 的格数/internal/flags + player.banks
+      try {
+        const bank = await page.evaluate(() => {
+          const g = globalThis.__swGame;
+          const st = g.world.store;
+          const piggy = [];
+          for (let i = 0; i < st.type.length; i++) {
+            const d = (globalThis.__swTileDefs ?? [])[st.type[i]];
+            if (d && d.key === 'v_29_piggy_bank') piggy.push({ i, flags: st.flags[i], fx: st.frameX[i] });
+          }
+          const banks = (g.player.banks ?? []).map((b) => (b ?? []).filter(Boolean).length);
+          return { piggyCount: piggy.length, piggySample: piggy.slice(0, 4), banks, charId: localStorage.getItem('sbw.lastCharId') };
+        });
+        log('BANK ' + JSON.stringify(bank));
+      } catch (e) { log('bank-err ' + e.message); }
       await new Promise((r2) => setTimeout(r2, 4000));
       // dump 玩家周围 ±120 格的非零格(按列聚合,找垂直连续段=截图金色链)
       try {

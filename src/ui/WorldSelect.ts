@@ -15,7 +15,7 @@ import { WorldStore, type WorldMeta } from '../save/WorldStore';
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
 import { parseSeed } from '../world/gen/SeedEasterEggs';
-import { exportWld } from '../wld/WldExport';
+import { saveClient } from '../workers/SaveClient';
 
 export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
@@ -385,7 +385,9 @@ export class WorldSelectPanel {
         try {
           const raw = await this.store.load(meta);
           if (!raw) throw new Error('存档缺失');
-          const bytes = exportWld(JSON.parse(raw) as import('../save/serialize').SaveData);
+          // ★worker 化(2026-09-07 用户报「导出卡一下主线程」):JSON.parse+全图
+          //  编码走 save.worker,产物 ArrayBuffer transfer 零拷贝;内部含主线程回退
+          const bytes = await saveClient.exportWld(raw);
           const safe = (meta.name || `world${meta.id}`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
           const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
           const aEl = document.createElement('a');

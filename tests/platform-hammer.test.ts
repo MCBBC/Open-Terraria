@@ -162,6 +162,9 @@ function mkHammerGame(w = 40, h = 20) {
   g.hammerPoundRelease = true;
   g.trackTile = 0;
   g.mining = null;
+  // ★SW-BJ10 2026-09-07：锤整形写位后走 squareTileFramePlatform → markDirtyArea 3×3
+  // （运行时平台帧重算新链）——stub 与 sw-bj3/sw-be1 shell 同式
+  g.chunks = { markDirtyArea: () => {} };
   g.sfx = { play: () => {}, playWavFile: () => true };
   g.playSfxFile = () => true;
   g.spawnParticles = () => {};

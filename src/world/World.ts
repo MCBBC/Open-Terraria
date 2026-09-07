@@ -391,6 +391,31 @@ export class World {
     if (changed) this.exploredVersion++;
   }
 
+  /** SW-BJ15 2026-09-07：全图迷雾消除（Shift+F4）的恢复快照。null=当前处于正常探索态。
+   *  深拷贝 explored 位图（小世界 ~5MB / 大世界 ~20MB，仅在"全开"态驻留，
+   *  恢复即释放）；会话态，不入存档/联机包（读档后为 null=无快照可恢复）。
+   *  语义注：全开期间 markExplored 被全 1 短路（changed 恒 false），玩家此刻
+   *  走过的区域不进快照——恢复后回到雾中，仅玩家当前邻域随后续移动重新点亮。 */
+  exploredRevealSnapshot: Uint8Array | null = null;
+
+  /** 全图迷雾消除/恢复（切换式，Shift+F4 再按恢复）：消除→快照+全图置 1；
+   *  恢复→写回快照+释放。@returns true=本次执行了消除（新建快照），false=执行了恢复 */
+  toggleFullReveal(): boolean {
+    if (!this.explored) return false;
+    if (!this.exploredRevealSnapshot) {
+      this.exploredRevealSnapshot = this.explored.slice();
+      this.explored.fill(1);
+    } else {
+      this.explored.set(this.exploredRevealSnapshot);
+      this.exploredRevealSnapshot = null;
+    }
+    // 消除/恢复都是全图变化，无局部脏盒可言 → 置空让渲染端整幅重建
+    // （ensureFogData：dirty=null + 版本跳跃 → 分带整幅重扫，与旧 F4 消除路径同款）
+    this.exploredDirty = null;
+    this.exploredVersion++;
+    return this.exploredRevealSnapshot !== null;
+  }
+
   constructor(w: number, h: number, seed: number, name = '新世界', skipStore = false) {
     // skipStore(读档 fromPacket 专用):调用方立即以转移 buffer 版 TileStore+explored
     // 注入——跳过默认分配免 15B/tile 丢弃式浪费(75-173MB);其余字段照常初始化

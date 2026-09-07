@@ -5,7 +5,7 @@
 // 跳过档（无行为可断言，源码级备案）：5395 屎（PooFly 粒子编排，纯视觉无管线）/
 // 1125 蜂蜜（仅 _givenName，本仓无敌怪名显示通道）/ 364 族金属矿（已由
 // ground-ai-parity-fixes S9 覆盖）/ 语音变声物品尾档（天空盒世界不可达）。
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
@@ -82,6 +82,26 @@ function spawn(h: ReturnType<typeof makeHooks>, id: number, tx: number, ty: numb
 
 afterEach(() => { vi.restoreAllMocks(); });
 
+// ★SW-BJ11 2026-09-07 电池族 RNG 播种(BJ9 登记 flake 治理):本文件用例依赖
+// Math.random 调用【序列】映射(mockReturnValue 常量 → Next(60)==7 等),跨文件
+// 模块级惰性初始化(战利品表/贴表构建等)消费随机数的次数随首载顺序漂移,会把
+// 在测掷点的映射整体错位=偶发炸红。治理=beforeEach 全域固定种子 PRNG(mulberry32),
+// 文件内每次用例从同一起点出发:构造期(settle/Enemy.fromVanilla 等)消费的掷流
+// 亦被钉死,在测掷点映射不再受跨文件顺序影响;用例内 mockReturnValue 常量桩
+// 照旧覆盖本种子(后 spyOn 者胜),断言值零改动。验收:连跑 5 次全绿。
+function seededRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+beforeEach(() => {
+  vi.spyOn(Math, 'random').mockImplementation(seededRandom(0x5111D));
+});
+
 /** 落到地板上（vy 归零、onGround 置位）。★出生 vy=0 也至少跑 5 tick */
 function settle(h: ReturnType<typeof makeHooks>, e: Enemy, n = 300): void {
   for (let i = 0; i < n; i++) {
@@ -93,6 +113,11 @@ function settle(h: ReturnType<typeof makeHooks>, e: Enemy, n = 300): void {
 /** 已 settle 的蓝史莱姆（type 1，携物梯宿主）+ 指定 ai[1] */
 function carrier(h: ReturnType<typeof makeHooks>, ai1: number, tx = 40): Enemy {
   const e = spawn(h, 1, tx, FLOOR - 2);
+  e.ai1 = -1;   // ★SW-BJ9 批夹具卫生（预存 flake 根因,与本批语义无关）:抑制 settle 期
+                //  slimeRollContainedItem 掷流（ai1!==0 早退）——掷中 9(木,防+16)/29/3609
+                //  等档会在 settle 内应用梯档并快照 slimeItemBase,使 def0(读数)与被测
+                //  档的 base 不一致,相对断言偶发炸红（实测 22/6、32/16 精确吻合）。
+                //  carrier 语义=「指定 ai1 的净梯宿主」,掷流本就不该参与。
   settle(h, e);
   e.ai1 = ai1;
   e.vx = 0;
@@ -444,18 +469,47 @@ describe('G5 贴角挪移 / 落地嵌固回退', () => {
     expect(nudged - control).toBeCloseTo(-1.4, 5);
   });
 
-  it('落地嵌固回退：贴地 + collideY + oldVelocity.Y≠0 + 位置嵌实心 → x −= vx+direction（:61932-61935）', () => {
-    const w = makeWorld();
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = carrier(h, 0);
-    const st = w.store;
-    // 在史莱姆头顶行嵌一块实心（SolidCollision 命中）
-    const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.y / TILE);
-    st.setTile(tx, ty, 1);
-    e.collideY = true;
-    e.preCollideVy = 0.4;              // 贴地态碰撞前 vy（重力步进值）
-    const x0 = e.x;
-    slimeAI(e, h);
-    expect(e.x).toBeCloseTo(x0 - 1, 5);   // vx=0（贴地摩擦清零）→ 净退 direction×1
+  // ★SW-BJ9 2026-09-07 重钉（**刻意偏离原版**——产品拍板「避免穿墙,哪怕偏离原版」,
+  //  偏离声明正本在 Enemy.applyUnwedgeDrift 方法注）：原版嵌固回退
+  //  （:61932-61935 `position.X -= velocity.X + direction`）对「漂移一步不能脱出
+  //  全实心」的深嵌体每拍 1px 逐拍磨出 = SW-BJ6 定谳的坡角相移穿墙通道本体；
+  //  本仓漂移步应用前测「漂移后位盒全实心重叠」（激活感知谓词）——命中即本拍
+  //  取消 + episode 闩（unwedgeBlocked）置位，真活埋交由 unembedPass 既有救援；
+  //  贴缘薄楔（一步即完全脱出全实心）门开，原版漂移照常（退楔功能保留）。
+  it('落地嵌固回退（SW-BJ9 重钉）：深嵌一步不能脱出 → 本拍漂移取消+episode 闩;贴缘薄楔一步脱出 → 原版漂移照常', () => {
+    {
+      // —— 深嵌形态：头顶行整格嵌入，漂移 1px 后仍与全实心重叠 → 门关（刻意偏离：
+      //    原版此拍 x0-1,逐拍磨出=穿墙通道）
+      const w = makeWorld();
+      const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+      const e = carrier(h, 0);
+      const st = w.store;
+      const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.y / TILE);
+      st.setTile(tx, ty, 1);
+      e.collideY = true;
+      e.preCollideVy = 0.4;            // 贴地态碰撞前 vy（重力步进值）
+      const x0 = e.x;
+      slimeAI(e, h);
+      expect(e.x).toBe(x0);            // 本拍漂移取消（原版 x0-1,SW-BJ9 刻意偏离）
+      expect((e as unknown as { unwedgeBlocked: boolean }).unwedgeBlocked).toBe(true);
+    }
+    {
+      // —— 贴缘薄楔形态：右缘 0.5px 嵌格，向左漂移 1px 即完全脱出全实心 → 门开,
+      //    原版漂移步照常（退楔功能不被门误杀）
+      const w = makeWorld();
+      const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+      const e = carrier(h, 0);
+      const st = w.store;
+      const ty = Math.floor(e.y / TILE);
+      e.x = 41 * TILE - e.w + 0.5;     // 右缘越格界 0.5px（一步漂移即净脱出）
+      e.facing = 1;
+      const txR = 41;                  // [41*16, 41*16+16) 与右缘 0.5px 相交
+      st.setTile(txR, ty, 1);
+      e.collideY = true;
+      e.preCollideVy = 0.4;
+      const x0 = e.x;
+      slimeAI(e, h);
+      expect(e.x).toBeCloseTo(x0 - 1, 5);  // vx=0（贴地摩擦清零）→ 净退 direction×1
+    }
   });
 });

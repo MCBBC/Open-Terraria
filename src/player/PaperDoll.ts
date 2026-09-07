@@ -35,12 +35,35 @@ const VERTICAL_CHANNELS: Array<{ sheet: number; color: keyof Appearance | 'white
  *   0→(2,0) 1→(3,0) 2→(4,0) 3→(5,0) 4→(6,0) 5→(2,1) 6→(3,1)
  *   7-10→(4,1) 11-13→(3,1) 14→(5,1) 15,16→(6,1) 17→(5,1) 18,19→(3,1)
  * 后臂 = 前臂 Y+2；躯干 (0,0)（行5=跳跃 (1,0)）；后肩 (1,1)；前肩 (0,1)。
+ * ★SW-BJ11 2026-09-07 补遗:复合组件(躯干/双臂/双肩)另随 bodyFrame 行吃
+ * OffsetsPlayerHeadgear 行偏移(Main.cs:530,行7-9/14-16 → −2px,行走 bob)——
+ * 头/眼/发/腿不吃此表,见 COMPOSITE_BOB_ROWS。
  */
 const ARM_FRAME: ReadonlyArray<readonly [number, number]> = [
   [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [2, 1], [3, 1],
   [4, 1], [4, 1], [4, 1], [4, 1], [3, 1], [3, 1], [3, 1],
   [5, 1], [6, 1], [6, 1], [5, 1], [3, 1], [3, 1],
 ];
+
+/** 复合衣着通道集中【身甲整替后不再绘制】的表(4=底衫/5=臂肤B/6=衬衫/7=臂肤A/
+ *  8=底衫臂/13=衬衫臂;3=皮肤躯干仍画在甲下,10=皮肤腿属腿侧)——SW-BJ11 2026-09-07 */
+const BODY_UNDER_ARMOR_PRUNE = new Set([4, 5, 6, 7, 8, 13]);
+
+/** ShouldOverrideLegs_CheckPants(PlayerDrawLayers.cs:1219-1240):这些腿甲(袍/裙族,
+ *  摆长及地)整替皮肤腿;白名单外的腿甲下皮肤腿照画(12_Skin_Composite :1289
+ *  IsBottomOverridden 门)。shoe 配饰==15 的覆写面未入(需配饰槽入参,登记) */
+const LEGS_HIDE_SKIN = new Set([55, 63, 67, 106, 138, 140, 143, 217, 222, 226, 228]);
+
+/** hidesTopSkin(PlayerDrawSet.cs:1789):这些身甲不画甲下皮肤躯干(21/22=狼人/人鱼
+ *  全形态强制,82/83/93=无上装族) */
+const HIDES_TOP_SKIN_BODIES = new Set([82, 83, 93, 21, 22]);
+
+/** OffsetsPlayerHeadgear.Y==0 的 bodyFrame 行(Main.cs:530 表:行 7-9/14-16 为 (0,0),
+ *  其余 (0,2))。复合网格组件(躯干/双臂/双肩)在这些行走行整体上移 2px(表值−2):
+ *  PlayerDrawLayers.cs:1293-1295(Skin_Composite)/:1311-1314(BackArmShirt)/
+ *  :1996-1999(TorsoComposite)/:3700-3703(ArmOverItemComposite)同一 vector。
+ *  头/眼/发/腿各层不消费此表(SW-BJ11 2026-09-07 补齐) */
+const COMPOSITE_BOB_ROWS = new Set([7, 8, 9, 14, 15, 16]);
 
 /** GetHairSettings（1456 Player.cs:16645-16760，switch(head) 精确提取）：
  *  fullHair 头盔露出完整发型 / hatHair 露出特制帽子发型(Player_HairAlt) / 其余完全隐藏 */
@@ -326,8 +349,28 @@ export function compositePaperDoll(
     const r = UITextures.get(name);
     return !!r && texReady(r.img as ImageBitmap | HTMLImageElement);
   };
+  // 甲替代面(就绪门按【实际绘制面】收窄,与下方绘制分支同口径——SW-BJ11 2026-09-07):
+  // 腿甲在位 → 裤/鞋(11/12)整替不画;皮肤腿(10)仍画在腿甲下(IsBottomOverridden 白名单
+  //   外,12_Skin_Composite :1289;坐姿 hidesBottomSkin=1 → 不画,PlayerDrawSet.cs:1244);
+  // 身甲在位 → 复合衣着(4-8/13)整替不画;皮肤躯干(3)仍画在身甲下(!hidesTopSkin,
+  //   DrawPlayer_12_Skin_Composite :1279-1286 与甲无关地先画)
+  const useLegsArmor = !!equip?.legs && (!part || part === 'legs');
+  const useBodyArmor = !!equip?.body && (!part || part === 'body');
+  const sitGate = !!opts?.sitting;
   for (const s of needSheets) {
-    if (!ready(`Player_${a.skinVariant}_${s}.png`) && !ready(`Player_0_${s}.png`)) return null;
+    if (useLegsArmor && (s === 11 || s === 12)) continue;
+    if (useLegsArmor && s === 10 && sitGate) continue;
+    if (useBodyArmor && BODY_UNDER_ARMOR_PRUNE.has(s)) continue;
+    // ★SW-BJ11 2026-09-07 变体通道就绪门 1:1 化(冷烘焙毒化根治):清单含变体表
+    //   (uiFileExists=构建期磁盘真相)→ 必须等变体表本身就绪;仅原版设计缺省通道
+    //   (4_0/1/2、1_3/5/7 等)才回退 Player_0_*。原 `!ready(v)&&!ready(0)` OR 门在
+    //   变体表在途、男表已载时放行 → sheetRect 逐表回退=混烘(女角色身体取男表:
+    //   男表 (0,2) 格为空 → 胸口/衣摆中缝缺失露背景、腿取男式加宽),且
+    //   appearanceKey 不含实际用表 → 混合烘焙被缓存定格 = 「头部与身体分离/悬空、
+    //   穿装备后更明显」用户实报(SW-BJ11)。探针实证 scripts/_swbj11-race.mjs:
+    //   冷烘 80px 差 / 强制预载+清缓存后 0 差(算法本体逐像素 1:1)。
+    const vName = `Player_${a.skinVariant}_${s}.png`;
+    if (!ready(UITextures.has(vName) ? vName : `Player_0_${s}.png`)) return null;
   }
   if (hairMode !== 'none' && (!part || part === 'head') && !ready(hairSrc)) return null;
   if (equip?.legs && (!part || part === 'legs') && !ready(`Armor_Legs_${equip.legs}.png`)) return null;
@@ -394,8 +437,15 @@ export function compositePaperDoll(
       ctx.drawImage(tinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
-  // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes；坐姿走切片表全档 :1473）
+  // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes；坐姿走切片表全档 :1473）。
+  // ★SW-BJ11 2026-09-07 甲下皮肤腿:12_Skin_Composite :1289 皮肤腿(10)只被
+  //  IsBottomOverridden(袍/裙族 LEGS_HIDE_SKIN ∪ shoe15[未入参,登记])压制,常规
+  //  腿甲下先画皮肤腿再叠甲(满罩甲不可见,镂空甲族露肤=原版本相);坐姿
+  //  hidesBottomSkin=1(PlayerDrawSet.cs:1244)不画,切片仅甲
   if (legsArmor && !noArmor && wantLegs) {
+    const showSkinUnderLegs = !sit && !LEGS_HIDE_SKIN.has(equip?.legs ?? 0);
+    const skinLegsImg = showSkinUnderLegs ? sheetRect(a.skinVariant, 10) : null;
+    const skinLegsTinted = skinLegsImg ? tint(skinLegsImg, a.skinColor) : null;
     for (let i = 0; i < nFrames; i++) {
       const row = rowsMode ? rowsMode.legs : i;
       if (sit) {
@@ -404,6 +454,7 @@ export function compositePaperDoll(
         }
         continue;
       }
+      if (skinLegsTinted) ctx.drawImage(skinLegsTinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
       ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
@@ -429,20 +480,22 @@ export function compositePaperDoll(
   for (let i = 0; i < nFrames; i++) {
     const row = rowsMode ? rowsMode.body : i;    // 复合网格属 body 件（bodyFrame 行）
     if (!wantBody) break;                        // part 拆分：复合网格只属 body 件
-    if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
-    if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
+    // ★SW-BJ11 2026-09-07 行走 bob 行(OffsetsPlayerHeadgear.Y==0 行={7,8,9,14,15,16},
+    //  Main.cs:530)复合组件整体 −2px(表值−2;四层出处见 COMPOSITE_BOB_ROWS 注)
+    const hgY = COMPOSITE_BOB_ROWS.has(row) ? -2 : 0;
     const drawTinted = (img: ImageBitmap | HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }, rot = 0) => {
       if (rot === 0) {
         // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
         ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-          0, i * FRAME_H, FRAME_W, FRAME_H);
+          0, i * FRAME_H + hgY, FRAME_W, FRAME_H);
         return;
       }
-      // 帧内绕肩轴旋转（源格左上仍对齐帧锚点，pivot 处于格内 (26,30)）
+      // 帧内绕肩轴旋转（源格左上仍对齐帧锚点，pivot 处于格内 (26,30)；bob 行随
+      //  position 整体 −2 而 origin(pivot) 相对贴图不变 → 平移量补 hgY）
       ctx.save();
-      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1]);
+      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1] + hgY);
       ctx.rotate(rot);
       ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
         -PET_ARM_PIVOT[0], -PET_ARM_PIVOT[1], FRAME_W, FRAME_H);
@@ -451,17 +504,36 @@ export function compositePaperDoll(
     const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number, rot = 0) => {
       if (rot === 0) {
         ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-          0, i * FRAME_H, FRAME_W, FRAME_H);
+          0, i * FRAME_H + hgY, FRAME_W, FRAME_H);
         return;
       }
       ctx.save();
-      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1]);
+      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1] + hgY);
       ctx.rotate(rot);
       ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
         -PET_ARM_PIVOT[0], -PET_ARM_PIVOT[1], FRAME_W, FRAME_H);
       ctx.restore();
     };
+    if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
+    if (noArmor && bodyArmorImg) {
+      // skin 层（stealth ×s'² 消费）：身甲在位时衣着/臂仍留空（甲覆盖语义），但
+      // ★SW-BJ11 2026-09-07 皮肤躯干照画（同 12_Skin_Composite !hidesTopSkin 门,
+      // 原版 12_Skin 层与甲无关)—— stealth 拆层的甲下露肤面与整烘一致
+      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0)) {
+        const torsoSkin = sheetRect(a.skinVariant, 3);
+        if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
+      }
+      continue;
+    }
     if (bodyArmorImg) {
+      // ★SW-BJ11 2026-09-07 甲下皮肤躯干:12_Skin_Composite :1279-1286 皮肤躯干(3)
+      //  在 !hidesTopSkin 时与甲无关地先画(17_TorsoComposite 甲再叠上)——女式胸甲
+      //  镂空处露肤(女胸轮廓)=原版本相(女甲态 12px 残差实证,见 _swbj11-matrix)。
+      //  hidesTopSkin={82,83,93,21,22}(21/22=狼人/人鱼全形态)不画
+      if (!HIDES_TOP_SKIN_BODIES.has(equip?.body ?? 0)) {
+        const torsoSkin = sheetRect(a.skinVariant, 3);
+        if (torsoSkin) drawTinted(torsoSkin, torsoX, dy, a.skinColor);
+      }
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
       drawArmorCell(bodyArmorImg, 1, 1 + dy);                          // 后肩
       // 后臂：petting 换列 8 拉伸档 + 旋转（甲臂同格；甲下皮肤臂层为既有

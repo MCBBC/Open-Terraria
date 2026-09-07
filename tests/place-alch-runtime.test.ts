@@ -47,6 +47,9 @@ function placeShell(w: World, heldVid: number) {
   const consumed: number[] = [];
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
   g.world = w;
+  // ★SW-BJ12 2026-09-07 重钉：BJ10 SmartCursorHelper.TileTargetDesired 门
+  // （tryPlace 头 lockedContinuity 读）缺 stub——锁存续期 null=无锁直通
+  g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.chunks = { markDirtyArea: () => {} };
   g.sfx = { play: () => {} };
   g.cb = { onInventoryChanged: () => {} };

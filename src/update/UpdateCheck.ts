@@ -41,12 +41,15 @@ export function startUpdateCheck(onNewVersion: (version: string, bundle: string)
       const r = await fetch(`/build-id.txt?t=${Date.now()}${opts.querySuffix ?? ''}`, { cache: 'no-store' });
       if (!r.ok) return;
       // 文件格式:`<数字版本> <bundle 名>`(gen-sw-twa 写入);容错纯 bundle(无版本段)
+      // ★防御(2026-09-07 用户实报「v<!DOCTYPE」):CF Pages 无 404.html 时启用 SPA
+      //  回退,未同步边缘/旧 SW 的 /build-id.txt 404 会被回退成 index.html——内容
+      //  必须形如 index-*.js 才认,否则静默忽略等下轮(探针自愈:边缘同步后自正)
       const parts = (await r.text()).trim().split(/\s+/);
       const bundle = parts[1] ?? parts[0] ?? '';
-      const version = parts[1] ? parts[0]! : '';
-      if (bundle && bundle !== cur) {
+      const version = parts[1] && /^\d+\.\d+\.\d+$/.test(parts[0] ?? '') ? parts[0]! : '';
+      if (/^index-[A-Za-z0-9_-]+\.js$/.test(bundle) && bundle !== cur) {
         stopped = true;
-        onNewVersion(version, bundle);
+        onNewVersion(version || bundle, bundle);
       }
     } catch { /* 离线/SW 拦截失败:静默,下轮再试 */ }
   };

@@ -117,6 +117,30 @@ export class TileStore {
 
   idx(x: number, y: number): number { return y * this.w + x; }
 
+  /** ★幽灵格净化(2026-09-07 方案B,全面对齐原版):worldgen 遗留的
+   *  active=false+type≠0 格(实测单世界可达 163 万)——原版存档格式对这类格
+   *  不写 type(WF:1458-1462 flag 门),「存档→读档」后它们就是空气;原版玩家
+   *  永远活在无幽灵世界里。本仓 v5 曾用差分通道跨存读保留它们(「幽灵保域」),
+   *  但每一条「裸读 type 不查 active」的运行时路径(替换掉落/矿石闪光/液体重建…)
+   *  都是潜在地雷,已累计多起——彻底对齐原版:在读档/生成边界净化(type 清零、
+   *  帧置 -1,对齐原版 LoadWorldTiles 非活格行为;wall/liquid/wire/paint 等
+   *  flag 外通道按原版语义保留)。返回净化格数。
+   *  ★净化语义与 fc98050f 战役(幽灵保域)的关系:保域服务「生成会话内」的
+   *  worldgen 对拍(x86 rig 幽灵参与 GERunner/拒绝采样判定)——对拍点在生成
+   *  函数内,本净化挂读档/进世界边界,不影响既有金标。 */
+  purgeGhostTiles(): number {
+    let purged = 0;
+    const n = this.w * this.h;
+    for (let i = 0; i < n; i++) {
+      if (!this.flags[i] && this.type[i] !== 0) {
+        this.type[i] = 0;
+        this.frameX[i] = 65535; this.frameY[i] = 65535;   // -1(原版非活格帧语义,killTile 同款)
+        purged++;
+      }
+    }
+    return purged;
+  }
+
   inBounds(x: number, y: number): boolean {
     return x >= 0 && y >= 0 && x < this.w && y < this.h;
   }

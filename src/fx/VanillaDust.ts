@@ -770,18 +770,17 @@ export class VanillaDust {
           }
           break;
         }
-        case 6: case 15: case 43: case 57:
-        case 58: case 267: case 274: case 292:
-        case 229: case 230: case 31: case 55:
-        case 76: case 217: case 240:
-          // :2379-2386 链 B 兜底（type!=304 && noGravity 才有效应——拴绳批诸型
-          // 多为 noGravity=false 不命中；267/229/230/31/76/217/240 恒命中）
-          if (d.noGravity) {
+        // :2379-2386 链 B 兜底（★2026-09-07 水花尺寸定谳,用户实报"水花非常大"——
+        //  原文此兜底=【全 type 缺省档】(链 B 各 case 未命中的尘都评估:type!=304 &&
+        //  noGravity → velocity×0.92 + fadeIn==0 → scale−0.04)。旧实现做成 15 型
+        //  白名单 case,水花尘 33/52/98-105/123/288/308 不在册=漏 −0.04/×0.92——
+        //  水滴原版净变化 +0.025−0.01−0.04=−0.025/t 约 52t 缩没,白名单版反向
+        //  +0.005/t 生长 78t=用户观感"水花非常大"）
+        default:
+          if (d.type !== 304 && d.noGravity) {
             d.vx *= 0.92; d.vy *= 0.92;
             if (d.fadeIn === 0) d.scale -= 0.04;
           }
-          break;
-        default:
           break;
       }
       // ★双轴同步（2026-09-03 VDust 双轴基建）：带 scaleX/scaleY 的尘（PrettySparkle

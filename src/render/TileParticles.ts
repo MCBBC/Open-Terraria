@@ -32,8 +32,15 @@ export interface TileParticleRule {
   life?: number;
   grav?: number;
   damp?: number;
-  /** 需要光照（矿物闪光族）：lightAt 红通道 > lightGate */
+  /** 需要光照（矿物闪光族）：lightAt max(R,G,B) > lightGate（TileDrawing.cs:7539-7543
+   *  三通道全 ≤20 不闪;2026-09-07 改三通道 max——曾只查 R 漏纯蓝/绿源） */
   lightGate?: number;
+  /** ★原版尘渲染(2026-09-07 闪光可见度批):矿物闪光族 Spawn=Dust.NewDust(...,43,
+   *  0,0,254,newColor,0.5f)+velocity×0(TileDrawing.cs:7652-7653)——设此字段时
+   *  发射器走 spawnDust 原版尘渲染(替代 1-2px 色方块近似,用户实报闪光不可见) */
+  dust?: number;
+  dustAlpha?: number;
+  dustScale?: number;
 }
 
 // ---- Dust 色表（dust id → 近似 hex；TileDrawing 各分支引用的 dust 编号）----
@@ -82,62 +89,77 @@ const HERB_RULES: Record<number, { color: string; prob: number; rise?: number; s
   // 2 Blinkroot：原版无粒子
 };
 
-/** 矿物闪光表（tileShine 全量，Main.cs:7083-7498/9562-10200 赋值 1:1；
- *  触发分支 TileDrawing.cs:7529-7646：光照>20 且 rand.Next(shine) < maxLight/30）。
- *  sheet（=tile id，矿石族表号同 id）→ shine 值 + 闪光色（:7568-7646 的 newColor 表）。
- *  概率折算：原版每帧 p = (maxLight/30)/shine（满光 8/shine）；本发射器每 3 tick 扫一次
- *  → prob = 24/shine。光照比例项（maxLight/30）需发射器传光照值，本批发射器在
- *  src/core（禁区），暂以 lightGate=20 二值门近似——登记。 */
-const SHINE_TABLE: Array<{ sheet: number; shine: number; color?: string }> = [
-  // 基础矿（Main.cs:7455-7463）
-  { sheet: 22, shine: 1150 },  // 黑檀石
-  { sheet: 6, shine: 1150 },   // 铜矿
-  { sheet: 7, shine: 1100 },   // 银矿
-  { sheet: 8, shine: 1000 },   // 金矿
-  { sheet: 9, shine: 1050 },   // 铁矿
-  { sheet: 166, shine: 1125 }, // 锡
-  { sheet: 167, shine: 1075 }, // 钨
-  { sheet: 168, shine: 1025 }, // 铂
-  { sheet: 169, shine: 975 },  // 铅
-  // 宝石族（:7472-7477 + 色 :7634-7640）
-  { sheet: 63, shine: 900, color: '#0000FF' },    // 蓝宝石
-  { sheet: 64, shine: 900, color: '#FF0000' },    // 红宝石
-  { sheet: 65, shine: 900, color: '#00FF00' },    // 绿宝石
-  { sheet: 66, shine: 900, color: '#FFFF00' },    // 黄玉
-  { sheet: 67, shine: 900, color: '#FF00FF' },    // 紫晶
-  { sheet: 68, shine: 900, color: '#FFFFFF' },    // 钻石
-  // 特殊色族（:7571-7643）
-  { sheet: 12, shine: 300, color: '#FF0000' },    // 生命水晶红（:7467/:7641 同 665）
-  // 178 宝石锁不在此列——色随 fx/18 列交替，下方按列拆七条规则
-  { sheet: 211, shine: 500, color: '#32FF64' },   // 丛林蜥蜴祭坛绿（:7498/:7643 (50,255,100)）
-  { sheet: 204, shine: 1150, color: '#FF0000' },  // 猩红石红（:10200/:7642）
-  { sheet: 639, shine: 300, color: '#0000FF' },   // 蓝冰（:9562/:7641）
-  { sheet: 239, shine: 1100 },                    // 珍珠石
-  { sheet: 566, shine: 900, color: '#FFFF00' },   // 琥珀宝石果（:7478/:7640）
-  // 金属砖/板（:7468-7471/:7479-7489）——低频微光
-  { sheet: 21, shine: 1200 }, { sheet: 467, shine: 1200 },
-  { sheet: 441, shine: 1200 }, { sheet: 468, shine: 1200 },
-  { sheet: 45, shine: 1900 }, { sheet: 680, shine: 1900 },   // 金砖/皇冠家具
-  { sheet: 46, shine: 2000 }, { sheet: 681, shine: 2000 },   // 银砖
-  { sheet: 47, shine: 2100 }, { sheet: 682, shine: 2100 },   // 铜砖
-  { sheet: 122, shine: 1800 }, { sheet: 686, shine: 1800 },  // 皇家具
-  { sheet: 121, shine: 1850 }, { sheet: 685, shine: 1850 },
-  { sheet: 125, shine: 600 },                      // 魔法水晶灯
-  // 陨石/狱岩（:7490-7494 超低频 8000-9000）
-  { sheet: 109, shine: 9000 }, { sheet: 110, shine: 9000 },
-  { sheet: 116, shine: 9000 }, { sheet: 117, shine: 9000 },
-  { sheet: 118, shine: 8000 },
-  // 硬模式矿（:7495-7497）
-  { sheet: 107, shine: 950 },  // 钴
-  { sheet: 108, shine: 900 },  // 秘银
-  { sheet: 111, shine: 850 },  // 精金
-  // 其余（:7083-7085/:7137/:9567/:9910-9924/:9981/:10086）
-  { sheet: 221, shine: 925 }, { sheet: 222, shine: 875 }, { sheet: 223, shine: 825 },
-  { sheet: 129, shine: 300 },
-  { sheet: 346, shine: 2000 }, { sheet: 347, shine: 1900 }, { sheet: 348, shine: 1800 },
-  { sheet: 370, shine: 1900 },
-  { sheet: 407, shine: 1000 },
-  // 617（蜥蜴电池座）走独占分支（:7571-7586 子格判定）——以整格近似
+/** 矿物闪光表（tileShine 全量 1:1，共 55 型；赋值锚 Main.cs:7273-7327/7645-7688/
+ *  9791-9796/10140-10431；触发分支 TileDrawing.cs:7537-7654）。
+ *  sheet（=tile id）→ shine 值 + 闪光色（TileDrawing.cs:7557-7651 的 newColor 表，
+ *  未列型=缺省 Color.White）。
+ *  概率折算：原版每帧 p = num43/shine（num43 = max(R,G,B)/30，TileDrawing.cs:7543-7552；
+ *  掷 :7553 rand.Next(shine) >= num43 不闪；门 :7539-7543 三通道全 ≤20 不闪，发射器以
+ *  max(R,G,B) ≤ lightGate 判，2026-09-07 逐字修正曾只查 R 漏纯蓝/绿源）。
+ *  本发射器每 3 tick 扫一次 → prob = 24/shine（≡满光 num43=8 档折算）。
+ *  登记债（发射器在 src/core，本文件侧不可达，逐字原文见 tests tileShine 段）：
+ *  ①光照比例项未建模——折到满光档：微光（max<240）至多 8× 超发；max∈[21,29] 原版
+ *    num43=0 不闪而仓内照发；
+ *  ②dust 43 TintableDustLighted 的 AddLight 闪光体发光与"环境光过低自灭"未建模
+ *    （Dust.cs:1472-1521）——尘通道已走 spawnDust 原版渲染,唯发光/自灭缺;
+ *    ★发射器 spawnDust 未传 noGravity → 落 VanillaDust 通用重力 +0.1/tick 下沉,
+ *    原文 43 号无重力/速度支应静止（Game.ts 侧一字修:noGravity=true）,登记;
+ *  ③tile 22 恶魔矿：原版 1/400 腐化尘支与闪光支同 else-if 链互斥（每帧至多一发），
+ *    仓内两规则独立掷可同帧双发。
+ *  ★tileShine2（Main.cs 同区 bool 表，52 型 + TileDrawing.cs:5226-5246 动态 185/186）
+ *  是另一套系统：GetFinalLight→ShouldTileShine→Main.shine 渲染期光色 ×1.6（暗处黑
+ *  不变，纯渲染提亮），非粒子，本表不含（未移植，登记）。 */
+export const SHINE_TABLE: Array<{ sheet: number; shine: number; color?: string }> = [
+  // 基础矿（Main.cs:7645-7653；TileID 6=Iron 7=Copper 8=Gold 9=Silver）
+  { sheet: 22, shine: 1150 },  // 恶魔矿 Demonite
+  { sheet: 6, shine: 1150 },   // 铁矿 Iron
+  { sheet: 7, shine: 1100 },   // 铜矿 Copper
+  { sheet: 8, shine: 1000 },   // 金矿 Gold
+  { sheet: 9, shine: 1050 },   // 银矿 Silver
+  { sheet: 166, shine: 1125 }, // 锡 Tin
+  { sheet: 167, shine: 1075 }, // 铅 Lead
+  { sheet: 168, shine: 1025 }, // 钨 Tungsten
+  { sheet: 169, shine: 975 },  // 铂 Platinum
+  // 宝石族（Main.cs:7662-7667 + 色 TileDrawing.cs:7608-7631）
+  { sheet: 63, shine: 900, color: '#0000FF' },    // 蓝宝石 Sapphire
+  { sheet: 64, shine: 900, color: '#FF0000' },    // 红宝石 Ruby
+  { sheet: 65, shine: 900, color: '#00FF00' },    // 绿宝石 Emerald
+  { sheet: 66, shine: 900, color: '#FFFF00' },    // 黄玉 Topaz
+  { sheet: 67, shine: 900, color: '#FF00FF' },    // 紫晶 Amethyst
+  { sheet: 68, shine: 900, color: '#FFFFFF' },    // 钻石 Diamond
+  // 特殊色族（色 TileDrawing.cs:7632-7651）
+  { sheet: 12, shine: 300, color: '#FF0000' },    // 生命水晶 Heart（色支 :7636 同 665 生命水晶巨石；665 无 tileShine 赋值→该半支死码，巨石不闪）
+  // 178 露头宝石不在此列——色随 fx/18 列交替，下方按列拆七条规则
+  { sheet: 211, shine: 500, color: '#32FF64' },   // 叶绿矿 Chlorophyte（:7648 (50,255,100)）
+  { sheet: 204, shine: 1150, color: '#FF0000' },  // 猩红矿 Crimtane（Main.cs:10430/色 :7644）
+  { sheet: 639, shine: 300, color: '#0000FF' },   // 魔力水晶 ManaCrystal（Main.cs:9791/色 :7640）
+  { sheet: 239, shine: 1100 },                    // 金属锭 MetalBars（Main.cs:9796）
+  { sheet: 566, shine: 900, color: '#FFFF00' },   // 琥珀石 AmberStoneBlock（色 :7632）
+  // 箱族（Main.cs:7658-7661）——帧门限箱体段（TileDrawing.cs:7553）
+  { sheet: 21, shine: 1200 }, { sheet: 467, shine: 1200 },   // 箱子 Containers / 金箱变体 Containers2
+  { sheet: 441, shine: 1200 }, { sheet: 468, shine: 1200 },  // 伪装箱 FakeContainers / 伪装箱2 FakeContainers2
+  // 金属砖/远古砖（Main.cs:7669-7678）
+  { sheet: 45, shine: 1900 }, { sheet: 680, shine: 1900 },   // 金砖 GoldBrick / 远古金砖 AncientGoldBrick
+  { sheet: 46, shine: 2000 }, { sheet: 681, shine: 2000 },   // 银砖 SilverBrick / 远古银砖 AncientSilverBrick
+  { sheet: 47, shine: 2100 }, { sheet: 682, shine: 2100 },   // 铜砖 CopperBrick / 远古铜砖 AncientCopperBrick
+  { sheet: 122, shine: 1800 }, { sheet: 686, shine: 1800 },  // 秘银砖 MythrilBrick / 远古秘银砖 AncientMythrilBrick
+  { sheet: 121, shine: 1850 }, { sheet: 685, shine: 1850 },  // 钴砖 CobaltBrick / 远古钴砖 AncientCobaltBrick
+  { sheet: 125, shine: 600 },                      // 水晶球 CrystalBall（Main.cs:7679）
+  // 圣地/珍珠族（Main.cs:7680-7684，超低频 8000-9000）
+  { sheet: 109, shine: 9000 }, { sheet: 110, shine: 9000 },  // 圣地草 HallowedGrass / 圣地植物 HallowedPlants
+  { sheet: 116, shine: 9000 }, { sheet: 117, shine: 9000 },  // 珍珠沙 Pearlsand / 珍珠石 Pearlstone
+  { sheet: 118, shine: 8000 },                               // 珍珠石砖 PearlstoneBrick
+  // 硬模式矿（Main.cs:7685-7687）
+  { sheet: 107, shine: 950 },  // 钴 Cobalt
+  { sheet: 108, shine: 900 },  // 秘银 Mythril
+  { sheet: 111, shine: 850 },  // 精金 Adamantite
+  // 其余（Main.cs:7273-7327/10140-10211/10316/10430）
+  { sheet: 221, shine: 925 }, { sheet: 222, shine: 875 }, { sheet: 223, shine: 825 },  // 钯/山铜/钛
+  { sheet: 129, shine: 300 },                    // 水晶碎晶 Crystals（Main.cs:7327）
+  { sheet: 346, shine: 2000 }, { sheet: 347, shine: 1900 }, { sheet: 348, shine: 1800 }, // 叶绿砖/猩红砖/蘑菇镀层
+  { sheet: 370, shine: 1900 },                   // 陨石砖 MeteoriteBrick（Main.cs:10211）
+  { sheet: 407, shine: 1000 },                   // 化石矿 FossilOre（Main.cs:10316）
+  // 617 大师奖杯底座（MasterTrophyBase）走独占分支（TileDrawing.cs:7560-7577 子格判定）——以整格近似
   { sheet: 617, shine: 400 },
 ];
 
@@ -259,13 +281,21 @@ function buildRules(): TileParticleRule[] {
     });
   }
 
-  // ---- 矿物闪光（TileDrawing.cs:7529-7646：rand.Next(shine) < maxLight/30）----
+  // ---- 矿物闪光（TileDrawing.cs:7537-7654：光门 :7539-7543，掷 :7553 rand.Next(shine)
+  //      >= num43 不闪，num43 = max(R,G,B)/30）----
   for (const s of SHINE_TABLE) {
     add({
       sheet: s.sheet, color: s.color ?? dust(43),
-      prob: 24 / s.shine,  // 原版 8/shine/帧（满光）×3 tick 扫描节流
-      lightGate: 20, dx: 8, dy: 8, rise: 0, life: 22, size: [1, 2],
-      // 帧门（:7546）：21/441 仅亮格段；467/468 仅 144-180 段
+      prob: 24 / s.shine,  // 原版 8/shine/帧（满光 num43=8）×3 tick 扫描节流
+      lightGate: 20,
+      // 原版尘通道 1:1：NewDust(...,43,0,0,254,newColor,0.5f)+velocity×0
+      //（TileDrawing.cs:7652-7653，617/178 子支 :7573/:7604 同参）
+      dust: 43, dustAlpha: 254, dustScale: 0.5,
+      // 色点回退路出生盒 = NewDust 内盒 rand.Next(W−4)+4，W=16 → [4,16)²（Dust.cs:167-170）
+      dxBox: [4, 16], dyBox: [4, 16],
+      // dust 43 无重力/速度支（Dust.cs:1472-1521）+ 生成即 velocity 归零 → 静止微光
+      rise: 0, grav: 0, life: 22, size: [1, 2],
+      // 帧门（TileDrawing.cs:7553）：21/441 仅箱体亮格段；467/468 仅 144-180 段
       pred: s.sheet === 21 || s.sheet === 441
         ? (fx) => !((fx < 36 || fx >= 180) && (fx < 396 || fx > 409))
         : s.sheet === 467 || s.sheet === 468
@@ -273,7 +303,8 @@ function buildRules(): TileParticleRule[] {
           : undefined,
     });
   }
-  // 宝石锁 178：色随 fx/18 列（:7573-7591 [品红,黄,蓝,绿,红,白,黄]）
+  // 露头宝石 178（ExposedGems）：色随 fx/18 列（TileDrawing.cs:7578-7603
+  //  [品红,黄,蓝,绿,红,白,黄]；TileFrame :66010 列域恰 0..6，switch default 不可达）
   {
     const COL: Array<[number, string]> = [
       [0, '#FF00FF'], [1, '#FFFF00'], [2, '#0000FF'], [3, '#00FF00'],
@@ -283,7 +314,9 @@ function buildRules(): TileParticleRule[] {
       add({
         sheet: 178, color,
         pred: (fx) => Math.floor(fx / 18) === col,
-        prob: 24 / 500, lightGate: 20, dx: 8, dy: 8, rise: 0, life: 22, size: [1, 2],
+        prob: 24 / 500, dust: 43, dustAlpha: 254, dustScale: 0.5,
+        lightGate: 20, dxBox: [4, 16], dyBox: [4, 16],
+        rise: 0, grav: 0, life: 22, size: [1, 2],
       });
     }
   }

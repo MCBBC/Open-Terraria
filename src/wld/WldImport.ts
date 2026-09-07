@@ -715,11 +715,20 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   //  cs:295-310 六段帧区间+467 style13)——QuickStacking/vanillaRecipes/Extractinator
   //  三处消费 c.locked 当门,导入锁箱不再白给。
   const CHEST_TILE = TILE_BY_KEY['chest'];
+  // ★合法容器族(2026-09-07 蓝队门1):箱锚兜底原判定 `type!==CHEST_TILE` 把合法
+  //  箱变体(467 群系箱族/88 梳妆台族——原版 Container 三族,帧带 144/486 各自成带)
+  //  强改成木箱 21(33 格实测,外来帧值落 21 的 locked 带)。兜底只该补「真脱节」
+  //  (锚格是空气/降级石),合法容器一律不动。
+  const CONTAINER_SHEETS = new Set([21, 467, 88]);
+  const isContainerTile = (id: number): boolean => {
+    const sh = TILE_DEFS[id]?.vanilla?.sheet;
+    return sh !== undefined && CONTAINER_SHEETS.has(sh);
+  };
   const chests: SaveData['chests'] = [];
 
   for (const c of wld.chests) {
     const anchor = c.y * w + c.x;
-    if (type[anchor] !== CHEST_TILE) {
+    if (!isContainerTile(type[anchor])) {
       // 兜底：登记箱与图格脱节（罕见——tile 被降级/清空）才补 type，不覆写帧
       type[anchor] = CHEST_TILE;
       if (c.x + 1 < w && type[c.y * w + c.x + 1] === 0) type[c.y * w + c.x + 1] = CHEST_TILE;
@@ -765,20 +774,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   for (const c of chests) for (const it of c.items) if (it) it.id = stItem(it.id);
   for (const f of furnitureSave) for (const it of f.slots) if (it) it.id = stItem(it.id);
 
-  // ★幽灵格差分还原(2026-09-07):导出侧把 v5 幽灵(inactive+type≠0)写成原版
-  //  致动虚化(active+inActive b3|4)——parser 把 inActive 并进 wireArr bit5。
-  //  此处识别「active+bit5」=幽灵 → tileActive 差分 v=1(loadSaveData 还原 flags=0,
-  //  回到不可见不实体的 v5 语义)。曾缺此段:虚化格读回全变活格=「漫天方块」
-  //  (用户实报);v0.1.10 的 export 曾反向把幽灵转正,同病同源。
-  let ghostAny = false;
-  const ghostV = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    if (type[i] !== 0 && wld.tiles.active[i] && (wireArr[i] & 0x20)) {
-      ghostV[i] = 1;
-      ghostAny = true;
-    }
-  }
-  if (ghostAny) warnings.push(`还原 ${ghostV.reduce((a, b) => a + (b ? 1 : 0), 0)} 个虚化格(幽灵保域)`);
+  // ★虚化位随档(2026-09-07 终版,五修):wld 流的 inActive 位=原版致动器机制——
+  //  「active+inActive」格=玩家用致动器虚化的方块(本仓 flags=1+wire bit5,
+  //  渲染 0.3 淡显=原版 DrawInactive 语义),wire 通道直拷即随档保真,
+  //  **不进 tileActive 差分**(曾把致动格全标成幽灵 v=1 → flags=0 完全消失,
+  //  用户实报「隐藏层不见了」)。v5 幽灵(worldgen 遗留 flags=0+type≠0,不可见)
+  //  在 wld 流中无表达,导出侧丢弃(视觉零差异,登记债)。
 
   const save: SaveData = {
     format: 'sandboxworld.save',
@@ -841,9 +842,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         mushroom: wld.bgMushroom, underworld: wld.bgUnderworld,
         bg10: wld.bg10, bg11: wld.bg11, bg12: wld.bg12,
         desert: wld.desertBG, ocean: wld.oceanBG,
-        // ★原版加载语义（WF:2316-2318）：四区森林背景全部用 treeBG1（setBG(10/11/12)
-        //  都塞 treeBG1）——treeBG2-4 存档字节为遗留零值,不映射
-        forest: [wld.treeBG1, wld.treeBG1, wld.treeBG1, wld.treeBG1],
+        // ★P0-2 配套勘误(2026-09-07 红队):WF:2316-2318 的「四区全塞 treeBG1」是
+        //  v≤195 else 分支;v≥204 读进 bg10/11/12 即 treeBG2/3/4(WorldGen setBG
+        //  同一存储)——映射 [treeBG1, bg10, bg11, bg12](旧写恒 treeBG1×4,四区
+        //  森林背景 2-4 区全错)
+        forest: [wld.treeBG1, wld.bg10, wld.bg11, wld.bg12],
         corrupt: wld.corruptBG, snow: wld.snowBG, hallow: wld.hallowBG, crimson: wld.crimsonBG,
       },
     },
@@ -894,8 +897,6 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     // （MapHelper.SaveMap），.wld 本体不含——WldParser 只读 .wld，无从回填，
     // 导入后从头探索（与旧存档行为一致）
     explored: undefined,
-    // ★幽灵差分段(2026-09-07):虚化格 v=1——loadSaveData 按差分还原 flags=0
-    tileActive: ghostAny ? bytesToB64(rlePairs(ghostV)) : undefined,
     chests,
     // ★七批备案④收尾：334 legacy 武器架持武还原记录（内部 id——本 SaveData 为
     //  v2 内存态，loadSaveData v3=false 同 chests 直读；落盘经 serialize 转稳定 id）

@@ -67,10 +67,14 @@ function shell(w: World, drops: Array<[string, number]>, heldVid: number, withPi
   g.hitTiles = { addDamage: () => 100, clear: () => {} };   // 块交换积累条单拍达标
   g.swingTileCutSet = new Set<number>();                    // 挥击砍切去重表
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
+  // ★SW-BJ12 2026-09-07 重钉：BJ10 SmartCursorHelper.TileTargetDesired 门
+  // （tryPlace 头 lockedContinuity 读）缺 stub——锁存续期 null=无锁直通
+  g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.player = {
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
-    buffs: { has: () => false }, equipStats: {},
+    // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐——wellFedTier/hungerPickSpeed
+    buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
     inv: {
       selected: 0,
       slots: withPick ? [{ id: iidOf(PICK_V), stack: 1 }] : new Array(50).fill(null),
@@ -117,18 +121,19 @@ describe('幽灵格放置漏判（块交换入口 active() 门）', () => {
     expect(st.type[st.idx(12, 20)]).toBe(WOOD_T);
   });
 
-  it('对照：活性矿块仍走块交换（镐门+完整掉落链；两步流=本拍破坏、下拍放置）', () => {
+  it('对照：活性矿块仍走块交换（镐门+完整掉落链；★SW-BJ12 重钉：同拍完成=破坏+放置）', () => {
+    // 旧钉「两步流=本拍破坏、下拍放置」是 BJ10 前即时写 useTime 的位次伪影——
+    // 原版 ReplaceTile+SetItemTime(num4+num5)（Player.cs:40218-40224）单拍完成：
+    // 旧块掉落、新块落位、合并冷却同拍生效。BJ10 暂存镐段后同拍成立,重钉。
     const w = mkWorld();
     const st = w.store;
     st.setTileSilent(9, 20, ORE_T);                    // active 铁矿
     const drops: Array<[string, number]> = [];
     const g = shell(w, drops, WOOD_V, true);
-    g.tryPlace(9, 20, defOf(WOOD_V));                  // 第一拍：先破坏旧块（行为档 [8] 同款）
+    g.tryPlace(9, 20, defOf(WOOD_V));
     expect(drops.some(([k]) => k.includes('IronOre'))).toBe(true);   // 旧块完整掉落链
-    expect(st.type[st.idx(9, 20)]).toBe(0);            // 旧块已清（placed 延到下拍）
-    (g.player as unknown as { useTime: number }).useTime = 0;
-    g.tryPlace(9, 20, defOf(WOOD_V));                  // 第二拍：正常放置（[30] 同款）
-    expect(st.type[st.idx(9, 20)]).toBe(WOOD_T);
+    expect(st.type[st.idx(9, 20)]).toBe(WOOD_T);       // 新块同拍落位
+    expect((g.player as unknown as { useTime: number }).useTime).toBeGreaterThan(0);   // 镐段+方块段合并冷却
   });
 });
 

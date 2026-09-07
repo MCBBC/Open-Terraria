@@ -274,6 +274,14 @@ const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 831, 970,
   112, 959, 1003, 1004, 1095, 1096]);
 const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
+/** ★SW-BJ13 2026-09-07：原版专绘支家族（Main.cs:34788 分支谓词投影到本仓实体域——
+ *  398/450 原版同支但本仓无 MinionProj 实体域,余九型全接）。这些型的 draw 锚 =
+ *  帧心@「盒心+(0,−num467)」、origin=(整图宽/2, 帧高/2+num151),【不走】通用
+ *  num143/144 尾绘的盒左上锚（分支锚/origin 见 draw 支注 Main.cs:34788-34800）。
+ *  WeaponProj.PROJ_DRAW_OFFSET 静态表的 1022/1036/423 三项已随本批退役（表值是
+ *  :30077 switch 真值,但本支原版只消费 num151——经通用路消费即错锚）。 */
+const CENTER_ANCHOR_34788 = new Set([393, 394, 395, 423, 1022, 1036, 1093, 1112, 1118]);
+
 /** 接触击退【玩家锚】方向族（Projectile.cs:13652-13660 switch,StrikeNPC num40 消费
  *  :13683）：697/699/707/708/759 原版既有 + ★1458 新增 1118 Clay Bud——击退方向 =
  *  玩家→敌（"always knocks enemies away from the player"）,非随从→敌 */
@@ -431,6 +439,9 @@ export function minionTrueBox(projId: number): { w: number; h: number } {
     case 1093: case 1112: case 1118: case 1119: return { w: 14, h: 22 };
     case 1113: return { w: 18, h: 18 };
     case 1022: return { w: 20, h: 30 };                  // 蘑菇小伙伴（:9670-9671）
+    case 393: case 394: case 395: return { w: 20, h: 30 };   // 海盗三变体（:4758-4759）★SW-BJ13
+    case 423: return { w: 28, h: 28 };                   // 异星 UFO（:4964-4965）★SW-BJ13
+    case 1036: return { w: 18, h: 10 };                  // 雾网蜘蛛（:9770-9771）★SW-BJ13
     case 663: return { w: 30, h: 54 };                   // :7133-7134
     case 665: return { w: 28, h: 58 };                   // :7141-7144
     case 667: return { w: 28, h: 60 };                   // :7145-7148
@@ -4029,6 +4040,13 @@ export class MinionProj extends Entity {
     else if (projId === 1094 || projId === 1113) { this.w = 18; this.h = 18; }
     // 蘑菇小伙伴 1022（Dead Cells 联动,5456）：20×30（SetDefaults Projectile.cs:9670-9671）
     else if (projId === 1022) { this.w = 20; this.h = 30; }
+    // ★SW-BJ13 2026-09-07：34788 专绘支家族 SetDefaults 真盒补注册（此前落 16×16
+    //  缺省 ⇒ 判定盒/盒心锚与精灵错位——本支 draw 锚=盒心系,盒错即绘错）：
+    //  海盗三变体 393-395 20×30（:4758-4759）/ 异星 UFO 423 28×28（:4964-4965）/
+    //  雾网蜘蛛 1036 18×10（:9770-9771）
+    else if (projId === 393 || projId === 394 || projId === 395) { this.w = 20; this.h = 30; }
+    else if (projId === 423) { this.w = 28; this.h = 28; }
+    else if (projId === 1036) { this.w = 18; this.h = 10; }
     // ★GC 移交收口（终局扫尾批 A7，2026-08-31）：DD2 哨兵塔 SetDefaults 真盒注册——
     //   此前 663 族/弩车族落 16×16 兜底 ⇒ 判定盒/索敌锚与贴图错位。
     //   · 爆炸烈焰塔（AI_130）SetDefaults(:7132-7157)：663=30×54 → 665=28×58 →
@@ -5674,6 +5692,30 @@ export class MinionProj extends Entity {
         ctx.restore();
         return;
       }
+    }
+    // ---- ★SW-BJ13 2026-09-07：帕鲁地面家族∪原版同支专绘（Main.cs:34788-34800 1:1）----
+    // 原版本族（393-395/398/423/450/1022/1036/1093/1112/1118）不走通用 num143/144
+    // 尾绘（:35567 起 = 帧左上锚盒左上）,专用支：anchor = proj.Center + (0, gfxOffY −
+    // num467)（num467 = 2 缺省 / 5=1093·1112 :34794 / 9=1118 :34798）、origin =
+    // (整图宽/2, 帧高/2 + num151)（num151=1 仅 1022 num151++ :30079、−4 仅 1036
+    // :30091；423 的 num152=−5 :30161 本支不消费=原版死值）。展开即「帧心锚于盒心
+    // 上方 num467」——精灵横居盒、帧底 = 盒底 + 4px（步行族全支一致）。
+    // 旧通用路把帧左上锚盒左上 ⇒ 精灵整体右下偏：1118 (+12,+22)（盒 14×22/帧 38×48）
+    // = 用户 F3 实报「盒在左上、精灵画在右下、走一步陷一步」；1093/1112 (+10,+14)、
+    // 393-395 (+16,+8)、1022 (+11,+10)、423 (0,+4)、1036 (+3,0)。
+    if (CENTER_ANCHOR_34788.has(this.projId) && img) {
+      const num467 = this.projId === 1118 ? 9
+        : this.projId === 1093 || this.projId === 1112 ? 5 : 2;
+      const num151 = this.projId === 1022 ? 1 : this.projId === 1036 ? -4 : 0;
+      ctx.save();
+      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+      ctx.translate(this.cx, this.cy - num467);          // gfxOffY 未建模恒 0（通用路同）
+      if (this.rot !== 0) ctx.rotate(this.rot);
+      if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, -img.width / 2, -(img.height / 2 + num151));
+      ctx.restore();
+      return;
     }
     ctx.save();
     // 帕鲁出场淡入（Projectile alpha 通道：绘制色 = 原色 × (255-α)/255——

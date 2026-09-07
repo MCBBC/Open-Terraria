@@ -97,7 +97,10 @@ describe('SW-BE1 平台放置自动斜放（SpinSmartPlatform Player.cs:40989-41
     g.tryPlace(10, 20, PLAT_ITEM!);
     expect(st.type[st.idx(10, 20)]).toBe(PLAT);
     expect(st.flags[st.idx(10, 20)]).toBe(1);
-    expect(st.frameX[st.idx(10, 20)]).toBe(0);
+    // ★SW-BJ10 2026-09-07：frameX 由置放值 0 变为原版 TileFrameImportant 平台支连接码
+    //  （WorldGen.cs:86748 slope0 链,num9=num8=-1 → 90 孤立帧;放置尾 SquareTileFrame
+    //  :60748 平台面补接后重算）。此前断言 0 = 冻结在置放帧的缺陷态。
+    expect(st.frameX[st.idx(10, 20)]).toBe(90);
     expect(st.frameY[st.idx(10, 20)]).toBe(0);          // case 19: frameY = 18*style,style 0
     expect(slopeAt(st, 10, 20)).toBe(0);                // 孤立恒平
     expect(consumed.length).toBe(1);                    // 消耗门不变

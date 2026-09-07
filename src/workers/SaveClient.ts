@@ -9,6 +9,7 @@ import type { Player } from '../entities/Player';
 import type { SaveData, SaveMeta } from '../save/serialize';
 import { saveGame, loadSave } from '../save/SaveFile';
 import { parseWldToSave } from '../wld/WldImport';
+import { exportWld } from '../wld/WldExport';
 import { weatherToSave } from '../world/weather/Weather';
 
 const HANDSHAKE_MS = 2000;
@@ -35,6 +36,7 @@ type SaveResponse =
   | { type: 'saved'; id: number; json: string }
   | { type: 'imported'; id: number; json: string; meta: ImportedWorld['meta'] }
   | { type: 'inspected'; id: number; ok: boolean; meta?: SaveHeaderInfo['meta'] }
+  | { type: 'exported-wld'; id: number; buf: ArrayBuffer }
   | { type: 'error'; id: number; message: string };
 
 export class SaveClient {
@@ -163,6 +165,9 @@ export class SaveClient {
     this.ensure();
     const w = this.worker;
     if (this.broken || !w) return this.importWldSync(buf);
+    // ★P2-8(红队):transfer 后主线程 buf 即 detach——超时/出错回退 importWldSync
+    //  会拿到 neutered buffer 恒抛越界。留底一份(worker 用副本 transfer)
+    const backup = buf.slice();
     const id = this.nextId++;
     const promise = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -172,7 +177,7 @@ export class SaveClient {
       }, IMPORT_TIMEOUT_MS);
     });
     try {
-      w.postMessage({ type: 'importWld', id, buf: buf.buffer }, [buf.buffer]);
+      w.postMessage({ type: 'importWld', id, buf: backup.buffer.slice(backup.byteOffset, backup.byteOffset + backup.byteLength) }, [backup.buffer]);
     } catch {
       const p = this.pending.get(id);
       if (p) this.pending.delete(id);
@@ -181,7 +186,7 @@ export class SaveClient {
     try {
       return await promise as ImportedWorld;
     } catch {
-      return this.importWldSync(buf);   // 回退同步(worker 出错/超时)
+      return this.importWldSync(buf);   // 回退同步(worker 出错/超时;buf 未 detach ✓)
     }
   }
 
@@ -209,6 +214,36 @@ export class SaveClient {
       return await promise as SaveHeaderInfo;
     } catch {
       return this.inspectSaveSync(text);
+    }
+  }
+
+  /** 后台 .wld 导出(2026-09-07 用户报「导出卡一下主线程」):存档 json 的
+   *  JSON.parse + 全图 tile 编码全在 worker;产物 ArrayBuffer transfer 零拷贝。
+   *  不可用/超时/出错回退主线程同步路径(与旧实现一致)。 */
+  async exportWld(json: string): Promise<Uint8Array> {
+    this.ensure();
+    const w = this.worker;
+    if (this.broken || !w) return exportWld(JSON.parse(json) as import('../save/serialize').SaveData);
+    const id = this.nextId++;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      setTimeout(() => {
+        const p = this.pending.get(id);
+        if (p) { this.pending.delete(id); p.reject(new Error('export worker timeout')); }
+      }, SAVE_TIMEOUT_MS);
+    });
+    try {
+      w.postMessage({ type: 'exportWld', id, json });
+    } catch {
+      const p = this.pending.get(id);
+      if (p) this.pending.delete(id);
+      return exportWld(JSON.parse(json) as import('../save/serialize').SaveData);
+    }
+    try {
+      const r = await promise as { buf: ArrayBuffer };
+      return new Uint8Array(r.buf);   // transfer 到手的 buffer 包视图(零拷贝)
+    } catch {
+      return exportWld(JSON.parse(json) as import('../save/serialize').SaveData);
     }
   }
 
@@ -256,6 +291,7 @@ export class SaveClient {
         if (d.type === 'saved') p.resolve(d.json);
         else if (d.type === 'imported') p.resolve({ json: d.json, meta: d.meta });
         else if (d.type === 'inspected') p.resolve({ ok: d.ok, meta: d.meta });
+        else if (d.type === 'exported-wld') p.resolve({ buf: d.buf });
         else p.reject(new Error(d.message));
       };
       w.onerror = () => {

@@ -598,5 +598,11 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (; i < end; i++) tyLq[i] = v;
     }
   }
+  // ★幽灵净化(2026-09-07 方案B,读档边界):v5 差分还原后的残留幽灵
+  //  (flags=0+type≠0)清零对齐原版读档语义——原版 SaveTile 对非活格不写 type,
+  //  读档后本就无幽灵(详见 TileStore.purgeGhostTiles 注)。净化点在差分还原
+  //  **之后**(旧档 v5 差分先还原 flags=0,再净化清 type=正确迁移)。
+  const purgedGhosts = world.store.purgeGhostTiles();
+  if (purgedGhosts > 0) console.log(`[load] 幽灵格净化 ${purgedGhosts} 格(对齐原版读档语义)`);
   return { world, player: data.player, data };
 }
