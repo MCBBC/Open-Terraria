@@ -28,6 +28,8 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { moveAndCollide } from '../physics/TileCollision';
+import { queueRipple } from '../render/WaterWaves';
+import { wetCollision } from '../player/SmartSelect';
 import goreTable from '../data/vanilla-gore.json';
 
 /** Gore.goreTime（Gore.cs:16） */
@@ -321,6 +323,8 @@ export class GorePiece extends Entity {
   /** SpriteFrame 行（多帧竖条：1217/1218 等） */
   row = 0;
   private frameCounter = 0;
+  /** ★落水段单次门(Gore.cs frame<10→10 等价:溅音/涟漪只发一次,此后浮于液面) */
+  private waterEntered = false;
 
   constructor(type: number, x: number, y: number, scale: number) {
     super();
@@ -505,7 +509,33 @@ export class GorePiece extends Entity {
 
     // ---- 碰撞/时档尾段（:929-1042）----
     if (this.sticky) {
+      // ★落水段(Gore.cs:975-992 1:1):先 TileCollision(改速=撞块→frame10+碎块
+      //  落水音 39 rand(2));未撞且 (position+velocity) 前方 WetCollision(16,14) →
+      //  frame10 + 落水音 style2 + WaterShaderData.QueueRipple(position+(8,8))
+      //  缺省重载(strength1/Square/size4/color(0.5,1,0,1));随后钉液面
+      //  (velocity×0,Y=行顶−liquid/16)。waterEntered=原文 frame<10→10 单次门。
+      const preVX = this.vx, preVY = this.vy;
       moveAndCollide(this, game.world, this.vx, this.vy);
+      const px2 = this.x + 8, py2 = this.y + 8;
+      const hitSolid = this.hitWall || this.collideY || this.onGround || this.hitHead
+        || this.vx !== preVX || this.vy !== preVY;
+      if (hitSolid) {
+        if (!this.waterEntered) {
+          this.waterEntered = true;
+          game.playSfxFiles?.(Math.random() < 0.5 ? ['Drip_0'] : ['Drip_1'], 1, px2, py2);   // PlaySound(39,…,rand(2))
+        }
+      } else if (wetCollision(st, this.x + preVX, this.y + preVY, 16, 14)) {
+        if (!this.waterEntered) {
+          this.waterEntered = true;
+          game.playSfxFiles?.(['Drip_2'], 1, px2, py2);   // PlaySound(39,…,2)
+          queueRipple(this.x + 8, this.y + 8);           // 缺省重载:strength1/Square/size4
+        }
+        const nx = Math.floor((this.x + 8) / 16), ny = Math.floor((this.y + 14) / 16);
+        if (st.inBounds(nx, ny) && st.liquid[st.idx(nx, ny)] > 0) {
+          this.vx = 0; this.vy = 0;
+          this.y = ny * 16 - st.liquid[st.idx(nx, ny)] / 16;
+        }
+      }
       if (this.vy === 0) {
         // 落地摩擦（:1015-1029）：|vx|<0.01 归零
         this.vx *= 0.97;

@@ -16,7 +16,8 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { Arrow, projSprite } from './Arrow';
-import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileWetSection, projWaterDragFactor, projShimmerStep,
+  type ProjShimmerFace } from './projWetSection';
 import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
   resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
   applyBannerDamageDealt } from './projTargets';
@@ -754,11 +755,37 @@ export class Boomerang extends Entity {
    *  各跑一次（EU 型）,闩在 fixedUpdate 头逐拍复位（杀拍位先于全部子步,恒逢 false） */
   private wetSectionRan = false;
 
-  /** 通用湿段步进（projWetSection 共享体穿参壳——活拍/杀拍两调用点共用） */
+  /** 通用湿段步进（projWetSection 共享体穿参壳——活拍/杀拍两调用点共用）。
+   *  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿）：本类 aiStyle 3 域不命中任何
+   *  aiStyle 支（:22719 缺省支无动作）,唯【相刃族】19 型（PHASEBLADE_PROJ=
+   *  ProjectileID.Sets.IsAPhaseblade,ProjectileID.cs:33）→ 相刃支（P.cs:22587-22604）
+   *  ——ai[0]==1（返回态）早退;否则 ai[1]=ai[0]=0（出程计数/状态复位=微光中重启
+   *  出程）+ vy>-11 浮升（>16 先 ×0.9）+ vx×1.1 钳 ±14。面适配：ai0≡ai0（0 飞出/
+   *  1 返回/2 悬停,本类同名字段）;ai1≡outT（飞出段计数——ai[1] 写面只此一支,
+   *  回写私有字段）;hostile=false（域全 friendly）;kill/timeLeft 面零消费（相刃支
+   *  无 Kill/无 timeLeft 面;域无 502/469/箭族 id——缺省不接=登记）。 */
   private wetSectionStep(game: GameHooks): void {
     this.wetSectionRan = true;
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.projId, !!projectileData(this.projId)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: this.projId,
+            aiStyle: projectileData(this.projId)?.aiStyle ?? -1,
+            hostile: false,
+            vx: this.vx, vy: this.vy,
+            timeLeft: this.life,
+            ai0: this.ai0, ai1: this.outT,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            rainbowSlimeUnlocked: false,
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy;
+          this.ai0 = sf.ai0;
+          this.outT = sf.ai1;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
   }
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
@@ -2708,8 +2735,31 @@ export class CounterweightProj extends Entity {
     // ---- 通用湿段（:16903-17113,projWetSection 共享体——AI 后/位移前,原版位序
     //      AI(:16880) → 湿段(:16903) → HandleMovement(:17120);三态全受段（原版湿段
     //      门只有 !ignoreWater,与 ai[0] 无关）;域注/阻尼定谳见字段块）----
+    //  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿·99 支补遗）：域 {556-561,1079}
+    //  全 aiStyle 99（DefaultToYoyo :6086 Range 块）→ 悠悠球支（P.cs:22656-22668）—
+    //  —vy>0 弹反+shimmerWet/wet 双清 + vy>-8 → -8 强制上收;头门 :22566
+    //  ai[0]==-1（回收态）早退,-2 脱离/-3 幽灵照跑。面适配：ai0≡ai0（环绕/回收/
+    //  脱离/幽灵同名字段）;ai1=0 恒传（本类不承载 ai[1] 活面,99 支亦零消费）;
+    //  hostile=false（域全 friendly）;kill/timeLeft 面零消费（99 支无 Kill、无
+    //  timeLeft 面——缺省不接=登记）。
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.projId, !!projectileData(this.projId)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: this.projId,
+            aiStyle: projectileData(this.projId)?.aiStyle ?? -1,
+            hostile: false,
+            vx: this.vx, vy: this.vy,
+            timeLeft: 0,
+            ai0: this.ai0, ai1: 0,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            rainbowSlimeUnlocked: false,
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
     if (this.ai0 === -2) {
       // 脱离坠落（:64738-64776）：penetrate=1（克隆一次命中即亡）;重力 0.3、速度上限
       // 16、vy≤3 缓落水平漂移 ±0.1（num5 钳）
@@ -3231,8 +3281,31 @@ export class YoyoProj extends Entity {
     //      湿段只读 position 不读 velocity;AI 无 position 写面 → 测位=上拍位移后同位,
     //      与原版 post-AI 位一致。三态全受段（原版湿段门只有 !ignoreWater :16895,
     //      与 ai[0] 无关）;域 id 全不豁免（字段块注）,ignoreWater 仍按数据面传）----
+    //  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿）：域全 aiStyle 99 → 悠悠球支
+    //  （P.cs:22656-22668）——vy>0 弹反+shimmerWet/wet 双清 + vy>-8 → -8 强制上收;
+    //  头门 :22566 ai[0]==-1（回收态）早退,-2 脱离/-3 幽灵照跑（原版只拦 -1）。
+    //  面适配：ai0≡ai0/ai1≡ai1（AI_099 状态机同名字段）;hostile=false（域全
+    //  friendly）;99 支无 timeLeft/ai 写面（原版 timeLeft 每帧重置 :64942,本仓 life
+    //  不回写）+无 Kill（深浸 Kill 属弹反族 A/B）→ 各面零消费。双清旗即出微光域,
+    //  下拍湿段重采样重置——弹反当拍位移走干态阻尼（:17721 段后原版同位）。
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.projId, !!projectileData(this.projId)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: this.projId,
+            aiStyle: projectileData(this.projId)?.aiStyle ?? -1,
+            hostile: false,
+            vx: this.vx, vy: this.vy,
+            timeLeft: this.life,
+            ai0: this.ai0, ai1: this.ai1,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            rainbowSlimeUnlocked: false,
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
     // ---- 状态尾段（:65118-65177）----
     if (this.ai0 === -2) {
       // 脱离坠落（:65118-65151）：penetrate 懒置 Next(3,7)、重力 0.3、速度上限 16、
@@ -4316,10 +4389,34 @@ export class FlailProj extends Entity {
     // ---- 通用湿段（:16903-17113,projWetSection 共享体——AI 链尾（switch+dust 后）/
     //      位移前 = 原版 post-AI 同位;湿 AI 消费者读取位在上方（R3"湿段放其读取位后"）,
     //      域注/收编/杀拍注见字段块）----
+    //  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿）：域全 aiStyle 15 → 链球支
+    //  （P.cs:22643-22654）——vy>0 弹反 + vy-=0.4 钳 ≥-8,【旗不清】无 timeLeft 面;
+    //  头门 :22566 ai[0]∈{2,4}（回拉/回收态）早退。面适配：ai0≡st/ai1≡stT
+    //  （AI_015 状态机同名字段既案）;hostile=false（域全 friendly）;timeLeft 面传出
+    //  但 15 支不写（本仓 life 不回写=零消费）;kill 缺省=15 支无 Kill（深浸 Kill 属
+    //  弹反族 A/B;头门已拦回拉/回收）。
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.projId, !!projectileData(this.projId)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: this.projId,
+            aiStyle: projectileData(this.projId)?.aiStyle ?? -1,
+            hostile: false,
+            vx: this.vx, vy: this.vy,
+            timeLeft: this.life,
+            ai0: this.st, ai1: this.stT,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            rainbowSlimeUnlocked: false,
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
     // 948→947 变型检查（原文本位 = AI_015_HandleMovementCollision :44542 位移后读
-    // 【当拍】旗——湿段已在本拍刷新旗,此处同拍等价;头注见上）
+    // 【当拍】旗——湿段已在本拍刷新旗,此处同拍等价;头注见上。★微光弹反对 948 不
+    // 触发变型误判：弹反双清湿旗仅 famA/B/99 支,15 支旗不动,wet 字段=本拍湿段终值,
+    // 与原文 :44542 同相）
     if (this.projId === 948 && this.wet && !this.lavaWet) this.projId = 947;
     // 位移 + tile 碰撞（AI_015_HandleMovementCollision :44460-44527）：
     // ★原版链球本体不扫格——lastVelocity 差分读数来自【标准弹体 Collision.TileCollision】
@@ -5234,6 +5331,15 @@ const NADE_PROJ = new Set([30, 397, 517]);
  *  + 1086/1087 超级炸弹（SW-E1 2026-09-03 接线）。 */
 const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637, 903, 904, 905, 906, 910, 911, 773, 1086, 1087]);
 
+/** ★⑧Shimmer 头门 hostile 位（P.cs:22566 `hostile && aiStyle != 25 && aiStyle != 17`）
+ *  ——本类域内原版 SetDefaults `hostile = true` id（1457 Projectile.cs 逐块核对）：
+ *  75 快乐炸弹(:1557)/303 骷髅爆破火箭(:3951)/681 哥布林炸弹(:7272)/655 蜂巢(:7046
+ *  friendly+hostile 双标)。本类无 hostile 字段（域=玩家投掷/发射族,75 系摇树
+ *  tenthAnniversaryWorld 特例 WorldGen.cs:63677）,面按原版数据位携带——75/303/681
+ *  （aiStyle 16）被头门拦下=原版无微光行为;655 aiStyle 25 头门豁免照走召唤浮升支。
+ *  303/681 现役不经本类（303=Enemy Dart 通道/681=bossAI_dd2）,死码成员照抄防缺面。 */
+const GRENADE_SHIMMER_HOSTILE = new Set([75, 303, 681, 655]);
+
 export class GrenadeProj extends Entity {
   // 碰撞盒 1:1（Projectile.SetDefaults :846-869/:938/:4508/:5173/:5584/:5592/:6571）：
   // 28/37/516=22×22 / 29/470/637=10×10 / 30/397/517=14×14——此前统一 14×14
@@ -5889,11 +5995,47 @@ export class GrenadeProj extends Entity {
   /** ★通用湿段·活拍（:16903-17113 全体弹共用段——projWetSection.ts 共享体 1:1,域注/
    *  位序/特支注见共享体文件头与本类字段块头）。调用位 = 各路【位移位前】
    *  （fired/粘性/655·普通三路;原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)）
-   *  + AI 内 Kill 早退位补跑（杀拍）。 */
+   *  + AI 内 Kill 早退位补跑（杀拍）。
+   *  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿；Update :17114-17117
+   *  `if (shimmerWet) Shimmer()`——位在 `if (!ignoreWater)` 整段门【外】,共享体两
+   *  支路（豁免早退支+段尾）已收口,本类只组装面）。域分派：aiStyle16 全域 →
+   *  弹反族 A 支（P.cs:22606-22625）——深浸双格 Kill/vy>0 弹反+timeLeft 600 钳+−60
+   *  （≡fuse 缩短=提前起爆,原版同字段）/shimmerWet·wet 双清;655 蜂巢（aiStyle 25）
+   *  → 召唤浮升支（:22707-22718）;907(30)/908(175) 链外无动作=缺省支。
+   *  面适配：hostile=GRENADE_SHIMMER_HOSTILE（域缺省 friendly,原版 hostile=true
+   *  四 id 见常量注——头门 :22566 消费,aiStyle 25 的 655 照走）;ai0/ai1=0 恒传（AI_016 的 ai[0]=投掷节拍轴/ai[1] 无通用活面,本支
+   *  只读 velocity/timeLeft/湿旗与深浸格,ai 面=零消费死码）;timeLeft≡fuse（引信=
+   *  原版 timeLeft 同名字段,SW-L1 既案）;kill=弹体 Kill 配方（dead+destroy+onExplode
+   *  +杀拍补跑——本类引信杀位 :5588-5594 同式;deep 浸 Kill 支 :22608-22610 消费;
+   *  wetSectionKillStep 在湿段调用位恒 no-op（wetSectionRan 已置）,照抄配方防漂移）;
+   *  936 解锁面域内无成员=缺省不接（登记死码）。 */
   private wetSectionStep(game: GameHooks): void {
     this.wetSectionRan = true;
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      this.projId, !!projectileData(this.projId)?.ignoreWater);
+      this.projId, !!projectileData(this.projId)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: this.projId,
+            aiStyle: projectileData(this.projId)?.aiStyle ?? -1,
+            hostile: GRENADE_SHIMMER_HOSTILE.has(this.projId),
+            vx: this.vx, vy: this.vy,
+            timeLeft: this.fuse,
+            ai0: 0, ai1: 0,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            rainbowSlimeUnlocked: false,
+            kill: () => {
+              if (this.dead) return;
+              this.dead = true;
+              this.destroy();
+              this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
+              this.wetSectionKillStep(game);
+            },
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy; this.fuse = sf.timeLeft;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
   }
 
   /** ★通用湿段·杀拍补跑（AI 内 Kill 早退位——原版湿段【无 active 门】,AI-Kill 拍

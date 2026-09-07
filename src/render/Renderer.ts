@@ -535,7 +535,7 @@ function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasEle
   } catch {
     return null;
   }
-  if (sparkleTintCache.size > 64) sparkleTintCache.clear();
+  if (sparkleTintCache.size > 64) { const k0 = sparkleTintCache.keys().next().value; if (k0 !== undefined) sparkleTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
   sparkleTintCache.set(key, c);
   return c;
 }
@@ -1776,7 +1776,7 @@ export function popupLabelMeasure(text: string): { w: number; h: number } {
     for (const ch of text) w += ch.charCodeAt(0) > 0xff ? POPUP_LABEL_FONT_PX : 7;
     m = { w, h: POPUP_LABEL_FONT_PX * 1.15 };
   }
-  if (popupLabelMeasureCache.size > 512) popupLabelMeasureCache.clear();
+  if (popupLabelMeasureCache.size > 512) { const k0 = popupLabelMeasureCache.keys().next().value; if (k0 !== undefined) popupLabelMeasureCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear,2026-09-07 统一)
   popupLabelMeasureCache.set(text, m);
   return m;
 }
@@ -5053,7 +5053,7 @@ export class Renderer {
     // 尘染料缓存（ArmorColored 静态族：输出与 uTime 无关 → 按 dyeVid|帧 缓存；
     // 动态族（彩虹/凝胶/反射等）逐帧跑真字节码）。key 含 fx/fy（帧三行变体）
     this.dustDyeCache ??= new Map();
-    if (this.dustDyeCache.size > 256) this.dustDyeCache.clear();
+    if (this.dustDyeCache.size > 256) { const k0 = this.dustDyeCache.keys().next().value; if (k0 !== undefined) this.dustDyeCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
     const s2 = (this.dustScratch2 ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const c1 = s1.getContext('2d', { willReadFrequently: true })!;
     const c2 = s2.getContext('2d', { willReadFrequently: true })!;
@@ -5421,7 +5421,7 @@ export class Renderer {
       cc.globalCompositeOperation = 'destination-in';
       cc.drawImage(img, 0, 0);
       this.fadingTintCache.set(key, c);
-      if (this.fadingTintCache.size > 64) this.fadingTintCache.clear();
+      if (this.fadingTintCache.size > 64) { const k0 = this.fadingTintCache.keys().next().value; if (k0 !== undefined) this.fadingTintCache.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
       return c;
     };
     for (const f of fadingParticles.each()) {
@@ -5511,7 +5511,7 @@ export class Renderer {
         }
       }
       const entry = { base, glow };
-      if (this.flameDyeCache.size > 32) this.flameDyeCache.clear();   // 3 贴图 × 染料档，容量闸防膨胀
+      if (this.flameDyeCache.size > 32) { const k0 = this.flameDyeCache.keys().next().value; if (k0 !== undefined) this.flameDyeCache.delete(k0); }   // ★逐条淘汰最旧(容量闸防膨胀,勿整表clear,2026-09-07)
       this.flameDyeCache.set(key, entry);
       return entry;
     };
@@ -13062,7 +13062,7 @@ export class Renderer {
             }
             src = cv;
           } else src = cloud;
-          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 容量闸（染料×帧×光照16级）
+          if (this.eyebrellaDyeCache.size > 96) { const k0 = this.eyebrellaDyeCache.keys().next().value; if (k0 !== undefined) this.eyebrellaDyeCache.delete(k0); }   // ★逐条淘汰最旧(容量闸,勿整表clear,2026-09-07)
           this.eyebrellaDyeCache.set(key, src);
         }
         const vx = p.cx, vy = p.y + p.h / 2 - p.h * 0.5 - 70;   // MountedCenter − h/2 + (0,−70)
@@ -15592,14 +15592,19 @@ export class Renderer {
       if (opts?.border) {
         const a = ctx.globalAlpha;
         if (a < 1) ctx.globalAlpha = a * a;
-        const sil = (color: string) => this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, color);
+        // ★性能刀(2026-09-07 trace 定谳:sil(#000) 同参×8 + sil(border) 同参×4 = 每帧
+        // 12 次 scratch 重制,每次触发源画布 flush+纹理重上传 = drawImage 40s/43% 的
+        // 机制面)。hoist 成 2 次生成(双槽并存,单槽会相互覆盖),blit 序列与逐像素
+        // 输出不变——每个 blit 时点的剪影内容与旧序一致。烘焙单张(12 blit→1)因
+        // a<1 叠印语义与原版 HandleUseRequest(不透明 ring)/LegacyCreateOutlines(a²
+        // 逐帧)三方互异,缓行另案。
+        const silB = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, '#000000', 0);
+        const silC = this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, opts.border, 1);
         for (const [dx, dy] of [[-4, 0], [-2, -2], [0, -4], [2, -2], [4, 0], [2, 2], [0, 4], [-2, 2]]) {
-          const s = sil('#000000');
-          ctx.drawImage(s, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
+          ctx.drawImage(silB, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
         }
         for (const [dx, dy] of [[-2, 0], [0, -2], [2, 0], [0, 2]]) {
-          const s = sil(opts.border);
-          ctx.drawImage(s, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
+          ctx.drawImage(silC, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
         }
         ctx.globalAlpha = a;
       } else if (extra) {
@@ -15702,10 +15707,12 @@ export class Renderer {
     }
   }
 
-  /** 头像描边纯色剪影 scratch（source-in 填色；当帧即用勿存） */
-  private mapHeadSilScratch: HTMLCanvasElement | null = null;
-  private mapHeadSilhouette(img: CanvasImageSource, sw: number, sh: number, color: string): CanvasImageSource {
-    const sc = this.mapHeadSilScratch ??= document.createElement('canvas');
+  /** 头像描边纯色剪影 scratch ×2 槽（source-in 填色；当帧即用勿存）。
+   *  ★双槽=黑环/队色环剪影同帧并存（hoist 后每帧各生成一次，单槽会相互覆盖）；
+   *  每次生成 = 一次 scratch flush+纹理重上传，12 次/帧 → 2 次/帧（2026-09-07 trace） */
+  private mapHeadSilScratch: (HTMLCanvasElement | null)[] = [null, null];
+  private mapHeadSilhouette(img: CanvasImageSource, sw: number, sh: number, color: string, slot = 0): CanvasImageSource {
+    const sc = this.mapHeadSilScratch[slot] ??= document.createElement('canvas');
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
     const c = sc.getContext('2d')!;
     c.clearRect(0, 0, sw, sh);

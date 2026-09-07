@@ -496,8 +496,11 @@ export function specialTileLight(
       return frameX >= 36 ? [0.5, 0.35, 0.1] : null; // 梳妆台暖档
     case 98:
       return frameY === 0 ? [1, 0.97, 0.85] : null;  // 烟囱顶
-    case 235:
-      return [0.6, 0.6, 0];   // 传送塔台（光地板 X/Y 抬 0.6，cs:678-686）
+    // case 235 传送器【已撤，2026-09-07 定谳】：原版 case 235（TileLightScanner.cs:1021-1029，
+    // 光地板 lightColor.X/Y<0.6 抬底）整段在 ApplyTileLight 的 `if (Main.tileLighted[tile.type])`
+    // 门（:350）内——Main.cs 全树零处 tileLighted[235] 赋值（1457 全量 grep 零命中）⇒ 死分支，
+    // 传送器零 tile 光（对照 238：tileLighted[238]=true（Main.cs:10384）→ 真活分支保留）。
+    // 本仓曾发 [0.6,0.6,0]=登记债清偿（tests/tile-light-static-golden-1457 头注同步改判）。
     case 238:
       return [0.5, 0, 0.5];   // 世纪之花球茎（光地板 X/Z 抬 0.5，cs:668-676）
     case 572: {
@@ -931,6 +934,18 @@ export class TileLightScanner {
                 if (this.flickerById[type]) {
                   const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
                   er += f; eg += f; eb += f;
+                }
+                // 涂装门 1:1（ApplyTileLight:2510-2511 case 22/140、:2578-2580 case 204/347、
+                // :2962-2967 case 739 flag + 尾段 :3131-3141；2026-09-07 光照批登记债清偿）。
+                // PaintID 26=White/27=Gray（PaintID.cs:57-59，非黑漆）：
+                // - 22/140 魔矿族：白/灰涂装时 R=0.12 赋值支被门跳过（R 保持 0），G/B 照常
+                // - 204/347 猩红矿族：同门只抬 R → 白/灰涂装整支归零不发光
+                // - 739 水母块：flag=true → color!=0 时三通道整支覆写 paintColor(color)/255
+                if (sheet === 22 || sheet === 140 || sheet === 204 || sheet === 347) {
+                  if (st.paint[i] === 26 || st.paint[i] === 27) er = 0;
+                } else if (sheet === 739 && st.paint[i] !== 0) {
+                  const pc = paintColor(st.paint[i]);
+                  er = pc[0] / 255; eg = pc[1] / 255; eb = pc[2] / 255;
                 }
               }
               lr = Math.max(lr, er); lg = Math.max(lg, eg); lb = Math.max(lb, eb);

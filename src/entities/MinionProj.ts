@@ -458,6 +458,18 @@ export function minionTrueBox(projId: number): { w: number; h: number } {
     case 393: case 394: case 395: return { w: 20, h: 30 };   // 海盗三变体（:4758-4759）★SW-BJ13
     case 423: return { w: 28, h: 28 };                   // 异星 UFO（:4964-4965）★SW-BJ13
     case 1036: return { w: 18, h: 10 };                  // 雾网蜘蛛（:9770-9771）★SW-BJ13
+    // ★SW-BJ17 2026-09-07：仆从构造器 13 id 真盒收尾批（前批移交件;与构造器 if 链单源
+    //   同步,判据同 BJ13/BJ16）。移交清单 13 id 中 393-395/758/1036 已由 BJ13/BJ16 注册
+    //   （对反编译终值核对一致,不重刀）,本批补余下 8 id——乌鸦 317 28×28（:4104-4105）/
+    //   蜘蛛三型 390-392 30×30（:4746-4747）/ 沙漠虎一档 833 26×20（:8086-8087）/
+    //   二三档 834-835 20×30（:8100-8101/:8114-8115）/ 酷鞭雪花哨兵 917 30×30
+    //   （:8705-8706）。各 SetDefaults 块无 scale 行（缺省 1）→ SetDefaults 尾
+    //   width×scale（:10674-10675）恒等,字面即终值;数据面 vanilla-projectiles.json 同值
+    case 317: return { w: 28, h: 28 };                   // 乌鸦 Raven（:4104-4105）★SW-BJ17
+    case 390: case 391: case 392: return { w: 30, h: 30 };   // 蜘蛛三型（:4746-4747）★SW-BJ17
+    case 833: return { w: 26, h: 20 };                   // 沙漠虎一档（:8086-8087）★SW-BJ17
+    case 834: case 835: return { w: 20, h: 30 };         // 沙漠虎二三档（:8100-8101/:8114-8115）★SW-BJ17
+    case 917: return { w: 30, h: 30 };                   // 酷鞭雪花哨兵（:8705-8706）★SW-BJ17
     // ★SW-BJ16 2026-09-07：33693 中心锚支家族真盒（与构造器 if 链单源同步,判据同 BJ13）
     case 613: return { w: 24, h: 24 };                   // 星尘细胞（:6600-6611 块内 width/height）
     case 623: return { w: 50, h: 80 };                   // 星尘守护者（:6713-6714）
@@ -4100,6 +4112,24 @@ export class MinionProj extends Entity {
     else if (projId === 393 || projId === 394 || projId === 395) { this.w = 20; this.h = 30; }
     else if (projId === 423) { this.w = 28; this.h = 28; }
     else if (projId === 1036) { this.w = 18; this.h = 10; }
+    // ★SW-BJ17 2026-09-07：仆从构造器 13 id 真盒收尾批（前批移交件;与 minionTrueBox
+    //  单源同步,判据同 BJ13/BJ16）。移交清单中 393-395/758/1036 已由 BJ13/BJ16 注册
+    //  （对反编译终值核对一致）,本批补余下 8 id——此前全落 16×16 缺省 ⇒ 判定盒/湿段
+    //  采样盒窄:乌鸦 317 28×28（:4104-4105）/ 蜘蛛三型 390-392 30×30（:4746-4747）/
+    //  沙漠虎一档 833 26×20（:8086-8087）/ 二三档 834-835 20×30（:8100-8101/:8114-8115）/
+    //  酷鞭雪花哨兵 917 30×30（:8705-8706）。各块无 scale 行 → 字面=SetDefaults 终值
+    //  （尾 width×scale :10674-10675 恒等）。
+    //  ★出生位半盒偏差备案（调用侧域外,本批不落刀）：通用 spawnMinion（Game.ts:15688）
+    //  把钳制后 MouseWorld、WhipProj.spawnSidekick 把敌怪 Center 直传盒左上,而原版
+    //  NewProjectile :10878 X−w×0.5=中心语义 → 真盒中心的右下偏 = 半盒（16×16 时代
+    //  8px 恒偏,本批后 317=14px、390-392=15px、833=(13,10)px、834-835=(10,15)px、
+    //  917=15px——偏移随盒扩容增大,随从 AI 入场即自纠,瞬态视觉;先例=钻地龟调用点
+    //  中心换算已修,spawnDigtoiseOnCursor。修复属 Game.ts/WhipProj.ts 调用侧）
+    else if (projId === 317) { this.w = 28; this.h = 28; }
+    else if (projId === 390 || projId === 391 || projId === 392) { this.w = 30; this.h = 30; }
+    else if (projId === 833) { this.w = 26; this.h = 20; }
+    else if (projId === 834 || projId === 835) { this.w = 20; this.h = 30; }
+    else if (projId === 917) { this.w = 30; this.h = 30; }
     // ★SW-BJ16 2026-09-07：33693 中心锚支家族 SetDefaults 真盒补注册（同 BJ13 判据：
     //  本支 draw 锚=盒心系,盒错即绘错；此前除 643/1098/1123/1119 外全落 16×16 缺省）：
     //  星尘细胞 613 24×24（:6600-6611）/ 星尘守护者 623 50×80（:6713-6714）/

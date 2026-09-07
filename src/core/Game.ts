@@ -825,6 +825,22 @@ export function killTileHitDustAmount(sheet: number, frameX: number): number {
   if (sheet === 184) return Math.floor(frameX / 22) >= 5 ? 5 : 3;   // LongMoss
   return KILL_TILE_DUST[sheet] ?? 3;
 }
+
+/** ★SW-RB6a 2026-09-07：KillTile_GetTileDustAmount(fail=false) 档值（WorldGen.cs
+ *  :67119-67207）——ReplaceTile 尘量（:63072）专用。与 fail=true 档
+ *  （killTileHitDustAmount）差异：缺省 10（:67123-67128）/231 幼虫 6（:67129-67134）/
+ *  481-483 裂纹砖 3（:67135-67140）/苔石族 534/536/539/625/627 5（:67189-67195，
+ *  fail 档均塌缩 3 故不在 KILL_TILE_DUST）/184 长苔 frameX/22≥5→5 否则 10
+ *  （:67196-67205,fail 档 10→3）；654/630/631/零尘族/541/549 两档同值=复用
+ *  KILL_TILE_DUST。 */
+function killTileBreakDustAmount(sheet: number, frameX: number): number {
+  if (sheet === 184) return Math.floor(frameX / 22) >= 5 ? 5 : 10;  // LongMoss
+  if (sheet === 231) return 6;                                      // Larva
+  if (sheet === 481 || sheet === 482 || sheet === 483) return 3;    // CrackedBricks
+  if (sheet === 534 || sheet === 536 || sheet === 539
+    || sheet === 625 || sheet === 627) return 5;                    // 苔石族
+  return KILL_TILE_DUST[sheet] ?? 10;
+}
 // tileAxe（Main.cs:7347-7364）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
 // ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
 const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
@@ -4550,6 +4566,11 @@ export class Game implements GameHooks {
    *  法杖定向采收期间置位，消耗于掉落求值） */
   private _staffHarvestBonus = false;
   private lastMusic = -1;
+  /** ★选曲滞回状态(见 tickCount%15 选曲段注):k=pending 曲目,n=连续稳定次数 */
+  private musicPending: { k: number; n: number } = { k: 0, n: 0 };
+  /** 环境曲切换的最小稳定时长(选曲每 15t 一次,4 次=1s)——原版无此机制(边缘
+   *  交替靠交叉淡化掩盖),本仓用户拍板「确保稳定,可偏离原版」加滞回 */
+  private static readonly MUSIC_HYSTERESIS_TICKS = 4;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
   /** 地图虫洞头像悬停态（上一帧；Main.cs unityMouseOver——悬停起始帧播 SoundID 12） */
@@ -5278,7 +5299,12 @@ export class Game implements GameHooks {
       // Grapple（E = 原版默认 PlayerInput.cs:2075，SW-BN2 2026-09-07 起缺省表对齐；
       // Inventory 收回纯 Escape :2074）：装备槽/背包首个钩爪朝鼠标方向发射
       // （Player.QuickGrapple :5971-6113 鼠标世界位方向）
-      if (isBound('Grapple', code) && this.player && !this.input.uiBlocking && !this.paused) {
+      // SW-RB6b 2026-09-07：补 !dead 门——原版 QuickGrapple 调用点在 Player.Update
+      // 主路径（:27682-27690 controlHook→releaseHook 支），死亡走 UpdateDead 永不达；
+      // 旧缺省 Grapple 空表时 E 不触发钩爪故从未暴露,缺省表对齐后死亡/观战按 E
+      // = 生成即死的隐形钩（GrappleProj.aiStep p.dead 首拍自灭）+ 与 spectateKeyExits
+      // 的 controlHook 退观战支同拍双消费。
+      if (isBound('Grapple', code) && this.player && !this.player.dead && !this.input.uiBlocking && !this.paused) {
         const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
         this.useEquippedGrapple(wx - this.player.cx, wy - this.player.cy);
       }
@@ -7373,9 +7399,31 @@ export class Game implements GameHooks {
           timeOfDay01: w.clock.timeOfDay,
         },
       });
+      // ★选曲滞回(2026-09-07 用户拍板「确保稳定,可偏离原版」):群系判定是
+      //  15t 计数阈值域(ZoneGlowshroom 等),洞穴边缘格数波动 → 环境曲快速交替
+      //  (蘑菇曲 29↔地下曲 31,2-3 秒一轮,bgm 环实录;原版边缘同样交替=交叉淡化
+      //  掩盖,用户不能接受)。修=环境曲间切换需连续 MUSIC_HYSTERESIS_TICKS 次
+      //  pickMusic 结果稳定才生效;事件曲( Boss/入侵/月/八音盒/火把神)即时切
+      //  (战斗反馈不延迟);pending 期间 pickMusic 回到当前曲=波动平息,取消。
       if (music !== this.lastMusic) {
-        this.lastMusic = music;
-        this.cb.onMusic?.(music);
+        const isEventMusic = !!eventMusic || !!moonMusicGated || (this.torchGod?.active ?? false)
+          || (this.scene.musicBoxStyle ?? -1) >= 0;
+        if (isEventMusic) {
+          this.lastMusic = music;
+          this.musicPending = { k: 0, n: 0 };
+          this.cb.onMusic?.(music);
+        } else if (this.musicPending.k === music) {
+          this.musicPending.n++;
+          if (this.musicPending.n >= Game.MUSIC_HYSTERESIS_TICKS) {
+            this.lastMusic = music;
+            this.musicPending = { k: 0, n: 0 };
+            this.cb.onMusic?.(music);
+          }
+        } else {
+          this.musicPending = { k: music, n: 1 };
+        }
+      } else if (this.musicPending.k !== 0) {
+        this.musicPending = { k: 0, n: 0 };   // 波动平息
       }
     }
     // ---- 群系光照影响逐 tick 平滑 + 写 scene(★必须在上面 15t 场景替换【之后】:
@@ -21855,9 +21903,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const anchor = this.moveReplaceTileAnchor(x, y, oldSheet, st.frameX[i0], st.frameY[i0]);   // :63072
     x = anchor[0]; y = anchor[1];
     if (!st.inBounds(x, y)) return false;
-    // :63073-63077 尘 = KillTile_GetTileDustAmount(fail:false) default 档 10（:67123-67128；
-    //  本仓粒子 idiom，计数对齐原版档位）
-    this.spawnParticles(x * TILE + 8, y * TILE + 8, oldDef?.mapColor ?? '#8a8a8a', 10, 1.5);
+    // :63073-63077 尘 = KillTile_GetTileDustAmount(fail:false)（:67119-67207 分型档；
+    //  ★SW-RB6a 2026-09-07：曾写死 10——苔石族 5/回声块 1/幼虫 6 等档整缺;帧取锚
+    //  归一前 i0（原版 tileSafely=原点击格,184 帧档读该格 frameX））
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, oldDef?.mapColor ?? '#8a8a8a',
+      killTileBreakDustAmount(oldSheet, st.frameX[i0]), 1.5);
     this.killTileBreakSound(oldType, x, y);              // :63078 KillTile_PlaySounds（无放置音）
     this.replaceTileDropOld(x, y, oldType);              // :63079 旧块物一次（includeLarge 面）
     const newSheet = TILE_DEFS[newType]?.vanilla?.sheet ?? -1;
@@ -24385,6 +24435,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (event > 0) this.achievements.notifyProgressionEvent(event);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestUnlocked'));
       this.cb.onInventoryChanged();
+      // SW-RB6b 2026-09-07：解锁拍不开箱（清偿登记债 BJ17-1）——原版解锁点击
+      // flag14=true → num77 恒 -1（Player.cs:33493-33495 `if (!flag14) num77 =
+      // Chest.FindChest(...)` 不执行）→ :33497 `if (num77 != -1)` 开/关/换箱 +
+      // IsChestRigged→HitSwitch + 成就 16 整块跳过,解锁拍只出解锁音 22 + 帧回退 +
+      // 成就 19/20（Chest.Unlock 内）;【次】拍点击才走开箱流（:33504 Sound 10）。
+      // 旧码解锁拍直落开箱流 = 多开一拍 + 多一声 menuOpen。
+      this.input.rightDown = false;
+      return;
       }
     }
     // 亡命箱布线触发（WorldGen.IsChestRigged :36127-36133 权威式）：type 467
@@ -33368,12 +33426,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 4385 Cursed)——infectedSeed 无文本映射恒 false，1:1 保留死分支）。
           // SW-BJ23 2026-09-07：vanilla-shopstock.json 曾并存同三条目且门被提取器
           // 丢成 '!hardMode'（vampireSeed/infectedSeed 无 token 静默剥离）→ 普通
-          // 肉前世界恒越货上架火把+邪恶火把；JSON 侧三行已删，本种子臂为唯一来源
-          if (!this.world.flags.hardMode && !!this.world.seedFlags?.vampireSeed
-            && !!this.world.seedFlags?.infectedSeed) {
-            add([8]);
-            add([this.world.crimson ? 4386 : 4385]);
-          }
+          // 肉前世界恒越货上架火把+邪恶火把；JSON 侧三行已删。
+          // ★SW-RB6a 2026-09-07：本臂曾与下方 IIIII61 吸血鬼种子两臂块（:33507 区）
+          // 同判双写（两臂门表达式全等）→ 种子世界树妖店双份火把/邪恶火把；留 IIIII61
+          // 单点（BJ23 结构锁 :257 钉的就是该块），此处只留注释。
           break;
         }
         case 54: // 裁缝套装（:1795-1923）
@@ -33445,9 +33501,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 兽耳尾套装（:3358-3379 四相位对——原 switch 直取，无进度门）
           add([[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)]);
           // 吸血鬼世界上架火把（Chest.cs:3381-3384 vampireSeed && !infectedSeed →
-          // SetDefaults(8)——动物学家开局即有火把供给）
-          if (!!this.world.seedFlags?.vampireSeed && !this.world.seedFlags?.infectedSeed) add([8]);
-          if (this.player.golferScoreAccumulated >= 2000) add([4744]);    // :1951 猎人斗篷
+          // SetDefaults(8)——动物学家开局即有火把供给）。
+          // ★SW-RB6a 2026-09-07：本臂曾与下方 IIIII61 两臂块 ② 支同判双写 → 种子世界
+          // 动物学家店双份火把；留 IIIII61 单点（树妖侧同步单点化），此处只留注释。
+          // ★SW-RB6a 2026-09-07：猎人斗篷 4744 臂整删——原版 4744 全 SetupShop 上架点
+          //  只有裁缝 case 5（:1971-1976 golferScoreAccumulated>=2000，vanilla-shopstock
+          //  json shops['54'] 已带 golfer2000 门）与派对女孩 case 13 派对段（:2352），
+          //  动物学家 case 23 无此条目（本臂 :1951 行号锚实为 case 5 域内）= 越货。
           break;
         }
       }
@@ -33598,6 +33658,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'windyDay': return !!this.world.weather?.shouldUseWindyDayMusic;
       case 'notTheBees': return !!this.world.seedFlags?.notTheBees;
       case 'tenthNotBees': return !!this.world.seedFlags?.tenthAnniversary && !!this.world.seedFlags?.notTheBees;
+      // ★SW-RB6a 2026-09-07：FTW 种子 token（Main.getGoodWorld）——蒸汽朋克人 995 拼装机
+      //  门 `hardMode || !getGoodWorld`（Chest.cs:2164-2167）此前无 token 只能恒真备案
+      case 'getGoodWorld': return !!this.world.seedFlags?.getGoodWorld;
       case 'downedClown': return !!f['downed_109'];     // NPC.cs:80195 case 109
       case 'downedFrost': return !!f['downedFrost'];
       case 'downedAncientCultist': return !!f['downed_439'];
@@ -34217,17 +34280,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return true;
     }
     const before = this.coinsOwned();
-    inv.slots[slot] = null;                         // 先腾格再入币（:787 TurnToAir 在结算后）
+    // ★SW-RB6a 2026-09-07：卖品格【不】先腾——原版槽位卖出 SellItem(item)（:823-841
+    //  cursorOverride 10 支）在包克隆/币换装（Player.cs:34727-34868）期间卖品仍驻
+    //  inventory[slot]（TurnToAir 在 SellItem true + AddItemToShop 之后 :829-833），
+    //  币必须装进【不含卖品格】的空间：曾先置 null=多腾一格，包全满时原版回滚
+    //  「装不下不卖」被本仓卖成（1 格差）。回滚语义同步：物品从未离位,无需复原。
     this.gainCopper(quote.copper);                  // :34745-34868 铂/金/银/铜换装
     if (this.coinsOwned() - before !== quote.copper) {
       // 装不下所有币 → 整体回滚（Player.cs:34727-34731 全仓克隆 + :34869-34876 还原；
-      // 本仓等价实现 = 撤回已入币 + 复原物品格），物品不动、回购记不动、货架不动
-      // （SellItem false 在先 → chest.AddItemToShop 根本不执行，ItemSlot.cs:783 门）
+      // 本仓等价实现 = 撤回已入币），物品不动、回购记不动、货架不动
+      // （SellItem false 在先 → chest.AddItemToShop 根本不执行，ItemSlot.cs:827 门）
       const gained = this.coinsOwned() - before;
       if (gained > 0) this.spendCopper(gained);
-      inv.slots[slot] = it;
       return true;
     }
+    inv.slots[slot] = null;                         // TurnToAir（:832，结算成功后）
     this.addItemToShopShelf(memoKey, vid, it.prefix ?? 0, it.stack);  // chest.AddItemToShop（:785）
     this.sfx.play('coin');                          // SoundID 18 = Coins（:788）
     this.cb.onInventoryChanged();
@@ -34283,7 +34350,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private addItemToShopShelf(memoKey: string, vid: number, prefix: number, stack: number): void {
     const memoBefore = this.shopSellbackMemo.get(memoKey) ?? 0;
     this.consumeSellbackMemo(memoKey, stack);
-    const shelf = buybackShelfStack(stack, memoBefore);
+    let shelf = buybackShelfStack(stack, memoBefore);
+    // ★SW-RB6a 2026-09-07：AddItemToShop 第一相补接（Chest.cs:664-671）——残量先并入
+    //  既有 buyOnce 条目：CanStack = 同 type ∧ 同 prefix ∧ 未满叠（Item.cs:5578-5585
+    //  `type 相同 → prefix 相同才可叠`，1.4.4 起带词缀物品不互叠），帽 = 条目 maxStack
+    //  （:669 Math.Min(num2, maxStack - stack)）；余量才落首空位（:673-686）。曾缺此相
+    //  直 push 新行 → 同件分两次卖=两行货架 + 39 条帽（:687 循环界）提前触顶。
+    if (shelf > 0) {
+      const maxStack = ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid] ?? '']]?.maxStack ?? 9999;
+      for (const bb of this.shopBuybackStock) {
+        if (shelf <= 0) break;
+        if (bb.vid !== vid || bb.prefix !== prefix || bb.stack >= maxStack) continue;
+        const add = Math.min(shelf, maxStack - bb.stack);
+        bb.stack += add;
+        shelf -= add;
+      }
+    }
     if (shelf > 0 && this.shopBuybackStock.length < 39) {
       this.shopBuybackStock.push({ vid, prefix, stack: shelf });
     }

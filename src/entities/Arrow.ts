@@ -225,7 +225,14 @@ export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElemen
   const cx = c.getContext('2d')!;
   cx.imageSmoothingEnabled = false;
   cx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-  if (frameCache.size > 2048) frameCache.clear();
+  if (frameCache.size > 2048) {
+    // ★逐条淘汰最旧(2026-09-07 canvas哨兵 62/s 风暴定谳):整表 clear = 下帧全部
+    // 弹幕重切片重分配 = 每张新 canvas 都是新 GPU 纹理 → 全局 blit 全被拖慢
+    // (大世界弹幕种类×帧号组合破 2048 后永久抖动)。同前科:BiomeBackground
+    // tintCache "整表 clear = 下帧全量重烘雪崩"。
+    const k0 = frameCache.keys().next().value;
+    if (k0 !== undefined) frameCache.delete(k0);
+  }
   frameCache.set(key, c);
   return c;
 }
@@ -261,7 +268,10 @@ function whiteSpriteOf(
   cx.globalCompositeOperation = 'source-in';
   cx.fillStyle = '#fff';
   cx.fillRect(0, 0, w, h);
-  if (whiteSpriteCache.size > 512) whiteSpriteCache.clear();
+  if (whiteSpriteCache.size > 512) {
+    const k0 = whiteSpriteCache.keys().next().value;   // ★逐条淘汰最旧(同 frameCache 2026-09-07)
+    if (k0 !== undefined) whiteSpriteCache.delete(k0);
+  }
   whiteSpriteCache.set(key, c);
   return c;
 }

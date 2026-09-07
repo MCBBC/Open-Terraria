@@ -72,8 +72,6 @@ export interface Body {
    *  `y = Position.Y + Velocity.Y`，Collision.cs G2 `Position.Y + num7 < y`） */
   vyEntry?: number;
   feetEntry?: number;
-  /** 坡面受阻推离已发射（一次性；脱坡复位） */
-  slopeBlockFired?: boolean;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -457,6 +455,7 @@ function slopeCollide(
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
   if (srec) srec.push(`  win x[${x0}..${x1}] y[${y0}..${y1}] probe=+${((wasGround && b.vy >= 0) ? 1 : 0)}`);
   let bestLift = 0;      // 最大抬升量（负 y 位移;0 = 无贴合）
+  let bestLiftSlope = 0; // 胜出坡 id（1/2 地面坡；原版 bitsByte[num3] 语义,shortfall 滑向用）
   let bestDrop = 0;      // 天花板最大下推量
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
@@ -617,12 +616,12 @@ function slopeCollide(
         if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
         if (num7 < bestLift) {
           bestLift = num7;
+          bestLiftSlope = slope;             // 胜出坡向（原版 bitsByte[num3]，num3=slope）
           if (SLOPE_G2) b.collideY = true;   // bitsByte[num3]=true（:1954）
         }
       }
     }
   }
-  if (bestLift >= 0) b.slopeBlockFired = false;   // 不再受阻：复位一次性标记
   // ★SW-BJ6 2026-09-07：else 支站顶应用（vanilla vector2.Y 棘轮收尾,取最高者,
   //  优先于抬升——抬升目标 feet=vy0+num4 ≥ 站顶 feet=vy0）。受阻判定按原版
   //  重跑 TileCollision 语义（:2003-2017）只认【新交】整块：站位前旧盒已与该格
@@ -680,21 +679,24 @@ function slopeCollide(
       //   （2026-08-19 用户报+行为录制定位；探针 _slopejump.mjs 复现 vy+2.31→-2.55）
       if (b.vy >= 0) b.onGround = true;
     } else {
-      // ★shortfall X-slide（原版 Collision.cs:2008-2036 核心机制）：
-      //   坡面贴合被上方实心堵住时，将受阻量转为水平滑动而非清零速度。
-      //   原版流程：贴合位移 → 递归 TileCollision 校验 → Y 被截短的差额
-      //   转为 X 滑动（:2010-2015 bitsByte[1]/[2] → ±num9）。这使玩家走复杂
-      //   坡结构时碰墙就滑过去而非卡死。
-      //   本仓实现：限制滑行量 ≤ TILE（一格），方向 = 贴合方向的反向
-      //   （被堵住意味着上方有障碍 → 沿墙面水平退让）。
-      // ★2026-09-01 用户反馈"弹飞太远"定罪：此 slide 每 tick 触发，持续
-      //   滑行 ~8px/tick × 多 tick = 累计数远超 1 格。修=一次性 4px 半格推离
-      //   （slopeBlockFired 门），接触期不重复，离开坡面后复位。
-      if (!b.slopeBlockFired) {
-        b.slopeBlockFired = true;
-        b.x += (b.vx >= 0 ? -1 : 1) * 4;          // 半格推离（固定量，非比例）
-      }
+      // ★shortfall X-slide（vanilla Collision.cs:2001-2019 逐字,2026-09-07 v_200 坡楔案重写）：
+      //   抬升被上方实心堵住。本仓受阻判定=整抬弃用（Y 不动,achieved=0）⇒
+      //   num9 = 截短前速度Y − 实际速度Y = bestLift（<0）；按胜出坡向转水平滑动：
+      //   bitsByte[1]（slope1）→ X -= num9、bitsByte[2]（slope2）→ X += num9
+      //   （:2008-2014；num9<0 ⇒ 两者均为沿坡向后退让）；并【双清速度】
+      //   （:2016-2017 vector3.X = 0f; vector3.Y = 0f）——该清零是 AI_003 卡死计数链
+      //   NPC.cs:57703 `position.X == oldPosition.X` → 满计数停索敌(:57914)→游荡转向
+      //   (:57955-57975) 的物理前提；缺失时位置逐拍振荡,计数永不点火 = 战士族在
+      //   坡楔型地形永久 ±px 弹跳（behavior-log-Starter_World 2026-09-07 v_200 实锤,
+      //   翻转实验2实测平衡态钉驻 cx ±0.1px、vx 0~0.07）。
+      //   逐 tick 施行（原版无接触期记忆）。2026-09-01"弹飞太远"病灶在旧实现的
+      //   固定 4px 一次量,非逐 tick 本身——精确 num9 的平衡态滑移为亚像素；
+      //   个别场景若仍见远滑,以 srec 的 lift= 值归因,勿回退固定量。
+      //   旧 slopeBlockFired 一次性门及其 bestLift>=0 复位行一并退役（字段无外部
+      //   消费面,已自 Body 接口删除）。
+      b.x += (bestLiftSlope === 1 || bestLiftSlope === 3) ? -bestLift : bestLift;
       b.vy = 0;
+      b.vx = 0;
       // 物理埋点（探针取证用；window.__swPhysDbg 为真时计数）
       const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
       if (dbg) dbg.shortfall = (dbg.shortfall ?? 0) + 1;
