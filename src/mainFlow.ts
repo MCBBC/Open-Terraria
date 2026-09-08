@@ -1074,7 +1074,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
   async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; size: number; difficulty: number; evil: -1 | 0 | 1 }) {
-    const loadState = new UIWorldLoadState(cfg.evil);
+    // ★IIIII215b：seedText 下传 → 生成屏彩蛋旗标派生（drunk 乱码/蜜蜂文案/FTW 反写/
+    //   十周年 HotPink/醉酒帧闪；UI 层私有 UnifiedRandom,零世界 RNG 耦合）；
+    //   genSounds=true → 生成流首尾双 MenuOpen（WorldGen.cs:6541/:6551 1:1）。
+    //   读档三路（loadFromKey/quickload/导入）不传 seed → 彩蛋全关（原版加载路径同态）。
+    const loadState = new UIWorldLoadState(cfg.evil, { seedText: cfg.seed, genSounds: true });
+    (window as unknown as { __swGenUi?: UIWorldLoadState }).__swGenUi = loadState; // 探针句柄(同 __swMenuBg 判例)
     VUI.setState(loadState);
     // ★宏任务让路(#三开压测批续,与 newWorld 同纪律):makeGame 的 Game ctor 冷兜底
     // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是

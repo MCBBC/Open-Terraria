@@ -894,7 +894,8 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
             // notNearOtherChests:true(cs:3708 原版实参)——±25×±8 已有 BasicChest 则拒。
             // ★QQQQQ（s22222 #63 定谳）：TileObject.Place 预清场（TileObject.cs:79-90）
             //   已由 JJJJ 批在 placeBuriedChest 写侧 1:1 落地（killTileChest：cut/
-            //   Breakable 覆盖格先杀后写箱，含 51&墙62 的 1×Next(4) cs:63904 + 尾
+            //   Breakable 覆盖格先杀后写箱，含 51&墙62 的 1×Next(4)（1456 cs:63904 /
+            //   1457 cs:64369）+ 尾
             //   SquareTileFrame 九宫孤儿级联）——IIIII 时代的"事后补杀镜像"（回滚→
             //   重杀→重写）随之退役：镜像会在 loot 之后再消费一遍覆盖格杀掷（s22222
             //   巢#11 箱覆 2 张蛛网 51 → +2×Next(4) 幽灵掷），掷流自此 +2 偏移 →

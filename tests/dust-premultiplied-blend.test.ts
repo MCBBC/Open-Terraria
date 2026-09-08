@@ -7,7 +7,8 @@
 // c 逐通道调制,src.rgb=texP×c.rgb 不乘 c.a、src.a=tex.a×c.a）：
 //   final = dst×(1−texA×cA) + tex.rgb×texA×cRGB   （单次 clamp）
 import { describe, it, expect, vi } from 'vitest';
-import { dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, DUST_PM_CACHE_MAX } from '../src/fx/VanillaDust';
+import { readFileSync } from 'node:fs';
+import { dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, DUST_PM_CACHE_MAX, VanillaDust } from '../src/fx/VanillaDust';
 import { Renderer } from '../src/render/Renderer';
 
 /** 2×2 直色贴图：tA=255 / 半透 / 全透（形状外）/ 低α,覆盖四象限 */
@@ -328,5 +329,59 @@ describe('A=0 加性族逐通道乘数 rgbv 金标（2026-09-03）', () => {
     expect(texel[0] * m2[0]).toBeCloseTo(200 * 150 / 255, 6);
     expect(texel[1] * m2[1]).toBeCloseTo(100 * 50 / 255, 6);
     expect(texel[2] * m2[2]).toBeCloseTo(50 * 50 / 255, 6);
+  });
+});
+
+// ===========================================================================
+// ★F1 dust 43 闪光尘档（2026-09-08 红队清偿）——GetAlpha（Dust.cs:2503 num=
+// (255−alpha)/255; :2757-2758 (num+9)/10 【只乘 RGB】; :2786-2792 尾段 A=newColor.A
+// −alpha,DrawDust Main.cs:39664 传 Lighting 色 A 恒 255 → A=255−alpha≡num）。
+// 旧 `a:(num+9)/10` 让烘焙对 erase=texA×0.9 → tileShine 闪尘（spawn α=254,
+// TileDrawing.cs:7657）每颗把世界层 90% alpha 擦掉=矿石/宝箱贴图被亮斑掏底
+// （用户可见伪影,同 2026-09-04 水花黑十字族）。Renderer 侧 43 恒走 A=0 直绘
+// 双 pass（判据结构锁见本 describe 末测试）。
+// ===========================================================================
+describe('dust 43 闪光尘档（★F1:a=num、rgb=(num+9)/10;43+color 不走烘焙对）', () => {
+  const dustOf = (type: number, alpha: number, color: import('../src/fx/VanillaDust').DustColor | null = null) =>
+    ({ type, alpha, scale: 0.5, color, noGravity: false, noLight: false } as never);
+
+  it('alphaOf(43) α=254 → a=1/255（纯加性 glint）、rgb=(num+9)/10≈0.9004', () => {
+    const got = VanillaDust.alphaOf(dustOf(43, 254));
+    expect(got.a).toBeCloseTo(1 / 255, 10);
+    expect(got.rgb).toBeCloseTo((1 / 255 + 9) / 10, 10);
+    // 判别力：旧档 a=(num+9)/10=0.9004 与正确 num=0.0039 相差 230 倍（防回退钉）
+    expect(Math.abs(got.a - (1 / 255 + 9) / 10)).toBeGreaterThan(0.5);
+  });
+
+  it('alphaOf(43) 全 α 域 a=(255−alpha)/255 恒等式（:2786-2792 尾段语义）', () => {
+    for (const alpha of [0, 100, 200, 254, 255]) {
+      const num = (255 - alpha) / 255;
+      const got = VanillaDust.alphaOf(dustOf(43, alpha));
+      expect(got.a).toBeCloseTo(num, 10);
+      expect(got.rgb).toBeCloseTo((num + 9) / 10, 10);
+    }
+  });
+
+  it('43 自定义色 GetColor pass：红 (255,0,0) → G/B 压 0 的彩色加性（α≈1/255）', () => {
+    const rgb = (1 / 255 + 9) / 10;
+    const cp = VanillaDust.colorPass(
+      dustOf(43, 254, { r: 255, g: 0, b: 0, a: 255 }) as never, rgb, 1 / 255,
+    );
+    // GetColor = clamp(color.ch − (255 − base.ch)) 后 /255;base 字节 229.6 按字节
+    // 语义截断（clamp255 的 v|0）→ 229/255（C# byte 算术同款）
+    expect(cp!.r).toBeCloseTo(Math.floor(rgb * 255) / 255, 10);
+    expect(cp!.g).toBe(0);                                                // 压零=纯红
+    expect(cp!.b).toBe(0);
+    expect(cp!.a).toBeCloseTo(1 / 255, 10);   // α 项低于本体支 0.004 阈 → 直绘支门槛看 RGB
+  });
+
+  it('结构锁：Renderer 直绘判据含 `|| d.type === 43`、43 GetColor 直绘 pass 在位', () => {
+    const src = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
+    // A=0 直绘支最小判据（43 型恒走直绘,不经烘焙对——烘焙对 e<0.5 二值残段会
+    // 把半透 worldLayer α 顶满=掏底/黑块族）
+    expect(src).toContain('if ((a <= 0.004 && !d.color) || d.type === 43) {');
+    // 43 自定义色 GetColor 加性 pass（本体后的第二 Draw,Main.cs:39696-39704）
+    expect(src).toContain('if (d.type === 43 && d.color) {');
+    expect(src).toContain('VanillaDust.colorPass(d, rgb, a)');
   });
 });

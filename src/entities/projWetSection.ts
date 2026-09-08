@@ -9,6 +9,9 @@
 // 的 270 id（缺行=不豁免,与原版缺省 false 同向;270=2026-09-02 F3③ 提取审计终值,
 // 旧注 264 系漂移）。豁免弹湿段整段跳过,但出生预置（:10886-10893）无条件跑——
 // wet 被 :10888-10891 反清,honeyWet/shimmerWet 照写（原文无条件赋值,无豁免支）。
+// ★2026-09-08 残差五件批④：豁免四型出生预置面开始有宿主承接——RainCloudProj
+// 238/244/239/245（aiStyle45,AI_045 零湿旗消费=惰性面）aiRain/aiDrop 头调共享体,
+// 豁免早退下落预置+:17114 shimmerWet 门（缺省支无动作,不接 shimmer 钩）。
 // 另 :16891-16894 三型前置换位（242/302/638 每子步 wet=false）在本函数内照抄,
 // 位次=预置后/整段门前（原文=Update 子步循环内 AI 后/:16895 前,豁免弹亦跑）。
 // 位序（原版 Update 内）: AI → 本湿段(:16903) → HandleMovement(:17120,湿阻尼
@@ -66,10 +69,14 @@ export const PROJ_DESTROYED_BY_WATER: ReadonlySet<number> = new Set([85, 15, 188
 //     /ai0·ai1 可选域缺省 0=原版 float[] 缺省——本类承载域无 99/15/相刃 id,三面零
 //     消费=死码登记）。B1-X3 既有 936 mid-AI 特支块随本泛化收口（避免 vy-=0.7 双跑）。
 //   · 共享体调用位经 hooks.shimmer 全步回调（宿主组装 ProjShimmerFace+回写,范本=
-//     Arrow 调用位）。现役共享消费域命中支而未传面=登记不跑：GrenadeProj aiStyle16
-//     （弹反族 A,含 229 型特案域）/FlailProj 15/YoyoProj 99/相刃 1059-1102（aiStyle3
-//     域,若由 WeaponProj 承载）/MinionProj 25·17 域/aiStyle14 域——弹幕微光行为对
-//     这些族暂缺,属玩家可感面残留,扩面时逐类接 shimmer 回调。
+//     Arrow 调用位/Boomerang 组装位）。已接面：Arrow（全量面）/Boomerang/
+//     WeaponProj 四域组装位/PortalGunBolt 601（aiStyle1 弹反族 A,2026-09-08 残差
+//     五件批①接,面适配注 PortalGunBolt.wetSectionStep）。现役共享消费域命中支而
+//     未传面=登记不跑：GrenadeProj aiStyle16（弹反族 A,含 229 型特案域）/FlailProj
+//     15/YoyoProj 99/相刃 1059-1102（aiStyle3 域,若由 WeaponProj 承载）/MinionProj
+//     25·17 域/aiStyle14 域/TrapShot 装置弹 601 变体（Dart.ts trapWetProjId 同 id
+//     双载体,域外件同批未触）——弹幕微光行为对这些族暂缺,属玩家可感面残留,
+//     扩面时逐类接 shimmer 回调。
 //   · netUpdate/SendData(7)/CheckAchievement_RealEstateAndTownSlimes=联机与成就记账
 //     面,本仓单模式无对应字段（936 解锁回调内置旗由 world.flags 承载,城镇入住由
 //     Main.cs:66913 townNPCCanSpawn 等价门承载——B1-X3 既案）。

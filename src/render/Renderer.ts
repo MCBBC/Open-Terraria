@@ -112,6 +112,7 @@ import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
+import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
 import type { Appearance } from '../player/Appearance';
 import { meleeThirdOf } from '../player/SwingPathMath';
@@ -3066,7 +3067,7 @@ export class Renderer {
       // Main.cs:9210-9222 的 tileFlame 表无 85 → flameCount=0，循环零次 = **原版死
       // 代码**（1.4.5.6 实测不渲染任何火苗），无物可移植，勿再登记
       graveyardIntensity: world.weather?.graveyardVisual ?? 0,
-      // HeatDistortion 门（SceneState.cs:122-123）：TileCenter=scene.tileY
+      // HeatDistortion 门（SceneState.cs:125-126;1456 :122-123）：TileCenter=scene.tileY
       //（SceneMetrics.cs:334 同源）、maxTilesY=store.h、沙漠三条件、sunScorch
       heatTileCenterY: this.scene?.tileY ?? 0,
       heatMaxTilesY: world.store.h,
@@ -3074,7 +3075,14 @@ export class Renderer {
       heatZoneRain: !!this.scene?.zoneRain,
       heatZoneSandstorm: !!this.scene?.zoneSandstorm,
       heatSunScorch: player.sunScorchCounter,
-      useHeatDistortion: true,   // Main.UseHeatDistortion（Main.cs:409 默认 true）
+      // SW-BJ27 2026-09-07：沙漠支强度输入（SceneState.cs:201-207 val3）——
+      // heatTileColor=上帧 ColorOfTheSkies 快照（本帧 :3140 才写入,滞后一帧与原版
+      // SceneState.Update 读上帧 Draw 的 Main.tileColor 同语义；首帧用声明缺省
+      // 白=[255,255,255]→num9=1,但首帧 opacity=0 不可见,次帧起即真实值）;
+      // heatOutsideWeather=weather.outsideWeatherEffect（SceneState.cs:178-179 同源）
+      heatTileColor: this.colorOfTheSkies,
+      heatOutsideWeather: world.weather?.outsideWeatherEffect ?? 1,
+      useHeatDistortion: true,   // Main.UseHeatDistortion（Main.cs:435 默认 true）
       // 月总战滤镜激活门（SceneState.cs:109 ClosestNPCPosition[398]≠Zero——
       // SceneMetrics.cs:739-763 全场 NPC 扫描，核心屏外也激活）：取首个在场
       // 核心（vanillaId 398）中心；drawScreenFilterChain 同源取其屏幕位
@@ -3234,7 +3242,13 @@ export class Renderer {
     //      "夜里的月亮不亮"根因）====
     // #perf-gpulog 方案A:世界层(墙/方块/实体/前景水/地下分层)按 K 降分辨率
     // 栅格化;背景/天体/HUD/飘字留在主画布全分辨率,合成时拉伸回填
-    const wK = this.effectiveRenderScale();
+    // ★水体扭曲分辨率保障(2026-09-08 250%缩放细缝定谳):auto 降档(K<1)时低清场景
+    //   纹理让 FilterWaterDistortion 的位移采样在量化 texel 上混合 = 水线细缝/多层水
+    //   (用户实报"缩放满 250 时发生"=最大缩放 GPU 负载→飢饿降档;低缩放不降档→干净,
+    //   与固化机案"特定缩放才出现"判别口诀同族)。扭曲激活帧(_waveLiquidInView 取
+    //   上帧值,1 帧陈旧无害)强制 K=1——全屏位移需要全分辨率场景纹理。
+    let wK = this.effectiveRenderScale();
+    if (wK < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) wK = 1;
     this._worldLowK = wK;
     const worldLayer = this.beginWorldLayer(viewW, viewH, wK);
     if (worldLayer) ctx = worldLayer;
@@ -5078,10 +5092,18 @@ export class Renderer {
       // ★N 批:rgbv 三通道（183 (50,0,0)/255 纯红、258 (150,50,50)/255——GetAlpha
       // 字面彩色档);标量档 rgbv=undefined → 三通道全取标量,零回归
       const mR = rgbv ? rgbv[0] : rgb, mG = rgbv ? rgbv[1] : rgb, mB = rgbv ? rgbv[2] : rgb;
-      if (a <= 0.004 && !d.color) {
+      if ((a <= 0.004 && !d.color) || d.type === 43) {
         // A=0 加性族（182/206/230/58/110-114/311-313：GetAlpha 恒 (255,255,255,0)
         // 型、不读尘 α）——XNA 预乘 AlphaBlend 纯加法（α=0 惯用法，非"纯光照尘
         // 不可见"）；canvas 等价 = RGB×rgb、α 通道保留贴图羽化、'lighter' 叠画
+        // ★F1（2026-09-08 红队清偿）：`|| d.type === 43` = 闪光尘恒走直绘支的最小
+        //  判据。彩色闪尘（tileShine 心/宝石族经 Game.emitTileParticles 传 color,
+        //  TileDrawing.cs:7657 α=254 → a≈1/255）在烘焙对里落 dustPremulBake 的
+        //  e<0.5 二值残段（add.A=255）→ 'lighter' 把半透 worldLayer 的 α 顶满
+        //  = 掏底/黑块族伪影；直绘支 α 保留贴图羽化，XNA src.a=texA×cA≈0.004 与
+        //  本支 texA 的偏差与 A=0 族同款备案。43 无拖影/染料/331 各档（dustTrailCount
+        //  不含 43），不触其余路径；成本=逐尘逐帧 8×8 getImageData×2（A=0 族同款,
+        //  闪尘 life≈22t 密度门限流,可承受）。
         if (Math.max(mR, mG, mB) <= 0.004) continue;
         c1.clearRect(0, 0, 8, 8);
         c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
@@ -5099,6 +5121,32 @@ export class Renderer {
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(s1, -4, -4);
         ctx.restore();
+        // ★F1：43 自定义色 GetColor 加性 pass（Main.cs:39696-39704 本体后的第二
+        //  Draw，PackedValue!=0 即跑）——红心 (255,0,0) 等 GetColor 后 G/B 压 0 =
+        //  彩色 glint（本体是白亮 sprite,无此 pass 彩色闪尘全成白闪）；White 色档 =
+        //  本体同色再叠 = 原版双画亮度。门槛看 RGB 内容（cp.a 恒 ≈1/255,低于本体
+        //  支 0.004 α 阈——原文本 pass 的 cA 只进 dst 因子,rgb 全额加法不乘 c.a）。
+        if (d.type === 43 && d.color) {
+          const cp43 = VanillaDust.colorPass(d, rgb, a);
+          if (cp43 && Math.max(cp43.r, cp43.g, cp43.b) > 0.004) {
+            c2.clearRect(0, 0, 8, 8);
+            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+            const idc = c2.getImageData(0, 0, 8, 8);
+            for (let i = 0; i < idc.data.length; i += 4) {
+              idc.data[i] = idc.data[i] * cp43.r;
+              idc.data[i + 1] = idc.data[i + 1] * cp43.g;
+              idc.data[i + 2] = idc.data[i + 2] * cp43.b;
+            }
+            c2.putImageData(idc, 0, 0);
+            ctx.save();
+            ctx.translate(px, py);
+            if (d.rotation) ctx.rotate(d.rotation);
+            if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(s2, -4, -4);
+            ctx.restore();
+          }
+        }
         continue;
       }
       // 本体 pass（GetAlpha 精确通道）——预乘烘焙对（本体+通用拖影共用一份,
@@ -10296,8 +10344,9 @@ export class Renderer {
    */
   /**
    * 挂物族存放物叠画（原版 TE*.Draw：物品框/武器架/食物盘/展示罐把存放物图标画在
-   * 框体上；模特/帽架走 PlayerRenderer 画穿戴件——本作无纸娃娃渲染链，等价为在
-   * 锚点上叠画各槽位物品图标）。仅锚点画一次，视口外剔除；不进 ChunkCache 烘焙
+   * 框体上；模特走 PlayerRenderer 画完整玩家形体——★SW-BN6 2026-09-08 P3a 接入
+   * 纸娃娃合成器（src/render/DisplayDoll.ts）,贴图未就绪回落图标叠画;帽架仍为
+   * 图标叠画=P3 域外债）。仅锚点画一次，视口外剔除；不进 ChunkCache 烘焙
    * （存放物是运行时可变状态，见 world/FurnitureItems.ts）。
    */
   private drawFurnitureItems(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
@@ -10341,7 +10390,40 @@ export class Renderer {
             if (s) drawIcon(s.id, bx + 14 + i * 22, by + 40, 12);
           }
           break;
-        case 'display_doll':   // 2×3：穿戴件自上而下叠画（头/身/腿/配饰/坐骑/持握）
+        case 'display_doll': {
+          // ★SW-BN6 2026-09-08 P3a：模特形体合成器（TEDisplayDoll.Draw :339-499 1:1——
+          //  固定 _dollPlayer（skinVariant 10/hair 15/白肤 :118-121）走玩家纸娃娃链
+          //  compositePaperDoll;pose 消费在玩家形体帧行（legFrame/bodyFrame）,非 tile 帧;
+          //  锚=(tx+1,ty+3)*16+(−width/2,−height−6+num2) :471;朝向 frameX%72==36 :347-351;
+          //  光照=tile 格光乘色（GetColor 单帧等价件,destination-in 保 α）。
+          //  P3b（持握展示/物品姿态动画/AI_DisplayDoll 预览）/P3c（dye/mount/paint/
+          //  女档/net msg121）分期未落=债（src/render/DisplayDoll.ts 头注）。
+          //  贴图未就绪（compositePaperDoll null）→ 旧图标叠画兜底（ready 门自愈,
+          //  下帧重试,CharCreation 同语义）。
+          const stFx = world.store;
+          const dollEquip = dollEquipFromSlots(rec.slots);
+          const dollPose = rec.pose ?? 0;
+          const dollState = displayDollRenderState(
+            dollPose, isValidDollPose(dollPose, dollHeldUseStyle(rec.slots)), dollEquip);
+          const dollBake = dollState.sitting
+            ? compositePaperDoll(DOLL_APPEARANCE, dollEquip, { sitting: dollState.sitting })
+            : compositePaperDoll(DOLL_APPEARANCE, dollEquip);
+          if (dollBake) {
+            const a = displayDollAnchor(rec.x, rec.y, dollState.offsetY);
+            const f = dollState.sitting ? dollFrameRows(dollBake, dollState.rows) : dollFrame(dollBake, dollState.rows.body);
+            const lt = this.lighting?.lightAt(rec.x, rec.y) ?? [255, 255, 255];
+            const lit = (lt[0] < 252 || lt[1] < 252 || lt[2] < 252)
+              ? dollLightTint(f.img, f.sx, f.sy, f.sw, f.sh, [lt[0], lt[1], lt[2]])
+              : f.img;
+            ctx.save();
+            ctx.translate(a.cx, a.bottomY);
+            ctx.scale(displayDollFacing(stFx.frameX[stFx.idx(rec.x, rec.y)]), 1);
+            // 乘色产物=帧级整图（0,0 起）;未乘色=表内切片
+            if (lit === f.img) ctx.drawImage(lit, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + 4, f.sw, f.sh);
+            else ctx.drawImage(lit, -f.sw / 2, -f.sh + 4);
+            ctx.restore();
+            break;
+          }
           for (let i = 0, row = 0; i < rec.slots.length; i++) {
             const s = rec.slots[i];
             if (!s) continue;
@@ -10349,6 +10431,7 @@ export class Renderer {
             row++;
           }
           break;
+        }
       }
     }
   }

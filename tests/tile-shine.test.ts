@@ -15,8 +15,8 @@ const close3 = (got: [number, number, number], want: [number, number, number], i
 };
 
 describe('TileShine — Main.tileShine2 / Main.shine 移植', () => {
-  it('tileShine2 全表 = 59 型（Main.cs 赋值点逐一对账）', () => {
-    expect(SHINE2_SHEETS.size).toBe(59);
+  it('tileShine2 全表 = 59 静态型 + 2 动态型（185/186）= 61 条目（Main.cs 赋值点逐一对账）', () => {
+    expect(SHINE2_SHEETS.size).toBe(61);
     const all = [6, 7, 8, 9, 12, 21, 22, 25, 45, 46, 47,
       63, 64, 65, 66, 67, 68, 107, 108, 111, 117, 121, 122,
       147, 161, 163, 164, 166, 167, 168, 169, 178, 204, 211,
@@ -30,10 +30,30 @@ describe('TileShine — Main.tileShine2 / Main.shine 移植', () => {
     for (const s of [0, 1, 2, 4, 5, 10, 17, 18, 19]) {
       expect(SHINE2_SHEETS.has(s), `sheet ${s} 不应在表`).toBe(false);
     }
-    // 185/186（SmallPiles/LargePiles）：Main.shine 有 case ×1.3 但 tileShine2 无赋值
-    // （全库 grep 零命中）→ ShouldTileShine 拒之门外，不在表（乘区 case 如实保留）
-    expect(SHINE2_SHEETS.has(185)).toBe(false);
-    expect(SHINE2_SHEETS.has(186)).toBe(false);
+    // ★F6a（2026-09-08 销账）：185/186（SmallPiles/LargePiles）Main.cs 无【静态】
+    // 赋值，但 TileDrawing.cs:5223-5231/:5239-5247 GetTileDrawData 按堆叠帧【动态】
+    // 写表（旧注"全库 grep 零命中→不在表"系截断假象）→ 入表 + shouldTileShine 帧门
+    expect(SHINE2_SHEETS.has(185)).toBe(true);
+    expect(SHINE2_SHEETS.has(186)).toBe(true);
+  });
+
+  it('★F6a 185/186 动态帧门（TileDrawing.cs:5223-5231/:5239-5247,上界闭区间）', () => {
+    // 185 = frameY==18 ∧ frameX∈[576,882]（双端【闭】——与 467/468 的 <178 开区间不同源）
+    expect(shouldTileShine(185, 576, false, 0, 18)).toBe(true);
+    expect(shouldTileShine(185, 882, false, 0, 18)).toBe(true);   // 上界闭
+    expect(shouldTileShine(185, 575, false, 0, 18)).toBe(false);
+    expect(shouldTileShine(185, 883, false, 0, 18)).toBe(false);
+    expect(shouldTileShine(185, 700, false, 0, 0)).toBe(false);   // frameY≠18 拒
+    expect(shouldTileShine(185, 700, false, 0, 36)).toBe(false);
+    // 186 = frameX∈[864,1170]（无 frameY 条件）
+    expect(shouldTileShine(186, 864, false, 0, 0)).toBe(true);
+    expect(shouldTileShine(186, 1170, false, 0, 0)).toBe(true);   // 上界闭
+    expect(shouldTileShine(186, 863, false, 0, 0)).toBe(false);
+    expect(shouldTileShine(186, 1171, false, 0, 0)).toBe(false);
+    expect(shouldTileShine(186, 900, false, 0, 54)).toBe(true);   // frameY 无关
+    // 乘区 case ×1.3（Main.cs:21913-21919）与 delta 联动（成员资格 × 帧门双闸）
+    close3(shineDelta(185, 0, 0)!, [0.3, 0.3, 0.3], '185 ×1.3 delta');
+    close3(shineDelta(186, 0, 0)!, [0.3, 0.3, 0.3], '186 ×1.3 delta');
   });
 
   it('Main.shine 乘区表逐 case（Main.cs:21874-21931）', () => {

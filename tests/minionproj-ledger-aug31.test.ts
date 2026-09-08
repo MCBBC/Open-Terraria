@@ -175,7 +175,12 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
     store.setTile(probe, midRow - 5, 1);                  // -5 实心 → -11.1
     ladder(); expect(m.vy).toBe(-11.1);
   });
-  it('高出距离表（:51492-51527）：高差 250 → -14、高差 ≥310 → -16（含同拍重力 +0.4 尾数）', () => {
+  it('TryJumpingToTarget 共享尾（:52154-52164,2026-09-08 续单补接）：高差 250/330 → 跃速 −√(h×0.8)（含同拍重力 +0.4 尾数）', () => {
+    // ★原「高出距离表」钉（250→-14/330→-16）随共享尾补接改写：原版共享尾
+    //   （:51024 调用位,阈值 30px）先于步行结算段（:51363,表阈值 48px）——
+    //   双距域内有目标且贴地时共享尾必先跃起（vy≠0）→ 结算段/距离表整段让位
+    //   =有目标场景下表位 vanilla 不可达（表仅跟随锚场景可达,由蛙 758 钉与
+    //   跳梯五档直驱钉承钉）。跃速无 +1 尾数,与 :51084 flag8 干态专支相区别。
     const { hooks, player } = makeHooks();
     const selfCy = 110 * 16 - 8;                          // 贴地 16 盒中心
     const mkCase = (diff: number): { m: MinionProj; g: GameHooks } => {
@@ -189,18 +194,21 @@ describe('台账批① AI_067 步行链两结算段（1458 :51273-52057）', () 
       priv(t).pounceCd = 1000;
       return { m: t, g: env.hooks };
     };
-    const a = mkCase(250);                                 // [210,270) → 表位 -14
+    const a = mkCase(250);                                 // 共享尾 h=252（真盒 26×20 → cy=y+10=1754）
     a.m.fixedUpdate(1, a.g);
-    expect(a.m.vy).toBeCloseTo(-14 + 0.4, 9);              // 结算后即加重力（原版同拍序）
-    const b = mkCase(330);                                 // ≥310 → -16
+    expect(a.m.vy).toBeCloseTo(-Math.sqrt(252 * 2 * 0.4) + 0.4, 9);   // 结算让位后即加重力（原版同拍序）
+    const b = mkCase(330);                                 // h=332（<26 帽）
     b.m.fixedUpdate(1, b.g);
-    expect(b.m.vy).toBeCloseTo(-16 + 0.4, 9);
+    expect(b.m.vy).toBeCloseTo(-Math.sqrt(332 * 2 * 0.4) + 0.4, 9);
   });
 });
 
 describe('台账批② 海盗 393-395 步行链正轨（AI_067 flag 支）', () => {
   it('地面追击替代悬停近似：800 内敌 → 走行接近（vx>0 且重力积分）', () => {
-    const e = mkEnemy(6, 60 * 16 + 700, 96 * 16);
+    // ★2026-09-08 续单：敌位从 96*16（高于本体 145px）改同高——共享尾
+    //   （:51024/:52154,补接批）对贴地+高目标先跃起（vy<0）,原 vy>0 断言与
+    //   原版序相悖;同高敌不触发共享尾（阈值 30px）,走行/重力断言保持原意
+    const e = mkEnemy(6, 60 * 16 + 700, 106 * 16 + 15);
     const { hooks } = makeHooks([e]);
     const p = mk(393, hooks.player, 60 * 16, 106 * 16);
     p.fixedUpdate(1, hooks);

@@ -10,6 +10,7 @@ import type { UISpriteBatch, Color } from '../draw/UISpriteBatch';
 import { UITextures } from '../assets/UITextures';
 import { rgb } from '../draw/UISpriteBatch';
 import { UIScale } from '../draw/UIScale';
+import type { UnifiedRandom } from '../../core/rng';
 
 const LONG_BAR_WIDTH = 570;
 const SMALL_BAR_WIDTH = 508;
@@ -20,14 +21,25 @@ export function fitProgressScale(logicalW: number): number {
   return Math.max(0.55, Math.min(1, (logicalW - 16) / 612));
 }
 
+/** FNA Color.PackedValue 解包（FNA src/Color.cs：B=byte2/G=byte1/R=byte0/A=byte3，
+ *  即 PackedValue = R | G<<8 | B<<16 | A<<24；本仓同构锚 Renderer.ts:2056 mapPaintPacked
+ *  反编译锚 Lighting.cs:248-249 color.X(R) 无移位低位）。★此前误写 B 在低位
+ *  （r=(v>>>16)），猩红条渲染成 (131,237,255) 淡蓝、随机邪恶成橙红——IIIII215b
+ *  修正为 FNA 语义：猩红=(255,237,131) 淡金、随机邪恶=(61,91,221) 紫。 */
 function packed(v: number): Color {
-  return { r: (v >>> 16) & 255, g: (v >>> 8) & 255, b: v & 255, a: (v >>> 24) & 255 };
+  return { r: v & 255, g: (v >>> 8) & 255, b: (v >>> 16) & 255, a: (v >>> 24) & 255 };
 }
 const CORRUPT_COLOR = packed(4283888223);
 const CRIMSON_COLOR = packed(4286836223);
 const SMALL_COLOR = packed(4290947159);
 /** 1.4.5.6 新增：随机邪恶（generatingRandomEvil）填充色 */
 const RANDOM_COLOR = packed(4292696893);
+/** 金标导出（IIIII215b packed 解包修正钉值；packed() 语义见函数注）：
+ *  corrupt=(95,242,86) 绿 / crimson=(255,237,131) 淡金 / small=(87,168,194) 钢蓝 /
+ *  random=(61,91,221) 紫（FNA Color.cs R 低字节语义）。 */
+export const PROGRESS_FILL_COLORS = {
+  corrupt: CORRUPT_COLOR, crimson: CRIMSON_COLOR, small: SMALL_COLOR, random: RANDOM_COLOR,
+} as const;
 const EMPTY_LONG = rgb(0x30, 0x30, 0x30);
 const EMPTY_SMALL = rgb(0x21, 0x21, 0x21);
 
@@ -40,6 +52,17 @@ export class UIGenProgressBar extends UIElement {
   crimson = false;
   /** 1.4.5.6：随机邪恶（Outer_Random + 专属填充色） */
   randomEvil = false;
+  /** ★IIIII215b 醉酒帧闪（UIGenProgressBar.DrawSelf :63-67）：WorldGen.drunkWorldGen
+   *  （getfixedboi 亦置位——Reset 七依赖套件）为 true 时启用。 */
+  drunkWorldGen = false;
+  /** UI 层共享掷子——原版同帧 Main.rand 单流（文本乱码/帧闪/云量共用，Main.rand
+   *  在生成期 = new UnifiedRandom(seed)，WorldGen.cs:11159）。由 UIWorldLoadState
+   *  注入自身私有 UnifiedRandom 实例（与世界生成 genRand/Main.rand 零共享）；
+   *  null = 无 drunk 帧闪（读档页）。 */
+  uiRand: UnifiedRandom | null = null;
+  /** 帧闪观测面（探针）：本帧实绘的 crimson/randomEvil 判定（drawSelf 回写） */
+  lastDrawnCrimson = false;
+  lastDrawnRandomEvil = false;
 
   constructor() {
     super();
@@ -78,15 +101,30 @@ export class UIGenProgressBar extends UIElement {
       const sep = rgb(Math.round(filled.r * 0.5), Math.round(filled.g * 0.5), Math.round(filled.b * 0.5));
       batch.fillRect(px + cwK - 2 * k, py, 2 * k, hk, sep);
     };
-    const fillColor = this.randomEvil ? RANDOM_COLOR : this.crimson ? CRIMSON_COLOR : CORRUPT_COLOR;
+    // ---- ★IIIII215b 醉酒帧闪（DrawSelf :61-67 1:1）：基色 = crimson/generatingRandomEvil；
+    //      drunkWorldGen 时每帧 50% 概率重掷——crimson=Next(2)==0（猩红/腐化对半）、
+    //      randomEvil=Next(4)==0（25% 概率 Outer_Random 帧与其专属紫填充）。
+    //      掷序与判定条件逐字同构（仅当门掷命中才消费后续两掷）。----
+    let crimson = this.crimson;
+    let randomEvil = this.randomEvil;
+    if (this.drunkWorldGen && this.uiRand) {
+      if (this.uiRand.nextInt(2) === 0) {
+        crimson = this.uiRand.nextInt(2) === 0;
+        randomEvil = this.uiRand.nextInt(4) === 0;
+      }
+    }
+    const fillColor = randomEvil ? RANDOM_COLOR : crimson ? CRIMSON_COLOR : CORRUPT_COLOR;
+    // 探针观测面（本帧实绘值;字段不动——帧闪是局部量,原版同构）
+    this.lastDrawnCrimson = crimson;
+    this.lastDrawnRandomEvil = randomEvil;
     drawFilling(20, 40, 16, LONG_BAR_WIDTH, this.totalProgress, fillColor, EMPTY_LONG);
     drawFilling(50, 60, 8, SMALL_BAR_WIDTH, this.currentProgress, SMALL_COLOR, EMPTY_SMALL);
 
     // ---- 外框后画（:104-107）：r.X-=8 后 Outer 画在 r.TopLeft()=(x-8,y)，
     //  Outer_Lower 画在 r.TopLeft()+(44,60)=(x+36,y+60)——此前误写 x+44 右移 8px
     //  （2026-08-24 用户截图实报下条框未对齐）----
-    const outerKey = this.randomEvil ? 'UI_WorldGen_Outer_Random'
-      : this.crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt';
+    const outerKey = randomEvil ? 'UI_WorldGen_Outer_Random'
+      : crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt';
     const outer = UITextures.get(outerKey);
     if (outer) batch.draw(outer, x - 8 * k, y, { scale: k });
     const lower = UITextures.get('UI_WorldGen_Outer_Lower');

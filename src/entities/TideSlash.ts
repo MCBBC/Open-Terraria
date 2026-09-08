@@ -14,8 +14,11 @@ import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 export class TideSlash extends Entity {
+  readonly projId = 451;
   w = 16; h = 16;
   damage: number;
   knockback: number;
@@ -32,6 +35,29 @@ export class TideSlash extends Entity {
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = [0.4, 0.5, 0.9];
+
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F1 清偿）----
+  //  域 id = {451}（SetDefaults :5231-5241：16×16 aiStyle81 melee penetrate3 light0.2
+  //  alpha255 friendly,无 ignoreWater 行=缺省 false（:763）→ 受段）。
+  //  插位=AI 链后/位移前（2026-09-08 残差五件批③ 自 tick 头挪正=原版 Update 位序
+  //  AI(:16880)→湿段(:16895)→HandleMovement(:17120)）：AI_081（:31541-31684 逐行核对）
+  //  零湿旗消费;杀拍（末段消亡 :31653-31655/无敌消亡 :31663-31665 Kill→active=false）
+  //  湿段照跑（原版段体无 active 门,killed 闩只跳位移/rot）。
+  //  ★挪位动因（登记微差清偿）：瞬击相 AI 传送支（:31673-31676 敌旁 100px 环瞬移+
+  //  vel=朝敌 15）与骑乘目标支（:31682 position += target.velocity）原版都在湿段【前】
+  //  写位——旧 tick 头插位该拍采样盒=传送/骑乘【前】位（原版=【后】位）,溅花尘/音
+  //  采样点差;挪位后逐相采样盒=原版同拍位（掷出/折返相 AI 零位写 → 采样位不变）。
+  //  阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 支,:17594）：掷出/折返相
+  //  tileCollide=true（AI 逐相直写 :31548/:31586）乘进位移行（速度场不减）;瞬击相
+  //  tileCollide=false（:31637）不消费——闸=moveAndHit 内按 ai0<1 分流。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
 
   constructor(vx: number, vy: number, damage: number, knockback: number, penetrate: number) {
     super();
@@ -56,16 +82,17 @@ export class TideSlash extends Entity {
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
+    // killed = AI 内消亡（:31653-31655 末段/:31663-31665 无敌 Kill → active=false;
+    // 原版湿段无 active 门照跑,killed 只拦位移+rot —— Arrow.ts 杀拍口径同式）
+    let killed = false;
     if (this.ai0 === -1) {
       // 掷出（:29900-29942）：alpha += 5×spdN，钳 75 达成 → ai0=0
       this.alpha = Math.min(75, this.alpha + 5 * this.spdN);
       if (this.alpha >= 75) { this.ai0 = 0; this.lai0 = 0; }
-      this.moveAndHit(game);
     } else if (this.ai0 === 0) {
       // 折返（:29943-29987）：alpha +75 钳 255 → ai0=1
       this.alpha = Math.min(255, this.alpha + 75);
       if (this.alpha >= 255) { this.ai0 = 1; this.lai0 = 0; }
-      this.moveAndHit(game);
     } else {
       // 瞬击穿梭（:29990-30052）
       this.alpha = Math.min(255, this.alpha + 15 * this.spdN);
@@ -82,30 +109,40 @@ export class TideSlash extends Entity {
         if (d < bd) { bd = d; target = e; }
       }
       if (this.alpha >= 255) {
-        if (this.ai0 === 1) { this.dead = true; return; }   // 末段消亡（:30020-30024）
-        if (target) {
+        if (this.ai0 === 1) { killed = true; }   // 末段消亡（:31653-31655 Kill,位未写）
+        else if (target) {
           this.ai0 += this.penetrate;
           const a = Math.random() * Math.PI * 2;
-          this.x = target.cx + Math.cos(a) * 100 - this.w / 2;
-          this.y = target.cy + Math.sin(a) * 100 - this.h / 2;
+          this.x = target.cx + Math.cos(a) * 100 - this.w / 2;   // :31673 瞬移写位
+          this.y = target.cy + Math.sin(a) * 100 - this.h / 2;   // :31673（湿段【前】）
           const dl = Math.hypot(target.cx - this.cx, target.cy - this.cy) || 1;
-          this.vx = (target.cx - this.cx) / dl * 15;
-          this.vy = (target.cy - this.cy) / dl * 15;
+          this.vx = (target.cx - this.cx) / dl * 15;             // :31674
+          this.vy = (target.cy - this.cy) / dl * 15;             // :31674
           this.lai0 = 0;
           this.alpha = 255;
         } else {
-          this.dead = true; return;
+          killed = true;                                          // 无敌消亡（:31663-31665,位未写）
         }
       }
-      if (target) { this.x += target.vx; this.y += target.vy; }   // 骑乘目标速度（:30047-30049）
-      this.moveAndHit(game);
+      if (!killed && target) { this.x += target.vx; this.y += target.vy; }   // 骑乘（:31682 active&&target,湿段【前】）
     }
-    this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
+    // ---- ★通用湿段（:16895-17113 共享体;原版位序 AI(:16880)→湿段(:16895)→
+    //      HandleMovement(:17120)——瞬击传送/骑乘写位后采样=挪位动因,注见字段块）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    if (!killed) {
+      this.moveAndHit(game);
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
+    }
   }
 
   private moveAndHit(game: GameHooks): void {
-    this.x += this.vx;
-    this.y += this.vy;
+    // 水中位移阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 时进;速度场不减,
+    // 只削当拍位移）——掷出/折返相 tileCollide=true 消费,瞬击相 tileCollide=false
+    // （AI :31637 直写,运行时镜像 ai0≥1）档位不消费全速。
+    const df = this.ai0 < 1 ? projWaterDragFactor(this) : 1;
+    this.x += this.vx * df;
+    this.y += this.vy * df;
     // 撞块：瞬击段关碰撞，掷出/折返开（原版 tileCollide 开 + 无反弹分支=消亡）
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);

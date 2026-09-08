@@ -24,7 +24,7 @@
 // ★夹具瞬态备案：柱嘴内 spawn 的 t=0 存在 BJ6 时代 K2 站顶 snap 瞬态（−12px 重锚，
 //  门开/关两 run 逐字节相同=非漂移路径，BJ9 零触碰）——故「前缘不进全实心」采用
 //  sticky-clean 不变式（首次洁净后不得再侵入），而非全程洁净。
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
@@ -32,6 +32,13 @@ import { moveAndCollide, type Body } from '../src/physics/TileCollision';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
 import type { TileStore } from '../src/world/TileStore';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）:
+// 6× 重复/出生点扫描族（:153 describe）依赖 AI 掷流稳定,播种后 rep 间序列可控。
+// 真实存档重放（beforeAll loadSave）在用例流之前,不受 beforeEach 影响（存档本身确定性）。
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const GRASS = TILE_BY_KEY['grass']!;

@@ -293,13 +293,19 @@ describe('★逐类湿段接线（入水溅花面）', () => {
 // GrenadeProj 拍序口径（R3 项 2）：入液引信门收编字段读 + 粘性族湿位移 quirk
 // =====================================================================
 describe('★GrenadeProj 拍序（:47771 字段读收编）', () => {
-  it('液体炸弹 903（投掷路）：出生水中 → 当拍不爆（旗未立）,次拍爆 = 原文 :47771→:48031 同拍序', () => {
+  // ★2026-09-08 预置首拍面修正（①′,CrystalSerpentProj 523 同款）：出生预置
+  //  （NewProjectile :10887 wet=WetCollision 采样）原版在【生成时点】写旗,首拍 AI
+  //  头 :47771 门即读预置值 → :48034 `timeLeft<=3` Kill 同拍判爆 = 出生水中【首拍】
+  //  即爆。旧钉「首拍不爆,次拍爆」系预置缺面期行为（旗随首拍湿段落 AI 后位,门晚
+  //  一拍才读到）,与 655 蜂巢 x1-round4 ② 金标 tick-1 Kill 同根,按反编译改钉。
+  it('液体炸弹 903（投掷路）：出生水中 → 首拍即爆（:10887 预置 → :47771 门首拍读 → :48034 同拍 Kill）+ 出生拍不溅', () => {
     const h = mkGame(mkWorld());
     let boom = 0;
     const e = new GrenadeProj(520, 1024, 0, 0, 30, 180, 903, () => { boom++; });
-    e.fixedUpdate(1 / 60, h.g);                           // 首拍：预置（出生水中不溅）+ 不爆
-    expect(boom).toBe(0);
-    e.fixedUpdate(1 / 60, h.g);                           // 次拍：门读旗 → fuse=1 → 同拍 Kill 判爆
+    e.fixedUpdate(1 / 60, h.g);                           // 首拍：预置 wet=true（出生不溅）→ 门 fuse=1 → 同拍 Kill 判爆
+    expect(boom).toBe(1);
+    expect(h.dust.length).toBe(0);                        // 出生水中不溅（预置先立 wet → 入水溅花门 !wet 不开,原版同相）
+    e.fixedUpdate(1 / 60, h.g);                           // 次拍：已亡（原版 Kill :71756 `!active` 早退同款）→ 不双爆
     expect(boom).toBe(1);
   });
 

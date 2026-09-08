@@ -136,6 +136,14 @@ export function sheetOf(t: number): number {
   return t >= 0 && t < SHEET_OF.length ? SHEET_OF[t] : -1;
 }
 
+/** SmartCursorHelper.cs:167-175 UsingSmartCursorWithContinuity：手持放置物
+ *  createTile≥0 ∧ TileID.Sets.Platforms——平台连通锁的存活条件（lookup 头 :64
+ *  清锁门第三项;★SW-BJ29 2026-09-08 起 lookup/lookupSkipped 共用本单源）。 */
+function usingSmartCursorWithContinuity(def: ItemDef | null | undefined): boolean {
+  if (def?.tile == null) return false;
+  return PLATFORMS.has(sheetOf(TILE_BY_KEY[def.tile] ?? -1));
+}
+
 // ===================== 设置（对齐原版 Player.SmartCursorSettings :320-329 + Main.cs:49705） =====================
 
 export interface SmartCursorSettings {
@@ -518,9 +526,7 @@ export class SmartCursor {
     // R4-44（SmartCursorHelper.cs:64/:167-174）：1457 清锁条件补第三项
     // !UsingSmartCursorWithContinuity——连通锁只对【持平台类物品】跨帧存活;
     // 中途切非平台物品再切回,原版锁已被中间帧清掉,本仓曾沿用陈旧锁线
-    const heldSheet = env.held.def?.tile != null ? sheetOf(TILE_BY_KEY[env.held.def.tile] ?? -1) : null;
-    const continuityHeld = heldSheet != null && PLATFORMS.has(heldSheet);
-    if (!env.controlUseItem || !used || !continuityHeld) { // :64-68
+    if (!env.controlUseItem || !used || !usingSmartCursorWithContinuity(env.held.def)) { // :64-68
       this.lockedDirection = null;
       this.lockedContinuity = null;
     }
@@ -593,6 +599,27 @@ export class SmartCursor {
       this.y = fY;
       this.showing = true;
     }
+  }
+
+  /** ★SW-BJ29 2026-09-08：跳过帧的 lookup 头等价（SmartCursorHelper.cs:63-68）。
+   *  原版 SmartCursorLookup 每帧【无条件】调用（Player.cs:25641-25645,仅 whoAmI/
+   *  相机跟踪两门,无 SmartCursorIsUsed/界面门）,清锁门(:64-68)先于 `!SmartCursorIsUsed`
+   *  早退(:69-72)——智能光标【关闭】的帧平台连通锁同样被清（used=false ⇒ 条件恒真,
+   *  与 controlUseItem/持物无关）。本仓 Game.updateSmartCursor 在 !wanted/界面遮挡帧
+   *  整支跳过 lookup（后续管线本仓刻意不跑,与原版唯一有意的分叉）,曾致置锁
+   *  （Step_Platforms :1392-1393,须智能开+持平台）后锁跨模式滞留 → tryPlace 头
+   *  TileTargetDesired 门（Player.cs:40032）在 showing 恒 false 下把一切 tile 放置
+   *  拦死（用户实报"不开智能光标放不了平台、物块"）。本前奏即补回 :63-68 段;
+   *  used 传调用帧 SmartCursorIsUsed 实况:智能关帧恒 false;界面遮挡帧 wanted 仍在
+   *  ⇒ 按原文条件消费 controlUseItem+持物平台位（原版该帧会跑整支管线,本仓跳过
+   *  ——分叉既有,不在此扩） */
+  lookupSkipped(controlUseItem: boolean, used: boolean, heldDef: ItemDef | null): void {
+    this.showing = false; // :63
+    if (!controlUseItem || !used || !usingSmartCursorWithContinuity(heldDef)) { // :64-68
+      this.lockedDirection = null;
+      this.lockedContinuity = null;
+    }
+    // :69-72 `!SmartCursorIsUsed → return`——跳过帧的后续管线本就不运行,同相
   }
 
   // ===================== 各策略 =====================

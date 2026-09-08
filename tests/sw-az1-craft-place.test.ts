@@ -287,8 +287,10 @@ describe('SW-AZ1 结构锁', () => {
     expect(game).toMatch(/if \(this\.usingOrReusingItem\(\) \|\| this\._dirtRodChannel \|\| this\.player\.useTime !== 0\) return;/);
   });
 
-  it('Game 手持消耗统一入口：56 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(56);
+  it('Game 手持消耗统一入口：57 处消费点全走 removeHeld,无 removeAt(selected) 残留', () => {
+    // ★2026-09-08:56→57——SW-BN5 换墙批新增 ReplaceWall 消费位(Game.ts:21297,
+    //  换墙消耗手持墙件=合法入账;行为面仍由"全走 removeHeld+无 removeAt 残留"两钉锁死)
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(57);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

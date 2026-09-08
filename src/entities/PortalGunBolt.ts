@@ -10,7 +10,7 @@
 //     （速度 = normalize(瞄准)×3f，ai0 = form）——本类即该 601
 //   ④ 601 SetDefaults（:6223-6231）：10×10 / aiStyle1 / alpha 255 / friendly / extraUpdates 30
 //   ⑤ 601 AI（:51174-51228）：光尘 + alpha 每子步 -15 + 2 帧动画 + 拖尾尘
-//   ⑥ 撞块（:16672-16691）：TryPlacingPortal(this, lastVelocity, velocity) → position += velocity → Kill
+//   ⑥ 撞块（1457 :18195-18214;旧注 :16672-16691 系 1456 行号）：TryPlacingPortal(this, lastVelocity, velocity) → position += velocity → Kill
 // extraUpdates 语义（Update :15331-15334 numUpdates=extraUpdates; while(numUpdates>=0)）：
 // 每 tick "AI+移动+碰撞" 整轮跑 31 次 → 弹速 3px×31 = 93px/tick（近瞬时光束，撞块检测
 // 逐子步进行不穿墙）。
@@ -21,6 +21,9 @@ import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { portalColor } from './Portal';
 import { texId } from '../render/texId';
+import { projectileWetSection, projWaterDragFactor, projShimmerStep,
+  type ProjShimmerFace } from './projWetSection';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 601 SetDefaults（:6225-6226）碰撞盒 */
 const BOLT_W = 10;
@@ -47,6 +50,36 @@ export class PortalGunBolt extends Entity {
   private life = BOLT_LIFE;
   private static frameCache = new Map<string, HTMLCanvasElement>();
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F3 清偿）----
+  //  域 id = {601}（SetDefaults :6504-6512：10×10 aiStyle1 alpha255 friendly
+  //  extraUpdates=30,无 ignoreWater 行=缺省 false（:763）→ 受段;tileCollide 缺省
+  //  true）。同 id 装置弹变体（TrapShot,Dart.ts trapWetProjId→601）已接=双载体对称。
+  //  插位=子步环内 AI 后/位移前——Update 子步循环（:16781 while numUpdates≥0）内
+  //  湿段 :16895 逐子步,EU=30 → 每 tick 31 次（本类子步环同构）。AI_001 601 支
+  //  （:55023-55060 逐行核对）零湿旗消费零速度写 → 采样位/位移消费等价。
+  //  601 ∉ IsDestroyedByWater（{85,15,188,34,1097,1106}）→ 无水death kill 钩;aiStyle1 ∈
+  //  Shimmer() 弹反族 A（:22606 深浸 Kill/vy>0 弹反+旗清+timeLeft 面）——★⑧已接
+  //  （2026-09-08 残差五件批,湿段中央清单同步销号）：wetSectionStep 壳经 hooks.shimmer
+  //  组装 ProjShimmerFace（范本=Boomerang WeaponProj.ts:767;面适配注见彼方法头）。
+  //  ★杀拍口径（同批②）：寿命头 Kill 早退曾整体跳过湿段——原版 timeLeft--/Kill 在
+  //  子步环【尾】（:17307-17311）,本子步湿段（:16895,无 active 门）照跑=杀拍溅花/
+  //  旗面缺口;照 Arrow.ts wetSectionStep 双调用点+wetSectionRan 防双跑闩配方补杀拍
+  //  调用（杀拍采样盒=本子步 AI 直写位——AI_001 601 零位写 → 采样=头顶位;死拍位移
+  //  仍跳过=Kill 尘已结死零观感,Arrow 同案登记）。
+  //  阻尼：tileCollide=true → HandleMovement :17721-17764 湿支生效,乘进逐子步
+  //  位移行（速度场不减;AI 不写速度 → wetVelocity 快照 :16870 恒等,pre/post 等价）;
+  //  撞块落门支 `position += velocity` 全速直写（Kill 拍原文字面）不受阻尼。
+  //  溅花尘/音 = wetSplashStepShared（逐子步门 wetCount==0 ∧ !wet,与原版同拍频）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐子步 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做=首子步出生盒;
+   *  寿命头杀拍首调时=杀拍同位（AI_001 零位写）,预置位仍=出生盒） */
+  presetDone = false;
+
   /** x/y = 弹心（600.Center，Projectile.cs:63905-63911）；内部存左上锚（碰撞盒 10×10，
    *  placePortal 消费的正是左上 + 5 的中心语义，同 TrapShot） */
   constructor(x: number, y: number, vx: number, vy: number, form: 0 | 1) {
@@ -58,8 +91,54 @@ export class PortalGunBolt extends Entity {
     this.form = form;
   }
 
+  /** ★通用湿段步进壳（活拍/杀拍双调用点共用;闩=Arrow.ts wetSectionStep 同名配方）。
+   *  ★⑧Shimmer() 接面（2026-09-08 残差五件批①）：601 aiStyle1 → 弹反族 A
+   *  （P.cs:22606-22625 逐字——深浸判定列=CenterX/16 行=positionY/16 满格微光+上格
+   *  微光 → Kill;否则 vy>0 → vy×-1 + timeLeft>600→600 且 −60 + shimmerWet/wet 双清）。
+   *  面适配：ai0≡form（601 生成只写 ai[0]=form,:63911）、ai1≡0（601 全链不写 ai[1]
+   *  =原版 float 缺省,撞块音门 :18199-18206 读它恒 0 同此）、hostile=false
+   *  （SetDefaults :6229 friendly）、timeLeft≡life（本类每 tick 递减模型——弹反
+   *  600 钳/−60 减按原值并入该计数器,寿命模型差异=既案登记）、kill=dead 置位
+   *  （深浸支 :22608-22610 消亡面）。rainbowSlimeUnlocked 惰性 getter（601 非 936,
+   *  支零消费=死码;惰性防测试桩 world 无 flags 炸——Arrow 同式）。 */
+  private wetSectionRan = false;
+
+  private wetSectionStep(game: GameHooks): void {
+    if (this.wetSectionRan) return;
+    this.wetSectionRan = true;
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      601, !!projectileData(601)?.ignoreWater, {
+        shimmer: (st, x, y, _w, _h) => {
+          const sf: ProjShimmerFace = {
+            projId: 601,
+            aiStyle: projectileData(601)?.aiStyle ?? -1,
+            hostile: false,
+            vx: this.vx, vy: this.vy,
+            timeLeft: this.life,
+            ai0: this.form, ai1: 0,
+            wet: this.wet, shimmerWet: this.shimmerWet,
+            get rainbowSlimeUnlocked() {
+              return (game.world as unknown as { flags?: Record<string, boolean> })
+                .flags?.['unlockedSlimeRainbowSpawn'] === true;
+            },
+            kill: () => { this.dead = true; },
+          };
+          projShimmerStep(sf, st, x, y, this.cx);
+          this.vx = sf.vx; this.vy = sf.vy;
+          this.life = sf.timeLeft;
+          this.wet = sf.wet; this.shimmerWet = sf.shimmerWet;
+        },
+      });
+  }
+
   fixedUpdate(_dt: number, game: GameHooks): void {
+    this.wetSectionRan = false;                     // 杀拍闩复位（杀拍位先于全部子步）
     if (--this.life <= 0) {
+      // ★寿命头杀拍湿段补跑（2026-09-08 残差五件批②）：原版 timeLeft--/Kill 在子步环
+      //  【尾】（Update :17307-17311）,本子步湿段（:16895,无 active 门）照跑——本仓
+      //  头杀早退曾整体跳过=杀拍溅花/旗面缺口。采样盒=本子步 AI 直写位（AI_001 601
+      //  零位写 → =头顶位）;死拍位移仍跳过（Arrow 同案:Kill 尘已结死,零观感登记）。
+      this.wetSectionStep(game);
       this.dead = true;
       return;
     }
@@ -67,6 +146,7 @@ export class PortalGunBolt extends Entity {
     const trailColor = this.form === 0 ? '#FFAA28' : '#3CE0FF'; // 与 TrapShot 拖尾同色表（门色近似）
     let updates = EXTRA_UPDATES;                                  // :15331 numUpdates = extraUpdates
     while (updates >= 0 && !this.dead) {
+      this.wetSectionRan = false;                                 // 逐子步闩复位（Arrow subStep 同式）
       updates--;                                                  // :15332-15334
       // ---- AI（:51174-51228，每子步一次）----
       // :51176-51179 门色×0.5 点光（center + velocity×3）
@@ -91,11 +171,17 @@ export class PortalGunBolt extends Entity {
         game.spawnBurst?.(this.cx, this.cy, trailColor, 1, 0.75,
           Math.atan2(this.vy, this.vx), 0.1, { life: 10, damp: 0.94 });
       }
+      // ---- ★通用湿段（:16895-17113 共享体,子步环内 AI 后/位移前——域/位序注见字段块;
+      //      经 wetSectionStep 壳=活拍①,杀拍②在 fixedUpdate 头）----
+      this.wetSectionStep(game);
       // ---- 移动 + 撞块（Update 主体序：AI 后 position += velocity，再碰撞响应）----
+      // 水中位移阻尼（HandleMovement :17721-17764 湿支,tileCollide=true 消费）——
+      // 只乘进当子步位移行,速度场 vx/vy 不减（lastVelocity :17696 系语义保真;1456 :16676）
+      const df = projWaterDragFactor(this);
       const lvx = this.vx;
       const lvy = this.vy;
-      this.x += this.vx;
-      this.y += this.vy;
+      this.x += this.vx * df;
+      this.y += this.vy * df;
       const tx = Math.floor(this.cx / TILE);
       const ty = Math.floor(this.cy / TILE);
       if (!game.world.store.inBounds(tx, ty)) {
@@ -103,16 +189,16 @@ export class PortalGunBolt extends Entity {
         break;
       }
       if (game.world.store.isSolid(tx, ty)) {
-        // :16672-16691 撞块落门
-        if (this.alpha > 0) {                                      // :16674 音门（alpha>0 才播）
-          // :16676-16683 按 ai[1] 选音——601 生成只写 ai0（:63911 尾参），
+        // :18195-18214 撞块落门（旧注 :16672-16691 系 1456 行号）
+        if (this.alpha > 0) {                                      // :18197 音门（alpha>0 才播）
+          // :18199-18206 按 ai[1] 选音——601 生成只写 ai0（:63911 尾参），
           // ai[1] 恒 0 → 此分支恒 Item_115（原版实况，非笔误；AI 侧 :51195 才按 form 分音）
           game.playSfx('portalOrange', 1, this.x, this.y);
         }
-        game.placePortal?.(this.x, this.y, lvx, lvy, this.form);   // :16685-16688 TryPlacingPortal(this, lastVelocity, velocity)
-        this.x += this.vx;                                         // :16689 position += velocity
+        game.placePortal?.(this.x, this.y, lvx, lvy, this.form);   // :18208-18211 TryPlacingPortal(this, lastVelocity, velocity)
+        this.x += this.vx;                                         // :18212 position += velocity
         this.y += this.vy;
-        this.dead = true;                                          // :16690 Kill()
+        this.dead = true;                                          // :18213 Kill()
         break;
       }
     }

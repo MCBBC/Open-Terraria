@@ -16,6 +16,10 @@ export type SfxName =
   | 'hit' | 'hurt' | 'pickup' | 'dig' | 'place' | 'drink' | 'chop' | 'splash'
   | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
   | 'menuOpen' | 'menuClose' | 'menuTick'
+  | 'menuAccept'   // SoundID.MenuAccept = CreateTrackable("menu_accept")（SoundID.cs:1068），
+                   //   SecretSeed.Enable 播（WorldGen.cs:539）——世界创建页录入秘种子解锁音
+  | 'chat'         // SoundID 24 = Chat（SoundID.cs:48）——UIWorldCreation 秘种子文本命中
+                   //   特殊种子时 PlaySound(24)（UIWorldCreation.cs:833）
   | 'unlock'
   | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
   | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
@@ -122,6 +126,10 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   menuClose: ['Menu_Close'],
   unlock: ['Unlock'],   // SoundID 22 Unlock（箱解锁 Chest.cs:402/:476;神庙钥匙开锁同号）
   menuTick: ['Menu_Tick'],
+  // 秘种子解锁音（Sounds/Custom/menu_accept.xnb 提取拍平；SoundID.cs:1068 MenuAccept）
+  menuAccept: ['menu_accept'],
+  // 特殊种子命中提示音（legacy PlaySound(24)=Chat；SoundID.cs:48，UIWorldCreation.cs:833）
+  chat: ['Chat'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
   explosionGrenade: ['Item_62'],  // 榴弹族闷爆（Kill :74471-74475/:74539-74543 弹型分支）
@@ -182,8 +190,8 @@ export const WAV_MAP: Record<SfxName, string[]> = {
  *  - 战斗/挖掘/拾取/门/液体高频。全 98 个 WAV_MAP 文件均在盘（2026-08-21 核对），
  *    合计 PCM 约 10MB 量级，远小于单首 BGM。 */
 export const WARMUP_NAMES: SfxName[] = [
-  // UI（首手势即菜单点击）
-  'menuOpen', 'menuClose', 'menuTick', 'unlock',
+  // UI（首手势即菜单点击；menuAccept/chat=秘种子录入两音,世界创建页即用）
+  'menuOpen', 'menuClose', 'menuTick', 'unlock', 'menuAccept', 'chat',
   // 战斗/挖掘/拾取高频
   'hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place', 'chop', 'tink',
   'shatter', 'coin', 'splash', 'drown', 'zombie', 'roar',

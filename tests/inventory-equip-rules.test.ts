@@ -34,9 +34,10 @@ describe('vi_ 堆叠上限 = 1456/1457 同值（默认 9999）', () => {
     const gel = idOf(23)!;              // 凝胶
     inv.add(gel, 9999);
     inv.add(gel, 1);                    // 满 9999 后溢出到新格
-    const stacks = inv.slots.filter((s) => s && s.id === gel).map((s) => s!.stack);
-    expect(stacks[0]).toBe(9999);
-    expect(stacks[1]).toBe(1);
+    // ★SW-BN5 2026-09-08：降序臂（Player.cs:39688-39700）落位=49→48,断言改序无关
+    //  （凝胶 useStyle 0 → 原版本就走降序臂;本测语义核=9999 上限+溢出成第二堆）
+    const stacks = inv.slots.filter((s) => s && s.id === gel).map((s) => s!.stack).sort((a, b) => b - a);
+    expect(stacks).toEqual([9999, 1]);
   });
 });
 

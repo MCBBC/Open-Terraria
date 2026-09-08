@@ -13,6 +13,7 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
 
 const W = 160, H = 140, FLOOR = 100;
 
@@ -89,17 +90,10 @@ afterEach(() => { vi.restoreAllMocks(); });
 // 文件内每次用例从同一起点出发:构造期(settle/Enemy.fromVanilla 等)消费的掷流
 // 亦被钉死,在测掷点映射不再受跨文件顺序影响;用例内 mockReturnValue 常量桩
 // 照旧覆盖本种子(后 spyOn 者胜),断言值零改动。验收:连跑 5 次全绿。
-function seededRandom(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6D2B79F5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// ★SW-BN6 2026-09-08：内联 mulberry32 实现抽出为 tests/seeded-rng.ts 单源（本电池=范式源,
+// 函数体逐字节迁移;0x5111D 即该件 BATTERY_SEED 同值,掷流零变化）。
 beforeEach(() => {
-  vi.spyOn(Math, 'random').mockImplementation(seededRandom(0x5111D));
+  vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED));
 });
 
 /** 落到地板上（vy 归零、onGround 置位）。★出生 vy=0 也至少跑 5 tick */

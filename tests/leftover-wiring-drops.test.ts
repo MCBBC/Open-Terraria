@@ -175,7 +175,10 @@ describe('echoResourceDropVid 帧段直查（⚠️4 接档二批,1456 WorldGen.
   });
 
   it('非 Echo sheet 恒 0（不侵 21 族 style 表/帧带特例域）+既有通道冒烟', () => {
-    for (const sheet of [0, 14, 15, 21, 105, 137, 186, 488, 649, 650, 693, 703, 706]) {
+    // ★649/650/693 已移出本组（v_693/v_649/v_650 并表移交批 2026-09-08）：三 sheet
+    //   入 ECHO_RESOURCE_SHEETS + echoResourceDropVid case（带表见
+    //   tests/tile-drop-handover.test.ts）;余下非 Echo 成员域照锁
+    for (const sheet of [0, 14, 15, 21, 105, 137, 186, 488, 653, 655, 696, 703, 706]) {
       expect(echoResourceDropVid(sheet, 0, 0), `sheet=${sheet}`).toBe(0);
       expect(echoResourceDropVid(sheet, 900, 36)).toBe(0);
     }

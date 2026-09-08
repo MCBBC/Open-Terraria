@@ -9,7 +9,14 @@
 //    短途支（TileCollision.ts shortfall X-slide）偏离原版 Collision.cs:2004-2033：
 //    原版每截短 tick 按精确差额 num9 滑移并清零 velocity.X/Y（:2016-2017
 //    vector3.X=0f; vector3.Y=0f），本仓一次性 4px 推离且不清 vx → x 永不静止
-//    → ai3 恒卡 1 → 永不转向。物理侧修复属 TileCollision 车道（本文件不含）。
+//    → ai3 恒卡 1 → 永不转向。★物理侧车道已开（2026-09-08 F3/F4③④ 落刀,
+//    TileCollision.ts slopeCollide）：shortfall 支已带双清+X 滑移（v_200 重写）
+//    并补 up=false 镜像（:2018→hitHead）；天花板下推受阻支已按 :2020-2034
+//    移植（截短下推+bitsByte[3]/[4] X 滑移+双清）。本场景无注入探针实测
+//    （_wedge-lane-check A/B,300t）：物理仍未自然复现楔点驻留前提
+//    （ai3 恒 1/x 漂移 ≤9px/vx 160/300t 非零,shortfall 139 次未收敛到亚像素;
+//    A/B 关 hitHead 清零输出逐位相同=与本刀无关的既有态），下注入仍承载
+//    vanilla 前提故保留；物理侧收敛差另册登记。
 //    本测试锁定【AI 侧链路】在 vanilla 前提（楔点每拍位置恒等 + vx 归零）下
 //    必须走完 卡死计数→停索敌→转向→走出 全链 —— 任何人削弱
 //    `this.x === this.fighterPrevX` 计数、游荡计数保持或转向状态机即刻爆红。
@@ -82,7 +89,9 @@ describe('v_200 坡楔卡死链（AI_003, NPC.cs:57703→:57732→:57783）', ()
       z.fixedUpdate(1 / 60, game);
       // —— vanilla shortfall 前提注入（Collision.cs:2016-2017 等价观测量）：
       // 面朝右（楔入向）期间强制楔点平衡：位置恒等 + velocity.X 归零。
-      // （物理侧修复落地后此注入即冗余——x 本就静止、vx 本就被清零）
+      // （★物理侧车道 2026-09-08 已开：受阻支双清/X 滑移/up=false 均在位——但本
+      //  场景物理侧尚未自然收敛到驻留前提（见文件头探针实录），注入仍承载前提,
+      //  保留无害）
       if (e.facing === 1) { z.x = WEDGE_PIN_X; z.vx = 0; }
       if (turned < 0 && e.facing === -1) turned = t;
       if (turned >= 0 && escaped < 0 && z.cx < WEDGE_PIN_X + 9 - 8) escaped = t;  // 左移 ≥8px

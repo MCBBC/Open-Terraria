@@ -50,27 +50,31 @@ export function invasionActive(w: World): boolean {
   return w.invasionType > 0 && w.invasionDelay === 0 && w.invasionSize > 0;
 }
 
-/** CanStartInvasion（Main.cs:63863-63881）：无进行中 + 冷却为 0（ignoreDelay 可跳）+ 生命上限≥200。
- *  单人 n=1；规模公式（StartInvasion :63904-63913）按合格玩家人数，单人固定档 */
+/** CanStartInvasion（1456 Main.cs:63863-63881 / 1457 Main.cs:65387-65406）：无进行中 + 冷却为 0（ignoreDelay 可跳）+ 生命上限≥200。
+ *  单人 n=1；规模公式在 StartInvasion 体内（1456 Main.cs:63904-63913 / 1457 Main.cs:
+ *  65428-65437,★行号重钉 2026-09-08——旧注"StartInvasion :63904-63913"缺 Main.cs
+ *  前缀,按 1456 WorldGen.cs:63904 查=蛛网掷、1457 WorldGen.cs:63904=树摇,两头落空;
+ *  StartInvasion 本体在 Main.cs 非 WorldGen.cs）按合格玩家人数,单人固定档 */
 export function canStartInvasion(w: World, playerMaxHp: number, ignoreDelay = false): boolean {
   if (w.invasionType !== 0) return false;
   if (w.invasionDelay !== 0 && !ignoreDelay) return false;
   return playerMaxHp >= 200;
 }
 
-/** StartInvasion（Main.cs:63884-63933）。返回公告用的 misc 编号（approaching west/east）
+/** StartInvasion（1456 Main.cs:63884-63933 / 1457 Main.cs:65408-65459）。返回公告用的 misc 编号（approaching west/east）
  *  供调用方 newText——文案本身无参数，方向由 invasionX 决定 */
 export function startInvasion(w: World, type: number): number | null {
   if (w.invasionType !== 0 && w.invasionSize === 0) w.invasionType = INVASION_NONE; // 允许胜利后立刻开
   if (w.invasionType !== 0) return null;
   const n = 1; // 单人
-  w.invasionSize = 80 + 40 * n;
-  if (type === INVASION_PIRATE) w.invasionSize += 40 + 20 * n;   // 海盗 120+60n
-  if (type === INVASION_MARTIAN) w.invasionSize = 160 + 40 * n;  // 火星 160+40n（:63898-63900）
+  w.invasionSize = 80 + 40 * n;                                  // 1457 Main.cs:65429
+  if (type === INVASION_PIRATE) w.invasionSize += 40 + 20 * n;   // 海盗 120+60n（1457 :65430-65433）
+  if (type === INVASION_MARTIAN) w.invasionSize = 160 + 40 * n;  // 火星 160+40n（1456 Main.cs:63910-63913 / 1457 :65434-65437,旧注 :63898-63900 系漂引）
   w.invasionSizeStart = w.invasionSize;
-  // invasionX（:63920-63932）：非火星 50/50 世界左右边缘；与 spawnX 的相对方向决定公告文案
+  // invasionX（1456 Main.cs:63920-63932 / 1457 :65444-65456）：非火星 50/50 世界左右边缘；与 spawnX 的相对方向决定公告文案
   w.invasionX = Math.random() < 0.5 ? 0 : w.store.w;
-  // 火星前线直接压在出生点旁一格（:63922-63925 invasionX=spawnTileX-1）——下一帧
+  // 火星前线直接压在出生点旁一格（1457 Main.cs:65446 invasionX=spawnTileX-1+:65447 warn=2;
+  // 1456 :63922-63923）——下一帧
   // tickInvasion 推进即"抵达"并广播 misc 41;原版同时置 invasionWarn=2（Game 侧私有
   // 计数,首帧 warn=0 时 arrived 公告同帧生效,语义等价）
   if (type === INVASION_MARTIAN) w.invasionX = w.spawnX - 1;

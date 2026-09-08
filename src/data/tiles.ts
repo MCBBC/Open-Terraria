@@ -69,7 +69,7 @@ def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0,
 def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: 5, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 // drop:null（2026-09-07 掉落全表对账）：tile 3 掉落面只有 fx==144→蘑菇 5 / 种子门 283
-// （KillTile case 3 :65506-65515）——27 橡果从不在 tile 3 掉落面,27 曾是死值+误导;
+// （KillTile case 3 :65506-65513）——27 橡果从不在 tile 3 掉落面,27 曾是死值+误导;
 // 条件掉落由 Game.killTileDropItems sheet-3 分支承载（cut 路径先 return,def.drop 不可达）
 def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 169, vanilla: { sheet: 53, frame: 'blend' } });
@@ -281,7 +281,14 @@ def({ key: 'v_50_books', name: '', solid: false, framed: true, opacity: 0.05, pi
 def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 93：吊灯样式表 frameY/54 */, vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } }); // ★R12 定谳修：足迹 1×3（TileObjectData.cs:2394-2419 Style1xX Height=3/Place1xX cs:39203-39226 num2=3/ToggleLamp Wiring.cs:2954-2975 SendTileSquare(1,3)）；曾 1×6 系与 92 路灯柱（:2421-2424 Height=6）混同
 def({ key: 'v_549_seaweed', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#365314', drop: null, vanilla: { sheet: 549, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_254_pumpkin_plant', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#F89E5C', drop: null, vanilla: { sheet: 254, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#A5A81A', drop: 4564, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
+// drop:null（571 竹 stack 移交批 2026-09-08,曾 pin 4564 恒 ×1）：KillTile_GetItemDrops
+// case 571（1457 :64903-64906/1456 :64438-64441）dropItem=4564 + dropItemStack=
+// genRand.Next(1,3)（:64905,1-2 根上开区间）——stack 掷入 Game.killTileDropItems 竹支
+// （dropId/stack 通道,同 61 丛林孢子族式）;def.drop 退位防尾段 def.drop ×1 双掉,
+// place_v_ 回收由 Game.ts NO_RETURN_RECYCLE_SHEETS 571 门压（★571 原版有返还 1-2 根,
+// 非零返还族,勿入 golden NO_RETURN_RECYCLE_DEBT 账;ReplaceTile 域 replaceTileDropOld
+// 的 place_v_ 支走 ADRIP 门不含 571,竹非 IsTileReplaceable 块换域不可达=备案）
+def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#A5A81A', drop: null, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_246_paintings_3x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#63321E', drop: null, vanilla: { sheet: 246, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_245_paintings_2x3', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#63321E', drop: null, vanilla: { sheet: 245, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_586_emerald_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 586, frame: 'style', fw: 1, fh: 1 } });
@@ -843,15 +850,21 @@ def({ platform: true, key: 'v_645_gray_cockatiel_cage', name: '', solid: false, 
 def({ key: 'v_646_shadow_candle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#6C858C', drop: 5322, vanilla: { sheet: 646, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_647_large_rubble_3x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#828268', drop: null, vanilla: { sheet: 647, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_648_large_rubble_3x2_group_2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#5F7A40', drop: null, vanilla: { sheet: 648, frame: 'style', fw: 3, fh: 2 } });
-// drop:3（2026-09-07 掉落全表对账 pin 首带）：tile 649 = MediumPiles2x1Echo,Check2x1
-// case 649（:47677-47760+）num3 带表 <6→3 石 / <16→154 / <17-19→71-73 / <20-25→181..182
-// / <31→593 / <34→9 / <38→150 / <41→3 / <47→3271…（650 同族带表）——无放置物品曾恒无
-// 掉落;逐带未建模=登记债
+// drop:3（2026-09-07 掉落全表对账 pin 首带;★逐带 2026-09-08 移交批建模）：tile 649 =
+// SmallPiles2x1Echo（TileID.cs:1735）,Check2x1 case 649（:47677-47770/1456 :47271）
+// s=fx/36+fy/18*53 带表 <6→3 石 / <16→154 / <17-24→71..178 / <25→182 / <31→593 /
+// <34→9 / <38→150 / <41→3 / <47→3271 / <53→3086 / <59→3081 / <62→62 / <64|65-67→169
+// / ==64→276 / ≥68 不发——全表入 vanillaStyleDrops.echoResourceDropVid case 649
+// （ECHO_RESOURCE_SHEETS 门,object 支/失撑链 'pile' kind 同源）;KillTile 直掉面在共享
+// no-drop 表（:66575）,def.drop=3 系 style0 档 pin（帧外 C-4 兜底,域内被带表覆写）
 def({ key: 'v_649_medium_rubble_2x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#5C5C5C', drop: 3, vanilla: { sheet: 649, frame: 'style', fw: 2, fh: 1 } });
-// drop:3（2026-09-07 掉落全表对账 pin 首带）：tile 650 = SmallPiles1x1Echo,case 650
-// frameX/18 带表（:65868-65948）<6→3 石 / <12→2 泥 / <20,<28→154 / <36→9 / <42→593 /
-// <48→664 / <54→150 / <60→3271 / <66→3086 / <72→3081 / <73→62 / 73-81→169|276——
-// 曾 drop:null 恒无掉落（650 非 tileCut 且无放置物品,place_v_ 回收不触发）;逐带未建模=登记债
+// drop:3（2026-09-07 掉落全表对账 pin 首带;★逐带 2026-09-08 移交批建模）：tile 650 =
+// SmallPiles1x1Echo（TileID.cs:1737）,KillTile_GetItemDrops case 650（:65868-65948/
+// 1456 :65403）num=frameX/18 带表 <6→3 石 / <12→2 泥 / <28→154（两支合并）/ <36→9 /
+// <42→593 / <48→664 / <54→150 / <60→3271 / <66→3086 / <72→3081 / <73→62 / 75|77→276
+// / 73-81 余→169 / ≥82 不发——全表入 vanillaStyleDrops.echoResourceDropVid case 650,
+// 经 styleDropVidOfFrames Echo 门接 1×1 直挖尾段（失撑 'ground1x1' 同源）;
+// def.drop=3 系 style0 档 pin（帧外 C-4 兜底,域内被带表覆写）
 def({ key: 'v_650_small_rubble_1x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#646464', drop: 3, vanilla: { sheet: 650, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_651_large_rubble_3x2_group_3', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB61D', drop: null, vanilla: { sheet: 651, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_652_medium_rubble_2x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6BB61D', drop: null, vanilla: { sheet: 652, frame: 'style', fw: 2, fh: 2 } });
@@ -895,11 +908,15 @@ def({ key: 'v_689_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 
 def({ key: 'v_690_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: 5442, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 690, frame: 'auto' } });
 def({ key: 'v_691_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: 5443, light: [77, 0, 89], /* ApplyTileLight case 625/626/691 静态 (0.3,0,0.35)×255（2026-09-07 对账 R 通道 76→77） */ vanilla: { sheet: 691, frame: 'auto' } });
 def({ key: 'v_692_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 5444, vanilla: { sheet: 692, frame: 'auto' } });
-// drop:664（2026-09-07 掉落全表对账 pin style0）：tile 693 = Stalactite1x1Echo
-// （TileID.cs:1823）,KillTile case 693 → GetStalactiteEchoDrop(fx/18)（:65560-65562,
-// 表 :39314-39363）style0→664 冰;与 694（1x2）同表——694 已走 echoResourceDropVid,
-// 693 并表移交（Game.ts ECHO_RESOURCE_SHEETS 扩一员即全 13 档),曾 drop:null 走 place_v_
-// 回收掉 Mitey-Titey 合成放置件（原版不还 5464）
+// drop:664（2026-09-07 掉落全表对账 pin style0;★并表通道 2026-09-08 移交批接线）：
+// tile 693 = Stalactite1x1Echo（TileID.cs:1823）,KillTile case 693 →
+// GetStalactiteEchoDrop(fx/18)（:65560-65562/1456 :65095,表 :39314-39370 十三带）——
+// 与 694（1x2）同表:两 sheet 已并入 vanillaStyleDrops.echoResourceDropVid 共用 case
+// （ECHO_RESOURCE_SHEETS 门,1×1 直挖走 styleDropVidOfFrames Echo 门,失撑 'stalactite'
+// kind 同表）,13 档全通 <3→664/<6→3/<9→150/<12→1124/<15→409/<18→61/<21→836/<24→3271/
+// <27→3086/<30→3081/<33→834/<36→833/<39→835/≥39 不发;def.drop=664 系 style0 档 pin
+// （帧外 C-4 兜底,域内被带表覆写）,曾 drop:null 走 place_v_ 回收掉 Mitey-Titey 合成
+// 放置件（原版不还 5464）
 def({ key: 'v_693_mitey_titey', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#050505', drop: 664, vanilla: { sheet: 693, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_694_stalactite_1x2_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#32323c', drop: null, vanilla: { sheet: 694, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_695_replica_demon_altar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#77657D', drop: null, vanilla: { sheet: 695, frame: 'style', fw: 3, fh: 2 } });
@@ -914,9 +931,11 @@ def({ key: 'v_703_jungle_plants_echo', name: '', solid: false, framed: true, opa
 def({ key: 'v_704_fallen_log_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 704, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_705_oasis_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB600', drop: null, vanilla: { sheet: 705, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_706_terragrim_shrine_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#1cd86d', drop: null, vanilla: { sheet: 706, frame: 'style', fw: 3, fh: 2 } });
-// drop:149（2026-09-07 掉落全表对账 pin 基档）：tile 707 = BooksEcho,case 707
-// fx==90→165 WaterBolt(noPrefix) 否则 149 Book（:65183-65193,与 sheet 50 书同表——
-// 50 已入 styleDropVidOfFrames 特例,707 只 pin 基档 149,fx==90 档=登记债）
+// drop:149（2026-09-07 掉落全表对账 pin 基档;★fx==90 档 2026-09-08 移交批建模）：
+// tile 707 = BooksEcho（TileID.cs:1851）,KillTile case 707 fx==90→165 WaterBolt
+// （:66183-66193/1456 :65718-65728,noPrefix=true :66187——165 档不掷词缀;本仓 tile
+// 掉落链本就不掷=语义自洽）否则 149 Book——已入 styleDropVidOfFrames 特例
+// （与 sheet 50 书同式,1×1 直挖/失撑链同表）;def.drop=149 系基档 pin（被帧表覆写）
 def({ key: 'v_707_books_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: 149, vanilla: { sheet: 707, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_708_shimmerfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EDDAF4', blend: true, drop: 5493, vanilla: { sheet: 708, frame: 'auto' } });
 def({ key: 'v_709_magic_shimmer_dropper', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F7E4FE', drop: null, vanilla: { sheet: 709, frame: 'style', fw: 1, fh: 1 } });

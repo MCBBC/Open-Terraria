@@ -71,9 +71,11 @@ export function emoteXY(chestOrShopOpen: boolean): { x: number; y: number } {
 }
 
 // ---- 小地图占位 mH(Main.cs:46535-46561) ----
-//   小地图开启(mapEnabled && mapStyle==1)→256,再钳 sh-600(sh<600 可为负=原版同款)
-export function mHOf(minimapOn: boolean, sh: number): number {
-  return Math.min(minimapOn ? 256 : 0, sh - 600);
+//   小地图开启(mapEnabled && mapStyle==1)→256,再钳 sh-PushUp(:46559-46561,可为负=
+//   原版同款;PushUp=RecommendedEquipmentAreaPushUp Main.cs:3063-3071——恶魔心/大师槽
+//   可显示时 610+PushEquipmentAreaUp·30,本仓无该设置取 610=偏差备案,否则 600)
+export function mHOf(minimapOn: boolean, sh: number, pushUp = 600): number {
+  return Math.min(minimapOn ? 256 : 0, sh - pushUp);
 }
 
 // ---- 装备区顶 num20(Main.cs:41854-41861) ----
@@ -103,9 +105,11 @@ export function accessoryCheckY(num20: number, row: number): number {
 }
 
 // ---- 配装轨(DrawLoadoutButtons Main.cs:42651-42707) ----
-//   竖轨 (sw-44, num20, 4, n*47.6);钮 32×32 @(sw-40, num20+36i)
-export function loadoutRailRect(sw: number, num20: number, visibleLoadouts: number) {
-  return { x: sw - 44, y: num20, w: 4, h: visibleLoadouts * CELL_STEP };
+//   竖轨 (sw-44, num20+2, 4, trunc(可见行数·47.6)):★轨高 n = 装备列可见行数
+//   (:42653-42662 num=10-缺恶魔心-缺大师,缺省 8,非钮数 3!);钮恒 3 颗
+//   32×32 @(sw-40, num20+36i)(:42674 步距 num5+num6=36)
+export function loadoutRailRect(sw: number, num20: number, visibleRows: number) {
+  return { x: sw - 44, y: num20 + 2, w: 4, h: Math.trunc(visibleRows * CELL_STEP) };
 }
 export function loadoutBtnXY(sw: number, num20: number, i: number): { x: number; y: number } {
   return { x: sw - 40, y: num20 + 36 * i };
@@ -143,28 +147,29 @@ export function miscCheckXY(slotXY: { x: number; y: number }): { x: number; y: n
 }
 
 // ---- 住房页(EquipPage==1 DrawNPCHousesInUI Main.cs:42709-42822) ----
-//   头像槽列 x=sw-92,y=num20+n*47.6;落位前判 y>sh-80 → 向左换列 -48 并回顶(42755)
+//   头像槽列 x=sw-92,y=trunc(num20+n·47.6)+num2;落位前判 y>sh-80 → 换列 -48 且
+//   num2 -= (y-num20) 吸收全局分数残量(:42751-42758,num 不归零——逐列归零有 1px 漂移)
 export function housingSlotPositions(count: number, sw: number, num20: number, sh: number): Array<{ x: number; y: number }> {
   const out: Array<{ x: number; y: number }> = [];
   let x = sw - 92;
-  let row = 0;
-  for (let n = 0; n < count; n++) {
-    let y = num20 + Math.trunc(row * CELL_STEP);
-    if (y > sh - 80) { x -= 48; row = 0; y = num20; }   // 换列(42755 逐槽判)
+  let num2 = 0;
+  for (let num = 0; num < count; num++) {
+    let y = num20 + Math.trunc(num * CELL_STEP) + num2;
+    if (y > sh - 80) { x -= 48; num2 -= y - num20; y = num20; }   // 换列(:42755-42758)
     out.push({ x, y });
-    row++;
   }
   return out;
 }
 
 // ---- PvP/队伍(DrawPVPIcons Main.cs:43389-43443) ----
-//   scale 0.6;剑 (sw-227, 179+mH)(页 2 x+46);队伍 2×3 步 20 @(sw-227, 239+mH)
+//   scale 0.6;剑 (sw-227, 179+mH)(页 2 x+46 :43392-43395);队伍 2×3 步 20:
+//   x=num2-10(num2 先吃 +46 再 -10 → 页 2 = sw-181 :43433-43443),y=239+mH
 export const PVP_SCALE = 0.6;
 export function pvpSwordXY(sw: number, mH: number, miscPage: boolean): { x: number; y: number } {
   return { x: sw - 227 + (miscPage ? 46 : 0), y: 179 + mH };
 }
-export function pvpTeamXY(sw: number, mH: number, i: number): { x: number; y: number } {
-  return { x: sw - 227 + (i % 2) * 20, y: 239 + mH + Math.floor(i / 2) * 20 };
+export function pvpTeamXY(sw: number, mH: number, i: number, miscPage: boolean): { x: number; y: number } {
+  return { x: sw - 227 + (miscPage ? 46 : 0) + (i % 2) * 20, y: 239 + mH + Math.floor(i / 2) * 20 };
 }
 
 // ---- 现代合成面板(NewCraftingUI.cs:302-307/UIDynamicItemCollection.cs:20-22) ----
@@ -181,29 +186,31 @@ export function craftPanelRect(sh: number) {
 export function craftCellXY(col: number, row: number): { x: number; y: number } {
   return { x: col * CRAFT_CELL, y: row * CRAFT_CELL };
 }
-/** 选中详情浮层(NewCraftingUI.cs:431-501;origin = 面板内区左上+(24,73)) */
+/** 选中详情浮层(NewCraftingUI.cs:431-501)。★origin = 面板自身左上+(24,73)
+ *  (:431 GetInnerDimensions = UIState 自身,SetPadding(0) :313——无内区 padding!)。
+ *  成品/向导槽 52px(scale 1 :470);材料行起点 origin+(72,22-16·num)、列距
+ *  34·num、槽 52×0.7·num(num=min(11/材料数,1) :477-485),拥有数=每槽+(3,32)·num
+ *  (:555-558)。panelX/panelY = 面板左上(20,312) */
 export interface CraftDetailLayout {
   origin: { x: number; y: number };
   resultSlot: { x: number; y: number };
   hammer: { x: number; y: number };
   materialsStart: { x: number; y: number };
   materialGap: number;
-  ownedText: { x: number; y: number };
   guideSlot: { x: number; y: number };
 }
-export function craftDetailLayout(innerX: number, innerY: number): CraftDetailLayout {
-  const origin = { x: innerX + 24, y: innerY + 73 };
+export function craftDetailLayout(panelX: number, panelY: number): CraftDetailLayout {
+  const origin = { x: panelX + 24, y: panelY + 73 };
   return {
     origin,
     resultSlot: { x: origin.x + 0, y: origin.y + 0 },
     hammer: { x: origin.x + 47, y: origin.y + 13 },       // scale 0.8
-    materialsStart: { x: origin.x + 72, y: origin.y + 22 },
-    materialGap: 34,                                       // 距 34,压缩 min(11/n,1)
-    ownedText: { x: origin.x + 3, y: origin.y + 32 },
+    materialsStart: { x: origin.x + 72, y: origin.y + 6 },   // 22-16·num,num=1
+    materialGap: 34,                                       // ×num 压缩
     guideSlot: { x: origin.x + 0, y: origin.y + 58 },      // ctx7 向导槽
   };
 }
-/** 就近箱参与制作钮 = 切换钮旁 +40(NewCraftingUI.cs:488-499) */
+/** 就近箱参与制作钮 = 网格切换钮旁 +40(NewCraftingUI.cs:486-499;旅程 +40 顺延) */
 export const CRAFT_NEARBY_BTN_OFF = 40;
 
 // ---- 容器缩放(本仓登记偏差:原版小屏直接裁切,本仓整体等比) ----

@@ -352,8 +352,8 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
     expect(d.fadeIn).toBe(0);                        // scale > 2 后转衰
     const s0 = d.scale;
     vd.update(0, 0, 1920, 1080);
-    // 衰减档 = 老化 −0.01（:2194）+ 链 B 兜底 −0.04（:2384——217 无链 A 专档且
-    // noGravity，恒命中；扩展批接入后本型行为对齐原版，旧断言只算了老化项）
+    // 衰减档 = 老化 −0.01（:2194）+ 链 B 兜底 −0.04（1457 :2407-2413——217 无链 A
+    // 专档且 noGravity，恒命中；扩展批接入后本型行为对齐原版，旧断言只算了老化项）
     expect(d.scale).toBeCloseTo(s0 - 0.01 - 0.04, 5);
   });
   it('261 型专属段（:705-727）：noGravity 阻尼 0.93+0.97/0.99 + 缩小 0.0025 + 持续玩家跟随 + 光收集', () => {
@@ -364,7 +364,10 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
     vd.update(0, 0, 1920, 1080, 3, -2);
     expect(d.x).toBeGreaterThan(500);                // 跟随 3px 且未清（261 持续）
     expect(d.followPlayer).toBe(true);
-    expect(d.scale).toBeCloseTo(2 - 0.01, 5);        // 专属段 ±0.0025 相抵 + 通用衰落 −0.01
+    // scale = 2 −0.01(老化) ±0.0025(261 段相抵) −0.04(链 B 兜底 :2407——链 B 对全体
+    // 尘评估,261 不在链 B 各 case=noGravity 恒吃兜底;2026-09-07 水花尺寸定谳把兜底
+    // 从 15 型白名单改回全 type 缺省档后本型即命中,旧断言漏算 −0.04)
+    expect(d.scale).toBeCloseTo(2 - 0.01 - 0.04, 5);
     expect(vd.lights.length).toBe(1);
     expect(vd.lights[0].g).toBeGreaterThan(vd.lights[0].r);   // (0.4,0.6,0.7) 比例
   });

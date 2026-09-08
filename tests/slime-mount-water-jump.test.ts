@@ -4,8 +4,13 @@
 //   flag2&flag3 = wet∧accFlipper ∧ 非矿车。旧近似只认 vy==0/脚蹼 ⇒ 水中任意 vy
 //   按跳无法起跳；本批把 justClearedWetSlime 并入水下起跳门（Player.ts water 分支）。
 //   集成位走真实 Player.fixedUpdate（makeLandHooks 精简桩，同 mount-combat R3 口径）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { World } from '../src/world/World';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 /** 真实 Player 最小钩桩 */
 function makeHooks(w: World) {

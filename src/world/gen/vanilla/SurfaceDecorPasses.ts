@@ -251,7 +251,8 @@ const bottomSlope = (st: TileStore, x: number, y: number): boolean => {
   return s === 3 || s === 4;
 };
 /** 生成期 KillTile（cs:63559）：仅清除活性/类型（noItem=true），保留液体。
- *  ★CCCC 批（2026-08-24）补 cs:63904 掷：蛛网(51)带蜘蛛墙(62) → 1×Next(4)
+ *  ★CCCC 批（2026-08-24）补掷:蛛网(51)带蜘蛛墙(62) → 1×Next(4)（1456 cs:63904 /
+ *  1457 cs:64369;行号重钉 2026-09-08）
  *  （结果只改 noItem,生成期恒 noItem——纯流位掷）。本文件 killTile 消费方=
  *  藤蔓 pass 蜂巢凹龛 2×2 击杀（NTB 丛林蛛网带高发,(189,784-785)/(190,784-785)
  *  四连掷实证,vanilla span A3 与 a4 交错）与 CheckVines 失锚级联（杀藤族,
@@ -260,7 +261,7 @@ const bottomSlope = (st: TileStore, x: number, y: number): boolean => {
  *  分派引擎另在（勿混用——本文件级联走 genSquareTileFrame 显式补）。 */
 const killTile = (st: TileStore, x: number, y: number, rng?: RNG): void => {
   if (!activeAt(st, x, y)) return;
-  // cs:63904（rng 缺省=CheckVines 藤族级联路径——藤 type 恒非 51,掷门不可达）
+  // 蛛网掷（1456 cs:63904 / 1457 cs:64369;rng 缺省=CheckVines 藤族级联路径——藤 type 恒非 51,掷门不可达）
   if (rng && SHEET[st.type[st.idx(x, y)]] === 51 && st.wall[st.idx(x, y)] === 62) rng.nextInt(4);
   st.setTileSilent(x, y, 0);
 };

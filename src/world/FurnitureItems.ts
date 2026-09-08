@@ -212,8 +212,10 @@ function vanillaDamage(vid: number): number {
   return itemFuncOfVid(vid)?.damage ?? itemCombat(vid)?.damage ?? 0;
 }
 
-/** Item.useStyle（itemfunc 表 + USE_STYLE_PATCH 补丁） */
-function vanillaUseStyle(vid: number): number {
+/** Item.useStyle（itemfunc 表 + USE_STYLE_PATCH 补丁）
+ *  ★SW-BN6 2026-09-08 导出：假人渲染 IsValidPose 消费（src/render/DisplayDoll.ts
+ *  → isValidDollPose 持握槽 useStyle 判定,TEDisplayDoll.cs:142-153 同源） */
+export function vanillaUseStyle(vid: number): number {
   const f = itemFuncOfVid(vid);
   if (f?.useStyle !== undefined) return f.useStyle;
   return USE_STYLE_PATCH[vid] ?? 0;

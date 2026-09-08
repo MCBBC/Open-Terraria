@@ -601,6 +601,7 @@ import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass, genSquareTileFrame } from './vanilla/FinalCleanupPass';
+import { solidTile as solidTileFC } from './vanilla/FinalCleanupPass';   // ★IIIII214b remix 出生 relocation 消费（WorldGen.SolidTile cs:70650 口径）
 // ★IIIII101e：FinishDrunkGen import 随调用位迁至 vanilla/FinalCleanupPass.ts（cs:22630 体位接线）
 // IIIII16 秘种子生成终结面（Do* 族九旗标；接线点见下方各 ★IIIII16 注）
 import {
@@ -2702,7 +2703,27 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   //   tileSolid[379] 还原。此前自造"上空净空清理盒"（豁免树干/草面的 3×3+5×5 清空）
   //   = 8 通道外的自创写入：#78 干净基座下 4 格硬化沙被误清（T187>0×4）。
   //   为逐位一致已整段移除（WWW 批 2026-08-18）——玩家卡块由消费端抬高处理。
-  // ★pass 尾还原（cs:19731 `Main.tileSolid[379] = true`）
+  // ★IIIII214b：remix 出生 relocation（1457/1458 cs:19740-19748；1456 cs:19722-19730）
+  //   ——SpawnPoint 委托尾、tileSolid[379] 还原前：`if (remixWorldGen) { spawnTileX =
+  //   maxTilesX/2; num14 = maxTilesY-10; while (SolidTile(spawnTileX, num14)) num14--;
+  //   spawnTileY = num14+1; }`。此前整臂缺失 ⇒ remix/zenith 世界出生留在地表采样点
+  //   ⇒ FinishRemixWorld ④ 出生列复检窗 [spawnY-14, spawnY+10]（cs:26908-26912）落在
+  //   地表（④ 清扫带 [h-200, h-125) 之外）⇒ 带清永远清不到复检窗，窗内既定液体
+  //  （地表穴袋熔岩）永不干 ⇒ while(flag) 零进展死循环（UI 'getfixedboi' 生成
+  //  watchdog 37s 无进展→3min 硬超时实锤；重放遥测 qw#232 次窗湿=1 恒定）。
+  //   零掷骰（RNG 流不动）；X0/Y0 快照同步=床 RemoveSpawn 回退锚同位语义。
+  //   vanilla SolidTile 越界=null→true，JS 口径 inBounds→false + num14>0 偿垫
+  //  （remix 恒有土墩 ash 柱（GenerateUnderworldStartingMound cs:13874），循环
+  //   必在墩顶首空格终止，垫位仅防退化世界）。
+  if (world.seedFlags?.remix) {
+    world.spawnX = Math.floor(store.w / 2);        // cs:19741（整除）
+    world.spawnX0 = world.spawnX;
+    let num14 = store.h - 10;                      // cs:19742
+    while (num14 > 0 && solidTileFC(store, world.spawnX, num14)) num14--;   // cs:19743-19746
+    world.spawnY = Math.max(4, num14 + 1);         // cs:19747（JS max4 安全垫，原版无界）
+    world.spawnY0 = world.spawnY;
+  }
+  // ★pass 尾还原（cs:19731/19749 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
 }
 

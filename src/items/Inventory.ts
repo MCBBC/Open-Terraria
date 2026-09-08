@@ -453,8 +453,9 @@ export class Inventory {
    *  语义域=「从 UI 面流回背包的整对象」（关包光标物归位 dropItemCheck→
    *  GetOrDropItem Player.cs:5135-5140、向导材料格取回 GetOrDropItem(Main.guideItem)
    *  :5112-5114）；世界拾取链调用方不传（缺省 false）=行为不变（世界掉落本无收藏）。
-   *  空格序：favorited 件升序落首空格（GetItem :39681-39698 favorited 臂同向——
-   *  本仓空格支升序见 ③ 注）。 */
+   *  空格序（★SW-BN5 2026-09-08 两臂 1:1,见 fillBagArms 注）：favorited 件升序
+   *  首空格（:39681-39687 favorited 臂）/ 非收藏件【降序】从背包尾填（:39688-39700,
+   *  旧 ③ 空格支升序预占=BP1 登记偏差已清偿）。 */
   /** noCoinMerge（R14-B4）：钱币入包跳过 doCoins 自动升面额（GetItemSettings.cs:25
    *  ReturnItemShowAsNewNoCoinMerge——合成 1 银→100 铜不被瞬时合回） */
   addNoCoinMerge(id: number, count: number): number {
@@ -483,14 +484,9 @@ export class Inventory {
         if (count === before) break;   // 无进展（格满且不再转换）→ 溢出走背包
       }
       if (count > 0) {
-        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix, favorited);
-        for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
-          if (!this.slots[i]) {
-            const put = Math.min(max, count);
-            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
-            count -= put;
-          }
-        }
+        // ★SW-BN5 2026-09-08：溢出币袋支与普通拾取同构（GetItem :39671-39700——
+        //    favorited 升序/非收藏降序,币经 isACoin 拒支跳热栏臂 :39671,见 fillBagArms 注）
+        count = this.fillBagArms(id, count, max, placeStyle, prefix, favorited, true);
       }
       return count;
     }
@@ -537,12 +533,63 @@ export class Inventory {
       }
       if (count <= 0) return 0;
     }
-    // ③ 合并 0-49 已有堆（fillRange 空格支升序先行落位——与原版 favorited 件空格臂
-    //    :39681-39686 升序同向；非收藏件原版降序臂 :39688-39700 被 fillRange 空格支
-    //    预占=登记偏差【2026-09-07 SW-BP1 复核在案,坐标:本行 mergeOnly 未设】,非本批刀）
-    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, undefined, prefix, favorited);
-    // ④ 空槽降序（原版非 favorited 降序从背包尾填，:38711-38730；常态由 ③ 预收，
-    //    本循环为残量兜底）
+    // ③④ 袋支两臂（★SW-BN5 2026-09-08 清偿 BP1 登记偏差：旧 ③ 空格支升序对全体
+    //    生效,使非收藏件降序臂（:39688-39700）常态不可达。现 favorited 升序臂由
+    //    fillRange 空格支承载,非收藏件 merge-only 后由 fillDescending 降序执行）
+    count = this.fillBagArms(id, count, max, placeStyle, prefix, favorited);
+    return count;
+  }
+
+  /** ★SW-BN5 2026-09-08：GetItem 袋支三臂（Player.cs:39671-39700 1:1）——
+   *  ③ 合并 0-49 已有堆（GetItem_FillIntoOccupiedSlot :39796;favorited OnlyNeedOne
+   *  拒收门 :39536-39539 在 merge-only 化后经 fillRange.favoritedGate 显式保持——
+   *  原 mergeOnly 一参耦合「无空格支+无拒收门」两语义：FillAmmo 首趟（:39575-39601
+   *  原版无门）须无门、袋合并（:39536 有门）须有门,故解耦为独立参,既有调用位
+   *  默认值 `!mergeOnly` 行为零漂移）。
+   *  热栏空格臂（:39671-39680 `!isACoin && newItem.useStyle != 0` → 空热栏 0..9 升序,
+   *  GetItem_FillEmptyInventorySlot :39873 整对象入槽）：useStyle 数据面 =
+   *  vanilla-itemfunc.useStyle（本仓唯一逐件源,heldUseStyle Game.ts:10222 同源）。
+   *  ★取数口径=exact-only（缺条目/缺键=useStyle 0=原版缺省 → 不接臂）,与
+   *  heldUseStyle 的「缺数据回退 1」刻意分叉：持姿渲染错档≠落位语义错路,臂路由
+   *  取保守向。提取器缺口类（共享 case 块/公式段/DefaultTo* 助手,vanillaItemFunc.ts
+   *  头注在案）漏报的 useStyle≠0 件=登记残差（落降序臂代热栏臂）。
+   *  ★isACoin 拒支（:39671）：币 71-74 itemfunc useStyle=1 但原版币不接本臂——
+   *  钱币溢出路径经 isACoin=true 跳过。
+   *  收藏空格臂（:39681-39687 favorited 臂,升序 0..49——fillRange 空格支承载,
+   *  SW-BP1 收藏金边行为零回退）；非收藏【降序】臂（:39688-39700
+   *  `for (num4 = num-1; num4 >= 0; num4--)`——fillDescending 唯一执行者）。 */
+  private fillBagArms(id: number, count: number, max: number, placeStyle: number | undefined,
+    prefix: number | undefined, favorited: boolean, isACoin = false): number {
+    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, true, prefix, favorited, true);
+    if (count > 0 && !isACoin && this.itemUseStyleOf(id) !== 0) {
+      for (let j = 0; j < 10 && count > 0; j++) {
+        if (!this.slots[j]) {
+          const put = Math.min(max, count);
+          this.slots[j] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}), ...(favorited ? { favorited: true } : {}) };
+          count -= put;
+        }
+      }
+      if (count <= 0) return 0;
+    }
+    if (favorited) {
+      return this.fillRange(0, BAG_SIZE, id, count, max, placeStyle, false, prefix, favorited);
+    }
+    return this.fillDescending(id, count, max, placeStyle, prefix, favorited);
+  }
+
+  /** useStyle 查表（:39672 判据数据面）：itemfunc.useStyle 显式值;缺条目/缺键=0 */
+  private itemUseStyleOf(id: number): number {
+    const def = ITEM_DEFS[id];
+    if (!def) return 0;
+    const vid = def.vid ?? viIdFromKey(def.key);
+    if (!(vid > 0)) return 0;
+    return itemFuncOfVid(vid)?.useStyle ?? 0;
+  }
+
+  /** 非收藏件空格【降序】臂（Player.cs:39688-39700 → GetItem_FillEmptyInventorySlot
+   *  :39873 `inventory[i] = returnItem` 整对象入槽）——★SW-BN5 起唯一降序执行者。 */
+  private fillDescending(id: number, count: number, max: number, placeStyle: number | undefined,
+    prefix: number | undefined, favorited: boolean): number {
     for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
       if (!this.slots[i]) {
         const put = Math.min(max, count);
@@ -567,14 +614,17 @@ export class Inventory {
    *  ★SW-BP1 favorited 随行：空格落位带收藏标记（GetItem_FillEmptyInventorySlot
    *  :39873 `inventory[i] = returnItem` 整对象语义,add 通道 favorited 入参透传） */
   private fillRange(start: number, len: number, id: number, count: number, max: number,
-    placeStyle?: number, mergeOnly = false, prefix?: number, favorited = false): number {
+    placeStyle?: number, mergeOnly = false, prefix?: number, favorited = false,
+    favoritedGate = !mergeOnly): number {
     for (let i = start; i < start + len && count > 0; i++) {
       const s = this.slots[i];
       // placeStyle 匹配门(2026-08-13):不同敌旗(bannerId)不并入已有堆——
       // 原版每旗独立 item id 天然隔离,本仓单物品+实例 style 需此门防混堆
       //（★SW-BP1 起判据在 canMergeStack placeStyle 位,此处不再内联展开）
+      // ★SW-BN5 2026-09-08：favorited 拒收门与 mergeOnly 解耦（favoritedGate 独立参,
+      //  缺省 !mergeOnly=旧耦合行为零漂移;fillBagArms 袋合并传 true=merge-only 仍有门）
       if (s && s.stack < max && canMergeStack(s, { id, prefix, placeStyle })
-        && !(!mergeOnly && s.favorited && onlyNeedOneInInventory(s.id))) {
+        && !(favoritedGate && s.favorited && onlyNeedOneInInventory(s.id))) {
         const put = Math.min(max - s.stack, count);
         s.stack += put;
         count -= put;

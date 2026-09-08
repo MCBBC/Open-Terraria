@@ -17,4 +17,10 @@ export const UISfx = {
   click() { this.sfx.play('menuTick', 1); },
   menuOpen() { this.sfx.play('menuOpen', 1); },
   menuClose() { this.sfx.play('menuClose', 1); },
+  /** 秘种子解锁音（SoundID.MenuAccept="menu_accept"，WorldGen.SecretSeed.Enable :539——
+   *  世界创建页录入秘种子一次性播放；★IIIII215b 生成界面彩蛋批接线） */
+  menuAccept() { this.sfx.play('menuAccept', 1); },
+  /** 特殊种子命中音（legacy PlaySound(24)=Chat，UIWorldCreation.cs:833——种子文本每次
+   *  变更且命中特殊种子表时播放） */
+  chat() { this.sfx.play('chat', 1); },
 };

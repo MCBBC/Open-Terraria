@@ -85,22 +85,11 @@ export class HousingPanel {
     this.loop();
   }
 
-  /** 头像持有表(Main.cs:41452-41461):按 HeadListOrder 首个持有该头索引的在世 NPC */
+  /** 头像持有表(Main.cs:41452-41461):按 HeadListOrder 首个持有该头索引的在世 NPC。
+   *  ★2026-09-07 刀 3:抽取共享——vanilla 布局住房页(EquipPage=1,UI.ts
+   *  vinvRefreshHousing)与本面板同源消费 */
   refresh(): void {
-    const heads = new Map<number, HeadRow>();
-    for (const n of this.game.entities.npcs) {
-      const t = n as unknown as { dead?: boolean; npcKey?: string; vanillaId?: number };
-      if (t.dead || t.npcKey === undefined) continue;
-      const vid = t.vanillaId;
-      if (vid == null) continue;
-      const head = TOWN_NPC_HEAD_INDEX[vid];
-      if (head === undefined || head === 21 || head === 80) continue;   // CannotBeDrawnInHousingUI
-      if (!heads.has(head)) {
-        heads.set(head, { headIndex: head, npcKey: t.npcKey, vanillaId: vid, name: Lang.npcName(vid) ?? '' });
-      }
-    }
-    // HeadListOrder 序(查询器 0 号位由面板自身画,不入 rows)
-    this.rows = HEAD_LIST_ORDER.filter((h) => h !== 0 && heads.has(h)).map((h) => heads.get(h)!);
+    this.rows = housingHeadRows(this.game);
     // 光标携带的 NPC 若已离场 → 降级查询器(:44649-44651)
     if (this.cursor?.kind === 'assign') {
       const held = this.cursor.npcKey;
@@ -276,4 +265,24 @@ function img(src: string): HTMLImageElement | null {
   i.src = src;
   imgCache.set(src, i);
   return i;
+}
+
+/** 在场 NPC 头像行(Main.cs:41452-41461):按 HeadListOrder 首个持有该头索引的
+ *  在世 NPC;排除 21/80(CannotBeDrawnInHousingUI);查询器 0 号位不入行。
+ *  ★2026-09-07 刀 3:抽取共享——vanilla 布局住房页(EquipPage=1,UI.ts
+ *  vinvRefreshHousing)与本面板 refresh 同源消费 */
+export function housingHeadRows(game: Game): HeadRow[] {
+  const heads = new Map<number, HeadRow>();
+  for (const n of game.entities.npcs) {
+    const t = n as unknown as { dead?: boolean; npcKey?: string; vanillaId?: number };
+    if (t.dead || t.npcKey === undefined) continue;
+    const vid = t.vanillaId;
+    if (vid == null) continue;
+    const head = TOWN_NPC_HEAD_INDEX[vid];
+    if (head === undefined || head === 21 || head === 80) continue;   // CannotBeDrawnInHousingUI
+    if (!heads.has(head)) {
+      heads.set(head, { headIndex: head, npcKey: t.npcKey, vanillaId: vid, name: Lang.npcName(vid) ?? '' });
+    }
+  }
+  return HEAD_LIST_ORDER.filter((h) => h !== 0 && heads.has(h)).map((h) => heads.get(h)!);
 }

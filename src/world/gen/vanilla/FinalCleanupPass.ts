@@ -122,7 +122,7 @@ function tileSolidT(t: number): boolean {
  *  静态化）取而代之 ⇒ #106 T147>224×52/T224>147×23/L255>0×21 @(2584,430)。
  *  vanilla SolidTile 两 overload（Tile 版 cs:70729 / int 版 cs:70886）均含 !inActive，
  *  本文件四消费位（cs:53786/Check 族杀门×2/③入口门）语义同一。 */
-function solidTile(st: TileStore, x: number, y: number): boolean {
+export function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
@@ -199,7 +199,8 @@ function tileCutAt(st: TileStore, x: number, y: number): boolean {
 //      1×Next(3)（支撑已失的击杀路径短路不掷）；
 //   ⑦ KillTile 尾部 SquareTileFrame（cs:63953）级联重访——邻格 184 每访再掷。
 // KillTile（cs:63559）生成期（isGeneratingOrLoadingWorld→noItem=true）：无掉落
-//   （Item.NewItem 系 Main.rand 不耗 genRand）；type51+wall62 掷（cs:63904）与
+//   （Item.NewItem 系 Main.rand 不耗 genRand）；type51+wall62 掷（1456 cs:63904 /
+//   1457 cs:64369;行号重钉 2026-09-08）与
 //   481-483 裂砖链 8 掷（cs:63877）的门=被杀格类型，本扫 KillTile 目标族
 //   （184/165/植物/藤/187 族/240/28/72/571/549/518/519/56/323/136/129/149/529）
 //   均不命中；getGoodWorld/remix 门不适用；TruncatesWalls={54,328,459,748}∩杀族=∅。

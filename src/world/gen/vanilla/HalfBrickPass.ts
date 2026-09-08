@@ -1088,7 +1088,7 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   //   时 3×3 邻域连锁碎裂——CONST 链 LavaLayerCaverer 雕进地下沙漠化石簇即从该列
   //   流移（vanilla 每个活性 404 邻格掷 1 次 Next(15)/Next(4),命中 0 连锁击杀;
   //   404 尘段 10 次迭代零 genRand → 流上只见碎裂掷不见尘掷,定罪铁证）。
-  //   原版序：尘段(cs:63747) → 本掷(cs:63756) → fail 支(cs:63758) → 蛛网掷(cs:63904)。
+  //   原版序：尘段(cs:63747) → 本掷(cs:63756) → fail 支(cs:63758) → 蛛网掷(1456 cs:63904 / 1457 cs:64369)。
   if (sheet === 404) attemptFossilShattering(st, rng, x, y);
   if (fail) {
     // cs:63758-63776 fail 支路：ShakeTree（IsShakeable=树族,gen 域 fail 仅
@@ -1159,8 +1159,9 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   // cs:63900 CheckTileBreakability2_ShouldTileSurvive（TTTTTT 批 2026-08-23 补）：
   //   有物箱/梳妆台免毁（尘段之后——尘掷已耗,箱族尘 10 迭代零掷故流位不变）
   if (shouldTileSurviveKT(st, x, y)) return;
-  // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
-  // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（cs:63904 > cs:63748 尘环）——
+  // 蛛网掷（1456 cs:63904 / 1457 cs:64369-64372;noItem 总门 1457 cs:64373-64377）：
+  //   蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
+  // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（掷位 > 尘环,1457 cs:64369 > 尘段）——
   //   曾前置 → 掷序错,CONST 链 LavaLayerCaverer 雕到蛛网+蜘蛛墙即从该点流移
   if (sheet === 51 && st.wall[i] === 62) rng.nextInt(4);
   // cs(1458):64427-64441 KillTile 尾液体灌入族（Main.netMode != 1 恒真;三臂互斥 else-if）：

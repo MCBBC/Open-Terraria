@@ -2,6 +2,52 @@
 // 每个可见 tile 按概率出 Dust；我们用通用 Particle（色点）近似，按 sheet 查表发射。
 // 帧门（点燃帧/样式行）、概率、出生偏移、上浮/横漂均取自反编译行号标注处。
 // Tier 3（风场树叶/萤火虫/恶搞 tile 等）不做，见 docs 备忘。
+//
+// ★F7 草族四绘制路径定谳（2026-09-08 定谳;2026-09-09 ×1/4 替换语义落刀——Game.ts
+//  GRASS_COUNTER_SHEETS/grassParticleFold + emitTileParticles probEff 乘区;机制锁
+//  tests/tile-particles-grass-path-verdict.test.ts + tests/tile-particles-grass-fold.test.ts）：
+//  原文四支 DrawGrass(:8508 掷+8512-8515 发射)/DrawAnyDirectionalGrass(:8566+:8570-8573)/
+//  DrawMultiTileGrassInWind(:9146+:9150-9153)/DrawMultiTileVinesInWind(:9665+:9669-9672)
+//  的 `_rand.Next(4)==0` 门包的是【整个】DrawTiles_EmitParticles 调用（非 sparkle 专支;
+//  函数内 tileShine 掷式 :7537-7654 与主路径 :7553 是同一份代码,组合无差异）。而四域
+//  tile 在注册循环（:539-727）命中专用 counter 后一律 `continue` 跳过 DrawSingleTile
+//  （:729）——主路径唯一发射点 :974-977 对它们整帧不评估 ⇒ 四支是【替换】而非【额外】：
+//  同格同帧至多一发（counter 按 type switch 互斥,每帧注册一次;PostDrawTiles(false)
+//  :429-441 逐 counter 绘制一次,风法 :8970/:9053 按多格矩形逐格发射）,频率 = 主路径
+//  ×1/4 随机掷。主路径参照系：缺省 Color 光照 Lighting.UpdateEveryFrame=false
+//  （Lighting.cs:77-85,Mode=Color 初始化 :96 ⇒ NotRetro=true;zoom≤1 无 RT Main.cs:2670）
+//  每帧全发;retro 光照才改 FastRandom(TileFrameSeed).WithModifier(x,y).Next(4)==0
+//  确定性 1/4（种子每 5 绘制帧再掷,Main.cs:62661-62668）。
+//  落刀口径（2026-09-09）：emitTileParticles probEff ×= grassParticleFold(sheet,swayInWind)
+//  =0.25,仅对本表∩四域的【未预折】规则生效：
+//   · 交集七条（纯块级概率）= 腐化植物 24（:7447 Next(500)）/ 丛林植物 61（:7533
+//     Next(60),fx==144）/ 蘑菇 71（:7486 Next(500)）/ 药草 83（:9790-9846 herb 内掷;
+//     83→84 换型在发射之后 :8516-8519,粒子仍按 83）/ 圣地植物 110 闪光（:7553
+//     Next(shine);tileShine 支与四域唯一交点,Main.cs:7681 shine 9000）（上五条
+//     WindyGrass 域）+ 吊灯 34（:7384 Next(40)）/ 吊挂灯笼 42（:7169 lantern 内掷）
+//     （MultiTileVine 域）——×1/4 后每 tick 率 = 原版草路径帧率（3-tick 扫描口径 =
+//     主路径概率 ×3×1/4）,禁止"额外概率支"（叠加即双发偏差）;
+//   · ★592 悬挂火盆例外：本表 592 prob=1/12×3 已内含「外层 Next(4)(:9665)×内层
+//     Next(3)(:6917)」结构门（上方篝火/火盆注）,再折即 4× 欠发射——Game.ts
+//     GRASS_FOLD_SKIP 豁免,表值不动;
+//   · ★WindyGrass 子域随设置回落：原文 ShouldSwayInWind :7836-7840 设置门
+//     （SettingsEnabled_TilesSwayInWind）关时整域不注册 → 回落主路径全率;本仓
+//     Options.swayInWind（Settings「图块在风中摆动」）已建模（WindSway.ts:141/:203/:218）
+//     ——2026-09-08 旧注"本仓无设置开关建模=按效果恒开口径"经复核为误,落刀时纠正为
+//     折算随 options.data.swayInWind 开合。227 五帧豁免 :7845-7848 同回落主路径
+//     （本表无 227 规则,备案）。
+//  域全集（Game.ts GRASS_COUNTER_SHEETS 带全锚）= WindyGrass（TileID.Sets.SwaysInWindBasic
+//    白名单 TileID.cs:273）= {3,20,24,61,703,71,73,74,83,84,110,113,201,227,529,590,595,
+//    615,624,700,656,701,637} / AnyDirectionalGrass = {184 LongMoss,:718-719} /
+//    MultiTileGrass（顶左注册 :605-691）= {27,233,236,238,485,489,490,493,519,521-527,
+//    530,651,652,702,705} / MultiTileVine（顶左注册 :554-603）= {34,42,91,95,126,270,271,
+//    444,454,465,572,581,591,592,660,698}。VineThread 爬藤 52/62/115/205/382/528/636/638/549
+//    走 TileCounterType.Vine（:766）→ DrawVines(:9058) 链条绘制,【无】EmitParticles,不入域。
+//  续单三件定谳（2026-09-09）：①Tier3 NatureFly 草域 12 型同折（Game.ts
+//    emitTileOrchestraAmbient 注带锚;TileID.cs:251 ∩ 域,唯 80 域外）;②篝火 215 无外层
+//    门 prob 0.25→1（掷链归属分账见篝火/火盆注）;③灯笼 42 行键勘误 pred 改
+//    fy/36==case ∧ fy/18 奇行（见 LANTERN_STYLE_DUST 注）。判别锁
+//    tests/tile-particles-grass-fold.test.ts 续单三件段。
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 
 export interface TileParticleRule {
@@ -32,9 +78,6 @@ export interface TileParticleRule {
   life?: number;
   grav?: number;
   damp?: number;
-  /** 需要光照（矿物闪光族）：lightAt max(R,G,B) > lightGate（TileDrawing.cs:7539-7543
-   *  三通道全 ≤20 不闪;2026-09-07 改三通道 max——曾只查 R 漏纯蓝/绿源） */
-  lightGate?: number;
   /** ★原版尘渲染(2026-09-07 闪光可见度批):矿物闪光族 Spawn=Dust.NewDust(...,43,
    *  0,0,254,newColor,0.5f)+velocity×0(TileDrawing.cs:7652-7653)——设此字段时
    *  发射器走 spawnDust 原版尘渲染(替代 1-2px 色方块近似,用户实报闪光不可见) */
@@ -73,7 +116,12 @@ const CHANDELIER_ROW_COLOR = [6, 59, 6, 57, 6, 6, 6, 242, 6, 6, 6, 6];
 const LAMP_ROW_DUST: Record<number, number> = { 0: 6, 6: 6, 7: 6, 8: 6, 10: 6, 14: 6, 15: 6, 16: 6, 20: 59, 44: 57, 45: 242 };
 // 烛台 100 L7286-7331：行%2==0 亮；行组同吊灯近似
 const CANDELABRA_ROW_COLOR = CHANDELIER_ROW_COLOR;
-// 灯笼 42 L7161-7219：样式（fy/18 的行）7→58、29→59、50→57、51→242
+// 灯笼 42（TileDrawing.cs:7169-7226）：键=case 号 num14=fy/36（7→58、29→59、50→57、
+// 51→242,掷 50/40/10/40）;发射行=fy/18 奇行（:7171 门）即 fy=style*36+18 火焰行。
+// ★2026-09-09 勘误:旧注"样式(fy/18 的行)"把 case 号误当 fy/18 行——旧 pred fy/18==case
+// 的四落点 {126,522,900,918} 在原文全不发射（900/918 连奇行门都不过;126/522 过门但落
+// switch 无 case 的 style 3/14）,原文四落点 {270,1062,1818,1854} 曾全哑。case 7 另有
+// Next(100) gore 16/17 火焰摇曳支——本表 dust 通道不含 gore,登记。
 const LANTERN_STYLE_DUST: Record<number, number> = { 7: 58, 29: 59, 50: 57, 51: 242 };
 
 const dust = (id: number) => DUST_COLOR[id] ?? '#FFFFFF';
@@ -94,19 +142,38 @@ const HERB_RULES: Record<number, { color: string; prob: number; rise?: number; s
  *  sheet（=tile id）→ shine 值 + 闪光色（TileDrawing.cs:7557-7651 的 newColor 表，
  *  未列型=缺省 Color.White）。
  *  概率折算：原版每帧 p = num43/shine（num43 = max(R,G,B)/30，TileDrawing.cs:7543-7552；
- *  掷 :7553 rand.Next(shine) >= num43 不闪；门 :7539-7543 三通道全 ≤20 不闪，发射器以
- *  max(R,G,B) ≤ lightGate 判，2026-09-07 逐字修正曾只查 R 漏纯蓝/绿源）。
+ *  掷 :7553 rand.Next(shine) >= num43 不闪；门 :7539-7543 三通道全 ≤20 不闪——发射器
+ *  以 num43=0 概率归零吸收（max≤30 ⊇ max≤20,同语义单点计算）,2026-09-07 逐字修正
+ *  曾只查 R 漏纯蓝/绿源）。
  *  本发射器每 3 tick 扫一次 → prob = 24/shine（≡满光 num43=8 档折算）。
- *  登记债（发射器在 src/core，本文件侧不可达，逐字原文见 tests tileShine 段）：
- *  ①光照比例项未建模——折到满光档：微光（max<240）至多 8× 超发；max∈[21,29] 原版
- *    num43=0 不闪而仓内照发；
- *  ②dust 43 TintableDustLighted 的 AddLight 闪光体发光与"环境光过低自灭"未建模
- *    （Dust.cs:1472-1521）——尘通道已走 spawnDust 原版渲染,唯发光/自灭缺;
- *    ★发射器 spawnDust 未传 noGravity → 落 VanillaDust 通用重力 +0.1/tick 下沉,
- *    原文 43 号无重力/速度支应静止（Game.ts 侧一字修:noGravity=true）,登记;
- *  ③tile 22 恶魔矿：原版 1/400 腐化尘支与闪光支同 else-if 链互斥（每帧至多一发），
+ *  登记债（逐字原文见 tests tileShine 段）：
+ *  ①dust 43 TintableDustLighted ——★2026-09-08 注销（引擎现场复核,旧注两处论断均
+ *    过期;机制锁 tests/tile-shine-dust43-verdict.test.ts）：
+ *    (a)"AddLight/环境光过低自灭未建模(Dust.cs:1472-1521)"——过期。VanillaDust.ts
+ *      case 43（:583-605,链 A）已 1:1 实装:照度门自灭（Dust.cs:1505-1508 三通道
+ *      <0.05 → active=false ⇒ VanillaDust.ts:598-599）与 AddLight（Dust.cs:1509-1512
+ *      noLightEmittance 门 ⇒ :600-601 lights.push;Game 每帧注入 lightAt 采样
+ *      Game.ts:7865-7868 并推 LightingEngine :7878）——发光/自灭俱在,无债。
+ *    (b)"发射器 spawnDust 未传 noGravity → 落通用重力 +0.1/tick 下沉,Game.ts 侧
+ *      一字修 noGravity=true"——**反向,撤**。43 是链 A 链接（Dust.cs:1472 else-if
+ *      成员;VanillaDust.ts:604 chainLink=true）,通用重力 Dust.cs:1889-1899
+ *      （`else if (!noGravity && type!=41/44/309) vy+=0.1`）本就跳过
+ *      （VanillaDust.ts:670-673 `!chainLink` 门）——不传也静止（spawn 速 0 +
+ *      TileDrawing.cs:7652-7653 velocity×0）。真传 noGravity=true 反落链 B 兜底
+ *      Dust.cs:2407-2413（type!=304 && noGravity → velocity×0.92 + fadeIn==0
+ *      scale−0.04;VanillaDust.ts:837-842,spawn 缺省 fadeIn=0）→ 闪尘逐拍缩没
+ *      =偏离原版。发射器现状（不传）即正解,勿修。
+ *  ②tile 22 恶魔矿：原版 1/400 腐化尘支与闪光支同 else-if 链互斥（每帧至多一发），
  *    仓内两规则独立掷可同帧双发。
- *  ★tileShine2（Main.cs 同区 bool 表，52 型 + TileDrawing.cs:5226-5246 动态 185/186）
+ *  （★F7 2026-09-08 销账：旧债①"光照比例项未建模"已由发射器 lightNum43 比例项
+ *    建模清偿（Game.ts emitTileParticles：probEff×num43/8 + dust 路 num43≤0 不发）；
+ *    曾挂 rule.lightGate 字段=死字段（发射器从未消费）已删,tests 同步改
+ *    r.dust 签名。旧注①与该死字段自相矛盾,一并销。草族四路径 sparkle 机会的
+ *    定谳 = 文件头注 ★F7 注（2026-09-08 定谳;2026-09-09 ×1/4 替换折算已随 Game.ts
+ *    grassParticleFold 落地,110 闪光支同折,WindyGrass 子域随 swayInWind 回落）。）
+ *  ★tileShine2（Main.cs 同区 bool 表——静态 59 型 = 单独下标写 52 型 + Main.cs:10473-10482
+ *  循环支 262-268 七型（Gemspark,`if (num3 > 261)`）;TileDrawing.cs:5223-5247 动态
+ *  185/186 按帧赋值;59+2=61 = TileShine.ts SHINE2_SHEETS 在册数,账面 2026-09-08 闭合）
  *  是另一套系统：GetFinalLight→ShouldTileShine→Main.shine 渲染期光色 ×1.6（暗处黑
  *  不变，纯渲染提亮），非粒子，本表不含（未移植，登记）。 */
 export const SHINE_TABLE: Array<{ sheet: number; shine: number; color?: string }> = [
@@ -182,13 +249,17 @@ function buildRules(): TileParticleRule[] {
       dx: 14, dy: -4, rise: 1.4, life: 32,
     });
   }
-  // 吊挂灯笼 42 L7161-7219：fx==0；样式行色
+  // 吊挂灯笼 42（TileDrawing.cs:7169-7226）：fx==0 && fy/36==样式 && fy/18 奇行（火焰行
+  //  fy=style*36+18）;掷链 case7→Next(50) dust58 / case29→Next(40) dust59 /
+  //  case50→Next(10) dust57 / case51→Next(40) dust242（出生位差 +4/+0/+2 与 8×8/4×4
+  //  盒差以共享 dx/dy±2 近似,登记）。★2026-09-09 行键勘误:旧 pred fy/18==case 四落点
+  //  {126,522,900,918} 在原文全不发射（见 LANTERN_STYLE_DUST 注）
   for (const [styleStr, di] of Object.entries(LANTERN_STYLE_DUST)) {
     const style = Number(styleStr);
     add({
       sheet: 42, color: dust(di),
       prob: (di === 57 ? 1 / 10 : di === 58 ? 1 / 50 : 1 / 40) * 3,
-      pred: (fx, fy) => fx === 0 && Math.floor(fy / 18) === style,
+      pred: (fx, fy) => fx === 0 && Math.floor(fy / 36) === style && Math.floor(fy / 18) % 2 === 1,
       dx: 8, dy: 6, rise: 1.4, life: 32,
     });
   }
@@ -236,8 +307,17 @@ function buildRules(): TileParticleRule[] {
   add({ sheet: 72, color: dust(41), prob: 1 / 500 * 3, rise: 0.4, life: 50, size: [1.5, 2.5] });
   // 丛林植物成熟 61 L7521-7528：fx==144
   add({ sheet: 61, color: dust(44), prob: 1 / 60 * 3, fx0: 144, rise: 0.3, life: 50, size: [1.5, 3] });
-  // 篝火 215 L6893-6908 + 悬挂火盆 592 L6909-6924（同构块）：外层 Next(4) 门 ×
-  // 内层 Next(3) → 每列 1/12/帧，×3 扫描折算 prob=0.25（曾用 0.9 ≈ 密度 3.6 倍）。
+  // 篝火 215（TileDrawing.cs:6901）+ 悬挂火盆 592（:6917 块）同构烟柱,但掷链归属不同
+  // （★2026-09-09 续单件2 勘误,旧注"同构块:外层 Next(4)×Next(3)"对 215 不成立）：
+  //  · 215 主路径（215∉四域,DrawSingleTile :974）——块内仅 Next(3)（:6901,其前后最近的
+  //    Next(4) 在 :6942 属烟囱 406 gore 档,并非外层门）;缺省 Color 光照
+  //    Lighting.UpdateEveryFrame=false（Lighting.cs:77-85 ⇒ NotRetro=true;zoom≤1 无 RT
+  //    Main.cs:2669-2678）⇒ 主路径每帧全发 → 每点燃列 1/3/帧,×3 扫描 prob=1（Retro/
+  //    Trippy 光照或 >1x 变焦才改 1/4,本仓光照恒现代口径,登记）。旧 0.25=多除一个 4
+  //    （4× 欠发射;当年 0.9 反而近乎精确 1/3×3=1 钳前）。
+  //  · 592 MultiTileVine 域——DrawMultiTileVinesInWind 逐格 flag5=Next(4)（:9665,与
+  //    光照模式无关）× 块 Next(3)（:6917）= 1/12/帧,×3 扫描 prob=0.25;该外层门真身=
+  //    结构路径,发射器侧 GRASS_FOLD_SKIP 豁免再折（Game.ts grassParticleFold 注）。
   // ★dxBox =【命中格自身左上】相对值。精确语义（Dust.NewDust 实读 Dust.cs:167-170：
   // position = Position + (rand.Next(W−4)+4, rand.Next(H−4)+4)，W=4 ⇒ X 项恒 +4
   // 零散布！）：X = i*16+6，列修正 左列(fx==0)+rand(8) → [6,14)、中列恰 +6（点）、
@@ -254,7 +334,7 @@ function buildRules(): TileParticleRule[] {
     [-1, 7],    // 右列(fx==36)：6−rand(8)
   ];
   for (const [fx, box] of [[0, STOVE_COL_BOX[0]], [18, STOVE_COL_BOX[1]], [36, STOVE_COL_BOX[2]]] as const) {
-    add({ sheet: 215, color: dust(31), prob: 1 / 12 * 3, fx0: fx, fy0: 0, dxBox: box, dyBox: [0, 4], sideways: 0.3, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+    add({ sheet: 215, color: dust(31), prob: 1, fx0: fx, fy0: 0, dxBox: box, dyBox: [0, 4], sideways: 0.3, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
   }
   for (const [fx, box] of [[0, STOVE_COL_BOX[0]], [18, STOVE_COL_BOX[1]], [36, STOVE_COL_BOX[2]]] as const) {
     add({ sheet: 592, color: dust(31), prob: 1 / 12 * 3, fx0: fx, fy0: 18, dxBox: box, dyBox: [8, 12], sideways: 0.3, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
@@ -287,7 +367,6 @@ function buildRules(): TileParticleRule[] {
     add({
       sheet: s.sheet, color: s.color ?? dust(43),
       prob: 24 / s.shine,  // 原版 8/shine/帧（满光 num43=8）×3 tick 扫描节流
-      lightGate: 20,
       // 原版尘通道 1:1：NewDust(...,43,0,0,254,newColor,0.5f)+velocity×0
       //（TileDrawing.cs:7652-7653，617/178 子支 :7573/:7604 同参）
       dust: 43, dustAlpha: 254, dustScale: 0.5,
@@ -315,7 +394,7 @@ function buildRules(): TileParticleRule[] {
         sheet: 178, color,
         pred: (fx) => Math.floor(fx / 18) === col,
         prob: 24 / 500, dust: 43, dustAlpha: 254, dustScale: 0.5,
-        lightGate: 20, dxBox: [4, 16], dyBox: [4, 16],
+        dxBox: [4, 16], dyBox: [4, 16],
         rise: 0, grav: 0, life: 22, size: [1, 2],
       });
     }

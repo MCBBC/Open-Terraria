@@ -11,6 +11,11 @@
 //  ⑤ 多格物件帧连续性 w×h>1 物件各格帧相位差≠18 = 物件残缺断裂（warn）
 //  ⑥ 火把锚定 用 torchStillAnchored——浮空火把（error）
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
+// ★SW-BJ28：火把锚定审计消费的原版旗表/平台连接档判定（Torch.ts 单源）
+import {
+  IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS,
+  PLATFORM_SHEETS, platformProperTopFrame,
+} from '../world/Torch';
 // 火把锚定判定内联（torchStillAnchored 依赖 TileStore 方法，审计视图是纯数组）
 
 /** 审计所需的最小存储视图（TileStore 本体满足） */
@@ -126,14 +131,39 @@ export function auditWorldRender(st: AuditStoreView, maxReport = 200): AuditRepo
           push('error', x, y, sheet, `帧未对齐步长: fx=${fx},fy=${fy} stride=${meta.stride}`);
         }
       }
-      // ⑥ 火把锚定（Torch.ts torchStillAnchored 语义内联；树干侧锚近似省略）
+      // ⑥ 火把锚定（Torch.ts torchStillAnchored 语义内联）。
+      //  ★SW-BJ28 2026-09-08 三臂补齐：底锚平台臂（TileID.Sets.Platforms 表 ∧
+      //  PlatformProperTopFrame(frameX)——视图无 slope/half/wire 字段,TopEdge 的
+      //  topSlope/半砖/致动细化仍近似,误报面=坡台/半砖/致动台上合法火把）、
+      //  侧锚梁木臂（IsBeam）与树干三连臂（IsATreeTrunk 本格+同侧上/下格,裸 type 读,
+      //  视图 type/flags 足够=全忠实）。坡向门（左排奇坡/右排偶坡）同理缺 slope 字段。
+      //  审计偏「宁可误报不漏报」：缺失字段只会把合法火把记为浮空,不会放过真浮空。
       if (sheet === SHEET_TORCH && torchReported < 50) {
         if (fx % 22 !== 0) { push('error', x, y, sheet, `火把帧非法: fx=${fx} 非 22 步长`); torchReported++; }
         else {
           const lit = fx % 66 < 22 ? fx % 22 : fx % 66;   // 剥未点燃 66 档取锚位
+          const inView = (x2: number, y2: number): boolean => x2 >= 0 && y2 >= 0 && x2 < st.w && y2 < st.h;
+          const sheetAt = (x2: number, y2: number): number => {
+            if (!inView(x2, y2)) return -1;
+            const j2 = y2 * st.w + x2;
+            return st.flags[j2] ? (TILE_DEFS[st.type[j2]]?.vanilla?.sheet ?? -1) : -1;
+          };
+          // 非 Platform 实心支（tileSolid∧!NotReallySolid;solidAt=def.solid≈tileSolid∧!solidTop）
+          const solidArm = (x2: number, y2: number): boolean =>
+            solidAt(st, x2, y2) && !NOT_REALLY_SOLID_SHEETS.has(sheetAt(x2, y2));
+          const beamArm = (x2: number, y2: number): boolean => IS_BEAM_SHEETS.has(sheetAt(x2, y2));
+          const trunkTrio = (x2: number, y2: number): boolean =>
+            IS_A_TREE_TRUNK_SHEETS.has(sheetAt(x2, y2))
+            && IS_A_TREE_TRUNK_SHEETS.has(sheetAt(x2, y2 - 1))
+            && IS_A_TREE_TRUNK_SHEETS.has(sheetAt(x2, y2 + 1));
+          // 底锚平台臂：TileID.Sets.Platforms 全集 ∧ 平台连接档（frameX/18 ∈ {0-7,12-16,25-26}）
+          const platArm = (x2: number, y2: number): boolean =>
+            PLATFORM_SHEETS.has(sheetAt(x2, y2)) && platformProperTopFrame(st.frameX[y2 * st.w + x2]);
           const anchor = lit === 0
-            ? (solidAt(st, x, y + 1) || st.wall[i] !== 0)
-            : lit === 22 ? solidAt(st, x - 1, y) : solidAt(st, x + 1, y);
+            ? (solidArm(x, y + 1) || platArm(x, y + 1) || st.wall[i] !== 0)
+            : lit === 22
+              ? (solidArm(x - 1, y) || beamArm(x - 1, y) || trunkTrio(x - 1, y))
+              : (solidArm(x + 1, y) || beamArm(x + 1, y) || trunkTrio(x + 1, y));
           if (!anchor) {
             push('error', x, y, sheet, `浮空火把: fx=${fx} 无底锚/侧锚/墙锚`);
             torchReported++;

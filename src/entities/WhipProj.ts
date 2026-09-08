@@ -361,16 +361,21 @@ export class WhipProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     const owner = this.ownerRef();
     const prevAi0 = this.ai0;
-    // ★F5（AI_165 :49309-49331）：owner.dead → flag → Kill()（原文 flag 五支 =
-    //   CCed/noItems/held.shoot!=type/pulley/dead；本仓只建模 dead 支——CCed 档
-    //   Frozen 属有损建模、held/pulley 面属发射侧语义，缺失=登记）。
-    //   此前靠 Game.ts 调用点 dead→null + 空转（null owner 不杀,鞭悬空飞完）= 双偏离
-    if (owner?.dead) { this.dead = true; return; }
-    this.ai0 += this.maxUpdates; // 每 update ai[0]+1（:45014）
+    // ★F5 定谳+回滚（2026-09-08 残差五件批⑤）：原台账「AI_165 :49309-49331 owner-flag
+    //   五支=CCed/noItems/held.shoot!=type/pulley/dead」系【行段误锚】——1457 :49309-49333
+    //   实为 AI_160_Kites（:49303 起风筝 AI,五支 :49309-49324+Kill :49329-49333;
+    //   1456 :45769-45791 同构）的五支;AI_165_Whip（:48539-49152）全支【零】owner 态
+    //   杀门（CCed/noItems/pulley/dead/shoot 逐支扫描零命中）,唯一 Kill=ai[0] ≥
+    //   timeToFlyOut（:48552-48556;1456 :45019-45022）——玩家死亡/冻结鞭照常飞满程
+    //   （锚点仍随玩家 arm :48550）。旁证：Projectile.IsInterruptible/Interrupt
+    //   （:22370-22390）也只认 aiStyle==160,鞭不可被切栏打断。→ 旧 owner.dead→Kill
+    //   早退门系同一误锚产物,本批回滚（原版=主人死后鞭飞满 timeToFlyOut 段）;五支
+    //   不存在由 tests/proj-wet-residual5 结构锁钉死防回灌。
+    this.ai0 += this.maxUpdates; // 每 update ai[0]+1（1457 :48547;1456 :45014）
     if (this.ai0 >= this.timeToFlyOut) {
-      // :45019-45022 Kill——原文湿段在该子步仍跑（AI 写位后 Kill,湿段无 active 门
-      // :16903;采样盒=本子步 AI 直写位）;owner-dead 支原文在 AI_165 头 :49309 前置,
-      // 位未写,湿段采样=上子步位——本仓早退不跑（仓内湿段批统一口径,登记有界偏差）
+      // :48552-48556 Kill（1456 :45019-45022）——原文湿段在该子步仍跑（AI 写位后
+      // Kill,湿段无 active 门:16903;采样盒=本子步 AI 直写位）。本类再无任何 owner 态
+      // 早退门（误锚产物已回滚）→ 不存在"早退拍跳湿段"路径
       const b = this.wetBoxAt(this.ai0);
       projectileWetSection(this, game, game.world.store, b.x, b.y, this.w, this.h,
         this.projId, !!projectileData(this.projId)?.ignoreWater);

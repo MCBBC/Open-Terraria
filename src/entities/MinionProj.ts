@@ -792,17 +792,34 @@ export class MinionProj extends Entity {
   //    Arrow 载体（foxChannel 支 spawn）——ARROW_DESTROYED_BY_WATER（Arrow.ts:546）
   //    已含 1106,水death 消亡面已接 killNow,本类湿段 hooks 不涉（域内 id 均不在
   //    IsDestroyedByWater 表,kill 钩恒空）。
-  //  插位=tick 头（fixedUpdate 首）：R3 八型家族 AI（AI_067 flag6/8/9、AI_026 flag8/10、
-  //  AI_204）vanilla 无 wet 旗消费——本仓 palGroundStep/mushBoiStep 的 wet 消费走
-  //  wetCollisionProbe 现场盒测独立面（台账批⑥,R3 域留存）,与湿段旗互不读 →
-  //  tick 头语义等价（共享体头注口径）。★旧受段族批（蓝队 K）：家族 AI 有 wet 旗
-  //  消费（AI_067 :51027 海盗俯扑门 / :51616 跳跃结算湿身 ×2 共享核,消费 id=
-  //  393-395/758/833-835/1036;AI_026 :60716/:60734 属 774/1046 非蜘蛛）——本批按
-  //  「互不双轨」纪律改读维护字段 this.wet（probe 消费位同步撤除）,tick 头插位下
-  //  AI 读到的是【当拍】段值（采样位=上拍位移后位）;vanilla AI 读【上拍】段值
-  //  （原版 :16880 AI → :16895 段序,段采样位=AI 后位移前同位）——两序采样位相同、
-  //  相位差 1 拍（入水/出水边界拍本仓 AI 早 1 拍感知,登记近似;AI 中途瞬移拍
-  //  （>2000 回收/虎扑链直写位）两序读到的都是瞬移前采样,同向）。
+  //  插位=tick 头（fixedUpdate 首）+★AI 湿旗读相=上拍快照 wetAi（2026-09-08 定谳批,
+  //  Terarria1457/Terraria/Projectile.cs 逐读点核）：
+  //  【①消费者定谳】原版 Update 子步序=AI(:16880) → 湿段(:16895-17113) → Shimmer
+  //  (:17114) → HandleMovement(:17122) → AI 读【上一子步】段值。AI_067 湿旗消费全集：
+  //  :51027 海盗俯扑门 !wet（flag=393-395 → pirateStep 消费）/ :51084 卡提瓦俯扑门
+  //  !wet（flag8=1093/1112——★2026-09-08 续单两门补接:!wet（读相 wetAi）+ai[1]==0
+  //  （=palA1,:50954 出扑归零）;湿中下落已由共享尾 :52114 支让位承接=原文两支以
+  //  wet 互斥）/ :51616 贴地跳 ×2 共享核（`if (velocity.Y==0f)` 段
+  //  flag 全族可达——flag6/8/9=1022/1093/1112/1118 亦消费,旧注「R3 八族 vanilla
+  //  零消费」有误已纠;仓内消费位=tigerBody/pirateStep/frogStep/palGroundStep/
+  //  mushBoiStep 全读 wetAi）/ :52114 TryJumpingToTarget wet∧vy>0∧!shouldFallThrough
+  //  →视作贴地+共享尾 :52151-52164（★2026-09-08 续单 1:1 补接=
+  //  ai67TryJumpingToTargetTail,五家族调用位随原文 :51024 时序置结算段/俯扑门前;
+  //  :52119 系 vanilla `_=` 丢弃死码;shouldFallThrough 域内死码、ai[0]==3 档
+  //  num4=16 与 :51212 栖点调用位未折算=登记,见 helper 注）。AI_026 :60716/:60734
+  //  属 774/1046 帧 选支（域外）;AI_204/AI_062 零消费 ✔。
+  //  【②相位差定谳】湿段采样位两序同位（=上拍位移后位）;差在 AI 读相:vanilla 读
+  //  上拍段值,旧实现读当拍段值——稳态同值,分叉仅「运动中跨液面拍」（步行横移/
+  //  坠落跨水面且当拍有 ×2/俯扑判定;×2=起跳速 2×,贴水跳 2 倍高,可感）→ 修。
+  //  【③挪位不可达→快照刀】原版序须把湿段插到各族 AI 与位移之间,而本类家族 AI 与
+  //  位移同函数体、ai0=1/2/4/5 早退 return 15+ 处会整跳湿段（溅花/wetCount/旗维护
+  //  停摆,劣于相位差）→ 保留 tick 头插位,消费位改读 wetAi 上拍快照（=上拍段尾
+  //  this.wet,与 vanilla AI 读上拍段值逐位同源;首拍=出生预置值——vanilla
+  //  NewProjectile :10886-10893 时点先于首拍 AI,预置先行单跑=首拍当拍段同位）。
+  //  probe 消费位（pal/mush）随批退役归一（wetCollisionProbe 本体保留=unit 钉测/
+  //  台账批⑥面）。AI 中途瞬移拍（>2000 回收/虎扑链直写位）:AI 读值两序同为瞬移前
+  //  采样（快照=上拍位,原版=上拍段采样位,同向）;湿段副作用（溅花）采样位仍取拍头
+  //  位=瞬移前,较原版（AI 后=瞬移后位）晚 1 拍触发,登记近似（随原插位批）。
   //  阻尼=各族位移位乘 projWaterDragFactor（HandleMovement :17721-17764 湿支只对
   //  tileCollide=true 宿主跑——917 SetDefaults tileCollide=false(:8708) 与 317
   //  归位态 ai[0]==1（aiStyle 54 :29079 else 支;:29042 attack 态置真）不适用,各支留锚）。
@@ -820,6 +837,13 @@ export class MinionProj extends Entity {
   wetCount = 0;
   /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
   presetDone = false;
+  /** ★AI 湿旗读相=上拍段值快照（2026-09-08 定谳批,消费者/相位差/挪位不可达三段
+   *  定谳见类字段块头注①②③）：vanilla AI(:16880) 先于湿段(:16895) → AI_067 湿旗
+   *  消费者读【上一子步】段值;本类家族 AI 与位移同函数体无法拆序 → tick 头湿段
+   *  保留,家族消费位改读本快照（fixedUpdate 湿段块于每拍段体前赋值=上拍段尾
+   *  this.wet,与 vanilla AI 读值逐位同源;首拍=出生预置值）。阻尼仍读 this.wet
+   *  （HandleMovement :17721 本子步湿段后旗,原文同相）——勿把阻尼位改读本字段。 */
+  private wetAi = false;
 
   /** true=哨兵（定点炮台，独立于随从上限） */
   sentry: boolean;
@@ -1035,6 +1059,40 @@ export class MinionProj extends Entity {
    *  限速 30，穿墙穿敌）/ 跟随玩家（限速 15，>2000px 传送）；伤害 ×(1+0.23×localAI[0])
    *  （:12097，localAI[0]=距尾段数，头=全段数）；首次生成 626→627→628 链（段距 16px），
    *  全链共用一张命中表（7t/敌） */
+  /** AI_121 索敌 1:1（1457 :43653-43695 / 1456 :40178-40219）——★专用择敌（不共用
+   *  nearestEnemy）：原版野生支遍历 Main.maxNPCs 升序、过门即覆盖写 num6（:43690/
+   *  :40216——无最近比较、无 break）＝【最后一个通过门的候选】胜,遍历序敏感;
+   *  nearestEnemy 的"最近"语义是其余消费者的共性近似,龙专属覆盖语义在此承载
+   *  （2026-09-08 收口裁断:共享助手不动,爆破半径最小）。
+   *  · 集火支（OwnerMinionAttackTargetNPC→minionTargetId）:存在性+CanBeChasedBy
+   *    （:43663-43664/:40189-40190）+距龙 num4×2<1400（:43667/:40193,无 num5 门、
+   *    无视线门）;未过门 → num6 仍−1 → 野生支照跑（原文即如此,非互斥挡板）。
+   *  · 野生支:CanBeChasedBy ∧ 距玩家 num5<1000（:43685/:40211）∧ 距龙
+   *    num4<700（:43688/:40214）;本仓 enemies() 即槽位升序=遍历序同构。
+   *  · 原文本支无鞭 tag 支（nearestEnemy 通用 tag 层不适用于 AI_121,不建模）。 */
+  private dragonTarget(game: GameHooks, p: Player): EnemyLike | null {
+    const focus = (p as unknown as { minionTargetId?: number }).minionTargetId ?? -1;
+    if (focus >= 0) {
+      for (const e of game.enemies()) {
+        const en = e as never as EnemyLike & { dead: boolean };
+        if (!en || en.dead || en.id !== focus) continue;
+        if (!canBeChasedBy(e)) break;                    // :43664/:40190 → num6=−1 → 野生支
+        if (Math.hypot(en.cx - this.cx, en.cy - this.cy) < 1400) return en;  // :43667/:40193
+        break;
+      }
+    }
+    let num6: EnemyLike | null = null;
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean };
+      if (!en || en.dead) continue;
+      if (!canBeChasedBy(e)) continue;                   // :43685/:40211 前置
+      if (Math.hypot(en.cx - p.cx, en.cy - p.cy) >= 1000) continue;        // num5
+      if (Math.hypot(en.cx - this.cx, en.cy - this.cy) >= 700) continue;   // num4
+      num6 = en;                                         // 覆盖写——末位通过者胜
+    }
+    return num6;
+  }
+
   private dragonHead(game: GameHooks, p: Player, dmg0: number): void {
     const ents = (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities;
     if (!this.spawned) {
@@ -1054,7 +1112,16 @@ export class MinionProj extends Entity {
       }
     }
     const scale = 1 + 0.23 * this.dragonLocalAI0(game);
-    const tgt = this.nearestEnemy(game, 1000);
+    // >2000 瞬移（:43656-43660 / :40182-40185）：索敌【前】无条件,base.Center =
+    // player.Center——中心即玩家心（盒 24×24 :6743-6744 → 左上=心−12）;原版不清
+    // 速度（动量保留,AI 从新位续走）。曾错挂 no-target 支 +(−30,−30) 旧盒径残留
+    // （中心落 pcx−18）,双错一并清偿（2026-09-08）。
+    if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) {
+      this.x = p.cx - 12; this.y = p.cy - 12;
+    }
+    // 索敌 1:1（AI_121,1457 :43653-43695 / 1456 :40178-40219）——dragonTarget
+    // 原文字面（集火 num4×2<1400 + 野生双门 num5∧num4 + 末位覆盖语义）
+    const tgt = this.dragonTarget(game, p);
     if (tgt) {
       const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
       const d = Math.hypot(dx, dy) || 1;
@@ -1072,8 +1139,9 @@ export class MinionProj extends Entity {
     } else {
       const dx = p.cx - this.cx, dy = p.cy - this.cy;
       const d = Math.hypot(dx, dy) || 1;
-      if (d > 2000) { this.x = p.cx - 30; this.y = p.cy - 30; this.vx = this.vy = 0; }
-      else if (d > 100) {
+      // >2000 瞬移已上移索敌前（:43656-43660/:40182-40185 无条件）——旧 no-target
+      // 支 (−30,−30)+清速残支撤除（中心错位见方法首注）
+      if (d > 100) {
         const acc = d < 140 ? 0.06 : d < 200 ? 0.12 : 0.2;
         this.vx += (dx / d) * acc;
         this.vy += (dy / d) * acc;
@@ -1281,6 +1349,37 @@ export class MinionProj extends Entity {
     return f19;
   }
 
+  /** AI_067_TryJumpingToTarget 共享尾（1457 :52109-52167；2026-09-08 续单补接——此前
+   *  整体未建模）。调用位：:51024（attackTarget>=0 ∧ IsInRangeOfMeOrMyOwner 段,本仓
+   *  =findTargetInRangeDual 命中即等价）与 :51212（ai[0]==3 栖点段——本仓 ai[0]==3 态
+   *  未折算=登记,仅接 :51024 面）。逐值：
+   *  · :52112 shouldFallThrough = toTarget.Y > 盒底——【域内死码】:decidesManualFallThrough
+   *    仅 379 置真（:4645）,AI_067 全族不在 → HandleMovement :17694 消费位不达,登记
+   *    不建模（以局部量承载判别式,不落字段）;
+   *  · :52113 flag = velocity.Y==0（AI 前段求值=上拍碰撞结果）;
+   *  · :52114-52117 wet ∧ vy>0 ∧ !shouldFallThrough → flag=真（湿中下落视作贴地可跃）
+   *    ——wet 读相=AI 先于湿段跑的【上子步段值】=wetAi 快照（2026-09-08 定谳批口径）;
+   *  · :52119-52122 type 393-395 ∧ vy>2 ∧ !wet 支 = vanilla 死码（`_=` 丢弃,无动作）;
+   *  · :52124-52150 1022 蘑菇蓄跃支 = mushBoiStep 既有独立实现（台账批⑤）,本函数以
+   *    flag2 形参承接其"本拍已消费"语义（:52149 支体尾置真,leap 是否已发无关）;
+   *  · :52151 num4=30；（1093|1112|1118）∧ ai[0]==3 → 16——ai[0]==3 未折算=登记,恒 30;
+   *  · :52154-52164 共享尾：toTarget.Y < Center.Y−num4 ∧ flag ∧ !flag2 →
+   *    velocity.Y = −min(26, sqrt((Center.Y−toTarget.Y)×2×0.4))（无 +1 尾数,与
+   *    :51084 flag8 干态专支相区别）。
+   *  ★位序契约：调用位在俯扑/扑击/虚空扫描与步行结算段【前】→ 跃起后 vy≠0 使结算段
+   *  （梯/表/×2）与干态俯扑门（vy>2/vy>1）整段让位——原版 wet 中下落跃起走本尾、
+   *  干态下落跃起走 :51027/:51084 专支,两支以 wet 相互排斥=原文设计。 */
+  private ai67TryJumpingToTargetTail(toTargetY: number, flag2: boolean): void {
+    const shouldFallThrough = toTargetY > this.y + this.h;             // :52112（域内死码,登记）
+    let flag = this.vy === 0;                                          // :52113
+    if (this.wetAi && this.vy > 0 && !shouldFallThrough) flag = true;  // :52114-52117
+    if (((toTargetY < this.cy - 30) && flag) && !flag2) {              // :52154（num4=30,:52151）
+      const num5 = (toTargetY - this.cy) * -1;                         // :52155
+      const num7 = Math.sqrt(num5 * 2 * 0.4);                          // :52156-52158
+      this.vy = -(num7 > 26 ? 26 : num7);                              // :52159-52162
+    }
+  }
+
   /** ★台账批①（2026-08-31,L 级清偿）：AI_067 步行链【两结算段】1:1 共轨
    *  （1458 Projectile.cs:51273-52057；1457 :51296-51557 两结算段同体,偏移 +23 行——
    *  动值先 grep 符号勿信旧注）。参数 tiers=家族"attackTarget!=-1"速度档：
@@ -1404,12 +1503,15 @@ export class MinionProj extends Entity {
     }
     const st = game.world.store;
     const tgt = tgtPre;
-    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet
-    // ——互不双轨纪律:probe 现场盒测位退役,见类字段块头注）
-    const wet = this.wet;
+    // 湿旗=上拍段值快照 wetAi（vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet=AI 先于
+    // 湿段跑读上一子步段值;2026-09-08 定谳批,见类字段块头注①②③）
+    const wet = this.wetAi;
     let ax: number, ay: number;
     if (tgt) {
       ax = tgt.cx; ay = tgt.cy;
+      // TryJumpingToTarget 共享尾（:51024 调用位;toTarget=敌心）——跃起后 vy<0 使
+      // 兔跳门（:51181 velocity.Y>=0）与步行结算段让位（原版同序）
+      this.ai67TryJumpingToTargetTail(tgt.cy, false);
       // 目标脚下 15 格虚空扫描（:51142-51156,flag3 支,IsInRangeOfMeOrMyOwner 域内
       // 每帧跑）：nPC3.Top（Entity.Top=CenterX :86-90）向下数 num5=15 行，遇
       // active() 或越界(null) 即截停；整窗无一格实心 → ai[0]=5 追离态+ai[1]=0
@@ -1594,9 +1696,9 @@ export class MinionProj extends Entity {
   }
   private pirateStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
-    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51027 俯扑门读 Projectile.wet
-    // ——互不双轨纪律:probe 现场盒测位退役,见类字段块头注）
-    const wet = this.wet;
+    // 湿旗=上拍段值快照 wetAi（vanilla AI_067 :51027 俯扑门读 Projectile.wet=AI 先于
+    // 湿段跑读上一子步段值;2026-09-08 定谳批,见类字段块头注①②③）
+    const wet = this.wetAi;
     // 终清波批：Minion_FindTargetInRange(800, skipOwnBody) 双距检索归真（单距近似退役）
     const tgtF = this.findTargetInRangeDual(game, 800);
     // ---- ai[0]==1 归位飞行（:50636-50712 族档）----
@@ -1653,6 +1755,10 @@ export class MinionProj extends Entity {
     let ax: number, ay: number;
     if (tgtF) {
       ax = tgtF.cx; ay = tgtF.cy;
+      // TryJumpingToTarget 共享尾（:51024 调用位,:52109-52167;toTarget=敌心,flag 恒 false）
+      // ——跃起后 vy<0 使下方俯扑门 vy>2 与步行结算段让位（原版同序;wet 中下落跃起走
+      // 本尾 :52114 支,干态下落走 :51027 俯扑专支=原文两支以 wet 互斥）
+      this.ai67TryJumpingToTargetTail(tgtF.cy, false);
       // ---- flag && ai[1]==0 块（:51022-51082，终零波补全两触发源+先后关系）----
       // ① 高空俯扑（:51023-51076）：vy>2 ∧ !wet ∧ 敌 CenterY−我盒底 < −250 →
       //    ★position.Y%1<0.5 整分叉 quirk（:51027-51031）：满足即入 ai[0]=5（ai[1]=0）
@@ -1823,10 +1929,10 @@ export class MinionProj extends Entity {
     const flag8 = this.projId === 1093 || this.projId === 1112;   // :50024
     const num10 = flag8 ? 16 : 30;            // 扑击时长（:50490/:50499）
     const num2 = flag8 ? 800 : 500;           // 索敌射程（:50030/:50052）
-    // 台账批⑥：wet = Projectile.wet = Collision.WetCollision 每 tick 盒级浸液判定
-    // （Collision.cs:1575-1650,内探针小盒）——旧中心单格近似退役，湿身跳 ×2 消费
-    const stWet = game.world.store;
-    const wet = wetCollisionProbe(stWet, this.x, this.y, this.w, this.h);
+    // 湿旗=上拍段值快照 wetAi（2026-09-08 定谳批:vanilla :51616 ×2 消费 Projectile.wet
+    // =AI 读上一子步段值——probe 现场盒测读当拍位=提前 1 拍,随批退役归一;
+    // wetCollisionProbe 本体保留=unit 钉测/台账批⑥面,见类字段块头注①②③）
+    const wet = this.wetAi;
     // ---- ai[0]==1 归位（:50636-50853；先于地面段——原版该态不索敌不行走）----
     if (this.palA0 === 1) {
       const dpx1 = p.cx - this.cx, dpy1 = p.cy - this.cy;
@@ -1916,9 +2022,16 @@ export class MinionProj extends Entity {
       const side = tgt.cx > this.cx ? tgt.cx + 10 : tgt.cx - 10;
       ax = side;
       ay = Math.max(tgt.y + this.h / 2, Math.min(this.cy, tgt.y + tgt.h - this.h / 2));
-      // 高差起跳（TryJumpingToTarget flag8 段 :51126-51151：下落中且敌高 100+ →
-      // sqrt(2×0.4×h)+1 封顶 26）
-      if (flag8 && this.vy > 1 && tgt.y + tgt.h - (this.y + this.h) < -100) {
+      // TryJumpingToTarget 共享尾（:51024 调用位;toTarget=侧翼点,Y 钳值同 :51019）
+      // ——跃起后 vy<0 使下方俯扑门 vy>1 与结算段让位（原版同序;湿中下落跃起走
+      // :52114 支,干态下落走 :51084 专支=原文两支以 wet 互斥）
+      this.ai67TryJumpingToTargetTail(ay, false);
+      // 高差起跳（:51082-51101 flag8 专支,`flag8 && ai[1]==0` 块内——★2026-09-08
+      // 续单两门补接：!wet 读相=wetAi（AI 先于湿段跑读上子步段值）;ai[1]==0=palA1
+      // （扑击计时,:50954 出扑归零）——旧实现只接跳体漏两门。湿中下落已由共享尾
+      // :52114 支承接（先于本门让位）→ 本门实际域=干态下落）
+      if (flag8 && this.palA1 === 0 && this.vy > 1 && !wet
+        && tgt.y + tgt.h - (this.y + this.h) < -100) {
         const h = (this.y + this.h) - (tgt.y + tgt.h);
         this.vy = -Math.min(26, Math.sqrt(Math.max(0, h) * 2 * 0.4) + 1);
         this.vx += (Math.random() * 2 - 1) * Math.random() * 5;
@@ -2073,8 +2186,10 @@ export class MinionProj extends Entity {
    *  零调用,DEAD_SLOTS 备案）不接。 */
   private mushBoiStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
-    // 台账批⑥：wet = 盒级 WetCollision（Collision.cs:1575-1650）
-    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    // 湿旗=上拍段值快照 wetAi（2026-09-08 定谳批:vanilla :51616 ×2 消费 Projectile.wet
+    // =AI 读上一子步段值——probe 现场盒测读当拍位=提前 1 拍,随批退役归一,见类字段
+    // 块头注①②③）
+    const wet = this.wetAi;
     // ---- 索敌（检索档 ai[0]==0||1 :50448-50450）——终清波批：双距检索归真 ----
     const tgt = this.mbA0 === 0 || this.mbA0 === 1 ? this.findTargetInRangeDual(game, 800) : null;
     // ---- 爆点判定（:50598-50621,先于移动块）。台账批⑦：IsInRangeOfMeOrMyOwner
@@ -2109,6 +2224,9 @@ export class MinionProj extends Entity {
     else if (this.vy === 0 && this.onGround) this.mbA2 = 0;
     else if (--this.mbA2 < 0) this.mbA2 = 0;
     // ---- TryJumpingToTarget 1022 支（:52108-52152;attackTarget>=0 段每拍调用）----
+    //  ★2026-09-08 续单：支体尾置 flag2（:52149——门过即置真,leap 是否已发无关）,
+    //  随后共享尾（:52154）以 !flag2 让位=与蘑菇蓄跃互斥（共享核原为同函数体）
+    let jump1022Flag2 = false;
     if (tgt) {
       if ((tgt.cy < this.cy - 160 || this.mbA0 === 1) && this.mbA2 === 0) {
         if (this.mbLai2 === 0) {
@@ -2133,7 +2251,11 @@ export class MinionProj extends Entity {
           this.mbA2 = 30;
           this.mbLai2 = 0;
         }
+        jump1022Flag2 = true;                             // :52149（支体尾,无条件置真）
       }
+      // 共享尾（:52154-52164）——toTarget.Y=敌心 Y（flag6 的 (num30+7)×dir 偏移为
+      // X 轴 :51012,targetCenter.Y 同值）;跃起后 vy≠0 使结算段让位（原版同序）
+      this.ai67TryJumpingToTargetTail(tgt.cy, jump1022Flag2);
     } else {
       this.mbLai2 = 0;                                    // :51017-51019
     }
@@ -3377,6 +3499,10 @@ export class MinionProj extends Entity {
       for (const e of game.enemies()) {
         const en = e as EnemyLike;
         if (en.dead || en.id !== focus) continue;
+        // CanBeChasedBy 门（:62793/:58832-58833 原文——门在距离求值前,ownerMinion
+        //  AttackTargetNPC2.CanBeChasedBy(this)）——门败=种子整块跳过（anyT/losT
+        //  不落种,num169=−1）→ 野生扫无种子照跑（2026-09-08 收口,同件 2 口径）
+        if (!canBeChasedBy(e)) break;
         const d = Math.abs(this.cx - en.cx) + Math.abs(this.cy - en.cy);
         anyD = d; anyT = en;                          // :62797-62803 种子
         if (canHit(st, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) { losD = d; losT = en; }
@@ -3566,9 +3692,9 @@ export class MinionProj extends Entity {
   private frogStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
     this.stepUp = true;
-    // 湿旗=维护字段（湿段 tick 头维护;vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet
-    // ——互不双轨纪律:台账批⑥ probe 现场盒测位退役,见类字段块头注）
-    const wet = this.wet;
+    // 湿旗=上拍段值快照 wetAi（vanilla AI_067 :51616 湿身 ×2 读 Projectile.wet=AI 先于
+    // 湿段跑读上一子步段值;2026-09-08 定谳批,见类字段块头注①②③）
+    const wet = this.wetAi;
     // 终清波批：Minion_FindTargetInRange(num2=800, skipOwnBody) 双距检索归真
     const tgt = this.findTargetInRangeDual(game, 800);
     // ---- ai[0]=1 归位飞行（:50636-50712）----
@@ -3619,6 +3745,10 @@ export class MinionProj extends Entity {
       const dirT = tgt.cx - this.cx < 0 ? -1 : 1;
       ax = tgt.cx - 20 * dirT;
       ay = tgt.cy;
+      // TryJumpingToTarget 共享尾（:51024 调用位;toTarget.Y=敌心 Y——flag2 的 20px
+      // 过冲是 :51167 X 轴另段,Y 同值）;跃起后 vy<0 使步行结算段让位（原版同序;
+      // 湿中下落跃起走 :52114 支）。扑击门在原版 :51132 后于共享尾,照此位序
+      this.ai67TryJumpingToTargetTail(tgt.cy, false);
       // 扑击门（:51155-51160）：距锚 <50 → ai[0]=2/ai[1]=num10=20
       if (Math.hypot(ax - this.cx, ay - this.cy) < 50) {
         this.frA0 = 2; this.frA1 = 20;
@@ -4386,7 +4516,11 @@ export class MinionProj extends Entity {
     if (focus >= 0) {
       for (const e of game.enemies()) {
         const en = e as never as EnemyLike;
-        if (!en.dead && en.id === focus && Math.hypot(en.cx - bx, en.cy - by) < focusRange) {
+        // CanBeChasedBy 门（AI_121 集火原文 :43664/:40190 字面;通用层清偿 2026-09-08:
+        //  曾缺门=训练假人 488/伪装雕像 690 等 immortal/exclude 族被集火锁定——
+        //  未过门 → 集火作废,tag/野生支照走,同原版 num6=−1 回退）
+        if (!en.dead && en.id === focus && canBeChasedBy(e)
+          && Math.hypot(en.cx - bx, en.cy - by) < focusRange) {
           // ★F6 焦点同吃角度/方向门（FindTarget 内 OwnerMinionAttackTargetNPC 桶
           //  与全局扫共用同一谓词链 :69426-69456——过门才被采纳）
           const df = Math.hypot(en.cx - bx, en.cy - by);
@@ -4480,7 +4614,18 @@ export class MinionProj extends Entity {
     //  tick 头插位（杀拍覆盖/采样位/域论证见字段块头注）;阻尼=位移处乘档位
     //  （palGroundStep/mushBoiStep/digtoiseStep/ai067WalkChase/spiderStep/frogStep/
     //  ravenBody/whip 族 1036/通用飞行·地面各积分位——旧受段族批同口径）。
-    if (MINION_WET_IDS.has(this.projId)) {
+    //  ★AI 湿旗读相=上拍快照 wetAi（定谳①②③见字段块头注）：首拍预置先行单跑
+    //  （=首拍当拍段:首拍未移动,采样位=出生盒=vanilla NewProjectile :10886-10893
+    //  同位）→ 快照=预置值;后续拍先快照（=上拍段尾 this.wet,vanilla AI 读上拍段值
+    //  同源）再跑当拍段。湿段副作用时序（溅花/wetCount/三清）与本插位批完全不变。
+    const runWet = MINION_WET_IDS.has(this.projId);
+    const presetFirst = runWet && !this.presetDone;
+    if (presetFirst) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+    }
+    this.wetAi = this.wet;
+    if (runWet && !presetFirst) {
       projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
         this.projId, !!projectileData(this.projId)?.ignoreWater);
     }
@@ -5848,6 +5993,19 @@ export class MinionProj extends Entity {
       if (this.projId === 758) ay += this.h / 2;                          // :33965 盒底锚
       else if (this.projId === 951) ay += this.h / 2 - img.height / 2 + 4; // :33943-33945
       else if (this.projId === 963 || this.projId === 1098 || this.projId === 1123) ay += -2; // :33836/:33771
+      // ★SW-BN6 2026-09-08：BJ16 债⑤清偿——963 cos 摆接线（Main.cs:33836-33844 1:1）。
+      //  原版 895/896/898/963 同支：num394=2（isAPreviewDummy=0.5,本仓无预览虚影档）,
+      //  vector99.Y += −num394 + cos(mouseTextColor/255·2π·2)·num394·2 —— 静态 −2 即
+      //  上一行;摆项 = cos((mt/255)·4π)·4（摆幅 ±4px,三角波全周期 130t≈2.17s）。
+      //  mt = 全局脉冲钟 FlickerClock.mouseTextColor（SkyColor.ts:318,190↔255 步进
+      //  1/帧 = Main.cs:18399-18406 同式;经 LightingEngine.compute 每帧 tick,
+      //  Game.ts:10005）——BJ16 登记「本仓无全局 tick 源」前提已过时,Renderer.lighting
+      //  在实体 draw 内可达（同 Renderer.ts:3440/:14217 消费口）。灯未就绪回退 255
+      //  = 摆顶（静止偏置 +2,与原版 mt=255 帧同形）。
+      if (this.projId === 963) {
+        const mt = r.lighting?.clock?.mouseTextColor ?? 255;
+        ay += Math.cos((mt / 255) * Math.PI * 2 * 2) * (2 * 2);
+      }
       const oy = this.projId === 758 ? img.height - 4                     // :33966-33967
         : this.projId === 759 ? img.height - 2                            // :33960
         : img.height / 2;

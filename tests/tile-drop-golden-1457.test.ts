@@ -99,10 +99,10 @@ const COND_PIN_BASE: Record<number, { vid: number; why: string }> = {
   137: { vid: 539, why: ':65597 fy/18 六档（1146-1149/5135 余档未建模,v_137 先例 pin）' },
   324: { vid: 2625, why: ':65793 fy/22 五档（2626/4072/4073/4071 未建模,本轮 pin）' },
   380: { vid: 3215, why: ':65726 3215+fy/18 八档（未建模,本轮 pin）' },
-  650: { vid: 3, why: ':65868 带表 13 带（未建模,本轮 pin 首带）' },
-  693: { vid: 664, why: ':65560 GetStalactiteEchoDrop 13 档（694 已走 echoResourceDropVid,693 并表移交）' },
-  707: { vid: 149, why: ':65183 fx==90→165 否则 149（165 档未建模,本轮 pin）' },
-  571: { vid: 4564, why: ':64937 4564×Next(1,3)（stack 未建模,pin 值）' },
+  650: { vid: 3, why: ':65868 带表 13 带（逐带已入 echoResourceDropVid case 650,2026-09-08 移交批;def.drop=3 系首带 pin）' },
+  693: { vid: 664, why: ':65560 GetStalactiteEchoDrop 13 档（693/694 已并表 echoResourceDropVid 共用 case,2026-09-08 移交批;def.drop=664 系 style0 pin）' },
+  707: { vid: 149, why: ':66183 fx==90→165 否则 149（双档已入 styleDropVidOfFrames 特例,2026-09-08 移交批;def.drop=149 系基档 pin）' },
+  571: { vid: 4564, why: ':64903-64905 4564×Next(1,3)（stack 已入 killTileDropItems 竹支 2026-09-08;def.drop=null 豁免+place_v_ 回收压门,本 pin 留档基值）' },
   5: { vid: 9, why: 'KillTile_GetTreeDrops 基掉 9 木（:66745+;fellTree/dropVanillaTreeLoot 已建模,own tree 锚）' },
 };
 
@@ -149,7 +149,7 @@ const ANCHOR_DROPS: Record<number, { vid: number; why: string }> = {
   698: { vid: 5472, why: 'Check1x2Top case 698 :47198 恒掉 5472（TE 有物先 DropItem :64177）' },
   99: { vid: 348, why: 'Check2x2 case 99 :49099 恒掉 348 TrashCan（无放置物品,曾真缺）' },
   134: { vid: 525, why: 'Check2x1 case 134 :47667 pin style0 MythrilAnvil（1220 档未建模）' },
-  649: { vid: 3, why: 'Check2x1 case 649 :47677 带表 pin 首带（650 同族,余带未建模）' },
+  649: { vid: 3, why: 'Check2x1 case 649 :47677 带表（逐带已入 echoResourceDropVid case 649,2026-09-08 移交批;def.drop=3 系首带 pin）' },
   86: { vid: 332, why: 'Check3x2 case 86 :50123 恒掉 332 Loom' },
   106: { vid: 363, why: 'Check3x3 case 106 :53623 恒掉 363 Sawmill' },
   125: { vid: 487, why: 'Check2x2 case 125 :49125 恒掉 487 Crystal Ball' },

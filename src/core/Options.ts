@@ -316,6 +316,11 @@ export class OptionsStore {
     inventoryLayout: 'classic',             // ★2026-09-07 灰度 flag(缺省现行布局;切缺省另刀)
   };
   loaded = false;
+  /** ★红队 F1(2026-09-08):?invlayout= 会话覆盖生效中——set() 序列化时把
+   *  inventoryLayout 剥回 persistedLayout(存档侧值),覆盖不落盘污染用户选择 */
+  private urlOverrideLayout = false;
+  /** 存档侧的 inventoryLayout(覆盖前快照;显式 set 本键时更新;null=load 未跑) */
+  private persistedLayout: 'classic' | 'vanilla' | null = null;
   private listeners: Array<(d: OptionsData) => void> = [];
 
   onChange(fn: (d: OptionsData) => void) {
@@ -452,17 +457,24 @@ export class OptionsStore {
       }
       // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
       if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
-      // ★2026-09-07 背包布局灰度：坏值回 classic；URL 会话覆盖（?invlayout=vanilla|
-      //  classic，只改内存不落盘——落盘唯一通道是 set()，探针/评审 URL 直达）
+      // ★2026-09-07 背包布局灰度：坏值回 classic；URL 会话覆盖见 try 外（★红队 F1
+      //  清偿：覆盖值只改内存,落盘通道 set() 序列化时剥回存档侧值(persistedLayout),
+      //  否则会话内任意一次 set() 把覆盖值连带写档污染用户选择）
       if (this.data.inventoryLayout !== 'vanilla' && this.data.inventoryLayout !== 'classic') {
         this.data.inventoryLayout = 'classic';
       }
-      {
-        const qLayout = typeof location !== 'undefined'
-          ? new URLSearchParams(location.search).get('invlayout') : null;
-        if (qLayout === 'vanilla' || qLayout === 'classic') this.data.inventoryLayout = qLayout;
-      }
+      this.persistedLayout = this.data.inventoryLayout;
     } catch { /* 无存档用默认 */ }
+    // URL 会话覆盖在 try 外执行:kvGet 拒绝(隐私模式)时覆盖仍生效(红队 F7)
+    if (this.persistedLayout === null) this.persistedLayout = this.data.inventoryLayout;
+    {
+      const qLayout = typeof location !== 'undefined'
+        ? new URLSearchParams(location.search).get('invlayout') : null;
+      if (qLayout === 'vanilla' || qLayout === 'classic') {
+        this.data.inventoryLayout = qLayout;
+        this.urlOverrideLayout = true;
+      }
+    }
     this.emit();
   }
 
@@ -473,11 +485,18 @@ export class OptionsStore {
   private saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
   async set<K extends keyof OptionsData>(key: K, value: OptionsData[K]) {
     this.data[key] = value;
+    // ★红队 F1:显式 set 本键 = 用户意志,更新落盘基准
+    if (key === 'inventoryLayout') this.persistedLayout = value as OptionsData['inventoryLayout'];
     this.emit();
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = 0;
-      kvSet(KEY, JSON.stringify(this.data)).catch(() => { /* 存储不可用则仅内存生效 */ });
+      // URL 会话覆盖生效中:序列化剥离覆盖键(写回存档侧值,覆盖仅本次会话)
+      const persisted = this.persistedLayout;
+      const payload: OptionsData = this.urlOverrideLayout && persisted !== null
+        ? { ...this.data, inventoryLayout: persisted }
+        : this.data;
+      kvSet(KEY, JSON.stringify(payload)).catch(() => { /* 存储不可用则仅内存生效 */ });
     }, 400) as unknown as ReturnType<typeof setTimeout>;
   }
 

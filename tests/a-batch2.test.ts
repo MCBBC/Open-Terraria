@@ -468,10 +468,38 @@ describe('乌鸦 317（:3825-3836 minion / AI :27383-27590）', () => {
     expect(e.hits.every((d) => d === 12)).toBe(true);
   });
 
-  it('无目标时悬停玩家上方 60px 且不造成伤害（friendly=false :27544）', () => {
+  // ★2026-09-08 定谳（蓝队）：旧断言 |cy-(pcy-60)|<40 系钉错,实现 1:1 无漂。
+  // 反编译跟随支（1457 Projectile.cs :29084-29123,aiStyle 54）：锚=玩家心-60（:29091）,
+  // 但收敛仅限 dist>70（:29111 门）——dist≤70 走漂移支（零速种子 -0.15/-0.05 后
+  // ×1.01 :29119-29123,不趋近锚）。旧夹具把 28×28 乌鸦（:4104-4105）放在玩家左上
+  // (player.x,player.y) → 距锚 √(4²+53²)=53.2<70 → 整程漂移支,90t 后 |Δy|=45.68
+  // （反编译逐值镜像复算一致）——该起点下原版本就到不了 40 内,非实现偏差。
+  // 无 float32 量化效应（漂移量级 45px ≫ 1e-7）。改钉为锚语义四钉：
+  it('无目标悬停：锚=玩家心上方 60px（:29091）,>70 收敛（:29111-29118）/≤70 漂移（:29119-29123）,全程不产生接触伤（friendly=false :29127）', () => {
     const { hooks, player } = makeHooks([]);
-    const r = new MinionProj(player.x, player.y, 317, 12, 1.5, false, 0, false, () => player);
-    step([r], 90, hooks);
-    expect(Math.abs(r.cy - (player.cy - 60))).toBeLessThan(40);
+    // ① dist=160（>100 → 317 提速 12 :29103-29109）首拍 v=(v×20+向×12)/21（:29117-29118）
+    //   夹具中心=玩家心正上 160（28×28 → 左上 = 中心 -14 :4104-4105）
+    const r = new MinionProj(player.cx - 14, player.cy - 60 - 160 - 14, 317, 12, 1.5, false, 0, false, () => player);
+    r.fixedUpdate(1, hooks);
+    expect(r.vy).toBeCloseTo(12 / 21, 6);
+    expect(r.vx).toBeCloseTo(0, 6);
+    // ② 70px 门判别：dist=80∈(70,100] → 收敛支 spd 8 → vy=8/21;dist=60≤70 →
+    //   漂移支零速种子×1.01 → (vx,vy)=(-0.15,-0.05)×1.01（门值 70 直接钉死 :29111）
+    const r80 = new MinionProj(player.cx - 14, player.cy - 60 - 80 - 14, 317, 12, 1.5, false, 0, false, () => player);
+    r80.fixedUpdate(1, hooks);
+    expect(r80.vy).toBeCloseTo(8 / 21, 6);
+    const r60 = new MinionProj(player.cx - 14, player.cy - 60 - 60 - 14, 317, 12, 1.5, false, 0, false, () => player);
+    r60.fixedUpdate(1, hooks);
+    expect(r60.vx).toBeCloseTo(-0.15 * 1.01, 6);
+    expect(r60.vy).toBeCloseTo(-0.05 * 1.01, 6);
+    // ③ 长程行为：从 160 外起跑,90t 内进抵锚（|Δy| 极小值 0.06,镜像复算）——
+    //   锚常量错钉（-20/-100）此钉必红;抵锚后围锚极限环摆动（70px 门内无减速过冲,
+    //   包络 +~113px,周期 ~96t,原版本相）——抵锚后 |Δy| 有界,不失速不坠地
+    const dys: number[] = [];
+    for (let i = 1; i < 90; i++) { r.fixedUpdate(1, hooks); dys.push(r.cy - (player.cy - 60)); }
+    expect(Math.min(...dys.map(Math.abs))).toBeLessThan(10);
+    const firstNear = dys.findIndex((v) => Math.abs(v) < 10);
+    expect(Math.max(...dys.slice(firstNear).map(Math.abs))).toBeLessThan(125);
+    // 无敌怪场景 + 跟随支 friendly=false 提前 return（:29127）→ 无接触伤路径
   });
 });

@@ -158,6 +158,9 @@ describe('刀1 几何:mH 与装备区顶(Main.cs:46535-46561/41854-41861)', () =
     expect(mHOf(true, 800)).toBe(200);      // min(256,200)
     expect(mHOf(true, 600)).toBe(0);        // 钳制分支
     expect(mHOf(false, 800)).toBe(0);
+    // ★红队 m1 清偿:PushUp 变体(恶魔心/大师 610)+关图负钳(Main.cs:3063-3071)
+    expect(mHOf(true, 780, 610)).toBe(170);
+    expect(mHOf(false, 500, 610)).toBe(-110);   // 关图仍钳,可为负=原版同款
   });
   it('num20=174+mH;矮屏(<950 且行≥10)上移 47.6*(n-9)', () => {
     expect(equipAreaTop(1080, 256, 8)).toBe(430);
@@ -183,7 +186,8 @@ describe('刀1 几何:三列/行 y/勾选框/配装轨/防御(Main.cs:42085-4289
     expect(accessoryCheckY(num20, 3)).toBe(574);   // 430-2+trunc(142.8)+4
   });
   it('配装竖轨/钮(sw-44 轨,sw-40+36i 钮)', () => {
-    expect(loadoutRailRect(sw, num20, 3)).toEqual({ x: 1236, y: 430, w: 4, h: 142.8 });
+    // ★红队 M1 清偿:轨高 n=装备列可见行数(:42653-42662 缺省 8),y=num20+2,截断
+    expect(loadoutRailRect(sw, num20, 8)).toEqual({ x: 1236, y: 432, w: 4, h: 380 });
     expect(loadoutBtnXY(sw, num20, 0)).toEqual({ x: 1240, y: 430 });
     expect(loadoutBtnXY(sw, num20, 2)).toEqual({ x: 1240, y: 502 });
   });
@@ -209,21 +213,26 @@ describe('刀1 几何:页签/杂项页/住房页/PvP/合成面板', () => {
     expect(pos[0]).toEqual({ x: 1188, y: 430 });
     expect(pos[6].y).toBe(715);             // trunc(6*47.6)=285+430=715 ≤ 720
     expect(pos[7]).toEqual({ x: 1140, y: 430 });   // 763>720 → 换列
+    // ★红队 m5 清偿:num2 吸收全局分数残量(num 不归零,:42751-42758)——
+    // 第 2 列第 4 槽(n=10):trunc(430+476)-333=573(旧逐列归零=572)
+    expect(pos[10]).toEqual({ x: 1140, y: 573 });
   });
   it('PvP 剑/队伍网格(Main.cs:43389-43443)', () => {
     expect(pvpSwordXY(sw, 200, false)).toEqual({ x: 1053, y: 379 });
     expect(pvpSwordXY(sw, 200, true).x).toBe(1099);   // 页 2 x+46
-    expect(pvpTeamXY(sw, 200, 0)).toEqual({ x: 1053, y: 439 });
-    expect(pvpTeamXY(sw, 200, 3)).toEqual({ x: 1073, y: 459 });
+    expect(pvpTeamXY(sw, 200, 0, false)).toEqual({ x: 1053, y: 439 });
+    expect(pvpTeamXY(sw, 200, 3, false)).toEqual({ x: 1073, y: 459 });
+    expect(pvpTeamXY(sw, 200, 0, true).x).toBe(1099);   // ★红队 m2:页 2 +46(Main.cs:43395-43397)
   });
   it('合成面板 (20,312) 490×(sh-350);44px 格;详情浮层偏移(NewCraftingUI.cs)', () => {
     expect(craftPanelRect(800)).toEqual({ x: 20, y: 312, w: 490, h: 450 });
     expect(craftCellXY(2, 1)).toEqual({ x: 88, y: 44 });
-    const d = craftDetailLayout(20, 350);
-    expect(d.origin).toEqual({ x: 44, y: 423 });
-    expect(d.hammer).toEqual({ x: 91, y: 436 });
-    expect(d.materialsStart).toEqual({ x: 116, y: 445 });
-    expect(d.guideSlot).toEqual({ x: 44, y: 481 });
+    // ★红队 M2 清偿:GetInnerDimensions=UIState 自身(SetPadding(0))——origin=面板+(24,73)
+    const d = craftDetailLayout(20, 312);
+    expect(d.origin).toEqual({ x: 44, y: 385 });
+    expect(d.hammer).toEqual({ x: 91, y: 398 });
+    expect(d.materialsStart).toEqual({ x: 116, y: 391 });   // 22-16·num(num=1)
+    expect(d.guideSlot).toEqual({ x: 44, y: 443 });
   });
   it('容器缩放钳 [0.5,1.15](本仓登记偏差:整体等比)', () => {
     expect(vanillaScaleFor(1280, 800)).toBe(1);
@@ -280,5 +289,89 @@ describe('刀1 页码:selectEquipPageOf(ItemSlot.cs:4641-4671 分支序 1:1)', (
     expect(selectEquipPageOf(equipPageCapOf(armorId), 2)).toBe(0);
     expect(accId).toBeGreaterThanOrEqual(0);
     expect(selectEquipPageOf(equipPageCapOf(accId), 0)).toBe(0);
+  });
+});
+
+// ---- 刀 6:结构锁(srcMatch 钉 vanilla 判据与 classic canary) ----
+// 依据 playbook P3.1 守卫矩阵:修复落盘必有永久回归测试——行为面(上方 flag/几何/
+// 页码)+ 结构锁(本节,防静默回退)。classic canary = 红线自证(buildInventoryPanel
+// 未被改写;配合 sw-au2/sw-ay1/sw-bp1 既有锁 = classic 区零漂移)。
+import { readFileSync } from 'node:fs';
+
+const srcOf = (f: string): string => readFileSync(f, 'utf8');
+
+describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
+  const ui = () => srcOf('src/ui/UI.ts');
+  it('classic canary:buildInventoryPanel 原签名仍在(classic 零改动红线)', () => {
+    expect(ui()).toContain('private buildInventoryPanel() {');
+  });
+  it('分派:buildInventoryFor 登记 _builtLayout(vanilla 分支经它,initInGame 不直调构建器)', () => {
+    const s = ui();
+    expect(s).toContain('private buildInventoryFor(layout:');
+    expect(s).toContain("this._builtLayout = layout;");
+    expect(s).toContain("this.buildInventoryFor('classic');   // classic 原路径(构建器零改动)");
+    expect(s).toContain("this.buildInventoryFor('vanilla');");
+  });
+  it('守卫:positionInvPanel 首行 vanilla 早退', () => {
+    const s = ui();
+    expect(s).toContain("if (this._builtLayout === 'vanilla') return;");
+  });
+  it('守卫:refreshHotbar 开包隐藏热键栏(GUIHotbarDrawInner :44324 早退等价)', () => {
+    const s = ui();
+    expect(s).toContain("if (this._builtLayout === 'vanilla') {\n      const vinvOpen = this.invPanel?.style.display === 'block';");
+    expect(s).toContain("if (this.hotbarEl) this.hotbarEl.style.display = vinvOpen ? 'none' : '';");
+  });
+  it('守卫:refreshAllNow 补绘门 + closeInventory 还原刷', () => {
+    const s = ui();
+    expect(s).toContain("if (this._builtLayout === 'vanilla') this.paintVanillaInvSlots();");
+    expect(s).toContain("if (this._builtLayout === 'vanilla') this.refreshAll();");
+  });
+  it('teardown 清单:双构建器字段全清(重建路径完整性)', () => {
+    const s = ui();
+    for (const f of ['this.vinvCraftPanel = null;', 'this.vinvHousingPage = null;',
+      'this.loadoutBtns = [];', 'this.accEyeEls.clear();', "document.getElementById('sw-vinv-style')?.remove();"]) {
+      expect(s).toContain(f);
+    }
+  });
+  it('domTargets/ closest 门登记 .sw-vinv(缝隙点击不穿透)', () => {
+    expect(srcOf('src/core/input/domTargets.ts')).toContain('.sw-eqdock, .sw-vinv');
+    const s = ui();
+    expect(s).toContain("'.sw-panel, .sw-eqdock, .sw-vinv'");
+  });
+});
+
+describe('刀6 结构锁:纯几何模块(vanillaInvLayout.ts)', () => {
+  it('网格公式逐槽截断(Main.cs:41731-41750 的字面锚)', () => {
+    const s = srcOf('src/ui/vanillaInvLayout.ts');
+    expect(s).toContain('Math.trunc(20 + (i % 10) * 56 * INV_SCALE)');
+    expect(s).toContain('Math.trunc(20 + Math.floor(i / 10) * 56 * INV_SCALE)');
+  });
+  it('装备区顶 174+mH 与矮屏压缩(:41855/:41858-41861)', () => {
+    const s = srcOf('src/ui/vanillaInvLayout.ts');
+    expect(s).toContain('let top = 174 + mH;');
+    expect(s).toContain('if (sh < 950 && visibleRows >= 10) top -= Math.trunc(CELL_STEP * (visibleRows - 9));');
+  });
+});
+
+describe('刀6 结构锁:页码路由(SlotActions.ts,ItemSlot.cs:4641-4671 分支序)', () => {
+  it('分支序:hook→mount→pet→light→dye&&1→armor,尾 null=记忆页', () => {
+    const s = srcOf('src/ui/SlotActions.ts');
+    const body = s.slice(s.indexOf('export function selectEquipPageOf'));
+    const order = [
+      'if (cap.projHook) return 2;',
+      'if (cap.mountType) return 2;',
+      'if (cap.vanityPet) return 2;',
+      'if (cap.lightPet) return 2;',
+      'if (cap.dye && selected === 1) return 0;',
+      'if (cap.legSlot || cap.headSlot || cap.bodySlot || cap.accessory) return 0;',
+      'return null;',
+    ];
+    let at = -1;
+    for (const line of order) {
+      const i = body.indexOf(line);
+      expect(i, line).toBeGreaterThan(-1);
+      expect(i, `位次: ${line}`).toBeGreaterThan(at);
+      at = i;
+    }
   });
 });

@@ -146,6 +146,10 @@ export class TownShot extends Entity {
   //    无条件跑=共享体 2026-09-06 逐字面化批口径);
   //  · 受段=其余 25 型(15/24/585/589/582/669/930/1/2/14/48/21/162/583/30/588/
   //    133/135/721/134/587/267/357/520/586)——溅花+旗维护;
+  //  · ★584 NurseSyringeShot（TownNPC.ts 子类,SetDefaults :6342-6350 无 ignoreWater
+  //    → 同受段）不在 TOWN_DRAW_SPEC 域内但其 override fixedUpdate 全量自写【不调
+  //    super】——基类本位湿段对其不生效,已在 override tick 头自接共享体+阻尼
+  //    （2026-09-08 红队接入面 F2,锚注见彼字段块）,本基类位零改动;
   //  · 15 ∈ ProjectileID.Sets.IsDestroyedByWater({85,15,188,34,1097,1106},
   //    ProjectileID.cs:287)→ 湿段消亡面接 hooks.kill(:16923-16925 `wet && !lavaWet`
   //    → Kill;本仓=dead 置位,型专属 Kill 尘面本类既有口径不变——669 kill669 爆炸

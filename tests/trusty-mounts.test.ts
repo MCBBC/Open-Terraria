@@ -235,7 +235,12 @@ describe('⑤ 坐骑抚摸支（62-65 骑乘中右键）', () => {
 // ---------------------------------------------------------------------------
 // ⑥ 帕鲁随从未折算两项：湿身 vy×2 + 抚摸 Joy 计时
 // ---------------------------------------------------------------------------
-const W = 200, H = 120;
+// ★H 120→200（2026-09-08 湿段读相定谳批）：湿旗消费位归一后 1112 读取=湿段维护旗
+//  （npcLiquid.wetCollision,j1 帽=原版字面 Main.maxTilesY−40 :15806/:15809）——
+//  旧 H=120 小桩把水带（行 96-99）压进帽下（min(80,·)）→ 预置假阴性剪空 ×2 钉。
+//  H≥200 后桩与真实世界同帽域（帽 160>水带）,probe 的 vitest 小桩豁免支
+//  （MinionProj.wetCollisionProbe yCap 守卫）不再被本文件消费。
+const W = 200, H = 200;
 function makeStore(wet: boolean): TileStore {
   const store = new TileStore(W, H);
   for (let x = 0; x < W; x++) for (let y = 100; y < H; y++) store.setTile(x, y, 1);
@@ -279,17 +284,31 @@ function makeHooks(enemies: unknown[] = [], wet = false) {
 }
 
 describe('⑥ 湿身 vy×2（Projectile.cs:51616-51619,1456 :51545）', () => {
-  // 敌在上方 50px → 高出差表 vy=-6（:51492-51527 d<60 档）；wet 支翻倍 → -12
+  // ★2026-09-08 续单重构：TryJumpingToTarget 共享尾（:51024/:52154,补接批）对
+  //   「贴地+敌心高于 30px」先跃起（vy≠0）→ 结算段（梯/表/×2）整段让位——原
+  //   「敌在上方 50px → 距离表」场景下 ×2 vanilla 不可达。×2 的可达域=敌不高于
+  //   30px（侧翼钳 Y 口径）∧ 前墙列扫触发跳梯（:51363 settle 段）→ 本夹具改
+  //   「同高敌（盒底对齐）+前墙」,梯档 -11.1（:51543 solid(-5)）×2。
+  //   出生 y = 地板顶 −22：1112 盒 14×22（Projectile.cs:10365-10366,非 16 高）——
+  //   按 −16 生成为底 1606 嵌进 100 行地板 6px,Collision 落地门（:1610/:1631
+  //   "上一位置在盒顶之上"才吸附）永不置 onGround → 跳档整段不跑
   const jumpVy = (wet: boolean): number => {
-    const { hooks, player } = makeHooks([mkEnemy(1, 60 * 16, 100 * 16 - 62)], wet);
-    // 出生 y = 地板顶 −22：1112 盒 14×22（Projectile.cs:10365-10366,非 16 高）——
-    // 按 −16 生成为底 1606 嵌进 100 行地板 6px,Collision 落地门（:1610/:1631
-    // "上一位置在盒顶之上"才吸附）永不置 onGround → 跳档整段不跑
+    const { hooks, player, store } = makeHooks([mkEnemy(1, 60 * 16 + 120, 100 * 16 - 23)], wet);
     const m = new MinionProj(60 * 16, 100 * 16 - 22, 1112, 10, 2, false, 0, false, () => player);
+    // 前墙列扫柱（:51438 柱式=中柱+intent+round(vx)）——1112 flag8 档 acc=9
+    // （:51325 1112 专档）→ 拍内 vx=9 → 柱=中柱+1+9=70（扫描在位移【前】,干湿同柱）。
+    // 跳梯在位移【后】（仓序:重力→位移→结算,见 palGroundStep 注）,pc=中柱'+1+trunc(9)
+    // ——干态位移 9px 跨过 61×16 柱界（pc=71）、湿态 ×0.5 位移 4.5px 不跨（pc=70）
+    // → 墙跨 70/71 两柱保干湿同梯档。墙自地板上立 6 行（行 94-99）→ 梯探测
+    // −1..−5 全实心 = −11.1 档
+    const wallCol = Math.floor((60 * 16 + 7) / 16) + 1 + 9;
+    for (const wc of [wallCol, wallCol + 1]) {
+      for (let yy = 94; yy <= 99; yy++) store.setTile(wc, yy, 1);
+    }
     m.fixedUpdate(1, hooks);
     return (m as unknown as { vy: number }).vy;
   };
-  it('水中贴地起跳速度翻倍（-6 → -12）,干地不翻', () => {
+  it('水中贴梯起跳速度翻倍（-11.1 → -22.2）,干地不翻', () => {
     const dry = Math.abs(jumpVy(false));
     const wetV = Math.abs(jumpVy(true));
     expect(dry).toBeGreaterThan(0);

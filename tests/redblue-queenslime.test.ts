@@ -3,7 +3,7 @@
 //   掉血撒仆从)+ 掉落表五规则 + 召唤物 4988 链 + 音乐/图鉴/素材面。
 // 标杆:Terarria1458 NPC.cs AI_121_QueenSlime(:45695-46177)/NPCLoot(:82813 族)/
 //   Item.cs:40186(4988)/Player.cs:44230(ZoneHallow 召唤)。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Enemy, VANILLA_BOSS_IDS } from '../src/entities/Enemy';
@@ -15,6 +15,12 @@ import dropsJson from '../src/data/vanilla-npcdrops.json';
 import bestiaryJson from '../src/data/vanilla-bestiary.json';
 import { BOSS_MUSIC, bossMusicFor } from '../src/data/Music';
 import type { GameHooks } from '../src/entities/types';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）:
+// AI_121 状态机选拍掷流（四连跳节奏/仆从撒落）依赖序列,播种后恒定。
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 const W = 160, H = 140, FLOOR = 120;
 

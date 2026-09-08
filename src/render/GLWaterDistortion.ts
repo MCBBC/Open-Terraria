@@ -132,14 +132,11 @@ void main() {
   // w = smoothstep((DISPY·c5.y+0.001)·500)，c5.y=32/res.y → x = dispy·16000/res.y + 0.5
   float x = clamp(dispy * 16000.0 / uCssSize.y + 0.5, 0.0, 1.0);
   float w = x * x * (3.0 - 2.0 * x);
-  float gate = clamp(f * (1.0 - abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0))), 0.0, 1.0);
-  // ★水线上缘保护(2026-09-08 直线缝定谳):原版 obj19 的 waterTarget 采样坐标带
-  //   w/h' 调制(mad r1.zw/r0.xy 链)——波峰上移(w→0)时采样塌向 target 原点 α≈0
-  //   → f→0 → gate→0 = 边缘显示未位移水线。SW 朴素水采样(uvD/vUv 直读)下该处
-  //   dA=-1、w→0 → gate 饱和 1 → 水线行显示拉上来的背景色 = 贯穿直线缝
-  //   (缩放/相机高度改变亚像素相位→隐现)。深水 dA≈0 不受影响;下缘 dip 由
-  //   w→1 分支自带保护(|2·1+dA−1|→0)无需此钳。
-  if (dA < 0.0 && dispy < 0.0) gate = 0.0;
+  // ★饱和位置字节级订正（2026-09-08 obj19 --dump-obj 逐 token）：原版 #64-70 为
+  //   mul r0.x_sat, |dA|, (1−|2w+dA−1|) —— 乘积【先饱和 [0,1]】再 1−（负积→0→
+  //   gate=f，边缘像素不过度位移）；SW 旧式最后才 clamp，负积时 gate=clamp(2f)=1
+  //   = 水线半覆盖像素被过度位移 = 多画出的位移层。
+  float gate = f * (1.0 - clamp(abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0)), 0.0, 1.0));
   gl_FragColor = mix(texture2D(uScene, vUv), texture2D(uScene, uvD), gate);
 }`;
 
@@ -271,9 +268,11 @@ void main() {
     const n = w * h;
     if (!this.waveBytes || this.waveBytes.length !== n) this.waveBytes = new Uint8Array(n);
     const bytes = this.waveBytes;
-    // ?wamp=N 波形偏差增益（默认 2=2026-08-25 用户对照原版观感校准"非常接近原版"；
-    // ?wamp=1=原样直通，诊断用）
-    const amp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
+    // ?wamp=N 波形偏差增益（★默认 1=原版原样直通,2026-09-08 水面直线缝案定版:
+    //   2=2026-08-25 观感校准值,位移×2 令水线边缘"越出水体"的位移采样带加宽
+    //   → 背景色直线缝(缩放/相机高度改亚像素相位→隐现);原版 obj19 无此增益。
+    //   ?wamp=2 仍可显式取回旧观感。与 WaterWaves.sampleDisplace 同值）
+    const amp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
     for (let i = 0; i < n; i++) {
       const v = ((waveR[i] - 0.5) * amp + 0.5) * 255 + 0.5;
       bytes[i] = v < 0 ? 0 : v > 255 ? 255 : v;

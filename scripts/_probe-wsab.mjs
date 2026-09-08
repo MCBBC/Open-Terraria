@@ -4,7 +4,7 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1512, height: 982, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-for (let att = 0; att < 8; att++) { try { await page.goto(ORIGIN + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 }); break; } catch { await new Promise(r => setTimeout(r, 2500)); } }
+for (let att = 0; att < 8; att++) { try { await page.goto(ORIGIN + '/?play=small' + (process.env.WQ || ''), { waitUntil: 'domcontentloaded', timeout: 60000 }); break; } catch { await new Promise(r => setTimeout(r, 2500)); } }
 const r = await page.evaluate(async () => {
   const t0 = Date.now();
   while (!window.__swGame?.player && Date.now() - t0 < 90000) await new Promise(r => setTimeout(r, 500));
@@ -30,10 +30,12 @@ const r = await page.evaluate(async () => {
         if (wL + wR >= 30) best = { x0: x - wL, x1: x + wR, y };
       }
   if (!best) return { pool: null, gl: gl2, spawn: [px, py] };
+    // ★250% 复现:记录 K 态(不强制降档,让数据说话)
+    const wouldBeK = g.renderer.effectiveRenderScale();
   const out = { pool: best, combos: [] };
   const cv0 = g.renderer.canvas;
   for (const c2 of [{ jx: 0, jy: 0, tag: 'jx0' }, { jx: 0.5, jy: 0, tag: 'jx05' }, { jx: 0, jy: 0, tag: 'jx0b' }, { jx: 0.5, jy: 0, tag: 'jx05b' }]) {
-    g.camera.zoomTarget = 1.25; g.camera.zoom = 1.25;
+    g.camera.zoomTarget = 2.5; g.camera.zoom = 2.5;
     g.player.noClip = true;
     let img = null, tries = 0;
     const cv = g.renderer.canvas, W = cv.width, H = cv.height, midY = Math.floor(H / 2);
@@ -42,10 +44,10 @@ const r = await page.evaluate(async () => {
     while (tries++ < 6) {
       g.player.x = (best.x0 + best.x1) / 2 * 16 + c2.jx; g.player.y = best.y * 16 - 46; g.player.vx = 0; g.player.vy = 0;
       await new Promise(r2 => setTimeout(r2, 380));
-      img = ctx2.getImageData(0, midY - 60, W, 120);
+      img = ctx2.getImageData(0, midY - 90, W, 180);
       // 水线存在:某行起下半段显著蓝(b>g>r)
       let waterRows = 0;
-      for (let y = 60; y < 118; y++) {
+      for (let y = 90; y < 176; y++) {
         let blue = 0;
         for (let x = Math.floor(W * 0.35); x < Math.floor(W * 0.65); x += 4) {
           const i = (y * W + x) * 4;
@@ -56,7 +58,7 @@ const r = await page.evaluate(async () => {
       if (waterRows > 30) break;
     }
     const rows = [];
-    for (let y = 6; y < 114; y++) {
+    for (let y = 6; y < 174; y++) {
       let anom = 0, mean = 0;
       for (let x = Math.floor(W * 0.3); x < Math.floor(W * 0.7); x += 2) {
         const i = (y * W + x) * 4;
@@ -69,14 +71,15 @@ const r = await page.evaluate(async () => {
       rows.push({ y, m: +(mean / (W * 0.4)).toFixed(0), a: anom });
     }
     const shot = document.createElement('canvas');
-    shot.width = W; shot.height = 120;
+    shot.width = W; shot.height = 180;
     shot.getContext('2d').putImageData(img, 0, 0);
-    out.combos.push({ tag: c2.tag, hot: rows.filter(x => x.a > 80).sort((a, b) => b.a - a.a).slice(0, 3), url: shot.toDataURL('image/png') });
+    out.combos.push({ tag: c2.tag, hot: rows.filter(x => x.a > 80).sort((a, b) => b.a - a.a).slice(0, 3), url: shot.toDataURL('image/png'), worldLowK: g.renderer._worldLowK, wouldBeK });
   }
   g.player.noClip = false;
   return out;
 });
-console.log(JSON.stringify({ pool: r.pool, gl: r.gl, spawn: r.spawn, n: (r.combos||[]).length }));
+console.log(JSON.stringify(r.combos.map(c => ({ tag: c.tag, hot: c.hot, worldLowK: c.worldLowK, wouldBeK: c.wouldBeK }))));
+console.log('pool=' + JSON.stringify(r.pool));
 if (!r.combos) { await browser.close(); process.exit(1); }
 const fs = await import('node:fs');
 for (const c of r.combos) fs.writeFileSync(`/tmp/wsab-${c.tag}.png`, Buffer.from(c.url.split(',')[1], 'base64'));

@@ -111,6 +111,17 @@ const SEED_ICON: Record<string, string> = {
   tenthAnniversary: 'Seed_Celebration', noTraps: 'Seed_NoTraps', remix: 'Seed_Remix',
 };
 
+/** 特殊种子（路线① GetOptionFromSeedText）旗标名→图标键（=SEED_ICON 九位；
+ *  ★IIIII215b Chat 音门）。秘密种子（路线② CheckInputForSecretSeed）= flags 里
+ *  不在此表的其余旗标名 → menu_accept 一次性解锁音。 */
+const SPECIAL_ICON_KEY_BY_FLAG: Record<string, string> = SEED_ICON;
+
+/** 路线①命中判定：flags 含任一特殊种子旗标（parseSeed 对 SPECIAL_OPTIONS 首中即返） */
+function isSpecialSeedText(flags: { everything?: boolean; drunkWorld?: boolean; notTheBees?: boolean; getGoodWorld?: boolean; theConstant?: boolean; skyblock?: boolean; tenthAnniversary?: boolean; noTraps?: boolean; remix?: boolean }): boolean {
+  return Object.keys(flags).some((n) => SPECIAL_ICON_KEY_BY_FLAG[n] !== undefined);
+}
+
+
 export class WorldCreationPanel {
   private panel: HTMLElement;
   private desc: HTMLElement;
@@ -286,8 +297,12 @@ export class WorldCreationPanel {
   }
 
   private seedIcon: ImageBitmap | HTMLImageElement;
-  /** 上次解析的种子图标键——menu_accept 的「首次命中」判定基线 */
+  /** 上次解析的种子图标键 */
   private lastSeedKey = '';
+  /** 上次解析的种子文本——Chat 音「文本变更且命中特殊种子」判定基线（★IIIII215b） */
+  private lastSeedText = '';
+  /** 会话级已解锁秘密种子旗标名（vanilla SecretSeed._enabled 的面板内镜像,纯 UI 态零 store 写） */
+  private enabledSecrets = new Set<string>();
   private refreshSeedIcon() {
     const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value.trim();
     const { flags } = parseSeed(seed);
@@ -302,14 +317,25 @@ export class WorldCreationPanel {
       : flags.remix ? 'Seed_Remix'
       : flags.vampireSeed ? 'Seed_Secret'   // 秘密种子通用图标（吸血鬼 1.4.5 无专属图标）
       : 'Seed_Normal';
-    // 输入即响（UIWorldCreation.cs:842 输入回调内 CheckInputForSecretSeed 命中且未启用 →
-    //   WorldGen.SecretSeed.Enable(secretSeed)（WorldGen.cs:532-546,playSound 缺省 true）
-    //   → SoundEngine.PlaySound(seed._sound)；全部秘密种子 _sound=SoundID.MenuAccept
-    //   （WorldGen.cs:341-379 Register 统一传参））。本仓 parseSeed 是纯函数无 Enabled
-    //   生命周期,以「图标键从普通切到任一秘密种子」为首次命中拍——同键续敲/回改普通不重播
-    if (key !== this.lastSeedKey && key !== 'Seed_Normal') {
-      UISfx.sfx.playWavFile('menu_accept');
+    // ★IIIII215b 两条独立音路（UIWorldCreation.cs :830-845 TextChanged 回调 1:1）：
+    //  ① 特殊种子（GetOptionFromSeedText 命中→SelectOption）→ PlaySound(24)=Chat
+    //     （SoundID.cs:48）——文本每次变更加命中即播,同文本刷新不重播；
+    //  ② 秘密种子（CheckInputForSecretSeed 命中且 !Enabled → SecretSeed.Enable）→
+    //     seed._sound=SoundID.MenuAccept（WorldGen.cs:341-379 全员同参,:532-546 Enable
+    //     playSound 缺省 true）——每枚种子会话内仅首次解锁播（enabledSecrets 镜像）。
+    //  此前实现两路混用（特殊种子误播 menu_accept、同图标键切换重复播）——本批修正。
+    if (seed !== this.lastSeedText && isSpecialSeedText(flags)) {
+      UISfx.chat();
     }
+    for (const name of Object.keys(flags)) {
+      const iconKey = SPECIAL_ICON_KEY_BY_FLAG[name];
+      if (iconKey !== undefined) continue;  // 路①特殊种子不占解锁位
+      if (!this.enabledSecrets.has(name)) {
+        this.enabledSecrets.add(name);
+        UISfx.menuAccept();
+      }
+    }
+    this.lastSeedText = seed;
     this.lastSeedKey = key;
     (this.seedIcon as HTMLImageElement).src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
   }

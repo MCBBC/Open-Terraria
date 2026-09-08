@@ -4,11 +4,14 @@ import { UIElement } from '../core/UIElement';
 import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch } from '../draw/UISpriteBatch';
 import { PixelText } from '../draw/PixelText';
-import { rgb } from '../draw/UISpriteBatch';
+import { rgb, type Color } from '../draw/UISpriteBatch';
 
 export class UIHeader extends UIElement {
   private _text = '';
   scale = 2; // DeathText 大字号
+  /** 主体文字色（原版 UIHeader.DrawSelf :54-61：白；十周年(celebrationmk10)且非
+   *  天顶(getfixedboi)时 Color.HotPink=(255,105,180)） */
+  textColor: Color = rgb(255, 255, 255);
 
   constructor(text = '') {
     super();
@@ -33,6 +36,6 @@ export class UIHeader extends UIElement {
     batch.drawString(this._text, d.x + o, d.y - o, black, this.scale);
     batch.drawString(this._text, d.x - o, d.y + o, black, this.scale);
     batch.drawString(this._text, d.x + o, d.y + o, black, this.scale);
-    batch.drawString(this._text, d.x, d.y, rgb(255, 255, 255), this.scale);
+    batch.drawString(this._text, d.x, d.y, this.textColor, this.scale);
   }
 }

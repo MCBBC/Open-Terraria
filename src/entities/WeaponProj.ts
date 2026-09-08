@@ -5476,10 +5476,12 @@ export class GrenadeProj extends Entity {
   shimmerWet = false;
   /** 出水溅花冷却窗（Projectile.wetCount 同名 :16984/:17109-17112） */
   wetCount = 0;
-  /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首 update 湿段位同位测值;
-   *  AI_016 不写 position → 与出生盒同位 ✓） */
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价——★2026-09-08 起首拍在
+   *  fixedUpdate 头「AI 前例外位」跑（①′,首拍 AI 湿旗消费者读预置值,见彼注）,
+   *  兼首拍湿段闩;presetDone 语义与共享体 ProjWetFlags 同名） */
   presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
-  /** ★杀拍防双跑闩（wetSectionStep 置位/wetSectionKillStep 消费——Arrow.ts 配方） */
+  /** ★同拍防双跑闩（wetSectionStep 头自检+置位;①′ 预置拍/杀拍补跑/各路位移位前
+   *  调用位共用——Arrow.ts 配方） */
   private wetSectionRan = false;
   /** 1077 入液过渡闩（localAI[0] 镜像：!wet→1/wet→0,:47775-47778——入液【首拍】才
    *  引爆的过渡门;本仓 1077 现无出生路径,死码照抄防缺面） */
@@ -6050,7 +6052,8 @@ export class GrenadeProj extends Entity {
   /** ★通用湿段·活拍（:16903-17113 全体弹共用段——projWetSection.ts 共享体 1:1,域注/
    *  位序/特支注见共享体文件头与本类字段块头）。调用位 = 各路【位移位前】
    *  （fired/粘性/655·普通三路;原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)）
-   *  + AI 内 Kill 早退位补跑（杀拍）。
+   *  + AI 内 Kill 早退位补跑（杀拍）+ 首拍 AI 前例外位（①′ 出生预置,fixedUpdate 头
+   *  ——同拍多响由 wetSectionRan 头闩收敛,只跑首响）。
    *  ★⑧Shimmer() 接面（2026-09-07 缺面清单清偿；Update :17114-17117
    *  `if (shimmerWet) Shimmer()`——位在 `if (!ignoreWater)` 整段门【外】,共享体两
    *  支路（豁免早退支+段尾）已收口,本类只组装面）。域分派：aiStyle16 全域 →
@@ -6063,8 +6066,11 @@ export class GrenadeProj extends Entity {
    *  原版 timeLeft 同名字段,SW-L1 既案）;kill=弹体 Kill 配方（dead+destroy+onExplode
    *  +杀拍补跑——本类引信杀位 :5588-5594 同式;deep 浸 Kill 支 :22608-22610 消费;
    *  wetSectionKillStep 在湿段调用位恒 no-op（wetSectionRan 已置）,照抄配方防漂移）;
-   *  936 解锁面域内无成员=缺省不接（登记死码）。 */
+   *  936 解锁面域内无成员=缺省不接（登记死码）。
+   *  ★同拍防双跑头闩（Arrow.ts wetSectionStep 头同配方）：调用位除上列外还有首拍
+   *  AI 前例外位（①′ 出生预置,fixedUpdate 头,见彼注）——同拍第二响一律跳过。 */
   private wetSectionStep(game: GameHooks): void {
+    if (this.wetSectionRan) return;   // ①′ 预置拍/杀拍补跑已跑过 → 位移位前调用位跳过
     this.wetSectionRan = true;
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater, {
@@ -6120,6 +6126,25 @@ export class GrenadeProj extends Entity {
     // :16870 wetVelocity 快照（AI 前——粘性族湿位移消费,见粘性路积分支;
     //  粘性族 tileCollide=false → 无阻尼,湿位移 = AI 前快照原版 quirk）
     const preVx = this.vx, preVy = this.vy;
+    // ★①′ 出生预置首拍面（NewProjectile :10886-10893;CrystalSerpentProj 523 同款范本,
+    //  2026-09-08）：原版在【生成时点】采样写旗（:10887 wet=WetCollision 采样 /
+    //  :10888-10891 ignoreWater 反清 / :10892-10893 honey·shimmer 无条件赋值）,首拍 AI
+    //  湿旗消费者（:47771 入液引信门 / :26752 蜂巢 Kill / :47775 1077 闩）读预置值。
+    //  旧结构预置随首拍湿段落在本仓 AI 后位（各路位移位前）→ 水中出生弹首拍 AI 读
+    //  字段缺省 false、次拍才 Kill/爆 = 晚一拍（x1-round4 ② 金标 tick-1 Kill 实证;
+    //  液体炸弹 903 出生水中同族）。首拍以「AI 前例外位」跑一次预置+段体（首拍盒未
+    //  移动 P_1≡P_0,同位等价;presetDone 闩防后续重跑）;本拍 wetSectionRan 随之置位 →
+    //  各路位移位前湿段与杀拍补跑同拍全部跳过（①′ 与杀拍闩互斥 = Arrow.ts 头闩同
+    //  配方）。快照位注:preVx/preVy（:16870 wetVelocity）须先于本块——段体尾 shimmer
+    //  钩可能改写速度,原版湿位移快照不含首拍 Shimmer 改写。残差登记:该钩（弹反族 A）
+    //  首拍先于 AI 跑,原版 Shimmer() 在 AI 后（:17114）→ 微光出生拍 AI 读弹反后
+    //  速度/旗,1 子步序差（523 范本同口径;523 无 shimmer 面=零差,本类有面,登记不扩）。
+    if (!this.presetDone) {
+      this.wetSectionStep(game);
+      // 深浸微光出生拍 Kill（弹反族 A 深浸支 :22608-22610）——原版 Kill :71756-71758
+      // `if (!active) return` 同款:亡弹不再续跑本拍管线,防门/引信面对亡弹二次结算。
+      if (this.dead) return;
+    }
     // ★液体炸弹/火箭入液引信门（AI_016 头 :47771 逐字——wet 旗 → timeLeft=1）。
     //  R3 收编（2026-09-06）：原 LIQUID_ROCKET/LIQUID_BOMB 两路内联扫盒（直测当前
     //  液态）退役,改读【上子步湿段】维护旗——原版 AI 在湿段(:16903)之前,读到的是
@@ -6907,6 +6932,30 @@ export class TorchGodProj extends Entity {
   /** 尘回调（Game.torchGodDust——尾迹/Kill 爆尘共用,velMul 由调用方给） */
   private readonly dust?: (x: number, y: number, type: number, velMul: number) => void;
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F4 清偿;
+  //      范本=同文件 TorchGodHelperProj 1084）----
+  //  域 id = {949}（SetDefaults :8950-8956：4×4 aiStyle184 penetrate−1
+  //  tileCollide=false,无 ignoreWater 行=缺省 false（:763）→ 受段）。
+  //  插位=AI 后/位移前（原版 Update 位序 :16880→:16895→:17120;与 1084 同款子步位）。
+  //  AI_184_BadTorchLuck（:43575-43610 逐行核对）零湿旗消费零位移写 → 采样位等价;
+  //  杀拍覆盖：moveAndCollide 撞块 kill 在位移【后】=湿段已跑,出界杀（:16790 通用门,
+  //  本仓 fixedUpdate 头）在湿段【前】=原版同序（出界拍原版本就 return 不跑湿段）。
+  //  命中玩家支（SelfHurtPlayers :43575-43579 移前盒）不杀弹（R3-16 定谳穿透续飞）
+  //  → 无杀拍湿段豁免面。
+  //  阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 支,:17594）：数据面
+  //  tileCollide=false（:8955）→ 预置期档位不消费（wetVelocity≡velocity 快照
+  //  :16870,位移全速）;但 AI_184 射程耗尽支（:43591-43598 else）置 tileCollide=true
+  //  （本仓 this.tileCollide 运行时镜像）→ 超程后湿支生效——闸=【运行时旗】非数据面,
+  //  乘进 moveAndCollide dx/dy 位移入参（body.tileCollide 同旗,关碰路径直写亦同闸）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, rangePx: number,
     dustType = 6,
     dust?: (x: number, y: number, type: number, velMul: number) => void) {
@@ -7011,6 +7060,9 @@ export class TorchGodProj extends Entity {
     for (let k = 0; k < 4; k++) {
       this.dust?.(this.x + (this.vx / 4) * k, this.y + (this.vy / 4) * k, this.dustType, 0.3);
     }
+    // ★通用湿段（:16895-17113 共享体,AI 后/位移前=原版位序——域/阻尼闸注见字段块）
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ★残余债清偿(2026-09-01):中心点采样在斜砖/半砖上漏检(空区)/误检并存——
     // 射程内 tileCollide=false 直写、超程后任一轴接触即 Kill(AI_184 :40112 系)
     {
@@ -7020,7 +7072,10 @@ export class TorchGodProj extends Entity {
         onGround: false, hitWall: false, hitHead: false, collideY: false,
         tileCollide: !!this.tileCollide, dropThrough: true,
       };
-      moveAndCollide(body, game.world, this.vx, this.vy);
+      // 水中位移阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 时进）——
+      // 闸=运行时 this.tileCollide（AI_184 超程支 :43595-43598 置 true,数据面恒 false）
+      const df = this.tileCollide ? projWaterDragFactor(this) : 1;
+      moveAndCollide(body, game.world, this.vx * df, this.vy * df);
       this.x = body.x; this.y = body.y;
       if (this.tileCollide && (body.hitWall || body.collideY || body.onGround || body.hitHead)) {
         this.kill(game); return;
@@ -7689,6 +7744,33 @@ export class RainCloudProj extends Entity {
   private hitCd = new HitCooldown();
   private dropHits = 0;  // 雨滴 penetrate 5 计数
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F5 清偿）----
+  //  域 id = {237,243}（SetDefaults :3187-3194/:3257-3264：28×28 aiStyle45
+  //  penetrate−1 netImportant,无 ignoreWater 行=缺省 false（:763）→ 受段;
+  //  tileCollide 缺省 true）。★同族豁免四型走【预置面】（2026-09-08 残差五件批④）：
+  //  238/244 降雨云（:3195-3205/:3265-3275 ignoreWater=true+tileCollide=false →
+  //  湿段整段门恒闭）、雨滴 239/245（:3206-3218/:3276-3289 ignoreWater=true）——
+  //  aiRain/aiDrop 头亦调共享体,豁免早退下只落出生预置（NewProjectile :10887-10893
+  //  无条件跑:wet 采样+ignoreWater 反清+honey/shimmer 无条件写,原文无豁免支）+
+  //  :17114-17117 shimmerWet 门（aiStyle45 ∉ Shimmer 任何支=:22719 缺省支无动作,
+  //  不接 shimmer 钩=零开销;AI_045 雨滴微光反弹走【直读 tile】 :28503-28508,
+  //  四型 AI 全程零湿旗消费=惰性面,补预置为 1:1 完整性）。
+  //  插位=aiMove 头（fixedUpdate 237/243 支首调=tick 头）：AI_045 移动云支
+  //  （:28351-28379 逐行核对）零湿旗消费 → 采样位等价;杀拍（过锚双轴齐停 → Kill 钩
+  //  变 238/244 :28373/:76032）在本调用点之后=杀拍湿段照跑。
+  //  阻尼：tileCollide=true → HandleMovement :17721-17764 湿支生效,乘进
+  //  moveAndCollide dx/dy 位移入参（body.vx/vy=碰撞调整字段原样回读——过锚轴零化
+  //  判定 :28361-28371 读【碰撞后速度】,不受阻尼污染;速度场不减）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;NewProjectile :10886-10893 等价;共享体首调自做=出生盒——
+   *  237/243=杖尖、238/244=移动云死亡点、239/245=降雨云云底,生成拍均未位移同位） */
+  presetDone = false;
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
     projId: number, anchorX = 0, anchorY = 0) {
     super();
@@ -7748,10 +7830,16 @@ export class RainCloudProj extends Entity {
    *  门内过锚臂双旗齐 → Kill 同达。唯一绕过 = 锚恰为 0.0(:28355 `!=0` 双门跳过,
    *  浮点测度零,负锚走比较臂照停)——维持现状=红蓝台账确认登记 */
   private aiMove(game: GameHooks): void {
+    // ---- ★通用湿段（:16895-17113 共享体,tick 头插位——域/阻尼注见字段块）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: false };
-    moveAndCollide(body, game.world, this.vx, this.vy);
+    // 水中位移阻尼（HandleMovement :17721-17764 湿支,tileCollide=true 消费）——
+    // 乘进 dx/dy 位移入参,body.vx/vy 碰撞调整字段原样回读（勿在采纳处除回）
+    const df = projWaterDragFactor(this);
+    moveAndCollide(body, game.world, this.vx * df, this.vy * df);
     this.x = body.x; this.y = body.y;
     this.vx = body.vx; this.vy = body.vy;   // TileCollision 后写:受阻轴置 0(原版同)
     if (this.anchorX !== 0 && this.anchorY !== 0) {        // :28356 num333/334 != 0 门
@@ -7782,6 +7870,11 @@ export class RainCloudProj extends Entity {
 
   /** ②降雨云(:28388-28477) */
   private aiRain(game: GameHooks): void {
+    // ---- ★出生预置（:10887-10893;豁免四型亦跑,域/惰性面注见字段块）——驻留弹零速
+    //      tileCollide=false → 首调位=死亡点出生盒≡原版 NewProjectile 同位;其后逐拍
+    //      调用走 :16895 豁免早退零开销（不入 lava/wet 碰撞扫描）。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     this.age++;
     if (this.age >= 18000) {                               // 5min 寿终 → 淡出
       this.fade += 5;
@@ -7851,6 +7944,11 @@ export class RainCloudProj extends Entity {
    *  曾单步 5px/t + life 3600 = 落速减半且永超时。AI 先于位移(AI():16880 →
    *  HandleMovement:17120)——微光反转当子步即生效 */
   private aiDrop(game: GameHooks): void {
+    // ---- ★出生预置（:10887-10893;豁免四型亦跑,注见 aiRain 头/字段块）——首调位=
+    //      云底出生盒（首拍 AI/位移前=原版 NewProjectile 同位）;其后调用全走豁免
+    //      早退（段体整跳）,逐子步/逐拍调用等价,取逐拍一次省扫。
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     const st = game.world.store;
     const substeps = (projectileData(this.projId)?.extraUpdates ?? 0) + 1;   // MaxUpdates(:556-565)
     for (let sub = 0; sub < substeps && !this.dead; sub++) {
@@ -7952,9 +8050,30 @@ export class CrystalSerpentProj extends Entity {
   private alpha = 255;
   private localAI0 = 0;
   private rot = 0;                                 // rotation = vx×0.1(:33592)
-  private wet = false;
-  private honey = false;
-  private shimmer = false;
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F6 清偿
+  //      ——旧内联 WetCollision 三旗探针（原 :8005-8007）退役迁共享体）----
+  //  域 id = {523}（SetDefaults :5931-5940：32×32 aiStyle95 ranged penetrate1
+  //  friendly alpha255,无 ignoreWater 行=缺省 false（:763）→ 受段）。
+  //  位序（红队 F6 口径「AI 读上拍/位移消费当拍」）：⑤ AI 浮升支读【上拍】样本 →
+  //  ⑥ 共享体（AI 后/位移前=原版 Update 位序 :16880→:16895→:17578）→ ⑦ 位移经
+  //  liqFactor 通道消费【当拍】旗（=原版 HandleMovement :17721 湿支读当拍子步湿段旗）。
+  //  ★出生预置（NewProjectile :10886-10893）原版在【生成时点】写旗、首拍 AI 浮升支
+  //  :33593 即读预置值——本类段位在 AI 后,故首拍以「AI 前例外位」跑一次预置+段体
+  //  （首拍盒未移动 P_1≡P_0,同位等价;presetDone 兼首拍闩防双跑）,此后各拍走 ⑥ 位。
+  //  补齐面：lavaWet 粘滞（:16906-16911 只置不清）/出入水溅花+音（wetSplashStepShared,
+  //  wetCount==0 ∧ !wet 门 :16948/:17029-17031）/wetCount 冷却窗（:16984/:17109-17112）/
+  //  出生预置。523 ∉ IsDestroyedByWater → 无 kill 钩;aiStyle95 ∉ Shimmer() 任何支
+  //  （:22564-22719）→ 缺省支无动作。阻尼：tileCollide 缺省 true（SetDefaults 无该行）
+  //  → 湿支生效;档位取 projWaterDragFactor（wet 前置门 :17721 `else if (wet)` 支——
+  //  旧内联 liqFactor 三元缺该门,wet=false+honey/shimmer 残留态会误吃档,随共享体校正）。
+  wet = false;
+  lavaWet = false;
+  honeyWet = false;
+  shimmerWet = false;
+  /** 出水溅花冷却窗（Projectile.wetCount :16984 置 10 / :17109-17112 逐拍 −1） */
+  wetCount = 0;
+  /** 出生预置已做（一次;兼首拍「AI 前例外位」闩,见上注） */
+  presetDone = false;
   private hitCd = new HitCooldown();
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -7978,6 +8097,14 @@ export class CrystalSerpentProj extends Entity {
       this.dead = true;
       return;
     }
+    // ①′ 首拍例外位：出生预置（:10886-10893）+段体在 AI 前跑一次——原版预置在
+    //    NewProjectile 生成时点,首拍 AI 浮升支 :33593 读预置值（首拍盒未移动=同位;
+    //    presetDone 兼首拍闩,该拍 ⑥ 位跳过防双跑,论证见字段块注）
+    const wetFirstTick = !this.presetDone;
+    if (wetFirstTick) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+    }
     // ② 淡入(:33573-33582):localAI[0] 先数 3 拍,其后 alpha −20/拍,下钳 100
     if (this.localAI0 > 2) {
       this.alpha -= 20;
@@ -7994,25 +8121,27 @@ export class CrystalSerpentProj extends Entity {
     }
     // ④ 旋转 = vx × 0.1(:33592;"蛇"的全部摆动感 = 贴图随横速微倾)
     this.rot = this.vx * 0.1;
-    // ⑤ 液体浮升【无视相位闸】(:33593-33596;wet 位 = 上一拍湿判——原版序 AI(:15434)
-    //    先于湿判(:16901),1 拍滞后照抄)
+    // ⑤ 液体浮升【无视相位闸】(:33593-33596;wet 位 = 上一拍湿判,首拍=出生预置值
+    //    ——原版序 AI(:15434) 先于湿判(:16901),1 拍滞后照抄)
     if (this.wet) {
       if (this.vy > 0) this.vy *= 0.98;
       if (this.vy > -8) this.vy -= 0.2;
       this.vx *= 0.94;
     }
-    // ⑥ 湿判(Update :16901 WetCollision,Collision.cs:1578-1592 整除版复用)
-    const wc = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
-    this.wet = wc.wet; this.honey = wc.honey; this.shimmer = wc.shimmer;
+    // ⑥ 通用湿段（:16895-17113 共享体,AI 后/位移前=原版位序;首拍已在 ①′ 跑）
+    if (!wetFirstTick) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        this.projId, !!projectileData(this.projId)?.ignoreWater);
+    }
     // ⑦ 位移+tile 碰撞:tile 盒 = 中心 10×10 缩盒(:20072-20075,锚 0.5,0.5 :19982-19984,
-    //    32×32 盒左上回写差 11px);湿态位移折减 = Body.liqFactor 通道(水/岩浆 .5、
-    //    蜂蜜 .25、微光 .375 = wetVelocity 派生 :17032-17036;纯岩浆无折减=1);fallThrough
-    //    缺省 true(:17587) → dropThrough=true 穿平台;受阻 = 通用默认支 HitTiles+Kill
-    //    (:18160-18166)
+    //    32×32 盒左上回写差 11px);湿态位移折减 = Body.liqFactor 通道——档位=
+    //    projWaterDragFactor（水 .5/蜂蜜 .25/微光 .375 = wetVelocity 派生 :17721-17764,
+    //    wet 前置门=:17721 `else if (wet)` 支语义）;fallThrough 缺省 true(:17587) →
+    //    dropThrough=true 穿平台;受阻 = 通用默认支 HitTiles+Kill(:18160-18166)
     const body = { x: this.x + 11, y: this.y + 11, w: 10, h: 10, vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: true,
-      liqFactor: this.shimmer ? 0.375 : this.honey ? 0.25 : this.wet ? 0.5 : 1 };
+      liqFactor: projWaterDragFactor(this) };
     moveAndCollide(body, game.world, this.vx, this.vy);
     this.x = body.x - 11; this.y = body.y - 11;
     if (body.hitWall || body.collideY || body.hitHead) { this.killFx(game); return; }

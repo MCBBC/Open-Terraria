@@ -590,9 +590,17 @@ export function styleDropVidOfFrames(sheet: number, fx: number, fy: number): num
     // on/off 两态同掉 1970+gem（1×1 'auto' 帧块,无 style 档,纯按 tile 型直掉）
     return 1970 + (sheet <= 261 ? sheet - 255 : sheet - 262);
   }
-  if (sheet === 50) return fx === 90 ? 165 : 149;   // 书（KillTile case 50 :65709-65716）——水书伪装帧 fx==90 → Water Bolt 165,其余 Book 149。审计 E ❌3：特判自 Game object 支移入（v_50_books def 1×1 永远到不了 object 支,旧分支死码）
+  if (sheet === 50) return fx === 90 ? 165 : 149;   // 书（KillTile case 50 :66173-66182,1456 :65709-65717）——水书伪装帧 fx==90 → Water Bolt 165,其余 Book 149。审计 E ❌3：特判自 Game object 支移入（v_50_books def 1×1 永远到不了 object 支,旧分支死码）
+  if (sheet === 707) return fx === 90 ? 165 : 149;  // 书 Echo（KillTile case 707 :66183-66193,1456 :65718-65728）——fx==90 → Water Bolt 165 且原版置 noPrefix=true（:66187,165 档不掷词缀;本仓 tile 掉落链本就不掷词缀=语义自洽）,其余 Book 149。v_707 移交批 2026-09-08（曾 pin 149,fx==90 档=登记债）
   if (sheet === 129) return fx >= 324 ? 4988 : 502; // 水晶碎晶基座（KillTile case 129 :65031-65039）——大晶簇帧带 fx≥324 → Gelatin Crystal 4988（女王史莱姆召唤物,原版 hardUpdateWorld 生长 pass 播种,本仓仅 wld 导入档可达）,常规簇 → Crystal Shard 502。审计 E ❌4
   if (sheet === 133) return fx >= 54 ? 1221 : 524;  // 熔炉二档（Check3x2 case 133 :49716-49724）——fx≥54（style≥1）→ Titanium Forge 1221,else Adamantite Forge 524。审计 E ❌10
+  // Echo 资源组并表门（v_693/v_649/v_650 移交批 2026-09-08）：11 sheet 全走
+  // echoResourceDropVid 帧段直查。直挖语义——693/650 是 KillTile_GetItemDrops 直掉
+  // case（693 :65560-65562 / 650 :65868-65948）,649 与原 8 件走 Check* 帧检;1×1 的
+  // 693/650 由此门接入本函数（object 支/失撑链经 ECHO_RESOURCE_SHEETS 门同表,两路
+  // 同源等价）。0 档=原版不发:649 走 object 支压 place_ 兜底;693/650 帧域内恒 >0,
+  // 帧外回落 def.drop 基档（C-4 备案口径,与 pick t[0] 同）
+  if (ECHO_RESOURCE_SHEETS.has(sheet)) return echoResourceDropVid(sheet, fx, fy);
   // ==================== 失谐门防御钳制（2026-08-30 用户要求固化）====================
   // ★sheet 10/11 门两态唯一出口，禁改回裸 pick(Doors, style)。
   // 【背景】社区"失谐门/哲学家之石"利用链（TapTap/B站 民考据 + 原版源码核实）：
@@ -671,17 +679,27 @@ export function coinBandVid(fx: number): number {
   return 0;
 }
 
-// ===== Echo 资源组 8 def（⚠️4 接档 2026-08-23,'无物'组剩余资源掉落,488/186 同批先例）=====
-// 8 sheet 全在 KillTile 共享 no-drop 表（WorldGen.cs:66108-66129 case 647/648/651/652/
-// 694/702/704/705 break）→ 无放置物品返还,掉落全走 Check* 帧检分支的资源直掉。
+// ===== Echo 资源组 11 def（⚠️4 接档 2026-08-23 8 件 + v_693/v_649/v_650 并表移交批
+// 2026-09-08 三件）=====
+// 原 8 sheet（647/648/651/652/694/702/704/705）全在 KillTile 共享 no-drop 表
+// （1456 WorldGen.cs:66108-66129;1457 :66565-66600 区——647@66573/648@66574/651@66576/
+// 652@66577/694@66587/702@66592）→ 无放置物品返还,掉落全走 Check* 帧检分支的资源直掉。
 // ★647 有真实放置物（Rubblemaker 5324/5329/5330,vanilla.json items.createTile）——
 // 挖掉/失撑也不返还 Rubblemaker（no-drop 表）,帧段无档=整件无掉落。
 // 帧几何:Check3x2 列号 num6=frameX/54（:49207-49213 while 减 3 计数）、变体行
 // num3=frameY/36（:49203-49204）;Check2x2 652 特例列号 num7=frameX/36（:48434-48440）。
+// ★移交批三件通道谱（与原 8 件不同源,逐件注）:
+//  693 钟乳石 1×1——KillTile_GetItemDrops case 693（1457 :65560-65562/1456 :65095）
+//    直掉 + TileFrame :86536-86539 → CheckStalactiteEcho 失撑,两路同函数同 style;
+//  649 中碎砾 2×1——KillTile 共享 no-drop 表（1457 :66575）,掉落全走 TileFrame
+//    :86882 → Check2x1 case 649（:47677-47760;1456 :47271）带表;
+//  650 小碎砾 1×1——KillTile_GetItemDrops case 650（:65868-65948/1456 :65403）直掉 +
+//    TileFrame :86856 → Check1x1 失撑。三件 def.drop 基档 pin 保持（golden
+//    COND_PIN_BASE/ANCHOR 账）,带表经 styleDropVidOfFrames 的 Echo 门先查。
 
 /** Echo 资源组 sheet 集:命中即整件掉落只由帧段直查决定（0 档=无掉落,压 place_ 兜底） */
 export const ECHO_RESOURCE_SHEETS: ReadonlySet<number> = new Set([
-  647, 648, 651, 652, 694, 702, 704, 705,
+  647, 648, 649, 650, 651, 652, 693, 694, 702, 704, 705,
 ]);
 
 /** Echo 资源组帧段直查:sheet → 原版物品 vid（0=该帧段无掉落,与 C# num=0 不发一致）。
@@ -721,8 +739,64 @@ export function echoResourceDropVid(sheet: number, fx: number, fy: number): numb
       return Math.floor(fx / 54) < 3 ? 195 : Math.floor(fx / 54) >= 6 ? 331 : 62;
     case 652:     // 植物碎屑 2x2 Echo——Check2x2 case 652（:48705-48708）num7=fx/36,同 651 三档
       return Math.floor(fx / 36) < 3 ? 195 : Math.floor(fx / 36) >= 6 ? 331 : 62;
-    case 694: {   // 钟乳石 1x2 Echo——CheckStalactiteEcho :38940 → GetStalactiteEchoDrop
-                  // （:38947-39003）13 档,style=frameX/18（:38906）
+    case 649: {   // 中碎砾 2x1 Echo——Check2x1 case 649（1457 :47677-47770/1456 :47271;
+                  // TileFrame 派发 :86882,KillTile 直掉面在共享 no-drop 表 :66575）。
+                  // Check2x1 序言（:47390-47394;1456 :47000-47004）num3=(frameX/18)>>1
+                  // =fx/36（左列锚,右列 36s+18 同档）、num4=frameY/18;case 内 s=num3+num4*53
+                  // （:47679,53 列网格）。带表逐带照录:num6!=0 才 Item.NewItem（:47765 门）
+      const s = Math.floor(fx / 36) + Math.floor(fy / 18) * 53;
+      if (s < 6) return 3;
+      if (s < 16) return 154;
+      if (s < 17) return 71;
+      if (s < 18) return 72;
+      if (s < 19) return 73;
+      if (s < 20) return 181;
+      if (s < 21) return 180;
+      if (s < 22) return 177;
+      if (s < 23) return 179;
+      if (s < 24) return 178;
+      if (s < 25) return 182;
+      if (s < 31) return 593;
+      if (s < 34) return 9;
+      if (s < 38) return 150;
+      if (s < 41) return 3;
+      if (s < 47) return 3271;
+      if (s < 53) return 3086;
+      if (s < 59) return 3081;
+      if (s < 62) return 62;
+      // :47757-47764 先判 <64||(65..67)→169 再判 ==64→276（顺序照抄,64=276 仙人掌档）
+      if (s < 64 || (s >= 65 && s <= 67)) return 169;
+      if (s === 64) return 276;
+      return 0;                       // ≥68 num6=0 不发（:47765 门）
+    }
+    case 650: {   // 小碎砾 1x1 Echo——KillTile_GetItemDrops case 650（1457 :65868-65948/
+                  // 1456 :65403;TileFrame 失撑派发 :86856 → Check1x1）。num=frameX/18
+                  // （:65869）;:65880-65889 <20/<28 两支同掉 154 合并写;尾 switch num
+                  // （:65930-65947）73-81 显式档（75/77=276 仙人掌,余=169）
+      const s = Math.floor(fx / 18);
+      if (s < 6) return 3;
+      if (s < 12) return 2;
+      if (s < 28) return 154;
+      if (s < 36) return 9;
+      if (s < 42) return 593;
+      if (s < 48) return 664;
+      if (s < 54) return 150;
+      if (s < 60) return 3271;
+      if (s < 66) return 3086;
+      if (s < 72) return 3081;
+      if (s < 73) return 62;
+      if (s === 75 || s === 77) return 276;
+      if (s >= 73 && s <= 81) return 169;
+      return 0;                       // ≥82 dropItem 保持初值 0 不发
+    }
+    case 693:
+    case 694: {   // 钟乳石 Echo 1×1（693）/1×2（694）同表（v_693 并表移交批 2026-09-08）。
+                  // TileFrame 派发 :86536-86539 case 693/694 → CheckStalactiteEcho
+                  // （1457 :39267/1456 :38900）style=frameX/18（:39273/1456 :38906）→
+                  // GetStalactiteEchoDrop（1457 :39314-39370/1456 :38947-39003）13 带。
+                  // 直挖面:693 另有 KillTile_GetItemDrops case 693（:65560-65562/
+                  // 1456 :65095）同函数同 style 直掉;694 在共享 no-drop 表（:66587）,
+                  // 掉落只走 CheckStalactiteEcho。≥39 档原版 result=0 不发
       const s = Math.floor(fx / 18);
       if (s < 3) return 664;
       if (s < 6) return 3;

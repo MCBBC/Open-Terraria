@@ -79,11 +79,20 @@ export interface ProjectileData {
   minion?: boolean;
   hostile?: boolean;
   tileCollide?: boolean;
-  /** 原版水敏门（Projectile.cs:412；1457 SetDefaults 置位 270 型 = 240 直写 +
-   *  DefaultToSpray() :10703 展开 1015/1016/1017；:763 全量初始化 false ⇒
-   *  缺省 undefined ≡ false）。★原版运行时仅两口消费本旗：出生预置 :10888-10890
-   *  `if (ignoreWater) wet = false` 与逐 tick 缓存刷新 :16895 `if (!ignoreWater)`
-   *  整段跳过（wet/lavaWet/honeyWet/shimmerWet 四旗冻结）——AI 一律读 `wet` 字段
+  /** 原版水敏门（Projectile.cs:412；1457 置位 270 型——账面 2026-09-08 机械闭合重计:
+   *  源码 `ignoreWater = true` 文本写面共 242 处 = SetDefaults(:699,写面 :861-:10479)
+   *  链内 240 + DefaultToSpray() 体 1（:10703）+ AI_113 运行时动态 1（:41398,数据面外
+   *  不计）;240 写面按分支守卫展开覆盖 267 型（分组 OR 守卫 76-78/567-568/625-628/
+   *  569-571/895-896 与连排 case 共享体 663/665/667 等承载 +27 展开）,DefaultToSpray
+   *  唯一调用点 :9635-9637（type==1015||1016||1017）再展开三型 → 267+3=270
+   *  （json 实载 270 条可验）。:763 全量初始化 false ⇒
+   *  缺省 undefined ≡ false）。★原版运行时共三口消费本旗：出生预置 :10888-10890
+   *  `if (ignoreWater) wet = false`、逐 tick 缓存刷新 :16895 `if (!ignoreWater)`
+   *  整段跳过（wet/lavaWet/honeyWet/shimmerWet 四旗冻结）、水面扰动面
+   *  WaterShaderData.cs:281/:289（:281 置 flag3(wet)=true 放行扰动门、:289 就地
+   *  Lava/Wet/Honey 三液重判,无液 continue 跳过着色——本仓 WaterWaves.ts
+   *  projDistort 门 :648/:742 已 1:1 建模,无行为缺口仅补账）——
+   *  AI 一律读 `wet` 字段
    *  而非本旗（蜂族 :27685 / 469 :54969 / 706 :56743 / 948 :44542），对本族天然恒假；
    *  AI_060 黏液族液体触杀（:29584-29602）直扫 Main.tile.liquid 与本旗无关
    *  （358/406/1042 虽有门照灭）。动态置位唯一例外 = AI_113_TargetSticker :41398

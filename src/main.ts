@@ -40,6 +40,10 @@ import { downloadDebugReport } from './debug/DebugReport';
 import { initTileFrameCapture, tileFrameCapture } from './debug/TileFrameCapture';
 import { tileAnim, TILE_ANIM_RATE, TILE_ANIM_PITCH, TILE_ANIM_FRAMES } from './render/TileAnim';
 import { showFeatureGate } from './ui/QuickGate';
+import { showJourneyQuickGate } from './ui/QuickGate';
+import { openPlayerListPanel } from './ui/PlayerListPanel';
+import { openJourneyPowersPanel } from './ui/JourneyPowersUI';
+import { openResearchPanel } from './ui/ResearchUI';
 import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
 import { assetVersion } from './net/AssetCache';
@@ -361,6 +365,23 @@ function openInGamePause(game: Game): void {
     // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
     onSettings: () => flow?.openSettings(true),
     onBestiary: () => flow?.openBestiary(),
+    // ★2026-09-07 刀 3:住房面板停车坪(vanilla 布局)——原版 EquipPage=1 住房页已
+    // 覆盖查询/指定,HousingPanel 右缘条自暂停菜单调起;classic 布局仍走背包簇格钮
+    // ★刀 5 停车坪:道具搜索/天气/时间/玩家列表/旅程/研究同迁(vanilla 门控)
+    ...(options.data.inventoryLayout === 'vanilla' ? (() => {
+      const isJourney = game.player.appearance?.difficulty === 3;
+      return {
+        onHousing: () => { pausePanel = null; game!.paused = false; flow?.openHousing?.(); },
+        onItemSearch: () => { pausePanel = null; game!.paused = false; ui.openItemSearch(); },
+        onWeather: () => { pausePanel = null; game!.paused = false; showJourneyQuickGate('weather', () => { game.renderer.weatherPanelOpen = !game.renderer.weatherPanelOpen; }); },
+        onTime: () => { pausePanel = null; game!.paused = false; showJourneyQuickGate('time', () => { game.renderer.timePanelOpen = !game.renderer.timePanelOpen; }); },
+        ...(game.net?.active ? { onPlayerList: () => { pausePanel = null; game!.paused = false; openPlayerListPanel(game); } } : {}),
+        ...(isJourney ? {
+          onJourney: () => { pausePanel = null; game!.paused = false; openJourneyPowersPanel(game); },
+          onResearch: () => { pausePanel = null; game!.paused = false; openResearchPanel(game); },
+        } : {}),
+      };
+    })() : {}),
     onQuit: () => {
       pausePanel = null;
       game!.paused = false;

@@ -34,7 +34,7 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('gy * 0.1 * uIntensity - clamp(h - 0.5, -0.3, 0.3)');
   });
 
-  it('屏幕位移量：(DISPX·0.1, DISPY)·32 —— c14.x=0.1/c14.y=1 × c5=32·opacity/res × res（★经验定版：反汇编 swizzle 解码多义，以用户对照原版观感校准为准 wamp=2）', () => {
+  it('屏幕位移量：(DISPX·0.1, DISPY)·32 —— c14.x=0.1/c14.y=1 × c5=32·opacity/res × res（★2026-09-08 缝案定版：波形增益 wamp 默认回原版 1，2=可选观感档 ?wamp=2）', () => {
     expect(f).toContain('vec2(dispx * 0.1, dispy) * 32.0');
     expect(f).toContain('vUv + disp / uCssSize');
   });
@@ -70,24 +70,30 @@ describe('GLWaterDistortion.FRAG：obj19 #55-71 alpha 门控锁（水下整屏�
     expect(f).toContain('x * x * (3.0 - 2.0 * x)');
   });
 
-  it('门控合成 gate = f·(1−|Δα|·(1−|2w+Δα−1|))；out = mix(原样, 位移后, gate)（#64-74 lrp）', () => {
-    expect(f).toContain('1.0 - abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0))');
+  it('门控合成 gate = f·(1−sat(|Δα|·(1−|2w+Δα−1|)))；out = mix(原样, 位移后, gate)（#64-74；★2026-09-08 字节级订正：原版 mul r0.x_sat 在乘积上先饱和，负积→gate=f 不放大，SW 旧式末尾 clamp 在半覆盖边缘过度位移=多层水）', () => {
+    expect(f).toContain('1.0 - clamp(abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0)), 0.0, 1.0)');
     expect(f).toContain('mix(texture2D(uScene, vUv), texture2D(uScene, uvD), gate)');
   });
 
-  it('门控语义三态：水体内部 Δα=0 → gate=f=1（整屏扭）；旱地 f=0 → 0；水线 |Δα| 大 → 带状果冻', () => {
-    // 纯数学复核门控公式在三态下的取值（与 FRAG 同式）
+  it('门控语义三态（★2026-09-08 字节级订正式，乘积先饱和）：水体内部 Δα=0 → gate=f=1；旱地 f=0 → 0；dA=-1 边缘 w<0.5 → gate=f 全量位移、w=1 → 0；dA=+1 边缘 w=1 → gate=f（水面抬升）、w=0 → 0', () => {
+    // 纯数学复核门控公式在三态下的取值（与 FRAG 同式,mul r0.x_sat 乘积先饱和）
     const gate = (aD: number, aU: number, w: number) => {
       const dA = aD - aU;
       const fq = Math.min((aD + aU) * 100, 1);
-      return fq * (1 - Math.abs(dA) * (1 - Math.abs(2 * w + dA - 1)));
+      const sat = Math.max(0, Math.min(1, Math.abs(dA) * (1 - Math.abs(2 * w + dA - 1))));
+      return fq * (1 - sat);   // ★字节级订正式：乘积先饱和（mul r0.x_sat）
     };
     expect(gate(1, 1, 0.5)).toBe(1);      // 水下内部：全量扭曲
     expect(gate(0, 0, 0.5)).toBe(0);      // 旱地：不扭
-    const edge = gate(1, 0, 0.25);        // 水线：带状衰减（w=0.25 → 0.5）
-    expect(edge).toBeCloseTo(0.5, 10);
-    expect(gate(1, 0, 0)).toBe(0);        // 水线 w=0 端：门关
-    expect(Math.min(1, gate(1, 0, 1))).toBe(1);  // 水线 w=1 端：门全开（原始式外推 2，钳 1）
+    // dA=-1（水中像素,位移采样越出上缘 aD=0,aU=1）：
+    expect(gate(0, 1, 0)).toBe(1);        //   w=0：负积饱和 0 → gate=f=1（全量位移=水面随场下沉）
+    expect(gate(0, 1, 0.25)).toBe(1);     //   w=0.25：负积饱和 0 → gate=f（旧式此处外推 0.5=偏差）
+    expect(gate(0, 1, 0.75)).toBe(0.5);   //   w=0.75：正积 0.5 → 半量位移（过渡带）
+    expect(gate(0, 1, 1)).toBe(0);        //   w=1：正积饱和 1 → gate=0（反向保护）
+    // dA=+1（空气中像素,位移采样落入水体 aD=1,aU=0）：
+    expect(gate(1, 0, 0)).toBe(0);        //   w=0：正积饱和 1 → gate=0（上浮方向不抬升）
+    expect(gate(1, 0, 0.25)).toBe(0.5);   //   w=0.25：正积 0.5 → 半量位移
+    expect(gate(1, 0, 0.5)).toBe(1);      //   w=0.5：积 0 → gate=f（水被拉上=波峰）
   });
 });
 

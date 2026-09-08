@@ -171,7 +171,7 @@ describe('水晶蛇 3210→523（aiStyle 95 独占族）', () => {
     expect(p.drawAlpha).toBeCloseTo(1 - 100 / 255, 9);
   });
 
-  it('⑨水面:浮升 −0.2/拍【无视相位闸】(wet 位 1 拍滞后)+vx×0.94+湿态位移折半', () => {
+  it('⑨水面:浮升 −0.2/拍【无视相位闸】+vx×0.94+湿态位移折半（★2026-09-08 F6 金标反转：出生预置 :10886-10893 在生成时点写 wet,首拍 AI 浮升支 :33593 读预置值——旧「1 拍滞后」钉系对原版偏差,共享体接入批校正）', () => {
     const { hooks, world } = mkHooks();
     const st = world.store;
     const ti = st.idx(30, 140);
@@ -179,14 +179,14 @@ describe('水晶蛇 3210→523（aiStyle 95 独占族）', () => {
     st.liquidType[ti] = LIQUID_TYPE.WATER;
     const p = new CrystalSerpentProj(30 * 16, 140 * 16, 6, 2, 43, 3, 0);   // 相位 0=未过闸
     const cx0 = p.cx;
-    p.fixedUpdate(1 / 60, hooks);                       // tick1:wet 未置位(原版序 AI 先于湿判)
-    expect(p.vy).toBe(2);                               // → 无浮升(1 拍滞后照抄)
-    expect(p.vx).toBe(6);
-    expect(p.cx).toBeCloseTo(cx0 + 3, 4);               // 位移折半 = liqFactor 0.5(wetVelocity :17032)
-    p.fixedUpdate(1 / 60, hooks);                       // tick2:wet=1 → 浮升启动(相位闸外)
+    p.fixedUpdate(1 / 60, hooks);                       // tick1:预置 wet=1(原版 NewProjectile 时点) → 浮升即跑
     expect(p.vy).toBeCloseTo(2 * 0.98 - 0.2, 9);        // vy>0 先 ×0.98 再 −0.2(:33594-33596)
     expect(p.vx).toBeCloseTo(5.64, 9);                  // ×0.94
-    expect(p.cx).toBeCloseTo(cx0 + 3 + 5.64 * 0.5, 3);
+    expect(p.cx).toBeCloseTo(cx0 + 5.64 * 0.5, 6);      // 位移折半 = liqFactor 0.5(wetVelocity :17721-17764)
+    p.fixedUpdate(1 / 60, hooks);                       // tick2:AI 读上拍样本(仍湿) → 浮升续跑
+    expect(p.vy).toBeCloseTo(1.76 * 0.98 - 0.2, 9);     // 1.5248
+    expect(p.vx).toBeCloseTo(5.64 * 0.94, 9);           // 5.3016
+    expect(p.cx).toBeCloseTo(cx0 + 5.64 * 0.5 + 5.3016 * 0.5, 6);
   });
 
   it('⑩撞格亡:通用默认支(:18160-18166)→ Kill 钩 Item_54 + 25 尘(:74622-74633)', () => {

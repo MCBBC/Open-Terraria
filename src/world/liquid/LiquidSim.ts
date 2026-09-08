@@ -107,7 +107,8 @@ const LILY_SOLIDTOP_KILL = new Set([239, 380]);
 // 之前**、尘段无 netMode 门 → 掷骰恒占用 genRand 流位（= pass 链流，gen 期
 // Main.rand≡genRand 同对象）。沉降期 KillTile 族（#97 vanilla 实测 844 格：
 // 藤62/丛草植物61/蛛网51/苔藓184/陶罐28/69/233/12/83/84/火把4）尘掷本身为 0，
-// 唯一实掷 = 蛛网51带蜘蛛墙62 的 Next(4)（cs:63904）。
+// 唯一实掷 = 蛛网51带蜘蛛墙62 的 Next(4)（1456 cs:63904 / 1457 cs:64369-64372——
+// noItem 总门 1457 cs:64373-64377,2026-09-08 行号重钉）。
 /** KillTile_GetTileDustAmount(fail=false)（cs:66654-66742；-1=按 frameX/22>=5 取 5:10） */
 const KILL_DUST_ZERO_SHEETS = new Set([654, 630, 631, 125, 138, 172, 287, 300, 301, 302, 303, 304, 305, 306, 307, 308, 354, 355, 373, 374, 375, 376, 461, 484, 499, 564, 565, 593, 594, 617, 664, 665, 699, 709, 711, 712, 713, 714, 715, 716]);
 const KILL_DUST_FIVE_SHEETS = new Set([534, 536, 539, 625, 627]);
@@ -345,7 +346,8 @@ export class LiquidSim {
       .__swLqKill?.(x, y, SHEET_OF[st.type[i]] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
     const sheet = SHEET_OF[st.type[i]] ?? -1;
     markKillTouch(x, y);   // ★级联去重杀事件标记(2026-09-07,见 FinalCleanupPass 注)
-    // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem，生成期本就 true）
+    // 蛛网(51)带蜘蛛墙(62) → Next(4)（1456 cs:63904 / 1457 cs:64369,条件原文化——
+    // 结果只改 noItem，生成期本就 true;行号重钉 2026-09-08）
     if (sheet === 51 && st.wall[i] === 62) this.roll(4);
     const n = killDustAmount(sheet);
     const amt = n === -1 ? (st.frameX[i] / 22 >= 5 ? 5 : 10) : n;

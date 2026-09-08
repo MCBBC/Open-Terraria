@@ -362,7 +362,8 @@ import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybin
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
-import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings } from '../player/SmartCursor';
+import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
+import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';   // ★SW-BJ28：Main.tileSolid 代理（平台九件套并集）
 import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION, WIRE_TOOL_VIDS } from '../player/ToolCursorIcon';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, TORCH_ITEMS, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
@@ -798,6 +799,54 @@ const TILE_NO_FAIL_SHEETS = new Set([
   373, 374, 375, 382, 384, 461, 481, 482, 483, 484, 485, 518, 519, 528, 529, 530, 549,
   624, 636, 637, 638, 654, 655, 656, 666, 697, 700, 701, 705, 709,
 ]);
+
+// ---- ★草族四绘制路径 ×1/4 替换折算（2026-09-09 落刀;2026-09-08 ★F7"登记不动"定谳升级）----
+// 原文（Terarria1457/Terraria.GameContent.Drawing/TileDrawing.cs）四支特殊绘制路径的
+// `_rand.Next(4)==0` 门包住【整个】DrawTiles_EmitParticles 调用：
+//   DrawGrass(:8488;掷 :8508;发射 :8512-8515)/ DrawAnyDirectionalGrass(:8546;:8566;:8570-8573)/
+//   DrawMultiTileGrassInWind(:9088;:9146;:9150-9153)/ DrawMultiTileVinesInWind(:9415;:9665;:9669-9672)。
+// 四域 tile 在注册循环（:539-727）命中专用 counter 后一律 `continue` 跳过 DrawSingleTile(:729)
+// ——主路径唯一发射点 :974-977 对它们整帧不评估 ⇒ 频率 = 主路径 ×1/4（【替换】非【额外】,
+// 同格同帧至多一发）。主路径参照系 = 缺省 Color 光照 Lighting.UpdateEveryFrame=false 每帧全发。
+// ★VineThread 爬藤 52/62/115/205/382/528/636/638/549 注册进 TileCounterType.Vine(:766),
+// 由 DrawVines(:9058)→DrawVineStrip 绘制——该路径【无】EmitParticles 调用,不入本表。
+/** WindyGrass 域 = TileID.Sets.SwaysInWindBasic 白名单（TileID.cs:273 逐字,23 型）。
+ *  唯一受设置开关回落主路径的四域成员（ShouldSwayInWind :7836-7840）;227 五帧豁免
+ *  :7845-7848（frameX∈{204,238,408,442,476} 同回落——本仓无 227 粒子规则,备案）。 */
+const GRASS_WINDY_SHEETS: ReadonlySet<number> = new Set([
+  3, 20, 24, 61, 703, 71, 73, 74, 83, 84, 110, 113, 201, 227, 529, 590, 595, 615, 624, 700, 656, 701, 637,
+]);
+/** AnyDirectionalGrass 域（:718-719,184 LongMoss 帧无关） */
+const GRASS_DIRECTIONAL_SHEETS: ReadonlySet<number> = new Set([184]);
+/** MultiTileGrass 域（顶左注册 :605-691,21 型） */
+const GRASS_MULTI_TILE_GRASS_SHEETS: ReadonlySet<number> = new Set([
+  27, 233, 236, 238, 485, 489, 490, 493, 519, 521, 522, 523, 524, 525, 526, 527, 530, 651, 652, 702, 705,
+]);
+/** MultiTileVine 域（顶左注册 :554-603,16 型） */
+const GRASS_MULTI_TILE_VINE_SHEETS: ReadonlySet<number> = new Set([
+  34, 42, 91, 95, 126, 270, 271, 444, 454, 465, 572, 581, 591, 592, 660, 698,
+]);
+/** 草族四域全集（四域并集 23+1+21+16=61 型,互不交叠;域代表锚见
+ *  tests/tile-particles-grass-fold.test.ts / tests/tile-particles-grass-path-verdict.test.ts） */
+export const GRASS_COUNTER_SHEETS: ReadonlySet<number> = new Set([
+  ...GRASS_WINDY_SHEETS, ...GRASS_DIRECTIONAL_SHEETS,
+  ...GRASS_MULTI_TILE_GRASS_SHEETS, ...GRASS_MULTI_TILE_VINE_SHEETS,
+]);
+/** 仓内 rule.prob 已内含结构门 1/4 的例外（再折即 4× 欠发射）：
+ *  592 悬挂火盆 TileParticles.ts prob=1/12×3 已按「外层 Next(4)(DrawMultiTileVinesInWind
+ *  :9665 逐格) × 内层 Next(3)(:6917)」折算——发射器不再折。 */
+const GRASS_FOLD_SKIP: ReadonlySet<number> = new Set([592]);
+/** 草族 ×1/4 替换折算因子（1 = 不折）。swayInWind=false 时 WindyGrass 域整域不注册
+ *  counter → 回落主路径全率（原文 ShouldSwayInWind :7836-7840 设置门;本仓
+ *  Options.swayInWind「图块在风中摆动」同款设置,WindSway.ts:141/:203/:218 已建模）,
+ *  故该子域折算随设置开合;其余三域原文注册无设置门,恒折。 */
+export function grassParticleFold(sheet: number, swayInWind: boolean): number {
+  if (!GRASS_COUNTER_SHEETS.has(sheet)) return 1;
+  if (GRASS_FOLD_SKIP.has(sheet)) return 1;
+  if (GRASS_WINDY_SHEETS.has(sheet) && !swayInWind) return 1;
+  return 0.25;
+}
+
 // KillTile_GetTileDustAmount（WorldGen.cs:67119-67207）分型档——hitTilesFx 撞块尘量。
 // 原版签名 (bool fail, Tile tileCache);Collision.HitTiles 走 KillTile(fail:true,
 // effectOnly:true)（Collision.cs:3116）→ 尘量恒取 fail=true 档（:64212-64216）。
@@ -881,8 +930,11 @@ const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
 const ACORN_SEED_GROUND_SHEETS: ReadonlySet<number> = new Set([
   2, 109, 147, 60, 23, 199, 661, 662, 53, 234, 116, 112, 633,
 ]);
-// 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366 的 createTile 表）——
-// 放置与 hasSupport 共用（书/水蜡/瓶等下方须 tileTable 桌面）
+// 桌面 1×1 族（PlaceOnTable1x1 1457 :45736/1456 :45346 的支撑面+TileFrame 派发组
+// :86893 {13,33,49,50,78,174,372,646,707} 的成员注）——放置与 hasSupport 共用
+// （书/水蜡/瓶等下方须 tileTable 桌面）。★2026-09-08 续单：707/78 不入本 set——
+// 两型幸存门已走 DECOR_SUPPORT_KIND 'ontable'（CheckOnTable1x1 :43899 1:1,先于
+// 家具链分派）;本 set 余 6 员维持 hasSupport onTable 近似（备案另批收编）
 const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
 // SW-D1 2026-09-03 镐打草族 transform-on-kill：KillTile fail 路径【原格转化表】
 // （WorldGen.cs:64228-64247，1457 原文逐 id 抄录；判定族与 Player.cs:54695
@@ -965,7 +1017,10 @@ type DecorSupportKind =
   | 'hang2x2' | 'trapdoor'
   // —— 2026-09-02 八批（幸存链缺口）：388/389 高门双态 CheckTallGate 完整性+
   //  顶/底双行 SolidTile（case 'tallgate'）
-  | 'tallgate';
+  | 'tallgate'
+  // —— 2026-09-08 续单：CheckOnTable1x1（:43899-43932）1:1 移植——707 书 Echo 接
+  //  原版等价门（曾走家具 hasSupport 近似）、78 陶盆自 'ground1x1' 迁入（补平台角支）
+  | 'ontable';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -997,12 +1052,12 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // ★2026-09-02 八批（幸存链缺口）：高门 389/宝石锁 440 移出本组（388/389 → 'tallgate'
   //  原版 CheckTallGate 完整性+顶/底双行 SolidTile;440 → 'wallhang' 原版 Check3x3Wall
   //  逐格 wall>0——家具 hasSupport「底行∨任一格有墙」均弱于原版精确判据）
-  // 马桶 497/虚空石 509/等离子灯 564/雾机 565/大火山 594/陶盆 78(CheckOnTable1x1
-  // :43548 的 78 特支=底格 SolidTileAllowBottomSlope,ground1x1 同判据)/墓碑 85(CheckSign)
+  // 马桶 497/虚空石 509/等离子灯 564/雾机 565/大火山 594/墓碑 85(CheckSign)
+  // ★2026-09-08 续单：78 移出本组（→ 'ontable' 1:1 门,见上方 CheckOnTable1x1 注册块）
   // ★2026-09-02 七件放置审计：95/126/386/531 移出本组（吊挂/侧锚件走精确支,
   //  家具 hasSupport 底行/墙近似对「AnchorTop 顶锚/AnchorLeft+Right 侧锚」语义反向,
   //  正确放置后在写循环末格被误杀——95/126/531/386 实测 placed 后 cells=0）
-  33: 'furniture', 49: 'furniture', 78: 'ground1x1', 85: 'furniture', 92: 'furniture',
+  33: 'furniture', 49: 'furniture', 85: 'furniture', 92: 'furniture',
   98: 'furniture', 100: 'furniture', 139: 'furniture',
   142: 'furniture', 143: 'furniture', 149: 'furniture', 173: 'furniture', 174: 'furniture',
   209: 'furniture', 212: 'furniture', 216: 'furniture', 244: 'furniture', 335: 'furniture',
@@ -1051,9 +1106,10 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // （底行 SolidTileAllowBottomSlope,非墙锚）→ 家具近似,勿入本组
   240: 'wallhang', 245: 'wallhang', 246: 'wallhang', 241: 'wallhang', 242: 'wallhang',
   334: 'wallhang', 471: 'wallhang',
-  // CheckStalactite（:86557 派发 165;函数 :39389——fy72 吊顶 1 格/fy90 立地 1 格/
-  // fy36|54 立地 2 格/fy0|18 吊顶 2 格）/CheckStalactiteEcho（:86559-86562 693/694;
-  // 函数 :39267——fy<格数*18=上半吊顶 SolidTileAllowTopSlope,否则立地）
+  // CheckStalactite（1457 :86533-86535 派发 165;函数 :39389——fy72 吊顶 1 格/fy90 立地 1 格/
+  // fy36|54 立地 2 格/fy0|18 吊顶 2 格）/CheckStalactiteEcho（:86536-86539 派发 693/694,
+  // ★行号重钉 2026-09-08:旧注 :86557/:86559-86562 系漂引;函数 :39267——fy<格数*18=
+  // 上半吊顶 SolidTileAllowTopSlope,否则立地）
   165: 'stalactite', 693: 'stalactite', 694: 'stalactite',
   // 苔藓植物（case 184 :86463 内联）：四邻须苔藓色（GetTileMossColor :82492 非 -1）
   184: 'moss',
@@ -1064,6 +1120,15 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // Check1x1（:87049-87062 派发组;函数 :45633）补 650 小碎砾/324 海贝（:86563-86570
   // 内联同判据=SolidTileAllowBottomSlope+下方巨石族杀）
   650: 'ground1x1', 324: 'ground1x1',
+  // CheckOnTable1x1（:86893 派发组 {13,33,49,50,78,174,372,646,707};函数 :43899-43932,
+  // 1456 :43548）——★2026-09-08 续单：707 书 Echo + 78 陶盆接 1:1 'ontable' 门。
+  //  707 曾走家具 hasSupport 近似（onTable=false=底行 SolidTile2∨墙——原版本支除 78
+  //  地面特支外【只认桌面】,地面/墙全是过拟合=书 Echo 落地不塌）。78 曾 'ground1x1'
+  //  复用 Check1x1 判据（:45633 SolidTileAllowBottomSlope+巨石杀）——漏平台角支
+  //  （:43905-43911 角平台带全块平台邻格可活）。余 13/33/49/50/174/372/646 维持
+  //  hasSupport onTable 近似（placement 侧 PlaceOnTable1x1 :45736 同源,另批收编）。
+  //  78 本仓无 def（ClayPot 未实现,注册休眠——实现落地即正确）
+  78: 'ontable', 707: 'ontable',
   // Check3x2（:87342 case 14 组+goto case 14 链 :87340;函数 :49617）：186/187 装饰组
   // （立地+style 生物群系地基）/647/648/651 大碎砾（:86899-86908 no-op break 组闭合
   // 后 goto case 14 :87342→完整性校验【无】支撑行——原版即"碎砾自身不断即不塌"）
@@ -1249,6 +1314,15 @@ const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
 // （WorldGen.cs:60436=1456 行号,1457=60901-60912）未败骷髅王时地牢墙不可锤/不可被
 // TileReplacement 替换。SW-BF1 2026-09-06：改引 wallDrops.ts 同表单源（拆墙 fail 门/掉落共用）
 const WALL_DUNGEON = WALL_DUNGEON_WALLS;
+// ★SW-BN5 2026-09-08：KillWall_PlaySounds（WorldGen.cs:60914-60932）三族+默认音分族表。
+// ① PlaySound(13) = SoundShatter（LegacySoundPlayer.cs:786-796,asset Sounds/Shatter :209）
+// ② PlaySound(6) = SoundGrass（:709-718,asset Sounds/Grass :203）
+// ③ wall 357 → SoundID.NPCHit25（SoundID.cs:210 = LegacySoundStyle(3,25)→NPC_Hit_25.wav）
+// 默认 → PlaySound(0) = SoundDig 三变体（:443-457,asset Dig_0..2 :179-181）。
+// 消费面=KillWall 全族调用方（锤墙/钻头/爆炸清墙/ReplaceWall 换墙）——:60876 在 fail
+// 早退【前】恒放（fail 只改尘量 10→3,:60877-60880,不改音）。BF1/BL1 备案清偿。
+const KILL_WALL_SHATTER = new Set([241, 88, 89, 90, 91, 92, 93, 21, 186, 136, 137, 168, 169, 172, 226, 227, 242, 243, 347, 365]);
+const KILL_WALL_GRASS = new Set([63, 64, 65, 66, 67, 68, 69, 70, 264, 265, 268]);
 // (已删除 sheetToInternal/TILE_NO_FAIL 内部 id 换算——2026-08-13 审计:唯一消费点
 //  传 sheet,换算后的集合 58 项误命中导致大量方块被一击秒挖;消费点已改用
 //  TILE_NO_FAIL_SHEETS 原表)
@@ -1395,6 +1469,30 @@ function replaceTileIsValidSolid(sheet: number): boolean {
   if (!(d.solid && !d.platform)) return false;
   return d.rope ? true : !VAN_TILE_FRAME_IMPORTANT.has(sheet);
 }
+/** ★SW-BN5 2026-09-08：WouldTileReplacementWork 绳邻特例（WorldGen.cs:63220-63236 1:1，
+ *  BJ18 §6 D6 分期清偿）——目标为绳（Main.tileRope[tile.type],tileRope 全表
+ *  Main.cs:9452-9460=TILE_ROPE_SHEETS）且 InWorld(x,y,2)（:9642-9649,x/y∈[2,size-2)）
+ *  时：放置物 314 矿车轨且左右邻 active 314 / 放置物∈Platforms 且左右邻 active 平台 /
+ *  放置物 380 种植盆且左右邻 active 380 → true。仅当外门绳支（Player.cs:40328-40334,
+ *  调用位 ropeTargetArm）先放行才可达；绳目标两侧皆非 validSolid（:63247-63258 绳
+ *  tileSolid=false）→ 族支恒不匹配,本支是绳目标域的唯一放行路（wiki 规则：绳可换
+ *  平台/种植盆/矿车轨,须紧邻左/右有同型）。 */
+function wouldTileReplacementWorkRopeArm(
+  st: import('../world/TileStore').TileStore, x: number, y: number, placedSheet: number,
+): boolean {
+  const tsheet = TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1;
+  if (!TILE_ROPE_SHEETS.has(tsheet)) return false;                       // Main.tileRope[tile.type]
+  if (x < 2 || y < 2 || x >= st.w - 2 || y >= st.h - 2) return false;    // InWorld(x,y,2)
+  for (const dx of [-1, 1] as const) {
+    const nx = x + dx, ny = y;
+    if (!st.inBounds(nx, ny) || !st.hasTile(nx, ny)) continue;           // tile2/3 != null && active()
+    const nSheet = TILE_DEFS[st.type[st.idx(nx, ny)]]?.vanilla?.sheet ?? -1;
+    if (placedSheet === 314 ? nSheet === 314                             // :63223-63226
+      : placedSheet === 380 ? nSheet === 380                             // :63232-63235
+        : PLATFORMS_SHEETS.has(placedSheet) && PLATFORMS_SHEETS.has(nSheet)) return true;   // :63227-63230
+  }
+  return false;
+}
 /** ★SW-BJ12 2026-09-07：Block Swap 旧块掉落门比对面（vanilla Player.cs:40347-40354
  *  `!IgnoresTileReplacementDropCheckWhenBeingPlaced[placed] && KillTile_GetItemDrops
  *  (target).dropItem == HeldItem.type → 不可换`）。原 wiki C5 草/苔/灰烬草族的
@@ -1491,9 +1589,10 @@ export function validTileForReplacementFamilies(ctx: FamilySwapCtx): boolean {
   if (!IGNORES_REPLACEMENT_DROP_CHECK_SHEETS.has(ps) && ctx.targetDropIsPlacedItem) return false;
   // :40356-40358 WouldTileReplacementWork（WorldGen.cs:63209-63246）：放置物/目标至少
   //   同属一有效族（双实心/双炬/双篝火/双平台/双箱/双柜）或 flag4（两侧皆"实心或平台"）
-  //   才放行。绳邻特例（:63220-63236）需目标为绳——族目标恒不触发；Chest.IsLocked
-  //   （:63242 flag5 末项）仅双箱时可及——双箱已在 :40311 早退,族目标域内不可达
-  //   （注释级豁免,非近似）。
+  //   才放行。绳邻特例（:63220-63236）需目标为绳——族目标恒不触发（★SW-BN5：绳目标
+  //   域的该支已接通用路径 wouldTileReplacementWorkRopeArm,见 swapOk 绳支注）；
+  //   Chest.IsLocked（:63242 flag5 末项）仅双箱时可及——双箱已在 :40311 早退,族目标
+  //   域内不可达（注释级豁免,非近似）。
   if (CONVERSION_GRASS_SHEETS.has(ps) || ps === 633) return false;   // :63216-63218
   const fSolid = !replaceTileIsValidSolid(ps) || !replaceTileIsValidSolid(ts);
   const fTorch = !(ps === 4) || !(ts === 4);                // IsValidTorch=Torches 表（:63260）
@@ -1564,7 +1663,11 @@ const ADRIP_TILE_SHEETS = new Set([373, 374, 375, 461, 709]);
 //  590 宝石树苗(gemcorn 放置,Check1x2 :86818 仅成长检)/595 樱花树苗(:86819)/
 //  615 黄柳树苗(:86820)/484 滚石仙人掌(Check2x2 仅弹 727 无物品)——金标
 //  NO_RETURN_RECYCLE_DEBT 已钉,防后车误补数值
-export const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484]);
+// ★571 竹（571 竹 stack 移交批 2026-09-08）——【非】零返还族（原版掉 4564×Next(1,3)
+//  :64904-64905,已入 killTileDropItems 竹支）;本门仅压 place_v_ 回收双掉
+//  （竹块 4564 是真实放置物,place_v_571_bamboo 已注册,def.drop 退位后回收支必触发）
+//  ——勿入 golden NO_RETURN_RECYCLE_DEBT 账（该账=真零返还语义）
+export const NO_RETURN_RECYCLE_SHEETS = new Set([...ADRIP_TILE_SHEETS, 590, 595, 615, 484, 571]);
 
 export function multiTileDropKey(
   def: { drop?: string | number | null; key: string; vanilla?: { sheet?: number } },
@@ -10984,6 +11087,22 @@ export class Game implements GameHooks {
     this.sfx.play('dig', 1, px, py);
   }
 
+  /** ★SW-BN5 2026-09-08：KillWall_PlaySounds（WorldGen.cs:60914-60932）三族+默认音 1:1
+   *  （分族表 KILL_WALL_* 见模块层锚）。原版签名 (i, j, tileCache)——位置 i*16/j*16,
+   *  本仓按块音惯例 +8 中心（killTileBreakSound 同式,8px 立体声差在声像噪声下限）。
+   *  调用面=KillWall/ReplaceWall 全族（:60876/:63053 恒放,fail 亦放——fail 只减尘量）。
+   *  走 SfxName 路由（WAV_MAP: shatter=Shatter/chop=Grass/dig=Dig_0..2 全真素材）；
+   *  357 直文件（NPC_Hit_25,SoundID.cs:210=(3,25)）。同键连放不互斥（原版
+   *  LegacySoundPlayer case 0/6/13 各停前一实例=:last-wins）与破坏域 tile 侧同款
+   *  仓内既有口径（killTileBreakSound 爆炸多块连放同现状）,不做域内特批。 */
+  private killWallSound(wall: number, x: number, y: number): void {
+    const px = x * TILE + 8, py = y * TILE + 8;
+    if (KILL_WALL_SHATTER.has(wall)) { this.sfx.play('shatter', 1, px, py); return; }   // :60925 PlaySound(13)
+    if (KILL_WALL_GRASS.has(wall)) { this.sfx.play('chop', 1, px, py); return; }        // :60927 PlaySound(6)
+    if (wall === 357) { this.playSfxFile('NPC_Hit_25', 1, px, py); return; }            // :60929 NPCHit25=(3,25)
+    this.sfx.play('dig', 1, px, py);                                                    // :60931 默认 PlaySound(0)
+  }
+
   /** 709 天龙弹的 1110 星圈挂接（Kill 链 :70218-70290）：亡爆消费 80×80 内
    *  同主旧圈（ai1=1 渐隐）+ 新圈 timeLeft=30×Next(2,6) + 圈音 */
   private hookSkyDragonCircle(shot: SkyDragonShot): void {
@@ -11094,7 +11213,21 @@ export class Game implements GameHooks {
     const blocked = inp.uiBlocking || this.inpOverDomUi() || this.player.dead || !!this.minecart
       || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
       || this.annotateMode;
-    if (blocked || !sc.wanted) { sc.showing = false; VUI.smartCursorOn = false; return; }
+    if (blocked || !sc.wanted) {
+      // ★SW-BJ29 2026-09-08：跳过帧仍须执行 SmartCursorLookup 头（SmartCursorHelper.cs:
+      //  63-68）——原版 lookup 每帧无条件调用（Player.cs:25641-25645,无 wanted/界面门）,
+      //  清锁门先于 `!SmartCursorIsUsed` 早退(:69-72)。本仓曾整支跳过 ⇒ 平台连通锁跨
+      //  模式滞留（置锁须智能开+持平台,Step_Platforms :1392-1393;智能一关/进 UI,清锁
+      //  再不运行）→ tryPlace 头 TileTargetDesired 门（Player.cs:40032,本文件 :22328）
+      //  + 放置图标位（:32363）在 showing 恒 false 下把锁存续期外的一切 tile 放置拦死
+      //  （用户实报"不开智能光标放不了平台、物块"）。used=本帧 SmartCursorIsUsed 实况:
+      //  智能关帧恒 false ⇒ 双锁必清（原文语义,与 controlUseItem/持物无关）;遮挡帧
+      //  wanted 仍在 ⇒ 按原文条件消费 controlUseItem+持物平台位。
+      const held0 = this.player.inv.heldItem();
+      sc.lookupSkipped(!!inp.mouseDown, !!sc.wanted, held0 ? ITEM_DEFS[held0.id] ?? null : null);
+      VUI.smartCursorOn = false;
+      return;
+    }
     const held = this.player.inv.heldItem();
     const heldDef = held ? ITEM_DEFS[held.id] : null;
     const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
@@ -15604,7 +15737,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
           Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
           whip.knockback, whip.useTime, whip.shootSpeed,
-          () => owner,   // ★F5：AI_165 :49309-49331 的 dead→Kill 门建模于 WhipProj.fixedUpdate
+          () => owner,   // ownerRef：AI_165 全程读 Main.player[owner]（:48545/:48550 锚/:48575 补鞭）——无 owner 态杀门（唯一 Kill :48552-48556）,死亡鞭飞满程;旧注 :49309-49331 系 AI_160_Kites 误锚（回滚批 2026-09-08）
           // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
           () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
             inp.mouseX - this.renderer.canvas.width / 2),
@@ -17892,14 +18025,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // → KillWall :60859-60899 与锤墙同链——fail 门 KillWall_CheckFailure（WorldGen.cs:
       // 60901-60912）不过时【墙保持原状不掉物】;过门才 wall=0 + KillWall_DropItems
       // （:60934-60941 → GetItemDrops :60943 表内墙掉 1 件，表外墙=0 不掉）。
-      if (!killWallCheckFailure(wall, this.skeletronDowned(), !!this.world.flags['downed_245'])) {
+      const drillWallFail = killWallCheckFailure(wall, this.skeletronDowned(), !!this.world.flags['downed_245']);
+      if (!drillWallFail) {
         st.setWall(tx, ty, 0);
         const dropVid = wallDropItemVid(wall);
         const dropKey = dropVid > 0 ? VI(dropVid) : '';
         if (dropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, dropKey, 1, 0, -2);   // Stack 缺省 1
       }
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 8, 1.8);
-      this.sfx.play('chop');
+      // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
+      //  尘 10/fail 3）——旧 'chop' 近似+8 尘成功档=BF1 简化面退役
+      this.killWallSound(wall, tx, ty);
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', drillWallFail ? 3 : 10, 1.8);
     }
   }
 
@@ -18458,14 +18594,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ② 过门 → wall=0 + KillWall_DropItems（:60934-60941 → GetItemDrops :60943-61834,
         //   表见 src/data/wallDrops.ts）：表内墙掉对应物品 1 件（Item.NewItem stack 缺省 1），
         //   表外墙=0 不掉（自然土/黑檀石/洞窟/草墙 Unsafe 族等）。
-        if (!killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245'])) {
+        const hammerWallFail = killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245']);
+        if (!hammerWallFail) {
           st.setWall(wX, wY, 0);
           const dropVid = wallDropItemVid(w);
           const dropKey = dropVid > 0 ? VI(dropVid) : '';
           if (dropKey) this.spawnDrop(wX * TILE + 8, wY * TILE + 8, dropKey, 1, 0, -2);
         }
-        this.spawnParticles(wX * TILE + 8, wY * TILE + 8, '#5C4436', 8, 1.8);
-        this.sfx.play('chop');
+        // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
+        //  尘 10/fail 3）——旧 'chop' 近似+8 尘成功档=BF1 简化面退役
+        this.killWallSound(w, wX, wY);
+        this.spawnParticles(wX * TILE + 8, wY * TILE + 8, '#5C4436', hammerWallFail ? 3 : 10, 1.8);
         this.mining = null;
       }
       // PickWall 尾（:46355-46357 if(damage!=0) Prune;★SW-BO1 勘误:旧 ":45351 → :46377"
@@ -19441,15 +19580,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const sheet = def?.vanilla?.sheet;
     // 植物族全集：61/74/703 丛林 + 3/110/24/201/73 短高草 + 71/72 蘑菇 + 227 染料
     //  + 51 蛛网（审计 E ❌2,2026-08-23 批）+ 52/62/382 藤 cordage（D-4,2026-08-23 批）
+    //  + 519 香蒲/528 蘑菇藤/637 灰烬草株（P1×3 补玩家破坏链掉落口,2026-09-08 批——
+    //  三型 TILE_CUT 可割,挥割/镐斧清装饰两链均汇入本函数,此前被本门整型吞掉）
+    //  + 571 竹（571 竹 stack 移交批 2026-09-08——stack 掷 :64905,def.drop 退位防双掉）
     if (sheet !== 61 && sheet !== 74 && sheet !== 703
       && sheet !== 3 && sheet !== 110 && sheet !== 24 && sheet !== 201
       && sheet !== 73 && sheet !== 71 && sheet !== 72 && sheet !== 227 && sheet !== 51
-      && sheet !== 52 && sheet !== 62 && sheet !== 382) return;
+      && sheet !== 52 && sheet !== 62 && sheet !== 382
+      && sheet !== 519 && sheet !== 528 && sheet !== 637
+      && sheet !== 571) return;
     const st = this.world.store;
     const fx = st.frameX[st.idx(x, y)];
+    const fy = st.frameY[st.idx(x, y)];   // 519 基座帧档用（framed 植物格,本函数在清格前=破坏前帧）
     let dropId = 0, stack = 1;
     if (sheet === 51) {
-      // 蛛网（KillTile case 51 :64728 → 150;门 :63904 在 DropItems 之前——蛛网墙 62
+      // 蛛网（KillTile case 51 :65193 → 150;51+墙62 noItem 门 :64369 在 DropItems 之前——蛛网墙 62
       // （Spider Nest）内 3/4 无掉落（Next(4)!=0 置 noItem）,墙外恒掉）。蛛网走
       // TILE_CUT 割草支（无掉落档）,本表是唯一掉落出口
       if (!(st.wall[st.idx(x, y)] === 62 && Math.floor(Math.random() * 4) !== 0)) dropId = 150;
@@ -19471,13 +19616,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 神圣短草（:65528-65535）——★仅蘑菇株帧→5,**无种子支**（曾并入 3 支误掉 283）
       if (fx === 144) dropId = 5;
     } else if (sheet === 24) {
-      if (fx === 144) dropId = 60;              // 腐化短草 → 腐化蘑菇(:65069)
+      if (fx === 144) dropId = 60;              // 腐化短草 → 腐化蘑菇(:65534)
     } else if (sheet === 201) {
       if (fx === 270) dropId = 2887;            // 猩红短草 → 猩红蘑菇(:65075)
     } else if (sheet === 73) {
       if (this.killTileShouldDropSeeds()) dropId = 283;   // 森林高草(:65081)
     } else if (sheet === 71 || sheet === 72) {
-      // 蘑菇草/蘑菇植物（:65697）：1/40 蘑菇草种子、1/2 发光蘑菇
+      // 蘑菇草/蘑菇植物（:66162）：1/40 蘑菇草种子、1/2 发光蘑菇
       if (Math.floor(Math.random() * 40) === 0) dropId = 194;
       else if (Math.floor(Math.random() * 2) === 0) dropId = 183;
     } else if (sheet === 227) {
@@ -19489,6 +19634,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 取 this.player 口径）→ 掉藤绳 2996（藤绳=前期垂直通行获取链）。
       // 无玩家（生成/读档装配期）语义=不掷（optional chain 短路）
       if (Math.floor(Math.random() * 2) === 0 && this.player?.equipStats.cordage) dropId = 2996;
+    } else if (sheet === 519) {
+      // P1×3 香蒲（WorldGen.cs:65516-65519）：frameY==90 → 1/2 发光蘑菇 183（1456
+      // :65051-65054 同文）。★frameY 语义勘定（红队"种穗帧"假设不成立,以反编译为
+      // 准）：CheckCatTail 基座表（cs:59285-59306）2/477→0、53→18、199/234/662→54、
+      // 23/112/661→72、**70→90** 全列写 frameY（:59396）——90=长在蘑菇草(70)上的
+      // 香蒲,即蘑菇林水面的香蒲割了才 1/2 掉发光蘑菇,森林/丛林/雪原基座(0/18/54/72)
+      // 不掉。原版骰源=genRand,条件在先（frameY!=90 零掷=骰序照抄）;本函数现行
+      // Math.random 通道（同 71/72/52 族口径）
+      if (fy === 90 && Math.floor(Math.random() * 2) === 0) dropId = 183;
+    } else if (sheet === 528) {
+      // P1×3 蘑菇藤（WorldGen.cs:65522-65525）：纯 1/2 发光蘑菇 183（无 frame 条件;
+      // 1456 :65057-65060 同文;原版骰源=genRand→本函数 Math.random 通道）。演化域
+      // kill 已另接（WorldEvolution case 528）,两域独立（玩家破坏只走本函数）
+      if (Math.floor(Math.random() * 2) === 0) dropId = 183;
+    } else if (sheet === 637) {
+      // P1×3 灰烬草株（WorldGen.cs:65490-65493）：1/100 灰烬草种子 5214（1456
+      // :65025 同文;原版骰源=Main.rand→本函数 Math.random 通道）。演化域蔓延流
+      // 已另接（WorldEvolution case 637 :563）,本支=玩家剑割/镐击链唯一出口,不冲突
+      if (Math.floor(Math.random() * 100) === 0) dropId = 5214;
+    } else if (sheet === 571) {
+      // 竹（571 竹 stack 移交批 2026-09-08）：KillTile_GetItemDrops case 571（1457
+      // :64903-64906/1456 :64438-64441）dropItem=4564 竹块 + dropItemStack=
+      // genRand.Next(1,3)（:64905,1-2 根上开区间）——曾 def.drop=4564 恒 ×1。
+      // def.drop 退位 null（tiles.ts）+ place_v_ 回收由 NO_RETURN_RECYCLE_SHEETS
+      // 571 门压,本支=唯一掉落出口（同 51 蛛网先例;竹非 TILE_CUT,1×1 尾段 sv=0）
+      dropId = 4564;
+      stack = 1 + Math.floor(Math.random() * 2);
     }
     if (!dropId) return;
     const key = VANILLA_ITEM_KEY_BY_ID[dropId];
@@ -20304,19 +20476,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 小堆饰 185（审计 E ❌11,2026-08-23 批）：CheckPile（:46940）只把 frameY==18 行
       // 派发 Check2x1 → 掉钱币/宝石段（掷串见 spawnPileDecoDrops）;其余行（苔藓小饰）
       // 原版无掉落（185 在共享 no-drop 表 :65844）——压 place_v_ 兜底（曾恒掉合成件）
-      // （★noItem 门同上:CheckPile 段亦在 KillTile_DropItems 族 :64351 门内）
+      // （★noItem 门同上:CheckPile 段亦在 KillTile_DropItems 族 :64373 门内）
       this.spawnPileDecoDrops(x, y, fxHere, fyHere);
     } else if (def.vanilla?.sheet !== 703) {
       // ★样式还原（审计补 A ⚠️2「1×1 版 6 族 45 件」）：KillTile_GetItemDrops 帧表——
       // 瓶 13(fx/18 :65587)/平台 19(fy/18 :65591)/烛 33(fy/22 :65595)/矿石条 239
-      // (fx/18 :65166)/节日灯 149(:65571)/钱币堆 330-333(:64197)/骨块 194(:64652)。
+      // (fx/18 :65166)/节日灯 149(:65571)/钱币堆 330-333(:64663-64672)/骨块 194(:65115)。
       // 命中→掉原版真物品（此前恒掉 style0 档或 place_v_ 假物品）
       // 2026-08-23 批新增档：书 50（fx==90→165/else 149）/水晶碎晶 129（fx≥324→4988/
       // else 502）/熔炉 133（fx≥54→1221/else 524）/碗 103（fx/36 四档）/压板 135
       // （fy/18 七档）/计时器 144（fx/18 五档）——全在 vanillaStyleDrops 表,失撑链同接
       const sv = styleDropVidOfFrames(def.vanilla?.sheet ?? -1, fxHere, fyHere);
       // ★noItem 门（2026-09-04 FTW 灰烬连锁批）：本尾段三支=KillTile_DropItems 族等价
-      //  面,原版整体在 `if (!noItem && !stopDrops && Main.netMode != 1)`（:64351-64356）
+      //  面,原版整体在 `if (!noItem && !stopDrops && Main.netMode != 1)`（:64373-64376）
       //  门内——本仓头部 killTileDropItems 已带门,尾段三支曾漏（连锁/裂砖 noItem:true
       //  递归毁格仍掉 def.drop,FTW 灰烬连锁掉 172 即此漏）。补门=尾段与头部同门。
       if (!noItem && sv > 0) {
@@ -20585,7 +20757,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★m-1（2026-09-02 缓修小账）：原版 WorldGen.cs:48778-48780 amountWeWant=1 过
     // GetAvailableAmountOfNPCsToSpawnUpToSlot 门——空槽为 0 时幼虫不出（:48779-48782
     // 循环 0 次）。旧码恒出 1 只
-    if (this.availableNPCSpawnsUpToSlot(1) < 1) return;
+    // SW-BJ27 2026-09-07 顺带定谳（视觉探针阻断):原版本支整门=!isGeneratingOrLoadingWorld
+    //（WorldGen.cs:48778 `type==485 && !isGeneratingOrLoadingWorld && Main.netMode!=1`）
+    // ——生成/读档沉降期 KillTile 命中幼虫【不】spawn;本仓缺门 → 沉降期也 spawn 且读
+    // this.player.x（player 未 attach → TypeError,createWorldProbe seed 424242 必现）。
+    // 门近似同 spawnBoulderRoll（killTileDropBait :11998 家族款）。
+    if (!this.player || this.availableNPCSpawnsUpToSlot(1) < 1) return;
     const larva = Enemy.fromVanilla(582, ax * TILE, ay * TILE + 32);
     if (larva) {
       larva.vx = (this.player.x >= ax * TILE ? 1 : -1) * 1.5;
@@ -20844,7 +21021,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     // 蘑菇树（sheet 72）：不走树干木材/橡实——原版 KillTile_GetTreeDrops 仅覆盖
-    // tile 5/596/616/634（WorldGen.cs:65267），72 走 case 71/72 掷骰（:65697-65707）：
+    // tile 5/596/616/634（WorldGen.cs:65267），72 走 case 71/72 掷骰（:66162-66172）：
     //   每格 1/40 蘑菇草种子(194) / 否则 1/2 发光蘑菇(183) / 否则无掉落
     if (sheet === 72) {
       const roll = new RNG((Math.random() * 1e9) | 0);
@@ -20969,7 +21146,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 仙人掌砍伐（CheckCactus :54132 级联语义）：破坏格及以上整株倒（TileFrame
    *  case 80 → CheckCactus 逐格上行；切口以下保留）；不动点迭代收敛（叠臂/
    *  干臂互撑也按三规则逐格解）。每格掉仙人掌 276 ×1（GetItemDrops case 80
-   *  :64767，无 bonus 掷）——此前 1×1 通用路径掉 place_v_ 假物品且上方柱悬空 */
+   *  :65233，无 bonus 掷）——此前 1×1 通用路径掉 place_v_ 假物品且上方柱悬空 */
   fellCactus(x: number, y: number) {   // public:GameHooks 接口(FallingBlock 沙落触发仙人掌复查)
     const st = this.world.store;
     const CAC = TILE_BY_KEY['v_80_cactus'];
@@ -21174,8 +21351,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       st.paintWall[wi] = 0;
       st.coat[wi] &= ~TileStore.COAT_WALL_MASK;   // Tile.cs:941-946
       this.recLog('tile', { x: tx, y: ty, from: WALL_DEFS[oldWall]?.key ?? oldWall, to: WALL_DEFS[wallId]?.key ?? wallId, cause: 'wallSwap' });   // 行为录制：墙替换
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 6, 1.5); // KillWall_MakeWallDust×10 近似
-      this.sfx.play('chop', 1, tx * TILE + 8, ty * TILE + 8);               // KillWall_PlaySounds
+      // ★SW-BN5 2026-09-08：ReplaceWall 音/尘对齐（WorldGen.cs:63050-63053）——
+      //  KillWall_MakeWallDust×10（fail 门已先行拦截,ReplaceWall 无 fail 尘档）+
+      //  KillWall_PlaySounds 三族表（:60914,经 killWallSound）。旧 'chop' 近似
+      //  +6 尘=BF1 简化面退役。
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 10, 1.5);
+      this.killWallSound(oldWall, tx, ty);
       this.player.inv.removeHeld(1);
       // ApplyItemTime(item, wallSpeed)（:40137/:4221-4230）：useTime×倒数乘数，下限 1。
       // ★SW-BJ12 2026-09-07：useTime 取数源=itemCombat（1457 终值——墙面物品 per-item：
@@ -21851,8 +22032,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  门矩阵（BJ12：C1/C5/C6/C7/A/B2）已在调用位跑完；体内保留 :63068
    *  IsTileReplaceable 复验（纯函数防御面，:22112 已同判）。:63064
    *  WouldTileReplacementWork 不另植——调用位 :40356 已同判（通用⑤门+族 verdict
-   *  :1471-1480），绳邻支(:63220-63236) 随外门 :40328 拒绳目标不可达（D6 分期，
-   *  docs §6 坐标）。
+   *  :1471-1480+★SW-BN5 绳邻支 wouldTileReplacementWorkRopeArm,绳目标经外门
+   *  ropeTargetArm+内门绳邻支放行,D6 分期已清偿）。
    *  @param newType 新块内部 id（HeldItem.createTile 域）；@param style 有效 placeStyle
    *  @returns false=内门拒绝（调用位不消耗不施时=原版 ReplaceTile false 同义；
    *  运行时不可达态）。尾奏（消耗/冷却/自动附件）在调用位，本函数只管写面。 */
@@ -22241,8 +22422,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  放置物黑名单 DoesntPlace{2,60,70,109,199,23,661,662,633}(草/丛/蘑菇族);
     //  目标黑名单 DoesntGetReplaced{58,225,171,127,481,482,483,423}(狱岩/晶簇等);
     //  tileCut 族/家具(frameImportant)非平台不换;同型不换;旧块掉落物==放置物
-    //  不换(:39371-39377 防土换土无限);绳索目标仅换轨道/平台(:39354-39359 简化:
-    //  绳一律不换)。★平台/火把/篝火/箱/柜 style 族分支已 1:1 接入（2026-09-03
+    //  不换(:39371-39377 防土换土无限);绳目标可换平台/种植盆/矿车轨（★SW-BN5
+    //  2026-09-08 外门绳支 :40328-40334+内门绳邻支 :63220-63236,紧邻左/右同型门）。
+    //  ★平台/火把/篝火/箱/柜 style 族分支已 1:1 接入（2026-09-03
     //  清偿批①：族目标 verdict 走模块层 validTileForReplacementFamilies——1457
     //  Player.cs:40232-40360 全段移植,见下方族分支注）。
     // ★SW-BJ10 2026-09-07：块换成功拍镐段冷却暂存（原版 SetItemTime(num4+num5) 同拍
@@ -22272,7 +22454,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           ? TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1 : -1;
         // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
         // (|| 平台 19 族可换——优先级括号已显式)
-        const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
+        // ★SW-BN5 2026-09-08：外门绳支（Player.cs:40328-40334 1:1,BJ18 §6 D6 分期清偿）
+        //  ——目标为绳（TILE_ROPE_SHEETS=Main.tileRope 全表 Main.cs:9452-9460）时,放置物
+        //  ∈ {314 矿车轨, 380 种植盆} ∪ Platforms → flag=true 放行（跳过 solidish 预门/
+        //  目标 framed 门/放置侧 frameImportant 拒支 :40336-40338——原版 flag=true 恒跳）；
+        //  其余放置物对绳目标仍拒（:40330-40333）。绳物品拒门 ROPE_ITEM_VIDS
+        //  （refine 块首支,:40245-40247 优先于一切）位次不动；内门绳邻特例
+        //  wouldTileReplacementWorkRopeArm（:63220-63236）在 refine 块 ⑤ 位消费。
+        const ropeTargetArm = TILE_ROPE_SHEETS.has(tsheet) && placeTileSheet >= 0
+          && (placeTileSheet === 314 || placeTileSheet === 380
+            || PLATFORMS_SHEETS.has(placeTileSheet));
+        const solidish = ropeTargetArm || (tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false);
         // ★放置侧 framed 门（1458 PlaceThing_CheckSpecificValidtyCaseForBlockSwap
         //  :40340-40343 `!Falling[placed] && tileFrameImportant[placed] &&
         //  !Platforms[placed] → return false`）——framed 放置物（墓碑/家具族）点在
@@ -22285,8 +22477,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const placeFramedNoPlatform = (placeDef?.framed ?? false)
           && !PLATFORMS_SHEETS.has(placeDef?.vanilla?.sheet ?? -1);
         let swapOk = !NO_SWAP_PLACE.has(placeTileSheet) && !NO_SWAP_TARGET.has(tsheet)
-          && !(tdef?.decor ?? false) && !tdef?.framed && solidish
-          && !placeFramedNoPlatform;
+          && (ropeTargetArm
+            || (!(tdef?.decor ?? false) && !tdef?.framed && solidish && !placeFramedNoPlatform));
+        // ★绳目标与 decor 代理门互斥备案：v_213_rope def.decor=true（摆动渲染旗）但
+        //  vanilla tileCut[213]=false——decor 代理只护非绳目标;绳目标的权威 tileCut
+        //  门=refine 块 TILE_CUT（真表,213 ∉ 表）仍生效,无误放。
         // ★SW-BJ12 2026-09-07：通用段补接 ValidTileForReplacement 前置否决门
         //  （1457 Player.cs:40248-40271/:40344-40346/:40356-40358——同款门只接在族
         //  路径,通用路径曾缺五项）：
@@ -22303,6 +22498,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           else if (MOSS_CONVERT_SHEETS.has(placeTileSheet)) swapOk = false;
           else if (TILE_CUT.has(targetType)) swapOk = false;
           else if (tsheet === 230 && !!this.world.seedFlags?.getGoodWorld) swapOk = false;
+          // ★SW-BN5 2026-09-08：⑤ 位分流——绳目标走内门绳邻特例（:63220-63236）；
+          //  绳目标两侧皆非 validSolid（tileSolid=false）→ 族支恒不匹配,本支即唯一
+          //  放行路,与 ⑤ 互斥成立。
+          else if (ropeTargetArm) swapOk = wouldTileReplacementWorkRopeArm(st, tx, ty, placeTileSheet);
           else if (placeTileSheet >= 0 && !replaceTileIsValidSolid(placeTileSheet)
             && !PLATFORMS_SHEETS.has(placeTileSheet)) swapOk = false;
         }
@@ -22857,6 +23056,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const wtT = st.get(tx, ty);
         if (!placeObstructionClearable(wtT, TILE_DEFS[wtT]?.vanilla?.sheet ?? -1)) return;
         hasObstacle = true;
+      }
+      // ★SW-BJ28 2026-09-08：AssortedThings 火把支斜坡拍平前置（Player.cs:41441-41462 1:1）——
+      //  墙锚不成立且底/左/右三邻皆非 SolidTileNoAttach 时，对半砖/坡形邻格先 SlopeTile
+      //  拍平再走 PlaceTile 锚点复验（平台被显式豁免不拍：:41452/:41457/:41461）。
+      //  三支互斥序 = 原文 if/else-if（支 1 命中含"平台坡不动作"也终止链）。
+      //  SolidTileNoAttach（WorldGen.cs:71042-71052）= active∧tileSolid∧!noAttach∧slope0
+      //  ∧!halfBrick∧!inActive（不查 tileSolidTop；域外 Main.tile null → true）。
+      const solidTileNoAttach = (x: number, y: number): boolean => {
+        if (!st.inBounds(x, y)) return true;
+        const i = st.idx(x, y);
+        if (!st.hasTile(x, y) || st.isActuated(x, y)) return false;
+        const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+        return !!(TILE_DEFS[st.type[i]]?.solid || VAN_TILE_SOLID_EXTRA.has(sh))
+          && !TILE_NO_ATTACH_SHEETS.has(sh) && st.slope[i] === 0 && !st.half[i];
+      };
+      if (st.wall[st.idx(tx, ty)] === 0
+        && !solidTileNoAttach(tx, ty + 1) && !solidTileNoAttach(tx - 1, ty) && !solidTileNoAttach(tx + 1, ty)) {
+        const slopedNonPlat = (x: number, y: number): boolean => {
+          if (!st.inBounds(x, y)) return false;
+          const i = st.idx(x, y);
+          return st.hasTile(x, y) && (st.half[i] !== 0 || st.slope[i] !== 0)
+            && !PLATFORMS_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1);
+        };
+        if (slopedNonPlat(tx, ty + 1)) {                                   // :41441-41447 下方
+          this.worldGenSlopeTile(tx, ty + 1, 0, false);
+        } else if (!solidTileNoAttach(tx - 1, ty) && slopedNonPlat(tx - 1, ty)) {   // :41448-41456 左
+          this.worldGenSlopeTile(tx - 1, ty, 0, false);
+        } else if (!solidTileNoAttach(tx + 1, ty) && slopedNonPlat(tx + 1, ty)) {   // :41457-41462 右
+          this.worldGenSlopeTile(tx + 1, ty, 0, false);
+        }
       }
       const frame = torchAnchorFrame(st, tx, ty);
       // placeStyle（Item.cs placeStyle→TileObjectData subtile）：彩色 427-433 /
@@ -26428,8 +26657,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  墙保持原状不掉物;过门 → wall=0 + 掉 1 件@格中心（vy=-2 仓内约定同 BF1,
           //  KillWall_DropItems :60934-60941 stack 缺省 1）。350 不可拆墙仍由调用侧
           //  `wall != 350` 恒拒（Projectile.cs:80489 + CanPlayerSmashWall Player.cs:46305）。
-          //  音/尘不逐墙补放:KillWall per-wall 10 尘+音在爆炸面被 Item14+爆炸尘覆盖
-          //  （与 BF1 的简化面同级,视觉差非语义差）。
+          //  音/尘逐墙补放（★SW-BN5 2026-09-08 清偿 BL1 备案）：旧备案「被 Item14+爆炸
+          //  尘覆盖」措辞复核退役——原文 Projectile.ExplodeTiles :80488 逐格直调
+          //  KillWall,:60876 音在 fail 早退前【恒放】、:60877-60884 尘 10/fail 3,
+          //  与弹侧 Item14 爆炸音并存=原文两音都响（爆炸音是弹体爆炸逻辑独立一拍,
+          //  不经 KillWall）。
           //  ★SW-RB5b 2026-09-07：setWallSilent → setWall——静默变体不发 netReporter
           //  也不发 listeners：联机 v3 房间制按 TileOp 状态同步（ClientNet.applyRemote
           //  case SetWall）,静默清墙=房主/客户端墙面分叉（BF1 锤墙/钻头两路同链走
@@ -26442,7 +26674,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               const wi = st.idx(wx, wy);
               const w = st.wall[wi];
               if (w <= 0 || w === 350) continue;
-              if (killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245'])) continue;
+              const explWallFail = killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245']);
+              this.killWallSound(w, wx, wy);            // :60876 恒放（fail 亦放）
+              this.spawnParticles(wx * TILE + 8, wy * TILE + 8, '#5C4436', explWallFail ? 3 : 10, 1.8);   // :60877-60884
+              if (explWallFail) continue;               // fail=墙保持原状不掉物（:60890-60892）
               st.setWall(wx, wy, 0);
               const dropVid = wallDropItemVid(w);
               if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1, 0, -2);
@@ -27038,13 +27273,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (wallSplode) {
             // SW-BL1 2026-09-06：KillWall 全语义（掉落+fail 门）与 explodeAt 同构，
             //  语义注见 explodeAt 同名段（Projectile.cs:80485-80492 → WorldGen.KillWall）。
+            //  ★SW-BN5 2026-09-08：per-wall 音/尘接齐（:60876-60884,音恒放+尘 10/fail 3,
+            //  与爆炸音并存=原文;BL1「被爆炸音覆盖」备案退役,同 explodeAt 注）。
             for (let wx = x - 1; wx <= x + 1; wx++) {
               for (let wy = y - 1; wy <= y + 1; wy++) {
                 if (!st.inBounds(wx, wy)) continue;
                 const wi = st.idx(wx, wy);
                 const w = st.wall[wi];
                 if (w <= 0 || w === 350) continue;
-                if (killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245'])) continue;
+                const scarabWallFail = killWallCheckFailure(w, this.skeletronDowned(), !!this.world.flags['downed_245']);
+                this.killWallSound(w, wx, wy);
+                this.spawnParticles(wx * TILE + 8, wy * TILE + 8, '#5C4436', scarabWallFail ? 3 : 10, 1.8);
+                if (scarabWallFail) continue;
                 // ★SW-RB5b 2026-09-07：setWallSilent → setWall（netReporter/listeners 面,
                 //  与 explodeAt 支同修,注见彼处）
                 st.setWall(wx, wy, 0);
@@ -39263,6 +39503,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       sheetCache[t] = s;
       return s;
     };
+    const swayOn = options.data.swayInWind;   // Main.SettingsEnabled_TilesSwayInWind（草族 WindyGrass 域回落门,grassParticleFold 注）
     for (let y = ty0; y <= ty1; y++) {
       for (let x = tx0; x <= tx1; x++) {
         const i = st.idx(x, y);
@@ -39270,7 +39511,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  循环（:7529-7646）在 active 绘制路径内——幽灵残型（flags=0,type≠0）不发
         //  特效粒子（放置/砍切域同款洞清扫；TIER1/2 尘表族同扫）
         if (st.type[i] === 0 || !st.hasTile(x, y)) continue;
-        const rules = TILE_PARTICLE_RULES.get(sheetOf(st.type[i]));
+        const sheet = sheetOf(st.type[i]);
+        const rules = TILE_PARTICLE_RULES.get(sheet);
         if (!rules) continue;
         const fx = st.frameX[i], fy = st.frameY[i];
         // ★光照比例项(TileDrawing.cs:7543-7552):num43 = max(R,G,B)/30(C# 整除;
@@ -39282,7 +39524,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         for (const rule of rules) {
           // ★闪光族概率随光照缩放(num43/8;普通规则系数 1)——单次 roll,勿二次
-          const probEff = rule.prob * (rule.dust !== undefined ? lightNum43 / 8 : 1);
+          //  ★F7 RNG 拓扑备案（2026-09-08）：原文 TileDrawing.cs:7553
+          //  `_rand.Next(shine) >= num43 || 帧门…` 同 if 短路（掷在先,掷失败即
+          //  return、帧门不消费 RNG）;本仓先 roll 后验帧门——掷的消费序两态恒同
+          //  （帧门失败时原文同样已消费该掷）,分布等价。
+          //  ★草族 ×1/4 替换折算（2026-09-09）：四域 tile 原版走专用绘制路径,发射被
+          //  _rand.Next(4)==0 门截到主路径 1/4（替换非额外;域全集与例外见
+          //  GRASS_COUNTER_SHEETS/grassParticleFold 定义处全锚）——交集 sheet 经
+          //  grassParticleFold 折算（592 表内已折/WindyGrass 域随设置回落）。
+          const probEff = rule.prob
+            * (rule.dust !== undefined ? lightNum43 / 8 : 1)
+            * grassParticleFold(sheet, swayOn);
           if (Math.random() >= probEff) continue;
           if (rule.fx0 !== undefined && fx !== rule.fx0) continue;
           if (rule.fy0 !== undefined && fy !== rule.fy0) continue;
@@ -39335,19 +39587,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** ★2026-09-01 编排器 tile-ambient 族发射位（TileDrawing.DrawTiles_EmitParticles
    *  Tier3 四支,clientOnly:true 各端本地直生,零广播）：与 Tier1/2 尘表（上方规则
    *  循环）同扫节拍（每 3 tick ×3 概率折算）。此前"tile-ambient 未建"登记消账：
-   *   · PooFly（:6983-6990）便砖 666/712：liquid≤0、j−1>0（★V6 补,世界顶缘门）、
+   *   · PooFly（:6978-6984）便砖 666/712：liquid≤0、j−1>0（★V6 补,世界顶缘门）、
    *     上格非 ActiveAndWalkable、Next(100)==0 → pooFlyFx@(x×16+8, y×16−8)；
-   *   · RainbowBoulder3（:6992-6999）虹砖 711 frameX==0&&frameY==0、Next(45)==0 →
+   *   · RainbowBoulder3（:6987-6992）虹砖 711 frameX==0&&frameY==0、Next(45)==0 →
    *     rainbowBoulderFx(3)@(x×16+16, y×16+16)；
-   *   · RainbowBoulder2（:7000-7007）同门 Next(3)!=0（=2/3/visit×3 窗折算=恒发,F1①）
+   *   · RainbowBoulder2（:6993-7000）同门 Next(3)!=0（=2/3/visit×3 窗折算=恒发,F1①）
    *     → rainbowBoulderFx(2) 位+circular(16,16)、move=circular(1,0.5)×0.5；
-   *   · NatureFly（:7009-7027）SpawnsNatureFlies 草族 {3,20,24,27,73,201,80,110,
-   *     529,530,595,615,637}：liquid≤0、双独立门 P(NextFloat<lerp+0.3)×P(Next(600)==0)
-   *     ——×3 窗折算只落第一因子（min(1,p×3)）,第二因子保持 1/600（F1②）；风时档
+   *   · NatureFly（:7003-7022,2026-09-09 勘正旧注 :7009-7027 的 +5 偏移）SpawnsNatureFlies
+   *     草族 {3,20,24,27,73,201,80,110,529,530,595,615,637}（TileID.cs:251）：liquid≤0、
+   *     双独立门 P(NextFloat<lerp+0.3)×P(Next(600)==0)——×3 窗折算只落第一因子,
+   *     第二因子保持 1/600（F1②）；★草域 12 型（∩GRASS_COUNTER_SHEETS,唯 80 域外）
+   *     第一因子再乘 grassParticleFold（该支原文在 EmitParticles 体内,草域整个调用被
+   *     专用路径 Next(4) 门住;fold=1 逐位退化 min(1,p×3)）；风时档
    *     _windGrid.GetWindTime(+Next(48)) 未建模,登记 → natureFlyFx@(x×16+8, y×16)。
    *     LakeSparkle 已由 FakeFish.ts 局部池直译（:20635-20646,积分步 F2 补 /life）。 */
   private emitTileOrchestraAmbient(tx0: number, ty0: number, tx1: number, ty1: number): void {
     const st = this.world.store;
+    const swayOn = options.data.swayInWind;   // 草域 NatureFly 折算回落门（grassParticleFold 注）
     const NATURE_FLIES = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 595, 615, 637]);
     const walkableAbove = (x: number, y: number): boolean => {
       if (!st.inBounds(x, y - 1)) return false;
@@ -39393,8 +39649,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const wind = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);   // ≈WindForVisuals
           const lv = wind < 0.08 ? 0 : wind > 0.18 ? 1 : (wind - 0.08) / 0.1; // GetLerpValue clamped
           const p = lv + 0.3;                                //（:7012-7015）
-          // 双独立门 ×3 窗折算只落第一因子,第二因子 Next(600)==0 保持 1/600（F1②）
-          if (Math.random() < Math.min(1, p * 3) && Math.random() < 1 / 600) {
+          // 双独立门 ×3 窗折算只落第一因子,第二因子 Next(600)==0 保持 1/600（F1②）。
+          // ★草族 ×1/4 替换折算（2026-09-09 续单件1）：SpawnsNatureFlies（TileID.cs:251,
+          //  13 型）∩ GRASS_COUNTER_SHEETS = 12 型（唯 80 仙人掌域外）——原文该支在
+          //  DrawTiles_EmitParticles（:6990-7008）体内,草域 sheet 的整个调用被专用路径
+          //  flag=Next(4)（:8508/:8566/:9146/:9665,逐格）门住 ⇒ 帧概率先乘 fold 再做
+          //  ×3 窗折算（fold=1 逐位退化旧式 min(1,p×3);无已预折成员,无需 592 式豁免）。
+          const fold = grassParticleFold(sheet, swayOn);
+          if (Math.random() < Math.min(1, Math.min(1, p) * fold * 3) && Math.random() < 1 / 600) {
             natureFlyFx(this, x * TILE + 8, y * TILE);
           }
         }
@@ -39695,6 +39957,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return !!(d && d.solid && !d.platform);
   }
 
+  /** AnchorValid(tile, AnchorType.Table)（WorldGen.cs:52294-52329 Table 通路 1:1）：
+   *  nactive() 门（:52296,repo isActive=未致动口径）内四臂——SolidTile/SolidBottom 两臂
+   *  对 Table 锚不参与;③(:52308-52321 SolidWithTop|Table 共享支) 平台帧带
+   *  num=frameX/18∈{0-7(须非半砖)}∪{12-16}∪{25-26}（PlatformFrameWidth=
+   *  _data[19].styleWidth=18,TileObjectData.cs:5124/:1812（width+padding)×Width）
+   *  ∨ tileSolid∧tileSolidTop（repo def.platform ⊇ tileSolidTop,solid∧platform 即交）;
+   *  ④(:52322-52326 Table 支) !平台∧tileTable∧blockType==0（blockType0=无坡无半砖） */
+  private anchorTableValidAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;   // :52296 nactive()
+    const i = st.idx(x, y);
+    const d = TILE_DEFS[st.type[i]];
+    if (!d) return false;
+    const sheet = d.vanilla?.sheet ?? -1;
+    const isPlatform = PLATFORMS_SHEETS.has(sheet);
+    if (isPlatform) {
+      const num = Math.floor(Math.max(0, st.frameX[i]) / 18);
+      if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
+    } else if (d.solid && d.platform) {   // :52318 tileSolid∧tileSolidTop
+      return true;
+    }
+    // :52322 !平台∧tileTable∧blockType==0（TILE_TABLE_SHEETS=Main.tileTable 全表移植）
+    return !isPlatform && TILE_TABLE_SHEETS.has(sheet) && !st.half[i] && (st.slope[i] ?? 0) === 0;
+  }
+
   /** SolidTileAllowTopSlope（WorldGen.cs:70851）：吊顶锚判据——active+(solid|绳380)+
    *  (非平台:非底坡 slope3/4 | 平台:半砖)+未致动。界外=原版 tile==null → true */
   private solidAllowTopSlopeAt(x: number, y: number): boolean {
@@ -39971,12 +40258,65 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'ground1x1': {
-        // Check1x1（:45243）：下方 SolidTileAllowBottomSlope；下方巨石族 → 杀
-        //（:45266-45269 TileID.Sets.Boulders）。78 陶盆（CheckOnTable1x1 :43548 的
-        // 78 特支）同判据复用本支
+        // Check1x1（1457 :45633/1456 :45243）：下方 SolidTileAllowBottomSlope；下方
+        // 巨石族 → 杀（:45266-45269 TileID.Sets.Boulders）。★2026-09-08 续单：78 陶盆
+        // 曾注"同判据复用本支"——原文本体是 CheckOnTable1x1（:43899）78 特支,已迁
+        // 'ontable'（补桌面臂+平台角支）;本支现仅 Check1x1 原生成员 210/428/593/650/324
         if (this.solidAllowBottomSlopeAt(x, y + 1)
           && !Game.BOULDER_SUPPORT_SHEETS.has(TILE_DEFS[st.get(x, y + 1)]?.vanilla?.sheet ?? -1)) return;
         this.killDecorTile(x, y);
+        return;
+      }
+      case 'ontable': {
+        // CheckOnTable1x1（1457 :43899-43932/1456 :43548-43581）1:1：
+        // ①:43901 下方 null（界外同义）→ return;
+        // ②:43904 下方 topSlope(坡1|2)——平台(:43905 Platforms 表)走角支 :43907-43911：
+        //    blockType()!=3∨左邻非[active+blockType0+平台] 与 blockType()!=2∨右邻非
+        //    [active+blockType0+平台] 双真才杀（slope2=bt3 须左邻、slope1=bt2 须右邻,
+        //    blockType=slope+1;blockType0=无坡无半砖）,非平台顶坡 :43917 杀;
+        // ③:43921 下方 halfBrick → 杀;
+        // ④:43925 否则活=AnchorValid(Table)∨(裸 active∧tileTable)——AnchorValid Table
+        //    支（:52294-52329）=平台帧带 num=frameX/18∈{0-7(非半砖)}∪{12-16}∪{25-26}
+        //    （PlatformFrameWidth=_data[19].styleWidth=18,TileObjectData.cs:5124/:1812）
+        //    ∨tileSolid∧tileSolidTop ∨!平台∧tileTable∧blockType0（nactive() 门 :52296）;
+        // ⑤:43930 type==78 特支=桌面不成立时再认地面 SolidTileAllowBottomSlope,
+        //    其余组员（13/33/49/50/174/372/646/707）:43935 杀。杀走 killDecorTile→
+        //    breakTile 掉落链（707 帧表 fx==90→165/else 149 同 KillTile case 707）
+        if (!st.inBounds(x, y + 1)) return;   // :43901 tile==null → return
+        const bId = st.get(x, y + 1);
+        const bDef = TILE_DEFS[bId];
+        const bSheet = bDef?.vanilla?.sheet ?? -1;
+        const bi2 = st.idx(x, y + 1);
+        const bSlope = st.slope[bi2] ?? 0;
+        const bHalf = !!st.half[bi2];
+        if (bSlope === 1 || bSlope === 2) {   // :43904 topSlope()
+          if (bDef && PLATFORMS_SHEETS.has(bSheet)) {   // :43905 角平台支
+            const bt = bSlope + 1;            // blockType()（slope>0 → +1,Tile.cs:204）
+            // 邻格合格=active(裸,:43909/:43912)+blockType0+平台;界外=不合格（域内
+            // 不可达——TileFrame 五格边界门 :82606 外不派发,防御面取杀向）
+            const nbrOk = (nx: number): boolean => {
+              if (!st.inBounds(nx, y + 1)) return false;
+              const ni = st.idx(nx, y + 1);
+              const nd = TILE_DEFS[st.get(nx, y + 1)];
+              return st.hasTile(nx, y + 1) && (st.slope[ni] ?? 0) === 0 && !st.half[ni]
+                && !!nd && PLATFORMS_SHEETS.has(nd.vanilla?.sheet ?? -1);
+            };
+            const kill = (bt !== 3 || !nbrOk(x - 1)) && (bt !== 2 || !nbrOk(x + 1));
+            if (kill) this.killDecorTile(x, y);
+            return;
+          }
+          this.killDecorTile(x, y);   // :43917 非平台顶坡
+          return;
+        }
+        if (bHalf) { this.killDecorTile(x, y); return; }   // :43921 halfBrick
+        // :43925 AnchorValid(Table) ∨ (裸 active ∧ tileTable)
+        if (this.anchorTableValidAt(x, y + 1)
+          || (st.hasTile(x, y + 1) && TILE_TABLE_SHEETS.has(bSheet))) return;
+        if (sheet === 78) {   // :43930 地面特支（仅 78）
+          if (!this.solidAllowBottomSlopeAt(x, y + 1)) this.killDecorTile(x, y);
+          return;
+        }
+        this.killDecorTile(x, y);   // :43935
         return;
       }
       case 'logic': {

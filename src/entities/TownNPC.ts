@@ -42,6 +42,8 @@ import {
 import { TownShot } from './TownShot';
 // ★对抗修复批⑤ A4：出膛锚点半宽/半高按弹真实 SetDefaults 尺寸换算
 import { projectileData } from '../data/vanillaProjectiles';
+// ★通用湿段（2026-09-08 F2）：NurseSyringeShot 584 override 自接（基类位被替代）
+import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -798,6 +800,24 @@ export class NurseSyringeShot extends TownShot {
   /** SetDefaults penetrate = 3（:6349）；消亡走 ：17312-17315 通用门（见类注 B4） */
   private bouncesLeft = 3;
 
+  // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F2 清偿）----
+  //  域 id = {584}（SetDefaults :6342-6350：10×10 aiStyle110 friendly scale0.8
+  //  penetrate3,无 ignoreWater 行=缺省 false（:763）→ 受段;tileCollide 缺省 true）。
+  //  ★本类 override fixedUpdate 全量自写不调 super——基类 TownShot.fixedUpdate 的
+  //  tick 头湿段对本类【不生效】,须在 override 内自接（TownShot.ts 头注豁免域清单
+  //  已补 584 口径）。插位=tick 头：AI_110（:34691-34727 逐行核对）零湿旗消费 →
+  //  共享体头注「AI 无湿旗消费者可用 tick 头插位」成立,采样位=上拍位移后 ≡ 原版
+  //  湿段采样;患者失活/抵达 Kill 拍（:34704/:34727）湿段照跑（原版 AI-Kill 拍段体
+  //  无 active 门）。584 ∉ IsDestroyedByWater（{85,15,188,34,1097,1106},
+  //  ProjectileID.cs:287）→ 无 kill 钩;aiStyle110 ∉ Shimmer() 任何支（:22564-22719）
+  //  → 缺省支=无动作,无 shimmer 面。
+  //  阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 支,:17594）：584
+  //  tileCollide=true → 湿支生效;只削位移（wetVelocity 通道 :20555-20557）,速度场
+  //  与反弹证据（lastVelocity :17696 捕获、:18233-18254 判定）不受阻尼——位移行
+  //  乘档、残速累计 mvx/mvy 保持全速语义。
+  //  旗持有（wet/lavaWet/honeyWet/shimmerWet/wetCount/presetDone）= 基类 TownShot
+  //  字段块同形字段,本类不重decl（继承即 ProjWetFlags 形状）。
+
   constructor(
     x: number, y: number, vx: number, vy: number,
     patient: PatientBox | null, onHeal?: (amt: number, px: number, py: number) => void,
@@ -809,6 +829,10 @@ export class NurseSyringeShot extends TownShot {
   }
 
   override fixedUpdate(_dt: number, game: GameHooks): void {
+    // ---- ★通用湿段（:16895-17113 共享体,tick 头插位——论证见字段块注;
+    //      基类 fixedUpdate 被本 override 全量替代,基类位不跑）----
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
     const t = this.patient;
     // :34699 目标门（vanilla `active && townNPC`；本仓城镇体 death 位承接）
     if (!t || t.dead) { this.dead = true; return; }
@@ -843,6 +867,12 @@ export class NurseSyringeShot extends TownShot {
     const spd = Math.hypot(preVx, preVy);
     const stepCap = Math.min(16, Math.max(3, Math.min(this.w, this.h)));   // num2(:17747-17756)
     let mvx = 0, mvy = 0;                                // 碰撞后残速（零累计 ≡ velocity）
+    // ★水中位移阻尼（HandleMovement :17721-17764 湿支;2026-09-08 F2）：wetVelocity=
+    //  post-TileCollision velocity×档（:17755-17762）仅进 UpdatePosition :20555-20557
+    //  `if (wet) position += wetVelocity`——位移行乘档,速度场与【反弹证据】（mvx/mvy
+    //  残速累计、:18233-18254 判定）保持全速语义不受阻尼污染。档位读 tick 头湿段旗
+    //  （原版 HandleMovement 亦消费当拍子步湿段旗,同位）。
+    const wetDrag = projWaterDragFactor(this);
     if (spd > stepCap) {
       // 快路径：SafeNormalize×stepCap 子步循环，每步盒钳制后位移照推进
       // （:17757-17812 while 循环;零累计即末速）;±1e-4 微差吸附(:17853-17858)
@@ -851,17 +881,17 @@ export class NurseSyringeShot extends TownShot {
       while (left > 0 && guard++ < 300) {
         const len = Math.min(left, stepCap);
         const [sxv, syv] = this.tileClipStep(st, nxs * len, nys * len);
-        this.x += sxv; this.y += syv;
-        mvx += sxv; mvy += syv;
+        mvx += sxv; mvy += syv;                          // 残速累计=碰撞语义（全速,不阻尼）
+        this.x += sxv * wetDrag; this.y += syv * wetDrag;   // 位移=wetVelocity 通道
         left -= len;
       }
       if (Math.abs(mvx - preVx) < 1e-4) mvx = preVx;
       if (Math.abs(mvy - preVy) < 1e-4) mvy = preVy;
     } else {
-      // 慢路径（:17813-17844）：单步整速盒钳制；位移已并入累计
+      // 慢路径（:17813-17844）：单步整速盒钳制；碰撞语义并入累计,位移消费阻尼
       const [sxv, syv] = this.tileClipStep(st, preVx, preVy);
-      this.x += sxv; this.y += syv;
       mvx = sxv; mvy = syv;
+      this.x += sxv * wetDrag; this.y += syv * wetDrag;
     }
     // 接触证据判定（:18234-18243,X 轴无条件/Y 轴双条件——全部本帧同拍证据,
     // 非跨帧比较）+ 反弹率还原（:18249-18253 num17 恒复 |lastVel| 幅值）

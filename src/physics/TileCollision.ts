@@ -426,11 +426,14 @@ function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
  *  （走路沿坡爬升;多格取最高贴合位,与原版 y 最小值机制一致）。
  *  slope1/2 地面坡:slope1 左高右低(左行爬升)、slope2 右高左低;
  *  slope3/4 天花板坡:对称向下推离。
- *  受阻回退已对齐原版 :2004-2033（速度清零 + slope 向性 X 补偿）。
+ *  受阻回退已对齐原版收尾两分支（:2004-2019 抬升受阻 shortfall X 滑移+双清+up=false;
+ *  :2020-2034 天花板下推受阻=截短下推+bitsByte[3]/[4] X 滑移+双清,2026-09-08）。
  *  与原版的偏差（稳定性取舍,均在行内注释标记）：
  *  - num4 钳 ≥0（原版 num4<0 跳过）：坡顶过渡瞬间防脱钩下沉
- *  - 未移植 :2003 的"重跑 TileCollision 校验"本体（分轴结构代价高,
- *    钳位已覆盖其主收益;受阻回退语义由嵌入守卫分支等价提供） */
+ *  - 未移植 :2003 的"重跑 TileCollision 校验"本体（分轴结构代价高）:截短量由
+ *    守卫扫描的 vector5 等价（受阻格最小 格顶−脚底,:2388 进近门内）提供,下推
+ *    受阻支已按其语义落刀,校验候选面（实心/站台面顶/半砖+8/坡面放行门）已
+ *    逐 facet 对齐（见下推受阻支行内注释） */
 function slopeCollide(
   b: Body, world: World, feetEntry: number, vyEntry: number, wasGround: boolean,
   captureOnly = false, xPre = b.x,
@@ -455,8 +458,23 @@ function slopeCollide(
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
   if (srec) srec.push(`  win x[${x0}..${x1}] y[${y0}..${y1}] probe=+${((wasGround && b.vy >= 0) ? 1 : 0)}`);
   let bestLift = 0;      // 最大抬升量（负 y 位移;0 = 无贴合）
-  let bestLiftSlope = 0; // 胜出坡 id（1/2 地面坡；原版 bitsByte[num3] 语义,shortfall 滑向用）
+  // 原版 bitsByte[1]/[2]（:1965,num3=1/2 在 y 棘轮严格胜出支内置位）——shortfall 滑向用。
+  // ★双旗非单值（与 bestDropSlope3/4 同配方）：两位同设时原版写序 [1] 先(:2008-2010)
+  // [2] 后(:2012-2014),[2] 的绝对写整体覆盖（终位=Position.X+num9,左滑）。
+  //  ★可达性定谳（2026-09-08）：会 diverge 的序（bit2 先置、bit1 后严格胜出）要求
+  //  slope2 格在 slope1 格左侧同排且 bodyLeft>slope1.tileLeft ⇒ bodyRight>slope2.tileRight
+  //  ⇒ slope2 的 rawNum4<0 ⇒ 原版走 :1968-1998 站顶支（不置 bit）/本仓走 :602 站顶——
+  //  两边同样先制,该序结构性不可达;可达双 bit 序（slope1 左 slope2 右）新旧公式同值。
+  //  故本配方为【结构镜像+死码清除】（旧式 slope3 臂系死码：branch 1 只读
+  //  bitsByte[1]/[2],bestLift 亦只在 1/2 置位）,非行为修复。
+  let bestLiftSlope1 = false;
+  let bestLiftSlope2 = false;
   let bestDrop = 0;      // 天花板最大下推量
+  // 原版 bitsByte[3]/[4]（:1906,num3=3/4 在 y2 棘轮胜出支内置位）——受阻支滑向用。
+  // ★双旗非单值：两坡位都曾严格胜出时两位同设,原版写序 [3] 先 [4] 后（:2024-2031）
+  // ⇒ [4] 覆盖 [3]（右滑被左滑覆盖）——单值 argmax 会写错该角。
+  let bestDropSlope3 = false;
+  let bestDropSlope4 = false;
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
   // ★SW-BJ6 2026-09-07：vanilla else 支站顶候选（Collision.cs:1968-1977）——
@@ -591,7 +609,11 @@ function slopeCollide(
           const num5 = vy0 + TILE - b.y - num4;
           // G2 对称门（头目标=入口头+速度Y 与当前头取大）+ 命中即回写 collideY
           if (SLOPE_G2 && b.y + num5 <= Math.max(b.y, feetEntry - b.h + vyEntry)) continue;
-          if (num5 > bestDrop) { bestDrop = num5; if (SLOPE_G2) b.collideY = true; }
+          if (num5 > bestDrop) {
+            bestDrop = num5;
+            if (slope === 3) bestDropSlope3 = true; else bestDropSlope4 = true; // bitsByte[num3]（:1906）
+            if (SLOPE_G2) b.collideY = true;
+          }
         }
       } else {
         // ★SW-BJ6 2026-09-07：原版 else 支（Collision.cs:1968-1977）——实心地坡
@@ -616,7 +638,7 @@ function slopeCollide(
         if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
         if (num7 < bestLift) {
           bestLift = num7;
-          bestLiftSlope = slope;             // 胜出坡向（原版 bitsByte[num3]，num3=slope）
+          if (slope === 1) bestLiftSlope1 = true; else bestLiftSlope2 = true; // bitsByte[num3]=true（:1965,y 棘轮严格胜出支内）
           if (SLOPE_G2) b.collideY = true;   // bitsByte[num3]=true（:1954）
         }
       }
@@ -690,13 +712,30 @@ function slopeCollide(
       //   坡楔型地形永久 ±px 弹跳（behavior-log-Starter_World 2026-09-07 v_200 实锤,
       //   翻转实验2实测平衡态钉驻 cx ±0.1px、vx 0~0.07）。
       //   逐 tick 施行（原版无接触期记忆）。2026-09-01"弹飞太远"病灶在旧实现的
-      //   固定 4px 一次量,非逐 tick 本身——精确 num9 的平衡态滑移为亚像素；
-      //   个别场景若仍见远滑,以 srec 的 lift= 值归因,勿回退固定量。
+      //   固定 4px 一次量,非逐 tick 本身——★F4③（2026-09-08 口径订正）本仓
+      //   num9 = 全额截短前速度差（= |bestLift|,受阻判定整抬弃用无部分抬升,
+      //   原文 :2007 vector2.Y = Position.Y + vector5.Y 的部分写回未移植）,
+      //   非"精确 num9";平衡态滑移仍为亚像素量级,个别场景若仍见远滑,以 srec
+      //   的 lift= 值归因,勿回退固定量。
       //   旧 slopeBlockFired 一次性门及其 bestLift>=0 复位行一并退役（字段无外部
       //   消费面,已自 Body 接口删除）。
-      b.x += (bestLiftSlope === 1 || bestLiftSlope === 3) ? -bestLift : bestLift;
-      b.vy = 0;
+      // ②X 滑移（:2008-2014）：两写均自 Position.X 绝对式,写序 [1] 先 [2] 后 ⇒
+      //   双 bit 同设时 [2] 整体覆盖（终位=Position.X+num9）——bestLiftSlope1/2 双旗
+      //   配方（可达性定谳见声明处;单 bit 退化与旧单值 argmax 同值）。
+      const liftX = b.x;                                   // 原版 Position.X（坡段不改 X）
+      if (bestLiftSlope1) b.x = liftX - bestLift;          // :2008-2010（num9<0 ⇒ 右滑）
+      if (bestLiftSlope2) b.x = liftX + bestLift;          // :2012-2014（后写覆盖 ⇒ 左滑）
+      b.vy = 0;                                            // :2016-2017 双清
       b.vx = 0;
+      // ★F4④（2026-09-08）up = false 镜像（Collision.cs:2018,branch 1 收尾行）：
+      //   原版 up = TileCollision 天花板接触旗（:2448 `up = true`,移前盒底在格底
+      //   之下=上顶）,branch 1（:2004-2019）收尾明文清位——坡面贴合吞掉了本帧
+      //   位移,顶头报告一并抑制,防消费面误动作。本仓等价字段 = b.hitHead
+      //   （moveAxis 上行 Y 命中置位,TileCollision.ts moveAxis dir<0 支）;
+      //   原版消费面 = NPC.cs:93736/:93930 vy=0.01 下推、Player.cs:23731/:23767
+      //   jump=0、:28463 vy=0.01。仅受阻支清（branch 2 :2020-2034 无此行——
+      //   天花板下推受阻支不清 up,勿顺手镜像）。窗口窄:紧随双清之后逐字对位。
+      b.hitHead = false;
       // 物理埋点（探针取证用；window.__swPhysDbg 为真时计数）
       const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
       if (dbg) dbg.shortfall = (dbg.shortfall ?? 0) + 1;
@@ -738,31 +777,82 @@ function slopeCollide(
   }
   if (bestDrop > 0) {
     positionChanged = true;
-    // 下推守卫:推离后不能嵌进下方实心(对称于抬升守卫)
+    // 下推守卫:推离后不能嵌进下方实心(对称于抬升守卫)。★F3/F4③（2026-09-08）升格为
+    // 原版受阻支的 vector5 等价采集:同趟扫出「允许下推量」= 受阻格中(格顶−当前脚底)
+    // 的最小正值(:2388 进近门 `vector3.Y + Height <= vector4.Y` 同式;num6 棘轮取最高
+    // 格顶同义)——即原版 :2003 重跑 TileCollision 的放行量 vector5.Y。
     const ny = b.y + bestDrop;    let blocked = false;
+    let allowedDrop = Infinity;   // vector5.Y 等价 ∈ [0,bestDrop);Infinity = 无进近门内受阻格
     const bx0 = Math.floor(b.x / TILE), bx1 = Math.floor((b.x + b.w - 0.01) / TILE);
     const by0 = Math.floor(ny / TILE), by1 = Math.floor((ny + b.h - 0.01) / TILE);
-    for (let tx = bx0; tx <= bx1 && !blocked; tx++) {
+    for (let tx = bx0; tx <= bx1; tx++) {
       for (let ty = by0; ty <= by1; ty++) {
         if (!st.inBounds(tx, ty)) continue;
         const j = st.idx(tx, ty);
-        if (!st.isSolid(tx, ty) || st.slope[j] > 0 || st.half[j]) continue;
-        const top = ty * TILE + (st.half[j] ? 8 : 0);
-        if (b.x + b.w > tx * TILE && b.x < tx * TILE + TILE && ny + b.h > top && ny < (ty + 1) * TILE) { blocked = true; break; }
+        const sl = st.slope[j];
+        let top: number;
+        if (sl === 1 || sl === 2) {
+          continue;   // flag2 恒真（:2372-2374）⇒ :2399 !flag2 恒假 ⇒ 地面坡从不截短下推
+        }
+        if (sl === 3 || sl === 4) {
+          // 坡面放行门（:2363/:2367 flag3）——重跑校验位移 X=0 ⇒ |Velocity.X|=0,
+          // 过门（移前头在格顶之下且缘未越低端）跳过;不过门 ⇒ 以格顶截短
+          //（:2388-2403,num7=16,flag2=false）——天花板坡顶面=实心地面（moveAxis 同约定）
+          const topTile = ty * TILE;
+          const pass = (sl === 3 ? b.x >= tx * TILE : b.x + b.w <= tx * TILE + TILE)
+            && b.y >= topTile;
+          if (pass) continue;
+          top = topTile;
+        } else if (!st.isSolid(tx, ty) && !st.isPlatform(tx, ty)) {
+          continue;     // 非实心非站台面（:2330-2334 flag 门;isPlatform 即 tileSolidTop&&frameY==0 语义,TileStore :205-240）
+        } else {
+          top = ty * TILE + (st.half[j] ? 8 : 0);   // :2350-2354（半砖盒顶 +8）
+        }
+        if (b.x + b.w > tx * TILE && b.x < tx * TILE + TILE && ny + b.h > top && ny < (ty + 1) * TILE) {
+          blocked = true;
+          const gap = top - (b.y + b.h);            // ≥0 = 进近门内(未嵌,:2388);<0 = 已嵌态
+          if (gap >= 0 && gap < allowedDrop) allowedDrop = gap;
+        }
       }
     }
-    if (!blocked) {
+    const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
+    if (blocked && dbg) dbg.ceilDropBlocked = (dbg.ceilDropBlocked ?? 0) + 1;
+    if (!blocked || !Number.isFinite(allowedDrop)) {
+      // 无截短:无受阻格,或受阻格全为已嵌态(进近门不过 ⇒ 校验不截短 ⇒ :2004/:2020
+      // 两分支均不点火)——全推 + 坡面推离速率地板原样(:1899-1907)。
       b.y = ny;
       if (b.vy < 0.0101) b.vy = 0.0101; // 原版向下推离（:1902-1905）
     } else {
-      // 天花板坡下推受阻——★2026-09-01 阻尼定罪修复：旧实现此处 vx=0/vy=0，
-      // 与输入加速度构成「加 0.08 → 清零」每帧循环 = 蠕动+站立态滑行（实机探针
-      // i19 起逐样本同步定罪）。vanilla SlopeCollision 天花推离【无任何受阻清零】：
-      // :1897-1921 成功仅 vy≥0.0101；截短发生在收尾 TileCollision 校验，按
-      // bitsByte[3]/[4] 转水平滑动或直接采纳更短位移，从不碰 X 速度。分轴架构
-      // 等价做法 = 放弃本次下推（不应用 ny）、速度保持，X 交给下一帧正常链路。
-      const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
-      if (dbg) dbg.ceilDropBlocked = (dbg.ceilDropBlocked ?? 0) + 1;
+      // ★天花板坡受阻支对齐原文（Collision.cs:2020-2034 `else if (vector5.Y < velocity.Y)`,
+      // 2026-09-08 落刀,销 2026-09-01 登记债——此前本支=整段弃用位移+速度保持+无滑移）：
+      //   velocity = vector2 − Position = 坡面下推位移(num5,本仓 bestDrop);vector5 =
+      //   以该位移重跑无坡 TileCollision 的放行量(本仓 allowedDrop);分支条件
+      //   vector5.Y < velocity.Y = 下推被下方地形截短。原文明文三件：
+      //   ①截短下推 :2023 vector2.Y = Position.Y + vector5.Y（采纳放行量=部分下推,
+      //     脚底落在受阻格顶,非【弃用】）;
+      //   ②沿坡水平滑移 :2024-2031 num10 = vector5.Y − velocity.Y < 0（:2022）,
+      //     bitsByte[3]→vector2.X = Position.X − num10（slope3 头顶净空向右增 ⇒ 右滑）、
+      //     bitsByte[4]→+num10（slope4 ⇒ 左滑）;两位同设时原版写序 [3]后[4] ⇒ [4]覆盖;
+      //   ③速度双清 :2032-2033 vector3.X = 0f; vector3.Y = 0f（清的是全速度,含本帧
+      //     重力/轴速度——AI_003 卡死计数链 NPC.cs:57703 的物理前提,与 shortfall 支
+      //     :2016-2017 同源）。
+      //   X 写回为自 Position.X 的绝对式（本仓坡段不改 X ⇒ b.x 即 Position.X,见下）。
+      //   截短候选面已按原版校验全开（2026-09-08 续刀）：半砖盒顶+8（:2350-2354）、
+      //   站台面顶（:2330-2334+:2391——校验调用 :2003 硬编码 fallThrough=false ⇒
+      //   无需 fallThrough 状态机;isPlatform 谓词=TileStore :205-240 已定谳的
+      //   tileSolidTop&&frameY==0 语义）、坡面放行门（:2361-2387 flag3,校验位移
+      //   X=0 ⇒ |Velocity.X|=0;slope1/2 flag2 恒真从不截短,slope3/4 过门跳过/
+      //   不过门按格顶截短）;已嵌态原版走全推（校验无支命中）,本仓同
+      //   （归 !Number.isFinite 臂）。
+      b.y += allowedDrop;                                  // ①:2023
+      const num10 = allowedDrop - bestDrop;                // ②:2022（<0）
+      // ②原版两写均为【自 Position.X 绝对式】（坡段不改 X ⇒ b.x 即 Position.X）——
+      //   两位同设时 [4] 的绝对写整体覆盖 [3],非增量抵消;单 bit 退化同增量等价。
+      const dropX = b.x;                                   // 原版 Position.X
+      if (bestDropSlope3) b.x = dropX - num10;             // :2024-2026（num10<0 ⇒ 右滑）
+      if (bestDropSlope4) b.x = dropX + num10;             // :2028-2030（后写覆盖 ⇒ 左滑）
+      b.vx = 0;                                            // ③:2032
+      b.vy = 0;                                            // ③:2033
     }
   }
   if (srec) {

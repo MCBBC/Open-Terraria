@@ -115,9 +115,10 @@ await new Promise((r) => setTimeout(r, 1200));
 
 // 截图存档(先关欢迎弹窗)
 await page.evaluate(() => {
-  const btn = [...document.querySelectorAll('button, .sw-btn')].find((b) => (b.textContent || '').includes('我知晓'));
+  const btn = [...document.querySelectorAll('button')].find((b) => (b.textContent || '').includes('知晓'));
   if (btn) btn.click();
-  window.__swUI.openInventory();
+  document.getElementById('sw-welcome-announce')?.remove();   // 兜底:直接摘遮罩
+  window.__swUI.openInventory(true);   // force:前序步骤可能已开(无 force 会翻转成关)
 });
 await new Promise((r) => setTimeout(r, 400));
 await page.screenshot({ path: '/tmp/vanilla-inv-knife2.png' });

@@ -5,13 +5,18 @@
 //   ② 纯空域缓降：下方 8+ 格无遮挡 → vy 钳 ≤2/tick
 //   ③ 湿（入水）→ 当 tick 爆裂死亡（原版 wet 支 :44032-44047）
 //   ④ 前方近地遮挡 → 上升（flag2 −0.2 档）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 const W = 160, H = 140, FLOOR = 100;
 

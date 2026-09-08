@@ -33,6 +33,8 @@ function fakeStore(cells: Array<{ x: number; y: number; t: number; fx: number; f
   return {
     idx: (x: number, y: number) => x * 100000 + y,
     isActive: (x: number, y: number) => map.has(String(x * 100000 + y)),
+    // 幽灵格门(Banners.ts hasTile 消费位)——桩内 map 有格即 hasTile(位0 语义)
+    hasTile: (x: number, y: number) => map.has(String(x * 100000 + y)),
     type: new Proxy({}, { get: (_t, p) => map.get(String(p))?.t ?? 0 }),
     frameX: new Proxy({}, { get: (_t, p) => map.get(String(p))?.fx ?? 0 }),
     frameY: new Proxy({}, { get: (_t, p) => map.get(String(p))?.fy ?? 0 }),

@@ -11,7 +11,7 @@
 // 由单 tick 改为循环至死(gate 使首施加最早第 3 拍、最迟第 5 拍),新增入液即爆用例。
 // 锚点：Item.cs case 2610 :25505-25518 / Projectile.cs :4866-4875(SetDefaults)/
 //       :29430-29700(AI)/:75506-75515(Kill 尘爆)
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';            // 断活环加载序（同 chester-pet 先例）
 import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
@@ -19,6 +19,12 @@ import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { SlimeGlob } from '../src/entities/SlimeGlob';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）:
+// 用例②③的 ai[0]>3 出生门掷流（Next(10,21)×0.1 步进率）依赖序列映射,播种后恒定。
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 /** 最小 Game 桩（chesterGame 同法）：真实 Player + 记录面 */
 function slimeGunGame(mouseAt: [number, number]) {

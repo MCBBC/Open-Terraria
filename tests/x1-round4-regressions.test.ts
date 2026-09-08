@@ -269,6 +269,26 @@ describe('SW-X1 L-1：655 蜂巢（AI_025）X 自加速/入水 Kill/反弹 HitTi
     expect(dryEnv.sounds).toContain('killed');
   });
 
+  it('② b 出生预置对称面：空中出生预置 wet=false → 首拍不杀,入水采样次拍 Kill（防过修）', () => {
+    // 预置 = NewProjectile :10887 出生盒 WetCollision 采样——空中出生盒扫窗内无液 →
+    // wet=false（原版同相）。反向钉:预置若盲置 true,空中出生蜂巢首拍即误杀。
+    // 水置 row15:同 ②（wetCollision 扫窗上界 st.h−40,60 行世界=须 row<20）。
+    const env = mkEnv();
+    carveShaft(env.w, 39, 41, 8, 19);
+    env.w.store.setLiquid(40, 15, 255, 0);
+    const kills: boolean[] = [];
+    const p = new GrenadeProj(40 * TILE, 9 * TILE, 0, 0, 10, 3600, 655, () => {});
+    p.w = 31; p.h = 31;                                     // SetDefaults :7043-7045（同 ②）
+    p.onBeehiveKill = (wet) => { kills.push(wet); };
+    p.fixedUpdate(0, env.g);                                // 首拍:预置 wet=false → AI 不杀
+    expect(p.dead).toBe(false);
+    expect(p.wet).toBe(false);
+    expect(kills).toEqual([]);
+    for (let t = 0; t < 120 && !p.dead; t++) p.fixedUpdate(0, env.g);   // 直落入水
+    expect(p.dead).toBe(true);
+    expect(kills).toEqual([true]);                          // 入水采样拍 → 次拍 Kill（上拍采样,R2 P2-4 同口径）
+  });
+
   it("③ 反弹同拍 Collision.HitTiles + 音 0（'dig'）,反弹 vy=lastVy×-0.2 只弹不杀", () => {
     const env = mkEnv();
     carveShaft(env.w, 39, 41, 40, 49);

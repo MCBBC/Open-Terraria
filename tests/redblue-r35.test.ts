@@ -64,7 +64,10 @@ describe('R35-B 669/753 宠物召唤件(use=装备/卸下宠物槽)', () => {
 
 describe('R35-C 1168 烟雾弹弹跳真值(aiStyle14)', () => {
   it('C-1 出膛支=grav0.2+bounce+penetrate−1(AI_014 尾 :25380 区段)', () => {
-    const blk = gameSrc.match(/tc\.shoot === 196[\s\S]{0,900}?return;/);
+    // ★锁窗 900→1600（2026-09-08）：196 支本体零变更（grav/life/pierce/bounce 原位）,
+    //  并行批在锚与 return 间净插 ~230+ 字（同函数域邻支注释/登记注）撑爆旧惰性窗——
+    //  γ 定谳"纯锁窗伪红";窗放宽至 1600 并保留内容三钉(行为面仍由三钉锁死)。
+    const blk = gameSrc.match(/tc\.shoot === 196[\s\S]{0,1600}?return;/);
     expect(blk).toBeTruthy();
     expect(blk![0]).toContain('grav: 0.2');
     expect(blk![0]).toContain('bounce: true');

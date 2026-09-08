@@ -331,17 +331,33 @@ describe('SW-BJ16 ④B 支改锚特例行为锁（支内逐型照录,防「无�
     }
   });
 
-  it('963 阿比盖尔：4×13 网格第 0 列切片（帧 44×64,非整宽竖条）+ 锚 Y−2（cos 摆=债）', () => {
+  it('963 阿比盖尔：4×13 网格第 0 列切片（帧 44×64）+ 锚 Y=−2+cos(mouseTextColor/255·4π)·4（★SW-BN6 2026-09-08 债⑤接线,Main.cs:33836-33844）', () => {
     setProjSpriteOverride(963, fakeTex(176, 832));
     const { player } = makeHooks();
     const m = mkOnGround(963, player);                               // 真盒 30×48
     (m as { a963Frame: number }).a963Frame = 5;
+    // mt=255（摆顶 cos(4π)=1）→ 锚 Y=−2+4=+2;灯未就绪回退 255 同值（摆顶静止形）
     const rec = recordingCtx();
     m.draw({ ctx: rec.ctx } as never);
-    expect(rec.translates).toEqual([[m.cx, m.cy - 2]]);              // :33836-33844 静态 −2
+    expect(rec.translates).toEqual([[m.cx, m.cy + 2]]);
     expect(rec.draws).toHaveLength(1);
     // 9 参切片 drawImage(sheet, 0, 5×64, 44, 64, −22, −32, 44, 64)
     expect(rec.draws[0].args).toEqual([0, 5 * 64, 44, 64, -22, -32, 44, 64]);
+    // mt=190（摆底）→ cos((190/255)·4π)=−0.9981033287370441 → 锚 Y≈−5.9924
+    const recLow = recordingCtx();
+    m.draw({ ctx: recLow.ctx, lighting: { clock: { mouseTextColor: 190 } } } as never);
+    expect(recLow.translates[0][0]).toBe(m.cx);
+    expect(recLow.translates[0][1]).toBeCloseTo(m.cy - 5.992413314948177, 9);
+    // mt=222（波节附近）→ cos=−0.05541147491596934 → 锚 Y≈−2.2216（mt 被逐帧消费的活证）
+    const recMid = recordingCtx();
+    m.draw({ ctx: recMid.ctx, lighting: { clock: { mouseTextColor: 222 } } } as never);
+    expect(recMid.translates[0][1]).toBeCloseTo(m.cy - 2.2216458996638773, 9);
+    // 摆只进 963:1098/1123 仍纯 −2（:33771-33773 无 cos 项）
+    setProjSpriteOverride(1098, fakeTex(82, 506));
+    const m2 = mkOnGround(1098, player);
+    const recB = recordingCtx();
+    m2.draw({ ctx: recB.ctx, lighting: { clock: { mouseTextColor: 255 } } } as never);
+    expect(recB.translates).toEqual([[m2.cx, m2.cy - 2]]);
   });
 });
 

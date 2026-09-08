@@ -53,9 +53,13 @@ describe('方块环境粒子规则表（TileParticles）', () => {
     for (const sheet of [215, 592] as const) {
       const rules = TILE_PARTICLE_RULES.get(sheet)!;
       expect(rules).toHaveLength(3);
-      // 原版每列 1/12/帧（外层 Next(4) × Next(3)），×3 扫描 = 0.25
+      // ★2026-09-09 掷链归属分账（续单件2 勘误,旧注"同构块:外层 Next(4)×Next(3)"
+      // 对 215 不成立）：215 主路径全率 1/3/帧（:6901 仅 Next(3),无外层门;
+      // Lighting.cs:77-85 缺省每帧发）→ ×3 = 1;592 结构门 :9665 Next(4) × :6917
+      // Next(3) = 1/12/帧 → ×3 = 0.25
+      const wantProb = sheet === 215 ? 1 : 0.25;
       for (const r of rules) {
-        expect(r.prob).toBeCloseTo(0.25, 5);
+        expect(r.prob).toBeCloseTo(wantProb, 5);
         expect(r.dxBox).toBeDefined();
         expect(r.dyBox).toBeDefined();
       }
@@ -131,9 +135,10 @@ const VANILLA_SHINE_COLOR: ReadonlyArray<readonly [number, string]> = [
 ];
 
 describe('tileShine 矿物闪光 1:1（Main.cs × TileDrawing.cs:7537-7654）', () => {
-  // 闪光规则签名 = 带 lightGate 的规则（全规则表仅闪光族携带）
+  // 闪光规则签名 = 带 dust 通道的规则（全规则表仅闪光族携带;★F7 2026-09-08：
+  // 旧签名 lightGate 系死字段——发射器从不消费,已随注释销账删除）
   const shineRulesOf = (sheet: number): TileParticleRule[] =>
-    (TILE_PARTICLE_RULES.get(sheet) ?? []).filter((r) => r.lightGate !== undefined);
+    (TILE_PARTICLE_RULES.get(sheet) ?? []).filter((r) => r.dust !== undefined);
 
   it('表抽取：55 型全覆盖、shine 值零漂移（178 拆七列 prob=24/500）', () => {
     const scalar = new Map(SHINE_TABLE.map((s) => [s.sheet, s.shine] as const));
@@ -218,7 +223,8 @@ describe('tileShine 矿物闪光 1:1（Main.cs × TileDrawing.cs:7537-7654）', 
     expect(heart.prob).toBeCloseTo(24 / 300, 12);  // ≡ 原版满光 8/300/帧 ×3 tick 扫描
     expect(heart.color).toBe('#FF0000');           // :7636 newColor(255,0,0)
     expect(heart.pred).toBeUndefined();            // 2×2 每格独立可闪
-    expect(heart.lightGate).toBe(20);              // :7539-7543 三通道 max>20 门
+    // :7539-7543 三通道 max>20 门由发射器 num43=max/30 概率归零吸收（max≤30 ⊇
+    // max≤20,同语义单点计算;★F7 曾挂的 rule.lightGate 死字段已删）
     expect(heart.dust).toBe(43);                   // TintableDustLighted
     expect(heart.dustAlpha).toBe(254);
     // 概率域：折算后不得超 1（表内最小 shine=300 → 恒真，结构性保险）

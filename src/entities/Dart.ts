@@ -293,11 +293,12 @@ export class TrapShot extends Entity {
   //  位序口径：原版 AI(:16880) → 湿段(:16903) → HandleMovement(:17120)/
   //  UpdatePosition(:19973)。本域各 aiStyle（1/2/5/14/25/34/49/73）AI 段湿旗消费者
   //  普查（AI() 全域 :23404-37400 wet 读点 ：24351 aiStyle5(1037/1049 尘 6 !wet 门)
-  //  /:25563/:25590 aiStyle14(326-328,400-402,1107-1109 专属)——本类现役受理面唯
-  //  1049 命中）→ 湿段置 tick 头（AI 前）时,1049 尘链落位于湿段调用【之后】
-  //  （fixedUpdate 内,见下）→ 门读当拍段值（出生拍=预置值,较原版 AI 读上一子步段值
-  //  新 ≤1 子步,视觉尘门登记域）;其余 kind 消费面为零,语义不变。湿阻尼 :17721-17764
-  //  读【本拍刷新后】旗。----
+  //  /:25563/:25590 aiStyle14(326-328,400-402,1107-1109 专属)/:26320 aiStyle24(1114)/
+  //  :26754 aiStyle25 尾 AnyWet Kill(1053/655/727/1054)/:27387/:27399 aiStyle32/
+  //  :27685 aiStyle36(307)/:30078 aiStyle65/:30725 aiStyle68/:33599 aiStyle95——本类
+  //  现役受理面唯 1049 命中）→ 1049 尘链读相已按原版时序修（2026-09-08 上子步段值
+  //  快照 wetSub0,逐轮同源,见 fixedUpdate 湿段块注）;其余 kind 消费面为零,语义不变。
+  //  湿阻尼 :17721-17764 读【本子步刷新后】旗（原文同相,勿改读快照）。----
   wet = false;
   lavaWet = false;
   honeyWet = false;
@@ -395,17 +396,31 @@ export class TrapShot extends Entity {
     //      弹面 10 粒;豁免 id 由共享体 :16903 整段门早退=零触发）----
     //  置于 timeLeft 递减/Kill 前：原版湿段 :16903 与 timeLeft--(:17307)/Kill(:17308)
     //  同在子步环内且在前 → 寿终拍湿段照跑（烟花支 fireworkUpdate 头同口径）
+    //  ★AI 湿旗读相=上子步段值快照 wetSub0（2026-09-08 定谳批）:vanilla 子步环
+    //  (:16781 while(numUpdates>=0)) 内序=AI(:16880)→湿段(:16903)→位移 → 子步 k 的
+    //  AI 读子步 k-1 段值（本域唯一湿旗消费者=aiStyle5 :24351 !wet 尘门）;本链 2 轮
+    //  连排（AI 逐子步拆分=尘点位次域,既有登记不动）→ 轮1 读 wetSub0（=上拍子步2
+    //  段值=vanilla 子步1 AI 读值,逐位同源）、轮2 读当拍拍头段值（=vanilla 子步2 AI
+    //  读值）。首拍预置先行单跑=首拍子步1段（首拍未移动,采样位=出生盒=
+    //  NewProjectile :10886-10893 同位）→ 快照=预置值（vanilla 首子步 AI 读预置值同相）。
     const wetId = trapWetProjId(this.kind, this.form);
-    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
-      wetId, !!projectileData(wetId)?.ignoreWater);
+    const presetFirst = !this.presetDone;
+    if (presetFirst) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        wetId, !!projectileData(wetId)?.ignoreWater);
+    }
+    const wetSub0 = this.wet;
+    if (!presetFirst) {
+      projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+        wetId, !!projectileData(wetId)?.ignoreWater);
+    }
 
     // ---- 1049 天界塔霰石 AI_5 尘链（1457 :24342-24364 aiStyle5 `type != 1037 &&
     //      type != 1049 return` 后的 1037/1049 专属支;2026-09-06 残差清偿——本链此前
-    //      整条缺位）:落位=湿段调用【后】——!wet 完美支（:24359）读本湿段刚写下的
-    //      当拍旗（出生拍=预置值,同原版 NewProjectile 预置先于首拍 AI;后续拍较原版
-    //      AI 读上一子步段值新 ≤1 子步,视觉尘门登记域）。★extraUpdates=1（:9949）→
-    //      原版 AI 在子步环内（:16781 while(numUpdates>=0)）每拍跑 2 次 → 本链每拍
-    //      2 轮（steps 同源）。
+    //      整条缺位）:!wet 完美支（:24359）读相已按原版时序修（2026-09-08 上子步段值
+    //      快照批,逐轮读值见湿段块注——轮1=上拍子步2段值/轮2=本拍子步1段值,与原版
+    //      子步1/子步2 AI 读值逐位同源）。★extraUpdates=1（:9949）→ 原版 AI 在子步环
+    //      内（:16781 while(numUpdates>=0)）每拍跑 2 次 → 本链每拍 2 轮（steps 同源）。
     //      逐值：vector9=Center+Normalize(v)×10（:24343）;两支各 1/2 掷（:24344/:24358）
     //      尘型 Next(4)==0?6:31（:24345）——velocity=（v.RotatedBy(±π/2)×0.25+v/3)×0.9
     //      （:24347 绝对赋值,消解 NewDust 抖与 6 号烟族型内初速——原版同款覆写）、
@@ -421,6 +436,8 @@ export class TrapShot extends Entity {
       const hnx = hsp > 1e-6 ? this.vx / hsp : 0;
       const hny = hsp > 1e-6 ? this.vy / hsp : 0;
       for (let hs = 0; hs < hailSteps; hs++) {
+        // ★读相（2026-09-08 快照批）：轮 k 读子步 k-1 段值（vanilla AI 先于湿段跑）
+        const wetRead = hs === 0 ? wetSub0 : this.wet;
         const v9x = this.cx + hnx * 10, v9y = this.cy + hny * 10;        // vector9 :24343
         for (const side of [-1, 1] as const) {                            // +π/2 支先掷（:24344）
           if (Math.random() >= 0.5) continue;                             // Main.rand.Next(2)==0
@@ -439,7 +456,7 @@ export class TrapShot extends Entity {
             d.noGravity = true;                                           // :24352
           }
         }
-        if (!this.wet) {                                                  // :24359（读上拍旗）
+        if (!wetRead) {                                                   // :24359（!wet 门,读相见上注）
           const ha = Math.random() * Math.PI * 2;                         // NextVector2Unit :Utils.cs:1295
           const hr = Math.random() * 25;                                  // ×NextFloat()×(25,25) :Utils.cs:1301
           const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 6);          // NewDustPerfect(Position,0,0,6)

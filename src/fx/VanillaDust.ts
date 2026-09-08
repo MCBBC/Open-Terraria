@@ -6,8 +6,9 @@
 // （翅膀尘埃 13 型：6/31/43/55/58/76/86/182/217/229/240/261/264；拴绳批 5 型：
 // 43/15/267/278/6；钻头坐骑 230——见各 case 行号），逐型带源码行号；
 //   2026-09-03 双轴/1135 批追加：水尘族 NewDust :232-237 + UpdateDust :1904-1946
-//   独立段（33 缺省水型=1135 KrakenWave 尾尘;52/266/98-105/123/288/308 随单段源支
-//   同移植）+ PrettySparkle 双轴通道（scaleX/scaleY,接口注）;
+//   独立段（33 缺省水型=1135 KrakenWave 尾尘;52/266/98-105/123/288 随单段源支
+//   同移植;308 兄弟支 :227-230 无 alpha=170,★F5 2026-09-08 补 spawn 侧）+
+//   PrettySparkle 双轴通道（scaleX/scaleY,接口注）;
 // ② **家族补全**（2026-09-01 起）：整段家族一次到位，含当前 0 发射方的型，
 // 防将来启用时静默缺光/缺 alpha——首批 EoC/肉山尘族 110-114/311-313（Dust.cs
 // 链 A 独占链接 :1564-1635 + GetAlpha :2583-2586，均无 noLight/noLightEmittance 门）；
@@ -27,11 +28,14 @@
 //  ① 链 A 独占 else-if 链（:423-2139）：一尘至多命中一链接，命中者跳过 :1884
 //     通用重力与 :2136 兜底 vx×0.99（267/278 例外见 case 注）；
 //  ② 公共段：:2144 旋转 + :2148 fadeIn 老化（全体）；
-//  ③ 链 B 独占链（:2197-2386）：130-134/278/219-223/226/272/331 + :2379 兜底
+//  ③ 链 B 独占链（1457 行号 :2202-2413）：130-134（:2202）/278（:2245）/219-223
+//     （:2275）/226（:2317）/331（:2352）/272（:2375）+ :2407 兜底
 //     （type!=304 && noGravity → velocity×0.92、fadeIn==0 时 scale−0.04）。
 //     ★R4-30：226/272/331 三档已实装（226 固定蓝光/272 固定紫光/331=1457 新自色光
 //     受 noLightEmittance 门）——头注曾虚标覆盖、实际 switch 缺 case（226 被闪电弹
-//     真实消费落 default）。331 绘制端拖影/四向贴片（M57:39639-39695）已实装（Renderer 拖影 331 专属色 +本体五贴片+全亮桶,2026-09-01 清偿）。
+//     真实消费落 default）。★F2（2026-09-08）：130-134/219-223 两支补齐（此前头注
+//     虚标成员、switch 实缺 → 落 default 吃兜底=原文明文拒绝）。331 绘制端拖影/四向
+//     贴片（M57:39639-39695）已实装（Renderer 拖影 331 专属色 +本体五贴片+全亮桶,2026-09-01 清偿）。
 //  本引擎 switch(链A)+老化后 switch(链B) 两段对应；261/264/182 维持翅膀批
 //  既有链 A 单段近似（其后通用重力照旧——扩表时勿动）。
 //
@@ -304,6 +308,14 @@ export class VanillaDust {
       d.vy = ((Math.random() * 16 | 0) - 10) * 0.1;
       d.vx *= 0.3;
       d.scale *= 0.7;
+    }
+    // ★F5（2026-09-08 红队清偿）:227-230 308 兄弟支——velocity×0.5 + Y++，【无】
+    //  alpha=170（170 是 :232-237 水尘族句内赋值,308 不在其成员表;update 侧水尘族
+    //  独立段 :1904 源支本就含 308,仅 spawn 侧缺）。prettySparkle 载体随链跳过
+    //  （同水尘族注）。
+    if (!ps && type === 308) {
+      d.vx *= 0.5;
+      d.vy = d.vy * 0.5 + 1;
     }
     // :232-237 水尘族（33=缺省水型 dustWater :419/52/266/98-105——1135 KrakenWave
     //  尾尘 33 批接入,单段源支全成员随支移植）：alpha=170 + velocity×0.5/Y++。
@@ -705,7 +717,7 @@ export class VanillaDust {
         if (d.type === 213 || d.type === 260) d.scale -= 0.2;
         else d.scale -= 0.01;
       }
-      // ---- 链 B 独占段（:2197-2386，公共老化之后）----
+      // ---- 链 B 独占段（1457 :2202-2413，公共老化之后）----
       switch (d.type) {
         // R4-30：226/272/331 三档补（Dust.cs:2317-2400;1456 无 331,226/272 曾落
         // default 无光无阻尼——226 被 LightningBoltProj 真实消费）。customData
@@ -770,12 +782,58 @@ export class VanillaDust {
           }
           break;
         }
-        // :2379-2386 链 B 兜底（★2026-09-07 水花尺寸定谳,用户实报"水花非常大"——
+        // :2407-2413 链 B 兜底（★2026-09-07 水花尺寸定谳,用户实报"水花非常大"——
         //  原文此兜底=【全 type 缺省档】(链 B 各 case 未命中的尘都评估:type!=304 &&
         //  noGravity → velocity×0.92 + fadeIn==0 → scale−0.04)。旧实现做成 15 型
         //  白名单 case,水花尘 33/52/98-105/123/288/308 不在册=漏 −0.04/×0.92——
         //  水滴原版净变化 +0.025−0.01−0.04=−0.025/t 约 52t 缩没,白名单版反向
         //  +0.005/t 生长 78t=用户观感"水花非常大"）
+        // ★F2（2026-09-08 红队清偿）：130-134 支（:2202-2243，1457 行号；旧版仅
+        //  alphaOf 有同型档、update 侧整支缺 → 落 default 吃 ×0.92/−0.04=原文明文
+        //  拒绝的兜底）。光 = min(scale,1)×逐型恒量，【无 noLight 门】（与 278/219-223
+        //  的 !noLight 门不同，原文直呼 Lighting.AddLight）；134 无光档。
+        //  阻尼三臂互斥：noGravity→×0.93(+fadeIn==0 scale+0.0025)/else if 131→
+        //  ×0.98+Y−0.1+scale+0.0025/else→×0.95+scale−0.0025。当前仓内 0 发射方
+        //  （潜伏债防静默缺光,家族补全同批纪律）。
+        case 130: case 131: case 132: case 133: case 134: {
+          const k = Math.min(d.scale, 1);
+          if (d.type === 130) this.lights.push({ x: d.x, y: d.y, r: k, g: 0.5 * k, b: 0.4 * k });
+          else if (d.type === 131) this.lights.push({ x: d.x, y: d.y, r: 0.4 * k, g: k, b: 0.6 * k });
+          else if (d.type === 132) this.lights.push({ x: d.x, y: d.y, r: 0.3 * k, g: 0.5 * k, b: k });
+          else if (d.type === 133) this.lights.push({ x: d.x, y: d.y, r: 0.9 * k, g: 0.9 * k, b: 0.3 * k });
+          if (d.noGravity) {
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          } else if (d.type === 131) {
+            d.vx *= 0.98; d.vy = d.vy * 0.98 - 0.1;
+            d.scale += 0.0025;
+          } else {
+            d.vx *= 0.95; d.vy *= 0.95;
+            d.scale -= 0.0025;
+          }
+          break;
+        }
+        // ★F2：219-223 支（:2275-2315）。光 = !noLight 门 × min(scale,1)×逐型恒量
+        //  （223 无光档）；阻尼 = noGravity→×0.93(+fadeIn==0 scale+0.0025)【后】
+        //  无条件 ×(0.97,0.99) + scale−0.0025（两段叠乘,与 226/272 同构但 scale 档
+        //  是 −0.0025 非 −0.01）。customData=Player 跟随档（:2308-2313）本仓无该
+        //  字段=不建模（备案,同 226/272）。当前仓内 0 发射方。
+        case 219: case 220: case 221: case 222: case 223: {
+          const k = Math.min(d.scale, 1);
+          if (!d.noLight) {
+            if (d.type === 219) this.lights.push({ x: d.x, y: d.y, r: k, g: 0.5 * k, b: 0.4 * k });
+            else if (d.type === 220) this.lights.push({ x: d.x, y: d.y, r: 0.4 * k, g: k, b: 0.6 * k });
+            else if (d.type === 221) this.lights.push({ x: d.x, y: d.y, r: 0.3 * k, g: 0.5 * k, b: k });
+            else if (d.type === 222) this.lights.push({ x: d.x, y: d.y, r: 0.9 * k, g: 0.9 * k, b: 0.3 * k });
+          }
+          if (d.noGravity) {
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          }
+          d.vx *= 0.97; d.vy *= 0.99;                    // :2306 无门叠乘
+          d.scale -= 0.0025;
+          break;
+        }
         default:
           if (d.type !== 304 && d.noGravity) {
             d.vx *= 0.92; d.vy *= 0.92;
@@ -846,7 +904,15 @@ export class VanillaDust {
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
       case 230: return { rgb: 1, a: 0 };   // :2616-2619 Color(255,255,255,0)——钻头尘本体透明，纯光源
       case 229: return { rgb: 1, a: 25 / 255 };   // :2659-2663（Lerp(lighting,White,0.6) 近似为全亮基底，备案）
-      case 43: return { rgb: (num + 9) / 10, a: (num + 9) / 10 };   // :2755-2758（num+9)/10 闪光尘恒亮档——tileShine 闪光可见度批补（漏则闪尘近乎隐形）
+      // ★F1（2026-09-08 红队清偿,用户可见伪影）：原文 (num+9)/10 【只乘 RGB】
+      //  （Dust.cs:2757-2758；num=(255−alpha)/255 :2503）；alpha 通道走 GetAlpha 尾段
+      //  `newColor.A − alpha`（:2786-2792），而 DrawDust :39664 传 Lighting 色其 A 恒
+      //  255 → 逐字节 = 255−alpha ≡ 本仓 num。旧 `a:(num+9)/10` 把 erase 面顶到
+      //  texA×0.9：tileShine 闪尘（spawn α=254,TileDrawing.cs:7657）每颗把世界层
+      //  90% alpha 擦掉 = 矿石/宝箱贴图被亮斑掏底（同 2026-09-04 水花黑十字族）。
+      //  修复后 α≈num=1/255 ≈ 纯加性 glint、rgb≈0.9×光。消费面：43 型恒走 Renderer
+      //  A=0 直绘双 pass（drawVanillaDustPass ★F1 判据，不经烘焙对）。
+      case 43: return { rgb: (num + 9) / 10, a: num };   // :2755-2758 + :2786-2792
       case 55: return { rgb: (num + 3) / 4, a: num };   // :2725-2727（num+3)/4 光乘区折减族
       // 15/57/274 亮色族走默认档：本体 A=255−alpha（:2756-2759），(num+3)/4 的
       // 光乘区折减由"画在合成后强制 White"（DrawDust :38406）等价表达

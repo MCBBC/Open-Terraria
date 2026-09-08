@@ -575,14 +575,14 @@ describe('特效发射器幽灵格门', () => {
     g.world = w;
     g.tickCount = 0;                                    // 0%3===0 → 发射拍
     g.camera = { x: 20 * TILE, y: 20 * TILE, viewW: 640, viewH: 480, zoom: 1 };
-    g.lighting = { lightAt: () => [255, 255, 255] };    // 满光（lightGate 20 过）
+    g.lighting = { lightAt: () => [255, 255, 255] };    // 满光（num43=255/30=8 满档）
     g.particles = [] as unknown[];
     g.recLog = () => {};
     g.player = { inv: { selected: 0, slots: [], heldItem: () => null } };
     return g;
   }
 
-  it('幽灵铁矿（flags=0）不闪：零粒子；活性铁矿照常闪光', () => {
+  it('幽灵铁矿（flags=0）不闪：零发射；活性铁矿照常闪光（dust 通道 43）', () => {
     const w = new World(40, 40, 7, 'ghost-sparkle');
     const st = w.store;
     const rand = Math.random;
@@ -591,16 +591,31 @@ describe('特效发射器幽灵格门', () => {
       // 幽灵矿
       st.type[st.idx(20, 20)] = TILE_BY_KEY['ore_iron'];
       st.flags[st.idx(20, 20)] = 0;
-      const g1 = emitterShell(w) as { particles: unknown[] };
+      const dustCalls1: Array<{ type: number; alpha: number; x: number; y: number }> = [];
+      const g1 = emitterShell(w) as { particles: unknown[]; spawnDust: unknown };
+      g1.spawnDust = (...a: unknown[]) => {
+        dustCalls1.push({ type: a[4] as number, alpha: a[7] as number, x: a[0] as number, y: a[1] as number });
+        return null;
+      };
       (g1 as unknown as { emitTileParticles(): void }).emitTileParticles();
-      const ghostCount = (g1.particles as unknown[]).length;
-      expect(ghostCount).toBe(0);                       // 不闪（核心回归）
-      // 活性矿
+      expect(dustCalls1).toHaveLength(0);               // 不闪（核心回归）
+      expect((g1.particles as unknown[]).length).toBe(0);
+      // 活性矿——★2026-09-07 闪光可见度批后 SHINE_TABLE 族走 spawnDust 原版尘通道
+      //（dust 43/α254/scale0.5,TileDrawing.cs:7657）,不再落 1-2px 色点 particles
       st.setTileSilent(21, 20, TILE_BY_KEY['ore_iron']);
-      const g2 = emitterShell(w) as { particles: unknown[] };
+      const dustCalls2: Array<{ type: number; alpha: number; x: number; y: number }> = [];
+      const g2 = emitterShell(w) as { particles: unknown[]; spawnDust: unknown };
+      g2.spawnDust = (...a: unknown[]) => {
+        dustCalls2.push({ type: a[4] as number, alpha: a[7] as number, x: a[0] as number, y: a[1] as number });
+        return null;
+      };
       (g2 as unknown as { emitTileParticles(): void }).emitTileParticles();
-      const liveCount = (g2.particles as unknown[]).length;
-      expect(liveCount).toBeGreaterThan(0);             // 照常闪光
+      expect(dustCalls2.length).toBeGreaterThan(0);     // 照常闪光（尘通道）
+      expect(dustCalls2[0].type).toBe(43);              // TintableDustLighted
+      expect(dustCalls2[0].alpha).toBe(254);
+      expect(dustCalls2[0].x).toBe(21 * TILE);
+      expect(dustCalls2[0].y).toBe(20 * TILE);
+      expect((g2.particles as unknown[]).length).toBe(0);   // 色点回退路不再触发
     } finally {
       Math.random = rand;
     }

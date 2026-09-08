@@ -1,17 +1,21 @@
-// 火把锚定（TileObjectData tile 4 + TileObject.CanPlace 1:1）。
+// 火把放置/重锚定（★SW-BJ28 2026-09-08 重写为原版 legacy 放置路 1:1）。
+// 原版火把【不走】TileObject.CanPlace：Player.PlaceThing_Tiles_TryPlacing :40084 显式
+// 排除 `tileToCreate != 82 && != 227 && != 4` → 火把走 AssortedThings（Player.cs:41435-41485
+// Torches 支 canPlace）+ WorldGen.PlaceTile case 4（:60289-60345 写入/复验），
+// 重锚定 = TileFrame 火把支（WorldGen.cs:87413-87461）。旧实现误按 TileObjectData
+// AnchorBottom=SolidTile|SolidSide 建模（tileSolidTop 平台两面全拒）→ 火把放不上平台
+// （用户实报 2026-09-08）；原版底锚对平台显式放行：
+//   PlaceTile :60326 `(Platforms[tile4.type] && TopEdgeCanBeAttachedTo(i, j + 1))`
+//   AssortedThings :41477 `(!tileNoAttach[num3] || TileID.Sets.Platforms[num3])`。
 // 帧语义（TEdit Tiles_4 framing，22px 步长）：
-//   frameX 0 = 底锚直立（地面/背景墙共用直立贴图）、22 = 左锚（贴左块倾斜）、44 = 右锚。
+//   frameX 0 = 底锚直立（地面/平台/背景墙共用直立贴图）、22 = 左锚（贴左块倾斜）、44 = 右锚。
 //   未点燃变体 = 点燃帧 +66（Wiring.ToggleTorch Wiring.cs:2922-2937 的 ±66 翻转；
 //   frameX ≥ 66 判定见同函数/Player.cs:17654 的 TorchAttack 复燃）。重锚定与点亮态
-//   互不干扰——TileFrame 重算时先剥掉 66 再选锚（WorldGen.cs:86860 num = frameX>=66 ? 66 : 0）。
-// TileObjectData.cs:4584-4602 锚定义：
-//   base      AnchorBottom = SolidTile | SolidSide
-//   alt[1]    AnchorLeft   = SolidTile | SolidSide | Tree | AlternateTile(124,561,574-578)
-//   alt[2]    AnchorRight  = 同上
-//   alt[0]    AnchorWall   = 任意背景墙
-// CanPlace（TileObject.cs:203 while 循环）按 base → alt[1] → alt[2] → alt[0] 顺序尝试，全过即取。
+//   互不干扰——TileFrame 重算时先剥掉 66 再选锚（WorldGen.cs:87416 num = frameX>=66 ? 66 : 0）。
+// 帧选取优先序 = TileFrame :87440-87459：底(0) → 左(22) → 右(44) → 墙(0)。
 import type { TileStore } from './TileStore';
 import { TILE_DEFS } from '../data/tiles';
+import { VAN_TILE_SOLID_EXTRA } from './gen/vanilla/GenSolid';
 
 /** 未点燃火把的帧偏移（Wiring.ToggleTorch：frameX ±= 66；判定 frameX >= 66） */
 export const TORCH_UNLIT_OFFSET = 66;
@@ -31,46 +35,171 @@ export function toggleTorchFrame(frameX: number): number {
   return isUnlitTorch(frameX) ? frameX - TORCH_UNLIT_OFFSET : frameX + TORCH_UNLIT_OFFSET;
 }
 
-/** 树干/棕榈干 sheet（AnchorLeft/Right 的 Tree|AlternateTile 项） */
-const TRUNK_SHEETS = new Set([5, 72, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 124, 561, 574, 575, 576, 577, 578]);
+// ---- 原版旗表（火把放置/重锚定消费域；行号锚 1457） ----
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——侧锚三格连续树干支；★不含棕榈 323（1457 原表如此） */
+export const IS_A_TREE_TRUNK_SHEETS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** TileID.Sets.IsBeam（TileID.cs:239）——侧锚梁木支（单格即可,无需三连） */
+export const IS_BEAM_SHEETS = new Set([124, 561, 574, 575, 576, 577, 578]);
+/** TileID.Sets.NotReallySolid（TileID.cs:359={387,388,10}）——PlaceTile 底/侧锚非平台实心支排除 */
+export const NOT_REALLY_SOLID_SHEETS = new Set([387, 388, 10]);
+/** Main.tileNoAttach 全表（Main.cs 逐条赋值提取：:7260-8331 盆景/树苗/火把与开门/可割植物
+ *  家具/高门/:9890-9900 平台族 427+435-439/:10258 岩浆石）。与 player/SmartCursor.TILE_NO_ATTACH
+ *  _SHEETS 同源副本（该表模块私有,此处复制为火把域单源;tests/sw-bj28 结构锁两表恒等,漂移爆红） */
+export const NO_ATTACH_SHEETS = new Set([
+  568, 569, 570, 580, 620, 572, 564, 565, 593, 594,
+  590, 595, 615, 110, 3, 4, 10, 50, 707,
+  20, 19, 13, 14, 469, 486, 488, 704, 487, 489, 490, 15, 497, 16, 134, 17, 18, 21, 467, 441,
+  468, 27, 114, 86, 87, 88, 89, 90, 101, 102, 94, 95, 96, 97, 98, 99, 91, 92, 93,
+  387, 388, 427, 435, 436, 437, 438, 439, 390,
+]);
+/** TileID.Sets.Platforms（TileID.cs:243={19,427,435-439}）——底锚平台臂/,noAttach 豁免臂 */
+export const PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** TileObjectData.PlatformFrameWidth()（TileObjectData.cs:5122-5126）= _data[19]
+ *  .CoordinateFullWidth = 16+2 = 18 —— PlatformProperTopFrame 的连接档步长 */
+const PLATFORM_FRAME_WIDTH = 18;
 
-const isTrunk = (st: TileStore, x: number, y: number): boolean => {
-  const i = st.idx(x, y);
-  if (!st.flags[i] || st.type[i] === 0) return false;
-  const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
-  return sheet !== undefined && TRUNK_SHEETS.has(sheet);
+const sheetOf = (t: number): number => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+
+/** 原版 Main.tileSolid 代理：def.solid（≈tileSolid&&!tileSolidTop）∪ 平台行为族九件套
+ *  （19/239/380/427/435-439 = tileSolid∩tileSolidTop,VAN_TILE_SOLID_EXTRA 单源,GenSolid） */
+const vanTileSolid = (t: number): boolean => {
+  if (!t) return false;
+  const d = TILE_DEFS[t];
+  if (!d) return false;
+  return d.solid || VAN_TILE_SOLID_EXTRA.has(d.vanilla?.sheet ?? -1);
 };
 
-/** 可锚定的支撑（AnchorLeft/Right 用：实心或树干） */
-const anchorable = (st: TileStore, x: number, y: number): boolean =>
-  st.isSolid(x, y) || isTrunk(st, x, y);
+/** 原版 Main.tileSolidTop 代理：def.platform（tiles.ts def 域=平台九件套+工作台/铁砧/
+ *  桌柜笼等 tileSolidTop 家族） */
+const vanTileSolidTop = (t: number): boolean => !!TILE_DEFS[t]?.platform;
+
+/** WorldGen.PlatformProperTopFrame（:70684-70694）1:1：平台 frameX/18 连接档 ∈
+ *  {0-7,12-16,25-26}（孤立/端点/横排与半坡档;斜坡档 8-11/17-24 不可附着） */
+export function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.floor(frameX / PLATFORM_FRAME_WIDTH);
+  if ((n < 0 || n > 7) && (n < 12 || n > 16)) {
+    if (n >= 25) return n <= 26;
+    return false;
+  }
+  return true;
+}
+
+/** WorldGen.TopEdgeCanBeAttachedTo（:70911-70924）1:1：格顶可附着（平台底锚臂）。
+ *  active && (tileSolid∨tileSolidTop) && (!topSlope ∨ (Platforms∧ProperTopFrame))
+ *  && !halfBrick && !inActive。GetTileSafely 域外=空砖（:426-431 不含 null 支可达）→ false。 */
+export function topEdgeCanBeAttachedTo(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.hasTile(x, y)) return false;
+  const t = st.type[i];
+  if (!(vanTileSolid(t) || vanTileSolidTop(t))) return false;
+  const slope = st.slope[i];
+  const isTopSlope = slope === 1 || slope === 2;      // Tile.topSlope()（bits 1|2）
+  if (isTopSlope && !(PLATFORM_SHEETS.has(sheetOf(t)) && platformProperTopFrame(st.frameX[i]))) return false;
+  if (st.half[i]) return false;
+  if (st.isActuated(x, y)) return false;              // !tile.inActive()
+  return true;
+}
+
+/** PlaceTile case 4 底锚臂（:60326 tile4 段）：下方平台走 TopEdge、其余走
+ *  「!tileSolidTop ∨ (380∧slope0)」∧!NotReallySolid∧!halfBrick∧slope0（外门 tileSolid :60326 前置） */
+const bottomArmPlace = (st: TileStore, tx: number, ty: number): boolean => {
+  if (!st.inBounds(tx, ty + 1) || !st.hasTile(tx, ty + 1)) return false;   // tile4.active()
+  const t = st.type[st.idx(tx, ty + 1)];
+  if (!vanTileSolid(t)) return false;
+  const sh = sheetOf(t);
+  const i = st.idx(tx, ty + 1);
+  if (PLATFORM_SHEETS.has(sh)) return topEdgeCanBeAttachedTo(st, tx, ty + 1);
+  return (!vanTileSolidTop(t) || (sh === 380 && st.slope[i] === 0))
+    && !NOT_REALLY_SOLID_SHEETS.has(sh)
+    && !st.half[i] && st.slope[i] === 0;
+};
+
+/** PlaceTile case 4 侧锚臂（:60326 tile2/tile3 段）：active ∧ 坡向门（左支排奇数坡
+ *  :60326 `slope()==0||slope()%2!=1`、右支排偶数坡 `%2!=0`）∧（实心非 solidTop 非
+ *  NotReallySolid ∨ 梁 ∨ 三格连续树干[本格+同侧上/下格,IsTreeType 读裸 type]） */
+const sideArmPlace = (
+  st: TileStore, tx: number, ty: number, dir: -1 | 1,
+): boolean => {
+  const sx = tx + dir;
+  if (!st.inBounds(sx, ty) || !st.hasTile(sx, ty)) return false;
+  const si = st.idx(sx, ty);
+  const slope = st.slope[si];
+  if (dir === -1 ? !(slope === 0 || slope % 2 !== 1) : !(slope === 0 || slope % 2 !== 0)) return false;
+  const t = st.type[si];
+  const sh = sheetOf(t);
+  if (vanTileSolid(t) && !vanTileSolidTop(t) && !NOT_REALLY_SOLID_SHEETS.has(sh)) return true;
+  if (IS_BEAM_SHEETS.has(sh)) return true;
+  if (!IS_A_TREE_TRUNK_SHEETS.has(sh)) return false;
+  const isTrunkTypeAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && IS_A_TREE_TRUNK_SHEETS.has(sheetOf(st.type[st.idx(x, y)]));   // 裸 type 读
+  return isTrunkTypeAt(sx, ty - 1) && isTrunkTypeAt(sx, ty + 1);
+};
 
 /**
- * 计算放置锚点帧。优先级 1:1 TileObject.CanPlace：底锚(0) → 左锚(22) → 右锚(44) → 墙锚(0)。
- * 无任何锚点返回 -1（放置拒绝）。新放置火把恒为点燃态；既有火把重锚定时须用
- * torchLitFrame 剥偏移选锚、再把 TORCH_UNLIT_OFFSET 加回（WorldGen.cs:86860 语义）。
+ * 计算放置锚点帧（PlaceTile case 4 :60289-60345 复验 1:1,帧序=TileFrame :87440-87459
+ * 优先级：底(0) → 左(22) → 右(44) → 墙(0)；无任何锚返回 -1=放置拒绝）。
+ * 新放置火把恒为点燃态；既有火把重锚定时须用 torchLitFrame 剥偏移选锚、再把
+ * TORCH_UNLIT_OFFSET 加回（WorldGen.cs:87416 语义）。
  */
 export function torchAnchorFrame(st: TileStore, tx: number, ty: number): number {
   if (!st.inBounds(tx, ty)) return -1;
-  if (st.isSolid(tx, ty + 1)) return 0;                       // base: AnchorBottom
-  if (anchorable(st, tx - 1, ty)) return 22;                  // alt[1]: AnchorLeft
-  if (anchorable(st, tx + 1, ty)) return 44;                  // alt[2]: AnchorRight
-  if (st.wall[st.idx(tx, ty)] !== 0) return 0;                // alt[0]: AnchorWall
+  if (bottomArmPlace(st, tx, ty)) return 0;                   // 底锚（含平台 TopEdge 臂）
+  if (sideArmPlace(st, tx, ty, -1)) return 22;                // 左锚
+  if (sideArmPlace(st, tx, ty, 1)) return 44;                 // 右锚
+  if (st.wall[st.idx(tx, ty)] !== 0) return 0;                // 墙锚
   return -1;
 }
 
+// ---- TileFrame 火把支（WorldGen.cs:87413-87461）重锚定判定 ----
+// num2（下方）定义 :87413 `tile3.active() && ((Platforms∧TopEdge) ∨ (!halfBrick∧!topSlope))`；
+// num3/num4（左/右）定义 :87424/:87427 坡向门同 PlaceTile；接受面 :87440-87459：
+// 底=tileSolid∧(!noAttach∨Platforms)、侧=tileSolid∧!noAttach∨梁∨树干三连、墙=wall>0。
+const tileFrameBottomOk = (st: TileStore, tx: number, ty: number): boolean => {
+  if (!st.inBounds(tx, ty + 1) || !st.hasTile(tx, ty + 1)) return false;
+  const i = st.idx(tx, ty + 1);
+  const t = st.type[i];
+  const sh = sheetOf(t);
+  const isPlat = PLATFORM_SHEETS.has(sh);
+  const defined = isPlat
+    ? topEdgeCanBeAttachedTo(st, tx, ty + 1)
+    : !st.half[i] && !(st.slope[i] === 1 || st.slope[i] === 2);
+  if (!defined) return false;
+  return vanTileSolid(t) && (!NO_ATTACH_SHEETS.has(sh) || isPlat);
+};
+
+const tileFrameSideOk = (
+  st: TileStore, tx: number, ty: number, dir: -1 | 1,
+): boolean => {
+  const sx = tx + dir;
+  if (!st.inBounds(sx, ty) || !st.hasTile(sx, ty)) return false;
+  const si = st.idx(sx, ty);
+  const slope = st.slope[si];
+  if (dir === -1 ? !(slope === 0 || slope % 2 !== 1) : !(slope === 0 || slope % 2 !== 0)) return false;
+  const t = st.type[si];
+  const sh = sheetOf(t);
+  if (vanTileSolid(t) && !NO_ATTACH_SHEETS.has(sh)) return true;
+  if (IS_BEAM_SHEETS.has(sh)) return true;
+  if (!IS_A_TREE_TRUNK_SHEETS.has(sh)) return false;
+  const isTrunkTypeAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && IS_A_TREE_TRUNK_SHEETS.has(sheetOf(st.type[st.idx(x, y)]));
+  return isTrunkTypeAt(sx, ty - 1) && isTrunkTypeAt(sx, ty + 1);
+};
+
 /**
- * 已放置火把的锚是否仍然成立（支撑被挖掉时判定掉落）。
- * frameX 0 的直立火把：底锚或墙锚任一在即成立（vanilla 行为：拆地板留墙不掉）。
+ * 已放置火把的锚是否仍然成立（支撑被挖掉时判定掉落；TileFrame 火把支 1:1 的
+ * 「任一锚仍在=TileFrame 重锚不杀」按现存 frameX 档位判,重锚定改帧由调用域
+ * checkTorchDetach 的掉落语义承担——本仓无逐拍 TileFrame 重算,档位即判定域）。
+ * frameX 0 直立：底锚（含平台）或墙锚任一在即成立（vanilla 行为：拆地板留墙不掉）。
  * 未点燃变体（+66）先剥偏移再判锚——此前 88（22+66）/110（44+66）落进 default，
  * 侧锚丢失不掉、只剩侧锚却误判成立。
  */
 export function torchStillAnchored(st: TileStore, tx: number, ty: number, frameX: number): boolean {
   if (!st.inBounds(tx, ty)) return false;
   switch (torchLitFrame(frameX)) {
-    case 22: return anchorable(st, tx - 1, ty);
-    case 44: return anchorable(st, tx + 1, ty);
-    default: return st.isSolid(tx, ty + 1) || st.wall[st.idx(tx, ty)] !== 0;
+    case 22: return tileFrameSideOk(st, tx, ty, -1);
+    case 44: return tileFrameSideOk(st, tx, ty, 1);
+    default: return tileFrameBottomOk(st, tx, ty) || st.wall[st.idx(tx, ty)] !== 0;
   }
 }
 

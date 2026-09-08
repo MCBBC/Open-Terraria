@@ -674,7 +674,8 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
 
 // ---- KillTile 生成期镜像（JJJJ 预清场用；FinalCleanupPass killTileGen 同源副本——
 //      引擎未导出，同源副本惯例）。尘埃掷表 = RRRR 实测定谳（28 罐/165/485/10 门/
-//      135 族零掷；51 蛛网默认 10 掷；51&墙62 再补 1×Next(4)（cs:63904，noItem 路
+//      135 族零掷；51 蛛网默认 10 掷；51&墙62 再补 1×Next(4)（1456 cs:63904 /
+//      1457 cs:64369,noItem 路
 //      同掷——生成期 noItem=true 只免掉落不免掷））。杀 = 失活+type0+清 half/slope；
 //      尾 SquareTileFrame 九宫走引擎 genSquareTileFrame（165/185/485/10 门等分派）。 */
 function chestKillDustAmount(sheet: number, fx: number): number {
@@ -756,7 +757,7 @@ export function killTileChest(st: TileStore, rng: RNG, x: number, y: number): vo
   const fx = st.frameX[k]!;
   const dust = chestKillDustAmount(sheet, fx);
   for (let q = 0; q < dust; q++) chestDustRoll(rng, sheet, fx);
-  if (sheet === 51 && st.wall[k] === 62) rng.nextInt(4);   // cs:63904（生成期同掷）
+  if (sheet === 51 && st.wall[k] === 62) rng.nextInt(4);   // 1456 cs:63904 / 1457 cs:64369（生成期同掷）
   st.setTileSilent(x, y, 0);                                // active=false+type=0+清 half/slope
   genSquareTileFrame(st, rng, x, y);                        // KillTile 尾九宫（引擎分派级联）
 }
@@ -1086,7 +1087,7 @@ function placeBuriedChestInner(
     }
     // ---- ★JJJJ：TileObject.Place 预清场（TileObject.cs:79-90）——箱体覆盖格上的
     //   cut/Breakable 装饰（51 蛛网/165 垂网/185 小堆等）先 KillTile（尘埃掷走表 +
-    //   51&墙62 补 Next(4) cs:63904 + 尾 SquareTileFrame 九宫级联——级联可连带杀
+    //   51&墙62 补 Next(4)（1456 cs:63904 / 1457 cs:64369）+ 尾 SquareTileFrame 九宫级联——级联可连带杀
     //   邻域孤儿残件）。IIIII 批 HiveSpiderPass CH 支同族（同源副本惯例）；曾整段
     //   缺失 → 箱旁孤儿装饰存活（m 链 #59 21.8k 屋域放大器的上游输入之一）。
     //   杀序 = vanilla 宽度外层/高度内层（(i-1,topY)→(i-1,topY+1)→(i,topY)→(i,topY+1)）。

@@ -4,8 +4,15 @@
 // 外包给"只有史莱姆掷 ai[1]"——但 ai[1] 是全 NPC 族共享槽（兔子行走计时 120-898、
 // 战士/蝙蝠计数都写它），任何怪死时 ai1 恰落 1..6146 即被当作物品 id 掉出
 // （兔子 ai1=412 → 珍珠石砖 item 412）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resolveDrops } from '../src/drops/NpcDrops';
+import { seededRandom, BATTERY_SEED } from './seeded-rng';
+
+// ★SW-BN6 2026-09-08 电池族 RNG 统一播种（范式=seeded-rng.ts,推广自 slime-item-ladder-parity）:
+// 本文件掷面走注入 rng（baseCtx.rng）不依赖 Math.random,播种为电池族统一卫生面
+// （防未来用例改动引入序列依赖时跨文件顺序漂移复发）。
+beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 const baseCtx = {
   type: 46, netId: 46,

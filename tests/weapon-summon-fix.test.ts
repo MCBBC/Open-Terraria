@@ -112,33 +112,135 @@ describe('① 阿比盖尔 963 困难档伤害系数（1456 :12116-12125）', ()
   });
 });
 
-describe('② 星尘龙 625 追击加速（1456 :40229-40244）', () => {
+describe('② 星尘龙 625 追击加速（1456 :40229-40244 / 1457 AI_121_StardustDragon :43688-43718）', () => {
+  // ★2026-09-08 定谳（蓝队）：三红全系测试夹具盒径错钉,实现 1:1 无漂——
+  // 旧夹具按 16×16 摆盒（"左上 = 中心 - 8"）,反编译龙链四段 width=height=24
+  // （1457 :6743-6744,本仓一致）→ 中心偏 (4,4),Normalize 非 1,d 亦被拽过档位界
+  // （800 档实测 d=796.010 / 300 档实测 d=296.027<300 → 误入 0.8 档）。
+  // 无 float32 量化效应：轴对齐向量 Normalize 分量恰为 ±1,d/d=1,期望值逐值精确。
   it('acc 档 ×1.5：d≥600 → 0.6、300≤d<600 → 0.9、d<300 → 1.2', () => {
-    for (const [dist, expVx] of [[800, 0.6], [400, 0.9], [200, 1.2]] as const) {
+    // 档位取样 d∈[600,700)：原版野生索敌门 num4=700（1457 :43653,按自身距）——
+    // 旧 800 档在原版不可达（追不上;本仓 nearestEnemy 1000 宽档=偏差,登记另案）
+    for (const [dist, expVx] of [[650, 0.6], [400, 0.9], [200, 1.2]] as const) {
       const e = mkEnemy(1, 60 * 16 + dist, 90 * 16);
       const { hooks, player } = makeHooks([e]);
-      // 中心对齐：cx = e.cx - dist、cy = e.cy（左上 = 中心 - 8）
-      const head = mkMinion(625, player, e.cx - dist - 8, e.cy - 8); // 首 tick 生成 626/627/628 链
+      // 中心对齐：cx = e.cx - dist、cy = e.cy（左上 = 中心 - 12,24×24 :6743-6744）
+      const head = mkMinion(625, player, e.cx - dist - 12, e.cy - 12); // 首 tick 生成 626/627/628 链
       head.fixedUpdate(1, hooks);
-      expect(head.vx).toBeCloseTo(expVx, 6);            // (dx/d)×acc0×1.5（dy=0）
+      expect(head.vx).toBeCloseTo(expVx, 6);            // (dx/d)×acc0×1.5（dy=0 → dx/d=1）
     }
   });
-  it('距敌 ≤ Size×0.75 门内不推进（:40237）', () => {
+  it('距敌 ≤ Size×0.75 门内不推进（:43712）', () => {
     const e = mkEnemy(1, 60 * 16 + 10, 90 * 16);        // d=10 < 28.8×0.75=21.6
     const { hooks, player } = makeHooks([e]);
-    const head = mkMinion(625, player, e.cx - 18, e.cy - 8);
+    const head = mkMinion(625, player, e.cx - 10 - 12, e.cy - 12); // 24×24 中心对齐
     head.fixedUpdate(1, hooks);
     expect(head.vx).toBe(0);                            // 门内零加速
   });
-  it('Dot(velocity,方向)<0.25 → velocity×0.8 阻尼（:40240-40243）', () => {
+  it('Dot(velocity,方向)<0.25 → velocity×0.8 阻尼（:43715-43718）', () => {
     const e = mkEnemy(1, 60 * 16 + 300, 90 * 16);       // d=300 → acc0=0.6×1.5=0.9
     const { hooks, player } = makeHooks([e]);
-    const head = mkMinion(625, player, e.cx - 308, e.cy - 8);
-    head.vx = -10;                                      // 背向高速 → Dot=-10×300<0.25
+    const head = mkMinion(625, player, e.cx - 300 - 12, e.cy - 12); // 中心对齐 → d=300 整
+    head.vx = -10;                                      // 背向高速 → Dot=-9.1×300<0.25
     head.fixedUpdate(1, hooks);
     // vx = (-10+0.9)×0.8 = -7.28（无阻尼应为 -9.1）
     expect(head.vx).toBeCloseTo(-7.28, 6);
     expect(head.vy).toBeCloseTo(0, 6);
+  });
+});
+
+describe('②b 星尘龙 625 索敌双门（1457 :43653-43695 / 1456 :40178-40219）', () => {
+  // 支结构（原文逐字）：集火支（OwnerMinionAttackTargetNPC→minionTargetId）门 =
+  // 距龙 num4×2<1400（:43667/:40193,无 num5 门无视线门）;野生支互斥（num6<0
+  // :43680/:40206）＝距龙 num4<700（:43688/:40214）∧ 距玩家 num5<1000（:43685/:40211）。
+  // 夹具盒径 24×24（:6743-6744）左上=中心-12;y 全对齐使 dx/d=1。
+  it('野生双门过：距龙 650<700 ∧ 距玩家 <1000 → 追击（vx=0.6 档 :43703-43714）', () => {
+    const e = mkEnemy(1, 60 * 16 + 650, 90 * 16);
+    const { hooks, player } = makeHooks([e]);
+    const head = mkMinion(625, player, e.cx - 650 - 12, e.cy - 12);
+    head.fixedUpdate(1, hooks);
+    expect(head.vx).toBeCloseTo(0.6, 6);
+  });
+  it('野生门 num4=700：距龙 800（距玩家 950<1000）→ 不追,回玩家跟随档 vx=-0.12', () => {
+    const b = makeHooks([]);
+    const e = mkEnemy(1, b.player.cx + 950, b.player.cy); // 距玩家 950:仅 num5 过,num4 拒
+    b.enemies.push(e);
+    const head = mkMinion(625, b.player, b.player.cx + 150 - 12, b.player.cy - 12); // 距龙 800
+    head.fixedUpdate(1, b.hooks);
+    // 跟随档 d=150∈[140,200) → acc 0.12 朝玩家（旧单门 1000 在此追击 vx=+0.6）
+    expect(head.vx).toBeCloseTo(-0.12, 6);
+  });
+  it('集火支 num4×2=1400 且无 num5 门：minionTargetId 距龙 1190（距玩家同 1190>1000）→ 仍追', () => {
+    const b = makeHooks([]);
+    const e = mkEnemy(1, b.player.cx + 1190, b.player.cy);
+    b.enemies.push(e);
+    (b.player as unknown as { minionTargetId: number }).minionTargetId = 1;
+    const head = mkMinion(625, b.player, b.player.cx - 12, b.player.cy - 12);
+    head.fixedUpdate(1, b.hooks);
+    expect(head.vx).toBeCloseTo(0.6, 6);                // :43667 过（旧双拒:>900 集火/>1000 野生）
+  });
+  it('集火支上界守卫：距龙 1500>1400 → 不追,回玩家跟随档 vx=-0.12', () => {
+    const b = makeHooks([]);
+    const e = mkEnemy(1, b.player.cx + 1650, b.player.cy);
+    b.enemies.push(e);
+    (b.player as unknown as { minionTargetId: number }).minionTargetId = 1;
+    const head = mkMinion(625, b.player, b.player.cx + 150 - 12, b.player.cy - 12);
+    head.fixedUpdate(1, b.hooks);
+    expect(head.vx).toBeCloseTo(-0.12, 6);              // :43667 拒 → 野生 num4 亦拒
+  });
+});
+
+describe('②c 星尘龙 625 瞬移/集火门/择敌序收口（1457 :43656-43694 / 1456 :40182-40219）', () => {
+  it('>2000 瞬移=索敌前无条件+中心=玩家心：带集火目标超距也瞬移（cy=pcy、cx=pcx+0.6）', () => {
+    const b = makeHooks([]);
+    const e = mkEnemy(1, b.player.cx + 900, b.player.cy);   // 集火目标（自距 900<1400）
+    b.enemies.push(e);
+    (b.player as unknown as { minionTargetId: number }).minionTargetId = 1;
+    // 龙心=玩家心右 2200（>2000）——旧实现带目标不瞬移、瞬移位 (−30,−30)=心偏 pcx−18
+    const head = mkMinion(625, b.player, b.player.cx + 2200 - 12, b.player.cy - 12);
+    head.fixedUpdate(1, b.hooks);
+    // :43658/:40184 Center=player.Center（盒 24×24 :6743-6744 → 心=pcx,pcy）;
+    // 落位后集火追击一拍 vx=+0.6 → cx=pcx+0.6
+    expect(head.cy).toBeCloseTo(b.player.cy, 6);
+    expect(head.cx).toBeCloseTo(b.player.cx + 0.6, 6);
+  });
+  it('集火 CanBeChasedBy 门（:43664/:40190）：集火目标=训练假人 488 → 集火作废,野生支追真敌', () => {
+    const b = makeHooks([]);
+    const dummy = mkEnemy(1, b.player.cx - 500, b.player.cy); // 集火锁定假人（自距 500<1400）
+    dummy.vanillaId = 488;                                    // CHASE_EXCLUDED_VIDS（:91141 族）
+    const real = mkEnemy(2, b.player.cx + 650, b.player.cy);  // 野生门全过（650<700∧<1000）
+    b.enemies.push(dummy, real);
+    (b.player as unknown as { minionTargetId: number }).minionTargetId = 1;
+    const head = mkMinion(625, b.player, b.player.cx - 12, b.player.cy - 12);
+    head.fixedUpdate(1, b.hooks);
+    // 集火被 :43664 拒 → 野生支取 650 敌（追假人应为 vx=−0.9 档）
+    expect(head.vx).toBeCloseTo(0.6, 6);
+  });
+  it('野生择敌=末位覆盖（:43690/:40216 无最近比较）：近敌 200 先过门、远敌 650 后过门 → 追远敌', () => {
+    const b = makeHooks([]);
+    const a = mkEnemy(1, b.player.cx + 200, b.player.cy);     // 槽序在前（较近,d<300 档 1.2）
+    const e2 = mkEnemy(2, b.player.cx + 650, b.player.cy);    // 槽序在后（较远,≥600 档 0.6）
+    b.enemies.push(a, e2);
+    const head = mkMinion(625, b.player, b.player.cx - 12, b.player.cy - 12);
+    head.fixedUpdate(1, b.hooks);
+    // 原版循环反复写 num6 无 break → 末位通过者 650 胜（"最近"语义应追 200 → vx=+1.2）
+    expect(head.vx).toBeCloseTo(0.6, 6);
+  });
+});
+
+describe('②d 蜘蛛 AI_026 flag7 集火种子 CanBeChasedBy 门（1457 :62793 / 1456 :58832-58833）', () => {
+  it('焦点=训练假人 488 → 种子作废（门败=整块跳过）→ 野生扫无种子 → 跟随支走向玩家', () => {
+    const b = makeHooks([]);
+    const dummy = mkEnemy(1, b.player.cx + 400, b.player.cy); // 焦点假人在右（LOS 通）
+    dummy.vanillaId = 488;                                    // CHASE_EXCLUDED_VIDS（:91141 族）
+    b.enemies.push(dummy);
+    // 蜘蛛立于玩家右侧地板（心=pcx+200,底=y1600 贴 row100 顶）——旧实现种子命中
+    // losT=假人 → 行走意图向右（dxT=+200>10）;门后野生无候选 → 跟随支 flag2 向左
+    const m = new MinionProj(b.player.cx + 200 - 15, 1600 - 30, 390, 10, 20, false, 0, false,
+      () => b.player);
+    const cx0 = m.cx;
+    m.fixedUpdate(1, b.hooks);
+    expect(m.cx).toBeLessThan(cx0);        // 旧:种子 honored → 向假人走 cx 增（红前）
   });
 });
 
@@ -179,16 +281,22 @@ describe('④ AI_062 索敌射程分档 + 视线门（1457 :66319-66333/:66392�
     expect(Math.abs(m.vx)).toBeLessThan(5);              // 无目标 → 归位档移速 <5
   });
   it('963 阿比盖尔 700 档 + CanHit 1×1 门（:66330-66333/:66435）', () => {
+    // ★2026-09-08 定谳（蓝队）：本 case 红系夹具盒径错钉——963 一阶体 30×48
+    // （1457 :9106-9107,本仓一致）,旧夹具 y=敌心-8 按 16 高摆盒 → 中心低 16px,
+    // dy=-16 → dx/d=375/375.341=0.99909 ≠ 1,实测 0.1620147 = 6×0.99909/37。
+    // 实现无漂：num2=970 计数-1（:66085 无 Max 钳）但原版 963 存在 ⇒ ≥1 计数器
+    // （Player.cs:12366 UpdateAbigailStatus 存在性门）→ num2=0 → num3=18/num27=6
+    // （本仓 Max(1,peerCount(970)) 同语义）。dy=0 对中后 dx/d=1,期望 6/37 精确。
     const eFar = mkEnemy(1, 60 * 16 + 900, 90 * 16);     // >700 → 不索敌
     const a = makeHooks([eFar]);
-    const m1 = mkMinion(963, a.player, a.player.cx, eFar.cy - 8);
+    const m1 = mkMinion(963, a.player, a.player.cx, eFar.cy - 24); // 30×48 中心对齐
     m1.fixedUpdate(1, a.hooks);
     expect(Math.abs(m1.vx)).toBeLessThan(4.8);           // 无目标 → 归位档速 ≤4.8
     const eNear = mkEnemy(2, 60 * 16 + 400, 90 * 16);    // <700 → 索敌交战加速
     const b = makeHooks([eNear]);
-    const m2 = mkMinion(963, b.player, b.player.cx, eNear.cy - 8);
+    const m2 = mkMinion(963, b.player, b.player.cx, eNear.cy - 24);
     m2.fixedUpdate(1, b.hooks);
-    // 交战 >200 加速段 velocity=(v×36+向×6)/37（:66620-66622,num3=18,num27=6）
+    // 交战 >200 加速段 velocity=(v×36+向×6)/37（:66618-66622,num28=num3×2=36）
     expect(m2.vx).toBeCloseTo(6 / 37, 6);
   });
 });

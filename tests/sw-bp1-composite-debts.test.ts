@@ -181,8 +181,9 @@ describe('★SW-BP1 Inventory.add favorited 随行（GetItem_FillEmptyInventoryS
     inv.add(WOOD, 1, undefined, undefined, false, false, true);
     expect(inv.slots[1]?.id).toBe(WOOD);
     expect(inv.slots[49]?.id).toBeUndefined();            // 尾格不动
-    // 注：非收藏件的原版降序臂（:39688-39700）被 fillRange 空格支升序预占=
-    // 登记偏差（Inventory.add ③ 注坐标在案,新债移交,不在本批断言域）
+    // ★SW-BN5 2026-09-08 勘误：上注「降序臂被预占=新债移交」已清偿（fillBagArms
+    // 三臂+热栏臂 :39671-39680,见 tests/sw-bn5-shop-drop-closeout.test.ts）——
+    // 本例 WOOD useStyle 1 现走热栏臂落首空热栏格 1,断言同值零漂移
   });
   it('并入已有收藏堆时堆位收藏保持；普通弹药空格支随行（FillAmmo :39620 整对象）', () => {
     const inv = new Inventory();
@@ -254,7 +255,11 @@ describe('★SW-BP1 放置实心尾奏 UnslopeForSolids/KillGrassForSolids（BE1
     const spinAt = game.indexOf('this.placeThingSpinSmartPlatform(tx, ty);');
     const unslopeAt = game.indexOf('this.placeThingUnslopeForSolids(clickX, clickY)');
     const grassAt = game.indexOf('this.placeThingKillGrassForSolids(clickX, clickY, shSolid)');
-    const paintAt = game.indexOf('PlaceIt_AutoPaintAndActuate');
+    // ★SW-BN5 2026-09-08 伪红勘误（记账层瑕疵顺手清,非本刀语义）：indexOf 首现命中
+    //  BJ18 块换段尾奏注释（Game.ts :22580 区「→ PlaceIt_AutoPaintAndActuate…」）,
+    //  BJ18 落盘起本锁恒红（既有红,先于 SW-BN5）；lastIndexOf 命中 place-thing 链
+    //  真身（:23377 AutoPaint 注）。
+    const paintAt = game.lastIndexOf('PlaceIt_AutoPaintAndActuate');
     expect(spinAt).toBeGreaterThan(-1);
     expect(unslopeAt).toBeGreaterThan(spinAt);
     expect(grassAt).toBeGreaterThan(unslopeAt);

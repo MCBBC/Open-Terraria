@@ -159,7 +159,9 @@ import {
   pvpSwordXY, pvpTeamXY,
   vanillaScaleFor, ADVISOR_XY, TITLE_XY,
   COIN_LABEL_XY, AMMO_LABEL_XY, COIN_AMMO_SCALE,
+  CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
+import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
@@ -5234,6 +5236,14 @@ export class UI {
     });
   }
 
+  /** 刷新的 Promise 版(探针/测试同步等待用,生产路径零消费;绕过 rAF 合并去重,
+   *  连调两次会全量刷两遍——仅测试语义) */
+  refreshAllAsync(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => { this.refreshAllNow(); resolve(); });
+    });
+  }
+
   private refreshAllNow() {
     if (!this.game) return;
     this.refreshEquipExtras();
@@ -5668,7 +5678,9 @@ export class UI {
 
   // ============ 暂停菜单（原版像素风：IngameOptions.Draw + Utils.DrawInvBG） ============
 
-  showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void }) {
+  showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void; onHousing?: () => void;
+    /** ★2026-09-07 刀 5 停车坪(vanilla 布局):自创功能入口自背包簇格迁暂停菜单 */
+    onItemSearch?: () => void; onWeather?: () => void; onTime?: () => void; onPlayerList?: () => void; onJourney?: () => void; onResearch?: () => void }) {
     // 已开守卫：移除旧面板再建新——防 ESC 快速连按/HMR 监听器堆积导致多层叠框
     document.querySelectorAll('.sw-pause-panel').forEach((el) => el.remove());
     if (!document.getElementById('sw-pause-style')) {
@@ -5714,7 +5726,18 @@ export class UI {
     const bQuit = mkBtn(Lang.text('Mods.SandboxWorld.UI.BackToMenu'), () => { panel.remove(); handlers.onQuit(); });
     panel.append(bRes, bSave);
     if (bExp) panel.appendChild(bExp);
-    panel.append(bSet, bBst, bQuit);
+    panel.append(bSet);
+    // 住房面板入口(★2026-09-07 刀 3:vanilla 布局停车坪——原版 EquipPage=1 住房页
+    // 已覆盖查询/指定,HousingPanel 右缘条(超集)自暂停菜单调起;classic 仍走簇格钮)
+    if (handlers.onHousing) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Housing.Button'), () => { panel.remove(); handlers.onHousing?.(); }));
+    // 停车坪钮组(★刀 5:vanilla 布局时自创功能入口;classic 不传=不渲染)
+    if (handlers.onPlayerList) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.PlayerList.Title'), () => { panel.remove(); handlers.onPlayerList?.(); }));
+    if (handlers.onJourney) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.JourneyPowers.Title'), () => { panel.remove(); handlers.onJourney?.(); }));
+    if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('LegacyInterface.112'), () => { panel.remove(); handlers.onResearch?.(); }));
+    if (handlers.onWeather) panel.appendChild(mkBtn('天气控制', () => { panel.remove(); handlers.onWeather?.(); }));
+    if (handlers.onTime) panel.appendChild(mkBtn('时间控制', () => { panel.remove(); handlers.onTime?.(); }));
+    if (handlers.onItemSearch) panel.appendChild(mkBtn('道具搜索', () => { panel.remove(); handlers.onItemSearch?.(); }));
+    panel.append(bBst, bQuit);
     this.root.appendChild(panel);
     // 原版像素面板底:Inventory_Back13 九宫(Utils.DrawInvBG :2672+:2681,
     // IngameOptions.Draw 面板色 (33,15,91)×0.685)逐像素乘色后按角 10px 合成;
@@ -5784,14 +5807,15 @@ export class UI {
     for (const [t, r, g, b, width] of this.chatPending) this.chatMonitor.message(t, r, g, b, width);
     this.chatPending = [];
 
-    // ★2026-09-07 刀 2:布局分派(vanilla 构建器必须在 buildHud【之后】跑——
-    // .sw-vinv 的 DOM 序在 hotbarEl 之后,关包态全局 slotEl(0-9) 首匹配=热键栏格)
+    // ★2026-09-07 刀 2:布局分派(必须走 buildInventoryFor 登记 _builtLayout——
+    // 共享守卫以它为门;vanilla 分支必须在 buildHud【之后】跑——.sw-vinv 的 DOM 序
+    // 在 hotbarEl 之后,关包态全局 slotEl(0-9) 首匹配=热键栏格)
     const vinvLayout = options.data.inventoryLayout === 'vanilla';
-    if (!vinvLayout) this.buildInventoryPanel();   // classic 原路径(零改动)
+    if (!vinvLayout) this.buildInventoryFor('classic');   // classic 原路径(构建器零改动)
     this.buildChestPanel();
     this.buildBuffBar();
     this.buildHud(this.game);
-    if (vinvLayout) this.buildVanillaInventoryPanel();
+    if (vinvLayout) this.buildInventoryFor('vanilla');
     // Buff → 图标物品映射
     const map: Array<[BuffType, string]> = [
       [BuffType.Agility, VI(290)], [BuffType.Ironskin, VI(292)],
@@ -6120,19 +6144,21 @@ export class UI {
   private vinvBestiaryBtn: HTMLButtonElement | null = null;
   private vinvEmoteBtn: HTMLButtonElement | null = null;
   private vinvDefenseEl: HTMLElement | null = null;
-  private vinvHousingSlots: HTMLElement[] = [];
   /** 布局期元素表:{el, pos()}——pos 返回 null=隐藏(追加槽未解锁/开箱态堆叠钮) */
   private vinvLayoutItems: Array<{ el: HTMLElement; pos: () => { x: number; y: number } | null }> = [];
   private vinvRowMap = new Map<string, number>();   // `equip:8`→可见行号(追加槽重编号;查不到=隐藏)
-  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean } | null = null;
+  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; visibleRows: number } | null = null;
   private vinvLayoutSig = '';
   private vinvResizeHandler: (() => void) | null = null;
   /** 当前已建布局(分派/重建判据;null=未建) */
   private _builtLayout: 'classic' | 'vanilla' | null = null;
 
   private buildInventoryFor(layout: 'classic' | 'vanilla'): void {
+    // _builtLayout 统一在分派层登记(classic 构建器零改动红线,不在其内写)。
+    // ★构建【后】再登记——vanilla 构建器首行的 teardown 会清它(红队 F2 重入卫生)
     if (layout === 'vanilla') this.buildVanillaInventoryPanel();
     else this.buildInventoryPanel();
+    this._builtLayout = layout;
   }
 
   /** 作用域样式(坑②):.sw-vinv 前缀全隔离;槽底 = eqdock 同款 gradient+multiply
@@ -6150,14 +6176,16 @@ export class UI {
   background-image:linear-gradient(var(--slot-tint, rgb(220,220,220)), var(--slot-tint, rgb(220,220,220))),
     var(--slot-bgimg, url(sprites/vanilla/Inventory_Back.png));
   background-size:100% 100%, 100% 100%; background-blend-mode:multiply, normal;
-  opacity:var(--slot-alpha, 1); }
-.sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
+  opacity:var(--slot-alpha, 0.575); }
 .sw-vinv .sw-slot:hover::after { opacity:1; }
+.sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
 .sw-vinv .vinv-btn { position:absolute; pointer-events:auto; margin:0; padding:0;
   border:none; background-color:transparent; background-repeat:no-repeat;
   image-rendering:pixelated; cursor:pointer; }
 .sw-vinv .vinv-txt { position:absolute; pointer-events:none; color:#e8e8f0;
   text-shadow:1px 1px 0 #000; white-space:nowrap; }
+.sw-vinv .sw-slot-num { position:absolute; left:5px; top:2px; font-size:11px; font-weight:bold;
+  color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; }
 `;
     document.head.appendChild(st);
   }
@@ -6171,9 +6199,12 @@ export class UI {
     return s;
   }
 
-  /** 原版布局构建器(几何逐函数锚 vanillaInvLayout.ts;行号注回 Main.cs) */
+  /** 原版布局构建器(几何逐函数锚 vanillaInvLayout.ts;行号注回 Main.cs)。
+   *  ★2026-09-08 红队 F2 清偿:开头强制 teardown——closeAll 只清 DOM 不清实例态,
+   *  重进世界路径(initInGame→本函数)不走 rebuild,布局/住房签名与 pvpTeamBtns/
+   *  vinvLayoutItems 若不重置 = 全新 DOM 吃旧缓存(布局冻结+住房页空白+监听泄漏) */
   private buildVanillaInventoryPanel(): void {
-    this._builtLayout = 'vanilla';
+    this.teardownInventoryPanel();
     this.vinvStyleEnsure();
     this.accEyeEls.clear();
     const root = el('div', 'sw-vinv');
@@ -6209,7 +6240,15 @@ export class UI {
     advWrap.appendChild(createAchievementAdvisor(this.game));
     this.achAdvisorEl = advWrap.firstChild as HTMLElement & { update(): void };
     root.appendChild(advWrap);
-    pos(advWrap, () => ({ x: ADVISOR_XY.x, y: ADVISOR_XY.y }));
+    // ★红队 m8b 清偿:CanDrawAboveCoins 在 sw<1000 为 false(AchievementAdvisor.cs:26-36)
+    // → 改画装备列旁第二落位 (:42096-42100 sw-224, 末行y+8),非恒钉 (501,25)
+    pos(advWrap, () => {
+      const c = this.vinvLayoutCtx!;
+      if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: ADVISOR_XY.y };
+      let last = 7;
+      for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
+      return { x: c.sw - 224, y: equipRowY(c.num20, last) + 8 };
+    });
     // ---- 钱币/弹药列(Main.cs:42460-42495:标签 (496,84)/(532,84),槽 x=497/534) ----
     const coinLbl = txt(Lang.text('LegacyInterface.26'));
     coinLbl.style.fontSize = '15px';
@@ -6349,17 +6388,17 @@ export class UI {
         return { x: ACCESSORY_CHECK_X(this.vinvLayoutCtx!.sw), y: accessoryCheckY(this.vinvLayoutCtx!.num20, row) };
       });
     }
-    // 配装轨(DrawLoadoutButtons Main.cs:42651-42707:竖轨 sw-44+钮 32×32 @sw-40+36i)
+    // 配装轨(DrawLoadoutButtons Main.cs:42651-42707:竖轨 (sw-44,num20+2) 高=可见行数·47.6 截断)
     {
       const rail = el('div');
       rail.style.cssText = 'position:absolute; width:4px; background:rgba(120,130,180,0.45);';
       pageEquip.appendChild(rail);
       pagePos(rail, () => {
         const c = this.vinvLayoutCtx!;
-        const r = loadoutRailRect(c.sw, c.num20, 3);
+        const r = loadoutRailRect(c.sw, c.num20, c.visibleRows);
+        rail.style.height = `${r.h}px`;   // 高度随追加槽行数变化(与 pos 同拍)
         return { x: r.x, y: r.y };
       });
-      rail.style.height = `${loadoutRailRect(0, 0, 3).h}px`;   // 高度定值(3 套恒可切)
       this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
         const b = el('button', 'vinv-btn sw-loadout-btn') as HTMLButtonElement;
@@ -6429,7 +6468,7 @@ export class UI {
     }
     // 页签(DrawPageIcons Main.cs:43511-43593:y=num20-32;杂项/住房=页切换,相机=债)
     const mkTab = (w: number, h: number, imgNormal: string, title: string): HTMLButtonElement => {
-      const b = btn(w, h);
+      const b = btn(Math.round(w * 0.9), Math.round(h * 0.9));   // ★红队 n2:原版 0.9f 绘制(:43523/:43534/:43545)
       b.title = title;
       b.style.backgroundImage = `url(sprites/vanilla-ui/${imgNormal})`;
       b.style.backgroundSize = '100% 100%';
@@ -6461,14 +6500,10 @@ export class UI {
     pos(this.vinvTabCamera, () => ({ x: TAB_CAMERA_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
 
     // ---- 杂项页(EquipPage==2 Main.cs:41886-41932:两列 5 行,行距整型 47) ----
-    // miscEquips 序 = 宠物/光源/矿车/坐骑/钩爪(context 19/20/18/17/16;:41905-41931)
-    const MISC_LABEL_KEYS = ['Mods.SandboxWorld.Tabs.Pet', 'Mods.SandboxWorld.Tabs.Light',
-      'Mods.SandboxWorld.Tabs.Minecart', 'Mods.SandboxWorld.Tabs.Mount', 'Mods.SandboxWorld.Tabs.Grapple'] as const;
+    // miscEquips 序 = 宠物/光源/矿车/坐骑/钩爪(context 19/20/18/17/16;:41905-41931)。
+    // ★红队 n1 清偿:原版杂项页无任何 DrawString(:41886-41932 零 DrawString)——
+    // 文字标签已摘(2026-09-08)
     for (let m = 0; m < 5; m++) {
-      const lbl = txt(Lang.text(MISC_LABEL_KEYS[m]));
-      lbl.style.fontSize = '13px';
-      pageMisc.appendChild(lbl);   // appendChild 自 root 移入杂项页(DOM reparent)
-      pagePos(lbl, () => ({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw) - 24, y: miscRowY(this.vinvLayoutCtx!.num20, m) - 18 }));
       const s = this.vinvMakeSlot('misc', m, INV_SCALE);
       pageMisc.appendChild(s);
       pagePos(s, () => ({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw), y: miscRowY(this.vinvLayoutCtx!.num20, m) }));
@@ -6491,8 +6526,15 @@ export class UI {
       }
     }
 
-    // ---- 住房页(EquipPage==1):壳(槽位+点击分配=刀 3 DrawNPCHousesInUI) ----
+    // ---- 现代合成面板(NewCraftingUI 1:1;挂 root 级,与页容器平级) ----
+    this.vinvBuildCraft();
+
+    // ---- 住房页(EquipPage==1 DrawNPCHousesInUI Main.cs:42709-42822) ----
+    // 查询器 0 号位(NPC_Head_0)+ 在场 NPC 头像槽列;x=sw-92,超 sh-80 换列 -48;
+    // 槽底 Back11(选中 Back14),头像 ≤36px 居中;点击接 game.housingMode 游标
+    // (Game.ts:11392 世界点击分配链零改动复用)。行集=刀3 共享 housingHeadRows
     pageHousing.dataset.role = 'vinv-housing';
+    this.vinvHousingPage = pageHousing;
 
     // ---- PvP/队伍(DrawPVPIcons Main.cs:43389-43443;本仓常开语义沿用 classic) ----
     {
@@ -6507,8 +6549,16 @@ export class UI {
       sword.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpToggleHostile(); });
       root.appendChild(sword);
       this.pvpSwordBtn = sword;
+      // ★红队 n4:住房页 NPC 列达第 4 列(num3≤-144)时原版隐藏 PvP/队伍(:42761-42763)
+      const housingPvpHidden = (): boolean => {
+        if (this.vinvPageCurrent !== 1 || !this.vinvLayoutCtx) return false;
+        const c = this.vinvLayoutCtx;
+        const posA = housingSlotPositions(this.vinvHousingSlotEls.length, c.sw, c.num20, c.sh);
+        return new Set(posA.map((p) => p.x)).size >= 4;
+      };
       pos(sword, () => {
         const c = this.vinvLayoutCtx!;
+        if (housingPvpHidden()) return null;
         const p = pvpSwordXY(c.sw, c.mH, this.vinvPageCurrent === 2);
         return { x: p.x, y: p.y };
       });
@@ -6526,7 +6576,11 @@ export class UI {
         cell.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpSetTeam(PVP_TEAM_BUTTONS[i].team); });
         root.appendChild(cell);
         this.pvpTeamBtns.push(cell);
-        pos(cell, () => pvpTeamXY(this.vinvLayoutCtx!.sw, this.vinvLayoutCtx!.mH, i));
+        pos(cell, () => {
+          const c = this.vinvLayoutCtx!;
+          if (housingPvpHidden()) return null;
+          return pvpTeamXY(c.sw, c.mH, i, this.vinvPageCurrent === 2);
+        });
       }
     }
 
@@ -6538,10 +6592,11 @@ export class UI {
   }
 
   /** 垃圾桶槽(Main.cs:43073-43090)。行为=classic 同面(Alt+聊天 tag/Shift 回包/
-   *  放置/取回),复制自 buildInventoryPanel 段(classic 区零改动红线) */
+   *  放置/取回),复制自 buildInventoryPanel 段(classic 区零改动红线)。
+   *  ★红队 m3 清偿:盒 52px × scale(0.85)=视觉 44.2(旧 44 盒×0.85=37.4 双重缩放) */
   private vinvBuildTrash(): HTMLElement {
     const trash = el('div', 'sw-slot trash sw-trash');
-    trash.style.cssText = 'width:44px; height:44px; pointer-events:auto;'
+    trash.style.cssText = 'width:52px; height:52px; pointer-events:auto;'
       + 'background-image:url(sprites/vanilla/Inventory_Back7.png);';
     trash.addEventListener('contextmenu', (e) => e.preventDefault());
     trash.addEventListener('mousedown', (e) => {
@@ -6600,15 +6655,18 @@ export class UI {
     const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
     const masterShown = inv.gateMaster || hasAt(9, 9);
     const chestOpen = !!this.openChest || this.game.npcShopOpen;
-    // ★小地图占位:本仓 minimap 缺省恒开(mapStyle 1);全屏地图/关图态的 mH=0 联动=债
-    const mH = mHOf(true, sh);
     const visibleRows = 8 + (heartShown ? 1 : 0) + (masterShown ? 1 : 0);
+    // ★小地图占位:本仓 minimap 缺省恒开(mapStyle 1);全屏地图/关图态的 mH=0 联动=债。
+    // PushUp=610 当恶魔心/大师槽可显示(Main.cs:3063-3071;PushEquipmentAreaUp 设置
+    // 本仓无,取 0=偏差备案);mH 可为负=原版同款
+    const mH = mHOf(true, sh, heartShown || masterShown ? 610 : 600);
     const num20 = equipAreaTop(sh, mH, visibleRows);
     root.style.transformOrigin = 'top left';
     root.style.transform = `scale(${K})`;
-    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen };
+    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, visibleRows };
     this.vinvComputeRows(heartShown, masterShown);
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}`;
+    // 签名含 uiScale(★红队 MINOR-4:K 依赖 uiScale,漏签 = 改缩放右锚列不重排)
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -6664,8 +6722,338 @@ export class UI {
     for (let i = 0; i < 50; i++) paintInvSlot(i);
     for (let k = 0; k < 4; k++) { paintInvSlot(COIN_START + k); paintInvSlot(AMMO_START + k); }
     this.vinvApplyPage();
+    this.vinvRefreshHousing();
+    this.vinvRefreshCraft();
     this.paintVanillaDefense();
   }
+
+  /** 住房页槽列同步(EquipPage==1;Diff 重建——行集仅在 NPC 进出变化时重建,
+   *  选中态每刷改背景)。行为面 = HousingPanel.setCursor 同款(menuTick+游标) */
+  private vinvHousingPage: HTMLElement | null = null;
+  private vinvHousingSlotEls: Array<{ el: HTMLElement; img: HTMLImageElement; key: string }> = [];
+  private vinvHousingSig = '-init';   // 哨兵:空世界(sig='')也要首建查询器槽
+  private vinvRefreshHousing(): void {
+    const page = this.vinvHousingPage;
+    if (!page || !this.game) return;
+    const rows = housingHeadRows(this.game);
+    // ★红队 MINOR-6 清偿:携带 NPC 离场 → 降级查询器(HousingPanel.refresh 同语义,
+    // :44649-44651)——否则 assign 游标持续吞世界点击
+    const hm = this.game.housingMode;
+    if (hm && hm.kind === 'assign' && !rows.some((r) => r.npcKey === hm.npcKey)) {
+      this.game.housingMode = null;
+    }
+    const sig = rows.map((r) => r.npcKey).join(',');
+    if (sig !== this.vinvHousingSig) {
+      this.vinvHousingSig = sig;
+      // ★红队 MAJOR-3 清偿:重建前按元素身份滤除旧布局项(旧实现只 remove DOM——
+      // vinvLayoutItems 无界增长+死节点每拍求 pos)
+      const dead = new Set(this.vinvHousingSlotEls.map((s) => s.el));
+      this.vinvLayoutItems = this.vinvLayoutItems.filter((it) => !dead.has(it.el));
+      for (const s of this.vinvHousingSlotEls) s.el.remove();
+      this.vinvHousingSlotEls = [];
+      const mk = (key: string, headPath: string, name: string, onPick: () => void): void => {
+        const b = el('button', 'vinv-btn') as HTMLButtonElement;
+        b.style.width = '52px'; b.style.height = '52px';
+        b.style.transform = 'scale(0.85)';   // ★红队 m4:原版槽 52×0.85=44.2(Main.cs:42787-42790)
+        b.style.transformOrigin = 'top left';
+        b.style.backgroundImage = 'url(sprites/vanilla/Inventory_Back11.png)';
+        b.style.backgroundSize = '100% 100%';
+        b.title = name;
+        const im = el('img') as HTMLImageElement;
+        im.draggable = false;
+        im.style.cssText = 'position:absolute; inset:0; margin:auto; max-width:36px; max-height:36px; image-rendering:pixelated;';
+        im.src = headPath;
+        b.appendChild(im);
+        b.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (e.button !== 0) return;
+          this.game.sfx.play('menuTick', 1);
+          onPick();
+          this.vinvPaintHousingSelection();
+        });
+        b.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (this.game.housingMode) { this.game.housingMode = null; this.game.sfx.play('menuTick', 1); }
+          this.vinvPaintHousingSelection();
+        });
+        const idx = this.vinvHousingSlotEls.length;
+        page.appendChild(b);
+        this.vinvLayoutItems.push({
+          el: b,
+          pos: () => {
+            const c = this.vinvLayoutCtx;
+            if (!c) return null;
+            return housingSlotPositions(this.vinvHousingSlotEls.length, c.sw, c.num20, c.sh)[idx] ?? null;
+          },
+        });
+        this.vinvHousingSlotEls.push({ el: b, img: im, key });
+      };
+      mk('__query__', 'sprites/vanilla/NPC_Head_0.png', Lang.inter(8),
+        () => { this.game.housingMode = { kind: 'query' }; });   // 0 号=查询器(:41506)
+      for (const r of rows) {
+        mk(r.npcKey, `sprites/vanilla/NPC_Head_${r.headIndex}.png`, r.name,
+          () => { this.game.housingMode = { kind: 'assign', npcKey: r.npcKey }; });
+      }
+      this.vinvLayoutSig = '';   // 行数变化 → 重排
+      this.layoutVanilla();
+    }
+    this.vinvPaintHousingSelection();
+  }
+
+  /** 选中态:游标匹配槽 = Back14(Main.cs:42796 焦点帧) */
+  private vinvPaintHousingSelection(): void {
+    const cur = this.game?.housingMode ?? null;
+    for (const s of this.vinvHousingSlotEls) {
+      const active = cur && (s.key === '__query__'
+        ? cur.kind === 'query'
+        : cur.kind === 'assign' && cur.npcKey === s.key);
+      s.el.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${active ? 14 : 11}.png)`;
+      s.img.style.opacity = active ? '0.4' : '1';   // 携带态灰显(HousingPanel.draw 同语义)
+    }
+  }
+
+  private vinvCraftFocusV = 0;
+  private vinvCraftAvailV: Array<{ r: VanillaRecipeLike; count: number }> = [];
+
+  // ---- 合成区(★2026-09-08 用户实测二轮:原版无面板底/无搜索框,合成=左下角
+  //  竖向列表;Modern 网格面板整体退役)。权威:CraftingUI.DrawRecipesList
+  //  (CraftingUI.cs:161-318)+ Main.cs:42239-42250(adjY/middleY 分档)+
+  //  HoverOverCraftingItemButton(Main.cs:42971-43036,点非焦点=居中+音12,
+  //  点焦点=合成,Shift×10)+ DrawRecipes_AdjustRecipeOffsetSnappy(:371-396)。
+  //  登记偏差:吸附动画以瞬时重排替代(recFastScroll 形态);鱼眼 scale/alpha/
+  //  x 位移逐式还原。inventoryBack.A 取 150(原版 LoadSettings 初值)。
+  private vinvBuildCraft(): void {
+    // 列表/材料行容器(透明,仅命中面;格子绝对定位直挂 root)
+    const listHit = el('div');
+    listHit.style.cssText = 'position:absolute; pointer-events:auto;';
+    listHit.addEventListener('wheel', (e) => {
+      e.stopPropagation();
+      const rows = this.vinvCraftAvailV;
+      if (!rows.length) return;
+      const dir = e.deltaY > 0 ? 1 : -1;
+      const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir));
+      if (next !== this.vinvCraftFocusV) {
+        this.vinvCraftFocusV = next;
+        this.game.sfx.play('menuTick', 1);   // SoundID 12(每越一步 :391/:4209)
+        this.vinvUpdateCraftList();
+      }
+    }, { passive: true });
+    this.vinvRoot?.appendChild(listHit);
+    this.vinvCraftListEl = listHit;
+    // 制作标题(Lang.inter[25] @(76,414+adjY);:169-173)
+    const title = el('div', 'vinv-txt', Lang.inter(25));
+    title.style.fontSize = '17px';
+    this.vinvRoot?.appendChild(title);
+    this.vinvCraftTitleEl = title;
+    // 材料行容器(底部一行,槽位绝对定位)
+    const mats = el('div');
+    mats.style.cssText = 'position:absolute; inset:0; pointer-events:none;';
+    this.vinvRoot?.appendChild(mats);
+    this.vinvCraftMatEl = mats;
+    // 就近箱参与制作开关((94,490+adjY);Main.cs:42440-42443,ChestCraft 32×34;
+    // 网格切换钮 (94,450+adjY) 的 Craft_Toggle 贴图未入仓+经典网格未实现=债 #2)
+    const nearImg = document.createElement('img');
+    nearImg.draggable = false;
+    nearImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
+    const syncNear = (): void => { nearImg.src = `sprites/vanilla-ui/UI_ChestCraft_${options.data.craftFromNearbyChests ? 0 : 2}.png`; };
+    syncNear();
+    const nearBtn = el('button', 'vinv-btn') as HTMLButtonElement;
+    nearBtn.style.cssText = 'width:32px; height:34px; padding:0;';
+    nearBtn.appendChild(nearImg);
+    nearBtn.title = Lang.has('GameUI.CraftFromNearbyChestsOn') ? Lang.text('GameUI.CraftFromNearbyChestsOn') : 'CraftFromNearbyChests';
+    nearBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      void options.set('craftFromNearbyChests', !options.data.craftFromNearbyChests);
+      this.game.sfx.play('menuTick', 1);
+    });
+    options.onChange(() => syncNear());
+    this.vinvRoot?.appendChild(nearBtn);
+    this.vinvLayoutItems.push({ el: nearBtn, pos: () => {
+      const c = this.vinvLayoutCtx;
+      if (!c) return null;
+      return { x: 94, y: 490 + this.vinvCraftAdjY(c.sh) };
+    } });
+    this.vinvLayoutItems.push({ el: listHit, pos: () => this.vinvCraftListRect() });
+    this.vinvLayoutItems.push({ el: title, pos: () => {
+      const c = this.vinvLayoutCtx;
+      if (!c) return null;
+      return { x: 76, y: 414 + this.vinvCraftAdjY(c.sh) };
+    } });
+    this.vinvLayoutItems.push({ el: mats, pos: () => ({ x: 0, y: 0 }) });
+  }
+
+  /** adjY(Main.cs:42239-42244:<700 → (sh-508)/2,否则 (sh-600)/2,整型) */
+  private vinvCraftAdjY(sh: number): number {
+    return sh < 700 ? Math.trunc((sh - 508) / 2) : Math.trunc((sh - 600) / 2);
+  }
+  /** middleY(Main.cs:42240-42249:<700 → sh/600·200;<850 → ·225;否则 ·250) */
+  private vinvCraftMiddleY(sh: number): number {
+    if (sh < 700) return Math.trunc(sh / 600 * 200);
+    if (sh < 850) return Math.trunc(sh / 600 * 225);
+    return Math.trunc(sh / 600 * 250);
+  }
+  /** 列表命中区(覆盖可见鱼眼带;顶=最上可见槽 410+adjY-0.75·(middleY+30)——
+   *  不下探到背包网格区,防吃首列点击) */
+  private vinvCraftListRect(): { x: number; y: number } | null {
+    const c = this.vinvLayoutCtx;
+    if (!c) return null;
+    const adjY = this.vinvCraftAdjY(c.sh), middleY = this.vinvCraftMiddleY(c.sh);
+    return { x: 0, y: Math.trunc(410 + adjY - 0.75 * (middleY + 30)) };
+  }
+
+  private vinvRefreshCraft(): void {
+    const game = this.game;
+    if (!game || !this.vinvCraftListEl) return;
+    const avail = game.vanillaAvailableRecipes();
+    // 签名比对(r 引用静态+count)——配方集变化才重建格池
+    const prev = this.vinvCraftAvailV;
+    const unchanged = prev.length === avail.length
+      && prev.every((p, i) => p.r === avail[i].r && p.count === avail[i].count);
+    this.vinvCraftAvailV = avail;
+    this.vinvCraftFocusV = Math.min(this.vinvCraftFocusV, Math.max(0, avail.length - 1));
+    if (!unchanged) {
+      this.vinvRebuildCraftCells();
+    }
+    this.vinvUpdateCraftList();
+  }
+
+  /** 格池重建(配方集变化;每配方一枚 52 盒槽,鱼眼 scale/x/y 全在 update 拍) */
+  private vinvRebuildCraftCells(): void {
+    const root = this.vinvRoot;
+    if (!root) return;
+    const dead = new Set(this.vinvCraftCellEls.map((c) => c.el));
+    this.vinvLayoutItems = this.vinvLayoutItems.filter((it) => !dead.has(it.el));
+    for (const c of this.vinvCraftCellEls) c.el.remove();
+    this.vinvCraftCellEls = [];
+    for (let idx = 0; idx < this.vinvCraftAvailV.length; idx++) {
+      const rec = this.vinvCraftAvailV[idx];
+      const outKey = vanillaItemKey(rec.r.create);
+      const s = el('div', 'sw-slot');
+      s.style.cssText = 'position:absolute; width:52px; height:52px; background-image:none;'
+        + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform-origin:top left;';
+      const img = el('img') as HTMLImageElement;
+      img.draggable = false;
+      img.src = iconUrl(this.game, this.game.itemId(outKey ?? ''));
+      s.appendChild(img);
+      if (rec.r.createStack > 1) s.appendChild(el('span', 'cnt', String(rec.r.createStack)));
+      s.addEventListener('mousedown', (ev) => {
+        ev.stopPropagation();
+        // HoverOverCraftingItemButton :43020-43033:点非焦点=居中+音12;点焦点=合成
+        if (this.vinvCraftFocusV !== idx) {
+          this.vinvCraftFocusV = idx;
+          this.game.sfx.play('menuTick', 1);
+          this.vinvUpdateCraftList();
+          return;
+        }
+        this.game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+        this.refreshAll();
+      });
+      s.addEventListener('mouseover', () => {
+        // HoverItem = createItem.Clone()(:42978)→ 完整物品 tooltip
+        const iid = this.game.itemId(vanillaItemKey(rec.r.create) ?? '');
+        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: s });
+      });
+      s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+      root.appendChild(s);
+      this.vinvCraftCellEls.push({ el: s });
+      const i = idx;
+      this.vinvLayoutItems.push({ el: s, pos: () => this.vinvCraftCellPos(i) });
+    }
+  }
+
+  /** 鱼眼格几何(DrawRecipesList :186-201):y_i=(i-focus)·65;
+   *  scale=max(0.75,100/(|y_i|+100));x=trunc(46-26·scale);
+   *  y=trunc(410+y_i·scale-30·scale+adjY);|y_i|>middleY 剔除(:188) */
+  private vinvCraftCellPos(i: number): { x: number; y: number } | null {
+    const c = this.vinvLayoutCtx;
+    if (!c) return null;
+    const adjY = this.vinvCraftAdjY(c.sh), middleY = this.vinvCraftMiddleY(c.sh);
+    const yOff = (i - this.vinvCraftFocusV) * 65;
+    if (Math.abs(yOff) > middleY) return null;
+    const scale = Math.max(0.75, 100 / (Math.abs(yOff) + 100));
+    return {
+      x: Math.trunc(46 - 26 * scale),
+      y: Math.trunc(410 + yOff * scale - 30 * scale + adjY),
+    };
+  }
+
+  /** 列表重排+焦点描金+边缘渐隐(GetItemSlotColors :358-370:alpha=A+50,
+   *  |y|>middleY-100 起线性衰减;灰乘色=原版 inventoryBack 灰,A=150) */
+  private vinvUpdateCraftList(): void {
+    const c = this.vinvLayoutCtx;
+    if (!c) return;
+    const middleY = this.vinvCraftMiddleY(c.sh);
+    const A = 150;
+    for (let i = 0; i < this.vinvCraftCellEls.length; i++) {
+      const el = this.vinvCraftCellEls[i].el;
+      const pos = this.vinvCraftCellPos(i);
+      if (!pos) { el.style.display = 'none'; continue; }
+      el.style.display = '';
+      el.style.left = `${pos.x}px`;
+      el.style.top = `${pos.y}px`;
+      const yOff = (i - this.vinvCraftFocusV) * 65;
+      const scale = Math.max(0.75, 100 / (Math.abs(yOff) + 100));
+      el.style.transform = `scale(${scale})`;
+      let alpha = A + 50;
+      if (Math.abs(yOff) > middleY - 100) {
+        alpha = 150 * (100 - (Math.abs(yOff) - (middleY - 100))) * 0.01;
+      }
+      el.style.opacity = String(Math.max(0, Math.min(1, alpha / 255)));
+      // 焦点槽描金(DrawGoldBGForCraftingMaterial 语义≈Back14 高亮 :206-213)
+      el.style.setProperty('--slot-bgimg',
+        `url(sprites/vanilla/Inventory_Back${i === this.vinvCraftFocusV ? 14 : ''}.png)`);
+    }
+    if (this.vinvCraftListEl) {
+      const r = this.vinvCraftListRect();
+      if (r) { this.vinvCraftListEl.style.left = `${r.x}px`; this.vinvCraftListEl.style.top = `${r.y}px`; }
+      this.vinvCraftListEl.style.width = '100px';
+      this.vinvCraftListEl.style.height = `${Math.trunc(middleY * 1.5) + 80}px`;
+    }
+    this.vinvUpdateCraftMaterials();
+  }
+
+  /** 材料行(DrawRecipesList :225-287:focus 配方 requiredItem;x=80+j·40,
+   *  y=380+adjY,scale 0.6;alpha=A-|y_focus|·2 远焦渐隐;悬停=材料 tooltip
+   *  (SetRecipeMaterialDisplayName :447-460 组名覆写近似=材料本体 tooltip)) */
+  private vinvUpdateCraftMaterials(): void {
+    const mats = this.vinvCraftMatEl;
+    const c = this.vinvLayoutCtx;
+    if (!mats || !c) return;
+    const rec = this.vinvCraftAvailV[this.vinvCraftFocusV];
+    const sig = rec ? `${rec.r.create}|${rec.r.items.map((i2) => `${i2.id}:${i2.stack}`).join(',')}` : '';
+    if (sig === this.vinvCraftMatSig) return;
+    this.vinvCraftMatSig = sig;
+    mats.replaceChildren();
+    if (!rec) return;
+    const alpha = Math.max(0, 150 / 255);
+    rec.r.items.forEach((req, j) => {
+      const k2 = ingredientKey(req.id);
+      const x = 80 + j * 40, y = 380 + this.vinvCraftAdjY(c.sh);
+      const box = el('div', 'sw-slot');
+      box.style.cssText = `position:absolute; left:${x}px; top:${y}px; width:52px; height:52px;`
+        + 'background-image:none; --slot-bgimg:url(sprites/vanilla/Inventory_Back.png);'
+        + 'transform:scale(0.6); transform-origin:top left;';
+      const img = el('img') as HTMLImageElement;
+      img.draggable = false;
+      img.src = k2 ? iconUrl(this.game, this.game.itemId(k2)) : '';
+      box.appendChild(img);
+      if (req.stack > 1) box.appendChild(el('span', 'cnt', String(req.stack)));
+      box.style.pointerEvents = 'auto';
+      box.addEventListener('mouseover', () => {
+        const iid = k2 ? this.game.itemId(k2) : -1;
+        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: req.stack }, anchor: box });
+      });
+      box.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+      mats.appendChild(box);
+    });
+  }
+
+  private vinvCraftCellEls: Array<{ el: HTMLElement }> = [];
+  private vinvCraftListEl: HTMLElement | null = null;
+  private vinvCraftTitleEl: HTMLElement | null = null;
+  private vinvCraftMatEl: HTMLElement | null = null;
+  private vinvCraftMatSig = '';
 
   /** EquipPage 状态机(原版 DrawPageIcons 帧尾 SelectEquipPage :43587 等价:
    *  手持物每帧重算页码,变化才切 display;空手落记忆页) */
@@ -6772,7 +7160,11 @@ export class UI {
     this.vinvPageCurrent = -1;
     this.vinvQuickBtn = this.vinvSortBtn = this.vinvBestiaryBtn = this.vinvEmoteBtn = null;
     this.vinvDefenseEl = null;
-    this.vinvHousingSlots = [];
+    this.vinvHousingPage = null;
+    this.vinvHousingSlotEls = [];
+    this.vinvHousingSig = '-init';
+    this.vinvCraftFocusV = -1;
+    this.vinvCraftAvailV = [];
     this.vinvLayoutItems = [];
     this.vinvRowMap.clear();
     this.vinvLayoutCtx = null;

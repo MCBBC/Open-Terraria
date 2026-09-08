@@ -171,7 +171,7 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     expect(p.appearance.hair).toBe(42);
     expect(p.playerState.hairDye).toBe(7);              // hairDye 是 playerState 字段(非外观)
     expect(p.appearance.skinVariant).toBe(1);
-    expect(p.appearance.voiceVariant).toBe(2);          // 奇数变体=女
+    expect(p.appearance.voiceVariant).toBe(1);          // ★SW-RB6c oracle：原版语音按 PlayerVariantID.Sets.Male={0,1,2,3,8,10} 派生（v1=男）——旧奇偶派生已废
     expect(p.appearance.hairColor).toEqual({ r: 10, g: 20, b: 30 });
     expect(p.appearance.shoeColor).toEqual({ r: 61, g: 62, b: 63 });
     expect(p.playerState.hideVisibleAccessory?.[0]).toBe(true);

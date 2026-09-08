@@ -418,10 +418,23 @@ export interface MonolithEnv {
   heatTileCenterY?: number;
   /** Main.maxTilesY = world.store.h（flag2 地狱带 = maxY-320） */
   heatMaxTilesY?: number;
-  /** metrics.ZoneDesert / ZoneRain / ZoneSandstorm（flag3 沙漠带三条件 :104） */
+  /** metrics.ZoneDesert / ZoneRain / ZoneSandstorm（flag3 沙漠带三条件 :104/1457 :107） */
   heatZoneDesert?: boolean;
   heatZoneRain?: boolean;
   heatZoneSandstorm?: boolean;
+  // ---- SW-BJ27 2026-09-07：沙漠支强度两输入（SceneState.cs:201-207 / 1456 :198-204）----
+  /** ColorOfTheSkies 快照 [R,G,B] 0-255（上帧 Draw 的 Main.ColorOfTheSkies——
+   *  Renderer.render 每帧 :3137-3141 计算写存,本处读到的是上帧值,与原版
+   *  SceneState.Update(Update 段)读上帧 Draw 写入的 Main.tileColor 同一滞后语义）。
+   *  ApplyColorOfTheSkiesToTiles（Main.cs:64134-64142;Draw :62929 在 SetBackColor 后
+   *  调用）逐通道 C=(Σrgb+7C)/10 得 Main.tileColor,其三通道均值【恰等于】天空色
+   *  均值/255（7C 倾斜项在均值中相消：avg_i[(Σ+7C_i)/10] = 3Σ+7Σ /30 = Σ/3）——
+   *  SceneState.cs:203-204 num9 = avg(tileColor.ToVector3()) 直接吃本均值。
+   *  null/缺省 = 首帧 tileColor 尚未产出（原版 default(Color) 全零 → num9=0 同态） */
+  heatTileColor?: readonly [number, number, number] | null;
+  /** outsideWeatherEffectIntensity（SceneState.cs:178-179：BehindBackwall ? −0.1 : 1.1,
+   *  0.005/t 逼近后钳 0-1——weather.outsideWeatherEffect 同源同值） */
+  heatOutsideWeather?: number;
   /** perspectivePlayer.sunScorchCounter（Player.cs:2228 吸血鬼阳光炽灼 0-300） */
   heatSunScorch?: number;
   /** Main.UseHeatDistortion（Main.cs:409 默认 true 的视频开关） */
@@ -456,11 +469,11 @@ export class MonolithFilters {
   miniTowerActive = -1;
 
   // ---- HeatDistortion 滤镜态（EffectPriority.Low，ScreenEffectInitializer.cs:40）----
-  /** Filter.Active（SceneState.cs:123 ManageSpecialBiomeVisuals 门） */
+  /** Filter.Active（SceneState.cs:126 ManageSpecialBiomeVisuals 门；1456 :123） */
   heatActive = false;
   /** Filter.Opacity（FilterManager.cs:95-101 同款 1/s 斜坡，与柱族共用速率） */
   heatOpacity = 0;
-  /** UseIntensity num8（SceneState.cs:186-204） */
+  /** UseIntensity num8（SceneState.cs:186-210；1456 :183-207） */
   heatIntensity = 0;
 
   reset(): void {
@@ -504,16 +517,16 @@ export class MonolithFilters {
     }
     this.miniTowerActive = scan.activeMonolithType;
 
-    // ---- HeatDistortion（SceneState.cs:122-123 激活门 + :183-207 强度）----
-    // flag2 地狱带 = TileCenter.Y > maxTilesY-320；flag3 沙漠带 = 地表且 ZoneDesert
-    // 且非雨非沙暴（:103-104）；flag7 三者并集 + sunScorch>0（:122）
+    // ---- HeatDistortion（SceneState.cs:125-126 激活门 + :186-210 强度；1456 :122-123/:183-207）----
+    // flag2 地狱带 = TileCenter.Y > maxTilesY-320（:106）；flag3 沙漠带 = 地表且
+    // ZoneDesert 且非雨非沙暴（:107）；flag7 三者并集 + sunScorch>0（:125）
     const tcY = env.heatTileCenterY ?? 0;
     const maxTY = env.heatMaxTilesY ?? 0;
-    const heatFlag2 = tcY > maxTY - 320;                                    // :103
+    const heatFlag2 = tcY > maxTY - 320;                                    // :106
     const heatFlag3 = tcY < env.worldSurface && !!env.heatZoneDesert
-      && !env.heatZoneRain && !env.heatZoneSandstorm;                       // :104
+      && !env.heatZoneRain && !env.heatZoneSandstorm;                       // :107
     this.heatActive = (env.useHeatDistortion ?? true)
-      && (heatFlag2 || heatFlag3 || (env.heatSunScorch ?? 0) > 0);          // :122-123
+      && (heatFlag2 || heatFlag3 || (env.heatSunScorch ?? 0) > 0);          // :125-126
     this.heatOpacity = this.heatActive
       ? Math.min(this.heatOpacity + dt * OPACITY_RATE, 1)
       : Math.max(this.heatOpacity - dt * OPACITY_RATE, 0);                  // FilterManager 斜坡
@@ -521,17 +534,31 @@ export class MonolithFilters {
       let num8 = 0;
       const scorch = env.heatSunScorch ?? 0;
       if (scorch > 0) {
-        num8 = Math.max(num8, smoothStep(0, 300, scorch) * 4);              // :187-191 GetLerpValue
+        num8 = Math.max(num8, smoothStep(0, 300, scorch) * 4);              // :190-194 GetLerpValue
       }
       if (heatFlag2) {
-        const val2 = Math.min(1, (tcY - (maxTY - 320)) / 120) * 2;         // :192-197
+        const val2 = Math.min(1, (tcY - (maxTY - 320)) / 120) * 2;         // :197-200
         num8 = Math.max(num8, val2);
       } else if (heatFlag3) {
-        // :198-204 num9 = tileColor.rgb 平均——Main.tileColor 全源码无赋值
-        //（Main.cs:1224 声明即 C# 默认 0）→ num9≡0 → val3≡0 = 1.4.5.6 死支
-        num8 = Math.max(num8, 0);
+        // SW-BJ27 2026-09-07：沙漠支强度 1:1（SceneState.cs:201-207；1456 :198-204）。
+        // ★翻案：旧注"Main.tileColor 全源码无赋值 → 死支"系误判——head 截断 grep
+        //   漏掉 Main.cs:64137-64141（ApplyColorOfTheSkiesToTiles 在 Draw 的
+        //   SetBackColor 后每帧赋值,1456 Main.cs 同在,非 1457 新增）。num9 = 上帧
+        //   ColorOfTheSkies 均值/255（见 MonolithEnv.heatTileColor 注——
+        //   tileColor 的 (Σ+7C)/10 逐通道倾斜在均值中恰相消）。
+        //   val3 = 室外强度 ×4 × max(0, 0.5−cloudAlpha) × num9（:205）：
+        //   雨云 cloudAlpha≥0.5 → 0（雨停后 cloudAlpha 渐退穿 0.5 才渐显）;墙后
+        //   室外强度→0 → 隐;夜天空暗 → num9 小 → 弱（原版无硬昼夜门,:107 沙漠门
+        //   本身不含 dayTime,昼夜差全由天空色亮度承载）。
+        const tc = env.heatTileColor;
+        const num9 = tc ? (tc[0] + tc[1] + tc[2]) / (3 * 255) : 0;          // :203-204
+        const val3 = (env.heatOutsideWeather ?? 1) * 4
+          * Math.max(0, 0.5 - env.cloudAlpha) * num9;                       // :205
+        num8 = Math.max(num8, val3);
       }
-      this.heatIntensity = num8;                                            // :205 UseIntensity
+      this.heatIntensity = num8;                                            // :208 UseIntensity
+      // :209 IsHidden = num8 ≤ 0 → Filter.IsVisible（Filter.cs:61-68）=false——
+      // 激活+斜坡照常走,只是不画;heatVisible 口已承载（opacity>0 && intensity>0）
     }
 
     // 微光三态（SceneState.cs:328-345）：state 1 → 开；state 2 显式关（压掉其它微光源）

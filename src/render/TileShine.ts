@@ -16,13 +16,20 @@
 //       (shimmerAlpha>0 && tileSolid[type]) || type==165 || 693 || 694 → true；
 //       !tileShine2[type] → false；467/468 frameX∈[144,178)；21/441 frameX∈[36,178)；
 //       default → true
+//     ★F6a（2026-09-08）：tileShine2[185]/[186] 是【按帧动态赋值】的成员
+//       （TileDrawing.cs:5223-5231/:5239-5247 GetTileDrawData 内逐格写表；
+//       DrawSingleTile :884 GetTileDrawData 先于 :1028 GetFinalLight → 每格自洽，
+//       无跨格泄漏）：185 = frameY==18 ∧ frameX∈[576,882]（双端闭）、
+//       186 = frameX∈[864,1170]（双端闭）——上界闭与 467/468 的 <178 开区间不同源。
+//       机制 = 入 SHINE2_SHEETS + shouldTileShine 帧门（frameY 形参为 185 新增）。
 //   · Main.cs:21868-21951 Main.shine(ref Vector3, type)：num=0.6 缺省；逐 case 乘区
 //       （全表见 shineMultiplier）；case 262-268 = XYZ += 0.39【加法支】；
 //       default = tileShine2[type] → 全通道 ×1.6；尾段 shimmerAlpha>0 时向
 //       (1.2,1.0,1.6) 逐通道 lerp 并钳 1（shimmerShine 全库仅此一处赋值）。
 //   · Main.tileShine2 全表（Main.cs:7276-7331 区块 + :7656/:9792/:10141-10155/
-//       :10212/:10315/:10420-10431 散点 + :10478-10481 循环 262..268）= 59 型，
-//       见 SHINE2_SHEETS。
+//       :10212/:10315/:10420-10431 散点 + :10478-10481 循环 262..268）= 59 静态型
+//       + 2 动态型（185/186,TileDrawing.cs 逐格按帧赋值,见 ShouldTileShine 注）
+//       = 61 条目，见 SHINE2_SHEETS。
 //
 // 【架构落点（为什么是"合成前 lighter 加进世界层"）】本仓 tile = 世界层画未调色
 //   sprite → compositeLight 全层乘光照图；逐格顶点色通道不存在（荧光涂层叠层
@@ -85,6 +92,7 @@ export const SHINE2_SHEETS: ReadonlySet<number> = new Set([
   161, 163, 164,         // IceBlock/CorruptIce/HallowedIce（:759-765）
   166, 167, 168, 169,    // Tin/Lead/Tungsten/Platinum（:769-775）
   178,                   // ExposedGems（:793）
+  185, 186,              // ★F6a SmallPiles/LargePiles（Main.cs 无静态赋值——TileDrawing.cs:5223-5231/:5239-5247 按帧动态赋值,帧门在 shouldTileShine;本仓 v_185_small_decos/v_186_decos_3x2 在册=活成员）
   204,                   // Crimtane（:845）
   211,                   // Chlorophyte（:859）
   221, 222, 223,         // Palladium/Orichalcum/Titanium（:879-883）
@@ -105,9 +113,11 @@ export function isPulseShineSheet(sheet: number): boolean {
   return sheet === 204 || sheet === 211;
 }
 
-/** Main.shine 加法支（Main.cs:21905-21912）：case 262-268 Gemspark 顶点色 XYZ += 0.39，
- *  加在【光】上与光照 L 无关（switch case 直落 break，不吃 ×1.6 缺省支）。
- *  交付层 = 合成后平加（drawTileShineAdditive）。 */
+/** Main.shine 加法支：case 262-268 Gemspark 顶点色 += 0.39（switch case 直落 break，
+ *  不吃 ×1.6 缺省支）。两个重载形态：Vector3 重载（Main.cs:21920-21930,GetFinalLight
+ *  Vector3 路 :4438 消费）XYZ += 0.39；Color 重载（Main.cs:21828-21830,:4424 消费）
+ *  逐通道 +100/255 后尾段钳 255（:21850-21856）——亮处（L≈1 的 Gemspark 自光域）
+ *  +0.39 被钳没。交付层 = 合成后平加（drawTileShineAdditive,精度边界见其注）。 */
 export const SHINE_ADDITIVE = 0.39;
 export function isAdditiveShineSheet(sheet: number): boolean {
   return sheet >= 262 && sheet <= 268;
@@ -132,10 +142,11 @@ export function shineMultiplier(sheet: number, mouseTextColor: number): [number,
     case 163:   return [1.05, 1.1, 1.15];            // :21902-21906
     case 164:   return [1.1, 1.1, 1.2];              // :21907-21911
     case 178:   return [1.5, 1.5, 1.5];              // :21912-21917（num4=0.5）
-    // case 185/186（SmallPiles/LargePiles ×1.3,:21918-21923）反编译如实保留——但
-    // tileShine2[185/186] 无赋值（全库 grep 零命中）且 Main.shine 全库调用点仅
-    // TileDrawing.cs:4424/:4438（ShouldTileShine 已先行把非 tileShine2 型拒之门
-    // 外）→ 该 case 对 tile 绘制路径不可达（dead for tiles）。
+    // case 185/186（SmallPiles/LargePiles ×1.3,Main.cs:21913-21919）——★F6a 销账：
+    //  旧注"tileShine2[185/186] 无赋值（全库 grep 零命中）→ dead for tiles"系
+    //  截断假象：TileDrawing.cs:5223-5231/:5239-5247 GetTileDrawData 按堆叠帧
+    //  【动态赋值】（185: frameY==18 ∧ frameX∈[576,882]；186: frameX∈[864,1170]），
+    //  这些帧原版吃 ×1.3（帧门见 shouldTileShine）。
     case 185:
     case 186:   return [1.3, 1.3, 1.3];
     case 262:                                        // :21924-21931 加法支（不走乘法）
@@ -159,14 +170,21 @@ export function shimmerTailMultiplier(shimmerAlpha: number): [number, number, nu
   return [1 + 0.2 * shimmerAlpha, 1, 1 + 0.6 * shimmerAlpha];
 }
 
-/** ShouldTileShine 1:1（TileDrawing.cs:4443-4471）。vanillaSolid = Main.tileSolid[type]。 */
+/** ShouldTileShine 1:1（TileDrawing.cs:4443-4471）。vanillaSolid = Main.tileSolid[type]。
+ *  ★F6a：frameY 形参（缺省 0,既有调用面零改动）——仅 185 的动态赋值帧门需要
+ *  （TileDrawing.cs:5223-5231 `tileFrameY == 18 && tileFrameX >= 576 && <= 882`）；
+ *  186 只看 frameX（:5239-5247）。两门上界【闭】区间,与 467/468 的 <178 开区间
+ *  不同源,勿归一。 */
 export function shouldTileShine(
   sheet: number, frameX: number, vanillaSolid: boolean, shimmerAlpha: number,
+  frameY = 0,
 ): boolean {
   if ((shimmerAlpha > 0 && vanillaSolid) || sheet === 165 || sheet === 693 || sheet === 694) {
     return true;
   }
   if (!SHINE2_SHEETS.has(sheet)) return false;
+  if (sheet === 185) return frameY === 18 && frameX >= 576 && frameX <= 882;  // :5223-5231 动态帧门
+  if (sheet === 186) return frameX >= 864 && frameX <= 1170;                  // :5239-5247 动态帧门
   if (sheet === 467 || sheet === 468) return frameX >= 144 && frameX < 178;   // :4463-4468
   if (sheet === 21 || sheet === 441) return frameX >= 36 && frameX < 178;     // :4469-4474
   return true;                                                                // :4475 default
@@ -336,7 +354,7 @@ function bakeShineChunk(
       const additive = isAdditiveShineSheet(sheet);
       const delta = additive ? null : shineDelta(sheet, 0, shimmerQ);
       if (!additive && !delta) continue;
-      if (!shouldTileShine(sheet, st.frameX[i], vanillaTileSolid(sheet), shimmerQ)) continue;
+      if (!shouldTileShine(sheet, st.frameX[i], vanillaTileSolid(sheet), shimmerQ, st.frameY[i])) continue;
       if (additive) {
         if (!entry.add) {
           entry.add = document.createElement('canvas');
@@ -435,7 +453,7 @@ export function drawTileShineGrid(
         if ((st.wire[i] & TileStore.WIRE_ACTUATED) !== 0) continue;
         if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) continue;
         if ((st.coat[i] & TileStore.COAT_FULLBRIGHT_BLOCK) !== 0) continue;
-        if (!shouldTileShine(sheet, st.frameX[i], vanillaTileSolid(sheet), shimmerAlpha)) continue;
+        if (!shouldTileShine(sheet, st.frameX[i], vanillaTileSolid(sheet), shimmerAlpha, st.frameY[i])) continue;
         const additive = isAdditiveShineSheet(sheet);
         const delta = additive ? null : shineDelta(sheet, mouseTextColor, shimmerAlpha);
         if (!additive && !delta) continue;
@@ -462,8 +480,12 @@ export function drawTileShineGrid(
 
 /** +0.39 平加层（render() 光照合成后、drawCoatGlowGrid 之后调用）。设备矩形与
  *  drawCoatGlowGrid 同式（含低清 wKg 约定——同先例同空间）。'lighter' 平加 =
- *  原版 case 262-268 顶点色 +=0.39 的 sprite×0.39 项（与光照无关,开灯 fullbright
- *  下同样成立——原版 fullbright 走 tileLight=White 后 shine 照跑）。 */
+ *  原版 case 262-268 顶点色 +=0.39 的 sprite×0.39 项。★F6b（2026-09-08 注释销账,
+ *  行为不动=登记近似②既有备案）精度边界如实声明：原版把 +0.39 加在【光】上再
+ *  逐通道钳 1（Color 重载 +100/255 后钳 255,Main.cs:21828-21830/:21850-21856）——
+ *  亮 texel（L≈1 的 Gemspark 自光域）+0.39 被钳没=原版零增量;本仓合成后平加,
+ *  亮 texel 最多 +39% 过亮（近似上界）。暗区恒精确：L 小时钳不触发,平加 =
+ *  sprite×(L+0.39) ≡ 原版 sprite×clamp(L+0.392)（本通道目标域）。 */
 export function drawTileShineAdditive(
   ctx: CanvasRenderingContext2D, world: World,
   chunks: { get(cx: number, cy: number): ChunkPair },
