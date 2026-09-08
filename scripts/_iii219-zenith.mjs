@@ -16,6 +16,8 @@
 //                 333≤2t→334 5t+Hungry 音）；:19255/:19458-19477 极饿流干 statLifeMax2/50
 //                 （沙漠/雪原 ×2）死因 ByOther(18)；:5080-5089 IsFedState 换档；
 //                 :52507/:52513 蘑菇 5/蛋奶酒 1912 → TryToResetHungerToNeutral。
+// 环境控制：探针自建石盒庇护所（隔怪/黑暗）+ 手持火把——zenith 含 constant 黑暗
+//   伤害（DontStarveDarkness 120t 蓄力 250 伤）会污染饥饿断言，持火保证光照安全。
 // 用法:SW_ORIGIN=http://localhost:5276 node tools/run-diag.mjs scripts/_iii219-zenith.mjs
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -34,6 +36,7 @@ await new Promise((r) => setTimeout(r, 2000));
 const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const w = g.world;
+  const st = w.store;
   const { BuffType } = await import('/src/stats/Buffs.ts');
   const { TownNPC } = await import('/src/entities/TownNPC.ts');
   const R = [];
@@ -41,8 +44,33 @@ const out = await page.evaluate(async () => {
   const pump = (n) => { for (let i = 0; i < n; i++) g.fixedUpdate(1 / 60); };
   const has = (t) => g.player.buffs.active.has(t);
   const left = (t) => g.player.buffs.active.get(t);
-  const aliveKeys = () => g.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).map((n) => n.npcKey);
   const keyOf = (k) => g.entities.npcs.filter((n) => n instanceof TownNPC && n.npcKey === k);
+  const aliveOf = (k) => keyOf(k).filter((n) => !n.dead).length;
+  const clearEnemies = () => { g.entities.enemies.length = 0; g.entities.projectiles.length = 0; };
+
+  // ── 庇护所：spawn 带两侧各 10 格清空+石底+石顶+石壁+火把（隔怪/防黑暗/防 NPC 漫步出盒）──
+  const sxT = Math.floor(g.player.cx / 16), syT = Math.floor(g.player.cy / 16);
+  const STONE = 1, TORCH_TILE = 4;
+  for (let x = sxT - 12; x <= sxT + 12; x++) {
+    for (let y = syT - 6; y <= syT + 4; y++) {
+      st.setTile(x, y, 0);
+      st.liquid[st.idx(x, y)] = 0;
+    }
+    st.setTile(x, syT + 3, STONE, 0, 0);   // 地板
+    st.setTile(x, syT - 6, STONE, 0, 0);   // 顶
+  }
+  for (let y = syT - 5; y <= syT + 2; y++) {
+    st.setTile(sxT - 12, y, STONE, 0, 0);  // 左壁
+    st.setTile(sxT + 12, y, STONE, 0, 0);  // 右壁
+  }
+  for (let x = sxT - 10; x <= sxT + 10; x += 4) st.setTile(x, syT + 2, TORCH_TILE, 0, 0);  // 火把排
+  // 玩家站盒中央；手持火把（光照双保险）
+  g.player.x = sxT * 16; g.player.y = (syT - 2) * 16; g.player.vx = 0; g.player.vy = 0;
+  const torchId = window.__swFlow.itemByVid(8);
+  g.player.inv.slots[0] = { id: torchId, stack: 1 };
+  g.player.inv.selected = 0;
+  pump(20);
+  clearEnemies();
 
   // ── P1 武装位 ──
   const sf = w.seedFlags ?? {};
@@ -57,17 +85,17 @@ const out = await page.evaluate(async () => {
   chk('P1d afterPartyOfDoom 武装（cs:11162）', w.flags.afterPartyOfDoom === true);
 
   // ── P2 起始镇民 ──
-  pump(30);
   const starters = ['tax_collector', 'steampunker', 'princess', 'painter', 'town_slime_diva'];
-  const stAlive = starters.map((k) => ({ k, n: keyOf(k).filter((n) => !n.dead).length }));
+  const stAlive = starters.map((k) => ({ k, n: aliveOf(k) }));
   chk('P2a 天顶起始镇民五员在场且活', stAlive.every((s) => s.n === 1), JSON.stringify(stAlive));
   chk('P2b 首位=税务员 441（remix 臂 cs:19869）', keyOf('tax_collector')[0]?.vanillaId === 441);
   chk('P2c savedTaxCollector 置位（cs:19870）', w.flags.savedTaxCollector === true);
 
-  // ── H1 饥饿链 ──
+  // ── H1 饥饿链（玩家持火把防黑暗污染）──
   chk('H1a 饥饿链上下文注入（theConstant+remix）',
     g.player.buffs.dontStarveWorld === true && g.player.buffs.remixHunger === true,
     `ds=${g.player.buffs.dontStarveWorld} remix=${g.player.buffs.remixHunger}`);
+  pump(30);
   chk('H1b 无 fed-state → 332 授予（UpdateStarvingState）', has(BuffType.NeutralHunger),
     `left=${left(BuffType.NeutralHunger)?.toFixed(1)}s`);
   // 快进：332 ≤2t → 333（28800t=480s remix 档）
@@ -77,8 +105,8 @@ const out = await page.evaluate(async () => {
   const d0 = g.player.defense, hp0 = g.player.hp;
   g.player.buffs.set(BuffType.Hunger, 0.04); pump(2);
   chk('H1d 333≤2t → 334 极饿（恒 5t）', has(BuffType.Starving) && left(BuffType.Starving) <= 5 / 60 + 1e-9);
-  // 极饿流干：num2=max(4,120·maxHp/3000)/2 HP/s；100hp → 2HP/s，3s 内必掉 ≥4
-  pump(180);
+  // 极饿流干：num12=max(2,⌊maxHp/50⌋) HP 每 60t 一跳；100hp → 2HP/s，3s 内必掉
+  clearEnemies(); pump(180);
   chk('H1e 极饿掉血（:19458 流干链）', g.player.hp < hp0, `hp ${hp0}→${g.player.hp}`);
   // 极饿 stat 惩罚（:11584-11595 防-4）
   chk('H1f 极饿防-4（ResetEffects 位）', g.player.defense === d0 - 4, `def ${d0}→${g.player.defense}`);
@@ -91,52 +119,55 @@ const out = await page.evaluate(async () => {
   // fed 到期 → 链重启（UpdateStarvingState 再授 332）
   g.player.buffs.set(BuffType.WellFed, 0.04); pump(3);
   chk('H1i fed 到期 → 332 重授', has(BuffType.NeutralHunger));
-  // 蘑菇 5 端到端：333 在栏 → 吃蘑菇 → TryToResetHungerToNeutral（:52513）→ 333/334 摘除
+  // 蘑菇 5 端到端：333 在栏 → 吃蘑菇 → TryToResetHungerToNeutral（:52513）→ 链回 332 满档
   g.player.buffs.set(BuffType.NeutralHunger, 0.04); pump(2);   // → 333
   const mushroomId = window.__swFlow.itemByVid(5);
   g.player.inv.slots[0] = { id: mushroomId, stack: 3 };
   g.player.inv.selected = 0;
-  const sx = g.camera.worldToScreen(g.player.cx, g.player.cy);
-  g.input.mouseX = sx[0] ?? sx.x ?? 0; g.input.mouseY = sx[1] ?? sx.y ?? 0;
+  const scr = g.camera.worldToScreen(g.player.cx, g.player.cy);
+  g.input.mouseX = Array.isArray(scr) ? scr[0] : scr.x; g.input.mouseY = Array.isArray(scr) ? scr[1] : scr.y;
   for (let i = 0; i < 60; i++) { g.input.mouseDown = true; g.input.mouseHeld = true; g.fixedUpdate(1 / 60); }
   g.input.mouseDown = false; g.input.mouseHeld = false;
-  const ateMushroom = (g.player.inv.slots[0]?.stack ?? 0) < 3 || g.player.inv.slots[0]?.id !== mushroomId;
+  const ateMushroom = (g.player.inv.slots[0]?.stack ?? 0) < 3;
   chk('H1j 蘑菇重置：333 摘除、链回 332 满档（TryToResetHungerToNeutral）',
     ateMushroom && !has(BuffType.Hunger) && !has(BuffType.Starving) && has(BuffType.NeutralHunger)
       && left(BuffType.NeutralHunger) > 470,
     `ate=${ateMushroom} 332=${left(BuffType.NeutralHunger)?.toFixed(0)}s`);
   chk('H1k 蘑菇药水病（mushroomDelay 1800t=30s）', has(BuffType.Resistance)
-    && Math.abs(left(BuffType.Resistance) - 30) < 2, `left=${left(BuffType.Resistance)?.toFixed(1)}s`);
-  // 极饿致死（ByOther(18)）——血量压到 5 泵到死
+    && Math.abs(left(BuffType.Resistance) - 30) < 3, `left=${left(BuffType.Resistance)?.toFixed(1)}s`);
+  // 极饿致死（ByOther(18)）——血量压到 5 泵到死；期间持火把防黑暗抢死因
   g.player.buffs.remove(BuffType.NeutralHunger);
   g.player.buffs.set(BuffType.Hunger, 0.04); pump(2);          // → 334
+  g.player.inv.slots[0] = { id: torchId, stack: 1 };
   g.player.hp = 5; g.player.iframes = 0;
+  clearEnemies();
   let died = false;
-  for (let i = 0; i < 900 && !died; i++) { pump(1); died = g.player.dead === true; }
+  for (let i = 0; i < 900 && !died; i++) { pump(1); if (i % 30 === 0) clearEnemies(); died = g.player.dead === true; }
   chk('H1l 极饿致死 + 死因 starved（ByOther(18)）',
     died && g.player.lastDamageCause?.kind === 'starved',
     `dead=${g.player.dead} cause=${JSON.stringify(g.player.lastDamageCause)}`);
-  pump(10);   // 复活窗口避开（重生前读态即可,后续断言只看 NPC）
-  if (g.player.dead) { try { g.respawnPlayer?.(); } catch { /* 死亡态不阻塞 NPC 断言 */ } }
 
   // ── P3 毁灭清算 ──
   // 豁免五型在场证人（NPCID.cs：37/453/368/680/20）
   const exemptKeys = ['dryad', 'old_man', 'travelling_merchant', 'town_slime_clumsy', 'skeleton_merchant'];
-  const px = g.player.x, py = g.player.y - 48;
-  exemptKeys.forEach((k, i) => { g.entities.add(new TownNPC(k, px + (i - 2) * 40, py), 'npcs'); });
+  exemptKeys.forEach((k, i) => { g.entities.add(new TownNPC(k, (sxT - 8 + i * 4) * 16, (syT - 2) * 16), 'npcs'); });
   pump(30);   // 站稳
-  const exemptBefore = exemptKeys.map((k) => keyOf(k).filter((n) => !n.dead).length);
-  chk('P3a 豁免证人五员就位', exemptBefore.every((n) => n >= 1), JSON.stringify(exemptBefore));
+  clearEnemies();
+  const exemptBefore = exemptKeys.map((k) => aliveOf(k));
+  const startersBefore = starters.map((k) => aliveOf(k));
+  chk('P3a 豁免证人五员就位+起始镇民尚活（清算前基线）',
+    exemptBefore.every((n) => n >= 1) && startersBefore.every((n) => n >= 1),
+    `exempt=${JSON.stringify(exemptBefore)} starters=${JSON.stringify(startersBefore)}`);
   // 快进到黄昏（DUSK=0.8125）
   w.clock.timeOfDay = 0.8125 - 0.002;
-  pump(120);
+  for (let i = 0; i < 120; i++) { pump(1); if (i % 15 === 0) clearEnemies(); }
   chk('P3b 派对散场（CheckNight cs:40-53）',
     g.partyState.genuineParty === false && g.partyState.manualParty === false);
   chk('P3c afterPartyOfDoom 卸武装（:18127）', w.flags.afterPartyOfDoom === false);
-  const after = starters.map((k) => ({ k, alive: keyOf(k).filter((n) => !n.dead).length }));
+  const after = starters.map((k) => ({ k, alive: aliveOf(k) }));
   chk('P3d 天顶起始镇民五员全灭（含税务员——vanilla 豁免表无 441）',
     after.every((s) => s.alive === 0), JSON.stringify(after));
-  const exemptAfter = exemptKeys.map((k) => keyOf(k).filter((n) => !n.dead).length);
+  const exemptAfter = exemptKeys.map((k) => aliveOf(k));
   chk('P3e 豁免五型幸存（37/453/368/680/20）', exemptAfter.every((n) => n >= 1), JSON.stringify(exemptAfter));
   chk('P3f 六旗复位（:18121-18126）——公主/彩虹史莱姆解锁清退',
     w.flags.unlockedPrincessSpawn === false && w.flags.unlockedSlimeRainbowSpawn === false

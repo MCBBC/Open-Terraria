@@ -114,7 +114,12 @@ describe('SW-BJ34 原版锚（1457 反编译金标）', () => {
     expect(line).toContain('npcTypeNoAggro[Main.npc[i].type]');
     const gmcLine = DECOMP_PLAYER.indexOf('GetMeleeCollisionData(rectangle, i,');
     expect(gmcLine).toBeGreaterThan(0);
-    expect(gmcLine).toBeGreaterThan(DECOMP_PLAYER.indexOf('npcTypeNoAggro[Main.npc[i].type]'));
+    // 在 Update_NPCCollision 方法体内序验：skip 早于盒变形求解（本仓同序落位）
+    const fnStart = DECOMP_PLAYER.indexOf('public void Update_NPCCollision()');
+    expect(fnStart).toBeGreaterThan(0);
+    const fnBody = DECOMP_PLAYER.slice(fnStart, fnStart + 6000);
+    expect(fnBody.indexOf('npcTypeNoAggro[Main.npc[i].type]')).toBeGreaterThan(0);
+    expect(fnBody.indexOf('GetMeleeCollisionData(rectangle, i,')).toBeGreaterThan(fnBody.indexOf('npcTypeNoAggro[Main.npc[i].type]'));
   });
 
   it('镇静药水不置 npcTypeNoAggro（player.calmed 只吃刷怪率,NPC.cs:708-712）', () => {
@@ -125,7 +130,7 @@ describe('SW-BJ34 原版锚（1457 反编译金标）', () => {
   it('数据面：vanilla-accfx.json 3090 → royalGel:1', () => {
     const accfx = JSON.parse(readFileSync(
       join(__dirname, '..', 'src', 'data', 'vanilla-accfx.json'), 'utf8')) as Record<string, Record<string, number>>;
-    expect(acfx['3090']?.royalGel).toBe(1);
+    expect(accfx['3090']?.royalGel).toBe(1);
   });
 
   it('皇冠视觉 N/A：Item 3090 无装备视觉位,NPC.cs 无 crown 绘制点', () => {

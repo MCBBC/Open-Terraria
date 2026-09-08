@@ -50,12 +50,13 @@ export class LightMap {
     this.mask.fill(0); // LightMap.cs:70-79 Clear 连 mask 一起清(世界边缘 1 格环陈旧 mask)
   }
 
-  /** Blur()(L86-91):两遍 BlurPass + NextSeed;★先预计算水 flicker LUT */
+  /** Blur()(L86-91):两遍 BlurPass + NextSeed(★NextSeed 在 passes 后=原版顺序;
+   *  LUT 预计算用【当前】seed=passes 实际消费的种子,位级等值) */
   blur(): void {
-    this.random = this.random.withModifier(++this.cycleIndex);
     this.buildWaterFlick();
     this.blurPass();
     this.blurPass();
+    this.random = this.random.withModifier(++this.cycleIndex);
   }
 
   /** 水 flicker 预计算(每水格一次 reseed+next;位级等值于逐访问重播种——

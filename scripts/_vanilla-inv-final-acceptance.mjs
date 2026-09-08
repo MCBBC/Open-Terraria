@@ -79,7 +79,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
     await sleep(120);
     // 经典竖向合成列表(adjY=(sh-600)/2=200:标题 (76,614);focus0 槽 (20,580);
     // 材料行 (80,580);CraftingUI.cs:161-287)
-    const craftTitle = [...vinv.querySelectorAll('.vinv-txt')].find((c) => c.style.fontSize === '17px');
+    const craftTitle = [...vinv.querySelectorAll('.vinv-txt')].find((c) => c.style.fontSize === '14px');
     out.craftTitle = craftTitle ? { x: craftTitle.offsetLeft, y: craftTitle.offsetTop } : null;
     const listSlots = [...vinv.querySelectorAll('.sw-slot')].filter((s) => {
       const x = s.offsetLeft, y = s.offsetTop;

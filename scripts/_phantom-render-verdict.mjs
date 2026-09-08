@@ -38,12 +38,23 @@ const out = await page.evaluate(async () => {
     for (const e of g.entities.projectiles) {
       if (!e.dead && e.projId === 1) arrs.push({ x: Math.round(e.cx - carrier.cx), y: Math.round(e.cy - carrier.cy), vx: +e.vx.toFixed(1), age: e.age });
     }
-    if (arrs.length && arrs.some(a => a.x < -30 && a.x > -140)) { shots.push({ t, arrs, carrierVx: +carrier.vx.toFixed(1) }); break; }
+    if (arrs.length && arrs.some(a => a.x < -30 && a.x > -140)) {
+      // 动态取第一支箭屏幕坐标供特写
+      const first = g.entities.projectiles.find(e => !e.dead && e.projId === 1);
+      const [asx, asy] = g.camera.worldToScreen ? g.camera.worldToScreen(first.cx, first.cy) : [680, 400];
+      g._arrowScreen = { sx: Math.round(asx), sy: Math.round(asy) };
+      shots.push({ t, arrs, carrierVx: +carrier.vx.toFixed(1), screen: g._arrowScreen });
+      break;
+    }
   }
   g.render?.(1 / 60);
-  return shots;
+  const img = document.querySelector('canvas').toDataURL('image/png');
+  return { shots, img };
 });
-console.log('RENDER=' + JSON.stringify(out));
+import { writeFileSync } from 'node:fs';
+writeFileSync('/tmp/phantom-frozen.png', Buffer.from(out.img.split(',')[1], 'base64'));
+console.log('RENDER=' + JSON.stringify(out.shots));
 await page.screenshot({ path: '/tmp/phantom-render.png' });
-await page.screenshot({ path: '/tmp/phantom-zoom.png', clip: { x: 380, y: 330, width: 400, height: 180 } });
+const zc = out[0]?.screen ?? { sx: 680, sy: 400 };
+await page.screenshot({ path: '/tmp/phantom-zoom.png', clip: { x: Math.max(0, zc.sx - 160), y: Math.max(0, zc.sy - 90), width: 320, height: 180 } });
 await browser.close();
