@@ -2666,6 +2666,7 @@ export class UI {
     this.positionInvPanel();
     this.invPanel.style.display = 'block';
     if (this.eqDockEl) this.eqDockEl.style.display = 'flex';   // 右下角坞随开显
+    if (this._builtLayout === 'vanilla') this.vinvPulseStart();   // ★槽底呼吸脉冲(Main.cs:46460-46474)
     // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正；
     // 配方列表高度同批二次刷新（首次采样布局未稳,LIST_H 偏大,hover 前不收敛）
     setTimeout(() => {
@@ -4877,6 +4878,12 @@ export class UI {
       [-4]: Lang.itemName(3813) ?? '守护者熔炉',
       [-5]: Lang.itemName(4076) ?? '虚空保险库',
     };
+    // ★2026-09-08 vanilla 布局:宝箱条直接叠背包下方(vinvBuildChest),无独立 modal
+    if (this._builtLayout === 'vanilla') {
+      this.openInventory(true);
+      this.refreshAll();
+      return;
+    }
     this.chestTitle.textContent = bankNames[c.x] ?? Lang.text('Mods.SandboxWorld.UI.Chest');
     // 按容器实际槽位数显隐（宝箱 10 / 玩家储物 40）
     const n = Math.min(40, c.items.length);
@@ -4891,7 +4898,7 @@ export class UI {
 
   closeChest() {
     this.openChest = null;
-    this.chestPanel.style.display = 'none';
+    if (this.chestPanel) this.chestPanel.style.display = 'none';
     this.refreshAll();   // 堆叠钮等随开箱门（chest == -1）复显
   }
 
@@ -5812,7 +5819,7 @@ export class UI {
     // 在 hotbarEl 之后,关包态全局 slotEl(0-9) 首匹配=热键栏格)
     const vinvLayout = options.data.inventoryLayout === 'vanilla';
     if (!vinvLayout) this.buildInventoryFor('classic');   // classic 原路径(构建器零改动)
-    this.buildChestPanel();
+    if (!vinvLayout) this.buildChestPanel();   // vanilla 布局宝箱条=vinvBuildChest(防 chest 槽双份)
     this.buildBuffBar();
     this.buildHud(this.game);
     if (vinvLayout) this.buildInventoryFor('vanilla');
@@ -6176,7 +6183,11 @@ export class UI {
   background-image:linear-gradient(var(--slot-tint, rgb(220,220,220)), var(--slot-tint, rgb(220,220,220))),
     var(--slot-bgimg, url(sprites/vanilla/Inventory_Back.png));
   background-size:100% 100%, 100% 100%; background-blend-mode:multiply, normal;
-  opacity:var(--slot-alpha, 0.575); }
+  /* ★原版 ground truth(Main.cs:46460-46474):inventoryBack=Color(invAlpha) 且
+     invAlpha 每拍 ±0.2 在 180↔240 循环脉冲(10s 周期)——槽底亮度+不透明度同脉。
+     --invpulse=(invAlpha-180)/60 由 rAF 单点驱动(root 单写,全槽 calc 派生);
+     --slot-alpha 显式置 1 的槽(经典列表格)退出脉冲 */
+  opacity:var(--slot-alpha, calc(0.706 + var(--invpulse, 0) * 0.235)); }
 .sw-vinv .sw-slot:hover::after { opacity:1; }
 .sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
 .sw-vinv .vinv-btn { position:absolute; pointer-events:auto; margin:0; padding:0;
@@ -6526,8 +6537,10 @@ export class UI {
       }
     }
 
-    // ---- 现代合成面板(NewCraftingUI 1:1;挂 root 级,与页容器平级) ----
+    // ---- 现代合成面板 → 经典竖列表(用户实测二轮退役 Modern 面板) ----
     this.vinvBuildCraft();
+    // ---- 宝箱条(直接叠背包下方;显示随 openChest) ----
+    this.vinvBuildChest();
 
     // ---- 住房页(EquipPage==1 DrawNPCHousesInUI Main.cs:42709-42822) ----
     // 查询器 0 号位(NPC_Head_0)+ 在场 NPC 头像槽列;x=sw-92,超 sh-80 换列 -48;
@@ -6724,6 +6737,7 @@ export class UI {
     this.vinvApplyPage();
     this.vinvRefreshHousing();
     this.vinvRefreshCraft();
+    this.vinvUpdateChestName();
     this.paintVanillaDefense();
   }
 
@@ -6827,18 +6841,7 @@ export class UI {
     // 列表/材料行容器(透明,仅命中面;格子绝对定位直挂 root)
     const listHit = el('div');
     listHit.style.cssText = 'position:absolute; pointer-events:auto;';
-    listHit.addEventListener('wheel', (e) => {
-      e.stopPropagation();
-      const rows = this.vinvCraftAvailV;
-      if (!rows.length) return;
-      const dir = e.deltaY > 0 ? 1 : -1;
-      const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir));
-      if (next !== this.vinvCraftFocusV) {
-        this.vinvCraftFocusV = next;
-        this.game.sfx.play('menuTick', 1);   // SoundID 12(每越一步 :391/:4209)
-        this.vinvUpdateCraftList();
-      }
-    }, { passive: true });
+    listHit.addEventListener('wheel', (e) => this.vinvCraftWheel(e), { passive: true });
     this.vinvRoot?.appendChild(listHit);
     this.vinvCraftListEl = listHit;
     // 制作标题(Lang.inter[25] @(76,414+adjY);:169-173)
@@ -6881,6 +6884,103 @@ export class UI {
       return { x: 76, y: 414 + this.vinvCraftAdjY(c.sh) };
     } });
     this.vinvLayoutItems.push({ el: mats, pos: () => ({ x: 0, y: 0 }) });
+  }
+
+  /** 列表滚轮(格/材料格/命中区共用;滚轮悬停格子上也有效——★用户实测二轮) */
+  private vinvCraftWheel(e: WheelEvent): void {
+    e.stopPropagation();
+    const rows = this.vinvCraftAvailV;
+    if (!rows.length) return;
+    const dir = e.deltaY > 0 ? 1 : -1;
+    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir));
+    if (next !== this.vinvCraftFocusV) {
+      this.vinvCraftFocusV = next;
+      this.game.sfx.play('menuTick', 1);   // SoundID 12(每越一步 :391/:4209)
+      this.vinvUpdateCraftList();
+    }
+  }
+
+  /** ★原版槽底脉冲(Main.cs:46460-46474):invAlpha 每游戏拍 ±0.2 循环 180↔240。
+   *  rAF 单点驱动:root 单写 --invpulse(全槽 calc 派生),材料行/列表 alpha 读数。
+   *  dt 归一(高刷屏 1:1 周期);开包启动/关包停(广播零开销) */
+  private vinvPulseA = 180;
+  private vinvPulseDir = 1;
+  private vinvPulseRaf = 0;
+  private vinvPulseLast = 0;
+  private vinvPulseTick = (ts: number): void => {
+    if (!this.vinvRoot || this.vinvRoot.style.display === 'none') { this.vinvPulseRaf = 0; return; }
+    const dt = this.vinvPulseLast ? Math.min(100, ts - this.vinvPulseLast) : 16.67;
+    this.vinvPulseLast = ts;
+    this.vinvPulseA += this.vinvPulseDir * 0.2 * (dt / 16.67);
+    if (this.vinvPulseA > 240) { this.vinvPulseA = 240; this.vinvPulseDir = -1; }
+    if (this.vinvPulseA < 180) { this.vinvPulseA = 180; this.vinvPulseDir = 1; }
+    this.vinvRoot.style.setProperty('--invpulse', ((this.vinvPulseA - 180) / 60).toFixed(4));
+    this.vinvPulseRaf = requestAnimationFrame(this.vinvPulseTick);
+  };
+  private vinvPulseStart(): void {
+    if (!this.vinvPulseRaf) { this.vinvPulseLast = 0; this.vinvPulseRaf = requestAnimationFrame(this.vinvPulseTick); }
+  }
+
+  // ---- 宝箱条(★2026-09-08 用户实测三轮:原版开箱非独立 modal,而是直接在物品栏
+  //  下方叠槽。权威:ChestUI.Draw(:79-100)+DrawSlots(:324-360):scale 0.755、
+  //  x=trunc(73+col·56·0.755)、y=trunc(invBottom+row·56·0.755)、invBottom=258;
+  //  名字 @(504,258);按钮列 @(506,invBottom+40+ID·26) 文本 0.75 缩放) ----
+  private vinvChestNameEl: HTMLElement | null = null;
+  private vinvChestBtnEls: HTMLButtonElement[] = [];
+  private vinvBuildChest(): void {
+    // 名字(Main.cs:504,invBottom;openChestPanel 的 bankNames 语义在 paint 侧回写)
+    const nameEl = el('div', 'vinv-txt');
+    nameEl.style.cssText += 'font-size:15px; pointer-events:auto;';
+    this.vinvRoot?.appendChild(nameEl);
+    this.vinvChestNameEl = nameEl;
+    this.vinvLayoutItems.push({ el: nameEl, pos: () => {
+      if (!this.openChest) return null;
+      return { x: 504, y: 258 };
+    } });
+    // 40 槽(scale 0.755;context 3/4/32 由 slotContext('chest') 经 openChest.x 分派)
+    for (let i = 0; i < 40; i++) {
+      const col = i % 10, row = (i / 10) | 0;
+      const s = this.vinvMakeSlot('chest', i, 0.755);
+      this.vinvRoot?.appendChild(s);
+      const x = Math.trunc(73 + col * 56 * 0.755);
+      const y = Math.trunc(258 + row * 56 * 0.755);
+      this.vinvLayoutItems.push({ el: s, pos: () => (this.openChest ? { x, y } : null) });
+    }
+    // 按钮列(DrawButtons :182-188 + DrawButton :190-250:Loot All/Deposit All/
+    // Quick Stack;Rename 等后续=债;文本 0.75 缩放 hover 1)
+    const mkChestBtn = (labelKey: string, act: () => void): void => {
+      const b = el('button', 'vinv-txt') as HTMLButtonElement;
+      b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
+        + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;';
+      b.textContent = Lang.text(labelKey);
+      b.addEventListener('mouseenter', () => { b.style.color = '#c8f0c8'; });
+      b.addEventListener('mouseleave', () => { b.style.color = '#fff'; });
+      b.addEventListener('mousedown', (e) => { e.stopPropagation(); act(); });
+      this.vinvRoot?.appendChild(b);
+      this.vinvLayoutItems.push({ el: b, pos: () => {
+        if (!this.openChest) return null;
+        const idx = this.vinvChestBtnEls.length;
+        return { x: 506, y: 258 + 40 + idx * 26 };
+      } });
+      this.vinvChestBtnEls.push(b);
+    };
+    mkChestBtn('LegacyInterface.29', () => this.chestLootAll());
+    mkChestBtn('LegacyInterface.30', () => this.chestDepositAll());
+    mkChestBtn('LegacyInterface.31', () => this.chestQuickStack());
+  }
+
+  /** 宝箱名回写(DrawName :102-180:bank x<0=官译物品名,真箱=chest.name/类型名) */
+  private vinvUpdateChestName(): void {
+    const c = this.openChest;
+    const el = this.vinvChestNameEl;
+    if (!el || !c) return;
+    const bankNames: Record<number, string> = {
+      [-2]: Lang.itemName(87) ?? '存钱罐',
+      [-3]: Lang.itemName(346) ?? '保险箱',
+      [-4]: Lang.itemName(3813) ?? '守护者熔炉',
+      [-5]: Lang.itemName(4076) ?? '虚空保险库',
+    };
+    el.textContent = bankNames[c.x] ?? ((c as { name?: string }).name || Lang.text('Mods.SandboxWorld.UI.Chest'));
   }
 
   /** adjY(Main.cs:42239-42244:<700 → (sh-508)/2,否则 (sh-600)/2,整型) */
@@ -6949,12 +7049,14 @@ export class UI {
         this.game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
         this.refreshAll();
       });
+      s.style.setProperty('--slot-alpha', '1');   // 列表格距离渐隐走元素 opacity,退出脉冲
       s.addEventListener('mouseover', () => {
         // HoverItem = createItem.Clone()(:42978)→ 完整物品 tooltip
         const iid = this.game.itemId(vanillaItemKey(rec.r.create) ?? '');
         if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: s });
       });
       s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+      s.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
       root.appendChild(s);
       this.vinvCraftCellEls.push({ el: s });
       const i = idx;
@@ -7045,6 +7147,7 @@ export class UI {
         if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: req.stack }, anchor: box });
       });
       box.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+      box.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
       mats.appendChild(box);
     });
   }
@@ -7163,8 +7266,16 @@ export class UI {
     this.vinvHousingPage = null;
     this.vinvHousingSlotEls = [];
     this.vinvHousingSig = '-init';
-    this.vinvCraftFocusV = -1;
+    this.vinvCraftFocusV = 0;   // 经典列表缺省聚焦首配方(-1 是 Modern 时代哨兵,已退役)
     this.vinvCraftAvailV = [];
+    this.vinvCraftCellEls = [];
+    this.vinvCraftListEl = null;
+    this.vinvCraftTitleEl = null;
+    this.vinvCraftMatEl = null;
+    this.vinvCraftMatSig = '';
+    this.vinvChestNameEl = null;
+    this.vinvChestBtnEls = [];
+    if (this.vinvPulseRaf) { cancelAnimationFrame(this.vinvPulseRaf); this.vinvPulseRaf = 0; }
     this.vinvLayoutItems = [];
     this.vinvRowMap.clear();
     this.vinvLayoutCtx = null;

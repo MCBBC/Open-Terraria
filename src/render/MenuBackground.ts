@@ -200,16 +200,60 @@ export class MenuBackground {
   /** 揭幕前冻结（mainFlow.showTitle(bgPaused)→resumeMenuBg 接线） */
   setPaused(on: boolean): void { this.paused = on; }
 
+  // ---- ★IIIII218 生成屏背景动效（Main.UpdateMenu/DrawMenu 生成期分支 1:1）----
+  /** 生成屏种子表现旗标（mainFlow.createWorldFlow 注入；null=标题态全部还原）。
+   *  vanilla 语义：以下分支全部判 WorldGen.remixWorldGen / drunkWorldGen /
+   *  drunkWorldGenText（生成期旗,标题屏为 false）——表现面随机源一律 Math.random
+   *  （原版此处消费 Main.rand,与本仓 genRand 世界掷流零共享,世界数据零扰动） */
+  private genFlags: import('../vui/states/UIWorldLoadState').GenScreenSeedFlags | null = null;
+
+  /** 生成屏旗标注入/清除（生成结束还原——mainFlow 接线） */
+  setGenFlags(flags: import('../vui/states/UIWorldLoadState').GenScreenSeedFlags | null): void {
+    this.genFlags = flags;
+    if (!flags) {
+      this.sky.menuCloudTypeForce = null;
+      this.sky.menuNumCloudsOverride = null;
+    }
+  }
+
+  /** 生成期每 tick 注入云强制（Cloud.cs:352-388 + Main.cs:20021-20026） */
+  private applyGenCloudForce(): void {
+    const f = this.genFlags;
+    if (f?.drunkWorldGenText) {
+      this.sky.menuNumCloudsOverride = f.dontStarveWorldGen
+        ? 50
+        : 100 + Math.floor(Math.random() * 100);          // Next(100,200) 每帧重掷
+      this.sky.menuCloudTypeForce = (scale: number) => {  // 云型四档（Update :352-388 序）
+        if (f.dontStarveWorldGen) {
+          if (scale < 0.7) return 40;
+          if (scale < 0.8) return 39;
+          if (scale < 0.9) return 38;
+          return 37;
+        }
+        if (f.getGoodWorldGen) return scale < 0.8 ? 25 : 26;
+        return 28;                                        // （shimmer-ocean=29 支无旗标源,备档）
+      };
+    } else {
+      this.sky.menuNumCloudsOverride = null;
+      this.sky.menuCloudTypeForce = null;
+    }
+  }
+
   tick(dtMs: number) {
     if (this.paused) return;   // 零推进零绘制零 GL 云层获取——加载密集期不抢算力
     glStatFrame();   // #perf-gpulog:菜单循环推进 GPU 账本(Game 循环未建, gpulog 菜单期可观测)
     const frames = Math.min(8, dtMs / FRAME_MS);   // 后台标签回来防大步进雪崩
-    // 星坠落（cs:20048）：夜 rand(12)==0/帧 → 随机星 Fall（抓取中照跑）
-    if (!this.dayTime) {
+    const remixGen = !!this.genFlags?.remixWorldGen;
+    const drunkGen = !!this.genFlags?.drunkWorldGen;
+    // 星坠落（Main.cs:20047-20056 UpdateMenu）：`(!dayTime || remixWorldGen) &&
+    //  (rand.Next(12)==0 || (drunkWorldGen && !remixWorld))`——remix 生成期【白昼】
+    //  也坠星；drunk 非 remix = 每帧必坠（流星雨）。抓取中照跑；FocusHelper.
+    //  LetStarsFallInMenu=窗口聚焦门（vanilla IsSelectedApplication,聚焦即真）
+    if (!this.dayTime || remixGen) {
       this.starAcc += frames;
       while (this.starAcc >= 1) {
         this.starAcc -= 1;
-        if (nextInt(12) === 0) this.sky.starFallAt(Math.random() * 1000, 1000);
+        if (nextInt(12) === 0 || (drunkGen && !remixGen)) this.sky.starFallAt(Math.random() * 1000, 1000);
       }
     }
     // 背景组重掷调度（cs:20070-20100，抓取中照跑）。★可见槽保留（原版菜单零硬切）：
@@ -267,8 +311,14 @@ export class MenuBackground {
     //  则云回落 lastSkyTop(天空顶色深蓝)→深蓝云画在深蓝天上隐形（实测 lit=0）
     setFrameAtmo(1);   // :62633 gameMenu 每帧强制(实例复用时构造器复位不重跑)
     this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
-    // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）
-    this.camX = (this.camX + 4 * frames) % MENU_X_WRAP;
+    // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）+ ★IIIII218 remix 生成
+    // UpdateMenu 首支 screenPosition.X -= 20/帧（cs:20011-20015）→ remix 生成净
+    // 漂移 -16/帧（背景整体反向平移）。原版越界=归零（非取模回卷）
+    this.camX += (remixGen ? -20 : 0) * frames + 4 * frames;
+    if (this.camX > MENU_X_WRAP) this.camX = 0;
+    if (this.camX < -MENU_X_WRAP) this.camX = 0;
+    // ★IIIII218 云强制/云量（drunkWorldGenText 生成期,Cloud.cs:352-388/cs:20021-20026）
+    this.applyGenCloudForce();
 
     const W = this.canvas.width, H = this.canvas.height;
     // 相机 Y = surface·16 − 屏高（DrawMenu :47620）——云 num3 视差/atmo 归位

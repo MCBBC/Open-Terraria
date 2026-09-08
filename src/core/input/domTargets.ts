@@ -10,7 +10,9 @@
 export const DOM_UI_TARGET_SELECTOR =
   '.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-chatbox,' +
   '.sw-mobile, .sw-hotbar, .sw-tooltip, .sw-drag-ghost,' +
-  '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-vinv';
+  '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-vinv, .sw-summon-panel';
+  // .sw-summon-panel = F6 召唤面板根节点（SW-BJ32 2026-09-08）：裸 div 曾不在本表
+  // ⇒ 面板点击漏成世界挥击/挖掘 + inpOverDomUi 盲区（见 DebugSummonPanel.show 注）
   // .sw-eqdock = 右下角无框装备/杂项坞(2026-09-02):无 .sw-panel 底框,不登记会把
   // 坞上标签/缝隙点击漏成世界挥击(槽/钮本身已被 .sw-slot/.sw-btn 覆盖)
   // .sw-vinv = 原版布局全屏层(2026-09-07 刀 2):pointer-events:none 根+绝对定位子元素,

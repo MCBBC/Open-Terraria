@@ -4,13 +4,17 @@ import { CameraModifierStack } from './CameraModifierStack';
 
 export class Camera {
   x = 0; y = 0;         // 视野中心（世界 px）
-  zoom = 1.25;          // 当前缩放（向 targetZoom 缓动）
-  zoomTarget = 1.25;    // 目标缩放
-  // 下限 0.5:canvas 背板是 CSS px(无 DPR 适配),retina(DPR2)上 zoom 0.5 才等效
-  // 原版 100% 的视野/屏上速度(0.5×2=1.0)——2026-08-13 用户报"EoC 二阶段冲刺体感
-  // 差距大",数值链已证 1:1,差在有效缩放(1.25×2=250% 原版)
-  static ZOOM_MIN = 0.5;
-  static ZOOM_MAX = 2.5;
+  zoom = 1;             // 当前缩放（向 targetZoom 缓动）
+  zoomTarget = 1;       // 目标缩放
+  // ★缩放域 [1,2] = 原版 Main.GameZoomTarget 语义（Main.cs:256 默认 1f、
+  //   :16986-16990 键调整钳 [1,2]、:62953 消费钳 [1,2]、config "Zoom" 持久化
+  //   :4284/4575；IngameOptions.cs:521-561 设置滑条杆值=zoom-1）。
+  //   密度等价：SW zoom1 = 16 css px/tile（Retina 上 32 设备 px）≡ 原版 zoom1
+  //   16 backbuffer px/tile——旧 0.5 下限的"0.5×DPR≡原版 100%"推导作废
+  //   （2026-09-08 用户拍板对齐原版；250%=原版不存在的域,是水线细缝复现参数）。
+  //   消费：options.gameZoom（持久化,Settings 滑条）→ Game 启动应用到本相机。
+  static ZOOM_MIN = 1;
+  static ZOOM_MAX = 2;
   /** 每帧把 zoom 向 target 缓动（指数趋近，永不到达导致卡死） */
   easeZoom() {
     const diff = this.zoomTarget - this.zoom;

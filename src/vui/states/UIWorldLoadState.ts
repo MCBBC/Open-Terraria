@@ -81,6 +81,12 @@ export interface GenScreenSeedFlags {
   tenthAnniversaryWorldGen: boolean; // WorldGen.tenthAnniversaryWorldGen（HotPink）
   vampireSeed: boolean;         // Main.vampireSeed（提示条整替）
   drunkWorldGen: boolean;       // WorldGen.drunkWorldGen（进度条帧闪门；getfixedboi 亦置位）
+  /** ★IIIII218：WorldGen.remixWorldGen（remix/天顶 logo 倒置摆动 + 菜单流星/背景漂移 +
+   *  强制夜面门——DrawMenu :49060 首分支） */
+  remixWorldGen: boolean;
+  /** ★IIIII218：WorldGen.dontStarveWorldGen（Cloud.Update 云型强制 37-40 档——
+   *  SeedFlags.theConstant = Main.dontStarveWorld 同源） */
+  dontStarveWorldGen: boolean;
 }
 
 /** SeedFlags → 生成屏表现旗标（纯函数；字段语义见 GenScreenSeedFlags） */
@@ -97,6 +103,8 @@ export function genScreenFlagsOf(f: SeedFlags | null | undefined): GenScreenSeed
     tenthAnniversaryWorldGen: !!f.tenthAnniversary,
     vampireSeed: !!f.vampireSeed,
     drunkWorldGen: !!f.drunkWorld,
+    remixWorldGen: !!f.remix,
+    dontStarveWorldGen: !!f.theConstant,
   };
 }
 
@@ -160,6 +168,10 @@ export class UIWorldLoadState extends UIState {
   override onActivate(): void {
     if (this.genSounds) UISfx.menuOpen();
   }
+
+  /** ★IIIII218：生成屏表现旗标只读出口（mainFlow → TitleMenu.setGenFlags /
+   *  MenuBackground.setGenFlags 接线；读档页= null） */
+  get screenFlags(): GenScreenSeedFlags | null { return this.seedFlags; }
 
   /** 生成流收场（成败/中止同播,WorldGen.cs:6551）——创建流离场（进世界/回菜单）即触发 */
   override onDeactivate(): void {
@@ -342,6 +354,8 @@ export class UIWorldLoadState extends UIState {
 
   /** 预览已挂载（测试用） */
   get hasPreview(): boolean { return this.preview != null; }
+  /** 生成流音效计数观测面（探针：onActivate/onDeactivate 双 MenuOpen 实证） */
+  get sfxCounts(): Record<string, number> { return UISfx.counts; }
 }
 
 /** SmoothStep（MathHelper.SmoothStep,GameTipsDisplay/GameTip.Update 消费） */

@@ -79,10 +79,12 @@ const CSS = `
   color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 .sw-vsel-footer { display: flex; gap: 10px; margin-top: 14px; }
 .sw-vsel-footer .sw-vbtn { flex: 1; height: 50px; font-size: 17px; }
-/* 世界行图标（60×58 原版 Icon* 贴图,左区与娃娃位同构） */
+/* 世界行图标（原版 Icon* 贴图,左区与娃娃位同构）——★宽度用 auto 随贴图原生尺寸:
+ * 1457 起 IconHallowCorruption/IconHallowCrimson 官方改版 60→59 宽(TSV 14837/14845),
+ * 钉死 60px 会把 59 宽件最近邻拉伸一列(IIIII216c);高度仍钉 58(两代同高) */
 .sw-vitem-icon {
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  width: 60px; height: 58px; image-rendering: pixelated; pointer-events: none;
+  width: auto; height: 58px; image-rendering: pixelated; pointer-events: none;
 }
 /* ---- 手机适配(2026-08-25,加法式覆盖,桌面 1280×800 全不命中)----
    A 竖屏窄(max-width:560):面板吃满宽度、行内长名/副行省略号(换行会压按钮行);

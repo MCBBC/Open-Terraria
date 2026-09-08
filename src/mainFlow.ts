@@ -1081,6 +1081,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const loadState = new UIWorldLoadState(cfg.evil, { seedText: cfg.seed, genSounds: true });
     (window as unknown as { __swGenUi?: UIWorldLoadState }).__swGenUi = loadState; // 探针句柄(同 __swMenuBg 判例)
     VUI.setState(loadState);
+    // ★IIIII218 生成屏背景动效接线（CXCI §6② 移交三支）：logo remix 倒置摆动/
+    //   drunk 自旋缩没/noTraps 巨石 Logo5,6 → TitleMenu；remix 背景漂移+白昼坠星/
+    //   drunk 云型强制+云量 → MenuBackground；lockMenuBGChange=true（WorldGen.cs:11161
+    //   生成即置 + Main.cs:20051-20053 生成期每帧恒置——背景组重掷冻结）
+    titleMenu?.setGenFlags(loadState.screenFlags);
+    menuBg?.setGenFlags(loadState.screenFlags);
+    menuBg?.setBGLock(true);
     // ★宏任务让路(#三开压测批续,与 newWorld 同纪律):makeGame 的 Game ctor 冷兜底
     // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是
     // 创建 UI 的真实入口(WorldCreationPanel→flow.onCreate),此前补丁打在 legacy
@@ -1091,19 +1098,28 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const wantPreview = (() => {
       try { return new URLSearchParams(location.search).get('wprev') !== '0'; } catch { return true; }
     })();
-    await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
-      // ★第三参 local=当前原版 pass 段内 Value（GenProgress；undefined=无短条语义路径）
-      (label, p, local) => loadState.setProgress(label ?? undefined, p, local),
-      {
-        name: cfg.name,
-        evil: cfg.evil,
-        size: cfg.size as import('./world/World').WorldSize, // 尺寸档 0/1/2（generateWorld 按 SIZE_DIMS 派生 W/H）
-        difficulty: cfg.difficulty,   // 世界难度 = Main.GameMode（Main.cs:2677；创建 UI 四档）
-        ...(wantPreview ? {
-          onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
-          onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
-        } : {}),
-      });
+    try {
+      await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
+        // ★第三参 local=当前原版 pass 段内 Value（GenProgress；undefined=无短条语义路径）
+        (label, p, local) => loadState.setProgress(label ?? undefined, p, local),
+        {
+          name: cfg.name,
+          evil: cfg.evil,
+          size: cfg.size as import('./world/World').WorldSize, // 尺寸档 0/1/2（generateWorld 按 SIZE_DIMS 派生 W/H）
+          difficulty: cfg.difficulty,   // 世界难度 = Main.GameMode（Main.cs:2677；创建 UI 四档）
+          ...(wantPreview ? {
+            onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
+            onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
+          } : {}),
+        });
+    } finally {
+      // ★IIIII218 生成流收场还原（成败同途;vanilla FinishWorldGen → ResetWorldSeedFlags
+      //  生成旗清零,此刻生成屏仍在场——与原版时序一致,进世界 TitleMenu 随之销毁）。
+      //  lockBG 解锁后当夜/当日不再补掷（MenuBackground tick 锁期两旗恒 true 同态）
+      titleMenu?.setGenFlags(null);
+      menuBg?.setGenFlags(null);
+      menuBg?.setBGLock(false);
+    }
     // onWorldReady 已进游戏；登记世界槽位并保存初始数据
     const meta = await worldStore.register({
       name: cfg.name, seed: cfg.seed, w: cfg.w, h: cfg.h,
@@ -1170,6 +1186,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       (window as unknown as { __swHousingPanel?: { destroy(): void } }).__swHousingPanel?.destroy();
       return;
     }
+    // ★SW-BJ32 2026-09-08：F6 召唤面板开着 → 先关（与住房条互斥，见
+    //  Game.toggleSummonPanel 同标记注——右上角同域,z-index 99999 会吞住房条点击,
+    //  F6 召唤的城镇 NPC 头像点不着 = 分配不生效）。
+    if (g.summonPanel?.open) g.toggleSummonPanel();
     const { HousingPanel } = await import('./ui/HousingPanel');
     // 动态 import 间隙防双开（连点/退出竞态）
     if (document.querySelector('.sw-housing-panel') || !game) return;

@@ -271,7 +271,7 @@ export class OptionsStore {
     smartAxeAfterPickaxe: false,
     smartBlocksEnabled: false,        // Player.cs:326 static bool 默认 false（R24 勘误）
     smartHoldCanReleaseMidUse: false, // Player.cs:330 static bool 默认 false（R24 勘误）
-    gameZoom: 1.25,                   // Main.cs:256 默认 1f；本仓相机基线 1.25（Camera.ts
+    gameZoom: 1,                      // Main.cs:256 默认 1f（★2026-09-08 对齐原版默认;旧 1.25=相机基线遗留,存档已持久化值不受影响）
                                       // 视野补偿档）为既有行为，域钳 [1,2]
     backgrounds: true,
     swayInWind: true,
@@ -375,7 +375,7 @@ export class OptionsStore {
       // Game Zoom 钳 [1,2]（Main.cs:16986-16990 键调整钳/:62953 消费端钳同款；
       // 旧档无键走默认，NaN/越界回默认）
       if (typeof this.data.gameZoom !== 'number' || !Number.isFinite(this.data.gameZoom)) {
-        this.data.gameZoom = 1.25;
+        this.data.gameZoom = 1;
       }
       this.data.gameZoom = Math.min(2, Math.max(1, this.data.gameZoom));
       // R4-13：PanControl 档位钳 [0,3]（PlayerInputProfile.cs:194-201 读回卫门同语义）

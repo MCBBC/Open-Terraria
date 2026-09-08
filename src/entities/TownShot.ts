@@ -16,6 +16,8 @@ import { projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { BuffType } from '../stats/Buffs';
 import { projectileWetSection, projWaterDragFactor, PROJ_DESTROYED_BY_WATER } from './projWetSection';
+import { HitCdImpl } from './proj1457';                       // SW-BJ33 2026-09-08（无环:proj1457 不反向依赖本文件）
+import { princessWeaponFx } from '../fx/orchestraFx';         // SW-BJ33 2026-09-08（Spawn_PrincessWeapon 1:1 站）
 
 const GRAV = 0.3; // 箭族重力(aiStyle 1/2 同值)
 

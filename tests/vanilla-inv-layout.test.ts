@@ -328,7 +328,8 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
   });
   it('teardown 清单:双构建器字段全清(重建路径完整性)', () => {
     const s = ui();
-    for (const f of ['this.vinvCraftPanel = null;', 'this.vinvHousingPage = null;',
+    for (const f of ['this.vinvCraftCellEls = [];', 'this.vinvCraftListEl = null;',
+      'this.vinvChestNameEl = null;', 'this.vinvHousingPage = null;',,
       'this.loadoutBtns = [];', 'this.accEyeEls.clear();', "document.getElementById('sw-vinv-style')?.remove();"]) {
       expect(s).toContain(f);
     }

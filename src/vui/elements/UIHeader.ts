@@ -10,7 +10,7 @@ export class UIHeader extends UIElement {
   private _text = '';
   scale = 2; // DeathText 大字号
   /** 主体文字色（原版 UIHeader.DrawSelf :54-61：白；十周年(celebrationmk10)且非
-   *  天顶(getfixedboi)时 Color.HotPink=(255,105,180)） */
+   *  天顶(getfixedboi)时 Color.HotPink=(255,105,180)；★IIIII215b 彩蛋生成界面批接线） */
   textColor: Color = rgb(255, 255, 255);
 
   constructor(text = '') {

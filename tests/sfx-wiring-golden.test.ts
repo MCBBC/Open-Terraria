@@ -129,9 +129,12 @@ function walkTs(dir: string): string[] {
 
 describe('sfx wiring golden', () => {
   it('每个 wav 都有消费点（或进入已知未接线白名单）', () => {
+    // ★IIIII215b 陈旧口径修复（非判例变更）：09-04 opus 迁移批（scripts/encode-sounds-opus.mjs）
+    //   后 public/sounds 为生成物目录（.opus+.mp3,零 .wav）——本金标语料面自迁移日起
+    //   恒红（wavs.length=0）,此处改读 .opus 生成物,stem 语义与覆盖判定不变。
     const wavs = readdirSync(`${ROOT}/public/sounds`)
-      .filter((f) => f.endsWith('.wav'))
-      .map((f) => f.replace(/\.wav$/, ''));
+      .filter((f) => f.endsWith('.opus'))
+      .map((f) => f.replace(/\.opus$/, ''));
     expect(wavs.length).toBeGreaterThan(800);
 
     const srcFiles = walkTs(`${ROOT}/src`);

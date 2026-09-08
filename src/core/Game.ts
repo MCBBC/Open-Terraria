@@ -189,7 +189,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y } from '../entities/Enemy';
+import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -4444,6 +4444,10 @@ export class Game implements GameHooks {
       if (e.dead || e.iframes > 0) continue;
       const dmg = e.def.damage ?? 0;
       if (dmg <= 0) continue;
+      // ★SW-BJ34 2026-09-08：访客端同面——原版 Update_NPCCollision（:31588
+      //  npcTypeNoAggro[type] → continue）跑在【每个客户端】本地,本仓访客侧接触
+      //  结算唯一在此,故凝胶 23 类史莱姆（含 59）对装着者零接触结算。
+      if (npcTypeNoAggro(e.vanillaId, p)) continue;
       // 手工 AABB（权威位 vs 本地玩家），不经插值渲染位
       if (!(e.netAx < p.x + p.w && e.netAx + e.w > p.x && e.netAy < p.y + p.h && e.netAy + e.h > p.y)) continue;
       this.damagePlayer(dmg, e.cx, e.cy, e, true);   // 接触伤害（荆棘反伤 eligible）
@@ -5364,17 +5368,10 @@ export class Game implements GameHooks {
         this.renderer.mapStyle = cycleMapStyle(this.renderer.mapStyle) as 0 | 1 | 2;
         this.sfx.play('menuTick', 1);   // SoundID 12（:24640）
       }
-      // 缩放键边沿：ViewZoom（引擎扩展键）恒缩视野；MapZoom 在样式 0（地图隐藏）时
-      // 回落视野缩放（迁移前 Equal/NumpadAdd 双键均缩视野的行为保持）——样式 1/2
-      // 由 updateMapKeys 电平接管（小地图/覆盖式缩放，勿在边沿重复步进）
-      if (!this.renderer.fullMap.open) {
-        if (isBound('ViewZoomIn', code)) this.setZoom(this.camera?.zoomTarget + 0.15);
-        if (isBound('ViewZoomOut', code)) this.setZoom(this.camera?.zoomTarget - 0.15);
-        if (this.renderer.mapStyle === 0) {
-          if (isBound('MapZoomIn', code)) this.setZoom(this.camera?.zoomTarget + 0.15);
-          if (isBound('MapZoomOut', code)) this.setZoom(this.camera?.zoomTarget - 0.15);
-        }
-      }
+      // 缩放键：★按住电平归 updateViewZoomKeys 每 tick（原版 UpdateViewZoomKeys
+      // Main.cs:16980-16992：held 触发器每帧 ±0.02,钳 [1,2]——非按键边沿跳变）。
+      // MapZoom 键只管地图（小地图/覆盖式/全屏图,updateMapKeys 电平）,不对视野缩放
+      // （原版 MapZoom 语义=地图,视野缩放=ViewZoom 独立键族）。
       // MapFull（M）：切换全屏地图（原版 cMapFull；开图对焦主角复用小地图点击链）
       if (isBound('MapFull', code) && this.player && !this.input.uiBlocking) {
         this.toggleFullMap();
@@ -6313,6 +6310,10 @@ export class Game implements GameHooks {
     this.sfx.setListener(w.spawnX * TILE, w.spawnY * TILE);
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
+    // ★GameZoomTarget 启动消费（原版 Main.cs:4575 config.Get("Zoom", 1f) 载入）：
+    //  options.gameZoom 持久化值 → 相机（域 [1,2] 已在 Options 载入钳）。
+    this.camera.setZoomTarget(options.data.gameZoom);
+    this.camera.zoom = this.camera.zoomTarget;   // 启动无缓动,直接落位
     // 大世界小地图全量构建拆带(2026-08-18 trace 石锤 811/943ms 进世界巨帧 =
     //  new Minimap 构造同步 redrawAll:80MB 画布+80MB ImageData+2000 万格循环
     //  全在 onload 微任务续体一次砸下):deferBuild + buildStriped 分行让路,
@@ -6548,6 +6549,12 @@ export class Game implements GameHooks {
         this.partyState.genuineParty = true;
         this.partyState.daysOnCooldown = 5;
         this.partyState.celebratingNpcs = starters.map((s) => s.key);
+        // ★IIIII219：afterPartyOfDoom 武装位（WorldGen.cs:11162 getGoodWorldGen 臂——
+        // vanilla 嵌套在 tenthAnniversary&&!skyblock 门内 :11157-11164；starters 记录面
+        // 与该门同域——pass 侧 skyblock 整段跳过）。「毁灭派对」清算消费端见 fixedUpdate
+        // （Main.cs:18109-18126）；随 world.flags 走存档（SaveFile flags 全量 / wld
+        // WF:1304 ver≥257 双通道）,读档天顶续清
+        if (this.world.seedFlags?.getGoodWorld) this.world.flags.afterPartyOfDoom = true;
       }
       const seededKeys = new Set(starters.map((s) => s.key));
       // 新世界：向导随世界出生(WorldGen.cs:20054)——唯一初始城镇 NPC,无家(homeless)。
@@ -7804,9 +7811,10 @@ export class Game implements GameHooks {
           this.renderer.fullMap.zoom * (inp.wheelDelta > 0 ? 0.85 : 1.18),
           inp.mouseX, inp.mouseY,
         );
-      } else {
-        this.setZoom(this.camera.zoomTarget * (inp.wheelDelta > 0 ? 0.94 : 1.064));
       }
+      // ★滚轮视野缩放移除(2026-09-08 zoom 对齐原版):原版 Main 无滚轮视野缩放
+      //  (UpdateViewZoomKeys 键族 + IngameOptions 滑条是仅有的两个入口),滚轮在
+      //  原版语义=热栏/抓钩等前置消费。全屏图滚轮缩放保留(地图域)。
     }
 
     // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
@@ -8374,6 +8382,9 @@ export class Game implements GameHooks {
     this.tickSmartInteractNpc();
     // ---- 地图键族电平（Player.cs:24596-24653：按住连续步进，详见 updateMapKeys） ----
     this.updateMapKeys();
+    // ---- 视野缩放键电平（原版 Main.UpdateViewZoomKeys :16980-16992：ViewZoomIn/Out
+    //      held 触发器每帧 ±0.02，钳 [1,2]；!inFancyUI 门 = 本 tick 仅游戏内运行已满足）----
+    this.updateViewZoomKeys();
     // ---- 指针物品/交互图标（DrawInterface_40 数据面）：五字段重置 → 悬停扫描 →
     //      余辉验证（ItemIconCacheVerification :45929 每帧）。绘制在 Renderer 尾段 ----
     this.tickCursorIcon();
@@ -9317,6 +9328,34 @@ export class Game implements GameHooks {
         this._lastClockT = this.pendingTimeSkip;
         this.pendingTimeSkip = null;
       }
+    }
+    // ---- ★IIIII219 天顶「毁灭派对」清算（Main.cs:18109-18126 UpdateNPCs 头，
+    //      1456 :17759 / 1457 :18109 三基线逐字同构；netMode!=1 服务器/单机域——
+    //      本仓 fixedUpdate 即权威域）：afterPartyOfDoom 武装中且派对已散（CheckNight
+    //      入夜散场 / 手动关闭 / CelebratingNPCs 失格清空任一路径）→ 在场城镇 NPC
+    //      全数 StrikeNPCNoInteraction(9999,10f,-direction) 一次清算。豁免五型
+    //      （NPCID.cs：37 老人 / 453 骷髅商 / 368 旅行商人 / 680 紫史莱姆 /
+    //      20 树妖——★441 税务员【不在】豁免表,天顶开局税务员 Andrew 照死）；
+    //      随后复位 NPC.savedMech/unlockedPartyGirlSpawn/unlockedPrincessSpawn/
+    //      unlockedSlimeRainbowSpawn/unlockedSlimeGreenSpawn/boughtBunny 六旗
+    //      （:18121-18126——开局派对解锁的入驻旗整批清退）并卸武装。
+    //      放置于昼夜事件块后 = 与 vanilla 同拍语义（CheckNight 与清算同 tick）；
+    //      逐 tick 检查 = 原版 UpdateNPCs 每拍门同形。hurt force 通道 = StrikeNPC
+    //      全链不查无敌帧/dontTakeDamage 的既有同形注（TownNPC.hurt ★C1）----
+    if (w.flags.afterPartyOfDoom && !partyIsUp(this.partyState)) {
+      const DOOM_EXEMPT = new Set<number>([37, 453, 368, 680, 20]);   // :18114 豁免型表
+      for (const n of this.entities.npcs) {
+        if (!(n instanceof TownNPC) || n.dead) continue;
+        if (DOOM_EXEMPT.has(n.vanillaId)) continue;
+        n.hurt(9999, -n.facing * 10, 0, this, 0, 0, false, true);     // :18116 (9999,10f,-direction)
+      }
+      w.flags.savedMech = false;                       // NPC.savedMech=false（:18121）
+      w.flags.unlockedPartyGirlSpawn = false;          // :18122
+      w.flags.unlockedPrincessSpawn = false;           // :18123
+      w.flags.unlockedSlimeRainbowSpawn = false;       // :18124
+      w.flags.unlockedSlimeGreenSpawn = false;         // :18125
+      w.flags.boughtBunny = false;                     // NPC.boughtBunny=false（:18126）
+      w.flags.afterPartyOfDoom = false;                // :18127 Main.afterPartyOfDoom=false
     }
     // ---- Main.IsItStorming 全局旗推进（Main.cs:2978 _shouldUseStormMusic；
     //      UpdateWindyDayState :12927-12960 迟滞机，阈值见 TownNPC.isItStormingNext）----
@@ -10485,6 +10524,11 @@ export class Game implements GameHooks {
     } else {
       ticks = ps ? p75(3600) : 3600;
     }
+    // ★IIIII219：TryToResetHungerToNeutral（Player.cs:52507 蛋奶酒 1912 臂 /
+    //  :52513 蘑菇 5 臂——ApplyPotionDelay 内;蘑菇另有 ItemCheck_UsePotionStuff
+    //  :5516 同拍幂等重入）——吃「无 fed buff 的疗药」把饥饿链（332/333/334）
+    //  拉回「稍饿」起点重新计时,而非直接喂饱（The Constant/天顶域）
+    if (vid === 1912 || vid === 5) this.player.buffs.tryToResetHungerToNeutral();
     this.player.buffs.apply(BuffType.Resistance, Math.round(ticks / 60));
   }
 
@@ -11172,6 +11216,21 @@ export class Game implements GameHooks {
    *  uiBlocking 豁免：原版此段在 Player.Update 无 playerInventory 门——背包打开时
    *  地图键照常生效（故不走 downAction 的 uiBlocking 路径）。α 持久化走 options.set
    *  （落盘自带 400ms 防抖；emit 侧仅音量/UIScale 四赋值，60t/s 持按安全）。 */
+  /** 觜野缩放键电平（原版 Main.UpdateViewZoomKeys :16980-16992 1:1）：ViewZoomIn/Out
+   *  held 触发器每帧 ±0.02,钳 [1,2]（:16986-16990）。全屏地图打开时不步进（该态下
+   *  同键族归地图缩放,updateMapKeys 电平——原版地图开时 +/- 归 mapFullscreenZoom）。 */
+  private updateViewZoomKeys(): void {
+    if (!this.camera || this.renderer?.fullMap?.open) return;
+    const inp = this.input;
+    if (!inp) return;
+    const held = (a: Parameters<typeof bindsOf>[0]) =>
+      bindsOf(a).some((c) => inp.keys.has(c) || inp.touchKeys.has(c));
+    let z = this.camera.zoomTarget;
+    if (held('ViewZoomIn')) z += 0.02;
+    if (held('ViewZoomOut')) z -= 0.02;
+    if (z !== this.camera.zoomTarget) this.setZoom(z);   // setZoom→setZoomTarget 钩 [ZOOM_MIN,ZOOM_MAX]=[1,2]
+  }
+
   private updateMapKeys(): void {
     const inp = this.input, r = this.renderer;
     if (!inp || !this.world) return;
@@ -38528,6 +38587,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.summonPanel.toggle();
     this.input.uiBlocking = this.summonPanel.open;
+    // ★SW-BJ32 2026-09-08：开面板时关住房条（互斥）——F6 面板 fixed 右上 350×78vh
+    //  z-index 99999，完整罩住住房右缘条（right:36 top:160 z-index 60）与原版布局
+    //  住房页同一角落：条开着再按 F6 召唤 ⇒ 头像点击被面板吞掉 = 「F6 召唤的城镇
+    //  NPC 无法分配住房」（用户实报）。走既定单发通道 cb.onHousingCursor(null) →
+    //  HousingPanel.cursorChanged(null) 自毁（onCursor(null) 顺带清 housingMode；
+    //  onClosed → 回背包 = ✕ 钮同款收口语义；未接线/面板未开时为 no-op）。
+    if (this.summonPanel.open) this.cb.onHousingCursor?.(null);
   }
 
   /** F6 事件触发(调试):全部走**自然事件入口**——与自然 roll 命中同路径/同公告/
@@ -41316,6 +41382,18 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     // 会落进下方 framed+非实心家具校验（1×1"家具"要求有效支撑，像素下方还是
     // 像素不算 → 写入期逐行级联拆除只剩贴地一行，2026-08-25 用户实报）
     if (t === TILE_BY_KEY['pixel_block']) return;
+    // ★SW-BJ30 2026-09-08：矿车轨道（314）不入任何支撑链——原版 TileFrame 对 314
+    //  唯一派发 = Minecart.FrameTrack(i,j,pound:false)（WorldGen.cs:86569-86572），
+    //  按六邻轨道连接掩码重定前/后轨帧，【无失撑破坏支】（Minecart.cs:947-1172 全文
+    //  零 KillTile;pound=true 的破坏支只有锤击/换轨信号路径触发）——轨道链自支撑、
+    //  悬空合法（孤格 array==null → 重置 0/-1 平轨仍保留，Minecart.cs:984-990）。
+    //  曾落家具 hasSupport 近似（framed+非 solid 1×1）→ 挖轨道正下方支撑块（症状②）
+    //  或轨道下方空格插火把（症状③）经 onTileChanged→checkFurnitureSupport(x,y-1)
+    //  把轨道整格误拆（用户实报 SW-BJ30）；此处按原版语义只重定帧、永不拆。
+    if (def.vanilla?.sheet === TRACK_SHEET) {
+      frameTrack(st, x, y, false);
+      return;
+    }
     // ---- decor 支撑链（D-1,原版 TileFrameImportant :85703 → Check* 族派发）：
     // 按 DECOR_SUPPORT_KIND 分派（PlantCheck/CheckAlch/CheckSunflower/Check1x2/
     // Check1x1/CheckLogicTiles/CheckOrb/CheckPot/吊挂族/家具机制族）。曾 def.decor

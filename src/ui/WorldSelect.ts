@@ -264,12 +264,16 @@ export class WorldSelectPanel {
     let frame = 0;       // _glitchFrame
     let counter = 0;     // _glitchFrameCounter
     const tick = () => {
-      // 天顶 60Hz 同门（红队R3⑥）：关闭/已拆离即自清（原仅静默 no-op,句柄悬空）
-      if (!ready || !cx || this.closed || !this.panel.isConnected) {
+      // 天顶 60Hz 同门（红队R3⑥）：关闭/已拆离即自清（原仅静默 no-op,句柄悬空）。
+      // ★IIIII216：!ready 不属关停条件——首拍(16ms)图集尚未 onload,整钟即被清
+      // → 天顶列表图标永久空白（2026-09-08 用户实报）。未就位只跳过本拍等 onload;
+      // 404 死路由 onerror 收钟
+      if (!cx || this.closed || !this.panel.isConnected) {
         clearInterval(timer);
         this.iconTimers.delete(timer);
         return;
       }
+      if (!ready) return;
       let min = 3, max = 3;
       if (frame === 0) { min = 15; max = 120; }
       // 阈值【每帧重掷】（Main.rand.Next(min, max+1) 在比较式内联求值 → [min,max]
@@ -288,6 +292,11 @@ export class WorldSelectPanel {
       cx.drawImage(img, variation * 62, frame * 60, 62, 60, 0, 0, 62, 60);
     };
     const timer: ReturnType<typeof setInterval> = setInterval(tick, 1000 / 60);
+    // 404/坏图死路自清（不收钟=60Hz 空转;timer 已入 iconTimers,close 侧兜底仍在）
+    img.onerror = () => {
+      clearInterval(timer);
+      this.iconTimers.delete(timer);
+    };
     this.iconTimers.add(timer);
     return cv;
   }

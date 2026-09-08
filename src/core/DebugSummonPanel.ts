@@ -117,6 +117,12 @@ export class DebugSummonPanel {
   show(): void {
     if (typeof document === 'undefined' || this.el) return;
     const el = document.createElement('div');
+    // ★SW-BJ32 2026-09-08：根节点登记 DOM-UI 类——此前裸 div 不在
+    // core/input/domTargets.ts 名单，isDomUiTarget(e.target) 判 false ⇒ 面板上每次
+    // mousedown 都漏进 Input 窗口监听置 mouseDown/mouseHeld（=对面板位置对应的世界
+    // 点挥击/挖掘，2026-08-28 商店案同族），且 Game.inpOverDomUi 同名单盲区。
+    // 不挂 .sw-panel（全局 CSS 带底框/内边距会改观感），走专用类+名单登记。
+    el.className = 'sw-summon-panel';
     el.style.cssText = STYLE;
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #445;">

@@ -1650,6 +1650,9 @@ export class SkyRenderer {
     // 海洋群系前景层满档（Cloud.cs:401 bgAlphaFrontLayer[4]==1）
     const oceanFull = (this.frameCtx?.oceanFrontAlpha ?? 0) >= 1;
     for (const c of this.vclouds) {
+      // ★IIIII218 云型强制（Cloud.cs:352-388 Update 首支逐位：每云每帧覆盖 type）——
+      // 在恰界微移/位移/淡出全部之前（原版 Update 函数体首行序）
+      if (this.menuCloudTypeForce) c.type = this.menuCloudTypeForce(c.scale);
       // 恰界 scale 微移（Cloud.cs:373-378：1.0→0.9999 / 1.15→1.1499）——防跨
       // pass 边界（1.0 应属远空 pass1、1.15 应属近距 pass2；每帧判、自限一次）
       if (c.scale === 1) c.scale -= 0.0001;
@@ -1688,10 +1691,21 @@ export class SkyRenderer {
    *  addCloud 尝试——AABB 重叠拒绝即少一朵（★曾用 while 重试凑满 guard400：
    *  离线模拟 1920×1080/目标100 档 77 朵 vs 原版 46 朵，云量约 1.7 倍——
    *  "云太多"实报根因）。下雨加密由 Weather.updateCloudCounts（numClouds 强制
-   *  爬升 200×cloudAlpha）自动传导 */
+   *  爬升 200×cloudAlpha）自动传导。★IIIII218：菜单生成期 drunk 云量强制优先 */
   private targetCloudCount(): number {
+    if (this.menuNumCloudsOverride !== null) return this.menuNumCloudsOverride;
     return this.weatherRef ? Math.max(0, Math.round(this.weatherRef.numClouds)) : 200;
   }
+
+  /** ★IIIII218 菜单生成期云量强制（Main.cs:20021-20026 UpdateMenu：drunkWorldGenText →
+   *  numClouds = dontStarveWorldGen ? 50 : Next(100,200) 每帧重掷）——MenuBackground
+   *  注入/清除；null = 无强制（游戏内天空不受扰） */
+  menuNumCloudsOverride: number | null = null;
+
+  /** ★IIIII218 菜单生成期云型强制（Cloud.cs:352-388 Update 首支：drunkWorldGenText &&
+   *  gameMenu → 每云每帧按 scale 档强制 type：shimmer=29/dontstarve=37-40/
+   *  getgood=25/26/缺省 28）——MenuBackground 注入/清除；null = 无强制 */
+  menuCloudTypeForce: ((scale: number) => number) | null = null;
   private cloudsInitialized = false;
   private maintainClouds(viewW: number, viewH: number) {
     const target = this.targetCloudCount();

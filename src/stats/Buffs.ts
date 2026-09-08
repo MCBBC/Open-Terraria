@@ -975,6 +975,20 @@ export class BuffState {
     }
   }
 
+  /** TryToResetHungerToNeutral（Player.cs:11619-11634）：饥饿链三态（332/333/334）
+   *  buffTime 全部清零——原版置 0 后 flag 分支再调 UpdateHungerBuffs（零时长槽在
+   *  其循环头 buffTime>0 门被跳过,无链转移）；等价 = 删三键。下拍 UpdateStarvingState
+   *  见栏空重新授 332（链从头计时）。消费面（IIIII219）：蘑菇 5（ApplyPotionDelay
+   *  :52513 + ItemCheck_UsePotionStuff :5516 双调用点）/蛋奶酒 1912（:52507）——
+   *  吃「无 fed buff 的疗药」把饥饿链拉回「稍饿」起点而非直接喂饱 */
+  tryToResetHungerToNeutral(): void {
+    let flag = false;
+    for (const t of [BuffType.NeutralHunger, BuffType.Hunger, BuffType.Starving]) {
+      if (this.active.delete(t)) flag = true;
+    }
+    if (flag) this.updateHungerBuffs();
+  }
+
   apply(type: BuffType, durationSec: number) {
     // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
     const vb = BUFF_DEFS[type]?.vanillaBuff;

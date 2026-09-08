@@ -52,6 +52,8 @@ const CSS = `
 .sw-wc-rand { background: #232c52; border: 1px solid #3a4680; border-radius: 4px; padding: 4px 8px;
   cursor: pointer; flex-shrink: 0; }
 .sw-wc-seedicon { width: 34px; height: 34px; flex-shrink: 0; image-rendering: pixelated; }
+/* 天顶种子图标画布（7×16 图集帧 62×60,与 34px 静态图标同视觉盒:34/60 缩放 → 宽 35px） */
+.sw-wc-seedicon-cv { width: 35px; height: 34px; flex-shrink: 0; image-rendering: pixelated; }
 .sw-wc-rand img { width: 28px; height: 28px; display: block; image-rendering: pixelated; }
 .sw-wc-group { display: flex; flex-direction: column; gap: 2px; }
 .sw-wc-grouplabel { color: #b8c0e8; font-size: 13px; }
@@ -148,7 +150,7 @@ export class WorldCreationPanel {
       <div class="sw-wc-body">
         <div class="sw-wc-main">
           <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationName')}</span><input type="text" data-f="name" maxlength="27"><button class="sw-wc-rand" data-act="randname" title="${Lang.text('UI.WorldCreationRandomizeNameDescription')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomName.png"></button></div>
-          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationSeed')}</span><input type="text" data-f="seed" maxlength="40" placeholder="${Lang.text('UI.WorldCreationSeedEmpty').replace(/^[<：: ]+|[>]+$|\s*[：:]\s*$/g, '')}"><button class="sw-wc-rand" data-act="randseed" title="${Lang.text('UI.WorldCreationRandomizeSeedDescription')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomSeed.png"></button><img class="sw-wc-seedicon" src="sprites/vanilla-ui/UI_WorldCreation_Seed_Normal.png"></div>
+          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationSeed')}</span><input type="text" data-f="seed" maxlength="40" placeholder="${Lang.text('UI.WorldCreationSeedEmpty').replace(/^[<：: ]+|[>]+$|\s*[：:]\s*$/g, '')}"><button class="sw-wc-rand" data-act="randseed" title="${Lang.text('UI.WorldCreationRandomizeSeedDescription')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomSeed.png"></button><img class="sw-wc-seedicon" src="sprites/vanilla-ui/UI_WorldCreation_Seed_Normal.png"><canvas class="sw-wc-seedicon-cv" width="62" height="60" style="display:none"></canvas></div>
           <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationSize')}</div><div class="sw-wc-opts" data-g="size"></div></div>
           <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationDifficulty')}</div><div class="sw-wc-opts" data-g="diff"></div></div>
           <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationEvil')}</div><div class="sw-wc-opts" data-g="evil"></div></div>
@@ -171,6 +173,9 @@ export class WorldCreationPanel {
     // ★seedIcon 必须先于 refresh() 就位——refreshSeedIcon() 会向它写 .src
     //  （曾挪到下方 randseed 监听器组后,构造器首刷写 undefined.src 崩"创建世界"）
     this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
+    this.seedCv = this.panel.querySelector('.sw-wc-seedicon-cv') as unknown as HTMLCanvasElement;
+    this.seedCvCtx = this.seedCv.getContext('2d');
+    if (this.seedCvCtx) this.seedCvCtx.imageSmoothingEnabled = false;
     this.refresh();
 
     this.panel.querySelector('[data-act=randname]')!.addEventListener('click', () => {
@@ -297,6 +302,14 @@ export class WorldCreationPanel {
   }
 
   private seedIcon: ImageBitmap | HTMLImageElement;
+  /** 天顶种子图标画布（7×16 故障动画图集裁帧域——静态 <img> 装不下 434×960 图集） */
+  private seedCv: HTMLCanvasElement;
+  private seedCvCtx: CanvasRenderingContext2D | null = null;
+  /** 天顶故障动画 60Hz 定时器（vanilla OnUpdate 等价时钟;close/rebuild 全清） */
+  private glitchTimer: ReturnType<typeof setInterval> | null = null;
+  /** 天顶图集图（UI_WorldCreation_Seed_Everything.png 434×960=vanilla 全等,懒加载一次） */
+  private glitchIm: HTMLImageElement | null = null;
+  private glitchState = { variation: 0, frame: 0, counter: 0 };
   /** 上次解析的种子图标键 */
   private lastSeedKey = '';
   /** 上次解析的种子文本——Chat 音「文本变更且命中特殊种子」判定基线（★IIIII215b） */
@@ -337,7 +350,75 @@ export class WorldCreationPanel {
     }
     this.lastSeedText = seed;
     this.lastSeedKey = key;
-    (this.seedIcon as HTMLImageElement).src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
+    // ★IIIII216：Seed_Everything 原版资产 = 434×960 的 7×16 故障动画图集（
+    // Terraria.WorldBuilding/WorldSeedOption_Everything.cs:64-94 ProvideUIElement →
+    // UIImageFramed(Texture, Texture.Frame(7,16)),逐帧 62×60;1456≡1457≡1458 diff 全等），
+    // 本仓 PNG 与 vanilla 源逐字节全等——资产无错,错在渲染面曾把整张图集塞进 34px
+    // <img>（=碎条+红精灵错乱,2026-09-08 用户报）。现按 vanilla 裁帧动画：
+    if (key === 'Seed_Everything') {
+      this.showGlitchIcon();
+    } else {
+      this.stopGlitchIcon();
+      this.seedCv.style.display = 'none';
+      const img = this.seedIcon as HTMLImageElement;
+      img.style.display = '';
+      img.src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
+    }
+  }
+
+  /** 天顶种子图标 = 7×16 故障动画（与 WorldSelect.buildZenithGlitchIcon 同一套 1:1 门）：
+   *  构造即 Frame(7,16) 首帧上屏（vanilla UIImageFramed ctor 帧域），OnUpdate 随机门：
+   *  当前帧 0 时阈值掷 15-120,其余帧恒 3t 换帧;落到 4/8/12 帧 1/3 概率换 7 变体列。 */
+  private showGlitchIcon() {
+    (this.seedIcon as HTMLImageElement).style.display = 'none';
+    this.seedCv.style.display = '';
+    if (!this.glitchIm) {
+      const im = new Image();
+      im.onload = () => this.drawGlitchFrame();
+      im.src = 'sprites/vanilla-ui/UI_WorldCreation_Seed_Everything.png';
+      this.glitchIm = im;
+    }
+    this.drawGlitchFrame();
+    if (this.glitchTimer) return;   // 已在动画中（连续输入保持相位,不重掷 RNG）
+    this.glitchTimer = setInterval(() => this.glitchTick(), 1000 / 60);
+  }
+
+  private stopGlitchIcon() {
+    if (this.glitchTimer) {
+      clearInterval(this.glitchTimer);
+      this.glitchTimer = null;
+    }
+  }
+
+  /** WorldSeedOption_Everything.OnUpdate cs:73-92 1:1（threshold 每帧重掷：
+   *  Main.rand.Next(min, max+1) 在比较式内联求值 ∈ [min,max] 闭区间） */
+  private glitchTick() {
+    if (!this.panel.isConnected) {
+      this.stopGlitchIcon();   // 面板已拆离（rebuild/close 竞态兜底）→ 自清
+      return;
+    }
+    const s = this.glitchState;
+    let min = 3, max = 3;
+    if (s.frame === 0) { min = 15; max = 120; }
+    const threshold = min + Math.floor(Math.random() * (max - min + 1));
+    if (++s.counter >= threshold) {
+      s.counter = 0;
+      s.frame = (s.frame + 1) % 16;
+      if ((s.frame === 4 || s.frame === 8 || s.frame === 12) && Math.floor(Math.random() * 3) === 0) {
+        s.variation = Math.floor(Math.random() * 7);
+      }
+    }
+    this.drawGlitchFrame();
+  }
+
+  /** SetFrame(7, 16, variation, frame, 0, 0)（cs:91）→ sourceRect(variation*62, frame*60, 62, 60) */
+  private drawGlitchFrame() {
+    const im = this.glitchIm;
+    if (!im?.complete || !im.width || !this.seedCvCtx) return;
+    const s = this.glitchState;
+    this.seedCvCtx.imageSmoothingEnabled = false;
+    this.seedCvCtx.clearRect(0, 0, this.seedCv.width, this.seedCv.height);
+    this.seedCvCtx.drawImage(im, s.variation * 62, s.frame * 60, 62, 60, 0, 0, 62, 60);
   }
 
   private submit() {
@@ -349,6 +430,7 @@ export class WorldCreationPanel {
   }
 
   private close(fn: () => void) {
+    this.stopGlitchIcon();   // 天顶故障动画定时器随面板销毁（IIIII216）
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
     this.unsubKb?.();
     this.unsubLang?.();

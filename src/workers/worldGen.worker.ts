@@ -83,9 +83,12 @@ ctx.onmessage = async (e) => {
         const now = Date.now();
         if (now < nextShotAt) return false;
         nextShotAt = now + PREVIEW_MIN_MS;
-        // 背景分层上下文（对齐游戏内小地图；生成早期世界面未定 → 兜底浅蓝）
+        // 背景分层上下文（对齐游戏内小地图；生成早期世界面未定 → 兜底浅蓝）。
+        // ★IIIII218：补地狱顶（lavaLine→地狱底单色支）与 remix 上表旗（mapType100）
         const bg = latestWorld.groundLevel > 0
-          ? { groundLevel: latestWorld.groundLevel, rockLevel: latestWorld.rockLevel }
+          ? { groundLevel: latestWorld.groundLevel, rockLevel: latestWorld.rockLevel,
+              underworld: latestWorld.lavaLine > 0 ? latestWorld.lavaLine : undefined,
+              remix: !!latestWorld.seedFlags?.remix }
           : undefined;
         const f = renderPreviewBitmap(latestWorld.store, 1024, bg);
         ctx.postMessage(

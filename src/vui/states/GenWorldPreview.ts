@@ -142,7 +142,9 @@ export class GenWorldPreview extends UIElement {
     while (n-- > 0) {
       const x = this.sweepCol;
       const bg = world.groundLevel > 0
-        ? { groundLevel: world.groundLevel, rockLevel: world.rockLevel }
+        ? { groundLevel: world.groundLevel, rockLevel: world.rockLevel,
+            underworld: world.lavaLine > 0 ? world.lavaLine : undefined,
+            remix: !!world.seedFlags?.remix }   // ★IIIII218：地狱底/remix 上表与游戏内同构
         : undefined;
       for (let y = 0; y < h; y++) {
         const c = mapColor24(st, x, y, bg);

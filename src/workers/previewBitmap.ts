@@ -5,11 +5,12 @@ import type { TileStore } from '../world/TileStore';
 import { mapColor24 } from '../render/MapColors';
 
 /** 降采样：每个输出像素取源格 (x*fx, y*fy) 的 mapColor24（tile>liquid>wall 优先级，
- *  MapColors.mapColor24 已封装）。bg = 世界面上下文（对齐游戏内小地图背景分层）。
+ *  MapColors.mapColor24 已封装）。bg = 世界面上下文（对齐游戏内小地图背景分层；
+ *  ★IIIII218 补 underworld=地狱顶与 remix 上表旗——与 Renderer.colorFor 同构）。
  *  中世界 6400×1800 → 640×180×4 ≈ 460KB/帧（maxW 1024 ≈ 1.2MB/帧——DPR2 下
  *  显示宽 ~1040 设备像素，640 源会被放大糊掉；微光湖等小地物也靠分辨率保住） */
 export function renderPreviewBitmap(st: TileStore, maxW = 1024,
-  bg?: { groundLevel: number; rockLevel: number }): {
+  bg?: { groundLevel: number; rockLevel: number; underworld?: number; remix?: boolean }): {
   width: number; height: number; rgba: Uint8ClampedArray;
 } {
   const fx = Math.max(1, Math.ceil(st.w / maxW));

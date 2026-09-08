@@ -39,6 +39,27 @@ export function npcNoAggroActive(player: Player): boolean {
   return !!player.buffs?.has(BuffType.Calming)
     || !!(player as unknown as { equipStats?: { royalGel?: boolean } }).equipStats?.royalGel;
 }
+/** ★SW-BJ34 2026-09-08：皇家凝胶装备旗（仅 3090）。1457 原文 npcTypeNoAggro[] 的
+ *  【唯一】置位源 = ApplyEquipFunctional `currentItem.type == 3090`（1457
+ *  Player.cs:14790-14814；1456 :14144-14168），逐项置 23 类（表见
+ *  CALMING_NO_AGGRO_TYPES）；镇静药水 `player.calmed` 只吃刷怪率 spawnRate×1.65/
+ *  maxSpawns×0.6（1457 NPC.cs:708-712），不置 npcTypeNoAggro。故原文消费面——
+ *  接触伤害跳过（Player.cs:31588 Update_NPCCollision）、AI_001 弹射门（NPC.cs
+ *  :61303/:61768/:61823/:61878/:61958/:62007）、aiStyle22 122 充能/开火（:24935/
+ *  :24969）与 aiStyle22 垂直决策（:25139）——一律只认装备旗，不并镇静
+ *  （npcNoAggroActive 的镇静并集是索敌罚项 :78490/:78542 历史接线，另行结算）。 */
+export function royalGelActive(player: Player): boolean {
+  return !!(player as unknown as { equipStats?: { royalGel?: boolean } }).equipStats?.royalGel;
+}
+/** ★SW-BJ34 2026-09-08：`npcTypeNoAggro[type]` 原文判定子的本仓形状——原版是玩家
+ *  实例上的 bool[NPCID.Count]（Player.cs:2977 声明；:17157 UpdateDead/:18922
+ *  ResetEffects 每帧全清 + :14792-14814 装备重置位），本仓以「型 ∈ 23 类表 ∧
+ *  royalGelActive」等效（equipStats 内容缓存随装备变化失效，语义同每帧重算）。
+ *  ★原文数组直查【无】direction!=0 守卫（该守卫仅 :78490/:78542 TargetClosest
+ *  两处所有），此判定子对齐原文裸语义。 */
+export function npcTypeNoAggro(vanillaId: number | null | undefined, player: Player): boolean {
+  return vanillaId != null && CALMING_NO_AGGRO_TYPES.has(vanillaId) && royalGelActive(player);
+}
 /** Main.wallDungeon（Main.cs:10507-10515：主题墙 7/8/9 + 1.4 变体 94-99）——地牢之魂
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
 const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
@@ -2614,8 +2635,15 @@ export class Enemy extends Entity {
     // 494-495）无相交门恒生效；460/417/466/552-554/576-577/668 的专盒未命中时回落裸
     // 盒 ×1.0（ref 未被改写）。rect=null ⇒ 原版 npcRect=default 永不相交：400 真眼零
     // 接触（此前显式 vanillaId!==400 早退并入此路，语义同式 ：96143-96144）。
+    // ★SW-BJ34 2026-09-08：皇家凝胶接触面跳过（原版 Update_NPCCollision 循环头
+    //  :31588 `|| npcTypeNoAggro[Main.npc[i].type]` → continue；1456 :30892 同式）
+    //  ——装备 3090 后 23 类史莱姆（含熔岩史莱姆 59）【零接触结算】：无伤/无击退/
+    //  无无敌帧/无 buff 蹭，且先于 GetMeleeCollisionData(:31595) 与蜂蜜史莱姆支
+    //  (:31598)——凝胶在身蜂蜜史莱姆也不蹭蜜。此前整缺 = 熔岩史莱姆照撞掉血
+    //  （用户实报）。旗源 npcTypeNoAggro（装备旗 3090 专面，不含镇静）。
     if (localPlayer && !localPlayer.dead && this.def.damage > 0
-      && this.vanillaId != null) {
+      && this.vanillaId != null
+      && !npcTypeNoAggro(this.vanillaId, localPlayer)) {
       const victim = { x: localPlayer.x, y: localPlayer.y, w: localPlayer.w, h: localPlayer.h };
       const gmc = getMeleeCollisionData(victim, {
         vanillaId: this.vanillaId,
@@ -3379,12 +3407,16 @@ export class Enemy extends Entity {
       if (a1 === 539) {
         // :61090-61105 史莱姆法杖物：noTraps/getGood 分母 300−120−120；1/num11 且
         //  目标存活视线可达 → 弹 1073（direction×12, 0）伤 20。kb=2 出参本仓敌弹
-        //  出口（spawnHostileProj）无 knockback 通道，登记；npcTypeNoAggo（镇静）
-        //  门与相邻 S7 仆从段同口径省略（仓内镇静等效=索敌距离罚项）
+        //  出口（spawnHostileProj）无 knockback 通道，登记。
+        //  ★SW-BJ34 2026-09-08：补 `!Main.player[target].npcTypeNoAggro[type]` 门
+        //  （1457 :61303；1456 :61102）——曾整缺（登记为「与 S7 仆从段同口径省略」，
+        //  本批与凝胶接触面一并清偿）。可携物族 {1,59,147,184,537} 全在 23 类表内，
+        //  门对凝胶装着者恒关。
         let num11 = 300;
         if (sf.noTraps) num11 -= 120;
         if (sf.getGoodWorld) num11 -= 120;
-        if (roll(num11) === 0 && player && !player.dead && this.canSeePlayer(stL, player)) {
+        if (roll(num11) === 0 && player && !player.dead
+          && !npcTypeNoAggro(this.vanillaId, player) && this.canSeePlayer(stL, player)) {
           this.spawnHostileProj(game, this.cx, this.cy, this.facing * 12, 0, 20, 1073);
           // 出膛音（Projectile.cs:56284-56287 ai[1]==0 首拍）:弹 1073 → Item17——
           // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
@@ -3814,7 +3846,11 @@ export class Enemy extends Entity {
     const spiked = this.vanillaId === 184 || this.vanillaId === 535 || this.vanillaId === 204;
     if (spiked) {
       if (this.ai3 > 0) this.ai3 -= 1;                         // :61764/:61819/:62004 无条件递减
-      if (player && !player.dead && !this.wet) {
+      // ★SW-BJ34 2026-09-08：尖刺三型射击头门补 `!npcTypeNoAggro[type]`
+      //  （184=1457 :61768 / 535=:61823 / 204=:62007；1456 :61565/:61620/:61804）
+      //  ——凝胶在身不蓄射。逐型覆盖：184/204 在 23 类表内=凝胶装着者禁射；
+      //  535 不在表内（:14792-14814 无此型）→ 门原文即恒开,写上是为逐字 1:1。
+      if (player && !player.dead && !this.wet && !npcTypeNoAggro(this.vanillaId, player)) {
         const expert = mainExpertMode(game.world);
         const is204 = this.vanillaId === 204;
         // 204 视线用抬升 20px 的碰撞盒（:62013/:62035 CanHit(new Vector2(x, y-20), w, h+20)）
@@ -3878,7 +3914,10 @@ export class Enemy extends Entity {
     const queenMinion = this.vanillaId === 658 || this.vanillaId === 659;
     if (queenMinion) {
       if (this.ai3 > 0) this.ai3 -= 1;                         // :61874-61876/:61954-61956 无条件递减
-      if (player && !player.dead && !this.wet && this.vy === 0) {
+      // ★SW-BJ34 2026-09-08：射击头门补 `!npcTypeNoAggro[type]`（1457 :61878/:61958；
+      //  1456 :61675/:61755）——逐字 1:1（658/659 不在 23 类表内 → 门原文即恒开）。
+      if (player && !player.dead && !this.wet && this.vy === 0
+        && !npcTypeNoAggro(this.vanillaId, player)) {
         const mdx = player.cx - this.cx;
       const mdy = player.cy - this.cy;
       const mdist = Math.hypot(mdx, mdy);
@@ -9186,7 +9225,9 @@ export class Enemy extends Entity {
     if (vid === 122) {
       num310 = 8;
       if (this.justHit) { this.ai3 = 0; this.lai1 = 0; }
-      if (this.ai3 === 32 && player) {
+      // ★SW-BJ34 2026-09-08：开火门补 `!Main.player[target].npcTypeNoAggro[type]`
+      //  （1457 :24935；1456 :24868）——122 在 23 类表内,凝胶装着者不吃粉激光。
+      if (this.ai3 === 32 && player && !npcTypeNoAggro(vid, player)) {
         const ang = Math.atan2(aimDY, aimDX) + (Math.random() - 0.5) * 0.157;
         const laser = new Dart(this.cx, this.cy, Math.cos(ang) * 7, Math.sin(ang) * 7, 25, 84);
         laser.hostile = true;
@@ -9200,7 +9241,10 @@ export class Enemy extends Entity {
       if (this.ai3 === 0) {
         this.lai1 += 1;
         // 1457 :24949-24951 flag36 = AI_GlobalFiringDistanceCheck——超视野不充能
+        // ★SW-BJ34 2026-09-08：充能门补 `!player7.npcTypeNoAggro[type]`
+        //  （1457 :24969；1456 :24908）——凝胶在身不充能。
         if (this.lai1 > 120 && player && !player.dead
+          && !npcTypeNoAggro(vid, player)
           && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
           && this.canSeePlayer(st, player)) {
           this.lai1 = 0;
@@ -9273,6 +9317,23 @@ export class Enemy extends Entity {
           }
         }
       }
+    }
+    // ★SW-BJ34 2026-09-08：no-aggro 垂直决策（1457 :25136-25154；1456 :25078-25096）
+    //  ——`if (Main.player[target].npcTypeNoAggro[type])` 时重探探测列
+    //  [feetY, feetY+num310-2)（深度比主探短 2 行）：有支承（实心/液）→
+    //  directionY=-1 上浮 / 悬空 → +1 下落（=(!flag37).ToDirectionInt()），整段
+    //  覆写 TargetClosest 的 dirY。表内成员仅 122 蜗牛怪（凝胶在身即悬停失的，
+    //  不随玩家上下追）。越界格原版 null tile=nactive 假 → 无支承,同 continue。
+    if (player && npcTypeNoAggro(vid, player)) {
+      let flag37 = false;
+      for (let ty = feetY; ty < feetY + num310 - 2; ty++) {
+        if (!st.inBounds(probeX, ty)) continue;
+        if (st.isSolid(probeX, ty) || st.liquid[st.idx(probeX, ty)] > 0) {
+          flag37 = true;
+          break;
+        }
+      }
+      this.dirY = flag37 ? -1 : 1;
     }
     // 169/268 头顶 3 行内实心/液 → 直落下穿（flag27,cs:25076-25088）
     if (vid === 169 || vid === 268) {

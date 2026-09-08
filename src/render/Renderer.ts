@@ -1836,6 +1836,14 @@ const MAP_WALL_NO_PAINT = new Set([21, 88, 89, 90, 91, 92, 93, 168, 241]);
 /** 小地图恒忽略油漆的 tile sheet（MapHelper.GetTileType :1965-1968：num==160 → newColor=0） */
 const MAP_TILE_NO_PAINT_SHEET = 160;
 
+/** ★IIIII218 remix 上表地图底色（GetBackgroundType :2025-2028 `return 100` 硬编码
+ *  mapType → colorLookup[100] = tileLookup[80]（仙人掌）option0 = (73,120,17)——
+ *  原版怪癖：remix/天顶世界小地图地表以上是这块暗绿，不是天空渐变） */
+const REMIX_MAP_BG_RGB: number[] = [73, 120, 17];
+/** ★IIIII218 地狱背景底色（MapHelper.cs:1689 color11=(50,44,38)，GetBackgroundType
+ *  尾支 hellPosition——此前地狱层误画石层底 (74,67,60)） */
+const VANILLA_HELL_BG_RGB: number[] = [50, 44, 38];
+
 /** 内部 tile id → 原版 sheet（redrawAll 热循环直查；-1 = 无映射） */
 const TILE_SHEET_OF: Readonly<Int16Array> = (() => {
   const a = new Int16Array(TILE_DEFS.length);
@@ -1963,8 +1971,16 @@ export class Minimap {
       }
       return '#2E2E2E';
     }
-    // 背景：天空渐变（y<世界面）/ 土层底 / 石层底（MapHelper GetBackgroundType）
-    if (y < Math.max(1, this.world.groundLevel)) return hex(vanillaSkyColor(y, Math.max(1, this.world.groundLevel)));
+    // 背景：remix 上表(mapType100 怪癖)/ 天空渐变（y<世界面）/ 土层底 / 石层底 /
+    // 地狱底 (50,44,38)（MapHelper.cs GetBackgroundType :2020-2077——★IIIII218 补
+    // remix 分支与 hellPosition 单色支，与 MapColors.mapColor24 同构单源语义）
+    const surf2 = Math.max(1, this.world.groundLevel);
+    if (y < surf2) {
+      if (this.world.seedFlags?.remix) return hex(REMIX_MAP_BG_RGB);
+      return hex(vanillaSkyColor(y, surf2));
+    }
+    const underworld = Math.max(0, this.world.lavaLine);
+    if (underworld > 0 && y >= underworld) return hex(VANILLA_HELL_BG_RGB);
     if (y < Math.max(1, this.world.rockLevel)) return hex(VANILLA_DIRT_BG);
     return hex(VANILLA_ROCK_BG);
   }
@@ -2034,10 +2050,12 @@ export class Minimap {
       liq[0] = parse('#000000');
       liq[1] = rgb(vanillaLiquidColor(0)); liq[2] = rgb(vanillaLiquidColor(1));
       liq[3] = rgb(vanillaLiquidColor(2)); liq[4] = rgb(vanillaLiquidColor(3));
-      this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG) };
+      // ★IIIII218：remix 上表（mapType100 硬编码=仙人掌色 73,120,17）与地狱底 (50,44,38)
+      this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG),
+        remixBg: rgb(REMIX_MAP_BG_RGB), hellBg: rgb(VANILLA_HELL_BG_RGB) };
   }
 
-  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number } | null = null;
+  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number; remixBg: number; hellBg: number } | null = null;
 
   /** 行带填充:y0..y1(不含)行直写 pix(绝对索引;与旧版同热循环,仅落点从
    *  ImageData 换 CPU 缓冲) */
@@ -2052,6 +2070,7 @@ export class Minimap {
     // 同一门;墙/液体/背景分支不查 active（幽灵格 wall 仍有效,同 MapHelper 模型）
     const { type, flags, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
+    const underworld = Math.max(0, world.lavaLine);   // 地狱顶（UnderworldLayer；0=未定→无地狱支）
     const mapPaintPacked = (packed: number, colorType: number, isWall: boolean): number => {
       const r = packed & 255, g = (packed >>> 8) & 255, b = (packed >>> 16) & 255;
       if (colorType === 29) {
@@ -2077,8 +2096,14 @@ export class Minimap {
       return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
     };
     for (let y = y0; y < y1; y++) {
+      // 背景（MapHelper.cs GetBackgroundType :2020-2077）：y<地表 → remix 上表
+      // (mapType100 硬编码怪癖=(73,120,17) 仙人掌色)/ 天空渐变；y<地狱顶 → 土层底/
+      // 石层底；其余 → 地狱底单色 (50,44,38)（color11）——★IIIII218 补 remix/hell 支
+      // （此前地狱层画石层底、remix 天空画蓝渐变，双路径同偏；与 MapColors.mapColor24 同构）
       const skyC = vanillaSkyColor(y, surf);
-      const bg = y < surf ? (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255))
+      const bg = y < surf ? (world.seedFlags?.remix ? lut.remixBg
+          : (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255)))
+        : (underworld > 0 && y >= underworld) ? lut.hellBg
         : y < rock ? lut.dirtBg : lut.rockBg;
       const rowOff = y * world.w;
       for (let x = 0; x < world.w; x++) {

@@ -497,7 +497,19 @@ export class Minecart extends Entity {
           st.inBounds(headX, feetY) && st.get(headX, feetY) === TRACK_TILE
           ? true
           : st.inBounds(headX, feetY - 1) && st.get(headX, feetY - 1) === TRACK_TILE;
-        if (!headTrack && st.inBounds(headX, feetY) && st.isSolid(headX, feetY)) {
+        // ★SW-BJ30 2026-09-08：坡面通行门（45°坡轨"这种角度开不过去"第二案）——
+        //  原版横向碰撞对坡形块从迎坡侧【不算墙】（Collision.cs:2361-2382：slope 1
+        //  在 vx≥0、slope 2 在 vx≤0 时 flag3=true 跳过碰撞；slope 3/4 同支 :2363-2367
+        //  横向让行），矿车贴轨上坡时探针格=坡形山体块是常态,原版车随坡面爬升。
+        //  曾把 slope≠0 当整块实心墙 → 相位落点踩中探针即 vx 清零+回退 x,而
+        //  trackCollision 的 Y 已随坡面抬升（x 回退与 y 抬升错位）→ 车被抛离轨面
+        //  2-3 格后落在坡体上,onWrongGround 刹车链把车永久楔死（用户实报）。
+        const pi = st.inBounds(headX, feetY) ? st.idx(headX, feetY) : -1;
+        const slopeAt = pi >= 0 ? st.slope[pi] : 0;
+        const slopePassable =
+          (slopeAt === 1 && this.vx > 0) || (slopeAt === 2 && this.vx < 0)
+          || slopeAt === 3 || slopeAt === 4;
+        if (!headTrack && pi >= 0 && st.isSolid(headX, feetY) && !slopePassable) {
           this.x -= this.vx;
           this.vx = 0;
         }

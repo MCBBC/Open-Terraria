@@ -23,6 +23,7 @@ import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
 import { decayCelestialModY } from '../render/SkyRenderer';
 import { openAssetDiagPanel } from './AssetDownloadUI';
+import type { GenScreenSeedFlags } from '../vui/states/UIWorldLoadState';
 
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
 const SUN_SIZE = 114;
@@ -140,6 +141,98 @@ export class TitleMenu {
    *  松手后每帧 ×0.999 缓回 0；基准 y 见 celestialState 的 dip 公式） */
   private modY = 0;
 
+  // ---- ★IIIII218 生成屏 logo 动效（Main.cs DrawMenu :49060-49132 + Update :17292 1:1）----
+  /** 生成屏种子表现旗标（mainFlow.createWorldFlow 注入；null=标题/普通籽=CSS 摆动照旧）。
+   *  vanilla：动效分支判 WorldGen.remixWorldGen / drunkWorldGen（生成期旗），标题屏
+   *  走 else 支（本仓=既有 CSS 摆动近似，不换脸）；生成结束进世界 TitleMenu 随之销毁 */
+  private genFlags: GenScreenSeedFlags | null = null;
+  /** Main.logo* 字段（:2331-2342 初值逐字：direction=-1/speed=1/scale=1/scaleDir=1/scaleSpeed=1） */
+  private logoRotation = 0;
+  private logoRotationDirection = -1;
+  private logoRotationSpeed = 1;
+  private logoScale = 1;
+  private logoScaleDirection = 1;
+  private logoScaleSpeed = 1;
+  private logoFrameAcc = 0;              // 定帧累积器（动效常量按 60fps 帧计）
+  /** boulderLogo（:1218 初值 false；:49177-49181 noTrapsWorld 置位【无复位】=会话闩；
+   *  SetTitle :6532-6534 1/200 随机在构造器已实现） */
+  private boulderLogo = false;
+
+  /** 生成屏旗标注入（mainFlow.createWorldFlow 接线；生成结束=null 还原 CSS 摆动） */
+  setGenFlags(flags: GenScreenSeedFlags | null): void {
+    this.genFlags = flags;
+    // noTrapsWorld → boulderLogo=true（:49177 会话闩——vanilla 无清零点，回标题仍是巨石）
+    if (flags?.noTrapsWorldGen) this.boulderLogo = true;
+    this.applyLogoImages();
+    if (!flags) {
+      // 还原 CSS 摆动（生成中止/失败回标题的防御路径；正常成功=TitleMenu 销毁重建）
+      const el = this.root.querySelector('.sw-title-logo') as HTMLElement | null;
+      if (el) { el.style.animation = ''; el.style.transform = ''; }
+    }
+  }
+
+  /** logo 图源（昼/夜对）：boulderLogo → Logo5/Logo6（:49136-49150），否则 Logo/Logo2 */
+  private applyLogoImages(): void {
+    const day = this.root.querySelector('.logo-day') as HTMLImageElement | null;
+    const night = this.root.querySelector('.logo-night') as HTMLImageElement | null;
+    if (!day || !night) return;
+    const prefix = this.boulderLogo ? 'Logo5' : 'Logo';
+    day.src = `sprites/vanilla-ui/${prefix}.png`;
+    night.src = `sprites/vanilla-ui/${prefix}2.png`;
+  }
+
+  /** 一步 60fps 帧动效（Main.cs Update :17292 复位点 + DrawMenu :49060-49132 分支逐字）。
+   *  remix 支=倒置摆动（rotation 3.04..3.22rad≈174°..184°、scale 0.9..1.0 呼吸）；
+   *  drunk&&!notTheBees 支=转速 ±1500/帧 + scale −0.05/帧——★1457/1458 Update 复位
+   *  `|speed|>1000 → rotation/speed=0, scale=1` 每帧在其先跑 ⇒ 该支净表现=定格在
+   *  scale 0.95 / rotation −0.006rad（1405 无此复位=真自旋缩没,1457 起被复位门中和——
+   *  以反编译终态为准,两处逐字后净效自动同构）；else 支不接管（CSS 摆动照旧）。
+   *  昼夜交叉淡化（:49197-49222）：remix 强制夜面（`dayTime && !remixWorldGen`）。 */
+  private logoStep(): void {
+    // Update :17292-17298（gameMenu 恒真 → 仅速度复位支可达）
+    if (Math.abs(this.logoRotationSpeed) > 1000) {
+      this.logoRotation = 0;
+      this.logoRotationSpeed = 0;
+      this.logoScale = 1;
+    }
+    const f = this.genFlags;
+    if (!f) return;
+    if (f.remixWorldGen) {
+      // DrawMenu :49060-49094 remixWorldGen 支
+      this.logoRotation += this.logoRotationSpeed * 4e-5;
+      if (this.logoRotation < 3.04) {
+        this.logoRotation += this.logoRotationSpeed * 0.0016;
+        if (this.logoRotationSpeed < 0) this.logoRotationSpeed = 0;
+      }
+      if (this.logoRotation > 3.22) this.logoRotationDirection = -1;
+      else if (this.logoRotation < 3.06) this.logoRotationDirection = 1;
+      if (this.logoRotationSpeed < 20 && this.logoRotationDirection === 1) this.logoRotationSpeed++;
+      else if (this.logoRotationSpeed > -20 && this.logoRotationDirection === -1) this.logoRotationSpeed--;
+      this.logoScale += this.logoScaleSpeed * 9e-5;
+      if (this.logoScale > 1) this.logoScaleDirection = -1;
+      else if (this.logoScale < 0.9) this.logoScaleDirection = 1;
+      if (this.logoScaleSpeed < 50 && this.logoScaleDirection === 1) this.logoScaleSpeed++;
+      else if (this.logoScaleSpeed > -50 && this.logoScaleDirection === -1) this.logoScaleSpeed--;
+    } else if (f.drunkWorldGen && !f.notTheBees) {
+      // DrawMenu :49095-49105 drunkWorldGen 支（:49079 转速±1500/:49090 缩没）
+      this.logoRotation += this.logoRotationSpeed * 4e-6;
+      if (this.logoRotationSpeed > 0) this.logoRotationSpeed += 1500;
+      else this.logoRotationSpeed -= 1500;
+      this.logoScale -= 0.05;
+      if (this.logoScale < 0) this.logoScale = 0;
+    } else {
+      return; // else 支 = CSS 摆动（标题/普通籽既有实现,不接管）
+    }
+    this.applyLogoTransform();
+  }
+
+  private applyLogoTransform(): void {
+    const el = this.root.querySelector('.sw-title-logo') as HTMLElement | null;
+    if (!el) return;
+    el.style.animation = 'none';
+    el.style.transform = `rotate(${this.logoRotation}rad) scale(${this.logoScale})`;
+  }
+
   constructor(parent: HTMLElement, private flow: TitleMenuFlow) {
     // 样式表每次挂载都刷新内容（★HMR/迭代期旧 <style> 驻留会吞掉 CSS 变更——
     // getElementById 守卫只建不更，用户可见"样式改了不生效"即此因）
@@ -151,9 +244,11 @@ export class TitleMenu {
     }
     style.textContent = CSS;
     // Logo 昼夜对（Main.LogoA/LogoB 交叉淡化；巨石 logo 1/200 随机 = SetTitle rand.Next(200)）
-    const boulder = Math.random() < 1 / 200;
-    const daySrc = boulder ? 'sprites/vanilla-ui/Logo5.png' : 'sprites/vanilla-ui/Logo.png';
-    const nightSrc = boulder ? 'sprites/vanilla-ui/Logo6.png' : 'sprites/vanilla-ui/Logo2.png';
+    // ★IIIII218：随机结果落 boulderLogo 会话闩（:49177 noTrapsWorld 置位同域）——
+    // 生成屏 setGenFlags 换图源时不得覆盖标题期 1/200 命中
+    this.boulderLogo = Math.random() < 1 / 200;
+    const daySrc = this.boulderLogo ? 'sprites/vanilla-ui/Logo5.png' : 'sprites/vanilla-ui/Logo.png';
+    const nightSrc = this.boulderLogo ? 'sprites/vanilla-ui/Logo6.png' : 'sprites/vanilla-ui/Logo2.png';
     this.root = document.createElement('div');
     this.root.className = 'sw-title-menu';
     this.root.innerHTML = `
@@ -363,7 +458,20 @@ export class TitleMenu {
       const dt = Math.min(100, now - last);
       last = now;
       const frames = dt / (1000 / 60);
-      const isDay = menuTimeInfo.timeOfDay > 0.1875 && menuTimeInfo.timeOfDay < 0.8125;
+      // ★IIIII218：生成屏 remix/drunk 分支按 60fps 定帧步进（动效常量按帧计；
+      // 上限 8 步/回调=后台标签回来防雪崩,MenuBackground 同纪律）
+      const g = this.genFlags;
+      if (g && (g.remixWorldGen || (g.drunkWorldGen && !g.notTheBees))) {
+        this.logoFrameAcc = Math.min(8, this.logoFrameAcc + frames);
+        while (this.logoFrameAcc >= 1) {
+          this.logoFrameAcc -= 1;
+          this.logoStep();
+        }
+      } else {
+        this.logoFrameAcc = 0;
+      }
+      const isDay = menuTimeInfo.timeOfDay > 0.1875 && menuTimeInfo.timeOfDay < 0.8125
+        && !this.genFlags?.remixWorldGen;   // remix 生成=强制夜面（Main.cs:49197 `dayTime && !remixWorldGen` else 支）
       logoA = Math.max(0, Math.min(255, logoA + (isDay ? 2 : -2) * frames));
       (this.logoDay as HTMLImageElement).style.opacity = String(logoA / 255);
       (this.logoNight as HTMLImageElement).style.opacity = String((255 - logoA) / 255);
