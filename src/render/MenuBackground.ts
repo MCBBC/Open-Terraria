@@ -223,7 +223,13 @@ export class MenuBackground {
       this.sky.menuNumCloudsOverride = f.dontStarveWorldGen
         ? 50
         : 100 + Math.floor(Math.random() * 100);          // Next(100,200) 每帧重掷
-      this.sky.menuCloudTypeForce = (scale: number) => {  // 云型四档（Update :352-388 序）
+      this.sky.menuCloudTypeForce = (scale: number) => {  // 云型五档（Update :352-388 序）
+        // ★IIIII223 F-4：onlyShimmerOceanWorlds=29 首支（Cloud.cs:354-356 +
+        //  Main.cs:2758-2769 getter：drunkWorld && tenthAnniversaryWorld && !remixWorld
+        //  && !zenithWorld → !notTheBees；生成期 WorldGen.cs:11142-11149 Main.*=*Gen
+        //  同拍置位 → 旗标源=GenScreenSeedFlags 组合，218 批「无旗标源」备案解除）
+        if (f.drunkWorldGen && f.tenthAnniversaryWorldGen && !f.remixWorldGen
+          && !f.zenithWorld && !f.notTheBees) return 29;
         if (f.dontStarveWorldGen) {
           if (scale < 0.7) return 40;
           if (scale < 0.8) return 39;
@@ -231,7 +237,7 @@ export class MenuBackground {
           return 37;
         }
         if (f.getGoodWorldGen) return scale < 0.8 ? 25 : 26;
-        return 28;                                        // （shimmer-ocean=29 支无旗标源,备档）
+        return 28;
       };
     } else {
       this.sky.menuNumCloudsOverride = null;
@@ -314,10 +320,12 @@ export class MenuBackground {
     //  则云回落 lastSkyTop(天空顶色深蓝)→深蓝云画在深蓝天上隐形（实测 lit=0）
     setFrameAtmo(1);   // :62633 gameMenu 每帧强制(实例复用时构造器复位不重跑)
     this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
-    // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）+ ★IIIII218 remix 生成
-    // UpdateMenu 首支 screenPosition.X -= 20/帧（cs:20011-20015）→ remix 生成净
-    // 漂移 -16/帧（背景整体反向平移）。原版越界=归零（非取模回卷）
-    this.camX += (remixGen ? -20 : 0) * frames + 4 * frames;
+    // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）+ ★IIIII218 生成漂移臂
+    // ★IIIII223 F-1：-20/帧嵌套在 if(WorldGen.drunkWorldGen) 内（Main.cs:20013-20018，
+    // 1457/1458 逐字同构：`if (drunkWorldGen) { if (remixWorldGen) screenPosition.X -= 20f; }`）
+    // ——仅 drunk∧remix（天顶族）漂移；纯 remix(dontdigup,drunk=false) 与纯 drunk 均
+    // 【不漂移】（218 批误读嵌套层，把 -20 挂到了裸 remix 上）
+    this.camX += (remixGen && drunkGen ? -20 : 0) * frames + 4 * frames;
     if (this.camX > MENU_X_WRAP) this.camX = 0;
     if (this.camX < -MENU_X_WRAP) this.camX = 0;
     // ★IIIII218 云强制/云量（drunkWorldGenText 生成期,Cloud.cs:352-388/cs:20021-20026）

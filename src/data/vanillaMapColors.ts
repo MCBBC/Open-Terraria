@@ -25,6 +25,31 @@ export function vanillaWallMapColor(wallId: number): number[] | null {
   return e?.[0] ?? null;
 }
 
+/** 原版 tile sheet id → 指定 option 地图色（缺条目/越界 null）——★IIIII223 F-3
+ *  184 长苔 frameX/22==10 → 627 换色支用（MapHelper.cs GetTileBaseOption
+ *  :2105-2108：`case 160/627/628/692: baseOption = (x + y) % 9` 九档彩移） */
+export function vanillaTileMapColorOption(sheet: number, option: number): number[] | null {
+  return DOC.tiles[String(sheet)]?.[option] ?? null;
+}
+
+/** 原版墙域上界（WallID.Count=367，WallID.cs:803；原版墙 id 域 0..366） */
+export const VANILLA_WALL_COUNT = 367;
+
+/** ★IIIII223 F-2：wallLookup=0 哨兵集（MapHelper.cs Initialize :1737-1754——
+ *  wallOptionCounts[wall]==0 ⇒ wallLookup[wall]=0 ⇒ GetWallType baseType=0 ⇒
+ *  CreateMapTile :1913-1917 落穿背景）。原版墙域内无色表条目者=玻璃族
+ *  （21 玻璃/88-93 染色玻璃/168 彩带/241 橙染色/318 回声）：GetWallType :2003
+ *  取色即得 0，:2005-2015 的 newColor=0 switch 系同域 belt-and-braces（218 批曾把
+ *  该集误读为「不吃漆墙族」，实为玻璃族不上图）。原版地图玻璃墙不画——JS 三路径
+ *  （MapColors.mapColor24 / Renderer.colorFor / Renderer.fillBand+ensureLUT）同构
+ *  落穿液体/背景；WALL_DEFS.mapColor 兜底只保留给原版墙域外的自研墙。
+ *  从 JSON 缺口派生 = extract-mapcolors 重产自动跟随 */
+export const VANILLA_WALL_LOOKUP0: ReadonlySet<number> = (() => {
+  const s = new Set<number>();
+  for (let id = 1; id < VANILLA_WALL_COUNT; id++) if (!DOC.walls[String(id)]) s.add(id);
+  return s;
+})();
+
 /** 液体色（索引：0水 1岩浆 2蜂蜜 3微光——MapHelper array3 :1271） */
 export function vanillaLiquidColor(idx: number): number[] {
   return DOC.liquids[idx] ?? DOC.liquids[0];

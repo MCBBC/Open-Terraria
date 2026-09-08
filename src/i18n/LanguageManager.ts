@@ -96,6 +96,14 @@ function buildGlobalSubstitutions(lang: LangTextSource): Map<string, () => strin
   m.set('InputTrigger_LockOn', k(''));                                   // LockOn（手柄 trigger,Web 版不做）
   m.set('InputTrigger_RadialQuickbar', triggerAction('HotbarMinus'));    // HotbarMinus（:153）
   m.set('InputTrigger_RadialHotbar', triggerAction('HotbarPlus'));       // HotbarPlus（:154）
+  // ★IIIII221（2026-09-08）：Lang.cs:157/:162-165 注册表补全——现有语言包值暂无
+  // 这 5 个 token（清点实证）,但注册表须与 vanilla 全谱对齐,防未来值面/自定义包
+  // 裸漏（Jump/QuickMount/QuickHeal/QuickMana/QuickBuff 均为本仓 KeybindAction）。
+  m.set('InputTrigger_Jump', triggerAction('Jump'));                     // Jump（:157）
+  m.set('InputTrigger_Mount', triggerAction('QuickMount'));              // QuickMount（:162）
+  m.set('InputTrigger_Healing', triggerAction('QuickHeal'));             // QuickHeal（:163）
+  m.set('InputTrigger_ManaHealing', triggerAction('QuickMana'));         // QuickMana（:164）
+  m.set('InputTrigger_QuickBuff', triggerAction('QuickBuff'));           // QuickBuff（:165）
   m.set('InputTriggerUI_BuildFromInventory', triggerAction('QuickMount')); // QuickMount（:149,原版缺省 R）
   m.set('InputTriggerUI_FavoriteItem', k('Alt'));                        // Main.FavoriteKey（:155 键盘硬编码,非 PlayerInput trigger）
   m.set('InputTriggerUI_Trash', () => {                                  // :154 DisableLeftShiftTrashCan 分支——
@@ -135,14 +143,23 @@ const TOKEN_RE = /\{([A-Za-z][A-Za-z0-9_]*)\}/g;
 
 let substitutionTable: Map<string, () => string | null> | null = null;
 
+/** 表惰性建一次（closure 捕获单例 lang，NPC 名经 resolver 活取） */
+function ensureSubstitutionTable(lang: LangTextSource): Map<string, () => string | null> {
+  if (!substitutionTable) substitutionTable = buildGlobalSubstitutions(lang);
+  return substitutionTable;
+}
+
 /** LocalizedText.Format 的 {Token} 段：注册表内替换（null=保留原文 token），
  *  未注册 token 原样保留（与原版一致——{0} 数字位已被上一段消化）。
- *  表惰性建一次（closure 捕获单例 lang，NPC 名经 resolver 活取） */
+ *  ★IIIII221 语义注（vanilla 侧有微差）：VariableText.TryFormat 任一变量查得
+ *  null 时整体失败 → LocalizedText.Value 回退整串原文（全部 token 裸显）；本仓
+ *  逐 token 独立判 null,可替换的照换、不可替换的保留。只在"部分变量缺位"
+ *  时可见（如 NPC 名 resolver 未注入的对话框）,全缺位两版同为整串原文。 */
 function applyGlobalSubstitutions(s: string, lang: LangTextSource): string {
   if (s.indexOf('{') < 0) return s;   // 快路径
-  if (!substitutionTable) substitutionTable = buildGlobalSubstitutions(lang);
+  const table = ensureSubstitutionTable(lang);
   return s.replace(TOKEN_RE, (whole, tok: string) => {
-    const gen = substitutionTable!.get(tok);
+    const gen = table.get(tok);
     if (!gen) return whole;
     const v = gen();
     return v === null ? whole : v;
@@ -321,24 +338,44 @@ class LanguageManager {
     return list ? [...list] : [];
   }
 
-  /** 类别内取模循环取值(对标 IndexedFromCategory,LanguageManager.cs:431) */
+  /** ★IIIII221 全局替换表键清单（审计/回归测试用——惰性建表后快照,保插入序） */
+  substitutionKeys(): string[] {
+    return [...ensureSubstitutionTable(this).keys()];
+  }
+
+  /** LocalizedText.Value 的 {Token} 半边（Lang.cs:86-98 GetGlobalSubstitution 消费端）：
+   *  对【已取出的原文串】做全局替换表替换——{0} 位置参数不在此层（原版走
+   *  string.Format,getTextValue 的 args 承担）。null 生成器/未注册 → 保留 token */
+  substitute(s: string): string {
+    return applyGlobalSubstitutions(s, this);
+  }
+
+  /** 类别内取模循环取值(对标 IndexedFromCategory,LanguageManager.cs:431)。
+   *  ★IIIII221：原版返回 LocalizedText、消费方读 .Value 完成替换——本仓直返
+   *  终值串,替换在出口等价落地(墓碑 WorldGen.cs:25205 / LucyAxe 消费侧实证) */
   indexedFromCategory(category: string, index: number): string | null {
     const list = this.pack.groupedKeys.get(category);
     if (!list || !list.length) return null;
     const i = ((index % list.length) + list.length) % list.length;
-    return this.pack.texts.get(list[i]) ?? null;
+    const v = this.pack.texts.get(list[i]);
+    return v === undefined ? null : this.substitute(v);
   }
 
-  /** 类别内随机(对标 RandomFromCategory,LanguageManager.cs:422) */
+  /** 类别内随机(对标 RandomFromCategory,LanguageManager.cs:422)。★IIIII221：
+   *  原版返回 LocalizedText,GameTipsDisplay.GameTip 构造器 :64
+   *  `_formattedText = _textKey.Value` 完成替换——世界生成屏提示条裸显
+   *  "{InputTrigger_SmartCursor}" 即此处曾直返 pack 原文漏了 .Value 半边 */
   randomFromCategory(category: string, rng: () => number = Math.random): string | null {
     const list = this.pack.groupedKeys.get(category);
     if (!list || !list.length) return null;
-    return this.pack.texts.get(list[Math.floor(rng() * list.length)]) ?? null;
+    const v = this.pack.texts.get(list[Math.floor(rng() * list.length)]);
+    return v === undefined ? null : this.substitute(v);
   }
 
   /** Lang.CreateDialogFilter(startsWith)（Lang.cs:425-428）+ Language.SelectRandom：
    *  类目内全键前缀匹配后随机一条（NPC.HasSpecialEventText 的
-   *  "XxxSpecialText.Yyy" 族——键形如 MerchantSpecialText.Rain1/Rain2） */
+   *  "XxxSpecialText.Yyy" 族——键形如 MerchantSpecialText.Rain1/Rain2）。
+   *  ★IIIII221：出口替换同上(.Value 等价) */
   randomFromPrefix(prefix: string, rng: () => number = Math.random): string | null {
     const dot = prefix.indexOf('.');
     if (dot <= 0) return null;
@@ -346,7 +383,8 @@ class LanguageManager {
     if (!list || !list.length) return null;
     const hits = list.filter((k) => k.startsWith(prefix));
     if (!hits.length) return null;
-    return this.pack.texts.get(hits[Math.floor(rng() * hits.length)]) ?? null;
+    const v = this.pack.texts.get(hits[Math.floor(rng() * hits.length)]);
+    return v === undefined ? null : this.substitute(v);
   }
 
   categorySize(category: string): number {

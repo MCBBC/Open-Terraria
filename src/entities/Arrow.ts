@@ -464,6 +464,14 @@ const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485]);
 const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173, 660, 451]);   // 451 涌流剑 rotation=vel+π/4（:31594/:31636）
 export { PROJ_ROT_DIAG };
 
+/** 贴图【朝下】族（AI 尾显式 rotation = velocity.ToRotation() − π/2——减号对齐
+ *  下向贴图；曾走默认 +π/2 = 整差 180°,左飞弹视觉朝右=用户实报"幻影弓影子箭
+ *  方向反了,应该镜像翻转"）。成员：631 幻象矢（AI_122 尾 :35613——命中侧补刀
+ *  弹,Projectile_631.png 尖端朝下叉口朝上,已验 PNG）。629 同支同式（:35613 同
+ *  行覆盖 629/631 两型）但本仓 0 消费面且贴图空,登记不入集。 */
+const PROJ_ROT_DOWN = new Set([631]);
+export { PROJ_ROT_DOWN };
+
 /** 恒旋族（AI_001 尾链 :54741-54749/:54822-54825：rotation 每帧累加、不对齐速度）：
  *  312 南瓜灯 += vx*0.02；772 晶洞 += sign(vx)·(|vx|+|vy|)·0.05；
  *  94 水晶风暴 += vx*0.2（AI_024 :24305）/ 95 诅咒之焰 += 0.3×direction
@@ -2936,6 +2944,8 @@ export class Arrow extends Entity {
       /* 直立族（aiStyle 29 零 rotation）：恒不旋转 */
     } else if (PROJ_ROT_ASIS.has(this.projId)) {
       ctx.rotate(ang);               // R27：宝石珠 rotation=velocity.ToRotation()（:38691）
+    } else if (PROJ_ROT_DOWN.has(this.projId)) {
+      ctx.rotate(ang - Math.PI / 2); // 631 幻象矢（AI_122 尾 :35613 减号——贴图朝下族,见 PROJ_ROT_DOWN 注）
     } else if (this.projId === 477 && this.dartRot !== null) {
       ctx.rotate(this.dartRot);      // 477 水晶镖平滑姿态（:58666-58676，AI 侧维护）
     } else if (this.bee36Tilt !== null) {

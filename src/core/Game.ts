@@ -166,7 +166,7 @@ import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/Player
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
 import { projectileData } from '../data/vanillaProjectiles';
-import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
+import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
@@ -5727,6 +5727,12 @@ export class Game implements GameHooks {
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean; playerAt?: { x: number; y: number } }) {
     this.freshlyCreated = false;
     this.world = world;
+    // SW-BJ31 2026-09-08：换世界必须重建 vanillaSpawner——spawner.world 是构造期
+    // 捕获的 World 引用（tile 扫描/flags 读数全走它），旧实现只在首次懒建（:30479 等
+    // ?? 位），同会话 loadWorld 第二个世界后刷怪域仍读旧世界（绑缚三人组的前置旗
+    // downedGoblins 也读旧 world.flags——旧世界未败军团则新世界永不刷 105）。
+    // null → 下一拍 trySpawnEnemy/SlimeRainSpawns/spawnFaelings 的 ?? 位按新世界重建
+    this.vanillaSpawner = null;
     // ★幽灵净化兜底(2026-09-07 方案B):worker 生成/读档链已在源头净化,此处兜
     //  主线程 fallback 路径(生成 fallback/导入直进)——三路径统一「进世界前无幽灵」
     try {
@@ -9342,7 +9348,11 @@ export class Game implements GameHooks {
     //      放置于昼夜事件块后 = 与 vanilla 同拍语义（CheckNight 与清算同 tick）；
     //      逐 tick 检查 = 原版 UpdateNPCs 每拍门同形。hurt force 通道 = StrikeNPC
     //      全链不查无敌帧/dontTakeDamage 的既有同形注（TownNPC.hurt ★C1）----
-    if (w.flags.afterPartyOfDoom && !partyIsUp(this.partyState)) {
+    // ★IIIII223 F-7：netMode!=1 显式门（Main.cs:18109 `netMode != 1 &&`——清算为
+    //  单机/服务器权威域,客户端不跑。JS 拓扑访客 TownNPC=Enemy 傀儡 instanceof 恒假
+    //  =击杀循环天然 no-op,但六旗复位在访客本地照跑（flags 不同步无存档面）——补门
+    //  对齐「fixedUpdate 即权威域」主张,219 批 F-7）
+    if ((!this.net || this.net.policy.isHost) && w.flags.afterPartyOfDoom && !partyIsUp(this.partyState)) {
       const DOOM_EXEMPT = new Set<number>([37, 453, 368, 680, 20]);   // :18114 豁免型表
       for (const n of this.entities.npcs) {
         if (!(n instanceof TownNPC) || n.dead) continue;
@@ -19450,7 +19460,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  4 火叶草-雨∨云量（:66677 Main.raining || Main.cloudAlpha > 0f——天将雨未雨
    *  云量已聚时同样可收） / 5 火焰花-15:45 后且（雨中须地下:y>worldSurface;remix
    *  世界改深度带 y<maxTilesY-350,:66684-66688）。2 闪根草、6 颠茄无时辰门（仅开花
-   *  掉种）。Main.time>40500 → timeOfDay > 15.75/24 */
+   *  掉种）。Main.time>40500 → Clock.vanillaMainTime(timeOfDay) > 40500（分段昼内
+   *  ticks 口径,★IIIII220:勿用绝对钟面 15.75/24 直比——夜里 19:30-24:00 段会误判收获） */
   private isAlchemyPlantHarvestable(style: number, y: number): boolean {
     const c = this.world.clock;
     const raining = !!this.world.weather?.raining;
@@ -19463,7 +19474,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (style === 5) {
       let flag = y > this.world.groundLevel;
       if (this.world.seedFlags?.remix) flag = y < this.world.store.h - 350;
-      if ((!raining || flag) && c.timeOfDay > 15.75 / 24) return true;
+      // ★IIIII220：时基口径修正——原版 Main.time 是**分段**钟（昼 4:30AM 起归零 0..54000、
+      //   夜 7:30PM 起归零 0..32400），`Main.time > 40500`（WorldGen.cs:66689,1457）在
+      //   夜间恒假（32400<40500）→ 火焰花收获窗 = 仅昼 15:45-19:30。旧 `timeOfDay >
+      //   15.75/24` 是绝对钟面刻度比较，把夜晚 19:30-24:00 段也判收获（夜 timeOfDay
+      //   ≥0.8125 恒 >0.65625）→ 夜里成熟火焰花可采收/掉种（渲染侧 WindSway ENV.mainTime
+      //   一直是分段口径无此泄,本仓内双口径曾不一致）。统一走 Clock.vanillaMainTime。
+      if ((!raining || flag) && Clock.vanillaMainTime(c.timeOfDay) > 40500) return true;
     }
     return false;
   }
@@ -30727,7 +30744,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
     if (picked.vanillaId === 453) {
       if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant')) return;
-      const sm = new TownNPC('skeleton_merchant', this.vanillaSpawner.currentSpawnX * TILE + 8, (this.vanillaSpawner.currentSpawnY + 1) * TILE);
+      // SW-BJ37 2026-09-08：落位 Bottom = spawnTileY*16 = 落脚实心格【顶边】
+      //  （原版 :5009 SpawnNPC(spawnTileX*16+8, spawnTileY*16, 453) → NewNPC :81594
+      //  `Bottom=(X,Y)`;TownNPC 构造器 y 参 = bottom）。旧版 +1 格 = 底边落在实心格
+      //  底边 → 出生即嵌入地面格一整行 16px（同游商嵌地根因,一并修正）
+      const sm = new TownNPC('skeleton_merchant', this.vanillaSpawner.currentSpawnX * TILE + 8, this.vanillaSpawner.currentSpawnY * TILE);
       this.entities.add(sm, 'npcs');
       return;
     }
@@ -30826,11 +30847,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const yy = pty + dy;
       if (yy < 2 || yy > st.h - 3) continue;
       const dry = st.liquid[st.idx(ptx, yy)] <= 40 && st.liquid[st.idx(ptx, yy - 1)] <= 40;
-      const clear = !st.isSolid(ptx, yy) && !st.isSolid(ptx, yy - 1) && dry;
-      const ground = st.isSolid(ptx, yy + 1) || st.isSolid(ptx, yy + 2);
+      // SW-BJ37 2026-09-08：净空/地面门统一原版 tileSolid 静态表语义（spawnTileSolid）
+      // ——平台九件套原版 tileSolid=true：净空窗内有平台格=拒（CanSpawnInTile :5431）、
+      // 平台格可作地面（FindSpawnTile :991 扫描止于平台）。spawner 侧已同谓词对齐
+      // （平台落点解传到这里后,裸 isSolid 会丢"站平台顶"解 → 掉到平台下方）
+      const clear = !spawnTileSolid(st, ptx, yy) && !spawnTileSolid(st, ptx, yy - 1) && dry;
+      const ground = spawnTileSolid(st, ptx, yy + 1) || spawnTileSolid(st, ptx, yy + 2);
       const flying = picked.def.flying;
       if (flying) {
-        if (!st.isSolid(ptx, yy) && dry) { spawnY = yy; break; }
+        if (!spawnTileSolid(st, ptx, yy) && dry) { spawnY = yy; break; }
       } else if (clear && ground) {
         spawnY = yy; break;
       }
@@ -31485,8 +31510,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return this.runQuickFindHome(n, oldHome.x, oldHome.y);
   }
 
-  /** 绑缚 NPC 触碰解救（原版 AI_007 玩家接触 bound → 转正；右键解救保留为便捷兜底）：
-   *  玩家 AABB 与 bound TownNPC 相交即 freeBoundNpc（534 税务官例外——需净化粉）。 */
+  /** 绑缚 NPC 触碰解救（★SW-BJ31 2026-09-08 注释勘误+近似登记：1457 原版解救唯一
+   *  路径 = 玩家 talkNPC（AI() aiStyle0 头 NPC.cs:19885-19909
+   *  AI_000_TransformBoundNPC :45371），【无】"玩家接触即转正"路径——旧注"原版
+   *  AI_007 玩家接触 bound → 转正"系误锚。触碰解救为本仓近似（UX 便捷,含 534
+   *  税务官净化粉例外 NPC.cs:13651-13655 同位），行为面差异已登记
+   *  spawn-parity-gaps.md；右键对话解救 talkToNearbyNpc 与原版 talkNPC 同义 */
   private boundTouchCheck(): void {
     const p = this.player;
     if (p.dead) return;
@@ -34823,23 +34852,128 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const others = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead
       && !['old_man', 'skeleton_merchant', 'travelling_merchant'].includes((n as TownNPC).npcKey));
     if (others.length < 2) return;                                // 需 ≥2 名城镇 NPC
-    const housed = others.filter((n) => (n as TownNPC).home);
-    const src = housed.length ? housed : others;
-    const anchor = src[Math.floor(Math.random() * src.length)] as TownNPC;
-    const hx = anchor.home ? anchor.home.x : Math.floor(anchor.cx / TILE);
-    const hy = anchor.home ? anchor.home.y : Math.floor(anchor.cy / TILE);
-    // 锚点旁 ±(30..80) 列找落脚地（同流浪生成锚定逻辑）
+    // ---- SW-BJ37 2026-09-08：落位段按 WorldGen.SpawnTravelNPC（WorldGen.cs:5188-5327）
+    //  1:1 重写。旧版 = 锚旁 ±(30..80) 列随机单列向下找首个实心格（①无上方净空门——
+    //  实心体内 1-2 格窄缝即整只嵌入【用户实报游商嵌岩石根因】;②Bottom 传 (ay+1)*TILE
+    //  = 地面格底边 → 开阔地也嵌地 16px【TownNPC 构造 y 参=bottom,NPC.cs NewNPC:81594
+    //  `Bottom=(X,Y)` 同语义,原版 :5314 落 num8*16=地面格顶边】;③homeless 兜底锚支
+    //  原版不可达【TownManager.HasRoom 本仓无房位面,Housing.ts:1111】）。
+    // 锚池：有房 townNPC 的 homeTile（WorldGen.cs:5191-5200 `!homeless`——homeless
+    //  支 = homeless && TownManager.HasRoom（:5206-5216）本仓无 TownManager 房位面
+    //  = 不可达;池空 → return 不刷（:5201-5217 num==0）。home.y=站立格 →
+    //  homeTileY 口径的脚下地面格 = home.y+1（Housing.ts:863 bestY=地板行→站立行 y-1）
+    const housed = others.filter((n) => (n as TownNPC).home) as TownNPC[];
+    if (housed.length === 0) return;
+    const anchor = housed[Math.floor(Math.random() * housed.length)];
+    const bestX0 = anchor.home!.x;
+    const bestY = anchor.home!.y + 1;                             // 脚下地面格（homeTileY 口径）
     const st = w.store;
-    const ax = hx + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
-    if (ax < 3 || ax > st.w - 4) return;
-    let ay = Math.max(4, hy - 20);
-    const limit = Math.min(st.h - 3, hy + 20);
-    while (ay < limit && !st.isSolid(ax, ay)) ay++;
-    if (ay >= limit) return;
-    const npc = new TownNPC('travelling_merchant', ax * TILE + 8, (ay + 1) * TILE);
+    // ---- 站立柱有效判定（WorldGen.cs:5231 字面）：SolidTile(i,j)（:70650 active&&
+    //  tileSolid&&!tileSolidTop&&!halfBrick&&slope==0&&!inActive）|| tileSolidTop[type]
+    //  （静态表直读 type,无 active 门——VANILLA_TILE_SOLID_TOP 照抄）,且上方 3 格
+    //  `!active() || !tileSolid[type] || tileSolidTop[type]`（平台/家具自由,实心阻挡,
+    //  致动实心 active() 纯位仍真 → 阻挡）——1-2 格窄缝/实心体内列全部无效。
+    const standable = (x: number, y: number): boolean => {
+      const i = st.idx(x, y);
+      const tp = st.type[i];
+      return (worldSolidTile(st, x, y) || VANILLA_TILE_SOLID_TOP.has(tp))
+        && (!st.hasTile(x, y - 1) || !vanillaTileSolidPure(st.type[st.idx(x, y - 1)])
+          || VANILLA_TILE_SOLID_TOP.has(st.type[st.idx(x, y - 1)]))
+        && (!st.hasTile(x, y - 2) || !vanillaTileSolidPure(st.type[st.idx(x, y - 2)])
+          || VANILLA_TILE_SOLID_TOP.has(st.type[st.idx(x, y - 2)]))
+        && (!st.hasTile(x, y - 3) || !vanillaTileSolidPure(st.type[st.idx(x, y - 3)])
+          || VANILLA_TILE_SOLID_TOP.has(st.type[st.idx(x, y - 3)]));
+    };
+    // ---- 近家横向扫描 ±10 列（:5231-5239）：minValue=左侧最远有效列（while 从锚列起,
+    //  锚列无效则不进循环=minValue 保持锚列）、num3=右侧最远有效列（for 同款）
+    let minValue = bestX0;
+    let num3 = bestX0;
+    for (let x = bestX0 - 1; x > bestX0 - 10; x--) {
+      if (x < 0 || x >= st.w || !standable(x, bestY)) break;
+      minValue = x;
+    }
+    for (let x = bestX0; x < bestX0 + 10; x++) {
+      if (x < 0 || x >= st.w || !standable(x, bestY)) break;
+      num3 = x;
+    }
+    // ---- 随机选列（:5240-5256）：Next(minValue,num3+1);前 20 掷要求偏离锚列 ±1 之外,
+    //  后 10 掷只要 !=锚列;30 掷全空 → 保持锚列
+    let bestX = bestX0;
+    for (let m = 0; m < 30; m++) {
+      const pick = minValue + Math.floor(Math.random() * (num3 - minValue + 1));
+      if (m < 20) {
+        if (pick < bestX0 - 1 || pick > bestX0 + 1) { bestX = pick; break; }
+      } else if (pick !== bestX0) { bestX = pick; break; }
+    }
+    // ---- 落点（:5257-5313）：num7=num8 初值 = 随机选列后的 (bestX, bestY)；螺旋支
+    //  仅锚在地表线之上时跑（:5260 `!(num8 > Main.worldSurface)`）——锚在地下直接落
+    //  近家支（站立柱门已保证净空）。★num7/num8 是方法级变量外泄语义（原版 C# 同名
+    //  局部直覆写：num7 每 side 轮覆写 :5266、num8 每 y 迭代覆写 :5281——螺旋全程
+    //  失败时落在最后尝试位,原版字面照抄）
+    let sx = bestX;
+    let sy = bestY;
+    if (!(bestY > w.groundLevel)) {
+      let flag = false;
+      for (let n = 20; n < 500 && !flag; n++) {
+        for (let side = 0; side < 2 && !flag; side++) {
+          sx = side !== 0 ? bestX - n * 2 : bestX + n * 2;      // :5266
+          if (sx <= 10 || sx >= st.w - 10) continue;            // :5267 `num7>10 && <maxTilesX-10`
+          let y0 = bestY - n;
+          if (y0 < 10) y0 = 10;                                 // :5271-5274
+          let y1 = bestY + n;
+          if (y1 > w.groundLevel) y1 = w.groundLevel;           // :5275-5278 clamp worldSurface
+          for (let y = y0; y < y1; y++) {                       // :5279 列内向下找首个实心格
+            sy = y;                                             // :5281 num8 逐迭代覆写
+            if (!spawnTileSolid(st, sx, sy)) continue;          // :5282 nactive()&&tileSolid
+            // :5286 上 3 格无液体（任何液体都拒）+ SolidTiles(sx-1,sx+1,sy-3,sy-1)
+            //  3 宽×3 高净空（Collision.cs:3494 逐格 = solidTilesCell,双闭区间;
+            //  越界 = true 拒 :3470-3485,endY>=maxTilesY-40 同）
+            if (st.liquid[st.idx(sx, sy - 3)] !== 0 || st.liquid[st.idx(sx, sy - 2)] !== 0
+              || st.liquid[st.idx(sx, sy - 1)] !== 0) break;
+            let blocked = sx - 1 < 0 || sx + 1 >= st.w || sy - 3 < 0 || sy - 1 >= st.h - 40;
+            for (let dx = -1; dx <= 1 && !blocked; dx++) {
+              for (let dy = -3; dy <= -1; dy++) {
+                if (solidTilesCell(st, sx + dx, sy + dy)) { blocked = true; break; }
+              }
+            }
+            if (blocked) break;
+            flag = true;
+            // :5291-5299 玩家屏盒：Rectangle(sx*16+8-sWidth/2-safeRangeX, sy*16+8-sHeight/2
+            //  -safeRangeY, sWidth+safeRangeX*2, sHeight+safeRangeY*2) vs 玩家 position
+            //  矩形 Intersects（任一玩家在场内 → flag=false 本列弃）。远端玩家盒 = 原版
+            //  恒定 20×42（net.players 的 q.x/q.y 为左上,30717 行注入中心时 +10/+21）
+            const rx = sx * TILE + 8 - NPC_SCREEN_HALF_X - NPC_SAFE_RANGE_X;
+            const ry = sy * TILE + 8 - NPC_SCREEN_HALF_Y - NPC_SAFE_RANGE_Y;
+            const rw = NPC_SCREEN_HALF_X * 2 + NPC_SAFE_RANGE_X * 2;
+            const rh = NPC_SCREEN_HALF_Y * 2 + NPC_SAFE_RANGE_Y * 2;
+            const pl = this.player;
+            if (pl.x < rx + rw && pl.x + pl.w > rx && pl.y < ry + rh && pl.y + pl.h > ry) {
+              flag = false;
+            } else {
+              for (const q of (this.net?.active ? this.net.players.values() : [])) {
+                if (!q.active) continue;
+                if (q.x < rx + rw && q.x + 20 > rx && q.y < ry + rh && q.y + 42 > ry) {
+                  flag = false;
+                  break;
+                }
+              }
+            }
+            break;                                              // :5300 首个实心格处理完即止
+          }
+        }
+      }
+    }
+    // ---- 落位（:5314-5327）：NewNPC(sx*16, sy*16, 368) → Bottom=(sx*16, sy*16)
+    //  （X 不加 8!身体跨 sx-1/sx 两列,与原版 :5314 逐字）;homeTile=锚原值（未随机化
+    //  的 bestX0/bestY——homeless NPC 首落地锚投影 anchorTile,TownNPC.ts:1098）、
+    //  direction 朝家（:5318-5325 num7<bestX→1 / num7>bestX→-1）
+    const npc = new TownNPC('travelling_merchant', sx * TILE, sy * TILE);
+    npc.anchorTile = { x: bestX0, y: bestY };
+    if (sx < bestX0) npc.facing = 1;
+    else if (sx > bestX0) npc.facing = -1;
     this.entities.add(npc, 'npcs');
-    this.travelStock = this.buildTravelStock();                   // SetupTravelShop
-    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);
+    this.travelStock = this.buildTravelStock();                   // SetupTravelShop :5185
+    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);  // :5327
   }
 
   /** 旅行商人当期股票（Chest.SetupTravelShop :1241-1321 结构 1:1）：
@@ -42321,6 +42455,18 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       if (key) {
         const left = this.player.inv.add(ITEM_BY_KEY[key]!, stack);
         if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key, left, 0, -2);
+        // SW-BJ36 2026-09-08：渔获拾取飘名（用户实报"钓上东西没有拾取提示"）——原版
+        // GiveItemToPlayer(PRJ57:54904) → QuickSpawnItem(PLR57:7186) → GetOrDropItem(:7197)
+        // 内联 GetItem(GetItemSettings.PickupItemFromWorld,GetItemSettings.cs:13 NoText=false)，
+        // 入包成功即 PopupText.NewText(PopupTextContext.RegularItemPickup, newItem, base.Center,
+        // 入包数)（GetItem_FillIntoOccupiedSlot :39810/:39825、GetItem_FillEmptyInventorySlot
+        // :39876、FillAmmo :39592/:39606——picked=实际入包数,多槽逐弹经 PopupText 同名合并
+        // :202-247 合成一条）。溢出余量走 RequestNewItem(:7202)落为掉落——生成时【不】飘，
+        // 后续拾取时才飘（本仓 ItemDrop.ts:273/:280 同源）；picked=0 全溢出不飘 = 原版同相。
+        // 一刀并额 picked=stack-left ≙ 原版逐槽弹+同名合并（showPickupLabel 合并支 :39323-39343
+        // 语义等价）。任务鱼/宝箱/垃圾件同一 QuickSpawnItem 面,无专属文案（PopupText.NewText
+        // 调用点全表核查:仅 SonarAlert/RegularItemPickup/ItemPickupToVoidContainer/ItemReforge）
+        if (left < stack) this.showPickupLabel(key, stack - left);
       }
       this.cb.onInventoryChanged?.();
     } else if (bobber.catchEnemy > 0) {

@@ -35,6 +35,64 @@ const MOON_FRAME_W = 50;
  *  ——用户实报"只有太阳在 logo 区(≈屏顶中央)才抓得到"即此因,2026-08-27 对齐） */
 const DAY_T0 = 0.1875, DAY_T1 = 0.8125;
 
+// ───────────────────────── ★IIIII218 生成屏 logo 动效（vanilla 1:1）─────────────────────────
+/** Main.logo* 六字段（:2331-2342；初值逐字）——纯状态机便于单测 */
+export interface LogoDynamicsState {
+  rotation: number; rotationDirection: number; rotationSpeed: number;
+  scale: number; scaleDirection: number; scaleSpeed: number;
+}
+export const LOGO_STATE_INITIAL: LogoDynamicsState = {
+  rotation: 0, rotationDirection: -1, rotationSpeed: 1,
+  scale: 1, scaleDirection: 1, scaleSpeed: 1,
+};
+
+/** 一步 60fps 帧（=1 原版帧）：
+ *  ① Update 复位点 :17292-17298（`!gameMenu || |speed|>1000` → rotation/speed=0,scale=1；
+ *     菜单恒 gameMenu=true → 仅速度支可达）；
+ *  ② DrawMenu 分支 :49060-49132（remix 倒置摆动 > drunk&&!notTheBees 自旋缩没 > else=返回
+ *     false 不接管——标题/普通籽维持既有 CSS 摆动）。
+ *  返回 true = 特殊分支消费了本帧（应把 rotation/scale 写上 DOM）。 */
+export function logoDynamicsStep(
+  s: LogoDynamicsState,
+  f: { remixWorldGen: boolean; drunkWorldGen: boolean; notTheBees: boolean } | null,
+): boolean {
+  // ① Update :17292-17298
+  if (Math.abs(s.rotationSpeed) > 1000) {
+    s.rotation = 0;
+    s.rotationSpeed = 0;
+    s.scale = 1;
+  }
+  if (!f) return false;
+  if (f.remixWorldGen) {
+    // ②-remix DrawMenu :49060-49094
+    s.rotation += s.rotationSpeed * 4e-5;
+    if (s.rotation < 3.04) {
+      s.rotation += s.rotationSpeed * 0.0016;
+      if (s.rotationSpeed < 0) s.rotationSpeed = 0;
+    }
+    if (s.rotation > 3.22) s.rotationDirection = -1;
+    else if (s.rotation < 3.06) s.rotationDirection = 1;
+    if (s.rotationSpeed < 20 && s.rotationDirection === 1) s.rotationSpeed++;
+    else if (s.rotationSpeed > -20 && s.rotationDirection === -1) s.rotationSpeed--;
+    s.scale += s.scaleSpeed * 9e-5;
+    if (s.scale > 1) s.scaleDirection = -1;
+    else if (s.scale < 0.9) s.scaleDirection = 1;
+    if (s.scaleSpeed < 50 && s.scaleDirection === 1) s.scaleSpeed++;
+    else if (s.scaleSpeed > -50 && s.scaleDirection === -1) s.scaleSpeed--;
+    return true;
+  }
+  if (f.drunkWorldGen && !f.notTheBees) {
+    // ②-drunk DrawMenu :49095-49105（:49079 转速 ±1500/帧;:49090 scale −0.05/帧缩没）
+    s.rotation += s.rotationSpeed * 4e-6;
+    if (s.rotationSpeed > 0) s.rotationSpeed += 1500;
+    else s.rotationSpeed -= 1500;
+    s.scale -= 0.05;
+    if (s.scale < 0) s.scale = 0;
+    return true;
+  }
+  return false;   // else 支 = CSS 摆动照旧
+}
+
 export interface TitleMenuFlow {
   onSinglePlayer(): void;
   onSettings(): void;
@@ -146,13 +204,8 @@ export class TitleMenu {
    *  vanilla：动效分支判 WorldGen.remixWorldGen / drunkWorldGen（生成期旗），标题屏
    *  走 else 支（本仓=既有 CSS 摆动近似，不换脸）；生成结束进世界 TitleMenu 随之销毁 */
   private genFlags: GenScreenSeedFlags | null = null;
-  /** Main.logo* 字段（:2331-2342 初值逐字：direction=-1/speed=1/scale=1/scaleDir=1/scaleSpeed=1） */
-  private logoRotation = 0;
-  private logoRotationDirection = -1;
-  private logoRotationSpeed = 1;
-  private logoScale = 1;
-  private logoScaleDirection = 1;
-  private logoScaleSpeed = 1;
+  /** Main.logo* 状态（:2331-2342 初值逐字：direction=-1/speed=1/scale=1/scaleDir=1/scaleSpeed=1） */
+  private logoState: LogoDynamicsState = { ...LOGO_STATE_INITIAL };
   private logoFrameAcc = 0;              // 定帧累积器（动效常量按 60fps 帧计）
   /** boulderLogo（:1218 初值 false；:49177-49181 noTrapsWorld 置位【无复位】=会话闩；
    *  SetTitle :6532-6534 1/200 随机在构造器已实现） */
@@ -171,66 +224,34 @@ export class TitleMenu {
     }
   }
 
-  /** logo 图源（昼/夜对）：boulderLogo → Logo5/Logo6（:49136-49150），否则 Logo/Logo2 */
+  /** logo 图源（昼/夜对）：boulderLogo → Logo5/Logo6（:49136-49150），否则 Logo/Logo2。
+   *  ★巨石对是 Logo5/Logo6 独立命名（非 prefix+2——曾误拼 Logo52.png=naturalWidth 0,
+   *  生成屏 logo 空框,2026-09-08 探针实拍抓出） */
   private applyLogoImages(): void {
     const day = this.root.querySelector('.logo-day') as HTMLImageElement | null;
     const night = this.root.querySelector('.logo-night') as HTMLImageElement | null;
     if (!day || !night) return;
-    const prefix = this.boulderLogo ? 'Logo5' : 'Logo';
-    day.src = `sprites/vanilla-ui/${prefix}.png`;
-    night.src = `sprites/vanilla-ui/${prefix}2.png`;
+    const [dayName, nightName] = this.boulderLogo ? ['Logo5', 'Logo6'] : ['Logo', 'Logo2'];
+    day.src = `sprites/vanilla-ui/${dayName}.png`;
+    night.src = `sprites/vanilla-ui/${nightName}.png`;
   }
 
-  /** 一步 60fps 帧动效（Main.cs Update :17292 复位点 + DrawMenu :49060-49132 分支逐字）。
-   *  remix 支=倒置摆动（rotation 3.04..3.22rad≈174°..184°、scale 0.9..1.0 呼吸）；
-   *  drunk&&!notTheBees 支=转速 ±1500/帧 + scale −0.05/帧——★1457/1458 Update 复位
-   *  `|speed|>1000 → rotation/speed=0, scale=1` 每帧在其先跑 ⇒ 该支净表现=定格在
-   *  scale 0.95 / rotation −0.006rad（1405 无此复位=真自旋缩没,1457 起被复位门中和——
-   *  以反编译终态为准,两处逐字后净效自动同构）；else 支不接管（CSS 摆动照旧）。
-   *  昼夜交叉淡化（:49197-49222）：remix 强制夜面（`dayTime && !remixWorldGen`）。 */
+  /** 一步 60fps 帧动效（Main.cs Update :17292 复位点 + DrawMenu :49060-49132 分支逐字，
+   *  纯函数 logoDynamicsStep 消费）。remix 支=倒置摆动（rotation 3.04..3.22rad≈174°..184°、
+   *  scale 0.9..1.0 呼吸）；drunk&&!notTheBees 支=转速 ±1500/帧 + scale −0.05/帧——
+   *  ★1457/1458 Update 复位 `|speed|>1000 → rotation/speed=0, scale=1` 每帧在其先跑
+   *  ⇒ 该支净表现=定格在 scale 0.95 / rotation −0.006rad（1405 无此复位=真自旋缩没,
+   *  1457 起被复位门中和——以反编译终态为准,两处逐字后净效自动同构）；else 支不接管
+   *  （CSS 摆动照旧）。昼夜交叉淡化（:49197-49222）：remix 强制夜面（见 startLogoFade）。 */
   private logoStep(): void {
-    // Update :17292-17298（gameMenu 恒真 → 仅速度复位支可达）
-    if (Math.abs(this.logoRotationSpeed) > 1000) {
-      this.logoRotation = 0;
-      this.logoRotationSpeed = 0;
-      this.logoScale = 1;
-    }
-    const f = this.genFlags;
-    if (!f) return;
-    if (f.remixWorldGen) {
-      // DrawMenu :49060-49094 remixWorldGen 支
-      this.logoRotation += this.logoRotationSpeed * 4e-5;
-      if (this.logoRotation < 3.04) {
-        this.logoRotation += this.logoRotationSpeed * 0.0016;
-        if (this.logoRotationSpeed < 0) this.logoRotationSpeed = 0;
-      }
-      if (this.logoRotation > 3.22) this.logoRotationDirection = -1;
-      else if (this.logoRotation < 3.06) this.logoRotationDirection = 1;
-      if (this.logoRotationSpeed < 20 && this.logoRotationDirection === 1) this.logoRotationSpeed++;
-      else if (this.logoRotationSpeed > -20 && this.logoRotationDirection === -1) this.logoRotationSpeed--;
-      this.logoScale += this.logoScaleSpeed * 9e-5;
-      if (this.logoScale > 1) this.logoScaleDirection = -1;
-      else if (this.logoScale < 0.9) this.logoScaleDirection = 1;
-      if (this.logoScaleSpeed < 50 && this.logoScaleDirection === 1) this.logoScaleSpeed++;
-      else if (this.logoScaleSpeed > -50 && this.logoScaleDirection === -1) this.logoScaleSpeed--;
-    } else if (f.drunkWorldGen && !f.notTheBees) {
-      // DrawMenu :49095-49105 drunkWorldGen 支（:49079 转速±1500/:49090 缩没）
-      this.logoRotation += this.logoRotationSpeed * 4e-6;
-      if (this.logoRotationSpeed > 0) this.logoRotationSpeed += 1500;
-      else this.logoRotationSpeed -= 1500;
-      this.logoScale -= 0.05;
-      if (this.logoScale < 0) this.logoScale = 0;
-    } else {
-      return; // else 支 = CSS 摆动（标题/普通籽既有实现,不接管）
-    }
-    this.applyLogoTransform();
+    if (logoDynamicsStep(this.logoState, this.genFlags)) this.applyLogoTransform();
   }
 
   private applyLogoTransform(): void {
     const el = this.root.querySelector('.sw-title-logo') as HTMLElement | null;
     if (!el) return;
     el.style.animation = 'none';
-    el.style.transform = `rotate(${this.logoRotation}rad) scale(${this.logoScale})`;
+    el.style.transform = `rotate(${this.logoState.rotation}rad) scale(${this.logoState.scale})`;
   }
 
   constructor(parent: HTMLElement, private flow: TitleMenuFlow) {

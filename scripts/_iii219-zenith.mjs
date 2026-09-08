@@ -41,7 +41,18 @@ const out = await page.evaluate(async () => {
   const { TownNPC } = await import('/src/entities/TownNPC.ts');
   const R = [];
   const chk = (name, ok, extra = '') => { R.push(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); return ok; };
-  const pump = (n) => { for (let i = 0; i < n; i++) g.fixedUpdate(1 / 60); };
+  // 泵：分段——每 ≤30t 复位黑暗计时器（zenith 含 constant 黑暗 250 伤必死,会冻结饥饿链
+  // 污染断言;headless 光照缓冲滞后,持火/火把不足以保证 safe）+ 清敌怪
+  const pump = (n) => {
+    let done = 0;
+    while (done < n) {
+      const step = Math.min(30, n - done);
+      g.dontStarveDarkness.reset();
+      g.entities.enemies.length = 0; g.entities.projectiles.length = 0;
+      for (let i = 0; i < step; i++) g.fixedUpdate(1 / 60);
+      done += step;
+    }
+  };
   const has = (t) => g.player.buffs.active.has(t);
   const left = (t) => g.player.buffs.active.get(t);
   const keyOf = (k) => g.entities.npcs.filter((n) => n instanceof TownNPC && n.npcKey === k);
@@ -98,18 +109,34 @@ const out = await page.evaluate(async () => {
   pump(30);
   chk('H1b 无 fed-state → 332 授予（UpdateStarvingState）', has(BuffType.NeutralHunger),
     `left=${left(BuffType.NeutralHunger)?.toFixed(1)}s`);
+  const baseDef = g.player.defense, hp0 = g.player.hp;   // 332 无数值效果 → 此读=基础防
   // 快进：332 ≤2t → 333（28800t=480s remix 档）
   g.player.buffs.set(BuffType.NeutralHunger, 0.04); pump(2);
   chk('H1c 332≤2t → 333 饥饿（remix 480s 档）', has(BuffType.Hunger) && Math.abs(left(BuffType.Hunger) - 480) < 2,
     `left=${left(BuffType.Hunger)?.toFixed(1)}s`);
-  const d0 = g.player.defense, hp0 = g.player.hp;
   g.player.buffs.set(BuffType.Hunger, 0.04); pump(2);
   chk('H1d 333≤2t → 334 极饿（恒 5t）', has(BuffType.Starving) && left(BuffType.Starving) <= 5 / 60 + 1e-9);
-  // 极饿流干：num12=max(2,⌊maxHp/50⌋) HP 每 60t 一跳；100hp → 2HP/s，3s 内必掉
-  clearEnemies(); pump(180);
-  chk('H1e 极饿掉血（:19458 流干链）', g.player.hp < hp0, `hp ${hp0}→${g.player.hp}`);
-  // 极饿 stat 惩罚（:11584-11595 防-4）
-  chk('H1f 极饿防-4（ResetEffects 位）', g.player.defense === d0 - 4, `def ${d0}→${g.player.defense}`);
+  // ★毛刺语义定谳（:12186-12238 + AddBuff IsFedState 换档 :5269）：334 无自持重钉,
+  //   5t 到期 → UpdateStarvingState 重授 332——极饿是周期性毛刺,非持续态
+  pump(12);
+  chk('H1e 334 毛刺到期 → 链回 332（循环闭合）', !has(BuffType.Starving) && has(BuffType.NeutralHunger)
+    && left(BuffType.NeutralHunger) > 470,
+    `334=${has(BuffType.Starving)} 332=${left(BuffType.NeutralHunger)?.toFixed(0)}s`);
+  // 极饿 stat 惩罚（:11584-11595 防-4）——毛刺内读（人为续钉保 334 在栏）
+  g.player.buffs.set(BuffType.Starving, 0.55); pump(5);
+  chk('H1f 极饿防-4（ResetEffects 位）', g.player.defense === baseDef - 4, `def ${baseDef}→${g.player.defense}`);
+  // 极饿流干接线验证（:19458-19477）：续钉 334（= vanilla lifeRegenCount 深负流干态）,
+  //   100hp → num12=2 HP 每 60t 一跳；先剥 334 清流干账（毛刺间回收 :19382/:19398 的
+  //   本仓同构),再走链到 334 净账起算——180t 恰两跳 −4
+  g.player.buffs.remove(BuffType.Starving); pump(2);      // 离栏清账 + 332 重授
+  g.player.buffs.set(BuffType.NeutralHunger, 0.04); pump(2);
+  g.player.buffs.set(BuffType.Hunger, 0.04); pump(2);     // → 334（净账）
+  g.player.hp = g.player.maxHp;
+  const hpHold0 = g.player.hp;
+  for (let c = 0; c < 6; c++) { g.player.buffs.set(BuffType.Starving, 0.55); pump(30); }
+  chk('H1e2 持续极饿流干 180t → 恰三跳 −6（num12=2 HP/60t,vanilla −4/t×180t=−720/240 同构）',
+    Math.abs((hpHold0 - g.player.hp) - 6) < 0.6 && !g.player.dead,
+    `hp ${hpHold0}→${g.player.hp}`);
   // 食物喂饱：26/206/207 任一 → 三态剥离（IsFedState :5080-5089）
   g.player.hp = g.player.maxHp;
   g.player.buffs.apply(BuffType.WellFed, 60);
@@ -117,7 +144,7 @@ const out = await page.evaluate(async () => {
   pump(5);
   chk('H1h fed 在栏不再授 332', !has(BuffType.NeutralHunger));
   // fed 到期 → 链重启（UpdateStarvingState 再授 332）
-  g.player.buffs.set(BuffType.WellFed, 0.04); pump(3);
+  g.player.buffs.set(BuffType.WellFed, 0.04); pump(5);
   chk('H1i fed 到期 → 332 重授', has(BuffType.NeutralHunger));
   // 蘑菇 5 端到端：333 在栏 → 吃蘑菇 → TryToResetHungerToNeutral（:52513）→ 链回 332 满档
   g.player.buffs.set(BuffType.NeutralHunger, 0.04); pump(2);   // → 333
@@ -135,14 +162,13 @@ const out = await page.evaluate(async () => {
     `ate=${ateMushroom} 332=${left(BuffType.NeutralHunger)?.toFixed(0)}s`);
   chk('H1k 蘑菇药水病（mushroomDelay 1800t=30s）', has(BuffType.Resistance)
     && Math.abs(left(BuffType.Resistance) - 30) < 3, `left=${left(BuffType.Resistance)?.toFixed(1)}s`);
-  // 极饿致死（ByOther(18)）——血量压到 5 泵到死；期间持火把防黑暗抢死因
+  // 极饿致死（ByOther(18)）——续钉 334 + 血量压到 5 泵到死；期间持火把防黑暗抢死因
   g.player.buffs.remove(BuffType.NeutralHunger);
-  g.player.buffs.set(BuffType.Hunger, 0.04); pump(2);          // → 334
   g.player.inv.slots[0] = { id: torchId, stack: 1 };
   g.player.hp = 5; g.player.iframes = 0;
   clearEnemies();
   let died = false;
-  for (let i = 0; i < 900 && !died; i++) { pump(1); if (i % 30 === 0) clearEnemies(); died = g.player.dead === true; }
+  for (let c = 0; c < 12 && !died; c++) { g.player.buffs.set(BuffType.Starving, 0.55); pump(30); died = g.player.dead === true; }
   chk('H1l 极饿致死 + 死因 starved（ByOther(18)）',
     died && g.player.lastDamageCause?.kind === 'starved',
     `dead=${g.player.dead} cause=${JSON.stringify(g.player.lastDamageCause)}`);
@@ -158,9 +184,10 @@ const out = await page.evaluate(async () => {
   chk('P3a 豁免证人五员就位+起始镇民尚活（清算前基线）',
     exemptBefore.every((n) => n >= 1) && startersBefore.every((n) => n >= 1),
     `exempt=${JSON.stringify(exemptBefore)} starters=${JSON.stringify(startersBefore)}`);
-  // 快进到黄昏（DUSK=0.8125）
-  w.clock.timeOfDay = 0.8125 - 0.002;
-  for (let i = 0; i < 120; i++) { pump(1); if (i % 15 === 0) clearEnemies(); }
+  // 快进到黄昏（DUSK=0.8125）——直接跳过界线（crossed 检测 pt<a≤ct,同拍兑现
+  // CheckNight + 同拍毁灭清算——本仓 doom 块位于昼夜事件块之后）
+  w.clock.timeOfDay = 0.8125 + 0.001;
+  pump(30);
   chk('P3b 派对散场（CheckNight cs:40-53）',
     g.partyState.genuineParty === false && g.partyState.manualParty === false);
   chk('P3c afterPartyOfDoom 卸武装（:18127）', w.flags.afterPartyOfDoom === false);

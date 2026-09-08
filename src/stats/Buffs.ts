@@ -1184,6 +1184,13 @@ export class BuffState {
         heal -= hit;
       }
       if (dots < 0) this.dotChunkOut += -dots;
+    } else {
+      // ★IIIII219：极饿离栏清账——vanilla lifeRegenCount 在非极饿拍由自然回复正项
+      //   逐 tick 回收（:19382 lifeRegenCount += lifeRegen 无条件跑 + :19398-19408
+      //   ≥120 正项兑付,满血也照走），5t 极饿毛刺（UpdateHungerBuffs :11722 334 恒
+      //   5t 无自持重钉→毛刺后 UpdateStarvingState 重授 332）累计 −20≪−num13 永不
+      //   出伤；本仓累加器若跨毛刺结转会造 12 毛刺后凭空 −2HP 的净偏差 → 离栏即清。
+      this.starvingHitAccum = 0;
     }
     // 蜂蜜对冲（Player.cs:19212-19219：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
     // 对冲后钳回 ≤0）。原版按 tick 连续流量结算;本仓 DoT 分块弹出,按块发 +1 HP 会在

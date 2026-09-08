@@ -42,23 +42,25 @@ const rep = await page.evaluate(async () => {
     const i = st.idx(xx, yy); st.liquid[i] = 0; st.liquidType[i] = 0;
     if (st.flags[i]) st.setTile(xx, yy, 0);
   }
-  // 场:A= mature+深岩浆(>16) → 期 bloom;B= mature+浅岩浆(=10) → 期 保持 mature;
-  //     C= bloom+浅岩浆(=10) → 期 退回 mature;D= mature 干燥对照
-  const place = (dx, t, fx) => st.setTile(gx + dx, gy - 1, t, fx, 0);
+  // 场(植株=gy 行,正贴 floorY 地基;列间 1 宽灰烬隔墙 3 高,防液体互串):
+  //   A= mature+岩浆255 入株格 → 期 bloom;B= mature+岩浆10 → 期 保持 mature;
+  //   C= bloom+岩浆10 → 期 退回 mature;D= mature 干燥对照
+  //   ★vanilla LiquidCheck:1290 — 非水液体在【上方格】会 KillTile 下方 cut 族
+  //   (含 82/83/84) → 岩浆只能入株格自身,不可堆头上(原版岩浆淹没一格格进)
+  const place = (dx, t, fx) => st.setTile(gx + dx, gy, t, fx, 0);
   place(2, m83, 90); place(4, m83, 90); place(6, b84, 90); place(8, m83, 90);
+  for (const wx of [3, 5, 7]) for (let yy = gy - 2; yy <= gy; yy++) st.setTile(gx + wx, yy, TILE_BY_KEY['ash'], 0, 0);
   const lava = (dx, amt) => {
-    for (let yy = gy - 3; yy <= gy - 1; yy++) {
-      const i = st.idx(gx + dx, yy);
-      st.liquidType[i] = 2; st.liquid[i] = amt;
-    }
-    for (let yy = gy - 3; yy <= gy - 1; yy++) g.world.liquids?.addWater?.(gx + dx, yy);
+    const i = st.idx(gx + dx, gy);
+    st.liquidType[i] = 2; st.liquid[i] = amt;
+    g.liquid?.addWater?.(gx + dx, gy);
   };
   lava(2, 255); lava(4, 10); lava(6, 10);
   // 液体入列后跑 sim(游戏 fixedUpdate 自会 step;这里额外手动 step 几拍保险)
-  for (let k = 0; k < 40 && g.world.liquids?.step; k++) g.world.liquids.step();
+  for (let k = 0; k < 40 && g.liquid?.step; k++) g.liquid.step();
   await wait(2500);
-  for (let k = 0; k < 40 && g.world.liquids?.step; k++) g.world.liquids.step();
-  const rd = (dx) => { const i = st.idx(gx + dx, gy - 1); return { sheet: sheetOf(st.type[i]), fx: st.frameX[i], liquid: st.liquid[i] }; };
+  for (let k = 0; k < 40 && g.liquid?.step; k++) g.liquid.step();
+  const rd = (dx) => { const i = st.idx(gx + dx, gy); return { sheet: sheetOf(st.type[i]), fx: st.frameX[i], liquid: st.liquid[i] }; };
   const out = {
     garden,
     A_deepLava: { ...rd(2), expect: 's84(bloom)' },

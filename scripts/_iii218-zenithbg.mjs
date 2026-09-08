@@ -49,8 +49,9 @@ const sampleBg = () => page.evaluate(() => {
   const mbg = globalThis.__swMenuBg;
   let rot = null, scale = null;
   if (logo) {
-    const m = new DOMMatrixReadOnly(getComputedStyle(logo).transform === 'none' ? '' : getComputedStyle(logo).transform);
-    if (getComputedStyle(logo).transform !== 'none') {
+    const tf = getComputedStyle(logo).transform;
+    if (tf && tf !== 'none') {
+      const m = new DOMMatrixReadOnly(tf);
       scale = Math.hypot(m.a, m.b);
       rot = Math.atan2(m.b, m.a);
     }
@@ -148,13 +149,14 @@ let colorReport = null;
     const { TILE_DEFS } = await import(`/src/data/tiles.ts?t=${bust}`);
     const { vanillaTileMapColor, vanillaWallMapColor } = await import(`/src/data/vanillaMapColors.ts?t=${bust}`);
     // vanilla 独立复核公式（Terraria.Map/MapHelper.cs:1812-1863 逐行重抄,不 import 本仓实现）
-    const PAINT_RGB = { 24: [163, 116, 81], 10: [127, 66, 168], 12: [222, 153, 176], 5: [61, 112, 44], 7: [104, 167, 195] };
+    // PAINT=WorldGen.paintColor 逐字（24 深粉=12 粉/10 深紫;深层与浅层同 RGB）
+    const PAINT_RGB = { 24: [255, 0, 127], 10: [127, 0, 255], 12: [255, 0, 127], 5: [0, 255, 0], 7: [0, 255, 255] };
     const vMapColor = (base, ct) => {
       let n = base[0] / 255, n2 = base[1] / 255, n3 = base[2] / 255;
       if (n2 > n) { const t = n; n = n2; n2 = t; }
       if (n3 > n) { const t = n; n = n3; n3 = t; }
       const c = PAINT_RGB[ct] ?? [128, 128, 128];
-      return [Math.round(c[0] * n), Math.round(c[1] * n), Math.round(c[2] * n)];
+      return [Math.trunc(c[0] * n), Math.trunc(c[1] * n), Math.trunc(c[2] * n)];   // C# (byte) 强转=截断
     };
     const g = globalThis.__swGame;
     const world = g.world, st = world.store, mm = g.renderer.minimap;

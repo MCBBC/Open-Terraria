@@ -135,6 +135,13 @@ export class TownShot extends Entity {
   private lifeOverride?: number;
   /** 绘制 scale(SetDefaults;绘制尺寸 = 贴图原生 × scale,与判定盒解耦) */
   drawScale = 1;
+  /** ★SW-BJ33 2026-09-08：Projectile.npcProj 语义位——AI_007 域全部城镇自卫弹出膛
+   *  均 `npcProj = true; noDropItem = true`（NPC.cs:54903/:55175/:55325/:55490 族
+   *  逐发射支字面）。原版消费点①CutTiles 调用门 `!npcProj`（Projectile.cs:12516,
+   *  城镇弹不割草——旧中央通道缺此半边门=全域城镇弹过度砍草,本批补齐,见
+   *  EntityManager.update 剪枝位）;②掉落归属面本仓 resolveDrops 承载（noDropItem
+   *  不适用,登记）。玩家弹（Arrow 等）无此位=undefined → 原中央门行为不变 */
+  npcProj = true;
   /** 出世 life(MountShot 不调 super.fixedUpdate,age 用 life 差值推导) */
   private age0 = 600;
   /** 翻滚/自旋累积角(tumble/up20 后段/spin 模式) */

@@ -631,7 +631,7 @@ import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_D
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
-import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
+import { vanillaTileMapColor, vanillaTileMapColorOption, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG, VANILLA_WALL_COUNT, VANILLA_WALL_LOOKUP0 } from '../data/vanillaMapColors';
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
@@ -1829,9 +1829,12 @@ export interface DamageNumber {
   rotation?: number;
 }
 
-/** 小地图恒忽略油漆的墙集（MapHelper.GetWallType :1993-2005：21/88-93/168/241）。
- *  这些是自带渐变/特殊贴图的墙（天然/地牢分段墙族），原版在地图上不吃漆 */
-const MAP_WALL_NO_PAINT = new Set([21, 88, 89, 90, 91, 92, 93, 168, 241]);
+/** ★IIIII223 F-2：MAP_WALL_NO_PAINT(21/88-93/168/241) 整支废除——红队定谳该集实为
+ *  玻璃族 wallLookup=0 哨兵（vanilla 地图根本不画：MapHelper.cs Initialize :1737-1754
+ *  无 array4 条目 ⇒ wallLookup=0 ⇒ GetWallType baseType=0 ⇒ 落穿背景；:1993-2005 的
+ *  newColor=0 switch 系同域 belt-and-braces，非「不吃漆」语义）。哨兵集单源 =
+ *  vanillaMapColors.VANILLA_WALL_LOOKUP0（三路径同构落穿），落穿前置后墙漆分支对其
+ *  永不可达=死代码；墙漆豁免面 vanilla 本就为空（MapColor :1854 默认支无条件吃漆） */
 
 /** 小地图恒忽略油漆的 tile sheet（MapHelper.GetTileType :1965-1968：num==160 → newColor=0） */
 const MAP_TILE_NO_PAINT_SHEET = 160;
@@ -1923,7 +1926,8 @@ export class Minimap {
     const i = st.idx(x, y);
     const hex = (c: ReadonlyArray<number>): string => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
     // MapHelper.MapColor（:1812-1863）油漆换色：先取基础色，paint>0 时按漆调制。
-    // 豁免表：tile sheet 160 恒忽略漆（:1965-1968）；墙 21/88-93/168/241 恒忽略（:1993-2005）
+    // 豁免表：tile sheet 160 恒忽略漆（:1965-1968）；★IIIII223 F-2：墙漆豁免面废除
+    // （原 MAP_WALL_NO_PAINT 实为玻璃族 wallLookup=0 哨兵——落穿前置,漆分支不可达）
     const paintTile = (rgb: ReadonlyArray<number>): ReadonlyArray<number> => {
       const p = st.paint[i];
       const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
@@ -1932,7 +1936,7 @@ export class Minimap {
     };
     const paintWall = (rgb: ReadonlyArray<number>): ReadonlyArray<number> => {
       const p = st.paintWall[i];
-      if (p > 0 && !MAP_WALL_NO_PAINT.has(st.wall[i])) return mapPaintColor(true, [rgb[0], rgb[1], rgb[2]], p);
+      if (p > 0) return mapPaintColor(true, [rgb[0], rgb[1], rgb[2]], p);
       return rgb;
     };
     // 回声涂层块（invisibleBlock）：小地图按空气处理（MapHelper.GetTileType
@@ -1948,10 +1952,22 @@ export class Minimap {
       }
       const d = TILE_DEFS[st.type[i]];
       if (d?.vanilla?.sheet !== undefined) {
-        const vc = vanillaTileMapColor(d.vanilla.sheet);
+        // ★IIIII223 F-3：GetTileType baseType=0/换色残余臂（Terraria.Map/MapHelper.cs
+        //  :1949-1964，三路径同构）——51/697 蛛网 (x+y)%2==0 半隐 / 19 平台 frameY==864
+        //  底柱格 / 184 长苔 frameX/22==10 → 627 苔色（option=(x+y)%9 :2105-2108）
+        const sh = d.vanilla.sheet;
+        let vc = (sh === 184 && Math.floor(st.frameX[i] / 22) === 10)
+          ? vanillaTileMapColorOption(627, (x + y) % 9)
+          : vanillaTileMapColor(sh);
+        if (sh === 51 || sh === 697) { if ((x + y) % 2 === 0) vc = null; }
+        else if (sh === 19 && st.frameY[i] === 864) vc = null;
         if (vc) return hex(paintTile(vc));
+        // ★IIIII218 tileLookup=0 落穿（MapHelper.cs GetTileType :1936/:1961——原版
+        //  Initialize 无色表条目的 sheet（127/135/210/428/504/541）不上图,落穿
+        //  液体/墙/背景；与 MapColors.mapColor24 同构。神庙压力板=墙87漆色）
+      } else {
+        return d ? d.mapColor : '#808080';   // 自研 tile（无 vanilla 映射）保留兜底
       }
-      return d ? d.mapColor : '#808080';
     }
     // 液体四色（原版 array3：水9,61,191/岩浆253,32,3/蜂蜜254,194,20/微光161,127,255）
     if (st.liquid[i] > 32) {
@@ -1959,8 +1975,10 @@ export class Minimap {
       return hex(vanillaLiquidColor(lt >= 1 && lt <= 4 ? lt - 1 : 0));
     }
     // 回声涂层墙（invisibleWall）：小地图不显示（MapHelper.GetWallType
-    // `!tileCache.invisibleWall()` 门）；判定单源 coatHiddenWall
-    if (st.wall[i] !== 0 && !this.coatHiddenWall(i)) {
+    // `!tileCache.invisibleWall()` 门）；判定单源 coatHiddenWall。
+    // ★IIIII223 F-2：玻璃族 wallLookup=0 → 不上图落背景（vanilla GetWallType
+    // baseType=0 ⇒ CreateMapTile 背景支；哨兵单源 VANILLA_WALL_LOOKUP0）
+    if (st.wall[i] !== 0 && !this.coatHiddenWall(i) && !VANILLA_WALL_LOOKUP0.has(st.wall[i])) {
       const vc = vanillaWallMapColor(st.wall[i]);
       if (vc) return hex(paintWall(vc));
       const mc = WALL_DEFS[st.wall[i]]?.mapColor;
@@ -2033,17 +2051,33 @@ export class Minimap {
         const sheet = d.vanilla?.sheet;
         if (sheet !== undefined) {
           const vc = vanillaTileMapColor(sheet);
+          // ★IIIII218：原版无色表条目（tileLookup=0）→ 哨兵 0=不上图,fillBand 落穿
+          //  液体/墙/背景（MapHelper.cs GetTileType :1936/:1961）；else 原版色
           if (vc) { tiles[id] = rgb(vc); continue; }
+          tiles[id] = 0;
+          continue;
         }
         if (d.mapColor) tiles[id] = parse(d.mapColor);
       }
-      // 墙：vanilla id 直查原版表（墙注册表即原版 id 序）；回落 def.mapColor
+      // 墙：vanilla id 直查原版表（墙注册表即原版 id 序）；回落 def.mapColor。
+      // ★IIIII223 F-2：原版墙域（id<VANILLA_WALL_COUNT=367）内无色表条目=玻璃族
+      // wallLookup=0 → 哨兵 0=不上图（fillBand 落穿液体/背景，MapHelper.cs Initialize
+      // :1737-1754）；原版墙域外的自研墙保留 def.mapColor 兜底
       const walls = new Uint32Array(Math.max(64, WALL_DEFS.length));
       walls.fill(parse('#2E2E2E'));
       for (let id = 0; id < WALL_DEFS.length; id++) {
         const vc = vanillaWallMapColor(id);
         if (vc) { walls[id] = rgb(vc); continue; }
+        if (id < VANILLA_WALL_COUNT) { walls[id] = 0; continue; }
         if (WALL_DEFS[id]?.mapColor) walls[id] = parse(WALL_DEFS[id].mapColor);
+      }
+      // ★IIIII223 F-3：苔色 627 九档预包（GetTileBaseOption :2105-2108 option=(x+y)%9；
+      //  184 长苔 frameX/22==10 换色支直查——LUT 按内部 id 索引，627 无独立内部 id；
+      //  627 无条目时全 0 → 换色格落穿=vanilla tileLookup[627]=0 同语义）
+      const moss627 = new Uint32Array(9);
+      for (let o = 0; o < 9; o++) {
+        const c627 = vanillaTileMapColorOption(627, o);
+        if (c627) moss627[o] = rgb(c627);
       }
       // 液体四色（我们编码 1水2岩浆3蜂蜜4微光 → 原版索引 0/1/2/3）
       const liq = new Uint32Array(5);
@@ -2052,10 +2086,10 @@ export class Minimap {
       liq[3] = rgb(vanillaLiquidColor(2)); liq[4] = rgb(vanillaLiquidColor(3));
       // ★IIIII218：remix 上表（mapType100 硬编码=仙人掌色 73,120,17）与地狱底 (50,44,38)
       this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG),
-        remixBg: rgb(REMIX_MAP_BG_RGB), hellBg: rgb(VANILLA_HELL_BG_RGB) };
+        remixBg: rgb(REMIX_MAP_BG_RGB), hellBg: rgb(VANILLA_HELL_BG_RGB), moss627 };
   }
 
-  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number; remixBg: number; hellBg: number } | null = null;
+  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number; remixBg: number; hellBg: number; moss627: Uint32Array } | null = null;
 
   /** 行带填充:y0..y1(不含)行直写 pix(绝对索引;与旧版同热循环,仅落点从
    *  ImageData 换 CPU 缓冲) */
@@ -2118,10 +2152,24 @@ export class Minimap {
             continue;
           }
           let c = lut.tiles[t] ?? lut.tiles[0];
-          if (paint[i] > 0 && TILE_SHEET_OF[t] !== MAP_TILE_NO_PAINT_SHEET) {
-            c = mapPaintPacked(c, paint[i], false);
+          // ★IIIII223 F-3：GetTileType baseType=0/换色残余臂（Terraria.Map/MapHelper.cs
+          //  :1949-1964，三路径同构；判型走 sheet=原版 num 域,内部 id 与原版不同构）——
+          //  ① 51/697 蛛网 (x+y)%2==0 棋盘半隐；② 19 平台 frameY==864 底柱格；
+          //  ③ 184 长苔 frameX/22==10 → 627 苔色九档 option=(x+y)%9（LUT 预包 moss627）
+          const shF3 = TILE_SHEET_OF[t] ?? -1;
+          if (shF3 === 51 || shF3 === 697) { if ((x + y) % 2 === 0) c = 0; }
+          else if (shF3 === 19) { if (frameY[i] === 864) c = 0; }
+          else if (shF3 === 184 && Math.floor(frameX[i] / 22) === 10) {
+            c = lut.moss627[(x + y) % 9];
           }
-          buf[i] = c; continue;
+          // ★IIIII218 tileLookup=0 哨兵（原版无色表条目的 sheet 不上图）→ 落穿
+          //  液体/墙/背景支（与增量路径 colorFor 同构；神庙压力板=墙87漆色）
+          if (c !== 0) {
+            if (paint[i] > 0 && TILE_SHEET_OF[t] !== MAP_TILE_NO_PAINT_SHEET) {
+              c = mapPaintPacked(c, paint[i], false);
+            }
+            buf[i] = c; continue;
+          }
         }
         if (liquid[i] > 32) {
           const lt = liquidType[i];
@@ -2130,13 +2178,16 @@ export class Minimap {
         }
         const wl = wall[i];
         // 回声涂层墙不上图（MapHelper.GetWallType !invisibleWall() 门）→ 落背景，
-        // 与增量路径 colorFor 同款门（coatHiddenWall 单源）
+        // 与增量路径 colorFor 同款门（coatHiddenWall 单源）。
+        // ★IIIII223 F-2：玻璃族 wallLookup=0 哨兵（LUT=0）→ 同落背景（哨兵集单源
+        //  VANILLA_WALL_LOOKUP0，ensureLUT 对原版墙域缺口写 0）；墙漆豁免面废除=死代码
         if (wl !== 0 && !this.coatHiddenWall(i)) {
-          let c = lut.walls[wl] ?? lut.walls[0];
-          if (paintWall[i] > 0 && !MAP_WALL_NO_PAINT.has(wl)) {
-            c = mapPaintPacked(c, paintWall[i], true);
+          const c = lut.walls[wl] ?? lut.walls[0];
+          if (c !== 0) {
+            buf[i] = paintWall[i] > 0 ? mapPaintPacked(c, paintWall[i], true) : c;
+          } else {
+            buf[i] = bg;
           }
-          buf[i] = c;
         } else {
           buf[i] = bg;
         }

@@ -1380,6 +1380,15 @@ export class TownNPC extends Entity {
     // force=true = 内部直击通道(StrikeNPCNoInteraction owner=255 同形):不查
     // 无敌帧也不查 dontTakeDamage(原版 StrikeNPC 全链两者皆不读)
     if ((this.iframes > 0 || this.shimmerRise) && !force) return false;
+    // ★IIIII223 F-8：owner=255∧Damage≥9999 静默判据——NPC.cs:82065
+    //   `bool flag = Damage >= 9999 && owner == 255`。StrikeNPCNoInteraction 形参无
+    //   owner 通道（:82012 缺省 255）→ JS 全部 StrikeNPCNoInteraction 调用面（毁灭
+    //   清算 Game.ts / 巫毒娃娃烧毁 ItemDrop.checkLavaDeath）恒 owner=255 同形,以
+    //   【入参原值】dmg≥9999 等价判（须在下方 dmg 被防御/暴击重算覆写前快照）。
+    //   flag 只憋两处：:82078 `if (!flag && lifeMax > 1)` CombatText 飘字、
+    //   :82199 `if (netMode != 1 && !flag)` NPCDamageTracker（本仓无此记账面）——
+    //   清算击杀不冒 9999 大字（原版系统致杀静默）;死亡/击退/ai 复位不受门影响
+    const strikeSilent = dmg >= 9999;
     // ↑ ai[0]==25 dontTakeDamage 承接位(= :53736 块：复位 dontTakeDamage=false
     //   :53736 + if(ai[0]==25f) 置真 :53738-39——★1457 锚行校准,非 :53596);force
     //   仅溺水致死一击使用
@@ -1415,12 +1424,16 @@ export class TownNPC extends Entity {
       game.behavioLog?.('nurseHeal', { phase: 'interrupted', id: this.id });
     }
     game.recLog?.('hurt', { id: this.id, vid: this.vanillaId ?? null, dmg, hp: this.hp });   // 行为录制：城镇 NPC 受击
-    // 飘值色 = CombatText.DamagedFriendly(255,80,90)/DamagedFriendlyCrit(255,100,30)
-    // （CombatText.cs:8/:10，NPC.StrikeNPC :82082 消费面）——单源 fx/CombatTextColors
-    game.addDamageNumber(this.cx, this.y, dmg, crit,
-      crit ? COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT : COMBAT_TEXT_DAMAGED_FRIENDLY);
-    // 受击血粒子(原版 StrikeNPC 尘近似,与 Enemy.hurt 同规)
-    game.spawnParticles(this.cx, this.cy, '#B01818', 5, 1.4, { life: 22, grav: 0.06 });
+    // ★IIIII223 F-8 静默门（:82078 `if (!flag && lifeMax > 1)`）——飘字+血粒子（本仓
+    //  StrikeNPC 尘近似,原版无独立粒子臂,随飘字同门）在 owner=255 大伤清算面不触发
+    if (!strikeSilent && this.maxHp > 1) {
+      // 飘值色 = CombatText.DamagedFriendly(255,80,90)/DamagedFriendlyCrit(255,100,30)
+      // （CombatText.cs:8/:10，NPC.StrikeNPC :82082 消费面）——单源 fx/CombatTextColors
+      game.addDamageNumber(this.cx, this.y, dmg, crit,
+        crit ? COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT : COMBAT_TEXT_DAMAGED_FRIENDLY);
+      // 受击血粒子(原版 StrikeNPC 尘近似,与 Enemy.hurt 同规)
+      game.spawnParticles(this.cx, this.cy, '#B01818', 5, 1.4, { life: 22, grav: 0.06 });
+    }
     // 击退（StrikeNPC 1456 锚 :82143-82241 = 1457 :82216-82312）：hitDirection = sign(kb)
     // SW-AF1 2026-09-04（F-1）：补 knockBackResist 乘——原版整段单门
     // `knockBack > 0f && knockBackResist > 0f`（1457 :82216）,num3 = knockBack×resist

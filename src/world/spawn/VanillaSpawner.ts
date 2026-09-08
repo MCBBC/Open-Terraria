@@ -11,7 +11,7 @@
 import { TILE } from '../../core/constants';
 import { RNG } from '../../core/rng';
 import type { World } from '../World';
-import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../../data/tiles';
 import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
@@ -19,6 +19,7 @@ import { TileStore, LIQUID_TYPE } from '../TileStore';
 import { mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
 import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollOnlyBadLuck, rollBadLuck, rollLuck } from '../../stats/Luck';
+import { TILE_SOLID_TOP_FAMILY } from '../../stats/TouchDamage';   // SW-BJ37：平台九件套=原版 tileSolid 补臂
 import { canHit } from '../../physics/LineOfSight';
 import { chumSpots } from '../../entities/chumBucket';
 import { scanChosenTileZones } from '../DungeonDualZones';
@@ -254,6 +255,67 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   '-52': { base: 203, scale: 0.9 }, '-53': { base: 203, scale: 0.9 },
   '-54': { base: 223, scale: 0.9 }, '-55': { base: 223, scale: 1.1 },
 };
+
+/** 原版 tileSolid 静态表语义谓词（SW-BJ37 2026-09-08）：
+ *  `nactive() && tileSolid[type]`（CanSpawnInTile NPC.cs:5433 / FindSpawnTile 落地面
+ *  :991 / 候选起点 :977 同款）。tileSolid 是 Main.cs 的静态赋值表——平台行为族九件套
+ *  （19/239/380/427/435-439）在原版 tileSolid+tileSolidTop 双 true（=solid,Main.cs
+ *  :8031-8032 等）；本仓 TILE_DEFS 把九件拆 platform 旗/solid:false（物理拆旗，
+ *  TouchDamage.ts TILE_SOLID_TOP_FAMILY 注）→ 裸 isSolid 漏九件。生成链所有
+ *  tileSolid 消费位（净空窗/落地面扫描/旅行商站立柱/螺旋净空）统一走本谓词：
+ *  isSolid（已带 flags+致动门）∪ isActive&&TILE_SOLID_TOP_FAMILY（致动平台
+ *  nactive=false 原版放行 ✓）。 */
+export function spawnTileSolid(st: TileStore, x: number, y: number): boolean {
+  if (st.isSolid(x, y)) return true;
+  return st.isActive(x, y) && TILE_SOLID_TOP_FAMILY.has(st.type[st.idx(x, y)]);
+}
+
+/** Main.tileSolidTop 静态表 1:1（SW-BJ37 2026-09-08,1457 Main.cs 赋值面全量核验,
+ *  与 data/vanilla-tilecollision.json 1456 提取逐 id 恒等；435-439 团队平台五色
+ *  原版经 for 循环批量赋值 :10126-10136）——旅行商 SpawnTravelNPC 站立柱扫描
+ *  （WorldGen.cs:5231/5236 `SolidTile||tileSolidTop`）与上 3 格自由门（:5231
+ *  `!active||!tileSolid||tileSolidTop`）消费。经 TILE_INTERNAL_BY_SHEET 映射到
+ *  本仓内部 id（未注册 sheet 过滤）；静态表不带 active/致动门——原版字面。 */
+export const VANILLA_TILE_SOLID_TOP = new Set<number>(
+  [14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+    285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364,
+    376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439,
+    469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582,
+    599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619,
+    629, 632, 640, 643, 644, 645, 710]
+    .map((sh) => TILE_INTERNAL_BY_SHEET.get(sh) ?? -1)
+    .filter((t) => t >= 0),
+);
+
+/** Main.tileSolid[type] 纯表谓词（SW-BJ37 2026-09-08）= SOLID_LUT ∪ 平台九件套，
+ *  【不带】active/致动门——原版 SpawnTravelNPC 上 3 格自由门（WorldGen.cs:5231
+ *  `!active() || !tileSolid[type] || tileSolidTop[type]`）按此消费（致动实心格
+ *  active() 纯位仍真 → 阻挡）。 */
+export function vanillaTileSolidPure(type: number): boolean {
+  return TileStore.SOLID_LUT[type] === 1 || TILE_SOLID_TOP_FAMILY.has(type);
+}
+
+/** Collision.SolidTiles(startX,endX,startY,endY) 逐格谓词 1:1（Collision.cs:3494,
+ *  SW-BJ37 2026-09-08）：`active() && !inActive() && tileSolid && !tileSolidTop`
+ *  ——平台九件套/家具等 solidTop 族【不算】实心（与 CanSpawnInTile NPC.cs:5433
+ *  的 tileSolid 表语义相反!）；半砖/坡面不排除（SolidTiles 无 slope/halfBrick 项,
+ *  与 WorldGen.SolidTile :70650 区分）。史莱姆雨净空窗（NPC.cs:5940）与旅行商
+ *  螺旋搜索净空（WorldGen.cs:5286）消费。 */
+export function solidTilesCell(st: TileStore, x: number, y: number): boolean {
+  const type = st.type[st.idx(x, y)];
+  return st.hasTile(x, y) && !st.isActuated(x, y)
+    && vanillaTileSolidPure(type) && !VANILLA_TILE_SOLID_TOP.has(type);
+}
+
+/** WorldGen.SolidTile(i,j) 1:1（WorldGen.cs:70650,SW-BJ37 2026-09-08）：
+ *  `active() && tileSolid && !tileSolidTop && !halfBrick && slope==0 && !inActive()`
+ *  ——旅行商站立柱扫描（WorldGen.cs:5231/5236 SolidTile||tileSolidTop）的 SolidTile 半边。 */
+export function worldSolidTile(st: TileStore, x: number, y: number): boolean {
+  const type = st.type[st.idx(x, y)];
+  return st.hasTile(x, y) && !st.isActuated(x, y)
+    && vanillaTileSolidPure(type) && !VANILLA_TILE_SOLID_TOP.has(type)
+    && st.half[st.idx(x, y)] === 0 && st.slope[st.idx(x, y)] === 0;
+}
 
 export class VanillaSpawner {
   // ---- SpawnFlags（Spawner 字段 L39-137） ----
@@ -521,7 +583,10 @@ export class VanillaSpawner {
     if (!st.inBounds(tx, ty)) return null;
     for (let dx = -3; dx <= 3; dx++) {
       for (let dy = -5; dy <= 2; dy++) {
-        if (st.inBounds(tx + dx, ty + dy) && st.isSolid(tx + dx, ty + dy)) return null;
+        // Collision.SolidTiles(num5-3,num5+3,num6-5,num6+2)（NPC.cs:5940）逐格谓词
+        //  = solidTilesCell（active&&!inActive&&tileSolid&&!tileSolidTop——平台/solidTop
+        //  族【不算】实心,与 CanSpawnInTile 的 tileSolid 表语义相反,SW-BJ37 定谳）
+        if (st.inBounds(tx + dx, ty + dy) && solidTilesCell(st, tx + dx, ty + dy)) return null;
       }
     }
     if (WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) return null;
@@ -1215,7 +1280,9 @@ export class VanillaSpawner {
       // L886-888：点在实心格 或 (非 ignoreSafeWalls 且带房屋墙) → 重试
       //  （房屋内不刷怪的主守卫;ignoreSafeWalls :315-319 仅星璇四塔 Zone 置位——
       //   塔战期间允许穿房屋墙刷怪,普通入侵不置位）
-      if (st.isSolid(tx, ty)) continue;
+      //  ★SW-BJ37：tileSolid 静态表语义（含平台九件套）= spawnTileSolid,裸 isSolid
+      //  漏九件（原版平台格 tileSolid[19]=true 拒作候选起点）
+      if (spawnTileSolid(st, tx, ty)) continue;
       if (!this.ignoreSafeWalls && WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) continue;
       this.skyMob = false;
       // L890-897：天空怪选点门——!invaders && y<worldSurface×0.35 && !spawnFriendly &&
@@ -1233,8 +1300,11 @@ export class VanillaSpawner {
         this.skyMob = true;
       } else {
         // L900-906：向下找第一个实心格 = 落脚面（扫描上限 = spawnArea.Bottom，非世界底）
+        //  ★SW-BJ37：`!nactive() || !tileSolid` 语义 = spawnTileSolid——原版平台格
+        //  tileSolid[19]=true 会【终止】扫描（怪站平台顶）;裸 isSolid 穿平台 →
+        //  落到平台下方地面（平台房地板下出生偏差）
         let j = ty;
-        while (j < areaB && !st.isSolid(tx, j)) j++;
+        while (j < areaB && !spawnTileSolid(st, tx, j)) j++;
         if (j >= areaB) continue;
         ty = j;
       }
@@ -1249,17 +1319,25 @@ export class VanillaSpawner {
     return false;
   }
 
-  /** HasTileSpawnSpace（L5306+5330）：落脚格上方 spawnSpaceX=2 × spawnSpaceY=3 区域
-   *  逐格 CanSpawnInTile——非实心且非岩浆（防刷进实心/岩浆里） */
+  /** HasTileSpawnSpace（NPC.cs:5406-5414）+ CanSpawnInTiles/CanSpawnInTile（:5416-5442）
+   *  1:1（SW-BJ37 2026-09-08）：净空窗 = Bottom=(tx*16+8, ty*16) 的默认 32×48 身体空间
+   *  = 列 [tx-1,tx] × 行 [ty-3,ty-1]（spawnSpaceX=2/spawnSpaceY=3 静态常量 NPC.cs:146/148,
+   *  全树无改写,1458 同值；NewNPC :81594 `Bottom=(X,Y)` 锚定）。逐格 CanSpawnInTile(:5431)：
+   *  nactive()&&tileSolid → 拒（tileSolid 静态表含平台九件套 = spawnTileSolid）、
+   *  anyLava()（Tile.cs:412 `liquid>0 && lava()`）→ 拒；墙/水/蜂蜜/装饰不查。
+   *  世界边界 = WorldGen.InWorld(Rectangle)（WorldGen.cs:9651-9662,fluff=0）逐字：
+   *  X<0 || X+W>=w || Y<0 || Y+H>=h 拒（X=tx-1/W=2/Y=ty-3/H=3）。
+   *  ★SW-BJ37 旧版两偏差：①isSolid 裸判漏平台九件套（原版 tileSolid[19]=true 等,
+   *  Main.cs:8031-8032）→ 可刷进平台格；②右/下边界差 1 格（tx=w-1 原版拒、旧版放）。 */
   private hasTileSpawnSpace(tx: number, ty: number): boolean {
     const st = this.world.store;
+    if (tx - 1 < 0 || tx + 1 >= st.w || ty - 3 < 0 || ty >= st.h) return false;
     for (let dx = -1; dx <= 0; dx++) {
       for (let dy = -3; dy <= -1; dy++) {
         const x = tx + dx, y = ty + dy;
-        if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
         const i = st.idx(x, y);
-        if (st.isSolid(x, y)) return false;
-        if (st.liquid[i] > 0 && st.liquidType[i] === 2) return false;
+        if (spawnTileSolid(st, x, y)) return false;
+        if (st.liquid[i] > 0 && st.liquidType[i] === LIQUID_TYPE.LAVA) return false;
       }
     }
     return true;
@@ -1902,12 +1980,15 @@ export class VanillaSpawner {
     //  睡渔夫在场时海洋敌怪（鲨鱼/水母/鱿鱼）全部断供。
     //  savedAngler（NPC.savedAngler 静态）：渔夫救援链在 Game 侧闭环（placeSleepingAngler
     //  放 bound 渔夫 → 右键 freeBoundNpc 置 savedAngler，Game:3008）——放置走确定性
-    //  补放非本段掷出，本门恒 false 语义等价（何时放差异已登记）。AnyNPCs(376) 用 activeIds 现查
-    if ((!this.spawnFriendlyCycle || !any(376)) && this.waterTile && this.isOcean) {
+    //  补放非本段掷出（何时放差异已登记）。AnyNPCs(376) 用 activeIds 现查
+    //  SW-BJ31 2026-09-08：补 L1705/L1708 的 !savedAngler 两处门（友好半臂+渔夫掷）——
+    //  解救后原版绝不再掷 376,旧缺门=解救后海洋仍可再出睡渔夫
+    if ((!this.spawnFriendlyCycle || (!this.world.flags['savedAngler'] && !any(376)))
+      && this.waterTile && this.isOcean) {
       // 渔夫 376（L1708-1728）：表层水（spawnTileY < worldSurface-10）→ 向上 50 格
       //  找干隙线 num15 → 抬到该线落点；!xRange 才出（L1723）
       let angler: Enemy | null = null;
-      if (!any(376) && this.spawnTileY < this.world.groundLevel - 10) {
+      if (!this.world.flags['savedAngler'] && !any(376) && this.spawnTileY < this.world.groundLevel - 10) {
         const num15 = this.findDryGapY(this.spawnTileY);
         if (num15 > 0 && !this.xRange) angler = this.spawnNPC(x, num15 * TILE, 376, rng);
       }
@@ -1973,6 +2054,18 @@ export class VanillaSpawner {
       if (N(18)) return D(221);   // 鱿鱼（L1822-1825）
       if (N(3)) return D(67);     // 螃蟹（L1826-1829）
       return D(64);               // 粉水母兜底（L1830-1833）
+    }
+    // SW-BJ31 2026-09-08【同族缺支补齐】沙滩干沙睡渔夫（NPC.cs:1928-1931,1458 同文）：
+    //  !waterTile && !savedAngler && !AnyNPCs(376) && (x<WorldGen.beachDistance(380)
+    //  || x>maxTilesX-380) && Main.tileSand[tileType] && y<worldSurface → 376。
+    //  门全确定性零 RNG；链位=海洋支（恒 return→本 if 等价 else-if）与水池段门 A 之间,
+    //  与原版 else-if 序一致。remix 臂（||Main.remixWorld）按 spawn-parity-gaps.md
+    //  Remix 支裁决不实现。产出真 Enemy 376（同 placeSleepingAnglerAt 实体路径,
+    //  解救走 ENEMY_BOUND_TOWN_KEY 376→'angler' wakeBoundEnemyNpc）
+    if (!this.waterTile && !this.world.flags['savedAngler'] && !any(376)
+      && (this.spawnTileX < 380 || this.spawnTileX > st.w - 380)
+      && TILE_SAND.has(t) && this.spawnTileY < this.world.groundLevel) {
+      return this.spawnNPC(x, y, 376, rng);
     }
     // ---- 水池段（L1839-1905）----
     //  两支 else-if（原版 L1839 / L1895,均带 !spawnFriendly 门）;友好轮落 SpawnAnNPC

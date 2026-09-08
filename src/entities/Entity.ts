@@ -128,10 +128,15 @@ export class EntityManager {
         //   真刃弧族等（2026-08-31 审计）。收口到此单点：projectiles 桶统一弹盒上报。
         //   · 幂等：已自砍弹型（Arrow 等）重复上报在 Game.cutTile 内零操作
         //   · CanCutTiles 排除表按 vanillaId/projId 近似过滤；minion 不砍（原版门）
+        //   · ★SW-BJ33 2026-09-08 补 npcProj 半边门：原版 CutTiles 调用点
+        //     `friendly && owner==Main.myPlayer && !npcProj && !minion`
+        //     （Projectile.cs:12516）——城镇自卫弹出膛全带 npcProj=true
+        //     （NPC.cs:54903/:55175/:55325/:55490 族）不割草;TownShot.npcProj
+        //     承载（玩家弹无此位=行为不变）
         if (list === this.projectiles) {
-          const m = e as { vanillaId?: number; projId?: number; minion?: boolean };
+          const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean };
           const vid = m.vanillaId ?? m.projId ?? 0;
-          if (!m.minion && !CUT_EXCLUDE_VIDS.has(vid)) {
+          if (!m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
             cutTilesBox(game, e.x, e.y, e.w, e.h);
           }
         }

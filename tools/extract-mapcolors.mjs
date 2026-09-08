@@ -55,6 +55,30 @@ const mulOf = (tok) => {
   return v ?? 1;
 };
 
+// ★IIIII218 前置预扫：循环整行拷贝形态（此前漏配 10 sheet 的根因——Initialize 用
+//  for 循环把一个 tile 的 13 槽整体拷给另一 tile：dst←src 同色表）：
+//  ①直接循环体 `array[dst][v] = array[src][v];`（同索引变量两侧:628/692/160←627、
+//    468←467、653←28、693/694←165）；
+//  ②别名循环 `Color[] array2 = array[dst];`（或续用 `array2 = array[dst];`）+ 循环体
+//    `array2[v] = array[src][v];`（647←186、648←187、650/649←185）。
+//  两种形态都登记为【整行拷贝op】（dst 全部【已知】槽 ← src 同号槽,拷贝在主扫描后、
+//  refQueue 解析前执行——array[706][0]=array[648][4] 这类单槽前向引用依赖 648 先落值）。
+const copyOps = [];          // [dstId, srcId]
+let aliasDst = null;         // 当前 array2 绑定的 dst（顺序语义）
+for (const raw of body.split('\n')) {
+  const l = raw.trim();
+  let m;
+  if ((m = l.match(/^(?:Color\[\] )?array2 = array\[(\d+)\];$/))) { aliasDst = +m[1]; continue; }
+  if ((m = l.match(/^array2\[(\w+)\] = array\[(\d+)\]\[\1\];$/))) {
+    if (aliasDst !== null) copyOps.push([aliasDst, +m[2]]);
+    continue;
+  }
+  if ((m = l.match(/^array\[(\d+)\]\[(\w+)\] = array\[(\d+)\]\[\2\];$/))) {
+    copyOps.push([+m[1], +m[3]]);
+    continue;
+  }
+}
+
 for (const raw of body.split('\n')) {
   const l = raw.trim();
   let m;
@@ -115,6 +139,15 @@ for (const raw of body.split('\n')) {
     continue;
   }
 }
+// ★IIIII218 整行拷贝 op 执行（主扫描后——src 的直接赋值行已全部落值）：
+// 只拷 src【已知】槽（避免给 dst 灌 13 槽空洞→JSON null），同号槽同值。
+for (const [dst, src] of copyOps) {
+  for (let opt = 0; opt < 13; opt++) {
+    const v = tileArr.get(`${src},${opt}`);
+    if (v !== undefined) tileArr.set(`${dst},${opt}`, v);
+  }
+}
+
 // 前向引用解析（数组键形式回归 Map 键）
 const keyOf = (ref) => ref.replace(/^array\[(\d+)\]\[(\d+)\]$/, '$1,$2');
 for (let pass = 0; pass < 4; pass++) {

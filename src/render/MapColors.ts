@@ -9,8 +9,8 @@
 // （MapHelper.cs:1812-1863 MapColor 单源 mapPaintColor，豁免面与 colorFor 同构）。
 import { TILE_DEFS, WALL_DEFS , TILE_BY_KEY } from '../data/tiles';
 import {
-  vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor,
-  vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG,
+  vanillaTileMapColor, vanillaTileMapColorOption, vanillaWallMapColor, vanillaLiquidColor,
+  vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG, VANILLA_WALL_LOOKUP0,
 } from '../data/vanillaMapColors';
 import { mapPaintColor } from '../world/Paint';
 import type { TileStore } from '../world/TileStore';
@@ -40,10 +40,12 @@ const pack = (c: readonly number[]): number => (c[0] << 16) | (c[1] << 8) | c[2]
 const liqColor = (lt: number): number => pack(vanillaLiquidColor(lt >= 1 && lt <= 4 ? lt - 1 : 0));
 
 /** 漆豁免面（Renderer.colorFor 同构；MapHelper.cs:1963-2005）：
- *  tile sheet 160=RainbowBrick 恒忽略漆（GetTileType `if (num == 160) newColor = 0`）；
- *  墙 21/88-93/168/241（GetWallType newColor=0 表） */
+ *  tile sheet 160=RainbowBrick 恒忽略漆（GetTileType `if (num == 160) newColor = 0`）。
+ *  ★IIIII223 F-2：MAP_WALL_NO_PAINT(21/88-93/168/241) 整支废除——红队定谳该集实为
+ *  玻璃族 wallLookup=0 哨兵（vanilla 地图不画，见 vanillaMapColors.VANILLA_WALL_LOOKUP0），
+ *  落穿前置后墙漆分支对其永不可达=死代码；墙漆豁免面 vanilla 本就为空（MapColor :1854
+ *  默认支无条件吃漆） */
 const MAP_TILE_NO_PAINT_SHEET = 160;
-const MAP_WALL_NO_PAINT = new Set([21, 88, 89, 90, 91, 92, 93, 168, 241]);
 
 /** tile → 0xRRGGBB。优先级：活性 tile > 液体 > 墙 > 背景（MapHelper 模型）。
  *  必须判 flags（=原版 tile.active()）：生成期 TileRunner 会在空气格写"幽灵 type"
@@ -69,35 +71,54 @@ export function mapColor24(st: TileStore, x: number, y: number,
       const fx = st.frameX[i], fy = st.frameY[i];
       return ((fx >> 8) << 16) | ((fx & 255) << 8) | fy;
     }
-    // 原版色优先（sheet 直查）；legacy def 回落 mapColor
+    // 原版色优先（sheet 直查）；legacy def 回落 mapColor。
+    // ★IIIII218 tileLookup=0 语义（MapHelper.cs GetTileType :1936 `baseType =
+    //  tileLookup[num]` + :1961 `if (baseType != 0)`）：原版 Initialize 无色表条目的
+    //  sheet（127 魔冰/135 压力板/210 地雷/428/504/541——tileOptionCounts=0 →
+    //  tileLookup=0）不画 tile,落穿液体/墙/背景（神庙压力板格=墙 87 漆色,即本批
+    //  77 格残差定谳）。def.mapColor 兜底仅保留给无 vanilla 映射的自研 tile。
     const sheet = TILE_DEFS[t]?.vanilla?.sheet;
     const p = st.paint[i];
     if (sheet !== undefined) {
-      const vc = vanillaTileMapColor(sheet);
+      // ★IIIII223 F-3：GetTileType baseType=0/换色残余臂（Terraria.Map/MapHelper.cs
+      //  :1949-1964，三路径同构）——① 51/697 蛛网 (x+y)%2==0 → baseType=0 棋盘半隐；
+      //  ② 19 平台 frameY==864 底柱格不上图（其黑色 option1（GetTileBaseOption
+      //  :2183-2190 frameY/18==48）被 baseType=0 整支屏蔽，原版不可达）；
+      //  ③ 184 长苔 frameX/22==10 → num=627 苔色（option=(x+y)%9 :2105-2108）
+      let vc = (sheet === 184 && Math.floor(st.frameX[i] / 22) === 10)
+        ? vanillaTileMapColorOption(627, (x + y) % 9)
+        : vanillaTileMapColor(sheet);
+      if (sheet === 51 || sheet === 697) { if ((x + y) % 2 === 0) vc = null; }
+      else if (sheet === 19) { if (st.frameY[i] === 864) vc = null; }
       if (vc) {
         if (p > 0 && sheet !== MAP_TILE_NO_PAINT_SHEET) return pack(mapPaintColor(false, [vc[0], vc[1], vc[2]], p));
         return pack(vc);
       }
+      // sheet 有映射但原版无色表条目（或 F-3 baseType=0 臂命中）→ 落穿（vanilla tileLookup=0）
+    } else {
+      const c0 = TILE_COLORS.get(t);
+      if (c0 !== undefined) {
+        if (p > 0) return pack(mapPaintColor(false, [(c0 >> 16) & 255, (c0 >> 8) & 255, c0 & 255], p));
+        return c0;
+      }
     }
-    const c0 = TILE_COLORS.get(t);
-    const c = c0 !== undefined ? c0 : UNKNOWN;
-    if (p > 0 && sheet !== MAP_TILE_NO_PAINT_SHEET) {
-      return pack(mapPaintColor(false, [(c >> 16) & 255, (c >> 8) & 255, c & 255], p));
-    }
-    return c;
+    // 落穿：液体 > 墙 > 背景（MapHelper GetWallType 液体优先序,见下）
   }
   if (st.liquid[i] > 32) return liqColor(st.liquidType[i]);
   const w = st.wall[i];
-  if (w !== 0) {
+  // ★IIIII223 F-2：玻璃族 wallLookup=0 → 不上图落穿背景（vanilla GetWallType
+  //  baseType=0 ⇒ CreateMapTile :1913-1917 背景支；液体支已在上方先行，与 vanilla
+  //  GetWallType 液体优先序同构；与 tileLookup=0 落穿哨兵同族）
+  if (w !== 0 && !VANILLA_WALL_LOOKUP0.has(w)) {
     const pw = st.paintWall[i];
     const vc = vanillaWallMapColor(w);
     if (vc) {
-      if (pw > 0 && !MAP_WALL_NO_PAINT.has(w)) return pack(mapPaintColor(true, [vc[0], vc[1], vc[2]], pw));
+      if (pw > 0) return pack(mapPaintColor(true, [vc[0], vc[1], vc[2]], pw));
       return pack(vc);
     }
     const c0 = WALL_COLORS.get(w);
     if (c0 !== undefined) {
-      if (pw > 0 && !MAP_WALL_NO_PAINT.has(w)) {
+      if (pw > 0) {
         return pack(mapPaintColor(true, [(c0 >> 16) & 255, (c0 >> 8) & 255, c0 & 255], pw));
       }
       return c0;

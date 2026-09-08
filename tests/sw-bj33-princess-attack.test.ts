@@ -215,5 +215,9 @@ describe('SW-BJ33 公主 663 魔法阵 950（AI_186 域内专类）', () => {
     const townNpcSrc = readFileSync(join(import.meta.dirname, '../src/entities/TownNPC.ts'), 'utf8');
     expect(townNpcSrc).toContain('new PrincessAuraShot(px, py');
     expect(townNpcSrc).toContain('if (speed === 0 && !target && (this.vanillaId === 160 || this.vanillaId === 663)) return;');
+    // 中央 CutTiles 通道 npcProj 半边门（P.cs:12516 调用点门——城镇弹不割草）
+    const entitySrc = readFileSync(join(import.meta.dirname, '../src/entities/Entity.ts'), 'utf8');
+    expect(entitySrc).toContain('m.npcProj !== true');
+    expect(townShotSrc).toContain('npcProj = true');
   });
 });

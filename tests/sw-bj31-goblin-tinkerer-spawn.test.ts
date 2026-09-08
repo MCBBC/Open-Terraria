@@ -28,12 +28,14 @@ import { Enemy } from '../src/entities/Enemy';
 import { TownNPC } from '../src/entities/TownNPC';
 import { Game } from '../src/core/Game';
 import { TILE } from '../src/core/constants';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import type { World } from '../src/world/World';
 
 // 单世界共享（worldgen 重量级；旗矩阵按用例顺序推演并在用例尾复位）
 let world: World;
 let cavern: { x: number; y: number };        // 洞穴层干燥落脚点
 let underground: { x: number; y: number };    // 地下层干燥落脚点（rockLevel 上）
+let beach: { x: number; y: number } | null = null;  // 海岸带干沙落脚点（SW-BJ31 新支）
 
 beforeAll(async () => {
   world = await generateWorld({ width: 2400, height: 1200, seedText: 'sw-bj31-a', evil: 0 });
@@ -52,6 +54,23 @@ beforeAll(async () => {
   };
   cavern = find(ry + 60, ry + 260);
   underground = find(ry - 260, ry - 40);
+  // 海岸带（x<380 || x>w-380）干沙（Main.tileSand 表）落脚点——生成流随机性可能
+  // 无干沙海岸（沙滩淹水/被海蚀），找到才跑新支正例（找不到则该臂跳过并备案）。
+  // ★只扫 worldSurface 上方行（y<groundLevel=原版 worldSurface）：支门要求
+  // spawnTileY<groundLevel——地下干沙腔不算（L1928 同门）
+  const ws = Math.floor(world.groundLevel);
+  const sands = new Set([TILE_BY_KEY['sand'], TILE_BY_KEY['v_112_ebonsand_block'],
+    TILE_BY_KEY['v_116_pearlsand_block'], TILE_BY_KEY['v_234_crimsand_block']]
+    .filter((v): v is number => v !== undefined));
+  for (let y = ws - 1; y > 20 && !beach; y--) {
+    for (const x of [200, 240, 280, 320, 360, st.w - 201, st.w - 241, st.w - 281, st.w - 321, st.w - 361]) {
+      if (!sands.has(st.type[st.idx(x, y)])) continue;
+      if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2) || st.isSolid(x, y - 3)) continue;
+      if (st.liquid[st.idx(x, y - 1)] > 0 || st.liquid[st.idx(x, y - 2)] > 0) continue;
+      beach = { x, y };
+      break;
+    }
+  }
 }, 300000);
 
 /** 实机条件组装：setPlayerFlags 实参序镜像 Game.trySpawnEnemy（zoneDungeon/
@@ -63,12 +82,13 @@ function makeSpawner(activeIds: Set<number> = new Set()): VanillaSpawner {
   return sp;
 }
 
-function sample(spot: { x: number; y: number }, attempts: number, salt = 1): Map<number, number> {
+function sample(spot: { x: number; y: number }, attempts: number, salt = 1,
+  viewHalfW = 60, viewHalfH = 34): Map<number, number> {
   const sp = makeSpawner();
   const hits = new Map<number, number>();
   for (let k = 0; k < attempts; k++) {
     const e = sp.spawn((spot.x + 0.5) * TILE, (spot.y - 3) * TILE,
-      new RNG((k * 2654435761 + salt) >>> 0), 60, 34);
+      new RNG((k * 2654435761 + salt) >>> 0), viewHalfW, viewHalfH);
     if (e && e.vanillaId != null) hits.set(e.vanillaId, (hits.get(e.vanillaId) ?? 0) + 1);
   }
   return hits;
@@ -171,6 +191,25 @@ describe('SW-BJ31 洞穴层哥布林工匠（绑缚 105）生成链', () => {
     delete world.flags['savedGoblin'];
   }, 120000);
 
+  it('同族新支（NPC.cs:1928-1931）：海岸带干沙 → 376 睡渔夫；savedAngler 关门', () => {
+    if (!beach) {
+      console.log('[SW-BJ31] 本种子无干沙海岸点——沙滩支正例跳过（结构锁仍覆盖）');
+      return;
+    }
+    // 正例：未解救 → 海岸干沙落点必出 376（门全确定性,无概率面）。实机视野 60/34：
+    // 屏内格拒收（checkNotSpawningOnScreen）后合格带=选点 x∈[w-380, 玩家x-60),
+    // 全为干沙海岸——200 次采样取_margin
+    delete world.flags['savedAngler'];
+    const h1 = sample(beach, 200, 41);
+    console.log('[SW-BJ31] beach spot', beach, 'hits', [...h1.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8));
+    expect(h1.get(376) ?? 0).toBeGreaterThan(0);
+    // 负例：解救后（savedAngler=true）→ 绝迹（L1928 !savedAngler 门）
+    world.flags['savedAngler'] = true;
+    const h2 = sample(beach, 200, 42);
+    expect(h2.get(376) ?? 0).toBe(0);
+    delete world.flags['savedAngler'];
+  }, 60000);
+
   it('结构锁：绑缚三人组门表达式与转换映射逐字在位', async () => {
     const fs = await import('node:fs/promises');
     const spawnerSrc = await fs.readFile('src/world/spawn/VanillaSpawner.ts', 'utf8');
@@ -181,6 +220,11 @@ describe('SW-BJ31 洞穴层哥布林工匠（绑缚 105）生成链', () => {
     expect(spawnerSrc).toContain('return this.spawnBound(105);');
     expect(spawnerSrc).toContain("if (hardMode && luck20() && !this.waterTile && this.deeperThanRockLayer");
     expect(spawnerSrc).toContain('this.downedBoss3 && luck20()');
+    // 同族新支：沙滩干沙睡渔夫（NPC.cs:1928-1931 1:1,门序逐字段）+ 海洋支 !savedAngler 两门（L1705/L1708）
+    expect(spawnerSrc).toContain("if (!this.waterTile && !this.world.flags['savedAngler'] && !any(376)");
+    expect(spawnerSrc).toContain('&& TILE_SAND.has(t) && this.spawnTileY < this.world.groundLevel)');
+    expect(spawnerSrc).toContain('return this.spawnNPC(x, y, 376, rng);');
+    expect(spawnerSrc).toContain("(!this.spawnFriendlyCycle || (!this.world.flags['savedAngler'] && !any(376)))");
     // Game 侧转换映射（105 → goblin_tinkerer）与解救旗表
     const gameSrc = await fs.readFile('src/core/Game.ts', 'utf8');
     expect(gameSrc).toContain("picked.vanillaId === 105 ? 'goblin_tinkerer'");

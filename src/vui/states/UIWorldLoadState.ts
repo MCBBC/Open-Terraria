@@ -280,7 +280,10 @@ export class UIWorldLoadState extends UIState {
   private addNewTip(): void {
     // GameTipsProvider.RollAvailableTip :25-51：Default+Keyboard 池去重上条；
     // 池空/键缺失 → textKey="UI.Back"（vanilla AddNewTip :185-193）——本仓池恒非空,
-    // 退化路径=沿用旧条不炸
+    // 退化路径=沿用旧条不炸。
+    // ★IIIII221：text 已含 {InputTrigger_*} 全局替换（GameTip 构造器 :64
+    // `_formattedText = _textKey.Value` 同构——替换在 randomFromCategory 出口
+    // 一次落定,存进 GenTip 后不再变,与原版"构造期定格"等价;种子变换在绘制期）
     let text: string | null = null;
     const rng = () => (this.uiRand ? this.uiRand.nextDouble() : Math.random());
     for (let i = 0; i < 4 && text === null; i++) {

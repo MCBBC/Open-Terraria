@@ -29,6 +29,12 @@ export const Lang = {
     return languageManager.getTextValue(path, ...args);
   },
 
+  /** ★IIIII221：LocalizedText.Value 的 {Token} 全局替换半边（Lang.cs:86-98）——
+   *  对【已取出的原文串】做 {InputTrigger_*}（活绑表驱动键位名）/ {NPC 名} /
+   *  {WorldName} 等动态值替换。raw 字符串消费方（自池/自缓存文案）的统一出口;
+   *  {0} 位置参数不在此层（text() 的 args 承担） */
+  substitute(s: string): string { return languageManager.substitute(s); },
+
   /** Main.ValueToCoins（Main.cs:54649-54689 1:1）：铜币总值 →
    *  "N 铂金 N 金 N 银 N 铜"（非零档空格拼接，Currency.* 文案 toLowerCase，
    *  去尾空格；0 → 空串）。死亡掉钱行（Game.DroppedCoins {0}）与价格显示用 */

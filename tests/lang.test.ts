@@ -143,7 +143,10 @@ describe('全局替换表（Lang.cs:102-110/:146-160 RegisterGlobalSubstitution�
       },
     });
     expect(languageManager.getTextValue('UI.A')).toBe('按住左键点击攻击');
-    expect(languageManager.getTextValue('UI.B')).toBe('Ctrl切换光标');
+    // ★IIIII221：期望值随 SW-BN2 缺省表对齐更新——SmartCursor 缺省 =
+    // ControlLeft+ControlRight 双绑（Keybinds.ts DEFAULT_KEYBINDS）,活绑表显示名
+    // '/' 连接（GenerateRawInputList :1994-2005 同形）= 'Ctrl/R·Ctrl'
+    expect(languageManager.getTextValue('UI.B')).toBe('Ctrl/R·Ctrl切换光标');
     expect(languageManager.getTextValue('UI.C')).toBe('E抛出钩爪');
     expect(languageManager.getTextValue('UI.D')).toBe('[]锁定');
   });
