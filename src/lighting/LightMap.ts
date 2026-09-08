@@ -10,6 +10,9 @@ import { DEAD_THRESHOLD, DECAY_AIR, DECAY_CRACKED, DECAY_HONEY, DECAY_SOLID, DEC
 /** 遮挡类型(LightMaskMode.cs;注意 Water=2 Honey=3 CrackedBricks=4) */
 export const enum Mask { None = 0, Solid = 1, Water = 2, Honey = 3, CrackedBricks = 4 }
 
+/** 水 flick 值域(L221-237 next(98,100)/100:98|99 → 精确除法定义的 double,位级等值) */
+const WATER_FLICK = [98 / 100, 99 / 100];
+
 export class LightMap {
   w = 0; h = 0;
   /** 三通道 SoA(浮点保真:Uint8 会把 0.0185 死阈值量化成可见条带) */
@@ -24,6 +27,11 @@ export class LightMap {
   /** 水 flicker scratch(2026-08-24 零分配重写:原每水格 withModifier 分配一实例,
    *  现原地 reseedWithModifier 值等价;金标 tests/lighting-scan-blur-golden 锁位级) */
   private scratch = new FastRandom(0);
+  /** 水 flicker LUT(2026-09-08 性能刀):flick(i)=f(seed,i) 在单次 blur 内恒定
+   *  (cycleIndex 固定),而每格被 2pass×4向 访问 8 次——旧实现每访问重播种 RNG
+   *  (水格主导场景=blur 主成本,用户 250%细缝案 trace 实测 blurLine 18%)。预计算
+   *  每水格一次,LUT 读回=位级等值(金标锁)。0→flick 0.98 / 1→0.99 */
+  private flickLut = new Uint8Array(0);
   /** 周期索引(引擎每 Present 递增;掺进水随机种子 → 每 4 tick 换一批微光) */
   cycleIndex = 0;
 
@@ -42,11 +50,25 @@ export class LightMap {
     this.mask.fill(0); // LightMap.cs:70-79 Clear 连 mask 一起清(世界边缘 1 格环陈旧 mask)
   }
 
-  /** Blur()(L86-91):两遍 BlurPass + NextSeed */
+  /** Blur()(L86-91):两遍 BlurPass + NextSeed;★先预计算水 flicker LUT */
   blur(): void {
-    this.blurPass();
-    this.blurPass();
     this.random = this.random.withModifier(++this.cycleIndex);
+    this.buildWaterFlick();
+    this.blurPass();
+    this.blurPass();
+  }
+
+  /** 水 flicker 预计算(每水格一次 reseed+next;位级等值于逐访问重播种——
+   *  单次 blur 内 cycleIndex/seed 恒定,同 (i,seed) 的 next 值各访问相同) */
+  private buildWaterFlick(): void {
+    const n = this.w * this.h;
+    if (this.flickLut.length < n) this.flickLut = new Uint8Array(n);
+    const lut = this.flickLut, mask = this.mask, seed = this.random.getSeed();
+    for (let i = 0; i < n; i++) {
+      if (mask[i] !== Mask.Water) continue;
+      this.scratch.reseedWithModifierFrom(i, seed);
+      lut[i] = this.scratch.next(98, 100) - 98;   // 0|1(→0.98|0.99)
+    }
   }
 
   /** BlurPass()(L93-115):列(上→下 / 下→上)后行(左→右 / 右→左) */
@@ -109,10 +131,9 @@ export class LightMap {
           if (!dg) zg *= DECAY_CRACKED;
           if (!dbb) zb *= DECAY_CRACKED;
         } else if (m === Mask.Water) {
-          // 逐格随机 [98,100)/100(L221-237)——scratch 原地重播 WithModifier(i),零分配
-          // (底种=this.random.seed,原语义 this.random.withModifier(i))
-          this.scratch.reseedWithModifierFrom(i, this.random.getSeed());
-          const flick = this.scratch.next(98, 100) / 100;
+          // 逐格随机 [98,100)/100(L221-237)——★LUT 读回(2026-09-08:预计算一次,
+          //  位级等值,见 buildWaterFlick;旧每访问重播种 RNG=水格场景 blur 主成本)
+          const flick = WATER_FLICK[this.flickLut[i]];
           if (!dr) zr *= DECAY_WATER[0] * flick;
           if (!dg) zg *= DECAY_WATER[1] * flick;
           if (!dbb) zb *= DECAY_WATER[2] * flick;

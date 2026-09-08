@@ -24,22 +24,21 @@ await new Promise((r) => setTimeout(r, 2000));
 const report = await page.evaluate(async () => {
   const g = window.__swGame, p = g.player, st = g.world.store;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const { TILE_BY_KEY } = await import('/src/data/tiles.ts');
-  const { VI_ID } = await import('/src/data/itemKeys.ts');
+  const { TILE_BY_KEY, TILE_DEFS } = await import('/src/data/tiles.ts');
+  const sheetOf = (t) => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
   const T = {
     s82: TILE_BY_KEY['v_82_herbs_sprout'], m83: TILE_BY_KEY['v_83_herbs_mature'],
-    b84: TILE_BY_KEY['v_84_herbs_bloom'], ash: TILE_BY_KEY['v_57_ash_block'] ?? TILE_BY_KEY['v_57_ash'],
+    b84: TILE_BY_KEY['v_84_herbs_bloom'], ash: TILE_BY_KEY['ash'],
   };
   const out = { tileIds: T };
 
-  // sheet 57=灰烬:全图搜地狱 ash 群(取最大连通近似:首个 y>st.h-260 的 ash 行)
-  const ASH = 57;
+  // sheet 57=灰烬(内部 id 经 TILE_DEFS 映射):搜地狱 ash 平台
   let garden = null;
-  for (let y = st.h - 40; y > st.h - 300 && !garden; y--) {
+  for (let y = st.h - 12; y > st.h - 160 && !garden; y--) {
     let run = 0, best = 0, bx = 0;
     for (let x = 20; x < st.w - 20; x++) {
       const i = st.idx(x, y);
-      if (st.flags[i] && st.type[i] === ASH) { run++; if (run > best) { best = run; bx = x - run + 1; } }
+      if (st.flags[i] && sheetOf(st.type[i]) === 57) { run++; if (run > best) { best = run; bx = x - run + 1; } }
       else run = 0;
     }
     if (best >= 24) garden = { x: bx + 2, y: y - 1, floorY: y };

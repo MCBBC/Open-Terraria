@@ -52,7 +52,7 @@ beforeAll(async () => {
   };
   cavern = find(ry + 60, ry + 260);
   underground = find(ry - 260, ry - 40);
-});
+}, 300000);
 
 /** 实机条件组装：setPlayerFlags 实参序镜像 Game.trySpawnEnemy（zoneDungeon/
  *  downedSkeletron/invaders/activeIds/moonEvent/lunar/maxHp/luck/trespassDual/
@@ -125,7 +125,11 @@ describe('SW-BJ31 洞穴层哥布林工匠（绑缚 105）生成链', () => {
       vanillaSpawner: { currentSpawnX: number; currentSpawnY: number };
       trySpawnBoundTownNpc(picked: Enemy): boolean;
     };
-    g.entities = { npcs: [], add(o: unknown, b: string) { added.push({ obj: o, bucket: b }); } };
+    const npcs: unknown[] = [];
+    g.entities = {
+      npcs,
+      add(o: unknown, b: string) { npcs.push(o); added.push({ obj: o, bucket: b }); },
+    };
     g.vanillaSpawner = { currentSpawnX: 640, currentSpawnY: 760 };
     // 占位体同 VanillaSpawner.spawnBound 形态：vanillaId 105
     const picked = new Enemy('v_105', 640 * TILE + 8, 760 * TILE);

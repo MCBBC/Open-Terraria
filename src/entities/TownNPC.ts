@@ -39,7 +39,7 @@ import {
   TOWN_MELEE, TOWN_BOW, TOWN_MAGIC, TOWN_SWING, TOWN_PRETTY_SAFE,
   type TownShotParams,
 } from '../data/vanillaTownAttack';
-import { TownShot } from './TownShot';
+import { TownShot, PrincessAuraShot } from './TownShot';   // SW-BJ33 2026-09-08：663 魔法阵专类
 // ★对抗修复批⑤ A4：出膛锚点半宽/半高按弹真实 SetDefaults 尺寸换算
 import { projectileData } from '../data/vanillaProjectiles';
 // ★通用湿段（2026-09-08 F2）：NurseSyringeShot 584 override 自接（基类位被替代）
@@ -4574,11 +4574,26 @@ export class TownNPC extends Entity {
           py = target.y + target.h * this.rng();
         }
       } while (retries-- > 0 && st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE)));
+      // ★SW-BJ33 2026-09-08：663 公主阵改专类承载——通用 TownShot 命中即亡,而 950
+      //  是在敌体内出生的 104×104 定点阵（penetrate=-1 命中不亡/AI_186 60t 包络/
+      //  双环 d267 尘+PrincessWeapon 编排粒子/NPC.immune[owner]=10t 再命中窗/
+      //  damage×0.98 逐击衰减,P.cs:43453-43573/:14182-14186/:13575-13577,详见
+      //  PrincessAuraShot 头注）。160 松露 590 仍走通用 TownShot（AI_112,域外）。
+      //  入参 (px,py)=阵心（=原版 NewProjectile X,Y 中心坐标;TownShot 顶左换算留旧面）
+      if (this.vanillaId === 663) {
+        game.spawnTownShot?.(new PrincessAuraShot(px, py, dmgFinal, kb, this.shimmered ? 1 : 0));
+        return;
+      }
       // ★对抗修复批⑤ A4：落点弹换算同步半宽化——950(104×104) 曾按 10×10 收半宽
       game.spawnTownShot?.(new TownShot(px - shotHW, py - shotHH, 0, 0, dmgFinal, kb, proj,
         { noGravity: true, ai2: this.shimmered ? 1 : 0 }));
       return;
     }
+    // ★SW-BJ33 2026-09-08：落点弹无靶守卫——原版 160/663 两支出膛块均整块包裹在
+    //  `if (num70 != -1)`（:55348/:55366）内,无靶整拍不出膛（散布掷已在上方照耗,
+    //  与原版流序一致）;旧实现坠入通用支=在本体侧出膛（活敌中途死亡拍可复现）。
+    //  20 树妖原版无 num70 守卫（:55525-55537 无条件出膛）→ 不入本守卫维持现状。
+    if (speed === 0 && !target && (this.vanillaId === 160 || this.vanillaId === 663)) return;
     // 108 巫师连发(NPC.cs:55415-55427):SelectRandom(1,1,1,1,2,2,3) 掷 1-3 发
     // (权重 4:2:1),每发速度额外 ±3.4 逐轴随机(Utils.RandomVector2(Main.rand,
     // -3.4f,3.4f) 叠加 vec4)——★F8:全链走 this.rng 注入面

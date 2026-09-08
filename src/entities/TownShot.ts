@@ -75,7 +75,7 @@ const TOWN_DRAW_SPEC: Record<number, TownDrawSpec> = {
   669: { rot: 'spin', cols: 0, spinRate: 0.25 },        // aiStyle 68 :29047
   880: { rot: 'upright-mirror', cols: 0, spinRate: 0 }, // AI_183 :40418-40430(34×256 八帧行)
   590: { rot: 'upright', cols: 6, spinRate: 0 },        // 96×20 六列条(AI_112 不赋 rotation)
-  950: { rot: 'upright', cols: 0, spinRate: 0 },        // AI_186(rotation 0;四层脉冲叠画未接,登记)
+  950: { rot: 'upright', cols: 0, spinRate: 0 },        // AI_186(rotation 0;★SW-BJ33 2026-09-08 起公主 663 面=PrincessAuraShot 专类（四层脉冲叠画已接）,本条=通用 TownShot 兜底形)
   586: { rot: 'grow', cols: 0, spinRate: 0 },           // 24×80 竖条 + 生长
 };
 
@@ -333,5 +333,195 @@ export class TownShot extends Entity {
       if (this.projId === 669) this.kill669(game);  // Kill() 爆炸(同敌免疫帧拦双吃)
       return;
     }
+  }
+}
+
+// ==================== SW-BJ33 2026-09-08：公主 663 魔法阵 950（AI_186 域内专类） ====================
+// 用户实报「公主魔法攻击怪物身上没有特效,只有凭空受伤害」。根因=发射端把 950 交给
+// 通用 TownShot 承载:通用命中环「命中即亡」（上段 dead=true 杀位）,而 950 是【在敌
+// 体内出生】的 104×104 定点阵（NPC.cs:55367 position+Size×rand(0..1)）→ tick1 命中
+// =tick1 亡,全程零帧可见。原版面（本类逐项对齐）：
+//   · SetDefaults P.cs:8958-8971：104×104/aiStyle186/friendly/magic/alpha255/
+//     ignoreWater/timeLeft180/tileCollide=false/penetrate=-1;
+//   · AI_186_PrincessWeapon P.cs:43453-43573：ai[0]>=60 自 Kill（timeLeft180 用不满,
+//     实寿命 60t）;Opacity=Remap(t,0,60,1,0);scale=(0.4+0.6×easeOut²)×(1−Remap(t,45,60)²);
+//     localAI[0]=(0.4+0.6×easeOut²(Remap(t,20,60)))×同尾;双环 d267 尘（环缘半径
+//     52×scale,法向 ±45° 偏 6px,环1 vel=法向×−2×scale+v×0.5+position−vel×5,
+//     环2 vel 被 :43517 覆写为 v×0.5〔v=0 → 静止〕）×3×½掷 + 白 CloneDust
+//     （scale/2、fadeIn×0.85,:43499-43503/:43520-35）+ PrincessWeapon 编排粒子
+//     ¼掷（:43538-43552,for(0..0.8) 单迭代;本仓 1:1 站 = orchestraFx.princessWeaponFx）
+//     + t==50 四正交收束爆发 ×2 档速度 ×4 向（:43554-43572,PositionInWorld=Center）;
+//   · 绘制 Main.cs:28735-28755：128 贴图四层叠画（白 inner=localAI[0]/粉 inner×0.95/
+//     白 outer=scale/粉 outer×0.95）,A=0 纯加法惯用法 → canvas 'lighter';色=
+//     hslToRgb(0.92,1,0.5)=(255,0,122)（Main.cs:48689-48724 hue2rgb 折算）;
+//     微光变体 ai2==1 → hue 0.96=(255,0,61) + 白面 (255,0,30,180)（其 A=180 erase
+//     分量 ≈ globalAlpha×180/255 折算——A=0 家族既有口径,登记 VanillaDust.ts 同债）;
+//   · 命中面 Damage_PVE_Inner P.cs:12615：penetrate=-1 → :14189 `penetrate>0` 减命
+//     支不可达 = 命中【不亡】;:14182-14186 `penetrate!=1` → NPC.immune[owner]=10 =
+//     同弹对同敌 10t 再命中窗（HitCdImpl 承接,每敌独立）;:13575-13577 case 950
+//     damage×0.98【字段】逐击衰减——当前击用衰减前值,击后 (int) 截断（15→14→13…）;
+//     击退向 num40=direction=Entity.cs:20 缺省 1（零速出膛全链无人改向,:13232 方向
+//     覆写支 `!npcProj` 不适用）→ kb 恒 +3 右推（原版本相,勿按直觉"修"成朝向）;
+//   · npcProj=true（NPC.cs:55514-55515）→ CutTiles 门 `!npcProj`（P.cs:12516）不割草;
+//     tileCollide=false → 通用撞块杀不适用。
+// 发射端（TownNPC.shootAt 663 支）= AttackTime 60 → 15/25/35/45/55 五阵/次。
+// TOWN_DRAW_SPEC[950] 通用条目随本类退役保留（防御:他处若仍以通用 TownShot 生成
+// 950,绘制面仍有 upright 形,不再登记）。
+
+/** 950 环贴图离屏染色缓存（'source-in';key=色串。XNA 顶点色染面 canvas 等价） */
+const ringTintCache = new Map<string, HTMLCanvasElement | null>();
+
+function tintedRing(img: ImageBitmap | HTMLImageElement, color: string): HTMLCanvasElement | null {
+  const hit = ringTintCache.get(color);
+  if (hit !== undefined) return hit;
+  if (typeof document === 'undefined') { ringTintCache.set(color, null); return null; }
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const c = cv.getContext('2d');
+    if (!c) { ringTintCache.set(color, null); return null; }
+    c.drawImage(img, 0, 0);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = color;
+    c.fillRect(0, 0, cv.width, cv.height);
+    ringTintCache.set(color, cv);
+    return cv;
+  } catch {
+    ringTintCache.set(color, null);
+    return null;
+  }
+}
+
+export class PrincessAuraShot extends TownShot {
+  /** AI_186 ai[0]（:43455 逐 t++,≥60 Kill） */
+  private t = 0;
+  private readonly lifeT = 60;
+  /** 绘制包络（fixedUpdate 逐拍成值,draw 消费） */
+  opacity = 1;
+  scl = 0.4;       // proj.scale（:43469）
+  sclInner = 0.4;  // localAI[0]（:43474）
+  /** 当前击伤害（=发射端 GetAttackDamage_ForTownNPC 终值;逐击 ×0.98 字段衰减 :13575） */
+  private hitDmg: number;
+  private readonly hitCd = new HitCdImpl();
+  /** 微光变体 ai2==1 → 红阵（Main.cs:28742-28746） */
+  private readonly red: boolean;
+
+  /** (cx,cy)=阵心世界像素（=原版 NewProjectile X,Y 中心坐标语义）;ai2=townNpcVariationIndex */
+  constructor(cx: number, cy: number, damage: number, knockback: number, ai2 = 0) {
+    const def = projectileData(950);
+    const hw = (def?.width ?? 104) / 2;
+    const hh = (def?.height ?? 104) / 2;
+    super(cx - hw, cy - hh, 0, 0, damage, knockback, 950, { noGravity: true, ai2 });
+    this.hitDmg = damage;
+    this.red = this.ai2 === 1;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // 湿段共享体调用面保留（域纪律,NurseSyringeShot 先例）——950 ignoreWater=true
+    //（P.cs:8966）→ 整段门恒闭零行为
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, true);
+    if (this.dead) return;
+    this.t++;
+    if (this.t >= this.lifeT) { this.dead = true; return; }        // :43457-43461
+    const u = this.t / this.lifeT;
+    this.opacity = 1 - u;                                          // :43462
+    const e1 = 1 - (1 - u) * (1 - u);                              // num3 :43464
+    const e2 = 1 - (1 - e1) * (1 - e1);                            // num4 :43465
+    const tail = Math.max(0, Math.min(1, (this.t - 45) / 15));     // num5 :43466 Remap(t,45,60)
+    const tailInv = 1 - tail * tail;                               // num6-7 :43467-68
+    this.scl = (0.4 + 0.6 * e2) * tailInv;                         // scale :43469
+    const g8 = Math.max(0, Math.min(1, (this.t - 20) / 40));       // num8 :43471 Remap(t,20,60)
+    const g9 = 1 - (1 - g8) * (1 - g8);                            // num9 :43472
+    const g10 = 1 - (1 - g9) * (1 - g9);                           // num10 :43473
+    this.sclInner = (0.4 + 0.6 * g10) * tailInv;                   // localAI[0] :43474
+    const cx = this.x + this.w / 2;
+    const cy = this.y + this.h / 2;
+    const ringR = (this.w / 2) * this.scl;                         // num11×scale（:43478/:43511）
+    // newColor = hslToRgb(0.92,1,0.5)×Opacity（:43477——(255,0,122),A=255×Opacity）
+    const col = { r: 255, g: 0, b: 122, a: Math.round(255 * this.opacity) };
+    const rx = (nx: number, ny: number): number => nx * Math.SQRT1_2 - ny * Math.SQRT1_2;   // RotatedBy(π/4)
+    const ry = (nx: number, ny: number): number => nx * Math.SQRT1_2 + ny * Math.SQRT1_2;
+    if (u < 0.9) {                                                 // :43478/:43506 双环门
+      for (const ring of [0, 1] as const) {                        // :43480 环1 / :43507 环2
+        for (let i = 0; i < 3; i++) {                              // ×3（:43481/:43508）
+          if (Math.random() >= 0.5) continue;                      // Next(2)==0（:43482/:43509）
+          const a = Math.random() * Math.PI * 2;                   // UnitX.RotatedBy(rand×τ)
+          const nx = Math.cos(a), ny = Math.sin(a);
+          const px = cx + nx * ringR + rx(nx, ny) * (ring === 0 ? 6 : -6);   // :43486 +6 / :43513 −6
+          const py = cy + ny * ringR + ry(nx, ny) * (ring === 0 ? 6 : -6);
+          // 环1 vel=法向×−2×scale（+v×0.5=0）;环2 vel 被 :43517 覆写为 v×0.5=0（视觉死写照抄）
+          const vx = ring === 0 ? rx(nx, ny) * -2 * this.scl : 0;
+          const vy = ring === 0 ? ry(nx, ny) * -2 * this.scl : 0;
+          const d = game.spawnDust?.(px, py, 0, 0, 267, vx, vy, 0, col, 0.3, true);
+          if (d) {
+            d.fadeIn = Math.random() * 1.2 * this.scl;             // :43494/:43510
+            d.scale = 0.3 * this.scl;                              // :43496/:43512 ×= scale（proj scale）
+            d.x -= d.vx * 5; d.y -= d.vy * 5;                      // :43498 position += velocity×−5（环2 vel=0 → 无偏移）
+          }
+          // CloneDust 白影（:43499-43503/:43520-35）scale/2、fadeIn×0.85、白、零掷
+          const w = game.spawnDust?.(d ? d.x : px, d ? d.y : py, 0, 0, 267, vx, vy, 0,
+            { r: 255, g: 255, b: 255, a: 255 }, 0.15, true);
+          if (w) {
+            w.scale = 0.15 * this.scl;
+            w.fadeIn = (d ? (d.fadeIn ?? 0) : 0) * 0.85;
+          }
+        }
+      }
+    }
+    // PrincessWeapon 编排粒子 ¼掷（:43538-43552;MovementVector=velocity=0）
+    if (u < 0.95 && Math.random() < 0.25) {
+      const a = Math.random() * Math.PI * 2 + Math.PI / 2;         // UnitX.RotatedBy(rand×τ+π/2)
+      princessWeaponFx(game, cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR, this.vx, this.vy);
+    }
+    // t==50 收束爆发（:43554-43572）：四正交 ×{1,2} 档速度,PositionInWorld=Center
+    if (this.t === this.lifeT - 10) {
+      for (let q = 0; q < 4; q++) {
+        const a = (Math.PI * 2 * q) / 4;
+        princessWeaponFx(game, cx, cy, Math.cos(a), Math.sin(a));
+        princessWeaponFx(game, cx, cy, Math.cos(a) * 2, Math.sin(a) * 2);
+      }
+    }
+    // ---- 命中面（penetrate=-1 命中不亡;同敌 10t 窗;×0.98 逐击衰减）----
+    this.hitCd.tick();
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; id?: number; uid?: number;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
+        def?: { friendly?: boolean } };
+      if (e.dead || e.def?.friendly) continue;
+      if (!projOverlap(this.x, this.y, this.w, this.h, e)) continue;
+      const eid = e.id ?? e.uid ?? 0;                              // NPC 索引位（immune[owner] 槽）
+      if (!this.hitCd.ready(eid, 10)) continue;                    // :14182-86 NPC.immune[owner]=10
+      e.hurt(this.hitDmg, this.knockback, 0, game, 0, false, 0, false);   // num40=direction=1（Entity.cs:20）
+      this.hitDmg = Math.max(1, Math.trunc(this.hitDmg * 0.98));   // :13575-77 字段衰减（下钳 1=域口径防 0 伤死循环）
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(950);
+    if (!img || img.width <= 0) return;    // 环贴图缺失 → 静默（尘/编排粒子仍可见;不用通用兜底盒——104 判定盒≠128 贴图）
+    const pink = tintedRing(img, this.red ? 'rgb(255,0,61)' : 'rgb(255,0,122)');   // hue 0.92 / 0.96
+    // Main.cs:28752-28755 四层叠画,A=0 纯加法 → 'lighter';×0.6 亮度 ×Opacity 进 globalAlpha。
+    // 微光白面 (255,0,30,180) 的 A=180 erase 分量 ≈ globalAlpha×(180/255) 折算（A=0 家族口径,登记）
+    const op = Math.max(0, this.opacity);
+    const whiteA = (this.red ? 180 / 255 : 1) * op * 0.6;
+    const pinkA = op * 0.6;
+    ctx.save();
+    ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;      // XNA spriteBatch 线性采样面（软辉环,非像素锁面）
+    const layer = (tex: CanvasImageSource | null, s: number, alpha: number): void => {
+      if (!tex || alpha <= 0) return;
+      ctx.globalAlpha = alpha;
+      const d = img.width * s;             // 128 贴图 × scale（origin=Size/2 中心 :28740）
+      ctx.drawImage(tex, -d / 2, -d / 2, d, d);
+    };
+    layer(img, this.sclInner, whiteA);     // :28752 白 inner
+    layer(pink, this.sclInner * 0.95, pinkA);   // :28753 粉 inner
+    layer(img, this.scl, whiteA);          // :28754 白 outer
+    layer(pink, this.scl * 0.95, pinkA);   // :28755 粉 outer
+    ctx.restore();
   }
 }

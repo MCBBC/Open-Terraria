@@ -6243,7 +6243,7 @@ export class UI {
     }
     // 标题(Main.cs:41725 Lang.inter[4] "Inventory" @(40,0))
     const title = txt(Lang.inter(4));
-    title.style.fontSize = '20px';
+    title.style.fontSize = '16px';
     pos(title, () => ({ x: TITLE_XY.x, y: TITLE_XY.y }));
     // 成就 Advisor(Main.cs:41758-41763 @(501,25))
     const advWrap = el('div');
@@ -6262,10 +6262,10 @@ export class UI {
     });
     // ---- 钱币/弹药列(Main.cs:42460-42495:标签 (496,84)/(532,84),槽 x=497/534) ----
     const coinLbl = txt(Lang.text('LegacyInterface.26'));
-    coinLbl.style.fontSize = '15px';
+    coinLbl.style.fontSize = '13px';
     pos(coinLbl, () => ({ x: COIN_LABEL_XY.x, y: COIN_LABEL_XY.y }));
     const ammoLbl = txt(Lang.text('LegacyInterface.27'));
-    ammoLbl.style.fontSize = '15px';
+    ammoLbl.style.fontSize = '13px';
     pos(ammoLbl, () => ({ x: AMMO_LABEL_XY.x, y: AMMO_LABEL_XY.y }));
     for (let k = 0; k < 4; k++) {
       const cs = this.vinvMakeSlot('inv', COIN_START + k, COIN_AMMO_SCALE);
@@ -6539,6 +6539,32 @@ export class UI {
 
     // ---- 现代合成面板 → 经典竖列表(用户实测二轮退役 Modern 面板) ----
     this.vinvBuildCraft();
+    // ---- 设置文字钮(DrawInterface_29_SettingsButton Main.cs:46286-46301:
+    //  (sw-110, sh-20) 文本 Lang.inter[62] 悬停放大;与装备列底碰撞 → 左推 140 并
+    //  贴列底上方(:46266-46282);点击=开/关设置浮层) ----
+    const settingsBtn = el('button', 'vinv-txt') as HTMLButtonElement;
+    settingsBtn.textContent = Lang.inter(62);
+    settingsBtn.style.cssText = 'font-size:15px; pointer-events:auto; cursor:pointer;'
+      + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;'
+      + 'transition:transform 80ms linear;';
+    settingsBtn.addEventListener('mouseenter', () => { settingsBtn.style.transform = 'scale(1.15)'; });
+    settingsBtn.addEventListener('mouseleave', () => { settingsBtn.style.transform = 'scale(1)'; });
+    settingsBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.onPauseMenu?.();   // 开/关设置浮层(SW-BN3 与原版同相:背包开着叠浮层)
+    });
+    this.vinvRoot?.appendChild(settingsBtn);
+    this.vinvLayoutItems.push({ el: settingsBtn, pos: () => {
+      const c = this.vinvLayoutCtx;
+      if (!c) return null;
+      let px = c.sw - 110, py = c.sh - 20;
+      let last = 7;
+      for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
+      const colBottom = equipRowY(c.num20, last) + 44.2;
+      if (py - 28 <= colBottom) { px -= 140; py = colBottom - 17; }
+      return { x: px, y: py };
+    } });
+
     // ---- 宝箱条(直接叠背包下方;显示随 openChest) ----
     this.vinvBuildChest();
 
@@ -6846,7 +6872,7 @@ export class UI {
     this.vinvCraftListEl = listHit;
     // 制作标题(Lang.inter[25] @(76,414+adjY);:169-173)
     const title = el('div', 'vinv-txt', Lang.inter(25));
-    title.style.fontSize = '17px';
+    title.style.fontSize = '14px';
     this.vinvRoot?.appendChild(title);
     this.vinvCraftTitleEl = title;
     // 材料行容器(底部一行,槽位绝对定位)
@@ -6930,7 +6956,7 @@ export class UI {
   private vinvBuildChest(): void {
     // 名字(Main.cs:504,invBottom;openChestPanel 的 bankNames 语义在 paint 侧回写)
     const nameEl = el('div', 'vinv-txt');
-    nameEl.style.cssText += 'font-size:15px; pointer-events:auto;';
+    nameEl.style.cssText += 'font-size:13px; pointer-events:auto;';
     this.vinvRoot?.appendChild(nameEl);
     this.vinvChestNameEl = nameEl;
     this.vinvLayoutItems.push({ el: nameEl, pos: () => {
@@ -7054,8 +7080,15 @@ export class UI {
         // HoverItem = createItem.Clone()(:42978)→ 完整物品 tooltip
         const iid = this.game.itemId(vanillaItemKey(rec.r.create) ?? '');
         if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: s });
+        // hover 态(★用户实测三轮:原版悬停配方=描金背景)
+        if (this.vinvCraftFocusV !== idx) s.style.setProperty('--slot-bgimg', 'url(sprites/vanilla/Inventory_Back14.png)');
       });
-      s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+      s.addEventListener('mouseleave', () => {
+        this.tooltip.style.display = 'none';
+        cancelAnimationFrame(this.tooltipPulseRaf);
+        s.style.setProperty('--slot-bgimg',
+          `url(sprites/vanilla/Inventory_Back${this.vinvCraftFocusV === idx ? 14 : ''}.png)`);
+      });
       s.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
       root.appendChild(s);
       this.vinvCraftCellEls.push({ el: s });

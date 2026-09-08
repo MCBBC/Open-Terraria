@@ -253,7 +253,10 @@ export class MenuBackground {
       this.starAcc += frames;
       while (this.starAcc >= 1) {
         this.starAcc -= 1;
-        if (nextInt(12) === 0 || (drunkGen && !remixGen)) this.sky.starFallAt(Math.random() * 1000, 1000);
+        if (nextInt(12) === 0 || (drunkGen && !remixGen)) {
+          this.sky.starFallAt(Math.random() * 1000, 1000);
+          this.starFallCount++;   // ★IIIII218 观测面
+        }
       }
     }
     // 背景组重掷调度（cs:20070-20100，抓取中照跑）。★可见槽保留（原版菜单零硬切）：
@@ -363,4 +366,22 @@ export class MenuBackground {
   /** 调试探针 */
   lastDt = 0;
   clockTime(): number { return this.clock.timeOfDay; }
+
+  // ---- ★IIIII218 生成屏动效观测面（探针专用,零行为影响）----
+  /** 坠星累计（tick 星坠支每次 Fall +1——drunk 生成期应≈60/s,remix 白昼应>0） */
+  starFallCount = 0;
+  /** 生成屏动效快照：旗标/相机漂移速度(px/帧)/云量/云型样本/坠星累计 */
+  genAnimDebug(): {
+    genFlags: unknown; camX: number; cloudTarget: number | null;
+    cloudTypes: number[]; starFallCount: number; lockBG: boolean;
+  } {
+    return {
+      genFlags: this.genFlags,
+      camX: Math.round(this.camX),
+      cloudTarget: this.sky.menuNumCloudsOverride,
+      cloudTypes: (this.sky as unknown as { vclouds: Array<{ type: number }> }).vclouds.slice(0, 12).map((c) => c.type),
+      starFallCount: this.starFallCount,
+      lockBG: this.lockBG,
+    };
+  }
 }
