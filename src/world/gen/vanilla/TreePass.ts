@@ -6,6 +6,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
+import { activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII228 多秘 ewAdjust
 import { idsByVanillaSheet } from './TileRunner';
 import { genRangeFrame } from './FinalCleanupPass';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
@@ -204,7 +205,10 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   //   高度改 Next(2,101)；else-if extraLivingTrees ⇒ 高度 += Next(0,11)。组合秘种子
   //   activeSecretSeedCount>1 的因子缩水另案（SecretSeedDoEndsPass ewAdjust 同域惯例）
   //   ——单旗标因子 (1+3)/4=1 ⇒ adjustment=3，零掷骰差。
-  if (!!gs.seedFlags.errorWorld && rng.nextInt(3) === 0) {
+  // ★IIIII228：Next(errorWorldAdjustment(3.0))——count 因子化（cs:30081;单旗标 3、
+  //   count 5..8 ⇒ 6、9..12 ⇒ 9 …）
+  if (!!gs.seedFlags.errorWorld
+    && rng.nextInt(errorWorldAdjustmentOf(3.0, activeSecretSeedCountOf(gs.seedFlags))) === 0) {
     height = rng.int(2, 100);                          // cs:30084
   } else if (!!gs.seedFlags.extraLivingTrees) {
     height += rng.int(0, 10);                          // eLT 树高加成（cs:30085-30086）
@@ -568,7 +572,9 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   //   +1~2 掷，地狱首棵灰烬树后全流相移（#28 树丛首差 @(447,994) 铁证）。
   //   gs 缺省（运行时直调/肥料云路径）不掷——生成流专属上下文。
   if (gs?.seedFlags?.errorWorld) {
-    if (rng.int(0, 1) === 0) {
+    // ★IIIII228：Next(errorWorldAdjustment(2.0))——count 因子化（cs:30709;单旗标 2、
+    //   count 5..8 ⇒ 4、9..12 ⇒ 6 …）
+    if (rng.nextInt(errorWorldAdjustmentOf(2.0, activeSecretSeedCountOf(gs.seedFlags))) === 0) {
       height = y < gs.worldSurface ? rng.int(3, 49) : rng.int(3, 14);
     }
   }

@@ -5,8 +5,8 @@
 //    3188）：僵尸沿 slope2 上行到楔点后永久 ±2px 弹跳（log 12 帧：vx 恒 0.87 从不
 //    归零、x 50987↔50991、g 交替、hw 恒 false）。定谳：AI_003 卡死计数链
 //    （position.X == oldPosition.X → ai3++，NPC.cs:57703；满 num58=60 → 停索敌
-//    :57732 → 游荡转向 :57783-57797）在本仓被物理侧饿死 —— slopeCollide 缺口
-//    短途支（TileCollision.ts shortfall X-slide）偏离原版 Collision.cs:2004-2033：
+//    :57914 → 游荡转向 :57955-57975）在本仓被物理侧饿死 —— slopeCollide 缺口
+//    短途支（TileCollision.ts shortfall X-slide）偏离原版 Collision.cs:2001-2019：
 //    原版每截短 tick 按精确差额 num9 滑移并清零 velocity.X/Y（:2016-2017
 //    vector3.X=0f; vector3.Y=0f），本仓一次性 4px 推离且不清 vx → x 永不静止
 //    → ai3 恒卡 1 → 永不转向。★物理侧车道已开（2026-09-08 F3/F4③④ 落刀,
@@ -101,6 +101,46 @@ describe('v_200 坡楔卡死链（AI_003, NPC.cs:57703→:57732→:57783）', ()
     expect(turned).toBeGreaterThanOrEqual(0);            // 转向必发生（log 态=永不转向）
     expect(turned).toBeLessThan(200);                    // vanilla 节奏 ≈ 60+2 tick
     expect(escaped).toBeGreaterThanOrEqual(0);           // 转向后走出楔（log 态=原地弹跳）
+  });
+
+  it('自然地形（无注入）：shortfall 双清速度 + 精确 num9 滑移 ⇒ 楔点亚像素钉驻', () => {
+    // 落刀后（TileCollision shortfall 支 = Collision.cs:2001-2019）的自然动力学：
+    // ① vx 逐拍归零（:2016-2017）——旧实现 vx 恒 0.87 从不归零（log 实锤）；
+    // ② 逐拍 |Δx| ≤ 0.2px——旧实现一次性 4px 推离；
+    // ③ 300t 内 x 停驻 <1px 带（钉驻，非弹跳/爬退）。
+    // 【残余登记 2026-09-07】自然平衡为 2-tick 微循环（前进 +0.07 / 滑退 −0.075，
+    // 净 −0.005/t）：Y 轴承接面（moveAxis/solidSpan 落点）与坡贴合线（右缘 num4）
+    // 在该进深处定义相差 ~0.075px ⇒ x 逐拍不满足浮点全等 ⇒ AI_003 字面计数
+    // （position.X == oldPosition.X, NPC.cs:57703）自然版不点火、不转向。
+    // 原版同地形是否精确钉驻（其 Y 承接面与贴合线同式,理论可全等）需 rig 仲裁；
+    // 修此残差须动 Y-sweep/solidSpan（本批授权外,勿强行改）。AI 链路正确性
+    // 由上一用例（vanilla 前提注入）守卫。
+    const game = makeGame('v200-wedge-natural');
+    buildCells(game.world, WEDGE);
+    const z = Enemy.fromVanilla(200, 372, 401);
+    if (!z) throw new Error('v_200 构造失败');
+    const player = { x: 30 * 16, y: 1 * 16, w: 20, h: 42, cx: 30.5 * 16, cy: 1.5 * 16, dead: false };
+    (game as { player: unknown }).player = player;
+    const e = z as unknown as { facing: number };
+    let wedgeTicks = 0, vxZeroTicks = 0, maxStep = 0, xMin = Infinity, xMax = -Infinity;
+    let prevX = z.x;
+    for (let t = 0; t < 400; t++) {
+      z.fixedUpdate(1 / 60, game);
+      if (t < 100) { prevX = z.x; continue; }              // 热身：逼近段不计量（满速 0.87/t）
+      if (e.facing === 1 && z.cx > 378 && z.cx < 386) {           // 楔点驻留带
+        wedgeTicks++;
+        if (z.vx === 0) vxZeroTicks++;
+        const step = Math.abs(z.x - prevX);
+        if (step > maxStep) maxStep = step;
+        if (z.x < xMin) xMin = z.x;
+        if (z.x > xMax) xMax = z.x;
+      }
+      prevX = z.x;
+    }
+    expect(wedgeTicks).toBeGreaterThan(200);             // 确在楔点驻留（非弹过/未达）
+    expect(vxZeroTicks).toBeGreaterThan(wedgeTicks * 0.3); // shortfall 双清在位（旧=恒 0 次）
+    expect(maxStep).toBeLessThanOrEqual(0.2);            // 旧=4px 推离；新=精确 num9 亚像素
+    expect(xMax - xMin).toBeLessThan(1);                 // 300t 钉驻 <1px 带（旧=±2px 弹跳）
   });
 });
 

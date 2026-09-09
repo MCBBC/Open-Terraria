@@ -80,17 +80,20 @@ describe('SW-BJ19 坡缝速度残量守卫(vanilla 1:1)', () => {
     void G;
   });
 
-  it('多相位扫描:任意入缝相位均无速度归零驻留', () => {
-    for (let phi = 0; phi < 8; phi++) {
+  it('多相位扫描:任意入缝相位均无速度归零驻留(★SW-RB6c 收紧:16 相位×1px+逐相位拦截判别力门)', () => {
+    for (let phi = 0; phi < 16; phi++) {
       const { W, sx } = makeSlopeWorld();
-      const trail = runUphill(W, sx * TILE - 20 - phi * 2, 80);
+      const trail = runUphill(W, sx * TILE - 20 - phi, 80);
       let hadSpeed = false;   // 排除起步加速段(合法的 0→3 爬升)
-      for (const [x, vx] of trail) {
+      let seamBlocks = 0;     // 逐相位判别力:每相位都必须真实触发坡缝拦截(防空转绿)
+      for (const [x, vx, hw] of trail) {
         if (vx >= 1) hadSpeed = true;
+        if (hw && x >= sx * TILE - 20 && x < (sx + 2) * TILE) seamBlocks++;
         if (hadSpeed && x >= sx * TILE - 20 && x < (sx + 2) * TILE) {
           expect(vx, `φ=${phi} 坡区速度归零(x=${x.toFixed(1)})`).toBeGreaterThan(0);
         }
       }
+      expect(seamBlocks, `φ=${phi} 夹具未触发坡缝拦截(判别力真空)`).toBeGreaterThan(0);
     }
   });
 

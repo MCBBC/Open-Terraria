@@ -2,6 +2,7 @@
 // 进度/预览回调、超时看门狗（terminate + 重建）、worker 不可用时抛 WorldGenUnavailable
 // 由调用方（Game.newWorld/loadWorld）落回主线程路径。
 import { World } from '../world/World';
+import { WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① 中止判别（与 WorldGenUnavailable 判例同形:不触发 fallback）
 import type { GenConfigDTO, WorldWorkerEvent, WorldWorkerRequest } from './protocol';
 
 export interface PreviewFrame {
@@ -138,6 +139,18 @@ export class WorldGenClient {
     });
   }
 
+  // ★IIIII229 ①：Esc 中止链客户端面——Game.abortWorldGen() 经此把请求转投 worker
+  //   通道（'abortGen' fire-and-forget）。主线程 fallback 生成路不经此处（Game 直接
+  //   调 WorldGen.requestWorldGenAbort 置位同一模块位）。
+  /** 有无在途作业（generate/saveParse/genIcons 任一 pending）——中止路由判据。 */
+  hasPendingWork(): boolean { return this.pending.size > 0; }
+  /** 请求中止当前生成作业（无在途作业时置位无害：worker 下次 generateWorld 头部清零）。 */
+  abortGen(): void {
+    void this.ensureWorker().then((w) => {
+      w.postMessage({ id: this.nextId++, type: 'abortGen' } satisfies WorldWorkerRequest);
+    }).catch(() => { /* worker 不可用=无作业可中止 */ });
+  }
+
   /** 程序化图标图集(#perf-gpulog 图标包 worker 化):纯像素生成+平铺进单张
    *  图集,rgba transfer 回传。排队语义 = 与后续 saveParse/generate 同 worker
    *  串行——startAssetPrewarm 先发本请求,天然排在读档/生成作业之前 */
@@ -214,6 +227,17 @@ export class WorldGenClient {
       if (p.stallTimer) clearInterval(p.stallTimer);
       this.pending.delete(ev.id);
       p.reject(new Error(`[worldGen worker] ${ev.message}`));
+      return;
+    }
+    // ★IIIII229 ①：生成被 Esc 中止（worker 端 WorldGenAbortedError 专用通道）——
+    //   以同名错误 reject,调用方（Game.newWorld/mainFlow）判别后按中止收场,
+    //   不触发 WorldGenUnavailable fallback。
+    if (ev.type === 'aborted') {
+      if (!p) return;
+      clearTimeout(p.timer);
+      if (p.stallTimer) clearInterval(p.stallTimer);
+      this.pending.delete(ev.id);
+      p.reject(new WorldGenAbortedError());
       return;
     }
     if (ev.type === 'progress') {

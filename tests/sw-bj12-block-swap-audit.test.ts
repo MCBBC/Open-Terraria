@@ -76,6 +76,7 @@ interface Shell {
     inv: { slots: unknown[]; heldItem(): unknown; removeHeld(n?: number): void };
   };
   drops: Array<[string, number]>;
+  achievements: Record<string, unknown>;   // SW-RB6a 2026-09-07：Shell 缺声明（F6 测试覆写 notifyTileDestroyed 用）
   hit: ReturnType<typeof mkHitTiles>;
   tryPlace(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;
   tryPlaceWall(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;

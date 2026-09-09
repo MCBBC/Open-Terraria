@@ -2703,7 +2703,12 @@ export class Enemy extends Entity {
           // 实扣>0 才授）。SlimeCanContainItems ∧ ai[1]>0 的接触携物状态梯；
           // ★StatusFromNPC 全表其余 type 臂（蜘蛛 Chill/木乃伊流血/猪龙等
           // :22645-22760）本批未建模=登记债（非五旗面,唯 FTW 火把史莱姆臂在此支内）
-          if (landed) this.slimeCarryContactStatus(game, localPlayer);
+          if (landed) {
+            const oreRet = this.slimeCarryContactStatus(game, localPlayer);
+            // ★IIIII228：StatusFromNPC 全表 type 臂（Player.cs:22513-22771）——
+            //  蜘蛛 Chill/木乃伊流血/猪龙 Rabies/脑专家九选一等 33 臂整表接线
+            this.statusFromNpcTypeArms(game, localPlayer, oreRet);
+          }
         } finally {
           if (inject) chan.__swNextHitBucket = undefined;
         }
@@ -3172,11 +3177,13 @@ export class Enemy extends Entity {
    *  （SlimeCanContainItems ∧ ai[1]>0）接触命中玩家时按体内物品授状态。
    *  消费点=Update_NPCCollision 接触支（:31663 `Hurt>0 && !dead && !flag2`）。
    *  梯序与 cs else-if 链同序；时长 tick→s（÷60 取整）。 */
-  private slimeCarryContactStatus(game: GameHooks, player: Player): void {
+  /** 返回值 = 原版矿石支 `return`（:22581）——命中时整段 StatusFromNPC 终止,
+   *  后续 type 臂不再执行（IIIII228 全表接线沿用该语义） */
+  private slimeCarryContactStatus(game: GameHooks, player: Player): boolean {
     const a1 = this.ai1;
-    if (!(this.vanillaId !== null && Enemy.SLIME_CAN_CONTAIN_ITEMS.has(this.vanillaId) && a1 > 0)) return;
+    if (!(this.vanillaId !== null && Enemy.SLIME_CAN_CONTAIN_ITEMS.has(this.vanillaId) && a1 > 0)) return false;
     const buffs = player.buffs;
-    if (!buffs) return;
+    if (!buffs) return false;
     const sf = game.world.seedFlags;
     const expert = mainExpertMode(game.world);
     const t = (ticks: number) => Math.max(1, Math.round(ticks / 60));
@@ -3187,6 +3194,7 @@ export class Enemy extends Entity {
       const pool = [BuffType.Confused, BuffType.Silenced, BuffType.Cursed, BuffType.Slow,
         BuffType.Blackout, BuffType.Weak, BuffType.BrokenArmor];
       buffs.apply(pool[Math.floor(Math.random() * 7)], t(R(60, 300)));
+      return true;                                   // :22581 return
     } else if (a1 === 3) {
       buffs.apply(BuffType.Stoned, t(R(30, 59)));                          // :22583-22585
     } else if (a1 === 150) {
@@ -3206,6 +3214,93 @@ export class Enemy extends Entity {
       buffs.apply(BuffType.Frostburn, t(R(180, 359)));                     // :22611-22617
     } else if (a1 === 3347) {
       buffs.apply(BuffType.Cursed, t(R(60, 299)));                         // :22619-22621
+    }
+    return false;
+  }
+
+  /** ★IIIII228 StatusFromNPC 全表 type 臂（Player.cs:22513-22545 脑臂 + :22642-22771
+   *  type 表,1:1 梯序与掷序）。原版各臂为独立 if（命中类型即掷,可多项叠加）;
+   *  专家档脑臂在表前。371 潮湿臂（:22639-22643）已由 Game 受击汇入点承担,此处
+   *  不重施（防双掷）。`!frozen` 门 = 玩家无 Frozen(47)（:9749 frozen=true）。
+   *  时长 tick→s（÷60）;R(a,b)=vanilla Next(a,b) 含头不含尾。 */
+  private statusFromNpcTypeArms(game: GameHooks, player: Player, oreReturned: boolean): void {
+    const buffs = player.buffs;
+    if (!buffs || oreReturned) return;
+    const vid = this.vanillaId;
+    if (vid == null) return;
+    const expert = mainExpertMode(game.world);
+    const t = (ticks: number) => Math.max(1, Math.round(ticks / 60));
+    const R = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1)); // Next(lo,hi+1)
+    const frozen = buffs.has(BuffType.Frozen);           // Player.frozen（buff 47 专属）
+    // ---- 脑臂（:22515-22545）：专家 && (266 1/3 || 267) → Next(9)（2/4 重掷一次）
+    //      × Next(75,150)×0.01 系数九选一 debuff ----
+    if (expert && ((vid === 266 && Math.floor(Math.random() * 3) === 0) || vid === 267)) {
+      let num = Math.floor(Math.random() * 9);
+      if (num === 2 || num === 4) num = Math.floor(Math.random() * 9);
+      const num2 = R(75, 149) * 0.01;                    // Next(75,150)
+      const dur = (mul: number) => t(Math.trunc(60 * num2 * mul));
+      switch (num) {
+        case 0: buffs.apply(BuffType.Poisoned, dur(3.5)); break;
+        case 1: buffs.apply(BuffType.Darkness, dur(2)); break;
+        case 2: buffs.apply(BuffType.Cursed, dur(0.5)); break;
+        case 3: buffs.apply(BuffType.Bleeding, dur(10)); break;
+        case 4: buffs.apply(BuffType.Confused, dur(1)); break;
+        case 5: buffs.apply(BuffType.Slow, dur(3.5)); break;
+        case 6: buffs.apply(BuffType.Weak, dur(7.5)); break;
+        case 7: buffs.apply(BuffType.Silenced, dur(1)); break;
+        case 8: buffs.apply(BuffType.BrokenArmor, t(Math.trunc(60 * num2 * 6.5))); break;  // (double)
+      }
+    }
+    if (oreReturned) return;                             // 携物矿石支 return 在脑臂之后（vanilla 序:脑→携物）
+    // ---- type 表（:22642-22771）----
+    if (vid === 530 || vid === 531) buffs.apply(BuffType.Venom, t(R(240, 240)));    // Next(240,241)=240 恒
+    if (vid === 159 || vid === 158) buffs.apply(BuffType.Bleeding, t(R(600, 1199)));
+    if (vid === 525) buffs.apply(BuffType.CursedInferno, t(240));
+    if (vid === 526) buffs.apply(BuffType.Ichor, t(420));
+    if (vid === 527) buffs.apply(BuffType.Confused, t(840));
+    if (expert && (vid === 49 || vid === 93 || vid === 51 || vid === 152 || vid === 634)
+      && Math.floor(Math.random() * 10) === 0) buffs.apply(BuffType.Rabies, t(R(1800, 5399)));
+    if (expert && vid === 222) buffs.apply(BuffType.Poisoned, t(R(60, 239)));
+    if (expert && (vid === 210 || vid === 211)) buffs.apply(BuffType.Poisoned, t(R(60, 179)));
+    if (expert && vid === 35) buffs.apply(BuffType.Bleeding, t(R(360, 599)));
+    if (expert && vid === 36 && Math.floor(Math.random() * 2) === 0) buffs.apply(BuffType.Slow, t(R(30, 59)));
+    if (vid >= 269 && vid <= 272) {
+      if (Math.floor(Math.random() * 3) === 0) buffs.apply(BuffType.Bleeding, t(1200));
+      else if (Math.floor(Math.random() * 3) === 0) buffs.apply(BuffType.Slow, t(300));
+    }
+    if (vid >= 273 && vid <= 276 && Math.floor(Math.random() * 2) === 0) buffs.apply(BuffType.BrokenArmor, t(600));
+    if (vid >= 277 && vid <= 280) buffs.apply(BuffType.OnFire, t(600));
+    if (vid === 370 && expert) {
+      const num5 = [0, BuffType.Rabies, BuffType.Bleeding][Math.floor(Math.random() * 3)];
+      if (num5 !== 0) buffs.apply(num5 as BuffType, t(60 * R(6, 20)));   // 60×Next(6,21)
+    }
+    if (((vid === 1 && this.vanillaNetId === -6) || vid === 81 || vid === 79 || vid === 183 || vid === 630)
+      && Math.floor(Math.random() * 4) === 0) buffs.apply(BuffType.Darkness, t(900));
+    if ((vid === 23 || vid === 25) && Math.floor(Math.random() * 3) === 0) buffs.apply(BuffType.OnFire, t(420));
+    if ((vid === 34 || vid === 83 || vid === 84 || vid === 179 || vid === 289)
+      && Math.floor(Math.random() * 3) === 0) buffs.apply(BuffType.Cursed, t(240));
+    if ((vid === 104 || vid === 102) && Math.floor(Math.random() * 5) === 0) buffs.apply(BuffType.Bleeding, t(2700));
+    if (vid === 75 && Math.floor(Math.random() * 10) === 0) buffs.apply(BuffType.Silenced, t(420));
+    if ((vid === 163 || vid === 238 || vid === 236 || vid === 237)
+      && Math.floor(Math.random() * 10) === 0) buffs.apply(BuffType.Venom, t(240));
+    if ((vid === 79 || vid === 103 || vid === 630) && Math.floor(Math.random() * 5) === 0) buffs.apply(BuffType.Silenced, t(420));
+    if ((vid === 75 || vid === 78 || vid === 82) && Math.floor(Math.random() * 8) === 0) buffs.apply(BuffType.Slow, t(900));
+    if ((vid === 93 || vid === 109 || vid === 80) && Math.floor(Math.random() * 14) === 0) buffs.apply(BuffType.Confused, t(300));
+    if (vid >= 305 && vid <= 314 && Math.floor(Math.random() * 10) === 0) buffs.apply(BuffType.Weak, t(3600));
+    if (vid === 77 && Math.floor(Math.random() * 6) === 0) buffs.apply(BuffType.BrokenArmor, t(7200));
+    if (vid === 112 && Math.floor(Math.random() * 20) === 0) buffs.apply(BuffType.Weak, t(18000));
+    if (vid === 182 && Math.floor(Math.random() * 25) === 0) buffs.apply(BuffType.Weak, t(7200));
+    if (vid === 141 && Math.floor(Math.random() * 2) === 0) buffs.apply(BuffType.Poisoned, t(600));
+    if (vid === 147 && !frozen && Math.floor(Math.random() * 12) === 0) buffs.apply(BuffType.Chilled, t(600));
+    if (vid === 150) {
+      if (Math.floor(Math.random() * 2) === 0) buffs.apply(BuffType.Chilled, t(900));
+      if (!frozen && Math.floor(Math.random() * 35) === 0) buffs.apply(BuffType.Frozen, t(60));
+      else if (!frozen && expert && Math.floor(Math.random() * 35) === 0) buffs.apply(BuffType.Frozen, t(60));
+    }
+    if (vid === 184) {
+      buffs.apply(BuffType.Chilled, t(1200));
+      if (!frozen && Math.floor(Math.random() * 15) === 0) buffs.apply(BuffType.Frozen, t(60));
+      else if (!frozen && expert && Math.floor(Math.random() * 25) === 0) buffs.apply(BuffType.Frozen, t(60));
     }
   }
 

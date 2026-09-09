@@ -27,7 +27,7 @@ import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
-import { generateWorld, lastGenState } from '../world/gen/WorldGen';
+import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
@@ -205,7 +205,7 @@ import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 // :38008/Spawn_IsAreaValidSpawn :38222/DescendFromDefaultSpace :38103/ForceClearArea :38199）
 import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from '../world/spawn/SpawnPlacement';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
-import { TILE_SOLID_TOP_FAMILY } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理
+import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
@@ -5449,6 +5449,14 @@ export class Game implements GameHooks {
 
   // ================= 生命周期 =================
 
+  /** ★IIIII229 ①：Esc 中止请求路由（vanilla UIWorldLoad.cs:54-58 QueuedAbort=true）——
+   *  worker 路径经 protocol 'abortGen' 消息（worker 侧置同一语义位）;主线程 fallback
+   *  路径直接置位本模块位。generateWorld pass 环边界消费（WorldGenerator.cs:435-439）。 */
+  abortWorldGen(): void {
+    if (this.genClient && this.genClient.hasPendingWork()) this.genClient.abortGen();
+    else requestWorldGenAbort();
+  }
+
   async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string | undefined, p: number, local?: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界尺寸档（0 小/1 中/2 大，UIWorldCreation 三档；给出时 generateWorld 以 SIZE_DIMS 派生 W/H） */ size?: import('../world/World').WorldSize; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; /** 彩蛋种子旗标直注（GenConfig.seedFlags，S0-1 解耦；缺省=parseSeed 派生） */ seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
     this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
     // 原版 gen[27]"正在安置液体"(SettleLiquids :16219;UIWorldLoadState 经
@@ -5483,6 +5491,9 @@ export class Game implements GameHooks {
         this.cb.onWorldReady();
         return;
       } catch (e) {
+        // ★IIIII229 ①：Esc 中止——专用错误类型优先判别,直接上抛收场
+        //  （中止绝不能触发 worker→主线程 fallback 重生成,那等于取消失败）
+        if (e instanceof WorldGenAbortedError) throw e;
         if (!(e instanceof WorldGenUnavailable)) throw e; // 真实业务错误（如 OOM）不吞
         // worker 失败 → 落回主线程路径
       }
@@ -7421,6 +7432,9 @@ export class Game implements GameHooks {
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount,
         partyIsUp(this.partyState), this.partyState.genuineParty);
+      // ★IIIII229 ⑤：场景旗标回写小地图（GetBackgroundType sceneArea 连续支的
+      //  sceneSnowiness 源,MapHelper.cs:1820-1821;Minimap 增量/全量两路共用）
+      if (this.renderer.minimap) this.renderer.minimap.scene = this.scene;
       // 显示隐形块/墙（Main.ShouldShowInvisibleBlocksAndWalls，Main.cs:57403-57408 =
       // SceneMetrics.EchoMonolith ∨ Player.CanSeeInvisibleBlocks）：后者 = 幽灵护目镜
       // 4409（UpdateEquips :14080）∨ 回声腔物品 5345 挂装备/时装格（ApplyEquipVanity
@@ -27703,6 +27717,142 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return null;
   }
 
+  /** ★IIIII228 TeleportHelpers.RequestMagicConchTeleportPosition（Terraria.GameContent/
+   *  TeleportHelpers.cs:49-241 1:1）——魔法海螺对侧海滩落点爬行搜索。旧实现=
+   *  「两缘 380 格带随机掷位」近似（226 登记债），本刀按原文逐臂移植：
+   *  自 (40 | maxTilesX-40, 50) 起沿竖向探测（遇实心下退/空地上进），带内爬行
+   *  `num10>=400` 上限 + `num7>=5000` 兜底；lowTiles（空岛）四臂：
+   *  ① num8=400×(worldSurface-10)（循环上限与深度挂钩）②下沉到 worldSurface-40
+   *  即回卷 Y=50、X 进 crawlOffsetX（③末支 `!lowTiles && !SolidOrSlopedTile(below)`
+   *  的继续爬行臂被去门）④落点深度扫描 num13=20→10+左右邻列两支。
+   *  物理探针近似面（登记）：IsInSolidTilesExtended 的 TileCollision 四向 ±16px
+   *  探测以「玩家盒±16px 实心覆盖」近似（坡度/半砖细粒度差异, Collision.cs
+   *  TileCollision 全量未建模）;CanTileHurt 走 TouchDamage.canTileHurt。
+   *  失败 = 原版 canSpawn=false（原地不传送、不消耗）。 */
+  private requestMagicConchTeleportPosition(rightOcean: boolean): { x: number; y: number } | null {
+    const st = this.world.store;
+    const p = this.player;
+    const downedPlant = !!this.world.flags['downed_262'];
+    const downedBoss3 = !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']);
+    const sf = this.world.seedFlags;
+    const low = !!this.world.skyblockLowTiles;
+    const solidOrSloped = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y)) return false;
+      const i = st.idx(x, y);
+      if (!st.flags[i]) return false;
+      if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;   // inActive()
+      const d = TILE_DEFS[st.type[i]];
+      if (!d?.solid) return false;
+      const solidTop = !!d.platform || TILE_SOLID_TOP_FAMILY.has(st.type[i]);
+      if (solidTop && !d.platform) return false;                // tileSolidTop 非平台位=false
+      return true;
+    };
+    const dangerous = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y)) return false;
+      const i = st.idx(x, y);
+      if (st.liquid[i] > 0 && st.liquidType[i] === 2) return true;   // lava()
+      if (st.wall[i] === 87 && y > this.world.groundLevel && !downedPlant) return true;
+      if (WALL_DUNGEON_SHEETS.has(st.wall[i]) && y > this.world.groundLevel && !downedBoss3) return true;
+      return st.flags[i] && canTileHurt(st.type[i], p.fireWalk, sf);
+    };
+    // 玩家盒（20×42）实心/岩浆/触伤覆盖；off = IsInSolidTilesExtended 四向 ±16px 探针近似
+    const boxBlocked = (tx: number, ty: number, off = false): boolean => {
+      const ox = off ? Math.round(p.w / 2 / TILE) : 0;
+      for (let dx = -ox; dx <= 1 + ox; dx++) {
+        for (let dy = -1; dy <= 2; dy++) {
+          const cx0 = tx + dx, cy0 = ty + dy;
+          if (!st.inBounds(cx0, cy0)) return true;
+          const i = st.idx(cx0, cy0);
+          if (st.liquid[i] > 0 && st.liquidType[i] === 2) return true;
+          if (!st.flags[i] || (st.wire[i] & TileStore.WIRE_ACTUATED)) continue;
+          const d = TILE_DEFS[st.type[i]];
+          if (d?.solid && !d.platform && !TILE_SOLID_TOP_FAMILY.has(st.type[i])) return true;
+          if (canTileHurt(st.type[i], p.fireWalk, sf)) return true;
+        }
+      }
+      return false;
+    };
+    const num = 40;
+    const x0 = rightOcean ? st.w - num : num;
+    const y0 = 50;
+    const num3 = Math.floor(this.world.groundLevel);   // (int)Main.worldSurface - num2(num2=0)
+    const crawlOffsetX = rightOcean ? -1 : 1;
+    let px = x0, py = y0;
+    const num8 = low ? 400 * (Math.floor(this.world.groundLevel) - 10) : 5000;
+    const num11 = 400;
+    let num10 = 0;
+    let flag = solidOrSloped(px, py);
+    let num7 = 0;
+    while (num7 < num8 && num10 < num11) {
+      num7++;
+      const flag2 = solidOrSloped(px, py) || st.liquid[st.idx(px, py)] > 0;
+      const flag3 = solidOrSloped(px, py + 1) || st.liquid[st.idx(px, py + 1)] > 0;
+      if (!flag2 && !flag3) {
+        if (!solidOrSloped(px - 1, py) && !solidOrSloped(px + 1, py)
+          && !solidOrSloped(px - 1, py + 1) && !solidOrSloped(px + 1, py + 1)
+          && st.liquid[st.idx(px - 1, py)] <= 0 && st.liquid[st.idx(px + 1, py)] <= 0
+          && st.liquid[st.idx(px - 1, py + 1)] <= 0 && st.liquid[st.idx(px + 1, py + 1)] <= 0) {
+          py++;
+          if (low && py >= num3) { py = y0; px += crawlOffsetX; num10++; }
+          continue;
+        }
+      }
+      if (boxBlocked(px, py, true)) {
+        py += flag ? 1 : -1;
+        continue;
+      }
+      if (flag2) {
+        py += flag ? 1 : -1;
+        continue;
+      }
+      flag = false;
+      if (!boxBlocked(px, py + 1, true) && !flag3 && py < this.world.groundLevel) {
+        py++;
+        if (low && py >= num3) { py = y0; px += crawlOffsetX; num10++; }
+        continue;
+      }
+      if (st.liquid[st.idx(px, py + 1)] > 0 && !solidOrSloped(px, py + 1)) {
+        px += crawlOffsetX; num10++; continue;
+      }
+      if (dangerous(px - crawlOffsetX, py) || dangerous(px, py)) { px += crawlOffsetX; num10++; continue; }
+      if (dangerous(px - crawlOffsetX, py + 1) || dangerous(px, py + 1)) { px += crawlOffsetX; num10++; continue; }
+      if (py < 40) { py++; continue; }
+      if (!low && !solidOrSloped(px, py + 1)) { px += crawlOffsetX; num10++; }
+      break;
+    }
+    if (num7 === num8 || num10 >= num11) return null;
+    if (px < 40 || py < 40 || px >= st.w - 40 || py >= st.h - 40) return null;   // InWorld(_,_,40)
+    const num13 = low ? 10 : 20;
+    let flag7 = solidOrSloped(px, py) || st.liquid[st.idx(px, py)] > 0;
+    if (!flag7) {
+      for (let i = 0; i < num13; i++) {
+        if (solidOrSloped(px, py + i) || st.liquid[st.idx(px, py + i)] > 0) {
+          flag7 = true;
+          py += Math.max(0, i - 1);
+          break;
+        }
+      }
+    }
+    if (low) {
+      if (!flag7) {
+        for (let j = 0; j < num13; j++) {
+          if (solidOrSloped(px - 1, py + j) || st.liquid[st.idx(px - 1, py + j)] > 0) {
+            flag7 = true; px--; py += Math.max(0, j - 1); break;
+          }
+        }
+      }
+      if (!flag7) {
+        for (let k = 0; k < num13; k++) {
+          if (solidOrSloped(px + 1, py + k) || st.liquid[st.idx(px + 1, py + k)] > 0) {
+            flag7 = true; px++; py += Math.max(0, k - 1); break;
+          }
+        }
+      }
+    }
+    if (!flag7) return null;
+    return { x: px * TILE + 6, y: py * TILE };
+  }
+
   /** 传送族触发（引导到期）：音效+尘+落点+消耗。语义对标 Player.cs:42297-42516 */
   /** 虫洞药水传送（Player.UnityTeleport :41699-41710 → Teleport(telePos, 3)）：
    *  入口/出口双份 TeleportEffect style 3（Main.cs:13227-13260：Item6 音 + 50 尘 180
@@ -27748,10 +27898,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const [px, py] = this.spawnPlacementCoords(p);
       dest = { x: px, y: py };
     } else if (c.kind === 'ocean') {
-      // MagicConch：对侧海滩带（beachDistance-100；近似取世界两缘 380 格带内找地表落点）
+      // ★IIIII228：TeleportHelpers.RequestMagicConchTeleportPosition 1:1 移植
+      //  （含 lowTiles 空岛四臂）——替换旧「两缘 380 格带随机掷位」近似（226 登记债）
       const right = p.x / TILE < st.w / 2;
-      const bx0 = right ? st.w - 380 : 60, bx1 = right ? st.w - 60 : 380;
-      dest = this.findTeleportSpot(bx0, bx1, 30, Math.floor(this.world.rockLevel));
+      dest = this.requestMagicConchTeleportPosition(right);
     } else {
       // DemonConch：中心 ±50，[UnderworldLayer+20, +100]，实心底/避液
       const cx = Math.floor(st.w / 2);
@@ -33810,10 +33960,43 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
     if (!stock) return [];
+    // ★remix 抑制门要对 stock 就地剔除 → 先拷贝（SHOPSTOCK 是静态提取表,禁突变）
+    const stockArr = stock.slice();
+    // ★IIIII228 Chest.SetupShop remix 抑制门整组（condOk 无法表达【围绕多支的
+    //  外层 if 块】,按店直筛）：门式 = !remixWorld || (tenth && !getGood)——
+    //  remix 且非十周年混搭时下列组整体不上架：
+    //  ① 树妖 20 血月恶地货 2886/2171/4508（crimson）与 67/59/4504（!crimson）
+    //    （:1567-1592）；净化粉 66 另受 infectedSeed 放行（:1584 三析取）
+    //  ② 松露 160 自动锤 783（:2124-2127）
+    //  ③ 蒸汽朋克 178 恶地魂 784/782 + 神圣魂 781 + 灵魂 780 + 月总魂 5392-5394
+    //    （:2201-2222 外层块）
+    {
+      const sf = this.world.seedFlags;
+      const tenthNoGG = !!sf?.tenthAnniversary && !sf?.getGoodWorld;
+      if (sf?.remix && !tenthNoGG) {
+        const remixIds: Record<string, ReadonlySet<number>> = {
+          '20': new Set([2886, 2171, 4508, 67, 59, 4504]),
+          '160': new Set([783]),
+          '178': new Set([784, 782, 781, 780, 5392, 5393, 5394]),
+        };
+        const banned = remixIds[String(npc.vanillaId)];
+        if (banned) {
+          for (let i = stockArr.length - 1; i >= 0; i--) {
+            if (banned.has(stockArr[i].id)) stockArr.splice(i, 1);
+          }
+        }
+        if (npc.vanillaId === 20 && !this.world.seedFlags?.infectedSeed) {
+          // 66 净化粉：!remix || infectedSeed || (tenth && !getGood) 才上架
+          for (let i = stockArr.length - 1; i >= 0; i--) {
+            if (stockArr[i].id === 66) stockArr.splice(i, 1);
+          }
+        }
+      }
+    }
     // 勋章条目（Chest.cs case 21 shopSpecialCurrency=DefenderMedals 全段 37 条）：
     // 第三位 = shopCustomPrice（勋章枚数）；铜币 price 位保留 item.value 备案
     const out: Array<[number, number] | [number, number, number]> =
-      stock.filter((s) => !(npc.vanillaId === 227 && Game.PAINTER_DECOR_IDS.has(s.id)))
+      stockArr.filter((s) => !(npc.vanillaId === 227 && Game.PAINTER_DECOR_IDS.has(s.id)))
         .filter((s) => this.shopCondOk(s.cond)).map((s) => (s.currency === 'DefenderMedals'
         ? [s.id, s.price ?? 0, s.customPrice ?? 0] as [number, number, number]
         : [s.id, s.price ?? 0] as [number, number]));
@@ -33993,8 +34176,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      把军火商19/树妖20错排挤出、酒保/骷髅商反而进晶塔货 ----
     // 门：DoesPositionHaveEnoughNPCs(2, 玩家中心格)（TeleportPylonsSystem.cs:224-247，
     // 复用 positionHasEnoughNpcs 同款 169×124 窗扫描）+ 玩家不在腐化/猩红；
-    // 群系分支逐条 num<39 上限（num=货架已入条数）。remix 分支（:3472-3484/:3499-3516）
-    // 本仓无颠倒世界不接（登记 R14-C33 同批）。
+    // 群系分支逐条 num<39 上限（num=货架已入条数）。remix 分支（:3472-3484/:3499-3516
+    // /:3511-3518/:3529-3531）★IIIII228 已实装（见下 remixPy）。
     if (npc.vanillaId !== 368 && npc.vanillaId !== 453 && npc.vanillaId !== 550 && this.scene) {
       const sc = this.scene;
       const ptx = Math.floor(this.player.cx / TILE);
@@ -34012,18 +34195,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         };
         // 4876 纯净：!remix 分支 = 非地下（ShoppingZone_BelowSurface :3479）
+        // ★IIIII228（R14-C33 登记清偿,Chest.cs:3461-3540 remix 三分支+蘑菇门）：
+        //  森林 4876：remix = 玩家 Y∈(rockLayer, maxTilesY-350)（岩下"森林"带）
+        //  洞穴 4917：remix = 蘑菇区不豁免（原版 :3499-3516 无 !ZoneGlowshroom 合取）
+        //  海滩 4918：remix 带外(0.43w~0.57w 之外)且 Y∈(rockLayer, maxTilesY-350) 视同海滩
+        //  蘑菇 4921：remix && ZoneUnderworldHeight 时不卖（:3529-3531 !remix||!zone3[4]）
+        const remixPy = !!this.world.seedFlags?.remix;
+        const pyY = this.player.y / TILE;
+        const pyX = this.player.x / TILE;
         if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
-          && !sc.zoneHallow && !sc.zoneGlowshroom && !sc.belowSurface) pylon(4876);
+          && !sc.zoneHallow && !sc.zoneGlowshroom) {
+          if (remixPy) {
+            if (pyY > this.world.rockLevel && pyY < this.world.store.h - 350) pylon(4876);
+          } else if (!sc.belowSurface) pylon(4876);
+        }
         if (sc.zoneSnow) pylon(4920);                              // :3484-3487
         if (sc.zoneDesert) pylon(4919);                            // :3488-3491
         if (sc.zoneUnderworldHeight) pylon(5652);                  // :3492-3498
-        else if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
+        else if (remixPy) {
+          if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
+            && !sc.zoneHallow && sc.belowSurface) pylon(4917);
+        } else if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
           && !sc.zoneHallow && !sc.zoneGlowshroom && sc.belowSurface) pylon(4917); // :3506-3509
-        // 4918 海洋：ZoneBeach && position.Y < worldSurface*16（:3510；remix 分支不接）
-        if (sc.zoneBeach && this.player.y / TILE < this.world.groundLevel) pylon(4918);
+        // 4918 海洋：ZoneBeach && position.Y < worldSurface*16（:3510）+
+        //  remix 带外岩下带或支（:3511-3518）
+        let beachPy = sc.zoneBeach && pyY < this.world.groundLevel;
+        if (remixPy) {
+          beachPy = beachPy || ((pyX < this.world.store.w * 0.43 || pyX > this.world.store.w * 0.57)
+            && pyY > this.world.rockLevel && pyY < this.world.store.h - 350);
+        }
+        if (beachPy) pylon(4918);
         if (sc.zoneJungle) pylon(4875);                            // :3521-3524
         if (sc.zoneHallow) pylon(4916);                            // :3525-3528
-        if (sc.zoneGlowshroom) pylon(4921);                        // :3529-3532
+        if (sc.zoneGlowshroom && (!remixPy || !sc.zoneUnderworldHeight)) pylon(4921); // :3529-3532
       }
     }
     // ★IIIII61 吸血鬼种子商店两臂（Main.vampireSeed 消费面,Chest.cs SetupShop）：
@@ -35105,7 +35309,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const pick = (pool: ReadonlyArray<{ id?: number; ids?: number[]; tier: number; cond: string | null; hardModeUp?: number }>, minimumRarity: number): number => {
       let it = 0;
       for (const e of pool) {
-        if (e.tier < minimumRarity || e.cond === 'skip' || !condOk(e.cond)) continue;
+        // ★IIIII228（Chest.cs:817-830 稀有档 / :910-930 普通档）DST 画作四张
+        //  5121/5122/5124/5123 双臂：tier3 = !dontStarveWorld、tier1 = dontStarveWorld
+        //  （提取器把 tier1 臂标 'skip' 恒跳 → dontStarve 世界四画永不上架）
+        const dstPainting = e.id != null && e.id >= 5121 && e.id <= 5124;
+        if (dstPainting) {
+          const ds = !!this.world.seedFlags?.theConstant;
+          if (e.tier >= 3 ? ds : !ds) continue;
+        } else if (e.tier < minimumRarity || e.cond === 'skip' || !condOk(e.cond)) continue;
         if (rollZero(rarity[e.tier])) {  // SetupTravelShop_GetItem RollLuck(rarity[t])==0
           // 单掷组条目（`it = 2281 + Main.rand.Next(3)`,:1232-1234）——一掷后组内均选
           it = e.ids ? e.ids[Math.floor(Math.random() * e.ids.length)] : e.id!;

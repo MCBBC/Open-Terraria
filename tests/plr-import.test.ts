@@ -106,7 +106,7 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     w.byte(2);                 // team(≥283)
     w.byte(0b00000101); w.byte(0b00000010);   // hideVisible 8+2
     w.byte(0);                 // hideMisc(≥119)
-    w.byte(1);                 // skinVariant=1(女)
+    w.byte(1);                 // skinVariant=1(MaleSticker 男贴纸,PlayerVariantID.Sets.Male)
     w.i32(380).i32(400);       // life/max
     w.i32(150).i32(200);       // mana/max
     w.bool(true);              // extraAccessory(≥125)

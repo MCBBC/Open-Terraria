@@ -13,7 +13,7 @@ const TITLE_ID = MUSIC.TitleIntro; // 50
 /** IIII225：标题曲种子覆写集（Main.cs:12626-12656 gameMenu 支——drunk:remix 70 /
  *  shimmerGen 72 / vampire 75 / notTheBees 86 / else 60;非 drunk:remix 8 / 十周年 11。
  *  'main' 解除面与其取并集——进世界后由环境选曲链接管,同原版 gameMenu/游戏世界分域） */
-const SEED_MENU_MUSIC = new Set<number>([60, 70, 72, 75, 86, 8, 11]);
+const SEED_MENU_MUSIC = new Set<number>([60, 70, 72, 75, 86, 8, 11, 6, 51]);   // ★IIIII228：+Old 6/Current 51（TitleMusicStyle 选曲面,50=TITLE_ID 已含）
 
 interface Track {
   src: AudioBufferSourceNode;

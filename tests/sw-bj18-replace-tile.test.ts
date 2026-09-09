@@ -46,7 +46,7 @@ interface Shell {
   world: World;
   player: Record<string, unknown> & {
     useTime: number;
-    inv: { slots: unknown[]; heldItem(): unknown; removeHeld(n?: number): void };
+    inv: { slots: unknown[]; heldItem(): unknown; removeHeld(n?: number): void; countOf(): number };   // SW-RB6a 2026-09-07：补 countOf 声明（tsc 零错基线）
   };
   drops: Array<[string, number]>;
   rig: Array<[number, number]>;
@@ -266,6 +266,34 @@ describe('D2 篝火燃态跨交换保留', () => {
     const lit = mk(true);
     expect(lit.st.frameY[lit.st.idx(11, 20)]).toBe(36 + 18);           // 燃态 offset 36 保留
     expect(lit.st.frameX[lit.st.idx(9, 19)]).toBe(54);
+  });
+});
+
+// ============================================================
+// 尘量分型档（★SW-RB6a 2026-09-07：KillTile_GetTileDustAmount(fail:false)
+// :67119-67207——苔石族 5/回声块 1,曾写死 10）
+// ============================================================
+describe('尘量分型档（fail:false 档）', () => {
+  function dustOf(tileKey: string): number {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(9, 20, TILE_BY_KEY[tileKey]);
+    const seen: Array<number> = [];
+    const g = shell(w, { heldDef: defByVid(WOOD_V), picks: [[TITANIUM_PICK, 5]] });
+    (g as unknown as { spawnParticles: (...a: unknown[]) => void }).spawnParticles
+      = (...a: unknown[]) => { seen.push(a[3] as number); };
+    g.tryPlace(9, 20, defByVid(WOOD_V));
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    return Math.max(...seen);
+  }
+  it('普通块（泥土）缺省 10 粒（:67123-67128）', () => {
+    expect(dustOf('dirt')).toBe(10);
+  });
+  it('苔石族 534 = 5 粒（:67189-67195,fail 档 3 不适用）', () => {
+    expect(dustOf('v_534_krypton_moss_block')).toBe(5);
+  });
+  it('回声块 541 = 1 粒（:67141-67143）', () => {
+    expect(dustOf('v_541_echo_block')).toBe(1);
   });
 });
 

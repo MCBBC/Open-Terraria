@@ -211,11 +211,19 @@ describe('appearance 持久化（存档跟随角色档;release<280 回退式 :56
     expect(validateAppearance({ ...defaultAppearance(), voicePitchOffset: NaN }).voicePitchOffset).toBe(0);
   });
 
-  it('randomAppearance 随机掷后语音随性别落档', () => {
-    for (let i = 0; i < 20; i++) {
+  // ★SW-RB6c 2026-09-07 重钉：randomAppearance 1:1 化后语音取【掷出变体】的性别
+  //  （UICharacterCreation.cs:1572 在发型性别校正 :1648-1651【之前】赋值）+ 50% → 3
+  //  （:1573-1575）——发型校正把变体翻到对表后,语音与终态变体性别可不同相
+  //  （如掷 0 男声 + 女发型 → 翻 4,语音仍 1 = 原版本相）。旧断言
+  //  「v4/v5 不得男声」按终态变体性别锁死 = 与原版时序不符,重钉为域断言。
+  it('randomAppearance 随机掷后语音落档(:1572 掷出变体性别 + :1573-1575 50%→3)', () => {
+    const seen = new Set<number>();
+    for (let i = 0; i < 60; i++) {
       const a = validateAppearance(randomAppearance());
       expect([1, 2, 3]).toContain(a.voiceVariant);
-      if (a.skinVariant === 4 || a.skinVariant === 5) expect(a.voiceVariant).not.toBe(1);
+      if (a.voiceVariant !== undefined) seen.add(a.voiceVariant);
     }
+    expect(seen.has(3)).toBe(true);   // 50% 掷 3 在 60 掷下必现
+    expect(seen.size).toBe(3);        // 1/2/3 三档都出得来
   });
 });

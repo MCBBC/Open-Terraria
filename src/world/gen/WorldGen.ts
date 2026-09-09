@@ -169,8 +169,31 @@ export function tryApplyingCopiedSeed(input: string): {
  *  多格残片兜底扫）——非原版 GenPass，给一个小权重自尾窗供长条走完。 */
 const GEN_TAIL_WEIGHT = 4;
 
+// ═══ ★IIIII229 ① Esc 中止链 gen 侧钩（最小挂面,pass 本体零触碰）═══
+// vanilla：UIWorldLoad.cs:54-58 Esc(Inventory 触发器)→`WorldGenerator.CurrentController.
+// QueuedAbort = true`+PlaySound(11)=MenuClose;生成器在 **pass 边界**消费
+// （WorldBuilding/WorldGenerator.cs:435-439 `if (_controller.QueuedAbort) { flag = true;
+// break; }`,快照门 :146-149）→ 停止派发后续 pass,世界不落库。
+// JS 镜像：UI/mainFlow 经 Game.abortWorldGen()（worker 路径=protocol 'abortGen' 消息
+// → worker 调 requestWorldGenAbort;主线程 fallback=直接调本 API）置位;generateWorld
+// pass 环逐槽头检查（与 vanilla 同位）→ 抛 WorldGenAbortedError,调用方按中止收场。
+let genAbortRequested = false;
+/** Esc 中止请求置位（vanilla QueuedAbort=true 的 API 面;生成 pass 环边界消费）。 */
+export function requestWorldGenAbort(): void { genAbortRequested = true; }
+/** 中止位观测面（探针/UI 断言用;生成环内部消费不经过此函数）。 */
+export function worldGenAbortRequested(): boolean { return genAbortRequested; }
+/** 中止专用错误类型：调用方（worker/mainFlow/Game）按此判别中止收场,不与
+ *  真实生成错误（OOM/栈溢出）混淆——照 WorldGenUnavailable 判例不触发 fallback。 */
+export class WorldGenAbortedError extends Error {
+  constructor() {
+    super('[worldgen] aborted (Esc/QueuedAbort)');
+    this.name = 'WorldGenAbortedError';
+  }
+}
+
 /** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
 export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress): Promise<World> {
+  genAbortRequested = false;   // ★IIIII229 ①：陈旧请求清零（vanilla 每次生成新建 Controller 同效）
   // ★IIIII88：dotted 秘种子配方路由先行（TryApplyingCopiedSeed cs:232-289）——
   //   命中时 size/evil 由配方段派生、旗标=配方位掩码+明文秘种子、世界种子按
   //   「明文|底种」翻译。缺省路径全部保持现行为。
@@ -494,6 +517,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: OnGenProgress):
 
   for (let i = 0; i < passes.length; i++) {
     await nextFrame();
+    // ★IIIII229 ①：pass 边界中止消费（WorldGenerator.cs:435-439 `_controller.QueuedAbort
+    //   → flag=true; break` 同位同语义）——已开跑的 pass 会做完（vanilla 同:中断只在
+    //   pass 之间生效）,后续 pass 不再派发,以专用错误上抛收场（finalize 不执行,世界
+    //   不落库;调用方捕获 WorldGenAbortedError 判别）。
+    if (genAbortRequested) throw new WorldGenAbortedError();
     // ★IIIII87 反演重放窗口仪·通用槽头捕获（缺省零开销；i87Cap 七带版的全槽推广）：
     //   槽末态=(store 八通道+帧 / gs / chests) 在 reseed 前直递 —— probe 端按目标
     //   槽名捕快照后以 .swAbort 停管。真值基座=dump N-1（同 slot-end 口径）。
@@ -590,7 +618,7 @@ import { runDunesPass } from './vanilla/DunesPass';
 import { runShimmerPass } from './vanilla/ShimmerPass';
 import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
-import { runCleanupPass } from './vanilla/CleanupPass';
+import { runCleanupPass, runNoSurfaceFillTheTop } from './vanilla/CleanupPass';   // ★IIIII228 noSurface FillTheTop 支
 import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
 import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood, setKillTileTailFlags, killTile, squareTileFrame } from './vanilla/HalfBrickPass';
 import { spawnIsAreaValidSpawn, spawnForceClearArea } from '../spawn/SpawnPlacement';   // ★IIIII226 noSurface 随机落点臂（Player.Spawn_* 移植面）
@@ -1575,6 +1603,12 @@ export function vanillaCleanup({ store, rng }: GenCtx) {
   if (!gs) return;
   if (sbDenyAll(gs.seedFlags)) return;                 // ★IIIII44 cs:15324
   rng.reseed(gs.seed); // ▶DirtWallCleanup cs:15310
+  // ★IIIII228 :15326-15328 noSurface 二分臂：noSurface 世界顶带填充
+  //  （DoNoSurfaceFillTheTop）【替换】清墙支——原版 if/else,先掷 Next(2) 后清墙
+  if (gs.seedFlags.noSurface) {
+    runNoSurfaceFillTheTop(store, rng, gs);
+    return;
+  }
   runCleanupPass(store, rng, gs);
 }
 

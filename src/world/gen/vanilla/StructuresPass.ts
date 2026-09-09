@@ -11,6 +11,7 @@ import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
 import { genTileFrame } from './FinalCleanupPass';   // ★IIIII112 SquareTileFrame 3×3 TileFrame 等价
+import { activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII228 多秘 ewAdjust
 import { idsByVanillaSheet } from './TileRunner';
 
 /** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
@@ -80,7 +81,10 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
   const sfI106 = gs.seedFlags;
   // ★IIIII106 cs:12981：eFI NormalAmount=skyblock 组合域；ReducedAmount=noSurface||count>=6
   // → 单旗标两派生位恒假。errorWorldAdjustment(1.0)=单旗标因子 1 < 3 恒真 ⇒ ×3（cs:12997）。
-  const ewIslandX3 = !!sfI106.errorWorld;                       // Variations.errorWorldAdjustment(1.0)<3
+  // ★IIIII228：errorWorldAdjustment(1.0)<3 按 activeSecretSeedCount 因子化——
+  //   count 1..4/5..8(因子 1/2)恒 <3 ⇒ ×3、count≥9(因子≥3)不再 ×3（cs:12997 组合域）
+  const ewIslandX3 = !!sfI106.errorWorld
+    && errorWorldAdjustmentOf(1.0, activeSecretSeedCountOf(sfI106)) < 3;
   const efiNormal = !!(sfI106.extraFloatingIslands && sfI106.skyblock);
   const efiReduced = !!(sfI106.extraFloatingIslands && (sfI106.noSurface || efiNormal));
   let isCount = Math.trunc(w * 0.0008);            // 3（4200 宽）
@@ -1125,7 +1129,8 @@ export function runPyramidPass(
   if (gs.seedFlags.errorWorld) {
     const cloud = pyrFindLowestCloud(st, gs);
     let num8 = rng.int(5, 7) * Math.trunc(st.w / 4200);
-    num8 = Math.trunc(num8 / 1);                    // ewAdjust(1.0)=1（单旗标域）
+    // ★IIIII228：num8 /= errorWorldAdjustment(1.0)（cs:15529——count 因子化）
+    num8 = Math.trunc(num8 / errorWorldAdjustmentOf(1.0, activeSecretSeedCountOf(gs.seedFlags)));
     for (let num9 = 0; num9 < num8; num9++) {
       let num10 = rng.int(300, st.w - 301);
       let num11 = rng.int(cloud, Math.trunc(gs.rockLevel) - 1);   // Next(FindLowestCloud(), (int)rockLayer)

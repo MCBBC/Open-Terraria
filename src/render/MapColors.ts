@@ -25,6 +25,48 @@ import {
 import { mapPaintColor } from '../world/Paint';
 import { TileStore } from '../world/TileStore';
 
+// ═══ ★IIIII229 ⑤ snowiness 通道（218 章遗留债清偿,GetBackgroundType 雪域支单源）═══
+// vanilla：GetBackgroundType（MapHelper.cs:2027-2077）地下支 b 通道——!generatingWorld 时
+// ① sceneArea.Contains(i,j) → b=Clamp(sceneSnowiness,0,1)*255（CaptureSceneState :1820-1821,
+//   窗=SceneMetrics.ZoneScanSize 169×124 玩家中心,snowiness=SnowTileCount/SnowTileMax(6000)）
+// ② 否则 7×7 粗采样窗（k=i-36..i+30 步长 10,实际尾 i+24;Main.Map[].Type∈snowTypes）→ 命中
+//   即 b=255（二值）。dirtPosition+b / rockPosition+b ⇒ array6/array7 雪渐变（:1671-1688）。
+// 生成期（WorldGen.generatingWorld）b 恒 0 ⇒ 本仓 GenWorldPreview/previewBitmap 消费的
+// mapColor24 保持 b=0 形态不动（vanilla 同态）;本组 API 供游戏内 Minimap 增量/全量路径接。
+
+/** vanilla snowTypes 表（MapHelper.cs:1782-1788：tileLookup[147,161,162,163,164,200]）。
+ *  注意与 SceneMetrics.SNOW_TILES（计数表,多 148）不同源——本表 GetBackgroundType 专用。 */
+export const MAP_SNOW_TYPES: ReadonlySet<number> = new Set([147, 161, 162, 163, 164, 200]);
+
+/** 雪窗 7×7 二值采样（:2045-2062 逐字;hasSnowAt 闭包自带界内守卫与 sheet 域判）。 */
+export function mapSnowinessB(hasSnowAt: (x: number, y: number) => boolean, x: number, y: number): number {
+  for (let k = x - 36; k <= x + 30; k += 10) {
+    for (let l = y - 36; l <= y + 30; l += 10) {
+      if (hasSnowAt(k, l)) return 255;
+    }
+  }
+  return 0;
+}
+
+/** 土层底雪渐变（array6：Color8(88,61,46)→Color9(37,78,123),b∈[0,255]）。
+ *  C# `(byte)(c8*(1-t)+c9*t)` 浮点截断语义（Math.trunc）。 */
+export function snowDirtBg(b: number): [number, number, number] {
+  const t = b / 255;
+  return [Math.trunc(88 * (1 - t) + 37 * t), Math.trunc(61 * (1 - t) + 78 * t), Math.trunc(46 * (1 - t) + 123 * t)];
+}
+
+/** 石层底雪渐变（array7：Color10(74,67,60)→Color9(53,70,97)）。 */
+export function snowRockBg(b: number): [number, number, number] {
+  const t = b / 255;
+  return [Math.trunc(74 * (1 - t) + 53 * t), Math.trunc(67 * (1 - t) + 70 * t), Math.trunc(60 * (1 - t) + 97 * t)];
+}
+
+/** 场景连续支（:2063-2068）：b=Clamp(SnowTileCount/6000,0,1)*255,截断。 */
+export function sceneSnowinessB(snowTileCount: number): number {
+  const s = snowTileCount / 6000;
+  return Math.trunc((s < 0 ? 0 : s > 1 ? 1 : s) * 255);
+}
+
 function hexToRgb24(hex: string | undefined, fallback: number): number {
   if (!hex || hex[0] !== '#') return fallback;
   const v = parseInt(hex.slice(1, 7), 16);

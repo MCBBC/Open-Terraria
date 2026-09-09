@@ -20,8 +20,10 @@
 //  · UI 层 RNG 纪律：全部掷点走本状态私有 UnifiedRandom(translateSeed(seedText))
 //    实例（原版 Main.rand = new UnifiedRandom(seed) 同构，WorldGen.cs:11159），与
 //    世界生成 genRand/Main.rand 零共享——g 链 mile8 守恒（tests/worldgen-ui-easter-eggs）。
-//  · 交互缺口备案：原版 Esc(Inventory 触发器)→QueuedAbort+MenuClose(UIWorldLoad.Update
-//    :54-58) 需生成管线取消钩（src/world/gen 冻结中，IIIRS214 在途）——本批不实装。
+//  · ★IIIII229 ① Esc 中止链实装：onActivate 挂 Esc 监听→QueuedAbort 闩+MenuClose+onAbort
+//    出口（mainFlow 注入 Game.abortWorldGen 路由 worker 'abortGen' 消息/主线程直置两通
+//    道）；generateWorld pass 环边界消费（WorldGenerator.cs:435-439）抛 WorldGenAbortedError;
+//    文案定格 UI.Canceling（:86-91,三重奏仍可依序覆写）。
 import { UIState } from '../core/UIState';
 import { UIHeader } from '../elements/UIHeader';
 import { UIGenProgressBar } from '../elements/UIGenProgressBar';
@@ -66,7 +68,7 @@ function usingGamepad(): boolean {
     return false;
   }
 }
-function tipCategories(): string[] {
+export function tipCategories(): string[] {   // ★IIIII229 ②：导出供测试(池选择判别)
   return usingGamepad() ? TIP_CATEGORIES_GAMEPAD : TIP_CATEGORIES;
 }
 
@@ -150,11 +152,19 @@ export class UIWorldLoadState extends UIState {
   /** 生成流音效门（WorldGen.worldGenCallback :6541/:6551 双 MenuOpen） */
   private genSounds: boolean;
 
+  // ---- ★IIIII229 ① Esc 中止链（UIWorldLoad.cs:54-58 镜像） ----
+  /** 中止已请求闩（vanilla QueuedAbort 持续真——文案定格 UI.Canceling,重复 Esc 不重播音） */
+  private abortQueued = false;
+  /** 中止请求出口（mainFlow 注入=Game.abortWorldGen 路由 worker/主线程两通道） */
+  private readonly onAbort: () => void;
+  /** Esc 监听句柄（onActivate 挂 / onDeactivate 卸,状态生命周期严格配对） */
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+
   // ---- 提示条（GameTipsDisplay 1:1：集合 + 全员临期补新） ----
   private tips: GenTip[] = [];
   private lastTipText = '';
 
-  constructor(evil?: -1 | 0 | 1, opts?: { seedText?: string; genSounds?: boolean }) {
+  constructor(evil?: -1 | 0 | 1, opts?: { seedText?: string; genSounds?: boolean; /** ★IIIII229 ①：Esc 中止请求出口（缺省=无操作——读档页无生成作业可中止） */ onAbort?: () => void }) {
     super();
     const logicalH = this.getDimensions().height;
     // 1.4.5.6：随机邪恶（generatingRandomEvil）用 Outer_Random 专属配色
@@ -175,6 +185,7 @@ export class UIWorldLoadState extends UIState {
       this.seedFlags = null;
     }
     this.genSounds = opts?.genSounds === true;
+    this.onAbort = opts?.onAbort ?? (() => {});   // ★IIIII229 ①
 
     this.header = new UIHeader('');
     this.header.hAlign = 0.5;
@@ -189,6 +200,15 @@ export class UIWorldLoadState extends UIState {
   /** 生成流激活：原版 worldGenCallback 进场 PlaySound(10)（WorldGen.cs:6541） */
   override onActivate(): void {
     if (this.genSounds) UISfx.menuOpen();
+    // ★IIIII229 ①：Esc 中止监听（vanilla PlayerInput.Triggers.Current.Inventory 触发器,
+    //  UIWorldLoad.Update :54-58——生成屏期间 inGame=false,全局局内键链不覆盖本态）
+    this.keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || this.abortQueued) return;
+      this.abortQueued = true;
+      UISfx.menuClose();          // PlaySound(11)=MenuClose（vanilla 同拍）
+      this.onAbort();             // → Game.abortWorldGen（worker/主线程两通道路由）
+    };
+    if (typeof window !== 'undefined') window.addEventListener('keydown', this.keyHandler);
   }
 
   /** ★IIIII218：生成屏表现旗标只读出口（mainFlow → TitleMenu.setGenFlags /
@@ -198,6 +218,10 @@ export class UIWorldLoadState extends UIState {
   /** 生成流收场（成败/中止同播,WorldGen.cs:6551）——创建流离场（进世界/回菜单）即触发 */
   override onDeactivate(): void {
     if (this.genSounds) UISfx.menuOpen();
+    if (this.keyHandler && typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this.keyHandler);
+      this.keyHandler = null;
+    }
   }
 
   /** 进度回调（WorldGen/Game 的 (label,p[,local])）。
@@ -250,7 +274,11 @@ export class UIWorldLoadState extends UIState {
   private refreshHeaderText(): void {
     const f = this.seedFlags;
     let text: string;
-    if (f && f.drunkWorldGenText && !this.placingTraps && !f.getGoodWorldGen) {
+    // ★IIIII229 ①：QueuedAbort 文案（UIWorldLoad.cs:86-91 `if (QueuedAbort) text =
+    //   "UI.Canceling"`——在 :93 三重奏**之前**,三重奏仍可依序覆写）
+    if (this.abortQueued) {
+      text = Lang.text('UI.Canceling');
+    } else if (f && f.drunkWorldGenText && !this.placingTraps && !f.getGoodWorldGen) {
       // ① drunk 乱码：整串替换（无后缀——原版该形态纯数字,每帧重掷）
       text = this.uiRand ? drunkScrambleText(this.uiRand, 3) : '';
     } else {

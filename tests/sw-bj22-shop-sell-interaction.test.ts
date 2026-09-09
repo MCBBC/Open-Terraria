@@ -64,10 +64,14 @@ function fakeGame() {
     dialogNpc: unknown;
     coinsOwned(): number;
     npcShopSellHeld(held: { id: number; stack: number; prefix?: number }): boolean;
+    npcShopSell(slot: number): boolean;
     npcShopBuy(vanillaId: number, buybackIndex?: number, held?: { id: number; stack: number; prefix?: number }, bulk?: boolean): boolean;
     shopBuybackPriceOf(vid: number, index: number): number | null;
     shopEntryPriceOf(vid: number): number | null;
     shopEntryMedalPriceOf(vid: number): number | null;
+    shopStockFor?: (n: unknown) => Array<[number, number]>;
+    openNpcShop?: () => void;
+    achievements?: { notifyItemPickup(v: number): void };
     sfx: { play(s: string, v?: number): void; playFiles(f: string[], v?: number): void };
     cb: Record<string, (...a: unknown[]) => void>;
   };
@@ -192,9 +196,9 @@ describe('② 光标持有物×商店格交互矩阵（npcShopSellHeld = case 4 
   it('守恒·买入面不变：空手点有货格真买（shopStockFor×npcShopBuy 全链）；手持同型买叠光标；异型无动作', () => {
     const { g, inv } = fakeGame();
     g.dialogNpc = { type: 1 };
-    (g as { shopStockFor(n: unknown): Array<[number, number]> }).shopStockFor = () => [[8, 50]];
-    (g as { openNpcShop(): void }).openNpcShop = () => {};       // 刷新面桩（Lang/DOM 不触碰）
-    (g as { achievements: { notifyItemPickup(v: number): void } }).achievements = { notifyItemPickup: () => {} };
+    g.shopStockFor = () => [[8, 50]];
+    g.openNpcShop = () => {};       // 刷新面桩（Lang/DOM 不触碰）
+    g.achievements = { notifyItemPickup: () => {} };
     inv.slots[0] = { id: COPPER_COIN, stack: 100 };              // 付 50 买火炬 ×2 笔
     inv.slots[1] = { id: COPPER_COIN, stack: 100 };
     expect(g.npcShopBuy(8, undefined, undefined, false)).toBe(true);
@@ -329,6 +333,73 @@ describe('④ BJ8 守恒：Ctrl 卖出路由与缺省修饰键档', () => {
     expect(fake.altMoveClick(21, 'inv', false, true, true)).toBe(true);
     expect(inv.slots[21]).toBeNull();
     expect(g.coinsOwned()).toBe(50);
+    expect(g.shopBuybackStock[0]).toMatchObject({ vid: 23, stack: 50 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑤ SW-RB6a 2026-09-07 红蓝复核：AddItemToShop 第一相并叠 + 槽位卖出「不先腾格」
+//    （Chest.cs:664-686 phase-1 merge；Player.cs:34727-34868 卖品驻格结算）
+// ---------------------------------------------------------------------------
+describe('⑤ SW-RB6a 回购架并叠相 + 槽位卖出占格语义（Chest.cs:664-686 / :823-841）', () => {
+  it('同 vid 同词缀分两次卖 → 并入同一条目（phase-1 CanStack 门；曾出两行）', () => {
+    const { g } = fakeGame();
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 10 })).toBe(true);
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 5 })).toBe(true);
+    expect(g.shopBuybackStock).toHaveLength(1);                 // :664-672 并叠相
+    expect(g.shopBuybackStock[0]).toMatchObject({ vid: 8, stack: 15 });
+  });
+
+  it('异词缀不并（Item.CanStack Item.cs:5578-5585 prefix 相同才可叠）', () => {
+    const { g } = fakeGame();
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 10 })).toBe(true);
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 5, prefix: 1 })).toBe(true);
+    expect(g.shopBuybackStock).toHaveLength(2);
+    expect(g.shopBuybackStock[0]).toMatchObject({ vid: 8, prefix: 0, stack: 10 });
+    expect(g.shopBuybackStock[1]).toMatchObject({ vid: 8, prefix: 1, stack: 5 });
+  });
+
+  it('maxStack 帽：货架条目满叠后余量落新行（:669 Math.Min(num2, maxStack-stack)）', () => {
+    const { g } = fakeGame();
+    g.shopBuybackStock.push({ vid: 8, prefix: 0, stack: ITEM_DEFS[TORCH].maxStack - 3 });
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 10 })).toBe(true);
+    expect(g.shopBuybackStock).toHaveLength(2);                 // 3 入旧行 + 7 落新行
+    expect(g.shopBuybackStock[0].stack).toBe(ITEM_DEFS[TORCH].maxStack);
+    expect(g.shopBuybackStock[1]).toMatchObject({ vid: 8, prefix: 0, stack: 7 });
+  });
+
+  it('回购记与并叠相同序（Remove 先于上架 :652-663）：买 1 再卖 10 → 架上 9', () => {
+    const { g, inv } = fakeGame();
+    g.dialogNpc = { type: 1 };
+    g.shopStockFor = () => [[8, 50]];
+    g.openNpcShop = () => {};
+    g.achievements = { notifyItemPickup: () => {} };
+    inv.slots[0] = { id: COPPER_COIN, stack: 100 };
+    expect(g.npcShopBuy(8, undefined, undefined, false)).toBe(true);   // 记 8:0 = 1
+    expect(g.npcShopSellHeld({ id: TORCH, stack: 10 })).toBe(true);
+    expect(g.shopBuybackStock[0]).toMatchObject({ vid: 8, stack: 9 }); // stack -= num(:663)
+    expect(g.shopSellbackMemo.has('8:0')).toBe(false);                  // 记已实扣删键
+  });
+
+  it('槽位卖出不先腾格：包+币位全满 → 币无格可落 = 整单回滚不卖（:34727-34876 语义）', () => {
+    const { g, inv } = fakeGame();
+    const max = ITEM_DEFS[TORCH].maxStack;
+    for (let i = 0; i < COIN_START; i++) inv.slots[i] = { id: TORCH, stack: max };
+    const coinMax = ITEM_DEFS[COPPER_COIN].maxStack;
+    for (let i = COIN_START; i < COIN_START + 4; i++) inv.slots[i] = { id: COPPER_COIN, stack: coinMax };
+    // slot 0 持满叠火炬（卖价 9990 铜）——原版结算期卖品仍驻格,币只能进 0-53 的空位
+    expect(g.npcShopSell(0)).toBe(true);
+    expect(g.coinsOwned()).toBe(4 * coinMax);          // 分文未入（回滚）
+    expect(g.shopBuybackStock).toHaveLength(0);        // 货未上
+    expect(inv.slots[0]).toMatchObject({ id: TORCH, stack: max });   // 物品从未离位
+  });
+
+  it('槽位卖出正常态：币入包 + 架上货 + 卖品格清空（TurnToAir 在结算后 :832）', () => {
+    const { g, inv } = fakeGame();
+    inv.slots[7] = { id: GEL, stack: 50 };
+    expect(g.npcShopSell(7)).toBe(true);
+    expect(g.coinsOwned()).toBe(50);
+    expect(inv.slots[7]).toBeNull();
     expect(g.shopBuybackStock[0]).toMatchObject({ vid: 23, stack: 50 });
   });
 });

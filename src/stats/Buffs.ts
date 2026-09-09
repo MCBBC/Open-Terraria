@@ -89,6 +89,9 @@ export enum BuffType {
   Crate = 60,          // 宝匣(123,300s)：渔获箱率 +10%（cratePotion :9839）
   Gravitation = 61,    // 重力(18,180s)：Up 键切换 gravDir（:9720）
   // ---- R8 敌弹状态批（Projectile.StatusPlayer :11450+ 授予链）----
+  Rabies = 74,         // 狂犬病(148,★IIIII228 StatusFromNPC 蝙蝠族接触臂 :22650-22652
+                       //   ——49/93/51/152/634 专家 1/10 Next(1800,5400))：vanilla
+                       //   Rabies 生命再生 -4（Player.cs lifeRegen 消费面同 Webbed 族登记）
   Chilled = 62,        // 冰寒(46)：移速 ×0.75（1457 :26151-26153 折入 strongestMoveSpeedDebuff）——霜月冰弹
                        //   348 FrostWave / 349 FrostShard 命中授予（:11554-11576）
   Frozen = 63,         // 冰冻(47)：整帧封移动输入（player.frozen :9749，input 清零
@@ -445,6 +448,7 @@ export function wetFromBubbleContact(rand: () => number = Math.random): number {
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
+  [BuffType.Rabies]: { vanillaBuff: 148, descKey: 'BuffDescription.Rabies', fallbackName: '狂犬病' },
   [BuffType.TitaniumStorm]: { vanillaBuff: 306, descKey: 'BuffDescription.TitaniumStorm', fallbackName: '钛金屏障' },
   [BuffType.Campfire]: { vanillaBuff: 87, descKey: 'Mods.SandboxWorld.Buff.Campfire.Desc', fallbackName: '篝火' },
   [BuffType.Agility]: { vanillaBuff: 3, descKey: 'Mods.SandboxWorld.Buff.Agility.Desc', fallbackName: '敏捷' },

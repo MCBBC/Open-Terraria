@@ -340,6 +340,17 @@ export class SettingsPanel {
         // 标签 = LegacyMenu.119（Main.cs:50914 音量三杆同族 98/99/119,原版 12 语言官译;
         // 旧自造 Mods.SandboxWorld.Settings.AmbientVol 仅 zh/en 两译,他语言落英文兜底）
         this.slider(Lang.text('LegacyMenu.119'), 0, 1, 0.05, () => d.ambientVol, (v) => { d.ambientVol = v; this.applySound(); void options.set('ambientVol', v); }),
+        // ★IIIII228 标题曲风格（Main.titleMusicStyle,config "TitleMusic" Main.cs:4602；
+        //  Current/Old/Console/Random 四档——Random 每启动抽签,Current=加载带 50→51）
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.TitleMusic'),
+          () => d.titleMusic,
+          () => Lang.text(`Mods.SandboxWorld.Settings.TitleMusic_${d.titleMusic.charAt(0).toUpperCase()}${d.titleMusic.slice(1)}`),
+          () => {
+            const order = ['current', 'old', 'console', 'random'] as const;
+            void options.set('titleMusic', order[(order.indexOf(d.titleMusic) + 1) % order.length]);
+          },
+        ),
       );
     } else if (this.cat === 'ui') {
       this.content.append(

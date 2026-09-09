@@ -21,7 +21,7 @@ import { UI } from '../src/ui/UI';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../src/data/items';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
-import { materialIids } from '../src/ui/itemTooltip';
+import { materialVids } from '../src/ui/itemTooltip';   // ★SW-BJ24 2026-09-07：双域分池,vid 域样本改取 materialVids
 import { options, cycleQuickTrashMode, QUICK_TRASH_MODES } from '../src/core/Options';
 import {
   slotContext, planAlternateClick, chestContainerContext, chestCanTakeJustCheck,
@@ -440,7 +440,7 @@ describe('R5 菜单特化路由（GetAlternateClickAction :631-651 else-if 序�
     expect(b.inv.slots[10]).toBeNull();                               // 恰好献完整格清
   });
   it('向导支执行面：Shift+点材料格与材料槽对换 + SoundID 7（:810-815）', () => {
-    const MAT_VID = [...materialIids()].find((v) => VANILLA_ITEM_KEY_BY_ID[v] && ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]] !== undefined);
+    const MAT_VID = [...materialVids()].find((v) => VANILLA_ITEM_KEY_BY_ID[v] && ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]] !== undefined);   // ★SW-BJ24：vid 域池
     if (MAT_VID === undefined) throw new Error('未找到材料样本');
     const MAT = iidOf(MAT_VID);
     const a = fakeAY();

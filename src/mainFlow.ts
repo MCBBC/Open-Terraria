@@ -2,6 +2,7 @@
 // main.ts 只做启动装配；本模块持有 Game 生命周期与 VUI/背景的 rAF 驱动。
 import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
 import { Game } from './core/Game';
+import { WorldGenAbortedError } from './world/gen/WorldGen';   // ★IIIII229 ① Esc 中止判别
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { resolveTouchMode } from './core/input/touchMode';
@@ -178,6 +179,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // 只在下次生成 Reset 时清零,读档不改旗 → 读档流不触本闩）。默认 undefined =
   // 本仓 TitleIntro 50（TitleMusicStyle 子系统未建模,50/51 档登记）。
   let lastGenScreenFlags: import('./vui/states/UIWorldLoadState').GenScreenSeedFlags | null = null;
+  // ★IIIII228 TitleMusicStyle 细分（Main.cs:153-159 枚举 + :4602-4608 config 解析 +
+  //  :12673-12694 选曲支）。Random 档每次启动抽签（cs = new UnifiedRandom(当前 tick)
+  //  .Next(3)——本仓 Math.random 同语义）;Current 档「_isAsyncLoadComplete 前 50 /
+  //  后 51」以「标题界面是否已交互挂载过」为加载完成近似（boot 首拍=50,此后 51）。
+  const titleMusicRandom = Math.floor(Math.random() * 3);   // 0 Current / 1 Old / 2 Console
+  let menuLoadDone = false;
+  const titleStyleMusicId = (): number => {
+    const seed = seedMenuMusicId();
+    if (seed !== undefined) return seed;                    // 种子覆写优先（原版同序）
+    let style = options.data.titleMusic ?? 'current';
+    if (style === 'random') style = (['current', 'old', 'console'] as const)[titleMusicRandom];
+    if (style === 'old') return 6;                          // :12688-12690 Old
+    if (style === 'console') return 60;                     // :12685-12687 Console
+    return menuLoadDone ? 51 : 50;                          // Current：加载带 50 / 完成后 51
+  };
   const seedMenuMusicId = (): number | undefined => {
     const f = lastGenScreenFlags;
     if (!f) return undefined;
@@ -1122,7 +1138,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     //   十周年 HotPink/醉酒帧闪；UI 层私有 UnifiedRandom,零世界 RNG 耦合）；
     //   genSounds=true → 生成流首尾双 MenuOpen（WorldGen.cs:6541/:6551 1:1）。
     //   读档三路（loadFromKey/quickload/导入）不传 seed → 彩蛋全关（原版加载路径同态）。
-    const loadState = new UIWorldLoadState(cfg.evil, { seedText: seedFinal, genSounds: true });
+    // ★IIIII229 ①：Esc 中止链——onAbort 注入 Game.abortWorldGen（loadState 建立时
+    //   Game 尚未 makeGame,惰性闭包取;中止请求经 worker 'abortGen'/主线程直置路由）。
+    let abortGame: ReturnType<typeof makeGame> | null = null;
+    const loadState = new UIWorldLoadState(cfg.evil, {
+      seedText: seedFinal, genSounds: true,
+      onAbort: () => abortGame?.abortWorldGen(),
+    });
     (window as unknown as { __swGenUi?: UIWorldLoadState }).__swGenUi = loadState; // 探针句柄(同 __swMenuBg 判例)
     VUI.setState(loadState);
     // ★IIIII218 生成屏背景动效接线（CXCI §6② 移交三支）：logo remix 倒置摆动/
@@ -1134,14 +1156,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // IIII225：生成期起标题曲随种子切（cs gameMenu 选曲支在生成期同样生效——
     // WorldGen.drunkWorldGen 置位后 gameMenu 仍真）。会话闩同步更新。
     lastGenScreenFlags = loadState.screenFlags;
-    audio.play('title', seedMenuMusicId());
+    audio.play('title', titleStyleMusicId());
+    menuLoadDone = true;   // ★IIIII228：标题界面已挂载 = 加载完成带结束（Current 50→51 下次起播生效）
     menuBg?.setBGLock(true);
     // ★宏任务让路(#三开压测批续,与 newWorld 同纪律):makeGame 的 Game ctor 冷兜底
     // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是
     // 创建 UI 的真实入口(WorldCreationPanel→flow.onCreate),此前补丁打在 legacy
     // newWorld 上未覆盖此处(t1547 专录 trace 实锤 772-1232ms 派发)
     await startAssetPrewarm();
-    const g = makeGame();
+    const g = abortGame = makeGame();   // ★IIIII229 ① 中止路由目标
     // 生成期预览位图 A/B(?wprev=0,2026-08-28 量化:60 passes × ~20 万像素扫描)
     const wantPreview = (() => {
       try { return new URLSearchParams(location.search).get('wprev') !== '0'; } catch { return true; }
@@ -1160,6 +1183,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
           } : {}),
         });
+    } catch (e) {
+      // ★IIIII229 ①：Esc 中止收场（WorldGenAbortedError 判别,真实生成错误原样上抛）——
+      //  世界不登记不落库,生成屏退场回菜单（vanilla 中止后 UIWorldLoad 离场同态）。
+      if (e instanceof WorldGenAbortedError) {
+        VUI.setState(null);
+        showTitle();   // 回标题（vanilla Esc 中止→UIWorldLoad 离场→menuMode 0）
+        return;
+      }
+      throw e;
     } finally {
       // ★IIIII218 生成流收场还原（成败同途;vanilla FinishWorldGen → ResetWorldSeedFlags
       //  生成旗清零,此刻生成屏仍在场——与原版时序一致,进世界 TitleMenu 随之销毁）。
@@ -1254,7 +1286,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   function showTitle(bgPaused = false) {
-    audio.play('title', seedMenuMusicId());   // IIII225：种子覆写曲（latch=最近一次创建世界）
+    audio.play('title', titleStyleMusicId());   // IIII225 种子覆写 + IIIII228 TitleMusicStyle 细分
     ui.closeAll();
     // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标
     // (warmAll 幂等,SW 侧 keys() 过滤已下载;被系统清理只补缺=自愈)

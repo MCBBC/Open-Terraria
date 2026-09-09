@@ -50,6 +50,10 @@ export interface OptionsData {
   backgrounds: boolean;                // Main.BackgroundEnabled（Main.cs:790，config.json 持久化；默认 true）
   swayInWind: boolean;                 // Main.SettingsEnabled_TilesSwayInWind（图块在风中摆动；默认 true）
   resourceBarStyle: 'classic' | 'fancy'; // 资源条样式（PlayerResourceSetsManager2：'New' Fancy 金框为原版 1.4.4+ 默认 / 'Default' Classic 朴素）
+  /** 标题曲风格（★IIIII228 Main.titleMusicStyle,config.json "TitleMusic" 字符串键
+   *  Main.cs:4602 默认 Current；Random 每次启动 new UnifiedRandom(DateTime.Ticks).Next(3)
+   *  抽档 :4605-4608）。值域 = Current/Old/Console/Random */
+  titleMusic: 'current' | 'old' | 'console' | 'random';
   /** 小地图边框皮肤（MinimapFrameManager：config.json "MinimapFrame" 字符串键，默认 Default） */
   minimapFrame: MinimapFrameSkin;
   /** 小地图透明度（Main.mapMinimapAlpha，Main.cs:892 默认 1；MapAlphaUp/Down 键
@@ -276,6 +280,7 @@ export class OptionsStore {
     backgrounds: true,
     swayInWind: true,
     resourceBarStyle: 'fancy',
+    titleMusic: 'current',
     minimapFrame: 'Default',
     mapMinimapAlpha: 1,      // Main.cs:892
     mapOverlayAlpha: 0.35,   // Main.cs:896

@@ -29,6 +29,7 @@ function makeWorld(w = 800, h = 300): { st: TileStore; gs: GenState } {
   const gs = {
     worldSurface: 60, rockLevel: 120, lavaLine: h - 200,
     snowOriginLeft: 10, snowOriginRight: 100,
+    seedFlags: {},   // ★IIIII229：bc6ee391(09-03) 起 runExposedGemsIcePass 读 gs.seedFlags.remix——夹具补空表(普通世界形态)
   } as unknown as GenState;
   return { st, gs };
 }

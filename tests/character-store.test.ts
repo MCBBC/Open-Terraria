@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 } as Storage;
 
 const { CharacterStore } = await import('../src/save/CharacterStore');
-const { validateAppearance, defaultAppearance, randomAppearance, MALE_VARIANTS, FEMALE_VARIANTS } = await import('../src/player/Appearance');
+const { validateAppearance, defaultAppearance, randomAppearance, MALE_VARIANTS, FEMALE_VARIANTS, FEMALE_HAIRS, VALID_CLOTH_STYLES } = await import('../src/player/Appearance');
 
 describe('Appearance', () => {
   it('默认值 = 原版色（Player.cs:199-205）', () => {
@@ -41,6 +41,28 @@ describe('Appearance', () => {
       expect(a.hair).toBeLessThanOrEqual(227);
       expect(MALE_VARIANTS.includes(a.skinVariant) || FEMALE_VARIANTS.includes(a.skinVariant)).toBe(true);
     }
+  });
+
+  // ★SW-RB6c 2026-09-07：randomAppearance 1:1 化守卫（UICharacterCreation.
+  // Click_RandomizePlayer :1571/:1572-1575/:1648-1651 + Player.Male setter
+  // Player.cs:3397-3407）。旧实现从 VariantOrder 男女表掷取 = 可产出 10/11
+  // DisplayDoll（原版随机键面从不产出）,判别力：roll 域含 10/11 即炸。
+  it('随机外观变体域 = _validClothStyles 0-9,10/11 DisplayDoll 不可达(:1571)', () => {
+    expect(VALID_CLOTH_STYLES).not.toContain(10);
+    expect(VALID_CLOTH_STYLES).not.toContain(11);
+    const seen = new Set<number>();
+    for (let i = 0; i < 400; i++) {
+      const a = randomAppearance();
+      seen.add(a.skinVariant);
+      expect(a.skinVariant, `roll#${i} 掷出 ${a.skinVariant}`).toBeLessThanOrEqual(9);
+      // 发型性别校正后变体性别必与发型池一致（Male setter 对翻语义）
+      if (FEMALE_HAIRS.has(a.hair)) expect(FEMALE_VARIANTS).toContain(a.skinVariant);
+      else expect(MALE_VARIANTS).toContain(a.skinVariant);
+      // 语音 = 掷出变体性别 1/2 或 50% 掷 3（:1572-1575）
+      expect([1, 2, 3]).toContain(a.voiceVariant);
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(5);   // 覆盖度抽样：双侧池都出得来
+    for (const v of seen) expect(VALID_CLOTH_STYLES).toContain(v);
   });
 });
 

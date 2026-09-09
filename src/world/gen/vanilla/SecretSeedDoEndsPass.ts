@@ -67,7 +67,7 @@ import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
 import type { SeedFlags } from '../SeedEasterEggs';
-import { noSpiderCavesActuallyNoSpiderCaves, activeSecretSeedCountOf } from '../SeedEasterEggs';   // ★IIIII41-T3② 变体门 / ★IIIII110 count 域
+import { noSpiderCavesActuallyNoSpiderCaves, activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII41-T3② 变体门 / ★IIIII110 count 域 / ★IIIII228 多秘 ewAdjust
 import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { initializeHardMode } from './HardmodePass';
 import { genKillTile, genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
@@ -1068,9 +1068,14 @@ const EW_INTERNAL_TO_VID: ReadonlyMap<number, number> = (() => {
 
 interface EWChestLike { x?: number; y?: number; items: Array<{ id: number; stack: number } | null> }
 
-/** errorWorldAdjustment(value)（cs:330-337）：count=单旗标 ⇒ 因子 (count+3)/4 整除=1。
- *  （组合世界 count≥2 才缩水——多秘计数另案，本仓按单旗标域恒等） */
-function ewAdjust(_value: number): number { return _value; }
+/** errorWorldAdjustment(value)（cs:330-337）：`if (count<1) return 4; return
+ *  (int)(value × ((count+3)/4 整除))`——count=activeSecretSeedCount（全部 37 枚
+ *  Register 秘种子计数,SeedEasterEggs.activeSecretSeedCountOf 同表）。
+ *  ★IIIII228 多秘计数因子清偿：count 1..4→×1、5..8→×2、9..12→×3 …（组合秘种子
+ *  叠加时 DoErrorWorldShuffleBlocks 全域掷骰分母同步缩水）。 */
+function ewAdjust(value: number, gs: GenState): number {
+  return errorWorldAdjustmentOf(value, activeSecretSeedCountOf(gs.seedFlags));
+}
 
 /** 40 槽窗视图（SW compact items → vanilla item[40]）：读/写都在 0..39 槽内。
  *  ★IIIRS200：空槽哨兵改 −1（原 0 与内部物品 id 0 合法位碰撞——EW_INTERNAL_TO_VID.get(0)=109
@@ -1132,7 +1137,7 @@ export function doErrorWorldFinish(
       if (it0 && (EW_INTERNAL_TO_VID.get(it0.id) ?? it0.id) !== 0) ewAlive++;
       ewLog(`EWC|i=${ewi}|x=${c.x}|y=${c.y}|it=${ewIts}`);
     }
-    ewLog(`EWE|w=${st.w}|h=${st.h}|ws=${String(gs.worldSurface)}|adj5=${ewAdjust(5)}|iters=${st.w * 2}|alive=${ewAlive}`);
+    ewLog(`EWE|w=${st.w}|h=${st.h}|ws=${String(gs.worldSurface)}|adj5=${ewAdjust(5,gs)}|iters=${st.w * 2}|alive=${ewAlive}`);
   }
   // ── ① 宝箱换物主循环（cs:1303-1349）：迭代 maxTilesX*2 次，两箱四掷 + 免疫/空箱拒采。
   //    Main.chest[8000] 稀疏数组语义 = 索引≥count 即 null ⇒ Next(8000) 接受率按 count 比例，
@@ -1232,7 +1237,7 @@ export function doErrorWorldFinish(
       if (EW_CRACKED.has(tNow())) st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;     // invisibleBlock(true)
       if (EW_CONV_MOSS.has(tNow()) && tNow() !== 381) {
         ewN++;
-        const mv = rng.nextInt(ewAdjust(5));
+        const mv = rng.nextInt(ewAdjust(5,gs));
         if (mv === 0) {
           ewN++;
           const roll = rng.nextInt(5);                  // NextFromList 5 元素=Next(5)
@@ -1262,7 +1267,7 @@ export function doErrorWorldFinish(
         }
       }
       ewN++;
-      const k7v = rng.nextInt(ewAdjust(7));
+      const k7v = rng.nextInt(ewAdjust(7,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k7|${k7v}|j=${j},k=${k}`);
       if (k7v === 0
         && [48, 232, 21, 467, 28, 639, 12, 484].includes(tNow())) {
@@ -1270,7 +1275,7 @@ export function doErrorWorldFinish(
         st.coat[ii] |= TileStore.COAT_INVISIBLE_BLOCK;
       }
       ewN++;
-      const k15v = rng.nextInt(ewAdjust(15));
+      const k15v = rng.nextInt(ewAdjust(15,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k15|${k15v}|j=${j},k=${k}`);
       if (k15v === 0 && solidNonTopAt(st, j, k)
         && !EW_FRAME_IMPORTANT_SHEET[tNow()]
@@ -1286,35 +1291,35 @@ export function doErrorWorldFinish(
         }
       }
       ewN++;
-      const k10av = rng.nextInt(ewAdjust(10000));
+      const k10av = rng.nextInt(ewAdjust(10000,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k10a|${k10av}|j=${j},k=${k}`);
       if (k10av === 0) {
         ewLog(`H|p30|j=${j},k=${k}`);
         st.paint[ii] = 30;
       }
       ewN++;
-      const k10bv = rng.nextInt(ewAdjust(10000));
+      const k10bv = rng.nextInt(ewAdjust(10000,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k10b|${k10bv}|j=${j},k=${k}`);
       if (k10bv === 0) {
         ewLog(`H|pw30|j=${j},k=${k}`);
         st.paintWall[ii] = 30;
       }
       ewN++;
-      const k50av = rng.nextInt(ewAdjust(50000));
+      const k50av = rng.nextInt(ewAdjust(50000,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k50a|${k50av}|j=${j},k=${k}`);
       if (k50av === 0) {
         ewLog(`H|fbb|j=${j},k=${k}`);
         st.coat[ii] |= TileStore.COAT_FULLBRIGHT_BLOCK;
       }
       ewN++;
-      const k50bv = rng.nextInt(ewAdjust(50000));
+      const k50bv = rng.nextInt(ewAdjust(50000,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k50b|${k50bv}|j=${j},k=${k}`);
       if (k50bv === 0) {
         ewLog(`H|fbw|j=${j},k=${k}`);
         st.coat[ii] |= TileStore.COAT_FULLBRIGHT_WALL;
       }
       ewN++;
-      const k250v = rng.nextInt(ewAdjust(250000));
+      const k250v = rng.nextInt(ewAdjust(250000,gs));
       if (ewWin(j)) ewLog(`R|n=${ewN}|k250|${k250v}|j=${j},k=${k}`);
       if (k250v === 0) {
         ewLog(`H|inv250|j=${j},k=${k}`);
@@ -1329,7 +1334,7 @@ export function doErrorWorldFinish(
   //   之前、泡块段之前——JS 镜像未移植（零掷,不涉相位;wire 通道 8ch dump 不可见）,
   //   x86 KLOG 的 H|rcn/WW 行为该支取证,移交独立清偿。
   {
-    const count = Math.trunc(st.w / 3 / ewAdjust(1));
+    const count = Math.trunc(st.w / 3 / ewAdjust(1,gs));
     for (let n = 0; n < count; n++) {
       ewN++;
       const x = rng.nextIntRange(50, st.w - 50);
@@ -2267,6 +2272,15 @@ export function finalizeSecretSeedDoEnds(
   //   组合臂在同一流内后置正确生效）
   if (F.worldIsFrozen) doWorldIsFrozenSweep(store, rng, gs);
   if (F.noInfection) doNoInfection(store, rng, gs);
+  // ★IIIII228 :637-640 DoNoSurface（noSurface 尾臂—— meteor 空投 + 落点随机化）：
+  //   skyblock 早退（cs:1039 !skyblockWorldGen）；meteor 空投 num2=(int)(4×w/4200) 次
+  //   （spawnUnderGround=true，深度带 [（ws+rock)/2, Underworld)——genRand 流）；随后
+  //   (!remix && !worldSpawnHasBeenRandomized) → RandomizeWorldSpawn + 环境改造
+  //   （randomSpawn 种子的同款核心,cs:1049-1053）。★RNG 双流：vanilla 生成期
+  //   Main.rand = new UnifiedRandom(seed)（CreateNewWorld :6562）与 genRand 同籽
+  //   双实例——dropMeteor 内 Main.rand（X 抖动/Box 偏置掷）与 genRand（深度/半径）
+  //   交替消费,此处以 mainRand=新 RNG(seed) 镜像第二流（勿并流）。
+  if (F.noSurface) doNoSurface(store, rng, gs, world);
   if (F.hallowOnTheSurface) doHallowOnSurface(store, rng, gs);
   // ★IIIII106 cs:629-632：purify this 全图感染面（Convert case1/4 入列后可达）
   if (F.infectedSeed) doWorldIsInfected(store, rng, gs);
@@ -2575,4 +2589,212 @@ export function doAdditionalChangesAroundSpawnCore(st: TileStore, rng: RNG, _gs:
       }
     }
   }
+}
+
+// ═══════════════ ★IIIII228 DoNoSurface（WorldGen.cs:1038-1055）+ dropMeteor(:6185)/meteor(:6233) ═══════════════
+/** TileID.Sets.Clouds（TileID.cs:197 = 189,196,460,717,718,719）+ RainCloud 202 —— meteor
+ *  候选盒计数惩罚项（命中一次 -100 直接否决） */
+const METEOR_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719, 202]);
+/** TileID.Sets.GetsDestroyedForMeteors（TileID.cs:165 = 5,32,352,583-589,596,616,634） */
+const GETS_DESTROYED_FOR_METEORS = new Set([5, 32, 352, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** meteor() 前置否决集：BasicChest/tileDungeon/26/226/470/475/488/597（cs:6269-6287） */
+const METEOR_VETO = new Set([26, 226, 470, 475, 488, 597]);
+/** TileID.Sets.BasicChest（TileID.cs:315 = 21,467）/ Main.tileDungeon（Main.cs:8131-8136
+ *  = 41,43,44,677,678,679）—— meteor() 前置否决两辅助集 */
+const CHEST_SHEETS = new Set([21, 467]);
+const DUNGEON_TILE_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+
+/** DoNoSurface（cs:1038-1055） */
+export function doNoSurface(st: TileStore, rng: RNG, gs: GenState, world: World): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;                                    // cs:1039 !skyblockWorldGen
+  const num = st.w / 4200;
+  const num2 = Math.floor(4.0 * num);
+  const mainRand = new RNG(gs.seed);                           // Main.rand（生成期同籽第二流,cs:6562）
+  for (let i = 0; i < num2; i++) genDropMeteor(st, rng, mainRand, gs, world, true);
+  if (!F.remix && !gs.worldSpawnHasBeenRandomized) {
+    randomizeWorldSpawnCore(st, rng, gs, world);               // cs:1050-1053
+    doAdditionalChangesAroundSpawnCore(st, rng, gs, world);
+  }
+}
+
+/** dropMeteor(spawnUnderGround)（cs:6185-6307）。生成期（isGeneratingOrLoadingWorld）：
+ *  跳过 netMode/玩家存在/地表陨石计数三闸（cs:6188-6209 仅运行时）。
+ *  返回 false = 本次未落（外层不再重试——vanilla while(!flag) 结构中 flag 只被
+ *  meteor() 结果改写;未命中候选 num4 递减/num5++ 继续） */
+function genDropMeteor(st: TileStore, genRand: RNG, mainRand: RNG, gs: GenState, world: World,
+  spawnUnderGround: boolean): boolean {
+  const F = gs.seedFlags;
+  let flag = false;                                            // cs:6204-6207 gen 期 flag=false
+  let num4 = 600.0;                                            // cs:6212
+  let num5 = 0;                                                // cs:6213
+  let num6 = Math.floor(gs.worldSurface * 0.3);                // cs:6214 (int)(worldSurface*0.3)
+  if (spawnUnderGround) {
+    // cs:6216-6218 genRand.Next((int)(worldSurface+rockLayer)/2, UnderworldLayer)
+    num6 = genRand.nextIntRange(
+      Math.floor((gs.worldSurface + gs.rockLevel) / 2), st.h - 200);
+  }
+  while (!flag) {
+    const num7 = st.w * 0.08;                                  // cs:6221
+    let num8 = mainRand.nextIntRange(150, st.w - 150);         // Main.rand 流（cs:6222）
+    while (num8 > world.spawnX - num7 && num8 < world.spawnX + num7) {
+      num8 = mainRand.nextIntRange(150, st.w - 150);           // cs:6223-6225
+    }
+    let l = num6;
+    for (; l < st.h; l++) {
+      if (l < 2 || l >= st.h - 2 || num8 < 2 || num8 >= st.w - 2) continue;   // InWorld(_,_,2)
+      const ii = st.idx(num8, l);
+      const sh = SHEET_OF_TYPE[st.type[ii]];
+      const isPlatform = sh >= 0 && PLATFORM_SHEETS.has(sh);
+      if (!st.flags[ii] || !solidTileAt(st, num8, l) || isPlatform) continue; // cs:6228-6230
+      let num9 = 0;                                            // cs:6231-6233
+      const num10 = 15;
+      for (let m = num8 - num10; m < num8 + num10; m++) {
+        for (let n = l - num10; n < l + num10; n++) {
+          if (m < 2 || n < 2 || m >= st.w - 2 || n >= st.h - 2) continue;     // InWorld
+          if (solidTileAt(st, m, n)) {
+            const sh2 = SHEET_OF_TYPE[st.type[st.idx(m, n)]];
+            num9++;
+            if ((sh2 >= 0 && METEOR_CLOUD_SHEETS.has(sh2))) num9 -= 100;      // Clouds∪202
+          } else if (st.liquid[st.idx(m, n)] > 0) {
+            num9--;
+          }
+        }
+      }
+      if (num9 >= num4) {                                      // cs:6244
+        flag = genMeteor(st, genRand, mainRand, gs, num8, l, world);
+        if (!flag) break;                                      // cs:6246-6250
+        return flag;
+      }
+      num4 -= 0.5;                                             // cs:6251-6252
+      break;                                                   // 每候选列只评估首个实心行
+    }
+    num5++;
+    if (num4 < 100.0) return false;                            // cs:6254-6256
+    if (num5 >= st.w * 5) return false;
+  }
+  return false;
+}
+
+/** TileID.Sets.Platforms（生成期谓词面——平台族 sheet 集,防御性自持） */
+const PLATFORM_SHEETS = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439, 546]);
+
+/** meteor(i,j)（cs:6233-6533）：玩家/NET 门生成期不可达；chest/dungeon/veto 扫描否决
+ *  → 陨石圆（genRand 半径 17-23,Main.rand 偏置）→ 空腔 carve（8-14）→ 清液/毁树
+ *  清理（25-35）→ 孤块坠除 → 洒落两轮（23-32/30-38,各 1/10、1/20 采样）。 */
+function genMeteor(st: TileStore, genRand: RNG, mainRand: RNG, gs: GenState,
+  i: number, j: number, world: World): boolean {
+  if (i < 50 || i > st.w - 50) return false;                   // cs:6234-6239
+  if (j < 50 || j > st.h - 50) return false;
+  let num = 35;
+  if (i - num < 10 || j - num < 10 || i + num >= st.w - 10 || j + num >= st.h - 10) return false; // InWorld(±num,10)
+  // cs:6258-6274 chest/dungeon/veto 否决（70×70 盒;玩家/NPC 盒生成期恒空不建模）
+  for (let m = i - num; m < i + num; m++) {
+    for (let n = j - num; n < j + num; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const ii = st.idx(m, n);
+      const sh = SHEET_OF_TYPE[st.type[ii]];
+      if (!st.flags[ii]) continue;
+      if ((sh >= 0 && CHEST_SHEETS.has(sh)) || DUNGEON_TILE_SHEETS.has(sh)) return false;
+      if (METEOR_VETO.has(sh)) return false;
+    }
+  }
+  // 第一轮：陨石主体（cs:6277-6294）
+  num = genRand.nextIntRange(17, 23);                          // genRand.Next(17,23)
+  for (let num2 = i - num; num2 < i + num; num2++) {
+    for (let num3 = j - num; num3 < j + num; num3++) {
+      if (!st.inBounds(num2, num3)) continue;
+      if (num3 <= j + mainRand.nextIntRange(-2, 3) - 5) continue;             // Main.rand 流
+      const dx = Math.abs(i - num2);
+      const dy = Math.abs(j - num3);
+      if (Math.sqrt(dx * dx + dy * dy) < num * 0.9 + mainRand.nextIntRange(-4, 5)) {
+        const ii = st.idx(num2, num3);
+        const sh = SHEET_OF_TYPE[st.type[ii]];
+        if (sh < 0 || !genSolidType(st.type[ii])) st.flags[ii] &= ~1;        // active(false) 残型
+        clearPaintCoat(st, num2, num3);                                      // paintTile/paintCoatTile(0)
+        st.half[ii] = 0; st.slope[ii] = 0;                                   // ClearSlope()
+        st.type[ii] = idOf(37);                                              // type = 37（陨石）
+      }
+    }
+  }
+  // 第二轮：空腔 carve（cs:6296-6310）
+  num = genRand.nextIntRange(8, 14);
+  for (let num6 = i - num; num6 < i + num; num6++) {
+    for (let num7 = j - num; num7 < j + num; num7++) {
+      if (!st.inBounds(num6, num7)) continue;
+      if (num7 > j + mainRand.nextIntRange(-2, 3) - 4) {
+        const dx = Math.abs(i - num6);
+        const dy = Math.abs(j - num7);
+        if (Math.sqrt(dx * dx + dy * dy) < num * 0.8 + mainRand.nextIntRange(-3, 4)) {
+          const ii = st.idx(num6, num7);
+          st.flags[ii] &= ~1;                                // active(false)（type 保留）
+        }
+      }
+    }
+  }
+  // 第三轮：清液 + 毁树 + 孤块坠除（cs:6312-6338）
+  num = genRand.nextIntRange(25, 35);
+  for (let num10 = i - num; num10 < i + num; num10++) {
+    for (let num11 = j - num; num11 < j + num; num11++) {
+      if (!st.inBounds(num10, num11)) continue;
+      const ii = st.idx(num10, num11);
+      const sh = SHEET_OF_TYPE[st.type[ii]];
+      const dx = Math.abs(i - num10);
+      const dy = Math.abs(j - num11);
+      if (Math.sqrt(dx * dx + dy * dy) < num * 0.7) {
+        if (sh >= 0 && GETS_DESTROYED_FOR_METEORS.has(sh)) genKillTile(st, genRand, num10, num11);
+        st.liquid[ii] = 0;
+      }
+      if (sh === 37) {
+        const noNb = !solidTileAt(st, num10 - 1, num11) && !solidTileAt(st, num10 + 1, num11)
+          && !solidTileAt(st, num10, num11 - 1) && !solidTileAt(st, num10, num11 + 1);
+        if (noNb) st.flags[ii] &= ~1;
+        else if ((st.half[ii] !== 0 || (st.slope[st.idx(num10 - 1, num11)] !== 0))
+          && !solidTileAt(st, num10, num11 + 1)) st.flags[ii] &= ~1;
+      }
+      genSquareTileFrame(st, genRand, num10, num11);           // SquareTileFrame
+      // SquareWallFrame（墙侧框架,掷骰镜像——DesertPass.genSquareWallFrame 同构）
+    }
+  }
+  // 第四轮：洒落 A（cs:6440-6460）genRand 半径 23-32,genRand 偏置掷 + Main.rand 1/10
+  num = genRand.nextIntRange(23, 32);
+  for (let num14 = i - num; num14 < i + num; num14++) {
+    for (let num15 = j - num; num15 < j + num; num15++) {
+      if (!st.inBounds(num14, num15)) continue;
+      if (num15 <= j + genRand.nextIntRange(-3, 4) - 3 || !st.flags[st.idx(num14, num15)]
+        || mainRand.nextInt(10) !== 0) continue;
+      const dx = Math.abs(i - num14);
+      const dy = Math.abs(j - num15);
+      if (Math.sqrt(dx * dx + dy * dy) < num * 0.8) {
+        const ii = st.idx(num14, num15);
+        const sh = SHEET_OF_TYPE[st.type[ii]];
+        if (sh >= 0 && GETS_DESTROYED_FOR_METEORS.has(sh)) genKillTile(st, genRand, num14, num15);
+        clearPaintCoat(st, num14, num15);
+        st.half[ii] = 0; st.slope[ii] = 0;
+        st.type[ii] = idOf(37);
+        genSquareTileFrame(st, genRand, num14, num15);
+      }
+    }
+  }
+  // 第五轮：洒落 B（cs:6462-6482）genRand 半径 30-38,genRand 偏置掷 + Main.rand 1/20
+  num = genRand.nextIntRange(30, 38);
+  for (let num18 = i - num; num18 < i + num; num18++) {
+    for (let num19 = j - num; num19 < j + num; num19++) {
+      if (!st.inBounds(num18, num19)) continue;
+      if (num19 <= j + genRand.nextIntRange(-2, 3) || !st.flags[st.idx(num18, num19)]
+        || mainRand.nextInt(20) !== 0) continue;
+      const dx = Math.abs(i - num18);
+      const dy = Math.abs(j - num19);
+      if (Math.sqrt(dx * dx + dy * dy) < num * 0.85) {
+        const ii = st.idx(num18, num19);
+        const sh = SHEET_OF_TYPE[st.type[ii]];
+        if (sh >= 0 && GETS_DESTROYED_FOR_METEORS.has(sh)) genKillTile(st, genRand, num18, num19);
+        clearPaintCoat(st, num18, num19);
+        st.half[ii] = 0; st.slope[ii] = 0;
+        st.type[ii] = idOf(37);
+        genSquareTileFrame(st, genRand, num18, num19);
+      }
+    }
+  }
+  return true;
 }

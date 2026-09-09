@@ -164,6 +164,18 @@ describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:49
     // 死亡 + 背包态字段为真（本仓死亡每 tick 强收,理论不可达）→ 仍不落背包
     expect(resolveEscapeChain(s({ dead: true, inventoryOpen: true }), 'escape')).toBe('openPause');
   });
+
+  it('SW-RB6b 死亡态：Inventory 沿改道暂停浮层开关（TryOpeningInGameOptions :17391-17410——'
+    + 'UpdateDead :17187 调用,ToggleInv 整链不跑,永不开关背包）', () => {
+    // 死亡无面板：Esc/绑键/暂停钮 → 开暂停浮层（原版 IngameOptions.Open）
+    for (const intent of ALL_INTENTS) {
+      expect(resolveEscapeChain(s({ dead: true }), intent)).toBe('openPause');
+    }
+    // 死亡 + 浮层已开 → 关（原版 ingameOptionsWindow ? Close : Open 的 Close 臂）
+    expect(resolveEscapeChain(s({ dead: true, pauseOpen: true }), 'escape')).toBe('closePause');
+    // 死亡 + 背包态字段为真（本仓死亡每 tick 强收,理论不可达）→ 仍不落背包
+    expect(resolveEscapeChain(s({ dead: true, inventoryOpen: true }), 'escape')).toBe('openPause');
+  });
 });
 
 describe('SW-BN2 ④未绑项绑定流（CheckRebindingProcessKeyboard :1643-1660 语义）', () => {

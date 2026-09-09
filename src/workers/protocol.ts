@@ -96,7 +96,11 @@ export type WorldWorkerRequest =
   | { id: number; type: 'ping' }
   | { id: number; type: 'generate'; cfg: GenConfigDTO }
   | { id: number; type: 'saveParse'; key?: string; json?: string; save?: SaveData }
-  | { id: number; type: 'genIcons' };
+  | { id: number; type: 'genIcons' }
+  /** ★IIIII229 ①：Esc 中止请求（fire-and-forget,无 pending）——worker 侧置位
+   *  WorldGen.requestWorldGenAbort(),生成 pass 环边界消费（WorldGenerator.QueuedAbort
+   *  WorldBuilding.cs:435-439 镜像） */
+  | { id: number; type: 'abortGen' };
 
 export type WorldWorkerEvent =
   | { id: number; type: 'ready' }
@@ -104,6 +108,7 @@ export type WorldWorkerEvent =
      /** GenProgress 当前原版 pass 内部 Value（0..1 短条语义；generate 相位专用） */
      local?: number }
   | { id: number; type: 'preview'; passIndex: number; passName: string; width: number; height: number; rgba: ArrayBuffer }
+  | { id: number; type: 'aborted'; }
   | { id: number; type: 'result'; world: WorldPacket; player?: SaveData['player']; save?: SaveData;
      /** 读档分段检查点（idb+parse/loadSaveData/settle+pack ms）——F5 报告 load 段消费 */
      wkLog?: string[] }

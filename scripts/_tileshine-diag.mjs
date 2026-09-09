@@ -73,7 +73,8 @@ const grabState = async (tag) => {
     const d = c2.getImageData(sx, sy, 48, 48).data;
     const px = [];
     for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]]);
-    const light = g.renderer.lighting ? g.renderer.lighting.lightAt(cx - 6, cy - 3) : null;
+    // fullbright 幅值测:屏幕=sprite(不乘光) → 归一恒 [255,255,255]
+    const light = g.renderer.fullbright ? [255, 255, 255] : (g.renderer.lighting ? g.renderer.lighting.lightAt(cx - 6, cy - 3) : null);
     globalThis.__grabs[tg].push({ px, light });
     return px.length;
   }, [spot.cx, spot.cy, tag]).catch((e) => { console.log(tag, 'FAIL:', e.message); return -1; });

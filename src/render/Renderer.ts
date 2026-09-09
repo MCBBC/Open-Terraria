@@ -633,6 +633,7 @@ import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
 import { vanillaTileMapColor, vanillaTileMapColorOption, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG, VANILLA_WALL_COUNT, VANILLA_WALL_LOOKUP0 } from '../data/vanillaMapColors';
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
+import { MAP_SNOW_TYPES, mapSnowinessB, snowDirtBg, snowRockBg, sceneSnowinessB } from './MapColors';   // ★IIIII229 ⑤ snowiness 通道
 import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
 import { shieldMax as shieldMaxOf } from '../world/LunarEvent';
@@ -1858,6 +1859,10 @@ export class Minimap {
   /** 实例序号(GL 全屏地图纹理键;切世界换实例即换键自动重传) */
   private static uidGen = 0;
   readonly uid = ++Minimap.uidGen;
+  /** ★IIIII229 ⑤：场景旗标（snowTileCount/tileX/tileY——GetBackgroundType sceneArea
+   *  连续支的 sceneSnowiness 源,CaptureSceneState MapHelper.cs:1820-1821）。Game 每次
+   *  scanScene 后回写;null=场景未扫（世界刚载/无玩家,落 7×7 雪窗二值采样支）。 */
+  scene: SceneFlags | null = null;
   /** ★CPU 像素后备(2026-08-18 GPU 预算瘦身):整幅小地图(大世界 80MB)曾是
    *  GPU 画布后备——Chrome 画布表面计入 GPU 进程预算,是双开 contextlost 风暴
    *  的常驻大头。改纯 CPU 内存(pix):HUD 缩略图只 blit 可见小窗(~≤512² ≈1MB
@@ -1999,8 +2004,43 @@ export class Minimap {
     }
     const underworld = Math.max(0, this.world.lavaLine);
     if (underworld > 0 && y >= underworld) return hex(VANILLA_HELL_BG_RGB);
-    if (y < Math.max(1, this.world.rockLevel)) return hex(VANILLA_DIRT_BG);
-    return hex(VANILLA_ROCK_BG);
+    // ★IIIII229 ⑤：地下支接 snowiness 通道（array6/array7 雪渐变端点,
+    //  MapHelper.cs:1671-1688/2072-2074;VANILLA_DIRT/ROCK_BG=b=0 端点常量保留）
+    if (y < Math.max(1, this.world.rockLevel)) return hex(snowDirtBg(this.snowinessB(x, y)));
+    return hex(snowRockBg(this.snowinessB(x, y)));
+  }
+
+  /** ★IIIII229 ⑤：GetBackgroundType 雪窗 b（MapHelper.cs:2043-2068 1:1）。
+   *  generatingWorld 门：本路径（游戏内小地图增量/全量）生成期不消费——生成预览走
+   *  MapColors.mapColor24（恒 b=0,vanilla 生成期同态）。sceneArea 连续支：玩家中心
+   *  169×124 窗内 b=sceneSnowiness*255（scene 由 Game 每次 scanScene 回写）;窗支：
+   *  7×7 雪型二值采样（采样读 store 活性 tile 的 sheet 域——JS 小地图无探索迷雾,
+   *  与 vanilla 读 Main.Map[已探索] 的域差登记于 doc 章）。 */
+  private snowinessB(x: number, y: number): number {
+    const sc = this.scene;
+    if (sc) {
+      const cx = sc.tileX, cy = sc.tileY;
+      if (x >= cx - 84 && x <= cx + 84 && y >= cy - 62 && y <= cy + 61) {
+        return sceneSnowinessB(sc.snowTileCount);
+      }
+    }
+    const st = this.world.store;
+    return mapSnowinessB((sx, sy) => {
+      if (sx < 0 || sy < 0 || sx >= st.w || sy >= st.h) return false;
+      const si = st.idx(sx, sy);
+      if (!st.flags[si]) return false;
+      const sheet = TILE_SHEET_OF[st.type[si]] ?? -1;
+      return MAP_SNOW_TYPES.has(sheet);
+    }, x, y);
+  }
+
+  /** ★IIIII229 ⑤：fillBand 地下行背景按像素求值（dirtPosition/rockPosition+b,
+   *  MapHelper.cs:2072-2074）。仅无 tile/无有效墙的真背景像素消费（地下带墙洞穴
+   *  极少落此）,49 tap 采样惰性触发,全量带构建成本不增。 */
+  private bgUnderground(x: number, y: number, rock: number): number {
+    const b = this.snowinessB(x, y);
+    const c = y < rock ? snowDirtBg(b) : snowRockBg(b);
+    return 0xff000000 | ((c[2] & 255) << 16) | ((c[1] & 255) << 8) | (c[0] & 255);
   }
 
   redrawAll() {
@@ -2135,10 +2175,13 @@ export class Minimap {
       // 石层底；其余 → 地狱底单色 (50,44,38)（color11）——★IIIII218 补 remix/hell 支
       // （此前地狱层画石层底、remix 天空画蓝渐变，双路径同偏；与 MapColors.mapColor24 同构）
       const skyC = vanillaSkyColor(y, surf);
+      // ★IIIII229 ⑤：地下行（土/石底）bg 改按像素惰性求（snowiness 通道,雪域雪渐变,
+      //  GetBackgroundType :2072-2074）——天空/remix/地狱行仍行常量（vanilla 同为
+      //  y 项单值）;0 哨兵=地下行,消费点走 bgUnderground。
       const bg = y < surf ? (world.seedFlags?.remix ? lut.remixBg
           : (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255)))
         : (underworld > 0 && y >= underworld) ? lut.hellBg
-        : y < rock ? lut.dirtBg : lut.rockBg;
+        : 0;
       const rowOff = y * world.w;
       for (let x = 0; x < world.w; x++) {
         const i = rowOff + x;
@@ -2186,10 +2229,10 @@ export class Minimap {
           if (c !== 0) {
             buf[i] = paintWall[i] > 0 ? mapPaintPacked(c, paintWall[i], true) : c;
           } else {
-            buf[i] = bg;
+            buf[i] = bg !== 0 ? bg : this.bgUnderground(x, y, rock);
           }
         } else {
-          buf[i] = bg;
+          buf[i] = bg !== 0 ? bg : this.bgUnderground(x, y, rock);
         }
       }
     }

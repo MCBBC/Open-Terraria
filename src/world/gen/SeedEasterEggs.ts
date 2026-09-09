@@ -265,6 +265,17 @@ export function activeSecretSeedCountOf(f: SeedFlags): number {
   return n;
 }
 
+/** errorWorldAdjustment(value)（WorldGen.cs:330-336，★IIIII228 多秘计数因子清偿）：
+ *  `if (count < 1) return 4; return (int)(value × (double)((count + 3) / 4))`
+ *  ——(count+3)/4 为**整除**（C# int 除）。count = activeSecretSeedCount（37 枚
+ *  Register 秘种子,zenith/remix/drunk 等特殊种子位不计,WorldSeedOption_Everything
+ *  依赖七项均非 SecretSeed 实例）。count 1..4→因子1、5..8→2、9..12→3 …；
+ *  count=0（errorWorld 关）→ 4（原版缺省值,消费面均在 errorWorld 门内不可达）。 */
+export function errorWorldAdjustmentOf(value: number, count: number): number {
+  if (count < 1) return 4;
+  return Math.trunc(value * Math.trunc((count + 3) / 4));
+}
+
 /** SeedFlags 中的派生 Variations 子旗标名（非注册种子位，不计入保守计数）。 */
 const DERIVED_VARIATION_KEYS = new Set([
   'echoJustSomeThings', 'echoJustInnerBlocks', 'illuminantJustSomeThings',

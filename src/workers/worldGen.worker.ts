@@ -4,7 +4,7 @@
 /// <reference lib="webworker" />
 import './procShim';   // ★必须最先(见 procShim 文档;ESM import 提升使本文件体内语句晚于依赖求值)
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { generateWorld } from '../world/gen/WorldGen';
+import { generateWorld, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { genItemIconPixels } from '../assets/ItemIconGen';
@@ -62,6 +62,12 @@ ctx.onmessage = async (e) => {
         [buf]);
       return;
     }
+    // ★IIIII229 ①：Esc 中止请求——置位生成中止位（generateWorld pass 环边界消费）。
+    //   fire-and-forget:无作业在跑时置位无害(下次 generateWorld 头部清零)。
+    if (req.type === 'abortGen') {
+      requestWorldGenAbort();
+      return;
+    }
     if (req.type === 'generate') {
       // ★预览抓帧与进度锚点同步（2026-08-31）：共享一个 400ms 冷却钟——
       //   槽边界帧（onWorldPartial）与进度里程碑帧（换窗 / Δp≥1% / 完成）都过同一
@@ -97,7 +103,9 @@ ctx.onmessage = async (e) => {
         );
         return true;
       };
-      const world = await generateWorld(
+      let world: import('../world/World').World;
+      try {
+        world = await generateWorld(
         {
           width: req.cfg.width, height: req.cfg.height, size: req.cfg.size, seedText: req.cfg.seedText,
           name: req.cfg.name, evil: req.cfg.evil, seedFlags: req.cfg.seedFlags,
@@ -131,7 +139,16 @@ ctx.onmessage = async (e) => {
             if (shootIfDue()) lastShotP = p;
           }
         },
-      );
+        );
+      } catch (err) {
+        // ★IIIII229 ①：Esc 中止收场——中止不走 error 通道(那是真实生成错误的告警面),
+        //   专用 'aborted' 事件回传,客户端按 WorldGenAbortedError 判别,世界不打包不落库。
+        if (err instanceof WorldGenAbortedError) {
+          ctx.postMessage({ id: req.id, type: 'aborted' });
+          return;
+        }
+        throw err;
+      }
       // 二次沉降(cs:21051)自 2026-08-17 起归位 generateWorld 管线内（蜂巢幼虫之后、
       // 仙人掌珊瑚之前）——此处不再生成后补跑（曾晚 8 个 pass：#98 液体门读到未沉水体）
       world.indexFramesRepaired = true;   // 生成端写像素帧终态，免主线程修复扫描

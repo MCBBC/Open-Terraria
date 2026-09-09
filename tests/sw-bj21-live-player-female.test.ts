@@ -27,7 +27,7 @@ const manifest: Record<string, unknown> = JSON.parse(
 const inManifest = (n: string) => n in manifest;
 
 // ===================== ① 数据锁:反编译 CopyVariant 链全网格认证 =====================
-describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变体0-9×通道0-15)', () => {
+describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变体0-11×通道0-15)', () => {
   // 从反编译源解 LoadVariant/CopyVariant 调用 → 逐 (变体,通道) 独立推导原版取表文件
   const ownOf = new Map<number, number[]>();
   const copyOf = new Map<number, number>();
@@ -35,12 +35,23 @@ describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变�
     ownOf.set(+m[1], m[2].split(',').map((x) => +x.trim()));
   }
   for (const m of csSrc.matchAll(/CopyVariant\((\d+), (\d+)\)/g)) copyOf.set(+m[1], +m[2]);
-  // res(v,s): 原版资产表解析(变体0-9 无别名面;14 号变体 0 为 Empty=不画)
+  // ★SW-RB6c 2026-09-07：LoadDisplayDollMale/Female 尾段重排块解析——
+  //  `val = TextureAssets.Players[10,2]` 后 `TextureAssets.Players[v,i] = val`
+  //  （v10 含自赋 [10,2],v11 整块）。别名面在 CopyVariant 之后=最终表值。
+  const aliasOf = new Map<number, Set<number>>();
+  for (const m of csSrc.matchAll(/TextureAssets\.Players\[(\d+), (\d+)\] = val;/g)) {
+    if (!aliasOf.has(+m[1])) aliasOf.set(+m[1], new Set());
+    aliasOf.get(+m[1])!.add(+m[2]);
+  }
+  // res(v,s): 原版资产表解析(own → DisplayDoll 别名面 val=10_2 → CopyVariant 链;
+  //  14 号变体 0 为 Empty=不画)。链递归取【重排后】的源表（CopyVariant(11,10)
+  //  在 10 的别名块之后执行）
   const ownFile = (v: number, s: number): string | null =>
     (ownOf.get(v) ?? []).includes(s) ? `Player_${v}_${s}.png` : null;
   const res = (v: number, s: number): string | null => {
     const own = ownFile(v, s);
     if (own) return own;
+    if (aliasOf.get(v)?.has(s)) return 'Player_10_2.png';
     const from = copyOf.get(v);
     if (from !== undefined && from !== v) return res(from, s);
     return s === 14 ? null : `Player_0_${s}.png`;   // 变体 0:14=Empty(不画),其余男表
@@ -52,15 +63,19 @@ describe('SW-BJ21 ① CopyVariant 链 vs PlayerDataInitializer.cs 全网格(变�
     expect(ownOf.get(6)).toEqual([4, 6, 8, 11, 12, 13]);
     expect(copyOf.get(5)).toBe(4); expect(copyOf.get(6)).toBe(4);
     expect(copyOf.get(7)).toBe(4); expect(copyOf.get(9)).toBe(4);
+    // DisplayDoll 重排块（val = Players[10,2]）
+    expect(aliasOf.get(10)).toEqual(new Set([2, 1, 4, 6, 11, 12, 13, 8, 15]));
+    expect(aliasOf.get(11)).toEqual(new Set([2, 1, 4, 6, 11, 12, 13, 8, 15]));
+    expect(aliasOf.get(5)).toBeUndefined();   // 0-9 无别名面
   });
 
-  it('variantSheetName 与反编译解析逐格一致(160 态全网格)', () => {
-    for (let v = 0; v <= 9; v++) {
+  it('variantSheetName 与反编译解析逐格一致(192 态全网格)', () => {
+    for (let v = 0; v <= 11; v++) {
       for (let s = 0; s <= 15; s++) {
         const want = res(v, s);
         const got = variantSheetName(v, s, inManifest);
         if (want === null) {
-          // 原版 Empty 面(变体0 的 14 号):清单无文件 → 取表返回清单外名=同「不画」语义
+          // 原版 Empty 面(变体0 的 14 号;10/14 链传):清单无文件 → 取表返回清单外名=同「不画」语义
           expect(got, `v${v}s${s} Empty face`).toBe(`Player_0_${s}.png`);
           expect(inManifest(got), `v${v}s${s} Empty face 清单外`).toBe(false);
         } else {
@@ -118,6 +133,10 @@ describe('SW-BJ21 ③ 结构锁(取表/就绪门/预载/捏人预抢 同源)', (
   it('CharCreation 烘焙前置/变体预抢两处同链', () => {
     const uses = ccSrc.split('variantSheetName(v, s, (n) => UITextures.has(n))').length - 1;
     expect(uses).toBe(2);
+  });
+  it('眼睑帧表同链(★SW-RB6c:硬编码 Player_0_15 对 10/11 = 多画男眼睑)', () => {
+    expect(src).toContain("UITextures.get(variantSheetName(a.skinVariant, 15, (n) => UITextures.has(n)))");
+    expect(src).not.toContain("UITextures.get('Player_0_15.png')");
   });
   it('实时链消费同一 compositePaperDoll(Renderer.drawPlayer 主烘焙入口)', () => {
     expect(rendererSrc).toContain('const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);');

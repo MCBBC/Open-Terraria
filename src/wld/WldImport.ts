@@ -781,6 +781,20 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   //  用户实报「隐藏层不见了」)。v5 幽灵(worldgen 遗留 flags=0+type≠0,不可见)
   //  在 wld 流中无表达,导出侧丢弃(视觉零差异,登记债)。
 
+  // ★IIIII228 FixEndlessRainWorlds legacy 迁移（WorldFile.cs:3299-3312，读档序列
+  //  LoadWorld_Version2/3 后同位调用）——v≤317 且 rainTime≥5184000（rainsForAYear
+  //  置的永雨值 60×60×24×60=5184000）且种子串不含 rainsForAYear → 清雨三件套
+  //  （_tempRaining=false/_tempRainTime=0/_tempMaxRain=0）。vanilla 1.4.4 前
+  //  rainTime 单位为 tick、1.4.4 起为秒——5184000t=24h 永雨是旧档遗留假永雨,
+  //  非本种子导入即清。种子判定 = header 种子文本 parseSeedChain 并集（本文件
+  //  seedFlags 双源并集①源,与 section 权威位②源同口径——rainsForAYear 在位面
+  //  二源本应一致,并集宽松侧=不清雨,与原文 Check 命中即 return 对齐）。
+  const ewrSeedFlags: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(parseSeedChain(wld.seed).flags)) if (v) ewrSeedFlags[k] = true;
+  for (const [k, v] of Object.entries(wld.seedFlags ?? {})) if (v) ewrSeedFlags[k] = true;
+  const ewrFixRain = wld.version <= 317 && (wld.weather?.rainTime ?? 0) >= 5184000
+    && !ewrSeedFlags.rainsForAYear;
+
   const save: SaveData = {
     format: 'sandboxworld.save',
     // ★v3(2026-09-07 统一稳定域):产物 tiles/items=稳定 id,读档端(v3 分支做
@@ -862,9 +876,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）
       bloodMoon: wld.bloodMoon, eclipse: wld.eclipse, moonPhase: wld.moonPhase },
     weather: wld.weather ? {
-      raining: wld.weather.raining,
-      rainTime: wld.weather.rainTime,
-      maxRaining: wld.weather.maxRaining,
+      // ★IIIII228：legacy 永雨迁移（FixEndlessRainWorlds,见上 ewrFixRain）
+      raining: ewrFixRain ? false : wld.weather.raining,
+      rainTime: ewrFixRain ? 0 : wld.weather.rainTime,
+      maxRaining: ewrFixRain ? 0 : wld.weather.maxRaining,
       cloudBGActive: wld.weather.cloudBGActive,
       numClouds: wld.weather.numClouds,
       windSpeedTarget: wld.weather.windSpeedTarget,

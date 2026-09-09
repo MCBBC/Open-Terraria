@@ -50,6 +50,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType, flipGenSolid, snapshotGenSolid, restoreGenSolid } from './GenSolid';
+import { activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII228 多秘 ewAdjust
 import { hfIs1457 } from './HellFortPass';
 import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
 import { inAnyPotentialDungeonBounds, intersectsAnyPotentialDungeonBounds, canBeClearedDuringGenerationDual } from './DungeonStyles1457';   // ★IIIII208 dual 门族（CLXXXV）：MB 全段界域门补装;★IIIII209 增 cbcDg 双态全语义
@@ -479,11 +480,14 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     //   =mile8 iamerror #97..105 级联真源。多旗标组合域 adj 缩水另案备案
     //   （照 TreePass IIIII111/StructuresPass ewAdjust 单旗标判例）。
     const ewSword = !!gs.seedFlags.errorWorld;
-    const ewMul = ewSword ? 6 : 0;                 // 6/errorWorldAdjustment(1.0)=6/1
+    // ★IIIII228：6/errorWorldAdjustment(1.0) 按 activeSecretSeedCount 因子化（cs:21158）——
+    //   count 5..8 因子 2 ⇒ ×3、9..12 因子 3 ⇒ ×2、≥13 因子 4 ⇒ 6/4 int 除=1 不乘区。
+    const ewAdj = ewSword ? errorWorldAdjustmentOf(1.0, activeSecretSeedCountOf(gs.seedFlags)) : 1;
+    const ewMul = ewSword ? Math.trunc(6 / ewAdj) : 0;   // 6/adj **int 除**（cs:21158 同式）
     let swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
     if (celbSword) swordAttempts *= 2;             // ×2（cs:21152-21155）
     if (ewMul > 1) swordAttempts *= ewMul;         // ×6（cs:21160）
-    const swordChance = (celbSword ? 0.25 : 0.5) / (ewMul > 1 ? ewMul : 1);  // ÷6（cs:21161）
+    const swordChance = (celbSword ? 0.25 : 0.5) / (ewMul > 1 ? ewMul : 1);  // ÷(6/adj)（cs:21161）
     segProbe('swordAttempts', swordAttempts);
     for (let i = 0; i < swordAttempts; i++) {
       // !(NextDouble < SwordShrinePlacementChance) 才放置(cs:21162)——注意极性
